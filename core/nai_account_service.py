@@ -48,6 +48,16 @@ ACCOUNTS_FILENAME = "nai_accounts.json"
 MAIN_ACCOUNT_ID = "nai_token"
 MAIN_ACCOUNT_LABEL = "메인 계정"
 
+# 정책은 **모델 계열마다 따로 기억한다.** 목록이 갈렸기 때문이다(balancer 주석 참조).
+# 한 칸에 몰아 두면 V5 에서 '동적 할당' 을 고른 뒤 4.5 로 갔다 오기만 해도 그 선택이
+# 폴백값으로 덮여 사라진다.
+#
+# `load_balancing_policy` 는 **옛 키 그대로** V5 쪽에 쓴다 - 기존 파일이 그대로
+# 읽힌다. 비V5 칸은 새 키이며, 없으면 옛 키에서 물려받는다(구간형 정책을 고른
+# 사용자가 이번 판올림에서 그 선택을 잃지 않도록).
+POLICY_KEY_USAGE = "load_balancing_policy"
+POLICY_KEY_ANLAS = "load_balancing_policy_anlas"
+
 # 계정을 무한정 늘릴 이유가 없다. 라운드 로빈은 카운터 % N 이라 N 이 커질수록
 # 한 계정이 다시 쓰이기까지의 간격만 늘어난다.
 MAX_ACCOUNTS = 9
@@ -58,7 +68,8 @@ def _default_data() -> dict[str, Any]:
         "accounts": [],
         "round_robin_enabled": False,
         "main_account_enabled": True,
-        "load_balancing_policy": DEFAULT_POLICY,
+        POLICY_KEY_USAGE: DEFAULT_POLICY,
+        POLICY_KEY_ANLAS: DEFAULT_POLICY,
     }
 
 
@@ -157,6 +168,40 @@ def rotation_seed(context: Any) -> int:
     return seed
 
 
+def context_uses_usage_limit(context: Any) -> bool:
+    """지금 고른 모델이 V5 계열인가. 판정은 모델 계약이 SSOT 다."""
+    from core.nai_model_contract import context_uses_opus_usage_limit
+
+    return context_uses_opus_usage_limit(context)
+
+
+# 계정별 **이번 세션 생성 장수**. 팝오버가 "총 1,024장" 을 그리는 데 쓴다
+# (사용자 요청 2026-08-21).
+#
+# ⚠️ 회전 카운터에서 나눗셈으로 계산하지 않는다. 소진된 계정은 후보에서 빠지므로
+# 실제 배분은 균등하지 않고, 계산값과 실제가 어긋나면 사용자가 보는 숫자가 거짓말이
+# 된다. **실제로 고른 순간에만** 센다.
+_SESSION_TALLY_ATTR = "nai_account_session_tally"
+
+
+def note_account_used(context: Any, account_id: str) -> int:
+    """이 계정으로 1장 나갔다고 기록하고 누적값을 돌려준다."""
+    if not account_id:
+        return 0
+    with _ROTATION_LOCK:
+        tally = account_session_tally(context)
+        total = tally.get(account_id, 0) + 1
+        tally[account_id] = total
+        setattr(context, _SESSION_TALLY_ATTR, tally)
+        return total
+
+
+def account_session_tally(context: Any) -> dict[str, int]:
+    """`{계정 id: 이번 세션 생성 장수}`. 프로세스 수명 동안만 센다."""
+    tally = getattr(context, _SESSION_TALLY_ATTR, None)
+    return tally if isinstance(tally, dict) else {}
+
+
 def peek_rotation_counter(context: Any) -> int:
     """**소비하지 않고** 다음 회전 번호만 본다.
 
@@ -206,7 +251,11 @@ class NaiAccountService:
         # 옛 파일에는 이 키가 없다. 없으면 메인을 켜 둔 것으로 본다 - 끄면 토큰이
         # 하나도 안 남아 생성이 통째로 막힌다.
         base["main_account_enabled"] = bool(data.get("main_account_enabled", True))
-        base["load_balancing_policy"] = normalize_policy(data.get("load_balancing_policy"))
+        legacy = data.get(POLICY_KEY_USAGE)
+        base[POLICY_KEY_USAGE] = normalize_policy(legacy, True)
+        # 비V5 칸이 없는 옛 파일은 옛 키에서 물려받는다.
+        base[POLICY_KEY_ANLAS] = normalize_policy(
+            data.get(POLICY_KEY_ANLAS, legacy), False)
         return base
 
     def save(self, data: dict[str, Any]) -> None:
@@ -261,8 +310,12 @@ class NaiAccountService:
         """생성 경로와 사용량 조회가 함께 쓰는 활성 계정 목록."""
         return self._active_rows(self.load())
 
-    def policy(self) -> str:
-        return normalize_policy(self.load().get("load_balancing_policy"))
+    def policy(self, uses_usage_limit: bool | None = None) -> str:
+        """이 모델 계열에서 지금 걸린 정책. 안 주면 컨텍스트에서 판정한다."""
+        if uses_usage_limit is None:
+            uses_usage_limit = context_uses_usage_limit(self.context)
+        key = POLICY_KEY_USAGE if uses_usage_limit else POLICY_KEY_ANLAS
+        return normalize_policy(self.load().get(key), uses_usage_limit)
 
     def all_account_ids(self, data: dict[str, Any] | None = None) -> list[str]:
         data = data if data is not None else self.load()
@@ -319,9 +372,14 @@ class NaiAccountService:
             if token and token not in seen:
                 seen[token] = row["label"]
         active = [r for r in rows if r["enabled"] and r["has_token"]]
+        on_v5 = context_uses_usage_limit(self.context)
+        policy_key = POLICY_KEY_USAGE if on_v5 else POLICY_KEY_ANLAS
         return {
             "accounts": rows,
-            "policy": normalize_policy(data.get("load_balancing_policy")),
+            # ⚠️ 지금 **모델 계열의** 정책이다. 계열마다 목록이 다르므로 이걸 틀리면
+            # 화면에 없는 라디오가 켜져 있거나, 아무것도 안 켜져 보인다.
+            "policy": normalize_policy(data.get(policy_key), on_v5),
+            "uses_usage_limit": on_v5,
             "active_count": len(active),
             # 활성 계정이 2개 미만이면 정책이 아무 일도 안 한다. 프런트가 라디오를
             # 흐리게 만들어 "골랐는데 안 바뀐다" 를 없앤다.
@@ -395,9 +453,15 @@ class NaiAccountService:
         self._set_token(account_id, token)
         return {"ok": True, "token_preview": token_preview(token)}
 
-    def set_policy(self, policy: str) -> dict[str, Any]:
-        """부하 분산 정책 선택. 모르는 값은 기본(라운드 로빈)으로 눕힌다."""
+    def set_policy(self, policy: str, uses_usage_limit: bool | None = None) -> dict[str, Any]:
+        """부하 분산 정책 선택. 모르는 값은 기본(라운드 로빈)으로 눕힌다.
+
+        **지금 모델 계열의 칸에만 쓴다** - 다른 계열의 선택은 건드리지 않는다.
+        """
+        if uses_usage_limit is None:
+            uses_usage_limit = context_uses_usage_limit(self.context)
+        key = POLICY_KEY_USAGE if uses_usage_limit else POLICY_KEY_ANLAS
         data = self.load()
-        data["load_balancing_policy"] = normalize_policy(policy)
+        data[key] = normalize_policy(policy, uses_usage_limit)
         self.save(data)
-        return {"ok": True, "policy": data["load_balancing_policy"]}
+        return {"ok": True, "policy": data[key]}

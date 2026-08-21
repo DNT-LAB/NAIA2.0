@@ -386,6 +386,24 @@ def resolve_nai_model_for_context(context: Any, model_key: Any) -> NaiModelSpec:
     return resolve_nai_model_spec(model_key)
 
 
+def context_uses_opus_usage_limit(context: Any) -> bool:
+    """지금 고른 모델이 Opus 무료 사용량 풀을 쓰는가(= V5 계열).
+
+    ⚠️ 모델 키는 `context._current_model_key()` 로 읽는다. 처음엔 있지도 않은
+    `get_generation_params()` 를 불렀는데, `except` 가 그 AttributeError 를 삼켜
+    **항상 False** 가 됐다 - 배지가 영영 안 뜨는데 오류도 안 보였다(실측 2026-08-21).
+
+    이 판정을 보는 곳이 셋(배지 페이로드 · 부하 분산 정책 목록 · 무료 집계)이라
+    여기 하나만 둔다. 복사본이 생기면 한쪽만 고쳐져 화면이 서로 다른 말을 한다.
+    """
+    try:
+        key = context._current_model_key()
+        return bool(resolve_nai_model_for_context(context, key).uses_opus_usage_limit)
+    except Exception as exc:  # pragma: no cover - 조회 실패가 생성 흐름을 막으면 안 됨
+        print(f"[warn] NAI usage-limit model check failed: {exc}", flush=True)
+        return False
+
+
 def resolve_nai_api_model(
     model_key: Any,
     custom_models: Mapping[str, NaiModelSpec] | None = None,

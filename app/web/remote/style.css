@@ -18553,10 +18553,15 @@ select.setup-input { cursor: pointer; }
   background: linear-gradient(90deg, #6f8cff, #9d7bff);
 }
 .nai-acct-bar.is-out > i { background: #ff6060; }
+/* 묶음형 정책(라운드 로빈-10/80~120/400~500)의 교체까지 진행도. 사용량 게이지와
+   **다른 색**이어야 한다 - 같은 파랑이면 "무료 잔량" 으로 오독한다. */
+.nai-acct-bar.is-block > i { background: linear-gradient(90deg, #f2e08a, #ffd166); }
 .nai-acct-pct {
   flex: 0 0 34px; text-align: right;
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
+/* 묶음 진행은 `37/100` 이라 34px 로는 잘린다. */
+.nai-acct-line:has(.is-block) .nai-acct-pct { flex: 0 0 54px; }
 /* 비V5 에서는 게이지/퍼센트를 안 그린다 - 이름만 남으면 줄이 무너지므로 자리를 채운다. */
 .nai-acct-spacer { flex: 1 1 auto; }
 .nai-acct-empty, .nai-acct-note {

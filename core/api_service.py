@@ -609,6 +609,7 @@ class APIService:
                 NaiAccountService,
                 cached_account_usage,
                 next_rotation_counter,
+                note_account_used,
                 rotation_seed,
             )
 
@@ -619,6 +620,7 @@ class APIService:
 
             tokens_by_id = dict(active)
             if len(active) == 1:
+                note_account_used(self.app_context, active[0][0])
                 return active[0][1]
 
             policy = service.policy()
@@ -640,8 +642,9 @@ class APIService:
             # 변할 수 있는 계정은 여기 하나뿐이고, 나머지를 매번 같이 묻는 것은
             # 계정 수만큼 요청이 늘 뿐이다(사용자 지적 2026-08-21).
             setattr(self.app_context, LAST_GENERATION_ACCOUNT_ATTR, selected_id)
+            total = note_account_used(self.app_context, selected_id)
             print(f"[multi-token] policy={policy} counter={counter} "
-                  f"picked={selected_id} of {len(active)}", flush=True)
+                  f"picked={selected_id} of {len(active)} total={total}", flush=True)
             return token
 
         except Exception as exc:  # noqa: BLE001 - 계정 선택 실패가 생성을 막으면 안 된다

@@ -1335,7 +1335,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken5')
+    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken6')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,
@@ -6858,7 +6858,9 @@ function showAppDialog(message, options = {}) {
       resolve(result);
     };
     const finishOk = () => {
-      // 선택지 모드에는 '확인' 버튼이 없다 - Enter 는 첫 선택지를 고른다.
+      // 선택지 모드에는 '확인' 버튼이 없다 - 포커스가 대화상자 밖으로 나간 경우에만
+      // 여기까지 오고, 그때는 첫 선택지를 고른다. 포커스가 버튼에 있으면 `onKeyDown`
+      // 이 그 버튼을 직접 누른다(아래).
       if (choices.length) {
         cleanup(String(choices[0].key));
         return;
@@ -6873,6 +6875,16 @@ function showAppDialog(message, options = {}) {
         cancel();
       } else if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
+        // ⚠️ `preventDefault()` 가 브라우저의 기본 버튼 활성화를 막는다 - 포커스가
+        // 어느 버튼에 있든 Enter 는 늘 finishOk() 로 갔다. 탭으로 옮긴 버튼을
+        // 직접 눌러 준다.
+        const focusedBtn = document.activeElement && document.activeElement.closest
+          ? document.activeElement.closest('[data-confirm-action]')
+          : null;
+        if (focusedBtn && overlay.contains(focusedBtn)) {
+          focusedBtn.click();
+          return;
+        }
         finishOk();
       }
     };
@@ -7090,10 +7102,13 @@ function onNaiUsageUpdate(m) {
   const multi = accounts.length > 1;
   // ⚠️ **V5 와 비V5 는 다른 값을 보여 준다**(사용자 지시 2026-08-21).
   //   V5   : 잔량 퍼센트 - 그 무료 풀을 실제로 쓰고 있으니 잔량이 답이다.
-  //   비V5 : 퍼센트가 뜻이 없으므로(그 풀을 안 쓴다) **이번 세션 무료 생성 수**.
+  //   비V5 : 퍼센트가 뜻이 없으므로(그 풀을 안 쓴다) **이번 세션 생성 장수**.
   // 배지 자체는 두 경우 다 뜬다 - 모델을 오갈 때마다 사라졌다 나타나면 자리가 흔들린다.
+  //
+  // ⚠️ 비V5 값은 '무료' 가 아니라 **전체** 장수다. 무료 장수를 띄웠더니 V4.5 생성은
+  // 정의상 무료가 아니라 숫자가 영영 안 움직였다(사용자 지적 2026-08-21).
   const onV5 = m.uses_usage_limit !== false;
-  value.textContent = onV5 ? `${pct}%` : String(Number(m.free_generations) || 0);
+  value.textContent = onV5 ? `${pct}%` : String(Number(m.session_generations) || 0);
   // 소진 표시는 V5 를 고른 동안에만 뜻이 있다(V4.5 는 이 무료 풀을 안 쓴다).
   pill.classList.toggle('is-out', !!m.is_negative && onV5);
   pill.classList.toggle('is-multi', multi);
@@ -7106,7 +7121,7 @@ function onNaiUsageUpdate(m) {
   const perDay = secs > 0 ? Math.round((86400 / secs) * 10) / 10 : 0;
   const rate = perDay > 0 ? `하루 약 ${perDay}% 회복` : '';
   const base = !onV5
-    ? '이번 세션에 무료로 뽑은 장수 (V5 가 아니면 무료 사용량을 쓰지 않습니다)'
+    ? '이번 세션에 뽑은 장수 (V5 가 아니면 무료 사용량을 쓰지 않습니다)'
     : m.is_negative
       ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
       : `NovelAI Diffusion V5 Opus 사용량${rate ? ` · ${rate}` : ''}`;

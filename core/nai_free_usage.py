@@ -27,6 +27,14 @@ FREE_PIXELS_MAX = 1024 * 1024
 
 _FREE_COUNT_ATTR = "nai_session_free_generation_count"
 
+# 이번 세션에 나간 **모든** NAI 생성 장수(무료·유료 가리지 않는다).
+#
+# ⚠️ 비V5 화면이 이 값을 쓴다. 처음엔 거기도 무료 카운터를 띄웠는데, V4.5 생성은
+# 정의상 무료가 아니라 **숫자가 영영 안 움직였다**(사용자 지적 2026-08-21:
+# "NAID4.5에서 이번 세션 무료 생성 카운트가 업데이트 되지 않습니다"). 그 화면이
+# 답해야 하는 질문은 "이번 세션에 몇 장 뽑았나" 이므로 전체를 센다.
+_TOTAL_COUNT_ATTR = "nai_session_generation_count"
+
 # 백엔드 프로세스가 뜬 시각. "현재 세션의 총 실행 시간" 의 기준이다.
 # ⚠️ `time.time()` 이 아니라 monotonic 이다 - 시계가 뒤로 가면(NTP 보정·절전 복귀)
 # 경과 시간이 음수가 될 수 있다.
@@ -41,8 +49,28 @@ def _as_int(value: Any, default: int = 0) -> int:
 
 
 def is_free_generation(context: Any, params: dict[str, Any] | None) -> bool:
-    """이 생성이 V5 무료 범위 안에서 나갔는가."""
+    """이 생성이 V5 무료 범위 안에서 나갔는가.
+
+    ⚠️ **고른 모델이 아니라 실제로 나간 것을 봐야 한다.** V5 를 골라도
+    img2img/인페인트/Enhance 는 V4.5 로 대체돼 나가고, 그건 Anlas 로 청구된다
+    (Codex 리뷰 2026-08-21 지적, 실측으로 확인). 대체를 카운터보다 나중에 넣고
+    카운터를 다시 안 봐서 **유료 작업이 무료로 집계되고 있었다.**
+    """
     params = params or {}
+
+    # 이미지를 싣고 온 요청(img2img · 인페인트 · Enhance)은 무료가 아니다.
+    # V5 는 이 액션을 제공하지 않아 V4.5 로 나가고, V4.5 는 아래 모델 게이트에서
+    # 어차피 걸린다 - 어느 쪽이든 무료 풀에서 빠지지 않는다.
+    if params.get("image_bytes") is not None or params.get("init_image_bytes") is not None:
+        return False
+    # 대체가 실제로 일어났다는 표식이 있으면 그것도 유료다(경로가 늘어나도 안전하게).
+    if params.get("_nai_img2img_fallback_model") or params.get("_nai_inpaint_fallback_model"):
+        return False
+    # 사용자가 payload 를 직접 덮어썼으면 우리가 아는 steps/해상도가 실제와 다를 수
+    # 있다 - 모르면 무료로 치지 않는다.
+    if params.get("use_custom_api_params"):
+        return False
+
     try:
         from core.nai_model_contract import resolve_nai_model_for_context
 
@@ -71,7 +99,11 @@ def is_free_generation(context: Any, params: dict[str, Any] | None) -> bool:
 
 
 def note_generation(context: Any, params: dict[str, Any] | None) -> int:
-    """생성 1장을 반영하고 현재까지의 무료 장수를 돌려준다."""
+    """생성 1장을 반영하고 현재까지의 무료 장수를 돌려준다.
+
+    총 장수는 무료 여부와 상관없이 **항상** 오른다.
+    """
+    setattr(context, _TOTAL_COUNT_ATTR, total_count(context) + 1)
     if not is_free_generation(context, params):
         return free_count(context)
     count = free_count(context) + 1
@@ -79,9 +111,17 @@ def note_generation(context: Any, params: dict[str, Any] | None) -> int:
     return count
 
 
-def free_count(context: Any) -> int:
-    value = getattr(context, _FREE_COUNT_ATTR, 0)
+def _count(context: Any, attr: str) -> int:
+    value = getattr(context, attr, 0)
     return value if isinstance(value, int) and value >= 0 else 0
+
+
+def free_count(context: Any) -> int:
+    return _count(context, _FREE_COUNT_ATTR)
+
+
+def total_count(context: Any) -> int:
+    return _count(context, _TOTAL_COUNT_ATTR)
 
 
 def session_elapsed_seconds() -> int:
@@ -92,5 +132,6 @@ def session_payload(context: Any) -> dict[str, Any]:
     """배지/패널이 쓰는 세션 요약."""
     return {
         "free_generations": free_count(context),
+        "session_generations": total_count(context),
         "elapsed_seconds": session_elapsed_seconds(),
     }

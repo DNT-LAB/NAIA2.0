@@ -75,8 +75,10 @@ export function createNaiAccountPanel({
   // 어긋난 순간에 행 수가 틀렸다(실측: 사용량엔 2개인데 화면엔 1줄).
   let usageRows = [];
   let totalPercent = null;
-  // 이번 세션 요약(무료 생성 수 · 실행 시간). 퍼센트 게이지를 대신한다.
-  let session = { free: 0, elapsed: 0, onV5: true };
+  // 이번 세션 요약(생성 장수 · 실행 시간). 비V5 에서 퍼센트 게이지를 대신한다.
+  let session = { free: 0, total: 0, elapsed: 0, onV5: true };
+  // 지금 부하 분산 묶음의 진행도. `target === 1` 이면 교체가 매 장이라 뜻이 없다.
+  let rotation = { current: 0, target: 1 };
   let popOpen = false;
   // 핀. 켜면 바깥을 눌러도 안 닫힌다 - 생성하는 동안 어느 계정이 도는지 계속
   // 보려고 둔 것이다(테스트용, 사용자 요청 2026-08-21). 세션 안에서만 기억한다.
@@ -148,9 +150,21 @@ export function createNaiAccountPanel({
     totalPercent = Number.isFinite(message.percent) ? message.percent : null;
     session = {
       free: Number(message.free_generations) || 0,
+      // ⚠️ 비V5 화면은 **이 값**을 쓴다. 무료 카운터를 띄웠더니 V4.5 생성은 정의상
+      // 무료가 아니라 숫자가 영영 안 움직였다(사용자 지적 2026-08-21).
+      total: Number(message.session_generations) || 0,
       elapsed: Number(message.elapsed_seconds) || 0,
       onV5: message.uses_usage_limit !== false,
     };
+    // 지금 묶음의 진행도(라운드 로빈-10 / 80~120 / 400~500). 1이면 게이지를 안 그린다.
+    rotation = {
+      current: Number(message.rotation_current) || 0,
+      target: Math.max(1, Number(message.rotation_target) || 1),
+    };
+    // 정책 목록은 **모델 계열마다 다르다** - 모델을 바꾸면 이 메시지로 함께 온다.
+    if (Array.isArray(message.policy_options) && message.policy_options.length) {
+      state.policyOptions = message.policy_options;
+    }
     const rows = Array.isArray(message.accounts) ? message.accounts : [];
     if (rows.length) {
       usageRows = rows.filter(row => row && row.id);
@@ -202,6 +216,30 @@ export function createNaiAccountPanel({
     return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
   }
 
+  /** 지금 묶음의 진행 게이지(연노랑). 사용자 요청 2026-08-21. */
+  function blockBarHtml() {
+    const width = Math.max(0, Math.min(100, (rotation.current / rotation.target) * 100));
+    return `<span class="nai-acct-bar is-block"><i style="width:${width}%"></i></span>`;
+  }
+
+  /**
+   * 계정 한 줄의 회전 상태 문구.
+   *
+   * 명세(사용자 2026-08-21): `( 목표 : *장, 현재 : *장 | 총 ****장 )`,
+   * 쉬고 있으면 `( 대기중 | 총 ****장 )`.
+   *
+   * ⚠️ 목표/현재는 **묶음형 정책에서만** 뜻이 있다. 라운드 로빈(1장)이나 동적 할당은
+   * 매 장 교체라 목표가 늘 1이고 현재가 늘 0이어서, 그대로 적으면 고장 난 것처럼
+   * 보인다. 그때는 '사용중' 으로만 적는다.
+   */
+  function rotationText(row) {
+    const total = `총 ${(Number(row.session_count) || 0).toLocaleString()}장`;
+    if (!row.is_next) return `대기중 | ${total}`;
+    if (rotation.target <= 1) return `사용중 | ${total}`;
+    return `목표 ${rotation.target.toLocaleString()}장 · `
+      + `현재 ${rotation.current.toLocaleString()}장 | ${total}`;
+  }
+
   /** 초 -> `1시간 23분` / `12분` / `48초`. 세션이 얼마나 돌았는지 한눈에. */
   function formatElapsed(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -238,20 +276,26 @@ export function createNaiAccountPanel({
       const remain = known && !row.is_negative
         ? `~${formatImages(row.percent)}`
         : (row.is_negative ? '소진' : '—');
-      // ⚠️ **게이지와 퍼센트는 V5 에서만 그린다**(사용자 지시 2026-08-21).
+      // ⚠️ **사용량 게이지와 퍼센트는 V5 에서만 그린다**(사용자 지시 2026-08-21).
       // V4.5 이하는 이 무료 풀을 쓰지 않으므로 퍼센트를 띄우면 거짓말이 된다 -
-      // 그 자리는 세션 요약(무료 생성 수 · 실행 시간)이 대신한다.
+      // 그 자리에는 지금 묶음의 진행 게이지(연노랑)를 그린다.
+      const showBlock = !session.onV5 && row.is_next && rotation.target > 1;
       return `<div class="nai-acct-row${row.is_next ? ' is-next' : ''}">`
         + '<div class="nai-acct-line">'
         + `<span class="nai-acct-name">${esc(name)}</span>`
         + (session.onV5
           ? barHtml(known ? row.percent : 0, known && row.is_negative)
             + `<span class="nai-acct-pct">${esc(pct)}</span>`
-          : '<span class="nai-acct-spacer"></span>')
+          : (showBlock
+            ? blockBarHtml()
+              + `<span class="nai-acct-pct">${rotation.current}/${rotation.target}</span>`
+            : '<span class="nai-acct-spacer"></span>'))
         + '</div>'
         + '<div class="nai-acct-sub">'
         + `<span>Anlas ${esc(anlas)}</span>`
-        + (session.onV5 ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>` : '')
+        + (session.onV5
+          ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>`
+          : `<i>|</i><span>${esc(rotationText(row))}</span>`)
         + '</div>'
         + '</div>';
     }).join('');
@@ -292,13 +336,18 @@ export function createNaiAccountPanel({
       + ` title="${pinned ? '고정 해제' : '열어 둔 채 고정'}">${pinned ? '📌' : '📍'}</button>`
       + (session.onV5
         ? `<span class="nai-acct-total">통합 ${esc(total)}</span>`
-        : `<span class="nai-acct-total">${session.free.toLocaleString()}장</span>`)
+        : `<span class="nai-acct-total">${session.total.toLocaleString()}장</span>`)
       + '</div>'
+      // ⚠️ 비V5 에서는 **전체 생성 장수**를 센다. 무료 장수를 띄웠더니 V4.5 생성은
+      // 정의상 무료가 아니라 숫자가 영영 안 움직였다(사용자 지적 2026-08-21).
+      // 무료 장수는 그래도 궁금할 수 있으니 아래 줄에 함께 적는다.
       + (session.onV5 ? ''
         : '<div class="nai-acct-session">'
-          + `<span>이번 세션 무료 생성 <b>${session.free.toLocaleString()}</b>장</span>`
+          + `<span>이번 세션 생성 <b>${session.total.toLocaleString()}</b>장</span>`
           + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em></div>`
-          + '<div class="nai-acct-note">V5 가 아닌 모델은 무료 사용량을 쓰지 않습니다.</div>')
+          + '<div class="nai-acct-note">'
+          + `V5 가 아닌 모델은 무료 사용량을 쓰지 않습니다 (무료 ${session.free.toLocaleString()}장).`
+          + '</div>')
       + (rows.length > 1
         ? '<div class="nai-acct-sum">'
           + `<span>Anlas ${sumAnlas.toLocaleString()}</span>`

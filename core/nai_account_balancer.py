@@ -1,13 +1,26 @@
 """다중 계정 부하 분산 정책 (Multi Token).
 
-사용자 명세(2026-08-21):
+사용자 명세(2026-08-21). **정책 목록은 모델 계열마다 다르다**:
 
-    [v] 라운드 로빈      1장씩 번갈아 생성. 한 토큰의 사용량을 다 쓰면 이후에는
-                         남은 계정에서만 생성한다.
-    [ ] 라운드 로빈-10   10장씩 번갈아. 소진 규칙은 같다.
-    [ ] 동적 할당        각 계정의 Usage 를 **균일하게 맞춰 가며** 생성한다.
-                         전부 같아지면 그때부터 라운드 로빈처럼 돈다.
-    [ ] 동적 할당-10     동적 할당인데 10장 단위로 고정. 같아지면 라운드 로빈-10.
+    V5 계열(무료 사용량 % 가 있다)
+        [v] 라운드 로빈      1장씩 번갈아 생성. 한 토큰의 사용량을 다 쓰면 이후에는
+                             남은 계정에서만 생성한다.
+        [ ] 라운드 로빈-10   10장씩 번갈아. 소진 규칙은 같다.
+        [ ] 동적 할당        각 계정의 Usage 를 **균일하게 맞춰 가며** 생성한다.
+                             전부 같아지면 그때부터 라운드 로빈처럼 돈다.
+        [ ] 동적 할당-10     동적 할당인데 10장 단위로 고정. 같아지면 라운드 로빈-10.
+
+    V5 가 아닌 계열(Anlas 로만 청구된다)
+        [v] 라운드 로빈 / 라운드 로빈-10   위와 같다.
+        [ ] 라운드 로빈-80~120   80~120 중 하나를 뽑아 그만큼 생성한 뒤 교체하고
+                                 새 값을 다시 뽑는다.
+        [ ] 라운드 로빈-400~500  같은 방식, 범위만 다르다.
+
+⚠️ **동적 할당을 비V5 에 두면 안 된다.** 그것이 균등화하는 값은 V5 무료 사용량 %
+인데, V4.5 생성은 그 %를 건드리지 않는다 - 아무리 생성해도 값이 안 움직여서 정책이
+라운드 로빈과 구분되지 않는다. 반대로 구간형(80~120 / 400~500)을 V5 에 두면 사용자가
+잔량을 보고 고르던 방식을 잃는다. 그래서 목록을 갈랐다(사용자 지적 2026-08-21:
+"NAID5 에서 NAID4.5 사양의 로드 밸런싱 정책이 나타납니다").
 
 여기는 **순수 함수만** 둔다. 네트워크도 파일도 만지지 않는다 - 계정 선택은 유료
 생성 경로가 매번 지나가는 자리라, 값만 넣으면 결과가 정해지는 형태여야 테스트로
@@ -26,6 +39,8 @@ from typing import Any, Iterable, Sequence
 # 파일에 저장되는 정책 키. 프런트 라디오와 1:1 이다.
 POLICY_ROUND_ROBIN = "round_robin"
 POLICY_ROUND_ROBIN_10 = "round_robin_10"
+POLICY_DYNAMIC = "dynamic"
+POLICY_DYNAMIC_10 = "dynamic_10"
 POLICY_ROUND_ROBIN_80_120 = "round_robin_80_120"
 POLICY_ROUND_ROBIN_400_500 = "round_robin_400_500"
 
@@ -35,28 +50,58 @@ POLICY_RANGES: dict[str, tuple[int, int]] = {
     POLICY_ROUND_ROBIN_400_500: (400, 500),
 }
 
-POLICIES: tuple[str, ...] = (
+# 모델 계열별 목록(화면 순서 그대로).
+USAGE_POLICIES: tuple[str, ...] = (
+    POLICY_ROUND_ROBIN,
+    POLICY_ROUND_ROBIN_10,
+    POLICY_DYNAMIC,
+    POLICY_DYNAMIC_10,
+)
+ANLAS_POLICIES: tuple[str, ...] = (
     POLICY_ROUND_ROBIN,
     POLICY_ROUND_ROBIN_10,
     POLICY_ROUND_ROBIN_80_120,
     POLICY_ROUND_ROBIN_400_500,
 )
 
+# 저장을 허용하는 전체 집합(두 계열의 합집합, 순서 유지).
+POLICIES: tuple[str, ...] = tuple(dict.fromkeys(USAGE_POLICIES + ANLAS_POLICIES))
+
 DEFAULT_POLICY = POLICY_ROUND_ROBIN
 
 # 10장 단위 정책의 묶음 크기.
 BLOCK = 10
 
-# 동적 할당(-10)은 없앴다(사용자 지시 2026-08-21). 잔량을 보고 균등화하는 방식은
-# **퍼센트가 정수라 해상도가 너무 거칠었다** - 1% 가 약 17장이라 값이 한 번 움직일
-# 때까지 같은 계정만 골랐고, 그동안은 라운드 로빈과 구분되지 않았다.
-# 설정에 남아 있는 옛 키(`dynamic` / `dynamic_10`)는 `POLICIES` 에 없으므로
-# `normalize_policy` 가 기본값으로 눕힌다 - 따로 지울 필요가 없다.
+# 계열이 다른 정책으로 넘어갈 때의 착지점. 뜻이 가장 가까운 쪽으로 눕힌다.
+# ⚠️ 저장은 계열마다 따로 하므로(`nai_account_service`) 이 폴백은 옛 파일을 읽을 때와
+# 방어용일 뿐이다 - 모델을 오갔다고 사용자가 고른 값이 서로를 덮지 않는다.
+_FAMILY_FALLBACK: dict[str, str] = {
+    POLICY_DYNAMIC: POLICY_ROUND_ROBIN,
+    POLICY_DYNAMIC_10: POLICY_ROUND_ROBIN_10,
+    POLICY_ROUND_ROBIN_80_120: POLICY_ROUND_ROBIN,
+    POLICY_ROUND_ROBIN_400_500: POLICY_ROUND_ROBIN,
+}
 
 
-def normalize_policy(value: Any) -> str:
+def family_policies(uses_usage_limit: bool) -> tuple[str, ...]:
+    """이 모델 계열에서 고를 수 있는 정책 키들."""
+    return USAGE_POLICIES if uses_usage_limit else ANLAS_POLICIES
+
+
+def normalize_policy(value: Any, uses_usage_limit: bool | None = None) -> str:
+    """저장/사용 전에 정책 키를 다듬는다.
+
+    `uses_usage_limit` 를 주면 **그 계열 안으로** 눕힌다(화면에 없는 라디오가 켜져
+    보이는 일을 막는다). 안 주면 저장 가능한 전체 집합만 본다.
+    """
     v = str(value or "").strip()
-    return v if v in POLICIES else DEFAULT_POLICY
+    if uses_usage_limit is None:
+        return v if v in POLICIES else DEFAULT_POLICY
+    allowed = family_policies(bool(uses_usage_limit))
+    if v in allowed:
+        return v
+    fallback = _FAMILY_FALLBACK.get(v, DEFAULT_POLICY)
+    return fallback if fallback in allowed else DEFAULT_POLICY
 
 
 def _block_size(seed: int, index: int, low: int, high: int) -> int:
@@ -74,8 +119,8 @@ def _block_size(seed: int, index: int, low: int, high: int) -> int:
     return low + (h % span)
 
 
-def _ranged_block_index(counter: int, seed: int, low: int, high: int) -> int:
-    """`counter` 장째가 몇 번째 묶음에 드는가.
+def _ranged_block(counter: int, seed: int, low: int, high: int) -> tuple[int, int, int]:
+    """`counter` 장째가 든 묶음의 `(번호, 그 묶음에서 몇 장째, 묶음 크기)`.
 
     묶음 크기가 매번 달라(80~120 등) 나눗셈으로는 못 구한다. 앞에서부터 더해 간다 -
     묶음이 최소 80장이라 한 세션에서 도는 횟수는 수십 번을 넘지 않는다.
@@ -84,12 +129,35 @@ def _ranged_block_index(counter: int, seed: int, low: int, high: int) -> int:
     index = 0
     consumed = 0
     while True:
-        consumed += _block_size(seed, index, low, high)
-        if counter < consumed:
-            return index
+        size = _block_size(seed, index, low, high)
+        if counter < consumed + size:
+            return index, counter - consumed, size
+        consumed += size
         index += 1
         if index > 100000:                      # 폭주 방지(현실적으로 도달 불가)
-            return index
+            return index, 0, size
+
+
+def _ranged_block_index(counter: int, seed: int, low: int, high: int) -> int:
+    return _ranged_block(counter, seed, low, high)[0]
+
+
+def rotation_block(policy: str, counter: int, seed: int = 0) -> tuple[int, int]:
+    """지금 묶음의 `(진행 장수, 목표 장수)`.
+
+    화면이 "목표 100장 · 현재 37장" 과 게이지를 그리는 데 쓴다(사용자 요청
+    2026-08-21). `counter` 는 **다음에 쓸 값**(peek)이므로 그대로 '이미 생성한 장수'
+    가 된다 - 첫 장이 counter 0 을 소비하기 때문이다.
+    """
+    policy = normalize_policy(policy)
+    counter = max(0, int(counter))
+    span = POLICY_RANGES.get(policy)
+    if span is not None:
+        _index, current, size = _ranged_block(counter, seed, span[0], span[1])
+        return current, size
+    if policy in (POLICY_ROUND_ROBIN_10, POLICY_DYNAMIC_10):
+        return counter % BLOCK, BLOCK
+    return 0, 1
 
 
 def is_exhausted(usage: Any) -> bool:
@@ -166,6 +234,18 @@ def select_account(
         return pool[0]
 
     step = max(0, int(counter))
+    block = step // BLOCK
+
+    # 동적 할당: 잔량이 가장 많은 쪽을 쓴다. 전부 같아지면 라운드 로빈으로 넘어간다.
+    if policy in (POLICY_DYNAMIC, POLICY_DYNAMIC_10):
+        top = max(_percent(usage_by_id.get(a)) for a in pool)
+        leaders = [a for a in pool if _percent(usage_by_id.get(a)) == top]
+        if len(leaders) < len(pool):
+            # 아직 균일하지 않다 - 선두가 여럿이면 그 안에서만 돌려 한 계정에
+            # 몰리지 않게 한다.
+            idx = (block if policy == POLICY_DYNAMIC_10 else step) % len(leaders)
+            return leaders[idx]
+        policy = POLICY_ROUND_ROBIN_10 if policy == POLICY_DYNAMIC_10 else POLICY_ROUND_ROBIN
 
     # 구간형: 묶음 크기를 80~120(또는 400~500) 안에서 뽑고, 그 수만큼 채우면 계정을
     # 바꾸면서 **새 값을 다시 뽑는다**(사용자 지시 2026-08-21).
@@ -174,25 +254,46 @@ def select_account(
         return pool[_ranged_block_index(step, seed, span[0], span[1]) % len(pool)]
 
     if policy == POLICY_ROUND_ROBIN_10:
-        return pool[(step // BLOCK) % len(pool)]
+        return pool[block % len(pool)]
     return pool[step % len(pool)]
 
 
-def policy_options() -> list[dict[str, str]]:
-    """프런트가 라디오를 그릴 때 쓰는 목록. 문구는 사용자 명세 그대로."""
+_POLICY_TEXT: dict[str, tuple[str, str]] = {
+    POLICY_ROUND_ROBIN: (
+        "라운드 로빈",
+        "1장씩 번갈아가며 생성합니다. 한 토큰의 사용량을 모두 소모하면 "
+        "이후에는 남은 계정에서만 생성합니다."),
+    POLICY_ROUND_ROBIN_10: (
+        "라운드 로빈-10",
+        "10장씩 번갈아가며 생성합니다. 한 토큰의 사용량을 모두 소모하면 "
+        "이후에는 남은 계정에서만 생성합니다."),
+    POLICY_DYNAMIC: (
+        "동적 할당",
+        "각 계정의 Usage를 균일하게 맞춰가며 생성합니다. Usage가 전부 같아지면 "
+        "이후에는 라운드 로빈 정책이 적용됩니다."),
+    POLICY_DYNAMIC_10: (
+        "동적 할당-10",
+        "각 계정의 Usage를 균일하게 맞춰가며 생성하되 10장 단위로 고정됩니다. "
+        "같아지면 라운드 로빈-10 정책이 적용됩니다."),
+    POLICY_ROUND_ROBIN_80_120: (
+        "라운드 로빈-80~120",
+        "80~120 사이에서 값을 하나 뽑아 그만큼 생성한 뒤 계정을 바꾸고, "
+        "새 값을 다시 뽑습니다. 한 토큰의 사용량을 모두 소모하면 이후에는 "
+        "남은 계정에서만 생성합니다."),
+    POLICY_ROUND_ROBIN_400_500: (
+        "라운드 로빈-400~500",
+        "400~500 사이에서 값을 하나 뽑아 그만큼 생성한 뒤 계정을 바꾸고, "
+        "새 값을 다시 뽑습니다. 한 토큰의 사용량을 모두 소모하면 이후에는 "
+        "남은 계정에서만 생성합니다."),
+}
+
+
+def policy_options(uses_usage_limit: bool = True) -> list[dict[str, str]]:
+    """프런트가 라디오를 그릴 때 쓰는 목록. 문구는 사용자 명세 그대로.
+
+    **모델 계열마다 다르다** - 위 모듈 주석 참조.
+    """
     return [
-        {"key": POLICY_ROUND_ROBIN, "label": "라운드 로빈",
-         "desc": "1장씩 번갈아가며 생성합니다. 한 토큰의 사용량을 모두 소모하면 "
-                 "이후에는 남은 계정에서만 생성합니다."},
-        {"key": POLICY_ROUND_ROBIN_10, "label": "라운드 로빈-10",
-         "desc": "10장씩 번갈아가며 생성합니다. 한 토큰의 사용량을 모두 소모하면 "
-                 "이후에는 남은 계정에서만 생성합니다."},
-        {"key": POLICY_ROUND_ROBIN_80_120, "label": "라운드 로빈-80~120",
-         "desc": "80~120 사이에서 값을 하나 뽑아 그만큼 생성한 뒤 계정을 바꾸고, "
-                 "새 값을 다시 뽑습니다. 한 토큰의 사용량을 모두 소모하면 이후에는 "
-                 "남은 계정에서만 생성합니다."},
-        {"key": POLICY_ROUND_ROBIN_400_500, "label": "라운드 로빈-400~500",
-         "desc": "400~500 사이에서 값을 하나 뽑아 그만큼 생성한 뒤 계정을 바꾸고, "
-                 "새 값을 다시 뽑습니다. 한 토큰의 사용량을 모두 소모하면 이후에는 "
-                 "남은 계정에서만 생성합니다."},
+        {"key": key, "label": _POLICY_TEXT[key][0], "desc": _POLICY_TEXT[key][1]}
+        for key in family_policies(bool(uses_usage_limit))
     ]

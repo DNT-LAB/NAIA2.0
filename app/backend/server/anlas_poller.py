@@ -87,18 +87,11 @@ async def broadcast_anlas_if_vibe_encoded(context: Any, clients: set) -> None:
 def _current_model_uses_usage_limit(context: Any) -> bool:
     """지금 고른 NAI 모델이 별도 사용량 한도를 쓰는가(= V5).
 
-    ⚠️ 모델 키는 `context._current_model_key()` 로 읽는다. 처음엔 있지도 않은
-    `get_generation_params()` 를 불렀는데, 아래 `except` 가 그 AttributeError 를
-    삼켜 **항상 False** 가 됐다 - 배지가 영영 안 뜨는데 오류도 안 보였다(실측).
+    판정은 모델 계약이 SSOT 다 - 정책 목록과 무료 집계도 같은 함수를 본다.
     """
-    try:
-        from core.nai_model_contract import resolve_nai_model_for_context
+    from core.nai_model_contract import context_uses_opus_usage_limit
 
-        key = context._current_model_key()
-        return bool(resolve_nai_model_for_context(context, key).uses_opus_usage_limit)
-    except Exception as exc:  # pragma: no cover - 조회 실패가 생성 흐름을 막으면 안 됨
-        print(f"[warn] NAI usage-limit model check failed: {exc}", flush=True)
-        return False
+    return context_uses_opus_usage_limit(context)
 
 
 def build_nai_usage_payload(context: Any) -> dict[str, Any]:
@@ -229,9 +222,10 @@ def _narrow_targets(context: Any, extras: list[tuple[str, str]]) -> list[tuple[s
 def _account_rows(context: Any, usage_by_id: dict[str, Any],
                   next_account_id: str) -> list[dict[str, Any]]:
     """패널이 그릴 계정 행. **토큰 전문은 넣지 않는다**(앞 7자 미리보기만)."""
-    from core.nai_account_service import NaiAccountService
+    from core.nai_account_service import NaiAccountService, account_session_tally
 
     service = NaiAccountService(context)
+    tally = account_session_tally(context)
     rows = []
     for row in service.snapshot()["accounts"]:
         if not (row["enabled"] and row["has_token"]):
@@ -249,6 +243,8 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any],
             "anlas": int(anlas) if isinstance(anlas, int) else None,
             # 이번 라운드에 생성할 계정. 화면이 여기를 강조한다.
             "is_next": row["id"] == next_account_id,
+            # 이번 세션에 이 계정으로 나간 장수(사용자 요청 2026-08-21: "총 ****장").
+            "session_count": int(tally.get(row["id"], 0)),
         })
     return rows
 
@@ -286,8 +282,14 @@ def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> d
         extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
         usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))
         # 좁혀 물었으면 안 물어본 계정은 캐시 값을 그대로 이어 쓴다.
+        #
+        # ⚠️ **지금 활성인 계정만** 이어 쓴다. 예전에는 캐시에 있는 것을 전부 합쳐서,
+        # 지우거나 꺼 버린 계정의 Anlas 가 통합값에 계속 더해졌다(Codex 리뷰
+        # 2026-08-21). 사용자는 없는 돈을 있다고 읽게 된다.
+        active_ids = {account_id for account_id, _ in active}
         for account_id, cached in cached_account_usage(context).items():
-            usage_by_id.setdefault(account_id, cached)
+            if account_id in active_ids:
+                usage_by_id.setdefault(account_id, cached)
         _cache_account_usage(context, usage_by_id)
         return usage_by_id
     except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
@@ -366,6 +368,7 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
         **session_payload(context),
     }
     _attach_accounts(context, usage_payload)
+    _attach_policy(context, usage_payload)
     return [anlas_payload, usage_payload]
 
 
@@ -407,8 +410,6 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
         )
         usage_payload["accounts"] = _account_rows(context, usage_by_id, next_account_id)
         usage_payload["next_account_id"] = next_account_id
-        usage_payload["policy"] = snapshot["policy"]
-        usage_payload["balancing_effective"] = snapshot["balancing_effective"]
         # 배지는 합이 아니라 **평균**이다(사용자 명세). 못 받은 계정은 평균에서 뺀다.
         avg = average_percent(usage_by_id, [a for a, _ in active])
         if avg is not None:
@@ -418,6 +419,37 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
         ) if usage_by_id else False
     except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
         print(f"[warn] multi-token usage attach failed: {exc}", flush=True)
+
+
+def _attach_policy(context: Any, usage_payload: dict[str, Any]) -> None:
+    """부하 분산 정책과 지금 묶음의 진행도를 붙인다.
+
+    ⚠️ **모델에 딸린 값이다.** 정책 목록이 V5 와 비V5 로 갈려 있어(balancer 참조)
+    모델이 바뀌면 목록도 선택도 바뀐다. 캐시된 페이로드를 다시 보내는 경로에서도
+    반드시 이걸 다시 돌려야 한다 - 안 그러면 4.5 로 갔는데 V5 목록이 그대로 남는다.
+    """
+    from core.nai_account_balancer import policy_options, rotation_block
+    from core.nai_account_service import (
+        NaiAccountService,
+        peek_rotation_counter,
+        rotation_seed,
+    )
+
+    try:
+        on_v5 = _current_model_uses_usage_limit(context)
+        snapshot = NaiAccountService(context).snapshot()
+        policy = snapshot["policy"]
+        current, target = rotation_block(
+            policy, peek_rotation_counter(context), rotation_seed(context))
+        usage_payload["policy"] = policy
+        usage_payload["policy_options"] = policy_options(on_v5)
+        usage_payload["balancing_effective"] = snapshot["balancing_effective"]
+        # "목표 100장 · 현재 37장" 과 게이지. 1장짜리 정책(라운드 로빈/동적 할당)은
+        # target 이 1 이라 화면이 게이지를 안 그린다.
+        usage_payload["rotation_current"] = current
+        usage_payload["rotation_target"] = target
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] multi-token policy attach failed: {exc}", flush=True)
 
 
 async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
@@ -478,7 +510,8 @@ def _usage_hidden_payload() -> dict[str, Any]:
         "type": "nai_usage_update", "available": False, "percent": 0,
         "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
         "accounts": [], "balancing_effective": False, "uses_usage_limit": False,
-        "free_generations": 0, "elapsed_seconds": 0,
+        "free_generations": 0, "session_generations": 0, "elapsed_seconds": 0,
+        "rotation_current": 0, "rotation_target": 1,
     }
 
 
@@ -538,6 +571,9 @@ def schedule_subscription_refresh(context: Any, clients: set, *, force: bool = F
         if usage.get("available"):
             usage["uses_usage_limit"] = _current_model_uses_usage_limit(context)
             usage.update(session_payload(context))
+            # 정책 목록/선택도 모델에 딸려 있다 - 캐시가 V5 때 잡혔으면 4.5 로 와도
+            # V5 목록이 그대로 남는다. 여기서 다시 채운다.
+            _attach_policy(context, usage)
         asyncio.create_task(_send_pair(clients, cached[0], usage))
         return
 

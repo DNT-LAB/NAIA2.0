@@ -51,7 +51,10 @@ def _snapshot_payload(context: Any) -> dict[str, Any]:
 
     snapshot = NaiAccountService(context).snapshot()
     snapshot["type"] = "nai_accounts"
-    snapshot["policy_options"] = policy_options()
+    # ⚠️ 목록은 **모델 계열마다 다르다**(balancer 주석 참조). `snapshot()` 이 이미
+    # 지금 계열을 판정해 뒀으니 그 값을 그대로 쓴다 - 여기서 다시 판정하면 두 값이
+    # 어긋나 라디오가 목록 밖 키를 가리킬 수 있다.
+    snapshot["policy_options"] = policy_options(bool(snapshot.get("uses_usage_limit", True)))
     return snapshot
 
 

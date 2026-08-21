@@ -586,6 +586,19 @@ class PromptProcessor:
             pass
         return context
 
+    def expand_preset_tokens(self, tags: list[str], context: PromptContext) -> list[str]:
+        """`preset:...` 토큰을 실제 태그로 푼다. **파이프라인 밖에서 쓰는 공개 입구.**
+
+        ⚠️ 메인 프롬프트 입력창의 Generate 경로는 이 파이프라인을 안 탄다
+        (`HeadlessGenerationService._expand_input_wildcards`). 그래서 입력창에 친
+        `preset:` 토큰이 전개되지 않은 채 NAI 로 나가 메타데이터에 문자열 그대로
+        박혔다(사용자 제보 2026-08-21). 그쪽이 이 메서드를 부른다.
+
+        **로직을 복제하지 마라.** 두 경로가 갈라지면 같은 토큰이 화면에 따라 다르게
+        풀린다.
+        """
+        return self._expand_preset_tokens(tags, context)
+
     def _expand_preset_tokens(self, tags: list[str], context: PromptContext) -> list[str]:
         expanded: list[str] = []
         for tag in tags:

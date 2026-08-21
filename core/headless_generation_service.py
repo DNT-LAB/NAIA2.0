@@ -497,8 +497,14 @@ class HeadlessGenerationService:
         text = params.get("input")
         if not isinstance(text, str) or not text.strip():
             return
-        # 빠른 통과: 와일드카드 문법 후보가 전혀 없으면 손대지 않는다.
-        if "__" not in text and "<" not in text and "$" not in text:
+        # 빠른 통과: 와일드카드/프리셋 문법 후보가 전혀 없으면 손대지 않는다.
+        #
+        # ⚠️ `preset:` 를 빼먹었었다. 프리셋 토큰만 있는 프롬프트는 여기서 즉시
+        # return 해서, 토큰이 NAI 로 그대로 나가 메타데이터에 문자열로 박혔다
+        # (사용자 제보 2026-08-21: "preset으로 적용해도 메타데이터를 보니까 그대로
+        # 들어가네요").
+        if ("__" not in text and "<" not in text and "$" not in text
+                and "preset:" not in text.lower()):
             return
         try:
             import weakref
@@ -543,6 +549,7 @@ class HeadlessGenerationService:
 
             # 입력창 와일드카드는 메인 프롬프트로 취급(location='main')해 위치 인식 롤에 기록.
             expanded_tags = processor.expand_tags(cleaned_tags, prompt_context, location='main')
+            expanded_tags = self._expand_input_presets(expanded_tags, prompt_context)
             result_parts = list(expanded_tags)
             if prompt_context.global_append_tags:
                 result_parts.extend(prompt_context.global_append_tags)
@@ -554,6 +561,37 @@ class HeadlessGenerationService:
             params["negative_prompt"] = negative
         except Exception as exc:  # pragma: no cover - defensive
             print(f"⚠️ 입력 와일드카드 전개 실패(원본 사용): {exc}")
+
+    def _expand_input_presets(self, tags: list[str], prompt_context: Any) -> list[str]:
+        """입력창의 `preset:` 토큰을 전개한다. **와일드카드 전개 직후**에 부른다.
+
+        순서는 파이프라인(`PromptProcessor._step_3_expand_wildcards`)과 같다 -
+        와일드카드 -> preset. 반대로 하면 `__wc__` 가 뱉은 preset 토큰이 안 풀린다.
+
+        ⚠️ **실패해도 와일드카드 결과는 살린다.** 바깥 try/except 에 맡기면 preset
+        하나가 넘어졌을 때 프롬프트 전체가 미전개 원본으로 떨어진다.
+
+        ⚠️ `prompt_context` 는 이 경로에서 **생성 간 재사용**된다
+        (`context.current_prompt_context`). `_expand_preset_tokens` 가 결과를
+        `metadata["preset_prompt_resolutions"]` 에 append 하므로, 전개 전에 비운다.
+        안 그러면 생성할 때마다 쌓여 메타데이터와 트레이스가 부풀어 오른다.
+        """
+        if not any(str(tag or "").strip().lower().startswith("preset:") for tag in tags):
+            return tags
+        try:
+            service = getattr(self.context, "prompt_generation_service", None)
+            if service is None:
+                from core.prompt_generation_service import PromptGenerationService
+
+                service = PromptGenerationService(self.context)
+                self.context.prompt_generation_service = service
+            metadata = getattr(prompt_context, "metadata", None)
+            if isinstance(metadata, dict):
+                metadata["preset_prompt_resolutions"] = []
+            return service.processor.expand_preset_tokens(tags, prompt_context)
+        except Exception as exc:  # noqa: BLE001 - 프리셋 실패가 프롬프트를 통째로 되돌리면 안 된다
+            print(f"[warn] input preset expand failed (keeping wildcards): {exc}", flush=True)
+            return tags
 
     def _api_service(self):
         service = getattr(self.context, "api_service", None)

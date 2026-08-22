@@ -718,31 +718,82 @@ export function createSearchPanel({
       pct = Math.max(0, Math.min(1, pct));
       return Math.round(pct * last());
     };
+    const hs = moduleBody.querySelector('#drHandleStart');
+    const he = moduleBody.querySelector('#drHandleEnd');
+    const setDragging = (h, on) => { if (h) h.classList.toggle('dragging', on); };
     const startDrag = (handle, edge) => (ev) => {
       if (!bucketState.loaded) return;
       ev.preventDefault();
-      handle.classList.add('dragging');
+      // 드래그 도중 잡은 쪽이 바뀔 수 있어(아래 교차 처리) let 으로 둔다.
+      let curHandle = handle;
+      let curEdge = edge;
+      setDragging(curHandle, true);
       const move = (e) => {
         const cx = (e.touches ? e.touches[0].clientX : e.clientX);
-        let idx = idxFromX(cx);
-        if (edge === 'start') idx = Math.min(idx, bucketState.end);
-        else idx = Math.max(idx, bucketState.start);
-        if (edge === 'start') bucketState.start = idx; else bucketState.end = idx;
+        const idx = idxFromX(cx);
+        // 상대 핸들을 지나치면 잡은 쪽을 넘긴다.
+        // 이 교차 처리가 없으면 두 핸들이 같은 칸에 겹쳤을 때 DOM 뒤쪽인 end 만
+        // 잡히는데, end 는 start 왼쪽으로 못 가므로 사용자가 영영 못 푼다.
+        // (양끝이 맨 오른쪽에서 겹쳐 selected parquets: 1 로 굳던 제보 버그)
+        if (curEdge === 'start' && idx > bucketState.end) {
+          bucketState.start = bucketState.end;
+          bucketState.end = idx;
+          setDragging(curHandle, false);
+          curHandle = he; curEdge = 'end';
+          setDragging(curHandle, true);
+        } else if (curEdge === 'end' && idx < bucketState.start) {
+          bucketState.end = bucketState.start;
+          bucketState.start = idx;
+          setDragging(curHandle, false);
+          curHandle = hs; curEdge = 'start';
+          setDragging(curHandle, true);
+        } else if (curEdge === 'start') {
+          bucketState.start = idx;
+        } else {
+          bucketState.end = idx;
+        }
         renderDateRange();
       };
       const up = () => {
-        handle.classList.remove('dragging');
+        setDragging(curHandle, false);
         document.removeEventListener('pointermove', move);
         document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
         persistBucketRange();
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
+      // 포인터가 취소되면(창 밖 드롭 등) pointerup 이 안 와 드래그가 붙어 있는다.
+      document.addEventListener('pointercancel', up);
     };
-    const hs = moduleBody.querySelector('#drHandleStart');
-    const he = moduleBody.querySelector('#drHandleEnd');
-    if (hs) hs.addEventListener('pointerdown', startDrag(hs, 'start'));
-    if (he) he.addEventListener('pointerdown', startDrag(he, 'end'));
+    // 키보드: 핸들은 이미 tabindex=0 이지만 동작이 없었다. 겹쳐도 Tab 으로 각각
+    // 잡히므로 마우스가 막혔을 때의 탈출구가 된다. 여기선 교차 대신 clamp 한다.
+    const nudge = (edge, delta) => {
+      if (!bucketState.loaded) return;
+      const lim = last();
+      const clamp = (v) => Math.min(Math.max(v, 0), lim);
+      if (edge === 'start') bucketState.start = clamp(Math.min(bucketState.start + delta, bucketState.end));
+      else bucketState.end = clamp(Math.max(bucketState.end + delta, bucketState.start));
+      renderDateRange();
+      persistBucketRange();
+    };
+    const onKey = (edge) => (e) => {
+      const step = e.shiftKey ? 10 : 1;
+      if (e.key === 'ArrowLeft') nudge(edge, -step);
+      else if (e.key === 'ArrowRight') nudge(edge, step);
+      else if (e.key === 'Home') nudge(edge, -bucketState.count);
+      else if (e.key === 'End') nudge(edge, bucketState.count);
+      else return;
+      e.preventDefault();
+    };
+    if (hs) {
+      hs.addEventListener('pointerdown', startDrag(hs, 'start'));
+      hs.addEventListener('keydown', onKey('start'));
+    }
+    if (he) {
+      he.addEventListener('pointerdown', startDrag(he, 'end'));
+      he.addEventListener('keydown', onKey('end'));
+    }
   }
 
   function dateRangeSliderHtml() {

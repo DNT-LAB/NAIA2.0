@@ -138,6 +138,31 @@ export function createResultHistoryController({
   let selectionBusy = false;
   let dragSelection = null;
   let suppressThumbClickUntil = 0;
+  // 팝업 목록은 **클릭 한 번에 열림 + 선택**이 같이 일어난다(`selectOnOpen`).
+  // 그렇게 딸려온 단일 선택만 여기에 적어 두고, 보는 그림이 바뀌면 놓아준다.
+  // Ctrl/Shift/드래그로 **작정하고 고른 것은 건드리지 않는다**(사용자 지정).
+  let incidentalSelectionPath = '';
+
+  /** 사용자가 작정하고 고른 선택으로 승격 - 더는 자동으로 놓지 않는다. */
+  function promoteSelectionToExplicit() {
+    incidentalSelectionPath = '';
+  }
+
+  /** 보는 그림이 바뀌었다. 딸려온 단일 선택이면 놓아준다.
+   *
+   *  ⚠️ 이게 없으면 **보고 있는 그림과 홀드한 그림이 갈린다.** 선택 바의
+   *  `저장 N`/`삭제 N` 은 `selectedPaths` 로 동작하므로(orderedSelectedPaths),
+   *  A 를 클릭하고 휠로 D 까지 넘어간 뒤 삭제를 누르면 **A 가 지워진다**.
+   */
+  function releaseIncidentalSelection(nextPath) {
+    if (!incidentalSelectionPath) return;
+    if (nextPath && nextPath === incidentalSelectionPath) return;   // 그 그림 그대로다
+    const onlyIncidental = selectedPaths.size === 1
+      && selectedPaths.has(incidentalSelectionPath);
+    incidentalSelectionPath = '';
+    // 여러 장이 고여 있으면 사용자가 따로 고른 것이다 - 표시만 지우고 둔다.
+    if (onlyIncidental) clearSelection();
+  }
 
   function isEditableTarget(target) {
     const editable = target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
@@ -246,6 +271,7 @@ export function createResultHistoryController({
   function clearSelection() {
     selectedPaths.clear();
     selectionAnchorPath = '';
+    incidentalSelectionPath = '';
     updateSelectionUi();
   }
 
@@ -269,6 +295,8 @@ export function createResultHistoryController({
     if (additive || event.shiftKey) {
       event.preventDefault();
       event.stopPropagation();
+      // Ctrl/Shift 로 고른 것은 **작정한 선택**이다 - 탐색으로 놓지 않는다.
+      promoteSelectionToExplicit();
       if (event.shiftKey) {
         selectRange(relPath, grid);
       } else {
@@ -282,6 +310,8 @@ export function createResultHistoryController({
     const hadSelection = selectedPaths.size > 0;
     if (hadSelection) selectedPaths.clear();
     if (selectOnOpen) selectedPaths.add(relPath);
+    // 이 한 장은 "열려고 클릭했더니 딸려온" 선택이다. 다른 그림으로 넘어가면 놓는다.
+    incidentalSelectionPath = selectOnOpen ? relPath : '';
     selectionAnchorPath = relPath;
     if (hadSelection || selectOnOpen) updateSelectionUi();
     openImage();
@@ -394,6 +424,8 @@ export function createResultHistoryController({
         dragSelection.marquee.className = 'history-selection-marquee';
         document.body.appendChild(dragSelection.marquee);
         grid.classList.add('is-selecting');
+        // 끌어서 고르는 것도 작정한 선택이다.
+        promoteSelectionToExplicit();
         if (!dragSelection.additive) selectedPaths.clear();
         // **목록과 좌표는 여기서 한 번만 잰다.** 예전에는 pointermove 마다
         // querySelectorAll + 썸네일마다 getBoundingClientRect 를 돌려서,
@@ -462,6 +494,7 @@ export function createResultHistoryController({
 
   function selectAllLoaded() {
     const paths = gridPaths(activeSelectionGrid());
+    promoteSelectionToExplicit();
     paths.forEach(path => selectedPaths.add(path));
     if (paths.length) selectionAnchorPath = paths[paths.length - 1];
     updateSelectionUi();
@@ -874,6 +907,7 @@ export function createResultHistoryController({
   }
 
   function showImage(relPath) {
+    releaseIncidentalSelection(relPath);
     currentViewerPath = relPath;
     onDiskImageSelected(relPath);
     preview.src = historyAssetUrl(relPath, 'image');
@@ -909,9 +943,31 @@ export function createResultHistoryController({
     showImage(relPath);
   }
 
+  /** 이 목록이 지금 몇 열인가. **상하 방향키는 한 줄만큼 움직여야 한다.**
+   *
+   *  ⚠️ 열 수를 상수로 박으면 안 된다 - 레일은 2열 고정이지만 팝업 목록은
+   *  `repeat(auto-fill, minmax(120px, 1fr))` 라 창 폭에 따라 달라진다.
+   *  계산된 `grid-template-columns` 는 열마다 px 값이 나오므로 개수를 센다.
+   */
+  function gridColumnCount(grid) {
+    if (!grid) return 1;
+    try {
+      const template = getComputedStyle(grid).gridTemplateColumns || '';
+      const columns = template.trim();
+      if (!columns || columns === 'none') return 1;
+      return Math.max(1, columns.split(/\s+/).length);
+    } catch (_) {
+      return 1;
+    }
+  }
+
   function navViewer(direction) {
-    const next = viewerNavIdx + direction;
-    if (next >= 0 && next < viewerNavPaths.length) {
+    const total = viewerNavPaths.length;
+    let next = viewerNavIdx + direction;
+    // 줄 단위 이동은 끝을 넘으면 **끝 항목으로 붙인다.** 마지막 줄이 덜 찬 경우가
+    // 흔한데, 거기서 아무 일도 안 일어나면 한 줄 아래로 가려던 손이 막힌다.
+    if (Math.abs(direction) > 1) next = Math.min(Math.max(0, next), total - 1);
+    if (next >= 0 && next < total && next !== viewerNavIdx) {
       viewerNavIdx = next;
       showImage(viewerNavPaths[viewerNavIdx]);
       if (viewerNavIdx === 0) hideLatestBadge();
@@ -995,6 +1051,7 @@ export function createResultHistoryController({
     }
     selectedPaths.delete(relPath);
     if (selectionAnchorPath === relPath) selectionAnchorPath = '';
+    if (incidentalSelectionPath === relPath) incidentalSelectionPath = '';
     // 삭제된 항목의 캐시 잔여까지 제거 (지워지면 남은 데이터가 없어야 한다).
     if (relPath in promptFloatCache) {
       delete promptFloatCache[relPath];
@@ -1528,6 +1585,7 @@ export function createResultHistoryController({
     // 실제로 한 장이 열렸으면 끝에서 막아 둔 자리를 푼다 — 클릭이든 슬라이더든
     // 화살표든, 어디로든 움직였으면 '끝에 서 있다'는 상태는 이미 지났다.
     vpEdgePending = '';
+    releaseIncidentalSelection(relPath);
     vpCurrentPath = relPath;
     onDiskImageSelected(relPath);
     const previewEl = getEl('vpPreview');
@@ -1574,6 +1632,9 @@ export function createResultHistoryController({
       updateSelectionUi();
     }
     vpSelectionOnOpen = null;
+    // 팝업에서 딸려온 단일 선택은 위 필터가 이미 걷어냈다 - 표식만 남으면 다음
+    // 탐색에서 엉뚱한 판정을 한다.
+    incidentalSelectionPath = '';
     viewerBindings.setPanelOpen(false);
     if (document.fullscreenElement) document.exitFullscreen?.();
     vpPan = null;
@@ -1592,10 +1653,28 @@ export function createResultHistoryController({
     if (thumbs.length === 0) return;
     const index = thumbs.findIndex(thumb => thumb.classList.contains('active'));
     const next = index + direction;
+    const step = (target) => {
+      selectPopupImage(thumbs[target].dataset.path, thumbs[target]);
+      thumbs[target].scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    };
     if (next >= 0 && next < thumbs.length) {
-      selectPopupImage(thumbs[next].dataset.path, thumbs[next]);
-      thumbs[next].scrollIntoView({block: 'nearest', behavior: 'smooth'});
+      step(next);
       return;
+    }
+    // 줄 단위 이동(|direction| > 1)은 끝을 넘어도 **끝 항목으로 붙인다.** 마지막
+    // 줄이 덜 찬 경우가 흔한데, 거기서 "마지막입니다" 를 띄우고 멈추면 한 줄
+    // 아래로 가려던 손이 막힌다. 처음/끝 되감기는 좌우(±1) 전용으로 남긴다.
+    if (Math.abs(direction) > 1) {
+      if (direction > 0 && thumbs.length < viewerTotal) {
+        vpSeek(next);          // 아직 안 받은 뒷장 - vpSeek 이 받아 온다
+        return;
+      }
+      const clamped = direction > 0 ? thumbs.length - 1 : 0;
+      if (clamped !== index) {
+        step(clamped);
+        return;
+      }
+      return;                  // 이미 그 끝이다 - 되감지 않는다
     }
     // 아직 안 받은 뒷장이 남아 있으면 여기는 끝이 아니다 — 이어서 받는다.
     // (데스크톱 뷰어는 폴더 전체를 한 번에 들고 있어 이 경우가 없었다.)
@@ -1707,13 +1786,22 @@ export function createResultHistoryController({
         }
         // 옛 NAIA Viewer 와 같은 손버릇: 0=맞춤 1=원본 F=전체화면 Home/End=처음/끝.
         // H(목록 접기)와 Space(다음)는 웹 쪽에서 더한 것이다.
-        if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+        // 좌우는 한 장, **상하는 한 줄**(사용자 지정). 예전에는 넷이 모두 ±1
+        // 이라 상하와 좌우가 구분되지 않았다 - 목록이 다열이라 손이 예측한 대로
+        // 움직이지 않았다.
+        if (event.key === 'ArrowLeft') {
           event.preventDefault();
           navPopup(-1);
-        } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight'
+        } else if (event.key === 'ArrowRight'
                    || event.key === ' ' || event.key === 'Spacebar') {
           event.preventDefault();
           navPopup(1);
+        } else if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          navPopup(-gridColumnCount(getEl('vpGrid')));
+        } else if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          navPopup(gridColumnCount(getEl('vpGrid')));
         } else if (event.key === 'Home') {
           event.preventDefault();
           vpSeek(0);
@@ -1753,12 +1841,20 @@ export function createResultHistoryController({
 
       if (viewerNavIdx < 0 || viewerNavPaths.length === 0) return;
 
-      if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      // 팝업과 같은 규칙: 좌우는 한 장, 상하는 한 줄. 레일은 2열 고정이지만
+      // 열 수는 실측해서 쓴다 - CSS 가 바뀌면 여기가 조용히 틀어진다.
+      if (event.key === 'ArrowLeft') {
         event.preventDefault();
         navViewer(-1);
-      } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      } else if (event.key === 'ArrowRight') {
         event.preventDefault();
         navViewer(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        navViewer(-gridColumnCount(viewerGrid));
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        navViewer(gridColumnCount(viewerGrid));
       } else if (event.key === 'Escape') {
         hideNav();
       }

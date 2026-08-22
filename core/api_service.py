@@ -1026,8 +1026,45 @@ class APIService:
                     if len(character_ids) < len(characters):
                         character_ids.extend(str(index + 1) for index in range(len(character_ids), len(characters)))
                     default_center = {"x": 0.5, "y": 0.5}
+
+                    def _normalized_center(value):
+                        """{'x','y'} 를 0.0~1.0 소수 3자리로. 좌표가 아니면 None.
+
+                        3자리는 NAI 웹이 보내는 형식이다(실측 2026-08-22:
+                        x 0.186 / y 0.654). 부동소수 그대로면 생성 정보에
+                        0.30000000000000004 같은 값이 찍힌다.
+                        """
+                        if not isinstance(value, dict):
+                            return None
+                        try:
+                            x = float(value.get("x"))
+                            y = float(value.get("y"))
+                        except (TypeError, ValueError):
+                            return None
+                        return {"x": round(min(1.0, max(0.0, x)), 3),
+                                "y": round(min(1.0, max(0.0, y)), 3)}
+
+                    given_centers = [_normalized_center(p) for p in character_positions]
+                    # ⚠️ centers 는 `use_coords` 가 켜져야 반영된다. 예전에는 위(856/869)에서
+                    #    False 로 못박혀 있어, 좌표를 정성껏 실어 보내고 같은 요청에서
+                    #    "무시하라" 고 말하고 있었다 - A1~E5 위치가 한 번도 먹지 않았다.
+                    #
+                    #    그렇다고 항상 켜면 회귀다: 좌표를 만진 적 없는 사용자도
+                    #    `default_center` 때문에 **전원 0.5/0.5** 가 실려 중앙에 겹친다.
+                    #    지금 그런 요청은 use_order(등장 순서 자동 배치)를 받고 있고 그게 맞다.
+                    #    그래서 **전원분 좌표를 실제로 받았을 때만** 켠다.
+                    #
+                    #    NAI 는 캐릭터가 1명이면 좌표를 조용히 무시한다(사용자 실측). 그래도
+                    #    여기서 막지는 않는다 - 무시는 NAI 쪽 동작이고, 프런트가 이미 1명일 때
+                    #    좌표를 보내지 않는다(interactivePanel.mjs `withCenter`).
+                    coords_given = bool(characters) and all(
+                        i < len(given_centers) and given_centers[i] is not None
+                        for i in range(len(characters))
+                    )
+                    api_parameters['use_coords'] = coords_given
+                    api_parameters['v4_prompt']['use_coords'] = coords_given
                     for i, prompt in enumerate(characters):
-                        centers = [character_positions[i]] if i < len(character_positions) else [default_center]
+                        centers = [given_centers[i] if coords_given else default_center]
                         api_parameters['v4_prompt']['caption']['char_captions'].append({
                             'char_caption': prompt,
                             'centers': centers
@@ -1036,8 +1073,9 @@ class APIService:
                             'char_caption': ucs[i] if i < len(ucs) else "",
                             'centers': centers
                         })
-                    print(f"✅ [{char_source}] {len(characters)} character(s) added"
-                          f"{' (positions: ' + str(character_positions) + ')' if character_positions else ''}")
+                    print(f"[{char_source}] {len(characters)} character(s) added"
+                          f" (use_coords={coords_given}"
+                          f"{', positions: ' + str([c for c in given_centers if c]) if coords_given else ''})")
                     # 실행본 기록(메타데이터 뷰어용): 캐릭터는 페이로드 빌드 시점에 늦은
                     # 바인딩으로 결정되므로 요청 params에는 없다. 뷰어가 "이 이미지가
                     # 실제로 생성된 캐릭터"를 보여줄 수 있도록 언더스코어 키로 기록한다

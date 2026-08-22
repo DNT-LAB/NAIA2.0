@@ -92,12 +92,6 @@ CANDIDATE_RETENTION_LIMIT = 24
 # 막는다 - 상한 도달 시 가장 오래된 핀부터 회수(리로드로 pin_id를 잃은 고아
 # 복구 경로 - 명시 거부로 두면 재시작 전까지 영구 소진된다, Codex).
 PINNED_CANDIDATE_LIMIT = 8
-_NAI_SOURCE_MODELS = (
-    ("NovelAI Diffusion V4.5 4BDE2A90", "NAID4.5F"),
-    ("NovelAI Diffusion V4.5 C02D4F98", "NAID4.5C"),
-    ("NovelAI Diffusion V4 7ABFFA2A", "NAID4.0C"),
-    ("NovelAI Diffusion V4 37442FCA", "NAID4.0F"),
-)
 _BENCH_PROFILE_PARAM_ALIASES = {
     "model": ("model", "Model", "model_name"),
     "sampler": ("sampler", "sampler_name"),
@@ -1240,30 +1234,30 @@ class HeadlessCharacterAssetService:
 
     def _normalize_nai_model(self, value: Any, source: Any = "") -> str:
         source_text = str(source or "")
-        for marker, model in _NAI_SOURCE_MODELS:
-            if marker in source_text:
-                return model
         raw = str(value or "").strip()
         if raw.upper().startswith("NAID"):
             return raw
+        # 사용자가 등록한 커스텀 모델이 먼저다 - 내장 라벨과 겹칠 수 있다.
         try:
             custom_key = self.context._nai_model_registry().key_for_api_model(raw)
             if custom_key:
                 return custom_key
         except Exception:
             pass
-        wire_map = {
-            "nai-diffusion-4-5-full": "NAID4.5F",
-            "nai-diffusion-4-5-curated": "NAID4.5C",
-            "nai-diffusion-4-full": "NAID4.0F",
-            "nai-diffusion-4-curated": "NAID4.0C",
-            "nai-diffusion-3": "NAID3",
-        }
-        lowered = raw.lower()
-        for marker, model in wire_map.items():
-            if marker in lowered:
-                return model
-        return raw
+        # 내장 모델은 **계약에서 파생**한다(해시·와이어 이름·라벨·계열 순).
+        # 예전에는 Source 마커 표와 와이어 이름 표를 각각 하드코딩해 뒀는데 V5 를
+        # 추가할 때 둘 다 안 고쳐서, V5 이미지의 라벨이 키 자리로 흘러가
+        # `등록되지 않은 NAI 모델 키입니다: NOVELAI DIFFUSION V5` 로 생성이 막혔다
+        # (사용자 제보 2026-08-22).
+        from core.nai_model_contract import nai_key_from_metadata
+
+        resolved = nai_key_from_metadata(raw, source_text)
+        if resolved:
+            return resolved
+        # ⚠️ **못 찾으면 원문을 돌려주지 않는다.** 라벨을 키인 척 넘기면 resolver 가
+        # 터져 생성 자체가 막힌다. 빈 값이면 호출부가 모델을 안 건드리고 지금 고른
+        # 것을 그대로 쓴다 - 모르는 모델 때문에 사용자의 선택을 뒤엎지 않는다.
+        return ""
 
     def _profile_generation_params(self, *sources: dict[str, Any]) -> dict[str, Any]:
         valid_sources = tuple(source for source in sources if isinstance(source, dict))

@@ -386,6 +386,94 @@ def resolve_nai_model_for_context(context: Any, model_key: Any) -> NaiModelSpec:
     return resolve_nai_model_spec(model_key)
 
 
+# NAI 가 PNG `Source`/`Comment.model_hash` 에 남기는 모델 해시 -> 키.
+# ⚠️ V4 는 Full/Curated 의 **표시 라벨이 같다**(`NovelAI Diffusion V4`) - 해시가
+# 유일한 구분자다. 실측으로 확인된 것만 넣는다.
+NAI_SOURCE_HASHES: dict[str, str] = {
+    "0ADF9AB7": "NAID5F",      # 실측 2026-08-22 (사용자 V5 Full 생성물)
+    "4BDE2A90": "NAID4.5F",
+    "C02D4F98": "NAID4.5C",
+    "7ABFFA2A": "NAID4.0C",
+    "37442FCA": "NAID4.0F",
+}
+
+# 맨 계열 이름만 있을 때의 기본값. NAI 는 `Comment.model_name` 에 Full/Curated 를
+# 안 붙인다(실측: `"NovelAI Diffusion V5"`). 긴 이름부터 봐야 V4 가 V4.5 를 안 삼킨다.
+NAI_FAMILY_DEFAULT_KEYS: dict[str, str] = {
+    "novelai diffusion v5": "NAID5F",
+    "novelai diffusion v4.5": "NAID4.5F",
+    "novelai diffusion v4": "NAID4.0F",
+    "novelai diffusion v3": "NAID3",
+}
+
+
+def nai_key_from_metadata(model_value: Any = "", source_value: Any = "") -> str:
+    """NAI 생성물의 메타데이터에서 **모델 키**를 되찾는다. 못 찾으면 빈 문자열.
+
+    NAI 가 PNG 에 남기는 것(실측, V5 생성물 2026-08-22):
+        Source              "NovelAI Diffusion V5 0ADF9AB7"     (라벨 + 해시)
+        Comment.model_name  "NovelAI Diffusion V5"              (라벨만)
+        Comment.model_hash  "0ADF9AB7"
+    그리고 요청 페이로드의 `model` 은 와이어 이름("nai-diffusion-5-full")이다.
+    셋 다 여기서 받는다.
+
+    ⚠️ **표를 손으로 유지하지 않는다.** 예전에는 `_NAI_SOURCE_MODELS` 와 `wire_map`
+    두 개를 하드코딩해 뒀는데 V5 를 추가할 때 **둘 다 안 고쳤다.** 그래서 V5 이미지의
+    메타데이터를 읽으면 라벨이 그대로 키 자리로 흘러가
+    `등록되지 않은 NAI 모델 키입니다: NOVELAI DIFFUSION V5` 로 생성이 막혔다
+    (사용자 제보 2026-08-22). `BUILTIN_NAI_MODEL_SPECS` 에서 파생하면 새 모델이
+    생겨도 저절로 따라온다.
+
+    ⚠️ **못 찾으면 원문을 돌려주지 마라.** 라벨을 키인 척 돌려주면 그게 그대로
+    resolver 로 들어가 터진다. 빈 문자열이면 호출부가 "모델 정보 없음" 으로 다루고
+    지금 고른 모델을 유지한다.
+
+    라벨은 **긴 것부터** 본다 - `"NovelAI Diffusion V4"` 는 `"NovelAI Diffusion V4.5
+    Full"` 의 접두사라, 짧은 것을 먼저 대면 4.5 가 4 로 떨어진다.
+    """
+    haystack = f"{source_value or ''} {model_value or ''}".strip()
+    if not haystack:
+        return ""
+
+    raw = str(model_value or "").strip()
+    if raw.upper() in BUILTIN_NAI_MODEL_SPECS:
+        return raw.upper()
+
+    lowered = haystack.lower()
+
+    # 1) 모델 해시가 가장 정확하다. V4 는 Full/Curated 의 **표시 라벨이 같아**
+    #    해시로만 갈린다(`NovelAI Diffusion V4 7ABFFA2A` vs `... 37442FCA`).
+    for digest, key in NAI_SOURCE_HASHES.items():
+        if digest.lower() in lowered:
+            return key
+
+    # 2) 와이어 이름(인페인트 변형 포함). 긴 것부터 - 짧은 이름이 긴 이름의
+    #    접두사다(`nai-diffusion-4-full` ⊂ `nai-diffusion-4-full-inpainting`).
+    for spec in sorted(BUILTIN_NAI_MODEL_SPECS.values(),
+                       key=lambda s: len(s.api_model), reverse=True):
+        names = [spec.api_model]
+        if spec.inpainting_api_model:
+            names.append(spec.inpainting_api_model)
+        if any(n and n.lower() in lowered for n in names):
+            return spec.key
+
+    # 3) 표시 라벨. 긴 라벨부터 - `NovelAI Diffusion V4` 는
+    #    `NovelAI Diffusion V4.5 Full` 의 접두사라 짧은 것을 먼저 대면 4.5 가 4 로 떨어진다.
+    for spec in sorted(BUILTIN_NAI_MODEL_SPECS.values(),
+                       key=lambda s: len(s.label), reverse=True):
+        if spec.label and spec.label.lower() in lowered:
+            return spec.key
+
+    # 4) **맨 계열 이름**. NAI 는 PNG 에 Full/Curated 를 안 붙이고 쓴다 -
+    #    실측(2026-08-22): `Comment.model_name = "NovelAI Diffusion V5"`.
+    #    여기까지 왔다는 건 해시로도 못 갈랐다는 뜻이라 Full 로 본다(다수 경우).
+    #    ⚠️ 이 추정이 싫으면 해시를 `NAI_SOURCE_HASHES` 에 추가하는 것이 정답이다.
+    for family, key in NAI_FAMILY_DEFAULT_KEYS.items():
+        if family.lower() in lowered:
+            return key
+    return ""
+
+
 def context_uses_opus_usage_limit(context: Any) -> bool:
     """지금 고른 모델이 Opus 무료 사용량 풀을 쓰는가(= V5 계열).
 

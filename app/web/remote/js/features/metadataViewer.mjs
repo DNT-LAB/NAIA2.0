@@ -121,13 +121,35 @@ export function createMetadataViewer({
   function naiModelCode(data) {
     const raw = String(findValue(data, ['model', 'Model', 'model_name']) || '').trim();
     if (/^NAID/i.test(raw)) return raw;
-    const text = raw.toLowerCase();
+    const source = String(findValue(data, ['Source', 'source']) || '');
+    const text = `${source} ${raw}`.toLowerCase();
+    // ⚠️ V4 는 Full/Curated 의 **표시 라벨이 같아** 해시로만 갈린다. 해시를 먼저 본다.
+    const hashes = [
+      ['4bde2a90', 'NAID4.5F'], ['c02d4f98', 'NAID4.5C'],
+      ['7abffa2a', 'NAID4.0C'], ['37442fca', 'NAID4.0F'],
+    ];
+    const byHash = hashes.find(([needle]) => text.includes(needle));
+    if (byHash) return byHash[1];
+    // 와이어 이름 -> 표시 라벨 순. **긴 것부터** 봐야 한다 -
+    // 'novelai diffusion v4' 는 'novelai diffusion v4.5 full' 의 접두사라
+    // 짧은 것을 먼저 대면 4.5 가 4 로 떨어진다.
+    // V5 가 이 목록에서 빠져 있어 메타데이터를 읽으면 라벨이 그대로 모델 키로
+    // 흘러갔다(사용자 제보 2026-08-22).
     const map = [
+      ['nai-diffusion-5-full', 'NAID5F'],
+      ['nai-diffusion-5-curated', 'NAID5C'],
       ['nai-diffusion-4-5-full', 'NAID4.5F'],
       ['nai-diffusion-4-5-curated', 'NAID4.5C'],
       ['nai-diffusion-4-full', 'NAID4.0F'],
       ['nai-diffusion-4-curated', 'NAID4.0C'],
       ['nai-diffusion-3', 'NAID3'],
+      ['novelai diffusion v5 full', 'NAID5F'],
+      ['novelai diffusion v5 curated', 'NAID5C'],
+      ['novelai diffusion v5', 'NAID5F'],
+      ['novelai diffusion v4.5 full', 'NAID4.5F'],
+      ['novelai diffusion v4.5 curated', 'NAID4.5C'],
+      ['novelai diffusion v4.5', 'NAID4.5F'],
+      ['novelai diffusion v3', 'NAID3'],
     ];
     const matched = map.find(([needle]) => text.includes(needle));
     return matched ? matched[1] : '';

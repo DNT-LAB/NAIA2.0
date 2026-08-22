@@ -5447,7 +5447,17 @@ function ensureSelectValue(selectEl, value) {
 
 function applyMetadataParamValue(key, value) {
   if (value === undefined || value === null || value === '') return false;
-  const text = String(value);
+  let text = String(value);
+  // ⚠️ 모델은 **키여야 한다.** NAI 는 PNG 에 표시 라벨을 쓰므로
+  // (`Comment.model_name = "NovelAI Diffusion V5"`), 그대로 넣으면 그 문자열이
+  // 드롭다운 옵션으로 주입되고 생성 시 `등록되지 않은 NAI 모델 키입니다:
+  // NOVELAI DIFFUSION V5` 로 막힌다(사용자 제보 2026-08-22).
+  // 못 알아보면 **모델은 건드리지 않는다** - 사용자가 고른 것을 남긴다.
+  if (key === 'model' && (currentMode || modeSelect?.value) === 'NAI') {
+    const resolved = naiModelKeyFromMetadataText(text);
+    if (!resolved) return false;
+    text = resolved;
+  }
   const target = paramEls ? paramEls[key] : null;
   if (target) {
     ensureSelectValue(target, text);
@@ -5459,6 +5469,48 @@ function applyMetadataParamValue(key, value) {
   }
   setParam(key, text);
   return true;
+}
+
+// NAI 생성물 메타데이터의 모델 표기를 **모델 키**로 되돌린다. 못 알아보면 ''.
+//
+// NAI 가 PNG 에 남기는 것(실측 2026-08-22, V5 생성물):
+//   Source             'NovelAI Diffusion V5 0ADF9AB7'   (라벨 + 해시)
+//   Comment.model_name 'NovelAI Diffusion V5'            (라벨만, Full/Curated 없음)
+// 요청 페이로드의 model 은 와이어 이름('nai-diffusion-5-full').
+//
+// ⚠️ **원문을 그대로 돌려주면 안 된다.** 그게 모델 키 자리로 흘러가 생성이 막힌다.
+// 백엔드 SSOT 는 `core/nai_model_contract.py::nai_key_from_metadata` 이고,
+// 여기는 그 규칙의 프런트 사본이다 - 새 모델을 추가하면 **양쪽을 같이** 고쳐야 한다
+// (테스트 `test_nai_model_from_metadata.py` 가 계약 쪽을 지킨다).
+function naiModelKeyFromMetadataText(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  if (/^NAID/i.test(text)) return text;
+  const lowered = text.toLowerCase();
+  // 해시가 가장 정확하다 - V4 는 Full/Curated 의 라벨이 같아 해시로만 갈린다.
+  const hashes = [
+    ['0adf9ab7', 'NAID5F'], ['4bde2a90', 'NAID4.5F'], ['c02d4f98', 'NAID4.5C'],
+    ['7abffa2a', 'NAID4.0C'], ['37442fca', 'NAID4.0F'],
+  ];
+  const byHash = hashes.find(([needle]) => lowered.includes(needle));
+  if (byHash) return byHash[1];
+  // 와이어 이름 -> 라벨 -> 계열. 각 단계에서 **긴 것부터** 봐야
+  // 'nai-diffusion-4-full' 이 '...-4-5-full' 을, 'v4' 가 'v4.5' 를 안 삼킨다.
+  const table = [
+    ['nai-diffusion-5-curated', 'NAID5C'], ['nai-diffusion-5-full', 'NAID5F'],
+    ['nai-diffusion-4-5-curated', 'NAID4.5C'], ['nai-diffusion-4-5-full', 'NAID4.5F'],
+    ['nai-diffusion-4-curated', 'NAID4.0C'], ['nai-diffusion-4-full', 'NAID4.0F'],
+    ['nai-diffusion-3', 'NAID3'],
+    ['novelai diffusion v5 curated', 'NAID5C'], ['novelai diffusion v5 full', 'NAID5F'],
+    ['novelai diffusion v4.5 curated', 'NAID4.5C'], ['novelai diffusion v4.5 full', 'NAID4.5F'],
+    ['novelai diffusion v4 curated', 'NAID4.0C'], ['novelai diffusion v4 full', 'NAID4.0F'],
+    // ⚠️ 맨 계열 이름의 착지점은 백엔드와 같아야 한다. V4.5/V4 는 **맨 이름 자체가
+    // 선택 가능한 내장 키**라 그쪽으로 붙고, V5 는 그런 항목이 없어 Full 로 간다.
+    ['novelai diffusion v5', 'NAID5F'], ['novelai diffusion v4.5', 'NAID4.5'],
+    ['novelai diffusion v4', 'NAID4'], ['novelai diffusion v3', 'NAID3'],
+  ];
+  const matched = table.find(([needle]) => lowered.includes(needle));
+  return matched ? matched[1] : '';
 }
 
 function normalizeMetadataBoolean(value) {

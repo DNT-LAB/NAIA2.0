@@ -13146,6 +13146,53 @@ body.detached-metadata .metadata-layout {
   font-size: 10px;
   margin-left: 5px;
 }
+/* 슬롯 이름표. 예전에는 체크박스 라벨이 이 자리였다 - 이제 활성/비활성이
+   무리로 갈려 있어 체크박스가 뜻을 잃었고, ▲/▼ 가 그 역할을 한다. */
+.mod-char-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 비활성 슬롯은 연노랑으로 구분한다. 테두리만으로는 두 무리가 안 갈린다. */
+.mod-char-block.is-inactive {
+  border-color: rgba(214, 184, 92, 0.55);
+  background: rgba(214, 184, 92, 0.06);
+}
+.mod-char-block.is-inactive .mod-char-title {
+  color: rgb(226, 200, 122);
+  font-weight: 500;
+}
+.mod-btn-square.mod-char-promote {
+  border-color: rgba(214, 184, 92, 0.6);
+  color: rgb(226, 200, 122);
+}
+.mod-char-group-label {
+  margin-top: 2px;
+  color: rgba(226, 200, 122, 0.85);
+}
+/* 추가 버튼은 활성 무리 바로 아래에 놓이고 슬롯과 폭을 맞춘다.
+   대시 테두리 = "여기에 하나 더" 라는 통상적인 신호. */
+.mod-char-add {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px dashed var(--border-dim);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.mod-char-add:hover {
+  border-color: var(--accent-blue, #8d7bd6);
+  color: var(--text);
+  background: rgba(141, 123, 214, 0.08);
+}
 .mod-char-actions {
   display: flex;
   align-items: center;

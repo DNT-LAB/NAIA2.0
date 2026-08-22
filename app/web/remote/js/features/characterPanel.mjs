@@ -309,18 +309,42 @@ export function createCharacterPanel({
     }, 0);
   }
 
-  function renderWorkingSlot(character, index, totalCount) {
+  /** 비활성 슬롯의 이름표. 프롬프트 앞 태그 2개면 보통 `girl, 캐릭터명` 이다.
+   *  비활성은 번호를 갖지 않는다 - 번호는 활성 무리 안의 자리이고, 올라올 때 받는다. */
+  function inactiveLabel(character) {
     const customName = String(character.custom_name || '').trim();
-    const label = customName ? `${escHtml(customName)} <span class="mod-char-id-muted">C${character.id}</span>` : `C${character.id}`;
+    if (customName) return escHtml(customName);
+    const tags = firstPromptLine(character.prompt)
+      .split(',').map(part => part.trim()).filter(Boolean);
+    return tags.length ? escHtml(tags.slice(0, 2).join(', ')) : '<span class="mod-char-id-muted">(empty)</span>';
+  }
+
+  /**
+   * @param ordinal  활성 슬롯이면 활성 무리 안의 1-based 번호(C1, C2...), 아니면 0.
+   * @param lastActive  마지막 활성 슬롯인가 - 그러면 ▼ 를 내주지 않는다.
+   *   "활성은 최소 하나" 는 여기(UI)에서만 세운다. 백엔드에 강제하면 활성 0을
+   *   정상 상태로 쓰는 기존 경로 두 개가 깨진다(Cold 로 비우기 · 조건부 스킵 판정).
+   */
+  function renderWorkingSlot(character, index, totalCount, ordinal, lastActive) {
+    const active = !!character.active;
+    const customName = String(character.custom_name || '').trim();
+    const label = active
+      ? (customName
+          ? `${escHtml(customName)} <span class="mod-char-id-muted">C${ordinal}</span>`
+          : `C${ordinal}`)
+      : inactiveLabel(character);
+    const moveBtn = active
+      ? (lastActive
+          ? ''
+          : `<button class="mod-btn-square" aria-label="Deactivate" data-naia-title="비활성으로 내린다" onclick="setCharacterSlotState(${index}, 'inactive')">&#9660;</button>`)
+      : `<button class="mod-btn-square mod-char-promote" aria-label="Activate" data-naia-title="활성 맨 아래로 올린다" onclick="setCharacterSlotState(${index}, 'active')">&#9650;</button>`;
     return `
-      <div class="mod-char-block" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
+      <div class="mod-char-block ${active ? 'is-active' : 'is-inactive'}" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
         <div class="mod-char-header">
-          <label class="mod-checkbox-item" style="margin:0">
-            <input type="checkbox" ${character.active ? 'checked' : ''} oninput="setModuleParam('character','char_active_${index}',String(this.checked))">
-            <span class="mod-checkbox-label">${label}</span>
-          </label>
+          <span class="mod-char-title">${label}</span>
           <div class="mod-char-card-actions">
-            <button class="mod-btn-square" aria-label="Move to Cold" onclick="setCharacterSlotState(${index}, 'cold')">-</button>
+            ${moveBtn}
+            <button class="mod-btn-square" aria-label="Move to Cold" data-naia-title="Cold 보관함으로" onclick="setCharacterSlotState(${index}, 'cold')">-</button>
             <button class="mod-btn-sm mod-btn-danger" ${totalCount > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${index})">Remove</button>
           </div>
         </div>
@@ -392,9 +416,25 @@ export function createCharacterPanel({
     const coldSlots = chars
       .map((character, index) => ({character, index}))
       .filter(item => slotState(item.character) === 'cold');
+    // 화면은 활성/비활성 두 무리다. 배열은 백엔드에서 [active][inactive][cold] 로
+    // 정렬돼 오므로(core/character_settings.sort_character_frames) 여기서 다시
+    // 순서를 만들지 않는다 - 만들면 index 주소가 저장 순서와 어긋난다.
+    const activeSlots = workingSlots.filter(item => item.character.active);
+    const inactiveSlots = workingSlots.filter(item => !item.character.active);
+    const addBtn = `
+      <button class="mod-char-add" onclick="addCharacterSlot()">+ Add Character</button>`;
     const charsHtml = workingSlots.length
-      ? workingSlots.map(({character, index}) => renderWorkingSlot(character, index, chars.length)).join('')
-      : '<div class="mod-empty">No active or inactive slots. Use + Add Character or restore a Cold slot.</div>';
+      ? [
+          activeSlots.map(({character, index}, i) =>
+            renderWorkingSlot(character, index, chars.length, i + 1, activeSlots.length <= 1)).join(''),
+          addBtn,
+          inactiveSlots.length
+            ? `<div class="mod-section-label mod-char-group-label">Deactivated (${inactiveSlots.length})</div>`
+            : '',
+          inactiveSlots.map(({character, index}) =>
+            renderWorkingSlot(character, index, chars.length, 0, false)).join(''),
+        ].join('')
+      : `<div class="mod-empty">No active or inactive slots. Restore a Cold slot or add one.</div>${addBtn}`;
     renderColdPanel(coldSlots, chars.length);
     const previewText = nextState.processed_preview_text || '';
     const previewEmpty = !previewText.trim();
@@ -415,7 +455,6 @@ export function createCharacterPanel({
             </label>
           </div>
           <div class="mod-char-actions">
-            <button class="mod-btn-sm" onclick="addCharacterSlot()">+ Add Character</button>
             <button class="mod-btn-sm mod-btn-encode" onclick="refreshCharacterPreview()">Refresh Preview</button>
             <button class="mod-btn-sm mod-cold-toggle ${coldPanelOpen ? 'active' : ''}" onclick="toggleCharacterColdPanel()">Cold (${coldSlots.length})</button>
             <button class="mod-btn-sm mod-btn-assets" title="캐릭터 에셋 라이브러리 (이미지 기반 영구 보관함)" onclick="openCharacterAssetTab()">Assets</button>

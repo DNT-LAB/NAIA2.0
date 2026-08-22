@@ -7,6 +7,16 @@ import threading
 from typing import Any
 
 
+# ⚠️ "활성 슬롯은 최소 하나" 는 **UI 규칙**이다(마지막 활성 슬롯의 ▼ 를 숨긴다).
+# 백엔드에 강제하면 안 된다 - 활성 0 은 기존 계약상 정상 상태이고, 그걸 막으면
+# 두 가지가 깨진다(실측):
+#   · 유일한 슬롯을 Cold 로 보내 캐릭터 없이 생성
+#     (test_no_active_frames_does_not_consume_snapshot)
+#   · 슬롯 하나를 비활성으로 두고 조건부 규칙이 건너뛰는지 보는 경로
+#     (test_inactive_slot_falls_back_to_the_frame)
+# 여기서는 정렬 불변식만 세운다(core/character_settings.sort_character_frames).
+
+
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
@@ -153,6 +163,9 @@ class HeadlessCharacterService:
         elif key.startswith("remove_character_"):
             index = context._index_from_key(key, "remove_character_")
             if index is not None and 0 <= index < len(frames) and len(frames) > 1:
+                # 삭제로 활성이 0이 될 수 있다. 승격시키지 않는다 - 캐릭터 0은
+                # 유효한 상태이고(모듈을 끄거나 Cold 로 비우는 경로가 이미 그렇다)
+                # 사용자가 지우려던 것을 되살리는 쪽이 더 놀랍다.
                 frames.pop(index)
                 invalidate_snapshot = True
         elif key.startswith("char_prompt_"):

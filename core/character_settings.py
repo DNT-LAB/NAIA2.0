@@ -109,8 +109,32 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 "return_slot_state": str(frame.get("return_slot_state") or ""),
                 "custom_name": str(frame.get("custom_name") or frame.get("slot_name") or ""),
             })
-    settings["character_frames"] = normalized_frames
+    settings["character_frames"] = sort_character_frames(normalized_frames)
     return settings, migrated
+
+
+# 슬롯 정렬 불변식: [active...] [inactive...] [cold...]
+#
+# 화면이 활성/비활성 두 무리로 나뉘고 활성 무리 안에서 C1,C2.. 번호를 매기므로
+# 배열 순서가 곧 화면 순서다. ⚠️ 프런트는 슬롯을 **인덱스로 주소 지정**한다
+# (`remove_character_3` 등) - 저장 순서와 표시 순서가 어긋나면 명령이 엉뚱한
+# 슬롯에 꽂힌다. 그래서 읽기·쓰기가 함께 지나는 이 정규화 지점 한 곳에서만 세운다.
+#
+# Cold 는 저장소로 격리한다(사용자 결정) - 맨 뒤로 몰아두고 Cold 패널만 본다.
+_SLOT_ORDER = {"active": 0, "inactive": 1, "cold": 2}
+
+
+def sort_character_frames(frames: list[dict]) -> list[dict]:
+    """무리별로만 모은다. **무리 안의 상대 순서는 보존**한다(안정 정렬).
+
+    사용자가 ▲/▼ 로 정한 순서가 다음 정규화에서 흐트러지면 안 된다.
+    """
+    return sorted(
+        frames,
+        key=lambda frame: _SLOT_ORDER.get(
+            str(frame.get("slot_state") or "inactive").strip().lower(), 1
+        ),
+    )
 
 
 def normalize_character_settings(raw: dict | None) -> dict:

@@ -911,13 +911,15 @@ export function createSearchPanel({
   function tagIncrementHtml() {
     if (!incrementState || incrementState.ready || !incrementState.base_ready) return '';
     const span = missingBucketSpan();
-    const label = span ? `Download ${span.from}-${span.to}` : 'Download latest tag data';
     return `
     <button type="button" class="search-tag-update" id="searchTagUpdateBtn"
             ${incrementBusy ? 'disabled' : ''}>
       <span class="stu-icon" aria-hidden="true">⬇</span>
-      <span class="stu-text">${incrementBusy ? '받는 중...' : `[ ${label} ]`}</span>
-      <span class="stu-sub">${incrementBusy ? '' : '최신 태그 데이터 · 275MB'}</span>
+      <span class="stu-stack">
+        <span class="stu-title">${incrementBusy ? '받는 중...' : 'Download Dataset'}</span>
+        <span class="stu-span">${incrementBusy ? '최신 태그 데이터' : (span ? `${span.from}-${span.to}` : '최신 태그 데이터')}</span>
+      </span>
+      <span class="stu-sub">${incrementBusy ? '' : '275MB'}</span>
     </button>`;
   }
 
@@ -952,9 +954,11 @@ export function createSearchPanel({
 }
 .search-tag-update:hover:not(:disabled){background:rgb(154,220,112);color:#0f1a0c;border-color:rgb(154,220,112)}
 .search-tag-update:disabled{opacity:.62;cursor:default}
-.search-tag-update .stu-icon{font-size:15px;line-height:1}
-.search-tag-update .stu-text{flex:1;min-width:0}
-.search-tag-update .stu-sub{opacity:.72;font-size:10.5px;font-weight:500;white-space:nowrap}
+.search-tag-update .stu-icon{font-size:16px;line-height:1}
+.search-tag-update .stu-stack{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.search-tag-update .stu-title{font-size:13px;line-height:1.2}
+.search-tag-update .stu-span{font-size:11.5px;font-weight:500;opacity:.82;line-height:1.2}
+.search-tag-update .stu-sub{opacity:.66;font-size:10.5px;font-weight:500;white-space:nowrap}
 .search-daterange{margin:2px 0}
 .dr-label-row{display:flex;align-items:center;gap:8px;margin-bottom:2px}
 .dr-label-row .mod-section-label{margin:0}

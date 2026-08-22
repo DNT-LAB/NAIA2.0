@@ -651,18 +651,47 @@ class APIService:
             print(f"[warn] multi-token account select failed: {exc}", flush=True)
             return main_token
 
+    # V5 multipart 에서 **파트로 떼어 보내야 하는** parameters 필드.
+    # 값은 base64 문자열이고, 떼어낸 뒤 JSON 에는 파트 이름만 남긴다.
+    _NAI_MULTIPART_BLOB_FIELDS = ("image", "mask")
+
     @staticmethod
     def _nai_request_body_kwargs(payload: Dict[str, Any], multipart: bool) -> Dict[str, Any]:
         """NAI 요청 바디를 프로필에 맞는 `requests` 인자로 만든다.
 
-        V4 이하: `json=payload` 그대로.
-        V5: `multipart/form-data` 의 **`request` 파트 하나**에 JSON 을 담는다.
-            파일명은 웹과 같은 `blob`, MIME 은 `application/json` 이다.
+        V4 이하: `json=payload` 그대로 (이미지는 parameters 안에 base64 문자열).
+        V5: `multipart/form-data`. JSON 은 **`request` 파트**에 담는다(파일명 `blob`,
+            MIME `application/json`).
+
+        ⚠️ **V5 는 이미지를 JSON 안에 넣지 않는다.** `parameters.image` / `.mask` 는
+        base64 가 아니라 **다른 폼 파트의 이름**이어야 하고, 실제 바이트는 그 이름의
+        파트로 따로 올라간다. base64 를 그대로 두면 서버가 그 긴 문자열을 파트
+        이름으로 읽고 거절한다(실측 400:
+        `image field references unknown form part "iVBORw0KGgo..."`).
+
+        이 규약을 몰라서 오랫동안 "V5 는 i2i/인페인트를 지원하지 않는다" 고 판단했고,
+        그 액션을 통째로 V4.5 로 대체하고 있었다.
         """
         if not multipart:
             return {"json": payload}
+        payload = copy.deepcopy(payload)      # 호출부의 dict 를 건드리지 않는다
+        parts: Dict[str, Any] = {}
+        parameters = payload.get("parameters")
+        if isinstance(parameters, dict):
+            for field in APIService._NAI_MULTIPART_BLOB_FIELDS:
+                encoded = parameters.get(field)
+                if not isinstance(encoded, str) or not encoded:
+                    continue
+                try:
+                    raw = base64.b64decode(encoded)
+                except Exception:
+                    continue                  # base64 가 아니면 이미 파트 이름일 수 있다
+                parameters[field] = field     # JSON 은 파트를 **이름으로** 가리킨다
+                parts[field] = (field, raw, "image/png")
         body = json.dumps(payload, ensure_ascii=False)
-        return {"files": {"request": ("blob", body, "application/json")}}
+        files: Dict[str, Any] = {"request": ("blob", body, "application/json")}
+        files.update(parts)
+        return {"files": files}
 
     def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다.
@@ -695,12 +724,12 @@ class APIService:
             action_type = "generate"
             if is_img2img:
                 action_type = "infill" if params.get('type') == 'inpaint' else "img2img"
-                # V5 는 인페인트/img2img 를 제공하지 않는다 - 같은 계열의 V4.5 로
-                # 자동 대체한다(사용자 지시 2026-08-21). Enhance 도 image_bytes 를
-                # 싣고 오므로 이 분기를 그대로 탄다.
+                # 이 액션을 못 하는 모델이면 같은 계열의 다른 모델로 대체한다.
+                # Enhance 도 image_bytes 를 싣고 오므로 이 분기를 그대로 탄다.
                 #
-                # ⚠️ 대체를 안 하면 스펙의 **추정** V5 인페인트 모델명이 그대로 나가
-                # 서버가 거부한다 - 그때는 이미 Anlas 를 문 뒤다.
+                # ⚠️ 지금 대체 표는 **비어 있다**(nai_model_contract 참조). V5 가
+                # 인페인트/i2i 를 못 한다는 전제가 뒤집혀서 걷어냈다 - V5 를 고르면
+                # 인페인트/i2i 도 V5 로 나간다.
                 fallback_key = nai_img2img_fallback_key(model_spec.key)
                 if fallback_key:
                     model_spec = resolve_nai_model_for_context(self.app_context, fallback_key)
@@ -1251,6 +1280,14 @@ class APIService:
             # 모델 레지스트리의 파라미터 규칙은 기존 NAI/custom payload 조립이 끝난
             # 뒤 적용한다. 동일 key는 모델 규칙이 최종 덮어쓰며, JSON 값은 요청별로
             # 복제해 queued NaiModelSpec의 스냅샷이 변형되지 않게 한다.
+            # ⚠️ 규칙은 **사용자가 고른 모델**(`selected_model_spec`) 것을 쓴다 -
+            # 대체가 일어나도 그렇다. 커스텀 모델에 인페인트 wire 가 없어 4.5 로
+            # 떨어질 때도 사용자가 등록한 파라미터(steps 등)는 따라가야 한다
+            # (`test_custom_model_without_inpaint_wire_falls_back_to_naid45_full`).
+            #
+            # 한때 "대체 후 모델 기준" 으로 바꿨다가 그 계약을 깼다. 대체 후 스펙을
+            # 보는 것은 **payload capability 와 전송 방식**뿐이다 - 그건 서버가
+            # 받아들이는 모양의 문제라 실제로 나갈 모델을 따라야 한다.
             model_overrides = dict(selected_model_spec.api_parameter_overrides)
             if model_overrides:
                 api_parameters.update(copy.deepcopy(model_overrides))
@@ -1267,7 +1304,7 @@ class APIService:
             # 강제 제거는 해상도 보정까지 포함한 모든 조립 단계보다 뒤에 둔다.
             # 사용자가 명시한 key가 뒤 단계에서 다시 생기지 않도록 payload 생성 직전
             # 단 한 번 pop하며, 없는 key는 안전하게 무시한다.
-            model_removals = tuple(selected_model_spec.api_parameter_removals)
+            model_removals = tuple(selected_model_spec.api_parameter_removals)  # 위와 같은 이유
             if model_removals:
                 for key in model_removals:
                     api_parameters.pop(key, None)

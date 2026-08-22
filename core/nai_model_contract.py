@@ -28,6 +28,13 @@ class NaiModelSpec:
     api_model: str
     payload_profile: str
     inpainting_api_model: str | None = None
+    # 위 인페인팅 모델이 **이 모델 자신의 것이 아니라 빌려 쓰는 것**인가.
+    #
+    # ⚠️ 메타데이터 -> 모델 되찾기(`nai_key_from_metadata`)가 인페인팅 wire 이름도
+    #    보고 모델을 고른다. 빌려 쓰는 이름까지 자기 것처럼 등록하면 **두 스펙이
+    #    같은 이름을 들어** 먼저 걸린 쪽으로 잘못 귀속된다(실측: V5 인페인트로 만든
+    #    그림이 Curated 로 되찾아졌다). 그래서 빌린 것은 되찾기에서 뺀다.
+    inpainting_is_substitute: bool = False
     family: str = ""
     source: str = "builtin"
     selectable: bool = True
@@ -123,6 +130,7 @@ def _builtin(
     inpainting_api_model: str | None,
     family: str,
     selectable: bool = True,
+    inpainting_is_substitute: bool = False,
 ) -> NaiModelSpec:
     return NaiModelSpec(
         key=key,
@@ -130,6 +138,7 @@ def _builtin(
         api_model=api_model,
         payload_profile=payload_profile,
         inpainting_api_model=inpainting_api_model,
+        inpainting_is_substitute=inpainting_is_substitute,
         family=family,
         source="builtin",
         selectable=selectable,
@@ -154,7 +163,13 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
         "NovelAI Diffusion V5 Curated",
         "nai-diffusion-5-curated",
         "v5",
-        inpainting_api_model="nai-diffusion-5-curated-inpainting",
+        # ⚠️ **Curated 전용 인페인팅 모델은 없다**(라이브 실측 2026-08-23:
+        # `nai-diffusion-5-curated-inpainting` -> 400 "model doesn't exist").
+        # Full 쪽 인페인팅으로 보낸다 - 세대(V5)를 지키고 Curated 성격만 포기하는
+        # 쪽을 사용자가 골랐다. i2i 는 `nai-diffusion-5-curated` 로 정상 동작한다
+        # (200 확인) - 그래서 여기만 갈아 끼우면 된다.
+        inpainting_api_model="nai-diffusion-5-full-inpainting",
+        inpainting_is_substitute=True,      # 빌려 쓴다 - 되찾기에서는 뺀다
         family="v5",
     ),
     "NAID4.5F": _builtin(
@@ -231,19 +246,21 @@ NAI_API_MODEL_BY_KEY = {
 
 # ---- img2img 계열 대체 모델 --------------------------------------------------
 #
-# **V5 는 인페인트/img2img 를 아직 제공하지 않는다**(사용자 확인 2026-08-21).
-# 그 액션에서는 같은 계열의 V4.5 로 자동 대체한다 - Full 은 Full 로, Curated 는
-# Curated 로.
+# **지금은 비어 있다.** 2026-08-21 에는 "V5 가 인페인트/img2img 를 아직 제공하지
+# 않는다" 는 전제로 V5 -> V4.5 대체를 넣었는데, **그 전제가 뒤집혔다**(사용자 확인
+# 2026-08-23: V5 전용 인페인팅 모델이 따로 있고 공식 사이트는 i2i 도 된다고 한다).
+# 대체를 걷어내면 V5 를 고른 사용자가 인페인트/i2i 에서도 V5 를 그대로 쓴다.
 #
-# ⚠️ 스펙의 `inpainting_api_model`(`nai-diffusion-5-*-inpainting`)은 웹 번들 스키마에서
-# 따온 **추정치**이고 라이브로 확인된 적이 없다. 그대로 보내면 서버가 거부하거나
-# 조용히 실패하는데, 그 장은 이미 Anlas 를 문 뒤다. 검증된 4.5 로 보내는 편이 낫다.
+# 표를 지우지 않고 비워 두는 이유: 앞으로도 "이 모델은 이 액션을 못 한다" 는 경우가
+# 생길 수 있고, 그때 다시 배선하는 것보다 여기 한 줄을 더하는 편이 안전하다.
+#
+# ⚠️ 대체가 일어나도 **파라미터 규칙은 사용자가 고른 모델 것을 쓴다**(의도된 계약,
+# `test_custom_model_without_inpaint_wire_falls_back_to_naid45_full`). 대체 후 스펙을
+# 따르는 것은 payload capability 와 전송 방식(`uses_multipart_request`)뿐이다 -
+# 그건 서버가 받아들이는 모양의 문제라 실제로 나갈 모델을 따라야 한다.
 #
 # Upscale 은 여기 없다 - `/ai/upscale` 은 모델을 안 받는다(그래서 V5 에서도 그냥 된다).
-NAI_IMG2IMG_FALLBACK_KEYS: dict[str, str] = {
-    "NAID5F": "NAID4.5F",
-    "NAID5C": "NAID4.5C",
-}
+NAI_IMG2IMG_FALLBACK_KEYS: dict[str, str] = {}
 
 
 def nai_img2img_fallback_key(model_key: Any) -> str:
@@ -452,7 +469,9 @@ def nai_key_from_metadata(model_value: Any = "", source_value: Any = "") -> str:
     for spec in sorted(BUILTIN_NAI_MODEL_SPECS.values(),
                        key=lambda s: len(s.api_model), reverse=True):
         names = [spec.api_model]
-        if spec.inpainting_api_model:
+        # ⚠️ **빌려 쓰는 인페인팅 이름은 넣지 않는다.** 넣으면 두 스펙이 같은 이름을
+        #    들어 먼저 걸린 쪽으로 잘못 귀속된다(V5 인페인트 -> Curated 로 되찾힘).
+        if spec.inpainting_api_model and not spec.inpainting_is_substitute:
             names.append(spec.inpainting_api_model)
         if any(n and n.lower() in lowered for n in names):
             return spec.key

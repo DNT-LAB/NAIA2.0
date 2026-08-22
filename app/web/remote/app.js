@@ -7127,11 +7127,21 @@ function onNaiUsageUpdate(m) {
   // ⚠️ **V5 와 비V5 는 다른 값을 보여 준다**(사용자 지시 2026-08-21).
   //   V5   : 잔량 퍼센트 - 그 무료 풀을 실제로 쓰고 있으니 잔량이 답이다.
   //   비V5 : 퍼센트가 뜻이 없으므로(그 풀을 안 쓴다) **이번 세션 생성 장수**.
-  // 배지 자체는 두 경우 다 뜬다 - 모델을 오갈 때마다 사라졌다 나타나면 자리가 흔들린다.
   //
   // ⚠️ 배지는 **총** 장수다. 팝오버 헤더가 '무료 / 총' 을 말하므로 여기서 또 무료를
   // 쓰면 같은 숫자가 나란히 두 번 나온다(사용자 지적 2026-08-21).
   const onV5 = m.uses_usage_limit !== false;
+  // ⚠️ 비V5 + 계정 1개면 배지를 **숨긴다**(사용자 지시: "1개일 땐 Mute, 2개 이상이면
+  // Show"). 그 조합에서는 보여 줄 게 없다 - 무료 사용량 게이지는 V5 전용이고, 통합
+  // Anlas 와 부하 분산은 계정이 둘 이상일 때만 뜻이 있다. 상시 노출로 만들어 뒀더니
+  // NAID4.5 에 계정 하나인 사용자에게 쓸모없는 버튼이 남았다(제보 2026-08-22).
+  if (!onV5 && !multi) {
+    pill.classList.add('hidden');
+    if (naiAccountPanel) naiAccountPanel.closePopover();
+    lastUsagePercent = null;
+    lastUsageAccount = null;
+    return;
+  }
   value.textContent = onV5 ? `${pct}%` : String(Number(m.session_generations) || 0);
   // 소진 표시는 V5 를 고른 동안에만 뜻이 있다(V4.5 는 이 무료 풀을 안 쓴다).
   pill.classList.toggle('is-out', !!m.is_negative && onV5);

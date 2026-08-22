@@ -22313,9 +22313,13 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
    접힘 = 좁고 반투명, 호버 = 또렷, 펼침 = 폭을 다 쓰고 불투명.
    `.viewer-wrapper` 가 position:relative 라 절대배치로 붙는다 - Interactive 쪽처럼
    JS 로 매번 재계산하지 않는다(그쪽은 씬 플로트에 매달려 있어 어쩔 수 없었다). */
+/* ⚠️ POS 무대(z 5)와 칩(z 7)보다 위에 있어야 한다. 무대가 패널을 덮으면
+   `Finish Editing POS` 에 닿을 수 없어 편집에서 나갈 길이 없다(실측). */
 .cq-float {
-  position: absolute; left: 12px; top: 40px; z-index: 3;
-  display: none; width: 260px;
+  position: absolute; left: 12px; top: 40px; z-index: 8;
+  /* POS: CUSTOM 이면 머리에 컨트롤이 넷이다(모드·편집·활성화·개수) - 260px 에서는
+     제목이 `C…` 로 뭉개졌다(실측). 제목이 살아 있을 만큼만 넓힌다. */
+  display: none; width: 300px;
 }
 /* 패널이 펼쳐지면 결과 이미지를 **패널 오른쪽 끝까지** 민다(사용자 지정) - 왼쪽에
    얹힌 패널이 그림을 덮지 않게. 끝까지 밀지 않는다: 필요한 만큼만 비켜서면 된다.
@@ -22405,7 +22409,8 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   white-space: nowrap; text-overflow: ellipsis;
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2px;
 }
-.cq-box.is-open .cq-title { color: var(--text-primary); font-weight: 600; }
+/* 제목은 컨트롤에 밀려 먼저 줄어든다(flex:1) - 바닥을 받쳐 글자가 남게 한다. */
+.cq-box.is-open .cq-title { color: var(--text-primary); font-weight: 600; min-width: 64px; }
 /* 오른쪽 끝에 붙으면 상자 테두리를 파고든다(사용자 지적) - 여백을 준다. */
 .cq-count {
   flex: none; margin-right: 7px; padding: 0 5px; border-radius: 999px;
@@ -22485,6 +22490,67 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   border-color: rgba(124,106,239,0.55); color: var(--text-primary);
   background: rgba(124,106,239,0.10);
 }
+
+/* ── POS 편집 무대 ──────────────────────────────────────────────────────
+   좌표계를 보여주는 판. 화면의 그림과 지금 해상도가 같으면 그림 위에 반투명
+   검은 판을 덮고(is-overlay), 다르면 흰 테두리의 검은 상자를 따로 세운다 -
+   다른 비율의 그림 위에 원을 놓으면 좌표가 거짓말이 된다. */
+.cq-stage {
+  position: absolute; z-index: 5; display: none;
+  border-radius: 4px; touch-action: none;
+  background: #0b0b12; border: 1px solid rgba(255,255,255,0.30);
+}
+.cq-stage.open { display: block; }
+.cq-stage.is-overlay { background: rgba(0,0,0,0.55); border-color: rgba(255,255,255,0.22); }
+/* 원. 좌표는 무대 기준 %로 놓고, 자기 크기의 절반만큼 되당겨 **중심**을 맞춘다. */
+.cq-dot {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 26px; height: 26px; padding: 0; cursor: grab;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,0.55);
+  background: rgba(18,18,28,0.92); color: var(--text-secondary);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.cq-dot:hover { border-color: rgba(255,255,255,0.9); color: var(--text-primary); }
+/* 고른 것은 반전시킨다 - 칩과 같은 선택을 본다. */
+.cq-dot.is-on { background: #f2efe3; color: #14141c; border-color: #fff; font-weight: 700; }
+.cq-dot.is-drag { cursor: grabbing; box-shadow: 0 0 0 4px rgba(124,106,239,0.28); }
+/* 무대 위 캐릭터 칩. 4명을 넘으면 줄을 바꾼다(flex-wrap). */
+.cq-chips {
+  position: absolute; z-index: 7; display: none;
+  flex-wrap: wrap; gap: 4px; align-content: flex-start;
+}
+.cq-chips.open { display: flex; }
+.cq-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 24%;
+  padding: 4px 8px; cursor: pointer;
+  border-radius: 5px; border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(18,18,28,0.88); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.cq-chip:hover { border-color: rgba(255,255,255,0.4); color: var(--text-primary); }
+.cq-chip.is-on { background: #f2efe3; color: #14141c; border-color: #fff; font-weight: 700; }
+.cq-chip-n { flex: none; opacity: 0.75; }
+.cq-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* POS: CUSTOM 이면 모드 버튼이 켜져 보이고, 편집 버튼은 연노랑으로 눈에 띈다. */
+.cq-pos.is-custom { border-color: rgba(124,106,239,0.6); color: var(--text-primary); }
+.cq-pos-edit {
+  border-color: rgba(214,184,92,0.65); color: rgb(226,200,122);
+  background: rgba(214,184,92,0.14);
+}
+.cq-pos-edit:hover {
+  border-color: rgb(226,200,122); color: #14141c; background: rgb(226,200,122);
+}
+.cq-grid-pos { padding: 6px; }
+.cq-posdone {
+  width: 100%; padding: 8px; cursor: pointer;
+  border-radius: 5px; border: 1px solid rgba(214,184,92,0.55);
+  background: rgba(214,184,92,0.16); color: rgb(232,214,150);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  transition: background .14s, color .14s;
+}
+.cq-posdone:hover { background: rgb(226,200,122); color: #14141c; }
 
 /* 축 칩 드롭다운. 값 목록 + 랜덤 토글. */
 .ia-axmenu { display: flex; flex-direction: column; gap: 8px; }

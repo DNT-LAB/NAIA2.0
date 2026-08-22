@@ -27,10 +27,13 @@ const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
 // 그림을 패널 오른쪽 끝에서 이만큼 띄운다.
 const VIEWER_GAP = 8;
+// POS 편집에서 캐릭터 칩 줄이 쓰는 높이(두 줄까지 여유).
+const CHIPS_BAND = 62;
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
   openCharacterModule = () => {},
+  getResolution = () => null,      // {w, h} — 지금 설정된 생성 해상도
 }) {
   let mount = null;
   let open = false;
@@ -39,9 +42,201 @@ export function createCharacterQuickPanel({
   let lastSignature = '';
   let visible = false;
   let anchorWatcher = null;      // 결과 패널이 늦게 생기면 다시 붙는다
+  let stage = null;              // POS 편집 무대(원이 놓이는 판)
+  let chips = null;              // 무대 위 캐릭터 칩 줄
+  let posEditing = false;
+  let posSelected = null;        // 칩과 원이 **같은** 선택을 본다
+  let stageRect = null;          // 진입 시 한 번 잰 무대 기하
+  let posDragging = false;       // 끄는 중에는 다시 그리지 않는다
 
   function host() {
     return document.querySelector('.viewer-wrapper') || document.body;
+  }
+
+  // ── POS 편집 무대 ─────────────────────────────────────────────────────
+  //
+  // 무대는 **좌표계를 보여주는 판**이다. 화면의 그림과 지금 설정한 해상도가 같으면
+  // 그림 위에 반투명 검은 판을 덮고, 다르면(옛 그림·비어 있음) 흰 테두리의 검은
+  // 상자를 따로 띄운다 - 다른 비율의 그림 위에 원을 놓으면 좌표가 거짓말이 된다.
+  //
+  // ⚠️ 무대 기하는 **진입 시점에 한 번만** 잰다(사용자 지정). 편집 중에 해상도가
+  //    바뀌어도 원이 튀지 않는다.
+  function ensureStage() {
+    if (stage && document.body.contains(stage)) return stage;
+    stage = document.createElement('div');
+    stage.className = 'cq-stage';
+    stage.addEventListener('pointerdown', onStagePointerDown);
+    stage.addEventListener('click', onStageClick);
+    host().appendChild(stage);
+    return stage;
+  }
+
+  /** `object-fit: contain` 이 실제로 그리는 사각형. 요소 상자와 다르다. */
+  function drawnImageRect() {
+    const img = document.getElementById('preview');
+    if (!img || !img.naturalWidth || !img.classList.contains('show')) return null;
+    const box = img.getBoundingClientRect();
+    if (!box.width || !box.height) return null;
+    const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+    const w = img.naturalWidth * scale;
+    const h = img.naturalHeight * scale;
+    const posX = getComputedStyle(img).objectPosition.split(' ')[0];
+    const slack = box.width - w;
+    const offX = posX.endsWith('px') ? parseFloat(posX) : slack * (parseFloat(posX) / 100);
+    return { left: box.left + offX, top: box.top + (box.height - h) / 2, width: w, height: h,
+             natural: { w: img.naturalWidth, h: img.naturalHeight } };
+  }
+
+  /** 무대가 설 자리와 그 종류를 정한다. 진입 시 한 번 부른다. */
+  function measureStage() {
+    const res = getResolution();
+    const drawn = drawnImageRect();
+    const matches = !!(drawn && res
+      && drawn.natural.w === res.w && drawn.natural.h === res.h);
+    if (matches) return { ...drawn, overlay: true };
+    // 그림이 없거나 비율이 다르면 뷰어 안에 **지금 해상도 비율**의 상자를 세운다.
+    //
+    // ⚠️ 패널과 칩 줄이 쓰는 자리를 먼저 빼고 남는 데에 세운다. 뷰어 전체에
+    //    세웠더니 무대가 패널을 덮어 `Finish Editing POS` 에 닿을 수 없었다(실측).
+    //    그래서 그림이 "약간 줄어든다"(사용자 사양) - 줄어드는 것이 아니라 남는
+    //    자리에 맞춰 서는 것이다.
+    const viewer = document.getElementById('resultViewer');
+    if (!viewer) return null;
+    const v = viewer.getBoundingClientRect();
+    const panel = mount && visible ? mount.getBoundingClientRect() : null;
+    const left0 = panel ? Math.max(v.left, panel.right + 10) : v.left + 12;
+    const top0 = v.top + CHIPS_BAND;
+    const ratio = res ? res.w / res.h : 1;
+    const maxW = Math.max(120, v.right - 12 - left0);
+    const maxH = Math.max(120, v.bottom - 12 - top0);
+    let w = maxH * ratio;
+    let h = maxH;
+    if (w > maxW) { w = maxW; h = maxW / ratio; }
+    return { left: left0 + (maxW - w) / 2, top: top0 + (maxH - h) / 2,
+             width: w, height: h, overlay: false };
+  }
+
+  function renderStage() {
+    if (posDragging) return;      // 끌고 있는 원을 교체하지 않는다
+    if (!posEditing) {
+      if (stage) { stage.classList.remove('open'); stage.innerHTML = ''; }
+      return;
+    }
+    const box = stageRect || (stageRect = measureStage());
+    if (!box) return;
+    ensureStage();
+    const wrap = host().getBoundingClientRect();
+    Object.assign(stage.style, {
+      left: Math.round(box.left - wrap.left) + 'px',
+      top: Math.round(box.top - wrap.top) + 'px',
+      width: Math.round(box.width) + 'px',
+      height: Math.round(box.height) + 'px',
+    });
+    stage.classList.toggle('is-overlay', !!box.overlay);
+    const slots = activeSlots(lastState);
+    stage.innerHTML = slots.map(({character, index}, i) => {
+      const p = character.position || { x: 0.5, y: 0.5 };
+      const on = posSelected === index;
+      return `<button type="button" class="cq-dot${on ? ' is-on' : ''}"`
+        + ` data-cq-dot="${index}" style="left:${p.x * 100}%;top:${p.y * 100}%"`
+        + ` aria-label="${escHtml(slotLabel(character, i + 1))}">${i + 1}</button>`;
+    }).join('');
+    stage.classList.add('open');
+    renderChips(slots);
+  }
+
+  /** 무대 위쪽 캐릭터 칩. 4명을 넘으면 줄을 바꾼다(사용자 지정). */
+  function renderChips(slots) {
+    if (!chips || !document.body.contains(chips)) {
+      chips = document.createElement('div');
+      chips.className = 'cq-chips';
+      chips.addEventListener('click', event => {
+        const chip = event.target.closest('[data-cq-chip]');
+        if (!chip) return;
+        posSelected = Number(chip.dataset.cqChip);
+        renderStage();
+      });
+      host().appendChild(chips);
+    }
+    const wrap = host().getBoundingClientRect();
+    const box = stageRect;
+    chips.style.left = Math.round(box.left - wrap.left) + 'px';
+    chips.style.width = Math.round(box.width) + 'px';
+    // 무대 **위**에 놓되, 그만한 자리가 없으면(해상도가 맞아 그림에 겹쳐 세운 경우
+    // 그림이 뷰어 꼭대기까지 닿는다) 무대 안쪽 위에 얹는다. 잘려서 안 보이는 것보다
+    // 그림을 조금 가리는 편이 낫다.
+    const above = box.top - wrap.top - CHIPS_BAND;
+    chips.style.top = Math.round(above >= 4 ? above : box.top - wrap.top + 6) + 'px';
+    chips.innerHTML = slots.map(({character, index}, i) =>
+      `<button type="button" class="cq-chip${posSelected === index ? ' is-on' : ''}"`
+      + ` data-cq-chip="${index}"><span class="cq-chip-n">${i + 1}</span>`
+      + `<span class="cq-chip-t">${escHtml(slotLabel(character, i + 1).replace(/^C\d+\s*·\s*/, '') || '(비어 있음)')}</span></button>`
+    ).join('');
+    chips.classList.add('open');
+  }
+
+  function onStageClick(event) {
+    const dot = event.target.closest('[data-cq-dot]');
+    if (dot) { posSelected = Number(dot.dataset.cqDot); renderStage(); }
+  }
+
+  function onStagePointerDown(event) {
+    const dot = event.target.closest('[data-cq-dot]');
+    if (!dot) return;
+    event.preventDefault();
+    const index = Number(dot.dataset.cqDot);
+    posSelected = index;
+    const box = stageRect;
+    const move = (e) => {
+      const x = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+      const y = Math.min(1, Math.max(0, (e.clientY - box.top) / box.height));
+      dot.style.left = (x * 100) + '%';
+      dot.style.top = (y * 100) + '%';
+      dot.dataset.cqX = x.toFixed(3);
+      dot.dataset.cqY = y.toFixed(3);
+    };
+    const up = () => {
+      posDragging = false;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      // 즉시 저장(사용자 확인 - 공식 홈페이지도 그렇다). 놓는 순간 한 번만 보낸다 -
+      // 끌 때마다 보내면 한 번의 드래그가 수십 번의 왕복이 된다.
+      if (dot.dataset.cqX !== undefined) {
+        setModuleParam('character', `char_pos_${index}`,
+                       `${dot.dataset.cqX},${dot.dataset.cqY}`);
+      }
+      dot.classList.remove('is-drag');
+    };
+    // ⚠️ 여기서 다시 그리면 **끌고 있던 원이 교체돼** 참조가 끊긴다(실측: 드래그가
+    //    통째로 무시됐다). 선택 표시는 클래스만 손으로 바꾸고, 드래그가 끝날 때까지
+    //    renderStage 를 막는다(서버 echo 가 와도 마찬가지다).
+    posDragging = true;
+    stage.querySelectorAll('.cq-dot.is-on').forEach(e => e.classList.remove('is-on'));
+    dot.classList.add('is-on', 'is-drag');
+    if (chips) {
+      chips.querySelectorAll('.cq-chip.is-on').forEach(e => e.classList.remove('is-on'));
+      const chip = chips.querySelector(`[data-cq-chip="${index}"]`);
+      if (chip) chip.classList.add('is-on');
+    }
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
+  }
+
+  function setPosEditing(on) {
+    posEditing = !!on;
+    if (posEditing) {
+      posSelected = null;
+      stageRect = measureStage();          // 진입 시 한 번만 잰다
+    } else {
+      stageRect = null;
+      if (chips) { chips.classList.remove('open'); chips.innerHTML = ''; }
+    }
+    const viewer = document.getElementById('resultViewer');
+    if (viewer) viewer.classList.toggle('is-cq-posedit', posEditing);
+    render(lastState, true);
+    renderStage();
   }
 
   function ensureMount() {
@@ -133,7 +328,8 @@ export function createCharacterQuickPanel({
       .map(({index}) => [index, openSlots.has(index) ? 1 : 0].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
-    return `${open ? 1 : 0}${state && state.activated ? 1 : 0}#${slots}`;
+    return `${open ? 1 : 0}${state && state.activated ? 1 : 0}`
+      + `${state && state.use_custom_positions ? 1 : 0}${posEditing ? 1 : 0}#${slots}`;
   }
 
   /** 렌더가 값을 지웠으므로 여기서 되돌린다(마크업에 값을 넣지 않는 대가). */
@@ -269,6 +465,15 @@ export function createCharacterQuickPanel({
       render(lastState, true);
       return;
     }
+    if (event.target.closest('[data-cq-posmode]')) {
+      const next = !(lastState && lastState.use_custom_positions);
+      // AUTO 로 되돌리면 편집 중일 이유가 없다.
+      if (!next && posEditing) setPosEditing(false);
+      setModuleParam('character', 'use_custom_positions', String(next));
+      return;
+    }
+    if (event.target.closest('[data-cq-posedit]')) { setPosEditing(true); return; }
+    if (event.target.closest('[data-cq-posdone]')) { setPosEditing(false); return; }
     if (event.target.closest('[data-cq-manage]')) { openCharacterModule(); return; }
     if (event.target.closest('[data-cq-add]')) setModuleParam('character', 'add_character', 'true');
   }
@@ -280,7 +485,8 @@ export function createCharacterQuickPanel({
     // 오기 전이라 없을 수 있는데, 그때는 render 가 알아서 물러난다.
     if (visible && !mount && lastState) render(lastState, true);
     if (mount) mount.classList.toggle('open', visible);
-    // 패널이 사라지면 이미지는 원래 자리(가운데)로 돌아와야 한다.
+    // 패널이 사라지면 편집도 끝난다 - 무대만 남으면 나갈 문이 없다.
+    if (!visible && posEditing) setPosEditing(false);
     syncViewerShift();
   }
 
@@ -293,7 +499,13 @@ export function createCharacterQuickPanel({
     const nextSignature = signature(current);
     if (!force && nextSignature === lastSignature) { syncValues(current); fitGridHeight(); return; }
     const slots = activeSlots(current);
-    const body = open
+    // POS 편집 중에는 슬롯 목록을 접고 그 자리에 종료 버튼만 둔다(사용자 지정) -
+    // 편집은 이미지 위 무대에서 하고, 여기는 나가는 문 하나면 된다.
+    const body = open && posEditing
+      ? `<div class="cq-grid cq-grid-pos">`
+        + `<button type="button" class="cq-posdone" data-cq-posdone="1">`
+        + `Finish Editing POS</button></div>`
+      : open
       ? `<div class="cq-grid">`
         + slots.map(({character, index}, i) =>
             slotHtml(character, index, i + 1, slots.length)).join('')
@@ -308,6 +520,7 @@ export function createCharacterQuickPanel({
     // 하는데, <button> 안에 <input> 이나 <button> 을 넣으면 마크업이 깨지고
     // 안쪽을 눌러도 바깥 토글이 먼저 먹는다.
     const enabled = !!current.activated;
+    const custom = !!current.use_custom_positions;
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`
@@ -316,13 +529,20 @@ export function createCharacterQuickPanel({
       + `<span class="cq-title">CHARACTER</span></button>`
       + `<label class="cq-enable"><input type="checkbox" data-cq-enable="1"`
       + `${enabled ? ' checked' : ''}><span>활성화</span></label>`
-      + `<button type="button" class="cq-pos" data-cq-pos="1">POS</button>`
+      // POS: AUTO 는 좌표를 아예 안 보낸다 -> NAI 가 배치(AI's Choice).
+      // CUSTOM 이어야 슬롯 좌표가 나가고, 그때만 편집 버튼이 생긴다.
+      + `<button type="button" class="cq-pos${custom ? ' is-custom' : ''}"`
+      + ` data-cq-posmode="1">POS : ${custom ? 'CUSTOM' : 'AUTO'}</button>`
+      + (custom
+          ? `<button type="button" class="cq-pos cq-pos-edit" data-cq-posedit="1">POS</button>`
+          : '')
       + `<span class="cq-count">${slots.length}</span>`
       + `</div><div class="cq-body">${body}</div></div>`;
     lastSignature = nextSignature;
     syncValues(current);
     fitGridHeight();
     syncViewerShift();
+    if (posEditing) renderStage();      // 좌표가 서버에서 돌아오면 원도 맞춘다
   }
 
   // 창 크기가 바뀌면 아래 경계도 움직인다. 한 번만 건다.

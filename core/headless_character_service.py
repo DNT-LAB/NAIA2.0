@@ -23,10 +23,6 @@ def _state_of(frame: Any) -> str:
     return str(frame.get("slot_state") or "").strip().lower()
 
 
-# 겹치지 않는 AUTO 자리의 개수(중앙 + 상하좌우 + 네 모서리).
-_RING_SIZE = 9
-
-
 def _seed_missing_positions(settings: dict) -> None:
     """POS: CUSTOM 일 때 좌표가 빈 활성 슬롯에 AUTO 배치의 **빈 자리**를 뿌린다.
 
@@ -39,16 +35,13 @@ def _seed_missing_positions(settings: dict) -> None:
     **언젠가 한 곳이 빠진다**(Codex 지적: 캐릭터 에셋의 add_slot 이 그랬다).
 
     ⚠️ 이미 있는 좌표는 절대 덮지 않는다 - 슬롯은 삭제되기 전까지 사용자가 정한
-    자리를 기억해야 한다(사용자 지정).
-
-    ⚠️ **이미 누가 서 있는 자리는 건너뛴다.** 순번대로 뿌리면 자리가 겹친다
-    (Codex 지적, 실측: 셋을 뿌리고 가운데를 지운 뒤 하나 더하면 새 슬롯이
-    오른쪽에 이미 선 슬롯과 같은 점을 받는다).
+    자리를 기억해야 한다(사용자 지정). 자리 고르기는 생성 경로와 **같은 함수**
+    (`fill_missing_positions`)를 쓴다 - 둘로 나누면 화면과 요청이 갈린다.
 
     ⚠️ 게이트는 `active_character_frames` 와 **똑같아야** 한다 - 모듈 활성까지
     본다. 어긋나면 여기서 채운 좌표가 저쪽 셈에 안 들어가 부분 좌표가 된다.
     """
-    from core.character_settings import auto_character_positions, normalize_position
+    from core.character_settings import fill_missing_positions, normalize_position
 
     if not settings.get("is_active"):
         return
@@ -59,15 +52,10 @@ def _seed_missing_positions(settings: dict) -> None:
     known = [normalize_position(f.get("position")) for f in active]
     if all(position is not None for position in known):
         return
-    taken = {(p["x"], p["y"]) for p in known if p is not None}
-    free = [spot for spot in auto_character_positions(_RING_SIZE)
-            if (spot["x"], spot["y"]) not in taken]
-    # 아홉 자리가 다 찼으면 겹치는 것을 피할 수 없다 - 그때는 순번대로 준다.
-    ordinal = auto_character_positions(len(active))
-    for index, (frame, position) in enumerate(zip(active, known)):
-        if position is not None:
-            continue
-        frame["position"] = free.pop(0) if free else dict(ordinal[index])
+    filled = fill_missing_positions(known)
+    for frame, position, was in zip(active, filled, known):
+        if was is None:
+            frame["position"] = position
 
 
 class HeadlessCharacterService:

@@ -27,8 +27,9 @@ const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
 // 그림을 패널 오른쪽 끝에서 이만큼 띄운다.
 const VIEWER_GAP = 8;
-// 무대가 이보다 얕아질 바에는 띠를 덮고 뷰어 전체를 쓴다.
-const MIN_STAGE = 120;
+// 무대의 최소 크기. 이보다 얕은 뷰어는 POS 편집을 담기엔 너무 작다 - 그때만
+// 바닥을 넘고, 넘은 부분은 뷰어가 잘라낸다.
+const STAGE_FLOOR = 48;
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
@@ -100,13 +101,14 @@ export function createCharacterQuickPanel({
     const v = viewer.getBoundingClientRect();
     const ratio = res ? res.w / res.h : (shown ? img.naturalWidth / img.naturalHeight : 1);
     const left0 = v.left + 12;
-    // 띠 아래에 설 자리가 너무 얕으면 **띠를 덮고** 뷰어 전체를 쓴다. 예전에는
-    // 120px 을 억지로 확보해 무대가 뷰어 바닥 밖으로 삐져나갔다(Codex 지적).
-    // 좁을 때는 겹치는 편이 낫다는 사용자 정정을 여기에도 적용한다.
-    const below = v.bottom - 12 - (bandBottom + 8);
-    const top0 = below >= MIN_STAGE ? bandBottom + 8 : v.top + 8;
-    const maxW = Math.max(MIN_STAGE, v.right - 12 - left0);
-    const maxH = Math.max(MIN_STAGE, v.bottom - 12 - top0);
+    // ⚠️ 무대는 **늘 띠 아래, 뷰어 안**이다. 자리가 모자라면 작아질 뿐 비켜서지
+    //    않는다. 예전에는 120px 을 억지로 확보해 무대가 뷰어 바닥 밖으로
+    //    삐져나갔고(Codex 지적), 그렇다고 띠를 덮게 했더니 띠(z 7)가 무대(z 5)보다
+    //    위라 **띠에 가린 원을 끌 수가 없었다**(Codex 2차 지적). 작은 무대가 못
+    //    끄는 무대보다 낫다.
+    const top0 = bandBottom + 8;
+    const maxW = Math.max(STAGE_FLOOR, v.right - 12 - left0);
+    const maxH = Math.max(STAGE_FLOOR, v.bottom - 12 - top0);
     let w = maxH * ratio;
     let h = maxH;
     if (w > maxW) { w = maxW; h = maxW / ratio; }
@@ -639,11 +641,24 @@ export function createCharacterQuickPanel({
     anchorWatcher = watchAnchor;
   }
 
-  // ⚠️ 편집 중에 새 그림이 도착할 수 있다(패널은 숨어 있어도 Ctrl+Enter 는 먹는다).
-  //    무대 배경은 그때의 `src` 를 복사해 둔 것이라, 다시 그리지 않으면 옛 그림이
-  //    남거나 폐기된 blob URL 을 가리켜 빈칸이 된다(Codex 지적).
+  // ⚠️ 편집 중에 보고 있는 그림이 바뀔 수 있다(패널은 숨어 있어도 Ctrl+Enter 는
+  //    먹고, 히스토리 항목을 지우면 그림이 사라진다). 무대 배경은 그때의 `src` 를
+  //    복사해 둔 것이라, 다시 그리지 않으면 옛 그림이 남거나 폐기된 blob URL 을
+  //    가리켜 빈칸이 된다(Codex 지적).
+  //
+  //    `load` 만으로는 모자란다 - **지우기·비우기는 load 를 안 쏜다**(Codex 2차).
+  //    그래서 `src` 속성 자체를 지켜본다. 배경에는 URL 만 쓰므로 디코드를 기다릴
+  //    이유도 없다. `load` 는 남겨 둔다 - 해상도 일치 판정이 naturalWidth 를 본다.
   const preview = document.getElementById('preview');
-  if (preview) preview.addEventListener('load', () => { if (posEditing) renderStage(); });
+  if (preview) {
+    const refresh = () => { if (posEditing) renderStage(); };
+    preview.addEventListener('load', refresh);
+    if (typeof MutationObserver === 'function') {
+      new MutationObserver(refresh).observe(preview, {
+        attributes: true, attributeFilter: ['src', 'class'],
+      });
+    }
+  }
 
   return {render, setVisible, isOpen: () => open};
 }

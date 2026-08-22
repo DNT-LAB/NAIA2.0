@@ -162,6 +162,32 @@ _AUTO_RING = (
 )
 
 
+def fill_missing_positions(positions: list[dict | None]) -> list[dict[str, float]]:
+    """빈 자리에 **아직 아무도 안 선** AUTO 자리를 채운다. 순서는 그대로.
+
+    ⚠️ 순번대로 주면 자리가 겹친다(Codex 지적, 실측): 중앙/왼쪽/오른쪽에 셋을 놓고
+    가운데를 지운 뒤 하나 더하면 새 슬롯이 index 2 라서 오른쪽을 받아, 이미 오른쪽에
+    선 슬롯과 같은 점에 놓였다. 그래서 **비어 있는 자리부터** 준다.
+
+    사용자가 링 위가 아닌 곳에 놓은 좌표는 링 자리를 소모하지 않는다 - 그 좌표는
+    그대로 두고, 빈 슬롯은 링의 아홉 자리 중 아무도 안 쓰는 곳을 받는다.
+    아홉이 다 차면 겹침을 피할 수 없으므로 그때만 순번으로 돌아간다.
+    """
+    taken = {(p["x"], p["y"]) for p in positions if p is not None}
+    free = [spot for spot in auto_character_positions(len(_AUTO_RING))
+            if (spot["x"], spot["y"]) not in taken]
+    ordinal = auto_character_positions(len(positions))
+    filled: list[dict[str, float]] = []
+    for index, position in enumerate(positions):
+        if position is not None:
+            filled.append(dict(position))
+        elif free:
+            filled.append(free.pop(0))
+        else:
+            filled.append(dict(ordinal[index]))
+    return filled
+
+
 def auto_character_positions(count: int) -> list[dict[str, float]]:
     """AUTO 의 자리. 순서는 `_AUTO_RING`, 아홉을 넘으면 중앙만 빼고 되풀이한다.
 
@@ -206,13 +232,18 @@ def resolved_character_positions(settings: dict | None,
       · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
       · AUTO   - 여기서 구운 `auto_character_positions` (사용자 지정)
 
-    ⚠️ 아래 두 경우에는 CUSTOM 이라도 **AUTO 배치로 통째로 떨어진다.** 좌표 수가
-    캐릭터 수와 어긋난 채로 나가면 api_service 가 빈 자리를 default_center
-    (0.5/0.5)로 메워 나머지가 중앙에 겹치고, 아예 개수가 안 맞으면 좌표가 통째로
-    꺼진다. 반쪽짜리 사용자 좌표보다 온전한 자동 배치가 낫다.
-      · 활성 슬롯 중 좌표가 빈 것이 있다(옛 설정 파일. 지금은
-        headless_character_service 가 CUSTOM 인 동안 매번 씨앗을 채운다)
-      · `count` 가 활성 슬롯 수와 다르다(조건부 규칙이 캐릭터를 더하거나 뺐다)
+    ⚠️ 빈 좌표가 섞여 있으면 **버리지 않고 채운다**(`fill_missing_positions`).
+    예전에는 통째로 AUTO 로 떨어뜨렸는데, 그러면 **저장 파일이 이미 반쪽인 채로
+    올라온 사용자가 자기 좌표를 영영 못 쓴다**(Codex 지적: 옛 빌드가 남긴 반쪽
+    파일은 쓰기가 한 번 더 일어나기 전까지 안 고쳐진다). 채워 보내면 사용자가 정한
+    자리는 지켜지고, 빈 슬롯만 자동 자리를 받는다.
+
+    ⚠️ 다만 `count` 가 활성 슬롯 수와 다르면 **AUTO 배치로 통째로 떨어진다.**
+    조건부 override 는 캐릭터를 제 목록으로 갈아끼우면서 슬롯 식별자를 남기지
+    않으므로(`_conditional_character_override` 는 character_ids 를 안 준다),
+    어느 좌표가 어느 캐릭터의 것인지 알 길이 없다. 순서로 짐작해 어긋난 좌표를
+    보내느니 개수가 맞는 자동 배치가 낫다.
+    ⚠️ 이때 화면(사용자 좌표)과 실제로 나가는 것(자동 배치)이 갈린다 - 알려진 틈.
     """
     normalized = normalize_character_settings(settings)
     frames = active_character_frames(normalized)
@@ -220,9 +251,9 @@ def resolved_character_positions(settings: dict | None,
     if not total:
         return []
     if normalized.get("use_custom_positions") and total == len(frames):
-        positions = [normalize_position(frame.get("position")) for frame in frames]
-        if not any(position is None for position in positions):
-            return [dict(position) for position in positions]
+        return fill_missing_positions(
+            [normalize_position(frame.get("position")) for frame in frames]
+        )
     return auto_character_positions(total)
 
 

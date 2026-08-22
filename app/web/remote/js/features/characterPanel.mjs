@@ -445,13 +445,13 @@ export function createCharacterPanel({
           <div>
             <label class="mod-checkbox-item">
               <input type="checkbox" ${nextState.activated ? 'checked' : ''} oninput="setModuleParam('character','activated',String(this.checked))">
-              <span class="mod-checkbox-label">Enable Character Prompts (NAID4+)</span>
+              <span class="mod-checkbox-label">캐릭터 프롬프트를 활성화 합니다 (NAID4 이상)</span>
             </label>
           </div>
           <div>
             <label class="mod-checkbox-item">
               <input type="checkbox" ${nextState.reroll_on_generate ? 'checked' : ''} oninput="setModuleParam('character','reroll_on_generate',String(this.checked))">
-              <span class="mod-checkbox-label">Process wildcards on Generate</span>
+              <span class="mod-checkbox-label">Generate 버튼을 누를 때 캐릭터 와일드카드 재굴림</span>
             </label>
           </div>
           <div class="mod-char-actions">

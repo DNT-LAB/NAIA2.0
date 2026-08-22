@@ -147,6 +147,28 @@ def register_install_manager_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Tag archive download failed: {exc}"}, status_code=500)
 
+    @app.post("/api/install-manager/tag-archive-increment/download")
+    async def api_install_manager_tag_increment_download(req: Request):
+        """최신 태그 데이터(버킷 150~174). 검색 화면의 버튼이 부른다.
+
+        ⚠️ 베이스가 아직 없으면 거절한다. 1.4GB 를 건너뛰고 275MB 만 받으면
+        코퍼스가 반쪽이 되고, 그 상태를 사용자가 알아채기 어렵다.
+        """
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            snapshot = await run_in_thread(manager.snapshot)
+            if not (snapshot.get("tag_archive") or {}).get("ready"):
+                return JSONResponse(
+                    {"ok": False, "error": "기본 태그 데이터를 먼저 설치해야 합니다."},
+                    status_code=409,
+                )
+            await run_in_thread(manager.start_tag_increment_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Tag increment download failed: {exc}"}, status_code=500)
+
     @app.post("/api/install-manager/corpus-archive/download")
     async def api_install_manager_corpus_archive_download(req: Request):
         if not _is_local_request(req):

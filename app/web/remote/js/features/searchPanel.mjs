@@ -12,6 +12,9 @@ export function createSearchPanel({
   bindTagAssist,
   lockTagSurface = () => {},
   unlockTagSurface = () => {},
+  // ⚠️ 기본값을 둔다. 이 패널은 원격 브라우저에서도 뜨는데 거기엔 설치 관리자가
+  //    없다 - 토스트를 못 띄운다고 검색이 죽으면 안 된다.
+  showToast = () => {},
 }) {
   let searchingActive = false;
   let initialFilterRestoreDone = false; // 시작 시 Tag Filter 자동 Search→Assign 1회 가드
@@ -542,8 +545,21 @@ export function createSearchPanel({
     bindSearchInputs();
     ensureDateRangeStyle();
     bindDateRangeDrag();
+    bindTagIncrementButton();
     renderDateRange();
     requestBucketDates();
+    // 검색 화면을 열 때마다 확인한다 - 설치 관리자는 이 창 밖(Setup)에서도 받을 수
+    // 있어서, 여기 상태를 한 번 잡아두고 마는 건 어긋난다.
+    refreshIncrementState();
+  }
+
+  function bindTagIncrementButton() {
+    // 버튼은 다시 그릴 때마다 새 요소라 위임으로 받는다.
+    if (moduleBody._tagIncrementBound) return;
+    moduleBody._tagIncrementBound = true;
+    moduleBody.addEventListener('click', event => {
+      if (event.target.closest('#searchTagUpdateBtn')) startIncrementDownload();
+    });
   }
 
   function applyInputValue(element, serverVal, guard, focusedEl) {
@@ -674,7 +690,79 @@ export function createSearchPanel({
     bucketState.end = Math.min(Math.max(ce, 0), last);
     if (bucketState.start > bucketState.end) [bucketState.start, bucketState.end] = [bucketState.end, bucketState.start];
     bucketState.loaded = bucketState.count > 0;
-    if (getCurrentModuleId() === 'search') renderDateRange();
+    // ⚠️ 슬라이더만 다시 그리면 안 된다. 버킷 표는 **버튼을 그린 뒤에** 도착하는데,
+    //    버튼 라벨의 기간이 그 표에서 나온다 - 슬라이더만 갱신하면 라벨이 폴백
+    //    ("Download latest tag data")에 굳는다(실측).
+    if (getCurrentModuleId() === 'search') renderDateRangeHost();
+  }
+
+  async function refreshIncrementState({ rerender = true } = {}) {
+    try {
+      const res = await fetch('/api/install-manager', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const next = data?.tag_archive_increment || null;
+      const was = incrementState?.ready;
+      incrementState = next;
+      // 다운로더는 **단일 비행**이고 진행 상태가 하나뿐이다. 그 상태가 이 아카이브를
+      // 가리킬 때만 "받는 중" 이다 - `phase` 에 스펙 키가 들어간다.
+      const dl = next?.download || {};
+      incrementBusy = Boolean(dl.active && dl.phase === 'tag_archive_increment');
+      if (next?.ready && was === false) {
+        showToast('최신 태그 데이터 설치 완료 — 기간 슬라이더가 넓어집니다.', 'success');
+        requestBucketDates();
+      }
+      if (rerender && getCurrentModuleId() === 'search') renderDateRangeHost();
+    } catch (_) { /* 설치 관리자는 로컬 전용 - 원격에서는 조용히 없다 */ }
+  }
+
+  function renderDateRangeHost() {
+    // 버튼은 슬라이더와 같은 부모에 산다. 슬라이더만 다시 그리면 버튼이 안 바뀐다.
+    const host = moduleBody.querySelector('#drTrack')?.closest('.search-daterange')?.parentElement;
+    const btn = moduleBody.querySelector('#searchTagUpdateBtn');
+    const wanted = tagIncrementHtml();
+    if (!wanted) { btn?.remove(); return; }
+    if (btn) {
+      btn.outerHTML = wanted;
+    } else if (host) {
+      host.insertAdjacentHTML('afterbegin', wanted);
+    }
+    renderDateRange();
+  }
+
+  async function startIncrementDownload() {
+    if (incrementBusy) return;
+    incrementBusy = true;
+    renderDateRangeHost();
+    try {
+      const res = await fetch('/api/install-manager/tag-archive-increment/download', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        incrementBusy = false;
+        showToast(data?.error || '최신 태그 데이터 내려받기를 시작하지 못했습니다.', 'error');
+        renderDateRangeHost();
+        return;
+      }
+      // ⚠️ 다운로더는 단일 비행이다. 다른 아카이브를 받는 중이면 위 요청은 조용히
+      //    기존 상태만 돌려준다 - 그걸 "시작됨" 으로 읽으면 안 된다.
+      const dl = data?.tag_archive_increment?.download || {};
+      if (dl.active && dl.phase !== 'tag_archive_increment') {
+        incrementBusy = false;
+        showToast('다른 데이터를 내려받는 중입니다. 끝난 뒤 다시 눌러 주세요.', 'warning');
+        renderDateRangeHost();
+        return;
+      }
+      showToast('최신 태그 데이터를 내려받는 중입니다 (275MB).', 'success');
+      // 완료·실패는 스냅샷 폴링으로 확인한다. 다운로더가 이어받기·취소를 이미 한다.
+      const poll = setInterval(async () => {
+        await refreshIncrementState();
+        if (!incrementBusy) clearInterval(poll);
+      }, 1500);
+    } catch (error) {
+      incrementBusy = false;
+      showToast('최신 태그 데이터 내려받기 실패.', 'error');
+      renderDateRangeHost();
+    }
   }
 
   function ymStart(i) { const b = bucketState.buckets[i]; return b ? (b.start_ym || '') : ''; }
@@ -796,8 +884,45 @@ export function createSearchPanel({
     }
   }
 
-  function dateRangeSliderHtml() {
+  // ── 최신 태그 데이터 받기 ────────────────────────────────────────────────
+  //
+  // ⚠️ 설치 패널(Setup)에만 두면 **평생 안 받는 사람이 나온다**(사용자 지적).
+  //    설정을 열 이유가 없는 사람에게는 그런 데이터가 있다는 사실 자체가 안 보인다.
+  //    그래서 검색 화면, 기간 슬라이더 바로 위에 크게 붙인다 - 사용자가 "더 최근
+  //    그림" 을 찾으려는 바로 그 자리다.
+  //
+  // 라벨의 기간은 **버킷 표에서 뽑는다.** 손으로 적으면 데이터와 갈린다
+  // (실제 2025/09~2026/06 인데 2025.11 로 적을 뻔했다).
+  let incrementState = null;      // /api/install-manager 의 tag_archive_increment
+  let incrementBusy = false;
+
+  function missingBucketSpan() {
+    // 날짜표에는 있는데 파일이 없는 구간 = 아직 안 받은 데이터.
+    const buckets = bucketState.buckets || [];
+    const have = incrementState?.file_count ?? 0;
+    if (!buckets.length || have <= 0 || have >= buckets.length) return null;
+    const first = buckets[have];
+    const last = buckets[buckets.length - 1];
+    if (!first || !last) return null;
+    return { from: String(first.start_ym || '').replace('/', '.'),
+             to: String(last.end_ym || '').replace('/', '.') };
+  }
+
+  function tagIncrementHtml() {
+    if (!incrementState || incrementState.ready || !incrementState.base_ready) return '';
+    const span = missingBucketSpan();
+    const label = span ? `Download ${span.from}-${span.to}` : 'Download latest tag data';
     return `
+    <button type="button" class="search-tag-update" id="searchTagUpdateBtn"
+            ${incrementBusy ? 'disabled' : ''}>
+      <span class="stu-icon" aria-hidden="true">⬇</span>
+      <span class="stu-text">${incrementBusy ? '받는 중...' : `[ ${label} ]`}</span>
+      <span class="stu-sub">${incrementBusy ? '' : '최신 태그 데이터 · 275MB'}</span>
+    </button>`;
+  }
+
+  function dateRangeSliderHtml() {
+    return tagIncrementHtml() + `
     <div class="search-daterange">
       <div class="dr-label-row">
         <span class="mod-section-label">기간 컷오프 (Date Cutoff)</span>
@@ -818,6 +943,18 @@ export function createSearchPanel({
   function ensureDateRangeStyle() {
     if (document.getElementById('dr-slider-style')) return;
     const css = `
+.search-tag-update{
+  display:flex;align-items:center;gap:9px;width:100%;margin:0 0 10px;padding:11px 14px;
+  cursor:pointer;text-align:left;border-radius:8px;
+  border:1px solid rgba(132,206,94,0.60);background:rgba(20,34,16,0.92);
+  color:rgb(178,232,146);font-family:var(--font-mono);font-size:12.5px;font-weight:600;
+  transition:background .14s,color .14s,border-color .14s;
+}
+.search-tag-update:hover:not(:disabled){background:rgb(154,220,112);color:#0f1a0c;border-color:rgb(154,220,112)}
+.search-tag-update:disabled{opacity:.62;cursor:default}
+.search-tag-update .stu-icon{font-size:15px;line-height:1}
+.search-tag-update .stu-text{flex:1;min-width:0}
+.search-tag-update .stu-sub{opacity:.72;font-size:10.5px;font-weight:500;white-space:nowrap}
 .search-daterange{margin:2px 0}
 .dr-label-row{display:flex;align-items:center;gap:8px;margin-bottom:2px}
 .dr-label-row .mod-section-label{margin:0}

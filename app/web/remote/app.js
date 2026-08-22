@@ -1866,7 +1866,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260714-predeploy1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd3')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -1880,6 +1880,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260714-predep
       bindTagAssist,
       lockTagSurface,
       unlockTagSurface,
+      showToast,
     });
   })
   .catch(error => {

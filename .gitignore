@@ -260,3 +260,8 @@ data/_companion_review/
 #   python tools/build_semantic_graph.py && python tools/build_recipe_bank.py
 #   python tools/build_tag_combo_bundle.py --verify
 data/tag_combo/
+
+# 태그 코퍼스 증분 빌드 산출물 (315MB + 275MB zip). 배포는 HuggingFace 로 하고
+# 레포에는 넣지 않는다.
+build_tags_increment/
+

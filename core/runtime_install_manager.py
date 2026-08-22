@@ -17,6 +17,22 @@ from app.backend.runtime import RuntimePaths
 TAG_ARCHIVE_URL = "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/naia_tags.zip"
 TAG_ARCHIVE_EXPECTED_COUNT = 150
 
+# 태그 코퍼스 증분 (버킷 150~174, 2025/09~2026/06, 1,584,644행). 275MB.
+#
+# ⚠️ **`TAG_ARCHIVE_EXPECTED_COUNT` 를 175 로 올리면 안 된다.** 그 숫자는 베이스
+# 아카이브의 "다 받았는가" 판정에 쓰인다. 올리는 순간 150개를 이미 가진 기존
+# 사용자 전원이 베이스를 **미완성으로 판정받아 1.4GB 를 다시 받는다.**
+# 증분은 별도 아카이브로 내보내고, 준비 판정은 개수가 아니라 **마지막 파일 이름**
+# 으로 한다 - 두 아카이브가 같은 `tags/` 를 공유해서 개수로는 구분이 안 된다.
+#
+# ⚠️ zip 을 다시 만들 때는 **파일 이름을 바꿔야 한다.** 다운로더가 바이트 오프셋으로
+# 이어받으므로(Range 요청), 같은 URL 에 다른 내용을 올리면 중간까지 받아 둔
+# 사용자의 임시 파일이 조용히 깨진다.
+TAG_INCREMENT_ARCHIVE_URL = (
+    "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/naia_tags_inc_150_174.zip"
+)
+TAG_INCREMENT_MARKER = "tags_174.parquet"
+
 # Event Corpus (Interactive 모드의 태그 공기 추천). Dev0714 QuickSearchBlock 이 쓰던 것과
 # 동일한 아카이브다. Dev0714 는 zip_ref.extractall() 을 그대로 써서 traversal 에 무방비였는데,
 # 여기서는 아래 _extract_archive 의 basename 평탄화 + 확장자 화이트리스트를 그대로 태운다.
@@ -98,6 +114,7 @@ class RuntimeInstallManager:
         tag_archive_url: str = TAG_ARCHIVE_URL,
         expected_tag_files: int = TAG_ARCHIVE_EXPECTED_COUNT,
         on_tag_archive_complete: Callable[[], None] | None = None,
+        tag_increment_archive_url: str = TAG_INCREMENT_ARCHIVE_URL,
         corpus_archive_url: str = CORPUS_ARCHIVE_URL,
         on_corpus_archive_complete: Callable[[], None] | None = None,
     ):
@@ -105,6 +122,7 @@ class RuntimeInstallManager:
         self.tag_archive_url = tag_archive_url
         self.expected_tag_files = int(expected_tag_files or 0)
         self._on_tag_archive_complete = on_tag_archive_complete
+        self.tag_increment_archive_url = tag_increment_archive_url
         self.corpus_archive_url = corpus_archive_url
         self._on_corpus_archive_complete = on_corpus_archive_complete
         self._specs: dict[str, ArchiveSpec] = {
@@ -117,6 +135,19 @@ class RuntimeInstallManager:
                 temp_name="naia_tags.zip.download_tmp",
                 count_glob="tags_*.parquet",
                 expected_count=self.expected_tag_files,
+            ),
+            # 베이스와 **같은 디렉터리**에 풀린다. 그래서 준비 판정을 개수로 하면
+            # 베이스와 구분이 안 된다 - 마지막 파일이 있는지로 본다.
+            "tag_archive_increment": ArchiveSpec(
+                key="tag_archive_increment",
+                url=tag_increment_archive_url,
+                subdir="tags",
+                suffixes=(".parquet",),
+                label="최신 태그 데이터",
+                temp_name="naia_tags_increment.zip.download_tmp",
+                count_glob="tags_*.parquet",
+                required_names=(TAG_INCREMENT_MARKER,),
+                min_count=1,
             ),
             "corpus_archive": ArchiveSpec(
                 key="corpus_archive",
@@ -132,6 +163,9 @@ class RuntimeInstallManager:
         }
         self._completion_hooks: dict[str, Callable[[], None] | None] = {
             "tag_archive": on_tag_archive_complete,
+            # 증분도 베이스와 같은 후처리를 탄다 - 새 parquet 이 생겼다는 사실은
+            # 같고, 검색·자동완성이 목록을 다시 잡아야 한다.
+            "tag_archive_increment": on_tag_archive_complete,
             "corpus_archive": on_corpus_archive_complete,
         }
         self._lock = RLock()
@@ -234,6 +268,12 @@ class RuntimeInstallManager:
                 "url": self.tag_archive_url,
                 "download": download,
             },
+            # 증분은 **베이스가 준비된 뒤에만** 의미가 있다. 베이스가 없는 사용자에게
+            # 권하면 1.4GB 를 건너뛰고 275MB 를 받아 반쪽 코퍼스가 된다.
+            "tag_archive_increment": {
+                **self._archive_snapshot(self._spec("tag_archive_increment"), download),
+                "base_ready": ready,
+            },
             "corpus_archive": self._archive_snapshot(self._spec("corpus_archive"), download),
             "samples": {
                 "app_data_template": str(self.runtime_paths.resource_path("app_data_template")),
@@ -244,6 +284,9 @@ class RuntimeInstallManager:
 
     def start_tag_archive_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("tag_archive", blocking=blocking)
+
+    def start_tag_increment_download(self, *, blocking: bool = False) -> dict[str, Any]:
+        return self.start_archive_download("tag_archive_increment", blocking=blocking)
 
     def cancel_tag_archive_download(self) -> dict[str, Any]:
         return self.cancel_archive_download()

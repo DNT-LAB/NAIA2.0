@@ -114,6 +114,7 @@
         {"method": "POST", "path": "/api/install-manager/initialize", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/install-manager/tag-archive/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/tag-archive/download/cancel", "smoke": "state_mutation"},
+      {"method": "POST", "path": "/api/install-manager/tag-archive-increment/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/corpus-archive/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/corpus-archive/download/cancel", "smoke": "state_mutation"}
       ]

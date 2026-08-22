@@ -24,11 +24,17 @@ def _state_of(frame: Any) -> str:
 
 
 def _seed_missing_positions(frames: list) -> None:
-    """POS: CUSTOM 일 때 좌표가 빈 활성 슬롯에 NAI 가 놓았을 자리를 뿌린다.
+    """POS: CUSTOM 일 때 좌표가 빈 활성 슬롯에 AUTO 배치의 자리를 뿌린다.
+
+    사용자가 보던 배치(AUTO)에서 이어서 옮기게 하려는 것이다.
 
     ⚠️ 켜는 순간만 뿌리면 **그 뒤에 추가·활성화된 슬롯이 좌표 없이 남는다.**
-    그러면 `active_character_positions` 가 "부분 좌표" 로 보고 전부 버려서, 켜 둔
-    CUSTOM 이 조용히 무효가 된다. 그래서 상태가 바뀔 때마다 채운다.
+    그러면 `resolved_character_positions` 가 "부분 좌표" 로 보고 그 요청을 통째로
+    AUTO 배치로 떨어뜨려, 켜 둔 CUSTOM 이 조용히 무효가 된다. 그래서 상태가
+    바뀔 때마다 채운다.
+
+    ⚠️ 반대로 **이미 있는 좌표는 절대 덮지 않는다** - 슬롯은 삭제되기 전까지
+    사용자가 정한 자리를 기억해야 한다(사용자 지정).
     """
     from core.character_settings import auto_character_positions, normalize_position
 

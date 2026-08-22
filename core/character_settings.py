@@ -111,8 +111,12 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 "position": normalize_position(frame.get("position")),
             })
     settings["character_frames"] = sort_character_frames(normalized_frames)
-    # POS: AUTO(기본) 는 좌표를 아예 보내지 않아 NAI 가 알아서 배치한다(AI's Choice).
-    # CUSTOM 이어야 슬롯의 position 이 페이로드로 나간다.
+    # POS: AUTO(기본) 는 `auto_character_positions` 가 구운 자리를 보낸다.
+    # CUSTOM 이면 슬롯이 기억하고 있는 사용자 좌표가 나간다.
+    #
+    # ⚠️ **AUTO 로 되돌려도 슬롯의 position 은 지우지 않는다**(사용자 지정:
+    #    "각 슬롯은 삭제되기 전까지 사용자가 설정한 POS 를 기억해야 한다").
+    #    CUSTOM 으로 되돌아오면 그대로 살아난다.
     settings["use_custom_positions"] = bool(data.get("use_custom_positions", False))
     return settings, migrated
 
@@ -133,47 +137,100 @@ def normalize_position(value: Any) -> dict[str, float] | None:
     return {"x": round(min(1.0, max(0.0, x)), 3), "y": round(min(1.0, max(0.0, y)), 3)}
 
 
-# NAI 가 좌표 없이 받았을 때 스스로 배치하는 자리(AI's Choice, 사용자 실측).
-# 가운데에서 시작해 좌우로 0.2 씩 벌리고, 그 줄을 채우면 위/아래 줄로 넘어간다.
-# 실측 3인: (0.5,0.5) (0.3,0.5) (0.7,0.5).
-_AUTO_ROWS = (0.5, 0.3, 0.7, 0.1, 0.9)     # 가운데 줄부터 위/아래로
-_AUTO_COLS = (0.5, 0.3, 0.7, 0.1, 0.9)     # 가운데에서 좌/우로
+# POS: AUTO 의 배치 순서 (사용자 지정 2026-08-23).
+#
+#   중앙 -> 왼쪽 -> 오른쪽 -> 위 -> 아래 -> 왼쪽위 -> 오른쪽위 -> 왼쪽아래 -> 오른쪽아래
+#   -> (중앙을 빼고) 왼쪽 -> 오른쪽 -> 위 -> ... 되풀이
+#
+# ⚠️ **NAI 에 맡기지 않고 우리가 정한다**(사용자 지정). NAI 의 AI's Choice 는
+#    좌표를 안 보내야 도는데, 그러면 화면의 원과 실제 배치가 갈리고 1인일 때는
+#    좌표가 조용히 무시되기까지 한다. AUTO 도 좌표를 보내되 값을 여기서 굽는다.
+#
+# 벌림폭 0.2 는 사용자 실측 페이로드에서 온다 - 3인 AI's Choice 가
+# (0.5,0.5) (0.3,0.5) (0.7,0.5) 였다. 좌상단 원점이라 "위"는 y 가 작은 쪽이다.
+_AUTO_C, _AUTO_LO, _AUTO_HI = 0.5, 0.3, 0.7
+_AUTO_RING = (
+    {"x": _AUTO_C, "y": _AUTO_C},      # 중앙
+    {"x": _AUTO_LO, "y": _AUTO_C},     # 왼쪽
+    {"x": _AUTO_HI, "y": _AUTO_C},     # 오른쪽
+    {"x": _AUTO_C, "y": _AUTO_LO},     # 위
+    {"x": _AUTO_C, "y": _AUTO_HI},     # 아래
+    {"x": _AUTO_LO, "y": _AUTO_LO},    # 왼쪽위
+    {"x": _AUTO_HI, "y": _AUTO_LO},    # 오른쪽위
+    {"x": _AUTO_LO, "y": _AUTO_HI},    # 왼쪽아래
+    {"x": _AUTO_HI, "y": _AUTO_HI},    # 오른쪽아래
+)
 
 
 def auto_character_positions(count: int) -> list[dict[str, float]]:
-    """좌표를 정하지 않았을 때 NAI 가 놓는 자리. 최대 25명(A1~E5).
+    """AUTO 의 자리. 순서는 `_AUTO_RING`, 아홉을 넘으면 중앙만 빼고 되풀이한다.
 
-    POS 편집을 처음 열 때 원의 출발 위치로 쓴다 - 사용자가 보던 배치에서
-    이어서 옮기게 하려는 것이다. 생성 페이로드에는 쓰지 않는다(AUTO 는 좌표를
-    아예 안 보낸다).
+    두 곳에서 같은 값을 쓴다 - 그래야 화면의 원과 실제로 나가는 좌표가 같다:
+      · 생성 요청 단계(`character_positions_for_mode`)
+      · CUSTOM 을 처음 켤 때 원의 출발 자리(빈 좌표 씨앗)
+
+    ⚠️ 아홉을 넘으면 **자리가 겹친다.** 사용자 지정이다 - NAI 도 A1~E5 안에서만
+    놓으므로 인원이 늘면 어차피 붙는다.
     """
+    if count <= 0:
+        return []
     out: list[dict[str, float]] = []
-    for y in _AUTO_ROWS:
-        for x in _AUTO_COLS:
-            if len(out) >= count:
-                return out
-            out.append({"x": x, "y": y})
+    for i in range(count):
+        # 되풀이 구간은 중앙(0번)을 건너뛴다: 왼쪽 -> 오른쪽 -> 위 -> ...
+        slot = i if i < len(_AUTO_RING) else 1 + (i - len(_AUTO_RING)) % (len(_AUTO_RING) - 1)
+        out.append(dict(_AUTO_RING[slot]))
     return out
 
 
-def character_positions_for_mode(app_context, mode: str = "NAI") -> list[dict[str, float]]:
+def character_positions_for_mode(app_context, mode: str = "NAI",
+                                 count: int | None = None) -> list[dict[str, float]]:
     """이 모드의 활성 캐릭터 좌표. 페이로드 빌드가 부르는 입구다.
 
     좌표는 **굴림의 일부가 아니다**(와일드카드로 변하지 않는다) - 그래서 캐릭터
     스냅샷을 거치지 않고 설정에서 곧장 읽는다. 스냅샷에 얹으면 굴림마다 좌표가
     따라다녀야 하고, 재굴림 시 좌표가 옛 값에 묶인다.
+
+    `count` 는 **실제로 나갈 캐릭터 수**다(조건부 규칙이 더하거나 뺀 뒤의 수).
     """
     try:
         settings = load_character_settings(mode, save_root=_save_root_from_context(app_context))
-        return active_character_positions(settings)
+        return resolved_character_positions(settings, count=count)
     except Exception:
         return []
 
 
-def active_character_positions(settings: dict | None) -> list[dict[str, float]]:
-    """활성 프레임과 **같은 순서**의 좌표 목록. CUSTOM 이 아니거나 하나라도
-    비어 있으면 빈 목록 - 부분 좌표는 나머지를 중앙에 몰아 놓기 때문에
-    (api_service 의 default_center) 보내지 않는 편이 낫다.
+def resolved_character_positions(settings: dict | None,
+                                 count: int | None = None) -> list[dict[str, float]]:
+    """생성 요청이 실제로 보낼 좌표. **AUTO 든 CUSTOM 이든 좌표는 나간다.**
+
+      · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
+      · AUTO   - 여기서 구운 `auto_character_positions` (사용자 지정)
+
+    ⚠️ 아래 두 경우에는 CUSTOM 이라도 **AUTO 배치로 통째로 떨어진다.** 좌표 수가
+    캐릭터 수와 어긋난 채로 나가면 api_service 가 빈 자리를 default_center
+    (0.5/0.5)로 메워 나머지가 중앙에 겹치고, 아예 개수가 안 맞으면 좌표가 통째로
+    꺼진다. 반쪽짜리 사용자 좌표보다 온전한 자동 배치가 낫다.
+      · 활성 슬롯 중 좌표가 빈 것이 있다(옛 설정 파일. 지금은
+        headless_character_service 가 CUSTOM 인 동안 매번 씨앗을 채운다)
+      · `count` 가 활성 슬롯 수와 다르다(조건부 규칙이 캐릭터를 더하거나 뺐다)
+    """
+    normalized = normalize_character_settings(settings)
+    frames = active_character_frames(normalized)
+    total = len(frames) if count is None else max(0, int(count))
+    if not total:
+        return []
+    if normalized.get("use_custom_positions") and total == len(frames):
+        positions = [normalize_position(frame.get("position")) for frame in frames]
+        if not any(position is None for position in positions):
+            return [dict(position) for position in positions]
+    return auto_character_positions(total)
+
+
+def custom_character_positions(settings: dict | None) -> list[dict[str, float]]:
+    """CUSTOM 일 때 슬롯이 기억하고 있는 좌표만. AUTO 이거나 하나라도 비면 빈 목록.
+
+    "사용자가 정한 좌표가 온전한가" 를 묻는 자리다 - 생성이 실제로 보낼 좌표는
+    `resolved_character_positions` 다(AUTO 배치까지 포함한다).
     """
     normalized = normalize_character_settings(settings)
     if not normalized.get("use_custom_positions"):

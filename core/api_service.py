@@ -1003,13 +1003,20 @@ class APIService:
                                 char_source = "Snapshot" if _had_snapshot else "HeadlessSettings"
                                 characters = char_params["characters"]
                                 ucs = char_params.get("uc", [])
-                                # POS: CUSTOM 일 때만 채워진다. 좌표는 굴림의 일부가
-                                # 아니라 슬롯에 붙은 정적 속성이라 스냅샷을 거치지 않고
-                                # 설정에서 곧장 읽는다.
+                                # POS: AUTO 든 CUSTOM 이든 채워진다.
+                                #   CUSTOM - 슬롯이 기억하는 사용자 좌표
+                                #   AUTO   - 여기서 굽는 하드코딩 배치(사용자 지정)
+                                # 좌표는 굴림의 일부가 아니라 슬롯에 붙은 정적 속성이라
+                                # 스냅샷을 거치지 않고 설정에서 곧장 읽는다.
+                                #
+                                # ⚠️ `count` 를 **실제로 나갈 캐릭터 수**로 준다. 조건부
+                                #    규칙이 캐릭터를 더하거나 빼면 설정의 활성 슬롯 수와
+                                #    갈리는데, 그때 좌표 개수가 어긋나면 아래 coords_given
+                                #    이 꺼져 배치가 통째로 조용히 사라진다.
                                 from core.character_settings import character_positions_for_mode
 
                                 character_positions = character_positions_for_mode(
-                                    self.app_context, _char_mode
+                                    self.app_context, _char_mode, count=len(characters)
                                 )
                                 character_ids = list(char_params.get("character_ids") or [])
                                 # Persist a genuine fresh roll (reroll ON, or snapshot was
@@ -1056,11 +1063,14 @@ class APIService:
                     #    False 로 못박혀 있어, 좌표를 정성껏 실어 보내고 같은 요청에서
                     #    "무시하라" 고 말하고 있었다 - A1~E5 위치가 한 번도 먹지 않았다.
                     #
-                    #    그렇다고 항상 켜면 회귀다: 좌표를 만진 적 없는 사용자도
+                    #    그렇다고 무조건 켜면 안 된다: 좌표를 아예 안 준 요청은
                     #    `default_center` 때문에 **전원 0.5/0.5** 가 실려 중앙에 겹친다.
-                    #    지금 그런 요청은 use_order(등장 순서 자동 배치)를 받고 있고 그게 맞다.
+                    #    그런 요청은 use_order(등장 순서 자동 배치)를 받아야 맞다.
                     #    그래서 **전원분 좌표를 실제로 받았을 때만** 켠다.
                     #
+                    #    캐릭터 모듈 경로는 AUTO 에서도 좌표를 준다(하드코딩 배치,
+                    #    character_settings.auto_character_positions) - 그래서 여기서는
+                    #    늘 켜진다. 좌표가 없는 쪽은 다른 소스(Interactive/스케치북 등)다.
                     #    NAI 는 캐릭터가 1명이면 좌표를 조용히 무시한다(사용자 실측). 그래도
                     #    여기서 막지는 않는다 - 무시는 NAI 쪽 동작이고, 프런트가 이미 1명일 때
                     #    좌표를 보내지 않는다(interactivePanel.mjs `withCenter`).

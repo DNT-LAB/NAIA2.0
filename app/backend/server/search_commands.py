@@ -152,6 +152,17 @@ async def handle_search_command(
         # archive sources for the progress bar regardless of the current scope.
         if callable(sources):
             archive_count = len(sources())
+        # ⚠️ 기간 컷오프를 **여기서도 똑같이 적용한다.** 진행률의 여는/닫는 메시지는
+        #    이 수를 쓰고 중간 메시지는 실제로 훑는 수를 쓰는데, 둘이 갈리면 막대가
+        #    `0/175 -> 25/25 -> 175/175` 로 튄다. 슬라이싱 규칙은
+        #    `run_search_command` 와 같아야 한다 - 다르면 또 갈린다.
+        if archive_count and (command.get("bucket_start") is not None
+                              or command.get("bucket_end") is not None):
+            from core.tag_bucket_dates import clamp_bucket_range
+
+            s, e = clamp_bucket_range(command.get("bucket_start"),
+                                      command.get("bucket_end"), archive_count)
+            archive_count = e - s + 1
         progress_total = max(1, archive_count)
         await _send_json(ws, {
             "type": "search_progress",

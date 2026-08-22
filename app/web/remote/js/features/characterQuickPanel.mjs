@@ -108,7 +108,8 @@ export function createCharacterQuickPanel({
       + `<button type="button" class="cq-slot-head" data-cq-toggle="${index}"`
       + ` aria-expanded="${isOpen ? 'true' : 'false'}">`
       + '<span class="cq-caret" aria-hidden="true">▸</span>'
-      + `<span class="cq-slot-title">${escHtml(slotLabel(character, ordinal))}</span></button>`
+      + `<span class="cq-slot-title" data-cq-label="${index}">`
+      + `${escHtml(slotLabel(character, ordinal))}</span></button>`
       + (canDeactivate
           ? `<button type="button" class="cq-slot-btn" data-cq-down="${index}"`
             + ` aria-label="비활성으로 내림">&#9660;</button>`
@@ -119,11 +120,15 @@ export function createCharacterQuickPanel({
       + `<div class="cq-slot-body">${body}</div></div>`;
   }
 
-  /** 구성만 담는다 - 입력 내용은 절대 넣지 않는다(캐럿 튐). */
+  /** 구성만 담는다 - 입력 내용은 절대 넣지 않는다(캐럿 튐).
+   *
+   *  ⚠️ 예전에 `slotLabel()` 을 여기 넣었다가 정확히 그 함정을 밟았다: 라벨은
+   *  프롬프트 앞 태그에서 만들어지므로 **입력 내용이다.** 한 글자 칠 때마다 서명이
+   *  바뀌어 통째로 다시 그렸고, 그 순간 편집 중인 textarea 가 교체돼 포커스가
+   *  빠졌다(사용자 제보). 라벨은 서명이 아니라 syncValues 가 제자리에서 고친다. */
   function signature(state) {
     const slots = activeSlots(state)
-      .map(({character, index}, i) =>
-        [index, openSlots.has(index) ? 1 : 0, slotLabel(character, i + 1)].join('~'))
+      .map(({index}) => [index, openSlots.has(index) ? 1 : 0].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
     return `${open ? 1 : 0}${state && state.activated ? 1 : 0}#${slots}`;
@@ -132,6 +137,17 @@ export function createCharacterQuickPanel({
   /** 렌더가 값을 지웠으므로 여기서 되돌린다(마크업에 값을 넣지 않는 대가). */
   function syncValues(state) {
     const chars = (state && state.characters) || [];
+    // 라벨은 프롬프트에서 파생되므로 **여기서** 고친다. 다시 그리면 편집 중인
+    // 칸이 교체돼 포커스가 빠진다(위 signature 주석 참조).
+    const ordinalOf = new Map();
+    activeSlots(state).forEach(({index}, i) => ordinalOf.set(index, i + 1));
+    mount.querySelectorAll('[data-cq-label]').forEach(element => {
+      const index = Number(element.dataset.cqLabel);
+      const character = chars[index];
+      if (!character) return;
+      const next = slotLabel(character, ordinalOf.get(index) || 1);
+      if (element.textContent !== next) element.textContent = next;
+    });
     mount.querySelectorAll('[data-cq-field]').forEach(element => {
       const key = element.dataset.cqField || '';
       const match = key.match(/^char_(prompt|uc)_(\d+)$/);

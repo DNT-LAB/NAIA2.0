@@ -690,6 +690,19 @@ export function createSearchPanel({
     bucketState.end = Math.min(Math.max(ce, 0), last);
     if (bucketState.start > bucketState.end) [bucketState.start, bucketState.end] = [bucketState.end, bucketState.start];
     bucketState.loaded = bucketState.count > 0;
+    // 설치 직후 한 번: 끝을 마지막 버킷까지 민다(위 pushEndAfterBuckets 참조).
+    if (pushEndAfterBuckets && bucketState.loaded) {
+      pushEndAfterBuckets = false;
+      const lastBucket = bucketState.count - 1;
+      if (bucketState.end < lastBucket) {
+        bucketState.end = lastBucket;
+        if (bucketState.start > bucketState.end) bucketState.start = bucketState.end;
+        persistBucketRange();
+        showToast(`최신 태그 데이터 설치 완료 — 검색 기간을 ${ymEnd(lastBucket)} 까지 넓혔습니다.`, 'success');
+      } else {
+        showToast('최신 태그 데이터 설치 완료.', 'success');
+      }
+    }
     // ⚠️ 슬라이더만 다시 그리면 안 된다. 버킷 표는 **버튼을 그린 뒤에** 도착하는데,
     //    버튼 라벨의 기간이 그 표에서 나온다 - 슬라이더만 갱신하면 라벨이 폴백
     //    ("Download latest tag data")에 굳는다(실측).
@@ -709,7 +722,12 @@ export function createSearchPanel({
       const dl = next?.download || {};
       incrementBusy = Boolean(dl.active && dl.phase === 'tag_archive_increment');
       if (next?.ready && was === false) {
-        showToast('최신 태그 데이터 설치 완료 — 기간 슬라이더가 넓어집니다.', 'success');
+        // ⚠️ 받았다고 검색 범위가 저절로 늘지는 않는다. 기본 끝은 `DEFAULT_END_YM`
+        //    기준이라(예: 버킷 135) **다운로드해도 2026 데이터가 안 잡힌다.**
+        //    받은 이유가 그 데이터를 쓰려는 것이니 끝을 마지막 버킷까지 민다
+        //    (사용자 지정). 시작점은 건드리지 않는다.
+        //    버킷 수는 응답이 와야 아므로 표를 다시 받은 뒤에 민다.
+        pushEndAfterBuckets = true;
         requestBucketDates();
       }
       if (rerender && getCurrentModuleId() === 'search') renderDateRangeHost();
@@ -721,8 +739,12 @@ export function createSearchPanel({
     const host = moduleBody.querySelector('#drTrack')?.closest('.search-daterange')?.parentElement;
     const btn = moduleBody.querySelector('#searchTagUpdateBtn');
     const wanted = tagIncrementHtml();
-    if (!wanted) { btn?.remove(); return; }
-    if (btn) {
+    // ⚠️ 버튼이 사라지는 경우에도 **슬라이더는 반드시 다시 그린다.** 예전에는 여기서
+    //    조기 반환했는데, 설치가 끝나는 순간이 바로 "버튼이 사라지는" 순간이라
+    //    같이 넓힌 기간이 화면에 안 나타났다(토스트만 뜨고 막대는 그대로, 실측).
+    if (!wanted) {
+      btn?.remove();
+    } else if (btn) {
       btn.outerHTML = wanted;
     } else if (host) {
       host.insertAdjacentHTML('afterbegin', wanted);
@@ -895,6 +917,7 @@ export function createSearchPanel({
   // (실제 2025/09~2026/06 인데 2025.11 로 적을 뻔했다).
   let incrementState = null;      // /api/install-manager 의 tag_archive_increment
   let incrementBusy = false;
+  let pushEndAfterBuckets = false;   // 설치 직후, 새 표가 오면 끝을 마지막으로 민다
 
   function missingBucketSpan() {
     // 날짜표에는 있는데 파일이 없는 구간 = 아직 안 받은 데이터.

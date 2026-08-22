@@ -22317,6 +22317,18 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   position: absolute; left: 12px; top: 40px; z-index: 3;
   display: none; width: 260px;
 }
+/* 패널이 펼쳐지면 결과 이미지를 **패널 오른쪽 끝까지** 민다(사용자 지정) - 왼쪽에
+   얹힌 패널이 그림을 덮지 않게. 끝까지 밀지 않는다: 필요한 만큼만 비켜서면 된다.
+   ⚠️ 미는 대상은 **요소가 아니라 그림**이다. `#preview` 는 `width/height: 100%` +
+   `object-fit: contain` 이라 요소는 늘 뷰어를 꽉 채우고 그림만 그 안에서 레터박싱된
+   다. 그래서 `justify-content` 도 `padding` 도 아무 효과가 없다(실측: flex-end 로
+   바꿔도 imgLeft 가 1px 도 안 움직였다). `object-position` 이 정확한 손잡이다.
+   이동량(px)은 JS 가 재서 넣는다 - 남는 여백을 넘지 않게 잘라서(syncViewerShift).
+   크기는 건드리지 않는다. */
+#resultViewer.is-cq-shift > #preview {
+  object-position: var(--cq-img-shift, 50%) 50%;
+}
+#preview { transition: object-position 0.16s ease; }
 .cq-float.open { display: block; }
 .cq-box {
   width: 58%; opacity: 0.5;

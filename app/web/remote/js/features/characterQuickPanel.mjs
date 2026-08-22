@@ -25,6 +25,8 @@ const MIN_ROWS = {prompt: 4, uc: 2};
 // 그리드가 침범하면 안 되는 아래 경계. 결과 정보 패널("GENERATION INFO")이다.
 const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
+// 그림을 패널 오른쪽 끝에서 이만큼 띄운다.
+const VIEWER_GAP = 8;
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
@@ -160,6 +162,46 @@ export function createCharacterQuickPanel({
     });
   }
 
+  /** 패널이 펼쳐져 있으면 결과 이미지를 오른쪽으로 민다(사용자 지정).
+   *
+   *  ⚠️ 미는 대상은 **요소가 아니라 그림**이다. `#preview` 는 `width/height: 100%`
+   *  + `object-fit: contain` 이라 요소는 늘 뷰어를 꽉 채우고 그림만 그 안에서
+   *  레터박싱된다. 그래서 `justify-content` 도 `padding` 도 안 먹는다(실측: flex-end
+   *  로 바꿔도 imgLeft 가 1px 도 안 움직였다). CSS 가 `object-position` 을 옮긴다 -
+   *  남는 여백만큼만 이동하고, 그림이 꽉 차 있으면 그대로다. 크기는 안 건드린다.
+   *
+   *  Interactive 의 `--ia-shift`(padding 으로 자리를 비우는 방식)를 쓰지 않는 이유:
+   *  그쪽은 팝업이 자리를 **요구**해 그림이 작아져도 되는 경우다. 여기 패널은
+   *  반투명으로 얹히는 것이라 그림을 줄일 이유가 없다. */
+  function syncViewerShift() {
+    const viewer = document.getElementById('resultViewer');
+    if (!viewer) return;
+    const on = visible && open;
+    viewer.classList.toggle('is-cq-shift', on);
+    if (!on) { viewer.style.removeProperty('--cq-img-shift'); return; }
+    const img = document.getElementById('preview');
+    const box = img && img.getBoundingClientRect();
+    if (!img || !box || !box.width || !img.naturalWidth) {
+      viewer.style.removeProperty('--cq-img-shift');
+      return;
+    }
+    // `object-fit: contain` 이 실제로 그리는 크기. 요소 상자와 다르다.
+    const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+    const drawnWidth = img.naturalWidth * scale;
+    const slack = Math.max(0, box.width - drawnWidth);
+    // 캐릭터 박스 **오른쪽 끝**까지만 민다(사용자 정정). 끝까지 밀지 않는다.
+    //
+    // ⚠️ **밀기만 한다.** 넓은 화면에서는 가운데 놓인 그림이 이미 패널을 벗어나
+    //    있는데, 원하는 위치를 그대로 넣으면 오히려 왼쪽으로 **당겨**진다
+    //    (실측: 가운데 908 -> 760 으로 끌려왔다). 기본 자리(가운데)보다 왼쪽으로는
+    //    가지 않게 바닥을 받친다.
+    const panel = mount && mount.getBoundingClientRect();
+    const want = panel ? panel.right + VIEWER_GAP - box.left : 0;
+    const centered = slack / 2;
+    const offset = Math.min(Math.max(want, centered), slack);
+    viewer.style.setProperty('--cq-img-shift', Math.round(offset) + 'px');
+  }
+
   /** 그리드가 GENERATION INFO 바로 위까지만 자라게 한다(사용자 지정).
    *
    *  CSS 의 vh 로는 못 한다 - 결과 정보 패널의 높이가 접힘/펼침에 따라 변하고,
@@ -238,6 +280,8 @@ export function createCharacterQuickPanel({
     // 오기 전이라 없을 수 있는데, 그때는 render 가 알아서 물러난다.
     if (visible && !mount && lastState) render(lastState, true);
     if (mount) mount.classList.toggle('open', visible);
+    // 패널이 사라지면 이미지는 원래 자리(가운데)로 돌아와야 한다.
+    syncViewerShift();
   }
 
   function render(state, force) {
@@ -278,6 +322,7 @@ export function createCharacterQuickPanel({
     lastSignature = nextSignature;
     syncValues(current);
     fitGridHeight();
+    syncViewerShift();
   }
 
   // 창 크기가 바뀌면 아래 경계도 움직인다. 한 번만 건다.

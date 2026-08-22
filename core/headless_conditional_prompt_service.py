@@ -111,11 +111,10 @@ class HeadlessConditionalPromptService:
 
         store = get_conditional_prompt_store(self.context)
         settings = store.collect_settings()
-        editor_mode = str(settings.get("editor_mode") or "legacy")
-        editor_mode = editor_mode if editor_mode in {"legacy", "v2"} else "legacy"
+        editor_mode = self._editor_mode(settings)
         rules_legacy = str(settings.get("rules") or "")
         rules_v2 = str(settings.get("rules_v2") or "")
-        active_rules = rules_v2 if editor_mode == "v2" else rules_legacy
+        active_rules = self._active_rules(settings)
         engine_options = normalize_conditional_engine_options(settings.get("engine_options") or {})
         return self.context._module_state_payload("conditional_prompt", {
             "enabled": bool(settings.get("enabled", False)),
@@ -215,6 +214,33 @@ class HeadlessConditionalPromptService:
         store.apply_settings(settings)
         return self.state()
 
+    # ------------------------------------------------------------------
+    # 편집기 모드와 규칙 텍스트
+    #
+    # ⚠️ 규칙 텍스트가 **두 칸**(`rules` = Legacy, `rules_v2` = 블록 편집기)이고
+    #    실행은 `editor_mode` 가 가리키는 쪽만 쓴다. 프리셋 저장·로드가 이걸 안 보고
+    #    `rules_v2` 에 못박혀 있어서 Legacy 사용자에게는 프리셋이 통째로 고장나
+    #    있었다 - 저장하면 화면에 없는 것이 저장되고, 로드하면 편집기가 바뀌면서
+    #    자기 규칙이 사라졌다. 그래서 두 곳 다 이 헬퍼를 지나게 한다.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _editor_mode(settings: dict[str, Any]) -> str:
+        mode = str(settings.get("editor_mode") or "legacy")
+        return mode if mode in {"legacy", "v2"} else "legacy"
+
+    @classmethod
+    def _rules_key(cls, settings: dict[str, Any]) -> str:
+        return "rules_v2" if cls._editor_mode(settings) == "v2" else "rules"
+
+    @classmethod
+    def _active_rules(cls, settings: dict[str, Any]) -> str:
+        return str(settings.get(cls._rules_key(settings)) or "")
+
+    @classmethod
+    def _write_active_rules(cls, settings: dict[str, Any], dsl: str) -> None:
+        settings[cls._rules_key(settings)] = dsl
+
     def _apply_rules_v2_book(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         from core.conditional.dsl_serializer import serialize_rulebook
         from core.conditional_prompt_settings import normalize_conditional_engine_options
@@ -281,7 +307,10 @@ class HeadlessConditionalPromptService:
             elif source_preset:
                 book = storage.load(source_preset)
             else:
-                book = parse_rulebook(str(settings.get("rules_v2") or ""))
+                # ⚠️ **화면에 보이는 규칙**을 담는다. 예전에는 `rules_v2` 로 못박혀
+                # 있어서, Legacy 편집기를 쓰던 사용자가 저장을 누르면 자기가 보고
+                # 있지도 않은(대개 비어 있는) v2 텍스트가 프리셋이 됐다.
+                book = parse_rulebook(self._active_rules(settings))
                 opts = normalize_conditional_engine_options(settings.get("engine_options") or {})
                 book.max_passes = opts["max_passes"]
                 book.stop_on_match = opts["stop_on_match"]
@@ -298,8 +327,7 @@ class HeadlessConditionalPromptService:
         storage.save(name, book)
         settings["active_preset"] = name
         if activate:
-            settings["rules_v2"] = serialize_rulebook(book)
-            settings["editor_mode"] = "v2"
+            self._write_active_rules(settings, serialize_rulebook(book))
             settings["engine_options"] = {
                 "max_passes": book.max_passes,
                 "stop_on_match": book.stop_on_match,
@@ -322,8 +350,11 @@ class HeadlessConditionalPromptService:
         except Exception as exc:
             return self._state_with(messages=[self._toast_message(f"프리셋 로드 실패: {exc}", "error")])
 
-        settings["rules_v2"] = serialize_rulebook(book)
-        settings["editor_mode"] = "v2"
+        # ⚠️ **편집기 모드를 바꾸지 않는다.** 예전에는 로드가 `rules_v2` 에 쓰고
+        # `editor_mode` 를 v2 로 못박아서, Legacy 를 쓰던 사용자는 프리셋을 부르는
+        # 순간 낯선 블록 편집기로 끌려가고 자기 규칙은 화면에서 사라졌다
+        # (`settings["rules"]` 에 남아 있지만 비활성이라 보이지 않는다).
+        self._write_active_rules(settings, serialize_rulebook(book))
         settings["engine_options"] = {
             "max_passes": book.max_passes,
             "stop_on_match": book.stop_on_match,
@@ -367,9 +398,10 @@ class HeadlessConditionalPromptService:
             return self._state_with(simulation=result)
 
         # legacy "test"
-        editor_mode = str(settings.get("editor_mode") or "legacy")
-        dsl = str(settings.get("rules_v2") if editor_mode == "v2" else settings.get("rules") or "")
-        result = self._run_simulation(dsl)
+        # ⚠️ 예전 식은 `str(A if cond else B or "")` 이라 우선순위가 어긋나 있었다 -
+        #    v2 인데 `rules_v2` 가 비어 있으면 `str(None)` = **문자열 "None"** 이
+        #    DSL 로 파싱됐다. 헬퍼 한 곳으로 모은다.
+        result = self._run_simulation(self._active_rules(settings))
         self._last_log = self._format_sim_log(result)
         return self.state()
 

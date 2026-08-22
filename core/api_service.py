@@ -1003,7 +1003,14 @@ class APIService:
                                 char_source = "Snapshot" if _had_snapshot else "HeadlessSettings"
                                 characters = char_params["characters"]
                                 ucs = char_params.get("uc", [])
-                                character_positions = []
+                                # POS: CUSTOM 일 때만 채워진다. 좌표는 굴림의 일부가
+                                # 아니라 슬롯에 붙은 정적 속성이라 스냅샷을 거치지 않고
+                                # 설정에서 곧장 읽는다.
+                                from core.character_settings import character_positions_for_mode
+
+                                character_positions = character_positions_for_mode(
+                                    self.app_context, _char_mode
+                                )
                                 character_ids = list(char_params.get("character_ids") or [])
                                 # Persist a genuine fresh roll (reroll ON, or snapshot was
                                 # empty) so the preview reflects what was generated. Never

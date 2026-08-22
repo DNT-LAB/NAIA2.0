@@ -155,6 +155,21 @@ class HeadlessCharacterService:
             settings["is_active"] = context._coerce_bool(value)
         elif key == "reroll_on_generate":
             settings["reroll_on_generate"] = context._coerce_bool(value)
+        elif key == "use_custom_positions":
+            # POS: AUTO <-> CUSTOM. AUTO 는 좌표를 아예 안 보내 NAI 가 배치한다.
+            # 스냅샷은 건드리지 않는다 - 좌표는 굴림의 일부가 아니다.
+            settings["use_custom_positions"] = context._coerce_bool(value)
+        elif key.startswith("char_pos_"):
+            index = context._index_from_key(key, "char_pos_")
+            if index is not None:
+                from core.character_settings import normalize_position
+
+                frame = self.ensure_frame(frames, index)
+                raw = value
+                if isinstance(raw, str):
+                    parts = [part.strip() for part in raw.split(",")]
+                    raw = {"x": parts[0], "y": parts[1]} if len(parts) == 2 else None
+                frame["position"] = normalize_position(raw)
         elif key == "add_character":
             frames.append({"prompt": "", "uc": "", "is_enabled": True, "slot_state": "active", "custom_name": ""})
             invalidate_snapshot = True

@@ -108,9 +108,81 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 "slot_state": slot_state,
                 "return_slot_state": str(frame.get("return_slot_state") or ""),
                 "custom_name": str(frame.get("custom_name") or frame.get("slot_name") or ""),
+                "position": normalize_position(frame.get("position")),
             })
     settings["character_frames"] = sort_character_frames(normalized_frames)
+    # POS: AUTO(기본) 는 좌표를 아예 보내지 않아 NAI 가 알아서 배치한다(AI's Choice).
+    # CUSTOM 이어야 슬롯의 position 이 페이로드로 나간다.
+    settings["use_custom_positions"] = bool(data.get("use_custom_positions", False))
     return settings, migrated
+
+
+def normalize_position(value: Any) -> dict[str, float] | None:
+    """`{'x','y'}` 를 0.0~1.0 소수 3자리로. 좌표가 아니면 None.
+
+    3자리는 NAI 웹이 보내는 형식이다(실측 2026-08-22). 좌상단이 원점이고
+    x 는 왼->오, y 는 위->아래로 증가한다.
+    """
+    if not isinstance(value, dict):
+        return None
+    try:
+        x = float(value.get("x"))
+        y = float(value.get("y"))
+    except (TypeError, ValueError):
+        return None
+    return {"x": round(min(1.0, max(0.0, x)), 3), "y": round(min(1.0, max(0.0, y)), 3)}
+
+
+# NAI 가 좌표 없이 받았을 때 스스로 배치하는 자리(AI's Choice, 사용자 실측).
+# 가운데에서 시작해 좌우로 0.2 씩 벌리고, 그 줄을 채우면 위/아래 줄로 넘어간다.
+# 실측 3인: (0.5,0.5) (0.3,0.5) (0.7,0.5).
+_AUTO_ROWS = (0.5, 0.3, 0.7, 0.1, 0.9)     # 가운데 줄부터 위/아래로
+_AUTO_COLS = (0.5, 0.3, 0.7, 0.1, 0.9)     # 가운데에서 좌/우로
+
+
+def auto_character_positions(count: int) -> list[dict[str, float]]:
+    """좌표를 정하지 않았을 때 NAI 가 놓는 자리. 최대 25명(A1~E5).
+
+    POS 편집을 처음 열 때 원의 출발 위치로 쓴다 - 사용자가 보던 배치에서
+    이어서 옮기게 하려는 것이다. 생성 페이로드에는 쓰지 않는다(AUTO 는 좌표를
+    아예 안 보낸다).
+    """
+    out: list[dict[str, float]] = []
+    for y in _AUTO_ROWS:
+        for x in _AUTO_COLS:
+            if len(out) >= count:
+                return out
+            out.append({"x": x, "y": y})
+    return out
+
+
+def character_positions_for_mode(app_context, mode: str = "NAI") -> list[dict[str, float]]:
+    """이 모드의 활성 캐릭터 좌표. 페이로드 빌드가 부르는 입구다.
+
+    좌표는 **굴림의 일부가 아니다**(와일드카드로 변하지 않는다) - 그래서 캐릭터
+    스냅샷을 거치지 않고 설정에서 곧장 읽는다. 스냅샷에 얹으면 굴림마다 좌표가
+    따라다녀야 하고, 재굴림 시 좌표가 옛 값에 묶인다.
+    """
+    try:
+        settings = load_character_settings(mode, save_root=_save_root_from_context(app_context))
+        return active_character_positions(settings)
+    except Exception:
+        return []
+
+
+def active_character_positions(settings: dict | None) -> list[dict[str, float]]:
+    """활성 프레임과 **같은 순서**의 좌표 목록. CUSTOM 이 아니거나 하나라도
+    비어 있으면 빈 목록 - 부분 좌표는 나머지를 중앙에 몰아 놓기 때문에
+    (api_service 의 default_center) 보내지 않는 편이 낫다.
+    """
+    normalized = normalize_character_settings(settings)
+    if not normalized.get("use_custom_positions"):
+        return []
+    frames = active_character_frames(normalized)
+    positions = [normalize_position(frame.get("position")) for frame in frames]
+    if not positions or any(position is None for position in positions):
+        return []
+    return [dict(position) for position in positions]
 
 
 # 슬롯 정렬 불변식: [active...] [inactive...] [cold...]
@@ -1016,6 +1088,7 @@ def character_state_from_settings(
             "custom_name": str(frame.get("custom_name") or ""),
             "prompt": str(frame.get("prompt") or ""),
             "uc": str(frame.get("uc") or ""),
+            "position": normalize_position(frame.get("position")),
         })
 
     # SSOT: the preview reads the stored roll snapshot for this mode — it NEVER
@@ -1037,6 +1110,7 @@ def character_state_from_settings(
         "module_id": "character",
         "activated": bool(normalized.get("is_active")),
         "reroll_on_generate": bool(normalized.get("reroll_on_generate")),
+        "use_custom_positions": bool(normalized.get("use_custom_positions")),
         "characters": characters,
         "character_count": len(characters),
         "active_count": sum(1 for item in characters if item.get("active")),

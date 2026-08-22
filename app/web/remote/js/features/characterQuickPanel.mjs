@@ -76,12 +76,12 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
 
   function slotHtml(character, index, ordinal) {
     const isOpen = openSlots.has(index);
+    // 라벨(PROMPT/NEGATIVE)을 두지 않는다 - 자리를 먹는 만큼 입력 공간을 뺏는다.
+    // 네거티브는 **테두리 색**으로 구분하고, 뜻은 placeholder 가 말한다.
     const body = isOpen
-      ? `<div class="cq-sub">PROMPT</div>`
-        + `<textarea class="cq-input" data-cq-field="char_prompt_${index}" data-cq-min="prompt"`
+      ? `<textarea class="cq-input" data-cq-field="char_prompt_${index}" data-cq-min="prompt"`
         + ` rows="${MIN_ROWS.prompt}" placeholder="캐릭터 프롬프트"></textarea>`
-        + `<div class="cq-sub">NEGATIVE</div>`
-        + `<textarea class="cq-input" data-cq-field="char_uc_${index}" data-cq-min="uc"`
+        + `<textarea class="cq-input is-neg" data-cq-field="char_uc_${index}" data-cq-min="uc"`
         + ` rows="${MIN_ROWS.uc}" placeholder="캐릭터 네거티브"></textarea>`
       : '';
     // ⚠️ title 을 두지 않는다. 앱이 그걸 걷어 자체 툴팁으로 바꾸는데, 이 상자는

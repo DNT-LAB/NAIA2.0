@@ -991,7 +991,8 @@ class HeadlessPromptEngineeringService:
                 "remove_character_features": False,
                 "remove_clothes": False,
                 "remove_clothing_event": False,
-                "remove_color": True,
+                # 사용자 지정(2026-08-22): V5 추천에서만 켜져 있던 것을 끈다.
+                "remove_color": False,
                 "remove_location_and_background_color": False,
                 "remove_expression": False,
                 "remove_pose_action": False,

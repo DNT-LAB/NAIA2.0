@@ -22331,6 +22331,16 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   background: rgba(18, 18, 26, 0.72);
   border-color: rgba(124, 106, 239, 0.45);
 }
+/* 머리는 줄이다 - 토글 버튼 + 활성화 토글 + POS + 개수. */
+.cq-head-row {
+  display: flex; align-items: center; width: 100%;
+  background: rgba(255,255,255,0.04);
+  transition: background 0.14s ease;
+}
+.cq-box.is-open .cq-head-row {
+  background: rgba(124,106,239,0.12);
+  border-bottom: 1px solid rgba(255,255,255,0.09);
+}
 .cq-head, .cq-slot-head {
   display: flex; align-items: center; gap: 6px; width: 100%;
   padding: 5px 8px; cursor: pointer; border: 0;
@@ -22338,14 +22348,35 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   color: var(--text-secondary); text-align: left;
   transition: background 0.14s ease, color 0.14s ease;
 }
+.cq-head { flex: 1; min-width: 0; background: transparent; }
+/* 접힘은 좁아서(58%) 컨트롤이 라벨을 밀어낸다 - 펼쳤을 때만 보인다. */
+.cq-enable, .cq-pos { display: none; }
+.cq-box.is-open .cq-enable { display: inline-flex; }
+.cq-box.is-open .cq-pos { display: inline-flex; }
+.cq-enable {
+  align-items: center; gap: 4px; flex: none; cursor: pointer;
+  padding: 0 6px 0 0;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
+}
+.cq-enable:hover { color: var(--text-secondary); }
+.cq-enable input { width: 11px; height: 11px; margin: 0; cursor: pointer; accent-color: rgb(124,106,239); }
+.cq-pos {
+  align-items: center; justify-content: center; flex: none;
+  margin-right: 6px; padding: 2px 7px; cursor: pointer;
+  border-radius: 5px; border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.4px;
+  transition: border-color .14s, color .14s, background .14s;
+}
+.cq-pos:hover {
+  border-color: rgba(124,106,239,0.55); color: var(--text-primary);
+  background: rgba(124,106,239,0.16);
+}
 .cq-head:hover, .cq-slot-head:hover { color: var(--text-primary); background: rgba(255,255,255,0.09); }
 .cq-head:focus-visible, .cq-slot-head:focus-visible {
   outline: 1px solid var(--accent-glow); outline-offset: -2px;
 }
-.cq-box.is-open .cq-head {
-  background: rgba(124,106,239,0.12);
-  border-bottom: 1px solid rgba(255,255,255,0.09);
-}
+.cq-box.is-open .cq-head { background: transparent; }
 .cq-caret {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 4px;

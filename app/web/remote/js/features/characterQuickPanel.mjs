@@ -84,10 +84,12 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
         + `<textarea class="cq-input" data-cq-field="char_uc_${index}" data-cq-min="uc"`
         + ` rows="${MIN_ROWS.uc}" placeholder="캐릭터 네거티브"></textarea>`
       : '';
+    // ⚠️ title 을 두지 않는다. 앱이 그걸 걷어 자체 툴팁으로 바꾸는데, 이 상자는
+    //    좁아서 툴팁이 라벨을 그대로 덮는다(사용자 지적). 화살표가 이미 접힘/펼침을
+    //    말하고 있어 설명이 필요 없다.
     return `<div class="cq-slot${isOpen ? ' is-open' : ''}">`
       + `<button type="button" class="cq-slot-head" data-cq-toggle="${index}"`
-      + ` aria-expanded="${isOpen ? 'true' : 'false'}"`
-      + ` title="${escHtml(isOpen ? '눌러서 접습니다' : '눌러서 펼칩니다')}">`
+      + ` aria-expanded="${isOpen ? 'true' : 'false'}">`
       + '<span class="cq-caret" aria-hidden="true">▸</span>'
       + `<span class="cq-slot-title">${escHtml(slotLabel(character, ordinal))}</span></button>`
       + `<div class="cq-slot-body">${body}</div></div>`;
@@ -99,7 +101,8 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
       .map(({character, index}, i) =>
         [index, openSlots.has(index) ? 1 : 0, slotLabel(character, i + 1)].join('~'))
       .join('|');
-    return `${open ? 1 : 0}#${slots}`;
+    // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
+    return `${open ? 1 : 0}${state && state.activated ? 1 : 0}#${slots}`;
   }
 
   /** 렌더가 값을 지웠으므로 여기서 되돌린다(마크업에 값을 넣지 않는 대가). */
@@ -127,6 +130,13 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
   }
 
   function onInput(event) {
+    const toggle = event.target.closest('[data-cq-enable]');
+    if (toggle) {
+      // 모듈 팝업의 "캐릭터 프롬프트를 활성화 합니다" 와 같은 값이다 - 한쪽을
+      // 바꾸면 module_state 로 다른 쪽도 따라온다.
+      setModuleParam('character', 'activated', String(toggle.checked));
+      return;
+    }
     const element = event.target.closest('[data-cq-field]');
     if (!element) return;
     autoGrow(element);
@@ -134,6 +144,11 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
   }
 
   function onClick(event) {
+    // 활성화 토글은 label/input 이라 클릭이 여기로도 올라온다 - 바깥 토글보다 먼저 본다.
+    if (event.target.closest('[data-cq-enable]') || event.target.closest('.cq-enable')) return;
+    // TODO(POS): 캐릭터 좌표 편집. 규약은 확정됨(좌상단 원점 · 0~1 · 소수 3자리)
+    //   이고 백엔드도 준비됐다(use_coords). 앵커 UI 만 남았다.
+    if (event.target.closest('[data-cq-pos]')) return;
     const head = event.target.closest('[data-cq-head]');
     if (head) { open = !open; render(lastState, true); return; }
     const toggle = event.target.closest('[data-cq-toggle]');
@@ -170,14 +185,21 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
         + `<button type="button" class="cq-add" data-cq-add="1">+ Add Character</button>`
         + `</div>`
       : '';
+    // 머리는 **버튼 하나가 아니라 줄**이다. 활성화 토글과 POS 를 나란히 두어야
+    // 하는데, <button> 안에 <input> 이나 <button> 을 넣으면 마크업이 깨지고
+    // 안쪽을 눌러도 바깥 토글이 먼저 먹는다.
+    const enabled = !!current.activated;
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
+      + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`
-      + ` aria-expanded="${open ? 'true' : 'false'}"`
-      + ` title="${escHtml(open ? '눌러서 접습니다' : '눌러서 펼칩니다')}">`
+      + ` aria-expanded="${open ? 'true' : 'false'}">`
       + '<span class="cq-caret" aria-hidden="true">▸</span>'
-      + `<span class="cq-title">CHARACTER</span>`
-      + `<span class="cq-count">${slots.length}</span></button>`
-      + `<div class="cq-body">${body}</div></div>`;
+      + `<span class="cq-title">CHARACTER</span></button>`
+      + `<label class="cq-enable"><input type="checkbox" data-cq-enable="1"`
+      + `${enabled ? ' checked' : ''}><span>활성화</span></label>`
+      + `<button type="button" class="cq-pos" data-cq-pos="1">POS</button>`
+      + `<span class="cq-count">${slots.length}</span>`
+      + `</div><div class="cq-body">${body}</div></div>`;
     lastSignature = nextSignature;
     syncValues(current);
   }

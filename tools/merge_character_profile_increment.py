@@ -67,7 +67,9 @@ DICT_PATH = REPO_ROOT / "danbooru_character.py"
 DROP_FIELDS = ("key_clothes",)
 MARKER = "# --- increment"
 
-# 색 칩이 '고유색' 이 아니라 '그림 속 아무 여자의 색' 일 때를 가려내는 문턱.
+# 비인간 개체(girl/boy 어느 쪽도 아닌 것)를 가려내는 문턱.
+#
+# 색 칩이 '고유색' 이 아니라 '그림 속 아무 여자의 색' 일 때를 잡는다.
 #
 # 진짜 캐릭터는 고유색이 있어 personal_color 가 **몇 개 안 된다**(ganyu 2 · miku 2 ·
 # ju fufu 5 · ellen joe 6). 반대로 비인간 개체는 그 태그가 붙은 `1girl solo` 그림
@@ -180,8 +182,8 @@ def main() -> int:
                     help="`solo` 기준 1girl/1boy 비율이 이 값 미만이면 analysis 제외 "
                          "(기본 10 - 추가분 전수 분포에서 고름)")
     ap.add_argument("--max-color-kinds", type=int, default=MAX_COLOR_KINDS,
-                    help=f"personal_color 가짓수가 이 값 이상이면 색·가슴을 끈다 "
-                         f"(기본 {MAX_COLOR_KINDS} - 전수 분포에서 고름)")
+                    help=f"personal_color 가짓수가 이 값 이상이면 비인간으로 보아 "
+                         f"analysis 에서 제외 (기본 {MAX_COLOR_KINDS} - 전수 분포에서 고름)")
     args = ap.parse_args()
 
     if str(REPO_ROOT) not in sys.path:
@@ -229,21 +231,21 @@ def main() -> int:
             key = name.strip().lower()
             if key in have or name.strip() in rejected:
                 continue
+            # 색이 '아무 여자의 평균' 이면 이 엔트리는 개체가 아니라 같이 그려진
+            # 사람을 묘사한다. 부분 억제(색·가슴만 끄기)도 해봤지만 characteristics
+            # 에 머리 모양이 그대로 남아(long hair 41% · twintails 14%) 어차피
+            # 반쪽이었다. 통째로 뺀다 - 사전에는 남으니 이름은 여전히 자동완성된다.
+            if len(data.get("personal_color") or []) >= args.max_color_kinds:
+                suppressed += 1
+                continue
             entry = {k: v for k, v in data.items() if k not in DROP_FIELDS}
             entry["gender"] = "girl"
             entry.setdefault("aliases", [name])
-            # 색이 '아무 여자의 평균' 이면 색과 가슴을 끈다. 그 둘은 개체가 아니라
-            # 같이 그려진 사람을 묘사하기 때문이다. characteristics 는 남긴다 -
-            # rx-78-2 의 `robot 31%` · `mecha musume 22%` 처럼 개체 자신의 정보다.
-            if len(entry.get("personal_color") or []) >= args.max_color_kinds:
-                entry["personal_color"] = []
-                entry.pop("breast_size", None)
-                suppressed += 1
             analysis.setdefault(group, {})[name] = entry
             have.add(key)
             added += 1
     print(f"\n[analysis] 추가 {added:,}종 -> 총 {len(have):,}종")
-    print(f"  그중 색·가슴 억제 {suppressed:,}종"
+    print(f"  비인간으로 보아 제외 {suppressed:,}종"
           f"  (personal_color 가짓수 >= {args.max_color_kinds})")
 
     # ── dict 병합 (아직 쓰지 않는다) ─────────────────────────────────────

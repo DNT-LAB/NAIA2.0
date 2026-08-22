@@ -26,7 +26,10 @@ const MIN_ROWS = {prompt: 4, uc: 2};
 const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
 
-export function createCharacterQuickPanel({document, escHtml, setModuleParam, onModTextEdit}) {
+export function createCharacterQuickPanel({
+  document, escHtml, setModuleParam, onModTextEdit,
+  openCharacterModule = () => {},
+}) {
   let mount = null;
   let open = false;
   const openSlots = new Set();       // 동시에 여러 개 펼칠 수 있다 - Set 이다
@@ -79,7 +82,7 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     return hint ? `${tag} · ${hint}` : tag;
   }
 
-  function slotHtml(character, index, ordinal) {
+  function slotHtml(character, index, ordinal, activeCount) {
     const isOpen = openSlots.has(index);
     // 라벨(PROMPT/NEGATIVE)을 두지 않는다 - 자리를 먹는 만큼 입력 공간을 뺏는다.
     // 네거티브는 **테두리 색**으로 구분하고, 뜻은 placeholder 가 말한다.
@@ -92,11 +95,27 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     // ⚠️ title 을 두지 않는다. 앱이 그걸 걷어 자체 툴팁으로 바꾸는데, 이 상자는
     //    좁아서 툴팁이 라벨을 그대로 덮는다(사용자 지적). 화살표가 이미 접힘/펼침을
     //    말하고 있어 설명이 필요 없다.
+    //
+    // 머리는 **줄**이다 - <button> 안에 <button> 을 넣으면 마크업이 깨지고
+    // 안쪽을 눌러도 바깥 토글이 먼저 먹는다(바깥 CHARACTER 머리와 같은 이유).
+    //
+    // C1 은 지울 수 없다(사용자 지정). 마지막 활성 하나는 남아야 하고, 그 자리가
+    // C1 이다. ▼ 도 활성이 하나뿐이면 내주지 않는다 - 내리면 활성이 0이 된다.
+    const canRemove = ordinal > 1;
+    const canDeactivate = activeCount > 1;
     return `<div class="cq-slot${isOpen ? ' is-open' : ''}">`
+      + `<div class="cq-slot-headrow">`
       + `<button type="button" class="cq-slot-head" data-cq-toggle="${index}"`
       + ` aria-expanded="${isOpen ? 'true' : 'false'}">`
       + '<span class="cq-caret" aria-hidden="true">▸</span>'
       + `<span class="cq-slot-title">${escHtml(slotLabel(character, ordinal))}</span></button>`
+      + (canDeactivate
+          ? `<button type="button" class="cq-slot-btn" data-cq-down="${index}"`
+            + ` aria-label="비활성으로 내림">&#9660;</button>`
+          : '')
+      + `<button type="button" class="cq-slot-btn is-danger" data-cq-del="${index}"`
+      + `${canRemove ? '' : ' disabled'} aria-label="슬롯 제거">-</button>`
+      + `</div>`
       + `<div class="cq-slot-body">${body}</div></div>`;
   }
 
@@ -170,6 +189,21 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     if (event.target.closest('[data-cq-pos]')) return;
     const head = event.target.closest('[data-cq-head]');
     if (head) { open = !open; render(lastState, true); return; }
+    // ▼ 와 - 는 슬롯 배열을 바꾼다. 번호는 활성 무리 안의 자리라 서버가 새 상태를
+    // 밀어 주면 저절로 재정렬된다 - 여기서 따로 손대지 않는다.
+    const down = event.target.closest('[data-cq-down]');
+    if (down) {
+      openSlots.delete(Number(down.dataset.cqDown));
+      setModuleParam('character', `char_slot_state_${down.dataset.cqDown}`, 'inactive');
+      return;
+    }
+    const del = event.target.closest('[data-cq-del]');
+    if (del) {
+      if (del.disabled) return;
+      openSlots.delete(Number(del.dataset.cqDel));
+      setModuleParam('character', `remove_character_${del.dataset.cqDel}`, 'true');
+      return;
+    }
     const toggle = event.target.closest('[data-cq-toggle]');
     if (toggle) {
       const index = Number(toggle.dataset.cqToggle);
@@ -177,6 +211,7 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
       render(lastState, true);
       return;
     }
+    if (event.target.closest('[data-cq-manage]')) { openCharacterModule(); return; }
     if (event.target.closest('[data-cq-add]')) setModuleParam('character', 'add_character', 'true');
   }
 
@@ -200,9 +235,14 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     const slots = activeSlots(current);
     const body = open
       ? `<div class="cq-grid">`
-        + slots.map(({character, index}, i) => slotHtml(character, index, i + 1)).join('')
+        + slots.map(({character, index}, i) =>
+            slotHtml(character, index, i + 1, slots.length)).join('')
+        // Manage 는 모듈 팝업을 연다 - 실수로 ▼ 로 내린 슬롯을 되살릴 곳이 거기다
+        // (여기에는 비활성 무리가 보이지 않는다).
+        + `<div class="cq-foot">`
         + `<button type="button" class="cq-add" data-cq-add="1">+ Add Character</button>`
-        + `</div>`
+        + `<button type="button" class="cq-manage" data-cq-manage="1">Manage</button>`
+        + `</div></div>`
       : '';
     // 머리는 **버튼 하나가 아니라 줄**이다. 활성화 토글과 POS 를 나란히 두어야
     // 하는데, <button> 안에 <input> 이나 <button> 을 넣으면 마크업이 깨지고

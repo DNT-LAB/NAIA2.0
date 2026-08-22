@@ -67,6 +67,20 @@ DICT_PATH = REPO_ROOT / "danbooru_character.py"
 DROP_FIELDS = ("key_clothes",)
 MARKER = "# --- increment"
 
+# 색 칩이 '고유색' 이 아니라 '그림 속 아무 여자의 색' 일 때를 가려내는 문턱.
+#
+# 진짜 캐릭터는 고유색이 있어 personal_color 가 **몇 개 안 된다**(ganyu 2 · miku 2 ·
+# ju fufu 5 · ellen joe 6). 반대로 비인간 개체는 그 태그가 붙은 `1girl solo` 그림
+# 속 아무 여자의 색이 쌓여 모집단 색 분포에 수렴하고, 가짓수가 20~30 으로 부푼다
+# (rx-78-2 28 · moogle 29 · haro 30 · crewmate 30).
+#
+# 퍼센트 1위로 가르면 안 된다 - hatsune miku 는 aqua/blue 로 갈려 1위가 51.6% 라
+# 같이 걸린다. **가짓수**가 맞는 잣대다.
+#
+# 20 은 전수 분포에서 골랐다(12,204종): 비인간 표본 10/10 을 잡고 진짜 캐릭터
+# 12종 오탐 0, 대상 411종(3.4%). 18 로 낮추면 mari (faraway) 가 오탐된다.
+MAX_COLOR_KINDS = 20
+
 # ⚠️ 두 자산 모두 **CRLF** 다(실측: character_analysis.json / danbooru_character.py).
 # `write_text` 는 `\n` 으로 써서 28MB·6.4MB 파일이 통째로 diff 에 잡힌다.
 # 무변경 왕복이 바이트 일치하는지 확인하고 쓴다.
@@ -165,8 +179,9 @@ def main() -> int:
     ap.add_argument("--min-girl-ratio", type=float, default=10.0,
                     help="`solo` 기준 1girl/1boy 비율이 이 값 미만이면 analysis 제외 "
                          "(기본 10 - 추가분 전수 분포에서 고름)")
-    ap.add_argument("--allow-dict-marker", action="store_true",
-                    help="사전에 이미 증분 블록이 있어도 analysis 만 갱신한다")
+    ap.add_argument("--max-color-kinds", type=int, default=MAX_COLOR_KINDS,
+                    help=f"personal_color 가짓수가 이 값 이상이면 색·가슴을 끈다 "
+                         f"(기본 {MAX_COLOR_KINDS} - 전수 분포에서 고름)")
     args = ap.parse_args()
 
     if str(REPO_ROOT) not in sys.path:
@@ -206,7 +221,7 @@ def main() -> int:
               f"  = {ratio(n):>5.2f}  {n}")
 
     # ── analysis 병합 ────────────────────────────────────────────────────
-    added = 0
+    added = suppressed = 0
     for group, members in profile.items():
         if not isinstance(members, dict):
             continue
@@ -217,10 +232,19 @@ def main() -> int:
             entry = {k: v for k, v in data.items() if k not in DROP_FIELDS}
             entry["gender"] = "girl"
             entry.setdefault("aliases", [name])
+            # 색이 '아무 여자의 평균' 이면 색과 가슴을 끈다. 그 둘은 개체가 아니라
+            # 같이 그려진 사람을 묘사하기 때문이다. characteristics 는 남긴다 -
+            # rx-78-2 의 `robot 31%` · `mecha musume 22%` 처럼 개체 자신의 정보다.
+            if len(entry.get("personal_color") or []) >= args.max_color_kinds:
+                entry["personal_color"] = []
+                entry.pop("breast_size", None)
+                suppressed += 1
             analysis.setdefault(group, {})[name] = entry
             have.add(key)
             added += 1
     print(f"\n[analysis] 추가 {added:,}종 -> 총 {len(have):,}종")
+    print(f"  그중 색·가슴 억제 {suppressed:,}종"
+          f"  (personal_color 가짓수 >= {args.max_color_kinds})")
 
     # ── dict 병합 (아직 쓰지 않는다) ─────────────────────────────────────
     new_entries = sorted(((n, total.get(n, 0)) for n in need_dict if total.get(n, 0) > 0),

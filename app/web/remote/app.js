@@ -413,6 +413,7 @@ function initNaiaTitleTooltips() {
 
 let automationPanel = null;
 let characterPanel = null;
+let characterQuickPanel = null;
 let characterAssetControl = null;
 let conditionalPromptPanel = null;
 let eventStreamPanel = null;
@@ -1195,6 +1196,19 @@ function restoreInteractiveState() {
 let promptBeforeInteractive = null;
 let interactiveStateRestored = false;
 
+/** 빠른 캐릭터 패널을 보일지. NAI 모드이면서 Interactive 가 꺼져 있을 때만 쓴다.
+ *  캐릭터 프롬프트는 NAID4+ 전용이라 WEBUI/ComfyUI 에서는 자리만 차지한다. */
+function syncCharacterQuickPanelVisibility(interactiveActive) {
+  if (!characterQuickPanel) return;
+  const active = interactiveActive === undefined
+    ? !!interactivePanel?.isActive?.()
+    : !!interactiveActive;
+  const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
+  characterQuickPanel.setVisible(!active && mode === 'NAI');
+  const cached = moduleStateCache.get('character');
+  if (cached) characterQuickPanel.render(cached);
+}
+
 function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
   // 나중에 별도 미리보기 팝업으로만 확인한다.
@@ -1229,6 +1243,9 @@ function applyInteractiveModeGate(isActive) {
   // 열기 전까지 비어 있다(실측: automationRuntime === null). Interactive 는 자기
   // 반복을 직접 몰므로 여기서 한 번 당겨 온다 — 없으면 딜레이가 늘 0 이 된다.
   if (isActive && !automationRuntime) requestModuleState('automation');
+  // 빠른 캐릭터 패널은 Interactive **밖에서만** 쓴다 — Interactive 는 자기
+  // 캐릭터 UI(C1 Fast 등)를 이미 갖고 있고, 둘이 같은 자리를 다툰다.
+  syncCharacterQuickPanelVisibility(isActive);
   // Assets 바는 Interactive 의 도구다 — 모드를 끄면 같이 사라진다.
   if (interactiveScenePanel) interactiveScenePanel.setVisible(!!isActive);
   if (interactiveAssetsPanel) {
@@ -1611,6 +1628,18 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260717-
   })
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
+  });
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260822-quickchar')
+  .then(({createCharacterQuickPanel}) => {
+    characterQuickPanel = createCharacterQuickPanel({
+      document, escHtml, setModuleParam, onModTextEdit,
+    });
+    syncCharacterQuickPanelVisibility();
+    const cached = moduleStateCache.get('character');
+    if (cached) characterQuickPanel.render(cached);
+  })
+  .catch(error => {
+    console.error('Failed to initialize character quick panel module', error);
   });
 const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260703-cond-split')
   .then(({createConditionalPromptPanel}) => {
@@ -4826,6 +4855,8 @@ function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.
 function setNaiHighlightMode(mode) {
   currentMode = mode;
   if (promptHighlighter) promptHighlighter.setMode(mode);
+  // 캐릭터 프롬프트는 NAID4+ 전용 - 모드가 바뀌면 빠른 패널도 따라 사라진다.
+  syncCharacterQuickPanelVisibility();
 }
 
 // ---- Right panel top-level tabs ----
@@ -8081,7 +8112,12 @@ function onModuleState(m) {
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);
-  else if (m.module_id === 'character') updateCharBadge(m);
+  else if (m.module_id === 'character') {
+    updateCharBadge(m);
+    // 결과 화면 위 빠른 캐릭터 패널. 팝업이 열려 있든 말든 상태는 늘 최신이어야
+    // 한다 - 팝업에서 슬롯을 고치면 이쪽도 따라 바뀐다(같은 상태를 본다).
+    if (characterQuickPanel) characterQuickPanel.render(m);
+  }
   else if (m.module_id === 'character_reference') {
     updateCharRefBadge(m);
     syncReferenceInsetWithCharRef(m);

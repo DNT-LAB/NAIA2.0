@@ -22308,6 +22308,104 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   color: var(--text-primary);
 }
 
+/* ── 빠른 캐릭터 패널(`[ ▸ CHARACTER ]`) ────────────────────────────────
+   결과 화면 좌상단. Interactive 의 빠른 입력 상자(.ia-fast-*)와 같은 규칙:
+   접힘 = 좁고 반투명, 호버 = 또렷, 펼침 = 폭을 다 쓰고 불투명.
+   `.viewer-wrapper` 가 position:relative 라 절대배치로 붙는다 - Interactive 쪽처럼
+   JS 로 매번 재계산하지 않는다(그쪽은 씬 플로트에 매달려 있어 어쩔 수 없었다). */
+.cq-float {
+  position: absolute; left: 12px; top: 40px; z-index: 3;
+  display: none; width: 260px;
+}
+.cq-float.open { display: block; }
+.cq-box {
+  width: 58%; opacity: 0.5;
+  border-radius: 8px; overflow: hidden;
+  background: rgba(20, 20, 28, 0.5); border: 1px solid rgba(255,255,255,0.10);
+  transition: width 0.16s ease, opacity 0.16s ease,
+              background 0.16s ease, border-color 0.16s ease;
+}
+.cq-box:hover { opacity: 0.9; }
+.cq-box.is-open {
+  width: 100%; opacity: 1;
+  background: rgba(18, 18, 26, 0.72);
+  border-color: rgba(124, 106, 239, 0.45);
+}
+.cq-head, .cq-slot-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 5px 8px; cursor: pointer; border: 0;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary); text-align: left;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.cq-head:hover, .cq-slot-head:hover { color: var(--text-primary); background: rgba(255,255,255,0.09); }
+.cq-head:focus-visible, .cq-slot-head:focus-visible {
+  outline: 1px solid var(--accent-glow); outline-offset: -2px;
+}
+.cq-box.is-open .cq-head {
+  background: rgba(124,106,239,0.12);
+  border-bottom: 1px solid rgba(255,255,255,0.09);
+}
+.cq-caret {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  font-size: 8px; line-height: 1;
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+.cq-box.is-open > .cq-head .cq-caret,
+.cq-slot.is-open > .cq-slot-head .cq-caret {
+  transform: rotate(90deg); background: rgba(124,106,239,0.3);
+}
+.cq-title, .cq-slot-title {
+  flex: 1; min-width: 0; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2px;
+}
+.cq-box.is-open .cq-title { color: var(--text-primary); font-weight: 600; }
+.cq-count {
+  flex: none; padding: 0 5px; border-radius: 999px;
+  background: rgba(124,106,239,0.22); color: var(--text-secondary);
+  font-family: var(--font-mono); font-size: 9px; line-height: 15px;
+}
+/* 안쪽은 **하나의 그리드**다 - 슬롯 여럿을 동시에 펼쳐도 스크롤은 여기가 받는다
+   (사용자 지정). 슬롯마다 스크롤이 생기면 어느 칸을 굴리는지 알 수 없다. */
+.cq-grid {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 6px; max-height: 52vh; overflow-y: auto; overscroll-behavior: contain;
+}
+.cq-slot {
+  border-radius: 6px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+}
+.cq-slot.is-open { border-color: rgba(124,106,239,0.35); }
+.cq-slot-body:not(:empty) { padding: 2px 7px 7px; }
+.cq-sub {
+  margin: 5px 0 3px; font-family: var(--font-mono); font-size: 8.5px;
+  font-weight: 600; letter-spacing: 0.9px; color: var(--text-dim);
+}
+/* resize:none - 높이는 내용이 정한다(자동 증가). 손잡이를 두면 두 규칙이 싸운다. */
+.cq-input {
+  width: 100%; resize: none; overflow: hidden;
+  padding: 5px 6px; border-radius: 6px;
+  background: rgba(0,0,0,0.34); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
+  line-height: 1.4;
+}
+.cq-input:focus { outline: none; border-color: rgba(124,106,239,0.55); }
+.cq-add {
+  width: 100%; padding: 7px 8px; cursor: pointer;
+  border-radius: 6px; border: 1px dashed rgba(255,255,255,0.18);
+  background: transparent; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10.5px;
+  transition: border-color .14s, color .14s, background .14s;
+}
+.cq-add:hover {
+  border-color: rgba(124,106,239,0.55); color: var(--text-primary);
+  background: rgba(124,106,239,0.10);
+}
+
 /* 축 칩 드롭다운. 값 목록 + 랜덤 토글. */
 .ia-axmenu { display: flex; flex-direction: column; gap: 8px; }
 .ia-axmenu-list { display: flex; flex-direction: column; gap: 3px; }

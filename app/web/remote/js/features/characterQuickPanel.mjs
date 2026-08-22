@@ -20,7 +20,11 @@
  *     다시 그려 캐럿이 튄다. 구성(누가 있고 무엇이 펼쳐졌나)만 본다.
  */
 
-const MIN_ROWS = {prompt: 3, uc: 2};
+// 포지티브는 한 줄 더 준다(사용자 지정) - 캐릭터 프롬프트는 보통 네거티브보다 길다.
+const MIN_ROWS = {prompt: 4, uc: 2};
+// 그리드가 침범하면 안 되는 아래 경계. 결과 정보 패널("GENERATION INFO")이다.
+const BOTTOM_ANCHOR = '#resultInfoPanel';
+const BOTTOM_GAP = 10;
 
 export function createCharacterQuickPanel({document, escHtml, setModuleParam, onModTextEdit}) {
   let mount = null;
@@ -29,6 +33,7 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
   let lastState = null;
   let lastSignature = '';
   let visible = false;
+  let anchorWatcher = null;      // 결과 패널이 늦게 생기면 다시 붙는다
 
   function host() {
     return document.querySelector('.viewer-wrapper') || document.body;
@@ -120,6 +125,20 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     });
   }
 
+  /** 그리드가 GENERATION INFO 바로 위까지만 자라게 한다(사용자 지정).
+   *
+   *  CSS 의 vh 로는 못 한다 - 결과 정보 패널의 높이가 접힘/펼침에 따라 변하고,
+   *  패널 자체도 뷰포트 맨 위에서 시작하지 않는다. 그릴 때마다 실제로 잰다. */
+  function fitGridHeight() {
+    if (anchorWatcher) anchorWatcher();
+    const grid = mount && mount.querySelector('.cq-grid');
+    if (!grid) return;
+    const anchor = document.querySelector(BOTTOM_ANCHOR);
+    const limit = anchor ? anchor.getBoundingClientRect().top : window.innerHeight;
+    const top = grid.getBoundingClientRect().top;
+    grid.style.maxHeight = Math.max(120, Math.round(limit - top - BOTTOM_GAP)) + 'px';
+  }
+
   /** 최소 줄수는 지키되, 넘치면 한 줄씩 늘어난다(사용자 지정). */
   function autoGrow(element) {
     const rows = MIN_ROWS[element.dataset.cqMin] || 2;
@@ -177,7 +196,7 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     if (!current) return;
     ensureMount();
     const nextSignature = signature(current);
-    if (!force && nextSignature === lastSignature) { syncValues(current); return; }
+    if (!force && nextSignature === lastSignature) { syncValues(current); fitGridHeight(); return; }
     const slots = activeSlots(current);
     const body = open
       ? `<div class="cq-grid">`
@@ -202,6 +221,27 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
       + `</div><div class="cq-body">${body}</div></div>`;
     lastSignature = nextSignature;
     syncValues(current);
+    fitGridHeight();
+  }
+
+  // 창 크기가 바뀌면 아래 경계도 움직인다. 한 번만 건다.
+  window.addEventListener('resize', () => fitGridHeight());
+  // ⚠️ resize 만으로는 모자란다. GENERATION INFO 패널은 **창과 무관하게** 높이가
+  //    변한다(히스토리 항목을 고르면 내용이 늘어난다) - 그때 경계가 올라오는데
+  //    창은 그대로라 resize 가 오지 않는다. 그 요소를 직접 지켜본다.
+  if (typeof ResizeObserver === 'function') {
+    let observed = null;
+    const watchAnchor = () => {
+      const anchor = document.querySelector(BOTTOM_ANCHOR);
+      if (!anchor || anchor === observed) return;
+      observer.disconnect();
+      observer.observe(anchor);
+      observed = anchor;
+    };
+    const observer = new ResizeObserver(() => fitGridHeight());
+    watchAnchor();
+    // 결과 패널은 늦게 생길 수 있다 - 그릴 때마다 한 번 더 확인한다.
+    anchorWatcher = watchAnchor;
   }
 
   return {render, setVisible, isOpen: () => open};

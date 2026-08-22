@@ -22406,6 +22406,8 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
    겹쳐 보이고 그만큼 입력 공간을 뺏는다. */
 .cq-grid {
   display: flex; flex-direction: column; gap: 3px;
+  /* max-height 는 fitGridHeight() 가 실제 측정으로 덮는다 - 여기 값은 그 전까지의
+     안전판이다(스크립트가 늦게 붙어도 화면을 뚫고 내려가지 않게). */
   padding: 0; max-height: 56vh; overflow-y: auto; overscroll-behavior: contain;
 }
 /* 슬롯 테두리도 뺀다. 머리띠 배경만으로 경계가 충분히 읽히고, 사용자에게 필요한

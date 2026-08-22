@@ -23,6 +23,24 @@ def _state_of(frame: Any) -> str:
     return str(frame.get("slot_state") or "").strip().lower()
 
 
+def _seed_missing_positions(frames: list) -> None:
+    """POS: CUSTOM 일 때 좌표가 빈 활성 슬롯에 NAI 가 놓았을 자리를 뿌린다.
+
+    ⚠️ 켜는 순간만 뿌리면 **그 뒤에 추가·활성화된 슬롯이 좌표 없이 남는다.**
+    그러면 `active_character_positions` 가 "부분 좌표" 로 보고 전부 버려서, 켜 둔
+    CUSTOM 이 조용히 무효가 된다. 그래서 상태가 바뀔 때마다 채운다.
+    """
+    from core.character_settings import auto_character_positions, normalize_position
+
+    active = [f for f in frames
+              if isinstance(f, dict) and _state_of(f) == "active"
+              and str(f.get("prompt") or "").strip()]
+    seeds = auto_character_positions(len(active))
+    for frame, seed in zip(active, seeds):
+        if normalize_position(frame.get("position")) is None:
+            frame["position"] = dict(seed)
+
+
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
@@ -164,24 +182,10 @@ class HeadlessCharacterService:
         elif key == "use_custom_positions":
             # POS: AUTO <-> CUSTOM. AUTO 는 좌표를 아예 안 보내 NAI 가 배치한다.
             # 스냅샷은 건드리지 않는다 - 좌표는 굴림의 일부가 아니다.
-            enabled = context._coerce_bool(value)
-            settings["use_custom_positions"] = enabled
-            if enabled:
-                # 켜는 순간 빈 좌표에 **NAI 가 놓았을 자리**를 뿌린다. 사용자가 보던
-                # 배치에서 이어 옮기게 하려는 것이다. 배치 규칙을 파이썬 한 곳에만
-                # 두려고 여기서 한다 - 프런트가 같은 표를 또 들고 있으면 언젠가 갈린다.
-                from core.character_settings import (
-                    auto_character_positions,
-                    normalize_position,
-                )
-
-                active = [f for f in frames
-                          if isinstance(f, dict) and _state_of(f) == "active"
-                          and str(f.get("prompt") or "").strip()]
-                seeds = auto_character_positions(len(active))
-                for frame, seed in zip(active, seeds):
-                    if normalize_position(frame.get("position")) is None:
-                        frame["position"] = dict(seed)
+            # 켜는 순간 빈 좌표에 **NAI 가 놓았을 자리**를 뿌린다(아래 공통 처리).
+            # 사용자가 보던 배치에서 이어 옮기게 하려는 것이고, 배치 규칙을 파이썬
+            # 한 곳에만 두려는 것이다 - 프런트가 같은 표를 또 들면 언젠가 갈린다.
+            settings["use_custom_positions"] = context._coerce_bool(value)
         elif key.startswith("char_pos_"):
             index = context._index_from_key(key, "char_pos_")
             if index is not None:
@@ -244,6 +248,10 @@ class HeadlessCharacterService:
                 invalidate_snapshot = True
         else:
             return None
+        # CUSTOM 인 동안에는 활성 슬롯이 늘거나 바뀔 때마다 빈 좌표를 채운다.
+        # 하나라도 비면 전체가 "부분 좌표" 로 버려져 CUSTOM 이 조용히 무효가 된다.
+        if settings.get("use_custom_positions"):
+            _seed_missing_positions(frames)
         prompt_context = getattr(context, "current_prompt_context", None)
         metadata = getattr(prompt_context, "metadata", None)
         if isinstance(metadata, dict):

@@ -22338,6 +22338,10 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
    (실측: 무대가 그림보다 107px 왼쪽에 섰다). 좌표가 거짓말이 되는 것보다 뚝 끊겨
    움직이는 편이 낫다. */
 #resultViewer.is-cq-posedit > #preview { transition: none; }
+/* POS 편집에서는 원본 그림을 감춘다 - 무대가 같은 그림을 배경으로 깔고 있어서
+   그냥 두면 두 번 보인다(무대 밖으로 삐져나온 조각이 남는다). opacity 로 감춰야
+   src 가 살아 있어 무대 배경이 그대로 쓰인다. */
+#resultViewer.is-cq-posedit > #preview { opacity: 0; }
 /* POS 편집 중에는 USAGE 배지를 감춘다(사용자 지정) - 무대 오른쪽 위에 겹친다. */
 #resultViewer.is-cq-posedit ~ #naiUsagePill,
 body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; }
@@ -22506,10 +22510,17 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-stage {
   position: absolute; z-index: 5; display: none;
   border-radius: 4px; touch-action: none;
-  background: #0b0b12; border: 1px solid rgba(255,255,255,0.30);
+  background-color: #0b0b12; border: 1px solid rgba(255,255,255,0.30);
+  /* 그림을 무대 배경으로 깐다. 무대 비율 = 해상도 비율이라 100% 100% 가 1:1 이다. */
+  background-size: 100% 100%; background-repeat: no-repeat;
 }
 .cq-stage.open { display: block; }
-.cq-stage.is-overlay { background: rgba(0,0,0,0.55); border-color: rgba(255,255,255,0.22); }
+/* 그림을 깐 경우: 위에 어둡게 덮어 원이 묻히지 않게 한다. */
+.cq-stage.is-overlay { border-color: rgba(255,255,255,0.22); }
+.cq-stage.is-overlay::before {
+  content: ''; position: absolute; inset: 0;
+  background: rgba(0,0,0,0.5); border-radius: 3px; pointer-events: none;
+}
 /* 원. 좌표는 무대 기준 %로 놓고, 자기 크기의 절반만큼 되당겨 **중심**을 맞춘다. */
 .cq-dot {
   position: absolute; transform: translate(-50%, -50%);
@@ -22524,11 +22535,17 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-dot.is-on { background: #f2efe3; color: #14141c; border-color: #fff; font-weight: 700; }
 .cq-dot.is-drag { cursor: grabbing; box-shadow: 0 0 0 4px rgba(124,106,239,0.28); }
 /* 무대 위 캐릭터 칩. 4명을 넘으면 줄을 바꾼다(flex-wrap). */
+/* 띠 = [종료 버튼][칩들…]. 칩은 자리가 모자라면 아래로 접히고, 그만큼 무대가
+   내려간다(JS 가 띠의 실제 높이를 재서 무대를 놓는다). */
 .cq-chips {
   position: absolute; z-index: 7; display: none;
-  flex-wrap: wrap; gap: 4px; align-content: flex-start;
+  gap: 6px; align-items: stretch;
 }
 .cq-chips.open { display: flex; }
+.cq-chiprow {
+  flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px;
+  align-content: flex-start;
+}
 .cq-chip {
   display: inline-flex; align-items: center; gap: 5px; max-width: 24%;
   padding: 4px 8px; cursor: pointer;
@@ -22550,12 +22567,14 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-pos-edit:hover {
   border-color: rgb(226,200,122); color: #14141c; background: rgb(226,200,122);
 }
-.cq-grid-pos { padding: 6px; }
+/* 종료 버튼은 띠 왼쪽에 **두 줄 높이**로 선다(사용자 지정) - 칩이 한 줄이든 세 줄이든
+   띠의 세로를 놀리지 않고, 칩과 같은 줄에서 눈에 먼저 들어온다. */
 .cq-posdone {
-  width: 100%; padding: 8px; cursor: pointer;
+  flex: none; display: flex; flex-direction: column; justify-content: center;
+  gap: 1px; padding: 5px 12px; cursor: pointer; white-space: nowrap;
   border-radius: 5px; border: 1px solid rgba(214,184,92,0.55);
-  background: rgba(214,184,92,0.16); color: rgb(232,214,150);
-  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  background: rgba(20,20,28,0.9); color: rgb(232,214,150);
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; line-height: 1.25;
   transition: background .14s, color .14s;
 }
 .cq-posdone:hover { background: rgb(226,200,122); color: #14141c; }

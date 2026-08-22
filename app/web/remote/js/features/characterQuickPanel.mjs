@@ -27,8 +27,6 @@ const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
 // 그림을 패널 오른쪽 끝에서 이만큼 띄운다.
 const VIEWER_GAP = 8;
-// POS 편집에서 캐릭터 칩 줄이 쓰는 높이(두 줄까지 여유).
-const CHIPS_BAND = 62;
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
@@ -73,67 +71,56 @@ export function createCharacterQuickPanel({
     return stage;
   }
 
-  /** `object-fit: contain` 이 실제로 그리는 사각형. 요소 상자와 다르다. */
-  function drawnImageRect() {
-    const img = document.getElementById('preview');
-    if (!img || !img.naturalWidth || !img.classList.contains('show')) return null;
-    const box = img.getBoundingClientRect();
-    if (!box.width || !box.height) return null;
-    const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
-    const w = img.naturalWidth * scale;
-    const h = img.naturalHeight * scale;
-    const posX = getComputedStyle(img).objectPosition.split(' ')[0];
-    const slack = box.width - w;
-    const offX = posX.endsWith('px') ? parseFloat(posX) : slack * (parseFloat(posX) / 100);
-    return { left: box.left + offX, top: box.top + (box.height - h) / 2, width: w, height: h,
-             natural: { w: img.naturalWidth, h: img.naturalHeight } };
-  }
-
   /** 무대가 설 자리와 그 종류를 정한다.
    *
-   *  ⚠️ **그릴 때마다 다시 잰다.** 진입 때 한 번 재서 들고 있었더니, 그 뒤 이미지가
-   *  움직이면(패널 펼침에 따른 오른쪽 밀기, 새 그림 도착) 무대만 옛 자리에 남아
-   *  그림과 어긋났다 - 무대가 그림 위에 정확히 얹히지 않으면 좌표가 거짓말이 된다.
+   *  ⚠️ 무대를 **그림 위에 얹지 않는다.** 예전에는 해상도가 맞으면 그려진 그림의
+   *  사각형을 그대로 무대로 삼았는데, 그러면 무대가 그림의 레이아웃에 묶여
+   *  칩 줄이 늘어나도 비켜설 수가 없고, 그림이 조금만 움직여도(밀기·트랜지션·
+   *  새 그림) 좌표가 어긋났다. 대신 **남는 자리에 무대를 세우고 그림을 무대의
+   *  배경으로 깐다** - 무대 비율이 곧 해상도 비율이라 1:1 로 맞고, 칩이 몇 줄이
+   *  되든 자리만 다시 잡으면 된다.
    *
    *  "진입 시에만" 이라는 사양은 **해상도**에 대한 것이다(편집 중에 해상도를 바꿔도
-   *  원이 튀지 않아야 한다). 그래서 해상도만 진입 시점 값(`stageRes`)으로 고정하고,
-   *  자리는 매번 실측한다.
+   *  원이 튀지 않아야 한다). 그래서 해상도만 진입 시점 값(`stageRes`)으로 고정한다.
+   *
+   *  @param bandBottom 칩 줄이 끝나는 y(뷰포트 기준). 줄이 늘면 무대가 내려간다.
    */
-  function measureStage() {
+  function measureStage(bandBottom) {
     const res = stageRes || getResolution();
-    const drawn = drawnImageRect();
-    const matches = !!(drawn && res
-      && drawn.natural.w === res.w && drawn.natural.h === res.h);
-    if (matches) return { ...drawn, overlay: true };
-    // 그림이 없거나 비율이 다르면 뷰어 안에 **지금 해상도 비율**의 상자를 세운다.
-    //
-    // ⚠️ 패널과 칩 줄이 쓰는 자리를 먼저 빼고 남는 데에 세운다. 뷰어 전체에
-    //    세웠더니 무대가 패널을 덮어 `Finish Editing POS` 에 닿을 수 없었다(실측).
-    //    그래서 그림이 "약간 줄어든다"(사용자 사양) - 줄어드는 것이 아니라 남는
-    //    자리에 맞춰 서는 것이다.
+    const img = document.getElementById('preview');
+    const shown = !!(img && img.naturalWidth && img.classList.contains('show'));
+    // 화면의 그림과 지금 해상도가 같을 때만 그림을 깐다. 비율이 다른 그림 위에
+    // 원을 놓으면 좌표가 거짓말이 된다.
+    const matches = !!(shown && res
+      && img.naturalWidth === res.w && img.naturalHeight === res.h);
     const viewer = document.getElementById('resultViewer');
     if (!viewer) return null;
     const v = viewer.getBoundingClientRect();
-    const panel = mount && visible ? mount.getBoundingClientRect() : null;
-    const left0 = panel ? Math.max(v.left, panel.right + 10) : v.left + 12;
-    const top0 = v.top + CHIPS_BAND;
-    const ratio = res ? res.w / res.h : 1;
+    const ratio = res ? res.w / res.h : (shown ? img.naturalWidth / img.naturalHeight : 1);
+    const left0 = v.left + 12;
+    const top0 = Math.max(v.top + 8, bandBottom + 8);
     const maxW = Math.max(120, v.right - 12 - left0);
     const maxH = Math.max(120, v.bottom - 12 - top0);
     let w = maxH * ratio;
     let h = maxH;
     if (w > maxW) { w = maxW; h = maxW / ratio; }
     return { left: left0 + (maxW - w) / 2, top: top0 + (maxH - h) / 2,
-             width: w, height: h, overlay: false };
+             width: w, height: h, overlay: matches,
+             src: matches ? img.currentSrc || img.src : '' };
   }
 
   function renderStage() {
     if (posDragging) return;      // 끌고 있는 원을 교체하지 않는다
     if (!posEditing) {
       if (stage) { stage.classList.remove('open'); stage.innerHTML = ''; }
+      if (chips) { chips.classList.remove('open'); chips.innerHTML = ''; }
       return;
     }
-    const box = stageRect = measureStage();
+    const slots = activeSlots(lastState);
+    // 줄이 몇 줄이 될지는 그려 봐야 안다 - 띠를 **먼저** 그려 실제 높이를 재고,
+    // 무대는 그 아래 남는 자리에 세운다(사용자 지정: 줄이 넘으면 자동 조절).
+    const bandBottom = renderBand(slots);
+    const box = stageRect = measureStage(bandBottom);
     if (!box) return;
     ensureStage();
     const wrap = host().getBoundingClientRect();
@@ -142,9 +129,10 @@ export function createCharacterQuickPanel({
       top: Math.round(box.top - wrap.top) + 'px',
       width: Math.round(box.width) + 'px',
       height: Math.round(box.height) + 'px',
+      // 무대 비율 = 해상도 비율이므로 100% 100% 가 곧 1:1 대응이다.
+      backgroundImage: box.src ? `url("${box.src}")` : '',
     });
     stage.classList.toggle('is-overlay', !!box.overlay);
-    const slots = activeSlots(lastState);
     stage.innerHTML = slots.map(({character, index}, i) => {
       const p = character.position || { x: 0.5, y: 0.5 };
       const on = posSelected === index;
@@ -153,15 +141,21 @@ export function createCharacterQuickPanel({
         + ` aria-label="${escHtml(slotLabel(character, i + 1))}">${i + 1}</button>`;
     }).join('');
     stage.classList.add('open');
-    renderChips(slots);
   }
 
-  /** 무대 위쪽 캐릭터 칩. 4명을 넘으면 줄을 바꾼다(사용자 지정). */
-  function renderChips(slots) {
+  /** 무대 위 띠: 종료 버튼 + 캐릭터 칩. 칩은 자리가 모자라면 줄을 바꾼다.
+   *
+   *  종료 버튼은 **두 줄 높이**로 세워 띠의 세로를 놀리지 않는다(사용자 지정).
+   *  띠는 뷰어 폭을 다 쓰므로 캐릭터가 늘어도 옆으로 퍼지다 아래로 접힌다.
+   *
+   *  @return 띠가 끝나는 y(뷰포트 기준) - 무대가 그 아래에 선다.
+   */
+  function renderBand(slots) {
     if (!chips || !document.body.contains(chips)) {
       chips = document.createElement('div');
       chips.className = 'cq-chips';
       chips.addEventListener('click', event => {
+        if (event.target.closest('[data-cq-posdone]')) { setPosEditing(false); return; }
         const chip = event.target.closest('[data-cq-chip]');
         if (!chip) return;
         posSelected = Number(chip.dataset.cqChip);
@@ -169,21 +163,24 @@ export function createCharacterQuickPanel({
       });
       host().appendChild(chips);
     }
+    const viewer = document.getElementById('resultViewer');
+    const v = viewer ? viewer.getBoundingClientRect() : host().getBoundingClientRect();
     const wrap = host().getBoundingClientRect();
-    const box = stageRect;
-    chips.style.left = Math.round(box.left - wrap.left) + 'px';
-    chips.style.width = Math.round(box.width) + 'px';
-    // 무대 **위**에 놓되, 그만한 자리가 없으면(해상도가 맞아 그림에 겹쳐 세운 경우
-    // 그림이 뷰어 꼭대기까지 닿는다) 무대 안쪽 위에 얹는다. 잘려서 안 보이는 것보다
-    // 그림을 조금 가리는 편이 낫다.
-    const above = box.top - wrap.top - CHIPS_BAND;
-    chips.style.top = Math.round(above >= 4 ? above : box.top - wrap.top + 6) + 'px';
-    chips.innerHTML = slots.map(({character, index}, i) =>
-      `<button type="button" class="cq-chip${posSelected === index ? ' is-on' : ''}"`
-      + ` data-cq-chip="${index}"><span class="cq-chip-n">${i + 1}</span>`
-      + `<span class="cq-chip-t">${escHtml(slotLabel(character, i + 1).replace(/^C\d+\s*·\s*/, '') || '(비어 있음)')}</span></button>`
-    ).join('');
+    chips.style.left = Math.round(v.left + 12 - wrap.left) + 'px';
+    chips.style.top = Math.round(v.top + 8 - wrap.top) + 'px';
+    chips.style.width = Math.round(v.width - 24) + 'px';
+    chips.innerHTML =
+      `<button type="button" class="cq-posdone" data-cq-posdone="1">`
+      + `<span>Finish</span><span>Editing POS</span></button>`
+      + `<div class="cq-chiprow">`
+      + slots.map(({character, index}, i) =>
+          `<button type="button" class="cq-chip${posSelected === index ? ' is-on' : ''}"`
+          + ` data-cq-chip="${index}"><span class="cq-chip-n">${i + 1}</span>`
+          + `<span class="cq-chip-t">${escHtml(slotLabel(character, i + 1).replace(/^C\d+\s*·\s*/, '') || '(비어 있음)')}</span></button>`
+        ).join('')
+      + `</div>`;
     chips.classList.add('open');
+    return chips.getBoundingClientRect().bottom;
   }
 
   function onStageClick(event) {
@@ -267,6 +264,7 @@ export function createCharacterQuickPanel({
     }
     const viewer = document.getElementById('resultViewer');
     if (viewer) viewer.classList.toggle('is-cq-posedit', posEditing);
+    if (mount) mount.classList.toggle('open', visible && !posEditing);
     render(lastState, true);
     renderStage();
     // 진입 직후 한 번 더 잰다. 이 렌더가 패널 높이·이미지 밀기를 바꾸므로 그
@@ -449,8 +447,12 @@ export function createCharacterQuickPanel({
     //    가지 않게 바닥을 받친다.
     const panel = mount && mount.getBoundingClientRect();
     const want = panel ? panel.right + VIEWER_GAP - box.left : 0;
-    const centered = slack / 2;
-    const offset = Math.min(Math.max(want, centered), slack);
+    // ⚠️ **다 못 비키면 아예 안 비킨다**(사용자 정정). 여백이 모자란데 끝까지 밀면
+    //    그림만 한쪽으로 쏠린 채 여전히 패널에 가린다 - 어중간하게 옮기느니
+    //    가운데 그대로 두고 겹치는 편이 낫다.
+    if (want > slack) { viewer.style.removeProperty('--cq-img-shift'); return; }
+    // 기본 자리(가운데)보다 왼쪽으로는 가지 않는다 - 밀기만 한다.
+    const offset = Math.min(Math.max(want, slack / 2), slack);
     viewer.style.setProperty('--cq-img-shift', Math.round(offset) + 'px');
   }
 
@@ -540,7 +542,8 @@ export function createCharacterQuickPanel({
     // 보이기로 했는데 아직 그린 적이 없으면 지금 그린다. 상태는 module_state 가
     // 오기 전이라 없을 수 있는데, 그때는 render 가 알아서 물러난다.
     if (visible && !mount && lastState) render(lastState, true);
-    if (mount) mount.classList.toggle('open', visible);
+    // POS 편집 중에는 패널을 감춘다(A안) - 띠의 종료 버튼이 나가는 문이다.
+    if (mount) mount.classList.toggle('open', visible && !posEditing);
     // 패널이 사라지면 편집도 끝난다 - 무대만 남으면 나갈 문이 없다.
     if (!visible && posEditing) setPosEditing(false);
     syncViewerShift();
@@ -554,16 +557,17 @@ export function createCharacterQuickPanel({
     ensureMount();
     const nextSignature = signature(current);
     if (!force && nextSignature === lastSignature) {
-      syncValues(current); bindAssist(); fitGridHeight(); return;
+      syncValues(current); bindAssist(); fitGridHeight();
+      // ⚠️ 여기서도 무대를 다시 그린다. 프롬프트를 고쳐도 서명은 그대로라(내용은
+      //    서명에 없다) 이 경로로 빠지는데, 칩 이름은 프롬프트에서 나온다 -
+      //    빼먹으면 편집 중 칩이 옛 이름에 굳는다(실측).
+      if (posEditing) renderStage();
+      return;
     }
     const slots = activeSlots(current);
-    // POS 편집 중에는 슬롯 목록을 접고 그 자리에 종료 버튼만 둔다(사용자 지정) -
-    // 편집은 이미지 위 무대에서 하고, 여기는 나가는 문 하나면 된다.
-    const body = open && posEditing
-      ? `<div class="cq-grid cq-grid-pos">`
-        + `<button type="button" class="cq-posdone" data-cq-posdone="1">`
-        + `Finish Editing POS</button></div>`
-      : open
+    // POS 편집 중에는 패널을 통째로 감춘다(사용자 결정 A안) - 그림 위를 가장 적게
+    // 가리는 길이고, 나가는 문은 띠의 종료 버튼이 맡는다.
+    const body = open
       ? `<div class="cq-grid">`
         + slots.map(({character, index}, i) =>
             slotHtml(character, index, i + 1, slots.length)).join('')
@@ -605,7 +609,9 @@ export function createCharacterQuickPanel({
   }
 
   // 창 크기가 바뀌면 아래 경계도 움직인다. 한 번만 건다.
-  window.addEventListener('resize', () => fitGridHeight());
+  // ⚠️ 무대도 함께 다시 그린다. 띠의 폭은 px 로 넣으므로 창이 좁아져도 스스로
+  //    줄지 않는다 - 다시 그려야 칩이 접히고 그만큼 무대가 내려간다(실측).
+  window.addEventListener('resize', () => { fitGridHeight(); renderStage(); });
   // ⚠️ resize 만으로는 모자란다. GENERATION INFO 패널은 **창과 무관하게** 높이가
   //    변한다(히스토리 항목을 고르면 내용이 늘어난다) - 그때 경계가 올라오는데
   //    창은 그대로라 resize 가 오지 않는다. 그 요소를 직접 지켜본다.

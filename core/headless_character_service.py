@@ -23,28 +23,51 @@ def _state_of(frame: Any) -> str:
     return str(frame.get("slot_state") or "").strip().lower()
 
 
-def _seed_missing_positions(frames: list) -> None:
-    """POS: CUSTOM 일 때 좌표가 빈 활성 슬롯에 AUTO 배치의 자리를 뿌린다.
+# 겹치지 않는 AUTO 자리의 개수(중앙 + 상하좌우 + 네 모서리).
+_RING_SIZE = 9
+
+
+def _seed_missing_positions(settings: dict) -> None:
+    """POS: CUSTOM 일 때 좌표가 빈 활성 슬롯에 AUTO 배치의 **빈 자리**를 뿌린다.
 
     사용자가 보던 배치(AUTO)에서 이어서 옮기게 하려는 것이다.
 
     ⚠️ 켜는 순간만 뿌리면 **그 뒤에 추가·활성화된 슬롯이 좌표 없이 남는다.**
     그러면 `resolved_character_positions` 가 "부분 좌표" 로 보고 그 요청을 통째로
-    AUTO 배치로 떨어뜨려, 켜 둔 CUSTOM 이 조용히 무효가 된다. 그래서 상태가
-    바뀔 때마다 채운다.
+    AUTO 배치로 떨어뜨려, 켜 둔 CUSTOM 이 조용히 무효가 된다. 그래서 쓰기가
+    지나가는 `save_settings` 한 곳에서 매번 채운다 - 호출부마다 부르면
+    **언젠가 한 곳이 빠진다**(Codex 지적: 캐릭터 에셋의 add_slot 이 그랬다).
 
-    ⚠️ 반대로 **이미 있는 좌표는 절대 덮지 않는다** - 슬롯은 삭제되기 전까지
-    사용자가 정한 자리를 기억해야 한다(사용자 지정).
+    ⚠️ 이미 있는 좌표는 절대 덮지 않는다 - 슬롯은 삭제되기 전까지 사용자가 정한
+    자리를 기억해야 한다(사용자 지정).
+
+    ⚠️ **이미 누가 서 있는 자리는 건너뛴다.** 순번대로 뿌리면 자리가 겹친다
+    (Codex 지적, 실측: 셋을 뿌리고 가운데를 지운 뒤 하나 더하면 새 슬롯이
+    오른쪽에 이미 선 슬롯과 같은 점을 받는다).
+
+    ⚠️ 게이트는 `active_character_frames` 와 **똑같아야** 한다 - 모듈 활성까지
+    본다. 어긋나면 여기서 채운 좌표가 저쪽 셈에 안 들어가 부분 좌표가 된다.
     """
     from core.character_settings import auto_character_positions, normalize_position
 
+    if not settings.get("is_active"):
+        return
+    frames = settings.get("character_frames") or []
     active = [f for f in frames
               if isinstance(f, dict) and _state_of(f) == "active"
               and str(f.get("prompt") or "").strip()]
-    seeds = auto_character_positions(len(active))
-    for frame, seed in zip(active, seeds):
-        if normalize_position(frame.get("position")) is None:
-            frame["position"] = dict(seed)
+    known = [normalize_position(f.get("position")) for f in active]
+    if all(position is not None for position in known):
+        return
+    taken = {(p["x"], p["y"]) for p in known if p is not None}
+    free = [spot for spot in auto_character_positions(_RING_SIZE)
+            if (spot["x"], spot["y"]) not in taken]
+    # 아홉 자리가 다 찼으면 겹치는 것을 피할 수 없다 - 그때는 순번대로 준다.
+    ordinal = auto_character_positions(len(active))
+    for index, (frame, position) in enumerate(zip(active, known)):
+        if position is not None:
+            continue
+        frame["position"] = free.pop(0) if free else dict(ordinal[index])
 
 
 class HeadlessCharacterService:
@@ -79,6 +102,12 @@ class HeadlessCharacterService:
 
         mode_key = str(mode or "NAI").upper()
         normalized = normalize_character_settings(settings)
+        # POS 씨앗은 **여기서만** 뿌린다. 프레임을 바꾸는 길이 여럿이라
+        # (set_param · 캐릭터 에셋 적용 · 앞으로 생길 것들) 호출부마다 걸면
+        # 언젠가 한 곳이 빠지고, 빠진 그 길이 CUSTOM 을 통째로 무효로 만든다.
+        # 정렬이 끝난 뒤여야 씨앗이 최종 순서를 보고 놓인다.
+        if normalized.get("use_custom_positions"):
+            _seed_missing_positions(normalized)
         self.settings_by_mode()[mode_key] = normalized
         path = self.context._save_path(f"CharacterModule_{mode_key}.json")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,10 +283,6 @@ class HeadlessCharacterService:
                 invalidate_snapshot = True
         else:
             return None
-        # CUSTOM 인 동안에는 활성 슬롯이 늘거나 바뀔 때마다 빈 좌표를 채운다.
-        # 하나라도 비면 전체가 "부분 좌표" 로 버려져 CUSTOM 이 조용히 무효가 된다.
-        if settings.get("use_custom_positions"):
-            _seed_missing_positions(frames)
         prompt_context = getattr(context, "current_prompt_context", None)
         metadata = getattr(prompt_context, "metadata", None)
         if isinstance(metadata, dict):

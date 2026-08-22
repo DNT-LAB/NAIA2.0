@@ -27,6 +27,8 @@ const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
 // 그림을 패널 오른쪽 끝에서 이만큼 띄운다.
 const VIEWER_GAP = 8;
+// 무대가 이보다 얕아질 바에는 띠를 덮고 뷰어 전체를 쓴다.
+const MIN_STAGE = 120;
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
@@ -98,9 +100,13 @@ export function createCharacterQuickPanel({
     const v = viewer.getBoundingClientRect();
     const ratio = res ? res.w / res.h : (shown ? img.naturalWidth / img.naturalHeight : 1);
     const left0 = v.left + 12;
-    const top0 = Math.max(v.top + 8, bandBottom + 8);
-    const maxW = Math.max(120, v.right - 12 - left0);
-    const maxH = Math.max(120, v.bottom - 12 - top0);
+    // 띠 아래에 설 자리가 너무 얕으면 **띠를 덮고** 뷰어 전체를 쓴다. 예전에는
+    // 120px 을 억지로 확보해 무대가 뷰어 바닥 밖으로 삐져나갔다(Codex 지적).
+    // 좁을 때는 겹치는 편이 낫다는 사용자 정정을 여기에도 적용한다.
+    const below = v.bottom - 12 - (bandBottom + 8);
+    const top0 = below >= MIN_STAGE ? bandBottom + 8 : v.top + 8;
+    const maxW = Math.max(MIN_STAGE, v.right - 12 - left0);
+    const maxH = Math.max(MIN_STAGE, v.bottom - 12 - top0);
     let w = maxH * ratio;
     let h = maxH;
     if (w > maxW) { w = maxW; h = maxW / ratio; }
@@ -624,11 +630,20 @@ export function createCharacterQuickPanel({
       observer.observe(anchor);
       observed = anchor;
     };
-    const observer = new ResizeObserver(() => fitGridHeight());
+    // ⚠️ 무대도 다시 그린다. 이 패널이 높이를 바꾸면 뷰어의 아래 경계가 함께
+    //    움직이는데, 창은 그대로라 resize 가 안 온다 - 무대만 옛 사각형에 남아
+    //    결과 패널을 덮는다(Codex 지적).
+    const observer = new ResizeObserver(() => { fitGridHeight(); renderStage(); });
     watchAnchor();
     // 결과 패널은 늦게 생길 수 있다 - 그릴 때마다 한 번 더 확인한다.
     anchorWatcher = watchAnchor;
   }
+
+  // ⚠️ 편집 중에 새 그림이 도착할 수 있다(패널은 숨어 있어도 Ctrl+Enter 는 먹는다).
+  //    무대 배경은 그때의 `src` 를 복사해 둔 것이라, 다시 그리지 않으면 옛 그림이
+  //    남거나 폐기된 blob URL 을 가리켜 빈칸이 된다(Codex 지적).
+  const preview = document.getElementById('preview');
+  if (preview) preview.addEventListener('load', () => { if (posEditing) renderStage(); });
 
   return {render, setVisible, isOpen: () => open};
 }

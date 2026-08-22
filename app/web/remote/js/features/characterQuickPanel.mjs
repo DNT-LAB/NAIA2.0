@@ -34,6 +34,7 @@ export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
   openCharacterModule = () => {},
   getResolution = () => null,      // {w, h} — 지금 설정된 생성 해상도
+  bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
 }) {
   let mount = null;
   let open = false;
@@ -48,6 +49,7 @@ export function createCharacterQuickPanel({
   let posSelected = null;        // 칩과 원이 **같은** 선택을 본다
   let stageRect = null;          // 진입 시 한 번 잰 무대 기하
   let posDragging = false;       // 끄는 중에는 다시 그리지 않는다
+  let stageRes = null;           // 진입 시점 해상도(편집 중 변경에 흔들리지 않게)
 
   function host() {
     return document.querySelector('.viewer-wrapper') || document.body;
@@ -87,9 +89,18 @@ export function createCharacterQuickPanel({
              natural: { w: img.naturalWidth, h: img.naturalHeight } };
   }
 
-  /** 무대가 설 자리와 그 종류를 정한다. 진입 시 한 번 부른다. */
+  /** 무대가 설 자리와 그 종류를 정한다.
+   *
+   *  ⚠️ **그릴 때마다 다시 잰다.** 진입 때 한 번 재서 들고 있었더니, 그 뒤 이미지가
+   *  움직이면(패널 펼침에 따른 오른쪽 밀기, 새 그림 도착) 무대만 옛 자리에 남아
+   *  그림과 어긋났다 - 무대가 그림 위에 정확히 얹히지 않으면 좌표가 거짓말이 된다.
+   *
+   *  "진입 시에만" 이라는 사양은 **해상도**에 대한 것이다(편집 중에 해상도를 바꿔도
+   *  원이 튀지 않아야 한다). 그래서 해상도만 진입 시점 값(`stageRes`)으로 고정하고,
+   *  자리는 매번 실측한다.
+   */
   function measureStage() {
-    const res = getResolution();
+    const res = stageRes || getResolution();
     const drawn = drawnImageRect();
     const matches = !!(drawn && res
       && drawn.natural.w === res.w && drawn.natural.h === res.h);
@@ -122,7 +133,7 @@ export function createCharacterQuickPanel({
       if (stage) { stage.classList.remove('open'); stage.innerHTML = ''; }
       return;
     }
-    const box = stageRect || (stageRect = measureStage());
+    const box = stageRect = measureStage();
     if (!box) return;
     ensureStage();
     const wrap = host().getBoundingClientRect();
@@ -186,8 +197,19 @@ export function createCharacterQuickPanel({
     event.preventDefault();
     const index = Number(dot.dataset.cqDot);
     posSelected = index;
-    const box = stageRect;
+    // ⚠️ 진입 때 잰 `stageRect` 로 계산하면 안 된다. 그건 무대를 **놓을 자리**를
+    //    정한 값(뷰포트 기준)이고, 그 뒤 스크롤이나 레이아웃 변화가 생기면 실제
+    //    무대와 어긋난다 - 놓는 순간 원이 엉뚱한 자리로 갔다(사용자 제보).
+    //    포인터 계산은 **살아 있는 무대**를 그때그때 재서 한다.
+    //    원의 %는 테두리 안쪽(패딩 상자) 기준이므로 그 상자로 재야 1:1로 맞는다.
+    const rectNow = () => {
+      const r = stage.getBoundingClientRect();
+      const bw = parseFloat(getComputedStyle(stage).borderLeftWidth) || 0;
+      return { left: r.left + bw, top: r.top + bw,
+               width: Math.max(1, r.width - bw * 2), height: Math.max(1, r.height - bw * 2) };
+    };
     const move = (e) => {
+      const box = rectNow();
       const x = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
       const y = Math.min(1, Math.max(0, (e.clientY - box.top) / box.height));
       dot.style.left = (x * 100) + '%';
@@ -203,8 +225,14 @@ export function createCharacterQuickPanel({
       // 즉시 저장(사용자 확인 - 공식 홈페이지도 그렇다). 놓는 순간 한 번만 보낸다 -
       // 끌 때마다 보내면 한 번의 드래그가 수십 번의 왕복이 된다.
       if (dot.dataset.cqX !== undefined) {
-        setModuleParam('character', `char_pos_${index}`,
-                       `${dot.dataset.cqX},${dot.dataset.cqY}`);
+        const x = Number(dot.dataset.cqX);
+        const y = Number(dot.dataset.cqY);
+        // ⚠️ 화면을 **먼저** 새 값으로 맞춘다. 서버 echo 가 오기까지 한 박자가 있는데,
+        //    그 사이에 무엇이든 다시 그리면 원이 옛 자리로 튀었다가 돌아온다
+        //    (실측: 연달아 끌면 매번 직전 좌표가 보였다).
+        const character = (lastState && lastState.characters || [])[index];
+        if (character) character.position = { x, y };
+        setModuleParam('character', `char_pos_${index}`, `${x},${y}`);
       }
       dot.classList.remove('is-drag');
     };
@@ -228,15 +256,22 @@ export function createCharacterQuickPanel({
     posEditing = !!on;
     if (posEditing) {
       posSelected = null;
-      stageRect = measureStage();          // 진입 시 한 번만 잰다
+      // 해상도만 진입 시점으로 고정한다 - 편집 중에 바꿔도 원이 튀지 않는다
+      // (사용자 지정). 무대 **자리**는 renderStage 가 매번 실측한다.
+      stageRes = getResolution();
+      stageRect = null;
     } else {
       stageRect = null;
+      stageRes = null;
       if (chips) { chips.classList.remove('open'); chips.innerHTML = ''; }
     }
     const viewer = document.getElementById('resultViewer');
     if (viewer) viewer.classList.toggle('is-cq-posedit', posEditing);
     render(lastState, true);
     renderStage();
+    // 진입 직후 한 번 더 잰다. 이 렌더가 패널 높이·이미지 밀기를 바꾸므로 그
+    // 결과가 레이아웃에 반영된 **다음 프레임**의 자리가 진짜다.
+    if (posEditing) requestAnimationFrame(() => renderStage());
   }
 
   function ensureMount() {
@@ -332,6 +367,23 @@ export function createCharacterQuickPanel({
       + `${state && state.use_custom_positions ? 1 : 0}${posEditing ? 1 : 0}#${slots}`;
   }
 
+  /** 자동완성을 새로 그린 칸에 다시 건다.
+   *
+   *  ⚠️ 매 렌더마다 요소가 교체되므로 **렌더 뒤에 반드시** 불러야 한다. 한 번만
+   *  걸면 첫 렌더의 칸에만 붙고, 슬롯을 접었다 펴는 순간 조용히 사라진다.
+   *
+   *  옵션은 모듈 팝업의 캐릭터 칸과 같다(카테고리 제외 없음) - 캐릭터 슬롯에서는
+   *  아티스트도 캐릭터도 다 쓴다. Interactive 의 전역 태그 칸만 그 둘을 뺀다.
+   */
+  function bindAssist() {
+    if (!mount) return;
+    mount.querySelectorAll('[data-cq-field]').forEach(element => {
+      if (element._cqAssistBound) return;   // 같은 요소에 두 번 걸지 않는다
+      element._cqAssistBound = true;
+      bindTagAssist(element);
+    });
+  }
+
   /** 렌더가 값을 지웠으므로 여기서 되돌린다(마크업에 값을 넣지 않는 대가). */
   function syncValues(state) {
     const chars = (state && state.characters) || [];
@@ -352,6 +404,10 @@ export function createCharacterQuickPanel({
       if (!match) return;
       const character = chars[Number(match[2])];
       if (!character) return;
+      // ⚠️ **지금 쓰고 있는 칸은 건드리지 않는다.** 서버 echo 가 조금 늦게 오는데
+      //    그때 `.value` 를 덮으면 (가) 한글 조합이 끊기고 (나) 자동완성이 막 끼워
+      //    넣은 글자가 되감긴다. 편집 중인 칸은 화면 쪽이 진실이다.
+      if (document.activeElement === element) { autoGrow(element); return; }
       const next = String((match[1] === 'prompt' ? character.prompt : character.uc) || '');
       if (element.value !== next) element.value = next;
       autoGrow(element);
@@ -497,7 +553,9 @@ export function createCharacterQuickPanel({
     if (!current) return;
     ensureMount();
     const nextSignature = signature(current);
-    if (!force && nextSignature === lastSignature) { syncValues(current); fitGridHeight(); return; }
+    if (!force && nextSignature === lastSignature) {
+      syncValues(current); bindAssist(); fitGridHeight(); return;
+    }
     const slots = activeSlots(current);
     // POS 편집 중에는 슬롯 목록을 접고 그 자리에 종료 버튼만 둔다(사용자 지정) -
     // 편집은 이미지 위 무대에서 하고, 여기는 나가는 문 하나면 된다.
@@ -540,6 +598,7 @@ export function createCharacterQuickPanel({
       + `</div><div class="cq-body">${body}</div></div>`;
     lastSignature = nextSignature;
     syncValues(current);
+    bindAssist();          // 렌더가 칸을 새로 만들었다 - 반드시 다시 건다
     fitGridHeight();
     syncViewerShift();
     if (posEditing) renderStage();      // 좌표가 서버에서 돌아오면 원도 맞춘다

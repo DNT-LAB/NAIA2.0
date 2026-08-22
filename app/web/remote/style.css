@@ -22333,6 +22333,14 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
   object-position: var(--cq-img-shift, 50%) 50%;
 }
 #preview { transition: object-position 0.16s ease; }
+/* ⚠️ POS 편집에서는 애니메이션을 끈다. 무대를 그림 위에 정확히 얹으려면 그림 위치를
+   재야 하는데, 트랜지션이 도는 중에 재면 **아직 움직이는 중인 자리**를 잡는다
+   (실측: 무대가 그림보다 107px 왼쪽에 섰다). 좌표가 거짓말이 되는 것보다 뚝 끊겨
+   움직이는 편이 낫다. */
+#resultViewer.is-cq-posedit > #preview { transition: none; }
+/* POS 편집 중에는 USAGE 배지를 감춘다(사용자 지정) - 무대 오른쪽 위에 겹친다. */
+#resultViewer.is-cq-posedit ~ #naiUsagePill,
+body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; }
 .cq-float.open { display: block; }
 .cq-box {
   width: 58%; opacity: 0.5;

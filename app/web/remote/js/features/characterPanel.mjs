@@ -429,7 +429,7 @@ export function createCharacterPanel({
             renderWorkingSlot(character, index, chars.length, i + 1, activeSlots.length <= 1)).join(''),
           addBtn,
           inactiveSlots.length
-            ? `<div class="mod-section-label mod-char-group-label">Deactivated (${inactiveSlots.length})</div>`
+            ? `<div class="mod-section-label mod-char-group-label">비활성 (${inactiveSlots.length})</div>`
             : '',
           inactiveSlots.map(({character, index}) =>
             renderWorkingSlot(character, index, chars.length, 0, false)).join(''),

@@ -452,12 +452,24 @@
             "key": "steps",
             "value": 12
           },
+          "_note": "파라미터를 바꾸면 선택된 프리셋에 즉시 반영되고(사용자 지정 2026-08-21), 그 프리셋 배지가 옛 모델을 달고 있지 않도록 module_state 가 뒤따른다. 이 줄이 없으면 그 메시지가 다음 스텝의 첫 메시지로 소비돼 이후 전부가 한 칸씩 밀린다.",
           "expected_messages": [
             {
               "type": "params",
               "expected_json_subset": {
                 "steps": 12
               }
+            },
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "prompt_engineering",
+                "runtime": "web",
+                "available": true
+              },
+              "expected_json_keys": [
+                "state"
+              ]
             }
           ]
         },

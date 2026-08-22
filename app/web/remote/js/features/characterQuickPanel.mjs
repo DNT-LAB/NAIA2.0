@@ -46,6 +46,11 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
     mount.addEventListener('click', onClick);
     mount.addEventListener('input', onInput);
     host().appendChild(mount);
+    // ⚠️ 지금까지의 가시성을 **새 요소에 다시 입힌다.** `setVisible` 은 mount 가
+    //    없으면 아무것도 못 하고 플래그만 남긴다 - 초기화 순서에 따라
+    //    `setVisible(true)` 가 먼저 오면 이 요소는 `.open` 없이 태어나 영영
+    //    display:none 이었다(사용자 인스턴스에서 실측: DOM 에는 있는데 0x0).
+    mount.classList.toggle('open', visible);
     return mount;
   }
 
@@ -144,6 +149,9 @@ export function createCharacterQuickPanel({document, escHtml, setModuleParam, on
   /** Interactive 가 켜져 있거나 NAI 모드가 아니면 자리를 비운다. */
   function setVisible(next) {
     visible = !!next;
+    // 보이기로 했는데 아직 그린 적이 없으면 지금 그린다. 상태는 module_state 가
+    // 오기 전이라 없을 수 있는데, 그때는 render 가 알아서 물러난다.
+    if (visible && !mount && lastState) render(lastState, true);
     if (mount) mount.classList.toggle('open', visible);
   }
 

@@ -32,13 +32,36 @@ from core.character_settings import (
     store_character_roll_snapshot,
 )
 from core.nai_model_contract import (
+    BUILTIN_NAI_MODEL_SPECS,
     DEFAULT_NAI_MODEL_SPEC,
     NaiModelSpec,
     nai_img2img_fallback_key,
+    nai_key_from_metadata,
     normalize_nai_model_key,
     resolve_nai_model_for_context,
 )
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
+
+
+def _resolve_nai_model_key_loosely(model_value: Any) -> str:
+    """키든 wire 이름이든 **아는 모델 키**로 되돌린다.
+
+    화면에서 온 요청은 키(`NAID5F`)를 싣지만, 메타데이터에서 되살린 파라미터
+    (Enhance · 리플레이 · 외부 이미지 가져오기)는 실제 API 이름
+    (`nai-diffusion-5-full`)을 싣는다. 아는 키가 아니면 `resolve_nai_model_for_context`
+    가 말없이 기본값(V4.5 Full)으로 떨어뜨린다 - V5 로 만든 그림을 Enhance 했는데
+    4.5 결과가 나오고, 아무도 그걸 알려주지 않는다.
+
+    ⚠️ 사용자 등록 모델은 여기서 판단하지 않는다. 내장 표에 없으면 원본을 그대로
+    돌려주고, 레지스트리를 보는 기존 해석에 맡긴다.
+    """
+    text = str(model_value or "").strip()
+    if not text:
+        return text
+    if normalize_nai_model_key(text) in BUILTIN_NAI_MODEL_SPECS:
+        return text                       # 이미 아는 키다
+    recovered = nai_key_from_metadata(text, "")
+    return recovered or text
 
 
 def _get_loaded_middle_module(app_context, class_name: str):
@@ -707,6 +730,13 @@ class APIService:
 
             # 모델 이름 가져오기 및 매핑
             model_key = params.get('model', 'NAID4.5F')
+            # ⚠️ **wire 이름이 실려 올 수 있다.** 화면에서 온 요청은 키(`NAID5F`)를
+            #    싣지만, 메타데이터에서 되살린 파라미터(Enhance·리플레이·외부 이미지)는
+            #    실제 API 이름(`nai-diffusion-5-full`)을 싣는다. 그러면
+            #    `normalize_nai_model_key` 가 대문자화만 해서 아는 키가 아니게 되고,
+            #    **말없이 기본값(V4.5 Full)으로 떨어졌다**(실측). V5 로 만든 그림을
+            #    Enhance 하면 4.5 결과가 나오는데 아무도 그걸 알려주지 않는다.
+            model_key = _resolve_nai_model_key_loosely(model_key)
             generation_request = params.get('_generation_request')
             frozen_model_spec = getattr(generation_request, "nai_model_spec", None)
             if (

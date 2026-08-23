@@ -228,23 +228,11 @@ def main() -> int:
         rows = row_counts[name]
         entry = {"total_rows": rows, "personal_color": [],
                  "characteristics": [], "key_clothes": []}
-        # ⚠️ **가지치기 전** 색 가짓수. 비인간/아바타 게이트가 이 값을 본다.
-        #
-        #    `merge_character_profile_increment.py` 는 원래 `len(personal_color) >= 20`
-        #    으로 411종을 걸렀는데, 위의 퍼센트 문턱이 생기면서 그 목록이 최대 9개로
-        #    잘려 **게이트가 영영 안 걸리게 된다**(실측: 문턱 30% 아래 전체 최대 9).
-        #    임계를 낮추는 것으로는 못 고친다 — 잣대 자체가 다른 값이 되었기 때문이다.
-        #    가지치기 전 값을 따로 실어 보내 게이트가 종전 판정을 유지하게 한다.
-        #
-        #    상한(top_n)은 걸지 않는다. 임계 20 < 상한 30 이라 판정은 완전히 같고,
-        #    자르지 않은 쪽이 나중에 분포를 다시 잴 때 쓸모 있다.
-        color_kinds_raw = 0
         for tag, cnt in counter.most_common():
             pct = round(cnt / rows * 100, 1)
             item = {"tag": tag, "count": cnt, "pct": pct}
             if tag in classify["personal_color"]:
                 bucket, floor = entry["personal_color"], args.min_pct_color
-                color_kinds_raw += 1
             elif tag in classify["clothes"]:
                 bucket, floor = entry["key_clothes"], args.min_pct_char
             elif tag in classify["characteristics"]:
@@ -258,8 +246,6 @@ def main() -> int:
                 continue
             if len(bucket) < args.top_n:
                 bucket.append(item)
-        # 게이트 전용 신호. `merge` 가 읽고 **배포본에는 싣지 않는다**(DROP_FIELDS).
-        entry["color_kinds_raw"] = color_kinds_raw
         # 가슴 크기는 characteristics 에서 빼고 별도 필드로 (원본 add_breast_size 규약).
         entry["characteristics"] = [e for e in entry["characteristics"]
                                     if e["tag"] not in BREAST_SET]

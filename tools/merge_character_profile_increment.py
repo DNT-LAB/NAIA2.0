@@ -64,25 +64,24 @@ DATA_DIR = REPO_ROOT / "data"
 ANALYSIS_PATH = DATA_DIR / "character_analysis.json"
 DICT_PATH = REPO_ROOT / "danbooru_character.py"
 
-# `color_kinds_raw` 는 아래 비인간 게이트 전용 신호다 — 판정에만 쓰고 배포본에는 안 싣는다.
+# `color_kinds_raw` 는 폐기된 신호다(가짓수 게이트를 쓰던 시절). 옛 증분 파일에 남아
+# 있을 수 있으니 계속 걷어낸다 — 28MB 배포본에 쓸모없는 필드가 실리면 안 된다.
 DROP_FIELDS = ("key_clothes", "color_kinds_raw")
 MARKER = "# --- increment"
 
-# 비인간 개체(girl/boy 어느 쪽도 아닌 것)를 가려내는 문턱.
+# 비인간·아바타(개체가 아닌 것)를 가려내는 문턱 — **최고 색 비율**이다.
 #
-# 색 칩이 '고유색' 이 아니라 '그림 속 아무 여자의 색' 일 때를 잡는다.
+# 색 칩이 '고유색' 이 아니라 '그림 속 아무 여자의 색' 일 때를 잡는다. 진짜 캐릭터는
+# 고유색이 높게 뜨고, 아바타·비인간은 모집단 분포로 흩어져 어느 하나도 이 값을
+# 못 넘는다. `build_character_profile_increment.py --min-pct-color` 와 같은 값이다.
 #
-# 진짜 캐릭터는 고유색이 있어 personal_color 가 **몇 개 안 된다**(ganyu 2 · miku 2 ·
-# ju fufu 5 · ellen joe 6). 반대로 비인간 개체는 그 태그가 붙은 `1girl solo` 그림
-# 속 아무 여자의 색이 쌓여 모집단 색 분포에 수렴하고, 가짓수가 20~30 으로 부푼다
-# (rx-78-2 28 · moogle 29 · haro 30 · crewmate 30).
-#
-# 퍼센트 1위로 가르면 안 된다 - hatsune miku 는 aqua/blue 로 갈려 1위가 51.6% 라
-# 같이 걸린다. **가짓수**가 맞는 잣대다.
-#
-# 20 은 전수 분포에서 골랐다(12,204종): 비인간 표본 10/10 을 잡고 진짜 캐릭터
-# 12종 오탐 0, 대상 411종(3.4%). 18 로 낮추면 mari (faraway) 가 오탐된다.
-MAX_COLOR_KINDS = 20
+# ⚠️ 예전에는 **가짓수**(`>= 20`)로 갈랐는데 그것은 잣대가 아니라 코퍼스 크기의
+#    대리값이었다(실측: 행 200 미만 평균 11.3종 -> 행 5,000 이상 평균 40.2종).
+#    그대로 두면 hatsune miku(59종) · hakurei reimu(44) · artoria pendragon(46) ·
+#    ganyu(40) 가 비인간으로 걸린다. 근거로 삼았던 `miku 2 · ganyu 2` 는
+#    **가지치기된 배포본**, `rx-78-2 28 · moogle 29` 는 **가지치기 안 된 증분**에서
+#    온 값이라 처음부터 서로 다른 자를 비교한 것이었다.
+MIN_PCT_COLOR = 30.0
 
 # ⚠️ 두 자산 모두 **CRLF** 다(실측: character_analysis.json / danbooru_character.py).
 # `write_text` 는 `\n` 으로 써서 28MB·6.4MB 파일이 통째로 diff 에 잡힌다.
@@ -94,33 +93,40 @@ def write_preserving_crlf(path: Path, text: str) -> None:
     path.write_bytes(text.replace("\r\n", "\n").replace("\n", NEWLINE).encode("utf-8"))
 
 
-def looks_nonhuman(data: dict, max_color_kinds: int) -> tuple[bool, bool]:
-    """`(제외할까, 옛 프로필이라 추측했나)`.
+def looks_nonhuman(data: dict, min_pct_color: float = MIN_PCT_COLOR) -> bool:
+    """**문턱을 넘는 색이 하나도 없으면** 개체가 아니다 — 제외한다.
 
-    ⚠️ **가지치기 전** 색 가짓수를 봐야 한다. 빌더에 퍼센트 문턱(`--min-pct-color`)이
-    생긴 뒤로 `personal_color` 는 문턱을 넘은 것만 담겨 **최대 9개**로 잘려 나온다
-    (실측: 문턱 30% 아래 11,890종 전체 최대 9). 그 목록 길이로 `>= 20` 을 판정하면
-    **게이트가 영영 안 걸려 411종 억제가 소리 없이 사라진다.**
+    색 칩이 '고유색' 이 아니라 '그림 속 아무 여자의 색' 일 때를 잡는 것이 목적이다.
+    진짜 캐릭터는 고유색이 높은 비율로 뜨고(miku `blue hair` 90.5% · reimu 2개 ·
+    `2b` 76.5%), 아바타·비인간은 색이 모집단 분포로 흩어져 **어느 하나도 30% 를
+    못 넘는다.**
 
-    임계를 20 -> 10 으로 낮추는 것으로는 못 고친다. 9 가 최대라 10 도 안 걸리고,
-    무엇보다 **잣대가 다른 값이 되었기 때문**이다 — 문턱 뒤 가짓수는 진짜 캐릭터와
-    비인간이 사실상 같은 분포다(둘 다 중앙 2 · 최대 9). 그래서 빌더가 가지치기 전
-    값을 `color_kinds_raw` 로 따로 실어 보내고, 여기서 그것을 본다.
+    ⚠️ **가짓수로 세면 안 된다.** 예전 규칙은 `len(personal_color) >= 20` 이었는데,
+    가짓수는 잣대가 아니라 **코퍼스 크기의 대리값**이다(실측 9,327종: 행 200 미만
+    평균 11.3종 -> 행 5,000 이상 평균 40.2종 -> miku 59종). 그 값으로 재면
+    hatsune miku · hakurei reimu · artoria pendragon · ganyu 가 통째로 비인간으로
+    걸린다. 원래 근거였던 `miku 2 · ganyu 2` 는 **가지치기된 배포본**에서, `rx-78-2 28
+    · moogle 29` 는 **가지치기 안 된 증분**에서 온 값이라 처음부터 서로 다른 자였다.
 
-    임계 20 은 **가지치기 전** 분포에서 검증한 값이라(비인간 표본 10/10 · 진짜
-    캐릭터 오탐 0) 그대로 쓴다.
+    이 판정은 문턱을 **여기서 직접** 걸기 때문에 빌더가 가지치기를 했든 안 했든
+    같은 답을 준다(가지치기 안 된 비인간도 최고 pct 가 문턱 미만이다).
+
+    실측(9,327종): 걸리는 것 121종(1.3%) — warrior of light (ff14) · inkling player
+    character · sensei (blue archive) · doctor (arknights) · avatar (wow) ·
+    ragnarok online 직업군 · manjuu · slime · poring · pikachu · hello kitty ·
+    enemy naval mine. 상위 25 오탐 0.
+    경계를 1 로 올리면 2b (nier:automata) 76.5% · mystia lorelei 87.9% ·
+    texas (arknights) 83.5% 가 걸린다 — **0 이 경계다.**
     """
-    raw = data.get("color_kinds_raw")
-    guessed = raw is None
-    if guessed:
-        # 문턱 이전에 만든 옛 프로필 — 그때는 목록 길이가 곧 가지치기 전 값이었다.
-        raw = len(data.get("personal_color") or [])
-    try:
-        raw = int(raw)
-    except (TypeError, ValueError):
-        raw = len(data.get("personal_color") or [])
-        guessed = True
-    return raw >= max_color_kinds, guessed
+    pcts = [e.get("pct", 0) for e in (data.get("personal_color") or [])
+            if isinstance(e, dict)]
+    values = []
+    for p in pcts:
+        try:
+            values.append(float(p))
+        except (TypeError, ValueError):
+            continue
+    return not values or max(values) < float(min_pct_color)
 
 
 def flatten_names(analysis: dict) -> set[str]:
@@ -211,9 +217,10 @@ def main() -> int:
     ap.add_argument("--min-girl-ratio", type=float, default=10.0,
                     help="`solo` 기준 1girl/1boy 비율이 이 값 미만이면 analysis 제외 "
                          "(기본 10 - 추가분 전수 분포에서 고름)")
-    ap.add_argument("--max-color-kinds", type=int, default=MAX_COLOR_KINDS,
-                    help=f"personal_color 가짓수가 이 값 이상이면 비인간으로 보아 "
-                         f"analysis 에서 제외 (기본 {MAX_COLOR_KINDS} - 전수 분포에서 고름)")
+    ap.add_argument("--min-pct-color", type=float, default=MIN_PCT_COLOR,
+                    help=f"이 비율을 넘는 색이 하나도 없으면 개체가 아니라고 보아 "
+                         f"analysis 에서 제외 (기본 {MIN_PCT_COLOR} - 빌더의 "
+                         f"--min-pct-color 와 같은 값이어야 한다)")
     args = ap.parse_args()
 
     if str(REPO_ROOT) not in sys.path:
@@ -253,7 +260,7 @@ def main() -> int:
               f"  = {ratio(n):>5.2f}  {n}")
 
     # ── analysis 병합 ────────────────────────────────────────────────────
-    added = suppressed = missing_raw_kinds = 0
+    added = suppressed = 0
     for group, members in profile.items():
         if not isinstance(members, dict):
             continue
@@ -265,9 +272,7 @@ def main() -> int:
             # 사람을 묘사한다. 부분 억제(색·가슴만 끄기)도 해봤지만 characteristics
             # 에 머리 모양이 그대로 남아(long hair 41% · twintails 14%) 어차피
             # 반쪽이었다. 통째로 뺀다 - 사전에는 남으니 이름은 여전히 자동완성된다.
-            drop, guessed = looks_nonhuman(data, args.max_color_kinds)
-            missing_raw_kinds += int(guessed)
-            if drop:
+            if looks_nonhuman(data, args.min_pct_color):
                 suppressed += 1
                 continue
             entry = {k: v for k, v in data.items() if k not in DROP_FIELDS}
@@ -277,12 +282,8 @@ def main() -> int:
             have.add(key)
             added += 1
     print(f"\n[analysis] 추가 {added:,}종 -> 총 {len(have):,}종")
-    print(f"  비인간으로 보아 제외 {suppressed:,}종"
-          f"  (가지치기 전 색 가짓수 >= {args.max_color_kinds})")
-    if missing_raw_kinds:
-        # 조용히 넘어가면 게이트가 반쯤 죽은 채로 지나간다 — 실제로 그렇게 될 뻔했다.
-        print(f"  [경고] {missing_raw_kinds:,}종에 color_kinds_raw 가 없어 목록 길이로 판정했다. "
-              f"퍼센트 문턱을 켜고 만든 프로필이면 **억제가 덜 된다** — 빌더를 다시 돌려라.")
+    print(f"  개체가 아니라고 보아 제외 {suppressed:,}종"
+          f"  ({args.min_pct_color}% 를 넘는 색이 하나도 없음)")
 
     # ── dict 병합 (아직 쓰지 않는다) ─────────────────────────────────────
     new_entries = sorted(((n, total.get(n, 0)) for n in need_dict if total.get(n, 0) > 0),

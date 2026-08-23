@@ -25028,6 +25028,16 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    ⚠️ v2 의 넓은 화면 인라인 배치를 건드리지 않으려고 `:not(.cond-v2-editor)` 로
    Legacy 루트에만 건다. */
 .cond-root:not(.cond-v2-editor) { position: relative; }
+/* ⚠️ 토글은 기본 `display:none` 이고 `@media (max-width:1800px)` 에서만 나타난다.
+   넓은 화면에서는 v2 가 3열 인라인으로 프리셋 판을 늘 보여주기 때문인데, Legacy
+   에는 그 그리드가 없다 - 그래서 1800px 를 넘으면 토글도 판도 없어 **프리셋에
+   들어갈 길이 아예 사라졌다**(Codex 지적, 코드로 확인). Legacy 는 폭과 무관하게
+   토글을 낸다. */
+.cond-root:not(.cond-v2-editor) .cond-preset-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .cond-root:not(.cond-v2-editor) .cond-preset-pane {
   display: none;
   position: absolute;

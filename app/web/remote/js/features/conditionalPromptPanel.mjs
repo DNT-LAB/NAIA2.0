@@ -572,10 +572,18 @@ export function createConditionalPromptPanel({
     }
     if (input) input.value = name;
     const sourcePreset = safeText(options.sourcePreset).trim();
-    const book = options.book ? normalizeBook(options.book) : currentBookPayload();
+    // ⚠️ **Legacy 는 `book` 을 보내지 않는다.** `currentBookPayload()` 는 언제나
+    //    v2 쪽(`rules_v2_book`)에서 나오는데, 백엔드는 `book` 이 오면 그것을
+    //    우선한다 - 그래서 Legacy 에서 저장을 누르면 화면에 보이지도 않는 v2
+    //    규칙이 프리셋이 됐다(Codex 지적, 코드로 확인). 백엔드에는 **지금 모드의
+    //    활성 규칙**을 담는 길이 이미 있고, `book` 이 없을 때만 그 길로 간다.
+    //    빈 프리셋 만들기처럼 book 을 명시하는 호출은 모드와 무관하게 그대로 쓴다.
+    const legacyMode = currentState?.editor_mode !== 'v2';
+    const explicitBook = options.book ? normalizeBook(options.book) : null;
+    const book = explicitBook || (legacyMode ? null : currentBookPayload());
     const payload = {name};
     if (sourcePreset) payload.source_preset = sourcePreset;
-    else payload.book = book;
+    else if (book) payload.book = book;
     if (options.activate) payload.activate = true;
     sendModuleParam('conditional_prompt', 'preset_save', JSON.stringify(payload));
     if (options.activate && currentState && !sourcePreset) {
@@ -583,14 +591,20 @@ export function createConditionalPromptPanel({
       // ⚠️ **모드를 바꾸지 않는다.** 백엔드가 화면에 보이는 칸(`editor_mode` 가
       //    가리키는 쪽)에 쓰도록 고쳐졌는데, 여기서만 v2 로 못박으면 낙관적 갱신이
       //    서버와 갈려 Legacy 사용자가 저장 직후 블록 편집기로 튄다.
-      currentState.rules_v2_book = normalizeBook(book);
-      const dsl = serializeRulebook(currentState.rules_v2_book);
-      if (currentState.editor_mode === 'v2') currentState.rules_v2 = dsl;
-      else currentState.rules_legacy = dsl;
-      currentState.rules = dsl;
-      currentState.active_rules = dsl;
-      currentState.engine_options = normalizeEngineOptions(currentState.rules_v2_book.engine_options);
-      selectedRuleId = null;
+      //
+      // ⚠️ 규칙 텍스트를 다시 쓰는 것은 **book 을 보낸 경우뿐**이다. Legacy 는
+      //    화면의 텍스트가 곧 프리셋이라 손댈 것이 없는데, 예전에는 여기서 v2 book
+      //    을 직렬화해 `rules_legacy` 에 덮어써 사용자가 방금 친 규칙을 지웠다.
+      if (book) {
+        currentState.rules_v2_book = normalizeBook(book);
+        const dsl = serializeRulebook(currentState.rules_v2_book);
+        if (currentState.editor_mode === 'v2') currentState.rules_v2 = dsl;
+        else currentState.rules_legacy = dsl;
+        currentState.rules = dsl;
+        currentState.active_rules = dsl;
+        currentState.engine_options = normalizeEngineOptions(currentState.rules_v2_book.engine_options);
+        selectedRuleId = null;
+      }
     }
     dirty = false;
     updateDynamicText();
@@ -1718,6 +1732,12 @@ export function createConditionalPromptPanel({
     // lint 도 규칙 텍스트에서 파생된다 — 타이핑 중 경고가 하나 늘고 줄 때마다 시그니처가
     // 바뀌면 위 가드가 무력해져 포커스/캐럿이 날아간다(같은 회귀 계열).
     delete rest.lint;
+    // active_rules_empty 도 규칙 텍스트의 파생값이다. 빈칸에 첫 글자를 넣거나 마지막
+    // 글자를 지우는 **바로 그 순간** 값이 뒤집혀, 빼지 않으면 그 한 타에서만 통째로
+    // 다시 그려져 textarea 포커스가 빠진다(Codex 지적, 같은 회귀 계열).
+    // 빼도 경고가 굳지는 않는다 - 위 가드는 렌더를 버리는 것이 아니라 **blur 까지
+    // 미루는** 것이라(queueDeferredCondRender), 칸을 벗어나는 순간 다시 그려진다.
+    delete rest.active_rules_empty;
     // module_state_payload nests a FULL copy of the state under `state` (in addition to
     // flattening it at top level). Deleting only top-level rule fields above leaves the
     // churning rules_v2_book (fresh uuids) inside rest.state — which alone destabilises the

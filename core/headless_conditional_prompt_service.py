@@ -50,7 +50,7 @@ class HeadlessConditionalPromptService:
                 })
             return infos
         except Exception as exc:
-            print(f"Remote: conditional preset list failed — {exc}")
+            print(f"Remote: conditional preset list failed - {exc}")
             return []
 
     def _rulebook_dict_from_dsl(self, dsl_text: str, engine_options: dict[str, Any]) -> dict[str, Any]:
@@ -78,7 +78,7 @@ class HeadlessConditionalPromptService:
                 "rules": [asdict(rule) for rule in book.rules],
             }
         except Exception as exc:
-            print(f"Remote: conditional RuleBook decode failed — {exc}")
+            print(f"Remote: conditional RuleBook decode failed - {exc}")
             return {
                 "schema_version": 1,
                 "name": "",
@@ -197,15 +197,15 @@ class HeadlessConditionalPromptService:
         elif key == "engine_options":
             parsed = json.loads(text_value or "{}")
             if isinstance(parsed, dict):
-                settings["engine_options"] = normalize_conditional_engine_options(parsed)
+                self._set_engine_options(settings, parsed)
         elif key == "max_passes":
-            options = dict(settings.get("engine_options") or {})
+            options = dict(self._active_engine_options(settings))
             options["max_passes"] = context._coerce_int(value, default=1, minimum=1, maximum=20)
-            settings["engine_options"] = options
+            self._set_engine_options(settings, options)
         elif key == "stop_on_match":
-            options = dict(settings.get("engine_options") or {})
+            options = dict(self._active_engine_options(settings))
             options["stop_on_match"] = context._coerce_bool(value)
-            settings["engine_options"] = options
+            self._set_engine_options(settings, options)
         elif key == "rules_v2_book":
             return self._apply_rules_v2_book(store, settings, text_value)
         elif key == "preset_save":
@@ -261,6 +261,28 @@ class HeadlessConditionalPromptService:
         settings[cls._preset_key(settings)] = name
         settings["active_preset"] = name        # 옛 단일 키를 지금 모드로 비춘다
 
+    # ⚠️ 엔진 옵션도 **모드별**이다. RuleBook JSON 이 옵션을 규칙과 함께 담으므로
+    #    옵션은 프리셋의 일부다 - 칸이 하나면 프리셋을 부를 때마다 반대편 모드의
+    #    옵션까지 덮어써서, Legacy 로 돌아왔을 때 이름·규칙은 L 인데 max_passes 는
+    #    V 것이 된다(Codex 지적, 코드로 확인).
+    @classmethod
+    def _engine_key(cls, settings: dict[str, Any]) -> str:
+        return "engine_options_v2" if cls._editor_mode(settings) == "v2" else "engine_options_legacy"
+
+    @classmethod
+    def _active_engine_options(cls, settings: dict[str, Any]) -> dict[str, Any]:
+        from core.conditional_prompt_settings import normalize_conditional_engine_options
+
+        return normalize_conditional_engine_options(settings.get(cls._engine_key(settings)) or {})
+
+    @classmethod
+    def _set_engine_options(cls, settings: dict[str, Any], options: Any) -> None:
+        from core.conditional_prompt_settings import normalize_conditional_engine_options
+
+        normalized = normalize_conditional_engine_options(options or {})
+        settings[cls._engine_key(settings)] = normalized
+        settings["engine_options"] = dict(normalized)   # 엔진이 읽는 이름을 비춘다
+
     def _apply_rules_v2_book(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         from core.conditional.dsl_serializer import serialize_rulebook
         from core.conditional_prompt_settings import normalize_conditional_engine_options
@@ -274,8 +296,10 @@ class HeadlessConditionalPromptService:
         book.stop_on_match = opts["stop_on_match"]
         dsl = serialize_rulebook(book)
         settings["rules_v2"] = dsl
+        # ⚠️ 모드를 먼저 v2 로 옮긴 **뒤에** 옵션을 쓴다. 순서가 바뀌면 v2 의 옵션이
+        #    legacy 칸에 들어간다(`_engine_key` 가 그때의 모드를 본다).
         settings["editor_mode"] = "v2"
-        settings["engine_options"] = opts
+        self._set_engine_options(settings, opts)
         store.apply_settings(settings)
         return self.state()
 
@@ -331,7 +355,7 @@ class HeadlessConditionalPromptService:
                 # 있어서, Legacy 편집기를 쓰던 사용자가 저장을 누르면 자기가 보고
                 # 있지도 않은(대개 비어 있는) v2 텍스트가 프리셋이 됐다.
                 book = parse_rulebook(self._active_rules(settings))
-                opts = normalize_conditional_engine_options(settings.get("engine_options") or {})
+                opts = self._active_engine_options(settings)
                 book.max_passes = opts["max_passes"]
                 book.stop_on_match = opts["stop_on_match"]
         except FileNotFoundError:
@@ -348,10 +372,10 @@ class HeadlessConditionalPromptService:
         self._set_active_preset(settings, name)
         if activate:
             self._write_active_rules(settings, serialize_rulebook(book))
-            settings["engine_options"] = {
+            self._set_engine_options(settings, {
                 "max_passes": book.max_passes,
                 "stop_on_match": book.stop_on_match,
-            }
+            })
         store.apply_settings(settings)
         return self._state_with(messages=[self._toast_message(f"조건부 프리셋 저장: {name}", "success")])
 
@@ -375,10 +399,11 @@ class HeadlessConditionalPromptService:
         # 순간 낯선 블록 편집기로 끌려가고 자기 규칙은 화면에서 사라졌다
         # (`settings["rules"]` 에 남아 있지만 비활성이라 보이지 않는다).
         self._write_active_rules(settings, serialize_rulebook(book))
-        settings["engine_options"] = {
+        # 프리셋의 옵션은 **그 프리셋을 부른 모드에만** 실린다.
+        self._set_engine_options(settings, {
             "max_passes": book.max_passes,
             "stop_on_match": book.stop_on_match,
-        }
+        })
         self._set_active_preset(settings, name)
         store.apply_settings(settings)
         return self._state_with(messages=[self._toast_message(f"조건부 프리셋 로드: {name}", "success")])
@@ -396,10 +421,40 @@ class HeadlessConditionalPromptService:
             if removed:
                 self._set_active_preset(settings, settings.get(self._preset_key(settings)))
                 store.apply_settings(settings)
+            # ⚠️ 프리셋 **파일은 API 모드 공용**인데 설정은 NAI/WEBUI/COMFYUI 로
+            #    갈린다. 지금 모드에서만 떼면 다른 모드가 지워진 이름을 계속 내걸고,
+            #    누르면 "찾을 수 없음" 이 뜬다(Codex 지적, 코드로 확인).
+            self._forget_preset_in_other_modes(store, name)
             return self._state_with(messages=[self._toast_message(f"조건부 프리셋 삭제: {name}", "success")])
         return self._state_with(messages=[
             self._toast_message(f"삭제할 사용자 프리셋을 찾을 수 없습니다: {name}", "error"),
         ])
+
+    def _forget_preset_in_other_modes(self, store, name: str) -> None:
+        """지운 프리셋 이름을 **다른 API 모드**의 이름표에서도 뗀다.
+
+        ⚠️ 부분 업데이트로 보내지 않는다. `apply_settings` 는 받은 dict 를 현재
+        값 위에 얹은 뒤 정규화하는데, 새 키만 None 으로 지우고 옛 alias
+        (`active_preset`)를 그대로 두면 남은 alias 가 다시 살아난다. 그래서
+        **전체 설정을 읽어 고쳐 통째로** 되돌려 준다.
+        """
+        from core.conditional_prompt_settings import normalize_conditional_mode
+
+        current = normalize_conditional_mode(store.mode())
+        for other in ("NAI", "WEBUI", "COMFYUI"):
+            if other == current:
+                continue
+            try:
+                settings = store.collect_settings(other)
+            except Exception:
+                continue
+            changed = False
+            for key in ("active_preset_legacy", "active_preset_v2", "active_preset"):
+                if str(settings.get(key) or "") == name:
+                    settings[key] = None
+                    changed = True
+            if changed:
+                store.apply_settings(settings, other)
 
     # ------------------------------------------------------------------
     # Simulation

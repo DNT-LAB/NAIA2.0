@@ -21,6 +21,13 @@ DEFAULT_CONDITIONAL_SETTINGS = {
     "rules": "",
     "rules_v2": "",
     "editor_mode": "legacy",
+    # ⚠️ 엔진 옵션도 **모드별로** 기억한다. RuleBook JSON 에는 옵션이 규칙과 함께
+    # 들어 있어 프리셋의 일부다 - 칸이 하나면 프리셋을 부를 때마다 반대편 모드의
+    # 옵션까지 덮어써서, Legacy 로 돌아왔을 때 이름·규칙은 L 인데 max_passes 는
+    # V 것이 된다(Codex 지적, 코드로 확인).
+    "engine_options_legacy": dict(DEFAULT_CONDITIONAL_ENGINE_OPTIONS),
+    "engine_options_v2": dict(DEFAULT_CONDITIONAL_ENGINE_OPTIONS),
+    # 지금 모드의 옵션을 비추는 파생값. 엔진이 읽는 이름이라 유지한다.
     "engine_options": dict(DEFAULT_CONDITIONAL_ENGINE_OPTIONS),
     # ⚠️ 프리셋 이름은 **모드별로** 기억한다. 규칙 칸이 `rules`(Legacy) / `rules_v2`
     # (블록 편집기)로 나뉘어 있는데 이름표만 하나면, 모드를 바꿨을 때 규칙은 이쪽
@@ -137,7 +144,26 @@ def normalize_conditional_settings(raw: Any = None) -> dict[str, Any]:
     settings["precedence_schema"] = max(0, min(PRECEDENCE_SCHEMA, schema))
     editor_mode = str(source.get("editor_mode", settings["editor_mode"]) or "legacy")
     settings["editor_mode"] = editor_mode if editor_mode in {"legacy", "v2"} else "legacy"
-    settings["engine_options"] = normalize_conditional_engine_options(source.get("engine_options"))
+    # 엔진 옵션: 모드별 두 칸 + 지금 모드를 비추는 파생 `engine_options`.
+    #
+    # ⚠️ 마이그레이션 규칙이 `active_preset` 과 **다르다.** 옛 저장본의 단일 값은
+    # **양쪽에 다 넣는다.** 이름표는 "사용자가 그 편집기에서 고른 프리셋" 이라
+    # 한쪽에만 넣는 것이 맞지만, 엔진 옵션은 기본값이 있는 설정이라 한쪽에만
+    # 넣으면 반대편이 업그레이드하는 순간 조용히 기본값(max_passes=1)으로
+    # 떨어진다 - 사용자가 아무것도 안 했는데 동작이 바뀐다.
+    has_split = "engine_options_legacy" in source or "engine_options_v2" in source
+    fallback = source.get("engine_options")
+    settings["engine_options_legacy"] = normalize_conditional_engine_options(
+        source.get("engine_options_legacy") if has_split else fallback
+    )
+    settings["engine_options_v2"] = normalize_conditional_engine_options(
+        source.get("engine_options_v2") if has_split else fallback
+    )
+    settings["engine_options"] = dict(
+        settings["engine_options_v2"] if settings["editor_mode"] == "v2"
+        else settings["engine_options_legacy"]
+    )
+
     def _name(value):
         return str(value) if value else None
 

@@ -706,10 +706,19 @@ export function createConditionalPromptPanel({
   function renderLegacy(m) {
     const activeRuleKey = 'rules_legacy';
     const activeRules = m.rules_legacy;
+    // ⚠️ 프리셋 팝오버를 **여기에도** 그린다. 예전에는 `presetPopoverOpen` 을
+    //    `renderV2` 만 읽어서, Legacy 에서 프리셋 버튼을 눌러도 플래그만 뒤집히고
+    //    아무 일도 안 일어났다(사용자 제보: "버튼이 눌러지지 않습니다").
+    //
+    //    프리셋은 **두 모드가 함께 쓴다**(분리하지 않는다). 저장 형식이 RuleBook
+    //    JSON 하나이고, 두 모드 다 `parse_rulebook`/`serialize_rulebook` 을 지나므로
+    //    한쪽에서 만든 프리셋이 다른 쪽에서 그대로 열린다(실측: legacy 규칙 5개 중
+    //    4개가 구조화 블록으로 파싱, 나머지 1개는 raw 로 원문 보존, 왕복 바이트 동일).
     moduleBody.innerHTML = `
-      <div class="cond-root">
+      <div class="cond-root${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
+        ${m.can_manage_presets && presetPopoverOpen ? renderPresetPane(m) : ''}
         <div class="cond-rules-section">
           <div class="cond-rules-head">
             <div class="mod-section-label">Rules (Legacy DSL)</div>

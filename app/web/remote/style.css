@@ -25010,3 +25010,27 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-size: 11px; line-height: 1.6; opacity: .72;
   padding: 8px 6px; text-align: center;
 }
+
+/* ── Legacy DSL 화면의 프리셋 팝오버 ─────────────────────────────────────────
+   프리셋 판(`.cond-preset-pane`)은 원래 v2 의 3열 그리드 칸이었고, 좁은 화면에서만
+   떠 있는 판이 됐다(`@media (max-width: 1800px)`). Legacy 화면에는 그 그리드가
+   없으므로 **폭과 무관하게 항상 떠 있는 판**으로 낸다.
+   ⚠️ v2 의 넓은 화면 인라인 배치를 건드리지 않으려고 `:not(.cond-v2-editor)` 로
+   Legacy 루트에만 건다. */
+.cond-root:not(.cond-v2-editor) { position: relative; }
+.cond-root:not(.cond-v2-editor) .cond-preset-pane {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: 44px;
+  right: 2px;
+  width: min(360px, calc(100% - 4px));
+  max-height: min(620px, calc(100% - 52px));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.48);
+}
+.cond-root:not(.cond-v2-editor).cond-preset-popover-open .cond-preset-pane { display: flex; }
+.cond-root:not(.cond-v2-editor).cond-preset-popover-open .cond-preset-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

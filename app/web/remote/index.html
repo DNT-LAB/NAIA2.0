@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260823-tfexact1">
+<link rel="stylesheet" href="style.css?v=20260823-tfexact2">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -408,7 +408,7 @@
   <div class="module-popup-header">
     <span class="module-popup-titlewrap">
       <span class="module-popup-title">Tag Filter</span>
-      <button type="button" class="header-guide-btn" data-naia-guide="Tag Filter — 랜덤 프롬프트를 뽑아오는 검색 데이터셋을 미리 좁혀, 지정한 태그가 든(또는 들지 않은) 행에서만 프롬프트가 생성되게 합니다.\n\nRating (G/S/Q/E) — 포함할 콘텐츠 등급(General/Sensitive/Questionable/Explicit). 켜진 등급만 검색 대상이 됩니다.\n\ninclude tag — 입력한 태그를 모두 포함하는 행만 남깁니다(AND). exclude tag — 해당 태그가 든 행을 제외합니다. 입력 후 Enter로 칩이 추가되고, 2글자 이상 입력하면 자동완성이 뜹니다.\n\n매칭 방식 — 부분 문자열 포함 검사입니다(대소문자 무시, _는 공백으로 처리). 예: 'girl'은 1girl·cowgirl까지, 'hair'는 long hair·hairband까지 함께 잡힙니다. 정확히 한 태그만 원하면 더 구체적으로 입력하세요.\n\n칩을 추가/제거하면 자동으로 즉시 적용됩니다(별도 Search/Assign 버튼 없음). 적용된 행 수는 RATING 옆 라벨에 표시됩니다.\n\nSave Filter — 현재 태그 조합(include/exclude)을 이름 붙여 저장합니다(등급은 저장 안 함). Filters — 저장된 필터를 클릭해 불러오거나 ×로 삭제합니다(기기 간 공유). Clear — 필터를 모두 해제합니다.">ⓘ 가이드</button>
+      <button type="button" class="header-guide-btn" data-naia-guide="Tag Filter — 랜덤 프롬프트를 뽑아오는 검색 데이터셋을 미리 좁혀, 지정한 태그가 든(또는 들지 않은) 행에서만 프롬프트가 생성되게 합니다.\n\nRating (G/S/Q/E) — 포함할 콘텐츠 등급(General/Sensitive/Questionable/Explicit). 켜진 등급만 검색 대상이 됩니다.\n\ninclude tag — 입력한 태그를 모두 포함하는 행만 남깁니다(AND). exclude tag — 해당 태그가 든 행을 제외합니다. 입력 후 Enter로 칩이 추가되고, 2글자 이상 입력하면 자동완성이 뜹니다.\n\n매칭 방식 — 기본은 부분 문자열 포함 검사입니다(대소문자 무시, _는 공백으로 처리). 예: 'girl'은 1girl·cowgirl까지 함께 잡힙니다.\n\n퍼펙트 매칭 — 칩을 클릭하면 [퍼펙트 매칭 적용] 버튼이 열립니다. 적용된 칩은 파랗게 표시되고 앞에 *가 붙습니다(SEARCH의 *tag와 같은 규약). 다시 눌러 해제할 수 있고, 입력창에 *girl처럼 직접 쳐도 됩니다. 주의: 경계는 쉼표 또는 공백이라 *sky는 'cloudy sky'에도 걸립니다 - 태그 전체가 정확히 일치해야 한다는 뜻은 아닙니다.\n\n칩을 추가/제거하면 자동으로 즉시 적용됩니다(별도 Search/Assign 버튼 없음). 적용된 행 수는 RATING 옆 라벨에 표시됩니다.\n\nSave Filter — 현재 태그 조합(include/exclude)을 이름 붙여 저장합니다(등급은 저장 안 함). Filters — 저장된 필터를 클릭해 불러오거나 ×로 삭제합니다(기기 간 공유). Clear — 필터를 모두 해제합니다.">ⓘ 가이드</button>
     </span>
     <button class="history-close" onclick="closeTagFilter()">&times;</button>
   </div>
@@ -1271,6 +1271,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260823-tfexact1"></script>
+<script src="app.js?v=20260823-tfexact2"></script>
 </body>
 </html>

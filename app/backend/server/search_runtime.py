@@ -830,9 +830,12 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
             # 선행 `*` = 퍼펙트 매칭(SEARCH 와 같은 표기). **예약 문자**다 - 지금 태그 사전
             # 150개 parquet 전수에 `*` 를 포함한 실제 태그는 0개지만, 커스텀 parquet 은
             # 태그 문자를 검증하지 않으므로 규약으로 못박는다.
+            # ⚠️ `lstrip("*")` 으로 **전부** 벗긴다. SEARCH 도 그렇고(`search_engine.py:49`)
+            #    프런트 `baseTag` 도 그렇다 - 여기만 하나씩 벗기면 `**tag` 가 SEARCH 에선
+            #    `tag`, 칩에선 literal `*tag` 를 골라 같은 입력이 두 화면에서 갈린다.
             exact = clean.startswith("*")
             if exact:
-                clean = clean[1:].strip()
+                clean = clean.lstrip("*").strip()
             if not clean:
                 continue
             # ⚠️ **영속 토큰에 `*` 를 되살린다.** 여기서 만든 `clean_tags` 가 pending 을 거쳐

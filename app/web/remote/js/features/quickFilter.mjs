@@ -248,7 +248,11 @@ export function createQuickFilterController(deps) {
       + `${exact ? ' is-exact' : ''}${open ? ' menu-open' : ''}"`
       + ` role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}"`
       + ` onclick="toggleTagFilterChipMenu('${list}',${index})"`
-      + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleTagFilterChipMenu('${list}',${index});}">`
+      // ⚠️ `event.target===this` 가 필수다. 메뉴 <button> 이 칩 **안**에 있어서 거기서
+      //    난 Enter/Space 가 여기로 올라오는데, 그때 preventDefault 를 걸면 버튼의
+      //    기본 활성화(=click)가 취소돼 **키보드로는 적용/해제를 못 한다**(Codex 지적).
+      + ` onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){`
+      + `event.preventDefault();toggleTagFilterChipMenu('${list}',${index});}">`
       + deps.escHtml(tag)
       + `<span class="chip-x" onclick="event.stopPropagation();${remover}(${index})">&times;</span>`
       + (open
@@ -390,7 +394,10 @@ export function createQuickFilterController(deps) {
   }
 
   function commitTags(target, rawValue) {
-    const tags = normalizeTags([rawValue]);
+    // ⚠️ sigil 만 남는 입력(`*`, `**`)은 태그가 없다 - 백엔드가 어차피 버리므로
+    //    칩으로 만들면 **화면에만 있고 아무 일도 안 하는 칩**이 되고, 퍼펙트 매칭을
+    //    해제하면 빈 칩이 남는다(Codex 지적).
+    const tags = normalizeTags([rawValue]).filter(tag => baseTag(tag).length > 0);
     if (!tags.length) return false;
     const targetList = target === 'exclude' ? excludeTags : includeTags;
     let changed = false;
@@ -451,7 +458,10 @@ export function createQuickFilterController(deps) {
       clearTimeout(acTimer);
       acTimer = setTimeout(() => {
         latestAcRequest = {target, query};
-        send({type: 'tag_filter_ac', query});
+        // ⚠️ 자동완성에는 sigil 을 빼고 보낸다. `*sky` 를 그대로 보내면 태그 색인에
+        //    그런 태그가 없어 **결과가 0건**이 된다 - 사용자가 직접 `*sky` 를 치면
+        //    Enter 로 칩은 만들어지는데 자동완성만 조용히 사라진다(Codex 지적).
+        send({type: 'tag_filter_ac', query: baseTag(query)});
       }, 150);
     });
 
@@ -829,6 +839,11 @@ export function createQuickFilterController(deps) {
       && JSON.stringify([...excludeTags].sort()) === JSON.stringify([...pref.tag_filter_exclude].sort());
 
     setActiveRatings(pref.ratings);
+    // ⚠️ 칩 배열이 통째로 바뀌면 열린 메뉴는 닫는다. 메뉴는 **인덱스**로 칩을 가리키는데,
+    //    백엔드 권위 상태는 모든 탭에 적용되므로 다른 탭이 앞쪽 칩을 지우면 인덱스가
+    //    밀려 **다음 클릭이 엉뚱한 칩의 exact 를 뒤집는다**(Codex 지적). 로컬 × 경로만
+    //    닫는 것으로는 모자란다.
+    if (!sameTags) closeChipMenu();
     includeTags = [...pref.tag_filter];
     excludeTags = [...pref.tag_filter_exclude];
     active = pref.tag_filter_active;

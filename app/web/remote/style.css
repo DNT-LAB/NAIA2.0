@@ -13149,6 +13149,12 @@ body.detached-metadata .metadata-layout {
 /* 슬롯 이름표. 예전에는 체크박스 라벨이 이 자리였다 - 이제 활성/비활성이
    무리로 갈려 있어 체크박스가 뜻을 잃었고, ▲/▼ 가 그 역할을 한다. */
 .mod-char-title {
+  /* ⚠️ 부모가 `justify-content: space-between` 이라, 체크박스가 들어오며 덩이가
+     셋이 되자 제목이 가운데로 밀렸다(사용자 지적). 제목이 남는 폭을 먹으면
+     체크박스 바로 옆에 붙고 버튼 무리는 오른쪽 끝에 남는다. */
+  flex: 1;
+  min-width: 0;
+  text-align: left;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
@@ -22450,6 +22456,9 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 /* 슬롯 머리도 줄이다 - 토글 + [▼] + [-]. */
 .cq-slot-headrow {
   display: flex; align-items: center; width: 100%;
+  /* 켬/끔 버튼이 패널 테두리에 붙지 않게 살짝 안으로 들인다(사용자 지정).
+     아래 본문(`.cq-slot-body` padding 3px 4px)과 왼쪽 여백을 맞춘다. */
+  padding-left: 4px;
   background: rgba(255,255,255,0.04);
 }
 .cq-slot-head { flex: 1; min-width: 0; background: transparent; }

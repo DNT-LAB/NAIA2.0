@@ -38,8 +38,14 @@ def _seed_missing_positions(settings: dict) -> None:
     자리를 기억해야 한다(사용자 지정). 자리 고르기는 생성 경로와 **같은 함수**
     (`fill_missing_positions`)를 쓴다 - 둘로 나누면 화면과 요청이 갈린다.
 
-    ⚠️ 게이트는 `active_character_frames` 와 **똑같아야** 한다 - 모듈 활성까지
-    본다. 어긋나면 여기서 채운 좌표가 저쪽 셈에 안 들어가 부분 좌표가 된다.
+    ⚠️ 게이트는 `active_character_frames` 의 **상위집합**이어야 한다 - 여기서
+    채운 좌표가 저쪽 셈에 안 들어가면 부분 좌표가 된다. 반대로 여기가 더 넓은
+    것은 안전하다(저쪽이 쓰는 슬롯은 전부 채워져 있다).
+
+    지금은 실제로 더 넓다: 여기는 `slot_state == "active"` 로 보고 저쪽은
+    `is_enabled`(= active and not muted)로 본다. **일부러 그렇다** - 꺼 둔 슬롯도
+    좌표를 받아 둬야 다시 켰을 때 자리가 살아 있다. 슬롯은 삭제되기 전까지 자기
+    자리를 기억한다(사용자 지정).
     """
     from core.character_settings import fill_missing_positions, normalize_position
 
@@ -160,6 +166,12 @@ class HeadlessCharacterService:
             frame["uc"] = str(uc or "")
             frame["is_enabled"] = True
             frame["slot_state"] = "active"
+            # ⚠️ mute 도 함께 푼다. `is_enabled` 는 이제 **파생값**이라
+            #    (`active and not muted`), 꺼 둔 C1 에 에셋을 얹으면 여기서 True 로
+            #    써도 다음 정규화가 다시 False 로 만든다 - 적용은 됐는데 슬롯이
+            #    조용히 꺼져 있게 된다. 사용자가 "이걸 C1 으로 쓴다" 고 한 것이므로
+            #    켜 주는 것이 맞다.
+            frame["is_muted"] = False
             for other in frames[1:]:
                 if not isinstance(other, dict):
                     continue

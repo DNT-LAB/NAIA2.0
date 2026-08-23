@@ -583,8 +583,15 @@ export function createCharacterQuickPanel({
     const mute = event.target.closest('[data-cq-mute]');
     if (mute) {
       const index = Number(mute.dataset.cqMute);
-      const now = activeSlots(lastState).find(s => s.index === index);
-      setModuleParam('character', `char_muted_${index}`, String(!(now && now.character.muted)));
+      const slot = activeSlots(lastState).find(item => item.index === index);
+      const nextMuted = !(slot && slot.character.muted);
+      // 끄면 접고, 켜면 편다(사용자 지정). 끈 슬롯의 입력칸은 쓸 일이 없으니
+      // 자리를 돌려주고, 다시 켜는 것은 대개 거기에 뭘 쓰려는 것이다.
+      if (nextMuted) openSlots.delete(index); else openSlots.add(index);
+      setModuleParam('character', `char_muted_${index}`, String(nextMuted));
+      // 서버 에코를 기다리지 않고 접힘/펼침을 먼저 반영한다 - 에코는 muted 만
+      // 바꾸고 openSlots 는 이쪽 상태라 다시 그려 줘야 화면이 따라온다.
+      render(lastState, true);
       return;
     }
     const toggle = event.target.closest('[data-cq-toggle]');

@@ -703,7 +703,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260823-cqdodge3')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260823-cqdodge23')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -1017,7 +1017,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260823-cqdodge')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260823-cqdodge2')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1026,7 +1026,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260823-cqdodge');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260823-cqdodge2');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -1040,7 +1040,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     });
     // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
     const {createInteractiveScenePanel} =
-      await import('./js/features/interactiveScenePanel.mjs?v=20260823-cqdodge');
+      await import('./js/features/interactiveScenePanel.mjs?v=20260823-cqdodge2');
     interactiveScenePanel = createInteractiveScenePanel({
       document, escHtml, showToast, showAppDialog,
       getPanel: () => interactivePanel,
@@ -1632,7 +1632,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260717-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260823-quickchar23')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260823-quickchar24')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml, setModuleParam, onModTextEdit,
@@ -7576,7 +7576,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260823-cqdodge2')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260823-cqdodge22')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -9755,7 +9755,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260823-cqdodge')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260823-cqdodge2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -40,6 +40,7 @@ export function createCharacterQuickPanel({
   let mount = null;
   let open = false;
   const openSlots = new Set();       // 동시에 여러 개 펼칠 수 있다 - Set 이다
+  let pendingAddOpen = null;         // + Add 직전의 활성 슬롯 수(에코를 기다린다)
   let lastState = null;
   let lastSignature = '';
   let visible = false;
@@ -572,7 +573,11 @@ export function createCharacterQuickPanel({
     if (event.target.closest('[data-cq-posedit]')) { setPosEditing(true); return; }
     if (event.target.closest('[data-cq-posdone]')) { setPosEditing(false); return; }
     if (event.target.closest('[data-cq-manage]')) { openCharacterModule(); return; }
-    if (event.target.closest('[data-cq-add]')) setModuleParam('character', 'add_character', 'true');
+    if (event.target.closest('[data-cq-add]')) {
+      // 지금 활성 슬롯 수를 적어 둔다 - 에코가 이보다 늘면 그게 새 슬롯이다.
+      pendingAddOpen = activeSlots(lastState).length;
+      setModuleParam('character', 'add_character', 'true');
+    }
   }
 
   /** Interactive 가 켜져 있거나 NAI 모드가 아니면 자리를 비운다. */
@@ -593,6 +598,20 @@ export function createCharacterQuickPanel({
     if (!visible) return;
     const current = lastState;
     if (!current) return;
+    // 방금 추가한 슬롯은 **펼친 채로** 나온다(사용자 지정) - 추가한 이유가 거기에
+    // 뭔가 적으려는 것이라, 접힌 채 나오면 한 번 더 눌러야 한다.
+    //
+    // ⚠️ 새 슬롯의 인덱스는 **서버 에코가 와야** 안다(`add_character` 는 백엔드가
+    //    프레임을 붙이고 정렬까지 한다). 그래서 누를 때 세어 둔 수보다 늘어난
+    //    순간에 마지막 활성 슬롯을 편다.
+    if (pendingAddOpen !== null) {
+      const now = activeSlots(current);
+      if (now.length > pendingAddOpen) {
+        openSlots.add(now[now.length - 1].index);
+        pendingAddOpen = null;
+        force = true;
+      }
+    }
     ensureMount();
     const nextSignature = signature(current);
     if (!force && nextSignature === lastSignature) {

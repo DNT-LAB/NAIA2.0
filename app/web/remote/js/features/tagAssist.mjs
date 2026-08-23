@@ -353,18 +353,7 @@ export function createTagAssistController({
     const measured = tagTooltip.getBoundingClientRect();
     const width = Math.min(maxWidth, measured.width || maxWidth);
     const maxLeft = viewport.offsetLeft + viewport.width - width - margin;
-    // ⚠️ **떠 있는 패널 안의 칸이면 그 패널을 비켜선다.** 캐릭터 퀵 패널은 결과 화면
-    //    위에 얹힌 좁은 부유창이라, 캐럿을 따라가면 팝업이 **자기가 딸린 슬롯과 아래
-    //    슬롯들을 통째로 덮는다**(실측 263x131). 오른쪽에 자리가 있으면 패널 밖으로
-    //    민다 - 자리가 없으면 원래대로 캐럿을 따른다.
-    const dodge = target?.closest?.('.cq-float');
-    let anchorX = anchorLeft;
-    if (dodge) {
-      const panel = dodge.getBoundingClientRect();
-      const right = panel.right + gap;
-      if (right + width + margin <= viewport.offsetLeft + viewport.width) anchorX = right;
-    }
-    const left = Math.max(viewport.offsetLeft + margin, Math.min(anchorX, maxLeft));
+    const left = Math.max(viewport.offsetLeft + margin, Math.min(anchorLeft, maxLeft));
     const belowTop = anchorBottom + gap;
     const maxHeightBelow = viewport.offsetTop + viewport.height - belowTop - margin;
     const height = measured.height || 220;

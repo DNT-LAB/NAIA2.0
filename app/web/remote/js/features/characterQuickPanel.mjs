@@ -396,13 +396,24 @@ export function createCharacterQuickPanel({
    *  프롬프트 앞 태그에서 만들어지므로 **입력 내용이다.** 한 글자 칠 때마다 서명이
    *  바뀌어 통째로 다시 그렸고, 그 순간 편집 중인 textarea 가 교체돼 포커스가
    *  빠졌다(사용자 제보). 라벨은 서명이 아니라 syncValues 가 제자리에서 고친다. */
+  /** POS 세 상태. 서버가 `position_mode` 를 주지만 옛 필드도 받아 둔다. */
+  const POS_CYCLE = ['auto', 'custom', 'random'];
+  const POS_LABEL = {auto: 'AUTO', custom: 'CUSTOM', random: 'RAND'};
+  function posModeOf(state) {
+    const raw = state && state.position_mode;
+    if (POS_CYCLE.includes(raw)) return raw;
+    return state && state.use_custom_positions ? 'custom' : 'auto';
+  }
+
   function signature(state) {
     const slots = activeSlots(state)
       .map(({index}) => [index, openSlots.has(index) ? 1 : 0].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
+    // ⚠️ POS 는 **모드 이름**을 넣는다. 불리언으로 넣으면 CUSTOM->RAND 전환이
+    //    서명에 안 잡혀 라벨이 CUSTOM 에 굳는다(둘 다 "참"이 아니게 되는 순간).
     return `${open ? 1 : 0}${state && state.activated ? 1 : 0}`
-      + `${state && state.use_custom_positions ? 1 : 0}${posEditing ? 1 : 0}#${slots}`;
+      + `${posModeOf(state)}${posEditing ? 1 : 0}#${slots}`;
   }
 
   /** 자동완성을 새로 그린 칸에 다시 건다.
@@ -564,10 +575,12 @@ export function createCharacterQuickPanel({
       return;
     }
     if (event.target.closest('[data-cq-posmode]')) {
-      const next = !(lastState && lastState.use_custom_positions);
-      // AUTO 로 되돌리면 편집 중일 이유가 없다.
-      if (!next && posEditing) setPosEditing(false);
-      setModuleParam('character', 'use_custom_positions', String(next));
+      // AUTO -> CUSTOM -> RAND -> AUTO (사용자 지정).
+      const now = posModeOf(lastState);
+      const next = POS_CYCLE[(POS_CYCLE.indexOf(now) + 1) % POS_CYCLE.length];
+      // CUSTOM 을 떠나면 편집 중일 이유가 없다 - 원을 옮길 대상이 사라진다.
+      if (next !== 'custom' && posEditing) setPosEditing(false);
+      setModuleParam('character', 'position_mode', next);
       return;
     }
     if (event.target.closest('[data-cq-posedit]')) { setPosEditing(true); return; }
@@ -640,7 +653,8 @@ export function createCharacterQuickPanel({
     // 하는데, <button> 안에 <input> 이나 <button> 을 넣으면 마크업이 깨지고
     // 안쪽을 눌러도 바깥 토글이 먼저 먹는다.
     const enabled = !!current.activated;
-    const custom = !!current.use_custom_positions;
+    const posMode = posModeOf(current);
+    const custom = posMode === 'custom';
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`
@@ -649,10 +663,11 @@ export function createCharacterQuickPanel({
       + `<span class="cq-title">CHARACTER</span></button>`
       + `<label class="cq-enable"><input type="checkbox" data-cq-enable="1"`
       + `${enabled ? ' checked' : ''}><span>활성화</span></label>`
-      // POS: AUTO 는 좌표를 아예 안 보낸다 -> NAI 가 배치(AI's Choice).
-      // CUSTOM 이어야 슬롯 좌표가 나가고, 그때만 편집 버튼이 생긴다.
-      + `<button type="button" class="cq-pos${custom ? ' is-custom' : ''}"`
-      + ` data-cq-posmode="1">POS : ${custom ? 'CUSTOM' : 'AUTO'}</button>`
+      // POS 세 상태. AUTO 는 고정 자리, CUSTOM 은 슬롯이 기억한 자리, RAND 는
+      // 생성 요청마다 새로 굽는 무작위 배치다. 옮길 원이 있는 CUSTOM 에서만
+      // 편집 버튼이 생긴다 - RAND 의 자리는 누를 시점에 아직 존재하지 않는다.
+      + `<button type="button" class="cq-pos is-${posMode}"`
+      + ` data-cq-posmode="1">POS : ${POS_LABEL[posMode]}</button>`
       + (custom
           ? `<button type="button" class="cq-pos cq-pos-edit" data-cq-posedit="1">POS</button>`
           : '')

@@ -202,13 +202,21 @@ class HeadlessCharacterService:
             settings["is_active"] = context._coerce_bool(value)
         elif key == "reroll_on_generate":
             settings["reroll_on_generate"] = context._coerce_bool(value)
-        elif key == "use_custom_positions":
-            # POS: AUTO <-> CUSTOM. AUTO 는 좌표를 아예 안 보내 NAI 가 배치한다.
+        elif key == "position_mode":
+            # POS: AUTO -> CUSTOM -> RAND -> AUTO (사용자 지정).
             # 스냅샷은 건드리지 않는다 - 좌표는 굴림의 일부가 아니다.
-            # 켜는 순간 빈 좌표에 **NAI 가 놓았을 자리**를 뿌린다(아래 공통 처리).
+            # CUSTOM 으로 들어오는 순간 빈 좌표에 AUTO 자리를 뿌린다(save_settings).
             # 사용자가 보던 배치에서 이어 옮기게 하려는 것이고, 배치 규칙을 파이썬
             # 한 곳에만 두려는 것이다 - 프런트가 같은 표를 또 들면 언젠가 갈린다.
+            from core.character_settings import normalize_position_mode
+
+            settings["position_mode"] = normalize_position_mode(value)
+            settings["use_custom_positions"] = settings["position_mode"] == "custom"
+        elif key == "use_custom_positions":
+            # 옛 이름. 정규화가 `position_mode` 를 우선하므로 **둘 다** 써야 먹는다
+            # - 미러만 바꾸면 다음 정규화에서 옛 모드로 조용히 되돌아간다.
             settings["use_custom_positions"] = context._coerce_bool(value)
+            settings["position_mode"] = "custom" if settings["use_custom_positions"] else "auto"
         elif key.startswith("char_pos_"):
             index = context._index_from_key(key, "char_pos_")
             if index is not None:

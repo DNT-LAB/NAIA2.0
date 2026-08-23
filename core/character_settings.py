@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import random
 import uuid
 from pathlib import Path
 from typing import Any
@@ -111,13 +113,20 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 "position": normalize_position(frame.get("position")),
             })
     settings["character_frames"] = sort_character_frames(normalized_frames)
-    # POS: AUTO(기본) 는 `auto_character_positions` 가 구운 자리를 보낸다.
-    # CUSTOM 이면 슬롯이 기억하고 있는 사용자 좌표가 나간다.
+    # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.
+    #   · AUTO   - `auto_character_positions` 가 구운 고정 자리
+    #   · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
+    #   · RAND   - 생성 요청마다 새로 굽는 무작위 배치
     #
-    # ⚠️ **AUTO 로 되돌려도 슬롯의 position 은 지우지 않는다**(사용자 지정:
+    # ⚠️ **AUTO/RAND 로 옮겨가도 슬롯의 position 은 지우지 않는다**(사용자 지정:
     #    "각 슬롯은 삭제되기 전까지 사용자가 설정한 POS 를 기억해야 한다").
     #    CUSTOM 으로 되돌아오면 그대로 살아난다.
-    settings["use_custom_positions"] = bool(data.get("use_custom_positions", False))
+    settings["position_mode"] = normalize_position_mode(
+        data.get("position_mode"), data.get("use_custom_positions")
+    )
+    # 옛 불리언 키는 **파생값**으로만 남긴다 - 읽는 곳이 여럿이라 지우면 흩어져
+    # 깨지고, 권위를 주면 새 값과 싸운다. 언제나 `position_mode` 가 이긴다.
+    settings["use_custom_positions"] = settings["position_mode"] == "custom"
     return settings, migrated
 
 
@@ -135,6 +144,59 @@ def normalize_position(value: Any) -> dict[str, float] | None:
     except (TypeError, ValueError):
         return None
     return {"x": round(min(1.0, max(0.0, x)), 3), "y": round(min(1.0, max(0.0, y)), 3)}
+
+
+POSITION_MODES = ("auto", "custom", "random")
+
+
+def normalize_position_mode(value: Any, legacy_flag: Any = None) -> str:
+    """POS 모드 하나를 고른다. 모르는 값이면 AUTO.
+
+    ⚠️ 옛 저장본에는 `position_mode` 가 없고 불리언 `use_custom_positions` 뿐이다.
+    그때만 그 값을 본다 - `position_mode` 가 유효하면 **언제나 그쪽이 이긴다.**
+    둘 다 권위를 가지면 한쪽만 담아 보내는 호출자가 상대를 조용히 되돌린다.
+    """
+    text = str(value or "").strip().lower()
+    if text in POSITION_MODES:
+        return text
+    return "custom" if bool(legacy_flag) else "auto"
+
+
+# POS: RAND 의 규약 (사용자 지정 2026-08-23).
+#
+#   0.1~0.9 안에서 뽑고, 이미 놓인 자리와 유클리드 거리 0.2 이상을 지킨다.
+#   한 슬롯당 5회까지 다시 뽑고, 다 실패하면 **마지막에 뽑은 값을 그대로 쓴다.**
+#
+# ⚠️ 판정은 **반올림한 뒤** 한다. 보내는 값과 재는 값이 달라지면 "0.2 이상" 이
+#    보장되지 않는다(소수 3자리로 나가므로 그 값으로 재야 한다).
+_RAND_LO, _RAND_HI = 0.1, 0.9
+_RAND_MIN_DIST = 0.2
+_RAND_TRIES = 5
+
+
+def random_character_positions(count: int, rng: Any = None) -> list[dict[str, float]]:
+    """POS: RAND 의 자리. **생성 요청마다 새로 굽는다** - 저장하지 않는다.
+
+    한 슬롯씩 물리는 방식이다(전체를 통째로 다시 뽑지 않는다). 통째로 뽑으면
+    인원이 늘수록 다섯 번 안에 성공할 확률이 급격히 떨어져 "마지막 값" 폴백이
+    사실상 기본값이 되고, 그 값은 겹침을 전혀 안 본 배치다.
+    """
+    if count <= 0:
+        return []
+    source = rng if rng is not None else random
+    placed: list[dict[str, float]] = []
+    for _ in range(count):
+        spot = {"x": 0.5, "y": 0.5}
+        for _attempt in range(_RAND_TRIES):
+            spot = {
+                "x": round(source.uniform(_RAND_LO, _RAND_HI), 3),
+                "y": round(source.uniform(_RAND_LO, _RAND_HI), 3),
+            }
+            if all(math.hypot(spot["x"] - other["x"], spot["y"] - other["y"]) >= _RAND_MIN_DIST
+                   for other in placed):
+                break
+        placed.append(spot)     # 5회 다 실패하면 마지막 값 그대로 (사용자 지정)
+    return placed
 
 
 # POS: AUTO 의 배치 순서 (사용자 지정 2026-08-23).
@@ -227,10 +289,15 @@ def character_positions_for_mode(app_context, mode: str = "NAI",
 
 def resolved_character_positions(settings: dict | None,
                                  count: int | None = None) -> list[dict[str, float]]:
-    """생성 요청이 실제로 보낼 좌표. **AUTO 든 CUSTOM 이든 좌표는 나간다.**
+    """생성 요청이 실제로 보낼 좌표. **어느 모드든 좌표는 나간다.**
 
       · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
       · AUTO   - 여기서 구운 `auto_character_positions` (사용자 지정)
+      · RAND   - 부를 때마다 다시 굽는 `random_character_positions`
+
+    ⚠️ RAND 는 **이 함수를 부를 때마다 값이 달라진다.** 그래서 화면 표시처럼
+    여러 번 부르는 자리에서 쓰면 원이 흔들린다 - 이 함수는 생성 요청 빌드
+    (`character_positions_for_mode`) 한 곳에서만 부른다.
 
     ⚠️ 빈 좌표가 섞여 있으면 **버리지 않고 채운다**(`fill_missing_positions`).
     예전에는 통째로 AUTO 로 떨어뜨렸는데, 그러면 **저장 파일이 이미 반쪽인 채로
@@ -250,6 +317,10 @@ def resolved_character_positions(settings: dict | None,
     total = len(frames) if count is None else max(0, int(count))
     if not total:
         return []
+    # RAND 는 개수만 알면 된다 - 슬롯과 좌표를 짝지을 일이 없어 조건부 override 로
+    # 인원이 달라져도 그대로 굽는다(CUSTOM 과 달리 어긋날 좌표가 없다).
+    if normalized.get("position_mode") == "random":
+        return random_character_positions(total)
     if normalized.get("use_custom_positions") and total == len(frames):
         return fill_missing_positions(
             [normalize_position(frame.get("position")) for frame in frames]
@@ -1198,6 +1269,8 @@ def character_state_from_settings(
         "module_id": "character",
         "activated": bool(normalized.get("is_active")),
         "reroll_on_generate": bool(normalized.get("reroll_on_generate")),
+        "position_mode": str(normalized.get("position_mode") or "auto"),
+        # 파생 미러. 옛 프런트/외부 소비자가 아직 이 이름을 읽는다.
         "use_custom_positions": bool(normalized.get("use_custom_positions")),
         "characters": characters,
         "character_count": len(characters),

@@ -22563,8 +22563,18 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-chip.is-on { background: #f2efe3; color: #14141c; border-color: #fff; font-weight: 700; }
 .cq-chip-n { flex: none; opacity: 0.75; }
 .cq-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* POS: CUSTOM 이면 모드 버튼이 켜져 보이고, 편집 버튼은 연노랑으로 눈에 띈다. */
+/* POS: CUSTOM 이면 모드 버튼이 켜져 보이고, 편집 버튼은 연노랑으로 눈에 띈다.
+   RAND 는 색을 따로 준다 - 셋을 도는 버튼이라 라벨만으로는 지금 어디인지
+   한눈에 안 들어온다(CUSTOM 과 같은 보라면 "켜짐" 둘이 구분이 안 된다). */
 .cq-pos.is-custom { border-color: rgba(124,106,239,0.6); color: var(--text-primary); }
+.cq-pos.is-random {
+  border-color: rgba(92,196,158,0.6); color: rgb(138,222,190);
+  background: rgba(92,196,158,0.14);
+}
+.cq-pos.is-random:hover {
+  border-color: rgb(138,222,190); color: var(--text-primary);
+  background: rgba(92,196,158,0.24);
+}
 .cq-pos-edit {
   border-color: rgba(214,184,92,0.65); color: rgb(226,200,122);
   background: rgba(214,184,92,0.14);

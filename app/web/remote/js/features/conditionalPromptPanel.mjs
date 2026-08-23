@@ -577,11 +577,15 @@ export function createConditionalPromptPanel({
     sendModuleParam('conditional_prompt', 'preset_save', JSON.stringify(payload));
     if (options.activate && currentState && !sourcePreset) {
       currentState.active_preset = name;
-      currentState.editor_mode = 'v2';
+      // ⚠️ **모드를 바꾸지 않는다.** 백엔드가 화면에 보이는 칸(`editor_mode` 가
+      //    가리키는 쪽)에 쓰도록 고쳐졌는데, 여기서만 v2 로 못박으면 낙관적 갱신이
+      //    서버와 갈려 Legacy 사용자가 저장 직후 블록 편집기로 튄다.
       currentState.rules_v2_book = normalizeBook(book);
-      currentState.rules_v2 = serializeRulebook(currentState.rules_v2_book);
-      currentState.rules = currentState.rules_v2;
-      currentState.active_rules = currentState.rules_v2;
+      const dsl = serializeRulebook(currentState.rules_v2_book);
+      if (currentState.editor_mode === 'v2') currentState.rules_v2 = dsl;
+      else currentState.rules_legacy = dsl;
+      currentState.rules = dsl;
+      currentState.active_rules = dsl;
       currentState.engine_options = normalizeEngineOptions(currentState.rules_v2_book.engine_options);
       selectedRuleId = null;
     }
@@ -672,10 +676,12 @@ export function createConditionalPromptPanel({
     const presetName = safeText(m.active_preset || '').trim();
     const presetLabel = presetName ? `<span class="cond-status-chip cond-preset-status">Preset ${escHtml(presetName)}</span>` : '';
     const presetButtonLabel = presetName ? `프리셋: ${presetName}` : '프리셋';
-    // 프리셋은 New Editor(v2) 전용 개념이다 — 프리셋을 적용/저장하면 항상 editor_mode='v2'가 된다.
-    // Legacy DSL 보기에서는 active_preset이 지금 편집 중인 원시 DSL을 의미하지 않으므로,
-    // 프리셋이 적용 중인 것처럼 오해를 줄 수 있는 이름 표시를 전부 숨긴다.
-    const presetControl = (m.can_manage_presets && m.editor_mode === 'v2')
+    // ⚠️ 예전에는 "프리셋은 New Editor(v2) 전용" 이라며 Legacy 보기에서 이 버튼을
+    //    통째로 숨겼다. 백엔드가 프리셋을 `rules_v2` 에만 쓰고 모드를 v2 로 못박던
+    //    시절의 이야기다. 지금은 **저장·로드가 화면에 보이는 칸을 쓰고 모드를 안
+    //    바꾼다** — Legacy 사용자에게도 프리셋이 정상 동작하므로 감출 이유가 없다
+    //    (사용자 제보: "Legacy DSL 모드에 여전히 프리셋 없음").
+    const presetControl = m.can_manage_presets
       ? `<button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
           ${presetLabel}`
       : '';

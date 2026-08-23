@@ -1204,7 +1204,13 @@ function syncCharacterQuickPanelVisibility(interactiveActive) {
     ? !!interactivePanel?.isActive?.()
     : !!interactiveActive;
   const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
-  characterQuickPanel.setVisible(!active && mode === 'NAI');
+  // ⚠️ **Result 탭에서만 보인다.** 이 패널은 결과 그림 위에 얹히는 부유창이라,
+  //    Metadata/Thumb/Artists 같은 다른 탭으로 가면 그 화면을 덮어 버린다
+  //    (사용자 제보). 탭은 `rightTabs` 가 안 내주므로 DOM 의 `.active` 로 읽는다.
+  //    분리 창(detached)에는 결과 뷰어 자체가 없으니 아예 띄우지 않는다.
+  const rightTab = document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
+  const onResult = !isDetachedShell && rightTab === 'result';
+  characterQuickPanel.setVisible(!active && mode === 'NAI' && onResult);
   const cached = moduleStateCache.get('character');
   if (cached) characterQuickPanel.render(cached);
 }
@@ -1649,7 +1655,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260703-cond-split')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260823-cond-legacy-preset')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -4924,6 +4930,8 @@ function switchRightTab(tabName, options = {}) {
   if (danbooruTabControl && typeof danbooruTabControl.setActive === 'function') {
     danbooruTabControl.setActive(activeTab === 'danbooru');
   }
+  // 캐릭터 퀵 패널은 Result 위에만 얹힌다 - 탭이 바뀌면 즉시 물러나야 한다.
+  syncCharacterQuickPanelVisibility();
   return activeTab;
 }
 

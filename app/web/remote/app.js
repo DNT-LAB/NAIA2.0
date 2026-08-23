@@ -9763,7 +9763,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260823-cqdodge4')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260823-charprune1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -1,3 +1,53 @@
+import { PALETTES, SLIDERS } from './interactiveAxes.mjs';
+
+// 캐릭터 정보 카드의 칩 가지치기.
+//
+// 프로필(`character_analysis.json`)은 **순위 전체**를 담는다 - 그게 프로필의 일이다.
+// 화면은 그중 무엇을 보여줄지 정해야 하는데, 지금까지는 개수로만 잘라서(앞 6개)
+// **같은 축의 하위 후보가 그대로 나왔다**: `purple hair 94%` 옆에
+// `multicolored hair 3.1%`, `yellow eyes 90%` 옆에 `orange eyes 3.1%`.
+// 실측 2026-08-23: 11,890종 중 **4,744종(39.9%)** 이 머리색/눈색을 2개 이상 달고 있었다.
+//
+// ⚠️ Copy All 이 더 나빴다 - 거긴 자르지도 않아 45개 전량이 복사됐다.
+//    `orange eyes`·`purple eyes`·`red eyes`·`brown eyes` 가 **한 프롬프트에** 들어갔다.
+//
+// 규칙은 새로 만들지 않는다. `tools/build_character_presets.mjs:94-102` 가 쓰는 것과
+// 같다: **배타 축은 1위 하나만, 나머지는 50% 문턱.** 축 표도 `interactiveAxes.mjs`
+// 한 곳에서 가져온다 - 여기에 베껴 두면 언젠가 갈린다.
+const CHAR_FEATURE_PCT = 50;
+
+let _exclusiveAxisMap = null;
+function exclusiveAxisOf(tag) {
+  if (!_exclusiveAxisMap) {
+    _exclusiveAxisMap = new Map();
+    for (const [ref, rows] of Object.entries(PALETTES || {})) {
+      for (const d of (rows || [])) _exclusiveAxisMap.set(String(d.tag).toLowerCase(), ref);
+    }
+    for (const [ref, def] of Object.entries(SLIDERS || {})) {
+      for (const t of ((def || {}).steps || [])) _exclusiveAxisMap.set(String(t).toLowerCase(), ref);
+    }
+  }
+  return _exclusiveAxisMap.get(String(tag || '').trim().toLowerCase()) || '';
+}
+
+/** pct 내림차순 목록에서 축별 1위 + 50% 이상만 남긴다. 입력 순서를 믿는다. */
+export function pruneCharacterProfileTags(items) {
+  const taken = new Set();
+  const kept = [];
+  for (const item of (Array.isArray(items) ? items : [])) {
+    if (!item || !item.tag) continue;
+    const axis = exclusiveAxisOf(item.tag);
+    if (axis) {
+      if (taken.has(axis)) continue;          // 같은 축의 하위 값 - 모순이라 버린다
+      taken.add(axis);
+      kept.push(item);
+    } else if (Number(item.pct) >= CHAR_FEATURE_PCT) {
+      kept.push(item);                        // 배타 축이 아닌 특징은 과반만
+    }
+  }
+  return kept;
+}
+
 export function autocompleteCandidateForRow(row) {
   return row?.candidate && typeof row.candidate === 'object' ? row.candidate : null;
 }
@@ -1402,18 +1452,22 @@ export function createTagAssistController({
       const fmtPct = p => p >= 10 ? Math.round(p) + '%' : p.toFixed(1) + '%';
       const DISPLAY_MAX = 6;
       const mkTag = (t, cls) => `<span class="tag-tooltip-extra-tag char-tag ${cls}" data-insert="${escHtml(t.tag)}">${escHtml(t.tag)} <small>${fmtPct(t.pct)}</small></span>`;
+      // 축별 1위 + 과반만 남긴다. 표시와 Copy All 이 **같은 목록**을 써야 한다 -
+      // 갈라 두면 화면에 없는 태그가 복사되는 지금 상태로 되돌아간다.
+      const pcTags = pruneCharacterProfileTags(cd.personal_color);
+      const chTags = pruneCharacterProfileTags(cd.characteristics);
       let charTags = '';
       if (cd.copyright) charTags += `<span class="char-copyright">${escHtml(cd.copyright)}</span>`;
-      if (cd.personal_color) charTags += cd.personal_color.slice(0, DISPLAY_MAX).map(t => mkTag(t, 'ct-pc')).join('');
-      if (cd.personal_color && cd.personal_color.length > DISPLAY_MAX) charTags += `<span class="char-more">+${cd.personal_color.length - DISPLAY_MAX}</span>`;
-      if (cd.characteristics) charTags += cd.characteristics.slice(0, DISPLAY_MAX).map(t => mkTag(t, 'ct-ch')).join('');
-      if (cd.characteristics && cd.characteristics.length > DISPLAY_MAX) charTags += `<span class="char-more">+${cd.characteristics.length - DISPLAY_MAX}</span>`;
+      charTags += pcTags.slice(0, DISPLAY_MAX).map(t => mkTag(t, 'ct-pc')).join('');
+      if (pcTags.length > DISPLAY_MAX) charTags += `<span class="char-more">+${pcTags.length - DISPLAY_MAX}</span>`;
+      charTags += chTags.slice(0, DISPLAY_MAX).map(t => mkTag(t, 'ct-ch')).join('');
+      if (chTags.length > DISPLAY_MAX) charTags += `<span class="char-more">+${chTags.length - DISPLAY_MAX}</span>`;
       if (cd.breast_size_top) charTags += `<span class="tag-tooltip-extra-tag char-tag ct-body" data-insert="${escHtml(cd.breast_size_top)}">${escHtml(cd.breast_size_top)}</span>`;
       if (charTags) html += `<div class="tag-tooltip-extra char-details-row">${charTags}</div>`;
       const allTags = [];
-      if (cd.personal_color) cd.personal_color.forEach(t => allTags.push(t.tag));
+      pcTags.forEach(t => allTags.push(t.tag));
       if (cd.breast_size_top) allTags.push(cd.breast_size_top);
-      if (cd.characteristics) cd.characteristics.forEach(t => allTags.push(t.tag));
+      chTags.forEach(t => allTags.push(t.tag));
       html += `<div class="char-copy-row"><button class="char-copy-btn" data-tags="${escHtml(allTags.join(', '))}">\u{1F4CB} Copy All</button>` +
         `<small class="char-sample-count">${cd.total_rows || 0} samples</small></div>`;
     }

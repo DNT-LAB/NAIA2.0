@@ -395,8 +395,20 @@ export function createModuleBadges({
       return;
     }
 
-    const count = m.active_count || 0;
+    // ⚠️ **나가는 수**를 센다. `active_count` 는 활성 무리의 크기라 꺼 둔 슬롯
+    //    (✘)까지 포함한다 - 셋을 다 꺼 페이로드가 비어도 "3" 이라고 말하게 된다.
+    //    옛 서버가 이 필드를 안 보낼 수 있으므로 그때만 active_count 로 물러난다.
+    const count = (m.enabled_count != null ? m.enabled_count : m.active_count) || 0;
     activatedCounts.characters = count;
+    if (!count) {
+      // 슬롯을 다 꺼 두면 나가는 캐릭터가 없다 - 모듈이 꺼진 것과 같은 그림이
+      // 맞다. "0" 을 내걸면 켜져 있다는 뜻으로 읽힌다.
+      badge.classList.add('hidden');
+      btn.classList.remove('char-active');
+      renderActivatedSummary();
+      updatePromptTokenEstimate();
+      return;
+    }
     btn.classList.add('char-active');
     badge.classList.remove('hidden');
     badge.classList.add('char');

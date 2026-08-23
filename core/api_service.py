@@ -1028,10 +1028,18 @@ class APIService:
                                     #    쓰면 NameError 다. 같은 값을 직접 읽는다.
                                     from core.character_settings import character_positions_for_mode
 
+                                    #    ⚠️ 조건부 슬롯 마스크는 **쓰지 않는다.**
+                                    #    여기서 나갈 캐릭터는 얼린 리터럴로 이미
+                                    #    확정됐고 조건부의 슬롯 선택과 무관하다.
+                                    #    그대로 씌우면 남의 슬롯 좌표가 붙는다 -
+                                    #    개수가 같으면 아무도 못 알아챈다(Codex
+                                    #    지적, 실측: 얼린 C1,C2,C3 에 C1,C3,C4 의
+                                    #    좌표가 붙었다).
                                     character_positions = character_positions_for_mode(
                                         self.app_context,
                                         params.get("api_mode", "NAI"),
                                         count=len(characters),
+                                        use_conditional_mask=False,
                                     )
                                     character_ids = list(frozen_chars.get("character_ids") or [])
                         # 5) Late Binding — 메인 UI CharacterModule (직접 생성).

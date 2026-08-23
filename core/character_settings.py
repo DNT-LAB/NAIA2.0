@@ -285,7 +285,8 @@ def auto_character_positions(count: int) -> list[dict[str, float]]:
 
 
 def character_positions_for_mode(app_context, mode: str = "NAI",
-                                 count: int | None = None) -> list[dict[str, float]]:
+                                 count: int | None = None,
+                                 *, use_conditional_mask: bool = True) -> list[dict[str, float]]:
     """이 모드의 활성 캐릭터 좌표. 페이로드 빌드가 부르는 입구다.
 
     좌표는 **굴림의 일부가 아니다**(와일드카드로 변하지 않는다) - 그래서 캐릭터
@@ -293,12 +294,17 @@ def character_positions_for_mode(app_context, mode: str = "NAI",
     따라다녀야 하고, 재굴림 시 좌표가 옛 값에 묶인다.
 
     `count` 는 **실제로 나갈 캐릭터 수**다(조건부 규칙이 더하거나 뺀 뒤의 수).
+
+    ⚠️ `use_conditional_mask` 는 **캐릭터를 조건부와 같은 눈으로 고른 호출자만**
+    켜야 한다. 마스크는 "조건부가 본 슬롯 중 무엇이 나가나" 인데, 캐릭터 목록을
+    다른 출처에서 확정한 경로(이벤트 스트림 freeze 는 얼린 리터럴을 쓴다)에
+    그대로 씌우면 **남의 슬롯 좌표가 붙는다.** 개수가 같으면 아무도 못 알아챈다
+    (Codex 지적, 실측: 얼린 C1,C2,C3 에 마스크가 고른 C1,C3,C4 의 좌표가 붙었다).
     """
     try:
         settings = load_character_settings(mode, save_root=_save_root_from_context(app_context))
-        return resolved_character_positions(
-            settings, count=count, slot_mask=_conditional_slot_mask(app_context)
-        )
+        mask = _conditional_slot_mask(app_context) if use_conditional_mask else None
+        return resolved_character_positions(settings, count=count, slot_mask=mask)
     except Exception:
         return []
 
@@ -1338,6 +1344,10 @@ def character_state_from_settings(
         "characters": characters,
         "character_count": len(characters),
         "active_count": sum(1 for item in characters if item.get("active")),
+        # ⚠️ **실제로 나가는 수**. `active_count` 는 활성 무리의 크기라 꺼 둔
+        #    슬롯까지 센다 - 배지가 그걸 쓰면 셋을 다 꺼 페이로드가 비어도
+        #    "3 Characters" 라고 말한다(Codex 지적).
+        "enabled_count": sum(1 for item in characters if item.get("enabled")),
         "cold_count": sum(1 for item in characters if item.get("slot_state") == "cold"),
         "processed_characters": processed_characters,
         "processed_ucs": processed_ucs,

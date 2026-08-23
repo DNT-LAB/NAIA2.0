@@ -202,6 +202,8 @@ export function createResultHistoryController({
       <div class="history-selection-count" data-history-selection-count>0개 선택</div>
       <div class="history-selection-actions">
         <button type="button" class="history-selection-btn save" data-history-selection-action="save">저장 0</button>
+        <button type="button" class="history-selection-btn saveas" data-history-selection-action="saveas"
+                title="저장 위치를 직접 고릅니다">다른 경로 0</button>
         <button type="button" class="history-selection-btn delete" data-history-selection-action="delete">삭제 0</button>
       </div>
       <button type="button" class="history-selection-clear" data-history-selection-action="clear" aria-label="선택 해제" title="선택 해제">×</button>
@@ -216,6 +218,7 @@ export function createResultHistoryController({
       if (!button) return;
       const action = button.dataset.historySelectionAction;
       if (action === 'save') saveSelected();
+      else if (action === 'saveas') saveSelectedAs();
       else if (action === 'delete') deleteSelected();
       else if (action === 'clear') clearSelection();
     });
@@ -259,6 +262,14 @@ export function createResultHistoryController({
       if (remove) {
         remove.textContent = `삭제 ${count}`;
         remove.disabled = selectionBusy || count === 0;
+      }
+      const saveAs = bar.querySelector('[data-history-selection-action="saveas"]');
+      if (saveAs) {
+        saveAs.textContent = `다른 경로 ${count}`;
+        // 저장 위치를 직접 고르는 길이 없는 환경(원격 브라우저·구형 WebView)에서는
+        // 버튼을 아예 감춘다 - 눌러도 아무 일이 없으면 고장으로 읽힌다.
+        saveAs.hidden = !hasNativeSavePicker();
+        saveAs.disabled = selectionBusy || count === 0;
       }
       if (clear) clear.disabled = selectionBusy || count === 0;
       // 팝업 헤더의 선택 바는 고른 것이 없으면 통째로 접힌다(CSS). 레일은 힌트
@@ -503,6 +514,118 @@ export function createResultHistoryController({
   function setSelectionBusy(busy) {
     selectionBusy = Boolean(busy);
     updateSelectionUi();
+  }
+
+  // ── 다른 경로에 저장 (Save As) ─────────────────────────────────────────────
+  //
+  // 빠른 저장(`저장 N`)은 설정된 폴더로 바로 보낸다. 이쪽은 **사용자가 자리를
+  // 고른다**(사용자 지정). 한 장이면 파일 이름까지 묻고(Save As), 여러 장이면
+  // **폴더를 한 번만** 묻는다 - 4장에 대화상자가 4번 뜨면 그건 기능이 아니다.
+
+  function hasNativeSavePicker() {
+    return typeof window.showSaveFilePicker === 'function'
+        || typeof window.showDirectoryPicker === 'function';
+  }
+
+  /** 저장할 파일 이름.
+   *
+   *  ⚠️ 자동 저장을 안 켠 항목은 **디스크에 파일이 없다** - `rel_path` 가
+   *  `__history_item__/<uuid>` 라, 그대로 쓰면 `b382c45e….png` 같은 이름이 나온다
+   *  (실측). 사람이 폴더에서 골라야 하는 이름이니 순번으로 바꾼다.
+   *  디스크에 있는 항목은 원래 파일명을 그대로 지킨다.
+   */
+  function basenameOf(relPath, ordinal) {
+    if (historyIdFromPath(relPath)) {
+      const n = Number.isFinite(ordinal) ? String(ordinal + 1).padStart(2, '0') : '01';
+      return `naia_${n}.png`;
+    }
+    const name = String(relPath || '').replace(/\\/g, '/').split('/').pop() || 'image.png';
+    return /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}.png`;
+  }
+
+  async function fetchHistoryBlob(relPath) {
+    const response = await fetch(historyAssetUrl(relPath, 'image'));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  }
+
+  async function writeBlob(handle, blob) {
+    const writable = await handle.createWritable();
+    try { await writable.write(blob); } finally { await writable.close(); }
+  }
+
+  async function saveSelectedAs() {
+    const paths = orderedSelectedPaths();
+    if (!paths.length || selectionBusy) return;
+    if (!hasNativeSavePicker()) {
+      showToast('이 환경에서는 저장 위치를 고를 수 없습니다.', 'error');
+      return;
+    }
+    let target = null;
+    let directory = false;
+    try {
+      if (paths.length === 1 && typeof window.showSaveFilePicker === 'function') {
+        target = await window.showSaveFilePicker({
+          suggestedName: basenameOf(paths[0], 0),
+          types: [{description: 'PNG image', accept: {'image/png': ['.png']}}],
+        });
+      } else if (typeof window.showDirectoryPicker === 'function') {
+        target = await window.showDirectoryPicker({mode: 'readwrite'});
+        directory = true;
+      } else {
+        showToast('여러 장을 저장하려면 폴더 선택이 필요한 환경입니다.', 'error');
+        return;
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') return;      // 사용자가 취소했다 - 조용히
+      showToast('저장 위치를 열지 못했습니다.', 'error');
+      return;
+    }
+    if (!target) return;
+
+    setSelectionBusy(true);
+    let saved = 0;
+    const failed = [];
+    try {
+      for (const [ordinal, relPath] of paths.entries()) {
+        try {
+          const blob = await fetchHistoryBlob(relPath);
+          if (directory) {
+            // ⚠️ 같은 이름이 이미 있으면 **말없이 덮어쓴다.** 이름 뒤에 번호를 붙여
+            //    피한다 - 사용자가 고른 폴더의 남의 파일을 지울 수는 없다.
+            const handle = await uniqueFileHandle(target, basenameOf(relPath, ordinal));
+            await writeBlob(handle, blob);
+          } else {
+            await writeBlob(target, blob);
+          }
+          saved += 1;
+        } catch (error) {
+          failed.push(basenameOf(relPath, ordinal));
+        }
+      }
+      const where = directory ? '고른 폴더' : '고른 위치';
+      const parts = [`저장 ${saved}개`];
+      if (failed.length) parts.push(`실패 ${failed.length}개`);
+      showToast(`${parts.join(' · ')} · ${where}`, failed.length ? 'warning' : 'success');
+    } finally {
+      setSelectionBusy(false);
+    }
+  }
+
+  async function uniqueFileHandle(dirHandle, filename) {
+    const dot = filename.lastIndexOf('.');
+    const stem = dot > 0 ? filename.slice(0, dot) : filename;
+    const ext = dot > 0 ? filename.slice(dot) : '';
+    for (let n = 0; n < 1000; n += 1) {
+      const name = n === 0 ? filename : `${stem} (${n})${ext}`;
+      try {
+        await dirHandle.getFileHandle(name);        // 있으면 다음 번호로
+      } catch (error) {
+        if (error?.name === 'NotFoundError') return dirHandle.getFileHandle(name, {create: true});
+        throw error;
+      }
+    }
+    return dirHandle.getFileHandle(`${stem} (${Date.now()})${ext}`, {create: true});
   }
 
   async function saveSelected() {

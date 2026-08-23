@@ -1350,11 +1350,19 @@ export function createResultContextMenu({
 
   function bind() {
     document.addEventListener('contextmenu', onContextMenu);
-    document.addEventListener('mousedown', event => {
+    // ⚠️ **`mousedown` 만 들으면 안 닫히는 자리가 있다.** 히스토리 목록의 빈 공간은
+    //    드래그 선택이 `pointerdown` 에서 `preventDefault()` 를 부르는데(브라우저 기본
+    //    선택 막기), 그러면 브라우저가 뒤따르는 **호환 마우스 이벤트를 통째로 생략**한다
+    //    - `mousedown` 이 영영 안 온다. 그래서 빈 곳을 눌러도 메뉴가 안 닫히고, 다시
+    //    우클릭해야만 닫혔다(사용자 제보, 실측으로 `pointerdown.defaultPrevented=true`
+    //    확인). `pointerdown` 은 preventDefault 와 무관하게 항상 오므로 그쪽도 듣는다.
+    const closeOnOutside = event => {
       if (!menu) return;
       if (menu.contains(event.target)) return;
       close();
-    });
+    };
+    document.addEventListener('pointerdown', closeOnOutside);
+    document.addEventListener('mousedown', closeOnOutside);
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         close();

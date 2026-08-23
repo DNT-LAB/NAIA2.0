@@ -64,7 +64,8 @@ DATA_DIR = REPO_ROOT / "data"
 ANALYSIS_PATH = DATA_DIR / "character_analysis.json"
 DICT_PATH = REPO_ROOT / "danbooru_character.py"
 
-DROP_FIELDS = ("key_clothes",)
+# `color_kinds_raw` 는 아래 비인간 게이트 전용 신호다 — 판정에만 쓰고 배포본에는 안 싣는다.
+DROP_FIELDS = ("key_clothes", "color_kinds_raw")
 MARKER = "# --- increment"
 
 # 비인간 개체(girl/boy 어느 쪽도 아닌 것)를 가려내는 문턱.
@@ -91,6 +92,35 @@ NEWLINE = "\r\n"
 
 def write_preserving_crlf(path: Path, text: str) -> None:
     path.write_bytes(text.replace("\r\n", "\n").replace("\n", NEWLINE).encode("utf-8"))
+
+
+def looks_nonhuman(data: dict, max_color_kinds: int) -> tuple[bool, bool]:
+    """`(제외할까, 옛 프로필이라 추측했나)`.
+
+    ⚠️ **가지치기 전** 색 가짓수를 봐야 한다. 빌더에 퍼센트 문턱(`--min-pct-color`)이
+    생긴 뒤로 `personal_color` 는 문턱을 넘은 것만 담겨 **최대 9개**로 잘려 나온다
+    (실측: 문턱 30% 아래 11,890종 전체 최대 9). 그 목록 길이로 `>= 20` 을 판정하면
+    **게이트가 영영 안 걸려 411종 억제가 소리 없이 사라진다.**
+
+    임계를 20 -> 10 으로 낮추는 것으로는 못 고친다. 9 가 최대라 10 도 안 걸리고,
+    무엇보다 **잣대가 다른 값이 되었기 때문**이다 — 문턱 뒤 가짓수는 진짜 캐릭터와
+    비인간이 사실상 같은 분포다(둘 다 중앙 2 · 최대 9). 그래서 빌더가 가지치기 전
+    값을 `color_kinds_raw` 로 따로 실어 보내고, 여기서 그것을 본다.
+
+    임계 20 은 **가지치기 전** 분포에서 검증한 값이라(비인간 표본 10/10 · 진짜
+    캐릭터 오탐 0) 그대로 쓴다.
+    """
+    raw = data.get("color_kinds_raw")
+    guessed = raw is None
+    if guessed:
+        # 문턱 이전에 만든 옛 프로필 — 그때는 목록 길이가 곧 가지치기 전 값이었다.
+        raw = len(data.get("personal_color") or [])
+    try:
+        raw = int(raw)
+    except (TypeError, ValueError):
+        raw = len(data.get("personal_color") or [])
+        guessed = True
+    return raw >= max_color_kinds, guessed
 
 
 def flatten_names(analysis: dict) -> set[str]:
@@ -223,7 +253,7 @@ def main() -> int:
               f"  = {ratio(n):>5.2f}  {n}")
 
     # ── analysis 병합 ────────────────────────────────────────────────────
-    added = suppressed = 0
+    added = suppressed = missing_raw_kinds = 0
     for group, members in profile.items():
         if not isinstance(members, dict):
             continue
@@ -235,7 +265,9 @@ def main() -> int:
             # 사람을 묘사한다. 부분 억제(색·가슴만 끄기)도 해봤지만 characteristics
             # 에 머리 모양이 그대로 남아(long hair 41% · twintails 14%) 어차피
             # 반쪽이었다. 통째로 뺀다 - 사전에는 남으니 이름은 여전히 자동완성된다.
-            if len(data.get("personal_color") or []) >= args.max_color_kinds:
+            drop, guessed = looks_nonhuman(data, args.max_color_kinds)
+            missing_raw_kinds += int(guessed)
+            if drop:
                 suppressed += 1
                 continue
             entry = {k: v for k, v in data.items() if k not in DROP_FIELDS}
@@ -246,7 +278,11 @@ def main() -> int:
             added += 1
     print(f"\n[analysis] 추가 {added:,}종 -> 총 {len(have):,}종")
     print(f"  비인간으로 보아 제외 {suppressed:,}종"
-          f"  (personal_color 가짓수 >= {args.max_color_kinds})")
+          f"  (가지치기 전 색 가짓수 >= {args.max_color_kinds})")
+    if missing_raw_kinds:
+        # 조용히 넘어가면 게이트가 반쯤 죽은 채로 지나간다 — 실제로 그렇게 될 뻔했다.
+        print(f"  [경고] {missing_raw_kinds:,}종에 color_kinds_raw 가 없어 목록 길이로 판정했다. "
+              f"퍼센트 문턱을 켜고 만든 프로필이면 **억제가 덜 된다** — 빌더를 다시 돌려라.")
 
     # ── dict 병합 (아직 쓰지 않는다) ─────────────────────────────────────
     new_entries = sorted(((n, total.get(n, 0)) for n in need_dict if total.get(n, 0) > 0),

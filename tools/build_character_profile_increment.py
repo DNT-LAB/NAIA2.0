@@ -122,6 +122,22 @@ def main() -> int:
     ap.add_argument("--min-rows", type=int, default=50,
                     help="필터 통과 행이 이 값 이상인 캐릭터만 (기본 50)")
     ap.add_argument("--top-n", type=int, default=30, help="카테고리별 상위 태그 수")
+    # ⚠️ 퍼센트 문턱. 이게 없어서 0.5% 태그까지 담겼고, 툴팁에 `purple hair 94%` 옆에
+    #    `multicolored hair 3.1%` 가 붙었다(사용자 제보 2026-08-23).
+    #
+    #    기본값은 **원본에서 역산**했다(추측 아님). 배포본 중 가지치기된 9,673종의
+    #    엔트리별 **최저 pct** 분포:
+    #      personal_color  p1=30.2% · 30% 미만 14종(0.1%) · 35% 로 올리면 1,393종(14.4%)
+    #                      -> 30% 에서 칼같이 갈린다
+    #      characteristics 91.7% 가 20% 이상 (색만큼 날카롭지 않다)
+    #
+    #    두 값 모두 **모든 소비자의 자체 문턱보다 낮다** - 정보 카드 50%,
+    #    `build_character_wildcards.py` 40/50, `build_character_presets.mjs` 50.
+    #    그래서 화면을 굶기지 않으면서 파일만 정상화한다.
+    ap.add_argument("--min-pct-color", type=float, default=30.0,
+                    help="personal_color 최소 비율 (기본 30 = 원본 역산값)")
+    ap.add_argument("--min-pct-char", type=float, default=20.0,
+                    help="characteristics 최소 비율 (기본 20 = 원본 역산값)")
     ap.add_argument("--include-known", action="store_true",
                     help="이미 색인된 캐릭터도 포함(기본은 미색인만)")
     ap.add_argument("--limit-buckets", type=int, default=0,
@@ -212,18 +228,38 @@ def main() -> int:
         rows = row_counts[name]
         entry = {"total_rows": rows, "personal_color": [],
                  "characteristics": [], "key_clothes": []}
+        # ⚠️ **가지치기 전** 색 가짓수. 비인간/아바타 게이트가 이 값을 본다.
+        #
+        #    `merge_character_profile_increment.py` 는 원래 `len(personal_color) >= 20`
+        #    으로 411종을 걸렀는데, 위의 퍼센트 문턱이 생기면서 그 목록이 최대 9개로
+        #    잘려 **게이트가 영영 안 걸리게 된다**(실측: 문턱 30% 아래 전체 최대 9).
+        #    임계를 낮추는 것으로는 못 고친다 — 잣대 자체가 다른 값이 되었기 때문이다.
+        #    가지치기 전 값을 따로 실어 보내 게이트가 종전 판정을 유지하게 한다.
+        #
+        #    상한(top_n)은 걸지 않는다. 임계 20 < 상한 30 이라 판정은 완전히 같고,
+        #    자르지 않은 쪽이 나중에 분포를 다시 잴 때 쓸모 있다.
+        color_kinds_raw = 0
         for tag, cnt in counter.most_common():
-            item = {"tag": tag, "count": cnt, "pct": round(cnt / rows * 100, 1)}
+            pct = round(cnt / rows * 100, 1)
+            item = {"tag": tag, "count": cnt, "pct": pct}
             if tag in classify["personal_color"]:
-                bucket = entry["personal_color"]
+                bucket, floor = entry["personal_color"], args.min_pct_color
+                color_kinds_raw += 1
             elif tag in classify["clothes"]:
-                bucket = entry["key_clothes"]
+                bucket, floor = entry["key_clothes"], args.min_pct_char
             elif tag in classify["characteristics"]:
-                bucket = entry["characteristics"]
+                bucket, floor = entry["characteristics"], args.min_pct_char
             else:
+                continue
+            # ⚠️ 개수 상한만으로는 모자란다. `most_common()` 은 내림차순이라 상한에
+            #    걸리기 전까지 **0.5% 짜리도 다 담긴다** - 193행 캐릭터가 색 16개를
+            #    달았던 이유다. 문턱을 먼저 본다.
+            if pct < floor:
                 continue
             if len(bucket) < args.top_n:
                 bucket.append(item)
+        # 게이트 전용 신호. `merge` 가 읽고 **배포본에는 싣지 않는다**(DROP_FIELDS).
+        entry["color_kinds_raw"] = color_kinds_raw
         # 가슴 크기는 characteristics 에서 빼고 별도 필드로 (원본 add_breast_size 규약).
         entry["characteristics"] = [e for e in entry["characteristics"]
                                     if e["tag"] not in BREAST_SET]

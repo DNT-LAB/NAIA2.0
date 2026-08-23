@@ -85,9 +85,14 @@ export function createInteractiveScenePanel({
 
   function thumbUrl(row) {
     // 썸네일은 생성이 끝난 뒤 붙는다 — 없으면 회색 판으로 둔다(빈 img 는 깨진
-    // 아이콘이 뜬다). `created_at` 을 붙여 갱신된 카드의 옛 그림이 캐시에 남지 않게.
+    // 아이콘이 뜬다). 판(`&v=`)을 붙여 갱신된 카드의 옛 그림이 캐시에 남지 않게.
+    //
+    // ⚠️ 예전엔 `created_at` 을 썼는데 그것은 **초 단위**라 같은 초에 두 번 생성하면
+    // 값이 같아 캐시가 안 갈린다. 백엔드가 파일 mtime/크기로 만든 `thumb_rev` 를 쓴다
+    // (인덱스가 옛 형식이면 `created_at` 으로 물러선다).
     return row && row.thumb
-      ? `/api/interactive-assets/scene/thumb?id=${encodeURIComponent(row.id)}&v=${row.created_at || 0}`
+      ? `/api/interactive-assets/scene/thumb?id=${encodeURIComponent(row.id)}`
+        + `&v=${encodeURIComponent(row.thumb_rev || row.created_at || 0)}`
       : '';
   }
 

@@ -897,14 +897,23 @@ export function createCharacterViewerController({
     if (!meta?.character_viewer_thumbnail_url || !group || !character) return;
     if (selected && selected.group !== group && !meta.character_viewer_group) return;
     if (selected && selected.character !== character && !meta.character_viewer_character_name) return;
-    const cacheBusted = `${meta.character_viewer_thumbnail_url}&_=${Date.now()}`;
-    const gridUrl = gridThumbnailUrl(cacheBusted);
+    // 서버 URL 에 파일 판(`v=<mtime>-<size>`)이 이미 붙어 있다 — 내용이 바뀌면 URL 이
+    // 바뀌므로 여기서 `&_=Date.now()` 로 뚫을 필요가 없다. 예전 그 임시방편은 이 순간만
+    // 통했고, 탭을 다시 열거나 새로고침하면 평범한 URL 로 돌아가 **캐시된 폴백이 다시
+    // 나왔다** — 사용자가 만든 썸네일이 "소리없이 사라진" 이유다.
+    const savedUrl = String(meta.character_viewer_thumbnail_url || '');
+    const gridUrl = gridThumbnailUrl(savedUrl);
     // detail 캐시도 같이 갱신해야 방금 생성한 썸네일을 곧바로 DELETE 할 수 있다
     // (currentThumbnailTarget 이 detail 의 URL 필드로 대상을 판정한다).
     const savedVariant = String(meta.character_viewer_variant || '');
     if (detail && detail.group === group && detail.character === character) {
-      if (!savedVariant) detail.default_thumbnail_url = cacheBusted;
-      if (String(detail.variant || '') === savedVariant) detail.thumbnail_url = cacheBusted;
+      if (!savedVariant) detail.default_thumbnail_url = savedUrl;
+      if (String(detail.variant || '') === savedVariant) detail.thumbnail_url = savedUrl;
+    }
+    if (state && Number.isFinite(Number(meta.character_viewer_thumbnail_count))
+        && Number(meta.character_viewer_thumbnail_count) > 0) {
+      state.thumbnail_count = Number(meta.character_viewer_thumbnail_count);
+      renderSummary();
     }
     allItems = allItems.map(item => (
       item.group === group && item.character === character
@@ -915,7 +924,7 @@ export function createCharacterViewerController({
     listItem?.classList.add('has-thumb');
     listItem?.classList.remove('no-thumb');
     if (selected?.group === group && selected?.character === character && selectedImage) {
-      selectedImage.src = cacheBusted;
+      selectedImage.src = savedUrl;
       selectedImage.classList.add('show');
       if (selectedEmpty) selectedEmpty.hidden = true;
     }
@@ -950,11 +959,17 @@ export function createCharacterViewerController({
     return null;
   }
 
-  function clearThumbnailLocally(group, character, variant) {
+  function clearThumbnailLocally(group, character, variant, after = null) {
+    // ⚠️ 사용자 썸네일을 지워도 **번들 폴백이 있으면 그림은 남는다**. 서버가 지운 뒤의
+    // 실효 상태(`has_thumbnail`/`thumbnail_url`)를 주므로 그대로 따른다. 예전엔 무조건
+    // `false` 로 칠해서 폴백이 있는 캐릭터가 새로고침 전까지 "No Thumb" 로 보였다.
     const variantKey = String(variant || '');
+    const restoredUrl = String(after?.thumbnail_url || '');
+    const restoredDefault = String(after?.default_thumbnail_url || '');
+    const stillHas = Boolean(after?.has_thumbnail);
     if (detail && detail.group === group && detail.character === character) {
-      if (!variantKey) detail.default_thumbnail_url = '';
-      if (String(detail.variant || '') === variantKey) detail.thumbnail_url = '';
+      if (!variantKey) detail.default_thumbnail_url = restoredDefault;
+      if (String(detail.variant || '') === variantKey) detail.thumbnail_url = restoredUrl;
     }
     if (selectedImage && selected?.group === group && selected?.character === character) {
       const showing = detail?.thumbnail_url || detail?.default_thumbnail_url || '';
@@ -968,24 +983,30 @@ export function createCharacterViewerController({
     }
     // 그리드/리스트의 has_thumbnail 은 대표(variant 없음) 썸네일만 가리킨다.
     if (variantKey) return;
+    const gridUrl = stillHas ? gridThumbnailUrl(restoredDefault) : '';
     allItems = allItems.map(item => (
       item.group === group && item.character === character
-        ? {...item, has_thumbnail: false, thumbnail_url: ''}
+        ? {...item, has_thumbnail: stillHas, thumbnail_url: gridUrl}
         : item
     ));
     const listItem = listEl?.querySelector(`.character-viewer-list-item[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`);
-    listItem?.classList.remove('has-thumb');
-    listItem?.classList.add('no-thumb');
+    listItem?.classList.toggle('has-thumb', stillHas);
+    listItem?.classList.toggle('no-thumb', !stillHas);
     gridEl?.querySelectorAll(`.character-viewer-card[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`).forEach(card => {
       const stage = card.querySelector('.character-viewer-card-image');
       if (stage) {
-        stage.innerHTML = `
+        stage.innerHTML = stillHas && gridUrl
+          ? `
+          <img src="${html(gridUrl)}" alt="${html(character)}" loading="lazy" decoding="async">
+          <span class="character-viewer-card-group">[${html(group)}]</span>
+        `
+          : `
           <span class="character-viewer-card-empty">No Thumb</span>
           <span class="character-viewer-card-group">[${html(group)}]</span>
         `;
       }
-      card.classList.remove('has-thumb');
-      card.classList.add('no-thumb');
+      card.classList.toggle('has-thumb', stillHas);
+      card.classList.toggle('no-thumb', !stillHas);
     });
   }
 
@@ -1000,7 +1021,7 @@ export function createCharacterViewerController({
       : target.character;
     try {
       const data = await postJson('/api/character-viewer/thumbnail/delete', target);
-      clearThumbnailLocally(target.group, target.character, target.variant);
+      clearThumbnailLocally(target.group, target.character, target.variant, data);
       if (state && Number.isFinite(Number(data.thumbnail_count))) {
         state.thumbnail_count = Number(data.thumbnail_count);
         renderSummary();

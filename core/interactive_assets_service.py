@@ -110,6 +110,21 @@ def _now() -> int:
     return int(time.time())
 
 
+def _thumb_rev(path: Path) -> str:
+    """썸네일 파일의 판(revision). 화면이 URL 에 `&v=` 로 붙여 캐시를 가른다.
+
+    ⚠️ 스냅샷/씬 id 는 같은 조합이면 **재사용**된다(`record()` 의 prompt_hash 분기).
+    그때 `s<id>.webp` 가 새 그림으로 덮이는데 URL 은 `?id=` 뿐이라 그대로다. 판이
+    없으면 브라우저가 캐시한 옛 그림을 계속 쓴다 — 캐릭터 뷰어에서 사용자가
+    "썸네일이 소리없이 사라진다" 고 제보한 것과 같은 결함이다.
+    """
+    try:
+        stat = path.stat()
+        return f"{stat.st_mtime_ns}-{stat.st_size}"
+    except OSError:
+        return "0"
+
+
 # 해시 직렬화의 구분자. 값 안에 이 글자가 있으면 경계를 흉내 낼 수 있다.
 _HASH_DELIMS = ("\\", "|", "=", ",")
 # 역슬래시가 **먼저**여야 한다 - 나중에 하면 앞서 넣은 이스케이프를 다시 이스케이프한다.
@@ -581,13 +596,18 @@ class InteractiveAssetsService:
                 except (TypeError, ValueError):
                     created = 0
                 thumb = f"{sid}.webp"
+                thumb_path = self.snapshot_root / thumb
+                has_thumb = thumb_path.exists()
                 rows.append({
                     "id": sid, "created_at": created,
                     "origin": self.classify_origin(chars),
                     "prompt_hash": snapshot_hash(chars),
                     "summary": snapshot_summary(chars),
                     "char_count": len(chars),
-                    "thumb": thumb if (self.snapshot_root / thumb).exists() else None,
+                    "thumb": thumb if has_thumb else None,
+                    # 인덱스를 잃고 복원해도 판이 살아 있어야 한다 — 없으면 복원 직후
+                    # 화면이 캐시된 옛 그림으로 되돌아간다.
+                    "thumb_rev": _thumb_rev(thumb_path) if has_thumb else "",
                 })
             except Exception as exc:
                 print(f"[interactive-assets] skipped broken body {body.name}: {exc}")
@@ -706,8 +726,13 @@ class InteractiveAssetsService:
                 img.save(buf, "WEBP", quality=THUMB_QUALITY, method=6)
             self.snapshot_root.mkdir(parents=True, exist_ok=True)
             name = f"{snapshot_id}.webp"
-            (self.snapshot_root / name).write_bytes(buf.getvalue())
+            path = self.snapshot_root / name
+            path.write_bytes(buf.getvalue())
             row["thumb"] = name
+            # ⚠️ **같은 id 에 새 그림이 덮인다**(`record()` 가 prompt_hash 가 같으면 id 를
+            # 재사용한다). URL 은 `?id=` 뿐이라 그대로인데 응답에 캐시가 걸려 있어,
+            # 이 값이 없으면 사용자는 1시간 동안 옛 그림을 본다. 화면이 `&v=` 로 붙인다.
+            row["thumb_rev"] = _thumb_rev(path)
             self._save_index(rows)
             return True
 
@@ -862,6 +887,7 @@ class InteractiveAssetsService:
                 except (TypeError, ValueError):
                     created = 0
                 thumb = f"{sid}.webp"
+                scene_thumb_path = self.scene_root / thumb
                 # 저장 상태는 본문에도 남겨 두었다 - 인덱스를 잃어도 사용자가
                 # 이름 붙인 것이 자동 기록으로 강등되어 프루닝되지 않게.
                 rows.append({
@@ -873,7 +899,9 @@ class InteractiveAssetsService:
                     "prompt_hash": scene_hash(g, chars),
                     "summary": scene_summary(g, chars),
                     "char_count": len(chars),
-                    "thumb": thumb if (self.scene_root / thumb).exists() else None,
+                    "thumb": thumb if scene_thumb_path.exists() else None,
+                    "thumb_rev": (_thumb_rev(scene_thumb_path)
+                                  if scene_thumb_path.exists() else ""),
                 })
             except Exception as exc:
                 print(f"[interactive-scene] skipped broken body {body.name}: {exc}")
@@ -1023,8 +1051,11 @@ class InteractiveAssetsService:
                 img.save(buf, "WEBP", quality=THUMB_QUALITY, method=6)
             self.scene_root.mkdir(parents=True, exist_ok=True)
             name = f"{scene_id}.webp"
-            (self.scene_root / name).write_bytes(buf.getvalue())
+            path = self.scene_root / name
+            path.write_bytes(buf.getvalue())
             row["thumb"] = name
+            # 캐릭터 쪽과 같은 이유 — 같은 id 에 새 그림이 덮이므로 판을 남긴다.
+            row["thumb_rev"] = _thumb_rev(path)
             self._save_scene_index(rows)
             return True
 

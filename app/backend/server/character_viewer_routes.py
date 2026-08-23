@@ -56,7 +56,13 @@ def character_viewer_thumbnail_payload(
     character: str,
     variant: str = "",
     size: str = "",
-) -> tuple[bytes, str]:
+) -> tuple[bytes, str, str]:
+    """``(bytes, media_type, source_kind)`` — kind 는 ``"user"`` / ``"fallback"``.
+
+    kind 를 같이 돌려주는 이유는 **캐시 정책이 출처마다 달라야** 하기 때문이다.
+    사용자 썸네일은 덮어써지는 가변물이고 남의 눈에 띄면 안 되는 개인 이미지지만,
+    번들 폴백은 릴리즈에 딸려오는 불변물이라 길게 캐시해도 된다.
+    """
     service = character_viewer_service(context)
     group = str(group or "")
     character = str(character or "")
@@ -70,7 +76,7 @@ def character_viewer_thumbnail_payload(
         raw = service.preview_thumb(group, character, variant)
         if raw is None:
             raise
-        return raw, "image/webp"
+        return raw, "image/webp", "fallback"
     size_key = str(size or "").strip().lower()
     if size_key == "grid":
         cache = getattr(context, "character_viewer_grid_thumb_cache", None)
@@ -81,7 +87,8 @@ def character_viewer_thumbnail_payload(
         cache_key = (str(path), stat.st_mtime_ns, stat.st_size, size_key)
         cached = cache.get(cache_key)
         if cached is not None:
-            return cached
+            # 캐시는 (bytes, media_type) 만 담는다 — 여기까지 온 것은 사용자 파일 경로다.
+            return cached[0], cached[1], "user"
         from PIL import Image
 
         with Image.open(path) as image:
@@ -94,10 +101,10 @@ def character_viewer_thumbnail_payload(
         if len(cache) > 256:
             cache.clear()
         cache[cache_key] = payload
-        return payload
+        return payload[0], payload[1], "user"
 
     raw = path.read_bytes()
-    return raw, _image_media_type(raw)
+    return raw, _image_media_type(raw), "user"
 
 
 def register_character_viewer_routes(
@@ -249,9 +256,14 @@ def register_character_viewer_routes(
             return JSONResponse({"error": f"Character preset failed: {exc}"}, status_code=500)
 
     @app.get("/api/character-viewer/thumbnail")
-    async def api_character_viewer_thumbnail(group: str = "", character: str = "", variant: str = "", size: str = ""):
+    async def api_character_viewer_thumbnail(
+        group: str = "", character: str = "", variant: str = "", size: str = "", v: str = ""
+    ):
+        # `v` 는 캐시 버스트용 판(revision)이라 서버가 읽지 않는다. `_thumb_url` 이
+        # 파일 mtime/크기로 만들어 붙이므로 **내용이 바뀌면 URL 이 바뀐다**.
+        # 선례: `/api/prompt-engineering/preset-thumbnail` 이 같은 방식을 쓴다.
         try:
-            image_bytes, media_type = await run_in_thread(
+            image_bytes, media_type, source_kind = await run_in_thread(
                 character_viewer_thumbnail_payload,
                 session_context,
                 group,
@@ -265,10 +277,17 @@ def register_character_viewer_routes(
             return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer thumbnail failed: {exc}"}, status_code=500)
+        # 사용자 썸네일은 개인 이미지이자 가변물이라 `private`. 번들 폴백은 릴리즈에
+        # 딸려오는 불변물이라 길게 캐시한다. **헤더만으로는 부족하다** — URL 이 그대로면
+        # 신선한 캐시가 서버에 닿지도 않아 새 헤더를 받을 기회조차 없다. 위의 `v=` 와
+        # 짝이어야 뜻이 산다.
+        cache_control = (
+            "private, max-age=3600" if source_kind == "user" else "public, max-age=86400"
+        )
         return Response(
             content=image_bytes,
             media_type=media_type,
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={"Cache-Control": cache_control},
         )
 
     @app.post("/api/character-viewer/thumbnail/delete")

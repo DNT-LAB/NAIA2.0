@@ -507,7 +507,7 @@ export function createInteractiveAssetsPanel({
       <div class="ia-as-pv-body">
         ${meta && meta.thumb
           ? `<div class="ia-as-pv-shot"><img alt="" loading="lazy"
-               src="/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(previewId)}"></div>`
+               src="${escHtml(snapshotThumbUrl({...meta, id: previewId}))}"></div>`
           : '<div class="ia-as-pv-shot is-empty">이 조합으로 생성해야 그림이 붙습니다</div>'}
         ${body}
       </div>
@@ -952,12 +952,23 @@ export function createInteractiveAssetsPanel({
     charObserver.observe(sentinel);
   }
 
+  function snapshotThumbUrl(row) {
+    // ⚠️ **같은 id 에 새 그림이 덮인다.** `record()` 는 조합 해시가 같으면 id 를
+    // 재사용하므로(같은 캐릭터로 다시 생성하면 늘 그렇다) URL 이 `?id=` 뿐이면
+    // 브라우저가 캐시한 옛 그림을 계속 쓴다. 백엔드가 파일 mtime/크기로 만든
+    // `thumb_rev` 를 판으로 붙인다(옛 인덱스면 `created_at` 으로 물러선다).
+    if (!row || !row.thumb) return '';
+    const rev = row.thumb_rev || row.created_at || 0;
+    return `/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(row.id)}`
+      + `&v=${encodeURIComponent(rev)}`;
+  }
+
   function card(row) {
     const id = escHtml(String(row.id || ''));
     const summary = String(row.summary || '(빈 조합)');
     const thumb = row.thumb
       ? `<img class="ia-as-thumb" loading="lazy" alt=""
-              src="/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(row.id)}">`
+              src="${escHtml(snapshotThumbUrl(row))}">`
       // 썸네일은 그 조합으로 생성해야 붙는다 — 아직이면 자리를 비워 둔다.
       : `<span class="ia-as-thumb is-empty" aria-hidden="true">…</span>`;
     // 카드는 **여는 것만** 한다. 적용·즐겨찾기·삭제는 미리보기 팝업이 맡는다 —

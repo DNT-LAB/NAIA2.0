@@ -66,6 +66,7 @@ class CharacterViewerService:
         self._analysis: dict[str, Any] | None = None
         self._tag_index: dict[str, tuple[str, dict[str, Any]]] | None = None
         self._thumb_index: dict[str, str] | None = None
+        self._preview_rev: str | None = None
         self._presets: dict[str, Any] | None = None
         self._preview_pack: dict[str, str] | None = None
 
@@ -335,18 +336,63 @@ class CharacterViewerService:
             key += f"::{variant_label}"
         return key
 
+    def _preview_revision(self) -> str:
+        """번들 폴백 팩의 판. 앱 업데이트로 팩이 갈리면 폴백 URL 이 통째로 새로워진다."""
+        if self._preview_rev is None:
+            try:
+                stat = self.preview_path.stat()
+                self._preview_rev = f"{stat.st_mtime_ns}-{stat.st_size}"
+            except OSError:
+                self._preview_rev = "0"
+        return self._preview_rev
+
+    def thumbnail_source(self, group_key: str, name: str, variant_label: str = "") -> tuple[str, Path | None, str]:
+        """썸네일 하나의 **실효 출처**: ``(kind, path, revision)``.
+
+        kind 는 ``"user"`` / ``"fallback"`` / ``""``(없음). URL 의 ``v=`` 와 HTTP 캐시
+        헤더가 **둘 다 여기서** 갈라진다.
+
+        ⚠️ **revision 접두사(`u`/`p`)가 핵심이다.** mtime·크기가 우연히 같아도
+        **폴백 -> 사용자 전환은 반드시 다른 URL** 이어야 한다. 그러지 않으면 브라우저가
+        캐시한 폴백을 계속 쓴다 — 실제로 그래서 사용자가 만든 썸네일이 "소리없이
+        사라졌다"(내용이 바뀌어도 URL 이 같은데 `max-age=3600` 이 걸려 있었다).
+
+        ⚠️ 판정은 `has_thumbnail()` 과 **정의상 같다**(인덱스 항목이 있거나 팩에 있거나).
+        인덱스가 가리키는데 파일이 없으면 그래도 ``"user"`` 를 유지한다 — 여기서만
+        폴백으로 흘리면 두 값이 갈라져 `has_thumbnail=True` 인데 URL 이 빈 항목이
+        생긴다(예전에 40개 중 7개). 그 경우 라우트가 404 를 주는 것은 종전과 같다.
+        """
+        group_key = str(group_key or "")
+        name = str(name or "")
+        variant_label = str(variant_label or "")
+        filename = self.thumb_index().get(self._thumb_key(group_key, name, variant_label))
+        if filename:
+            try:
+                path = self._resolve_thumb_file(str(filename))
+                stat = path.stat()
+            except (OSError, ValueError):
+                return "user", None, "u0"
+            return "user", path, f"u{stat.st_mtime_ns}-{stat.st_size}"
+        if not variant_label and f"{group_key}::{name}" in self.preview_pack():
+            return "fallback", None, f"p{self._preview_revision()}"
+        return "", None, ""
+
     def _thumb_url(self, group_key: str, name: str, variant_label: str = "", size: str = "") -> str:
         # 사용자 인덱스에 없어도 **번들 폴백이 있으면 URL 을 준다.** 라우트가 같은 우선순위로
         # 응답하기 때문이다. 여기서 사용자 인덱스만 보면 `has_thumbnail=True` 인데
         # `thumbnail_url` 이 빈 값인 항목이 생겨(실측 40개 중 7개) 프론트가 이니셜을 그린다.
         # 두 값은 항상 같은 판정을 써야 한다.
-        if not self.has_thumbnail(group_key, name, variant_label):
+        kind, _path, revision = self.thumbnail_source(group_key, name, variant_label)
+        if not kind:
             return ""
         params = f"group={quote(group_key, safe='')}&character={quote(name, safe='')}"
         if variant_label:
             params += f"&variant={quote(variant_label, safe='')}"
         if size:
             params += f"&size={quote(size, safe='')}"
+        if revision:
+            # 내용이 바뀔 때만 URL 이 바뀐다 -> 캐시를 살린 채 항상 최신을 본다.
+            params += f"&v={quote(revision, safe='')}"
         return f"/api/character-viewer/thumbnail?{params}"
 
     def _serialize_list_item(
@@ -744,7 +790,12 @@ class CharacterViewerService:
             return None
 
     def has_thumbnail(self, group_key: str, name: str, variant_label: str = "") -> bool:
-        """사용자 썸네일이 없어도 폴백이 있으면 True — 그리드가 이니셜 대신 그림을 청한다."""
+        """사용자 썸네일이 없어도 폴백이 있으면 True — 그리드가 이니셜 대신 그림을 청한다.
+
+        ⚠️ `thumbnail_source()` 의 kind 와 **정의상 같은 판정**이다(인덱스 항목 또는 팩).
+        여기는 stat 을 하지 않는다 — `include_all=True` 목록이 전 캐릭터(11,890명)를
+        직렬화하면서 이 판정을 쓰기 때문에 syscall 을 붙이면 통째로 느려진다.
+        """
         if self.thumb_index().get(self._thumb_key(group_key, name, variant_label)):
             return True
         return not str(variant_label or "") and f"{group_key}::{name}" in self.preview_pack()
@@ -782,12 +833,19 @@ class CharacterViewerService:
                 path.unlink()
                 removed_file = True
         self._write_thumb_index(index)
+        # 지운 **뒤의 실효 상태**를 함께 준다. 번들 폴백이 있는 캐릭터는 사용자 썸네일을
+        # 지워도 여전히 그림이 나오는데(`thumbnail_source` 가 fallback 으로 떨어진다),
+        # 프론트가 무조건 `has_thumbnail=false` 로 칠하면 새로고침 전까지 "No Thumb" 라는
+        # 거짓을 보여준다.
         return {
             "key": key,
             "filename": filename,
             "removed": True,
             "removed_file": removed_file,
             "thumbnail_count": len(index),
+            "has_thumbnail": self.has_thumbnail(group_key, name, variant_label),
+            "thumbnail_url": self._thumb_url(group_key, name, variant_label),
+            "default_thumbnail_url": self._thumb_url(group_key, name),
         }
 
     def save_thumbnail(self, pil_image: Any, snapshot: dict[str, Any]) -> dict[str, Any] | None:
@@ -803,13 +861,23 @@ class CharacterViewerService:
         safe_name = re.sub(r'[<>:"/\\|?*]', "_", key.replace("::", "__")) + ".webp"
         thumb = pil_image.copy()
         thumb.thumbnail(self.THUMB_MAX_SIZE, Image.Resampling.LANCZOS)
-        thumb.save(self.thumb_dir / safe_name, "WEBP", quality=82)
+        # 최종 경로에 바로 쓰면 덮어쓰는 동안 들어온 GET 이 **잘린 파일**을 받는다.
+        # 인덱스와 같은 방식(임시 파일 -> replace)으로 맞춘다. revision(mtime/크기)을
+        # 읽는 쪽과도 경합하지 않는다.
+        target = self.thumb_dir / safe_name
+        tmp_path = target.with_name(target.name + ".tmp")
+        thumb.save(tmp_path, "WEBP", quality=82)
+        tmp_path.replace(target)
 
         index = dict(self.thumb_index())
         index[key] = safe_name
         self._write_thumb_index(index)
+        # `thumbnail_count` 를 여기서 준다. 저장 시점에 갱신된 인덱스가 이미 손에 있어
+        # 프론트가 헤더 숫자를 고치자고 `state()` 를 다시 부를 이유가 없다
+        # (`state()` 는 전 캐릭터를 순회한다). 삭제 경로가 쓰는 계약과 같은 모양이다.
         return {
             "key": key,
             "filename": safe_name,
             "url": self._thumb_url(group_key, name, variant_label),
+            "thumbnail_count": len(index),
         }

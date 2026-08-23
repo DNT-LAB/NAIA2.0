@@ -1418,6 +1418,11 @@ async def _save_character_viewer_thumbnail(
         "character_viewer_thumbnail_url": (
             str(thumbnail.get("url") or "") if isinstance(thumbnail, dict) else ""
         ),
+        # 헤더의 "N thumbnails" 를 고치려고 `state()` 를 다시 부르면 전 캐릭터를 순회한다.
+        # 저장 시점에 이미 정확한 값이 나오므로 그대로 실어 보낸다(삭제 경로와 같은 계약).
+        "character_viewer_thumbnail_count": (
+            int(thumbnail.get("thumbnail_count") or 0) if isinstance(thumbnail, dict) else 0
+        ),
     })
 
 

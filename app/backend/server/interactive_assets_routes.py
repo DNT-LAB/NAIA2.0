@@ -84,7 +84,10 @@ def register_interactive_assets_routes(
         return body
 
     @app.get("/api/interactive-assets/snapshot/thumb")
-    async def api_interactive_snapshot_thumb(id: str = ""):
+    async def api_interactive_snapshot_thumb(id: str = "", v: str = ""):
+        # `v` 는 화면이 붙이는 판(`thumb_rev`)이라 서버가 읽지 않는다. **같은 id 에 새
+        # 그림이 덮이므로**(record 의 prompt_hash 재사용) 이것 없이는 캐시된 옛 그림이
+        # 계속 나온다. 사용자가 만든 개인 이미지라 `private` 이기도 하다.
         def _read() -> bytes | None:
             svc = interactive_assets_service(session_context)
             path = svc.snapshot_root / f"{str(id or '')}.webp"
@@ -97,7 +100,7 @@ def register_interactive_assets_routes(
         if raw is None:
             return JSONResponse({"error": "thumb not found"}, status_code=404)
         return Response(content=raw, media_type="image/webp",
-                        headers={"Cache-Control": "public, max-age=3600"})
+                        headers={"Cache-Control": "private, max-age=3600"})
 
     @app.post("/api/interactive-assets/snapshot")
     async def api_interactive_snapshot_record(req: Request):
@@ -313,7 +316,8 @@ def register_interactive_assets_routes(
         return body
 
     @app.get("/api/interactive-assets/scene/thumb")
-    async def api_interactive_scene_thumb(id: str = ""):
+    async def api_interactive_scene_thumb(id: str = "", v: str = ""):
+        # 캐릭터 스냅샷과 같은 계약 — `v` 는 캐시 버스트용, 응답은 `private`.
         def _read() -> bytes | None:
             svc = interactive_assets_service(session_context)
             path = svc.scene_root / f"{str(id or '')}.webp"
@@ -326,7 +330,7 @@ def register_interactive_assets_routes(
         if raw is None:
             return JSONResponse({"error": "thumb not found"}, status_code=404)
         return Response(content=raw, media_type="image/webp",
-                        headers={"Cache-Control": "public, max-age=3600"})
+                        headers={"Cache-Control": "private, max-age=3600"})
 
     @app.post("/api/interactive-assets/scene")
     async def api_interactive_scene_record(req: Request):

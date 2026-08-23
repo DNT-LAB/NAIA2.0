@@ -2101,6 +2101,7 @@ class HeadlessCharacterAssetService:
             "type", "mask_bytes", "cropped_image_request", "full_mask_pil",
             "reference_inset_tag_required",
             "_executed_characters", "_executed_character_ids", "_executed_characters_uc",
+            "_executed_character_positions",
         ):
             overrides.pop(key, None)
         overrides.update({

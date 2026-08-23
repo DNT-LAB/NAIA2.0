@@ -324,6 +324,7 @@ class HeadlessGenerationService:
         params.pop("_executed_characters", None)
         params.pop("_executed_character_ids", None)
         params.pop("_executed_characters_uc", None)
+        params.pop("_executed_character_positions", None)
         # Storyteller Use Vibe: 정지 후 실행되는 큐 잔존 페이지가 휘발성 스트림 vibe를
         # 보내지 않도록 실행 시점 검증 — 마커의 run_id가 활성 스트림과 다르면 스트림
         # 발급분만 제거한다(일반 vibe 불변; Codex 설계검수 #4).

@@ -1182,6 +1182,17 @@ class APIService:
                     params['_executed_characters_uc'] = [
                         str(ucs[i]) if i < len(ucs) else "" for i in range(len(characters))
                     ]
+                    # ⚠️ 좌표도 남긴다. POS: RAND 는 요청마다 새로 굽는 값이라, 기록해
+                    #    두지 않으면 **이 이미지가 어디에 배치됐는지 알 방법이 없다** -
+                    #    NAI PNG 의 Comment 안에는 있지만 메타 추출기가 `char_caption`
+                    #    텍스트만 꺼내고 `centers` 를 버린다(utils/image_info.py).
+                    #    다른 `_executed_*` 와 같이 리플레이 때 벗겨지므로(late binding)
+                    #    재생 의미는 그대로다 - 기록 전용이다.
+                    if coords_given:
+                        params['_executed_character_positions'] = [
+                            dict(center) for center in given_centers[:len(characters)]
+                            if isinstance(center, dict)
+                        ]
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             generation_request = params.get('_generation_request')

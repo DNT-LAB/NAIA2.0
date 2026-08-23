@@ -426,9 +426,16 @@ class HeadlessConditionalPromptService:
                 if str(settings.get(key) or "") == name:
                     settings[key] = None
                     removed = True
+            # ⚠️ 지금 모드의 쓰기도 감싼다. 파일은 **이미 unlink 된 뒤**라(위 `delete`),
+            #    여기서 예외가 올라가면 프리셋은 사라졌는데 요청은 실패로 끝나고
+            #    이름표는 남아 사용자가 다시 지울 수도 없다(Codex 3차 지적).
+            #    다른 모드 정리와 같은 처리다 - 한쪽만 감싸 둔 것이 구멍이었다.
             if removed:
-                self._set_active_preset(settings, settings.get(self._preset_key(settings)))
-                store.apply_settings(settings)
+                try:
+                    self._set_active_preset(settings, settings.get(self._preset_key(settings)))
+                    store.apply_settings(settings)
+                except Exception as exc:
+                    print(f"Remote: conditional preset label cleanup failed for current mode: {exc}")
             # ⚠️ 프리셋 **파일은 API 모드 공용**인데 설정은 NAI/WEBUI/COMFYUI 로
             #    갈린다. 지금 모드에서만 떼면 다른 모드가 지워진 이름을 계속 내걸고,
             #    누르면 "찾을 수 없음" 이 뜬다(Codex 지적, 코드로 확인).

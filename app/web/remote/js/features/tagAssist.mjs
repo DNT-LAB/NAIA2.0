@@ -452,9 +452,23 @@ export function createTagAssistController({
       return;
     }
 
-    const left = viewerRect
+    let left = viewerRect
       ? Math.min(viewerRect.left + sideGap, viewportWidth - 320 - safeGap)
       : 494;
+    // ⚠️ **캐릭터 퀵 패널이 바로 이 자리에 떠 있다.** 기본 자리가 뷰어 왼쪽 위인데,
+    //    그 패널도 거기 얹힌다 - 그대로 두면 이 카드가 슬롯을 통째로 덮는다
+    //    (사용자 제보: C1/C2 가 안 보였다). 패널이 열려 있으면 그 오른쪽에서 시작한다.
+    //    오른쪽에 최소 폭(320)이 안 남으면 원래 자리를 지킨다 - 밀다가 화면 밖으로
+    //    나가는 것이 덮이는 것보다 나쁘다.
+    //
+    //    **펼쳐진 때만** 비켜선다(`.cq-box.is-open`). 접혀 있으면 머리줄 한 칸이라
+    //    가릴 슬롯이 없다 - 그때까지 밀면 원래 자리를 괜히 잃는다.
+    const quickPanel = document.querySelector('.cq-float.open .cq-box.is-open');
+    const quickRect = quickPanel?.getBoundingClientRect();
+    if (quickRect && quickRect.width > 0 && quickRect.height > 0) {
+      const beside = quickRect.right + sideGap;
+      if (beside + 320 + safeGap <= viewportWidth) left = Math.max(left, beside);
+    }
     const availableWidth = viewerRect
       ? viewerRect.right - left - sideGap
       : viewportWidth - left - safeGap;

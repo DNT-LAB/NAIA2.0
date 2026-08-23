@@ -1013,10 +1013,23 @@ class ExtensionContext:
 
             snap = character_params_from_settings(self._app_context, mode=mode)
             if snap and snap.get("characters"):
+                # ⚠️ 좌표는 스냅샷에 **들어 있지 않다.** `character_params_from_settings`
+                #    는 캐릭터 텍스트(와일드카드 전개)만 돌려주고 좌표는 굴림의 일부가
+                #    아니라 설정에 붙어 있다 - 그래서 여기서 따로 읽는다.
+                #    예전에는 `snap.get("character_positions")` 를 읽어 **언제나 빈
+                #    목록**이었다. `use_coords` 가 하드코딩 false 이던 시절엔 무해했지만,
+                #    POS 가 동작하는 지금은 이 스냅샷을 overrides 로 실어 보내는 요청
+                #    (샘플 확장 Seed Fan-out 의 "캐릭터 프롬프트 고정")이 **좌표를 통째로
+                #    잃는다** - EarlyBinding 분기가 빈 목록을 그대로 쓰기 때문이다.
+                from core.character_settings import character_positions_for_mode
+
+                characters = [str(c) for c in snap["characters"]]
                 return {
-                    "characters": [str(c) for c in snap["characters"]],
+                    "characters": characters,
                     "uc": [str(u) for u in (snap.get("uc") or [])],
-                    "character_positions": list(snap.get("character_positions") or []),
+                    "character_positions": character_positions_for_mode(
+                        self._app_context, mode, count=len(characters)
+                    ),
                 }
         except (SystemExit, Exception) as exc:
             self.log(f"resolve_nai_characters failed: {_safe_error_text(exc)}")

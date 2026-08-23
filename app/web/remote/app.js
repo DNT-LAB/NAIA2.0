@@ -9420,6 +9420,30 @@ function updateSearchCount(count) {
   if (searchPanelControl) searchPanelControl.updateSearchCount(count);
 }
 
+// 검색 데이터 증분이 남아 있는지 **한 번만** 알린다.
+//
+// ⚠️ 받기 버튼은 Prompt 패널 안에 있다. 그 패널을 열 이유가 없는 사용자는 새 데이터가
+//    있다는 사실 자체를 모른다 - 시작할 때 한 번 말해 준다. 시점은 "이전 태그 데이터가
+//    다 올라온 뒤"(아래 pool ready)라야 한다. 그전에 띄우면 로딩 토스트에 묻힌다.
+let tagDatasetUpdateNoticeDone = false;
+function noticeTagDatasetUpdateOnce() {
+  if (tagDatasetUpdateNoticeDone) return;
+  tagDatasetUpdateNoticeDone = true;
+  // pool ready 가 방금 자기 토스트를 지운다 - 조금 뒤에 말한다.
+  setTimeout(async () => {
+    try {
+      const res = await fetch('/api/install-manager', {cache: 'no-store'});
+      if (!res.ok) return;                       // 원격 브라우저에는 설치 관리자가 없다
+      const data = await res.json();
+      // 베이스가 준비된 사용자에게만. 베이스부터 받아야 하는 사람에게 증분을 권하면
+      // 1.4GB 를 건너뛰고 275MB 만 받아 반쪽 코퍼스가 된다.
+      if (!data?.tag_archive?.ready) return;
+      if (!data?.tag_archive_increment || data.tag_archive_increment.ready) return;
+      showToast('검색 데이터 업데이트가 있습니다 — 좌상단 Prompt 버튼을 누르세요.', 'success');
+    } catch (_) { /* 조용히 - 알림이 안 뜬다고 앱이 멈출 이유는 없다 */ }
+  }, 1500);
+}
+
 function onSearchState(m) {
   // stale/superseded search_state(revision 가드 거부)는 pool 준비 완료가 아니므로 pool 잠금/
   // Random 게이트를 조기 해제하지 않는다 — newer 작업이 아직 진행 중(Codex NEW 선재 결함).
@@ -9427,6 +9451,7 @@ function onSearchState(m) {
   if (authoritative === false) return;
   tagSurfaceLock.end('pool');   // completion of search / parquet load-merge / rating recompute / restore
   poolLoad.stop();              // authoritative 'pool ready' — clears load/reconstruct/filter gate + toast
+  noticeTagDatasetUpdateOnce();
 }
 
 function onSearchProgress(m) {

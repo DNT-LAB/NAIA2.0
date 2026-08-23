@@ -22491,6 +22491,11 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 /* 네거티브는 라벨 대신 **테두리 색**으로 알린다(사용자 지정). */
 .cq-input.is-neg { border-color: rgba(212, 98, 98, 0.45); }
 .cq-input.is-neg:focus { border-color: rgba(226, 116, 116, 0.75); }
+/* 네거티브 글자는 한 톤 죽인다(사용자 지정). 슬롯이 세로로 쌓이면 포지티브와
+   네거티브가 같은 밝기라 어디서 한 슬롯이 끝나는지 눈으로 안 잡힌다 - 밝기 차가
+   경계 노릇을 한다. 편집 중에는 원래 밝기로 돌려준다(읽기 어려우면 안 된다). */
+.cq-input.is-neg { color: var(--text-dim); }
+.cq-input.is-neg:focus { color: var(--text-primary); }
 .cq-add {
   flex: 1; min-width: 0; padding: 6px 8px; cursor: pointer;
   border-radius: 5px; border: 1px dashed rgba(255,255,255,0.18);

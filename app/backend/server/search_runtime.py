@@ -753,17 +753,55 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
     tags_text = cache["tags_text"]
     row_count = cache["row_count"]
 
-    def _hit_mask(key: str):
+    def _store_mask(cache_key, mask):
+        if len(cache["tag_hits"]) >= _TAG_HITS_CAP:
+            cache["tag_hits"].clear()  # 메모리 상한 — tags_text 유지라 재계산 저렴
+        cache["tag_hits"][cache_key] = mask
+        return mask
+
+    def _hit_mask(key: str, exact: bool = False):
         # 행(positional) 단위 boolean 마스크(numpy). id 가 아니라 행 위치 기준이라 중복 id(합친
         # parquet)에서도 구버전 per-row mask 와 동치. 파이썬 int frozenset(원소당 ~28바이트) 대신
         # 1 byte/row bool 배열 → 대형 풀에서 매칭 메모리 스파이크(스와핑)를 제거한다.
-        cached = cache["tag_hits"].get(key)
-        if cached is None:
-            cached = tags_text.str.contains(key, na=False, regex=False).to_numpy()
-            if len(cache["tag_hits"]) >= _TAG_HITS_CAP:
-                cache["tag_hits"].clear()  # 메모리 상한 — tags_text 유지라 재계산 저렴
-            cache["tag_hits"][key] = cached
-        return cached
+        #
+        # ⚠️ 캐시 키는 **(exact, key) 튜플**이다. 문자열 하나로 두면 `sky` 와 `*sky` 가 같은
+        #    마스크를 공유해 토글해도 결과가 안 바뀐다(조용히 틀린다). 튜플이라 sigil 문자와
+        #    충돌할 여지도 없다.
+        cache_key = (exact, key)
+        cached = cache["tag_hits"].get(cache_key)
+        if cached is not None:
+            return cached
+        if not exact:
+            return _store_mask(
+                cache_key, tags_text.str.contains(key, na=False, regex=False).to_numpy()
+            )
+        # 퍼펙트 매칭: SEARCH(`core/search_engine.py` contains_exact)와 **같은 경계**를 쓴다 -
+        # 쉼표 또는 공백. 같은 `*tag` 가 화면마다 다른 뜻이 되는 것이 최악이라 의도적으로
+        # 복제한다(따라서 `*sky` 는 `cloudy sky` 에도 걸린다. 태그 전체 일치가 아니다).
+        # 비캡처 그룹이어야 한다 - 캡처 그룹이면 pandas 가 매 호출 경고를 뱉는다.
+        pattern = "(?:^|[, ])" + re.escape(key) + "(?:[, ]|$)"
+        # exact 결과는 부분일치 결과의 **부분집합**이다(정규식이 리터럴 key 를 요구하므로).
+        # 그래서 부분 마스크가 **이미 캐시에 있으면** 그 후보 행만 훑는다.
+        #
+        # ⚠️ 캐시에 없으면 굳이 만들지 않는다. 실측(800k 행): 부분일치가 흔한 태그에서는
+        #    base 를 새로 만들어 후보로 좁히는 것이 전체 regex 1회보다 **느리다**
+        #    (sky 84.5%: 콜드 327ms vs 전체 289ms). base 가 이미 있을 때만 이득이다
+        #    (1girl 34.6%: 웜 110ms vs 320ms).
+        base = cache["tag_hits"].get((False, key))
+        if base is None:
+            return _store_mask(
+                cache_key, tags_text.str.contains(pattern, na=False, regex=True).to_numpy()
+            )
+        out = np.zeros(row_count, dtype=bool)
+        candidates = np.flatnonzero(base)
+        if candidates.size:
+            # ⚠️ positional `.iloc` 이어야 한다. 커스텀 parquet 은 index 가 기본이 아닐 수 있어
+            #    label 색인을 쓰면 엉뚱한 행을 본다.
+            hits = tags_text.iloc[candidates].str.contains(
+                pattern, na=False, regex=True
+            ).to_numpy()
+            out[candidates[hits]] = True
+        return _store_mask(cache_key, out)
 
     def _beat():
         # bracket 하트비트: 각 (미캐시 가능) str.contains scan 직전과 최종 materialize 직전에 발행 →
@@ -778,7 +816,7 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
     # 먼저 모든 칩을 (clean, negate)로 분해 — 프론트가 "1girl, armpits" 한 칩을 통째로 보내도 두
     # 태그로 매칭/표기(예약 버그). negate('-')는 분리 후 서브토큰별 판정('1girl, -armpits' →
     # include 1girl + exclude armpits).
-    parsed: list[tuple[str, bool]] = []
+    parsed: list[tuple[str, bool, bool]] = []
     clean_tags: list[str] = []
     for item in tags:
         for raw in re.split(r"[,\n]", str(item or "")):
@@ -789,16 +827,25 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
             # replace 후 strip: 프론트가 보낸 "_armpits"의 선행 '_'(원래 공백)가 공백→제거되도록
             # (strip→replace 순서면 " armpits"로 남아 매칭이 깨진다).
             clean = raw.lstrip("-").replace("_", " ").strip()
+            # 선행 `*` = 퍼펙트 매칭(SEARCH 와 같은 표기). **예약 문자**다 - 지금 태그 사전
+            # 150개 parquet 전수에 `*` 를 포함한 실제 태그는 0개지만, 커스텀 parquet 은
+            # 태그 문자를 검증하지 않으므로 규약으로 못박는다.
+            exact = clean.startswith("*")
+            if exact:
+                clean = clean[1:].strip()
             if not clean:
                 continue
-            clean_tags.append(("-" if negate else "") + clean)
-            parsed.append((clean, negate))
+            # ⚠️ **영속 토큰에 `*` 를 되살린다.** 여기서 만든 `clean_tags` 가 pending 을 거쳐
+            #    그대로 디스크(`save_search_filter_state`)에 쓰인다 - 벗겨낸 채로 두면
+            #    재시작 시 exact 가 조용히 부분일치로 강등된다(Codex 지적).
+            clean_tags.append(("-" if negate else "") + ("*" if exact else "") + clean)
+            parsed.append((clean, negate, exact))
 
     include_mask = None                                  # None = 아직 제한 없음(전체 행)
     exclude_mask = np.zeros(row_count, dtype=bool)
-    for clean, negate in parsed:
+    for clean, negate, exact in parsed:
         _beat()                                          # 이 칩의 str.contains scan 직전
-        m = _hit_mask(clean.lower())
+        m = _hit_mask(clean.lower(), exact)
         if negate:
             exclude_mask |= m
         elif include_mask is None:

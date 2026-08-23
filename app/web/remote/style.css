@@ -25104,3 +25104,36 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .mod-char-block.is-muted .mod-char-title { opacity: 0.45; text-decoration: line-through; }
 .mod-char-block.is-muted .mod-char-prompt,
 .mod-char-block.is-muted .mod-char-uc { opacity: 0.5; }
+/* ── 태그 필터 칩: 퍼펙트 매칭 서브메뉴 ─────────────────────────────────────
+   칩을 누르면 아래에 버튼 하나가 열린다(사용자 지정). 버튼을 상시로 두면 칩 폭이
+   커져서 누를 때만 내놓는다. 퍼펙트 매칭이 걸린 칩은 파랗게 강조한다. */
+.tag-filter-chip { position: relative; cursor: pointer; }
+.tag-filter-chip:hover { border-color: var(--border-strong, rgba(255,255,255,0.28)); }
+.tag-filter-chip:focus-visible {
+  outline: 1px solid var(--accent-blue, #5f97ff); outline-offset: 1px;
+}
+.tag-filter-chip.is-exact {
+  border-color: rgba(95,151,255,0.72);
+  background: rgba(95,151,255,0.20);
+  color: #cddcff;
+}
+/* 제외 칩이 퍼펙트 매칭이면 두 색이 싸운다 - 테두리는 파랑(=매칭 방식)을 남기고
+   글자는 제외의 붉은 기를 유지해 "무엇을 하는 칩인지"를 잃지 않는다. */
+.tag-filter-chip.exclude.is-exact { color: #ffc9c9; }
+.tag-filter-chip.menu-open { border-color: rgba(95,151,255,0.9); }
+.tag-filter-chip .chip-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+  display: flex; padding: 3px;
+  border-radius: 5px; border: 1px solid rgba(95,151,255,0.45);
+  background: #12121b; box-shadow: 0 10px 26px rgba(0,0,0,0.5);
+  cursor: default;
+}
+.tag-filter-chip .chip-menu-btn {
+  white-space: nowrap; padding: 4px 9px; cursor: pointer;
+  border-radius: 4px; border: 1px solid transparent;
+  background: transparent; color: var(--text-main);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.tag-filter-chip .chip-menu-btn:hover {
+  border-color: rgba(95,151,255,0.6); background: rgba(95,151,255,0.18);
+}

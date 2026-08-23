@@ -11,6 +11,13 @@ function normalizeTagParts(value) {
     .filter(Boolean);
 }
 
+// 선행 `*` = 퍼펙트 매칭. SEARCH 의 `*tag` 와 같은 표기이고, 칩은 그냥 문자열이라
+// 저장 스키마(localStorage · 상태 파일 · 프리셋 · WS)를 하나도 안 바꾼다.
+// ⚠️ 예약 문자다 - 태그 사전 150개 parquet 전수에 `*` 를 포함한 실제 태그는 0개다.
+const isExactTag = (tag) => String(tag || '').startsWith('*');
+const baseTag = (tag) => String(tag || '').replace(/^\*+/, '');
+const withExact = (tag, exact) => (exact ? '*' : '') + baseTag(tag);
+
 export function normalizeRatings(value) {
   if (!Array.isArray(value)) return [...DEFAULT_RATING_KEYS];
   const picked = RATING_KEYS.filter(key => value.includes(key));
@@ -228,28 +235,101 @@ export function createQuickFilterController(deps) {
     return loadPreferences(storage);
   }
 
+  // 칩을 누르면 아래에 서브메뉴가 하나 열린다(사용자 지정). 버튼을 칩에 상시로 두면
+  // 칩 폭이 커져서, 누를 때만 내놓는다. 퍼펙트 매칭이 걸린 칩은 파랗게 강조된다.
+  let chipMenu = null;          // {list:'include'|'exclude', index:number} | null
+
+  function chipHtml(tag, index, list) {
+    const exact = isExactTag(tag);
+    const open = !!chipMenu && chipMenu.list === list && chipMenu.index === index;
+    const remover = list === 'exclude' ? 'removeTagFilterExcludeTag' : 'removeTagFilterTag';
+    // ⚠️ × 는 칩 **안**에 있어 클릭이 칩으로 올라간다 - 멈추지 않으면 지우면서 메뉴가 열린다.
+    return `<span class="tag-filter-chip${list === 'exclude' ? ' exclude' : ''}`
+      + `${exact ? ' is-exact' : ''}${open ? ' menu-open' : ''}"`
+      + ` role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}"`
+      + ` onclick="toggleTagFilterChipMenu('${list}',${index})"`
+      + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleTagFilterChipMenu('${list}',${index});}">`
+      + deps.escHtml(tag)
+      + `<span class="chip-x" onclick="event.stopPropagation();${remover}(${index})">&times;</span>`
+      + (open
+          ? `<span class="chip-menu" onclick="event.stopPropagation()">`
+            + `<button type="button" class="chip-menu-btn"`
+            + ` onclick="setTagFilterChipExact('${list}',${index},${exact ? 'false' : 'true'})">`
+            + `${exact ? '퍼펙트 매칭 해제' : '퍼펙트 매칭 적용'}</button></span>`
+          : '')
+      + `</span>`;
+  }
+
   function renderIncludeChips() {
     const el = getEl('tagFilterChips');
     if (!el) return;
-    if (!includeTags.length) {
-      el.innerHTML = '';
-      return;
-    }
-    el.innerHTML = includeTags.map((tag, index) =>
-      `<span class="tag-filter-chip">${deps.escHtml(tag)}<span class="chip-x" onclick="removeTagFilterTag(${index})">&times;</span></span>`
-    ).join('');
+    el.innerHTML = includeTags.length
+      ? includeTags.map((tag, index) => chipHtml(tag, index, 'include')).join('')
+      : '';
   }
 
   function renderExcludeChips() {
     const el = getEl('tagFilterExcludeChips');
     if (!el) return;
-    if (!excludeTags.length) {
-      el.innerHTML = '';
+    el.innerHTML = excludeTags.length
+      ? excludeTags.map((tag, index) => chipHtml(tag, index, 'exclude')).join('')
+      : '';
+  }
+
+  function renderChips() {
+    renderIncludeChips();
+    renderExcludeChips();
+  }
+
+  // 바깥 클릭 / Escape 로 닫는다.
+  // ⚠️ **캡처 단계**로 듣는다 - 중간에서 전파를 멈추는 코드가 있어도 도달한다.
+  //    대신 칩 안에서 시작한 것은 무시해야 한다(닫자마자 그 칩의 click 이 다시 여는 꼴).
+  function onChipMenuDismiss(event) {
+    if (event.type === 'keydown') {
+      if (event.key === 'Escape') closeChipMenu();
       return;
     }
-    el.innerHTML = excludeTags.map((tag, index) =>
-      `<span class="tag-filter-chip exclude">${deps.escHtml(tag)}<span class="chip-x" onclick="removeTagFilterExcludeTag(${index})">&times;</span></span>`
-    ).join('');
+    if (event.target && event.target.closest && event.target.closest('.tag-filter-chip')) return;
+    closeChipMenu();
+  }
+
+  function bindChipMenuDismiss(on) {
+    const fn = on ? 'addEventListener' : 'removeEventListener';
+    document[fn]('pointerdown', onChipMenuDismiss, true);
+    document[fn]('keydown', onChipMenuDismiss, true);
+  }
+
+  function closeChipMenu() {
+    if (!chipMenu) return;
+    chipMenu = null;
+    bindChipMenuDismiss(false);
+    renderChips();
+  }
+
+  function toggleChipMenu(list, index) {
+    const same = chipMenu && chipMenu.list === list && chipMenu.index === index;
+    if (same) { closeChipMenu(); return; }
+    if (!chipMenu) bindChipMenuDismiss(true);
+    chipMenu = {list: String(list) === 'exclude' ? 'exclude' : 'include', index: Number(index)};
+    renderChips();
+  }
+
+  function setChipExact(list, index, exact) {
+    const arr = String(list) === 'exclude' ? excludeTags : includeTags;
+    const idx = Number(index);
+    const current = arr[idx];
+    closeChipMenu();
+    if (current === undefined) return;
+    const next = withExact(current, !!exact);
+    if (next === current) return;
+    // 같은 칩이 이미 있으면 **합친다**. `sky` 와 `*sky` 가 나란히 있으면 AND 라 결과는
+    // `*sky` 와 같지만 화면이 헷갈린다.
+    const duplicate = arr.some((tag, i) => i !== idx && tag === next);
+    if (duplicate) arr.splice(idx, 1);
+    else arr[idx] = next;
+    renderChips();
+    updateCommitButton();
+    apply();
   }
 
   function clearAutocomplete() {
@@ -500,6 +580,8 @@ export function createQuickFilterController(deps) {
   }
 
   function removeExcludeTag(index) {
+    // ⚠️ 인덱스가 밀리므로 열린 메뉴는 닫는다 - 안 닫으면 엉뚱한 칩에 메뉴가 붙는다.
+    closeChipMenu();
     excludeTags.splice(index, 1);
     renderExcludeChips();
     updateCommitButton();
@@ -511,6 +593,7 @@ export function createQuickFilterController(deps) {
   }
 
   function removeIncludeTag(index) {
+    closeChipMenu();
     includeTags.splice(index, 1);
     renderIncludeChips();
     updateCommitButton();
@@ -944,6 +1027,9 @@ export function createQuickFilterController(deps) {
     deletePresetAt,
     removeExcludeTag,
     removeIncludeTag,
+    toggleChipMenu,
+    setChipExact,
+    closeChipMenu,
     apply,
     onPoolSwap,
     onSearchReleased,

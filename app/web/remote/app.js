@@ -451,7 +451,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260714-a3fix')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260823-tfexact1')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -9902,6 +9902,10 @@ function renderTagFilterChips() { /* rendered by quickFilter controller */ }
 function renderTagFilterExcludeChips() { /* rendered by quickFilter controller */ }
 function removeTagFilterExcludeTag(idx) { if (quickFilter) quickFilter.removeExcludeTag(idx); }
 function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag(idx); }
+// 칩을 누르면 열리는 서브메뉴(퍼펙트 매칭 적용/해제). 칩 마크업이 innerHTML 문자열이라
+// 이 파일의 다른 칩 핸들러와 같은 전역 브리지 방식을 쓴다.
+function toggleTagFilterChipMenu(list, idx) { if (quickFilter) quickFilter.toggleChipMenu(list, idx); }
+function setTagFilterChipExact(list, idx, exact) { if (quickFilter) quickFilter.setChipExact(list, idx, exact); }
 function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function commitPendingTagFilterText() { if (quickFilter) quickFilter.commitPendingInputs(); }

@@ -222,7 +222,16 @@ class HeadlessConditionalRuleEngine:
         if index < 0 or index >= len(frames) or not isinstance(frames[index], dict):
             return False
         frame = frames[index]
-        return bool(frame.get("is_enabled")) or str(frame.get("slot_state") or "").lower() == "active"
+        # ⚠️ 끈 슬롯(`is_muted`)은 활성 무리에 남아 있어도 **꺼진 것**이다.
+        #    예전에는 `is_enabled or slot_state == active` 였는데, 이제
+        #    `is_enabled` 가 mute 까지 접은 파생값이라 그 OR 이 mute 를 되살린다.
+        #    옛 저장본(정규화 전 프레임)에는 `is_enabled` 가 없을 수 있어
+        #    slot_state 폴백은 남기되, mute 는 어느 쪽이든 이긴다.
+        if bool(frame.get("is_muted")):
+            return False
+        if "is_enabled" in frame:
+            return bool(frame.get("is_enabled"))
+        return str(frame.get("slot_state") or "").lower() == "active"
 
     @staticmethod
     def _parse_char_uc_target(target: str) -> tuple[str, int | str] | None:

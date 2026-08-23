@@ -338,9 +338,21 @@ export function createCharacterPanel({
           ? ''
           : `<button class="mod-btn-square" aria-label="Deactivate" data-naia-title="비활성으로 내린다" onclick="setCharacterSlotState(${index}, 'inactive')">&#9660;</button>`)
       : `<button class="mod-btn-square mod-char-promote" aria-label="Activate" data-naia-title="활성 맨 아래로 올린다" onclick="setCharacterSlotState(${index}, 'active')">&#9650;</button>`;
+    // ✔/✘ - **제자리에서** 끈다(NAI 공식 구현과 같다). 끈 슬롯은 활성 무리에
+    // 그대로 남아 번호(C3)도 유지하고, 페이로드에서만 빠진다.
+    // ⚠️ ▼(비활성으로 내림)와 **다른 축**이다. 그쪽은 목록에서 치우고 번호를
+    //    다시 매긴다. 예전에는 축이 하나라 체크박스가 곧 ▼ 였고, 무리를 나누며
+    //    체크박스를 걷어내자 제자리에서 끌 방법이 사라졌다(사용자 제보).
+    const muted = !!character.muted;
+    const enableBox = active
+      ? `<label class="mod-char-en" data-naia-title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">`
+        + `<input type="checkbox" ${muted ? '' : 'checked'}`
+        + ` oninput="setModuleParam('character','char_muted_${index}',String(!this.checked))"></label>`
+      : '';
     return `
-      <div class="mod-char-block ${active ? 'is-active' : 'is-inactive'}" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
+      <div class="mod-char-block ${active ? 'is-active' : 'is-inactive'}${muted ? ' is-muted' : ''}" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
         <div class="mod-char-header">
+          ${enableBox}
           <span class="mod-char-title">${label}</span>
           <div class="mod-char-card-actions">
             ${moveBtn}

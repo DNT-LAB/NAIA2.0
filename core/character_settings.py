@@ -99,6 +99,16 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 continue
             is_enabled = bool(frame.get("is_enabled", False))
             slot_state = normalize_slot_state(frame.get("slot_state"), is_enabled)
+            # ⚠️ 슬롯은 **두 축**이다(NAI 공식 구현과 같다).
+            #   · slot_state - 목록의 어느 무리에 있나 (▲/▼ · Cold)
+            #   · is_muted   - 활성 무리 안에서 이번 생성에 나가나 (✔/✘)
+            # 끈 슬롯은 **제자리에 남는다.** C3 을 꺼도 화면에서는 C3 이고 C4 는
+            # C4 다 - 페이로드에서만 C4 가 2번지로 당겨진다.
+            #
+            # 예전에는 축이 하나뿐이라 "끄기" 가 곧 비활성 무리로 보내기였고
+            # (`char_active_N`), 무리를 나누면서 그 조작이 사라져 제자리에서 끌
+            # 방법이 없어졌다(사용자 제보).
+            is_muted = bool(frame.get("is_muted", False))
             frame_uuid = _frame_uuid(frame, create=True)
             if frame.get("uuid") != frame_uuid:
                 migrated = True
@@ -106,7 +116,11 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 "uuid": frame_uuid,
                 "prompt": str(frame.get("prompt") or ""),
                 "uc": str(frame.get("uc") or ""),
-                "is_enabled": slot_state == "active",
+                # `is_enabled` 는 **파생값**이다 - "이 슬롯이 실제로 나가는가".
+                # 읽는 곳이 많은데(조건부·에셋·프리뷰·배지) 뜻이 그대로라서,
+                # 새 축을 여기에 접어 넣으면 기존 독자가 자동으로 옳아진다.
+                "is_enabled": slot_state == "active" and not is_muted,
+                "is_muted": is_muted,
                 "slot_state": slot_state,
                 "return_slot_state": str(frame.get("return_slot_state") or ""),
                 "custom_name": str(frame.get("custom_name") or frame.get("slot_name") or ""),
@@ -282,13 +296,44 @@ def character_positions_for_mode(app_context, mode: str = "NAI",
     """
     try:
         settings = load_character_settings(mode, save_root=_save_root_from_context(app_context))
-        return resolved_character_positions(settings, count=count)
+        return resolved_character_positions(
+            settings, count=count, slot_mask=_conditional_slot_mask(app_context)
+        )
     except Exception:
         return []
 
 
+def _conditional_slot_mask(app_context) -> list[bool] | None:
+    """조건부가 이번 런에 끈 슬롯까지 반영한 마스크. 없으면 None.
+
+    ⚠️ 이것이 좌표 문제의 열쇠다. 조건부 `char_set(N, disabled)` 은 캐릭터 목록을
+    **짧게** 만들어서, 개수만 보면 어느 좌표가 누구 것인지 알 수 없었다 - 그래서
+    사용자가 찍은 자리를 통째로 버리고 AUTO 로 떨어뜨렸다(실측: 3인 중 2번을 끄면
+    1·3번이 자기 자리 대신 중앙·왼쪽으로 갔다).
+
+    런타임이 남기는 `_conditional_character_slots` 는 **프레임과 위치가 1:1** 이고
+    `active` 를 담는다(`conditional_prompt_runtime._character_slots`). 그러니
+    버릴 필요가 없다 - 살아남은 슬롯이 자기 좌표를 그대로 들고 가면 된다.
+    """
+    context = getattr(app_context, "current_prompt_context", None)
+    metadata = getattr(context, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    slots = metadata.get("_conditional_character_slots")
+    if not isinstance(slots, list) or not slots:
+        return None
+    # `_store_character_overrides` 와 **같은 필터**여야 한다 - 그쪽은 active 이고
+    # 프롬프트가 빈칸이 아닌 슬롯만 내보낸다. 어긋나면 좌표가 한 칸씩 밀린다.
+    return [
+        bool(slot.get("active")) and bool(str(slot.get("prompt") or "").strip())
+        for slot in slots
+        if isinstance(slot, dict)
+    ]
+
+
 def resolved_character_positions(settings: dict | None,
-                                 count: int | None = None) -> list[dict[str, float]]:
+                                 count: int | None = None,
+                                 slot_mask: list[bool] | None = None) -> list[dict[str, float]]:
     """생성 요청이 실제로 보낼 좌표. **어느 모드든 좌표는 나간다.**
 
       · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
@@ -305,19 +350,27 @@ def resolved_character_positions(settings: dict | None,
     파일은 쓰기가 한 번 더 일어나기 전까지 안 고쳐진다). 채워 보내면 사용자가 정한
     자리는 지켜지고, 빈 슬롯만 자동 자리를 받는다.
 
-    ⚠️ 다만 `count` 가 활성 슬롯 수와 다르면 **AUTO 배치로 통째로 떨어진다.**
-    조건부 override 는 캐릭터를 제 목록으로 갈아끼우면서 슬롯 식별자를 남기지
-    않으므로(`_conditional_character_override` 는 character_ids 를 안 준다),
-    어느 좌표가 어느 캐릭터의 것인지 알 길이 없다. 순서로 짐작해 어긋난 좌표를
+    `slot_mask` 는 **전체 프레임과 위치가 1:1** 인 불리언 목록이다(조건부가 이번
+    런에 끈 슬롯까지 반영). 주면 그것으로 나갈 슬롯을 고르므로, 살아남은 슬롯이
+    **자기 좌표를 그대로** 들고 간다 - C3 을 끄면 C1·C4 는 원래 찍어 둔 자리를
+    지키고 C4 만 페이로드 2번지로 당겨진다(NAI 공식 구현과 같다).
+
+    ⚠️ 마스크가 없고 `count` 도 슬롯 수와 어긋나면 그때만 AUTO 배치로 떨어진다 -
+    어느 좌표가 누구 것인지 알 길이 없는 경우다. 순서로 짐작해 어긋난 좌표를
     보내느니 개수가 맞는 자동 배치가 낫다.
-    ⚠️ 이때 화면(사용자 좌표)과 실제로 나가는 것(자동 배치)이 갈린다 - 알려진 틈.
     """
     normalized = normalize_character_settings(settings)
-    frames = active_character_frames(normalized)
+    all_frames = normalized.get("character_frames", []) or []
+    if slot_mask is not None and len(slot_mask) == len(all_frames):
+        # 마스크가 프레임과 자릿수까지 맞을 때만 믿는다. 어긋난 마스크를 쓰면
+        # 좌표가 한 칸씩 밀려 **틀린 자리**로 나간다 - 차라리 옛 길로 간다.
+        frames = [frame for frame, keep in zip(all_frames, slot_mask) if keep]
+    else:
+        frames = active_character_frames(normalized)
     total = len(frames) if count is None else max(0, int(count))
     if not total:
         return []
-    # RAND 는 개수만 알면 된다 - 슬롯과 좌표를 짝지을 일이 없어 조건부 override 로
+    # RAND 는 개수만 알면 된다 - 슬롯과 좌표를 짝지을 일이 없어 조건부로
     # 인원이 달라져도 그대로 굽는다(CUSTOM 과 달리 어긋날 좌표가 없다).
     if normalized.get("position_mode") == "random":
         return random_character_positions(total)
@@ -428,10 +481,12 @@ def active_character_frames(settings: dict | None) -> list[dict]:
     normalized = normalize_character_settings(settings)
     if not normalized.get("is_active"):
         return []
+    # ⚠️ 끈 슬롯(`is_muted`)은 활성 무리에 **남아 있지만 나가지 않는다.**
+    #    `is_enabled` 가 그 둘을 이미 접어 둔 파생값이라 그것만 보면 된다.
     return [
         frame
         for frame in normalized.get("character_frames", [])
-        if frame.get("slot_state") == "active" and str(frame.get("prompt") or "").strip()
+        if frame.get("is_enabled") and str(frame.get("prompt") or "").strip()
     ]
 
 
@@ -1241,7 +1296,15 @@ def character_state_from_settings(
         characters.append({
             "id": idx + 1,
             "slot_uuid": str(_frame_uuid(frame) or ""),
+            # 셋을 다 보낸다 - 화면이 구분해 그려야 한다.
+            #   active  = 활성 무리에 있나 (자리)
+            #   muted   = 그 안에서 꺼져 있나 (✘)
+            #   enabled = 실제로 나가나 (active and not muted)
+            # 끈 슬롯을 비활성 슬롯과 같게 그리면 "제자리에 남는다" 는 사실이
+            # 화면에서 사라진다 - 그게 이 기능의 요점이다.
             "active": slot_state == "active",
+            "muted": bool(frame.get("is_muted")),
+            "enabled": bool(frame.get("is_enabled")),
             "slot_state": slot_state,
             "return_slot_state": str(frame.get("return_slot_state") or ""),
             "custom_name": str(frame.get("custom_name") or ""),

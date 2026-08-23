@@ -259,6 +259,20 @@ class HeadlessCharacterService:
                 frame["is_enabled"] = active
                 frame["slot_state"] = "active" if active else "inactive"
                 invalidate_snapshot = True
+        elif key.startswith("char_muted_"):
+            # ✔/✘ - **제자리에서** 끈다. 무리는 그대로라 번호도 그대로다.
+            # `char_active_N`(옛 체크박스)과 다르다 - 그건 무리를 옮긴다.
+            index = context._index_from_key(key, "char_muted_")
+            if index is not None:
+                frame = self.ensure_frame(frames, index)
+                muted = context._coerce_bool(value)
+                frame["is_muted"] = muted
+                # 파생값도 함께 세운다 - 정규화가 다시 세우지만, 이 사이에
+                # 프레임을 읽는 경로(스냅샷 무효화 판정 등)가 옛 값을 본다.
+                frame["is_enabled"] = (
+                    str(frame.get("slot_state") or "") == "active" and not muted
+                )
+                invalidate_snapshot = True
         elif key.startswith("char_slot_state_"):
             index = context._index_from_key(key, "char_slot_state_")
             if index is not None:

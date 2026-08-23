@@ -22412,10 +22412,28 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   font-size: 8px; line-height: 1;
   transition: transform 0.16s ease, background 0.16s ease;
 }
-.cq-box.is-open > .cq-head .cq-caret,
-.cq-slot.is-open > .cq-slot-head .cq-caret {
+.cq-box.is-open > .cq-head .cq-caret {
   transform: rotate(90deg); background: rgba(124,106,239,0.3);
 }
+/* 슬롯 켬/끔. 캐럿이 있던 자리를 받는다 - 머리줄 전체가 이미 접고 펴므로
+   화살표는 뜻이 없었고, NAI 공식 구현도 그 자리에 켬/끔을 둔다. */
+.cq-slot-en {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-right: 5px; padding: 0; cursor: pointer;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  font-size: 8.5px; line-height: 1;
+  transition: border-color .14s, color .14s, background .14s;
+}
+.cq-slot-en.is-on {
+  border-color: rgba(124,106,239,0.6); color: rgb(178,166,247);
+  background: rgba(124,106,239,0.22);
+}
+.cq-slot-en:hover { border-color: rgba(124,106,239,0.75); color: var(--text-primary); }
+/* 끈 슬롯은 **자리를 지킨 채** 흐려진다 - 비활성 무리로 내려간 것과 구분돼야
+   한다(그쪽은 목록에서 아예 빠진다). */
+.cq-slot.is-muted > .cq-slot-headrow .cq-slot-title { opacity: 0.42; text-decoration: line-through; }
+.cq-slot.is-muted .cq-input { opacity: 0.5; }
 .cq-title, .cq-slot-title {
   flex: 1; min-width: 0; overflow: hidden;
   white-space: nowrap; text-overflow: ellipsis;
@@ -25068,3 +25086,12 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   line-height: 1.5;
 }
 .cond-empty-notice b { color: #ffe9a8; }
+
+/* 메인 캐릭터 패널의 슬롯 켬/끔 체크박스. 라벨 앞자리다(사용자 지정 - 복원). */
+.mod-char-en { display: inline-flex; align-items: center; margin: 0 7px 0 0; cursor: pointer; }
+.mod-char-en input {
+  width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: rgb(124,106,239);
+}
+.mod-char-block.is-muted .mod-char-title { opacity: 0.45; text-decoration: line-through; }
+.mod-char-block.is-muted .mod-char-prompt,
+.mod-char-block.is-muted .mod-char-uc { opacity: 0.5; }

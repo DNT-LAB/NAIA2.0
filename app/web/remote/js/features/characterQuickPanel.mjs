@@ -373,11 +373,21 @@ export function createCharacterQuickPanel({
     // C1 이다. ▼ 도 활성이 하나뿐이면 내주지 않는다 - 내리면 활성이 0이 된다.
     const canRemove = ordinal > 1;
     const canDeactivate = activeCount > 1;
-    return `<div class="cq-slot${isOpen ? ' is-open' : ''}">`
+    // ✔/✘ 가 캐럿 자리를 받는다(사용자 지정). 캐럿은 뜻이 없었다 - 머리줄 전체가
+    // 이미 접고 펴는 버튼이라 화살표는 상태 표시일 뿐이었고, 그 자리가 NAI 공식
+    // 구현에서 켬/끔이 있는 자리다.
+    //
+    // ⚠️ 머리 <button> **바깥**에 둔다. 안에 넣으면 마크업이 깨지고 안쪽을 눌러도
+    //    바깥 토글이 먼저 먹는다(이 파일이 이미 두 번 밟은 함정).
+    const muted = !!character.muted;
+    return `<div class="cq-slot${isOpen ? ' is-open' : ''}${muted ? ' is-muted' : ''}">`
       + `<div class="cq-slot-headrow">`
+      + `<button type="button" class="cq-slot-en${muted ? '' : ' is-on'}"`
+      + ` data-cq-mute="${index}" aria-pressed="${muted ? 'false' : 'true'}"`
+      + ` aria-label="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다'}">`
+      + `${muted ? '✘' : '✔'}</button>`
       + `<button type="button" class="cq-slot-head" data-cq-toggle="${index}"`
       + ` aria-expanded="${isOpen ? 'true' : 'false'}">`
-      + '<span class="cq-caret" aria-hidden="true">▸</span>'
       + `<span class="cq-slot-title" data-cq-label="${index}">`
       + `${escHtml(slotLabel(character, ordinal))}</span></button>`
       + (canDeactivate
@@ -406,8 +416,11 @@ export function createCharacterQuickPanel({
   }
 
   function signature(state) {
+    // ⚠️ muted 도 서명에 넣는다. 빼면 ✔/✘ 를 눌러도 다시 그리지 않아 표시가
+    //    옛 상태에 굳는다(POS 라벨이 CUSTOM 에 굳었던 것과 같은 계열).
     const slots = activeSlots(state)
-      .map(({index}) => [index, openSlots.has(index) ? 1 : 0].join('~'))
+      .map(({index, character}) =>
+        [index, openSlots.has(index) ? 1 : 0, character && character.muted ? 1 : 0].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
     // ⚠️ POS 는 **모드 이름**을 넣는다. 불리언으로 넣으면 CUSTOM->RAND 전환이
@@ -565,6 +578,13 @@ export function createCharacterQuickPanel({
       if (del.disabled) return;
       openSlots.delete(Number(del.dataset.cqDel));
       setModuleParam('character', `remove_character_${del.dataset.cqDel}`, 'true');
+      return;
+    }
+    const mute = event.target.closest('[data-cq-mute]');
+    if (mute) {
+      const index = Number(mute.dataset.cqMute);
+      const now = activeSlots(lastState).find(s => s.index === index);
+      setModuleParam('character', `char_muted_${index}`, String(!(now && now.character.muted)));
       return;
     }
     const toggle = event.target.closest('[data-cq-toggle]');

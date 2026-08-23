@@ -22,6 +22,14 @@ DEFAULT_CONDITIONAL_SETTINGS = {
     "rules_v2": "",
     "editor_mode": "legacy",
     "engine_options": dict(DEFAULT_CONDITIONAL_ENGINE_OPTIONS),
+    # ⚠️ 프리셋 이름은 **모드별로** 기억한다. 규칙 칸이 `rules`(Legacy) / `rules_v2`
+    # (블록 편집기)로 나뉘어 있는데 이름표만 하나면, 모드를 바꿨을 때 규칙은 이쪽
+    # 것인데 이름은 저쪽 것이 뜬다 - "프리셋을 바꿨는데 내용이 안 바뀐다" 로 보인다
+    # (실측 2026-08-23: legacy 복귀 후 규칙은 legacy 인데 이름표는 v2 프리셋).
+    # 모드별로 다른 프리셋을 쓰려는 것이 이 기능의 목적이다(사용자).
+    "active_preset_legacy": None,
+    "active_preset_v2": None,
+    # 옛 단일 키. 읽기 전용 하위호환 - 마이그레이션이 위 둘로 옮긴다.
     "active_preset": None,
     "precedence_schema": PRECEDENCE_SCHEMA,
 }
@@ -130,8 +138,25 @@ def normalize_conditional_settings(raw: Any = None) -> dict[str, Any]:
     editor_mode = str(source.get("editor_mode", settings["editor_mode"]) or "legacy")
     settings["editor_mode"] = editor_mode if editor_mode in {"legacy", "v2"} else "legacy"
     settings["engine_options"] = normalize_conditional_engine_options(source.get("engine_options"))
-    active_preset = source.get("active_preset")
-    settings["active_preset"] = str(active_preset) if active_preset else None
+    def _name(value):
+        return str(value) if value else None
+
+    legacy_name = _name(source.get("active_preset_legacy"))
+    v2_name = _name(source.get("active_preset_v2"))
+    old_name = _name(source.get("active_preset"))
+    # 하위호환: 옛 저장본은 단일 `active_preset` 뿐이다. **지금 모드 쪽으로만**
+    # 옮긴다 - 양쪽에 같은 이름을 넣으면 쓰지도 않은 편집기에 프리셋이 걸린 것처럼
+    # 보인다. 모드별로 다른 프리셋을 쓰려는 것이 이 기능의 목적이므로 더 그렇다.
+    if old_name and not legacy_name and not v2_name:
+        if settings["editor_mode"] == "v2":
+            v2_name = old_name
+        else:
+            legacy_name = old_name
+    settings["active_preset_legacy"] = legacy_name
+    settings["active_preset_v2"] = v2_name
+    # 지금 모드의 이름을 옛 키에도 비춰 둔다 - 이 키를 읽는 곳이 아직 남아 있고,
+    # 저장본을 되돌려 열어도 뜻이 통해야 한다.
+    settings["active_preset"] = v2_name if settings["editor_mode"] == "v2" else legacy_name
     return settings
 
 

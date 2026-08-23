@@ -252,6 +252,9 @@ export function createConditionalPromptPanel({
       rules_v2_book: book,
       engine_options: normalizeEngineOptions(book.engine_options || engineOptions),
       active_preset: state.active_preset || '',
+      // ⚠️ 로컬 상태(낙관적 갱신)에서도 다시 센다. 서버 값만 믿으면 방금 비운 칸이
+      //    에코가 올 때까지 "규칙 있음" 으로 남아 경고가 늦는다.
+      active_rules_empty: !String(activeRules || '').trim(),
       presets: Array.isArray(state.presets) ? state.presets : [],
       can_test_rules: capabilities.test_rules !== undefined
         ? Boolean(capabilities.test_rules)
@@ -703,6 +706,24 @@ export function createConditionalPromptPanel({
       </div>`;
   }
 
+  /** 지금 편집기의 규칙이 비었을 때의 알림.
+   *
+   *  ⚠️ 두 편집기는 규칙 칸을 **따로** 쓴다(모드별로 다른 프리셋을 쓰라는 기능이다).
+   *  그래서 모드를 바꾸면 반대편이 빈 채로 남기 쉬운데, 그 상태에서는 조건부가
+   *  켜져 있어도 **아무 일도 일어나지 않는다** - 생성 결과에서만 드러난다.
+   *  반대편에 규칙이 있으면 그 사실까지 말해 준다(복사는 하지 않는다 - 따로 쓰는
+   *  것이 목적이라 말없이 덮으면 안 된다).
+   */
+  function renderEmptyRulesNotice(m) {
+    if (!m.enabled || !m.active_rules_empty) return '';
+    const otherName = m.editor_mode === 'v2' ? 'Legacy DSL' : 'New Editor';
+    const otherRules = m.editor_mode === 'v2' ? m.rules_legacy : m.rules_v2;
+    const hint = String(otherRules || '').trim()
+      ? ` <b>${escHtml(otherName)}</b> 쪽에는 규칙이 있습니다 — 두 편집기는 규칙을 따로 보관합니다.`
+      : '';
+    return `<div class="cond-empty-notice">이 편집기의 규칙이 비어 있어 <b>조건부가 적용되지 않습니다</b>.${hint}</div>`;
+  }
+
   function renderLegacy(m) {
     const activeRuleKey = 'rules_legacy';
     const activeRules = m.rules_legacy;
@@ -719,6 +740,7 @@ export function createConditionalPromptPanel({
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
         ${m.can_manage_presets && presetPopoverOpen ? renderPresetPane(m) : ''}
+        ${renderEmptyRulesNotice(m)}
         <div class="cond-rules-section">
           <div class="cond-rules-head">
             <div class="mod-section-label">Rules (Legacy DSL)</div>
@@ -831,6 +853,7 @@ export function createConditionalPromptPanel({
       <div class="cond-root cond-v2-editor${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
+        ${renderEmptyRulesNotice(m)}
         <div class="cond-summary-box" id="condSelectedSummary">${escHtml(selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.')}</div>
         ${renderLint(m)}
         <div class="cond-v2-grid">

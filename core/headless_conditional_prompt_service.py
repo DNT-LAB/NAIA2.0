@@ -126,7 +126,15 @@ class HeadlessConditionalPromptService:
             "rules_v2_book": self._rulebook_dict_from_dsl(rules_v2, engine_options),
             "lint": self._lint(active_rules),
             "engine_options": engine_options,
-            "active_preset": str(settings.get("active_preset") or ""),
+            # 프리셋 이름은 모드별이다. 화면은 `active_preset`(지금 모드 것)만 쓰면
+            # 되지만, 양쪽을 함께 보내 두면 "반대편엔 무엇이 걸려 있나" 도 그릴 수 있다.
+            "active_preset": str(settings.get(self._preset_key(settings)) or ""),
+            "active_preset_legacy": str(settings.get("active_preset_legacy") or ""),
+            "active_preset_v2": str(settings.get("active_preset_v2") or ""),
+            # ⚠️ 조건부가 켜져 있는데 **지금 편집기의 규칙이 비어** 있으면 아무 일도
+            #    안 일어난다. 모드별로 규칙을 따로 두는 기능이라 한쪽이 빈 채 남기
+            #    쉽고, 그 상태는 생성 결과에서만 드러난다 - 화면이 말해 줘야 한다.
+            "active_rules_empty": not active_rules.strip(),
             "presets": self._preset_infos(),
             "can_test_rules": True,
             "can_manage_presets": True,
@@ -241,6 +249,18 @@ class HeadlessConditionalPromptService:
     def _write_active_rules(cls, settings: dict[str, Any], dsl: str) -> None:
         settings[cls._rules_key(settings)] = dsl
 
+    # ⚠️ 프리셋 이름도 **모드별**이다. 규칙 칸이 나뉘어 있는데 이름표만 하나면,
+    #    모드를 바꿨을 때 규칙은 이쪽 것인데 이름은 저쪽 것이 뜬다(실측). 모드마다
+    #    다른 프리셋을 쓰려는 것이 이 기능의 목적이라 더 어긋나 보인다.
+    @classmethod
+    def _preset_key(cls, settings: dict[str, Any]) -> str:
+        return "active_preset_v2" if cls._editor_mode(settings) == "v2" else "active_preset_legacy"
+
+    @classmethod
+    def _set_active_preset(cls, settings: dict[str, Any], name: str | None) -> None:
+        settings[cls._preset_key(settings)] = name
+        settings["active_preset"] = name        # 옛 단일 키를 지금 모드로 비춘다
+
     def _apply_rules_v2_book(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         from core.conditional.dsl_serializer import serialize_rulebook
         from core.conditional_prompt_settings import normalize_conditional_engine_options
@@ -325,7 +345,7 @@ class HeadlessConditionalPromptService:
             return self._state_with(messages=[self._toast_message("프리셋 저장 실패: 규칙을 해석할 수 없습니다.", "error")])
 
         storage.save(name, book)
-        settings["active_preset"] = name
+        self._set_active_preset(settings, name)
         if activate:
             self._write_active_rules(settings, serialize_rulebook(book))
             settings["engine_options"] = {
@@ -359,15 +379,22 @@ class HeadlessConditionalPromptService:
             "max_passes": book.max_passes,
             "stop_on_match": book.stop_on_match,
         }
-        settings["active_preset"] = name
+        self._set_active_preset(settings, name)
         store.apply_settings(settings)
         return self._state_with(messages=[self._toast_message(f"조건부 프리셋 로드: {name}", "success")])
 
     def _handle_preset_delete(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         name = text_value.strip()
         if name and self._storage().delete(name):
-            if str(settings.get("active_preset") or "") == name:
-                settings["active_preset"] = None
+            # 지운 이름이 걸려 있던 **모든 모드**에서 뗀다. 한쪽만 떼면 다른 모드가
+            # 없는 프리셋 이름을 계속 내걸고, 그걸 누르면 "찾을 수 없음" 이 뜬다.
+            removed = False
+            for key in ("active_preset_legacy", "active_preset_v2"):
+                if str(settings.get(key) or "") == name:
+                    settings[key] = None
+                    removed = True
+            if removed:
+                self._set_active_preset(settings, settings.get(self._preset_key(settings)))
                 store.apply_settings(settings)
             return self._state_with(messages=[self._toast_message(f"조건부 프리셋 삭제: {name}", "success")])
         return self._state_with(messages=[

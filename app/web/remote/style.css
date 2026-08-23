@@ -25034,3 +25034,17 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   align-items: center;
   justify-content: center;
 }
+
+/* 지금 편집기의 규칙이 비어 조건부가 실제로는 아무 일도 안 할 때. 두 편집기가
+   규칙을 따로 보관하는 구조(모드별 프리셋)라 한쪽이 빈 채 남기 쉽다. */
+.cond-empty-notice {
+  margin: 6px 0 2px;
+  padding: 8px 11px;
+  border: 1px solid rgba(232, 196, 80, 0.45);
+  border-radius: 7px;
+  background: rgba(140, 110, 20, 0.20);
+  color: #f5ecc8;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.cond-empty-notice b { color: #ffe9a8; }

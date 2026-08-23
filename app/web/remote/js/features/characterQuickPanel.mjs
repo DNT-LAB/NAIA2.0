@@ -50,7 +50,11 @@ export function createCharacterQuickPanel({
   let posSelected = null;        // 칩과 원이 **같은** 선택을 본다
   let stageRect = null;          // 진입 시 한 번 잰 무대 기하
   let posDragging = false;       // 끄는 중에는 다시 그리지 않는다
-  let stageRes = null;           // 진입 시점 해상도(편집 중 변경에 흔들리지 않게)
+  // 해상도는 **얼리지 않는다.** 편집 중에 바꾸면 무대가 곧바로 그 비율이 되어야 한다
+  // (사용자 제보). 좌표는 0~1 정규화라 비율이 바뀌어도 원은 제자리를 지킨다 - 예전에
+  // "편집 중 흔들리지 않게" 라며 진입 시점 값으로 고정했는데, 흔들릴 것이 없었다.
+  let stageResWatch = 0;         // 편집 중에만 도는 해상도 감시
+  let lastStageResKey = '';
 
   function host() {
     return document.querySelector('.viewer-wrapper') || document.body;
@@ -83,13 +87,14 @@ export function createCharacterQuickPanel({
    *  배경으로 깐다** - 무대 비율이 곧 해상도 비율이라 1:1 로 맞고, 칩이 몇 줄이
    *  되든 자리만 다시 잡으면 된다.
    *
-   *  "진입 시에만" 이라는 사양은 **해상도**에 대한 것이다(편집 중에 해상도를 바꿔도
-   *  원이 튀지 않아야 한다). 그래서 해상도만 진입 시점 값(`stageRes`)으로 고정한다.
+   *  해상도는 **매번 지금 값을 읽는다.** 편집 중에 바꾸면 무대 비율이 곧바로 따라야
+   *  한다(사용자 제보: 즉석 변경이 반영되지 않았다). 좌표는 0~1 정규화라 비율이
+   *  바뀌어도 원은 제자리를 지킨다.
    *
    *  @param bandBottom 칩 줄이 끝나는 y(뷰포트 기준). 줄이 늘면 무대가 내려간다.
    */
   function measureStage(bandBottom) {
-    const res = stageRes || getResolution();
+    const res = getResolution();
     const img = document.getElementById('preview');
     const shown = !!(img && img.naturalWidth && img.classList.contains('show'));
     // 화면의 그림과 지금 해상도가 같을 때만 그림을 깐다. 비율이 다른 그림 위에
@@ -257,17 +262,43 @@ export function createCharacterQuickPanel({
     document.addEventListener('pointercancel', up);
   }
 
+  function resKey() {
+    const res = getResolution();
+    return res ? `${res.w}x${res.h}` : '';
+  }
+
+  /** 편집 중에만 해상도를 지켜본다.
+   *
+   *  ⚠️ **이벤트로는 못 잡는다.** 해상도가 바뀌는 길이 여럿이다 - 커스텀 셀렉트,
+   *  `Rnd Res`, `Auto Res`, 프리셋, 서버 에코. 그중 하나만 놓쳐도 무대가 옛 비율에
+   *  굳는다(사용자 제보: 즉석 변경이 반영 안 됨). 값 하나를 비교하는 쪽이 확실하다.
+   *  편집을 끝내면 멈추므로 상시 비용은 없다.
+   */
+  function startStageResWatch() {
+    stopStageResWatch();
+    lastStageResKey = resKey();
+    stageResWatch = setInterval(() => {
+      const now = resKey();
+      if (now === lastStageResKey) return;
+      lastStageResKey = now;
+      renderStage();
+    }, 350);
+  }
+
+  function stopStageResWatch() {
+    if (stageResWatch) { clearInterval(stageResWatch); stageResWatch = 0; }
+    lastStageResKey = '';
+  }
+
   function setPosEditing(on) {
     posEditing = !!on;
     if (posEditing) {
       posSelected = null;
-      // 해상도만 진입 시점으로 고정한다 - 편집 중에 바꿔도 원이 튀지 않는다
-      // (사용자 지정). 무대 **자리**는 renderStage 가 매번 실측한다.
-      stageRes = getResolution();
       stageRect = null;
+      startStageResWatch();
     } else {
       stageRect = null;
-      stageRes = null;
+      stopStageResWatch();
       if (chips) { chips.classList.remove('open'); chips.innerHTML = ''; }
     }
     const viewer = document.getElementById('resultViewer');

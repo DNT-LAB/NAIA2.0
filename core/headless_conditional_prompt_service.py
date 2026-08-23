@@ -116,6 +116,14 @@ class HeadlessConditionalPromptService:
         rules_v2 = str(settings.get("rules_v2") or "")
         active_rules = self._active_rules(settings)
         engine_options = normalize_conditional_engine_options(settings.get("engine_options") or {})
+        # ⚠️ v2 book 에는 **v2 칸의 옵션**을 실어야 한다. 지금 모드의 미러를 쓰면
+        #    Legacy 에 서 있는 동안 v2 book 이 Legacy 의 max_passes 를 달고 나가고,
+        #    프런트가 그 book 을 되돌려 보내는 순간(모드 전환 직후 저장 등) 잘못된
+        #    값이 v2 칸에 영구히 박힌다(Codex 지적, 실행으로 확인: legacy=3/v2=7 인데
+        #    book 이 3 으로 나왔다).
+        engine_options_v2 = normalize_conditional_engine_options(
+            settings.get("engine_options_v2") or {}
+        )
         return self.context._module_state_payload("conditional_prompt", {
             "enabled": bool(settings.get("enabled", False)),
             "editor_mode": editor_mode,
@@ -123,7 +131,7 @@ class HeadlessConditionalPromptService:
             "active_rules": active_rules,
             "rules_legacy": rules_legacy,
             "rules_v2": rules_v2,
-            "rules_v2_book": self._rulebook_dict_from_dsl(rules_v2, engine_options),
+            "rules_v2_book": self._rulebook_dict_from_dsl(rules_v2, engine_options_v2),
             "lint": self._lint(active_rules),
             "engine_options": engine_options,
             # 프리셋 이름은 모드별이다. 화면은 `active_preset`(지금 모드 것)만 쓰면
@@ -444,17 +452,20 @@ class HeadlessConditionalPromptService:
         for other in ("NAI", "WEBUI", "COMFYUI"):
             if other == current:
                 continue
+            # ⚠️ 쓰기까지 감싼다. 프리셋 파일은 **이미 지워진 뒤**라, 여기서 예외가
+            #    올라가면 삭제는 성공했는데 요청은 실패로 보이고 사용자는 다시 지울
+            #    수도 없다(Codex 지적). 한 모드가 실패해도 나머지는 계속 뗀다.
             try:
                 settings = store.collect_settings(other)
-            except Exception:
-                continue
-            changed = False
-            for key in ("active_preset_legacy", "active_preset_v2", "active_preset"):
-                if str(settings.get(key) or "") == name:
-                    settings[key] = None
-                    changed = True
-            if changed:
-                store.apply_settings(settings, other)
+                changed = False
+                for key in ("active_preset_legacy", "active_preset_v2", "active_preset"):
+                    if str(settings.get(key) or "") == name:
+                        settings[key] = None
+                        changed = True
+                if changed:
+                    store.apply_settings(settings, other)
+            except Exception as exc:
+                print(f"Remote: conditional preset label cleanup failed for {other}: {exc}")
 
     # ------------------------------------------------------------------
     # Simulation

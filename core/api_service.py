@@ -1011,7 +1011,28 @@ class APIService:
                                     char_source = "EventStreamFreeze"
                                     characters = frozen_chars["characters"]
                                     ucs = frozen_chars.get("uc", [])
-                                    character_positions = []
+                                    # ⚠️ 좌표는 **얼리지 않는다.** 얼리는 것은 캐릭터
+                                    #    (와일드카드 전개 리터럴)이고, 좌표는 굴림의
+                                    #    일부가 아니라 슬롯에 붙은 정적 속성이다 -
+                                    #    아래 HeadlessSettings 분기와 같은 함수로 지금
+                                    #    설정에서 읽는다.
+                                    #
+                                    #    예전에는 여기서 빈 목록을 넣었다(2026-06 스토리
+                                    #    텔러 도입분). 그때는 `use_coords` 가 하드코딩
+                                    #    false 라 아무 차이가 없었지만, 지금은 이 경로로
+                                    #    나가는 생성만 **좌표가 통째로 사라진다** -
+                                    #    AUTO·CUSTOM 은 배치를 잃고 RAND 는 "요청마다
+                                    #    새로 굽는다" 는 규약 자체를 못 지킨다
+                                    #    (Codex 지적, 코드로 확인).
+                                    #    ⚠️ `_char_mode` 는 아래에서야 정해진다 - 여기서
+                                    #    쓰면 NameError 다. 같은 값을 직접 읽는다.
+                                    from core.character_settings import character_positions_for_mode
+
+                                    character_positions = character_positions_for_mode(
+                                        self.app_context,
+                                        params.get("api_mode", "NAI"),
+                                        count=len(characters),
+                                    )
                                     character_ids = list(frozen_chars.get("character_ids") or [])
                         # 5) Late Binding — 메인 UI CharacterModule (직접 생성).
                         # Desktop archive only; absent in headless. The live desktop

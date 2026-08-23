@@ -1655,7 +1655,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260823-cond-permode2')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260823-cond-permode4')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,

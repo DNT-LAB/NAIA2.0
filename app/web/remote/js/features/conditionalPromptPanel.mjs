@@ -596,14 +596,23 @@ export function createConditionalPromptPanel({
       //    화면의 텍스트가 곧 프리셋이라 손댈 것이 없는데, 예전에는 여기서 v2 book
       //    을 직렬화해 `rules_legacy` 에 덮어써 사용자가 방금 친 규칙을 지웠다.
       if (book) {
-        currentState.rules_v2_book = normalizeBook(book);
-        const dsl = serializeRulebook(currentState.rules_v2_book);
-        if (currentState.editor_mode === 'v2') currentState.rules_v2 = dsl;
-        else currentState.rules_legacy = dsl;
+        const applied = normalizeBook(book);
+        const dsl = serializeRulebook(applied);
+        if (currentState.editor_mode === 'v2') {
+          currentState.rules_v2_book = applied;
+          currentState.rules_v2 = dsl;
+          selectedRuleId = null;
+        } else {
+          // ⚠️ Legacy 에서는 **`rules_v2_book` 을 건드리지 않는다.** 곧바로 부르는
+          //    `updateDynamicText()` 가 그 book 을 `rules_v2` 로 다시 구워 넣으므로,
+          //    여기서 덮으면 반대편 v2 초안이 통째로 지워진다 - 빈 프리셋 만들기가
+          //    특히 위험했다(빈 book 이 v2 를 비우고, 그 상태로 v2 에서 저장하면
+          //    원래 v2 프리셋이 빈 내용으로 박힌다. Codex 지적).
+          currentState.rules_legacy = dsl;
+        }
         currentState.rules = dsl;
         currentState.active_rules = dsl;
-        currentState.engine_options = normalizeEngineOptions(currentState.rules_v2_book.engine_options);
-        selectedRuleId = null;
+        currentState.engine_options = normalizeEngineOptions(applied.engine_options);
       }
     }
     dirty = false;
@@ -747,8 +756,10 @@ export function createConditionalPromptPanel({
     //
     //    프리셋은 **두 모드가 함께 쓴다**(분리하지 않는다). 저장 형식이 RuleBook
     //    JSON 하나이고, 두 모드 다 `parse_rulebook`/`serialize_rulebook` 을 지나므로
-    //    한쪽에서 만든 프리셋이 다른 쪽에서 그대로 열린다(실측: legacy 규칙 5개 중
-    //    4개가 구조화 블록으로 파싱, 나머지 1개는 raw 로 원문 보존, 왕복 바이트 동일).
+    //    한쪽에서 만든 프리셋이 다른 쪽에서 그대로 열린다.
+    //    ⚠️ 다만 **바이트 단위 원문 보존은 아니다**(정정, 실측): 왕복하면
+    //    `(!hair)`->`(*hair)`, 앞뒤 공백 제거, `a|b&c`->`a|(b&c)` 로 정규화된다.
+    //    보존되는 것은 **의미**다.
     moduleBody.innerHTML = `
       <div class="cond-root${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
@@ -773,6 +784,7 @@ export function createConditionalPromptPanel({
           <div class="mod-section-label">Execution Log</div>
           <div class="mod-log-viewer" id="condLogViewer">${formatLog(m.log)}</div>
         </div>
+        ${renderPresetDialog()}
       </div>`;
   }
 

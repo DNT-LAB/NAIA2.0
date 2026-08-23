@@ -295,7 +295,10 @@ def main() -> int:
 
     analysis_text = json.dumps(analysis, ensure_ascii=False, indent=2)
     if not args.apply:
-        print(f"\n  [dry-run] analysis 예상 {len(analysis_text.encode('utf-8'))/1024/1024:.1f} MB"
+        # ⚠️ 둘 다 **CRLF 기준**으로 재야 한다. `json.dumps` 는 LF 라 그대로 비교하면
+        #    줄 수(약 170만)만큼 작아 보여 **추가를 했는데 파일이 줄어드는 것처럼** 나온다.
+        predicted = len(analysis_text.encode("utf-8")) + analysis_text.count("\n")
+        print(f"\n  [dry-run] analysis 예상 {predicted/1024/1024:.1f} MB"
               f" (현재 {ANALYSIS_PATH.stat().st_size/1024/1024:.1f} MB)"
               f" · dict {'갱신 예정' if dict_text else '변경 없음'}")
         return 0

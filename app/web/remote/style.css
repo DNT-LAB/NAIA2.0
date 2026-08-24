@@ -23254,6 +23254,11 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
    골라서 옮기는 것 자체는 막지 않는다: 다시 켤 때 자리가 맞아 있어야 하니까. */
 .cq-dot.is-muted { opacity: 0.5; }
 .cq-dot.is-muted.is-on { opacity: 0.75; }
+/* POS 버튼 hover 엿보기(사용자 지정). 편집이 아니라 **보기만** 하는 자리라 아무것도
+   못 누르게 둔다 - 손을 떼면 사라지므로 누를 틈도 없고, 눌려서 편집으로 새면 놀란다.
+   ⚠️ 무대 자체와 원 **둘 다** 막아야 한다. 원은 버튼이라 부모만 막으면 다시 살아난다. */
+.cq-stage.is-peek, .cq-stage.is-peek .cq-dot { pointer-events: none; cursor: default; }
+.cq-stage.is-peek { transition: opacity 0.12s ease; }
 /* 무대 위 캐릭터 칩. 4명을 넘으면 줄을 바꾼다(flex-wrap). */
 /* 띠 = [종료 버튼][칩들…]. 칩은 자리가 모자라면 아래로 접히고, 그만큼 무대가
    내려간다(JS 가 띠의 실제 높이를 재서 무대를 놓는다). */

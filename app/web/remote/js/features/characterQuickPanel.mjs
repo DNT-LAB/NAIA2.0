@@ -49,6 +49,9 @@ export function createCharacterQuickPanel({
   let stage = null;              // POS 편집 무대(원이 놓이는 판)
   let chips = null;              // 무대 위 캐릭터 칩 줄
   let posEditing = false;
+  // POS 버튼에 손을 올린 동안만 배치를 겹쳐 보여 준다(사용자 지정) - 편집에 들어가지
+  // 않고 "지금 누가 어디 서 있나" 만 확인하는 자리다.
+  let posPeek = false;
   let posSelected = null;        // 칩과 원이 **같은** 선택을 본다
   let stageRect = null;          // 진입 시 한 번 잰 무대 기하
   let posDragging = false;       // 끄는 중에는 다시 그리지 않는다
@@ -126,15 +129,21 @@ export function createCharacterQuickPanel({
 
   function renderStage() {
     if (posDragging) return;      // 끌고 있는 원을 교체하지 않는다
-    if (!posEditing) {
-      if (stage) { stage.classList.remove('open'); stage.innerHTML = ''; }
+    if (!posEditing && !posPeek) {
+      if (stage) { stage.classList.remove('open', 'is-peek'); stage.innerHTML = ''; }
       if (chips) { chips.classList.remove('open'); chips.innerHTML = ''; }
       return;
     }
+    // **엿보기**: POS 버튼에 손을 올린 동안만 배치를 겹쳐 보여 준다(사용자 지정).
+    // 편집에 들어가지 않고 "지금 누가 어디 서 있나" 만 확인하는 자리라, 띠도 안 그리고
+    // 아무것도 못 누르게 둔다 - 손을 떼면 사라진다.
+    const peek = !posEditing;
     const slots = activeSlots(lastState);
     // 줄이 몇 줄이 될지는 그려 봐야 안다 - 띠를 **먼저** 그려 실제 높이를 재고,
     // 무대는 그 아래 남는 자리에 세운다(사용자 지정: 줄이 넘으면 자동 조절).
-    const bandBottom = renderBand(slots);
+    // 엿보기에는 띠가 없으므로 뷰어 위쪽에서 바로 시작한다.
+    const viewerBox = document.getElementById('resultViewer')?.getBoundingClientRect();
+    const bandBottom = peek ? ((viewerBox ? viewerBox.top : 0) + 4) : renderBand(slots);
     const box = stageRect = measureStage(bandBottom);
     if (!box) return;
     ensureStage();
@@ -148,9 +157,12 @@ export function createCharacterQuickPanel({
       backgroundImage: box.src ? `url("${box.src}")` : '',
     });
     stage.classList.toggle('is-overlay', !!box.overlay);
-    stage.innerHTML = gridSvg() + slots.map(({character, index}, i) => {
+    stage.classList.toggle('is-peek', peek);
+    // 엿보기에서는 격자를 늘 깐다 - 어디쯤인지 가늠할 눈금이 없으면 원만 떠 있어
+    // "저게 그림의 어느 지점인가" 를 알 수 없다(사용자가 보여 준 그림도 격자가 있다).
+    stage.innerHTML = (peek ? gridSvg(true) : gridSvg()) + slots.map(({character, index}, i) => {
       const p = character.position || { x: 0.5, y: 0.5 };
-      const on = posSelected === index;
+      const on = !peek && posSelected === index;
       // 무대의 동그라미도 같이 흐려진다 - 띠만 흐리면 무대에서는 여전히 구분이 안 된다.
       const muted = !!(character && character.muted);
       return `<button type="button" class="cq-dot${on ? ' is-on' : ''}${muted ? ' is-muted' : ''}"`
@@ -177,8 +189,10 @@ export function createCharacterQuickPanel({
    *     대신 선은 그만큼 얇아지므로 `vector-effect: non-scaling-stroke` 로 굵기와
    *     dash 간격을 화면 픽셀에 고정한다 - 안 하면 무대가 작을수록 선이 사라진다.
    */
-  function gridSvg() {
-    if (!posGrid) return '';
+  /** `force` 면 Show Grid 설정과 무관하게 그린다 - 엿보기에는 눈금이 있어야
+   *  원이 그림의 어느 지점인지 읽힌다(사용자 지정). */
+  function gridSvg(force) {
+    if (!posGrid && !force) return '';
     const res = getResolution();
     const w = Number(res?.w) > 0 ? Math.trunc(res.w) : 0;
     const h = Number(res?.h) > 0 ? Math.trunc(res.h) : 0;
@@ -346,8 +360,21 @@ export function createCharacterQuickPanel({
     lastStageResKey = '';
   }
 
+  /** POS 버튼 hover 엿보기를 켜고 끈다.
+   *
+   * ⚠️ 편집 중에는 아무것도 하지 않는다 - 이미 무대가 떠 있고, 엿보기가 끼어들면
+   *    골라 둔 원의 선택이 풀린다.
+   */
+  function setPosPeek(on) {
+    const next = !!on && !posEditing;
+    if (posPeek === next) return;
+    posPeek = next;
+    renderStage();
+  }
+
   function setPosEditing(on) {
     posEditing = !!on;
+    if (posEditing) posPeek = false;
     if (posEditing) {
       posSelected = null;
       stageRect = null;
@@ -384,6 +411,18 @@ export function createCharacterQuickPanel({
     });
     mount.addEventListener('click', onClick);
     mount.addEventListener('input', onInput);
+    // POS 버튼 hover 엿보기(사용자 지정). ⚠️ `mouseover`/`mouseout` 을 쓴다 -
+    // `mouseenter` 는 버블링이 없어 위임이 안 되는데, 이 버튼은 다시 그릴 때마다 새
+    // 요소가 되므로 위임이 아니면 매 렌더마다 다시 걸어야 한다.
+    mount.addEventListener('mouseover', event => {
+      if (event.target.closest?.('[data-cq-posedit]')) setPosPeek(true);
+    });
+    mount.addEventListener('mouseout', event => {
+      if (!event.target.closest?.('[data-cq-posedit]')) return;
+      // 버튼 **안에서** 자식으로 옮겨 다니는 것은 나간 것이 아니다.
+      if (event.relatedTarget?.closest?.('[data-cq-posedit]')) return;
+      setPosPeek(false);
+    });
     // 강조 미러는 textarea 와 같이 스크롤해야 한다. `scroll` 은 버블링하지 않으므로
     // **캡처 단계**로 받는다 - 안 그러면 긴 프롬프트에서 띠가 글자와 어긋난다.
     mount.addEventListener('scroll', event => {
@@ -1029,7 +1068,7 @@ export function createCharacterQuickPanel({
       setModuleParam('character', 'position_mode', next);
       return;
     }
-    if (event.target.closest('[data-cq-posedit]')) { setPosEditing(true); return; }
+    if (event.target.closest('[data-cq-posedit]')) { setPosPeek(false); setPosEditing(true); return; }
     if (event.target.closest('[data-cq-posdone]')) { setPosEditing(false); return; }
     if (event.target.closest('[data-cq-manage]')) { openCharacterModule(); return; }
     if (event.target.closest('[data-cq-add]')) {

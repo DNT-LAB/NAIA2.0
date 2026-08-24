@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -1040,6 +1041,70 @@ def _replay_character_snapshot_rolls(app_context, snapshot: dict, *, reuse_curre
                 history.setdefault(key, []).append(str(roll.get("value") or ""))
 
 
+# Connect 공유 구간 마커. NAI 체계가 바뀌며 캐릭터 슬롯이 메인 프롬프트 역할까지
+# 겸하게 되어, 슬롯 전체가 아니라 **일부만** 물려주고 싶은 경우가 생겼다(사용자 지정).
+#
+#   &connect: girl, original, black hair &end, extra prompts: 123, 456
+#   └──────────── 물려주는 구간 ────────────┘  └─── 이 슬롯에만 남는다 ───┘
+#
+# 마커가 없으면 예전처럼 전체를 물려준다(하위 호환).
+#
+# ⚠️ 닫는 기호가 맨 `&` 가 아니라 `&end` 인 이유: `&` 하나로 닫으면 태그 안쪽의 `&`
+#    (예: `preset:clothes/a&b&`)와 구분하려고 "태그를 끝내는 & 만 인정" 같은 추론을
+#    해야 하고, 그 추론은 앞으로 들어올 문법마다 다시 틀린다. 낱말로 닫으면 그 문제가
+#    통째로 사라진다(사용자 지정).
+_CONNECT_OPEN_RE = re.compile(r"&connect\s*:?", re.IGNORECASE)
+_CONNECT_CLOSE_RE = re.compile(r"&end", re.IGNORECASE)
+
+
+def _split_connect_region(text: str) -> tuple[str, str, str]:
+    """`(앞, 공유구간, 뒤)`. 마커가 없으면 `("", 전체, "")` — 전체가 공유다.
+
+    `&end` 가 없으면 `&connect` 부터 끝까지가 공유 구간이다(뒤를 안 쓴 경우).
+    """
+    source = str(text or "")
+    opened = _CONNECT_OPEN_RE.search(source)
+    if not opened:
+        return "", source, ""
+    head = source[:opened.start()]
+    rest = source[opened.end():]
+    closed = _CONNECT_CLOSE_RE.search(rest)
+    if not closed:
+        return head, rest, ""
+    return head, rest[:closed.start()], rest[closed.end():]
+
+
+def _expand_connect_field(
+    raw: str,
+    inherited: str,
+    processor: WildcardProcessor | None,
+    context: PromptContext,
+    slot,
+    slot_label,
+) -> tuple[str, str]:
+    """한 칸(프롬프트 또는 UC)을 전개해 `(이 슬롯의 최종값, 아래로 물려줄 값)` 을 낸다.
+
+    ⚠️ 세 토막을 **원문 순서대로** 전개한다. 공유 구간만 따로 전개하면 순차
+       와일드카드(`__*wc__`)·종속(`__$m:s__`)의 카운터가 원문과 다른 순서로 돌아
+       화면에 보이는 것과 다른 값이 나온다.
+
+    물려주는 값 = **물려받은 것 + 공유 구간**. 물려받은 것은 언제나 흘려보낸다 —
+    그게 이 사슬이 나르는 "캐릭터" 자체이고, 마커는 *내가 더한 것 중 무엇을 공유할지*
+    만 정한다(마커가 없으면 더한 것 전부).
+    """
+    head, shared, tail = _split_connect_region(raw)
+    expand = lambda text: _expand_character_text(  # noqa: E731
+        text, processor, context, slot=slot, slot_label=slot_label)
+    expanded_head = expand(head)
+    expanded_shared = expand(shared)
+    expanded_tail = expand(tail)
+    own = _join_character_text(_join_character_text(expanded_head, expanded_shared), expanded_tail)
+    return (
+        _join_character_text(inherited, own),
+        _join_character_text(inherited, expanded_shared),
+    )
+
+
 def _join_character_text(base: str, own: str) -> str:
     """물려받은 텍스트 뒤에 이 슬롯이 직접 쓴 것을 잇는다. 한쪽이 비면 다른 쪽 그대로."""
     left = str(base or "").strip().strip(",").strip()
@@ -1164,20 +1229,16 @@ def character_params_from_settings(
             # 두 칸이 "추가할" 칸이 된다). 고정된 원본을 물려받으면 그 고정값이 온다 —
             # 원본이 어느 분기로 확정됐든 `expanded_by_uuid` 에는 결과만 담기기 때문.
             base_prompt, base_uc = expanded_by_uuid.get(str(frame.get("connect_to") or ""), ("", ""))
-            prompt = _join_character_text(base_prompt, _expand_character_text(
-                frame.get("prompt", ""),
-                processor,
-                context,
-                slot=slot,
-                slot_label=slot_index,
-            ))
-            uc = _join_character_text(base_uc, _expand_character_text(
-                frame.get("uc", ""),
-                processor,
-                context,
-                slot=slot,
-                slot_label=slot_index,
-            ))
+            prompt, share_prompt = _expand_connect_field(
+                frame.get("prompt", ""), base_prompt, processor, context, slot, slot_index)
+            uc, share_uc = _expand_connect_field(
+                frame.get("uc", ""), base_uc, processor, context, slot, slot_index)
+            expanded_by_uuid[slot] = (share_prompt, share_uc)
+            if prompt:
+                characters.append(prompt)
+                ucs.append(uc)
+                character_ids.append(slot)
+            continue
         expanded_by_uuid[slot] = (prompt, uc)
         if prompt:
             characters.append(prompt)

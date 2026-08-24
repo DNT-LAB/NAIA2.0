@@ -19257,6 +19257,21 @@ body.detached-module .mod-grid-3 {
   max-width: 104px; padding: 0; outline: none;
 }
 .mod-char-connect select option { background: #1a1a26; color: var(--text-primary); }
+/* 원본 슬롯 배지. 몇 개가 물려받는지 + 구간을 쓰는 중인지. 원본에는 Connect
+   컨트롤이 없어 자기가 원본이라는 사실을 알 길이 없었다. */
+.mod-char-source {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 22px; padding: 0 7px;
+  border: 1px solid rgba(106,191,123,0.45); border-radius: 4px;
+  background: rgba(38,74,48,0.35); color: #b6dcc1;
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1;
+  cursor: help; white-space: nowrap;
+}
+/* 구간을 잡아 둔 원본은 한눈에 구분한다 — 전체를 주는 것과 뜻이 다르다. */
+.mod-char-source.has-region {
+  border-color: var(--hint-cross-search);
+  background: rgba(90,80,30,0.32); color: #ecdfa6;
+}
 /* 연결된 슬롯은 물려받은 몸통이 따로 있다 — 두 칸이 '추가분' 이라는 것을 테두리로
    말한다. 색은 Connect 칩과 같은 계열이라 눈이 둘을 하나로 묶는다. */
 .mod-char-block.is-connected .mod-char-prompt,

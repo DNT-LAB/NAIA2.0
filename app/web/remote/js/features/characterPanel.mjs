@@ -342,10 +342,27 @@ export function createCharacterPanel({
     }).join('');
     const on = !!current;
     return `<label class="mod-char-connect${on ? ' is-on' : ''}"`
-      + ` data-naia-guide="Connect - 앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n연결 중에는 아래 두 칸이 '추가할' 칸이 됩니다.">`
+      + ` data-naia-guide="Connect - 앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n연결 중에는 아래 두 칸이 '추가할' 칸이 됩니다.\\n\\n원본의 일부만 물려받고 싶으면 그 슬롯에 &connect: ... &end 로 구간을 잡으세요.">`
       + `<span class="mod-char-connect-tag">${on ? '&#128279;' : 'Connect'}</span>`
       + `<select onchange="setModuleParam('character','char_connect_${index}',this.value)">`
       + `<option value=""${on ? '' : ' selected'}>연결 없음</option>${options}</select></label>`;
+  }
+
+  /** 이 슬롯을 물려받는 슬롯이 몇 개인가. 원본 쪽에는 Connect 컨트롤이 없어서
+   *  (앞을 가리킬 대상이 없으므로) **자기가 원본이라는 사실을 알 길이 없었다.**
+   *  구간 마커(`&connect: … &end`)를 쓰는 자리도 원본이라 여기서 함께 안내한다. */
+  function connectSourceBadge(character, activeSlots) {
+    const uuid = String(character.slot_uuid || '');
+    if (!character.active || !uuid) return '';
+    const takers = (activeSlots || []).filter(item => String(item.character.connect_to || '') === uuid);
+    if (!takers.length) return '';
+    const hasRegion = /&connect/i.test(String(character.prompt || '') + String(character.uc || ''));
+    return `<span class="mod-char-source${hasRegion ? ' has-region' : ''}"`
+      + ` data-naia-guide="이 슬롯을 ${takers.length}개가 물려받고 있습니다.`
+      + `\\n\\n${hasRegion
+          ? '&connect: … &end 구간만 물려주는 중입니다. 구간 밖은 이 슬롯에만 남습니다.'
+          : '지금은 전체를 물려줍니다. 일부만 주려면 프롬프트에 &connect: … &end 로 구간을 잡으세요.'}">`
+      + `&#8681; ${takers.length}</span>`;
   }
 
   function renderWorkingSlot(character, index, totalCount, ordinal, lastActive, activeSlots) {
@@ -380,6 +397,7 @@ export function createCharacterPanel({
           ${enableBox}
           <span class="mod-char-title">${label}</span>
           <div class="mod-char-card-actions">
+            ${connectSourceBadge(character, activeSlots)}
             ${connectControl(character, index, ordinal, activeSlots || [])}
             ${moveBtn}
             <button class="mod-btn-square" aria-label="Move to Cold" data-naia-title="Cold 보관함으로" onclick="setCharacterSlotState(${index}, 'cold')">-</button>

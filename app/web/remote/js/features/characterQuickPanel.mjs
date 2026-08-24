@@ -367,8 +367,14 @@ export function createCharacterQuickPanel({
     mount.className = 'cq-float';
     // ⚠️ 포커스를 뺏지 않는다. 상자 안을 누르면 편집 중인 칸이 blur 되어
     //    입력이 커밋되고 다시 그려진다 - 캐럿이 튄다.
+    //
+    // ⚠️ 다만 **폼 컨트롤은 빼야 한다.** `preventDefault()` 는 네이티브 select 의
+    //    드롭다운이 열리는 것까지 막는다 - 호버 툴팁은 뜨는데 눌러도 아무 일이
+    //    없어서 "버튼이 고장났다" 로 보인다(사용자 제보: Connect 가 안 눌림).
+    //    예외는 **select 까지만** 넓힌다. 체크박스(활성화)는 preventDefault 로도
+    //    정상 동작하므로 넣을 이유가 없고, 넣으면 포커스를 뺏어 위 규칙을 깬다.
     mount.addEventListener('mousedown', event => {
-      if (!event.target.closest('textarea')) event.preventDefault();
+      if (!event.target.closest('textarea, select')) event.preventDefault();
     });
     mount.addEventListener('click', onClick);
     mount.addEventListener('input', onInput);

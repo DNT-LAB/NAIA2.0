@@ -66,7 +66,7 @@ DICT_PATH = REPO_ROOT / "danbooru_character.py"
 
 # `color_kinds_raw` 는 폐기된 신호다(가짓수 게이트를 쓰던 시절). 옛 증분 파일에 남아
 # 있을 수 있으니 계속 걷어낸다 — 28MB 배포본에 쓸모없는 필드가 실리면 안 된다.
-DROP_FIELDS = ("key_clothes", "color_kinds_raw")
+DROP_FIELDS = ("key_clothes", "color_kinds_raw", "built_from")
 MARKER = "# --- increment"
 
 # 비인간·아바타(개체가 아닌 것)를 가려내는 문턱 — **최고 색 비율**이다.
@@ -137,8 +137,9 @@ def flatten_names(analysis: dict) -> set[str]:
     return names
 
 
-def scan_corpus(targets: set[str], dirs: list[Path]) -> tuple[Counter, Counter, Counter]:
-    """대상 캐릭터의 (전체 출현, 1girl+solo 행, 1boy+solo 행).
+def scan_corpus(targets: set[str],
+                dirs: list[Path]) -> tuple[Counter, Counter, Counter, Counter]:
+    """대상 캐릭터의 (전체 출현, 1girl+solo 행, 1boy+solo 행, **최신 버킷 출현**).
 
     `total` 은 **필터 없이** 센다 - `character_dict_count` 의 빈도는 걸러지지 않은
     출현이다(예: ouro kronii 7,253 vs 1girl solo 3,620).
@@ -147,11 +148,13 @@ def scan_corpus(targets: set[str], dirs: list[Path]) -> tuple[Counter, Counter, 
     잣대가 다르면 판정이 무의미해진다 - 모듈 서두 참조.
     """
     files = sorted((DATA_DIR / "tags").glob("tags_*.parquet"))
+    base_count = len(files)
     for d in dirs:
         files += sorted(d.glob("tags_*.parquet"))
     total: Counter = Counter()
     girl: Counter = Counter()
     boy: Counter = Counter()
+    recent: Counter = Counter()
     for i, path in enumerate(files, 1):
         df = pd.read_parquet(path, columns=["character", "general"])
         general = df["general"].fillna("").astype(str)
@@ -168,13 +171,15 @@ def scan_corpus(targets: set[str], dirs: list[Path]) -> tuple[Counter, Counter, 
                 name = name.strip()
                 if name and name in targets:
                     total[name] += 1
+                    if i > base_count:
+                        recent[name] += 1
                     if ok and g:
                         girl[name] += 1
                     if ok and b:
                         boy[name] += 1
         if i % 25 == 0 or i == len(files):
             print(f"  [스캔] {i}/{len(files)}", flush=True)
-    return total, girl, boy
+    return total, girl, boy, recent
 
 
 def build_dict_text(entries: list[tuple[str, int]]) -> str | None:
@@ -217,6 +222,17 @@ def main() -> int:
     ap.add_argument("--min-girl-ratio", type=float, default=10.0,
                     help="`solo` 기준 1girl/1boy 비율이 이 값 미만이면 analysis 제외 "
                          "(기본 10 - 추가분 전수 분포에서 고름)")
+    ap.add_argument("--min-boy-ratio", type=float, default=1.0,
+                    help="`1boy` 로 만든 엔트리의 boy/girl 비율 문턱 (기본 1.0). "
+                         "여성 쪽(10)과 다른 이유는 코퍼스가 여성으로 기울어 있어서다 "
+                         "- floor_for() 주석 참조")
+    ap.add_argument("--fix-misgendered", action="store_true",
+                    help="이미 있는 엔트리라도 **성별이 틀렸으면** 이번 프로필로 "
+                         "교체한다. 기본은 끔 - 추가만 하는 것이 이 도구의 안전 규약이다")
+    ap.add_argument("--keep-stale-tags", action="store_true",
+                    help="최신 버킷에 0행인 태그도 사전에 넣는다(옛 동작). "
+                         "기본은 제외 - 개명된 옛 표기가 자동완성에 들어가면 "
+                         "같은 인물이 둘로 보이고 죽은 태그로 생성하게 된다")
     ap.add_argument("--min-pct-color", type=float, default=MIN_PCT_COLOR,
                     help=f"이 비율을 넘는 색이 하나도 없으면 개체가 아니라고 보아 "
                          f"analysis 에서 제외 (기본 {MIN_PCT_COLOR} - 빌더의 "
@@ -246,27 +262,114 @@ def main() -> int:
     print(f"analysis 추가 후보 {len(need_analysis):,}종 / dict 추가 후보 {len(need_dict):,}종"
           f"  (합집합 {len(targets):,})\n")
 
-    total, girl, boy = scan_corpus(targets, [Path(c) for c in args.corpus])
+    total, girl, boy, recent = scan_corpus(targets, [Path(c) for c in args.corpus])
+
+    # ⚠️ 판정의 **방향**은 프로필이 어느 필터에서 나왔는지에 달렸다.
+    #    `1girl` 로 만든 엔트리는 girl/boy 비를, `1boy` 로 만든 것은 boy/girl 비를 본다.
+    #    방향을 고정하면 남성 프로필이 전부 "여성이 아니다" 로 걸려 통째로 사라진다.
+    built = {}
+    for members in profile.values():
+        if isinstance(members, dict):
+            for name, data in members.items():
+                if isinstance(data, dict):
+                    built[name.strip()] = str(data.get("built_from") or "1girl")
 
     def ratio(name: str) -> float:
-        b = boy.get(name, 0)
-        return float("inf") if b == 0 else girl.get(name, 0) / b
+        """이 엔트리가 주장하는 성별 쪽 / 반대쪽. 클수록 그 성별이 확실하다."""
+        want_girl = built.get(name, "1girl") == "1girl"
+        mine = girl.get(name, 0) if want_girl else boy.get(name, 0)
+        other = boy.get(name, 0) if want_girl else girl.get(name, 0)
+        return float("inf") if other == 0 else mine / other
 
-    rejected = {n for n in targets if ratio(n) < args.min_girl_ratio}
-    print(f"\n[성별 실측] `solo` 기준 1girl/1boy 비율 < {args.min_girl_ratio}"
-          f" 인 것 {len(rejected):,}종 - analysis 에서 제외(사전에는 넣는다)")
+    def floor_for(name: str) -> float:
+        """방향마다 임계가 다르다 - **코퍼스가 여성으로 크게 기울어 있기 때문**이다.
+
+        실측:
+            남성 엔트리 1,339종 중 `1girl solo` 가 0인 것  29.9%
+            여성 엔트리 2,632종 중 `1boy solo` 가 0인 것    81.1%
+
+        남성 캐릭터는 젠더벤드 그림이 흔해 `1girl solo` 행이 꽤 쌓인다. 여성 쪽
+        임계(10)를 그대로 쓰면 **진짜 남성이 6.5% 나 걸린다**(fujimaru ritsuka
+        (male) 은 boy 263 / girl 158 인데도 탈락했다).
+
+        남성 방향 분포에서 다시 골랐다(1,339종): 비율 1.0 미만 28종(2.1%)은 전부
+        **양성 아바타·직업군**이다 - byleth/corrin/alear/robin (fire emblem 성별
+        선택), ragnarok online 직업군 전체, warrior of light (ff14),
+        employee (project moon). 1.0 위부터는 terry bogard(1.66) ·
+        hanzo (overwatch)(2.73) · genji(3.23) 같은 진짜 남성이다.
+        """
+        return (args.min_girl_ratio if built.get(name, "1girl") == "1girl"
+                else args.min_boy_ratio)
+
+    rejected = {n for n in targets if ratio(n) < floor_for(n)}
+    n_boy = sum(1 for n in targets if built.get(n, "1girl") == "1boy")
+    print(f"\n[성별 실측] `solo` 기준 자기 성별/반대 성별 비율이 임계 미만인 것"
+          f" {len(rejected):,}종 - analysis 에서 제외(사전에는 넣는다)"
+          f"   [임계 girl {args.min_girl_ratio} / boy {args.min_boy_ratio}"
+          f" · 1boy 로 만든 엔트리 {n_boy:,}종]")
     for n in sorted(rejected, key=ratio)[:10]:
         print(f"    girl {girl.get(n,0):>5,} / boy {boy.get(n,0):>5,}"
-              f"  = {ratio(n):>5.2f}  {n}")
+              f"  = {ratio(n):>5.2f}  ({built.get(n,'1girl')})  {n}")
 
     # ── analysis 병합 ────────────────────────────────────────────────────
+    def entry_gender(name: str) -> str:
+        return "boy" if built.get(name.strip()) == "1boy" else "girl"
+
+    def target_of(group: str, name: str, tree: dict) -> tuple[str, str, dict] | None:
+        """배포본에서 같은 이름을 찾아 `(그룹, 이름, 엔트리)` 를 준다.
+
+        ⚠️ **그룹이 다를 수 있다.** 배포본은 `employee (project moon)` 을
+        `lobotomy corporation` 아래 두는데 이번 빌드는 `project moon` 으로 잡았다.
+        새 그룹에 쓰면 같은 캐릭터가 두 작품에 **중복**된다 - 반드시 원래 자리에 쓴다.
+        """
+        hit = (tree.get(group) or {}).get(name)
+        if isinstance(hit, dict):
+            return group, name, hit
+        low = name.strip().lower()
+        for g, members2 in tree.items():
+            if not isinstance(members2, dict):
+                continue
+            for n2, d2 in members2.items():
+                if str(n2).strip().lower() == low and isinstance(d2, dict):
+                    return g, n2, d2
+        return None
+
     added = suppressed = 0
+    fixed: list[tuple[str, str, str, str]] = []
     for group, members in profile.items():
         if not isinstance(members, dict):
             continue
         for name, data in members.items():
             key = name.strip().lower()
-            if key in have or name.strip() in rejected:
+            if key in have:
+                # ⚠️ **이미 있는 엔트리는 손대지 않는 것이 원칙**이다(멱등·안전).
+                #    딱 한 가지 예외: 성별이 틀린 채로 배포돼 있고, 이번 실행이
+                #    **반대 성별로 다시 만든** 프로필을 손에 들고 있는 경우다.
+                #    실측: `1boy` 로 만들 수 있는 1,290종 중 76종이 배포본에서
+                #    girl 이고, 그중 69종에 가슴 데이터가 붙어 있다
+                #    (zhongli `large breasts 31.4%` · link · kirby · kuzuha).
+                #    `1girl` 필터가 젠더벤드 그림을 물어 온 흔적이다.
+                #
+                #    양성 아바타(ragnarok 직업군 · warrior of light)는 성별 게이트를
+                #    통과하지 못하므로 여기 오지 않는다 - 그쪽은 여성 프로필이
+                #    틀린 것이 아니라 여성 판을 묘사한 것이다.
+                if not (args.fix_misgendered and name.strip() not in rejected):
+                    continue
+                found = target_of(group, name, analysis)
+                if found is None:
+                    continue
+                tgt_group, tgt_name, target = found
+                if target.get("gender") == entry_gender(name):
+                    continue
+                if looks_nonhuman(data, args.min_pct_color):
+                    continue
+                fixed.append((tgt_group, tgt_name, target.get("gender"), entry_gender(name)))
+                new_entry = {k: v for k, v in data.items() if k not in DROP_FIELDS}
+                new_entry["gender"] = entry_gender(name)
+                new_entry.setdefault("aliases", target.get("aliases") or [tgt_name])
+                analysis[tgt_group][tgt_name] = new_entry
+                continue
+            if name.strip() in rejected:
                 continue
             # 색이 '아무 여자의 평균' 이면 이 엔트리는 개체가 아니라 같이 그려진
             # 사람을 묘사한다. 부분 억제(색·가슴만 끄기)도 해봤지만 characteristics
@@ -276,18 +379,55 @@ def main() -> int:
                 suppressed += 1
                 continue
             entry = {k: v for k, v in data.items() if k not in DROP_FIELDS}
-            entry["gender"] = "girl"
+            # ⚠️ 예전에는 "girl" 을 박았다 - 필터가 `1girl` 뿐이었기 때문이다.
+            #    이제 `1boy` 로 만든 엔트리가 있으므로 만들어진 출처를 따른다.
+            entry["gender"] = "boy" if built.get(name.strip()) == "1boy" else "girl"
             entry.setdefault("aliases", [name])
             analysis.setdefault(group, {})[name] = entry
             have.add(key)
             added += 1
     print(f"\n[analysis] 추가 {added:,}종 -> 총 {len(have):,}종")
+    if fixed:
+        print(f"  ★ 성별이 틀려 교체한 기존 엔트리 {len(fixed):,}종 "
+              f"(--fix-misgendered)")
+        for group, name, was, now in fixed[:10]:
+            print(f"      {name[:38]:<38} [{group[:18]}]  {was} -> {now}")
     print(f"  개체가 아니라고 보아 제외 {suppressed:,}종"
           f"  ({args.min_pct_color}% 를 넘는 색이 하나도 없음)")
 
     # ── dict 병합 (아직 쓰지 않는다) ─────────────────────────────────────
-    new_entries = sorted(((n, total.get(n, 0)) for n in need_dict if total.get(n, 0) > 0),
-                         key=lambda kv: -kv[1])
+    # ⚠️ **'사전에 없다' 가 곧 '추가해야 한다' 가 아니다.** Danbooru 가 태그를 개명하면
+    #    옛 표기가 코퍼스에 잔뜩 남지만 신규 그림에는 안 붙는다. 그것을 자동완성에
+    #    넣으면 같은 인물이 둘로 보이고, 사용자가 **죽은 태그로 생성**하게 된다.
+    #
+    #    실측(전수조사 800종): 신 버킷(2025/09~2026/06) 0행인 것이 131종.
+    #      todoroki shouto  구1,576 / 신0     <- 죽은 표기
+    #      todoroki shoto   구701  / 신353    <- 현행(이미 사전에 있다)
+    #    상위 15 중 13개가 hololive 번호식 의상 태그였다(3rd/2nd/5th costume).
+    #    `costume` 태그 자체는 살아 있고(신 27,147회) **서술식으로 개명**됐다 -
+    #    `nekomata okayu (gyaru)` 가 구0/신161 로 새로 등장한 것이 증거다.
+    #
+    #    판정은 **문자열 유사도가 아니라 시기 분포**로 한다. difflib 0.86 으로는
+    #    lohen<-xilonen · flins<-lisa 같은 무관한 신규 캐릭터가 쏟아진다.
+    stale: list[tuple[str, int]] = []
+    if args.corpus and not args.keep_stale_tags:
+        fresh = []
+        for n in need_dict:
+            if total.get(n, 0) <= 0:
+                continue
+            if recent.get(n, 0) == 0:
+                stale.append((n, total.get(n, 0)))
+            else:
+                fresh.append((n, total.get(n, 0)))
+        new_entries = sorted(fresh, key=lambda kv: -kv[1])
+    else:
+        new_entries = sorted(((n, total.get(n, 0)) for n in need_dict if total.get(n, 0) > 0),
+                             key=lambda kv: -kv[1])
+    if stale:
+        print(f"\n[dict] 폐기 태그로 보아 제외 {len(stale):,}종  "
+              f"(최신 버킷 0행 - 개명됐거나 더 이상 쓰이지 않는다)")
+        for tag, cnt in sorted(stale, key=lambda kv: -kv[1])[:8]:
+            print(f"    구 {cnt:>7,} / 신 0   {tag}")
     print(f"\n[dict] 추가 {len(new_entries):,}종  (빈도는 필터 없는 전수 출현)")
     for tag, cnt in new_entries[:8]:
         print(f"    {cnt:>7,}  {tag}")

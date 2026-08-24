@@ -20,14 +20,23 @@
 
 의상/헤어 변형(alternate)이 섞이면 "주 구성요소" 가 흐려지기 때문이다.
 
+⚠️ `--gender boy` 로 같은 파이프라인을 `1boy` 에도 돌린다. 남성 캐릭터는 위 필터
+   때문에 **구조적으로 프로필을 가질 수 없었다**(전수조사: 자동완성에 없는 800종 중
+   boy 195종). 남성은 `breast_size` 를 만들지 않는다(사용자 지시).
+
+⚠️ `solo` 인데 `character` 에 이름이 2개 이상인 행이 16.93% 있다. 대부분은 같은
+   인물의 변형 태깅이라 통째로 버리면 의상 변형을 잃는다 - **변형을 접은 뒤**
+   남는 인물이 2명 이상인 행만 버린다(`apply_filter` 참조).
+
     python tools/build_character_profile_increment.py --out <dir> \\
-        [--min-rows 50] [--top-n 30] [--include-known] [--limit-buckets N]
+        [--gender girl|boy] [--min-rows 50] [--top-n 30] [--include-known]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -91,20 +100,53 @@ def bucket_files(extra: list[Path]) -> list[Path]:
     return files
 
 
-def apply_filter(df: pd.DataFrame) -> pd.DataFrame:
-    """`1girl` ∧ `solo` ∧ ~alternate ∧ ~cosplay.
+# 괄호·콜론 한정자를 벗겨 '기본 이름' 을 얻는다 — 변형 태깅을 접기 위한 것이다.
+#   `yuuka (track) (blue archive)` -> `yuuka`
+#   `lucia: dawn (punishing: gray raven)` -> `lucia`
+_PAREN = re.compile(r"\s*\([^()]*\)")
+
+
+def base_name(name: str) -> str:
+    prev = None
+    out = str(name or "").strip().lower()
+    while prev != out:                      # 중첩 괄호를 반복해서 벗긴다
+        prev = out
+        out = _PAREN.sub("", out).strip()
+    if ":" in out:
+        out = out.split(":", 1)[0].strip()
+    return out
+
+
+def apply_filter(df: pd.DataFrame, person_tag: str = "1girl",
+                 exclude_multi: bool = True) -> pd.DataFrame:
+    """`<person_tag>` ∧ `solo` ∧ ~alternate ∧ ~cosplay [∧ 인물 1명].
 
     태그는 `, ` 로 결합돼 있다. 온전한 태그 판정은 양끝을 감싸서 하고,
     alternate/cosplay 는 **부분문자열**로 본다(원본과 같은 의미:
     `alternate costume`·`alternate hairstyle`·`cosplay` 계열을 전부 거른다).
+
+    ⚠️ `solo` 인데 `character` 컬럼에 이름이 2개 이상인 행이 **16.93%** 있다
+       (실측 tags_100). 대부분은 오염이 아니라 **같은 인물의 변형 태깅**이다:
+
+           yuuka (blue archive), yuuka (track) (blue archive)   같은 인물
+           maya (kancolle), shimakaze (kancolle)                 진짜 두 명
+
+       통째로 버리면 의상 변형을 대량으로 잃으므로, **변형을 접은 뒤** 남는 인물이
+       2명 이상인 행만 버린다. 그런 행의 태그는 둘 중 누구의 것인지 알 수 없어
+       프로필을 오염시킨다.
     """
     general = df["general"].fillna("").astype(str)
     padded = ", " + general + ", "
-    keep = padded.str.contains(", 1girl, ", regex=False)
+    keep = padded.str.contains(f", {person_tag}, ", regex=False)
     keep &= padded.str.contains(", solo, ", regex=False)
     keep &= ~general.str.contains("alternate", regex=False)
     keep &= ~general.str.contains("cosplay", regex=False)
-    return df[keep]
+    out = df[keep]
+    if exclude_multi and len(out):
+        people = out["character"].fillna("").astype(str).map(
+            lambda v: len({base_name(n) for n in split_names(v) if base_name(n)}))
+        out = out[people <= 1]
+    return out
 
 
 def split_names(value) -> list[str]:
@@ -138,6 +180,15 @@ def main() -> int:
                     help="personal_color 최소 비율 (기본 30 = 원본 역산값)")
     ap.add_argument("--min-pct-char", type=float, default=20.0,
                     help="characteristics 최소 비율 (기본 20 = 원본 역산값)")
+    # ⚠️ 남성 캐릭터는 `1girl` 필터 때문에 **구조적으로 프로필을 가질 수 없었다**
+    #    (전수조사: 자동완성에 없는 800종 중 boy 195종). 같은 파이프라인을 `1boy` 로
+    #    한 번 더 돌려 만든다. 가슴 분포는 남성에서 뜻이 없어 아예 조사하지 않는다
+    #    (사용자 지시) - 넣으면 여성과 같이 그려진 그림의 값이 딸려 들어온다.
+    ap.add_argument("--gender", choices=("girl", "boy"), default="girl",
+                    help="어느 인물 태그로 거를지 (girl=1girl / boy=1boy). "
+                         "boy 는 breast_size 를 만들지 않는다")
+    ap.add_argument("--keep-multi-character-rows", action="store_true",
+                    help="변형을 접어도 인물이 2명 이상인 행을 버리지 않는다(옛 동작)")
     ap.add_argument("--include-known", action="store_true",
                     help="이미 색인된 캐릭터도 포함(기본은 미색인만)")
     ap.add_argument("--limit-buckets", type=int, default=0,
@@ -154,6 +205,10 @@ def main() -> int:
           f" / clothes {len(classify['clothes']):,}")
     print(f"[기존 색인] character_dict_count {len(known):,}종")
 
+    person_tag = "1girl" if args.gender == "girl" else "1boy"
+    exclude_multi = not args.keep_multi_character_rows
+    # 가슴 분포는 여성 프로필에만 뜻이 있다(사용자 지시).
+    want_breast = args.gender == "girl"
     files = bucket_files([Path(c) for c in args.corpus])
     if args.limit_buckets:
         files = files[:args.limit_buckets]
@@ -167,7 +222,7 @@ def main() -> int:
     row_counts: Counter = Counter()
     total = kept = 0
     for i, path in enumerate(files, 1):
-        df = apply_filter(pd.read_parquet(path, columns=cols))
+        df = apply_filter(pd.read_parquet(path, columns=cols), person_tag, exclude_multi)
         total += pq.ParquetFile(path).metadata.num_rows
         kept += len(df)
         for value in df["character"]:
@@ -181,7 +236,8 @@ def main() -> int:
     targets = qualified if args.include_known else {n for n in qualified
                                                     if n.strip().lower() not in known}
     print(f"\n[필터] {total:,}행 -> {kept:,}행 ({kept/max(1,total)*100:.2f}%)"
-          f"  `1girl`∧`solo`∧~alternate∧~cosplay")
+          f"  `{person_tag}`∧`solo`∧~alternate∧~cosplay"
+          + ("∧인물1명" if exclude_multi else ""))
     # ⚠️ `targets` 로 미색인 수를 세면 안 된다 - --include-known 이면 전체가 들어와
     #    "자격 N종 중 미색인 N종" 이라는 거짓말이 찍힌다. 항상 `qualified` 로 센다.
     n_new = sum(1 for n in qualified if n.strip().lower() not in known)
@@ -199,14 +255,14 @@ def main() -> int:
     breast: dict[str, Counter] = defaultdict(Counter)
     rated_rows: Counter = Counter()
     for i, path in enumerate(files, 1):
-        df = apply_filter(pd.read_parquet(path, columns=cols))
+        df = apply_filter(pd.read_parquet(path, columns=cols), person_tag, exclude_multi)
         for value, cp, general, rating in zip(df["character"], df["copyright"],
                                               df["general"], df["rating"]):
             names = [n for n in split_names(value) if n in targets]
             if not names:
                 continue
             tags = [t.strip() for t in str(general or "").split(",") if t.strip()]
-            row_breast = BREAST_SET.intersection(tags)
+            row_breast = BREAST_SET.intersection(tags) if want_breast else set()
             cp_names = split_names(cp)
             is_sqe = str(rating) in RATINGS_SQE
             for name in names:
@@ -246,7 +302,13 @@ def main() -> int:
                 continue
             if len(bucket) < args.top_n:
                 bucket.append(item)
+        # 어느 인물 필터로 만든 엔트리인지 남긴다. `merge` 가 이 값으로 성별 판정의
+        # **방향**을 정한다(girl 이면 girl/boy 비, boy 면 boy/girl 비). 플래그를 따로
+        # 넘기게 하면 파일과 플래그가 어긋났을 때 조용히 반대로 판정한다.
+        entry["built_from"] = person_tag
         # 가슴 크기는 characteristics 에서 빼고 별도 필드로 (원본 add_breast_size 규약).
+        # ⚠️ `--gender boy` 는 애초에 모으지 않지만(want_breast), characteristics 에서
+        #    빼는 것은 양쪽 다 해야 한다 - 남성 그림에도 `flat chest` 가 붙는다.
         entry["characteristics"] = [e for e in entry["characteristics"]
                                     if e["tag"] not in BREAST_SET]
         rated = rated_rows.get(name, 0)

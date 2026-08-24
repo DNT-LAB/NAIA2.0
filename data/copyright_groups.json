@@ -602,7 +602,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "apollo justice",
+        "aliases": [
+          "apollo justice"
+        ]
+      },
+      {
+        "name": "barok van zieks",
+        "aliases": [
+          "barok van zieks"
+        ]
+      },
+      {
+        "name": "dick gumshoe",
+        "aliases": [
+          "dick gumshoe"
+        ]
+      },
+      {
+        "name": "kazuma asogi",
+        "aliases": [
+          "kazuma asogi"
+        ]
+      },
+      {
+        "name": "miles edgeworth",
+        "aliases": [
+          "miles edgeworth"
+        ]
+      },
+      {
+        "name": "phoenix wright",
+        "aliases": [
+          "phoenix wright"
+        ]
+      }
+    ]
   },
   "acfun": {
     "girl": [
@@ -1326,7 +1363,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ivan (alien stage)",
+        "aliases": [
+          "ivan (alien stage)"
+        ]
+      },
+      {
+        "name": "luka (alien stage)",
+        "aliases": [
+          "luka (alien stage)"
+        ]
+      },
+      {
+        "name": "till (alien stage)",
+        "aliases": [
+          "till (alien stage)"
+        ]
+      }
+    ]
   },
   "amaetai hi wa soba ni ite": {
     "girl": [
@@ -1874,7 +1930,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "king (aotu world)",
+        "aliases": [
+          "king (aotu world)"
+        ]
+      },
+      {
+        "name": "pius (aotu world)",
+        "aliases": [
+          "pius (aotu world)"
+        ]
+      },
+      {
+        "name": "ray (aotu world)",
+        "aliases": [
+          "ray (aotu world)"
+        ]
+      },
+      {
+        "name": "xander (aotu world)",
+        "aliases": [
+          "xander (aotu world)"
+        ]
+      }
+    ]
   },
   "apex legends": {
     "girl": [
@@ -4041,7 +4122,224 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aak (arknights)",
+        "aliases": [
+          "aak (arknights)"
+        ]
+      },
+      {
+        "name": "ansel (arknights)",
+        "aliases": [
+          "ansel (arknights)"
+        ]
+      },
+      {
+        "name": "arene (arknights)",
+        "aliases": [
+          "arene (arknights)"
+        ]
+      },
+      {
+        "name": "ayerscarpe (arknights)",
+        "aliases": [
+          "ayerscarpe (arknights)"
+        ]
+      },
+      {
+        "name": "chong yue (arknights)",
+        "aliases": [
+          "chong yue (arknights)"
+        ]
+      },
+      {
+        "name": "chongyue (arknights)",
+        "aliases": [
+          "chongyue (arknights)"
+        ]
+      },
+      {
+        "name": "ebenholz (arknights)",
+        "aliases": [
+          "ebenholz (arknights)"
+        ]
+      },
+      {
+        "name": "elysium (arknights)",
+        "aliases": [
+          "elysium (arknights)"
+        ]
+      },
+      {
+        "name": "enforcer (arknights)",
+        "aliases": [
+          "enforcer (arknights)"
+        ]
+      },
+      {
+        "name": "ethan (arknights)",
+        "aliases": [
+          "ethan (arknights)"
+        ]
+      },
+      {
+        "name": "executor (arknights)",
+        "aliases": [
+          "executor (arknights)"
+        ]
+      },
+      {
+        "name": "flamebringer (arknights)",
+        "aliases": [
+          "flamebringer (arknights)"
+        ]
+      },
+      {
+        "name": "hellagur (arknights)",
+        "aliases": [
+          "hellagur (arknights)"
+        ]
+      },
+      {
+        "name": "hung (arknights)",
+        "aliases": [
+          "hung (arknights)"
+        ]
+      },
+      {
+        "name": "jaye (arknights)",
+        "aliases": [
+          "jaye (arknights)"
+        ]
+      },
+      {
+        "name": "lee (arknights)",
+        "aliases": [
+          "lee (arknights)"
+        ]
+      },
+      {
+        "name": "leonhardt (arknights)",
+        "aliases": [
+          "leonhardt (arknights)"
+        ]
+      },
+      {
+        "name": "logos (arknights)",
+        "aliases": [
+          "logos (arknights)"
+        ]
+      },
+      {
+        "name": "lumen (arknights)",
+        "aliases": [
+          "lumen (arknights)"
+        ]
+      },
+      {
+        "name": "matterhorn (arknights)",
+        "aliases": [
+          "matterhorn (arknights)"
+        ]
+      },
+      {
+        "name": "mizuki (arknights)",
+        "aliases": [
+          "mizuki (arknights)"
+        ]
+      },
+      {
+        "name": "mlynar (arknights)",
+        "aliases": [
+          "mlynar (arknights)"
+        ]
+      },
+      {
+        "name": "mountain (arknights)",
+        "aliases": [
+          "mountain (arknights)"
+        ]
+      },
+      {
+        "name": "passenger (arknights)",
+        "aliases": [
+          "passenger (arknights)"
+        ]
+      },
+      {
+        "name": "phantom (arknights)",
+        "aliases": [
+          "phantom (arknights)"
+        ]
+      },
+      {
+        "name": "silverash (arknights)",
+        "aliases": [
+          "silverash (arknights)"
+        ]
+      },
+      {
+        "name": "spot (arknights)",
+        "aliases": [
+          "spot (arknights)"
+        ]
+      },
+      {
+        "name": "tequila (arknights)",
+        "aliases": [
+          "tequila (arknights)"
+        ]
+      },
+      {
+        "name": "tequila (cardwinner) (arknights)",
+        "aliases": [
+          "tequila (cardwinner) (arknights)"
+        ]
+      },
+      {
+        "name": "thorns (arknights)",
+        "aliases": [
+          "thorns (arknights)"
+        ]
+      },
+      {
+        "name": "ulpianus (arknights)",
+        "aliases": [
+          "ulpianus (arknights)"
+        ]
+      },
+      {
+        "name": "vigil (arknights)",
+        "aliases": [
+          "vigil (arknights)"
+        ]
+      },
+      {
+        "name": "wang (arknights)",
+        "aliases": [
+          "wang (arknights)"
+        ]
+      },
+      {
+        "name": "yi (arknights)",
+        "aliases": [
+          "yi (arknights)"
+        ]
+      },
+      {
+        "name": "yu (arknights)",
+        "aliases": [
+          "yu (arknights)"
+        ]
+      },
+      {
+        "name": "zuo le (arknights)",
+        "aliases": [
+          "zuo le (arknights)"
+        ]
+      }
+    ]
   },
   "armored core": {
     "girl": [
@@ -4688,7 +4986,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "china (hetalia)",
+        "aliases": [
+          "china (hetalia)"
+        ]
+      },
+      {
+        "name": "france (hetalia)",
+        "aliases": [
+          "france (hetalia)"
+        ]
+      }
+    ]
   },
   "azumanga daioh": {
     "girl": [
@@ -7028,7 +7339,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "griffith (berserk)",
+        "aliases": [
+          "griffith (berserk)"
+        ]
+      },
+      {
+        "name": "guts (berserk)",
+        "aliases": [
+          "guts (berserk)"
+        ]
+      }
+    ]
   },
   "big hero 6": {
     "girl": [
@@ -7337,7 +7661,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "asta (black clover)",
+        "aliases": [
+          "asta (black clover)"
+        ]
+      },
+      {
+        "name": "yami sukehiro",
+        "aliases": [
+          "yami sukehiro"
+        ]
+      }
+    ]
   },
   "black lagoon": {
     "girl": [
@@ -7815,7 +8152,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "giselle gewelle",
+        "aliases": [
+          "giselle gewelle"
+        ]
+      },
+      {
+        "name": "grimmjow jaegerjaquez",
+        "aliases": [
+          "grimmjow jaegerjaquez"
+        ]
+      },
+      {
+        "name": "hirako shinji",
+        "aliases": [
+          "hirako shinji"
+        ]
+      },
+      {
+        "name": "hitsugaya toushirou",
+        "aliases": [
+          "hitsugaya toushirou"
+        ]
+      },
+      {
+        "name": "kurosaki ichigo",
+        "aliases": [
+          "kurosaki ichigo"
+        ]
+      },
+      {
+        "name": "ulquiorra cifer",
+        "aliases": [
+          "ulquiorra cifer"
+        ]
+      }
+    ]
   },
   "blend s": {
     "girl": [
@@ -7838,7 +8212,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kanzaki hideri",
+        "aliases": [
+          "kanzaki hideri"
+        ]
+      }
+    ]
   },
   "blood+": {
     "girl": [
@@ -9898,7 +10279,92 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aizawa shota",
+        "aliases": [
+          "aizawa shota"
+        ]
+      },
+      {
+        "name": "all might",
+        "aliases": [
+          "all might"
+        ]
+      },
+      {
+        "name": "dabi (boku no hero academia)",
+        "aliases": [
+          "dabi (boku no hero academia)"
+        ]
+      },
+      {
+        "name": "endeavor (boku no hero academia)",
+        "aliases": [
+          "endeavor (boku no hero academia)"
+        ]
+      },
+      {
+        "name": "eraser head (boku no hero academia)",
+        "aliases": [
+          "eraser head (boku no hero academia)"
+        ]
+      },
+      {
+        "name": "hawks (boku no hero academia)",
+        "aliases": [
+          "hawks (boku no hero academia)"
+        ]
+      },
+      {
+        "name": "kirishima eijiro",
+        "aliases": [
+          "kirishima eijiro"
+        ]
+      },
+      {
+        "name": "kirishima eijirou",
+        "aliases": [
+          "kirishima eijirou"
+        ]
+      },
+      {
+        "name": "overhaul (boku no hero academia)",
+        "aliases": [
+          "overhaul (boku no hero academia)"
+        ]
+      },
+      {
+        "name": "shigaraki tomura",
+        "aliases": [
+          "shigaraki tomura"
+        ]
+      },
+      {
+        "name": "shinsou hitoshi",
+        "aliases": [
+          "shinsou hitoshi"
+        ]
+      },
+      {
+        "name": "todoroki shoto",
+        "aliases": [
+          "todoroki shoto"
+        ]
+      },
+      {
+        "name": "todoroki shouto",
+        "aliases": [
+          "todoroki shouto"
+        ]
+      },
+      {
+        "name": "togata mirio",
+        "aliases": [
+          "togata mirio"
+        ]
+      }
+    ]
   },
   "boku no kanojo sensei": {
     "girl": [
@@ -10283,7 +10749,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "akutagawa ryuunosuke (bungou stray dogs)",
+        "aliases": [
+          "akutagawa ryuunosuke (bungou stray dogs)"
+        ]
+      },
+      {
+        "name": "dazai osamu (bungou stray dogs)",
+        "aliases": [
+          "dazai osamu (bungou stray dogs)"
+        ]
+      },
+      {
+        "name": "nakahara chuuya",
+        "aliases": [
+          "nakahara chuuya"
+        ]
+      },
+      {
+        "name": "nakahara chuuya (bungou stray dogs)",
+        "aliases": [
+          "nakahara chuuya (bungou stray dogs)"
+        ]
+      }
+    ]
   },
   "bunny garden": {
     "girl": [
@@ -10556,7 +11047,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "li syaoran",
+        "aliases": [
+          "li syaoran"
+        ]
+      }
+    ]
   },
   "cardfight!! vanguard": {
     "girl": [
@@ -10590,7 +11088,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "alucard (castlevania)",
+        "aliases": [
+          "alucard (castlevania)"
+        ]
+      },
+      {
+        "name": "richter belmont",
+        "aliases": [
+          "richter belmont"
+        ]
+      }
+    ]
   },
   "catherine (game)": {
     "girl": [
@@ -10664,7 +11175,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "takahashi amato",
+        "aliases": [
+          "takahashi amato"
+        ]
+      }
+    ]
   },
   "chainsaw man": {
     "girl": [
@@ -10789,7 +11307,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "angel devil (chainsaw man)",
+        "aliases": [
+          "angel devil (chainsaw man)"
+        ]
+      },
+      {
+        "name": "denji (chainsaw man)",
+        "aliases": [
+          "denji (chainsaw man)"
+        ]
+      },
+      {
+        "name": "hayakawa aki",
+        "aliases": [
+          "hayakawa aki"
+        ]
+      },
+      {
+        "name": "yoshida hirofumi",
+        "aliases": [
+          "yoshida hirofumi"
+        ]
+      }
+    ]
   },
   "charlotte (anime)": {
     "girl": [
@@ -11279,7 +11822,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "mistilteinn (closers)",
+        "aliases": [
+          "mistilteinn (closers)"
+        ]
+      }
+    ]
   },
   "cloud nine inc": {
     "girl": [
@@ -11420,7 +11970,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kururugi suzaku",
+        "aliases": [
+          "kururugi suzaku"
+        ]
+      },
+      {
+        "name": "lelouch vi britannia",
+        "aliases": [
+          "lelouch vi britannia"
+        ]
+      }
+    ]
   },
   "code vein": {
     "girl": [
@@ -11822,7 +12385,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "spike spiegel",
+        "aliases": [
+          "spike spiegel"
+        ]
+      }
+    ]
   },
   "coyote ragtime show": {
     "girl": [
@@ -11996,7 +12566,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "david martinez",
+        "aliases": [
+          "david martinez"
+        ]
+      }
+    ]
   },
   "cyborg 009": {
     "girl": [
@@ -12035,7 +12612,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "allen walker",
+        "aliases": [
+          "allen walker"
+        ]
+      },
+      {
+        "name": "lavi",
+        "aliases": [
+          "lavi"
+        ]
+      }
+    ]
   },
   "da capo": {
     "girl": [
@@ -12166,7 +12756,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "takakura ken (dandadan)",
+        "aliases": [
+          "takakura ken (dandadan)"
+        ]
+      },
+      {
+        "name": "takakura ken (transformed) (dandadan)",
+        "aliases": [
+          "takakura ken (transformed) (dandadan)"
+        ]
+      }
+    ]
   },
   "danganronpa (series)": {
     "girl": [
@@ -12381,7 +12984,80 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "amami rantaro",
+        "aliases": [
+          "amami rantaro"
+        ]
+      },
+      {
+        "name": "fujisaki chihiro",
+        "aliases": [
+          "fujisaki chihiro"
+        ]
+      },
+      {
+        "name": "gokuhara gonta",
+        "aliases": [
+          "gokuhara gonta"
+        ]
+      },
+      {
+        "name": "hinata hajime",
+        "aliases": [
+          "hinata hajime"
+        ]
+      },
+      {
+        "name": "hoshi ryoma",
+        "aliases": [
+          "hoshi ryoma"
+        ]
+      },
+      {
+        "name": "k1-b0",
+        "aliases": [
+          "k1-b0"
+        ]
+      },
+      {
+        "name": "kamukura izuru",
+        "aliases": [
+          "kamukura izuru"
+        ]
+      },
+      {
+        "name": "momota kaito",
+        "aliases": [
+          "momota kaito"
+        ]
+      },
+      {
+        "name": "naegi makoto",
+        "aliases": [
+          "naegi makoto"
+        ]
+      },
+      {
+        "name": "shinguji korekiyo",
+        "aliases": [
+          "shinguji korekiyo"
+        ]
+      },
+      {
+        "name": "soda kazuichi",
+        "aliases": [
+          "soda kazuichi"
+        ]
+      },
+      {
+        "name": "togami byakuya",
+        "aliases": [
+          "togami byakuya"
+        ]
+      }
+    ]
   },
   "danjo no yuujou wa seiritsu suru?": {
     "girl": [
@@ -12839,7 +13515,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "l (death note)",
+        "aliases": [
+          "l (death note)"
+        ]
+      },
+      {
+        "name": "yagami light",
+        "aliases": [
+          "yagami light"
+        ]
+      }
+    ]
   },
   "deathsmiles": {
     "girl": [
@@ -13015,7 +13704,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "nero (devil may cry)",
+        "aliases": [
+          "nero (devil may cry)"
+        ]
+      },
+      {
+        "name": "vergil (devil may cry)",
+        "aliases": [
+          "vergil (devil may cry)"
+        ]
+      }
+    ]
   },
   "devil summoner (series)": {
     "girl": [
@@ -13212,7 +13914,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "beelzebumon",
+        "aliases": [
+          "beelzebumon"
+        ]
+      },
+      {
+        "name": "symbareangoramon",
+        "aliases": [
+          "symbareangoramon"
+        ]
+      }
+    ]
   },
   "dimension w": {
     "girl": [
@@ -13654,7 +14369,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "shin (dorohedoro)",
+        "aliases": [
+          "shin (dorohedoro)"
+        ]
+      }
+    ]
   },
   "dororo (tezuka)": {
     "girl": [
@@ -13665,7 +14387,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "hyakkimaru (dororo)",
+        "aliases": [
+          "hyakkimaru (dororo)"
+        ]
+      }
+    ]
   },
   "dosanko gal wa namaramenkoi": {
     "girl": [
@@ -13820,7 +14549,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "asagiri gen",
+        "aliases": [
+          "asagiri gen"
+        ]
+      },
+      {
+        "name": "ishigami senkuu",
+        "aliases": [
+          "ishigami senkuu"
+        ]
+      }
+    ]
   },
   "dra+koi": {
     "girl": [
@@ -14019,7 +14761,86 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "bardock",
+        "aliases": [
+          "bardock"
+        ]
+      },
+      {
+        "name": "broly (dragon ball super)",
+        "aliases": [
+          "broly (dragon ball super)"
+        ]
+      },
+      {
+        "name": "cooler (dragon ball)",
+        "aliases": [
+          "cooler (dragon ball)"
+        ]
+      },
+      {
+        "name": "cooler (fifth form) (dragon ball)",
+        "aliases": [
+          "cooler (fifth form) (dragon ball)"
+        ]
+      },
+      {
+        "name": "gogeta",
+        "aliases": [
+          "gogeta"
+        ]
+      },
+      {
+        "name": "goku black",
+        "aliases": [
+          "goku black"
+        ]
+      },
+      {
+        "name": "son gohan",
+        "aliases": [
+          "son gohan"
+        ]
+      },
+      {
+        "name": "son gohan (future)",
+        "aliases": [
+          "son gohan (future)"
+        ]
+      },
+      {
+        "name": "son goku",
+        "aliases": [
+          "son goku"
+        ]
+      },
+      {
+        "name": "trunks (dragon ball)",
+        "aliases": [
+          "trunks (dragon ball)"
+        ]
+      },
+      {
+        "name": "trunks (future) (dragon ball)",
+        "aliases": [
+          "trunks (future) (dragon ball)"
+        ]
+      },
+      {
+        "name": "vegeta",
+        "aliases": [
+          "vegeta"
+        ]
+      },
+      {
+        "name": "vegetto",
+        "aliases": [
+          "vegetto"
+        ]
+      }
+    ]
   },
   "dragon half": {
     "girl": [
@@ -14245,7 +15066,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "camus (dq11)",
+        "aliases": [
+          "camus (dq11)"
+        ]
+      },
+      {
+        "name": "hero (dq11)",
+        "aliases": [
+          "hero (dq11)"
+        ]
+      },
+      {
+        "name": "sidoh (dqb2)",
+        "aliases": [
+          "sidoh (dqb2)"
+        ]
+      }
+    ]
   },
   "dragon's crown": {
     "girl": [
@@ -14453,7 +15293,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "male priest (dungeon and fighter)",
+        "aliases": [
+          "male priest (dungeon and fighter)"
+        ]
+      }
+    ]
   },
   "dungeon meshi": {
     "girl": [
@@ -14518,7 +15365,50 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "chilchuck tims",
+        "aliases": [
+          "chilchuck tims"
+        ]
+      },
+      {
+        "name": "kabru",
+        "aliases": [
+          "kabru"
+        ]
+      },
+      {
+        "name": "laios touden",
+        "aliases": [
+          "laios touden"
+        ]
+      },
+      {
+        "name": "mithrun",
+        "aliases": [
+          "mithrun"
+        ]
+      },
+      {
+        "name": "mithrun (young)",
+        "aliases": [
+          "mithrun (young)"
+        ]
+      },
+      {
+        "name": "senshi (dungeon meshi)",
+        "aliases": [
+          "senshi (dungeon meshi)"
+        ]
+      },
+      {
+        "name": "thistle (dungeon meshi)",
+        "aliases": [
+          "thistle (dungeon meshi)"
+        ]
+      }
+    ]
   },
   "dungeon ni deai wo motomeru no wa machigatteiru darou ka": {
     "girl": [
@@ -14611,7 +15501,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "orihara izaya",
+        "aliases": [
+          "orihara izaya"
+        ]
+      }
+    ]
   },
   "eden's zero": {
     "girl": [
@@ -14739,7 +15636,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aaron wei",
+        "aliases": [
+          "aaron wei"
+        ]
+      },
+      {
+        "name": "crow armbrust",
+        "aliases": [
+          "crow armbrust"
+        ]
+      },
+      {
+        "name": "rean schwarzer",
+        "aliases": [
+          "rean schwarzer"
+        ]
+      },
+      {
+        "name": "van arkride",
+        "aliases": [
+          "van arkride"
+        ]
+      }
+    ]
   },
   "eizouken ni wa te wo dasu na!": {
     "girl": [
@@ -14880,7 +15802,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "miquella (elden ring)",
+        "aliases": [
+          "miquella (elden ring)"
+        ]
+      }
+    ]
   },
   "elemental gelade": {
     "girl": [
@@ -15096,7 +16025,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "akitaru oubi",
+        "aliases": [
+          "akitaru oubi"
+        ]
+      }
+    ]
   },
   "encanto": {
     "girl": [
@@ -15209,7 +16145,200 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "akehoshi subaru",
+        "aliases": [
+          "akehoshi subaru"
+        ]
+      },
+      {
+        "name": "amagi hiiro",
+        "aliases": [
+          "amagi hiiro"
+        ]
+      },
+      {
+        "name": "amagi rinne",
+        "aliases": [
+          "amagi rinne"
+        ]
+      },
+      {
+        "name": "ayase mayoi",
+        "aliases": [
+          "ayase mayoi"
+        ]
+      },
+      {
+        "name": "hakaze kaoru",
+        "aliases": [
+          "hakaze kaoru"
+        ]
+      },
+      {
+        "name": "hibiki wataru",
+        "aliases": [
+          "hibiki wataru"
+        ]
+      },
+      {
+        "name": "himemiya tori",
+        "aliases": [
+          "himemiya tori"
+        ]
+      },
+      {
+        "name": "himeru (ensemble stars!)",
+        "aliases": [
+          "himeru (ensemble stars!)"
+        ]
+      },
+      {
+        "name": "isara mao",
+        "aliases": [
+          "isara mao"
+        ]
+      },
+      {
+        "name": "itsuki shu",
+        "aliases": [
+          "itsuki shu"
+        ]
+      },
+      {
+        "name": "kagehira mika",
+        "aliases": [
+          "kagehira mika"
+        ]
+      },
+      {
+        "name": "kanzaki souma",
+        "aliases": [
+          "kanzaki souma"
+        ]
+      },
+      {
+        "name": "kazehaya tatsumi",
+        "aliases": [
+          "kazehaya tatsumi"
+        ]
+      },
+      {
+        "name": "kiryu kuro",
+        "aliases": [
+          "kiryu kuro"
+        ]
+      },
+      {
+        "name": "mashiro tomoya",
+        "aliases": [
+          "mashiro tomoya"
+        ]
+      },
+      {
+        "name": "mikejima madara",
+        "aliases": [
+          "mikejima madara"
+        ]
+      },
+      {
+        "name": "morisawa chiaki",
+        "aliases": [
+          "morisawa chiaki"
+        ]
+      },
+      {
+        "name": "narukami arashi",
+        "aliases": [
+          "narukami arashi"
+        ]
+      },
+      {
+        "name": "nito nazuna",
+        "aliases": [
+          "nito nazuna"
+        ]
+      },
+      {
+        "name": "saegusa ibara",
+        "aliases": [
+          "saegusa ibara"
+        ]
+      },
+      {
+        "name": "sakasaki natsume",
+        "aliases": [
+          "sakasaki natsume"
+        ]
+      },
+      {
+        "name": "sakuma rei (ensemble stars!)",
+        "aliases": [
+          "sakuma rei (ensemble stars!)"
+        ]
+      },
+      {
+        "name": "sakuma ritsu",
+        "aliases": [
+          "sakuma ritsu"
+        ]
+      },
+      {
+        "name": "sena izumi (ensemble stars!)",
+        "aliases": [
+          "sena izumi (ensemble stars!)"
+        ]
+      },
+      {
+        "name": "sengoku shinobu",
+        "aliases": [
+          "sengoku shinobu"
+        ]
+      },
+      {
+        "name": "shiina niki",
+        "aliases": [
+          "shiina niki"
+        ]
+      },
+      {
+        "name": "shinkai kanata",
+        "aliases": [
+          "shinkai kanata"
+        ]
+      },
+      {
+        "name": "shino hajime",
+        "aliases": [
+          "shino hajime"
+        ]
+      },
+      {
+        "name": "shiratori aira (ensemble stars!)",
+        "aliases": [
+          "shiratori aira (ensemble stars!)"
+        ]
+      },
+      {
+        "name": "suou tsukasa",
+        "aliases": [
+          "suou tsukasa"
+        ]
+      },
+      {
+        "name": "tenshouin eichi",
+        "aliases": [
+          "tenshouin eichi"
+        ]
+      },
+      {
+        "name": "tsukinaga leo",
+        "aliases": [
+          "tsukinaga leo"
+        ]
+      }
+    ]
   },
   "epic seven": {
     "girl": [
@@ -15370,7 +16499,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "laxus dreyar",
+        "aliases": [
+          "laxus dreyar"
+        ]
+      }
+    ]
   },
   "fantasy earth zero": {
     "girl": [
@@ -15439,7 +16575,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "billy kane",
+        "aliases": [
+          "billy kane"
+        ]
+      }
+    ]
   },
   "fate (series)": {
     "girl": [
@@ -17286,7 +18429,332 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "achilles (fate)",
+        "aliases": [
+          "achilles (fate)"
+        ]
+      },
+      {
+        "name": "amakusa shirou (fate)",
+        "aliases": [
+          "amakusa shirou (fate)"
+        ]
+      },
+      {
+        "name": "angra mainyu (fate)",
+        "aliases": [
+          "angra mainyu (fate)"
+        ]
+      },
+      {
+        "name": "arash (fate)",
+        "aliases": [
+          "arash (fate)"
+        ]
+      },
+      {
+        "name": "archer (fate)",
+        "aliases": [
+          "archer (fate)"
+        ]
+      },
+      {
+        "name": "arthur pendragon (fate)",
+        "aliases": [
+          "arthur pendragon (fate)"
+        ]
+      },
+      {
+        "name": "ashiya douman (fate)",
+        "aliases": [
+          "ashiya douman (fate)"
+        ]
+      },
+      {
+        "name": "ashwatthama (fate)",
+        "aliases": [
+          "ashwatthama (fate)"
+        ]
+      },
+      {
+        "name": "astolfo (fate)",
+        "aliases": [
+          "astolfo (fate)"
+        ]
+      },
+      {
+        "name": "astolfo (saber) (fate)",
+        "aliases": [
+          "astolfo (saber) (fate)"
+        ]
+      },
+      {
+        "name": "astolfo (saber) (third ascension) (fate)",
+        "aliases": [
+          "astolfo (saber) (third ascension) (fate)"
+        ]
+      },
+      {
+        "name": "astolfo (sailor paladin) (fate)",
+        "aliases": [
+          "astolfo (sailor paladin) (fate)"
+        ]
+      },
+      {
+        "name": "bedivere (fate)",
+        "aliases": [
+          "bedivere (fate)"
+        ]
+      },
+      {
+        "name": "charlemagne (fate)",
+        "aliases": [
+          "charlemagne (fate)"
+        ]
+      },
+      {
+        "name": "cu chulainn (caster) (fate)",
+        "aliases": [
+          "cu chulainn (caster) (fate)"
+        ]
+      },
+      {
+        "name": "cu chulainn (fate)",
+        "aliases": [
+          "cu chulainn (fate)"
+        ]
+      },
+      {
+        "name": "cu chulainn (fate/prototype)",
+        "aliases": [
+          "cu chulainn (fate/prototype)"
+        ]
+      },
+      {
+        "name": "cu chulainn (fate/stay night)",
+        "aliases": [
+          "cu chulainn (fate/stay night)"
+        ]
+      },
+      {
+        "name": "cu chulainn (lancer) (fate)",
+        "aliases": [
+          "cu chulainn (lancer) (fate)"
+        ]
+      },
+      {
+        "name": "diarmuid ua duibhne (lancer) (fate)",
+        "aliases": [
+          "diarmuid ua duibhne (lancer) (fate)"
+        ]
+      },
+      {
+        "name": "emiya kiritsugu",
+        "aliases": [
+          "emiya kiritsugu"
+        ]
+      },
+      {
+        "name": "enkidu (fate)",
+        "aliases": [
+          "enkidu (fate)"
+        ]
+      },
+      {
+        "name": "fujimaru ritsuka (male)",
+        "aliases": [
+          "fujimaru ritsuka (male)"
+        ]
+      },
+      {
+        "name": "gawain (fate)",
+        "aliases": [
+          "gawain (fate)"
+        ]
+      },
+      {
+        "name": "gilgamesh (caster) (fate)",
+        "aliases": [
+          "gilgamesh (caster) (fate)"
+        ]
+      },
+      {
+        "name": "hans christian andersen (fate)",
+        "aliases": [
+          "hans christian andersen (fate)"
+        ]
+      },
+      {
+        "name": "harada sanosuke (fate)",
+        "aliases": [
+          "harada sanosuke (fate)"
+        ]
+      },
+      {
+        "name": "hector (fate)",
+        "aliases": [
+          "hector (fate)"
+        ]
+      },
+      {
+        "name": "hijikata toshizou (fate)",
+        "aliases": [
+          "hijikata toshizou (fate)"
+        ]
+      },
+      {
+        "name": "iskandar (fate)",
+        "aliases": [
+          "iskandar (fate)"
+        ]
+      },
+      {
+        "name": "john lackland (fate)",
+        "aliases": [
+          "john lackland (fate)"
+        ]
+      },
+      {
+        "name": "karna (fate)",
+        "aliases": [
+          "karna (fate)"
+        ]
+      },
+      {
+        "name": "king hassan (fate)",
+        "aliases": [
+          "king hassan (fate)"
+        ]
+      },
+      {
+        "name": "kirschtaria wodime",
+        "aliases": [
+          "kirschtaria wodime"
+        ]
+      },
+      {
+        "name": "kondou isami (fate)",
+        "aliases": [
+          "kondou isami (fate)"
+        ]
+      },
+      {
+        "name": "kotomine kirei",
+        "aliases": [
+          "kotomine kirei"
+        ]
+      },
+      {
+        "name": "li shuwen (fate)",
+        "aliases": [
+          "li shuwen (fate)"
+        ]
+      },
+      {
+        "name": "merlin (fate)",
+        "aliases": [
+          "merlin (fate)"
+        ]
+      },
+      {
+        "name": "miyamoto iori (fate)",
+        "aliases": [
+          "miyamoto iori (fate)"
+        ]
+      },
+      {
+        "name": "mori nagayoshi (fate)",
+        "aliases": [
+          "mori nagayoshi (fate)"
+        ]
+      },
+      {
+        "name": "oberon (fate)",
+        "aliases": [
+          "oberon (fate)"
+        ]
+      },
+      {
+        "name": "oberon (third ascension) (fate)",
+        "aliases": [
+          "oberon (third ascension) (fate)"
+        ]
+      },
+      {
+        "name": "oda nobukatsu (fate)",
+        "aliases": [
+          "oda nobukatsu (fate)"
+        ]
+      },
+      {
+        "name": "okada izou (fate)",
+        "aliases": [
+          "okada izou (fate)"
+        ]
+      },
+      {
+        "name": "ozymandias (fate)",
+        "aliases": [
+          "ozymandias (fate)"
+        ]
+      },
+      {
+        "name": "richard i (fate)",
+        "aliases": [
+          "richard i (fate)"
+        ]
+      },
+      {
+        "name": "robin hood (fate)",
+        "aliases": [
+          "robin hood (fate)"
+        ]
+      },
+      {
+        "name": "saitou hajime (fate)",
+        "aliases": [
+          "saitou hajime (fate)"
+        ]
+      },
+      {
+        "name": "sieg (fate)",
+        "aliases": [
+          "sieg (fate)"
+        ]
+      },
+      {
+        "name": "siegfried (fate)",
+        "aliases": [
+          "siegfried (fate)"
+        ]
+      },
+      {
+        "name": "vlad iii (fate/apocrypha)",
+        "aliases": [
+          "vlad iii (fate/apocrypha)"
+        ]
+      },
+      {
+        "name": "voyager (fate)",
+        "aliases": [
+          "voyager (fate)"
+        ]
+      },
+      {
+        "name": "voyager (first ascension) (fate)",
+        "aliases": [
+          "voyager (first ascension) (fate)"
+        ]
+      },
+      {
+        "name": "yan qing (fate)",
+        "aliases": [
+          "yan qing (fate)"
+        ]
+      }
+    ]
   },
   "fear & hunger (series)": {
     "girl": [
@@ -17805,7 +19273,170 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "alphinaud leveilleur",
+        "aliases": [
+          "alphinaud leveilleur"
+        ]
+      },
+      {
+        "name": "ardbert hylfyst",
+        "aliases": [
+          "ardbert hylfyst"
+        ]
+      },
+      {
+        "name": "barret wallace",
+        "aliases": [
+          "barret wallace"
+        ]
+      },
+      {
+        "name": "cid highwind",
+        "aliases": [
+          "cid highwind"
+        ]
+      },
+      {
+        "name": "clive rosfield",
+        "aliases": [
+          "clive rosfield"
+        ]
+      },
+      {
+        "name": "dion lesage",
+        "aliases": [
+          "dion lesage"
+        ]
+      },
+      {
+        "name": "emet-selch",
+        "aliases": [
+          "emet-selch"
+        ]
+      },
+      {
+        "name": "estinien varlineau",
+        "aliases": [
+          "estinien varlineau"
+        ]
+      },
+      {
+        "name": "g'raha tia",
+        "aliases": [
+          "g'raha tia"
+        ]
+      },
+      {
+        "name": "gladiolus amicitia",
+        "aliases": [
+          "gladiolus amicitia"
+        ]
+      },
+      {
+        "name": "haurchefant greystone",
+        "aliases": [
+          "haurchefant greystone"
+        ]
+      },
+      {
+        "name": "hythlodaeus",
+        "aliases": [
+          "hythlodaeus"
+        ]
+      },
+      {
+        "name": "ignis scientia",
+        "aliases": [
+          "ignis scientia"
+        ]
+      },
+      {
+        "name": "locke cole",
+        "aliases": [
+          "locke cole"
+        ]
+      },
+      {
+        "name": "noctis lucis caelum",
+        "aliases": [
+          "noctis lucis caelum"
+        ]
+      },
+      {
+        "name": "prompto argentum",
+        "aliases": [
+          "prompto argentum"
+        ]
+      },
+      {
+        "name": "ramza beoulve",
+        "aliases": [
+          "ramza beoulve"
+        ]
+      },
+      {
+        "name": "reno (ff7)",
+        "aliases": [
+          "reno (ff7)"
+        ]
+      },
+      {
+        "name": "sephiroth",
+        "aliases": [
+          "sephiroth"
+        ]
+      },
+      {
+        "name": "sephiroth (ever crisis)",
+        "aliases": [
+          "sephiroth (ever crisis)"
+        ]
+      },
+      {
+        "name": "themis (ff14)",
+        "aliases": [
+          "themis (ff14)"
+        ]
+      },
+      {
+        "name": "tidus",
+        "aliases": [
+          "tidus"
+        ]
+      },
+      {
+        "name": "vincent valentine",
+        "aliases": [
+          "vincent valentine"
+        ]
+      },
+      {
+        "name": "zack fair",
+        "aliases": [
+          "zack fair"
+        ]
+      },
+      {
+        "name": "zenos yae galvus",
+        "aliases": [
+          "zenos yae galvus"
+        ]
+      },
+      {
+        "name": "zephirin de valhourdin",
+        "aliases": [
+          "zephirin de valhourdin"
+        ]
+      },
+      {
+        "name": "zidane tribal",
+        "aliases": [
+          "zidane tribal"
+        ]
+      }
+    ]
   },
   "final fight": {
     "girl": [
@@ -19093,7 +20724,242 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "alcryst (fire emblem)",
+        "aliases": [
+          "alcryst (fire emblem)"
+        ]
+      },
+      {
+        "name": "alear (male) (fire emblem)",
+        "aliases": [
+          "alear (male) (fire emblem)"
+        ]
+      },
+      {
+        "name": "alfred (fire emblem)",
+        "aliases": [
+          "alfred (fire emblem)"
+        ]
+      },
+      {
+        "name": "ashe ubert",
+        "aliases": [
+          "ashe ubert"
+        ]
+      },
+      {
+        "name": "byleth (male) (fire emblem)",
+        "aliases": [
+          "byleth (male) (fire emblem)"
+        ]
+      },
+      {
+        "name": "chrom (fire emblem)",
+        "aliases": [
+          "chrom (fire emblem)"
+        ]
+      },
+      {
+        "name": "claude von riegan",
+        "aliases": [
+          "claude von riegan"
+        ]
+      },
+      {
+        "name": "corrin (male) (fire emblem)",
+        "aliases": [
+          "corrin (male) (fire emblem)"
+        ]
+      },
+      {
+        "name": "diamant (fire emblem)",
+        "aliases": [
+          "diamant (fire emblem)"
+        ]
+      },
+      {
+        "name": "dimitri alexandre blaiddyd",
+        "aliases": [
+          "dimitri alexandre blaiddyd"
+        ]
+      },
+      {
+        "name": "dimitri alexandre blaiddyd (timeskip)",
+        "aliases": [
+          "dimitri alexandre blaiddyd (timeskip)"
+        ]
+      },
+      {
+        "name": "eikthyrnir (fire emblem)",
+        "aliases": [
+          "eikthyrnir (fire emblem)"
+        ]
+      },
+      {
+        "name": "felix hugo fraldarius",
+        "aliases": [
+          "felix hugo fraldarius"
+        ]
+      },
+      {
+        "name": "fogado (fire emblem)",
+        "aliases": [
+          "fogado (fire emblem)"
+        ]
+      },
+      {
+        "name": "hector (fire emblem)",
+        "aliases": [
+          "hector (fire emblem)"
+        ]
+      },
+      {
+        "name": "ike (fire emblem)",
+        "aliases": [
+          "ike (fire emblem)"
+        ]
+      },
+      {
+        "name": "jakob (fire emblem)",
+        "aliases": [
+          "jakob (fire emblem)"
+        ]
+      },
+      {
+        "name": "leo (fire emblem fates)",
+        "aliases": [
+          "leo (fire emblem fates)"
+        ]
+      },
+      {
+        "name": "leo (fire emblem)",
+        "aliases": [
+          "leo (fire emblem)"
+        ]
+      },
+      {
+        "name": "linhardt von hevring",
+        "aliases": [
+          "linhardt von hevring"
+        ]
+      },
+      {
+        "name": "male alear (fire emblem)",
+        "aliases": [
+          "male alear (fire emblem)"
+        ]
+      },
+      {
+        "name": "male byleth (fire emblem)",
+        "aliases": [
+          "male byleth (fire emblem)"
+        ]
+      },
+      {
+        "name": "male robin (fire emblem)",
+        "aliases": [
+          "male robin (fire emblem)"
+        ]
+      },
+      {
+        "name": "marth (fire emblem)",
+        "aliases": [
+          "marth (fire emblem)"
+        ]
+      },
+      {
+        "name": "niles (fire emblem)",
+        "aliases": [
+          "niles (fire emblem)"
+        ]
+      },
+      {
+        "name": "pandreo (fire emblem)",
+        "aliases": [
+          "pandreo (fire emblem)"
+        ]
+      },
+      {
+        "name": "ranulf (fire emblem)",
+        "aliases": [
+          "ranulf (fire emblem)"
+        ]
+      },
+      {
+        "name": "robin (male) (fire emblem)",
+        "aliases": [
+          "robin (male) (fire emblem)"
+        ]
+      },
+      {
+        "name": "rosado (fire emblem)",
+        "aliases": [
+          "rosado (fire emblem)"
+        ]
+      },
+      {
+        "name": "roy (fire emblem)",
+        "aliases": [
+          "roy (fire emblem)"
+        ]
+      },
+      {
+        "name": "ryoma (fire emblem)",
+        "aliases": [
+          "ryoma (fire emblem)"
+        ]
+      },
+      {
+        "name": "seliph (fire emblem)",
+        "aliases": [
+          "seliph (fire emblem)"
+        ]
+      },
+      {
+        "name": "soren (fire emblem)",
+        "aliases": [
+          "soren (fire emblem)"
+        ]
+      },
+      {
+        "name": "subaki (fire emblem)",
+        "aliases": [
+          "subaki (fire emblem)"
+        ]
+      },
+      {
+        "name": "sylvain jose gautier",
+        "aliases": [
+          "sylvain jose gautier"
+        ]
+      },
+      {
+        "name": "takumi (fire emblem)",
+        "aliases": [
+          "takumi (fire emblem)"
+        ]
+      },
+      {
+        "name": "tibarn (fire emblem)",
+        "aliases": [
+          "tibarn (fire emblem)"
+        ]
+      },
+      {
+        "name": "xander (fire emblem)",
+        "aliases": [
+          "xander (fire emblem)"
+        ]
+      },
+      {
+        "name": "yuri leclerc",
+        "aliases": [
+          "yuri leclerc"
+        ]
+      }
+    ]
   },
   "fireball (series)": {
     "girl": [
@@ -19332,7 +21198,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "matsuoka rin",
+        "aliases": [
+          "matsuoka rin"
+        ]
+      },
+      {
+        "name": "nanase haruka (free!)",
+        "aliases": [
+          "nanase haruka (free!)"
+        ]
+      },
+      {
+        "name": "tachibana makoto",
+        "aliases": [
+          "tachibana makoto"
+        ]
+      },
+      {
+        "name": "yamazaki sousuke",
+        "aliases": [
+          "yamazaki sousuke"
+        ]
+      }
+    ]
   },
   "freezing (series)": {
     "girl": [
@@ -19456,7 +21347,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "alphonse elric",
+        "aliases": [
+          "alphonse elric"
+        ]
+      },
+      {
+        "name": "edward elric",
+        "aliases": [
+          "edward elric"
+        ]
+      },
+      {
+        "name": "roy mustang",
+        "aliases": [
+          "roy mustang"
+        ]
+      }
+    ]
   },
   "funamusea": {
     "girl": [
@@ -19661,7 +21571,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "rudo surebrec",
+        "aliases": [
+          "rudo surebrec"
+        ]
+      }
+    ]
   },
   "gad guard": {
     "girl": [
@@ -20733,7 +22650,260 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aether (genshin impact)",
+        "aliases": [
+          "aether (genshin impact)"
+        ]
+      },
+      {
+        "name": "albedo (genshin impact)",
+        "aliases": [
+          "albedo (genshin impact)"
+        ]
+      },
+      {
+        "name": "alhaitham (genshin impact)",
+        "aliases": [
+          "alhaitham (genshin impact)"
+        ]
+      },
+      {
+        "name": "arataki itto",
+        "aliases": [
+          "arataki itto"
+        ]
+      },
+      {
+        "name": "bennett (genshin impact)",
+        "aliases": [
+          "bennett (genshin impact)"
+        ]
+      },
+      {
+        "name": "capitano (genshin impact)",
+        "aliases": [
+          "capitano (genshin impact)"
+        ]
+      },
+      {
+        "name": "chongyun (genshin impact)",
+        "aliases": [
+          "chongyun (genshin impact)"
+        ]
+      },
+      {
+        "name": "cyno (genshin impact)",
+        "aliases": [
+          "cyno (genshin impact)"
+        ]
+      },
+      {
+        "name": "dahlia (genshin impact)",
+        "aliases": [
+          "dahlia (genshin impact)"
+        ]
+      },
+      {
+        "name": "dainsleif (genshin impact)",
+        "aliases": [
+          "dainsleif (genshin impact)"
+        ]
+      },
+      {
+        "name": "dottore (genshin impact)",
+        "aliases": [
+          "dottore (genshin impact)"
+        ]
+      },
+      {
+        "name": "durin (genshin impact)",
+        "aliases": [
+          "durin (genshin impact)"
+        ]
+      },
+      {
+        "name": "flins (genshin impact)",
+        "aliases": [
+          "flins (genshin impact)"
+        ]
+      },
+      {
+        "name": "freminet (genshin impact)",
+        "aliases": [
+          "freminet (genshin impact)"
+        ]
+      },
+      {
+        "name": "gaming (genshin impact)",
+        "aliases": [
+          "gaming (genshin impact)"
+        ]
+      },
+      {
+        "name": "gorou (genshin impact)",
+        "aliases": [
+          "gorou (genshin impact)"
+        ]
+      },
+      {
+        "name": "illuga (genshin impact)",
+        "aliases": [
+          "illuga (genshin impact)"
+        ]
+      },
+      {
+        "name": "kaedehara kazuha",
+        "aliases": [
+          "kaedehara kazuha"
+        ]
+      },
+      {
+        "name": "kamisato ayato",
+        "aliases": [
+          "kamisato ayato"
+        ]
+      },
+      {
+        "name": "kaveh (genshin impact)",
+        "aliases": [
+          "kaveh (genshin impact)"
+        ]
+      },
+      {
+        "name": "kinich (genshin impact)",
+        "aliases": [
+          "kinich (genshin impact)"
+        ]
+      },
+      {
+        "name": "lohen (genshin impact)",
+        "aliases": [
+          "lohen (genshin impact)"
+        ]
+      },
+      {
+        "name": "lyney (genshin impact)",
+        "aliases": [
+          "lyney (genshin impact)"
+        ]
+      },
+      {
+        "name": "mika (genshin impact)",
+        "aliases": [
+          "mika (genshin impact)"
+        ]
+      },
+      {
+        "name": "mini durin (genshin impact)",
+        "aliases": [
+          "mini durin (genshin impact)"
+        ]
+      },
+      {
+        "name": "mini durin (human) (genshin impact)",
+        "aliases": [
+          "mini durin (human) (genshin impact)"
+        ]
+      },
+      {
+        "name": "neuvillette (genshin impact)",
+        "aliases": [
+          "neuvillette (genshin impact)"
+        ]
+      },
+      {
+        "name": "ororon (genshin impact)",
+        "aliases": [
+          "ororon (genshin impact)"
+        ]
+      },
+      {
+        "name": "pantalone (genshin impact)",
+        "aliases": [
+          "pantalone (genshin impact)"
+        ]
+      },
+      {
+        "name": "razor (genshin impact)",
+        "aliases": [
+          "razor (genshin impact)"
+        ]
+      },
+      {
+        "name": "scaramouche (cat) (genshin impact)",
+        "aliases": [
+          "scaramouche (cat) (genshin impact)"
+        ]
+      },
+      {
+        "name": "scaramouche (kabukimono) (genshin impact)",
+        "aliases": [
+          "scaramouche (kabukimono) (genshin impact)"
+        ]
+      },
+      {
+        "name": "sethos (genshin impact)",
+        "aliases": [
+          "sethos (genshin impact)"
+        ]
+      },
+      {
+        "name": "shikanoin heizou",
+        "aliases": [
+          "shikanoin heizou"
+        ]
+      },
+      {
+        "name": "tartaglia (genshin impact)",
+        "aliases": [
+          "tartaglia (genshin impact)"
+        ]
+      },
+      {
+        "name": "thoma (genshin impact)",
+        "aliases": [
+          "thoma (genshin impact)"
+        ]
+      },
+      {
+        "name": "tighnari (genshin impact)",
+        "aliases": [
+          "tighnari (genshin impact)"
+        ]
+      },
+      {
+        "name": "varka (genshin impact)",
+        "aliases": [
+          "varka (genshin impact)"
+        ]
+      },
+      {
+        "name": "venti (archon) (genshin impact)",
+        "aliases": [
+          "venti (archon) (genshin impact)"
+        ]
+      },
+      {
+        "name": "wriothesley (genshin impact)",
+        "aliases": [
+          "wriothesley (genshin impact)"
+        ]
+      },
+      {
+        "name": "xiao (genshin impact)",
+        "aliases": [
+          "xiao (genshin impact)"
+        ]
+      },
+      {
+        "name": "xingqiu (genshin impact)",
+        "aliases": [
+          "xingqiu (genshin impact)"
+        ]
+      }
+    ]
   },
   "gensou suikoden": {
     "girl": [
@@ -20898,7 +23068,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "hijikata toushirou",
+        "aliases": [
+          "hijikata toushirou"
+        ]
+      },
+      {
+        "name": "sakata gintoki",
+        "aliases": [
+          "sakata gintoki"
+        ]
+      },
+      {
+        "name": "takasugi shinsuke",
+        "aliases": [
+          "takasugi shinsuke"
+        ]
+      }
+    ]
   },
   "girl cafe gun": {
     "girl": [
@@ -22726,7 +24915,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "remnan (gnosia)",
+        "aliases": [
+          "remnan (gnosia)"
+        ]
+      },
+      {
+        "name": "sha-ming",
+        "aliases": [
+          "sha-ming"
+        ]
+      }
+    ]
   },
   "go! go! gris!": {
     "girl": [
@@ -23641,7 +25843,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "koito otonoshin",
+        "aliases": [
+          "koito otonoshin"
+        ]
+      },
+      {
+        "name": "ogata hyakunosuke",
+        "aliases": [
+          "ogata hyakunosuke"
+        ]
+      },
+      {
+        "name": "sugimoto saichi",
+        "aliases": [
+          "sugimoto saichi"
+        ]
+      },
+      {
+        "name": "tanigaki genjirou",
+        "aliases": [
+          "tanigaki genjirou"
+        ]
+      },
+      {
+        "name": "tsukishima hajime",
+        "aliases": [
+          "tsukishima hajime"
+        ]
+      },
+      {
+        "name": "tsurumi tokushirou",
+        "aliases": [
+          "tsurumi tokushirou"
+        ]
+      }
+    ]
   },
   "gorillaz": {
     "girl": [
@@ -24381,7 +26620,56 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "barawa",
+        "aliases": [
+          "barawa"
+        ]
+      },
+      {
+        "name": "belial (granblue fantasy)",
+        "aliases": [
+          "belial (granblue fantasy)"
+        ]
+      },
+      {
+        "name": "kou (granblue fantasy)",
+        "aliases": [
+          "kou (granblue fantasy)"
+        ]
+      },
+      {
+        "name": "noa (granblue fantasy)",
+        "aliases": [
+          "noa (granblue fantasy)"
+        ]
+      },
+      {
+        "name": "percival (granblue fantasy)",
+        "aliases": [
+          "percival (granblue fantasy)"
+        ]
+      },
+      {
+        "name": "sandalphon (granblue fantasy)",
+        "aliases": [
+          "sandalphon (granblue fantasy)"
+        ]
+      },
+      {
+        "name": "soriz",
+        "aliases": [
+          "soriz"
+        ]
+      },
+      {
+        "name": "vane (granblue fantasy)",
+        "aliases": [
+          "vane (granblue fantasy)"
+        ]
+      }
+    ]
   },
   "grandia": {
     "girl": [
@@ -24747,7 +27035,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "happy chaos",
+        "aliases": [
+          "happy chaos"
+        ]
+      },
+      {
+        "name": "ky kiske",
+        "aliases": [
+          "ky kiske"
+        ]
+      },
+      {
+        "name": "sol badguy",
+        "aliases": [
+          "sol badguy"
+        ]
+      }
+    ]
   },
   "gundam": {
     "girl": [
@@ -25172,7 +27479,56 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "akihiro altland",
+        "aliases": [
+          "akihiro altland"
+        ]
+      },
+      {
+        "name": "athrun zala",
+        "aliases": [
+          "athrun zala"
+        ]
+      },
+      {
+        "name": "challia bull",
+        "aliases": [
+          "challia bull"
+        ]
+      },
+      {
+        "name": "char aznable",
+        "aliases": [
+          "char aznable"
+        ]
+      },
+      {
+        "name": "elan ceres",
+        "aliases": [
+          "elan ceres"
+        ]
+      },
+      {
+        "name": "guel jeturk",
+        "aliases": [
+          "guel jeturk"
+        ]
+      },
+      {
+        "name": "kamille bidan",
+        "aliases": [
+          "kamille bidan"
+        ]
+      },
+      {
+        "name": "shuji ito",
+        "aliases": [
+          "shuji ito"
+        ]
+      }
+    ]
   },
   "gunslinger girl": {
     "girl": [
@@ -25217,7 +27573,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "hacka doll 3",
+        "aliases": [
+          "hacka doll 3"
+        ]
+      }
+    ]
   },
   "hades (series)": {
     "girl": [
@@ -25234,7 +27597,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "zagreus (hades)",
+        "aliases": [
+          "zagreus (hades)"
+        ]
+      }
+    ]
   },
   "hai to gensou no grimgar": {
     "girl": [
@@ -25303,7 +27673,80 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "akaashi keiji",
+        "aliases": [
+          "akaashi keiji"
+        ]
+      },
+      {
+        "name": "bokuto koutarou",
+        "aliases": [
+          "bokuto koutarou"
+        ]
+      },
+      {
+        "name": "hinata shouyou",
+        "aliases": [
+          "hinata shouyou"
+        ]
+      },
+      {
+        "name": "kageyama tobio",
+        "aliases": [
+          "kageyama tobio"
+        ]
+      },
+      {
+        "name": "kita shinsuke",
+        "aliases": [
+          "kita shinsuke"
+        ]
+      },
+      {
+        "name": "kozume kenma",
+        "aliases": [
+          "kozume kenma"
+        ]
+      },
+      {
+        "name": "kuroo tetsurou",
+        "aliases": [
+          "kuroo tetsurou"
+        ]
+      },
+      {
+        "name": "miya atsumu",
+        "aliases": [
+          "miya atsumu"
+        ]
+      },
+      {
+        "name": "oikawa tooru (haikyuu!!)",
+        "aliases": [
+          "oikawa tooru (haikyuu!!)"
+        ]
+      },
+      {
+        "name": "sawamura daichi",
+        "aliases": [
+          "sawamura daichi"
+        ]
+      },
+      {
+        "name": "tendou satori",
+        "aliases": [
+          "tendou satori"
+        ]
+      },
+      {
+        "name": "tsukishima kei",
+        "aliases": [
+          "tsukishima kei"
+        ]
+      }
+    ]
   },
   "haite kudasai takamine-san": {
     "girl": [
@@ -25596,7 +28039,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "killer t (hataraku saibou)",
+        "aliases": [
+          "killer t (hataraku saibou)"
+        ]
+      }
+    ]
   },
   "hayate no gotoku!": {
     "girl": [
@@ -28298,7 +30748,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "mr. crawling",
+        "aliases": [
+          "mr. crawling"
+        ]
+      },
+      {
+        "name": "mr. scarletella",
+        "aliases": [
+          "mr. scarletella"
+        ]
+      }
+    ]
   },
   "honkai (series)": {
     "girl": [
@@ -29431,7 +31894,38 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "blade (honkai: star rail)",
+        "aliases": [
+          "blade (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "dan heng (honkai: star rail)",
+        "aliases": [
+          "dan heng (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "kevin kaslana",
+        "aliases": [
+          "kevin kaslana"
+        ]
+      },
+      {
+        "name": "sunday (honkai: star rail)",
+        "aliases": [
+          "sunday (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "welt yang",
+        "aliases": [
+          "welt yang"
+        ]
+      }
+    ]
   },
   "honzuki no gekokujou": {
     "girl": [
@@ -29453,7 +31947,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "miyamura izumi",
+        "aliases": [
+          "miyamura izumi"
+        ]
+      }
+    ]
   },
   "horizon (video game)": {
     "girl": [
@@ -29595,7 +32096,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "chrollo lucilfer",
+        "aliases": [
+          "chrollo lucilfer"
+        ]
+      },
+      {
+        "name": "feitan portor",
+        "aliases": [
+          "feitan portor"
+        ]
+      },
+      {
+        "name": "gon freecss",
+        "aliases": [
+          "gon freecss"
+        ]
+      },
+      {
+        "name": "hisoka morow",
+        "aliases": [
+          "hisoka morow"
+        ]
+      },
+      {
+        "name": "illumi zoldyck",
+        "aliases": [
+          "illumi zoldyck"
+        ]
+      },
+      {
+        "name": "killua zoldyck",
+        "aliases": [
+          "killua zoldyck"
+        ]
+      }
+    ]
   },
   "hyakko": {
     "girl": [
@@ -29629,7 +32167,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "oreki houtarou",
+        "aliases": [
+          "oreki houtarou"
+        ]
+      }
+    ]
   },
   "ib (kouri)": {
     "girl": [
@@ -29736,7 +32281,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "edgar valden",
+        "aliases": [
+          "edgar valden"
+        ]
+      }
+    ]
   },
   "idolmaster": {
     "girl": [
@@ -31493,7 +34045,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kizaki ren",
+        "aliases": [
+          "kizaki ren"
+        ]
+      },
+      {
+        "name": "mizushima saki",
+        "aliases": [
+          "mizushima saki"
+        ]
+      },
+      {
+        "name": "shingen seiji",
+        "aliases": [
+          "shingen seiji"
+        ]
+      }
+    ]
   },
   "idoly pride": {
     "girl": [
@@ -31707,7 +34278,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "afuro terumi",
+        "aliases": [
+          "afuro terumi"
+        ]
+      },
+      {
+        "name": "kazemaru ichirouta",
+        "aliases": [
+          "kazemaru ichirouta"
+        ]
+      }
+    ]
   },
   "indie utaite": {
     "girl": [
@@ -31754,7 +34338,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "mafumafu",
+        "aliases": [
+          "mafumafu"
+        ]
+      }
+    ]
   },
   "indie virtual youtuber": {
     "girl": [
@@ -32995,7 +35586,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kite hasegawa",
+        "aliases": [
+          "kite hasegawa"
+        ]
+      },
+      {
+        "name": "kushizaki (vtuber)",
+        "aliases": [
+          "kushizaki (vtuber)"
+        ]
+      },
+      {
+        "name": "ryuugen drake",
+        "aliases": [
+          "ryuugen drake"
+        ]
+      },
+      {
+        "name": "shoto (vtuber)",
+        "aliases": [
+          "shoto (vtuber)"
+        ]
+      }
+    ]
   },
   "indivisible": {
     "girl": [
@@ -33099,7 +35715,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "inuyasha (character)",
+        "aliases": [
+          "inuyasha (character)"
+        ]
+      },
+      {
+        "name": "sesshoumaru",
+        "aliases": [
+          "sesshoumaru"
+        ]
+      }
+    ]
   },
   "iriam": {
     "girl": [
@@ -33396,7 +36025,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "hanako (jibaku shounen hanako-kun)",
+        "aliases": [
+          "hanako (jibaku shounen hanako-kun)"
+        ]
+      }
+    ]
   },
   "jigoku sensei nube": {
     "girl": [
@@ -33633,7 +36269,128 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "bruno bucciarati",
+        "aliases": [
+          "bruno bucciarati"
+        ]
+      },
+      {
+        "name": "diavolo",
+        "aliases": [
+          "diavolo"
+        ]
+      },
+      {
+        "name": "diego brando",
+        "aliases": [
+          "diego brando"
+        ]
+      },
+      {
+        "name": "guido mista",
+        "aliases": [
+          "guido mista"
+        ]
+      },
+      {
+        "name": "gyro zeppeli",
+        "aliases": [
+          "gyro zeppeli"
+        ]
+      },
+      {
+        "name": "higashikata josuke",
+        "aliases": [
+          "higashikata josuke"
+        ]
+      },
+      {
+        "name": "jean pierre polnareff",
+        "aliases": [
+          "jean pierre polnareff"
+        ]
+      },
+      {
+        "name": "jodio joestar",
+        "aliases": [
+          "jodio joestar"
+        ]
+      },
+      {
+        "name": "johnny joestar",
+        "aliases": [
+          "johnny joestar"
+        ]
+      },
+      {
+        "name": "jonathan joestar",
+        "aliases": [
+          "jonathan joestar"
+        ]
+      },
+      {
+        "name": "joseph joestar (young)",
+        "aliases": [
+          "joseph joestar (young)"
+        ]
+      },
+      {
+        "name": "kars (jojo)",
+        "aliases": [
+          "kars (jojo)"
+        ]
+      },
+      {
+        "name": "kira yoshikage",
+        "aliases": [
+          "kira yoshikage"
+        ]
+      },
+      {
+        "name": "kishibe rohan",
+        "aliases": [
+          "kishibe rohan"
+        ]
+      },
+      {
+        "name": "leone abbacchio",
+        "aliases": [
+          "leone abbacchio"
+        ]
+      },
+      {
+        "name": "melone",
+        "aliases": [
+          "melone"
+        ]
+      },
+      {
+        "name": "narancia ghirga",
+        "aliases": [
+          "narancia ghirga"
+        ]
+      },
+      {
+        "name": "pannacotta fugo",
+        "aliases": [
+          "pannacotta fugo"
+        ]
+      },
+      {
+        "name": "risotto nero",
+        "aliases": [
+          "risotto nero"
+        ]
+      },
+      {
+        "name": "vinegar doppio",
+        "aliases": [
+          "vinegar doppio"
+        ]
+      }
+    ]
   },
   "jormungand (manga)": {
     "girl": [
@@ -33748,7 +36505,110 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "choso (jujutsu kaisen)",
+        "aliases": [
+          "choso (jujutsu kaisen)"
+        ]
+      },
+      {
+        "name": "fushiguro megumi",
+        "aliases": [
+          "fushiguro megumi"
+        ]
+      },
+      {
+        "name": "fushiguro touji",
+        "aliases": [
+          "fushiguro touji"
+        ]
+      },
+      {
+        "name": "getou suguru",
+        "aliases": [
+          "getou suguru"
+        ]
+      },
+      {
+        "name": "gojo satoru",
+        "aliases": [
+          "gojo satoru"
+        ]
+      },
+      {
+        "name": "gojou satoru",
+        "aliases": [
+          "gojou satoru"
+        ]
+      },
+      {
+        "name": "higuruma hiromi",
+        "aliases": [
+          "higuruma hiromi"
+        ]
+      },
+      {
+        "name": "inumaki toge",
+        "aliases": [
+          "inumaki toge"
+        ]
+      },
+      {
+        "name": "itadori yuji",
+        "aliases": [
+          "itadori yuji"
+        ]
+      },
+      {
+        "name": "itadori yuuji",
+        "aliases": [
+          "itadori yuuji"
+        ]
+      },
+      {
+        "name": "kashimo hajime",
+        "aliases": [
+          "kashimo hajime"
+        ]
+      },
+      {
+        "name": "nanami kento",
+        "aliases": [
+          "nanami kento"
+        ]
+      },
+      {
+        "name": "okkotsu yuuta",
+        "aliases": [
+          "okkotsu yuuta"
+        ]
+      },
+      {
+        "name": "ryoumen sukuna (jujutsu kaisen)",
+        "aliases": [
+          "ryoumen sukuna (jujutsu kaisen)"
+        ]
+      },
+      {
+        "name": "ryoumen sukuna (true form) (jujutsu kaisen)",
+        "aliases": [
+          "ryoumen sukuna (true form) (jujutsu kaisen)"
+        ]
+      },
+      {
+        "name": "toudou aoi (jujutsu kaisen)",
+        "aliases": [
+          "toudou aoi (jujutsu kaisen)"
+        ]
+      },
+      {
+        "name": "zen'in naoya",
+        "aliases": [
+          "zen'in naoya"
+        ]
+      }
+    ]
   },
   "justice gakuen": {
     "girl": [
@@ -33799,7 +36659,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "okino tsukasa",
+        "aliases": [
+          "okino tsukasa"
+        ]
+      }
+    ]
   },
   "k-on!": {
     "girl": [
@@ -34148,7 +37015,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kamen rider 1",
+        "aliases": [
+          "kamen rider 1"
+        ]
+      },
+      {
+        "name": "kamen rider build",
+        "aliases": [
+          "kamen rider build"
+        ]
+      },
+      {
+        "name": "kamen rider geats",
+        "aliases": [
+          "kamen rider geats"
+        ]
+      },
+      {
+        "name": "kamen rider kuuga",
+        "aliases": [
+          "kamen rider kuuga"
+        ]
+      }
+    ]
   },
   "kamen rider 01 (series)": {
     "girl": [
@@ -37542,7 +40434,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "sawada tsunayoshi",
+        "aliases": [
+          "sawada tsunayoshi"
+        ]
+      }
+    ]
   },
   "kawaii dake ja nai shikimori-san": {
     "girl": [
@@ -38585,7 +41484,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "dark pit",
+        "aliases": [
+          "dark pit"
+        ]
+      },
+      {
+        "name": "pit (kid icarus)",
+        "aliases": [
+          "pit (kid icarus)"
+        ]
+      }
+    ]
   },
   "kiddy grade": {
     "girl": [
@@ -38815,7 +41727,86 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "agatsuma zenitsu",
+        "aliases": [
+          "agatsuma zenitsu"
+        ]
+      },
+      {
+        "name": "akaza (kimetsu no yaiba)",
+        "aliases": [
+          "akaza (kimetsu no yaiba)"
+        ]
+      },
+      {
+        "name": "douma (kimetsu no yaiba)",
+        "aliases": [
+          "douma (kimetsu no yaiba)"
+        ]
+      },
+      {
+        "name": "enmu (kimetsu no yaiba)",
+        "aliases": [
+          "enmu (kimetsu no yaiba)"
+        ]
+      },
+      {
+        "name": "hashibira inosuke",
+        "aliases": [
+          "hashibira inosuke"
+        ]
+      },
+      {
+        "name": "kamado tanjirou",
+        "aliases": [
+          "kamado tanjirou"
+        ]
+      },
+      {
+        "name": "kokushibou",
+        "aliases": [
+          "kokushibou"
+        ]
+      },
+      {
+        "name": "rengoku kyoujurou",
+        "aliases": [
+          "rengoku kyoujurou"
+        ]
+      },
+      {
+        "name": "shinazugawa sanemi",
+        "aliases": [
+          "shinazugawa sanemi"
+        ]
+      },
+      {
+        "name": "tokitou muichirou",
+        "aliases": [
+          "tokitou muichirou"
+        ]
+      },
+      {
+        "name": "tomioka giyuu",
+        "aliases": [
+          "tomioka giyuu"
+        ]
+      },
+      {
+        "name": "tsugikuni yoriichi",
+        "aliases": [
+          "tsugikuni yoriichi"
+        ]
+      },
+      {
+        "name": "uzui tengen",
+        "aliases": [
+          "uzui tengen"
+        ]
+      }
+    ]
   },
   "kimi ga nozomu eien": {
     "girl": [
@@ -39075,7 +42066,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "riku (kingdom hearts)",
+        "aliases": [
+          "riku (kingdom hearts)"
+        ]
+      },
+      {
+        "name": "roxas",
+        "aliases": [
+          "roxas"
+        ]
+      },
+      {
+        "name": "sora (kingdom hearts)",
+        "aliases": [
+          "sora (kingdom hearts)"
+        ]
+      }
+    ]
   },
   "kininatteru hito ga otoko ja nakatta": {
     "girl": [
@@ -39878,7 +42888,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "jinu (kpop demon hunters)",
+        "aliases": [
+          "jinu (kpop demon hunters)"
+        ]
+      }
+    ]
   },
   "krt girls": {
     "girl": [
@@ -40065,7 +43082,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "jinshi (kusuriya no hitorigoto)",
+        "aliases": [
+          "jinshi (kusuriya no hitorigoto)"
+        ]
+      }
+    ]
   },
   "kuzu no honkai": {
     "girl": [
@@ -40821,7 +43845,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "sett (league of legends)",
+        "aliases": [
+          "sett (league of legends)"
+        ]
+      }
+    ]
   },
   "leon the professional": {
     "girl": [
@@ -41090,7 +44121,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "klein moretti",
+        "aliases": [
+          "klein moretti"
+        ]
+      }
+    ]
   },
   "lost universe": {
     "girl": [
@@ -41740,7 +44778,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "arsene lupin iii",
+        "aliases": [
+          "arsene lupin iii"
+        ]
+      },
+      {
+        "name": "ishikawa goemon xiii",
+        "aliases": [
+          "ishikawa goemon xiii"
+        ]
+      },
+      {
+        "name": "jigen daisuke",
+        "aliases": [
+          "jigen daisuke"
+        ]
+      }
+    ]
   },
   "luvdia": {
     "girl": [
@@ -42244,7 +45301,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "maruruk",
+        "aliases": [
+          "maruruk"
+        ]
+      },
+      {
+        "name": "reg (made in abyss)",
+        "aliases": [
+          "reg (made in abyss)"
+        ]
+      },
+      {
+        "name": "regu (made in abyss)",
+        "aliases": [
+          "regu (made in abyss)"
+        ]
+      }
+    ]
   },
   "magi in wanchin basilica": {
     "girl": [
@@ -43535,7 +46611,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "bowser",
+        "aliases": [
+          "bowser"
+        ]
+      },
+      {
+        "name": "luigi",
+        "aliases": [
+          "luigi"
+        ]
+      }
+    ]
   },
   "marl kingdom": {
     "girl": [
@@ -43713,7 +46802,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "loki (marvel)",
+        "aliases": [
+          "loki (marvel)"
+        ]
+      },
+      {
+        "name": "miguel o'hara",
+        "aliases": [
+          "miguel o'hara"
+        ]
+      }
+    ]
   },
   "marvel vs. capcom": {
     "girl": [
@@ -43792,7 +46894,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "zilch alexander",
+        "aliases": [
+          "zilch alexander"
+        ]
+      }
+    ]
   },
   "material sniper": {
     "girl": [
@@ -44128,7 +47237,50 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "axl (mega man)",
+        "aliases": [
+          "axl (mega man)"
+        ]
+      },
+      {
+        "name": "bass.exe (mega man)",
+        "aliases": [
+          "bass.exe (mega man)"
+        ]
+      },
+      {
+        "name": "copy x (mega man)",
+        "aliases": [
+          "copy x (mega man)"
+        ]
+      },
+      {
+        "name": "megaman.exe",
+        "aliases": [
+          "megaman.exe"
+        ]
+      },
+      {
+        "name": "sage harpuia (mega man)",
+        "aliases": [
+          "sage harpuia (mega man)"
+        ]
+      },
+      {
+        "name": "x (mega man)",
+        "aliases": [
+          "x (mega man)"
+        ]
+      },
+      {
+        "name": "zero(z) (mega man)",
+        "aliases": [
+          "zero(z) (mega man)"
+        ]
+      }
+    ]
   },
   "meitantei conan": {
     "girl": [
@@ -44157,7 +47309,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "amuro tooru",
+        "aliases": [
+          "amuro tooru"
+        ]
+      },
+      {
+        "name": "edogawa conan",
+        "aliases": [
+          "edogawa conan"
+        ]
+      },
+      {
+        "name": "kudou shin'ichi",
+        "aliases": [
+          "kudou shin'ichi"
+        ]
+      }
+    ]
   },
   "melonbooks": {
     "girl": [
@@ -44307,7 +47478,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "raiden (metal gear)",
+        "aliases": [
+          "raiden (metal gear)"
+        ]
+      },
+      {
+        "name": "solid snake",
+        "aliases": [
+          "solid snake"
+        ]
+      }
+    ]
   },
   "metal slug": {
     "girl": [
@@ -44353,7 +47537,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "louis (metaphor: refantazio)",
+        "aliases": [
+          "louis (metaphor: refantazio)"
+        ]
+      },
+      {
+        "name": "protagonist (metaphor: refantazio)",
+        "aliases": [
+          "protagonist (metaphor: refantazio)"
+        ]
+      }
+    ]
   },
   "metroid": {
     "girl": [
@@ -45316,7 +48513,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ginko",
+        "aliases": [
+          "ginko"
+        ]
+      }
+    ]
   },
   "mushoku tensei": {
     "girl": [
@@ -45369,7 +48573,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "rudeus greyrat",
+        "aliases": [
+          "rudeus greyrat"
+        ]
+      }
+    ]
   },
   "musou orochi": {
     "girl": [
@@ -45965,7 +49176,86 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "deidara (naruto)",
+        "aliases": [
+          "deidara (naruto)"
+        ]
+      },
+      {
+        "name": "gaara (naruto)",
+        "aliases": [
+          "gaara (naruto)"
+        ]
+      },
+      {
+        "name": "hatake kakashi",
+        "aliases": [
+          "hatake kakashi"
+        ]
+      },
+      {
+        "name": "hidan (naruto)",
+        "aliases": [
+          "hidan (naruto)"
+        ]
+      },
+      {
+        "name": "orochimaru (naruto)",
+        "aliases": [
+          "orochimaru (naruto)"
+        ]
+      },
+      {
+        "name": "rock lee",
+        "aliases": [
+          "rock lee"
+        ]
+      },
+      {
+        "name": "sarutobi asuma",
+        "aliases": [
+          "sarutobi asuma"
+        ]
+      },
+      {
+        "name": "uchiha itachi",
+        "aliases": [
+          "uchiha itachi"
+        ]
+      },
+      {
+        "name": "uchiha madara",
+        "aliases": [
+          "uchiha madara"
+        ]
+      },
+      {
+        "name": "uchiha obito",
+        "aliases": [
+          "uchiha obito"
+        ]
+      },
+      {
+        "name": "uchiha sasuke",
+        "aliases": [
+          "uchiha sasuke"
+        ]
+      },
+      {
+        "name": "uzumaki boruto",
+        "aliases": [
+          "uzumaki boruto"
+        ]
+      },
+      {
+        "name": "uzumaki naruto",
+        "aliases": [
+          "uzumaki naruto"
+        ]
+      }
+    ]
   },
   "natsuzora kanata": {
     "girl": [
@@ -46150,7 +49440,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ikari shinji",
+        "aliases": [
+          "ikari shinji"
+        ]
+      },
+      {
+        "name": "nagisa kaworu",
+        "aliases": [
+          "nagisa kaworu"
+        ]
+      }
+    ]
   },
   "neptune (series)": {
     "girl": [
@@ -46538,7 +49841,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "9s (nier:automata)",
+        "aliases": [
+          "9s (nier:automata)"
+        ]
+      },
+      {
+        "name": "nier (brother)",
+        "aliases": [
+          "nier (brother)"
+        ]
+      }
+    ]
   },
   "night wizard": {
     "girl": [
@@ -47790,7 +51106,320 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "alban knox",
+        "aliases": [
+          "alban knox"
+        ]
+      },
+      {
+        "name": "alban knox (1st costume)",
+        "aliases": [
+          "alban knox (1st costume)"
+        ]
+      },
+      {
+        "name": "aster arcadia",
+        "aliases": [
+          "aster arcadia"
+        ]
+      },
+      {
+        "name": "axia krone",
+        "aliases": [
+          "axia krone"
+        ]
+      },
+      {
+        "name": "belmond banderas",
+        "aliases": [
+          "belmond banderas"
+        ]
+      },
+      {
+        "name": "doppio dropscythe",
+        "aliases": [
+          "doppio dropscythe"
+        ]
+      },
+      {
+        "name": "fura kanato",
+        "aliases": [
+          "fura kanato"
+        ]
+      },
+      {
+        "name": "fushimi gaku",
+        "aliases": [
+          "fushimi gaku"
+        ]
+      },
+      {
+        "name": "fuwa minato",
+        "aliases": [
+          "fuwa minato"
+        ]
+      },
+      {
+        "name": "hanabatake chaika",
+        "aliases": [
+          "hanabatake chaika"
+        ]
+      },
+      {
+        "name": "hibachi mana",
+        "aliases": [
+          "hibachi mana"
+        ]
+      },
+      {
+        "name": "hoshirube sho",
+        "aliases": [
+          "hoshirube sho"
+        ]
+      },
+      {
+        "name": "hoshirube sho (1st costume)",
+        "aliases": [
+          "hoshirube sho (1st costume)"
+        ]
+      },
+      {
+        "name": "ibrahim (nijisanji)",
+        "aliases": [
+          "ibrahim (nijisanji)"
+        ]
+      },
+      {
+        "name": "ike eveland",
+        "aliases": [
+          "ike eveland"
+        ]
+      },
+      {
+        "name": "ike eveland (1st costume)",
+        "aliases": [
+          "ike eveland (1st costume)"
+        ]
+      },
+      {
+        "name": "inami rai",
+        "aliases": [
+          "inami rai"
+        ]
+      },
+      {
+        "name": "kagami hayato",
+        "aliases": [
+          "kagami hayato"
+        ]
+      },
+      {
+        "name": "kaida haru",
+        "aliases": [
+          "kaida haru"
+        ]
+      },
+      {
+        "name": "kanae (nijisanji)",
+        "aliases": [
+          "kanae (nijisanji)"
+        ]
+      },
+      {
+        "name": "kenmochi touya (1st costume)",
+        "aliases": [
+          "kenmochi touya (1st costume)"
+        ]
+      },
+      {
+        "name": "kuzuha (1st costume) (nijisanji)",
+        "aliases": [
+          "kuzuha (1st costume) (nijisanji)"
+        ]
+      },
+      {
+        "name": "lauren iroas",
+        "aliases": [
+          "lauren iroas"
+        ]
+      },
+      {
+        "name": "lauren iroas (1st costume)",
+        "aliases": [
+          "lauren iroas (1st costume)"
+        ]
+      },
+      {
+        "name": "luca kaneshiro",
+        "aliases": [
+          "luca kaneshiro"
+        ]
+      },
+      {
+        "name": "luca kaneshiro (1st costume)",
+        "aliases": [
+          "luca kaneshiro (1st costume)"
+        ]
+      },
+      {
+        "name": "mashiro (1st costume) (nijisanji)",
+        "aliases": [
+          "mashiro (1st costume) (nijisanji)"
+        ]
+      },
+      {
+        "name": "mashiro (nijisanji)",
+        "aliases": [
+          "mashiro (nijisanji)"
+        ]
+      },
+      {
+        "name": "mashiro meme",
+        "aliases": [
+          "mashiro meme"
+        ]
+      },
+      {
+        "name": "mashiro meme (1st costume)",
+        "aliases": [
+          "mashiro meme (1st costume)"
+        ]
+      },
+      {
+        "name": "mayuzumi kai",
+        "aliases": [
+          "mayuzumi kai"
+        ]
+      },
+      {
+        "name": "mayuzumi kai (1st costume)",
+        "aliases": [
+          "mayuzumi kai (1st costume)"
+        ]
+      },
+      {
+        "name": "murakumo kagetsu",
+        "aliases": [
+          "murakumo kagetsu"
+        ]
+      },
+      {
+        "name": "mysta rias",
+        "aliases": [
+          "mysta rias"
+        ]
+      },
+      {
+        "name": "mysta rias (1st costume)",
+        "aliases": [
+          "mysta rias (1st costume)"
+        ]
+      },
+      {
+        "name": "ren zotto",
+        "aliases": [
+          "ren zotto"
+        ]
+      },
+      {
+        "name": "saegusa akina",
+        "aliases": [
+          "saegusa akina"
+        ]
+      },
+      {
+        "name": "saegusa akina (1st costume)",
+        "aliases": [
+          "saegusa akina (1st costume)"
+        ]
+      },
+      {
+        "name": "saiki ittetsu",
+        "aliases": [
+          "saiki ittetsu"
+        ]
+      },
+      {
+        "name": "shellin burgundy",
+        "aliases": [
+          "shellin burgundy"
+        ]
+      },
+      {
+        "name": "shu yamino",
+        "aliases": [
+          "shu yamino"
+        ]
+      },
+      {
+        "name": "sonny brisko",
+        "aliases": [
+          "sonny brisko"
+        ]
+      },
+      {
+        "name": "suzuki masaru",
+        "aliases": [
+          "suzuki masaru"
+        ]
+      },
+      {
+        "name": "uki violeta",
+        "aliases": [
+          "uki violeta"
+        ]
+      },
+      {
+        "name": "uzuki kou",
+        "aliases": [
+          "uzuki kou"
+        ]
+      },
+      {
+        "name": "uzuki kou (3rd costume)",
+        "aliases": [
+          "uzuki kou (3rd costume)"
+        ]
+      },
+      {
+        "name": "uzuki kou (5th costume)",
+        "aliases": [
+          "uzuki kou (5th costume)"
+        ]
+      },
+      {
+        "name": "vox akuma",
+        "aliases": [
+          "vox akuma"
+        ]
+      },
+      {
+        "name": "vox akuma (1st costume)",
+        "aliases": [
+          "vox akuma (1st costume)"
+        ]
+      },
+      {
+        "name": "watarai hibari",
+        "aliases": [
+          "watarai hibari"
+        ]
+      },
+      {
+        "name": "yashiro kizuku",
+        "aliases": [
+          "yashiro kizuku"
+        ]
+      },
+      {
+        "name": "yumeoi kakeru",
+        "aliases": [
+          "yumeoi kakeru"
+        ]
+      }
+    ]
   },
   "nikki (series)": {
     "girl": [
@@ -48060,7 +51689,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "inuyama tamaki",
+        "aliases": [
+          "inuyama tamaki"
+        ]
+      },
+      {
+        "name": "inuyama tamaki (1st costume)",
+        "aliases": [
+          "inuyama tamaki (1st costume)"
+        ]
+      }
+    ]
   },
   "noworld": {
     "girl": [
@@ -48297,7 +51939,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kim dokja",
+        "aliases": [
+          "kim dokja"
+        ]
+      },
+      {
+        "name": "yoo joonghyuk",
+        "aliases": [
+          "yoo joonghyuk"
+        ]
+      }
+    ]
   },
   "omoide no marnie": {
     "girl": [
@@ -48355,7 +52010,74 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "basil (faraway) (omori)",
+        "aliases": [
+          "basil (faraway) (omori)"
+        ]
+      },
+      {
+        "name": "basil (headspace) (omori)",
+        "aliases": [
+          "basil (headspace) (omori)"
+        ]
+      },
+      {
+        "name": "basil (omori)",
+        "aliases": [
+          "basil (omori)"
+        ]
+      },
+      {
+        "name": "captain spaceboy",
+        "aliases": [
+          "captain spaceboy"
+        ]
+      },
+      {
+        "name": "hero (faraway) (omori)",
+        "aliases": [
+          "hero (faraway) (omori)"
+        ]
+      },
+      {
+        "name": "hero (omori)",
+        "aliases": [
+          "hero (omori)"
+        ]
+      },
+      {
+        "name": "kel (faraway) (omori)",
+        "aliases": [
+          "kel (faraway) (omori)"
+        ]
+      },
+      {
+        "name": "kel (headspace) (omori)",
+        "aliases": [
+          "kel (headspace) (omori)"
+        ]
+      },
+      {
+        "name": "kel (omori)",
+        "aliases": [
+          "kel (omori)"
+        ]
+      },
+      {
+        "name": "omori (omori)",
+        "aliases": [
+          "omori (omori)"
+        ]
+      },
+      {
+        "name": "sunny (omori)",
+        "aliases": [
+          "sunny (omori)"
+        ]
+      }
+    ]
   },
   "one - kagayaku kisetsu e": {
     "girl": [
@@ -48563,7 +52285,170 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "borsalino (kizaru)",
+        "aliases": [
+          "borsalino (kizaru)"
+        ]
+      },
+      {
+        "name": "brook (one piece)",
+        "aliases": [
+          "brook (one piece)"
+        ]
+      },
+      {
+        "name": "buggy the clown",
+        "aliases": [
+          "buggy the clown"
+        ]
+      },
+      {
+        "name": "crocodile (one piece)",
+        "aliases": [
+          "crocodile (one piece)"
+        ]
+      },
+      {
+        "name": "donquixote doflamingo",
+        "aliases": [
+          "donquixote doflamingo"
+        ]
+      },
+      {
+        "name": "donquixote rocinante",
+        "aliases": [
+          "donquixote rocinante"
+        ]
+      },
+      {
+        "name": "dracule mihawk",
+        "aliases": [
+          "dracule mihawk"
+        ]
+      },
+      {
+        "name": "eustass kid",
+        "aliases": [
+          "eustass kid"
+        ]
+      },
+      {
+        "name": "franky (one piece)",
+        "aliases": [
+          "franky (one piece)"
+        ]
+      },
+      {
+        "name": "gol d. roger",
+        "aliases": [
+          "gol d. roger"
+        ]
+      },
+      {
+        "name": "jinbe (one piece)",
+        "aliases": [
+          "jinbe (one piece)"
+        ]
+      },
+      {
+        "name": "kikunojo (one piece)",
+        "aliases": [
+          "kikunojo (one piece)"
+        ]
+      },
+      {
+        "name": "killer (one piece)",
+        "aliases": [
+          "killer (one piece)"
+        ]
+      },
+      {
+        "name": "king (one piece)",
+        "aliases": [
+          "king (one piece)"
+        ]
+      },
+      {
+        "name": "koby (one piece)",
+        "aliases": [
+          "koby (one piece)"
+        ]
+      },
+      {
+        "name": "marco (one piece)",
+        "aliases": [
+          "marco (one piece)"
+        ]
+      },
+      {
+        "name": "monkey d. garp",
+        "aliases": [
+          "monkey d. garp"
+        ]
+      },
+      {
+        "name": "monkey d. luffy",
+        "aliases": [
+          "monkey d. luffy"
+        ]
+      },
+      {
+        "name": "portgas d. ace",
+        "aliases": [
+          "portgas d. ace"
+        ]
+      },
+      {
+        "name": "roronoa zoro",
+        "aliases": [
+          "roronoa zoro"
+        ]
+      },
+      {
+        "name": "sabo (one piece)",
+        "aliases": [
+          "sabo (one piece)"
+        ]
+      },
+      {
+        "name": "sanji (one piece)",
+        "aliases": [
+          "sanji (one piece)"
+        ]
+      },
+      {
+        "name": "shanks (one piece)",
+        "aliases": [
+          "shanks (one piece)"
+        ]
+      },
+      {
+        "name": "silvers rayleigh",
+        "aliases": [
+          "silvers rayleigh"
+        ]
+      },
+      {
+        "name": "smoker (one piece)",
+        "aliases": [
+          "smoker (one piece)"
+        ]
+      },
+      {
+        "name": "usopp",
+        "aliases": [
+          "usopp"
+        ]
+      },
+      {
+        "name": "x drake",
+        "aliases": [
+          "x drake"
+        ]
+      }
+    ]
   },
   "one-punch man": {
     "girl": [
@@ -48592,7 +52477,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "genos",
+        "aliases": [
+          "genos"
+        ]
+      },
+      {
+        "name": "onsoku no sonic",
+        "aliases": [
+          "onsoku no sonic"
+        ]
+      },
+      {
+        "name": "saitama (one-punch man)",
+        "aliases": [
+          "saitama (one-punch man)"
+        ]
+      }
+    ]
   },
   "onegai teacher": {
     "girl": [
@@ -48762,7 +52666,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "taishakuten (onmyoji)",
+        "aliases": [
+          "taishakuten (onmyoji)"
+        ]
+      }
+    ]
   },
   "onna shunin kishi mieko": {
     "girl": [
@@ -49027,7 +52938,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "hoshino aquamarine",
+        "aliases": [
+          "hoshino aquamarine"
+        ]
+      }
+    ]
   },
   "oshiete! galko-chan": {
     "girl": [
@@ -49405,7 +53323,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "reaper (overwatch)",
+        "aliases": [
+          "reaper (overwatch)"
+        ]
+      },
+      {
+        "name": "reinhardt (overwatch)",
+        "aliases": [
+          "reinhardt (overwatch)"
+        ]
+      },
+      {
+        "name": "soldier: 76 (overwatch)",
+        "aliases": [
+          "soldier: 76 (overwatch)"
+        ]
+      }
+    ]
   },
   "owari no seraph": {
     "girl": [
@@ -49932,7 +53869,74 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "adachi tooru",
+        "aliases": [
+          "adachi tooru"
+        ]
+      },
+      {
+        "name": "akechi gorou",
+        "aliases": [
+          "akechi gorou"
+        ]
+      },
+      {
+        "name": "amamiya ren",
+        "aliases": [
+          "amamiya ren"
+        ]
+      },
+      {
+        "name": "aragaki shinjirou",
+        "aliases": [
+          "aragaki shinjirou"
+        ]
+      },
+      {
+        "name": "hanamura yousuke",
+        "aliases": [
+          "hanamura yousuke"
+        ]
+      },
+      {
+        "name": "kitagawa yuusuke",
+        "aliases": [
+          "kitagawa yuusuke"
+        ]
+      },
+      {
+        "name": "mochizuki ryouji",
+        "aliases": [
+          "mochizuki ryouji"
+        ]
+      },
+      {
+        "name": "narukami yuu",
+        "aliases": [
+          "narukami yuu"
+        ]
+      },
+      {
+        "name": "sanada akihiko",
+        "aliases": [
+          "sanada akihiko"
+        ]
+      },
+      {
+        "name": "yuuki makoto",
+        "aliases": [
+          "yuuki makoto"
+        ]
+      },
+      {
+        "name": "yuuki makoto (persona 3)",
+        "aliases": [
+          "yuuki makoto (persona 3)"
+        ]
+      }
+    ]
   },
   "phantasy star": {
     "girl": [
@@ -51544,7 +55548,266 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "adaman (pokemon)",
+        "aliases": [
+          "adaman (pokemon)"
+        ]
+      },
+      {
+        "name": "allister (pokemon)",
+        "aliases": [
+          "allister (pokemon)"
+        ]
+      },
+      {
+        "name": "amethio (pokemon)",
+        "aliases": [
+          "amethio (pokemon)"
+        ]
+      },
+      {
+        "name": "archer (pokemon)",
+        "aliases": [
+          "archer (pokemon)"
+        ]
+      },
+      {
+        "name": "archie (pokemon)",
+        "aliases": [
+          "archie (pokemon)"
+        ]
+      },
+      {
+        "name": "arven (pokemon)",
+        "aliases": [
+          "arven (pokemon)"
+        ]
+      },
+      {
+        "name": "ash ketchum",
+        "aliases": [
+          "ash ketchum"
+        ]
+      },
+      {
+        "name": "bede (pokemon)",
+        "aliases": [
+          "bede (pokemon)"
+        ]
+      },
+      {
+        "name": "blue oak",
+        "aliases": [
+          "blue oak"
+        ]
+      },
+      {
+        "name": "brendan (pokemon)",
+        "aliases": [
+          "brendan (pokemon)"
+        ]
+      },
+      {
+        "name": "calem (pokemon)",
+        "aliases": [
+          "calem (pokemon)"
+        ]
+      },
+      {
+        "name": "clemont (pokemon)",
+        "aliases": [
+          "clemont (pokemon)"
+        ]
+      },
+      {
+        "name": "corbeau (pokemon)",
+        "aliases": [
+          "corbeau (pokemon)"
+        ]
+      },
+      {
+        "name": "emmet (pokemon)",
+        "aliases": [
+          "emmet (pokemon)"
+        ]
+      },
+      {
+        "name": "ethan (pokemon)",
+        "aliases": [
+          "ethan (pokemon)"
+        ]
+      },
+      {
+        "name": "florian (pokemon)",
+        "aliases": [
+          "florian (pokemon)"
+        ]
+      },
+      {
+        "name": "giacomo (pokemon)",
+        "aliases": [
+          "giacomo (pokemon)"
+        ]
+      },
+      {
+        "name": "gladion (pokemon)",
+        "aliases": [
+          "gladion (pokemon)"
+        ]
+      },
+      {
+        "name": "goh (pokemon)",
+        "aliases": [
+          "goh (pokemon)"
+        ]
+      },
+      {
+        "name": "grimsley (pokemon)",
+        "aliases": [
+          "grimsley (pokemon)"
+        ]
+      },
+      {
+        "name": "grusha (pokemon)",
+        "aliases": [
+          "grusha (pokemon)"
+        ]
+      },
+      {
+        "name": "guzma (pokemon)",
+        "aliases": [
+          "guzma (pokemon)"
+        ]
+      },
+      {
+        "name": "hau (pokemon)",
+        "aliases": [
+          "hau (pokemon)"
+        ]
+      },
+      {
+        "name": "hilbert (pokemon)",
+        "aliases": [
+          "hilbert (pokemon)"
+        ]
+      },
+      {
+        "name": "hop (pokemon)",
+        "aliases": [
+          "hop (pokemon)"
+        ]
+      },
+      {
+        "name": "incineroar",
+        "aliases": [
+          "incineroar"
+        ]
+      },
+      {
+        "name": "ingo (pokemon)",
+        "aliases": [
+          "ingo (pokemon)"
+        ]
+      },
+      {
+        "name": "james (pokemon)",
+        "aliases": [
+          "james (pokemon)"
+        ]
+      },
+      {
+        "name": "kabu (pokemon)",
+        "aliases": [
+          "kabu (pokemon)"
+        ]
+      },
+      {
+        "name": "kieran (pokemon)",
+        "aliases": [
+          "kieran (pokemon)"
+        ]
+      },
+      {
+        "name": "lance (pokemon)",
+        "aliases": [
+          "lance (pokemon)"
+        ]
+      },
+      {
+        "name": "leon (pokemon)",
+        "aliases": [
+          "leon (pokemon)"
+        ]
+      },
+      {
+        "name": "n (pokemon)",
+        "aliases": [
+          "n (pokemon)"
+        ]
+      },
+      {
+        "name": "nate (pokemon)",
+        "aliases": [
+          "nate (pokemon)"
+        ]
+      },
+      {
+        "name": "piers (pokemon)",
+        "aliases": [
+          "piers (pokemon)"
+        ]
+      },
+      {
+        "name": "raihan (pokemon)",
+        "aliases": [
+          "raihan (pokemon)"
+        ]
+      },
+      {
+        "name": "red (pokemon)",
+        "aliases": [
+          "red (pokemon)"
+        ]
+      },
+      {
+        "name": "rei (pokemon)",
+        "aliases": [
+          "rei (pokemon)"
+        ]
+      },
+      {
+        "name": "saturn (pokemon)",
+        "aliases": [
+          "saturn (pokemon)"
+        ]
+      },
+      {
+        "name": "silver (pokemon)",
+        "aliases": [
+          "silver (pokemon)"
+        ]
+      },
+      {
+        "name": "steven stone",
+        "aliases": [
+          "steven stone"
+        ]
+      },
+      {
+        "name": "urbain (pokemon)",
+        "aliases": [
+          "urbain (pokemon)"
+        ]
+      },
+      {
+        "name": "volo (pokemon)",
+        "aliases": [
+          "volo (pokemon)"
+        ]
+      }
+    ]
   },
   "pop-up story": {
     "girl": [
@@ -53077,7 +57340,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "yuki (princess connect!)",
+        "aliases": [
+          "yuki (princess connect!)"
+        ]
+      }
+    ]
   },
   "princess crown": {
     "girl": [
@@ -53462,7 +57732,62 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "argalia (project moon)",
+        "aliases": [
+          "argalia (project moon)"
+        ]
+      },
+      {
+        "name": "chesed (project moon)",
+        "aliases": [
+          "chesed (project moon)"
+        ]
+      },
+      {
+        "name": "heathcliff (project moon)",
+        "aliases": [
+          "heathcliff (project moon)"
+        ]
+      },
+      {
+        "name": "meursault (project moon)",
+        "aliases": [
+          "meursault (project moon)"
+        ]
+      },
+      {
+        "name": "netzach (project moon)",
+        "aliases": [
+          "netzach (project moon)"
+        ]
+      },
+      {
+        "name": "sinclair (project moon)",
+        "aliases": [
+          "sinclair (project moon)"
+        ]
+      },
+      {
+        "name": "vergilius (project moon)",
+        "aliases": [
+          "vergilius (project moon)"
+        ]
+      },
+      {
+        "name": "yesod (project moon)",
+        "aliases": [
+          "yesod (project moon)"
+        ]
+      },
+      {
+        "name": "yi sang (project moon)",
+        "aliases": [
+          "yi sang (project moon)"
+        ]
+      }
+    ]
   },
   "project sekai": {
     "girl": [
@@ -53581,7 +57906,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aoyagi touya",
+        "aliases": [
+          "aoyagi touya"
+        ]
+      },
+      {
+        "name": "kamishiro rui",
+        "aliases": [
+          "kamishiro rui"
+        ]
+      },
+      {
+        "name": "shinonome akito",
+        "aliases": [
+          "shinonome akito"
+        ]
+      },
+      {
+        "name": "tenma tsukasa",
+        "aliases": [
+          "tenma tsukasa"
+        ]
+      }
+    ]
   },
   "promare": {
     "girl": [
@@ -53592,7 +57942,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "galo thymos",
+        "aliases": [
+          "galo thymos"
+        ]
+      },
+      {
+        "name": "lio fotia",
+        "aliases": [
+          "lio fotia"
+        ]
+      }
+    ]
   },
   "propro production": {
     "girl": [
@@ -53882,7 +58245,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "wanshi (pgr)",
+        "aliases": [
+          "wanshi (pgr)"
+        ]
+      }
+    ]
   },
   "pure pure": {
     "girl": [
@@ -53976,7 +58346,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "sig (puyopuyo)",
+        "aliases": [
+          "sig (puyopuyo)"
+        ]
+      }
+    ]
   },
   "puzzle & dragons": {
     "girl": [
@@ -54769,7 +59146,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "despair god morroc",
+        "aliases": [
+          "despair god morroc"
+        ]
+      },
+      {
+        "name": "minstrel (ragnarok online)",
+        "aliases": [
+          "minstrel (ragnarok online)"
+        ]
+      }
+    ]
   },
   "rakudai kishi no cavalry": {
     "girl": [
@@ -54867,7 +59257,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "hibiki ryouga",
+        "aliases": [
+          "hibiki ryouga"
+        ]
+      },
+      {
+        "name": "saotome ranma (male)",
+        "aliases": [
+          "saotome ranma (male)"
+        ]
+      }
+    ]
   },
   "re:act": {
     "girl": [
@@ -55139,7 +59542,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "felix argyle",
+        "aliases": [
+          "felix argyle"
+        ]
+      },
+      {
+        "name": "natsuki subaru",
+        "aliases": [
+          "natsuki subaru"
+        ]
+      }
+    ]
   },
   "read or die": {
     "girl": [
@@ -55430,7 +59846,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "carlos oliveira",
+        "aliases": [
+          "carlos oliveira"
+        ]
+      },
+      {
+        "name": "chris redfield",
+        "aliases": [
+          "chris redfield"
+        ]
+      },
+      {
+        "name": "leon s. kennedy",
+        "aliases": [
+          "leon s. kennedy"
+        ]
+      },
+      {
+        "name": "piers nivans",
+        "aliases": [
+          "piers nivans"
+        ]
+      }
+    ]
   },
   "return of the mount hua sect": {
     "girl": [
@@ -55800,7 +60241,50 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "6 (reverse:1999)",
+        "aliases": [
+          "6 (reverse:1999)"
+        ]
+      },
+      {
+        "name": "enigma (reverse:1999)",
+        "aliases": [
+          "enigma (reverse:1999)"
+        ]
+      },
+      {
+        "name": "ezra theodore",
+        "aliases": [
+          "ezra theodore"
+        ]
+      },
+      {
+        "name": "getian (reverse:1999)",
+        "aliases": [
+          "getian (reverse:1999)"
+        ]
+      },
+      {
+        "name": "j (reverse:1999)",
+        "aliases": [
+          "j (reverse:1999)"
+        ]
+      },
+      {
+        "name": "shamane",
+        "aliases": [
+          "shamane"
+        ]
+      },
+      {
+        "name": "x (reverse:1999)",
+        "aliases": [
+          "x (reverse:1999)"
+        ]
+      }
+    ]
   },
   "rewrite": {
     "girl": [
@@ -56147,7 +60631,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "himura kenshin",
+        "aliases": [
+          "himura kenshin"
+        ]
+      }
+    ]
   },
   "rwby": {
     "girl": [
@@ -56415,7 +60906,86 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aiba ibuki",
+        "aliases": [
+          "aiba ibuki"
+        ]
+      },
+      {
+        "name": "atou haruki",
+        "aliases": [
+          "atou haruki"
+        ]
+      },
+      {
+        "name": "harada minoru",
+        "aliases": [
+          "harada minoru"
+        ]
+      },
+      {
+        "name": "harada mutei",
+        "aliases": [
+          "harada mutei"
+        ]
+      },
+      {
+        "name": "hatsutori hajime",
+        "aliases": [
+          "hatsutori hajime"
+        ]
+      },
+      {
+        "name": "isoi haruki",
+        "aliases": [
+          "isoi haruki"
+        ]
+      },
+      {
+        "name": "isoi reiji",
+        "aliases": [
+          "isoi reiji"
+        ]
+      },
+      {
+        "name": "jabuchi you",
+        "aliases": [
+          "jabuchi you"
+        ]
+      },
+      {
+        "name": "kanou aogu",
+        "aliases": [
+          "kanou aogu"
+        ]
+      },
+      {
+        "name": "nijou ryuu",
+        "aliases": [
+          "nijou ryuu"
+        ]
+      },
+      {
+        "name": "shinano eiji",
+        "aliases": [
+          "shinano eiji"
+        ]
+      },
+      {
+        "name": "theodore riddle",
+        "aliases": [
+          "theodore riddle"
+        ]
+      },
+      {
+        "name": "utsugi noriyuki",
+        "aliases": [
+          "utsugi noriyuki"
+        ]
+      }
+    ]
   },
   "saikin yatotta maid ga ayashii": {
     "girl": [
@@ -56488,7 +61058,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "nagumo (sakamoto days)",
+        "aliases": [
+          "nagumo (sakamoto days)"
+        ]
+      }
+    ]
   },
   "saki (manga)": {
     "girl": [
@@ -57109,7 +61686,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "itoshiki nozomu",
+        "aliases": [
+          "itoshiki nozomu"
+        ]
+      }
+    ]
   },
   "school days": {
     "girl": [
@@ -57316,7 +61900,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "okabe rintarou (beta)",
+        "aliases": [
+          "okabe rintarou (beta)"
+        ]
+      },
+      {
+        "name": "urushibara luka",
+        "aliases": [
+          "urushibara luka"
+        ]
+      }
+    ]
   },
   "scooby-doo": {
     "girl": [
@@ -57513,7 +62110,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "otori tan",
+        "aliases": [
+          "otori tan"
+        ]
+      }
+    ]
   },
   "seitokai no ichizon": {
     "girl": [
@@ -57718,7 +62322,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "sekiro",
+        "aliases": [
+          "sekiro"
+        ]
+      }
+    ]
   },
   "sen no kiseki (series)": {
     "girl": [
@@ -57847,7 +62458,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "chousokabe motochika (sengoku basara)",
+        "aliases": [
+          "chousokabe motochika (sengoku basara)"
+        ]
+      },
+      {
+        "name": "mouri motonari (sengoku basara)",
+        "aliases": [
+          "mouri motonari (sengoku basara)"
+        ]
+      }
+    ]
   },
   "sengoku bushouki muramasa": {
     "girl": [
@@ -58128,7 +62752,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "takeda harumi (shiromanta)",
+        "aliases": [
+          "takeda harumi (shiromanta)"
+        ]
+      }
+    ]
   },
   "senran kagura": {
     "girl": [
@@ -58849,7 +63480,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "demi-fiend",
+        "aliases": [
+          "demi-fiend"
+        ]
+      },
+      {
+        "name": "protagonist (smtv)",
+        "aliases": [
+          "protagonist (smtv)"
+        ]
+      }
+    ]
   },
   "shin sangoku musou": {
     "girl": [
@@ -58984,7 +63628,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "armin arlert",
+        "aliases": [
+          "armin arlert"
+        ]
+      },
+      {
+        "name": "bertolt hoover",
+        "aliases": [
+          "bertolt hoover"
+        ]
+      },
+      {
+        "name": "eren yeager",
+        "aliases": [
+          "eren yeager"
+        ]
+      },
+      {
+        "name": "erwin smith",
+        "aliases": [
+          "erwin smith"
+        ]
+      },
+      {
+        "name": "levi (shingeki no kyojin)",
+        "aliases": [
+          "levi (shingeki no kyojin)"
+        ]
+      },
+      {
+        "name": "reiner braun",
+        "aliases": [
+          "reiner braun"
+        ]
+      }
+    ]
   },
   "shinigami bocchan to kuro maid": {
     "girl": [
@@ -59736,7 +64417,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "gretel (sinoalice)",
+        "aliases": [
+          "gretel (sinoalice)"
+        ]
+      },
+      {
+        "name": "pinocchio (sinoalice)",
+        "aliases": [
+          "pinocchio (sinoalice)"
+        ]
+      }
+    ]
   },
   "sister princess": {
     "girl": [
@@ -59935,7 +64629,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "mimizuku (sky: children of the light)",
+        "aliases": [
+          "mimizuku (sky: children of the light)"
+        ]
+      }
+    ]
   },
   "slay the princess": {
     "girl": [
@@ -60086,7 +64787,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "sung jin-woo",
+        "aliases": [
+          "sung jin-woo"
+        ]
+      }
+    ]
   },
   "solty rei": {
     "girl": [
@@ -60156,7 +64864,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "knuckles the echidna",
+        "aliases": [
+          "knuckles the echidna"
+        ]
+      },
+      {
+        "name": "metal sonic",
+        "aliases": [
+          "metal sonic"
+        ]
+      },
+      {
+        "name": "shadow the hedgehog",
+        "aliases": [
+          "shadow the hedgehog"
+        ]
+      },
+      {
+        "name": "silver the hedgehog",
+        "aliases": [
+          "silver the hedgehog"
+        ]
+      },
+      {
+        "name": "sonic the hedgehog",
+        "aliases": [
+          "sonic the hedgehog"
+        ]
+      },
+      {
+        "name": "tails (sonic)",
+        "aliases": [
+          "tails (sonic)"
+        ]
+      }
+    ]
   },
   "sono bisque doll wa koi wo suru": {
     "girl": [
@@ -60565,7 +65310,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "himmel (sousou no frieren)",
+        "aliases": [
+          "himmel (sousou no frieren)"
+        ]
+      },
+      {
+        "name": "stark (sousou no frieren)",
+        "aliases": [
+          "stark (sousou no frieren)"
+        ]
+      }
+    ]
   },
   "space channel 5": {
     "girl": [
@@ -60822,7 +65580,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "twilight (spy x family)",
+        "aliases": [
+          "twilight (spy x family)"
+        ]
+      }
+    ]
   },
   "ss kabushikigaisha": {
     "girl": [
@@ -61388,7 +66153,62 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "akuma (street fighter)",
+        "aliases": [
+          "akuma (street fighter)"
+        ]
+      },
+      {
+        "name": "ed (street fighter)",
+        "aliases": [
+          "ed (street fighter)"
+        ]
+      },
+      {
+        "name": "guile",
+        "aliases": [
+          "guile"
+        ]
+      },
+      {
+        "name": "jamie siu",
+        "aliases": [
+          "jamie siu"
+        ]
+      },
+      {
+        "name": "jp (street fighter)",
+        "aliases": [
+          "jp (street fighter)"
+        ]
+      },
+      {
+        "name": "ken masters",
+        "aliases": [
+          "ken masters"
+        ]
+      },
+      {
+        "name": "luke sullivan",
+        "aliases": [
+          "luke sullivan"
+        ]
+      },
+      {
+        "name": "ryu (street fighter)",
+        "aliases": [
+          "ryu (street fighter)"
+        ]
+      },
+      {
+        "name": "zangief",
+        "aliases": [
+          "zangief"
+        ]
+      }
+    ]
   },
   "street fighter ii (series)": {
     "girl": [
@@ -62376,7 +67196,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "eugeo",
+        "aliases": [
+          "eugeo"
+        ]
+      },
+      {
+        "name": "kirito",
+        "aliases": [
+          "kirito"
+        ]
+      },
+      {
+        "name": "kirito (sao-ggo)",
+        "aliases": [
+          "kirito (sao-ggo)"
+        ]
+      }
+    ]
   },
   "sword girls": {
     "girl": [
@@ -62837,7 +67676,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "luke fon fabre",
+        "aliases": [
+          "luke fon fabre"
+        ]
+      },
+      {
+        "name": "yuri lowell",
+        "aliases": [
+          "yuri lowell"
+        ]
+      }
+    ]
   },
   "tamako market": {
     "girl": [
@@ -63009,7 +67861,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "iwatani naofumi",
+        "aliases": [
+          "iwatani naofumi"
+        ]
+      }
+    ]
   },
   "tayutama": {
     "girl": [
@@ -63054,7 +67913,32 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "artem wing (tears of themis)",
+        "aliases": [
+          "artem wing (tears of themis)"
+        ]
+      },
+      {
+        "name": "luke pearce (tears of themis)",
+        "aliases": [
+          "luke pearce (tears of themis)"
+        ]
+      },
+      {
+        "name": "marius von hagen (tears of themis)",
+        "aliases": [
+          "marius von hagen (tears of themis)"
+        ]
+      },
+      {
+        "name": "vyn richter (tears of themis)",
+        "aliases": [
+          "vyn richter (tears of themis)"
+        ]
+      }
+    ]
   },
   "teenage mutant ninja turtles": {
     "girl": [
@@ -63177,7 +68061,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kazama jin",
+        "aliases": [
+          "kazama jin"
+        ]
+      },
+      {
+        "name": "mishima kazuya",
+        "aliases": [
+          "mishima kazuya"
+        ]
+      }
+    ]
   },
   "tenchi muyou!": {
     "girl": [
@@ -63621,7 +68518,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aotsuki eito",
+        "aliases": [
+          "aotsuki eito"
+        ]
+      },
+      {
+        "name": "omokage yugamu",
+        "aliases": [
+          "omokage yugamu"
+        ]
+      },
+      {
+        "name": "sumino takumi",
+        "aliases": [
+          "sumino takumi"
+        ]
+      }
+    ]
   },
   "the king of fighters": {
     "girl": [
@@ -63752,7 +68668,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kusanagi kyou",
+        "aliases": [
+          "kusanagi kyou"
+        ]
+      },
+      {
+        "name": "yagami iori",
+        "aliases": [
+          "yagami iori"
+        ]
+      }
+    ]
   },
   "the last of us (series)": {
     "girl": [
@@ -63924,7 +68853,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ganondorf",
+        "aliases": [
+          "ganondorf"
+        ]
+      }
+    ]
   },
   "the little mermaid (disney)": {
     "girl": [
@@ -64025,7 +68961,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "geralt of rivia",
+        "aliases": [
+          "geralt of rivia"
+        ]
+      }
+    ]
   },
   "tiger & bunny": {
     "girl": [
@@ -64680,7 +69623,140 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "aegir (housamo)",
+        "aliases": [
+          "aegir (housamo)"
+        ]
+      },
+      {
+        "name": "aegir (swimsuit) (housamo)",
+        "aliases": [
+          "aegir (swimsuit) (housamo)"
+        ]
+      },
+      {
+        "name": "akiha gongen (housamo)",
+        "aliases": [
+          "akiha gongen (housamo)"
+        ]
+      },
+      {
+        "name": "dagon (housamo)",
+        "aliases": [
+          "dagon (housamo)"
+        ]
+      },
+      {
+        "name": "gullinbursti (housamo)",
+        "aliases": [
+          "gullinbursti (housamo)"
+        ]
+      },
+      {
+        "name": "hephaestus (housamo)",
+        "aliases": [
+          "hephaestus (housamo)"
+        ]
+      },
+      {
+        "name": "heracles (housamo)",
+        "aliases": [
+          "heracles (housamo)"
+        ]
+      },
+      {
+        "name": "horkeu kamui",
+        "aliases": [
+          "horkeu kamui"
+        ]
+      },
+      {
+        "name": "ikusaba daisuke",
+        "aliases": [
+          "ikusaba daisuke"
+        ]
+      },
+      {
+        "name": "jiraiya (housamo)",
+        "aliases": [
+          "jiraiya (housamo)"
+        ]
+      },
+      {
+        "name": "mononobe kyoma",
+        "aliases": [
+          "mononobe kyoma"
+        ]
+      },
+      {
+        "name": "qinglong (housamo)",
+        "aliases": [
+          "qinglong (housamo)"
+        ]
+      },
+      {
+        "name": "sakimori toji",
+        "aliases": [
+          "sakimori toji"
+        ]
+      },
+      {
+        "name": "sandayu (housamo)",
+        "aliases": [
+          "sandayu (housamo)"
+        ]
+      },
+      {
+        "name": "shennong (housamo)",
+        "aliases": [
+          "shennong (housamo)"
+        ]
+      },
+      {
+        "name": "takabushi kengo",
+        "aliases": [
+          "takabushi kengo"
+        ]
+      },
+      {
+        "name": "takemaru (housamo)",
+        "aliases": [
+          "takemaru (housamo)"
+        ]
+      },
+      {
+        "name": "tamamura gunzo",
+        "aliases": [
+          "tamamura gunzo"
+        ]
+      },
+      {
+        "name": "tangaroa (housamo)",
+        "aliases": [
+          "tangaroa (housamo)"
+        ]
+      },
+      {
+        "name": "wakan tanka",
+        "aliases": [
+          "wakan tanka"
+        ]
+      },
+      {
+        "name": "yamasachihiko (housamo)",
+        "aliases": [
+          "yamasachihiko (housamo)"
+        ]
+      },
+      {
+        "name": "zabaniyya (housamo)",
+        "aliases": [
+          "zabaniyya (housamo)"
+        ]
+      }
+    ]
   },
   "tokyo ghoul": {
     "girl": [
@@ -64715,7 +69791,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kaneki ken",
+        "aliases": [
+          "kaneki ken"
+        ]
+      },
+      {
+        "name": "suzuya juuzou",
+        "aliases": [
+          "suzuya juuzou"
+        ]
+      }
+    ]
   },
   "tokyo metropolitan police department": {
     "girl": [
@@ -64772,7 +69861,38 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "baji keisuke",
+        "aliases": [
+          "baji keisuke"
+        ]
+      },
+      {
+        "name": "hanemiya kazutora",
+        "aliases": [
+          "hanemiya kazutora"
+        ]
+      },
+      {
+        "name": "matsuno chifuyu",
+        "aliases": [
+          "matsuno chifuyu"
+        ]
+      },
+      {
+        "name": "sano manjirou",
+        "aliases": [
+          "sano manjirou"
+        ]
+      },
+      {
+        "name": "sanzu haruchiyo",
+        "aliases": [
+          "sanzu haruchiyo"
+        ]
+      }
+    ]
   },
   "tomb raider": {
     "girl": [
@@ -64877,7 +69997,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "qifrey (tongari boushi no atelier)",
+        "aliases": [
+          "qifrey (tongari boushi no atelier)"
+        ]
+      }
+    ]
   },
   "top wo nerae! (series)": {
     "girl": [
@@ -64969,7 +70096,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "meguriya ayumu",
+        "aliases": [
+          "meguriya ayumu"
+        ]
+      }
+    ]
   },
   "touhou": {
     "girl": [
@@ -66240,7 +71374,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "shingyoku (male)",
+        "aliases": [
+          "shingyoku (male)"
+        ]
+      }
+    ]
   },
   "touqi guaitan": {
     "girl": [
@@ -66269,7 +71410,62 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "bai ling (touqi guaitan)",
+        "aliases": [
+          "bai ling (touqi guaitan)"
+        ]
+      },
+      {
+        "name": "fu shun (touqi guaitan)",
+        "aliases": [
+          "fu shun (touqi guaitan)"
+        ]
+      },
+      {
+        "name": "huai yunqing",
+        "aliases": [
+          "huai yunqing"
+        ]
+      },
+      {
+        "name": "li yuting (male)",
+        "aliases": [
+          "li yuting (male)"
+        ]
+      },
+      {
+        "name": "liu qingcheng",
+        "aliases": [
+          "liu qingcheng"
+        ]
+      },
+      {
+        "name": "mo chengwei",
+        "aliases": [
+          "mo chengwei"
+        ]
+      },
+      {
+        "name": "you jiujiu",
+        "aliases": [
+          "you jiujiu"
+        ]
+      },
+      {
+        "name": "zhu yaoxing",
+        "aliases": [
+          "zhu yaoxing"
+        ]
+      },
+      {
+        "name": "ziche fuzhao",
+        "aliases": [
+          "ziche fuzhao"
+        ]
+      }
+    ]
   },
   "toushinden": {
     "girl": [
@@ -66585,7 +71781,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "michael roa valdamjong",
+        "aliases": [
+          "michael roa valdamjong"
+        ]
+      },
+      {
+        "name": "tohno shiki",
+        "aliases": [
+          "tohno shiki"
+        ]
+      }
+    ]
   },
   "tsukuyomi moonphase": {
     "girl": [
@@ -66646,7 +71855,134 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ace trappola",
+        "aliases": [
+          "ace trappola"
+        ]
+      },
+      {
+        "name": "azul ashengrotto",
+        "aliases": [
+          "azul ashengrotto"
+        ]
+      },
+      {
+        "name": "divus crewel",
+        "aliases": [
+          "divus crewel"
+        ]
+      },
+      {
+        "name": "epel felmier",
+        "aliases": [
+          "epel felmier"
+        ]
+      },
+      {
+        "name": "floyd leech",
+        "aliases": [
+          "floyd leech"
+        ]
+      },
+      {
+        "name": "idia shroud",
+        "aliases": [
+          "idia shroud"
+        ]
+      },
+      {
+        "name": "jack howl",
+        "aliases": [
+          "jack howl"
+        ]
+      },
+      {
+        "name": "jade leech",
+        "aliases": [
+          "jade leech"
+        ]
+      },
+      {
+        "name": "jamil viper",
+        "aliases": [
+          "jamil viper"
+        ]
+      },
+      {
+        "name": "kalim al-asim",
+        "aliases": [
+          "kalim al-asim"
+        ]
+      },
+      {
+        "name": "leona kingscholar",
+        "aliases": [
+          "leona kingscholar"
+        ]
+      },
+      {
+        "name": "lilia vanrouge",
+        "aliases": [
+          "lilia vanrouge"
+        ]
+      },
+      {
+        "name": "malleus draconia",
+        "aliases": [
+          "malleus draconia"
+        ]
+      },
+      {
+        "name": "ortho shroud",
+        "aliases": [
+          "ortho shroud"
+        ]
+      },
+      {
+        "name": "riddle rosehearts",
+        "aliases": [
+          "riddle rosehearts"
+        ]
+      },
+      {
+        "name": "rollo flamme",
+        "aliases": [
+          "rollo flamme"
+        ]
+      },
+      {
+        "name": "rook hunt",
+        "aliases": [
+          "rook hunt"
+        ]
+      },
+      {
+        "name": "ruggie bucchi",
+        "aliases": [
+          "ruggie bucchi"
+        ]
+      },
+      {
+        "name": "skully j. graves",
+        "aliases": [
+          "skully j. graves"
+        ]
+      },
+      {
+        "name": "trey clover",
+        "aliases": [
+          "trey clover"
+        ]
+      },
+      {
+        "name": "vil schoenheit",
+        "aliases": [
+          "vil schoenheit"
+        ]
+      }
+    ]
   },
   "uchi no hime-sama ga ichiban kawaii": {
     "girl": [
@@ -66804,7 +72140,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ultraman",
+        "aliases": [
+          "ultraman"
+        ]
+      },
+      {
+        "name": "ultraman tiga",
+        "aliases": [
+          "ultraman tiga"
+        ]
+      }
+    ]
   },
   "umamusume": {
     "girl": [
@@ -68796,7 +74145,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "namine ritsu",
+        "aliases": [
+          "namine ritsu"
+        ]
+      }
+    ]
   },
   "utawarerumono": {
     "girl": [
@@ -69828,7 +75184,44 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "fukase",
+        "aliases": [
+          "fukase"
+        ]
+      },
+      {
+        "name": "kagamine len",
+        "aliases": [
+          "kagamine len"
+        ]
+      },
+      {
+        "name": "kaito (vocaloid)",
+        "aliases": [
+          "kaito (vocaloid)"
+        ]
+      },
+      {
+        "name": "kaito (vocaloid3)",
+        "aliases": [
+          "kaito (vocaloid3)"
+        ]
+      },
+      {
+        "name": "kamui gakupo",
+        "aliases": [
+          "kamui gakupo"
+        ]
+      },
+      {
+        "name": "utatane piko",
+        "aliases": [
+          "utatane piko"
+        ]
+      }
+    ]
   },
   "voicepeak": {
     "girl": [
@@ -70015,7 +75408,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "takashi shirogane",
+        "aliases": [
+          "takashi shirogane"
+        ]
+      }
+    ]
   },
   "voms": {
     "girl": [
@@ -71433,7 +76833,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kuga yuuma",
+        "aliases": [
+          "kuga yuuma"
+        ]
+      }
+    ]
   },
   "world witches series": {
     "girl": [
@@ -72028,7 +77435,50 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "brant (wuthering waves)",
+        "aliases": [
+          "brant (wuthering waves)"
+        ]
+      },
+      {
+        "name": "jiyan (wuthering waves)",
+        "aliases": [
+          "jiyan (wuthering waves)"
+        ]
+      },
+      {
+        "name": "lingyang (wuthering waves)",
+        "aliases": [
+          "lingyang (wuthering waves)"
+        ]
+      },
+      {
+        "name": "luuk herssen (wuthering waves)",
+        "aliases": [
+          "luuk herssen (wuthering waves)"
+        ]
+      },
+      {
+        "name": "qiuyuan (wuthering waves)",
+        "aliases": [
+          "qiuyuan (wuthering waves)"
+        ]
+      },
+      {
+        "name": "scar (wuthering waves)",
+        "aliases": [
+          "scar (wuthering waves)"
+        ]
+      },
+      {
+        "name": "xiangli yao",
+        "aliases": [
+          "xiangli yao"
+        ]
+      }
+    ]
   },
   "xai (company)": {
     "girl": [
@@ -72266,7 +77716,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "rex (xenoblade)",
+        "aliases": [
+          "rex (xenoblade)"
+        ]
+      },
+      {
+        "name": "shulk (xenoblade)",
+        "aliases": [
+          "shulk (xenoblade)"
+        ]
+      }
+    ]
   },
   "xenogears": {
     "girl": [
@@ -72855,7 +78318,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "adol christin",
+        "aliases": [
+          "adol christin"
+        ]
+      }
+    ]
   },
   "yu yu hakusho": {
     "girl": [
@@ -72866,7 +78336,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kurama (yu yu hakusho)",
+        "aliases": [
+          "kurama (yu yu hakusho)"
+        ]
+      }
+    ]
   },
   "yu-gi-oh!": {
     "girl": [
@@ -73375,7 +78852,62 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "atem",
+        "aliases": [
+          "atem"
+        ]
+      },
+      {
+        "name": "bruno (yu-gi-oh!)",
+        "aliases": [
+          "bruno (yu-gi-oh!)"
+        ]
+      },
+      {
+        "name": "fudo yusei",
+        "aliases": [
+          "fudo yusei"
+        ]
+      },
+      {
+        "name": "kaiba seto",
+        "aliases": [
+          "kaiba seto"
+        ]
+      },
+      {
+        "name": "manjoume jun",
+        "aliases": [
+          "manjoume jun"
+        ]
+      },
+      {
+        "name": "yami yugi",
+        "aliases": [
+          "yami yugi"
+        ]
+      },
+      {
+        "name": "yami yuugi",
+        "aliases": [
+          "yami yuugi"
+        ]
+      },
+      {
+        "name": "yuki judai",
+        "aliases": [
+          "yuki judai"
+        ]
+      },
+      {
+        "name": "yuuki juudai",
+        "aliases": [
+          "yuuki juudai"
+        ]
+      }
+    ]
   },
   "yukijirushi": {
     "girl": [
@@ -74161,7 +79693,74 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "anton ivanov",
+        "aliases": [
+          "anton ivanov"
+        ]
+      },
+      {
+        "name": "asaba harumasa",
+        "aliases": [
+          "asaba harumasa"
+        ]
+      },
+      {
+        "name": "banyue (zenless zone zero)",
+        "aliases": [
+          "banyue (zenless zone zero)"
+        ]
+      },
+      {
+        "name": "billy kid",
+        "aliases": [
+          "billy kid"
+        ]
+      },
+      {
+        "name": "billy kid (starlight)",
+        "aliases": [
+          "billy kid (starlight)"
+        ]
+      },
+      {
+        "name": "hugo vlad",
+        "aliases": [
+          "hugo vlad"
+        ]
+      },
+      {
+        "name": "komano manato",
+        "aliases": [
+          "komano manato"
+        ]
+      },
+      {
+        "name": "lighter (zenless zone zero)",
+        "aliases": [
+          "lighter (zenless zone zero)"
+        ]
+      },
+      {
+        "name": "seth lowell",
+        "aliases": [
+          "seth lowell"
+        ]
+      },
+      {
+        "name": "von lycaon",
+        "aliases": [
+          "von lycaon"
+        ]
+      },
+      {
+        "name": "wise (zenless zone zero)",
+        "aliases": [
+          "wise (zenless zone zero)"
+        ]
+      }
+    ]
   },
   "zero in": {
     "girl": [
@@ -77581,7 +83180,56 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ayase ayato (imamiya pinoko)",
+        "aliases": [
+          "ayase ayato (imamiya pinoko)"
+        ]
+      },
+      {
+        "name": "blonde-haired boy (sunaba (nczd5875))",
+        "aliases": [
+          "blonde-haired boy (sunaba (nczd5875))"
+        ]
+      },
+      {
+        "name": "envy elika (koyashaka)",
+        "aliases": [
+          "envy elika (koyashaka)"
+        ]
+      },
+      {
+        "name": "kaya (hazakura hinata)",
+        "aliases": [
+          "kaya (hazakura hinata)"
+        ]
+      },
+      {
+        "name": "kokado shido (domo)",
+        "aliases": [
+          "kokado shido (domo)"
+        ]
+      },
+      {
+        "name": "ninja (yzpyn)",
+        "aliases": [
+          "ninja (yzpyn)"
+        ]
+      },
+      {
+        "name": "raito-kun (uenomigi)",
+        "aliases": [
+          "raito-kun (uenomigi)"
+        ]
+      },
+      {
+        "name": "rigel (op na yarou)",
+        "aliases": [
+          "rigel (op na yarou)"
+        ]
+      }
+    ]
   },
   "hilda (series)": {
     "girl": [
@@ -78042,7 +83690,26 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "kageyama ritsu",
+        "aliases": [
+          "kageyama ritsu"
+        ]
+      },
+      {
+        "name": "kageyama shigeo",
+        "aliases": [
+          "kageyama shigeo"
+        ]
+      },
+      {
+        "name": "reigen arataka",
+        "aliases": [
+          "reigen arataka"
+        ]
+      }
+    ]
   },
   "hajimete no gal": {
     "girl": [
@@ -80194,7 +85861,296 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "achilles (fearless diver) (fate)",
+        "aliases": [
+          "achilles (fearless diver) (fate)"
+        ]
+      },
+      {
+        "name": "alexander (fate)",
+        "aliases": [
+          "alexander (fate)"
+        ]
+      },
+      {
+        "name": "antonio salieri (fate)",
+        "aliases": [
+          "antonio salieri (fate)"
+        ]
+      },
+      {
+        "name": "antonio salieri (second ascension) (fate)",
+        "aliases": [
+          "antonio salieri (second ascension) (fate)"
+        ]
+      },
+      {
+        "name": "asclepius (fate)",
+        "aliases": [
+          "asclepius (fate)"
+        ]
+      },
+      {
+        "name": "azrael (grand assassin) (fate)",
+        "aliases": [
+          "azrael (grand assassin) (fate)"
+        ]
+      },
+      {
+        "name": "bartholomew roberts (fate)",
+        "aliases": [
+          "bartholomew roberts (fate)"
+        ]
+      },
+      {
+        "name": "beowulf (fate)",
+        "aliases": [
+          "beowulf (fate)"
+        ]
+      },
+      {
+        "name": "camazotz (fate)",
+        "aliases": [
+          "camazotz (fate)"
+        ]
+      },
+      {
+        "name": "charles-henri sanson (fate)",
+        "aliases": [
+          "charles-henri sanson (fate)"
+        ]
+      },
+      {
+        "name": "constantine xi (fate)",
+        "aliases": [
+          "constantine xi (fate)"
+        ]
+      },
+      {
+        "name": "dante alighieri (fate)",
+        "aliases": [
+          "dante alighieri (fate)"
+        ]
+      },
+      {
+        "name": "dante alighieri (second ascension) (fate)",
+        "aliases": [
+          "dante alighieri (second ascension) (fate)"
+        ]
+      },
+      {
+        "name": "daybit sem void",
+        "aliases": [
+          "daybit sem void"
+        ]
+      },
+      {
+        "name": "duryodhana (fate)",
+        "aliases": [
+          "duryodhana (fate)"
+        ]
+      },
+      {
+        "name": "edmond dantes (fate)",
+        "aliases": [
+          "edmond dantes (fate)"
+        ]
+      },
+      {
+        "name": "emiya alter",
+        "aliases": [
+          "emiya alter"
+        ]
+      },
+      {
+        "name": "fuuma kotarou (fate)",
+        "aliases": [
+          "fuuma kotarou (fate)"
+        ]
+      },
+      {
+        "name": "indra (fate)",
+        "aliases": [
+          "indra (fate)"
+        ]
+      },
+      {
+        "name": "james moriarty (archer) (fate)",
+        "aliases": [
+          "james moriarty (archer) (fate)"
+        ]
+      },
+      {
+        "name": "james moriarty (ruler) (fate)",
+        "aliases": [
+          "james moriarty (ruler) (fate)"
+        ]
+      },
+      {
+        "name": "kadoc zemlupus",
+        "aliases": [
+          "kadoc zemlupus"
+        ]
+      },
+      {
+        "name": "karna (santa) (fate)",
+        "aliases": [
+          "karna (santa) (fate)"
+        ]
+      },
+      {
+        "name": "lancelot (fate/grand order)",
+        "aliases": [
+          "lancelot (fate/grand order)"
+        ]
+      },
+      {
+        "name": "mandricardo (fate)",
+        "aliases": [
+          "mandricardo (fate)"
+        ]
+      },
+      {
+        "name": "marisbury animusphere",
+        "aliases": [
+          "marisbury animusphere"
+        ]
+      },
+      {
+        "name": "mephistopheles (fate)",
+        "aliases": [
+          "mephistopheles (fate)"
+        ]
+      },
+      {
+        "name": "napoleon bonaparte (fate)",
+        "aliases": [
+          "napoleon bonaparte (fate)"
+        ]
+      },
+      {
+        "name": "noah (fate)",
+        "aliases": [
+          "noah (fate)"
+        ]
+      },
+      {
+        "name": "oberon (first ascension) (fate)",
+        "aliases": [
+          "oberon (first ascension) (fate)"
+        ]
+      },
+      {
+        "name": "oberon (second ascension) (fate)",
+        "aliases": [
+          "oberon (second ascension) (fate)"
+        ]
+      },
+      {
+        "name": "odysseus (fate)",
+        "aliases": [
+          "odysseus (fate)"
+        ]
+      },
+      {
+        "name": "percival (fate)",
+        "aliases": [
+          "percival (fate)"
+        ]
+      },
+      {
+        "name": "prince of lan ling (fate)",
+        "aliases": [
+          "prince of lan ling (fate)"
+        ]
+      },
+      {
+        "name": "romani archaman",
+        "aliases": [
+          "romani archaman"
+        ]
+      },
+      {
+        "name": "romulus quirinus (fate)",
+        "aliases": [
+          "romulus quirinus (fate)"
+        ]
+      },
+      {
+        "name": "sakata kintoki (fate)",
+        "aliases": [
+          "sakata kintoki (fate)"
+        ]
+      },
+      {
+        "name": "sherlock holmes (fate)",
+        "aliases": [
+          "sherlock holmes (fate)"
+        ]
+      },
+      {
+        "name": "shi huang di (fate)",
+        "aliases": [
+          "shi huang di (fate)"
+        ]
+      },
+      {
+        "name": "solomon (fate)",
+        "aliases": [
+          "solomon (fate)"
+        ]
+      },
+      {
+        "name": "tai gong wang (fate)",
+        "aliases": [
+          "tai gong wang (fate)"
+        ]
+      },
+      {
+        "name": "takasugi shinsaku (fate)",
+        "aliases": [
+          "takasugi shinsaku (fate)"
+        ]
+      },
+      {
+        "name": "tanaka shinbei (fate)",
+        "aliases": [
+          "tanaka shinbei (fate)"
+        ]
+      },
+      {
+        "name": "tezcatlipoca (fate)",
+        "aliases": [
+          "tezcatlipoca (fate)"
+        ]
+      },
+      {
+        "name": "toudou heisuke (fate)",
+        "aliases": [
+          "toudou heisuke (fate)"
+        ]
+      },
+      {
+        "name": "tristan (fate)",
+        "aliases": [
+          "tristan (fate)"
+        ]
+      },
+      {
+        "name": "wolfgang amadeus mozart (fate)",
+        "aliases": [
+          "wolfgang amadeus mozart (fate)"
+        ]
+      },
+      {
+        "name": "yamanami keisuke (fate)",
+        "aliases": [
+          "yamanami keisuke (fate)"
+        ]
+      }
+    ]
   },
   "gakuen idolmaster": {
     "girl": [
@@ -80359,7 +86315,134 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "anaxa (honkai: star rail)",
+        "aliases": [
+          "anaxa (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "argenti (honkai: star rail)",
+        "aliases": [
+          "argenti (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "ashveil (honkai: star rail)",
+        "aliases": [
+          "ashveil (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "aventurine (honkai: star rail)",
+        "aliases": [
+          "aventurine (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "boothill (honkai: star rail)",
+        "aliases": [
+          "boothill (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "dan heng (imbibitor lunae) (honkai: star rail)",
+        "aliases": [
+          "dan heng (imbibitor lunae) (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "dan heng (permansor terrae) (honkai: star rail)",
+        "aliases": [
+          "dan heng (permansor terrae) (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "dr. ratio (honkai: star rail)",
+        "aliases": [
+          "dr. ratio (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "gallagher (honkai: star rail)",
+        "aliases": [
+          "gallagher (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "gepard landau",
+        "aliases": [
+          "gepard landau"
+        ]
+      },
+      {
+        "name": "jiaoqiu (honkai: star rail)",
+        "aliases": [
+          "jiaoqiu (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "jing yuan",
+        "aliases": [
+          "jing yuan"
+        ]
+      },
+      {
+        "name": "luocha (honkai: star rail)",
+        "aliases": [
+          "luocha (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "misha (honkai: star rail)",
+        "aliases": [
+          "misha (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "moze (honkai: star rail)",
+        "aliases": [
+          "moze (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "mydei (honkai: star rail)",
+        "aliases": [
+          "mydei (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "phainon (honkai: star rail)",
+        "aliases": [
+          "phainon (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "phainon (khaslana) (honkai: star rail)",
+        "aliases": [
+          "phainon (khaslana) (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "sampo koski",
+        "aliases": [
+          "sampo koski"
+        ]
+      },
+      {
+        "name": "sunday (sacerdos' relived ordeal) (honkai: star rail)",
+        "aliases": [
+          "sunday (sacerdos' relived ordeal) (honkai: star rail)"
+        ]
+      },
+      {
+        "name": "yanqing (honkai: star rail)",
+        "aliases": [
+          "yanqing (honkai: star rail)"
+        ]
+      }
+    ]
   },
   "koi suru kokoro to mahou no kotoba": {
     "girl": [
@@ -80393,7 +86476,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "okabe rintarou",
+        "aliases": [
+          "okabe rintarou"
+        ]
+      }
+    ]
   },
   "cho kaguya-hime!": {
     "girl": [
@@ -80446,7 +86536,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "komazawa noi",
+        "aliases": [
+          "komazawa noi"
+        ]
+      },
+      {
+        "name": "komazawa noi (tsukuyomi)",
+        "aliases": [
+          "komazawa noi (tsukuyomi)"
+        ]
+      }
+    ]
   },
   "hirogaru sky! precure": {
     "girl": [
@@ -80504,7 +86607,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "grisham (pokemon)",
+        "aliases": [
+          "grisham (pokemon)"
+        ]
+      }
+    ]
   },
   "limbus company": {
     "girl": [
@@ -80521,7 +86631,20 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "gregor (project moon)",
+        "aliases": [
+          "gregor (project moon)"
+        ]
+      },
+      {
+        "name": "jia qiu (project moon)",
+        "aliases": [
+          "jia qiu (project moon)"
+        ]
+      }
+    ]
   },
   "kourin tenshi en ciel rena": {
     "girl": [
@@ -80597,7 +86720,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "ardashir (arknights)",
+        "aliases": [
+          "ardashir (arknights)"
+        ]
+      }
+    ]
   },
   "chaos;head": {
     "girl": [
@@ -80943,7 +87073,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "spamton g. spamton",
+        "aliases": [
+          "spamton g. spamton"
+        ]
+      }
+    ]
   },
   "genseishinki sacred virth": {
     "girl": [
@@ -81244,7 +87381,14 @@
         ]
       }
     ],
-    "boy": []
+    "boy": [
+      {
+        "name": "sunny (shadow slave)",
+        "aliases": [
+          "sunny (shadow slave)"
+        ]
+      }
+    ]
   },
   "gameoverse": {
     "girl": [
@@ -82524,5 +88668,1814 @@
       }
     ],
     "boy": []
+  },
+  "modao zushi": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "lan wangji",
+        "aliases": [
+          "lan wangji"
+        ]
+      },
+      {
+        "name": "wei wuxian",
+        "aliases": [
+          "wei wuxian"
+        ]
+      }
+    ]
+  },
+  "trigun": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "millions knives",
+        "aliases": [
+          "millions knives"
+        ]
+      },
+      {
+        "name": "nicholas d. wolfwood",
+        "aliases": [
+          "nicholas d. wolfwood"
+        ]
+      },
+      {
+        "name": "vash the stampede",
+        "aliases": [
+          "vash the stampede"
+        ]
+      }
+    ]
+  },
+  "nige jouzu no wakagimi": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "houjou tokiyuki (nige jouzu no wakagimi)",
+        "aliases": [
+          "houjou tokiyuki (nige jouzu no wakagimi)"
+        ]
+      }
+    ]
+  },
+  "scott pilgrim takes off": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "lucas lee",
+        "aliases": [
+          "lucas lee"
+        ]
+      }
+    ]
+  },
+  "dao gui yi xian": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "li huowang",
+        "aliases": [
+          "li huowang"
+        ]
+      },
+      {
+        "name": "zhuge yuan",
+        "aliases": [
+          "zhuge yuan"
+        ]
+      }
+    ]
+  },
+  "randal's friends": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "luther von ivory",
+        "aliases": [
+          "luther von ivory"
+        ]
+      },
+      {
+        "name": "nyen (randal's friends)",
+        "aliases": [
+          "nyen (randal's friends)"
+        ]
+      },
+      {
+        "name": "nyon (randal's friends)",
+        "aliases": [
+          "nyon (randal's friends)"
+        ]
+      },
+      {
+        "name": "randal ivory",
+        "aliases": [
+          "randal ivory"
+        ]
+      },
+      {
+        "name": "tsukada satoru",
+        "aliases": [
+          "tsukada satoru"
+        ]
+      }
+    ]
+  },
+  "love and deepspace": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "caleb (love and deepspace)",
+        "aliases": [
+          "caleb (love and deepspace)"
+        ]
+      },
+      {
+        "name": "rafayel (love and deepspace)",
+        "aliases": [
+          "rafayel (love and deepspace)"
+        ]
+      },
+      {
+        "name": "sylus (love and deepspace)",
+        "aliases": [
+          "sylus (love and deepspace)"
+        ]
+      },
+      {
+        "name": "xavier (love and deepspace)",
+        "aliases": [
+          "xavier (love and deepspace)"
+        ]
+      },
+      {
+        "name": "zayne (love and deepspace)",
+        "aliases": [
+          "zayne (love and deepspace)"
+        ]
+      }
+    ]
+  },
+  "library of ruina": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "roland (project moon)",
+        "aliases": [
+          "roland (project moon)"
+        ]
+      },
+      {
+        "name": "yan vismok",
+        "aliases": [
+          "yan vismok"
+        ]
+      }
+    ]
+  },
+  "cry of fear": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "simon henriksson",
+        "aliases": [
+          "simon henriksson"
+        ]
+      },
+      {
+        "name": "simon henriksson (book)",
+        "aliases": [
+          "simon henriksson (book)"
+        ]
+      }
+    ]
+  },
+  "kuroshitsuji": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "ciel phantomhive",
+        "aliases": [
+          "ciel phantomhive"
+        ]
+      }
+    ]
+  },
+  "fukumoto mahjong": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "akagi shigeru",
+        "aliases": [
+          "akagi shigeru"
+        ]
+      }
+    ]
+  },
+  "hazbin hotel": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "alastor (hazbin hotel)",
+        "aliases": [
+          "alastor (hazbin hotel)"
+        ]
+      },
+      {
+        "name": "angel dust",
+        "aliases": [
+          "angel dust"
+        ]
+      },
+      {
+        "name": "lucifer morningstar (hazbin hotel)",
+        "aliases": [
+          "lucifer morningstar (hazbin hotel)"
+        ]
+      },
+      {
+        "name": "valentino (hazbin hotel)",
+        "aliases": [
+          "valentino (hazbin hotel)"
+        ]
+      }
+    ]
+  },
+  "lovebrush chronicles": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "alkaid mcgrath",
+        "aliases": [
+          "alkaid mcgrath"
+        ]
+      },
+      {
+        "name": "ayn alwyn",
+        "aliases": [
+          "ayn alwyn"
+        ]
+      },
+      {
+        "name": "cael anselm",
+        "aliases": [
+          "cael anselm"
+        ]
+      },
+      {
+        "name": "clarence clayden",
+        "aliases": [
+          "clarence clayden"
+        ]
+      },
+      {
+        "name": "lars rorschach",
+        "aliases": [
+          "lars rorschach"
+        ]
+      }
+    ]
+  },
+  "live a hero": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "akashi (live a hero)",
+        "aliases": [
+          "akashi (live a hero)"
+        ]
+      },
+      {
+        "name": "nessen (live a hero)",
+        "aliases": [
+          "nessen (live a hero)"
+        ]
+      },
+      {
+        "name": "yohack",
+        "aliases": [
+          "yohack"
+        ]
+      }
+    ]
+  },
+  "shiguang dailiren": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "cheng xiaoshi",
+        "aliases": [
+          "cheng xiaoshi"
+        ]
+      },
+      {
+        "name": "xia fei",
+        "aliases": [
+          "xia fei"
+        ]
+      },
+      {
+        "name": "xiao weiying",
+        "aliases": [
+          "xiao weiying"
+        ]
+      }
+    ]
+  },
+  "hikaru ga shinda natsu": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "indou hikaru",
+        "aliases": [
+          "indou hikaru"
+        ]
+      },
+      {
+        "name": "tsujinaka yoshiki",
+        "aliases": [
+          "tsujinaka yoshiki"
+        ]
+      }
+    ]
+  },
+  "elden ring: shadow of the erdtree": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "messmer the impaler",
+        "aliases": [
+          "messmer the impaler"
+        ]
+      }
+    ]
+  },
+  "touken ranbu": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "doudanuki masakuni",
+        "aliases": [
+          "doudanuki masakuni"
+        ]
+      },
+      {
+        "name": "heshikiri hasebe",
+        "aliases": [
+          "heshikiri hasebe"
+        ]
+      },
+      {
+        "name": "higekiri (touken ranbu)",
+        "aliases": [
+          "higekiri (touken ranbu)"
+        ]
+      },
+      {
+        "name": "honebami toushirou",
+        "aliases": [
+          "honebami toushirou"
+        ]
+      },
+      {
+        "name": "horikawa kunihiro",
+        "aliases": [
+          "horikawa kunihiro"
+        ]
+      },
+      {
+        "name": "hotarumaru",
+        "aliases": [
+          "hotarumaru"
+        ]
+      },
+      {
+        "name": "ichimonji norimune",
+        "aliases": [
+          "ichimonji norimune"
+        ]
+      },
+      {
+        "name": "izumi-no-kami kanesada",
+        "aliases": [
+          "izumi-no-kami kanesada"
+        ]
+      },
+      {
+        "name": "kashuu kiyomitsu",
+        "aliases": [
+          "kashuu kiyomitsu"
+        ]
+      },
+      {
+        "name": "kogitsunemaru",
+        "aliases": [
+          "kogitsunemaru"
+        ]
+      },
+      {
+        "name": "kyogoku masamune",
+        "aliases": [
+          "kyogoku masamune"
+        ]
+      },
+      {
+        "name": "midare toushirou",
+        "aliases": [
+          "midare toushirou"
+        ]
+      },
+      {
+        "name": "mikazuki munechika",
+        "aliases": [
+          "mikazuki munechika"
+        ]
+      },
+      {
+        "name": "mutsu-no-kami yoshiyuki",
+        "aliases": [
+          "mutsu-no-kami yoshiyuki"
+        ]
+      },
+      {
+        "name": "nagasone kotetsu",
+        "aliases": [
+          "nagasone kotetsu"
+        ]
+      },
+      {
+        "name": "namazuo toushirou",
+        "aliases": [
+          "namazuo toushirou"
+        ]
+      },
+      {
+        "name": "ookurikara",
+        "aliases": [
+          "ookurikara"
+        ]
+      },
+      {
+        "name": "shokudaikiri mitsutada",
+        "aliases": [
+          "shokudaikiri mitsutada"
+        ]
+      },
+      {
+        "name": "tonbokiri (touken ranbu)",
+        "aliases": [
+          "tonbokiri (touken ranbu)"
+        ]
+      },
+      {
+        "name": "tsurumaru kuninaga",
+        "aliases": [
+          "tsurumaru kuninaga"
+        ]
+      },
+      {
+        "name": "yagen toushirou",
+        "aliases": [
+          "yagen toushirou"
+        ]
+      },
+      {
+        "name": "yamanbagiri kunihiro",
+        "aliases": [
+          "yamanbagiri kunihiro"
+        ]
+      },
+      {
+        "name": "yamato-no-kami yasusada",
+        "aliases": [
+          "yamato-no-kami yasusada"
+        ]
+      }
+    ]
+  },
+  "baldur's gate": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "astarion",
+        "aliases": [
+          "astarion"
+        ]
+      },
+      {
+        "name": "gale (baldur's gate)",
+        "aliases": [
+          "gale (baldur's gate)"
+        ]
+      },
+      {
+        "name": "halsin",
+        "aliases": [
+          "halsin"
+        ]
+      }
+    ]
+  },
+  "mega man (classic)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "mega man (character)",
+        "aliases": [
+          "mega man (character)"
+        ]
+      }
+    ]
+  },
+  "kaiji": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "ichijou seiya",
+        "aliases": [
+          "ichijou seiya"
+        ]
+      },
+      {
+        "name": "itou kaiji",
+        "aliases": [
+          "itou kaiji"
+        ]
+      }
+    ]
+  },
+  "tianguan cifu": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "hua cheng",
+        "aliases": [
+          "hua cheng"
+        ]
+      },
+      {
+        "name": "xie lian",
+        "aliases": [
+          "xie lian"
+        ]
+      }
+    ]
+  },
+  "minecraft youtube": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "technoblade",
+        "aliases": [
+          "technoblade"
+        ]
+      }
+    ]
+  },
+  "chi.: chikyuu no undou ni tsuite": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "badeni",
+        "aliases": [
+          "badeni"
+        ]
+      },
+      {
+        "name": "rafal (chi.)",
+        "aliases": [
+          "rafal (chi.)"
+        ]
+      }
+    ]
+  },
+  "gyee": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "alca (wakatanka4)",
+        "aliases": [
+          "alca (wakatanka4)"
+        ]
+      },
+      {
+        "name": "romg",
+        "aliases": [
+          "romg"
+        ]
+      }
+    ]
+  },
+  "call of duty": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "captain price",
+        "aliases": [
+          "captain price"
+        ]
+      },
+      {
+        "name": "soap (modern warfare 2)",
+        "aliases": [
+          "soap (modern warfare 2)"
+        ]
+      }
+    ]
+  },
+  "slam dunk (series)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "mitsui hisashi",
+        "aliases": [
+          "mitsui hisashi"
+        ]
+      },
+      {
+        "name": "miyagi ryouta",
+        "aliases": [
+          "miyagi ryouta"
+        ]
+      },
+      {
+        "name": "rukawa kaede",
+        "aliases": [
+          "rukawa kaede"
+        ]
+      },
+      {
+        "name": "sakuragi hanamichi",
+        "aliases": [
+          "sakuragi hanamichi"
+        ]
+      }
+    ]
+  },
+  "lake of voices": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "bemelle",
+        "aliases": [
+          "bemelle"
+        ]
+      },
+      {
+        "name": "the guide (lake of voices)",
+        "aliases": [
+          "the guide (lake of voices)"
+        ]
+      }
+    ]
+  },
+  "holostars": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "aragami oga",
+        "aliases": [
+          "aragami oga"
+        ]
+      },
+      {
+        "name": "arurandeisu",
+        "aliases": [
+          "arurandeisu"
+        ]
+      },
+      {
+        "name": "astel leda",
+        "aliases": [
+          "astel leda"
+        ]
+      },
+      {
+        "name": "banzoin hakka",
+        "aliases": [
+          "banzoin hakka"
+        ]
+      },
+      {
+        "name": "gavis bettel",
+        "aliases": [
+          "gavis bettel"
+        ]
+      },
+      {
+        "name": "hanasaki miyabi",
+        "aliases": [
+          "hanasaki miyabi"
+        ]
+      },
+      {
+        "name": "kagami kira",
+        "aliases": [
+          "kagami kira"
+        ]
+      },
+      {
+        "name": "kageyama shien",
+        "aliases": [
+          "kageyama shien"
+        ]
+      },
+      {
+        "name": "kanade izuru",
+        "aliases": [
+          "kanade izuru"
+        ]
+      },
+      {
+        "name": "kanade izuru (1st costume)",
+        "aliases": [
+          "kanade izuru (1st costume)"
+        ]
+      },
+      {
+        "name": "machina x flayon",
+        "aliases": [
+          "machina x flayon"
+        ]
+      },
+      {
+        "name": "minase rio",
+        "aliases": [
+          "minase rio"
+        ]
+      },
+      {
+        "name": "octavio",
+        "aliases": [
+          "octavio"
+        ]
+      },
+      {
+        "name": "rikka (holostars)",
+        "aliases": [
+          "rikka (holostars)"
+        ]
+      },
+      {
+        "name": "yatogami fuma",
+        "aliases": [
+          "yatogami fuma"
+        ]
+      },
+      {
+        "name": "yukoku roberu",
+        "aliases": [
+          "yukoku roberu"
+        ]
+      }
+    ]
+  },
+  "a date with death": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "casper (a date with death)",
+        "aliases": [
+          "casper (a date with death)"
+        ]
+      }
+    ]
+  },
+  "magic kaito": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "kaitou kid",
+        "aliases": [
+          "kaitou kid"
+        ]
+      }
+    ]
+  },
+  "wind breaker (nii satoru)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "sakura haruka (wind breaker)",
+        "aliases": [
+          "sakura haruka (wind breaker)"
+        ]
+      },
+      {
+        "name": "suo hayato",
+        "aliases": [
+          "suo hayato"
+        ]
+      }
+    ]
+  },
+  "ace of diamond": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "miyuki kazuya",
+        "aliases": [
+          "miyuki kazuya"
+        ]
+      },
+      {
+        "name": "sawamura eijun",
+        "aliases": [
+          "sawamura eijun"
+        ]
+      }
+    ]
+  },
+  "howl no ugoku shiro": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "howl (howl no ugoku shiro)",
+        "aliases": [
+          "howl (howl no ugoku shiro)"
+        ]
+      }
+    ]
+  },
+  "disco elysium": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "harry du bois",
+        "aliases": [
+          "harry du bois"
+        ]
+      },
+      {
+        "name": "kim kitsuragi",
+        "aliases": [
+          "kim kitsuragi"
+        ]
+      }
+    ]
+  },
+  "blue lock": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "bachira meguru",
+        "aliases": [
+          "bachira meguru"
+        ]
+      },
+      {
+        "name": "chigiri hyoma",
+        "aliases": [
+          "chigiri hyoma"
+        ]
+      },
+      {
+        "name": "isagi yoichi",
+        "aliases": [
+          "isagi yoichi"
+        ]
+      },
+      {
+        "name": "itoshi rin",
+        "aliases": [
+          "itoshi rin"
+        ]
+      },
+      {
+        "name": "michael kaiser",
+        "aliases": [
+          "michael kaiser"
+        ]
+      },
+      {
+        "name": "mikage reo",
+        "aliases": [
+          "mikage reo"
+        ]
+      },
+      {
+        "name": "nagi seishirou",
+        "aliases": [
+          "nagi seishirou"
+        ]
+      }
+    ]
+  },
+  "helios rising heroes": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "asch albright",
+        "aliases": [
+          "asch albright"
+        ]
+      },
+      {
+        "name": "dino albani",
+        "aliases": [
+          "dino albani"
+        ]
+      },
+      {
+        "name": "jay kidman",
+        "aliases": [
+          "jay kidman"
+        ]
+      },
+      {
+        "name": "jude ares",
+        "aliases": [
+          "jude ares"
+        ]
+      },
+      {
+        "name": "keith max",
+        "aliases": [
+          "keith max"
+        ]
+      },
+      {
+        "name": "oscar bale",
+        "aliases": [
+          "oscar bale"
+        ]
+      },
+      {
+        "name": "otori akira",
+        "aliases": [
+          "otori akira"
+        ]
+      }
+    ]
+  },
+  "yuri!!! on ice": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "katsuki yuuri",
+        "aliases": [
+          "katsuki yuuri"
+        ]
+      },
+      {
+        "name": "viktor nikiforov",
+        "aliases": [
+          "viktor nikiforov"
+        ]
+      },
+      {
+        "name": "yuri plisetsky",
+        "aliases": [
+          "yuri plisetsky"
+        ]
+      }
+    ]
+  },
+  "degrees of lewdity": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "kylar (degrees of lewdity)",
+        "aliases": [
+          "kylar (degrees of lewdity)"
+        ]
+      },
+      {
+        "name": "kylar (male) (degrees of lewdity)",
+        "aliases": [
+          "kylar (male) (degrees of lewdity)"
+        ]
+      },
+      {
+        "name": "sydney (degrees of lewdity)",
+        "aliases": [
+          "sydney (degrees of lewdity)"
+        ]
+      },
+      {
+        "name": "sydney (male) (degrees of lewdity)",
+        "aliases": [
+          "sydney (male) (degrees of lewdity)"
+        ]
+      },
+      {
+        "name": "whitney (degrees of lewdity)",
+        "aliases": [
+          "whitney (degrees of lewdity)"
+        ]
+      },
+      {
+        "name": "whitney (male) (degrees of lewdity)",
+        "aliases": [
+          "whitney (male) (degrees of lewdity)"
+        ]
+      }
+    ]
+  },
+  "skoshism": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "robo frostor",
+        "aliases": [
+          "robo frostor"
+        ]
+      }
+    ]
+  },
+  "ryuu ga gotoku (series)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "kiryu kazuma",
+        "aliases": [
+          "kiryu kazuma"
+        ]
+      },
+      {
+        "name": "majima goro",
+        "aliases": [
+          "majima goro"
+        ]
+      }
+    ]
+  },
+  "chaos;child": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "itou shinji (chaos;child)",
+        "aliases": [
+          "itou shinji (chaos;child)"
+        ]
+      },
+      {
+        "name": "kawahara masashi",
+        "aliases": [
+          "kawahara masashi"
+        ]
+      }
+    ]
+  },
+  "dramatical murder": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "seragaki aoba",
+        "aliases": [
+          "seragaki aoba"
+        ]
+      }
+    ]
+  },
+  "love and producer": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "li zeyan",
+        "aliases": [
+          "li zeyan"
+        ]
+      }
+    ]
+  },
+  "yuuki bakuhatsu bang bravern": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "ao isami",
+        "aliases": [
+          "ao isami"
+        ]
+      }
+    ]
+  },
+  "black jack (series)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "black jack (character)",
+        "aliases": [
+          "black jack (character)"
+        ]
+      }
+    ]
+  },
+  "saihate eki": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "tatsunami shion",
+        "aliases": [
+          "tatsunami shion"
+        ]
+      }
+    ]
+  },
+  "renzha fanpai zijiu xitong": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "luo binghe",
+        "aliases": [
+          "luo binghe"
+        ]
+      }
+    ]
+  },
+  "mononoke": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "kusuriuri (mononoke)",
+        "aliases": [
+          "kusuriuri (mononoke)"
+        ]
+      }
+    ]
+  },
+  "mitsudomoe koubou (series)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "tonimura yui",
+        "aliases": [
+          "tonimura yui"
+        ]
+      }
+    ]
+  },
+  "eddsworld": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "tord (eddsworld)",
+        "aliases": [
+          "tord (eddsworld)"
+        ]
+      }
+    ]
+  },
+  "tongkkangi": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "tongkkangi (streamer)",
+        "aliases": [
+          "tongkkangi (streamer)"
+        ]
+      }
+    ]
+  },
+  "kuroko no basuke": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "akashi seijuurou",
+        "aliases": [
+          "akashi seijuurou"
+        ]
+      },
+      {
+        "name": "aomine daiki",
+        "aliases": [
+          "aomine daiki"
+        ]
+      },
+      {
+        "name": "kagami taiga",
+        "aliases": [
+          "kagami taiga"
+        ]
+      },
+      {
+        "name": "kise ryouta",
+        "aliases": [
+          "kise ryouta"
+        ]
+      },
+      {
+        "name": "kuroko tetsuya",
+        "aliases": [
+          "kuroko tetsuya"
+        ]
+      }
+    ]
+  },
+  "priapus": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "priapus a. tarou",
+        "aliases": [
+          "priapus a. tarou"
+        ]
+      }
+    ]
+  },
+  "kaijuu no. 8": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "hibino kafka",
+        "aliases": [
+          "hibino kafka"
+        ]
+      },
+      {
+        "name": "hoshina soshiro",
+        "aliases": [
+          "hoshina soshiro"
+        ]
+      }
+    ]
+  },
+  "luo xiaohei zhanji": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "fengxi (the legend of luoxiaohei)",
+        "aliases": [
+          "fengxi (the legend of luoxiaohei)"
+        ]
+      },
+      {
+        "name": "luo xiaohei",
+        "aliases": [
+          "luo xiaohei"
+        ]
+      },
+      {
+        "name": "nezha (the legend of luoxiaohei)",
+        "aliases": [
+          "nezha (the legend of luoxiaohei)"
+        ]
+      },
+      {
+        "name": "wuxian (the legend of luoxiaohei)",
+        "aliases": [
+          "wuxian (the legend of luoxiaohei)"
+        ]
+      }
+    ]
+  },
+  "koisuru (otome) no tsukurikata": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "mihate hiura",
+        "aliases": [
+          "mihate hiura"
+        ]
+      }
+    ]
+  },
+  "classicaloid": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "franz schubert (classicaloid)",
+        "aliases": [
+          "franz schubert (classicaloid)"
+        ]
+      },
+      {
+        "name": "ludwig van beethoven (classicaloid)",
+        "aliases": [
+          "ludwig van beethoven (classicaloid)"
+        ]
+      },
+      {
+        "name": "wolfgang amadeus mozart (classicaloid)",
+        "aliases": [
+          "wolfgang amadeus mozart (classicaloid)"
+        ]
+      }
+    ]
+  },
+  "akira (manga)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "kaneda shoutarou (akira)",
+        "aliases": [
+          "kaneda shoutarou (akira)"
+        ]
+      }
+    ]
+  },
+  "fate/samurai remnant": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "archer (fate/samurai remnant)",
+        "aliases": [
+          "archer (fate/samurai remnant)"
+        ]
+      }
+    ]
+  },
+  "project hail mary": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "ryland grace",
+        "aliases": [
+          "ryland grace"
+        ]
+      }
+    ]
+  },
+  "south park": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "kenny mccormick",
+        "aliases": [
+          "kenny mccormick"
+        ]
+      },
+      {
+        "name": "kyle broflovski",
+        "aliases": [
+          "kyle broflovski"
+        ]
+      }
+    ]
+  },
+  "to be hero x": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "nice (to be hero x)",
+        "aliases": [
+          "nice (to be hero x)"
+        ]
+      },
+      {
+        "name": "x (to be hero x)",
+        "aliases": [
+          "x (to be hero x)"
+        ]
+      }
+    ]
+  },
+  "slow damage": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "towa (slow damage)",
+        "aliases": [
+          "towa (slow damage)"
+        ]
+      }
+    ]
+  },
+  "hypnosis mic": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "amemura ramuda",
+        "aliases": [
+          "amemura ramuda"
+        ]
+      },
+      {
+        "name": "kannonzaka doppo",
+        "aliases": [
+          "kannonzaka doppo"
+        ]
+      },
+      {
+        "name": "yamada ichiro",
+        "aliases": [
+          "yamada ichiro"
+        ]
+      }
+    ]
+  },
+  "kagurabachi": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "rokuhira chihiro",
+        "aliases": [
+          "rokuhira chihiro"
+        ]
+      }
+    ]
+  },
+  "ansatsu kyoushitsu": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "shiota nagisa",
+        "aliases": [
+          "shiota nagisa"
+        ]
+      }
+    ]
+  },
+  "cyphers": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "damian doyle (cyphers)",
+        "aliases": [
+          "damian doyle (cyphers)"
+        ]
+      }
+    ]
+  },
+  "pripara": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "reona west",
+        "aliases": [
+          "reona west"
+        ]
+      }
+    ]
+  },
+  "light and night love": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "lu chen",
+        "aliases": [
+          "lu chen"
+        ]
+      },
+      {
+        "name": "qi sili",
+        "aliases": [
+          "qi sili"
+        ]
+      }
+    ]
+  },
+  "lies of p": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "pinocchio (lies of p)",
+        "aliases": [
+          "pinocchio (lies of p)"
+        ]
+      }
+    ]
+  },
+  "strawberry prince": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "rinu (stpri)",
+        "aliases": [
+          "rinu (stpri)"
+        ]
+      },
+      {
+        "name": "root (stpri)",
+        "aliases": [
+          "root (stpri)"
+        ]
+      }
+    ]
+  },
+  "occultic;nine": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "gamon yuuta",
+        "aliases": [
+          "gamon yuuta"
+        ]
+      }
+    ]
+  },
+  "detroit: become human": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "connor (detroit)",
+        "aliases": [
+          "connor (detroit)"
+        ]
+      }
+    ]
+  },
+  "osomatsu-san": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "matsuno choromatsu",
+        "aliases": [
+          "matsuno choromatsu"
+        ]
+      },
+      {
+        "name": "matsuno ichimatsu",
+        "aliases": [
+          "matsuno ichimatsu"
+        ]
+      },
+      {
+        "name": "matsuno karamatsu",
+        "aliases": [
+          "matsuno karamatsu"
+        ]
+      },
+      {
+        "name": "matsuno osomatsu",
+        "aliases": [
+          "matsuno osomatsu"
+        ]
+      }
+    ]
+  },
+  "nu carnival": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "edmond (nu carnival)",
+        "aliases": [
+          "edmond (nu carnival)"
+        ]
+      },
+      {
+        "name": "kuya (nu carnival)",
+        "aliases": [
+          "kuya (nu carnival)"
+        ]
+      }
+    ]
+  },
+  "steins;gate 0": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "alexis leskinen",
+        "aliases": [
+          "alexis leskinen"
+        ]
+      }
+    ]
+  },
+  "mother 3": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "lucas (mother 3)",
+        "aliases": [
+          "lucas (mother 3)"
+        ]
+      }
+    ]
+  },
+  "plave": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "bamby (plave)",
+        "aliases": [
+          "bamby (plave)"
+        ]
+      },
+      {
+        "name": "eunho (plave)",
+        "aliases": [
+          "eunho (plave)"
+        ]
+      }
+    ]
+  },
+  "our life": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "cove holden",
+        "aliases": [
+          "cove holden"
+        ]
+      }
+    ]
+  },
+  "iron lung (movie)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "simon (iron lung)",
+        "aliases": [
+          "simon (iron lung)"
+        ]
+      }
+    ]
+  },
+  "i-chu": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "hanabusa kokoro",
+        "aliases": [
+          "hanabusa kokoro"
+        ]
+      }
+    ]
+  },
+  "silent hill f": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "fox mask (silent hill)",
+        "aliases": [
+          "fox mask (silent hill)"
+        ]
+      }
+    ]
+  },
+  "mother 2": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "ness (mother 2)",
+        "aliases": [
+          "ness (mother 2)"
+        ]
+      }
+    ]
+  },
+  "suicide boy": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "lee hoon",
+        "aliases": [
+          "lee hoon"
+        ]
+      }
+    ]
+  },
+  "livejupiter (2channel)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "aile-kun",
+        "aliases": [
+          "aile-kun"
+        ]
+      }
+    ]
+  },
+  "drifters": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "nasu no yoichi",
+        "aliases": [
+          "nasu no yoichi"
+        ]
+      }
+    ]
+  },
+  "kimi ga shine": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "hiyori sou",
+        "aliases": [
+          "hiyori sou"
+        ]
+      },
+      {
+        "name": "midori (kimi ga shine)",
+        "aliases": [
+          "midori (kimi ga shine)"
+        ]
+      }
+    ]
+  },
+  "jinhongi": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "zaha",
+        "aliases": [
+          "zaha"
+        ]
+      }
+    ]
+  },
+  "pikmin (series)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "olimar",
+        "aliases": [
+          "olimar"
+        ]
+      }
+    ]
+  },
+  "kekkai sensen": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "klaus von reinhertz",
+        "aliases": [
+          "klaus von reinhertz"
+        ]
+      }
+    ]
+  },
+  "special civil servant": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "han maru",
+        "aliases": [
+          "han maru"
+        ]
+      }
+    ]
+  },
+  "1hp club": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "obi (1hp club)",
+        "aliases": [
+          "obi (1hp club)"
+        ]
+      }
+    ]
+  },
+  "vinland saga": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "thorfinn",
+        "aliases": [
+          "thorfinn"
+        ]
+      }
+    ]
+  },
+  "pressure (roblox)": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "sebastian solace",
+        "aliases": [
+          "sebastian solace"
+        ]
+      }
+    ]
+  },
+  "senpai wa otokonoko": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "hanaoka makoto",
+        "aliases": [
+          "hanaoka makoto"
+        ]
+      }
+    ]
+  },
+  "erha he ta de bai mao shizun": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "chu wanning",
+        "aliases": [
+          "chu wanning"
+        ]
+      }
+    ]
+  },
+  "otome domain": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "asuka minato",
+        "aliases": [
+          "asuka minato"
+        ]
+      }
+    ]
+  },
+  "vanitas no carte": {
+    "girl": [],
+    "boy": [
+      {
+        "name": "vanitas (vanitas no carte)",
+        "aliases": [
+          "vanitas (vanitas no carte)"
+        ]
+      }
+    ]
   }
 }

@@ -43,6 +43,44 @@ from core.nai_model_contract import (
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 
+# 캐릭터 칸의 대사를 메인 프롬프트로 옮길 때 쓰는 표식.
+#
+# ⚠️ `korean text,` 처럼 **콜론 없는** 낱말에 걸리면 안 되고, `context:` 같이 뒤에
+#    붙은 낱말에도 걸리면 안 된다 - 그래서 앞에 낱말 문자가 오면 안 잡는다.
+CHARACTER_TEXT_MARKER = re.compile(r"(?<![A-Za-z0-9_])text\s*:\s*", re.IGNORECASE)
+# 사용자가 화면에서 쓰는 문법 그대로 적는다(사용자 지정). 공식 웹은 `teXt: ` 로 적지만
+# 그 대소문자를 흉내 낼 이유가 없다 - NAI 는 어느 쪽이든 같은 글자를 그린다.
+CHARACTER_TEXT_PREFIX = "text: "
+
+
+def extract_character_speech(characters: Any) -> str:
+    """캐릭터 프롬프트의 `text:` 조각을 모아 메인 프롬프트 뒤에 얹을 한 덩어리로 만든다.
+
+    공식 웹의 사양이다(사용자 실측 비교 2026-08-25). 캐릭터 칸에 적은 대사를 사이트가
+    메인 프롬프트 뒤로 옮겨 주는데 앱은 그걸 안 했다 - 같은 시드·같은 캐릭터 프롬프트
+    인데도 글자만 안 나왔다.
+
+    규칙(사용자 지정):
+      - `text:` 뒤부터 **쉼표 전까지**가 한 조각이다.
+      - 조각이 없는 캐릭터는 건너뛴다.
+      - 캐릭터 순서대로 **진짜 LF 두 개**로 잇는다.
+      - 앞머리는 맨 앞에 한 번만 붙인다(호출부가 붙인다).
+
+    ⚠️ 캐릭터 프롬프트에서 **지우지 않는다.** 공홈 요청도 char_captions 는 원본 그대로
+       보냈다(실측: 앱/공홈 3개 전부 바이트 일치). 지우면 그림 자체가 달라진다.
+    ⚠️ 리터럴 `\\n`(백슬래시 + n)은 사용자가 친 **두 글자**다 - 진짜 개행으로 풀지
+       않는다. 푸는 순간 공홈과 다른 요청이 된다. 잇는 구분자만 진짜 LF 다.
+    """
+    parts: list[str] = []
+    for raw in (characters or []):
+        text = str(raw or "")
+        for match in CHARACTER_TEXT_MARKER.finditer(text):
+            piece = text[match.end():].split(",", 1)[0].strip()
+            if piece:
+                parts.append(piece)
+    return "\n\n".join(parts)
+
+
 def _resolve_nai_model_key_loosely(model_value: Any) -> str:
     """키든 wire 이름이든 **아는 모델 키**로 되돌린다.
 
@@ -1135,6 +1173,18 @@ class APIService:
                     if len(character_ids) < len(characters):
                         character_ids.extend(str(index + 1) for index in range(len(character_ids), len(characters)))
                     default_center = {"x": 0.5, "y": 0.5}
+
+                    # 캐릭터 칸에 적은 대사를 메인 프롬프트 뒤에 얹는다(공식 웹 사양).
+                    # 이걸 안 해서 같은 시드·같은 캐릭터 프롬프트인데도 글자가 안 나왔다.
+                    _speech = extract_character_speech(characters)
+                    if _speech:
+                        _base = str(api_parameters['v4_prompt']['caption']['base_caption'] or "")
+                        api_parameters['v4_prompt']['caption']['base_caption'] = (
+                            f"{_base}, {CHARACTER_TEXT_PREFIX}{_speech}" if _base.strip()
+                            else f"{CHARACTER_TEXT_PREFIX}{_speech}"
+                        )
+                        print(f"[{char_source}] appended {_speech.count(chr(10) * 2) + 1}"
+                              f" character text segment(s) to base caption")
 
                     def _normalized_center(value):
                         """{'x','y'} 를 0.0~1.0 소수 3자리로. 좌표가 아니면 None.

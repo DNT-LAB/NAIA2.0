@@ -19418,10 +19418,6 @@ body.detached-module .mod-grid-3 {
 }
 .scene-apply:hover:not(:disabled) { background: rgba(124,106,239,0.3); }
 .scene-apply:disabled { opacity: 0.4; cursor: default; }
-/* 한 번 더 눌러야 적용된다 - 지금 구도를 통째로 갈아치우는 조작이라 오조작이 아프다. */
-.scene-apply.is-confirm {
-  border-color: rgba(232,217,143,0.75); background: rgba(90,80,30,0.45); color: #ecdfa6;
-}
 
 /* ── 캐릭터 슬롯 Connect ─────────────────────────────────────────────────────
    앞선 활성 슬롯의 캐릭터를 그대로 물려받는다(사용자 지정). 카드 머리의 액션 줄에

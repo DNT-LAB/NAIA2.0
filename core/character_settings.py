@@ -175,6 +175,10 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 #    날 조용히 다른 캐릭터를 가리킨다. "자기보다 낮은 번호만" 은 화면에서
                 #    거는 제약이고, 저장은 안정 uuid 로 한다.
                 "connect_to": str(frame.get("connect_to") or ""),
+                # V5 Scene 이 만든 슬롯인가. 씬을 잇달아 불러올 때 **이전 씬이 남긴
+                # 칸만** 골라 버리려고 둔다 - 사용자가 손으로 만든 칸은 그대로 남는다.
+                # 이게 없으면 비활성 무리에 씬 찌꺼기가 끝없이 쌓인다(사용자 제보).
+                "from_scene": bool(frame.get("from_scene", False)),
             })
     settings["character_frames"] = _prune_character_links(sort_character_frames(normalized_frames))
     # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.

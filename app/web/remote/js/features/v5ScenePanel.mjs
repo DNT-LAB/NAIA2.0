@@ -28,7 +28,6 @@ export function createV5ScenePanel({
   let lastState = null;
   let query = '';
   let openName = '';           // 펼쳐 둔 컷
-  let pendingApply = '';       // 확인 대기(두 번 눌러야 적용)
 
   function escAttr(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => (
@@ -127,7 +126,6 @@ export function createV5ScenePanel({
     const name = String(scene.name || '');
     const wrongMode = scene.mode && lastState && scene.mode !== lastState.current_mode;
     const open = openName === name;
-    const confirming = pendingApply === name;
     const slots = Number(scene.character_count || 0);
     const solo = Number(scene.independent_count || 0);
     // 순번은 이제 뜻을 가진다 - 만화의 컷 순서다(사용자 지정: ↑↓ 로 바꾼다).
@@ -163,11 +161,11 @@ export function createV5ScenePanel({
                     data-naia-title="뒤 컷과 자리를 바꿉니다">▼</button>
           </span>
         </div>
-        ${open ? sceneDetail(scene, confirming, wrongMode) : ''}
+        ${open ? sceneDetail(scene, wrongMode) : ''}
       </article>`;
   }
 
-  function sceneDetail(scene, confirming, wrongMode) {
+  function sceneDetail(scene, wrongMode) {
     const detail = scene.detail || {};
     const characters = detail.characters || [];
     const line = (label, value) => value
@@ -187,9 +185,9 @@ export function createV5ScenePanel({
           </div>`;
         }).join('')}
         <div class="scene-detail-actions">
-          <button type="button" class="scene-apply${confirming ? ' is-confirm' : ''}"
+          <button type="button" class="scene-apply"
                   data-scene-apply="${escAttr(scene.name)}"${wrongMode ? ' disabled' : ''}>
-            ${confirming ? '한 번 더 누르면 적용' : '이 구도로 불러오기'}</button>
+            이 구도로 불러오기</button>
         </div>
       </div>`;
   }
@@ -308,25 +306,15 @@ export function createV5ScenePanel({
     if (toggle) {
       const name = toggle.dataset.sceneToggle || '';
       openName = (openName === name) ? '' : name;
-      pendingApply = '';
       render();
       return;
     }
     const apply = event.target.closest('[data-scene-apply]');
     if (apply) {
       const name = apply.dataset.sceneApply || '';
-      // ⚠️ **두 번 눌러야 적용한다.** 적용은 지금 프롬프트와 캐릭터를 통째로 갈아치운다 -
-      //    목록을 훑다 잘못 누르면 작업하던 구도가 화면에서 사라진다(기존 캐릭터는
-      //    비활성으로 남아 되살릴 수 있지만, 그걸 아는 것과 놀라지 않는 것은 다르다).
-      if (pendingApply !== name) {
-        pendingApply = name;
-        render();
-        globalThis.setTimeout(() => {
-          if (pendingApply === name) { pendingApply = ''; render(); }
-        }, 4000);
-        return;
-      }
-      pendingApply = '';
+      // 한 번에 적용한다(사용자 지정). 예전엔 두 번 눌러야 했는데 - 통째 교체라
+      // 잘못 누르면 작업하던 구도가 사라져서 - 컷을 잇달아 넘겨 보는 작업에서는
+      // 그 한 번이 매번 거슬린다. 안전보다 손맛을 택했다.
       setModuleParam('v5_scene', 'apply', {event: activeEvent(), name});
       showToast(`구도를 불러왔습니다 — ${name}`, 'info');
     }
@@ -338,7 +326,7 @@ export function createV5ScenePanel({
     const name = String(event.target.value || '');
     rememberEvent(name);
     // 이벤트를 바꾸면 검색·펼침은 초기화한다 - 남의 이벤트에서 쓰던 상태다.
-    query = ''; openName = ''; pendingApply = '';
+    query = ''; openName = '';
     setModuleParam('v5_scene', 'refresh', {event: name});
   });
   panel?.addEventListener('input', event => {

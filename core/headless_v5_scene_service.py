@@ -33,6 +33,13 @@ from core.v5_scene_store import (
 )
 
 
+def _has_wildcard(text: Any) -> bool:
+    """아직 안 풀린 와일드카드가 남았나. `__name__` / `<name>` / `$name` 셋 다 본다
+    (`headless_generation_service._expand_input_wildcards` 와 같은 판정 기준)."""
+    raw = str(text or "")
+    return "__" in raw or "<" in raw or "$" in raw
+
+
 def _pe_options(context: Any) -> dict[str, Any]:
     """지금 적용 중인 프롬프트 엔지니어링 설정(앞뒤 태그 등).
 
@@ -353,16 +360,32 @@ class HeadlessV5SceneService:
         )
 
         shares = read_character_shares(self.context, mode)
+        # ⚠️ **롤 스냅샷은 apply 가 매번 지운다.** 그래서 컷을 잇달아 넘기면 두 번째부터
+        #    굴려진 값을 못 찾고 원문 `__wildcard__` 가 그대로 넘어가, 컷마다 다른 인물이
+        #    나온다(사용자 제보). 해석된 배역을 **순번으로** 따로 기억해 둔다 - uuid 는
+        #    apply 때마다 새로 만들어져 다음 번에 못 찾는다.
+        remembered = dict(getattr(self.context, "_v5_scene_cast", None) or {})
         cast: dict[int, str] = {}
         for index, frame in enumerate(active_character_frames(settings), 1):
             raw = str(frame.get("prompt") or "")
             if not has_connect_region(raw):
                 continue
+            own = _split_connect_region(raw)[1].strip()
             rolled = str(shares.get(str(_frame_uuid(frame) or "")) or "").strip()
-            if not rolled:
-                rolled = _split_connect_region(raw)[1].strip()
+            if not rolled and _has_wildcard(own):
+                # 굴린 값이 없고 원문이 아직 와일드카드면, 지난번에 기억해 둔 값을 쓴다.
+                rolled = str(remembered.get(str(index)) or "").strip()
             if rolled:
                 cast[index] = rolled
+            elif own:
+                cast[index] = own
+        # 다음 컷을 위해 남긴다. 와일드카드가 아직 안 풀린 자리는 기억하지 않는다 -
+        # 그건 아직 아무것도 "획득" 하지 않은 상태라 덮어쓰면 옛 값이 되살아난다.
+        keep = {key: value for key, value in remembered.items() if value}
+        for index, value in cast.items():
+            if not _has_wildcard(value):
+                keep[str(index)] = value
+        self.context._v5_scene_cast = keep
         return cast
 
     @staticmethod
@@ -433,6 +456,8 @@ class HeadlessV5SceneService:
                 "slot_state": "active",
                 "is_enabled": True,
                 "is_muted": False,
+                # 이 칸은 씬이 만든 것이다 - **다음 씬을 부를 때 버릴 대상**이 된다.
+                "from_scene": True,
             })
 
         def is_cold(frame: Any) -> bool:
@@ -440,11 +465,19 @@ class HeadlessV5SceneService:
                     and str(frame.get("slot_state") or "").strip().lower() == "cold")
 
         kept = []
+        dropped = 0
         for frame in frames:
             if is_cold(frame):
                 kept.append(frame)
                 continue
             if not isinstance(frame, dict):
+                continue
+            # ⚠️ **이전 씬이 남긴 칸은 버린다.** 예전엔 전부 비활성으로 남겼는데(아무것도
+            #    잃지 않으려고), 씬을 잇달아 부르면 비활성 무리에 찌꺼기가 끝없이 쌓였다
+            #    (사용자 제보). 손으로 만든 칸은 그대로 남기고 씬이 만든 것만 고른다 -
+            #    그게 없으면 어느 것이 사용자 작업인지 구분할 방법이 없다.
+            if frame.get("from_scene"):
+                dropped += 1
                 continue
             frame["slot_state"] = "inactive"
             frame["is_enabled"] = False

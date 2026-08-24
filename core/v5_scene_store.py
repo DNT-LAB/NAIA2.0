@@ -43,7 +43,12 @@ from pathlib import Path
 from typing import Any
 
 SCENE_DIR_NAME = "v5_scenes"
-SCENE_SCHEMA_VERSION = 1
+# 2 = **프롬프트에 구도만 담긴다**(프롬프트 엔지니어링은 저장 시점에 걷어낸다).
+# 1 이하는 조립된 프롬프트를 통째로 들고 있어 읽을 때 되짚어야 한다.
+# ⚠️ 이 판 구분이 없으면 되짚기가 새 씬에도 걸려, 사용자가 직접 친 세 문단을
+#    `prefix/main/postfix` 로 오인해 가운데만 남기고 버린다(Codex CONCERN
+#    2026-08-25 재현: `castle\n\nnight\n\nrain` -> `night`).
+SCENE_SCHEMA_VERSION = 2
 # 이벤트 폴더 안의 메타 파일. `_` 로 시작해 씬 파일(`*.json`)과 섞이지 않는다.
 EVENT_META_NAME = "_event.json"
 EVENT_SCHEMA_VERSION = 1
@@ -412,11 +417,19 @@ def normalize_scene(raw: Any) -> dict[str, Any]:
     #    구도의 일부가 아니다. 구도가 무언가를 빼야 한다면 `-태그` 로 적는다(연결된
     #    캐릭터 슬롯에서 물려받은 태그를 지우는 문법 — `character_settings._apply_minus_tags`).
     #    옛 씬이 들고 있던 값은 여기서 조용히 버린다.
+    # 되짚기는 **옛 판에만** 건다. 새 판은 이미 구도만 담고 있으므로 손대면 사용자가
+    # 직접 친 여러 문단을 조립된 프롬프트로 오인해 버린다.
+    try:
+        raw_version = int(data.get("version") or 0)
+    except (TypeError, ValueError):
+        raw_version = 0
+    prompt = (str(data.get("prompt") or "") if raw_version >= SCENE_SCHEMA_VERSION
+              else _normalized_prompt(data.get("prompt")))
     return {
         "version": SCENE_SCHEMA_VERSION,
         "name": sanitize_scene_name(data.get("name")),
         "mode": mode,
-        "prompt": _normalized_prompt(data.get("prompt")),
+        "prompt": prompt,
         "resolution": str(data.get("resolution") or ""),
         "position_mode": position_mode,
         "characters": characters,
@@ -500,7 +513,12 @@ def read_scene(event: str, name: str, save_root: str | Path | None = None) -> di
 
 
 def write_scene(event: str, scene: dict[str, Any], save_root: str | Path | None = None) -> Path | None:
-    normalized = normalize_scene(scene)
+    # ⚠️ 쓰는 값은 **이미 구도만** 담고 있다(서비스가 저장 시점에 프롬프트 엔지니어링을
+    #    걷어내 넘긴다). 판을 안 찍어 주면 `normalize_scene` 이 이걸 옛 씬으로 보고
+    #    되짚기를 걸어, 문단이 셋인 사용자 프롬프트를 가운데만 남기고 버린다.
+    incoming = dict(scene) if isinstance(scene, dict) else {}
+    incoming["version"] = SCENE_SCHEMA_VERSION
+    normalized = normalize_scene(incoming)
     path = scene_path(event, normalized["name"], save_root)
     if path is None:
         return None

@@ -707,11 +707,10 @@
                 <button type="button" class="assistants-ollama-btn" id="ollamaBtn" aria-label="Ollama"
                         data-naia-guide="Ollama 도구. 누르면 Assist(태그 추천·프롬프트 보강)와 Chat(자유 대화) 중에 고릅니다. 이미 열려 있는 Ollama 창이 있으면 그 창을 닫습니다.">Ollama</button>
               </div>
-              <!-- ⚠️ 아직 **기능이 배선되지 않은 자리표시자**다(사용자: 역할은 이후 설명).
-                   Interactive 와 같은 독립 버튼 모양으로 자리만 잡아 둔다. 누르면
-                   "준비 중" 을 알린다 - 아무 반응이 없으면 고장으로 읽힌다. -->
+              <!-- 태그 이름 **부분 매칭** 검색. 자동완성은 속도 때문에 접두사만 봐서
+                   `utsusumi kio` 를 `kio` 로 못 찾는다 — 그 구멍을 메운다. -->
               <button type="button" class="ia-mode-toggle" id="tagSearchBtn" aria-pressed="false"
-                      data-naia-guide="Tag Search. 아직 준비 중인 기능입니다.">
+                      data-naia-guide="Tag Search. 태그 이름의 **일부**로 찾습니다 — 자동완성이 못 찾는 뒷부분(예: kio → utsusumi kio)도 나옵니다. ALL/Character/Artists/General 로 좁힐 수 있고, 고른 태그의 한글 설명을 옆에서 봅니다.">
                 <span>Tag Search</span>
               </button>
             </div>

@@ -430,6 +430,8 @@ let img2imgPanel = null;
 let lastAutoHiddenImg2ImgSubmission = '';
 let refinePanelControl = null;
 let tagSearchController = null;
+let tagSearchPopup = null;
+let tagSearchPopupReady = null;
 let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
@@ -5448,11 +5450,30 @@ if (ollamaBtn) {
     else if (pick === 'chat') openOllamaChat();
   });
 }
+tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260824-tagsearch1')
+  .then(({createTagSearchPopup}) => {
+    tagSearchPopup = createTagSearchPopup({
+      document,
+      window,
+      escHtml,
+      showToast,
+      getWs: () => ws,
+      onInsertTag: insertTagIntoPrompt,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Tag Search popup', error);
+  });
 if (tagSearchBtn) {
-  // ⚠️ **자리표시자다.** 역할이 아직 정해지지 않았다(사용자: 이후 설명).
-  //    아무 반응이 없으면 고장으로 읽히므로 준비 중임을 알린다.
-  tagSearchBtn.addEventListener('click', () => {
-    showToast('Tag Search 는 아직 준비 중입니다', 'info');
+  // 재클릭 = 토글(Ollama·Interactive 와 같은 규약).
+  tagSearchBtn.addEventListener('click', async () => {
+    await tagSearchPopupReady;
+    if (!tagSearchPopup) {
+      showToast('Tag Search 모듈을 불러오지 못했습니다.', 'error');
+      return;
+    }
+    if (tagSearchPopup.isOpen()) tagSearchPopup.close();
+    else tagSearchPopup.open();
   });
 }
 
@@ -9800,7 +9821,35 @@ function fireTagSearch() {
 }
 
 function onTagSearchResult(m) {
+  // Tag Search 팝업이 열려 있으면 그쪽이 먹는다. 옛 `#tagSearchBar` 컨트롤러는
+  // 그 바가 `display:none` 하드 숨김이라 사실상 죽어 있지만, 배선을 걷어내는 것보다
+  // 뒤로 두는 편이 폭발 반경이 작다.
+  if (tagSearchPopup && tagSearchPopup.onResult(m)) return;
   if (tagSearchController) tagSearchController.onResult(m);
+}
+
+/** Tag Search 창이 고른 태그를 프롬프트 끝 커서 자리에 넣는다.
+ *  옛 `tagSearch.mjs` 의 삽입 규약을 그대로 따른다 - 스크롤 복원까지 포함해서다
+ *  (긴 프롬프트에서 value 재대입이 scrollTop 을 0 으로 되돌린다). */
+function insertTagIntoPrompt(tag) {
+  const clean = String(tag || '').trim();
+  if (!clean || !promptEdit) return false;
+  const current = promptEdit.value;
+  const start = promptEdit.selectionStart != null ? promptEdit.selectionStart : current.length;
+  const st = promptEdit.scrollTop;
+  const sl = promptEdit.scrollLeft;
+  const before = current.substring(0, start);
+  const needSep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',')
+    && before.trim().length > 0;
+  const sep = needSep ? ', ' : '';
+  promptEdit.value = before + sep + clean + ', ' + current.substring(start);
+  promptEdit.focus({preventScroll: true});
+  const newPos = start + sep.length + clean.length + 2;
+  promptEdit.selectionStart = promptEdit.selectionEnd = newPos;
+  promptEdit.scrollTop = st;
+  promptEdit.scrollLeft = sl;
+  onPromptEdit();
+  return true;
 }
 
 function insertTag(tag) {

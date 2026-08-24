@@ -836,6 +836,57 @@ class TagSearchIndex:
             scan_substrings=False,
         )
 
+    def search_substring(
+        self,
+        query: str,
+        *,
+        limit: int | None = 200,
+        cats: set[str] | None = None,
+        exclude_cats: set[str] | None = None,
+    ) -> list[TagSearchResult]:
+        """Tag Search 전용 — **태그 이름 부분 매칭**을 켜고 **빈도순**으로 세운다.
+
+        자동완성(`search_autocomplete`)은 속도 때문에 `scan_substrings=False` 라
+        접두사만 본다. 그래서 사용자가 `utsusumi kio` 의 뒷부분(`kio`)만 기억하면
+        찾을 길이 없다 - 이 기능이 채우려는 구멍이 정확히 그것이다(사용자 지정).
+
+        ⚠️ **점수순이 아니라 빈도순이다.** 기본 점수는 접두사 일치를 크게 쳐서,
+        `kio` 로 찾으면 `kion-kun`·`kionant` 같은 것이 앞을 다 채우고
+        `utsusumi kio` 는 129개 중 **29위**로 묻힌다(실측). 빈도순으로 세우면
+        **5위**로 올라온다 - "이름 일부만 기억난다" 는 상황에서는 유명한 것부터
+        보여주는 쪽이 맞다.
+
+        ⚠️ `force_term_scan` 은 켜지 않는다. 그건 설명 전문까지 훑어(`_blob_by_tag`)
+        느리고 노이즈가 크다 - 여기서 찾는 것은 **이름**이다. 한글 질의는 아래
+        term 스캔이 이미 받아 준다.
+
+        ⚠️ 부분 매칭은 짧은 질의에서 꺼진다(`_should_scan_tag_substrings`:
+        ASCII 3자·비ASCII 2자 이상). 그 아래에서는 접두사 매칭만 남는데, 두 글자로
+        19만 태그를 훑으면 히트가 수천이라 목록이 쓸모없어지기 때문이다.
+        """
+        results = self._search(
+            query,
+            limit=None,
+            axes=None,
+            require_event=None,
+            sources=None,
+            cats=cats,
+            force_term_scan=False,
+            scan_substrings=True,
+        )
+        if exclude_cats:
+            results = [r for r in results
+                       if (getattr(r.entry, "cat", "") or "") not in exclude_cats]
+
+        def freq_of(result: TagSearchResult) -> int:
+            try:
+                return int(getattr(result.entry, "freq", 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        results.sort(key=lambda r: (-freq_of(r), r.tag))
+        return results[:limit] if limit else results
+
     def search_semantic(
         self,
         query: str,

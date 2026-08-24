@@ -310,6 +310,60 @@ def search_kr_tags(context: WebSessionContext, query: str, limit: int = 20) -> l
     return rows[:limit]
 
 
+# Tag Search 탭 -> 카테고리 필터.
+#
+# ⚠️ 네 탭이 **전체를 덮어야** 한다. `cat` 실측 분포는
+#     artist 95,619 · character 48,932 · (빈값) 34,208 · copyright 8,845 · e621 5,382
+# 이라, General 을 `cat == ""` 로 잡으면 copyright(touhou 등)와 e621 이 어느 탭에도
+# 안 속해 ALL 에서만 보인다. 그래서 General 은 **캐릭터도 아티스트도 아닌 것**이다.
+TAG_SEARCH_TABS: dict[str, dict[str, set[str] | None]] = {
+    "all": {"cats": None, "exclude_cats": None},
+    "character": {"cats": {"character"}, "exclude_cats": None},
+    "artist": {"cats": {"artist"}, "exclude_cats": None},
+    "general": {"cats": None, "exclude_cats": {"artist", "character"}},
+}
+
+
+def search_tags_substring(
+    context: WebSessionContext,
+    query: str,
+    tab: str = "all",
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Tag Search 팝업 — **부분 매칭 + 빈도순**.
+
+    자동완성은 속도 때문에 접두사만 본다. 그래서 `utsusumi kio` 의 뒷부분(`kio`)만
+    기억나면 찾을 길이 없었다 - 이 기능이 채우는 구멍이다(사용자 지정).
+
+    실측: `kio` 129개 중 `utsusumi kio` 가 점수순으로는 29위, **빈도순 5위**.
+    비용은 질의당 30~50ms 라 지연 검색(lazy)으로 감당한다.
+    """
+    from core.tag_search_index import normalize_search_query
+
+    q = normalize_search_query(str(query or ""))
+    if not q:
+        return []
+    spec = TAG_SEARCH_TABS.get(str(tab or "all").strip().lower()) or TAG_SEARCH_TABS["all"]
+    index = ensure_tag_search_index(context)
+    results = index.search_substring(
+        q,
+        limit=max(1, min(500, int(limit or 200))),
+        cats=spec["cats"],
+        exclude_cats=spec["exclude_cats"],
+    )
+    rows: list[dict[str, Any]] = []
+    for result in results:
+        row = _autocomplete_row(result)
+        entry = result.entry
+        # 우측 설명 패널이 쓰는 값들. `_autocomplete_row` 는 자동완성 목록용이라
+        # 한글 동의어(keywords)를 안 싣는다 - 여기서만 더한다.
+        keywords = getattr(entry, "keywords", None) or ()
+        row["keywords"] = [str(k) for k in keywords if str(k or "").strip()]
+        row["source"] = str(getattr(entry, "source", "") or "")
+        rows.append(row)
+    return rows
+
+
 def _has_hangul_text(text: str) -> bool:
     return bool(re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", str(text or "")))
 
@@ -591,8 +645,20 @@ async def handle_autocomplete_command(
 
     query = str(command.get("query") or "")
     if command_type == "tag_search":
-        results = await run_in_thread(search_kr_tags, context, query, 20)
-        await _send_json(ws, {"type": "tag_search_result", "query": query, "results": results})
+        # ⚠️ 이 커맨드는 **소비자가 없는 채로 남아 있었다** — `#tagSearchBar` 가
+        #    `display:none` 하드 숨김이고(주석: reserved for future) JS 참조도 0이었다.
+        #    Tag Search 팝업이 그 자리를 이어받는다. 새 메시지 타입을 만들지 않는
+        #    이유는 **웹 스모크 계약이 타입을 순서대로 세기 때문**이다 - 하나만 더해도
+        #    이후 전부가 밀린다.
+        tab = str(command.get("tab") or "all")
+        limit = int(command.get("limit") or 200)
+        results = await run_in_thread(search_tags_substring, context, query, tab, limit)
+        await _send_json(ws, {
+            "type": "tag_search_result",
+            "query": query,
+            "tab": tab,
+            "results": results,
+        })
         return True
 
     if command_type == "tag_filter_ac":

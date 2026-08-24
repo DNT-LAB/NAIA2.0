@@ -329,28 +329,54 @@ def search_tags_substring(
     query: str,
     tab: str = "all",
     limit: int = 200,
-) -> list[dict[str, Any]]:
-    """Tag Search 팝업 — **부분 매칭 + 빈도순**.
+    translate: bool = False,
+) -> tuple[list[dict[str, Any]], str]:
+    """Tag Search 팝업 — **부분 매칭 + 빈도순**. `(행, 번역어)` 를 준다.
 
     자동완성은 속도 때문에 접두사만 본다. 그래서 `utsusumi kio` 의 뒷부분(`kio`)만
     기억나면 찾을 길이 없었다 - 이 기능이 채우는 구멍이다(사용자 지정).
 
     실측: `kio` 129개 중 `utsusumi kio` 가 점수순으로는 29위, **빈도순 5위**.
     비용은 질의당 30~50ms 라 지연 검색(lazy)으로 감당한다.
+
+    두 번째 값은 **번역으로 다시 찾았을 때의 영어 질의**다. 빈 문자열이면 번역을
+    안 썼다는 뜻이다 - 화면이 "'밀크티' -> 'milk tea' 로 찾았습니다" 를 알려야
+    사용자가 왜 다른 말의 결과가 나오는지 안다.
     """
     from core.tag_search_index import normalize_search_query
 
-    q = normalize_search_query(str(query or ""))
+    raw_query = str(query or "")
+    q = normalize_search_query(raw_query)
     if not q:
-        return []
+        return [], ""
     spec = TAG_SEARCH_TABS.get(str(tab or "all").strip().lower()) or TAG_SEARCH_TABS["all"]
     index = ensure_tag_search_index(context)
+    cap = max(1, min(500, int(limit or 200)))
     results = index.search_substring(
-        q,
-        limit=max(1, min(500, int(limit or 200))),
-        cats=spec["cats"],
-        exclude_cats=spec["exclude_cats"],
+        q, limit=cap, cats=spec["cats"], exclude_cats=spec["exclude_cats"],
     )
+    translated = ""
+    if not results and translate:
+        # 한글이 안 걸리면 번역해서 한 번 더 친다(사용자 제안).
+        #
+        # ⚠️ **자동으로 하지 않는다.** `translate` 를 켜야 돈다. 이유는 실측이다:
+        #   · 번역기는 **네트워크**다(googletrans / Google Translate API). 이
+        #     환경에서는 전부 빈 문자열을 돌려주면서 질의당 **700~870ms** 를 쓴다.
+        #     자동으로 걸면 결과 없는 질의마다 0.8초 멈추고 얻는 것이 없다.
+        #   · 한글 색인이 이미 거의 다 덮는다 - `자동차`->motor vehicle ·
+        #     `권투 장갑`->boxing gloves · `칫솔`->toothbrush · `선글라스`->sunglasses ·
+        #     `헬리콥터`->helicopter 가 **번역 없이** 나온다.
+        #
+        # 그래서 0건일 때 화면이 [번역해서 다시 찾기] 를 내밀고, 누르면 여기로 온다.
+        # 오프라인이면 멈춤이 아니라 "번역하지 못했습니다" 가 된다.
+        translated = _translate_autocomplete_query(context, raw_query)
+        if translated and translated != q:
+            results = index.search_substring(
+                translated, limit=cap, cats=spec["cats"], exclude_cats=spec["exclude_cats"],
+            )
+        if not results:
+            # 번역해도 빈손이면 번역어를 알릴 이유가 없다 - 오히려 헷갈린다.
+            translated = ""
     rows: list[dict[str, Any]] = []
     for result in results:
         row = _autocomplete_row(result)
@@ -361,7 +387,7 @@ def search_tags_substring(
         row["keywords"] = [str(k) for k in keywords if str(k or "").strip()]
         row["source"] = str(getattr(entry, "source", "") or "")
         rows.append(row)
-    return rows
+    return rows, translated
 
 
 def _has_hangul_text(text: str) -> bool:
@@ -652,11 +678,18 @@ async def handle_autocomplete_command(
         #    이후 전부가 밀린다.
         tab = str(command.get("tab") or "all")
         limit = int(command.get("limit") or 200)
-        results = await run_in_thread(search_tags_substring, context, query, tab, limit)
+        # `translate` 는 화면의 [번역해서 다시 찾기] 가 켠다 - 자동이 아니다
+        # (번역기가 네트워크라 질의당 0.8초를 문다, search_tags_substring 주석 참조).
+        translate = bool(command.get("translate"))
+        results, translated = await run_in_thread(
+            search_tags_substring, context, query, tab, limit, translate)
         await _send_json(ws, {
             "type": "tag_search_result",
             "query": query,
             "tab": tab,
+            # 번역으로 다시 찾았으면 그 영어 질의. 화면이 왜 다른 말의 결과가
+            # 나오는지 알려야 한다.
+            "translated": translated,
             "results": results,
         })
         return True

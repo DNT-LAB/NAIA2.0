@@ -54,6 +54,8 @@ export function createTagSearchPopup({
   let selectedTag = '';
   let lastQuery = '';
   let pendingQuery = '';
+  // 같은 질의에 번역을 두 번 청하지 않는다 - 버튼이 되풀이되면 사용자가 계속 누른다.
+  let triedTranslate = false;
 
   const pick = selector => (popup ? popup.querySelector(selector) : null);
 
@@ -87,8 +89,20 @@ export function createTagSearchPopup({
     if (!list) return;
     if (!rows.length) {
       const q = String(pick('.tagsearch-input')?.value || '').trim();
-      list.innerHTML = `<div class="tagsearch-empty">${
-        q ? escHtml('결과가 없습니다') : escHtml('태그의 일부를 입력하세요')
+      if (!q) {
+        list.innerHTML = `<div class="tagsearch-empty">${escHtml('태그의 일부를 입력하세요')}</div>`;
+        return;
+      }
+      // 한글로 찾아 0건이면 **번역해서 다시 찾기**를 내민다(사용자 제안).
+      // ⚠️ 자동으로 하지 않는다 - 번역기가 네트워크라 질의당 0.8초를 문다(실측).
+      //    누를 때만 물면 흔한 경우가 안 느려지고, 오프라인이면 멈춤 대신
+      //    "번역하지 못했습니다" 로 끝난다.
+      const offer = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(q) && !triedTranslate;
+      list.innerHTML = `<div class="tagsearch-empty">${escHtml('결과가 없습니다')}${
+        offer
+          ? `<br><button type="button" class="tagsearch-act tagsearch-retry"
+                data-act="translate">번역해서 다시 찾기</button>`
+          : ''
       }</div>`;
       return;
     }
@@ -143,7 +157,7 @@ export function createTagSearchPopup({
   }
 
   // ── 검색 ──────────────────────────────────────────────────────────────
-  function send(query) {
+  function send(query, {translate = false} = {}) {
     const ws = getWs();
     if (!ws || ws.readyState !== 1) {
       setStatus('연결이 끊겼습니다', 'warn');
@@ -151,9 +165,10 @@ export function createTagSearchPopup({
     }
     // 백엔드가 부분 매칭을 켜고 **빈도순**으로 세운다 — 그래야 이름 일부만
     // 기억나는 상황에서 유명한 것부터 보인다(실측: `kio` 로 utsusumi kio 5위).
-    ws.send(JSON.stringify({type: 'tag_search', query, tab: activeTab, limit: 200}));
+    ws.send(JSON.stringify({type: 'tag_search', query, tab: activeTab, limit: 200, translate}));
     pendingQuery = query;
-    setStatus('검색 중...', 'busy');
+    if (translate) triedTranslate = true;
+    setStatus(translate ? '번역해서 찾는 중...' : '검색 중...', 'busy');
   }
 
   function schedule({immediate = false} = {}) {
@@ -171,6 +186,7 @@ export function createTagSearchPopup({
     }
     // ⚠️ 조합 중에는 보내지 않는다 — 한글 자모가 튀어 헛질의가 쌓인다.
     if (composing) return;
+    if (query !== lastQuery) triedTranslate = false;
     const wait = immediate ? 0 : (DEBOUNCE_MS);
     timer = setTimeoutFn(() => { timer = null; send(query); }, wait);
   }
@@ -188,7 +204,14 @@ export function createTagSearchPopup({
     if (!rows.some(row => row.tag === selectedTag)) selectedTag = rows[0]?.tag || '';
     renderList();
     renderDesc();
-    setStatus(rows.length ? `${rows.length}개` : '결과 없음', rows.length ? 'ok' : 'warn');
+    // 한글이 안 걸려 번역으로 다시 찾았으면 **그렇다고 말한다** — 안 그러면 왜 다른
+    // 말의 결과가 나오는지 알 수 없다(사용자 제안으로 넣은 폴백).
+    const translated = String(message?.translated || '').trim();
+    if (!rows.length) {
+      setStatus(triedTranslate ? '번역해도 결과가 없습니다' : '결과 없음', 'warn');
+    }
+    else if (translated) setStatus(`${translated} → ${rows.length}개`, 'warn');
+    else setStatus(`${rows.length}개`, 'ok');
     return true;
   }
 
@@ -203,17 +226,34 @@ export function createTagSearchPopup({
   }
 
   // ── 위치 ──────────────────────────────────────────────────────────────
+  /** Result 탭 이미지 영역의 **좌측 하단**에 붙인다(사용자 지정).
+   *
+   *  ⚠️ 처음에는 런처 버튼 아래에 뒀는데, 그 버튼이 왼쪽 패널 아래쪽이라 창이
+   *     프롬프트 편집기를 통째로 덮었다. 결과 이미지 옆이 비어 있는 자리이고,
+   *     찾은 태그를 프롬프트에 넣는 동안 프롬프트가 보여야 한다.
+   *  ⚠️ 그 영역을 못 찾으면(모바일·좁은 화면) 화면 좌하단으로 물러선다 —
+   *     그때는 어차피 겹칠 수밖에 없다.
+   */
   function position() {
     if (!popup) return;
-    const margin = 8;
-    const pw = popup.offsetWidth || 720;
-    const ph = popup.offsetHeight || 480;
-    const btn = document.getElementById('tagSearchBtn');
-    const rect = btn ? btn.getBoundingClientRect() : null;
-    let left = rect ? rect.left : (win.innerWidth - pw) / 2;
+    const margin = 10;
+    const pw = popup.offsetWidth || 560;
+    const ph = popup.offsetHeight || 380;
+    const host = document.getElementById('resultViewer')
+      || document.getElementById('rightTabResult')
+      || document.querySelector('.right-tab-pane.active');
+    const rect = host ? host.getBoundingClientRect() : null;
+    let left;
+    let top;
+    if (rect && rect.width > pw + margin * 2 && rect.height > ph + margin * 2) {
+      left = rect.left + margin;
+      top = rect.bottom - ph - margin;
+    } else {
+      left = margin;
+      top = win.innerHeight - ph - margin;
+    }
     left = Math.max(margin, Math.min(left, win.innerWidth - pw - margin));
-    let top = rect ? rect.bottom + margin : 64;
-    if (top + ph > win.innerHeight - margin) top = Math.max(margin, win.innerHeight - ph - margin);
+    top = Math.max(margin, Math.min(top, win.innerHeight - ph - margin));
     popup.style.left = `${Math.round(left)}px`;
     popup.style.top = `${Math.round(top)}px`;
   }
@@ -271,6 +311,11 @@ export function createTagSearchPopup({
       if (!act) return;
       const action = act.dataset.act;
       if (action === 'close') { close(); return; }
+      if (action === 'translate') {
+        const q = String(pick('.tagsearch-input')?.value || '').trim();
+        if (q) send(q, {translate: true});
+        return;
+      }
       if (!selectedTag) return;
       if (action === 'copy') {
         win.navigator?.clipboard?.writeText(selectedTag)

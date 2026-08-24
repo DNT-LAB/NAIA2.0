@@ -19266,8 +19266,10 @@ body.detached-module .mod-grid-3 {
 .tagsearch-popup {
   position: fixed;
   z-index: var(--z-floating-module-aux);
-  width: min(760px, calc(100vw - 16px));
-  height: min(520px, calc(100vh - 16px));
+  /* ⚠️ 처음 760x520 은 **너무 컸다**(사용자 지적) — 결과 영역을 통째로 덮었다.
+     목록 9~10줄이 보이는 최소치로 줄인다. 설명은 대개 두세 줄이라 이 높이로 충분하다. */
+  width: min(540px, calc(100vw - 16px));
+  height: min(360px, calc(100vh - 16px));
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(130,150,255,0.36);
@@ -19308,7 +19310,7 @@ body.detached-module .mod-grid-3 {
    내용 높이로 부풀어 팝업 밖으로 넘친다. */
 .tagsearch-body { flex: 1; min-height: 0; display: flex; }
 .tagsearch-left {
-  flex: 0 0 300px; min-width: 0; min-height: 0;
+  flex: 0 0 230px; min-width: 0; min-height: 0;
   display: flex; flex-direction: column;
   border-right: 1px solid var(--border-dim);
 }
@@ -19359,6 +19361,9 @@ body.detached-module .mod-grid-3 {
   padding: 18px 12px; text-align: center;
   font-size: 11px; color: var(--text-dim);
 }
+/* 0건일 때만 나타나는 [번역해서 다시 찾기]. 자동이 아닌 이유는
+   `search_tags_substring` 주석 참조(번역기가 네트워크라 질의당 0.8초). */
+.tagsearch-retry { margin-top: 10px; }
 
 .ollama-chat-popup {
   position: fixed;

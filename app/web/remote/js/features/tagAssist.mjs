@@ -1305,6 +1305,17 @@ export function createTagAssistController({
     while (start < end && /\s/.test(text[start])) start++;
     let rawEnd = end;
     while (rawEnd > start && /\s/.test(text[rawEnd - 1])) rawEnd--;
+    // Connect 구간 표식(`&connect:` … `&end`)은 태그가 아니라 **경계선**이다. 캐릭터
+    // 슬롯에서 `&connect:lacrimosa (nte)&end` 처럼 한 태그를 감싸면 토큰 전체가 그 모양이
+    // 되어 조회가 통째로 빗나갔다 - 자동완성도 와일드카드도 안 걸렸다(제보 2026-08-24).
+    // ⚠️ `stripped` 만 손보면 모자란다. 후보를 고를 때 `swapToken` 이 start..end 를
+    //    갈아끼우므로 **경계까지 안쪽으로 당겨야** 표식이 살아남는다.
+    // 표식 문법은 백엔드가 SSOT 다 - `core/character_settings.py` 의
+    // `_CONNECT_OPEN_RE` / `_CONNECT_CLOSE_RE` 와 같은 모양으로 맞춘다.
+    const openMark = /^&connect\s*:?\s*/i.exec(text.substring(start, rawEnd));
+    if (openMark) start += openMark[0].length;
+    const closeMark = /\s*&end\s*$/i.exec(text.substring(start, rawEnd));
+    if (closeMark) rawEnd -= closeMark[0].length;
     const raw = text.substring(start, rawEnd);
     if (!raw || raw.startsWith('#')) return null;
     let stripped = stripAutocompleteTokenDecorators(raw);

@@ -2,7 +2,12 @@
 
 씬이 담는 것은 **구도**다(사용자 지정):
 
-    메인 프롬프트 / 네거티브 · 캐릭터(프롬프트·UC·좌표·Connect·이름) · 해상도 · POS 모드
+    메인 프롬프트 · 캐릭터(프롬프트·UC·좌표·Connect·이름) · 해상도 · POS 모드
+
+**네거티브는 안 담는다**(사용자 지정) - 되돌리기가 사용자의 네거티브를 통째로 덮어쓰는
+것은 치명적이다. 네거티브는 씬을 넘나드는 사용자의 기본 설정이지 구도의 일부가 아니다.
+구도가 무언가를 빼야 한다면 `-태그` 로 적는다(연결된 슬롯에서 물려받은 태그를 지우는
+문법 — `character_settings._apply_minus_tags`).
 
 steps/cfg/sampler/model 은 **일부러 안 담는다.** 그건 Prompt Engineering 프리셋의
 몫이라, 서로 직교하게 두면 "프리셋 × 씬" 을 조합할 수 있다. 시드도 안 담는다 — 씬은
@@ -153,16 +158,72 @@ def normalize_scene(raw: Any) -> dict[str, Any]:
     position_mode = str(data.get("position_mode") or "auto").strip().lower()
     if position_mode not in ("auto", "custom", "random"):
         position_mode = "auto"
+    # ⚠️ **네거티브는 담지 않는다**(사용자 지정). 되돌리기가 사용자의 네거티브를 통째로
+    #    덮어쓰는 것은 치명적이다 - 네거티브는 씬을 넘나드는 사용자의 기본 설정이지
+    #    구도의 일부가 아니다. 구도가 무언가를 빼야 한다면 `-태그` 로 적는다(연결된
+    #    캐릭터 슬롯에서 물려받은 태그를 지우는 문법 — `character_settings._apply_minus_tags`).
+    #    옛 씬이 들고 있던 값은 여기서 조용히 버린다.
     return {
         "version": SCENE_SCHEMA_VERSION,
         "name": sanitize_scene_name(data.get("name")),
         "mode": mode,
-        "prompt": str(data.get("prompt") or ""),
-        "negative": str(data.get("negative") or ""),
+        "prompt": _normalized_prompt(data.get("prompt")),
         "resolution": str(data.get("resolution") or ""),
         "position_mode": position_mode,
         "characters": characters,
     }
+
+
+def _normalized_prompt(raw: Any) -> str:
+    """옛 씬이 담고 있는 **조립된** 프롬프트를 구도만 남게 되돌린다.
+
+    프롬프트 엔지니어링을 빼고 담기 시작하기 전에 저장된 씬은 작가·품질·연도까지
+    통째로 들고 있다. 구조가 다르므로(`prefix \\n\\n main \\n\\n postfix`) 알아볼 수
+    있고, 읽을 때마다 걷어내면 따로 마이그레이션 도구를 둘 필요가 없다.
+    담긴 값 자체는 다음 저장 때 정리된 모습으로 덮인다.
+
+    ⚠️ 구도만 든 프롬프트에는 덩어리 경계가 없으므로 손대지 않는다 - 사용자가 직접
+       친 여러 줄 프롬프트를 뭉개지 않기 위해서다.
+    """
+    text = str(raw or "")
+    if "\n\n" not in text:
+        return text
+    return bare_from_text(text)
+
+
+def tags_of(text: Any) -> list[str]:
+    """조립된 프롬프트 조각에서 태그만 뽑는다. 주석(`#...`) 줄은 태그가 아니다."""
+    out = []
+    for part in str(text or "").replace("\n", ",").split(","):
+        tag = part.strip()
+        if tag and not tag.startswith("#"):
+            out.append(tag)
+    return out
+
+
+def bare_from_text(text: Any) -> str:
+    """조립된 글에서 **사용자의 구도**만 구조로 되짚는다.
+
+    최종 포맷의 산출물은 `prefix \\n\\n main \\n\\n postfix` 다(`_inject_boost_at_main`
+    이 같은 규약을 쓴다). 덩어리가 셋이면 가운데가 사용자 몫이고, 앞 덩어리에서는
+    **인물 수 태그만** 데려온다 - 그건 옮겨졌을 뿐 원래 사용자 것이다
+    (`prompt_processor._step_final_format` 이 main -> prefix 로 옮긴다).
+    덩어리 경계가 없으면(손으로 친 프롬프트) 통째로 사용자 것이다.
+    """
+    from core.prompt_processor import ALL_PERSON_TAGS
+
+    raw = str(text or "")
+    blocks = raw.split("\n\n")
+    if len(blocks) < 2:
+        return ", ".join(tags_of(raw))
+    # 앞=prefix, 뒤=postfix, 나머지 가운데가 main. 덩어리가 둘뿐이면 main 이 비었던 것이라
+    # 가운데는 없고 인물 태그만 남는다.
+    head, middle = blocks[0], blocks[1:-1] if len(blocks) > 2 else []
+    person = [tag for tag in tags_of(head) if tag in ALL_PERSON_TAGS]
+    body = []
+    for block in middle:
+        body.extend(tags_of(block))
+    return ", ".join(person + body)
 
 
 def list_scene_names(save_root: str | Path | None = None) -> list[str]:

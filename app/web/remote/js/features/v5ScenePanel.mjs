@@ -1,8 +1,9 @@
 /**
  * V5 Scene 패널 (Fn > V5 Scene).
  *
- * 씬 = **구도**를 한 벌로 담은 것: 메인 프롬프트/네거티브 · 캐릭터(프롬프트·UC·좌표·
- * Connect) · 해상도 · POS 모드. 담는 범위와 규약은 `core/v5_scene_store.py` 머리 주석.
+ * 씬 = **구도**를 한 벌로 담은 것: 메인 프롬프트 · 캐릭터(프롬프트·UC·좌표·Connect) ·
+ * 해상도 · POS 모드. 담는 범위와 규약은 `core/v5_scene_store.py` 머리 주석.
+ * 네거티브는 담지 않는다 - 사용자의 네거티브를 덮어쓰는 것이 치명적이라서다.
  *
  * 지금 지원하는 것은 **검색 · 저장 · 폴더 열기** 셋뿐이다(사용자 지정). 삭제·이름변경은
  * 백엔드에 있지만 버튼을 두지 않는다 - 대신 폴더를 열어 파일을 직접 다루면 된다.
@@ -109,7 +110,6 @@ export function createV5ScenePanel({panel, escHtml, showToast, setModuleParam}) 
     return `
       <div class="scene-detail">
         ${line('프롬프트', detail.prompt)}
-        ${line('네거티브', detail.negative)}
         ${line('POS', detail.position_mode)}
         ${characters.map((item, i) => {
           const link = Number(item.connect_to || 0);

@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from core.v5_scene_store import (
+    bare_from_text,
     delete_scene,
     existing_scene_thumb,
     list_scene_names,
@@ -22,19 +23,10 @@ from core.v5_scene_store import (
     sanitize_scene_name,
     scene_summary,
     scene_thumb_revision,
+    tags_of,
     write_scene,
     write_scene_thumb,
 )
-
-
-def _tags_of(text: str) -> list[str]:
-    """조립된 프롬프트 조각에서 태그만 뽑는다. 주석(`#...`) 줄은 태그가 아니다."""
-    out = []
-    for part in str(text or "").replace("\n", ",").split(","):
-        tag = part.strip()
-        if tag and not tag.startswith("#"):
-            out.append(tag)
-    return out
 
 
 def bare_prompt(context: Any) -> str:
@@ -60,31 +52,7 @@ def bare_prompt(context: Any) -> str:
         #    손으로 고쳤으면 낡은 구도를 담게 된다 - 상자와 산출물이 같을 때만 믿는다.
         if tags and final.strip() == box.strip():
             return ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
-    return _bare_from_text(box)
-
-
-def _bare_from_text(text: str) -> str:
-    """폴백: 조립된 글을 구조로 되짚는다.
-
-    최종 포맷의 산출물은 `prefix \\n\\n main \\n\\n postfix` 다(`_inject_boost_at_main`
-    이 같은 규약을 쓴다). 덩어리가 셋이면 가운데가 사용자 몫이고, 앞 덩어리에서는
-    **인물 수 태그만** 데려온다 - 그건 옮겨졌을 뿐 원래 사용자 것이다.
-    덩어리 경계가 없으면(손으로 친 프롬프트) 통째로 사용자 것이다.
-    """
-    from core.prompt_processor import ALL_PERSON_TAGS
-
-    raw = str(text or "")
-    blocks = raw.split("\n\n")
-    if len(blocks) < 2:
-        return ", ".join(_tags_of(raw))
-    # 앞=prefix, 뒤=postfix, 나머지 가운데가 main. 덩어리가 둘뿐이면 main 이 비었던 것이라
-    # 가운데는 없고 인물 태그만 남는다.
-    head, middle = blocks[0], blocks[1:-1] if len(blocks) > 2 else []
-    person = [tag for tag in _tags_of(head) if tag in ALL_PERSON_TAGS]
-    body = []
-    for block in middle:
-        body.extend(_tags_of(block))
-    return ", ".join(person + body)
+    return bare_from_text(box)
 
 
 def redecorate(context: Any, bare: str) -> str:
@@ -100,7 +68,7 @@ def redecorate(context: Any, bare: str) -> str:
     ⚠️ **auto_hide 는 무시한다**(사용자 지정). 씬의 태그는 이미 고른 것이라
        자동 숨김을 다시 걸면 방금 되돌린 구도에서 태그가 사라진다.
     """
-    tags = _tags_of(bare)
+    tags = tags_of(bare)
     if not tags:
         return str(bare or "")
     try:
@@ -187,7 +155,6 @@ class HeadlessV5SceneService:
                 # 있고, 그때마다 왕복하면 느리다 - 씬 하나가 작아 함께 실어 보낸다.
                 "detail": {
                     "prompt": scene["prompt"],
-                    "negative": scene["negative"],
                     "position_mode": scene["position_mode"],
                     "characters": [{
                         "prompt": item["prompt"],
@@ -258,9 +225,9 @@ class HeadlessV5SceneService:
             "name": clean,
             "mode": mode,
             # 프롬프트 엔지니어링이 덧댄 것은 담지 않는다 - 되돌릴 때 지금 설정으로
-            # 다시 입힌다(사용자 지정). 네거티브는 사용자가 직접 치는 칸이라 그대로.
+            # 다시 입힌다(사용자 지정).
+            # ⚠️ **네거티브는 담지 않는다**(사용자 지정) - 사유는 `v5_scene_store.normalize_scene`.
             "prompt": bare_prompt(context),
-            "negative": str(getattr(context, "negative_prompt_text", "") or ""),
             "resolution": str(params.get("resolution") or ""),
             "position_mode": str(settings.get("position_mode") or "auto"),
             "characters": characters,
@@ -361,8 +328,9 @@ class HeadlessV5SceneService:
 
         # 2) 프롬프트 · 해상도
         # 담을 때 뺀 프롬프트 엔지니어링을 여기서 **지금 설정으로** 다시 입힌다.
+        # ⚠️ **네거티브는 건드리지 않는다**(사용자 지정). 사용자의 네거티브를 통째로
+        #    덮어쓰는 것은 치명적이다 - 구도가 무언가를 빼야 한다면 `-태그` 로 적는다.
         context.prompt_text = redecorate(context, scene["prompt"])
-        context.negative_prompt_text = scene["negative"]
         if scene["resolution"]:
             context.set_param("resolution", scene["resolution"])
         context.save_remote_ui_state()
@@ -377,6 +345,8 @@ class HeadlessV5SceneService:
         state["_headless_extra_messages"] = [{
             "type": "prompt_sync",
             "prompt": context.prompt_text,
+            # 네거티브는 **지금 값 그대로** 실어 보낸다 - 되돌리는 게 아니라 상자가
+            # 어긋나지 않게 하려는 것이다(씬은 네거티브를 담지 않는다).
             "negative": context.negative_prompt_text,
             "negative_prompt": context.negative_prompt_text,
             "force": True,

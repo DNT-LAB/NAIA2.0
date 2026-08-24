@@ -48,6 +48,16 @@ from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 # ⚠️ `korean text,` 처럼 **콜론 없는** 낱말에 걸리면 안 되고, `context:` 같이 뒤에
 #    붙은 낱말에도 걸리면 안 된다 - 그래서 앞에 낱말 문자가 오면 안 잡는다.
 CHARACTER_TEXT_MARKER = re.compile(r"(?<![A-Za-z0-9_])text\s*:\s*", re.IGNORECASE)
+
+# 메인으로 옮기는 것은 **따옴표로 적은 대사뿐**이다(사용자 지정 2026-08-25).
+#
+# ⚠️ `text:` 는 **옮기지 않는다.** 한때 옮겼다가 되돌렸다 - 캐릭터 칸의 `text:` 는
+#    NAI 가 그 캐릭터 자리에 글자를 그리라고 읽는 자기 문법으로 보인다. 그걸 메인으로
+#    빼면 같은 글자를 다른 뜻으로 보내는 셈이고, 실제로 공홈과 결과가 갈렸다.
+#    따옴표 쪽만 사이트가 메인으로 들어 올려 주는 **줄임 표기**다.
+#
+# 경계가 쉼표가 아니라 따옴표라, 대사 안에 쉼표가 있어도 끊기지 않는다.
+_CHARACTER_SPEECH_RE = re.compile(r'"(?P<quoted>[^"]*)"|“(?P<curly>[^”]*)”')
 # 사용자가 화면에서 쓰는 문법 그대로 적는다(사용자 지정). 공식 웹은 `teXt: ` 로 적지만
 # 그 대소문자를 흉내 낼 이유가 없다 - NAI 는 어느 쪽이든 같은 글자를 그린다.
 CHARACTER_TEXT_PREFIX = "text: "
@@ -61,11 +71,13 @@ def extract_character_speech(characters: Any) -> str:
     인데도 글자만 안 나왔다.
 
     규칙(사용자 지정):
-      - `text:` 뒤부터 **쉼표 전까지**가 한 조각이다.
+      - `"대사"` **따옴표 안쪽만** 가져온다. 따옴표는 뗀다.
       - 조각이 없는 캐릭터는 건너뛴다.
-      - 캐릭터 순서대로 **진짜 LF 두 개**로 잇는다.
-      - 앞머리는 맨 앞에 한 번만 붙인다(호출부가 붙인다).
+      - **글에 나온 차례**대로, 캐릭터 순서대로 **진짜 LF 두 개**로 잇는다.
+      - 앞머리 `text: ` 는 맨 앞에 한 번만 붙인다(호출부가 붙인다).
 
+    ⚠️ 캐릭터 칸의 `text:` 는 **건드리지 않는다**(사용자 지정 - 되돌린 결정).
+       그건 NAI 가 그 캐릭터 자리에 글자를 그리라고 읽는 자기 문법으로 보인다.
     ⚠️ 캐릭터 프롬프트에서 **지우지 않는다.** 공홈 요청도 char_captions 는 원본 그대로
        보냈다(실측: 앱/공홈 3개 전부 바이트 일치). 지우면 그림 자체가 달라진다.
     ⚠️ 리터럴 `\\n`(백슬래시 + n)은 사용자가 친 **두 글자**다 - 진짜 개행으로 풀지
@@ -74,8 +86,9 @@ def extract_character_speech(characters: Any) -> str:
     parts: list[str] = []
     for raw in (characters or []):
         text = str(raw or "")
-        for match in CHARACTER_TEXT_MARKER.finditer(text):
-            piece = text[match.end():].split(",", 1)[0].strip()
+        for match in _CHARACTER_SPEECH_RE.finditer(text):
+            piece = (match.group("quoted") if match.group("quoted") is not None
+                     else match.group("curly") or "").strip()
             if piece:
                 parts.append(piece)
     return "\n\n".join(parts)
@@ -967,6 +980,11 @@ class APIService:
             except Exception as exc:
                 print(f"⚠️ reference inset 삽입 실패: {exc}")
 
+            # 캐릭터 대사를 합친 프롬프트. 아래 payload 의 `input` 도 이걸 써야 한다 -
+            # NAI 는 이 값을 그대로 이미지 메타데이터의 `prompt` 로 남기므로, base_caption
+            # 에만 넣으면 두 자리가 어긋난다(사용자 실측 2026-08-25).
+            nai_input_override: str | None = None
+
             # V4 특화 설정 (기존과 동일)
             if model_spec.uses_v4_payload:
                 main_prompt = params.get('input', '')
@@ -1211,9 +1229,10 @@ class APIService:
                         _before = str(api_parameters['v4_prompt']['caption']['base_caption'] or "")
                         _merged = merge_character_speech(_before, _speech)
                         api_parameters['v4_prompt']['caption']['base_caption'] = _merged
+                        nai_input_override = _merged
                         if _merged != _before:
                             print(f"[{char_source}] merged {_speech.count(chr(10) * 2) + 1}"
-                                  f" character text segment(s) into base caption")
+                                  f" character text segment(s) into prompt")
 
                     def _normalized_center(value):
                         """{'x','y'} 를 0.0~1.0 소수 3자리로. 좌표가 아니면 None.
@@ -1479,7 +1498,10 @@ class APIService:
 
             # 최종 페이로드 구성
             payload = {
-                "input": params.get('input', ''),
+                # 캐릭터 대사가 합쳐졌으면 그 값이다 - base_caption 과 **같은 문자열**
+                # 이어야 한다(공홈도 두 자리가 같다).
+                "input": (nai_input_override if nai_input_override is not None
+                          else params.get('input', '')),
                 "model": model_name,
                 "action": action_type,
                 "parameters": api_parameters

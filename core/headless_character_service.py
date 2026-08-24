@@ -134,6 +134,21 @@ class HeadlessCharacterService:
         )
 
     @staticmethod
+    def _connected_children(frames: list[dict[str, Any]], source: dict[str, Any]) -> list[dict[str, Any]]:
+        """`source` 를 물려받는 슬롯들. 사슬은 금지돼 있으므로 한 겹만 보면 된다
+        (`core/character_settings._prune_character_links`)."""
+        from core.character_settings import _frame_uuid
+
+        uuid = str(_frame_uuid(source) or "")
+        if not uuid:
+            return []
+        return [
+            frame for frame in frames
+            if isinstance(frame, dict) and frame is not source
+            and str(frame.get("connect_to") or "") == uuid
+        ]
+
+    @staticmethod
     def _sync_connect_markers(frames: list[dict[str, Any]], previous: str, current: str) -> None:
         """Connect 를 걸면 **원본** 프롬프트를 `&connect: … &end` 로 감싸고, 풀면 걷어낸다.
 
@@ -471,6 +486,14 @@ class HeadlessCharacterService:
                 frame["is_enabled"] = (
                     str(frame.get("slot_state") or "") == "active" and not muted
                 )
+                # Connect 자식은 **원본과 함께 움직인다**(사용자 지정). 원본이 꺼지면
+                # 자식은 물려받을 것이 없어져 자기 추가분만 남는다 - 그 상태를 화면에
+                # 남겨 두느니 같이 끈다.
+                for child in self._connected_children(frames, frame):
+                    child["is_muted"] = muted
+                    child["is_enabled"] = (
+                        str(child.get("slot_state") or "") == "active" and not muted
+                    )
                 invalidate_snapshot = True
         elif key.startswith("char_slot_state_"):
             index = context._index_from_key(key, "char_slot_state_")
@@ -480,10 +503,18 @@ class HeadlessCharacterService:
                 if requested == "restore":
                     requested = str(frame.get("return_slot_state") or "inactive")
                 if requested in {"active", "inactive", "cold"}:
-                    if requested == "cold":
-                        frame["return_slot_state"] = str(frame.get("slot_state") or "inactive")
-                    frame["slot_state"] = requested
-                    frame["is_enabled"] = requested == "active"
+                    # ⚠️ 자식도 같은 무리로 옮긴다. 원본만 비활성으로 내리면 정렬이
+                    #    원본을 자식 **뒤로** 보내고, 그러면 "앞만 가리킨다" 규칙에
+                    #    걸려 `_prune_character_links` 가 자식의 링크를 지운다.
+                    #    함께 옮기면 무리 안 상대 순서가 보존돼(안정 정렬) 링크가 산다.
+                    targets = [frame, *self._connected_children(frames, frame)]
+                    for target in targets:
+                        if requested == "cold":
+                            target["return_slot_state"] = str(target.get("slot_state") or "inactive")
+                        target["slot_state"] = requested
+                        target["is_enabled"] = (
+                            requested == "active" and not bool(target.get("is_muted"))
+                        )
                     invalidate_snapshot = True
         elif key.startswith("char_slot_name_"):
             index = context._index_from_key(key, "char_slot_name_")

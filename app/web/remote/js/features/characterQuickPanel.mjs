@@ -541,12 +541,13 @@ export function createCharacterQuickPanel({
     const current = String(character.connect_to || '');
     const on = !!current;
     const sourceOrdinal = slots.findIndex(item => String(item.character.slot_uuid || '') === current) + 1;
-    // ⚠️ 원본이 꺼져 있으면(✘ muted) 백엔드 전개 대상에서 빠져 **아무것도 물려받지
-    //    못한다**(실측: C1 을 끄면 C2 가 자기 추가분만 남았다). 그런데 칩은 여전히
-    //    `🔗 C1` 이라 말하고 있었다 - 화면이 거짓말을 하면 사용자는 원인을 못 찾는다.
-    //    끊긴 것으로 그리고 이유를 말한다(Codex 리뷰 2026-08-24 #2).
+    // ⚠️ 원본이 꺼져 있으면 백엔드 전개 대상에서 빠져 **아무것도 물려받지 못한다**.
+    //    보통은 원본을 끄면 자식도 함께 꺼지므로(사용자 지정, `_connected_children`)
+    //    이 상태가 잘 안 생기지만, 남아 있는 옛 저장본이나 다른 경로로 어긋날 수 있다.
+    //    **자식이 켜져 있을 때만** 경고한다 - 둘 다 꺼져 있으면 아무 일도 안 일어나는데
+    //    경고를 띄우면 그게 더 헷갈린다(Codex 리뷰 2026-08-24 #2).
     const sourceItem = sourceOrdinal ? slots[sourceOrdinal - 1] : null;
-    const broken = on && (!sourceItem || !!sourceItem.character.muted);
+    const broken = on && !character.muted && (!sourceItem || !!sourceItem.character.muted);
     const label = on
       ? `${broken ? '&#9888;' : '&#128279;'} C${sourceOrdinal || '?'}`
       : '&#8681; Connect';

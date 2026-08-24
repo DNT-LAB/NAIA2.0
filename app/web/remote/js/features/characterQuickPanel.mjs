@@ -151,7 +151,9 @@ export function createCharacterQuickPanel({
     stage.innerHTML = gridSvg() + slots.map(({character, index}, i) => {
       const p = character.position || { x: 0.5, y: 0.5 };
       const on = posSelected === index;
-      return `<button type="button" class="cq-dot${on ? ' is-on' : ''}"`
+      // 무대의 동그라미도 같이 흐려진다 - 띠만 흐리면 무대에서는 여전히 구분이 안 된다.
+      const muted = !!(character && character.muted);
+      return `<button type="button" class="cq-dot${on ? ' is-on' : ''}${muted ? ' is-muted' : ''}"`
         + ` data-cq-dot="${index}" style="left:${p.x * 100}%;top:${p.y * 100}%"`
         + ` aria-label="${escHtml(slotLabel(character, i + 1))}">${i + 1}</button>`;
     }).join('');
@@ -236,8 +238,12 @@ export function createCharacterQuickPanel({
       + ` aria-pressed="${posGrid ? 'true' : 'false'}">`
       + `<span class="cq-gridtoggle-box">${posGrid ? '&#10003;' : ''}</span>`
       + `<span>Show Grid</span></button>`
+      // 끈 슬롯(`is-muted`)도 띠에 남는다 - 자리는 그대로 두고 좌표만 못 옮기게 하는
+      // 것이 아니라, 이번 생성에 안 나갈 뿐이라 어디 서 있었는지는 보여야 한다.
+      // 다만 **켠 것과 구분이 안 되면** 안 나갈 인물을 옮기며 시간을 쓴다(사용자 제보).
       + slots.map(({character, index}, i) =>
-          `<button type="button" class="cq-chip${posSelected === index ? ' is-on' : ''}"`
+          `<button type="button" class="cq-chip${posSelected === index ? ' is-on' : ''}`
+          + `${character && character.muted ? ' is-muted' : ''}"`
           + ` data-cq-chip="${index}"><span class="cq-chip-n">${i + 1}</span>`
           + `<span class="cq-chip-t">${escHtml(slotLabel(character, i + 1).replace(/^C\d+\s*·\s*/, '') || '(비어 있음)')}</span></button>`
         ).join('')

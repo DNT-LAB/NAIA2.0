@@ -22771,8 +22771,11 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
 .cq-float {
   position: absolute; left: 12px; top: 40px; z-index: 8;
   /* POS: CUSTOM 이면 머리에 컨트롤이 넷이다(모드·편집·활성화·개수) - 260px 에서는
-     제목이 `C…` 로 뭉개졌다(실측). 제목이 살아 있을 만큼만 넓힌다. */
-  display: none; width: 300px;
+     제목이 `C…` 로 뭉개졌고, 300px 도 **경계값**이었다(실측: 제목 폭 64px 에 딱 맞아
+     폰트가 조금만 넓으면 `CHARACT` 로 잘리며 체크박스와 붙는다 — 사용자 제보).
+     340px 으로 여유를 주면 캐릭터 프롬프트 칸도 그만큼 넓어진다(사용자 지정).
+     ⚠️ 좁은 화면에서 무대(`.viewer-wrapper`)를 넘지 않게 상한을 함께 건다. */
+  display: none; width: min(340px, calc(100% - 24px));
 }
 /* 패널이 펼쳐지면 결과 이미지를 **패널 오른쪽 끝까지** 민다(사용자 지정) - 왼쪽에
    얹힌 패널이 그림을 덮지 않게. 끝까지 밀지 않는다: 필요한 만큼만 비켜서면 된다.
@@ -22893,7 +22896,9 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2px;
 }
 /* 제목은 컨트롤에 밀려 먼저 줄어든다(flex:1) - 바닥을 받쳐 글자가 남게 한다. */
-.cq-box.is-open .cq-title { color: var(--text-primary); font-weight: 600; min-width: 64px; }
+/* `CHARACTER` 아홉 글자가 들어갈 만큼. 64px 은 이 폰트에서 **딱 맞는 값**이라 폰트가
+   조금만 넓어지면 곧장 잘렸다 - 한 글자 몫을 여유로 둔다. */
+.cq-box.is-open .cq-title { color: var(--text-primary); font-weight: 600; min-width: 78px; }
 /* 오른쪽 끝에 붙으면 상자 테두리를 파고든다(사용자 지적) - 여백을 준다. */
 .cq-count {
   flex: none; margin-right: 7px; padding: 0 5px; border-radius: 999px;
@@ -23209,6 +23214,10 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 /* 고른 것은 반전시킨다 - 칩과 같은 선택을 본다. */
 .cq-dot.is-on { background: #f2efe3; color: #14141c; border-color: #fff; font-weight: 700; }
 .cq-dot.is-drag { cursor: grabbing; box-shadow: 0 0 0 4px rgba(124,106,239,0.28); }
+/* 무대의 동그라미도 같이 흐려진다 - 띠만 흐리면 무대에서는 여전히 구분이 안 된다.
+   골라서 옮기는 것 자체는 막지 않는다: 다시 켤 때 자리가 맞아 있어야 하니까. */
+.cq-dot.is-muted { opacity: 0.5; }
+.cq-dot.is-muted.is-on { opacity: 0.75; }
 /* 무대 위 캐릭터 칩. 4명을 넘으면 줄을 바꾼다(flex-wrap). */
 /* 띠 = [종료 버튼][칩들…]. 칩은 자리가 모자라면 아래로 접히고, 그만큼 무대가
    내려간다(JS 가 띠의 실제 높이를 재서 무대를 놓는다). */
@@ -23231,6 +23240,12 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 }
 .cq-chip:hover { border-color: rgba(255,255,255,0.4); color: var(--text-primary); }
 .cq-chip.is-on { background: #f2efe3; color: #14141c; border-color: #fff; font-weight: 700; }
+/* 끈 슬롯(✘)은 이번 생성에 안 나간다. 자리는 남기되 **켠 것과 한눈에 갈려야** 한다 -
+   구분이 없으면 안 나갈 인물을 옮기며 시간을 쓴다(사용자 제보). 절반 불투명도로
+   내리고 이름에 줄을 긋는다(슬롯 목록의 `.is-muted` 와 같은 어법). */
+.cq-chip.is-muted { opacity: 0.5; }
+.cq-chip.is-muted .cq-chip-t { text-decoration: line-through; }
+.cq-chip.is-muted.is-on { opacity: 0.72; }
 .cq-chip-n { flex: none; opacity: 0.75; }
 .cq-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* POS: CUSTOM 이면 모드 버튼이 켜져 보이고, 편집 버튼은 연노랑으로 눈에 띈다.

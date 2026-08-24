@@ -23257,6 +23257,18 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   content: ''; position: absolute; inset: 0;
   background: rgba(0,0,0,0.5); border-radius: 3px; pointer-events: none;
 }
+/* 캐릭터가 1명이면 NAI 가 좌표를 무시한다 - 무대 위에 직접 적는다.
+   ⚠️ 원(z 2)보다 위(z 3)에 두되 `pointer-events: none` 이다. 안 그러면 이 알림이
+      원을 덮어 **끌 수가 없다** - 알려 주려다 못 쓰게 만드는 꼴이 된다. */
+.cq-lonely {
+  /* ⚠️ **아래쪽**이다. 캐릭터 패널은 늘 왼쪽 위에 있고, 창이 좁으면 그림 위로
+     얹혀 무대의 위쪽 절반을 덮는다 - 거기에 두면 알림이 가린다(실측). */
+  position: absolute; z-index: 3; left: 50%; bottom: 10px; transform: translateX(-50%);
+  max-width: calc(100% - 24px); padding: 5px 10px; border-radius: 999px;
+  background: rgba(12,12,20,0.82); border: 1px solid rgba(255,255,255,0.16);
+  color: #e2e2ef; font-size: 11px; line-height: 1.35; text-align: center;
+  pointer-events: none;
+}
 /* 원. 좌표는 무대 기준 %로 놓고, 자기 크기의 절반만큼 되당겨 **중심**을 맞춘다. */
 .cq-dot {
   /* 격자(z 1) 위에 선다 - 원을 못 찾으면 끌 수가 없다. */

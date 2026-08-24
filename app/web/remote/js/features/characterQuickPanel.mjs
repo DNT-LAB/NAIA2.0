@@ -202,7 +202,18 @@ export function createCharacterQuickPanel({
     stage.classList.toggle('is-peek', peek);
     // 엿보기에서는 격자를 늘 깐다 - 어디쯤인지 가늠할 눈금이 없으면 원만 떠 있어
     // "저게 그림의 어느 지점인가" 를 알 수 없다(사용자가 보여 준 그림도 격자가 있다).
-    stage.innerHTML = (peek ? gridSvg(true) : gridSvg()) + slots.map(({character, index}, i) => {
+    // ⚠️ 캐릭터가 **1명이면 NAI 가 좌표를 조용히 무시한다**(실측 - `api_service.py`
+    //    의 `coords_given` 주석 참조). 화면은 멀쩡히 움직이는데 결과가 안 바뀌니
+    //    모르면 "왜 안 먹지" 가 된다(사용자 지정). 엿보기와 편집 **둘 다**에 적는다 -
+    //    손을 올렸을 때만 알려 주고 정작 끌 때 입을 다물면 반만 해결한 셈이다.
+    //    0명일 때는 안 적는다. 그 문구가 가리키는 상황이 아니고, 빈 무대는 스스로
+    //    설명이 된다.
+    const lonely = slots.length === 1;
+    stage.innerHTML = (peek ? gridSvg(true) : gridSvg())
+      + (lonely
+        ? '<div class="cq-lonely">캐릭터가 1명일 때는 위치 지정이 적용되지 않습니다.</div>'
+        : '')
+      + slots.map(({character, index}, i) => {
       const p = character.position || { x: 0.5, y: 0.5 };
       const on = !peek && posSelected === index;
       // 무대의 동그라미도 같이 흐려진다 - 띠만 흐리면 무대에서는 여전히 구분이 안 된다.

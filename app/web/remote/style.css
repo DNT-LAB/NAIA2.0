@@ -19233,6 +19233,54 @@ body.detached-module .mod-grid-3 {
   transition: width 0.3s ease;
 }
 
+/* ── 시드+해상도 고정 알약 ───────────────────────────────────────────────────
+   결과 뷰어 **좌측 하단**. NovelAI 공식과 사양을 맞춘 것이다(사용자 지정).
+   ⚠️ 꺼져 있을 때는 **작아야 한다** — 결과 이미지를 가리면 방해가 된다. 그래서
+      꺼짐은 새싹만 있는 정사각이고, 켜지면 시드 번호가 나오며 옆으로 자란다.
+      `width: auto` + 자식 숨김으로 처리한다(고정 폭을 두면 숫자 길이에 안 맞는다). */
+.seedlock-pill {
+  position: absolute; bottom: 10px; z-index: 6;
+  /* 왼쪽에 붙는 오버레이는 전부 도구 팝업만큼 비켜선다 — `.frozen-wc-bar` 와 같은
+     이유(절대배치는 .viewer 의 padding 으로 안 밀려 팝업 뒤에 숨는다). */
+  left: calc(10px + var(--ia-shift, 0px));
+  /* 색만 전환한다 — 폭·패딩은 즉시. 위 `.seedlock-pill-seed` 주석의 이유(throttle
+     된 창에서 애니메이션 시계가 멈춘다)가 기하 속성 전부에 똑같이 적용된다. */
+  transition: left 0.16s ease, background 0.15s, border-color 0.15s, color 0.15s;
+  display: inline-flex; align-items: center; gap: 0;
+  height: 26px; min-width: 26px; padding: 0; cursor: pointer;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(12,12,20,0.82); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1;
+}
+/* ⚠️ Interactive Assets 바가 **같은 모서리**를 쓴다(`.ia-assets`: left 12 / bottom 12 /
+   z-index 6). 그리고 Interactive 는 자기 시드 고정을 이미 갖고 있다. 그래서 그 바가
+   떠 있는 동안에는 이 알약을 감춘다 — 두 개를 겹쳐 두면 어느 쪽이 무엇을 고정하는지
+   구분이 안 된다. */
+#resultViewer:has(> .ia-assets:not([hidden])) .seedlock-pill { display: none; }
+.seedlock-pill:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+.seedlock-pill-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; flex: 0 0 24px; font-size: 12px;
+}
+/* 꺼짐: 숫자 칸을 **접지 않고 없앤다**.
+   ⚠️ `max-width: 0 → 220px` 트랜지션으로 펼치는 방식을 먼저 썼다가 물렸다: 창이
+      백그라운드로 throttle 되면 애니메이션 시계가 멈춰(`getAnimations()` 가 전부
+      `currentTime: 0` 인데 `running`) 폭이 시작값 0 에 그대로 붙고 **시드 번호가
+      아예 안 보인다**(실측). 알약의 유일한 정보를 프레임 클럭에 걸어 둘 수는 없다.
+      색만 전환하고 폭은 즉시 바뀌게 한다. */
+.seedlock-pill-seed {
+  display: none; overflow: hidden; white-space: nowrap;
+  max-width: 220px; text-overflow: ellipsis;
+}
+.seedlock-pill.is-on {
+  border-color: rgba(106,191,123,0.75);
+  background: rgba(38,74,48,0.9); color: #d7f0dd;
+  padding-right: 9px;
+}
+.seedlock-pill.is-on .seedlock-pill-seed { display: block; padding-left: 2px; }
+/* 아직 잡을 시드가 없으면 켜져 있어도 숫자가 없다 — 그 상태를 말해 준다. */
+.seedlock-pill.is-on.no-seed { border-color: var(--hint-cross-search); }
+
 /* [Ollama] 런처 드롭다운 — Quick Filter 칩 메뉴와 같은 결(사용자 지정).
    ⚠️ `position: fixed` 이고 body 직계다. 감싸는 `.assistants-ollama-segment` 가
       `overflow: hidden` 이라 그 안에 그리면 잘린다. */

@@ -2023,7 +2023,10 @@ function _collectCurrentParams() {
   if (steps !== null) p.steps = Math.trunc(steps);
   if (cfgScale !== null) p.cfg_scale = cfgScale;
   if (cfgRescale !== null) p.cfg_rescale = cfgRescale;
-  const seedFixed = flagState('seed_fixed');
+  // 좌하단 고정 알약도 대체 원천이다 — `random_resolution` 이 `qRndRes` 를 대체
+  // 원천으로 두는 것과 같은 패턴. 칩이 있으면 아래 `#paramFlags` 훑기가 덮으므로
+  // 이 폴백은 칩이 아직 없는 구간에서만 효력이 있다.
+  const seedFixed = flagState('seed_fixed') || isSeedResLockOn();
   p.seed_fixed = seedFixed;
   if (seedFixed && paramEls.seed.value) {
     const seed = parseNumber(paramEls.seed.value);
@@ -3196,6 +3199,8 @@ function onGenerationDispatched(m) {
   // 등)도 같은 "마지막 실사용 시드"에 고정되게 한다(Codex High). Seed Fix OFF인
   // 동안의 영속은 무해 — 서버 리셋 가드(534fa55)가 매 요청 재추첨한다.
   setParam('seed', seedText);
+  // 좌하단 고정 알약은 이 숫자를 라벨로 쓴다 — 갱신을 안 하면 옛 시드를 계속 보여 준다.
+  renderSeedLockPill();
 }
 
 /** Interactive '시드 고정' 이 쓸 값 — **그 모드로 나간 것만** 잡는다.
@@ -4302,6 +4307,9 @@ function updateParams(m) {
   else if (schemaOnly) qRndRes.classList.toggle('on', incomingFlagState('random_resolution'));
   if ('auto_fit_resolution' in m) qAutoRes.classList.toggle('on', m.auto_fit_resolution);
   else if (schemaOnly) qAutoRes.classList.toggle('on', incomingFlagState('auto_fit_resolution'));
+  // 칩을 새로 그렸으니 좌하단 고정 알약을 여기 맞춘다 — 알약은 `seed_fixed` 칩의
+  // 거울이고, `innerHTML` 재생성이 칩의 on 상태를 서버 값으로 갈아 버린다.
+  renderSeedLockPill();
 
   // WEBUI HR
   if (mode === 'WEBUI') {
@@ -4433,6 +4441,174 @@ function toggleFlag(el) {
   // Quick flags 동기화 (Params → Quick)
   if (key === 'random_resolution') qRndRes.classList.toggle('on', !isOn);
   if (key === 'auto_fit_resolution') qAutoRes.classList.toggle('on', !isOn);
+  // Params 탭에서 Seed Fix 를 **끄면** 알약이 빌려 간 해상도 설정도 함께 돌려준다.
+  // 켜는 방향은 손대지 않는다 — 기존 Seed Fix 는 시드만 고정하는 플래그이고,
+  // 여기서 Rnd Res 를 몰래 끄면 이 칩만 쓰던 사용자에게는 원인 모를 변화다.
+  if (key === 'seed_fixed') {
+    if (isOn) applySeedResLockResSideEffect(false);
+    renderSeedLockPill();
+  }
+  if (key === 'random_resolution' || key === 'auto_fit_resolution') renderSeedLockPill();
+}
+
+// ── 시드+해상도 고정 알약 (결과 뷰어 좌하단) ─────────────────────────────────
+// NovelAI 공식과 사양 맞춤(사용자 지정). **새 상태를 만들지 않는다** — 기존
+// `seed_fixed` 플래그를 몬다. Params 탭 플래그·이 알약이 같은 값을 가리켜야 한다.
+//
+// ⚠️ 해상도 처리가 특이하다(사용자 지정): 켜기 **전**의 [Rnd Res]·[Auto Res] 를
+//    기억해 두고 둘을 끈다(그래야 해상도가 실제로 고정된다). 고정을 풀면 기억한
+//    값으로 되돌린다. 기억을 안 하면 사용자가 켜 뒀던 설정을 조용히 잃는다.
+// ⚠️ **메모리에만 두면 약속이 깨진다.** `seed_fixed` 는 서버 remote_params 에 남아
+//    새로고침/재시작 후에도 켜진 채로 돌아오는데, 기억은 사라져 있다 — 그러면 고정을
+//    풀어도 Rnd/Auto Res 가 되살아나지 않고 사용자는 이유를 알 수 없다(실측: 리로드
+//    후 두 플래그가 꺼진 채 굳었다). localStorage 로 같이 넘긴다.
+const SEEDLOCK_RES_MEMO_KEY = 'naia.seedlock.resmemo.v1';
+let seedResLockMemo = null;
+
+function saveSeedResLockMemo() {
+  try {
+    if (seedResLockMemo) localStorage.setItem(SEEDLOCK_RES_MEMO_KEY, JSON.stringify(seedResLockMemo));
+    else localStorage.removeItem(SEEDLOCK_RES_MEMO_KEY);
+  } catch (_) { /* 용량 초과·프라이빗 모드 — 기억 못 하는 것이 기능을 막지는 않는다 */ }
+}
+
+/** 지난 세션의 기억을 되살린다. 모드는 **되돌릴 때** 본다(여기서 걸러내면 로드
+ *  시점의 모드가 아직 확정되지 않아 멀쩡한 기억을 버린다). */
+function loadSeedResLockMemo() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SEEDLOCK_RES_MEMO_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return;
+    seedResLockMemo = {mode: String(raw.mode || 'NAI'), rnd: !!raw.rnd, auto: !!raw.auto};
+  } catch (_) {}
+}
+
+// 꺼짐 상태의 안내문. index.html 의 `data-naia-guide` 초기값과 **같은 글**이어야
+// 한다 — 한 번 켜고 끄면 이 상수가 그 자리를 덮는다.
+const SEEDLOCK_GUIDE_OFF =
+  '시드+해상도 고정.\\n누르면 직전 생성의 시드와 지금 해상도를 그대로 다시 씁니다.\\n' +
+  '켜는 동안 Rnd Res / Auto Res 는 잠시 꺼지고, 고정을 풀면 원래대로 돌아옵니다.';
+
+/** `#paramFlags` 의 플래그 상태. `_collectCurrentParams` / `updateModeSchema` 안에
+ *  같은 이름의 지역 헬퍼가 있지만 **전역이 아니다** — 여기서 부르면 ReferenceError. */
+function paramFlagOn(key) {
+  return !!paramFlags?.querySelector?.(`[data-key="${key}"]`)?.classList.contains('on');
+}
+
+/** 알약이 켜져 있나(뷰 상태). */
+function isSeedResLockOn() {
+  return !!$('seedLockPill')?.classList.contains('is-on');
+}
+
+/** 지금 실제로 시드가 고정돼 있나.
+ *  플래그 칩이 그려져 있으면 **그것이 진실이다** — `_collectCurrentParams` 가
+ *  `#paramFlags` 를 훑어 payload 를 만들기 때문(`p[el.dataset.key]`). 칩이 아직
+ *  없는 초기 구간에서만 알약이 원천이 된다. */
+function seedResLockEffective() {
+  const el = paramFlags?.querySelector?.('[data-key="seed_fixed"]');
+  return el ? el.classList.contains('on') : isSeedResLockOn();
+}
+
+/** 지금 화면의 시드. 생성이 끝나면 시드 박스에 실제 디스패치 값이 들어온다. */
+function seedLockPillSeed() {
+  const n = Number(String(paramEls?.seed?.value ?? '').trim());
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
+}
+
+function renderSeedLockPill() {
+  const pill = $('seedLockPill');
+  if (!pill) return;
+  const on = seedResLockEffective();
+  const seed = on ? seedLockPillSeed() : null;
+  pill.classList.toggle('is-on', on);
+  pill.classList.toggle('no-seed', on && seed == null);
+  pill.setAttribute('aria-pressed', on ? 'true' : 'false');
+  const label = $('seedLockPillSeed');
+  if (label) label.textContent = on ? (seed != null ? String(seed) : '고정') : '';
+  // 설명은 **실제로** 해상도가 잠겼는지 보고 쓴다. Params 탭에서 Seed Fix 만 켠
+  // 경로에서는 Rnd/Auto Res 가 그대로 살아 있을 수 있고, 그때 '해상도 고정' 이라
+  // 적으면 거짓말이 된다.
+  // ⚠️ `title` 이 아니라 `data-naia-guide` 에 쓴다 — 툴팁 시스템이 `title` 을
+  //    `data-naia-title` 로 흡수하는데 `data-naia-guide` 가 그것보다 우선이라
+  //    (app.js 툴팁 초기화), `title` 로 쓰면 HTML 의 정적 문구만 계속 보인다.
+  const res = currentResolutionWH();
+  const resLocked = !qRndRes?.classList.contains('on') && !qAutoRes?.classList.contains('on');
+  if (on) {
+    const head = seed != null ? `시드 ${seed} 고정 중` : '시드 고정 켬 — 다음 장의 시드를 뭅니다';
+    const tail = resLocked
+      ? `해상도 ${res ? `${res.w}×${res.h}` : '현재값'} 고정`
+      : '해상도는 여전히 Rnd / Auto Res 를 따릅니다';
+    pill.dataset.naiaGuide = `${head}\\n${tail}\\n다시 누르면 풀립니다.`;
+  } else {
+    pill.dataset.naiaGuide = SEEDLOCK_GUIDE_OFF;
+  }
+}
+
+/** 고정을 켤/끌 때의 **해상도 부수효과**. 사양(사용자 지정): 켜기 직전의
+ *  [Rnd Res]·[Auto Res] 를 기억하고 둘을 끈다. 풀면 기억한 값으로 되돌린다.
+ *  안 끄면 시드만 같고 해상도가 매 장 갈려 "고정"이 아니게 된다.
+ *  @returns {boolean} 되돌리기가 실제로 일어났는지 */
+function applySeedResLockResSideEffect(on) {
+  if (on) {
+    // 이미 켜져 있던 상태에서 다시 켜는 경로로 들어오면 기억을 덮지 않는다
+    // (덮으면 "직전"이 이미 꺼진 값이라 원래 설정을 영구히 잃는다).
+    if (!seedResLockMemo || seedResLockMemo.mode !== seedMemoMode()) {
+      seedResLockMemo = {
+        mode: seedMemoMode(),
+        rnd: !!qRndRes?.classList.contains('on'),
+        auto: !!qAutoRes?.classList.contains('on'),
+      };
+    }
+    setResFlag('random_resolution', false);
+    setResFlag('auto_fit_resolution', false);
+    saveSeedResLockMemo();
+    return false;
+  }
+  if (!seedResLockMemo) return false;
+  // 모드가 다르면 남의 기억이다 — Rnd/Auto Res 는 모드별 플래그라 그대로 심으면
+  // 엉뚱한 모드의 설정을 남긴다. 되돌리지 않고 버린다.
+  const mine = seedResLockMemo.mode === seedMemoMode();
+  if (mine) {
+    setResFlag('random_resolution', seedResLockMemo.rnd);
+    setResFlag('auto_fit_resolution', seedResLockMemo.auto);
+  }
+  seedResLockMemo = null;
+  saveSeedResLockMemo();
+  return mine;
+}
+
+function toggleSeedResLock() {
+  const next = !seedResLockEffective();
+  const restored = applySeedResLockResSideEffect(next);
+  setSeedFixedFlag(next);
+  const seed = seedLockPillSeed();
+  showToast(
+    next
+      ? (seed != null ? `시드+해상도 고정 — ${seed}` : '시드+해상도 고정 (다음 장의 시드를 뭅니다)')
+      : (restored ? '고정 해제 — 해상도 설정을 되돌렸습니다' : '고정 해제'),
+    'info');
+}
+
+/** `seed_fixed` 를 **모든 표면에** 세운다(Params 칩 · 알약 · 서버). */
+function setSeedFixedFlag(on) {
+  const el = paramFlags?.querySelector?.('[data-key="seed_fixed"]');
+  if (el) el.classList.toggle('on', !!on);
+  setParam('seed_fixed', String(!!on));
+  renderSeedLockPill();
+}
+
+// 지난 세션이 남긴 해상도 기억을 되살린다. **`let seedResLockMemo` 선언 뒤여야
+// 한다** — 위쪽에서 부르면 TDZ ReferenceError 가 나는데 `loadSeedResLockMemo` 의
+// try/catch 가 그걸 삼켜 복원이 조용히 실패한다(같은 함정이 3257 줄에 기록돼 있다).
+loadSeedResLockMemo();
+
+/** Rnd/Auto Res 를 Quick·Params 양쪽에 세운다. `toggleQuickFlag` 와 같은 일을
+ *  하지만 **토글이 아니라 지정**이다 — 기억한 값으로 되돌릴 때 토글은 못 쓴다. */
+function setResFlag(key, on) {
+  const quick = key === 'random_resolution' ? qRndRes : qAutoRes;
+  quick?.classList.toggle('on', !!on);
+  const el = paramFlags?.querySelector?.(`[data-key="${key}"]`);
+  if (el) el.classList.toggle('on', !!on);
+  setParam(key, String(!!on));
 }
 
 function toggleQuickFlag(el, key) {
@@ -4442,6 +4618,8 @@ function toggleQuickFlag(el, key) {
   // Params 탭 내 플래그도 동기화
   const paramEl = paramFlags.querySelector(`[data-key="${key}"]`);
   if (paramEl) paramEl.classList.toggle('on', !isOn);
+  // 해상도 플래그가 바뀌면 알약 툴팁의 '해상도 고정' 문구가 달라진다.
+  if (key === 'random_resolution' || key === 'auto_fit_resolution') renderSeedLockPill();
 }
 
 function setSamplingMode(mode) {

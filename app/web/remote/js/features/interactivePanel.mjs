@@ -1396,6 +1396,12 @@ export function createInteractivePanel({
       if (sl) { event.preventDefault(); setSeedLock(!seedLock); return; }
       const rx = event.target.closest('[data-ia-reactive]');
       if (rx) { event.preventDefault(); setReactive(!reactive); return; }
+      // ⚠️ Safe Viewer 는 **팝업 헤더에서 이 줄로 옮겨진**(2eefc94f) 버튼이다.
+      //    옛 배선은 `panelMount.querySelector('[data-safe-viewer]')` 였는데 버튼이
+      //    `sceneMount` 로 이사하면서 **딸려오지 않아 버튼이 통째로 죽어 있었다**
+      //    (사용자 제보: 켜고 꺼지지 않는다). 여기 위임에 얹어 다시 그려도 살아 있게 한다.
+      const sv = event.target.closest('[data-safe-viewer]');
+      if (sv) { event.preventDefault(); setSafeViewer(!safeViewer); return; }
       const cp = event.target.closest('[data-comp-preset]');
       if (cp) {
         event.preventDefault();

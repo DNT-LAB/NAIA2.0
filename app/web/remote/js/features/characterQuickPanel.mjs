@@ -36,6 +36,7 @@ export function createCharacterQuickPanel({
   openCharacterModule = () => {},
   getResolution = () => null,      // {w, h} — 지금 설정된 생성 해상도
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
+  showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
 }) {
   let mount = null;
   let open = false;
@@ -415,12 +416,22 @@ export function createCharacterQuickPanel({
     return state && state.use_custom_positions ? 'custom' : 'auto';
   }
 
+  /** Connect 를 쓰는 슬롯이 하나라도 있나. 있으면 POS 가 CUSTOM 에 못 박힌다
+   *  (백엔드 `_normalize_character_settings_with_migration` 이 강제한다). */
+  function hasConnectedSlot(state) {
+    return ((state && state.characters) || [])
+      .some(character => character && character.active && String(character.connect_to || ''));
+  }
+
   function signature(state) {
     // ⚠️ muted 도 서명에 넣는다. 빼면 ✔/✘ 를 눌러도 다시 그리지 않아 표시가
     //    옛 상태에 굳는다(POS 라벨이 CUSTOM 에 굳었던 것과 같은 계열).
+    // ⚠️ Connect 도 같은 이유로 넣는다. 이미 CUSTOM 인 상태에서 링크를 걸면
+    //    `posModeOf` 는 그대로라 서명이 안 바뀌고, POS 버튼의 자물쇠가 안 나타난다.
     const slots = activeSlots(state)
       .map(({index, character}) =>
-        [index, openSlots.has(index) ? 1 : 0, character && character.muted ? 1 : 0].join('~'))
+        [index, openSlots.has(index) ? 1 : 0, character && character.muted ? 1 : 0,
+         character && String(character.connect_to || '') ? 1 : 0].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
     // ⚠️ POS 는 **모드 이름**을 넣는다. 불리언으로 넣으면 CUSTOM->RAND 전환이
@@ -602,6 +613,12 @@ export function createCharacterQuickPanel({
       return;
     }
     if (event.target.closest('[data-cq-posmode]')) {
+      // Connect 가 걸려 있으면 POS 는 CUSTOM 에 못 박힌다(백엔드 정규화가 강제한다).
+      // 여기서 막지 않으면 눌러도 값이 되돌아와 "버튼이 고장났다" 로 보인다.
+      if (hasConnectedSlot(lastState)) {
+        showToast('Connect 를 쓰는 동안에는 POS 가 CUSTOM 으로 고정됩니다 (칸마다 직접 앉히는 기능입니다)', 'info');
+        return;
+      }
       // AUTO -> CUSTOM -> RAND -> AUTO (사용자 지정).
       const now = posModeOf(lastState);
       const next = POS_CYCLE[(POS_CYCLE.indexOf(now) + 1) % POS_CYCLE.length];
@@ -682,6 +699,7 @@ export function createCharacterQuickPanel({
     const enabled = !!current.activated;
     const posMode = posModeOf(current);
     const custom = posMode === 'custom';
+    const posLocked = hasConnectedSlot(current);
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`
@@ -693,8 +711,13 @@ export function createCharacterQuickPanel({
       // POS 세 상태. AUTO 는 고정 자리, CUSTOM 은 슬롯이 기억한 자리, RAND 는
       // 생성 요청마다 새로 굽는 무작위 배치다. 옮길 원이 있는 CUSTOM 에서만
       // 편집 버튼이 생긴다 - RAND 의 자리는 누를 시점에 아직 존재하지 않는다.
-      + `<button type="button" class="cq-pos is-${posMode}"`
-      + ` data-cq-posmode="1">POS : ${POS_LABEL[posMode]}</button>`
+      // Connect 중에는 CUSTOM 에 못 박힌다 - 자물쇠를 붙여 "왜 안 바뀌는가" 를
+      // 누르기 전에 알려 준다(누르면 토스트가 이유를 말한다).
+      + `<button type="button" class="cq-pos is-${posMode}${posLocked ? ' is-locked' : ''}"`
+      + (posLocked
+          ? ' data-naia-guide="Connect 를 쓰는 동안에는 POS 가 CUSTOM 으로 고정됩니다.\\n같은 캐릭터를 칸마다 직접 앉히는 기능이라 AUTO/RAND 가 자리를 정하면 안 됩니다."'
+          : '')
+      + ` data-cq-posmode="1">POS : ${POS_LABEL[posMode]}${posLocked ? ' &#128274;' : ''}</button>`
       + (custom
           ? `<button type="button" class="cq-pos cq-pos-edit" data-cq-posedit="1">POS</button>`
           : '')

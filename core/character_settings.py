@@ -174,6 +174,13 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
     settings["position_mode"] = normalize_position_mode(
         data.get("position_mode"), data.get("use_custom_positions")
     )
+    # ⚠️ Connect 가 하나라도 걸려 있으면 POS 는 **강제로 CUSTOM** 이다(사용자 지정).
+    #    이 기능은 2koma 처럼 같은 캐릭터를 칸마다 손으로 앉히려고 쓰는 것이라,
+    #    AUTO/RAND 가 자리를 대신 정해 버리면 쓰는 목적 자체가 사라진다.
+    #    여기서 세우면 `save_settings` 의 `_seed_missing_positions` 도 따라 돌아
+    #    좌표 없는 슬롯이 씨앗을 받는다(정규화 뒤에 도는 순서라 이 순서가 맞다).
+    if any(str(frame.get("connect_to") or "") for frame in settings["character_frames"]):
+        settings["position_mode"] = "custom"
     # 옛 불리언 키는 **파생값**으로만 남긴다 - 읽는 곳이 여럿이라 지우면 흩어져
     # 깨지고, 권위를 주면 새 값과 싸운다. 언제나 `position_mode` 가 이긴다.
     settings["use_custom_positions"] = settings["position_mode"] == "custom"

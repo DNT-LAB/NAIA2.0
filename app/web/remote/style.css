@@ -22832,6 +22832,14 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
    RAND 는 색을 따로 준다 - 셋을 도는 버튼이라 라벨만으로는 지금 어디인지
    한눈에 안 들어온다(CUSTOM 과 같은 보라면 "켜짐" 둘이 구분이 안 된다). */
 .cq-pos.is-custom { border-color: rgba(124,106,239,0.6); color: var(--text-primary); }
+/* Connect 중에는 POS 를 못 바꾼다 - 눌러도 되지만(토스트가 이유를 말한다) 값이
+   안 바뀐다는 것을 미리 보여 준다. 비활성처럼 흐리게 만들지는 않는다: 누를 수
+   있어야 이유를 들을 수 있다. */
+.cq-pos.is-locked {
+  border-color: rgba(106,191,123,0.6);
+  background: rgba(38,74,48,0.35);
+  cursor: default;
+}
 .cq-pos.is-random {
   border-color: rgba(92,196,158,0.6); color: rgb(138,222,190);
   background: rgba(92,196,158,0.14);

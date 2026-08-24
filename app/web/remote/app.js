@@ -1641,7 +1641,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260823-quickchar27')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260824-charconnect2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml, setModuleParam, onModTextEdit,
@@ -1650,6 +1650,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
       // ⚠️ 이걸 빠뜨려서 자동완성이 **통째로 죽어 있었다.** 패널 쪽 배선은 있었지만
       //    기본값이 빈 함수라 아무 일도 안 일어났다 - 오류도 안 난다.
       bindTagAssist,
+      showToast,
     });
     syncCharacterQuickPanelVisibility();
     const cached = moduleStateCache.get('character');

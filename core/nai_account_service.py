@@ -58,6 +58,11 @@ MAIN_ACCOUNT_LABEL = "메인 계정"
 POLICY_KEY_USAGE = "load_balancing_policy"
 POLICY_KEY_ANLAS = "load_balancing_policy_anlas"
 
+# 활성 계정이 **전부** 무료 사용량 0% 에 닿으면 Auto Gen 을 스스로 끈다(사용자 지정).
+# 계열마다 갈리지 않는 하나의 스위치다 - 무료 풀은 V5 에만 있으므로 판정 자체가
+# V5 에서만 뜻을 가진다(`all_active_accounts_exhausted` 참조).
+STOP_ON_EXHAUSTED_KEY = "stop_auto_gen_on_exhausted"
+
 # 계정을 무한정 늘릴 이유가 없다. 라운드 로빈은 카운터 % N 이라 N 이 커질수록
 # 한 계정이 다시 쓰이기까지의 간격만 늘어난다.
 MAX_ACCOUNTS = 9
@@ -70,6 +75,7 @@ def _default_data() -> dict[str, Any]:
         "main_account_enabled": True,
         POLICY_KEY_USAGE: DEFAULT_POLICY,
         POLICY_KEY_ANLAS: DEFAULT_POLICY,
+        STOP_ON_EXHAUSTED_KEY: False,
     }
 
 
@@ -123,6 +129,43 @@ def cached_account_usage(context: Any) -> dict[str, Any]:
     if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[1], dict):
         return cached[1]
     return {}
+
+
+def all_active_accounts_exhausted(context: Any) -> bool:
+    """활성 계정이 **전부** 무료 사용량 0% 에 닿았는가.
+
+    ⚠️ '완전히 0' 이 아니다(사용자 정정). Anlas 는 남아 있어도 이 풀이 마르면 그
+       다음 장부터 유료다 - 밤새 도는 Auto Gen 이 그 선을 조용히 넘는 것을 막자는
+       판정이다. **하나라도 남아 있으면 False** 다(부하 분산이 남은 계정으로 옮겨
+       계속 무료로 생성한다).
+
+    ⚠️ **모르면 False 다.** 캐시가 비었거나(폴러가 아직 못 채웠거나 조회가 실패했거나)
+       활성 계정 중 하나라도 값을 모르면 판단하지 않는다 - 모르는 것을 소진으로 읽으면
+       멀쩡한 루프가 이유 없이 죽는다.
+    """
+    if not context_uses_usage_limit(context):
+        return False        # 무료 풀이 없는 계열에서는 퍼센트에 뜻이 없다
+    usage = cached_account_usage(context)
+    if not usage:
+        return False
+    try:
+        active = [account_id for account_id, _ in NaiAccountService(context).active_accounts()]
+    except Exception:       # noqa: BLE001 - 판정 하나 때문에 생성 루프가 죽으면 안 된다
+        return False
+    if not active:
+        return False
+    for account_id in active:
+        row = usage.get(account_id)
+        if not isinstance(row, dict):
+            return False                        # 값을 모르는 계정이 있다
+        if row.get("is_negative"):
+            continue                            # 음수 = 이미 넘겨 썼다
+        percent = row.get("percent")
+        if not isinstance(percent, (int, float)) or isinstance(percent, bool):
+            return False
+        if percent > 0:
+            return False                        # 아직 남은 계정이 있다
+    return True
 
 
 # 계정 회전용 카운터.
@@ -272,6 +315,9 @@ class NaiAccountService:
         # 비V5 칸이 없는 옛 파일은 옛 키에서 물려받는다.
         base[POLICY_KEY_ANLAS] = normalize_policy(
             data.get(POLICY_KEY_ANLAS, legacy), False)
+        # 옛 파일에는 없다. 없으면 꺼진 것으로 본다 - 켜져 있다고 오해하면 사용자가
+        # 켠 적 없는 이유로 Auto Gen 이 멈춘다.
+        base[STOP_ON_EXHAUSTED_KEY] = bool(data.get(STOP_ON_EXHAUSTED_KEY, False))
         return base
 
     def save(self, data: dict[str, Any]) -> None:
@@ -413,6 +459,7 @@ class NaiAccountService:
             "balancing_effective": len(active) >= 2,
             "can_add": len(data["accounts"]) < MAX_ACCOUNTS,
             "max_accounts": MAX_ACCOUNTS,
+            STOP_ON_EXHAUSTED_KEY: bool(data.get(STOP_ON_EXHAUSTED_KEY, False)),
         }
 
     # ---- 변경 ----------------------------------------------------------
@@ -504,3 +551,14 @@ class NaiAccountService:
         if data[key] != previous:
             reset_rotation_counter(self.context)
         return {"ok": True, "policy": data[key]}
+
+    def set_stop_on_exhausted(self, enabled: bool) -> dict[str, Any]:
+        """모든 계정이 0% 에 닿으면 Auto Gen 을 끌 것인가(사용자 지정).
+
+        계열을 나누지 않는다 - 무료 풀은 V5 에만 있으므로 비V5 에서는 판정이 애초에
+        서지 않는다(`all_active_accounts_exhausted`).
+        """
+        data = self.load()
+        data[STOP_ON_EXHAUSTED_KEY] = bool(enabled)
+        self.save(data)
+        return {"ok": True, STOP_ON_EXHAUSTED_KEY: data[STOP_ON_EXHAUSTED_KEY]}

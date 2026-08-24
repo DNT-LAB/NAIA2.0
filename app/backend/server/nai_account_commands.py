@@ -9,6 +9,8 @@ Dev0714 의 PyQt `api_management_window.py` 가 하던 일을 웹으로 옮긴 �
     nai_account_set_token      setup_gate   토큰 입력
     nai_account_set_enabled    account_gate 로컬이면 터널 중에도 허용
     nai_account_set_policy     account_gate 로컬이면 터널 중에도 허용
+    nai_account_set_stop_on_exhausted
+                               account_gate 0% 도달 시 Auto Gen 해제 스위치
 
 ⚠️ 토큰은 **검증에 성공해야만 저장한다**(메인 토큰과 같은 규칙). 검증 없이 넣으면
 그 계정이 회전에 들어간 뒤 **N 장마다 한 번씩 생성이 실패한다** - 사용자 입장에서는
@@ -35,11 +37,13 @@ NAI_ACCOUNT_COMMAND_TYPES = {
     "nai_account_set_token",
     "nai_account_set_enabled",
     "nai_account_set_policy",
+    "nai_account_set_stop_on_exhausted",
 }
 
 # 쓰기 커맨드별 게이트. 위 표 참조.
 _SETUP_GATED = {"nai_account_add", "nai_account_delete", "nai_account_set_token"}
-_ACCOUNT_GATED = {"nai_account_set_enabled", "nai_account_set_policy"}
+_ACCOUNT_GATED = {"nai_account_set_enabled", "nai_account_set_policy",
+                  "nai_account_set_stop_on_exhausted"}
 
 
 async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
@@ -134,6 +138,8 @@ async def handle_nai_account_command(
         result = service.set_enabled(account_id, bool(command.get("enabled", False)))
     elif command_type == "nai_account_set_policy":
         result = service.set_policy(str(command.get("policy") or ""))
+    elif command_type == "nai_account_set_stop_on_exhausted":
+        result = service.set_stop_on_exhausted(bool(command.get("enabled", False)))
 
     await _send_json(ws, {
         "type": "nai_account_result",

@@ -810,6 +810,72 @@ async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSock
     return True
 
 
+def _auto_gen_loop_engaged(context: WebSessionContext) -> bool:
+    """지금 무언가가 **스스로 다음 장을 부르고 있는가.**
+
+    아니면 멈출 것이 없다 - 수동 생성 한 장에 "자동 생성을 해제했습니다" 토스트를
+    띄우면 하지도 않은 일을 했다고 말하는 셈이다.
+    """
+    try:
+        if context._coerce_bool(context.get_options().get("auto_generate", False)):
+            return True
+        return bool(context._storyteller_service().is_running()
+                    or context._automation_service().is_running())
+    except Exception:   # noqa: BLE001
+        return False
+
+
+def _auto_gen_quota_exhausted(context: WebSessionContext) -> bool:
+    """'모든 계정 사용량 0% 도달 시 자동 생성 해제' 가 켜져 있고, 실제로 닿았는가.
+
+    스위치와 판정을 **여기서 함께** 본다 - 스위치가 꺼져 있으면 계정 파일도 사용량도
+    읽을 이유가 없다.
+    """
+    try:
+        from core.nai_account_service import (
+            STOP_ON_EXHAUSTED_KEY,
+            NaiAccountService,
+            all_active_accounts_exhausted,
+        )
+
+        if not bool(NaiAccountService(context).load().get(STOP_ON_EXHAUSTED_KEY, False)):
+            return False
+        return all_active_accounts_exhausted(context)
+    except Exception:   # noqa: BLE001 - 안전장치 하나 때문에 루프가 죽으면 안 된다
+        return False
+
+
+async def _stop_auto_generation_for_quota(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+) -> None:
+    """무료 사용량이 모두 마르면 Auto Gen 을 **직접 끈다.**
+
+    Storyteller/Automation 이 돌고 있으면 그쪽 `finish` 로 끝낸다 - 그것들이 Auto Gen
+    스위치의 주인이라, 옵션만 끄면 런타임이 무장한 채 남아 다음 수동 생성이 다시
+    루프를 탄다. 아무도 안 돌고 있으면 옵션을 직접 내리고 알린다.
+    """
+    _release_auto_gen_prefetch(context)
+    story = context._storyteller_service()
+    automation = context._automation_service()
+    messages: list[dict[str, Any]] = []
+    if story.is_running():
+        messages.extend(story.finish(story.active_run_id(), reason="stopped").get("messages", []))
+        await _broadcast_storyteller_state(context, clients)
+    elif automation.is_running():
+        messages.extend(automation.finish(automation.active_run_id(), reason="stopped").get("messages", []))
+        await _broadcast_automation_state(context, clients)
+    elif context._coerce_bool(context.get_options().get("auto_generate", False)):
+        context.set_option("auto_generate", False)
+        messages.append({"type": "options", **context.get_options()})
+    messages.append(context._toast(
+        "모든 계정의 무료 사용량이 0% 입니다. 자동 생성을 해제했습니다.",
+        level="warning",
+    ))
+    for message in messages:
+        await broadcast_json(clients, message)
+
+
 async def _maybe_continue_auto_generation(
     context: WebSessionContext,
     clients: set[WebSocket],
@@ -821,6 +887,14 @@ async def _maybe_continue_auto_generation(
     # 진전시키고(완료 시 다음 랜덤 그룹 연속 또는 종료) True 를 돌려준다. 시퀀스는 '그룹 전체'를
     # 새로 넣으므로 아래 제네릭 프롬프트 재롤 경로를 타면 안 된다 — 처리됐으면 곧장 return.
     if await _advance_sequence_run(context, clients, request):
+        return False
+
+    # 무료 사용량이 모두 마르면 여기서 끊는다(사용자 지정). ⚠️ **Automation 정책보다
+    # 먼저 본다** - 아래 record_generation_completed 는 "계속" 이라 말할 수 있고, 그
+    # 말을 들으면 그 다음 장부터 Anlas 로 나간다. 이미 나간 이 장은 어쩔 수 없고,
+    # 막는 것은 **다음 장**이다.
+    if _auto_gen_loop_engaged(context) and _auto_gen_quota_exhausted(context):
+        await _stop_auto_generation_for_quota(context, clients)
         return False
 
     # Run-policy controller bound to this completion. Storyteller and Automation each own

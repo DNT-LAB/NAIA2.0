@@ -18700,6 +18700,16 @@ select.setup-input { cursor: pointer; }
 .nai-acct-policy-text em {
   font-style: normal; font-size: 10px; line-height: 1.45; color: #83839b;
 }
+/* 0% 도달 시 Auto Gen 해제 스위치. 정책 줄과 같은 뼈대를 쓰되 표식만 네모다 -
+   라디오(하나 고르기)가 아니라 체크(켜고 끄기)라는 것이 한눈에 보여야 한다. */
+.nai-acct-check {
+  flex: 0 0 auto; width: 11px; height: 11px; margin-top: 3px;
+  border: 1px solid rgba(255,255,255,0.32); border-radius: 3px;
+  font-size: 8px; line-height: 10px; text-align: center; color: #6f8cff;
+}
+.nai-acct-guard.on .nai-acct-check {
+  border-color: rgba(111,140,255,0.75); background: rgba(111,140,255,0.14);
+}
 
 /* ---- 설정 대화상자의 계정 관리 ------------------------------------------ */
 .setup-accounts {

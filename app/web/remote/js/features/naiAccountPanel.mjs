@@ -65,6 +65,8 @@ export function createNaiAccountPanel({
     canAdd: true,
     activeCount: 0,
     balancingEffective: false,
+    // 모든 계정이 0% 에 닿으면 Auto Gen 을 스스로 끈다(사용자 지정 2026-08-24).
+    stopOnExhausted: false,
     loaded: false,
   };
   // 계정별 사용량 — `nai_usage_update` 가 채운다. 명부와 수명이 다르다.
@@ -125,6 +127,9 @@ export function createNaiAccountPanel({
     state.canAdd = message.can_add !== false;
     state.activeCount = Number(message.active_count) || 0;
     state.balancingEffective = !!message.balancing_effective;
+    if (typeof message.stop_auto_gen_on_exhausted === 'boolean') {
+      state.stopOnExhausted = message.stop_auto_gen_on_exhausted;
+    }
     state.loaded = true;
     renderPopover();
     renderSetupList();
@@ -318,6 +323,25 @@ export function createNaiAccountPanel({
     }).join('');
   }
 
+  /** 무료 사용량이 다 마르면 Auto Gen 을 스스로 끄는 스위치(사용자 지정 2026-08-24).
+   *
+   *  ⚠️ **V5 에서만 그린다.** 무료 풀이 없는 계열에는 퍼센트가 없어 판정 자체가 서지
+   *     않고, 백엔드도 같은 조건으로 물러난다 - 안 듣는 스위치를 그리면 거짓말이다.
+   *  ⚠️ '완전히 0' 이 아니라 **모두 0%** 다. 하나라도 남아 있으면 부하 분산이 그쪽으로
+   *     옮겨 계속 무료로 생성한다.
+   */
+  function guardHtml() {
+    const on = !!state.stopOnExhausted;
+    return '<div class="nai-acct-sec">Safety</div>'
+      + `<button type="button" class="nai-acct-policy nai-acct-guard${on ? ' on' : ''}"`
+      + ` data-act="guard" aria-pressed="${on ? 'true' : 'false'}">`
+      + `<span class="nai-acct-check">${on ? '✔' : ''}</span>`
+      + '<span class="nai-acct-policy-text">'
+      + '<b>모든 계정 사용량 0% 도달 시 자동 생성 해제</b>'
+      + '<em>Auto Gen 을 끕니다. Automation 정책보다 우선합니다.</em>'
+      + '</span></button>';
+  }
+
   function renderPopover() {
     const el = popEl();
     if (!el || !popOpen) return;
@@ -364,6 +388,10 @@ export function createNaiAccountPanel({
       + `<div class="nai-acct-rows">${accountRowsHtml()}</div>`
       + '<button type="button" class="nai-acct-manage" data-act="manage">'
       + '<span>＋</span> Manage Account</button>'
+      // ⚠️ 정책 **위**에 둔다. 아래에 두면 정책 설명 4개 뒤라 스크롤에 묻히는데,
+      //    이건 돈이 새는 것을 막는 스위치라 눈에 보여야 한다(실측: 팝오버가
+      //    scrollHeight 631 / clientHeight 534 로 잘려 있었다).
+      + (session.onV5 ? guardHtml() : '')
       + '<div class="nai-acct-sec">Load Balancing</div>'
       + `<div class="nai-acct-policies">${policiesHtml()}</div>`
       + (state.balancingEffective ? ''
@@ -381,6 +409,13 @@ export function createNaiAccountPanel({
     if (manage) {
       closePopover();
       openAccountSettings();
+      return;
+    }
+    const guard = event.target.closest('[data-act="guard"]');
+    if (guard) {
+      state.stopOnExhausted = !state.stopOnExhausted;  // 낙관적 - 서버 스냅샷이 확정한다
+      renderPopover();
+      send({ type: 'nai_account_set_stop_on_exhausted', enabled: state.stopOnExhausted });
       return;
     }
     const policy = event.target.closest('[data-policy]');

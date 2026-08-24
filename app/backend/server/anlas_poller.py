@@ -258,7 +258,7 @@ def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> d
     NAID5 이외 버전에도 전파).
 
     `main_summary` 는 호출자가 이미 받아 둔 메인 계정 구독 응답(있으면 재사용해서
-    같은 걸 두 번 묻지 않는다). 계정이 하나뿐이면 빈 dict 를 돌려주고 아무것도 안 한다.
+    같은 걸 두 번 묻지 않는다). 활성 계정이 하나도 없을 때만 빈 dict 를 돌려준다.
     """
     from core.nai_account_service import (
         MAIN_ACCOUNT_ID,
@@ -268,7 +268,17 @@ def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> d
 
     try:
         active = NaiAccountService(context).active_accounts()
-        if len(active) < 2:
+        # ⚠️ 예전에는 `< 2` 였다. 계정이 하나면 배지가 어차피 그 계정의 값을 그대로
+        #    보여 주니 캐시가 필요 없다고 봤는데, **생성 경로는 이 캐시만 본다** -
+        #    그래서 '0% 도달 시 Auto Gen 해제' 가 계정 하나인 설치에서 통째로 안
+        #    걸렸다(Codex BLOCK 2026-08-25). 빈 캐시는 '모른다' 로 읽혀 영영 안 멈춘다.
+        #
+        #    배지는 그대로다 - `_attach_accounts` 에 자기 `< 2` 가드가 따로 있어
+        #    평균/계정 줄을 붙이지 않는다(실측 확인).
+        #    요청도 안 는다 - 활성이 메인 하나면 `main_summary` 로 채우고 extras 가
+        #    비어 조회가 아예 없다. 메인을 끄고 추가 계정 하나만 쓰는 드문 구성에서만
+        #    조회 하나가 는다.
+        if not active:
             return {}
 
         usage_by_id: dict[str, Any] = {}
@@ -344,7 +354,7 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
             "anlas": int(summary["anlas"]), "fetched_at": now,
         }
     # 계정 조회는 **모델과 무관하다.** V4.5 에서도 계정이 둘이면 Anlas 를 합쳐 준다
-    # (사용자 지시 2026-08-21). 하나뿐이면 이 함수가 빈 dict 를 주고 요청도 안 낸다.
+    # (사용자 지시 2026-08-21). 하나뿐이면 메인 구독 응답만으로 채운다(추가 요청 없음).
     usage_by_id = refresh_account_pool(context, summary)
     combine_anlas(anlas_payload, usage_by_id)
 

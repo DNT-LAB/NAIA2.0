@@ -510,11 +510,20 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             #    컷을 냈다 - 시키지 않은 그림에 돈이 나간다(Codex 리뷰 BLOCK).
             #    요청에 실려 온 런 표를 그대로 되돌려 주면 각 탭이 **자기 것만** 센다.
             #    타입은 그대로라 웹 스모크 계약(타입을 순서대로 셈)에도 안 걸린다.
+            # ⚠️ 사용량 판정은 **완료 알림보다 먼저** 내린다. 프런트가 도는 루프
+            #    (V5 Scene 연속 생성)는 바로 이 알림을 보고 다음 컷을 내므로, 나중에
+            #    따로 알리면 이미 한 장이 더 나간 뒤다(Codex BLOCK 2026-08-25).
+            #    `_maybe_continue_auto_generation` 은 여기서 낸 답을 그대로 쓴다.
+            context._auto_gen_quota_stop = (
+                _auto_gen_loop_engaged(context, request)
+                and _auto_gen_quota_exhausted(context)
+            )
             await broadcast_json(clients, {
                 "type": "status",
                 "is_generating": False,
                 "message": "completed",
                 "v5_scene_run": str((request_params or {}).get("v5_scene_run") or ""),
+                "quota_exhausted": bool(context._auto_gen_quota_stop),
             })
             # ComfyUI 서버가 생성 이미지에 메타데이터를 남기지 않아(예: --disable-metadata)
             # NAIA가 자체 메타데이터를 삽입한 경우, 세션당 한 번만 경고 토스트로 알린다.
@@ -810,17 +819,26 @@ async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSock
     return True
 
 
-def _auto_gen_loop_engaged(context: WebSessionContext) -> bool:
+def _auto_gen_loop_engaged(context: WebSessionContext, request=None) -> bool:
     """지금 무언가가 **스스로 다음 장을 부르고 있는가.**
 
     아니면 멈출 것이 없다 - 수동 생성 한 장에 "자동 생성을 해제했습니다" 토스트를
     띄우면 하지도 않은 일을 했다고 말하는 셈이다.
+
+    ⚠️ 루프의 주인이 **서버만은 아니다.** V5 Scene 연속 생성은 프런트가 돌리며 공용
+       `auto_generate` 를 켜지 않는다 - 그것만 보면 "아무도 안 돈다" 로 읽혀 가드가
+       통째로 안 걸렸다(Codex BLOCK 2026-08-25). 요청에 실려 온 런 표로 알아본다.
+    ⚠️ 시퀀스도 마찬가지로 자기 런을 돈다.
     """
     try:
+        params = getattr(request, "params", {}) or {}
+        if isinstance(params, dict) and str(params.get("v5_scene_run") or ""):
+            return True
         if context._coerce_bool(context.get_options().get("auto_generate", False)):
             return True
         return bool(context._storyteller_service().is_running()
-                    or context._automation_service().is_running())
+                    or context._automation_service().is_running()
+                    or context._sequence_run_service().is_running())
     except Exception:   # noqa: BLE001
         return False
 
@@ -858,7 +876,18 @@ async def _stop_auto_generation_for_quota(
     _release_auto_gen_prefetch(context)
     story = context._storyteller_service()
     automation = context._automation_service()
+    sequence = context._sequence_run_service()
     messages: list[dict[str, Any]] = []
+    # ⚠️ 시퀀스는 **따로** 끝낸다(elif 가 아니다). 자기 런을 돌기 때문에 아래 컨트롤러
+    #    들과 동시에 살아 있을 수 있고, 안 끝내면 런타임이 무장한 채 남아 다음 완료가
+    #    다시 다음 묶음을 넣는다(Codex BLOCK 2026-08-25).
+    if sequence.is_running():
+        finish = sequence.finish(sequence.active_run_id(), reason="stopped")
+        try:
+            await broadcast_json(clients, context._sequence_run_module_state())
+        except Exception:
+            pass
+        messages.extend(finish.get("messages", []))
     if story.is_running():
         messages.extend(story.finish(story.active_run_id(), reason="stopped").get("messages", []))
         await _broadcast_storyteller_state(context, clients)
@@ -886,15 +915,22 @@ async def _maybe_continue_auto_generation(
     # Sequence 연속 생성(Auto Gen): 시퀀스 프레임이면 _advance_sequence_run 이 라운드 카운트를
     # 진전시키고(완료 시 다음 랜덤 그룹 연속 또는 종료) True 를 돌려준다. 시퀀스는 '그룹 전체'를
     # 새로 넣으므로 아래 제네릭 프롬프트 재롤 경로를 타면 안 된다 — 처리됐으면 곧장 return.
-    if await _advance_sequence_run(context, clients, request):
+    # 무료 사용량이 모두 마르면 여기서 끊는다(사용자 지정).
+    #
+    # ⚠️ **맨 앞이다.** 바로 아래 `_advance_sequence_run` 은 시퀀스 요청이면 곧장
+    #    돌아가므로, 뒤에 두면 시퀀스 연속 생성이 가드를 통째로 건너뛰고 라운드마다
+    #    새 묶음을 유료로 넣는다(Codex BLOCK 2026-08-25).
+    # ⚠️ **Automation 정책보다도 먼저다** - 아래 record_generation_completed 는
+    #    "계속" 이라 말할 수 있고, 그 말을 들으면 그 다음 장부터 Anlas 로 나간다.
+    # ⚠️ 판정은 **완료 알림 직전에** 이미 내려 두었다(그 알림에 실어 프런트 루프도
+    #    멈추게 해야 하므로). 여기서 다시 재지 않고 그 답을 그대로 쓴다 - 두 번 재면
+    #    그 사이에 폴러가 캐시를 바꿔 알림과 서버 판단이 어긋날 수 있다.
+    if getattr(context, "_auto_gen_quota_stop", False):
+        context._auto_gen_quota_stop = False
+        await _stop_auto_generation_for_quota(context, clients)
         return False
 
-    # 무료 사용량이 모두 마르면 여기서 끊는다(사용자 지정). ⚠️ **Automation 정책보다
-    # 먼저 본다** - 아래 record_generation_completed 는 "계속" 이라 말할 수 있고, 그
-    # 말을 들으면 그 다음 장부터 Anlas 로 나간다. 이미 나간 이 장은 어쩔 수 없고,
-    # 막는 것은 **다음 장**이다.
-    if _auto_gen_loop_engaged(context) and _auto_gen_quota_exhausted(context):
-        await _stop_auto_generation_for_quota(context, clients)
+    if await _advance_sequence_run(context, clients, request):
         return False
 
     # Run-policy controller bound to this completion. Storyteller and Automation each own
@@ -1402,9 +1438,13 @@ async def _broadcast_generation_error(
         img2img_service
         and img2img_service.record_generation_failed(params, request.request_id, message)
     )
-    await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
+    # 실패에도 런 표를 싣는다. 안 실으면 남의 실패로 내 연속 생성이 멈춘다(Codex CONCERN).
+    _scene_run = str((params or {}).get("v5_scene_run") or "")
+    await broadcast_json(clients, {"type": "status", "is_generating": False,
+                                  "message": "error", "v5_scene_run": _scene_run})
     await broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
-    await broadcast_json(clients, {"type": "generation_error", "message": message})
+    await broadcast_json(clients, {"type": "generation_error", "message": message,
+                                  "v5_scene_run": _scene_run})
     story_run_id = str(params.get("event_stream_run_id") or "")
     if story_run_id and not context._storyteller_service().is_running(story_run_id):
         story_run_id = ""

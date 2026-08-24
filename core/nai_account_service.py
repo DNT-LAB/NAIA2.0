@@ -35,6 +35,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import random
 import threading
@@ -181,6 +182,26 @@ def all_active_accounts_exhausted(context: Any) -> bool:
 # 사라져도 이렇게 조용히 꺼진다.
 _ROTATION_ATTR = "nai_account_rotation_counter"
 _ROTATION_LOCK = threading.Lock()
+
+# ⚠️ 이 파일은 **읽고 -> 고치고 -> 쓴다.** 그 셋이 한 덩어리가 아니면 서로를 지운다:
+# 토큰 검증은 워커 스레드에서 끝나며 `set_enabled` 를 부르고, 그 사이 다른 브라우저가
+# 이벤트 루프에서 `set_stop_on_exhausted` 를 부를 수 있다. 둘 다 옛 문서를 읽으면
+# 나중에 저장한 쪽이 상대의 변경을 되돌린다 - 화면은 이미 "켜짐" 이라 말했는데 다음
+# 묶음이 보호 없이 돈다(Codex BLOCK 2026-08-25).
+#
+# RLock 이다 - 잠근 메서드가 다른 잠근 메서드를 부를 수 있다(같은 스레드 재진입).
+_DATA_LOCK = threading.RLock()
+
+
+def _locked(method):
+    """`load -> 고치기 -> save` 한 덩어리를 통째로 잠근다."""
+
+    @functools.wraps(method)
+    def wrapper(*args, **kwargs):
+        with _DATA_LOCK:
+            return method(*args, **kwargs)
+
+    return wrapper
 
 
 def reset_rotation_counter(context: Any) -> None:
@@ -471,6 +492,7 @@ class NaiAccountService:
             index += 1
         return f"{MAIN_ACCOUNT_ID}_{index}"
 
+    @_locked
     def add_account(self) -> dict[str, Any]:
         data = self.load()
         if len(data["accounts"]) >= MAX_ACCOUNTS:
@@ -487,6 +509,7 @@ class NaiAccountService:
         self.save(data)
         return {"ok": True, "account_id": account_id}
 
+    @_locked
     def delete_account(self, account_id: str) -> dict[str, Any]:
         if account_id == MAIN_ACCOUNT_ID:
             return {"ok": False, "message": "메인 계정은 삭제할 수 없습니다."}
@@ -506,6 +529,7 @@ class NaiAccountService:
                                "자격 증명이 남아 있으니 확인해 주세요."}
         return {"ok": True}
 
+    @_locked
     def set_enabled(self, account_id: str, enabled: bool) -> dict[str, Any]:
         data = self.load()
         if account_id == MAIN_ACCOUNT_ID:
@@ -534,6 +558,7 @@ class NaiAccountService:
         self._set_token(account_id, token)
         return {"ok": True, "token_preview": token_preview(token)}
 
+    @_locked
     def set_policy(self, policy: str, uses_usage_limit: bool | None = None) -> dict[str, Any]:
         """부하 분산 정책 선택. 모르는 값은 기본(라운드 로빈)으로 눕힌다.
 
@@ -552,6 +577,7 @@ class NaiAccountService:
             reset_rotation_counter(self.context)
         return {"ok": True, "policy": data[key]}
 
+    @_locked
     def set_stop_on_exhausted(self, enabled: bool) -> dict[str, Any]:
         """모든 계정이 0% 에 닿으면 Auto Gen 을 끌 것인가(사용자 지정).
 

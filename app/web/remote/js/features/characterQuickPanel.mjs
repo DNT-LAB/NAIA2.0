@@ -184,11 +184,18 @@ export function createCharacterQuickPanel({
     // 줄이 몇 줄이 될지는 그려 봐야 안다 - 띠를 **먼저** 그려 실제 높이를 재고,
     // 무대는 그 아래 남는 자리에 세운다(사용자 지정: 줄이 넘으면 자동 조절).
     // 엿보기에는 띠가 없으므로 뷰어 위쪽에서 바로 시작한다.
+    // ⚠️ `is-peek` 를 **재기 전에** 붙인다. 이 클래스가 그림의 `object-position`
+    //    트랜지션을 끄는데, 나중에 붙이면 재는 동안엔 아직 트랜지션이 돌고 있어
+    //    **움직이는 중인 자리**를 잡는다 - 그 다음 클래스가 붙는 순간 그림만 최종
+    //    위치로 튀어 무대가 어긋난 채 남는다(Codex CONCERN 2026-08-25).
+    ensureStage();
+    stage.classList.toggle('is-peek', peek);
     const viewerBox = document.getElementById('resultViewer')?.getBoundingClientRect();
     const bandBottom = peek ? ((viewerBox ? viewerBox.top : 0) + 4) : renderBand(slots);
     const box = stageRect = measureStage(bandBottom, peek);
-    if (!box) return;
-    ensureStage();
+    // 잴 자리가 없으면 표식도 거둔다 - 안 그러면 뜨지도 않은 무대 때문에 그림의
+    // 트랜지션만 꺼진 채 남는다.
+    if (!box) { stage.classList.remove('is-peek'); return; }
     const wrap = host().getBoundingClientRect();
     Object.assign(stage.style, {
       left: Math.round(box.left - wrap.left) + 'px',

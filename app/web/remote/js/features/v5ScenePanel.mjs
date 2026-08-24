@@ -535,13 +535,20 @@ export function createV5ScenePanel({
    *    요청을 영원히 다시 보낸다(Interactive Auto Gen 이 이미 밟은 함정 - 크레딧이 탄다).
    * ⚠️ 마지막 컷에서 **반드시 선다.** 되감아 돌면 사용자가 자리를 비운 사이에 끝없이 만든다.
    */
-  function notifyGenerationDone(ok, tag) {
+  function notifyGenerationDone(ok, tag, quotaExhausted) {
     if (!running) return;
     // ⚠️ **내 런의 완료만 센다.** 이 알림은 모든 탭·모든 생성에서 온다 - 남의 것으로
     //    컷을 넘기면 시키지 않은 그림이 나간다. 표가 안 맞으면 조용히 흘려보낸다
     //    (멈추지도 않는다 - 내 생성은 아직 돌고 있을 수 있다).
     if (String(tag || '') !== runTag) return;
     if (!ok) { stopRun('생성이 완료되지 않아 연속 생성을 멈췄습니다'); return; }
+    // ⚠️ 무료 사용량이 모두 말랐다고 서버가 알려 주면 **여기서 선다.** 이 루프는
+    //    프런트가 돌리므로 서버가 Auto Gen 을 꺼도 저절로 멈추지 않는다 - 안 세우면
+    //    남은 컷을 전부 Anlas 로 낸다(Codex BLOCK 2026-08-25).
+    if (quotaExhausted) {
+      stopRun('모든 계정의 무료 사용량이 0% 라 연속 생성을 멈췄습니다');
+      return;
+    }
     const scenes = lastState?.scenes || [];
     const here = indexOfScene(appliedName);
     if (here < 0) { stopRun('컷을 찾지 못해 연속 생성을 멈췄습니다'); return; }

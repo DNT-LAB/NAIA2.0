@@ -1944,7 +1944,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-evmenu1')
+const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-seqrun2')
   .then(({createV5ScenePanel}) => {
     v5SceneControl = createV5ScenePanel({
       panel: $('v5ScenePanel'),
@@ -1954,6 +1954,9 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-evmenu1')
       // ⚠️ `window.prompt` 은 **Electron 에서 동작하지 않는다** - 앱 자체 대화상자를 쓴다.
       showPromptDialog,
       showConfirmDialog,
+      // 연속 생성용. 패널이 직접 WS 를 몰지 않고 앱의 입구를 빌린다 - 프롬프트 flush·
+      // 중복 발사 방지가 이미 거기 들어 있다.
+      requestGenerate,
     });
     const cached = moduleStateCache.get('v5_scene');
     if (cached) v5SceneControl.render(cached);
@@ -3352,6 +3355,8 @@ const wsMessageHandlers = {
   generation_error: m => {
     lastGenerationOk = false;
     cancelInteractiveAutoGen();
+    // 연속 생성도 여기서 끊는다 - 실패를 딜레이마다 다시 보내면 크레딧이 탄다.
+    v5SceneControl?.stopRun?.('생성 오류로 연속 생성을 멈췄습니다');
     if (m && m.message) showToast(m.message, 'error', true);
   },
   prompt_generated: updatePromptOnly,
@@ -6923,6 +6928,13 @@ function setGen(v) {
   } else if (wasGenerating && !next) {
     setTimeout(scheduleInteractiveAutoGen, 0);
   }
+  // V5 Scene 연속 생성: 한 장이 **성공으로** 끝나면 다음 컷을 불러오고 또 낸다.
+  // 성공 판정은 위 `lastGenerationOk` 를 그대로 쓴다 - 실패·큐잉도 `is_generating:false`
+  // 로 오므로 가르지 않으면 실패한 요청을 영원히 다시 보낸다(Interactive 와 같은 함정).
+  if (wasGenerating && !next && v5SceneControl?.notifyGenerationDone) {
+    setTimeout(() => v5SceneControl.notifyGenerationDone(lastGenerationOk), 0);
+  }
+  if (v5SceneControl?.setGeneratingStatus) v5SceneControl.setGeneratingStatus(next);
   if (studioTabControl) studioTabControl.handleGenerationStatus(next);
   if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(next);
   btnGen.disabled = next;

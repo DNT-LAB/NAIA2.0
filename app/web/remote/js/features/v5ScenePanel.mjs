@@ -24,9 +24,18 @@ export function createV5ScenePanel({
   //    대화상자를 받아 쓴다 - 생김새도 나머지 화면과 같아진다.
   showPromptDialog = null,
   showConfirmDialog = null,
+  requestGenerate = null,
 }) {
   let lastState = null;
   let openName = '';           // 펼쳐 둔 컷
+  // ── 연속 생성 ────────────────────────────────────────────────────────────
+  // 컷을 순서대로 불러오며 한 장씩 낸다(사용자 지정). 와일드카드가 골칫거리라서
+  // **먼저 한 컷을 불러온 뒤에만** 시작할 수 있게 한다 - 그 사이에 사용자가 자기
+  // 와일드카드를 바꿔 두면 그대로 반영된다.
+  let appliedName = '';        // 방금 불러온 컷(이 컷에서만 연속 생성을 켤 수 있다)
+  let running = false;         // 연속 생성 진행 중
+  let generatingNow = false;
+  let watchdog = null;         // 생성이 시작되는지 지켜보는 타이머
 
   function escAttr(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => (
@@ -113,6 +122,9 @@ export function createV5ScenePanel({
       if (name === activeEvent()) return;
       rememberEvent(name);
       openName = '';        // 남의 이벤트에서 쓰던 펼침 상태다
+      // 이벤트를 넘어가며 잇지 않는다 - 다른 만화의 컷을 이어 만들 이유가 없다.
+      stopRun(running ? '이벤트를 바꿔 연속 생성을 멈췄습니다' : '');
+      appliedName = '';
       setModuleParam('v5_scene', 'refresh', {event: name});
     });
 
@@ -226,11 +238,11 @@ export function createV5ScenePanel({
                     data-naia-title="뒤 컷과 자리를 바꿉니다">▼</button>
           </span>
         </div>
-        ${open ? sceneDetail(scene, wrongMode) : ''}
+        ${open ? sceneDetail(scene, wrongMode, ordinal) : ''}
       </article>`;
   }
 
-  function sceneDetail(scene, wrongMode) {
+  function sceneDetail(scene, wrongMode, ordinal) {
     const detail = scene.detail || {};
     const characters = detail.characters || [];
     const line = (label, value) => value
@@ -253,8 +265,25 @@ export function createV5ScenePanel({
           <button type="button" class="scene-apply"
                   data-scene-apply="${escAttr(scene.name)}"${wrongMode ? ' disabled' : ''}>
             이 구도로 불러오기</button>
+          ${runButton(scene, ordinal)}
         </div>
       </div>`;
+  }
+
+  /** 연속 생성 버튼. **불러온 컷에서만** 켜진다(사용자 지정) - 그래야 그 사이에 자기
+   *  와일드카드를 손볼 틈이 있다. 돌고 있으면 중단 버튼이 된다. */
+  function runButton(scene, ordinal) {
+    if (running) {
+      return '<button type="button" class="scene-run is-stop" data-scene-run-stop="1">'
+        + '생성 중단</button>';
+    }
+    const armed = String(scene.name) === appliedName;
+    return `<button type="button" class="scene-run"`
+      + ` data-scene-run="${escAttr(scene.name)}"${armed ? '' : ' disabled'}`
+      + ` data-naia-title="${armed
+          ? '이 컷부터 마지막 컷까지 한 장씩 이어서 만듭니다'
+          : '먼저 [이 구도로 불러오기] 를 누르세요'}">`
+      + `${ordinal} 부터 연속 생성</button>`;
   }
 
   // ── 크게 보기 ────────────────────────────────────────────────────────────
@@ -399,7 +428,90 @@ export function createV5ScenePanel({
     showToast(`컷을 담았습니다 — ${name}`, 'info');
   }
 
+  /** 컷 이름 -> 목록에서의 자리(0-based). 못 찾으면 -1. */
+  function indexOfScene(name) {
+    return (lastState?.scenes || []).findIndex(scene => String(scene.name) === String(name));
+  }
+
+  /** 한 장 요청하고 **시작됐는지 지켜본다.**
+   *
+   * ⚠️ 요청이 서버에서 막히면(자격증명 없음·설정 미비) 생성이 아예 시작되지 않고,
+   *    그러면 완료 신호도 안 온다 - `running` 이 영영 안 풀려 중단 버튼이 박제된다.
+   *    시작 신호(`setGeneratingStatus(true)`)가 제때 안 오면 스스로 선다.
+   */
+  function fire(failReason) {
+    clearWatchdog();
+    if (!requestGenerate({})) { stopRun(failReason); return; }
+    watchdog = globalThis.setTimeout(() => {
+      watchdog = null;
+      if (running && !generatingNow) stopRun('생성이 시작되지 않아 연속 생성을 멈췄습니다');
+    }, 8000);
+  }
+
+  function clearWatchdog() {
+    if (watchdog) { globalThis.clearTimeout(watchdog); watchdog = null; }
+  }
+
+  function startRun(name) {
+    if (running) return;
+    if (typeof requestGenerate !== 'function') {
+      showToast('이 런타임에서는 연속 생성을 쓸 수 없습니다', 'error');
+      return;
+    }
+    if (indexOfScene(name) < 0) return;
+    running = true;
+    render();
+    // 지금 화면은 이미 그 컷이다(불러오기를 누른 직후에만 켜지므로). 바로 한 장 낸다.
+    fire('생성을 시작하지 못했습니다');
+  }
+
+  /** 멈춘다. `reason` 이 있으면 왜 멈췄는지 알린다 - 조용히 서면 끝난 줄 안다. */
+  function stopRun(reason) {
+    clearWatchdog();
+    if (!running) return;
+    running = false;
+    render();
+    if (reason) showToast(reason, 'info');
+  }
+
+  /** 한 장이 끝났다. 성공이면 다음 컷을 불러오고 또 낸다.
+   *
+   * ⚠️ **성공일 때만 잇는다.** 실패·큐잉도 생성 종료로 오므로, 가르지 않으면 실패한
+   *    요청을 영원히 다시 보낸다(Interactive Auto Gen 이 이미 밟은 함정 - 크레딧이 탄다).
+   * ⚠️ 마지막 컷에서 **반드시 선다.** 되감아 돌면 사용자가 자리를 비운 사이에 끝없이 만든다.
+   */
+  function notifyGenerationDone(ok) {
+    if (!running) return;
+    if (!ok) { stopRun('생성이 완료되지 않아 연속 생성을 멈췄습니다'); return; }
+    const scenes = lastState?.scenes || [];
+    const next = indexOfScene(appliedName) + 1;
+    if (next <= 0 || next >= scenes.length) {
+      stopRun(`연속 생성을 마쳤습니다 — ${scenes.length}컷`);
+      return;
+    }
+    const target = scenes[next];
+    appliedName = String(target.name);
+    openName = appliedName;
+    // 불러오기 -> (서버 응답으로 화면이 갱신) -> 다음 장. 응답을 기다리지 않고 바로
+    // 내면 **이전 컷의 캐릭터로** 한 장이 나간다 - 적용은 왕복이 필요하다.
+    setModuleParam('v5_scene', 'apply', {event: activeEvent(), name: appliedName});
+    globalThis.setTimeout(() => {
+      if (!running) return;
+      fire('다음 컷을 시작하지 못했습니다');
+    }, 900);
+  }
+
+  function setGeneratingStatus(next) {
+    generatingNow = !!next;
+    // 시작됐으면 감시를 푼다 - 이제부터는 완료 신호가 이어받는다.
+    if (generatingNow) clearWatchdog();
+  }
+
   function onClick(event) {
+    const runStop = event.target.closest('[data-scene-run-stop]');
+    if (runStop) { stopRun('연속 생성을 멈췄습니다'); return; }
+    const run = event.target.closest('[data-scene-run]');
+    if (run) { startRun(run.dataset.sceneRun || ''); return; }
     const pickBtn = event.target.closest('[data-scene-event-pick]');
     if (pickBtn) {
       const reopened = menuClosedFrom === pickBtn;
@@ -462,6 +574,9 @@ export function createV5ScenePanel({
       // 그 한 번이 매번 거슬린다. 안전보다 손맛을 택했다.
       setModuleParam('v5_scene', 'apply', {event: activeEvent(), name});
       showToast(`구도를 불러왔습니다 — ${name}`, 'info');
+      // 이 컷에서만 연속 생성을 켤 수 있다 - 불러온 뒤에 와일드카드를 손볼 틈을 준다.
+      appliedName = name;
+      render();
     }
   }
 
@@ -475,5 +590,5 @@ export function createV5ScenePanel({
       ? '[data-scene-save]' : '[data-scene-event-create]')?.click();
   });
 
-  return {onOpen, render};
+  return {onOpen, render, notifyGenerationDone, setGeneratingStatus, stopRun};
 }

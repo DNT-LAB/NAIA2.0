@@ -19379,6 +19379,24 @@ body.detached-module .mod-grid-3 {
   flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-faint, #6e7086);
 }
 .scene-preview-bar .scene-apply { flex: none; width: auto; padding: 8px 18px; }
+/* 연속 생성. 불러오기 버튼 옆에 붙는 짝이라 같은 줄·같은 높이다.
+   ⚠️ 켜지는 조건이 있는 버튼이므로 꺼진 모습이 분명해야 한다 - 눌러 놓고 왜 안 되는지
+      묻게 하지 않는다(안내문은 hover 로 이유를 말한다). */
+.scene-detail-actions { display: flex; gap: 8px; }
+.scene-detail-actions .scene-apply { flex: 1; }
+.scene-run {
+  flex: none; padding: 8px 14px; cursor: pointer; white-space: nowrap;
+  border-radius: 6px; border: 1px solid rgba(124,106,239,0.45);
+  background: rgba(124,106,239,0.12); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.scene-run:hover:not(:disabled) { border-color: rgba(150,132,255,0.85); background: rgba(124,106,239,0.24); }
+.scene-run:disabled { opacity: 0.35; cursor: default; }
+/* 돌고 있을 때는 멈추는 버튼이다 - 색을 바꿔 "지금 뭔가 돌고 있다"를 먼저 알린다. */
+.scene-run.is-stop {
+  border-color: rgba(226,92,112,0.75); background: rgba(74,32,40,0.7); color: #f2c3cc;
+}
+.scene-run.is-stop:hover { border-color: rgba(240,120,140,0.95); background: rgba(96,42,52,0.85); }
 .scene-thumb-none { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint, #6e7086); }
 .scene-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .scene-row-name {

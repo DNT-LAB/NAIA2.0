@@ -476,30 +476,123 @@ export function createCharacterQuickPanel({
   function connectControl(character, index, ordinal, slots) {
     if (ordinal <= 1) return '';
     const current = String(character.connect_to || '');
-    const options = slots.slice(0, ordinal - 1).map((item, i) => {
-      const uuid = String(item.character.slot_uuid || '');
-      const name = String(item.character.custom_name || '').trim();
-      const text = name ? `C${i + 1} · ${name}` : `C${i + 1}`;
-      return `<option value="${escAttr(uuid)}"${uuid === current ? ' selected' : ''}>${escHtml(text)}</option>`;
-    }).join('');
     const on = !!current;
-    // select 를 투명하게 덮어 두므로(네이티브 화살표가 옆 ▼ 와 겹쳐 보였다) 라벨은
-    // **여기서 직접** 그린다. 안 그리면 무엇에 연결됐는지가 화면에서 사라진다.
     const sourceOrdinal = slots.findIndex(item => String(item.character.slot_uuid || '') === current) + 1;
-    const label = on
-      ? `&#128279; C${sourceOrdinal || '?'}`
-      : '&#8681; Connect';
-    return `<span class="cq-connect${on ? ' is-on' : ''}"`
+    const label = on ? `&#128279; C${sourceOrdinal || '?'}` : '&#8681; Connect';
+    // ⚠️ 네이티브 `<select>` 를 쓰지 않는다. 드롭다운 팝업은 OS 가 그려서 스타일이
+    //    전혀 안 먹고(사용자 지적: "못생김"), 앱의 커스텀 select 위젯은 17px 칩에
+    //    들어갈 폭이 아니다. Tag Filter 팝업과 같은 결의 작은 메뉴를 직접 띄운다.
+    return `<button type="button" class="cq-connect${on ? ' is-on' : ''}"`
+      + ` data-cq-connect="${index}" aria-haspopup="listbox" aria-expanded="false"`
       + ` data-naia-guide="${on
           ? `C${sourceOrdinal || '?'} 의 캐릭터를 물려받는 중입니다.\\n아래 두 칸은 '추가할' 칸입니다.\\n\\n물려받는 범위는 C${sourceOrdinal || '?'} 의 &connect: … &end 구간이 정합니다.`
           : '앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n\\n연결하면 원본에 &connect: … &end 가 자동으로 붙습니다. &end 를 앞으로 당기면 그만큼만 물려줍니다.'}">`
-      + `<span class="cq-connect-tag">${label}</span>`
-      // ⚠️ `data-native-select` 로 커스텀 select 교체를 **끈다**. 앱은 모든 select 를
-      //    자체 위젯으로 바꾸는데(customSelects.mjs `SELECTOR`), 그러면 그 위젯의
-      //    라벨과 이 칩의 라벨이 **둘 다** 그려져 `🔗 C1` 옆에 `C1 ▾` 가 하나 더
-      //    붙는다(실측). 이 자리는 17px 짜리 칩이라 그 위젯이 들어갈 폭도 없다.
-      + `<select data-cq-connect="${index}" data-native-select aria-label="앞선 슬롯에서 물려받기">`
-      + `<option value=""${on ? '' : ' selected'}>연결 없음</option>${options}</select></span>`;
+      + `<span class="cq-connect-tag">${label}</span></button>`;
+  }
+
+  // ── Connect 메뉴 ─────────────────────────────────────────────────────────
+  // Tag Filter 팝업과 같은 결(`--bg-surface` + `--border-glow` + 큰 그림자).
+  //
+  // ⚠️ **body 에 붙이고 fixed 로 놓는다.** 칩은 `.cq-slot-headrow` 안에 있고 그 조상
+  //    (`.cq-box`)이 스크롤 상자라, 안에 그리면 메뉴가 잘리거나 같이 스크롤된다.
+  let connectMenuEl = null;
+  let connectMenuDismiss = null;
+  // 열려 있는 칩을 다시 누르면 **닫히고 끝나야 한다.** 바깥 클릭 해제(capture mousedown)가
+  // 먼저 닫고 그 뒤 click 이 다시 열어 "안 닫힌다" 로 보인다 - 방금 이 칩 때문에 닫혔다는
+  // 사실을 한 클릭 동안만 기억해 재열기를 막는다.
+  let connectMenuClosedFrom = null;
+
+  function closeConnectMenu() {
+    if (connectMenuDismiss) {
+      document.removeEventListener('mousedown', connectMenuDismiss, true);
+      document.removeEventListener('keydown', connectMenuDismiss, true);
+      window.removeEventListener('resize', connectMenuDismiss, true);
+      window.removeEventListener('scroll', connectMenuDismiss, true);
+      connectMenuDismiss = null;
+    }
+    connectMenuEl?.remove();
+    connectMenuEl = null;
+    mount?.querySelectorAll('[data-cq-connect]').forEach(el => {
+      el.classList.remove('is-menu-open');
+      el.setAttribute('aria-expanded', 'false');
+      // 열 때 떼어 둔 안내문을 돌려준다(아래 `openConnectMenu` 참조).
+      if (el.dataset.cqGuideStash !== undefined) {
+        el.dataset.naiaGuide = el.dataset.cqGuideStash;
+        delete el.dataset.cqGuideStash;
+      }
+    });
+  }
+
+  function openConnectMenu(button, index) {
+    closeConnectMenu();
+    const slots = activeSlots(lastState);
+    const ordinal = slots.findIndex(item => item.index === index) + 1;
+    if (ordinal <= 1) return;
+    const current = String(slots[ordinal - 1]?.character.connect_to || '');
+    const row = (value, main, sub, on) =>
+      `<button type="button" class="cq-connect-item${on ? ' is-on' : ''}" role="option"`
+      + ` aria-selected="${on ? 'true' : 'false'}" data-cq-pick="${escAttr(value)}">`
+      + `<b>${escHtml(main)}</b>${sub ? `<span>${escHtml(sub)}</span>` : ''}</button>`;
+
+    connectMenuEl = document.createElement('div');
+    connectMenuEl.className = 'cq-connect-menu';
+    connectMenuEl.setAttribute('role', 'listbox');
+    connectMenuEl.innerHTML =
+      `<div class="cq-connect-menu-head">물려받을 슬롯</div>`
+      + row('', '연결 없음', '이 슬롯만의 캐릭터', !current)
+      + slots.slice(0, ordinal - 1).map((item, i) => {
+          const uuid = String(item.character.slot_uuid || '');
+          const name = String(item.character.custom_name || '').trim();
+          const hint = name || String(item.character.prompt || '')
+            .replace(CONNECT_OPEN_RE, '').replace(CONNECT_CLOSE_RE, '')
+            .split(',').map(part => part.trim()).filter(Boolean).slice(0, 2).join(', ');
+          return row(uuid, `C${i + 1}`, hint || '(비어 있음)', uuid === current);
+        }).join('');
+    document.body.appendChild(connectMenuEl);
+    button.classList.add('is-menu-open');
+    button.setAttribute('aria-expanded', 'true');
+    // ⚠️ 가이드 툴팁을 내린다. 사용자는 칩에 손을 올려 설명을 읽고 그대로 누르는데,
+    //    그러면 열린 툴팁이 **메뉴를 통째로 덮는다**(실측). 앱의 툴팁은 `pointerout`
+    //    에 닫히므로 그 계약으로 내리고, 메뉴가 떠 있는 동안은 안내문을 아예 떼어
+    //    다시 뜨지 못하게 한다(메뉴 자체가 이미 설명을 담고 있다).
+    //    ⚠️ **순서가 중요하다.** 앱의 핸들러는 `closest('[data-naia-guide]')` 로 대상을
+    //       찾으므로, 속성을 먼저 지우면 아무것도 못 찾고 툴팁이 그대로 남는다(실측).
+    //       내리고 나서 뗀다.
+    button.dispatchEvent(new PointerEvent('pointerout', {bubbles: true, relatedTarget: null}));
+    if (button.dataset.naiaGuide !== undefined) {
+      button.dataset.cqGuideStash = button.dataset.naiaGuide;
+      delete button.dataset.naiaGuide;
+    }
+
+    const rect = button.getBoundingClientRect();
+    const mw = connectMenuEl.offsetWidth, mh = connectMenuEl.offsetHeight;
+    const margin = 6;
+    // 칩의 **오른쪽 끝**에 맞춘다 - 칩이 줄 오른쪽에 있어 왼쪽 정렬하면 화면 밖으로 샌다.
+    let left = Math.max(margin, Math.min(rect.right - mw, window.innerWidth - mw - margin));
+    let top = rect.bottom + 4;
+    if (top + mh > window.innerHeight - margin) top = Math.max(margin, rect.top - mh - 4);
+    connectMenuEl.style.left = `${Math.round(left)}px`;
+    connectMenuEl.style.top = `${Math.round(top)}px`;
+
+    connectMenuEl.addEventListener('click', event => {
+      const pick = event.target.closest('[data-cq-pick]');
+      if (!pick) return;
+      closeConnectMenu();
+      setModuleParam('character', `char_connect_${index}`, pick.dataset.cqPick);
+    });
+
+    connectMenuDismiss = event => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return;
+      if (event.type === 'mousedown' && connectMenuEl?.contains(event.target)) return;
+      if (event.type === 'mousedown') {
+        connectMenuClosedFrom = event.target?.closest?.('[data-cq-connect]') || null;
+      }
+      closeConnectMenu();
+    };
+    document.addEventListener('mousedown', connectMenuDismiss, true);
+    document.addEventListener('keydown', connectMenuDismiss, true);
+    window.addEventListener('resize', connectMenuDismiss, true);
+    window.addEventListener('scroll', connectMenuDismiss, true);
   }
 
   /** 이 슬롯을 물려받는 슬롯 수. 원본에는 Connect 드롭다운이 없어(앞을 가리킬 대상이
@@ -751,13 +844,6 @@ export function createCharacterQuickPanel({
       setModuleParam('character', 'activated', String(toggle.checked));
       return;
     }
-    // Connect 드롭다운. `change` 가 아니라 `input` 으로도 오는 브라우저가 있어
-    // 여기서 함께 받는다(select 는 둘 다 발화한다).
-    const connect = event.target.closest('[data-cq-connect]');
-    if (connect) {
-      setModuleParam('character', `char_connect_${connect.dataset.cqConnect}`, connect.value);
-      return;
-    }
     const element = event.target.closest('[data-cq-field]');
     if (!element) return;
     autoGrow(element);
@@ -802,6 +888,14 @@ export function createCharacterQuickPanel({
       // 서버 에코를 기다리지 않고 접힘/펼침을 먼저 반영한다 - 에코는 muted 만
       // 바꾸고 openSlots 는 이쪽 상태라 다시 그려 줘야 화면이 따라온다.
       render(lastState, true);
+      return;
+    }
+    const connect = event.target.closest('[data-cq-connect]');
+    if (connect) {
+      // 방금 이 칩 때문에 닫혔으면 다시 열지 않는다(위 `connectMenuClosedFrom` 참조).
+      if (connectMenuClosedFrom === connect) { connectMenuClosedFrom = null; return; }
+      connectMenuClosedFrom = null;
+      openConnectMenu(connect, Number(connect.dataset.cqConnect));
       return;
     }
     const toggle = event.target.closest('[data-cq-toggle]');
@@ -878,6 +972,9 @@ export function createCharacterQuickPanel({
       if (posEditing) renderStage();
       return;
     }
+    // 여기부터는 머리줄을 통째로 다시 그린다 - 열려 있던 Connect 메뉴는 사라진 칩을
+    // 가리키게 되고, 담고 있던 인덱스도 옛 것이다. 닫고 간다.
+    closeConnectMenu();
     const slots = activeSlots(current);
     // POS 편집 중에는 패널을 통째로 감춘다(사용자 결정 A안) - 그림 위를 가장 적게
     // 가리는 길이고, 나가는 문은 띠의 종료 버튼이 맡는다.

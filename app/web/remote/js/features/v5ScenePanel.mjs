@@ -26,7 +26,6 @@ export function createV5ScenePanel({
   showConfirmDialog = null,
 }) {
   let lastState = null;
-  let query = '';
   let openName = '';           // 펼쳐 둔 컷
 
   function escAttr(value) {
@@ -51,13 +50,8 @@ export function createV5ScenePanel({
     setModuleParam('v5_scene', 'refresh', {event: rememberedEvent()});
   }
 
-  /** 검색은 이름·설명·요약을 함께 본다 - 이름을 잊어도 "2koma" 나 "blonde" 로 찾힌다. */
-  function matches(scene) {
-    if (!query) return true;
-    const hay = [scene.name, scene.description, scene.summary, scene.resolution]
-      .map(v => String(v || '').toLowerCase()).join(' ');
-    return query.toLowerCase().split(/\s+/).filter(Boolean).every(part => hay.includes(part));
-  }
+  // 컷 검색칸은 **일부러 없앴다**(사용자 지정). 한 이벤트에 컷 몇 개인 규모라 목록이
+  // 한눈에 들어오고, 검색칸이 오히려 저장칸과 헷갈린다. 규모가 커지면 되살린다.
 
   function render(state) {
     if (state) {
@@ -69,7 +63,6 @@ export function createV5ScenePanel({
     const events = lastState.events || [];
     const active = activeEvent();
     const all = lastState.scenes || [];
-    const shown = all.filter(matches);
     const mode = String(lastState.current_mode || '');
 
     if (!events.length) {
@@ -86,8 +79,6 @@ export function createV5ScenePanel({
       return;
     }
 
-    // ⚠️ 검색어·이름은 마크업에 넣지 않고 렌더 뒤 `.value` 로 채운다 - 사용자가 적은
-    //    `<`·따옴표가 마크업으로 새지 않게(이 앱의 다른 입력 표면과 같은 규약).
     panel.innerHTML = `
       <div class="scene-bar">
         <select class="scene-event-pick" id="sceneEventPick" data-native-select
@@ -100,26 +91,18 @@ export function createV5ScenePanel({
         <button type="button" class="scene-bar-btn" data-scene-folder="1"
                 data-naia-title="이 이벤트의 폴더를 탐색기에서 엽니다">폴더</button>
       </div>
-      <div class="scene-count">${shown.length}${
-        shown.length !== all.length ? ` / ${all.length}` : ''} 컷 · ${escHtml(mode)}</div>
-      <div class="scene-bar">
-        <input type="text" class="scene-search" id="sceneSearch" placeholder="컷 검색 (이름 · 태그)"
-               autocomplete="off">
-      </div>
-      ${shown.length
-        ? `<div class="scene-list">${shown.map((scene, index) =>
-            sceneRow(scene, all.indexOf(scene) + 1, all.length)).join('')}</div>`
-        : `<div class="scene-empty">${all.length
-            ? '검색과 맞는 컷이 없습니다.'
-            : '이 이벤트에는 아직 컷이 없습니다.<br>구도를 만든 뒤 이름을 적고 <b>저장</b>을 누르세요.'}</div>`}
+      <div class="scene-count">${all.length} 컷 · ${escHtml(mode)}</div>
+      ${all.length
+        ? `<div class="scene-list">${all.map((scene, index) =>
+            sceneRow(scene, index + 1, all.length)).join('')}</div>`
+        : '<div class="scene-empty">이 이벤트에는 아직 컷이 없습니다.<br>'
+          + '구도를 만든 뒤 이름을 적고 <b>저장</b>을 누르세요.</div>'}
       <div class="scene-save">
-        <input type="text" class="scene-save-name" id="sceneSaveName" placeholder="이 구도를 담을 이름"
-               maxlength="80" autocomplete="off">
+        <input type="text" class="scene-save-name" id="sceneSaveName" maxlength="80" autocomplete="off"
+               placeholder="이 구도를 담을 이름 (현재 메인 + 캐릭터 + 해상도 저장)">
         <button type="button" class="scene-save-btn" data-scene-save="1">저장</button>
       </div>
     `;
-    const search = panel.querySelector('#sceneSearch');
-    if (search) search.value = query;
   }
 
   function sceneRow(scene, ordinal, total) {
@@ -201,12 +184,31 @@ export function createV5ScenePanel({
     closePreview();
     const box = document.createElement('div');
     box.className = 'scene-preview';
+    // ⚠️ 그림 칸과 아래 줄을 나눈다. 만화 컷은 세로로 길어 화면에 맞추면 글자가 안 보이는데,
+    //    통째로 `object-fit: contain` 하면 스크롤할 여지가 없다 - 폭을 채우고 넘치면
+    //    굴린다(사용자 지정). 버튼은 굴려도 늘 보이게 칸 밖에 둔다.
     box.innerHTML = `
-      <div class="scene-preview-inner">
+      <div class="scene-preview-scroll" data-preview-close="1">
         <img src="${escAttr(url)}" alt="">
-        <div class="scene-preview-name">${escHtml(name || '')}</div>
+      </div>
+      <div class="scene-preview-bar">
+        <span class="scene-preview-name">${escHtml(name || '')}</span>
+        <button type="button" class="scene-apply" data-preview-apply="${escAttr(name || '')}">
+          이 구도로 불러오기</button>
       </div>`;
-    box.addEventListener('click', closePreview);
+    box.addEventListener('click', event => {
+      const apply = event.target.closest('[data-preview-apply]');
+      if (apply) {
+        const sceneName = apply.dataset.previewApply || '';
+        setModuleParam('v5_scene', 'apply', {event: activeEvent(), name: sceneName});
+        showToast(`구도를 불러왔습니다 — ${sceneName}`, 'info');
+        closePreview();
+        return;
+      }
+      // 그림 칸(빈 곳 포함)을 누르면 닫는다. 아래 줄은 닫기 영역이 아니다 -
+      // 버튼을 누르려다 빗나가서 닫히면 다시 열어야 한다.
+      if (event.target.closest('[data-preview-close]')) closePreview();
+    });
     document.body.appendChild(box);
     document.addEventListener('keydown', onPreviewKey, true);
   }
@@ -325,17 +327,9 @@ export function createV5ScenePanel({
     if (!event.target.closest('#sceneEventPick')) return;
     const name = String(event.target.value || '');
     rememberEvent(name);
-    // 이벤트를 바꾸면 검색·펼침은 초기화한다 - 남의 이벤트에서 쓰던 상태다.
-    query = ''; openName = '';
+    // 이벤트를 바꾸면 펼침은 초기화한다 - 남의 이벤트에서 쓰던 상태다.
+    openName = '';
     setModuleParam('v5_scene', 'refresh', {event: name});
-  });
-  panel?.addEventListener('input', event => {
-    if (!event.target.closest('#sceneSearch')) return;
-    query = String(event.target.value || '');
-    render();
-    // 다시 그리면 포커스가 빠진다 - 검색은 계속 치는 칸이라 캐럿까지 되돌린다.
-    const search = panel.querySelector('#sceneSearch');
-    if (search) { search.focus(); search.setSelectionRange(query.length, query.length); }
   });
   panel?.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;

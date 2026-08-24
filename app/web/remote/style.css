@@ -19340,20 +19340,31 @@ body.detached-module .mod-grid-3 {
 .scene-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .scene-thumb.is-zoom { cursor: zoom-in; }
 .scene-thumb.is-zoom:hover { border-color: rgba(124,106,239,0.7); }
-/* 크게 보기. body 에 붙는다 - 패널 안에 두면 `overflow-y: auto` 에 잘린다. */
+/* 크게 보기. body 에 붙는다 - 패널 안에 두면 `overflow-y: auto` 에 잘린다.
+   ⚠️ 그림을 화면 높이에 **맞추지 않는다**. 만화 컷은 세로로 길어 맞추면 글자가 안 보인다 -
+      폭을 채우고 넘치는 만큼 굴린다(사용자 지정: 마우스 스크롤). */
 .scene-preview {
-  position: fixed; inset: 0; z-index: 4000; cursor: zoom-out;
-  display: flex; align-items: center; justify-content: center;
-  padding: 32px; background: rgba(0,0,0,0.78);
+  position: fixed; inset: 0; z-index: 4000;
+  display: flex; flex-direction: column; background: rgba(0,0,0,0.82);
 }
-.scene-preview-inner { display: flex; flex-direction: column; gap: 8px; align-items: center; max-height: 100%; }
+.scene-preview-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  cursor: zoom-out; padding: 24px; text-align: center;
+}
 .scene-preview img {
-  max-width: 100%; min-height: 0; object-fit: contain; border-radius: 8px;
-  border: 1px solid var(--border-dim); background: rgba(0,0,0,0.5);
+  width: auto; max-width: min(100%, 860px); height: auto; display: inline-block;
+  border-radius: 8px; border: 1px solid var(--border-dim); background: rgba(0,0,0,0.5);
+}
+.scene-preview-bar {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-top: 1px solid var(--border-dim);
+  background: var(--bg-surface, #14141c);
 }
 .scene-preview-name {
-  flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim);
 }
+.scene-preview-bar .scene-apply { flex: none; width: auto; padding: 8px 18px; }
 .scene-thumb-none { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint, #6e7086); }
 .scene-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .scene-row-name {

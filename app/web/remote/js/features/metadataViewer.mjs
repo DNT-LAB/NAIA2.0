@@ -6,6 +6,8 @@ export function createMetadataViewer({
   onApplyPrompt = null,
   onApplySettings = null,
   onApplyCharacterSettings = null,
+  // 캐릭터만 얹는다(설정값은 안 건드린다). 기존 슬롯 처리 방식은 호스트가 묻는다.
+  onApplyCharacters = null,
   onSendImg2Img = null,
   onRestoreVibeTransfer = null,
   canUseDesktopImg2Img = () => true,
@@ -29,6 +31,7 @@ export function createMetadataViewer({
   const applyPromptBtn = document.getElementById('metadataApplyPromptBtn');
   const applySettingsBtn = document.getElementById('metadataApplySettingsBtn');
   const applyCharacterSettingsBtn = document.getElementById('metadataApplyCharacterSettingsBtn');
+  const applyCharactersBtn = document.getElementById('metadataApplyCharactersBtn');
   const restoreVibeBtn = document.getElementById('metadataRestoreVibeBtn');
   const sendImg2ImgBtn = document.getElementById('metadataSendImg2ImgBtn');
   if (sendImg2ImgBtn) sendImg2ImgBtn.style.display = 'none';
@@ -512,6 +515,8 @@ export function createMetadataViewer({
     const hasImageActionSource = hasPayload && (currentActionPayload.blob || currentActionPayload.imageUrl);
     const desktopImg2ImgAvailable = typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img();
     if (applyCharacterSettingsBtn) applyCharacterSettingsBtn.style.display = hasCharacters ? '' : 'none';
+    // 캐릭터만 얹는 버튼도 캐릭터가 있을 때만 자리를 차지한다.
+    if (applyCharactersBtn) applyCharactersBtn.style.display = hasCharacters ? '' : 'none';
     if (sendImg2ImgBtn) sendImg2ImgBtn.style.display = desktopImg2ImgAvailable ? '' : 'none';
     if (restoreVibeBtn) {
       restoreVibeBtn.style.display = hasVibeTransfer ? '' : 'none';
@@ -523,6 +528,8 @@ export function createMetadataViewer({
       [applyPromptBtn, typeof onApplyPrompt === 'function' && hasPrompt],
       [applySettingsBtn, typeof onApplySettings === 'function' && hasParams],
       [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters],
+      // ⚠️ 설정값(hasParams)을 요구하지 않는다 - 캐릭터만 있는 메타데이터에서도 써야 한다.
+      [applyCharactersBtn, typeof onApplyCharacters === 'function' && hasCharacters],
       [restoreVibeBtn, typeof onRestoreVibeTransfer === 'function' && hasVibeTransfer],
       [sendImg2ImgBtn, desktopImg2ImgAvailable && typeof onSendImg2Img === 'function' && hasImageActionSource],
     ].forEach(([button, enabled]) => {
@@ -725,6 +732,7 @@ export function createMetadataViewer({
   bindAction(applyPromptBtn, onApplyPrompt);
   bindAction(applySettingsBtn, onApplySettings);
   bindAction(applyCharacterSettingsBtn, onApplyCharacterSettings);
+  bindAction(applyCharactersBtn, onApplyCharacters);
   bindAction(restoreVibeBtn, onRestoreVibeTransfer);
   bindAction(sendImg2ImgBtn, onSendImg2Img);
   renderEmpty('No image selected');

@@ -134,6 +134,89 @@ class HeadlessCharacterService:
         with self._commit_lock:
             return self._apply_asset_locked(prompt, uc, mode)
 
+    def apply_bulk_characters(self, characters: list[str], characters_uc: list[str],
+                              existing: str = "inactive") -> dict[str, Any]:
+        with self._commit_lock:
+            return self._apply_bulk_characters_locked(characters, characters_uc, existing)
+
+    def _apply_bulk_characters_locked(self, characters: list[str], characters_uc: list[str],
+                                      existing: str = "inactive") -> dict[str, Any]:
+        """메타데이터의 캐릭터 프롬프트를 슬롯에 통째로 얹는다.
+
+        ⚠️ 이 키(`bulk_characters`)는 프런트가 **오래 전부터 보내고 있었는데 받는 곳이
+           없었다.** `set_param` 이 `else: return None` 으로 떨어져 백엔드가
+           "Module parameter is not supported in this runtime" 토스트를 보냈고,
+           프런트는 그 전에 이미 "Applied N character prompts" 를 띄운 뒤였다 —
+           **성공 토스트와 실패 토스트가 나란히 뜨고 캐릭터는 안 들어갔다.**
+
+        `existing` 은 **기존 슬롯을 어떻게 할지**다(사용자에게 묻는다):
+
+            "inactive"   기존을 비활성 무리로 보내고 새 것을 활성으로 덧붙인다.
+                         아무것도 잃지 않는다 - 되돌리려면 다시 켜면 된다.
+            "overwrite"  기존(비-cold)을 버리고 새 것으로 갈아치운다.
+
+        어느 쪽이든 **cold 슬롯은 건드리지 않는다.** cold 는 사용자가 일부러 치워 둔
+        것이라 "기존 캐릭터" 로 취급하면 놀란다 - `_apply_asset_locked` 와 같은 규약이다.
+        """
+        context = self.context
+        api_mode = context.get_api_mode()
+        settings = self.settings_cache()
+        frames = settings.setdefault("character_frames", [])
+        mode = str(existing or "inactive").strip().lower()
+        if mode not in {"inactive", "overwrite"}:
+            raise ValueError(f"unknown existing mode: {existing}")
+
+        prompts = [str(p or "") for p in (characters or [])]
+        ucs = [str(u or "") for u in (characters_uc or [])]
+        # 길이가 다를 수 있다 - 네거티브만 짧게 온 메타데이터가 실제로 있다.
+        fresh = [{
+            "prompt": prompts[i],
+            "uc": ucs[i] if i < len(ucs) else "",
+            "is_enabled": True,
+            "slot_state": "active",
+            "is_muted": False,
+            "custom_name": "",
+        } for i in range(len(prompts)) if prompts[i].strip()]
+        if not fresh:
+            raise ValueError("no character prompts to apply")
+
+        def is_cold(frame: Any) -> bool:
+            return (isinstance(frame, dict)
+                    and str(frame.get("slot_state") or "").strip().lower() == "cold")
+
+        cold = [f for f in frames if is_cold(f)]
+        if mode == "overwrite":
+            kept = cold
+        else:
+            kept = []
+            for frame in frames:
+                if is_cold(frame):
+                    kept.append(frame)
+                    continue
+                if not isinstance(frame, dict):
+                    continue
+                # 빈 슬롯까지 비활성으로 남기면 무리가 쓰레기로 찬다. 내용이 있는
+                # 것만 보존한다 - 기본 상태의 빈 C1 이 그대로 남는 것이 가장 흔하다.
+                if not str(frame.get("prompt") or "").strip() and not str(frame.get("uc") or "").strip():
+                    continue
+                frame["slot_state"] = "inactive"
+                frame["is_enabled"] = False
+                kept.append(frame)
+        frames[:] = fresh + kept
+
+        settings["is_active"] = True
+        prompt_context = getattr(context, "current_prompt_context", None)
+        metadata = getattr(prompt_context, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata.pop("conditional_character_overrides", None)
+            metadata.pop("_conditional_character_slots", None)
+            metadata.pop("conditional_character_skips", None)
+        self.save_settings(api_mode, settings)
+        from core.character_settings import clear_character_roll_snapshot
+
+        clear_character_roll_snapshot(context, api_mode)
+        return self.state()
+
     def _apply_asset_locked(self, prompt: str, uc: str, mode: str = "c1") -> dict[str, Any]:
         """Bulk slot apply for the Character Asset library.
 
@@ -240,6 +323,23 @@ class HeadlessCharacterService:
                     parts = [part.strip() for part in raw.split(",")]
                     raw = {"x": parts[0], "y": parts[1]} if len(parts) == 2 else None
                 frame["position"] = normalize_position(raw)
+        elif key == "bulk_characters":
+            # 메타데이터 뷰어의 캐릭터 일괄 적용. 값은 JSON 문자열이다
+            # (`{characters, characters_uc, existing}`). 커밋 규약은
+            # `_apply_bulk_characters_locked` 가 스스로 지키므로 여기서 끝낸다.
+            payload = value
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (TypeError, ValueError):
+                    payload = None
+            if not isinstance(payload, dict):
+                return None
+            return self._apply_bulk_characters_locked(
+                payload.get("characters") or [],
+                payload.get("characters_uc") or [],
+                str(payload.get("existing") or "inactive"),
+            )
         elif key == "add_character":
             frames.append({"prompt": "", "uc": "", "is_enabled": True, "slot_state": "active", "custom_name": ""})
             invalidate_snapshot = True

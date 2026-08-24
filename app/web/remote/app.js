@@ -818,7 +818,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260705-vibe-charref')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260824-bulkchars1')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -828,6 +828,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260705-
       onApplyPrompt: applyMetadataPrompt,
       onApplySettings: applyMetadataSettings,
       onApplyCharacterSettings: applyMetadataCharacterSettings,
+      onApplyCharacters: payload => applyMetadataCharacters(payload, {withSettings: false}),
       onSendImg2Img: payload => callResultImageAction('requestMetadataImageAction', payload, 'img2img'),
       onRestoreVibeTransfer: applyMetadataVibeTransfer,
       canUseDesktopImg2Img,
@@ -5622,7 +5623,17 @@ function applyMetadataSettings(payload, options = {}) {
   return applied;
 }
 
-function applyMetadataCharacterSettings(payload) {
+/** 메타데이터의 캐릭터를 슬롯에 얹는다. **기존 슬롯을 어떻게 할지 사용자에게 묻는다.**
+ *
+ *  ⚠️ 예전에는 묻지도 않았고 **들어가지도 않았다.** 프런트는 `bulk_characters` 를
+ *     보내는데 백엔드에 그 키를 받는 곳이 없어 `set_param` 이 None 으로 떨어졌다 -
+ *     백엔드가 "Module parameter is not supported in this runtime" 토스트를 보내는
+ *     동안 프런트는 이미 "Applied N character prompts" 성공 토스트를 띄운 뒤였다.
+ *     두 토스트가 나란히 뜨고 캐릭터는 그대로였다.
+ *
+ *  `withSettings` 가 true 면 설정값도 함께 적용한다(기존 버튼의 동작).
+ */
+async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
   if ((currentMode || modeSelect.value) !== 'NAI') {
     showToast('Character prompts are only available in NAI mode', 'error');
     return;
@@ -5636,15 +5647,41 @@ function applyMetadataCharacterSettings(payload) {
     showToast('No character prompts in metadata', 'error');
     return;
   }
-  applyMetadataSettings(payload, {silent: true});
+  // 기존 슬롯 처리 방식을 묻는다. 취소하면 아무것도 안 한다 - 설정값까지 포함해서다
+  // (반쪽만 적용해 놓고 취소한 것처럼 보이면 더 나쁘다).
+  const existing = await showConfirmDialog(
+    `메타데이터의 캐릭터 ${validCharacters.length}명을 적용합니다.`, {
+      title: '기존 캐릭터를 어떻게 할까요?',
+      messageHtml: `${escHtml(`메타데이터의 캐릭터 ${validCharacters.length}명을 적용합니다.`)}`
+        + `<br>${escHtml('지금 슬롯에 있는 캐릭터를 어떻게 할지 고르세요.')}`
+        + `<br>${escHtml('(따로 치워 둔 Cold 슬롯은 어느 쪽이든 그대로 둡니다)')}`,
+      choices: [
+        {key: 'inactive', label: '비활성으로 보내기'},
+        {key: 'overwrite', label: '덮어씌우기'},
+      ],
+    });
+  if (existing !== 'inactive' && existing !== 'overwrite') return;
+
+  if (withSettings) applyMetadataSettings(payload, {silent: true});
   if (currentModuleId !== 'character') {
     openModule('character');
   }
-  setModuleParam('character', 'bulk_characters', JSON.stringify({
+  const sent = setModuleParam('character', 'bulk_characters', JSON.stringify({
     characters,
     characters_uc: charactersUc,
+    existing,
   }));
-  showToast(`Applied ${validCharacters.length} character prompts from metadata`, 'success');
+  // ⚠️ 성공 토스트를 **보낸 뒤에** 띄우지 말 것. 재연결 중이면 조용히 유실된다.
+  if (!sent) {
+    showToast('Remote connection is not open', 'error');
+    return;
+  }
+  const how = existing === 'overwrite' ? '덮어씀' : '기존은 비활성으로';
+  showToast(`캐릭터 ${validCharacters.length}명 적용 (${how})`, 'success');
+}
+
+function applyMetadataCharacterSettings(payload) {
+  return applyMetadataCharacters(payload, {withSettings: true});
 }
 
 function applyMetadataVibeTransfer(payload) {

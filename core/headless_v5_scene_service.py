@@ -366,25 +366,29 @@ class HeadlessV5SceneService:
         #    apply 때마다 새로 만들어져 다음 번에 못 찾는다.
         remembered = dict(getattr(self.context, "_v5_scene_cast", None) or {})
         cast: dict[int, str] = {}
+        keep: dict[str, dict[str, str]] = {}
         for index, frame in enumerate(active_character_frames(settings), 1):
             raw = str(frame.get("prompt") or "")
             if not has_connect_region(raw):
                 continue
             own = _split_connect_region(raw)[1].strip()
+            key = str(index)
             rolled = str(shares.get(str(_frame_uuid(frame) or "")) or "").strip()
             if not rolled and _has_wildcard(own):
-                # 굴린 값이 없고 원문이 아직 와일드카드면, 지난번에 기억해 둔 값을 쓴다.
-                rolled = str(remembered.get(str(index)) or "").strip()
-            if rolled:
-                cast[index] = rolled
-            elif own:
-                cast[index] = own
-        # 다음 컷을 위해 남긴다. 와일드카드가 아직 안 풀린 자리는 기억하지 않는다 -
-        # 그건 아직 아무것도 "획득" 하지 않은 상태라 덮어쓰면 옛 값이 되살아난다.
-        keep = {key: value for key, value in remembered.items() if value}
-        for index, value in cast.items():
-            if not _has_wildcard(value):
-                keep[str(index)] = value
+                # ⚠️ 기억은 **그때 그 원문에서 나온 값일 때만** 쓴다. 사용자가 구간을
+                #    고쳐 다른 와일드카드를 넣었는데 옛 인물이 되살아나면, 고친 것이
+                #    조용히 무시된다(사용자 지적). 무효화 비트를 따로 두는 대신 원문을
+                #    같이 기억해 두고 대조한다 - 잊는 것을 잊을 일이 없다.
+                memo = remembered.get(key)
+                if isinstance(memo, dict) and memo.get("source") == own:
+                    rolled = str(memo.get("value") or "").strip()
+            value = rolled or own
+            if value:
+                cast[index] = value
+            # 아직 안 풀린 원문에서 값을 얻었을 때만 기억한다. 원문이 이미 구체적이면
+            # 기억할 것이 없고(그 값이 곧 배역), 아무것도 못 얻었으면 기억할 값이 없다.
+            if rolled and _has_wildcard(own):
+                keep[key] = {"source": own, "value": rolled}
         self.context._v5_scene_cast = keep
         return cast
 

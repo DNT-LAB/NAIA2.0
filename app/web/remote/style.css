@@ -19341,19 +19341,22 @@ body.detached-module .mod-grid-3 {
 .scene-thumb.is-zoom { cursor: zoom-in; }
 .scene-thumb.is-zoom:hover { border-color: rgba(124,106,239,0.7); }
 /* 크게 보기. body 에 붙는다 - 패널 안에 두면 `overflow-y: auto` 에 잘린다.
-   ⚠️ 그림을 화면 높이에 **맞추지 않는다**. 만화 컷은 세로로 길어 맞추면 글자가 안 보인다 -
-      폭을 채우고 넘치는 만큼 굴린다(사용자 지정: 마우스 스크롤). */
+   그림은 **화면에 맞춘다** - 한 컷 전체가 한눈에 들어와야 어느 장면인지 알아본다.
+   휠은 확대가 아니라 **이웃 컷으로 넘기기**다(사용자 지정) - 그래서 굴릴 것이 없다. */
 .scene-preview {
   position: fixed; inset: 0; z-index: 4000;
   display: flex; flex-direction: column; background: rgba(0,0,0,0.82);
 }
-.scene-preview-scroll {
-  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  cursor: zoom-out; padding: 24px; text-align: center;
+.scene-preview-stage {
+  flex: 1; min-height: 0; cursor: zoom-out; padding: 20px;
+  display: flex; align-items: center; justify-content: center;
 }
 .scene-preview img {
-  width: auto; max-width: min(100%, 860px); height: auto; display: inline-block;
+  max-width: 100%; max-height: 100%; object-fit: contain;
   border-radius: 8px; border: 1px solid var(--border-dim); background: rgba(0,0,0,0.5);
+}
+.scene-preview-none {
+  display: none; font-family: var(--font-mono); font-size: 12px; color: var(--text-faint, #6e7086);
 }
 .scene-preview-bar {
   flex: none; display: flex; align-items: center; gap: 12px;
@@ -19362,7 +19365,11 @@ body.detached-module .mod-grid-3 {
 }
 .scene-preview-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary);
+}
+/* 휠로 넘길 수 있다는 것은 알려주지 않으면 모른다 - 조용히 눈에 띄지 않게 적는다. */
+.scene-preview-hint {
+  flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-faint, #6e7086);
 }
 .scene-preview-bar .scene-apply { flex: none; width: auto; padding: 8px 18px; }
 .scene-thumb-none { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint, #6e7086); }

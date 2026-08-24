@@ -120,8 +120,8 @@ export function createV5ScenePanel({
                   aria-expanded="${open ? 'true' : 'false'}">
             <span class="scene-ord">${ordinal}</span>
             <span class="scene-thumb${scene.thumbnail_url ? ' is-zoom' : ''}"${scene.thumbnail_url
-              ? ` data-scene-preview="${escAttr(scene.thumbnail_url)}" data-preview-name="${escAttr(name)}"`
-                + ' data-naia-title="크게 보기"'
+              ? ` data-scene-preview="1" data-preview-name="${escAttr(name)}"`
+                + ' data-naia-title="크게 보기 (휠로 컷 넘기기)"'
               : ''}>${scene.thumbnail_url
               ? `<img src="${escAttr(scene.thumbnail_url)}" alt="" loading="lazy" decoding="async">`
               : '<span class="scene-thumb-none">—</span>'}</span>
@@ -175,33 +175,43 @@ export function createV5ScenePanel({
       </div>`;
   }
 
-  /** 썸네일 크게 보기. 목록의 56px 로는 어느 구도인지 알아보기 어렵다(사용자 지정).
-   *
-   * ⚠️ body 에 단다. 패널이 `overflow-y: auto` 라 안에 두면 잘린다 - Connect 메뉴와
-   *    같은 이유다. 닫기는 아무 데나 클릭 / Esc.
-   */
-  function openPreview(url, name) {
+  // ── 크게 보기 ────────────────────────────────────────────────────────────
+  // 목록의 56px 로는 어느 구도인지 알아보기 어렵다(사용자 지정). 그림은 **화면에
+  // 맞춘다** - 한 컷 전체가 한눈에 들어와야 어느 장면인지 알아본다.
+  //
+  // 휠을 굴리면 **같은 이벤트의 이웃 컷**으로 넘어간다(사용자 지정). 창을 닫았다
+  // 다시 여는 것보다 컷을 훑는 데 빠르고, 만화를 넘겨 보는 동작과도 맞는다.
+  //
+  // ⚠️ body 에 단다. 패널이 `overflow-y: auto` 라 안에 두면 잘린다 - Connect 메뉴와
+  //    같은 이유다. 닫기는 그림 칸 클릭 / Esc.
+  let previewIndex = -1;
+  let wheelAccum = 0;
+
+  function openPreview(name) {
+    const scenes = lastState?.scenes || [];
+    const index = scenes.findIndex(scene => String(scene.name) === String(name));
+    if (index < 0) return;
     closePreview();
+    previewIndex = index;
+    wheelAccum = 0;
     const box = document.createElement('div');
     box.className = 'scene-preview';
-    // ⚠️ 그림 칸과 아래 줄을 나눈다. 만화 컷은 세로로 길어 화면에 맞추면 글자가 안 보이는데,
-    //    통째로 `object-fit: contain` 하면 스크롤할 여지가 없다 - 폭을 채우고 넘치면
-    //    굴린다(사용자 지정). 버튼은 굴려도 늘 보이게 칸 밖에 둔다.
     box.innerHTML = `
-      <div class="scene-preview-scroll" data-preview-close="1">
-        <img src="${escAttr(url)}" alt="">
+      <div class="scene-preview-stage" data-preview-close="1">
+        <img alt="">
+        <div class="scene-preview-none">그림이 아직 없습니다</div>
       </div>
       <div class="scene-preview-bar">
-        <span class="scene-preview-name">${escHtml(name || '')}</span>
-        <button type="button" class="scene-apply" data-preview-apply="${escAttr(name || '')}">
-          이 구도로 불러오기</button>
+        <span class="scene-preview-name"></span>
+        <span class="scene-preview-hint">휠로 컷 넘기기</span>
+        <button type="button" class="scene-apply" data-preview-apply="1">이 구도로 불러오기</button>
       </div>`;
     box.addEventListener('click', event => {
-      const apply = event.target.closest('[data-preview-apply]');
-      if (apply) {
-        const sceneName = apply.dataset.previewApply || '';
-        setModuleParam('v5_scene', 'apply', {event: activeEvent(), name: sceneName});
-        showToast(`구도를 불러왔습니다 — ${sceneName}`, 'info');
+      if (event.target.closest('[data-preview-apply]')) {
+        const scene = (lastState?.scenes || [])[previewIndex];
+        if (!scene) return;
+        setModuleParam('v5_scene', 'apply', {event: activeEvent(), name: scene.name});
+        showToast(`구도를 불러왔습니다 — ${scene.name}`, 'info');
         closePreview();
         return;
       }
@@ -209,21 +219,64 @@ export function createV5ScenePanel({
       // 버튼을 누르려다 빗나가서 닫히면 다시 열어야 한다.
       if (event.target.closest('[data-preview-close]')) closePreview();
     });
+    // ⚠️ `passive: false` 여야 `preventDefault` 가 먹는다. 안 막으면 뒤의 목록이
+    //    같이 굴러가서, 창을 닫았을 때 엉뚱한 자리에 가 있다.
+    box.addEventListener('wheel', onPreviewWheel, {passive: false});
     document.body.appendChild(box);
+    paintPreview();
     document.addEventListener('keydown', onPreviewKey, true);
+  }
+
+  /** 지금 `previewIndex` 의 컷을 창에 그린다. 창 자체는 다시 만들지 않는다. */
+  function paintPreview() {
+    const box = document.querySelector('.scene-preview');
+    const scene = (lastState?.scenes || [])[previewIndex];
+    if (!box || !scene) return;
+    const total = (lastState?.scenes || []).length;
+    const img = box.querySelector('img');
+    const none = box.querySelector('.scene-preview-none');
+    const url = String(scene.thumbnail_url || '');
+    if (url) { img.src = url; img.style.display = ''; none.style.display = 'none'; }
+    else { img.removeAttribute('src'); img.style.display = 'none'; none.style.display = ''; }
+    box.querySelector('.scene-preview-name').textContent =
+      `${previewIndex + 1} / ${total} · ${scene.name}`;
+  }
+
+  function stepPreview(delta) {
+    const total = (lastState?.scenes || []).length;
+    if (!total) return;
+    const next = previewIndex + delta;
+    // 양 끝에서는 멈춘다. 되돌아 감기면 몇 번째를 보고 있는지 놓친다.
+    if (next < 0 || next >= total) return;
+    previewIndex = next;
+    paintPreview();
+  }
+
+  function onPreviewWheel(event) {
+    event.preventDefault();
+    // 한 번 튕기면 한 컷. 트랙패드는 잘게 여러 번 오므로 모아서 문턱을 넘을 때만 옮긴다.
+    wheelAccum += event.deltaY;
+    if (Math.abs(wheelAccum) < 40) return;
+    stepPreview(wheelAccum > 0 ? 1 : -1);
+    wheelAccum = 0;
   }
 
   function closePreview() {
     document.querySelector('.scene-preview')?.remove();
     document.removeEventListener('keydown', onPreviewKey, true);
+    previewIndex = -1;
   }
 
   function onPreviewKey(event) {
-    if (event.key !== 'Escape') return;
-    // 미리보기가 떠 있는 동안의 Esc 는 여기서 삼킨다 - 안 그러면 뒤의 탭/팝업까지 닫힌다.
-    event.stopPropagation();
-    event.preventDefault();
-    closePreview();
+    // 미리보기가 떠 있는 동안의 키는 여기서 삼킨다 - 안 그러면 뒤의 탭/팝업까지 닫힌다.
+    if (event.key === 'Escape') {
+      event.stopPropagation(); event.preventDefault(); closePreview(); return;
+    }
+    // 휠과 같은 이동을 키보드로도 - 손이 마우스에 없을 때가 있다.
+    const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
+    if (!step) return;
+    event.stopPropagation(); event.preventDefault();
+    stepPreview(step);
   }
 
   /** 새 이벤트 이름을 묻는다. 만화 한 편에 해당하니 이름이 곧 폴더 이름이 된다. */
@@ -270,7 +323,7 @@ export function createV5ScenePanel({
     const preview = event.target.closest('[data-scene-preview]');
     if (preview) {
       event.preventDefault();
-      openPreview(preview.dataset.scenePreview || '', preview.dataset.previewName || '');
+      openPreview(preview.dataset.previewName || '');
       return;
     }
     const create = event.target.closest('[data-scene-event-create]');

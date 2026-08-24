@@ -1944,7 +1944,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-codexfix1')
+const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-runtag1')
   .then(({createV5ScenePanel}) => {
     v5SceneControl = createV5ScenePanel({
       panel: $('v5ScenePanel'),
@@ -3350,6 +3350,9 @@ const wsMessageHandlers = {
   // (Codex 리뷰 2026-08-08).
   status: m => {
     if (!m.is_generating) lastGenerationOk = (String(m.message || '') === 'completed');
+    // V5 Scene 연속 생성의 런 표. 완료가 **누구 것인지** 가르는 유일한 단서다 -
+    // 이 알림은 모든 탭에 가므로, 표가 없으면 남의 완료로 자기 컷을 넘긴다.
+    lastGenerationRunTag = String(m.v5_scene_run || '');
     setGen(m.is_generating);
   },
   generation_error: m => {
@@ -6932,7 +6935,7 @@ function setGen(v) {
   // 성공 판정은 위 `lastGenerationOk` 를 그대로 쓴다 - 실패·큐잉도 `is_generating:false`
   // 로 오므로 가르지 않으면 실패한 요청을 영원히 다시 보낸다(Interactive 와 같은 함정).
   if (wasGenerating && !next && v5SceneControl?.notifyGenerationDone) {
-    setTimeout(() => v5SceneControl.notifyGenerationDone(lastGenerationOk), 0);
+    setTimeout(() => v5SceneControl.notifyGenerationDone(lastGenerationOk, lastGenerationRunTag), 0);
   }
   if (v5SceneControl?.setGeneratingStatus) v5SceneControl.setGeneratingStatus(next);
   if (studioTabControl) studioTabControl.handleGenerationStatus(next);
@@ -9183,6 +9186,8 @@ let interactiveAutoGenTimer = null;
 // 직전 생성이 **성공으로** 끝났는가. 실패/큐잉에서 다음 장을 예약하지 않으려는 것이다
 // (wsMessageHandlers.status 주석 참조). 생성이 시작되면 다시 false 로 내린다.
 let lastGenerationOk = false;
+// 직전 완료 알림이 달고 온 V5 연속 생성 런 표(없으면 빈 문자열).
+let lastGenerationRunTag = '';
 // Automation 미지원 안내는 한 번만 띄운다.
 let interactiveAutomationWarned = false;
 

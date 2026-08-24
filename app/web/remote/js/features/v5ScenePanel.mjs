@@ -39,6 +39,10 @@ export function createV5ScenePanel({
   let awaitingApply = false;   // 다음 컷의 불러오기 응답을 기다리는 중
   let applyWait = null;        // 그 응답의 뒷문 타이머
   let doneWait = null;         // 완료 신호가 오는지 지켜보는 타이머
+  // ⚠️ **이 런의 표.** 완료 알림은 모든 탭에 가므로, 표가 없으면 남의 완료로 내 컷을
+  //    넘긴다 - 탭 두 개가 각자 돌리면 서로를 밀어 시키지 않은 그림이 나간다
+  //    (Codex 리뷰 BLOCK). 서버가 요청에 실려 온 표를 완료에 그대로 되돌려 준다.
+  let runTag = '';
 
   function escAttr(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => (
@@ -476,7 +480,9 @@ export function createV5ScenePanel({
     //    연쇄가 이 완료를 평범한 생성으로 보고 **자기도 다음 장을 낸다** - 프론트 루프와
     //    합쳐 생산자가 둘이 되고, 사용자가 시키지 않은 그림에 돈이 나간다(Codex BLOCK).
     //    Interactive·Studio 가 같은 방식으로 단다(`payload.overrides`).
-    if (!requestGenerate({overrides: {v5_scene_request: true}})) { stopRun(failReason); return; }
+    //    `v5_scene_run` 은 완료를 되짚을 표다 - 서버가 그대로 돌려준다.
+    const payload = {overrides: {v5_scene_request: true, v5_scene_run: runTag}};
+    if (!requestGenerate(payload)) { stopRun(failReason); return; }
     watchdog = globalThis.setTimeout(() => {
       watchdog = null;
       if (running && !generatingNow) stopRun('생성이 시작되지 않아 연속 생성을 멈췄습니다');
@@ -502,6 +508,8 @@ export function createV5ScenePanel({
       return;
     }
     running = true;
+    // 이 런만의 표를 새로 뽑는다. 창을 닫았다 다시 열어도 옛 표는 안 맞는다.
+    runTag = (globalThis.crypto?.randomUUID?.() || `v5-${Date.now()}-${Math.random()}`);
     render();
     // 지금 화면은 이미 그 컷이다(불러오기를 누른 직후에만 켜지므로). 바로 한 장 낸다.
     fire('생성을 시작하지 못했습니다');
@@ -513,6 +521,8 @@ export function createV5ScenePanel({
     clearApplyWait();
     clearDoneWait();
     awaitingApply = false;
+    // 표를 버린다 - 뒤늦게 도착한 완료가 멈춘 런을 되살리면 안 된다.
+    runTag = '';
     if (!running) return;
     running = false;
     render();
@@ -525,8 +535,12 @@ export function createV5ScenePanel({
    *    요청을 영원히 다시 보낸다(Interactive Auto Gen 이 이미 밟은 함정 - 크레딧이 탄다).
    * ⚠️ 마지막 컷에서 **반드시 선다.** 되감아 돌면 사용자가 자리를 비운 사이에 끝없이 만든다.
    */
-  function notifyGenerationDone(ok) {
+  function notifyGenerationDone(ok, tag) {
     if (!running) return;
+    // ⚠️ **내 런의 완료만 센다.** 이 알림은 모든 탭·모든 생성에서 온다 - 남의 것으로
+    //    컷을 넘기면 시키지 않은 그림이 나간다. 표가 안 맞으면 조용히 흘려보낸다
+    //    (멈추지도 않는다 - 내 생성은 아직 돌고 있을 수 있다).
+    if (String(tag || '') !== runTag) return;
     if (!ok) { stopRun('생성이 완료되지 않아 연속 생성을 멈췄습니다'); return; }
     const scenes = lastState?.scenes || [];
     const here = indexOfScene(appliedName);

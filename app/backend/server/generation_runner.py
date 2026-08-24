@@ -505,7 +505,17 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             auto_save_result = await _auto_save_generated_history_item(context, stored.item)
 
             context.is_generating = False
-            await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "completed"})
+            # ⚠️ 완료 알림은 **모든 클라이언트에게** 간다. 지금까지 알맹이가 없어서, 탭 두
+            #    개가 각자 V5 연속 생성을 돌리면 서로의 완료를 자기 것으로 세고 각자 다음
+            #    컷을 냈다 - 시키지 않은 그림에 돈이 나간다(Codex 리뷰 BLOCK).
+            #    요청에 실려 온 런 표를 그대로 되돌려 주면 각 탭이 **자기 것만** 센다.
+            #    타입은 그대로라 웹 스모크 계약(타입을 순서대로 셈)에도 안 걸린다.
+            await broadcast_json(clients, {
+                "type": "status",
+                "is_generating": False,
+                "message": "completed",
+                "v5_scene_run": str((request_params or {}).get("v5_scene_run") or ""),
+            })
             # ComfyUI 서버가 생성 이미지에 메타데이터를 남기지 않아(예: --disable-metadata)
             # NAIA가 자체 메타데이터를 삽입한 경우, 세션당 한 번만 경고 토스트로 알린다.
             if getattr(stored, "comfyui_metadata_injected", False) and not getattr(

@@ -19307,8 +19307,12 @@ body.detached-module .mod-grid-3 {
 .scene-event-pick:hover { border-color: rgba(150,132,255,0.8); }
 /* 컷 한 줄 = [본문 버튼][↑↓]. 순서 버튼이 본문 클릭 영역을 갉아먹지 않게 나눠 둔다. */
 .scene-row-line { display: flex; align-items: stretch; }
+/* ⚠️ `width: 100%` 을 쓰면 안 된다. flex 아이템이라 그게 flex-basis 가 되고, 기본
+   `min-width: auto` 때문에 내용이 길면 **줄어들지 못한다** - 설명이 긴 컷에서
+   ↑↓ 가 행 밖으로 밀려나 `overflow: hidden` 에 잘려 사라졌다(실측: move.x 453 =
+   행의 오른쪽 끝). 자라고 줄어드는 아이템으로 두고 min-width 를 0 으로 푼다. */
 .scene-row-head {
-  display: flex; align-items: stretch; gap: 10px; width: 100%;
+  display: flex; align-items: stretch; gap: 10px; flex: 1 1 auto; min-width: 0;
   padding: 8px; cursor: pointer; text-align: left;
   border: 0; background: transparent; color: inherit;
 }
@@ -19334,6 +19338,22 @@ body.detached-module .mod-grid-3 {
   background: rgba(0,0,0,0.4); border: 1px solid var(--border-soft, #212130);
 }
 .scene-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scene-thumb.is-zoom { cursor: zoom-in; }
+.scene-thumb.is-zoom:hover { border-color: rgba(124,106,239,0.7); }
+/* 크게 보기. body 에 붙는다 - 패널 안에 두면 `overflow-y: auto` 에 잘린다. */
+.scene-preview {
+  position: fixed; inset: 0; z-index: 4000; cursor: zoom-out;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px; background: rgba(0,0,0,0.78);
+}
+.scene-preview-inner { display: flex; flex-direction: column; gap: 8px; align-items: center; max-height: 100%; }
+.scene-preview img {
+  max-width: 100%; min-height: 0; object-fit: contain; border-radius: 8px;
+  border: 1px solid var(--border-dim); background: rgba(0,0,0,0.5);
+}
+.scene-preview-name {
+  flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
 .scene-thumb-none { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint, #6e7086); }
 .scene-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .scene-row-name {

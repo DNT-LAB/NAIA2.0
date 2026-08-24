@@ -17,7 +17,14 @@
 
 const EVENT_KEY = 'naia.v5scene.event.v1';
 
-export function createV5ScenePanel({panel, escHtml, showToast, setModuleParam}) {
+export function createV5ScenePanel({
+  panel, escHtml, showToast, setModuleParam,
+  // ⚠️ `window.prompt` / `window.confirm` 을 쓰면 안 된다. **Electron 은 `prompt` 를
+  //    구현하지 않아** 아무 일도 안 일어난다(제보: [+ 이벤트] 가 먹통). 앱 자체
+  //    대화상자를 받아 쓴다 - 생김새도 나머지 화면과 같아진다.
+  showPromptDialog = null,
+  showConfirmDialog = null,
+}) {
   let lastState = null;
   let query = '';
   let openName = '';           // 펼쳐 둔 컷
@@ -131,7 +138,10 @@ export function createV5ScenePanel({panel, escHtml, showToast, setModuleParam}) 
           <button type="button" class="scene-row-head" data-scene-toggle="${escAttr(name)}"
                   aria-expanded="${open ? 'true' : 'false'}">
             <span class="scene-ord">${ordinal}</span>
-            <span class="scene-thumb">${scene.thumbnail_url
+            <span class="scene-thumb${scene.thumbnail_url ? ' is-zoom' : ''}"${scene.thumbnail_url
+              ? ` data-scene-preview="${escAttr(scene.thumbnail_url)}" data-preview-name="${escAttr(name)}"`
+                + ' data-naia-title="크게 보기"'
+              : ''}>${scene.thumbnail_url
               ? `<img src="${escAttr(scene.thumbnail_url)}" alt="" loading="lazy" decoding="async">`
               : '<span class="scene-thumb-none">—</span>'}</span>
             <span class="scene-row-text">
@@ -184,7 +194,85 @@ export function createV5ScenePanel({panel, escHtml, showToast, setModuleParam}) 
       </div>`;
   }
 
+  /** 썸네일 크게 보기. 목록의 56px 로는 어느 구도인지 알아보기 어렵다(사용자 지정).
+   *
+   * ⚠️ body 에 단다. 패널이 `overflow-y: auto` 라 안에 두면 잘린다 - Connect 메뉴와
+   *    같은 이유다. 닫기는 아무 데나 클릭 / Esc.
+   */
+  function openPreview(url, name) {
+    closePreview();
+    const box = document.createElement('div');
+    box.className = 'scene-preview';
+    box.innerHTML = `
+      <div class="scene-preview-inner">
+        <img src="${escAttr(url)}" alt="">
+        <div class="scene-preview-name">${escHtml(name || '')}</div>
+      </div>`;
+    box.addEventListener('click', closePreview);
+    document.body.appendChild(box);
+    document.addEventListener('keydown', onPreviewKey, true);
+  }
+
+  function closePreview() {
+    document.querySelector('.scene-preview')?.remove();
+    document.removeEventListener('keydown', onPreviewKey, true);
+  }
+
+  function onPreviewKey(event) {
+    if (event.key !== 'Escape') return;
+    // 미리보기가 떠 있는 동안의 Esc 는 여기서 삼킨다 - 안 그러면 뒤의 탭/팝업까지 닫힌다.
+    event.stopPropagation();
+    event.preventDefault();
+    closePreview();
+  }
+
+  /** 새 이벤트 이름을 묻는다. 만화 한 편에 해당하니 이름이 곧 폴더 이름이 된다. */
+  async function askNewEvent() {
+    let name = '';
+    if (typeof showPromptDialog === 'function') {
+      const answer = await showPromptDialog('만화 한 편에 해당하는 이름을 적으세요.', {
+        title: '새 이벤트',
+        okText: '만들기',
+        cancelText: '취소',
+        placeholder: '예: 3컷 만화',
+      });
+      if (answer === null) return;            // 취소
+      name = String(answer || '').trim();
+    } else {
+      name = String(globalThis.prompt?.('새 이벤트 이름') || '').trim();
+    }
+    if (!name) { showToast('이벤트 이름을 입력하세요', 'error'); return; }
+    setModuleParam('v5_scene', 'event_create', {name});
+    rememberEvent(name);
+  }
+
+  /** 지금 구도를 열린 이벤트의 끝에 담는다. */
+  async function saveCurrent() {
+    const input = panel.querySelector('#sceneSaveName');
+    const name = String(input?.value || '').trim();
+    if (!name) { showToast('컷 이름을 입력하세요', 'error'); input?.focus(); return; }
+    // 같은 이름이 있으면 덮어쓰기다 - 조용히 덮으면 남의 컷을 잃는다.
+    if ((lastState?.scenes || []).some(s => String(s.name) === name)) {
+      const ok = (typeof showConfirmDialog === 'function')
+        ? await showConfirmDialog(`"${name}" 컷을 덮어씁니다. 계속할까요?`,
+                                  {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'})
+        : globalThis.confirm(`"${name}" 컷을 덮어씁니다. 계속할까요?`);
+      if (!ok) return;
+    }
+    setModuleParam('v5_scene', 'save', {event: activeEvent(), name});
+    if (input) input.value = '';
+    showToast(`컷을 담았습니다 — ${name}`, 'info');
+  }
+
   function onClick(event) {
+    // ⚠️ 썸네일 판정이 **토글보다 먼저**다. 썸네일이 헤더 버튼 안에 있어서, 나중에
+    //    보면 카드가 같이 펼쳐졌다 접혔다 한다.
+    const preview = event.target.closest('[data-scene-preview]');
+    if (preview) {
+      event.preventDefault();
+      openPreview(preview.dataset.scenePreview || '', preview.dataset.previewName || '');
+      return;
+    }
     const create = event.target.closest('[data-scene-event-create]');
     if (create) {
       const input = panel.querySelector('#sceneEventName');
@@ -195,10 +283,7 @@ export function createV5ScenePanel({panel, escHtml, showToast, setModuleParam}) 
       return;
     }
     if (event.target.closest('[data-scene-event-new]')) {
-      const name = String(globalThis.prompt?.('새 이벤트 이름') || '').trim();
-      if (!name) return;
-      setModuleParam('v5_scene', 'event_create', {name});
-      rememberEvent(name);
+      askNewEvent();
       return;
     }
     if (event.target.closest('[data-scene-folder]')) {
@@ -216,15 +301,7 @@ export function createV5ScenePanel({panel, escHtml, showToast, setModuleParam}) 
     }
     const save = event.target.closest('[data-scene-save]');
     if (save) {
-      const input = panel.querySelector('#sceneSaveName');
-      const name = String(input?.value || '').trim();
-      if (!name) { showToast('컷 이름을 입력하세요', 'error'); input?.focus(); return; }
-      // 같은 이름이 있으면 덮어쓰기다 - 조용히 덮으면 남의 컷을 잃는다.
-      const exists = (lastState?.scenes || []).some(s => String(s.name) === name);
-      if (exists && !globalThis.confirm(`"${name}" 컷을 덮어씁니다. 계속할까요?`)) return;
-      setModuleParam('v5_scene', 'save', {event: activeEvent(), name});
-      if (input) input.value = '';
-      showToast(`컷을 담았습니다 — ${name}`, 'info');
+      saveCurrent();
       return;
     }
     const toggle = event.target.closest('[data-scene-toggle]');

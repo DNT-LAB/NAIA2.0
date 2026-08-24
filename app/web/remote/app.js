@@ -1944,13 +1944,16 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-v5event1')
+const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-v5event3')
   .then(({createV5ScenePanel}) => {
     v5SceneControl = createV5ScenePanel({
       panel: $('v5ScenePanel'),
       escHtml,
       showToast,
       setModuleParam,
+      // ⚠️ `window.prompt` 은 **Electron 에서 동작하지 않는다** - 앱 자체 대화상자를 쓴다.
+      showPromptDialog,
+      showConfirmDialog,
     });
     const cached = moduleStateCache.get('v5_scene');
     if (cached) v5SceneControl.render(cached);

@@ -699,9 +699,20 @@
                       data-naia-guide="Interactive 모드. 프롬프트를 캐릭터/의상/액션/표정/구도/배경 슬롯으로 나눠 편집합니다. 켜져 있는 동안 Prompt Fixed와 WC Solo는 사용할 수 없습니다(블록에서 프롬프트를 직접 조립하므로 충돌합니다).">
                 <span>Interactive</span>
               </button>
+              <!-- ⚠️ 아직 **기능이 배선되지 않은 자리표시자**다(사용자: 역할은 이후 설명).
+                   Interactive 와 같은 독립 버튼 모양으로 자리만 잡아 둔다. 누르면
+                   "준비 중" 을 알린다 - 아무 반응이 없으면 고장으로 읽힌다. -->
+              <button type="button" class="ia-mode-toggle" id="tagSearchBtn" aria-pressed="false"
+                      data-naia-guide="Tag Search. 아직 준비 중인 기능입니다.">
+                <span>Tag Search</span>
+              </button>
+              <!-- Assist / Chat 두 칸이던 것을 한 칸으로 합쳤다(사용자 지정) - 자주
+                   쓰이지 않는 기능이 상단 바를 두 칸이나 먹고 있었다. 누르면 무엇을
+                   열지 고른다. 래퍼(.assistants-ollama-segment)는 그대로 둔다 -
+                   `:last-child` 규칙이 있어 한 칸이어도 테두리가 맞는다. -->
               <div class="assistants-ollama-segment" role="group" aria-label="Ollama tools">
-                <button type="button" class="assistants-ollama-btn" id="ollamaAssistantBtn" aria-label="Ollama Assist">Ollama Assist</button>
-                <button type="button" class="assistants-ollama-btn" id="ollamaChatBtn" aria-label="Ollama Chat">Chat</button>
+                <button type="button" class="assistants-ollama-btn" id="ollamaBtn" aria-label="Ollama"
+                        data-naia-guide="Ollama 도구. 누르면 Assist(태그 추천·프롬프트 보강)와 Chat(자유 대화) 중에 고릅니다. 이미 열려 있는 Ollama 창이 있으면 그 창을 닫습니다.">Ollama</button>
               </div>
             </div>
           </div>

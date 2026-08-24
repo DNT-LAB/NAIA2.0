@@ -1430,7 +1430,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260618-related-curated2')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260824-ollama-merge1')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -1453,7 +1453,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
     console.error('Failed to initialize ollama assistant popup module', error);
   });
 let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260618-related-curated2')
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260824-ollama-merge1')
   .then(({createOllamaChatPopup}) => {
     ollamaChatPopup = createOllamaChatPopup({
       document, window, showToast, escHtml,
@@ -2906,8 +2906,9 @@ const resultUnsavedActions = $('resultUnsavedActions');
 const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
 const naiDirectorBtn = $('naiDirectorBtn');
-const ollamaAssistantBtn = $('ollamaAssistantBtn');
-const ollamaChatBtn = $('ollamaChatBtn');
+// [Ollama Assist][Chat] 두 칸을 한 칸으로 합쳤다(사용자 지정) — 누르면 고른다.
+const ollamaBtn = $('ollamaBtn');
+const tagSearchBtn = $('tagSearchBtn');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -5418,25 +5419,40 @@ async function openOllamaChat() {
   }
   ollamaChatPopup.open();
 }
-if (ollamaAssistantBtn) {
-  ollamaAssistantBtn.addEventListener('click', async () => {
-    // [Ollama Assist] 버튼 재클릭 = 토글: 열려 있으면 닫고, 아니면 연다.
-    await ollamaAssistantPopupReady;
-    if (ollamaAssistantPopup && ollamaAssistantPopup.isOpen && ollamaAssistantPopup.isOpen()) {
-      ollamaAssistantPopup.close();
-    } else {
-      openOllamaAssistant();
+if (ollamaBtn) {
+  // [Ollama] 한 칸으로 합쳤다(사용자 지정). 예전에는 [Ollama Assist][Chat] 두 칸이
+  // 상단 바를 먹고 있었다 - 자주 쓰이지 않는 기능이라 자리를 돌려준다.
+  //
+  // 재클릭 = 토글이라는 **기존 동작은 지킨다**: 둘 중 하나가 열려 있으면 그것을 닫고,
+  // 아무것도 안 열려 있을 때만 무엇을 열지 묻는다. 열려 있는데도 대화상자를 띄우면
+  // 닫으려고 누른 사용자가 한 번 더 골라야 한다.
+  ollamaBtn.addEventListener('click', async () => {
+    await Promise.all([ollamaAssistantPopupReady, ollamaChatPopupReady]);
+    const assistOpen = Boolean(ollamaAssistantPopup?.isOpen?.());
+    const chatOpen = Boolean(ollamaChatPopup?.isOpen?.());
+    if (assistOpen || chatOpen) {
+      if (assistOpen) ollamaAssistantPopup.close();
+      if (chatOpen) ollamaChatPopup.close();
+      return;
     }
+    const pick = await showConfirmDialog('무엇을 여시겠습니까?', {
+      title: 'Ollama',
+      messageHtml: `${escHtml('Assist')} — ${escHtml('현재 프롬프트를 읽어 태그를 추천하고 보강합니다.')}`
+        + `<br>${escHtml('Chat')} — ${escHtml('모델과 자유롭게 대화합니다.')}`,
+      choices: [
+        {key: 'assist', label: 'Assist'},
+        {key: 'chat', label: 'Chat'},
+      ],
+    });
+    if (pick === 'assist') openOllamaAssistant();
+    else if (pick === 'chat') openOllamaChat();
   });
 }
-if (ollamaChatBtn) {
-  ollamaChatBtn.addEventListener('click', async () => {
-    await ollamaChatPopupReady;
-    if (ollamaChatPopup && ollamaChatPopup.isOpen && ollamaChatPopup.isOpen()) {
-      ollamaChatPopup.close();
-    } else {
-      openOllamaChat();
-    }
+if (tagSearchBtn) {
+  // ⚠️ **자리표시자다.** 역할이 아직 정해지지 않았다(사용자: 이후 설명).
+  //    아무 반응이 없으면 고장으로 읽히므로 준비 중임을 알린다.
+  tagSearchBtn.addEventListener('click', () => {
+    showToast('Tag Search 는 아직 준비 중입니다', 'info');
   });
 }
 

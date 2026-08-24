@@ -78,7 +78,10 @@ export function createOllamaChatPopup({
       popup.style.top = `${Math.round(top)}px`;
       return;
     }
-    const btn = document.getElementById('ollamaChatBtn');
+    // 런처가 [Ollama] 한 칸으로 합쳐졌다. 옛 id 를 먼저 보고 없으면 새 것으로
+    // 물러선다 - 분리창처럼 옛 마크업이 남아 있을 수 있는 문서도 있다.
+    const btn = document.getElementById('ollamaChatBtn')
+      || document.getElementById('ollamaBtn');
     const rect = btn ? btn.getBoundingClientRect() : null;
     let left = rect ? (rect.right - pw) : (win.innerWidth - pw - 16);
     left = Math.max(margin, Math.min(left, win.innerWidth - pw - margin));

@@ -42,6 +42,8 @@ class HeadlessModuleDispatchService:
             return context._event_stream_module_state()
         if clean_id == "storyteller":
             return context._storyteller_module_state()
+        if clean_id == "v5_scene":
+            return context._v5_scene_module_state()
         if clean_id == "wildcard":
             return context._wildcard_module_state()
         if clean_id == "instant_wildcard":
@@ -103,6 +105,8 @@ class HeadlessModuleDispatchService:
             return context._set_event_stream_param(clean_key, value)
         if clean_id == "storyteller":
             return context._set_storyteller_param(clean_key, value)
+        if clean_id == "v5_scene":
+            return context._set_v5_scene_param(clean_key, value)
         if clean_id == "wildcard":
             return context._set_wildcard_param(clean_key, value)
         if clean_id == "instant_wildcard":

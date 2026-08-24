@@ -177,6 +177,15 @@ class WebSessionContext:
     def _character_service(self):
         return self._lazy_service("character")
 
+    def _v5_scene_service(self):
+        return self._lazy_service("v5_scene")
+
+    def _v5_scene_module_state(self):
+        return self._v5_scene_service().state()
+
+    def _set_v5_scene_param(self, key, value):
+        return self._v5_scene_service().set_param(key, value)
+
     def _wildcard_service(self):
         return self._lazy_service("wildcard")
 

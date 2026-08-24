@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket
 from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail_routes
 from app.backend.server.character_asset_routes import register_character_asset_routes
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
+from app.backend.server.v5_scene_routes import register_v5_scene_routes
 from app.backend.server.data_migration_routes import register_data_migration_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.grok_routes import register_grok_routes  # Grok 연동 (제거 가능)
@@ -183,6 +184,7 @@ def register_headless_routes(
     register_tag_combo_routes(app, context, run_in_thread=run_in_thread)
     register_interactive_assets_routes(app, context, run_in_thread=run_in_thread)
     register_interactive_reference_routes(app, context, run_in_thread=run_in_thread)
+    register_v5_scene_routes(app, context, run_in_thread=run_in_thread)
     register_character_viewer_routes(
         app,
         context,

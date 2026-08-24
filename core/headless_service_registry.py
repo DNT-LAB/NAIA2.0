@@ -59,6 +59,7 @@ HEADLESS_SERVICE_SPECS = {
         "core.headless_character_asset_service",
         "HeadlessCharacterAssetService",
     ),
+    "v5_scene": HeadlessServiceSpec("core.headless_v5_scene_service", "HeadlessV5SceneService"),
     "wildcard": HeadlessServiceSpec("core.headless_wildcard_service", "HeadlessWildcardService"),
     "instant_wildcard": HeadlessServiceSpec(
         "core.headless_instant_wildcard_service",

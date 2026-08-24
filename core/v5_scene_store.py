@@ -1,5 +1,14 @@
 """Scene 저장소 — 한 장면을 통째로 담고 되살린다.
 
+**Event > Scene** 두 층이다(사용자 지정). 이벤트는 만화 한 편, 씬은 그 안의 한 컷이다.
+사용자는 이벤트를 먼저 만들고 그 안에 컷을 쌓는다.
+
+    save/v5_scenes/
+    └── <이벤트>/
+        ├── _event.json      # 이름 · 컷 순서(order)
+        ├── <씬>.json
+        └── <씬>.webp
+
 씬이 담는 것은 **구도**다(사용자 지정):
 
     메인 프롬프트 · 캐릭터(프롬프트·UC·좌표·Connect·이름) · 해상도 · POS 모드
@@ -35,6 +44,11 @@ from typing import Any
 
 SCENE_DIR_NAME = "v5_scenes"
 SCENE_SCHEMA_VERSION = 1
+# 이벤트 폴더 안의 메타 파일. `_` 로 시작해 씬 파일(`*.json`)과 섞이지 않는다.
+EVENT_META_NAME = "_event.json"
+EVENT_SCHEMA_VERSION = 1
+# 평면으로 저장돼 있던 옛 씬들을 담을 이벤트 이름(공통 접두사를 못 뽑을 때).
+LEGACY_EVENT_NAME = "이전 씬"
 # 파일명으로 못 쓰는 문자. `prompt_engineering_settings.sanitize_preset_name` 과 같은 목록.
 _FORBIDDEN_NAME_CHARS = '<>:"/\\|?*'
 
@@ -45,7 +59,13 @@ def sanitize_scene_name(name: Any) -> str:
     sanitized = name.strip()
     for char in _FORBIDDEN_NAME_CHARS:
         sanitized = sanitized.replace(char, "")
-    return sanitized.strip()
+    sanitized = sanitized.strip().strip(".")
+    # `_` 로 시작하는 이름은 메타 파일(`_event.json`)과 부딪힌다. 앞의 `_` 만 걷어낸다.
+    return sanitized.lstrip("_").strip()
+
+
+# 이벤트 이름도 같은 규칙이다 - 둘 다 파일 시스템 이름이 된다.
+sanitize_event_name = sanitize_scene_name
 
 
 def _default_save_root() -> Path:
@@ -71,8 +91,8 @@ def scene_dir(save_root: str | Path | None = None) -> Path:
     return _coerce_save_root(save_root) / SCENE_DIR_NAME
 
 
-def _read_dirs(save_root: str | Path | None = None) -> list[Path]:
-    """읽을 때 훑는 디렉터리들. 쓰기는 언제나 첫 번째에만 한다."""
+def _root_dirs(save_root: str | Path | None = None) -> list[Path]:
+    """읽을 때 훑는 뿌리들. 쓰기는 언제나 첫 번째에만 한다."""
     primary = scene_dir(save_root)
     dirs = [primary]
     legacy = (Path("save") / SCENE_DIR_NAME).resolve()
@@ -81,19 +101,222 @@ def _read_dirs(save_root: str | Path | None = None) -> list[Path]:
     return dirs
 
 
-def scene_path(name: str, save_root: str | Path | None = None) -> Path | None:
+# ── 이벤트 ───────────────────────────────────────────────────────────────
+# 이벤트 = **폴더**다. 씬은 그 안의 파일이고, 순서는 `_event.json` 의 `order` 배열이다.
+#
+# 폴더로 나눈 이유: 이 기능이 지원하는 조작 셋 중 하나가 **폴더 열기**라, 사용자가
+# 파일을 직접 다루는 것이 규약이다. 그러면 파일 구조가 곧 화면이어야 한다. 덤으로 씬
+# 이름이 이벤트 안에서만 유일하면 되니 `1컷`·`2컷` 을 이벤트마다 재사용할 수 있다.
+#
+# ⚠️ `order` 에 없는 파일은 **뒤에 붙인다.** 폴더에 파일을 떨궈 넣는 것이 그대로
+#    동작해야 한다 - 안 그러면 직접 넣은 씬이 조용히 사라진 것처럼 보인다.
+
+
+def event_dir(event: str, save_root: str | Path | None = None) -> Path | None:
+    clean = sanitize_event_name(event)
+    if not clean:
+        return None
+    return scene_dir(save_root) / clean
+
+
+def _event_read_dirs(event: str, save_root: str | Path | None = None) -> list[Path]:
+    clean = sanitize_event_name(event)
+    if not clean:
+        return []
+    return [base / clean for base in _root_dirs(save_root)]
+
+
+def list_event_names(save_root: str | Path | None = None) -> list[str]:
+    """이벤트(=폴더) 이름들. 먼저 평면 씬이 남아 있으면 한 이벤트로 옮긴다."""
+    migrate_flat_scenes(save_root)
+    names: list[str] = []
+    seen: set[str] = set()
+    for base in _root_dirs(save_root):
+        if not base.is_dir():
+            continue
+        for path in sorted(base.iterdir()):
+            if not path.is_dir():
+                continue
+            clean = sanitize_event_name(path.name)
+            if clean and clean not in seen:
+                seen.add(clean)
+                names.append(clean)
+    return names
+
+
+def read_event(event: str, save_root: str | Path | None = None) -> dict[str, Any] | None:
+    """이벤트 메타. `order` 는 **실제 파일과 화해된** 순서다.
+
+    없는 씬은 빠지고, 폴더에만 있는 씬은 뒤에 붙는다.
+    """
+    clean = sanitize_event_name(event)
+    if not clean:
+        return None
+    dirs = [path for path in _event_read_dirs(clean, save_root) if path.is_dir()]
+    if not dirs:
+        return None
+    stored: list[str] = []
+    for base in dirs:
+        meta = base / EVENT_META_NAME
+        if not meta.exists():
+            continue
+        try:
+            raw = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(raw, dict) and isinstance(raw.get("order"), list):
+            stored = [sanitize_scene_name(item) for item in raw["order"]]
+            break
+    present = _scene_stems(clean, save_root)
+    order = [name for name in stored if name in present]
+    seen = set(order)
+    for name in present:
+        if name not in seen:
+            seen.add(name)
+            order.append(name)
+    return {"version": EVENT_SCHEMA_VERSION, "name": clean, "order": order}
+
+
+def _scene_stems(event: str, save_root: str | Path | None = None) -> list[str]:
+    """폴더에 실제로 있는 씬 파일 이름들(정렬). 메타 파일은 뺀다."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for base in _event_read_dirs(event, save_root):
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob("*.json")):
+            if path.name == EVENT_META_NAME:
+                continue
+            stem = sanitize_scene_name(path.stem)
+            if stem and stem not in seen:
+                seen.add(stem)
+                names.append(stem)
+    return names
+
+
+def write_event_order(event: str, order: list[str], save_root: str | Path | None = None) -> bool:
+    base = event_dir(event, save_root)
+    if base is None:
+        return False
+    base.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": EVENT_SCHEMA_VERSION,
+        "name": sanitize_event_name(event),
+        "order": [sanitize_scene_name(item) for item in order if sanitize_scene_name(item)],
+    }
+    try:
+        (base / EVENT_META_NAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def create_event(name: str, save_root: str | Path | None = None) -> str | None:
+    """빈 이벤트를 만든다. 이미 있으면 그 이름을 그대로 돌려준다(덮지 않는다)."""
+    clean = sanitize_event_name(name)
+    if not clean:
+        return None
+    base = event_dir(clean, save_root)
+    if base is None:
+        return None
+    existed = base.is_dir()
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    if not existed:
+        write_event_order(clean, [], save_root)
+    return clean
+
+
+def move_scene(event: str, name: str, delta: int, save_root: str | Path | None = None) -> bool:
+    """씬을 순서에서 위/아래로 한 칸 옮긴다(`delta` = -1 / +1)."""
+    meta = read_event(event, save_root)
+    if meta is None:
+        return False
+    order = list(meta["order"])
+    clean = sanitize_scene_name(name)
+    if clean not in order:
+        return False
+    index = order.index(clean)
+    target = index + int(delta)
+    if not (0 <= target < len(order)):
+        return False
+    order[index], order[target] = order[target], order[index]
+    return write_event_order(event, order, save_root)
+
+
+def _longest_common_prefix(names: list[str]) -> str:
+    if not names:
+        return ""
+    prefix = names[0]
+    for name in names[1:]:
+        while prefix and not name.startswith(prefix):
+            prefix = prefix[:-1]
+    # 접두사가 낱말 중간에서 끊기면 이름이 이상해진다 - 구분자에서 자른다.
+    return prefix.strip().rstrip("-_ .,").strip()
+
+
+def migrate_flat_scenes(save_root: str | Path | None = None) -> str | None:
+    """이벤트가 생기기 전에 평면으로 저장된 씬들을 이벤트 하나로 옮긴다(사용자 지정).
+
+    ⚠️ **쓰기 뿌리에 있는 것만 옮긴다.** 레거시 폴백 경로는 읽기 전용이라 손대면
+       다른 설치본의 파일을 움직이게 된다.
+    이름은 씬들의 공통 접두사에서 뽑고, 못 뽑으면 `이전 씬`. 이미 옮길 것이 없으면 None.
+    """
+    base = scene_dir(save_root)
+    if not base.is_dir():
+        return None
+    loose = [path for path in base.glob("*.json") if path.name != EVENT_META_NAME]
+    if not loose:
+        return None
+    # ⚠️ 순서는 **만든 시각**을 따른다. 이름순으로 두면 `제목 - 2` 가 `제목` 보다 앞에
+    #    온다(' ' < '.'). 만화의 컷 순서가 거꾸로 들어가는 셈이라 눈에 띄게 틀린다.
+    # ⚠️ mtime 이 아니라 **생성 시각**이다. 파일을 한 번이라도 고쳐 쓰면 mtime 이 다 같이
+    #    밀려 순서가 뭉개진다(실측: 두 씬을 일괄 정리했더니 0.4초 차이로 붙었다).
+    def _made_at(path: Path) -> tuple:
+        try:
+            stat = path.stat()
+        except OSError:
+            return (0.0, path.name)
+        made = getattr(stat, "st_birthtime", None)
+        if made is None:
+            made = stat.st_ctime if os.name == "nt" else stat.st_mtime
+        return (float(made), path.name)
+
+    loose.sort(key=_made_at)
+    stems = [path.stem for path in loose]
+    event = sanitize_event_name(_longest_common_prefix(stems)) or LEGACY_EVENT_NAME
+    # 같은 이름의 폴더가 이미 있으면 그 안에 합친다 - 새 이름을 지어내면 사용자가 못 찾는다.
+    target = base / event
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for path in loose:
+            thumb = path.with_suffix(THUMB_SUFFIX)
+            path.replace(target / path.name)
+            if thumb.exists():
+                thumb.replace(target / thumb.name)
+    except OSError:
+        return None
+    write_event_order(event, [path.stem for path in loose], save_root)
+    return event
+
+
+def scene_path(event: str, name: str, save_root: str | Path | None = None) -> Path | None:
     """쓸 자리. 이름이 비면 None."""
     clean = sanitize_scene_name(name)
-    if not clean:
+    base = event_dir(event, save_root)
+    if not clean or base is None:
         return None
-    return scene_dir(save_root) / f"{clean}.json"
+    return base / f"{clean}.json"
 
 
-def _existing_scene_path(name: str, save_root: str | Path | None = None) -> Path | None:
+def _existing_scene_path(event: str, name: str, save_root: str | Path | None = None) -> Path | None:
     clean = sanitize_scene_name(name)
     if not clean:
         return None
-    for base in _read_dirs(save_root):
+    for base in _event_read_dirs(event, save_root):
         candidate = base / f"{clean}.json"
         if candidate.exists():
             return candidate
@@ -226,22 +449,14 @@ def bare_from_text(text: Any) -> str:
     return ", ".join(person + body)
 
 
-def list_scene_names(save_root: str | Path | None = None) -> list[str]:
-    names: list[str] = []
-    seen: set[str] = set()
-    for base in _read_dirs(save_root):
-        if not base.is_dir():
-            continue
-        for path in sorted(base.glob("*.json")):
-            stem = path.stem
-            if stem and stem not in seen:
-                seen.add(stem)
-                names.append(stem)
-    return names
+def list_scene_names(event: str, save_root: str | Path | None = None) -> list[str]:
+    """이벤트 안의 씬 이름들. **`_event.json` 의 순서**를 따른다."""
+    meta = read_event(event, save_root)
+    return list(meta["order"]) if meta else []
 
 
-def read_scene(name: str, save_root: str | Path | None = None) -> dict[str, Any] | None:
-    path = _existing_scene_path(name, save_root)
+def read_scene(event: str, name: str, save_root: str | Path | None = None) -> dict[str, Any] | None:
+    path = _existing_scene_path(event, name, save_root)
     if path is None:
         return None
     try:
@@ -251,32 +466,42 @@ def read_scene(name: str, save_root: str | Path | None = None) -> dict[str, Any]
     scene = normalize_scene(raw)
     # 파일명이 곧 이름이다 - 안쪽 name 이 비었거나 어긋나도 파일명을 따른다.
     scene["name"] = sanitize_scene_name(path.stem) or scene["name"]
+    scene["event"] = sanitize_event_name(event)
     return scene
 
 
-def write_scene(scene: dict[str, Any], save_root: str | Path | None = None) -> Path | None:
+def write_scene(event: str, scene: dict[str, Any], save_root: str | Path | None = None) -> Path | None:
     normalized = normalize_scene(scene)
-    path = scene_path(normalized["name"], save_root)
+    path = scene_path(event, normalized["name"], save_root)
     if path is None:
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 새 씬은 순서의 **끝**에 붙는다. 이미 있으면 자리를 지킨다 - 덮어쓰기가 순서를
+    # 흔들면 3컷을 고쳤을 뿐인데 만화 순서가 바뀐다.
+    meta = read_event(event, save_root)
+    if meta is not None:
+        write_event_order(event, meta["order"], save_root)
     return path
 
 
-def delete_scene(name: str, save_root: str | Path | None = None) -> bool:
+def delete_scene(event: str, name: str, save_root: str | Path | None = None) -> bool:
     """지운다. **쓰기 루트에 있는 것만** 지운다 - 레거시 폴백은 읽기 전용으로 둔다.
 
     썸네일도 함께 지운다 - 남겨 두면 같은 이름으로 새 씬을 만들 때 남의 그림이 붙는다.
     """
-    path = scene_path(name, save_root)
+    path = scene_path(event, name, save_root)
     existed = bool(path is not None and path.exists())
     if existed:
         try:
             path.unlink()
         except OSError:
             return False
-    delete_scene_thumb(name, save_root)
+    delete_scene_thumb(event, name, save_root)
+    if existed:
+        meta = read_event(event, save_root)
+        if meta is not None:
+            write_event_order(event, meta["order"], save_root)
     return existed
 
 
@@ -290,27 +515,28 @@ def delete_scene(name: str, save_root: str | Path | None = None) -> bool:
 THUMB_SUFFIX = ".webp"
 
 
-def scene_thumb_path(name: str, save_root: str | Path | None = None) -> Path | None:
+def scene_thumb_path(event: str, name: str, save_root: str | Path | None = None) -> Path | None:
+    clean = sanitize_scene_name(name)
+    base = event_dir(event, save_root)
+    if not clean or base is None:
+        return None
+    return base / f"{clean}{THUMB_SUFFIX}"
+
+
+def existing_scene_thumb(event: str, name: str, save_root: str | Path | None = None) -> Path | None:
     clean = sanitize_scene_name(name)
     if not clean:
         return None
-    return scene_dir(save_root) / f"{clean}{THUMB_SUFFIX}"
-
-
-def existing_scene_thumb(name: str, save_root: str | Path | None = None) -> Path | None:
-    clean = sanitize_scene_name(name)
-    if not clean:
-        return None
-    for base in _read_dirs(save_root):
+    for base in _event_read_dirs(event, save_root):
         candidate = base / f"{clean}{THUMB_SUFFIX}"
         if candidate.exists():
             return candidate
     return None
 
 
-def scene_thumb_revision(name: str, save_root: str | Path | None = None) -> str:
+def scene_thumb_revision(event: str, name: str, save_root: str | Path | None = None) -> str:
     """URL 에 붙일 리비전. 썸네일이 없으면 빈 문자열."""
-    path = existing_scene_thumb(name, save_root)
+    path = existing_scene_thumb(event, name, save_root)
     if path is None:
         return ""
     try:
@@ -320,9 +546,10 @@ def scene_thumb_revision(name: str, save_root: str | Path | None = None) -> str:
     return f"{stat.st_mtime_ns}-{stat.st_size}"
 
 
-def write_scene_thumb(name: str, data: bytes, save_root: str | Path | None = None) -> Path | None:
+def write_scene_thumb(event: str, name: str, data: bytes,
+                      save_root: str | Path | None = None) -> Path | None:
     """썸네일을 쓴다. 임시 파일에 쓴 뒤 바꿔치기해 **반쯤 쓰인 그림**이 안 남게 한다."""
-    path = scene_thumb_path(name, save_root)
+    path = scene_thumb_path(event, name, save_root)
     if path is None or not data:
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,8 +566,8 @@ def write_scene_thumb(name: str, data: bytes, save_root: str | Path | None = Non
     return path
 
 
-def delete_scene_thumb(name: str, save_root: str | Path | None = None) -> bool:
-    path = scene_thumb_path(name, save_root)
+def delete_scene_thumb(event: str, name: str, save_root: str | Path | None = None) -> bool:
+    path = scene_thumb_path(event, name, save_root)
     if path is None or not path.exists():
         return False
     try:

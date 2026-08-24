@@ -990,6 +990,9 @@ def _snapshot_result(snapshot: dict, frame_slot_ids: list[str]) -> dict:
     rolls = snapshot.get("wildcard_rolls")
     if isinstance(rolls, list) and rolls:
         result["wildcard_rolls"] = [dict(roll) for roll in rolls if isinstance(roll, dict)]
+    shares = snapshot.get("shares")
+    if isinstance(shares, dict) and shares:
+        result["shares"] = {str(slot): str(text) for slot, text in shares.items()}
     return result
 
 
@@ -1004,6 +1007,7 @@ def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: l
         ids = frame_slot_ids[:len(characters)]
     id_to_index = {slot_id: index for index, slot_id in enumerate(ids) if slot_id}
     rolls = [dict(roll) for roll in result.get("wildcard_rolls") or [] if isinstance(roll, dict)]
+    shares = {str(slot): str(text) for slot, text in (result.get("shares") or {}).items()}
     for frame_index, slot_id in enumerate(frame_slot_ids):
         payload = frozen.get(slot_id)
         if not payload:
@@ -1021,9 +1025,13 @@ def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: l
         ucs[index] = payload.get("uc", "")
         ids[index] = slot_id
         rolls = _replace_frozen_character_roll(rolls, slot_id, payload["prompt"], frame_index + 1)
+        # 고정된 슬롯이 아래로 물려주는 것은 고정값 자체다(전개 루프의 frozen 분기와 같다).
+        shares[slot_id] = payload["prompt"]
     merged = {"characters": characters, "uc": ucs, "character_ids": ids}
     if rolls:
         merged["wildcard_rolls"] = rolls
+    if shares:
+        merged["shares"] = shares
     return merged
 
 
@@ -1366,6 +1374,12 @@ def character_params_from_settings(
         "uc": ucs,
         "character_ids": character_ids,
         "wildcard_rolls": _character_rolls_from_context(context, roll_start),
+        # 슬롯이 아래로 물려주는 **전개된** 몫. 이미 위에서 계산해 둔 값이라 공짜다.
+        # V5 Scene 이 같은 이벤트 안에서 컷을 넘길 때 배역을 이어가는 데 쓴다 — 배역이
+        # 와일드카드면 **뽑힌 결과**를 이어야 하고(사용자 지정), 그 값이 여기 있다.
+        # ⚠️ 마커가 없는 슬롯은 "전체 공유"라 프롬프트 전체가 담긴다(`_split_connect_region`).
+        #    쓰는 쪽이 `has_connect_region()` 으로 걸러야 한다.
+        "shares": {slot: pair[0] for slot, pair in expanded_by_uuid.items() if pair[0]},
     }
 
 
@@ -1414,6 +1428,23 @@ def read_character_roll_snapshot(app_context, mode: str = "NAI") -> dict | None:
     return None
 
 
+def read_character_shares(app_context, mode: str = "NAI") -> dict[str, str]:
+    """슬롯이 아래로 물려주는 **전개된** 몫을 slot uuid 로 찾는다. 없으면 빈 dict.
+
+    배역이 `&connect:__wildcard__&end` 처럼 굴려진 것일 때, **뽑힌 결과**를 집는 유일한
+    입구다. 조건부 override 경로는 전개를 우회하므로 여기에 안 담긴다(사용자 결정으로
+    조건부는 Connect 계열에서 제외).
+
+    ⚠️ 마커가 없는 슬롯은 "전체 공유"라 프롬프트 전체가 담긴다 - 쓰는 쪽이
+       `has_connect_region()` 으로 먼저 걸러야 한다.
+    """
+    snapshot = read_character_roll_snapshot(app_context, mode)
+    shares = (snapshot or {}).get("shares")
+    if not isinstance(shares, dict):
+        return {}
+    return {str(slot): str(text) for slot, text in shares.items() if str(text)}
+
+
 def store_character_roll_snapshot(app_context, params: dict | None, mode: str = "NAI") -> dict | None:
     """Store ``params`` (an expanded character roll) as the SSOT snapshot for ``mode``.
 
@@ -1441,6 +1472,9 @@ def store_character_roll_snapshot(app_context, params: dict | None, mode: str = 
     rolls = params.get("wildcard_rolls")
     if isinstance(rolls, list) and rolls:
         snapshot["wildcard_rolls"] = [dict(roll) for roll in rolls if isinstance(roll, dict)]
+    shares = params.get("shares")
+    if isinstance(shares, dict) and shares:
+        snapshot["shares"] = {str(slot): str(text) for slot, text in shares.items() if str(text)}
     store[_snapshot_mode_key(mode)] = snapshot
     return snapshot
 

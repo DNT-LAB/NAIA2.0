@@ -29,12 +29,13 @@ def register_v5_scene_routes(
     run_in_thread: AsyncRunner,
 ) -> None:
     @app.get("/api/v5-scene/thumbnail")
-    async def api_v5_scene_thumbnail(name: str = "", v: str = ""):
+    async def api_v5_scene_thumbnail(event: str = "", name: str = "", v: str = ""):
         # `v` 는 캐시 버스트용 판(revision)이라 서버가 읽지 않는다. 서비스가 파일
         # mtime/크기로 만들어 URL 에 붙이므로 **내용이 바뀌면 URL 이 바뀐다**.
         # 선례: `/api/character-viewer/thumbnail`.
         try:
-            payload = await run_in_thread(v5_scene_service(session_context).thumbnail_payload, name)
+            payload = await run_in_thread(
+                v5_scene_service(session_context).thumbnail_payload, event, name)
         except Exception as exc:
             return JSONResponse({"error": f"V5 Scene thumbnail failed: {exc}"}, status_code=500)
         if payload is None:

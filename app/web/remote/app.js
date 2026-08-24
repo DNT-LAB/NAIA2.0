@@ -818,7 +818,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260824-bulkchars1')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260824-bulkchars2')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -5173,6 +5173,18 @@ function handleDetachedMessage(event) {
     window.focus?.();
     return;
   }
+  // 분리된 메타데이터 창의 '캐릭터 일괄 적용' 위임 → 메인이 대화상자·모드 검사·전송을
+  // 모두 맡는다. 분리창이 직접 보내면 백엔드 상태는 바뀌지만 `module_state` 응답이
+  // 그 소켓으로만 가서 **메인의 캐릭터 패널이 옛 값을 그대로 보여준다**(Codex 리뷰).
+  if (data.type === 'naia_apply_characters' && Array.isArray(data.characters)) {
+    applyMetadataCharacters({
+      characters: data.characters,
+      charactersUc: Array.isArray(data.charactersUc) ? data.charactersUc : [],
+      params: data.params || {},
+    }, {withSettings: Boolean(data.withSettings)});
+    window.focus?.();
+    return;
+  }
   if (data.type !== 'naia_attach_module' || !data.moduleId) return;
   const moduleId = String(data.moduleId);
   const transferredState = (data.state && data.state.module_id === moduleId) ? data.state : null;
@@ -5634,10 +5646,6 @@ function applyMetadataSettings(payload, options = {}) {
  *  `withSettings` 가 true 면 설정값도 함께 적용한다(기존 버튼의 동작).
  */
 async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
-  if ((currentMode || modeSelect.value) !== 'NAI') {
-    showToast('Character prompts are only available in NAI mode', 'error');
-    return;
-  }
   const characters = Array.isArray(payload?.characters) ? payload.characters : [];
   const charactersUc = Array.isArray(payload?.charactersUc) ? payload.charactersUc : [];
   const validCharacters = characters
@@ -5647,6 +5655,27 @@ async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
     showToast('No character prompts in metadata', 'error');
     return;
   }
+  // ⚠️ 분리/팝업 메타데이터 창이면 **메인 창에 위임한다** — Vibe 복원과 같은 이유다.
+  //    백엔드 세션은 하나라 분리창이 보내도 상태 자체는 바뀌지만, `set_module_param`
+  //    의 응답(`module_state`)은 **보낸 소켓에만** 돌아간다(module_commands). 그러면
+  //    메인 창의 캐릭터 패널·배지가 갱신되지 않아 조용히 옛 값을 보여준다.
+  //    설정값(withSettings)까지 메인이 적용해야 파라미터 입력칸도 같이 갱신된다.
+  if (isDetachedShell && window.opener && !window.opener.closed) {
+    try {
+      window.opener.postMessage({
+        type: 'naia_apply_characters',
+        characters, charactersUc, withSettings,
+        params: payload?.params || null,
+      }, window.location.origin);
+      showToast('메인 창에 캐릭터 적용을 요청했습니다', 'success');
+      return;
+    } catch (error) {
+      // 위임 실패 시 아래 로컬 경로로 폴백.
+    }
+  }
+  // 모드/모델 검사는 **대화상자 뒤에 한 번 더** 한다(아래). 여기서 먼저 걸러 주는 것은
+  // 대화상자를 띄우고 나서 거절하는 것보다 낫기 때문이다.
+  if (!canApplyCharactersNow()) return;
   // 기존 슬롯 처리 방식을 묻는다. 취소하면 아무것도 안 한다 - 설정값까지 포함해서다
   // (반쪽만 적용해 놓고 취소한 것처럼 보이면 더 나쁘다).
   const existing = await showConfirmDialog(
@@ -5661,6 +5690,11 @@ async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
       ],
     });
   if (existing !== 'inactive' && existing !== 'overwrite') return;
+  // ⚠️ **대화상자를 기다리는 동안 모드/모델이 바뀔 수 있다.** 모드 전환은 WS 로 도는
+  //    비동기 명령이라 사용자가 고르는 사이에 WEBUI 로 넘어갈 수 있고, 그러면
+  //    백엔드는 **그 모드의 슬롯**을 고친다. NAID3 도 마찬가지다 — `openModule` 이
+  //    거절해도 반환값이 없어 호출부가 모르고 그대로 전송한다(Codex 리뷰).
+  if (!canApplyCharactersNow()) return;
 
   if (withSettings) applyMetadataSettings(payload, {silent: true});
   if (currentModuleId !== 'character') {
@@ -5676,8 +5710,27 @@ async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
     showToast('Remote connection is not open', 'error');
     return;
   }
+  // `sent` 는 **`ws.send()` 가 성공했다**는 뜻이지 백엔드가 적용했다는 뜻이 아니다.
+  // 그래서 "적용했다" 가 아니라 "보냈다" 로 말한다 — Vibe 복원도 같은 문구를 쓴다.
   const how = existing === 'overwrite' ? '덮어씀' : '기존은 비활성으로';
-  showToast(`캐릭터 ${validCharacters.length}명 적용 (${how})`, 'success');
+  showToast(`캐릭터 ${validCharacters.length}명 적용 요청 (${how})`, 'success');
+}
+
+/** 지금 캐릭터를 적용할 수 있는 상태인가. **대화상자 전후로 두 번** 부른다.
+ *
+ *  `openModule` 의 가드와 같은 조건이다. 그쪽은 반환값이 없어 호출부가 실패를
+ *  알 수 없다 — 여기서 같은 판정을 해 두면 죽은 명령을 안 보낸다.
+ */
+function canApplyCharactersNow() {
+  if ((currentMode || modeSelect.value) !== 'NAI') {
+    showToast('Character prompts are only available in NAI mode', 'error');
+    return false;
+  }
+  if (typeof naiModelBlocksReference === 'function' && naiModelBlocksReference()) {
+    showToast('NAID3에서는 캐릭터 프롬프트를 지원하지 않습니다 (다른 사양)', 'error');
+    return false;
+  }
+  return true;
 }
 
 function applyMetadataCharacterSettings(payload) {

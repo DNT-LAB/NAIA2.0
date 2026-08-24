@@ -17,6 +17,29 @@ from typing import Any
 # 여기서는 정렬 불변식만 세운다(core/character_settings.sort_character_frames).
 
 
+def _slot_is_untouched(frame: Any) -> bool:
+    """사용자가 **아무것도 넣지 않은** 슬롯인가.
+
+    기본 상태의 빈 C1 을 가리키기 위한 것이다. 프롬프트/UC 만 보면 안 된다 —
+    이름만 붙였거나 좌표만 잡아 둔 자리표시자 슬롯이 실제로 만들어진다:
+
+        · 슬롯 우클릭 -> 프롬프트가 없어도 이름을 붙인다(`characterPanel.renameSlot`)
+        · 화면은 **이름 없는** 빈 슬롯만 `(empty)` 로 그린다(`inactiveLabel`)
+        · 좌표는 프롬프트와 무관하게 설정된다(`char_pos_N`)
+
+    `uuid` 는 기준이 될 수 없다 — 정규화가 모든 슬롯에 만들어 준다.
+    """
+    if not isinstance(frame, dict):
+        return True
+    if str(frame.get("prompt") or "").strip():
+        return False
+    if str(frame.get("uc") or "").strip():
+        return False
+    if str(frame.get("custom_name") or "").strip():
+        return False
+    return not isinstance(frame.get("position"), dict)
+
+
 def _state_of(frame: Any) -> str:
     if not isinstance(frame, dict):
         return ""
@@ -157,6 +180,22 @@ class HeadlessCharacterService:
 
         어느 쪽이든 **cold 슬롯은 건드리지 않는다.** cold 는 사용자가 일부러 치워 둔
         것이라 "기존 캐릭터" 로 취급하면 놀란다 - `_apply_asset_locked` 와 같은 규약이다.
+
+        ## 좌표 정책 (의도적 선택, Codex 리뷰 2026-08-24)
+
+        새 슬롯은 좌표 없이 만든다. POS 가 CUSTOM 이면 `_seed_missing_positions` 가
+        저장 중에 AUTO 링의 **빈 자리**를 뿌린다. 그 함수는 **활성 슬롯만** 자리를
+        차지한 것으로 세므로:
+
+            inactive 로 밀려난 기존 슬롯의 좌표는 링 자리를 잡아 두지 않는다
+            -> 새 활성 슬롯이 같은 점을 받을 수 있고,
+               나중에 그 슬롯을 다시 켜면 두 슬롯이 같은 자리에 선다
+
+        **그대로 둔다.** 비활성 슬롯은 생성에 안 나가므로 링 자리를 예약하면 안 된다
+        (치워 둔 슬롯이 많을수록 아홉 자리가 금세 마른다). 재활성화 시의 겹침은
+        사용자가 옮기면 되고, 좌표 시스템 전체를 바꿀 만한 이득이 아니다.
+        ⚠️ 이건 이 함수가 만든 성질이 아니라 **선재 동작**이다 - 슬롯을 하나 끄고
+           새로 추가해도 똑같다.
         """
         context = self.context
         api_mode = context.get_api_mode()
@@ -195,9 +234,16 @@ class HeadlessCharacterService:
                     continue
                 if not isinstance(frame, dict):
                     continue
-                # 빈 슬롯까지 비활성으로 남기면 무리가 쓰레기로 찬다. 내용이 있는
-                # 것만 보존한다 - 기본 상태의 빈 C1 이 그대로 남는 것이 가장 흔하다.
-                if not str(frame.get("prompt") or "").strip() and not str(frame.get("uc") or "").strip():
+                # 기본 상태의 **빈 C1** 까지 비활성으로 남기면 무리가 쓰레기로 찬다.
+                # ⚠️ 다만 "비었다" 의 기준을 프롬프트/UC 로만 잡으면 안 된다 -
+                #    사용자가 이름을 붙이거나 좌표만 잡아 둔 자리표시자 슬롯이
+                #    소리 없이 사라진다. 그건 도달 가능한 상태다:
+                #    슬롯을 우클릭하면 프롬프트가 없어도 이름을 붙일 수 있고
+                #    (`characterPanel.renameSlot`), 화면은 이름 없는 빈 슬롯만
+                #    `(empty)` 로 그린다(`inactiveLabel`). 좌표도 프롬프트와 무관하게
+                #    설정된다(`char_pos_N`).
+                #    "아무것도 잃지 않는다" 는 약속을 지키려면 넷 다 비어야 버린다.
+                if _slot_is_untouched(frame):
                     continue
                 frame["slot_state"] = "inactive"
                 frame["is_enabled"] = False

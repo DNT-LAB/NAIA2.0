@@ -89,15 +89,25 @@ def _frame_uuid(frame: dict[str, Any], *, create: bool = False) -> str:
 def _prune_character_links(frames: list[dict]) -> list[dict]:
     """끊어진 Connect 링크를 지운다. **정렬 뒤에 부른다** — 유효성이 순서에 달렸다.
 
-    지우는 경우 셋:
+    지우는 경우 넷:
       · 자기 자신을 가리킴
       · 없는 uuid 를 가리킴 (슬롯이 지워졌다)
       · **자기보다 뒤에 있는 슬롯을 가리킴** (▲▼ 로 순서가 뒤집혔다)
+      · **이미 남을 물고 있는 슬롯을 가리킴** (사슬 금지, 사용자 지정)
 
-    마지막 것이 이 기능의 안전장치다. 참조 대상이 항상 앞에 있어야 전개 루프
-    (`_expanded_character_pairs`)가 한 번 훑는 동안 값이 확정돼 있고, 순환이
-    원천적으로 생기지 않는다. 뒤를 가리키게 된 링크는 **조용히 무시하지 않고
-    지운다** — 남겨 두면 화면에는 연결로 보이는데 생성물에는 안 실린다.
+    셋째가 순서 안전장치다. 참조 대상이 항상 앞에 있어야 전개 루프가 한 번 훑는 동안
+    값이 확정돼 있고, 순환이 원천적으로 생기지 않는다.
+
+    넷째는 **사슬 자체를 막는다**(사용자 지정: "Connect 앵커를 건 슬롯은 다른
+    슬롯에서 다시 못 걸게"). C3→C2→C1 이 되면 C3 가 무엇을 물려받는지가 C2 의 구간
+    설정에까지 달려 있어, 화면만 보고는 결과를 예측할 수 없다. 원본은 언제나 남을
+    물지 않은 슬롯이다.
+
+    ⚠️ 앞에서부터 훑는다. 원본은 늘 앞에 있으므로 그 슬롯의 링크는 이미 이 루프에서
+       정리가 끝나 있다 — 그래서 한 번만 훑어도 "정리된 뒤의 값" 을 보게 된다.
+
+    끊어진 링크는 **조용히 무시하지 않고 지운다** — 남겨 두면 화면에는 연결로 보이는데
+    생성물에는 안 실린다.
     """
     order = {}
     for index, frame in enumerate(frames):
@@ -110,6 +120,9 @@ def _prune_character_links(frames: list[dict]) -> list[dict]:
             continue
         source_index = order.get(link)
         if source_index is None or source_index >= index:
+            frame["connect_to"] = ""
+            continue
+        if str(frames[source_index].get("connect_to") or ""):
             frame["connect_to"] = ""
     return frames
 

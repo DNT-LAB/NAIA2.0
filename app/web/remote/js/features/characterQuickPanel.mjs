@@ -475,6 +475,13 @@ export function createCharacterQuickPanel({
    *  값은 표시 번호가 아니라 **slot_uuid** 다 - 번호는 ▼·비활성화로 밀린다. */
   function connectControl(character, index, ordinal, slots) {
     if (ordinal <= 1) return '';
+    // ⚠️ **원본 역할인 슬롯에는 Connect 를 주지 않는다.** 주면 C3→C2 를 걸어 둔 뒤
+    //    C2→C1 을 걸 수 있고, 그 순간 사슬 금지 규칙에 걸려 C3 의 링크가 조용히
+    //    사라진다(백엔드 `_prune_character_links`). 애초에 고를 수 없게 해서 그
+    //    상황을 만들지 않는다 — 슬롯은 원본이거나 대상이거나 둘 다 아니거나 셋 중
+    //    하나다. 이 자리에는 `⇩N` 원본 배지가 이미 서서 역할을 말한다.
+    const uuid = String(character.slot_uuid || '');
+    if (uuid && slots.some(item => String(item.character.connect_to || '') === uuid)) return '';
     const current = String(character.connect_to || '');
     const on = !!current;
     const sourceOrdinal = slots.findIndex(item => String(item.character.slot_uuid || '') === current) + 1;
@@ -542,6 +549,11 @@ export function createCharacterQuickPanel({
       + row('', '연결 없음', '이 슬롯만의 캐릭터', !current)
       + slots.slice(0, ordinal - 1).map((item, i) => {
           const uuid = String(item.character.slot_uuid || '');
+          // ⚠️ **이미 남을 물고 있는 슬롯은 후보가 아니다**(사용자 지정: 사슬 금지).
+          //    C3→C2→C1 이 되면 C3 가 무엇을 물려받는지가 C2 의 구간 설정에까지
+          //    달려 있어 화면만 보고 결과를 예측할 수 없다. 백엔드도 같은 규칙으로
+          //    막지만(`_prune_character_links`), 고를 수 없어야 헛클릭이 없다.
+          if (String(item.character.connect_to || '')) return '';
           const name = String(item.character.custom_name || '').trim();
           const hint = name || String(item.character.prompt || '')
             .replace(CONNECT_OPEN_RE, '').replace(CONNECT_CLOSE_RE, '')
@@ -607,10 +619,19 @@ export function createCharacterQuickPanel({
   }
 
   /** 한 줄 라벨. 이름이 있으면 이름, 없으면 프롬프트 앞 태그. */
-  function slotLabel(character, ordinal) {
+  /** 한 줄 라벨. 이름이 있으면 이름, 없으면 프롬프트 앞 태그.
+   *
+   *  연결된 슬롯은 `C2 · C1 + smile` 로 쓴다(사용자 지정). 자기가 적은 것만 보여 주면
+   *  접힌 상태에서 **몸통이 어디서 오는지가 화면에서 사라진다** — 그 슬롯의 결과는
+   *  대부분 물려받은 쪽이다.
+   *
+   *  @param sourceOrdinal 물려받는 원본의 1-based 번호(없으면 0).
+   */
+  function slotLabel(character, ordinal, sourceOrdinal = 0) {
     const tag = 'C' + ordinal;
+    const lead = sourceOrdinal ? `${tag} · C${sourceOrdinal}` : tag;
     const custom = String(character.custom_name || '').trim();
-    if (custom) return `${tag} · ${custom}`;
+    if (custom) return sourceOrdinal ? `${lead} + ${custom}` : `${tag} · ${custom}`;
     // 마커는 이름이 아니다. 안 걷어내면 접힌 슬롯이 `C1 · &connect: girl` 이 되어
     // 정작 구분에 필요한 태그 한 칸을 문법이 잡아먹는다(실측).
     const first = String(character.prompt || '')
@@ -619,7 +640,15 @@ export function createCharacterQuickPanel({
       .split(',').map(part => part.trim()).filter(Boolean);
     // 앞 태그는 보통 `girl` 이라 그것만으로는 구분이 안 된다 - 둘째까지 본다.
     const hint = first.slice(0, 2).join(', ');
+    if (sourceOrdinal) return hint ? `${lead} + ${hint}` : lead;
     return hint ? `${tag} · ${hint}` : tag;
+  }
+
+  /** 이 슬롯이 물려받는 원본의 1-based 번호. 연결이 없거나 못 찾으면 0. */
+  function sourceOrdinalOf(character, slots) {
+    const link = String(character.connect_to || '');
+    if (!link) return 0;
+    return slots.findIndex(item => String(item.character.slot_uuid || '') === link) + 1;
   }
 
   function slotHtml(character, index, ordinal, activeCount, slots) {
@@ -668,7 +697,7 @@ export function createCharacterQuickPanel({
       + `<button type="button" class="cq-slot-head" data-cq-toggle="${index}"`
       + ` aria-expanded="${isOpen ? 'true' : 'false'}">`
       + `<span class="cq-slot-title" data-cq-label="${index}">`
-      + `${escHtml(slotLabel(character, ordinal))}</span></button>`
+      + `${escHtml(slotLabel(character, ordinal, sourceOrdinalOf(character, slots || [])))}</span></button>`
       + connectSourceBadge(character, slots || [])
       + connectControl(character, index, ordinal, slots || [])
       + (canDeactivate
@@ -742,13 +771,14 @@ export function createCharacterQuickPanel({
     const chars = (state && state.characters) || [];
     // 라벨은 프롬프트에서 파생되므로 **여기서** 고친다. 다시 그리면 편집 중인
     // 칸이 교체돼 포커스가 빠진다(위 signature 주석 참조).
+    const labelSlots = activeSlots(state);
     const ordinalOf = new Map();
-    activeSlots(state).forEach(({index}, i) => ordinalOf.set(index, i + 1));
+    labelSlots.forEach(({index}, i) => ordinalOf.set(index, i + 1));
     mount.querySelectorAll('[data-cq-label]').forEach(element => {
       const index = Number(element.dataset.cqLabel);
       const character = chars[index];
       if (!character) return;
-      const next = slotLabel(character, ordinalOf.get(index) || 1);
+      const next = slotLabel(character, ordinalOf.get(index) || 1, sourceOrdinalOf(character, labelSlots));
       if (element.textContent !== next) element.textContent = next;
     });
     mount.querySelectorAll('[data-cq-field]').forEach(element => {

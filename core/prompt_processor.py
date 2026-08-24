@@ -14,6 +14,17 @@ from core.resolution_utils import (
     nearest_standard_1mp_resolution,
 )
 
+# 인물 수 태그. 최종 포맷에서 main -> prefix 맨 앞으로 **옮겨진다**(아래 `_step_final_format`).
+# ⚠️ 그래서 조립된 프롬프트만 보면 `1girl` 이 프롬프트 엔지니어링이 붙인 것처럼 보인다.
+#    실제로는 사용자의 장면 태그다 - 되짚어야 하는 쪽(V5 Scene 저장)이 여기를 함께 봐야
+#    해서 모듈 상수로 올렸다. 같은 목록을 두 벌 두면 한쪽만 늘어난다.
+PERSON_TAG_SETS = {
+    "boys": {"1boy", "2boys", "3boys", "4boys", "5boys", "6+boys"},
+    "girls": {"1girl", "2girls", "3girls", "4girls", "5girls", "6+girls"},
+    "others": {"1other", "2others", "3others", "4others", "5others", "6+others"},
+}
+ALL_PERSON_TAGS = PERSON_TAG_SETS["boys"] | PERSON_TAG_SETS["girls"] | PERSON_TAG_SETS["others"]
+
 # 가중치 구문 감지 정규식 (C-2: \d+\.?\d* 로 정밀화)
 _WEIGHT_WEBUI_RE = re.compile(r'^\(.*:\d+\.?\d*\)$')   # (tag:1.2) — A1111 개별 가중치
 _WEIGHT_NAI_RE = re.compile(r'^\d+\.?\d*::.*\s*::$')    # 0.85::tag :: — NAI 개별 가중치
@@ -653,13 +664,9 @@ class PromptProcessor:
         if context.global_append_tags:
             context.main_tags.extend(context.global_append_tags)
 
-        # 인물 태그 세트 정의
-        person_sets = {
-            "boys": {"1boy", "2boys", "3boys", "4boys", "5boys", "6+boys"},
-            "girls": {"1girl", "2girls", "3girls", "4girls", "5girls", "6+girls"},
-            "others": {"1other", "2others", "3others", "4others", "5others", "6+others"}
-        }
-        all_person_tags = person_sets["boys"] | person_sets["girls"] | person_sets["others"]
+        # 인물 태그 세트 — 모듈 상수(PERSON_TAG_SETS/ALL_PERSON_TAGS)를 쓴다.
+        person_sets = PERSON_TAG_SETS
+        all_person_tags = ALL_PERSON_TAGS
         
         person_tags_found = []
         new_main_tags = []

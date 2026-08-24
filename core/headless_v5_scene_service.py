@@ -27,6 +27,108 @@ from core.v5_scene_store import (
 )
 
 
+def _tags_of(text: str) -> list[str]:
+    """조립된 프롬프트 조각에서 태그만 뽑는다. 주석(`#...`) 줄은 태그가 아니다."""
+    out = []
+    for part in str(text or "").replace("\n", ",").split(","):
+        tag = part.strip()
+        if tag and not tag.startswith("#"):
+            out.append(tag)
+    return out
+
+
+def bare_prompt(context: Any) -> str:
+    """씬에 담을 **사용자의 구도**만 남긴다 - 프롬프트 엔지니어링이 덧댄 것은 뺀다.
+
+    화면의 프롬프트 상자에는 조립된 결과가 들어 있다(Random/생성이 되돌려 씀).
+    거기엔 작가·품질·연도처럼 **그때의 취향**이 섞여 있다. 씬은 구도를 담는 것이라
+    그걸 같이 담으면 나중에 불러왔을 때 남의 취향이 따라온다 - 그래서 뺀다.
+    되돌릴 때 지금 설정으로 다시 입힌다(`redecorate`).
+
+    ⚠️ **중간 덩어리만 떼면 `1girl` 을 잃는다.** 최종 포맷이 인물 수 태그를
+       main -> prefix 맨 앞으로 옮기기 때문이다(`prompt_processor._step_final_format`).
+       사용자가 남기라고 짚은 것도 `1girl, 3koma, silent comic` 이었다.
+       그래서 파이프라인이 **옮기기 전에** 남긴 스냅샷을 먼저 쓴다.
+    """
+    box = str(getattr(context, "prompt_text", "") or "")
+    run = getattr(context, "current_prompt_context", None)
+    meta = getattr(run, "metadata", None)
+    if isinstance(meta, dict):
+        tags = meta.get("boost_main_tags")
+        final = str(getattr(run, "final_prompt", "") or "")
+        # ⚠️ 스냅샷은 **마지막 파이프라인 실행**의 것이다. 그 뒤에 사용자가 상자를
+        #    손으로 고쳤으면 낡은 구도를 담게 된다 - 상자와 산출물이 같을 때만 믿는다.
+        if tags and final.strip() == box.strip():
+            return ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+    return _bare_from_text(box)
+
+
+def _bare_from_text(text: str) -> str:
+    """폴백: 조립된 글을 구조로 되짚는다.
+
+    최종 포맷의 산출물은 `prefix \\n\\n main \\n\\n postfix` 다(`_inject_boost_at_main`
+    이 같은 규약을 쓴다). 덩어리가 셋이면 가운데가 사용자 몫이고, 앞 덩어리에서는
+    **인물 수 태그만** 데려온다 - 그건 옮겨졌을 뿐 원래 사용자 것이다.
+    덩어리 경계가 없으면(손으로 친 프롬프트) 통째로 사용자 것이다.
+    """
+    from core.prompt_processor import ALL_PERSON_TAGS
+
+    raw = str(text or "")
+    blocks = raw.split("\n\n")
+    if len(blocks) < 2:
+        return ", ".join(_tags_of(raw))
+    # 앞=prefix, 뒤=postfix, 나머지 가운데가 main. 덩어리가 둘뿐이면 main 이 비었던 것이라
+    # 가운데는 없고 인물 태그만 남는다.
+    head, middle = blocks[0], blocks[1:-1] if len(blocks) > 2 else []
+    person = [tag for tag in _tags_of(head) if tag in ALL_PERSON_TAGS]
+    body = []
+    for block in middle:
+        body.extend(_tags_of(block))
+    return ", ".join(person + body)
+
+
+def redecorate(context: Any, bare: str) -> str:
+    """저장된 구도를 **지금의** 프롬프트 엔지니어링 설정으로 다시 입힌다(사용자 지정).
+
+    상자에 든 글은 생성 경로에서 파이프라인을 타지 않으므로
+    (`HeadlessGenerationService._expand_input_wildcards`), 여기서 입혀 두지 않으면
+    구도만 덩그러니 남아 작가도 품질 태그도 없이 나간다.
+
+    ⚠️ **전체 파이프라인을 돌리지 않는다.** `PromptProcessor.process()` 는 와일드카드를
+       굴리고 해상도를 맞추고 캐릭터 훅까지 깨운다 - 되돌리기 한 번에 그만한 부작용을
+       낼 이유가 없다. 프롬프트 엔지니어링 훅과 최종 포맷만 태운다.
+    ⚠️ **auto_hide 는 무시한다**(사용자 지정). 씬의 태그는 이미 고른 것이라
+       자동 숨김을 다시 걸면 방금 되돌린 구도에서 태그가 사라진다.
+    """
+    tags = _tags_of(bare)
+    if not tags:
+        return str(bare or "")
+    try:
+        import pandas as pd
+
+        from core.prompt_context import PromptContext
+        from core.prompt_engineering_runtime import PromptEngineeringHeadlessPostHook
+        from core.prompt_processor import PromptProcessor
+
+        run = PromptContext(
+            # 빈 행이다 - 씬에는 DB 행이 없다. 작가/작품/캐릭터를 넣으면 프롬프트
+            # 엔지니어링이 **그 행의** 작가를 앞에 꽂는다(씬에는 없는 정보).
+            source_row=pd.Series({"general": ", ".join(tags)}),
+            settings={"api_mode": context.get_api_mode()},
+            main_tags=list(tags),
+        )
+        previous = getattr(context, "skip_prompt_engineering_auto_hide", False)
+        context.skip_prompt_engineering_auto_hide = True
+        try:
+            run = PromptEngineeringHeadlessPostHook(context).execute_pipeline_hook(run)
+            return PromptProcessor(context)._step_final_format(run)
+        finally:
+            context.skip_prompt_engineering_auto_hide = previous
+    except Exception:
+        # 입히기 실패가 되돌리기를 막지 않는다 - 구도라도 돌려주는 편이 낫다.
+        return str(bare or "")
+
+
 def _describe(scene: dict[str, Any]) -> str:
     """카드에 한 줄로 붙일 설명. 메인 프롬프트의 앞 태그를 쓴다.
 
@@ -155,7 +257,9 @@ class HeadlessV5SceneService:
         scene = {
             "name": clean,
             "mode": mode,
-            "prompt": str(getattr(context, "prompt_text", "") or ""),
+            # 프롬프트 엔지니어링이 덧댄 것은 담지 않는다 - 되돌릴 때 지금 설정으로
+            # 다시 입힌다(사용자 지정). 네거티브는 사용자가 직접 치는 칸이라 그대로.
+            "prompt": bare_prompt(context),
             "negative": str(getattr(context, "negative_prompt_text", "") or ""),
             "resolution": str(params.get("resolution") or ""),
             "position_mode": str(settings.get("position_mode") or "auto"),
@@ -256,18 +360,28 @@ class HeadlessV5SceneService:
         clear_character_roll_snapshot(context, mode)
 
         # 2) 프롬프트 · 해상도
-        context.prompt_text = scene["prompt"]
+        # 담을 때 뺀 프롬프트 엔지니어링을 여기서 **지금 설정으로** 다시 입힌다.
+        context.prompt_text = redecorate(context, scene["prompt"])
         context.negative_prompt_text = scene["negative"]
         if scene["resolution"]:
             context.set_param("resolution", scene["resolution"])
         context.save_remote_ui_state()
         context.publish("remote_params_changed", context.generation_param_schema_payload())
-        context.publish("prompt_sync", {
+        state = self.state()
+        # ⚠️ **`publish` 로는 브라우저에 아무것도 안 간다.** 그건 내부 이벤트 버스이고
+        #    WebSocket 이 아니다 - 이걸 몰라서 되돌리기가 백엔드만 바꾸고 화면은 옛 글을
+        #    든 채였다(재접속해야 보였다). 모듈 응답에 실어 보내는 것이 규약이다.
+        # ⚠️ **force 도 함께 필요하다.** `syncPrompts` 는 사용자가 프롬프트를 만지는 중이면
+        #    서버 값을 버린다(치던 글 보호). 되돌리기는 사용자가 직접 누른 **의도된 교체**라
+        #    그 보호를 넘어야 한다 - 모드 전환·`get_prompt` 와 같은 이유다(`session_commands`).
+        state["_headless_extra_messages"] = [{
             "type": "prompt_sync",
             "prompt": context.prompt_text,
+            "negative": context.negative_prompt_text,
             "negative_prompt": context.negative_prompt_text,
-        })
-        return self.state()
+            "force": True,
+        }]
+        return state
 
     # ── 커맨드 ───────────────────────────────────────────────────────────
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:

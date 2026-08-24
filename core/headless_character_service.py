@@ -449,6 +449,18 @@ class HeadlessCharacterService:
             if index is not None:
                 self.ensure_frame(frames, index)["custom_name"] = str(value or "")
                 invalidate_snapshot = True
+        elif key.startswith("char_connect_"):
+            # Connect - 앞선 활성 슬롯의 전개 결과를 물려받는다. 값은 원본 슬롯의
+            # **uuid**(빈 문자열이면 연결 해제).
+            #
+            # 여기서는 넘어온 값을 그대로 적기만 한다. 유효성(자기 참조 · 없는 uuid ·
+            # 뒤를 가리킴)은 `normalize_character_settings` 안의
+            # `_prune_character_links` 가 저장·로드 양쪽에서 판정한다 — 순서가 걸린
+            # 판정이라 프레임을 정렬한 뒤에 해야 옳고, 그 자리가 거기다.
+            index = context._index_from_key(key, "char_connect_")
+            if index is not None:
+                self.ensure_frame(frames, index)["connect_to"] = str(value or "").strip()
+                invalidate_snapshot = True
         else:
             return None
         prompt_context = getattr(context, "current_prompt_context", None)

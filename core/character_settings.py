@@ -85,6 +85,34 @@ def _frame_uuid(frame: dict[str, Any], *, create: bool = False) -> str:
     return _new_character_uuid() if create else ""
 
 
+def _prune_character_links(frames: list[dict]) -> list[dict]:
+    """끊어진 Connect 링크를 지운다. **정렬 뒤에 부른다** — 유효성이 순서에 달렸다.
+
+    지우는 경우 셋:
+      · 자기 자신을 가리킴
+      · 없는 uuid 를 가리킴 (슬롯이 지워졌다)
+      · **자기보다 뒤에 있는 슬롯을 가리킴** (▲▼ 로 순서가 뒤집혔다)
+
+    마지막 것이 이 기능의 안전장치다. 참조 대상이 항상 앞에 있어야 전개 루프
+    (`_expanded_character_pairs`)가 한 번 훑는 동안 값이 확정돼 있고, 순환이
+    원천적으로 생기지 않는다. 뒤를 가리키게 된 링크는 **조용히 무시하지 않고
+    지운다** — 남겨 두면 화면에는 연결로 보이는데 생성물에는 안 실린다.
+    """
+    order = {}
+    for index, frame in enumerate(frames):
+        uuid = str(_frame_uuid(frame) or "")
+        if uuid:
+            order[uuid] = index
+    for index, frame in enumerate(frames):
+        link = str(frame.get("connect_to") or "")
+        if not link:
+            continue
+        source_index = order.get(link)
+        if source_index is None or source_index >= index:
+            frame["connect_to"] = ""
+    return frames
+
+
 def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict, bool]:
     data = raw if isinstance(raw, dict) else {}
     settings = default_character_settings()
@@ -125,8 +153,16 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 "return_slot_state": str(frame.get("return_slot_state") or ""),
                 "custom_name": str(frame.get("custom_name") or frame.get("slot_name") or ""),
                 "position": normalize_position(frame.get("position")),
+                # Connect - 앞선 활성 슬롯의 **전개 결과**를 물려받는다. 값은 그 슬롯의
+                # uuid 다(표시 번호가 아니다).
+                #
+                # ⚠️ 번호로 저장하면 안 된다. `sort_character_frames` 가 무리별로 다시
+                #    묶고 ▲▼·비활성화가 번호를 밀기 때문에, C1 을 가리키던 링크가 어느
+                #    날 조용히 다른 캐릭터를 가리킨다. "자기보다 낮은 번호만" 은 화면에서
+                #    거는 제약이고, 저장은 안정 uuid 로 한다.
+                "connect_to": str(frame.get("connect_to") or ""),
             })
-    settings["character_frames"] = sort_character_frames(normalized_frames)
+    settings["character_frames"] = _prune_character_links(sort_character_frames(normalized_frames))
     # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.
     #   · AUTO   - `auto_character_positions` 가 구운 고정 자리
     #   · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
@@ -489,10 +525,16 @@ def active_character_frames(settings: dict | None) -> list[dict]:
         return []
     # ⚠️ 끈 슬롯(`is_muted`)은 활성 무리에 **남아 있지만 나가지 않는다.**
     #    `is_enabled` 가 그 둘을 이미 접어 둔 파생값이라 그것만 보면 된다.
+    #
+    # ⚠️ 빈 프롬프트는 원래 여기서 탈락한다. 그런데 Connect 를 쓰면 프롬프트 칸이
+    #    "추가할" 칸이 되어 **비워 두는 것이 정상**이다(앞 슬롯을 그대로 물려받는
+    #    경우). 링크가 있으면 통과시키지 않으면 그 슬롯은 화면에는 있는데 생성물에는
+    #    없다. 링크 유효성은 `_prune_character_links` 가 이미 정리해 두었다.
     return [
         frame
         for frame in normalized.get("character_frames", [])
-        if frame.get("is_enabled") and str(frame.get("prompt") or "").strip()
+        if frame.get("is_enabled")
+        and (str(frame.get("prompt") or "").strip() or str(frame.get("connect_to") or "").strip())
     ]
 
 
@@ -991,6 +1033,17 @@ def _replay_character_snapshot_rolls(app_context, snapshot: dict, *, reuse_curre
                 history.setdefault(key, []).append(str(roll.get("value") or ""))
 
 
+def _join_character_text(base: str, own: str) -> str:
+    """물려받은 텍스트 뒤에 이 슬롯이 직접 쓴 것을 잇는다. 한쪽이 비면 다른 쪽 그대로."""
+    left = str(base or "").strip().strip(",").strip()
+    right = str(own or "").strip().strip(",").strip()
+    if not left:
+        return right
+    if not right:
+        return left
+    return f"{left}, {right}"
+
+
 def _expand_character_text(
     text: str,
     processor: WildcardProcessor | None,
@@ -1086,6 +1139,10 @@ def character_params_from_settings(
     characters = []
     ucs = []
     character_ids = []
+    # Connect: 앞선 슬롯의 **전개 결과**를 물려받는다. 이 루프가 활성 프레임을 화면
+    # 순서대로 한 번 훑고, 링크는 항상 앞을 가리키므로(`_prune_character_links`)
+    # 참조 시점에 값이 이미 확정돼 있다. 별도의 패스도, 순서 뒤집기도 필요 없다.
+    expanded_by_uuid: dict[str, tuple[str, str]] = {}
     for slot_index, frame in enumerate(frames, 1):
         slot = frame_slot_ids[slot_index - 1] if slot_index - 1 < len(frame_slot_ids) else str(slot_index)
         frozen_payload = frozen.get(slot)
@@ -1096,20 +1153,25 @@ def character_params_from_settings(
             if isinstance(rolls, list):
                 _append_frozen_character_roll(rolls, slot, prompt, slot_index)
         else:
-            prompt = _expand_character_text(
+            # 물려받은 것이 앞, 이 슬롯이 직접 쓴 것이 뒤 (사용자 지정: 연결 중에는
+            # 두 칸이 "추가할" 칸이 된다). 고정된 원본을 물려받으면 그 고정값이 온다 —
+            # 원본이 어느 분기로 확정됐든 `expanded_by_uuid` 에는 결과만 담기기 때문.
+            base_prompt, base_uc = expanded_by_uuid.get(str(frame.get("connect_to") or ""), ("", ""))
+            prompt = _join_character_text(base_prompt, _expand_character_text(
                 frame.get("prompt", ""),
                 processor,
                 context,
                 slot=slot,
                 slot_label=slot_index,
-            )
-            uc = _expand_character_text(
+            ))
+            uc = _join_character_text(base_uc, _expand_character_text(
                 frame.get("uc", ""),
                 processor,
                 context,
                 slot=slot,
                 slot_label=slot_index,
-            )
+            ))
+        expanded_by_uuid[slot] = (prompt, uc)
         if prompt:
             characters.append(prompt)
             ucs.append(uc)
@@ -1317,6 +1379,10 @@ def character_state_from_settings(
             "prompt": str(frame.get("prompt") or ""),
             "uc": str(frame.get("uc") or ""),
             "position": normalize_position(frame.get("position")),
+            # Connect 원본의 uuid(빈 문자열이면 연결 없음). 끊어진 링크는
+            # `_prune_character_links` 가 정규화에서 이미 지웠으므로 여기 오는 값은
+            # **항상 앞선 슬롯**을 가리킨다.
+            "connect_to": str(frame.get("connect_to") or ""),
         })
 
     # SSOT: the preview reads the stored roll snapshot for this mode — it NEVER

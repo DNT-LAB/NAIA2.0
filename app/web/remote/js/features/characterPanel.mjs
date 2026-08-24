@@ -325,7 +325,30 @@ export function createCharacterPanel({
    *   "활성은 최소 하나" 는 여기(UI)에서만 세운다. 백엔드에 강제하면 활성 0을
    *   정상 상태로 쓰는 기존 경로 두 개가 깨진다(Cold 로 비우기 · 조건부 스킵 판정).
    */
-  function renderWorkingSlot(character, index, totalCount, ordinal, lastActive) {
+  /** Connect 드롭다운. **자기보다 앞선 활성 슬롯만** 후보다(사용자 지정).
+   *
+   *  그 제약이 곧 안전장치다 - 백엔드 전개 루프가 활성 프레임을 화면 순서대로 한 번
+   *  훑으므로, 앞만 가리키면 참조 시점에 값이 이미 확정돼 있고 순환이 생길 수 없다.
+   *  값은 표시 번호가 아니라 **slot_uuid** 다 - 번호는 ▲▼·비활성화로 밀린다.
+   *  C1 은 앞이 없으므로 아예 그리지 않는다. */
+  function connectControl(character, index, ordinal, activeSlots) {
+    if (!character.active || ordinal <= 1) return '';
+    const current = String(character.connect_to || '');
+    const options = activeSlots.slice(0, ordinal - 1).map((item, i) => {
+      const uuid = String(item.character.slot_uuid || '');
+      const name = String(item.character.custom_name || '').trim();
+      const text = name ? `C${i + 1} · ${name}` : `C${i + 1}`;
+      return `<option value="${escAttr(uuid)}"${uuid === current ? ' selected' : ''}>${escHtml(text)}</option>`;
+    }).join('');
+    const on = !!current;
+    return `<label class="mod-char-connect${on ? ' is-on' : ''}"`
+      + ` data-naia-guide="Connect - 앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n연결 중에는 아래 두 칸이 '추가할' 칸이 됩니다.">`
+      + `<span class="mod-char-connect-tag">${on ? '&#128279;' : 'Connect'}</span>`
+      + `<select onchange="setModuleParam('character','char_connect_${index}',this.value)">`
+      + `<option value=""${on ? '' : ' selected'}>연결 없음</option>${options}</select></label>`;
+  }
+
+  function renderWorkingSlot(character, index, totalCount, ordinal, lastActive, activeSlots) {
     const active = !!character.active;
     const customName = String(character.custom_name || '').trim();
     const label = active
@@ -343,6 +366,8 @@ export function createCharacterPanel({
     // ⚠️ ▼(비활성으로 내림)와 **다른 축**이다. 그쪽은 목록에서 치우고 번호를
     //    다시 매긴다. 예전에는 축이 하나라 체크박스가 곧 ▼ 였고, 무리를 나누며
     //    체크박스를 걷어내자 제자리에서 끌 방법이 사라졌다(사용자 제보).
+    // 연결 중이면 두 칸의 뜻이 바뀐다 - 대체가 아니라 **덧붙이기**다(사용자 지정).
+    const connected = active && !!String(character.connect_to || '');
     const muted = !!character.muted;
     const enableBox = active
       ? `<label class="mod-char-en" data-naia-title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">`
@@ -350,18 +375,19 @@ export function createCharacterPanel({
         + ` oninput="setModuleParam('character','char_muted_${index}',String(!this.checked))"></label>`
       : '';
     return `
-      <div class="mod-char-block ${active ? 'is-active' : 'is-inactive'}${muted ? ' is-muted' : ''}" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
+      <div class="mod-char-block ${active ? 'is-active' : 'is-inactive'}${muted ? ' is-muted' : ''}${connected ? ' is-connected' : ''}" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
         <div class="mod-char-header">
           ${enableBox}
           <span class="mod-char-title">${label}</span>
           <div class="mod-char-card-actions">
+            ${connectControl(character, index, ordinal, activeSlots || [])}
             ${moveBtn}
             <button class="mod-btn-square" aria-label="Move to Cold" data-naia-title="Cold 보관함으로" onclick="setCharacterSlotState(${index}, 'cold')">-</button>
             <button class="mod-btn-sm mod-btn-danger" ${totalCount > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${index})">Remove</button>
           </div>
         </div>
-        <textarea class="mod-textarea mod-char-prompt" placeholder="character prompt..." oninput="onModTextEdit('character','char_prompt_${index}',this.value)">${escHtml(character.prompt)}</textarea>
-        <textarea class="mod-textarea mod-uc mod-char-uc" placeholder="negative prompt (UC)..." oninput="onModTextEdit('character','char_uc_${index}',this.value)">${escHtml(character.uc)}</textarea>
+        <textarea class="mod-textarea mod-char-prompt" placeholder="${connected ? '추가할 캐릭터 프롬프트...' : 'character prompt...'}" oninput="onModTextEdit('character','char_prompt_${index}',this.value)">${escHtml(character.prompt)}</textarea>
+        <textarea class="mod-textarea mod-uc mod-char-uc" placeholder="${connected ? '추가할 캐릭터 네거티브...' : 'negative prompt (UC)...'}" oninput="onModTextEdit('character','char_uc_${index}',this.value)">${escHtml(character.uc)}</textarea>
       </div>
     `;
   }
@@ -438,7 +464,7 @@ export function createCharacterPanel({
     const charsHtml = workingSlots.length
       ? [
           activeSlots.map(({character, index}, i) =>
-            renderWorkingSlot(character, index, chars.length, i + 1, activeSlots.length <= 1)).join(''),
+            renderWorkingSlot(character, index, chars.length, i + 1, activeSlots.length <= 1, activeSlots)).join(''),
           addBtn,
           inactiveSlots.length
             ? `<div class="mod-section-label mod-char-group-label">비활성 (${inactiveSlots.length})</div>`

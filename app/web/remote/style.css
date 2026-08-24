@@ -19233,6 +19233,37 @@ body.detached-module .mod-grid-3 {
   transition: width 0.3s ease;
 }
 
+/* ── 캐릭터 슬롯 Connect ─────────────────────────────────────────────────────
+   앞선 활성 슬롯의 캐릭터를 그대로 물려받는다(사용자 지정). 카드 머리의 액션 줄에
+   앉되, 옆의 정사각 버튼들과 높이를 맞춘다. 연결되면 사슬 아이콘만 남겨 좁게 쓴다 —
+   무엇에 연결됐는지는 select 가 이미 말하고 있다. */
+.mod-char-connect {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 5px 0 6px;
+  border: 1px solid var(--border-dim); border-radius: 4px;
+  background: rgba(255,255,255,0.03); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1;
+  cursor: pointer;
+}
+.mod-char-connect:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+.mod-char-connect.is-on {
+  border-color: rgba(106,191,123,0.7);
+  background: rgba(38,74,48,0.55); color: #cdeed6;
+}
+.mod-char-connect-tag { white-space: nowrap; letter-spacing: 0.04em; }
+.mod-char-connect select {
+  border: none; background: transparent; color: inherit;
+  font-family: inherit; font-size: inherit; cursor: pointer;
+  max-width: 104px; padding: 0; outline: none;
+}
+.mod-char-connect select option { background: #1a1a26; color: var(--text-primary); }
+/* 연결된 슬롯은 물려받은 몸통이 따로 있다 — 두 칸이 '추가분' 이라는 것을 테두리로
+   말한다. 색은 Connect 칩과 같은 계열이라 눈이 둘을 하나로 묶는다. */
+.mod-char-block.is-connected .mod-char-prompt,
+.mod-char-block.is-connected .mod-char-uc {
+  border-left: 2px solid rgba(106,191,123,0.55);
+}
+
 /* ── 시드+해상도 고정 알약 ───────────────────────────────────────────────────
    결과 뷰어 **좌측 하단**. NovelAI 공식과 사양을 맞춘 것이다(사용자 지정).
    ⚠️ 꺼져 있을 때는 **작아야 한다** — 결과 이미지를 가리면 방해가 된다. 그래서

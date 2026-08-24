@@ -472,6 +472,13 @@ export function createV5ScenePanel({
       return;
     }
     if (indexOfScene(name) < 0) return;
+    // ⚠️ 이미 한 장 만드는 중이면 **여기서 거절한다.** 그대로 두면 아래 `fire` 가
+    //    같은 이유로 서는데, 그때 나가는 문구는 왜 막혔는지 말하지 않는다 -
+    //    사용자가 원인을 스스로 찾아야 한다(실측 제보).
+    if (generatingNow) {
+      showToast('이미 생성 중입니다 — 끝난 뒤에 눌러 주세요', 'error');
+      return;
+    }
     running = true;
     render();
     // 지금 화면은 이미 그 컷이다(불러오기를 누른 직후에만 켜지므로). 바로 한 장 낸다.

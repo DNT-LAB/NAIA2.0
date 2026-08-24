@@ -504,8 +504,16 @@ class HeadlessGenerationService:
         # return 해서, 토큰이 NAI 로 그대로 나가 메타데이터에 문자열로 박혔다
         # (사용자 제보 2026-08-21: "preset으로 적용해도 메타데이터를 보니까 그대로
         # 들어가네요").
+        # ⚠️ `-태그`(네거티브 이동)도 이 함수가 하는 일인데 조건에서 빠져 있었다.
+        #    그래서 와일드카드나 프리셋이 **같이 있을 때만** 마이너스가 먹었고, 평범한
+        #    프롬프트의 `-bad hands` 는 그 문자열 그대로 NAI 로 나갔다(실측).
+        #    바로 위 `preset:` 누락과 같은 계열의 두 번째 사고다.
+        #
+        #    `"-" in text` 로 잡으면 `long-sleeves` 같은 흔한 태그 때문에 거의 모든
+        #    프롬프트가 통과해 매 생성마다 전개기를 헛돌린다. **태그 맨 앞의 `-`** 만 본다.
         if ("__" not in text and "<" not in text and "$" not in text
-                and "preset:" not in text.lower()):
+                and "preset:" not in text.lower()
+                and not any(part.strip().startswith("-") for part in text.split(","))):
             return
         try:
             import weakref

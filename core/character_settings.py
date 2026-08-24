@@ -1117,6 +1117,50 @@ def strip_connect_markers(text: str) -> str:
     return _join_character_text(_join_character_text(head, shared), tail)
 
 
+# 연결된 슬롯에서 `-태그` 는 **빼기**다(사용자 지정). 메인 프롬프트 입력창의 `-태그` 는
+# 네거티브로 옮기는 뜻이지만(headless_generation_service._expand_input_wildcards), 여기서는
+# 물려받은 것 중 그 태그를 지운다 — 같은 캐릭터인데 한 가지만 빼고 싶은 경우가 이 기능의
+# 본래 용도다.
+#
+# ⚠️ `::` 가 있으면 건드리지 않는다. `-1.0::tag ::` 는 NAI 음수 가중치라 빼기가 아니다
+#    (메인 입력창 쪽과 같은 판정).
+_NAI_WEIGHT_HEAD = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*")
+_NAI_WEIGHT_TAIL = re.compile(r"\s*::\s*$")
+
+
+def _tag_match_key(tag: str) -> str:
+    """비교용 키. NAI 가중치를 벗기고, 밑줄/공백/대소문자 차이를 없앤다.
+
+    `-blonde hair` 로 `1.2::blonde_hair ::` 도 지울 수 있어야 한다 — 물려받은 쪽에
+    가중치가 붙어 있다는 이유로 안 지워지면 사용자는 왜 안 되는지 알 수 없다.
+    """
+    text = _NAI_WEIGHT_TAIL.sub("", _NAI_WEIGHT_HEAD.sub("", str(tag or "").strip()))
+    return " ".join(text.replace("_", " ").lower().split())
+
+
+def _apply_minus_tags(text: str) -> str:
+    """`-태그` 를 걷어내고, 그 태그가 있으면 함께 지운다. 없으면 조용히 버린다.
+
+    ⚠️ 빼기는 **앞뒤를 가리지 않는다.** 물려받은 것이든 이 슬롯이 직접 쓴 것이든 같은
+       이름이면 지운다 - "내 결과에서 이 태그를 빼라" 가 가장 단순한 뜻이고, 어느 쪽을
+       지웠는지 사용자가 추적해야 하는 규칙은 쓸 수 없다.
+    """
+    tags = [piece.strip() for piece in split_tags_smart(str(text or ""))]
+    tags = [piece for piece in tags if piece]
+    drop: set[str] = set()
+    kept: list[str] = []
+    for tag in tags:
+        if tag.startswith("-") and "::" not in tag:
+            key = _tag_match_key(tag[1:])
+            if key:
+                drop.add(key)
+            continue
+        kept.append(tag)
+    if not drop:
+        return ", ".join(kept)
+    return ", ".join(tag for tag in kept if _tag_match_key(tag) not in drop)
+
+
 def _expand_connect_field(
     raw: str,
     inherited: str,
@@ -1124,6 +1168,8 @@ def _expand_connect_field(
     context: PromptContext,
     slot,
     slot_label,
+    *,
+    linked: bool = False,
 ) -> tuple[str, str]:
     """한 칸(프롬프트 또는 UC)을 전개해 `(이 슬롯의 최종값, 아래로 물려줄 값)` 을 낸다.
 
@@ -1134,6 +1180,12 @@ def _expand_connect_field(
     물려주는 값 = **물려받은 것 + 공유 구간**. 물려받은 것은 언제나 흘려보낸다 —
     그게 이 사슬이 나르는 "캐릭터" 자체이고, 마커는 *내가 더한 것 중 무엇을 공유할지*
     만 정한다(마커가 없으면 더한 것 전부).
+
+    ⚠️ **연결된 슬롯에서만** `-태그` 가 빼기로 동작한다(사용자 지정). 뺄 대상이 없는
+       슬롯에서는 뜻이 없고, 그런 슬롯의 `-태그` 는 지금까지처럼 그대로 둔다 — 조용히
+       사라지면 사용자가 오타를 눈치챌 수 없다.
+       판정은 **링크 유무**로 한다. 물려받은 텍스트가 비었는지로 보면 원본 프롬프트가
+       빈 경우에 빼기가 조용히 꺼진다.
     """
     head, shared, tail = _split_connect_region(raw)
     expand = lambda text: _expand_character_text(  # noqa: E731
@@ -1142,10 +1194,14 @@ def _expand_connect_field(
     expanded_shared = expand(shared)
     expanded_tail = expand(tail)
     own = _join_character_text(_join_character_text(expanded_head, expanded_shared), expanded_tail)
-    return (
-        _join_character_text(inherited, own),
-        _join_character_text(inherited, expanded_shared),
-    )
+    final = _join_character_text(inherited, own)
+    share = _join_character_text(inherited, expanded_shared)
+    if linked:
+        # 지금 규약상 연결된 슬롯은 사슬이 금지되어 아래로 물려주지 않지만
+        # (`_prune_character_links`), 두 값이 갈라져 있으면 언젠가 한쪽만 고친다.
+        final = _apply_minus_tags(final)
+        share = _apply_minus_tags(share)
+    return (final, share)
 
 
 def _join_character_text(base: str, own: str) -> str:
@@ -1271,11 +1327,14 @@ def character_params_from_settings(
             # 물려받은 것이 앞, 이 슬롯이 직접 쓴 것이 뒤 (사용자 지정: 연결 중에는
             # 두 칸이 "추가할" 칸이 된다). 고정된 원본을 물려받으면 그 고정값이 온다 —
             # 원본이 어느 분기로 확정됐든 `expanded_by_uuid` 에는 결과만 담기기 때문.
-            base_prompt, base_uc = expanded_by_uuid.get(str(frame.get("connect_to") or ""), ("", ""))
+            link = str(frame.get("connect_to") or "")
+            base_prompt, base_uc = expanded_by_uuid.get(link, ("", ""))
             prompt, share_prompt = _expand_connect_field(
-                frame.get("prompt", ""), base_prompt, processor, context, slot, slot_index)
+                frame.get("prompt", ""), base_prompt, processor, context, slot, slot_index,
+                linked=bool(link))
             uc, share_uc = _expand_connect_field(
-                frame.get("uc", ""), base_uc, processor, context, slot, slot_index)
+                frame.get("uc", ""), base_uc, processor, context, slot, slot_index,
+                linked=bool(link))
             expanded_by_uuid[slot] = (share_prompt, share_uc)
             if prompt:
                 characters.append(prompt)

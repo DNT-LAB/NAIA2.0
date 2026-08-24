@@ -12,6 +12,12 @@
   --ia-axis-pose_multi: #56b6c2;
   --ia-axis-adult: #e05561;
 
+  /* 서로 다른 것을 거르는 두 검색칸을 눈으로 이어 주는 단서색(연노랑).
+     캐릭터 뷰어의 좌측 `(캐릭터 검색 →)` 글자와 우측 검색창 테두리가 **같은 값**을
+     써야 한다 - 갈리면 단서 구실을 못 한다. 기존 `--warning`(#d8a13a, 정의 없이
+     폴백으로만 쓰인다)과 일부러 다른 이름이다: 이건 경고가 아니라 길잡이다. */
+  --hint-cross-search: #e8d98f;
+
   --bg-deep: #0a0a0f;
   /* **정의가 없는 채로 8곳에서 쓰이고 있었다.** 그래서 그 배경들이 전부 투명으로
      떨어졌다 — 히스토리 팝업이 뒤의 프롬프트창·도구 패널·Generate 버튼을 그대로
@@ -2686,6 +2692,18 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   font-weight: 700;
   text-transform: uppercase;
 }
+/* "이 칸은 작품만 거른다, 캐릭터는 저쪽" 단서. 우측 캐릭터 검색창 테두리와 **같은
+   토큰**을 쓴다 — 색이 갈리면 두 자리가 이어지지 않아 단서 구실을 못 한다.
+   ⚠️ 부모가 `text-transform: uppercase` 라 한글은 그대로지만 화살표까지 10px 면
+      너무 작아 안 읽힌다. 여기서 크기를 되돌리고 대문자 변환도 끈다. */
+.character-viewer-field-hint {
+  color: var(--hint-cross-search);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
 .character-viewer-input,
 .character-viewer-select,
 .character-viewer-textarea {
@@ -3372,6 +3390,15 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 }
 .character-viewer-character-search {
   height: 36px;
+  /* 좌측 `(캐릭터 검색 →)` 단서와 **같은 색**이어야 눈이 두 자리를 이어 붙인다.
+     포커스하면 `.character-viewer-input:focus` 가 accent 로 덮는다(명시도 0,2,0 >
+     0,1,0) — 단서는 손이 가기 전에 눈길을 끄는 것이 일이라 그게 맞다.
+     ⚠️ 1px 로는 안 보인다(실측). 앱이 줌 0.8 로 그려 **0.67px** 가 되고, 연노랑이
+        어두운 바닥에서 씻겨 회색 테두리와 구분되지 않았다. 2px + 바깥 링으로
+        올린다. */
+  border-color: var(--hint-cross-search);
+  border-width: 2px;
+  box-shadow: 0 0 0 2px rgba(232, 217, 143, 0.18);
 }
 .character-viewer-grid {
   overflow: hidden;

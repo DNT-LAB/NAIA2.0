@@ -1058,7 +1058,11 @@
       <aside class="character-viewer-browser">
         <section class="character-viewer-browser-section">
           <label class="character-viewer-field">
-            <span>Groups</span>
+            <!-- 이 칸은 **작품만** 거른다. 캐릭터는 우측 검색창이 맡고, 그 결과가
+                 아래 CHARACTERS 목록에도 그대로 적용된다(같은 API 응답의
+                 items/all_items). 화면이 그걸 안 알려줘서 "왼쪽에서 캐릭터가 안
+                 찾아진다" 로 읽혔다 — 두 자리를 같은 색으로 이어 단서를 준다. -->
+            <span>Groups <span class="character-viewer-field-hint">(캐릭터 검색 →)</span></span>
             <input class="character-viewer-input" id="characterViewerGroupSearch" type="search" placeholder="Search groups..." autocomplete="off" spellcheck="false">
           </label>
           <nav class="character-viewer-group-list" id="characterViewerGroupList" aria-label="Character groups"></nav>

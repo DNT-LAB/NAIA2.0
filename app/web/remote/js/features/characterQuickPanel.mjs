@@ -324,6 +324,12 @@ export function createCharacterQuickPanel({
     });
     mount.addEventListener('click', onClick);
     mount.addEventListener('input', onInput);
+    // 강조 미러는 textarea 와 같이 스크롤해야 한다. `scroll` 은 버블링하지 않으므로
+    // **캡처 단계**로 받는다 - 안 그러면 긴 프롬프트에서 띠가 글자와 어긋난다.
+    mount.addEventListener('scroll', event => {
+      const element = event.target;
+      if (element && element.dataset && element.dataset.cqField) paintConnectHighlight(element);
+    }, true);
     host().appendChild(mount);
     // ⚠️ 지금까지의 가시성을 **새 요소에 다시 입힌다.** `setVisible` 은 mount 가
     //    없으면 아무것도 못 하고 플래그만 남긴다 - 초기화 순서에 따라
@@ -341,27 +347,138 @@ export function createCharacterQuickPanel({
       .filter(item => item.character && item.character.active);
   }
 
+  // ── Connect 공유 구간 마커 ───────────────────────────────────────────────
+  // 백엔드 `core/character_settings._split_connect_region` 과 **같은 정규식**이어야
+  // 한다. 화면이 칠해 주는 구간과 실제로 물려주는 구간이 다르면, 이 강조는 가르치는
+  // 것이 아니라 속이는 것이 된다.
+  const CONNECT_OPEN_RE = /&connect\s*:?/i;
+  const CONNECT_CLOSE_RE = /&end/i;
+
+  // 이 모듈은 `escHtml` 만 주입받는다. 속성값에는 따옴표까지 막아야 하므로 따로 둔다
+  // (slot_uuid 는 hex 라 지금은 안전하지만, 값의 출처를 믿고 짜면 언젠가 틀린다).
+  function escAttr(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => (
+      {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]
+    ));
+  }
+
+  /** `{head, openTok, shared, closeTok, tail}` 또는 마커가 없으면 null. */
+  function connectParts(text) {
+    const source = String(text || '');
+    const opened = source.match(CONNECT_OPEN_RE);
+    if (!opened) return null;
+    const head = source.slice(0, opened.index);
+    const openTok = opened[0];
+    const rest = source.slice(opened.index + openTok.length);
+    const closed = rest.match(CONNECT_CLOSE_RE);
+    if (!closed) return {head, openTok, shared: rest, closeTok: '', tail: ''};
+    return {
+      head, openTok,
+      shared: rest.slice(0, closed.index),
+      closeTok: closed[0],
+      tail: rest.slice(closed.index + closed[0].length),
+    };
+  }
+
+  /** 미러에 칠할 HTML. 마커가 없으면 빈 문자열(강조를 아예 걸지 않는다). */
+  function connectHighlightHtml(text) {
+    const parts = connectParts(text);
+    if (!parts) return '';
+    return escHtml(parts.head)
+      + `<span class="cq-hl-mark">${escHtml(parts.openTok)}</span>`
+      + `<span class="cq-hl-share">${escHtml(parts.shared)}</span>`
+      + (parts.closeTok ? `<span class="cq-hl-mark">${escHtml(parts.closeTok)}</span>` : '')
+      + escHtml(parts.tail);
+  }
+
+  /** 칸 하나의 강조를 다시 칠한다.
+   *
+   *  ⚠️ 미러는 글자를 **투명**으로 그리고 배경만 남긴다. 글자까지 그리면 아래
+   *     textarea 의 글자와 겹쳐 이중으로 보이고, 그러려면 textarea 글자를 투명하게
+   *     해야 하는데 그러면 이 코드가 한 번이라도 실패했을 때 칸이 통째로 비어 보인다.
+   *     배경만 칠하면 최악의 경우가 "강조가 안 보인다" 로 끝난다.
+   *  ⚠️ 마커가 없으면 미러를 비운다 - 이 기능을 안 쓰는 사용자에게는 아무 일도
+   *     일어나지 않는다. */
+  function paintConnectHighlight(element) {
+    const wrap = element && element.parentElement;
+    if (!wrap || !wrap.classList.contains('cq-input-wrap')) return;
+    const mirror = wrap.querySelector('.cq-hl');
+    if (!mirror) return;
+    const html = connectHighlightHtml(element.value);
+    if (mirror.innerHTML !== html) mirror.innerHTML = html;
+    wrap.classList.toggle('has-hl', !!html);
+    mirror.scrollTop = element.scrollTop;
+  }
+
+  function paintAllConnectHighlights() {
+    mount?.querySelectorAll('.cq-input-wrap > [data-cq-field]')
+      .forEach(element => paintConnectHighlight(element));
+  }
+
+  /** Connect 드롭다운. **자기보다 앞선 활성 슬롯만** 후보다(사용자 지정).
+   *  그 제약이 곧 안전장치다 - 백엔드 전개 루프가 활성 프레임을 화면 순서대로 한 번
+   *  훑으므로, 앞만 가리키면 참조 시점에 값이 이미 확정돼 있고 순환이 생길 수 없다.
+   *  값은 표시 번호가 아니라 **slot_uuid** 다 - 번호는 ▼·비활성화로 밀린다. */
+  function connectControl(character, index, ordinal, slots) {
+    if (ordinal <= 1) return '';
+    const current = String(character.connect_to || '');
+    const options = slots.slice(0, ordinal - 1).map((item, i) => {
+      const uuid = String(item.character.slot_uuid || '');
+      const name = String(item.character.custom_name || '').trim();
+      const text = name ? `C${i + 1} · ${name}` : `C${i + 1}`;
+      return `<option value="${escAttr(uuid)}"${uuid === current ? ' selected' : ''}>${escHtml(text)}</option>`;
+    }).join('');
+    const on = !!current;
+    return `<span class="cq-connect${on ? ' is-on' : ''}">`
+      + `<span class="cq-connect-tag">${on ? '&#128279;' : 'Connect'}</span>`
+      + `<select data-cq-connect="${index}" aria-label="앞선 슬롯에서 물려받기">`
+      + `<option value=""${on ? '' : ' selected'}>연결 없음</option>${options}</select></span>`;
+  }
+
+  /** 이 슬롯을 물려받는 슬롯 수. 원본에는 Connect 드롭다운이 없어(앞을 가리킬 대상이
+   *  없다) 자기가 원본이라는 사실을 알 길이 없었다. 구간 마커를 쓰는 자리도 원본이다. */
+  function connectSourceBadge(character, slots) {
+    const uuid = String(character.slot_uuid || '');
+    if (!uuid) return '';
+    const takers = slots.filter(item => String(item.character.connect_to || '') === uuid).length;
+    if (!takers) return '';
+    const hasRegion = CONNECT_OPEN_RE.test(String(character.prompt || '') + String(character.uc || ''));
+    return `<span class="cq-source${hasRegion ? ' has-region' : ''}">&#8681;${takers}</span>`;
+  }
+
   /** 한 줄 라벨. 이름이 있으면 이름, 없으면 프롬프트 앞 태그. */
   function slotLabel(character, ordinal) {
     const tag = 'C' + ordinal;
     const custom = String(character.custom_name || '').trim();
     if (custom) return `${tag} · ${custom}`;
-    const first = String(character.prompt || '').split(/\r?\n/)[0]
+    // 마커는 이름이 아니다. 안 걷어내면 접힌 슬롯이 `C1 · &connect: girl` 이 되어
+    // 정작 구분에 필요한 태그 한 칸을 문법이 잡아먹는다(실측).
+    const first = String(character.prompt || '')
+      .replace(CONNECT_OPEN_RE, '').replace(CONNECT_CLOSE_RE, '')
+      .split(/\r?\n/)[0]
       .split(',').map(part => part.trim()).filter(Boolean);
     // 앞 태그는 보통 `girl` 이라 그것만으로는 구분이 안 된다 - 둘째까지 본다.
     const hint = first.slice(0, 2).join(', ');
     return hint ? `${tag} · ${hint}` : tag;
   }
 
-  function slotHtml(character, index, ordinal, activeCount) {
+  function slotHtml(character, index, ordinal, activeCount, slots) {
     const isOpen = openSlots.has(index);
+    // 연결 중이면 두 칸의 뜻이 바뀐다 - 대체가 아니라 **덧붙이기**다(사용자 지정).
+    const linked = !!String(character.connect_to || '');
     // 라벨(PROMPT/NEGATIVE)을 두지 않는다 - 자리를 먹는 만큼 입력 공간을 뺏는다.
     // 네거티브는 **테두리 색**으로 구분하고, 뜻은 placeholder 가 말한다.
+    //
+    // 강조 미러는 textarea 와 **같은 부모** 안에 형제로 둔다. 렌더가 innerHTML 이라
+    // 나중에 DOM 을 감싸는 방식은 매 렌더마다 다시 해야 하고 한 번 빠지면 조용히 안 뜬다.
+    const field = (kind, cls, ph) =>
+      `<div class="cq-input-wrap">`
+      + `<div class="cq-hl" aria-hidden="true"></div>`
+      + `<textarea class="cq-input${cls}" data-cq-field="char_${kind}_${index}" data-cq-min="${kind === 'prompt' ? 'prompt' : 'uc'}"`
+      + ` rows="${MIN_ROWS[kind === 'prompt' ? 'prompt' : 'uc']}" placeholder="${ph}"></textarea></div>`;
     const body = isOpen
-      ? `<textarea class="cq-input" data-cq-field="char_prompt_${index}" data-cq-min="prompt"`
-        + ` rows="${MIN_ROWS.prompt}" placeholder="캐릭터 프롬프트"></textarea>`
-        + `<textarea class="cq-input is-neg" data-cq-field="char_uc_${index}" data-cq-min="uc"`
-        + ` rows="${MIN_ROWS.uc}" placeholder="캐릭터 네거티브"></textarea>`
+      ? field('prompt', '', linked ? '추가할 캐릭터 프롬프트' : '캐릭터 프롬프트')
+        + field('uc', ' is-neg', linked ? '추가할 캐릭터 네거티브' : '캐릭터 네거티브')
       : '';
     // ⚠️ title 을 두지 않는다. 앱이 그걸 걷어 자체 툴팁으로 바꾸는데, 이 상자는
     //    좁아서 툴팁이 라벨을 그대로 덮는다(사용자 지적). 화살표가 이미 접힘/펼침을
@@ -381,7 +498,8 @@ export function createCharacterQuickPanel({
     // ⚠️ 머리 <button> **바깥**에 둔다. 안에 넣으면 마크업이 깨지고 안쪽을 눌러도
     //    바깥 토글이 먼저 먹는다(이 파일이 이미 두 번 밟은 함정).
     const muted = !!character.muted;
-    return `<div class="cq-slot${isOpen ? ' is-open' : ''}${muted ? ' is-muted' : ''}">`
+    return `<div class="cq-slot${isOpen ? ' is-open' : ''}${muted ? ' is-muted' : ''}`
+      + `${linked ? ' is-linked' : ''}">`
       + `<div class="cq-slot-headrow">`
       + `<button type="button" class="cq-slot-en${muted ? '' : ' is-on'}"`
       + ` data-cq-mute="${index}" aria-pressed="${muted ? 'false' : 'true'}"`
@@ -391,6 +509,8 @@ export function createCharacterQuickPanel({
       + ` aria-expanded="${isOpen ? 'true' : 'false'}">`
       + `<span class="cq-slot-title" data-cq-label="${index}">`
       + `${escHtml(slotLabel(character, ordinal))}</span></button>`
+      + connectSourceBadge(character, slots || [])
+      + connectControl(character, index, ordinal, slots || [])
       + (canDeactivate
           ? `<button type="button" class="cq-slot-btn" data-cq-down="${index}"`
             + ` aria-label="비활성으로 내림">&#9660;</button>`
@@ -480,10 +600,12 @@ export function createCharacterQuickPanel({
       // ⚠️ **지금 쓰고 있는 칸은 건드리지 않는다.** 서버 echo 가 조금 늦게 오는데
       //    그때 `.value` 를 덮으면 (가) 한글 조합이 끊기고 (나) 자동완성이 막 끼워
       //    넣은 글자가 되감긴다. 편집 중인 칸은 화면 쪽이 진실이다.
-      if (document.activeElement === element) { autoGrow(element); return; }
+      if (document.activeElement === element) { autoGrow(element); paintConnectHighlight(element); return; }
       const next = String((match[1] === 'prompt' ? character.prompt : character.uc) || '');
       if (element.value !== next) element.value = next;
       autoGrow(element);
+      // 값이 서버에서 온 경로(다른 창에서 편집·프리셋 적용 등)도 강조가 따라와야 한다.
+      paintConnectHighlight(element);
     });
   }
 
@@ -562,9 +684,19 @@ export function createCharacterQuickPanel({
       setModuleParam('character', 'activated', String(toggle.checked));
       return;
     }
+    // Connect 드롭다운. `change` 가 아니라 `input` 으로도 오는 브라우저가 있어
+    // 여기서 함께 받는다(select 는 둘 다 발화한다).
+    const connect = event.target.closest('[data-cq-connect]');
+    if (connect) {
+      setModuleParam('character', `char_connect_${connect.dataset.cqConnect}`, connect.value);
+      return;
+    }
     const element = event.target.closest('[data-cq-field]');
     if (!element) return;
     autoGrow(element);
+    // 강조는 **글자를 칠 때마다** 다시 칠한다. 서명 기반 재렌더는 입력 내용을 일부러
+    // 무시하므로(캐럿 튐) 여기서 하지 않으면 구간이 옛 모양에 굳는다.
+    paintConnectHighlight(element);
     onModTextEdit('character', element.dataset.cqField, element.value);
   }
 
@@ -685,7 +817,7 @@ export function createCharacterQuickPanel({
     const body = open
       ? `<div class="cq-grid">`
         + slots.map(({character, index}, i) =>
-            slotHtml(character, index, i + 1, slots.length)).join('')
+            slotHtml(character, index, i + 1, slots.length, slots)).join('')
         // Manage 는 모듈 팝업을 연다 - 실수로 ▼ 로 내린 슬롯을 되살릴 곳이 거기다
         // (여기에는 비활성 무리가 보이지 않는다).
         + `<div class="cq-foot">`

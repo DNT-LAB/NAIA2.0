@@ -148,7 +148,7 @@ export function createCharacterQuickPanel({
       backgroundImage: box.src ? `url("${box.src}")` : '',
     });
     stage.classList.toggle('is-overlay', !!box.overlay);
-    stage.innerHTML = slots.map(({character, index}, i) => {
+    stage.innerHTML = gridSvg() + slots.map(({character, index}, i) => {
       const p = character.position || { x: 0.5, y: 0.5 };
       const on = posSelected === index;
       return `<button type="button" class="cq-dot${on ? ' is-on' : ''}"`
@@ -156,6 +156,47 @@ export function createCharacterQuickPanel({
         + ` aria-label="${escHtml(slotLabel(character, i + 1))}">${i + 1}</button>`;
     }).join('');
     stage.classList.add('open');
+  }
+
+  // ── POS 격자 ─────────────────────────────────────────────────────────────
+  // 64×64 **생성 픽셀** 단위. 중앙을 가로지르는 두 선만 굵고 연한 하늘색이고 나머지는
+  // 흰 dash 다(사용자 지정).
+  const POS_GRID_STEP = 64;
+  const POS_GRID_KEY = 'naia.pos.showgrid.v1';
+  let posGrid = (() => {
+    try { return localStorage.getItem(POS_GRID_KEY) === '1'; } catch (_) { return false; }
+  })();
+
+  /** 무대에 깔 격자.
+   *
+   *  ⚠️ SVG 로 그린다. dash 격자를 `repeating-linear-gradient` 로 만들려면 축마다
+   *     겹겹이 쌓아야 하고 중앙선만 다르게 하기가 사실상 불가능하다.
+   *  ⚠️ `viewBox` 를 **해상도 그대로** 잡아 64 단위가 곧 생성 픽셀 64 가 되게 한다.
+   *     대신 선은 그만큼 얇아지므로 `vector-effect: non-scaling-stroke` 로 굵기와
+   *     dash 간격을 화면 픽셀에 고정한다 - 안 하면 무대가 작을수록 선이 사라진다.
+   */
+  function gridSvg() {
+    if (!posGrid) return '';
+    const res = getResolution();
+    const w = Number(res?.w) > 0 ? Math.trunc(res.w) : 0;
+    const h = Number(res?.h) > 0 ? Math.trunc(res.h) : 0;
+    if (!w || !h) return '';        // 해상도를 모르면 격자의 뜻이 없다
+    const cx = w / 2, cy = h / 2;
+    return `<svg class="cq-posgrid" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`
+      + `<defs><pattern id="cqGridCell" width="${POS_GRID_STEP}" height="${POS_GRID_STEP}"`
+      + ` patternUnits="userSpaceOnUse">`
+      + `<path d="M ${POS_GRID_STEP} 0 L 0 0 0 ${POS_GRID_STEP}" class="cq-posgrid-line"/>`
+      + `</pattern></defs>`
+      + `<rect width="${w}" height="${h}" fill="url(#cqGridCell)"/>`
+      + `<line x1="${cx}" y1="0" x2="${cx}" y2="${h}" class="cq-posgrid-mid"/>`
+      + `<line x1="0" y1="${cy}" x2="${w}" y2="${cy}" class="cq-posgrid-mid"/>`
+      + `</svg>`;
+  }
+
+  function setPosGrid(on) {
+    posGrid = !!on;
+    try { localStorage.setItem(POS_GRID_KEY, posGrid ? '1' : '0'); } catch (_) {}
+    renderStage();
   }
 
   /** 무대 위 띠: 종료 버튼 + 캐릭터 칩. 칩은 자리가 모자라면 줄을 바꾼다.
@@ -171,6 +212,7 @@ export function createCharacterQuickPanel({
       chips.className = 'cq-chips';
       chips.addEventListener('click', event => {
         if (event.target.closest('[data-cq-posdone]')) { setPosEditing(false); return; }
+        if (event.target.closest('[data-cq-grid]')) { setPosGrid(!posGrid); return; }
         const chip = event.target.closest('[data-cq-chip]');
         if (!chip) return;
         posSelected = Number(chip.dataset.cqChip);
@@ -188,6 +230,12 @@ export function createCharacterQuickPanel({
       `<button type="button" class="cq-posdone" data-cq-posdone="1">`
       + `<span>Finish</span><span>Editing POS</span></button>`
       + `<div class="cq-chiprow">`
+      // 격자 토글은 **칩 줄의 맨 앞**에 둔다. 종료 버튼은 두 줄 높이라 그 옆에 붙이면
+      // 세로 가운데가 안 맞고, 칩과 같은 줄에 두면 자리가 모자랄 때 함께 접힌다.
+      + `<button type="button" class="cq-gridtoggle${posGrid ? ' is-on' : ''}" data-cq-grid="1"`
+      + ` aria-pressed="${posGrid ? 'true' : 'false'}">`
+      + `<span class="cq-gridtoggle-box">${posGrid ? '&#10003;' : ''}</span>`
+      + `<span>Show Grid</span></button>`
       + slots.map(({character, index}, i) =>
           `<button type="button" class="cq-chip${posSelected === index ? ' is-on' : ''}"`
           + ` data-cq-chip="${index}"><span class="cq-chip-n">${i + 1}</span>`

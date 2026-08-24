@@ -5437,18 +5437,88 @@ if (ollamaBtn) {
       if (chatOpen) ollamaChatPopup.close();
       return;
     }
-    const pick = await showConfirmDialog('무엇을 여시겠습니까?', {
-      title: 'Ollama',
-      messageHtml: `${escHtml('Assist')} — ${escHtml('현재 프롬프트를 읽어 태그를 추천하고 보강합니다.')}`
-        + `<br>${escHtml('Chat')} — ${escHtml('모델과 자유롭게 대화합니다.')}`,
-      choices: [
-        {key: 'assist', label: 'Assist'},
-        {key: 'chat', label: 'Chat'},
-      ],
-    });
+    // 모달이 아니라 **버튼에 붙는 드롭다운**이다(사용자 지정: Quick Filter 칩 메뉴처럼).
+    // 런처를 여는 데 화면을 덮는 모달은 과했다.
+    if (ollamaMenuEl) closeOllamaMenu();
+    else openOllamaMenu();
+  });
+}
+
+let ollamaMenuEl = null;
+let ollamaMenuDismiss = null;
+
+function closeOllamaMenu() {
+  if (ollamaMenuDismiss) {
+    document.removeEventListener('mousedown', ollamaMenuDismiss, true);
+    document.removeEventListener('keydown', ollamaMenuDismiss, true);
+    window.removeEventListener('resize', ollamaMenuDismiss, true);
+    window.removeEventListener('scroll', ollamaMenuDismiss, true);
+    ollamaMenuDismiss = null;
+  }
+  ollamaMenuEl?.remove();
+  ollamaMenuEl = null;
+  ollamaBtn?.classList.remove('is-menu-open');
+}
+
+/** [Ollama] 아래(자리가 없으면 위)에 붙는 두 줄짜리 드롭다운.
+ *
+ *  ⚠️ **body 에 붙이고 fixed 로 놓는다.** 감싸는
+ *  `.assistants-ollama-segment` 가 `overflow: hidden` 이라(두 칸이던 시절의 테두리
+ *  처리) 그 안에 그리면 메뉴가 잘린다.
+ */
+function openOllamaMenu() {
+  if (!ollamaBtn) return;
+  ollamaMenuEl = document.createElement('div');
+  ollamaMenuEl.className = 'ollama-menu';
+  ollamaMenuEl.setAttribute('role', 'menu');
+  ollamaMenuEl.innerHTML = `
+    <button type="button" class="ollama-menu-btn" role="menuitem" data-ollama-pick="assist">
+      <b>Assist</b><span>프롬프트를 읽어 태그 추천·보강</span>
+    </button>
+    <button type="button" class="ollama-menu-btn" role="menuitem" data-ollama-pick="chat">
+      <b>Chat</b><span>모델과 자유롭게 대화</span>
+    </button>`;
+  document.body.appendChild(ollamaMenuEl);
+  ollamaBtn.classList.add('is-menu-open');
+
+  const rect = ollamaBtn.getBoundingClientRect();
+  const mw = ollamaMenuEl.offsetWidth;
+  const mh = ollamaMenuEl.offsetHeight;
+  const margin = 6;
+  let left = Math.max(margin, Math.min(rect.left, window.innerWidth - mw - margin));
+  // 아래에 자리가 없으면 버튼 위로 뒤집는다 — 이 줄은 화면 아래쪽에 있다.
+  let top = rect.bottom + 4;
+  if (top + mh > window.innerHeight - margin) top = Math.max(margin, rect.top - mh - 4);
+  ollamaMenuEl.style.left = `${Math.round(left)}px`;
+  ollamaMenuEl.style.top = `${Math.round(top)}px`;
+
+  ollamaMenuEl.addEventListener('click', async event => {
+    const btn = event.target.closest('[data-ollama-pick]');
+    if (!btn) return;
+    const pick = btn.dataset.ollamaPick;
+    closeOllamaMenu();
     if (pick === 'assist') openOllamaAssistant();
     else if (pick === 'chat') openOllamaChat();
   });
+
+  ollamaMenuDismiss = event => {
+    if (event.type === 'keydown') {
+      if (event.key === 'Escape') { closeOllamaMenu(); ollamaBtn?.focus(); }
+      return;
+    }
+    if (event.type === 'mousedown') {
+      // 버튼 자신은 그 클릭이 토글을 처리한다 — 여기서 닫으면 곧바로 다시 열린다.
+      if (ollamaMenuEl?.contains(event.target) || ollamaBtn?.contains(event.target)) return;
+    }
+    closeOllamaMenu();
+  };
+  // ⚠️ 캡처 단계로 듣는다. 아래 어딘가가 `stopPropagation()` 을 하면 버블로는 못 듣고
+  //    메뉴가 열린 채로 남는다.
+  document.addEventListener('mousedown', ollamaMenuDismiss, true);
+  document.addEventListener('keydown', ollamaMenuDismiss, true);
+  window.addEventListener('resize', ollamaMenuDismiss, true);
+  window.addEventListener('scroll', ollamaMenuDismiss, true);
+  ollamaMenuEl.querySelector('.ollama-menu-btn')?.focus();
 }
 tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260824-tagsearch1')
   .then(({createTagSearchPopup}) => {

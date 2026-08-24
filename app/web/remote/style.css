@@ -19233,6 +19233,32 @@ body.detached-module .mod-grid-3 {
   transition: width 0.3s ease;
 }
 
+/* [Ollama] 런처 드롭다운 — Quick Filter 칩 메뉴와 같은 결(사용자 지정).
+   ⚠️ `position: fixed` 이고 body 직계다. 감싸는 `.assistants-ollama-segment` 가
+      `overflow: hidden` 이라 그 안에 그리면 잘린다. */
+.ollama-menu {
+  position: fixed;
+  z-index: var(--z-floating-module-aux);
+  display: flex; flex-direction: column; gap: 2px; padding: 3px;
+  border: 1px solid rgba(95,151,255,0.45); border-radius: 6px;
+  background: #12121b; box-shadow: 0 10px 26px rgba(0,0,0,0.5);
+}
+.ollama-menu-btn {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 190px; padding: 6px 10px; cursor: pointer; text-align: left;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text-primary);
+}
+.ollama-menu-btn b { font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
+.ollama-menu-btn span { font-size: 10px; color: var(--text-dim); }
+.ollama-menu-btn:hover,
+.ollama-menu-btn:focus-visible {
+  outline: none;
+  border-color: rgba(95,151,255,0.6); background: rgba(95,151,255,0.18);
+}
+.ollama-menu-btn:hover span, .ollama-menu-btn:focus-visible span { color: var(--text-muted); }
+.assistants-ollama-btn.is-menu-open { background: rgba(96,120,255,0.3); }
+
 /* ── Tag Search ─────────────────────────────────────────────────────────────
    태그 이름 **부분 매칭**으로 찾는 창. 자동완성은 속도 때문에 접두사만 봐서
    `utsusumi kio` 를 `kio` 로 못 찾는다 — 그 구멍을 메운다(사용자 지정).

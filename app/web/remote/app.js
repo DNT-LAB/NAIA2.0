@@ -1624,7 +1624,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-charconnect3')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-codexfix1')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -1641,7 +1641,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260824-connchain1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260824-codexfix1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml, setModuleParam, onModTextEdit,

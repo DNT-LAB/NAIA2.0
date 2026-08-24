@@ -19251,12 +19251,9 @@ body.detached-module .mod-grid-3 {
   background: rgba(38,74,48,0.55); color: #cdeed6;
 }
 .mod-char-connect-tag { white-space: nowrap; letter-spacing: 0.04em; }
-.mod-char-connect select {
-  border: none; background: transparent; color: inherit;
-  font-family: inherit; font-size: inherit; cursor: pointer;
-  max-width: 104px; padding: 0; outline: none;
-}
-.mod-char-connect select option { background: #1a1a26; color: var(--text-primary); }
+/* 모듈 팝업 쪽은 **표시 전용**이다(조작은 퀵 편집 슬롯에서만). */
+.mod-char-connect.is-readonly { cursor: help; }
+.mod-char-connect.is-readonly:hover { border-color: rgba(106,191,123,0.7); color: #cdeed6; }
 /* 원본 슬롯 배지. 몇 개가 물려받는지 + 구간을 쓰는 중인지. 원본에는 Connect
    컨트롤이 없어 자기가 원본이라는 사실을 알 길이 없었다. */
 .mod-char-source {
@@ -22807,6 +22804,20 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   background: rgba(232,217,143,0.38);
   border-radius: 2px;
 }
+/* `-태그` = 빼기. 가넷 계열의 밝은 적색(사용자 지정).
+   ⚠️ **취소선을 함께 긋는다.** 미러 글자는 투명이라 `text-decoration-color` 를 명시하면
+      선만 보이고 아래 진짜 글자가 그대로 비친다 - "이건 지워진다" 가 색보다 훨씬 빨리
+      읽힌다. 색만으로는 초록 띠(공유)와 같은 계열로 오해할 여지가 있다.
+   ⚠️ 연결된 슬롯에서만 칠한다(JS `fieldIsLinked`). 연결이 없으면 빼기가 동작하지 않는
+      데도 칠하면 화면이 거짓말을 한다. */
+.cq-hl-minus {
+  background: rgba(226,92,112,0.26);
+  box-shadow: 0 0 0 1px rgba(226,92,112,0.42);
+  border-radius: 2px;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255,138,158,0.95);
+  text-decoration-thickness: 1.5px;
+}
 /* 강조가 걸린 칸은 테두리도 같은 편으로 물들여 멀리서도 구분된다. */
 .cq-input-wrap.has-hl .cq-input { border-color: rgba(106,191,123,0.45); }
 
@@ -22840,6 +22851,13 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   background: rgba(38,74,48,0.6); color: #d2f0da;
 }
 .cq-connect.is-on:hover { border-color: rgba(126,214,144,0.9); background: rgba(46,92,58,0.75); }
+/* 원본이 꺼져 있어 실제로는 아무것도 물려받지 못하는 상태. 초록(정상 연결)으로 두면
+   화면이 거짓말을 한다 - 경고색으로 갈라 놓는다. */
+.cq-connect.is-on.is-broken {
+  border-color: rgba(226,92,112,0.75);
+  background: rgba(74,32,40,0.7); color: #f2c3cc;
+}
+.cq-connect.is-on.is-broken:hover { border-color: rgba(240,120,140,0.95); background: rgba(96,42,52,0.85); }
 .cq-connect-tag { white-space: nowrap; letter-spacing: 0.02em; }
 .cq-connect:focus-visible { outline: none; border-color: rgba(124,106,239,0.75); }
 .cq-connect.is-menu-open { border-color: rgba(124,106,239,0.85); background: rgba(124,106,239,0.2); }

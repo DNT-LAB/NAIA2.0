@@ -193,7 +193,13 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
     #    AUTO/RAND 가 자리를 대신 정해 버리면 쓰는 목적 자체가 사라진다.
     #    여기서 세우면 `save_settings` 의 `_seed_missing_positions` 도 따라 돌아
     #    좌표 없는 슬롯이 씨앗을 받는다(정규화 뒤에 도는 순서라 이 순서가 맞다).
-    if any(str(frame.get("connect_to") or "") for frame in settings["character_frames"]):
+    #    ⚠️ **실제로 나가는 슬롯만 본다.** 모든 프레임을 보면 비활성/Cold 로 치워 둔
+    #       슬롯에 남아 있는 옛 링크가 POS 를 계속 CUSTOM 에 묶는다 — 화면에는 자물쇠가
+    #       없는데 AUTO 를 고르면 곧바로 되돌아온다(Codex 리뷰 2026-08-24 #5, 실측).
+    if any(
+        str(frame.get("connect_to") or "") and frame.get("is_enabled")
+        for frame in settings["character_frames"]
+    ):
         settings["position_mode"] = "custom"
     # 옛 불리언 키는 **파생값**으로만 남긴다 - 읽는 곳이 여럿이라 지우면 흩어져
     # 깨지고, 권위를 주면 새 값과 싸운다. 언제나 `position_mode` 가 이긴다.
@@ -1222,7 +1228,13 @@ def _expand_character_text(
     slot=None,
     slot_label=None,
 ) -> str:
-    pieces = [piece.strip() for piece in split_tags_smart(str(text or ""))]
+    # ⚠️ 구간 마커는 **여기서** 걷어낸다. 마커는 지시어이지 태그가 아니라 어느 경로로
+    #    전개되든 프롬프트에 남으면 안 된다. `_expand_connect_field` 는 이미 세 토막으로
+    #    잘라 넘기므로 무해하고, 그 밖의 경로(캐릭터 Freeze 리롤 · 조건부 override 생산자
+    #    등)가 원문을 그대로 전개할 때 마커가 문자열로 NAI 까지 나가던 것을 막는다
+    #    (Codex 리뷰 2026-08-24 #4, 실측: `&connect: girl &end, extra` 가 그대로 나왔다).
+    #    이 함수가 캐릭터 텍스트 전개의 SSOT 라 여기 한 곳이면 모든 표면이 옳아진다.
+    pieces = [piece.strip() for piece in split_tags_smart(strip_connect_markers(text))]
     pieces = [piece for piece in pieces if piece]
     if not pieces:
         return ""

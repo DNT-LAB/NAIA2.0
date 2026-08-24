@@ -434,15 +434,71 @@ export function createCharacterQuickPanel({
     };
   }
 
-  /** 미러에 칠할 HTML. 마커가 없으면 빈 문자열(강조를 아예 걸지 않는다). */
-  function connectHighlightHtml(text) {
+  /** 태그 경계 구간 `[start, end)` 목록.
+   *
+   *  ⚠️ 백엔드 `split_tags_smart` 와 **같은 규칙**이어야 한다 — `<...>` 안의 쉼표는
+   *     경계가 아니고, 닫히지 않은 `<` 는 뒤를 삼킨다. 여기서 규칙이 갈리면 화면이
+   *     빼기로 칠한 것이 실제로는 안 빠진다(가르치는 게 아니라 속이는 것이 된다).
+   *  글자를 자르지 않고 **구간만** 낸다 — 미러는 원문과 한 글자도 달라선 안 된다. */
+  function tagRanges(text) {
+    const out = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '<') depth++;
+      else if (ch === '>') depth = Math.max(0, depth - 1);
+      else if (ch === ',' && depth === 0) { out.push([start, i]); start = i + 1; }
+    }
+    out.push([start, text.length]);
+    return out;
+  }
+
+  /** 한 토막 안의 `-태그` 를 감싼다. 나머지는 원문 그대로.
+   *  백엔드 `_apply_minus_tags` 와 같은 판정: 맨 앞이 `-` 이고 `::` 가 없을 것. */
+  function minusHtml(text) {
+    let out = '', cursor = 0, hit = false;
+    for (const [start, end] of tagRanges(text)) {
+      out += escHtml(text.slice(cursor, start));
+      const piece = text.slice(start, end);
+      const lead = piece.match(/^\s*/)[0];
+      const core = piece.slice(lead.length).replace(/\s+$/, '');
+      const trail = piece.slice(lead.length + core.length);
+      if (core.length > 1 && core.startsWith('-') && !core.includes('::')) {
+        out += escHtml(lead) + `<span class="cq-hl-minus">${escHtml(core)}</span>` + escHtml(trail);
+        hit = true;
+      } else {
+        out += escHtml(piece);
+      }
+      cursor = end;
+    }
+    out += escHtml(text.slice(cursor));
+    return {html: out, hit};
+  }
+
+  /** 미러에 칠할 HTML. 칠할 것이 없으면 빈 문자열(강조를 아예 걸지 않는다).
+   *  @param minus 이 슬롯에서 `-태그` 가 빼기로 동작하는가(= 연결된 슬롯인가). */
+  function connectHighlightHtml(text, minus) {
+    const paint = segment => (minus ? minusHtml(segment) : {html: escHtml(segment), hit: false});
     const parts = connectParts(text);
-    if (!parts) return '';
-    return escHtml(parts.head)
+    if (!parts) {
+      // 구간 마커가 없어도 `-태그` 는 칠한다. 둘 다 없으면 아무것도 하지 않는다.
+      const whole = paint(text);
+      return whole.hit ? whole.html : '';
+    }
+    const head = paint(parts.head), shared = paint(parts.shared), tail = paint(parts.tail);
+    return head.html
       + `<span class="cq-hl-mark">${escHtml(parts.openTok)}</span>`
-      + `<span class="cq-hl-share">${escHtml(parts.shared)}</span>`
+      + `<span class="cq-hl-share">${shared.html}</span>`
       + (parts.closeTok ? `<span class="cq-hl-mark">${escHtml(parts.closeTok)}</span>` : '')
-      + escHtml(parts.tail);
+      + tail.html;
+  }
+
+  /** 이 칸이 속한 슬롯이 연결돼 있나 — `-태그` 가 빼기로 동작하는 조건이다. */
+  function fieldIsLinked(element) {
+    const match = String(element?.dataset?.cqField || '').match(/^char_(?:prompt|uc)_(\d+)$/);
+    if (!match) return false;
+    const character = ((lastState && lastState.characters) || [])[Number(match[1])];
+    return !!(character && String(character.connect_to || ''));
   }
 
   /** 칸 하나의 강조를 다시 칠한다.
@@ -451,14 +507,14 @@ export function createCharacterQuickPanel({
    *     textarea 의 글자와 겹쳐 이중으로 보이고, 그러려면 textarea 글자를 투명하게
    *     해야 하는데 그러면 이 코드가 한 번이라도 실패했을 때 칸이 통째로 비어 보인다.
    *     배경만 칠하면 최악의 경우가 "강조가 안 보인다" 로 끝난다.
-   *  ⚠️ 마커가 없으면 미러를 비운다 - 이 기능을 안 쓰는 사용자에게는 아무 일도
+   *  ⚠️ 칠할 것이 없으면 미러를 비운다 - 이 기능을 안 쓰는 사용자에게는 아무 일도
    *     일어나지 않는다. */
   function paintConnectHighlight(element) {
     const wrap = element && element.parentElement;
     if (!wrap || !wrap.classList.contains('cq-input-wrap')) return;
     const mirror = wrap.querySelector('.cq-hl');
     if (!mirror) return;
-    const html = connectHighlightHtml(element.value);
+    const html = connectHighlightHtml(element.value, fieldIsLinked(element));
     if (mirror.innerHTML !== html) mirror.innerHTML = html;
     wrap.classList.toggle('has-hl', !!html);
     mirror.scrollTop = element.scrollTop;
@@ -485,15 +541,26 @@ export function createCharacterQuickPanel({
     const current = String(character.connect_to || '');
     const on = !!current;
     const sourceOrdinal = slots.findIndex(item => String(item.character.slot_uuid || '') === current) + 1;
-    const label = on ? `&#128279; C${sourceOrdinal || '?'}` : '&#8681; Connect';
+    // ⚠️ 원본이 꺼져 있으면(✘ muted) 백엔드 전개 대상에서 빠져 **아무것도 물려받지
+    //    못한다**(실측: C1 을 끄면 C2 가 자기 추가분만 남았다). 그런데 칩은 여전히
+    //    `🔗 C1` 이라 말하고 있었다 - 화면이 거짓말을 하면 사용자는 원인을 못 찾는다.
+    //    끊긴 것으로 그리고 이유를 말한다(Codex 리뷰 2026-08-24 #2).
+    const sourceItem = sourceOrdinal ? slots[sourceOrdinal - 1] : null;
+    const broken = on && (!sourceItem || !!sourceItem.character.muted);
+    const label = on
+      ? `${broken ? '&#9888;' : '&#128279;'} C${sourceOrdinal || '?'}`
+      : '&#8681; Connect';
     // ⚠️ 네이티브 `<select>` 를 쓰지 않는다. 드롭다운 팝업은 OS 가 그려서 스타일이
     //    전혀 안 먹고(사용자 지적: "못생김"), 앱의 커스텀 select 위젯은 17px 칩에
     //    들어갈 폭이 아니다. Tag Filter 팝업과 같은 결의 작은 메뉴를 직접 띄운다.
-    return `<button type="button" class="cq-connect${on ? ' is-on' : ''}"`
+    const guide = !on
+      ? '앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n\\n연결하면 원본에 &connect: … &end 가 자동으로 붙습니다. &end 를 앞으로 당기면 그만큼만 물려줍니다.'
+      : broken
+        ? `원본 C${sourceOrdinal || '?'} 이(가) 꺼져 있어 **아무것도 물려받지 못합니다**.\\n원본의 ✔ 를 다시 켜거나 연결을 바꾸세요.`
+        : `C${sourceOrdinal || '?'} 의 캐릭터를 물려받는 중입니다.\\n아래 두 칸은 '추가할' 칸입니다.\\n\\n물려받는 범위는 C${sourceOrdinal || '?'} 의 &connect: … &end 구간이 정합니다.\\n\\n-태그 를 적으면 그 태그를 빼고 물려받습니다.`;
+    return `<button type="button" class="cq-connect${on ? ' is-on' : ''}${broken ? ' is-broken' : ''}"`
       + ` data-cq-connect="${index}" aria-haspopup="listbox" aria-expanded="false"`
-      + ` data-naia-guide="${on
-          ? `C${sourceOrdinal || '?'} 의 캐릭터를 물려받는 중입니다.\\n아래 두 칸은 '추가할' 칸입니다.\\n\\n물려받는 범위는 C${sourceOrdinal || '?'} 의 &connect: … &end 구간이 정합니다.`
-          : '앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n\\n연결하면 원본에 &connect: … &end 가 자동으로 붙습니다. &end 를 앞으로 당기면 그만큼만 물려줍니다.'}">`
+      + ` data-naia-guide="${guide}">`
       + `<span class="cq-connect-tag">${label}</span></button>`;
   }
 
@@ -554,6 +621,8 @@ export function createCharacterQuickPanel({
           //    달려 있어 화면만 보고 결과를 예측할 수 없다. 백엔드도 같은 규칙으로
           //    막지만(`_prune_character_links`), 고를 수 없어야 헛클릭이 없다.
           if (String(item.character.connect_to || '')) return '';
+          // 꺼진 슬롯(✘)도 후보가 아니다 - 물려받아도 아무것도 안 온다(위 `broken` 참조).
+          if (item.character.muted) return '';
           const name = String(item.character.custom_name || '').trim();
           const hint = name || String(item.character.prompt || '')
             .replace(CONNECT_OPEN_RE, '').replace(CONNECT_CLOSE_RE, '')
@@ -737,10 +806,13 @@ export function createCharacterQuickPanel({
     //    옛 상태에 굳는다(POS 라벨이 CUSTOM 에 굳었던 것과 같은 계열).
     // ⚠️ Connect 도 같은 이유로 넣는다. 이미 CUSTOM 인 상태에서 링크를 걸면
     //    `posModeOf` 는 그대로라 서명이 안 바뀌고, POS 버튼의 자물쇠가 안 나타난다.
+    // ⚠️ **참/거짓이 아니라 대상 uuid 를 넣는다.** 불리언으로 넣으면 C3 의 연결을
+    //    C1 에서 C2 로 바꿔도 서명이 그대로라 다시 그리지 않는다 - 칩은 계속 `C1` 이라
+    //    말하고 원본 배지도 옛 슬롯에 붙어 있다(Codex 리뷰 2026-08-24 #6).
     const slots = activeSlots(state)
       .map(({index, character}) =>
         [index, openSlots.has(index) ? 1 : 0, character && character.muted ? 1 : 0,
-         character && String(character.connect_to || '') ? 1 : 0].join('~'))
+         String((character && character.connect_to) || '')].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
     // ⚠️ POS 는 **모드 이름**을 넣는다. 불리언으로 넣으면 CUSTOM->RAND 전환이

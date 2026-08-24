@@ -331,21 +331,25 @@ export function createCharacterPanel({
    *  훑으므로, 앞만 가리키면 참조 시점에 값이 이미 확정돼 있고 순환이 생길 수 없다.
    *  값은 표시 번호가 아니라 **slot_uuid** 다 - 번호는 ▲▼·비활성화로 밀린다.
    *  C1 은 앞이 없으므로 아예 그리지 않는다. */
+  /** 연결 상태 **표시만** 한다. 거는 것은 퀵 편집 슬롯에서만 한다(사용자 지정).
+   *
+   *  ⚠️ 예전에는 여기에도 드롭다운이 있었는데, 사슬 금지 규칙(이미 연결된 슬롯은
+   *     후보에서 빼기 · 원본 역할이면 Connect 를 주지 않기)이 퀵 패널에만 있어
+   *     이 팝업으로는 금지된 상태를 만들 수 있었다. 그러면 백엔드가 남의 링크를
+   *     조용히 지운다 — C3→C2 를 걸어 둔 채 여기서 C2→C1 을 걸면 C3 의 연결이
+   *     사라졌다(Codex 리뷰 2026-08-24 #1).
+   *     같은 규칙을 두 곳에 두면 언젠가 한쪽이 뒤처진다. 조작은 한 곳에만 둔다.
+   *     대신 표시는 남긴다 — 없으면 이 팝업이 침묵으로 거짓말을 한다. */
   function connectControl(character, index, ordinal, activeSlots) {
-    if (!character.active || ordinal <= 1) return '';
+    if (!character.active) return '';
     const current = String(character.connect_to || '');
-    const options = activeSlots.slice(0, ordinal - 1).map((item, i) => {
-      const uuid = String(item.character.slot_uuid || '');
-      const name = String(item.character.custom_name || '').trim();
-      const text = name ? `C${i + 1} · ${name}` : `C${i + 1}`;
-      return `<option value="${escAttr(uuid)}"${uuid === current ? ' selected' : ''}>${escHtml(text)}</option>`;
-    }).join('');
-    const on = !!current;
-    return `<label class="mod-char-connect${on ? ' is-on' : ''}"`
-      + ` data-naia-guide="Connect - 앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n연결 중에는 아래 두 칸이 '추가할' 칸이 됩니다.\\n\\n원본의 일부만 물려받고 싶으면 그 슬롯에 &connect: ... &end 로 구간을 잡으세요.">`
-      + `<span class="mod-char-connect-tag">${on ? '&#128279;' : 'Connect'}</span>`
-      + `<select onchange="setModuleParam('character','char_connect_${index}',this.value)">`
-      + `<option value=""${on ? '' : ' selected'}>연결 없음</option>${options}</select></label>`;
+    if (!current) return '';
+    const source = (activeSlots || []).findIndex(
+      item => String(item.character.slot_uuid || '') === current) + 1;
+    return `<span class="mod-char-connect is-on is-readonly"`
+      + ` data-naia-guide="C${source || '?'} 의 캐릭터를 물려받는 중입니다.`
+      + `\\n연결을 바꾸려면 결과 화면의 CHARACTER 패널에서 하세요.">`
+      + `<span class="mod-char-connect-tag">&#128279; C${source || '?'}</span></span>`;
   }
 
   /** 이 슬롯을 물려받는 슬롯이 몇 개인가. 원본 쪽에는 Connect 컨트롤이 없어서

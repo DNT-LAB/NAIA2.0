@@ -47,7 +47,6 @@ export function createTagSearchPopup({
 
   let popup = null;
   let timer = null;
-  let composing = false;
   let onResize = null;
   let activeTab = 'all';
   let rows = [];
@@ -184,8 +183,18 @@ export function createTagSearchPopup({
       setStatus('');
       return;
     }
-    // ⚠️ 조합 중에는 보내지 않는다 — 한글 자모가 튀어 헛질의가 쌓인다.
-    if (composing) return;
+    // ⚠️⚠️ **조합 중에도 보낸다.** 예전에 `if (composing) return;` 을 뒀다가
+    //   `밀크티` 가 영영 안 나가는 결함을 만들었다(사용자 제보, 재현):
+    //
+    //     한글 IME 는 **마지막 음절의 조합을 열어 둔다.** `밀크티` 를 치면 `티` 가
+    //     계속 조합 중이라 `compositionend` 가 안 온다. 그래서 마지막으로 나간
+    //     질의는 `크` 가 확정될 때의 **`밀크`** 였고, 화면에는 milk 계열이 떴다.
+    //     공백을 치면(`밀크티 `) 조합이 끝나 비로소 제대로 나갔다.
+    //
+    //   조합 중 `input.value` 에는 조합 글자가 이미 들어 있으므로 그대로 읽으면 된다.
+    //   자모가 튀는 문제는 **디바운스가 흡수한다** - 260ms 안에 다음 글자가 오면
+    //   타이머가 갈리므로 중간 상태(`ㅁ`·`미`·`밀`)는 애초에 안 나간다.
+    //   옛 `tagSearch.mjs` 컨트롤러도 같은 방식이다(compositionupdate 에서 바로 쏜다).
     if (query !== lastQuery) triedTranslate = false;
     const wait = immediate ? 0 : (DEBOUNCE_MS);
     timer = setTimeoutFn(() => { timer = null; send(query); }, wait);
@@ -287,9 +296,12 @@ export function createTagSearchPopup({
 
     const input = pick('.tagsearch-input');
     input.addEventListener('input', () => schedule());
-    input.addEventListener('compositionstart', () => { composing = true; });
+    // ⚠️ 조합 중 갱신에도 반응해야 한다. 마지막 음절은 조합이 안 끝나므로
+    //    `compositionend` 만 믿으면 그 글자가 영영 검색에 안 들어간다.
+    //    조합 상태를 따로 들고 있지 **않는다** - 플래그가 있으면 언젠가 다시
+    //    게이트로 쓰이고, 그게 `밀크티` 결함의 원인이었다.
+    input.addEventListener('compositionupdate', () => schedule());
     input.addEventListener('compositionend', () => {
-      composing = false;
       // 조합이 막 끝난 값이 아직 input.value 에 안 반영된 브라우저가 있다 —
       // 한 틱 뒤에 읽는다.
       setTimeoutFn(() => schedule(), IME_SETTLE_MS);

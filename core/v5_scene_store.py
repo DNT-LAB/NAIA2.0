@@ -292,14 +292,40 @@ def migrate_flat_scenes(save_root: str | Path | None = None) -> str | None:
     target = base / event
     try:
         target.mkdir(parents=True, exist_ok=True)
-        for path in loose:
-            thumb = path.with_suffix(THUMB_SUFFIX)
-            path.replace(target / path.name)
-            if thumb.exists():
-                thumb.replace(target / thumb.name)
     except OSError:
         return None
-    write_event_order(event, [path.stem for path in loose], save_root)
+    # ⚠️ **`Path.replace` 는 말없이 덮어쓴다.** 합치는 폴더에 같은 이름의 컷이 이미 있으면
+    #    사용자의 진짜 작업물이 사라진다(Codex 리뷰 BLOCK - 재현 완료: 이벤트 안의
+    #    `Comic - 1` 이 평면의 동명 파일로 통째로 바뀌었다). 부딪히는 것은 **옮기지 않고
+    #    그 자리에 둔다** - 자동 정리가 사용자 데이터를 지우는 일은 없어야 한다.
+    #    남겨진 파일은 다음에 다시 이 함수를 타므로 기회를 잃지도 않는다.
+    moved: list[Path] = []
+    for path in loose:
+        dest = target / path.name
+        if dest.exists():
+            continue
+        thumb = path.with_suffix(THUMB_SUFFIX)
+        dest_thumb = target / thumb.name
+        try:
+            path.replace(dest)
+        except OSError:
+            continue
+        moved.append(path)
+        if thumb.exists() and not dest_thumb.exists():
+            try:
+                thumb.replace(dest_thumb)
+            except OSError:
+                pass       # 그림 하나를 못 옮긴 것이 컷을 잃을 이유는 아니다
+    if not moved:
+        return None
+    # 순서는 **옮긴 것만** 이어 붙인다. `read_event` 가 폴더에 있는 것과 화해시키므로
+    # 이미 있던 컷도 빠지지 않는다.
+    existing = read_event(event, save_root)
+    order = list(existing["order"]) if existing else []
+    for path in moved:
+        if path.stem not in order:
+            order.append(path.stem)
+    write_event_order(event, order, save_root)
     return event
 
 
@@ -405,11 +431,14 @@ def _normalized_prompt(raw: Any) -> str:
     있고, 읽을 때마다 걷어내면 따로 마이그레이션 도구를 둘 필요가 없다.
     담긴 값 자체는 다음 저장 때 정리된 모습으로 덮인다.
 
-    ⚠️ 구도만 든 프롬프트에는 덩어리 경계가 없으므로 손대지 않는다 - 사용자가 직접
-       친 여러 줄 프롬프트를 뭉개지 않기 위해서다.
+    ⚠️ **덩어리가 셋 이상일 때만 손댄다.** 조립된 프롬프트는 언제나
+       `prefix \\n\\n main \\n\\n postfix` 셋이다. 둘짜리는 사용자가 직접 친 두 문단일
+       뿐인데, 예전엔 그것까지 되짚어 **통째로 날려 먹었다**(Codex 리뷰 CONCERN -
+       재현: `'castle\\n\\nnight'` -> `''`). 애매하면 손대지 않는 쪽이 맞다 - 못 알아본
+       옛 씬은 화면에 길게 보일 뿐이지만, 뭉갠 프롬프트는 되돌릴 방법이 없다.
     """
     text = str(raw or "")
-    if "\n\n" not in text:
+    if len(text.split("\n\n")) < 3:
         return text
     return bare_from_text(text)
 

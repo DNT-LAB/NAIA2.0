@@ -458,12 +458,19 @@ class HeadlessCharacterService:
         elif key.startswith("char_prompt_"):
             index = context._index_from_key(key, "char_prompt_")
             if index is not None:
-                self.ensure_frame(frames, index)["prompt"] = str(value or "")
+                frame = self.ensure_frame(frames, index)
+                frame["prompt"] = str(value or "")
+                # ⚠️ 사용자가 손댄 칸은 **더 이상 씬의 것이 아니다.** 이 표식을 안 지우면
+                #    다음 씬을 불러올 때 "이전 씬이 남긴 칸" 으로 보고 통째로 버린다 -
+                #    공들여 고친 내용이 사라진다(Codex 리뷰 CONCERN).
+                frame["from_scene"] = False
                 invalidate_snapshot = True
         elif key.startswith("char_uc_"):
             index = context._index_from_key(key, "char_uc_")
             if index is not None:
-                self.ensure_frame(frames, index)["uc"] = str(value or "")
+                frame = self.ensure_frame(frames, index)
+                frame["uc"] = str(value or "")
+                frame["from_scene"] = False
                 invalidate_snapshot = True
         elif key.startswith("char_active_"):
             index = context._index_from_key(key, "char_active_")

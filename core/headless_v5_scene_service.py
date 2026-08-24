@@ -364,7 +364,13 @@ class HeadlessV5SceneService:
         #    굴려진 값을 못 찾고 원문 `__wildcard__` 가 그대로 넘어가, 컷마다 다른 인물이
         #    나온다(사용자 제보). 해석된 배역을 **순번으로** 따로 기억해 둔다 - uuid 는
         #    apply 때마다 새로 만들어져 다음 번에 못 찾는다.
-        remembered = dict(getattr(self.context, "_v5_scene_cast", None) or {})
+        # ⚠️ 기억은 **모드별로** 나눠 둔다. 전에는 한 통이라, 같은 이벤트를 열어 둔 채
+        #    모드를 바꾸면 이전 모드에서 굴린 배역이 원문만 같으면 되살아났다
+        #    (Codex 리뷰 CONCERN). 모드가 다르면 캐릭터 규약 자체가 다르다.
+        store = getattr(self.context, "_v5_scene_cast", None)
+        store = store if isinstance(store, dict) else {}
+        mode_key = str(mode or "NAI").upper()
+        remembered = dict(store.get(mode_key) or {})
         cast: dict[int, str] = {}
         keep: dict[str, dict[str, str]] = {}
         for index, frame in enumerate(active_character_frames(settings), 1):
@@ -389,7 +395,8 @@ class HeadlessV5SceneService:
             # 기억할 것이 없고(그 값이 곧 배역), 아무것도 못 얻었으면 기억할 값이 없다.
             if rolled and _has_wildcard(own):
                 keep[key] = {"source": own, "value": rolled}
-        self.context._v5_scene_cast = keep
+        store[mode_key] = keep
+        self.context._v5_scene_cast = store
         return cast
 
     @staticmethod

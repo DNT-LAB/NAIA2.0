@@ -38,11 +38,27 @@ export function createV5ScenePanel({
   let watchdog = null;         // 생성이 시작되는지 지켜보는 타이머
   let awaitingApply = false;   // 다음 컷의 불러오기 응답을 기다리는 중
   let applyWait = null;        // 그 응답의 뒷문 타이머
+  let doneWait = null;         // 완료 신호가 오는지 지켜보는 타이머
 
   function escAttr(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => (
       {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]
     ));
+  }
+
+  /** 저장 이름을 백엔드와 **같은 규칙**으로 정제한다.
+   *
+   * ⚠️ SSOT 는 `core/v5_scene_store.sanitize_scene_name` 이다. 여기서 흉내 내는 이유는
+   *    덮어쓰기 확인을 **저장을 보내기 전에** 해야 하기 때문이다 - 날것으로 견주면
+   *    `A:B` 가 목록의 `AB` 와 안 맞아 확인 없이 덮어쓴다(실증됨). 규칙이 바뀌면 둘 다
+   *    고쳐야 한다.
+   */
+  function sanitizeName(value) {
+    return String(value ?? '')
+      .replace(/[<>:"/\\|?*]/g, '')
+      .trim().replace(/^\.+|\.+$/g, '')
+      .replace(/^_+/, '')
+      .trim();
   }
 
   function rememberedEvent() {
@@ -426,9 +442,11 @@ export function createV5ScenePanel({
   /** 지금 구도를 열린 이벤트의 끝에 담는다. */
   async function saveCurrent() {
     const input = panel.querySelector('#sceneSaveName');
-    const name = String(input?.value || '').trim();
+    const name = sanitizeName(String(input?.value || ''));
     if (!name) { showToast('컷 이름을 입력하세요', 'error'); input?.focus(); return; }
     // 같은 이름이 있으면 덮어쓰기다 - 조용히 덮으면 남의 컷을 잃는다.
+    // ⚠️ **정제한 이름으로 견준다.** 목록의 이름은 이미 정제돼 있는데 날것을 그대로
+    //    비교하면 `A:B` 가 `AB` 와 안 맞아 확인 없이 덮어썼다(Codex 리뷰 BLOCK).
     if ((lastState?.scenes || []).some(s => String(s.name) === name)) {
       const ok = (typeof showConfirmDialog === 'function')
         ? await showConfirmDialog(`"${name}" 컷을 덮어씁니다. 계속할까요?`,
@@ -454,7 +472,11 @@ export function createV5ScenePanel({
    */
   function fire(failReason) {
     clearWatchdog();
-    if (!requestGenerate({})) { stopRun(failReason); return; }
+    // ⚠️ **`v5_scene_request` 마커를 반드시 단다.** 이게 없으면 서버 쪽 Auto Generate
+    //    연쇄가 이 완료를 평범한 생성으로 보고 **자기도 다음 장을 낸다** - 프론트 루프와
+    //    합쳐 생산자가 둘이 되고, 사용자가 시키지 않은 그림에 돈이 나간다(Codex BLOCK).
+    //    Interactive·Studio 가 같은 방식으로 단다(`payload.overrides`).
+    if (!requestGenerate({overrides: {v5_scene_request: true}})) { stopRun(failReason); return; }
     watchdog = globalThis.setTimeout(() => {
       watchdog = null;
       if (running && !generatingNow) stopRun('생성이 시작되지 않아 연속 생성을 멈췄습니다');
@@ -489,6 +511,7 @@ export function createV5ScenePanel({
   function stopRun(reason) {
     clearWatchdog();
     clearApplyWait();
+    clearDoneWait();
     awaitingApply = false;
     if (!running) return;
     running = false;
@@ -536,9 +559,27 @@ export function createV5ScenePanel({
   }
 
   function setGeneratingStatus(next) {
+    const was = generatingNow;
     generatingNow = !!next;
-    // 시작됐으면 감시를 푼다 - 이제부터는 완료 신호가 이어받는다.
-    if (generatingNow) clearWatchdog();
+    if (!running) return;
+    if (generatingNow) {
+      // 시작됐다 - 시작 감시를 풀고 **완료 감시**로 넘긴다.
+      clearWatchdog();
+      clearDoneWait();
+      // ⚠️ 시작 감시만으로는 모자란다. 소켓이 끊기거나 완료 프레임을 잃으면 완료 신호가
+      //    영영 안 와서 `running` 이 풀리지 않는다(Codex 리뷰 CONCERN). 한 장이 이보다
+      //    오래 걸릴 일은 없으니, 넘으면 이어 가지 않고 **선다** - 모르면 안 내는 쪽이 맞다.
+      doneWait = globalThis.setTimeout(() => {
+        doneWait = null;
+        if (running) stopRun('생성 완료 신호가 오지 않아 연속 생성을 멈췄습니다');
+      }, 300000);
+    } else if (was) {
+      clearDoneWait();
+    }
+  }
+
+  function clearDoneWait() {
+    if (doneWait) { globalThis.clearTimeout(doneWait); doneWait = null; }
   }
 
   function onClick(event) {
@@ -606,6 +647,10 @@ export function createV5ScenePanel({
       // 한 번에 적용한다(사용자 지정). 예전엔 두 번 눌러야 했는데 - 통째 교체라
       // 잘못 누르면 작업하던 구도가 사라져서 - 컷을 잇달아 넘겨 보는 작업에서는
       // 그 한 번이 매번 거슬린다. 안전보다 손맛을 택했다.
+      // ⚠️ 돌고 있는 중에 손으로 다른 컷을 부르면 **줄거리가 바뀐다.** 예전엔 그냥
+      //    `appliedName` 만 갈아 끼워서, 구경하려고 5컷을 눌렀더니 다음 장부터 6컷으로
+      //    이어졌다(Codex 리뷰 CONCERN). 사람이 끼어들면 자동은 물러난다.
+      if (running) stopRun('다른 컷을 불러와 연속 생성을 멈췄습니다');
       setModuleParam('v5_scene', 'apply', {event: activeEvent(), name});
       showToast(`구도를 불러왔습니다 — ${name}`, 'info');
       // 이 컷에서만 연속 생성을 켤 수 있다 - 불러온 뒤에 와일드카드를 손볼 틈을 준다.

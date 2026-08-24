@@ -24,6 +24,11 @@ AUTO_GENERATE_SUPPRESSED_FLAGS = {
     "sequence_preset_request",
     "studio_request",
     "turbo_sequence_request",
+    # V5 Scene 연속 생성. **프론트가 루프를 몬다**(컷마다 불러오기 왕복이 필요해서
+    # 서버가 직전 params 를 복사하는 방식으로는 안 된다) - 그래서 서버 쪽 Auto Generate
+    # 연쇄는 반드시 빠져야 한다. 안 빼면 생산자가 둘이 되어 사용자가 시키지 않은 그림이
+    # 나간다(Codex 리뷰 BLOCK, 실증됨).
+    "v5_scene_request",
 }
 
 # img2img류 요청 타입: 위 플래그와 동일하게 특수 취급.

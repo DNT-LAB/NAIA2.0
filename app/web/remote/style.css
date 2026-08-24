@@ -19248,6 +19248,134 @@ body.detached-module .mod-grid-3 {
   transition: width 0.3s ease;
 }
 
+/* ── V5 Scene (Fn > V5 Scene) ────────────────────────────────────────────────
+   씬 = 구도 한 벌(프롬프트 · 캐릭터 · 좌표 · 해상도).
+   목록은 가볍게: [썸네일 | 독립/전체 슬롯 · 해상도 · 설명]. **누르면 세부가 펼쳐진다**
+   (사용자 지정) - 훑을 때 필요한 것과 하나를 고른 뒤 확인할 것이 다르다. */
+.scene-panel {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 12px; height: 100%; min-height: 0; overflow-y: auto;
+}
+.scene-bar, .scene-save { display: flex; gap: 7px; }
+.scene-search, .scene-save-name {
+  flex: 1; min-width: 0; padding: 7px 10px;
+  border-radius: 6px; border: 1px solid var(--border-dim);
+  background: var(--bg-deep); color: var(--text-primary);
+  font-family: var(--font-editor); font-size: 12px; outline: none;
+}
+.scene-search:focus, .scene-save-name:focus { border-color: var(--accent-blue); }
+.scene-bar-btn, .scene-save-btn {
+  flex: none; padding: 7px 13px; cursor: pointer; white-space: nowrap;
+  border-radius: 6px; border: 1px solid var(--border-dim);
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 11px;
+  transition: background .14s, border-color .14s, color .14s;
+}
+.scene-bar-btn:hover { border-color: rgba(124,106,239,0.55); color: var(--text-primary); background: rgba(124,106,239,0.14); }
+.scene-save-btn {
+  border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.18);
+  color: var(--text-primary);
+}
+.scene-save-btn:hover { background: rgba(124,106,239,0.32); border-color: rgba(150,132,255,0.8); }
+.scene-count {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint, #6e7086);
+  letter-spacing: 0.04em;
+}
+.scene-empty {
+  padding: 28px 16px; text-align: center; line-height: 1.7;
+  border: 1px dashed var(--border-dim); border-radius: 8px;
+  color: var(--text-dim); font-size: 12px;
+}
+.scene-list { display: flex; flex-direction: column; gap: 6px; }
+.scene-row {
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-surface); overflow: hidden;
+  transition: border-color .14s;
+}
+.scene-row:hover { border-color: rgba(124,106,239,0.45); }
+.scene-row.is-open { border-color: rgba(124,106,239,0.65); }
+/* 다른 모드의 씬은 적용할 수 없다 - 눌리지 않는다는 것이 보여야 한다. */
+.scene-row.is-othermode { opacity: 0.6; }
+.scene-row-head {
+  display: flex; align-items: stretch; gap: 10px; width: 100%;
+  padding: 8px; cursor: pointer; text-align: left;
+  border: 0; background: transparent; color: inherit;
+}
+.scene-thumb {
+  flex: none; width: 56px; height: 56px; border-radius: 6px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.4); border: 1px solid var(--border-soft, #212130);
+}
+.scene-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scene-thumb-none { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint, #6e7086); }
+.scene-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.scene-row-name {
+  font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scene-row-meta {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
+}
+/* 독립 슬롯 / 전체 슬롯. 서로 다른 캐릭터가 몇이고 칸이 몇인지가 구도의 뼈대다. */
+.scene-slots {
+  padding: 1px 5px; border-radius: 3px;
+  border: 1px solid rgba(106,191,123,0.4); background: rgba(38,74,48,0.3); color: #b6dcc1;
+}
+.scene-row-warn { color: var(--hint-cross-search); }
+.scene-row-desc {
+  font-size: 10.5px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scene-detail {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 8px 10px 10px; border-top: 1px solid var(--border-soft, #212130);
+  background: rgba(0,0,0,0.22);
+}
+.scene-detail-line { display: flex; gap: 8px; align-items: baseline; }
+.scene-detail-line > span {
+  flex: none; width: 52px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint, #6e7086);
+}
+.scene-detail-line > code {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 10.5px; color: #cdd3e4;
+  background: transparent; border: 0; padding: 0;
+  word-break: break-all; white-space: pre-wrap;
+  /* ⚠️ 네거티브는 기본값만으로도 열 줄이 넘는다(실측) - 그대로 두면 펼친 카드가
+     화면을 통째로 잡아먹어 목록으로 돌아갈 수가 없다. 접어 두고 필요하면 굴린다. */
+  max-height: 4.6em; overflow-y: auto; overscroll-behavior: contain;
+}
+.scene-detail-char {
+  display: flex; gap: 8px; align-items: baseline;
+  padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06);
+}
+.scene-detail-cn {
+  flex: none; width: 52px;
+  font-family: var(--font-mono); font-size: 9.5px; color: #b6dcc1;
+}
+.scene-detail-cp {
+  flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-primary);
+  word-break: break-all;
+}
+.scene-detail-cpos {
+  flex: none; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint, #6e7086);
+}
+.scene-detail-actions { display: flex; margin-top: 4px; }
+.scene-apply {
+  flex: 1; padding: 7px; cursor: pointer;
+  border-radius: 6px; border: 1px solid rgba(124,106,239,0.5);
+  background: rgba(124,106,239,0.16); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 11px;
+  transition: background .14s, border-color .14s;
+}
+.scene-apply:hover:not(:disabled) { background: rgba(124,106,239,0.3); }
+.scene-apply:disabled { opacity: 0.4; cursor: default; }
+/* 한 번 더 눌러야 적용된다 - 지금 구도를 통째로 갈아치우는 조작이라 오조작이 아프다. */
+.scene-apply.is-confirm {
+  border-color: rgba(232,217,143,0.75); background: rgba(90,80,30,0.45); color: #ecdfa6;
+}
+
 /* ── 캐릭터 슬롯 Connect ─────────────────────────────────────────────────────
    앞선 활성 슬롯의 캐릭터를 그대로 물려받는다(사용자 지정). 카드 머리의 액션 줄에
    앉되, 옆의 정사각 버튼들과 높이를 맞춘다. 연결되면 사슬 아이콘만 남겨 좁게 쓴다 —

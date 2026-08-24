@@ -436,6 +436,7 @@ let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
 let sequencePresetControl = null;
+let v5SceneControl = null;
 let danbooruFeedbackControl = null;
 let resolutionManagerPanel = null;
 let naiModelManagerPanel = null;
@@ -1942,6 +1943,20 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   })
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
+  });
+const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260824-v5scene2')
+  .then(({createV5ScenePanel}) => {
+    v5SceneControl = createV5ScenePanel({
+      panel: $('v5ScenePanel'),
+      escHtml,
+      showToast,
+      setModuleParam,
+    });
+    const cached = moduleStateCache.get('v5_scene');
+    if (cached) v5SceneControl.render(cached);
+  })
+  .catch(error => {
+    console.error('Failed to initialize V5 Scene panel', error);
   });
 const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs')
   .then(({createResolutionManagerPanel}) => {
@@ -6337,6 +6352,14 @@ function openFnSequence() {
   sequencePresetReady.then(() => sequencePresetControl?.onOpen());
 }
 
+function openFnV5Scene() {
+  closeFnMenu();
+  switchTab('v5scene');
+  // 열 때마다 목록을 다시 받는다 - 다른 창에서 담은 씬이 있을 수 있고, 썸네일
+  // 리비전도 그때 갱신된다.
+  v5SceneReady.then(() => v5SceneControl?.onOpen());
+}
+
 function positionTranslatorPopup() {
   if (!translatorPopup || translatorPopup.hidden) return;
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -8649,6 +8672,10 @@ function onModuleState(m) {
   else if (m.module_id === 'prompt_engineering') {
     // Interactive 의 베이스 프롬프트가 선행·후행을 품는다 — PE 가 바뀌면 즉시 다시 조립한다.
     if (interactivePanel && interactivePanel.isActive?.()) interactivePanel.refreshPrompt();
+  }
+  else if (m.module_id === 'v5_scene') {
+    // Fn > V5 Scene 은 탭 페이지라 팝업 배선을 타지 않는다 - 여기서 직접 그린다.
+    if (v5SceneControl) v5SceneControl.render(m);
   }
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory') {

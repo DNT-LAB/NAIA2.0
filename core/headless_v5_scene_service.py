@@ -27,6 +27,18 @@ from core.v5_scene_store import (
 )
 
 
+def _describe(scene: dict[str, Any]) -> str:
+    """카드에 한 줄로 붙일 설명. 메인 프롬프트의 앞 태그를 쓴다.
+
+    따로 적는 칸을 두지 않는다(사용자 지정: 지금은 검색·저장·폴더 열기만) - 대신
+    프롬프트에서 뽑으면 적는 수고 없이 늘 최신이고, 검색어로도 그대로 쓰인다.
+    """
+    text = str(scene.get("prompt") or "")
+    tags = [part.strip() for part in text.replace("\n", ",").split(",")]
+    tags = [tag for tag in tags if tag and not tag.startswith("#")]
+    return ", ".join(tags[:6])
+
+
 class HeadlessV5SceneService:
     def __init__(self, context: Any):
         self.context = context
@@ -56,12 +68,33 @@ class HeadlessV5SceneService:
             if scene is None:
                 continue
             revision = scene_thumb_revision(scene["name"], save_root=root)
+            characters = scene["characters"]
+            # **독립 슬롯**(Connect 로 물려받지 않는 것) 수를 따로 센다. 카드가
+            # `2/3` 처럼 보여 준다 - 서로 다른 캐릭터가 몇이고 칸이 몇인지가 한눈에
+            # 들어와야 어느 구도인지 알아본다(사용자 지정).
+            independent = sum(1 for item in characters if not item.get("connect_to"))
             scenes.append({
                 "name": scene["name"],
                 "mode": scene["mode"],
                 "summary": scene_summary(scene),
-                "character_count": len(scene["characters"]),
+                "character_count": len(characters),
+                "independent_count": independent,
+                "description": _describe(scene),
                 "resolution": scene["resolution"],
+                # 카드를 눌렀을 때 펼칠 세부. 목록은 가볍게 두되 자세히 보고 싶을 때가
+                # 있고, 그때마다 왕복하면 느리다 - 씬 하나가 작아 함께 실어 보낸다.
+                "detail": {
+                    "prompt": scene["prompt"],
+                    "negative": scene["negative"],
+                    "position_mode": scene["position_mode"],
+                    "characters": [{
+                        "prompt": item["prompt"],
+                        "uc": item["uc"],
+                        "custom_name": item["custom_name"],
+                        "connect_to": item["connect_to"],
+                        "position": item["position"],
+                    } for item in characters],
+                },
                 # ⚠️ 리비전을 **URL 에 실어** 보낸다. 같은 이름의 씬을 다시 저장하면
                 #    파일 경로는 그대로라, 이게 없으면 브라우저가 옛 그림을 계속 쓴다
                 #    (이 저장소가 캐릭터 뷰어에서 한 번 밟은 함정).
@@ -249,6 +282,8 @@ class HeadlessV5SceneService:
             if delete_scene(str(value or ""), save_root=self._save_root()):
                 return self.state()
             return context._toast("씬을 지우지 못했습니다", level="error")
+        if key == "open_folder":
+            return self.open_folder()
         if key == "rename":
             try:
                 payload = json.loads(str(value or "{}"))
@@ -258,6 +293,35 @@ class HeadlessV5SceneService:
                 payload = {}
             return self.rename(str(payload.get("old") or ""), str(payload.get("new") or ""))
         return context._toast(f"V5 Scene action is not supported in this runtime: {key}", level="info")
+
+    def open_folder(self) -> dict[str, Any]:
+        """씬 폴더를 OS 탐색기에서 연다(없으면 만든다).
+
+        지금은 씬을 지우거나 이름을 바꾸는 버튼을 두지 않는다(사용자 지정) - 그 대신
+        폴더를 열어 주면 파일을 직접 다루면 된다. `wildcard.open_folder` 와 같은 규약.
+        """
+        import os
+        import subprocess
+        import sys
+
+        from core.v5_scene_store import scene_dir
+
+        context = self.context
+        base = scene_dir(self._save_root())
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return context._toast(f"씬 폴더를 만들지 못했습니다: {exc}", level="error")
+        try:
+            if os.name == "nt":
+                os.startfile(str(base))  # type: ignore[attr-defined]
+            elif sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(base)])
+            else:
+                subprocess.Popen(["xdg-open", str(base)])
+        except Exception as exc:
+            return context._toast(f"폴더 열기 실패: {exc}", level="error")
+        return context._toast("씬 폴더를 탐색기에서 열었어요.", level="info")
 
     def rename(self, old: str, new: str) -> dict[str, Any]:
         context = self.context

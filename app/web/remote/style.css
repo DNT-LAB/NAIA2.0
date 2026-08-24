@@ -19296,15 +19296,22 @@ body.detached-module .mod-grid-3 {
 .scene-row.is-open { border-color: rgba(124,106,239,0.65); }
 /* 다른 모드의 씬은 적용할 수 없다 - 눌리지 않는다는 것이 보여야 한다. */
 .scene-row.is-othermode { opacity: 0.6; }
-/* 이벤트 고르는 칸. 네이티브 select 로 둔다(`data-native-select`) - customSelects 가
-   업그레이드하면 이 패널의 재렌더마다 다시 감싸야 하고, 라벨이 두 벌로 겹친 전례가 있다. */
+/* 이벤트 고르는 칸. ⚠️ 네이티브 `<select>` 를 쓰면 **Windows 기본 드롭다운**이 떠서
+   흰 바탕에 시스템 폰트로 혼자 튀고 글자가 안 읽힌다(사용자 제보) - 버튼 + 커스텀
+   메뉴로 바꿨고, 메뉴는 Connect 메뉴의 CSS 를 **그대로 공유**한다(아래 참조). */
 .scene-event-pick {
-  flex: 1; min-width: 0; padding: 7px 10px; cursor: pointer;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; cursor: pointer; text-align: left;
   border-radius: 6px; border: 1px solid rgba(124,106,239,0.5);
   background: rgba(124,106,239,0.12); color: var(--text-primary);
   font-family: var(--font-mono); font-size: 12px;
 }
-.scene-event-pick:hover { border-color: rgba(150,132,255,0.8); }
+.scene-event-pick:hover { border-color: rgba(150,132,255,0.8); background: rgba(124,106,239,0.2); }
+.scene-event-pick[aria-expanded="true"] { border-color: rgba(150,132,255,0.9); background: rgba(124,106,239,0.24); }
+.scene-event-pick-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-event-pick-c { flex: none; font-size: 10px; color: var(--text-dim); }
+/* 메뉴는 Connect 메뉴와 같은 결이다 - 폭만 조금 넉넉히(이벤트 이름이 길 수 있다). */
+.scene-event-menu { max-width: 320px; }
 /* 컷 한 줄 = [본문 버튼][↑↓]. 순서 버튼이 본문 클릭 영역을 갉아먹지 않게 나눠 둔다. */
 .scene-row-line { display: flex; align-items: stretch; }
 /* ⚠️ `width: 100%` 을 쓰면 안 된다. flex 아이템이라 그게 flex-basis 가 되고, 기본

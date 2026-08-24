@@ -53,6 +53,86 @@ export function createV5ScenePanel({
   // 컷 검색칸은 **일부러 없앴다**(사용자 지정). 한 이벤트에 컷 몇 개인 규모라 목록이
   // 한눈에 들어오고, 검색칸이 오히려 저장칸과 헷갈린다. 규모가 커지면 되살린다.
 
+  // ── 이벤트 고르기 ────────────────────────────────────────────────────────
+  // ⚠️ 네이티브 `<select>` 를 쓰면 **Windows 기본 드롭다운**이 뜬다 - 흰 바탕에 시스템
+  //    폰트라 이 화면에서 혼자 튀고 글자가 안 읽힌다(사용자 제보). 캐릭터 슬롯의
+  //    Connect 메뉴와 **같은 결·같은 CSS 선택자**를 쓴다(`.cq-connect-menu` 와 공유).
+  // ⚠️ body 직계 + fixed 다. 패널이 `overflow-y: auto` 라 안에 그리면 잘린다.
+  let eventMenuEl = null;
+  let eventMenuDismiss = null;
+  let menuClosedFrom = null;   // 방금 닫힌 원인이 된 버튼(아래 재열림 방지)
+
+  function closeEventMenu() {
+    if (eventMenuDismiss) {
+      document.removeEventListener('mousedown', eventMenuDismiss, true);
+      document.removeEventListener('keydown', eventMenuDismiss, true);
+      window.removeEventListener('resize', eventMenuDismiss, true);
+      window.removeEventListener('scroll', eventMenuDismiss, true);
+      eventMenuDismiss = null;
+    }
+    eventMenuEl?.remove();
+    eventMenuEl = null;
+    panel?.querySelector('[data-scene-event-pick]')?.setAttribute('aria-expanded', 'false');
+  }
+
+  function openEventMenu(button) {
+    closeEventMenu();
+    const events = lastState?.events || [];
+    if (!events.length) return;
+    const active = activeEvent();
+    eventMenuEl = document.createElement('div');
+    eventMenuEl.className = 'cq-connect-menu scene-event-menu';
+    eventMenuEl.setAttribute('role', 'listbox');
+    eventMenuEl.innerHTML =
+      '<div class="cq-connect-menu-head">이벤트</div>'
+      + events.map(name =>
+          `<button type="button" class="cq-connect-item${name === active ? ' is-on' : ''}"`
+          + ` role="option" aria-selected="${name === active ? 'true' : 'false'}"`
+          + ` data-scene-event-pickone="${escAttr(name)}"><b>${escHtml(name)}</b></button>`
+        ).join('');
+    document.body.appendChild(eventMenuEl);
+    button.setAttribute('aria-expanded', 'true');
+
+    const rect = button.getBoundingClientRect();
+    const mw = eventMenuEl.offsetWidth, mh = eventMenuEl.offsetHeight;
+    const margin = 6;
+    // 버튼 **왼쪽 끝**에 맞춘다 - 이 버튼은 줄 왼쪽에 있어 그쪽이 자연스럽다.
+    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - mw - margin));
+    let top = rect.bottom + 4;
+    if (top + mh > window.innerHeight - margin) top = Math.max(margin, rect.top - mh - 4);
+    eventMenuEl.style.left = `${Math.round(left)}px`;
+    eventMenuEl.style.top = `${Math.round(top)}px`;
+    // 버튼보다 좁으면 어색하다 - 최소한 버튼만큼은 벌린다.
+    eventMenuEl.style.minWidth = `${Math.round(rect.width)}px`;
+
+    eventMenuEl.addEventListener('click', event => {
+      const pick = event.target.closest('[data-scene-event-pickone]');
+      if (!pick) return;
+      const name = pick.dataset.sceneEventPickone || '';
+      closeEventMenu();
+      if (name === activeEvent()) return;
+      rememberEvent(name);
+      openName = '';        // 남의 이벤트에서 쓰던 펼침 상태다
+      setModuleParam('v5_scene', 'refresh', {event: name});
+    });
+
+    eventMenuDismiss = event => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return;
+      if (event.type === 'mousedown' && eventMenuEl?.contains(event.target)) return;
+      // ⚠️ `mousedown` 은 `click` 보다 먼저다. 열린 상태에서 버튼을 다시 누르면
+      //    여기서 닫히고 이어 온 click 이 **다시 연다** - 닫히지 않는 것처럼 보인다.
+      //    누른 자리가 그 버튼이면 표시를 남겨 click 이 건너뛰게 한다.
+      if (event.type === 'mousedown') {
+        menuClosedFrom = event.target?.closest?.('[data-scene-event-pick]') || null;
+      }
+      closeEventMenu();
+    };
+    document.addEventListener('mousedown', eventMenuDismiss, true);
+    document.addEventListener('keydown', eventMenuDismiss, true);
+    window.addEventListener('resize', eventMenuDismiss, true);
+    window.addEventListener('scroll', eventMenuDismiss, true);
+  }
+
   function render(state) {
     if (state) {
       lastState = state;
@@ -60,6 +140,8 @@ export function createV5ScenePanel({
       if (state.event) rememberEvent(state.event);
     }
     if (!panel || !lastState) return;
+    // 다시 그리면 메뉴가 가리키던 버튼이 사라진다 - 떠 있는 채로 두면 허공에 남는다.
+    closeEventMenu();
     const events = lastState.events || [];
     const active = activeEvent();
     const all = lastState.scenes || [];
@@ -81,11 +163,11 @@ export function createV5ScenePanel({
 
     panel.innerHTML = `
       <div class="scene-bar">
-        <select class="scene-event-pick" id="sceneEventPick" data-native-select
-                data-naia-title="열어 둘 이벤트">
-          ${events.map(name => `<option value="${escAttr(name)}"${
-            name === active ? ' selected' : ''}>${escHtml(name)}</option>`).join('')}
-        </select>
+        <button type="button" class="scene-event-pick" id="sceneEventPick" data-scene-event-pick="1"
+                aria-haspopup="listbox" aria-expanded="false" data-naia-title="열어 둘 이벤트">
+          <span class="scene-event-pick-t">${escHtml(active || '(이벤트 없음)')}</span>
+          <span class="scene-event-pick-c" aria-hidden="true">▾</span>
+        </button>
         <button type="button" class="scene-bar-btn" data-scene-event-new="1"
                 data-naia-title="새 이벤트를 만듭니다">+ 이벤트</button>
         <button type="button" class="scene-bar-btn" data-scene-folder="1"
@@ -318,6 +400,14 @@ export function createV5ScenePanel({
   }
 
   function onClick(event) {
+    const pickBtn = event.target.closest('[data-scene-event-pick]');
+    if (pickBtn) {
+      const reopened = menuClosedFrom === pickBtn;
+      menuClosedFrom = null;
+      if (!reopened) openEventMenu(pickBtn);
+      return;
+    }
+    menuClosedFrom = null;
     // ⚠️ 썸네일 판정이 **토글보다 먼저**다. 썸네일이 헤더 버튼 안에 있어서, 나중에
     //    보면 카드가 같이 펼쳐졌다 접혔다 한다.
     const preview = event.target.closest('[data-scene-preview]');
@@ -376,14 +466,6 @@ export function createV5ScenePanel({
   }
 
   panel?.addEventListener('click', onClick);
-  panel?.addEventListener('change', event => {
-    if (!event.target.closest('#sceneEventPick')) return;
-    const name = String(event.target.value || '');
-    rememberEvent(name);
-    // 이벤트를 바꾸면 펼침은 초기화한다 - 남의 이벤트에서 쓰던 상태다.
-    openName = '';
-    setModuleParam('v5_scene', 'refresh', {event: name});
-  });
   panel?.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
     const target = event.target.closest('#sceneSaveName, #sceneEventName');

@@ -1222,18 +1222,6 @@ class APIService:
                         character_ids.extend(str(index + 1) for index in range(len(character_ids), len(characters)))
                     default_center = {"x": 0.5, "y": 0.5}
 
-                    # 캐릭터 칸에 적은 대사를 메인 프롬프트 뒤에 얹는다(공식 웹 사양).
-                    # 이걸 안 해서 같은 시드·같은 캐릭터 프롬프트인데도 글자가 안 나왔다.
-                    _speech = extract_character_speech(characters)
-                    if _speech:
-                        _before = str(api_parameters['v4_prompt']['caption']['base_caption'] or "")
-                        _merged = merge_character_speech(_before, _speech)
-                        api_parameters['v4_prompt']['caption']['base_caption'] = _merged
-                        nai_input_override = _merged
-                        if _merged != _before:
-                            print(f"[{char_source}] merged {_speech.count(chr(10) * 2) + 1}"
-                                  f" character text segment(s) into prompt")
-
                     def _normalized_center(value):
                         """{'x','y'} 를 0.0~1.0 소수 3자리로. 좌표가 아니면 None.
 
@@ -1306,6 +1294,26 @@ class APIService:
                             dict(center) for center in given_centers[:len(characters)]
                             if isinstance(center, dict)
                         ]
+
+                # 따옴표로 적은 대사를 프롬프트 맨 뒤에 `text: ` 로 얹는다(공식 웹 사양).
+                #
+                # ⚠️ **메인 프롬프트도 훑는다.** 캐릭터가 하나도 없어도 올라간다 -
+                #    공홈 예제가 그렇다(사용자 제보 2026-08-25):
+                #      입력  ... english text, text. The text "Tags are concise." is written ...
+                #      출력  ... 같은 문장 그대로 ..., no text, teXt: Tags are concise.
+                #    그래서 `if characters:` 안이 아니라 **밖**에 둔다. 안에 뒀을 때는
+                #    캐릭터가 없으면 통째로 건너뛰었다.
+                # ⚠️ 훑는 차례는 메인 -> 캐릭터 순이다. 둘 다에 따옴표가 있는 표본이
+                #    아직 없어 확실치 않다 - 어긋나면 여기 순서를 뒤집으면 된다.
+                _speech = extract_character_speech([main_prompt, *characters])
+                if _speech:
+                    _before = str(api_parameters['v4_prompt']['caption']['base_caption'] or "")
+                    _merged = merge_character_speech(_before, _speech)
+                    api_parameters['v4_prompt']['caption']['base_caption'] = _merged
+                    nai_input_override = _merged
+                    if _merged != _before:
+                        print(f"[NAI] merged {_speech.count(chr(10) * 2) + 1}"
+                              f" quoted text segment(s) into prompt")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             generation_request = params.get('_generation_request')

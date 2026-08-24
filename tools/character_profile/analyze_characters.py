@@ -8,6 +8,7 @@ copyright_groups.json의 각 copyright에 대해:
 
 Usage:
     python analyze_characters.py [--min-rows 50] [--top-n 30]
+                                 [--min-pct-color 30] [--min-pct-char 20]
 """
 
 import json
@@ -24,6 +25,16 @@ FILTERED_PATH = TAGS_DIR / "1girl_solo_filtered.parquet"
 ALTERNATE_PATH = TAGS_DIR / "1girl_solo_alternate.parquet"
 GROUPS_PATH = TAGS_DIR / "copyright_groups.json"
 OUTPUT_PATH = TAGS_DIR / "character_analysis.json"
+
+# 퍼센트 문턱. 이 스크립트에는 오랫동안 개수 상한(`--top-n`)만 있었고, 그래서 배포된
+# `data/character_analysis.json` 의 2,874종(21.3%)이 0.3% 짜리 태그까지 달고 있었다.
+# ⚠️ 세 곳이 **같은 값이어야 한다** - 어긋나면 증분으로 들어온 캐릭터와 원본 캐릭터의
+#    잣대가 달라진다:
+#      tools/build_character_profile_increment.py  (증분 빌드)
+#      tools/prune_character_profile_gate.py       (사후 가지치기 · 검사)
+#      여기                                        (전체 재빌드)
+MIN_PCT_COLOR = 30.0
+MIN_PCT_CHAR = 20.0
 
 # ─── 태그 분류용 사전 로드 ───
 
@@ -62,7 +73,8 @@ def load_classification_sets():
 # ─── 단일 캐릭터 분석 ───
 
 
-def analyze_character_tags(df_char, classify, top_n=30):
+def analyze_character_tags(df_char, classify, top_n=30,
+                           min_pct_color=MIN_PCT_COLOR, min_pct_char=MIN_PCT_CHAR):
     """캐릭터 DataFrame에서 태그 빈도를 분석하고 분류."""
     total = len(df_char)
     if total == 0:
@@ -88,14 +100,22 @@ def analyze_character_tags(df_char, classify, top_n=30):
         entry = {"tag": tag, "count": cnt, "pct": pct}
 
         if tag in classify["personal_color"]:
-            if len(result["personal_color"]) < top_n:
-                result["personal_color"].append(entry)
+            bucket, floor = result["personal_color"], min_pct_color
         elif tag in classify["clothes"]:
-            if len(result["key_clothes"]) < top_n:
-                result["key_clothes"].append(entry)
+            bucket, floor = result["key_clothes"], min_pct_char
         elif tag in classify["characteristics"]:
-            if len(result["characteristics"]) < top_n:
-                result["characteristics"].append(entry)
+            bucket, floor = result["characteristics"], min_pct_char
+        else:
+            continue
+        # ⚠️ 개수 상한만으로는 모자란다. `most_common()` 은 내림차순이라 상한에 걸리기
+        #    전까지 **0.3% 짜리도 다 담긴다** - 129행짜리 `lacrimosa (nte)` 가 색 15종을
+        #    달고 `red hair 0.8%`(1장)까지 프롬프트에 넣었던 이유다(제보 2026-08-24).
+        #    소비자에 자체 문턱이 없으므로(`character_viewer_service.py` 의 프롬프트
+        #    조립) 이 파일이 유일한 관문이다. 문턱을 상한보다 **먼저** 본다.
+        if pct < floor:
+            continue
+        if len(bucket) < top_n:
+            bucket.append(entry)
 
     return result
 
@@ -109,6 +129,10 @@ def main():
                         help="최소 행 수 (이 미만의 캐릭터는 건너뜀)")
     parser.add_argument("--top-n", type=int, default=30,
                         help="카테고리별 상위 태그 수")
+    parser.add_argument("--min-pct-color", type=float, default=MIN_PCT_COLOR,
+                        help="personal_color 최소 비율 (기본 30)")
+    parser.add_argument("--min-pct-char", type=float, default=MIN_PCT_CHAR,
+                        help="characteristics / key_clothes 최소 비율 (기본 20)")
     args = parser.parse_args()
 
     print("Loading datasets...")
@@ -174,7 +198,9 @@ def main():
             if len(df_char) < args.min_rows:
                 continue
 
-            analysis = analyze_character_tags(df_char, classify, args.top_n)
+            analysis = analyze_character_tags(
+                df_char, classify, args.top_n,
+                min_pct_color=args.min_pct_color, min_pct_char=args.min_pct_char)
             if analysis:
                 analysis["gender"] = gender
                 analysis["aliases"] = aliases

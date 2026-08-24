@@ -98,10 +98,52 @@ export function createCharacterQuickPanel({
    *
    *  @param bandBottom 칩 줄이 끝나는 y(뷰포트 기준). 줄이 늘면 무대가 내려간다.
    */
-  function measureStage(bandBottom) {
+  /** `#preview` 가 **실제로 그리는** 사각형.
+   *
+   *  ⚠️ 요소 상자가 아니다. `#preview` 는 `width/height: 100%` + `object-fit: contain`
+   *     이라 요소는 늘 뷰어를 꽉 채우고 그림만 그 안에서 레터박싱된다 -
+   *     `getBoundingClientRect()` 를 그대로 쓰면 무대가 그림보다 훨씬 크게 잡힌다.
+   *  ⚠️ 가로 자리는 `object-position` 이 정한다. syncViewerShift 가 넣은
+   *     `--cq-img-shift` 로 그림이 오른쪽에 밀려 있을 수 있으니 **가운데라고 가정하지
+   *     말고 계산된 값을 읽는다.**
+   */
+  function drawnImageRect(img) {
+    const box = img.getBoundingClientRect();
+    const nw = img.naturalWidth, nh = img.naturalHeight;
+    if (!box.width || !box.height || !nw || !nh) return null;
+    const scale = Math.min(box.width / nw, box.height / nh);
+    const width = nw * scale, height = nh * scale;
+    // `50%` 는 "남는 여백의 절반", `124px` 는 "왼쪽에서 124px". 둘 다 온다.
+    const at = (raw, slack) => {
+      const text = String(raw || '50%');
+      const value = parseFloat(text);
+      if (!Number.isFinite(value)) return slack / 2;
+      return text.endsWith('%') ? slack * (value / 100) : value;
+    };
+    const parts = String(getComputedStyle(img).objectPosition || '50% 50%').trim().split(/\s+/);
+    return {
+      left: box.left + at(parts[0], box.width - width),
+      top: box.top + at(parts[1], box.height - height),
+      width, height,
+    };
+  }
+
+  function measureStage(bandBottom, snapToImage) {
     const res = getResolution();
     const img = document.getElementById('preview');
     const shown = !!(img && img.naturalWidth && img.classList.contains('show'));
+    // 엿보기는 띠가 없어 **피할 것이 없다** - 그림에 딱 맞춰 얹는다. 따로 계산한
+    // 사각형은 비율만 같고 자리가 조금씩 어긋나 "약간 안 맞는" 느낌을 준다(사용자 지적).
+    // ⚠️ 비율이 다르면 맞추지 않는다 - 어긋난 그림에 원을 얹으면 좌표가 거짓말이 된다.
+    if (snapToImage && shown && res) {
+      const drawn = drawnImageRect(img);
+      if (drawn && Math.abs(img.naturalWidth / img.naturalHeight - res.w / res.h) < 0.01) {
+        // `src` 는 비운다 - 진짜 그림이 이미 뒤에 있으니 다시 깔 이유가 없다
+        // (엿보기에는 `is-cq-posedit` 를 안 붙여 원본이 그대로 보인다).
+        // `overlay` 는 켠다 - 원이 그림에 묻히지 않게 덮는 층이 필요하다.
+        return {...drawn, overlay: true, src: ''};
+      }
+    }
     // 화면의 그림과 지금 해상도가 같을 때만 그림을 깐다. 비율이 다른 그림 위에
     // 원을 놓으면 좌표가 거짓말이 된다.
     const matches = !!(shown && res
@@ -144,7 +186,7 @@ export function createCharacterQuickPanel({
     // 엿보기에는 띠가 없으므로 뷰어 위쪽에서 바로 시작한다.
     const viewerBox = document.getElementById('resultViewer')?.getBoundingClientRect();
     const bandBottom = peek ? ((viewerBox ? viewerBox.top : 0) + 4) : renderBand(slots);
-    const box = stageRect = measureStage(bandBottom);
+    const box = stageRect = measureStage(bandBottom, peek);
     if (!box) return;
     ensureStage();
     const wrap = host().getBoundingClientRect();
@@ -1178,7 +1220,8 @@ export function createCharacterQuickPanel({
   // 창 크기가 바뀌면 아래 경계도 움직인다. 한 번만 건다.
   // ⚠️ 무대도 함께 다시 그린다. 띠의 폭은 px 로 넣으므로 창이 좁아져도 스스로
   //    줄지 않는다 - 다시 그려야 칩이 접히고 그만큼 무대가 내려간다(실측).
-  window.addEventListener('resize', () => { fitGridHeight(); renderStage(); });
+  // 미는 양은 뷰어 상자에서 나온다 - 창이 바뀌면 그것도 같이 다시 재야 한다.
+  window.addEventListener('resize', () => { fitGridHeight(); syncViewerShift(); renderStage(); });
   // ⚠️ resize 만으로는 모자란다. GENERATION INFO 패널은 **창과 무관하게** 높이가
   //    변한다(히스토리 항목을 고르면 내용이 늘어난다) - 그때 경계가 올라오는데
   //    창은 그대로라 resize 가 오지 않는다. 그 요소를 직접 지켜본다.
@@ -1210,7 +1253,14 @@ export function createCharacterQuickPanel({
   //    이유도 없다. `load` 는 남겨 둔다 - 해상도 일치 판정이 naturalWidth 를 본다.
   const preview = document.getElementById('preview');
   if (preview) {
-    const refresh = () => { if (posEditing) renderStage(); };
+    // ⚠️ **미는 양도 다시 잰다.** 그것은 지금 그림의 여백(slack)에서 나오는데,
+    //    Rnd Res/Auto Res 로 비율이 달라진 그림이 들어와도 아무도 다시 재지 않아
+    //    옛 그림 기준의 이동량이 그대로 남았다 - 그림이 가운데로 못 왔다.
+    //    패널을 접었다 펴면 `setVisible` 이 다시 재서 돌아온다(사용자 제보).
+    // ⚠️ 순서가 있다. 미는 양을 **먼저** 고쳐야 무대가 그림의 새 자리를 읽는다 -
+    //    엿보기 무대는 `object-position` 을 읽어 그림에 겹치므로, 거꾸로 하면
+    //    한 박자 뒤진 자리에 선다. 엿보는 중에도 다시 그린다(Auto Gen 중 hover).
+    const refresh = () => { syncViewerShift(); if (posEditing || posPeek) renderStage(); };
     preview.addEventListener('load', refresh);
     if (typeof MutationObserver === 'function') {
       new MutationObserver(refresh).observe(preview, {

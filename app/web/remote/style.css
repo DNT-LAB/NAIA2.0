@@ -22830,6 +22830,11 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
    (실측: 무대가 그림보다 107px 왼쪽에 섰다). 좌표가 거짓말이 되는 것보다 뚝 끊겨
    움직이는 편이 낫다. */
 #resultViewer.is-cq-posedit > #preview { transition: none; }
+/* 엿보기도 같은 이유로 끈다 - 무대가 `object-position` 을 읽어 그림에 겹치는데,
+   트랜지션이 도는 중에 읽으면 **아직 움직이는 중인 자리**를 잡는다. 무대는 stage 에
+   `is-peek` 로 표시되는데 그 무대는 뷰어가 아니라 **뷰어의 부모**(.viewer-wrapper)에
+   붙으므로, 거기서 `:has()` 로 집는다(실측: 뷰어 기준으로 쓰면 안 걸린다). */
+.viewer-wrapper:has(> .cq-stage.is-peek) #preview { transition: none; }
 /* POS 편집에서는 원본 그림을 감춘다 - 무대가 같은 그림을 배경으로 깔고 있어서
    그냥 두면 두 번 보인다(무대 밖으로 삐져나온 조각이 남는다). opacity 로 감춰야
    src 가 살아 있어 무대 배경이 그대로 쓰인다. */
@@ -23225,13 +23230,19 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-stage {
   position: absolute; z-index: 5; display: none;
   border-radius: 4px; touch-action: none;
-  background-color: #0b0b12; border: 1px solid rgba(255,255,255,0.30);
+  /* 반투명이다 - 해상도가 그림과 달라 무대를 그림 위에 못 얹는 경우에도
+     뒤에 있는 그림이 비쳐 보여야 위치를 가늠할 수 있다(사용자 요청). */
+  background-color: rgba(11,11,18,0.62); border: 1px solid rgba(255,255,255,0.30);
   /* 그림을 무대 배경으로 깐다. 무대 비율 = 해상도 비율이라 100% 100% 가 1:1 이다. */
   background-size: 100% 100%; background-repeat: no-repeat;
 }
 .cq-stage.open { display: block; }
 /* 그림을 깐 경우: 위에 어둡게 덮어 원이 묻히지 않게 한다. */
-.cq-stage.is-overlay { border-color: rgba(255,255,255,0.22); }
+/* ⚠️ 겹쳐 놓은 경우엔 바탕을 **비운다.** 아래 ::before 가 이미 0.5 로 덮으므로
+   반투명 바탕까지 겹치면 두 번 어두워져 그림이 19% 밖에 안 남는다. 그림을 깐
+   경우(background-image)엔 어차피 안 보이고, 엿보기처럼 진짜 그림 위에 얹은
+   경우엔 이걸 비워야 뒤가 비친다. */
+.cq-stage.is-overlay { border-color: rgba(255,255,255,0.22); background-color: transparent; }
 .cq-stage.is-overlay::before {
   content: ''; position: absolute; inset: 0;
   background: rgba(0,0,0,0.5); border-radius: 3px; pointer-events: none;

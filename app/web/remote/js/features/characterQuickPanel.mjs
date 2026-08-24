@@ -429,9 +429,22 @@ export function createCharacterQuickPanel({
       return `<option value="${escAttr(uuid)}"${uuid === current ? ' selected' : ''}>${escHtml(text)}</option>`;
     }).join('');
     const on = !!current;
-    return `<span class="cq-connect${on ? ' is-on' : ''}">`
-      + `<span class="cq-connect-tag">${on ? '&#128279;' : 'Connect'}</span>`
-      + `<select data-cq-connect="${index}" aria-label="앞선 슬롯에서 물려받기">`
+    // select 를 투명하게 덮어 두므로(네이티브 화살표가 옆 ▼ 와 겹쳐 보였다) 라벨은
+    // **여기서 직접** 그린다. 안 그리면 무엇에 연결됐는지가 화면에서 사라진다.
+    const sourceOrdinal = slots.findIndex(item => String(item.character.slot_uuid || '') === current) + 1;
+    const label = on
+      ? `&#128279; C${sourceOrdinal || '?'}`
+      : '&#8681; Connect';
+    return `<span class="cq-connect${on ? ' is-on' : ''}"`
+      + ` data-naia-guide="${on
+          ? `C${sourceOrdinal || '?'} 의 캐릭터를 물려받는 중입니다.\\n아래 두 칸은 '추가할' 칸입니다.\\n\\n물려받는 범위는 C${sourceOrdinal || '?'} 의 &connect: … &end 구간이 정합니다.`
+          : '앞선 슬롯의 캐릭터를 그대로 물려받습니다.\\n와일드카드도 같은 값이 옵니다.\\n\\n연결하면 원본에 &connect: … &end 가 자동으로 붙습니다. &end 를 앞으로 당기면 그만큼만 물려줍니다.'}">`
+      + `<span class="cq-connect-tag">${label}</span>`
+      // ⚠️ `data-native-select` 로 커스텀 select 교체를 **끈다**. 앱은 모든 select 를
+      //    자체 위젯으로 바꾸는데(customSelects.mjs `SELECTOR`), 그러면 그 위젯의
+      //    라벨과 이 칩의 라벨이 **둘 다** 그려져 `🔗 C1` 옆에 `C1 ▾` 가 하나 더
+      //    붙는다(실측). 이 자리는 17px 짜리 칩이라 그 위젯이 들어갈 폭도 없다.
+      + `<select data-cq-connect="${index}" data-native-select aria-label="앞선 슬롯에서 물려받기">`
       + `<option value=""${on ? '' : ' selected'}>연결 없음</option>${options}</select></span>`;
   }
 

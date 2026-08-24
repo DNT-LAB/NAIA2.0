@@ -134,6 +134,47 @@ class HeadlessCharacterService:
         )
 
     @staticmethod
+    def _sync_connect_markers(frames: list[dict[str, Any]], previous: str, current: str) -> None:
+        """Connect 를 걸면 **원본** 프롬프트를 `&connect: … &end` 로 감싸고, 풀면 걷어낸다.
+
+        감싸는 것은 의미를 바꾸지 않는다(마커 없음 = 전체 공유). 목적은 가르치는 것이다 —
+        연결하는 순간 문법이 눈앞에 나타나고, 사용자는 `&end` 를 앞으로 당겨 구간을
+        줄이기만 하면 된다(사용자 지정).
+
+        ⚠️ 풀 때는 **다른 슬롯이 아직 그 원본을 물고 있는지** 먼저 본다. C2·C3 가 같은
+           C1 을 보는데 C2 만 끊었다고 C1 의 구간을 지우면, 살아 있는 C3 의 상속 범위가
+           조용히 넓어진다.
+        ⚠️ 네거티브는 건드리지 않는다. 감싸 두면 UC 전체가 공유로 보이는데, 네거티브는
+           슬롯마다 다르게 두는 쪽이 흔하다. 필요하면 사용자가 직접 적는다.
+        """
+        from core.character_settings import (
+            _frame_uuid,
+            strip_connect_markers,
+            wrap_connect_region,
+        )
+
+        def find(uuid: str) -> dict[str, Any] | None:
+            if not uuid:
+                return None
+            for item in frames:
+                if isinstance(item, dict) and str(_frame_uuid(item) or "") == uuid:
+                    return item
+            return None
+
+        if current and current != previous:
+            source = find(current)
+            if source is not None:
+                source["prompt"] = wrap_connect_region(source.get("prompt", ""))
+        if previous and previous != current:
+            still_used = any(
+                isinstance(item, dict) and str(item.get("connect_to") or "") == previous
+                for item in frames
+            )
+            source = find(previous)
+            if source is not None and not still_used:
+                source["prompt"] = strip_connect_markers(source.get("prompt", ""))
+
+    @staticmethod
     def ensure_frame(frames: list[dict[str, Any]], index: int) -> dict[str, Any]:
         while len(frames) <= index:
             frames.append({"prompt": "", "uc": "", "is_enabled": False, "slot_state": "inactive", "custom_name": ""})
@@ -459,7 +500,10 @@ class HeadlessCharacterService:
             # 판정이라 프레임을 정렬한 뒤에 해야 옳고, 그 자리가 거기다.
             index = context._index_from_key(key, "char_connect_")
             if index is not None:
-                self.ensure_frame(frames, index)["connect_to"] = str(value or "").strip()
+                frame = self.ensure_frame(frames, index)
+                previous = str(frame.get("connect_to") or "")
+                frame["connect_to"] = str(value or "").strip()
+                self._sync_connect_markers(frames, previous, frame["connect_to"])
                 invalidate_snapshot = True
         else:
             return None

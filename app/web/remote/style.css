@@ -22813,31 +22813,50 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 /* 물려받는 슬롯 표시 - 두 칸이 '추가분' 이라는 것을 왼쪽 띠로 말한다. */
 .cq-slot.is-linked .cq-input { border-left: 2px solid rgba(106,191,123,0.55); }
 /* 머리줄의 Connect 드롭다운과 원본 배지. */
+/* Connect 칩. 머리줄의 다른 버튼(17px 정사각)과 높이를 맞추되, 글자를 담으므로
+   가로로만 늘어난다.
+
+   ⚠️ 네이티브 select 화살표를 지운다(`appearance: none`). 바로 옆 `▼`(비활성으로 내림)
+      버튼과 모양이 겹쳐, 어느 쪽이 무엇인지 눈이 한 번에 못 갈랐다(사용자 지적).
+      select 는 칩 전체를 덮는 투명 판으로 두고 보이는 것은 칩뿐이다 - 어디를 눌러도
+      열린다. */
 .cq-connect {
-  flex: none; display: inline-flex; align-items: center; gap: 2px;
-  height: 17px; margin-right: 3px; padding: 0 3px 0 4px;
-  border-radius: 4px; border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.05); color: var(--text-dim);
-  font-family: var(--font-mono); font-size: 8px; line-height: 1;
+  position: relative;
+  flex: none; display: inline-flex; align-items: center; gap: 3px;
+  height: 17px; margin-right: 3px; padding: 0 6px;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04); color: var(--text-faint, #6e7086);
+  font-family: var(--font-mono); font-size: 9px; line-height: 1;
+  cursor: pointer;
+  transition: border-color .14s, color .14s, background .14s;
 }
-.cq-connect:hover { border-color: rgba(124,106,239,0.55); color: var(--text-primary); }
+/* 꺼져 있을 때는 조용히 있는다 - 제목과 경쟁하면 안 된다. 손을 올리면 또렷해진다. */
+.cq-connect:hover {
+  border-color: rgba(124,106,239,0.55); color: var(--text-primary);
+  background: rgba(124,106,239,0.14);
+}
 .cq-connect.is-on {
-  border-color: rgba(106,191,123,0.65);
-  background: rgba(38,74,48,0.5); color: #cdeed6;
+  border-color: rgba(106,191,123,0.7);
+  background: rgba(38,74,48,0.6); color: #d2f0da;
 }
-.cq-connect-tag { white-space: nowrap; }
+.cq-connect.is-on:hover { border-color: rgba(126,214,144,0.9); background: rgba(46,92,58,0.75); }
+.cq-connect-tag { white-space: nowrap; letter-spacing: 0.02em; }
 .cq-connect select {
-  border: none; background: transparent; color: inherit;
-  font-family: inherit; font-size: inherit; cursor: pointer;
-  max-width: 68px; padding: 0; outline: none;
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  appearance: none; -webkit-appearance: none;
+  border: none; background: transparent; color: transparent;
+  font-family: inherit; font-size: inherit; padding: 0; margin: 0;
+  cursor: pointer; outline: none; opacity: 0;
 }
+.cq-connect:focus-within { border-color: rgba(124,106,239,0.75); }
 .cq-connect select option { background: #1a1a26; color: var(--text-primary); font-size: 11px; }
+/* 원본 배지. 몇 개가 물려받는지 - 칩과 같은 크기 규격을 쓴다. */
 .cq-source {
-  flex: none; display: inline-flex; align-items: center;
-  height: 17px; margin-right: 3px; padding: 0 4px;
+  flex: none; display: inline-flex; align-items: center; gap: 1px;
+  height: 17px; margin-right: 3px; padding: 0 5px;
   border-radius: 4px; border: 1px solid rgba(106,191,123,0.45);
   background: rgba(38,74,48,0.35); color: #b6dcc1;
-  font-family: var(--font-mono); font-size: 8px; line-height: 1;
+  font-family: var(--font-mono); font-size: 9px; line-height: 1;
   white-space: nowrap;
 }
 /* 구간을 잡아 둔 원본은 한눈에 구분한다 - 전체를 주는 것과 뜻이 다르다. */

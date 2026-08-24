@@ -1074,6 +1074,36 @@ def _split_connect_region(text: str) -> tuple[str, str, str]:
     return head, rest[:closed.start()], rest[closed.end():]
 
 
+def has_connect_region(text: str) -> bool:
+    return bool(_CONNECT_OPEN_RE.search(str(text or "")))
+
+
+def wrap_connect_region(text: str) -> str:
+    """전체를 `&connect: … &end` 로 감싼다. 이미 마커가 있거나 빈 칸이면 그대로.
+
+    감싸는 것 자체는 **의미를 바꾸지 않는다**(마커 없음 = 전체 공유). 목적은 가르치는
+    것이다 — 연결하는 순간 문법이 눈앞에 나타나고, 사용자는 `&end` 를 앞으로 당겨
+    구간을 줄이기만 하면 된다(사용자 지정).
+    """
+    source = str(text or "").strip()
+    if not source or has_connect_region(source):
+        return str(text or "")
+    return f"&connect: {source} &end"
+
+
+def strip_connect_markers(text: str) -> str:
+    """마커만 걷어내고 내용은 남긴다. 마커가 없으면 손대지 않는다.
+
+    쉼표/공백 정리는 `_join_character_text` 에 맡긴다 — 이음매에서 생기는 `, ,` 나
+    앞뒤에 남는 쉼표를 이미 처리하는 함수라, 여기서 정규식으로 다시 짜면 규칙이 둘로
+    갈린다.
+    """
+    if not has_connect_region(text):
+        return str(text or "")
+    head, shared, tail = _split_connect_region(text)
+    return _join_character_text(_join_character_text(head, shared), tail)
+
+
 def _expand_connect_field(
     raw: str,
     inherited: str,

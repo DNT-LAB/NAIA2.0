@@ -1298,7 +1298,7 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260603-caret-align1')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260824-minustoken1')
   .then(({createPromptHighlighter}) => {
     promptHighlighter = createPromptHighlighter({
       document,

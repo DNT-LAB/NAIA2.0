@@ -205,6 +205,15 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     const trailing = segment.match(/\s*$/)?.[0] || '';
     const core = segment.substring(leading.length, segment.length - trailing.length);
     if (!core) return escHtml(segment);
+    // `-태그` 는 생성 직전에 **네거티브로 옮겨진다**
+    // (headless_generation_service._expand_input_wildcards). 여기서 알려 주지 않으면
+    // 사용자는 그 태그가 포지티브에 남아 있는 줄 안다(사용자 지적).
+    // ⚠️ `::` 가 있으면 NAI 음수 가중치이지 이동이 아니다 - 백엔드와 같은 판정.
+    if (core.length > 1 && core.startsWith('-') && !core.includes('::')) {
+      return escHtml(leading) +
+        `<span class="prompt-token-minus">${escHtml(core)}</span>` +
+        escHtml(trailing);
+    }
     const presetStyle = presetTokenStyle(core);
     if (presetStyle) {
       return escHtml(leading) +
@@ -430,6 +439,12 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     let plain = '';
     const colorRanges = new Map();   // computed color   -> [[start,end], ...]
     const bgRanges = new Map();      // computed bgColor  -> {depth, spans:[...]}
+    // `-태그`(네거티브로 빠지는 것)는 **취소선**으로 알린다. 색상(hue)은 이미 artist/
+    // character/preset 이 나눠 갖고 있어 하나 더 끼면 서로 흐려진다 - 아무도 안 쓰는
+    // 채널을 쓴다(사용자 지적: "아티스트 태그가 이미 붉은색을 점유").
+    // ⚠️ `::highlight()` 가 `text-decoration` 을 받는지 이 런타임에서 실측 확인했다
+    //    (Chrome 151: `text-decoration: line-through rgb(...)` 로 보존됨).
+    const decoRanges = new Map();    // "line|color|thickness" -> [[start,end], ...]
     const styleCache = new Map();
     const computed = (el) => {
       let cs = styleCache.get(el);
@@ -449,6 +464,20 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
           let arr = colorRanges.get(color);
           if (!arr) { arr = []; colorRanges.set(color, arr); }
           arr.push([start, end]);
+        }
+        const line = computed(parent).textDecorationLine;
+        if (line && line !== 'none') {
+          const deco = {
+            line,
+            color: computed(parent).textDecorationColor || 'currentcolor',
+            thickness: computed(parent).textDecorationThickness || 'auto',
+          };
+          // 값을 키에 이어 붙여 인코딩하지 않는다 - 구분자가 없으면 서로 다른 조합이
+          // 같은 키가 될 수 있다. 키는 식별용이고 값은 레코드에 담는다.
+          const key = `${deco.line}|${deco.color}|${deco.thickness}`;
+          let rec = decoRanges.get(key);
+          if (!rec) { rec = {...deco, spans: []}; decoRanges.set(key, rec); }
+          rec.spans.push([start, end]);
         }
         let el = parent;
         let depth = 0;
@@ -503,6 +532,19 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
       CSS.highlights.set(name, h);
       registeredHighlightNames.push(name);
       css += `::highlight(${name}){background-color:${bg};}`;
+    }
+    let di = 0;
+    for (const rec of decoRanges.values()) {
+      const name = 'naia-phd-' + di;
+      di += 1;
+      const h = new Highlight();
+      for (const [s, e] of rec.spans) h.add(makeRange(s, e));
+      // 색·배경보다 위에 얹는다 - 선은 글자를 덮는 것이 아니라 함께 보여야 한다.
+      h.priority = 200;
+      CSS.highlights.set(name, h);
+      registeredHighlightNames.push(name);
+      css += `::highlight(${name}){text-decoration:${rec.line};`
+        + `text-decoration-color:${rec.color};text-decoration-thickness:${rec.thickness};}`;
     }
     if (dynamicStyle) dynamicStyle.textContent = css;
   }

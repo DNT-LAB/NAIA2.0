@@ -9623,6 +9623,21 @@ body.resizing-result-info {
 .prompt-token-preset-separator {
   color: rgba(255, 255, 255, 0.96);
 }
+/* `-태그` = 생성 직전에 네거티브로 빠지는 것.
+   ⚠️ **색상(hue)으로 구분하지 않는다.** 이 상자의 팔레트는 전부 밝은 전경색이고
+      artist(살구빛)·character/copyright(연녹)·comment(노랑)·preset 3종이 이미
+      hue 를 나눠 갖고 있다 - 여기에 붉은 계열을 하나 더 끼우면 artist 와 헷갈린다
+      (사용자 지적). 대신 **아무도 안 쓰는 채널**을 쓴다: 취소선 + 흐린 글자.
+      "포지티브에서 빠진다" 는 뜻이 색이 아니라 형태로 읽히므로 오해할 여지도 없다.
+   ⚠️ `::highlight()` 가 text-decoration 을 받는지 이 런타임에서 실측 확인했다
+      (Chrome 151). 파이프라인은 스팬의 computed 값을 읽어 옮기므로 여기 CSS 가 곧
+      하이라이트 규칙이 된다. */
+.prompt-token-minus {
+  color: rgba(255, 255, 255, 0.42);
+  text-decoration: line-through;
+  text-decoration-color: rgba(240, 122, 142, 0.95);
+  text-decoration-thickness: 1.5px;
+}
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }
 .nai-wt-blue { background: rgba(80,120,220,0.10); border-radius: 2px; }

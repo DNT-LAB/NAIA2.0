@@ -81,6 +81,36 @@ def extract_character_speech(characters: Any) -> str:
     return "\n\n".join(parts)
 
 
+def merge_character_speech(base_caption: Any, speech: str) -> str:
+    """캐릭터 대사를 메인 프롬프트의 `text:` 자리에 합친다.
+
+    ⚠️ 메인에 **이미 `text:` 가 있으면 그 뒤에 잇는다.** 앞머리를 새로 붙이면
+       `text: ... , text: ...` 가 되어 글자가 두 덩어리로 읽힌다(사용자 라이브
+       제보 2026-08-25).
+    ⚠️ 잇는 자리는 그 조각의 **끝**(다음 쉼표 앞)이다. 메인 뒤에 통째로 붙이면
+       `text:` 가 문장 중간에 있는 경우 나머지 순서가 뒤집힌다.
+    ⚠️ 이미 같은 대사가 붙어 있으면 **아무것도 안 한다.** 공홈 메타데이터를 되살려
+       다시 만들면 base 에는 이미 합쳐진 대사가, 캐릭터 칸에는 원본 `text:` 가
+       그대로 있어 그냥 이으면 같은 말이 두 번 나간다.
+    """
+    base = str(base_caption or "")
+    if not speech:
+        return base
+    match = CHARACTER_TEXT_MARKER.search(base)
+    if not match:
+        return (f"{base}, {CHARACTER_TEXT_PREFIX}{speech}" if base.strip()
+                else f"{CHARACTER_TEXT_PREFIX}{speech}")
+    rest = base[match.end():]
+    comma = rest.find(",")
+    cut = match.end() + (len(rest) if comma < 0 else comma)
+    existing = base[match.end():cut].strip()
+    if existing and (existing == speech or existing.endswith(speech)):
+        return base
+    if not existing:
+        return f"{base[:match.end()]}{speech}{base[cut:]}"
+    return f"{base[:cut].rstrip()}\n\n{speech}{base[cut:]}"
+
+
 def _resolve_nai_model_key_loosely(model_value: Any) -> str:
     """키든 wire 이름이든 **아는 모델 키**로 되돌린다.
 
@@ -1178,13 +1208,12 @@ class APIService:
                     # 이걸 안 해서 같은 시드·같은 캐릭터 프롬프트인데도 글자가 안 나왔다.
                     _speech = extract_character_speech(characters)
                     if _speech:
-                        _base = str(api_parameters['v4_prompt']['caption']['base_caption'] or "")
-                        api_parameters['v4_prompt']['caption']['base_caption'] = (
-                            f"{_base}, {CHARACTER_TEXT_PREFIX}{_speech}" if _base.strip()
-                            else f"{CHARACTER_TEXT_PREFIX}{_speech}"
-                        )
-                        print(f"[{char_source}] appended {_speech.count(chr(10) * 2) + 1}"
-                              f" character text segment(s) to base caption")
+                        _before = str(api_parameters['v4_prompt']['caption']['base_caption'] or "")
+                        _merged = merge_character_speech(_before, _speech)
+                        api_parameters['v4_prompt']['caption']['base_caption'] = _merged
+                        if _merged != _before:
+                            print(f"[{char_source}] merged {_speech.count(chr(10) * 2) + 1}"
+                                  f" character text segment(s) into base caption")
 
                     def _normalized_center(value):
                         """{'x','y'} 를 0.0~1.0 소수 3자리로. 좌표가 아니면 None.

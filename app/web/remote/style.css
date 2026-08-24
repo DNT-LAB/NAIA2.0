@@ -19397,6 +19397,8 @@ body.detached-module .mod-grid-3 {
   border-color: rgba(226,92,112,0.75); background: rgba(74,32,40,0.7); color: #f2c3cc;
 }
 .scene-run.is-stop:hover { border-color: rgba(240,120,140,0.95); background: rgba(96,42,52,0.85); }
+/* 개수 줄에 붙는 작은 중단 버튼. 카드를 접어도 멈출 수 있어야 한다. */
+.scene-run.is-inline { padding: 2px 8px; font-size: 9.5px; margin-left: 8px; vertical-align: middle; }
 .scene-thumb-none { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint, #6e7086); }
 .scene-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .scene-row-name {

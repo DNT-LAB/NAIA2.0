@@ -36,6 +36,8 @@ export function createV5ScenePanel({
   let running = false;         // 연속 생성 진행 중
   let generatingNow = false;
   let watchdog = null;         // 생성이 시작되는지 지켜보는 타이머
+  let awaitingApply = false;   // 다음 컷의 불러오기 응답을 기다리는 중
+  let applyWait = null;        // 그 응답의 뒷문 타이머
 
   function escAttr(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => (
@@ -154,6 +156,12 @@ export function createV5ScenePanel({
     if (!panel || !lastState) return;
     // 다시 그리면 메뉴가 가리키던 버튼이 사라진다 - 떠 있는 채로 두면 허공에 남는다.
     closeEventMenu();
+    // 다음 컷의 불러오기 응답이 왔다 - 이제 내면 그 컷의 캐릭터로 나간다.
+    if (running && awaitingApply && state) {
+      awaitingApply = false;
+      clearApplyWait();
+      globalThis.setTimeout(() => { if (running) fire('다음 컷을 시작하지 못했습니다'); }, 0);
+    }
     const events = lastState.events || [];
     const active = activeEvent();
     const all = lastState.scenes || [];
@@ -185,7 +193,12 @@ export function createV5ScenePanel({
         <button type="button" class="scene-bar-btn" data-scene-folder="1"
                 data-naia-title="이 이벤트의 폴더를 탐색기에서 엽니다">폴더</button>
       </div>
-      <div class="scene-count">${all.length} 컷 · ${escHtml(mode)}</div>
+      <div class="scene-count">${all.length} 컷 · ${escHtml(mode)}${running
+        // ⚠️ 중단은 **접어도 닿아야 한다.** 컷 카드 안에만 두면 카드를 접는 순간
+        //    멈출 방법이 사라진다 - 돌고 있는데 세울 수가 없다.
+        ? ` <button type="button" class="scene-run is-stop is-inline"`
+          + ` data-scene-run-stop="1">생성 중단</button>`
+        : ''}</div>
       ${all.length
         ? `<div class="scene-list">${all.map((scene, index) =>
             sceneRow(scene, index + 1, all.length)).join('')}</div>`
@@ -468,6 +481,8 @@ export function createV5ScenePanel({
   /** 멈춘다. `reason` 이 있으면 왜 멈췄는지 알린다 - 조용히 서면 끝난 줄 안다. */
   function stopRun(reason) {
     clearWatchdog();
+    clearApplyWait();
+    awaitingApply = false;
     if (!running) return;
     running = false;
     render();
@@ -484,21 +499,33 @@ export function createV5ScenePanel({
     if (!running) return;
     if (!ok) { stopRun('생성이 완료되지 않아 연속 생성을 멈췄습니다'); return; }
     const scenes = lastState?.scenes || [];
-    const next = indexOfScene(appliedName) + 1;
-    if (next <= 0 || next >= scenes.length) {
+    const here = indexOfScene(appliedName);
+    if (here < 0) { stopRun('컷을 찾지 못해 연속 생성을 멈췄습니다'); return; }
+    const next = here + 1;
+    if (next >= scenes.length) {
       stopRun(`연속 생성을 마쳤습니다 — ${scenes.length}컷`);
       return;
     }
-    const target = scenes[next];
-    appliedName = String(target.name);
+    appliedName = String(scenes[next].name);
     openName = appliedName;
-    // 불러오기 -> (서버 응답으로 화면이 갱신) -> 다음 장. 응답을 기다리지 않고 바로
-    // 내면 **이전 컷의 캐릭터로** 한 장이 나간다 - 적용은 왕복이 필요하다.
+    // ⚠️ 불러오기는 **왕복이 필요하다.** 응답을 안 기다리고 바로 내면 이전 컷의
+    //    캐릭터로 한 장이 나간다 - 그림 한 장을 헛되이 태운다.
+    //    고정 지연으로 어림하지 않고 **서버가 돌려준 상태를 기다린다**(`render` 가 깨운다).
+    //    다만 응답이 영영 안 오는 경우를 대비해 뒷문을 하나 둔다.
+    awaitingApply = true;
     setModuleParam('v5_scene', 'apply', {event: activeEvent(), name: appliedName});
-    globalThis.setTimeout(() => {
-      if (!running) return;
-      fire('다음 컷을 시작하지 못했습니다');
-    }, 900);
+    clearApplyWait();
+    applyWait = globalThis.setTimeout(() => {
+      applyWait = null;
+      if (running && awaitingApply) {
+        awaitingApply = false;
+        stopRun('불러오기 응답이 없어 연속 생성을 멈췄습니다');
+      }
+    }, 6000);
+  }
+
+  function clearApplyWait() {
+    if (applyWait) { globalThis.clearTimeout(applyWait); applyWait = null; }
   }
 
   function setGeneratingStatus(next) {

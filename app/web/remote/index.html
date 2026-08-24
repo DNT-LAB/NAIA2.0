@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260824-seedlock3">
+<link rel="stylesheet" href="style.css?v=20260824-seedlock4">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -824,7 +824,7 @@
                   플래그·이 알약이 같은 값을 가리켜야 하므로 양쪽을 함께 갱신한다. -->
           <button type="button" class="seedlock-pill" id="seedLockPill"
                   aria-pressed="false" onclick="toggleSeedResLock()"
-                  data-naia-guide="시드+해상도 고정.\n누르면 직전 생성의 시드와 지금 해상도를 그대로 다시 씁니다.\n켜는 동안 Rnd Res / Auto Res 는 잠시 꺼지고, 고정을 풀면 원래대로 돌아옵니다.">
+                  data-naia-guide="시드+해상도 고정.\n누르면 직전 생성의 시드와 그 생성의 해상도를 그대로 다시 씁니다.\n켜는 동안 Rnd Res / Auto Res 는 잠시 꺼지고, 고정을 풀면 원래대로 돌아옵니다.">
             <span class="seedlock-pill-icon" aria-hidden="true">&#127793;</span>
             <span class="seedlock-pill-seed" id="seedLockPillSeed"></span>
           </button>
@@ -1297,6 +1297,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260824-seedlock3"></script>
+<script src="app.js?v=20260824-seedlock7"></script>
 </body>
 </html>

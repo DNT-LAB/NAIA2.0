@@ -2028,10 +2028,17 @@ function _collectCurrentParams() {
   // 이 폴백은 칩이 아직 없는 구간에서만 효력이 있다.
   const seedFixed = flagState('seed_fixed') || isSeedResLockOn();
   p.seed_fixed = seedFixed;
-  if (seedFixed && paramEls.seed.value) {
-    const seed = parseNumber(paramEls.seed.value);
-    if (seed !== null) p.seed = Math.max(0, Math.trunc(seed));
-  } else if (!seedFixed) {
+  // ⚠️ 고정인데 **물 시드가 없는** 경우가 있다. WEBUI/COMFYUI 는 백엔드가 시드를
+  //    굴려 프론트가 실행 시드를 모르고(위 3183 주석), 그 모드 plane 에는 -1 이
+  //    남는다(실측: app_settings.json COMFYUI plane `seed: -1`). 예전 코드는
+  //    `Math.max(0, -1)` 로 **시드 0** 을 박았다 — 아무도 원하지 않는 값이고
+  //    "고정했다" 는 화면과도 다르다(Codex 리뷰 2026-08-24). 그럴 때는 고정을
+  //    주장하지 말고 미고정과 같은 값을 보낸다. 한 장 나오면 그 시드를 잡아
+  //    (`captureSeedLockDispatch`) 다음 장부터 실제로 물린다.
+  const seedBoxValue = seedFixed ? parseNumber(paramEls.seed.value) : null;
+  if (seedFixed && seedBoxValue !== null && seedBoxValue >= 0) {
+    p.seed = Math.trunc(seedBoxValue);
+  } else {
     p.seed = mode === 'NAI' ? Math.floor(Math.random() * 10000000000) : -1;
   }
   if (paramEls.sampler.value) p.sampler = paramEls.sampler.value;
@@ -3190,6 +3197,9 @@ function onGenerationDispatched(m) {
   // 시드 입력란에 포커스를 둔 채 Ctrl+Enter 로 생성하면 잠금이 그 생성을 놓쳤다
   // (Codex 리뷰 2026-08-10).
   captureInteractiveSeed(m, seed);
+  // 좌하단 고정 알약이 물 값도 **여기서** 잡는다. 위 Interactive 캡처와 같은 이유로
+  // 아래 두 가드보다 먼저다 — 가드는 '시드 박스를 건드리지 않는다' 는 뜻이다.
+  captureSeedLockDispatch(m, seed);
   if (!paramEls?.seed || document.activeElement === paramEls.seed) return;
   if (isComfyUiFreeWorkflowActive()) return;
   const seedText = String(Math.trunc(seed));
@@ -4281,6 +4291,22 @@ function updateParams(m) {
   refreshResolutionPresetDisplay(mode, m.resolution);
 
   // 플래그 (공통 + NAI)
+  // ⚠️ **서버가** seed_fixed 를 끄는 경로를 잡는다(대표: 프리셋 적용 —
+  //    `_apply_main_settings` 는 `PRESET_RUNTIME_STATE_KEYS`(random_resolution/
+  //    auto_fit_resolution)만 벗겨 내고 seed_fixed 는 그대로 `set_param` 한다).
+  //    그 경로에서도 알약이 빌려 간 Rnd/Auto Res 를 돌려줘야 한다(Codex 리뷰 #3).
+  //
+  // ⚠️⚠️ 판정을 **로컬 칩**으로 하면 안 된다. 잠금 한 번이 setParam 을 여럿 보내는데
+  //      (seed · resolution · rnd · auto · seed_fixed 순서), seed_fixed 보다 먼저 나간
+  //      것들의 서버 에코에는 아직 `seed_fixed: false` 가 실려 있다. 그러면 "서버가
+  //      껐다" 로 오인해 **잠근 직후 기억을 지운다**(실측: 잠금 500ms 뒤 memo=null).
+  //      그래서 **서버가 보내 준 값끼리만** 비교한다 — 낙관적 로컬 상태는 끼지 않는다.
+  const serverSeedFixed = ('seed_fixed' in m) ? !!m.seed_fixed : null;
+  const serverReleasedLock = serverSeedFixed === false && seedLockLastServerSeedFixed === true;
+  if (serverSeedFixed !== null) seedLockLastServerSeedFixed = serverSeedFixed;
+  const seedLockRenderMode = String(mode || '');
+  const seedLockSameMode = seedLockLastRenderMode === seedLockRenderMode;
+  seedLockLastRenderMode = seedLockRenderMode;
   const flags = [];
   const naiFlagsEnabled = m.nai_flags_enabled || {};
   const currentFlagState = key => {
@@ -4307,6 +4333,12 @@ function updateParams(m) {
   else if (schemaOnly) qRndRes.classList.toggle('on', incomingFlagState('random_resolution'));
   if ('auto_fit_resolution' in m) qAutoRes.classList.toggle('on', m.auto_fit_resolution);
   else if (schemaOnly) qAutoRes.classList.toggle('on', incomingFlagState('auto_fit_resolution'));
+  // 서버가 고정을 껐다 — 빌린 해상도 설정을 돌려준다.
+  // **모드가 그대로일 때만** 한다. 모드 전환도 이 경로로 오는데, 그때 되돌리면
+  // 이전 모드의 기억을 새 모드의 판에 심는다(Rnd/Auto Res 는 모드별 플래그다).
+  if (seedLockSameMode && serverReleasedLock) {
+    applySeedResLockResSideEffect(false);
+  }
   // 칩을 새로 그렸으니 좌하단 고정 알약을 여기 맞춘다 — 알약은 `seed_fixed` 칩의
   // 거울이고, `innerHTML` 재생성이 칩의 on 상태를 서버 값으로 갈아 버린다.
   renderSeedLockPill();
@@ -4462,30 +4494,114 @@ function toggleFlag(el) {
 //    새로고침/재시작 후에도 켜진 채로 돌아오는데, 기억은 사라져 있다 — 그러면 고정을
 //    풀어도 Rnd/Auto Res 가 되살아나지 않고 사용자는 이유를 알 수 없다(실측: 리로드
 //    후 두 플래그가 꺼진 채 굳었다). localStorage 로 같이 넘긴다.
-const SEEDLOCK_RES_MEMO_KEY = 'naia.seedlock.resmemo.v1';
-let seedResLockMemo = null;
+// ⚠️ **모드별로 따로 기억한다.** Rnd/Auto Res 는 모드별 플래그다 — 백엔드가
+//    `remote_param_planes` 로 모드마다 다른 판을 쓰고, 모드를 넘나드는 키는
+//    `RUNTIME_REMOTE_PARAM_KEYS = {"web_session_port"}` 하나뿐이다
+//    (headless_remote_state_service.py:13,80-100). 기억을 하나만 두면 NAI 에서
+//    잠근 뒤 WEBUI 에서 잠그는 순간 NAI 의 기억이 덮이고, 어느 쪽도 못 되돌린다
+//    (Codex 리뷰 2026-08-24 #4).
+const SEEDLOCK_RES_MEMO_KEY = 'naia.seedlock.resmemo.v2';
+// v1 은 `{mode, rnd, auto}` 단일 객체였다. **키가 다르므로 v2 키만 읽으면 못 본다** —
+// 이미 잠근 채 업데이트를 받은 사용자가 복원을 영구히 못 받는다(실측: v1 블롭이
+// 남아 있는데 v2 는 null 이었다). v2 가 없을 때만 v1 을 보고, 옮긴 뒤 지운다.
+const SEEDLOCK_RES_MEMO_KEY_V1 = 'naia.seedlock.resmemo.v1';
+let seedResLockMemos = {};
+// `updateModeSchema` 가 마지막으로 그린 모드. 모드 전환과 같은 모드 재렌더를
+// 가려내는 데 쓴다(서버가 고정을 끈 것인지, 그냥 모드가 바뀐 것인지).
+let seedLockLastRenderMode = '';
+// **서버가 보내 준** 마지막 seed_fixed. 로컬 낙관 상태와 섞으면 잠금이 보내는
+// setParam 들의 뒤늦은 에코를 "서버가 껐다" 로 오인한다(updateModeSchema 주석 참조).
+// null = 아직 서버 값을 본 적 없음.
+let seedLockLastServerSeedFixed = null;
 
-function saveSeedResLockMemo() {
+function saveSeedResLockMemos() {
   try {
-    if (seedResLockMemo) localStorage.setItem(SEEDLOCK_RES_MEMO_KEY, JSON.stringify(seedResLockMemo));
-    else localStorage.removeItem(SEEDLOCK_RES_MEMO_KEY);
+    if (Object.keys(seedResLockMemos).length) {
+      localStorage.setItem(SEEDLOCK_RES_MEMO_KEY, JSON.stringify(seedResLockMemos));
+    } else {
+      localStorage.removeItem(SEEDLOCK_RES_MEMO_KEY);
+    }
   } catch (_) { /* 용량 초과·프라이빗 모드 — 기억 못 하는 것이 기능을 막지는 않는다 */ }
 }
 
-/** 지난 세션의 기억을 되살린다. 모드는 **되돌릴 때** 본다(여기서 걸러내면 로드
- *  시점의 모드가 아직 확정되지 않아 멀쩡한 기억을 버린다). */
-function loadSeedResLockMemo() {
+/** 지난 세션의 기억을 되살린다. v2 가 없으면 v1 을 흡수해 옮긴다. */
+function loadSeedResLockMemos() {
   try {
     const raw = JSON.parse(localStorage.getItem(SEEDLOCK_RES_MEMO_KEY) || 'null');
-    if (!raw || typeof raw !== 'object') return;
-    seedResLockMemo = {mode: String(raw.mode || 'NAI'), rnd: !!raw.rnd, auto: !!raw.auto};
+    if (raw && typeof raw === 'object') {
+      const out = {};
+      for (const [mode, v] of Object.entries(raw)) {
+        if (v && typeof v === 'object') out[String(mode)] = {rnd: !!v.rnd, auto: !!v.auto};
+      }
+      seedResLockMemos = out;
+      return;
+    }
+    const legacy = JSON.parse(localStorage.getItem(SEEDLOCK_RES_MEMO_KEY_V1) || 'null');
+    if (legacy && typeof legacy === 'object' && ('rnd' in legacy || 'auto' in legacy)) {
+      seedResLockMemos = {[String(legacy.mode || 'NAI')]: {rnd: !!legacy.rnd, auto: !!legacy.auto}};
+      saveSeedResLockMemos();
+    }
+    localStorage.removeItem(SEEDLOCK_RES_MEMO_KEY_V1);
   } catch (_) {}
+}
+
+// 이 모드로 **실제 나간** 마지막 디스패치 {seed, w, h}. 시드 박스만 보면 안 되는
+// 이유가 둘이다:
+//   1) Rnd Res 는 payload 에만 무작위 해상도를 넣고 셀렉터는 그대로 둔다
+//      (`_collectCurrentParams` 의 `resolutionOptions[random]`). 그래서 화면의
+//      해상도와 방금 나온 그림의 해상도가 다르다 — 시드만 물고 다시 만들면
+//      크기가 달라 구도가 재현되지 않는다(Codex 리뷰 2026-08-24 #1).
+//   2) WEBUI/COMFYUI 는 백엔드가 시드를 굴려 프론트가 실행 시드를 모른다.
+// 모드별로 담는다 — 남의 모드 시드를 물면 숫자만 같고 그림은 전혀 다르다.
+const seedLockDispatch = {};
+
+/** 방금 나간 생성의 시드·해상도를 이 모드 칸에 적는다. `onGenerationDispatched` 가
+ *  seed>=0 을 확인한 뒤에만 부른다 — 즉 **실행 시드를 아는 경우만** 담긴다. */
+function captureSeedLockDispatch(m, seed) {
+  const mode = seedMemoMode();
+  const entry = {seed: Math.trunc(seed), w: null, h: null};
+  const w = Number(m.params?.width), h = Number(m.params?.height);
+  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+    entry.w = Math.trunc(w);
+    entry.h = Math.trunc(h);
+  }
+  seedLockDispatch[mode] = entry;
+}
+
+/** 이 모드에서 물 수 있는 실측 디스패치. 없으면 null. */
+function seedLockKnownDispatch() {
+  const d = seedLockDispatch[seedMemoMode()];
+  return d && Number.isFinite(d.seed) && d.seed >= 0 ? d : null;
+}
+
+/** 잠글 때 그 디스패치의 시드·해상도를 **화면과 서버에 실제로 심는다**.
+ *  해상도를 안 심으면 Rnd Res 를 끄기만 해서 셀렉터의 옛 값으로 생성된다. */
+function applySeedLockDispatch(d) {
+  if (!d) return false;
+  if (paramEls?.seed && document.activeElement !== paramEls.seed) {
+    paramEls.seed.value = String(d.seed);
+    setParam('seed', String(d.seed));
+  }
+  if (d.w == null || d.h == null) return false;
+  // 라벨 형식은 기존 해상도 옵션과 같은 모양을 쓴다(`resolutionLabelFromMessage`).
+  // 목록에 없는 조합이면 `ensureSelectValue` 가 옵션을 만들어 준다 — 커스텀
+  // 해상도로 나온 결과도 그대로 다시 쓸 수 있어야 한다.
+  const label = `${d.w} x ${d.h}`;
+  ensureSelectValue(paramEls.resolution, label);
+  ensureSelectValue(qResolution, label);
+  paramEls.resolution.value = label;
+  if (qResolution) qResolution.value = label;
+  baseResolutionValue = label;
+  setParam('resolution', label);
+  refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI', label);
+  updateWebUiHrScaleHint();
+  return true;
 }
 
 // 꺼짐 상태의 안내문. index.html 의 `data-naia-guide` 초기값과 **같은 글**이어야
 // 한다 — 한 번 켜고 끄면 이 상수가 그 자리를 덮는다.
 const SEEDLOCK_GUIDE_OFF =
-  '시드+해상도 고정.\\n누르면 직전 생성의 시드와 지금 해상도를 그대로 다시 씁니다.\\n' +
+  '시드+해상도 고정.\\n누르면 직전 생성의 시드와 그 생성의 해상도를 그대로 다시 씁니다.\\n' +
   '켜는 동안 Rnd Res / Auto Res 는 잠시 꺼지고, 고정을 풀면 원래대로 돌아옵니다.';
 
 /** `#paramFlags` 의 플래그 상태. `_collectCurrentParams` / `updateModeSchema` 안에
@@ -4548,44 +4664,55 @@ function renderSeedLockPill() {
  *  안 끄면 시드만 같고 해상도가 매 장 갈려 "고정"이 아니게 된다.
  *  @returns {boolean} 되돌리기가 실제로 일어났는지 */
 function applySeedResLockResSideEffect(on) {
+  const mode = seedMemoMode();
   if (on) {
-    // 이미 켜져 있던 상태에서 다시 켜는 경로로 들어오면 기억을 덮지 않는다
-    // (덮으면 "직전"이 이미 꺼진 값이라 원래 설정을 영구히 잃는다).
-    if (!seedResLockMemo || seedResLockMemo.mode !== seedMemoMode()) {
-      seedResLockMemo = {
-        mode: seedMemoMode(),
+    // **잠기지 않은 상태에서만** 기억을 뜬다. 이미 잠겨 있는데 또 뜨면 "직전"이
+    // 이미 꺼진 값이라 원래 설정을 영구히 잃는다.
+    // ⚠️ 반대로 "기억이 없을 때만 뜬다" 로 막으면 **남은 쓰레기를 보존한다** —
+    //    해제 경로가 한 번이라도 기억을 못 지우고 끝나면(예전 v1/v2 키 불일치가
+    //    그랬다) 그 옛 값이 다음 잠금의 복원값이 된다(실측: 이미 꺼진 Auto Res 가
+    //    해제 시 켜졌다). 해제는 항상 기억을 지우므로 이 시점의 화면이 곧 진실이다.
+    if (!seedResLockEffective()) {
+      seedResLockMemos[mode] = {
         rnd: !!qRndRes?.classList.contains('on'),
         auto: !!qAutoRes?.classList.contains('on'),
       };
     }
     setResFlag('random_resolution', false);
     setResFlag('auto_fit_resolution', false);
-    saveSeedResLockMemo();
+    saveSeedResLockMemos();
     return false;
   }
-  if (!seedResLockMemo) return false;
-  // 모드가 다르면 남의 기억이다 — Rnd/Auto Res 는 모드별 플래그라 그대로 심으면
-  // 엉뚱한 모드의 설정을 남긴다. 되돌리지 않고 버린다.
-  const mine = seedResLockMemo.mode === seedMemoMode();
-  if (mine) {
-    setResFlag('random_resolution', seedResLockMemo.rnd);
-    setResFlag('auto_fit_resolution', seedResLockMemo.auto);
-  }
-  seedResLockMemo = null;
-  saveSeedResLockMemo();
-  return mine;
+  const memo = seedResLockMemos[mode];
+  if (!memo) return false;
+  setResFlag('random_resolution', memo.rnd);
+  setResFlag('auto_fit_resolution', memo.auto);
+  delete seedResLockMemos[mode];
+  saveSeedResLockMemos();
+  return true;
 }
 
 function toggleSeedResLock() {
   const next = !seedResLockEffective();
+  let resPinned = false;
+  if (next) {
+    // **해상도를 실제로 심는다.** Rnd/Auto Res 를 끄기만 하면 셀렉터의 옛 값으로
+    // 생성돼, 방금 본 그림과 크기가 달라 시드를 물어도 재현되지 않는다.
+    resPinned = applySeedLockDispatch(seedLockKnownDispatch());
+  }
   const restored = applySeedResLockResSideEffect(next);
   setSeedFixedFlag(next);
   const seed = seedLockPillSeed();
-  showToast(
-    next
-      ? (seed != null ? `시드+해상도 고정 — ${seed}` : '시드+해상도 고정 (다음 장의 시드를 뭅니다)')
-      : (restored ? '고정 해제 — 해상도 설정을 되돌렸습니다' : '고정 해제'),
-    'info');
+  const res = currentResolutionWH();
+  let msg;
+  if (next) {
+    if (seed == null) msg = '시드+해상도 고정 — 아직 물 시드가 없습니다 (다음 장의 시드를 뭅니다)';
+    else if (resPinned && res) msg = `시드+해상도 고정 — ${seed} · ${res.w}×${res.h}`;
+    else msg = `시드 고정 — ${seed} (직전 생성의 해상도는 알 수 없어 현재값을 씁니다)`;
+  } else {
+    msg = restored ? '고정 해제 — 해상도 설정을 되돌렸습니다' : '고정 해제';
+  }
+  showToast(msg, 'info');
 }
 
 /** `seed_fixed` 를 **모든 표면에** 세운다(Params 칩 · 알약 · 서버). */
@@ -4596,10 +4723,10 @@ function setSeedFixedFlag(on) {
   renderSeedLockPill();
 }
 
-// 지난 세션이 남긴 해상도 기억을 되살린다. **`let seedResLockMemo` 선언 뒤여야
-// 한다** — 위쪽에서 부르면 TDZ ReferenceError 가 나는데 `loadSeedResLockMemo` 의
+// 지난 세션이 남긴 해상도 기억을 되살린다. **`let seedResLockMemos` 선언 뒤여야
+// 한다** — 위쪽에서 부르면 TDZ ReferenceError 가 나는데 `loadSeedResLockMemos` 의
 // try/catch 가 그걸 삼켜 복원이 조용히 실패한다(같은 함정이 3257 줄에 기록돼 있다).
-loadSeedResLockMemo();
+loadSeedResLockMemos();
 
 /** Rnd/Auto Res 를 Quick·Params 양쪽에 세운다. `toggleQuickFlag` 와 같은 일을
  *  하지만 **토글이 아니라 지정**이다 — 기억한 값으로 되돌릴 때 토글은 못 쓴다. */

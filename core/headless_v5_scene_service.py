@@ -33,18 +33,59 @@ from core.v5_scene_store import (
 )
 
 
+def _pe_options(context: Any) -> dict[str, Any]:
+    """지금 적용 중인 프롬프트 엔지니어링 설정(앞뒤 태그 등).
+
+    ⚠️ 설정 **파일을 읽으면 안 된다.** Quick Preset 이 걸려 있으면 파일에는 프리셋
+       적용 **전** 값이 들어 있어 전혀 다른 태그가 나온다 - 실측으로 한 번 속아서
+       "빼기는 불가능하다" 는 잘못된 결론까지 냈다(사용자가 화면과의 불일치를 짚어 줌).
+       훅이 실제로 쓰는 입구(`_current_options`)를 그대로 쓴다 - 이벤트 스트림 freeze,
+       세션 override, 로드된 모듈까지 같은 순서로 본다.
+    """
+    try:
+        from core.prompt_engineering_runtime import PromptEngineeringHeadlessPostHook
+
+        return PromptEngineeringHeadlessPostHook(context)._current_options() or {}
+    except Exception:
+        return {}
+
+
+def _pe_edge_tags(context: Any) -> set[str]:
+    """PE 가 앞뒤에 덧대는 태그를 소문자 집합으로."""
+    edge: set[str] = set()
+    options = _pe_options(context)
+    for key in ("pre_prompt", "post_prompt"):
+        for tag in options.get(key) or []:
+            clean = str(tag).strip().lower()
+            if clean:
+                edge.add(clean)
+    return edge
+
+
 def bare_prompt(context: Any) -> str:
     """씬에 담을 **사용자의 구도**만 남긴다 - 프롬프트 엔지니어링이 덧댄 것은 뺀다.
 
-    화면의 프롬프트 상자에는 조립된 결과가 들어 있다(Random/생성이 되돌려 씀).
-    거기엔 작가·품질·연도처럼 **그때의 취향**이 섞여 있다. 씬은 구도를 담는 것이라
-    그걸 같이 담으면 나중에 불러왔을 때 남의 취향이 따라온다 - 그래서 뺀다.
-    되돌릴 때 지금 설정으로 다시 입힌다(`redecorate`).
+    화면의 프롬프트 상자에는 조립된 결과가 들어 있다. 거기엔 작가·품질·연도처럼
+    **그때의 취향**이 섞여 있다. 씬은 구도를 담는 것이라 그걸 같이 담으면 나중에
+    불러왔을 때 남의 취향이 따라온다 - 그래서 뺀다. 되돌릴 때 지금 설정으로 다시
+    입힌다(`redecorate`).
 
     ⚠️ **중간 덩어리만 떼면 `1girl` 을 잃는다.** 최종 포맷이 인물 수 태그를
        main -> prefix 맨 앞으로 옮기기 때문이다(`prompt_processor._step_final_format`).
        사용자가 남기라고 짚은 것도 `1girl, 3koma, silent comic` 이었다.
-       그래서 파이프라인이 **옮기기 전에** 남긴 스냅샷을 먼저 쓴다.
+
+    세 갈래를 차례로 본다:
+      1. 파이프라인이 **인물 수를 옮기기 전에** 남긴 스냅파샷(`boost_main_tags`) -
+         가장 정확하지만 상자와 산출물이 같을 때만 믿을 수 있다.
+      2. **앞뒤 태그 빼기** - 상자에서 지금 PE 의 prefix/postfix 태그를 걷어낸다.
+         글의 생김새에 기대지 않아 손으로 쓴 한 줄에서도 통한다.
+      3. 구조로 되짚기(`prefix \\n\\n main \\n\\n postfix`) - 줄바꿈이 남아 있을 때만.
+
+    ⚠️ 2번이 3번보다 앞이다. 상자가 **한 줄로 평탄해지는 경우가 실제로 있어서**
+       (사용자 포터블 실측: 641자에 줄바꿈 0) 구조에 기대면 그때 통째로 샌다.
+    ⚠️ prefix/postfix 안의 와일드카드는 상자에서 이미 전개돼 있어 이름이 안 맞는다.
+       그 몇 개는 빼기에서 살아남아 씬에 남는다 - 되돌릴 때 PE 가 다시 붙이므로
+       중복이 될 수 있다. 완전히 막으려면 롤 기록(`*_wildcard_tags`)까지 봐야 한다.
     """
     box = str(getattr(context, "prompt_text", "") or "")
     run = getattr(context, "current_prompt_context", None)
@@ -56,6 +97,12 @@ def bare_prompt(context: Any) -> str:
         #    손으로 고쳤으면 낡은 구도를 담게 된다 - 상자와 산출물이 같을 때만 믿는다.
         if tags and final.strip() == box.strip():
             return ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+    edge = _pe_edge_tags(context)
+    if edge:
+        kept = [tag for tag in tags_of(box) if tag.strip().lower() not in edge]
+        # 전부 걷혀 나갔으면 빼기가 과했다는 뜻이다 - 빈 씬을 담느니 구조로 넘긴다.
+        if kept:
+            return ", ".join(kept)
     return bare_from_text(box)
 
 
@@ -66,11 +113,15 @@ def redecorate(context: Any, bare: str) -> str:
     (`HeadlessGenerationService._expand_input_wildcards`), 여기서 입혀 두지 않으면
     구도만 덩그러니 남아 작가도 품질 태그도 없이 나간다.
 
-    ⚠️ **전체 파이프라인을 돌리지 않는다.** `PromptProcessor.process()` 는 와일드카드를
-       굴리고 해상도를 맞추고 캐릭터 훅까지 깨운다 - 되돌리기 한 번에 그만한 부작용을
-       낼 이유가 없다. 프롬프트 엔지니어링 훅과 최종 포맷만 태운다.
-    ⚠️ **auto_hide 는 무시한다**(사용자 지정). 씬의 태그는 이미 고른 것이라
-       자동 숨김을 다시 걸면 방금 되돌린 구도에서 태그가 사라진다.
+    ⚠️ **태그 필터를 태우지 않는다.** 처음엔 PE 훅을 통째로 돌렸는데 `apply_tag_filters`
+       가 `3koma`·`silent comic` 을 먹어 구도가 통째로 사라졌다(실측). 체크박스를 다 끄고
+       auto_hide 를 건너뛰어도 **빈 옵션에서조차 지워진다** - 필터는 검색 행을 다듬으라고
+       있는 것이지 이미 고른 태그에 다시 걸 것이 아니다. 씬의 태그는 사용자가 고른
+       결과이므로 **그대로 두고 앞뒤만 덧댄다.**
+    ⚠️ 전체 파이프라인도 돌리지 않는다. `process()` 는 와일드카드를 굴리고 해상도를
+       맞추고 캐릭터 훅까지 깨운다 - 되돌리기 한 번에 그만한 부작용을 낼 이유가 없다.
+       앞뒤의 `__wildcard__` 는 전개하지 않은 채 둔다 - 생성 경로가 상자를 전개하므로
+       (`_expand_input_wildcards`) 매번 새로 굴려지는 편이 오히려 맞다.
     """
     tags = tags_of(bare)
     if not tags:
@@ -79,23 +130,20 @@ def redecorate(context: Any, bare: str) -> str:
         import pandas as pd
 
         from core.prompt_context import PromptContext
-        from core.prompt_engineering_runtime import PromptEngineeringHeadlessPostHook
         from core.prompt_processor import PromptProcessor
 
+        options = _pe_options(context)
         run = PromptContext(
             # 빈 행이다 - 씬에는 DB 행이 없다. 작가/작품/캐릭터를 넣으면 프롬프트
             # 엔지니어링이 **그 행의** 작가를 앞에 꽂는다(씬에는 없는 정보).
             source_row=pd.Series({"general": ", ".join(tags)}),
             settings={"api_mode": context.get_api_mode()},
+            prefix_tags=[str(tag) for tag in (options.get("pre_prompt") or [])],
             main_tags=list(tags),
+            postfix_tags=[str(tag) for tag in (options.get("post_prompt") or [])],
         )
-        previous = getattr(context, "skip_prompt_engineering_auto_hide", False)
-        context.skip_prompt_engineering_auto_hide = True
-        try:
-            run = PromptEngineeringHeadlessPostHook(context).execute_pipeline_hook(run)
-            return PromptProcessor(context)._step_final_format(run)
-        finally:
-            context.skip_prompt_engineering_auto_hide = previous
+        # 최종 포맷만 태운다 - 인물 수 태그를 앞으로 옮기고 세 덩어리로 잇는 일.
+        return PromptProcessor(context)._step_final_format(run)
     except Exception:
         # 입히기 실패가 되돌리기를 막지 않는다 - 구도라도 돌려주는 편이 낫다.
         return str(bare or "")

@@ -1474,9 +1474,17 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   resize: vertical;
 }
 .studio-field-tall textarea { min-height: 140px; }
-/* Dialogue Prompt - 대사는 한두 줄이라 프롬프트 칸만큼 클 이유가 없다. 조립할 때 항상
-   맨 뒤로 가는 칸이라, 다른 칸과 같은 옷을 입되 높이로만 성격을 구분한다. */
-.studio-dialogue-field textarea { min-height: 44px; }
+/* Dialogue Prompt - 대사는 한두 줄이라 프롬프트 칸만큼 클 이유가 없다. 그리고 이 칸만
+   **붉은 계열**로 둔다(사용자 지정): 조립에서 홀로 맨 뒤로 가는 칸이라, 나머지와 같은
+   보라색이면 그냥 또 하나의 프롬프트 칸으로 읽힌다. */
+.studio-dialogue-field textarea {
+  min-height: 44px;
+  border-color: rgba(240,120,140,0.38);
+  background: #241823;
+}
+.studio-dialogue-field textarea:focus { border-color: rgba(255,150,170,0.72); }
+.studio-dialogue-field textarea::placeholder { color: rgba(240,170,185,0.42); }
+.studio-dialogue-field > span { color: #ffc2ce; }
 .studio-field input,
 .studio-field select {
   height: 42px;

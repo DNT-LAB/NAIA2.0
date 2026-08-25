@@ -843,7 +843,7 @@ function toggleReferenceInsetMenu(button) {
   document.addEventListener('keydown', referenceInsetMenuDismiss, true);
   window.addEventListener('resize', referenceInsetMenuDismiss, true);
 }
-const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue1')
+const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2')
   .then(({createStudioTabController}) => {
     studioTabControl = createStudioTabController({
       document,

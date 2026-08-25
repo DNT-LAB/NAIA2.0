@@ -514,13 +514,15 @@ export function createStudioTabController({
             <textarea data-studio-frame-field="prompt" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false">${escHtml(frame.prompt)}</textarea>
           </label>
         </div>
-        <label class="studio-field studio-dialogue-field">
-          <span>Dialogue Prompt</span>
-          <textarea data-studio-frame-field="dialogue" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false" placeholder="대사만 적으세요 - 따옴표는 자동으로 붙고, 모든 프롬프트의 맨 뒤에 들어갑니다">${escHtml(frame.dialogue)}</textarea>
-        </label>
         <label class="studio-field">
           <span>Additional Negative</span>
           <textarea data-studio-frame-field="negative" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false" placeholder="공통 네거티브 뒤에 추가할 프레임 전용 네거티브">${escHtml(frame.negative)}</textarea>
+        </label>
+        <!-- 조립에서 맨 뒤로 가는 칸이라 화면에서도 맨 뒤에 둔다(사용자 지정) -
+             순서가 눈에 보이는 대로면 "왜 여기 적은 게 맨 뒤로 가지" 를 안 묻는다. -->
+        <label class="studio-field studio-dialogue-field">
+          <span>Dialogue Prompt</span>
+          <textarea data-studio-frame-field="dialogue" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false" placeholder="대사만 적으세요 - 따옴표는 자동으로 붙고, 모든 프롬프트의 맨 뒤에 들어갑니다">${escHtml(frame.dialogue)}</textarea>
         </label>
         <div class="studio-editor-grid">
           <label class="studio-field">

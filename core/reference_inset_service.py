@@ -44,6 +44,11 @@ REFERENCE_INSET_HOOK_INFO = {
 
 def reference_inset_should_inject_context(context, app_context=None) -> bool:
     settings = getattr(context, "settings", None) or {}
+    # ⚠️ **V5 게이트를 여기에도 둔다.** 아래 트리거 검사가 먼저 True 로 나가 버려서
+    #    `..._should_inject_params` 까지 안 떨어진다 - 한쪽에만 걸었다가 훅 경로가
+    #    그대로 태그를 넣는 것을 실측으로 잡았다.
+    if reference_inset_model_is_v5(settings, app_context=app_context):
+        return False
     for key in REFERENCE_INSET_TRIGGER_KEYS:
         if settings.get(key):
             return True
@@ -126,7 +131,46 @@ def inject_reference_inset_into_context(context) -> None:
         prefix_tags[0:0] = missing
 
 
+def reference_inset_model_is_v5(params: Dict[str, Any], app_context=None) -> bool:
+    """이 요청이 V5 계열로 나가는가. 알 수 없으면 False.
+
+    ⚠️ **모르면 False**(= 예전대로 삽입)다. 태그 하나를 더 넣는 쪽이, 넣어야 할 때
+       빠뜨리는 쪽보다 되돌리기 쉽다.
+    ⚠️ 엄격한 해석기는 모르는 키에서 예외를 던진다 - 프롬프트를 만드는 자리에서
+       터지면 생성이 통째로 죽으므로 삼킨다. 그 키는 어차피 생성 직전에 막힌다.
+    """
+    from core.nai_model_contract import (
+        BUILTIN_NAI_MODEL_SPECS,
+        normalize_nai_model_key,
+        resolve_nai_model_for_context,
+    )
+
+    raw = (params or {}).get("model")
+    if not raw and app_context is not None:
+        try:
+            raw = app_context._current_model_key()
+        except Exception:
+            raw = None
+    key = normalize_nai_model_key(raw)
+    if not key:
+        return False
+    spec = BUILTIN_NAI_MODEL_SPECS.get(key)
+    if spec is None and app_context is not None:
+        try:
+            spec = resolve_nai_model_for_context(app_context, key)
+        except Exception:
+            spec = None
+    return bool(spec is not None and getattr(spec, "payload_profile", "") == "v5")
+
+
 def reference_inset_should_inject_params(params: Dict[str, Any], app_context=None) -> bool:
+    # ⚠️ **V5 는 이 태그를 넣지 않는다**(사용자 지정 2026-08-25). `borderless panels` 는
+    #    Dev0714 계보에서 인셋 구도를 모델에게 설명하려고 넣던 표식인데, V5 는 그것
+    #    없이도 인셋을 알아본다 - 넣으면 오히려 프롬프트를 흐린다.
+    #    ⚠️ 훅 경로(`..._should_inject_context`)는 트리거 검사에서 먼저 나가므로
+    #    **거기에도 같은 게이트가 따로 있어야 한다** - 여기만 막으면 훅이 그대로 넣는다.
+    if reference_inset_model_is_v5(params, app_context=app_context):
+        return False
     if params.get("reference_inset_tag_required") or params.get("cropped_image_request"):
         return True
     try:

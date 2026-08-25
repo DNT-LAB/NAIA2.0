@@ -493,6 +493,14 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 _release_auto_gen_prefetch(context)  # 생성 실패 → 이번 예약 홀더 폐기(stale 방지)
                 await _broadcast_generation_error(context, clients, request, str(exc), exc)
                 # 실패한 시퀀스 프레임도 라운드 카운트를 진전시켜야 연속 루프가 멈추지 않는다(Codex).
+                # ⚠️ 사용량 판정을 **여기서도** 낸다. 아래 성공 완료 경로만 이 답을 세워 두는데,
+                #    라운드 마지막 프레임이 넘어지면 완료 알림을 안 거치고 곳장 아래
+                #    `_advance_sequence_run` 으로 떨어진다 - 답이 없으면 가드가 통째로 빠지고
+                #    다음 묶음이 **그룹 전체** 유료로 들어간다.
+                context._auto_gen_quota_stop = (
+                    _auto_gen_loop_engaged(context, request)
+                    and _auto_gen_quota_exhausted(context)
+                )
                 try:
                     await _advance_sequence_run(context, clients, request)
                 except Exception:
@@ -806,6 +814,16 @@ async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSock
     queue_manager = context.generation_queue_manager
     advanced = False
     if auto_gen and not queue_manager.is_paused() and queue_manager.is_empty():
+        # ⚠️ 다음 라운드는 '한 장' 이 아니라 **그룹 전체**다. 성공 완료는 위쪽
+        #    `_maybe_continue_auto_generation` 이 먼저 걸러 여기까지 오지 않지만,
+        #    실행 실패(except)는 그 문을 안 지나고 곳장 이리로 온다 - 그 경로가 세워 둔
+        #    답을 여기서 받아 끊는다. 안 끊으면 마지막 프레임 하나가 넘어졌을 뿐인데
+        #    새 묶음이 유료로 나간다(2026-08-25).
+        if getattr(context, "_auto_gen_quota_stop", False):
+            context._auto_gen_quota_stop = False
+            await _stop_auto_generation_for_quota(context, clients)
+            # 그쪽이 이 런을 stopped 로 끝내고 알린다 - 아래에서 또 '완료' 로 끝내지 않는다.
+            return True
         from app.backend.server.sequence_preset_routes import continue_sequence_run
         advanced = await continue_sequence_run(context, clients, sequence_run_id, broadcast_json)
     if not advanced:

@@ -517,14 +517,14 @@ export function createSearchPanel({
     <div>
       <div class="dr-label-row">
         <span class="mod-section-label">Search Keyword</span>
-        <button type="button" class="header-guide-btn" data-naia-guide="Search Keyword — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다.\\n\\n*tag — 태그 전체 일치. 태그가 정확히 그것인 행만 매칭합니다. 예: *girl 은 girl 만 — 1girl·cowgirl 은 물론 girl (character) 처럼 뒤에 말이 더 붙은 태그도 제외됩니다. *dog 은 dog ears·hot dog 을 끌어오지 않습니다.\\n\\n~tag — 포함 칸에 써도 됩니다. 그 태그를 정확히 가진 행을 뺍니다(제외 칸의 ~tag 와 같음).">ⓘ 가이드</button>
+        <button type="button" class="header-guide-btn" data-naia-guide="Search Keyword — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다. 그룹 안에서도 *를 쓸 수 있습니다 — 예: {*dog|*cat} 은 태그가 정확히 dog 또는 cat 인 행만 남깁니다.\\n\\n*tag — 태그 전체 일치. 태그가 정확히 그것인 행만 매칭합니다. 예: *girl 은 girl 만 — 1girl·cowgirl 은 물론 girl (character) 처럼 뒤에 말이 더 붙은 태그도 제외됩니다. *dog 은 dog ears·hot dog 을 끌어오지 않습니다.\\n\\n~tag — 포함 칸에 써도 됩니다. 그 태그를 정확히 가진 행을 뺍니다(제외 칸의 ~tag 와 같음).">ⓘ 가이드</button>
       </div>
       <input class="mod-input" id="searchQuery" type="text" value="${escHtml(searchText.query)}" placeholder="tags, keywords...">
     </div>
     <div>
       <div class="dr-label-row">
         <span class="mod-section-label">Exclude Keyword</span>
-        <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n※ 제외 칸에서 {a|b} OR 그룹은 동작하지 않습니다.">ⓘ 가이드</button>
+        <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n{a|b} — OR 그룹 제외. 그 중 하나라도 든 행을 뿕니다.">ⓘ 가이드</button>
       </div>
       <input class="mod-input" id="searchExclude" type="text" value="${escHtml(searchText.exclude)}" placeholder="exclude tags...">
     </div>

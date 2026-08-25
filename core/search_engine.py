@@ -92,6 +92,26 @@ class SearchEngine:
             pattern = r'(^|,)\s*' + re.escape(keyword) + r'\s*(,|$)'
             return pc.fill_null(pc.match_substring_regex(tags, pattern), False).to_numpy(zero_copy_only=False)
 
+        def or_term(keyword: str) -> np.ndarray:
+            """OR 그룹의 항 하나. `*tag` 는 **그룹 밖과 똑같이** 태그 전체일치로 읽는다.
+
+            ⚠️ 예전엔 리터럴이었다 - `{*dog|*cat}` 이 문자 그대로 `*dog` 을 찾아
+               **조용히 0건**을 돌려줬다. `*` 가 정확 검색의 표준 표기가 된 뒤로는
+               자연스럽게 칠 법한 질의라 더 위험하다(2026-08-25).
+            """
+            keyword = keyword.strip()
+            if keyword.startswith('*'):
+                stripped = keyword.lstrip('*').strip()
+                if stripped:
+                    return contains_exact(stripped)
+            return contains(keyword)
+
+        def or_group_mask(or_group) -> np.ndarray:
+            mask = np.zeros(n, dtype=bool)
+            for keyword in or_group:
+                mask |= or_term(keyword)
+            return mask
+
         n = len(df)
         survivors = np.ones(n, dtype=bool)
 
@@ -101,18 +121,19 @@ class SearchEngine:
         if not survivors.any():
             return df.iloc[:0]
 
-        # 2. OR - {a|b}, {c|d} → (a OR b) AND (c OR d). 단, 기존 구현의 동작 보존:
-        #    누적 OR 마스크가 현재 생존행 중 매치 0이면 다음 그룹으로 '덮어쓰기'.
+        # 2. OR - {a|b}, {c|d} → (a OR b) AND (c OR d).
+        #
+        # ⚠️ 초기화 판정은 **'첫 바퀴인가'** 여야 한다. 예전엔 '누적 마스크에 매치가
+        #    있나' 로 물어서, 어떤 그룹이 **정당하게 0건**이면 그 그룹이 다음 그룹으로
+        #    덮여 통째로 사라졌다 - 그래서 같은 뜻인데 **그룹 순서만 바꾸면 답이 달라졌다**:
+        #      `{zzz|yyy}, {solo|monochrome}` -> 5건 (비어야 맞다)
+        #      `{solo|monochrome}, {zzz|yyy}` -> 0건 (맞다)
+        #    원본(C:/VNR/NAIA2.0 search_engine.py:92)도 같은 모양이었다 - 물려받은 결함이다.
         if search_params.get('or'):
             final_or: Optional[np.ndarray] = None
             for or_group in search_params['or']:
-                group_mask = np.zeros(n, dtype=bool)
-                for keyword in or_group:
-                    group_mask |= contains(keyword.strip())
-                if final_or is not None and bool((final_or & survivors).any()):
-                    final_or = final_or & group_mask
-                else:
-                    final_or = group_mask
+                group_mask = or_group_mask(or_group)
+                final_or = group_mask if final_or is None else (final_or & group_mask)
             survivors &= final_or
             if not survivors.any():
                 return df.iloc[:0]
@@ -136,6 +157,12 @@ class SearchEngine:
         #    예전엔 `*` 쪽을 아무도 안 써서 `제외: *dog ears` 가 한 줄도 못 줄였다.
         for keyword in exclude_params['not_exact'] + exclude_params['exact']:
             survivors &= ~contains_exact(keyword)
+
+        # 6. OR Exclude - `{a|b}` = 그 중 하나라도 들면 뺀다.
+        #    예전엔 파싱만 하고 아무도 안 썼다. 게다가 정규식이 중괄호째 지우므로
+        #    낱말이 통째로 사라져 `제외: {dog|cat}` 이 한 줄도 못 줄였다.
+        for or_group in (exclude_params.get('or') or []):
+            survivors &= ~or_group_mask(or_group)
 
         return df[survivors]
 

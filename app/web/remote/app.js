@@ -247,11 +247,24 @@ function initNaiaTitleTooltips() {
 
   const adoptTitle = element => {
     if (!(element instanceof Element) || shouldKeepNativeTitle(element)) return;
+    if (!element.hasAttribute('title')) return;
     const title = element.getAttribute('title');
-    if (!title) return;
+    element.removeAttribute('title');
+    if (!title) {
+      // ⚠️ **빈 `title` 은 "이 툴팁을 지워라" 는 뜻이다.** 예전에는 여기서 그냥
+      //    돌아서서, 앞서 옮겨 둔 `data-naia-title` 이 그대로 남았다 - 조건이 풀려
+      //    멀쩡히 켜진 버튼에 **꺼졌을 때의 설명이 계속 떴다**(사용자 제보 2026-08-25:
+      //    메타데이터 뷰어의 "Not connected yet"). 지우는 쪽도 같이 지운다.
+      const adopted = element.dataset.naiaTitle;
+      if (adopted !== undefined) {
+        delete element.dataset.naiaTitle;
+        // aria-label 은 그 title 에서 베껴 온 것일 때만 거둔다 - 원래 있던 것은 남긴다.
+        if (element.getAttribute('aria-label') === adopted) element.removeAttribute('aria-label');
+      }
+      return;
+    }
     element.dataset.naiaTitle = title;
     if (!element.getAttribute('aria-label')) element.setAttribute('aria-label', title);
-    element.removeAttribute('title');
   };
 
   const scanTitles = root => {
@@ -823,7 +836,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260824-bulkchars2')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260825-notip1')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -5860,7 +5873,7 @@ function openOllamaMenu() {
   window.addEventListener('scroll', ollamaMenuDismiss, true);
   ollamaMenuEl.querySelector('.ollama-menu-btn')?.focus();
 }
-tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260825-comp2')
+tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260825-comp3')
   .then(({createTagSearchPopup}) => {
     tagSearchPopup = createTagSearchPopup({
       document,

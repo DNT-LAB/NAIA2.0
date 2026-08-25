@@ -123,8 +123,8 @@ export function createTagSearchPopup({
    *  ⚠️ **칩이 아니라 쉼표로 이은 한 줄로 그린다**(사용자 지적 2026-08-25). 칩으로
    *     두면 긁어 복사했을 때 `multicolored hair77%pink eyes64%` 처럼 퍼센트가 붙고
    *     쉼표가 없어 프롬프트에 그대로 못 쓴다. 이 칸의 쓸모는 '그대로 가져가기'다.
-   *     퍼센트는 버리지 않고 **툴팁**으로 옮긴다 - 어느 특징이 그 캐릭터를 대표하는지는
-   *     여전히 쓸모 있는 정보다.
+   *  ⚠️ 퍼센트는 **아예 싣지 않는다**(사용자 지정). 한때 툴팁으로 옮겨 뒀는데, 글 위에
+   *     상자가 뜨는 것이 정신 사납다고 했다 - 여기서 필요한 것은 태그 이름뿐이다.
    */
   function componentTags(profile) {
     return [...(Array.isArray(profile.personal_color) ? profile.personal_color : []),
@@ -137,17 +137,13 @@ export function createTagSearchPopup({
     const items = componentTags(profile);
     if (!items.length) return '';
     const text = items.map(item => String(item.tag)).join(', ');
-    const detail = items.map(item => {
-      const pct = Number(item.pct);
-      return Number.isFinite(pct) && pct > 0 ? `${item.tag} ${Math.round(pct)}%` : String(item.tag);
-    }).join(', ');
     const meta = [profile.group, profile.gender].filter(Boolean).map(String);
     return `<div class="tagsearch-desc-comp">
       <div class="tagsearch-comp-head"><span class="tagsearch-comp-label">구성요소</span>${
         meta.length ? `<span>${escHtml(meta.join(' · '))}</span>` : ''}
         <button type="button" class="tagsearch-comp-copy" data-act="copy-comp">복사</button>
       </div>
-      <p class="tagsearch-comp-text" title="${escHtml(detail)}">${escHtml(text)}</p>
+      <p class="tagsearch-comp-text">${escHtml(text)}</p>
     </div>`;
   }
 

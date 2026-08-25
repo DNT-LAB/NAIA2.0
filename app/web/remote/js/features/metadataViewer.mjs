@@ -535,7 +535,11 @@ export function createMetadataViewer({
     ].forEach(([button, enabled]) => {
       if (!button) return;
       button.disabled = !enabled;
-      button.title = enabled ? '' : 'Not connected yet';
+      // ⚠️ 예전에는 꺼진 버튼에 `Not connected yet` 을 달았다. 뜻이 없는 자리표시였고
+      //    (연결과 아무 상관이 없다 - 이 이미지에 그 정보가 없다는 뜻이었다),
+      //    툴팁 상자가 버튼을 통째로 덮어 무엇을 누르는지 가렸다(사용자 제보).
+      //    꺼진 버튼은 이미 꺼져 보인다 - 말을 더 얹지 않는다.
+      button.title = '';
     });
   }
 

@@ -861,8 +861,16 @@ class PromptEngineeringHeadlessStore:
             return True
         if name not in state["preset_list"]:
             return False
-        preset_data = self.read_preset_data(name, self.mode(mode))
-        state["settings"] = merge_settings(state["settings"], preset_data.get("module_settings") or {})
+        mode_key = self.mode(mode)
+        preset_data = self.read_preset_data(name, mode_key)
+        # ⚠️ **앞 프리셋의 살아 있는 값 위에 얹지 않는다.** 그렇게 하면 새 프리셋이
+        #    정의하지 않은 키가 앞 프리셋 것으로 남고, 그 뒤 어떤 저장 경로든
+        #    `state["settings"]` 를 통째로 파일에 쓰는 순간 **남의 값이 이 프리셋에
+        #    영구히 박힌다**(사용자 제보 2026-08-25: "제목만 2번이지 내용물은 1번").
+        #    앱을 새로 켰을 때와 같은 자리에서 시작한다 - `_load_state` 와 같은 조립이다.
+        base = default_prompt_engineering_settings(save_root=self._save_root)
+        base = merge_settings(base, self.load_mode_settings(mode_key))
+        state["settings"] = merge_settings(base, preset_data.get("module_settings") or {})
         state["current_preset"] = name
         self.save_last_used_preset(self.mode(mode), name)
         self._dirty_modes.discard(self.mode(mode))
@@ -873,7 +881,16 @@ class PromptEngineeringHeadlessStore:
         mode: str | None = None,
         *,
         main_settings: dict[str, Any] | None = None,
+        write_module_settings: bool = True,
     ) -> tuple[bool, str]:
+        """현재 프리셋에 쓴다.
+
+        ⚠️ ``write_module_settings=False`` 는 **생성 파라미터만** 반영하는 경로용이다
+        (`sync_param_into_current_preset` / `sync_negative_into_current_preset`).
+        그 경로가 module_settings 까지 통째로 덮으면, 살아 있는 설정에 잠깐 섞인
+        남의 값(스왑 직후 늦게 도착한 편집 등)이 **파일에 영구히 박힌다.**
+        한 키를 반영하러 온 요청이 나머지 전부를 갈아치울 이유는 없다.
+        """
         mode_key = self.mode(mode)
         state = self.state(mode_key)
         name = state["current_preset"]
@@ -881,7 +898,10 @@ class PromptEngineeringHeadlessStore:
             return False, "저장할 현재 프리셋이 없습니다."
         data = self.read_preset_data(name, mode_key)
         data["api_mode"] = mode_key
-        data["module_settings"] = copy.deepcopy(state["settings"])
+        if write_module_settings:
+            data["module_settings"] = copy.deepcopy(state["settings"])
+        else:
+            data.setdefault("module_settings", copy.deepcopy(state["settings"]))
         if main_settings is not None:
             # Generation params travel with the preset (future01 parity); runtime
             # -state keys are stripped so they stay session-global.

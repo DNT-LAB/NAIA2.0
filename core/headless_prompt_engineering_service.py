@@ -12,6 +12,10 @@ from core.nai_model_contract import NAI_PRESET_FILTER_GROUPS, nai_model_badge
 HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
 
 
+# 어느 프리셋을 보고 친 글인지 표식을 함께 받는 키들(위 `_text_and_preset_stamp`).
+_STAMPED_TEXT_KEYS = frozenset({"pre_prompt", "post_prompt", "auto_hide"})
+
+
 class HeadlessPromptEngineeringService:
     def __init__(self, context: Any):
         self.context = context
@@ -222,7 +226,22 @@ class HeadlessPromptEngineeringService:
 
         context = self.context
         store = get_prompt_engineering_store(context)
-        text_value = str(value or "")
+        text_value, stamp = self._text_and_preset_stamp(value)
+        if key in _STAMPED_TEXT_KEYS and stamp:
+            # ⚠️ **어느 프리셋을 보고 친 글인가.** 화면은 프리셋을 바꾼 뒤에도 잠깐
+            #    앞 프리셋의 글을 들고 있다(디바운스 500ms · 창이 둘일 때의 에코).
+            #    그 글이 스왑 뒤에 도착하면 살아 있는 설정이 오염되고, 이어지는
+            #    저장이 그것을 파일에 박는다(사용자 제보 2026-08-25).
+            #    보고 친 프리셋과 지금 프리셋이 다르면 **버린다** - 사용자는 그 글을
+            #    이 프리셋에 쓰려고 친 적이 없다.
+            current = str(store.state(context.get_api_mode()).get("current_preset") or "")
+            if current and current != stamp:
+                print(
+                    f"[info] dropped stale prompt-engineering edit ({key}):"
+                    f" typed for {stamp!r}, current is {current!r}",
+                    flush=True,
+                )
+                return self.state()
         if key == "pre_prompt":
             store.apply_settings({"pre_prompt": text_value})
         elif key == "post_prompt":
@@ -468,6 +487,17 @@ class HeadlessPromptEngineeringService:
             suffix += 1
         return candidate
 
+    @staticmethod
+    def _text_and_preset_stamp(value: Any) -> tuple[str, str]:
+        """텍스트 편집 값에서 `(글, 어느 프리셋을 보고 친 것인가)` 를 뽑는다.
+
+        옛 클라이언트는 문자열만 보낸다 - 그때는 표식이 없으니 그대로 받는다.
+        새 클라이언트는 `{"text": ..., "preset": ...}` 로 보낸다.
+        """
+        if isinstance(value, dict):
+            return str(value.get("text") or ""), str(value.get("preset") or "").strip()
+        return str(value or ""), ""
+
     def _capture_main_settings(self) -> dict[str, Any]:
         """Snapshot the active mode's generation params (+ prompt/negative) for
         persisting with a preset. Internal (``_*``) and process-runtime keys are
@@ -539,7 +569,11 @@ class HeadlessPromptEngineeringService:
             if main_settings.get(key) == new_value:
                 return ""                       # 값이 그대로면 쓰지 않는다
             main_settings[key] = new_value
-            ok, _message = store.save_current_preset(mode_key, main_settings=main_settings)
+            # ⚠️ **module_settings 는 건드리지 않는다.** 파라미터 하나를 반영하러 온
+            #    길이 프리셋의 Prefix/Postfix 까지 살아 있는 값으로 갈아치우면, 스왑
+            #    직후 늦게 도착한 앞 프리셋의 편집이 이 프리셋 파일에 영구히 박힌다.
+            ok, _message = store.save_current_preset(
+                mode_key, main_settings=main_settings, write_module_settings=False)
             return name if ok else ""
         except Exception as exc:  # noqa: BLE001 - 프리셋 반영 실패가 파라미터 변경을 막으면 안 된다
             print(f"[warn] preset param sync failed for {key}: {exc}", flush=True)
@@ -592,7 +626,9 @@ class HeadlessPromptEngineeringService:
             main_settings["negative"] = new_value
             if "negative_prompt" in main_settings:
                 main_settings["negative_prompt"] = new_value
-            ok, _message = store.save_current_preset(mode_key, main_settings=main_settings)
+            # 네거티브만 반영한다 - module_settings 는 위 파라미터 동기화와 같은 이유로 둔다.
+            ok, _message = store.save_current_preset(
+                mode_key, main_settings=main_settings, write_module_settings=False)
             return name if ok else ""
         except Exception as exc:  # noqa: BLE001 - 반영 실패가 프롬프트 편집을 막으면 안 된다
             print(f"[warn] preset negative sync failed: {exc}", flush=True)

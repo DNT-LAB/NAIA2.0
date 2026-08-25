@@ -519,15 +519,15 @@ export function createPromptEngineeringPanel({
     <div class="pe-prompt-stack">
       <div class="pe-prompt-field">
         <div class="mod-section-label has-actions"><span>Prefix Prompt</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value)">${escHtml(m.pre_prompt)}</textarea>
+        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea>
       </div>
       <div class="pe-prompt-field">
         <div class="mod-section-label has-actions"><span>Postfix Prompt</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_POSTFIX_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" placeholder="postfix tags..." oninput="onModTextEdit('prompt_engineering','post_prompt',this.value)">${escHtml(m.post_prompt)}</textarea>
+        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" data-preset="${escHtml(m.preset || '')}" placeholder="postfix tags..." oninput="onModTextEdit('prompt_engineering','post_prompt',this.value,this.dataset.preset)">${escHtml(m.post_prompt)}</textarea>
       </div>
       <div class="pe-prompt-field">
         <div class="mod-section-label has-actions"><span>Auto-Hide (Filter)</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_AUTOHIDE_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modAutoHide" placeholder="tags to filter out..." oninput="onModTextEdit('prompt_engineering','auto_hide',this.value)">${escHtml(m.auto_hide)}</textarea>
+        <textarea class="mod-textarea pe-textarea" id="modAutoHide" data-preset="${escHtml(m.preset || '')}" placeholder="tags to filter out..." oninput="onModTextEdit('prompt_engineering','auto_hide',this.value,this.dataset.preset)">${escHtml(m.auto_hide)}</textarea>
       </div>
     </div>
     <div>

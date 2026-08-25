@@ -8133,7 +8133,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260823-cqdodge42')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260825-maint1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -8949,14 +8949,21 @@ function renderPeDebugPanel(m) {
 }
 
 function flushPromptEngineeringEdits() {
-  if (currentModuleId !== 'prompt_engineering') return;
+  // ⚠️ **밀린 편집은 화면이 어느 모듈이든 먼저 내보낸다.** 예전에는 아래 조기 반환이
+  //    이 줄까지 건너뛰어, 다른 모듈을 보는 동안 걸려 있던 500ms 타이머가 프리셋을
+  //    바꾼 **뒤에** 터졌다 - 앞 프리셋의 글이 새 프리셋에 얹혔다.
   flushPendingModuleEdit('prompt_engineering');
+  if (currentModuleId !== 'prompt_engineering') return;
   const pre = document.getElementById('modPrePrompt');
   const post = document.getElementById('modPostPrompt');
   const autoHide = document.getElementById('modAutoHide');
-  if (pre) setModuleParam('prompt_engineering', 'pre_prompt', pre.value, {skipPendingFlush: true});
-  if (post) setModuleParam('prompt_engineering', 'post_prompt', post.value, {skipPendingFlush: true});
-  if (autoHide) setModuleParam('prompt_engineering', 'auto_hide', autoHide.value, {skipPendingFlush: true});
+  // 칸에 박힌 `data-preset` = 이 칸을 그릴 때의 프리셋. 화면이 아직 앞 프리셋을
+  // 들고 있으면 그 표식이 따라가고 백엔드가 버린다.
+  const send = (key, el) => setModuleParam(
+    'prompt_engineering', key, stampedEdit(el.value, el.dataset.preset), {skipPendingFlush: true});
+  if (pre) send('pre_prompt', pre);
+  if (post) send('post_prompt', post);
+  if (autoHide) send('auto_hide', autoHide);
 }
 
 function flushMainPromptAndParams() {
@@ -9048,6 +9055,11 @@ function savePromptEngineeringCategoryFilter(category, exclude, include) {
   return promptEngineeringActions.saveCategoryFilter(category, exclude, include);
 }
 
+function stampedEdit(value, stamp) {
+  const preset = String(stamp || '');
+  return preset ? {text: String(value ?? ''), preset} : value;
+}
+
 function flushPendingModuleEdit(moduleId = null) {
   if (!pendingModuleEdit) return;
   if (moduleId && pendingModuleEdit.moduleId !== moduleId) return;
@@ -9093,9 +9105,12 @@ function setModuleParam(moduleId, key, value, options = {}) {
   return false;
 }
 
-function onModTextEdit(moduleId, key, value) {
+// `stamp` = 이 글을 칠 때 화면이 들고 있던 프리셋 이름(프롬프트 엔지니어링 전용).
+// 500ms 디바운스라 **프리셋을 바꾼 뒤에 도착할 수 있고**, 그러면 앞 프리셋의 글이
+// 새 프리셋에 얹힌다 — 백엔드가 표식을 보고 그런 글을 버린다(사용자 제보 2026-08-25).
+function onModTextEdit(moduleId, key, value, stamp) {
   if (moduleSendTimer) clearTimeout(moduleSendTimer);
-  pendingModuleEdit = {moduleId, key, value};
+  pendingModuleEdit = {moduleId, key, value: stampedEdit(value, stamp)};
   moduleSendTimer = setTimeout(() => {
     const pending = pendingModuleEdit;
     pendingModuleEdit = null;

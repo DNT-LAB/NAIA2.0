@@ -229,17 +229,22 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
 
 
 def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:
-    """저장돼 있던 NAI 모델 키가 **레지스트리에 없는 것**이면 기본값으로 되돌린다.
+    """저장돼 있던 값이 모델 **이름**이면 키로 되돌린다. 모르는 값은 **그대로 둔다**.
 
     ⚠️ 여기까지 온 값은 이미 디스크에 앉은 값이다. 생성 시점 판정은 일부러 엄격해서
-       (돈이 나가는 길이라) 모르는 키를 만나면 멈춘다 - 그래서 한 번 잘못된 값이
+       (돈이 나가는 길이라) 모르는 키를 만나면 멈춘다 - 그래서 한 번 표시 라벨이
        저장되면 **껐다 켜도, API 키를 새로 받아도** 계속 막힌다(사용자 제보
        2026-08-25). 켤 때 한 번 훑어 되돌리면 그 막다른 길이 사라진다.
+
+    ⚠️⚠️ **기본값으로 갈아 끼우지 않는다.** 그러면 사용자가 등록했다가 지운 커스텀
+       모델이 말없이 4.5 Full 이 되어 돈을 태운다(Codex 리뷰 BLOCK, 재현됨).
+       아는 이름만 번역하고, 모르는 것은 남겨 생성 직전에 막히게 둔다 - 그때
+       화면이 PARAMS 를 열어 다시 고르게 안내한다.
 
     ⚠️ **NAI 판만 본다.** WEBUI/COMFYUI 의 `model` 은 체크포인트 파일 이름이라
        NAI 레지스트리에는 당연히 없다 - 같이 훑으면 멀쩡한 값을 지운다.
     """
-    from core.nai_model_contract import DEFAULT_NAI_MODEL_KEY, normalize_nai_model_key
+    from core.nai_model_contract import nai_key_from_metadata, normalize_nai_model_key
 
     try:
         registry = context._nai_model_registry()
@@ -256,12 +261,14 @@ def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:
         key = normalize_nai_model_key(raw)
         if registry.has_key(key):
             continue
-        plane["model"] = DEFAULT_NAI_MODEL_KEY
-        print(
-            f"[warn] stored NAI model key is not registered: {key}"
-            f" -> reset to {DEFAULT_NAI_MODEL_KEY}",
-            flush=True,
-        )
+        translated = nai_key_from_metadata(model_value=key)
+        if not translated or translated == key:
+            print(f"[warn] stored NAI model key is unknown, kept for reselect: {key}",
+                  flush=True)
+            continue
+        plane["model"] = translated
+        print(f"[warn] stored NAI model name mapped to key: {key} -> {translated}",
+              flush=True)
 
 
 def save_remote_ui_state(context: Any) -> dict[str, Any]:

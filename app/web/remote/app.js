@@ -5902,7 +5902,7 @@ if (tagSearchBtn) {
     else tagSearchPopup.open();
   });
 }
-memoPopupReady = import('./js/features/memoPopup.mjs?v=20260825-memo2')
+memoPopupReady = import('./js/features/memoPopup.mjs?v=20260825-memo3')
   .then(({createMemoPopup}) => {
     memoPopup = createMemoPopup({
       document,

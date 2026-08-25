@@ -908,7 +908,13 @@ class PromptEngineeringHeadlessStore:
             data["main_settings"] = normalize_preset_main_settings(copy.deepcopy(main_settings))
         self.write_preset_data(name, mode_key, data)
         self.save_last_used_preset(mode_key, name)
-        self._dirty_modes.discard(mode_key)
+        # ⚠️ **쓴 것만 clean 으로 친다.** `discard` 는 "살아 있는 설정을 파일에 다 썼다"
+        #    는 뜻인데, `write_module_settings=False` 갈래는 그걸 **안 썼다.** 그런데도
+        #    지우면 아직 저장 안 된 Prefix 편집이 미아가 되어, 다음 생성/종료의
+        #    `persist_active_settings` 가 clean 으로 보고 넘어가 사라진다
+        #    (Codex 리뷰 BLOCK, 재현됨 - 한 데이터 유실을 고치다 다른 하나를 냈다).
+        if write_module_settings:
+            self._dirty_modes.discard(mode_key)
         return True, name
 
     def create_preset(

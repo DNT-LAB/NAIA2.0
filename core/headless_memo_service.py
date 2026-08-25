@@ -243,7 +243,11 @@ class HeadlessMemoService:
             return self.context._toast(f"메모는 최대 {MAX_NOTES}개까지 둘 수 있습니다", level="error")
         note = {"id": self._new_id(), "body": str(body or "")[:MAX_BODY_CHARS], "updated": _now()}
         notes.append(note)
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            notes.remove(note)          # 디스크에 못 앉았으면 없던 일이다
+            raise
         state = self.state()
         state["focus_id"] = note["id"]
         return state
@@ -261,9 +265,18 @@ class HeadlessMemoService:
                 state = self.state()
                 state["written_id"] = note_id
                 return state
+            previous = (note["body"], note["updated"])
             note["body"] = clean
             note["updated"] = _now()
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                # ⚠️ **캐시를 되돌린다.** 안 되돌리면 화면엔 새 글이 남고 캐시도 새 글이라,
+                #    같은 글을 다시 보내면 위 '값이 그대로' 갈래로 빠져 **다시는 디스크에
+                #    안 쓴다** - 사용자는 저장된 줄 알고 껐다가 옛 글을 본다
+                #    (Codex 리뷰 BLOCK, 재현됨).
+                note["body"], note["updated"] = previous
+                raise
             # ⚠️ 목록만 다시 그리게 두면 **타이핑 중에 커서가 튄다.** 어느 메모를
             #    쓰고 있었는지 함께 알려 화면이 그 칸을 건드리지 않게 한다.
             state = self.state()
@@ -276,6 +289,11 @@ class HeadlessMemoService:
         remaining = [note for note in notes if note["id"] != note_id]
         if len(remaining) == len(notes):
             return self.context._toast("메모를 찾지 못했습니다", level="error")
+        keep = self._notes
         self._notes = remaining
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            self._notes = keep          # 디스크에 못 앉았으면 지운 적 없는 것이다
+            raise
         return self.state()

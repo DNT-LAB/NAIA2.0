@@ -204,10 +204,15 @@ export function createMemoPopup({
 
   async function askDelete(note) {
     const title = String(note.title || '').trim() || '(제목 없음)';
-    const ok = (typeof confirmDialog === 'function')
-      ? await confirmDialog(`"${title}" 메모를 지웁니다. 되돌릴 수 없습니다.`,
-                            {title: '메모 삭제', okText: '지우기', cancelText: '취소'})
-      : win.confirm(`"${title}" 메모를 지웁니다.`);
+    // ⚠️ **네이티브 `confirm` 으로 물러서지 않는다.** Electron 에서 그것이 초점을
+    //    앗아가 메모가 잠겼던 바로 그 결함이다 - 물러설 곳으로도 두지 않는다
+    //    (Codex 리뷰 CONCERN). 대화상자가 없으면 지우지 못한다고 말하고 만다.
+    if (typeof confirmDialog !== 'function') {
+      showToast('확인 창을 띄울 수 없어 지우지 않았습니다', 'error');
+      return;
+    }
+    const ok = await confirmDialog(`"${title}" 메모를 지웁니다. 되돌릴 수 없습니다.`,
+                                   {title: '메모 삭제', okText: '지우기', cancelText: '취소'});
     if (!ok) {
       // 취소했으면 쓰던 자리로 돌려준다 - 대화상자가 초점을 가져갔다.
       pick('.memo-editor')?.focus();

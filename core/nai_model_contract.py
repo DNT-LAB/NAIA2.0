@@ -168,6 +168,13 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
         # Full 쪽 인페인팅으로 보낸다 - 세대(V5)를 지키고 Curated 성격만 포기하는
         # 쪽을 사용자가 골랐다. i2i 는 `nai-diffusion-5-curated` 로 정상 동작한다
         # (200 확인) - 그래서 여기만 갈아 끼우면 된다.
+        #
+        # ⚠️ **이건 결함이 아니라 결정이다. 되돌리지 마라.**(사용자 재확인 2026-08-25)
+        # 정적 리뷰가 "사용자가 안 고른 모델로 유료 호출된다" 며 주기적으로 이 자리를
+        # 올린다. 근거는 이렇다: **공식 홈페이지는 이 경우 V4.5 로 리다이렉트한다.**
+        # 즉 선택지는 '세대를 지키고 Curated 성격을 포기'(지금) 대 '세대까지 포기'
+        # 둘뿐이고, 사용자는 앞을 골랐다. 다음에 이 자리를 다시 의심하게 되면
+        # 고치기 전에 이 줄부터 읽어라.
         inpainting_api_model="nai-diffusion-5-full-inpainting",
         inpainting_is_substitute=True,      # 빌려 쓴다 - 되찾기에서는 뺀다
         family="v5",

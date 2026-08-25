@@ -22,6 +22,7 @@ AUTO_GENERATE_SUPPRESSED_FLAGS = {
     "remote_preset_request",
     "result_enhance_request",
     "sequence_preset_request",
+    "inpaint_sequence_request",
     "studio_request",
     "turbo_sequence_request",
     # V5 Scene 연속 생성. **프론트가 루프를 몬다**(컷마다 불러오기 왕복이 필요해서

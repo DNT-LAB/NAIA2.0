@@ -483,6 +483,7 @@
       <div class="fn-menu" id="fnMenu" role="menu" hidden>
         <button type="button" role="menuitem" onclick="openFnPreset()"><span>&#9638;</span><span>Preset</span></button>
         <button type="button" role="menuitem" onclick="openFnSequence()"><span>&#9654;</span><span>Sequence</span></button>
+        <button type="button" role="menuitem" onclick="openFnISequence()"><span>&#9655;</span><span>I.Sequence</span></button>
         <button type="button" role="menuitem" onclick="openFnV5Scene()"><span>&#127916;</span><span>V5 Scene</span></button>
         <button type="button" role="menuitem" onclick="openTranslatorPopup()"><span>あ</span><span>Translate</span></button>
       </div>
@@ -696,6 +697,10 @@
         </div>
         <div class="tab-page" id="tabSequence">
           <div class="seq-panel" id="sequencePresetPanel"></div>
+        </div>
+        <!-- I.Sequence (Inpaint Sequence) — Sequence 의 복제본. 같은 .seq-* 스킨을 쓴다. -->
+        <div class="tab-page" id="tabIsequence">
+          <div class="seq-panel" id="inpaintSequencePanel"></div>
         </div>
         <div class="tab-page" id="tabV5scene">
           <div class="scene-panel" id="v5ScenePanel"></div>

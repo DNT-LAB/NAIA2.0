@@ -664,6 +664,29 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
         _release_auto_gen_prefetch(context)
 
 
+# Sequence 와 I.Sequence 는 **같은 기계**를 쓴다 - 프레임에 박힌 키 이름만 다르다.
+# 둘을 따로 짜면 이 파일의 돈 가드(사용량 0% 차단)가 둘로 갈라 한쪽만 고치는 날이
+# 온다 - 그래서 본체는 하나로 두고 여기서 종류만 갈라낸다(2026-08-25).
+#   (run_id 키, Vibe 캡처 stamp 키, 런 서비스 접근자, 모듈 상태 접근자, 연속 라우트 모듈)
+_SEQUENCE_KINDS = (
+    ("sequence_run_id", "sequence_vibe_capture", "_sequence_run_service",
+     "_sequence_run_module_state", "app.backend.server.sequence_preset_routes"),
+    ("inpaint_sequence_run_id", "inpaint_sequence_vibe_capture", "_inpaint_sequence_run_service",
+     "_inpaint_sequence_run_module_state", "app.backend.server.inpaint_sequence_routes"),
+)
+
+
+def _sequence_kind_for(request):
+    """이 요청이 어느 시퀀스의 프레임인가. 시퀀스 프레임이 아니면 None."""
+    params = getattr(request, "params", None)
+    if not isinstance(params, dict):
+        return None
+    for kind in _SEQUENCE_KINDS:
+        if str(params.get(kind[0]) or ""):
+            return kind
+    return None
+
+
 def _inject_sequence_vibe(context: WebSessionContext, request) -> None:
     """Sequence Use Vibe: 실행 직전, 라운드 첫 이미지의 인코딩이 준비돼 있으면 이 프레임의 NAI vibe
     EarlyBinding(``request.nai_vibe_transfer`` — api_service 가 실제로 보내는 출처)에 임시 vibe 1장을
@@ -676,10 +699,14 @@ def _inject_sequence_vibe(context: WebSessionContext, request) -> None:
     params = getattr(request, "params", None)
     if not isinstance(params, dict):
         return
-    run_id = str(params.get("sequence_run_id") or "")
-    if not run_id or params.get("sequence_vibe_capture"):
+    kind = _sequence_kind_for(request)
+    if kind is None:
+        return
+    run_key, capture_key, accessor = kind[0], kind[1], kind[2]
+    run_id = str(params.get(run_key) or "")
+    if not run_id or params.get(capture_key):
         return  # 시퀀스 프레임 아님 / 캡처 프레임 자신은 vibe 소스라 주입 대상 아님
-    svc = context._sequence_run_service()
+    svc = getattr(context, accessor)()
     if not svc.is_running(run_id):
         return
     # 게이트는 프레임에 baking 된 값으로 본다(라이브 컨텍스트가 아니라) — 생성 도중 사용자가
@@ -744,10 +771,14 @@ async def _capture_sequence_vibe(context: WebSessionContext, clients: set[WebSoc
     params = getattr(request, "params", None)
     if not isinstance(params, dict):
         return
-    run_id = str(params.get("sequence_run_id") or "")
-    if not run_id or str(params.get("sequence_vibe_capture") or "") != run_id:
+    kind = _sequence_kind_for(request)
+    if kind is None:
         return
-    svc = context._sequence_run_service()
+    run_key, capture_key, accessor = kind[0], kind[1], kind[2]
+    run_id = str(params.get(run_key) or "")
+    if not run_id or str(params.get(capture_key) or "") != run_id:
+        return
+    svc = getattr(context, accessor)()
     if not svc.is_running(run_id) or not svc.wants_vibe(run_id):
         return
     if svc.vibe_injection(run_id):
@@ -795,14 +826,19 @@ async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSock
     라운드 완료 시 Auto Gen ON·큐 빔이면 다음 랜덤 그룹으로 연속(continue_sequence_run), 아니면
     종료한다. 시퀀스 프레임이 아니면 False(미처리). 성공 완료(_maybe_continue)와 실행 실패(except)
     양쪽에서 호출돼 실패 프레임도 카운트되므로 루프가 영구 정지하지 않는다(Codex MUST-FIX)."""
-    params = getattr(request, "params", {}) or {}
-    sequence_run_id = str(params.get("sequence_run_id") or "")
-    if not sequence_run_id or not context._sequence_run_service().is_running(sequence_run_id):
+    kind = _sequence_kind_for(request)
+    if kind is None:
         return False
-    seq_service = context._sequence_run_service()
+    run_key, _capture_key, accessor, state_accessor, routes_module = kind
+    params = getattr(request, "params", {}) or {}
+    sequence_run_id = str(params.get(run_key) or "")
+    seq_service = getattr(context, accessor)()
+    if not sequence_run_id or not seq_service.is_running(sequence_run_id):
+        return False
+    module_state = getattr(context, state_accessor)
     policy = seq_service.record_generation_completed(sequence_run_id)
     try:
-        await broadcast_json(clients, context._sequence_run_module_state())
+        await broadcast_json(clients, module_state())
     except Exception:
         pass
     for message in policy.get("messages", []):
@@ -824,12 +860,14 @@ async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSock
             await _stop_auto_generation_for_quota(context, clients)
             # 그쪽이 이 런을 stopped 로 끝내고 알린다 - 아래에서 또 '완료' 로 끝내지 않는다.
             return True
-        from app.backend.server.sequence_preset_routes import continue_sequence_run
-        advanced = await continue_sequence_run(context, clients, sequence_run_id, broadcast_json)
+        import importlib
+
+        continue_run = importlib.import_module(routes_module).continue_sequence_run
+        advanced = await continue_run(context, clients, sequence_run_id, broadcast_json)
     if not advanced:
         finish = seq_service.finish(sequence_run_id, reason="complete")
         try:
-            await broadcast_json(clients, context._sequence_run_module_state())
+            await broadcast_json(clients, module_state())
         except Exception:
             pass
         for message in finish.get("messages", []):
@@ -856,7 +894,8 @@ def _auto_gen_loop_engaged(context: WebSessionContext, request=None) -> bool:
             return True
         return bool(context._storyteller_service().is_running()
                     or context._automation_service().is_running()
-                    or context._sequence_run_service().is_running())
+                    or context._sequence_run_service().is_running()
+                    or context._inpaint_sequence_run_service().is_running())
     except Exception:   # noqa: BLE001
         return False
 
@@ -894,15 +933,17 @@ async def _stop_auto_generation_for_quota(
     _release_auto_gen_prefetch(context)
     story = context._storyteller_service()
     automation = context._automation_service()
-    sequence = context._sequence_run_service()
     messages: list[dict[str, Any]] = []
     # ⚠️ 시퀀스는 **따로** 끝낸다(elif 가 아니다). 자기 런을 돌기 때문에 아래 컨트롤러
     #    들과 동시에 살아 있을 수 있고, 안 끝내면 런타임이 무장한 채 남아 다음 완료가
     #    다시 다음 묶음을 넣는다(Codex BLOCK 2026-08-25).
-    if sequence.is_running():
+    for _run_key, _capture_key, _accessor, _state_accessor, _routes in _SEQUENCE_KINDS:
+        sequence = getattr(context, _accessor)()
+        if not sequence.is_running():
+            continue
         finish = sequence.finish(sequence.active_run_id(), reason="stopped")
         try:
-            await broadcast_json(clients, context._sequence_run_module_state())
+            await broadcast_json(clients, getattr(context, _state_accessor)())
         except Exception:
             pass
         messages.extend(finish.get("messages", []))
@@ -1524,6 +1565,14 @@ async def _broadcast_generation_error(
             "requestId": str(params.get("sequence_preset_request_id") or ""),
             "groupId": str(params.get("sequence_preset_group_id") or ""),
             "frame": str(params.get("sequence_preset_frame") or ""),
+            "message": message,
+        })
+    if params.get("inpaint_sequence_request"):
+        await broadcast_json(clients, {
+            "type": "inpaint_sequence_generation_error",
+            "requestId": str(params.get("inpaint_sequence_request_id") or ""),
+            "groupId": str(params.get("inpaint_sequence_group_id") or ""),
+            "frame": str(params.get("inpaint_sequence_frame") or ""),
             "message": message,
         })
     if params.get("character_asset_request"):

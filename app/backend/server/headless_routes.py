@@ -23,6 +23,7 @@ from app.backend.server.interactive_reference_routes import (
     register_interactive_reference_routes,
 )
 from app.backend.server.generation_commands import register_generation_rest_routes
+from app.backend.server.inpaint_sequence_routes import register_inpaint_sequence_routes
 from app.backend.server.sequence_preset_routes import register_sequence_preset_routes
 from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
@@ -165,6 +166,14 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_sequence_preset_routes(
+        app,
+        context,
+        run_in_thread=run_in_thread,
+        clients=clients,
+        broadcast_json=broadcast_json,
+        start_generation_runner=ensure_generation_runner,
+    )
+    register_inpaint_sequence_routes(
         app,
         context,
         run_in_thread=run_in_thread,

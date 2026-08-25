@@ -451,6 +451,7 @@ let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
 let sequencePresetControl = null;
+let inpaintSequenceControl = null;
 let v5SceneControl = null;
 let danbooruFeedbackControl = null;
 let resolutionManagerPanel = null;
@@ -2112,6 +2113,19 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
+const inpaintSequenceReady = import('./js/features/inpaintSequencePanel.mjs?v=20260825-isequence1')
+  .then(({createInpaintSequencePanel}) => {
+    inpaintSequenceControl = createInpaintSequencePanel({
+      panel: $('inpaintSequencePanel'),
+      escHtml,
+      showToast,
+      bindTagAssist,
+      getApiMode: () => currentMode || modeSelect?.value || '',
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize I.Sequence panel', error);
+  });
 const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .then(({createV5ScenePanel}) => {
     v5SceneControl = createV5ScenePanel({
@@ -3621,6 +3635,8 @@ const wsMessageHandlers = {
   preset_generation_error: onEventPresetGenerationError,
   sequence_preset_generation_error: m => showToast(
     `시퀀스 컷${m.frame ? ' ' + m.frame : ''} 생성 실패: ${m.message || 'failed'}`, 'error'),
+  inpaint_sequence_generation_error: m => showToast(
+    `I.Sequence 컷${m.frame ? ' ' + m.frame : ''} 생성 실패: ${m.message || 'failed'}`, 'error'),
   load_prompt: m => onLoadPrompt(m.prompt),
   viewer_new_image: onViewerNewImage,
   viewer_history_removed: onViewerHistoryRemoved,
@@ -6566,6 +6582,7 @@ const FN_QUICK_STORE = 'naia.fn.lastUsed';
 const FN_QUICK_ITEMS = [
   {key: 'preset', icon: '▦', label: 'Preset', tab: 'preset', run: () => openFnPreset()},
   {key: 'sequence', icon: '▶', label: 'Sequence', tab: 'sequence', run: () => openFnSequence()},
+  {key: 'isequence', icon: '▷', label: 'I.Sequence', tab: 'isequence', run: () => openFnISequence()},
   {key: 'v5scene', icon: '🎬', label: 'V5 Scene', tab: 'v5scene', run: () => openFnV5Scene()},
   // Translate 는 탭이 아니라 팝업이다 - `tab` 이 비어 있으면 활성 표시를 하지 않는다.
   {key: 'translate', icon: 'あ', label: 'Translate', tab: '', run: () => openTranslatorPopup()},
@@ -6634,6 +6651,13 @@ function openFnSequence() {
   rememberFnQuick('sequence');
   switchTab('sequence');
   sequencePresetReady.then(() => sequencePresetControl?.onOpen());
+}
+
+function openFnISequence() {
+  closeFnMenu();
+  rememberFnQuick('isequence');
+  switchTab('isequence');
+  inpaintSequenceReady.then(() => inpaintSequenceControl?.onOpen());
 }
 
 function openFnV5Scene() {
@@ -7146,6 +7170,14 @@ function send(cmd) {
       }
       return;
     }
+    if (activePromptTab === 'isequence') {
+      if (inpaintSequenceControl?.hasOpenGroup?.()) {
+        inpaintSequenceControl.generateOpenGroup();
+      } else {
+        showToast('I.Sequence 에서는 Generate 대신 Random 버튼을 누르거나, 생성할 이벤트를 선택한 뒤 Generate를 눌러주세요.', 'error');
+      }
+      return;
+    }
     if (activePromptTab === 'preset') {
       void generateFromPresetTab();
       return;
@@ -7170,6 +7202,10 @@ function send(cmd) {
     // Sequence 탭에서 메인 Random = 현재 매칭 전체에서 랜덤 그룹 연속 생성(req2/3).
     if (activePromptTab === 'sequence' && sequencePresetControl?.randomGenerate) {
       sequencePresetControl.randomGenerate();
+      return;
+    }
+    if (activePromptTab === 'isequence' && inpaintSequenceControl?.randomGenerate) {
+      inpaintSequenceControl.randomGenerate();
       return;
     }
     requestRandomPrompt();
@@ -7669,6 +7705,7 @@ function syncMode(mode) {
   if (resultEnhance) resultEnhance.update();
   if (artistThumbControl) artistThumbControl.syncPromptFormat();
   if (sequencePresetControl?.onModeChange) sequencePresetControl.onModeChange(mode);
+  if (inpaintSequenceControl?.onModeChange) inpaintSequenceControl.onModeChange(mode);
 }
 
 function setMode(mode) {

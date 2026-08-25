@@ -787,6 +787,17 @@ class WebSessionContext:
     def _set_sequence_run_param(self, key: str, value: Any) -> dict[str, Any] | None:
         return self._sequence_run_service().set_param(key, value)
 
+    # I.Sequence(Inpaint Sequence) — Sequence 의 복제본이며 런 상태만 따로 가진다.
+    # 이벤트 그룹 검색(`sequence_preset_service`)은 공유한다.
+    def _inpaint_sequence_run_service(self):
+        return self._lazy_service("inpaint_sequence_run")
+
+    def _inpaint_sequence_run_module_state(self) -> dict[str, Any]:
+        return self._inpaint_sequence_run_service().state()
+
+    def _set_inpaint_sequence_run_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        return self._inpaint_sequence_run_service().set_param(key, value)
+
     def _e621_event_service(self):
         return self._lazy_service("e621_event")
 

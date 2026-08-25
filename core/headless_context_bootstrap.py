@@ -37,6 +37,15 @@ def initialize_web_session_context(context: Any) -> None:
     if context.runtime_paths is None:
         context.runtime_paths = resolve_runtime_paths(context.repo_root, portable=explicit_repo_root)
     context.runtime_paths.ensure_writable_dirs()
+    # ⚠️ **여기서 불러야 한다.** `RuntimeInstallManager.initialize()` 는 아카이브
+    #    다운로드를 시작할 때만 도는데(`start_archive_download`), 태그를 이미 받아 둔
+    #    기존 사용자는 그 길을 다시 안 지난다 — 사전을 고쳐 배포해도 닿지 않았다.
+    try:
+        from core.runtime_install_manager import refresh_bootstrap_data_files
+
+        refresh_bootstrap_data_files(context.runtime_paths)
+    except Exception as exc:  # noqa: BLE001 - 사전 갱신 실패가 기동을 막으면 안 된다
+        print(f"[data] bootstrap refresh skipped: {exc}", flush=True)
 
     initialize_desktop_compatibility(context)
     initialize_runtime_state(context)

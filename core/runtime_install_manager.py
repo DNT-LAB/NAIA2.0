@@ -61,12 +61,80 @@ class ArchiveSpec:
     min_count: int = 1
 
 
+# ⚠️ 이 목록과 taglist/*.json 은 **앱 소유 사전**이다. 앱 어디에서도 쓰지 않는
+#    읽기 전용이고 편집 UI 도 없다(사용자 커스터마이즈는 PE 카테고리 오버라이드가
+#    따로 저장한다). 그래서 배포본과 다르면 **덮어써서 갱신한다**.
+#
+#    예전엔 `target.exists()` 면 무조건 건너뛰었다. user-data 가 primary 이고
+#    resource 는 fallback 이라(`headless_random_prompt_service._install_filter_manager`)
+#    한 번 설치된 사전은 업데이트를 해도 **영영 옛것이 남았다** — 사전을 고쳐
+#    배포해도 기존 사용자에게 닿지 않는다(2026-08-26 실측: 포터블 user-data 에
+#    3,399개짜리 옛 characteristic_list.txt 가 그대로 있었다).
 BOOTSTRAP_DATA_FILES = (
     "clothes_list.txt",
     "color.txt",
     "characteristic_list.txt",
 )
 BOOTSTRAP_TAGLIST_GLOB = "*.json"
+
+# 크기가 같을 때 내용까지 비교할 상한. `taglist/style_thumbnails.json` 이 54MB 라
+# 전량 비교는 매 기동 20ms(콜드 디스크에선 그 몇 배)를 먹는다 — 사전류는 전부
+# 1MB 미만이라 이 문턱으로 실질 정확도를 잃지 않는다. 크기가 다르면 문턱과
+# 무관하게 갱신하므로, 실제 개정은 크기 검사에서 걸린다.
+BOOTSTRAP_CONTENT_COMPARE_MAX_BYTES = 4 * 1024 * 1024
+
+
+def refresh_bootstrap_data_files(runtime_paths: Any) -> dict[str, Any]:
+    """앱 소유 사전을 user-data 로 복사/갱신한다. 기동 경로와 설치 경로가 함께 쓴다.
+
+    반환 `{copied, refreshed, present, missing}`. 어떤 실패도 기동을 막지 않는다.
+    """
+    source_data = runtime_paths.resource_path("data")
+    target_data = runtime_paths.data_dir
+    copied = 0
+    refreshed = 0
+    present = 0
+    missing: list[str] = []
+
+    candidates: list[Path] = [source_data / relative for relative in BOOTSTRAP_DATA_FILES]
+    taglist_dir = source_data / "taglist"
+    if taglist_dir.is_dir():
+        candidates.extend(sorted(taglist_dir.glob(BOOTSTRAP_TAGLIST_GLOB)))
+    else:
+        missing.append("taglist/*.json")
+
+    seen: set[str] = set()
+    for source in candidates:
+        relative = source.relative_to(source_data).as_posix()
+        if relative in seen:
+            continue
+        seen.add(relative)
+        target = target_data / relative
+        if not source.is_file():
+            missing.append(relative)
+            continue
+        try:
+            if target.exists():
+                src_stat = source.stat()
+                same = src_stat.st_size == target.stat().st_size
+                if same and src_stat.st_size <= BOOTSTRAP_CONTENT_COMPARE_MAX_BYTES:
+                    same = source.read_bytes() == target.read_bytes()
+                if same:
+                    present += 1
+                    continue
+                target.write_bytes(source.read_bytes())
+                refreshed += 1
+                # cp949 콘솔이라 ASCII 만 쓴다.
+                print(f"[data] refreshed dictionary: {relative}", flush=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+            copied += 1
+        except OSError as exc:  # noqa: PERF203 - 파일 하나가 기동을 막으면 안 된다
+            print(f"[data] bootstrap skip {relative}: {exc}", flush=True)
+            missing.append(relative)
+
+    return {"copied": copied, "refreshed": refreshed, "present": present, "missing": missing}
 
 try:
     import certifi
@@ -559,41 +627,7 @@ class RuntimeInstallManager:
         return len([path for path in self.tag_dir.glob("tags_*.parquet") if path.is_file()])
 
     def _copy_bootstrap_data_files(self) -> None:
-        source_data = self.runtime_paths.resource_path("data")
-        target_data = self.runtime_paths.data_dir
-        copied = 0
-        present = 0
-        missing: list[str] = []
-
-        candidates: list[Path] = [source_data / relative for relative in BOOTSTRAP_DATA_FILES]
-        taglist_dir = source_data / "taglist"
-        if taglist_dir.is_dir():
-            candidates.extend(sorted(taglist_dir.glob(BOOTSTRAP_TAGLIST_GLOB)))
-        else:
-            missing.append("taglist/*.json")
-
-        seen: set[str] = set()
-        for source in candidates:
-            relative = source.relative_to(source_data).as_posix()
-            if relative in seen:
-                continue
-            seen.add(relative)
-            target = target_data / relative
-            if not source.is_file():
-                missing.append(relative)
-                continue
-            if target.exists():
-                present += 1
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(source.read_bytes())
-            copied += 1
-
-        self._bootstrap_state = {
-            "copied": copied,
-            "present": present,
-            "missing": missing,
-        }
+        self._bootstrap_state = refresh_bootstrap_data_files(self.runtime_paths)
 
     def _tag_archive_ready(self, count: int | None = None) -> bool:
         current = self._tag_file_count() if count is None else int(count)

@@ -153,7 +153,6 @@ bangs pinned back
 barber chair
 barcode tattoo
 barnacle
-bat
 bat boy
 bat ears
 bat furry
@@ -164,7 +163,6 @@ bat tattoo
 bat wings
 battle scarred
 bead tail ornament
-bear
 bear boy
 bear charm
 bear claws
@@ -395,7 +393,6 @@ capybara girl
 carcinization
 cartoon wings
 castration
-cat
 cat boy
 cat ear headphones
 cat ear-shaped hair
@@ -498,7 +495,6 @@ covered shoulder blades
 covering another's ears
 covering another's eye
 covering own eyes
-cow
 cow boy
 cow ears
 cow furry
@@ -576,7 +572,6 @@ dark-skinned other
 darkened skin
 decaying skin
 deep skin
-deer
 deer boy
 deer ears
 deer furry
@@ -616,7 +611,6 @@ disembodied wing
 disembowelment
 disfigured
 divine markings
-dog
 dog boy
 dog ears
 dog furry
@@ -639,7 +633,6 @@ double halo
 double-parted hair
 doufang
 doughnut hair bun
-dragon
 dragon boy
 dragon claw
 dragon ears
@@ -802,7 +795,6 @@ feet above head
 feixianji (hairstyle)
 female pubic hair
 fennec fox
-ferret
 ferret ears
 ferret furry
 ferret girl
@@ -900,7 +892,6 @@ forward facing horns
 forward-facing horns
 four eyebrows
 four eyes
-fox
 fox boy
 fox ears
 fox furry
@@ -995,7 +986,6 @@ glowing tree
 glowing veins
 glowing wings
 gluteal fold peek
-goat
 goat boy
 goat ears
 goat furry
@@ -1239,7 +1229,6 @@ horns
 horns removed
 horns through headwear
 horns through hood
-horse
 horse boy
 horse ears
 horse furry
@@ -1374,7 +1363,6 @@ lightened skin
 lightning bolt piercing
 lightning bolt-shaped pupils
 lightning hair
-lion
 lion boy
 lion cub
 lion ears
@@ -1566,7 +1554,6 @@ moray eel
 moth boy
 moth girl
 moth wings
-mouse
 mouse boy
 mouse ears
 mouse furry
@@ -1716,7 +1703,6 @@ paifang
 paint in hair
 pale eye
 pale skin
-panda
 panda ears
 panda furry
 panda girl
@@ -1761,7 +1747,6 @@ phoenix wings
 photo date watermark
 photokinesis
 piecey
-pig
 pig ears
 pig furry
 pig girl
@@ -1862,7 +1847,6 @@ question mark ahoge
 question mark in eye
 quiff
 quin tails
-rabbit
 rabbit boy
 rabbit ear hairband
 rabbit ear headphones
@@ -1878,7 +1862,6 @@ rabbit tail
 rabbit tattoo
 rabbit-ear headwear
 rabbit-shaped pupils
-raccoon
 raccoon boy3finger hand
 raccoon ears
 raccoon furry
@@ -1937,7 +1920,6 @@ ring hair extensions
 ring sidelocks
 ringed eyes
 ringlets
-robot
 robot bird
 robot boy
 robot ears
@@ -2017,7 +1999,6 @@ sharp tail
 sharp teeth
 sharp tongue
 shedding skin
-sheep
 sheep boy
 sheep ears
 sheep furry
@@ -2198,7 +2179,6 @@ square pupils
 square tattoo
 squid girl
 squid tattoo
-squirrel
 squirrel ears
 squirrel furry
 squirrel girl
@@ -2358,7 +2338,6 @@ throwing money
 thumb
 tied beard
 tied breast
-tiger
 tiger boy
 tiger ears
 tiger furry
@@ -2542,7 +2521,6 @@ winged weapon
 wingjob
 wings
 wings over eyes
-wolf
 wolf boy
 wolf cut
 wolf ears
@@ -3232,7 +3210,6 @@ distorted halo
 oni
 kitsune
 jiangshi
-demon
 nekomata
 kyuubi
 pokemon (creature)

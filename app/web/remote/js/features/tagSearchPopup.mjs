@@ -118,26 +118,36 @@ export function createTagSearchPopup({
 
   /** 캐릭터의 **구성요소**. 캐릭터 태그에는 설명글이 거의 없어 설명 칸이 통째로
    *  비어 보였다(사용자 제보) - 캐릭터의 답은 글이 아니라 어떤 특징으로 이루어져
-   *  있는가다. 캐릭터 뷰어가 칩으로 그리는 것과 **같은 값**이다.
+   *  있는가다. 캐릭터 뷰어가 쓰는 것과 **같은 값**이다.
+   *
+   *  ⚠️ **칩이 아니라 쉼표로 이은 한 줄로 그린다**(사용자 지적 2026-08-25). 칩으로
+   *     두면 긁어 복사했을 때 `multicolored hair77%pink eyes64%` 처럼 퍼센트가 붙고
+   *     쉼표가 없어 프롬프트에 그대로 못 쓴다. 이 칸의 쓸모는 '그대로 가져가기'다.
+   *     퍼센트는 버리지 않고 **툴팁**으로 옮긴다 - 어느 특징이 그 캐릭터를 대표하는지는
+   *     여전히 쓸모 있는 정보다.
    */
+  function componentTags(profile) {
+    return [...(Array.isArray(profile.personal_color) ? profile.personal_color : []),
+            ...(Array.isArray(profile.characteristics) ? profile.characteristics : [])]
+      .filter(item => item && item.tag);
+  }
+
   function profileHtml(profile) {
     if (!profile || typeof profile !== 'object') return '';
-    const chips = list => (Array.isArray(list) ? list : [])
-      .filter(item => item && item.tag)
-      .map(item => {
-        const pct = Number(item.pct);
-        const share = Number.isFinite(pct) && pct > 0 ? `<i>${Math.round(pct)}%</i>` : '';
-        return `<span class="tagsearch-comp">${escHtml(item.tag)}${share}</span>`;
-      }).join('');
-    const color = chips(profile.personal_color);
-    const traits = chips(profile.characteristics);
-    if (!color && !traits) return '';
+    const items = componentTags(profile);
+    if (!items.length) return '';
+    const text = items.map(item => String(item.tag)).join(', ');
+    const detail = items.map(item => {
+      const pct = Number(item.pct);
+      return Number.isFinite(pct) && pct > 0 ? `${item.tag} ${Math.round(pct)}%` : String(item.tag);
+    }).join(', ');
     const meta = [profile.group, profile.gender].filter(Boolean).map(String);
     return `<div class="tagsearch-desc-comp">
-      <div class="tagsearch-comp-head">구성요소${
-        meta.length ? `<span>${escHtml(meta.join(' · '))}</span>` : ''}</div>
-      ${color ? `<div class="tagsearch-comp-row">${color}</div>` : ''}
-      ${traits ? `<div class="tagsearch-comp-row">${traits}</div>` : ''}
+      <div class="tagsearch-comp-head"><span class="tagsearch-comp-label">구성요소</span>${
+        meta.length ? `<span>${escHtml(meta.join(' · '))}</span>` : ''}
+        <button type="button" class="tagsearch-comp-copy" data-act="copy-comp">복사</button>
+      </div>
+      <p class="tagsearch-comp-text" title="${escHtml(detail)}">${escHtml(text)}</p>
     </div>`;
   }
 
@@ -355,6 +365,15 @@ export function createTagSearchPopup({
         return;
       }
       if (!selectedTag) return;
+      if (action === 'copy-comp') {
+        const row = rows.find(item => item.tag === selectedTag);
+        const text = componentTags(row?.profile || {}).map(item => String(item.tag)).join(', ');
+        if (!text) { showToast('구성요소가 없습니다', 'error'); return; }
+        win.navigator?.clipboard?.writeText(text)
+          .then(() => showToast('구성요소를 복사했습니다', 'success'))
+          .catch(() => showToast('복사하지 못했습니다', 'error'));
+        return;
+      }
       if (action === 'copy') {
         win.navigator?.clipboard?.writeText(selectedTag)
           .then(() => showToast(`복사했습니다: ${selectedTag}`, 'success'))

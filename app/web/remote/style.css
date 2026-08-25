@@ -19778,15 +19778,20 @@ body.detached-module .mod-grid-3 {
   letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase;
 }
 .tagsearch-comp-head span { font-weight: 400; letter-spacing: 0; text-transform: none; }
-.tagsearch-comp-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.tagsearch-comp {
-  display: inline-flex; align-items: baseline; gap: 5px;
-  padding: 2px 8px; border-radius: 999px;
-  background: rgba(106,191,123,0.14); border: 1px solid rgba(106,191,123,0.28);
-  font-family: var(--font-editor); font-size: 11px; color: var(--text-primary);
+.tagsearch-comp-label { font-weight: 700 !important; letter-spacing: 0.06em !important; }
+.tagsearch-comp-copy {
+  margin-left: auto; padding: 1px 7px; cursor: pointer;
+  border: 1px solid var(--border-dim); border-radius: 4px;
+  background: rgba(255,255,255,0.05); color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.04em;
 }
-.tagsearch-comp i {
-  font-style: normal; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+.tagsearch-comp-copy:hover { background: rgba(96,120,255,0.2); color: var(--text-primary); }
+/* 칩이 아니라 **긁어 갈 수 있는 한 줄**이다 - 쉼표로 이어 프롬프트에 그대로 붙는다.
+   퍼센트는 title(툴팁)로 옮겼다: 글에 섞이면 복사물이 못 쓰게 된다. */
+.tagsearch-comp-text {
+  margin: 7px 0 0; user-select: text; cursor: text;
+  font-family: var(--font-editor); font-size: 11.5px; line-height: 1.75;
+  color: #a8d8b4; word-break: break-word;
 }
 .tagsearch-desc-kw { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .tagsearch-kw {

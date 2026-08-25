@@ -235,6 +235,35 @@ def create_event(name: str, save_root: str | Path | None = None) -> str | None:
     return clean
 
 
+def delete_event(event: str, save_root: str | Path | None = None) -> bool:
+    """이벤트 폴더를 통째로 지운다. **쓰기 루트에 있는 것만** 지운다.
+
+    ⚠️ 되돌릴 수 없다 - 그 안의 컷과 썸네일이 함께 사라진다. 부르는 쪽이 반드시
+       한 번 더 묻는다(`headless_v5_scene_service.delete_event`).
+    ⚠️ 레거시 폴백 폴더는 읽기 전용이다 - `delete_scene` 과 같은 규약. 그쪽에만 있는
+       이벤트를 지우려 하면 아무것도 지우지 않고 False 를 돌려준다.
+    """
+    import shutil
+
+    base = event_dir(event, save_root)
+    if base is None or not base.is_dir():
+        return False
+    try:
+        shutil.rmtree(base)
+    except OSError:
+        return False
+    return True
+
+
+def event_cover(event: str, save_root: str | Path | None = None) -> str:
+    """이벤트를 대표할 컷 이름 - 순서상 **첫 컷** 중 썸네일이 있는 것. 없으면 빈 문자열."""
+    meta = read_event(event, save_root)
+    for name in (meta or {}).get("order", []):
+        if existing_scene_thumb(event, name, save_root) is not None:
+            return name
+    return ""
+
+
 def move_scene(event: str, name: str, delta: int, save_root: str | Path | None = None) -> bool:
     """씬을 순서에서 위/아래로 한 칸 옮긴다(`delta` = -1 / +1)."""
     meta = read_event(event, save_root)

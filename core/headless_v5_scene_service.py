@@ -248,10 +248,29 @@ class HeadlessV5SceneService:
             "available": True,
             "runtime": "web",
             "events": events,
+            # 폴더(=이벤트) 단위로 훑어보는 화면이 쓴다. 목록 하나로 "어느 만화가
+            # 몇 컷인지" 가 보여야 이벤트를 하나씩 열어 확인하지 않는다(사용자 지정).
+            "event_cards": [self._event_card(name, root) for name in events],
             "event": active,
             "scenes": scenes,
             "scene_count": len(scenes),
             "current_mode": self.context.get_api_mode(),
+        }
+
+    def _event_card(self, name: str, root: Any) -> dict[str, Any]:
+        """폴더 뷰의 카드 한 장. 표지는 **첫 컷의 썸네일**을 빌린다."""
+        from core.v5_scene_store import event_cover
+
+        cover = event_cover(name, save_root=root)
+        revision = scene_thumb_revision(name, cover, save_root=root) if cover else ""
+        return {
+            "name": name,
+            "scene_count": len(list_scene_names(name, save_root=root)),
+            "thumbnail_url": (
+                f"/api/v5-scene/thumbnail?event={quote(name)}"
+                f"&name={quote(cover)}&v={revision}"
+                if revision else ""
+            ),
         }
 
     # ── 담기 ─────────────────────────────────────────────────────────────
@@ -587,11 +606,33 @@ class HeadlessV5SceneService:
             if delete_scene(event, name, save_root=self._save_root()):
                 return self.state(event)
             return context._toast("컷을 지우지 못했습니다", level="error")
+        if key == "event_delete":
+            return self.delete_event(str(payload.get("name") or event))
         if key == "open_folder":
             return self.open_folder(event)
         if key == "rename":
             return self.rename(event, str(payload.get("old") or ""), str(payload.get("new") or ""))
         return context._toast(f"V5 Scene action is not supported in this runtime: {key}", level="info")
+
+    def delete_event(self, event: str) -> dict[str, Any]:
+        """이벤트 폴더를 통째로 지운다. 그 안의 컷과 썸네일이 함께 사라진다.
+
+        ⚠️ 되돌릴 수 없다. 화면이 이름을 다시 받아 적게 해서 한 번 더 확인한다 -
+           컷 하나가 아니라 만화 한 편이 사라지는 자리다.
+        """
+        from core.v5_scene_store import delete_event as _delete_event
+
+        context = self.context
+        clean = sanitize_event_name(event)
+        if not clean:
+            return context._toast("이벤트 이름을 입력하세요", level="error")
+        if not _delete_event(clean, save_root=self._save_root()):
+            return context._toast(f"이벤트를 지우지 못했습니다: {clean}", level="error")
+        state = self.state("")
+        state["_headless_extra_messages"] = [
+            context._toast(f"이벤트를 지웠습니다: {clean}", level="success")
+        ]
+        return state
 
     def open_folder(self, event: str = "") -> dict[str, Any]:
         """폴더를 OS 탐색기에서 연다(없으면 만든다). 이벤트가 열려 있으면 **그 폴더**를.

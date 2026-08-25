@@ -1944,7 +1944,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-quotastop1')
+const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .then(({createV5ScenePanel}) => {
     v5SceneControl = createV5ScenePanel({
       panel: $('v5ScenePanel'),

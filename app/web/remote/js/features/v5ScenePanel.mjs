@@ -28,6 +28,11 @@ export function createV5ScenePanel({
 }) {
   let lastState = null;
   let openName = '';           // 펼쳐 둔 컷
+  // ── 폴더 뷰 ──────────────────────────────────────────────────────────────
+  // 이벤트가 여럿이 되면 "어느 만화가 몇 컷인지" 를 드롭다운으로는 알 수 없다 -
+  // 폴더를 늘어놓고 표지를 보여 주는 화면을 하나 둔다(사용자 지정 2026-08-25).
+  // 처음 열었을 때(기억해 둔 이벤트가 없을 때)는 여기서 시작한다.
+  let folderView = !rememberedEvent();
   // ── 연속 생성 ────────────────────────────────────────────────────────────
   // 컷을 순서대로 불러오며 한 장씩 낸다(사용자 지정). 와일드카드가 골칫거리라서
   // **먼저 한 컷을 불러온 뒤에만** 시작할 수 있게 한다 - 그 사이에 사용자가 자기
@@ -190,6 +195,7 @@ export function createV5ScenePanel({
     if (!events.length) {
       // 이벤트가 하나도 없으면 만들기 칸만 보여 준다 - 컷을 담을 곳이 없는데 저장 칸을
       // 띄우면 눌러 놓고 왜 안 되는지 모른다(사용자 지정: 이벤트를 먼저 만든다).
+      folderView = false;
       panel.innerHTML = `
         <div class="scene-empty">아직 이벤트가 없습니다.<br>
           만화 한 편에 해당하는 <b>이벤트</b>를 먼저 만드세요.</div>
@@ -201,15 +207,20 @@ export function createV5ScenePanel({
       return;
     }
 
+    if (folderView) {
+      panel.innerHTML = eventGrid();
+      return;
+    }
+
     panel.innerHTML = `
       <div class="scene-bar">
+        <button type="button" class="scene-bar-btn scene-bar-back" data-scene-events="1"
+                data-naia-title="이벤트를 늘어놓고 고릅니다">◀ 이벤트</button>
         <button type="button" class="scene-event-pick" id="sceneEventPick" data-scene-event-pick="1"
                 aria-haspopup="listbox" aria-expanded="false" data-naia-title="열어 둘 이벤트">
           <span class="scene-event-pick-t">${escHtml(active || '(이벤트 없음)')}</span>
           <span class="scene-event-pick-c" aria-hidden="true">▾</span>
         </button>
-        <button type="button" class="scene-bar-btn" data-scene-event-new="1"
-                data-naia-title="새 이벤트를 만듭니다">+ 이벤트</button>
         <button type="button" class="scene-bar-btn" data-scene-folder="1"
                 data-naia-title="이 이벤트의 폴더를 탐색기에서 엽니다">폴더</button>
       </div>
@@ -230,6 +241,50 @@ export function createV5ScenePanel({
         <button type="button" class="scene-save-btn" data-scene-save="1">저장</button>
       </div>
     `;
+  }
+
+  /** 폴더(=이벤트) 단위로 훑어보는 화면. 표지는 그 이벤트의 첫 컷 썸네일이다. */
+  function eventGrid() {
+    const cards = lastState?.event_cards || [];
+    const active = activeEvent();
+    return `
+      <div class="scene-bar">
+        <span class="scene-bar-title">이벤트 ${cards.length}${running
+          // ⚠️ **중단은 어느 화면에서도 닿아야 한다.** 폴더 뷰로 나온 사이에 세울 수
+          //    없으면, 돌고 있는 것을 멈추려고 다시 이벤트로 들어가야 한다.
+          ? ` <button type="button" class="scene-run is-stop is-inline"`
+            + ` data-scene-run-stop="1">생성 중단</button>`
+          : ''}</span>
+        <button type="button" class="scene-bar-btn" data-scene-event-new="1"
+                data-naia-title="새 이벤트를 만듭니다">+ 이벤트</button>
+        <button type="button" class="scene-bar-btn" data-scene-folder="1"
+                data-naia-title="V5 Scene 폴더를 탐색기에서 엽니다">폴더</button>
+      </div>
+      ${cards.length
+        ? `<div class="scene-grid">${cards.map(card => {
+            const name = String(card.name || '');
+            const count = Number(card.scene_count || 0);
+            return `<article class="scene-card${name === active ? ' is-current' : ''}">
+              <button type="button" class="scene-card-open" data-scene-enter="${escAttr(name)}"
+                      data-naia-title="이 이벤트를 엽니다">
+                <span class="scene-card-thumb">${card.thumbnail_url
+                  ? `<img src="${escAttr(card.thumbnail_url)}" alt="" loading="lazy" decoding="async">`
+                  : '<span class="scene-thumb-none">—</span>'}</span>
+                <span class="scene-card-name">${escHtml(name)}</span>
+                <span class="scene-card-count">${count} 컷</span>
+              </button>
+              <button type="button" class="scene-card-del" data-scene-event-del="${escAttr(name)}"
+                      aria-label="${escAttr(name)} 이벤트 지우기"
+                      data-naia-title="이 이벤트를 폴더째 지웁니다 (되돌릴 수 없습니다)">&times;</button>
+            </article>`;
+          }).join('')}</div>`
+        : `<div class="scene-empty">아직 이벤트가 없습니다.<br>
+             만화 한 편에 해당하는 <b>이벤트</b>를 먼저 만드세요.</div>
+           <div class="scene-save">
+             <input type="text" class="scene-save-name" id="sceneEventName" placeholder="새 이벤트 이름"
+                    maxlength="80" autocomplete="off">
+             <button type="button" class="scene-save-btn" data-scene-event-create="1">만들기</button>
+           </div>`}`;
   }
 
   function sceneRow(scene, ordinal, total) {
@@ -299,6 +354,8 @@ export function createV5ScenePanel({
                   data-scene-apply="${escAttr(scene.name)}"${wrongMode ? ' disabled' : ''}>
             이 구도로 불러오기</button>
           ${runButton(scene, ordinal)}
+          <button type="button" class="scene-del" data-scene-del="${escAttr(scene.name)}"
+                  data-naia-title="이 컷을 지웁니다 (되돌릴 수 없습니다)">삭제</button>
         </div>
       </div>`;
   }
@@ -441,6 +498,50 @@ export function createV5ScenePanel({
     if (!name) { showToast('이벤트 이름을 입력하세요', 'error'); return; }
     setModuleParam('v5_scene', 'event_create', {name});
     rememberEvent(name);
+  }
+
+  /** 컷 하나를 지운다. 한 번 묻고 지운다 - 다시 담으면 그만인 크기다. */
+  async function askDeleteScene(name) {
+    if (!name) return;
+    const ok = (typeof showConfirmDialog === 'function')
+      ? await showConfirmDialog(`"${name}" 컷을 지웁니다. 되돌릴 수 없습니다.`,
+                                {title: '컷 삭제', okText: '지우기', cancelText: '취소'})
+      : globalThis.confirm(`"${name}" 컷을 지웁니다. 되돌릴 수 없습니다.`);
+    if (!ok) return;
+    // 지운 컷이 지금 돌고 있는 줄거리의 일부면 자동은 물러난다 - 다음 컷을 못 찾는다.
+    if (running) stopRun('컷을 지워 연속 생성을 멈췄습니다');
+    if (appliedName === name) appliedName = '';
+    if (openName === name) openName = '';
+    setModuleParam('v5_scene', 'delete', {event: activeEvent(), name});
+  }
+
+  /** 이벤트를 폴더째 지운다. **이름을 다시 받아 적게 한다** - 컷 하나가 아니라
+   *  만화 한 편과 그 썸네일이 함께 사라지는 자리라, 한 번 누르는 것으로는 가볍다. */
+  async function askDeleteEvent(name) {
+    if (!name) return;
+    const count = (lastState?.event_cards || [])
+      .find(card => String(card.name) === name)?.scene_count || 0;
+    let answer = null;
+    if (typeof showPromptDialog === 'function') {
+      answer = await showPromptDialog(
+        `"${name}" 이벤트를 폴더째 지웁니다 (${count} 컷). 되돌릴 수 없습니다.\n`
+        + '지우려면 이벤트 이름을 그대로 적으세요.',
+        {title: '이벤트 삭제', okText: '지우기', cancelText: '취소', placeholder: name});
+    } else {
+      answer = globalThis.prompt?.(`"${name}" 을(를) 지우려면 이름을 그대로 적으세요.`) ?? null;
+    }
+    if (answer === null) return;
+    if (String(answer).trim() !== name) {
+      showToast('이름이 달라 지우지 않았습니다', 'error');
+      return;
+    }
+    if (running) stopRun('이벤트를 지워 연속 생성을 멈췄습니다');
+    if (name === activeEvent()) {
+      appliedName = '';
+      openName = '';
+      rememberEvent('');
+    }
+    setModuleParam('v5_scene', 'event_delete', {name});
   }
 
   /** 지금 구도를 열린 이벤트의 끝에 담는다. */
@@ -635,6 +736,37 @@ export function createV5ScenePanel({
     }
     if (event.target.closest('[data-scene-event-new]')) {
       askNewEvent();
+      return;
+    }
+    if (event.target.closest('[data-scene-events]')) {
+      folderView = true;
+      render();
+      return;
+    }
+    const enter = event.target.closest('[data-scene-enter]');
+    if (enter) {
+      const name = enter.dataset.sceneEnter || '';
+      folderView = false;
+      if (name !== activeEvent()) {
+        openName = '';
+        // 이벤트를 넘어가며 잇지 않는다 - 이벤트 메뉴에서 고를 때와 같은 규약.
+        stopRun(running ? '이벤트를 바꿔 연속 생성을 멈췄습니다' : '');
+        appliedName = '';
+        rememberEvent(name);
+        setModuleParam('v5_scene', 'refresh', {event: name});
+        return;
+      }
+      render();
+      return;
+    }
+    const eventDel = event.target.closest('[data-scene-event-del]');
+    if (eventDel) {
+      askDeleteEvent(eventDel.dataset.sceneEventDel || '');
+      return;
+    }
+    const sceneDel = event.target.closest('[data-scene-del]');
+    if (sceneDel) {
+      askDeleteScene(sceneDel.dataset.sceneDel || '');
       return;
     }
     if (event.target.closest('[data-scene-folder]')) {

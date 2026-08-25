@@ -636,9 +636,15 @@ const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=202607
 
 // ---------------------------------------------------------------------------
 // 레퍼런스 인셋 핀 배지 - Result 뷰어 좌상단 고정(캐릭터 에셋 [C1+레퍼런스 인셋]).
-// 핀이 살아 있는 동안 plain 생성이 전부 1152x896 인셋 인페인트로 나가므로,
-// 항상 보이는 배지 + X 즉시 해제를 제공한다(사용자 계약).
+// 핀이 살아 있는 동안 plain 생성이 전부 인셋 인페인트로 나가므로, 항상 보이는 배지 +
+// X 즉시 해제를 제공한다(사용자 계약).
+//
+// 해상도는 **눌러서 고른다**(사용자 지정 2026-08-25, V5). 예전에는 `1152x896 고정`
+// 이라고만 적혀 있었다. 고를 수 있는 목록은 백엔드가 `sizes` 로 실어 보낸다 - 여기에
+// 표를 복사하면 한쪽만 고쳐져 서로 다른 말을 한다(SSOT = reference_inpaint_preprocess).
 let referenceInsetState = null;
+let referenceInsetMenuEl = null;
+let referenceInsetMenuDismiss = null;
 
 function setReferenceInsetBadge(state) {
   referenceInsetState = state && state.active ? state : null;
@@ -666,6 +672,7 @@ function renderReferenceInsetBadge() {
   if (!viewer) return;
   let badge = document.getElementById('referenceInsetBadge');
   if (!referenceInsetState) {
+    closeReferenceInsetMenu();
     badge?.remove();
     return;
   }
@@ -679,11 +686,21 @@ function renderReferenceInsetBadge() {
     badge.className = 'reference-inset-badge';
     viewer.appendChild(badge);
   }
+  const width = Number(referenceInsetState.width) || 0;
+  const height = Number(referenceInsetState.height) || 0;
+  const sizeText = width && height ? `${width}x${height}` : '크기 미상';
   badge.innerHTML = `
     <img src="${thumb}" alt="레퍼런스 인셋 핀">
     <button type="button" class="reference-inset-badge-x" aria-label="레퍼런스 인셋 해제">x</button>
-    <div class="reference-inset-badge-label">레퍼런스 인셋<br>1152x896 고정</div>`;
+    <button type="button" class="reference-inset-badge-label" aria-haspopup="listbox"
+            aria-expanded="false" data-naia-title="눌러서 인셋 해상도를 고릅니다">레퍼런스 인셋<br>${
+      escHtml(sizeText)} <span aria-hidden="true">&#9662;</span></button>`;
+  badge.querySelector('.reference-inset-badge-label').onclick = event => {
+    event.stopPropagation();
+    toggleReferenceInsetMenu(event.currentTarget);
+  };
   badge.querySelector('.reference-inset-badge-x').onclick = async () => {
+    closeReferenceInsetMenu();
     try {
       await fetch('/api/character-asset/inset/unpin', {method: 'POST'});
     } catch (error) {
@@ -692,6 +709,88 @@ function renderReferenceInsetBadge() {
     setReferenceInsetBadge(null);
     showToast('레퍼런스 인셋 핀 해제됨 - 일반 생성으로 복귀합니다', 'success');
   };
+}
+
+function closeReferenceInsetMenu() {
+  if (referenceInsetMenuDismiss) {
+    document.removeEventListener('mousedown', referenceInsetMenuDismiss, true);
+    document.removeEventListener('keydown', referenceInsetMenuDismiss, true);
+    window.removeEventListener('resize', referenceInsetMenuDismiss, true);
+    referenceInsetMenuDismiss = null;
+  }
+  referenceInsetMenuEl?.remove();
+  referenceInsetMenuEl = null;
+  document.getElementById('referenceInsetBadge')
+    ?.querySelector('.reference-inset-badge-label')
+    ?.setAttribute('aria-expanded', 'false');
+}
+
+/** 해상도 고르기 메뉴. ⚠️ body 직계 + fixed 다 - 배지가 뷰어 안에 있어서 그 안에
+ *  그리면 잘린다(V5 Scene 의 이벤트 메뉴와 같은 이유). */
+function toggleReferenceInsetMenu(button) {
+  if (referenceInsetMenuEl) { closeReferenceInsetMenu(); return; }
+  const sizes = Array.isArray(referenceInsetState?.sizes) ? referenceInsetState.sizes : [];
+  if (!sizes.length) { showToast('고를 수 있는 해상도가 없습니다', 'error'); return; }
+  const current = `${referenceInsetState.width}x${referenceInsetState.height}`;
+  referenceInsetMenuEl = document.createElement('div');
+  referenceInsetMenuEl.className = 'cq-connect-menu reference-inset-menu';
+  referenceInsetMenuEl.setAttribute('role', 'listbox');
+  referenceInsetMenuEl.innerHTML = '<div class="cq-connect-menu-head">인셋 해상도</div>'
+    + sizes.map(pair => {
+      const w = Number(pair[0]) || 0;
+      const h = Number(pair[1]) || 0;
+      const on = `${w}x${h}` === current;
+      return `<button type="button" class="cq-connect-item${on ? ' is-on' : ''}" role="option"
+              aria-selected="${on ? 'true' : 'false'}" data-inset-w="${w}" data-inset-h="${h}"
+              ><b>${w} x ${h}</b></button>`;
+    }).join('');
+  document.body.appendChild(referenceInsetMenuEl);
+  button.setAttribute('aria-expanded', 'true');
+
+  const rect = button.getBoundingClientRect();
+  const margin = 6;
+  const mw = referenceInsetMenuEl.offsetWidth;
+  const mh = referenceInsetMenuEl.offsetHeight;
+  const left = Math.max(margin, Math.min(rect.left, window.innerWidth - mw - margin));
+  let top = rect.bottom + 4;
+  if (top + mh > window.innerHeight - margin) top = Math.max(margin, rect.top - mh - 4);
+  referenceInsetMenuEl.style.left = `${Math.round(left)}px`;
+  referenceInsetMenuEl.style.top = `${Math.round(top)}px`;
+
+  referenceInsetMenuEl.addEventListener('click', async event => {
+    const pick = event.target.closest('[data-inset-w]');
+    if (!pick) return;
+    const w = Number(pick.dataset.insetW);
+    const h = Number(pick.dataset.insetH);
+    closeReferenceInsetMenu();
+    if (`${w}x${h}` === current) return;
+    try {
+      const response = await fetch('/api/character-asset/inset/canvas', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({width: w, height: h}),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || data.error) {
+        showToast(`인셋 해상도를 바꾸지 못했습니다: ${data?.error || response.status}`, 'error');
+        return;
+      }
+      setReferenceInsetBadge(data);
+      showToast(`인셋 해상도 ${w} x ${h}`, 'success');
+    } catch (error) {
+      showToast('인셋 해상도를 바꾸지 못했습니다', 'error');
+    }
+  });
+
+  referenceInsetMenuDismiss = event => {
+    if (event.type === 'keydown' && event.key !== 'Escape') return;
+    if (event.type === 'mousedown' && referenceInsetMenuEl?.contains(event.target)) return;
+    if (event.type === 'mousedown' && button.contains(event.target)) return;
+    closeReferenceInsetMenu();
+  };
+  document.addEventListener('mousedown', referenceInsetMenuDismiss, true);
+  document.addEventListener('keydown', referenceInsetMenuDismiss, true);
+  window.addEventListener('resize', referenceInsetMenuDismiss, true);
 }
 const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1')
   .then(({createStudioTabController}) => {

@@ -247,6 +247,25 @@ def register_character_asset_routes(
         # 살아 있으므로(생성이 계속 인셋으로 나감) 표시 불일치를 막아야 한다.
         return _asset_service(session_context).reference_inset_state()
 
+    @app.post("/api/character-asset/inset/canvas")
+    async def api_character_asset_inset_canvas(req: Request):
+        # 핀을 유지한 채 캔버스 크기만 바꾼다. 배율·마스크가 통째로 달라지므로
+        # 서비스가 같은 원본으로 다시 만든다.
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).set_reference_inset_canvas,
+                payload.get("width"),
+                payload.get("height"),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset canvas failed: {exc}"}, status_code=500)
+        return {"ok": True, **state}
+
     @app.post("/api/character-asset/inset/unpin")
     async def api_character_asset_inset_unpin():
         released = _asset_service(session_context).clear_reference_inset_pin()

@@ -21220,10 +21220,20 @@ body.detached-module .mod-grid-3 {
   display: block; width: 100%; height: auto; border-radius: 7px 7px 0 0;
   user-select: none; -webkit-user-drag: none;
 }
+/* 라벨이 곧 해상도 고르기 버튼이다(사용자 지정) - 누를 수 있다는 것이 보여야 해서
+   테두리 대신 밑줄 한 줄과 hover 배경만 준다. 배지가 96px 로 좁아 테두리를 두르면
+   글자가 두 줄로 깨진다. */
 .reference-inset-badge-label {
-  padding: 4px 6px 5px; text-align: center; color: #cfc4ff;
-  font: 700 10px var(--font-mono); line-height: 1.4; letter-spacing: 0.02em;
+  display: block; width: 100%; padding: 4px 6px 5px; text-align: center;
+  border: 0; border-top: 1px solid rgba(139, 118, 255, 0.28);
+  border-radius: 0 0 7px 7px; background: transparent; cursor: pointer;
+  color: #cfc4ff; font: 700 10px var(--font-mono); line-height: 1.4;
+  letter-spacing: 0.02em; transition: background .14s, color .14s;
 }
+.reference-inset-badge-label:hover { background: rgba(139, 118, 255, 0.18); color: #ffffff; }
+.reference-inset-badge-label:focus-visible { outline: 1px solid #b2a0ff; outline-offset: -1px; }
+/* 고르기 메뉴는 body 직계 + fixed 다 - 배지가 뷰어 안이라 그 안에 그리면 잘린다. */
+.reference-inset-menu { min-width: 132px; }
 .reference-inset-badge-x {
   position: absolute; top: -7px; right: -7px; width: 20px; height: 20px;
   border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.5); cursor: pointer;

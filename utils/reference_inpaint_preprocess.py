@@ -96,6 +96,34 @@ class ReferenceGenerationSpec:
         )
 
 
+# V5 에서 고를 수 있는 인셋 캔버스(사용자 지정 2026-08-25). 예전에는 1152x896 하나로
+# 못 박혀 있었다. 세로 레퍼런스를 캔버스 높이에 맞춰 키워 왼쪽에 붙이므로, **캔버스가
+# 넓을수록 인셋이 차지하는 비율이 줄고 생성 영역이 넓어진다** - 그게 고르는 이유다.
+#
+# ⚠️ 여기가 유일한 목록이다. 화면은 `reference_inset_state()` 가 실어 보내는 이 값을
+#    그려야 한다 - 프런트에 표를 복사하면 한쪽만 고쳐져 서로 다른 말을 하게 된다.
+REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = (
+    (1088, 960),
+    (1152, 896),
+    (1216, 832),
+    (1344, 768),
+)
+DEFAULT_REFERENCE_INSET_CANVAS: tuple[int, int] = (1152, 896)
+
+
+def resolve_reference_inset_canvas(width: object, height: object) -> tuple[int, int]:
+    """고를 수 있는 캔버스인지 확인해 돌려준다. 목록에 없으면 기본값.
+
+    ⚠️ 임의 크기를 받지 않는다. 이 값이 그대로 NAI 인페인트 요청의 width/height 가
+       되므로, 아무 숫자나 통과시키면 **돈이 나가는 요청이 엉뚱한 크기로** 나간다.
+    """
+    try:
+        pair = (int(width), int(height))
+    except (TypeError, ValueError):
+        return DEFAULT_REFERENCE_INSET_CANVAS
+    return pair if pair in REFERENCE_INSET_CANVAS_SIZES else DEFAULT_REFERENCE_INSET_CANVAS
+
+
 @dataclass(frozen=True)
 class ReferenceInsetPreprocessSpec:
     """Layout and mask rules for the reference-inset canvas."""

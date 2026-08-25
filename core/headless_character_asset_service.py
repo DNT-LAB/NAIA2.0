@@ -286,25 +286,41 @@ class HeadlessCharacterAssetService:
             return self._pinned_candidates.pop(str(pin_id or "").strip(), None) is not None
 
     # ------------------------------------------------- reference inset pin
-    def set_reference_inset_pin(self, character_id: str, variation: str = "") -> dict[str, Any]:
+    def set_reference_inset_pin(
+        self,
+        character_id: str,
+        variation: str = "",
+        width: Any = 0,
+        height: Any = 0,
+    ) -> dict[str, Any]:
         """선택 이미지를 레퍼런스 인셋 소스로 고정한다(Dev0714 Comic Panel 계보).
 
-        prepare_reference_inpaint_canvas가 1152x896 캔버스 왼쪽에 이미지를 붙이고
+        prepare_reference_inpaint_canvas가 고른 캔버스 왼쪽에 이미지를 붙이고
         보존 마스크(+우측 seam 스트립)를 만든다. 핀이 살아 있는 동안 plain NAI
         생성은 전부 이 캔버스 위 인셋 인페인트로 나간다(주입은
         headless_image_module_param_service). 이번 버전은 마스크 크롭 저장 미지원 -
-        결과는 1152x896 전체가 히스토리에 남는다.
+        결과는 캔버스 전체가 히스토리에 남는다.
+
+        캔버스는 `REFERENCE_INSET_CANVAS_SIZES` 중에서 고른다(사용자 지정 2026-08-25).
+        안 주면 기본 1152x896. 목록에 없는 값은 조용히 기본값으로 떨어뜨린다 -
+        아무 숫자나 통과시키면 돈이 나가는 요청이 엉뚱한 크기로 나간다.
         """
         from PIL import Image
 
-        from utils.reference_inpaint_preprocess import prepare_reference_inpaint_canvas
+        from utils.reference_inpaint_preprocess import (
+            ReferenceInsetPreprocessSpec,
+            prepare_reference_inpaint_canvas,
+            resolve_reference_inset_canvas,
+        )
 
         character_id = self._validate_id(character_id)
         variation = self._validate_hash(variation) if str(variation or "").strip() else ""
+        canvas_w, canvas_h = resolve_reference_inset_canvas(width, height)
+        spec = ReferenceInsetPreprocessSpec(canvas_width=canvas_w, canvas_height=canvas_h)
         path = self.resolve_image_path(character_id, variation)
         with Image.open(path) as opened:
             opened.load()
-            result = prepare_reference_inpaint_canvas(opened)
+            result = prepare_reference_inpaint_canvas(opened, spec)
         canvas_buffer = io.BytesIO()
         result.canvas_image.save(canvas_buffer, format="PNG")
         mask_buffer = io.BytesIO()
@@ -321,6 +337,20 @@ class HeadlessCharacterAssetService:
             self._reference_inset_pin = pin
         return self.reference_inset_state()
 
+    def set_reference_inset_canvas(self, width: Any, height: Any) -> dict[str, Any]:
+        """핀은 그대로 두고 **캔버스 크기만** 바꾼다.
+
+        캔버스가 바뀌면 붙이는 배율과 마스크가 통째로 달라지므로 같은 원본으로 다시
+        만든다. 핀이 없으면 아무것도 하지 않는다(화면이 배지를 안 그리는 상태다).
+        """
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            character_id = str(pin["character_id"]) if pin else ""
+            variation = str(pin["variation"]) if pin else ""
+        if not character_id:
+            raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
+        return self.set_reference_inset_pin(character_id, variation, width, height)
+
     def clear_reference_inset_pin(self) -> bool:
         with self._retain_lock:
             had = self._reference_inset_pin is not None
@@ -328,6 +358,8 @@ class HeadlessCharacterAssetService:
         return had
 
     def reference_inset_state(self) -> dict[str, Any]:
+        from utils.reference_inpaint_preprocess import REFERENCE_INSET_CANVAS_SIZES
+
         with self._retain_lock:
             pin = self._reference_inset_pin
             if not pin:
@@ -338,6 +370,9 @@ class HeadlessCharacterAssetService:
                 "variation": pin["variation"],
                 "width": pin["width"],
                 "height": pin["height"],
+                # 고를 수 있는 목록을 함께 싣는다 - 화면이 표를 따로 들면 한쪽만
+                # 고쳐져 서로 다른 말을 한다(SSOT 는 reference_inpaint_preprocess).
+                "sizes": [list(size) for size in REFERENCE_INSET_CANVAS_SIZES],
             }
 
     def reference_inset_generation_params(self) -> dict[str, Any]:

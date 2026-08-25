@@ -162,6 +162,14 @@ def _get_loaded_middle_module(app_context, class_name: str):
     return None
 
 class APIService:
+    def _nai_registry_knows(self, model_key: Any) -> bool:
+        """레지스트리(빌트인 + 사용자 등록)가 이 키를 아는가. 조회 실패는 False."""
+        try:
+            return bool(self.app_context._nai_model_registry().has_key(model_key))
+        except Exception:
+            return normalize_nai_model_key(model_key) in BUILTIN_NAI_MODEL_SPECS
+
+
     WEBUI_HIRES_ASSIST_MAX_PIXELS = 1536 * 1536
 
     # [추가] 생성자에서 AppContext를 받도록 수정
@@ -824,7 +832,12 @@ class APIService:
             #    `normalize_nai_model_key` 가 대문자화만 해서 아는 키가 아니게 되고,
             #    **말없이 기본값(V4.5 Full)으로 떨어졌다**(실측). V5 로 만든 그림을
             #    Enhance 하면 4.5 결과가 나오는데 아무도 그걸 알려주지 않는다.
-            model_key = _resolve_nai_model_key_loosely(model_key)
+            # ⚠️ **등록된 키면 손대지 않는다.** 커스텀 키는 wire 이름과 같은 글자를
+            #    쓸 수 있어(`NAI-DIFFUSION-5-FULL`), 아래 번역이 사용자가 고른 자기
+            #    모델을 빌트인으로 둔갑시켰다 - 스냅샷도 어긋나 **다른 모델로 돈이
+            #    나갔다**(Codex 리뷰 BLOCK, 가짜 POST 로 재현). 사용자가 고른 것이 먼저다.
+            if not self._nai_registry_knows(model_key):
+                model_key = _resolve_nai_model_key_loosely(model_key)
             generation_request = params.get('_generation_request')
             frozen_model_spec = getattr(generation_request, "nai_model_spec", None)
             if (

@@ -33,6 +33,18 @@ _API_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _FAMILY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
 
 
+def _collides_with_builtin_wire(key: str) -> bool:
+    """이 키가 빌트인 모델의 API(wire) 이름과 같은 글자인가."""
+    lowered = str(key or "").lower()
+    if not lowered:
+        return False
+    for spec in BUILTIN_NAI_MODEL_SPECS.values():
+        for wire in (spec.api_model, spec.inpainting_api_model):
+            if wire and wire.lower() == lowered:
+                return True
+    return False
+
+
 class NaiModelValidationError(ValueError):
     """A custom model entry is unsafe or incomplete."""
 
@@ -156,6 +168,16 @@ class NaiModelRegistry:
             )
         if key in BUILTIN_NAI_MODEL_SPECS:
             raise NaiModelValidationError(f"기본 모델 키는 덮어쓸 수 없습니다: {key}")
+        # ⚠️ **wire 이름과 같은 키를 새로 만들지 못하게 한다.** 키 문법이 공백을 안 써서
+        #    `NAI-DIFFUSION-5-FULL` 같은 이름이 그대로 통과하는데, 그러면 메타데이터
+        #    복원 경로가 이 키를 빌트인 wire 로 읽어 **다른 모델에 돈을 태운다**
+        #    (Codex 리뷰 BLOCK). 이미 만들어 둔 것은 `_load` 에서 막지 않는다 -
+        #    쓰던 모델을 말없이 없애는 쪽이 더 나쁘고, 등록돼 있는 동안은 위
+        #    `_nai_registry_knows` 가 먼저 잡아 준다.
+        if _collides_with_builtin_wire(key):
+            raise NaiModelValidationError(
+                f"기본 모델의 API 이름과 같은 키는 쓸 수 없습니다: {key}"
+            )
         api_model = cls._clean_api_model(raw.get("api_model"), field="api_model", required=True)
         profile = str(raw.get("payload_profile") or "passthrough").strip().lower()
         if profile not in NAI_PAYLOAD_PROFILES:

@@ -185,11 +185,12 @@ class HeadlessRemoteStateService:
            무엇인지 모르겠으면 **그대로 둔다.** 그러면 생성 직전에 막히고, 화면이
            PARAMS 를 열어 다시 고르게 안내한다.
 
-        ⚠️ 정확 매칭이어야 한다(`nai_key_from_exact_name`). 부분 문자열로 맞추면
-           커스텀 키 `MY-NAI-DIFFUSION-5-FULL` 이 `NAID5F` 로 둔갑해, 막히기는커녕
-           **다른 모델로 돈이 나간다**(Codex 리뷰 BLOCK, 재현됨).
+        ⚠️ **표시 이름만** 번역한다(`nai_key_from_display_name`). 라벨·계열 이름은
+           공백이 있어 커스텀 키가 될 수 없으니 남의 키를 삼킬 수가 없다. wire 이름
+           (`nai-diffusion-5-full`)은 공백이 없어 **그대로 커스텀 키가 되므로** 여기서
+           번역하면 사용자가 고른 자기 모델이 빌트인으로 둔갑한다(Codex 리뷰 BLOCK).
         """
-        from core.nai_model_contract import nai_key_from_exact_name, normalize_nai_model_key
+        from core.nai_model_contract import nai_key_from_display_name, normalize_nai_model_key
 
         key = normalize_nai_model_key(value)
         if not key:
@@ -197,7 +198,7 @@ class HeadlessRemoteStateService:
         try:
             if self.context._nai_model_registry().has_key(key):
                 return key
-            translated = nai_key_from_exact_name(key)
+            translated = nai_key_from_display_name(key)
         except Exception as exc:  # noqa: BLE001 - 조회 실패가 파라미터 설정을 막으면 안 된다
             print(f"[warn] NAI model key check failed: {exc}", flush=True)
             return key

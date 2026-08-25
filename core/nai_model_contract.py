@@ -424,6 +424,34 @@ NAI_FAMILY_DEFAULT_KEYS: dict[str, str] = {
 }
 
 
+def nai_key_from_display_name(value: Any) -> str:
+    """**사람에게 보이는 이름**일 때만 canonical 키로 되돌린다. 아니면 "".
+
+    맞춰 보는 것은 canonical 키 · 표시 라벨 · 계열 이름뿐이다. **wire 이름은 뺀다.**
+
+    ⚠️ 그 구분이 이 함수의 존재 이유다. 커스텀 모델 키 문법은
+       `^[A-Z0-9][A-Z0-9._-]{0,39}$` 라 **공백을 못 쓴다.** 라벨(`NovelAI Diffusion
+       V5 Full`)과 계열 이름(`novelai diffusion v5`)은 공백이 있으니 커스텀 키가
+       **될 수 없고**, 그래서 이 번역은 남의 키를 삼킬 수가 없다. 반면 wire 이름
+       (`nai-diffusion-5-full`)은 공백이 없어 **그대로 커스텀 키가 된다** - 사용자가
+       고른 자기 모델이 빌트인으로 둔갑해 다른 모델에 돈이 나간다(Codex 리뷰 BLOCK).
+
+    그래서 사용자 **선택**을 다루는 자리(파라미터 목·시작 시 치유)는 이 함수를 쓰고,
+    메타데이터에서 온 값을 다루는 자리만 `nai_key_from_exact_name` 을 쓴다.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in BUILTIN_NAI_MODEL_SPECS:
+        return upper
+    lowered = text.lower()
+    for spec in BUILTIN_NAI_MODEL_SPECS.values():
+        if spec.label and spec.label.lower() == lowered:
+            return spec.key
+    return NAI_FAMILY_DEFAULT_KEYS.get(lowered, "")
+
+
 def nai_key_from_exact_name(value: Any) -> str:
     """전체 문자열이 **정확히** 아는 이름일 때만 canonical 키로 되돌린다. 아니면 "".
 

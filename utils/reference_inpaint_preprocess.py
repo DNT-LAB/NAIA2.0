@@ -143,6 +143,16 @@ class ReferenceInsetPreprocessSpec:
 
     # Re-open a thin editable band on the right edge of the reference image.
     seam_overlap_px: int = 8
+
+    # 이음매 **바로 안쪽**(보존되는 쪽)에 긋는 검은 세로선 - 칸을 가르는 테두리다
+    # (사용자 지정 2026-08-25).
+    #
+    # ⚠️ **마스크가 열리는 쪽이 아니라 그 반대편에 긋는다.** 편집 가능한 띠 안에 그으면
+    #    모델이 그 위를 덮어 버려 아무것도 안 남는다. 보존 구간에 그어야 결과에 그대로
+    #    실린다.
+    # ⚠️ 0 이면 긋지 않는다 - 예전 판과 같은 그림이 된다.
+    seam_edge_line_px: int = 8
+    seam_edge_line_rgb: tuple[int, int, int] = (0, 0, 0)
     # Keep disabled by default. The older rounded wrap looked acceptable in raw
     # mask math, but it becomes a visible stepped protrusion once the inpaint
     # editor quantizes the mask to NovelAI's 8x8 grid.
@@ -278,6 +288,8 @@ def prepare_reference_inpaint_canvas(
     if spec.reference_border_px > 0:
         _draw_reference_border(canvas, placement, spec)
 
+    _draw_seam_edge_line(canvas, placement, spec)
+
     full_mask = _build_reference_inpaint_mask(placement, spec)
     small_mask = _downscale_binary_mask(full_mask, spec.mask_downscale)
 
@@ -344,6 +356,45 @@ def _draw_reference_border(
             ),
             outline=spec.reference_border_rgb,
         )
+
+
+def seam_edge_line_bounds(
+    placement: PlacementBox,
+    spec: ReferenceInsetPreprocessSpec,
+) -> tuple[int, int] | None:
+    """이음매 안쪽 검은 선이 차지할 x 구간 ``[left, right)``. 그을 자리가 없으면 None.
+
+    마스크가 열리는 띠(`seam_overlap_px`)의 **왼쪽**, 즉 보존되는 쪽에 붙인다.
+    선이 인셋 왼쪽 끝을 넘지 않도록 자른다.
+    """
+    line_px = max(0, spec.seam_edge_line_px)
+    if line_px <= 0:
+        return None
+    if placement.visible_right <= placement.visible_left:
+        return None
+    seam_left = max(placement.visible_left, placement.visible_right - max(0, spec.seam_overlap_px))
+    right = seam_left
+    left = max(placement.visible_left, right - line_px)
+    if right <= left:
+        return None
+    return left, right
+
+
+def _draw_seam_edge_line(
+    canvas: Image.Image,
+    placement: PlacementBox,
+    spec: ReferenceInsetPreprocessSpec,
+) -> None:
+    """인셋과 생성 영역을 가르는 검은 세로선(보존 구간 안쪽)."""
+    bounds = seam_edge_line_bounds(placement, spec)
+    if bounds is None:
+        return
+    left, right = bounds
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle(
+        (left, placement.visible_top, right - 1, placement.visible_bottom - 1),
+        fill=spec.seam_edge_line_rgb,
+    )
 
 
 def _build_reference_inpaint_mask(

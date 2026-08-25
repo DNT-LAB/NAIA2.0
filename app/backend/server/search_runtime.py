@@ -776,10 +776,11 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
                 cache_key, tags_text.str.contains(key, na=False, regex=False).to_numpy()
             )
         # 퍼펙트 매칭: SEARCH(`core/search_engine.py` contains_exact)와 **같은 경계**를 쓴다 -
-        # 쉼표 또는 공백. 같은 `*tag` 가 화면마다 다른 뜻이 되는 것이 최악이라 의도적으로
-        # 복제한다(따라서 `*sky` 는 `cloudy sky` 에도 걸린다. 태그 전체 일치가 아니다).
+        # 쉼표뿐. 같은 `*tag` 가 화면마다 다른 뜻이 되는 것이 최악이라 의도적으로 복제한다.
+        # ⚠️ 예전엔 경계가 쉼표 **또는 공백**이라 `*sky` 가 `cloudy sky` 에도 걸렸다 -
+        #    태그 전체 일치가 아니었다. 양쪽을 같이 고쳤다(사용자 제보 2026-08-25).
         # 비캡처 그룹이어야 한다 - 캡처 그룹이면 pandas 가 매 호출 경고를 뱉는다.
-        pattern = "(?:^|[, ])" + re.escape(key) + "(?:[, ]|$)"
+        pattern = r"(?:^|,)\s*" + re.escape(key) + r"\s*(?:,|$)"
         # exact 결과는 부분일치 결과의 **부분집합**이다(정규식이 리터럴 key 를 요구하므로).
         # 그래서 부분 마스크가 **이미 캐시에 있으면** 그 후보 행만 훑는다.
         #

@@ -80,9 +80,16 @@ class SearchEngine:
             return pc.fill_null(pc.match_substring(tags, keyword), False).to_numpy(zero_copy_only=False)
 
         def contains_exact(keyword: str) -> np.ndarray:
-            # 정확태그 일치. 기존 lookbehind 정규식 (?<![^, ])kw(?![^, ]) 을 RE2 가 지원하는
-            # 경계 소비형 (^|[, ])kw([, ]|$) 으로 변환(존재여부 동치).
-            pattern = '(^|[, ])' + re.escape(keyword) + '([, ]|$)'
+            # 퍼펙트 매칭 = **태그 전체 일치**. 경계는 쉼표뿐이다.
+            #
+            # ⚠️ 예전 경계는 `[, ]`(쉼표 **또는 공백**)였다. 태그 자체가 공백을 품으므로
+            #    (`dog ears`·`hot dog`) `*dog` 이 그것들에 전부 걸렸다 - 이름은 퍼펙트
+            #    매칭인데 실제로는 '단어 일치'였다. 실측(196,974행): `*dog` 2,883건 중
+            #    맞는 것은 701건뿐이고 나머지 2,182건이 `dog ears`(1,617)·`dog girl`
+            #    (1,019)·`dog tail`(889) 류였다(사용자 제보 2026-08-25).
+            #
+            # 쉼표 주변 공백은 데이터에 섞여 있다(`a, b,c` 둘 다 나온다) - `\s*` 로 흡수한다.
+            pattern = r'(^|,)\s*' + re.escape(keyword) + r'\s*(,|$)'
             return pc.fill_null(pc.match_substring_regex(tags, pattern), False).to_numpy(zero_copy_only=False)
 
         n = len(df)
@@ -110,16 +117,24 @@ class SearchEngine:
             if not survivors.any():
                 return df.iloc[:0]
 
-        # 3. Exact (*) - 정확한 태그 매칭
+        # 3. Exact (*) - 태그 전체 일치
         for keyword in search_params['exact']:
             survivors &= contains_exact(keyword)
+
+        # 3-b. 포함칸에 쓴 `~` = 제외. 예전엔 파싱만 하고 **아무도 안 써서** 그 낱말이
+        #      통째로 사라졌다 - 걸러지기는커녕 검색이 조용히 넓어졌다(실측: `~dog ears`
+        #      를 포함칸에 넣으면 `cat` 행까지 돌아왔다). 자리를 잘못 썼더라도 뜻은
+        #      명백하므로 제외로 읽는다(사용자 결정 2026-08-25).
+        for keyword in search_params['not_exact']:
+            survivors &= ~contains_exact(keyword)
 
         # 4. Normal Exclude - 해당 키워드를 포함하지 않아야 함
         for keyword in exclude_params['normal']:
             survivors &= ~contains(keyword)
 
-        # 5. Exact Exclude (~) - 정확한 태그를 포함하지 않아야 함
-        for keyword in exclude_params['not_exact']:
+        # 5. Exact Exclude - 태그 전체가 일치하면 뺀다. `~` 와 `*` **둘 다** 받는다.
+        #    예전엔 `*` 쪽을 아무도 안 써서 `제외: *dog ears` 가 한 줄도 못 줄였다.
+        for keyword in exclude_params['not_exact'] + exclude_params['exact']:
             survivors &= ~contains_exact(keyword)
 
         return df[survivors]

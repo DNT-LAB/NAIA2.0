@@ -145,7 +145,10 @@ class HeadlessRemoteStateService:
         clean_key = str(key or "").strip()
         if not clean_key:
             return
-        self.context.remote_params[clean_key] = self.coerce_remote_param(clean_key, value)
+        coerced = self.coerce_remote_param(clean_key, value)
+        if clean_key == "model" and self.get_api_mode() == "NAI":
+            coerced = self.guarded_nai_model_key(coerced)
+        self.context.remote_params[clean_key] = coerced
         self._sync_cached_selection(clean_key, self.context.remote_params[clean_key])
         self.context.save_remote_ui_state()
         self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
@@ -161,6 +164,38 @@ class HeadlessRemoteStateService:
         if not isinstance(cached_options, dict):
             return
         cached_options[key] = [value]
+
+    def guarded_nai_model_key(self, value: Any) -> str:
+        """레지스트리가 아는 키만 통과시킨다. 모르는 것이면 쓰던 것(없으면 기본)으로.
+
+        ⚠️ 이 자리는 **모든 파라미터 설정이 지나는 목**이다 - UI 드롭다운뿐 아니라
+           프리셋 적용·메타데이터 불러오기가 전부 여기로 온다. NAI 는 PNG 에 표시
+           라벨을 남기므로(`NovelAI Diffusion V5`) 그 문자열이 한 번 흘러들면
+           `remote_params["model"]` 에 앉아 **디스크에 저장되고**, 그 뒤로는 껐다
+           켜도 `등록되지 않은 NAI 모델 키입니다` 로 생성이 영영 막힌다
+           (사용자 제보 2026-08-25: 재시작·API 키 재발급으로도 안 풀렸다).
+
+        생성 시점의 엄격한 판정(`resolve_nai_model_for_context`)은 그대로 둔다 -
+        지우거나 오타 난 사용자 모델이 **말없이 4.5 Full 로** 돈에 태워지면 안 된다.
+        여기서 막는 것은 애초에 모델 키가 아닌 것이 **들어와 눌러앉는 것**이다.
+        """
+        from core.nai_model_contract import DEFAULT_NAI_MODEL_KEY, normalize_nai_model_key
+
+        key = normalize_nai_model_key(value)
+        if not key:
+            return key
+        try:
+            registry = self.context._nai_model_registry()
+            if registry.has_key(key):
+                return key
+            fallback = normalize_nai_model_key(self.context.remote_params.get("model"))
+            if not fallback or not registry.has_key(fallback):
+                fallback = DEFAULT_NAI_MODEL_KEY
+        except Exception as exc:  # noqa: BLE001 - 조회 실패가 파라미터 설정을 막으면 안 된다
+            print(f"[warn] NAI model key check failed: {exc}", flush=True)
+            return key
+        print(f"[warn] unknown NAI model key rejected: {key} -> {fallback}", flush=True)
+        return fallback
 
     def current_model_key(self) -> str:
         model = str(self.context.remote_params.get("model") or "NAID4.5F").strip()

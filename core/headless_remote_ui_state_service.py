@@ -213,6 +213,7 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
     active.update(runtime_params)
     planes[mode] = active
     context.remote_param_planes = planes
+    _heal_nai_model_key(context, planes)
     context.auto_save_state.update(state["auto_save_state"])
     context.save_directory_state.update(state["save_directory_state"])
     if "auto_save" not in context.auto_save_state:
@@ -225,6 +226,42 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
         )
     context.remote_options["auto_save"] = bool(context.auto_save_state["auto_save"])
     return state
+
+
+def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:
+    """저장돼 있던 NAI 모델 키가 **레지스트리에 없는 것**이면 기본값으로 되돌린다.
+
+    ⚠️ 여기까지 온 값은 이미 디스크에 앉은 값이다. 생성 시점 판정은 일부러 엄격해서
+       (돈이 나가는 길이라) 모르는 키를 만나면 멈춘다 - 그래서 한 번 잘못된 값이
+       저장되면 **껐다 켜도, API 키를 새로 받아도** 계속 막힌다(사용자 제보
+       2026-08-25). 켤 때 한 번 훑어 되돌리면 그 막다른 길이 사라진다.
+
+    ⚠️ **NAI 판만 본다.** WEBUI/COMFYUI 의 `model` 은 체크포인트 파일 이름이라
+       NAI 레지스트리에는 당연히 없다 - 같이 훑으면 멀쩡한 값을 지운다.
+    """
+    from core.nai_model_contract import DEFAULT_NAI_MODEL_KEY, normalize_nai_model_key
+
+    try:
+        registry = context._nai_model_registry()
+    except Exception as exc:  # noqa: BLE001 - 부팅을 막으면 안 된다
+        print(f"[warn] NAI model registry unavailable during restore: {exc}", flush=True)
+        return
+    # 활성 모드가 NAI 면 `planes["NAI"] is active` 다(바로 위에서 그렇게 넣었다) -
+    # 그래서 NAI 판 하나만 보면 화면에 뜬 값까지 함께 고쳐진다.
+    planes_nai = planes.get("NAI")
+    for plane in ([planes_nai] if isinstance(planes_nai, dict) else []):
+        raw = plane.get("model")
+        if raw in (None, ""):
+            continue
+        key = normalize_nai_model_key(raw)
+        if registry.has_key(key):
+            continue
+        plane["model"] = DEFAULT_NAI_MODEL_KEY
+        print(
+            f"[warn] stored NAI model key is not registered: {key}"
+            f" -> reset to {DEFAULT_NAI_MODEL_KEY}",
+            flush=True,
+        )
 
 
 def save_remote_ui_state(context: Any) -> dict[str, Any]:

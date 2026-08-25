@@ -19,8 +19,10 @@ from core.resolution_utils import (
     snap_resolution_to_multiple,
 )
 from core.reference_inset_service import (
+    REFERENCE_INSET_V5_TAGS,
     inject_reference_inset_into_prompt,
     reference_inset_should_inject_params,
+    reference_inset_tags_for,
     strip_nai_weight_for_match,
 )
 from core.character_settings import (
@@ -993,7 +995,12 @@ class APIService:
             # 누르면 훅을 우회한다. 여기서 한 번 더 문자열 매칭으로 안전망을 친다.
             try:
                 if reference_inset_should_inject_params(params, app_context=self.app_context):
-                    cleaned_input = inject_reference_inset_into_prompt(params.get('input', '') or '')
+                    _inset_tags = reference_inset_tags_for(params, app_context=self.app_context)
+                    cleaned_input = inject_reference_inset_into_prompt(
+                        params.get('input', '') or '',
+                        _inset_tags,
+                        after_prefix=(_inset_tags is REFERENCE_INSET_V5_TAGS),
+                    )
                     if cleaned_input != params.get('input', ''):
                         params['input'] = cleaned_input
                         print(f"🩹 reference inset 자동 삽입 (생성 시점): {cleaned_input[:80]}...")

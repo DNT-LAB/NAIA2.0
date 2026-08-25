@@ -20,6 +20,11 @@ export function createMemoPopup({
   window: win = window,
   escHtml = value => String(value ?? ''),
   showToast = () => {},
+  // ⚠️ **`window.confirm` 을 쓰면 안 된다.** Electron 에서는 네이티브 모달이 뜨고
+  //    (제목이 "naia-electron-shell" 로 보인다) 닫힌 뒤 렌더러가 키보드 초점을 잃어
+  //    **그 뒤로 아무것도 못 친다**(사용자 제보 2026-08-25: 지운 뒤 메모가 잠긴다).
+  //    v5ScenePanel 이 이미 같은 이유로 앱 자체 대화상자를 받아 쓴다 - 같은 규약.
+  confirmDialog = null,
   setModuleParam = () => false,
   requestModuleState = () => false,
   onInsertText = null,
@@ -38,6 +43,8 @@ export function createMemoPopup({
   // 저장 요청을 보낸 뒤 돌아오는 상태로 **본문 칸을 다시 그리지 않는다** — 그리면
   // 타이핑 도중 커서가 맨 뒤로 튄다. 어느 메모를 쓰던 중인지 여기서 든다.
   let editingId = '';
+  // 다음 상태가 오면 본문 칸으로 초점을 넘길 것인가(삭제 직후).
+  let focusAfterState = false;
 
   const pick = selector => (popup ? popup.querySelector(selector) : null);
 
@@ -185,9 +192,33 @@ export function createMemoPopup({
     if (!isOpen()) return true;
     renderList();
     // 저장 응답으로 돌아온 것이면 **본문 칸을 건드리지 않는다** - 커서가 튄다.
-    renderBody({keepText: !focus && String(message.written_id || '') === editingId});
+    renderBody({keepText: !focus && !focusAfterState
+                          && String(message.written_id || '') === editingId});
+    if (focusAfterState) {
+      focusAfterState = false;
+      pick('.memo-editor')?.focus();
+    }
     setStatus(notes.length ? `${notes.length}개` : '', notes.length ? 'ok' : '');
     return true;
+  }
+
+  async function askDelete(note) {
+    const title = String(note.title || '').trim() || '(제목 없음)';
+    const ok = (typeof confirmDialog === 'function')
+      ? await confirmDialog(`"${title}" 메모를 지웁니다. 되돌릴 수 없습니다.`,
+                            {title: '메모 삭제', okText: '지우기', cancelText: '취소'})
+      : win.confirm(`"${title}" 메모를 지웁니다.`);
+    if (!ok) {
+      // 취소했으면 쓰던 자리로 돌려준다 - 대화상자가 초점을 가져갔다.
+      pick('.memo-editor')?.focus();
+      return;
+    }
+    if (saveTimer) { clearTimeoutFn(saveTimer); saveTimer = null; }
+    editingId = '';
+    // 지운 뒤 다음 메모의 칸으로 초점을 넘긴다. 대화상자를 거쳐 온 길이라 초점이
+    // 어디에도 없는 상태로 남을 수 있고, 그러면 "지우고 나니 못 친다" 가 된다.
+    focusAfterState = true;
+    setModuleParam('memo', 'delete', {id: note.id});
   }
 
   // ── 위치 ── Tag Search 와 같은 자리(결과 이미지 영역 좌하단). ─────────────
@@ -267,10 +298,7 @@ export function createMemoPopup({
       const note = noteById(selectedId);
       if (!note) return;
       if (action === 'delete') {
-        if (!win.confirm('이 메모를 지웁니다.')) return;
-        if (saveTimer) { clearTimeoutFn(saveTimer); saveTimer = null; }
-        editingId = '';
-        setModuleParam('memo', 'delete', {id: note.id});
+        askDelete(note);
         return;
       }
       const text = String(pick('.memo-editor')?.value ?? note.body ?? '');

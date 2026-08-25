@@ -165,7 +165,12 @@ class HeadlessMemoService:
                 continue
             clean = str(body or "")[:MAX_BODY_CHARS]
             if note["body"] == clean:
-                return None                     # 바뀐 게 없으면 디스크를 건드리지 않는다
+                # 디스크는 건드리지 않는다. ⚠️ 그렇다고 None 을 돌려주면 안 된다 -
+                # 모듈 디스패치가 그것을 "지원하지 않는 동작" 으로 읽어
+                # `Module parameter is not supported in this runtime.` 을 띄운다.
+                state = self.state()
+                state["written_id"] = note_id
+                return state
             note["body"] = clean
             note["updated"] = _now()
             self._save()

@@ -72,6 +72,7 @@ export function createStudioTabController({
       name: '',
       enabled: true,
       prompt: '',
+      dialogue: '',
       negative: '',
       resolution: '',
       cfgScale: '',
@@ -126,6 +127,7 @@ export function createStudioTabController({
     if (!frame || typeof frame !== 'object') return false;
     if (safeText(frame.name).trim()) return true;
     if (safeText(frame.prompt).trim()) return true;
+    if (safeText(frame.dialogue).trim()) return true;
     if (safeText(frame.negative).trim()) return true;
     if (safeText(frame.resolution).trim()) return true;
     if (normalizedCfgScale(frame.cfgScale)) return true;
@@ -162,6 +164,7 @@ export function createStudioTabController({
         name: safeText(frame?.name).slice(0, 60),
         enabled: frame?.enabled !== false,
         prompt: safeText(frame?.prompt),
+        dialogue: safeText(frame?.dialogue),
         negative: safeText(frame?.negative),
         resolution: safeText(frame?.resolution),
         cfgScale: normalizedCfgScale(frame?.cfgScale),
@@ -209,6 +212,7 @@ export function createStudioTabController({
         name: frame.name,
         enabled: frame.enabled,
         prompt: frame.prompt,
+        dialogue: frame.dialogue,
         negative: frame.negative,
         resolution: frame.resolution,
         cfgScale: frame.cfgScale,
@@ -238,8 +242,26 @@ export function createStudioTabController({
     return parts.map(part => safeText(part).trim()).filter(Boolean);
   }
 
+  /** 대사 칸을 NAI 공식 사양(따옴표)으로 감싼다.
+   *
+   *  이미 따옴표를 쓴 글, `text:` 로 직접 쓴 글은 **그대로 둔다** - 감싸면
+   *  `"text: 안녕"` 이 되어 대사 안에 문법이 들어간다.
+   */
+  function quotedDialogue(raw) {
+    const text = safeText(raw).trim();
+    if (!text) return '';
+    if (/["\u201c\u201d]/.test(text)) return text;
+    if (/^text\s*:/i.test(text)) return text;
+    return `"${text}"`;
+  }
+
   function composePrompt(frame) {
-    return nonEmpty([state.prefix, frame?.prompt, state.postfix]).join(',\n');
+    // ⚠️ **대사는 맨 뒤다.** 후행 고정 프레임(`postfix`)이 대사 뒤에 붙으면 NAI 가
+    //    그것까지 대사로 읽는다(사용자 제보: "후행 고정 프레임칸 프롬프트도 다 대사로
+    //    처리돼요"). 규칙으로 당부하는 대신 **자리로** 보장한다.
+    return nonEmpty([
+      state.prefix, frame?.prompt, state.postfix, quotedDialogue(frame?.dialogue),
+    ]).join(',\n');
   }
 
   function composeNegative(frame) {
@@ -492,6 +514,10 @@ export function createStudioTabController({
             <textarea data-studio-frame-field="prompt" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false">${escHtml(frame.prompt)}</textarea>
           </label>
         </div>
+        <label class="studio-field studio-dialogue-field">
+          <span>Dialogue Prompt</span>
+          <textarea data-studio-frame-field="dialogue" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false" placeholder="대사만 적으세요 - 따옴표는 자동으로 붙고, 모든 프롬프트의 맨 뒤에 들어갑니다">${escHtml(frame.dialogue)}</textarea>
+        </label>
         <label class="studio-field">
           <span>Additional Negative</span>
           <textarea data-studio-frame-field="negative" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false" placeholder="공통 네거티브 뒤에 추가할 프레임 전용 네거티브">${escHtml(frame.negative)}</textarea>
@@ -668,6 +694,7 @@ export function createStudioTabController({
     Object.assign(frame, {
       enabled: true,
       prompt: '',
+      dialogue: '',
       negative: '',
       resolution: '',
       cfgScale: '',
@@ -961,6 +988,7 @@ export function createStudioTabController({
       name: frame.name.trim() ? `${frame.name.trim()} 복사`.slice(0, 60) : '',
       enabled: frame.enabled,
       prompt: frame.prompt,
+      dialogue: frame.dialogue,
       negative: frame.negative,
       resolution: frame.resolution,
       cfgScale: frame.cfgScale,

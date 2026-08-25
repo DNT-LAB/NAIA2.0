@@ -21125,7 +21125,20 @@ body.detached-module .mod-grid-3 {
 .char-asset-edit-uc { min-height: 64px; resize: vertical; }
 .char-asset-prompt-edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .char-asset-warn { color: #e2b74a; font-weight: 400; }
-.char-asset-apply-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.char-asset-apply-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* [불러오기시 의상 제거] - 적용 버튼들과 한 줄에 서되, 버튼이 아니라는 것이 보여야 한다. */
+.char-asset-strip {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;
+  padding: 4px 9px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(255,255,255,0.03); color: var(--text-muted);
+  font-size: 12px; cursor: pointer; user-select: none;
+}
+.char-asset-strip:hover { border-color: rgba(124,106,239,0.5); color: var(--text-primary); }
+.char-asset-strip input { margin: 0; cursor: pointer; }
+.char-asset-strip:has(input:checked) {
+  border-color: rgba(124,106,239,0.7); background: rgba(124,106,239,0.14);
+  color: var(--text-primary);
+}
 .char-asset-gen-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
 .char-asset-gen-count input {
   width: 52px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);

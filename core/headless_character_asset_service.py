@@ -934,6 +934,7 @@ class HeadlessCharacterAssetService:
         mode: str = "c1",
         with_reference: bool = False,
         with_inset: bool = False,
+        strip_outfit: bool = False,
     ) -> dict[str, Any]:
         self._bootstrap()
         context = self.context
@@ -956,6 +957,13 @@ class HeadlessCharacterAssetService:
         prompt, uc = self._prompt_for(character_id, path, sidecar, variation)
         if not prompt:
             raise ValueError("no NAI character block in this image - cannot recover the character prompt")
+        if strip_outfit:
+            # [불러오기시 의상 제거](사용자 지정 2026-08-25) - 같은 캐릭터를 다른 옷으로
+            # 입히려고 쓰는 길이다. 남기는 것은 인물 태그 + 캐릭터 특징 + 악세서리/모자.
+            # ⚠️ UC 는 건드리지 않는다 - 거기 든 것은 체형/연령 방어라 옷과 무관하다.
+            from core.character_outfit_filter import strip_outfit_tags
+
+            prompt = strip_outfit_tags(prompt, getattr(context, "repo_root", None))
         state = context._character_service().apply_asset(prompt, uc, mode)
         reference_attached = False
         references_disabled = False

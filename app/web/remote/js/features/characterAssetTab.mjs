@@ -71,6 +71,12 @@ export function createCharacterAssetTabController({
   let busy = false;
   let promptEditOpen = false;
   let promptDraft = '';
+  // [불러오기시 의상 제거] - 켠 채로 두는 사람이 많을 설정이라 브라우저에 기억한다.
+  const STRIP_OUTFIT_KEY = 'naia.characterAsset.stripOutfit';
+  let stripOutfit = (() => {
+    try { return globalThis.localStorage?.getItem(STRIP_OUTFIT_KEY) === '1'; }
+    catch (_) { return false; }
+  })();
   let promptUcDraft = '';
   // 생성 벤치는 탭 컨트롤러당 싱글턴 - 닫아도 후보/requestId를 보존해야 진행 중
   // 결과가 미아가 되지 않는다(Codex 수명 계약).
@@ -431,6 +437,7 @@ export function createCharacterAssetTabController({
         mode,
         with_reference: withReference,
         with_inset: withInset,
+        strip_outfit: stripOutfit,
       });
       if (withInset) {
         showToast('C1 슬롯 적용 + 레퍼런스 인셋 고정됨 - 해제 전까지 1152x896 인셋으로 생성됩니다', 'success');
@@ -1684,6 +1691,12 @@ export function createCharacterAssetTabController({
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-inset" ${applyDisabled} ${applyTitle}
           title="C1 슬롯 적용 + 이 이미지를 레퍼런스 인셋(1152x896)으로 고정 - 기존 CR은 전부 비활성화">C1 + 레퍼런스 인셋 적용</button>
         <button class="mod-btn-sm" data-action="apply-add" ${applyDisabled} ${applyTitle}>새 슬롯으로 추가</button>
+        <!-- 같은 캐릭터를 다른 옷으로 입힐 때 쓴다(사용자 지정). 인물 태그 + 캐릭터 특징
+             + 악세서리/모자만 남기고 의상을 걷어낸다. UC 는 건드리지 않는다. -->
+        <label class="char-asset-strip" data-naia-title="인물 태그 + 캐릭터 특징 + 악세서리/모자만 남기고 의상 태그를 뺍니다. UC 는 그대로 둡니다.">
+          <input type="checkbox" data-action="toggle-strip"${stripOutfit ? ' checked' : ''}>
+          <span>불러오기시 의상 제거</span>
+        </label>
       </div>
     `;
   }
@@ -1729,6 +1742,13 @@ export function createCharacterAssetTabController({
       else if (action === 'delete-variation') deleteSelectedVariation();
       else if (action === 'promote') promoteSelectedVariation();
       else if (action === 'open-bench') openBench();
+    });
+    root.addEventListener('change', event => {
+      const box = event.target.closest('[data-action="toggle-strip"]');
+      if (!box) return;
+      stripOutfit = !!box.checked;
+      try { globalThis.localStorage?.setItem(STRIP_OUTFIT_KEY, stripOutfit ? '1' : '0'); }
+      catch (_) { /* 사생활 모드 */ }
     });
     root.addEventListener('input', event => {
       const field = event.target.closest('[data-field]');

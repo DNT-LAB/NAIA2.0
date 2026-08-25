@@ -202,6 +202,7 @@ def register_character_asset_routes(
         payload = await _read_json(req)
         with_reference = bool(payload.get("with_reference"))
         with_inset = bool(payload.get("with_inset"))
+        strip_outfit = bool(payload.get("strip_outfit"))
         try:
             result = await run_in_thread(
                 _asset_service(session_context).apply_to_slot,
@@ -210,6 +211,7 @@ def register_character_asset_routes(
                 str(payload.get("mode") or "c1"),
                 with_reference,
                 with_inset,
+                strip_outfit,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)

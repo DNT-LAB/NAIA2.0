@@ -17,6 +17,7 @@ from core.v5_scene_store import (
     bare_from_text,
     create_event,
     delete_scene,
+    delete_scene_thumb,
     existing_scene_thumb,
     list_event_names,
     list_scene_names,
@@ -326,23 +327,34 @@ class HeadlessV5SceneService:
             "position_mode": str(settings.get("position_mode") or "auto"),
             "characters": characters,
         }
+        # 같은 이름의 컷이 **이미 있었는가**. 아래 썸네일 처리가 이걸 본다.
+        existed = read_scene(clean_event, clean, save_root=self._save_root()) is not None
         path = write_scene(clean_event, scene, save_root=self._save_root())
         if path is None:
             return context._toast("컷을 저장하지 못했습니다", level="error")
-        self._capture_thumb(clean_event, clean)
+        self._capture_thumb(clean_event, clean, fresh=not existed)
         return self.state(clean_event)
 
-    def _capture_thumb(self, event: str, name: str) -> None:
+    def _capture_thumb(self, event: str, name: str, *, fresh: bool = False) -> None:
         """지금 화면의 결과 그림을 씬 썸네일로 붙인다.
 
         ⚠️ 썸네일 실패가 씬 저장을 막지 않는다. 그림이 없을 수도 있고(아직 한 장도 안
            만든 상태) 그건 오류가 아니다 - `_attach_interactive_snapshot_thumb` 와 같은 규약.
+
+        ⚠️ `fresh=True`(**새로 만드는 컷**)인데 붙일 그림이 없으면 같은 이름의 옛 그림을
+           지운다. 이 폴더는 사용자가 직접 다루는 것이 규약이라, 탐색기에서 `X.json` 만
+           지우고 `X.webp` 를 남기는 일이 실제로 생긴다(실측). 그 상태에서 `X` 를 새로
+           담으면 **남의 그림이 새 컷에 붙는다.**
+           덮어쓰기(`fresh=False`)에서는 지우지 않는다 - 그림 없이 다시 담았다고 해서
+           멀쩡히 있던 썸네일을 잃으면 안 된다.
         """
         try:
             store = getattr(self.context, "result_store", None)
             data = getattr(store, "latest_webp", None)
             if data:
                 write_scene_thumb(event, name, bytes(data), save_root=self._save_root())
+            elif fresh:
+                delete_scene_thumb(event, name, save_root=self._save_root())
         except Exception as exc:                       # pragma: no cover - 방어
             print(f"[v5-scene] thumb attach skipped: {exc}")
 

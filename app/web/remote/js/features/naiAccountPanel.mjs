@@ -337,8 +337,8 @@ export function createNaiAccountPanel({
       + ` data-act="guard" aria-pressed="${on ? 'true' : 'false'}">`
       + `<span class="nai-acct-check">${on ? '✔' : ''}</span>`
       + '<span class="nai-acct-policy-text">'
-      + '<b>모든 계정 사용량 0% 도달 시 자동 생성 해제</b>'
-      + '<em>Auto Gen 을 끕니다. Automation 정책보다 우선합니다.</em>'
+      + '<b>사용량 0% 도달 시 자동 생성 해제</b>'
+      + '<em>Auto Gen 을 끕니다. Automation 정책보다 우선합니다. (모든 계정 사용량 0% 기준)</em>'
       + '</span></button>';
   }
 

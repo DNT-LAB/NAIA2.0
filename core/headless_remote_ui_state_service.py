@@ -244,7 +244,7 @@ def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:
     ⚠️ **NAI 판만 본다.** WEBUI/COMFYUI 의 `model` 은 체크포인트 파일 이름이라
        NAI 레지스트리에는 당연히 없다 - 같이 훑으면 멀쩡한 값을 지운다.
     """
-    from core.nai_model_contract import nai_key_from_metadata, normalize_nai_model_key
+    from core.nai_model_contract import nai_key_from_exact_name, normalize_nai_model_key
 
     try:
         registry = context._nai_model_registry()
@@ -261,7 +261,7 @@ def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:
         key = normalize_nai_model_key(raw)
         if registry.has_key(key):
             continue
-        translated = nai_key_from_metadata(model_value=key)
+        translated = nai_key_from_exact_name(key)
         if not translated or translated == key:
             print(f"[warn] stored NAI model key is unknown, kept for reselect: {key}",
                   flush=True)

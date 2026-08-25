@@ -36,6 +36,7 @@ from core.nai_model_contract import (
     DEFAULT_NAI_MODEL_SPEC,
     NaiModelSpec,
     nai_img2img_fallback_key,
+    nai_key_from_exact_name,
     nai_key_from_metadata,
     normalize_nai_model_key,
     resolve_nai_model_for_context,
@@ -135,13 +136,19 @@ def _resolve_nai_model_key_loosely(model_value: Any) -> str:
 
     ⚠️ 사용자 등록 모델은 여기서 판단하지 않는다. 내장 표에 없으면 원본을 그대로
     돌려주고, 레지스트리를 보는 기존 해석에 맡긴다.
+
+    ⚠️ **정확 매칭이어야 한다.** 예전에는 `nai_key_from_metadata`(부분 문자열 탐색)를
+    썼는데, 그러면 커스텀 키 `MY-NAI-DIFFUSION-5-FULL` 이 `NAID5F` 로 둔갑한다 -
+    그 모델을 지운 뒤 그 그림을 Enhance/Outpaint 하면 **엄격한 판정을 지나쳐 다른
+    모델로 돈이 나간다**(Codex 리뷰 BLOCK). 이 함수가 실제로 받는 것은 키 아니면
+    wire 이름이라, 정확 매칭으로도 제 할 일을 그대로 한다.
     """
     text = str(model_value or "").strip()
     if not text:
         return text
     if normalize_nai_model_key(text) in BUILTIN_NAI_MODEL_SPECS:
         return text                       # 이미 아는 키다
-    recovered = nai_key_from_metadata(text, "")
+    recovered = nai_key_from_exact_name(text)
     return recovered or text
 
 

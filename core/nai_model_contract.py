@@ -424,6 +424,37 @@ NAI_FAMILY_DEFAULT_KEYS: dict[str, str] = {
 }
 
 
+def nai_key_from_exact_name(value: Any) -> str:
+    """전체 문자열이 **정확히** 아는 이름일 때만 canonical 키로 되돌린다. 아니면 "".
+
+    ⚠️ **이 자리에 `nai_key_from_metadata` 를 쓰면 안 된다.** 그건 PNG 메타데이터
+       한 덩이 안에서 모델 이름을 **찾아내는** 함수라 부분 문자열로 맞춘다. 그래서
+       사용자가 등록할 수 있는 커스텀 키 `MY-NAI-DIFFUSION-5-FULL` 이 `NAID5F` 로
+       둔갑했다 - 그 모델을 지운 뒤에도 생성이 막히지 않고 **다른 모델로 돈이 나간다**
+       (Codex 리뷰 BLOCK, 재현됨). 사용자가 고른 모델을 바꾸는 판단은 **정확히 아는
+       이름일 때만** 해야 한다.
+
+    맞춰 보는 것: canonical 키 · wire 이름(제 인페인팅 이름 포함) · 표시 라벨 ·
+    계열 이름(`NovelAI Diffusion V5` - NAI 가 PNG 에 실제로 쓰는 형태다).
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in BUILTIN_NAI_MODEL_SPECS:
+        return upper
+    lowered = text.lower()
+    for spec in BUILTIN_NAI_MODEL_SPECS.values():
+        names = [spec.api_model, spec.label]
+        # ⚠️ 빌려 쓰는 인페인팅 이름은 뺀다 - 두 스펙이 같은 이름을 들어 먼저 걸린
+        #    쪽으로 잘못 귀속된다(`nai_key_from_metadata` 와 같은 이유).
+        if spec.inpainting_api_model and not spec.inpainting_is_substitute:
+            names.append(spec.inpainting_api_model)
+        if any(name and name.lower() == lowered for name in names):
+            return spec.key
+    return NAI_FAMILY_DEFAULT_KEYS.get(lowered, "")
+
+
 def nai_key_from_metadata(model_value: Any = "", source_value: Any = "") -> str:
     """NAI 생성물의 메타데이터에서 **모델 키**를 되찾는다. 못 찾으면 빈 문자열.
 

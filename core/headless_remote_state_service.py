@@ -180,11 +180,16 @@ class HeadlessRemoteStateService:
            돈이 나가는 판단은 화면이 아니라 사람이 해야 한다.
 
            그래서 여기서 하는 일은 **번역 하나뿐**이다: 그 값이 우리가 아는 모델의
-           표시 라벨이나 wire 이름이면 canonical 키로 되돌린다(`NOVELAI DIFFUSION V5`
-           -> `NAID5F` — 원래 고르려던 그 모델이다). 무엇인지 모르겠으면 **그대로 둔다.**
-           그러면 생성 직전에 막히고, 화면이 PARAMS 를 열어 다시 고르게 안내한다.
+           표시 라벨이나 wire 이름과 **정확히 같으면** canonical 키로 되돌린다
+           (`NOVELAI DIFFUSION V5` -> `NAID5F` — 원래 고르려던 그 모델이다).
+           무엇인지 모르겠으면 **그대로 둔다.** 그러면 생성 직전에 막히고, 화면이
+           PARAMS 를 열어 다시 고르게 안내한다.
+
+        ⚠️ 정확 매칭이어야 한다(`nai_key_from_exact_name`). 부분 문자열로 맞추면
+           커스텀 키 `MY-NAI-DIFFUSION-5-FULL` 이 `NAID5F` 로 둔갑해, 막히기는커녕
+           **다른 모델로 돈이 나간다**(Codex 리뷰 BLOCK, 재현됨).
         """
-        from core.nai_model_contract import nai_key_from_metadata, normalize_nai_model_key
+        from core.nai_model_contract import nai_key_from_exact_name, normalize_nai_model_key
 
         key = normalize_nai_model_key(value)
         if not key:
@@ -192,7 +197,7 @@ class HeadlessRemoteStateService:
         try:
             if self.context._nai_model_registry().has_key(key):
                 return key
-            translated = nai_key_from_metadata(model_value=key)
+            translated = nai_key_from_exact_name(key)
         except Exception as exc:  # noqa: BLE001 - 조회 실패가 파라미터 설정을 막으면 안 된다
             print(f"[warn] NAI model key check failed: {exc}", flush=True)
             return key

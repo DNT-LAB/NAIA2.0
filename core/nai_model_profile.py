@@ -54,6 +54,22 @@ NAI_MODEL_API_MAP: dict[str, str] = {
     "NAID3": "nai-diffusion-3",
 }
 
+# 인페인팅 wire 이름의 **예외표**. 규칙(`base + "-inpainting"`)으로 안 떨어지는 것만 적는다.
+#
+# ⚠️ `nai-diffusion-5-curated-inpainting` 은 **서버에 없다** - future02 라이브 실측에서
+#    400(모델 없음)이 떴다. V5 Curated 인페인트는 Full 인페인팅을 **빌려 쓴다**
+#    (사용자 결정: 세대(V5)를 지키고 Curated 성격을 포기). i2i 는 `nai-diffusion-5-curated`
+#    로 정상이라 건드리지 않는다 - 여기 걸리는 것은 인페인트 액션뿐이다.
+NAI_INPAINTING_API_MAP: dict[str, str] = {
+    "nai-diffusion-5-curated": "nai-diffusion-5-full-inpainting",
+    # NAID4.0C 는 베이스에만 `-preview` 가 붙는다. 규칙대로 이으면
+    # `nai-diffusion-4-curated-preview-inpainting` 이 되는데 **그런 모델은 없다** -
+    # 인페인팅 쪽 이름은 `-preview` 가 빠진 `nai-diffusion-4-curated-inpainting` 이다.
+    # 옛 하드코딩 목록에도 후자가 적혀 있었지만 실제로 만들어 보내는 이름과 달라
+    # 아무것도 못 잡고 있었다(선재 결함, ES2 에서 교정).
+    "nai-diffusion-4-curated-preview": "nai-diffusion-4-curated-inpainting",
+}
+
 # `resolve_api_model()` 의 폴백. 모르는 키를 기본 모델로 되돌리는 기존 동작 유지.
 _V5_API_PREFIX = "nai-diffusion-5"
 _V4_API_PREFIXES = ("nai-diffusion-4", _V5_API_PREFIX)
@@ -77,9 +93,41 @@ def normalize_model_key(value: Any) -> str:
     return ""
 
 
+_API_MODEL_TO_KEY: dict[str, str] = {v: k for k, v in NAI_MODEL_API_MAP.items()}
+_INPAINTING_SUFFIX = "-inpainting"
+
+
 def resolve_api_model(model_key: Any) -> str:
-    """UI 모델 키 -> 아웃바운드 API `model` 문자열. 모르면 기본 모델."""
-    return NAI_MODEL_API_MAP.get(str(model_key or "").strip(), DEFAULT_NAI_API_MODEL)
+    """UI 모델 키 -> 아웃바운드 API `model` 문자열. 모르면 기본 모델.
+
+    ⚠️ **wire 이름이 그대로 들어오는 경로가 있다.** 화면에서 온 요청은 키(`NAID5.0F`)를
+    싣지만, 메타데이터에서 되살린 파라미터(Enhance · 리플레이 · 외부 이미지 가져오기)는
+    실제 API 이름(`nai-diffusion-5-full`)을 실을 수 있다. 그때 "아는 키가 아니다" 로
+    기본값(V4.5 Full)에 떨어뜨리면 **V5 로 만든 그림을 Enhance 했는데 4.5 가 나오고
+    아무도 그걸 알려주지 않는다** - 모델이 틀리면 전송 방식(multipart)까지 틀어진다.
+    그래서 아는 wire 이름이면 그대로 인정한다(인페인팅 접미사가 붙어 있어도 벗겨서 본다).
+    """
+    text = str(model_key or "").strip()
+    if text in NAI_MODEL_API_MAP:
+        return NAI_MODEL_API_MAP[text]
+    base = text[: -len(_INPAINTING_SUFFIX)] if text.endswith(_INPAINTING_SUFFIX) else text
+    if base in _API_MODEL_TO_KEY:
+        return base
+    return DEFAULT_NAI_API_MODEL
+
+
+def inpainting_api_model(value: Any) -> str:
+    """인페인트 액션에 쓸 wire 이름. 기본 규칙은 `base + "-inpainting"`.
+
+    예외는 `NAI_INPAINTING_API_MAP` 이 가진다 - V5 Curated 는 전용 인페인팅 모델이
+    없어 Full 인페인팅을 빌려 쓴다.
+    """
+    base = _api_model_of(value)
+    if not base:
+        return ""
+    if base.endswith(_INPAINTING_SUFFIX):
+        return base
+    return NAI_INPAINTING_API_MAP.get(base, base + _INPAINTING_SUFFIX)
 
 
 def _api_model_of(value: Any) -> str:

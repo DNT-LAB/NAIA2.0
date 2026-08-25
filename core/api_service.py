@@ -1,6 +1,7 @@
 import requests
 import zipfile
 import io, time, re, json
+import copy
 import base64
 import math
 import numpy as np
@@ -16,6 +17,80 @@ from core import nai_model_profile as nai_profile
 
 if TYPE_CHECKING:
     from core.context import AppContext
+
+
+# ── 따옴표 대사를 메인 프롬프트로 올리는 규약 (공식 웹 사양) ────────────────
+#
+# 공식 웹은 프롬프트 안에 따옴표로 적은 대사를 메인 프롬프트 뒤에 `text: ` 로 얹어
+# 준다. 앱이 그걸 안 하면 같은 시드·같은 캐릭터 프롬프트인데도 **글자만 안 나온다**.
+#
+# ⚠️ 캐릭터 칸의 `text:` 는 **옮기지 않는다.** future02 에서 한 번 옮겼다가 되돌린
+#    결정이다 - 캐릭터 칸의 `text:` 는 NAI 가 "그 캐릭터 자리에 글자를 그리라" 고
+#    읽는 자기 문법으로 보이고, 따옴표 쪽만 사이트가 메인으로 들어 올려 주는 줄임
+#    표기다. 그걸 메인으로 빼면 같은 글자를 다른 뜻으로 보내는 셈이라 결과가 갈린다.
+#
+# ⚠️ `korean text,`(콜론 없음)나 `context:`(뒤에 붙은 낱말)에 걸리면 안 되므로 앞에
+#    낱말 문자가 오면 안 잡는다.
+NAI_TEXT_MARKER = re.compile(r"(?<![A-Za-z0-9_])text\s*:\s*", re.IGNORECASE)
+
+# 경계가 쉼표가 아니라 따옴표라, 대사 안에 쉼표가 있어도 끊기지 않는다. 둥근 따옴표도 받는다.
+_NAI_SPEECH_RE = re.compile('"(?P<quoted>[^"]*)"|\u201c(?P<curly>[^\u201d]*)\u201d')
+
+NAI_TEXT_PREFIX = "text: "
+
+
+def extract_quoted_speech(sources: Any) -> str:
+    """따옴표로 적은 대사를 글에 나온 차례대로 모아 한 덩어리로 만든다.
+
+    규칙:
+      - `"대사"` **따옴표 안쪽만** 가져온다. 따옴표는 뗀다.
+      - 빈 조각은 건너뛴다.
+      - **진짜 LF 두 개**로 잇는다. 앞머리 `text: ` 는 호출부가 한 번만 붙인다.
+
+    ⚠️ 원본에서 **지우지 않는다.** 공식 웹 요청도 char_captions 를 원본 그대로 보낸다
+       (future02 실측: 앱/공홈 바이트 일치). 지우면 그림 자체가 달라진다.
+    ⚠️ 리터럴 `\\n`(백슬래시 + n)은 사용자가 친 **두 글자**다 - 진짜 개행으로 풀지
+       않는다. 푸는 순간 공식 웹과 다른 요청이 된다. 잇는 구분자만 진짜 LF 다.
+    """
+    parts: List[str] = []
+    for raw in (sources or []):
+        text = str(raw or "")
+        for match in _NAI_SPEECH_RE.finditer(text):
+            piece = (match.group("quoted") if match.group("quoted") is not None
+                     else match.group("curly") or "").strip()
+            if piece:
+                parts.append(piece)
+    return "\n\n".join(parts)
+
+
+def merge_quoted_speech(base_caption: Any, speech: str) -> str:
+    """모은 대사를 메인 프롬프트의 `text:` 자리에 합친다.
+
+    ⚠️ 메인에 **이미 `text:` 가 있으면 그 뒤에 잇는다.** 앞머리를 새로 붙이면
+       `text: ... , text: ...` 가 되어 글자가 두 덩어리로 읽힌다.
+    ⚠️ 잇는 자리는 그 조각의 **끝**(다음 쉼표 앞)이다. 메인 뒤에 통째로 붙이면
+       `text:` 가 문장 중간일 때 나머지 순서가 뒤집힌다.
+    ⚠️ 이미 같은 대사가 붙어 있으면 **아무것도 안 한다.** 메타데이터를 되살려 다시
+       만들면 base 에는 이미 합쳐진 대사가 그대로 있어, 그냥 이으면 같은 말이 두 번
+       나간다. 대소문자를 안 가리므로 공식 웹이 쓰는 `teXt: ` 로 돌아온 것도 알아본다.
+    """
+    base = str(base_caption or "")
+    if not speech:
+        return base
+    match = NAI_TEXT_MARKER.search(base)
+    if not match:
+        return (f"{base}, {NAI_TEXT_PREFIX}{speech}" if base.strip()
+                else f"{NAI_TEXT_PREFIX}{speech}")
+    rest = base[match.end():]
+    comma = rest.find(",")
+    cut = match.end() + (len(rest) if comma < 0 else comma)
+    existing = base[match.end():cut].strip()
+    if existing and (existing == speech or existing.endswith(speech)):
+        return base
+    if not existing:
+        return f"{base[:match.end()]}{speech}{base[cut:]}"
+    return f"{base[:cut].rstrip()}\n\n{speech}{base[cut:]}"
+
     from modules.character_module import CharacterModule
 
 class APIService:
@@ -308,18 +383,49 @@ class APIService:
             main_token = self.app_context.secure_token_manager.get_token('nai_token')
             return main_token if main_token else ""
 
+    # V5 multipart 에서 **파트로 떼어 보내야 하는** parameters 필드.
+    # 값은 base64 문자열이고, 떼어낸 뒤 JSON 에는 파트 이름만 남긴다.
+    _NAI_MULTIPART_BLOB_FIELDS = ("image", "mask")
+
     @staticmethod
     def _nai_request_body_kwargs(payload: Dict[str, Any], multipart: bool) -> Dict[str, Any]:
         """NAI 요청 바디를 모델 프로필에 맞는 `requests` 인자로 만든다.
 
-        V4 이하: `json=payload` 그대로.
-        V5: `multipart/form-data` 의 **`request` 파트 하나**에 JSON 을 담는다.
-            파일명은 웹과 같은 `blob`, MIME 은 `application/json` 이다.
+        V4 이하: `json=payload` 그대로 (이미지는 parameters 안에 base64 문자열).
+        V5: `multipart/form-data`. JSON 은 **`request` 파트**에 담는다(파일명 `blob`,
+            MIME `application/json`).
+
+        ⚠️ **V5 는 이미지를 JSON 안에 넣지 않는다.** `parameters.image` / `.mask` 는
+        base64 가 아니라 **다른 폼 파트의 이름**이어야 하고, 실제 바이트는 그 이름의
+        파트로 따로 올라간다. base64 를 그대로 두면 서버가 그 긴 문자열을 파트 이름으로
+        읽고 거절한다(future02 라이브 실측 400:
+        `image field references unknown form part "iVBORw0KGgo..."`).
+
+        이 규약을 몰라서 한동안 "V5 는 i2i/인페인트를 지원하지 않는다" 고 판단했었다.
+
+        ⚠️ 호출부 dict 는 **깊은 복사본에서만** 바꾼다. `store_api_payload` 에 저장되는
+        페이로드까지 파트 이름으로 바뀌면 메타뷰어·리플레이가 이미지를 잃는다.
         """
         if not multipart:
             return {"json": payload}
+        payload = copy.deepcopy(payload)      # 호출부의 dict 를 건드리지 않는다
+        parts: Dict[str, Any] = {}
+        parameters = payload.get("parameters")
+        if isinstance(parameters, dict):
+            for field in APIService._NAI_MULTIPART_BLOB_FIELDS:
+                encoded = parameters.get(field)
+                if not isinstance(encoded, str) or not encoded:
+                    continue
+                try:
+                    raw = base64.b64decode(encoded)
+                except Exception:
+                    continue                  # base64 가 아니면 이미 파트 이름일 수 있다
+                parameters[field] = field     # JSON 은 파트를 **이름으로** 가리킨다
+                parts[field] = (field, raw, "image/png")
         body = json.dumps(payload, ensure_ascii=False)
-        return {"files": {"request": ("blob", body, "application/json")}}
+        files: Dict[str, Any] = {"request": ("blob", body, "application/json")}
+        files.update(parts)
+        return {"files": files}
 
     def _nai_vibe_payload_pending(self, params: Dict[str, Any]) -> bool:
         """이번 요청에 실릴 뻔한 Vibe Transfer 데이터가 있는가 (V5 안내 전용).
@@ -357,7 +463,10 @@ class APIService:
             if is_img2img:
                 action_type = "infill" if params.get('type') == 'inpaint' else "img2img"
             if params.get('type') == 'inpaint':
-                model_name += "-inpainting"
+                # ⚠️ `+= "-inpainting"` 로 만들면 안 되는 모델이 있다 - V5 Curated 전용
+                # 인페인팅 모델은 서버에 없어(future02 라이브 400) Full 인페인팅을
+                # 빌려 쓴다. 예외표는 core/nai_model_profile.py 가 가진다.
+                model_name = nai_profile.inpainting_api_model(model_name)
 
             # NAI 서버는 seed를 uint64로 파싱하므로 음수 방지
             nai_seed = params.get('seed', 0)
@@ -428,6 +537,9 @@ class APIService:
                         print(f"🩹 reference inset 자동 삽입 (생성 시점): {cleaned_input[:80]}...")
             except Exception as exc:
                 print(f"⚠️ reference inset 삽입 실패: {exc}")
+
+            # 따옴표 대사 병합이 `input` 까지 바꿔야 할 때 여기에 담긴다(V5 전용).
+            nai_input_override = None
 
             # V4 특화 설정 (기존과 동일)
             # ⚠️ V5 도 여기에 들어온다 — `v5_prompt` 는 존재하지 않고 `v4_prompt` /
@@ -542,6 +654,28 @@ class APIService:
                         })
                     print(f"✅ [{char_source}] {len(characters)} character(s) added"
                           f"{' (positions: ' + str(character_positions) + ')' if character_positions else ''}")
+
+                # 따옴표로 적은 대사를 메인 프롬프트 뒤에 `text: ` 로 얹는다(공식 웹 사양).
+                #
+                # ⚠️ **메인 프롬프트도 훑는다.** 캐릭터가 하나도 없어도 올라간다 -
+                #    공식 웹 예제가 그렇다. 그래서 `if characters:` **밖**에 둔다.
+                # ⚠️ 훑는 차례는 메인 -> 캐릭터다. 둘 다에 따옴표가 있는 표본이 아직
+                #    없어 확실치 않다 - 어긋나면 여기 순서를 뒤집으면 된다.
+                # ⚠️ V5 전용이다(사용자 지정). V4/V4.5 는 기존 동작을 그대로 둔다.
+                if nai_profile.is_v5_model(model_name):
+                    _speech = extract_quoted_speech([main_prompt, *characters])
+                    if _speech:
+                        _cap = api_parameters['v4_prompt']['caption']
+                        _before = str(_cap['base_caption'] or "")
+                        _merged = merge_quoted_speech(_before, _speech)
+                        _cap['base_caption'] = _merged
+                        # payload 의 `input` 도 같은 값으로 나가야 한다 - NAI 가 이 값을
+                        # 이미지 메타데이터의 `prompt` 로 남기므로 base_caption 과
+                        # 어긋나면 안 된다.
+                        nai_input_override = _merged
+                        if _merged != _before:
+                            _n = _speech.count(chr(10) * 2) + 1
+                            print(f"💬 [{model_key}] 따옴표 대사 {_n}조각을 메인 프롬프트에 병합")
             
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             #
@@ -653,7 +787,8 @@ class APIService:
             
             # 최종 페이로드 구성
             payload = {
-                "input": params.get('input', ''),
+                "input": (nai_input_override if nai_input_override is not None
+                          else params.get('input', '')),
                 "model": model_name,
                 "action": action_type,
                 "parameters": api_parameters

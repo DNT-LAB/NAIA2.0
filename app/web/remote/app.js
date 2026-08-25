@@ -432,6 +432,8 @@ let refinePanelControl = null;
 let tagSearchController = null;
 let tagSearchPopup = null;
 let tagSearchPopupReady = null;
+let memoPopup = null;
+let memoPopupReady = null;
 let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
@@ -2943,6 +2945,7 @@ const naiDirectorBtn = $('naiDirectorBtn');
 // [Ollama Assist][Chat] 두 칸을 한 칸으로 합쳤다(사용자 지정) — 누르면 고른다.
 const ollamaBtn = $('ollamaBtn');
 const tagSearchBtn = $('tagSearchBtn');
+const memoBtn = $('memoBtn');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -5883,6 +5886,32 @@ if (tagSearchBtn) {
     else tagSearchPopup.open();
   });
 }
+memoPopupReady = import('./js/features/memoPopup.mjs?v=20260825-memo1')
+  .then(({createMemoPopup}) => {
+    memoPopup = createMemoPopup({
+      document,
+      window,
+      escHtml,
+      showToast,
+      setModuleParam,
+      requestModuleState,
+      onInsertText: insertTagIntoPrompt,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Memo popup', error);
+  });
+if (memoBtn) {
+  memoBtn.addEventListener('click', async () => {
+    await memoPopupReady;
+    if (!memoPopup) {
+      showToast('Memo 모듈을 불러오지 못했습니다.', 'error');
+      return;
+    }
+    if (memoPopup.isOpen()) memoPopup.close();
+    else memoPopup.open();
+  });
+}
 
 function loadMetadataImageBlob(blob, label = 'Input Image') {
   if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {
@@ -8769,6 +8798,10 @@ function onModuleState(m) {
   else if (m.module_id === 'v5_scene') {
     // Fn > V5 Scene 은 탭 페이지라 팝업 배선을 타지 않는다 - 여기서 직접 그린다.
     if (v5SceneControl) v5SceneControl.render(m);
+  }
+  else if (m.module_id === 'memo') {
+    // 창이 닫혀 있어도 목록은 받아 둔다 - 다음에 열 때 곧바로 보인다.
+    if (memoPopup) memoPopup.onState(m);
   }
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory') {

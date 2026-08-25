@@ -19809,6 +19809,29 @@ body.detached-module .mod-grid-3 {
    `search_tags_substring` 주석 참조(번역기가 네트워크라 질의당 0.8초). */
 .tagsearch-retry { margin-top: 10px; }
 
+/* ── Memo ────────────────────────────────────────────────────────────────
+   Tag Search 의 뼈대를 그대로 입는다(사용자 지정). 여기서 손보는 것은 셋뿐:
+   ① 검색줄 오른쪽의 [+ 새 메모], ② 목록/본문의 폭 배분, ③ 본문 편집 칸. */
+.memo-popup .tagsearch-searchrow { display: flex; gap: 6px; align-items: center; }
+.memo-popup .tagsearch-input { flex: 1; min-width: 0; }
+.memo-popup .memo-new { flex: 0 0 auto; height: 24px; padding: 0 10px; }
+/* 메모는 제목이 짧고 본문이 길다 - 목록을 좁히고 편집 칸에 자리를 준다. */
+.memo-popup .tagsearch-left { flex: 0 0 172px; }
+.memo-popup .tagsearch-desc { display: flex; padding: 10px; }
+.memo-editor-wrap { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.memo-editor {
+  flex: 1; min-height: 120px; width: 100%; resize: none;
+  padding: 9px 10px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.22); color: var(--text-primary);
+  font-family: var(--font-editor); font-size: 12px; line-height: 1.7;
+}
+.memo-editor:focus { outline: none; border-color: rgba(130,150,255,0.55); }
+.memo-editor-wrap .tagsearch-desc-actions { margin-top: 0; }
+.tagsearch-act.is-danger {
+  border-color: rgba(255,120,120,0.38); background: rgba(255,90,90,0.13);
+}
+.tagsearch-act.is-danger:hover { background: rgba(255,90,90,0.24); }
+
 .ollama-chat-popup {
   position: fixed;
   z-index: var(--z-floating-module-aux);

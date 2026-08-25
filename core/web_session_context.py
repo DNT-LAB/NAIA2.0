@@ -177,6 +177,15 @@ class WebSessionContext:
     def _character_service(self):
         return self._lazy_service("character")
 
+    def _memo_service(self):
+        return self._lazy_service("memo")
+
+    def _memo_module_state(self):
+        return self._memo_service().state()
+
+    def _set_memo_param(self, key, value):
+        return self._memo_service().set_param(key, value)
+
     def _v5_scene_service(self):
         return self._lazy_service("v5_scene")
 

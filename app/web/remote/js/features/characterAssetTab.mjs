@@ -1649,7 +1649,10 @@ export function createCharacterAssetTabController({
     const promptContent = promptEditOpen ? `
       <textarea class="mod-textarea char-asset-edit-prompt" data-field="asset-prompt-edit"
         placeholder="character prompt...">${escHtml(promptDraft)}</textarea>
-      <div class="mod-section-label">Character UC</div>
+      <div class="char-asset-uc-label-row">
+        <div class="mod-section-label">Character UC</div>
+        ${stripOutfitToggle()}
+      </div>
       <textarea class="mod-textarea mod-uc char-asset-edit-uc" data-field="asset-uc-edit"
         placeholder="character UC (optional)...">${escHtml(promptUcDraft)}</textarea>
       <div class="char-asset-prompt-edit-actions">
@@ -1658,7 +1661,10 @@ export function createCharacterAssetTabController({
       </div>
     ` : `
       <pre class="char-asset-pre" data-role="prompt-pre">${escHtml(detail.character_prompt || '(empty)')}</pre>
-      <div class="mod-section-label">Character UC</div>
+      <div class="char-asset-uc-label-row">
+        <div class="mod-section-label">Character UC</div>
+        ${stripOutfitToggle()}
+      </div>
       <pre class="char-asset-pre char-asset-pre-uc" data-role="uc-pre">${escHtml(detail.character_uc || '(empty)')}</pre>
     `;
     return `
@@ -1691,14 +1697,18 @@ export function createCharacterAssetTabController({
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-inset" ${applyDisabled} ${applyTitle}
           title="C1 슬롯 적용 + 이 이미지를 레퍼런스 인셋(1152x896)으로 고정 - 기존 CR은 전부 비활성화">C1 + 레퍼런스 인셋 적용</button>
         <button class="mod-btn-sm" data-action="apply-add" ${applyDisabled} ${applyTitle}>새 슬롯으로 추가</button>
-        <!-- 같은 캐릭터를 다른 옷으로 입힐 때 쓴다(사용자 지정). 인물 태그 + 캐릭터 특징
-             + 악세서리/모자만 남기고 의상을 걷어낸다. UC 는 건드리지 않는다. -->
-        <label class="char-asset-strip" data-naia-title="인물 태그 + 캐릭터 특징 + 악세서리/모자만 남기고 의상 태그를 뺍니다. UC 는 그대로 둡니다.">
-          <input type="checkbox" data-action="toggle-strip"${stripOutfit ? ' checked' : ''}>
-          <span>불러오기시 의상 제거</span>
-        </label>
       </div>
     `;
+  }
+
+  /** [불러오기시 의상 제거] - 같은 캐릭터를 다른 옷으로 입힐 때 쓴다(사용자 지정).
+   *  ⚠️ `mod-btn-sm` 을 그대로 입는다 - 옆의 버튼들과 크기가 어긋나면 혼자 튄다.
+   *     자리는 Character UC 라벨 줄의 **오른쪽 끝**이다. */
+  function stripOutfitToggle() {
+    return `<label class="mod-btn-sm char-asset-strip"`
+      + ` data-naia-title="인물 태그 + 캐릭터 특징 + 악세서리/모자만 남기고 의상 태그를 뺍니다. UC 는 그대로 둡니다.">`
+      + `<input type="checkbox" data-action="toggle-strip"${stripOutfit ? ' checked' : ''}>`
+      + `<span>불러오기시 의상 제거</span></label>`;
   }
 
   function render() {

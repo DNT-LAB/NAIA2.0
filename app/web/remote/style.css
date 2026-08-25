@@ -21126,17 +21126,18 @@ body.detached-module .mod-grid-3 {
 .char-asset-prompt-edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .char-asset-warn { color: #e2b74a; font-weight: 400; }
 .char-asset-apply-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-/* [불러오기시 의상 제거] - 적용 버튼들과 한 줄에 서되, 버튼이 아니라는 것이 보여야 한다. */
-.char-asset-strip {
-  display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;
-  padding: 4px 9px; border: 1px solid var(--border-dim); border-radius: 6px;
-  background: rgba(255,255,255,0.03); color: var(--text-muted);
-  font-size: 12px; cursor: pointer; user-select: none;
+/* [불러오기시 의상 제거] - Character UC 라벨 줄의 오른쪽 끝(사용자 지정).
+   ⚠️ 크기는 `mod-btn-sm` 을 그대로 물려받는다. 혼자 다른 치수를 쓰면 옆의 버튼들과
+      어긋나 튄다 - 그래서 여기서는 **체크 표시와 켬 상태 색만** 더한다. */
+.char-asset-uc-label-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
-.char-asset-strip:hover { border-color: rgba(124,106,239,0.5); color: var(--text-primary); }
-.char-asset-strip input { margin: 0; cursor: pointer; }
+.char-asset-strip {
+  display: inline-flex; align-items: center; gap: 5px; user-select: none; flex: 0 0 auto;
+}
+.char-asset-strip input { margin: 0; width: 11px; height: 11px; cursor: pointer; }
 .char-asset-strip:has(input:checked) {
-  border-color: rgba(124,106,239,0.7); background: rgba(124,106,239,0.14);
+  border-color: rgba(157,139,255,0.55); background: rgba(124,106,239,0.16);
   color: var(--text-primary);
 }
 .char-asset-gen-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }

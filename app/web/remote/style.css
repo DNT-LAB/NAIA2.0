@@ -8064,6 +8064,31 @@ body.resizing-result-info {
   background: rgba(124,106,239,0.12);
   box-shadow: inset 0 0 0 1px rgba(157,139,255,0.08);
 }
+/* Fn 에서 마지막으로 쓴 기능으로 곧장 가는 칸. Fn 트리거와 같은 보라 계열을 쓰되
+   한 단계 옅게 둔다 - 같은 무리라는 것은 보이되 Fn 자체보다 앞서면 안 된다.
+   `hidden` 은 flex 컨테이너 안에서 무시되므로 display 로 다시 눌러 준다. */
+.tab-btn.fn-quick-btn {
+  position: relative;      /* 안의 X 가 이 칸 기준으로 앉는다 */
+  /* 좌우로 같은 만큼 비운다 - 이름은 가운데 그대로 두고 오른쪽 여백에 X 가 앉는다.
+     한쪽만 비우면 이름이 왼쪽으로 밀려 다른 탭들과 어긋난다. */
+  flex: 0.95 0.95 0;
+  padding-left: 11px; padding-right: 11px;
+  color: #cfc7f2;
+  background: rgba(124,106,239,0.06);
+}
+.tab-btn.fn-quick-btn[hidden] { display: none; }
+.tab-btn.fn-quick-btn:hover { color: #ffffff; background: rgba(124,106,239,0.16); }
+.fn-quick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 치우기. **늘 보이되 흐리게** 둔다 - hover 로만 나타내면 터치 화면에서 닿을 길이
+   없고, 진하게 두면 좁은 탭바에서 이름보다 먼저 눈에 든다. */
+.fn-quick-x {
+  position: absolute; top: 1px; right: 3px;
+  width: 11px; height: 11px; line-height: 10px; text-align: center;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-dim); opacity: 0.45; cursor: pointer;
+  transition: opacity .14s, color .14s;
+}
+.fn-quick-x:hover, .fn-quick-x:focus-visible { opacity: 1; color: #ffd8de; outline: none; }
 .tab-btn:last-child {
   border-right: none;
 }

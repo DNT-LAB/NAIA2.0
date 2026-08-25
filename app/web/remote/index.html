@@ -469,6 +469,15 @@
         <button class="tab-btn active" data-tab="prompt" onclick="switchTab('prompt')"><span class="tab-icon">&#9998;</span><span>Prompt</span></button>
         <button class="tab-btn" data-tab="params" onclick="switchTab('params')"><span class="tab-icon">&#9776;</span><span>Params</span></button>
         <button class="tab-btn" data-tab="negative" onclick="switchTab('negative')"><span class="tab-icon">&#8856;</span><span>Negative</span></button>
+        <!-- Fn 에서 마지막으로 쓴 기능으로 곧장 가는 칸(사용자 지정). 한 번도 안 썼으면
+             숨어 있다 - 아직 가리킬 것이 없는데 자리를 차지하면 안 된다. -->
+        <button class="tab-btn fn-quick-btn" id="fnQuickBtn" onclick="openFnQuick()" hidden><span class="tab-icon fn-quick-icon"></span><span class="fn-quick-label"></span><!--
+             X 는 button 안의 button 이 될 수 없다(HTML 위반) - span 에 role 을 준다.
+             클릭은 여기서 멈춘다(stopPropagation) - 안 그러면 치우려다 열린다. --><span
+             class="fn-quick-x" role="button" tabindex="0" aria-label="빠른 전환 칸 치우기"
+             data-naia-title="이 칸을 치웁니다 (Fn 에서 다시 고르면 돌아옵니다)"
+             onclick="dismissFnQuick(event)"
+             onkeydown="if(event.key==='Enter'||event.key===' ')dismissFnQuick(event)">&times;</span></button>
         <button class="tab-btn fn-menu-trigger" id="fnMenuTrigger" data-tab="preset" onclick="toggleFnMenu(event)" aria-haspopup="menu" aria-expanded="false"><span class="tab-icon">&#9638;</span><span>Fn</span></button>
       </div>
       <div class="fn-menu" id="fnMenu" role="menu" hidden>

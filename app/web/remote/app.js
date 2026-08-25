@@ -6357,19 +6357,89 @@ function toggleFnMenu(event) {
   positionFnMenu();
 }
 
+// ── Fn 빠른 전환 ─────────────────────────────────────────────────────────
+// Fn 메뉴는 두 번 눌러야 목적지에 닿는다(열기 -> 고르기). 거의 늘 같은 것을 고르므로
+// **마지막으로 쓴 하나**를 탭바에 그대로 내놓는다(사용자 지정 2026-08-25).
+//
+// ⚠️ 아래 표의 아이콘/이름은 index.html 의 `#fnMenu` 항목과 **짝이다.** Fn 메뉴에
+//    항목을 더하면 여기도 같이 더해야 한다 - 안 그러면 그 기능만 빠른 칸에 못 올라온다.
+const FN_QUICK_STORE = 'naia.fn.lastUsed';
+const FN_QUICK_ITEMS = [
+  {key: 'preset', icon: '▦', label: 'Preset', tab: 'preset', run: () => openFnPreset()},
+  {key: 'sequence', icon: '▶', label: 'Sequence', tab: 'sequence', run: () => openFnSequence()},
+  {key: 'v5scene', icon: '🎬', label: 'V5 Scene', tab: 'v5scene', run: () => openFnV5Scene()},
+  // Translate 는 탭이 아니라 팝업이다 - `tab` 이 비어 있으면 활성 표시를 하지 않는다.
+  {key: 'translate', icon: 'あ', label: 'Translate', tab: '', run: () => openTranslatorPopup()},
+];
+let fnQuickKey = (() => {
+  try { return String(localStorage.getItem(FN_QUICK_STORE) || ''); } catch (_) { return ''; }
+})();
+
+function fnQuickItem() {
+  return FN_QUICK_ITEMS.find(item => item.key === fnQuickKey) || null;
+}
+
+function rememberFnQuick(key) {
+  if (fnQuickKey !== key) {
+    fnQuickKey = key;
+    try { localStorage.setItem(FN_QUICK_STORE, key); } catch (_) { /* 사생활 모드 */ }
+  }
+  renderFnQuick();
+}
+
+function renderFnQuick() {
+  const button = $('fnQuickBtn');
+  if (!button) return;
+  const item = fnQuickItem();
+  if (!item) {
+    button.hidden = true;
+    return;
+  }
+  button.hidden = false;
+  // `promptDrawer.switchTab` 이 `data-tab` 을 보고 활성 표시를 옮긴다 - 탭이 있는
+  // 항목일 때만 달아 준다(Translate 는 탭이 없어 늘 비활성이어야 한다).
+  if (item.tab) button.dataset.tab = item.tab;
+  else delete button.dataset.tab;
+  button.classList.toggle('active', !!item.tab && activePromptTab === item.tab);
+  button.querySelector('.fn-quick-icon').textContent = item.icon;
+  button.querySelector('.fn-quick-label').textContent = item.label;
+  button.setAttribute('aria-label', `${item.label} (Fn 마지막 사용)`);
+  button.dataset.naiaTitle = `${item.label} — Fn 에서 마지막으로 쓴 기능`;
+}
+
+function openFnQuick() {
+  const item = fnQuickItem();
+  if (item) item.run();
+}
+
+/** 빠른 전환 칸을 치운다. 없앤 것이 아니라 **접어 둔 것**이다 - Fn 에서 아무거나
+ *  다시 고르면 그 기능으로 돌아온다(`rememberFnQuick`). */
+function dismissFnQuick(event) {
+  event?.preventDefault?.();
+  // ⚠️ 이 span 은 칸(button) **안에** 있다. 멈추지 않으면 치우려던 클릭이 그대로
+  //    부모로 올라가 그 기능을 열어 버린다.
+  event?.stopPropagation?.();
+  fnQuickKey = '';
+  try { localStorage.removeItem(FN_QUICK_STORE); } catch (_) { /* 사생활 모드 */ }
+  renderFnQuick();
+}
+
 function openFnPreset() {
   closeFnMenu();
+  rememberFnQuick('preset');
   switchTab('preset');
 }
 
 function openFnSequence() {
   closeFnMenu();
+  rememberFnQuick('sequence');
   switchTab('sequence');
   sequencePresetReady.then(() => sequencePresetControl?.onOpen());
 }
 
 function openFnV5Scene() {
   closeFnMenu();
+  rememberFnQuick('v5scene');
   switchTab('v5scene');
   // 열 때마다 목록을 다시 받는다 - 다른 창에서 담은 씬이 있을 수 있고, 썸네일
   // 리비전도 그때 갱신된다.
@@ -10591,6 +10661,7 @@ Promise.all([
 ])
   .then(() => {
     initNaiaTitleTooltips();
+    renderFnQuick();
     initHistoryRail();
     initResultInfoResizer();
     bindMetadataImageDropTarget();

@@ -721,7 +721,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260823-cqdodge43')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260825-openfor1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -3381,6 +3381,9 @@ const wsMessageHandlers = {
     // ⚠️ **내 런일 때만** 끊는다. 이 알림도 모든 탭에 가므로 표를 안 보면 남의
     //    실패로 내 연속 생성이 멈춘다(Codex CONCERN). 표 대조는 패널이 한다.
     v5SceneControl?.notifyGenerationDone?.(false, String(m.v5_scene_run || ''));
+    // ⚠️ 모델 미상은 바로 앞 `toast` 메시지가 이미 알렸다 - 여기서 또 띄우면 같은 말이
+    //    두 번 쌓인다. 여기서는 **고칠 자리로 데려가는 일**만 한다.
+    if (m && m.model_unknown) { guideModelReselect(); return; }
     if (m && m.message) showToast(m.message, 'error', true);
   },
   prompt_generated: updatePromptOnly,
@@ -8782,6 +8785,33 @@ function closePeDebugPanel() {
 
 function syncPromptEngineeringPopups() {
   if (promptEngineeringPopups) promptEngineeringPopups.sync(lastPromptEngineeringState);
+}
+
+/** 고른 모델을 서버가 모른다 - 생성이 막혔다. 사용자가 **다시 고르면 풀리는** 실패라,
+ *  말만 하지 말고 고칠 자리까지 데려간다(사용자 지정 2026-08-25):
+ *  PARAMS 탭을 열고 -> 무엇을 해야 하는지 알리고 -> 모델 드롭다운을 펼친다.
+ *
+ *  ⚠️ 드롭다운은 탭이 실제로 그려진 **다음 프레임**에 편다. 숨은 칸을 기준으로 위치를
+ *     잡으면 화면 밖에 뜬다.
+ */
+function guideModelReselect() {
+  // 모바일은 서랍이 닫혀 있을 수 있다 - 탭만 바꾸면 아무것도 안 보인다.
+  // 데스크톱에서는 `toggle()` 이 스스로 물러난다(promptDrawer 의 mediaQuery 가드).
+  const drawerEl = document.getElementById('promptDrawer');
+  if (promptDrawerControl && drawerEl && !drawerEl.classList.contains('open')) {
+    promptDrawerControl.toggle();
+  }
+  switchTab('params');
+  const select = paramEls?.model;
+  if (!select) return;
+  requestAnimationFrame(() => {
+    select.scrollIntoView({block: 'center', behavior: 'smooth'});
+    if (typeof customSelectsControl?.openFor === 'function') {
+      if (customSelectsControl.openFor(select)) return;
+    }
+    // 커스텀 드롭다운이 아직 안 붙었으면(스캔 전) 원본에 초점만 준다.
+    select.focus?.();
+  });
 }
 
 function onModuleState(m) {

@@ -37,6 +37,20 @@ class NaiModelValidationError(ValueError):
     """A custom model entry is unsafe or incomplete."""
 
 
+class UnknownNaiModelError(NaiModelValidationError):
+    """레지스트리가 모르는 모델 키로 생성이 막혔다.
+
+    ⚠️ 이 하나만 **화면이 알아볼 수 있어야 한다.** 나머지 검증 실패(라벨 길이 등)는
+       사용자가 등록 창에서 고칠 일이지만, 이건 "고른 모델을 알 수 없다" 는 뜻이라
+       화면이 PARAMS 를 열고 다시 고르게 안내해야 한다(사용자 지정 2026-08-25).
+       `NaiModelValidationError` 를 물려받으므로 기존 `except` 는 그대로 잡는다.
+    """
+
+    def __init__(self, key: str):
+        self.model_key = str(key or "")
+        super().__init__(f"등록되지 않은 NAI 모델 키입니다: {self.model_key}")
+
+
 class NaiModelRegistry:
     """Runtime SSOT for built-in and user-defined NAI model specifications."""
 
@@ -238,7 +252,7 @@ class NaiModelRegistry:
             builtin = BUILTIN_NAI_MODEL_SPECS.get(key)
             if builtin is not None:
                 return builtin
-        raise NaiModelValidationError(f"등록되지 않은 NAI 모델 키입니다: {key}")
+        raise UnknownNaiModelError(key)
 
     def has_key(self, model_key: Any) -> bool:
         key = normalize_nai_model_key(model_key)

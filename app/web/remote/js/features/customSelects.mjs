@@ -903,9 +903,23 @@ export function createCustomSelectController({
     Array.from(states).forEach(destroyState);
   }
 
+  /** 바깥에서 드롭다운 하나를 펼친다(원본 `<select>` 를 준다).
+   *
+   *  생성이 모르는 모델 키로 막혔을 때 화면이 여기를 열어 다시 고르게 한다
+   *  (사용자 지정 2026-08-25). 트리거를 가짜로 클릭하면 열려 있던 경우 **닫혀 버려서**
+   *  토글이 아니라 '열기'가 필요하다.
+   */
+  function openFor(select) {
+    const state = Array.from(states).find(item => item.select === select);
+    if (!state || state.select.disabled) return false;
+    openSelect(state);
+    return true;
+  }
+
   return {
     start,
     stop,
     scan,
+    openFor,
   };
 }

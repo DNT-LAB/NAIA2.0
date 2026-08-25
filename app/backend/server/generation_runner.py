@@ -491,7 +491,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 )
             except Exception as exc:
                 _release_auto_gen_prefetch(context)  # 생성 실패 → 이번 예약 홀더 폐기(stale 방지)
-                await _broadcast_generation_error(context, clients, request, str(exc))
+                await _broadcast_generation_error(context, clients, request, str(exc), exc)
                 # 실패한 시퀀스 프레임도 라운드 카운트를 진전시켜야 연속 루프가 멈추지 않는다(Codex).
                 try:
                     await _advance_sequence_run(context, clients, request)
@@ -638,7 +638,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             try:
                 await _maybe_continue_auto_generation(context, clients, request)
             except Exception as exc:
-                await _broadcast_generation_error(context, clients, request, str(exc))
+                await _broadcast_generation_error(context, clients, request, str(exc), exc)
             await broadcast_json(clients, context.queue_state_payload())
             await broadcast_json(clients, context.auto_save_state_payload())
             if isinstance(auto_save_result, dict) and auto_save_result.get("error"):
@@ -1430,8 +1430,22 @@ async def _broadcast_generation_error(
     clients: set[WebSocket],
     request,
     message: str,
+    error: BaseException | None = None,
 ) -> None:
     context.is_generating = False
+    # 고른 모델을 레지스트리가 모른다 - 이건 사용자가 **다시 고르면 풀리는** 실패다.
+    # 원문("등록되지 않은 NAI 모델 키입니다")은 계정 등록 문제처럼 읽혀서, 무엇을
+    # 해야 하는지 말해 주는 문장으로 바꾸고 화면이 알아볼 표식을 싣는다.
+    # ⚠️ 새 메시지 타입을 만들지 않고 **기존 것에 필드만** 더한다 - 웹 스모크 계약이
+    #    타입을 순서대로 세기 때문이다.
+    from core.nai_model_registry import UnknownNaiModelError
+
+    model_unknown = isinstance(error, UnknownNaiModelError)
+    if model_unknown:
+        stale = getattr(error, "model_key", "")
+        message = "모델을 다시 골라 주세요 - 저장된 모델을 알 수 없습니다"
+        if stale:
+            message = f"{message} ({stale})"
     params = getattr(request, "params", {}) or {}
     img2img_service = _img2img_lifecycle_service(context)
     img2img_failed = bool(
@@ -1442,9 +1456,11 @@ async def _broadcast_generation_error(
     _scene_run = str((params or {}).get("v5_scene_run") or "")
     await broadcast_json(clients, {"type": "status", "is_generating": False,
                                   "message": "error", "v5_scene_run": _scene_run})
-    await broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
+    await broadcast_json(clients, {"type": "toast", "level": "error", "message": message,
+                                  "model_unknown": model_unknown})
     await broadcast_json(clients, {"type": "generation_error", "message": message,
-                                  "v5_scene_run": _scene_run})
+                                  "v5_scene_run": _scene_run,
+                                  "model_unknown": model_unknown})
     story_run_id = str(params.get("event_stream_run_id") or "")
     if story_run_id and not context._storyteller_service().is_running(story_run_id):
         story_run_id = ""

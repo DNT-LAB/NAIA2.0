@@ -5857,7 +5857,7 @@ function openOllamaMenu() {
   window.addEventListener('scroll', ollamaMenuDismiss, true);
   ollamaMenuEl.querySelector('.ollama-menu-btn')?.focus();
 }
-tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260824-tagsearch1')
+tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260825-maint1')
   .then(({createTagSearchPopup}) => {
     tagSearchPopup = createTagSearchPopup({
       document,

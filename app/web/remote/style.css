@@ -19765,6 +19765,29 @@ body.detached-module .mod-grid-3 {
   font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted);
 }
 .tagsearch-desc-body { margin: 12px 0 0; font-size: 12px; line-height: 1.65; color: var(--text-muted); }
+/* 캐릭터 구성요소 — 뷰어의 칩과 같은 값(퍼스널 컬러 / 특징). 캐릭터 태그에는
+   설명글이 없어 설명 칸이 통째로 비어 보이던 자리를 이것이 채운다. */
+.tagsearch-desc-comp {
+  margin-top: 12px; padding: 9px 10px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(255,255,255,0.028);
+}
+.tagsearch-comp-head {
+  display: flex; align-items: baseline; gap: 7px;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase;
+}
+.tagsearch-comp-head span { font-weight: 400; letter-spacing: 0; text-transform: none; }
+.tagsearch-comp-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.tagsearch-comp {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(106,191,123,0.14); border: 1px solid rgba(106,191,123,0.28);
+  font-family: var(--font-editor); font-size: 11px; color: var(--text-primary);
+}
+.tagsearch-comp i {
+  font-style: normal; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+}
 .tagsearch-desc-kw { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .tagsearch-kw {
   padding: 1px 7px; border-radius: 4px;

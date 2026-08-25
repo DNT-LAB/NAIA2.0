@@ -116,6 +116,31 @@ export function createTagSearchPopup({
     }).join('');
   }
 
+  /** 캐릭터의 **구성요소**. 캐릭터 태그에는 설명글이 거의 없어 설명 칸이 통째로
+   *  비어 보였다(사용자 제보) - 캐릭터의 답은 글이 아니라 어떤 특징으로 이루어져
+   *  있는가다. 캐릭터 뷰어가 칩으로 그리는 것과 **같은 값**이다.
+   */
+  function profileHtml(profile) {
+    if (!profile || typeof profile !== 'object') return '';
+    const chips = list => (Array.isArray(list) ? list : [])
+      .filter(item => item && item.tag)
+      .map(item => {
+        const pct = Number(item.pct);
+        const share = Number.isFinite(pct) && pct > 0 ? `<i>${Math.round(pct)}%</i>` : '';
+        return `<span class="tagsearch-comp">${escHtml(item.tag)}${share}</span>`;
+      }).join('');
+    const color = chips(profile.personal_color);
+    const traits = chips(profile.characteristics);
+    if (!color && !traits) return '';
+    const meta = [profile.group, profile.gender].filter(Boolean).map(String);
+    return `<div class="tagsearch-desc-comp">
+      <div class="tagsearch-comp-head">구성요소${
+        meta.length ? `<span>${escHtml(meta.join(' · '))}</span>` : ''}</div>
+      ${color ? `<div class="tagsearch-comp-row">${color}</div>` : ''}
+      ${traits ? `<div class="tagsearch-comp-row">${traits}</div>` : ''}
+    </div>`;
+  }
+
   function renderDesc() {
     const box = pick('.tagsearch-desc');
     if (!box) return;
@@ -137,6 +162,7 @@ export function createTagSearchPopup({
         </div>
       </div>
       ${row.desc ? `<p class="tagsearch-desc-body">${escHtml(row.desc)}</p>` : ''}
+      ${profileHtml(row.profile)}
       ${keywords.length ? `<div class="tagsearch-desc-kw">${
         keywords.map(k => `<span class="tagsearch-kw">${escHtml(k)}</span>`).join('')
       }</div>` : ''}

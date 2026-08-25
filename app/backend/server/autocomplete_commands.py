@@ -386,8 +386,33 @@ def search_tags_substring(
         keywords = getattr(entry, "keywords", None) or ()
         row["keywords"] = [str(k) for k in keywords if str(k or "").strip()]
         row["source"] = str(getattr(entry, "source", "") or "")
+        profile = _character_profile(context, row)
+        if profile:
+            row["profile"] = profile
         rows.append(row)
     return rows, translated
+
+
+def _character_profile(context: WebSessionContext, row: dict[str, Any]) -> dict[str, Any]:
+    """캐릭터 태그면 **구성요소**(퍼스널 컬러 · 특징)를 함께 싣는다.
+
+    설명 칸이 캐릭터에서 유난히 비어 보이던 이유는 사전에 설명글이 없어서다
+    (사용자 제보 2026-08-25). 캐릭터의 답은 설명글이 아니라 **어떤 특징으로
+    이루어져 있는가**이고, 그 값은 캐릭터 뷰어가 이미 쓰는
+    `data/character_analysis.json` 에 있다 - 같은 SSOT 를 그대로 본다.
+
+    조회 실패는 삼킨다 - 부가 정보 하나 때문에 검색이 통째로 죽으면 안 된다.
+    """
+    if str(row.get("cat") or "").strip().lower() != "character":
+        return {}
+    try:
+        from app.backend.server.character_viewer_routes import character_viewer_service
+
+        service = character_viewer_service(context)
+        return service.profile_summary(str(row.get("tag") or ""))
+    except Exception as exc:  # noqa: BLE001 - 부가 정보다. 검색을 막으면 안 된다
+        print(f"[warn] character profile lookup failed: {exc}", flush=True)
+        return {}
 
 
 def _has_hangul_text(text: str) -> bool:

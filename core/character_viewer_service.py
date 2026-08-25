@@ -170,6 +170,26 @@ class CharacterViewerService:
             self._tag_index = index
         return self._tag_index.get(normalized)
 
+    def profile_summary(self, tag: str) -> dict[str, Any]:
+        """태그 하나의 **구성요소** 요약. 못 찾으면 빈 dict.
+
+        Tag Search 의 설명 칸이 쓴다 - 캐릭터에는 설명글이 없고, 대신 "어떤 특징으로
+        이루어져 있는가" 가 답이다. 뷰어가 칩으로 그리는 것과 **같은 값**이다
+        (`build_detail` 의 `sections.personal_color` / `characteristics`).
+        """
+        found = self.find_by_tag(tag)
+        if not found:
+            return {}
+        group_key, data = found
+        color, traits, _attire = self._variant_items(data, None)
+        return {
+            "group": str(group_key or ""),
+            "gender": str(data.get("gender") or ""),
+            "rows": int(data.get("total_rows", 0) or 0),
+            "personal_color": [self._format_entry(entry) for entry in color],
+            "characteristics": [self._format_entry(entry) for entry in traits],
+        }
+
     def _adopt_legacy_thumbs(self) -> None:
         """앱 트리에 써 둔 옛 썸네일을 사용자 루트로 **한 번만 복사**한다.
 

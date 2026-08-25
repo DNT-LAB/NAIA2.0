@@ -645,6 +645,8 @@ const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=202607
 let referenceInsetState = null;
 let referenceInsetMenuEl = null;
 let referenceInsetMenuDismiss = null;
+let referenceInsetPanelObserver = null;
+let referenceInsetObservedPanel = null;
 
 function setReferenceInsetBadge(state) {
   referenceInsetState = state && state.active ? state : null;
@@ -699,6 +701,8 @@ function renderReferenceInsetBadge() {
     event.stopPropagation();
     toggleReferenceInsetMenu(event.currentTarget);
   };
+  watchQuickPanelForInsetBadge();
+  positionReferenceInsetBadge();
   badge.querySelector('.reference-inset-badge-x').onclick = async () => {
     closeReferenceInsetMenu();
     try {
@@ -709,6 +713,53 @@ function renderReferenceInsetBadge() {
     setReferenceInsetBadge(null);
     showToast('레퍼런스 인셋 핀 해제됨 - 일반 생성으로 복귀합니다', 'success');
   };
+}
+
+/** 배지를 **캐릭터 퀵 패널 아래로** 내린다(사용자 지정 2026-08-25).
+ *
+ *  둘 다 뷰어 좌상단에 얹혀 있어 서로를 덮었다. 퀵 패널은 높이가 고정이 아니라
+ *  (POS: CUSTOM 이면 컨트롤 줄이 늘고, 슬롯 수만큼 카드가 쌓인다) **고정 오프셋으로는
+ *  못 맞춘다** - 실측해서 그 아래에 붙인다.
+ *
+ *  ⚠️ 두 요소의 기준 상자가 다르다(배지는 `#resultViewer`, 패널은 `.viewer-wrapper`).
+ *     그래서 `getBoundingClientRect` 로 화면 좌표를 재서 배지 기준으로 되돌린다.
+ *  ⚠️ 패널이 없거나 접혀 있으면 CSS 기본값(좌상단)으로 되돌린다 - 인라인 스타일을
+ *     남겨 두면 패널을 끈 뒤에도 허공에 떠 있다.
+ */
+function positionReferenceInsetBadge() {
+  const badge = document.getElementById('referenceInsetBadge');
+  if (!badge) return;
+  const viewer = document.getElementById('resultViewer');
+  const panel = document.querySelector('.cq-float.open');
+  const panelBox = panel ? panel.getBoundingClientRect() : null;
+  if (!viewer || !panelBox || panelBox.height <= 0) {
+    badge.style.top = '';
+    badge.style.left = '';
+    return;
+  }
+  const viewerBox = viewer.getBoundingClientRect();
+  const gap = 10;
+  let top = panelBox.bottom - viewerBox.top + gap;
+  // 패널이 아주 길면 배지가 뷰어 밖으로 나간다 - 바닥 안쪽으로 물린다.
+  const room = viewerBox.height - badge.offsetHeight - gap;
+  if (room > 0) top = Math.min(top, room);
+  badge.style.top = `${Math.round(Math.max(gap, top))}px`;
+  badge.style.left = `${Math.round(panelBox.left - viewerBox.left)}px`;
+}
+
+/** 퀵 패널의 높이가 바뀌면 배지를 다시 앉힌다.
+ *
+ *  ⚠️ `.cq-float` 는 늦게 만들어지고, 떨어져 나가면 **새로 만들어진다**
+ *     (`ensureMount`). 그래서 한 번 걸고 마는 것이 아니라 볼 때마다 지금 요소인지
+ *     확인해 다시 건다. */
+function watchQuickPanelForInsetBadge() {
+  const panel = document.querySelector('.cq-float');
+  if (!panel || panel === referenceInsetObservedPanel) return;
+  referenceInsetPanelObserver?.disconnect();
+  referenceInsetObservedPanel = panel;
+  if (typeof ResizeObserver !== 'function') return;
+  referenceInsetPanelObserver = new ResizeObserver(() => positionReferenceInsetBadge());
+  referenceInsetPanelObserver.observe(panel);
 }
 
 function closeReferenceInsetMenu() {
@@ -1329,6 +1380,9 @@ function syncCharacterQuickPanelVisibility(interactiveActive) {
   const rightTab = document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
   const onResult = !isDetachedShell && rightTab === 'result';
   characterQuickPanel.setVisible(!active && mode === 'NAI' && onResult);
+  // 패널이 켜지고 꺼질 때마다 인셋 배지 자리가 달라진다(꺼지면 좌상단으로 복귀).
+  watchQuickPanelForInsetBadge();
+  positionReferenceInsetBadge();
   const cached = moduleStateCache.get('character');
   if (cached) characterQuickPanel.render(cached);
 }
@@ -6767,6 +6821,8 @@ document.addEventListener('keydown', event => {
 window.addEventListener('resize', () => {
   positionFnMenu();
   positionTranslatorPopup();
+  // 뷰어가 넓어지면 퀵 패널도 자리를 옮긴다 - 그 아래 붙은 배지도 따라가야 한다.
+  positionReferenceInsetBadge();
 });
 
 function currentPromptTabFromDom() {
@@ -8925,6 +8981,9 @@ function onModuleState(m) {
     // 결과 화면 위 빠른 캐릭터 패널. 팝업이 열려 있든 말든 상태는 늘 최신이어야
     // 한다 - 팝업에서 슬롯을 고치면 이쪽도 따라 바뀐다(같은 상태를 본다).
     if (characterQuickPanel) characterQuickPanel.render(m);
+    // 퀵 패널이 다시 그려지면 높이가 달라진다 - 인셋 배지를 그 아래로 다시 앉힌다.
+    watchQuickPanelForInsetBadge();
+    positionReferenceInsetBadge();
   }
   else if (m.module_id === 'character_reference') {
     updateCharRefBadge(m);

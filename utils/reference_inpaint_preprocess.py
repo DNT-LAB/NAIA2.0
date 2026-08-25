@@ -103,7 +103,8 @@ class ReferenceGenerationSpec:
 # ⚠️ 여기가 유일한 목록이다. 화면은 `reference_inset_state()` 가 실어 보내는 이 값을
 #    그려야 한다 - 프런트에 표를 복사하면 한쪽만 고쳐져 서로 다른 말을 하게 된다.
 REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = (
-    (1088, 960),
+    # ⚠️ 1088x960 은 뺐다(사용자 지정 2026-08-25) - 인셋이 캔버스의 절반을 넘게
+    #    차지해 생성 영역이 너무 좁았다.
     (1152, 896),
     (1216, 832),
     (1344, 768),

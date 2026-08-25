@@ -153,6 +153,11 @@ class ReferenceInsetPreprocessSpec:
     # ⚠️ 0 이면 긋지 않는다 - 예전 판과 같은 그림이 된다.
     seam_edge_line_px: int = 8
     seam_edge_line_rgb: tuple[int, int, int] = (0, 0, 0)
+    # 그 선의 오른쪽 몇 px 을 **마스크가 덮게** 할 것인가(사용자 지정 2026-08-25).
+    # 선 전체를 보존 구간에 두면 가장자리가 칼같이 서서 붙여 넣은 티가 난다 -
+    # 끝을 조금 물려 두면 모델이 그 위에서 생성 영역으로 자연스럽게 넘어간다.
+    # ⚠️ 이음매 띠(`seam_overlap_px`)보다 크면 안 된다 - 아래에서 잘라 준다.
+    seam_edge_line_masked_px: int = 2
     # Keep disabled by default. The older rounded wrap looked acceptable in raw
     # mask math, but it becomes a visible stepped protrusion once the inpaint
     # editor quantizes the mask to NovelAI's 8x8 grid.
@@ -372,8 +377,11 @@ def seam_edge_line_bounds(
         return None
     if placement.visible_right <= placement.visible_left:
         return None
-    seam_left = max(placement.visible_left, placement.visible_right - max(0, spec.seam_overlap_px))
-    right = seam_left
+    seam_overlap = max(0, spec.seam_overlap_px)
+    seam_left = max(placement.visible_left, placement.visible_right - seam_overlap)
+    # 선을 오른쪽으로 밀어 끝 몇 px 이 이음매(편집 가능) 안으로 들어가게 한다.
+    masked = max(0, min(spec.seam_edge_line_masked_px, seam_overlap, line_px))
+    right = min(placement.visible_right, seam_left + masked)
     left = max(placement.visible_left, right - line_px)
     if right <= left:
         return None

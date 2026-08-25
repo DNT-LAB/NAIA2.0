@@ -28,6 +28,76 @@ MAX_BODY_CHARS = 40000
 _ID_RE = re.compile(r"^[a-z0-9]{1,32}$")
 
 
+# ── 기본 메모 ────────────────────────────────────────────────────────────
+# 처음 켰을 때(파일이 아직 없을 때) 심는 메모들. 사용자가 고치거나 지우면 그대로 둔다 -
+# 다시 심지 않는다. **`memo.json` 을 지우면 다시 온다** - 되돌리는 길은 그것 하나다.
+#
+# ⚠️ 여기 있는 것은 사용자 데이터가 아니라 **앱이 들고 다니는 내용**이다. `data/` 가
+#    아니라 이 모듈에 두는 이유는 릴리즈 매니페스트가 `core/**` 를 통째로 싣기
+#    때문이다 - 데이터 파일로 빼면 매니페스트에 한 줄을 빠뜨리는 순간 조용히 죽는다
+#    (이 저장소가 harmony JSON 에서 한 번 밟은 함정).
+DEFAULT_NOTES: tuple[tuple[str, str], ...] = (
+    ("naiaquality", """퀄리티 태그 (v5)
+
+퀄리티 태그는 생성되는 이미지의 전반적인 품질에 영향을 주는 데 사용되어요. 
+
+best quality (추천)
+amazing quality (추천) 
+great quality
+normal quality
+bad quality
+worst quality
+
+생성된 이미지를 미적으로 더 보기 좋게, 또는 덜 보기 좋게 만드는 태그들이에요
+
+masterpiece 
+very aesthetic (추천)
+aesthetic
+aesthetic
+displeasing
+very displeasing
+
+연도태그
+
+year 2026, year 2025, year 2024, ... , year 1980 등. 
+
+작가태그 조합이 어지러울 때
+
+-0.8::artist collaboration :: 같은 태그를 넣어보세요
+
+NAI 공식 퀄리티 태그 (v5) 
+
+standard::  very aesthetic, masterpiece, no text
+Light::  very aesthetic, amazing quality, no text"""),
+    ("naianegative", """네거티브 (v5)
+
+추천 값이 아니라, Novel AI 공식 홈페이지의 설정값이에요. 
+
+Heavy::  lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page
+
+
+Light::  lowres, bad hands, bad anatomy, artistic error, sepia, white haze, worst quality, very displeasing, jpeg artifacts, 0 :: ai-generated ::
+
+Human focus::  lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy"""),
+    ("naispecial", """특수 프롬프트 (v5)
+
+depthness - 음영에 깊이감을 더합니다. depth of field의 상위 버전 ? 
+
+low complexity, medium complexity, high complexity, ultra complexity - 모델에 이미지의 복잡도(충실도)를 설명합니다. NAI 권장은 high complexity지만, 신체의 질감이 중요하면 medium complexity 도 좋은 것 같아요. 
+
+meta:novel era - 조금 더 고전적인 느낌을 주게 하는 vibe한 태그래요
+meta:golden era - 조금 더 현대적인 느낌을 주게 하는 vibe한 태그래요
+
+visual novel art - 모르겠어요
+visual novel bg - 백그라운드에 더 집중해요
+visual novel cg - 생성물이 조금 더 깔끔해져요
+visual novel chibi - 치비 캐릭터를 어딘가에 박아줘요
+visual novel sprite - 미연시의 대사창 같은걸 생각하면 좋을 것 같아요
+
+has alpha - 생성 이미지에 투명도를 부여해요.
+"""),
+)
+
 def _now() -> float:
     return time.time()
 
@@ -58,6 +128,7 @@ class HeadlessMemoService:
         if self._notes is not None:
             return self._notes
         notes: list[dict[str, Any]] = []
+        seed = False
         try:
             path = self._path()
             if path.is_file():
@@ -67,10 +138,29 @@ class HeadlessMemoService:
                     note = self._normalize(item)
                     if note:
                         notes.append(note)
+            else:
+                # 처음 켰다 - 기본 메모를 심는다. ⚠️ **파일이 없을 때만** 심는다.
+                #    비어 있는 파일은 "다 지웠다" 는 뜻이라 다시 심으면 안 된다.
+                notes = self._seed_notes()
+                seed = True
         except Exception as exc:  # noqa: BLE001 - 메모를 못 읽는다고 앱이 멈추면 안 된다
             print(f"[warn] memo load failed: {exc}", flush=True)
         self._notes = notes
+        if seed:
+            try:
+                self._save()
+            except Exception as exc:  # noqa: BLE001 - 못 써도 화면에는 보인다
+                print(f"[warn] memo seed write failed: {exc}", flush=True)
         return notes
+
+    @staticmethod
+    def _seed_notes() -> list[dict[str, Any]]:
+        """기본 메모. 목록이 `updated` 내림차순이라 **앞의 것이 위로** 오게 시간을 벌린다."""
+        base = _now()
+        return [
+            {"id": note_id, "body": body, "updated": base - index}
+            for index, (note_id, body) in enumerate(DEFAULT_NOTES)
+        ]
 
     def _save(self) -> None:
         notes = self._load()

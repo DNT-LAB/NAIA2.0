@@ -279,6 +279,8 @@ class HeadlessImg2ImgService:
                 "active": bool(character.get("active", True)),
                 "prompt": str(character.get("prompt") or ""),
                 "uc": str(character.get("uc") or ""),
+                # 캔버스 좌표(픽셀). 없으면 None - 화면이 마커를 안 그린다.
+                "position": character.get("position") if isinstance(character.get("position"), dict) else None,
             }
             for index, character in enumerate(state.get("characters") or [])
         ]
@@ -289,6 +291,9 @@ class HeadlessImg2ImgService:
             "active": True,
             "window_id": int(state.get("window_id", 0) or 0),
             "mode": mode,
+            # ⚠️ 캔버스 상태를 여기 안 실으면 화면이 캔버스를 볼 방법이 없다.
+            #    `canvas_state()` 만 만들어 두고 합치는 것을 빠뜨렸었다.
+            **self.canvas_state(),
             "source_label": str(state.get("source_label") or "Result Image"),
             "width": int(state.get("width", 0) or 0),
             "height": int(state.get("height", 0) or 0),

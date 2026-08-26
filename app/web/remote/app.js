@@ -3205,6 +3205,8 @@ function handleWsBlob(data) {
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = url;
   latestResultBlob = data instanceof Blob ? data : null;
+  // Inpaint 버튼은 '결과가 있는가' 로 열린다 - 결과가 바뀌는 이 자리에서 다시 잰다.
+  updateNaiDirectorButton();
   if (studioTabControl) studioTabControl.handleResultBlob(data);
   if (artistThumbControl && typeof artistThumbControl.handleResultBlob === 'function') {
     artistThumbControl.handleResultBlob(data);
@@ -3960,6 +3962,7 @@ function releaseLatestResultBuffers() {
   }
   latestResultBlob = null;
   latestImageMeta = null;
+  updateNaiDirectorButton();
 }
 
 // 결과/히스토리 컨텍스트 메뉴 "이미지 삭제" 핸들러.
@@ -5881,6 +5884,14 @@ function requestResultUpscale() {
   callResultImageAction('upscaleFromContext', {source: 'current'});
 }
 
+/** 현재 결과를 인페인트로 연다. 예전에는 결과 우클릭 메뉴 안에만 있어서, 고치고 싶을
+ *  때마다 메뉴를 뒤져야 했다 - Director 옆에 내놓는다(사용자 지정 2026-08-26). */
+function requestResultInpaint() {
+  if (!latestResultBlob) { showToast('결과 이미지가 없습니다', 'error'); return; }
+  callResultImageAction('requestPopupImageAction',
+    {blob: latestResultBlob, label: 'Result Image'}, 'inpaint');
+}
+
 // NAI Director Tools (제거 가능) — NAI 계정이 등록돼 있으면(api_status.nai_configured) 모드 무관 활성.
 function updateNaiDirectorButton() {
   if (naiDirectorBtn) naiDirectorBtn.disabled = !naiConfigured;
@@ -5889,6 +5900,13 @@ function updateNaiDirectorButton() {
   const upscaleBtn = $('resultUpscaleBtn');
   if (upscaleBtn) {
     upscaleBtn.disabled = !naiConfigured
+      || (currentMode || modeSelect?.value || '') !== 'NAI';
+  }
+  // 인페인트도 NAI 전용이다(라우트가 그렇게 막는다). 다만 계정 등록이 아니라
+  // **결과 이미지가 있는지**가 조건이다 - 없으면 열어도 보여 줄 게 없다.
+  const inpaintBtn = $('resultInpaintBtn');
+  if (inpaintBtn) {
+    inpaintBtn.disabled = !latestResultBlob
       || (currentMode || modeSelect?.value || '') !== 'NAI';
   }
 }

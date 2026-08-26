@@ -5596,6 +5596,14 @@ body.resizing-result-info {
   text-transform: none;
   cursor: pointer;
 }
+/* Upscale 은 글자가 짧다 - 공용 118px 을 그대로 쓰면 혼자 헐렁하고, 그만큼
+   Inpaint 가 들어갈 자리를 잡아먹는다(사용자 지적). */
+.result-upscale-btn {
+  min-width: 78px;
+}
+.result-inpaint-btn {
+  min-width: 84px;
+}
 .result-enhance-btn:hover:not(:disabled) {
   border-color: rgba(185,174,255,0.72);
   background: rgba(157,139,255,0.22);

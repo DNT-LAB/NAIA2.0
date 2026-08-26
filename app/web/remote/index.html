@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260826-artistthumb1">
+<link rel="stylesheet" href="style.css?v=20260826-inpaintbtn1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -896,8 +896,9 @@
                  쓰면 낮은 판에서 칩 자리를 그만큼 잡아먹는다(사용자 지적). -->
             <div class="ia-ge-groups" id="iaGlobalGroups" hidden></div>
             <div class="result-enhance-controls">
+              <button class="result-enhance-btn result-inpaint-btn" id="resultInpaintBtn" onclick="requestResultInpaint()" title="현재 결과를 인페인트로 엽니다 (V5 는 가상 캔버스)" disabled>Inpaint</button>
               <button class="result-enhance-btn nai-director-btn" id="naiDirectorBtn" onclick="openNaiDirector()" title="NAI Director Tools (현재 결과 변형)" disabled>Director</button>
-              <button class="result-enhance-btn" id="resultUpscaleBtn" onclick="requestResultUpscale()" title="NAI 2x 업스케일 (현재 결과) — Anlas 를 씁니다" disabled>Upscale</button>
+              <button class="result-enhance-btn result-upscale-btn" id="resultUpscaleBtn" onclick="requestResultUpscale()" title="NAI 2x 업스케일 (현재 결과) — Anlas 를 씁니다" disabled>Upscale</button>
               <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
               <button class="result-enhance-settings-btn" id="resultEnhanceSettingsBtn" title="Enhance settings" aria-label="Enhance settings">⚙</button>
             </div>
@@ -1332,6 +1333,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260826-artistthumb1"></script>
+<script src="app.js?v=20260826-inpaintbtn1"></script>
 </body>
 </html>

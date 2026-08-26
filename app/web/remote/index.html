@@ -1033,7 +1033,13 @@
           </section>
           <section class="artist-thumb-prompt-box">
             <label class="artist-thumb-field">
-              <span>Prefix</span>
+              <span class="artist-thumb-label-row">
+                <span>Prefix</span>
+                <span class="artist-thumb-label-actions">
+                  <button type="button" class="header-guide-btn" data-naia-guide="PREFIX — 생성·일괄 생성을 진행할 때 기본으로 쓰일 아티스트 태그 앞에 들어갈 태그를 삽입합니다.\n\n기본 권장값은 1girl 이며, 기호에 따라 퀄리티 태그·연도 태그·작품 태그 등을 앞에 넣을 수 있습니다.\n\n[기본값] 버튼을 누르면 권장값으로 되돌립니다.">ⓘ 가이드</button>
+                  <button type="button" class="artist-thumb-btn artist-thumb-default-btn" id="artistThumbPrefixDefaultBtn">기본값</button>
+                </span>
+              </span>
               <textarea class="artist-thumb-textarea" id="artistThumbPrefix" spellcheck="false"></textarea>
             </label>
             <label class="artist-thumb-field">
@@ -1047,7 +1053,13 @@
               <textarea class="artist-thumb-textarea artist-thumb-positive" id="artistThumbPositive" spellcheck="false" placeholder="artist:name"></textarea>
             </label>
             <label class="artist-thumb-field">
-              <span>Postfix</span>
+              <span class="artist-thumb-label-row">
+                <span>Postfix</span>
+                <span class="artist-thumb-label-actions">
+                  <button type="button" class="header-guide-btn" data-naia-guide="POSTFIX — 아티스트 태그 뒤에 들어갈 태그입니다. 잘 모른다면 기본값 사용을 권장합니다.\n\nhair between eyes 는 아티스트의 특징을 모를 때 머리와 눈을 모두 표현할 수 있게 하기 위해 권장됩니다.\n\n[기본값] 버튼을 누르면 권장값으로 되돌립니다.">ⓘ 가이드</button>
+                  <button type="button" class="artist-thumb-btn artist-thumb-default-btn" id="artistThumbPostfixDefaultBtn">기본값</button>
+                </span>
+              </span>
               <textarea class="artist-thumb-textarea" id="artistThumbPostfix" spellcheck="false"></textarea>
             </label>
           </section>

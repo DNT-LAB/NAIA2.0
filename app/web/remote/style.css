@@ -2358,6 +2358,18 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   gap: 8px;
   min-height: 22px;
 }
+/* PREFIX/POSTFIX 라벨 줄 오른쪽의 [ⓘ 가이드][기본값] 묶음. */
+.artist-thumb-label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.artist-thumb-default-btn {
+  padding: 2px 8px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
 .artist-thumb-weight-control {
   display: inline-flex;
   align-items: center;

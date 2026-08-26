@@ -41,6 +41,8 @@ export function createArtistThumbController({
   const weightSlider = document.getElementById('artistThumbWeightSlider');
   const weightInput = document.getElementById('artistThumbWeightInput');
   const postfixEl = document.getElementById('artistThumbPostfix');
+  const prefixDefaultBtn = document.getElementById('artistThumbPrefixDefaultBtn');
+  const postfixDefaultBtn = document.getElementById('artistThumbPostfixDefaultBtn');
   const generateBtn = document.getElementById('artistThumbGenerateBtn');
   const randomGenerateBtn = document.getElementById('artistThumbRandomGenerateBtn');
   const resultPreviewEl = document.getElementById('artistThumbResultPreview');
@@ -1085,6 +1087,22 @@ export function createArtistThumbController({
     return state.options;
   }
 
+  // 권장 기본값(사용자 지정 2026-08-26). 서버의 저장 기본값은 빈 문자열이라
+  // — 비워 둔 사람과 일부러 비운 사람을 가를 수 없어야 하므로 — 권장값은
+  // 버튼을 눌렀을 때만 들어간다. 자동으로 채우지 않는다.
+  const RECOMMENDED_PREFIX = '1girl';
+  const RECOMMENDED_POSTFIX = 'original, hair between eyes, medium breasts, year2025, '
+    + 'masterpiece, very aesthetic, high-quality digital art, high complexity';
+
+  /** 값만 넣으면 자동저장이 안 돌아간다 — `input` 을 직접 띄워 기존
+   *  자동저장(scheduleSaveOptions)에 태워 보낸다. */
+  function applyRecommended(el, value) {
+    if (!el) return;
+    el.value = value;
+    el.dataset.seeded = '1';
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+
   function readOptionFields() {
     return {
       prefix: prefixEl?.value || '',
@@ -1869,6 +1887,16 @@ export function createArtistThumbController({
     resultCloseBtn?.addEventListener('click', closeResultPreview);
     prefixEl?.addEventListener('input', scheduleSaveOptions);
     postfixEl?.addEventListener('input', scheduleSaveOptions);
+    // ⚠️ 버튼이 <label> 안에 있다 — preventDefault 없으면 라벨이 클릭을
+    //    텍스트에리어로 넘겨 커서가 뒤늦게 들어간다.
+    prefixDefaultBtn?.addEventListener('click', event => {
+      event.preventDefault();
+      applyRecommended(prefixEl, RECOMMENDED_PREFIX);
+    });
+    postfixDefaultBtn?.addEventListener('click', event => {
+      event.preventDefault();
+      applyRecommended(postfixEl, RECOMMENDED_POSTFIX);
+    });
     weightSlider?.addEventListener('input', event => setArtistWeight(event.target.value));
     weightInput?.addEventListener('input', event => setArtistWeight(event.target.value));
     // 커밋 시점(blur/Enter)에만 정규화 표시를 반영 — 입력 중 캐럿 점프 방지(위 가드와 짝).

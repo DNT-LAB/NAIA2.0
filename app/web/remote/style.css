@@ -26070,3 +26070,48 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .tag-filter-chip .chip-menu-btn:hover {
   border-color: rgba(95,151,255,0.6); background: rgba(95,151,255,0.18);
 }
+
+
+/* ===== V5 인페인트 가상 캔버스 (#inpaintCanvasPanel) ===== */
+.inpaint-canvas-panel { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; }
+.ic-bar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.ic-btn {
+  height: 20px; padding: 0 8px; border: 1px solid rgba(157,139,255,0.42); border-radius: 5px;
+  background: rgba(157,139,255,0.10); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700; cursor: pointer;
+}
+.ic-btn:hover:not(:disabled) { background: rgba(157,139,255,0.22); }
+.ic-btn:disabled { opacity: 0.4; cursor: default; }
+.ic-btn.is-on { background: rgba(124,106,239,0.34); border-color: rgba(185,174,255,0.8); }
+.ic-select { height: 20px; font-family: var(--font-mono); font-size: 10px; }
+.ic-sep { width: 1px; height: 14px; background: var(--border-dim); }
+.ic-readout { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); min-width: 34px; text-align: center; }
+.ic-off { font-size: 11px; color: var(--text-muted); padding: 8px 2px; }
+.ic-hint { font-size: 10px; color: var(--text-muted); }
+
+/* 스테이지는 캔버스 비율을 그대로 쥔다 - 좌표 환산이 비율에만 기댄다.
+   ⚠️ 화면을 줄여도(max-height) 비율이 유지돼야 마커가 안 어긋난다. */
+.ic-stage {
+  position: relative; width: 100%; max-height: 46vh; margin: 0 auto;
+  background: #202028; border: 1px solid var(--border-dim); border-radius: 6px;
+  overflow: hidden; touch-action: none; user-select: none;
+}
+.ic-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.ic-grid { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.pos-grid-line { fill: none; stroke: rgba(255,255,255,0.12); stroke-width: 1; }
+.pos-grid-mid { stroke: rgba(157,139,255,0.5); stroke-width: 1.5; }
+
+.ic-handle, .ic-marker {
+  position: absolute; transform: translate(-50%, -50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; cursor: grab; font-family: var(--font-mono); font-weight: 700;
+}
+.ic-handle {
+  width: 26px; height: 26px; font-size: 13px;
+  border: 1px solid rgba(255,255,255,0.85); background: rgba(20,20,28,0.78); color: #fff;
+}
+.ic-marker {
+  width: 22px; height: 22px; font-size: 11px;
+  border: 1px solid rgba(157,139,255,0.9); background: rgba(124,106,239,0.9); color: #fff;
+}
+.ic-handle.is-drag, .ic-marker.is-drag { cursor: grabbing; box-shadow: 0 0 0 3px rgba(157,139,255,0.35); }

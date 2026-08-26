@@ -227,6 +227,12 @@ class HeadlessImg2ImgService:
             "base_offset_y": 0,
             "base_width": int(image.width),
             "base_height": int(image.height),
+            # 베이스에 먹이는 변형. 캔버스 안에서 키우거나 돌린다.
+            "base_scale": 1.0,
+            "base_rotation": 0.0,
+            # 변형을 먹인 뒤의 크기(화면이 손잡이를 그리는 데 필요하다).
+            "placed_width": int(image.width),
+            "placed_height": int(image.height),
             # 사용자가 칠한 마스크(캔버스 좌표). 빈 곳 마스크와는 따로 보관해야
             # 오프셋을 다시 옮겼을 때 칠한 것을 잃지 않는다.
             "user_mask_bytes": b"",
@@ -348,6 +354,10 @@ class HeadlessImg2ImgService:
             "base_offset_y": int(state.get("base_offset_y") or 0),
             "base_width": int(state.get("base_width") or 0),
             "base_height": int(state.get("base_height") or 0),
+            "placed_width": int(state.get("placed_width") or 0),
+            "placed_height": int(state.get("placed_height") or 0),
+            "base_scale": float(state.get("base_scale") or 1.0),
+            "base_rotation": float(state.get("base_rotation") or 0.0),
         }
 
     def generation_event_payload(self) -> dict[str, Any]:
@@ -563,6 +573,15 @@ class HeadlessImg2ImgService:
             return self._set_canvas_size(value)
         elif key == "base_offset":
             return self._set_base_offset(value)
+        elif key == "base_scale":
+            return self._set_base_transform(scale=value)
+        elif key == "base_rotation":
+            return self._set_base_transform(rotation=value)
+        elif key == "base_reset":
+            state = context.img2img_session
+            state["base_scale"], state["base_rotation"] = 1.0, 0.0
+            state["base_offset_x"] = state["base_offset_y"] = 0
+            return self._recompose_canvas() if state.get("canvas_active") else self.module_state()
         elif key.startswith("char_position_"):
             index = context._index_from_key(key, "char_position_")
             chars = context.img2img_session.setdefault("characters", [])
@@ -706,11 +725,15 @@ class HeadlessImg2ImgService:
             canvas_h=int(state.get("canvas_height") or base.height),
             offset_x=int(state.get("base_offset_x") or 0),
             offset_y=int(state.get("base_offset_y") or 0),
+            scale=state.get("base_scale", 1.0),
+            rotation=state.get("base_rotation", 0.0),
             user_mask=user_mask,
         )
         state["image_bytes"] = payload["canvas_bytes"]
         state["width"], state["height"] = payload["width"], payload["height"]
         state["base_offset_x"], state["base_offset_y"] = payload["offset_x"], payload["offset_y"]
+        state["placed_width"], state["placed_height"] = payload["placed_width"], payload["placed_height"]
+        state["base_scale"], state["base_rotation"] = payload["scale"], payload["rotation"]
         state["mask_bytes"] = payload["mask_bytes"]
         state["has_mask"] = bool(payload["has_mask"])
         if payload["has_mask"]:
@@ -745,6 +768,20 @@ class HeadlessImg2ImgService:
         state = self.context.img2img_session
         state["canvas_width"], state["canvas_height"] = int(width), int(height)
         state["canvas_active"] = True
+        return self._recompose_canvas()
+
+    def _set_base_transform(self, *, scale: Any = None, rotation: Any = None) -> dict[str, Any]:
+        """확대/회전. 오프셋과 달리 **캔버스를 자동으로 켜지 않는다** - 캔버스가 꺼진
+        상태에서 베이스를 돌리면 전송 이미지가 말없이 달라져 예전 동작이 깨진다."""
+        from utils.v5_inpaint_canvas import clamp_scale, normalize_rotation
+
+        state = self.context.img2img_session
+        if scale is not None:
+            state["base_scale"] = clamp_scale(scale)
+        if rotation is not None:
+            state["base_rotation"] = normalize_rotation(rotation)
+        if not state.get("canvas_active"):
+            return self.module_state()
         return self._recompose_canvas()
 
     def _set_base_offset(self, value: Any) -> dict[str, Any]:

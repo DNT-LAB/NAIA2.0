@@ -57,10 +57,61 @@ def clamp_offset(
     return off_x, off_y
 
 
+# 베이스 확대/축소 한계. 너무 줄이면 캔버스에 점만 남고, 너무 키우면 합성이 느려진다.
+MIN_SCALE = 0.1
+MAX_SCALE = 4.0
+
+
+def clamp_scale(value: Any) -> float:
+    try:
+        scale = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if scale != scale or scale <= 0:      # NaN 방어
+        return 1.0
+    return round(min(MAX_SCALE, max(MIN_SCALE, scale)), 4)
+
+
+def normalize_rotation(value: Any) -> float:
+    """0~360 으로 접는다. 임의 각도를 받는다 - 90도 배수로 제한하지 않는다."""
+    try:
+        angle = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if angle != angle:
+        return 0.0
+    return round(angle % 360.0, 2)
+
+
+def transform_base(base_image: Image.Image, scale: Any = 1.0, rotation: Any = 0.0) -> Image.Image:
+    """베이스에 확대/회전을 먹인다.
+
+    ⚠️ 회전은 `expand=True` 다. 안 그러면 기울인 모서리가 잘려 나간다 - 사용자는
+       '회전했더니 그림이 깎였다' 로만 본다.
+    ⚠️ 회전으로 생기는 삼각형 여백은 **캔버스 배경색**으로 채운다. 그래야 그 자리가
+       '빈 곳'으로 보이고, 아래 `uncovered_mask` 와 색이 어긋나지 않는다.
+    """
+    source = base_image if base_image.mode == "RGB" else base_image.convert("RGB")
+    factor = clamp_scale(scale)
+    if factor != 1.0:
+        width = max(1, int(round(source.width * factor)))
+        height = max(1, int(round(source.height * factor)))
+        source = source.resize((width, height), Image.Resampling.LANCZOS)
+    angle = normalize_rotation(rotation)
+    if angle:
+        source = source.rotate(
+            angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=CANVAS_BACKGROUND
+        )
+    return source
+
+
 def compose_canvas(
     base_image: Image.Image, canvas_w: int, canvas_h: int, offset_x: int, offset_y: int
 ) -> Image.Image:
-    """베이스를 오프셋 위치에 올린 캔버스. 나머지는 배경색."""
+    """베이스를 오프셋 위치에 올린 캔버스. 나머지는 배경색.
+
+    베이스는 이미 `transform_base` 를 거친 것을 넘겨야 한다 - 여기서는 붙이기만 한다.
+    """
     canvas = Image.new("RGB", (int(canvas_w), int(canvas_h)), CANVAS_BACKGROUND)
     source = base_image
     if source.mode != "RGB":
@@ -137,18 +188,24 @@ def build_payload(
     canvas_h: int,
     offset_x: int,
     offset_y: int,
+    scale: Any = 1.0,
+    rotation: Any = 0.0,
     user_mask: Image.Image | None = None,
 ) -> dict[str, Any]:
     """인페인트 요청에 실을 캔버스/마스크 한 벌.
 
     마스크는 **사용자가 칠한 것 + 베이스가 못 덮은 빈 곳**을 합친 것이다.
+
+    ⚠️ 확대/회전을 **먼저** 먹인다. 변형 뒤의 크기로 오프셋을 가두고 빈 곳을 재야
+       한다 - 원본 크기로 재면 회전해서 커진 만큼이 빈 곳으로 잘못 잡힌다.
     """
+    placed = transform_base(base_image, scale, rotation)
     offset_x, offset_y = clamp_offset(
-        canvas_w, canvas_h, base_image.width, base_image.height, offset_x, offset_y
+        canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y
     )
-    canvas = compose_canvas(base_image, canvas_w, canvas_h, offset_x, offset_y)
+    canvas = compose_canvas(placed, canvas_w, canvas_h, offset_x, offset_y)
     gap = uncovered_mask(
-        canvas_w, canvas_h, base_image.width, base_image.height, offset_x, offset_y
+        canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y
     )
     if mask_is_empty(gap):
         gap = None
@@ -162,5 +219,9 @@ def build_payload(
         "height": int(canvas.height),
         "offset_x": offset_x,
         "offset_y": offset_y,
+        "placed_width": int(placed.width),
+        "placed_height": int(placed.height),
+        "scale": clamp_scale(scale),
+        "rotation": normalize_rotation(rotation),
         "has_mask": merged is not None and not mask_is_empty(merged),
     }

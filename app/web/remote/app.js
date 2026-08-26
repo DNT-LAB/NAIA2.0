@@ -451,6 +451,7 @@ let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
 let sequencePresetControl = null;
+let inpaintCanvasControl = null;
 let inpaintSequenceControl = null;
 let v5SceneControl = null;
 let danbooruFeedbackControl = null;
@@ -2112,6 +2113,15 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   })
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
+  });
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintcanvas1')
+  .then(({createInpaintCanvasPanel}) => {
+    inpaintCanvasControl = createInpaintCanvasPanel({
+      panel: $('inpaintCanvasPanel'), escHtml, setModuleParam, showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize inpaint canvas panel', error);
   });
 const inpaintSequenceReady = import('./js/features/inpaintSequencePanel.mjs?v=20260825-isequence1')
   .then(({createInpaintSequencePanel}) => {
@@ -9109,6 +9119,11 @@ function onModuleState(m) {
   // Frozen wildcard bar must stay live even when the wildcard panel isn't the
   // open module — freeze/unfreeze/reroll all broadcast a fresh wildcard state.
   if (m.module_id === 'wildcard') updateFrozenWildcardBar(m.frozen);
+
+  // ⚠️ **이 게이트 앞이어야 한다.** 아래 `currentModuleId` 검사는 '지금 열려 있는
+  //    모듈' 만 렌더하는데, V5 가상 캔버스는 모듈 팝업이 아니라 **Result 안에** 산다.
+  //    뒤에 두면 팝업을 열어 두지 않는 한 캔버스가 영영 안 그려진다(실측).
+  if (m.module_id === 'img2img') inpaintCanvasControl?.handleModuleState?.(m);
 
   if (m.module_id !== currentModuleId) return;
   renderModuleState(m);

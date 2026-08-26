@@ -18736,6 +18736,11 @@ select.setup-input { cursor: pointer; }
 .nai-acct-row.is-forced {
   border-color: rgba(111,140,255,0.45); background: rgba(111,140,255,0.10);
 }
+/* 안전장치의 판정 기준. 계정을 지목하면 기준이 그 계정 하나로 좁아지는데,
+   그건 스위치의 뜻이 바뀌는 것이라 눈에 띄어야 한다(사용자 지정 2026-08-27).
+   색은 화면이 이미 '지금 이것' 에 쓰는 연노랑(`is-next`)과 같다. */
+.nai-acct-basis.is-narrow { color: #f2e08a; }
+
 /* '이 계정만 사용' 꼬리표. 지목한 줄에만 붙는다 - 정책 라디오가 전부 꺼져 있는
    이유를 여기서 말해 준다. */
 .nai-acct-only {

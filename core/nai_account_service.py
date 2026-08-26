@@ -61,7 +61,7 @@ POLICY_KEY_ANLAS = "load_balancing_policy_anlas"
 
 # 활성 계정이 **전부** 무료 사용량 0% 에 닿으면 Auto Gen 을 스스로 끈다(사용자 지정).
 # 계열마다 갈리지 않는 하나의 스위치다 - 무료 풀은 V5 에만 있으므로 판정 자체가
-# V5 에서만 뜻을 가진다(`all_active_accounts_exhausted` 참조).
+# V5 에서만 뜻을 가진다(`generation_quota_exhausted` 참조).
 STOP_ON_EXHAUSTED_KEY = "stop_auto_gen_on_exhausted"
 
 # 사용자가 **직접 고른 계정**(사용자 지정 2026-08-27). 비어 있으면 부하 분산 정책을
@@ -139,16 +139,23 @@ def cached_account_usage(context: Any) -> dict[str, Any]:
     return {}
 
 
-def all_active_accounts_exhausted(context: Any) -> bool:
-    """활성 계정이 **전부** 무료 사용량 0% 에 닿았는가.
+def generation_quota_exhausted(context: Any) -> bool:
+    """**이번 생성이 쓸 계정들**이 전부 무료 사용량 0% 에 닿았는가.
 
     ⚠️ '완전히 0' 이 아니다(사용자 정정). Anlas 는 남아 있어도 이 풀이 마르면 그
        다음 장부터 유료다 - 밤새 도는 Auto Gen 이 그 선을 조용히 넘는 것을 막자는
        판정이다. **하나라도 남아 있으면 False** 다(부하 분산이 남은 계정으로 옮겨
        계속 무료로 생성한다).
 
+    ⚠️ **계정을 하나 지목했으면 그 계정만 본다**(사용자 지정 2026-08-27). 지목하면
+       생성은 그 계정으로만 나가므로, '모든 계정' 을 기다리면 지목한 계정이 마른
+       뒤에도 안전장치가 안 걸려 **Anlas 로 계속 태운다** - 다른 계정에 남은 잔량은
+       이번 생성에 쓰이지 않는데도 판정을 붙잡고 있는 셈이다.
+       화면의 스위치 설명도 이때 '선택 계정 사용량 0% 기준' 으로 바뀐다 - 판정과
+       설명은 같은 것을 말해야 한다.
+
     ⚠️ **모르면 False 다.** 캐시가 비었거나(폴러가 아직 못 채웠거나 조회가 실패했거나)
-       활성 계정 중 하나라도 값을 모르면 판단하지 않는다 - 모르는 것을 소진으로 읽으면
+       보는 계정 중 하나라도 값을 모르면 판단하지 않는다 - 모르는 것을 소진으로 읽으면
        멀쩡한 루프가 이유 없이 죽는다.
     """
     if not context_uses_usage_limit(context):
@@ -157,7 +164,13 @@ def all_active_accounts_exhausted(context: Any) -> bool:
     if not usage:
         return False
     try:
-        active = [account_id for account_id, _ in NaiAccountService(context).active_accounts()]
+        service = NaiAccountService(context)
+        active = [account_id for account_id, _ in service.active_accounts()]
+        # 지목한 계정이 있으면 그 하나가 곧 '이번 생성이 쓸 계정' 이다.
+        # `forced_account()` 는 못 쓰는 값이면 빈 문자열을 돌려주므로 자연히 전체로 돌아간다.
+        forced = service.forced_account()
+        if forced:
+            active = [forced]
     except Exception:       # noqa: BLE001 - 판정 하나 때문에 생성 루프가 죽으면 안 된다
         return False
     if not active:
@@ -634,7 +647,7 @@ class NaiAccountService:
         """모든 계정이 0% 에 닿으면 Auto Gen 을 끌 것인가(사용자 지정).
 
         계열을 나누지 않는다 - 무료 풀은 V5 에만 있으므로 비V5 에서는 판정이 애초에
-        서지 않는다(`all_active_accounts_exhausted`).
+        서지 않는다(`generation_quota_exhausted`).
         """
         data = self.load()
         data[STOP_ON_EXHAUSTED_KEY] = bool(enabled)

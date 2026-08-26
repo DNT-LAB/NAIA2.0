@@ -356,13 +356,20 @@ export function createNaiAccountPanel({
    */
   function guardHtml() {
     const on = !!state.stopOnExhausted;
+    // ⚠️ **기준이 상태에 따라 달라진다.** 계정을 하나 지목하면 생성이 그 계정으로만
+    //    나가므로 백엔드도 그 계정 하나로 판정한다(`generation_quota_exhausted`).
+    //    설명이 '모든 계정' 이라고 계속 말하면 거짓말이 된다 - 바뀐 자리를 눈에
+    //    띄게 적어 준다(사용자 지정 2026-08-27).
+    const narrow = !!state.forcedAccount;
+    const basis = narrow ? '(선택 계정 사용량 0% 기준)' : '(모든 계정 사용량 0% 기준)';
     return '<div class="nai-acct-sec">Safety</div>'
       + `<button type="button" class="nai-acct-policy nai-acct-guard${on ? ' on' : ''}"`
       + ` data-act="guard" aria-pressed="${on ? 'true' : 'false'}">`
       + `<span class="nai-acct-check">${on ? '✔' : ''}</span>`
       + '<span class="nai-acct-policy-text">'
       + '<b>사용량 0% 도달 시 자동 생성 해제</b>'
-      + '<em>Auto Gen 을 끕니다. Automation 정책보다 우선합니다. (모든 계정 사용량 0% 기준)</em>'
+      + '<em>Auto Gen 을 끕니다. Automation 정책보다 우선합니다. '
+      + `<span class="nai-acct-basis${narrow ? ' is-narrow' : ''}">${basis}</span></em>`
       + '</span></button>';
   }
 

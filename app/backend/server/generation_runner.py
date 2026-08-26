@@ -1002,7 +1002,10 @@ def _auto_gen_loop_engaged(context: WebSessionContext, request=None) -> bool:
 
 
 def _auto_gen_quota_exhausted(context: WebSessionContext) -> bool:
-    """'모든 계정 사용량 0% 도달 시 자동 생성 해제' 가 켜져 있고, 실제로 닿았는가.
+    """'사용량 0% 도달 시 자동 생성 해제' 가 켜져 있고, 실제로 닿았는가.
+
+    ⚠️ 기준은 **이번 생성이 쓸 계정들**이다. 계정을 하나 지목했으면 그 계정 하나가
+       기준이 된다(`generation_quota_exhausted` 주석 참조).
 
     스위치와 판정을 **여기서 함께** 본다 - 스위치가 꺼져 있으면 계정 파일도 사용량도
     읽을 이유가 없다.
@@ -1011,12 +1014,12 @@ def _auto_gen_quota_exhausted(context: WebSessionContext) -> bool:
         from core.nai_account_service import (
             STOP_ON_EXHAUSTED_KEY,
             NaiAccountService,
-            all_active_accounts_exhausted,
+            generation_quota_exhausted,
         )
 
         if not bool(NaiAccountService(context).load().get(STOP_ON_EXHAUSTED_KEY, False)):
             return False
-        return all_active_accounts_exhausted(context)
+        return generation_quota_exhausted(context)
     except Exception:   # noqa: BLE001 - 안전장치 하나 때문에 루프가 죽으면 안 된다
         return False
 

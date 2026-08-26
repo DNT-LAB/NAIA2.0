@@ -1764,6 +1764,16 @@ export function createArtistThumbController({
     // 서버가 썸네일로 저장했으면 카드에 바로 반영한다(재시작 후에도 남는 그림).
     if (meta.artist_thumb_saved && meta.artist_thumb_url) {
       applySavedThumbnail(artist, meta.artist_thumb_url);
+      // ⚠️ 처음 쓰는 모델이면 FILTER 의 '생성한 모델' 에 그 줄이 아직 없다 — 서버는
+      //    이미 알고 있으므로 state 만 다시 받아 목록을 고친다.
+      //
+      //    판단은 **화면의 select 를 직접 본다.** 목적이 "사용자가 그 모델을 고를 수
+      //    있는가" 이기 때문이다(내부 state 와 화면이 어긋나도 화면 쪽이 진실이다).
+      //    매번 부르지는 않는다 - `/state` 가 60ms 인데 일괄생성이면 장마다 쌓인다.
+      const modelKey = meta.artist_thumb_model ? `model:${meta.artist_thumb_model}` : '';
+      const shown = modelKey && filterEl
+        && [...filterEl.options].some(option => option.value === modelKey);
+      if (modelKey && !shown) fetchState({force: true}).catch(() => {});
     }
     setResultBlobUrl(rememberedEntry?.url || URL.createObjectURL(blob), !rememberedEntry);
     resultPreviewOpen = true;

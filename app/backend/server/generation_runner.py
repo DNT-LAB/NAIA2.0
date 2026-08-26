@@ -1699,7 +1699,8 @@ async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dic
     saved = None
     try:
         saved = await asyncio.to_thread(
-            artist_thumbnail_service(context).save_generated_thumbnail, image, artist, model
+            artist_thumbnail_service(context).save_generated_thumbnail,
+            image, artist, model, str(params.get("api_mode") or ""),
         )
     except Exception as exc:   # noqa: BLE001
         print(f"[artist-thumb] thumbnail save failed: {exc}", flush=True)
@@ -1708,6 +1709,7 @@ async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dic
         "artist_thumb_saved": bool(saved),
         "artist_thumb_url": str(saved.get("url") or "") if isinstance(saved, dict) else "",
         "artist_thumb_model": str(saved.get("model") or "") if isinstance(saved, dict) else "",
+        "artist_thumb_api_mode": str(saved.get("api_mode") or "") if isinstance(saved, dict) else "",
     })
 
 

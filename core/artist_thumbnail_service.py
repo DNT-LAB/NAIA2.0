@@ -638,6 +638,7 @@ class ArtistThumbnailService:
             return [artist for artist in banned if artist in weights], "제외 작가"
         if key.startswith("model:"):
             model_name = key.split(":", 1)[1].strip()
+            # 지금 모드 안에서만 (백엔드가 다르면 그림의 결이 다르다).
             items = [a for a in self.generated_artists_for_model(model_name) if a in weights]
             return ([a for a in items if a not in banned_set] if exclude_banned else items), model_name
         if key.startswith("custom:"):
@@ -762,20 +763,22 @@ class ArtistThumbnailService:
         except Exception:
             favorite_thumb_items = {}
 
+        # ⚠️ **지금 모드의 것만 본다.** 백엔드가 다르면 그림의 결이 전혀 다르다.
+        api_key = self._generated_api_key()
         try:
-            generated_index = self.generated_index()
+            generated_models = self.generated_index().get(api_key, {})
         except Exception:
-            generated_index = {}
+            generated_models = {}
         # 모델 필터로 보고 있으면 **그 모델의** 그림을 보여 준다. 아니면 가장 최근 것.
         filter_model = (str(filter_key or "")[len("model:"):]
                         if str(filter_key or "").startswith("model:") else "")
         generated_lookup: dict[str, str] = {}
         if filter_model:
-            for artist_name in generated_index.get(self._generated_model_key(filter_model), {}):
+            for artist_name in generated_models.get(self._generated_model_key(filter_model), {}):
                 generated_lookup[artist_name] = filter_model
         else:
             newest: dict[str, tuple[str, str]] = {}
-            for model_name, entries in generated_index.items():
+            for model_name, entries in generated_models.items():
                 for artist_name, entry in entries.items():
                     stamp = entry.get("updated_at") or ""
                     if artist_name not in newest or stamp > newest[artist_name][0]:
@@ -792,7 +795,7 @@ class ArtistThumbnailService:
             if artist in favorite_thumb_items:
                 return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
             if artist in generated_lookup:
-                return self._generated_image_url(artist, generated_lookup[artist])
+                return self._generated_image_url(artist, generated_lookup[artist], api_key)
             return ""
 
         return {
@@ -875,32 +878,43 @@ class ArtistThumbnailService:
     GENERATED_THUMB_MAX_SIZE = (896, 1152)
     GENERATED_UNKNOWN_MODEL = "unknown"
 
-    # 인덱스 = {"version": 2, "items": {model: {artist: {"filename", "updated_at"}}}}
-    # ⚠️ **모델(폴더) 단위다**(사용자 지정 2026-08-26). 같은 아티스트라도 모델이 다르면
-    #    그림이 전혀 다르므로 한 칸에 뭉쳐 두면 어느 모델 것인지 알 수 없다.
-    def generated_index(self) -> dict[str, dict[str, dict[str, str]]]:
+    # 인덱스 = {"version": 3, "items": {api_mode: {model: {artist: {filename, updated_at}}}}}
+    #
+    # ⚠️ **api_mode 가 맨 위 층이다**(사용자 지정 2026-08-26). 앱은 이미 모드별 파라미터
+    #    plane(`remote_param_planes`)을 갖고 있고, 백엔드가 다르면 같은 아티스트라도
+    #    그림의 결이 전혀 다르다. 게다가 WEBUI/COMFYUI 의 `model` 은 체크포인트 파일
+    #    이름이라 NAI 의 모델 키와 성격이 다르고, ComfyUI LOCKED 워크플로우나 모델을
+    #    못 읽은 경우 모두 `unknown` 으로 떨어져 **백엔드끼리 섞인다** - 그 충돌을 막는다.
+    # ⚠️ 그 아래가 모델(폴더)이다. 같은 모델이라도 아티스트마다 한 장씩.
+    def generated_index(self) -> dict[str, dict[str, dict[str, dict[str, str]]]]:
         """읽기 실패는 빈 dict 로 삼킨다(썸네일 하나 때문에 탭이 죽으면 안 된다)."""
         try:
             data = json.loads(self._generated_index_path().read_text(encoding="utf-8"))
         except Exception:
             return {}
         items = data.get("items") if isinstance(data, dict) else None
-        if not isinstance(items, dict):
+        if not isinstance(items, dict) or int(data.get("version") or 0) < 3:
+            # v1(평면) · v2(모델만)는 버린다 - 배포 전 형식이라 쓰는 사람이 없다.
             return {}
-        out: dict[str, dict[str, dict[str, str]]] = {}
-        for model, entries in items.items():
-            # v1(평면 {artist: filename})은 버린다 - 배포 전 형식이라 쓰는 사람이 없다.
-            if not isinstance(entries, dict):
+        out: dict[str, dict[str, dict[str, dict[str, str]]]] = {}
+        for api_mode, models in items.items():
+            if not isinstance(models, dict):
                 continue
-            bucket = {}
-            for artist, entry in entries.items():
-                if isinstance(entry, dict) and entry.get("filename"):
-                    bucket[str(artist)] = {
-                        "filename": str(entry.get("filename")),
-                        "updated_at": str(entry.get("updated_at") or ""),
-                    }
-            if bucket:
-                out[str(model)] = bucket
+            mode_bucket: dict[str, dict[str, dict[str, str]]] = {}
+            for model, entries in models.items():
+                if not isinstance(entries, dict):
+                    continue
+                bucket = {}
+                for artist, entry in entries.items():
+                    if isinstance(entry, dict) and entry.get("filename"):
+                        bucket[str(artist)] = {
+                            "filename": str(entry.get("filename")),
+                            "updated_at": str(entry.get("updated_at") or ""),
+                        }
+                if bucket:
+                    mode_bucket[str(model)] = bucket
+            if mode_bucket:
+                out[str(api_mode)] = mode_bucket
         return out
 
     def _write_generated_index(self, index: dict) -> None:
@@ -908,7 +922,7 @@ class ArtistThumbnailService:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = target.with_name(target.name + ".tmp")
         with open(tmp_path, "w", encoding="utf-8") as handle:
-            json.dump({"version": 2, "items": index}, handle, ensure_ascii=False, indent=2)
+            json.dump({"version": 3, "items": index}, handle, ensure_ascii=False, indent=2)
         tmp_path.replace(target)
 
     @staticmethod
@@ -916,11 +930,21 @@ class ArtistThumbnailService:
         safe = re.sub(r'[<>:"/\\|?*]', "_", str(value or "").strip()).strip(". ")
         return safe or fallback
 
+    def _current_api_mode(self) -> str:
+        try:
+            return str(self._mode_getter() or "").strip().upper() or "NAI"
+        except Exception:
+            return "NAI"
+
+    def _generated_api_key(self, api_mode: str = "") -> str:
+        return self._safe_component(api_mode or self._current_api_mode(), "NAI").upper()
+
     def _generated_model_key(self, model: str) -> str:
         return self._safe_component(model, self.GENERATED_UNKNOWN_MODEL)
 
-    def save_generated_thumbnail(self, pil_image: Any, artist: str, model: str = "") -> dict[str, Any] | None:
-        """생성 결과를 (모델, 아티스트) 칸에 남긴다. **매번 덮어쓴다**(사용자 결정).
+    def save_generated_thumbnail(self, pil_image: Any, artist: str, model: str = "",
+                                 api_mode: str = "") -> dict[str, Any] | None:
+        """생성 결과를 (api_mode, 모델, 아티스트) 칸에 남긴다. **매번 덮어쓴다**(사용자 결정).
 
         ⚠️ 최종 경로에 바로 쓰면 덮어쓰는 동안 들어온 GET 이 **잘린 파일**을 받는다.
            임시 파일 -> replace 로 맞춘다(캐릭터 뷰어와 같은 방식).
@@ -930,8 +954,9 @@ class ArtistThumbnailService:
             return None
         from PIL import Image
 
+        api_key = self._generated_api_key(api_mode)
         model_key = self._generated_model_key(model)
-        target_dir = self._generated_dir() / model_key
+        target_dir = self._generated_dir() / api_key / model_key
         target_dir.mkdir(parents=True, exist_ok=True)
         filename = self._safe_component(artist_name, "artist") + ".webp"
         target = target_dir / filename
@@ -946,71 +971,80 @@ class ArtistThumbnailService:
 
         with self._lock:
             index = self.generated_index()
-            index.setdefault(model_key, {})[artist_name] = {
+            index.setdefault(api_key, {}).setdefault(model_key, {})[artist_name] = {
                 "filename": filename,
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
             }
             self._write_generated_index(index)
             # 덮어썼으니 이전 바이트를 물고 있는 캐시를 버린다.
-            self._image_cache.pop(("__generated__", model_key, artist_name), None)
-            self._image_cache.pop(("__generated__", "", artist_name), None)
+            for key in list(self._image_cache):
+                if key[:1] == ("__generated__",) and key[-1] == artist_name:
+                    self._image_cache.pop(key, None)
         return {
             "artist": artist_name,
+            "api_mode": api_key,
             "model": model_key,
             "filename": filename,
-            "url": self._generated_image_url(artist_name, model_key),
-            "count": sum(len(v) for v in index.values()),
+            "url": self._generated_image_url(artist_name, model_key, api_key),
+            "count": sum(len(m) for models in index.values() for m in models.values()),
         }
 
     @staticmethod
-    def _generated_image_url(artist: str, model: str = "") -> str:
+    def _generated_image_url(artist: str, model: str = "", api_mode: str = "") -> str:
         url = f"/api/artist-thumb/generated-image?artist={quote(str(artist), safe='')}"
         if model:
             url += f"&model={quote(str(model), safe='')}"
+        if api_mode:
+            url += f"&api={quote(str(api_mode), safe='')}"
         return url
 
-    def _generated_entry(self, artist: str, model: str = "") -> tuple[str, str] | None:
-        """(model_key, filename). 모델을 안 주면 **가장 최근** 것을 고른다."""
-        index = self.generated_index()
+    def _generated_entry(self, artist: str, model: str = "",
+                         api_mode: str = "") -> tuple[str, str, str] | None:
+        """(api_key, model_key, filename). 모델을 안 주면 그 모드 안에서 **가장 최근** 것."""
+        api_key = self._generated_api_key(api_mode)
+        models = self.generated_index().get(api_key, {})
         if model:
-            entry = index.get(self._generated_model_key(model), {}).get(artist)
-            return (self._generated_model_key(model), entry["filename"]) if entry else None
+            model_key = self._generated_model_key(model)
+            entry = models.get(model_key, {}).get(artist)
+            return (api_key, model_key, entry["filename"]) if entry else None
         best: tuple[str, str, str] | None = None   # (updated_at, model, filename)
-        for model_key, entries in index.items():
+        for model_key, entries in models.items():
             entry = entries.get(artist)
             if not entry:
                 continue
             stamp = entry.get("updated_at") or ""
             if best is None or stamp > best[0]:
                 best = (stamp, model_key, entry["filename"])
-        return (best[1], best[2]) if best else None
+        return (api_key, best[1], best[2]) if best else None
 
-    def generated_models(self) -> list[dict[str, Any]]:
-        """생성 썸네일이 있는 모델 목록. FILTER 하단에 나열된다."""
-        index = self.generated_index()
+    def generated_models(self, api_mode: str = "") -> list[dict[str, Any]]:
+        """지금 모드에서 생성 썸네일이 있는 모델 목록. FILTER 하단에 나열된다."""
+        models = self.generated_index().get(self._generated_api_key(api_mode), {})
         return [
             {"key": f"model:{model}", "name": model, "count": len(entries)}
-            for model, entries in sorted(index.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+            for model, entries in sorted(models.items(), key=lambda kv: (-len(kv[1]), kv[0]))
             if entries
         ]
 
-    def generated_artists_for_model(self, model: str) -> list[str]:
-        return sorted(self.generated_index().get(self._generated_model_key(model), {}).keys())
+    def generated_artists_for_model(self, model: str, api_mode: str = "") -> list[str]:
+        models = self.generated_index().get(self._generated_api_key(api_mode), {})
+        return sorted(models.get(self._generated_model_key(model), {}).keys())
 
-    def generated_image_payload(self, artist: str, model: str = "") -> tuple[bytes, str]:
+    def generated_image_payload(self, artist: str, model: str = "",
+                                api_mode: str = "") -> tuple[bytes, str]:
         artist_name = str(artist or "").strip()
         if not artist_name:
             raise ValueError("artist is required")
-        cache_key = ("__generated__", str(model or ""), artist_name)
+        cache_key = ("__generated__", self._generated_api_key(api_mode), str(model or ""), artist_name)
         with self._lock:
             cached = self._image_cache.get(cache_key)
             if cached:
                 return cached
-            found = self._generated_entry(artist_name, str(model or ""))
+            found = self._generated_entry(artist_name, str(model or ""), api_mode)
         if not found:
             raise FileNotFoundError(f"Generated artist thumbnail not found: {artist_name}")
-        model_key, filename = found
-        path = self._generated_dir() / model_key / filename
+        api_key, model_key, filename = found
+        path = self._generated_dir() / api_key / model_key / filename
         try:
             payload = (path.read_bytes(), "image/webp")
         except OSError as exc:

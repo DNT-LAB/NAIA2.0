@@ -26291,6 +26291,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border-radius: 999px; cursor: grab; font-family: var(--font-mono); font-weight: 700;
 }
 .ic-marker {
+  /* 표시 전용 - 끌리지 않는다(좌표를 고치는 곳은 POS 편집 하나뿐). */
+  pointer-events: none;
   width: 22px; height: 22px; font-size: 11px;
   border: 1px solid rgba(157,139,255,0.9); background: rgba(124,106,239,0.9); color: #fff;
 }

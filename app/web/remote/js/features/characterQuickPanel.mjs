@@ -1163,9 +1163,14 @@ export function createCharacterQuickPanel({
   /** Interactive 가 켜져 있거나 NAI 모드가 아니면 자리를 비운다. */
   function setVisible(next) {
     visible = !!next;
-    // 보이기로 했는데 아직 그린 적이 없으면 지금 그린다. 상태는 module_state 가
-    // 오기 전이라 없을 수 있는데, 그때는 render 가 알아서 물러난다.
-    if (visible && !mount && lastState) render(lastState, true);
+    // 보이기로 했으면 **다시 그린다.**
+    //
+    // ⚠️ 예전에는 `!mount` 일 때만 그렸다. 그런데 `render()` 는 안 보이는 동안 온 상태를
+    //    `lastState` 에 넣어 두기만 하고 DOM 은 안 건드린다 - 이미 mount 가 있으면 그
+    //    사이에 온 상태가 **영영 화면에 못 올라온다.** 사용자가 한 번 누를 때까지
+    //    옛 화면이 남는다(사용자 제보 2026-08-26: 인페인트에 들어가도 (가상) 이
+    //    바로 안 뜨고 누른 뒤에야 바뀐다).
+    if (visible && lastState) render(lastState, true);
     // POS 편집 중에는 패널을 감춘다(A안) - 띠의 종료 버튼이 나가는 문이다.
     if (mount) mount.classList.toggle('open', visible && !posEditing);
     // 패널이 사라지면 편집도 끝난다 - 무대만 남으면 나갈 문이 없다.

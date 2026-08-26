@@ -334,6 +334,8 @@ export function createInteractivePanel({
   blocksMount,
   panelMount,
   toggleButton,
+  // 지금 Interactive 로 들어가도 되는가. false 를 주면 진입만 막는다(나가기는 늘 허용).
+  canEnter = null,
   escHtml = value => String(value == null ? '' : value),
   onPromptChange = () => {},
   onActiveChange = () => {},
@@ -8595,6 +8597,10 @@ export function createInteractivePanel({
       showToast('Interactive 모드는 현재 NAI에서만 지원됩니다.', 'error');
       return;
     }
+    // ⚠️ 인페인트 세션이 화면을 잡고 있으면 **들어가지 않는다**(사용자 지정 2026-08-26).
+    //    Interactive 는 프롬프트를 블록에서 다시 조립하는데, 인페인트는 그 세션의
+    //    프롬프트로 고치는 일이라 둘이 같은 자리를 다툰다. 나가는 것은 막지 않는다.
+    if (!active && canEnter && !canEnter()) return;
     setActive(!active);
   };
   if (toggleButton) toggleButton.addEventListener('click', onToggleClick);

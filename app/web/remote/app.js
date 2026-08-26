@@ -492,6 +492,55 @@ function virtualCharacterState(session) {
   };
 }
 
+/** 인페인트 세션이 화면을 잡고 있는 동안 잠가 두는 것들(사용자 지정 2026-08-26).
+ *
+ *  ⚠️ 인페인트는 **이 세션의 그림**을 고치는 일이다. 그 사이에 프롬프트를 새로 굴리거나
+ *     모드/모델을 바꾸면 세션이 가리키던 전제가 말없이 무너진다 - 특히 모델이 V5 를
+ *     벗어나면 캔버스 자체가 성립하지 않는다.
+ *  ⚠️ 잠그는 것은 **화면뿐**이다. 저장된 사용자 설정은 건드리지 않는다 - 세션이 끝나면
+ *     그대로 돌아와야 한다.
+ */
+function applyInpaintSessionLock() {
+  const locked = !!virtualCharacterSession();
+  const reason = '인페인트 세션 중에는 쓸 수 없습니다 (세션 닫기 후 사용)';
+
+  // ⚠️ **풀 때 `false` 로 밀면 안 된다.** 이 컨트롤들은 다른 이유로도 잠긴다 - 실측:
+  //    사용 가능한 백엔드가 NAI 하나뿐인 판에서 모드 셀렉트는 처음부터 disabled 였다.
+  //    일괄 false 로 풀면 인페인트를 한 번 하고 나온 뒤 **없던 모드가 열린다.**
+  //    걸 때 원래 값을 적어 두고, 풀 때 그 값으로 되돌린다.
+  const lockOne = (el, hint) => {
+    if (!el) return;
+    if (locked) {
+      if (el.dataset.inpaintLockPrev === undefined) {
+        el.dataset.inpaintLockPrev = el.disabled ? '1' : '0';
+        el.dataset.inpaintLockTitle = el.title || '';
+      }
+      el.disabled = true;
+      el.title = hint;
+    } else if (el.dataset.inpaintLockPrev !== undefined) {
+      el.disabled = el.dataset.inpaintLockPrev === '1';
+      el.title = el.dataset.inpaintLockTitle || '';
+      delete el.dataset.inpaintLockPrev;
+      delete el.dataset.inpaintLockTitle;
+    }
+  };
+
+  lockOne($('btnRnd'), reason);
+  lockOne(modeSelect, reason);
+  lockOne(paramEls?.model, 'V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다');
+  lockOne($('iaModeToggle'), reason);
+
+  // Generate 는 막지 않고 **인페인트 생성으로 바꾼다** - 큰 버튼이 눈앞의 일을 한다.
+  const gen = $('btnGen');
+  if (gen) {
+    // 라벨은 단축키 힌트 <span> 뒤에 붙은 **맨 뒤 텍스트 노드**다.
+    const label = Array.from(gen.childNodes).reverse().find(n => n.nodeType === 3);
+    gen.classList.toggle('is-inpaint', locked);
+    if (label) label.textContent = locked ? 'Generate (Inpaint)' : 'Generate';
+    gen.title = locked ? '현재 인페인트 세션을 생성합니다' : '';
+  }
+}
+
 /** 퀵 패널을 지금 맞는 상태로 그린다 - 세션이 살아 있으면 **가상**, 아니면 메인.
  *
  *  ⚠️ 진입점이 셋이다(모듈 상태 도착 · 패널 초기화 · 보임 동기화). 한 곳이라도 메인을
@@ -1052,7 +1101,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-onepath')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-lock2')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1282,7 +1331,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260824-safeviewer1')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260826-lock2')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1318,6 +1367,11 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       blocksMount: $('iaBlocks'),
       panelMount: $('iaPanel'),
       toggleButton: $('iaModeToggle'),
+      canEnter: () => {
+        if (!virtualCharacterSession()) return true;
+        showToast('인페인트 세션 중에는 Interactive 로 들어갈 수 없습니다 (세션 닫기 후)', 'error');
+        return false;
+      },
       escHtml,
       showToast,
       autocomplete: interactiveAutocomplete,
@@ -1905,7 +1959,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-onepath')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-lock2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2085,7 +2139,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-onepath')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-lock2')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2214,7 +2268,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-onepath')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-lock2')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -7319,6 +7373,16 @@ function scheduleInitialRandomPrompt(delay = 350) {
 }
 
 function send(cmd) {
+  // 인페인트 세션이 화면을 잡고 있으면 큰 버튼도 **눈앞의 일**을 한다(사용자 지정).
+  // ⚠️ 라벨만 바꾸고 동작을 안 바꾸면 `Generate (Inpaint)` 를 눌렀는데 일반 t2i 가
+  //    나간다 - 돈이 엉뚱한 데로 간다.
+  if (virtualCharacterSession()) {
+    if (cmd === 'generate') { img2imgPanel?.generate?.(); return; }
+    if (cmd === 'random') {
+      showToast('인페인트 세션 중에는 Random 을 쓸 수 없습니다 (세션 닫기 후 사용)', 'error');
+      return;
+    }
+  }
   if (cmd === 'generate') {
     // Sequence 탭에서 그룹 팝업을 보고 있으면 메인 Generate = 그 그룹의 '연속 생성'(req1).
     // 이벤트 미선택 상태로 Generate 를 누르면 일반 프롬프트가 생성돼 혼동을 주므로, 적색
@@ -7875,6 +7939,14 @@ function syncMode(mode) {
 function setMode(mode) {
   if (syncingMode) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // ⚠️ 셀렉트를 `disabled` 로 두는 것만으로는 부족하다 - 단축키·다른 탭·프로그램 호출이
+  //    남는다. 실제로 값을 바꾸는 **이 목**에서 막는다(사용자 지정: 임의의 방법으로도
+  //    모드 변경 불가).
+  if (virtualCharacterSession()) {
+    showToast('인페인트 세션 중에는 모드를 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
+    syncMode(currentMode || modeSelect?.value || '');
+    return;
+  }
   // Interactive 는 NAI 전용이다(캐릭터를 char_captions 로 싣는 배선이 NAI 스펙이다).
   // 켜진 채로 다른 모드로 넘어가면 조립한 프롬프트가 갈 곳이 없다 — 먼저 끄게 한다.
   if (mode !== 'NAI' && interactivePanel?.isActive?.()) {
@@ -9045,6 +9117,13 @@ function revertModelSelect() {
 
 async function onModelSelectChange(value) {
   if (modelRevertInFlight) return;
+  // 모델이 V5 를 벗어나면 캔버스 자체가 성립하지 않는다 - 세션을 닫기 전에는 막는다.
+  if (virtualCharacterSession()) {
+    showToast('V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
+    const back = String(lastBackendModel || '');
+    if (paramEls?.model && back) paramEls.model.value = back;
+    return;
+  }
   const mode = currentMode || modeSelect?.value || '';
   const preset = currentPresetNameForModelGuard();
   if (mode !== 'NAI' || !preset || String(value) === lastBackendModel) {
@@ -9273,6 +9352,7 @@ function onModuleState(m) {
     // 가상 캐릭터 프롬프트: 세션이 살아 있으면 퀵 패널이 **세션 캐릭터**를 그린다.
     // 세션이 끝나면 원래 캐릭터 모듈 상태로 돌아간다.
     renderCharacterQuickPanel();
+    applyInpaintSessionLock();
     // 캔버스에서 부르는 마스크 편집기는 img2img 패널의 상태를 본다. 팝업이 닫혀
     // 있어도 상태만은 최신으로 흘려 넣는다 - `isOpen` 가드가 DOM 은 안 건드린다.
     if (m.module_id !== currentModuleId) img2imgPanel?.render?.(m);

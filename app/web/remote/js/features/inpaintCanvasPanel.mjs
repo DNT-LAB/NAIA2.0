@@ -201,7 +201,7 @@ export function createInpaintCanvasPanel({
         </div>
         <span class="ic-spacer"></span>
         <span class="ic-hint">${editing
-          ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 휠버튼 끌기도 같음 · 방향키=1px(Shift 16) · 0=초기화'
+          ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 방향키=1px(Shift 16) · 0=초기화 · 숫자 위치는 POS 에서'
           : '생성 결과를 보는 중입니다.'}</span>
         <button type="button" class="ic-btn ic-btn-collapse" data-ic="collapse" title="접기" aria-label="접기">▾</button>
       </div>
@@ -296,8 +296,12 @@ export function createInpaintCanvasPanel({
         <div class="ic-ghost" data-ic-ghost="1" hidden></div>
         ${chars.map(c => {
           const p = contentToPercent(c.position.x, c.position.y, w, h);
-          return `<button type="button" class="ic-marker" data-ic-marker="${c.index}"
-            style="left:${p.left};top:${p.top}" title="${escHtml(c.prompt)}">${c.index + 1}</button>`;
+          // ⚠️ **표시 전용이다.** 예전에는 여기서도 끌 수 있었는데, 그러면 위치를 고치는
+          //    길이 둘이 된다(여기 + 캐릭터 POS 편집) - 인원을 더하거나 POS 모드를
+          //    오갈 때 어느 쪽이 진짜인지 알 수 없어진다(사용자 지적 2026-08-26).
+          //    좌표를 고치는 곳은 **POS 편집 하나**로 둔다.
+          return `<span class="ic-marker" data-ic-marker="${c.index}"
+            style="left:${p.left};top:${p.top}" title="${escHtml(c.prompt)}">${c.index + 1}</span>`;
         }).join('')}
       </div>
     `;
@@ -420,9 +424,7 @@ export function createInpaintCanvasPanel({
 
   function onPlanePointerDown(event) {
     if (!stageEl) return;
-    // 숫자 마커가 **먼저**다. 그 위에서 누르면 그 캐릭터를 옮긴다.
-    const marker = event.target.closest?.('[data-ic-marker]');
-    if (marker) { posStage.beginDrag(event, marker, `char_${marker.dataset.icMarker}`); return; }
+    // 마커는 표시 전용이라 붙잡지 않는다 - 그 위에서 눌러도 베이스가 움직인다.
     if (event.button === 1) { event.preventDefault(); beginMiddleDrag(event); return; }
     if (event.button === 0) beginBaseDrag(event);
   }

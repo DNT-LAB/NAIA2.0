@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import random
+import re
 import threading
 import time
 import uuid
@@ -224,6 +225,15 @@ class ArtistThumbnailService:
 
     def _favorite_thumbnail_cache_path(self) -> Path:
         return self.state_root / "favorite_thumbnail_cache.json"
+
+    # ── 사용자가 생성한 썸네일 ─────────────────────────────────────────
+    # Artist 탭에서 그 아티스트로 생성한 그림을 카드에 남긴다. 예전에는 어디에도
+    # 저장하지 않아 브라우저 메모리(`resultMemory`)에만 있었고 재시작하면 사라졌다.
+    def _generated_dir(self) -> Path:
+        return self.state_root / "generated"
+
+    def _generated_index_path(self) -> Path:
+        return self._generated_dir() / "index.json"
 
     def _legacy_favorite_path(self) -> Path:
         return self.legacy_wildcards_root / "favorite_artist.txt"
@@ -727,11 +737,22 @@ class ArtistThumbnailService:
         except Exception:
             favorite_thumb_items = {}
 
+        try:
+            generated_items = self.generated_index()
+        except Exception:
+            generated_items = {}
+
         def item_image_url(artist: str) -> str:
+            # ⚠️ 순서가 규약이다(사용자 결정 2026-08-26): 모드 팩 -> 즐겨찾기 캐시 ->
+            #    사용자가 생성한 것. 사용자 썸네일은 **빈 칸을 메꾸는 용도**지 공식 팩
+            #    그림을 밀어내지 않는다. 모드를 안 고르면 앞의 둘이 대부분 비어 있어
+            #    실질적으로 사용자 썸네일이 먼저 보인다(즐겨찾기 123명 제외).
             if mode_key and artist in thumb_data:
                 return f"/api/artist-thumb/image?mode={quote(mode_key, safe='')}&artist={quote(artist, safe='')}"
             if artist in favorite_thumb_items:
                 return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
+            if artist in generated_items:
+                return self._generated_image_url(artist)
             return ""
 
         return {
@@ -810,6 +831,96 @@ class ArtistThumbnailService:
                 self._image_cache.pop(next(iter(self._image_cache)), None)
             self._image_cache[cache_key] = (image_bytes, media_type)
         return image_bytes, media_type
+
+    GENERATED_THUMB_MAX_SIZE = (896, 1152)
+
+    def generated_index(self) -> dict[str, str]:
+        """{artist: filename}. 읽기 실패는 빈 dict 로 삼킨다(썸네일 하나 때문에 탭이 죽으면 안 된다)."""
+        try:
+            raw = self._generated_index_path().read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {str(k): str(v) for k, v in data.items() if k and v}
+
+    def _write_generated_index(self, index: dict[str, str]) -> None:
+        target = self._generated_index_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = target.with_name(target.name + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(index, handle, ensure_ascii=False, indent=2)
+        tmp_path.replace(target)
+
+    @staticmethod
+    def _generated_filename(artist: str) -> str:
+        safe = re.sub(r'[<>:"/\\|?*]', "_", str(artist or "").strip())
+        return (safe or "artist") + ".webp"
+
+    def save_generated_thumbnail(self, pil_image: Any, artist: str) -> dict[str, Any] | None:
+        """생성 결과를 그 아티스트의 썸네일로 남긴다. **매번 덮어쓴다**(사용자 결정 2026-08-26).
+
+        ⚠️ 최종 경로에 바로 쓰면 덮어쓰는 동안 들어온 GET 이 **잘린 파일**을 받는다.
+           임시 파일 -> replace 로 맞춘다(캐릭터 뷰어와 같은 방식).
+        """
+        artist_name = str(artist or "").strip()
+        if not artist_name or pil_image is None:
+            return None
+        from PIL import Image
+
+        target_dir = self._generated_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        filename = self._generated_filename(artist_name)
+        target = target_dir / filename
+
+        thumb = pil_image.copy()
+        if thumb.mode not in ("RGB", "RGBA"):
+            thumb = thumb.convert("RGB")
+        thumb.thumbnail(self.GENERATED_THUMB_MAX_SIZE, Image.Resampling.LANCZOS)
+        tmp_path = target.with_name(target.name + ".tmp")
+        thumb.save(tmp_path, "WEBP", quality=82)
+        tmp_path.replace(target)
+
+        with self._lock:
+            index = self.generated_index()
+            index[artist_name] = filename
+            self._write_generated_index(index)
+            # 덮어썼으니 이전 바이트를 물고 있는 캐시를 버린다.
+            self._image_cache.pop(("__generated__", artist_name), None)
+        return {
+            "artist": artist_name,
+            "filename": filename,
+            "url": self._generated_image_url(artist_name),
+            "count": len(index),
+        }
+
+    @staticmethod
+    def _generated_image_url(artist: str) -> str:
+        return f"/api/artist-thumb/generated-image?artist={quote(str(artist), safe='')}"
+
+    def generated_image_payload(self, artist: str) -> tuple[bytes, str]:
+        artist_name = str(artist or "").strip()
+        if not artist_name:
+            raise ValueError("artist is required")
+        cache_key = ("__generated__", artist_name)
+        with self._lock:
+            cached = self._image_cache.get(cache_key)
+            if cached:
+                return cached
+            filename = self.generated_index().get(artist_name) or ""
+        if not filename:
+            raise FileNotFoundError(f"Generated artist thumbnail not found: {artist_name}")
+        path = self._generated_dir() / filename
+        try:
+            payload = (path.read_bytes(), "image/webp")
+        except OSError as exc:
+            raise FileNotFoundError(f"Generated artist thumbnail unreadable: {artist_name}") from exc
+        with self._lock:
+            if len(self._image_cache) > 512:
+                self._image_cache.pop(next(iter(self._image_cache)), None)
+            self._image_cache[cache_key] = payload
+        return payload
 
     def favorite_image_payload(self, artist: str) -> tuple[bytes, str]:
         artist_name = str(artist or "").strip()

@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from app.backend.server.artist_thumbnail_routes import artist_thumbnail_service
 from app.backend.server.character_viewer_routes import character_viewer_service
 from app.backend.server.generation_commands import (
     generation_service,
@@ -565,6 +566,8 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 await _broadcast_prompt_preset_thumbnail_update(context, clients, stored, params)
             if params.get("character_viewer_request"):
                 await _save_character_viewer_thumbnail(context, stored, params)
+            if params.get("artist_thumb_request"):
+                await _save_artist_thumbnail(context, stored, params)
             if params.get("character_asset_request"):
                 # 벤치 후보는 화면에 떠 있는 동안 저장 가능해야 한다 - 결과 저장소가
                 # 상한을 넘겨 퇴출해도 캐릭터 에셋 서비스가 bounded FIFO로 붙잡는다.
@@ -1668,6 +1671,35 @@ async def _broadcast_generation_error(
     await broadcast_json(clients, context.queue_state_payload())
     if img2img_failed:
         await _broadcast_img2img_generation_state(context, clients)
+
+
+async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dict) -> None:
+    """Artist 탭 생성 결과를 그 아티스트의 썸네일로 남기고, 화면이 알아볼 표식을 싣는다.
+
+    예전에는 아무 데도 저장하지 않아 브라우저 메모리(`resultMemory`)에만 있었고
+    재시작하면 사라졌다 - 캐릭터 뷰어와 달리 이쪽은 **처음부터 없던 기능**이다
+    (future01 에도 저장 경로가 없었다). 신규로 붙인다(사용자 결정 2026-08-26).
+
+    ⚠️ 표식은 **기존 image_meta 에 필드만** 더한다. 새 WS 메시지 타입을 만들면
+       웹 스모크 계약(타입을 순서대로 셈)이 깨진다.
+    ⚠️ 저장 실패가 생성을 망치면 안 된다 - 삼키고 로그만 남긴다.
+    """
+    artist = str(params.get("artist_thumb_artist") or params.get("_remote_queue_label") or "").strip()
+    image = getattr(getattr(stored, "item", None), "image", None)
+    if not artist or image is None:
+        return
+    saved = None
+    try:
+        saved = await asyncio.to_thread(
+            artist_thumbnail_service(context).save_generated_thumbnail, image, artist
+        )
+    except Exception as exc:   # noqa: BLE001
+        print(f"[artist-thumb] thumbnail save failed: {exc}", flush=True)
+    meta = stored.image_meta if isinstance(stored.image_meta, dict) else {}
+    meta.update({
+        "artist_thumb_saved": bool(saved),
+        "artist_thumb_url": str(saved.get("url") or "") if isinstance(saved, dict) else "",
+    })
 
 
 async def _save_character_viewer_thumbnail(

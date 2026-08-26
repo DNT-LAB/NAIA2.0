@@ -130,6 +130,27 @@ def register_artist_thumbnail_routes(
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    @app.get("/api/artist-thumb/generated-image")
+    async def api_artist_thumb_generated_image(artist: str = ""):
+        """Artist 탭에서 그 아티스트로 생성한 그림. 매번 덮어쓰므로 느스러운
+        캐시를 주면 새 그림을 넣어도 역 그림이 남는다 — 재검증하게 한다."""
+        try:
+            image_bytes, media_type = await run_in_thread(
+                artist_thumbnail_service(session_context).generated_image_payload,
+                artist,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except (FileNotFoundError, KeyError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb generated image failed: {exc}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "no-cache"},
+        )
+
     @app.post("/api/artist-thumb/favorite")
     async def api_artist_thumb_favorite(req: Request):
         try:

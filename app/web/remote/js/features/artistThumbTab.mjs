@@ -293,6 +293,30 @@ export function createArtistThumbController({
     return true;
   }
 
+  /** 서버에 저장된 썸네일을 그 아티스트 카드에 바로 입힌다.
+   *
+   *  ⚠️ 목록을 다시 불러오지 않는다 — 그러면 스크롤·선택이 튀고, 일괄생성
+   *     중이라면 매 장마다 전체 목록을 재조회하게 된다.
+   *  ⚠️ 매번 덮어쓰므로 URL 이 같다 — 캐시 버스터가 없으면 역 그림이 남는다.
+   */
+  function applySavedThumbnail(artist, url) {
+    const key = String(artist || '').trim();
+    if (!key || !url) return;
+    const card = gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(key)}"]`);
+    const host = card?.querySelector('.artist-thumb-card-image');
+    if (!host) return;
+    const src = `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`;
+    let img = host.querySelector('img');
+    if (!img) {
+      host.innerHTML = '';
+      img = document.createElement('img');
+      img.loading = 'lazy';
+      img.alt = key;
+      host.appendChild(img);
+    }
+    img.src = src;
+  }
+
   function updateRememberedCards() {
     gridEl?.querySelectorAll('.artist-thumb-card[data-artist]').forEach(card => {
       const remembered = resultMemory.has(card.dataset.artist || '');
@@ -1734,6 +1758,10 @@ export function createArtistThumbController({
     const requestId = String(meta.artist_thumb_request_id || pendingResultRequestId || '');
     const artist = String(meta.artist_thumb_artist || selected?.artist || '').trim();
     const rememberedEntry = rememberArtistResult(artist, blob, meta);
+    // 서버가 썸네일로 저장했으면 카드에 바로 반영한다(재시작 후에도 남는 그림).
+    if (meta.artist_thumb_saved && meta.artist_thumb_url) {
+      applySavedThumbnail(artist, meta.artist_thumb_url);
+    }
     setResultBlobUrl(rememberedEntry?.url || URL.createObjectURL(blob), !rememberedEntry);
     resultPreviewOpen = true;
     applyResultPreviewVisibility();

@@ -81,7 +81,9 @@ class HeadlessInpaintSequenceRunService:
         return f"inpaint-sequence-run-{uuid.uuid4().hex}"
 
     def begin(self, *, run_id: str, query: dict[str, Any], group_id: int, total_frames: int,
-              auto_gen: bool, use_vibe: bool = False) -> str:
+              auto_gen: bool, use_vibe: bool = False,
+              pending_frames: list[dict[str, Any]] | None = None,
+              direction: str = "horizontal") -> str:
         """첫 라운드 시작 — run 상태 생성. 호출부(라우트)가 run_id 로 freeze+enqueue 한 뒤 호출.
 
         ``use_vibe`` (Vibe 사용, NAI 전용): 라운드의 첫 프레임을 인코딩해 나머지 프레임에
@@ -103,10 +105,16 @@ class HeadlessInpaintSequenceRunService:
             "use_vibe": bool(use_vibe),
             "vibe_encoding": "",
             "vibe_model": "",
+            # 캔버스 연쇄: 아직 큐에 안 넣은 프레임들. 직전 컷의 **결과 이미지**가 있어야
+            # 다음 캔버스를 만들 수 있어서 한 번에 못 넣는다 - 한 장씩 이어 붙인다.
+            "pending_frames": list(pending_frames or []),
+            "direction": str(direction or "horizontal"),
         }
         return run_id
 
-    def begin_round(self, run_id: str, *, group_id: int, total_frames: int) -> None:
+    def begin_round(self, run_id: str, *, group_id: int, total_frames: int,
+                    pending_frames: list[dict[str, Any]] | None = None,
+                    direction: str | None = None) -> None:
         """다음 라운드(자동 연속) — 카운터 리셋 + 새 그룹/총프레임. 라운드마다 vibe 인코딩을
         리셋해 새 라운드의 첫 이미지를 다시 인코딩한다(fresh freeze 와 동일한 라운드 경계 규칙)."""
         st = self._runtime_for(run_id)
@@ -119,6 +127,9 @@ class HeadlessInpaintSequenceRunService:
         st["round_count"] = int(st.get("round_count") or 0) + 1
         st["vibe_encoding"] = ""
         st["vibe_model"] = ""
+        st["pending_frames"] = list(pending_frames or [])
+        if direction:
+            st["direction"] = str(direction)
 
     def record_generation_completed(self, run_id: str) -> dict[str, Any]:
         """프레임 1장 완료 기록. round_done=이 라운드의 전 프레임 완료."""
@@ -209,6 +220,47 @@ class HeadlessInpaintSequenceRunService:
         if not encoding:
             return None
         return {"encoding": encoding, "model": str(st.get("vibe_model") or "")}
+
+    # ------------------------------------------------------------ 캔버스 연쇄
+    def direction(self, run_id: str) -> str:
+        st = self._runtime_for(run_id)
+        return str(st.get("direction") or "horizontal") if st else "horizontal"
+
+    def pending_frame_count(self, run_id: str) -> int:
+        st = self._runtime_for(run_id)
+        return len(st.get("pending_frames") or []) if st else 0
+
+    def abandon_pending(self, run_id: str) -> int:
+        """남은 대기 프레임을 버리고 이 라운드를 지금 완결로 만든다. 버린 개수를 돌려준다.
+
+        ⚠️ 프레임이 **실패**하면 이어 붙일 씨앗 이미지가 없다. 그대로 두면 다음 컷이
+           영영 큐에 안 들어가고, `completed < total_frames` 라 라운드도 안 끝나
+           런이 살아 있는 채로 멈춘다(다음 시작까지 막힌다). 총 프레임 수를 지금까지
+           센 것 + 이번 완료로 줄여 라운드가 정상으로 닫히게 한다.
+        """
+        st = self._runtime_for(run_id)
+        if not st:
+            return 0
+        dropped = len(st.get("pending_frames") or [])
+        st["pending_frames"] = []
+        st["total_frames"] = int(st.get("completed_count") or 0) + 1
+        return dropped
+
+    def pop_next_frame(self, run_id: str) -> dict[str, Any] | None:
+        """다음에 이어 그릴 프레임을 꺼낸다. 없으면 None(=이 라운드의 마지막 컷이었다).
+
+        ⚠️ **꺼내면서 지운다.** 같은 완료를 두 번 처리해도 같은 컷이 두 번 나가지
+           않아야 한다 - 큐에 그림 한 장은 곧 돈이다.
+        """
+        st = self._runtime_for(run_id)
+        if not st:
+            return None
+        queue = st.get("pending_frames") or []
+        if not queue:
+            return None
+        nxt = queue.pop(0)
+        st["pending_frames"] = queue
+        return nxt
 
     # ----------------------------------------------------------------- helpers
     def _runtime_for(self, run_id: str) -> dict[str, Any] | None:

@@ -501,6 +501,19 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                     _auto_gen_loop_engaged(context, request)
                     and _auto_gen_quota_exhausted(context)
                 )
+                # I.Sequence 캔버스 연쇄: 실패하면 이어 붙일 씨앗이 없다. 남은 대기분을
+                # 버려 라운드를 지금 닫는다 - 안 그러면 다음 컷이 영영 안 들어가고
+                # `completed < total` 이라 런이 살아 있는 채로 멈춘다.
+                try:
+                    _isq_run = str((getattr(request, "params", {}) or {}).get(
+                        "inpaint_sequence_run_id") or "")
+                    if _isq_run:
+                        _dropped = context._inpaint_sequence_run_service().abandon_pending(_isq_run)
+                        if _dropped:
+                            print(f"[i.sequence] frame failed - dropped {_dropped} pending cut(s)",
+                                  flush=True)
+                except Exception:
+                    pass
                 try:
                     await _advance_sequence_run(context, clients, request)
                 except Exception:
@@ -639,6 +652,10 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # 해 이후 프레임에 적용할 임시 vibe 로 보관한다. 다음 프레임 dequeue 전(같은 루프 반복
             # 안에서 await)이라 두 번째 컷부터 곧바로 주입된다. 비NAI/이미 인코딩됨/실패는 no-op.
             await _capture_sequence_vibe(context, clients, request, stored)
+            # I.Sequence 캔버스 연쇄 — 다음 컷을 지금 넣는다. `_advance_sequence_run`
+            # 보다 **먼저**여야 한다: 그쪽은 큐가 비어 있어야 다음 그룹으로 넘어가므로,
+            # 뒤에 두면 라운드가 안 끝났는데 새 그룹이 시작될 수 있다.
+            await _chain_inpaint_sequence_frame(context, clients, request, stored)
             # Guard the auto-continue (prompt gen / PE persist / enqueue) so a raised
             # exception after a story page was counted still cleans up the cycle
             # (_broadcast_generation_error fails the stamped story) instead of leaving the
@@ -762,6 +779,72 @@ def _inject_sequence_vibe(context: WebSessionContext, request) -> None:
         )
     except Exception:
         pass  # 검증(길이/범위) 실패 시 vibe 없이 진행(시퀀스를 막지 않음)
+
+
+async def _chain_inpaint_sequence_frame(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    request,
+    stored,
+) -> bool:
+    """I.Sequence 캔버스 연쇄: 방금 나온 컷을 캔버스에 붙여 다음 컷을 큐에 넣는다.
+
+    직전 컷의 **결과 이미지**가 있어야 다음 캔버스를 만들 수 있어서, 라운드의 전
+    프레임을 한 번에 넣는 t2i 방식으로는 성립하지 않는다. 라우트는 첫 컷만 넣고
+    나머지를 런 상태에 재워 두며, 여기서 완료마다 한 장씩 꺼내 이어 붙인다.
+
+    ⚠️ 이어 붙일 씨앗은 **잘라낸 절반**이다. 2컷부터는 결과가 캔버스(두 칸)이므로
+       통째로 다시 붙이면 칸이 반씩 줄며 그림이 뭉갠다.
+    ⚠️ 실패해도 조용히 접는다(False). 라운드 카운트는 `_advance_sequence_run` 이
+       따로 세므로, 여기서 예외를 올리면 그 진행까지 멈춰 런이 영영 안 끝난다.
+    """
+    params = getattr(request, "params", None)
+    if not isinstance(params, dict):
+        return False
+    run_id = str(params.get("inpaint_sequence_run_id") or "")
+    if not run_id:
+        return False
+    svc = context._inpaint_sequence_run_service()
+    if not svc.is_running(run_id):
+        return False
+    nxt = svc.pop_next_frame(run_id)
+    if not nxt:
+        return False   # 이 라운드의 마지막 컷이었다
+
+    image = getattr(getattr(stored, "item", None), "image", None)
+    if image is None:
+        print("[i.sequence] chain stopped: no result image", flush=True)
+        return False
+
+    from utils.sequence_canvas_chain import crop_result, inpaint_payload
+
+    direction = svc.direction(run_id)
+    try:
+        seed_image = crop_result(image, direction) if params.get("inpaint_sequence_canvas") else image
+        payload = await asyncio.to_thread(inpaint_payload, seed_image, direction)
+    except Exception as exc:   # noqa: BLE001
+        print(f"[i.sequence] canvas build failed: {exc}", flush=True)
+        return False
+
+    command = nxt.get("command") or {}
+    overrides = dict(command.get("overrides") or {})
+    overrides.update(payload)
+    command = {**command, "overrides": overrides}
+    try:
+        dispatch = await asyncio.to_thread(
+            generation_service(context).enqueue_remote_request, command
+        )
+    except Exception as exc:   # noqa: BLE001
+        print(f"[i.sequence] chain enqueue failed: {exc}", flush=True)
+        return False
+    if not getattr(dispatch, "ok", False):
+        print("[i.sequence] chain enqueue blocked", flush=True)
+        return False
+    try:
+        await broadcast_json(clients, context._inpaint_sequence_run_module_state())
+    except Exception:
+        pass
+    return True
 
 
 async def _capture_sequence_vibe(context: WebSessionContext, clients: set[WebSocket], request, stored) -> None:

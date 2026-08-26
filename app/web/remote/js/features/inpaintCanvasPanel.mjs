@@ -250,9 +250,7 @@ export function createInpaintCanvasPanel({
     const off = {x: Number(state.base_offset_x) || 0, y: Number(state.base_offset_y) || 0};
     const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
     const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
-    // 베이스 손잡이는 **놓인 그림의 한가운데**에 둔다. 모서리에 두면 캔버스 밖으로
-    // 나갔을 때 잡을 수가 없다.
-    const handle = contentToPercent(off.x + placedW / 2, off.y + placedH / 2, w, h);
+    const handle = contentToPercent(...handlePoint(w, h, off, placedW, placedH), w, h);
     const chars = (state.characters || [])
       .map((c, i) => ({...c, index: i}))
       .filter(c => c.prompt && c.position);
@@ -292,6 +290,21 @@ export function createInpaintCanvasPanel({
     const scale = Math.min(availW / w, availH / h);
     stageEl.style.width = `${Math.round(w * scale)}px`;
     stageEl.style.height = `${Math.round(h * scale)}px`;
+  }
+
+  /** 손잡이가 앉을 자리(캔버스 픽셀).
+   *
+   *  놓인 그림의 한가운데를 가리키되 **캔버스 안에 가둔다.**
+   *  ⚠️ 안 가두면 크게 확대했을 때 한가운데가 캔버스 밖이라 손잡이가 `overflow:hidden`
+   *     에 잘려 **사라진다** - 다시 잡을 방법이 없어진다(사용자 지적 2026-08-26,
+   *     224% 에서 실측). 가둬 두면 어느 쪽으로 밀려 있는지도 함께 읽힌다.
+   *  ⚠️ 가두는 순간 손잡이는 '그림의 한가운데'가 아니게 된다 - 그래서 베이스 드래그는
+   *     절대 위치가 아니라 **상대 이동**이어야 한다(아래 `onPlanePointerDown`).
+   */
+  function handlePoint(w, h, off, placedW, placedH) {
+    const pad = Math.max(24, Math.min(w, h) * 0.06);
+    const clamp = (v, max) => Math.min(Math.max(v, pad), Math.max(pad, max - pad));
+    return [clamp(off.x + placedW / 2, w), clamp(off.y + placedH / 2, h)];
   }
 
   // ── 조작 ────────────────────────────────────────────────────────────────
@@ -391,14 +404,22 @@ export function createInpaintCanvasPanel({
       const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
       const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
       const ghost = stageEl.querySelector('[data-ic-ghost]');
-      // 손잡이는 그림의 한가운데를 가리키므로, 좌상단 오프셋으로 되돌려 보낸다.
+      // ⚠️ **상대 이동**이다. 손잡이는 화면 안에 갇혀 있어 '그림의 한가운데'가 아닐 수
+      //    있으므로, 절대 위치로 옮기면 잡는 순간 그림이 저 멀리로 튄다.
+      //    첫 좌표를 기준점으로 삼고 그 뒤로는 **움직인 만큼만** 더한다.
+      const startOffset = {
+        x: Number(state.base_offset_x) || 0,
+        y: Number(state.base_offset_y) || 0,
+      };
+      let anchor = null;
       posStage.beginDrag(event, handle, 'base', (x, y) => {
         const {w, h} = canvasSize();
         const pos = contentToPercent(x, y, w, h);
         handle.style.left = pos.left;
         handle.style.top = pos.top;
-        const ox = Math.round(x - placedW / 2);
-        const oy = Math.round(y - placedH / 2);
+        if (!anchor) { anchor = {x, y}; return; }   // 잡은 자리 = 기준점
+        const ox = Math.round(startOffset.x + (x - anchor.x));
+        const oy = Math.round(startOffset.y + (y - anchor.y));
         pendingOffset = {x: ox, y: oy};
         // 그림 자체는 서버가 다시 합성해야 움직인다(놓을 때 한 번). 끄는 동안에는
         // **어디에 놓이는지**와 **얼마나 새 자리가 열리는지**를 유령으로 보여 준다 -

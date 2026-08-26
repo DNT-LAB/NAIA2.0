@@ -15,12 +15,19 @@ export function createImg2ImgPanel({
   isOpen = () => true,
 }) {
   const MASK_CELL_SIZE = 8;
+  // 브러시 한계와 휠 한 칸. 슬라이더의 min/max/step 과 **같은 값**이어야 한다 -
+  // 어긋나면 휠로만 갈 수 있는 크기가 생겨 슬라이더가 거짓말한다.
+  const MASK_BRUSH_MIN = 8;
+  const MASK_BRUSH_MAX = 160;
+  const MASK_BRUSH_STEP = 8;
   const MASK_OVERLAY_COLOR = 'rgba(0, 0, 255, 0.47)';
   const sliderDebounce = {};
   const sliderPending = {};
   const maskDrafts = new Map();
   const maskCanvasDrafts = new WeakMap();
   let currentState = null;
+  // 마스크 편집기를 열 때 건 것들(키·휠·리사이즈·본문 스크롤 잠금)을 되돌리는 함수.
+  let maskDialogTeardown = null;
   let maskBrushSize = 48;
   let maskMode = 'paint';
   let lastRenderedStructureSignature = '';
@@ -430,8 +437,17 @@ export function createImg2ImgPanel({
           </label>
           <button type="button" class="mod-action-btn mod-start" onclick="img2imgApplyMask()">마스크 적용</button>
         </div>
-        <div class="mod-img2img-mask-dialog-stage">
-          <div class="mod-img2img-mask-frame">
+        <div class="mod-img2img-mask-dialog-stage" id="img2imgMaskDialogStage">
+          <!-- 항상 보이는 반투명 가이드(사용자 지정 2026-08-26).
+               ⚠️ 클릭이 안 먹어야 하고, 그림과 겹치면 **그림이 이긴다** - 그래서
+                  pointer-events:none + 프레임보다 낮은 z-index 다. -->
+          <div class="mod-img2img-mask-guide" aria-hidden="true">
+            <div><kbd>휠</kbd><span>브러시 크기</span></div>
+            <div><kbd>TAB</kbd><span>칠하기 / 지우기</span></div>
+            <div><kbd>ENTER</kbd><span>마스크 적용</span></div>
+            <div><kbd>ESC</kbd><span>취소하고 닫기</span></div>
+          </div>
+          <div class="mod-img2img-mask-frame" id="img2imgMaskDialogFrame">
             ${preview}
             <canvas id="img2imgMaskDialogCanvas" class="mod-img2img-mask-canvas" aria-label="인페인트 마스크"></canvas>
           </div>
@@ -441,13 +457,91 @@ export function createImg2ImgPanel({
       if (event.target === dialog) closeMaskEditor();
     });
     document.body.appendChild(dialog);
-    setTimeoutFn(() => setupMaskCanvas(currentState, {
-      canvasId: 'img2imgMaskDialogCanvas',
-      imageId: 'img2imgMaskDialogBase',
-    }), 0);
+    bindMaskDialogShell(dialog);
+    setTimeoutFn(() => {
+      setupMaskCanvas(currentState, {
+        canvasId: 'img2imgMaskDialogCanvas',
+        imageId: 'img2imgMaskDialogBase',
+      });
+      fitMaskFrame();
+    }, 0);
+  }
+
+  /** 그림을 스테이지에 **비율 그대로** 앉힌다.
+   *
+   *  ⚠️ CSS 로는 안 된다. 프레임은 `inline-block` 이라 높이가 auto 이고, 그 안의
+   *     `<img>` 가 `max-height: 100%` 를 쓰면 auto 높이에 대한 백분율이라 **무시된다**
+   *     (순환 의존). 그래서 그림이 스테이지를 넘고 스크롤이 생겼다(사용자 지적).
+   *  ⚠️ 캔버스는 프레임에 `inset: 0` 으로 겹쳐 있으므로, 프레임을 px 로 못 박으면
+   *     캔버스도 따라온다 - 좌표가 어긋날 자리가 없다.
+   */
+  function fitMaskFrame() {
+    const stage = document.getElementById('img2imgMaskDialogStage');
+    const frame = document.getElementById('img2imgMaskDialogFrame');
+    const image = document.getElementById('img2imgMaskDialogBase');
+    if (!stage || !frame || !image) return;
+    const natW = image.naturalWidth || Number(currentState?.preview_width) || 0;
+    const natH = image.naturalHeight || Number(currentState?.preview_height) || 0;
+    if (!(natW > 0) || !(natH > 0)) return;
+    const style = getComputedStyle(stage);
+    const availW = stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const availH = stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    if (!(availW > 0) || !(availH > 0)) return;
+    // ⚠️ 1 을 넘기지 않는다. 640px 미리보기를 늘리면 붓 자국만 뭉개진다.
+    const scale = Math.min(availW / natW, availH / natH, 1);
+    frame.style.width = `${Math.round(natW * scale)}px`;
+    frame.style.height = `${Math.round(natH * scale)}px`;
+  }
+
+  /** 창 껍데기: 휠·단축키·리사이즈·본문 스크롤 잠금. 닫을 때 전부 되돌린다. */
+  function bindMaskDialogShell(dialog) {
+    const image = dialog.querySelector('#img2imgMaskDialogBase');
+    if (image && !image.complete) image.addEventListener('load', fitMaskFrame, {once: true});
+
+    // 휠은 **브러시 크기**다(사용자 지정). 기본 동작을 막아야 뒤 페이지가 안 굴러간다.
+    const onWheel = event => {
+      event.preventDefault();
+      const step = event.deltaY < 0 ? MASK_BRUSH_STEP : -MASK_BRUSH_STEP;
+      maskBrush(maskBrushSize + step);
+      const slider = dialog.querySelector('.mod-img2img-mask-brush input[type="range"]');
+      if (slider) slider.value = String(maskBrushSize);
+    };
+    dialog.addEventListener('wheel', onWheel, {passive: false});
+
+    const onKeyDown = event => {
+      if (!document.getElementById('img2imgMaskDialog')) return;
+      const key = event.key;
+      if (key !== 'Escape' && key !== 'Tab' && key !== 'Enter') return;
+      // ⚠️ 브러시 슬라이더에 포커스가 있어도 가로챈다 - 이 창에서 Enter/Tab/Esc 가
+      //    할 일은 하나뿐이고, 놓치면 포커스가 창 밖으로 빠져나간다.
+      event.preventDefault();
+      event.stopPropagation();
+      if (key === 'Escape') return closeMaskEditor();
+      if (key === 'Tab') return setMaskMode(maskMode === 'paint' ? 'erase' : 'paint');
+      applyMask();
+    };
+    // ⚠️ capture 로 받는다. 전역 Escape 핸들러가 먼저 채 가면 이 창만 남고 다른 것이
+    //    닫힌다.
+    document.addEventListener('keydown', onKeyDown, true);
+
+    const onResize = () => fitMaskFrame();
+    window.addEventListener('resize', onResize);
+
+    // 뒤 페이지가 굴러가지 않게(사용자 지정). 원래 값을 기억해 두고 되돌린다.
+    const bodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    maskDialogTeardown = () => {
+      dialog.removeEventListener('wheel', onWheel);
+      document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('resize', onResize);
+      document.body.style.overflow = bodyOverflow;
+      maskDialogTeardown = null;
+    };
   }
 
   function closeMaskEditor() {
+    if (maskDialogTeardown) maskDialogTeardown();
     const dialog = document.getElementById('img2imgMaskDialog');
     if (dialog) dialog.remove();
   }
@@ -780,7 +874,8 @@ export function createImg2ImgPanel({
   }
 
   function maskBrush(value) {
-    maskBrushSize = Math.max(8, Math.min(160, Math.round(Number(value) || 48)));
+    const raw = Math.round(Number(value) || 48);
+    maskBrushSize = Math.max(MASK_BRUSH_MIN, Math.min(MASK_BRUSH_MAX, raw));
     document.querySelectorAll('[data-img2img-mask-brush-value]').forEach(label => {
       label.textContent = String(maskBrushSize);
     });

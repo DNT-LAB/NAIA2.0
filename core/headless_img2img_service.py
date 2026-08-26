@@ -581,6 +581,8 @@ class HeadlessImg2ImgService:
             context.img2img_session["user_mask_bytes"] = b""
             if context.img2img_session.get("canvas_active"):
                 return self._recompose_canvas()
+        elif key == "auto_mask":
+            return self._auto_mask()
         elif key == "canvas_active":
             return self._set_canvas_active(context._coerce_bool(value))
         elif key == "canvas_size":
@@ -775,6 +777,58 @@ class HeadlessImg2ImgService:
         preview, preview_w, preview_h = self._image_preview_data_url(payload["canvas_image"])
         state["preview"], state["preview_width"], state["preview_height"] = preview, preview_w, preview_h
         return self.module_state()
+
+    def _auto_mask(self) -> dict[str, Any]:
+        """빈 곳과 **그 경계**를 한 번에 칠한다(사용자 지정 2026-08-26).
+
+        ⚠️ 빈 곳만 딱 열면 이음매가 그대로 남는다. 베이스를 밀거나 돌린 자리에는 늘
+           경계가 생기고, 그 위를 조금 덮어야 모델이 이어 그린다.
+        ⚠️ 부풀리기는 **1/8 마스크 위에서** 한다. 캔버스 크기에서 16px 커널을 돌리면
+           1216x832 기준 수천만 번 비교다 - 어차피 NAI 로는 1/8 이 나간다.
+        """
+        from PIL import Image
+
+        from utils.v5_inpaint_canvas import (
+            AUTO_MASK_RADIUS_PX,
+            MASK_SCALE,
+            build_payload,
+            dilate_mask,
+            downscale_mask,
+            mask_is_empty,
+            png_bytes,
+        )
+
+        state = self.context.img2img_session
+        base = self._base_image()
+        canvas_w = int(state.get("canvas_width") or base.width)
+        canvas_h = int(state.get("canvas_height") or base.height)
+        # 지금 놓인 그대로의 빈 곳. 기하는 `build_payload` 가 SSOT 다 - 여기서 다시
+        # 계산하면 화면이 보는 것과 어긋날 자리가 생긴다.
+        probe = build_payload(
+            base,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+            offset_x=int(state.get("base_offset_x") or 0),
+            offset_y=int(state.get("base_offset_y") or 0),
+            scale=state.get("base_scale", 1.0),
+            rotation=state.get("base_rotation", 0.0),
+            user_mask=None,
+        )
+        gap = probe.get("mask_image")
+        if gap is None or mask_is_empty(gap):
+            return self.context._toast(
+                "빈 곳이 없습니다 - 캔버스를 넓히거나 베이스를 옮겨 보세요", level="error"
+            )
+        grown = dilate_mask(downscale_mask(gap), AUTO_MASK_RADIUS_PX, scale=MASK_SCALE)
+        state["mode"] = "inpaint"
+        state["user_mask_bytes"] = png_bytes(grown)
+        preview = grown.resize((canvas_w, canvas_h), Image.Resampling.NEAREST)
+        state["mask_preview"] = (
+            "data:image/png;base64,"
+            + base64.b64encode(png_bytes(preview)).decode("ascii")
+        )
+        print(f"[v5-canvas] auto mask: gap + {AUTO_MASK_RADIUS_PX}px edge", flush=True)
+        return self._recompose_canvas()
 
     def _set_canvas_active(self, active: bool) -> dict[str, Any]:
         state = self.context.img2img_session

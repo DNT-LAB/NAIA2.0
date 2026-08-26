@@ -13639,17 +13639,72 @@ body.detached-metadata .metadata-layout {
   background: rgba(10, 10, 15, 0.42);
 }
 .mod-img2img-mask-dialog-stage {
+  position: relative;
   min-height: 0;
   display: grid;
   place-items: center;
-  overflow: auto;
+  /* ⚠️ 스크롤 금지(사용자 지정). 굴려서 찾아야 하는 편집기는 편집기가 아니다.
+     크기는 `fitMaskFrame()` 이 px 로 못 박는다 - CSS 로는 프레임이 inline-block 이라
+     그 안의 `max-height: 100%` 가 auto 높이에 대한 백분율이 되어 무시된다. */
+  overflow: hidden;
   padding: 14px;
   background: var(--bg-deep);
+  /* 휠은 브러시 크기다 - 스크롤 연쇄가 뒤 페이지로 새지 않게 막는다. */
+  overscroll-behavior: contain;
 }
-.mod-img2img-mask-dialog-stage .mod-img2img-mask-frame,
-.mod-img2img-mask-dialog-stage .mod-img2img-mask-frame img {
+.mod-img2img-mask-dialog-stage .mod-img2img-mask-frame {
+  position: relative;
+  z-index: 1;                 /* 가이드보다 위 - 겹치면 그림이 이긴다 */
   max-width: 100%;
   max-height: 100%;
+}
+.mod-img2img-mask-dialog-stage .mod-img2img-mask-frame img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;           /* 프레임이 이미 원본 비율이다 */
+}
+
+/* 항상 보이는 반투명 단축키 가이드(사용자 지정).
+   ⚠️ 클릭이 안 먹어야 한다 - 그림 위로 지나가는 붓질을 가로채면 안 된다.
+   ⚠️ 그림과 겹치면 그림이 이긴다 - 그래서 프레임보다 z-index 가 낮다. */
+.mod-img2img-mask-guide {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 9px;
+  background: rgba(10, 10, 16, 0.34);
+  color: rgba(233, 233, 245, 0.62);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.mod-img2img-mask-guide div { display: flex; align-items: center; gap: 9px; }
+.mod-img2img-mask-guide kbd {
+  min-width: 46px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(233, 233, 245, 0.82);
+  font-family: inherit;
+  font-size: 10px;
+  text-align: center;
+}
+/* 좁으면 가이드가 그림을 가릴 뿐이다 - 그때는 접는다. */
+@media (max-width: 880px) {
+  .mod-img2img-mask-guide { display: none; }
 }
 .mod-img2img-mask-brush {
   display: grid;

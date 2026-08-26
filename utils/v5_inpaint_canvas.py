@@ -37,6 +37,12 @@ MIN_VISIBLE_PX = 64
 # NAI 인페인트 마스크 축소 배율.
 MASK_SCALE = 8
 
+# `자동 마스킹` 이 빈 곳 바깥으로 더 물고 들어가는 폭(캔버스 픽셀).
+# ⚠️ 빈 곳만 딱 열면 **경계선이 그대로 남는다.** 베이스를 밀거나 돌린 자리에는 늘
+#    이음매가 생기고, 그 위를 조금 덮어야 모델이 이어 그린다(사용자 지정 2026-08-26:
+#    "빈칸 + 빈칸과 겹친 모서리(약 16px 이상)").
+AUTO_MASK_RADIUS_PX = 16
+
 
 def clamp_offset(
     canvas_w: int, canvas_h: int, base_w: int, base_h: int, x: Any, y: Any
@@ -84,14 +90,16 @@ def normalize_rotation(value: Any) -> float:
 
 
 def transform_base(base_image: Image.Image, scale: Any = 1.0, rotation: Any = 0.0) -> Image.Image:
-    """베이스에 확대/회전을 먹인다.
+    """베이스에 확대/회전을 먹인다. 회전하면 **RGBA** 로 나온다.
 
     ⚠️ 회전은 `expand=True` 다. 안 그러면 기울인 모서리가 잘려 나간다 - 사용자는
        '회전했더니 그림이 깎였다' 로만 본다.
-    ⚠️ 회전으로 생기는 삼각형 여백은 **캔버스 배경색**으로 채운다. 그래야 그 자리가
-       '빈 곳'으로 보이고, 아래 `uncovered_mask` 와 색이 어긋나지 않는다.
+    ⚠️ 회전으로 생기는 삼각형 여백은 **투명**으로 남긴다. 예전에는 캔버스 배경색으로
+       채웠는데, 그러면 `uncovered_mask` 가 그 쐐기까지 '덮인 곳' 으로 세어 **영영
+       다시 그려지지 않는다** - 화면에는 회색 삼각형으로 남는다(사용자 제보 2026-08-26).
+       색은 어차피 `compose_canvas` 가 배경 위에 얹어 같아 보인다.
     """
-    source = base_image if base_image.mode == "RGB" else base_image.convert("RGB")
+    source = base_image if base_image.mode in ("RGB", "RGBA") else base_image.convert("RGB")
     factor = clamp_scale(scale)
     if factor != 1.0:
         width = max(1, int(round(source.width * factor)))
@@ -99,10 +107,34 @@ def transform_base(base_image: Image.Image, scale: Any = 1.0, rotation: Any = 0.
         source = source.resize((width, height), Image.Resampling.LANCZOS)
     angle = normalize_rotation(rotation)
     if angle:
-        source = source.rotate(
-            angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=CANVAS_BACKGROUND
+        source = source.convert("RGBA").rotate(
+            angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=(0, 0, 0, 0)
         )
     return source
+
+
+def coverage_mask(image: Image.Image) -> Image.Image:
+    """이 그림이 **실제로 색을 칠하는** 자리(흰색). 투명한 곳은 검정."""
+    if image.mode == "RGBA":
+        return image.getchannel("A").point(lambda v: 255 if v >= 128 else 0, "L")
+    return Image.new("L", image.size, 255)
+
+
+def dilate_mask(mask: Image.Image, radius_px: Any, scale: int = 1) -> Image.Image:
+    """마스크를 바깥으로 `radius_px` 만큼 부풀린다.
+
+    `scale` 은 마스크가 이미 줄어든 배율이다(1/8 마스크면 8) - 반지름을 그 배율로
+    나눠 **캔버스 픽셀 기준**으로 맞춘다.
+    """
+    from PIL import ImageFilter
+
+    try:
+        radius = int(round(float(radius_px) / max(1, int(scale))))
+    except (TypeError, ValueError):
+        return mask
+    if radius <= 0:
+        return mask
+    return mask.convert("L").filter(ImageFilter.MaxFilter(2 * radius + 1))
 
 
 def compose_canvas(
@@ -114,6 +146,11 @@ def compose_canvas(
     """
     canvas = Image.new("RGB", (int(canvas_w), int(canvas_h)), CANVAS_BACKGROUND)
     source = base_image
+    if source.mode == "RGBA":
+        # 투명한 곳(회전 여백)은 배경이 그대로 비친다 - 색은 예전과 같아 보이지만
+        # `uncovered_mask` 는 이제 그곳을 빈 곳으로 셀 수 있다.
+        canvas.paste(source, (int(offset_x), int(offset_y)), source)
+        return canvas
     if source.mode != "RGB":
         source = source.convert("RGB")
     canvas.paste(source, (int(offset_x), int(offset_y)))
@@ -121,11 +158,19 @@ def compose_canvas(
 
 
 def uncovered_mask(
-    canvas_w: int, canvas_h: int, base_w: int, base_h: int, offset_x: int, offset_y: int
+    canvas_w: int, canvas_h: int, base_w: int, base_h: int, offset_x: int, offset_y: int,
+    coverage: Image.Image | None = None,
 ) -> Image.Image:
-    """베이스가 덮지 못한 자리만 흰색(=생성)인 캔버스 크기 마스크."""
+    """베이스가 덮지 못한 자리만 흰색(=생성)인 캔버스 크기 마스크.
+
+    `coverage` 를 주면 사각형 대신 **실제로 색이 칠해진 자리**를 덮인 것으로 본다.
+    회전하면 놓인 상자는 사각형이지만 그림은 마름모라, 그 차이가 곧 모서리 쐐기다.
+    """
     mask = Image.new("L", (int(canvas_w), int(canvas_h)), 255)
-    covered = Image.new("L", (int(base_w), int(base_h)), 0)
+    if coverage is None:
+        covered = Image.new("L", (int(base_w), int(base_h)), 0)
+    else:
+        covered = coverage.point(lambda v: 0 if v >= 128 else 255, "L")
     mask.paste(covered, (int(offset_x), int(offset_y)))
     return mask
 
@@ -205,7 +250,8 @@ def build_payload(
     )
     canvas = compose_canvas(placed, canvas_w, canvas_h, offset_x, offset_y)
     gap = uncovered_mask(
-        canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y
+        canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y,
+        coverage=coverage_mask(placed),
     )
     if mask_is_empty(gap):
         gap = None

@@ -210,6 +210,8 @@ export function createInpaintCanvasPanel({
       <section class="ic-col" aria-label="인페인트 실행">
         <div class="ic-row">
           <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>
+          <button type="button" class="ic-btn" data-ic="auto-mask" ${editing ? '' : 'disabled'}
+            title="빈 곳과 그 경계(16px)를 한 번에 칠합니다">자동 마스킹</button>
           <span class="ic-mask-state${masked ? ' is-on' : ''}">${masked ? '마스크 있음' : '마스크 없음'}</span>
           <button type="button" class="ic-btn" data-ic="clear-mask"
             ${(masked && editing) ? '' : 'disabled'}>지우기</button>
@@ -348,6 +350,7 @@ export function createInpaintCanvasPanel({
     // 90° 는 자주 쓰는 자리라 한 번에 간다 - 슬라이더로 정확히 90 을 맞추기는 번거롭다.
     if (action === 'rot-quarter') return nudge('rotation', 90);
     if (action === 'mask') return openMaskEditor();
+    if (action === 'auto-mask') return send('auto_mask', 'true');
     if (action === 'clear-mask') return send('clear_mask', 'true');
     if (action === 'generate') return onGenerate();
     if (action === 'close') return onClose();

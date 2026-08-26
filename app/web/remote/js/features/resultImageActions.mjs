@@ -838,6 +838,20 @@ export function createResultImageActions({
     document.addEventListener('dragstart', event => {
       const target = event.target;
       if (!(target instanceof window.Element)) return;
+      // V5 인페인트 가상 캔버스가 뷰어를 차지하고 있으면 결과를 끌어내지 않는다.
+      //
+      // ⚠️ `.viewer` **자체**가 draggable 이라, 캔버스 어디를 끌어도 dragstart 는 여기로
+      //    들어온다(그때 `event.target` 은 캔버스가 아니라 `.viewer` 다 - 자식에
+      //    `draggable="false"` 를 붙여도 막히지 않는다). 그리고 그렇게 실려 나가는 것은
+      //    편집 중이라 **숨겨져 있는 예전 결과**다 - 메타데이터 뷰어에 엉뚱한 그림이
+      //    도착한다(사용자 제보 2026-08-26).
+      //
+      // 결과 보기 모드에서는 막지 않는다 - 거기서는 진짜 결과가 화면에 있고,
+      // 끌어내는 것이 맞다.
+      if (document.querySelector('.viewer.ic-editing')) {
+        event.preventDefault();
+        return;
+      }
       if (isResultDragSourceTarget(target) && isMobileInitiatedDrag()) {
         event.preventDefault();
         return;

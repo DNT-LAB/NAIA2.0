@@ -75,12 +75,17 @@ window.addEventListener(
   "wheel",
   (event) => {
     if (!event.ctrlKey) return;
-    // 이미지 뷰어의 무대에서는 비켜난다. 거기서 Ctrl+휠은 **그림**을 확대하는
-    // 손버릇이고, 창 전체가 그 그림으로 덮여 있으니 UI 배율을 바꿔 봐야 볼 것도
-    // 없다. 이 리스너는 window 에 capture 로 붙어 stopPropagation 까지 하므로,
-    // 여기서 빠져 주지 않으면 페이지 쪽 리스너는 이벤트를 구경도 못 한다.
+    // 아래 자리에서는 비켜난다. 거기서 Ctrl+휠은 **그림**을 다루는 손버릇이고,
+    // 창이 그 그림으로 덮여 있으니 UI 배율을 바꿔 봐야 볼 것도 없다.
+    //   .vp-stage  - 이미지 뷰어 무대(확대)
+    //   .ic-plane  - V5 인페인트 가상 캔버스(회전; 사용자 지정 2026-08-26)
+    //
+    // ⚠️ 이 리스너는 window 에 **capture** 로 붙어 stopPropagation 까지 한다. preload
+    //    는 페이지 스크립트보다 먼저 도므로 같은 target·같은 단계에서 언제나 먼저
+    //    실행된다 - 즉 **페이지 쪽에서는 이 배선을 절대 가로챌 수 없다.** 새 화면이
+    //    Ctrl+휠을 쓰려면 반드시 여기에 이름을 적어야 한다.
     if (event.target && typeof event.target.closest === "function"
-        && event.target.closest(".vp-stage")) {
+        && event.target.closest(".vp-stage, .ic-plane")) {
       return;
     }
     event.preventDefault();

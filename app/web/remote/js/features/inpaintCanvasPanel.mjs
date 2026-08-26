@@ -48,6 +48,10 @@ const ROTATE_DEAD_ZONE_PX = 40;
 // 베이스 미세 이동. Shift 는 자동 마스킹 반경과 같은 값으로 맞춘다.
 const NUDGE_PX = 1;
 const NUDGE_PX_COARSE = 16;
+// 휠 한 칸. Shift 를 누르면 다섯 배로 간다(방향키와 같은 손버릇).
+const WHEEL_SCALE_PCT = 2;
+const WHEEL_ROTATE_DEG = 1;
+const WHEEL_COARSE = 5;
 
 const ratio = (value) => (Number(value) || 0).toFixed(2);
 const clampPct = (v) => Math.max(SCALE_MIN_PCT, Math.min(SCALE_MAX_PCT, Math.round(Number(v) || 100)));
@@ -172,7 +176,7 @@ export function createInpaintCanvasPanel({
         </div>
         <span class="ic-spacer"></span>
         <span class="ic-hint">${editing
-          ? '끌기=이동 · 휠버튼 끌기=크기 · Ctrl+휠버튼=회전 · 방향키=1px(Shift 16) · 0=초기화'
+          ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 휠버튼 끌기도 같음 · 방향키=1px(Shift 16) · 0=초기화'
           : '생성 결과를 보는 중입니다.'}</span>
         <button type="button" class="ic-btn ic-btn-collapse" data-ic="collapse" title="접기" aria-label="접기">▾</button>
       </div>
@@ -484,6 +488,40 @@ export function createInpaintCanvasPanel({
     document.addEventListener('mousedown', swallowMiddle, true);
     document.addEventListener('auxclick', swallowAux, true);
 
+    // 휠 = 크기(커서 붙잡음), Ctrl+휠 = 회전.
+    //
+    // ⚠️ Ctrl+휠은 원래 **Electron 셸의 UI 배율**이다(`preload.cjs` 가 window 에
+    //    capture 로 물고 stopPropagation 한다). 페이지에서는 가로챌 수 없어서, 그쪽
+    //    예외 목록에 `.ic-plane` 을 적어 두고서야 여기까지 온다. 예외를 안 적으면
+    //    이 리스너는 **영영 안 불린다**(사용자 제보 2026-08-26).
+    const onWheel = (event) => {
+      if (viewMode !== 'edit' || !state?.active) return;
+      if (!plane?.contains(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const dir = event.deltaY < 0 ? 1 : -1;
+      const boost = event.shiftKey ? WHEEL_COARSE : 1;
+      if (event.ctrlKey) {
+        nudge('rotation', dir * WHEEL_ROTATE_DEG * boost);
+        return;
+      }
+      // 커서 아래를 붙잡고 키운다 - 안 붙잡으면 굴릴수록 그림이 도망간다.
+      const next = clampPct((Number(state.base_scale) || 1) * 100 + dir * WHEEL_SCALE_PCT * boost);
+      applyTransform('scale', next, canvasPointOf(event));
+    };
+    plane?.addEventListener('wheel', onWheel, {passive: false});
+
+    // Ctrl 을 쥐면 **회전할 수 있다는 것을 커서로 알린다**(사용자 지적: 회전 커서가
+    // 안 보인다). 표식은 매 렌더마다 새로 나는 스테이지가 아니라 **plane** 에 붙인다.
+    const syncRotateCursor = (event) => {
+      plane?.classList.toggle('is-rotate',
+        !!(event?.ctrlKey) && viewMode === 'edit' && !!state?.active);
+    };
+    const dropRotateCursor = () => plane?.classList.remove('is-rotate');
+    document.addEventListener('keydown', syncRotateCursor);
+    document.addEventListener('keyup', syncRotateCursor);
+    window.addEventListener('blur', dropRotateCursor);
+
     const onKeyDown = (event) => {
       if (viewMode !== 'edit' || !state?.active) return;
       const active = document.activeElement;
@@ -509,6 +547,11 @@ export function createInpaintCanvasPanel({
     document.addEventListener('keydown', onKeyDown);
 
     sessionInputTeardown = () => {
+      plane?.removeEventListener('wheel', onWheel);
+      document.removeEventListener('keydown', syncRotateCursor);
+      document.removeEventListener('keyup', syncRotateCursor);
+      window.removeEventListener('blur', dropRotateCursor);
+      dropRotateCursor();
       document.removeEventListener('mousedown', swallowMiddle, true);
       document.removeEventListener('auxclick', swallowAux, true);
       document.removeEventListener('keydown', onKeyDown);
@@ -518,6 +561,18 @@ export function createInpaintCanvasPanel({
 
   function disarmSessionInput() {
     if (sessionInputTeardown) sessionInputTeardown();
+  }
+
+  /** 화면 좌표를 캔버스 픽셀로. 확대의 기준점을 잡는 데 쓴다. */
+  function canvasPointOf(event) {
+    if (!stageEl) return null;
+    const rect = stageEl.getBoundingClientRect();
+    const {w, h} = canvasSize();
+    if (!(rect.width > 0) || !(w > 0) || !(h > 0)) return null;
+    return {
+      x: Math.round((event.clientX - rect.left) / rect.width * w),
+      y: Math.round((event.clientY - rect.top) / rect.height * h),
+    };
   }
 
   /** 중앙 버튼 드래그: 크기(세로) / Ctrl 이면 회전(각도).
@@ -537,11 +592,8 @@ export function createInpaintCanvasPanel({
     const startScale = clampPct((Number(state.base_scale) || 1) * 100);
     const startRotation = wrapDeg(state.base_rotation);
     const startY = event.clientY;
-    // 누른 지점을 캔버스 좌표로. 크기의 기준점이 된다.
-    const at = {
-      x: Math.round((event.clientX - rect.left) / rect.width * w),
-      y: Math.round((event.clientY - rect.top) / rect.height * h),
-    };
+    const at = canvasPointOf(event);   // 누른 지점 = 크기의 기준점
+    if (rotating) plane?.classList.add('is-rotate');
     const pivot = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
     const angleOf = (ev) => Math.atan2(ev.clientY - pivot.y, ev.clientX - pivot.x) * 180 / Math.PI;
     const startAngle = angleOf(event);
@@ -565,6 +617,7 @@ export function createInpaintCanvasPanel({
       if (sent.key === 'scale') sendTransform('base_scale', {value: sent.value / 100, at});
       else sendTransform('base_rotation', {value: sent.value});
       sent = null;
+      if (rotating) plane?.classList.remove('is-rotate');
     });
   }
 

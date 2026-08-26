@@ -435,15 +435,40 @@ export function createInpaintCanvasPanel({
   if (panel) {
     // 도크가 실제로 차지한 높이를 뷰어에 적어 둔다. 캔버스가 그만큼 비켜선다 -
     // 고정값으로 박으면 좁은 창에서 줄이 접혀 도크가 그림을 덮는다(실측 286px).
+    // 도크 높이 -> plane 여백 -> 스테이지 크기. 셋이 사슬로 물려 있다.
+    //
+    // ⚠️ **콜백 안에서 레이아웃을 바꾸면 안 된다.** 바로 쓰면 같은 프레임 안에서
+    //    관찰 대상이 또 바뀌어 브라우저가 "ResizeObserver loop completed with
+    //    undelivered notifications" 를 던진다(실측). 다음 프레임으로 미루고,
+    //    값이 그대로면 아예 쓰지 않는다 - 둘 다 있어야 사슬이 멎는다.
+    const deferred = (fn) => {
+      let queued = 0;
+      return () => {
+        if (queued) return;
+        queued = requestAnimationFrame(() => { queued = 0; fn(); });
+      };
+    };
+
     if (viewer && typeof ResizeObserver === 'function') {
-      new ResizeObserver(entries => {
-        const h = entries[0]?.target?.getBoundingClientRect().height || 0;
-        viewer.style.setProperty('--ic-dock-h', `${Math.round(h)}px`);
-      }).observe(panel);
+      let lastDockH = -1;
+      const syncDockHeight = deferred(() => {
+        const h = Math.round(panel.getBoundingClientRect().height);
+        if (h === lastDockH) return;
+        lastDockH = h;
+        viewer.style.setProperty('--ic-dock-h', `${h}px`);
+      });
+      new ResizeObserver(syncDockHeight).observe(panel);
     }
     // 남는 자리가 바뀌면(도크가 접히거나 줄이 늘거나 창이 바뀌면) 다시 앉힌다.
     if (plane && typeof ResizeObserver === 'function') {
-      new ResizeObserver(() => fitStage()).observe(plane);
+      let lastBox = '';
+      const refit = deferred(() => {
+        const box = `${plane.clientWidth}x${plane.clientHeight}`;
+        if (box === lastBox) return;
+        lastBox = box;
+        fitStage();
+      });
+      new ResizeObserver(refit).observe(plane);
     }
     panel.addEventListener('click', onClick);
     panel.addEventListener('change', onChange);
@@ -470,6 +495,23 @@ export function createInpaintCanvasPanel({
     render,
     /** 생성이 끝나면 결과를 봐야 한다 - 캔버스가 결과를 가리고 있으면 안 된다. */
     showResult() { setViewMode('result'); },
+    /** Inpaint 를 눌러 세션이 열렸다. 도크가 **반드시** 눈에 보이게 한다.
+     *
+     *  ⚠️ 이게 없으면 버튼이 조용히 아무 일도 안 한 것처럼 보이는 길이 셋이나 된다:
+     *    · 접어 둔 상태가 저장돼 있으면 24px 알약만 떠서 못 알아본다
+     *    · 직전 세션에서 `결과 보기` 로 끝났으면 캔버스가 안 그려진다
+     *    · 반복 칸에 커서가 남아 있으면 `typingInPanel` 가드가 렌더를 통째로 막는다
+     *  세 가지 모두 여기서 풀고 그린다.
+     */
+    revealForSession() {
+      viewMode = 'edit';
+      if (collapsed) { collapsed = false; write(COLLAPSE_KEY, '0'); }
+      if (document.activeElement && panel?.contains(document.activeElement)) {
+        try { document.activeElement.blur(); } catch (_) {}
+      }
+      rangeDragging = false;
+      render();
+    },
     /** 지금 무대가 놓인 자리와 캔버스 해상도. 캐릭터 POS 무대가 여기 겹쳐 선다.
      *
      *  ⚠️ 캔버스가 떠 있는 동안 화면의 그림은 `#preview` 가 아니고, 생성 해상도도

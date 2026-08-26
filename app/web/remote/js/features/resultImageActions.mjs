@@ -13,6 +13,8 @@ export function createResultImageActions({
   discardPendingModuleEdit = () => {},
   openModule = () => {},
   openImg2ImgSessionSurface = () => openModule('img2img', {forceOpen: true}),
+  // V5 인페인트 세션이 열렸다 - 화면이 그것을 보여 주게 한다.
+  onCanvasSession = () => {},
   onLoadPrompt = () => {},
   applyMetadataSettings = () => {},
   switchRightTab = () => {},
@@ -171,6 +173,10 @@ export function createResultImageActions({
         // (사용자 지정 2026-08-26). 백엔드가 세션을 열면서 계열을 판정하므로
         // 여기서 모델 표를 한 벌 더 들고 있지 않는다.
         if (data && data.state && data.state.canvas_active) {
+          // ⚠️ 토스트만 띄우고 끝내면 안 된다. 도크가 접혀 있거나 직전 세션이
+          //    `결과 보기` 로 끝났으면 화면에 아무 변화가 없어 "버튼이 안 먹는다" 가
+          //    된다(사용자 제보 2026-08-26).
+          onCanvasSession();
           showToast('Result 안 가상 캔버스에서 편집하세요', 'success');
         } else {
           openImg2ImgSessionSurface();

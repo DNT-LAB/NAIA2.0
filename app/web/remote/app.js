@@ -960,7 +960,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-v5canvas2')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-reveal1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -979,6 +979,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
       discardPendingModuleEdit,
       openModule,
       openImg2ImgSessionSurface,
+      onCanvasSession: () => inpaintCanvasControl?.revealForSession?.(),
       onLoadPrompt,
       applyMetadataSettings,
       switchRightTab,
@@ -2117,7 +2118,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintdock6')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintdock8')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),

@@ -35,6 +35,14 @@ export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
   openCharacterModule = () => {},
   getResolution = () => null,      // {w, h} — 지금 설정된 생성 해상도
+  // V5 인페인트 가상 캔버스가 결과 뷰어를 차지하고 있을 때 그 무대의 자리와 크기.
+  // {left, top, width, height, w, h} 또는 null.
+  //
+  // ⚠️ 캔버스가 떠 있는 동안 화면의 그림은 `#preview` 가 **아니다**(그건 숨겨져 있다).
+  //    생성 해상도도 파라미터가 아니라 캔버스 크기다. 이걸 모르면 무대가 파라미터
+  //    비율로 서서 그림과 어긋난 자리에 원을 놓게 된다
+  //    (사용자 제보 2026-08-26: "현재 이미지와 POS 해상도 불일치").
+  getCanvasStage = () => null,
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
 }) {
@@ -107,6 +115,13 @@ export function createCharacterQuickPanel({
    *     `--cq-img-shift` 로 그림이 오른쪽에 밀려 있을 수 있으니 **가운데라고 가정하지
    *     말고 계산된 값을 읽는다.**
    */
+  /** 지금 화면이 실제로 쓰는 생성 해상도. 캔버스가 떠 있으면 그쪽이 이긴다. */
+  function resolutionNow() {
+    const canvas = getCanvasStage();
+    if (canvas && canvas.w > 0 && canvas.h > 0) return {w: canvas.w, h: canvas.h};
+    return getResolution();
+  }
+
   function drawnImageRect(img) {
     const box = img.getBoundingClientRect();
     const nw = img.naturalWidth, nh = img.naturalHeight;
@@ -129,7 +144,14 @@ export function createCharacterQuickPanel({
   }
 
   function measureStage(bandBottom, snapToImage) {
-    const res = getResolution();
+    // 가상 캔버스가 떠 있으면 **그 무대에 그대로 겹친다.** 따로 상자를 세우면 비율도
+    // 자리도 어긋나 원이 그림의 다른 지점을 가리킨다(실측: 무대 1.284 vs 캔버스 0.778).
+    const canvas = getCanvasStage();
+    if (canvas && canvas.width > 0 && canvas.height > 0) {
+      return {left: canvas.left, top: canvas.top, width: canvas.width, height: canvas.height,
+              overlay: true, src: ''};
+    }
+    const res = resolutionNow();
     const img = document.getElementById('preview');
     const shown = !!(img && img.naturalWidth && img.classList.contains('show'));
     // 엿보기는 띠가 없어 **피할 것이 없다** - 그림에 딱 맞춰 얹는다. 따로 계산한
@@ -253,7 +275,7 @@ export function createCharacterQuickPanel({
    *  원이 그림의 어느 지점인지 읽힌다(사용자 지정). */
   function gridSvg(force) {
     if (!posGrid && !force) return '';
-    const res = getResolution();
+    const res = resolutionNow();
     const w = Number(res?.w) > 0 ? Math.trunc(res.w) : 0;
     const h = Number(res?.h) > 0 ? Math.trunc(res.h) : 0;
     if (!w || !h) return '';        // 해상도를 모르면 격자의 뜻이 없다
@@ -393,7 +415,7 @@ export function createCharacterQuickPanel({
   }
 
   function resKey() {
-    const res = getResolution();
+    const res = resolutionNow();
     return res ? `${res.w}x${res.h}` : '';
   }
 

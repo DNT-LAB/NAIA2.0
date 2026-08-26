@@ -320,6 +320,19 @@ export function createInpaintCanvasPanel({
     render,
     /** 생성이 끝나면 결과를 봐야 한다 - 캔버스가 결과를 가리고 있으면 안 된다. */
     showResult() { setViewMode('result'); },
+    /** 지금 무대가 놓인 자리와 캔버스 해상도. 캐릭터 POS 무대가 여기 겹쳐 선다.
+     *
+     *  ⚠️ 캔버스가 떠 있는 동안 화면의 그림은 `#preview` 가 아니고, 생성 해상도도
+     *     파라미터가 아니라 캔버스 크기다. 이걸 안 알려 주면 POS 무대가 파라미터
+     *     비율로 서서 그림과 어긋난다(사용자 제보: "현재 이미지와 POS 해상도 불일치").
+     */
+    stageRect() {
+      if (!stageEl || plane?.hidden) return null;
+      const r = stageEl.getBoundingClientRect();
+      const {w, h} = canvasSize();
+      if (!(r.width > 0) || !(r.height > 0) || !(w > 0) || !(h > 0)) return null;
+      return {left: r.left, top: r.top, width: r.width, height: r.height, w, h};
+    },
     handleModuleState(payload) {
       if (payload && payload.module_id === 'img2img') render(payload);
     },

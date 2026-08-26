@@ -188,6 +188,16 @@ def _enrich_img2img_source_prompt(
             prompt_ctx["main_prompt"] = prompt
         if negative and not gen_params.get("negative_prompt"):
             gen_params["negative_prompt"] = negative
+        # ⚠️ **캐릭터도 복원한다.** 여기서 빠뜨려서, 헤더 Inpaint 버튼을 WS 로 합친 뒤
+        #    외부에서 가져온 그림은 가상 캐릭터가 통째로 비었다 - HTTP 업로드로 열면
+        #    나오고 버튼으로 열면 안 나오는 갈림이었다(Codex 리뷰 2026-08-26).
+        #    HTTP 라우트와 **같은 함수**를 쓴다.
+        if not prompt_ctx.get("character_prompts"):
+            from utils.image_info import character_prompts_from_embedded
+
+            slots = character_prompts_from_embedded(extracted)
+            if slots:
+                prompt_ctx["character_prompts"] = slots
     return gen_params, prompt_ctx
 
 
@@ -668,7 +678,11 @@ async def handle_result_command(
             "runtime": "web",
         })
         return True
-    await _send_json(ws, state)
+    # ⚠️ **보낸 소켓에만 주면 안 된다.** 세션은 백엔드 하나를 여럿이 나눠 쓰는 것인데,
+    #    이쪽만 알면 다른 탭·모바일 화면은 잠기지 않은 채 남아 옛 캐릭터를 보면서
+    #    같은 세션에 생성을 건다(HTTP 업로드 경로는 처음부터 broadcast 였다 -
+    #    같은 동작인데 길에 따라 갈렸다. Codex 리뷰 2026-08-26).
+    await broadcast_json(clients, state)
     await _send_json(ws, {
         "type": "toast",
         "level": "success",

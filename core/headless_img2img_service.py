@@ -231,6 +231,29 @@ class HeadlessImg2ImgService:
                 return out
         return []
 
+    @staticmethod
+    def _session_has_user_work(state: dict[str, Any]) -> bool:
+        """이 세션에 **사람이 손댄 것**이 있는가. 있으면 덮어쓰기를 거절한다.
+
+        마스크·확대·회전·이동·캔버스 크기 - 하나라도 처음과 다르면 작업물이다.
+        (프롬프트 편집만 한 경우는 세지 않는다. 세션을 닫아도 원본 그림에서 다시
+        복원되므로 잃는 것이 없다.)
+        """
+        if state.get("has_mask") or state.get("user_mask_bytes"):
+            return True
+        try:
+            if abs(float(state.get("base_scale") or 1.0) - 1.0) > 1e-6:
+                return True
+            if abs(float(state.get("base_rotation") or 0.0)) > 1e-6:
+                return True
+        except (TypeError, ValueError):
+            pass
+        if int(state.get("base_offset_x") or 0) or int(state.get("base_offset_y") or 0):
+            return True
+        canvas = (int(state.get("canvas_width") or 0), int(state.get("canvas_height") or 0))
+        base = (int(state.get("base_width") or 0), int(state.get("base_height") or 0))
+        return canvas != base and all(canvas) and all(base)
+
     def open_session_from_bytes(
         self,
         image_bytes: bytes,
@@ -243,6 +266,18 @@ class HeadlessImg2ImgService:
         context = self.context
         if not image_bytes:
             raise ValueError("Image data is unavailable")
+        # ⚠️ **살아 있는 세션을 말없이 덮지 않는다.** 아래에서 `img2img_session` 을 새
+        #    dict 로 통째로 갈아 끼우는데, 예전에는 확인이 없어 인페인트를 다시 누르면
+        #    칠한 마스크·캔버스 배치·가상 캐릭터 편집이 한 번에 사라졌다(Codex 리뷰
+        #    2026-08-26). 진입점이 셋이라(헤더 버튼 · 결과 우클릭 · 드래그 업로드)
+        #    화면에서 막는 것으로는 모자라다 - **여기가 목이다.**
+        #    손댄 적이 없는 세션은 그냥 바꿔 준다 - 잘못 열었을 때 한 번 더 누르게
+        #    만들 이유는 없다.
+        prior = context.img2img_session or {}
+        if prior.get("active") and self._session_has_user_work(prior):
+            raise ValueError(
+                "편집 중인 인페인트 세션이 있습니다. 먼저 [세션 닫기] 를 누른 뒤 다시 여세요."
+            )
         image = self._session_image_from_bytes(bytes(image_bytes), resize_1mp=True)
         png_bytes = self._image_to_png_bytes(image)
         preview, preview_width, preview_height = self._image_preview_data_url(image)

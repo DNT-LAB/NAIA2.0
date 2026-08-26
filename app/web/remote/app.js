@@ -500,6 +500,8 @@ function virtualCharacterState(session) {
  *  ⚠️ 잠그는 것은 **화면뿐**이다. 저장된 사용자 설정은 건드리지 않는다 - 세션이 끝나면
  *     그대로 돌아와야 한다.
  */
+let _inpaintLockRecomputing = false;
+
 function applyInpaintSessionLock() {
   const locked = !!virtualCharacterSession();
   const reason = '인페인트 세션 중에는 쓸 수 없습니다 (세션 닫기 후 사용)';
@@ -508,9 +510,11 @@ function applyInpaintSessionLock() {
   //    사용 가능한 백엔드가 NAI 하나뿐인 판에서 모드 셀렉트는 처음부터 disabled 였다.
   //    일괄 false 로 풀면 인페인트를 한 번 하고 나온 뒤 **없던 모드가 열린다.**
   //    걸 때 원래 값을 적어 두고, 풀 때 그 값으로 되돌린다.
-  const lockOne = (el, hint) => {
+  //    `on` 이 거짓이면 세션 여부와 무관하게 **원래대로 돌린다** - 잠글지 말지의
+  //    판단은 부르는 쪽에 둔다(Interactive 처럼 예외가 있는 것이 있다).
+  const setLock = (el, on, hint) => {
     if (!el) return;
-    if (locked) {
+    if (on) {
       if (el.dataset.inpaintLockPrev === undefined) {
         el.dataset.inpaintLockPrev = el.disabled ? '1' : '0';
         el.dataset.inpaintLockTitle = el.title || '';
@@ -525,10 +529,20 @@ function applyInpaintSessionLock() {
     }
   };
 
-  lockOne($('btnRnd'), reason);
-  lockOne(modeSelect, reason);
-  lockOne(paramEls?.model, 'V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다');
-  lockOne($('iaModeToggle'), reason);
+  setLock(modeSelect, locked, reason);
+  setLock(paramEls?.model, locked, 'V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다');
+  // ⚠️ **이미 켜져 있으면 잠그지 않는다.** 진입만 막으려던 건데 버튼째 얼려 놓으니
+  //    Interactive 를 켠 채로 인페인트에 들어간 사람은 **끄지도 못했다**. 진입 거절은
+  //    `canEnter` 가 맡고, 나가는 문은 늘 열어 둔다(Codex 리뷰 2026-08-26).
+  setLock($('iaModeToggle'), locked && !interactivePanel?.isActive?.(), reason);
+
+  // ⚠️ Random 과 Generate 는 **스냅샷을 뜨지 않는다.** 이 둘에는 이미 주인이 있다 -
+  //    `updateGenerateButtonMode()` 가 prompt_fixed·프리셋 탭 상태로 매번 다시
+  //    계산한다. 스냅샷을 되씌우면 세션 중에 바뀐 진짜 상태를 덮어, 예컨대 세션
+  //    안에서 prompt_fixed 를 끈 사람은 나온 뒤 Random 이 이유 없이 죽어 있다.
+  //    잠글 때만 눌러 두고, 풀 때는 **주인에게 다시 계산시킨다.**
+  const rnd = $('btnRnd');
+  if (rnd && locked) { rnd.disabled = true; rnd.title = reason; }
 
   // Generate 는 막지 않고 **인페인트 생성으로 바꾼다** - 큰 버튼이 눈앞의 일을 한다.
   const gen = $('btnGen');
@@ -538,6 +552,11 @@ function applyInpaintSessionLock() {
     gen.classList.toggle('is-inpaint', locked);
     if (label) label.textContent = locked ? 'Generate (Inpaint)' : 'Generate';
     gen.title = locked ? '현재 인페인트 세션을 생성합니다' : '';
+  }
+
+  if (!locked && !_inpaintLockRecomputing) {
+    _inpaintLockRecomputing = true;
+    try { updateGenerateButtonMode(); } finally { _inpaintLockRecomputing = false; }
   }
 }
 
@@ -570,7 +589,11 @@ function virtualSetModuleParam(moduleId, key, value) {
       {x: Math.round(nx * w), y: Math.round(ny * h)});
   }
   if (key.startsWith('char_slot_state_')) {
-    return setModuleParam('img2img', `char_active_${key.slice('char_slot_state_'.length)}`, 'false');
+    // ⚠️ ▼ 는 슬롯을 목록에서 내려두는 것인데, **되살리는 UI 가 캐릭터 모듈 팝업에만**
+    //    있다. 가상 슬롯은 그 팝업에 없으므로 한 번 내리면 세션을 닫기 전에는 못
+    //    돌아온다 - 그러자고 마스크를 버리게 할 수는 없다(Codex 리뷰 2026-08-26).
+    showToast('가상 캐릭터는 세션 안에서 내려둘 수 없습니다 (지우려면 − 를 쓰세요)', 'error');
+    return undefined;
   }
   if (key.startsWith('remove_character_') || key === 'add_character') {
     return setModuleParam('img2img', key, value);
@@ -1101,7 +1124,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-lock2')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-fix2')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1331,7 +1354,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260826-lock2')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260826-fix2')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1959,7 +1982,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-lock2')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-fix2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2139,7 +2162,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-lock2')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-fix2')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2268,7 +2291,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-lock2')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-fix2')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -4813,6 +4836,13 @@ function updateParams(m) {
 
 function setParam(key, value) {
   if (syncingParams) return;
+  // ⚠️ 모델을 바꾸는 입구가 셋이다: PARAMS 셀렉트 · 모델 매니저 저장 · 메타데이터 적용.
+  //    셀렉트만 막았더니 나머지 둘로 그대로 새어, 세션 중에 바뀐 모델로 다음 유료
+  //    인페인트가 나갈 수 있었다(Codex 리뷰 2026-08-26). 값이 실리는 목에서 막는다.
+  if (key === 'model' && virtualCharacterSession()) {
+    showToast('V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
+    return;
+  }
   if (isComfyUiFreeWorkflowActive() && COMFYUI_FREE_LOCKED_PARAM_KEYS.has(key)) return;
   // Quick ↔ Params 탭 양방향 동기화
   if (key === 'resolution') {
@@ -7246,9 +7276,25 @@ async function generateWithInteractiveSnapshot(payload, resolved = null) {
   return requestGenerate(payload);
 }
 
+let _inpaintGenerateToastAt = 0;
+
 function requestGenerate(payload = {}) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   if (generating) return false;
+  // ⚠️ **여기가 목이다.** 예전에는 `send()` 에만 게이트를 걸었는데, Studio 탭과
+  //    V5 Scene 은 `send()` 를 안 거치고 이 함수를 직접 부른다(deps 로 넘겨 받는다).
+  //    세션이 살아 있는데 저기서 누르면 인페인트가 아니라 **일반 t2i** 가 나가
+  //    엉뚱한 그림에 Anlas 를 쓴다(Codex 리뷰 2026-08-26).
+  //    Interactive Auto Gen 도 결국 이리로 오므로 같은 문으로 막힌다 - 다만 타이머라
+  //    같은 토스트가 쌓이지 않게 3초에 한 번만 말한다.
+  if (virtualCharacterSession()) {
+    const now = performance.now();
+    if (now - _inpaintGenerateToastAt > 3000) {
+      _inpaintGenerateToastAt = now;
+      showToast('인페인트 세션 중에는 일반 생성이 나가지 않습니다 (Generate (Inpaint) 를 쓰거나 세션을 닫으세요)', 'error');
+    }
+    return false;
+  }
   flushPromptEngineeringEdits();
   if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
   _localPromptDirty = false;
@@ -7372,16 +7418,23 @@ function scheduleInitialRandomPrompt(delay = 350) {
   }, Math.max(0, Number(delay) || 0));
 }
 
+/** 큰 Generate 버튼과 그 단축키(Ctrl+Enter)**만** 지나는 입구.
+ *
+ *  ⚠️ 이 갈림길을 `send()` 안에 두면 안 된다. `send('generate')` 는 Interactive 의
+ *     **Auto Gen 루프**도 쓰는데(interactivePanel 의 `generateNow`/`requestGeneration`),
+ *     거기서 인페인트로 돌려 버리면 타이머가 도는 대로 유료 인페인트가 반복 발사된다.
+ *     "버튼을 눌렀다" 와 "무언가가 생성을 요청했다" 는 다른 일이다.
+ */
+function generateAction() {
+  if (virtualCharacterSession()) { img2imgPanel?.generate?.(); return; }
+  send('generate');
+}
+
 function send(cmd) {
-  // 인페인트 세션이 화면을 잡고 있으면 큰 버튼도 **눈앞의 일**을 한다(사용자 지정).
-  // ⚠️ 라벨만 바꾸고 동작을 안 바꾸면 `Generate (Inpaint)` 를 눌렀는데 일반 t2i 가
-  //    나간다 - 돈이 엉뚱한 데로 간다.
-  if (virtualCharacterSession()) {
-    if (cmd === 'generate') { img2imgPanel?.generate?.(); return; }
-    if (cmd === 'random') {
-      showToast('인페인트 세션 중에는 Random 을 쓸 수 없습니다 (세션 닫기 후 사용)', 'error');
-      return;
-    }
+  // Random 은 출처를 가리지 않고 막는다 - 세션 중에 프롬프트를 새로 굴릴 이유가 없다.
+  if (cmd === 'random' && virtualCharacterSession()) {
+    showToast('인페인트 세션 중에는 Random 을 쓸 수 없습니다 (세션 닫기 후 사용)', 'error');
+    return;
   }
   if (cmd === 'generate') {
     // Sequence 탭에서 그룹 팝업을 보고 있으면 메인 Generate = 그 그룹의 '연속 생성'(req1).
@@ -7517,6 +7570,11 @@ function updateGenerateButtonMode() {
       : false;
     btnGen.innerHTML = '<span class="shortcut-hint">CTRL + ENTER</span>Generate';
   }
+  // ⚠️ 위에서 innerHTML 을 통째로 다시 쓰고 Random 도 다시 켠다 - 인페인트 세션의
+  //    잠금이 여기서 말없이 벗겨졌다(탭을 옮기기만 해도 라벨이 `Generate` 로 되돌아감).
+  //    이 함수가 화면을 손보는 마지막 자리이므로 여기서 다시 건다.
+  //    (잠금 해제 쪽에서 나를 부른 경우에는 되부르지 않는다 - 서로 부르게 된다.)
+  if (!_inpaintLockRecomputing) applyInpaintSessionLock();
 }
 
 function clearPresetGenerationOptions({autoGenerate = true} = {}) {
@@ -11099,7 +11157,8 @@ document.addEventListener('keydown', async e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
     e.preventDefault();
-    send('generate');
+    // 버튼의 단축키다 - 버튼과 **같은 입구**를 쓴다(라벨이 Generate (Inpaint) 면 그렇게 돈다).
+    generateAction();
   } else if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.shiftKey) {
     e.preventDefault();
     send('random');

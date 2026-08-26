@@ -1069,6 +1069,88 @@ def json_safe_metadata(value: Any, _depth: int = 0) -> Any:
     return str(value)
 
 
+def character_prompts_from_embedded(embedded: Optional[Dict[str, Any]]) -> list:
+    """이미지 메타데이터에서 **가상 캐릭터 슬롯**을 만든다. 없으면 빈 목록.
+
+    반환 모양은 세션이 첫 소스로 보는 `prompt_context['character_prompts']` 다:
+    ``[{"prompt": str, "uc": str, "active": True, "position": {"x","y"}|None}, ...]``
+    좌표는 0~1 비율이고, 캔버스 픽셀로 되돌리는 것은 세션 쪽 일이다.
+
+    ⚠️ **여기 하나뿐이어야 한다.** 예전에는 HTTP 업로드 경로에만 복원이 있고 WS 경로에는
+       없어서, 같은 버튼이 어느 길로 가느냐에 따라 캐릭터가 있기도 없기도 했다
+       (Codex 리뷰 2026-08-26). 두 라우트가 이 함수를 함께 부른다.
+
+    ⚠️ **`char_captions` 를 직접 읽는다.** 상위 `characters` / `characters_uc` 는 빈
+       항목을 **버리며** 압축되는데(`_extract_char_captions_from_dict`), 좌표 쪽은
+       빈 자리를 `None` 으로 **남긴다**. 둘을 인덱스로 맞추면 C1 의 UC 가 비었을 때
+       C2 의 UC 가 C1 에 붙는다. 원본 배열을 한 번에 읽어 자리를 어긋내지 않는다.
+
+    ⚠️ **`use_coords` 가 꺼져 있으면 좌표를 버린다.** NAI 는 좌표를 안 쓸 때도 전원에게
+       기본값 {0.5, 0.5} 를 적어 둔다(`core/api_service.py` 의 `default_center`).
+       그대로 실으면 원래 자동 배치였던 사람들이 전부 한가운데 겹치고, 다음 요청은
+       `use_coords=True` 가 되어 **없던 배치가 생긴다**.
+    """
+    if not isinstance(embedded, dict):
+        return []
+
+    def _captions(node: Any) -> list:
+        if not isinstance(node, dict):
+            return []
+        caption = node.get('caption')
+        if not isinstance(caption, dict):
+            return []
+        items = caption.get('char_captions')
+        return items if isinstance(items, list) else []
+
+    positive_node = embedded.get('v4_prompt')
+    negative_node = embedded.get('v4_negative_prompt')
+    pos_items = _captions(positive_node)
+    neg_items = _captions(negative_node)
+
+    def _text(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get('char_caption') or '')
+        if isinstance(item, str):
+            return item
+        return ''
+
+    use_coords = True
+    if isinstance(positive_node, dict) and 'use_coords' in positive_node:
+        use_coords = bool(positive_node.get('use_coords'))
+
+    slots = []
+    if pos_items:
+        for index, item in enumerate(pos_items):
+            prompt = _text(item)
+            uc = _text(neg_items[index]) if index < len(neg_items) else ''
+            position = None
+            if use_coords and isinstance(item, dict):
+                raw = item.get('centers')
+                if isinstance(raw, list) and raw:
+                    raw = raw[0]
+                if isinstance(raw, dict):
+                    try:
+                        position = {'x': float(raw.get('x')), 'y': float(raw.get('y'))}
+                    except (TypeError, ValueError):
+                        position = None
+            slots.append({'prompt': prompt, 'uc': uc, 'active': True, 'position': position})
+    else:
+        # v4 원본이 없는 그림(스텔스 PNG · 외부 도구)은 압축된 목록밖에 없다. 이때는
+        # 좌표를 아예 쓰지 않는다 - 자리가 맞는지 보증할 방법이 없기 때문이다.
+        texts = embedded.get('characters') or []
+        ucs = embedded.get('characters_uc') or []
+        for index, text in enumerate(texts):
+            slots.append({
+                'prompt': str(text or ''),
+                'uc': str(ucs[index]) if index < len(ucs) else '',
+                'active': True,
+                'position': None,
+            })
+
+    # 전부 빈 슬롯이면 캐릭터가 없는 그림이다.
+    return slots if any(slot['prompt'] or slot['uc'] for slot in slots) else []
+
+
 def extract_embedded_metadata(raw_bytes: Optional[bytes]) -> Dict[str, Any]:
     """Best-effort embedded-metadata extraction from original image bytes.
 

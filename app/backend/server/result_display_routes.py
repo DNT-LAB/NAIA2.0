@@ -1633,23 +1633,14 @@ def register_result_display_routes(
                                 seed_gen_params = {"negative_prompt": embedded_negative}
                             # ⚠️ **캐릭터도 넘긴다.** 예전에는 프롬프트/네거티브만 넘겨서
                             #    V5 가상 캐릭터 퀵 프롬프트가 늘 비어 있었다(사용자 제보
-                            #    2026-08-26). 세션은 `character_prompts` 를 첫 소스로
-                            #    보므로 그 모양으로 맞춘다 - 좌표는 0~1 비율이고
-                            #    세션이 캔버스 픽셀로 되돌린다.
-                            chars = embedded.get("characters") or []
-                            if chars:
-                                ucs = embedded.get("characters_uc") or []
-                                centers = embedded.get("character_positions") or []
+                            #    2026-08-26). 조립은 WS 경로와 **같은 함수**가 한다 -
+                            #    여기서 손으로 짜다가 두 길이 갈렸다(Codex 리뷰).
+                            from utils.image_info import character_prompts_from_embedded
+
+                            slots = character_prompts_from_embedded(embedded)
+                            if slots:
                                 seed_prompt_ctx = dict(seed_prompt_ctx or {})
-                                seed_prompt_ctx["character_prompts"] = [
-                                    {
-                                        "prompt": str(text or ""),
-                                        "uc": str(ucs[i]) if i < len(ucs) else "",
-                                        "active": True,
-                                        "position": centers[i] if i < len(centers) else None,
-                                    }
-                                    for i, text in enumerate(chars)
-                                ]
+                                seed_prompt_ctx["character_prompts"] = slots
                     except Exception:
                         pass
                     return session_context.open_img2img_session_from_bytes(

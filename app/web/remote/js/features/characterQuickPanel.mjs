@@ -945,7 +945,11 @@ export function createCharacterQuickPanel({
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.
     // ⚠️ POS 는 **모드 이름**을 넣는다. 불리언으로 넣으면 CUSTOM->RAND 전환이
     //    서명에 안 잡혀 라벨이 CUSTOM 에 굳는다(둘 다 "참"이 아니게 되는 순간).
-    return `${open ? 1 : 0}${state && state.activated ? 1 : 0}`
+    // ⚠️ `virtual` 도 넣는다. 메인과 세션의 슬롯 구조가 우연히 같으면(같은 인원수·
+    //    같은 POS 모드·아무것도 안 펼친 상태) 서명이 똑같아 빠른 경로로 빠지고,
+    //    머리줄을 다시 안 그려 **(가상) 배지가 안 뜬다**(Codex 리뷰 2026-08-26).
+    //    세션을 닫을 때는 반대로 배지가 남는다.
+    return `${open ? 1 : 0}${state && state.activated ? 1 : 0}${state && state.virtual ? 1 : 0}`
       + `${posModeOf(state)}${posEditing ? 1 : 0}#${slots}`;
   }
 

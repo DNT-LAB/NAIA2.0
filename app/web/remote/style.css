@@ -26138,6 +26138,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   background: rgba(16,16,24,0.90); backdrop-filter: blur(7px);
   box-shadow: 0 6px 22px rgba(0,0,0,0.45);
 }
+/* ⚠️ `hidden` 속성은 **CSS 에 진다.** 브라우저 기본 규칙 `[hidden]{display:none}` 은
+   author 의 클래스 규칙보다 약해서, 위의 `display:flex` 가 이긴다. 세션이 없을 때
+   빈 패널이 패딩과 테두리만 남은 **작은 알약**으로 뷰어 아래에 떠 있었다(사용자 제보
+   2026-08-26: "아무것도 안한 상태에서 하단에 이상한 버튼"). 눌러도 아무 일이 없으니
+   더 헷갈린다. `display` 를 쓰는 요소에 `hidden` 을 얹을 때는 반드시 짝을 지어라. */
+.inpaint-canvas-panel[hidden],
+.ic-plane[hidden] { display: none; }
+
 /* 접으면 알약 하나만 남는다 - 캔버스를 최대한 안 가린다. */
 .inpaint-canvas-panel.is-collapsed {
   padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none;

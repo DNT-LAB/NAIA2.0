@@ -1,8 +1,16 @@
-// V5 인페인트 가상 캔버스 — Result 안에서 바로 고치는 화면.
+// V5 인페인트 가상 캔버스.
 //
-// V5 는 인페인트를 별도 팝업으로 빼지 않는다(사용자 지정 2026-08-26). 그래서 이 패널은
-// **팝업이 하던 일을 전부** 떠맡는다: 캔버스 조작 + 마스크 + 강도/노이즈/반복 + 생성.
-// 팝업만 안 열고 조작 수단을 안 옮기면 사용자에게 아무 편집 수단도 안 남는다.
+// V5 는 인페인트를 별도 팝업으로 빼지 않는다(사용자 지정 2026-08-26).
+//
+// ⚠️ **캔버스는 결과 이미지와 같은 자리(plane)에 산다.** 아래에 작은 복제본을 하나 더
+//    띄우면 어느 쪽이 진짜인지 알 수 없다(사용자 지적 2026-08-26). 가상 캔버스는
+//    "원본과 실물을 분리해 두는 종이" 지, 별도의 미리보기가 아니다.
+//
+//    · 화면(스테이지)  -> `#inpaintCanvasPlane`  (결과 뷰어 위에 겹친다)
+//    · 조작(컨트롤러)  -> `#inpaintCanvasPanel`  (Generation Info 안, 계속 떠 있다)
+//
+// 컨트롤러는 세션이 사는 동안 계속 떠 있고, 거기서 셋 중 하나를 고른다:
+//    편집(캔버스를 본다) / 결과 보기(생성 결과를 본다) / 세션 닫기(끝낸다).
 //
 // ⚠️ 계열 판정은 백엔드가 한다(`canvas_supported`). 여기서 모델 표를 한 벌 더 들면
 //    커스텀 모델이 등록될 때마다 두 곳이 어긋난다.
@@ -22,7 +30,7 @@ const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
 const ratio = (value) => (Number(value) || 0).toFixed(2);
 
 export function createInpaintCanvasPanel({
-  panel, escHtml, setModuleParam, showToast,
+  panel, plane, viewer, escHtml, setModuleParam, showToast,
   openMaskEditor = () => {},
   onSlider = () => {},
   onRepeat = () => {},
@@ -33,6 +41,9 @@ export function createInpaintCanvasPanel({
   let state = null;
   let stageEl = null;
   let posStage = null;
+  // 편집(캔버스) / 결과 보기. 화면에서만 쓰는 값이라 서버에 안 보낸다 - 다른 기기에서
+  // 보던 화면을 여기서 바꿔 버리면 안 된다.
+  let viewMode = 'edit';
   // 드래그 중 계산한 베이스 오프셋. DOM 에 붙여 두면 재렌더에 함께 날아간다.
   let pendingOffset = null;
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
@@ -62,72 +73,58 @@ export function createInpaintCanvasPanel({
     // 갈려 어느 쪽이 진짜인지 알 수 없게 된다.
     const show = !!(state?.active && state.canvas_supported);
     if (show !== !panel.hidden) onVisibility(show);
-    if (!show) { panel.innerHTML = ''; panel.hidden = true; return; }
+    if (!show) {
+      panel.innerHTML = '';
+      panel.hidden = true;
+      viewMode = 'edit';        // 다음 세션은 편집부터 시작한다
+      renderPlane();
+      return;
+    }
     panel.hidden = false;
+    panel.innerHTML = controllerHtml();
+    renderPlane();
+  }
 
+  function controllerHtml() {
     const {w, h} = canvasSize();
     const on = !!state.canvas_active;
-    panel.innerHTML = `
+    const editing = viewMode === 'edit';
+    // 캔버스 조작은 편집 모드에서만 뜻이 있다. 결과를 보는 중에 눌러 봐야 화면이
+    // 안 바뀌어 "먹통" 으로 읽힌다.
+    const off = editing ? '' : 'disabled';
+    return `
       <div class="ic-bar">
-        <button type="button" class="ic-btn${on ? ' is-on' : ''}" data-ic="toggle">가상 캔버스</button>
-        <select class="ic-select" data-ic="size" ${on ? '' : 'disabled'} aria-label="캔버스 해상도">
+        <div class="ic-modes" role="group" aria-label="인페인트 보기 모드">
+          <button type="button" class="ic-btn${editing ? ' is-on' : ''}" data-ic="mode-edit">편집</button>
+          <button type="button" class="ic-btn${editing ? '' : ' is-on'}" data-ic="mode-result">결과 보기</button>
+        </div>
+        <span class="ic-sep"></span>
+        <button type="button" class="ic-btn${on ? ' is-on' : ''}" data-ic="toggle" ${off}>가상 캔버스</button>
+        <select class="ic-select" data-ic="size" ${(on && editing) ? '' : 'disabled'} aria-label="캔버스 해상도">
           ${CANVAS_SIZES.map(label => {
             const [sw, sh] = label.split('x').map(v => parseInt(v.trim(), 10));
             const sel = (sw === w && sh === h) ? ' selected' : '';
             return `<option value="${escHtml(label)}"${sel}>${escHtml(label)}</option>`;
           }).join('')}
         </select>
-        <span class="ic-sep"></span>
-        <button type="button" class="ic-btn" data-ic="zoom-out" ${on ? '' : 'disabled'} title="축소">−</button>
+        <button type="button" class="ic-btn" data-ic="zoom-out" ${(on && editing) ? '' : 'disabled'} title="축소">−</button>
         <span class="ic-readout">${Math.round((Number(state.base_scale) || 1) * 100)}%</span>
-        <button type="button" class="ic-btn" data-ic="zoom-in" ${on ? '' : 'disabled'} title="확대">+</button>
-        <button type="button" class="ic-btn" data-ic="rotate" ${on ? '' : 'disabled'} title="90° 회전">⟳</button>
+        <button type="button" class="ic-btn" data-ic="zoom-in" ${(on && editing) ? '' : 'disabled'} title="확대">+</button>
+        <button type="button" class="ic-btn" data-ic="rotate" ${(on && editing) ? '' : 'disabled'} title="90° 회전">⟳</button>
         <span class="ic-readout">${Math.round(Number(state.base_rotation) || 0)}°</span>
-        <button type="button" class="ic-btn" data-ic="reset" ${on ? '' : 'disabled'} title="위치·확대·회전 초기화">초기화</button>
-        <span class="ic-sep"></span>
-        <button type="button" class="ic-btn${showGrid ? ' is-on' : ''}" data-ic="grid" title="격자">격자</button>
+        <button type="button" class="ic-btn" data-ic="reset" ${(on && editing) ? '' : 'disabled'} title="위치·확대·회전 초기화">초기화</button>
+        <button type="button" class="ic-btn${showGrid ? ' is-on' : ''}" data-ic="grid" ${off} title="격자">격자</button>
+        <span class="ic-spacer"></span>
+        <span class="ic-hint">${editing
+          ? '✥ 를 끌면 베이스가 움직이고, 비는 자리는 자동으로 열립니다.'
+          : '생성 결과를 보는 중입니다. 편집을 누르면 캔버스로 돌아갑니다.'}</span>
       </div>
-      ${stageHtml(w, h, on)}
-      ${inpaintBarHtml()}
-    `;
-    stageEl = panel.querySelector('[data-ic-stage]');
-    if (stageEl && w > 0 && h > 0) {
-      // 스테이지는 캔버스 비율을 그대로 쥔다 - 좌표 환산이 비율에만 기대기 때문이다.
-      stageEl.style.aspectRatio = `${w} / ${h}`;
-    }
-  }
-
-  function stageHtml(w, h, on) {
-    const preview = state.preview || '';
-    const off = {x: Number(state.base_offset_x) || 0, y: Number(state.base_offset_y) || 0};
-    const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
-    const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
-    // 베이스 손잡이는 **놓인 그림의 한가운데**에 둔다. 모서리에 두면 캔버스 밖으로
-    // 나갔을 때 잡을 수가 없다.
-    const handle = contentToPercent(off.x + placedW / 2, off.y + placedH / 2, w, h);
-    const chars = (state.characters || [])
-      .map((c, i) => ({...c, index: i}))
-      .filter(c => c.prompt && c.position);
-    return `
-      <div class="ic-stage" data-ic-stage="1">
-        ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}
-        ${showGrid ? gridSvg(w, h, {className: 'ic-grid pos-grid'}) : ''}
-        ${on ? `<button type="button" class="ic-handle" data-ic-handle="1"
-          style="left:${handle.left};top:${handle.top}" title="끌어서 베이스 이미지를 옮깁니다">✥</button>` : ''}
-        ${chars.map(c => {
-          const p = contentToPercent(c.position.x, c.position.y, w, h);
-          return `<button type="button" class="ic-marker" data-ic-marker="${c.index}"
-            style="left:${p.left};top:${p.top}" title="${escHtml(c.prompt)}">${c.index + 1}</button>`;
-        }).join('')}
-      </div>
-      <div class="ic-hint">${on
-        ? '✥ 를 끌면 베이스가 움직이고, 비는 자리는 자동으로 열립니다. 숫자를 끌면 그 캐릭터의 자리가 바뀝니다.'
-        : '가상 캔버스를 켜면 베이스를 옮겨 새 자리를 열 수 있습니다.'}</div>
+      ${runBarHtml(editing)}
     `;
   }
 
   // 팝업이 안 열리므로 인페인트 조작은 전부 여기 있어야 한다.
-  function inpaintBarHtml() {
+  function runBarHtml(editing) {
     const strength = Number.isFinite(Number(state.strength)) ? Number(state.strength) : 99;
     const noise = Number.isFinite(Number(state.noise)) ? Number(state.noise) : 0;
     const repeat = Number.isFinite(Number(state.repeat)) ? Number(state.repeat) : 1;
@@ -136,7 +133,7 @@ export function createInpaintCanvasPanel({
       ? ' title="생성 전에 마스크를 칠하거나 베이스를 옮겨 빈 자리를 여세요"' : '';
     return `
       <div class="ic-bar ic-bar-run">
-        <button type="button" class="ic-btn ic-btn-mask" data-ic="mask">마스크 그리기</button>
+        <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>
         <span class="ic-mask-state${masked ? ' is-on' : ''}">${masked ? '마스크 있음' : '마스크 없음'}</span>
         <button type="button" class="ic-btn" data-ic="clear-mask" ${masked ? '' : 'disabled'}>마스크 지우기</button>
         <span class="ic-sep"></span>
@@ -147,9 +144,50 @@ export function createInpaintCanvasPanel({
         <label class="ic-range ic-repeat">반복 <input type="number" min="1" max="99" value="${repeat}" data-ic-num="repeat"></label>
         <span class="ic-spacer"></span>
         <button type="button" class="ic-btn ic-btn-go" data-ic="generate" ${state.can_generate ? '' : 'disabled'}${genTitle}>인페인트 생성</button>
-        <button type="button" class="ic-btn" data-ic="close">세션 닫기</button>
+        <button type="button" class="ic-btn ic-btn-end" data-ic="close">세션 닫기</button>
       </div>
     `;
+  }
+
+  // 결과 이미지와 같은 자리. 편집 모드일 때만 겹친다.
+  function renderPlane() {
+    if (!plane) return;
+    const editing = !!(state?.active && state.canvas_supported && viewMode === 'edit');
+    // 뷰어에 표식을 남겨 결과 이미지를 숨긴다 - 캔버스가 반투명하게 겹치면 옮긴
+    // 자리가 원본과 겹쳐 보여 무엇이 진짜인지 알 수 없다.
+    viewer?.classList.toggle('ic-editing', editing);
+    if (!editing) { plane.innerHTML = ''; plane.hidden = true; stageEl = null; return; }
+    plane.hidden = false;
+
+    const {w, h} = canvasSize();
+    const preview = state.preview || '';
+    const off = {x: Number(state.base_offset_x) || 0, y: Number(state.base_offset_y) || 0};
+    const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
+    const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
+    // 베이스 손잡이는 **놓인 그림의 한가운데**에 둔다. 모서리에 두면 캔버스 밖으로
+    // 나갔을 때 잡을 수가 없다.
+    const handle = contentToPercent(off.x + placedW / 2, off.y + placedH / 2, w, h);
+    const chars = (state.characters || [])
+      .map((c, i) => ({...c, index: i}))
+      .filter(c => c.prompt && c.position);
+    plane.innerHTML = `
+      <div class="ic-stage" data-ic-stage="1">
+        ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}
+        ${showGrid ? gridSvg(w, h, {className: 'ic-grid pos-grid'}) : ''}
+        ${state.canvas_active ? `<button type="button" class="ic-handle" data-ic-handle="1"
+          style="left:${handle.left};top:${handle.top}" title="끌어서 베이스 이미지를 옮깁니다">✥</button>` : ''}
+        ${chars.map(c => {
+          const p = contentToPercent(c.position.x, c.position.y, w, h);
+          return `<button type="button" class="ic-marker" data-ic-marker="${c.index}"
+            style="left:${p.left};top:${p.top}" title="${escHtml(c.prompt)}">${c.index + 1}</button>`;
+        }).join('')}
+      </div>
+    `;
+    stageEl = plane.querySelector('[data-ic-stage]');
+    if (stageEl && w > 0 && h > 0) {
+      // 스테이지는 캔버스 비율을 그대로 쥔다 - 좌표 환산이 비율에만 기대기 때문이다.
+      stageEl.style.aspectRatio = `${w} / ${h}`;
+    }
   }
 
   // ── 조작 ────────────────────────────────────────────────────────────────
@@ -167,9 +205,18 @@ export function createInpaintCanvasPanel({
     return best;
   }
 
+  function setViewMode(mode) {
+    const next = mode === 'result' ? 'result' : 'edit';
+    if (next === viewMode) return;
+    viewMode = next;
+    render();
+  }
+
   function onClick(event) {
     const action = event.target.closest?.('[data-ic]')?.dataset.ic;
     if (!action) return;
+    if (action === 'mode-edit') return setViewMode('edit');
+    if (action === 'mode-result') return setViewMode('result');
     if (action === 'toggle') return send('canvas_active', !state?.canvas_active);
     if (action === 'grid') {
       showGrid = !showGrid;
@@ -206,8 +253,11 @@ export function createInpaintCanvasPanel({
     if (event.target?.dataset?.icNum === 'repeat') onRepeat(event.target.value);
   }
 
-  function onPointerDown(event) {
-    if (event.target?.matches?.('input[type="range"]')) { rangeDragging = true; return; }
+  function onPanelPointerDown(event) {
+    if (event.target?.matches?.('input[type="range"]')) rangeDragging = true;
+  }
+
+  function onPlanePointerDown(event) {
     if (!stageEl) return;
     const handle = event.target.closest?.('[data-ic-handle]');
     if (handle) {
@@ -227,9 +277,7 @@ export function createInpaintCanvasPanel({
       return;
     }
     const marker = event.target.closest?.('[data-ic-marker]');
-    if (marker) {
-      posStage.beginDrag(event, marker, `char_${marker.dataset.icMarker}`);
-    }
+    if (marker) posStage.beginDrag(event, marker, `char_${marker.dataset.icMarker}`);
   }
 
   function commit({x, y, key}) {
@@ -254,7 +302,8 @@ export function createInpaintCanvasPanel({
     panel.addEventListener('click', onClick);
     panel.addEventListener('change', onChange);
     panel.addEventListener('input', onInput);
-    panel.addEventListener('pointerdown', onPointerDown);
+    panel.addEventListener('pointerdown', onPanelPointerDown);
+    plane?.addEventListener('pointerdown', onPlanePointerDown);
     // 슬라이더는 패널 밖에서 손을 떼도 끝난다 - document 에서 받아야 놓치지 않는다.
     document.addEventListener('pointerup', () => { rangeDragging = false; });
     document.addEventListener('pointercancel', () => { rangeDragging = false; });
@@ -269,6 +318,8 @@ export function createInpaintCanvasPanel({
 
   return {
     render,
+    /** 생성이 끝나면 결과를 봐야 한다 - 캔버스가 결과를 가리고 있으면 안 된다. */
+    showResult() { setViewMode('result'); },
     handleModuleState(payload) {
       if (payload && payload.module_id === 'img2img') render(payload);
     },

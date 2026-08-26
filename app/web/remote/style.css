@@ -26073,17 +26073,25 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 
 /* ===== V5 인페인트 가상 캔버스 (#inpaintCanvasPanel) ===== */
-/* ⚠️ Result 패널은 사용자가 손잡이로 높이를 정하는 **고정 높이** 상자다. 여기서
-   안 자르면 캔버스가 아래 파라미터 패널 위로 흘러넘친다(실측). */
+/* 컨트롤러. 세션이 사는 동안 계속 여기 떠 있다 - 화면(스테이지)은 결과 이미지와
+   같은 자리(`.ic-plane`)에 있고, 여기에는 조작만 남는다(사용자 지정). */
 .inpaint-canvas-panel {
   display: flex; flex-direction: column; gap: 6px; padding: 6px 8px;
-  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  /* ⚠️ `0 0 auto` 로 두면 사용자가 Result 패널을 줄였을 때 컨트롤러가 안 줄고
+     아래 파라미터 패널 위로 흘러넘친다(실측 27px). 줄되, 넘치지는 않게. */
+  flex: 0 1 auto; min-height: 0; overflow: hidden;
 }
-/* 캔버스가 떠 있는 동안에는 메타데이터 칸이 자리를 양보한다. 둘 다 `flex-grow: 1`
-   이면 남는 높이를 반씩 나눠 가져 캔버스가 100px 대로 눌린다(실측). */
-.result-info-panel:has(#inpaintCanvasPanel:not([hidden])) #resultInfoContent {
-  flex: 0 1 auto; max-height: 64px;
+/* 화면. 결과 뷰어 위에 그대로 겹친다.
+   ⚠️ 결과 이미지를 **숨긴다**. 반투명하게 겹치면 옮긴 자리가 원본과 겹쳐 보여
+      무엇이 진짜인지 알 수 없다. */
+.viewer.ic-editing #preview { visibility: hidden; }
+.ic-plane {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  padding: 10px; pointer-events: none;
 }
+.ic-plane .ic-stage { pointer-events: auto; }
+.ic-modes { display: flex; gap: 3px; }
 .ic-bar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .ic-btn {
   height: 20px; padding: 0 8px; border: 1px solid rgba(157,139,255,0.42); border-radius: 5px;
@@ -26119,11 +26127,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 스테이지는 캔버스 비율을 그대로 쥔다 - 좌표 환산이 비율에만 기댄다.
    ⚠️ **높이**를 정하고 폭을 비율에 맡긴다. 폭을 100% 로 잡고 max-height 로 자르면
       세로 캔버스에서 상자만 납작해지고 그림은 `object-fit: fill` 로 눌린다 - 좌표는
-      맞는데 화면만 찌그러져 보인다. Result 안에 사는 화면이라 크기도 눌러 둔다
-      (사용자 지정: "캔버스를 줄이고"). */
+      맞는데 화면만 찌그러져 보인다(실측). */
 .ic-stage {
-  position: relative; flex: 1 1 auto; min-height: 120px; max-height: 340px;
-  width: auto; max-width: 100%; margin: 0 auto;
+  position: relative; height: 100%; width: auto; max-width: 100%; margin: 0 auto;
   background: #202028; border: 1px solid var(--border-dim); border-radius: 6px;
   overflow: hidden; touch-action: none; user-select: none;
 }

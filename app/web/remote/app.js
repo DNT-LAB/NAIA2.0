@@ -2115,10 +2115,15 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintcanvas3')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintcanvas6')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
-      panel: $('inpaintCanvasPanel'), escHtml, setModuleParam, showToast,
+      panel: $('inpaintCanvasPanel'),
+      // 화면은 결과 이미지와 같은 자리에 산다 - 컨트롤러(panel)와 스테이지(plane)는
+      // 다른 곳에 있고, 둘을 한 모듈이 함께 그린다.
+      plane: $('inpaintCanvasPlane'),
+      viewer: $('resultViewer'),
+      escHtml, setModuleParam, showToast,
       // V5 는 팝업을 안 여니 조작도 이쪽에 있어야 한다. 다만 **로직은 옮기지 않는다** -
       // 마스크 디코드/슬라이더 디바운스/생성 규약은 img2img 패널이 계속 SSOT 다.
       openMaskEditor: () => img2imgPanel?.openMaskEditor?.(),
@@ -2128,8 +2133,10 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       onClose: () => img2imgPanel?.close?.(),
       // Result 패널은 사용자가 손잡이로 높이를 정한다. 캔버스가 열려 있는 동안만
       // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
+      // 컨트롤러 두 줄이 들어갈 만큼만 확보한다. 스테이지는 여기 없으므로 예전처럼
+      // 크게 벌릴 이유가 없다.
       onVisibility: visible => {
-        if (visible) resultInfoResizer?.ensureAtLeast?.(470);
+        if (visible) resultInfoResizer?.ensureAtLeast?.(175);
         else resultInfoResizer?.releaseMinimum?.();
       },
     });
@@ -3231,6 +3238,9 @@ function handleWsBlob(data) {
   latestResultBlob = data instanceof Blob ? data : null;
   // Inpaint 버튼은 '결과가 있는가' 로 열린다 - 결과가 바뀌는 이 자리에서 다시 잰다.
   updateNaiDirectorButton();
+  // 인페인트 캔버스가 결과 이미지와 같은 자리에 겹쳐 있다. 새 결과가 왔는데 그대로
+  // 두면 방금 돈을 쓴 그림을 캔버스가 가린다 - 결과 보기로 넘긴다(컨트롤러는 남는다).
+  inpaintCanvasControl?.showResult?.();
   if (studioTabControl) studioTabControl.handleResultBlob(data);
   if (artistThumbControl && typeof artistThumbControl.handleResultBlob === 'function') {
     artistThumbControl.handleResultBlob(data);

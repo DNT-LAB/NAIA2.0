@@ -37,9 +37,12 @@ const COLLAPSE_KEY = 'naia.inpaintcanvas.collapsed.v1';
 // 백엔드 `clamp_scale` 과 같은 한계. 어긋나면 화면이 보내 놓고 다른 값을 되받는다.
 const SCALE_MIN_PCT = 10;
 const SCALE_MAX_PCT = 400;
-// 변형은 서버가 이미지를 다시 합성한다(리사이즈 + PNG 인코딩 + base64). 슬라이더가
-// 움직이는 동안 매번 보내면 그만큼 합성이 쌓인다 - 마지막 값만 보낸다.
-const TRANSFORM_DEBOUNCE_MS = 200;
+// 변형은 서버가 이미지를 다시 합성한다. 슬라이더가 움직이는 동안 매번 보내면 그만큼
+// 합성이 쌓이므로 마지막 값만 보낸다.
+// ⚠️ 이 값이 **체감 지연의 대부분**이다. 백엔드를 13~66ms 로 줄이고 나니(전송본 PNG를
+//    생성 때로 미루고, 미리보기를 JPEG 로 바꾸고, 베이스를 캐시) 200ms 가 남은 가장 큰
+//    항목이 됐다. 120ms 면 200% 기준 합성이 절반쯤 쉬어 느린 기기에서도 밀리지 않는다.
+const TRANSFORM_DEBOUNCE_MS = 120;
 
 // 중앙 버튼 드래그 감도. 세로 3px 당 1% - 한 화면(약 700px)에 대략 배율 전 구간이 든다.
 const MIDDLE_SCALE_PX_PER_PCT = 3;

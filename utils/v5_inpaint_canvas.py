@@ -237,6 +237,7 @@ def build_payload(
     rotation: Any = 0.0,
     user_mask: Image.Image | None = None,
     anchor: tuple[float, float, float, float] | None = None,
+    encode_canvas: bool = True,
 ) -> dict[str, Any]:
     """인페인트 요청에 실을 캔버스/마스크 한 벌.
 
@@ -271,7 +272,9 @@ def build_payload(
     merged = merge_masks(user_mask, gap) if (user_mask is not None or gap is not None) else None
     return {
         "canvas_image": canvas,
-        "canvas_bytes": png_bytes(canvas),
+        # ⚠️ 굽는 데 62ms 든다(실측, 일러스트급 832x1216). 조작 중에는 필요 없다 -
+        #    화면은 미리보기만 보고, 이건 생성할 때 실려 나가는 물건이다.
+        "canvas_bytes": png_bytes(canvas) if encode_canvas else b"",
         "mask_image": merged,
         "mask_bytes": png_bytes(downscale_mask(merged)) if merged is not None else b"",
         "width": int(canvas.width),

@@ -587,9 +587,12 @@ export function createArtistThumbController({
     if (filterEl) {
       const previous = filterEl.value || 'all';
       const filters = state.filters || [];
-      filterEl.innerHTML = filters.map(filter => `
-        <option value="${escHtml(filter.key)}">${escHtml(filter.name)} · ${Number(filter.count || 0).toLocaleString()}</option>
-      `).join('');
+      // 생성한 모델 묶음은 성격이 달라 구분선으로 가른다. <select> 안에서는 disabled
+      // option 이 가장 널리 먹는 구분선이다(<hr> 은 최신 Chromium 에서만 산다).
+      filterEl.innerHTML = filters.map(filter => (filter.separator
+        ? `<option disabled>──── ${escHtml(filter.name || '')} ────</option>`
+        : `<option value="${escHtml(filter.key)}">${escHtml(filter.name)} · ${Number(filter.count || 0).toLocaleString()}</option>`
+      )).join('');
       filterEl.value = filters.some(filter => filter.key === previous) ? previous : 'all';
     }
     syncOptionsForCurrentMode();

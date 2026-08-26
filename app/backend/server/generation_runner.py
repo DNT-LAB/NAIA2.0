@@ -1688,10 +1688,18 @@ async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dic
     image = getattr(getattr(stored, "item", None), "image", None)
     if not artist or image is None:
         return
+    # ⚠️ **모델(폴더) 단위로 저장한다**(사용자 지정). 프레임에 baking 된 모델을 먼저
+    #    본다 - 생성이 끝난 뒤 사용자가 모델을 바꿨어도 이 그림은 그때 그 모델의 것이다.
+    model = str(params.get("model") or "").strip()
+    if not model:
+        try:
+            model = str(context._current_model_key() or "").strip()
+        except Exception:
+            model = ""
     saved = None
     try:
         saved = await asyncio.to_thread(
-            artist_thumbnail_service(context).save_generated_thumbnail, image, artist
+            artist_thumbnail_service(context).save_generated_thumbnail, image, artist, model
         )
     except Exception as exc:   # noqa: BLE001
         print(f"[artist-thumb] thumbnail save failed: {exc}", flush=True)
@@ -1699,6 +1707,7 @@ async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dic
     meta.update({
         "artist_thumb_saved": bool(saved),
         "artist_thumb_url": str(saved.get("url") or "") if isinstance(saved, dict) else "",
+        "artist_thumb_model": str(saved.get("model") or "") if isinstance(saved, dict) else "",
     })
 
 

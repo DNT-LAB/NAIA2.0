@@ -132,8 +132,30 @@ class HeadlessImg2ImgService:
             image = opened.convert("RGBA")
         return self._resize_to_1mp(image) if resize_1mp else self._normalize_source_image(image)
 
+    @staticmethod
+    def _position_from_ratio(value: Any, width: int, height: int) -> dict[str, float] | None:
+        """NAI 가 쓰는 0~1 비율 좌표를 **캔버스 픽셀**로 되돌린다.
+
+        ⚠️ 두 좌표계가 섞여 있다. NAI `centers` 는 비율이고, 캔버스 마커는 픽셀이다.
+           `to_canvas_position` 이 픽셀->비율이고 이것이 그 반대다.
+        """
+        if not isinstance(value, dict) or width <= 0 or height <= 0:
+            return None
+        try:
+            ratio_x = float(value.get("x"))
+            ratio_y = float(value.get("y"))
+        except (TypeError, ValueError):
+            return None
+        if ratio_x != ratio_x or ratio_y != ratio_y:      # NaN 방어
+            return None
+        return {
+            "x": round(min(1.0, max(0.0, ratio_x)) * width, 1),
+            "y": round(min(1.0, max(0.0, ratio_y)) * height, 1),
+        }
+
     def _session_characters_from_sources(
-        self, params: dict[str, Any], prompt_ctx: dict[str, Any]
+        self, params: dict[str, Any], prompt_ctx: dict[str, Any],
+        width: int = 0, height: int = 0,
     ) -> list[dict[str, Any]]:
         """인페인트/img2img 세션 캐릭터 슬롯을 *소스 이미지의* 캐릭터로 채운다.
 
@@ -146,19 +168,31 @@ class HeadlessImg2ImgService:
         라이브 메인 UI 캐릭터로 폴백하지 않는다 — 메타 없는 외부 이미지에 무관한 활성
         캐릭터를 silently 주입하는 의외 동작을 방지(Codex). 메타 없으면 빈 슬롯이 정상이며
         future01 set_from_history_item 도 라이브 폴백을 하지 않았다(그건 별개의 fresh-open 경로).
-        반환 형식 = 세션/모듈스테이트가 쓰는 [{'prompt','uc','active'}].
+        반환 형식 = 세션/모듈스테이트가 쓰는 [{'prompt','uc','active','position'}].
+
+        ⚠️ **좌표도 함께 복원한다.** 예전에는 프롬프트만 옮기고 좌표를 버렸다. 그래서
+           인페인트 요청은 늘 `use_coords=False` 였고(화면에서 본 배치가 무시된다),
+           캔버스 마커는 좌표가 있는 캐릭터만 그리므로 **뜰 수가 없었다** - 마커가
+           없으니 끌어서 놓을 수도 없다(닭과 달걀). 사양 "인페인트 이미지에도 캐릭터
+           좌표 배정 가능" 이 한 번도 동작하지 않았다(Codex 리뷰 2026-08-26 BLOCK 4).
         """
-        def _norm(prompt, uc, active=True):
+        def _norm(prompt, uc, active=True, position=None):
             text = str(prompt or "").strip()
             if not text:
                 return None
-            return {"prompt": text, "uc": str(uc or ""), "active": bool(active)}
+            return {
+                "prompt": text,
+                "uc": str(uc or ""),
+                "active": bool(active),
+                "position": self._position_from_ratio(position, width, height),
+            }
 
         # 1) prompt_context character_prompts
         cps = prompt_ctx.get("character_prompts")
         if isinstance(cps, list) and cps:
             out = [c for c in (
-                _norm(item.get("prompt"), item.get("uc"), item.get("active", True))
+                _norm(item.get("prompt"), item.get("uc"), item.get("active", True),
+                      item.get("position") or item.get("center"))
                 for item in cps if isinstance(item, dict)
             ) if c]
             if out:
@@ -169,7 +203,8 @@ class HeadlessImg2ImgService:
             out = []
             for item in skb:
                 if isinstance(item, dict):
-                    c = _norm(item.get("prompt"), item.get("uc"), item.get("active", True))
+                    c = _norm(item.get("prompt"), item.get("uc"), item.get("active", True),
+                              item.get("position"))
                 elif isinstance(item, (list, tuple)) and item:
                     c = _norm(item[0], item[1] if len(item) > 1 else "", True)
                 else:
@@ -182,9 +217,14 @@ class HeadlessImg2ImgService:
         ec = params.get("_executed_characters")
         if isinstance(ec, list) and ec:
             ucs = params.get("_executed_characters_uc") or []
+            # ⚠️ 일반 생성 이미지에서 좌표를 나르는 것은 **이 키 하나뿐**이다.
+            #    NAI PNG 의 Comment 안에도 `centers` 가 있지만 메타 추출기가 `char_caption`
+            #    텍스트만 꺼내고 그것을 버린다(utils/image_info.py).
+            pos = params.get("_executed_character_positions") or []
             out = []
             for i, prompt in enumerate(ec):
-                c = _norm(prompt, ucs[i] if i < len(ucs) else "", True)
+                c = _norm(prompt, ucs[i] if i < len(ucs) else "", True,
+                          pos[i] if i < len(pos) else None)
                 if c:
                     out.append(c)
             if out:
@@ -274,7 +314,11 @@ class HeadlessImg2ImgService:
             "main_prompt": main_prompt,
             "negative_prompt": negative_prompt,
             # 캐릭터 프롬프트 슬롯을 소스 이미지/라이브 메인 UI에서 자동 채움(future01 패리티 복구).
-            "characters": self._session_characters_from_sources(params, prompt_ctx),
+            # 좌표는 **이 이미지 크기 기준의 픽셀**로 들어온다. 세션이 열릴 때 캔버스가
+            # 곧 이미지 크기이므로 그대로 캔버스 좌표가 된다.
+            "characters": self._session_characters_from_sources(
+                params, prompt_ctx, int(image.width), int(image.height)
+            ),
             # 생성 요청은 팝업 수명과 분리해 추적한다. 세션/마스크는 완료 뒤에도
             # 살아 있어 같은 마스크로 재시도할 수 있고, 다른 Web 클라이언트나 분리창도
             # 동일한 submission 상태를 관찰한다.

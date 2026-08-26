@@ -1231,7 +1231,11 @@ export function createCharacterQuickPanel({
       + `<button type="button" class="cq-head" data-cq-head="1"`
       + ` aria-expanded="${open ? 'true' : 'false'}">`
       + '<span class="cq-caret" aria-hidden="true">▸</span>'
-      + `<span class="cq-title">CHARACTER</span></button>`
+      + `<span class="cq-title">CHARACTER</span>`
+      // 가상 캐릭터 프롬프트는 **메인과 갈라져 있다** - 여기서 고친 것이 메인에 안 남고,
+      // 인페인트 요청에만 실린다. 그 사실을 머리말이 말해 준다(사용자 지정).
+      + (lastState && lastState.virtual ? `<span class="cq-virtual">가상</span>` : '')
+      + `</button>`
       + `<label class="cq-enable"><input type="checkbox" data-cq-enable="1"`
       + `${enabled ? ' checked' : ''}><span>활성화</span></label>`
       // POS 세 상태. AUTO 는 고정 자리, CUSTOM 은 슬롯이 기억한 자리, RAND 는

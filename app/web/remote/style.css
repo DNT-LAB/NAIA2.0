@@ -26273,6 +26273,12 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* Ctrl 을 쥐면 **회전할 수 있다**고 알린다(사용자 지적: 회전 커서가 안 보인다).
    ⚠️ 표식은 plane 에 붙는다 - 스테이지는 매 렌더마다 새 노드라 클래스가 날아간다.
    ⚠️ 검은 테두리 위에 흰 획을 얹었다. 한 겹이면 밝은 그림 위에서 사라진다. */
+/* 가상 캐릭터 프롬프트 배지 - 메인과 갈라져 있음을 머리말이 말한다(사용자 지정). */
+.cq-virtual {
+  margin-left: 6px; padding: 1px 6px; border-radius: 7px;
+  border: 1px solid rgba(157,139,255,0.55); background: rgba(124,106,239,0.28);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+}
 .ic-plane.is-rotate .ic-stage,
 .ic-plane.is-rotate .ic-stage.is-drag {
   cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2726%27%20height%3D%2726%27%20viewBox%3D%270%200%2026%2026%27%3E%3Cg%20fill%3D%27none%27%20stroke-linecap%3D%27round%27%3E%3Cpath%20d%3D%27M21%2013a8%208%200%201%201-4.1-7%27%20stroke%3D%27%23000%27%20stroke-width%3D%275%27%2F%3E%3Cpath%20d%3D%27M21%2013a8%208%200%201%201-4.1-7%27%20stroke%3D%27%23fff%27%20stroke-width%3D%272.4%27%2F%3E%3C%2Fg%3E%3Cpath%20d%3D%27M17.6%201.2%2017.6%208.4%2010.9%206.1z%27%20fill%3D%27%23fff%27%20stroke%3D%27%23000%27%20stroke-width%3D%271.4%27%20stroke-linejoin%3D%27round%27%2F%3E%3C%2Fsvg%3E") 13 13, crosshair;

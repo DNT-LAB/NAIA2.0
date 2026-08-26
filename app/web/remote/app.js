@@ -455,6 +455,81 @@ let inpaintCanvasControl = null;
 // 인페인트 진입점이 세션을 요청해 두고 상태를 기다리는 중인가. 상태가 오면 계열에 따라
 // 캔버스를 드러내거나 옛 팝업을 연다(위 onModuleState 참조).
 let pendingImg2ImgSurface = false;
+
+// ── 가상 캐릭터 프롬프트 (사용자 지정 2026-08-26) ─────────────────────────
+//
+// 인페인트 세션 동안에는 메인 캐릭터 퀵 패널을 **숨기고**, 같은 UI 를 그 세션의
+// 캐릭터에 물려 띄운다. 내용은 대상 이미지 메타데이터에서 복원되고, POS 도 이쪽을
+// 기준으로 돈다. 머리말에 (가상) 을 붙여 갈라져 있음을 알린다.
+//
+// ⚠️ **두 좌표계가 다르다.** 퀵 패널은 0~1 비율로 말하고(`char_pos_N` = "x,y"),
+//    인페인트 세션은 **캔버스 픽셀**로 말한다(`char_position_N` = {x,y}).
+//    여기가 그 통역이다 - 한쪽만 고치면 마커가 엉뚱한 데 선다.
+function virtualCharacterSession() {
+  const state = moduleStateCache.get('img2img');
+  return (state && state.active && state.canvas_supported) ? state : null;
+}
+
+/** 세션 캐릭터를 퀵 패널이 아는 모양(character 모듈 상태)으로 옮긴다. */
+function virtualCharacterState(session) {
+  const w = Number(session.canvas_width) || 0;
+  const h = Number(session.canvas_height) || 0;
+  return {
+    type: 'module_state',
+    module_id: 'character',
+    virtual: true,                 // 머리말이 (가상) 을 붙이는 표
+    activated: true,
+    position_mode: 'custom',       // 가상은 늘 직접 배치다
+    characters: (session.characters || []).map(c => ({
+      prompt: String(c.prompt || ''),
+      uc: String(c.uc || ''),
+      active: c.active !== false,
+      muted: false,
+      position: (c.position && w > 0 && h > 0)
+        ? {x: c.position.x / w, y: c.position.y / h}
+        : null,
+    })),
+  };
+}
+
+/** 퀵 패널이 `character` 로 쓰려는 것을 인페인트 세션으로 돌린다. */
+function virtualSetModuleParam(moduleId, key, value) {
+  const session = virtualCharacterSession();
+  if (moduleId !== 'character' || !session) return setModuleParam(moduleId, key, value);
+  const w = Number(session.canvas_width) || 0;
+  const h = Number(session.canvas_height) || 0;
+
+  if (key.startsWith('char_pos_')) {
+    const index = key.slice('char_pos_'.length);
+    const [nx, ny] = String(value).split(',').map(Number);
+    if (!(w > 0) || !(h > 0) || !Number.isFinite(nx) || !Number.isFinite(ny)) return undefined;
+    return setModuleParam('img2img', `char_position_${index}`,
+      {x: Math.round(nx * w), y: Math.round(ny * h)});
+  }
+  if (key.startsWith('char_slot_state_')) {
+    return setModuleParam('img2img', `char_active_${key.slice('char_slot_state_'.length)}`, 'false');
+  }
+  if (key.startsWith('remove_character_') || key === 'add_character') {
+    return setModuleParam('img2img', key, value);
+  }
+  // 세션에 없는 개념(Connect · 음소거 · 활성 토글 · POS 모드)은 조용히 흘리지 않고
+  // 말해 준다 - 눌렀는데 아무 일이 없으면 고장으로 읽힌다.
+  showToast('가상 캐릭터에는 없는 기능입니다', 'error');
+  return undefined;
+}
+
+/** 퀵 패널의 프롬프트/네거티브 편집을 인페인트 세션으로 돌린다. */
+function virtualModTextEdit(moduleId, field, value) {
+  const session = virtualCharacterSession();
+  if (moduleId !== 'character' || !session) return onModTextEdit(moduleId, field, value);
+  const map = {char_prompt_: 'char_prompt_', char_uc_: 'char_uc_'};
+  for (const prefix of Object.keys(map)) {
+    if (String(field).startsWith(prefix)) {
+      return setModuleParam('img2img', map[prefix] + String(field).slice(prefix.length), value);
+    }
+  }
+  return undefined;
+}
 let inpaintSequenceControl = null;
 let v5SceneControl = null;
 let danbooruFeedbackControl = null;
@@ -963,7 +1038,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-codexfix')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-virtchar')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1817,10 +1892,13 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-canvasstage')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-virtchar')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
-      document, escHtml, setModuleParam, onModTextEdit,
+      document, escHtml,
+      // 가상 캐릭터 프롬프트가 켜져 있으면 인페인트 세션으로 돌린다(위 통역기 참조).
+      setModuleParam: virtualSetModuleParam,
+      onModTextEdit: virtualModTextEdit,
       openCharacterModule: () => openModule('character'),
       getResolution: () => currentResolutionWH(),
       // 가상 캔버스가 결과 뷰어를 차지하고 있으면 POS 무대는 그 위에 겹쳐 선다.
@@ -1993,7 +2071,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-codexfix')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-virtchar')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2122,7 +2200,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-codexfix')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-virtchar')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -9101,7 +9179,9 @@ function onModuleState(m) {
     updateCharBadge(m);
     // 결과 화면 위 빠른 캐릭터 패널. 팝업이 열려 있든 말든 상태는 늘 최신이어야
     // 한다 - 팝업에서 슬롯을 고치면 이쪽도 따라 바뀐다(같은 상태를 본다).
-    if (characterQuickPanel) characterQuickPanel.render(m);
+    // ⚠️ 가상 캐릭터가 떠 있는 동안에는 메인 상태로 덮지 않는다 - 덮으면 화면이
+    //    세션 것과 메인 것 사이를 오간다.
+    if (characterQuickPanel && !virtualCharacterSession()) characterQuickPanel.render(m);
     // 퀵 패널이 다시 그려지면 높이가 달라진다 - 인셋 배지를 그 아래로 다시 앉힌다.
     watchQuickPanelForInsetBadge();
     positionReferenceInsetBadge();
@@ -9188,6 +9268,14 @@ function onModuleState(m) {
       else openImg2ImgSessionSurface();
     }
     inpaintCanvasControl?.handleModuleState?.(m);
+    // 가상 캐릭터 프롬프트: 세션이 살아 있으면 퀵 패널이 **세션 캐릭터**를 그린다.
+    // 세션이 끝나면 원래 캐릭터 모듈 상태로 돌아간다.
+    if (characterQuickPanel) {
+      const session = (m.active && m.canvas_supported) ? m : null;
+      characterQuickPanel.render(session
+        ? virtualCharacterState(session)
+        : (moduleStateCache.get('character') || {module_id: 'character', characters: []}));
+    }
     // 캔버스에서 부르는 마스크 편집기는 img2img 패널의 상태를 본다. 팝업이 닫혀
     // 있어도 상태만은 최신으로 흘려 넣는다 - `isOpen` 가드가 DOM 은 안 건드린다.
     if (m.module_id !== currentModuleId) img2imgPanel?.render?.(m);

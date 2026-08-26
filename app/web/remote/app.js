@@ -2117,7 +2117,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintcanvas9')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintdock6')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -2135,12 +2135,6 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       onClose: () => img2imgPanel?.close?.(),
       // Result 패널은 사용자가 손잡이로 높이를 정한다. 캔버스가 열려 있는 동안만
       // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
-      // 컨트롤러 두 줄이 들어갈 만큼만 확보한다. 스테이지는 여기 없으므로 예전처럼
-      // 크게 벌릴 이유가 없다.
-      onVisibility: visible => {
-        if (visible) resultInfoResizer?.ensureAtLeast?.(175);
-        else resultInfoResizer?.releaseMinimum?.();
-      },
     });
   })
   .catch(error => {

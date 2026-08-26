@@ -595,6 +595,15 @@ class HeadlessImg2ImgService:
             state = context.img2img_session
             state["base_scale"], state["base_rotation"] = 1.0, 0.0
             state["base_offset_x"] = state["base_offset_y"] = 0
+            # 캔버스 크기도 원본으로 되돌린다. 이게 곧 "원본 그대로" 상태다 -
+            # 화면의 `가상 캔버스` 토글이 하던 일을 초기화가 대신한다(사용자 지적
+            # 2026-08-26: "역할이 모호합니다"). 실제로 토글은 켜나 끄나 결과가 같았다:
+            # 캔버스=원본 크기 · 오프셋 0 · 배율 1 · 회전 0 이면 `build_payload` 가
+            # 원본을 그대로 돌려주고 빈 곳 마스크도 안 생긴다.
+            base_w = int(state.get("base_width") or 0)
+            base_h = int(state.get("base_height") or 0)
+            if base_w > 0 and base_h > 0:
+                state["canvas_width"], state["canvas_height"] = base_w, base_h
             return self._recompose_canvas() if state.get("canvas_active") else self.module_state()
         elif key.startswith("char_position_"):
             index = context._index_from_key(key, "char_position_")

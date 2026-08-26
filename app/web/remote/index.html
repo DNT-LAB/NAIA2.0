@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260826-inpaintcanvas9">
+<link rel="stylesheet" href="style.css?v=20260826-inpaintdock6">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -837,8 +837,11 @@
           <!-- V5 인페인트 가상 캔버스의 **화면**. 결과 이미지와 같은 자리(plane)에 산다 -
                사용자가 만화를 고치듯 원본과 실물을 분리해 보는 곳이라, 아래에 작은
                복제본을 하나 더 띄우면 어느 쪽이 진짜인지 알 수 없다(사용자 지적).
-               조작 줄은 Generation Info 안 `#inpaintCanvasPanel` 에 따로 있다. -->
+               조작 줄은 바로 아래 `#inpaintCanvasPanel` 도크에 따로 있다. -->
           <div class="ic-plane" id="inpaintCanvasPlane" hidden></div>
+          <!-- 인페인트 조작 도크. Generation Info 아래가 아니라 **뷰어 안에** 떠 있고
+               접힌다(사용자 지정 2026-08-26: "하단에 컨트롤 패널이 있는게 불편"). -->
+          <div class="inpaint-canvas-panel" id="inpaintCanvasPanel" hidden></div>
           <div class="frozen-wc-bar" id="frozenWcBar" aria-label="고정된 와일드카드" hidden></div>
           <!-- Img2Img/Inpaint 재개 dock (Grok I2V pill 방식) — 결과 뷰어 하단 중앙 플로팅. -->
           <div class="img2img-resume-dock" id="img2imgResumeDock" hidden>
@@ -908,8 +911,6 @@
               <button class="result-enhance-settings-btn" id="resultEnhanceSettingsBtn" title="Enhance settings" aria-label="Enhance settings">⚙</button>
             </div>
           </div>
-          <!-- V5 인페인트 가상 캔버스. 세션이 없으면 스스로 숨는다. -->
-          <div class="inpaint-canvas-panel" id="inpaintCanvasPanel" hidden></div>
           <div class="result-info-content" id="resultInfoContent">
             <span class="result-info-empty">select a history item...</span>
           </div>
@@ -1340,6 +1341,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260826-inpaintcanvas9"></script>
+<script src="app.js?v=20260826-inpaintdock6"></script>
 </body>
 </html>

@@ -3,14 +3,19 @@
 // V5 는 인페인트를 별도 팝업으로 빼지 않는다(사용자 지정 2026-08-26).
 //
 // ⚠️ **캔버스는 결과 이미지와 같은 자리(plane)에 산다.** 아래에 작은 복제본을 하나 더
-//    띄우면 어느 쪽이 진짜인지 알 수 없다(사용자 지적 2026-08-26). 가상 캔버스는
-//    "원본과 실물을 분리해 두는 종이" 지, 별도의 미리보기가 아니다.
+//    띄우면 어느 쪽이 진짜인지 알 수 없다(사용자 지적). 가상 캔버스는 "원본과 실물을
+//    분리해 두는 종이" 지, 별도의 미리보기가 아니다.
 //
-//    · 화면(스테이지)  -> `#inpaintCanvasPlane`  (결과 뷰어 위에 겹친다)
-//    · 조작(컨트롤러)  -> `#inpaintCanvasPanel`  (Generation Info 안, 계속 떠 있다)
+//    · 화면(스테이지) -> `#inpaintCanvasPlane` (결과 뷰어 위에 겹친다)
+//    · 조작(도크)     -> `#inpaintCanvasPanel` (결과 뷰어 **안**에 떠 있고, 접힌다)
 //
-// 컨트롤러는 세션이 사는 동안 계속 떠 있고, 거기서 셋 중 하나를 고른다:
+// 도크는 세션이 사는 동안 떠 있고, 거기서 셋 중 하나를 고른다:
 //    편집(캔버스를 본다) / 결과 보기(생성 결과를 본다) / 세션 닫기(끝낸다).
+//
+// ⚠️ `가상 캔버스` 토글은 **없앴다**(사용자 지적: "역할이 모호합니다"). 실제로 켜나
+//    끄나 결과가 같았다 - 캔버스=원본 크기 · 오프셋 0 · 배율 1 · 회전 0 이면
+//    `build_payload` 가 원본을 그대로 돌려주고 빈 곳 마스크도 안 생긴다. 그 상태로
+//    가는 길은 `초기화` 다.
 //
 // ⚠️ 계열 판정은 백엔드가 한다(`canvas_supported`). 여기서 모델 표를 한 벌 더 들면
 //    커스텀 모델이 등록될 때마다 두 곳이 어긋난다.
@@ -20,16 +25,25 @@
 //
 // ⚠️ 좌표는 전부 **캔버스 픽셀**로 주고받는다. 화면이 줄어 있어도 그대로다 - 화면
 //    비율로 보내면 캔버스 크기를 바꾼 순간 전부 어긋난다.
-
-// ⚠️  는 posStage 를 고칠 때도 **함께** 바꾼다. 이 파일 키만 올리면 브라우저가
-//    옛 posStage 를 계속 쓴다 - import 는 URL 로 캐시된다.
+//
+// ⚠️ 아래 import 의 캐시 키는 posStage 를 고칠 때도 **함께** 바꾼다. 이 파일 키만
+//    올리면 브라우저가 옛 posStage 를 계속 쓴다 - import 는 URL 로 캐시된다.
 import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-raf1';
 
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
-const SCALE_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
+const COLLAPSE_KEY = 'naia.inpaintcanvas.collapsed.v1';
+
+// 백엔드 `clamp_scale` 과 같은 한계. 어긋나면 화면이 보내 놓고 다른 값을 되받는다.
+const SCALE_MIN_PCT = 10;
+const SCALE_MAX_PCT = 400;
+// 변형은 서버가 이미지를 다시 합성한다(리사이즈 + PNG 인코딩 + base64). 슬라이더가
+// 움직이는 동안 매번 보내면 그만큼 합성이 쌓인다 - 마지막 값만 보낸다.
+const TRANSFORM_DEBOUNCE_MS = 200;
 
 const ratio = (value) => (Number(value) || 0).toFixed(2);
+const clampPct = (v) => Math.max(SCALE_MIN_PCT, Math.min(SCALE_MAX_PCT, Math.round(Number(v) || 100)));
+const wrapDeg = (v) => ((Math.round(Number(v) || 0) % 360) + 360) % 360;
 
 export function createInpaintCanvasPanel({
   panel, plane, viewer, escHtml, setModuleParam, showToast,
@@ -50,9 +64,17 @@ export function createInpaintCanvasPanel({
   let pendingOffset = null;
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
   let rangeDragging = false;
-  let showGrid = (() => {
-    try { return localStorage.getItem(GRID_KEY) !== '0'; } catch (_) { return true; }
-  })();
+  const transformTimers = {};
+
+  const read = (key, fallback) => {
+    try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
+  };
+  const write = (key, value) => {
+    try { localStorage.setItem(key, value); } catch (_) {}
+  };
+
+  let showGrid = read(GRID_KEY, '1') !== '0';
+  let collapsed = read(COLLAPSE_KEY, '0') === '1';
 
   const canvasSize = () => ({
     w: Number(state?.canvas_width) || 0,
@@ -62,6 +84,15 @@ export function createInpaintCanvasPanel({
   function send(key, value) {
     try { setModuleParam('img2img', key, value); }
     catch (error) { showToast?.(`캔버스 설정 실패: ${error.message}`, 'error'); }
+  }
+
+  /** 변형은 마지막 값만 보낸다. 슬라이더 한 번에 수십 번 합성시키지 않는다. */
+  function sendTransform(key, value) {
+    if (transformTimers[key]) clearTimeout(transformTimers[key]);
+    transformTimers[key] = setTimeout(() => {
+      delete transformTimers[key];
+      send(key, value);
+    }, TRANSFORM_DEBOUNCE_MS);
   }
 
   // ── 렌더 ────────────────────────────────────────────────────────────────
@@ -83,50 +114,92 @@ export function createInpaintCanvasPanel({
       return;
     }
     panel.hidden = false;
-    panel.innerHTML = controllerHtml();
+    panel.className = `inpaint-canvas-panel${collapsed ? ' is-collapsed' : ''}`;
+    panel.innerHTML = collapsed ? collapsedHtml() : dockHtml();
     renderPlane();
   }
 
-  function controllerHtml() {
-    const {w, h} = canvasSize();
-    const on = !!state.canvas_active;
+  function collapsedHtml() {
     const editing = viewMode === 'edit';
-    // 캔버스 조작은 편집 모드에서만 뜻이 있다. 결과를 보는 중에 눌러 봐야 화면이
-    // 안 바뀌어 "먹통" 으로 읽힌다.
+    return `<button type="button" class="ic-pill" data-ic="collapse" title="인페인트 조작 펼치기">`
+      + `<span class="ic-pill-dot${editing ? ' is-edit' : ''}"></span>`
+      + `인페인트<span class="ic-caret">▴</span></button>`;
+  }
+
+  /** 캔버스 해상도 목록.
+   *
+   *  ⚠️ 지금 크기가 프리셋에 없으면 `<select>` 는 **첫 항목**을 보여 준다 - 화면이
+   *     실제와 다른 해상도를 말하게 된다. 원본 크기는 프리셋과 무관하고(사용자가
+   *     아무 이미지나 보낼 수 있다) `초기화` 는 그 원본 크기로 돌아가므로, 늘 있을
+   *     수 있는 일이다. 없으면 맨 앞에 끼워 넣는다.
+   */
+  function sizeOptions(w, h) {
+    const labels = CANVAS_SIZES.slice();
+    const current = (w > 0 && h > 0) ? `${w} x ${h}` : '';
+    const bare = (t) => String(t).replace(/\s+/g, '');
+    if (current && !labels.some(label => bare(label) === bare(current))) labels.unshift(current);
+    return labels.map(label => {
+      const [sw, sh] = label.split('x').map(v => parseInt(v.trim(), 10));
+      const sel = (sw === w && sh === h) ? ' selected' : '';
+      return `<option value="${escHtml(label)}"${sel}>${escHtml(label)}</option>`;
+    }).join('');
+  }
+
+  // 좌우 2단(사용자 지정 2026-08-26). 왼쪽은 **캔버스의 기하**, 오른쪽은 **인페인트의
+  // 실행**이다. 한 단으로 늘어놓으면 세 줄이 넉 줄이 되고, 그만큼 캔버스가 눌린다.
+  function dockHtml() {
+    const {w, h} = canvasSize();
+    const editing = viewMode === 'edit';
     const off = editing ? '' : 'disabled';
+    const scalePct = clampPct((Number(state.base_scale) || 1) * 100);
+    const rotation = wrapDeg(state.base_rotation);
     return `
-      <div class="ic-bar">
-        <div class="ic-modes" role="group" aria-label="인페인트 보기 모드">
+      <div class="ic-bar ic-bar-head ic-nowrap">
+        <span class="ic-title">인페인트</span>
+        <div class="ic-modes" role="group" aria-label="보기 모드">
           <button type="button" class="ic-btn${editing ? ' is-on' : ''}" data-ic="mode-edit">편집</button>
           <button type="button" class="ic-btn${editing ? '' : ' is-on'}" data-ic="mode-result">결과 보기</button>
         </div>
-        <span class="ic-sep"></span>
-        <button type="button" class="ic-btn${on ? ' is-on' : ''}" data-ic="toggle" ${off}>가상 캔버스</button>
-        <select class="ic-select" data-ic="size" ${(on && editing) ? '' : 'disabled'} aria-label="캔버스 해상도">
-          ${CANVAS_SIZES.map(label => {
-            const [sw, sh] = label.split('x').map(v => parseInt(v.trim(), 10));
-            const sel = (sw === w && sh === h) ? ' selected' : '';
-            return `<option value="${escHtml(label)}"${sel}>${escHtml(label)}</option>`;
-          }).join('')}
-        </select>
-        <button type="button" class="ic-btn" data-ic="zoom-out" ${(on && editing) ? '' : 'disabled'} title="축소">−</button>
-        <span class="ic-readout">${Math.round((Number(state.base_scale) || 1) * 100)}%</span>
-        <button type="button" class="ic-btn" data-ic="zoom-in" ${(on && editing) ? '' : 'disabled'} title="확대">+</button>
-        <button type="button" class="ic-btn" data-ic="rotate" ${(on && editing) ? '' : 'disabled'} title="90° 회전">⟳</button>
-        <span class="ic-readout">${Math.round(Number(state.base_rotation) || 0)}°</span>
-        <button type="button" class="ic-btn" data-ic="reset" ${(on && editing) ? '' : 'disabled'} title="위치·확대·회전 초기화">초기화</button>
-        <button type="button" class="ic-btn${showGrid ? ' is-on' : ''}" data-ic="grid" ${off} title="격자">격자</button>
         <span class="ic-spacer"></span>
         <span class="ic-hint">${editing
           ? '✥ 를 끌면 베이스가 움직이고, 비는 자리는 자동으로 열립니다.'
-          : '생성 결과를 보는 중입니다. 편집을 누르면 캔버스로 돌아갑니다.'}</span>
+          : '생성 결과를 보는 중입니다.'}</span>
+        <button type="button" class="ic-btn ic-btn-collapse" data-ic="collapse" title="접기" aria-label="접기">▾</button>
       </div>
-      ${runBarHtml(editing)}
+      <div class="ic-cols">
+        <section class="ic-col" aria-label="캔버스">
+          <div class="ic-row">
+            <span class="ic-label">캔버스</span>
+            <select class="ic-select" data-ic="size" ${off} aria-label="캔버스 해상도">${sizeOptions(w, h)}</select>
+            <button type="button" class="ic-btn" data-ic="reset" ${off}
+              title="원본 그대로로 되돌립니다 — 크기·위치·확대·회전">초기화</button>
+            <button type="button" class="ic-btn${showGrid ? ' is-on' : ''}" data-ic="grid" ${off} title="격자">격자</button>
+          </div>
+          <div class="ic-row">
+            <span class="ic-label">확대</span>
+            <button type="button" class="ic-btn ic-nudge" data-ic="zoom-out" ${off} title="1% 축소">−</button>
+            <input type="range" class="ic-slider-wide" min="${SCALE_MIN_PCT}" max="${SCALE_MAX_PCT}" step="1"
+                   value="${scalePct}" data-ic-tr="scale" ${off} aria-label="확대 비율">
+            <strong class="ic-val" data-ic-val="scale">${scalePct}%</strong>
+            <button type="button" class="ic-btn ic-nudge" data-ic="zoom-in" ${off} title="1% 확대">+</button>
+          </div>
+          <div class="ic-row">
+            <span class="ic-label">회전</span>
+            <button type="button" class="ic-btn ic-nudge" data-ic="rot-down" ${off} title="1° 반시계">−</button>
+            <input type="range" class="ic-slider-wide" min="0" max="359" step="1" value="${rotation}"
+                   data-ic-tr="rotation" ${off} aria-label="회전 각도">
+            <strong class="ic-val" data-ic-val="rotation">${rotation}°</strong>
+            <button type="button" class="ic-btn ic-nudge" data-ic="rot-up" ${off} title="1° 시계">+</button>
+            <button type="button" class="ic-btn" data-ic="rot-quarter" ${off} title="90° 돌리기">⟳</button>
+          </div>
+        </section>
+        ${runColHtml(editing)}
+      </div>
     `;
   }
 
   // 팝업이 안 열리므로 인페인트 조작은 전부 여기 있어야 한다.
-  function runBarHtml(editing) {
+  function runColHtml(editing) {
     const strength = Number.isFinite(Number(state.strength)) ? Number(state.strength) : 99;
     const noise = Number.isFinite(Number(state.noise)) ? Number(state.noise) : 0;
     const repeat = Number.isFinite(Number(state.repeat)) ? Number(state.repeat) : 1;
@@ -134,20 +207,29 @@ export function createInpaintCanvasPanel({
     const genTitle = state.requires_mask
       ? ' title="생성 전에 마스크를 칠하거나 베이스를 옮겨 빈 자리를 여세요"' : '';
     return `
-      <div class="ic-bar ic-bar-run">
-        <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>
-        <span class="ic-mask-state${masked ? ' is-on' : ''}">${masked ? '마스크 있음' : '마스크 없음'}</span>
-        <button type="button" class="ic-btn" data-ic="clear-mask" ${masked ? '' : 'disabled'}>마스크 지우기</button>
-        <span class="ic-sep"></span>
-        <label class="ic-range">강도 <input type="range" min="1" max="99" value="${strength}" data-ic-range="strength">
-          <strong data-ic-val="strength">${ratio(state.strength_value)}</strong></label>
-        <label class="ic-range">노이즈 <input type="range" min="0" max="99" value="${noise}" data-ic-range="noise">
-          <strong data-ic-val="noise">${ratio(state.noise_value)}</strong></label>
-        <label class="ic-range ic-repeat">반복 <input type="number" min="1" max="99" value="${repeat}" data-ic-num="repeat"></label>
-        <span class="ic-spacer"></span>
-        <button type="button" class="ic-btn ic-btn-go" data-ic="generate" ${state.can_generate ? '' : 'disabled'}${genTitle}>인페인트 생성</button>
-        <button type="button" class="ic-btn ic-btn-end" data-ic="close">세션 닫기</button>
-      </div>
+      <section class="ic-col" aria-label="인페인트 실행">
+        <div class="ic-row">
+          <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>
+          <span class="ic-mask-state${masked ? ' is-on' : ''}">${masked ? '마스크 있음' : '마스크 없음'}</span>
+          <button type="button" class="ic-btn" data-ic="clear-mask"
+            ${(masked && editing) ? '' : 'disabled'}>지우기</button>
+        </div>
+        <div class="ic-row">
+          <span class="ic-label">강도</span>
+          <input type="range" min="1" max="99" value="${strength}" data-ic-range="strength" aria-label="강도">
+          <strong class="ic-val" data-ic-val="strength">${ratio(state.strength_value)}</strong>
+          <span class="ic-label">노이즈</span>
+          <input type="range" min="0" max="99" value="${noise}" data-ic-range="noise" aria-label="노이즈">
+          <strong class="ic-val" data-ic-val="noise">${ratio(state.noise_value)}</strong>
+        </div>
+        <div class="ic-row">
+          <span class="ic-label">반복</span>
+          <input class="ic-num" type="number" min="1" max="99" value="${repeat}" data-ic-num="repeat" aria-label="반복">
+          <span class="ic-spacer"></span>
+          <button type="button" class="ic-btn ic-btn-go" data-ic="generate" ${state.can_generate ? '' : 'disabled'}${genTitle}>인페인트 생성</button>
+          <button type="button" class="ic-btn ic-btn-end" data-ic="close">세션 닫기</button>
+        </div>
+      </section>
     `;
   }
 
@@ -177,8 +259,8 @@ export function createInpaintCanvasPanel({
         ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}
         ${showGrid ? gridSvg(w, h, {className: 'ic-grid pos-grid'}) : ''}
         <div class="ic-ghost" data-ic-ghost="1" hidden></div>
-        ${state.canvas_active ? `<button type="button" class="ic-handle" data-ic-handle="1"
-          style="left:${handle.left};top:${handle.top}" title="끌어서 베이스 이미지를 옮깁니다">✥</button>` : ''}
+        <button type="button" class="ic-handle" data-ic-handle="1"
+          style="left:${handle.left};top:${handle.top}" title="끌어서 베이스 이미지를 옮깁니다">✥</button>
         ${chars.map(c => {
           const p = contentToPercent(c.position.x, c.position.y, w, h);
           return `<button type="button" class="ic-marker" data-ic-marker="${c.index}"
@@ -187,25 +269,33 @@ export function createInpaintCanvasPanel({
       </div>
     `;
     stageEl = plane.querySelector('[data-ic-stage]');
-    if (stageEl && w > 0 && h > 0) {
-      // 스테이지는 캔버스 비율을 그대로 쥔다 - 좌표 환산이 비율에만 기대기 때문이다.
-      stageEl.style.aspectRatio = `${w} / ${h}`;
-    }
+    fitStage();
+  }
+
+  /** 스테이지를 남는 자리에 **비율 그대로** 앉힌다.
+   *
+   *  ⚠️ CSS `aspect-ratio` 로는 안 된다. 한 축만 확실할 때는 맞지만, 폭·높이 양쪽에
+   *     한계가 걸리면 먼저 걸린 쪽만 잘리고 다른 쪽이 안 따라와 그림이 눌린다
+   *     (실측: 도크가 자라 높이가 줄자 1.462 -> 1.399). 좌표 환산은 스테이지 상자의
+   *     비율에만 기대므로, 눌린 상자는 곧 거짓말하는 좌표다.
+   */
+  function fitStage() {
+    if (!stageEl || !plane) return;
+    const {w, h} = canvasSize();
+    if (!(w > 0) || !(h > 0)) return;
+    const style = getComputedStyle(plane);
+    const availW = plane.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const availH = plane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    if (!(availW > 0) || !(availH > 0)) return;
+    const scale = Math.min(availW / w, availH / h);
+    stageEl.style.width = `${Math.round(w * scale)}px`;
+    stageEl.style.height = `${Math.round(h * scale)}px`;
   }
 
   // ── 조작 ────────────────────────────────────────────────────────────────
   function typingInPanel() {
     const active = document.activeElement;
     return !!(active && panel?.contains(active) && active.matches?.('input[type="number"]'));
-  }
-
-  function currentScaleIndex() {
-    const scale = Number(state?.base_scale) || 1;
-    let best = 0;
-    SCALE_STEPS.forEach((step, i) => {
-      if (Math.abs(step - scale) < Math.abs(SCALE_STEPS[best] - scale)) best = i;
-    });
-    return best;
   }
 
   function setViewMode(mode) {
@@ -215,28 +305,52 @@ export function createInpaintCanvasPanel({
     render();
   }
 
+  /** 확대/회전을 정확히 얼마만큼 민다. 화면은 즉시, 서버는 묶어서. */
+  function nudge(key, delta) {
+    if (!state) return;
+    if (key === 'scale') applyTransform('scale', clampPct((Number(state.base_scale) || 1) * 100 + delta));
+    else applyTransform('rotation', wrapDeg((Number(state.base_rotation) || 0) + delta));
+  }
+
+  function applyTransform(key, value) {
+    if (!state) return;
+    // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
+    if (key === 'scale') state.base_scale = value / 100;
+    else state.base_rotation = value;
+    const input = panel.querySelector(`[data-ic-tr="${key}"]`);
+    const label = panel.querySelector(`[data-ic-val="${key}"]`);
+    if (input && input.value !== String(value)) input.value = String(value);
+    if (label) label.textContent = key === 'scale' ? `${value}%` : `${value}°`;
+    sendTransform(key === 'scale' ? 'base_scale' : 'base_rotation',
+      key === 'scale' ? value / 100 : value);
+  }
+
   function onClick(event) {
     const action = event.target.closest?.('[data-ic]')?.dataset.ic;
     if (!action) return;
+    if (action === 'collapse') {
+      collapsed = !collapsed;
+      write(COLLAPSE_KEY, collapsed ? '1' : '0');
+      return render();
+    }
     if (action === 'mode-edit') return setViewMode('edit');
     if (action === 'mode-result') return setViewMode('result');
-    if (action === 'toggle') return send('canvas_active', !state?.canvas_active);
     if (action === 'grid') {
       showGrid = !showGrid;
-      try { localStorage.setItem(GRID_KEY, showGrid ? '1' : '0'); } catch (_) {}
+      write(GRID_KEY, showGrid ? '1' : '0');
       return render();
     }
     if (action === 'reset') return send('base_reset', null);
-    if (action === 'rotate') return send('base_rotation', ((Number(state?.base_rotation) || 0) + 90) % 360);
+    if (action === 'zoom-in') return nudge('scale', 1);
+    if (action === 'zoom-out') return nudge('scale', -1);
+    if (action === 'rot-up') return nudge('rotation', 1);
+    if (action === 'rot-down') return nudge('rotation', -1);
+    // 90° 는 자주 쓰는 자리라 한 번에 간다 - 슬라이더로 정확히 90 을 맞추기는 번거롭다.
+    if (action === 'rot-quarter') return nudge('rotation', 90);
     if (action === 'mask') return openMaskEditor();
     if (action === 'clear-mask') return send('clear_mask', 'true');
     if (action === 'generate') return onGenerate();
     if (action === 'close') return onClose();
-    if (action === 'zoom-in' || action === 'zoom-out') {
-      const i = currentScaleIndex();
-      const next = SCALE_STEPS[Math.min(SCALE_STEPS.length - 1, Math.max(0, i + (action === 'zoom-in' ? 1 : -1)))];
-      return send('base_scale', next);
-    }
   }
 
   function onChange(event) {
@@ -244,6 +358,13 @@ export function createInpaintCanvasPanel({
   }
 
   function onInput(event) {
+    const transform = event.target?.dataset?.icTr;
+    if (transform) {
+      applyTransform(transform, transform === 'scale'
+        ? clampPct(event.target.value)
+        : wrapDeg(event.target.value));
+      return;
+    }
     const key = event.target?.dataset?.icRange;
     if (key) {
       // 값 표시는 여기서 직접 맞춘다 - 팝업이 안 열려 있어 저쪽 라벨은 존재하지 않는다.
@@ -312,6 +433,18 @@ export function createInpaintCanvasPanel({
   }
 
   if (panel) {
+    // 도크가 실제로 차지한 높이를 뷰어에 적어 둔다. 캔버스가 그만큼 비켜선다 -
+    // 고정값으로 박으면 좁은 창에서 줄이 접혀 도크가 그림을 덮는다(실측 286px).
+    if (viewer && typeof ResizeObserver === 'function') {
+      new ResizeObserver(entries => {
+        const h = entries[0]?.target?.getBoundingClientRect().height || 0;
+        viewer.style.setProperty('--ic-dock-h', `${Math.round(h)}px`);
+      }).observe(panel);
+    }
+    // 남는 자리가 바뀌면(도크가 접히거나 줄이 늘거나 창이 바뀌면) 다시 앉힌다.
+    if (plane && typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => fitStage()).observe(plane);
+    }
     panel.addEventListener('click', onClick);
     panel.addEventListener('change', onChange);
     panel.addEventListener('input', onInput);

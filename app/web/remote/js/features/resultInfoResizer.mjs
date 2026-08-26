@@ -30,27 +30,6 @@ export function createResultInfoResizer({document, window, localStorage}) {
     }
   }
 
-  // V5 인페인트 캔버스가 이 패널 안에서 열린다. 사용자가 줄여 둔 높이 그대로면
-  // 캔버스가 몇십 px 로 눌려 아무것도 안 보인다 - 열려 있는 동안만 키워 준다.
-  // ⚠️ **저장하지 않는다.** 저장하면 캔버스를 닫은 뒤에도 그 높이가 사용자의 취향으로
-  //    남는다. 사용자가 그 사이에 직접 끌면 그쪽이 이긴다(아래 `beginDrag` 에서 해제).
-  let heightBeforeOverride = null;
-
-  function ensureAtLeast(minHeight) {
-    if (!panel) return;
-    const current = panel.getBoundingClientRect().height;
-    if (current >= minHeight) return;
-    if (heightBeforeOverride === null) heightBeforeOverride = current;
-    setHeight(minHeight, false);
-  }
-
-  function releaseMinimum() {
-    if (heightBeforeOverride === null) return;
-    const back = heightBeforeOverride;
-    heightBeforeOverride = null;
-    setHeight(back, false);
-  }
-
   function init() {
     if (!panel || !handle || initialized) return;
     initialized = true;
@@ -96,8 +75,6 @@ export function createResultInfoResizer({document, window, localStorage}) {
         }
       } catch (_) {}
       setHeight(panel.getBoundingClientRect().height, true);
-      // 사용자가 직접 잡아 끌었다 - 임시로 키워 둔 값을 되돌릴 이유가 사라졌다.
-      heightBeforeOverride = null;
     };
 
     const abortDrag = () => finishDrag({pointerId: activePointerId});
@@ -133,5 +110,5 @@ export function createResultInfoResizer({document, window, localStorage}) {
     });
   }
 
-  return {init, setHeight, ensureAtLeast, releaseMinimum};
+  return {init, setHeight};
 }

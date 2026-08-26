@@ -452,6 +452,9 @@ let searchPanelControl = null;
 let chunkPanelControl = null;
 let sequencePresetControl = null;
 let inpaintCanvasControl = null;
+// 인페인트 진입점이 세션을 요청해 두고 상태를 기다리는 중인가. 상태가 오면 계열에 따라
+// 캔버스를 드러내거나 옛 팝업을 연다(위 onModuleState 참조).
+let pendingImg2ImgSurface = false;
 let inpaintSequenceControl = null;
 let v5SceneControl = null;
 let danbooruFeedbackControl = null;
@@ -960,7 +963,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-reveal1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-codexfix')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -980,6 +983,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
       openModule,
       openImg2ImgSessionSurface,
       onCanvasSession: () => inpaintCanvasControl?.revealForSession?.(),
+      onCanvasSessionPending: () => { pendingImg2ImgSurface = true; },
       onLoadPrompt,
       applyMetadataSettings,
       switchRightTab,
@@ -1989,7 +1993,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-bug12')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-codexfix')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2118,7 +2122,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-bug12')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-codexfix')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -5933,6 +5937,11 @@ async function displayedImageBlob() {
       const response = await fetch(src, {cache: 'no-store'});
       if (response.ok) return await response.blob();
     } catch (error) { console.error('displayed image fetch failed', error); }
+    // ⚠️ **다른 그림으로 대신하지 않는다.** 화면에 A 가 있는데 A 를 못 읽었다고 B 를
+    //    열면, 그럴듯해 보이는 엉뚱한 원본에 Anlas 를 쓰게 된다(Codex 리뷰 BLOCK 5).
+    //    이 폴백이 바로 직전에 고친 버그와 같은 종류였다.
+    showToast('표시 중인 이미지를 읽지 못했습니다', 'error');
+    return null;
   }
   return latestResultBlob;
 }
@@ -9169,6 +9178,15 @@ function onModuleState(m) {
   //    모듈' 만 렌더하는데, V5 가상 캔버스는 모듈 팝업이 아니라 **Result 안에** 산다.
   //    뒤에 두면 팝업을 열어 두지 않는 한 캔버스가 영영 안 그려진다(실측).
   if (m.module_id === 'img2img') {
+    // ⚠️ 인페인트 진입점이 둘이다(헤더 버튼 = HTTP 업로드, 결과 우클릭 = WS 명령).
+    //    우클릭 쪽은 응답이 없어 그 자리에서 계열을 알 수 없다 - 예전에는 무조건 옛
+    //    팝업을 열어 V5 에서도 팝업과 캔버스가 **함께** 떴다(Codex 리뷰 BLOCK 3).
+    //    이제 두 진입점 모두 표를 세워 두고, **상태가 도착한 여기서** 갈림길을 정한다.
+    if (pendingImg2ImgSurface) {
+      pendingImg2ImgSurface = false;
+      if (m.canvas_supported) inpaintCanvasControl?.revealForSession?.();
+      else openImg2ImgSessionSurface();
+    }
     inpaintCanvasControl?.handleModuleState?.(m);
     // 캔버스에서 부르는 마스크 편집기는 img2img 패널의 상태를 본다. 팝업이 닫혀
     // 있어도 상태만은 최신으로 흘려 넣는다 - `isOpen` 가드가 DOM 은 안 건드린다.

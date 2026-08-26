@@ -238,6 +238,18 @@ export function createImg2ImgPanel({
     // ⚠️ `moduleBody` 는 **모든 모듈이 나눠 쓰는 한 칸**이다 - 여기서 그리면 지금 열려
     //    있는 남의 모듈 화면을 덮어쓴다. 그래도 상태는 최신이어야 한다: V5 캔버스에서
     //    부르는 마스크 편집기가 `currentState` 로 세션을 확인하기 때문이다.
+    // ⚠️ 이 검사는 `isOpen()` 게이트 **앞**이어야 한다. V5 는 팝업을 안 열어 늘
+    //    조기 반환하는데, 그러면 열려 있는 마스크 편집창이 옛 캔버스 크기로 남고
+    //    적용할 때 늘어난 잘못된 마스크가 저장된다(Codex 리뷰 CONCERN 1).
+    if (state && state.active) {
+      const liveCanvas = document.getElementById('img2imgMaskDialogCanvas');
+      const liveDraft = liveCanvas ? maskCanvasDrafts.get(liveCanvas) : null;
+      if (liveDraft
+        && (liveDraft.sourceWidth !== (Number(state.width) || 0)
+          || liveDraft.sourceHeight !== (Number(state.height) || 0))) {
+        closeMaskEditor();
+      }
+    }
     if (!isOpen()) {
       currentState = (state && state.active) ? state : null;
       // 다시 열릴 때 반드시 새로 그리도록 - 서명을 남겨 두면 건너뛴다.

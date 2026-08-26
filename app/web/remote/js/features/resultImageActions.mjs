@@ -15,6 +15,8 @@ export function createResultImageActions({
   openImg2ImgSessionSurface = () => openModule('img2img', {forceOpen: true}),
   // V5 인페인트 세션이 열렸다 - 화면이 그것을 보여 주게 한다.
   onCanvasSession = () => {},
+  // 세션을 요청했지만 아직 계열을 모른다 - 상태가 도착하면 화면이 고른다.
+  onCanvasSessionPending = () => {},
   onLoadPrompt = () => {},
   applyMetadataSettings = () => {},
   switchRightTab = () => {},
@@ -720,7 +722,10 @@ export function createResultImageActions({
           action,
           ...resultContextCommandPayload(context || {}),
         }));
-        openImg2ImgSessionSurface();
+        // ⚠️ 여기서 팝업을 바로 열면 안 된다. 이 경로는 WS 명령이라 응답이 없어 계열을
+        //    모르고, V5 에서는 팝업과 캔버스가 함께 떠 **두 경로가 한 세션을 만진다**
+        //    (Codex 리뷰 BLOCK 3). 표만 세워 두고 상태가 도착하면 그때 고른다.
+        onCanvasSessionPending();
         showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session requested`, 'success');
       } catch (error) {
         console.error('Context image action request failed', error);

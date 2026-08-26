@@ -66,6 +66,10 @@ export function contentToPercent(x, y, contentW, contentH) {
  */
 export function createPosStage({stage, getContentSize, onCommit, onDragStart, onDragEnd}) {
   let dragging = false;
+  // 진행 중인 드래그를 밖에서 끊는 손잡이. 세션이 닫히는데 손가락이 아직 눌려 있으면,
+  // document 에 걸린 리스너가 남아 **닫힌 세션(또는 방금 열린 새 세션)** 에 옛 좌표를
+  // 보낸다(Codex 리뷰 2026-08-26 CONCERN 2 - 다중 탭에서 실재).
+  let cancelActiveDrag = null;
   const stageEl = () => (typeof stage === 'function' ? stage() : stage);
 
   /** 드래그 중인가. 호출부는 이 값이 true 인 동안 renderStage 를 **막아야** 한다(규칙 1). */
@@ -112,16 +116,24 @@ export function createPosStage({stage, getContentSize, onCommit, onDragStart, on
       if (!frame) frame = requestAnimationFrame(flush);
     };
 
-    const up = () => {
+    const detach = () => {
       dragging = false;
+      cancelActiveDrag = null;
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
+      if (frame) cancelAnimationFrame(frame);
+      node.classList.remove('is-drag');
+    };
+
+    // 밖에서 끊을 때는 **커밋하지 않는다** - 세션이 이미 닫혔을 수 있다.
+    cancelActiveDrag = () => { pendingEvent = null; last = null; detach(); };
+
+    const up = () => {
       // ⚠️ 마지막 한 프레임을 **반드시 흘려보낸다.** 손을 떼는 순간 아직 반영 안 된
       //    좌표가 남아 있으면 그만큼 뒤로 되돌아간 자리에 저장된다.
-      if (frame) cancelAnimationFrame(frame);
       flush();
-      node.classList.remove('is-drag');
+      detach();
       // ⚠️ **커밋이 먼저다.** `onDragEnd` 가 대개 재렌더인데, 그게 먼저 돌면 끌던
       //    노드가 교체되면서 거기 붙여 둔 값(dataset 등)이 사라진다 - 실측: 베이스
       //    오프셋이 통째로 안 실렸다. 화면은 드래그 중에 이미 새 값이다(규칙 3).
@@ -168,14 +180,22 @@ export function createPosStage({stage, getContentSize, onCommit, onDragStart, on
       pending = ev;
       if (!frame) frame = requestAnimationFrame(flush);
     };
-    const up = () => {
+    const detach = () => {
       dragging = false;
+      cancelActiveDrag = null;
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
       if (frame) cancelAnimationFrame(frame);
-      flush();
       node.classList.remove('is-drag');
+    };
+
+    // 밖에서 끊을 때는 **커밋하지 않는다** - 세션이 이미 닫혔을 수 있다.
+    cancelActiveDrag = () => { pending = null; detach(); };
+
+    const up = () => {
+      flush();
+      detach();
       // 규칙: 커밋이 먼저, 재렌더는 그 다음.
       onEnd?.();
       onDragEnd?.();
@@ -189,5 +209,10 @@ export function createPosStage({stage, getContentSize, onCommit, onDragStart, on
     document.addEventListener('pointercancel', up);
   }
 
-  return {beginDrag, beginFreeDrag, isDragging};
+  /** 진행 중인 드래그를 **커밋 없이** 끊는다. 아무것도 안 끌고 있으면 조용히 지나간다. */
+  function cancelDrag() {
+    if (cancelActiveDrag) cancelActiveDrag();
+  }
+
+  return {beginDrag, beginFreeDrag, cancelDrag, isDragging};
 }

@@ -886,6 +886,7 @@ class HeadlessImg2ImgService:
             dilate_mask,
             downscale_mask,
             mask_is_empty,
+            merge_masks,
             png_bytes,
         )
 
@@ -913,6 +914,18 @@ class HeadlessImg2ImgService:
                 "빈 곳이 없습니다 - 캔버스를 넓히거나 베이스를 옮겨 보세요", level="error"
             )
         grown = dilate_mask(downscale_mask(gap), AUTO_MASK_RADIUS_PX, scale=MASK_SCALE)
+        # ⚠️ 손으로 칠한 것을 **덮지 않는다.** `자동으로 마스킹을 해준다` 는 더하는 것이지
+        #    지우는 것이 아니다 - 예전에는 그대로 덮어써서 칠한 자리가 사라졌다
+        #    (Codex 리뷰 2026-08-26 BLOCK 2). 지우는 길은 `마스크 지우기` 가 따로 있다.
+        painted = state.get("user_mask_bytes") or b""
+        if painted:
+            try:
+                existing = Image.open(io.BytesIO(bytes(painted))).convert("L")
+                if existing.size != grown.size:
+                    existing = existing.resize(grown.size, Image.Resampling.NEAREST)
+                grown = merge_masks(grown, existing) or grown
+            except Exception as exc:   # noqa: BLE001 - 칠한 것 하나 때문에 자동 마스킹이 죽으면 안 된다
+                print(f"[v5-canvas] painted mask unreadable, auto mask only: {exc}", flush=True)
         state["mode"] = "inpaint"
         state["user_mask_bytes"] = png_bytes(grown)
         preview = grown.resize((canvas_w, canvas_h), Image.Resampling.NEAREST)

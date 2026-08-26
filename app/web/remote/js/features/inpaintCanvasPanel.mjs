@@ -28,7 +28,7 @@
 //
 // ⚠️ 아래 import 의 캐시 키는 posStage 를 고칠 때도 **함께** 바꾼다. 이 파일 키만
 //    올리면 브라우저가 옛 posStage 를 계속 쓴다 - import 는 URL 로 캐시된다.
-import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-freedrag1';
+import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-cancel1';
 
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
 const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
@@ -103,11 +103,33 @@ export function createInpaintCanvasPanel({
 
   /** 변형은 마지막 값만 보낸다. 슬라이더 한 번에 수십 번 합성시키지 않는다. */
   function sendTransform(key, value) {
-    if (transformTimers[key]) clearTimeout(transformTimers[key]);
-    transformTimers[key] = setTimeout(() => {
+    if (transformTimers[key]) clearTimeout(transformTimers[key].id);
+    transformTimers[key] = {
+      value,
+      id: setTimeout(() => {
+        delete transformTimers[key];
+        send(key, value);
+      }, TRANSFORM_DEBOUNCE_MS),
+    };
+  }
+
+  /** 미뤄 둔 변형을 **지금 당장** 보낸다.
+   *
+   *  ⚠️ 이걸 안 하면 **돈이 잘못 나간다.** 휠을 굴린 뒤 120ms 안에 `인페인트 생성` 을
+   *     누르면, 백엔드는 아직 옛 배율로 굽고 요청하고, 새 배율은 큐에 들어간 뒤에야
+   *     도착한다(Codex 리뷰 2026-08-26 BLOCK 1). 초기화·세션 닫기도 마찬가지로,
+   *     미뤄 둔 값이 뒤늦게 되살아나 방금 되돌린 것을 다시 적용한다.
+   *  ⚠️ `img2imgPanel.generate()` 의 `flushSliders()` 는 **강도/노이즈용**이다.
+   *     여기 타이머는 그것과 별개라 저쪽이 대신 비워 주지 않는다.
+   */
+  function flushTransforms() {
+    Object.keys(transformTimers).forEach(key => {
+      const pending = transformTimers[key];
+      if (!pending) return;
+      clearTimeout(pending.id);
       delete transformTimers[key];
-      send(key, value);
-    }, TRANSFORM_DEBOUNCE_MS);
+      send(key, pending.value);
+    });
   }
 
   // ── 렌더 ────────────────────────────────────────────────────────────────
@@ -353,7 +375,7 @@ export function createInpaintCanvasPanel({
       write(GRID_KEY, showGrid ? '1' : '0');
       return render();
     }
-    if (action === 'reset') return send('base_reset', null);
+    if (action === 'reset') { flushTransforms(); return send('base_reset', null); }
     if (action === 'zoom-in') return nudge('scale', 1);
     if (action === 'zoom-out') return nudge('scale', -1);
     if (action === 'rot-up') return nudge('rotation', 1);
@@ -363,8 +385,9 @@ export function createInpaintCanvasPanel({
     if (action === 'mask') return openMaskEditor();
     if (action === 'auto-mask') return send('auto_mask', 'true');
     if (action === 'clear-mask') return send('clear_mask', 'true');
-    if (action === 'generate') return onGenerate();
-    if (action === 'close') return onClose();
+    // ⚠️ 생성/닫기 전에 미뤄 둔 변형을 먼저 보낸다 - 순서가 뒤집히면 옛 그림으로 굽는다.
+    if (action === 'generate') { flushTransforms(); return onGenerate(); }
+    if (action === 'close') { flushTransforms(); return onClose(); }
   }
 
   function onChange(event) {
@@ -563,6 +586,9 @@ export function createInpaintCanvasPanel({
   }
 
   function disarmSessionInput() {
+    // 끌고 있던 것이 있으면 먼저 끊는다 - 세션이 닫힌 뒤 놓아도 stale 좌표가 안 나간다.
+    posStage?.cancelDrag?.();
+    flushTransforms();
     if (sessionInputTeardown) sessionInputTeardown();
   }
 

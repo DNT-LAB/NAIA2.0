@@ -26275,6 +26275,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    ⚠️ 검은 테두리 위에 흰 획을 얹었다. 한 겹이면 밝은 그림 위에서 사라진다. */
 /* 가상 캐릭터 프롬프트 배지 - 메인과 갈라져 있음을 머리말이 말한다(사용자 지정). */
 .cq-virtual {
+  /* ⚠️ 좁은 자리라 flex 가 줄여 "가/상" 으로 쪼갠다(사용자 지적). 줄이지도 접지도 않는다. */
+  flex: 0 0 auto; white-space: nowrap;
   margin-left: 6px; padding: 1px 6px; border-radius: 7px;
   border: 1px solid rgba(157,139,255,0.55); background: rgba(124,106,239,0.28);
   color: var(--text-primary); font-family: var(--font-mono); font-size: 9px; font-weight: 700;

@@ -184,6 +184,14 @@ class ImageMetadataExtractor:
             result['characters'] = characters
         if characters_uc:
             result['characters_uc'] = characters_uc
+        # ⚠️ 좌표(`centers`)도 꺼낸다. 예전에는 `char_caption` 텍스트만 꺼내고 버렸는데,
+        #    그래서 인페인트로 그림을 다시 열면 **누가 어디 있었는지 알 방법이 없었다**
+        #    (V5 가상 캐릭터 프롬프트, 사용자 제보 2026-08-26).
+        centers = ImageMetadataExtractor._extract_char_centers_from_dict(
+            comment_data.get('v4_prompt', {}),
+        )
+        if centers:
+            result['character_positions'] = centers
 
         return result
 
@@ -758,6 +766,32 @@ class ImageMetadataExtractor:
         captions.extend(matches)
 
         return captions
+
+    @staticmethod
+    def _extract_char_centers_from_dict(prompt_data: Dict[str, Any]) -> list:
+        """v4 char_captions 안의 `centers` 를 캐릭터 순서대로 꺼낸다.
+
+        반환은 `[{'x': 0~1, 'y': 0~1} | None, ...]` - 캐릭터 하나에 좌표가 없을 수
+        있으므로 자리를 비워 두고 순서를 지킨다.
+        """
+        caption_data = prompt_data.get('caption', {}) if isinstance(prompt_data, dict) else {}
+        char_captions = caption_data.get('char_captions', [])
+        if not isinstance(char_captions, list):
+            return []
+        out = []
+        for item in char_captions:
+            center = None
+            if isinstance(item, dict):
+                raw = item.get('centers')
+                if isinstance(raw, list) and raw and isinstance(raw[0], dict):
+                    raw = raw[0]
+                if isinstance(raw, dict):
+                    try:
+                        center = {'x': float(raw.get('x')), 'y': float(raw.get('y'))}
+                    except (TypeError, ValueError):
+                        center = None
+            out.append(center)
+        return out if any(c is not None for c in out) else []
 
     @staticmethod
     def _extract_char_captions_from_dict(prompt_data: Dict[str, Any]) -> list:

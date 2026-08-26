@@ -21,7 +21,9 @@
 // ⚠️ 좌표는 전부 **캔버스 픽셀**로 주고받는다. 화면이 줄어 있어도 그대로다 - 화면
 //    비율로 보내면 캔버스 크기를 바꾼 순간 전부 어긋난다.
 
-import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs';
+// ⚠️  는 posStage 를 고칠 때도 **함께** 바꾼다. 이 파일 키만 올리면 브라우저가
+//    옛 posStage 를 계속 쓴다 - import 는 URL 로 캐시된다.
+import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-raf1';
 
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
 const SCALE_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
@@ -174,6 +176,7 @@ export function createInpaintCanvasPanel({
       <div class="ic-stage" data-ic-stage="1">
         ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}
         ${showGrid ? gridSvg(w, h, {className: 'ic-grid pos-grid'}) : ''}
+        <div class="ic-ghost" data-ic-ghost="1" hidden></div>
         ${state.canvas_active ? `<button type="button" class="ic-handle" data-ic-handle="1"
           style="left:${handle.left};top:${handle.top}" title="끌어서 베이스 이미지를 옮깁니다">✥</button>` : ''}
         ${chars.map(c => {
@@ -263,16 +266,26 @@ export function createInpaintCanvasPanel({
     if (handle) {
       const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
       const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
+      const ghost = stageEl.querySelector('[data-ic-ghost]');
       // 손잡이는 그림의 한가운데를 가리키므로, 좌상단 오프셋으로 되돌려 보낸다.
       posStage.beginDrag(event, handle, 'base', (x, y) => {
         const {w, h} = canvasSize();
         const pos = contentToPercent(x, y, w, h);
         handle.style.left = pos.left;
         handle.style.top = pos.top;
-        pendingOffset = {
-          x: Math.round(x - placedW / 2),
-          y: Math.round(y - placedH / 2),
-        };
+        const ox = Math.round(x - placedW / 2);
+        const oy = Math.round(y - placedH / 2);
+        pendingOffset = {x: ox, y: oy};
+        // 그림 자체는 서버가 다시 합성해야 움직인다(놓을 때 한 번). 끄는 동안에는
+        // **어디에 놓이는지**와 **얼마나 새 자리가 열리는지**를 유령으로 보여 준다 -
+        // 손잡이 하나만 움직이면 무엇이 일어나는지 알 수 없다(사용자 지적).
+        if (ghost && w > 0 && h > 0) {
+          ghost.hidden = false;
+          ghost.style.left = `${(ox / w) * 100}%`;
+          ghost.style.top = `${(oy / h) * 100}%`;
+          ghost.style.width = `${(placedW / w) * 100}%`;
+          ghost.style.height = `${(placedH / h) * 100}%`;
+        }
       });
       return;
     }
@@ -312,7 +325,11 @@ export function createInpaintCanvasPanel({
       stage: () => stageEl,
       getContentSize: canvasSize,
       onCommit: commit,
-      onDragEnd: () => render(),
+      onDragEnd: () => {
+        // 재렌더가 유령을 지우지만, 커밋이 없어 다시 그리지 않는 경우도 있다.
+        stageEl?.querySelector('[data-ic-ghost]')?.setAttribute('hidden', '');
+        render();
+      },
     });
   }
 

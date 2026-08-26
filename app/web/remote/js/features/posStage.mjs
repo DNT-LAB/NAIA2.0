@@ -93,9 +93,23 @@ export function createPosStage({stage, getContentSize, onCommit, onDragStart, on
       node.style.top = pos.top;
     };
 
-    const move = (ev) => {
-      last = pointToContent(ev, host, size.w, size.h);
+    // 포인터는 한 프레임에 여러 번 온다(고주사율 마우스·펜은 더). 올 때마다 스타일을
+    // 쓰면 화면은 60번밖에 안 그려지는데 레이아웃 계산만 그 몇 배를 한다 - 끌수록
+    // 무거워지고 손가락과 어긋난다. **프레임당 한 번**만 반영한다.
+    let frame = 0;
+    let pendingEvent = null;
+
+    const flush = () => {
+      frame = 0;
+      if (!pendingEvent) return;
+      last = pointToContent(pendingEvent, host, size.w, size.h);
+      pendingEvent = null;
       put(last.x, last.y);
+    };
+
+    const move = (ev) => {
+      pendingEvent = ev;
+      if (!frame) frame = requestAnimationFrame(flush);
     };
 
     const up = () => {
@@ -103,6 +117,10 @@ export function createPosStage({stage, getContentSize, onCommit, onDragStart, on
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
+      // ⚠️ 마지막 한 프레임을 **반드시 흘려보낸다.** 손을 떼는 순간 아직 반영 안 된
+      //    좌표가 남아 있으면 그만큼 뒤로 되돌아간 자리에 저장된다.
+      if (frame) cancelAnimationFrame(frame);
+      flush();
       node.classList.remove('is-drag');
       // ⚠️ **커밋이 먼저다.** `onDragEnd` 가 대개 재렌더인데, 그게 먼저 돌면 끌던
       //    노드가 교체되면서 거기 붙여 둔 값(dataset 등)이 사라진다 - 실측: 베이스

@@ -26152,3 +26152,15 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid rgba(157,139,255,0.9); background: rgba(124,106,239,0.9); color: #fff;
 }
 .ic-handle.is-drag, .ic-marker.is-drag { cursor: grabbing; box-shadow: 0 0 0 3px rgba(157,139,255,0.35); }
+
+/* 끄는 동안의 유령. 베이스가 놓일 자리를 점선으로 두르고, **바깥을 어둡게** 깐다 -
+   그 어두운 부분이 곧 새로 열릴 자리다(자르기 도구와 같은 몸짓).
+   ⚠️ `box-shadow` 로 바깥을 덮는다. div 넷을 두면 프레임마다 넷을 다시 재게 된다. */
+.ic-ghost {
+  position: absolute; pointer-events: none; z-index: 2;
+  border: 1px dashed rgba(255,255,255,0.85);
+  box-shadow: 0 0 0 9999px rgba(16,16,22,0.5);
+  /* ⚠️ 트랜지션 금지. 프레임마다 자리를 바꾸는 요소라 보간이 붙으면 손가락보다 늦게
+     따라오고, 그게 정확히 "뻑뻑하다" 로 읽힌다. */
+  transition: none;
+}

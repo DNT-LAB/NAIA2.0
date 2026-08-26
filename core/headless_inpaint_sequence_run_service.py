@@ -62,6 +62,14 @@ class HeadlessInpaintSequenceRunService:
         #    있어 아래 EventStream 검사로는 안 잡힌다 - 런 상태를 직접 본다.
         if self.context._sequence_run_service().is_running():
             return "Sequence 연속 생성이 실행 중입니다. 정지한 뒤 시도하세요."
+        # ⚠️ **ComfyUI 는 인페인트 입력을 받지 않는다.** 캔버스·마스크를 실어 보내도
+        #    워크플로우가 프롬프트·샘플러·해상도만 치환해(comfyui_workflow_manager) 그냥 독립
+        #    t2i 가 된다 - 연쇄가 안 되는데 되는 것처럼 보이고 GPU 시간만 태운다
+        #    (Codex #2). NAI·WEBUI 는 image_bytes/mask_bytes 를 실제로 보낸다.
+        mode = str(getattr(self.context, "get_api_mode", lambda: "")() or "").upper()
+        if mode == "COMFYUI":
+            return ("I.Sequence 는 ComfyUI 에서 쓸 수 없습니다 - 캔버스 연쇄가 인페인트를 "
+                    "쓰는데 ComfyUI 경로는 그 입력을 받지 않습니다. NAI 또는 WEBUI 로 바꿔 주세요.")
         es = getattr(self.context, "event_stream_runtime", None)
         if (es is not None and getattr(es, "is_active", False)) \
                 or self.context._storyteller_service().is_running():

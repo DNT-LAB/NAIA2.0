@@ -1966,6 +1966,19 @@ export function createArtistThumbController({
     reload: () => load({force: true}),
     setActive,
     syncPromptFormat,
+    /** 백엔드(NAI/WEBUI/COMFYUI)가 바뀌면 '생성한 모델' 필터와 카드 그림이 그 모드
+     *  기준으로 다시 갈려야 한다. 예전에는 프롬프트 표기만 고쳐서, WEBUI 로 바꿔도
+     *  NAI 의 모델 목록·썸네일이 그대로 남았다(Codex #5).
+     *  ⚠️ 탭이 안 떠 있으면 목록 재조회는 하지 않는다 - 안 보는 화면 때문에 95k 행을
+     *     훑을 이유가 없다. 다음에 열 때 `onOpen` 이 받아 온다. */
+    async onApiModeChange() {
+      syncPromptFormat();
+      if (!state) return;
+      try {
+        await fetchState({force: true});
+        if (artistTabActive) await loadPage(currentPage, {anchor: 'top'});
+      } catch (_) { /* 상태 갱신 실패가 모드 전환을 막으면 안 된다 */ }
+    },
     handleResultMeta,
     handleResultBlob,
   };

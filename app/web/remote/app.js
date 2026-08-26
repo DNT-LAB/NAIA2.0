@@ -569,7 +569,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260609-scrollfix1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260826-artistthumb1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -7705,6 +7705,8 @@ function syncMode(mode) {
   if (resultEnhance) resultEnhance.update();
   if (artistThumbControl) artistThumbControl.syncPromptFormat();
   if (sequencePresetControl?.onModeChange) sequencePresetControl.onModeChange(mode);
+  // 아티스트 썸네일은 백엔드별로 갈려 있다 - 모드가 바뀌면 그 스코프로 다시 잡는다.
+  artistThumbControl?.onApiModeChange?.();
   if (inpaintSequenceControl?.onModeChange) inpaintSequenceControl.onModeChange(mode);
 }
 

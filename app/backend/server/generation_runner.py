@@ -810,14 +810,32 @@ async def _chain_inpaint_sequence_frame(
     svc = context._inpaint_sequence_run_service()
     if not svc.is_running(run_id):
         return False
+
+    # ⚠️ **할당량 판정을 여기서 본다.** 이 함수는 `_maybe_continue_auto_generation`
+    #    보다 **먼저** 돌기 때문에(라운드가 넘어가기 전에 이어 붙여야 해서), 그쪽이
+    #    정지를 처리하기 전에 유료 한 장이 이미 큐에 들어간다. 판정은 완료 알림
+    #    직전에 세워 둔 답을 **읽기만** 한다 - 지우는 것은 그쪽 몫이다(Codex #1).
+    if getattr(context, "_auto_gen_quota_stop", False):
+        svc.abandon_pending(run_id)
+        print("[i.sequence] chain stopped: free quota exhausted", flush=True)
+        return False
+
     nxt = svc.pop_next_frame(run_id)
     if not nxt:
         return False   # 이 라운드의 마지막 컷이었다
 
+    def _give_up(reason: str) -> bool:
+        """⚠️ 프레임은 이미 **꺼내져 지워졌다.** 여기서 그냥 돌아가면 다음 컷이 영영
+        큐에 안 들어가고 `completed < total_frames` 라 라운드가 안 닫혀, 런이 살아
+        있는 채로 멈춰 다음 시작까지 막는다(Codex #3). 남은 대기분을 버려 닫는다."""
+        dropped = svc.abandon_pending(run_id)
+        print(f"[i.sequence] chain stopped: {reason} (dropped {dropped} pending cut(s))",
+              flush=True)
+        return False
+
     image = getattr(getattr(stored, "item", None), "image", None)
     if image is None:
-        print("[i.sequence] chain stopped: no result image", flush=True)
-        return False
+        return _give_up("no result image")
 
     from utils.sequence_canvas_chain import crop_result, inpaint_payload
 
@@ -826,8 +844,7 @@ async def _chain_inpaint_sequence_frame(
         seed_image = crop_result(image, direction) if params.get("inpaint_sequence_canvas") else image
         payload = await asyncio.to_thread(inpaint_payload, seed_image, direction)
     except Exception as exc:   # noqa: BLE001
-        print(f"[i.sequence] canvas build failed: {exc}", flush=True)
-        return False
+        return _give_up(f"canvas build failed: {exc}")
 
     command = nxt.get("command") or {}
     overrides = dict(command.get("overrides") or {})
@@ -838,11 +855,9 @@ async def _chain_inpaint_sequence_frame(
             generation_service(context).enqueue_remote_request, command
         )
     except Exception as exc:   # noqa: BLE001
-        print(f"[i.sequence] chain enqueue failed: {exc}", flush=True)
-        return False
+        return _give_up(f"enqueue failed: {exc}")
     if not getattr(dispatch, "ok", False):
-        print("[i.sequence] chain enqueue blocked", flush=True)
-        return False
+        return _give_up("enqueue blocked")
     try:
         await broadcast_json(clients, context._inpaint_sequence_run_module_state())
     except Exception:

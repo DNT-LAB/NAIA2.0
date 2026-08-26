@@ -116,7 +116,14 @@ def refresh_bootstrap_data_files(runtime_paths: Any) -> dict[str, Any]:
         try:
             if target.exists():
                 src_stat = source.stat()
-                same = src_stat.st_size == target.stat().st_size
+                dst_stat = target.stat()
+                same = src_stat.st_size == dst_stat.st_size
+                # ⚠️ 크기가 같아도 **배포본이 더 새로우면** 갱신한다. 안 그랬면
+                #    4MB 넘는 파일(taglist/style_thumbnails.json = 54MB)는 크기만 보므로
+                #    크기가 같은 개정이 **영영 안 닿는다**(Codex #6). stat 두 번이라
+                #    공짜나 다름없고, 갱신 뒤엔 target 이 더 새로워 재발동하지 않는다.
+                if same and src_stat.st_mtime > dst_stat.st_mtime + 1:
+                    same = False
                 if same and src_stat.st_size <= BOOTSTRAP_CONTENT_COMPARE_MAX_BYTES:
                     same = source.read_bytes() == target.read_bytes()
                 if same:

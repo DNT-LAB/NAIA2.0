@@ -632,6 +632,9 @@ class WebSessionContext:
     def _is_naid3_model(self) -> bool:
         return self._remote_state_service().is_naid3_model()
 
+    def _is_naid5_model(self) -> bool:
+        return self._remote_state_service().is_naid5_model()
+
     def _nai_model_supports_vibe(self) -> bool:
         return self._remote_state_service().nai_model_supports_vibe()
 

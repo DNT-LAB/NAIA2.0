@@ -318,6 +318,18 @@ class HeadlessSessionStateService:
             self.api_status_payload(client_host),
             {"type": "init_complete"},
         ])
+        # V5 인페인트 가상 캔버스는 모듈 팝업이 아니라 Result 안에 산다. 아무도 안
+        # 물어보면 새로고침/재접속 뒤에 화면에서 사라진다 - 세션은 서버에 멀쩡히
+        # 살아 있는데 편집 수단만 없어진다.
+        #
+        # ⚠️ **세션이 있을 때만** 싣는다. 웹 스모크 계약은 초기 메시지 **타입을 순서대로**
+        #    세므로, 조건 없이 한 줄 더하면 그 뒤가 전부 밀려 계약이 깨진다(실측).
+        try:
+            session = getattr(context, "img2img_session", None)
+            if isinstance(session, dict) and session.get("canvas_supported"):
+                messages.append(context.module_state_payload("img2img", client_host))
+        except Exception:   # noqa: BLE001 - 복구용 한 줄 때문에 접속이 막히면 안 된다
+            pass
         return messages
 
     @staticmethod

@@ -167,8 +167,15 @@ export function createResultImageActions({
       }
       const data = await response.json().catch(() => ({}));
       if (isDesktopImg2ImgAction(action)) {
-        openImg2ImgSessionSurface();
-        showToast(data.message || `${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session ready`, 'success');
+        // V5 인페인트는 팝업을 열지 않는다 - Result 안 가상 캔버스에서 바로 고친다
+        // (사용자 지정 2026-08-26). 백엔드가 세션을 열면서 계열을 판정하므로
+        // 여기서 모델 표를 한 벌 더 들고 있지 않는다.
+        if (data && data.state && data.state.canvas_active) {
+          showToast('Result 안 가상 캔버스에서 편집하세요', 'success');
+        } else {
+          openImg2ImgSessionSurface();
+          showToast(data.message || `${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session ready`, 'success');
+        }
       } else if (action === 'vibe' && currentMode() === 'NAI') {
         openModule('vibe_transfer');
         showToast(data.message || 'Vibe Transfer image added', 'success');

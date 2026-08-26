@@ -198,6 +198,14 @@ class HeadlessImg2ImgService:
         )
         negative_prompt = str(params.get("negative_prompt") or params.get("uc") or context.negative_prompt_text or "")
         clean_mode = "inpaint" if str(mode or "").lower() == "inpaint" else "img2img"
+        # V5 인가. 가상 캔버스는 V5 인페인트 **전용**이다(사용자 지정 2026-08-26:
+        # "V5 모드에서는 별도 팝업이 아니라 Result 안에서 직접 수정").
+        # ⚠️ 판정이 실패하면 **예전 길**로 간다. 여기서 예외가 새면 결과 우클릭
+        #    인페인트가 통째로 죽는데, 그건 캔버스를 못 쓰는 것보다 훨씬 나쁘다.
+        try:
+            canvas_supported = bool(context._is_naid5_model()) and clean_mode == "inpaint"
+        except Exception:
+            canvas_supported = False
         context.img2img_session = {
             "active": True,
             "window_id": context._img2img_window_counter,
@@ -220,7 +228,10 @@ class HeadlessImg2ImgService:
             # 비게 된 자리를 자동으로 연다.
             # ⚠️ `canvas_active` 가 꺼져 있으면 예전과 **완전히 같은 길**을 탄다.
             #    기존 img2img/인페인트 팝업의 동작을 바꾸지 않기 위해서다.
-            "canvas_active": False,
+            # V5 인페인트면 처음부터 켜 둔다 - 이 길에서는 팝업이 열리지 않으므로
+            # 꺼진 채로 두면 사용자에게 아무 편집 수단도 남지 않는다.
+            "canvas_supported": canvas_supported,
+            "canvas_active": canvas_supported,
             "canvas_width": int(image.width),
             "canvas_height": int(image.height),
             "base_offset_x": 0,
@@ -347,6 +358,9 @@ class HeadlessImg2ImgService:
         """화면이 캔버스를 그리는 데 필요한 값. 이미지 바이트는 넣지 않는다(미리보기로 간다)."""
         state = self.context.img2img_session
         return {
+            # 화면은 이 값으로 캔버스 패널을 띄울지 정한다. `canvas_active` 로는 안 된다 -
+            # 사용자가 캔버스를 끄면 패널까지 사라져 다시 켤 방법이 없어진다.
+            "canvas_supported": bool(state.get("canvas_supported")),
             "canvas_active": bool(state.get("canvas_active")),
             "canvas_width": int(state.get("canvas_width") or 0),
             "canvas_height": int(state.get("canvas_height") or 0),
@@ -711,18 +725,29 @@ class HeadlessImg2ImgService:
         base = self._base_image()
         state["base_width"], state["base_height"] = int(base.width), int(base.height)
 
+        canvas_w = int(state.get("canvas_width") or base.width)
+        canvas_h = int(state.get("canvas_height") or base.height)
+
         user_mask = None
         raw = state.get("user_mask_bytes") or b""
         if raw:
             try:
                 user_mask = Image.open(io.BytesIO(bytes(raw))).convert("L")
+                # ⚠️ 칠한 마스크는 NAI 규약대로 **1/8 로 줄여** 보관돼 있다
+                #    (`_decode_mask` -> `decode_mask_to_small_png`). 그대로 넘기면
+                #    `merge_masks` 가 첫 겹의 크기를 기준으로 삼아 빈 곳 마스크까지
+                #    1/8 로 끌어내리고, `downscale_mask` 가 거기서 또 1/8 을 한다
+                #    -> 1/64. 캔버스 좌표로 되돌려 놓고 합쳐야 한다.
+                if user_mask.size != (canvas_w, canvas_h):
+                    user_mask = user_mask.resize((canvas_w, canvas_h), Image.Resampling.NEAREST)
             except Exception as exc:   # noqa: BLE001 - 마스크 하나 때문에 세션이 죽으면 안 된다
                 print(f"[v5-canvas] user mask unreadable: {exc}", flush=True)
+                user_mask = None
 
         payload = build_payload(
             base,
-            canvas_w=int(state.get("canvas_width") or base.width),
-            canvas_h=int(state.get("canvas_height") or base.height),
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
             offset_x=int(state.get("base_offset_x") or 0),
             offset_y=int(state.get("base_offset_y") or 0),
             scale=state.get("base_scale", 1.0),

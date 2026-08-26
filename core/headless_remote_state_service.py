@@ -230,6 +230,16 @@ class HeadlessRemoteStateService:
         spec = self._current_nai_model_spec()
         return bool(spec and spec.payload_profile == "v3")
 
+    def is_naid5_model(self) -> bool:
+        """V5 계열인가.
+
+        ⚠️ 계열 판정은 `payload_profile` 로 한다. `family` 는 표시용(색·묶음)이라
+           커스텀 모델에서 비어 있을 수 있다 - 그러면 사용자가 등록한 V5 모델이
+           조용히 V4 취급을 받는다.
+        """
+        spec = self._current_nai_model_spec()
+        return bool(spec and spec.payload_profile == "v5")
+
     def nai_model_supports_vibe(self) -> bool:
         spec = self._current_nai_model_spec()
         return bool(spec and spec.supports_vibe)

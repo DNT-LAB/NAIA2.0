@@ -960,7 +960,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260618-outpaint')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-v5canvas')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1986,7 +1986,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260713-lifecycle1')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-v5canvas')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -1999,6 +1999,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260713-life
       bindTagAssist,
       // V3 인페인트는 디노이징 미지원 → 강도 슬라이더 숨김(백엔드 img2img.strength 게이트와 동일 기준).
       hideInpaintStrength: () => naiModelBlocksReference(),
+      isOpen: () => currentModuleId === 'img2img',
     });
   })
   .catch(error => {
@@ -2114,10 +2115,23 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintcanvas1')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-inpaintcanvas3')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'), escHtml, setModuleParam, showToast,
+      // V5 는 팝업을 안 여니 조작도 이쪽에 있어야 한다. 다만 **로직은 옮기지 않는다** -
+      // 마스크 디코드/슬라이더 디바운스/생성 규약은 img2img 패널이 계속 SSOT 다.
+      openMaskEditor: () => img2imgPanel?.openMaskEditor?.(),
+      onSlider: (key, value) => img2imgPanel?.slider?.(key, value),
+      onRepeat: value => img2imgPanel?.repeat?.(value),
+      onGenerate: () => img2imgPanel?.generate?.(),
+      onClose: () => img2imgPanel?.close?.(),
+      // Result 패널은 사용자가 손잡이로 높이를 정한다. 캔버스가 열려 있는 동안만
+      // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
+      onVisibility: visible => {
+        if (visible) resultInfoResizer?.ensureAtLeast?.(470);
+        else resultInfoResizer?.releaseMinimum?.();
+      },
     });
   })
   .catch(error => {
@@ -9123,7 +9137,12 @@ function onModuleState(m) {
   // ⚠️ **이 게이트 앞이어야 한다.** 아래 `currentModuleId` 검사는 '지금 열려 있는
   //    모듈' 만 렌더하는데, V5 가상 캔버스는 모듈 팝업이 아니라 **Result 안에** 산다.
   //    뒤에 두면 팝업을 열어 두지 않는 한 캔버스가 영영 안 그려진다(실측).
-  if (m.module_id === 'img2img') inpaintCanvasControl?.handleModuleState?.(m);
+  if (m.module_id === 'img2img') {
+    inpaintCanvasControl?.handleModuleState?.(m);
+    // 캔버스에서 부르는 마스크 편집기는 img2img 패널의 상태를 본다. 팝업이 닫혀
+    // 있어도 상태만은 최신으로 흘려 넣는다 - `isOpen` 가드가 DOM 은 안 건드린다.
+    if (m.module_id !== currentModuleId) img2imgPanel?.render?.(m);
+  }
 
   if (m.module_id !== currentModuleId) return;
   renderModuleState(m);

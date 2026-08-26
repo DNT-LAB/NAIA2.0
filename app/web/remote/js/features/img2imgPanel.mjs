@@ -10,6 +10,9 @@ export function createImg2ImgPanel({
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
   hideInpaintStrength = () => false,
+  // 이 패널이 지금 화면을 소유하고 있는가. V5 인페인트는 팝업을 열지 않고 Result 안
+  // 가상 캔버스에서 고치는데, 마스크 편집기는 여전히 **이 패널의 상태**를 본다.
+  isOpen = () => true,
 }) {
   const MASK_CELL_SIZE = 8;
   const MASK_OVERLAY_COLOR = 'rgba(0, 0, 255, 0.47)';
@@ -224,6 +227,17 @@ export function createImg2ImgPanel({
   }
 
   function render(state) {
+    // 팝업이 닫혀 있으면 상태만 받아 두고 나간다.
+    // ⚠️ `moduleBody` 는 **모든 모듈이 나눠 쓰는 한 칸**이다 - 여기서 그리면 지금 열려
+    //    있는 남의 모듈 화면을 덮어쓴다. 그래도 상태는 최신이어야 한다: V5 캔버스에서
+    //    부르는 마스크 편집기가 `currentState` 로 세션을 확인하기 때문이다.
+    if (!isOpen()) {
+      currentState = (state && state.active) ? state : null;
+      // 다시 열릴 때 반드시 새로 그리도록 - 서명을 남겨 두면 건너뛴다.
+      lastRenderedStructureSignature = null;
+      if (!currentState) closeMaskEditor();
+      return;
+    }
     const structureSignature = img2imgStructureSignature(state);
     const focusedTextarea = focusedImg2imgTextarea();
     if (focusedTextarea && state && state.active && lastRenderedStructureSignature === structureSignature) {

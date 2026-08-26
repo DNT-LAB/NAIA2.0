@@ -26073,7 +26073,17 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 
 /* ===== V5 인페인트 가상 캔버스 (#inpaintCanvasPanel) ===== */
-.inpaint-canvas-panel { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; }
+/* ⚠️ Result 패널은 사용자가 손잡이로 높이를 정하는 **고정 높이** 상자다. 여기서
+   안 자르면 캔버스가 아래 파라미터 패널 위로 흘러넘친다(실측). */
+.inpaint-canvas-panel {
+  display: flex; flex-direction: column; gap: 6px; padding: 6px 8px;
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+}
+/* 캔버스가 떠 있는 동안에는 메타데이터 칸이 자리를 양보한다. 둘 다 `flex-grow: 1`
+   이면 남는 높이를 반씩 나눠 가져 캔버스가 100px 대로 눌린다(실측). */
+.result-info-panel:has(#inpaintCanvasPanel:not([hidden])) #resultInfoContent {
+  flex: 0 1 auto; max-height: 64px;
+}
 .ic-bar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .ic-btn {
   height: 20px; padding: 0 8px; border: 1px solid rgba(157,139,255,0.42); border-radius: 5px;
@@ -26086,13 +26096,34 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ic-select { height: 20px; font-family: var(--font-mono); font-size: 10px; }
 .ic-sep { width: 1px; height: 14px; background: var(--border-dim); }
 .ic-readout { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); min-width: 34px; text-align: center; }
-.ic-off { font-size: 11px; color: var(--text-muted); padding: 8px 2px; }
 .ic-hint { font-size: 10px; color: var(--text-muted); }
+/* 실행 줄. V5 는 팝업이 안 열려서 강도/노이즈/반복/생성이 전부 여기 있다. */
+.ic-bar-run { border-top: 1px solid var(--border-dim); padding-top: 6px; margin-top: 2px; }
+.ic-bar-run .ic-spacer { flex: 1 1 auto; }
+.ic-mask-state { font-size: 10px; color: var(--text-muted); }
+.ic-mask-state.is-on { color: var(--accent-soft, #b9aeff); }
+.ic-range {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; color: var(--text-muted); white-space: nowrap;
+}
+.ic-range input[type="range"] { width: 84px; }
+.ic-range strong { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); min-width: 28px; }
+.ic-repeat input[type="number"] {
+  width: 46px; background: var(--bg-input, rgba(255,255,255,0.05));
+  border: 1px solid var(--border-dim); border-radius: 4px;
+  color: var(--text-dim); font-size: 10px; padding: 2px 4px;
+}
+.ic-btn-go { background: rgba(88,178,120,0.26); border-color: rgba(126,214,158,0.6); }
+.ic-btn-go:hover:not(:disabled) { background: rgba(88,178,120,0.4); }
 
 /* 스테이지는 캔버스 비율을 그대로 쥔다 - 좌표 환산이 비율에만 기댄다.
-   ⚠️ 화면을 줄여도(max-height) 비율이 유지돼야 마커가 안 어긋난다. */
+   ⚠️ **높이**를 정하고 폭을 비율에 맡긴다. 폭을 100% 로 잡고 max-height 로 자르면
+      세로 캔버스에서 상자만 납작해지고 그림은 `object-fit: fill` 로 눌린다 - 좌표는
+      맞는데 화면만 찌그러져 보인다. Result 안에 사는 화면이라 크기도 눌러 둔다
+      (사용자 지정: "캔버스를 줄이고"). */
 .ic-stage {
-  position: relative; width: 100%; max-height: 46vh; margin: 0 auto;
+  position: relative; flex: 1 1 auto; min-height: 120px; max-height: 340px;
+  width: auto; max-width: 100%; margin: 0 auto;
   background: #202028; border: 1px solid var(--border-dim); border-radius: 6px;
   overflow: hidden; touch-action: none; user-select: none;
 }

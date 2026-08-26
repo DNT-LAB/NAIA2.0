@@ -23,16 +23,23 @@ class HeadlessImg2ImgService:
         return image_to_png_bytes(image)
 
     @staticmethod
-    def _image_preview_data_url(image, max_side: int = 640) -> tuple[str, int, int]:
+    def _image_preview_data_url(image, max_side: int = 1152) -> tuple[str, int, int]:
         """화면에 보여 줄 축소본. **JPEG 다.**
 
         ⚠️ 예전에는 `PNG optimize=True` 였다. 이건 화면용이지 전송본이 아닌데, 실측
            (832x1216 일러스트급 그림, 640px 축소본):
              PNG optimize=True   50.6 ms / base64 216 KB   <- 예전
              PNG optimize=False  11.6 ms / base64 220 KB
-             JPEG q=82            0.5 ms / base64  62 KB   <- 지금
+             JPEG q=82            0.5 ms / base64  62 KB
            캔버스를 굴릴 때마다 이걸 다시 만들어 WS 로 보낸다. 100배 느리고 3.5배
            무거운 쪽을 고를 이유가 없다.
+
+        ⚠️ 그리고 **640px 은 너무 작았다.** 캔버스는 이 그림을 뷰어 폭(대략 1150px)에
+           맞춰 늘려 그린다 - 2배 확대라 흐릿하게 보였다(사용자 제보 2026-08-26).
+           1152 로 올리면 대개 원본 그대로라 줄이는 일조차 없어져 **더 빠르다**:
+             960x1088 캔버스 기준  max 640: 15.4 ms / 74 KB / 화면 2.04배 확대
+                                  max1152:  2.4 ms /113 KB / 원본 그대로
+           오늘 아침(PNG 640px)이 50.6ms · 216KB · 흐릿이었으니 모든 면에서 낫다.
         ⚠️ **마스크에는 쓰지 마라.** 흑백 경계에 JPEG 링잉이 생긴다 - 마스크 미리보기는
            따로 PNG 로 만든다.
         ⚠️ 축소는 LANCZOS 를 유지한다. BILINEAR 이 3ms 빠르지만 그건 인코더가 아니라
@@ -45,7 +52,7 @@ class HeadlessImg2ImgService:
         if preview.mode != "RGB":
             preview = preview.convert("RGB")
         buffer = io.BytesIO()
-        preview.save(buffer, format="JPEG", quality=82)
+        preview.save(buffer, format="JPEG", quality=78)
         encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
         return f"data:image/jpeg;base64,{encoded}", int(preview.width), int(preview.height)
 
@@ -410,6 +417,9 @@ class HeadlessImg2ImgService:
             "active": True,
             "window_id": int(state.get("window_id", 0) or 0),
             "mode": mode,
+            # 화면이 옛 재개 dock 을 띄울지 정하는 데 쓴다 - V5 캔버스에는 이미
+            # 편집/결과 보기/세션 닫기가 있어서 두 경로가 겹치면 안 된다.
+            "canvas_supported": bool(state.get("canvas_supported")),
             "has_mask": bool(state.get("has_mask")),
             "can_retry": retryable,
             "can_generate": retryable and not generation_busy,

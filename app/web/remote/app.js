@@ -1989,7 +1989,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-perf2')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-bug12')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2118,7 +2118,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-perf2')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-bug12')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -5915,12 +5915,34 @@ function requestResultUpscale() {
   callResultImageAction('upscaleFromContext', {source: 'current'});
 }
 
-/** 현재 결과를 인페인트로 연다. 예전에는 결과 우클릭 메뉴 안에만 있어서, 고치고 싶을
- *  때마다 메뉴를 뒤져야 했다 - Director 옆에 내놓는다(사용자 지정 2026-08-26). */
-function requestResultInpaint() {
-  if (!latestResultBlob) { showToast('결과 이미지가 없습니다', 'error'); return; }
-  callResultImageAction('requestPopupImageAction',
-    {blob: latestResultBlob, label: 'Result Image'}, 'inpaint');
+/** 지금 **보고 있는** 그림의 원본 바이트.
+ *
+ *  ⚠️ `latestResultBlob` 은 "마지막으로 생성된 것" 이지 "지금 화면에 있는 것" 이 아니다.
+ *     히스토리에서 예전 그림을 골라 놓고 Inpaint 를 누르면 엉뚱하게 **직전 생성물**이
+ *     열렸다 - 인페인트를 한 번 하고 나면 그 결과가 계속 따라붙는다(사용자 제보
+ *     2026-08-26). Director 가 쓰는 `preview.dataset` 규약과 같은 자리를 본다.
+ *  ⚠️ `source === 'preview'` 는 생성 중 스트리밍되는 **저해상 중간 그림**이다 -
+ *     인페인트 원본으로 쓰면 안 된다.
+ */
+async function displayedImageBlob() {
+  const shown = preview && preview.classList.contains('show');
+  const kind = String(preview?.dataset?.source || '');
+  const src = shown ? String(preview.getAttribute('src') || '') : '';
+  if (src && kind !== 'preview') {
+    try {
+      const response = await fetch(src, {cache: 'no-store'});
+      if (response.ok) return await response.blob();
+    } catch (error) { console.error('displayed image fetch failed', error); }
+  }
+  return latestResultBlob;
+}
+
+/** 지금 보고 있는 그림을 인페인트로 연다. 예전에는 결과 우클릭 메뉴 안에만 있어서,
+ *  고치고 싶을 때마다 메뉴를 뒤져야 했다 - Director 옆에 내놓는다(사용자 지정). */
+async function requestResultInpaint() {
+  const blob = await displayedImageBlob();
+  if (!blob) { showToast('결과 이미지가 없습니다', 'error'); return; }
+  callResultImageAction('requestPopupImageAction', {blob, label: 'Result Image'}, 'inpaint');
 }
 
 // NAI Director Tools (제거 가능) — NAI 계정이 등록돼 있으면(api_status.nai_configured) 모드 무관 활성.
@@ -5937,7 +5959,9 @@ function updateNaiDirectorButton() {
   // **결과 이미지가 있는지**가 조건이다 - 없으면 열어도 보여 줄 게 없다.
   const inpaintBtn = $('resultInpaintBtn');
   if (inpaintBtn) {
-    inpaintBtn.disabled = !latestResultBlob
+    // 히스토리에서 고른 그림도 대상이다 - 마지막 생성물이 없어도 화면에 뭔가 있으면 연다.
+    const shown = !!(preview && preview.classList.contains('show'));
+    inpaintBtn.disabled = (!latestResultBlob && !shown)
       || (currentMode || modeSelect?.value || '') !== 'NAI';
   }
 }
@@ -10212,7 +10236,12 @@ function updateImg2ImgResumeButton(state) {
   const mode = String(state?.mode || 'img2img').toLowerCase();
   const retryable = !!state?.active && (mode !== 'inpaint' || !!state?.has_mask);
   const hasSubmission = !['', 'idle', 'inactive', 'submitting'].includes(status);
-  if (dock) dock.hidden = !(retryable && hasSubmission);
+  // ⚠️ V5 캔버스에서는 이 dock 을 띄우지 않는다(사용자 지정 2026-08-26: "V5에서는
+  //    해당 연결을 단선"). 캔버스 도크에 편집/결과 보기/세션 닫기가 이미 있고, 이 알약은
+  //    **뷰어 아래 가운데** - 캔버스 도크와 같은 자리다. 게다가 누르면 옛 img2img 팝업이
+  //    열려 인페인트 경로가 둘로 갈린다.
+  const canvasPath = !!state?.canvas_supported;
+  if (dock) dock.hidden = canvasPath || !(retryable && hasSubmission);
   const label = mode === 'inpaint' ? 'Inpaint' : 'Img2Img';
   const ico = document.createElement('span');
   ico.className = 'img2img-resume-ico';
@@ -10259,6 +10288,10 @@ function onImg2ImgGenerationState(message) {
 }
 
 function resumeImg2ImgSession() {
+  // V5 는 팝업이 아니라 Result 안 캔버스다 - 여기로 들어오는 길이 남아 있더라도
+  // 옛 팝업을 열지 않는다.
+  const cached = moduleStateCache.get('img2img');
+  if (cached?.canvas_supported) { inpaintCanvasControl?.revealForSession?.(); return; }
   openModule('img2img', {forceOpen: true});
 }
 

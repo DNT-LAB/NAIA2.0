@@ -1052,7 +1052,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-virtchar4')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-onepath')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1905,7 +1905,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-virtchar4')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-onepath')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2085,7 +2085,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-virtchar4')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-onepath')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2214,7 +2214,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-virtchar4')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260826-onepath')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -6011,39 +6011,27 @@ function requestResultUpscale() {
   callResultImageAction('upscaleFromContext', {source: 'current'});
 }
 
-/** 지금 **보고 있는** 그림의 원본 바이트.
- *
- *  ⚠️ `latestResultBlob` 은 "마지막으로 생성된 것" 이지 "지금 화면에 있는 것" 이 아니다.
- *     히스토리에서 예전 그림을 골라 놓고 Inpaint 를 누르면 엉뚱하게 **직전 생성물**이
- *     열렸다 - 인페인트를 한 번 하고 나면 그 결과가 계속 따라붙는다(사용자 제보
- *     2026-08-26). Director 가 쓰는 `preview.dataset` 규약과 같은 자리를 본다.
- *  ⚠️ `source === 'preview'` 는 생성 중 스트리밍되는 **저해상 중간 그림**이다 -
- *     인페인트 원본으로 쓰면 안 된다.
- */
-async function displayedImageBlob() {
-  const shown = preview && preview.classList.contains('show');
+/** 지금 **보고 있는** 그림이 무엇인지 백엔드에 말해 주는 표. Director 와 같은 규약이다. */
+function displayedImageContext() {
   const kind = String(preview?.dataset?.source || '');
-  const src = shown ? String(preview.getAttribute('src') || '') : '';
-  if (src && kind !== 'preview') {
-    try {
-      const response = await fetch(src, {cache: 'no-store'});
-      if (response.ok) return await response.blob();
-    } catch (error) { console.error('displayed image fetch failed', error); }
-    // ⚠️ **다른 그림으로 대신하지 않는다.** 화면에 A 가 있는데 A 를 못 읽었다고 B 를
-    //    열면, 그럴듯해 보이는 엉뚱한 원본에 Anlas 를 쓰게 된다(Codex 리뷰 BLOCK 5).
-    //    이 폴백이 바로 직전에 고친 버그와 같은 종류였다.
-    showToast('표시 중인 이미지를 읽지 못했습니다', 'error');
-    return null;
-  }
-  return latestResultBlob;
+  const path = String(preview?.dataset?.path || '');
+  return {source: kind || 'current', path, label: path || 'Result Image'};
 }
 
-/** 지금 보고 있는 그림을 인페인트로 연다. 예전에는 결과 우클릭 메뉴 안에만 있어서,
- *  고치고 싶을 때마다 메뉴를 뒤져야 했다 - Director 옆에 내놓는다(사용자 지정). */
-async function requestResultInpaint() {
-  const blob = await displayedImageBlob();
-  if (!blob) { showToast('결과 이미지가 없습니다', 'error'); return; }
-  callResultImageAction('requestPopupImageAction', {blob, label: 'Result Image'}, 'inpaint');
+/** 지금 보고 있는 그림을 인페인트로 연다.
+ *
+ *  ⚠️ **바이트를 다시 올리지 않는다.** 예전에는 화면의 그림을 fetch 해서 POST 했는데,
+ *     브라우저를 한 번 거치는 동안 그림이 **자기 메타데이터를 잃는다** - 그래서 V5
+ *     가상 캐릭터가 늘 0명이었다(사용자 제보 2026-08-26). 백엔드는 결과 저장소에
+ *     그 항목의 `generation_params` 를 그대로 갖고 있고, 거기에 캐릭터와 좌표가 들어
+ *     있다(`_executed_characters` / `_executed_character_positions`).
+ *  ⚠️ 그래서 우클릭 메뉴와 **같은 WS 경로**로 보낸다. 진입점이 하나면 갈라질 일도 없다 -
+ *     Codex BLOCK 3 이 지적한 "두 경로" 를 여기서 끝낸다.
+ */
+function requestResultInpaint() {
+  const shown = !!(preview && preview.classList.contains('show'));
+  if (!shown && !latestResultBlob) { showToast('결과 이미지가 없습니다', 'error'); return; }
+  callResultImageAction('requestContextImageAction', displayedImageContext(), 'inpaint');
 }
 
 // NAI Director Tools (제거 가능) — NAI 계정이 등록돼 있으면(api_status.nai_configured) 모드 무관 활성.

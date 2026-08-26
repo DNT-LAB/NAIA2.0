@@ -210,15 +210,29 @@ def select_account(
     counter: int = 0,
     usage_by_id: dict[str, Any] | None = None,
     seed: int = 0,
+    forced: str = "",
 ) -> str:
     """이번 생성에 쓸 계정 id 하나.
 
     `counter` 는 기존 구현과 같은 이미지 카운터다(단조 증가). 이것만으로 결정되므로
     같은 입력이면 같은 결과가 나온다.
+
+    `forced` 는 사용자가 **직접 고른 계정**이다(사용자 지정 2026-08-27). 있으면
+    정책보다 먼저다 - 부하 분산은 "알아서 나눠 달라" 는 뜻이고, 계정을 지목한
+    것은 그 반대의 뜻이기 때문이다.
+
+    ⚠️ **소진돼도 그 계정을 쓴다.** 정책 경로는 0% 인 계정을 후보에서 빼지만,
+       지목은 명시적인 선택이라 말없이 다른 계정으로 옮기면 안 된다(그러면 이
+       기능이 있으나 마나다). 무료 풀이 마르면 Anlas 로 계속 생성된다 - 그것을
+       원치 않으면 'Safety' 스위치가 Auto Gen 을 끈다.
+    ⚠️ 목록에 없는 id(계정을 끄거나 지운 뒤 남은 값)면 **정책으로 되돌아간다.**
+       고를 수 없는 것을 가리킨 채 생성을 막는 쪽이 더 나쁘다.
     """
     ids = [a for a in account_ids if a]
     if not ids:
         return ""
+    if forced and forced in ids:
+        return forced
     if len(ids) == 1:
         return ids[0]
 

@@ -18725,6 +18725,25 @@ select.setup-input { cursor: pointer; }
 .nai-acct-sum em { font-style: normal; margin-left: auto; color: #55556b; }
 .nai-acct-rows { display: flex; flex-direction: column; gap: 9px; }
 .nai-acct-row { display: flex; flex-direction: column; gap: 2px; }
+/* 계정을 직접 고를 수 있다(사용자 지정 2026-08-27). 줄이 <button> 이 되므로
+   버튼 기본 모양을 걷어내고, 누를 수 있다는 것만 알린다. */
+.nai-acct-row.is-pick {
+  width: 100%; margin: 0; padding: 4px 6px;
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.nai-acct-row.is-pick:hover { background: rgba(255,255,255,0.05); }
+.nai-acct-row.is-forced {
+  border-color: rgba(111,140,255,0.45); background: rgba(111,140,255,0.10);
+}
+/* '이 계정만 사용' 꼬리표. 지목한 줄에만 붙는다 - 정책 라디오가 전부 꺼져 있는
+   이유를 여기서 말해 준다. */
+.nai-acct-only {
+  align-self: flex-start; margin-top: 2px;
+  padding: 1px 6px; border-radius: 999px;
+  background: rgba(111,140,255,0.18); color: #b9c4ff;
+  font-size: 9px; letter-spacing: 0.02em;
+}
 .nai-acct-line { display: flex; align-items: center; gap: 8px; }
 /* 게이지 아래 작은 숫자 줄 — 잔여 Anlas | NAID5 Remain.
    툴팁을 없애고 여기로 옮겼다(사용자 지정 2026-08-21): 툴팁은 가리키기 전엔 안

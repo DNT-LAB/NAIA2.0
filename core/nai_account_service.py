@@ -64,6 +64,12 @@ POLICY_KEY_ANLAS = "load_balancing_policy_anlas"
 # V5 에서만 뜻을 가진다(`all_active_accounts_exhausted` 참조).
 STOP_ON_EXHAUSTED_KEY = "stop_auto_gen_on_exhausted"
 
+# 사용자가 **직접 고른 계정**(사용자 지정 2026-08-27). 비어 있으면 부하 분산 정책을
+# 쓴다. 계열을 나누지 않는다 - "이 계정으로 뽑겠다" 는 뜻이 모델에 따라 달라질 이유가
+# 없다. 고른 계정이 꺼지거나 지워지면 스냅샷이 빈 값으로 보고하고 선택은 정책으로
+# 되돌아간다(`nai_account_balancer.select_account` 주석 참조).
+FORCED_ACCOUNT_KEY = "forced_account_id"
+
 # 계정을 무한정 늘릴 이유가 없다. 라운드 로빈은 카운터 % N 이라 N 이 커질수록
 # 한 계정이 다시 쓰이기까지의 간격만 늘어난다.
 MAX_ACCOUNTS = 9
@@ -77,6 +83,7 @@ def _default_data() -> dict[str, Any]:
         POLICY_KEY_USAGE: DEFAULT_POLICY,
         POLICY_KEY_ANLAS: DEFAULT_POLICY,
         STOP_ON_EXHAUSTED_KEY: False,
+        FORCED_ACCOUNT_KEY: "",
     }
 
 
@@ -339,6 +346,7 @@ class NaiAccountService:
         # 옛 파일에는 없다. 없으면 꺼진 것으로 본다 - 켜져 있다고 오해하면 사용자가
         # 켠 적 없는 이유로 Auto Gen 이 멈춘다.
         base[STOP_ON_EXHAUSTED_KEY] = bool(data.get(STOP_ON_EXHAUSTED_KEY, False))
+        base[FORCED_ACCOUNT_KEY] = str(data.get(FORCED_ACCOUNT_KEY) or "")
         return base
 
     def save(self, data: dict[str, Any]) -> None:
@@ -481,6 +489,10 @@ class NaiAccountService:
             "can_add": len(data["accounts"]) < MAX_ACCOUNTS,
             "max_accounts": MAX_ACCOUNTS,
             STOP_ON_EXHAUSTED_KEY: bool(data.get(STOP_ON_EXHAUSTED_KEY, False)),
+            # ⚠️ **지금 쓸 수 있는 값만 보고한다.** 고른 계정을 나중에 끄거나 지우면
+            #    저장된 값은 남는데 선택은 정책으로 되돌아간다 - 그대로 보고하면
+            #    화면은 "이 계정만 사용" 이라 말하는데 실제로는 돌아가고 있게 된다.
+            FORCED_ACCOUNT_KEY: self._effective_forced(data, active),
         }
 
     # ---- 변경 ----------------------------------------------------------
@@ -576,6 +588,46 @@ class NaiAccountService:
         if data[key] != previous:
             reset_rotation_counter(self.context)
         return {"ok": True, "policy": data[key]}
+
+    @staticmethod
+    def _effective_forced(data: dict[str, Any], active_rows: list[dict[str, Any]]) -> str:
+        """저장된 '고른 계정' 중 **지금 실제로 쓸 수 있는** 것만 돌려준다."""
+        forced = str(data.get(FORCED_ACCOUNT_KEY) or "")
+        if not forced:
+            return ""
+        return forced if any(row["id"] == forced for row in active_rows) else ""
+
+    def forced_account(self) -> str:
+        """생성 경로가 읽는 값. 못 쓰는 값이면 빈 문자열(= 정책으로)."""
+        data = self.load()
+        forced = str(data.get(FORCED_ACCOUNT_KEY) or "")
+        if not forced:
+            return ""
+        # ⚠️ **같은 판**으로 판정한다. `active_accounts()` 를 부르면 파일을 다시
+        #    읽어, 그 사이에 바뀐 명부와 이 값이 어긋날 수 있다.
+        return forced if any(a == forced for a, _ in self._active_rows(data)) else ""
+
+    @_locked
+    def set_forced_account(self, account_id: str) -> dict[str, Any]:
+        """계정 하나를 지목한다. 빈 값이면 해제하고 부하 분산으로 돌아간다.
+
+        ⚠️ **활성 계정만** 지목할 수 있다. 꺼져 있거나 토큰이 없는 계정을 가리키면
+           생성은 정책으로 돌아가는데 화면만 지목됐다고 말해 어긋난다.
+        """
+        account_id = str(account_id or "")
+        data = self.load()
+        if account_id:
+            usable = {a for a, _ in self._active_rows(data)}
+            if account_id not in usable:
+                return {"ok": False, "message": "활성 계정만 선택할 수 있습니다."}
+        previous = str(data.get(FORCED_ACCOUNT_KEY) or "")
+        data[FORCED_ACCOUNT_KEY] = account_id
+        self.save(data)
+        # 지목을 걸거나 풀면 회전을 처음부터 다시 센다 - 정책을 바꿀 때와 같은 이유다
+        # (묶음 중간에서 이어받으면 화면의 진행 게이지가 거짓말을 한다).
+        if account_id != previous:
+            reset_rotation_counter(self.context)
+        return {"ok": True, FORCED_ACCOUNT_KEY: account_id}
 
     @_locked
     def set_stop_on_exhausted(self, enabled: bool) -> dict[str, Any]:

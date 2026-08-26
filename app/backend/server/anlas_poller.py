@@ -417,6 +417,9 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
             counter=peek_rotation_counter(context),
             usage_by_id=usage_by_id,
             seed=rotation_seed(context),
+            # 생성 경로(`api_service`)와 **같은 값**을 넣는다. 스냅샷의 값은 이미
+            # '지금 쓸 수 있는지' 로 걸러져 있다.
+            forced=str(snapshot.get("forced_account_id") or ""),
         )
         usage_payload["accounts"] = _account_rows(context, usage_by_id, next_account_id)
         usage_payload["next_account_id"] = next_account_id

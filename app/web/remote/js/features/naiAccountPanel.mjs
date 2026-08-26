@@ -67,6 +67,10 @@ export function createNaiAccountPanel({
     balancingEffective: false,
     // 모든 계정이 0% 에 닿으면 Auto Gen 을 스스로 끈다(사용자 지정 2026-08-24).
     stopOnExhausted: false,
+    // 사용자가 **직접 고른 계정**(사용자 지정 2026-08-27). 비어 있으면 부하 분산.
+    // ⚠️ 서버가 '지금 쓸 수 있는지' 를 걸러 보내 준다 - 고른 계정을 꺼 버리면
+    //    빈 값으로 돌아온다. 화면이 실제 동작과 어긋나지 않게 하는 유일한 길이다.
+    forcedAccount: '',
     loaded: false,
   };
   // 계정별 사용량 — `nai_usage_update` 가 채운다. 명부와 수명이 다르다.
@@ -129,6 +133,9 @@ export function createNaiAccountPanel({
     state.balancingEffective = !!message.balancing_effective;
     if (typeof message.stop_auto_gen_on_exhausted === 'boolean') {
       state.stopOnExhausted = message.stop_auto_gen_on_exhausted;
+    }
+    if (typeof message.forced_account_id === 'string') {
+      state.forcedAccount = message.forced_account_id;
     }
     state.loaded = true;
     renderPopover();
@@ -288,7 +295,19 @@ export function createNaiAccountPanel({
       // V4.5 이하는 이 무료 풀을 쓰지 않으므로 퍼센트를 띄우면 거짓말이 된다 -
       // 그 자리에는 지금 묶음의 진행 게이지(연노랑)를 그린다.
       const showBlock = !session.onV5 && row.is_next && rotation.target > 1;
-      return `<div class="nai-acct-row${row.is_next ? ' is-next' : ''}">`
+      // ⚠️ 계정이 하나뿐이면 고를 것이 없다 - 눌러도 아무 일이 없는 자리를 만들지
+      //    않는다. 둘 이상일 때만 누를 수 있게 하고, 고른 줄은 표시가 남는다.
+      const pickable = rows.length > 1;
+      const forced = pickable && row.id === state.forcedAccount;
+      const cls = `nai-acct-row${row.is_next ? ' is-next' : ''}`
+        + `${pickable ? ' is-pick' : ''}${forced ? ' is-forced' : ''}`;
+      const open = pickable
+        ? `<button type="button" class="${cls}" data-pick-account="${esc(row.id)}"`
+          + ` aria-pressed="${forced ? 'true' : 'false'}"`
+          + ` title="${forced ? '이 계정만 사용 - 해제하려면 다시 누르세요'
+            : '이 계정만 사용합니다 (부하 분산 해제)'}">`
+        : `<div class="${cls}">`;
+      return open
         + '<div class="nai-acct-line">'
         + `<span class="nai-acct-name">${esc(name)}</span>`
         + (session.onV5
@@ -305,14 +324,19 @@ export function createNaiAccountPanel({
           ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>`
           : `<i>|</i><span>${esc(rotationText(row))}</span>`)
         + '</div>'
-        + '</div>';
+        + (forced ? '<span class="nai-acct-only">이 계정만 사용</span>' : '')
+        + (pickable ? '</button>' : '</div>');
     }).join('');
   }
 
   function policiesHtml() {
-    const disabled = state.balancingEffective ? '' : ' is-idle';
+    // ⚠️ 계정을 지목했으면 **아무 정책도 켜지지 않는다**(사용자 지정 2026-08-27).
+    //    지목은 "나눠 쓰지 마라" 는 뜻이라, 라디오가 켜진 채로 두면 둘 다 도는
+    //    것처럼 읽힌다. 정책을 다시 누르면 지목이 풀린다.
+    const forced = !!state.forcedAccount;
+    const disabled = (state.balancingEffective && !forced) ? '' : ' is-idle';
     return state.policyOptions.map(option => {
-      const on = option.key === state.policy;
+      const on = !forced && option.key === state.policy;
       return `<button type="button" class="nai-acct-policy${on ? ' on' : ''}${disabled}"`
         + ` data-policy="${esc(option.key)}">`
         + `<span class="nai-acct-radio">${on ? '●' : '○'}</span>`
@@ -394,8 +418,11 @@ export function createNaiAccountPanel({
       + (session.onV5 ? guardHtml() : '')
       + '<div class="nai-acct-sec">Load Balancing</div>'
       + `<div class="nai-acct-policies">${policiesHtml()}</div>`
-      + (state.balancingEffective ? ''
-        : '<div class="nai-acct-note">활성 계정이 2개 이상일 때 적용됩니다.</div>');
+      + (state.forcedAccount
+        ? '<div class="nai-acct-note">계정을 직접 고른 상태입니다. '
+          + '정책을 누르면 다시 부하 분산으로 돌아갑니다.</div>'
+        : (state.balancingEffective ? ''
+          : '<div class="nai-acct-note">활성 계정이 2개 이상일 때 적용됩니다.</div>'));
   }
 
   function onPopoverClick(event) {
@@ -418,10 +445,28 @@ export function createNaiAccountPanel({
       send({ type: 'nai_account_set_stop_on_exhausted', enabled: state.stopOnExhausted });
       return;
     }
+    // 계정 줄을 누르면 그 계정만 쓴다. 이미 고른 줄을 다시 누르면 해제된다 -
+    // 되돌리는 길이 정책 라디오 하나뿐이면 "어떻게 푸는지" 를 알 수 없다.
+    // ⚠️ `data-pick-account` 다. `data-account` 는 설정 페이지의 계정 목록이 쓰는
+    //    이름이라 같은 이름을 두 뜻으로 쓰지 않는다.
+    const account = event.target.closest('[data-pick-account]');
+    if (account) {
+      const id = account.getAttribute('data-pick-account');
+      const next = state.forcedAccount === id ? '' : id;
+      state.forcedAccount = next;  // 낙관적 반영 - 서버 스냅샷이 곧 확정한다.
+      renderPopover();
+      send({ type: 'nai_account_set_forced', account_id: next });
+      return;
+    }
     const policy = event.target.closest('[data-policy]');
     if (policy) {
       const key = policy.getAttribute('data-policy');
-      if (key === state.policy) return;
+      // 지목을 푸는 것도 이 버튼이 한다 - 같은 정책을 다시 눌러도 풀려야 한다.
+      if (state.forcedAccount) {
+        state.forcedAccount = '';
+        send({ type: 'nai_account_set_forced', account_id: '' });
+      }
+      if (key === state.policy) { renderPopover(); return; }
       state.policy = key;          // 낙관적 반영 - 서버 스냅샷이 곧 확정한다.
       renderPopover();
       send({ type: 'nai_account_set_policy', policy: key });

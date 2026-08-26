@@ -37,13 +37,14 @@ NAI_ACCOUNT_COMMAND_TYPES = {
     "nai_account_set_token",
     "nai_account_set_enabled",
     "nai_account_set_policy",
+    "nai_account_set_forced",
     "nai_account_set_stop_on_exhausted",
 }
 
 # 쓰기 커맨드별 게이트. 위 표 참조.
 _SETUP_GATED = {"nai_account_add", "nai_account_delete", "nai_account_set_token"}
 _ACCOUNT_GATED = {"nai_account_set_enabled", "nai_account_set_policy",
-                  "nai_account_set_stop_on_exhausted"}
+                  "nai_account_set_forced", "nai_account_set_stop_on_exhausted"}
 
 
 async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
@@ -138,6 +139,8 @@ async def handle_nai_account_command(
         result = service.set_enabled(account_id, bool(command.get("enabled", False)))
     elif command_type == "nai_account_set_policy":
         result = service.set_policy(str(command.get("policy") or ""))
+    elif command_type == "nai_account_set_forced":
+        result = service.set_forced_account(str(command.get("account_id") or ""))
     elif command_type == "nai_account_set_stop_on_exhausted":
         result = service.set_stop_on_exhausted(bool(command.get("enabled", False)))
 

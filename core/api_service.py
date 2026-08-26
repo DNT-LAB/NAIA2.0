@@ -747,12 +747,17 @@ class APIService:
             policy = service.policy()
             counter = next_rotation_counter(self.app_context)
             usage_by_id = cached_account_usage(self.app_context)
+            # 사용자가 계정을 지목했으면 정책보다 먼저다(사용자 지정 2026-08-27).
+            # ⚠️ 화면의 '다음 계정' 예측(anlas_poller)도 **같은 값**을 넣어야 한다 -
+            #    한쪽만 고치면 표시와 실제가 갈린다.
+            forced = service.forced_account()
             selected_id = select_account(
                 [account_id for account_id, _ in active],
                 policy=policy,
                 counter=counter,
                 usage_by_id=usage_by_id,
                 seed=rotation_seed(self.app_context),
+                forced=forced,
             )
             token = tokens_by_id.get(selected_id, "")
             if not token:
@@ -764,8 +769,9 @@ class APIService:
             # 계정 수만큼 요청이 늘 뿐이다(사용자 지적 2026-08-21).
             setattr(self.app_context, LAST_GENERATION_ACCOUNT_ATTR, selected_id)
             total = note_account_used(self.app_context, selected_id)
-            print(f"[multi-token] policy={policy} counter={counter} "
-                  f"picked={selected_id} of {len(active)} total={total}", flush=True)
+            print(f"[multi-token] policy={'forced' if forced else policy} "
+                  f"counter={counter} picked={selected_id} of {len(active)} "
+                  f"total={total}", flush=True)
             return token
 
         except Exception as exc:  # noqa: BLE001 - 계정 선택 실패가 생성을 막으면 안 된다

@@ -1050,15 +1050,25 @@ class APIService:
 
                 if params.get('sketchbook_character_prompts'):
                     # 1) Sketchbook / Img2ImgWindow 오버라이드
+                    #
+                    # ⚠️ **좌표를 함께 읽는다.** 예전엔 여기서 위치를 통째로 버려
+                    #    (주석: "Sketchbook은 위치 미지원") 인페인트에서는 캐릭터를
+                    #    어디에 둘지 말할 방법이 아예 없었다 - 전원 0.5/0.5 였다.
+                    #    V5 가상 캔버스가 캔버스 좌표를 실어 보내므로 그대로 받는다
+                    #    (사용자 지정 2026-08-26). 튜플로 오던 옛 호출부는 그대로 둔다.
+                    #
+                    #    아래 `coords_given` 은 **전원분 좌표가 있을 때만** 켜지므로,
+                    #    좌표 없는 캐릭터가 섞이면 예전과 같이 use_order 로 떨어진다.
                     char_source = "Sketchbook"
                     for item in params['sketchbook_character_prompts']:
                         if isinstance(item, tuple):
                             characters.append(item[0])
                             ucs.append(item[1] or "")
+                            character_positions.append(None)
                         elif isinstance(item, dict):
                             characters.append(item.get('prompt', ''))
                             ucs.append(item.get('uc', ''))
-                        # Sketchbook은 위치 미지원 → 기본값(0.5, 0.5)
+                            character_positions.append(item.get('position'))
 
                 else:
                     generation_request = params.get('_generation_request')

@@ -214,6 +214,22 @@ class HeadlessImg2ImgService:
             "has_mask": False,
             "mask_bytes": b"",
             "mask_preview": "",
+            # ── V5 가상 캔버스(사용자 지정 2026-08-26) ──────────────────
+            # V5 는 인페인트를 별도 팝업으로 빼지 않고 Result 안에서 고친다. 그러려면
+            # "이미지 = 캔버스" 라는 전제를 깨야 한다 - 베이스를 캔버스 안에서 옮기고
+            # 비게 된 자리를 자동으로 연다.
+            # ⚠️ `canvas_active` 가 꺼져 있으면 예전과 **완전히 같은 길**을 탄다.
+            #    기존 img2img/인페인트 팝업의 동작을 바꾸지 않기 위해서다.
+            "canvas_active": False,
+            "canvas_width": int(image.width),
+            "canvas_height": int(image.height),
+            "base_offset_x": 0,
+            "base_offset_y": 0,
+            "base_width": int(image.width),
+            "base_height": int(image.height),
+            # 사용자가 칠한 마스크(캔버스 좌표). 빈 곳 마스크와는 따로 보관해야
+            # 오프셋을 다시 옮겼을 때 칠한 것을 잃지 않는다.
+            "user_mask_bytes": b"",
             "strength": 99 if clean_mode == "inpaint" else 70,
             "noise": 0,
             "repeat": 1,
@@ -314,6 +330,19 @@ class HeadlessImg2ImgService:
             "generation_failed_count": int(state.get("generation_failed_count", 0) or 0),
             "generation_request_ids": list(state.get("generation_request_ids") or []),
             "generation_error": str(state.get("generation_error") or ""),
+        }
+
+    def canvas_state(self) -> dict[str, Any]:
+        """화면이 캔버스를 그리는 데 필요한 값. 이미지 바이트는 넣지 않는다(미리보기로 간다)."""
+        state = self.context.img2img_session
+        return {
+            "canvas_active": bool(state.get("canvas_active")),
+            "canvas_width": int(state.get("canvas_width") or 0),
+            "canvas_height": int(state.get("canvas_height") or 0),
+            "base_offset_x": int(state.get("base_offset_x") or 0),
+            "base_offset_y": int(state.get("base_offset_y") or 0),
+            "base_width": int(state.get("base_width") or 0),
+            "base_height": int(state.get("base_height") or 0),
         }
 
     def generation_event_payload(self) -> dict[str, Any]:
@@ -511,12 +540,32 @@ class HeadlessImg2ImgService:
             context.img2img_session["mask_bytes"] = mask_bytes
             context.img2img_session["mask_preview"] = preview
             context.img2img_session["has_mask"] = True
+            # 캔버스 모드에서는 사용자가 칠한 것을 따로 붙잡아 둔다 - 오프셋을 다시
+            # 옮기면 빈 곳 마스크가 달라지므로 합성을 매번 새로 해야 한다.
+            context.img2img_session["user_mask_bytes"] = mask_bytes
+            if context.img2img_session.get("canvas_active"):
+                return self._recompose_canvas()
         elif key == "clear_mask":
             context.img2img_session["mask_bytes"] = b""
             context.img2img_session["mask_preview"] = ""
             context.img2img_session["has_mask"] = False
+            context.img2img_session["user_mask_bytes"] = b""
+            if context.img2img_session.get("canvas_active"):
+                return self._recompose_canvas()
+        elif key == "canvas_active":
+            return self._set_canvas_active(context._coerce_bool(value))
+        elif key == "canvas_size":
+            return self._set_canvas_size(value)
+        elif key == "base_offset":
+            return self._set_base_offset(value)
+        elif key.startswith("char_position_"):
+            index = context._index_from_key(key, "char_position_")
+            chars = context.img2img_session.setdefault("characters", [])
+            if index is not None and 0 <= index < len(chars):
+                chars[index]["position"] = self._normalized_position(value)
         elif key == "add_character":
-            context.img2img_session.setdefault("characters", []).append({"active": True, "prompt": "", "uc": ""})
+            context.img2img_session.setdefault("characters", []).append(
+                {"active": True, "prompt": "", "uc": "", "position": None})
         elif key.startswith("remove_character_"):
             index = context._index_from_key(key, "remove_character_")
             chars = context.img2img_session.setdefault("characters", [])
@@ -605,6 +654,104 @@ class HeadlessImg2ImgService:
             session["has_mask"] = False
         return self.module_state()
 
+    # ------------------------------------------------------------------
+    # V5 가상 캔버스
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalized_position(value: Any) -> dict[str, float] | None:
+        """캔버스 픽셀 좌표 {x, y}. 못 읽으면 None(= 좌표 없음)."""
+        if not isinstance(value, dict):
+            return None
+        try:
+            return {"x": float(value.get("x")), "y": float(value.get("y"))}
+        except (TypeError, ValueError):
+            return None
+
+    def _base_image(self):
+        """세션의 원본(베이스) 이미지. 캔버스 합성은 늘 여기서 다시 시작한다 -
+        합성 결과를 다시 합성하면 배경이 겹겹이 쌓인다."""
+        state = self.context.img2img_session
+        source = state.get("source_bytes") or state.get("image_bytes")
+        if not source:
+            raise RuntimeError("Img2Img source image is unavailable")
+        return self._session_image_from_bytes(bytes(source), resize_1mp=bool(state.get("resize_1mp", True)))
+
+    def _recompose_canvas(self) -> dict[str, Any]:
+        """캔버스/오프셋/칠한 마스크로 전송용 이미지와 마스크를 다시 만든다."""
+        from PIL import Image
+
+        from utils.v5_inpaint_canvas import build_payload
+
+        state = self.context.img2img_session
+        base = self._base_image()
+        state["base_width"], state["base_height"] = int(base.width), int(base.height)
+
+        user_mask = None
+        raw = state.get("user_mask_bytes") or b""
+        if raw:
+            try:
+                user_mask = Image.open(io.BytesIO(bytes(raw))).convert("L")
+            except Exception as exc:   # noqa: BLE001 - 마스크 하나 때문에 세션이 죽으면 안 된다
+                print(f"[v5-canvas] user mask unreadable: {exc}", flush=True)
+
+        payload = build_payload(
+            base,
+            canvas_w=int(state.get("canvas_width") or base.width),
+            canvas_h=int(state.get("canvas_height") or base.height),
+            offset_x=int(state.get("base_offset_x") or 0),
+            offset_y=int(state.get("base_offset_y") or 0),
+            user_mask=user_mask,
+        )
+        state["image_bytes"] = payload["canvas_bytes"]
+        state["width"], state["height"] = payload["width"], payload["height"]
+        state["base_offset_x"], state["base_offset_y"] = payload["offset_x"], payload["offset_y"]
+        state["mask_bytes"] = payload["mask_bytes"]
+        state["has_mask"] = bool(payload["has_mask"])
+        if payload["has_mask"]:
+            state["mode"] = "inpaint"
+        preview, preview_w, preview_h = self._image_preview_data_url(payload["canvas_image"])
+        state["preview"], state["preview_width"], state["preview_height"] = preview, preview_w, preview_h
+        return self.module_state()
+
+    def _set_canvas_active(self, active: bool) -> dict[str, Any]:
+        state = self.context.img2img_session
+        state["canvas_active"] = bool(active)
+        if not active:
+            # 캔버스를 끄면 예전 길로 돌아간다 - 베이스를 그대로 전송한다.
+            base = self._base_image()
+            state["image_bytes"] = self._image_to_png_bytes(base)
+            state["width"], state["height"] = int(base.width), int(base.height)
+            state["base_offset_x"] = state["base_offset_y"] = 0
+            state["mask_bytes"] = state.get("user_mask_bytes") or b""
+            state["has_mask"] = bool(state["mask_bytes"])
+            preview, pw, ph = self._image_preview_data_url(base)
+            state["preview"], state["preview_width"], state["preview_height"] = preview, pw, ph
+            return self.module_state()
+        return self._recompose_canvas()
+
+    def _set_canvas_size(self, value: Any) -> dict[str, Any]:
+        from core.resolution_utils import parse_resolution_pair, snap_resolution_to_multiple
+
+        pair = parse_resolution_pair(value)
+        if not pair:
+            return self.context._toast("캔버스 해상도를 읽지 못했습니다", level="error")
+        width, height = snap_resolution_to_multiple(*pair)
+        state = self.context.img2img_session
+        state["canvas_width"], state["canvas_height"] = int(width), int(height)
+        state["canvas_active"] = True
+        return self._recompose_canvas()
+
+    def _set_base_offset(self, value: Any) -> dict[str, Any]:
+        position = self._normalized_position(value)
+        if position is None:
+            return self.context._toast("베이스 위치를 읽지 못했습니다", level="error")
+        state = self.context.img2img_session
+        state["base_offset_x"] = int(round(position["x"]))
+        state["base_offset_y"] = int(round(position["y"]))
+        state["canvas_active"] = True
+        return self._recompose_canvas()
+
     def generation_commands(self, *, submission_id: str = "") -> list[dict[str, Any]]:
         state = self.context.img2img_session
         if not state.get("image_bytes"):
@@ -627,13 +774,29 @@ class HeadlessImg2ImgService:
         }
         if mode == "inpaint":
             overrides["mask_bytes"] = state.get("mask_bytes")
+        # ⚠️ 예전에는 (prompt, uc) 튜플만 실어 **좌표가 통째로 버려졌다**
+        #    (api_service: "Sketchbook은 위치 미지원 -> 기본값(0.5, 0.5)").
+        #    dict 로 실으면 그쪽이 position 을 함께 읽는다. 좌표를 안 준 캐릭터가
+        #    하나라도 있으면 NAI 쪽에서 use_coords 가 꺼지므로(전원분이 있어야 켜짐)
+        #    섞여 있어도 예전과 같은 결과가 된다.
+        from utils.v5_inpaint_canvas import to_canvas_position
+
+        canvas_w = int(state.get("width") or 0)
+        canvas_h = int(state.get("height") or 0)
         char_data = []
         for character in state.get("characters") or []:
             if not character.get("active", True):
                 continue
             prompt = str(character.get("prompt") or "").strip()
-            if prompt:
-                char_data.append((prompt, str(character.get("uc") or "").strip()))
+            if not prompt:
+                continue
+            entry = {"prompt": prompt, "uc": str(character.get("uc") or "").strip()}
+            position = character.get("position")
+            if isinstance(position, dict):
+                ratio = to_canvas_position(canvas_w, canvas_h, position.get("x"), position.get("y"))
+                if ratio:
+                    entry["position"] = ratio
+            char_data.append(entry)
         if char_data:
             overrides["sketchbook_character_prompts"] = char_data
         repeat = max(1, min(99, int(state.get("repeat", 1) or 1)))

@@ -590,8 +590,14 @@ class HeadlessImg2ImgService:
         elif key == "base_offset":
             return self._set_base_offset(value)
         elif key == "base_scale":
+            # 값만 오면 캔버스 한가운데 기준. `{"value":…, "at":{"x":…,"y":…}}` 로 오면
+            # 그 점을 붙잡는다(휠·중앙버튼 드래그가 커서를 붙잡는 데 쓴다).
+            if isinstance(value, dict):
+                return self._set_base_transform(scale=value.get("value"), at=value.get("at"))
             return self._set_base_transform(scale=value)
         elif key == "base_rotation":
+            if isinstance(value, dict):
+                return self._set_base_transform(rotation=value.get("value"), at=value.get("at"))
             return self._set_base_transform(rotation=value)
         elif key == "base_reset":
             state = context.img2img_session
@@ -726,7 +732,38 @@ class HeadlessImg2ImgService:
             raise RuntimeError("Img2Img source image is unavailable")
         return self._session_image_from_bytes(bytes(source), resize_1mp=bool(state.get("resize_1mp", True)))
 
-    def _recompose_canvas(self) -> dict[str, Any]:
+    def _anchor_from_canvas_point(self, point: Any) -> tuple[float, float, float, float] | None:
+        """캔버스의 한 점을 '지금 그림의 어느 자리인가' 로 바꿔 둔다.
+
+        확대/회전을 하고 나서도 그 점이 같은 자리를 가리키게 하려면, 변형 **전에**
+        비율로 재 둬야 한다.
+
+        ⚠️ 점을 안 주면 **캔버스 한가운데**다. 예전에는 앵커가 아예 없어 놓인 상자의
+           좌상단이 고정됐고, 그래서 키울수록 그림이 우하단으로 도망갔다(실측: 200%
+           에서 그림 한가운데가 캔버스 우하단 모서리, 400% 에서는 화면 밖).
+        """
+        state = self.context.img2img_session
+        canvas_w = int(state.get("canvas_width") or 0)
+        canvas_h = int(state.get("canvas_height") or 0)
+        placed_w = int(state.get("placed_width") or 0)
+        placed_h = int(state.get("placed_height") or 0)
+        if canvas_w <= 0 or canvas_h <= 0 or placed_w <= 0 or placed_h <= 0:
+            return None
+        try:
+            anchor_x = float(point["x"])
+            anchor_y = float(point["y"])
+        except (TypeError, ValueError, KeyError):
+            anchor_x, anchor_y = canvas_w / 2.0, canvas_h / 2.0
+        off_x = float(state.get("base_offset_x") or 0)
+        off_y = float(state.get("base_offset_y") or 0)
+        return (
+            anchor_x,
+            anchor_y,
+            (anchor_x - off_x) / placed_w,
+            (anchor_y - off_y) / placed_h,
+        )
+
+    def _recompose_canvas(self, anchor: tuple[float, float, float, float] | None = None) -> dict[str, Any]:
         """캔버스/오프셋/칠한 마스크로 전송용 이미지와 마스크를 다시 만든다."""
         from PIL import Image
 
@@ -764,6 +801,7 @@ class HeadlessImg2ImgService:
             scale=state.get("base_scale", 1.0),
             rotation=state.get("base_rotation", 0.0),
             user_mask=user_mask,
+            anchor=anchor,
         )
         state["image_bytes"] = payload["canvas_bytes"]
         state["width"], state["height"] = payload["width"], payload["height"]
@@ -858,19 +896,26 @@ class HeadlessImg2ImgService:
         state["canvas_active"] = True
         return self._recompose_canvas()
 
-    def _set_base_transform(self, *, scale: Any = None, rotation: Any = None) -> dict[str, Any]:
+    def _set_base_transform(
+        self, *, scale: Any = None, rotation: Any = None, at: Any = None
+    ) -> dict[str, Any]:
         """확대/회전. 오프셋과 달리 **캔버스를 자동으로 켜지 않는다** - 캔버스가 꺼진
-        상태에서 베이스를 돌리면 전송 이미지가 말없이 달라져 예전 동작이 깨진다."""
+        상태에서 베이스를 돌리면 전송 이미지가 말없이 달라져 예전 동작이 깨진다.
+
+        `at` 은 붙잡을 캔버스 좌표. 안 주면 캔버스 한가운데다.
+        ⚠️ 앵커는 **바꾸기 전에** 재야 한다 - 바꾼 뒤에 재면 이미 도망간 자리를 잰다.
+        """
         from utils.v5_inpaint_canvas import clamp_scale, normalize_rotation
 
         state = self.context.img2img_session
+        anchor = self._anchor_from_canvas_point(at if isinstance(at, dict) else None)
         if scale is not None:
             state["base_scale"] = clamp_scale(scale)
         if rotation is not None:
             state["base_rotation"] = normalize_rotation(rotation)
         if not state.get("canvas_active"):
             return self.module_state()
-        return self._recompose_canvas()
+        return self._recompose_canvas(anchor)
 
     def _set_base_offset(self, value: Any) -> dict[str, Any]:
         position = self._normalized_position(value)

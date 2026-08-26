@@ -139,5 +139,55 @@ export function createPosStage({stage, getContentSize, onCommit, onDragStart, on
     document.addEventListener('pointercancel', up);
   }
 
-  return {beginDrag, isDragging};
+  /** 좌표를 **안 자르는** 드래그. 옮기는 대상이 무대 밖으로 나가도 되는 경우에 쓴다
+   *  (예: 인페인트 캔버스에서 베이스를 밖으로 밀 때).
+   *
+   *  ⚠️ `beginDrag` 는 좌표를 무대 안으로 가둔다 - 마커는 그래야 맞지만, 밖으로 미는
+   *     조작에서는 커서가 무대를 벗어나는 순간 **델타가 멈춰 덜 간다**(실측).
+   *     여기서는 원본 이벤트를 그대로 넘겨 호출부가 화면 픽셀로 재게 한다.
+   *
+   *  @param {PointerEvent} event
+   *  @param {HTMLElement} node        `is-drag` 표시를 붙일 요소
+   *  @param {(ev:PointerEvent) => void} onMove
+   *  @param {() => void} onEnd        놓을 때 한 번(규칙 2)
+   */
+  function beginFreeDrag(event, node, onMove, onEnd) {
+    if (!node) return;
+    event.preventDefault();
+    let frame = 0;
+    let pending = null;
+
+    const flush = () => {
+      frame = 0;
+      if (!pending) return;
+      const ev = pending;
+      pending = null;
+      onMove(ev);
+    };
+    const move = (ev) => {
+      pending = ev;
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
+    const up = () => {
+      dragging = false;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      if (frame) cancelAnimationFrame(frame);
+      flush();
+      node.classList.remove('is-drag');
+      // 규칙: 커밋이 먼저, 재렌더는 그 다음.
+      onEnd?.();
+      onDragEnd?.();
+    };
+
+    dragging = true;
+    node.classList.add('is-drag');
+    onDragStart?.();
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
+  }
+
+  return {beginDrag, beginFreeDrag, isDragging};
 }

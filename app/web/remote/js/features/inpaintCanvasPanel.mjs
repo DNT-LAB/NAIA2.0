@@ -28,7 +28,7 @@
 //
 // ⚠️ 아래 import 의 캐시 키는 posStage 를 고칠 때도 **함께** 바꾼다. 이 파일 키만
 //    올리면 브라우저가 옛 posStage 를 계속 쓴다 - import 는 URL 로 캐시된다.
-import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-raf1';
+import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-freedrag1';
 
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
 const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
@@ -40,6 +40,14 @@ const SCALE_MAX_PCT = 400;
 // 변형은 서버가 이미지를 다시 합성한다(리사이즈 + PNG 인코딩 + base64). 슬라이더가
 // 움직이는 동안 매번 보내면 그만큼 합성이 쌓인다 - 마지막 값만 보낸다.
 const TRANSFORM_DEBOUNCE_MS = 200;
+
+// 중앙 버튼 드래그 감도. 세로 3px 당 1% - 한 화면(약 700px)에 대략 배율 전 구간이 든다.
+const MIDDLE_SCALE_PX_PER_PCT = 3;
+// 회전은 각도를 그대로 따라가되, 중앙 가까이에서는 각도가 튀므로 그 안은 무시한다.
+const ROTATE_DEAD_ZONE_PX = 40;
+// 베이스 미세 이동. Shift 는 자동 마스킹 반경과 같은 값으로 맞춘다.
+const NUDGE_PX = 1;
+const NUDGE_PX_COARSE = 16;
 
 const ratio = (value) => (Number(value) || 0).toFixed(2);
 const clampPct = (v) => Math.max(SCALE_MIN_PCT, Math.min(SCALE_MAX_PCT, Math.round(Number(v) || 100)));
@@ -107,12 +115,14 @@ export function createInpaintCanvasPanel({
     const show = !!(state?.active && state.canvas_supported);
     if (show !== !panel.hidden) onVisibility(show);
     if (!show) {
+      disarmSessionInput();     // 세션이 끝나면 입력을 **즉시** 돌려준다(사용자 지정)
       panel.innerHTML = '';
       panel.hidden = true;
       viewMode = 'edit';        // 다음 세션은 편집부터 시작한다
       renderPlane();
       return;
     }
+    armSessionInput();
     panel.hidden = false;
     panel.className = `inpaint-canvas-panel${collapsed ? ' is-collapsed' : ''}`;
     panel.innerHTML = collapsed ? collapsedHtml() : dockHtml();
@@ -162,7 +172,7 @@ export function createInpaintCanvasPanel({
         </div>
         <span class="ic-spacer"></span>
         <span class="ic-hint">${editing
-          ? '✥ 를 끌면 베이스가 움직이고, 비는 자리는 자동으로 열립니다.'
+          ? '끌기=이동 · 휠버튼 끌기=크기 · Ctrl+휠버튼=회전 · 방향키=1px(Shift 16) · 0=초기화'
           : '생성 결과를 보는 중입니다.'}</span>
         <button type="button" class="ic-btn ic-btn-collapse" data-ic="collapse" title="접기" aria-label="접기">▾</button>
       </div>
@@ -247,10 +257,6 @@ export function createInpaintCanvasPanel({
 
     const {w, h} = canvasSize();
     const preview = state.preview || '';
-    const off = {x: Number(state.base_offset_x) || 0, y: Number(state.base_offset_y) || 0};
-    const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
-    const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
-    const handle = contentToPercent(...handlePoint(w, h, off, placedW, placedH), w, h);
     const chars = (state.characters || [])
       .map((c, i) => ({...c, index: i}))
       .filter(c => c.prompt && c.position);
@@ -259,8 +265,6 @@ export function createInpaintCanvasPanel({
         ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}
         ${showGrid ? gridSvg(w, h, {className: 'ic-grid pos-grid'}) : ''}
         <div class="ic-ghost" data-ic-ghost="1" hidden></div>
-        <button type="button" class="ic-handle" data-ic-handle="1"
-          style="left:${handle.left};top:${handle.top}" title="끌어서 베이스 이미지를 옮깁니다">✥</button>
         ${chars.map(c => {
           const p = contentToPercent(c.position.x, c.position.y, w, h);
           return `<button type="button" class="ic-marker" data-ic-marker="${c.index}"
@@ -292,21 +296,6 @@ export function createInpaintCanvasPanel({
     stageEl.style.height = `${Math.round(h * scale)}px`;
   }
 
-  /** 손잡이가 앉을 자리(캔버스 픽셀).
-   *
-   *  놓인 그림의 한가운데를 가리키되 **캔버스 안에 가둔다.**
-   *  ⚠️ 안 가두면 크게 확대했을 때 한가운데가 캔버스 밖이라 손잡이가 `overflow:hidden`
-   *     에 잘려 **사라진다** - 다시 잡을 방법이 없어진다(사용자 지적 2026-08-26,
-   *     224% 에서 실측). 가둬 두면 어느 쪽으로 밀려 있는지도 함께 읽힌다.
-   *  ⚠️ 가두는 순간 손잡이는 '그림의 한가운데'가 아니게 된다 - 그래서 베이스 드래그는
-   *     절대 위치가 아니라 **상대 이동**이어야 한다(아래 `onPlanePointerDown`).
-   */
-  function handlePoint(w, h, off, placedW, placedH) {
-    const pad = Math.max(24, Math.min(w, h) * 0.06);
-    const clamp = (v, max) => Math.min(Math.max(v, pad), Math.max(pad, max - pad));
-    return [clamp(off.x + placedW / 2, w), clamp(off.y + placedH / 2, h)];
-  }
-
   // ── 조작 ────────────────────────────────────────────────────────────────
   function typingInPanel() {
     const active = document.activeElement;
@@ -327,7 +316,7 @@ export function createInpaintCanvasPanel({
     else applyTransform('rotation', wrapDeg((Number(state.base_rotation) || 0) + delta));
   }
 
-  function applyTransform(key, value) {
+  function applyTransform(key, value, at) {
     if (!state) return;
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
     if (key === 'scale') state.base_scale = value / 100;
@@ -336,8 +325,10 @@ export function createInpaintCanvasPanel({
     const label = panel.querySelector(`[data-ic-val="${key}"]`);
     if (input && input.value !== String(value)) input.value = String(value);
     if (label) label.textContent = key === 'scale' ? `${value}%` : `${value}°`;
-    sendTransform(key === 'scale' ? 'base_scale' : 'base_rotation',
-      key === 'scale' ? value / 100 : value);
+    // 기준점을 안 주면 백엔드가 캔버스 한가운데를 잡는다(슬라이더·± 가 그 경우다).
+    const payload = key === 'scale' ? {value: value / 100} : {value};
+    if (at) payload.at = at;
+    sendTransform(key === 'scale' ? 'base_scale' : 'base_rotation', payload);
   }
 
   function onClick(event) {
@@ -399,43 +390,58 @@ export function createInpaintCanvasPanel({
 
   function onPlanePointerDown(event) {
     if (!stageEl) return;
-    const handle = event.target.closest?.('[data-ic-handle]');
-    if (handle) {
-      const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
-      const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
-      const ghost = stageEl.querySelector('[data-ic-ghost]');
-      // ⚠️ **상대 이동**이다. 손잡이는 화면 안에 갇혀 있어 '그림의 한가운데'가 아닐 수
-      //    있으므로, 절대 위치로 옮기면 잡는 순간 그림이 저 멀리로 튄다.
-      //    첫 좌표를 기준점으로 삼고 그 뒤로는 **움직인 만큼만** 더한다.
-      const startOffset = {
-        x: Number(state.base_offset_x) || 0,
-        y: Number(state.base_offset_y) || 0,
-      };
-      let anchor = null;
-      posStage.beginDrag(event, handle, 'base', (x, y) => {
-        const {w, h} = canvasSize();
-        const pos = contentToPercent(x, y, w, h);
-        handle.style.left = pos.left;
-        handle.style.top = pos.top;
-        if (!anchor) { anchor = {x, y}; return; }   // 잡은 자리 = 기준점
-        const ox = Math.round(startOffset.x + (x - anchor.x));
-        const oy = Math.round(startOffset.y + (y - anchor.y));
-        pendingOffset = {x: ox, y: oy};
-        // 그림 자체는 서버가 다시 합성해야 움직인다(놓을 때 한 번). 끄는 동안에는
-        // **어디에 놓이는지**와 **얼마나 새 자리가 열리는지**를 유령으로 보여 준다 -
-        // 손잡이 하나만 움직이면 무엇이 일어나는지 알 수 없다(사용자 지적).
-        if (ghost && w > 0 && h > 0) {
-          ghost.hidden = false;
-          ghost.style.left = `${(ox / w) * 100}%`;
-          ghost.style.top = `${(oy / h) * 100}%`;
-          ghost.style.width = `${(placedW / w) * 100}%`;
-          ghost.style.height = `${(placedH / h) * 100}%`;
-        }
-      });
-      return;
-    }
+    // 숫자 마커가 **먼저**다. 그 위에서 누르면 그 캐릭터를 옮긴다.
     const marker = event.target.closest?.('[data-ic-marker]');
-    if (marker) posStage.beginDrag(event, marker, `char_${marker.dataset.icMarker}`);
+    if (marker) { posStage.beginDrag(event, marker, `char_${marker.dataset.icMarker}`); return; }
+    if (event.button === 1) { event.preventDefault(); beginMiddleDrag(event); return; }
+    if (event.button === 0) beginBaseDrag(event);
+  }
+
+  /** 그림 위 **어디서나** 끌어서 옮긴다(사용자 지정 2026-08-26, 파워포인트처럼).
+   *
+   *  ⚠️ 좌표를 `pointToContent` 로 받으면 안 된다. 그건 스테이지 밖을 **잘라낸다**
+   *     (마커는 캔버스 안에 있어야 하니 그쪽에는 맞는 동작이다). 베이스를 밖으로 밀
+   *     때는 커서가 스테이지를 벗어나는데, 그러면 델타가 가장자리에서 멈춰 **덜 간다**
+   *     - 사용자 제보 "정확한 위치로 놓여지지 않습니다". 화면 픽셀 델타를 직접 재서
+   *     캔버스 배율로만 나눈다.
+   */
+  function beginBaseDrag(event) {
+    const host = stageEl;
+    const {w, h} = canvasSize();
+    const rect = host.getBoundingClientRect();
+    if (!(rect.width > 0) || !(w > 0) || !(h > 0)) return;
+    const perX = w / rect.width;
+    const perY = h / rect.height;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startOffset = {
+      x: Number(state.base_offset_x) || 0,
+      y: Number(state.base_offset_y) || 0,
+    };
+    const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
+    const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
+    const ghost = host.querySelector('[data-ic-ghost]');
+
+    posStage.beginFreeDrag(event, host, (ev) => {
+      const ox = Math.round(startOffset.x + (ev.clientX - startX) * perX);
+      const oy = Math.round(startOffset.y + (ev.clientY - startY) * perY);
+      pendingOffset = {x: ox, y: oy};
+      // 그림 자체는 서버가 다시 합성해야 움직인다(놓을 때 한 번). 끄는 동안에는
+      // **어디에 놓이는지**와 **얼마나 새 자리가 열리는지**를 유령으로 보여 준다.
+      if (ghost) {
+        ghost.hidden = false;
+        ghost.style.left = `${(ox / w) * 100}%`;
+        ghost.style.top = `${(oy / h) * 100}%`;
+        ghost.style.width = `${(placedW / w) * 100}%`;
+        ghost.style.height = `${(placedH / h) * 100}%`;
+      }
+    }, () => {
+      if (!pendingOffset) return;
+      const {x: ox, y: oy} = pendingOffset;
+      pendingOffset = null;
+      if (state) { state.base_offset_x = ox; state.base_offset_y = oy; }
+      send('base_offset', {x: ox, y: oy});
+    });
   }
 
   function commit({x, y, key}) {
@@ -454,6 +460,112 @@ export function createInpaintCanvasPanel({
     const character = (state?.characters || [])[index];
     if (character) character.position = {x, y};
     send(`char_position_${index}`, {x, y});
+  }
+
+  /** 이 조작들은 **인페인트 세션 안에서만** 산다(사용자 지정 2026-08-26).
+   *
+   *  ⚠️ 방향키와 중앙 버튼은 document 를 가로챈다. 세션이 끝나도 붙어 있으면 앱 전체의
+   *     입력을 조용히 갉아먹는다 - 세션이 열릴 때 걸고, 닫히는 즉시 돌려준다.
+   */
+  let sessionInputTeardown = null;
+
+  function armSessionInput() {
+    if (sessionInputTeardown) return;
+
+    // ⚠️ Chromium 은 중앙 버튼을 누르면 **자동 스크롤**(사방향 커서)을 띄운다.
+    //    `pointerdown` 만 막아도 되는 것이 원칙이지만, 빌드에 따라 호환 `mousedown`
+    //    으로 새는 경우가 있어 셋 다 막는다.
+    const swallowMiddle = (event) => {
+      if (event.button === 1 && plane?.contains(event.target)) event.preventDefault();
+    };
+    const swallowAux = (event) => {
+      if (event.button === 1 && plane?.contains(event.target)) event.preventDefault();
+    };
+    document.addEventListener('mousedown', swallowMiddle, true);
+    document.addEventListener('auxclick', swallowAux, true);
+
+    const onKeyDown = (event) => {
+      if (viewMode !== 'edit' || !state?.active) return;
+      const active = document.activeElement;
+      // 글자를 치고 있으면 손대지 않는다.
+      if (active && active.matches?.('input, textarea, select, [contenteditable="true"]')) return;
+      const step = event.shiftKey ? NUDGE_PX_COARSE : NUDGE_PX;
+      const move = {ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+                    ArrowUp: [0, -step], ArrowDown: [0, step]}[event.key];
+      if (move) {
+        event.preventDefault();
+        const ox = Math.round((Number(state.base_offset_x) || 0) + move[0]);
+        const oy = Math.round((Number(state.base_offset_y) || 0) + move[1]);
+        state.base_offset_x = ox;
+        state.base_offset_y = oy;
+        send('base_offset', {x: ox, y: oy});
+        return;
+      }
+      if (event.key === '0') {
+        event.preventDefault();
+        send('base_reset', null);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    sessionInputTeardown = () => {
+      document.removeEventListener('mousedown', swallowMiddle, true);
+      document.removeEventListener('auxclick', swallowAux, true);
+      document.removeEventListener('keydown', onKeyDown);
+      sessionInputTeardown = null;
+    };
+  }
+
+  function disarmSessionInput() {
+    if (sessionInputTeardown) sessionInputTeardown();
+  }
+
+  /** 중앙 버튼 드래그: 크기(세로) / Ctrl 이면 회전(각도).
+   *
+   *  ⚠️ 크기는 **누른 지점**을, 회전은 **캔버스 한가운데**를 붙잡는다. 안 붙잡으면
+   *     놓인 상자의 좌상단이 고정돼 키울수록 그림이 우하단으로 도망간다(실측:
+   *     200% 에서 그림 한가운데가 캔버스 모서리, 400% 에서는 화면 밖).
+   *  ⚠️ 중앙 버튼이 없는 입력기(터치·트랙패드·펜)가 있다 - 슬라이더와 ± 는 그대로
+   *     남는다. 이건 빠른 길이지 유일한 길이 아니다.
+   */
+  function beginMiddleDrag(event) {
+    const host = stageEl;
+    const {w, h} = canvasSize();
+    const rect = host.getBoundingClientRect();
+    if (!(rect.width > 0) || !(w > 0) || !(h > 0)) return;
+    const rotating = event.ctrlKey;
+    const startScale = clampPct((Number(state.base_scale) || 1) * 100);
+    const startRotation = wrapDeg(state.base_rotation);
+    const startY = event.clientY;
+    // 누른 지점을 캔버스 좌표로. 크기의 기준점이 된다.
+    const at = {
+      x: Math.round((event.clientX - rect.left) / rect.width * w),
+      y: Math.round((event.clientY - rect.top) / rect.height * h),
+    };
+    const pivot = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+    const angleOf = (ev) => Math.atan2(ev.clientY - pivot.y, ev.clientX - pivot.x) * 180 / Math.PI;
+    const startAngle = angleOf(event);
+    const startDist = Math.hypot(event.clientX - pivot.x, event.clientY - pivot.y);
+    let sent = null;
+
+    posStage.beginFreeDrag(event, host, (ev) => {
+      if (rotating) {
+        if (startDist < ROTATE_DEAD_ZONE_PX) return;
+        const next = wrapDeg(startRotation + (angleOf(ev) - startAngle));
+        sent = {key: 'rotation', value: next};
+        applyTransform('rotation', next);
+      } else {
+        const next = clampPct(startScale + (startY - ev.clientY) / MIDDLE_SCALE_PX_PER_PCT);
+        sent = {key: 'scale', value: next};
+        applyTransform('scale', next, at);
+      }
+    }, () => {
+      // 놓는 순간 마지막 값을 곧바로 보낸다 - 디바운스가 남아 있으면 거기서 또 간다.
+      if (!sent) return;
+      if (sent.key === 'scale') sendTransform('base_scale', {value: sent.value / 100, at});
+      else sendTransform('base_rotation', {value: sent.value});
+      sent = null;
+    });
   }
 
   if (panel) {

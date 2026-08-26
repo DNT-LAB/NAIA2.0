@@ -236,6 +236,7 @@ def build_payload(
     scale: Any = 1.0,
     rotation: Any = 0.0,
     user_mask: Image.Image | None = None,
+    anchor: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any]:
     """인페인트 요청에 실을 캔버스/마스크 한 벌.
 
@@ -243,8 +244,20 @@ def build_payload(
 
     ⚠️ 확대/회전을 **먼저** 먹인다. 변형 뒤의 크기로 오프셋을 가두고 빈 곳을 재야
        한다 - 원본 크기로 재면 회전해서 커진 만큼이 빈 곳으로 잘못 잡힌다.
+
+    `anchor=(ax, ay, u, v)` 를 주면 `offset` 을 무시하고, **캔버스의 (ax, ay) 가 놓인
+    그림의 비율 좌표 (u, v) 를 계속 가리키도록** 오프셋을 새로 잡는다. 확대/회전의
+    기준점이 이것이다.
+
+    ⚠️ 크기를 미리 계산하지 않는다. `transform_base` 를 한 번 돌린 **그 결과의 크기**로
+       잡는다 - 회전 상자 공식을 따로 세우면 PIL 의 반올림과 1px 씩 어긋나고, 그
+       어긋남이 매 조작마다 쌓인다.
     """
     placed = transform_base(base_image, scale, rotation)
+    if anchor is not None:
+        anchor_x, anchor_y, ratio_u, ratio_v = anchor
+        offset_x = int(round(anchor_x - ratio_u * placed.width))
+        offset_y = int(round(anchor_y - ratio_v * placed.height))
     offset_x, offset_y = clamp_offset(
         canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y
     )

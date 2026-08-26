@@ -26259,20 +26259,19 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .pos-grid-line { fill: none; stroke: rgba(255,255,255,0.12); stroke-width: 1; }
 .pos-grid-mid { stroke: rgba(157,139,255,0.5); stroke-width: 1.5; }
 
-.ic-handle, .ic-marker {
+/* 그림 위 어디서나 끈다(사용자 지정) - 손잡이를 없앤 대신 커서가 알린다. */
+.ic-stage { cursor: grab; }
+.ic-stage.is-drag { cursor: grabbing; }
+.ic-marker {
   position: absolute; transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 999px; cursor: grab; font-family: var(--font-mono); font-weight: 700;
-}
-.ic-handle {
-  width: 26px; height: 26px; font-size: 13px;
-  border: 1px solid rgba(255,255,255,0.85); background: rgba(20,20,28,0.78); color: #fff;
 }
 .ic-marker {
   width: 22px; height: 22px; font-size: 11px;
   border: 1px solid rgba(157,139,255,0.9); background: rgba(124,106,239,0.9); color: #fff;
 }
-.ic-handle.is-drag, .ic-marker.is-drag { cursor: grabbing; box-shadow: 0 0 0 3px rgba(157,139,255,0.35); }
+.ic-marker.is-drag { cursor: grabbing; box-shadow: 0 0 0 3px rgba(157,139,255,0.35); }
 
 /* 끄는 동안의 유령. 베이스가 놓일 자리를 점선으로 두르고, **바깥을 어둡게** 깐다 -
    그 어두운 부분이 곧 새로 열릴 자리다(자르기 도구와 같은 몸짓).

@@ -372,10 +372,6 @@ class HeadlessImg2ImgService:
             "generation_terminal_request_ids": [],
             "generation_error": "",
         }
-        # 메타에서 복원한 목록이 **좌표가 있는 사람과 없는 사람을 섞어** 줄 수 있다
-        # (예: v4 캡션 일부에만 centers 가 있는 그림). 그대로 두면 첫 생성에서
-        # 전원의 배치가 무효가 된다.
-        self._settle_character_positions()
         return self.module_state()
 
     @staticmethod
@@ -725,12 +721,9 @@ class HeadlessImg2ImgService:
             chars = context.img2img_session.setdefault("characters", [])
             if index is not None and 0 <= index < len(chars):
                 chars[index]["position"] = self._normalized_position(value)
-                # 한 명을 앉히면 나머지도 자리를 가져야 한다(아래 불변식 참조).
-                self._settle_character_positions()
         elif key == "add_character":
             context.img2img_session.setdefault("characters", []).append(
-                {"active": True, "prompt": "", "uc": "", "position": None})
-            self._settle_character_positions()
+                {"active": True, "prompt": "", "uc": "", "position": self._new_character_seat()})
         elif key.startswith("remove_character_"):
             index = context._index_from_key(key, "remove_character_")
             chars = context.img2img_session.setdefault("characters", [])
@@ -823,55 +816,33 @@ class HeadlessImg2ImgService:
     # V5 가상 캔버스
     # ------------------------------------------------------------------
 
-    def _settle_character_positions(self) -> None:
-        """캔버스 세션의 캐릭터 좌표를 **전원 있거나 전원 없거나** 로 맞춘다.
+    def _new_character_seat(self) -> dict[str, float] | None:
+        """새로 더한 슬롯이 설 자리 - **캔버스 한가운데**(캔버스 픽셀).
 
-        ⚠️ NAI 는 한 명이라도 좌표가 비면 `use_coords` 를 **통째로** 끈다
-           (`core/api_service.py` 의 `coords_given` - 전원분이 있어야 켜진다).
-           그래서 인페인트로 사람을 하나 더하고 프롬프트를 적는 순간, 원래 있던
-           사람들의 자리까지 무효가 됐다. 실측(2026-08-26): C1·C2 를 앉힌 뒤 C3 에
-           글자를 적자 `use_coords` 가 True -> False 로 떨어졌다. 화면에는 표식이
-           1·2 만 있어 3 을 놓을 방법도 없었다(사용자 제보).
+        ⚠️ 좌표 없이 두면 안 된다. NAI 는 한 명이라도 좌표가 비면 `use_coords` 를
+           통째로 끄므로(`core/api_service.py` 의 `coords_given`), 사람을 하나
+           더하는 것만으로 **원래 있던 사람들의 배치까지 사라진다.**
+           실측(2026-08-26): C1·C2 를 앉힌 뒤 C3 에 글자를 적자 use_coords 가
+           True -> False 로 떨어졌다(사용자 제보 + 스크린샷).
 
-        ⚠️ **아무도 좌표가 없으면 그대로 둔다.** 그건 '자동 배치' 라는 뜻이다 -
-           원본 그림이 `use_coords=False` 였던 경우가 여기다. 거기에 자리를 지어
-           넣으면 없던 배치가 생긴다.
+        ⚠️ 다만 **아무도 좌표가 없는 판은 깨지 않는다.** 원본이 좌표를 안 쓰던
+           그림이면 복원된 슬롯이 전부 좌표 없이 들어온다 - 거기에 새 슬롯만 자리를
+           주면 섞인 상태가 되어, 화면에는 표식이 서는데 NAI 는 여전히 전원을
+           자동 배치한다(표식이 거짓말을 한다). 그 판은 그대로 자동 배치로 둔다.
 
-        빈 자리는 메인 캐릭터 모듈과 **같은 규칙**으로 채운다(`fill_missing_positions`:
-        아무도 안 선 AUTO 링 자리부터 준다 - 순번대로 주면 겹친다).
+        캔버스를 안 쓰는 옛 팝업 경로는 좌표 자체가 없는 길이라 건드리지 않는다.
         """
         state = self.context.img2img_session or {}
         if not state.get("canvas_active"):
-            return
-        chars = state.get("characters") or []
+            return None
         width = int(state.get("canvas_width") or 0)
         height = int(state.get("canvas_height") or 0)
-        if not chars or width <= 0 or height <= 0:
-            return
-        # 꺼진 슬롯은 생성에 안 나가므로 판단에서도 뺀다.
-        live = [c for c in chars if c.get("active", True)]
-        if not live:
-            return
-        ratios = []
-        for character in live:
-            position = character.get("position")
-            if isinstance(position, dict):
-                try:
-                    ratios.append({"x": float(position["x"]) / width,
-                                   "y": float(position["y"]) / height})
-                    continue
-                except (TypeError, ValueError, KeyError):
-                    pass
-            ratios.append(None)
-        if all(r is None for r in ratios) or all(r is not None for r in ratios):
-            return
-
-        from core.character_settings import fill_missing_positions
-
-        filled = fill_missing_positions(ratios)
-        for character, ratio, before in zip(live, filled, ratios):
-            if before is None:
-                character["position"] = {"x": ratio["x"] * width, "y": ratio["y"] * height}
+        if width <= 0 or height <= 0:
+            return None
+        seated = [c for c in (state.get("characters") or []) if c.get("active", True)]
+        if seated and not any(isinstance(c.get("position"), dict) for c in seated):
+            return None
+        return {"x": width / 2, "y": height / 2}
 
     @staticmethod
     def _normalized_position(value: Any) -> dict[str, float] | None:

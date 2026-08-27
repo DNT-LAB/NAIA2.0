@@ -84,7 +84,12 @@ def decode_mask_to_small_png(
         raise ValueError("Inpaint mask is empty")
     if painted_blocks < MIN_PAINTED_BLOCKS:
         raise ValueError("Inpaint mask is too small")
-    preview = "data:image/png;base64," + base64.b64encode(_png_bytes(full_mask)).decode("ascii")
+    # ⚠️ **알파를 함께 싣는다(LA).** 화면은 이 그림을 CSS `mask-image` 로 쓰는데,
+    #    알파가 없는 흑백 PNG 는 브라우저가 **전체를 불투명**으로 보아 그림 전체가
+    #    칠해진 것처럼 덮인다(사용자 제보 2026-08-27: "마스크가 전체에 다 들어간다").
+    #    L 채널은 그대로 두므로 `convert("L")` 로 읽던 곳은 영향이 없다.
+    preview = "data:image/png;base64," + base64.b64encode(
+        _png_bytes(Image.merge("LA", (full_mask, full_mask)))).decode("ascii")
     return DecodedInpaintMask(_png_bytes(small_mask), preview, painted_blocks)
 
 

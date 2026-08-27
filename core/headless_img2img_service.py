@@ -1107,10 +1107,19 @@ class HeadlessImg2ImgService:
 
     @staticmethod
     def _mask_preview_data_url(mask: Any) -> str:
-        """칠한 마스크의 화면용 data URL. 손으로 짜던 자리가 여럿이라 하나로 모은다."""
+        """칠한 마스크의 화면용 data URL. 손으로 짜던 자리가 여럿이라 하나로 모은다.
+
+        ⚠️ **알파를 함께 싣는다(LA).** 화면은 CSS `mask-image` 로 쓰는데, 알파가 없는
+           흑백 PNG 는 브라우저가 전체를 불투명으로 보아 그림 전체가 덮인다
+           (사용자 제보 2026-08-27). L 채널은 그대로라 파이썬 쪽 소비자는 그대로다.
+        """
+        from PIL import Image
+
         from utils.v5_inpaint_canvas import png_bytes
 
-        return "data:image/png;base64," + base64.b64encode(png_bytes(mask)).decode("ascii")
+        flat = mask if mask.mode == "L" else mask.convert("L")
+        return "data:image/png;base64," + base64.b64encode(
+            png_bytes(Image.merge("LA", (flat, flat)))).decode("ascii")
 
     def _set_canvas_size(self, value: Any) -> dict[str, Any]:
         from core.resolution_utils import parse_resolution_pair, snap_resolution_to_multiple

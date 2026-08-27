@@ -13401,6 +13401,8 @@ body.detached-metadata .metadata-layout {
   background: rgba(0, 0, 255, 0.47);
   -webkit-mask-image: var(--img2img-mask-url);
   mask-image: var(--img2img-mask-url);
+  /* 위 `.ic-mask` 와 같은 이유 - 알파가 없으면 전체가 덮인다. */
+  mask-mode: luminance;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
   -webkit-mask-position: center;
@@ -26334,6 +26336,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   background: rgba(64, 96, 255, 0.42);
   -webkit-mask-image: var(--ic-mask-url);
   mask-image: var(--ic-mask-url);
+  /* ⚠️ 흰=칠함, 검정=안 칠함이다. `match-source`(기본)는 **알파**를 보므로 알파가
+     없는 그림이 오면 전체가 덮인다. 밝기로 보라고 못 박는다(그림에도 알파를
+     싣지만, 옛 그림이 와도 맞게 두 겹으로 막는다). */
+  mask-mode: luminance;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;

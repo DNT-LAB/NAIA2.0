@@ -21,6 +21,7 @@ V5 에서는 인페인트를 별도 팝업으로 빼지 않고 Result 안에서 
 
 from __future__ import annotations
 
+import math
 from io import BytesIO
 from typing import Any
 
@@ -116,9 +117,8 @@ def transform_base(base_image: Image.Image, scale: Any = 1.0, rotation: Any = 0.
 def placed_size(base_image: Image.Image, scale: Any) -> tuple[int, int]:
     """확대만 먹였을 때의 크기. `transform_base` 와 **같은 식**으로 센다.
 
-    ⚠️ 회전에는 쓰지 마라. 회전 상자는 PIL 의 반올림을 따로 재현할 수 없어 1px 씩
-       어긋나고, 그 어긋남이 매 조작마다 쌓인다(`build_payload` 주석 참조).
-       확대만이면 식이 한 줄이라 그럴 여지가 없다.
+    회전한 뒤의 크기는 `rotated_size` 가 따로 센다 - 그쪽은 PIL 의 행렬과 반올림을
+    그대로 옮겨야 맞는다(순진한 공식은 어긋난다. 그 함수 주석 참조).
     """
     factor = clamp_scale(scale)
     return (max(1, int(round(base_image.width * factor))),
@@ -166,6 +166,105 @@ def scaled_visible_part(
     sy = source.height / float(placed_h)
     box = (left * sx, top * sy, right * sx, bottom * sy)
     visible = source.resize((right - left, bottom - top), Image.Resampling.LANCZOS, box=box)
+    return visible, int(offset_x) + left, int(offset_y) + top
+
+
+# PIL 의 회전을 **픽셀을 돌리지 않고** 따라 계산하기 위한 두 함수.
+#
+# ⚠️ 이 파일에는 오래도록 "회전 상자는 미리 못 센다" 는 주석이 있었다. 절반만 맞다:
+#    **순진한 `|w·cos| + |h·sin|` 공식은 어긋난다**(실측 600 조합 중 373 건이 1px 차).
+#    PIL 은 픽셀 처리 전에 네 모서리만 변환해 `ceil(max) - floor(min)` 로 크기를
+#    정하므로(Pillow 10.4.0 `Image.py:2460-2469`), **그 계산을 그대로 옮기면 정확하다**
+#    (같은 600 조합 0 건 차이). 아래 두 함수가 그 옮긴 것이다.
+# ⚠️ 그래서 Pillow 판올림 때 이 계약이 깨질 수 있다. 회귀 테스트가 PIL 과 전수 대조한다.
+
+
+def rotation_matrix(width: int, height: int, angle: float) -> list[float]:
+    """PIL `rotate(angle, expand=True)` 가 쓰는 **역 아핀 행렬**(목적지 -> 원본).
+
+    Pillow 10.4.0 `Image.py:2431-2474` 를 그대로 옮긴다 - 15자리 반올림과 중심
+    기준 평행이동까지. 한 자리라도 다르면 픽셀이 어긋난다.
+    """
+    rad = -math.radians(angle)
+    matrix = [round(math.cos(rad), 15), round(math.sin(rad), 15), 0.0,
+              round(-math.sin(rad), 15), round(math.cos(rad), 15), 0.0]
+
+    def apply(x: float, y: float) -> tuple[float, float]:
+        a, b, c, d, e, f = matrix
+        return a * x + b * y + c, d * x + e * y + f
+
+    center_x, center_y = width / 2, height / 2
+    matrix[2], matrix[5] = apply(-center_x, -center_y)
+    matrix[2] += center_x
+    matrix[5] += center_y
+
+    corners = [apply(x, y) for x, y in
+               ((0, 0), (width, 0), (width, height), (0, height))]
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
+    new_w = math.ceil(max(xs)) - math.floor(min(xs))
+    new_h = math.ceil(max(ys)) - math.floor(min(ys))
+    # expand 보정: 목적지 원점이 옮겨진 만큼 평행이동을 다시 잡는다.
+    matrix[2], matrix[5] = apply(-(new_w - width) / 2.0, -(new_h - height) / 2.0)
+    return matrix
+
+
+def rotated_size(width: int, height: int, angle: Any) -> tuple[int, int]:
+    """`rotate(angle, expand=True)` 의 출력 크기. 픽셀은 만들지 않는다."""
+    angle = normalize_rotation(angle) % 360.0
+    if angle in (0.0, 180.0):
+        return int(width), int(height)
+    if angle in (90.0, 270.0):
+        return int(height), int(width)
+    rad = -math.radians(angle)
+    matrix = [round(math.cos(rad), 15), round(math.sin(rad), 15), 0.0,
+              round(-math.sin(rad), 15), round(math.cos(rad), 15), 0.0]
+
+    def apply(x: float, y: float) -> tuple[float, float]:
+        a, b, c, d, e, f = matrix
+        return a * x + b * y + c, d * x + e * y + f
+
+    center_x, center_y = width / 2, height / 2
+    matrix[2], matrix[5] = apply(-center_x, -center_y)
+    matrix[2] += center_x
+    matrix[5] += center_y
+    corners = [apply(x, y) for x, y in
+               ((0, 0), (width, 0), (width, height), (0, height))]
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
+    return (math.ceil(max(xs)) - math.floor(min(xs)),
+            math.ceil(max(ys)) - math.floor(min(ys)))
+
+
+def rotated_visible_part(
+    scaled: Image.Image, angle: float, rotated_w: int, rotated_h: int,
+    canvas_w: int, canvas_h: int, offset_x: int, offset_y: int,
+) -> tuple[Image.Image | None, int, int]:
+    """돌린 그림 중 **캔버스에 걸리는 부분만** 만든다. `(그림, 붙일 x, 붙일 y)`.
+
+    ⚠️ 실측(2026-08-27, 960x1088 베이스): 4배 확대 + 33.5° 회전은 5606x5750 =
+       **32.2M 픽셀**을 만들어 캔버스가 쓰는 1.04M(3.2%)만 남기고 버렸다.
+       회전 단계에만 1049ms 가 들었다.
+
+    ⚠️ **근사가 아니다.** `rotate()` 자체가 `transform(size, AFFINE, matrix)` 이므로
+       (Pillow `Image.py:2477-2479`), 같은 행렬에 목적지 원점만 옮겨 창을 좁히면
+       각 픽셀이 **완전히 같은 자리를 같은 필터로** 샘플링한다. 잘려 나갈 픽셀을
+       애초에 안 만드는 것뿐이다.
+    """
+    left = max(0, -int(offset_x))
+    top = max(0, -int(offset_y))
+    right = min(int(rotated_w), int(canvas_w) - int(offset_x))
+    bottom = min(int(rotated_h), int(canvas_h) - int(offset_y))
+    if right <= left or bottom <= top:
+        return None, 0, 0
+    matrix = rotation_matrix(scaled.width, scaled.height, float(angle))
+    # 목적지 원점을 창의 좌상단으로 옮긴다(행렬은 목적지 -> 원본이므로 평행이동만 더한다).
+    a, b, c, d, e, f = matrix
+    shifted = [a, b, a * left + b * top + c, d, e, d * left + e * top + f]
+    visible = scaled.convert("RGBA").transform(
+        (right - left, bottom - top), Image.Transform.AFFINE, shifted,
+        Image.Resampling.BICUBIC, fillcolor=(0, 0, 0, 0),
+    )
     return visible, int(offset_x) + left, int(offset_y) + top
 
 
@@ -306,20 +405,22 @@ def build_payload(
     그림의 비율 좌표 (u, v) 를 계속 가리키도록** 오프셋을 새로 잡는다. 확대/회전의
     기준점이 이것이다.
 
-    ⚠️ 크기를 미리 계산하지 않는다. `transform_base` 를 한 번 돌린 **그 결과의 크기**로
-       잡는다 - 회전 상자 공식을 따로 세우면 PIL 의 반올림과 1px 씩 어긋나고, 그
-       어긋남이 매 조작마다 쌓인다.
+    ⚠️ 크기는 **픽셀을 만들기 전에** 센다. 확대만이면 한 줄이고(`placed_size`),
+       회전이 있으면 PIL 의 행렬을 그대로 옮겨 센다(`rotated_size`).
+       한때 여기에는 "회전 상자는 미리 못 센다" 고 적혀 있었는데 절반만 맞았다 -
+       순진한 공식은 어긋나지만 PIL 의 계산을 옮기면 정확하다(그 함수 주석 참조).
+       크기를 먼저 알아야 **보이는 부분만** 만들 수 있다.
     """
-    # 회전이 없으면 놓인 크기를 한 줄로 셀 수 있다 - 그러면 그림 전체를 만들지 않고
-    # **보이는 부분만** 뽑아 붙일 수 있다(`scaled_visible_part` 주석 참조).
-    # 회전이 있으면 예전 그대로 - 회전 상자는 미리 셀 수 없다.
-    turning = bool(normalize_rotation(rotation))
+    # 크기를 먼저 세어 두면 그림 전체를 만들지 않고 **캔버스에 걸리는 부분만** 뽑아
+    # 붙일 수 있다(`scaled_visible_part` / `rotated_visible_part` 주석 참조).
+    angle = normalize_rotation(rotation)
+    turning = bool(angle)
+    scaled_w, scaled_h = placed_size(base_image, scale)
     if turning:
-        placed = transform_base(base_image, scale, rotation)
-        placed_w, placed_h = placed.width, placed.height
+        # 회전 상자도 **픽셀을 돌리지 않고** 정확히 센다(`rotated_size` 주석 참조).
+        placed_w, placed_h = rotated_size(scaled_w, scaled_h, angle)
     else:
-        placed = None
-        placed_w, placed_h = placed_size(base_image, scale)
+        placed_w, placed_h = scaled_w, scaled_h
 
     if anchor is not None:
         anchor_x, anchor_y, ratio_u, ratio_v = anchor
@@ -329,27 +430,38 @@ def build_payload(
         canvas_w, canvas_h, placed_w, placed_h, offset_x, offset_y
     )
 
-    if turning:
-        canvas = compose_canvas(placed, canvas_w, canvas_h, offset_x, offset_y)
-        gap = uncovered_mask(
-            canvas_w, canvas_h, placed_w, placed_h, offset_x, offset_y,
-            coverage=coverage_mask(placed),
+    if turning and angle % 90.0 == 0.0:
+        # ⚠️ **직각은 옛 경로 그대로.** PIL 은 0/90/180/270 에서 리샘플이 아니라
+        #    `transpose`(정확한 픽셀 순열)를 쓴다(Pillow `Image.py:2404-2411`).
+        #    같은 각도를 아핀으로 태우면 알파 경계에서 보간이 달라 어긋난다
+        #    (실측: 90°/180° + 알파에서 42·60 픽셀이 1 씩 차이).
+        #    transpose 는 리샘플이 아니라 4배에서도 수십 ms 다.
+        placed = transform_base(base_image, scale, angle)
+        visible, paste_x, paste_y = placed, offset_x, offset_y
+    elif turning:
+        # 확대는 아직 전체를 만든다 - 그 단계까지 창으로 좁히면 LANCZOS 의 필터
+        # 위상이 달라져(측정: 채널당 1) 회전 결과가 예전과 어긋난다.
+        # 회전 단계만 좁혀도 4배에서 1049ms -> 캔버스 크기로 떨어진다.
+        scaled = transform_base(base_image, scale, 0.0)
+        visible, paste_x, paste_y = rotated_visible_part(
+            scaled, angle, placed_w, placed_h, canvas_w, canvas_h, offset_x, offset_y
         )
     else:
         visible, paste_x, paste_y = scaled_visible_part(
             base_image, placed_w, placed_h, canvas_w, canvas_h, offset_x, offset_y
         )
-        if visible is None:
-            # 화면 밖으로 완전히 나갔다 - `clamp_offset` 이 막지만, 막지 못한 판이
-            # 오더라도 캔버스는 비어 있을 뿐 예외가 나면 안 된다.
-            canvas = Image.new("RGB", (int(canvas_w), int(canvas_h)), CANVAS_BACKGROUND)
-            gap = Image.new("L", (int(canvas_w), int(canvas_h)), 255)
-        else:
-            canvas = compose_canvas(visible, canvas_w, canvas_h, paste_x, paste_y)
-            gap = uncovered_mask(
-                canvas_w, canvas_h, visible.width, visible.height, paste_x, paste_y,
-                coverage=coverage_mask(visible),
-            )
+
+    if visible is None:
+        # 화면 밖으로 완전히 나갔다 - `clamp_offset` 이 막지만, 막지 못한 판이
+        # 오더라도 캔버스는 비어 있을 뿐 예외가 나면 안 된다.
+        canvas = Image.new("RGB", (int(canvas_w), int(canvas_h)), CANVAS_BACKGROUND)
+        gap = Image.new("L", (int(canvas_w), int(canvas_h)), 255)
+    else:
+        canvas = compose_canvas(visible, canvas_w, canvas_h, paste_x, paste_y)
+        gap = uncovered_mask(
+            canvas_w, canvas_h, visible.width, visible.height, paste_x, paste_y,
+            coverage=coverage_mask(visible),
+        )
     if mask_is_empty(gap):
         gap = None
     merged = merge_masks(user_mask, gap) if (user_mask is not None or gap is not None) else None

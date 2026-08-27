@@ -462,6 +462,8 @@ export function createInpaintCanvasPanel({
       // **어디에 놓이는지**와 **얼마나 새 자리가 열리는지**를 유령으로 보여 준다.
       if (ghost) {
         ghost.hidden = false;
+        // 회전이 남긴 변환을 지운다 - 이동 유령은 좌상단 기준이다(같은 요소를 쓴다).
+        ghost.style.transform = '';
         ghost.style.left = `${(ox / w) * 100}%`;
         ghost.style.top = `${(oy / h) * 100}%`;
         ghost.style.width = `${(placedW / w) * 100}%`;
@@ -622,6 +624,22 @@ export function createInpaintCanvasPanel({
     const rotating = event.ctrlKey;
     const startScale = clampPct((Number(state.base_scale) || 1) * 100);
     const startRotation = wrapDeg(state.base_rotation);
+    const ghost = host.querySelector('[data-ic-ghost]');
+    // ⚠️ **`placed_*` 를 돌리면 안 된다.** 그건 이미 PIL 이 회전시킨 뒤의 축정렬
+    //    바운딩 박스라(`utils/v5_inpaint_canvas.transform_base` 의 `expand=True`),
+    //    그 사각형을 CSS 로 또 돌리면 두 번 부풀어 보인다(Codex 자문 2026-08-27).
+    //    유령은 **회전 전 사각형**(베이스 x 배율)을 지금 놓인 자리의 한가운데에
+    //    놓고 돌린다.
+    // ⚠️ 이 유령은 **각도와 대략의 자리**를 보여 주는 조작 피드백이다 - 서버 결과와
+    //    픽셀이 같다고 약속하지 않는다. 회전은 캔버스 한가운데를 붙잡으므로 그림이
+    //    많이 치우쳐 있으면 놓을 때 조금 어긋난다.
+    const scaleNow = Number(state.base_scale) || 1;
+    const preW = (Number(state.base_width) || 0) * scaleNow;
+    const preH = (Number(state.base_height) || 0) * scaleNow;
+    const cx = (Number(state.base_offset_x) || 0)
+      + (Number(state.placed_width) || preW) / 2;
+    const cy = (Number(state.base_offset_y) || 0)
+      + (Number(state.placed_height) || preH) / 2;
     const startY = event.clientY;
     const at = canvasPointOf(event);   // 누른 지점 = 크기의 기준점
     if (rotating) plane?.classList.add('is-rotate');
@@ -637,6 +655,17 @@ export function createInpaintCanvasPanel({
         const next = wrapDeg(startRotation + (angleOf(ev) - startAngle));
         sent = {key: 'rotation', value: next};
         applyTransform('rotation', next);
+        // 그림 자체는 서버가 다시 합성해야 돈다(놓을 때 한 번). 끄는 동안에는
+        // 유령이 각도를 보여 준다 - 예전에는 슬라이더 숫자만 바뀌고 화면에는
+        // 아무 반응이 없었다(사용자 지적 2026-08-27).
+        if (ghost && preW > 0 && preH > 0) {
+          ghost.hidden = false;
+          ghost.style.left = `${(cx / w) * 100}%`;
+          ghost.style.top = `${(cy / h) * 100}%`;
+          ghost.style.width = `${(preW / w) * 100}%`;
+          ghost.style.height = `${(preH / h) * 100}%`;
+          ghost.style.transform = `translate(-50%, -50%) rotate(${next}deg)`;
+        }
       } else {
         const next = clampPct(startScale + (startY - ev.clientY) / MIDDLE_SCALE_PX_PER_PCT);
         sent = {key: 'scale', value: next};
@@ -705,7 +734,8 @@ export function createInpaintCanvasPanel({
       onCommit: commit,
       onDragEnd: () => {
         // 재렌더가 유령을 지우지만, 커밋이 없어 다시 그리지 않는 경우도 있다.
-        stageEl?.querySelector('[data-ic-ghost]')?.setAttribute('hidden', '');
+        const spirit = stageEl?.querySelector('[data-ic-ghost]');
+        if (spirit) { spirit.setAttribute('hidden', ''); spirit.style.transform = ''; }
         render();
       },
     });

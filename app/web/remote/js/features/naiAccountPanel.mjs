@@ -468,13 +468,15 @@ export function createNaiAccountPanel({
     const policy = event.target.closest('[data-policy]');
     if (policy) {
       const key = policy.getAttribute('data-policy');
-      // 지목을 푸는 것도 이 버튼이 한다 - 같은 정책을 다시 눌러도 풀려야 한다.
-      if (state.forcedAccount) {
-        state.forcedAccount = '';
-        send({ type: 'nai_account_set_forced', account_id: '' });
-      }
-      if (key === state.policy) { renderPopover(); return; }
-      state.policy = key;          // 낙관적 반영 - 서버 스냅샷이 곧 확정한다.
+      // ⚠️ **커맨드는 하나다.** 예전에는 `set_forced('')` 를 먼저 보내고 이어서
+      //    `set_policy` 를 보냈는데, 그 사이는 원자적이지 않다 - 틈에 Auto Gen 이
+      //    토큰을 고르면 화면은 새 정책인데 실제 이미지는 옛 지목 계정으로 나간다
+      //    (Codex 리뷰 2026-08-27). 이제 서버의 `set_policy` 가 한 잠금 안에서
+      //    지목까지 푼다. 같은 정책을 다시 눌러도 보내는 이유가 그것이다.
+      const wasForced = !!state.forcedAccount;
+      state.forcedAccount = '';    // 낙관적 반영 - 서버 스냅샷이 곧 확정한다.
+      if (key === state.policy && !wasForced) { renderPopover(); return; }
+      state.policy = key;
       renderPopover();
       send({ type: 'nai_account_set_policy', policy: key });
     }

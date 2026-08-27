@@ -1060,8 +1060,17 @@ async def _stop_auto_generation_for_quota(
     elif context._coerce_bool(context.get_options().get("auto_generate", False)):
         context.set_option("auto_generate", False)
         messages.append({"type": "options", **context.get_options()})
+    # 기준이 상태에 따라 다르다 - 계정을 지목했으면 그 계정 하나가 기준이다.
+    # 그대로 "모든 계정" 이라 말하면 남은 무료 풀까지 마른 줄로 읽힌다.
+    try:
+        from core.nai_account_service import NaiAccountService
+
+        picked = NaiAccountService(context).forced_account()
+    except Exception:   # noqa: BLE001 - 문구 하나 때문에 정지 처리가 죽으면 안 된다
+        picked = ""
     messages.append(context._toast(
-        "모든 계정의 무료 사용량이 0% 입니다. 자동 생성을 해제했습니다.",
+        ("선택한 계정의 무료 사용량이 0% 입니다. 자동 생성을 해제했습니다."
+         if picked else "모든 계정의 무료 사용량이 0% 입니다. 자동 생성을 해제했습니다."),
         level="warning",
     ))
     for message in messages:

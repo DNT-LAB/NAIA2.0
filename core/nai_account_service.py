@@ -543,6 +543,8 @@ class NaiAccountService:
         data["accounts"] = [a for a in data["accounts"] if str(a.get("id")) != account_id]
         if len(data["accounts"]) == before:
             return {"ok": False, "message": "계정을 찾을 수 없습니다."}
+        # 지운 계정의 id 는 나중에 재사용된다 - 지목을 남기면 **남의 자리**로 간다.
+        self._drop_forced_if_unusable(data, {a for a, _ in self._active_rows(data)})
         self.save(data)
         # ⚠️ 토큰 삭제 실패를 삼키면 **지운 계정의 자격 증명이 저장소에 남는다.**
         # 명부에서 빠져 회전에는 안 들어가므로 생성은 멀쩡하지만, 사용자는 "지웠다"
@@ -568,6 +570,8 @@ class NaiAccountService:
                     break
             if not found:
                 return {"ok": False, "message": "계정을 찾을 수 없습니다."}
+        # 끈 계정이 지목돼 있었으면 그 지목도 함께 버린다(위 주석 참조).
+        self._drop_forced_if_unusable(data, {a for a, _ in self._active_rows(data)})
         self.save(data)
         return {"ok": True}
 
@@ -588,6 +592,11 @@ class NaiAccountService:
         """부하 분산 정책 선택. 모르는 값은 기본(라운드 로빈)으로 눕힌다.
 
         **지금 모델 계열의 칸에만 쓴다** - 다른 계열의 선택은 건드리지 않는다.
+
+        ⚠️ **지목 해제도 여기서 함께 한다**(Codex 리뷰 2026-08-27). 화면에서 두
+           커맨드(`set_forced('')` + `set_policy`)로 나눠 보냈더니 그 사이가 원자적이
+           아니었다 - 그 틈에 Auto Gen 이 토큰을 고르면 화면은 새 정책인데 실제
+           이미지는 옛 지목 계정으로 나간다. 한 잠금 안에서 같이 쓴다.
         """
         if uses_usage_limit is None:
             uses_usage_limit = context_uses_usage_limit(self.context)
@@ -595,12 +604,32 @@ class NaiAccountService:
         data = self.load()
         previous = normalize_policy(data.get(key), uses_usage_limit)
         data[key] = normalize_policy(policy, uses_usage_limit)
+        # 정책을 고르는 것은 "다시 나눠 써라" 는 뜻이다 - 지목은 그 자리에서 풀린다.
+        forced_cleared = bool(data.get(FORCED_ACCOUNT_KEY))
+        data[FORCED_ACCOUNT_KEY] = ""
         self.save(data)
         # 정책이 실제로 바뀌었으면 회전을 **처음부터** 다시 센다(사용자 지시
         # 2026-08-21). 이유는 `reset_rotation_counter` 주석 참조.
-        if data[key] != previous:
+        if data[key] != previous or forced_cleared:
             reset_rotation_counter(self.context)
-        return {"ok": True, "policy": data[key]}
+        return {"ok": True, "policy": data[key], FORCED_ACCOUNT_KEY: ""}
+
+    @staticmethod
+    def _drop_forced_if_unusable(data: dict[str, Any], usable: set[str]) -> bool:
+        """못 쓰게 된 지목을 **파일에서 지운다**. 지웠으면 True.
+
+        ⚠️ 숨기기만 하면 유령이 남는다(Codex 리뷰 2026-08-27). 스냅샷은 빈 값을
+           보내므로 화면도 지목을 모르고, 따라서 해제 커맨드도 안 나간다 - 그런데
+           파일에는 값이 남아 있어서 그 계정을 **다시 켜는 순간** 사용자가 고르지도
+           않은 단일 계정 모드로 돌아간다. 더 나쁜 경우: 지운 계정의 id 는
+           `next_account_id()` 가 다시 내주므로(`nai_token_1`), **다른 계정**이
+           그 지목을 물려받는다.
+        """
+        forced = str(data.get(FORCED_ACCOUNT_KEY) or "")
+        if forced and forced not in usable:
+            data[FORCED_ACCOUNT_KEY] = ""
+            return True
+        return False
 
     @staticmethod
     def _effective_forced(data: dict[str, Any], active_rows: list[dict[str, Any]]) -> str:

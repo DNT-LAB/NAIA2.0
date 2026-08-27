@@ -25,6 +25,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import WebSocket
 
 from app.backend.server.anlas_poller import schedule_subscription_refresh
+from app.backend.server.websocket_broadcast import broadcast_json
 from core import api_verification
 from core.nai_account_service import MAIN_ACCOUNT_ID, NaiAccountService
 
@@ -153,7 +154,16 @@ async def handle_nai_account_command(
         # 그걸 조용한 info 토스트로 흘리면 자격 증명이 남은 걸 아무도 모른다.
         "level": str(result.get("level") or ""),
     })
-    await _send_json(ws, _snapshot_payload(context))
+    # ⚠️ **보낸 탭에만 주면 안 된다.** 계정 구성은 백엔드 하나를 여럿이 나눠 쓰는
+    #    것이라, 탭 A 가 계정을 지목하면 탭 B 는 여전히 옛 지목을 그린다 - 화면은
+    #    "A 만 사용" 이라 말하는데 실제 생성은 B 로 나간다(Codex 리뷰 2026-08-27).
+    #    브로드캐스트되는 `nai_usage_update` 에는 지목값이 없어 스스로 낫지도 않는다.
+    #    (위쪽 두 스냅샷은 거절 응답과 단순 조회라 부른 탭에게만 답한다.)
+    snapshot = _snapshot_payload(context)
+    if clients:
+        await broadcast_json(clients, snapshot)
+    else:
+        await _send_json(ws, snapshot)
 
     # 계정 구성이 바뀌면 배지의 평균값도 바뀐다. 캐시를 버리고 다시 받는다
     # (비차단 - 이 커맨드 핸들러는 조회를 기다리지 않는다).

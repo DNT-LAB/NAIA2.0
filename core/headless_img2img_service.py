@@ -343,6 +343,9 @@ class HeadlessImg2ImgService:
             # 사용자가 칠한 마스크(캔버스 좌표). 빈 곳 마스크와는 따로 보관해야
             # 오프셋을 다시 옮겼을 때 칠한 것을 잃지 않는다.
             "user_mask_bytes": b"",
+            # 위 마스크가 **어느 캔버스에서** 칠해진 것인가(캔버스 픽셀).
+            # 캔버스 크기가 바뀌었을 때 늘릴지 넓힐지를 여기로 가른다.
+            "user_mask_canvas": (int(image.width), int(image.height)),
             "strength": 99 if clean_mode == "inpaint" else 70,
             "noise": 0,
             "repeat": 1,
@@ -675,6 +678,7 @@ class HeadlessImg2ImgService:
             # 캔버스 모드에서는 사용자가 칠한 것을 따로 붙잡아 둔다 - 오프셋을 다시
             # 옮기면 빈 곳 마스크가 달라지므로 합성을 매번 새로 해야 한다.
             context.img2img_session["user_mask_bytes"] = mask_bytes
+            context.img2img_session["user_mask_canvas"] = self._canvas_size(context.img2img_session)
             if context.img2img_session.get("canvas_active"):
                 return self._recompose_canvas()
         elif key == "clear_mask":
@@ -682,6 +686,7 @@ class HeadlessImg2ImgService:
             context.img2img_session["mask_preview"] = ""
             context.img2img_session["has_mask"] = False
             context.img2img_session["user_mask_bytes"] = b""
+            context.img2img_session["user_mask_canvas"] = self._canvas_size(context.img2img_session)
             if context.img2img_session.get("canvas_active"):
                 return self._recompose_canvas()
         elif key == "auto_mask":
@@ -921,7 +926,7 @@ class HeadlessImg2ImgService:
         """
         from PIL import Image
 
-        from utils.v5_inpaint_canvas import build_payload
+        from utils.v5_inpaint_canvas import build_payload, png_bytes
 
         state = self.context.img2img_session
         base = self._base_image()
@@ -940,8 +945,28 @@ class HeadlessImg2ImgService:
                 #    `merge_masks` 가 첫 겹의 크기를 기준으로 삼아 빈 곳 마스크까지
                 #    1/8 로 끌어내리고, `downscale_mask` 가 거기서 또 1/8 을 한다
                 #    -> 1/64. 캔버스 좌표로 되돌려 놓고 합쳐야 한다.
-                if user_mask.size != (canvas_w, canvas_h):
-                    user_mask = user_mask.resize((canvas_w, canvas_h), Image.Resampling.NEAREST)
+                # 1) 먼저 **자기 캔버스**로 되돌린다. 저장본은 1/8 축소본이라
+                #    그대로 넘기면 `merge_masks` 가 첫 겹의 크기를 기준으로 삼아
+                #    빈 곳 마스크까지 1/8 로 끌어내리고 `downscale_mask` 가 거기서
+                #    또 1/8 을 한다 -> 1/64.
+                own_w, own_h = self._user_mask_canvas(state, canvas_w, canvas_h)
+                if user_mask.size != (own_w, own_h):
+                    user_mask = user_mask.resize((own_w, own_h), Image.Resampling.NEAREST)
+                # 2) 그 뒤 캔버스가 바뀌었으면 **늘리지 말고** 넓히거나 잘라낸다.
+                #    칠한 자국은 "여기를 다시 그려라" 는 표시라 캔버스 좌표에 붙어
+                #    있어야 한다. 예전에는 새 크기로 resize 해서, 캔버스 비율을 바꾸면
+                #    얼굴에 칠한 자국이 얼굴 밖으로 미끄러졌다(실측 2026-08-27:
+                #    1216x832 -> 832x1216 에서 (300,204) 가 (205,298) 로 갔다).
+                #    캔버스 원점은 늘 좌상단이므로 그 기준으로 맞춘다.
+                if (own_w, own_h) != (canvas_w, canvas_h):
+                    moved = Image.new("L", (canvas_w, canvas_h), 0)
+                    moved.paste(user_mask, (0, 0))      # 넘치는 부분은 PIL 이 자른다
+                    user_mask = moved
+                    # 새 캔버스의 것으로 **다시 적어 둔다.** 안 그러면 다음 합성이
+                    # 또 옛 크기에서 시작해 같은 판단을 되풀이한다.
+                    state["user_mask_bytes"] = png_bytes(user_mask)
+                    state["user_mask_canvas"] = (canvas_w, canvas_h)
+                    state["mask_preview"] = self._mask_preview_data_url(user_mask)
             except Exception as exc:   # noqa: BLE001 - 마스크 하나 때문에 세션이 죽으면 안 된다
                 print(f"[v5-canvas] user mask unreadable: {exc}", flush=True)
                 user_mask = None
@@ -1035,11 +1060,9 @@ class HeadlessImg2ImgService:
                 print(f"[v5-canvas] painted mask unreadable, auto mask only: {exc}", flush=True)
         state["mode"] = "inpaint"
         state["user_mask_bytes"] = png_bytes(grown)
-        preview = grown.resize((canvas_w, canvas_h), Image.Resampling.NEAREST)
-        state["mask_preview"] = (
-            "data:image/png;base64,"
-            + base64.b64encode(png_bytes(preview)).decode("ascii")
-        )
+        state["user_mask_canvas"] = (canvas_w, canvas_h)
+        state["mask_preview"] = self._mask_preview_data_url(
+            grown.resize((canvas_w, canvas_h), Image.Resampling.NEAREST))
         print(f"[v5-canvas] auto mask: gap + {AUTO_MASK_RADIUS_PX}px edge", flush=True)
         return self._recompose_canvas()
 
@@ -1059,6 +1082,35 @@ class HeadlessImg2ImgService:
             state["preview"], state["preview_width"], state["preview_height"] = preview, pw, ph
             return self.module_state()
         return self._recompose_canvas()
+
+    @staticmethod
+    def _canvas_size(state: dict[str, Any]) -> tuple[int, int]:
+        """이 세션의 캔버스 크기(픽셀). 아직 없으면 베이스 크기다."""
+        return (int(state.get("canvas_width") or state.get("base_width") or 1),
+                int(state.get("canvas_height") or state.get("base_height") or 1))
+
+    @staticmethod
+    def _user_mask_canvas(state: dict[str, Any], canvas_w: int, canvas_h: int) -> tuple[int, int]:
+        """저장된 칠한 마스크가 **어느 캔버스**의 것인가.
+
+        적어 둔 것이 없으면(옛 세션) 지금 캔버스의 것으로 본다 - 예전 동작 그대로다.
+        """
+        own = state.get("user_mask_canvas")
+        if isinstance(own, (tuple, list)) and len(own) == 2:
+            try:
+                width, height = int(own[0]), int(own[1])
+                if width > 0 and height > 0:
+                    return width, height
+            except (TypeError, ValueError):
+                pass
+        return int(canvas_w), int(canvas_h)
+
+    @staticmethod
+    def _mask_preview_data_url(mask: Any) -> str:
+        """칠한 마스크의 화면용 data URL. 손으로 짜던 자리가 여럿이라 하나로 모은다."""
+        from utils.v5_inpaint_canvas import png_bytes
+
+        return "data:image/png;base64," + base64.b64encode(png_bytes(mask)).decode("ascii")
 
     def _set_canvas_size(self, value: Any) -> dict[str, Any]:
         from core.resolution_utils import parse_resolution_pair, snap_resolution_to_multiple

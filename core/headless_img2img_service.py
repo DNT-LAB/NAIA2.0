@@ -431,6 +431,11 @@ class HeadlessImg2ImgService:
             "main_prompt": str(state.get("main_prompt") or ""),
             "negative_prompt": str(state.get("negative_prompt") or ""),
             "characters": characters,
+            # ⚠️ `has_mask` 는 **칠한 것 + 빈 곳**을 합친 값이다 - 생성이 가능한가를
+            #    가리는 데는 맞지만, 화면의 라벨과 [지우기] 는 **칠한 것**에 대한
+            #    이야기다. 둘을 한 값으로 쓰면 회전만 해도 "마스크 있음" 이라 하고,
+            #    [지우기] 를 눌러도 표시가 안 바뀐다(사용자 제보 2026-08-27).
+            "has_user_mask": bool(state.get("user_mask_bytes")),
             "requires_mask": mode == "inpaint" and not bool(state.get("has_mask")),
             "can_generate": (
                 bool(state.get("image_bytes"))

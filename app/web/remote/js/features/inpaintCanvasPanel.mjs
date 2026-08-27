@@ -265,7 +265,12 @@ export function createInpaintCanvasPanel({
     const strength = Number.isFinite(Number(state.strength)) ? Number(state.strength) : 99;
     const noise = Number.isFinite(Number(state.noise)) ? Number(state.noise) : 0;
     const repeat = Number.isFinite(Number(state.repeat)) ? Number(state.repeat) : 1;
-    const masked = !!state.has_mask;
+    // ⚠️ 셋을 가른다. `has_mask` 는 **칠한 것 + 빈 곳**이라 회전만 해도 참이 된다 -
+    //    그걸 그대로 "마스크 있음" 이라 적으면 칠한 적 없는 사용자에게 거짓말이다
+    //    (사용자 제보 2026-08-27).
+    const painted = !!state.has_user_mask;      // 사람이 칠한 것
+    const masked = !!state.has_mask;            // 칠한 것 + 빈 곳(= 생성 가능 여부)
+    const gapOnly = masked && !painted;
     const genTitle = state.requires_mask
       ? ' title="생성 전에 마스크를 칠하거나 베이스를 옮겨 빈 자리를 여세요"' : '';
     return `
@@ -274,9 +279,14 @@ export function createInpaintCanvasPanel({
           <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>
           <button type="button" class="ic-btn" data-ic="auto-mask" ${editing ? '' : 'disabled'}
             title="빈 곳과 그 경계(16px)를 한 번에 칠합니다">자동 마스킹</button>
-          <span class="ic-mask-state${masked ? ' is-on' : ''}">${masked ? '마스크 있음' : '마스크 없음'}</span>
+          <span class="ic-mask-state${painted ? ' is-on' : ''}${gapOnly ? ' is-auto' : ''}"
+            title="${gapOnly
+              ? '베이스가 못 덮은 빈 곳이 자동으로 열립니다 - 직접 칠한 것은 없습니다'
+              : (painted ? '직접 칠한 마스크가 있습니다' : '아직 칠한 곳이 없습니다')}"
+            >${painted ? '마스크 있음' : (gapOnly ? '빈 곳 자동' : '마스크 없음')}</span>
           <button type="button" class="ic-btn" data-ic="clear-mask"
-            ${(masked && editing) ? '' : 'disabled'}>지우기</button>
+            ${(painted && editing) ? '' : 'disabled'}
+            title="직접 칠한 것만 지웁니다 (빈 곳은 베이스를 되돌려야 사라집니다)">지우기</button>
         </div>
         <div class="ic-row">
           <span class="ic-label">강도</span>

@@ -113,6 +113,62 @@ def transform_base(base_image: Image.Image, scale: Any = 1.0, rotation: Any = 0.
     return source
 
 
+def placed_size(base_image: Image.Image, scale: Any) -> tuple[int, int]:
+    """확대만 먹였을 때의 크기. `transform_base` 와 **같은 식**으로 센다.
+
+    ⚠️ 회전에는 쓰지 마라. 회전 상자는 PIL 의 반올림을 따로 재현할 수 없어 1px 씩
+       어긋나고, 그 어긋남이 매 조작마다 쌓인다(`build_payload` 주석 참조).
+       확대만이면 식이 한 줄이라 그럴 여지가 없다.
+    """
+    factor = clamp_scale(scale)
+    return (max(1, int(round(base_image.width * factor))),
+            max(1, int(round(base_image.height * factor))))
+
+
+def scaled_visible_part(
+    base_image: Image.Image, placed_w: int, placed_h: int,
+    canvas_w: int, canvas_h: int, offset_x: int, offset_y: int,
+) -> tuple[Image.Image | None, int, int]:
+    """확대한 그림 중 **캔버스에 걸리는 부분만** 만든다. `(그림, 붙일 x, 붙일 y)`.
+
+    ⚠️ 이게 이 파일에서 제일 값진 최적화다. 예전에는 4배 확대에서 3840x4352(16.7M
+       픽셀)를 통째로 만든 뒤 960x1088 캔버스에 붙였다 - 만든 것의 **94% 를 즉시
+       버렸다.** 실측(2026-08-27, 960x1088 베이스): 4배 확대 한 번이 230ms 였고 그중
+       227ms 가 이 리샘플이었다.
+
+    PIL 의 `resize(size, box=...)` 는 원본의 일부만 리샘플한다. 보이는 사각형만
+    캔버스 해상도로 뽑으면 비용이 **배율과 무관**해진다: 4배 199ms -> 20ms.
+    `compose_canvas` 와 `uncovered_mask` 는 어차피 붙이기만 하고 캔버스 밖은 PIL 이
+    잘라내므로, 잘려 나갈 것을 애초에 안 만드는 것뿐이다.
+
+    ⚠️ **완전히 같지는 않다.** 배율이 정수가 아니면(1.5x, 3x 등) box 의 끝이 원본의
+       소수 좌표에 떨어져 LANCZOS 필터의 위상이 미세하게 달라진다 - 실측: 채널당
+       **최대 1/255**, 그것도 일부 픽셀에서만. 기하(놓인 크기·오프셋)와 **마스크
+       바이트는 완전히 동일**하다. 즉 NAI 가 무엇을 다시 그릴지는 한 치도 안 바뀌고,
+       눈에 보이는 차이도 없다. 회귀 테스트가 이 경계(<=1)를 못 박는다.
+    """
+    left = max(0, -int(offset_x))
+    top = max(0, -int(offset_y))
+    right = min(int(placed_w), int(canvas_w) - int(offset_x))
+    bottom = min(int(placed_h), int(canvas_h) - int(offset_y))
+    if right <= left or bottom <= top:
+        return None, 0, 0
+    # 원본 좌표로 되돌린다. 배율이 아니라 **실제 놓인 크기**로 나눠야 반올림까지 맞는다.
+    source = base_image if base_image.mode in ("RGB", "RGBA") else base_image.convert("RGB")
+    if (placed_w, placed_h) == (source.width, source.height):
+        # 확대도 축소도 아니면 리샘플할 것이 없다 - 잘라내기만 한다(예전 경로도
+        # `transform_base` 에서 resize 를 건너뛰었다. 여기서도 건너뛰어야 1.0배가
+        # 예전보다 느려지지 않는다).
+        if (left, top, right, bottom) == (0, 0, source.width, source.height):
+            return source, int(offset_x), int(offset_y)      # 통째로 보인다 - 복사도 아깝다
+        return source.crop((left, top, right, bottom)), int(offset_x) + left, int(offset_y) + top
+    sx = source.width / float(placed_w)
+    sy = source.height / float(placed_h)
+    box = (left * sx, top * sy, right * sx, bottom * sy)
+    visible = source.resize((right - left, bottom - top), Image.Resampling.LANCZOS, box=box)
+    return visible, int(offset_x) + left, int(offset_y) + top
+
+
 def coverage_mask(image: Image.Image) -> Image.Image:
     """이 그림이 **실제로 색을 칠하는** 자리(흰색). 투명한 곳은 검정."""
     if image.mode == "RGBA":
@@ -254,19 +310,46 @@ def build_payload(
        잡는다 - 회전 상자 공식을 따로 세우면 PIL 의 반올림과 1px 씩 어긋나고, 그
        어긋남이 매 조작마다 쌓인다.
     """
-    placed = transform_base(base_image, scale, rotation)
+    # 회전이 없으면 놓인 크기를 한 줄로 셀 수 있다 - 그러면 그림 전체를 만들지 않고
+    # **보이는 부분만** 뽑아 붙일 수 있다(`scaled_visible_part` 주석 참조).
+    # 회전이 있으면 예전 그대로 - 회전 상자는 미리 셀 수 없다.
+    turning = bool(normalize_rotation(rotation))
+    if turning:
+        placed = transform_base(base_image, scale, rotation)
+        placed_w, placed_h = placed.width, placed.height
+    else:
+        placed = None
+        placed_w, placed_h = placed_size(base_image, scale)
+
     if anchor is not None:
         anchor_x, anchor_y, ratio_u, ratio_v = anchor
-        offset_x = int(round(anchor_x - ratio_u * placed.width))
-        offset_y = int(round(anchor_y - ratio_v * placed.height))
+        offset_x = int(round(anchor_x - ratio_u * placed_w))
+        offset_y = int(round(anchor_y - ratio_v * placed_h))
     offset_x, offset_y = clamp_offset(
-        canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y
+        canvas_w, canvas_h, placed_w, placed_h, offset_x, offset_y
     )
-    canvas = compose_canvas(placed, canvas_w, canvas_h, offset_x, offset_y)
-    gap = uncovered_mask(
-        canvas_w, canvas_h, placed.width, placed.height, offset_x, offset_y,
-        coverage=coverage_mask(placed),
-    )
+
+    if turning:
+        canvas = compose_canvas(placed, canvas_w, canvas_h, offset_x, offset_y)
+        gap = uncovered_mask(
+            canvas_w, canvas_h, placed_w, placed_h, offset_x, offset_y,
+            coverage=coverage_mask(placed),
+        )
+    else:
+        visible, paste_x, paste_y = scaled_visible_part(
+            base_image, placed_w, placed_h, canvas_w, canvas_h, offset_x, offset_y
+        )
+        if visible is None:
+            # 화면 밖으로 완전히 나갔다 - `clamp_offset` 이 막지만, 막지 못한 판이
+            # 오더라도 캔버스는 비어 있을 뿐 예외가 나면 안 된다.
+            canvas = Image.new("RGB", (int(canvas_w), int(canvas_h)), CANVAS_BACKGROUND)
+            gap = Image.new("L", (int(canvas_w), int(canvas_h)), 255)
+        else:
+            canvas = compose_canvas(visible, canvas_w, canvas_h, paste_x, paste_y)
+            gap = uncovered_mask(
+                canvas_w, canvas_h, visible.width, visible.height, paste_x, paste_y,
+                coverage=coverage_mask(visible),
+            )
     if mask_is_empty(gap):
         gap = None
     merged = merge_masks(user_mask, gap) if (user_mask is not None or gap is not None) else None
@@ -281,8 +364,8 @@ def build_payload(
         "height": int(canvas.height),
         "offset_x": offset_x,
         "offset_y": offset_y,
-        "placed_width": int(placed.width),
-        "placed_height": int(placed.height),
+        "placed_width": int(placed_w),
+        "placed_height": int(placed_h),
         "scale": clamp_scale(scale),
         "rotation": normalize_rotation(rotation),
         "has_mask": merged is not None and not mask_is_empty(merged),

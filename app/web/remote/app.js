@@ -2291,7 +2291,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260827-rot1')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260827-fb2')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -7426,7 +7426,13 @@ function scheduleInitialRandomPrompt(delay = 350) {
  *     "버튼을 눌렀다" 와 "무언가가 생성을 요청했다" 는 다른 일이다.
  */
 function generateAction() {
-  if (virtualCharacterSession()) { img2imgPanel?.generate?.(); return; }
+  if (virtualCharacterSession()) {
+    // 도크의 [인페인트 생성] 과 **같은 문**을 지난다 - 마스크가 없으면 거기서
+    // 무엇을 하면 되는지 말해 준다(사용자 지정 2026-08-27).
+    if (inpaintCanvasControl?.canGenerate?.() === false) return;
+    img2imgPanel?.generate?.();
+    return;
+  }
   send('generate');
 }
 

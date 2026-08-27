@@ -77,6 +77,18 @@ export function createInpaintCanvasPanel({
   let viewMode = 'edit';
   // 드래그 중 계산한 베이스 오프셋. DOM 에 붙여 두면 재렌더에 함께 날아간다.
   let pendingOffset = null;
+  // [자동 마스킹] 을 누른 뒤 결과를 기다리는 중인가(사용자 지정 2026-08-27:
+  // "시각적 피드백이 필요하다"). 칠하는 데 성공하면 상태가 오고, 그때 한 번
+  // 번쩍이며 말해 준다.
+  //
+  // ⚠️ **빈 곳이 없으면 상태가 아예 안 온다.** 백엔드가 module_state 대신 토스트
+  //    하나만 돌려주기 때문이다(`_auto_mask` 의 "빈 곳이 없습니다"). 그래서 이
+  //    깃발은 시간으로도 내려간다 - 안 그러면 켜진 채 남아 **다음 상태**에서
+  //    엉뚱하게 "칠했습니다" 라고 말한다.
+  let autoMaskPending = false;
+  let autoMaskTimer = 0;
+  // 방금 칠한 것을 한 번 번쩍여 눈에 알린다. 그리고 나면 꺼진다(계속 깜빡이면 방해다).
+  let flashMask = false;
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
   let rangeDragging = false;
   const transformTimers = {};
@@ -134,6 +146,17 @@ export function createInpaintCanvasPanel({
 
   // ── 렌더 ────────────────────────────────────────────────────────────────
   function render(next) {
+    // [자동 마스킹] 의 답이 도착했다. 빈 곳이 없으면 화면이 거의 안 바뀌므로
+    // **무슨 일이 있었는지 말해 준다** - 눌렀는데 조용하면 고장으로 읽힌다.
+    if (autoMaskPending && next && next.module_id === 'img2img') {
+      autoMaskPending = false;
+      clearTimeout(autoMaskTimer);
+      // 실패(빈 곳 없음)는 백엔드가 이미 말한다 - 여기서 또 말하면 두 번 뜬다.
+      if (next.has_mask) {
+        showToast?.('빈 곳과 그 경계를 칠했습니다', 'success');
+        flashMask = true;                 // 아래 renderPlane 이 한 번 번쩍인다
+      }
+    }
     if (next) state = next;
     if (!panel) return;
     // ⚠️ 조작 중에는 절대 다시 그리지 않는다(posStage 규칙 1). 서버 echo 가 와도
@@ -267,7 +290,7 @@ export function createInpaintCanvasPanel({
           <span class="ic-label">반복</span>
           <input class="ic-num" type="number" min="1" max="99" value="${repeat}" data-ic-num="repeat" aria-label="반복">
           <span class="ic-spacer"></span>
-          <button type="button" class="ic-btn ic-btn-go" data-ic="generate" ${state.can_generate ? '' : 'disabled'}${genTitle}>인페인트 생성</button>
+          <button type="button" class="ic-btn ic-btn-go${masked ? '' : ' is-blocked'}" data-ic="generate"${genTitle}>인페인트 생성</button>
           <button type="button" class="ic-btn ic-btn-end" data-ic="close">세션 닫기</button>
         </div>
       </section>
@@ -293,6 +316,10 @@ export function createInpaintCanvasPanel({
       <div class="ic-stage" data-ic-stage="1">
         ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}
         ${showGrid ? gridSvg(w, h, {className: 'ic-grid pos-grid'}) : ''}
+        ${state.mask_preview
+          ? `<div class="ic-mask${flashMask ? ' is-flash' : ''}"
+              style="--ic-mask-url:url('${escHtml(state.mask_preview)}')"></div>`
+          : ''}
         <div class="ic-ghost" data-ic-ghost="1" hidden></div>
         ${chars.map(c => {
           const p = contentToPercent(c.position.x, c.position.y, w, h);
@@ -306,6 +333,8 @@ export function createInpaintCanvasPanel({
       </div>
     `;
     stageEl = plane.querySelector('[data-ic-stage]');
+    // 번쩍임은 **한 번뿐**이다. 안 끄면 다음 렌더마다 다시 번쩍여 방해가 된다.
+    flashMask = false;
     fitStage();
   }
 
@@ -349,6 +378,28 @@ export function createInpaintCanvasPanel({
     else applyTransform('rotation', wrapDeg((Number(state.base_rotation) || 0) + delta));
   }
 
+  /** 지금 인페인트 생성을 보낼 수 있는가. 안 되면 **이유를 말하고** false.
+   *
+   *  ⚠️ 예전에는 버튼을 `disabled` 로 뒀다. 눌리지 않는 버튼은 왜 안 되는지 알려
+   *     주지 않는다 - 사용자는 "버튼이 죽었다" 로만 본다(사용자 지정 2026-08-27).
+   *  ⚠️ 마스크가 없으면 백엔드도 `Inpaint mask is required` 로 거절한다. 여기서
+   *     먼저 막는 것은 그 거절을 **한국어로, 무엇을 하면 되는지와 함께** 돌려주기
+   *     위해서다.
+   */
+  function canGenerateNow() {
+    if (!state) return false;
+    if (!state.has_mask) {
+      showToast?.('칠한 곳이 없습니다 - [마스크 그리기] 로 고칠 곳을 칠하거나, '
+        + '베이스를 옮겨 빈 자리를 연 뒤 [자동 마스킹] 을 누르세요', 'error');
+      return false;
+    }
+    if (state.can_generate === false) {
+      showToast?.('지금은 생성할 수 없습니다 (앞선 요청이 끝나기를 기다리는 중)', 'error');
+      return false;
+    }
+    return true;
+  }
+
   function applyTransform(key, value, at) {
     if (!state) return;
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
@@ -387,10 +438,24 @@ export function createInpaintCanvasPanel({
     // 90° 는 자주 쓰는 자리라 한 번에 간다 - 슬라이더로 정확히 90 을 맞추기는 번거롭다.
     if (action === 'rot-quarter') return nudge('rotation', 90);
     if (action === 'mask') return openMaskEditor();
-    if (action === 'auto-mask') return send('auto_mask', 'true');
+    if (action === 'auto-mask') {
+      // 자동 마스킹은 화면이 거의 안 바뀔 수 있다(빈 곳이 없으면 아무것도 안 칠한다).
+      // 눌렀는데 아무 말이 없으면 고장으로 읽힌다 - 결과는 상태가 도착할 때 말한다.
+      autoMaskPending = true;
+      clearTimeout(autoMaskTimer);
+      autoMaskTimer = setTimeout(() => { autoMaskPending = false; }, 4000);
+      return send('auto_mask', 'true');
+    }
     if (action === 'clear-mask') return send('clear_mask', 'true');
     // ⚠️ 생성/닫기 전에 미뤄 둔 변형을 먼저 보낸다 - 순서가 뒤집히면 옛 그림으로 굽는다.
-    if (action === 'generate') { flushTransforms(); return onGenerate(); }
+    if (action === 'generate') {
+      // ⚠️ **막되 말해 준다.** 예전에는 `disabled` 로 뒀는데, 눌리지 않는 버튼은
+      //    왜 안 되는지 알려 주지 않는다(사용자 지정 2026-08-27: "누를 수 있어도
+      //    상관없는데 차단하고 피드백을 줄 수 있어야 한다").
+      if (!canGenerateNow()) return;
+      flushTransforms();
+      return onGenerate();
+    }
     if (action === 'close') { flushTransforms(); return onClose(); }
   }
 
@@ -778,5 +843,8 @@ export function createInpaintCanvasPanel({
     handleModuleState(payload) {
       if (payload && payload.module_id === 'img2img') render(payload);
     },
+    /** 큰 Generate 버튼도 **같은 문**을 지나야 한다. 도크 버튼만 막으면 큰 버튼으로
+     *  마스크 없이 나가고, 백엔드가 영어로 거절할 뿐 무엇을 하면 되는지는 못 듣는다. */
+    canGenerate: () => canGenerateNow(),
   };
 }

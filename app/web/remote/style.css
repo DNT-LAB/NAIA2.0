@@ -26325,6 +26325,36 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 끄는 동안의 유령. 베이스가 놓일 자리를 점선으로 두르고, **바깥을 어둡게** 깐다 -
    그 어두운 부분이 곧 새로 열릴 자리다(자르기 도구와 같은 몸짓).
    ⚠️ `box-shadow` 로 바깥을 덮는다. div 넷을 두면 프레임마다 넷을 다시 재게 된다. */
+/* 칠한 마스크를 캔버스 위에 겹쳐 보여 준다(사용자 지정 2026-08-27).
+   여태 캔버스는 마스크를 아예 안 그려서, [자동 마스킹] 을 눌러도 화면이 안 바뀌면
+   눌린 건지 알 수 없었다. 색은 기존 마스크 오버레이(`mod-img2img-source-mask`)와
+   같은 계열의 파랑이다. */
+.ic-mask {
+  position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: rgba(64, 96, 255, 0.42);
+  -webkit-mask-image: var(--ic-mask-url);
+  mask-image: var(--ic-mask-url);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+/* 방금 자동 마스킹이 칠한 순간에만 한 번 번쩍인다 - "눌렀다" 를 눈으로 알린다. */
+.ic-mask.is-flash { animation: ic-mask-flash 620ms ease-out 1; }
+@keyframes ic-mask-flash {
+  0%   { background: rgba(120, 200, 255, 0.85); }
+  100% { background: rgba(64, 96, 255, 0.42); }
+}
+
+/* 마스크가 없어 지금은 생성할 수 없는 상태. **막되 눌리기는 한다** - 눌러야
+   왜 안 되는지 말해 줄 수 있다(사용자 지정 2026-08-27). */
+.ic-btn-go.is-blocked { opacity: 0.55; }
+
+/* 캔버스의 숫자 표식은 **POS 편집 중에만** 보인다. 늘 띄워 두면 그림을 가린다
+   (사용자 지적 2026-08-27). 좌표를 고치는 자리는 어차피 POS 편집 하나뿐이다. */
+.ic-marker { display: none; }
+.viewer.is-cq-posedit .ic-marker { display: inline-flex; }
+
 .ic-ghost {
   position: absolute; pointer-events: none; z-index: 2;
   border: 1px dashed rgba(255,255,255,0.85);

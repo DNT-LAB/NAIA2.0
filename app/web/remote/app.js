@@ -2291,7 +2291,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260827-fb4')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260827-fb5')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -6092,7 +6092,11 @@ function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh();
 // 업스케일은 모델을 안 받는 별도 엔드포인트(`/ai/upscale`)라 V5 에서도 그냥 된다 -
 // img2img 계열처럼 4.5 로 대체할 필요가 없다.
 function requestResultUpscale() {
-  callResultImageAction('upscaleFromContext', {source: 'current'});
+  // ⚠️ **`source:'current'` 는 "마지막 생성물" 이다.** 히스토리에서 예전 그림을
+  //    보다가 눌러도 서버는 최신 항목을 집어 **엉뚱한 그림에 Anlas 를 쓴다**
+  //    (Codex 리뷰 2026-08-27). Inpaint 는 이미 고쳤는데 Upscale 만 남아 있었다 -
+  //    같은 표(`displayedImageContext`)를 쓴다.
+  callResultImageAction('upscaleFromContext', displayedImageContext());
 }
 
 /** 지금 **보고 있는** 그림이 무엇인지 백엔드에 말해 주는 표. Director 와 같은 규약이다. */
@@ -7427,10 +7431,10 @@ function scheduleInitialRandomPrompt(delay = 350) {
  */
 function generateAction() {
   if (virtualCharacterSession()) {
-    // 도크의 [인페인트 생성] 과 **같은 문**을 지난다 - 마스크가 없으면 거기서
-    // 무엇을 하면 되는지 말해 준다(사용자 지정 2026-08-27).
-    if (inpaintCanvasControl?.canGenerate?.() === false) return;
-    img2imgPanel?.generate?.();
+    // ⚠️ 도크의 [인페인트 생성] 과 **같은 함수**를 부른다. 예전에는 여기서 가드만
+    //    빌려 쓰고 생성은 직접 불렀는데, 그러다 `flushTransforms()` 를 빠뜨려
+    //    **옛 배치로 유료 요청**이 나갔다(Codex 리뷰 2026-08-27).
+    inpaintCanvasControl?.generate?.();
     return;
   }
   send('generate');

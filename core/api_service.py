@@ -3012,7 +3012,6 @@ class APIService:
 
             print(f"🔍 NAI Upscale API 호출 중... (원본: {width}x{height})")
             route, response = self._post_nai_upscale(img_base64, width, height, token, model_key)
-            self._last_upscale_route = route
 
             if response.status_code not in (200, 201):
                 error_msg = f"API 에러 (코드: {response.status_code})"
@@ -3052,7 +3051,10 @@ class APIService:
                 upscaled_width = upscaled_width_attr() if callable(upscaled_width_attr) else upscaled_width_attr
                 upscaled_height = upscaled_height_attr() if callable(upscaled_height_attr) else upscaled_height_attr
 
-                legacy = getattr(self, "_last_upscale_route", "new") == "legacy"
+                # ⚠️ 경로는 **이 요청의 지역 값**이다. 인스턴스에 담아 두면 두 탭이
+                #    동시에 업스케일할 때 한쪽의 폴백 경고가 다른 쪽에 붙는다
+                #    (Codex 리뷰 2026-08-27).
+                legacy = route == "legacy"
                 print(f"[upscale] ok route={'legacy' if legacy else 'new'} "
                       f"{width}x{height} -> {upscaled_width}x{upscaled_height}", flush=True)
 

@@ -967,10 +967,12 @@ class HeadlessImg2ImgService:
                     moved = Image.new("L", (canvas_w, canvas_h), 0)
                     moved.paste(user_mask, (0, 0))      # 넘치는 부분은 PIL 이 자른다
                     user_mask = moved
-                    # 새 캔버스의 것으로 **다시 적어 둔다.** 안 그러면 다음 합성이
-                    # 또 옛 크기에서 시작해 같은 판단을 되풀이한다.
-                    state["user_mask_bytes"] = png_bytes(user_mask)
-                    state["user_mask_canvas"] = (canvas_w, canvas_h)
+                    # ⚠️ **잘린 것을 저장하지 않는다.** 한때 여기서 새 크기로 다시
+                    #    적었는데, 캔버스를 줄이면 바깥으로 나간 자국이 **영영**
+                    #    사라져 다시 넓혀도 못 돌아왔다(Codex 리뷰 2026-08-27).
+                    #    저장본은 칠할 때의 캔버스 그대로 두고, 쓸 때만 맞춘다 -
+                    #    줄였다 넓히면 가려졌던 자국이 그대로 돌아온다.
+                    #    화면용 미리보기는 지금 캔버스 기준이라 여기서 만든다.
                     state["mask_preview"] = self._mask_preview_data_url(user_mask)
             except Exception as exc:   # noqa: BLE001 - 마스크 하나 때문에 세션이 죽으면 안 된다
                 print(f"[v5-canvas] user mask unreadable: {exc}", flush=True)

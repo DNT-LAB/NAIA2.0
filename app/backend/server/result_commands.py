@@ -331,6 +331,28 @@ def _history_item_from_result_payload(context: WebSessionContext, payload: dict[
     return item
 
 
+def _upscale_token(context: WebSessionContext) -> str:
+    """Upscale 에 쓸 토큰. 지목한 계정이 있으면 그 계정, 없으면 기본값(메인).
+
+    ⚠️ 부하 분산 **정책**은 여기 안 태운다. 정책은 "생성을 나눠 담는" 규칙이고
+       Upscale 은 그 회전에 들어 있지 않다 - 여기서 회전시키면 다음 생성의 차례가
+       엉킨다. 사용자가 **명시적으로 지목한** 계정만 존중한다.
+    """
+    try:
+        from core.nai_account_service import NaiAccountService
+
+        service = NaiAccountService(context)
+        forced = service.forced_account()
+        if not forced:
+            return ""
+        for account_id, token in service.active_accounts():
+            if account_id == forced:
+                return token
+    except Exception as exc:   # noqa: BLE001 - 계정 하나 때문에 업스케일이 죽으면 안 된다
+        print(f"[warn] upscale account pick failed: {exc}", flush=True)
+    return ""
+
+
 def perform_nai_result_upscale(context: WebSessionContext, payload: dict[str, Any] | None):
     if context.get_api_mode() != "NAI":
         raise RuntimeError("NAI 2x upscale is available in NAI mode only")
@@ -341,7 +363,11 @@ def perform_nai_result_upscale(context: WebSessionContext, payload: dict[str, An
 
         service = APIService(context)
         context.api_service = service
-    result = service.upscale_NAI(None, raw_bytes=image_bytes)
+    # ⚠️ 토큰을 안 주면 `upscale_NAI` 가 메인 계정을 읽는다 - 사용자가 "이 계정만
+    #    사용" 으로 보조 계정을 지목해 놓아도 **Upscale 만 메인에서 빠져나간다**
+    #    (Codex 리뷰 2026-08-27). 화면이 가리키는 계정과 실제 과금이 갈린다.
+    result = service.upscale_NAI(None, raw_bytes=image_bytes,
+                                 token=_upscale_token(context))
     if not isinstance(result, dict) or result.get("status") != "success":
         raise RuntimeError(str((result or {}).get("message") or "NAI upscale failed"))
 

@@ -410,6 +410,20 @@ export function createInpaintCanvasPanel({
     return true;
   }
 
+  /** 인페인트 생성으로 가는 **유일한 문**.
+   *
+   *  ⚠️ 도크 버튼과 큰 `Generate (Inpaint)` 가 각자 이 일을 하면 한쪽이 빠뜨린다 -
+   *     실제로 큰 버튼이 `flushTransforms()` 를 빠뜨려, 옮기고 120ms 안에 누르면
+   *     **옛 배치로 유료 요청**이 나갔다(Codex 리뷰 2026-08-27). 예전 라운드가
+   *     잡았던 바로 그 버그를 새 진입점으로 되살린 셈이다.
+   */
+  function requestGenerate() {
+    if (!canGenerateNow()) return false;
+    flushTransforms();
+    onGenerate();
+    return true;
+  }
+
   function applyTransform(key, value, at) {
     if (!state) return;
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
@@ -449,6 +463,11 @@ export function createInpaintCanvasPanel({
     if (action === 'rot-quarter') return nudge('rotation', 90);
     if (action === 'mask') return openMaskEditor();
     if (action === 'auto-mask') {
+      // ⚠️ **여기도 flush 가 먼저다.** 빈 곳은 지금 배치에서 계산되는데, 미뤄 둔
+      //    변형이 남아 있으면 서버는 **옛 배치**로 칠하고 그 결과가 사용자 마스크로
+      //    굳는다 - 나중에 변형이 도착해도 엉뚱한 자리가 생성 대상으로 남는다
+      //    (Codex 리뷰 2026-08-27).
+      flushTransforms();
       // 자동 마스킹은 화면이 거의 안 바뀔 수 있다(빈 곳이 없으면 아무것도 안 칠한다).
       // 눌렀는데 아무 말이 없으면 고장으로 읽힌다 - 결과는 상태가 도착할 때 말한다.
       autoMaskPending = true;
@@ -458,14 +477,7 @@ export function createInpaintCanvasPanel({
     }
     if (action === 'clear-mask') return send('clear_mask', 'true');
     // ⚠️ 생성/닫기 전에 미뤄 둔 변형을 먼저 보낸다 - 순서가 뒤집히면 옛 그림으로 굽는다.
-    if (action === 'generate') {
-      // ⚠️ **막되 말해 준다.** 예전에는 `disabled` 로 뒀는데, 눌리지 않는 버튼은
-      //    왜 안 되는지 알려 주지 않는다(사용자 지정 2026-08-27: "누를 수 있어도
-      //    상관없는데 차단하고 피드백을 줄 수 있어야 한다").
-      if (!canGenerateNow()) return;
-      flushTransforms();
-      return onGenerate();
-    }
+    if (action === 'generate') return requestGenerate();
     if (action === 'close') { flushTransforms(); return onClose(); }
   }
 
@@ -853,8 +865,8 @@ export function createInpaintCanvasPanel({
     handleModuleState(payload) {
       if (payload && payload.module_id === 'img2img') render(payload);
     },
-    /** 큰 Generate 버튼도 **같은 문**을 지나야 한다. 도크 버튼만 막으면 큰 버튼으로
-     *  마스크 없이 나가고, 백엔드가 영어로 거절할 뿐 무엇을 하면 되는지는 못 듣는다. */
-    canGenerate: () => canGenerateNow(),
+    /** 큰 Generate 버튼이 지나는 문. 도크 버튼과 **같은 함수**다 - 가드도 flush 도
+     *  한 자리에 있어야 한 쪽만 빠뜨리는 일이 없다. */
+    generate: () => requestGenerate(),
   };
 }

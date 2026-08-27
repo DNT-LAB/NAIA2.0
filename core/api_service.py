@@ -2873,7 +2873,96 @@ class APIService:
             traceback.print_exc()
             return {'status': 'error', 'message': f'Auto-outpainting 실패: {e}'}
 
-    def upscale_NAI(self, pixmap: Any, token: str = None, raw_bytes: bytes = None) -> Dict[str, Any]:
+    # ── NAI Upscale ────────────────────────────────────────────────────────
+    #
+    # ⚠️ **같은 경로에 서로 다른 API 가 둘 있다.**(Swagger 대조 2026-08-27)
+    #
+    #   구형  `api.novelai.net/ai/upscale`   (NovelAI Primary API)
+    #         AiUpscaleImageRequest = {image, width, height, scale(2|4)}
+    #   신형  `image.novelai.net/ai/upscale` (Omegalaser API) <- 공식 사이트가 쓰는 것
+    #         image.UpscaleRequest = {image, model, declared_blur_sigma?}
+    #         "NovelAI's **standalone upscaler**"
+    #
+    # 신형에는 width/height/scale 이 **아예 없고** 대신 `model` 이 있다. 사용자 제보:
+    # 같은 그림이 공식 사이트에서 1 Anlas, NAIA 에서 7 Anlas 였다 - NAIA 만 구형
+    # 스키마를 구형 호스트로 보내고 있었다(2026-07 `229f558d` 은 공지가 `/user/*`
+    # 만 다뤄서 여기를 일부러 안 옮겼다. 근거가 바뀌었다).
+    #
+    # ⚠️ 배율은 이제 **서버가 정한다**(신형에 scale 이 없다). 부르는 쪽은 돌아온
+    #    크기를 그대로 쓴다 - 어디서도 ×2 를 가정하지 않는다.
+    NAI_UPSCALE_URL = "https://image.novelai.net/ai/upscale"
+    NAI_UPSCALE_LEGACY_URL = "https://api.novelai.net/ai/upscale"
+
+    # 신형 업스케일러가 받아 주는 모델 이름. **실측 2026-08-27**:
+    #   nai-diffusion-5-full     200
+    #   nai-diffusion-5-curated  200
+    #   nai-diffusion-4-5-full   400 "doesn't support standalone upscaling"
+    #   nai-diffusion-4-full     400 (동일)   ·  nai-diffusion-3  400 (동일)
+    NAI_UPSCALE_MODELS = ("nai-diffusion-5-full", "nai-diffusion-5-curated")
+
+    def _nai_upscale_model_name(self, model_key: Any = None) -> str:
+        """신형 업스케일에 실을 모델 이름.
+
+        ⚠️ **원본이 무엇으로 생성됐는지는 상관없다.** 업스케일러는 올려 보낸 픽셀만
+           본다 - `model` 은 "어느 업스케일러를 쓸 것인가" 를 고르는 값이고, 그걸
+           가진 것은 V5 계열뿐이다. 그래서 4.5 로 만든 그림도 V5 이름으로 올린다.
+           지금 세션 모델을 그대로 실으면 4.5 사용자는 400 을 맞고 구형으로 물러나
+           **7배를 계속 낸다**(실측: 같은 그림 신형 1 Anlas vs 구형 7 Anlas).
+        """
+        try:
+            from core.nai_model_contract import resolve_nai_model_for_context
+
+            key = model_key or self.app_context._current_model_key()
+            current = str(resolve_nai_model_for_context(self.app_context, key).api_model or "")
+        except Exception:   # noqa: BLE001 - 이름 하나 때문에 업스케일이 죽으면 안 된다
+            current = ""
+        # 지금 모델이 이미 업스케일러를 가졌으면 그대로 쓰고, 아니면 기본값.
+        return current if current in self.NAI_UPSCALE_MODELS else self.NAI_UPSCALE_MODELS[0]
+
+    def _post_nai_upscale(self, image_b64: str, width: int, height: int,
+                          token: str, model_key: Any = None):
+        """신형으로 먼저 보내고, 거절당하면 구형으로 한 번 물러난다.
+
+        ⚠️ **말없이 물러나지 않는다.** 구형은 같은 그림에 몇 배를 물리므로, 조용히
+           폴백하면 사용자는 계속 비싸게 쓰면서 그 사실을 모른다. 어느 길로 갔는지
+           호출부에 돌려주고 화면 메시지에 남긴다.
+        """
+        model = self._nai_upscale_model_name(model_key)
+        attempts = [
+            ("new", self.NAI_UPSCALE_URL, {"image": image_b64, "model": model}),
+            # NAI 가 신형을 거절하면(모델 목록이 바뀌는 등) 여기로 물러난다. 구형은
+            # 같은 그림에 7배를 물리므로 **조용히 물러나지 않는다** - 호출부가
+            # 어느 길로 갔는지 화면에 적는다.
+            ("legacy", self.NAI_UPSCALE_LEGACY_URL,
+             {"image": image_b64, "width": width, "height": height, "scale": 2}),
+        ]
+
+        last = None
+        for index, (route, url, body) in enumerate(attempts):
+            with requests.Session() as session:
+                response = session.post(url, json=body,
+                                        headers={"Authorization": f"Bearer {token}"},
+                                        timeout=60)
+                session.close()
+                if hasattr(session, "adapters"):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, "poolmanager") and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            self._cleanup_http_threads()
+            last = (route, response)
+            if response.status_code in (200, 201):
+                return route, response
+            # 4xx 면 스키마/모델 문제일 수 있으니 남은 길을 시도한다. 5xx 는 서버
+            # 문제라 다시 물어도 같은 답이 오므로 그대로 돌려준다.
+            if index + 1 < len(attempts) and 400 <= response.status_code < 500:
+                print(f"[upscale] {route} rejected ({response.status_code}) - falling back",
+                      flush=True)
+                continue
+            break
+        return last
+
+    def upscale_NAI(self, pixmap: Any, token: str = None, raw_bytes: bytes = None,
+                    model_key: Any = None) -> Dict[str, Any]:
         """
         NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
 
@@ -2921,35 +3010,11 @@ class APIService:
                 with Image.open(io.BytesIO(image_bytes)) as source_image:
                     width, height = source_image.size
 
-            # API 요청 데이터
-            data = {
-                "image": img_base64,
-                "width": width,
-                "height": height,
-                "scale": 2  # 2배 업스케일
-            }
-
-            # API 호출
             print(f"🔍 NAI Upscale API 호출 중... (원본: {width}x{height})")
-            # HTTP 세션을 사용하여 연결 정리
-            with requests.Session() as session:
-                response = session.post(
-                    "https://api.novelai.net/ai/upscale",
-                    json=data,
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=60
-                )
-                # 세션 정리
-                session.close()
-                if hasattr(session, 'adapters'):
-                    for adapter in session.adapters.values():
-                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
-                            adapter.poolmanager.clear()
+            route, response = self._post_nai_upscale(img_base64, width, height, token, model_key)
+            self._last_upscale_route = route
 
-            # HTTP 스레드 정리
-            self._cleanup_http_threads()
-
-            if response.status_code != 200:
+            if response.status_code not in (200, 201):
                 error_msg = f"API 에러 (코드: {response.status_code})"
                 try:
                     error_detail = response.json()
@@ -2987,13 +3052,19 @@ class APIService:
                 upscaled_width = upscaled_width_attr() if callable(upscaled_width_attr) else upscaled_width_attr
                 upscaled_height = upscaled_height_attr() if callable(upscaled_height_attr) else upscaled_height_attr
 
-                print(f"✅ 업스케일 성공: {upscaled_width}x{upscaled_height}")
+                legacy = getattr(self, "_last_upscale_route", "new") == "legacy"
+                print(f"[upscale] ok route={'legacy' if legacy else 'new'} "
+                      f"{width}x{height} -> {upscaled_width}x{upscaled_height}", flush=True)
 
                 return {
                     'status': 'success',
                     'image': upscaled_image,
                     'raw_bytes': image_bytes,
-                    'message': f'이미지가 {upscaled_width}x{upscaled_height}로 업스케일되었습니다.'
+                    'upscale_route': 'legacy' if legacy else 'new',
+                    # 구형은 같은 그림에 몇 배를 물린다 - 조용히 물러나면 사용자는
+                    # 계속 비싸게 쓰면서 그 사실을 모른다. 메시지에 남긴다.
+                    'message': (f'이미지가 {upscaled_width}x{upscaled_height}로 업스케일되었습니다.'
+                                + (' (구버전 경로로 처리됨 - Anlas 가 더 소모됩니다)' if legacy else ''))
                 }
 
             except zipfile.BadZipFile:
@@ -3250,43 +3321,13 @@ class APIService:
             print(f"🔍 DEBUG - Target upscale size: {pil_image.width * 2}x{pil_image.height * 2}")
             print(f"🔍 DEBUG - Base64 string length: {len(image_base64)}")
 
-            # NAI API는 width/height가 아닌 원본 크기를 받고 scale로 배수를 결정
-            data = {
-                "image": image_base64,
-                "width": pil_image.width,  # 원본 너비
-                "height": pil_image.height,  # 원본 높이
-                "scale": 2  # 2배 업스케일 (scale 4는 4배를 의미)
-            }
+            # ⚠️ 배율은 신형에서 서버가 정한다. 이 경로는 어차피 아래에서
+            #    `target_width/height` 로 다시 리사이즈하므로 배율에 무관하다.
+            route, response = self._post_nai_upscale(
+                image_base64, pil_image.width, pil_image.height, token)
+            print(f"[upscale] inpaint route={route} status={response.status_code}", flush=True)
 
-            # 디버깅: 요청 데이터 확인
-            print(f"🔍 DEBUG - Request data keys: {data.keys()}")
-            print(f"🔍 DEBUG - Width: {data['width']}, Height: {data['height']}, Scale: {data['scale']}")
-            print(f"🔍 DEBUG - Token exists: {bool(token)}")
-            print(f"🔍 DEBUG - Token length: {len(token) if token else 0}")
-
-            # HTTP 세션을 사용하여 연결 정리
-            with requests.Session() as session:
-                response = session.post(
-                    "https://api.novelai.net/ai/upscale",
-                    json=data,
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=60
-                )
-                # 세션 정리
-                session.close()
-                if hasattr(session, 'adapters'):
-                    for adapter in session.adapters.values():
-                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
-                            adapter.poolmanager.clear()
-
-            # HTTP 스레드 정리
-            self._cleanup_http_threads()
-
-            # 디버깅: 응답 상세 정보
-            print(f"🔍 DEBUG - Response status code: {response.status_code}")
-            print(f"🔍 DEBUG - Response headers: {dict(response.headers)}")
-
-            if response.status_code != 200:
+            if response.status_code not in (200, 201):
                 # 디버깅: 에러 응답 내용 확인
                 try:
                     error_content = response.text

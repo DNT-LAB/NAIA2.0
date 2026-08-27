@@ -455,6 +455,7 @@ let inpaintCanvasControl = null;
 // 인페인트 진입점이 세션을 요청해 두고 상태를 기다리는 중인가. 상태가 오면 계열에 따라
 // 캔버스를 드러내거나 옛 팝업을 연다(위 onModuleState 참조).
 let pendingImg2ImgSurface = false;
+let pendingImg2ImgSurfaceTimer = 0;
 
 // ── 가상 캐릭터 프롬프트 (사용자 지정 2026-08-26) ─────────────────────────
 //
@@ -1124,7 +1125,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260826-fix2')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260827-fb6')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1144,7 +1145,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
       openModule,
       openImg2ImgSessionSurface,
       onCanvasSession: () => inpaintCanvasControl?.revealForSession?.(),
-      onCanvasSessionPending: () => { pendingImg2ImgSurface = true; },
+      onCanvasSessionPending: () => armImg2ImgSurface(),
       onLoadPrompt,
       applyMetadataSettings,
       switchRightTab,
@@ -7429,6 +7430,19 @@ function scheduleInitialRandomPrompt(delay = 350) {
  *     거기서 인페인트로 돌려 버리면 타이머가 도는 대로 유료 인페인트가 반복 발사된다.
  *     "버튼을 눌렀다" 와 "무언가가 생성을 요청했다" 는 다른 일이다.
  */
+/** "인페인트를 열어 달라고 했다" 는 표를 세운다.
+ *
+ *  ⚠️ **시간이 지나면 스스로 내려간다.** WS 경로는 실패하면 토스트만 오고
+ *     module_state 는 안 온다(예: 작업 중인 세션이 있어 거절될 때). 표가 남아 있으면
+ *     그 뒤 **아무 img2img 상태**나 도착했을 때 엉뚱한 화면이 열린다
+ *     (Codex 리뷰 2026-08-27).
+ */
+function armImg2ImgSurface() {
+  pendingImg2ImgSurface = true;
+  clearTimeout(pendingImg2ImgSurfaceTimer);
+  pendingImg2ImgSurfaceTimer = setTimeout(() => { pendingImg2ImgSurface = false; }, 6000);
+}
+
 function generateAction() {
   if (virtualCharacterSession()) {
     // ⚠️ 도크의 [인페인트 생성] 과 **같은 함수**를 부른다. 예전에는 여기서 가드만
@@ -9413,6 +9427,7 @@ function onModuleState(m) {
     //    이제 두 진입점 모두 표를 세워 두고, **상태가 도착한 여기서** 갈림길을 정한다.
     if (pendingImg2ImgSurface) {
       pendingImg2ImgSurface = false;
+      clearTimeout(pendingImg2ImgSurfaceTimer);
       if (m.canvas_supported) inpaintCanvasControl?.revealForSession?.();
       else openImg2ImgSessionSurface();
     }

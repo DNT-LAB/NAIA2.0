@@ -1024,15 +1024,19 @@ def _auto_gen_quota_exhausted(context: WebSessionContext) -> bool:
         return False
 
 
-async def _stop_auto_generation_for_quota(
+async def stop_all_generation_loops(
     context: WebSessionContext,
     clients: set[WebSocket],
-) -> None:
-    """무료 사용량이 모두 마르면 Auto Gen 을 **직접 끈다.**
+) -> list[dict[str, Any]]:
+    """도는 것을 **전부** 멈추고, 화면에 보낼 메시지를 돌려준다(토스트는 부르는 쪽이).
 
-    Storyteller/Automation 이 돌고 있으면 그쪽 `finish` 로 끝낸다 - 그것들이 Auto Gen
-    스위치의 주인이라, 옵션만 끄면 런타임이 무장한 채 남아 다음 수동 생성이 다시
-    루프를 탄다. 아무도 안 돌고 있으면 옵션을 직접 내리고 알린다.
+    Storyteller/Automation/Sequence 가 돌고 있으면 그쪽 `finish` 로 끝낸다 - 그것들이
+    Auto Gen 스위치의 주인이라, 옵션만 끄면 런타임이 무장한 채 남아 다음 수동 생성이
+    다시 루프를 탄다. 아무도 안 돌고 있으면 옵션을 직접 내린다.
+
+    ⚠️ 부르는 자리가 둘이다: 무료 사용량 0%(아래)와 **인페인트 진입**(세션이 화면을
+       잡는 동안 일반 생성이 계속 나가면 안 된다 - 사용자 지정 2026-08-27).
+       각자 따로 짜면 한쪽이 시퀀스나 프리페치를 빠뜨린다.
     """
     _release_auto_gen_prefetch(context)
     story = context._storyteller_service()
@@ -1060,6 +1064,15 @@ async def _stop_auto_generation_for_quota(
     elif context._coerce_bool(context.get_options().get("auto_generate", False)):
         context.set_option("auto_generate", False)
         messages.append({"type": "options", **context.get_options()})
+    return messages
+
+
+async def _stop_auto_generation_for_quota(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+) -> None:
+    """무료 사용량이 마르면 도는 것을 멈추고 **왜 멈췄는지** 알린다."""
+    messages = await stop_all_generation_loops(context, clients)
     # 기준이 상태에 따라 다르다 - 계정을 지목했으면 그 계정 하나가 기준이다.
     # 그대로 "모든 계정" 이라 말하면 남은 무료 풀까지 마른 줄로 읽힌다.
     try:

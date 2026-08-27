@@ -1652,6 +1652,10 @@ def register_result_display_routes(
                     )
 
                 state = await run_in_thread(_open_img2img_with_embedded_prompt)
+                # 진입점이 둘이다(WS 우클릭 · 여기 HTTP 업로드) - **같은 함수**를 쓴다.
+                from app.backend.server.result_commands import stop_loops_for_inpaint
+
+                await stop_loops_for_inpaint(session_context, clients)
                 await broadcast_json(clients, state)
                 return {
                     "ok": True,

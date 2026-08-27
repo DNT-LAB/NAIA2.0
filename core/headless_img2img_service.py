@@ -239,6 +239,11 @@ class HeadlessImg2ImgService:
         (프롬프트 편집만 한 경우는 세지 않는다. 세션을 닫아도 원본 그림에서 다시
         복원되므로 잃는 것이 없다.)
         """
+        # 손으로 고친 프롬프트·캐릭터도 작업이다. 이걸 안 세면, 글자만 고쳐 둔 채
+        # 다른 그림을 인페인트로 열었을 때 **그 편집이 조용히 사라진다**
+        # (Codex 리뷰 2026-08-27).
+        if state.get("user_edited"):
+            return True
         if state.get("has_mask") or state.get("user_mask_bytes"):
             return True
         try:
@@ -343,6 +348,9 @@ class HeadlessImg2ImgService:
             # 사용자가 칠한 마스크(캔버스 좌표). 빈 곳 마스크와는 따로 보관해야
             # 오프셋을 다시 옮겼을 때 칠한 것을 잃지 않는다.
             "user_mask_bytes": b"",
+            # 사람이 이 세션의 글자/캐릭터를 손댔는가. 복원값은 세지 않는다 -
+            # 아래 `set_param` 의 편집 분기에서만 켜진다.
+            "user_edited": False,
             # 위 마스크가 **어느 캔버스에서** 칠해진 것인가(캔버스 픽셀).
             # 캔버스 크기가 바뀌었을 때 늘릴지 넓힐지를 여기로 가른다.
             "user_mask_canvas": (int(image.width), int(image.height)),
@@ -655,6 +663,13 @@ class HeadlessImg2ImgService:
             raise RuntimeError(str(exc)) from exc
         return decoded.small_png, decoded.preview_data_url, decoded.painted_blocks
 
+    # 사람이 손댔다고 볼 파라미터. 여기 있는 것을 바꾸면 세션이 "작업 중" 이 되어
+    # 다른 그림으로 덮어쓸 때 먼저 물어본다(`_session_has_user_work`).
+    _USER_EDIT_KEYS = ("main_prompt", "negative_prompt", "strength", "noise",
+                       "add_character")
+    _USER_EDIT_PREFIXES = ("char_prompt_", "char_uc_", "char_active_",
+                           "remove_character_", "char_position_")
+
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
         if key == "close":
@@ -662,6 +677,8 @@ class HeadlessImg2ImgService:
             return self.module_state()
         if not context.img2img_session.get("active"):
             return context._toast("No active Img2Img session", level="error")
+        if key in self._USER_EDIT_KEYS or key.startswith(self._USER_EDIT_PREFIXES):
+            context.img2img_session["user_edited"] = True
         if key == "main_prompt":
             context.img2img_session["main_prompt"] = str(value or "")
         elif key == "negative_prompt":

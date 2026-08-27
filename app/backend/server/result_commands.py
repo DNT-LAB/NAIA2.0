@@ -331,6 +331,28 @@ def _history_item_from_result_payload(context: WebSessionContext, payload: dict[
     return item
 
 
+async def stop_loops_for_inpaint(context, clients) -> None:
+    """인페인트 세션이 열리면 **도는 것을 전부 멈춘다**(사용자 지정 2026-08-27).
+
+    ⚠️ 세션이 화면을 잡고 있는 동안 일반 생성이 계속 나가면 안 된다. 화면은 인페인트를
+       가리키는데 백엔드는 t2i 를 굽는다 - 그 사이 나가는 장수만큼 Anlas 가 엉뚱한
+       데로 간다(Codex 리뷰 2026-08-27).
+    ⚠️ 옵션만 내리면 안 된다. Storyteller/Automation/Sequence 가 스위치의 주인이라
+       런타임이 무장한 채 남는다 - 무료 사용량 0% 정지와 **같은 함수**를 쓴다.
+    """
+    try:
+        from app.backend.server.generation_runner import stop_all_generation_loops
+
+        messages = await stop_all_generation_loops(context, clients)
+        if messages:
+            messages.append(context._toast(
+                "인페인트 세션을 여는 동안 자동 생성을 껐습니다", level="info"))
+        for message in messages:
+            await broadcast_json(clients, message)
+    except Exception as exc:   # noqa: BLE001 - 정지 하나 때문에 세션 열기가 죽으면 안 된다
+        print(f"[warn] inpaint could not stop auto generation: {exc}", flush=True)
+
+
 def _upscale_token(context: WebSessionContext) -> str:
     """Upscale 에 쓸 토큰. 지목한 계정이 있으면 그 계정, 없으면 기본값(메인).
 
@@ -704,6 +726,8 @@ async def handle_result_command(
             "runtime": "web",
         })
         return True
+    # 세션이 열렸으니 도는 것을 멈춘다 - 화면은 인페인트인데 t2i 가 계속 나가면 안 된다.
+    await stop_loops_for_inpaint(context, clients)
     # ⚠️ **보낸 소켓에만 주면 안 된다.** 세션은 백엔드 하나를 여럿이 나눠 쓰는 것인데,
     #    이쪽만 알면 다른 탭·모바일 화면은 잠기지 않은 채 남아 옛 캐릭터를 보면서
     #    같은 세션에 생성을 건다(HTTP 업로드 경로는 처음부터 broadcast 였다 -

@@ -89,6 +89,9 @@ export function createInpaintCanvasPanel({
   let autoMaskTimer = 0;
   // 방금 칠한 것을 한 번 번쩍여 눈에 알린다. 그리고 나면 꺼진다(계속 깜빡이면 방해다).
   let flashMask = false;
+  // 생성이 끝나 **자동으로** 결과 보기로 넘어간 순간에만 선다. 사용자가 직접 누른
+  // 전환에는 안 선다 - 자기가 누른 것은 이미 안다.
+  let flashModes = false;
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
   let rangeDragging = false;
   const transformTimers = {};
@@ -148,7 +151,10 @@ export function createInpaintCanvasPanel({
   function render(next) {
     // [자동 마스킹] 의 답이 도착했다. 빈 곳이 없으면 화면이 거의 안 바뀌므로
     // **무슨 일이 있었는지 말해 준다** - 눌렀는데 조용하면 고장으로 읽힌다.
-    if (autoMaskPending && next && next.module_id === 'img2img') {
+    // `lifecycle_only` = 생성 생명주기만 실린 갱신(img2img_generation_state).
+    // 자동 마스킹의 답이 아니므로 대기표를 삼키면 안 된다 - 삼키면 진짜 결과가
+    // 왔을 때 알릴 대상이 없어 눌러도 조용한 채로 끝난다.
+    if (autoMaskPending && next && next.module_id === 'img2img' && !next.lifecycle_only) {
       autoMaskPending = false;
       clearTimeout(autoMaskTimer);
       // 실패(빈 곳 없음)는 백엔드가 이미 말한다 - 여기서 또 말하면 두 번 뜬다.
@@ -171,6 +177,10 @@ export function createInpaintCanvasPanel({
       panel.innerHTML = '';
       panel.hidden = true;
       viewMode = 'edit';        // 다음 세션은 편집부터 시작한다
+      // ⚠️ 번쩍임 표도 여기서 내린다. 세션이 없을 때 `showResult()` 가 불리면
+      //    (일반 생성 결과도 이 자리를 지난다) 표만 서고 그릴 도크가 없어, 다음에
+      //    세션을 열자마자 이유 없이 번쩍인다 - 표식이 값싸진다.
+      flashModes = false;
       renderPlane();
       return;
     }
@@ -178,12 +188,14 @@ export function createInpaintCanvasPanel({
     panel.hidden = false;
     panel.className = `inpaint-canvas-panel${collapsed ? ' is-collapsed' : ''}`;
     panel.innerHTML = collapsed ? collapsedHtml() : dockHtml();
+    flashModes = false;          // 한 번만 번쩍인다(그린 순간 표를 내린다)
     renderPlane();
   }
 
   function collapsedHtml() {
     const editing = viewMode === 'edit';
-    return `<button type="button" class="ic-pill" data-ic="collapse" title="인페인트 조작 펼치기">`
+    return `<button type="button" class="ic-pill${flashModes ? ' is-fresh' : ''}"`
+      + ` data-ic="collapse" title="인페인트 조작 펼치기">`
       + `<span class="ic-pill-dot${editing ? ' is-edit' : ''}"></span>`
       + `인페인트<span class="ic-caret">▴</span></button>`;
   }
@@ -218,7 +230,7 @@ export function createInpaintCanvasPanel({
     return `
       <div class="ic-bar ic-bar-head ic-nowrap">
         <span class="ic-title">인페인트</span>
-        <div class="ic-modes" role="group" aria-label="보기 모드">
+        <div class="ic-modes${flashModes ? ' is-fresh' : ''}" role="group" aria-label="보기 모드">
           <button type="button" class="ic-btn${editing ? ' is-on' : ''}" data-ic="mode-edit">편집</button>
           <button type="button" class="ic-btn${editing ? '' : ' is-on'}" data-ic="mode-result">결과 보기</button>
         </div>
@@ -831,7 +843,14 @@ export function createInpaintCanvasPanel({
   return {
     render,
     /** 생성이 끝나면 결과를 봐야 한다 - 캔버스가 결과를 가리고 있으면 안 된다. */
-    showResult() { setViewMode('result'); },
+    showResult() {
+      // ⚠️ 이건 **자동** 전환이다(새 결과가 도착해 캔버스를 치웠다). 사용자는 아무것도
+      //    안 눌렀으니, 바뀌었다는 사실을 눈으로 알려야 한다 - 안 그러면 편집으로
+      //    돌아가는 길을 못 찾는다(사용자 제보 2026-08-28 "포커스 노출이 느슨하다").
+      //    이미 결과 보기면 바뀐 게 없으므로 번쩍이지 않는다.
+      if (viewMode !== 'result') flashModes = true;
+      setViewMode('result');
+    },
     /** Inpaint 를 눌러 세션이 열렸다. 도크가 **반드시** 눈에 보이게 한다.
      *
      *  ⚠️ 이게 없으면 버튼이 조용히 아무 일도 안 한 것처럼 보이는 길이 셋이나 된다:

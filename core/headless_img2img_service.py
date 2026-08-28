@@ -665,8 +665,12 @@ class HeadlessImg2ImgService:
 
     # 사람이 손댔다고 볼 파라미터. 여기 있는 것을 바꾸면 세션이 "작업 중" 이 되어
     # 다른 그림으로 덮어쓸 때 먼저 물어본다(`_session_has_user_work`).
+    # ⚠️ `mask_draft_dirty` 는 **적용 전 붓질**을 알리는 표다. 그 붓질은 브라우저
+    #    안에만 있어서(격자 초안), 이 표가 없으면 백엔드는 `has_mask` 도 `user_edited`
+    #    도 없는 빈 세션으로 보고 다른 그림을 **묻지도 않고** 덮어썼다 - 새 세션이
+    #    열리면 window_id 가 바뀌어 초안이 통째로 미아가 된다(Codex HIGH 2026-08-28).
     _USER_EDIT_KEYS = ("main_prompt", "negative_prompt", "strength", "noise",
-                       "add_character")
+                       "add_character", "mask_draft_dirty")
     _USER_EDIT_PREFIXES = ("char_prompt_", "char_uc_", "char_active_",
                            "remove_character_", "char_position_")
 
@@ -687,6 +691,10 @@ class HeadlessImg2ImgService:
             context.img2img_session["strength"] = max(1, min(99, int(float(value))))
         elif key == "noise":
             context.img2img_session["noise"] = max(0, min(99, int(float(value))))
+        elif key == "mask_draft_dirty":
+            # 값은 필요 없다 - 위에서 이미 `user_edited` 를 세웠다. 세션 내용은 그대로
+            # 두고(초안 자체는 브라우저 소유) 덮어쓰기 경고만 켜는 것이 전부다.
+            pass
         elif key == "repeat":
             context.img2img_session["repeat"] = max(1, min(99, int(float(value))))
         elif key == "resize_1mp":

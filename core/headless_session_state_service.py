@@ -7,6 +7,14 @@ from typing import Any
 import re
 
 from core.headless_remote_state_service import HeadlessRemoteStateService
+from core.nai_anlas_cost import estimate_anlas_cost
+from core.nai_free_usage import FREE_PIXELS_MAX, FREE_STEPS_MAX
+from core.resolution_utils import (
+    NAI_RESOLUTION_PRESET_DISPLAY,
+    NAI_RESOLUTION_PRESET_LABELS,
+    nai_resolution_preset_labels,
+    normalize_nai_resolution_preset_id,
+)
 from core.nai_model_contract import NAI_REMOTE_MODEL_KEYS, NAI_SAMPLER_OPTIONS
 
 # 해상도 매니저가 저장하는 모드 키 (params_workflow_routes.REMOTE_RESOLUTION_MODES와 동일).
@@ -206,6 +214,27 @@ class HeadlessSessionStateService:
             "options_scheduler": self.scheduler_options_for_mode(mode),
             "options_resolution": resolution_options,
             "steps_range": [1, 50],
+            # Anlas 를 물기 시작하는 문턱. 화면이 상단 Anlas 알약을 점멸시키는 데
+            # 쓴다(사용자 지정 2026-08-28). **여기를 SSOT 로 삼는다** - 프론트가
+            # 숫자를 따로 들면 한쪽만 고쳤을 때 경고가 거짓말을 한다.
+            # 경계는 `초과`다: 28스텝·1024x1024 까지는 무료(`nai_free_usage` 참조).
+            "nai_free_limits": {
+                "steps": FREE_STEPS_MAX,
+                "pixels": FREE_PIXELS_MAX,
+            },
+            # Generate 버튼 옆에 띄울 **추정** Anlas. NAI 웹 UI 의 계산식을 옮긴
+            # 것이라 공식 계약이 아니다 - 표시용이고 집계엔 안 쓴다. 무료 판정은
+            # `is_free_generation` 을 그대로 재사용하므로 상단 알약의 유료 점멸과
+            # 항상 같은 말을 한다. NAI 가 아니면 뜻이 없으니 0.
+            "nai_anlas_cost": (
+                estimate_anlas_cost(context, dict(context.remote_params))
+                if mode == "NAI" else 0),
+            # 무료 풀이 마른 뒤의 가격. 화면은 사용량 소진 신호(`nai_usage_update`
+            # 의 `quota_exhausted`)를 보고 둘 중 하나를 고른다 - 계산식을 프론트에
+            # 복제하지 않으려고 **둘 다 내려 준다**.
+            "nai_anlas_cost_if_paid": (
+                estimate_anlas_cost(context, dict(context.remote_params), ignore_free=True)
+                if mode == "NAI" else 0),
             "nai_flags_enabled": {
                 "SMEA": mode == "NAI",
                 "DYN": mode == "NAI",
@@ -219,6 +248,24 @@ class HeadlessSessionStateService:
                 "DYN": False,
                 "VAR+": False,
                 "DECRISP": False,
+                # NAI 전용 해상도 밴드(Small/Normal/Large/Wallpaper). ANIMA 쪽
+                # `resolution_preset` 과 **키를 나눠 뒀다** - id 공간이 달라서
+                # 섞이면 `normal` 이 `standard` 로 뭉개진다.
+                "nai_resolution_preset_enabled": bool(
+                    context.remote_params.get("nai_resolution_preset_enabled", False)),
+                "nai_resolution_preset": normalize_nai_resolution_preset_id(
+                    context.remote_params.get("nai_resolution_preset")),
+                # 표를 **백엔드가 내려 준다.** 화면이 같은 숫자를 따로 들면 한쪽만
+                # 고쳤을 때 드롭다운이 거짓말을 한다(ANIMA 표가 이미 그렇게 복제돼
+                # 있어 드리프트 위험을 안고 있다).
+                "options_nai_resolution_preset": [
+                    {
+                        "id": key,
+                        "label": NAI_RESOLUTION_PRESET_DISPLAY.get(key, key),
+                        "resolutions": list(labels),
+                    }
+                    for key, labels in NAI_RESOLUTION_PRESET_LABELS.items()
+                ],
             })
         elif mode == "WEBUI":
             hires_state = context._normalized_webui_hiresfix_assist_state(context.webui_hiresfix_assist_state)
@@ -270,6 +317,17 @@ class HeadlessSessionStateService:
         # options_resolution이 위 update로 덮어쓰지 못하게, 파일 기반 모드별
         # 목록을 최종 확정한다.
         payload["options_resolution"] = list(resolution_options)
+        # 밴드를 켰으면 드롭다운(= Rnd Res 의 프런트 추첨 모집단)을 그 밴드로 좁힌다.
+        # ⚠️ `resolution_options_for_mode` 안에서 좁히면 **해상도 관리자**까지 좁아져
+        #    사용자가 저장해 둔 목록이 화면에서 사라진다 - 여기서만 갈아 끼운다.
+        if mode == "NAI" and context._coerce_bool(
+                context.remote_params.get("nai_resolution_preset_enabled", False)):
+            band = list(nai_resolution_preset_labels(
+                context.remote_params.get("nai_resolution_preset")))
+            current = str(context.remote_params.get("resolution") or "")
+            if current and current not in band:
+                band.append(current)      # 지금 값이 사라지면 콤보가 비어 보인다
+            payload["options_resolution"] = band
         option_cache = getattr(context, "remote_option_cache", {}) or {}
         cached_options = option_cache.get(mode, {}) if isinstance(option_cache, dict) else {}
         for key in ("options_model", "options_sampler", "options_scheduler", "options_hr_upscaler"):

@@ -11,6 +11,7 @@ export function createResultImageActions({
   getMetadataViewer = () => null,
   getQueuePanel = () => null,
   discardPendingModuleEdit = () => {},
+  flushPendingModuleEdit = () => {},
   openModule = () => {},
   openImg2ImgSessionSurface = () => openModule('img2img', {forceOpen: true}),
   // V5 인페인트 세션이 열렸다 - 화면이 그것을 보여 주게 한다.
@@ -157,7 +158,11 @@ export function createResultImageActions({
     }
     try {
       if (isDesktopImg2ImgAction(action)) {
-        discardPendingModuleEdit('img2img');
+        // ⚠️ **버리지 않고 보낸다.** 예전에는 여기서 버렸는데, 그러면 방금 친
+        //    프롬프트가 백엔드에 영영 안 닿아 세션이 `user_edited` 로 서지
+        //    않는다 - 덮어쓰기 경고가 안 뜨고 작업이 조용히 사라진다
+        //    (Codex HIGH 2026-08-28). 옛 세션으로 먼저 흘려보낸 뒤 연다.
+        flushPendingModuleEdit('img2img');
       }
       const label = encodeURIComponent(payload.label || 'Input Image');
       const response = await fetch(`/api/image-action/${encodeURIComponent(action)}?label=${label}`, {
@@ -716,7 +721,11 @@ export function createResultImageActions({
         return;
       }
       try {
-        discardPendingModuleEdit('img2img');
+        // ⚠️ **버리지 않고 보낸다.** 예전에는 여기서 버렸는데, 그러면 방금 친
+        //    프롬프트가 백엔드에 영영 안 닿아 세션이 `user_edited` 로 서지
+        //    않는다 - 덮어쓰기 경고가 안 뜨고 작업이 조용히 사라진다
+        //    (Codex HIGH 2026-08-28). 옛 세션으로 먼저 흘려보낸 뒤 연다.
+        flushPendingModuleEdit('img2img');
         ws.send(JSON.stringify({
           type: 'result_image_action',
           action,

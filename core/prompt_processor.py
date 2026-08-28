@@ -554,6 +554,16 @@ class PromptProcessor:
                             height,
                             settings.get('resolution_preset'),
                         )
+                    elif (
+                        normalized_mode == 'NAI'
+                        and settings.get('nai_resolution_preset_enabled')
+                    ):
+                        # 밴드를 켰으면 **그 밴드 안**에서 비율이 가장 가까운 것으로.
+                        # 안 그러면 Auto Res 가 항상 1MP 로 끌어내려 밴드가 무의미해진다.
+                        from core.resolution_utils import nearest_nai_preset_resolution
+
+                        width, height = nearest_nai_preset_resolution(
+                            width, height, settings.get('nai_resolution_preset'))
                     elif normalized_mode == 'NAI':
                         # NAI only accepts dimensions that are multiples of 64.
                         # Always fit to the nearest standard ~1MP resolution so a

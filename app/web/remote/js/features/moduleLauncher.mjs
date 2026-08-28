@@ -90,6 +90,17 @@ const MODULE_REGISTRY = {
     action: 'webui_hiresfix_assist',
     modes: ['WEBUI'],
   },
+  // NAI 해상도 밴드. WEBUI/COMFYUI 의 '해상도 프리셋' 과 **같은 자리**에 둔다 -
+  // 같은 성격의 것을 다른 자리에 두면 사용자가 두 군데를 뒤진다.
+  // ⚠️ `action` 이 다르다. 저 둘은 ANIMA 밴드(`resolution_preset`)를 쓰고 NAI 는
+  //    자기 키(`nai_resolution_preset`)를 쓴다 - id 공간이 섞이면 안 된다.
+  nai_resolution_band: {
+    label: '해상도 프리셋',
+    title: 'NAI 해상도 프리셋 (Small / Normal / Large / Wallpaper)',
+    category: 'character_tools',
+    action: 'nai_resolution_band',
+    modes: ['NAI'],
+  },
   comfyui_resolution_preset: {
     label: '해상도 프리셋',
     title: 'COMFYUI 해상도 프리셋',
@@ -149,7 +160,7 @@ const CATEGORY_REGISTRY = [
     id: 'character_tools',
     label: 'NAI 전용 도구',
     title: 'NAI 전용 도구 (다른 모드에서 차단)',
-    moduleIds: ['character', 'character_reference', 'vibe_transfer'],
+    moduleIds: ['nai_resolution_band', 'character', 'character_reference', 'vibe_transfer'],
     splitBadges: true,
   },
   {
@@ -317,6 +328,18 @@ export function createModuleLauncher({
             <span>${config.label}</span>
           </label>
           <select class="param-select module-resolution-preset-select" data-resolution-preset-select="${mode}" onchange="setResolutionPreset('${mode}', this.value)"></select>
+        </div>
+      `;
+    }
+    if (config.action === 'nai_resolution_band') {
+      const tooltip = tooltipAttr(config.title);
+      return `
+        <div class="module-resolution-preset-row" data-module="${moduleId}" data-nai-band-row data-module-tooltip="${tooltip}">
+          <label class="module-resolution-preset-toggle">
+            <input type="checkbox" data-nai-band-enabled onchange="setNaiResolutionBandEnabled(this.checked)">
+            <span>${config.label}</span>
+          </label>
+          <select class="param-select module-resolution-preset-select" data-nai-band-select onchange="setNaiResolutionBand(this.value)"></select>
         </div>
       `;
     }
@@ -656,7 +679,19 @@ export function createModuleLauncher({
       sendModuleParam('event_stream', 'active', String(Boolean(toggle.checked)));
     });
     document.addEventListener('pointerdown', event => {
-      if (!root.contains(event.target)) closeMenus();
+      // ⚠️ 커스텀 셀렉트(`customSelects.mjs`)는 목록과 미리보기를 **`document.body`
+      //    에 붙인다** - 런처 root 밖이라 여기서 '바깥 클릭' 으로 읽혔다. 그래서
+      //    해상도 프리셋에서 항목을 고르는 순간 팝업이 닫히고 선택이 반영되지
+      //    않았다(사용자 제보 2026-08-28). 그 목록은 **런처 UI 의 일부**다.
+      //
+      //    WEBUI/COMFYUI 의 해상도 프리셋도 같은 자리에 있어 같은 증상이었다 -
+      //    NAI 밴드를 넣으면서 드러났을 뿐 새 버그가 아니다.
+      const target = event.target;
+      if (target instanceof Element
+          && target.closest('.custom-select-menu, .custom-select-preview')) {
+        return;
+      }
+      if (!root.contains(target)) closeMenus();
     }, true);
     root.addEventListener('pointerover', event => {
       const target = findTooltipTarget(event.target);

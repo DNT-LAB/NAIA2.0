@@ -611,6 +611,12 @@ class WebSessionContext:
     def sync_negative_into_current_preset(self) -> str:
         return self._prompt_engineering_service().sync_negative_into_current_preset()
 
+    def sync_prompt_into_current_preset(self, stamp: str = "") -> str:
+        return self._prompt_engineering_service().sync_prompt_into_current_preset(stamp)
+
+    def stale_prompt_edit(self, origin: str, stamp: str) -> bool:
+        return self._prompt_engineering_service().stale_prompt_edit(origin, stamp)
+
     def _conditional_prompt_module_state(self) -> dict[str, Any]:
         return self._conditional_prompt_service().state()
 

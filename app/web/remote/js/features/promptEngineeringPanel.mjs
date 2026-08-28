@@ -364,17 +364,35 @@ export function createPromptEngineeringPanel({
       selectionStart: active.selectionStart,
       selectionEnd: active.selectionEnd,
       scrollTop: active.scrollTop,
+      // ⚠️ **어느 프리셋을 보고 있던 칸인가.** 아래 복원이 이 값을 본다.
+      preset: active.dataset.preset || '',
     };
   }
 
+  /** 다시 그린 뒤 커서를 돌려준다.
+   *
+   *  ⚠️ **프리셋이 바뀌었으면 글자는 돌려주지 않는다.** 예전에는 무조건 되돌렸는데,
+   *     그러면 프리셋을 바꾼 순간 새로 그려진 칸에 **앞 프리셋의 글**이 다시 박힌다.
+   *     칸의 `data-preset` 은 새 프리셋이므로 그 글이 새 프리셋의 것으로 서명돼
+   *     나가고, 백엔드의 스탬프 검사(`_text_and_preset_stamp`)가 **무력화된다** -
+   *     앞 프리셋의 prefix 가 새 프리셋 파일에 영구히 박힌다(사용자 제보 2026-08-27:
+   *     "A -> B -> A 로 돌아오면 의문의 프롬프트가 나타난다").
+   *     실제로 그 사용자의 프리셋 파일에서 `image_generation_bench` 를 고른 화면이
+   *     `malang2` 의 prefix/auto-hide 를 들고 있는 것을 확인했다.
+   */
   function restoreFocus(snap) {
     if (!snap) return;
     const el = document.getElementById(snap.id);
     if (!el) return;
-    el.value = snap.value;
-    el.scrollTop = snap.scrollTop;
+    const swapped = (el.dataset.preset || '') !== (snap.preset || '');
+    if (!swapped) {
+      el.value = snap.value;
+      el.scrollTop = snap.scrollTop;
+    }
     try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
-    try { el.setSelectionRange(snap.selectionStart, snap.selectionEnd); } catch (e) {}
+    if (!swapped) {
+      try { el.setSelectionRange(snap.selectionStart, snap.selectionEnd); } catch (e) {}
+    }
   }
 
   function captureTextareaHeights() {

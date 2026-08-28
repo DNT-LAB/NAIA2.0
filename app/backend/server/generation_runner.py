@@ -1024,6 +1024,50 @@ def _auto_gen_quota_exhausted(context: WebSessionContext) -> bool:
         return False
 
 
+# 루프가 소유한 요청임을 알려 주는 표식. 사용자가 손수 넣은 배치에는 하나도 없다.
+_LOOP_RUN_KEYS = ("sequence_run_id", "inpaint_sequence_run_id",
+                  "event_stream_run_id", "automation_run_id")
+
+
+def _drop_queued_loop_frames(context: WebSessionContext) -> int:
+    """루프가 소유한 **대기 중** 프레임을 큐에서 걷어낸다.
+
+    ⚠️ 런을 `finish` 로 닫는 것만으로는 **이미 큐에 든 프레임이 안 멈춘다.** 그대로
+       나가서 돈을 태운다 - 인페인트로 화면이 넘어간 뒤에도 시퀀스 컷이 계속
+       생성됐다(Codex HIGH 2026-08-28). 런을 닫는 자리와 큐를 비우는 자리가
+       달라서 생긴 구멍이라, **멈추는 함수 안에서 함께** 처리한다.
+    ⚠️ 사용자가 손수 걸어 둔 배치는 이 표식이 없다 - 건드리지 않는다. 큐를 통째로
+       지우면 "스무 장 걸어 두고 인페인트로 한 장 보러 갔다" 가 파괴된다.
+    ⚠️ 러너가 이미 집어간 한 장은 큐에 없어 못 뺀다 - 실행 직전 건너뛰기를 예약해
+       둔다(러너가 `consume_cancellation` 으로 소비한다).
+    """
+    manager = getattr(context, "generation_queue_manager", None)
+    if manager is None:
+        return 0
+    try:
+        pending = manager.get_all_requests()
+    except Exception:
+        return 0
+    dropped = 0
+    for request in pending:
+        params = getattr(request, "params", None)
+        if not isinstance(params, dict):
+            continue
+        if not any(str(params.get(key) or "") for key in _LOOP_RUN_KEYS):
+            continue
+        request_id = str(getattr(request, "request_id", "") or "")
+        if not request_id:
+            continue
+        try:
+            if manager.remove_request(request_id):
+                dropped += 1
+            else:
+                manager.mark_cancelled(request_id)
+        except Exception:
+            continue
+    return dropped
+
+
 async def stop_all_generation_loops(
     context: WebSessionContext,
     clients: set[WebSocket],
@@ -1064,6 +1108,10 @@ async def stop_all_generation_loops(
     elif context._coerce_bool(context.get_options().get("auto_generate", False)):
         context.set_option("auto_generate", False)
         messages.append({"type": "options", **context.get_options()})
+    # ⚠️ **여기가 마지막 목이다.** 위에서 런을 다 닫아도 이미 큐에 든 프레임은 그대로
+    #    나간다 - 멈췄다고 말해 놓고 돈이 계속 샜다([[feedback_gate_at_the_neck]]).
+    if _drop_queued_loop_frames(context):
+        messages.append(context.queue_state_payload())
     return messages
 
 
@@ -1360,6 +1408,16 @@ async def _maybe_continue_auto_generation(
                 height=overrides.get("height"),
             )
 
+    # ⚠️ **여기서 한 번 더 본다.** 위쪽 `_should_continue_auto_generation` 검사와 이
+    #    줄 사이에 프롬프트 생성(`to_thread`)·Ollama boost·broadcast 가 여럿 끼어
+    #    있어서, 그 사이에 인페인트 세션이 열리거나 사용자가 Auto Gen 을 꺼도 이
+    #    한 장은 그대로 유료로 나갔다(Codex HIGH 2026-08-28).
+    #    판정은 순수 읽기라 두 번 불러도 부작용이 없다 - 값이 나가는 **마지막 한 줄**
+    #    앞에 거는 것이 규칙이다([[feedback_gate_at_the_neck]]).
+    if not _should_continue_auto_generation(context, request):
+        _release_auto_gen_prefetch(context)
+        return False
+
     dispatch = await asyncio.to_thread(
         generation_service(context).enqueue_remote_request,
         {
@@ -1466,8 +1524,10 @@ def _reroll_random_resolution(context: WebSessionContext, overrides: dict[str, A
         return
     from core.resolution_utils import (
         ANIMA_RESOLUTION_PRESET_LABELS,
+        NAI_RESOLUTION_PRESET_LABELS,
         STANDARD_1MP_RESOLUTION_LABELS,
         normalize_anima_resolution_preset_id,
+        normalize_nai_resolution_preset_id,
     )
 
     mode = str(overrides.get("api_mode") or context.get_api_mode() or "").strip().upper()
@@ -1479,6 +1539,18 @@ def _reroll_random_resolution(context: WebSessionContext, overrides: dict[str, A
             rp.get("resolution_preset", overrides.get("resolution_preset"))
         )
         labels = ANIMA_RESOLUTION_PRESET_LABELS.get(preset) or ()
+    elif mode == "NAI" and context._coerce_bool(
+        rp.get("nai_resolution_preset_enabled",
+               overrides.get("nai_resolution_preset_enabled", False))
+    ):
+        # NAI 밴드는 키가 따로다(위 import 주석 참조). 여기서 안 갈라 주면 Auto Gen
+        # 이 밴드를 무시하고 저장된 전체 목록에서 뽑아, 화면이 보여 준 밴드 밖
+        # 해상도로 생성이 나간다 - 그러면 Anlas 유료 경고와도 어긋난다.
+        labels = NAI_RESOLUTION_PRESET_LABELS.get(
+            normalize_nai_resolution_preset_id(
+                rp.get("nai_resolution_preset", overrides.get("nai_resolution_preset"))
+            )
+        ) or ()
     if not labels:
         # Res Preset이 아니면 해상도 매니저가 저장한 모드별 사용자 목록에서 추첨
         # — 드롭다운(프론트 per-click 추첨)과 동일한 모집단. 목록을 2개로 줄였는데

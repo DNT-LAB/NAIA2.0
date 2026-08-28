@@ -101,6 +101,10 @@ export function createImg2ImgPanel({
       gridWidth,
       gridHeight,
       cells: new Uint8Array(gridWidth * gridHeight),
+      // ⚠️ **"초안 없음" 과 "다 지웠음" 은 다르다.** 칠한 칸 수만 세면 둘이 같아
+      //    보여서, 사용자가 마스크를 전부 지운 뒤 편집창을 다시 열면 서버에 저장된
+      //    옛 마스크가 되살아났다(Codex 2026-08-28). 손을 댄 적이 있는지를 따로 든다.
+      touched: false,
     };
   }
 
@@ -115,11 +119,41 @@ export function createImg2ImgPanel({
       && draft.cells?.length === gridWidth * gridHeight;
   }
 
+  /** 캔버스가 바뀐 초안을 **새 격자로 옮긴다**(버리지 않는다).
+   *
+   *  원점은 좌상단, 늘리지 않고 넓히거나 잘라낸다 - 백엔드가 저장된 마스크에 하는
+   *  것과 **같은 규약**이다(`core/headless_img2img_service.py` 의 payload 조립).
+   *  칠한 자국은 "여기를 다시 그려라" 는 표시라 캔버스 좌표에 붙어 있어야 한다.
+   *  새 크기로 늘리면 얼굴에 칠한 자국이 얼굴 밖으로 미끄러진다.
+   *
+   *  ⚠️ 예전에는 여기서 **새로 만들었다** - 캔버스 비율을 바꾸면 적용 전 붓질이
+   *     통째로 사라졌다. 당시엔 마스크가 캔버스 좌표에 안 붙어 있어 "기준이
+   *     무너지니 버린다" 가 맞는 판단이었는데, `9431fe54` 로 원점 기준이 생긴
+   *     뒤로는 옮길 수 있다.
+   *
+   *  ⚠️ 캔버스를 **줄이면** 바깥으로 나간 칸은 사라진다(다시 넓혀도 안 돌아온다).
+   *     저장된 마스크는 백엔드가 칠할 때의 캔버스 그대로 보관해 되살리지만, 적용 전
+   *     초안에는 그 보관처가 없다. 되살리려면 초안도 '칠한 캔버스' 를 따로 들고
+   *     다녀야 하는데 읽는 자리가 열 곳이라 이번 범위 밖으로 둔다.
+   */
+  function remapMaskDraft(draft, state) {
+    const next = createMaskDraft(state);
+    if (!draft?.cells) return next;
+    next.touched = !!draft.touched;   // 캔버스가 바뀌어도 '손댔음' 은 따라간다
+    const cols = Math.min(draft.gridWidth, next.gridWidth);
+    const rows = Math.min(draft.gridHeight, next.gridHeight);
+    for (let row = 0; row < rows; row += 1) {
+      const from = row * draft.gridWidth;
+      next.cells.set(draft.cells.subarray(from, from + cols), row * next.gridWidth);
+    }
+    return next;
+  }
+
   function getOrCreateMaskDraft(state = currentState) {
     const key = sessionKey(state);
     let draft = key ? maskDrafts.get(key) : null;
     if (!draftMatchesState(draft, state)) {
-      draft = createMaskDraft(state);
+      draft = draft ? remapMaskDraft(draft, state) : createMaskDraft(state);
       if (key) maskDrafts.set(key, draft);
     }
     return draft;
@@ -273,8 +307,10 @@ export function createImg2ImgPanel({
     currentState = state || null;
     if (state && state.active) {
       // 세션 해상도가 바뀌면(1MP 리사이즈 토글 등, 분리창 동시 편집 포함) 열린 마스크
-      // 편집창의 캔버스 좌표 기준이 무너지므로 닫는다. 초안은 재오픈 시
-      // draftMatchesState가 치수 불일치를 감지해 새로 만든다.
+      // 편집창의 캔버스 좌표 기준이 어긋나므로 닫는다.
+      // ⚠️ **초안은 버리지 않는다.** 다시 열 때 `getOrCreateMaskDraft` 가 원점
+      //    기준으로 새 격자에 옮겨 준다(`remapMaskDraft`) - 예전에는 여기서
+      //    닫히면 적용 전 붓질이 통째로 사라졌다.
       const dialogCanvas = document.getElementById('img2imgMaskDialogCanvas');
       const dialogDraft = dialogCanvas ? maskCanvasDrafts.get(dialogCanvas) : null;
       if (dialogDraft
@@ -578,7 +614,9 @@ export function createImg2ImgPanel({
         canvas.width = draft.sourceWidth;
         canvas.height = draft.sourceHeight;
       }
-      if (countMaskCells(draft) <= 0 && state.mask_preview) {
+      // ⚠️ 손댄 적 없는 빈 초안일 때만 서버 마스크를 불러온다. `touched` 없이
+      //    칸 수만 보면, 사용자가 다 지우고 다시 연 순간 지운 것이 되돌아온다.
+      if (countMaskCells(draft) <= 0 && !draft.touched && state.mask_preview) {
         loadMaskToCanvas(canvas, state.mask_preview);
       } else {
         renderMaskCanvas(canvas, draft);
@@ -770,10 +808,25 @@ export function createImg2ImgPanel({
     image.src = dataUrl;
   }
 
+  // 적용 전 붓질을 백엔드에 알렸는가(세션당 한 번). 값이 아니라 **표**만 보낸다.
+  const maskDraftAnnounced = new Set();
+
   function rememberMaskDraft(canvas, key = sessionKey()) {
     if (!key) return;
     const draft = maskCanvasDrafts.get(canvas);
-    if (draft) maskDrafts.set(key, draft);
+    if (!draft) return;
+    // 지우개로 다 지운 것도 **손댄 것**이다 - 여기가 붓질이 지나는 유일한 목이다.
+    draft.touched = true;
+    maskDrafts.set(key, draft);
+    // ⚠️ 이 붓질은 **브라우저 안에만** 있다(격자 초안). 알리지 않으면 백엔드는
+    //    `has_mask` 도 `user_edited` 도 없는 빈 세션으로 보고 다른 그림을 묻지도
+    //    않고 덮어쓴다 - 새 세션은 window_id 가 달라 초안이 통째로 미아가 된다
+    //    (Codex HIGH 2026-08-28). 세션당 한 번이면 충분하다(붓질마다 보내면
+    //    드래그 한 번에 수십 통이 나간다).
+    if (!maskDraftAnnounced.has(key)) {
+      maskDraftAnnounced.add(key);
+      setModuleParam('img2img', 'mask_draft_dirty', 'true');
+    }
   }
 
   function maskPixelCount(canvas) {

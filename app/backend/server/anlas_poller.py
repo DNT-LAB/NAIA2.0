@@ -379,6 +379,7 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
     }
     _attach_accounts(context, usage_payload)
     _attach_policy(context, usage_payload)
+    _attach_quota_state(context, usage_payload)
     return [anlas_payload, usage_payload]
 
 
@@ -432,6 +433,23 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
         ) if usage_by_id else False
     except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
         print(f"[warn] multi-token usage attach failed: {exc}", flush=True)
+
+
+def _attach_quota_state(context: Any, usage_payload: dict[str, Any]) -> None:
+    """"이번 생성이 쓸 계정들의 무료 풀이 말랐는가" 를 실어 보낸다.
+
+    ⚠️ 판정을 **화면에서 다시 하지 않는다.** `generation_quota_exhausted` 가 SSOT 다 -
+    V5 계열인지, 계정을 지목했는지, 값을 모르는지까지 이미 그 함수가 본다. 프런트가
+    `percent <= 0` 으로 흉내 내면 지목 계정·미확인 캐시에서 판정이 갈라져, 돈 가드와
+    화면 경고가 서로 다른 말을 하게 된다.
+    """
+    try:
+        from core.nai_account_service import generation_quota_exhausted
+
+        usage_payload["quota_exhausted"] = bool(generation_quota_exhausted(context))
+    except Exception as exc:  # noqa: BLE001 - 경고 하나 때문에 배지가 죽으면 안 된다
+        print(f"[warn] quota state attach failed: {ascii(exc)}", flush=True)
+        usage_payload["quota_exhausted"] = False
 
 
 def _attach_policy(context: Any, usage_payload: dict[str, Any]) -> None:
@@ -625,15 +643,46 @@ def schedule_subscription_refresh(context: Any, clients: set, *, force: bool = F
             # 정책 목록/선택도 모델에 딸려 있다 - 캐시가 V5 때 잡혔으면 4.5 로 와도
             # V5 목록이 그대로 남는다. 여기서 다시 채운다.
             _attach_policy(context, usage)
+            _attach_quota_state(context, usage)
         asyncio.create_task(_send_pair(clients, cached[0], usage))
         return
 
     task = getattr(context, "headless_subscription_refresh_task", None)
     if task is not None and not task.done():
+        # ⚠️ **강제 갱신은 버리면 안 된다.** 도는 조회는 이 생성이 끝나기 **전에**
+        #    값을 읽었으므로 그 결과에는 방금 쓴 Anlas 가 안 빠져 있다. 예전에는
+        #    여기서 그냥 return 해서, Auto Gen 처럼 생성이 왕복보다 빠른 상황이면
+        #    잔량이 다음 5분 폴링까지 옛 값으로 남았다(실측 2026-08-28: 진행 중
+        #    조회 하나에 강제 갱신 2건 -> 추가 조회 0건).
+        #    표를 남겨 두고 지금 조회가 끝나면 한 번 더 돈다.
+        if force:
+            context.headless_subscription_refresh_pending = True
         return
+    _start_subscription_refresh(context, clients)
+
+
+def _start_subscription_refresh(context: Any, clients: set) -> None:
+    """조회 태스크를 띄우고, 밀린 강제 갱신이 있으면 끝난 뒤 이어서 돌린다."""
+    context.headless_subscription_refresh_pending = False
     new_task = asyncio.create_task(broadcast_anlas_and_usage(context, clients))
-    # 예외를 회수하지 않으면 "Task exception was never retrieved" 로 로그만 더럽힌다.
-    new_task.add_done_callback(_log_refresh_failure)
+
+    def _done(task: "asyncio.Task[Any]") -> None:
+        # 예외를 회수하지 않으면 "Task exception was never retrieved" 로 로그만 더럽힌다.
+        _log_refresh_failure(task)
+        if not getattr(context, "headless_subscription_refresh_pending", False):
+            return
+        if not clients:
+            context.headless_subscription_refresh_pending = False
+            return
+        # 밀린 것이 있었다 - 캐시를 버리고(방금 값이 변했다) 한 번 더.
+        context.headless_subscription_cache = None
+        try:
+            _start_subscription_refresh(context, clients)
+        except Exception as exc:  # noqa: BLE001 - 이어달리기 실패가 세션을 막으면 안 된다
+            context.headless_subscription_refresh_pending = False
+            print(f"[warn] pending anlas refresh failed: {ascii(exc)}", flush=True)
+
+    new_task.add_done_callback(_done)
     context.headless_subscription_refresh_task = new_task
 
 

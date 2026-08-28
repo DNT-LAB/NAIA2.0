@@ -568,6 +568,10 @@ class HeadlessRandomPromptService:
             "auto_fit_resolution": self._coerce_bool(remote_params.get("auto_fit_resolution", False)),
             "resolution_preset_enabled": self._coerce_bool(remote_params.get("resolution_preset_enabled", False)),
             "resolution_preset": remote_params.get("resolution_preset"),
+            # NAI 밴드도 같이 실어야 Auto Res 가 밴드를 본다(위 ANIMA 와 키가 다르다).
+            "nai_resolution_preset_enabled": self._coerce_bool(
+                remote_params.get("nai_resolution_preset_enabled", False)),
+            "nai_resolution_preset": remote_params.get("nai_resolution_preset"),
             "api_mode": self.context.get_api_mode(),
             "comfyui_sampling_mode": str(comfyui_sampling_mode),
             "workflow_type": str(workflow_type),
@@ -579,6 +583,7 @@ class HeadlessRandomPromptService:
             "wildcard_standalone",
             "auto_fit_resolution",
             "resolution_preset_enabled",
+            "nai_resolution_preset_enabled",
         ):
             settings[key] = self._coerce_bool(settings.get(key, False))
         settings["api_mode"] = self.context.get_api_mode()

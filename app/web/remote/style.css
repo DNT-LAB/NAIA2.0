@@ -19724,7 +19724,11 @@ body.detached-module .mod-grid-3 {
       꺼짐은 새싹만 있는 정사각이고, 켜지면 시드 번호가 나오며 옆으로 자란다.
       `width: auto` + 자식 숨김으로 처리한다(고정 폭을 두면 숫자 길이에 안 맞는다). */
 .seedlock-pill {
-  position: absolute; bottom: 10px; z-index: 6;
+  /* 인페인트 도크가 떠 있는 동안에는 그 **위로** 올라간다(사용자 지정 2026-08-28).
+     도크는 가운데 정렬에 최대 940px 이라 좁은 화면에서 이 알약을 그대로 덮었다.
+     올릴 높이는 app.js `syncInpaintDockLift()` 가 도크를 **실측해** 넣는다 - 접힘/
+     펼침으로 높이가 변하므로 상수로 두면 어긋난다. 세션이 없으면 0 이다. */
+  position: absolute; bottom: calc(10px + var(--inpaint-dock-lift, 0px)); z-index: 6;
   /* 왼쪽에 붙는 오버레이는 전부 도구 팝업만큼 비켜선다 — `.frozen-wc-bar` 와 같은
      이유(절대배치는 .viewer 의 padding 으로 안 밀려 팝업 뒤에 숨는다). */
   left: calc(10px + var(--ia-shift, 0px));
@@ -26256,7 +26260,43 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   padding: 6px; pointer-events: none;
 }
 .ic-plane .ic-stage { pointer-events: auto; }
-.ic-modes { display: flex; gap: 3px; }
+/* 보기 모드는 **한 덩어리 스위치**로 읽혀야 한다.
+   예전에는 똑같이 생긴 버튼 둘의 배경 알파만 0.10 -> 0.34 로 달라서, 생성이 끝나
+   결과 보기로 넘어가도 지금 어디에 있는지 눈에 안 들어왔다(사용자 제보 2026-08-28:
+   "결과 보기 - 편집에 대한 사용자 포커스 노출이 느슨하다").
+   ⚠️ 설명 글자를 더 넣어 풀지 않는다 - 좁은 화면(<=900px)에서는 `.ic-hint` 가 아예
+      사라지고, 애초에 사람은 글자를 안 읽는다. **대비**로 말하게 한다. */
+.ic-modes {
+  display: flex; gap: 0; padding: 2px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.34);
+}
+.ic-modes .ic-btn {
+  height: 18px; padding: 0 9px; border: 0; border-radius: 4px;
+  background: none; color: var(--text-muted); font-weight: 600;
+}
+.ic-modes .ic-btn:hover:not(:disabled) {
+  background: rgba(157,139,255,0.16); color: var(--text-primary);
+}
+/* 켜진 칸만 **채운다.** 알파 차이가 아니라 채움/비움의 차이라 곁눈으로도 갈린다. */
+.ic-modes .ic-btn.is-on {
+  background: rgba(124,106,239,0.92); border-color: transparent;
+  color: #fff; font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,0.45);
+}
+
+/* 새 결과가 와서 **자동으로** 결과 보기로 넘어간 순간 한 번 번쩍인다.
+   ⚠️ 번쩍임은 **덤**이다 - 어느 쪽인지는 위의 채움이 정적으로 말한다. throttle 된
+      창은 프레임을 안 만들어 이 애니메이션이 통째로 안 돌 수 있는데, 그래도 정보는
+      하나도 안 잃는다([[feedback_transition_gates_content]]). */
+.ic-modes.is-fresh,
+.ic-pill.is-fresh { animation: ic-modes-fresh 900ms ease-out 1; }
+@keyframes ic-modes-fresh {
+  0%   { box-shadow: 0 0 0 0 rgba(185,174,255,0.9); }
+  100% { box-shadow: 0 0 0 8px rgba(185,174,255,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ic-modes.is-fresh, .ic-pill.is-fresh { animation: none; }
+}
 .ic-bar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .ic-btn {
   height: 20px; padding: 0 8px; border: 1px solid rgba(157,139,255,0.42); border-radius: 5px;
@@ -26373,3 +26413,66 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
      따라오고, 그게 정확히 "뻑뻑하다" 로 읽힌다. */
   transition: none;
 }
+
+
+/* ── 유료 설정 경고: 상단 Anlas 알약 점멸 ───────────────────────────────────
+   사용자 지정(2026-08-28): NAI 모드에서 이번 생성이 Anlas 를 물면(29스텝 이상 또는
+   1MP 초과) 잔량을 **연노랑↔주황 0.5초 간격**으로 점멸시킨다. 누르기 전에 알아채는
+   것이 목적이라 색만 바꾸고 자리는 안 움직인다 - 레이아웃이 흔들리면 눈이 숫자를
+   따라가지 못한다. */
+@keyframes naia-anlas-paid-blink {
+  0%, 49.9% { color: #ffe28a; }
+  50%, 100% { color: #ff9d3d; }
+}
+/* ⚠️ 점멸은 **숫자에만** 건다. 두 가지 이유다.
+   1. 알약 자체에 `animation` 을 얹으면 소비 점멸(`.anlas-pill.anlas-flash`)과 같은
+      속성을 다퉈, 유료 설정인 동안 Anlas 가 줄어도 그 피드백이 통째로 사라진다
+      (둘 다 `animation` 이고 특이도가 같아 나중 규칙이 이긴다).
+   2. `ANLAS` 글자까지 깜빡이면 무엇을 보라는 건지 흐려진다 - 변하는 값에만 눈이
+      가야 한다(사용자 지시 2026-08-28). 라벨은 흰색으로 고정한다. */
+.anlas-pill.is-paid .anlas-value {
+  animation: naia-anlas-paid-blink 1s step-end infinite;
+}
+.anlas-pill.is-paid .anlas-label {
+  color: #fff;
+}
+.anlas-pill.is-paid {
+  border-color: rgba(255, 157, 61, 0.75);
+}
+/* 움직임을 줄여 달라고 한 사용자에게는 점멸 대신 **고정 주황**으로 같은 사실을
+   전한다. 경고 자체를 없애면 안 된다 - 돈이 걸린 표시다. */
+@media (prefers-reduced-motion: reduce) {
+  .anlas-pill.is-paid .anlas-value {
+    animation: none;
+    color: #ff9d3d;
+  }
+}
+
+
+/* 유료 설정에서 USAGE 헤더가 Anlas 로 바뀐 상태. 상단 알약의 경고색과 같은 주황을
+   써서 "지금 돈이 나간다" 는 한 가지 사실을 두 자리가 같은 말로 하게 한다. */
+.nai-acct-total.is-anlas { color: #ff9d3d; }
+
+
+/* Generate 버튼 **안**의 예상 Anlas 칩. 무료면 아예 안 뜬다 - 늘 떠 있으면 경고가
+   아니라 배경이 된다. 색은 상단 알약의 유료 경고와 같은 주황으로 맞춰, 두 자리가
+   같은 사실을 말하고 있다는 것이 보이게 한다.
+   ⚠️ `position: absolute` 로 띄워 **버튼 라벨의 가운데 정렬을 흔들지 않는다** -
+      흐름에 넣으면 금액이 붙고 떨어질 때마다 `Generate` 글자가 좌우로 움직인다. */
+.gen-cost-chip {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #ffd9a8;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.btn-gen { position: relative; }

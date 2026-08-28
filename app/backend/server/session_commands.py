@@ -108,6 +108,35 @@ async def _maybe_autostart_automation(
     ensure_automation_timer_watcher(context, clients)
 
 
+def _snap_resolution_into_nai_band(context: Any) -> None:
+    """지금 해상도를 선택된 NAI 밴드 안으로 옮긴다(이미 안에 있으면 그대로)."""
+    try:
+        if str(context.get_api_mode() or "").upper() != "NAI":
+            return
+        params = context.remote_params
+        if not context._coerce_bool(params.get("nai_resolution_preset_enabled", False)):
+            return
+        from core.resolution_utils import (
+            nai_resolution_preset_labels,
+            nearest_nai_preset_resolution,
+            parse_resolution_pair,
+        )
+
+        band = nai_resolution_preset_labels(params.get("nai_resolution_preset"))
+        current = str(params.get("resolution") or "")
+        if current in band:
+            return
+        pair = parse_resolution_pair(current)
+        width, height = pair if pair else (1024, 1024)
+        new_w, new_h = nearest_nai_preset_resolution(width, height,
+                                                     params.get("nai_resolution_preset"))
+        context.set_param("resolution", f"{new_w} x {new_h}")
+        context.set_param("width", new_w)
+        context.set_param("height", new_h)
+    except Exception as exc:  # noqa: BLE001 - 맞춤 실패가 파라미터 변경을 막으면 안 된다
+        print(f"[warn] NAI resolution band snap failed: {ascii(exc)}", flush=True)
+
+
 async def handle_session_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -142,7 +171,18 @@ async def handle_session_command(
         )
         return True
     if command_type == "set_prompt":
-        context.prompt_text = str(command.get("prompt") or "")
+        # ⚠️ **어느 프리셋을 보고 친 글인가를 먼저 본다.** 예전에는 프롬프트를 먼저
+        #    싣고 나중에 표식을 봤는데, 그러면 프리셋 파일은 지켜져도 **살아 있는
+        #    세션 프롬프트**가 앞 프리셋의 글로 바뀐다 - 재접속하거나 다시 편집하면
+        #    그 글이 새 프리셋의 것인 양 되살아난다(Codex 리뷰 2026-08-27).
+        #    표식이 어긋나면 메인 프롬프트는 통째로 무시하고, 화면이 스스로 고치도록
+        #    지금 값을 `force` 로 되돌려 준다.
+        stale_prompt = context.stale_prompt_edit(
+            str(command.get("prompt_origin") or ""),
+            str(command.get("prompt_preset") or ""),
+        )
+        if not stale_prompt:
+            context.prompt_text = str(command.get("prompt") or "")
         context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
         context.save_remote_ui_state()
         # 네거티브는 **선택된 프리셋에도** 즉시 반영한다. 안 하면 편집분이 세션에만
@@ -151,15 +191,26 @@ async def handle_session_command(
         # ⚠️ `origin == "edit"` 일 때만 한다. 서버가 밀어 준 값을 클라이언트가
         # 되돌려 보내는 에코 경로가 여럿이라(프리셋 적용·메타데이터 적용·재동기),
         # 아무 `set_prompt` 에서나 반영하면 파이프라인이 만든 네거티브가 프리셋에
-        # 굳는다. 메인 프롬프트는 어느 경로에서도 저장하지 않는다 - Random 이 매번
-        # 덮어쓰기 때문이다.
+        # 굳는다.
         if str(command.get("origin") or "") == "edit":
             context.sync_negative_into_current_preset()
+        # 메인 프롬프트도 같다. 표식이 **따로**인 이유: `origin` 은 "네거티브 칸을
+        # 직접 쳤다" 는 뜻이라 여기에 새 의미를 얹으면 두 칸이 서로의 값을 프리셋에
+        # 밀어 넣는다. Random 이 덮어쓴 값은 `set_prompt` 로 돌아오지 않으므로 이
+        # 빗장 하나로 충분하다(사용자 지적 2026-08-27: A -> B -> A 왕복에서 메인
+        # 프롬프트가 사라지고 옛 저장값이 나타남).
+        if not stale_prompt and str(command.get("prompt_origin") or "") == "edit":
+            context.sync_prompt_into_current_preset(str(command.get("prompt_preset") or ""))
         await ws.send_text(json.dumps({
             "type": "prompt_sync",
             "prompt": context.prompt_text,
             "negative": context.negative_prompt_text,
             "negative_prompt": context.negative_prompt_text,
+            # 버린 편집을 보낸 화면은 아직 앞 프리셋의 글을 들고 있다 - 편집 중이어도
+            # 덮어써서 맞춘다(`get_prompt` 가 재접속 때 쓰는 것과 같은 처리).
+            # `stale_correction` 은 화면이 **보낸 뒤 더 친 글**을 지키게 하는 표식이다 -
+            # 그것까지 지우면 방금 친 글자가 소리없이 사라진다(Codex 리뷰 2026-08-27).
+            **({"force": True, "stale_correction": True} if stale_prompt else {}),
         }, ensure_ascii=False))
         return True
     if command_type == "get_prompt":
@@ -177,6 +228,17 @@ async def handle_session_command(
     if command_type == "set_param":
         key = str(command.get("key") or "")
         context.set_param(key, command.get("value"))
+        # NAI 해상도 밴드를 **사용자가 직접** 켜거나 바꿨다 - 지금 해상도가 밴드 밖이면
+        # 밴드 안에서 비율이 가장 가까운 것으로 끌어들인다.
+        #
+        # ⚠️ 안 하면 밴드 밖 값이 드롭다운 끝에 남는다. 그러면 (a) 프런트 Rnd Res 가
+        #    그것을 뽑아 밴드 밖 해상도로 생성이 나가고, (b) 화면은 Wallpaper 를
+        #    가리키는데 Anlas 유료 경고가 안 켜진다(실측 2026-08-28).
+        #
+        # ⚠️ 프리셋 적용 경로(`_apply_main_settings`)는 `context.set_param` 을 직접
+        #    부르므로 여기를 안 탄다 - 저장된 해상도를 존중한다.
+        if key in {"nai_resolution_preset_enabled", "nai_resolution_preset"}:
+            _snap_resolution_into_nai_band(context)
         # 선택된 프리셋에 **즉시 반영**한다(사용자 지정 2026-08-21). 프리셋을 열어
         # 둔 채 모델을 바꾸면 그 프리셋이 곧 새 모델의 프리셋이 된다.
         #

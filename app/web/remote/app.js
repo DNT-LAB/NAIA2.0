@@ -100,6 +100,25 @@ let _localPromptDirty = false;
 // `_localPromptDirty` 를 지우는 자리가 여럿인데, 거기서 같이 지우면 500ms 안에
 // Generate/Random 을 누른 사용자의 네거티브 편집이 조용히 사라진다.
 let _negativeUserDirty = false;
+/** 지금 화면이 믿고 있는 프리셋 이름. 사용자가 친 프롬프트에 함께 실어 보내면
+ *  백엔드가 **스왑 뒤 늦게 도착한 글**을 버릴 수 있다(Prefix/Postfix 와 같은 방식).
+ *  패널이 안 열려 있어도 모듈 상태 캐시에 남아 있으므로 여기서 읽는다. */
+function _currentPresetStamp() {
+  const st = moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState;
+  return st && typeof st.preset === 'string' ? st.preset : '';
+}
+
+// 사용자가 **메인 프롬프트 칸의 내용을** 직접 바꿨는가. 이 표식이 붙은 `set_prompt`
+// 만 선택된 프리셋에 반영된다. Random 이 서버에서 만든 프롬프트는 `prompt_sync` 로
+// 내려올 뿐 이 경로로 돌아오지 않으므로, 랜덤 결과가 프리셋에 굳지 않는다.
+let _promptUserDirty = false;
+// 그 편집을 **시작할 때** 화면이 믿던 프리셋. 보낼 때 다시 읽으면 안 된다 - 500ms
+// 디바운스 동안 다른 창이 프리셋을 바꾸면, A 를 보며 친 글이 B 의 이름표를 달고
+// B 에 저장된다(Codex 리뷰 2026-08-27).
+let _promptDirtyPreset = '';
+// 마지막으로 서버에 보낸 메인 프롬프트. 서버가 "그 편집은 버렸다" 며 되돌려 줄 때,
+// **보낸 뒤에 더 친 글까지 지우지 않도록** 대조하는 데 쓴다.
+let _lastSentPromptValue = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let pendingRandomRequestId = '';
 let initialStateRefreshTimer = null;
@@ -456,6 +475,9 @@ let inpaintCanvasControl = null;
 // 캔버스를 드러내거나 옛 팝업을 연다(위 onModuleState 참조).
 let pendingImg2ImgSurface = false;
 let pendingImg2ImgSurfaceTimer = 0;
+// 인페인트를 시킨 **시점의** 세션 번호. 새 세션이 열리면 이 값과 달라진다 - WS 경로는
+// 응답이 없어서, 이것이 "우리가 시킨 그 세션" 임을 아는 유일한 표다.
+let pendingImg2ImgSurfaceFromWindow = -1;
 
 // ── 가상 캐릭터 프롬프트 (사용자 지정 2026-08-26) ─────────────────────────
 //
@@ -729,7 +751,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
       escHtml,
       showToast,
       promptEdit,
-      onPromptEdit,
+      onPromptEdit: onPromptAuthoredEdit,
     });
   })
   .catch(error => {
@@ -744,7 +766,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260826-art
       showToast,
       promptEdit,
       negEdit,
-      onPromptEdit,
+      onPromptEdit: onPromptAuthoredEdit,
       setPromptFields: applyPromptFields,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
       getCurrentGenerationParams: () => _collectCurrentParams(),
@@ -1027,7 +1049,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
       getCurrentCfgScale: () => paramEls.cfg_scale?.value || '',
       isCfgScaleLocked: () => isComfyUiFreeWorkflowActive(),
       setParam,
-      setPromptFields: applyPromptFields,
+      setPromptFields: (p, n) => applyPromptFields(p, n, {authored: true}),
       generate: requestGenerate,
       showToast,
       escHtml,
@@ -1125,7 +1147,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260827-fb6')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260828-flush')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1142,6 +1164,10 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
       getMetadataViewer: () => metadataViewer,
       getQueuePanel: () => queuePanel,
       discardPendingModuleEdit,
+      // ⚠️ 새 그림을 열기 전에 디바운스된 편집을 **버리면 안 된다** - 백엔드가
+      //    "작업 중" 을 모른 채 덮어써서 사용자가 방금 친 글이 조용히 사라진다
+      //    (Codex HIGH 2026-08-28). 옛 세션으로 **먼저 보내고** 연다.
+      flushPendingModuleEdit,
       openModule,
       openImg2ImgSessionSurface,
       onCanvasSession: () => inpaintCanvasControl?.revealForSession?.(),
@@ -1788,7 +1814,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
         if (!tags || !promptEdit) return;
         const current = promptEdit.value.replace(/[,\s]+$/, '');
         promptEdit.value = current ? `${current}, ${tags}` : tags;
-        onPromptEdit();
+        onPromptAuthoredEdit();
         showToast('프롬프트에 추가했습니다.', 'success');
       },
     });
@@ -2163,7 +2189,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260826-fix2')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260828-draft')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2208,7 +2234,7 @@ const tagSearchReady = import('./js/features/tagSearch.mjs?v=20260609-scrollfix1
       escHtml,
       getWs: () => ws,
       WebSocket,
-      onPromptEdit,
+      onPromptEdit: onPromptAuthoredEdit,
     });
   })
   .catch(error => {
@@ -2263,7 +2289,7 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260606-remote-e
       updateModuleBtnState,
       positionFloatingPanel,
       setModuleParam,
-      onPromptEdit,
+      onPromptEdit: onPromptAuthoredEdit,
       fireModuleOninput: _fireModuleOninput,
       escHtml,
       onOpenRemote: target => openRemotePanel(target),
@@ -2292,7 +2318,44 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
   });
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260827-fb5')
+/** 인페인트 도크가 떠 있는 동안 좌하단 알약을 그 **위로** 올린다(사용자 지정).
+ *
+ *  둘 다 `#resultViewer` 안 `position:absolute; bottom:~; z-index:6` 이라, 도크가
+ *  넓어지면(최대 940px, 좁은 화면에선 96%) 알약을 그대로 덮는다.
+ *
+ *  ⚠️ 도크 높이는 **고정이 아니다** - 접힘/펼침, 줄바꿈에 따라 변한다. 그래서 상수
+ *     offset 대신 실측 높이를 CSS 변수로 흘린다. `hidden` 은 높이 0 이라 자연히 0 이
+ *     되어, 세션이 없을 때는 알약이 원래 자리로 돌아온다.
+ *  ⚠️ `bottom` 에 transition 을 걸지 않는다 - throttle 된 창은 프레임을 안 만들어
+ *     기하 애니메이션 시계가 멈춘 채로 남는다([[feedback_transition_gates_content]]).
+ */
+function syncInpaintDockLift() {
+  // ⚠️ `$` 를 쓰지 않는다 - 그 헬퍼는 이 파일 **훨씬 아래**(3300행대)에서 `const` 로
+  //    선언돼, 여기서 부르면 TDZ 에 걸린다. 실제로 그렇게 짰다가 app.js 평가가
+  //    그 자리에서 멈춰 **뒷부분 전체가 죽었다**(2026-08-28 실측). 선언 순서에
+  //    기대지 않는 `document.getElementById` 를 그대로 쓴다.
+  const dock = document.getElementById('inpaintCanvasPanel');
+  const viewer = document.getElementById('resultViewer');
+  if (!dock || !viewer) return;
+  const lift = dock.hidden ? 0 : Math.round(dock.getBoundingClientRect().height);
+  viewer.style.setProperty('--inpaint-dock-lift', lift ? `${lift + 8}px` : '0px');
+}
+
+function watchInpaintDockLift() {
+  const dock = document.getElementById('inpaintCanvasPanel');
+  if (!dock) return;
+  // 크기 변화(접힘/펼침/줄바꿈)와 표시 전환(`hidden`)·내용 교체를 모두 본다.
+  // ⚠️ ResizeObserver 는 **프레임 경계에서** 전달된다 - 백그라운드로 밀린 창은
+  //    프레임을 안 만들어 영영 안 온다([[feedback_transition_gates_content]]).
+  //    MutationObserver 는 마이크로태스크라 그 창에서도 도착한다 - 둘 다 건다.
+  new ResizeObserver(syncInpaintDockLift).observe(dock);
+  new MutationObserver(syncInpaintDockLift).observe(dock, {
+    attributes: true, attributeFilter: ['hidden', 'class'], childList: true,
+  });
+  syncInpaintDockLift();
+}
+
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260828-life2')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -2311,6 +2374,7 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       // Result 패널은 사용자가 손잡이로 높이를 정한다. 캔버스가 열려 있는 동안만
       // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
     });
+    watchInpaintDockLift();
   })
   .catch(error => {
     console.error('Failed to initialize inpaint canvas panel', error);
@@ -4298,6 +4362,15 @@ function resolutionLabelFromMessage(message = {}) {
 function applyGeneratedResolutionUpdate(message = {}) {
   const label = resolutionLabelFromMessage(message);
   if (!label) return;
+  // ⚠️ **Rnd Res 가 켜졌을 때만 화면 해상도를 갈아 끼운다**(사용자 지정 2026-08-28).
+  //
+  //    Rnd Res 는 매 생성마다 다음 값을 새로 뽑으므로 그 결과를 보여 주는 것이
+  //    맞다. 그런데 Auto Res 만 켠 경우에도 이 자리가 덮어써서, 한 장 뽑고 나면
+  //    해상도가 1:1 로 바뀌어 있다는 제보가 있었다 - Auto Res 는 **그림마다
+  //    원본에 박힌 해상도**를 따라가는 기능이라 화면의 기준값을 바꿀 이유가 없다.
+  //    (Auto Res 가 실제 생성에 쓰는 값은 그대로다 - 여기서 바꾸는 것은 표시뿐이다.)
+  const randomOn = !!qRndRes?.classList.contains('on');
+  if (!randomOn) return;
   ensureSelectValue(paramEls.resolution, label);
   ensureSelectValue(qResolution, label);
   paramEls.resolution.value = label;
@@ -4384,6 +4457,12 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
       promptSendTimer = null;
     }
     _localPromptDirty = false;
+    // ⚠️ **여기서 표식을 안 내리면 랜덤 결과가 프리셋에 굳는다.** 사용자가 뭔가 치던
+    //    중에 Random/Storyteller/Automation 이 칸을 덮으면, 위에서 타이머를 껐으니
+    //    당장은 안 나가지만 표식은 남는다 - 다음 프리셋 전환의 flush 가 그 표식을 달고
+    //    **기계가 만든 글**을 프리셋에 써 버린다. 메인 프롬프트를 원래 저장하지
+    //    않았던 이유가 정확히 이 사고다.
+    _promptUserDirty = false;
     deferredPromptSync = null;
     syncingPrompt = true;
     // Interactive 가 켜져 있으면 입력창의 주인은 블록이다. 서버 에코를 그대로 쓰면
@@ -4644,6 +4723,22 @@ function onComfyUiWorkflowState(m) {
 
 function updateParams(m) {
   const schemaOnly = !!m.schema_only;
+  if (Array.isArray(m.options_nai_resolution_preset) && m.options_nai_resolution_preset.length) {
+    naiResolutionBands = m.options_nai_resolution_preset;
+  }
+  if ('nai_resolution_preset_enabled' in m || 'nai_resolution_preset' in m) {
+    syncNaiResolutionBandControls(
+      !!m.nai_resolution_preset_enabled,
+      String(m.nai_resolution_preset || 'normal'));
+  }
+  if ('nai_anlas_cost' in m) naiAnlasCost = Number(m.nai_anlas_cost) || 0;
+  if ('nai_anlas_cost_if_paid' in m) naiAnlasCostIfPaid = Number(m.nai_anlas_cost_if_paid) || 0;
+  if (m.nai_free_limits) {
+    const steps = Number(m.nai_free_limits.steps);
+    const pixels = Number(m.nai_free_limits.pixels);
+    if (Number.isFinite(steps) && steps > 0) naiFreeLimits.steps = steps;
+    if (Number.isFinite(pixels) && pixels > 0) naiFreeLimits.pixels = pixels;
+  }
   const mode = m.api_mode || currentMode || modeSelect?.value || '';
   syncingParams = true;
   ensureResolutionPresetOptions();
@@ -4833,6 +4928,8 @@ function updateParams(m) {
   updateModuleHeaderAction(currentModuleId);
   syncingParams = false;
   if (resultEnhance) resultEnhance.update();
+  // 모드 전환·프리셋 적용·재접속으로 값이 통째로 바뀌었다 - 유료 경고를 다시 본다.
+  updateAnlasPaidIndicator();
 }
 
 function setParam(key, value) {
@@ -4891,6 +4988,8 @@ function setParam(key, value) {
   if (resultEnhance && ['enable_hr', 'hr_scale', 'hr_upscaler', 'denoising_strength', 'hires_steps', 'hr_cfg'].includes(key)) {
     resultEnhance.update();
   }
+  // 값이 실리는 목이라 여기 하나만 걸면 입구(PARAMS·Quick·프리셋 적용)를 다 덮는다.
+  updateAnlasPaidIndicator();
 }
 
 function setAnimaWeightFromBadge(value) {
@@ -4906,7 +5005,11 @@ function toggleFlag(el) {
   el.classList.toggle('on', !isOn);
   setParam(key, String(!isOn));
   // Quick flags 동기화 (Params → Quick)
-  if (key === 'random_resolution') qRndRes.classList.toggle('on', !isOn);
+  if (key === 'random_resolution') {
+    qRndRes.classList.toggle('on', !isOn);
+    // Rnd Res 가 켜지면 판정 대상이 **후보 목록 전체**로 바뀐다 - 다시 본다.
+    updateAnlasPaidIndicator();
+  }
   if (key === 'auto_fit_resolution') qAutoRes.classList.toggle('on', !isOn);
   // Params 탭에서 Seed Fix 를 **끄면** 알약이 빌려 간 해상도 설정도 함께 돌려준다.
   // 켜는 방향은 손대지 않는다 — 기존 Seed Fix 는 시드만 고정하는 플래그이고,
@@ -5493,6 +5596,9 @@ function _applyPromptSync(m) {
   const interactiveOwnsPrompt = interactivePanel?.isActive?.() && promptBeforeInteractive !== null;
   if (!interactiveOwnsPrompt && 'prompt' in m && m.prompt !== promptEdit.value) {
     promptEdit.value = m.prompt;
+    // 서버 값(Random·프리셋 적용·파이프라인)이 칸을 덮었다 - 사용자 편집 표식을
+    // 내린다. 안 내리면 남이 만든 프롬프트가 다음 flush 때 프리셋에 굳는다.
+    _promptUserDirty = false;
   }
   if ('negative_prompt' in m && m.negative_prompt !== negEdit.value) negEdit.value = m.negative_prompt;
   syncingPrompt = false;
@@ -5512,7 +5618,13 @@ function flushDeferredPromptSync() {
 function syncPrompts(m) {
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
   const negativeChanged = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
-  const forceSync = !!m.force || !!m.desktop_sync;
+  let forceSync = !!m.force || !!m.desktop_sync;
+  // 서버가 "그 편집은 앞 프리셋의 것이라 버렸다" 며 되돌려 주는 정정이다. 보낸 뒤에
+  // 사용자가 더 쳤다면 **그 글이 지금의 의사**이므로 덮어쓰지 않는다 - 다음 송신이
+  // 지금 프리셋의 이름표를 달고 제대로 저장한다(Codex 리뷰 2026-08-27).
+  if (forceSync && m.stale_correction && promptEdit.value !== _lastSentPromptValue) {
+    forceSync = false;
+  }
 
   if (!forceSync && _isPromptEditingActive() && (promptChanged || negativeChanged)) {
     // 편집 중: 서버 값 버림. blur해도 자동 flush 안 함 (사용자 편집 보호).
@@ -5526,6 +5638,39 @@ function syncPrompts(m) {
   _applyPromptSync(m);
 }
 
+/** 사용자가 **메인 프롬프트 칸의 내용을 바꾼** 편집. 표식을 세우고 평소 처리를 한다.
+ *
+ *  ⚠️ **`onPromptEdit` 안에서 세우면 안 된다.** 그 함수는 메인 칸 전용이 아니다 -
+ *     네거티브 입력창도(`negEdit` 리스너), Interactive 블록 조립도 그것을 부른다.
+ *     안에서 세우면 *네거티브만 고쳐도* 칸에 떠 있던 **랜덤 결과가 사용자가 쓴 것으로
+ *     프리셋에 저장된다**(Codex 리뷰 2026-08-27). `_negativeUserDirty` 가 리스너에서
+ *     세워지는 것과 같은 이유다 - 바로 그 자리 주석이 같은 경고를 하고 있다. */
+function onPromptAuthoredEdit() {
+  // 표식을 **처음 세울 때만** 프리셋을 잡는다. 계속 치는 동안 다시 잡으면 스왑
+  // 이후의 프리셋으로 갱신돼 표식의 의미가 사라진다.
+  if (!_promptUserDirty) _promptDirtyPreset = _currentPresetStamp();
+  _promptUserDirty = true;
+  onPromptEdit();
+}
+
+/** 서버에 **저장용으로** 보낼 메인 프롬프트.
+ *
+ *  ⚠️ Interactive 가 켜져 있으면 입력창은 블록이 조립한 **표시값**이다. 그것을
+ *     저장하면 켠 채로 프리셋을 옮겼을 때 조립값이 프리셋에 굳고 사용자 원본이
+ *     사라진다. 디바운스 경로는 원래 이렇게 하고 있었는데 **프리셋 전환 직전의
+ *     flush 는 표시값을 그대로 보내고 있었다**(Codex 리뷰 2026-08-27) - 두 자리가
+ *     같은 규칙을 쓰도록 여기 한 곳으로 모은다.
+ *
+ *  ⚠️ 판단은 **`promptBeforeInteractive` 하나**로 한다. 예전 표현은
+ *     `interactivePanel?.isActive?.() && promptBeforeInteractive !== null` 이었는데,
+ *     진실 소스가 둘이라 어긋난다 - 라이브에서 Interactive 를 켜 원본을 잡아 둔
+ *     상태인데 `isActive()` 가 false 라 **조립값이 저장용으로 나갔다**(2026-08-27
+ *     실측). 이 변수는 Interactive 가 입력창을 가져갈 때 채워지고 돌려줄 때 비워지므로
+ *     "지금 입력창이 조립값인가" 에 그 자체로 답한다. */
+function promptTextForSave() {
+  return promptBeforeInteractive !== null ? promptBeforeInteractive : promptEdit.value;
+}
+
 function onPromptEdit() {
   if (syncingPrompt) return;
   _localPromptDirty = true;
@@ -5535,22 +5680,27 @@ function onPromptEdit() {
   if (promptSendTimer) clearTimeout(promptSendTimer);
   promptSendTimer = setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
+      const sentPrompt = promptTextForSave();
       ws.send(JSON.stringify({
         type: 'set_prompt',
         // Interactive 가 켜져 있으면 입력창은 **블록이 조립한 표시값**이다. 그것을
         // 저장하면 켠 채로 종료했을 때 다음 실행에 그 값이 메인 프롬프트로 굳고
         // 사용자 원본이 사라진다(실측). 저장은 항상 원본으로 한다 — 생성은
         // 요청에 프롬프트를 직접 실어 보내므로 이 값에 의존하지 않는다.
-        prompt: (interactivePanel?.isActive?.() && promptBeforeInteractive !== null)
-          ? promptBeforeInteractive : promptEdit.value,
+        prompt: sentPrompt,
         negative_prompt: negEdit.value,
         // ⚠️ **네거티브 입력창을 직접 친 경우에만** 표시를 단다. 서버는 이때만
         // 네거티브를 선택된 프리셋에 반영한다. 이 함수는 메인 프롬프트 편집과
         // Interactive 블록 변경에서도 불리므로, 무조건 달면 화면에 떠 있던 남의
         // 네거티브가 프리셋에 굳는다(Codex 리뷰 2026-08-21).
         ...(_negativeUserDirty ? {origin: 'edit'} : {}),
+        // 메인 프롬프트의 표식은 **따로** 단다. `origin` 은 네거티브 전용이라
+        // 겸용하면 한쪽 칸의 값이 다른 칸의 이름으로 프리셋에 들어간다.
+        ...(_promptUserDirty ? {prompt_origin: 'edit', prompt_preset: _promptDirtyPreset} : {}),
       }));
+      _lastSentPromptValue = sentPrompt;      // 표시값이 아니라 **보낸 값**
       _negativeUserDirty = false;             // 실제로 나갔을 때만 지운다
+      _promptUserDirty = false;
     }
     promptSendTimer = null;
     _localPromptDirty = false;
@@ -5566,19 +5716,29 @@ function applyPromptText(prompt) {
   promptEdit.value = String(prompt || '');
   syncingPrompt = false;
   _localPromptDirty = false;
+  // 남이 정해 준 프롬프트를 그대로 꽂는 자리다 - 사용자 편집 표식을 내린다.
+  // 안 내리면 치던 중에 이 함수가 불렸을 때, 다음 프리셋 전환이 **이 값**을
+  // 사용자가 친 것처럼 프리셋에 저장한다.
+  _promptUserDirty = false;
   updatePromptHighlight();
   applyPromptHighlightState();
   updatePromptTokenEstimate();
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
-      prompt: promptEdit.value,
+      prompt: promptTextForSave(),
       negative_prompt: negEdit.value,
     }));
   }
 }
 
-function applyPromptFields(prompt, negative) {
+/** 모듈이 조립한 프롬프트를 메인 칸에 꽂는다.
+ *
+ *  `authored` = 사용자가 **버튼을 눌러 이걸 작업값으로 삼았다**(Studio 프레임 적용,
+ *  아티스트 썸네일 적용, 캐릭터 뷰어 적용). 그러면 프리셋에도 따라가야 한다 - 안
+ *  그러면 적용해 놓고 프리셋을 옮겼다 돌아왔을 때 사라진다(Codex 리뷰 2026-08-27).
+ *  기본값은 false 라, 서버 값이 칸을 덮는 용도로 쓰는 쪽의 동작은 그대로다. */
+function applyPromptFields(prompt, negative, {authored = false} = {}) {
   if (promptSendTimer) {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
@@ -5591,6 +5751,8 @@ function applyPromptFields(prompt, negative) {
   // 서버 값이 네거티브를 덮었다 - 사용자가 치던 것은 더 이상 화면에 없으므로
   // 표시도 내린다(안 내리면 남의 값이 사용자 편집인 척 프리셋에 들어간다).
   _negativeUserDirty = false;
+  _promptUserDirty = authored;
+  if (authored) _promptDirtyPreset = _currentPresetStamp();
   deferredPromptSync = null;
   updatePromptHighlight();
   applyPromptHighlightState();
@@ -6380,7 +6542,11 @@ function bindMetadataImageDropTarget() {
 
 function applyMetadataPrompt(payload) {
   if (!payload) return;
-  if (promptEdit && payload.prompt != null) promptEdit.value = payload.prompt || '';
+  if (promptEdit && payload.prompt != null) {
+    promptEdit.value = payload.prompt || '';
+    // 이미지에서 불러온 값이지 사용자가 친 것이 아니다 - 프리셋에 넣지 않는다.
+    _promptUserDirty = false;
+  }
   if (negEdit && payload.negative != null) {
     negEdit.value = payload.negative || '';
     // 이미지에서 불러온 값이지 사용자가 친 것이 아니다 - 프리셋에 넣지 않는다.
@@ -6710,7 +6876,9 @@ function onLoadPrompt(prompt) {
   // 사용자가 히스토리에서 "Load Prompt"를 명시적으로 클릭한 경우 — 편집 중이어도 즉시 적용.
   // (blur 시 자동 flush를 제거했으므로 defer하면 영원히 안 들어감)
   promptEdit.value = prompt;
-  onPromptEdit();
+  // 사용자가 **버튼을 눌러** 이 프롬프트를 작업값으로 삼았다 - 프리셋에도 반영한다.
+  // (이미지를 훑다 우연히 적용되는 `applyMetadataPrompt` 와 갈라지는 지점이다.)
+  onPromptAuthoredEdit();
   showToast('Prompt loaded', 'success');
 }
 
@@ -6723,6 +6891,11 @@ function onGenerateFromPrompt(prompt) {
   if (generating) return false;
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   promptEdit.value = prompt;
+  // 남의 프롬프트로 칸을 통째로 갈아치우고 곧바로 생성하는 자리다 - 사용자가 치던
+  // 표식이 켜져 있었다면 내린다. 안 내리면 다음 프리셋 전환이 **이 글**을 사용자가
+  // 쓴 것처럼 프리셋에 저장한다(히스토리 Load 와 갈라지는 지점: 그쪽은 그 프롬프트로
+  // 계속 작업하겠다는 뜻이라 표식을 세운다).
+  _promptUserDirty = false;
   onPromptEdit();
   const negative = negEdit ? negEdit.value : '';
   // 이 경로도 buildWebGenerationOverrides 로 Interactive 캐릭터를 싣는다 — 조합을
@@ -7063,7 +7236,7 @@ function insertTranslatorOutput() {
   const end = Number.isFinite(target.selectionEnd) ? target.selectionEnd : target.value.length;
   target.setRangeText(text, start, end, 'end');
   target.focus();
-  onPromptEdit();
+  onPromptAuthoredEdit();
 }
 
 if (translatorInput) {
@@ -7439,8 +7612,16 @@ function scheduleInitialRandomPrompt(delay = 350) {
  */
 function armImg2ImgSurface() {
   pendingImg2ImgSurface = true;
+  pendingImg2ImgSurfaceFromWindow = Number(moduleStateCache.get('img2img')?.window_id ?? -1);
   clearTimeout(pendingImg2ImgSurfaceTimer);
-  pendingImg2ImgSurfaceTimer = setTimeout(() => { pendingImg2ImgSurface = false; }, 6000);
+  // ⚠️ 예전에는 **6초 시계**가 판정이었다 - 백엔드가 큰 그림을 옮기느라 늦으면
+  //    성공한 세션을 그대로 버려, 세션은 살아 있는데 캔버스가 안 떴다(Codex
+  //    2026-08-28). 이제 판정은 위의 세션 번호가 하고, 시계는 **마지막 안전망**일
+  //    뿐이라 넉넉히 잡는다(표가 영영 남아 엉뚱한 세션을 가로채는 것만 막는다).
+  pendingImg2ImgSurfaceTimer = setTimeout(() => {
+    pendingImg2ImgSurface = false;
+    pendingImg2ImgSurfaceFromWindow = -1;
+  }, 60000);
 }
 
 function generateAction() {
@@ -7592,7 +7773,7 @@ function updateGenerateButtonMode() {
     btnGen.disabled = presetMode
       ? (promptFixed || !!presetGenerationPending || !eventPresetPanel?.canGenerate?.())
       : false;
-    btnGen.innerHTML = '<span class="shortcut-hint">CTRL + ENTER</span>Generate';
+    btnGen.innerHTML = genButtonHtml('Generate');
   }
   // ⚠️ 위에서 innerHTML 을 통째로 다시 쓰고 Random 도 다시 켠다 - 인페인트 세션의
   //    잠금이 여기서 말없이 벗겨졌다(탭을 옮기기만 해도 라벨이 `Generate` 로 되돌아감).
@@ -7697,7 +7878,7 @@ function startGenTimer() {
   stopGenTimer();
   genTimer = setInterval(() => {
     const elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
-    btnGen.innerHTML = `<span class="shortcut-hint">CTRL + ENTER</span>${elapsed}s`;
+    btnGen.innerHTML = genButtonHtml(`${elapsed}s`);
   }, 100);
 }
 
@@ -8379,6 +8560,16 @@ function onNaiUsageUpdate(m) {
   const pill = $('naiUsagePill');
   const value = $('naiUsageValue');
   if (naiAccountPanel) naiAccountPanel.onUsageUpdate(m);
+  // 무료 풀이 말랐는가. 값이 안 오면(옛 백엔드·조회 실패) **경고하지 않는다** -
+  // 모르는 것을 소진으로 읽으면 멀쩡한 무료 생성에 가짜 금액이 뜬다.
+  const nextExhausted = !!(m && m.quota_exhausted);
+  if (nextExhausted !== naiQuotaExhausted) {
+    naiQuotaExhausted = nextExhausted;
+    updateAnlasPaidIndicator();
+    if (nextExhausted) {
+      showToast('무료 사용량을 다 썼습니다 - 지금부터 생성은 Anlas 를 씁니다', 'warning');
+    }
+  }
   if (!pill || !value) return;
   if (!m || !m.available) {
     pill.classList.add('hidden');
@@ -8436,6 +8627,154 @@ function onNaiUsageUpdate(m) {
       : `NovelAI Diffusion V5 Opus 사용량${rate ? ` · ${rate}` : ''}`;
   pill.title = `${base}\n${multi ? `계정 ${accounts.length}개 · ` : ''}눌러서 계정 관리`;
   pill.classList.remove('hidden');
+}
+
+// ---- NAI 해상도 밴드 (Small / Normal / Large / Wallpaper) ----
+//
+// NAI 는 자기 UI 에서 이 이름들을 쓰는데 이름당 Portrait/Landscape/Square 셋만 준다.
+// NAIA 는 1MP 종횡비 일곱 개로 돌아가서, 그대로 붙이면 `1088x960`·`1152x896` 같은
+// 비율이 Small/Large 에서 사라진다 - 그래서 밴드마다 일곱을 스케일해 채웠다
+// (사용자 지시 2026-08-28). ⚠️ 표는 **백엔드가 내려 준다**(`options_nai_resolution_preset`).
+// 화면이 같은 숫자를 따로 들면 한쪽만 고쳤을 때 드롭다운이 거짓말을 한다.
+let naiResolutionBands = [];      // [{id, label, resolutions:[...]}]
+// 마지막으로 아는 상태. 컨트롤은 **'NAI 전용 도구' 런처가 그린다**(WEBUI/COMFYUI 의
+// 해상도 프리셋과 같은 자리). 런처 렌더가 우리 뒤에 올 수 있고 모드가 바뀌면 다시
+// 그리므로, 상태를 들고 있다가 새로 그려진 칸에 다시 씌운다 - 안 그러면 체크가
+// 풀린 채로 남아 화면과 서버가 어긋난다.
+let naiBandState = {enabled: false, id: 'normal'};
+
+/** 밴드 컨트롤이 있는 자리를 **전부** 찾는다(런처 · 나중에 다른 화면이 생겨도). */
+function naiBandControlSets() {
+  return Array.from(document.querySelectorAll('[data-nai-band-select]')).map(select => ({
+    select,
+    toggle: (select.closest('[data-nai-band-row]') || document)
+      .querySelector('[data-nai-band-enabled]'),
+  }));
+}
+
+function syncNaiResolutionBandControls(enabled, bandId) {
+  if (enabled !== undefined) naiBandState.enabled = !!enabled;
+  if (bandId) naiBandState.id = String(bandId);
+  const wanted = naiResolutionBands.map(b => b.id);
+  for (const {select, toggle} of naiBandControlSets()) {
+    if (wanted.length) {
+      const existing = Array.from(select.options).map(o => o.value);
+      if (existing.length !== wanted.length || existing.some((v, i) => v !== wanted[i])) {
+        select.innerHTML = naiResolutionBands
+          .map(b => `<option value="${escHtml(b.id)}">${escHtml(b.label)}</option>`)
+          .join('');
+      }
+      select.value = naiBandState.id;
+    }
+    select.disabled = !naiBandState.enabled;
+    if (toggle) toggle.checked = naiBandState.enabled;
+  }
+}
+
+function setNaiResolutionBandEnabled(enabled) {
+  syncNaiResolutionBandControls(enabled, naiBandState.id);
+  setParam('nai_resolution_preset_enabled', String(Boolean(enabled)));
+}
+
+function setNaiResolutionBand(bandId) {
+  syncNaiResolutionBandControls(true, bandId);
+  // 밴드를 고르면 켜는 것이 의도다 - 켜고 나서 다시 고르라고 하면 한 번 헛돈다.
+  setParam('nai_resolution_preset_enabled', 'true');
+  setParam('nai_resolution_preset', bandId);
+}
+
+// ---- 유료 설정 경고 (상단 Anlas 알약 점멸) ----
+//
+// 사용자 지정(2026-08-28): NAI 모드에서 이번 생성이 **Anlas 를 물면** 상단 잔량을
+// 연노랑↔주황으로 0.5초 간격 점멸시킨다. 무심코 유료 설정으로 넘어간 것을 누르기
+// 전에 알아채게 하는 장치다.
+//
+// ⚠️ 문턱은 **백엔드가 준 값**을 쓴다(`params.nai_free_limits`). 실제 과금 집계가
+//    쓰는 `core/nai_free_usage.py` 가 SSOT 이고, 여기 숫자를 따로 들면 한쪽만
+//    고쳤을 때 경고가 거짓말을 한다. 아래 기본값은 그 파일이 오기 전 한 순간용.
+let naiFreeLimits = {steps: 28, pixels: 1024 * 1024};
+// 이번 생성의 **추정** Anlas. 백엔드가 계산해 파라미터와 함께 내려 준다
+// (`core/nai_anlas_cost.py`) - 화면이 같은 식을 따로 들면 한쪽만 낡는다.
+let naiAnlasCost = 0;
+// 무료 풀이 마른 뒤의 가격(무료 대역이어도 값이 있다).
+let naiAnlasCostIfPaid = 0;
+// **이번 생성이 쓸 계정들의 무료 풀이 말랐는가.** 백엔드의 `generation_quota_exhausted`
+// 판정을 그대로 받는다 - 화면에서 `percent <= 0` 으로 흉내 내면 지목 계정·미확인
+// 캐시에서 판정이 갈라져, 돈 가드와 경고가 서로 다른 말을 한다.
+let naiQuotaExhausted = false;
+
+/** 지금 화면에 띄울 금액. 무료 풀이 말랐으면 무료 대역도 값이 있다. */
+function naiEffectiveAnlasCost() {
+  return naiQuotaExhausted ? naiAnlasCostIfPaid : naiAnlasCost;
+}
+
+/** 지금 설정으로 생성하면 Anlas 를 무는가. (NAI 모드에서만 뜻이 있다) */
+function naiGenerationCostsAnlas() {
+  if (String(currentMode || modeSelect?.value || '').toUpperCase() !== 'NAI') return false;
+  // ⚠️ **무료 풀이 마르면 설정이 무료 대역이어도 돈이 나간다.** 이 한 줄이 없으면
+  //    0% 이후에도 화면이 "무료" 라고 말해, 사용자가 모르는 사이에 Anlas 가 빠진다
+  //    (사용자 지정 2026-08-28: "지금부터 돈이 나갈 수 있어" 를 알리는 것이 핵심).
+  //    판정은 백엔드가 준 것을 그대로 쓴다 - V5 여부·지목 계정까지 그쪽이 본다.
+  if (naiQuotaExhausted) return true;
+  const steps = Number(paramEls.steps?.value);
+  if (Number.isFinite(steps) && steps > naiFreeLimits.steps) return true;
+  // ⚠️ Rnd Res 가 켜져 있으면 실제 해상도는 **추첨 결과**다. 화면에 떠 있는 값만
+  //    보면 목록에 큰 것이 섞여 있을 때 경고 없이 Anlas 가 나간다 - 켜져 있으면
+  //    후보 중 **가장 큰 것**으로 판정한다.
+  const randomOn = !!qRndRes?.classList.contains('on');
+  const candidates = randomOn && paramEls.resolution
+    ? Array.from(paramEls.resolution.options || []).map(o => o.value)
+    : [paramEls.resolution?.value || qResolution?.value || ''];
+  return candidates.some(text => {
+    const wh = parseResolutionText(text);
+    return wh ? wh.width * wh.height > naiFreeLimits.pixels : false;
+  });
+}
+
+/** Generate 버튼의 내부 HTML. **금액 칩을 여기서 함께 만든다.**
+ *
+ *  ⚠️ 버튼 안에 칩을 두려면 이 방법뿐이다. `updateGenerateButtonMode` 와 생성 중
+ *     경과시간 타이머가 `btnGen.innerHTML` 을 통째로 다시 쓰기 때문에, 밖에서
+ *     append 만 하면 100ms 마다 지워진다. 라벨을 만드는 자리를 하나로 모아 칩을
+ *     항상 함께 그린다(사용자 지시 2026-08-28).
+ *
+ *  ⚠️ 칩은 라벨 **뒤**에 온다. 인페인트 잠금이 라벨을 "맨 뒤 텍스트 노드" 로 찾는데
+ *     (`applyInpaintSessionLock`), 칩은 element 라 그 탐색에 안 걸린다.
+ */
+function genButtonHtml(label) {
+  const cost = naiEffectiveAnlasCost();
+  const show = naiGenerationCostsAnlas() && cost > 0;
+  const chip = show
+    ? `<span class="gen-cost-chip">${escHtml(cost.toLocaleString())} Anlas</span>`
+    : '';
+  return `<span class="shortcut-hint">CTRL + ENTER</span>${escHtml(label)}${chip}`;
+}
+
+/** 값만 바뀐 경우 - 라벨은 건드리지 않고 칩만 갈아 끼운다.
+ *  (라벨을 다시 쓰면 인페인트 잠금의 `Generate (Inpaint)` 가 벗겨진다.) */
+function syncGenCostChip() {
+  if (!btnGen) return;
+  const cost = naiEffectiveAnlasCost();
+  const show = naiGenerationCostsAnlas() && cost > 0;
+  let chip = btnGen.querySelector('.gen-cost-chip');
+  if (!show) { if (chip) chip.remove(); return; }
+  if (!chip) {
+    chip = document.createElement('span');
+    chip.className = 'gen-cost-chip';
+    btnGen.appendChild(chip);
+  }
+  chip.textContent = `${cost.toLocaleString()} Anlas`;
+}
+
+function updateAnlasPaidIndicator() {
+  const paid = naiGenerationCostsAnlas();
+  if (anlasPill) anlasPill.classList.toggle('is-paid', paid);
+  // Generate **안**의 금액 칩. 무료면 아예 안 띄운다 - 늘 떠 있으면 경고가 아니라
+  // 배경이 된다.
+  syncGenCostChip();
+  // USAGE 패널도 기준을 바꾼다 - 유료 설정에서 V5 무료 퍼센트를 크게 띄우면
+  // 깎이는 것(Anlas)과 다른 것을 보고 있게 된다(사용자 지정 2026-08-28).
+  naiAccountPanel?.setPaidMode?.(paid);
 }
 
 // ---- NAI Anlas pill (viewer bottom-left) ----
@@ -8751,6 +9090,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
     replayLauncherModuleStates();
     moduleLauncherControl.updateState();
     ensureResolutionPresetOptions();
+    syncNaiResolutionBandControls();   // 런처가 방금 그린 NAI 밴드 행도 채운다
     updateWebUiHiresfixAssistControls();
     refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI');
   })
@@ -9425,8 +9765,14 @@ function onModuleState(m) {
     //    우클릭 쪽은 응답이 없어 그 자리에서 계열을 알 수 없다 - 예전에는 무조건 옛
     //    팝업을 열어 V5 에서도 팝업과 캔버스가 **함께** 떴다(Codex 리뷰 BLOCK 3).
     //    이제 두 진입점 모두 표를 세워 두고, **상태가 도착한 여기서** 갈림길을 정한다.
-    if (pendingImg2ImgSurface) {
+    // ⚠️ **새 세션이 도착했을 때만** 표를 쓴다. 그냥 도착한 img2img 상태를 다 받으면
+    //    옛 세션의 파라미터 echo 가 표를 먼저 먹어, 정작 새 세션이 열렸을 때 띄울
+    //    표가 없다. 캐시가 비어 있던 첫 세션(-1)은 무엇이 와도 우리 것이다.
+    const img2imgIsNewSession = pendingImg2ImgSurfaceFromWindow < 0
+      || Number(m.window_id ?? -1) !== pendingImg2ImgSurfaceFromWindow;
+    if (pendingImg2ImgSurface && img2imgIsNewSession) {
       pendingImg2ImgSurface = false;
+      pendingImg2ImgSurfaceFromWindow = -1;
       clearTimeout(pendingImg2ImgSurfaceTimer);
       if (m.canvas_supported) inpaintCanvasControl?.revealForSession?.();
       else openImg2ImgSessionSurface();
@@ -9663,19 +10009,32 @@ function flushMainPromptAndParams() {
   // 아직 안 나간 **네거티브** 편집이 있었는가. 이 경로는 디바운스 타이머를 취소하고
   // 대신 보내는 자리라, 표시를 잃으면 방금 친 네거티브가 프리셋에 반영되지 않는다.
   const negativeWasEdited = _negativeUserDirty;
+  // 메인 프롬프트도 같다. **이 자리가 프리셋 전환의 길목이다** - 여기서 표식을
+  // 잃으면 방금 친 프롬프트가 나가는 프리셋에 저장되지 않고, 돌아왔을 때 옛
+  // 저장값이 실린다(사용자 제보 2026-08-27).
+  const promptWasEdited = _promptUserDirty;
   if (promptSendTimer) {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
   }
   _localPromptDirty = false;
   if (ws && ws.readyState === WebSocket.OPEN) {
+    // ⚠️ **여기가 프리셋 전환의 길목이다.** 표시값을 그대로 보내면 Interactive 조립값이
+    //    프리셋에 굳는다 - 디바운스와 **같은 함수**를 써야 한다(Codex 리뷰 2026-08-27:
+    //    한 번 고쳤다가 되돌아왔다. 그때 테스트가 전역 개수만 세서 못 잡았다).
+    const sentPrompt = promptTextForSave();
     ws.send(JSON.stringify({
       type: 'set_prompt',
-      prompt: promptEdit.value,
+      prompt: sentPrompt,
       negative_prompt: negEdit.value,
       ...(negativeWasEdited ? {origin: 'edit'} : {}),
+      ...(promptWasEdited ? {prompt_origin: 'edit', prompt_preset: _promptDirtyPreset} : {}),
     }));
+    // 기록은 **실제로 보낸 값**으로. 표시값을 적어 두면 Interactive 에서 둘이 달라
+    // 정정 판정이 어긋난다(Codex 리뷰 2026-08-27).
+    _lastSentPromptValue = sentPrompt;
     _negativeUserDirty = false;
+    _promptUserDirty = false;
     const params = _collectCurrentParams();
     Object.entries(params).forEach(([key, value]) => {
       ws.send(JSON.stringify({type: 'set_param', key, value}));
@@ -10535,6 +10894,13 @@ function onImg2ImgGenerationState(message) {
     const merged = {...cached, ...message, type: 'module_state', module_id: 'img2img'};
     moduleStateCache.set('img2img', merged);
     if (currentModuleId === 'img2img') renderImg2Img(merged);
+    // ⚠️ **V5 캔버스는 모듈 팝업이 아니라 Result 안에 산다** - 바로 위 `currentModuleId`
+    //    검사에 안 걸린다. 그런데 생명주기(제출/큐/실행/완료)는 **이 타입으로만**
+    //    온다(`module_state` 는 이미지·마스크까지 실어 무거워 안 보낸다). 여기서
+    //    넘겨주지 않으면 완료가 패널에 영영 안 닿아, 그림은 돌아왔는데도
+    //    "앞선 요청이 끝나기를 기다리는 중" 이 안 풀린다(실측 2026-08-28).
+    //    `lifecycle_only` 는 자동 마스킹 알림을 이 길이 삼키지 않게 하는 표식이다.
+    inpaintCanvasControl?.handleModuleState?.({...merged, lifecycle_only: true});
   }
   updateImg2ImgResumeButton(message);
 
@@ -10994,7 +11360,7 @@ function insertTagIntoPrompt(tag) {
   promptEdit.selectionStart = promptEdit.selectionEnd = newPos;
   promptEdit.scrollTop = st;
   promptEdit.scrollLeft = sl;
-  onPromptEdit();
+  onPromptAuthoredEdit();
   return true;
 }
 
@@ -11079,7 +11445,7 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260824-connmark1'
       getChunkPanelControl: () => chunkPanelControl,
       openChunkPanel,
       getChunkAnchor,
-      onPromptEdit,
+      onPromptEdit: onPromptAuthoredEdit,
       fireModuleOninput: _fireModuleOninput,
       escHtml,
       fmtCount,
@@ -11110,8 +11476,8 @@ promptEdit.addEventListener('blur', () => {
 negEdit.addEventListener('blur', () => {
   deferredPromptSync = null;
 });
-promptEdit.addEventListener('compositionend', () => { onPromptEdit(); });
-promptEdit.addEventListener('input', () => { onPromptEdit(); });
+promptEdit.addEventListener('compositionend', () => { onPromptAuthoredEdit(); });
+promptEdit.addEventListener('input', () => { onPromptAuthoredEdit(); });
 applyPromptHighlightState();
 updatePromptTokenEstimate();
 

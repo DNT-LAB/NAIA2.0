@@ -238,7 +238,7 @@ class HeadlessPromptEngineeringService:
             if current and current != stamp:
                 print(
                     f"[info] dropped stale prompt-engineering edit ({key}):"
-                    f" typed for {stamp!r}, current is {current!r}",
+                    f" typed for {ascii(stamp)}, current is {ascii(current)}",
                     flush=True,
                 )
                 return self.state()
@@ -588,9 +588,11 @@ class HeadlessPromptEngineeringService:
         (돌아와도 저장된 옛 값이 다시 실린다). 생성 파라미터는 즉시 반영되는데
         네거티브만 아니었다.
 
-        ⚠️ **메인 프롬프트는 여기서 절대 저장하지 않는다.** Random 이 매번 덮어쓰므로
-        프리셋의 프롬프트가 마지막 랜덤 결과로 굳어 버린다(`sync_param_into_current_preset`
-        주석의 사고와 같은 뿌리). 네거티브는 사용자가 직접 두는 값이라 사정이 다르다.
+        ⚠️ **메인 프롬프트는 여기서 저장하지 않는다.** Random 이 매번 덮어쓰므로
+        아무 `set_prompt` 에서나 반영하면 프리셋의 프롬프트가 마지막 랜덤 결과로 굳어
+        버린다(`sync_param_into_current_preset` 주석의 사고와 같은 뿌리). 메인 프롬프트는
+        `sync_prompt_into_current_preset` 이 **사용자가 직접 친 경로에서만**(2026-08-27)
+        따로 맡는다.
 
         ⚠️ 호출은 **사용자가 직접 편집한 경로에서만** 한다(`origin="edit"`).
         서버가 밀어 준 값을 클라이언트가 되돌려 보내는 에코 경로가 여럿이라, 아무
@@ -631,7 +633,95 @@ class HeadlessPromptEngineeringService:
                 mode_key, main_settings=main_settings, write_module_settings=False)
             return name if ok else ""
         except Exception as exc:  # noqa: BLE001 - 반영 실패가 프롬프트 편집을 막으면 안 된다
-            print(f"[warn] preset negative sync failed: {exc}", flush=True)
+            print(f"[warn] preset negative sync failed: {ascii(exc)}", flush=True)
+            return ""
+
+    def stale_prompt_edit(self, origin: str, stamp: str) -> bool:
+        """이 메인 프롬프트 편집이 **앞 프리셋을 보고 친 것**인가.
+
+        표식이 없으면(옛 클라이언트 · 사람이 친 게 아닌 에코) 판정하지 않는다 -
+        기존 동작 유지. 참이면 부르는 쪽이 그 프롬프트를 통째로 무시해야 한다.
+        """
+        if str(origin or "") != "edit":
+            return False
+        stamp_text = str(stamp or "")
+        if not stamp_text:
+            return False
+        try:
+            from core.prompt_engineering_settings import get_prompt_engineering_store
+
+            context = self.context
+            store = get_prompt_engineering_store(context)
+            name = str(store.state(context.get_api_mode()).get("current_preset") or "")
+        except Exception:   # noqa: BLE001 - 판정 실패가 편집을 막으면 안 된다
+            return False
+        if not name or name == stamp_text:
+            return False
+        # 콘솔이 cp949 다 - 프리셋 이름은 한글/이모지일 수 있으므로 ascii() 로 이스케이프.
+        print(
+            "[info] dropped stale prompt edit:"
+            f" typed for {ascii(stamp_text)}, current is {ascii(name)}",
+            flush=True,
+        )
+        return True
+
+    def sync_prompt_into_current_preset(self, stamp: str = "") -> str:
+        """메인 프롬프트를 **선택된 프리셋에 즉시 반영**한다.
+
+        ⚠️ 사용자 지적(2026-08-27): "프리셋 A -> B -> 다시 A 로 오면 의문의 메인
+        프롬프트가 나타난다". 실측 재현: A 에서 `1girl, artist:h.yasai, ...` 로
+        작업하다 B 를 거쳐 A 로 돌아오면 A 파일에 옛날에 저장된 전혀 다른 프롬프트가
+        실린다. 프리셋 전환은 프롬프트를 **덮어쓰기만** 하고 나가는 프리셋에는
+        아무것도 저장하지 않아, 그 사이의 작업이 통째로 사라진 것이다.
+        파라미터와 네거티브는 이미 즉시 반영되는데(`sync_param_into_current_preset`
+        / `sync_negative_into_current_preset`) 메인 프롬프트만 빠져 있었다.
+
+        ⚠️ 호출은 **사용자가 직접 편집한 경로에서만** 한다(`prompt_origin="edit"`).
+        Random 은 `context.prompt_text` 를 서버에서 직접 덮어쓰고(예:
+        `headless_random_prompt_service.py`) 그 값은 `prompt_sync` 로 내려갈 뿐
+        `set_prompt` 로 되돌아오지 않는다. 이 빗장이 없으면 프리셋의 프롬프트가
+        마지막 랜덤 결과로 굳는다 - 위 두 함수가 같은 이유로 같은 빗장을 쓴다.
+
+        빈 문자열도 그대로 저장한다. 사용자가 칸을 비운 것 역시 편집이고,
+        네거티브도 같게 다룬다.
+
+        `stamp` = **어느 프리셋을 보고 친 글인가**(클라이언트가 알려 준다).
+        화면은 프리셋을 바꾼 뒤에도 잠깐 앞 프리셋의 글을 들고 있고(디바운스 500ms ·
+        창이 둘일 때의 에코), 그 글이 스왑 뒤에 도착하면 **새 프리셋에 박힌다**.
+        Prefix/Postfix 는 이미 같은 표식으로 막혀 있다(`_text_and_preset_stamp`).
+        표식이 없으면(옛 클라이언트) 검사하지 않는다 - 기존 동작 유지.
+
+        반환: 반영한 프리셋 이름. 반영할 게 없으면 빈 문자열.
+        """
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        try:
+            context = self.context
+            store = get_prompt_engineering_store(context)
+            mode_key = context.get_api_mode()
+            state = store.state(mode_key)
+            name = str(state.get("current_preset") or "")
+            if name in {"", "(프리셋 없음)", "*randomized"}:
+                return ""
+            if str(stamp or "") and str(stamp) != name:
+                return ""      # 판정과 로그는 `stale_prompt_edit` 가 이미 했다
+
+            data = store.read_preset_data(name, mode_key)
+            if not data:
+                return ""
+            main_settings = data.get("main_settings")
+            main_settings = dict(main_settings) if isinstance(main_settings, dict) else {}
+            new_value = str(context.prompt_text or "")
+            if main_settings.get("prompt") == new_value:
+                return ""                       # 값이 그대로면 쓰지 않는다
+            main_settings["prompt"] = new_value
+            # 프롬프트만 반영한다 - module_settings 는 위 두 동기화와 같은 이유로 둔다
+            # (스왑 직후 늦게 도착한 앞 프리셋의 Prefix 가 이 파일에 박히는 사고).
+            ok, _message = store.save_current_preset(
+                mode_key, main_settings=main_settings, write_module_settings=False)
+            return name if ok else ""
+        except Exception as exc:  # noqa: BLE001 - 반영 실패가 프롬프트 편집을 막으면 안 된다
+            print(f"[warn] preset prompt sync failed: {ascii(exc)}", flush=True)
             return ""
 
     def _apply_preset_main_settings_response(self, store: Any, preset_name: str):

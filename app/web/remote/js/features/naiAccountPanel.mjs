@@ -83,6 +83,26 @@ export function createNaiAccountPanel({
   let totalPercent = null;
   // 이번 세션 요약(생성 장수 · 실행 시간). 비V5 에서 퍼센트 게이지를 대신한다.
   let session = { free: 0, total: 0, elapsed: 0, onV5: true };
+  // 지금 설정으로 생성하면 Anlas 를 무는가(29스텝 이상 또는 1MP 초과). 그러면 V5
+  // 무료 사용량 퍼센트는 **답이 아니다** - 깎이는 것은 Anlas 다. 그래서 패널의
+  // 기준을 통째로 Anlas 로 바꾼다(사용자 지정 2026-08-28).
+  //
+  // ⚠️ **V5 에서만** 바꾼다. 4.5 이하는 애초에 이 무료 풀을 안 쓰므로 화면이 이미
+  //    다른 것(세션 장수/실행 시간)을 보여 주고 있다 - 거기에 또 손대면 전파가 된다.
+  let paidMode = false;
+
+  /** 지금 Anlas 기준으로 보여 줄 때인가. */
+  function onAnlasBasis() {
+    return session.onV5 && paidMode;
+  }
+
+  /** 유료 여부가 바뀌면 다시 그린다(app.js 가 파라미터 변경마다 부른다). */
+  function setPaidMode(next) {
+    const value = !!next;
+    if (value === paidMode) return;
+    paidMode = value;
+    renderPopover();
+  }
   // 지금 부하 분산 묶음의 진행도. `target === 1` 이면 교체가 매 장이라 뜻이 없다.
   let rotation = { current: 0, target: 1 };
   let popOpen = false;
@@ -280,6 +300,13 @@ export function createNaiAccountPanel({
     if (!rows.length) {
       return '<div class="nai-acct-empty">활성 계정이 없습니다.</div>';
     }
+    // Anlas 기준일 때 게이지의 분모. **계정 중 가장 많은 쪽**을 100% 로 둔다.
+    //
+    // ⚠️ '전체 합계 대비 점유율' 로 하면 계정 넷이 고르게 남았을 때 전부 25% 라
+    //    막대가 다 같아 보여 아무것도 못 읽는다. 이 패널이 답해야 하는 질문은
+    //    "어느 계정이 말랐나" 이므로 **가장 많은 계정 대비**가 맞다.
+    const anlasMax = Math.max(
+      1, ...rows.map(r => (Number.isFinite(r.anlas) ? r.anlas : 0)));
     return rows.map(row => {
       const known = !!row.available;
       // 사용자 표기(명세)는 토큰 앞자리 — 어느 계정인지 한눈에 구분되는 값이다.
@@ -310,19 +337,30 @@ export function createNaiAccountPanel({
       return open
         + '<div class="nai-acct-line">'
         + `<span class="nai-acct-name">${esc(name)}</span>`
-        + (session.onV5
-          ? barHtml(known ? row.percent : 0, known && row.is_negative)
-            + `<span class="nai-acct-pct">${esc(pct)}</span>`
-          : (showBlock
-            ? blockBarHtml()
-              + `<span class="nai-acct-pct">${rotation.current}/${rotation.target}</span>`
-            : '<span class="nai-acct-spacer"></span>'))
+        + (onAnlasBasis()
+          ? barHtml(Number.isFinite(row.anlas) ? (row.anlas / anlasMax) * 100 : 0,
+            Number.isFinite(row.anlas) && row.anlas <= 0)
+            + `<span class="nai-acct-pct">${esc(anlas)}</span>`
+          : session.onV5
+            ? barHtml(known ? row.percent : 0, known && row.is_negative)
+              + `<span class="nai-acct-pct">${esc(pct)}</span>`
+            : (showBlock
+              ? blockBarHtml()
+                + `<span class="nai-acct-pct">${rotation.current}/${rotation.target}</span>`
+              : '<span class="nai-acct-spacer"></span>'))
         + '</div>'
         + '<div class="nai-acct-sub">'
-        + `<span>Anlas ${esc(anlas)}</span>`
-        + (session.onV5
-          ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>`
-          : `<i>|</i><span>${esc(rotationText(row))}</span>`)
+        // Anlas 기준일 때는 오른쪽 라벨이 이미 Anlas 다 - 여기서 또 말하면 같은
+        // 숫자를 두 번 하는 꼴이라(2026-08-21 지적의 그 문제) 무료 잔량을 대신
+        // 적어 "이만큼은 아직 공짜" 를 남긴다.
+        + (onAnlasBasis()
+          ? `<span>무료 ${esc(remain)}장</span>`
+          : `<span>Anlas ${esc(anlas)}</span>`)
+        + (onAnlasBasis()
+          ? ''
+          : session.onV5
+            ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>`
+            : `<i>|</i><span>${esc(rotationText(row))}</span>`)
         + '</div>'
         + (forced ? '<span class="nai-acct-only">이 계정만 사용</span>' : '')
         + (pickable ? '</button>' : '</div>');
@@ -396,10 +434,12 @@ export function createNaiAccountPanel({
       // "USAGE 137, USAGE 137장, 이번 세션 생성 137장 이렇게 3번 연달아 나온다").
       // 배지 = 총 장수 · 헤더 = 무료/총 · 세션 줄 = Anlas 로 나간 장수. 각자 다른
       // 사실을 말한다.
-      + (session.onV5
-        ? `<span class="nai-acct-total">통합 ${esc(total)}</span>`
-        : `<span class="nai-acct-total">무료 ${session.free.toLocaleString()}`
-          + `<i> / ${session.total.toLocaleString()}장</i></span>`)
+      + (onAnlasBasis()
+        ? `<span class="nai-acct-total is-anlas">Anlas ${sumAnlas.toLocaleString()}</span>`
+        : session.onV5
+          ? `<span class="nai-acct-total">통합 ${esc(total)}</span>`
+          : `<span class="nai-acct-total">무료 ${session.free.toLocaleString()}`
+            + `<i> / ${session.total.toLocaleString()}장</i></span>`)
       + '</div>'
       // ⚠️ 'Anlas 소비 N장' 과 무료 조건 안내는 뺐다(사용자 지시 2026-08-21:
       // "정보량이 과다하게 많아 그냥 치웁시다"). 헤더의 `무료 130 / 137장` 이
@@ -409,11 +449,16 @@ export function createNaiAccountPanel({
           + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em></div>`)
       + (rows.length > 1
         ? '<div class="nai-acct-sum">'
-          + `<span>Anlas ${sumAnlas.toLocaleString()}</span>`
-          + (session.onV5
-            ? `<i>|</i><span>NAID5 Remain : ~${sumImages.toLocaleString()}</span>`
-              + `<em>${esc(IMAGE_BASIS_NOTE)}</em>`
-            : '')
+          // Anlas 기준일 때 헤더가 이미 같은 합계를 말한다 - 여기서 또 적으면
+          // 한 화면이 같은 숫자를 두 번 하는 꼴이다(2026-08-21 지적).
+          + (onAnlasBasis() ? '' : `<span>Anlas ${sumAnlas.toLocaleString()}</span>`)
+          + (onAnlasBasis()
+            ? `<span>무료 ~${sumImages.toLocaleString()}장 남음</span>`
+              + '<em>지금 설정은 Anlas 를 씁니다</em>'
+            : session.onV5
+              ? `<i>|</i><span>NAID5 Remain : ~${sumImages.toLocaleString()}</span>`
+                + `<em>${esc(IMAGE_BASIS_NOTE)}</em>`
+              : '')
           + '</div>'
         : '')
       + `<div class="nai-acct-rows">${accountRowsHtml()}</div>`
@@ -627,5 +672,6 @@ export function createNaiAccountPanel({
     closePopover,
     togglePopover,
     renderSetupList,
+    setPaidMode,
   };
 }

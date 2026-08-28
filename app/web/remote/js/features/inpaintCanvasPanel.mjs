@@ -30,6 +30,9 @@
 //    올리면 브라우저가 옛 posStage 를 계속 쓴다 - import 는 URL 로 캐시된다.
 import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=20260826-cancel1';
 
+// 밴드를 못 받았을 때만 쓰는 폴백(옛 목록). 평소에는 백엔드가 내려 준 NAI 밴드를
+// 쓴다 - 여기에 목록을 박아 두면 Params 탭과 갈라져, 실제로 **유료권이 통째로
+// 빠져 있었다**(Large/Wallpaper 가 없어 인페인트 도중 유료 해상도로 갈 길이 없었다).
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
 const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
 const COLLAPSE_KEY = 'naia.inpaintcanvas.collapsed.v1';
@@ -68,6 +71,8 @@ export function createInpaintCanvasPanel({
   onGenerate = () => {},
   onClose = () => {},
   onVisibility = () => {},
+  getResolutionBands = () => [],
+  getFreePixels = () => 1048576,
 }) {
   let state = null;
   let stageEl = null;
@@ -207,16 +212,46 @@ export function createInpaintCanvasPanel({
    *     아무 이미지나 보낼 수 있다) `초기화` 는 그 원본 크기로 돌아가므로, 늘 있을
    *     수 있는 일이다. 없으면 맨 앞에 끼워 넣는다.
    */
+  const bare = (t) => String(t).replace(/\s+/g, '');
+
+  /** 밴드별로 묶은 해상도 목록. 없으면 옛 폴백 하나로 묶는다.
+   *
+   *  ⚠️ 유료권(1MP 초과)은 **묶음 이름에** 표시한다. 항목마다 글자를 붙이면 30줄이
+   *     전부 길어져 무엇이 무엇인지 안 보인다 - 어차피 금액은 Generate 버튼의 칩이
+   *     정확히 말한다.
+   */
+  function sizeGroups() {
+    const bands = getResolutionBands() || [];
+    if (!bands.length) return [{label: '', items: CANVAS_SIZES.slice()}];
+    const free = Number(getFreePixels()) || 1048576;
+    return bands.map(band => {
+      const items = (band.resolutions || []).map(String);
+      const paid = items.some(text => {
+        const [bw, bh] = text.split('x').map(v => parseInt(v.trim(), 10));
+        return bw > 0 && bh > 0 && bw * bh > free;
+      });
+      return {label: `${band.label || band.id}${paid ? ' · Anlas' : ''}`, items};
+    }).filter(g => g.items.length);
+  }
+
   function sizeOptions(w, h) {
-    const labels = CANVAS_SIZES.slice();
     const current = (w > 0 && h > 0) ? `${w} x ${h}` : '';
-    const bare = (t) => String(t).replace(/\s+/g, '');
-    if (current && !labels.some(label => bare(label) === bare(current))) labels.unshift(current);
-    return labels.map(label => {
+    const groups = sizeGroups();
+    const known = groups.some(g => g.items.some(label => bare(label) === bare(current)));
+    const opt = (label) => {
       const [sw, sh] = label.split('x').map(v => parseInt(v.trim(), 10));
       const sel = (sw === w && sh === h) ? ' selected' : '';
       return `<option value="${escHtml(label)}"${sel}>${escHtml(label)}</option>`;
-    }).join('');
+    };
+    // ⚠️ 지금 크기가 목록에 없을 수 있다(사용자가 아무 이미지나 보낼 수 있고,
+    //    `초기화` 는 원본 크기로 돌아간다). 없으면 `<select>` 가 **첫 항목**을
+    //    보여 줘서 화면이 실제와 다른 해상도를 말한다 - 맨 앞에 끼워 넣는다.
+    const head = (current && !known) ? `<option value="${escHtml(current)}" selected>${escHtml(current)}</option>` : '';
+    return head + groups.map(g => (
+      g.label
+        ? `<optgroup label="${escHtml(g.label)}">${g.items.map(opt).join('')}</optgroup>`
+        : g.items.map(opt).join('')
+    )).join('');
   }
 
   // 좌우 2단(사용자 지정 2026-08-26). 왼쪽은 **캔버스의 기하**, 오른쪽은 **인페인트의

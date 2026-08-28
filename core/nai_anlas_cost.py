@@ -127,3 +127,25 @@ def estimate_anlas_cost(context: Any, params: dict[str, Any] | None,
         _AREA_COEFF * resolution + _AREA_STEP_COEFF * resolution * steps
     ) * factor
     return max(math.ceil(per_sample), _MIN_PER_SAMPLE)
+def cost_params_for_context(context: Any) -> dict[str, Any]:
+    """지금 [Generate] 를 누르면 **실제로 나갈** 파라미터.
+
+    ⚠️ 인페인트/img2img 세션이 열려 있으면 나가는 것은 Params 탭의 해상도가 아니라
+       **캔버스**다. 도크에서 Wallpaper 로 옮겨 놓고도 화면이 옛 해상도의 금액을
+       말하면 안 된다(실측 2026-08-28: 1280x1280 로 바꾸니 실제 청구는 14 였다).
+    ⚠️ 스텝은 세션에 없다 - 인페인트도 Params 탭 값을 그대로 쓰므로 손대지 않는다.
+    ⚠️ **유료 표식을 여기서 세우지 않는다.** 한때 "인페인트는 이미지를 싣고 가니
+       무조건 유료" 라고 `image_bytes` 를 끼워 넣었는데, 라이브 실측이 그것을
+       뒤집었다 - 1MP·28스텝 이하 인페인트는 Anlas 를 **안 문다**. 판정은
+       `is_free_generation` 하나에 맡긴다(그쪽 주석에 실측표가 있다).
+    """
+    params = dict(getattr(context, "remote_params", {}) or {})
+    session = getattr(context, "img2img_session", None)
+    if not isinstance(session, dict) or not session.get("active"):
+        return params
+    width = int(session.get("width") or 0)
+    height = int(session.get("height") or 0)
+    if width > 0 and height > 0:
+        params["width"], params["height"] = width, height
+        params["resolution"] = f"{width} x {height}"
+    return params

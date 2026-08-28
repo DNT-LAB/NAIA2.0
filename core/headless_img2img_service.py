@@ -393,6 +393,27 @@ class HeadlessImg2ImgService:
             value = 70
         return 1.0 if value == 99 else max(1, min(99, value)) / 100.0
 
+    def _anlas_cost_fields(self) -> dict[str, Any]:
+        """이 세션으로 생성하면 얼마인가. NAI 가 아니면 뜻이 없으니 0.
+
+        인페인트는 크기와 무관하게 유료이므로 `cost_params_for_context` 가 세션을
+        보고 **캔버스 해상도 + 유료 표식**을 세워 준다.
+        """
+        try:
+            if str(self.context.get_api_mode() or "").upper() != "NAI":
+                return {"nai_anlas_cost": 0, "nai_anlas_cost_if_paid": 0}
+            from core.nai_anlas_cost import cost_params_for_context, estimate_anlas_cost
+
+            params = cost_params_for_context(self.context)
+            return {
+                "nai_anlas_cost": estimate_anlas_cost(self.context, params),
+                "nai_anlas_cost_if_paid": estimate_anlas_cost(
+                    self.context, params, ignore_free=True),
+            }
+        except Exception as exc:   # noqa: BLE001 - 금액 표시가 세션을 죽이면 안 된다
+            print(f"[warn] inpaint anlas estimate failed: {ascii(exc)}", flush=True)
+            return {}
+
     def module_state(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         context = self.context
         state = context.img2img_session if isinstance(context.img2img_session, dict) else {}
@@ -422,6 +443,12 @@ class HeadlessImg2ImgService:
             # ⚠️ 캔버스 상태를 여기 안 실으면 화면이 캔버스를 볼 방법이 없다.
             #    `canvas_state()` 만 만들어 두고 합치는 것을 빠뜨렸었다.
             **self.canvas_state(),
+            # ⚠️ 금액을 **여기에도** 싣는다. 화면의 금액 칩은 params 페이로드로만
+            #    갱신되는데, 캔버스 해상도는 이 모듈 상태로 바뀐다 - 안 실으면
+            #    Wallpaper 로 바꿔 놓고도 칩이 옛 금액을 말한다(유료 경로다).
+            #    계산은 `cost_params_for_context` 하나를 공유하므로 params 쪽과
+            #    같은 답이 나온다.
+            **self._anlas_cost_fields(),
             "source_label": str(state.get("source_label") or "Result Image"),
             "width": int(state.get("width", 0) or 0),
             "height": int(state.get("height", 0) or 0),

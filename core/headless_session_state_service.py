@@ -7,7 +7,7 @@ from typing import Any
 import re
 
 from core.headless_remote_state_service import HeadlessRemoteStateService
-from core.nai_anlas_cost import estimate_anlas_cost
+from core.nai_anlas_cost import cost_params_for_context, estimate_anlas_cost
 from core.nai_free_usage import FREE_PIXELS_MAX, FREE_STEPS_MAX
 from core.resolution_utils import (
     NAI_RESOLUTION_PRESET_DISPLAY,
@@ -227,13 +227,13 @@ class HeadlessSessionStateService:
             # `is_free_generation` 을 그대로 재사용하므로 상단 알약의 유료 점멸과
             # 항상 같은 말을 한다. NAI 가 아니면 뜻이 없으니 0.
             "nai_anlas_cost": (
-                estimate_anlas_cost(context, dict(context.remote_params))
+                estimate_anlas_cost(context, cost_params_for_context(context))
                 if mode == "NAI" else 0),
             # 무료 풀이 마른 뒤의 가격. 화면은 사용량 소진 신호(`nai_usage_update`
             # 의 `quota_exhausted`)를 보고 둘 중 하나를 고른다 - 계산식을 프론트에
             # 복제하지 않으려고 **둘 다 내려 준다**.
             "nai_anlas_cost_if_paid": (
-                estimate_anlas_cost(context, dict(context.remote_params), ignore_free=True)
+                estimate_anlas_cost(context, cost_params_for_context(context), ignore_free=True)
                 if mode == "NAI" else 0),
             "nai_flags_enabled": {
                 "SMEA": mode == "NAI",

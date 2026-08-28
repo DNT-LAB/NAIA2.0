@@ -57,18 +57,28 @@ def _as_int(value: Any, default: int = 0) -> int:
 
 
 def is_free_generation(context: Any, params: dict[str, Any] | None) -> bool:
-    """이 생성이 Anlas 를 안 물고 나갔는가(= 1MP·28스텝 이하 txt2img).
+    """이 생성이 Anlas 를 안 물고 나갔는가(= 1MP·28스텝 이하).
 
-    ⚠️ **고른 모델이 아니라 실제로 나간 것을 봐야 한다.** img2img/인페인트/Enhance 는
-    해상도·스텝이 아무리 작아도 Anlas 로 청구된다(Codex 리뷰 2026-08-21 지적,
-    실측 확인). 대체(V5->4.5)를 카운터보다 나중에 넣고 카운터를 다시 안 봐서
-    **유료 작업이 무료로 집계되고 있었다.**
+    ⚠️ **고른 모델이 아니라 실제로 나간 것을 봐야 한다.** 대체(V5->4.5)를 카운터보다
+    나중에 넣고 카운터를 다시 안 봐서 유료 작업이 무료로 집계된 적이 있다.
+
+    ⚠️ 한때 "이미지를 싣고 온 요청(img2img·인페인트·Enhance)은 **무조건** 유료" 라는
+       줄이 여기 있었다(2026-08-21). **틀렸다.** 2026-08-28 라이브 실측:
+
+         832x1216(1,011,712px) 4스텝 인페인트 -> Anlas 9,986 -> 9,986 (**0**)
+         1280x1280(1,638,400px) 4스텝 인페인트 -> 10,000 -> 9,986 (**14**)
+
+       (잔액은 화면이 아니라 `image.novelai.net/user/subscription` 응답으로 확인했다.)
+       규칙은 t2i 와 **같다** - 크기와 스텝만 본다. 그 줄 때문에 1MP 이하 인페인트가
+       "유료" 로 집계되고, Generate 옆에 있지도 않은 금액이 떴다.
+
+    ⚠️ 헷갈리기 쉬운 것: 인페인트는 Anlas 를 안 물어도 **V5(Opus) 사용량은 깎는다.**
+       그 둘은 다른 풀이고, 화면도 다른 곳에서 말한다(USAGE 알약 vs Anlas 알약).
+       여기서 판정하는 것은 **Anlas** 뿐이다. 사용량이 마르면 그때부터는 무료 대역도
+       Anlas 로 나가는데, 그 판정은 NAI 가 주는 `quota_exhausted` 가 따로 한다.
     """
     params = params or {}
 
-    # 이미지를 싣고 온 요청(img2img · 인페인트 · Enhance)은 무료가 아니다.
-    if params.get("image_bytes") is not None or params.get("init_image_bytes") is not None:
-        return False
     # 대체가 실제로 일어났다는 표식이 있으면 그것도 유료다(경로가 늘어나도 안전하게).
     if params.get("_nai_img2img_fallback_model") or params.get("_nai_inpaint_fallback_model"):
         return False

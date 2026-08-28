@@ -2355,7 +2355,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260828-life2')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260828-bands')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -2371,6 +2371,11 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       onRepeat: value => img2imgPanel?.repeat?.(value),
       onGenerate: () => img2imgPanel?.generate?.(),
       onClose: () => img2imgPanel?.close?.(),
+      // 캔버스 해상도 목록은 **NAI 밴드와 같은 표**를 쓴다(백엔드가 내려 준 것).
+      // 도크가 자기 목록을 따로 들고 있어서 유료권(Large/Wallpaper)이 통째로
+      // 빠져 있었다 - 인페인트 도중 유료 해상도로 갈 길이 아예 없었다.
+      getResolutionBands: () => naiResolutionBands,
+      getFreePixels: () => naiFreeLimits.pixels,
       // Result 패널은 사용자가 손잡이로 높이를 정한다. 캔버스가 열려 있는 동안만
       // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
     });
@@ -8716,15 +8721,29 @@ function naiGenerationCostsAnlas() {
   //    (사용자 지정 2026-08-28: "지금부터 돈이 나갈 수 있어" 를 알리는 것이 핵심).
   //    판정은 백엔드가 준 것을 그대로 쓴다 - V5 여부·지목 계정까지 그쪽이 본다.
   if (naiQuotaExhausted) return true;
+  // ⚠️ **인페인트를 무조건 유료로 치지 않는다.** 한때 그렇게 했는데 라이브 실측이
+  //    뒤집었다(2026-08-28): 832x1216 4스텝 인페인트는 Anlas 가 한 푼도 안 빠졌고,
+  //    1280x1280 은 14 가 빠졌다. 규칙은 t2i 와 **같다** - 크기와 스텝만 본다.
+  //    (인페인트가 V5 사용량을 깎는 것은 맞지만 그것은 **다른 풀**이고, 화면도
+  //     USAGE 알약이 따로 말한다. 여기서 판정하는 것은 Anlas 뿐이다.)
+  //    세션 중에는 아래 해상도 후보가 **캔버스**를 가리켜야 하는데, 그 계산은
+  //    백엔드가 `cost_params_for_context` 로 하고 금액을 실어 보낸다.
   const steps = Number(paramEls.steps?.value);
   if (Number.isFinite(steps) && steps > naiFreeLimits.steps) return true;
   // ⚠️ Rnd Res 가 켜져 있으면 실제 해상도는 **추첨 결과**다. 화면에 떠 있는 값만
   //    보면 목록에 큰 것이 섞여 있을 때 경고 없이 Anlas 가 나간다 - 켜져 있으면
   //    후보 중 **가장 큰 것**으로 판정한다.
   const randomOn = !!qRndRes?.classList.contains('on');
-  const candidates = randomOn && paramEls.resolution
-    ? Array.from(paramEls.resolution.options || []).map(o => o.value)
-    : [paramEls.resolution?.value || qResolution?.value || ''];
+  // ⚠️ 인페인트 세션 중에 나가는 것은 Params 탭 해상도가 아니라 **캔버스**다.
+  //    (Rnd Res 도 세션에는 안 걸린다 - 캔버스는 사용자가 도크에서 직접 고른다.)
+  //    이걸 안 보면 도크에서 Wallpaper 를 골라 놓고도 Params 탭이 무료 대역이라
+  //    금액 칩이 안 뜬다 - 실제로는 Anlas 가 나간다(실측 2026-08-28).
+  const session = moduleStateCache.get('img2img');
+  const candidates = (session?.active && session.width && session.height)
+    ? [`${session.width} x ${session.height}`]
+    : (randomOn && paramEls.resolution
+      ? Array.from(paramEls.resolution.options || []).map(o => o.value)
+      : [paramEls.resolution?.value || qResolution?.value || '']);
   return candidates.some(text => {
     const wh = parseResolutionText(text);
     return wh ? wh.width * wh.height > naiFreeLimits.pixels : false;
@@ -9778,6 +9797,13 @@ function onModuleState(m) {
       else openImg2ImgSessionSurface();
     }
     inpaintCanvasControl?.handleModuleState?.(m);
+    // ⚠️ 인페인트는 **크기와 무관하게 유료**다. 금액 칩과 상단 알약 점멸은 params
+    //    페이로드로만 갱신되는데 캔버스 해상도는 이 메시지로 바뀐다 - 여기서 값을
+    //    받아 다시 그리지 않으면, 유료권(Large/Wallpaper)으로 바꿔 놓고도 화면이
+    //    옛 금액을 말하거나 아예 "무료" 로 보인다(실측 2026-08-28).
+    if ('nai_anlas_cost' in m) naiAnlasCost = Number(m.nai_anlas_cost) || 0;
+    if ('nai_anlas_cost_if_paid' in m) naiAnlasCostIfPaid = Number(m.nai_anlas_cost_if_paid) || 0;
+    updateAnlasPaidIndicator();
     // 가상 캐릭터 프롬프트: 세션이 살아 있으면 퀵 패널이 **세션 캐릭터**를 그린다.
     // 세션이 끝나면 원래 캐릭터 모듈 상태로 돌아간다.
     renderCharacterQuickPanel();

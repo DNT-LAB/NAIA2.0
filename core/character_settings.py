@@ -182,7 +182,8 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
             })
     settings["character_frames"] = _prune_character_links(sort_character_frames(normalized_frames))
     # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.
-    #   · AUTO   - `auto_character_positions` 가 구운 고정 자리
+    #   · AUTO   - **AI's Choice**. 좌표를 안 보낸다(`use_coords:false`) - NAI 가
+    #              캡션과 등장 순서(`use_order`)로 알아서 놓는다.
     #   · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
     #   · RAND   - 생성 요청마다 새로 굽는 무작위 배치
     #
@@ -407,11 +408,32 @@ def _conditional_slot_mask(app_context) -> list[bool] | None:
 def resolved_character_positions(settings: dict | None,
                                  count: int | None = None,
                                  slot_mask: list[bool] | None = None) -> list[dict[str, float]]:
-    """생성 요청이 실제로 보낼 좌표. **어느 모드든 좌표는 나간다.**
+    """생성 요청이 실제로 보낼 좌표. **AUTO 는 빈 목록이다.**
 
+      · AUTO   - **AI's Choice**: 좌표를 안 보낸다 -> `api_service` 의 `coords_given`
+                 이 거짓이 되어 `v4_prompt.use_coords=false` 로 나간다.
       · CUSTOM - 슬롯이 기억하고 있는 사용자 좌표
-      · AUTO   - 여기서 구운 `auto_character_positions` (사용자 지정)
       · RAND   - 부를 때마다 다시 굽는 `random_character_positions`
+
+    ⚠️ **사양이 두 번 뒤집혔다. 지금은 공홈과 같다(2026-08-28).**
+       2026-08-23 에 "AUTO 도 우리가 구워 보낸다" 로 바꿨었다 - 화면의 원과 실제
+       배치가 갈리는 것이 싫어서였다. 그런데 그 배치는 `use_coords=true` 로 나가서
+       **AI's Choice 가 아니었다.** NAI 웹 실측(2026-08-28, 같은 시드로 스위치 하나만
+       뒤집어 대조):
+
+           AI's Choice : v4_prompt.use_coords = false  (centers 는 실려 가나 무시됨)
+           Custom      : v4_prompt.use_coords = true
+
+       좌표가 boy 를 x=0.3(왼쪽)에 두라고 했는데 AI's Choice 결과에서는 오른쪽에
+       나왔다 - 정말로 무시된다. 공홈에 맞추기로 결정(사용자 지시 2026-08-28).
+
+    ⚠️ 2026-08-23 의 걱정("화면의 원과 실제 배치가 갈린다")은 지금 구조에서는 안
+       일어난다 - POS 무대(엿보기·편집)를 여는 `[data-cq-posedit]` 버튼이
+       **CUSTOM 일 때만** 렌더되고(`characterQuickPanel.mjs`), 모드를 벗어나면
+       편집기가 닫힌다. AUTO 에서는 원을 볼 길이 아예 없다(사용자 확인 2026-08-28).
+       ⚠️ **그 게이트가 풀리면 이야기가 달라진다.** AUTO 에서 무대가 열리게 만들
+          거면, 슬롯에 남은 옛 CUSTOM 좌표를 그리면 안 된다 - 여기서는 그 좌표를
+          안 보내므로 화면이 거짓말을 하게 된다.
 
     ⚠️ RAND 는 **이 함수를 부를 때마다 값이 달라진다.** 그래서 화면 표시처럼
     여러 번 부르는 자리에서 쓰면 원이 흔들린다 - 이 함수는 생성 요청 빌드
@@ -451,7 +473,10 @@ def resolved_character_positions(settings: dict | None,
         return fill_missing_positions(
             [normalize_position(frame.get("position")) for frame in frames]
         )
-    return auto_character_positions(total)
+    # 여기까지 오면 AUTO 이거나, CUSTOM 인데 개수가 어긋나 어느 좌표가 누구 것인지
+    # 알 수 없는 경우다. 둘 다 **좌표를 안 보낸다**(AI's Choice) - 순서로 짐작한
+    # 어긋난 좌표를 보내느니 NAI 에 맡기는 편이 낫다.
+    return []
 
 
 def custom_character_positions(settings: dict | None) -> list[dict[str, float]]:

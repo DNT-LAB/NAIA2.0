@@ -453,8 +453,10 @@ export function createCustomSelectController({
     if (!hasPreview(state)) return;
     const option = optionForItem(state, item);
     if (!option) {
-      hidePreview(state);
-      return;
+      left = Math.min(
+        Math.max(viewportGap, menuRect.left),
+        Math.max(viewportGap, viewportWidth - previewRect.width - viewportGap),
+      );
     }
 
     const preview = ensurePreview(state);
@@ -747,10 +749,25 @@ export function createCustomSelectController({
     } else if (menuRect.left - gap - viewportGap >= previewRect.width) {
       left = menuRect.left - gap - previewRect.width;
     } else {
-      left = Math.min(
-        Math.max(viewportGap, menuRect.left),
-        Math.max(viewportGap, viewportWidth - previewRect.width - viewportGap),
-      );
+      // ⚠️ **자리가 없으면 안 띄운다.** 예전에는 여기서 폴백으로 메뉴와 **같은 자리**를
+      //    골랐는데, preview 는 z-index 가 메뉴보다 높고(`--z-floating-select-preview`
+      //    10110 > 10100) `pointer-events: auto` 라 옵션을 통째로 덮어 **프리셋을 못
+      //    누르게** 만든다(보고서 P0-1).
+      //
+      //    앞서 `hasPreview` 에 손가락 화면 가드를 넣었지만 그것만으로는 모자랐다 -
+      //    사용자 제보 2026-08-29: 아직 노출된다. **좁은 창의 데스크톱 브라우저는
+      //    `pointer: coarse` 도 `hover: none` 도 아니다.** 즉 진짜 원인은 입력 장치가
+      //    아니라 **좌우 공간**이었다. 그래서 여기서 재서 판정한다 - 폭 문턱을 새로
+      //    찍어 맞히는 것보다 실제로 재는 쪽이 어느 화면에서도 맞다.
+      //
+      //    넉넉한 창에서는 위 두 갈래 중 하나가 늘 잡히므로 데스크톱 동작은 그대로다.
+      //
+      //    실측 A/B(2026-08-29, 375x812, 변수 하나만 바꿈):
+      //      폴백 있음: preview x=8 w=359 가 메뉴(16..355)를 덮고, 옵션 한가운데의
+      //                 `elementFromPoint` = `.custom-select-preview-thumb` (못 누른다)
+      //      폴백 없음: preview hidden, 같은 자리 `elementFromPoint` = `.custom-select-option`
+      hidePreview(state);
+      return;
     }
 
     const maxTop = Math.max(viewportGap, viewportHeight - previewRect.height - viewportGap);

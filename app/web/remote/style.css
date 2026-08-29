@@ -7366,8 +7366,24 @@ body.resizing-result-info {
         HISTORY 중앙의 `elementFromPoint` 가 `naiUsageValue` 를 돌려줬다.
      ⚠️ 근본 해법은 보고서 단계 B(공통 overlay rail)다. 여기서는 P0 를 먼저 되살리는
         좁은 패치만 한다 - 보고서도 그 순서를 허용한다. */
+  /* 2026-08-29 사용자 지정: HISTORY · CHARACTER · USAGE 를 **한 줄에 나열**한다.
+     42px 로 아래층에 내려두던 것을 같은 줄로 올리고, 대신 **왼쪽으로** 비킨다.
+     ⚠️ 비키는 거리는 상수로 못 박지 않는다 - 섬의 글자가 `0` 에서 `12 (1.4/m)` 까지
+        늘어나 폭이 변한다. app.js 의 ResizeObserver 가 실제 폭을 재서
+        `--stats-island-w` 로 흘려 준다(없으면 30px 로 버틴다).
+        `--inpaint-dock-lift` 와 같은 관용이다 - 높이/폭이 변하는 이웃 옆에서는
+        상수가 반드시 어긋난다. */
   #naiUsagePill.nai-usage-pill {
-    top: 42px;
+    top: 10px;
+    right: calc(16px + var(--stats-island-w, 30px));
+  }
+  /* CHARACTER 머리도 같은 줄로. 왼쪽 끝이라 오른쪽 둘과 안 부딪힌다.
+     ⚠️ **클래스를 겹쳐 쓴다.** `.cq-float` 기본 규칙(`top: 40px`)이 이 파일
+        **23000행대**, 즉 여기보다 뒤에 있어서 같은 특이도로는 순서에 진다.
+        `.cq-float` 에는 ID 조상이 없다(`.viewer-wrapper` 직계). 하루에 세 번 밟은
+        그 함정이라 여기서는 특이도로 이겨 둔다. */
+  .cq-float.cq-float {
+    top: 10px;
   }
 
   /* ── P0-3: Generation Info 줄이 화면을 넘는다 ─────────────────────────────

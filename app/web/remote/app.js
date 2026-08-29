@@ -1081,7 +1081,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260829-mobileA')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260829-noroom')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -3526,6 +3526,37 @@ let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
+
+// 모바일 한 줄 배치(사용자 지정 2026-08-29): HISTORY 섬 · USAGE 배지 · CHARACTER 머리가
+// 결과 화면 맨 윗줄에 나란히 선다. USAGE 는 섬의 **왼쪽**에 붙어야 하는데, 섬의 글자가
+// `0` 에서 `12 (1.4/m)` 까지 늘어나 폭이 변한다.
+//
+// ⚠️ 상수로 비켜 두면 반드시 어긋난다 - 실제 폭을 재서 CSS 로 흘린다
+//    (`--inpaint-dock-lift` 와 같은 관용). 글자를 고치는 **자리**를 찾아 붙이지
+//    않는다 - 새 경로가 생기면 또 갈린다. 섬 자체를 지켜본다.
+//
+// ⚠️⚠️ **ResizeObserver 만으로는 안 된다.** 그 콜백은 프레임 끝에 배달되는데,
+//    배경 탭/최소화 창은 프레임을 안 만들어 **한 번도 안 온다**(실측 2026-08-29:
+//    폭이 28->104 로 바뀌었는데 발화 0회, 변수는 29px 에 멈춰 배지와 섬이 69px
+//    겹쳤다). 같은 계열의 함정을 트랜지션에서도 밟았다.
+//    → 글자 변화는 **MutationObserver**(마이크로태스크, 프레임과 무관)로 잡고,
+//      ResizeObserver 는 폰트/줌처럼 글자가 안 변하는 변화를 위한 덤으로만 둔다.
+// ⚠️ 데스크톱에서도 변수는 계속 갱신되지만 쓰는 규칙이 모바일에만 있어 무해하다.
+(() => {
+  const island = $('statsIsland');
+  const viewer = $('resultViewer');
+  if (!island || !viewer) return;
+  const sync = () => {
+    const width = Math.round(island.getBoundingClientRect().width);
+    if (width > 0) viewer.style.setProperty('--stats-island-w', `${width}px`);
+  };
+  new MutationObserver(sync).observe(island, {
+    childList: true, subtree: true, characterData: true,
+  });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(sync).observe(island);
+  window.addEventListener('resize', sync);
+  sync();
+})();
 const resultUnsavedActions = $('resultUnsavedActions');
 const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');

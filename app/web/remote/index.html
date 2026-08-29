@@ -483,7 +483,14 @@
       <div class="fn-menu" id="fnMenu" role="menu" hidden>
         <button type="button" role="menuitem" onclick="openFnPreset()"><span>&#9638;</span><span>Preset</span></button>
         <button type="button" role="menuitem" onclick="openFnSequence()"><span>&#9654;</span><span>Sequence</span></button>
+        <!-- I.Sequence 진입로는 **일부러 닫아 뒀다**(사용자 지정 2026-08-28).
+             기능은 살아 있다 - 백엔드·패널·테스트 전부 그대로고, 라이브로
+             3컷 연쇄까지 확인했다. 다만 원본(Dev0714)의 큐레이션 루프
+             (그리드 조립·컷별 재생성·순서 바꾸기·즐겨찾기)이 아직 없어
+             메뉴에 내놓지 않는다. 되살리려면 이 주석을 걷고 app.js 의
+             `FN_QUICK_ITEMS` 짝도 함께 풀면 된다.
         <button type="button" role="menuitem" onclick="openFnISequence()"><span>&#9655;</span><span>I.Sequence</span></button>
+        -->
         <button type="button" role="menuitem" onclick="openFnV5Scene()"><span>&#127916;</span><span>V5 Scene</span></button>
         <button type="button" role="menuitem" onclick="openTranslatorPopup()"><span>あ</span><span>Translate</span></button>
       </div>

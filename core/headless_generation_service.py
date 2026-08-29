@@ -165,6 +165,31 @@ class HeadlessGenerationDispatch:
         }
 
 
+def _isq_crop_result(api_result: dict[str, Any], params: dict[str, Any]) -> None:
+    """I.Sequence 연쇄 프레임이면 결과를 **새로 생긴 절반**으로 줄인다(제자리 수정).
+
+    ⚠️ `image` 와 `raw_bytes` 를 **함께** 갈아야 한다. `add_api_result` 는 raw_bytes 가
+       있으면 그것을 파일로 쓰고 image 로는 WebP 를 만든다 - 하나만 자르면 저장 PNG 는
+       캔버스인데 화면 썸네일만 컷인 상태가 된다.
+    ⚠️ 표식은 `inpaint_sequence_canvas` 다. 1컷(t2i)에는 없으므로 안 잘린다 - 연쇄가
+       씨앗을 고를 때 쓰는 표식과 **같은 것**이라 두 자리가 갈라지지 않는다.
+    """
+    if not params.get("inpaint_sequence_canvas"):
+        return
+    try:
+        from utils.sequence_canvas_chain import crop_result, crop_result_png
+
+        direction = "vertical" if str(params.get("inpaint_sequence_direction") or "") == "vertical"             else "horizontal"
+        raw = api_result.get("raw_bytes")
+        if isinstance(raw, (bytes, bytearray)):
+            api_result["raw_bytes"] = crop_result_png(bytes(raw), direction)
+        image = api_result.get("image")
+        if image is not None:
+            api_result["image"] = crop_result(image, direction)
+    except Exception as exc:   # noqa: BLE001 - 자르기 하나 때문에 결과를 잃지 않는다
+        print(f"[warn] i.sequence crop failed: {ascii(exc)}", flush=True)
+
+
 class HeadlessGenerationService:
     """Create queue-ready generation requests without desktop widgets."""
 
@@ -353,6 +378,12 @@ class HeadlessGenerationService:
             error_message = str(api_result.get("message") or "Unknown API error")
             request.mark_failed(error_message)
             raise RuntimeError(error_message)
+        # I.Sequence 캔버스 연쇄: 사용자가 보고 저장할 것은 **컷**이지 캔버스가 아니다.
+        # 여기가 이미지가 저장물로 굳기 직전의 유일한 목이라, 자르려면 여기서 잘라야
+        # 한다(아래 `add_api_result` 가 파일·히스토리·WebP 를 전부 여기서 파생시킨다).
+        # 안 자르면 2컷부터 [직전 절반 | 새 절반] 이 함께 남아 같은 인물이 두 번 쌓인
+        # 그림이 된다(2026-08-28 라이브 실행에서 확인). 원본도 결과를 잘라 저장한다.
+        _isq_crop_result(api_result, params)
         api_result["generation_params"] = params
         api_result["source_row"] = request.source_row
         # 읽기 전용 생성 추적(파이프라인 단계 델타 + 적용된 와일드카드)을 이 이미지에 붙인다.

@@ -837,12 +837,15 @@ async def _chain_inpaint_sequence_frame(
     if image is None:
         return _give_up("no result image")
 
-    from utils.sequence_canvas_chain import crop_result, inpaint_payload
+    from utils.sequence_canvas_chain import inpaint_payload
 
     direction = svc.direction(run_id)
     try:
-        seed_image = crop_result(image, direction) if params.get("inpaint_sequence_canvas") else image
-        payload = await asyncio.to_thread(inpaint_payload, seed_image, direction)
+        # ⚠️ **여기서 자르지 않는다.** 저장 직전(`HeadlessGenerationService.execute_request`
+        #    -> `_isq_crop_result`)에서 이미 새 절반만 남겨 뒀다 - 여기서 또 자르면
+        #    씨앗이 1/4 이 되어 다음 컷이 통째로 어긋난다. 자르는 자리는 하나여야 한다.
+        #    (1컷 t2i 는 애초에 안 잘리므로 그대로 씨앗이 된다.)
+        payload = await asyncio.to_thread(inpaint_payload, image, direction)
     except Exception as exc:   # noqa: BLE001
         return _give_up(f"canvas build failed: {exc}")
 

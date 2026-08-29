@@ -7016,7 +7016,12 @@ const FN_QUICK_STORE = 'naia.fn.lastUsed';
 const FN_QUICK_ITEMS = [
   {key: 'preset', icon: '▦', label: 'Preset', tab: 'preset', run: () => openFnPreset()},
   {key: 'sequence', icon: '▶', label: 'Sequence', tab: 'sequence', run: () => openFnSequence()},
-  {key: 'isequence', icon: '▷', label: 'I.Sequence', tab: 'isequence', run: () => openFnISequence()},
+  // ⚠️ I.Sequence 는 진입로를 닫아 뒀다(index.html `#fnMenu` 의 짝도 함께).
+  //    기능은 그대로 살아 있고 `openFnISequence()` 도 부를 수 있다 - 메뉴에만
+  //    안 내놓는다(사용자 지정 2026-08-28). 여기를 지우면 마지막으로 쓴 칸이
+  //    `isequence` 로 저장돼 있던 사용자는 `fnQuickItem()` 이 null 을 돌려
+  //    빠른칸이 그냥 비므로, 옛 저장값 때문에 되살아나지 않는다.
+  // {key: 'isequence', icon: '▷', label: 'I.Sequence', tab: 'isequence', run: () => openFnISequence()},
   {key: 'v5scene', icon: '🎬', label: 'V5 Scene', tab: 'v5scene', run: () => openFnV5Scene()},
   // Translate 는 탭이 아니라 팝업이다 - `tab` 이 비어 있으면 활성 표시를 하지 않는다.
   {key: 'translate', icon: 'あ', label: 'Translate', tab: '', run: () => openTranslatorPopup()},

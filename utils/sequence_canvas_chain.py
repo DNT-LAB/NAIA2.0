@@ -141,3 +141,36 @@ def inpaint_payload(prev_image: Image.Image, direction: Direction = "horizontal"
         "noise": 0.0,
         "add_original_image": True,
     }
+
+
+def crop_result_png(raw_png: bytes, direction: Direction = "horizontal") -> bytes:
+    """인페인트 결과 PNG 를 **새로 생긴 절반만** 남기고 자른다. 메타데이터는 옮긴다.
+
+    사용자가 보고 저장하는 것은 캔버스가 아니라 **컷**이어야 한다. 원본도 그렇게
+    한다(`sequence_generation_worker._crop_result` -> `_generated_images.append`).
+    자르지 않으면 2컷부터 [직전 절반 | 새 절반] 이 함께 든 그림이 남아, 같은 인물이
+    두 번 쌓인 모양이 된다(2026-08-28 라이브 실행에서 확인).
+
+    ⚠️ **텍스트 청크를 반드시 옮긴다.** NAI 는 생성 파라미터를 PNG `Comment` 에
+       실어 보내고, 메타뷰어·설정 복원이 그것을 근거로 삼는다. 그냥 `crop().save()`
+       하면 그 청크가 통째로 사라져 "이 그림을 어떻게 만들었나" 를 영영 못 읽는다.
+    ⚠️ 실패하면 **원본을 그대로 돌려준다.** 자르기 하나 때문에 생성 결과를 잃는 것이
+       가장 나쁘다 - 캔버스가 남는 편이 아무것도 없는 것보다 낫다.
+    """
+    from PIL import PngImagePlugin
+
+    try:
+        with Image.open(BytesIO(raw_png)) as src:
+            src.load()
+            cropped = crop_result(src, direction)
+            info = PngImagePlugin.PngInfo()
+            for key, value in (getattr(src, "text", None) or {}).items():
+                try:
+                    info.add_text(str(key), str(value))
+                except Exception:      # noqa: BLE001 - 청크 하나가 자르기를 막지 않는다
+                    continue
+            buf = BytesIO()
+            cropped.save(buf, format="PNG", pnginfo=info)
+            return buf.getvalue()
+    except Exception:                  # noqa: BLE001
+        return raw_png

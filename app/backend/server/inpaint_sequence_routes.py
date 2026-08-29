@@ -130,15 +130,18 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
                     enqueued.append({"index": idx, "ok": False,
                                      "error": assembled.error or "assembly failed"})
                     continue
-                # 라운드 내 직전 enqueue 프롬프트와 동일하면 skip. PE 태그 제거(작가/캐릭터/구도
-                # 압축 등)로 인접 프레임이 같은 최종 프롬프트가 되는 케이스 — 시드 고정 시 같은
-                # 시드/해상도라 동일 이미지다. skip 프레임은 ok=False+skipped 라 ok_count(=total_frames)
-                # 에서 빠져 라운드 완결·다음 freeze 갱신이 정확하다(2행/마지막행 케이스 포함).
-                # ※ 시드 미고정이면 프레임마다 시드가 달라 같은 프롬프트라도 다른 이미지 → dedup 안 함.
-                if fix_seed and assembled.prompt == prev_prompt:
-                    enqueued.append({"index": idx, "ok": False, "skipped": True,
-                                     "prompt": assembled.prompt})
-                    continue
+                # ⚠️ **중복 프롬프트 skip 을 하지 않는다(2026-08-28).**
+                #
+                # 예전에는 "시드 고정 + 직전과 같은 프롬프트 = 같은 시드/해상도라 동일
+                # 이미지" 라는 근거로 걸렀다. **t2i 시절의 논리다.** 캔버스 연쇄에서는
+                # 컷마다 **입력 캔버스가 다르다**(직전 컷의 결과가 절반에 붙는다) -
+                # 같은 프롬프트·같은 시드라도 결과가 달라진다.
+                #
+                # 그대로 두면 조용히 시퀀스를 잘라먹는다. 라이브 실측(2026-08-28):
+                # 3컷 이벤트가 "1컷 생성 큐 등록 (중복 2컷 생략)" 으로 한 컷이 됐다.
+                # 사용자는 3컷을 골랐는데 1컷을 받는다.
+                #
+                # `prev_prompt` 는 더 쓰지 않지만 아래 흐름을 건드리지 않으려 유지한다.
                 prev_prompt = assembled.prompt
                 overrides: dict[str, Any] = {
                     "input": assembled.prompt,
@@ -202,6 +205,9 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
         #    이어 붙인다(`_chain_inpaint_sequence_frame`).
         for item in pending[1:]:
             item["command"]["overrides"]["inpaint_sequence_canvas"] = True
+            # 자를 방향도 함께 싣는다. 저장 직전(`_isq_crop_result`)이 이 값을 보고
+            # 새 절반을 남긴다 - 런 상태를 못 보는 자리라 프레임에 실어 보내야 한다.
+            item["command"]["overrides"]["inpaint_sequence_direction"] = direction
             enqueued[item["pos"]] = {
                 "index": item["idx"], "ok": True, "prompt": item["prompt"],
                 "requestId": "", "error": "", "chained": True,

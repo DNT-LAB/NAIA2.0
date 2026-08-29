@@ -7357,9 +7357,44 @@ body.resizing-result-info {
   .stats-island {
     display: flex;
   }
-  /* 여기서만 세대 카운터 섬이 뜬다 — 그 아래로 비킨다(데스크톱은 top:10 그대로). */
-  .nai-usage-pill {
+  /* 여기서만 세대 카운터 섬이 뜬다 — 그 아래로 비킨다(데스크톱은 top:10 그대로).
+     ⚠️ **ID 로 쓴다(특이도).** 클래스로 쓰면 파일 **뒤쪽**(18000행대)의 같은 특이도
+        기본 규칙 `.nai-usage-pill { top: 10px }` 이 순서로 이겨 이 줄이 통째로
+        무시된다. 그러면 USAGE 가 HISTORY 버튼과 같은 모서리에 겹쳐,
+        HISTORY 를 눌러도 USAGE 가 먹는다(모바일 보고서 P0-2).
+        실측(375x812): HISTORY(336~365)가 USAGE(264~365) 안에 완전히 들어가고
+        HISTORY 중앙의 `elementFromPoint` 가 `naiUsageValue` 를 돌려줬다.
+     ⚠️ 근본 해법은 보고서 단계 B(공통 overlay rail)다. 여기서는 P0 를 먼저 되살리는
+        좁은 패치만 한다 - 보고서도 그 순서를 허용한다. */
+  #naiUsagePill.nai-usage-pill {
     top: 42px;
+  }
+
+  /* ── P0-3: Generation Info 줄이 화면을 넘는다 ─────────────────────────────
+     실측(375x812): scrollWidth 540 vs clientWidth 375 = **165px 넘침**.
+     제목 108 + 액션 묶음 412 인데 둘 다 `flex: 0 0 auto` 라 아무도 안 줄어든다.
+
+     제목을 감춘다 - 결과 패널 안이라 무엇인지 자명하고, 그 108px 이 액션 한 줄과
+     맞먹는다. 액션은 줄바꿈을 허용해 남는 것이 다음 줄로 간다.
+     ⚠️ 버튼과 handler 는 **안 건드린다**(보고서 계약 4). 숨기는 것도 없다 -
+        전부 그대로 누를 수 있다.                                              */
+  #resultInfoTitle {
+    display: none;
+  }
+  .result-info-header {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 4px 8px;
+  }
+  .result-enhance-controls {
+    margin-left: 0;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    /* ⚠️ `flex: 0 0 auto` 로는 **줄바꿈이 안 일어난다.** 묶음 자체가 max-content 로
+       커져서 안쪽 버튼이 접힐 자리가 없다 - 폭을 내주고(1 1 100%) `min-width: 0`
+       으로 줄어들 수 있게 해야 비로소 접힌다(실측: 그전엔 420 / 375 로 45px 넘침). */
+    flex: 1 1 100%;
+    min-width: 0;
   }
   /* 배지가 내려가면 그 아래 붙는 팝오버도 같이 내려가야 앵커가 안 어긋난다. */
   .nai-acct-pop {
@@ -11305,6 +11340,36 @@ body.resizing-result-info {
   }
   /* 본문만 스크롤한다 - 시트 전체가 스크롤되면 머리줄이 위로 밀려 올라간다. */
   .module-popup > .module-popup-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Tag Filter 도 **같은 시트**다(모바일 보고서 P0-4 의 나머지 절반).
+     같은 `bottom: 60px` 을 따로 들고 있었다 - 팝업마다 낡은 상수를 복제한 것이
+     보고서 §4 가 지목한 공통 원인 2번이다.
+     ⚠️ 이 팝업은 **열자마자 입력창에 포커스를 준다** - 소프트 키보드가 곧바로
+        올라온다. 시트라야 키보드가 밀어 올려도 머리줄과 입력이 살아남는다. */
+  /* ⚠️ **ID 로 못 박는다(특이도).** `.tag-filter-popup` 기본 규칙이 이 블록보다
+        파일 **뒤쪽**(17900행대)이라, 클래스로 쓰면 `width: min(360px,90vw)` 와
+        `max-height: 50dvh` 가 순서로 이겨 시트가 안 된다(실측: 338x406 로 남았다).
+        모듈 팝업은 기본 규칙이 앞쪽이라 안 걸렸다 - 같은 파일에서도 자리에 따라
+        결과가 갈린다. */
+  #tagFilterPopup.tag-filter-popup {
+    top: 0; right: 0; bottom: 0; left: 0;
+    width: auto;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #tagFilterPopup.tag-filter-popup > .tag-filter-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;

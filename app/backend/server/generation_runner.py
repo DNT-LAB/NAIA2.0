@@ -69,7 +69,11 @@ AUTO_GENERATE_DROPPED_PARAM_KEYS = {
 
 # Auto Gen continuation 에서 overrides 로 핀하면 안 되는 라이브 PARAMS 의 예외(전용 로직이 관리).
 # seed: 매 반복 -1 리셋(랜덤 재시드) 또는 seed_fixed 시 유지. resolution/width/height/random_resolution:
-# Rnd Res 재추첨/Auto Res 가 별도 처리. 이 키들만 빼고 remote_params 의 나머지 키는 모두 제거한다.
+# Rnd Res 재추첨/Auto Res 가 별도 처리.
+# ⚠️ 이 예외는 **전용 로직이 실제로 돈다는 전제** 위에 서 있다. Rnd Res OFF + Prompt Fix ON
+#    이면 하나도 안 돌아 핀이 영원히 살았다(2026-08-29 실측). 그래서
+#    `_maybe_continue_auto_generation` 이 전용 로직 **앞에서** 해상도 셋을 먼저 놓는다 -
+#    여기 예외 목록은 그 뒤에 **쓰인 값**을 지키는 용도로만 남는다.
 AUTO_GEN_PARAM_PIN_EXEMPT = {"seed", "seed_fixed", "resolution", "width", "height", "random_resolution"}
 
 
@@ -1254,6 +1258,22 @@ async def _maybe_continue_auto_generation(
     # 같은 이미지만 반복된다. seed=-1로 리셋해 시드 정규화에서 재랜덤화되도록 한다.
     if not context._coerce_bool(overrides.get("seed_fixed", params.get("seed_fixed", False))):
         overrides["seed"] = -1
+    # ⚠️ **앞 반복의 해상도 핀을 여기서 놓아 준다.**
+    #    `_auto_generation_overrides` 는 직전 생성의 params 를 그대로 물고 오는데,
+    #    enqueue 가 `params.update(remote_params)` **다음에** `params.update(overrides)`
+    #    를 하므로 그 핀이 라이브 값을 이긴다 - 사용자가 Auto Gen 도중 바꾼 해상도가
+    #    조용히 무시된다(화면만 바뀐다).
+    #    실측 2026-08-29 (Auto Gen 4장): 1장째 뒤 Prompt Fix 를 켜고 해상도를
+    #    1216x832 로 바꿨는데 **4장 내내 832x1216** 로 나갔다.
+    #    Rnd Res OFF + Prompt Fix ON 이면 아래 전용 로직(재추첨 / 감지값 / 스토리
+    #    플랜)이 **하나도 안 돌아** 핀이 영원히 산다.
+    #    조건을 따지지 않는다 - 전용 로직이 돌면 그것이 다시 써 넣고, 하나도 안 돌면
+    #    라이브 `remote_params` 값이 적용된다. 어느 쪽이든 옳다.
+    #    ⚠️ 셋을 **함께** 놓아야 한다. `resolution` 만 놓고 width/height 를 남기면
+    #       라벨과 치수가 어긋난 채로 나간다(하류는 치수를 먼저 본다).
+    #       치수가 없으면 `_normalize_resolution` 이 라벨에서 파생하므로 안전하다.
+    for _res_key in ("resolution", "width", "height"):
+        overrides.pop(_res_key, None)
     # Rnd Res must re-roll every Auto Gen iteration, exactly like a manual Random
     # press. The frontend picks a random resolution per click (_collectCurrentParams),
     # but this server-side loop reuses the previous params, so without this the

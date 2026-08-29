@@ -51,9 +51,16 @@ def _backoff_remaining() -> float:
 
 
 def _note_rate_limited() -> None:
-    """429 를 봤다. 다음 시도까지 물러선다(성공 전까지 두 배씩)."""
+    """429 를 봤다. 다음 시도까지 물러선다(성공 전까지 두 배씩).
+
+    ⚠️ **이미 물러서 있으면 더 늘리지 않는다.** 여러 스레드가 동시에 429 를 만나면
+       각자 두 배씩 올려 한 번의 장애가 60->120->240->480 이 된다(Codex 리뷰 MED,
+       스레드 모킹으로 재현됨). 단계는 **창이 끝난 뒤 다시 걸릴 때만** 올린다.
+    """
     global _backoff_until, _backoff_step
     with _BACKOFF_LOCK:
+        if _backoff_until > time.monotonic():
+            return
         _backoff_step = min(_BACKOFF_MAX_SECONDS,
                             _BACKOFF_BASE_SECONDS if _backoff_step <= 0 else _backoff_step * 2)
         _backoff_until = time.monotonic() + _backoff_step
@@ -85,6 +92,11 @@ _CLIENT_LOCK = threading.Lock()
 _preferred_client = _TRANSLATE_CLIENTS[0]
 
 _TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
+# ⚠️ client 하나당 5초를 주면 둘을 순서대로 시도할 때 10초를 넘겨, 프론트의 10초
+#    안전망이 먼저 요청을 버린다 - 결과가 도착해도 ID 가 안 맞아 무시되고 출력창이
+#    `...` 에 남는다(Codex 리뷰 MED). 전체가 그 안에 끝나도록 나눠 갖는다.
+_TRANSLATE_TIMEOUT_SECONDS = 4.0
+_TRANSLATE_TOTAL_BUDGET_SECONDS = 8.5
 _TRANSLATE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -103,23 +115,60 @@ def _remember_client(client: str) -> None:
         _preferred_client = client
 
 
+def _parse_translation_payload(payload) -> str:
+    """구글 응답에서 번역문을 꺼낸다. 모양이 다르면 빈 문자열.
+
+    ⚠️ **여기서 예외가 새면 WS 수신 루프가 끊긴다.** 자동완성 경로
+       (`_translate_autocomplete_query`)는 예외를 안 잡는다. 합치기 전에는 이 순회가
+       바깥 `try` 안에 있었는데 합치면서 밖으로 나왔다 - `{"sentences": [...]}` 같은
+       200 응답에 `KeyError: 0` 이 튀는 것을 실측했다(Codex 리뷰 2026-08-29 HIGH).
+    ⚠️ 모양 검사도 함께 한다. 예전에는 `payload` 가 문자열이면 `'u'` 한 글자를
+       번역 결과랍시고 돌려줬다 - 예외보다 조용해서 더 나쁘다.
+    """
+    if not isinstance(payload, (list, tuple)) or not payload:
+        return ""
+    chunks = payload[0]
+    if not isinstance(chunks, (list, tuple)):
+        return ""
+    out = []
+    for part in chunks:
+        if not isinstance(part, (list, tuple)) or not part:
+            continue
+        piece = part[0]
+        if isinstance(piece, str) and piece:
+            out.append(piece)
+    return "".join(out)
+
+
 def _fetch_translation(text: str, sl: str, tl: str) -> Optional[str]:
     """번역문을 가져온다. 실패하면 `None` - **절대 raise 하지 않는다.**
 
-    사유는 `_set_reason` 으로 남긴다.
-    ⚠️ 백오프는 **모든 client 가 429 일 때만** 건다. 하나가 죽었다고 물러서면
-       살아 있는 쪽까지 못 쓰게 된다 - 지금 gtx 가 정확히 그 상태다.
+    사유는 `_set_reason` 으로 남긴다(스레드별).
+    ⚠️ 백오프는 **모든 client 가 429 일 때만** 건다. 하나가 죽었다고 물러서면 살아
+       있는 쪽까지 못 쓰게 된다 - 지금 gtx 가 정확히 그 상태다.
     """
     if _backoff_remaining() > 0:
         _set_reason(FAILURE_RATE_LIMITED)
         return None
-    saw_rate_limit = False
+    # ⚠️ "마지막 사유가 429" 로 판정하면 **순서에 따라 결과가 갈린다.** 실측:
+    #    dict=네트워크오류 -> gtx=429 면 백오프 60초, 순서를 뒤집으면 0초였다
+    #    (Codex 리뷰 HIGH). 레이트 리밋으로 단정하려면 **전부** 429 여야 한다.
+    attempts = 0
+    rate_limited = 0
     last_reason = FAILURE_EMPTY
+    deadline = time.monotonic() + _TRANSLATE_TOTAL_BUDGET_SECONDS
     for client in _client_order():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            last_reason = FAILURE_TIMEOUT
+            break
+        attempts += 1
         params = {"client": client, "sl": sl, "tl": tl, "dt": "t", "q": text}
         try:
-            response = requests.get(_TRANSLATE_URL, params=params,
-                                    headers={"User-Agent": _TRANSLATE_UA}, timeout=5)
+            response = requests.get(
+                _TRANSLATE_URL, params=params,
+                headers={"User-Agent": _TRANSLATE_UA},
+                timeout=min(_TRANSLATE_TIMEOUT_SECONDS, remaining))
         except requests.Timeout:
             last_reason = FAILURE_TIMEOUT
             continue
@@ -127,21 +176,17 @@ def _fetch_translation(text: str, sl: str, tl: str) -> Optional[str]:
             last_reason = FAILURE_NETWORK
             continue
         if response.status_code == 429:
-            saw_rate_limit = True
+            rate_limited += 1
             last_reason = FAILURE_RATE_LIMITED
             continue
         if response.status_code != 200:
             last_reason = FAILURE_NETWORK
             continue
+        # ⚠️ 파싱은 통째로 감싼다 - 여기서 새면 WS 루프가 끊긴다.
         try:
-            payload = response.json()
+            joined = _parse_translation_payload(response.json())
         except Exception:
-            last_reason = FAILURE_EMPTY
-            continue
-        if not payload or not payload[0]:
-            last_reason = FAILURE_EMPTY
-            continue
-        joined = "".join(part[0] for part in payload[0] if part and part[0])
+            joined = ""
         if not joined:
             last_reason = FAILURE_EMPTY
             continue
@@ -149,11 +194,11 @@ def _fetch_translation(text: str, sl: str, tl: str) -> Optional[str]:
         _note_success()
         _set_reason("")
         return joined
-    if saw_rate_limit and last_reason == FAILURE_RATE_LIMITED:
+    if attempts > 0 and rate_limited == attempts:
         _note_rate_limited()
+        last_reason = FAILURE_RATE_LIMITED
     _set_reason(last_reason)
     return None
-
 
 def translate_with_reason(text: str, direction: str = "ko_en") -> tuple[Optional[str], str]:
     """번역 결과와 **실패 사유**를 함께 돌려준다.
@@ -172,19 +217,19 @@ def translate_with_reason(text: str, direction: str = "ko_en") -> tuple[Optional
     return None, _last_reason()
 
 
-_REASON_LOCK = threading.Lock()
-_last_failure_reason = ""
+# ⚠️ **스레드별로 둔다.** 전역 문자열이면 A 가 실패한 뒤 사유를 읽기 전에 B 가 덮어써,
+#    A 에게 남의 실패 사유가 보고된다(Codex 리뷰 2026-08-29 MED). 백엔드는
+#    `run_in_thread` 풀로 부르므로 실제로 겹친다. 락은 문자열 손상만 막지 요청과 사유를
+#    묶어 주지 않는다.
+_reason_state = threading.local()
 
 
 def _set_reason(reason: str) -> None:
-    global _last_failure_reason
-    with _REASON_LOCK:
-        _last_failure_reason = reason
+    _reason_state.value = reason
 
 
 def _last_reason() -> str:
-    with _REASON_LOCK:
-        return _last_failure_reason or FAILURE_EMPTY
+    return getattr(_reason_state, "value", "") or FAILURE_EMPTY
 
 
 def rate_limit_seconds_remaining() -> int:
@@ -227,12 +272,20 @@ def korean_to_english(text: str) -> Optional[str]:
         return text
 
     # 1. googletrans 시도
-    if GOOGLETRANS_AVAILABLE:
+    # ⚠️ 이 경로도 **백오프를 지켜야** 한다. 안 지키면 물러서기로 한 동안에도 외부
+    #    요청이 나간다(Codex 리뷰 2026-08-29 MED). 성공하면 정책도 함께 갱신한다 -
+    #    그래야 아래 HTTP 경로와 상태가 어긋나지 않는다.
+    # ⚠️ 설치된 googletrans 3.4.0 의 `translate` 는 coroutine 이라 이 동기 호출은 늘
+    #    실패로 떨어진다(경고만 남는다). 구버전이 깔린 환경이 있을 수 있어 분기는
+    #    남기되, **정책 밖에서 돌게 두지는 않는다.**
+    if GOOGLETRANS_AVAILABLE and _backoff_remaining() <= 0:
         try:
             translator = GoogleTranslator()
             result = translator.translate(text, src='ko', dest='en')
-            if result and hasattr(result, 'text'):
+            if result and isinstance(getattr(result, 'text', None), str) and result.text:
                 translated = result.text.lower()
+                _note_success()
+                _set_reason("")
                 _record_translation(text, translated, "ko->en")
                 return translated
         except (RuntimeWarning, Exception):
@@ -261,12 +314,14 @@ def english_to_korean(text: str) -> Optional[str]:
     if not text or not text.strip():
         return text
 
-    # 1. googletrans 시도
-    if GOOGLETRANS_AVAILABLE:
+    # 1. googletrans 시도 (백오프 준수 - ko->en 쪽 주석 참조)
+    if GOOGLETRANS_AVAILABLE and _backoff_remaining() <= 0:
         try:
             translator = GoogleTranslator()
             result = translator.translate(text, src='en', dest='ko')
-            if result and hasattr(result, 'text'):
+            if result and isinstance(getattr(result, 'text', None), str) and result.text:
+                _note_success()
+                _set_reason("")
                 _record_translation(text, result.text, "en->ko")
                 return result.text
         except (RuntimeWarning, Exception):

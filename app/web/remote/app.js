@@ -696,7 +696,7 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260823-tfexac
   .catch(error => {
     console.error('Failed to initialize Quick Filter module', error);
   });
-const rightTabsReady = import('./js/features/rightTabs.mjs')
+const rightTabsReady = import('./js/features/rightTabs.mjs?v=20260829-mark0')
   .then(({createRightTabsController}) => {
     rightTabs = createRightTabsController({
       document,
@@ -757,7 +757,7 @@ const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260714-a3fix'
   .catch(error => {
     console.error('Failed to initialize Danbooru browser module', error);
   });
-const thumbTabReady = import('./js/features/thumbTab.mjs')
+const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .then(({createThumbTabController}) => {
     thumbTabControl = createThumbTabController({
       document,
@@ -1095,7 +1095,7 @@ const customSelectsReady = import('./js/features/customSelects.mjs?v=20260829-no
   .catch(error => {
     console.error('Failed to initialize custom select module', error);
   });
-const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
+const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs?v=20260829-mark0')
   .then(({createResultInfoResizer}) => {
     resultInfoResizer = createResultInfoResizer({
       document,
@@ -1265,7 +1265,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize image action popup module', error);
   });
-const resultImageInputReady = import('./js/features/resultImageInput.mjs')
+const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20260829-mark0')
   .then(({createResultImageInput}) => {
     resultImageInput = createResultImageInput({
       document,
@@ -1792,7 +1792,7 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
   });
-const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
+const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260829-mark0')
   .then(({createTokenDisplay}) => {
     tokenDisplayControl = createTokenDisplay({
       promptEdit,
@@ -1854,7 +1854,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20260827-forced4')
+    return import('./js/features/naiAccountPanel.mjs?v=20260829-anlas')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,
@@ -2087,7 +2087,7 @@ const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize save directory panel module', error);
   });
-const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats.mjs')
+const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats.mjs?v=20260829-mark0')
   .then(({createSessionGenerationStats}) => {
     sessionGenerationStats = createSessionGenerationStats({
       statsGenCount,
@@ -2414,7 +2414,7 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260606-remote-e
   .catch(error => {
     console.error('Failed to initialize chunk panel module', error);
   });
-const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
+const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260829-mark0')
   .then(({createDanbooruFeedbackController}) => {
     danbooruFeedbackControl = createDanbooruFeedbackController({document});
   })
@@ -2535,7 +2535,7 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .catch(error => {
     console.error('Failed to initialize V5 Scene panel', error);
   });
-const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs')
+const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs?v=20260829-mark0')
   .then(({createResolutionManagerPanel}) => {
     resolutionManagerPanel = createResolutionManagerPanel({
       document,
@@ -4124,7 +4124,7 @@ const wsMessageHandlers = {
   lazy_indices_ready: onLazyIndicesReady,
 };
 
-const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
+const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark0')
   .then(({createRemoteWsClient}) => {
     wsClient = createRemoteWsClient({
       window,
@@ -9582,7 +9582,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-v3-refblock')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260829-anlas')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -9623,7 +9623,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260825-maint1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260829-anlas')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

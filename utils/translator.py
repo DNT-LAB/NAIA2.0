@@ -66,6 +66,95 @@ def _note_success() -> None:
         _backoff_step = 0.0
 
 
+# ── 어떤 `client` 로 부를 것인가 ───────────────────────────────────────────────
+#
+# ⚠️ **`client=gtx` 는 구글이 막았다.** 사용자가 "차단이 그렇게 길 리 없다" 고 짚어
+#    다시 재 봤더니 IP 문제가 아니었다 - 같은 IP·같은 순간에 이렇게 갈렸다:
+#
+#      client=gtx             -> HTTP 429  (UA 4종 · ie/oe 추가 · 전부 429)
+#      client=dict-chrome-ex  -> HTTP 200, 471ms
+#
+#    dict-chrome-ex 는 연속 12회도 200/200 이었고 긴 문장·여러 문장·양방향·특수문자가
+#    모두 정상이었다. 즉 레이트 리밋이 아니라 **파라미터가 죽은 것**이다.
+#    응답 모양은 같아서(`payload[0]` 이 조각 목록) 파싱은 그대로 쓴다.
+#
+# 순서대로 시도하고 **먹힌 것을 기억한다**(매번 죽은 것부터 던지지 않게).
+# gtx 를 뒤에 남기는 이유: 구글이 또 뒤집으면 그쪽이 살아날 수 있다.
+_TRANSLATE_CLIENTS = ("dict-chrome-ex", "gtx")
+_CLIENT_LOCK = threading.Lock()
+_preferred_client = _TRANSLATE_CLIENTS[0]
+
+_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
+_TRANSLATE_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
+
+
+def _client_order() -> tuple:
+    with _CLIENT_LOCK:
+        first = _preferred_client
+    return (first,) + tuple(c for c in _TRANSLATE_CLIENTS if c != first)
+
+
+def _remember_client(client: str) -> None:
+    global _preferred_client
+    with _CLIENT_LOCK:
+        _preferred_client = client
+
+
+def _fetch_translation(text: str, sl: str, tl: str) -> Optional[str]:
+    """번역문을 가져온다. 실패하면 `None` - **절대 raise 하지 않는다.**
+
+    사유는 `_set_reason` 으로 남긴다.
+    ⚠️ 백오프는 **모든 client 가 429 일 때만** 건다. 하나가 죽었다고 물러서면
+       살아 있는 쪽까지 못 쓰게 된다 - 지금 gtx 가 정확히 그 상태다.
+    """
+    if _backoff_remaining() > 0:
+        _set_reason(FAILURE_RATE_LIMITED)
+        return None
+    saw_rate_limit = False
+    last_reason = FAILURE_EMPTY
+    for client in _client_order():
+        params = {"client": client, "sl": sl, "tl": tl, "dt": "t", "q": text}
+        try:
+            response = requests.get(_TRANSLATE_URL, params=params,
+                                    headers={"User-Agent": _TRANSLATE_UA}, timeout=5)
+        except requests.Timeout:
+            last_reason = FAILURE_TIMEOUT
+            continue
+        except Exception:
+            last_reason = FAILURE_NETWORK
+            continue
+        if response.status_code == 429:
+            saw_rate_limit = True
+            last_reason = FAILURE_RATE_LIMITED
+            continue
+        if response.status_code != 200:
+            last_reason = FAILURE_NETWORK
+            continue
+        try:
+            payload = response.json()
+        except Exception:
+            last_reason = FAILURE_EMPTY
+            continue
+        if not payload or not payload[0]:
+            last_reason = FAILURE_EMPTY
+            continue
+        joined = "".join(part[0] for part in payload[0] if part and part[0])
+        if not joined:
+            last_reason = FAILURE_EMPTY
+            continue
+        _remember_client(client)
+        _note_success()
+        _set_reason("")
+        return joined
+    if saw_rate_limit and last_reason == FAILURE_RATE_LIMITED:
+        _note_rate_limited()
+    _set_reason(last_reason)
+    return None
+
+
 def translate_with_reason(text: str, direction: str = "ko_en") -> tuple[Optional[str], str]:
     """번역 결과와 **실패 사유**를 함께 돌려준다.
 
@@ -150,61 +239,13 @@ def korean_to_english(text: str) -> Optional[str]:
             # googletrans 내부의 비동기 관련 경고 무시
             pass
 
-    # 2. requests로 Google Translate API 호출
-    #    ⚠️ **막혀 있으면 아예 안 나간다.** 429 중에 계속 두드리면 차단이 길어진다.
-    if _backoff_remaining() > 0:
-        _set_reason(FAILURE_RATE_LIMITED)
+    # 2. HTTP 호출 - client 폴백과 백오프는 `_fetch_translation` 이 관리한다.
+    translated_text = _fetch_translation(text, "ko", "en")
+    if not translated_text:
         return None
-    try:
-        base_url = "https://translate.googleapis.com/translate_a/single"
-
-        params = {
-            'client': 'gtx',
-            'sl': 'ko',
-            'tl': 'en',
-            'dt': 't',
-            'q': text
-        }
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-
-        response = requests.get(base_url, params=params, headers=headers, timeout=5)
-
-        if response.status_code == 429:
-            _note_rate_limited()
-            _set_reason(FAILURE_RATE_LIMITED)
-            return None
-        if response.status_code == 200:
-            # 명시적으로 동기 방식으로 JSON 파싱
-            try:
-                result = response.json()
-            except Exception:
-                result = None
-
-            if result and len(result) > 0 and len(result[0]) > 0:
-                translated_parts = []
-                for part in result[0]:
-                    if part[0]:
-                        translated_parts.append(part[0])
-
-                translated_text = ''.join(translated_parts)
-                if translated_text:
-                    translated = translated_text.lower()
-                    _note_success()
-                    _set_reason("")
-                    _record_translation(text, translated, "ko->en")
-                    return translated
-    except requests.Timeout:
-        _set_reason(FAILURE_TIMEOUT)
-        return None
-    except Exception:
-        _set_reason(FAILURE_NETWORK)
-        return None
-
-    _set_reason(FAILURE_EMPTY)
-    return None
+    translated = translated_text.lower()
+    _record_translation(text, translated, "ko->en")
+    return translated
 
 
 def english_to_korean(text: str) -> Optional[str]:
@@ -232,57 +273,9 @@ def english_to_korean(text: str) -> Optional[str]:
             # googletrans 내부의 비동기 관련 경고 무시
             pass
 
-    # 2. requests로 Google Translate API 호출
-    #    ⚠️ **막혀 있으면 아예 안 나간다.** 429 중에 계속 두드리면 차단이 길어진다.
-    if _backoff_remaining() > 0:
-        _set_reason(FAILURE_RATE_LIMITED)
+    # 2. HTTP 호출 - client 폴백과 백오프는 `_fetch_translation` 이 관리한다.
+    translated_text = _fetch_translation(text, "en", "ko")
+    if not translated_text:
         return None
-    try:
-        base_url = "https://translate.googleapis.com/translate_a/single"
-
-        params = {
-            'client': 'gtx',
-            'sl': 'en',
-            'tl': 'ko',
-            'dt': 't',
-            'q': text
-        }
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-
-        response = requests.get(base_url, params=params, headers=headers, timeout=5)
-
-        if response.status_code == 429:
-            _note_rate_limited()
-            _set_reason(FAILURE_RATE_LIMITED)
-            return None
-        if response.status_code == 200:
-            # 명시적으로 동기 방식으로 JSON 파싱
-            try:
-                result = response.json()
-            except Exception:
-                result = None
-
-            if result and len(result) > 0 and len(result[0]) > 0:
-                translated_parts = []
-                for part in result[0]:
-                    if part[0]:
-                        translated_parts.append(part[0])
-
-                translated_text = ''.join(translated_parts)
-                if translated_text:
-                    _note_success()
-                    _set_reason("")
-                    _record_translation(text, translated_text, "en->ko")
-                    return translated_text
-    except requests.Timeout:
-        _set_reason(FAILURE_TIMEOUT)
-        return None
-    except Exception:
-        _set_reason(FAILURE_NETWORK)
-        return None
-
-    _set_reason(FAILURE_EMPTY)
-    return None
+    _record_translation(text, translated_text, "en->ko")
+    return translated_text

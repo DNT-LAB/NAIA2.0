@@ -2463,7 +2463,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260829-nocollapse')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260829-busy')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -2479,6 +2479,8 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       onRepeat: value => img2imgPanel?.repeat?.(value),
       onGenerate: () => img2imgPanel?.generate?.(),
       onClose: () => img2imgPanel?.close?.(),
+      // 생성 중이면 [인페인트 생성] 을 잠근다(사용자 지정 2026-08-29).
+      isGenerating: () => generating,
       // 캔버스 해상도 목록은 **NAI 밴드와 같은 표**를 쓴다(백엔드가 내려 준 것).
       // 도크가 자기 목록을 따로 들고 있어서 유료권(Large/Wallpaper)이 통째로
       // 빠져 있었다 - 인페인트 도중 유료 해상도로 갈 길이 아예 없었다.
@@ -8124,6 +8126,9 @@ function setGen(v) {
   }
   const wasGenerating = generating;
   generating = next;
+  // 인페인트 도크의 [인페인트 생성] 도 이 상태를 따라 잠긴다 - 다시 그려야 보인다
+  // (사용자 지정 2026-08-29). 서버 에코(`can_generate`)는 한 박자 늦어 연타를 못 막는다.
+  try { inpaintCanvasControl?.render?.(); } catch (_) {}
   // 새 생성이 시작됐다 — 직전 성공 표시를 내린다. 안 내리면 실패로 끝나도
   // 옛 true 가 남아 다음 장을 예약한다.
   if (next) lastGenerationOk = false;

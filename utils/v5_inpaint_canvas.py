@@ -464,14 +464,30 @@ def build_payload(
         )
     if mask_is_empty(gap):
         gap = None
+    # `mask_image` 는 **부풀리기 전**의 기하다 - `_auto_mask` 가 "빈 곳이 있나" 를
+    # 판정하는 데만 쓴다. 실제로 나가는 것은 아래 `mask_bytes` 다.
     merged = merge_masks(user_mask, gap) if (user_mask is not None or gap is not None) else None
+    # ⚠️ **빈 곳은 여기서도 16px 부풀린다**(사용자 제보 2026-08-29).
+    #    [자동 마스킹] 버튼은 `빈 곳 + 16px` 로 칠하는데, 생성 시 자동 병합은 빈 곳을
+    #    **그대로** 실어 보내고 있었다 - 규격이 갈렸다. 빈 곳만 딱 열면 이음매가 남고,
+    #    캔버스 배경이 중간 회색(128,128,128)이라 그 이음매가 **회색 액자**로 굳는다.
+    #    (`_auto_mask` 주석이 이미 같은 이유를 적어 뒀다 - 한쪽에만 적용돼 있었다.)
+    # ⚠️ 부풀리는 것은 **빈 곳뿐**이다. 손으로 칠한 것까지 부풀리면 사용자가 그린
+    #    범위가 말없이 커진다.
+    # ⚠️ 1/8 로 줄인 뒤에 부풀린다 - 캔버스 크기에서 16px 커널을 돌리면 수천만 번이다
+    #    (`_auto_mask` 와 같은 이유·같은 순서).
+    gap_small = downscale_mask(gap) if gap is not None else None
+    if gap_small is not None:
+        gap_small = dilate_mask(gap_small, AUTO_MASK_RADIUS_PX, scale=MASK_SCALE)
+    user_small = downscale_mask(user_mask) if user_mask is not None else None
+    merged_small = merge_masks(user_small, gap_small)
     return {
         "canvas_image": canvas,
         # ⚠️ 굽는 데 62ms 든다(실측, 일러스트급 832x1216). 조작 중에는 필요 없다 -
         #    화면은 미리보기만 보고, 이건 생성할 때 실려 나가는 물건이다.
         "canvas_bytes": png_bytes(canvas) if encode_canvas else b"",
         "mask_image": merged,
-        "mask_bytes": png_bytes(downscale_mask(merged)) if merged is not None else b"",
+        "mask_bytes": png_bytes(merged_small) if merged_small is not None else b"",
         "width": int(canvas.width),
         "height": int(canvas.height),
         "offset_x": offset_x,

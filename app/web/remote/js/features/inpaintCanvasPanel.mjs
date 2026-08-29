@@ -68,6 +68,8 @@ export function createInpaintCanvasPanel({
   onSlider = () => {},
   onRepeat = () => {},
   onGenerate = () => {},
+  // 지금 생성이 도는 중인가(사용자 지정 2026-08-29: 생성 중에는 또 못 누른다).
+  isGenerating = () => false,
   onClose = () => {},
   onVisibility = () => {},
   getResolutionBands = () => [],
@@ -308,6 +310,10 @@ export function createInpaintCanvasPanel({
     //    (사용자 제보 2026-08-27).
     const painted = !!state.has_user_mask;      // 사람이 칠한 것
     const masked = !!state.has_mask;            // 칠한 것 + 빈 곳(= 생성 가능 여부)
+    // 생성이 도는 동안에는 버튼 자체를 잠근다 - 눌러 봐야 토스트만 나오는 것보다
+    // 눌리지 않는 편이 낫다(사용자 지정 2026-08-29).
+    let busyNow = false;
+    try { busyNow = !!isGenerating(); } catch (_) { busyNow = false; }
     const gapOnly = masked && !painted;
     const genTitle = state.requires_mask
       ? ' title="생성 전에 마스크를 칠하거나 베이스를 옮겨 빈 자리를 여세요"' : '';
@@ -338,7 +344,7 @@ export function createInpaintCanvasPanel({
           <span class="ic-label">반복</span>
           <input class="ic-num" type="number" min="1" max="99" value="${repeat}" data-ic-num="repeat" aria-label="반복">
           <span class="ic-spacer"></span>
-          <button type="button" class="ic-btn ic-btn-go${masked ? '' : ' is-blocked'}" data-ic="generate"${genTitle}>인페인트 생성</button>
+          <button type="button" class="ic-btn ic-btn-go${masked ? '' : ' is-blocked'}${busyNow ? ' is-busy' : ''}" data-ic="generate"${busyNow ? ' disabled' : ''}${genTitle}>${busyNow ? '생성 중…' : '인페인트 생성'}</button>
           <button type="button" class="ic-btn ic-btn-end" data-ic="close">세션 닫기</button>
         </div>
       </section>
@@ -443,6 +449,15 @@ export function createInpaintCanvasPanel({
     }
     if (state.can_generate === false) {
       showToast?.('지금은 생성할 수 없습니다 (앞선 요청이 끝나기를 기다리는 중)', 'error');
+      return false;
+    }
+    // ⚠️ **생성 중에는 또 못 누른다**(사용자 지정 2026-08-29). 연타하면 그만큼
+    //    유료 요청이 쌓인다 - `state.can_generate` 는 서버 에코라 한 박자 늦어,
+    //    누른 직후의 연타를 못 막는다. 화면이 아는 `generating` 으로 즉시 막는다.
+    let busy = false;
+    try { busy = !!isGenerating(); } catch (_) { busy = false; }
+    if (busy) {
+      showToast?.('이미 생성 중입니다 - 끝나면 다시 누르세요', 'error');
       return false;
     }
     return true;

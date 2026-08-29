@@ -26587,3 +26587,33 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   pointer-events: none;
 }
 .btn-gen { position: relative; }
+
+/* 인페인트 ⚙ 미니 팝업 (사용자 지정 2026-08-29: "상단 미니 팝업").
+   Enhance 설정은 모달인데 이쪽은 항목이 하나뿐이라 앵커 팝업으로 둔다 -
+   화면을 덮는 모달을 띄울 무게가 아니다. */
+.inpaint-settings-pop {
+  position: fixed;
+  z-index: var(--z-floating-module-aux);
+  min-width: 210px;
+  max-width: min(300px, 92vw);
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glow);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  font-size: 12px;
+}
+.inpaint-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.inpaint-settings-row input { flex: 0 0 auto; }
+.inpaint-settings-note {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.7;
+}

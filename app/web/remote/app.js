@@ -1147,7 +1147,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260828-flush')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260829-resize')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1158,6 +1158,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
       getWs: () => ws,
       getLatestResultBlob: () => latestResultBlob,
       useNativeClipboard: () => canUseHostClipboardBridge,
+      getInpaintResize1mp: () => inpaintForce1mp(),
       getPreviewImageUrl: () => (
         preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : ''
       ),
@@ -2009,7 +2010,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260826-fix2')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260829-posrnd')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2018,6 +2019,8 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
       onModTextEdit: virtualModTextEdit,
       openCharacterModule: () => openModule('character'),
       getResolution: () => currentResolutionWH(),
+      // Rnd Res 중에는 해상도가 매 생성마다 바뀐다 - POS 를 AUTO 로 잠근다.
+      isRandomResolution: () => !!qRndRes?.classList.contains('on'),
       // 가상 캔버스가 결과 뷰어를 차지하고 있으면 POS 무대는 그 위에 겹쳐 선다.
       getCanvasStage: () => inpaintCanvasControl?.stageRect?.() || null,
       // ⚠️ 이걸 빠뜨려서 자동완성이 **통째로 죽어 있었다.** 패널 쪽 배선은 있었지만
@@ -2355,7 +2358,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260828-bands')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260829-nocollapse')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -4610,6 +4613,10 @@ function refreshResolutionPresetDisplay(mode = currentMode || modeSelect?.value 
   });
   refreshHiresfixResolutionDisplay();
   if (typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
+  // POS 무대는 **지금 해상도의 비율**로 선다. 해상도가 바뀌었는데 다시 안 그리면
+  // 그리드가 옛 비율에 굳어 그림과 어긋난 자리에 원이 놓인다(사용자 지적 2026-08-29).
+  // 서명에 해상도를 넣어 뒀으니 실제로 바뀐 경우에만 다시 그린다.
+  try { renderCharacterQuickPanel(); } catch (_) {}
 }
 
 function resetResolutionOptionLabels(select) {
@@ -5064,6 +5071,10 @@ function setParam(key, value) {
     const pinnedLabel = dispatchedResolutionLabel;
     dispatchedResolutionLabel = null;
     setParam('resolution', pinnedLabel);
+  }
+  // Rnd Res 가 바뀌면 POS 잠금도 바뀐다 - 퀵 패널을 다시 그린다.
+  if (key === 'random_resolution') {
+    try { renderCharacterQuickPanel(); } catch (_) {}
   }
   // Quick ↔ Params 탭 양방향 동기화
   if (key === 'resolution') {
@@ -6406,7 +6417,72 @@ function displayedImageContext() {
  *  ⚠️ 그래서 우클릭 메뉴와 **같은 WS 경로**로 보낸다. 진입점이 하나면 갈라질 일도 없다 -
  *     Codex BLOCK 3 이 지적한 "두 경로" 를 여기서 끝낸다.
  */
+// ── 인페인트 진입 옵션 (⚙ 미니 팝업, 사용자 지정 2026-08-29) ──────────────
+// 기본은 **켜짐** = 기존 동작(늘 ~1MP 표준으로 채움). 끄면 원본 크기를 지킨다.
+// ⚠️ 꺼도 1MP 를 넘기지는 못한다 - 그 위는 Anlas 가 붙는 구간이라 이 토글로 열지
+//    않는다(백엔드 `_provider_safe_original_resolution` 의 상한).
+const INPAINT_RESIZE_KEY = 'naia.inpaint.force1mp.v1';
+function inpaintForce1mp() {
+  try { return localStorage.getItem(INPAINT_RESIZE_KEY) !== '0'; } catch (_) { return true; }
+}
+function setInpaintForce1mp(on) {
+  try { localStorage.setItem(INPAINT_RESIZE_KEY, on ? '1' : '0'); } catch (_) {}
+  // 세션이 열려 있으면 **지금 것에도** 먹인다 - 백엔드가 원본 바이트에서 다시 만든다.
+  if (virtualCharacterSession()) setModuleParam('img2img', 'resize_1mp', String(!!on));
+}
+
+// ⚙ 배선. 늦게 들어오는 요소가 아니라 정적 마크업이라 여기서 바로 건다.
+document.getElementById('resultInpaintSettingsBtn')
+  ?.addEventListener('click', () => toggleInpaintSettings());
+
+let inpaintSettingsPopup = null;
+function closeInpaintSettings() {
+  if (!inpaintSettingsPopup) return;
+  inpaintSettingsPopup.remove();
+  inpaintSettingsPopup = null;
+  document.removeEventListener('pointerdown', onInpaintSettingsOutside, true);
+}
+function onInpaintSettingsOutside(event) {
+  if (!inpaintSettingsPopup) return;
+  if (inpaintSettingsPopup.contains(event.target)) return;
+  if (event.target.closest?.('#resultInpaintSettingsBtn')) return;
+  closeInpaintSettings();
+}
+function toggleInpaintSettings() {
+  if (inpaintSettingsPopup) { closeInpaintSettings(); return; }
+  const anchor = $('resultInpaintSettingsBtn');
+  if (!anchor) return;
+  const on = inpaintForce1mp();
+  inpaintSettingsPopup = document.createElement('div');
+  inpaintSettingsPopup.className = 'inpaint-settings-pop';
+  inpaintSettingsPopup.innerHTML =
+    '<label class="inpaint-settings-row">'
+    + `<input type="checkbox" id="inpaintForce1mpBox"${on ? ' checked' : ''}>`
+    + '<span>강제 1MP 리사이징</span>'
+    + '</label>'
+    + '<div class="inpaint-settings-note">끄면 원본 크기를 지킵니다 (1MP 초과분은 여전히 줄어듭니다)</div>';
+  document.body.appendChild(inpaintSettingsPopup);
+  // 버튼 **위쪽**에 띄운다(사용자 지정: 상단 미니 팝업). 화면 밖으로 나가면 안쪽으로 민다.
+  const rect = anchor.getBoundingClientRect();
+  const box = inpaintSettingsPopup.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - box.width - 8, rect.left + rect.width / 2 - box.width / 2));
+  const top = Math.max(8, rect.top - box.height - 8);
+  inpaintSettingsPopup.style.left = Math.round(left) + 'px';
+  inpaintSettingsPopup.style.top = Math.round(top) + 'px';
+  inpaintSettingsPopup.querySelector('#inpaintForce1mpBox')?.addEventListener('change', event => {
+    setInpaintForce1mp(!!event.target.checked);
+  });
+  document.addEventListener('pointerdown', onInpaintSettingsOutside, true);
+}
+
 function requestResultInpaint() {
+  // ⚠️ **다시 누르면 닫는다**(사용자 지정 2026-08-29). 편집 중에 잘못 누르면 수정이
+  //    사라지지만, 여는 입구와 닫는 입구를 하나로 두는 쪽을 택했다.
+  if (virtualCharacterSession()) {
+    closeInpaintSettings();
+    inpaintCanvasControl?.requestClose?.();
+    return;
+  }
   const shown = !!(preview && preview.classList.contains('show'));
   if (!shown && !latestResultBlob) { showToast('결과 이미지가 없습니다', 'error'); return; }
   callResultImageAction('requestContextImageAction', displayedImageContext(), 'inpaint');

@@ -710,6 +710,10 @@ async def handle_result_command(
             generation_params,
             prompt_context,
         )
+        # 진입 해상도 옵션. 값이 아예 없으면 기존 동작(강제 1MP)을 유지한다 -
+        # 옛 클라이언트가 이 키를 안 보내도 요금·결과가 달라지면 안 된다.
+        raw_resize = command.get("resize_1mp")
+        resize_1mp = True if raw_resize is None else context._coerce_bool(raw_resize)
         state = await run_in_thread(
             context.open_img2img_session_from_bytes,
             image_bytes,
@@ -717,6 +721,7 @@ async def handle_result_command(
             mode=action,
             generation_params=generation_params,
             prompt_context=prompt_context,
+            resize_1mp=resize_1mp,
         )
     except Exception as exc:
         await _send_json(ws, {

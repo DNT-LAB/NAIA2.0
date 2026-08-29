@@ -35,7 +35,6 @@ import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=202608
 // 빠져 있었다**(Large/Wallpaper 가 없어 인페인트 도중 유료 해상도로 갈 길이 없었다).
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
 const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
-const COLLAPSE_KEY = 'naia.inpaintcanvas.collapsed.v1';
 
 // 백엔드 `clamp_scale` 과 같은 한계. 어긋나면 화면이 보내 놓고 다른 값을 되받는다.
 const SCALE_MIN_PCT = 10;
@@ -109,7 +108,6 @@ export function createInpaintCanvasPanel({
   };
 
   let showGrid = read(GRID_KEY, '1') !== '0';
-  let collapsed = read(COLLAPSE_KEY, '0') === '1';
 
   const canvasSize = () => ({
     w: Number(state?.canvas_width) || 0,
@@ -191,18 +189,12 @@ export function createInpaintCanvasPanel({
     }
     armSessionInput();
     panel.hidden = false;
-    panel.className = `inpaint-canvas-panel${collapsed ? ' is-collapsed' : ''}`;
-    panel.innerHTML = collapsed ? collapsedHtml() : dockHtml();
+    // 접기는 없앴다(사용자 지정 2026-08-29: "실용성이 없다"). 도크는 늘 펼쳐져 있고,
+    // 닫는 길은 `세션 닫기` 와 헤더의 Inpaint 버튼 두 곳이다.
+    panel.className = 'inpaint-canvas-panel';
+    panel.innerHTML = dockHtml();
     flashModes = false;          // 한 번만 번쩍인다(그린 순간 표를 내린다)
     renderPlane();
-  }
-
-  function collapsedHtml() {
-    const editing = viewMode === 'edit';
-    return `<button type="button" class="ic-pill${flashModes ? ' is-fresh' : ''}"`
-      + ` data-ic="collapse" title="인페인트 조작 펼치기">`
-      + `<span class="ic-pill-dot${editing ? ' is-edit' : ''}"></span>`
-      + `인페인트<span class="ic-caret">▴</span></button>`;
   }
 
   /** 캔버스 해상도 목록.
@@ -273,7 +265,6 @@ export function createInpaintCanvasPanel({
         <span class="ic-hint">${editing
           ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 방향키=1px(Shift 16) · 0=초기화 · 숫자 위치는 POS 에서'
           : '생성 결과를 보는 중입니다.'}</span>
-        <button type="button" class="ic-btn ic-btn-collapse" data-ic="collapse" title="접기" aria-label="접기">▾</button>
       </div>
       <div class="ic-cols">
         <section class="ic-col" aria-label="캔버스">
@@ -489,11 +480,6 @@ export function createInpaintCanvasPanel({
   function onClick(event) {
     const action = event.target.closest?.('[data-ic]')?.dataset.ic;
     if (!action) return;
-    if (action === 'collapse') {
-      collapsed = !collapsed;
-      write(COLLAPSE_KEY, collapsed ? '1' : '0');
-      return render();
-    }
     if (action === 'mode-edit') return setViewMode('edit');
     if (action === 'mode-result') return setViewMode('result');
     if (action === 'grid') {
@@ -877,6 +863,16 @@ export function createInpaintCanvasPanel({
 
   return {
     render,
+    /** 헤더의 Inpaint 버튼을 **다시 눌러** 닫는 길(사용자 지정 2026-08-29).
+     *
+     *  ⚠️ `세션 닫기` 버튼과 **같은 일**을 해야 한다. 미뤄 둔 변형을 먼저 흘려보내지
+     *     않으면 백엔드가 옛 배율로 굽는다 - 여는 입구와 닫는 입구가 갈리면 그 차이가
+     *     그대로 돈이 된다(Codex 리뷰 2026-08-26 BLOCK 1 과 같은 계열).
+     */
+    requestClose() {
+      flushTransforms();
+      return onClose();
+    },
     /** 생성이 끝나면 결과를 봐야 한다 - 캔버스가 결과를 가리고 있으면 안 된다. */
     showResult() {
       // ⚠️ 이건 **자동** 전환이다(새 결과가 도착해 캔버스를 치웠다). 사용자는 아무것도
@@ -896,7 +892,6 @@ export function createInpaintCanvasPanel({
      */
     revealForSession() {
       viewMode = 'edit';
-      if (collapsed) { collapsed = false; write(COLLAPSE_KEY, '0'); }
       if (document.activeElement && panel?.contains(document.activeElement)) {
         try { document.activeElement.blur(); } catch (_) {}
       }

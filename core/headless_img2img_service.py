@@ -267,6 +267,7 @@ class HeadlessImg2ImgService:
         mode: str = "img2img",
         generation_params: dict[str, Any] | None = None,
         prompt_context: dict[str, Any] | None = None,
+        resize_1mp: bool = True,
     ) -> dict[str, Any]:
         context = self.context
         if not image_bytes:
@@ -283,7 +284,13 @@ class HeadlessImg2ImgService:
             raise ValueError(
                 "편집 중인 인페인트 세션이 있습니다. 먼저 [세션 닫기] 를 누른 뒤 다시 여세요."
             )
-        image = self._session_image_from_bytes(bytes(image_bytes), resize_1mp=True)
+        # ⚠️ 진입 해상도는 **사용자 선택**이다(사용자 지정 2026-08-29).
+        #    켜짐(기본) = 늘 ~1MP 표준으로 채운다(작은 그림은 업스케일).
+        #    꺼짐 = 원본 크기를 지킨다. 다만 1MP 를 넘으면 여전히 줄인다
+        #    (`_provider_safe_original_resolution` 의 상한) - 그 위는 유료 구간이라
+        #    이 토글만으로 열지 않는다.
+        resize_1mp = bool(resize_1mp)
+        image = self._session_image_from_bytes(bytes(image_bytes), resize_1mp=resize_1mp)
         png_bytes = self._image_to_png_bytes(image)
         preview, preview_width, preview_height = self._image_preview_data_url(image)
         context._img2img_window_counter += 1
@@ -313,7 +320,7 @@ class HeadlessImg2ImgService:
             "mode": clean_mode,
             "source_label": str(label or "Result Image"),
             "source_bytes": bytes(image_bytes),
-            "resize_1mp": True,
+            "resize_1mp": resize_1mp,
             "image_bytes": png_bytes,
             "width": int(image.width),
             "height": int(image.height),

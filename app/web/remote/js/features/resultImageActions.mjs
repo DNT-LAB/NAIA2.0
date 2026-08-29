@@ -8,6 +8,8 @@ export function createResultImageActions({
   getLatestResultBlob = () => null,
   useNativeClipboard = () => false,
   getPreviewImageUrl = () => '',
+  // 인페인트 진입 해상도 옵션(⚙ 미니 팝업). 기본은 켜짐 = 기존 동작.
+  getInpaintResize1mp = () => true,
   getMetadataViewer = () => null,
   getQueuePanel = () => null,
   discardPendingModuleEdit = () => {},
@@ -729,6 +731,8 @@ export function createResultImageActions({
         ws.send(JSON.stringify({
           type: 'result_image_action',
           action,
+          // 진입 해상도 옵션(⚙). 안 보내면 백엔드가 기존 동작(강제 1MP)을 쓴다.
+          resize_1mp: getInpaintResize1mp() ? 'true' : 'false',
           ...resultContextCommandPayload(context || {}),
         }));
         // ⚠️ 여기서 팝업을 바로 열면 안 된다. 이 경로는 WS 명령이라 응답이 없어 계열을

@@ -35,6 +35,10 @@ export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
   openCharacterModule = () => {},
   getResolution = () => null,      // {w, h} — 지금 설정된 생성 해상도
+  // Rnd Res 가 켜져 있는가. 켜져 있으면 해상도가 **매 생성마다 바뀌므로** 좌표를
+  // 앉혀 둘 캔버스가 없다 - POS 는 AUTO 로 고정하고 미리보기·편집을 막는다
+  // (사용자 지정 2026-08-29: 그리드 비율이 생성마다 널뛰어 원이 거짓말을 했다).
+  isRandomResolution = () => false,
   // V5 인페인트 가상 캔버스가 결과 뷰어를 차지하고 있을 때 그 무대의 자리와 크기.
   // {left, top, width, height, w, h} 또는 null.
   //
@@ -448,13 +452,20 @@ export function createCharacterQuickPanel({
    *    골라 둔 원의 선택이 풀린다.
    */
   function setPosPeek(on) {
-    const next = !!on && !posEditing;
+    // Rnd Res 중에는 엿보기도 막는다 - 지금 해상도로 그린 무대는 다음 생성과 무관하다.
+    const next = !!on && !posEditing && !posBlockedByRandom();
     if (posPeek === next) return;
     posPeek = next;
     renderStage();
   }
 
   function setPosEditing(on) {
+    // 켜는 방향만 막는다. **끄는 방향은 늘 통과시켜야** 한다 - 편집 중에 Rnd Res 를
+    // 켜면 여기로 나가야 하는데 막으면 무대에 갇힌다.
+    if (on && posBlockedByRandom()) {
+      showToast('Rnd Res 중에는 POS 편집이 잠깁니다 (해상도가 매 생성마다 바뀝니다)', 'info');
+      return;
+    }
     posEditing = !!on;
     if (posEditing) posPeek = false;
     if (posEditing) {
@@ -929,6 +940,12 @@ export function createCharacterQuickPanel({
       .some(character => character && character.active && String(character.connect_to || ''));
   }
 
+  /** Rnd Res 중에는 POS 를 잠근다. 해상도가 매번 바뀌면 원을 앉힐 캔버스가 없다. */
+  function posBlockedByRandom() {
+    try { return !!isRandomResolution(); } catch (_) { return false; }
+  }
+  let randomPosForced = false;   // AUTO 강제를 **한 번만** 보낸다(에코마다 쏘면 안 된다)
+
   function signature(state) {
     // ⚠️ muted 도 서명에 넣는다. 빼면 ✔/✘ 를 눌러도 다시 그리지 않아 표시가
     //    옛 상태에 굳는다(POS 라벨이 CUSTOM 에 굳었던 것과 같은 계열).
@@ -949,8 +966,13 @@ export function createCharacterQuickPanel({
     //    같은 POS 모드·아무것도 안 펼친 상태) 서명이 똑같아 빠른 경로로 빠지고,
     //    머리줄을 다시 안 그려 **(가상) 배지가 안 뜬다**(Codex 리뷰 2026-08-26).
     //    세션을 닫을 때는 반대로 배지가 남는다.
+    // ⚠️ Rnd Res 잠금과 **해상도**도 넣는다. 안 넣으면 (a) 랜덤을 켜도 POS 버튼에
+    //    자물쇠가 안 붙고, (b) 해상도가 바뀌어도 무대 비율이 옛 값에 굳어 그리드가
+    //    그림과 어긋난 채 남는다(사용자 지정: "POS 그리드 및 패널 동기화").
+    const res = resolutionNow();
     return `${open ? 1 : 0}${state && state.activated ? 1 : 0}${state && state.virtual ? 1 : 0}`
-      + `${posModeOf(state)}${posEditing ? 1 : 0}#${slots}`;
+      + `${posModeOf(state)}${posEditing ? 1 : 0}${posBlockedByRandom() ? 'R' : '-'}`
+      + `${res ? `${res.w}x${res.h}` : '-'}#${slots}`;
   }
 
   /** 자동완성을 새로 그린 칸에 다시 건다.
@@ -1146,6 +1168,10 @@ export function createCharacterQuickPanel({
         showToast('Connect 를 쓰는 동안에는 POS 가 CUSTOM 으로 고정됩니다 (칸마다 직접 앉히는 기능입니다)', 'info');
         return;
       }
+      if (posBlockedByRandom()) {
+        showToast('Rnd Res 중에는 POS 가 AUTO 로 고정됩니다 (해상도가 매 생성마다 바뀌어 좌표를 앉힐 캔버스가 없습니다)', 'info');
+        return;
+      }
       // AUTO -> CUSTOM -> RAND -> AUTO (사용자 지정).
       const now = posModeOf(lastState);
       const next = POS_CYCLE[(POS_CYCLE.indexOf(now) + 1) % POS_CYCLE.length];
@@ -1232,9 +1258,22 @@ export function createCharacterQuickPanel({
     // 하는데, <button> 안에 <input> 이나 <button> 을 넣으면 마크업이 깨지고
     // 안쪽을 눌러도 바깥 토글이 먼저 먹는다.
     const enabled = !!current.activated;
-    const posMode = posModeOf(current);
+    // Rnd Res 가 켜지면 CUSTOM 을 **AUTO 로 되돌린다.** 좌표가 살아 있으면 다음
+    // 생성에서 다른 비율의 캔버스에 그대로 실려 나가 구도가 어긋난다.
+    // ⚠️ 한 번만 보낸다 - 에코마다 쏘면 서버와 핑퐁이 된다.
+    if (posBlockedByRandom()) {
+      if (posEditing) setPosEditing(false);
+      else if (posPeek) setPosPeek(false);
+      if (posModeOf(current) === 'custom' && !randomPosForced) {
+        randomPosForced = true;
+        setModuleParam('character', 'position_mode', 'auto');
+      }
+    } else {
+      randomPosForced = false;
+    }
+    const posMode = posBlockedByRandom() ? 'auto' : posModeOf(current);
     const custom = posMode === 'custom';
-    const posLocked = hasConnectedSlot(current);
+    const posLocked = hasConnectedSlot(current) || posBlockedByRandom();
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`

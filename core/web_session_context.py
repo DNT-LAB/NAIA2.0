@@ -736,6 +736,7 @@ class WebSessionContext:
         mode: str = "img2img",
         generation_params: dict[str, Any] | None = None,
         prompt_context: dict[str, Any] | None = None,
+        resize_1mp: bool = True,
     ) -> dict[str, Any]:
         return self._img2img_service().open_session_from_bytes(
             image_bytes,
@@ -743,6 +744,7 @@ class WebSessionContext:
             mode=mode,
             generation_params=generation_params,
             prompt_context=prompt_context,
+            resize_1mp=resize_1mp,
         )
 
     def _img2img_strength_value(self, raw: Any) -> float:

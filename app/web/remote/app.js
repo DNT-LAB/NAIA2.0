@@ -4367,15 +4367,20 @@ function resolutionLabelFromMessage(message = {}) {
 function applyGeneratedResolutionUpdate(message = {}) {
   const label = resolutionLabelFromMessage(message);
   if (!label) return;
-  // ⚠️ **Rnd Res 가 켜졌을 때만 화면 해상도를 갈아 끼운다**(사용자 지정 2026-08-28).
+  // ⚠️ **여기를 막으면 Auto Res 가 통째로 죽는다.** 2026-08-28 에 "Rnd Res 가 켜졌을
+  //    때만 갈아 끼운다" 는 게이트를 넣었다가 되돌렸다(2026-08-29). 그때 주석에
+  //    "Auto Res 가 실제 생성에 쓰는 값은 그대로다 - 여기서 바꾸는 것은 표시뿐" 이라고
+  //    적었는데 **틀렸다.** 재보고 알았다:
   //
-  //    Rnd Res 는 매 생성마다 다음 값을 새로 뽑으므로 그 결과를 보여 주는 것이
-  //    맞다. 그런데 Auto Res 만 켠 경우에도 이 자리가 덮어써서, 한 장 뽑고 나면
-  //    해상도가 1:1 로 바뀌어 있다는 제보가 있었다 - Auto Res 는 **그림마다
-  //    원본에 박힌 해상도**를 따라가는 기능이라 화면의 기준값을 바꿀 이유가 없다.
-  //    (Auto Res 가 실제 생성에 쓰는 값은 그대로다 - 여기서 바꾸는 것은 표시뿐이다.)
-  const randomOn = !!qRndRes?.classList.contains('on');
-  if (!randomOn) return;
+  //      · 파이프라인(`_step_2_fit_resolution`)은 소스 행에서 해상도를 제대로 뽑는다
+  //        (실측: 648x932 행 -> detected_resolution=(832,1216)).
+  //      · 그 값이 화면에 닿는 길은 **이 함수 하나뿐**이고, 생성 요청은 화면의
+  //        해상도 컨트롤을 읽는다. 여기서 막으면 낡은 값(1024x1024)으로 나간다.
+  //      · 백엔드는 `detected_resolution` 과 `resolution` 에 **같은 Auto Res 값**을
+  //        싣는다(`headless_random_prompt_service` 페이로드) - 이 메시지에
+  //        "Rnd Res 가 뽑은 값" 같은 것은 애초에 없다. 그래서 Rnd Res 로 가를 수 없다.
+  //
+  //    실측 재현(2026-08-29): Auto Res 만 켠 세션의 산출물 5장이 전부 1024x1024 였다.
   ensureSelectValue(paramEls.resolution, label);
   ensureSelectValue(qResolution, label);
   paramEls.resolution.value = label;

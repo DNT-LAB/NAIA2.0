@@ -3795,6 +3795,13 @@ function onWsMessageError(error) {
  *     추첨값으로 덮인다. 시드는 심고 있지만(주석에 '무해' 라고 적혀 있다) 해상도는
  *     사용자가 직접 고른 값이라 무게가 다르다. */
 function applyDispatchedResolutionDisplay(m) {
+  // ⚠️ **인페인트 세션 중에는 비추지 않는다**(사용자 제보 2026-08-29).
+  //    그때 나가는 해상도는 **캔버스 크기**이지 사용자의 생성 해상도가 아니다.
+  //    비추면 그 값이 `dispatchedResolutionLabel` 에 들어가고, 뒤이어 Rnd Res 를 끄거나
+  //    시드 알약을 잠그는 순간 **메인 파라미터로 심긴다** - 실측: 세션을 닫고 앱을
+  //    껐는데도 `remote_params.resolution` 이 `1536 x 1024` 로 남아 목록에 끼고
+  //    유료 표시가 켜져 있었다. 캔버스 크기는 도크가 따로 보여 준다.
+  if (virtualCharacterSession()) return;
   const width = Number(m?.params?.width);
   const height = Number(m?.params?.height);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
@@ -5171,9 +5178,13 @@ function setParam(key, value) {
   // ⚠️ **끌 때만**이다. 켤 때 심으면 다음 추첨에 영향을 준다(표시 전용 원칙).
   // ⚠️ 진입로가 셋이다(`toggleFlag` PARAMS · `toggleQuickFlag` Quick · `setResFlag`
   //    시드 알약 복원). 셋 다 여기를 지나므로 목에서 한 번만 건다.
+  // ⚠️ 세션 중에는 심지 않는다 - 그때 보이던 값은 캔버스 크기일 수 있다.
+  //    위 `applyDispatchedResolutionDisplay` 가 이미 막지만, 심는 자리에서도 한 번 더
+  //    본다(값이 나가는 마지막 줄에 거는 규칙).
   if (key === 'random_resolution'
       && !(value === true || String(value).toLowerCase() === 'true')
-      && dispatchedResolutionLabel) {
+      && dispatchedResolutionLabel
+      && !virtualCharacterSession()) {
     const pinnedLabel = dispatchedResolutionLabel;
     dispatchedResolutionLabel = null;
     setParam('resolution', pinnedLabel);
@@ -5342,7 +5353,12 @@ const seedLockDispatch = {};
 function captureSeedLockDispatch(m, seed) {
   const mode = seedMemoMode();
   const entry = {seed: Math.trunc(seed), w: null, h: null};
-  const w = Number(m.params?.width), h = Number(m.params?.height);
+  // ⚠️ 인페인트 세션의 디스패치 해상도는 **캔버스 크기**다. 그것을 물어 두면 나중에
+  //    알약을 잠글 때 `applySeedLockDispatch` 가 그 값을 메인 파라미터에 심는다
+  //    (사용자 제보 2026-08-29). 시드는 그대로 물어도 된다 - 해상도만 안 문다.
+  const inSession = !!virtualCharacterSession();
+  const w = inSession ? NaN : Number(m.params?.width);
+  const h = inSession ? NaN : Number(m.params?.height);
   if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
     entry.w = Math.trunc(w);
     entry.h = Math.trunc(h);

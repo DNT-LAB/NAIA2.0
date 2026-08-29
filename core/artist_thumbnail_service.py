@@ -47,8 +47,10 @@ class ArtistThumbnailService:
             "label": "NAID5F-10000-Q",
             "path": Path("data/artist_thumbnail_naid5f.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5F-10000-Q",
-            "expected_size": 791166304,
-            "sha256": "3209B1EEBA3BC1EAEAB73277116B436011C0A087EE6E14C1C30BED2D15E9AB3B",
+            # 2026-08-29 재생성분(768x768 · 내용 597x768). 첫 판은 512x512 라
+            # 배포 중인 3팩과 규격이 어긋났다 - 지문도 함께 올렸다.
+            "expected_size": 1373203772,
+            "sha256": "54252858FFF8193EE6A6BE0601A2E9C52D94BDEAEFCD414AD860B174C53BAF19",
         },
         "NAID4.5F-31000": {
             "label": "NAID4.5F-31000",

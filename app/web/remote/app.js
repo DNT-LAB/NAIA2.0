@@ -1602,7 +1602,34 @@ function applyVirtualMainPrompt() {
   const wrap = box ? box.closest('.prompt-box') || box.parentElement : null;
   if (session) {
     if (promptBeforeInpaint === null && box) {
-      promptBeforeInpaint = String(box.value || '');
+      // ⚠️ **걸려 있던 디바운스를 먼저 처리한다.** 안 하면 500ms 안에 세션을 연 경우
+      //    타이머가 나중에 깨어나 **가상 문장을 진짜 프롬프트로 저장**한다. 그리고
+      //    되돌아온 `prompt_sync` 가 stash 까지 덮어써, 세션을 닫아도 원본이 안
+      //    돌아온다(Codex 리뷰 2026-08-29 HIGH 1). 사용자가 방금 친 것은 진짜
+      //    프롬프트이므로 **버리지 않고 지금 보낸다.**
+      if (promptSendTimer) {
+        clearTimeout(promptSendTimer);
+        promptSendTimer = null;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const pending = promptTextForSave();
+          ws.send(JSON.stringify({
+            type: 'set_prompt',
+            prompt: pending,
+            negative_prompt: negEdit.value,
+            ...(_negativeUserDirty ? {origin: 'edit'} : {}),
+            ...(_promptUserDirty ? {prompt_origin: 'edit', prompt_preset: _promptDirtyPreset} : {}),
+          }));
+          _lastSentPromptValue = pending;
+          _negativeUserDirty = false;
+          _promptUserDirty = false;
+          _localPromptDirty = false;
+        }
+      }
+      // Interactive 가 이미 입력창을 가져갔다면 화면의 것은 **조립값**이다. 그것을
+      // 맡아 두면 세션을 닫은 뒤 조립값이 '사용자 원본' 행세를 한다(Codex MED 3).
+      promptBeforeInpaint = promptBeforeInteractive !== null
+        ? String(promptBeforeInteractive)
+        : String(box.value || '');
       syncingPrompt = true;
       box.value = String(session.main_prompt || '');
       syncingPrompt = false;
@@ -1620,7 +1647,13 @@ function applyVirtualMainPrompt() {
       }
     }
   } else if (promptBeforeInpaint !== null) {
-    if (box) {
+    // ⚠️ Interactive 가 아직 입력창을 갖고 있으면 **화면이 아니라 그쪽 stash 로**
+    //    돌려준다. 화면에 쓰면 조립값이 덮이고, 그 뒤 Interactive 를 끄면 우리가
+    //    맡아 둔 원본이 사라진다 - 주인이 둘인데 stack 이 없어서 생기는 일이다
+    //    (Codex 리뷰 2026-08-29 MED 3).
+    if (promptBeforeInteractive !== null) {
+      promptBeforeInteractive = promptBeforeInpaint;
+    } else if (box) {
       syncingPrompt = true;
       box.value = promptBeforeInpaint;
       syncingPrompt = false;
@@ -5837,6 +5870,12 @@ function syncPrompts(m) {
       syncingPrompt = false;
     }
     updateMetaChips(m);
+    // ⚠️ 토큰 표시도 갱신한다. 평소 경로(`_applyPromptSync`)가 하던 일인데 조기
+    //    반환이 빠뜨려, 다른 기기가 네거티브를 바꾸면 글자만 바뀌고 Estimated Tokens
+    //    가 옛 값에 굳었다(Codex 리뷰 2026-08-29 LOW).
+    applyPromptTokenPayload(m);
+    updatePromptTokenEstimate();
+    updateNegativeTokenEstimate();
     return;
   }
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
@@ -5891,7 +5930,25 @@ function onPromptAuthoredEdit() {
  *     실측). 이 변수는 Interactive 가 입력창을 가져갈 때 채워지고 돌려줄 때 비워지므로
  *     "지금 입력창이 조립값인가" 에 그 자체로 답한다. */
 function promptTextForSave() {
+  // ⚠️ 인페인트 세션이 입력창을 가졌으면 화면의 것은 **세션 문장**이다. 그것을
+  //    저장하면 사용자의 진짜 프롬프트가 사라진다 - 맡아 둔 원본을 돌려준다.
+  if (inpaintOwnsPromptBox()) return promptBeforeInpaint;
   return promptBeforeInteractive !== null ? promptBeforeInteractive : promptEdit.value;
+}
+
+/** 프롬프트를 **지금의 주인**에게 보낸다.
+ *
+ *  ⚠️ `set_prompt` 를 보내는 자리가 다섯인데 예전에는 `onPromptEdit` 하나만 세션을
+ *     알았다(Codex 리뷰 2026-08-29 HIGH 2). 나머지 넷(`applyPromptText` ·
+ *     `applyPromptFields` · `applyMetadataPrompt` · `flushMainPromptAndParams`)은
+ *     · 가상 문장을 진짜 프롬프트로 저장하거나
+ *     · 화면만 바꾸고 세션엔 안 알려 **유료 생성이 화면과 달라졌다.**
+ *     여기 한 곳으로 모은다 - `true` 를 돌려주면 호출자는 `set_prompt` 를 보내지 않는다.
+ */
+function routePromptToOwner(text) {
+  if (!inpaintOwnsPromptBox()) return false;
+  setModuleParam('img2img', 'main_prompt', String(text ?? promptEdit.value ?? ''));
+  return true;
 }
 
 function onPromptEdit() {
@@ -5910,6 +5967,10 @@ function onPromptEdit() {
   }
   if (promptSendTimer) clearTimeout(promptSendTimer);
   promptSendTimer = setTimeout(() => {
+    // 세션이 입력창을 가졌으면 **세션으로** 보낸다. 안 그러면 (a) 가상 문장이
+    // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
+    // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
+    if (routePromptToOwner(promptEdit.value)) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       const sentPrompt = promptTextForSave();
       ws.send(JSON.stringify({
@@ -5954,6 +6015,10 @@ function applyPromptText(prompt) {
   updatePromptHighlight();
   applyPromptHighlightState();
   updatePromptTokenEstimate();
+  // 세션이 입력창을 가졌으면 **세션으로** 보낸다. 안 그러면 (a) 가상 문장이
+  // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
+  // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
+  if (routePromptToOwner(promptEdit.value)) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
@@ -5989,6 +6054,10 @@ function applyPromptFields(prompt, negative, {authored = false} = {}) {
   applyPromptHighlightState();
   updatePromptTokenEstimate();
   updateNegativeTokenEstimate();
+  // 세션이 입력창을 가졌으면 **세션으로** 보낸다. 안 그러면 (a) 가상 문장이
+  // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
+  // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
+  if (routePromptToOwner(promptEdit.value)) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
@@ -6857,6 +6926,10 @@ function applyMetadataPrompt(payload) {
   updatePromptHighlight();
   updatePromptTokenEstimate();
   updateNegativeTokenEstimate();
+  // 세션이 입력창을 가졌으면 **세션으로** 보낸다. 안 그러면 (a) 가상 문장이
+  // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
+  // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
+  if (routePromptToOwner(promptEdit.value)) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
@@ -7524,10 +7597,14 @@ function scheduleTranslatorPopupTranslation() {
   }
   if (!translatorHangulRe.test(text)) return;
   // ⚠️ 음절이 **덜 만들어진 상태**에서는 쏘지 않는다. `대` 를 치는 중간은 `ㄷ`
-  //    (호환 자모 U+3131~U+318E)인데, 그걸 보내면 엉뚱한 번역이 한 번 스쳤다가
-  //    바뀐다. 조합을 막는 대신 이 한 글자만 본다 - 사용자가 멈춘 자리가 음절
-  //    한가운데면 아직 단어가 아니다.
-  if (/[ㄱ-ㆎ]$/.test(text)) return;
+  //    (호환 자모)인데, 그걸 보내면 엉뚱한 번역이 스쳤다가 바뀐다.
+  // ⚠️ 그런데 `ㅋㅋ` `ㅠㅠ` `진짜 ㅋ` 은 **진짜 표현**이다. 끝 글자만 보면 그것까지
+  //    영영 못 번역하게 막는다(Codex 리뷰 2026-08-29 MED). 그래서 **완성된 음절에
+  //    바로 붙은 자모 하나**만 거른다 - 그게 조합 중인 모양이다.
+  //      보고있ㄷ  -> 앞이 `있`(완성 음절) -> 조합 중 -> 안 보낸다
+  //      ㅋㅋ / 진짜 ㅋㅋ -> 앞이 자모 -> 표현 -> 보낸다
+  //      진짜 ㅋ  -> 앞이 공백 -> 표현 -> 보낸다
+  if (/[가-힣][ㄱ-ㆎ]$/.test(text)) return;
   translatorPopupTimer = window.setTimeout(() => {
     translatorPopupTimer = null;
     requestTranslatorPopupTranslate({force: false});
@@ -10378,6 +10455,10 @@ function flushMainPromptAndParams() {
     promptSendTimer = null;
   }
   _localPromptDirty = false;
+  // 세션이 입력창을 가졌으면 **세션으로** 보낸다. 안 그러면 (a) 가상 문장이
+  // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
+  // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
+  if (routePromptToOwner(promptEdit.value)) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     // ⚠️ **여기가 프리셋 전환의 길목이다.** 표시값을 그대로 보내면 Interactive 조립값이
     //    프리셋에 굳는다 - 디바운스와 **같은 함수**를 써야 한다(Codex 리뷰 2026-08-27:

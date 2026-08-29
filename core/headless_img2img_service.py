@@ -11,7 +11,7 @@ import io
 from typing import Any
 
 from core.headless_image_utils import image_to_png_bytes
-from core.resolution_utils import MAX_1MP_PIXELS, snap_resolution_to_multiple
+from core.resolution_utils import MAX_1MP_PIXELS, MAX_NAI_SOURCE_PIXELS, snap_resolution_to_multiple
 
 
 class HeadlessImg2ImgService:
@@ -101,15 +101,15 @@ class HeadlessImg2ImgService:
                 target_h = max(64, ((max_pixels // target_w) // 64) * 64)
         return target_w, target_h
 
-    def _normalize_source_image(self, image):
+    def _normalize_source_image(self, image, max_pixels: int = MAX_1MP_PIXELS):
         from PIL import Image
 
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGBA")
         width, height = image.size
-        if width % 64 == 0 and height % 64 == 0 and width * height <= MAX_1MP_PIXELS:
+        if width % 64 == 0 and height % 64 == 0 and width * height <= max_pixels:
             return image
-        new_w, new_h = self._provider_safe_original_resolution(width, height)
+        new_w, new_h = self._provider_safe_original_resolution(width, height, max_pixels)
         if (new_w, new_h) == (width, height):
             return image
         return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -130,7 +130,13 @@ class HeadlessImg2ImgService:
 
         with Image.open(io.BytesIO(source_bytes)) as opened:
             image = opened.convert("RGBA")
-        return self._resize_to_1mp(image) if resize_1mp else self._normalize_source_image(image)
+        # 끄면 **원본 크기를 지킨다** - 1MP 를 넘어도 그대로 간다(사용자 지정
+        # 2026-08-29: 상한을 연다). 다만 NAI 가 받는 최대(1472x1472)까지다.
+        # ⚠️ 1MP 를 넘기면 Anlas 가 나간다. 그래서 기본은 켜짐이고, 끄는 것은 사용자가
+        #    ⚙ 에서 명시적으로 고르는 선택이다.
+        if resize_1mp:
+            return self._resize_to_1mp(image)
+        return self._normalize_source_image(image, MAX_NAI_SOURCE_PIXELS)
 
     @staticmethod
     def _position_from_ratio(value: Any, width: int, height: int) -> dict[str, float] | None:
@@ -879,6 +885,21 @@ class HeadlessImg2ImgService:
             session["mask_bytes"] = b""
             session["mask_preview"] = ""
             session["has_mask"] = False
+        if size_changed:
+            # ⚠️ **캔버스도 따라가야 한다.** 이 함수는 옛 img2img 팝업 시절 것이라
+            #    "이미지 = 캔버스" 를 전제하고 `width/height` 만 고쳤다. V5 가상
+            #    캔버스에서는 둘이 따로 살아서, 안 맞추면 새 크기의 베이스가 **옛
+            #    크기의 캔버스** 안에 앉아 화면과 좌표가 어긋난다(POS 원도 같이 틀어진다).
+            #    마스크를 이미 버리는 자리이므로 배치도 함께 처음 상태로 돌린다 -
+            #    반만 맞추면 어디가 진짜인지 알 수 없게 된다.
+            session["canvas_width"] = int(image.width)
+            session["canvas_height"] = int(image.height)
+            session["base_width"] = int(image.width)
+            session["base_height"] = int(image.height)
+            session["base_offset_x"] = 0
+            session["base_offset_y"] = 0
+            session["base_scale"] = 1.0
+            session["base_rotation"] = 0.0
         return self.module_state()
 
     # ------------------------------------------------------------------

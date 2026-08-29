@@ -4,6 +4,12 @@ from typing import Any, MutableMapping, Tuple
 
 
 MAX_1MP_PIXELS = 1024 * 1024
+# NAI 가 실제로 받는 최대 면적 = `wallpaper` 밴드의 가장 큰 항목(1472x1472).
+# 인페인트 진입에서 `강제 1MP 리사이징` 을 끄면 원본 크기를 지키되 **여기까지만**
+# 지킨다(사용자 지정 2026-08-29: 1MP 상한을 연다).
+# ⚠️ 무제한으로 두면 안 된다 - 8000px 짜리를 실수로 올리면 그 면적이 그대로 Anlas 가
+#    된다. 요금은 면적에 비례한다(실측 1280x1280 4스텝 = 14 Anlas).
+MAX_NAI_SOURCE_PIXELS = 1472 * 1472
 STANDARD_1MP_RESOLUTIONS: tuple[tuple[int, int], ...] = (
     (1024, 1024),
     (960, 1088),

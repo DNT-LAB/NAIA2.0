@@ -6419,8 +6419,9 @@ function displayedImageContext() {
  */
 // ── 인페인트 진입 옵션 (⚙ 미니 팝업, 사용자 지정 2026-08-29) ──────────────
 // 기본은 **켜짐** = 기존 동작(늘 ~1MP 표준으로 채움). 끄면 원본 크기를 지킨다.
-// ⚠️ 꺼도 1MP 를 넘기지는 못한다 - 그 위는 Anlas 가 붙는 구간이라 이 토글로 열지
-//    않는다(백엔드 `_provider_safe_original_resolution` 의 상한).
+// ⚠️ 끄면 **1MP 를 넘을 수 있다**(사용자 지정 2026-08-29: 상한을 연다). 그 구간은
+//    Anlas 가 나간다 - 그래서 기본은 켜짐이고, 끄는 것은 명시적 선택이다.
+//    상한은 NAI 가 받는 최대(1472x1472)까지다.
 const INPAINT_RESIZE_KEY = 'naia.inpaint.force1mp.v1';
 function inpaintForce1mp() {
   try { return localStorage.getItem(INPAINT_RESIZE_KEY) !== '0'; } catch (_) { return true; }
@@ -6460,7 +6461,7 @@ function toggleInpaintSettings() {
     + `<input type="checkbox" id="inpaintForce1mpBox"${on ? ' checked' : ''}>`
     + '<span>강제 1MP 리사이징</span>'
     + '</label>'
-    + '<div class="inpaint-settings-note">끄면 원본 크기를 지킵니다 (1MP 초과분은 여전히 줄어듭니다)</div>';
+    + '<div class="inpaint-settings-note">끄면 원본 크기를 지킵니다. 1MP 를 넘으면 Anlas 가 나갑니다 (최대 1472×1472)</div>';
   document.body.appendChild(inpaintSettingsPopup);
   // 버튼 **위쪽**에 띄운다(사용자 지정: 상단 미니 팝업). 화면 밖으로 나가면 안쪽으로 민다.
   const rect = anchor.getBoundingClientRect();

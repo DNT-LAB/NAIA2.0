@@ -3384,6 +3384,12 @@ const qRndRes = $('qRndRes');
 const qAutoRes = $('qAutoRes');
 let baseResolutionOptions = [];
 let baseResolutionValue = '';
+// Auto Res 가 소스 행에서 뽑아 컨트롤에 꽂은 해상도.
+// **저장은 원본(기준 해상도), 표시·생성은 파생값** 으로 가른다 - Interactive 가
+// 프롬프트에서 쓰는 방식과 같다. 이 값이 있는 동안 `params` 에코는 컨트롤을 못 덮는다.
+// 푸는 자리는 셋뿐이다: 사용자가 해상도를 직접 고를 때 · Auto Res 를 끌 때 ·
+// 모드가 바뀔 때(선택지가 통째로 달라진다). 전부 `setParam`/`syncMode` 를 지난다.
+let autoResDetectedLabel = null;
 const naiModelMetaByKey = new Map();
 let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
@@ -4366,7 +4372,13 @@ function resolutionLabelFromMessage(message = {}) {
 
 function applyGeneratedResolutionUpdate(message = {}) {
   const label = resolutionLabelFromMessage(message);
-  if (!label) return;
+  if (!label) {
+    // Auto Res 가 이번 행에서는 못 뽑았다(치수 없는 행) 또는 Auto Res 가 꺼져 있다.
+    // 표식을 **놓아 준다** - 안 그러면 앞 행의 값이 영원히 남아 기준값으로 못 돌아간다.
+    // (백엔드의 `reset_resolution_detected` 와 같은 뜻이지만 그것은 프론트까지 안 온다.)
+    autoResDetectedLabel = null;
+    return;
+  }
   // ⚠️ **여기를 막으면 Auto Res 가 통째로 죽는다.** 2026-08-28 에 "Rnd Res 가 켜졌을
   //    때만 갈아 끼운다" 는 게이트를 넣었다가 되돌렸다(2026-08-29). 그때 주석에
   //    "Auto Res 가 실제 생성에 쓰는 값은 그대로다 - 여기서 바꾸는 것은 표시뿐" 이라고
@@ -4386,6 +4398,7 @@ function applyGeneratedResolutionUpdate(message = {}) {
   paramEls.resolution.value = label;
   qResolution.value = label;
   baseResolutionValue = label;
+  autoResDetectedLabel = label;
   refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI', label);
   updateWebUiHrScaleHint();
 }
@@ -4821,7 +4834,24 @@ function updateParams(m) {
       setWebUiHiresfixEnabled(false);
     }
   }
-  refreshResolutionPresetDisplay(mode, m.resolution);
+  // ⚠️ **Auto Res 가 뽑은 값을 `params` 에코가 덮지 못하게 지킨다.**
+  //    서버가 싣는 `m.resolution` 은 저장된 **기준** 해상도(`remote_params`)다.
+  //    Auto Res 결과는 어디에도 저장되지 않고 `prompt_generated` 로만 오기 때문에,
+  //    파라미터를 **아무거나** 하나 건드리면(`set_param` -> `remote_params_changed`
+  //    -> 이 함수) 컨트롤이 기준값으로 되돌아간다.
+  //    실측 2026-08-29 (라이브 재현): 랜덤 프롬프트 뒤 832x1216 -> steps 를 28에서
+  //    27로 바꾸자 곧바로 1024x1024. 사용자가 제보한 그 값이다.
+  //    그리고 **그 컨트롤이 곧 생성 입력**이다(`_collectCurrentParams` 가
+  //    `paramEls.resolution.value` 를 읽어 overrides 에 싣는다) - 표시만의 문제가 아니다.
+  //    `baseResolutionValue` 는 위에서 그대로 기준값을 따라간다 - 가리는 것은 표시뿐이고,
+  //    표식이 풀리면 저절로 기준값으로 돌아온다.
+  const presetOpts = resolutionPresetResolutionOptions(mode);
+  const activeOpts = (Array.isArray(presetOpts) && presetOpts.length) ? presetOpts : baseResolutionOptions;
+  // 선택지에 없는 값을 붙들면 `populateSelect` 가 조용히 버려 어긋난다 - 있을 때만 지킨다.
+  const heldResolution = autoResDetectedLabel && activeOpts.includes(String(autoResDetectedLabel))
+    ? autoResDetectedLabel
+    : null;
+  refreshResolutionPresetDisplay(mode, heldResolution || m.resolution);
 
   // 플래그 (공통 + NAI)
   // ⚠️ **서버가** seed_fixed 를 끄는 경로를 잡는다(대표: 프리셋 적용 —
@@ -4952,8 +4982,19 @@ function setParam(key, value) {
     return;
   }
   if (isComfyUiFreeWorkflowActive() && COMFYUI_FREE_LOCKED_PARAM_KEYS.has(key)) return;
+  // Auto Res 를 끄면 지킬 것이 없다 - 기준 해상도로 돌아가야 한다.
+  // ⚠️ **여기가 목이다.** 토글 진입점이 둘(`toggleFlag` = PARAMS 탭,
+  //    `toggleQuickFlag` = Quick 바)인데 둘 다 `setParam` 을 지난다. 어느 한쪽에
+  //    걸면 다른 쪽으로 그대로 샌다 - 실제로 toggleFlag 에 먼저 걸었다가 옮겼다.
+  if (key === 'auto_fit_resolution'
+      && !(value === true || String(value).toLowerCase() === 'true')) {
+    autoResDetectedLabel = null;
+  }
   // Quick ↔ Params 탭 양방향 동기화
   if (key === 'resolution') {
+    // 사용자가 직접 골랐다(PARAMS/Quick 셀렉트 · 메타데이터 적용). Auto Res 표식을 푼다 -
+    // 안 그러면 방금 고른 값이 다음 에코에서 옛 Auto Res 값으로 되돌아간다.
+    autoResDetectedLabel = null;
     paramEls.resolution.value = value;
     qResolution.value = value;
     if (!resolutionPresetResolutionOptions()) baseResolutionValue = value;
@@ -8173,6 +8214,8 @@ function syncMode(mode) {
   syncingMode = false;
   currentMode = mode;
   setNaiHighlightMode(mode);
+  // 모드가 바뀌면 해상도 선택지가 통째로 달라진다 - 앞 모드의 Auto Res 값은 무효다.
+  autoResDetectedLabel = null;
   // 백엔드가 바뀌었으니 앞 모드에서 잡아 둔 Interactive 시드는 버린다.
   resetInteractiveSeedForMode();
   updatePromptTokenEstimate();

@@ -1271,9 +1271,23 @@ async def _maybe_continue_auto_generation(
     #    라이브 `remote_params` 값이 적용된다. 어느 쪽이든 옳다.
     #    ⚠️ 셋을 **함께** 놓아야 한다. `resolution` 만 놓고 width/height 를 남기면
     #       라벨과 치수가 어긋난 채로 나간다(하류는 치수를 먼저 본다).
-    #       치수가 없으면 `_normalize_resolution` 이 라벨에서 파생하므로 안전하다.
+    #    ⚠️ **놓기만 해서는 안 된다.** `remote_params` 자체가 셋을 따로 들고 있고,
+    #       `set_param("resolution", ...)` 은 **그 키 하나만** 갱신한다 - 치수는 낡은 채
+    #       남는다(실측: 저장된 COMFYUI 평면이 `resolution '1408 x 960'` 인데
+    #       `width 1280 / height 1024` 로 이미 어긋나 있었다). 그냥 놓으면
+    #       `params.update(remote_params)` 가 그 낡은 치수를 실어 오고, 하류
+    #       `_normalize_resolution` 이 치수를 먼저 보므로 라벨이 진다.
+    #       그래서 **라이브 라벨에서 셋을 다시 만들어** overrides 에 넣는다 -
+    #       overrides 가 remote_params 보다 뒤에 얹히므로 라벨이 권위를 갖는다.
+    #       (Codex 리뷰 2026-08-29 HIGH. 실제 세션 파일로 확인했다.)
     for _res_key in ("resolution", "width", "height"):
         overrides.pop(_res_key, None)
+    _live_label = (getattr(context, "remote_params", None) or {}).get("resolution")
+    _live_w, _live_h = _parse_resolution_label(_live_label)
+    if _live_w and _live_h:
+        overrides["resolution"] = f"{_live_w} x {_live_h}"
+        overrides["width"] = _live_w
+        overrides["height"] = _live_h
     # Rnd Res must re-roll every Auto Gen iteration, exactly like a manual Random
     # press. The frontend picks a random resolution per click (_collectCurrentParams),
     # but this server-side loop reuses the previous params, so without this the

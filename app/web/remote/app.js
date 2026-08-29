@@ -4542,8 +4542,21 @@ function populateSelect(el, options, current, labels = null) {
 function refreshResolutionPresetDisplay(mode = currentMode || modeSelect?.value || 'NAI', preferred = undefined) {
   const presetOptions = resolutionPresetResolutionOptions(mode);
   const active = Array.isArray(presetOptions) && presetOptions.length > 0;
-  const options = active ? presetOptions : baseResolutionOptions;
+  let options = active ? presetOptions : baseResolutionOptions;
   let current = preferred !== undefined ? preferred : (active ? paramEls.resolution?.value : baseResolutionValue);
+  // ⚠️ 호출자가 **명시적으로 요구한 값**(preferred)이 목록에 없으면 버리지 말고 끼워 넣는다.
+  //    `populateSelect` 는 목록으로 다시 그리므로, 없는 값은 조용히 사라지고 첫 항목으로
+  //    튄다. 사용자가 해상도 매니저에서 목록을 줄여 뒀으면 Auto Res 감지값(표준 1MP 7종
+  //    중 하나)이 목록 밖이라 **매번 버려진다** - Auto Res 가 통째로 안 먹는다.
+  //    (Codex 리뷰 2026-08-29 HIGH. `ensureSelectValue` 가 DOM 에 해 주던 일과 같은 것을
+  //     여기서도 해야 한다 - 그쪽은 이 함수가 다시 그리면서 되돌려 놓았다.)
+  //    ⚠️ 프리셋 밴드가 켜져 있을 때는 **예외**다. 밴드는 Anlas 유료 경고의 기준이라
+  //       밴드 밖 값을 끼워 넣으면 화면과 요금 판정이 어긋난다.
+  //    ⚠️ `baseResolutionOptions` 자체는 안 건드린다(지역 사본) - Rnd Res 추첨 모집단이
+  //       세션 내내 소리 없이 커지면 안 된다.
+  if (!active && preferred !== undefined && current && !options.includes(String(current))) {
+    options = options.concat([String(current)]);
+  }
   if (current && options.length && !options.includes(String(current))) current = undefined;
   if (current === undefined && active) current = options[0];
   if (current === undefined && !active) current = baseResolutionValue || options[0];
@@ -4846,9 +4859,14 @@ function updateParams(m) {
   //    `baseResolutionValue` 는 위에서 그대로 기준값을 따라간다 - 가리는 것은 표시뿐이고,
   //    표식이 풀리면 저절로 기준값으로 돌아온다.
   const presetOpts = resolutionPresetResolutionOptions(mode);
-  const activeOpts = (Array.isArray(presetOpts) && presetOpts.length) ? presetOpts : baseResolutionOptions;
-  // 선택지에 없는 값을 붙들면 `populateSelect` 가 조용히 버려 어긋난다 - 있을 때만 지킨다.
-  const heldResolution = autoResDetectedLabel && activeOpts.includes(String(autoResDetectedLabel))
+  const usingPresetBand = Array.isArray(presetOpts) && presetOpts.length > 0;
+  // 프리셋 밴드가 켜져 있으면 **밴드 안일 때만** 지킨다 - 밴드는 Anlas 유료 경고의
+  // 기준이라 밖의 값을 붙들면 화면과 요금 판정이 어긋난다.
+  // 밴드가 없으면 목록에 없어도 지킨다 - `refreshResolutionPresetDisplay` 가 끼워 준다.
+  // (처음엔 `baseResolutionOptions.includes()` 로 걸렀는데, 사용자가 목록을 줄여 두면
+  //  감지값이 목록 밖이라 보호가 통째로 안 걸렸다 - Codex 리뷰 HIGH.)
+  const heldResolution = autoResDetectedLabel
+    && (!usingPresetBand || presetOpts.includes(String(autoResDetectedLabel)))
     ? autoResDetectedLabel
     : null;
   refreshResolutionPresetDisplay(mode, heldResolution || m.resolution);

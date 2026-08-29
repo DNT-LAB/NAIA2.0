@@ -348,6 +348,13 @@ class HeadlessImg2ImgService:
             "canvas_active": canvas_supported,
             "canvas_width": int(image.width),
             "canvas_height": int(image.height),
+            # POS 모드(사용자 지정 2026-08-29). 인페인트는 **해상도가 고정**이라
+            # 좌표가 뜻을 가진다 - 화면에서 AUTO/CUSTOM 을 고르고, 여기서 그것을 보고
+            # 좌표를 실을지 말지 정한다(AUTO = 안 싣는다 = `use_coords:false`).
+            # ⚠️ 기본은 CUSTOM 이다. 지금까지 늘 좌표를 실었으므로 기본을 바꾸면
+            #    기존 사용자의 인페인트 구도가 말없이 달라진다.
+            # ⚠️ RAND 는 없다 - 세션 캐릭터에는 뜻이 없어 화면에서도 막는다.
+            "position_mode": "custom",
             "base_offset_x": 0,
             "base_offset_y": 0,
             "base_width": int(image.width),
@@ -520,6 +527,7 @@ class HeadlessImg2ImgService:
             "canvas_active": bool(state.get("canvas_active")),
             "canvas_width": int(state.get("canvas_width") or 0),
             "canvas_height": int(state.get("canvas_height") or 0),
+            "position_mode": str(state.get("position_mode") or "custom"),
             "base_offset_x": int(state.get("base_offset_x") or 0),
             "base_offset_y": int(state.get("base_offset_y") or 0),
             "base_width": int(state.get("base_width") or 0),
@@ -710,7 +718,7 @@ class HeadlessImg2ImgService:
     #    도 없는 빈 세션으로 보고 다른 그림을 **묻지도 않고** 덮어썼다 - 새 세션이
     #    열리면 window_id 가 바뀌어 초안이 통째로 미아가 된다(Codex HIGH 2026-08-28).
     _USER_EDIT_KEYS = ("main_prompt", "negative_prompt", "strength", "noise",
-                       "add_character", "mask_draft_dirty")
+                       "add_character", "mask_draft_dirty", "position_mode")
     _USER_EDIT_PREFIXES = ("char_prompt_", "char_uc_", "char_active_",
                            "remove_character_", "char_position_")
 
@@ -723,7 +731,13 @@ class HeadlessImg2ImgService:
             return context._toast("No active Img2Img session", level="error")
         if key in self._USER_EDIT_KEYS or key.startswith(self._USER_EDIT_PREFIXES):
             context.img2img_session["user_edited"] = True
-        if key == "main_prompt":
+        if key == "position_mode":
+            # ⚠️ **RAND 는 받지 않는다**(사용자 지정). 세션 캐릭터에는 뜻이 없다.
+            mode = str(value or "").strip().lower()
+            if mode not in {"auto", "custom"}:
+                return context._toast("가상 캐릭터에는 AUTO/CUSTOM 만 있습니다", level="error")
+            context.img2img_session["position_mode"] = mode
+        elif key == "main_prompt":
             context.img2img_session["main_prompt"] = str(value or "")
         elif key == "negative_prompt":
             context.img2img_session["negative_prompt"] = str(value or "")
@@ -1296,6 +1310,13 @@ class HeadlessImg2ImgService:
                 continue
             entry = {"prompt": prompt, "uc": str(character.get("uc") or "").strip()}
             position = character.get("position")
+            # ⚠️ AUTO 면 좌표를 **안 싣는다.** `api_service` 의 `coords_given` 이 전원분
+            #    좌표가 있을 때만 켜지므로, 안 실으면 저절로 `use_coords:false` 가 되어
+            #    공홈의 AI's Choice 와 같아진다([[project_pos_auto_ai_choice]]).
+            #    좌표를 지우는 것이 아니라 **이번 요청에만 안 싣는다** - CUSTOM 으로
+            #    되돌리면 앉혀 둔 자리가 그대로 살아난다.
+            if str(state.get("position_mode") or "custom").lower() == "auto":
+                position = None
             if isinstance(position, dict):
                 ratio = to_canvas_position(canvas_w, canvas_h, position.get("x"), position.get("y"))
                 if ratio:

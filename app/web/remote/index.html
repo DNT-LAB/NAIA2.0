@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260829-inpaintopt">
+<link rel="stylesheet" href="style.css?v=20260829-vmp">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -497,6 +497,9 @@
       <div class="tab-content">
         <div class="tab-page active" id="tabPrompt">
           <span class="section-label">Prompt</span>
+          <!-- 인페인트 세션이 입력창을 가져갔을 때만 뜬다(사용자 지정 2026-08-29):
+               녹색 바탕 · 흰 글씨. 테두리도 함께 녹색으로 바뀐다. -->
+          <span class="prompt-inpaint-badge" id="promptInpaintBadge" hidden>Inpaint</span>
           <div class="prompt-highlight-wrap">
             <div class="prompt-highlight" id="promptHighlight"></div>
             <textarea class="prompt-edit" id="promptEdit" placeholder="prompt..." onscroll="syncPromptHighlight()"></textarea>
@@ -1349,6 +1352,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260829-ime"></script>
+<script src="app.js?v=20260829-vmp"></script>
 </body>
 </html>

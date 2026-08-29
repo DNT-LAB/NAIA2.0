@@ -942,6 +942,10 @@ export function createCharacterQuickPanel({
 
   /** Rnd Res 중에는 POS 를 잠근다. 해상도가 매번 바뀌면 원을 앉힐 캔버스가 없다. */
   function posBlockedByRandom() {
+    // ⚠️ **가상(인페인트 세션)에서는 안 막는다**(사용자 지정 2026-08-29).
+    //    Rnd Res 로 막는 이유는 "다음 생성의 캔버스 비율을 모른다" 였는데, 세션은
+    //    캔버스 해상도가 **고정**이라 그 전제가 성립하지 않는다. 좌표가 뜻을 가진다.
+    if (lastState && lastState.virtual) return false;
     try { return !!isRandomResolution(); } catch (_) { return false; }
   }
   let randomPosForced = false;   // AUTO 강제를 **한 번만** 보낸다(에코마다 쏘면 안 된다)
@@ -1173,8 +1177,14 @@ export function createCharacterQuickPanel({
         return;
       }
       // AUTO -> CUSTOM -> RAND -> AUTO (사용자 지정).
+      // ⚠️ **가상 캐릭터는 RAND 를 건너뛴다**(사용자 지정 2026-08-29). 인페인트 세션의
+      //    캐릭터에는 뜻이 없다 - 백엔드도 auto/custom 만 받는다.
+      const cycle = lastState && lastState.virtual
+        ? POS_CYCLE.filter(mode => mode !== 'random')
+        : POS_CYCLE;
       const now = posModeOf(lastState);
-      const next = POS_CYCLE[(POS_CYCLE.indexOf(now) + 1) % POS_CYCLE.length];
+      const at = cycle.indexOf(now);
+      const next = cycle[(at < 0 ? 0 : at + 1) % cycle.length];
       // CUSTOM 을 떠나면 편집 중일 이유가 없다 - 원을 옮길 대상이 사라진다.
       if (next !== 'custom' && posEditing) setPosEditing(false);
       setModuleParam('character', 'position_mode', next);

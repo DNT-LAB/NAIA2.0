@@ -502,7 +502,10 @@ function virtualCharacterState(session) {
     module_id: 'character',
     virtual: true,                 // 머리말이 (가상) 을 붙이는 표
     activated: true,
-    position_mode: 'custom',       // 가상은 늘 직접 배치다
+    // 세션이 들고 있는 POS 모드를 그대로 쓴다(사용자 지정 2026-08-29). 예전에는
+    // `'custom'` 으로 못 박아 AUTO 로 갈 길이 없었다 - 인페인트는 해상도가 고정이라
+    // 좌표가 뜻을 가지므로 AUTO/CUSTOM 을 고를 수 있어야 한다. RAND 는 없다.
+    position_mode: String(session.position_mode || 'custom'),
     characters: (session.characters || []).map(c => ({
       prompt: String(c.prompt || ''),
       uc: String(c.uc || ''),
@@ -573,7 +576,9 @@ function applyInpaintSessionLock() {
     // 라벨은 단축키 힌트 <span> 뒤에 붙은 **맨 뒤 텍스트 노드**다.
     const label = Array.from(gen.childNodes).reverse().find(n => n.nodeType === 3);
     gen.classList.toggle('is-inpaint', locked);
-    if (label) label.textContent = locked ? 'Generate (Inpaint)' : 'Generate';
+    // ⚠️ 짧게 쓴다(사용자 지정 2026-08-29). `Generate (Inpaint)` 는 길어서 버튼
+    //    안의 Anlas 금액 칩을 덮었다 - 돈이 보여야 하는 자리다.
+    if (label) label.textContent = locked ? 'Inpaint' : 'Generate';
     gen.title = locked ? '현재 인페인트 세션을 생성합니다' : '';
   }
 
@@ -620,6 +625,14 @@ function virtualSetModuleParam(moduleId, key, value) {
   }
   if (key.startsWith('remove_character_') || key === 'add_character') {
     return setModuleParam('img2img', key, value);
+  }
+  if (key === 'position_mode') {
+    // ⚠️ RAND 는 세션에 없다 - 백엔드도 거절하지만 여기서 먼저 말해 준다.
+    if (String(value) === 'random') {
+      showToast('가상 캐릭터에는 POS RAND 가 없습니다 (AUTO / CUSTOM)', 'error');
+      return undefined;
+    }
+    return setModuleParam('img2img', 'position_mode', value);
   }
   // 세션에 없는 개념(Connect · 음소거 · 활성 토글 · POS 모드)은 조용히 흘리지 않고
   // 말해 준다 - 눌렀는데 아무 일이 없으면 고장으로 읽힌다.
@@ -1564,6 +1577,65 @@ function restoreInteractiveState() {
 // 블록 상태는 그대로 살아 있으니 다시 켜면 Interactive 프롬프트가 재조립된다 —
 // 되돌린다고 잃는 것은 없다.
 let promptBeforeInteractive = null;
+
+// ── 가상 메인 프롬프트 (사용자 지정 2026-08-29) ───────────────────────────────
+//
+// 인페인트 세션은 **자기 메인 프롬프트**(`session.main_prompt`)로 생성한다 - 백엔드가
+// `input`/`_raw_input` 에 그것을 싣는다. 그런데 V5 가상 캔버스 경로에는 그것을 고칠
+// 칸이 없었다(옛 img2img 팝업에는 있다). 캐릭터는 이미 '가상' 으로 갈라 놨는데
+// 메인만 빠져 있어서, 사용자가 세션 안에서 프롬프트를 고칠 수 없었다.
+//
+// → 세션이 떠 있는 동안 **메인 입력창을 세션이 가져간다.** Interactive 가 하는 것과
+//   같은 방식이고(`promptBeforeInteractive`), 원본은 여기 맡겨 두었다가 돌려준다.
+// ⚠️ 가져간 동안에는 `set_prompt` 를 **보내지 않는다.** 보내면 세션 프롬프트가
+//    사용자의 진짜 메인 프롬프트로 저장돼, 세션을 닫은 뒤에도 남는다.
+let promptBeforeInpaint = null;
+
+function inpaintOwnsPromptBox() {
+  return promptBeforeInpaint !== null;
+}
+
+/** 세션이 떴다/닫혔다에 맞춰 메인 입력창의 주인을 바꾼다. */
+function applyVirtualMainPrompt() {
+  const session = virtualCharacterSession();
+  const box = document.getElementById('promptEdit');
+  const wrap = box ? box.closest('.prompt-box') || box.parentElement : null;
+  if (session) {
+    if (promptBeforeInpaint === null && box) {
+      promptBeforeInpaint = String(box.value || '');
+      syncingPrompt = true;
+      box.value = String(session.main_prompt || '');
+      syncingPrompt = false;
+      updatePromptHighlight();
+      updatePromptTokenEstimate();
+    } else if (box && !_isPromptEditingActive()) {
+      // 세션 값이 서버에서 바뀌면 따라간다 - 단 사용자가 치는 중에는 덮지 않는다.
+      const next = String(session.main_prompt || '');
+      if (box.value !== next) {
+        syncingPrompt = true;
+        box.value = next;
+        syncingPrompt = false;
+        updatePromptHighlight();
+        updatePromptTokenEstimate();
+      }
+    }
+  } else if (promptBeforeInpaint !== null) {
+    if (box) {
+      syncingPrompt = true;
+      box.value = promptBeforeInpaint;
+      syncingPrompt = false;
+      updatePromptHighlight();
+      updatePromptTokenEstimate();
+    }
+    promptBeforeInpaint = null;
+  }
+  document.body.classList.toggle('inpaint-prompt-owned', !!session);
+  if (wrap) wrap.classList.toggle('is-inpaint-owned', !!session);
+  const badge = document.getElementById('promptInpaintBadge');
+  // ⚠️ `hidden` 은 CSS 에 진다 - 이 배지는 `display:inline-block` 이라 짝이 되는
+  //    `[hidden]{display:none}` 규칙을 스타일에 함께 뒀다.
+  if (badge) badge.hidden = !session;
+}
 let interactiveStateRestored = false;
 
 /** 빠른 캐릭터 패널을 보일지. NAI 모드이면서 Interactive 가 꺼져 있을 때만 쓴다.
@@ -2010,7 +2082,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260829-posrnd')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260829-vpos')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -5753,6 +5825,20 @@ function flushDeferredPromptSync() {
 }
 
 function syncPrompts(m) {
+  // ⚠️ 세션이 입력창을 가져간 동안에는 **메인 프롬프트 동기화를 받지 않는다.**
+  //    받으면 화면이 세션 것과 메인 것 사이를 오간다(캐릭터 퀵 패널이 같은 이유로
+  //    `virtualCharacterSession()` 을 본다). 네거티브는 세션이 안 가져가므로 그대로 둔다.
+  if (inpaintOwnsPromptBox()) {
+    if (promptBeforeInpaint !== null && 'prompt' in m) promptBeforeInpaint = String(m.prompt || '');
+    if ('negative_prompt' in m && !_isPromptEditingActive() && negEdit
+        && negEdit.value !== m.negative_prompt) {
+      syncingPrompt = true;
+      negEdit.value = m.negative_prompt;
+      syncingPrompt = false;
+    }
+    updateMetaChips(m);
+    return;
+  }
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
   const negativeChanged = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
   let forceSync = !!m.force || !!m.desktop_sync;
@@ -5814,6 +5900,14 @@ function onPromptEdit() {
   if (tokenDisplayControl) tokenDisplayControl.invalidatePromptCounts();
   updatePromptHighlight();
   updatePromptTokenEstimate();
+  // ⚠️ 세션이 입력창을 가져간 동안에는 **세션으로** 보낸다. `set_prompt` 로 보내면
+  //    인페인트용 문장이 사용자의 진짜 메인 프롬프트로 저장돼 세션을 닫아도 남는다.
+  if (inpaintOwnsPromptBox()) {
+    if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
+    setModuleParam('img2img', 'main_prompt', promptEdit.value);
+    _localPromptDirty = false;
+    return;
+  }
   if (promptSendTimer) clearTimeout(promptSendTimer);
   promptSendTimer = setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -7708,7 +7802,7 @@ function requestGenerate(payload = {}) {
     const now = performance.now();
     if (now - _inpaintGenerateToastAt > 3000) {
       _inpaintGenerateToastAt = now;
-      showToast('인페인트 세션 중에는 일반 생성이 나가지 않습니다 (Generate (Inpaint) 를 쓰거나 세션을 닫으세요)', 'error');
+      showToast('인페인트 세션 중에는 일반 생성이 나가지 않습니다 ([Inpaint] 를 쓰거나 세션을 닫으세요)', 'error');
     }
     return false;
   }
@@ -8019,6 +8113,8 @@ function updateGenerateButtonMode() {
   //    이 함수가 화면을 손보는 마지막 자리이므로 여기서 다시 건다.
   //    (잠금 해제 쪽에서 나를 부른 경우에는 되부르지 않는다 - 서로 부르게 된다.)
   if (!_inpaintLockRecomputing) applyInpaintSessionLock();
+  // 입력창의 주인도 같은 신호로 바뀐다 - 자리를 따로 두면 한쪽만 도는 날이 온다.
+  applyVirtualMainPrompt();
 }
 
 function clearPresetGenerationOptions({autoGenerate = true} = {}) {
@@ -9007,7 +9103,7 @@ function genButtonHtml(label) {
 }
 
 /** 값만 바뀐 경우 - 라벨은 건드리지 않고 칩만 갈아 끼운다.
- *  (라벨을 다시 쓰면 인페인트 잠금의 `Generate (Inpaint)` 가 벗겨진다.) */
+ *  (라벨을 다시 쓰면 인페인트 잠금의 `Inpaint` 라벨이 벗겨진다.) */
 function syncGenCostChip() {
   if (!btnGen) return;
   const cost = naiEffectiveAnlasCost();
@@ -10045,6 +10141,7 @@ function onModuleState(m) {
     // 세션이 끝나면 원래 캐릭터 모듈 상태로 돌아간다.
     renderCharacterQuickPanel();
     applyInpaintSessionLock();
+    applyVirtualMainPrompt();
     // 캔버스에서 부르는 마스크 편집기는 img2img 패널의 상태를 본다. 팝업이 닫혀
     // 있어도 상태만은 최신으로 흘려 넣는다 - `isOpen` 가드가 DOM 은 안 건드린다.
     if (m.module_id !== currentModuleId) img2imgPanel?.render?.(m);
@@ -11811,7 +11908,7 @@ document.addEventListener('keydown', async e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
     e.preventDefault();
-    // 버튼의 단축키다 - 버튼과 **같은 입구**를 쓴다(라벨이 Generate (Inpaint) 면 그렇게 돈다).
+    // 버튼의 단축키다 - 버튼과 **같은 입구**를 쓴다(라벨이 Inpaint 면 그렇게 돈다).
     generateAction();
   } else if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.shiftKey) {
     e.preventDefault();

@@ -124,7 +124,10 @@ def _save_resolution_manager_state(context: WebSessionContext, mode: str, raw_it
         # 현재 해상도가 목록을 벗어났을 때의 보정과 브로드캐스트만 수행한다.
         context.remote_params.pop("options_resolution", None)
         if str(context.remote_params.get("resolution") or "") not in cleaned:
-            context.remote_params["resolution"] = cleaned[0]
+            # ⚠️ `remote_params` 를 **직접** 쓰면 width/height 가 낡은 채 남아 라벨과
+            #    갈린다(하류는 치수를 먼저 본다). `set_param` 이 둘을 함께 옮긴다 -
+            #    해상도를 쓰는 자리가 둘이었고 이쪽만 새고 있었다.
+            context.set_param("resolution", cleaned[0])
         context.publish("remote_params_changed", context.generation_param_schema_payload())
     return _resolution_manager_state(context, normalized_mode)
 

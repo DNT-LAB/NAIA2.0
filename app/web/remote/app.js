@@ -3390,6 +3390,14 @@ let baseResolutionValue = '';
 // 푸는 자리는 셋뿐이다: 사용자가 해상도를 직접 고를 때 · Auto Res 를 끌 때 ·
 // 모드가 바뀔 때(선택지가 통째로 달라진다). 전부 `setParam`/`syncMode` 를 지난다.
 let autoResDetectedLabel = null;
+// 방금 **실제로 나간** 해상도(Rnd Res 추첨 결과 포함). 표시 전용이다 - 서버
+// (`remote_params`)에는 안 심으므로 다음 랜덤 추첨에 영향을 주지 않는다.
+// 사용자 결정 2026-08-29: "사용자는 발화한 해상도만 시각적으로 확인할 수 있으며,
+// 이것이 다음 랜덤 생성에 영향을 주지는 않는다. 이후 랜덤 버튼을 해제하여 지금
+// 해상도를 고정하거나 원하는 해상도를 할당할 수 있다."
+// 그 '고정' 이 성립하려면 에코가 이 값을 못 덮어야 한다 - Rnd Res 를 끄는 것 자체가
+// `set_param` 이라 `params` 에코를 부르기 때문이다. 그래서 표식으로 지킨다.
+let dispatchedResolutionLabel = null;
 const naiModelMetaByKey = new Map();
 let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
@@ -3671,12 +3679,40 @@ function onWsMessageError(error) {
   console.warn('Failed to handle WebSocket message', error);
 }
 
+/** 방금 나간 해상도를 **표시만** 갱신한다.
+ *  `_collectCurrentParams` 가 콤보를 읽으므로, 사용자가 Rnd Res 를 끄는 순간
+ *  화면에 보이던 그 값이 곧 생성값이 된다 - 서버에 심지 않아도 '고정' 이 성립한다.
+ *  ⚠️ 서버에 심지 **않는다**(setParam 금지). 심으면 사용자가 고른 기준 해상도가
+ *     추첨값으로 덮인다. 시드는 심고 있지만(주석에 '무해' 라고 적혀 있다) 해상도는
+ *     사용자가 직접 고른 값이라 무게가 다르다. */
+function applyDispatchedResolutionDisplay(m) {
+  const width = Number(m?.params?.width);
+  const height = Number(m?.params?.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+  // 사용자가 셀렉트를 만지는 중이면 건드리지 않는다(시드 박스와 같은 예의).
+  if (document.activeElement === paramEls?.resolution || document.activeElement === qResolution) return;
+  const label = `${Math.trunc(width)} x ${Math.trunc(height)}`;
+  dispatchedResolutionLabel = label;
+  ensureSelectValue(paramEls.resolution, label);
+  ensureSelectValue(qResolution, label);
+  paramEls.resolution.value = label;
+  if (qResolution) qResolution.value = label;
+  refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI', label);
+}
+
 function onGenerationDispatched(m) {
   // 실제 디스패치된 시드를 Params 패널 시드 박스에 반영한다 — Seed Fix OFF면 서버가
   // 요청마다 시드를 재추첨하므로(534fa55) 박스의 직전 값과 어긋난다. 구체 시드(>=0)일
   // 때만 갱신한다(WEBUI/COMFYUI의 -1은 백엔드 랜덤 위임이라 실행 시드를 아직 모름).
   // 사용자가 시드 박스를 편집 중이거나 COMFYUI Free 잠금 표시 중에는 건드리지 않는다.
   if (!m || m.ok !== true) return;
+  // 방금 **실제로 나간** 해상도를 콤보에 비춰 준다. Rnd Res 는 매 생성마다 새로 뽑는데
+  // (프론트 `_collectCurrentParams` / 백엔드 `_reroll_random_resolution`) 콤보는 그걸
+  // 몰라 옛 값을 보여 줬다 - 실측: 그림은 1024x1024 인데 콤보는 `1088 x 960`.
+  // 바로 아래에서 **시드는** 이미 이렇게 되돌려 쓰고 있었다. 해상도만 빠진 비대칭이다.
+  // ⚠️ 시드 판정(`seed >= 0`)보다 **앞**이다. WEBUI/COMFYUI 는 백엔드가 시드를 굴려
+  //    `-1` 로 오지만 해상도는 알고 있다 - 뒤에 두면 그 두 모드에서 영영 안 비친다.
+  applyDispatchedResolutionDisplay(m);
   const seed = Number(m.params?.seed);
   if (!Number.isFinite(seed) || seed < 0) return;
   // **Interactive 캡처를 먼저 한다.** 아래 두 가드는 '시드 박스를 건드리지
@@ -4377,6 +4413,7 @@ function applyGeneratedResolutionUpdate(message = {}) {
     // 표식을 **놓아 준다** - 안 그러면 앞 행의 값이 영원히 남아 기준값으로 못 돌아간다.
     // (백엔드의 `reset_resolution_detected` 와 같은 뜻이지만 그것은 프론트까지 안 온다.)
     autoResDetectedLabel = null;
+    dispatchedResolutionLabel = null;
     return;
   }
   // ⚠️ **여기를 막으면 Auto Res 가 통째로 죽는다.** 2026-08-28 에 "Rnd Res 가 켜졌을
@@ -4399,6 +4436,8 @@ function applyGeneratedResolutionUpdate(message = {}) {
   qResolution.value = label;
   baseResolutionValue = label;
   autoResDetectedLabel = label;
+  // 새 프롬프트가 나왔으니 직전 생성의 값은 낡았다 - 감지값에 자리를 내준다.
+  dispatchedResolutionLabel = null;
   refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI', label);
   updateWebUiHrScaleHint();
 }
@@ -4865,9 +4904,11 @@ function updateParams(m) {
   // 밴드가 없으면 목록에 없어도 지킨다 - `refreshResolutionPresetDisplay` 가 끼워 준다.
   // (처음엔 `baseResolutionOptions.includes()` 로 걸렀는데, 사용자가 목록을 줄여 두면
   //  감지값이 목록 밖이라 보호가 통째로 안 걸렸다 - Codex 리뷰 HIGH.)
-  const heldResolution = autoResDetectedLabel
-    && (!usingPresetBand || presetOpts.includes(String(autoResDetectedLabel)))
-    ? autoResDetectedLabel
+  // 디스패치값이 감지값보다 **뒤**에 일어난다(프롬프트 -> 생성) - 더 최근이 이긴다.
+  const heldCandidate = dispatchedResolutionLabel || autoResDetectedLabel;
+  const heldResolution = heldCandidate
+    && (!usingPresetBand || presetOpts.includes(String(heldCandidate)))
+    ? heldCandidate
     : null;
   refreshResolutionPresetDisplay(mode, heldResolution || m.resolution);
 
@@ -5008,11 +5049,28 @@ function setParam(key, value) {
       && !(value === true || String(value).toLowerCase() === 'true')) {
     autoResDetectedLabel = null;
   }
+  // Rnd Res 를 **끄는 순간**, 화면에 보이던 '방금 나간 해상도' 를 서버에도 심는다.
+  // 사용자 지시 2026-08-29: 표시는 표시로 두되 "랜덤 버튼을 해제 할 때는 서버도
+  // 똑같이 해당 값을 알고 있게 되어야 한다."
+  // 이유: overrides 없이 나가는 **서버 주도 경로**(프리셋 적용 · Character Viewer 등)는
+  // 콤보가 아니라 `remote_params` 를 읽는다. 심지 않으면 화면만 맞고 그쪽만 옛 값으로
+  // 나가서, 사용자는 원인을 알 수 없다.
+  // ⚠️ **끌 때만**이다. 켤 때 심으면 다음 추첨에 영향을 준다(표시 전용 원칙).
+  // ⚠️ 진입로가 셋이다(`toggleFlag` PARAMS · `toggleQuickFlag` Quick · `setResFlag`
+  //    시드 알약 복원). 셋 다 여기를 지나므로 목에서 한 번만 건다.
+  if (key === 'random_resolution'
+      && !(value === true || String(value).toLowerCase() === 'true')
+      && dispatchedResolutionLabel) {
+    const pinnedLabel = dispatchedResolutionLabel;
+    dispatchedResolutionLabel = null;
+    setParam('resolution', pinnedLabel);
+  }
   // Quick ↔ Params 탭 양방향 동기화
   if (key === 'resolution') {
     // 사용자가 직접 골랐다(PARAMS/Quick 셀렉트 · 메타데이터 적용). Auto Res 표식을 푼다 -
     // 안 그러면 방금 고른 값이 다음 에코에서 옛 Auto Res 값으로 되돌아간다.
     autoResDetectedLabel = null;
+    dispatchedResolutionLabel = null;
     paramEls.resolution.value = value;
     qResolution.value = value;
     if (!resolutionPresetResolutionOptions()) baseResolutionValue = value;
@@ -8232,8 +8290,9 @@ function syncMode(mode) {
   syncingMode = false;
   currentMode = mode;
   setNaiHighlightMode(mode);
-  // 모드가 바뀌면 해상도 선택지가 통째로 달라진다 - 앞 모드의 Auto Res 값은 무효다.
+  // 모드가 바뀌면 해상도 선택지가 통째로 달라진다 - 앞 모드의 값은 둘 다 무효다.
   autoResDetectedLabel = null;
+  dispatchedResolutionLabel = null;
   // 백엔드가 바뀌었으니 앞 모드에서 잡아 둔 Interactive 시드는 버린다.
   resetInteractiveSeedForMode();
   updatePromptTokenEstimate();

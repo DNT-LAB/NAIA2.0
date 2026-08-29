@@ -151,8 +151,31 @@ class HeadlessRemoteStateService:
             coerced = self.guarded_nai_model_key(coerced)
         self.context.remote_params[clean_key] = coerced
         self._sync_cached_selection(clean_key, self.context.remote_params[clean_key])
+        self._sync_resolution_dimensions(clean_key, self.context.remote_params[clean_key])
         self.context.save_remote_ui_state()
         self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
+
+    def _sync_resolution_dimensions(self, key: str, value: Any) -> None:
+        """`resolution` 라벨을 바꾸면 `width`/`height` 도 **함께** 옮긴다.
+
+        ⚠️ 안 맞추면 라벨과 치수가 갈린다. 생성 직전 정규화
+           (`headless_generation_service._normalize_resolution`)는 **치수를 먼저**
+           보므로, 갈리면 사용자가 고른 해상도가 조용히 무시되고 옛 치수로 나간다.
+           실측 2026-08-29: 저장 파일이 `resolution '1408 x 960'` 인데
+           `width 1280 / height 1024` 로 이미 갈려 있었다(Codex 리뷰 HIGH).
+           set_param 이 이 키 하나만 쓰고 있었던 탓이다.
+        ⚠️ 파싱이 안 되면 **아무것도 안 한다** - 모르는 형식에 치수를 지어내면
+           안 된다.
+        """
+        if key != "resolution":
+            return
+        from core.resolution_utils import parse_resolution_pair
+
+        pair = parse_resolution_pair(value)
+        if not pair:
+            return
+        self.context.remote_params["width"] = int(pair[0])
+        self.context.remote_params["height"] = int(pair[1])
 
     def _sync_cached_selection(self, key: str, value: Any) -> None:
         if key not in {"model", "sampler", "scheduler", "hr_upscaler"}:

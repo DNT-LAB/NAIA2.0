@@ -11277,6 +11277,40 @@ body.resizing-result-info {
   max-height: 55dvh;
 }
 .module-popup.open { display: flex; }
+
+/* ── 모바일: 모듈 팝업은 **전체 화면 시트**다 (사용자 지정 2026-08-29) ──────────
+   위 기본값(`bottom: 60px` · `max-height: 55dvh`)은 떠 있는 카드였다. 그 60px 은
+   낡은 값이라 실제 하단 조작부(약 114px + 프롬프트 토글 28px)를 **덮었고**
+   (모바일 보고서 P0-4: 실측 54px 겹침), 위쪽으로는 화면의 절반을 놀렸다.
+
+   ⚠️ `100dvh` 를 쓴다. `100vh` 는 모바일 주소창이 접히기 전 높이라 시트가 화면보다
+      길어져 아래가 잘린다.
+   ⚠️ safe-area 를 **padding 으로** 준다. 노치/홈 인디케이터 밑으로 머리줄과 마지막
+      항목이 들어가지 않게 한다.
+   ⚠️ 머리줄은 `flex-shrink: 0` 이라 늘 보인다 - 시트가 화면을 다 덮으므로 닫기(×)가
+      사라지면 빠져나갈 길이 없다.                                                */
+@media (max-width: 767px) {
+  .module-popup {
+    top: 0; right: 0; bottom: 0; left: 0;
+    width: auto;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* 본문만 스크롤한다 - 시트 전체가 스크롤되면 머리줄이 위로 밀려 올라간다. */
+  .module-popup > .module-popup-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
 @media (min-width: 768px) {
   .module-popup {
     /* PC: viewer 영역(우측)에 표시 — 프롬프트 패널을 가리지 않음 */

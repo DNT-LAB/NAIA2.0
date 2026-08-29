@@ -35,6 +35,21 @@ def _safe_log(message: str, fallback: str | None = None) -> None:
 
 class ArtistThumbnailService:
     ARTIST_THUMB_MODES = {
+        # ⚠️ **여기가 유일한 정의다**(future02). 이 표가 그대로 드롭다운이 된다 -
+        #    프론트는 `key`/`label` 을 하드코딩하지 않는다.
+        # ⚠️ 새 데이터셋은 **반드시 새 키 + 새 `path`** 로 낸다. 같은 키에 내용만
+        #    갈아끼우면 이미 받은 사용자 기기에서는 갱신이 **안 일어난다** -
+        #    갱신 판정이 `expected_size` 비교뿐이라 지문이 없으면 늘 최신으로 본다
+        #    (ARTIST_THUMBNAIL_DATASET_UPDATE_REPORT.md 0절).
+        # ⚠️ `expected_size`/`sha256` 은 **앱 소스에 박힌다** = 데이터셋 갱신에는
+        #    앱 릴리즈가 따라야 사용자에게 닿는다.
+        "NAID5F-10000-Q": {
+            "label": "NAID5F-10000-Q",
+            "path": Path("data/artist_thumbnail_naid5f.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5F-10000-Q",
+            "expected_size": 791166304,
+            "sha256": "3209B1EEBA3BC1EAEAB73277116B436011C0A087EE6E14C1C30BED2D15E9AB3B",
+        },
         "NAID4.5F-31000": {
             "label": "NAID4.5F-31000",
             "path": Path("data/artist_thumbnail_nai.json"),

@@ -7358,15 +7358,26 @@ function clearTranslatorPopupTimer() {
   translatorPopupTimer = null;
 }
 
-function clearPendingTranslatorPopupTranslation(text = '', requestId = '') {
+/** 진행 중 표식과 '이미 보낸 글자' 기억을 **가른다**.
+ *
+ *  ⚠️ 예전에는 응답이 올 때마다 둘 다 지웠다. 그러면 `requestText` 로 하는 중복
+ *     차단이 매 응답마다 풀려, **글자가 하나도 안 바뀌어도** 같은 요청이 다시
+ *     나갔다(실측: 같은 "테스트" 가 3번). `text = value.trim()` 이라 끝에 공백을
+ *     넣었다 빼는 것도 재발사였다. 429 중에 사용자가 글자를 만지작거리면 그때마다
+ *     요청이 나가 차단이 길어졌다 - 사용자 제보 "가끔 번역 실패" 의 기전이다.
+ *  · `keepText` 를 주면 **진행 중 표식만** 지운다(응답 도착 · 10초 안전망).
+ *  · 입력이 비거나 팝업을 닫으면 둘 다 지운다 - 그때는 다시 보내는 게 맞다.
+ */
+function clearPendingTranslatorPopupTranslation(text = '', requestId = '', options = {}) {
+  const keepText = !!options.keepText;
   if (!text && !requestId) {
-    translatorPopupRequestText = '';
+    if (!keepText) translatorPopupRequestText = '';
     translatorPopupRequestId = '';
     return;
   }
   if (text && translatorPopupRequestText !== text) return;
   if (requestId && translatorPopupRequestId !== requestId) return;
-  translatorPopupRequestText = '';
+  if (!keepText) translatorPopupRequestText = '';
   translatorPopupRequestId = '';
 }
 
@@ -7397,7 +7408,10 @@ function requestTranslatorPopupTranslate(options = {}) {
     text,
     requestId,
   }));
-  window.setTimeout(() => clearPendingTranslatorPopupTranslation(text, requestId), 10000);
+  // 응답이 영영 안 오는 경우의 안전망. 여기서도 **글자 기억은 남긴다** - 지우면
+  // 그 뒤 아무 입력이나 같은 글자를 다시 보낸다.
+  window.setTimeout(
+    () => clearPendingTranslatorPopupTranslation(text, requestId, {keepText: true}), 10000);
 }
 
 function scheduleTranslatorPopupTranslation() {
@@ -7419,7 +7433,15 @@ function scheduleTranslatorPopupTranslation() {
 function onTranslationResult(message) {
   const requestId = String(message?.requestId || '');
   if (requestId && requestId !== translatorPopupRequestId) return;
-  clearPendingTranslatorPopupTranslation('', requestId);
+  // ⚠️ **글자 기억은 남긴다.** 지우면 같은 글자가 다시 나간다(위 주석 참조).
+  //    다시 시도하려면 [Translate] 버튼이 `force: true` 로 중복 검사를 지나간다.
+  clearPendingTranslatorPopupTranslation('', requestId, {keepText: true});
+  // ⚠️ 늦게 온 응답이 **지금 입력과 다른 글자**의 결과면 출력창에 쓰지 않는다.
+  //    요청 ID 만 보면, 한글이 아닌 글자로 바꾼 뒤 옛 응답이 도착했을 때 그것이
+  //    현재 입력의 번역인 척 앉는다(Codex 리뷰 2026-08-29 MED 5).
+  const answered = String(message?.text || '');
+  const current = translatorInput?.value?.trim() || '';
+  if (answered && current && answered !== current) return;
   const translated = String(message?.translated || '');
   if (translatorOutput) translatorOutput.value = translated;
   if (!translated) showToast(message?.error || 'Translation failed', 'error');

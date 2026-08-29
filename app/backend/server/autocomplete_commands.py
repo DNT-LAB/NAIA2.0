@@ -436,8 +436,15 @@ def _translate_autocomplete_query(context: WebSessionContext, query: str) -> str
 
     with translation_context("autocomplete"):
         translated = normalize_search_query(korean_to_english(normalized) or "")
+    failed = not translated
     if not translated or _has_hangul_text(translated) or translated == normalized:
         translated = ""
+    # ⚠️ **실패는 캐시하지 않는다.** 429 하나가 그 질의를 세션 내내 실패로 굳혔다 -
+    #    제한이 풀린 뒤 같은 말을 쳐도 다시 시도조차 안 했다(Codex 리뷰 MED 4).
+    #    "번역했는데 쓸 값이 아니다"(한글 그대로 · 원문과 같음)는 캐시해도 된다 -
+    #    그건 네트워크와 무관한 확정된 결과다.
+    if failed:
+        return ""
     if len(cache) > 256:
         cache.clear()
     cache[normalized] = translated
@@ -818,15 +825,35 @@ async def handle_autocomplete_command(
 
         try:
             # asyncio.to_thread는 contextvar를 워커 스레드로 복사하므로 라벨이 전파된다.
+            # ⚠️ **사유를 예외로 받지 않는다.** `utils/translator` 의 계약은 "실패하면
+            #    None, 절대 raise 안 함" 이고, 자동완성 경로(`_translate_autocomplete_query`)
+            #    는 예외를 안 잡는다 - 던지게 바꾸면 WS 수신 루프가 통째로 끝난다
+            #    (Codex 리뷰 2026-08-29 MED 2). 그래서 사유를 **함께 돌려주는** 함수를 쓴다.
+            from utils.translator import rate_limit_seconds_remaining, translate_with_reason
+
+            direction_key = "en_ko" if translator is english_to_korean else "ko_en"
             with translation_context("manual_translate"):
-                translated = await run_in_thread(translator, text)
+                translated, reason = await run_in_thread(
+                    translate_with_reason, text, direction_key)
             payload = {
                 "type": "translation_result",
                 "text": text,
                 "translated": translated or "",
-                "direction": "en_ko" if translator is english_to_korean else "ko_en",
+                "direction": direction_key,
                 "ok": bool(translated),
             }
+            if not translated:
+                # 화면이 "Translation failed" 밖에 못 말하던 것을 고친다(사용자 제보).
+                wait = rate_limit_seconds_remaining()
+                payload["reason"] = reason
+                payload["retry_after"] = wait
+                payload["error"] = {
+                    "rate_limited": (
+                        f"번역 서버가 요청을 제한하고 있습니다 (약 {wait}초 후 다시 시도)"
+                        if wait > 0 else "번역 서버가 요청을 제한하고 있습니다"),
+                    "timeout": "번역 서버 응답이 없습니다 (시간 초과)",
+                    "network": "번역 서버에 연결하지 못했습니다 (네트워크 확인)",
+                }.get(reason, "번역하지 못했습니다")
         except Exception as exc:
             payload = {
                 "type": "translation_result",

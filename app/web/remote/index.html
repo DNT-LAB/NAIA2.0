@@ -1324,7 +1324,7 @@
     <textarea id="translatorOutput" class="translator-textarea output" placeholder="English..." readonly></textarea>
   </div>
   <footer class="translator-popup-actions">
-    <button type="button" onclick="requestTranslatorPopupTranslate()">Translate</button>
+    <button type="button" onclick="requestTranslatorPopupTranslate({force: true})">Translate</button>
     <button type="button" onclick="copyTranslatorOutput()">Copy</button>
     <button type="button" onclick="insertTranslatorOutput()">Insert</button>
   </footer>
@@ -1349,6 +1349,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260829-cap"></script>
+<script src="app.js?v=20260829-tr"></script>
 </body>
 </html>

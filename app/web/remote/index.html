@@ -533,6 +533,12 @@
             <div class="prompt-token-footer" id="promptTokenFooter">
               <span id="promptTokenLabel">Estimated Tokens : 0 (Main 0 + Character 0)</span>
               <div class="activated-summary hidden" id="activatedSummary" aria-live="polite"></div>
+              <!-- 투명 배경. **NAI V5 일 때만** 보인다(app.js 가 hidden 을 제어).
+                   상태는 앞글자로 읽는다: 꺼지면 x · 켜지면 v (사용자 지정). -->
+              <button type="button" class="transparent-bg-pill" id="transparentBgPill" hidden
+                      aria-pressed="false" onclick="toggleTransparentBackground()">
+                <span class="transparent-bg-mark" id="transparentBgMark">x</span>투명 BG
+              </button>
             </div>
           </div>
           <!-- Interactive Mode: 프롬프트를 의미 슬롯으로 분해한 블록 리스트.
@@ -1352,6 +1358,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260829-artkeys"></script>
+<script src="app.js?v=20260829-transbg"></script>
 </body>
 </html>

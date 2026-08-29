@@ -18,6 +18,10 @@ from core.resolution_utils import (
     normalize_artist_thumbnail_resolution,
     snap_resolution_to_multiple,
 )
+from core.nai_transparent_background import (
+    inject_transparent_background,
+    should_inject_transparent_background,
+)
 from core.reference_inset_service import (
     REFERENCE_INSET_V5_TAGS,
     inject_reference_inset_into_prompt,
@@ -1012,6 +1016,23 @@ class APIService:
                         print(f"🩹 reference inset 자동 삽입 (생성 시점): {cleaned_input[:80]}...")
             except Exception as exc:
                 print(f"⚠️ reference inset 삽입 실패: {exc}")
+
+            # 투명 배경(사용자 지정 2026-08-29). 스위치·V5·t2i 셋이 다 맞을 때만.
+            #
+            # ⚠️ **여기가 목이다.** 프롬프트 창에 심지 않고 나가는 자리에서만 실으므로,
+            #    스위치를 끄면 글에 자국이 안 남는다(프리셋·히스토리가 깨끗하다).
+            # ⚠️ `main_prompt = params.get('input')` 보다 **앞**이어야 한다 - 그래야 V4/V5
+            #    페이로드의 `base_caption` 과 최상위 `input` 이 같은 문자열로 나간다.
+            try:
+                if should_inject_transparent_background(
+                        params, action_type=action_type, model_spec=model_spec):
+                    _tb_before = params.get('input', '') or ''
+                    _tb_after = inject_transparent_background(_tb_before)
+                    if _tb_after != _tb_before:
+                        params['input'] = _tb_after
+                        print("[TransparentBG] tag appended (V5 t2i)")
+            except Exception as exc:
+                print(f"[TransparentBG] injection failed: {exc}")
 
             # 캐릭터 대사를 합친 프롬프트. 아래 payload 의 `input` 도 이걸 써야 한다 -
             # NAI 는 이 값을 그대로 이미지 메타데이터의 `prompt` 로 남기므로, base_caption

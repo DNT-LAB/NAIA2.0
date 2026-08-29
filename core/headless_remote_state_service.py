@@ -28,6 +28,9 @@ REMOTE_BOOLEAN_PARAMS = {
     "webui_hiresfix_assist",
     "webui_hiresfix_assist_enabled",
     "webui_custom_payload_enabled",
+    # 투명 배경(V5 t2i 전용). 문자열 `"true"` 로 오는 경로가 있어 여기서 불리언으로 굳힌다 -
+    # 그래야 저장본과 화면이 같은 모양을 본다.
+    "transparent_background",
     "SMEA",
     "DYN",
     "VAR+",

@@ -9530,6 +9530,64 @@ body.resizing-result-info {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 투명 배경 알약(NAI V5 전용). 사용자 지정 2026-08-29.
+   ⚠️ 부모(.prompt-token-footer)가 `pointer-events: none` 이다 - 알약만 다시 열어
+      준다. 안 열면 보이긴 하는데 **눌러지지 않는다**.
+   ⚠️ 부모는 `justify-content: center` 이고 캐릭터 요약이 붙으면 세로 배열로
+      바뀐다(.has-activated). 흐름에 실리면 자리가 그때마다 옮겨 다니므로
+      absolute 로 오른쪽에 못 박는다. */
+.transparent-bg-pill {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid rgba(232,232,240,0.16);
+  border-radius: 999px;
+  background: rgba(20,22,34,0.86);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.transparent-bg-pill[hidden] {
+  /* `hidden` 속성은 CSS 에 진다 - `display: inline-flex` 를 준 이상 짝을 반드시 쓴다. */
+  display: none;
+}
+.transparent-bg-pill:hover {
+  border-color: rgba(232,232,240,0.32);
+  color: var(--text-primary);
+}
+.transparent-bg-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.transparent-bg-pill[aria-pressed="true"] {
+  border-color: rgba(96,214,160,0.55);
+  background: rgba(38,92,68,0.42);
+  color: #d8f5e6;
+}
+.transparent-bg-mark {
+  /* 꺼지면 x · 켜지면 v. 폭을 고정해 글자가 바뀔 때 알약이 안 떨게 한다. */
+  display: inline-block;
+  width: 8px;
+  text-align: center;
+  font-family: var(--font-mono);
+  opacity: 0.85;
+}
+.transparent-bg-pill[aria-pressed="true"] .transparent-bg-mark {
+  color: #7fe3ab;
+  opacity: 1;
+}
 .activated-summary {
   max-width: 100%;
   overflow: hidden;

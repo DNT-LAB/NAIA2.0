@@ -5163,6 +5163,12 @@ function updateParams(m) {
   if (resultEnhance) resultEnhance.update();
   // 모드 전환·프리셋 적용·재접속으로 값이 통째로 바뀌었다 - 유료 경고를 다시 본다.
   updateAnlasPaidIndicator();
+  // 투명 BG: 서버가 들고 있는 값이 진실이다. 모델도 여기서 바뀌므로 보임을 함께 갱신한다.
+  if ('transparent_background' in m) {
+    transparentBgEnabled = (m.transparent_background === true
+      || String(m.transparent_background).toLowerCase() === 'true');
+  }
+  refreshTransparentBgPill();
 }
 
 function setParam(key, value) {
@@ -5240,6 +5246,8 @@ function setParam(key, value) {
   // NAID3 로 바꾸면 NAI 전용 캐릭터 계열(Character/CR/VT)을 즉시 차단(런처 비활성 재계산 +
   // 열려 있으면 닫기)하고, 인페인트 강도 슬라이더 표시 여부도 갱신한다(V3=디노이징 미지원).
   if (key === 'model') {
+    // 투명 BG 알약은 V5 에서만 보인다. 에코를 기다리면 한 박자 늦게 사라진다.
+    refreshTransparentBgPill();
     if (moduleLauncherControl) moduleLauncherControl.updateState();
     if (['character', 'character_reference', 'vibe_transfer'].includes(currentModuleId)
         && naiModelBlocksReference()
@@ -8613,6 +8621,10 @@ function syncMode(mode) {
   resetInteractiveSeedForMode();
   updatePromptTokenEstimate();
   updateRandomPromptWeightRow(mode);
+  // 투명 BG 알약은 NAI V5 전용이다. `params` 에코에서도 다시 보지만, 그 메시지가
+  // `mode` 보다 **먼저** 도착하면 `currentMode` 가 앞 모드라 한 박자 늦게 사라진다.
+  // 두 순서 어느 쪽이든 맞도록 여기서도 한 번 본다.
+  refreshTransparentBgPill();
   applyComfyUiFreeParamLock(mode);
   // Upscale 은 NAI 전용이라 모드가 바뀌면 다시 판정해야 한다(Director 는 모드 무관이라
   // 지금까지 이 자리에서 갱신할 이유가 없었다).
@@ -9703,6 +9715,50 @@ function naiModelBlocksReference() {
   const metadata = naiModelMetaByKey.get(model);
   if (metadata?.capabilities && metadata.capabilities.v4_payload === false) return true;
   return model.includes('NAID3');
+}
+
+// 투명 배경(Transparent BG) - 사용자 지정 2026-08-29.
+//
+// 알약은 **NAI V5 일 때만** 보이고, 실제 태그는 생성 때 **V5 + t2i** 에서만 실린다
+// (백엔드 `core/nai_transparent_background.py` 가 그 목이다). 프론트는 스위치만 든다 -
+// 프롬프트 창의 글은 안 건드린다(끄면 자국이 남지 않아야 한다).
+const TRANSPARENT_BG_GUIDE = [
+  'V5 t2i 생성에서 프롬프트 끝에 "transparent background" 를 더해 보냅니다.',
+  '프롬프트 창의 글은 바뀌지 않으며, i2i·인페인트에는 실리지 않습니다.',
+  '',
+  '잘 안 되면: indoors / outdoors / location 및 ~ background,',
+  'depth of field 등 배경 관련 프롬프트를 지우고 "has alpha" 를 추가하세요.',
+].join('\n');
+let transparentBgEnabled = false;
+
+// 지금 고른 모델이 V5 계열인가.
+// 판정의 SSOT 는 백엔드 모델 계약이 보낸 `payload_profile` 이다 - 여기서 모델
+// 이름 문자열을 따로 뒤지면 **사용자가 등록한 V5 커스텀 모델**이 빠진다.
+function naiModelIsV5() {
+  if ((currentMode || modeSelect.value) !== 'NAI') return false;
+  const sel = document.getElementById('pModel');
+  const model = sel ? String(sel.value || '').trim().toUpperCase() : '';
+  if (!model) return false;
+  return String(naiModelMetaByKey.get(model)?.payload_profile || '') === 'v5';
+}
+
+function refreshTransparentBgPill() {
+  const pill = document.getElementById('transparentBgPill');
+  if (!pill) return;
+  const visible = naiModelIsV5();
+  pill.hidden = !visible;
+  if (!visible) return;
+  pill.setAttribute('aria-pressed', transparentBgEnabled ? 'true' : 'false');
+  const mark = document.getElementById('transparentBgMark');
+  // 꺼지면 x · 켜지면 v (사용자 지정).
+  if (mark) mark.textContent = transparentBgEnabled ? 'v' : 'x';
+  pill.dataset.naiaGuide = TRANSPARENT_BG_GUIDE;
+}
+
+function toggleTransparentBackground() {
+  transparentBgEnabled = !transparentBgEnabled;
+  refreshTransparentBgPill();
+  setParam('transparent_background', String(transparentBgEnabled));
 }
 
 function openModule(moduleId, options = {}) {

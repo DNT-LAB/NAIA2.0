@@ -9,6 +9,8 @@ export function createArtistThumbController({
   setPromptFields,
   getGenerationMode = () => 'NAI',
   getCurrentGenerationParams = null,
+  // Auto Res·Rnd Res 를 **무시한** 사용자 선택 해상도(사용자 지정 2026-08-29).
+  getUserChosenResolution = null,
   isComfyUiAnimaMode = () => false,
   isAnimaArtistMode = null,
 }) {
@@ -1408,10 +1410,41 @@ export function createArtistThumbController({
     return overrides;
   }
 
+  /** 이 화면이 쓸 해상도를 정한다 (사용자 지정 2026-08-29).
+   *
+   *  · **Auto Res 는 언제나 무시한다.** 그것은 랜덤 프롬프트의 소스 행에서 읽은
+   *    값이라 아티스트 썸네일과 아무 상관이 없다.
+   *  · **단일 [Generate] 는 Rnd Res 도 무시한다.** 아티스트를 비교하는 화면이라
+   *    장마다 크기가 달라지면 비교가 안 된다.
+   *  · `with random` 만 Rnd Res 를 따른다(그쪽은 매번 다른 그림이 목적이다).
+   *
+   *  ⚠️ `getCurrentGenerationParams()`(= `_collectCurrentParams`)는 Rnd Res 면
+   *     **추첨**하고, 컨트롤에는 Auto Res 감지값이 앉아 있을 수 있다 - 그래서
+   *     기본은 `getUserChosenResolution()`(서버에 저장된 사용자 선택)을 쓴다.
+   */
+  function resolutionOverridesFor(mode) {
+    if (mode === 'random' && typeof getCurrentGenerationParams === 'function') {
+      const rolled = currentActiveResolutionOverrides();
+      if (rolled && rolled.width && rolled.height) return rolled;
+    }
+    if (typeof getUserChosenResolution === 'function') {
+      try {
+        const chosen = getUserChosenResolution();
+        if (chosen && chosen.width && chosen.height) {
+          return {resolution: chosen.resolution, width: chosen.width, height: chosen.height};
+        }
+      } catch (error) {
+        console.warn('Artist Thumbnail resolution unavailable', error);
+      }
+    }
+    return currentActiveResolutionOverrides();
+  }
+
   function generationPayloadForItem(item, requestId, overrides = {}) {
     const artistPrompt = formatArtistPrompt(item.artist);
-    const activeResolution = currentActiveResolutionOverrides();
+    const activeResolution = resolutionOverridesFor(overrides.__resMode || 'fixed');
     const mergedOverrides = {...activeResolution, ...overrides};
+    // ⚠️ `__resMode` 는 **내부 표식**이다. 서버 스키마에 없으므로 반환에 섞지 않는다.
     return {
       ...activeResolution,
       request_id: requestId,
@@ -1501,6 +1534,7 @@ export function createArtistThumbController({
       if (randomGenerateBtn) randomGenerateBtn.textContent = 'Requesting...';
       applyGeneratedPromptToEditor(positive, negative);
       await requestArtistGeneration(generationPayloadForItem(item, requestId, {
+        __resMode: 'random',        // 이쪽만 Rnd Res 를 따른다
         prefix: '',
         positive,
         postfix: '',
@@ -1536,6 +1570,7 @@ export function createArtistThumbController({
     if (!positive.trim()) throw new Error(`${item.artist} random prompt is empty`);
     const negative = String(randomPrompt.negative_prompt || negEdit?.value || '');
     return generationPayloadForItem(item, requestId, {
+      __resMode: 'random',          // 큐의 random 항목도 같다
       prefix: '',
       positive,
       postfix: '',
@@ -1908,6 +1943,86 @@ export function createArtistThumbController({
       }
       selectArtist(item);
     });
+    // ── 방향키로 아티스트 고르기 (사용자 지정 2026-08-29) ────────────────────
+    //
+    // 히스토리 뷰어와 **같은 손버릇**: 좌우는 한 칸, 상하는 **한 줄**.
+    // 넷 다 ±1 로 두면 다열 목록에서 손이 예측한 대로 안 움직인다(그쪽 주석 참조).
+    // ⚠️ 마지막 줄에서 아래로 가면 **다음 페이지**로 넘어간다(사용자 지정).
+    //    이미 있는 `loadAdjacentPage` 를 쓴다 - 휠 넘김과 같은 길이라 잠금도 공유된다.
+    function gridColumnCount() {
+      if (!gridEl) return 1;
+      try {
+        const template = String(getComputedStyle(gridEl).gridTemplateColumns || '').trim();
+        if (!template || template === 'none') return 1;
+        return Math.max(1, template.split(/\s+/).length);
+      } catch (_) {
+        return 1;
+      }
+    }
+
+    function visibleCards() {
+      return Array.from(gridEl?.querySelectorAll('.artist-thumb-card[data-artist]') || []);
+    }
+
+    async function moveSelection(delta) {
+      const cards = visibleCards();
+      if (!cards.length) return;
+      const key = selected ? String(selected.artist || '') : '';
+      let at = cards.findIndex(c => c.dataset.artist === key);
+      if (at < 0) {
+        // 고른 것이 없으면 방향에 따라 양 끝에서 시작한다.
+        const first = itemFromCard(delta >= 0 ? cards[0] : cards[cards.length - 1]);
+        if (first) selectArtist(first);
+        return;
+      }
+      const next = at + delta;
+      if (next >= 0 && next < cards.length) {
+        const item = itemFromCard(cards[next]);
+        if (item) {
+          selectArtist(item);
+          cards[next].scrollIntoView({block: 'nearest'});
+        }
+        return;
+      }
+      // 목록 밖으로 나갔다 - 페이지를 넘긴다. 넘긴 뒤 들어온 자리에서 이어 고른다.
+      const direction = next < 0 ? -1 : 1;
+      if (direction > 0 ? currentPage >= totalPages - 1 : currentPage <= 0) return;
+      await loadAdjacentPage(direction);
+      const after = visibleCards();
+      if (!after.length) return;
+      const landing = direction > 0 ? after[0] : after[after.length - 1];
+      const item = itemFromCard(landing);
+      if (item) {
+        selectArtist(item);
+        landing.scrollIntoView({block: 'nearest'});
+      }
+    }
+
+    document.addEventListener('keydown', event => {
+      // 이 탭이 보이지 않으면 방향키를 가로채지 않는다 - 다른 화면의 손버릇을 뺏는다.
+      const pane = document.getElementById('rightTabArtists');
+      if (!pane || pane.hidden || pane.offsetParent === null) return;
+      if (event.altKey || event.metaKey) return;
+      // 입력 중에는 손대지 않는다 - 검색창·프롬프트 칸에서 화살표는 캐럿 이동이다.
+      const el = document.activeElement;
+      const tag = el ? String(el.tagName || '').toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+      if (selectionMode) return;
+
+      const columns = gridColumnCount();
+      if (event.key === 'ArrowLeft') { event.preventDefault(); void moveSelection(-1); }
+      else if (event.key === 'ArrowRight') { event.preventDefault(); void moveSelection(1); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); void moveSelection(-columns); }
+      else if (event.key === 'ArrowDown') { event.preventDefault(); void moveSelection(columns); }
+      else if (event.key === 'Enter') {
+        // ⚠️ 사용자 지정: 여기서는 **Ctrl+Enter 가 with random** 이다. 메인 화면의
+        //    관례(Ctrl+Enter = 그냥 생성)와 반대지만, 이 화면의 주 동작이 그쪽이다.
+        event.preventDefault();
+        if (event.ctrlKey) void generateWithRandomPrompt();
+        else void generateSelected();
+      }
+    });
+
     gridEl?.addEventListener('contextmenu', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
       if (!card || !gridEl.contains(card)) return;

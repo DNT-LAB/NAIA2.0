@@ -770,7 +770,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260826-artistthumb1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260829-keys')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -783,6 +783,14 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260826-art
       setPromptFields: applyPromptFields,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
       getCurrentGenerationParams: () => _collectCurrentParams(),
+      // Auto Res·Rnd Res 를 **무시한** 해상도(사용자 지정 2026-08-29).
+      // ⚠️ `_collectCurrentParams()` 는 Rnd Res 면 추첨하고, 컨트롤에는 Auto Res 감지값이
+      //    앉아 있을 수 있다 - 아티스트 썸네일은 그 둘 다 따르면 안 된다.
+      getUserChosenResolution: () => {
+        const label = String(storedResolutionValue || baseResolutionValue || '');
+        const m = label.match(/(\d+)\s*x\s*(\d+)/);
+        return m ? {resolution: label, width: Number(m[1]), height: Number(m[2])} : null;
+      },
       isComfyUiAnimaMode,
       isAnimaArtistMode,
     });
@@ -3508,6 +3516,11 @@ let autoResDetectedLabel = null;
 // 그 '고정' 이 성립하려면 에코가 이 값을 못 덮어야 한다 - Rnd Res 를 끄는 것 자체가
 // `set_param` 이라 `params` 에코를 부르기 때문이다. 그래서 표식으로 지킨다.
 let dispatchedResolutionLabel = null;
+// 서버에 저장된 **사용자가 고른** 해상도. Auto Res(감지값)도 Rnd Res(추첨)도 이것을
+// 건드리지 않는다 - 그 둘은 컨트롤(표시)과 요청만 바꾼다.
+// 아티스트 썸네일처럼 "그 둘을 무시하고 내 설정대로" 가 필요한 자리가 쓴다
+// (사용자 지정 2026-08-29).
+let storedResolutionValue = '';
 const naiModelMetaByKey = new Map();
 let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
@@ -4970,6 +4983,7 @@ function updateParams(m) {
   }
   if (m.resolution !== undefined) {
     baseResolutionValue = m.resolution;
+    storedResolutionValue = String(m.resolution || '');
   }
   if (m.steps !== undefined) paramEls.steps.value = m.steps;
   if (m.cfg_scale !== undefined) paramEls.cfg_scale.value = m.cfg_scale;
@@ -5199,6 +5213,7 @@ function setParam(key, value) {
     // 안 그러면 방금 고른 값이 다음 에코에서 옛 Auto Res 값으로 되돌아간다.
     autoResDetectedLabel = null;
     dispatchedResolutionLabel = null;
+    storedResolutionValue = String(value || '');
     paramEls.resolution.value = value;
     qResolution.value = value;
     if (!resolutionPresetResolutionOptions()) baseResolutionValue = value;

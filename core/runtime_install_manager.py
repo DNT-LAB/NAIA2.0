@@ -498,7 +498,7 @@ class RuntimeInstallManager:
         for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
             if self._cancel.is_set():
                 raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
-            headers = {"User-Agent": "NAIA/2.0.39 RuntimeInstallManager"}
+            headers = {"User-Agent": "NAIA/2.0.40 RuntimeInstallManager"}
             if downloaded > 0:
                 headers["Range"] = f"bytes={downloaded}-"
             # ⚠️ `_set_state` 는 dict.update 라 None 을 넣으면 그 값이 None 이 된다.

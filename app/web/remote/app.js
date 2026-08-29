@@ -3425,7 +3425,6 @@ let translatorPopupRequestId = '';
 let translatorPopupRequestText = '';
 let translatorPopupTimer = null;
 let translatorPopupSeq = 0;
-let translatorPopupComposing = false;
 const translatorHangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
 const TRANSLATOR_AUTO_TRANSLATE_MS = 600;
 // ---- Result history wrappers ----
@@ -7416,7 +7415,13 @@ function requestTranslatorPopupTranslate(options = {}) {
 
 function scheduleTranslatorPopupTranslation() {
   clearTranslatorPopupTimer();
-  if (!translatorPopup || translatorPopup.hidden || translatorPopupComposing) return;
+  // ⚠️ **조합 중이라고 막지 않는다**(사용자 제보 2026-08-29).
+  //    한글 IME 는 마지막 음절의 조합을 공백·구두점·포커스 이동 전까지 **열어 둔다.**
+  //    그래서 `보고있대` 를 치고 멈추면 `compositionend` 가 영영 안 와서, 마지막
+  //    글자가 번역에 안 실렸다 - 화면에는 그 앞까지의 옛 번역이 남았다.
+  //    `input` 은 조합 중에도 오고 그때 `value` 에는 조합 중인 글자가 이미 들어 있다.
+  //    **멈춤(디바운스)이 곧 신호**다.
+  if (!translatorPopup || translatorPopup.hidden) return;
   const text = translatorInput?.value?.trim() || '';
   if (!text) {
     if (translatorOutput) translatorOutput.value = '';
@@ -7424,6 +7429,11 @@ function scheduleTranslatorPopupTranslation() {
     return;
   }
   if (!translatorHangulRe.test(text)) return;
+  // ⚠️ 음절이 **덜 만들어진 상태**에서는 쏘지 않는다. `대` 를 치는 중간은 `ㄷ`
+  //    (호환 자모 U+3131~U+318E)인데, 그걸 보내면 엉뚱한 번역이 한 번 스쳤다가
+  //    바뀐다. 조합을 막는 대신 이 한 글자만 본다 - 사용자가 멈춘 자리가 음절
+  //    한가운데면 아직 단어가 아니다.
+  if (/[ㄱ-ㆎ]$/.test(text)) return;
   translatorPopupTimer = window.setTimeout(() => {
     translatorPopupTimer = null;
     requestTranslatorPopupTranslate({force: false});
@@ -7472,14 +7482,12 @@ function insertTranslatorOutput() {
 
 if (translatorInput) {
   translatorInput.addEventListener('input', scheduleTranslatorPopupTranslation);
-  translatorInput.addEventListener('compositionstart', () => {
-    translatorPopupComposing = true;
-    clearTranslatorPopupTimer();
-  });
-  translatorInput.addEventListener('compositionend', () => {
-    translatorPopupComposing = false;
-    scheduleTranslatorPopupTranslation();
-  });
+  // ⚠️ `compositionstart` 는 안 듣는다. 예전에는 거기서 예약을 취소했는데, 한글은
+  //    조합이 안 끝나서 그 취소가 곧 "영영 안 나감" 이었다(사용자 제보 2026-08-29).
+  //    조합 상태를 기억할 이유도 없어졌다 - 디바운스가 알아서 멈춤을 기다린다.
+  //    `compositionend` 만 듣는다: 음절이 완성된 확실한 자리라 여기서 한 번 더 건다
+  //    (뒤이어 오는 `input` 과 겹쳐도 중복 차단이 잡는다).
+  translatorInput.addEventListener('compositionend', scheduleTranslatorPopupTranslation);
 }
 
 document.addEventListener('click', event => {

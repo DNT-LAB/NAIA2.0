@@ -35,6 +35,24 @@ export function createPromptDrawer({
     }
   }
 
+  /** 서랍을 접는다. **모바일 전용**이다(사용자 지정 2026-08-29).
+   *
+   *  Random / Generate 를 누르면 자동으로 내려온다 - 좁은 화면에서는 이 서랍이
+   *  결과를 통째로 덮고 있어서, 누른 뒤에도 무엇이 나왔는지 볼 수가 없다.
+   *
+   *  ⚠️ 데스크톱에서는 아무것도 안 한다. 거기서는 이것이 '서랍' 이 아니라 늘 펼쳐진
+   *     왼쪽 칸이라(`toggle()` 과 `closeForDesktop()` 이 같은 가드를 쓴다), 접으면
+   *     프롬프트 칸이 통째로 사라진다.
+   *  ⚠️ 이미 닫혀 있으면 손대지 않는다 - 클래스를 다시 써서 트랜지션이 깜빡이는 것을
+   *     막는다.
+   */
+  function closeForMobile() {
+    if (mediaQuery.matches) return;
+    if (!open) return;
+    open = false;
+    syncOpenClasses();
+  }
+
   function showNewContentDot() {
     if (!open && promptNewDot) promptNewDot.classList.remove('hidden');
   }
@@ -59,6 +77,7 @@ export function createPromptDrawer({
 
   return {
     toggle,
+    closeForMobile,
     showNewContentDot,
     switchTab,
   };

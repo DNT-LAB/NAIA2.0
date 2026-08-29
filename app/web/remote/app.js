@@ -2026,7 +2026,7 @@ const generationProgressReady = import('./js/features/generationProgress.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize generation progress module', error);
   });
-const promptDrawerReady = import('./js/features/promptDrawer.mjs')
+const promptDrawerReady = import('./js/features/promptDrawer.mjs?v=20260829-mobileclose')
   .then(({createPromptDrawer}) => {
     promptDrawerControl = createPromptDrawer({
       document,
@@ -8106,7 +8106,19 @@ function armImg2ImgSurface() {
   }, 60000);
 }
 
+// 모바일에서 PROMPT/PARAMS/MODULES 서랍을 접는다(사용자 지정 2026-08-29).
+// 좁은 화면에서는 이 서랍이 결과를 통째로 덮어, 누른 뒤에도 무엇이 나왔는지 못 본다.
+//
+// ⚠️ 거는 자리는 **버튼이 부르는 함수**다. 두 버튼은 각각 입구가 둘이라
+//    (버튼 onclick · 단축키 CTRL/ALT+ENTER) 버튼에만 걸면 단축키로 샌다 -
+//    `generateAction()` / `send('random')` 이 둘 다 지나는 목이다.
+// ⚠️ 데스크톱은 모듈 쪽에서 스스로 물러난다(`closeForMobile` 의 mediaQuery 가드).
+function collapsePromptDrawerForMobile() {
+  try { promptDrawerControl?.closeForMobile?.(); } catch (_) {}
+}
+
 function generateAction() {
+  collapsePromptDrawerForMobile();
   if (virtualCharacterSession()) {
     // ⚠️ 도크의 [인페인트 생성] 과 **같은 함수**를 부른다. 예전에는 여기서 가드만
     //    빌려 쓰고 생성은 직접 불렀는데, 그러다 `flushTransforms()` 를 빠뜨려
@@ -8123,6 +8135,10 @@ function send(cmd) {
     showToast('인페인트 세션 중에는 Random 을 쓸 수 없습니다 (세션 닫기 후 사용)', 'error');
     return;
   }
+  // Random 버튼(과 그 단축키)도 서랍을 접는다. Generate 쪽은 `generateAction()` 이
+  // 이미 접었으므로 여기서 `cmd === 'generate'` 는 안 본다 - 그러면 화면을 거치지
+  // 않는 다른 `send('generate')` 호출까지 서랍을 건드리게 된다.
+  if (cmd === 'random') collapsePromptDrawerForMobile();
   if (cmd === 'generate') {
     // Sequence 탭에서 그룹 팝업을 보고 있으면 메인 Generate = 그 그룹의 '연속 생성'(req1).
     // 이벤트 미선택 상태로 Generate 를 누르면 일반 프롬프트가 생성돼 혼동을 주므로, 적색

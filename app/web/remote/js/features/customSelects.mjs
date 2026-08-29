@@ -345,7 +345,36 @@ export function createCustomSelectController({
     hidePreview(state);
   }
 
+  /** 손가락으로 쓰는 화면인가. 마우스 hover 가 성립하지 않는 환경이다.
+   *
+   *  ⚠️ **매번 다시 묻는다**(캐시하지 않는다). 데스크톱 브라우저에서 창을 줄이거나
+   *     기기 에뮬레이션을 켜면 이 값이 바뀐다 - 한 번 재서 굳히면 그때부터 거짓말을 한다.
+   */
+  function isCoarsePointer() {
+    try {
+      return window.matchMedia('(pointer: coarse)').matches
+        || window.matchMedia('(hover: none)').matches;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function hasPreview(state) {
+    // ⚠️ **터치 화면에서는 preview 를 아예 만들지 않는다.**
+    //
+    //    preview 는 `position: fixed` 레이어이고 z-index 가 메뉴보다 **높다**
+    //    (--z-floating-select-preview 10110 > --z-floating-select 10100).
+    //    데스크톱에서는 메뉴 좌우에 놓이지만, 좌우 공간이 없는 모바일에서는 폴백이
+    //    메뉴와 **같은 자리**를 골라 옵션을 통째로 덮는다. `pointer-events: auto`
+    //    라서 탭이 preview 로 먹히고, 프리셋을 눌러도 값이 안 바뀐다.
+    //
+    //    실측(2026-08-26 조사 · 2026-08-29 재확인, 375~393px):
+    //      옵션 중앙의 `document.elementFromPoint()` = `.custom-select-preview-thumb`
+    //      실제 터치 뒤에도 `#modPreset.value` 가 그대로였다.
+    //
+    //    z-index 나 `pointer-events` 를 손보는 대신 **애초에 안 만든다** - 손가락에는
+    //    hover 라는 것이 없어서 preview 를 띄울 계기 자체가 없다.
+    if (isCoarsePointer()) return false;
     return state.select.dataset.previewKind === 'prompt-preset';
   }
 
@@ -730,10 +759,27 @@ export function createCustomSelectController({
     state.preview.style.top = `${Math.round(top)}px`;
   }
 
+  /** 지금 **실제로 보이는** 세로 구간. 소프트 키보드가 먹은 자리는 뺀다.
+   *
+   *  ⚠️ `window.innerHeight` 만 보면 모바일에서 키보드가 올라온 순간 메뉴를 그 아래로
+   *     밀어 넣는다 - 화면에는 안 보이는데 열려 있는 상태가 된다. `visualViewport` 는
+   *     키보드가 먹은 높이를 빼고 돌려주므로 그것을 기준으로 삼는다.
+   *  ⚠️ `visualViewport` 가 없으면(옛 브라우저) 예전과 **똑같이** 동작한다.
+   */
+  function viewportBand() {
+    const vv = window.visualViewport;
+    if (!vv || !(vv.height > 0)) {
+      return {top: 0, bottom: window.innerHeight, height: window.innerHeight};
+    }
+    const top = vv.offsetTop || 0;
+    return {top, bottom: top + vv.height, height: vv.height};
+  }
+
   function positionMenu(state) {
     const rect = state.button.getBoundingClientRect();
     const viewportGap = 8;
-    const menuMaxHeight = Math.min(420, Math.max(160, window.innerHeight - viewportGap * 2));
+    const band = viewportBand();
+    const menuMaxHeight = Math.min(420, Math.max(160, band.height - viewportGap * 2));
     // ⚠️ **머리말 높이를 더한다.** 이 추정은 원래 옵션 개수만 봤는데(개당 36px),
     // 목록 맨 위에 고정 필터 바가 붙으면서 그 높이가 빠졌다. 항목이 적을 때 바로
     // 드러난다 - 2개면 `2*36+8 = 80px` 로 잡히는데 실제 내용은 바 37 + 항목 56 +
@@ -745,8 +791,8 @@ export function createCustomSelectController({
       menuMaxHeight,
       Math.max(44, state.select.options.length * 36 + 8 + headerHeight),
     );
-    const below = window.innerHeight - rect.bottom - viewportGap;
-    const above = rect.top - viewportGap;
+    const below = band.bottom - rect.bottom - viewportGap;
+    const above = rect.top - band.top - viewportGap;
     const preferBelow = state.wrapper.classList.contains('custom-studio-select') && below >= 64;
     const openUpward = !preferBelow && below < desiredHeight && above > below;
     const available = Math.max(44, openUpward ? above : below);
@@ -763,7 +809,7 @@ export function createCustomSelectController({
       state.menu.style.bottom = `${Math.round(Math.max(viewportGap, window.innerHeight - (rect.top - 4)))}px`;
     } else {
       state.menu.style.bottom = 'auto';
-      state.menu.style.top = `${Math.round(Math.min(window.innerHeight - viewportGap, rect.bottom + 4))}px`;
+      state.menu.style.top = `${Math.round(Math.min(band.bottom - viewportGap, rect.bottom + 4))}px`;
     }
     positionPreview(state);
   }

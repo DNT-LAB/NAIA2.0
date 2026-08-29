@@ -633,8 +633,20 @@ header {
   padding: 7px 10px;
   font-size: 11px;
 }
+/* 프리셋 옵션은 데스크톱에서 220px 로 좁혀 둔다 - 그 오른쪽에 hover preview 가
+   놓이기 때문이다. */
 .custom-select-menu.custom-mod-preset-select .custom-select-option {
   width: min(220px, calc(100% - 8px));
+}
+/* ⚠️ **손가락 화면에서는 폭을 좁히지 않는다.**
+   preview 가 없으므로(customSelects `hasPreview` 가 coarse pointer 를 막는다) 옆을
+   비워 둘 이유가 없고, 좁혀 두면 **눌러도 아무 일이 없는 빈 영역**이 생긴다.
+   실측(2026-08-26 조사): 메뉴 328px 중 오른쪽 108px, 약 33% 가 죽어 있었다.
+   손가락은 마우스보다 부정확해서 그 33% 를 자주 짚는다. */
+@media (pointer: coarse), (hover: none) {
+  .custom-select-menu.custom-mod-preset-select .custom-select-option {
+    width: calc(100% - 8px);
+  }
 }
 .custom-select-menu.custom-setup-input .custom-select-option {
   padding: 8px 10px;

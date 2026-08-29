@@ -1060,7 +1060,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260825-openfor1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260829-mobileA')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,

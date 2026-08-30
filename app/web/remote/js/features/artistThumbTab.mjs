@@ -505,7 +505,10 @@ export function createArtistThumbController({
 
   function updateArtistActionAvailability() {
     const locked = artistQueueRunning;
-    [modeEl, filterEl, searchEl, downloadBtn, selectBtn, randomBtn, prevBtn, nextBtn, gotoBtn, gotoInput].forEach(control => {
+    // ⚠️ 페이지 이동은 **잠그지 않는다**(사용자 지시 2026-08-30). 큐는 자기 배열
+    //    (`artistQueueEntries`)로 돌지 화면을 읽지 않으므로, 넘겨도 아무 영향이 없다.
+    //    막아서 얻는 것이 없이 큐가 도는 동안 목록을 훑지 못하게만 했다.
+    [modeEl, filterEl, searchEl, downloadBtn, selectBtn, randomBtn].forEach(control => {
       if (control) control.disabled = locked;
     });
     if (generateBtn) generateBtn.disabled = false;
@@ -689,15 +692,14 @@ export function createArtistThumbController({
 
   function updatePager() {
     if (pageLabel) pageLabel.textContent = `${currentPage + 1} / ${totalPages}`;
-    if (prevBtn) prevBtn.disabled = artistQueueRunning || currentPage <= 0;
-    if (nextBtn) nextBtn.disabled = artistQueueRunning || currentPage >= totalPages - 1;
+    if (prevBtn) prevBtn.disabled = currentPage <= 0;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages - 1;
     if (gotoInput) {
       gotoInput.max = String(totalPages);
       gotoInput.placeholder = String(currentPage + 1);
       gotoInput.value = '';
-      gotoInput.disabled = artistQueueRunning;
     }
-    if (gotoBtn) gotoBtn.disabled = artistQueueRunning || totalPages <= 1;
+    if (gotoBtn) gotoBtn.disabled = totalPages <= 1;
   }
 
   function scrollGrid(anchor = 'top') {
@@ -709,7 +711,6 @@ export function createArtistThumbController({
   }
 
   async function loadPage(page = 0, options = {}) {
-    if (artistQueueRunning && !options.force) return;
     if (selectionMode) setSelectionMode(false);
     await fetchState();
     const requestId = ++listRequestId;
@@ -766,7 +767,6 @@ export function createArtistThumbController({
   }
 
   async function loadAdjacentPage(direction) {
-    if (artistQueueRunning) return;
     const nextPage = currentPage + direction;
     if (wheelPageLocked || nextPage < 0 || nextPage >= totalPages) return;
     wheelPageLocked = true;

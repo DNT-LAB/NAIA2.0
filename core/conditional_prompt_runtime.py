@@ -770,9 +770,28 @@ class HeadlessConditionalRuleEngine:
 
     @staticmethod
     def _tag_matches_action_target(tag: str, target: str) -> bool:
+        """조건부 액션의 대상 태그를 찾는다. **가중치는 벗겨 놓고 본다.**
+
+        사용자 제보 2026-08-30: "Danbooru Auto-Weight 로 가중치가 씌워지면 조건부의
+        `old=new` 가 작동을 안 한다."
+
+        ⚠️ 원인은 **파이프라인 순서**다. Auto-Weight 는 `post_processing`(3단계)에서
+           태그를 `0.8::solo ::` 로 바꿔 놓고, 조건부는 `after_wildcard`(5단계)에서
+           돈다 - 그때는 이미 원래 글자가 아니다. 완전일치가 영영 안 맞았다
+           (실측: `'0.8::solo ::' == 'solo'` -> False).
+
+        ⚠️ **양쪽 다 벗긴다.** 사용자가 규칙에 `0.8::solo ::` 처럼 가중치째 적어
+           둘 수도 있는데, 한쪽만 벗기면 그 경우가 거꾸로 안 맞는다.
+        ⚠️ 부분일치(`*solo`)는 원래도 우연히 맞았지만(가중치 문자열 안에 이름이
+           들어 있어서), 벗긴 뒤에 보면 `*0.8` 같은 것이 엉뚱한 태그를 집지 않는다.
+        """
+        from core.reference_inset_service import strip_nai_weight_for_match
+
+        bare_tag = strip_nai_weight_for_match(str(tag))
         if target.startswith("*"):
-            return target[1:].strip() in tag
-        return tag == target
+            needle = strip_nai_weight_for_match(target[1:].strip())
+            return bool(needle) and needle in bare_tag
+        return bare_tag == strip_nai_weight_for_match(target)
 
     def _expand_action_tags(self, context, raw_tags) -> list[str]:
         """Expand wildcard tokens (__wc__/<a|b>/$wc) in tags an action injects.

@@ -108,19 +108,65 @@ async def _maybe_autostart_automation(
     ensure_automation_timer_watcher(context, clients)
 
 
+def _band_exit_distance(label: str, width: int, height: int) -> float:
+    """밴드를 끓 때 고를 기본 해상도의 순위. **종횡비가 먼저**다.
+
+    크기는 어차피 전부 1MP 대역으로 내려오므로, 사용자가 잃으면 가장 아쉬운
+    것은 그림의 모양이다(세로 그림을 골랐는데 가로로 되돌아오면 구도가 바뀜다).
+    """
+    from core.resolution_utils import parse_resolution_pair
+
+    pair = parse_resolution_pair(label)
+    if not pair or not width or not height:
+        return float("inf")
+    want = width / height
+    got = pair[0] / pair[1] if pair[1] else 0.0
+    return abs(got - want)
+
+
 def _snap_resolution_into_nai_band(context: Any) -> None:
     """지금 해상도를 선택된 NAI 밴드 안으로 옮긴다(이미 안에 있으면 그대로)."""
     try:
         if str(context.get_api_mode() or "").upper() != "NAI":
             return
         params = context.remote_params
-        if not context._coerce_bool(params.get("nai_resolution_preset_enabled", False)):
-            return
         from core.resolution_utils import (
             nai_resolution_preset_labels,
             nearest_nai_preset_resolution,
             parse_resolution_pair,
         )
+
+        if not context._coerce_bool(params.get("nai_resolution_preset_enabled", False)):
+            # 밴드를 **끕 때**도 맞춰야 한다(사용자 제보 2026-08-30).
+            #
+            # 예전에는 여기서 그냥 돌아섬다 - 그러면 밴드가 올려 놓은 큰 해상도가
+            # 그대로 남고, 목록만 기본(무료) 대역으로 돌아온다. 사용자는 "프리셋을
+            # 끓으니 원래대로 돌아왔다" 고 읽는데 실제로는 유료 해상도에 서 있다.
+            #
+            # 실측(사용자 실기 7243, 2026-08-30): 밴드 Large 를 끔 뒤 목록이
+            #   [1024x1024 ... 1216x832](전부 <=1MP) **+ 1408x1088 (1,531,904px)** 이었고,
+            #   그 하나가 선택된 채로 남아 Generate 가 `32 Anlas` 를 붙였다.
+            # ⚠️ 표시만의 문제가 아니다 - **Rnd Res 가 그 항목을 추첨할 수 있다.**
+            #    목록에 남아 있으면 사용자가 모르는 사이에 Anlas 가 나간다.
+            base = list(context.resolution_options_for_mode("NAI"))
+            current_off = str(params.get("resolution") or "")
+            if not base or current_off in base:
+                return
+            pair_off = parse_resolution_pair(current_off)
+            if not pair_off:
+                return
+            width_off, height_off = pair_off
+            target = min(
+                base,
+                key=lambda label: _band_exit_distance(label, width_off, height_off),
+            )
+            snapped = parse_resolution_pair(target)
+            if not snapped:
+                return
+            context.set_param("resolution", f"{snapped[0]} x {snapped[1]}")
+            context.set_param("width", snapped[0])
+            context.set_param("height", snapped[1])
+            return
 
         band = nai_resolution_preset_labels(params.get("nai_resolution_preset"))
         current = str(params.get("resolution") or "")

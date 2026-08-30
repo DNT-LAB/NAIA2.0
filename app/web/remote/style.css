@@ -934,6 +934,27 @@ header {
   border-color: var(--border-glow);
   box-shadow: 0 0 0 2px rgba(124,106,239,0.22);
 }
+/* 확인창 안의 체크박스(예: 삭제창의 "이번 실행 동안 물어보지 않습니다").
+   ⚠️ 글자까지 눌러야 켜진다 - `<label>` 로 감싸 두었으니 상자만 겨냥하지 않게
+      전체를 손가락 크기로 잡는다. */
+.app-confirm-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.app-confirm-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.app-confirm-check:hover { color: var(--text-primary); }
 .app-confirm-actions {
   grid-column: 2;
   display: flex;

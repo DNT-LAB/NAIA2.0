@@ -1106,7 +1106,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260823b-saveas')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260830-railselect')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -8823,6 +8823,18 @@ function showAppDialog(message, options = {}) {
   // 그리고 **고른 key 로 resolve** 한다. 취소는 그대로 false/null.
   // 안 주면 지금까지와 완전히 같다(확인/취소 두 버튼) - 이 함수는 앱 전체가 쓴다.
   const choices = Array.isArray(options.choices) ? options.choices.filter(c => c && c.key) : [];
+  // 확인창 안의 체크박스. `{checkbox: {label, checked}}` 를 주면 그린다.
+  //
+  // 확인 시점의 상태를 **호출자가 준 그 객체에 되적는다**(`options.checkbox.checked`).
+  // resolve 값의 모양을 바꾸지 않으므로 기존 호출부는 아무 영향이 없다 - 이 함수는
+  // 앱 전체가 쓴다(사용자 지정 2026-08-30: 삭제창의 '이번 실행 동안 묻지 않기').
+  const checkbox = (options.checkbox && options.checkbox.label) ? options.checkbox : null;
+  const checkboxHtml = checkbox ? `
+          <label class="app-confirm-check">
+            <input type="checkbox" data-dialog-check${checkbox.checked ? ' checked' : ''}>
+            <span>${escHtml(checkbox.label)}</span>
+          </label>
+        ` : '';
   const choiceHtml = choices.map(c =>
     `<button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="choice"`
     + ` data-choice-key="${escHtml(c.key)}" type="button">${escHtml(c.label || c.key)}</button>`
@@ -8838,6 +8850,7 @@ function showAppDialog(message, options = {}) {
           <div class="app-confirm-title">${escHtml(title)}</div>
           <div class="app-confirm-message">${messageMarkup}</div>
           ${inputHtml}
+          ${checkboxHtml}
         </div>
         <div class="app-confirm-actions">
           ${choiceHtml || `<button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(okText)}</button>`}
@@ -8862,6 +8875,11 @@ function showAppDialog(message, options = {}) {
         return;
       }
       const input = overlay.querySelector('[data-dialog-input]');
+      // ⚠️ 체크 상태는 **확인을 누른 순간에만** 되적는다. 취소했는데 적으면 "묻지
+      //    않기" 가 켜져, 다음부터 묻지도 않고 지운다.
+      if (checkbox) {
+        checkbox.checked = Boolean(overlay.querySelector('[data-dialog-check]')?.checked);
+      }
       cleanup(isPrompt ? (input?.value ?? '') : true);
     };
     const cancel = () => cleanup(isPrompt ? null : false);

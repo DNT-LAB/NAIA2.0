@@ -134,6 +134,12 @@ export function createResultHistoryController({
   let promptFloatCache = {};
   let promptFloatCacheKeys = [];
   const selectedPaths = new Set();
+  // 삭제 확인을 **이번 실행 동안만** 건너뛴다(사용자 요청 2026-08-30).
+  //
+  // ⚠️ 뷰어 설정의 `삭제할 때 묻지 않음`(`skipDeleteConfirm`)과 **다른 것**이다.
+  //    그쪽은 localStorage 에 굳어 다음에 켜도 그대로다. 이건 새로고침하면 사라진다 -
+  //    "지금 몇 장 정리하는 동안만" 이라는 뜻이라 남기면 안 된다.
+  let skipDeleteConfirmThisRun = false;
   let selectionAnchorPath = '';
   let selectionBusy = false;
   let dragSelection = null;
@@ -684,16 +690,29 @@ export function createResultHistoryController({
     // 판단한다 — 0 이면 고른 것도 전부 저장돼 있다. 모르면(-1) 묻는다.
     const unsaved = Number(getUnsavedCount());
     const recoverable = unsaved === 0;
-    if (!viewerBindings.skipDeleteConfirm() || !recoverable) {
+    if ((!viewerBindings.skipDeleteConfirm() && !skipDeleteConfirmThisRun) || !recoverable) {
       const warn = recoverable ? ''
         : (unsaved > 0
             ? `\n\u26a0 아직 저장되지 않은 이미지가 ${unsaved}장 있습니다. 지우면 되돌릴 수 없습니다.`
             : '\n\u26a0 저장 여부를 알 수 없습니다.');
       const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}${warn}`;
+      // ⚠️ 되돌릴 수 없는 삭제(미저장분)에는 이 체크박스를 안 준다. 그 관문까지
+      //    걷어내면 실수 한 번이 영영 돌이킬 수 없다(설정의 '묻지 않음' 도 그래서
+      //    `recoverable` 일 때만 통한다).
+      const askOnce = recoverable
+        ? {label: '이번 실행 동안 물어보지 않습니다', checked: false}
+        : null;
       const confirmed = typeof confirmDialog === 'function'
-        ? await confirmDialog(message, {title: '선택 항목 삭제', okText: `삭제 (${paths.length})`, cancelText: '취소'})
+        ? await confirmDialog(message, {
+          title: '선택 항목 삭제',
+          okText: `삭제 (${paths.length})`,
+          cancelText: '취소',
+          ...(askOnce ? {checkbox: askOnce} : {}),
+        })
         : window.confirm(message);
       if (!confirmed) return;
+      // 확인을 누른 경우에만 켜진다(다이얼로그가 그때만 되적는다).
+      if (askOnce?.checked) skipDeleteConfirmThisRun = true;
     }
 
     setSelectionBusy(true);
@@ -796,7 +815,13 @@ export function createResultHistoryController({
     img.loading = 'lazy';
     img.dataset.path = relPath;
     img.src = historyAssetUrl(relPath, 'thumb');
-    configureThumb(img, relPath, viewerGrid, () => thumbClick(relPath));
+    // 평클릭 한 번으로 **선택까지** 된다(사용자 요청 2026-08-30: "클릭 후 DELETE").
+    // 예전에는 레일에서 평클릭이 선택을 **비우기만** 해서, 눌러 놓고 Del 을 눌러도
+    // 아무 일도 안 일어났다(Ctrl/Shift/드래그로만 홀드가 생겼다).
+    // ⚠️ 팝업 목록과 **같은 옵션**을 쓴다 - 그쪽이 이미 "딸려온 단일 선택" 을
+    //    추적해(`incidentalSelectionPath`) 다른 그림으로 넘어가면 놓아준다.
+    //    그 장치가 없으면 보고 있는 그림과 지워지는 그림이 갈린다.
+    configureThumb(img, relPath, viewerGrid, () => thumbClick(relPath), {selectOnOpen: true});
     viewerGrid.appendChild(img);
   }
 
@@ -807,7 +832,7 @@ export function createResultHistoryController({
     img.loading = 'lazy';
     img.dataset.path = relPath;
     img.src = historyAssetUrl(relPath, 'thumb');
-    configureThumb(img, relPath, viewerGrid, () => thumbClick(relPath));
+    configureThumb(img, relPath, viewerGrid, () => thumbClick(relPath), {selectOnOpen: true});
     viewerGrid.prepend(img);
   }
 

@@ -160,11 +160,21 @@ export function createResultHistoryController({
    *  `저장 N`/`삭제 N` 은 `selectedPaths` 로 동작하므로(orderedSelectedPaths),
    *  A 를 클릭하고 휠로 D 까지 넘어간 뒤 삭제를 누르면 **A 가 지워진다**.
    */
+  /** 지금 선택이 "열려고 클릭했더니 딸려온 한 장" 뿐인가.
+   *
+   *  Ctrl/Shift/드래그로 **작정하고 고른 것**과 가르는 잣대다. 놓아줄지(위)와
+   *  선택 바를 띄울지(아래)가 같은 질문이라 한 곳에서 답한다.
+   */
+  function selectionIsOnlyIncidental() {
+    return Boolean(incidentalSelectionPath)
+      && selectedPaths.size === 1
+      && selectedPaths.has(incidentalSelectionPath);
+  }
+
   function releaseIncidentalSelection(nextPath) {
     if (!incidentalSelectionPath) return;
     if (nextPath && nextPath === incidentalSelectionPath) return;   // 그 그림 그대로다
-    const onlyIncidental = selectedPaths.size === 1
-      && selectedPaths.has(incidentalSelectionPath);
+    const onlyIncidental = selectionIsOnlyIncidental();
     incidentalSelectionPath = '';
     // 여러 장이 고여 있으면 사용자가 따로 고른 것이다 - 표시만 지우고 둔다.
     if (onlyIncidental) clearSelection();
@@ -282,7 +292,15 @@ export function createResultHistoryController({
       // 한 줄을 남겨야 해서 자기 규칙을 따로 쓴다 — 그래서 클래스는 바에 붙인다.
       bar.classList.toggle('is-empty', count === 0);
     });
-    if (viewerPanel) viewerPanel.classList.toggle('has-history-selection', count > 0);
+    // ⚠️ **우측 레일에는 딸려온 한 장 때문에 바를 띄우지 않는다**(사용자 지적
+    //    2026-08-30: "히스토리 탭 사양이 노출되고 있어요. 여기에 나타나면 안돼요").
+    //    평클릭으로 선택되게 바꾸면서(`selectOnOpen`) 그림 한 장만 눌러도 저장/삭제
+    //    버튼 줄이 통째로 튀어나왔다 - 레일은 그림을 훑는 자리지 조작판이 아니다.
+    //    Ctrl/Shift/드래그로 **작정하고 고른 경우에만** 띄운다.
+    // ⚠️ 삭제는 그대로 된다 - Del 은 `selectedPaths` 를 보지 바를 보지 않는다.
+    //    무엇이 골라졌는지는 썸네일 테두리가 말한다.
+    const deliberate = count > 0 && !selectionIsOnlyIncidental();
+    if (viewerPanel) viewerPanel.classList.toggle('has-history-selection', deliberate);
   }
 
   function clearSelection() {

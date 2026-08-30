@@ -1106,7 +1106,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260830-oneclick')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260830-railbar')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,

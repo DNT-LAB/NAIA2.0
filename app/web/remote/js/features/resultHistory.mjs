@@ -741,6 +741,7 @@ export function createResultHistoryController({
     setSelectionBusy(true);
     let succeeded = 0;
     let failed = 0;
+    let unrescued = 0;
     try {
       const response = await fetch('/api/history/selected/delete', {
         method: 'POST',
@@ -756,14 +757,20 @@ export function createResultHistoryController({
       });
       succeeded = Number(data.deleted || removed.length || 0);
       failed = Array.isArray(data.failed) ? data.failed.length : 0;
+      // ⚠️ 저장된 적 없는 그림은 지우기 전에 휴지통에 한 벌 남긴다. 그것이 **실패**하면
+      //    사본이 어디에도 없는데, 예전에는 그대로 "성공" 이라고 말했다 - 묻지 않기를
+      //    켜 둔 사용자에게는 경고 없는 영구 유실이었다(Codex BLOCK 5).
+      //    지우는 것 자체는 막지 않는다(사용자가 원한 것이다). 다만 조용하지는 않다.
+      unrescued = removed.filter(item => item && item.rescue_failed).length;
     } catch (error) {
       console.error('Selected history delete failed:', error);
       failed = paths.length;
     }
     if (!selectedPaths.size) selectionAnchorPath = '';
     setSelectionBusy(false);
-    const level = failed ? (succeeded ? 'warning' : 'error') : 'success';
-    showToast(`선택 삭제 완료: 성공 ${succeeded}개, 실패 ${failed}개`, level);
+    const level = failed || unrescued ? (succeeded ? 'warning' : 'error') : 'success';
+    const note = unrescued ? ` · ${unrescued}개는 사본을 못 남겼습니다(복구 불가)` : '';
+    showToast(`선택 삭제 완료: 성공 ${succeeded}개, 실패 ${failed}개${note}`, level);
   }
 
   function setRailCollapsed(collapsed, persist = true) {

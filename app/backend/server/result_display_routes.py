@@ -1284,6 +1284,7 @@ def register_result_display_routes(
                 file_path = str(getattr(item, "filepath", "") or "")
                 deleted_file = False
                 rescued = ""
+                rescue_attempted = False
                 try:
                     if file_path and not keep_file:
                         target = Path(file_path)
@@ -1291,7 +1292,7 @@ def register_result_display_routes(
                             if not _move_to_trash(target):
                                 raise OSError(f"Could not move file to recycle bin: {target}")
                             deleted_file = True
-                    elif not file_path:
+                    elif not file_path and not keep_file:
                         # **저장된 적 없는 그림도 휴지통을 거친다**(사용자 지정 2026-08-30:
                         # "디스크에서 삭제 옵션의 사양이 휴지통으로 보내는 것이니 그대로
                         # 확대 적용").
@@ -1307,6 +1308,7 @@ def register_result_display_routes(
                         #    안 된다 - 대신 결과에 적어 화면이 말할 수 있게 한다.
                         # ⚠️ 휴지통 이동이 실패하면 **쓴 파일을 그대로 둔다.** 지우면
                         #    보존하려던 목적이 무너진다.
+                        rescue_attempted = True
                         rescued = _rescue_unsaved_to_trash(session_context, item)
                     removed = session_context.result_store.remove_item(item)
                     if removed is None:
@@ -1319,6 +1321,10 @@ def register_result_display_routes(
                         # 저장된 적 없던 그림을 지우기 전에 한 벌 남긴 자리(빈 문자열이면
                         # 못 남겼다 - 그때만 진짜로 되돌릴 수 없다).
                         "rescued_path": rescued,
+                        # ⚠️ 빈 `rescued_path` 만으로는 **시도조차 안 한 경우**와 구분되지
+                        #    않는다(저장된 그림도 빈 문자열이다). 화면이 "성공" 이라고
+                        #    거짓말하지 않으려면 이 표식이 필요하다(Codex BLOCK 5).
+                        "rescue_failed": bool(rescue_attempted and not rescued),
                     })
                 except Exception as exc:
                     delete_failures.append({"path": rel_path, "error": str(exc)})

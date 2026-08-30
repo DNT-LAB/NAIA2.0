@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
@@ -121,7 +122,13 @@ def _band_exit_distance(label: str, width: int, height: int) -> float:
         return float("inf")
     want = width / height
     got = pair[0] / pair[1] if pair[1] else 0.0
-    return abs(got - want)
+    if want <= 0 or got <= 0:
+        return float("inf")
+    # ⚠️ **뺄셈으로 재면 안 된다.** 비율은 곱셈 눈금이라 1 아래가 눌려서, 세로 후보가
+    #    늘 가깝게 나온다(Codex CONCERN 6). 실제로 1344x1280(1.05) 에서 뺄셈은
+    #    0.366(세로 832x1216) < 0.412(가로 1216x832) 로 **가로 그림을 세로로 뒤집었다.**
+    #    로그 거리는 회전 대칭이라 배수 오차를 그대로 잰다: 0.429 vs 0.331 -> 가로.
+    return abs(math.log(got) - math.log(want))
 
 
 def _snap_resolution_into_nai_band(context: Any) -> None:

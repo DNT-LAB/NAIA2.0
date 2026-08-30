@@ -206,6 +206,20 @@ def _anlas(usage: Any) -> int:
     return value
 
 
+def _cannot_pay(usage: Any) -> bool:
+    """**알려진** Anlas 가 0 이하인가. 모르는 계정은 False - 후보로 남긴다.
+
+    ⚠️ `_anlas` 의 -1(모름)을 여기서 '없음' 으로 읽으면 안 된다. 조회가 한 번
+       실패했을 뿐 잔액이 멀쩡한 계정을 영영 안 쓰게 된다.
+    """
+    if not isinstance(usage, dict):
+        return False
+    value = usage.get("anlas")
+    if not isinstance(value, int):
+        return False
+    return value <= 0
+
+
 def average_percent(usage_by_id: dict[str, Any], account_ids: Iterable[str]) -> int | None:
     """배지에 찍을 **통합값**. 명세대로 합이 아니라 평균이다.
 
@@ -262,10 +276,25 @@ def select_account(
     #    보는 것인데, 지금 나가는 돈은 Anlas 다 - 사용량이 0% 인 계정도 Anlas 가 있으면
     #    멀쩡하게 쓴다. 여기서 빼면 버리는 후보가 생긴다(사용자 지정 2026-08-30).
     if prefer_anlas:
-        pool = list(ids)
+        # ⚠️ 무료 필터를 뗐으면 **유료 짝을 달아야 한다.** 여기를 비워 두면 라운드
+        #    로빈·구간형·10장 정책은 잔액을 아예 안 보므로, Anlas 가 0 인 계정이
+        #    차례가 되는 순간 결제 불가 토큰으로 요청이 나간다(Codex BLOCK 3).
+        #    동적 할당만 잔액을 비교하고 있었다.
+        payable = [a for a in ids if not _cannot_pay(usage_by_id.get(a))]
+        pool = payable if payable else list(ids)
     else:
         live = [a for a in ids if not is_exhausted(usage_by_id.get(a))]
-        pool = live if live else ids
+        if live:
+            pool = live
+        else:
+            # **전부 소진**이면 지금부터는 무료 대역도 Anlas 로 나간다
+            # (`is_free_generation` 주석이 말하는 바로 그 경우 - `quota_exhausted`).
+            # 그런데 잣대는 여전히 무료 사용량이라 전부 0 으로 동률이 되어,
+            # 100 Anlas 인 계정과 10,000 인 계정을 구분하지 못했다(Codex BLOCK 2).
+            # 깎이는 것이 바뀌었으면 재는 자도 바꾼다.
+            prefer_anlas = True
+            payable = [a for a in ids if not _cannot_pay(usage_by_id.get(a))]
+            pool = payable if payable else list(ids)
 
     if len(pool) == 1:
         return pool[0]

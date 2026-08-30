@@ -14,6 +14,27 @@ from core.headless_image_utils import image_to_png_bytes
 from core.resolution_utils import MAX_1MP_PIXELS, MAX_NAI_SOURCE_PIXELS, snap_resolution_to_multiple
 
 
+def _session_position_mode(characters: list[dict[str, Any]] | None) -> str:
+    """인페인트 세션을 열 때의 POS 모드. **원본 그림을 따라간다.**
+
+    ``auto``  - 캐릭터는 복원됐는데 좌표가 하나도 없다 = 원본이 공홈 AI's Choice
+                (`use_coords: false`)로 나갔다는 뜻이다. 그 그림을 고치는 요청도
+                좌표를 안 실어야 배치가 그대로 남는다.
+    ``custom`` - 좌표가 하나라도 있으면 사용자가 자리를 정한 그림이다. 캐릭터가
+                아예 없을 때도 이쪽이다(알 길이 없고, 예전 기본값이다).
+
+    ⚠️ 좌표의 **유무**로 가른다. 값이 `{0.5, 0.5}` 인지로 가르면 안 된다 - NAI 는
+       좌표를 안 쓸 때도 전원에게 그 기본값을 적어 두므로, 진짜로 한가운데를 고른
+       사용자와 구분이 안 된다(`utils/image_info` 의 같은 주의).
+    """
+    if not characters:
+        return "custom"
+    for character in characters:
+        if isinstance(character, dict) and character.get("position"):
+            return "custom"
+    return "auto"
+
+
 class HeadlessImg2ImgService:
     def __init__(self, context: Any):
         self.context = context
@@ -320,6 +341,10 @@ class HeadlessImg2ImgService:
             canvas_supported = bool(context._is_naid5_model()) and clean_mode == "inpaint"
         except Exception:
             canvas_supported = False
+        # 세션 캐릭터를 **먼저** 만든다 - `position_mode` 를 이것으로 정하기 때문이다.
+        session_characters = self._session_characters_from_sources(
+            params, prompt_ctx, int(image.width), int(image.height)
+        )
         context.img2img_session = {
             "active": True,
             "window_id": context._img2img_window_counter,
@@ -351,10 +376,19 @@ class HeadlessImg2ImgService:
             # POS 모드(사용자 지정 2026-08-29). 인페인트는 **해상도가 고정**이라
             # 좌표가 뜻을 가진다 - 화면에서 AUTO/CUSTOM 을 고르고, 여기서 그것을 보고
             # 좌표를 실을지 말지 정한다(AUTO = 안 싣는다 = `use_coords:false`).
-            # ⚠️ 기본은 CUSTOM 이다. 지금까지 늘 좌표를 실었으므로 기본을 바꾸면
-            #    기존 사용자의 인페인트 구도가 말없이 달라진다.
+            # ⚠️ **원본 그림을 따라간다**(사용자 지정 2026-08-30). AI's Choice 로 뽑은
+            #    그림을 인페인트하는데 세션이 CUSTOM 으로 잡히면, 다음 요청이
+            #    `use_coords: true` 로 나가 **배치가 통째로 달라진다** - 사용자는 같은
+            #    그림을 고치려던 것인데 구도가 바뀐다.
+            #
+            #    판별은 복원된 좌표로 한다. `_executed_character_positions` 는
+            #    `coords_given` 이 참일 때만 기록되고(`api_service`), 메타데이터 복원도
+            #    `use_coords` 가 꺼져 있으면 좌표를 버린다(`utils/image_info.py`).
+            #    그래서 **캐릭터는 있는데 좌표가 하나도 없으면 원본이 AI's Choice** 다.
+            # ⚠️ 캐릭터가 아예 없으면 CUSTOM 으로 둔다 - 알 길이 없고, 그때는 사용자가
+            #    직접 캐릭터를 더하며 자리를 잡는 흐름이라 예전 기본값이 맞다.
             # ⚠️ RAND 는 없다 - 세션 캐릭터에는 뜻이 없어 화면에서도 막는다.
-            "position_mode": "custom",
+            "position_mode": _session_position_mode(session_characters),
             "base_offset_x": 0,
             "base_offset_y": 0,
             "base_width": int(image.width),
@@ -382,9 +416,7 @@ class HeadlessImg2ImgService:
             # 캐릭터 프롬프트 슬롯을 소스 이미지/라이브 메인 UI에서 자동 채움(future01 패리티 복구).
             # 좌표는 **이 이미지 크기 기준의 픽셀**로 들어온다. 세션이 열릴 때 캔버스가
             # 곧 이미지 크기이므로 그대로 캔버스 좌표가 된다.
-            "characters": self._session_characters_from_sources(
-                params, prompt_ctx, int(image.width), int(image.height)
-            ),
+            "characters": session_characters,
             # 생성 요청은 팝업 수명과 분리해 추적한다. 세션/마스크는 완료 뒤에도
             # 살아 있어 같은 마스크로 재시도할 수 있고, 다른 Web 클라이언트나 분리창도
             # 동일한 submission 상태를 관찰한다.

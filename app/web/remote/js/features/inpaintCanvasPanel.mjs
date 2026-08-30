@@ -65,6 +65,10 @@ const wrapDeg = (v) => ((Math.round(Number(v) || 0) % 360) + 360) % 360;
 export function createInpaintCanvasPanel({
   panel, plane, viewer, escHtml, setModuleParam, showToast,
   openMaskEditor = () => {},
+  // 마스크를 지우는 **하나뿐인 목**. 서버만 지우면 브라우저에 남은 초안이 살아 있어,
+  // 다시 [마스크 그리기] 를 열면 지운 것이 그대로 되살아난다(사용자 제보 2026-08-30).
+  // 실측: 지우기 전 31,232px -> 지운 뒤 도크는 "빈 곳 자동" 인데 에디터는 여전히 31,232px.
+  onClearMask = () => {},
   onSlider = () => {},
   onRepeat = () => {},
   onGenerate = () => {},
@@ -83,6 +87,21 @@ export function createInpaintCanvasPanel({
   let viewMode = 'edit';
   // 드래그 중 계산한 베이스 오프셋. DOM 에 붙여 두면 재렌더에 함께 날아간다.
   let pendingOffset = null;
+  // ── 되돌리기 (사용자 지정 2026-08-30: "실수로 드래그하면 되돌릴 방법이 없다") ──
+  //
+  // **되돌릴 대상은 이동과 회전뿐이다**(사용자 지정). 확대는 뺀다 - 커서를 붙잡고
+  // 굴리는 조작이라 한 눈금이 곧 한 단계가 아니고, 되돌리면 붙잡았던 지점이
+  // 어긋나 오히려 더 헷갈린다.
+  //
+  // ⚠️ 초기화(`base_reset`)는 **되돌리기 대상이 아니다.** 그것은 확대까지 함께
+  //    되돌리는데, 여기서 이동·회전만 복구하면 "되돌렸다" 면서 반만 돌아온다 -
+  //    반쪽 복구는 거짓말이라 아예 안 건다.
+  // ⚠️ 쌓는 것은 **바뀌기 전 값**이다. 바뀐 뒤에 쌓으면 한 번 눌러도 제자리다.
+  const UNDO_LIMIT = 20;
+  let undoStack = [];
+  // 되돌리는 도중에 다시 쌓지 않는다 - 안 막으면 되돌리기가 자기 자신을 기록해
+  // 두 번째 누름이 원래대로 돌아온다(무한 왕복).
+  let undoApplying = false;
   // [자동 마스킹] 을 누른 뒤 결과를 기다리는 중인가(사용자 지정 2026-08-27:
   // "시각적 피드백이 필요하다"). 칠하는 데 성공하면 상태가 오고, 그때 한 번
   // 번쩍이며 말해 준다.
@@ -168,6 +187,9 @@ export function createInpaintCanvasPanel({
         flashMask = true;                 // 아래 renderPlane 이 한 번 번쩍인다
       }
     }
+    // ⚠️ **그림이 바뀌면 되돌리기 기록도 버린다.** 세션은 살아 있는데 다른 그림을
+    //    열면(`window_id` 가 바뀐다) 남의 그림에서 잰 자리가 이 그림에 적용된다.
+    if (next && String(next.window_id || '') !== String(state?.window_id || '')) undoStack = [];
     if (next) state = next;
     if (!panel) return;
     // ⚠️ 조작 중에는 절대 다시 그리지 않는다(posStage 규칙 1). 서버 echo 가 와도
@@ -182,6 +204,9 @@ export function createInpaintCanvasPanel({
       panel.innerHTML = '';
       panel.hidden = true;
       viewMode = 'edit';        // 다음 세션은 편집부터 시작한다
+      // 되돌리기 기록은 **세션의 것**이다. 다음 세션으로 넘기면 남의 그림의 자리를
+      // 이 그림에 적용하게 된다.
+      undoStack = [];
       // ⚠️ 번쩍임 표도 여기서 내린다. 세션이 없을 때 `showResult()` 가 불리면
       //    (일반 생성 결과도 이 자리를 지난다) 표만 서고 그릴 도크가 없어, 다음에
       //    세션을 열자마자 이유 없이 번쩍인다 - 표식이 값싸진다.
@@ -273,6 +298,8 @@ export function createInpaintCanvasPanel({
           <div class="ic-row">
             <span class="ic-label">캔버스</span>
             <select class="ic-select" data-ic="size" ${off} aria-label="캔버스 해상도">${sizeOptions(w, h)}</select>
+            <button type="button" class="ic-btn" data-ic="undo" ${(editing && undoStack.length) ? '' : 'disabled'}
+              title="이동/회전을 한 단계 되돌립니다 (Ctrl+Z)">&#8630;</button>
             <button type="button" class="ic-btn" data-ic="reset" ${off}
               title="원본 그대로로 되돌립니다 — 크기·위치·확대·회전">초기화</button>
             <button type="button" class="ic-btn${showGrid ? ' is-on' : ''}" data-ic="grid" ${off} title="격자">격자</button>
@@ -477,8 +504,59 @@ export function createInpaintCanvasPanel({
     return true;
   }
 
+  /** 지금의 이동·회전. 되돌리기가 기억하는 것은 이 셋뿐이다. */
+  function transformSnapshot() {
+    return {
+      x: Math.round(Number(state?.base_offset_x) || 0),
+      y: Math.round(Number(state?.base_offset_y) || 0),
+      rotation: Number(state?.base_rotation) || 0,
+    };
+  }
+
+  /** 바꾸기 **직전**에 부른다. 같은 값이면 안 쌓는다(방향키를 오래 눌러도 한 칸씩만). */
+  function pushUndo() {
+    if (!state?.active || undoApplying) return;
+    const snap = transformSnapshot();
+    const top = undoStack[undoStack.length - 1];
+    if (top && top.x === snap.x && top.y === snap.y && top.rotation === snap.rotation) return;
+    undoStack.push(snap);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  }
+
+  /** 한 단계 되돌린다. 되돌릴 것이 없으면 말해 준다 - 조용하면 고장으로 읽힌다. */
+  function undoTransform() {
+    if (!state?.active) return;
+    if (!undoStack.length) { showToast?.('되돌릴 이동/회전이 없습니다', 'info'); return; }
+    // ⚠️ **미뤄 둔 회전을 먼저 흘려보낸다.** 디바운스에 걸려 있던 값이 되돌린 뒤에
+    //    도착하면 방금 되돌린 것을 다시 덮는다.
+    flushTransforms();
+    const snap = undoStack.pop();
+    const now = transformSnapshot();
+    undoApplying = true;
+    try {
+      if (snap.x !== now.x || snap.y !== now.y) {
+        state.base_offset_x = snap.x;
+        state.base_offset_y = snap.y;
+        send('base_offset', {x: snap.x, y: snap.y});
+      }
+      if (snap.rotation !== now.rotation) {
+        state.base_rotation = snap.rotation;
+        // 슬라이더/숫자도 즉시 맞춘다(규칙 3 - 서버 echo 를 기다리지 않는다).
+        const input = panel?.querySelector('[data-ic-tr="rotation"]');
+        const label = panel?.querySelector('[data-ic-val="rotation"]');
+        if (input) input.value = String(snap.rotation);
+        if (label) label.textContent = `${snap.rotation}°`;
+        send('base_rotation', {value: snap.rotation});
+      }
+    } finally {
+      undoApplying = false;
+    }
+  }
+
   function applyTransform(key, value, at) {
     if (!state) return;
+    // 회전만 되돌리기에 남긴다(확대는 대상이 아니다 - 위 UNDO 주석).
+    if (key !== 'scale') pushUndo();
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
     if (key === 'scale') state.base_scale = value / 100;
     else state.base_rotation = value;
@@ -502,6 +580,7 @@ export function createInpaintCanvasPanel({
       write(GRID_KEY, showGrid ? '1' : '0');
       return render();
     }
+    if (action === 'undo') return undoTransform();
     if (action === 'reset') { flushTransforms(); return send('base_reset', null); }
     if (action === 'zoom-in') return nudge('scale', 1);
     if (action === 'zoom-out') return nudge('scale', -1);
@@ -523,7 +602,11 @@ export function createInpaintCanvasPanel({
       autoMaskTimer = setTimeout(() => { autoMaskPending = false; }, 4000);
       return send('auto_mask', 'true');
     }
-    if (action === 'clear-mask') return send('clear_mask', 'true');
+    // ⚠️ **`send('clear_mask')` 를 직접 부르지 않는다.** 그러면 서버만 지워지고
+    //    브라우저의 마스크 초안이 남아, 에디터를 다시 열면 지운 마스크가 되살아난다.
+    //    지우는 입구가 둘(도크의 [지우기] · 에디터의 [초기화])인데 초안까지 지우는
+    //    쪽은 하나뿐이었다 - 같은 함수로 합친다.
+    if (action === 'clear-mask') return onClearMask();
     // ⚠️ 생성/닫기 전에 미뤄 둔 변형을 먼저 보낸다 - 순서가 뒤집히면 옛 그림으로 굽는다.
     if (action === 'generate') return requestGenerate();
     if (action === 'close') { flushTransforms(); return onClose(); }
@@ -608,6 +691,9 @@ export function createInpaintCanvasPanel({
       if (!pendingOffset) return;
       const {x: ox, y: oy} = pendingOffset;
       pendingOffset = null;
+      // 끄는 동안에는 `state` 가 안 바뀌므로, 여기서 쌓으면 **끌기 전 자리**가 담긴다.
+      // 드래그 한 번 = 한 단계다(사용자가 되돌리고 싶은 단위가 그것이다).
+      pushUndo();
       if (state) { state.base_offset_x = ox; state.base_offset_y = oy; }
       send('base_offset', {x: ox, y: oy});
     });
@@ -618,6 +704,7 @@ export function createInpaintCanvasPanel({
       if (pendingOffset) {
         const {x: ox, y: oy} = pendingOffset;
         pendingOffset = null;
+        pushUndo();
         // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
         if (state) { state.base_offset_x = ox; state.base_offset_y = oy; }
         send('base_offset', {x: ox, y: oy});
@@ -692,11 +779,20 @@ export function createInpaintCanvasPanel({
       const active = document.activeElement;
       // 글자를 치고 있으면 손대지 않는다.
       if (active && active.matches?.('input, textarea, select, [contenteditable="true"]')) return;
+      // Ctrl+Z = 이동/회전 한 단계 되돌리기(사용자 지정 2026-08-30).
+      // ⚠️ 위 가드가 입력칸을 이미 걸러 낸다 - 글자를 치는 중에는 브라우저 기본
+      //    되돌리기가 먹어야 한다.
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === 'z' || event.key === 'Z')) {
+        event.preventDefault();
+        undoTransform();
+        return;
+      }
       const step = event.shiftKey ? NUDGE_PX_COARSE : NUDGE_PX;
       const move = {ArrowLeft: [-step, 0], ArrowRight: [step, 0],
                     ArrowUp: [0, -step], ArrowDown: [0, step]}[event.key];
       if (move) {
         event.preventDefault();
+        pushUndo();
         const ox = Math.round((Number(state.base_offset_x) || 0) + move[0]);
         const oy = Math.round((Number(state.base_offset_y) || 0) + move[1]);
         state.base_offset_x = ox;
@@ -925,6 +1021,18 @@ export function createInpaintCanvasPanel({
       const {w, h} = canvasSize();
       if (!(r.width > 0) || !(r.height > 0) || !(w > 0) || !(h > 0)) return null;
       return {left: r.left, top: r.top, width: r.width, height: r.height, w, h};
+    },
+    /** POS 무대가 얹힐 수 있게 **편집 모드**로 되돌린다.
+     *
+     *  POS 좌표는 "지금 생성할 캔버스" 의 좌표계다 - 결과 보기는 이미 나온 그림을
+     *  보는 화면이라 얹을 판이 없다(평면이 감춰져 `stageRect()` 가 null 이다).
+     *  세션이 없거나 캔버스를 안 쓰면 아무것도 안 한다.
+     */
+    ensureEditMode() {
+      if (!state?.active || !state?.canvas_supported) return false;
+      if (viewMode === 'edit') return false;
+      setViewMode('edit');
+      return true;
     },
     handleModuleState(payload) {
       if (payload && payload.module_id === 'img2img') render(payload);

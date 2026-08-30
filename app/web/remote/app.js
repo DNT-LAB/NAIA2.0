@@ -2123,7 +2123,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260829-vpos')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260830-poseditmode')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2136,6 +2136,8 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
       isRandomResolution: () => !!qRndRes?.classList.contains('on'),
       // 가상 캔버스가 결과 뷰어를 차지하고 있으면 POS 무대는 그 위에 겹쳐 선다.
       getCanvasStage: () => inpaintCanvasControl?.stageRect?.() || null,
+      // POS 는 캔버스 좌표계다 - 결과 보기에서 들어오면 편집 모드로 되돌린다.
+      ensureCanvasEditMode: () => inpaintCanvasControl?.ensureEditMode?.(),
       // ⚠️ 이걸 빠뜨려서 자동완성이 **통째로 죽어 있었다.** 패널 쪽 배선은 있었지만
       //    기본값이 빈 함수라 아무 일도 안 일어났다 - 오류도 안 난다.
       bindTagAssist,
@@ -2305,7 +2307,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260828-draft')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clearneck')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2471,7 +2473,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260829-busy')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260830-undo')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -2483,6 +2485,9 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       // V5 는 팝업을 안 여니 조작도 이쪽에 있어야 한다. 다만 **로직은 옮기지 않는다** -
       // 마스크 디코드/슬라이더 디바운스/생성 규약은 img2img 패널이 계속 SSOT 다.
       openMaskEditor: () => img2imgPanel?.openMaskEditor?.(),
+      // 도크의 [지우기] 도 에디터의 [초기화] 와 **같은 함수**를 쓴다 - 그쪽만
+      // 클라이언트 초안까지 지운다.
+      onClearMask: () => img2imgPanel?.clearMask?.(),
       onSlider: (key, value) => img2imgPanel?.slider?.(key, value),
       onRepeat: value => img2imgPanel?.repeat?.(value),
       onGenerate: () => img2imgPanel?.generate?.(),

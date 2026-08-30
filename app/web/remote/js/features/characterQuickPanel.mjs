@@ -47,6 +47,16 @@ export function createCharacterQuickPanel({
   //    비율로 서서 그림과 어긋난 자리에 원을 놓게 된다
   //    (사용자 제보 2026-08-26: "현재 이미지와 POS 해상도 불일치").
   getCanvasStage = () => null,
+  // 가상 캔버스 세션이 **결과 보기**면 편집 모드로 되돌린다. POS 좌표는 "지금 생성할
+  // 캔버스" 의 좌표계라, 이미 나온 결과를 보는 화면에서는 얹을 판이 없다.
+  //
+  // ⚠️ 결과 보기에서는 `renderPlane` 이 평면을 감추므로 `getCanvasStage()` 가 null 을
+  //    돌려준다 -> 무대가 옛 폴백(파라미터 해상도 == 화면 그림 크기일 때만 배경을 깜)으로
+  //    떨어지는데, 세션 중에는 그 둘이 다르다. 게다가 `is-cq-posedit` 가 결과 이미지를
+  //    `opacity:0` 으로 감춰서 **화면이 통째로 검게** 된다(사용자 제보 2026-08-30).
+  //    실측(원본 832x1216 · 캔버스 1152x896): overlay=false · background=none ·
+  //    무대 비율 1.286 vs 그림 0.684. 편집 모드에서는 overlay=true 로 정상이었다.
+  ensureCanvasEditMode = () => {},
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
 }) {
@@ -466,6 +476,9 @@ export function createCharacterQuickPanel({
       showToast('Rnd Res 중에는 POS 편집이 잠깁니다 (해상도가 매 생성마다 바뀝니다)', 'info');
       return;
     }
+    // ⚠️ **무대를 재기 전**에 편집 모드로 돌려놓는다. 순서가 뒤집히면 평면이 아직
+    //    감춰진 채로 재서 폴백 경로로 떨어진다(그게 곧 검은 화면이다).
+    if (on) { try { ensureCanvasEditMode(); } catch (_) { /* 화면 전환 실패가 POS 를 막으면 안 된다 */ } }
     posEditing = !!on;
     if (posEditing) posPeek = false;
     if (posEditing) {

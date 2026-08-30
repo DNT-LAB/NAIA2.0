@@ -32,6 +32,45 @@ def _viewer_save_dir(context: WebSessionContext) -> Path:
     return context._current_save_directory()
 
 
+def _rescue_unsaved_to_trash(context: WebSessionContext, item: Any) -> str:
+    """저장된 적 없는 히스토리 그림을 지우기 전에 **휴지통에 한 벌 남긴다.**
+
+    사용자 지정 2026-08-30. 저장된 그림은 이미 휴지통을 거치지만(되돌릴 수 있다),
+    저장된 적 없는 그림은 서버 메모리에만 있어 히스토리에서 빼는 순간 사라졌다.
+    그 비대칭 때문에 화면이 "되돌릴 수 없다" 며 한 번 더 물어야 했고, 사용자가 원한
+    '딸깍 한 번' 이 막혔다. 휴지통 사양을 이쪽까지 넓히면 물을 이유가 없어진다.
+
+    ⚠️ 저장 폴더 밑 `_deleted/` 에 쓴다. 저장 폴더 **바로 밑**에 쓰면 사용자가 저장한
+       그림들 사이에 안 지운 파일이 섞일 수 있다(휴지통 이동이 실패하는 경우).
+    ⚠️ 휴지통 이동이 실패하면 **그 파일을 지우지 않는다.** 지우면 보존하려던 목적이
+       무너진다 - 남겨 두고 그 경로를 돌려준다.
+    ⚠️ 어떤 이유로든 실패하면 **빈 문자열**이다. 호출부는 그래도 삭제를 진행한다 -
+       사용자가 원한 것은 지우는 것이고, 이것은 안전망일 뿐이다.
+
+    반환: 남긴 자리(휴지통으로 갔으면 원래 있던 경로). 못 남겼으면 "".
+    """
+    try:
+        from core.result_image_payload_service import history_item_png_payload
+
+        payload, name = history_item_png_payload(item)
+        if not payload:
+            return ""
+        folder = Path(_viewer_save_dir(context)) / "_deleted"
+        folder.mkdir(parents=True, exist_ok=True)
+        history_id = str(getattr(item, "history_id", "") or "")
+        stem = Path(str(name or "naia-result.png")).stem or "naia-result"
+        target = folder / f"{stem}_{history_id[:8]}.png"
+        target.write_bytes(payload)
+    except Exception as exc:   # noqa: BLE001 - 안전망 실패가 삭제를 막으면 안 된다
+        print(f"[warn] unsaved rescue write failed: {ascii(exc)}", flush=True)
+        return ""
+    try:
+        _move_to_trash(target)
+    except Exception as exc:   # noqa: BLE001
+        print(f"[warn] unsaved rescue trash failed: {ascii(exc)}", flush=True)
+    return str(target)
+
+
 def history_item_from_viewer_path(context: WebSessionContext, rel_path: str):
     normalized = str(rel_path or "").replace("\\", "/").strip("/")
     prefix = "__history_item__/"
@@ -1244,6 +1283,7 @@ def register_result_display_routes(
             for rel_path, item in requested:
                 file_path = str(getattr(item, "filepath", "") or "")
                 deleted_file = False
+                rescued = ""
                 try:
                     if file_path and not keep_file:
                         target = Path(file_path)
@@ -1251,6 +1291,23 @@ def register_result_display_routes(
                             if not _move_to_trash(target):
                                 raise OSError(f"Could not move file to recycle bin: {target}")
                             deleted_file = True
+                    elif not file_path:
+                        # **저장된 적 없는 그림도 휴지통을 거친다**(사용자 지정 2026-08-30:
+                        # "디스크에서 삭제 옵션의 사양이 휴지통으로 보내는 것이니 그대로
+                        # 확대 적용").
+                        #
+                        # 이 그림은 서버 메모리에만 있어서, 예전에는 히스토리에서 빼는
+                        # 순간 **영영 사라졌다**. 그래서 화면이 "되돌릴 수 없다" 며 한 번
+                        # 더 물었고, 사용자가 원한 '딸깍 한 번' 을 막고 있었다.
+                        # 지우기 전에 한 벌 써서 휴지통에 넣으면 그 전제가 사라진다 -
+                        # 물을 이유도 함께 사라진다.
+                        #
+                        # ⚠️ 실패해도 **삭제를 막지 않는다.** 사용자가 원한 것은 지우는
+                        #    것이고, 보존은 안전망이다. 안전망이 찢어졌다고 문을 잠그면
+                        #    안 된다 - 대신 결과에 적어 화면이 말할 수 있게 한다.
+                        # ⚠️ 휴지통 이동이 실패하면 **쓴 파일을 그대로 둔다.** 지우면
+                        #    보존하려던 목적이 무너진다.
+                        rescued = _rescue_unsaved_to_trash(session_context, item)
                     removed = session_context.result_store.remove_item(item)
                     if removed is None:
                         raise FileNotFoundError("History item not found")
@@ -1259,6 +1316,9 @@ def register_result_display_routes(
                         "file_path": file_path,
                         "deleted_file": deleted_file,
                         "trashed": deleted_file,
+                        # 저장된 적 없던 그림을 지우기 전에 한 벌 남긴 자리(빈 문자열이면
+                        # 못 남겼다 - 그때만 진짜로 되돌릴 수 없다).
+                        "rescued_path": rescued,
                     })
                 except Exception as exc:
                     delete_failures.append({"path": rel_path, "error": str(exc)})

@@ -680,39 +680,44 @@ export function createResultHistoryController({
     const modeText = deleteMode === 'disk'
       ? '연결된 저장 파일은 영구 삭제하지 않고 휴지통으로 이동합니다.'
       : '히스토리에서만 제거하며 저장 파일은 유지합니다.';
-    // **저장 안 된 이미지는 지우면 끝이다.** 파일이 없으니 휴지통에도 안 남고
-    // (`selected/delete` 는 `file_path` 가 있을 때만 휴지통으로 보낸다) 그림은
-    // 서버 메모리에만 있었다. '묻지 않음'이 그 마지막 관문까지 걷어내고 있었다
-    // — 되돌릴 수 있는 삭제에만 적용한다(Codex 리뷰 P1).
+    // 저장 안 된 이미지가 섞였는지 센다 — **경고 문구를 고르는 데만** 쓴다.
     //
-    // 어느 항목이 미저장인지 화면은 정확히 알 수 없다(방금 생성한 것은 저장이
-    // 아직 안 끝났을 수 있고, 알림은 저장 전에 온다). 그래서 전체 미저장 개수로
-    // 판단한다 — 0 이면 고른 것도 전부 저장돼 있다. 모르면(-1) 묻는다.
+    // ⚠️ 예전에는 "저장 안 된 이미지는 지우면 끝" 이라 이 값이 '묻지 않기' 를
+    //    무력화했다(Codex 리뷰 P1). 2026-08-30 부터 **그 전제가 사라졌다** —
+    //    백엔드가 미저장분도 지우기 전에 휴지통에 한 벌 남긴다
+    //    (`result_display_routes._rescue_unsaved_to_trash`). 사용자 지정:
+    //    "디스크에 저장이 되었건 말건 그냥 딸깍 한 번으로 지우고 싶어한다."
+    // ⚠️ 어느 항목이 미저장인지 화면은 정확히 알 수 없다(방금 생성한 것은 저장이
+    //    아직 안 끝났을 수 있다). 그래서 전체 미저장 개수로 판단한다.
     const unsaved = Number(getUnsavedCount());
     const recoverable = unsaved === 0;
-    if ((!viewerBindings.skipDeleteConfirm() && !skipDeleteConfirmThisRun) || !recoverable) {
+    // ⚠️ **미저장분이라고 더 물어보지 않는다**(사용자 지정 2026-08-30). 예전에는
+    //    `|| !recoverable` 이 붙어 있어, '묻지 않기' 를 켜 놔도 저장 안 된 그림이
+    //    섞이면 매번 다시 물었다 - 사용자가 원한 '딸깍 한 번' 이 그것 때문에 막혔다.
+    //    이제 백엔드가 미저장분도 휴지통에 한 벌 남기므로(`_rescue_unsaved_to_trash`)
+    //    "되돌릴 수 없다" 는 전제 자체가 없어졌다.
+    if (!viewerBindings.skipDeleteConfirm() && !skipDeleteConfirmThisRun) {
+      // ⚠️ 문구가 사실과 어긋나면 안 된다. 미저장분도 이제 휴지통을 거치므로
+      //    "지우면 되돌릴 수 없습니다" 는 **거짓말**이 됐다.
       const warn = recoverable ? ''
         : (unsaved > 0
-            ? `\n\u26a0 아직 저장되지 않은 이미지가 ${unsaved}장 있습니다. 지우면 되돌릴 수 없습니다.`
-            : '\n\u26a0 저장 여부를 알 수 없습니다.');
+            ? `\n저장되지 않은 이미지 ${unsaved}장은 지우기 전에 휴지통으로 보냅니다.`
+            : '\n저장되지 않은 이미지는 지우기 전에 휴지통으로 보냅니다.');
       const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}${warn}`;
-      // ⚠️ 되돌릴 수 없는 삭제(미저장분)에는 이 체크박스를 안 준다. 그 관문까지
-      //    걷어내면 실수 한 번이 영영 돌이킬 수 없다(설정의 '묻지 않음' 도 그래서
-      //    `recoverable` 일 때만 통한다).
-      const askOnce = recoverable
-        ? {label: '이번 실행 동안 물어보지 않습니다', checked: false}
-        : null;
+      // 체크박스는 **늘** 준다. 저장 여부로 가르지 않는다(사용자 지정) -
+      // 미저장분도 휴지통을 거치므로 되돌릴 수 있다.
+      const askOnce = {label: '이번 실행 동안 물어보지 않습니다', checked: false};
       const confirmed = typeof confirmDialog === 'function'
         ? await confirmDialog(message, {
           title: '선택 항목 삭제',
           okText: `삭제 (${paths.length})`,
           cancelText: '취소',
-          ...(askOnce ? {checkbox: askOnce} : {}),
+          checkbox: askOnce,
         })
         : window.confirm(message);
       if (!confirmed) return;
       // 확인을 누른 경우에만 켜진다(다이얼로그가 그때만 되적는다).
-      if (askOnce?.checked) skipDeleteConfirmThisRun = true;
+      if (askOnce.checked) skipDeleteConfirmThisRun = true;
     }
 
     setSelectionBusy(true);

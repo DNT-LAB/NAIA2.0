@@ -56,6 +56,37 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def costs_anlas_confidently(context: Any, params: dict[str, Any] | None) -> bool:
+    """이번 생성이 Anlas 를 무는가 - **확실할 때만** True.
+
+    `is_free_generation` 과 다른 점 하나: **모르면 False** 다.
+
+    ⚠️ 그쪽은 스텝을 모르면 9999 로 보아 '유료' 로 눕는다. 그것은 **경고**를 위한
+       fail-safe 다 - 모를 때 "돈이 나갈 수 있다" 고 말하는 편이 안전하다.
+       그런데 **어느 계정으로 나갈지**를 고르는 데 같은 기본값을 쓰면, 값을 모르는
+       상황에서 조용히 잣대가 바뀌어 **엉뚱한 계정의 돈이 빠진다.**
+       실제로 그렇게 깨졌다(2026-08-30: `remote_params` 에 steps 가 없는 상태에서
+       부하 분산의 '다음 계정' 예측이 다른 계정을 가리켰다).
+
+    그래서 여기서는 **크기와 스텝을 둘 다 아는 경우에만** 답한다.
+    """
+    params = params or {}
+    if _as_int(params.get("steps"), 0) <= 0:
+        return False
+    # 크기는 `width`/`height` 로 오기도, `resolution` 문자열로만 오기도 한다
+    # (`is_free_generation` 이 쓰는 것과 **같은 두 갈래**다 - 한쪽만 보면 어긋난다).
+    width = _as_int(params.get("width"))
+    height = _as_int(params.get("height"))
+    if not (width and height):
+        raw = str(params.get("resolution") or "").lower().replace(" ", "")
+        if "x" in raw:
+            left, _, right = raw.partition("x")
+            width, height = _as_int(left), _as_int(right)
+    if not (width and height):
+        return False
+    return not is_free_generation(context, params)
+
+
 def is_free_generation(context: Any, params: dict[str, Any] | None) -> bool:
     """이 생성이 Anlas 를 안 물고 나갔는가(= 1MP·28스텝 이하).
 

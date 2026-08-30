@@ -701,8 +701,13 @@ class APIService:
                     return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {e}"}
 
 
-    def _get_active_nai_token(self) -> str:
+    def _get_active_nai_token(self, prefer_anlas: bool = False) -> str:
         """멀티 계정(Multi Token): 이번 생성에 쓸 NAI 토큰 하나.
+
+        `prefer_anlas` 는 **이번 생성이 Anlas 를 무는가**다(사용자 지정 2026-08-30).
+        참이면 동적 할당이 V5 무료 사용량 % 대신 **Anlas 잔량**을 균등화한다 -
+        유료 모드에서는 그 % 가 안 움직여 선두가 영영 그대로이기 때문이다.
+
 
         선택 규칙은 `core.nai_account_balancer` 가 갖고 있다(라운드 로빈 / 라운드
         로빈-10 / 동적 할당 / 동적 할당-10). 여기서는 재료만 모아 넘긴다.
@@ -762,6 +767,7 @@ class APIService:
                 usage_by_id=usage_by_id,
                 seed=rotation_seed(self.app_context),
                 forced=forced,
+                prefer_anlas=prefer_anlas,
             )
             token = tokens_by_id.get(selected_id, "")
             if not token:
@@ -832,7 +838,17 @@ class APIService:
         """
         try:
             # 🆕 멀티 계정 지원: 라운드 로빈 토큰 선택
-            token = self._get_active_nai_token()
+            # ⚠️ 이번 생성이 Anlas 를 물면 동적 할당의 잣대를 Anlas 로 바꾼다 -
+            #    V5 무료 사용량 % 는 유료 모드에서 안 움직여 균등화가 멎는다.
+            #    판정은 `nai_free_usage` 한 곳이 한다(화면·집계와 같은 자).
+            try:
+                from core.nai_free_usage import costs_anlas_confidently
+
+                # 모르면 False - 잣대를 조용히 바꾸면 엉뚱한 계정의 돈이 빠진다.
+                _prefer_anlas = costs_anlas_confidently(self.app_context, params)
+            except Exception:   # noqa: BLE001 - 판정 실패가 생성을 막으면 안 된다
+                _prefer_anlas = False
+            token = self._get_active_nai_token(prefer_anlas=_prefer_anlas)
             if not token:
                 raise ValueError("NAI 토큰이 제공되지 않았습니다.")
 

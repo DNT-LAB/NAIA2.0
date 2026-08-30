@@ -191,6 +191,21 @@ def _percent(usage: Any) -> int:
         return 100
 
 
+def _anlas(usage: Any) -> int:
+    """정렬용 Anlas 잔량. **모르는 계정은 -1** 이다.
+
+    ⚠️ `_percent` 는 모르는 계정을 100 으로 봐서 우선 후보로 올리는데, 여기서 같은
+       손버릇을 쓰면 **잔량을 모르는 계정에 돈이 몰린다**. 모르면 뒤로 미룬다 -
+       전부 모르면 서로 같아져 라운드 로빈으로 넘어간다.
+    """
+    if not isinstance(usage, dict):
+        return -1
+    value = usage.get("anlas")
+    if not isinstance(value, int):
+        return -1
+    return value
+
+
 def average_percent(usage_by_id: dict[str, Any], account_ids: Iterable[str]) -> int | None:
     """배지에 찍을 **통합값**. 명세대로 합이 아니라 평균이다.
 
@@ -211,6 +226,7 @@ def select_account(
     usage_by_id: dict[str, Any] | None = None,
     seed: int = 0,
     forced: str = "",
+    prefer_anlas: bool = False,
 ) -> str:
     """이번 생성에 쓸 계정 id 하나.
 
@@ -241,8 +257,15 @@ def select_account(
 
     # 1) 소진된 계정을 뺀다. 다 소진됐으면 **아무도 빼지 않는다** - 그때는 Anlas 로
     #    계속 생성할 수 있으므로, 후보를 비워 생성을 막는 편이 더 나쁘다.
-    live = [a for a in ids if not is_exhausted(usage_by_id.get(a))]
-    pool = live if live else ids
+    #
+    # ⚠️ **유료 모드에서는 걸러 내지 않는다.** 이 판정은 V5 **무료 사용량**이 말랐는가를
+    #    보는 것인데, 지금 나가는 돈은 Anlas 다 - 사용량이 0% 인 계정도 Anlas 가 있으면
+    #    멀쩡하게 쓴다. 여기서 빼면 버리는 후보가 생긴다(사용자 지정 2026-08-30).
+    if prefer_anlas:
+        pool = list(ids)
+    else:
+        live = [a for a in ids if not is_exhausted(usage_by_id.get(a))]
+        pool = live if live else ids
 
     if len(pool) == 1:
         return pool[0]
@@ -252,8 +275,14 @@ def select_account(
 
     # 동적 할당: 잔량이 가장 많은 쪽을 쓴다. 전부 같아지면 라운드 로빈으로 넘어간다.
     if policy in (POLICY_DYNAMIC, POLICY_DYNAMIC_10):
-        top = max(_percent(usage_by_id.get(a)) for a in pool)
-        leaders = [a for a in pool if _percent(usage_by_id.get(a)) == top]
+        # ⚠️ **재는 자를 지금 깎이는 것에 맞춘다**(사용자 지정 2026-08-30).
+        #    동적 할당은 "각 계정을 균일하게 맞춰 간다" 는 약속인데, 유료 모드에서
+        #    V5 무료 사용량 % 를 보면 **그 값이 안 움직인다** - 깎이는 것은 Anlas 다.
+        #    그러면 선두가 영영 그대로여서 한 계정만 계속 쓰게 된다
+        #    (사용자 제보: "유료 모드에서 Load Balancing 정책이 적용되지 않는다").
+        metric = _anlas if prefer_anlas else _percent
+        top = max(metric(usage_by_id.get(a)) for a in pool)
+        leaders = [a for a in pool if metric(usage_by_id.get(a)) == top]
         if len(leaders) < len(pool):
             # 아직 균일하지 않다 - 선두가 여럿이면 그 안에서만 돌려 한 계정에
             # 몰리지 않게 한다.

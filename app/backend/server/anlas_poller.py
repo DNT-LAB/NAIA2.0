@@ -390,6 +390,7 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
     똑같이 그 계정의 값을 보여 준다.
     """
     from core.nai_account_balancer import average_percent, select_account
+
     from core.nai_account_service import (
         MAIN_ACCOUNT_ID,
         NaiAccountService,
@@ -421,6 +422,9 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
             # 생성 경로(`api_service`)와 **같은 값**을 넣는다. 스냅샷의 값은 이미
             # '지금 쓸 수 있는지' 로 걸러져 있다.
             forced=str(snapshot.get("forced_account_id") or ""),
+            # ⚠️ 유료 여부도 **생성 경로와 같은 자**로 재야 한다. 한쪽만 Anlas 기준으로
+            #    고르면 화면의 '다음 계정' 과 실제로 쓰는 계정이 갈린다.
+            prefer_anlas=_prefer_anlas_now(context),
         )
         usage_payload["accounts"] = _account_rows(context, usage_by_id, next_account_id)
         usage_payload["next_account_id"] = next_account_id
@@ -659,6 +663,24 @@ def schedule_subscription_refresh(context: Any, clients: set, *, force: bool = F
             context.headless_subscription_refresh_pending = True
         return
     _start_subscription_refresh(context, clients)
+
+
+def _prefer_anlas_now(context: Any) -> bool:
+    """지금 설정으로 생성하면 Anlas 를 무는가.
+
+    ⚠️ 판정은 **생성 경로와 같은 자**를 쓴다(`nai_free_usage.is_free_generation` +
+       `nai_anlas_cost.cost_params_for_context`). 여기서 따로 크기·스텝을 뒤지면
+       화면의 '다음 계정' 과 실제로 쓰는 계정이 갈린다.
+    ⚠️ 실패하면 **False**(사용량 기준)로 눕는다 - 예측이 틀리는 것보다 예측 때문에
+       폴러가 죽는 쪽이 나쁘다.
+    """
+    try:
+        from core.nai_anlas_cost import cost_params_for_context
+        from core.nai_free_usage import costs_anlas_confidently
+
+        return costs_anlas_confidently(context, cost_params_for_context(context))
+    except Exception:   # noqa: BLE001
+        return False
 
 
 def _start_subscription_refresh(context: Any, clients: set) -> None:

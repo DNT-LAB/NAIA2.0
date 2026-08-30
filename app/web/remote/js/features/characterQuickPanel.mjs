@@ -57,6 +57,8 @@ export function createCharacterQuickPanel({
   //    실측(원본 832x1216 · 캔버스 1152x896): overlay=false · background=none ·
   //    무대 비율 1.286 vs 그림 0.684. 편집 모드에서는 overlay=true 로 정상이었다.
   ensureCanvasEditMode = () => {},
+  // POS 를 나갈 때 들어오기 전 모드(결과 보기)로 돌려준다.
+  restoreCanvasViewMode = () => {},
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
 }) {
@@ -479,6 +481,7 @@ export function createCharacterQuickPanel({
     // ⚠️ **무대를 재기 전**에 편집 모드로 돌려놓는다. 순서가 뒤집히면 평면이 아직
     //    감춰진 채로 재서 폴백 경로로 떨어진다(그게 곧 검은 화면이다).
     if (on) { try { ensureCanvasEditMode(); } catch (_) { /* 화면 전환 실패가 POS 를 막으면 안 된다 */ } }
+    else { try { restoreCanvasViewMode(); } catch (_) { /* 위와 같다 */ } }
     posEditing = !!on;
     if (posEditing) posPeek = false;
     if (posEditing) {

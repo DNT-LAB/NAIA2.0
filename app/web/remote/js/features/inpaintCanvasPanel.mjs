@@ -102,6 +102,13 @@ export function createInpaintCanvasPanel({
   // 되돌리는 도중에 다시 쌓지 않는다 - 안 막으면 되돌리기가 자기 자신을 기록해
   // 두 번째 누름이 원래대로 돌아온다(무한 왕복).
   let undoApplying = false;
+  // 드래그 **한 번**을 한 단계로 묶는다. 회전 드래그는 `pointermove` 마다
+  // `applyTransform` 을 부르므로, 안 묶으면 한 번 끄는 동안 20칸이 통째로 밀린다
+  // (Codex 리뷰 2026-08-30 BLOCK 2). 시작할 때 한 번만 쌓고 그 뒤로는 잠근다.
+  let undoGestureOpen = false;
+  // POS 에 들어오기 **전에** 보던 모드. 나갈 때 돌려주려고 적어 둔다(빈 문자열이면
+  // POS 가 모드를 바꾼 적이 없다는 뜻이다).
+  let posEntryViewMode = '';
   // [자동 마스킹] 을 누른 뒤 결과를 기다리는 중인가(사용자 지정 2026-08-27:
   // "시각적 피드백이 필요하다"). 칠하는 데 성공하면 상태가 오고, 그때 한 번
   // 번쩍이며 말해 준다.
@@ -515,13 +522,21 @@ export function createInpaintCanvasPanel({
 
   /** 바꾸기 **직전**에 부른다. 같은 값이면 안 쌓는다(방향키를 오래 눌러도 한 칸씩만). */
   function pushUndo() {
-    if (!state?.active || undoApplying) return;
+    if (!state?.active || undoApplying || undoGestureOpen) return;
     const snap = transformSnapshot();
     const top = undoStack[undoStack.length - 1];
     if (top && top.x === snap.x && top.y === snap.y && top.rotation === snap.rotation) return;
     undoStack.push(snap);
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   }
+
+  /** 드래그 한 번을 한 단계로 묶는다. 시작에서 한 번 쌓고, 끝날 때까지 잠근다. */
+  function beginUndoGesture() {
+    if (undoGestureOpen) return;
+    pushUndo();
+    undoGestureOpen = true;
+  }
+  function endUndoGesture() { undoGestureOpen = false; }
 
   /** 한 단계 되돌린다. 되돌릴 것이 없으면 말해 준다 - 조용하면 고장으로 읽힌다. */
   function undoTransform() {
@@ -531,23 +546,26 @@ export function createInpaintCanvasPanel({
     //    도착하면 방금 되돌린 것을 다시 덮는다.
     flushTransforms();
     const snap = undoStack.pop();
-    const now = transformSnapshot();
     undoApplying = true;
     try {
-      if (snap.x !== now.x || snap.y !== now.y) {
-        state.base_offset_x = snap.x;
-        state.base_offset_y = snap.y;
-        send('base_offset', {x: snap.x, y: snap.y});
-      }
-      if (snap.rotation !== now.rotation) {
-        state.base_rotation = snap.rotation;
-        // 슬라이더/숫자도 즉시 맞춘다(규칙 3 - 서버 echo 를 기다리지 않는다).
-        const input = panel?.querySelector('[data-ic-tr="rotation"]');
-        const label = panel?.querySelector('[data-ic-val="rotation"]');
-        if (input) input.value = String(snap.rotation);
-        if (label) label.textContent = `${snap.rotation}°`;
-        send('base_rotation', {value: snap.rotation});
-      }
+      // ⚠️ **회전을 먼저, 이동을 나중에.** 서버는 회전을 받으면 캔버스 한가운데를
+      //    앵커로 잡고 오프셋을 **다시 계산**한다(`_recompose_canvas(anchor)`).
+      //    이동을 먼저 보내면 뒤따라온 회전이 방금 되돌린 좌표를 덮는다
+      //    (Codex 리뷰 2026-08-30 BLOCK 1).
+      // ⚠️ **둘 다 무조건 보낸다.** 예전에는 "지금 값과 다를 때만" 보냈는데, 화면의
+      //    `state` 는 서버 echo 로 통째로 갈아 끼워진다 - 늦게 온 echo 를 보고
+      //    "이미 같다" 고 판단해 **아무것도 안 보내는** 창이 있었다(BLOCK 4).
+      //    같은 값을 다시 보내는 비용은 합성 한 번이고, 안 보내는 대가는 유료 생성이
+      //    되돌리지 않은 자리로 나가는 것이다.
+      state.base_rotation = snap.rotation;
+      const input = panel?.querySelector('[data-ic-tr="rotation"]');
+      const label = panel?.querySelector('[data-ic-val="rotation"]');
+      if (input) input.value = String(snap.rotation);
+      if (label) label.textContent = `${snap.rotation}°`;
+      send('base_rotation', {value: snap.rotation});
+      state.base_offset_x = snap.x;
+      state.base_offset_y = snap.y;
+      send('base_offset', {x: snap.x, y: snap.y});
     } finally {
       undoApplying = false;
     }
@@ -581,7 +599,14 @@ export function createInpaintCanvasPanel({
       return render();
     }
     if (action === 'undo') return undoTransform();
-    if (action === 'reset') { flushTransforms(); return send('base_reset', null); }
+    if (action === 'reset') {
+      flushTransforms();
+      // ⚠️ 초기화는 **확대와 캔버스 크기까지** 되돌린다. 기록을 남겨 두면 그 뒤의
+      //    되돌리기가 이동·회전만 살려 내 **반쪽 상태**가 된다 - 커밋 메시지에
+      //    "절대 안 만든다" 고 적어 놓고 정작 안 비우고 있었다(BLOCK 3).
+      undoStack = [];
+      return send('base_reset', null);
+    }
     if (action === 'zoom-in') return nudge('scale', 1);
     if (action === 'zoom-out') return nudge('scale', -1);
     if (action === 'rot-up') return nudge('rotation', 1);
@@ -613,7 +638,11 @@ export function createInpaintCanvasPanel({
   }
 
   function onChange(event) {
-    if (event.target.closest?.('[data-ic="size"]')) send('canvas_size', event.target.value);
+    if (event.target.closest?.('[data-ic="size"]')) {
+      // 캔버스가 바뀌면 예전 **픽셀** 좌표는 뜻이 달라진다(세로->가로면 아예 밖이다).
+      undoStack = [];
+      send('canvas_size', event.target.value);
+    }
   }
 
   function onInput(event) {
@@ -885,6 +914,9 @@ export function createInpaintCanvasPanel({
         if (startDist < ROTATE_DEAD_ZONE_PX) return;
         const next = wrapDeg(startRotation + (angleOf(ev) - startAngle));
         sent = {key: 'rotation', value: next};
+        // 끄는 **한 번**이 한 단계다. 여기서 열어 두면 아래 `applyTransform` 이
+        // 프레임마다 불려도 기록은 하나뿐이다(Codex BLOCK 2).
+        beginUndoGesture();
         applyTransform('rotation', next);
         // 그림 자체는 서버가 다시 합성해야 돈다(놓을 때 한 번). 끄는 동안에는
         // 유령이 각도를 보여 준다 - 예전에는 슬라이더 숫자만 바뀌고 화면에는
@@ -903,6 +935,8 @@ export function createInpaintCanvasPanel({
         applyTransform('scale', next, at);
       }
     }, () => {
+      // 제스처가 끝났다 - 다음 조작은 새 단계로 쌓인다.
+      endUndoGesture();
       // 놓는 순간 마지막 값을 곧바로 보낸다 - 디바운스가 남아 있으면 거기서 또 간다.
       if (!sent) return;
       if (sent.key === 'scale') sendTransform('base_scale', {value: sent.value / 100, at});
@@ -1031,7 +1065,21 @@ export function createInpaintCanvasPanel({
     ensureEditMode() {
       if (!state?.active || !state?.canvas_supported) return false;
       if (viewMode === 'edit') return false;
+      // 사용자가 결과를 보다 들어왔다 - 나갈 때 돌려주려고 적어 둔다
+      // (Codex 리뷰 2026-08-30 CONCERN 5: 나가도 편집 모드에 남아 있었다).
+      posEntryViewMode = viewMode;
       setViewMode('edit');
+      return true;
+    },
+    /** POS 를 나갈 때 들어오기 전 모드로 되돌린다. 바꾼 적이 없으면 아무것도 안 한다. */
+    restoreViewModeAfterPos() {
+      if (!posEntryViewMode) return false;
+      const back = posEntryViewMode;
+      posEntryViewMode = '';
+      // 그 사이에 세션이 닫혔거나 사용자가 직접 모드를 골랐으면 건드리지 않는다.
+      if (!state?.active || !state?.canvas_supported) return false;
+      if (viewMode !== 'edit') return false;
+      setViewMode(back);
       return true;
     },
     handleModuleState(payload) {

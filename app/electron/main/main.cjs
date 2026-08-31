@@ -91,28 +91,58 @@ function Remove-WithRetry($target) {
     if (-not (Test-Path -LiteralPath $target)) { return }
   }
 }
+function Repair-ProbeResidue($root) {
+  # A previous run may have renamed an item to the probe name and then failed to
+  # rename it back (narrow race: something grabs it between the two renames).
+  # Put it back before doing anything else -- otherwise the install stays broken
+  # and the next probe would nest the suffix.
+  $fixed = @()
+  foreach ($item in Get-ChildItem -LiteralPath $root -Force) {
+    if ($item.Name -notlike '*.__swap_probe__') { continue }
+    $original = $item.Name.Substring(0, $item.Name.Length - '.__swap_probe__'.Length)
+    if (Test-Path -LiteralPath (Join-Path $root $original)) { continue }
+    for ($r = 0; $r -lt 20; $r++) {
+      Rename-Item -LiteralPath $item.FullName -NewName $original -Force -ErrorAction SilentlyContinue
+      if (Test-Path -LiteralPath (Join-Path $root $original)) { $fixed += $original; break }
+      Start-Sleep -Milliseconds 300
+    }
+  }
+  return $fixed
+}
 function Find-LockedItem($root, $preserve) {
   # Pre-swap lock probe: rename each top-level item back and forth. Rename is an
   # atomic non-destructive operation; a resident child process that inherited its
   # CWD from the backend (ollama serve / cloudflared) makes it fail cleanly here
   # instead of half-destroying the install mid-swap.
+  #
+  # The result is checked by EXISTENCE, not by catching. Rename-Item failures are
+  # non-terminating, so this gate used to depend entirely on the script-level
+  # 'Stop' preference: with it absent the rename fails, nothing throws, and the
+  # probe reports 'not locked' -- letting the destructive swap start on a locked
+  # install. Measured 2026-08-31.
   foreach ($item in Get-ChildItem -LiteralPath $root -Force) {
     if ($preserve -contains $item.Name) { continue }
+    if ($item.Name -like '*.__swap_probe__') { return 'RESIDUE:' + $item.Name }
     $probeName = $item.Name + '.__swap_probe__'
     $probePath = Join-Path $root $probeName
-    try {
-      Rename-Item -LiteralPath $item.FullName -NewName $probeName -Force
-    } catch { return $item.FullName }
-    for ($r = 0; $r -lt 10; $r++) {
-      try { Rename-Item -LiteralPath $probePath -NewName $item.Name -Force; $probePath = ''; break } catch { Start-Sleep -Milliseconds 300 }
+    $originalPath = $item.FullName
+    Rename-Item -LiteralPath $originalPath -NewName $probeName -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $probePath)) { return 'LOCKED:' + $item.Name }
+    # Restore. Try hard: leaving the item under the probe name is exactly the
+    # damage this function exists to prevent.
+    for ($r = 0; $r -lt 100; $r++) {
+      Rename-Item -LiteralPath $probePath -NewName $item.Name -Force -ErrorAction SilentlyContinue
+      if (Test-Path -LiteralPath $originalPath) { $probePath = ''; break }
+      Start-Sleep -Milliseconds 300
     }
-    if ($probePath) { return $item.FullName }
+    if ($probePath) { return 'RESIDUE:' + $item.Name }
   }
   return $null
 }
 function Restore-FromBackup($backupRoot, $installRoot) {
   # Copy (not move) everything back so files can be restored even into a locked
   # directory, and the backup stays behind for manual recovery.
+  $failed = 0
   foreach ($item in Get-ChildItem -LiteralPath $backupRoot -Force) {
     $dest = Join-Path $installRoot $item.Name
     try {
@@ -122,10 +152,13 @@ function Restore-FromBackup($backupRoot, $installRoot) {
       } else {
         Copy-Item -LiteralPath $item.FullName -Destination $dest -Force
       }
-    } catch { Write-ApplyLog "restore FAILED for $($item.Name): $_" }
+    } catch { $failed = $failed + 1; Write-ApplyLog "restore FAILED for $($item.Name): $_" }
   }
+  return $failed
 }
 Write-ApplyLog "apply start pid=$($cfg.pid) install=$($cfg.installRoot)"
+$repaired = Repair-ProbeResidue $cfg.installRoot
+if ($repaired.Count -gt 0) { Write-ApplyLog "repaired probe residue: $($repaired -join ', ')" }
 for ($i = 0; $i -lt 240; $i++) {
   $proc = Get-Process -Id $cfg.pid -ErrorAction SilentlyContinue
   if (-not $proc) { break }
@@ -140,10 +173,18 @@ for ($i = 0; $i -lt 20; $i++) {
   Start-Sleep -Milliseconds 1000
 }
 if ($locked) {
-  Write-ApplyLog "swap ABORTED (locked): $locked"
-  Write-ApplyMarker "LOCKED: $locked"
+  # RESIDUE means the probe could not put an item back -- the install is NOT
+  # untouched and saying so would send the user to a silently broken app.
+  if ($locked -like 'RESIDUE:*') {
+    Write-ApplyLog "swap ABORTED (probe residue, install DAMAGED): $locked"
+    Write-ApplyMarker "PROBE_RESIDUE: $locked"
+  } else {
+    Write-ApplyLog "swap ABORTED (locked): $locked"
+    Write-ApplyMarker "LOCKED: $locked"
+    Write-ApplyLog "install untouched"
+  }
   try { Start-Process -FilePath $cfg.exePath } catch { Write-ApplyLog "relaunch FAILED: $_" }
-  Write-ApplyLog "apply end (aborted, install untouched)"
+  Write-ApplyLog "apply end (aborted)"
   exit 0
 }
 if (Test-Path -LiteralPath $cfg.backupRoot) { Remove-Item -LiteralPath $cfg.backupRoot -Recurse -Force -ErrorAction SilentlyContinue }
@@ -159,10 +200,18 @@ try {
   }
   Write-ApplyLog "swap ok"
 } catch {
-  Write-ApplyLog "swap FAILED: $_ restoring from backup"
-  Restore-FromBackup $cfg.backupRoot $cfg.installRoot
-  Write-ApplyMarker "SWAP_FAILED: $_"
-  Write-ApplyLog "restore done (backup kept at $($cfg.backupRoot))"
+  $reason = "$_"
+  Write-ApplyLog "swap FAILED: $reason restoring from backup"
+  $restoreFailed = Restore-FromBackup $cfg.backupRoot $cfg.installRoot
+  if ($restoreFailed -gt 0) {
+    # Do not claim a clean rollback we did not achieve. The user needs to know the
+    # install may be mixed so they reinstall instead of trusting a broken app.
+    Write-ApplyMarker "RESTORE_INCOMPLETE: $restoreFailed item(s) failed after: $reason"
+    Write-ApplyLog "restore INCOMPLETE ($restoreFailed failed, backup kept at $($cfg.backupRoot))"
+  } else {
+    Write-ApplyMarker "SWAP_FAILED: $reason"
+    Write-ApplyLog "restore done (backup kept at $($cfg.backupRoot))"
+  }
 }
 foreach ($d in @($cfg.cleanupDirs)) {
   try { Remove-WithRetry $d; Write-ApplyLog "cleaned $d" } catch { Write-ApplyLog "cleanup FAILED $d : $_" }
@@ -1357,9 +1406,18 @@ function surfaceLastApplyError() {
       return;
     }
     appendBackendLog("shell", `Previous update apply did not complete: ${raw}`);
-    const friendly = raw.startsWith("LOCKED:")
-      ? `업데이트를 적용하지 못했습니다 — 설치 폴더를 다른 프로세스가 사용 중이었습니다 (${raw.slice(7).trim()}). Ollama/Cloudflared 등을 종료한 뒤 다시 시도하거나, 릴리스 페이지에서 새로 받아 설치하세요.`
-      : `업데이트 적용 중 오류가 발생해 이전 버전으로 복원했습니다 (${raw}). 다시 시도하거나 릴리스 페이지에서 새로 받아 설치하세요.`;
+    // ⚠️ 문구가 실제 상태보다 낙관적이면 안 된다. 예전에는 어떤 실패든 "이전 버전으로
+    //    복원했습니다" 라고 단정해, 반쪽만 복원된 설치를 사용자가 멀쩡한 줄 알고 썼다.
+    let friendly;
+    if (raw.startsWith("LOCKED:")) {
+      friendly = `업데이트를 적용하지 못했습니다 — 설치 폴더를 다른 프로세스가 사용 중이었습니다 (${raw.slice(7).trim()}). 설치는 그대로입니다. Ollama/Cloudflared 등을 종료한 뒤 다시 시도하세요.`;
+    } else if (raw.startsWith("PROBE_RESIDUE:")) {
+      friendly = `업데이트를 중단했지만 설치 폴더가 손상되었을 수 있습니다 (${raw.slice(14).trim()}). 앱을 완전히 종료한 뒤 다시 실행하면 자동 복구를 시도합니다. 실행되지 않으면 릴리스 페이지에서 새로 받아 설치하세요.`;
+    } else if (raw.startsWith("RESTORE_INCOMPLETE:")) {
+      friendly = `업데이트에 실패했고 이전 버전 복원도 일부 실패했습니다 (${raw.slice(19).trim()}). 설치가 섞인 상태일 수 있으니 릴리스 페이지에서 새로 받아 설치하세요. 백업은 user-data\.updates\backup 에 있습니다.`;
+    } else {
+      friendly = `업데이트 적용 중 오류가 발생해 이전 버전으로 복원했습니다 (${raw}). 다시 시도하거나 릴리스 페이지에서 새로 받아 설치하세요.`;
+    }
     setUpdateState({ phase: "error", error: friendly });
   } catch (_e) {
     // 표면화 실패는 앱 기동을 막지 않는다
@@ -1675,15 +1733,27 @@ function stopBackend() {
   // apply.log 'being used by another process'). 외부에서 사용자가 직접 켠 프로세스는
   // 이 트리에 속하지 않으므로 건드리지 않는다.
   if (process.platform === "win32" && backendProcess.pid) {
+    let killed = false;
     try {
-      spawnSync("taskkill", ["/PID", String(backendProcess.pid), "/T", "/F"], {
+      const result = spawnSync("taskkill", ["/PID", String(backendProcess.pid), "/T", "/F"], {
         windowsHide: true,
         timeout: 10000,
       });
-      return;
-    } catch (_e) {
-      // taskkill 실패 시 기존 동작으로 폴백
+      // ⚠️ `spawnSync` 는 실패해도 **던지지 않는다.** 접근 거부·timeout·ENOENT 는
+      //    예외가 아니라 결과 객체(`error`/`status`)로 돌아온다. 예전에는 곧장
+      //    `return` 해서 폴백 `kill()` 이 영영 안 돌았고, 그러면 백엔드 트리가
+      //    살아남아 `resources/naia-backend` 를 잠근 채 남는다 - 이 함수가 막으려던
+      //    바로 그 상황이다(2.0.29 업데이트 사고). 결과를 보고 갈린다.
+      killed = !result.error && result.status === 0;
+      if (!killed) {
+        const why = result.error ? result.error.message : `exit ${result.status}`;
+        appendBackendLog("shell", `taskkill failed (${why}); falling back to kill()`);
+      }
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      appendBackendLog("shell", `taskkill threw (${message}); falling back to kill()`);
     }
+    if (killed) return;
   }
   backendProcess.kill();
 }

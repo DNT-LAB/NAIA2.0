@@ -1257,7 +1257,14 @@ class ExtensionManager:
             self._discover_locked()
             self._apply_config_locked()
             for record in self.records:
-                if record.status == "discovered" and record.approved and not record.blocked:
+                # ⚠️ `enabled` 를 여기서 **반드시** 본다. 예전에는 안 봐서, 꺼 둔
+                # 확장도 부팅 때 import 되고 `register()` 가 돌았다 - 호스트를
+                # 몽키패치하는 확장은 그 순간 패치를 걸어 버린다. `is_active`
+                # 게이트는 **ctx 표면만** 막으므로 패치는 그대로 살아남았고,
+                # 재시작해도 안 걷혔다(사용자 제보 2026-08-31: 껐는데 그대로).
+                # blocked 가 이미 같은 규약이다 - enabled 도 거기에 맞춘다.
+                if (record.status == "discovered" and record.approved
+                        and not record.blocked and record.enabled):
                     self._load_record_locked(record)
         if self.records:
             loaded = sum(1 for record in self.records if record.status == "loaded")
@@ -1717,6 +1724,12 @@ class ExtensionManager:
                         continue
                     record.approved = True
                     self._write_config_locked()
+                if action == "enabled":
+                    # ⚠️ 이 경로는 일반 dispatch 를 **안 탄다**(module_commands 가
+                    # 가로챈다). 그쪽이 세우던 플래그를 여기서 대신 세운다 -
+                    # 안 하면 로드는 되는데 `is_active` 가 계속 False 다.
+                    record.enabled = True
+                    self._write_config_locked()
                 if record.approved and not record.blocked and record.status in {"discovered", "loading", "error", "dependency_error"}:
                     # ②단계: 선언 의존성이 미설치면 import 전에 격리 설치(host 재사용·
                     # 무거운 ML 차단·wheel-only). 실패하면 로드하지 않고 사유를 남긴다.
@@ -1767,7 +1780,10 @@ class ExtensionManager:
 
     def _load_targets(self, key: str) -> list[ExtensionRecord]:
         action, _, rest = str(key or "").strip().partition(":")
-        if action in {"approve", "retry"}:
+        if action in {"approve", "retry", "enabled"}:
+            # `enabled` 는 이제 로드 게이트다(위 load_all 참조). 켜는 순간 아직
+            # 로드 안 된 확장이면 여기서 실제로 import 해야 한다 - 안 그러면
+            # 재시작 전까지 '켬' 인데 아무것도 안 도는 상태가 된다.
             record = self._find(rest)
             return [record] if record is not None else []
         if action == "retry_errors":

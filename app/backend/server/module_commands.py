@@ -125,7 +125,16 @@ async def handle_module_command(
     # '로딩 중' 상태를 먼저 브로드캐스트해 패널이 즉시 반응한다.
     if (
         str(command.get("module_id") or "") == "extensions"
-        and str(command.get("key") or "").split(":", 1)[0] in {"approve", "retry", "retry_errors"}
+        # ⚠️ 여기서 가로채면 `return True` 라 **일반 dispatch 가 건너뛰어진다** -
+        # 그 경로가 `record.enabled` 를 세우므로, 아무거나 가로채면 플래그가
+        # 영영 안 바뀐다. 그래서 `enabled` 는 **켜는 경우만** 가로채고
+        # (그때는 import 가 필요하다 - load_all 이 꺼진 것을 안 읽는다),
+        # 끄는 경우는 일반 경로로 보내 플래그만 내린다.
+        and (
+            str(command.get("key") or "").split(":", 1)[0] in {"approve", "retry", "retry_errors"}
+            or (str(command.get("key") or "").split(":", 1)[0] == "enabled"
+                and bool(command.get("value")))
+        )
     ):
         import asyncio
 

@@ -98,7 +98,16 @@ export function createExtensionsUi(deps) {
     if (ext.blocked) {
       return [ext.status === 'loaded' ? '차단됨 (재시작 시 완전 차단)' : '차단됨', 'ext-chip-muted'];
     }
-    if (ext.status === 'discovered') {
+    // 꺼진 확장. ⚠️ 이제 **꺼져 있으면 부팅 때 로드하지 않으므로**(load_all),
+    // 승인됐는데도 status 가 'discovered' 로 남는다 - 그걸 '미승인' 이라고
+    // 표시하면 거짓말이다. 승인 여부로 먼저 가른다.
+    if (ext.enabled === false && ext.approved) {
+      // 아직 이번 실행에 로드돼 있으면 정직하게 말한다(blocked 와 같은 규약).
+      // 몽키패치형 확장은 이 상태에서 프론트에 계속 얹혀 있다.
+      return [ext.status === 'loaded' ? '꺼짐 (재시작 시 완전 정지)' : '꺼짐',
+              'ext-chip-muted'];
+    }
+    if (ext.status === 'discovered' && !ext.approved) {
       // 의존성이 선언됐는데 미설치면 "승인 시 설치"를 알린다.
       if (Array.isArray(ext.requirements) && ext.requirements.length && !ext.deps_ready) {
         return [`미승인 · 의존성 ${ext.requirements.length}`, 'ext-chip-muted'];
@@ -418,7 +427,7 @@ export function createExtensionsUi(deps) {
     const toggleChecked = ext.status === 'loaded' ? ext.enabled : false;
     const toggleDisabled = ext.status === 'loading' || ext.status === 'installing_deps';
     const toggle = showToggle
-      ? `<label class="ext-switch" title="${ext.status === 'discovered' ? '활성화(승인 필요)' : '켜기/끄기 (즉시)'}">
+      ? `<label class="ext-switch" title="${!ext.approved ? '활성화(승인 필요)' : '켜기/끄기 (즉시)'}">
            <input type="checkbox" class="ext-toggle" data-ext="${escHtml(ext.id)}" ${toggleChecked ? 'checked' : ''} ${toggleDisabled ? 'disabled' : ''}>
            <span class="ext-slider"></span>
          </label>`
@@ -654,12 +663,21 @@ export function createExtensionsUi(deps) {
    *     몽키패치를 되돌릴 수 없다. 그 코드가 `renderPromptEngineering` 같은
    *     전역을 바꿔치기해 둔 상태라 화면이 이상해질 수 있다 - 그래서 되돌리는
    *     대신 **말해 준다**(사용자 제보 2026-08-31: 끄고 나서 PE 모듈이 안 열림).
+   *
+   *  ⚠️ 끄기는 **새로고침으로 안 풀린다** - 패치가 백엔드 프로세스 안에 살아 있어
+   *     이번 실행 내내 계속 얹힌다. 재시작해야 걷힌다(그래야 로드를 건너뛴다).
    */
   function noticeReloadIfFrontendPatched(nowEnabled) {
     if (!lastState || lastState.web_frontend_patched !== true) return;
-    showToast(
-      (nowEnabled ? '확장을 켰습니다.' : '확장을 껐습니다.') +
-      ' 화면에 완전히 반영하려면 새로고침(F5)하세요.', 'warning');
+    if (nowEnabled) {
+      showToast('확장을 켰습니다. 화면에 반영하려면 새로고침(F5)하세요.', 'warning');
+      return;
+    }
+    // ⚠️ 끌 때는 **새로고침으로 안 풀린다.** 패치는 백엔드 프로세스 안에 있어서
+    //    이번 실행 동안 계속 프론트에 얹힌다. 재시작해야 걷힌다(그래야 로드 자체를
+    //    건너뛴다). 새로고침하라고 하면 해 보고 안 되니 사용자가 두 번 속는다.
+    showToast('확장을 껐습니다. 이번 실행 동안은 화면에 남아 있을 수 있습니다 — '
+              + '완전히 내리려면 NAIA를 재시작하세요.', 'warning');
   }
 
   function renderSettingsPane() {
@@ -696,7 +714,11 @@ export function createExtensionsUi(deps) {
       el.addEventListener('change', () => {
         const ext = findExt(el.dataset.ext);
         if (!ext) return;
-        if (ext.status === 'discovered') {
+        // ⚠️ `discovered` 를 '미승인' 과 같게 보면 안 된다. 이제 **꺼 둔 확장은
+        //    부팅 때 로드하지 않으므로**(load_all) 승인됐는데도 discovered 로
+        //    남는다 - 예전 조건이면 켜기가 승인 확인 흐름으로 새서 아무 명령도
+        //    안 나갔다(실측: 백엔드에 요청 자체가 안 왔다). 승인 여부로 가른다.
+        if (!ext.approved) {
           el.checked = false; // 승인은 신뢰 경고 인라인 확인을 거친다.
           confirmingId = ext.id;
           openMenuId = null;

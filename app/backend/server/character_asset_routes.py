@@ -116,13 +116,16 @@ def _resolve_source_bytes(context: WebSessionContext, source: dict[str, Any]) ->
             raise ValueError("invalid viewer path")
         return path.read_bytes()
     if kind == "canvas":
-        # 인페인트 가상 캔버스에 놓인 그대로(합성본). 생성하지 않는다 - 0 Anlas.
-        # ⚠️ 위 두 종류와 달리 경로가 아니라 **세션 상태**를 읽는다. 사용자가
-        #    버튼을 누른 그 순간의 캔버스가 곧 저장 대상이므로 '떠다니는 현재
-        #    결과' 와 같은 위험은 없다 - 사용자가 보고 있는 것이 그것이다.
-        from core.headless_img2img_service import HeadlessImg2ImgService
-
-        return HeadlessImg2ImgService(context).composed_canvas_png()
+        # 인페인트 가상 캔버스 합성본. 생성하지 않는다 - 0 Anlas.
+        #
+        # ⚠️ **저장 시점에 합성하지 않는다.** 액자를 저장하면 인페인트 세션이 곧바로
+        #    닫히고(사용자 지정 2026-08-31), `close` 는 `img2img_session = {}` 으로
+        #    통째로 지운다 - 그때 합성하려 들면 합성할 것이 없다. 그래서
+        #    `/api/character-asset/stage-canvas` 가 **미리 구워** 여기에 담아 둔다.
+        data = bytes(getattr(context, "character_asset_staged_png", b"") or b"")
+        if not data:
+            raise ValueError("액자 합성본이 없습니다. 액자를 다시 열어 주세요.")
+        return data
     raise ValueError(f"unknown source kind: {kind or '(empty)'}")
 
 
@@ -186,6 +189,25 @@ def register_character_asset_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Character Asset image failed: {exc}"}, status_code=500)
         return Response(content=image_bytes, media_type="image/png", headers=PRIVATE_CACHE_HEADERS)
+
+    @app.post("/api/character-asset/stage-canvas")
+    async def api_character_asset_stage_canvas():
+        """지금 액자에 놓인 그대로를 **미리 구워** 둔다(생성 안 함 - 0 Anlas).
+
+        저장을 누르는 시점에는 인페인트 세션이 이미 닫혀 있으므로(액자를 넘긴 뒤
+        바로 닫는다) 그때 합성할 수 없다. 여기서 한 번 굽고, `kind: "canvas"` 가
+        그것을 읽는다.
+        """
+        from core.headless_img2img_service import HeadlessImg2ImgService
+
+        try:
+            data = await run_in_thread(HeadlessImg2ImgService(session_context).composed_canvas_png)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"액자 합성 실패: {exc}"}, status_code=500)
+        session_context.character_asset_staged_png = data
+        return {"ok": True, "bytes": len(data)}
 
     @app.post("/api/character-asset/save")
     async def api_character_asset_save(req: Request):

@@ -21541,6 +21541,19 @@ body.detached-module .mod-grid-3 {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
   padding: 8px 10px; border: 1px solid var(--accent-blue); border-radius: 8px;
   background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+  /* ⚠️ 저장 대기가 올라온 것을 **사용자가 모를 수 있다**(사용자 지적 2026-08-31).
+     테두리를 흰색과 원래 색 사이로 점멸시켜 눈에 넣는다. 테두리만 건드린다 -
+     배경이나 크기를 움직이면 옆 내용이 밀린다. */
+  animation: char-asset-banner-pulse 1.15s ease-in-out infinite;
+}
+@keyframes char-asset-banner-pulse {
+  0%, 100% { border-color: var(--accent-blue); }
+  50%      { border-color: #ffffff; }
+}
+/* 움직임을 줄여 달라고 한 사람에게는 **정지한 흰 테두리**로 대신한다 -
+   깜빡임만 빼고 '여기 뭔가 있다' 는 신호는 남긴다. */
+@media (prefers-reduced-motion: reduce) {
+  .char-asset-banner { animation: none; border-color: #ffffff; }
 }
 .char-asset-banner-label { font-size: 12px; font-weight: 700; color: var(--text-primary); }
 .char-asset-banner-actions { display: flex; gap: 6px; flex-wrap: wrap; }

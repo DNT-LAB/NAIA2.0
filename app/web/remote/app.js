@@ -1358,13 +1358,32 @@ async function stageCharacterAssetThroughFrame(pinnedPath, context) {
 }
 
 /** 액자에 맞춘 합성본을 그대로 에셋 저장 대기로 넘긴다(생성 없음 = 0 Anlas). */
-function stageFramedCharacterAsset() {
+async function stageFramedCharacterAsset() {
   if (!characterAssetControl) { showToast('Character Asset tab is not ready', 'error'); return; }
+  // ⚠️ **지금 굽는다.** 아래에서 세션을 닫는데, 닫기는 `img2img_session` 을 통째로
+  //    지운다 - 저장을 누르는 시점에 합성하려 들면 합성할 것이 없다.
+  let baked = null;
+  try {
+    const response = await fetch('/api/character-asset/stage-canvas', {method: 'POST'});
+    baked = await response.json().catch(() => null);
+    if (!response.ok || !baked || baked.ok !== true) {
+      showToast((baked && baked.error) || '액자를 저장하지 못했습니다.', 'error');
+      return;   // ⚠️ 실패하면 세션을 **닫지 않는다** - 다시 시도할 수 있어야 한다.
+    }
+  } catch (error) {
+    showToast(`액자를 저장하지 못했습니다: ${error}`, 'error');
+    return;
+  }
   const label = characterAssetFramePending?.label || 'framed';
   characterAssetControl.stageSource({kind: 'canvas'}, `${label} (${CHARACTER_ASSET_FRAME})`);
   characterAssetFramePending = null;
+  // 액자는 할 일이 끝났다 - 세션을 닫는다(사용자 지정 2026-08-31). 열어 두면
+  // Assets 탭으로 넘어간 뒤에도 캔버스가 결과 화면을 덮고 있어 "이건 왜 안
+  // 없어지지" 가 된다.
+  img2imgPanel?.close?.();
   switchRightTab('charAssets');
 }
+
 
 const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260831-tagger')
   .then(({createImageActionPopup}) => {

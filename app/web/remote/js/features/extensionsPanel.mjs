@@ -8,6 +8,9 @@
 // - 꺼짐(enabled=false)이면 퀵 버튼을 비활성 표시가 아니라 **아예 숨긴다** —
 //   Settings에서 다시 켜야 보인다.
 // 토글은 승인/soft 전용, 차단은 ⋯ 메뉴로 분리(설계 인스펙션 #4).
+// 시작 시 자동 확인 사이의 간격. 남의 서버에 몰아치지 않는다.
+const LAZY_CHECK_GAP_MS = 1500;
+
 export function createExtensionsUi(deps) {
   const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems,
     openExternalUrl} = deps;
@@ -652,6 +655,86 @@ export function createExtensionsUi(deps) {
     </button>`;
   }
 
+  /** 확장별 업데이트 확인 결과. `{state, latest, error}` - state 는
+   *  'idle' | 'checking' | 'latest' | 'outdated' | 'unknown'. */
+  const updateChecks = new Map();
+
+  function installedVersionOf(entry) {
+    const row = (lastState?.extensions || []).find(item => item && item.id === entry.id);
+    return String(row?.version || '');
+  }
+
+  /** 설치됨 아래에 붙는 [업데이트 확인] / [업데이트] 버튼(사용자 지정 2026-08-31). */
+  function updateButtonHtml(entry, busy) {
+    const check = updateChecks.get(entry.id) || {state: 'idle'};
+    if (check.state === 'checking') {
+      return '<button type="button" class="ext-avail-update" disabled>확인 중…</button>';
+    }
+    if (check.state === 'outdated') {
+      return `<button type="button" class="ext-avail-update is-new" data-update="${escHtml(entry.url)}"
+        title="설치된 ${escHtml(installedVersionOf(entry))} -> ${escHtml(check.latest || '')}"
+        ${busy ? 'disabled' : ''}>업데이트 ${escHtml(check.latest || '')}</button>`;
+    }
+    const label = check.state === 'latest' ? '최신'
+      : (check.state === 'unknown' ? '확인 불가' : '업데이트 확인');
+    const hint = check.state === 'unknown' && check.error ? ` title="${escHtml(check.error)}"` : '';
+    return `<button type="button" class="ext-avail-update" data-check="${escHtml(entry.id)}"${hint}>
+      ${label}</button>`;
+  }
+
+  /** 원격 매니페스트만 읽어 새 판이 있는지 본다(zip 을 받지 않는다).
+   *
+   *  ⚠️ 비교는 **백엔드가** 한다 - 여기서 버전 규약을 한 벌 더 들면 두 곳이
+   *     어긋난다(`0.10.0` vs `0.9.0` 같은 자리에서 갈린다).
+   */
+  async function checkForUpdate(entryId, {quiet = false} = {}) {
+    const entry = AVAILABLE_EXTENSIONS.find(item => item.id === entryId);
+    if (!entry) return;
+    updateChecks.set(entryId, {state: 'checking'});
+    renderSettingsPane();
+    const query = new URLSearchParams({url: entry.url, installed: installedVersionOf(entry)});
+    let next = {state: 'unknown', error: ''};
+    try {
+      const response = await fetch(`/api/extensions/update-check?${query}`);
+      const data = await response.json().catch(() => null);
+      if (response.ok && data && data.ok === true) {
+        if (data.known !== true) next = {state: 'unknown', error: String(data.error || '')};
+        else if (data.outdated) next = {state: 'outdated', latest: String(data.latest || '')};
+        else next = {state: 'latest', latest: String(data.latest || '')};
+      } else {
+        next = {state: 'unknown', error: (data && data.error) || `HTTP ${response.status}`};
+      }
+    } catch (error) {
+      next = {state: 'unknown', error: String(error)};
+    }
+    updateChecks.set(entryId, next);
+    renderSettingsPane();
+    // ⚠️ 시작 시 자동 확인(lazy)은 **말하지 않는다** - 켤 때마다 토스트가 뜨면
+    //    사용자가 곧 무시하게 된다. 직접 누른 경우에만 알린다.
+    if (quiet) return;
+    if (next.state === 'outdated') showToast(`새 판이 있습니다: ${next.latest}`, 'success');
+    else if (next.state === 'latest') showToast('최신입니다.', 'info');
+    else showToast(`업데이트를 확인하지 못했습니다: ${next.error || '알 수 없음'}`, 'warning');
+  }
+
+  /** 시작 시 **하나씩** 확인한다(사용자 지정: Lazy Check).
+   *
+   *  ⚠️ 한꺼번에 쏘지 않는다 - 목록이 길어지면 남의 서버에 몰아치고, 부팅
+   *     직후 네트워크를 태거·태그 다운로드와 다툰다. 사이를 띄우고 한 번만 돈다.
+   */
+  let lazyCheckStarted = false;
+  async function startLazyUpdateCheck() {
+    if (lazyCheckStarted) return;
+    const ids = installedIds();
+    const targets = AVAILABLE_EXTENSIONS.filter(entry => ids.has(entry.id));
+    if (!targets.length) return;      // 아직 상태가 안 왔다 - 다음 상태에서 다시 본다
+    lazyCheckStarted = true;
+    for (const entry of targets) {
+      await checkForUpdate(entry.id, {quiet: true});
+      await new Promise(resolve => setTimeout(resolve, LAZY_CHECK_GAP_MS));
+    }
+  }
+
   // 설치 가능한 확장 표 — [ 이름 | 설명 | GitHub 링크 ] [ 설치 ] (사용자 지정 구조).
   function availableExtensionsHtml() {
     const urls = installedRepoUrls();
@@ -670,8 +753,11 @@ export function createExtensionsUi(deps) {
           <div class="ext-avail-desc">${described}</div>
           <a class="ext-avail-link" href="${escHtml(entry.url)}" target="_blank" rel="noopener noreferrer">${escHtml(entry.url)}</a>
         </div>
-        <button type="button" class="ext-avail-install" data-url="${escHtml(entry.url)}"
-          ${already || busy ? 'disabled' : ''}>${already ? '설치됨' : '설치'}</button>
+        <div class="ext-avail-actions">
+          <button type="button" class="ext-avail-install" data-url="${escHtml(entry.url)}"
+            ${already || busy ? 'disabled' : ''}>${already ? '설치됨' : '설치'}</button>
+          ${already ? updateButtonHtml(entry, busy) : ''}
+        </div>
       </div>`;
     }).join('');
     return `<div class="ext-avail">
@@ -821,6 +907,17 @@ export function createExtensionsUi(deps) {
         if (!(key in collapsed)) return;
         collapsed[key] = !collapsed[key];
         renderSettingsPane();
+      });
+    });
+    root.querySelectorAll('[data-check]').forEach(el => {
+      el.addEventListener('click', () => checkForUpdate(el.dataset.check));
+    });
+    root.querySelectorAll('[data-update]').forEach(el => {
+      el.addEventListener('click', () => {
+        if (el.disabled) return;
+        // 업데이트 = **같은 주소로 다시 설치**. 설치 경로를 한 벌 더 짜면
+        // 검증·압축 해제 규약이 두 곳으로 갈린다.
+        startInstall(el.dataset.update);
       });
     });
     root.querySelectorAll('.ext-avail-install').forEach((btn) => {
@@ -1063,6 +1160,9 @@ export function createExtensionsUi(deps) {
 
   // ── 진입점: module_state 브로드캐스트 ───────────────────────
   function onState(m) {
+    // 시작 시 한 번만, 목록이 실제로 온 뒤에 깨운다(사용자 지정: Lazy Check).
+    // ⚠️ 부팅을 막지 않는다 - 다음 틱으로 미룬다.
+    setTimeout(() => { startLazyUpdateCheck(); }, 0);
     if (!m || !m.state) return;
     lastState = m.state;
     bindNav();

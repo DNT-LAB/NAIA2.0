@@ -28,6 +28,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from threading import Event, RLock, Thread
 from typing import Any
 from zipfile import ZipFile
@@ -124,6 +125,10 @@ def _codeload_urls(owner: str, repo: str, ref: str, *, explicit: bool) -> list[t
     ]
 
 
+# 매니페스트는 작다 - 이보다 크면 확장 매니페스트가 아니다.
+MAX_MANIFEST_BYTES = 64 * 1024
+
+
 def _detect_default_branch(owner: str, repo: str) -> str:
     """GitHub API로 default branch 조회 — 실패 시 main→master 폴백."""
     api = f"https://api.github.com/repos/{owner}/{repo}"
@@ -138,6 +143,58 @@ def _detect_default_branch(owner: str, repo: str) -> str:
     except Exception:
         pass
     return "main"  # codeload 다운로드가 main 실패 시 master 재시도(아래)
+
+
+def compare_versions(left: str, right: str) -> int:
+    """`left` 가 크면 1, 작으면 -1, 같으면 0.
+
+    ⚠️ 문자열 비교로는 안 된다 - `0.10.0` 이 `0.9.0` 보다 **작다**고 나온다.
+       숫자 조각으로 끊어 수로 견준다. 숫자가 아닌 꼬리(`-beta`)는 무시한다 -
+       그걸 순서로 세우려면 규약이 필요한데 확장마다 다르다.
+    """
+    def parts(value: str) -> list[int]:
+        return [int(chunk) for chunk in re.findall(r"\d+", str(value or ""))] or [0]
+
+    a, b = parts(left), parts(right)
+    for i in range(max(len(a), len(b))):
+        x = a[i] if i < len(a) else 0
+        y = b[i] if i < len(b) else 0
+        if x != y:
+            return 1 if x > y else -1
+    return 0
+
+
+def fetch_remote_manifest(url: str, *, timeout: float = 15.0) -> dict[str, Any]:
+    """레포 루트의 `extension.json` 만 읽어 온다 — **zip 을 받지 않는다**.
+
+    업데이트가 있는지만 보는 데 수 MB 를 받을 이유가 없다(실측: 매니페스트만
+    0.37초). 매니페스트가 하위 폴더에 있는 레포는 여기서 못 찾는다 - 그때는
+    `found=False` 로 정직하게 답하고 화면이 "확인 불가" 라고 말한다. 추측으로
+    폴더 이름을 넣어 보면 엉뚱한 확장의 버전을 읽을 수 있다.
+    """
+    owner, repo, ref = parse_github_url(url)
+    branch = ref or _detect_default_branch(owner, repo)
+    raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/extension.json"
+    request = urllib.request.Request(raw, headers={"User-Agent": "NAIA/2.0 Extension Updater"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=SSL_CONTEXT) as response:
+            data = json.loads(response.read(MAX_MANIFEST_BYTES).decode("utf-8"))
+    except Exception as exc:
+        return {"found": False, "branch": branch, "error": _safe_error(exc)}
+    if not isinstance(data, dict):
+        return {"found": False, "branch": branch, "error": "매니페스트 모양이 아닙니다."}
+    return {
+        "found": True,
+        "branch": branch,
+        "id": str(data.get("id") or ""),
+        "name": str(data.get("name") or ""),
+        "version": str(data.get("version") or ""),
+    }
+
+
+def _safe_error(exc: Exception) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    return text[:160]
 
 
 class ExtensionInstallService:

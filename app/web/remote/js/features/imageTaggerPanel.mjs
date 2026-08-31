@@ -264,11 +264,14 @@ export function createImageTaggerResultPanel({
     const host = ensureChip();
     if (!minimized) { host.classList.remove('open'); host.innerHTML = ''; return; }
     const n = queueLength();
+    // 사용자 지적 2026-08-31: 두 조각이 **떨어져 보인다** - 하나의 알약으로 합친다.
     host.innerHTML = `
-      <button type="button" class="imgtag-chip-btn" data-chip="open">
-        <span>Tagger</span>${n ? `<span class="imgtag-chip-count">${n}</span>` : ''}
-      </button>
-      <button type="button" class="imgtag-chip-btn is-x" data-chip="close" aria-label="닫기">×</button>`;
+      <div class="imgtag-chip">
+        <button type="button" class="imgtag-chip-open" data-chip="open">
+          <span>Tagger</span>${n ? `<span class="imgtag-chip-count">${n}</span>` : ''}
+        </button>
+        <button type="button" class="imgtag-chip-close" data-chip="close" aria-label="닫기">×</button>
+      </div>`;
     host.classList.add('open');
     positionChip();
   }
@@ -279,13 +282,28 @@ export function createImageTaggerResultPanel({
     const info = document.querySelector('.result-info-panel');
     if (!stage) return;
     const box = stage.getBoundingClientRect();
-    // 결과 정보 패널 **위**에 앉힌다.
-    const bottom = info ? win.innerHeight - info.getBoundingClientRect().top + 8 : 56;
-    // ⚠️ **오른쪽**에 붙인다. 왼쪽 구석에는 이미 다른 플로트가 있어 글자가 겹쳤다
-    //    (사용자 지적 2026-08-31). 창 본체도 오른쪽이라 손이 한 곳에 머문다.
-    chip.style.right = `${Math.round(win.innerWidth - box.right + 12)}px`;
+    if (box.width <= 0 || box.height <= 0) return;
+    // ⚠️ **오른쪽**에 붙인다. 왼쪽 구석에는 이미 다른 플로트가 있어 글자가 겹쳤다.
+    //    창 본체도 오른쪽이라 손이 한 곳에 머문다.
     chip.style.left = 'auto';
-    chip.style.bottom = `${Math.round(bottom)}px`;
+    chip.style.right = `${Math.round(win.innerWidth - box.right + 12)}px`;
+    // 결과 정보 패널 **위**에 앉힌다. 그 패널이 스테이지 밖/아래에 있으면 이 값이
+    // 음수에 가까워져 칩이 스테이지를 벗어난다(사용자 지적 2026-08-31: "이미지
+    // 패널 밖으로 나갑니다"). 그래서 **가둔다**.
+    const infoTop = info ? info.getBoundingClientRect().top : box.bottom;
+    const wanted = win.innerHeight - Math.min(infoTop, box.bottom) + 8;
+    chip.style.bottom = `${Math.round(wanted)}px`;
+    // ⚠️ 실제로 그린 뒤 크기를 재서 **스테이지 안으로 밀어 넣는다.** 계산만으로는
+    //    칩 높이(내용에 따라 변한다)를 알 수 없다.
+    const rect = chip.getBoundingClientRect();
+    const overTop = box.top + 8 - rect.top;
+    if (overTop > 0) {
+      chip.style.bottom = `${Math.round(wanted - overTop)}px`;
+    }
+    const under = rect.bottom - (box.bottom - 4);
+    if (under > 0) {
+      chip.style.bottom = `${Math.round(wanted + under)}px`;
+    }
   }
 
   function minimize() {

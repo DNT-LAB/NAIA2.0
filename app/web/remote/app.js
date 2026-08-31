@@ -1292,7 +1292,7 @@ async function runImageTagger(payload) {
     release();
   }
 }
-const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-progress')
+const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-onechip')
   .then(({createImageTaggerResultPanel}) => {
     imageTaggerPanel = createImageTaggerResultPanel({
       document,
@@ -2377,7 +2377,7 @@ function setExtensionLauncherItems(items, onClick) {
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
 }
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-saferestart')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-extupdate')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,

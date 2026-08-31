@@ -73,6 +73,39 @@ def register_extension_install_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"설치 상태 조회 실패: {exc}"}, status_code=500)
 
+    @app.get("/api/extensions/update-check")
+    async def api_extension_update_check(req: Request):
+        """레포 루트의 매니페스트만 읽어 원격 버전을 알려 준다(zip 을 안 받는다).
+
+        ⚠️ 설치와 달리 **루프백 전용이 아니다** - 읽기만 하고 이 기기에 아무것도
+        바꾸지 않는다. 원격에서도 "새 판이 있나" 는 볼 수 있어야 한다.
+        """
+        from core.extension_install_service import compare_versions, fetch_remote_manifest
+
+        url = str(req.query_params.get("url") or "").strip()
+        if not url:
+            return JSONResponse({"ok": False, "error": "주소가 없습니다."}, status_code=400)
+        installed = str(req.query_params.get("installed") or "").strip()
+        try:
+            remote = await run_in_thread(fetch_remote_manifest, url)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"확인 실패: {exc}"}, status_code=502)
+        if not remote.get("found"):
+            # 매니페스트가 하위 폴더에 있는 레포는 여기서 못 본다 - 실패가 아니라
+            # "모른다" 다. 화면이 그렇게 말한다.
+            return {"ok": True, "known": False, "error": remote.get("error") or ""}
+        latest = str(remote.get("version") or "")
+        return {
+            "ok": True,
+            "known": True,
+            "id": remote.get("id") or "",
+            "latest": latest,
+            "installed": installed,
+            # 설치된 판을 함께 주면 비교도 여기서 한다 - 화면이 버전 규약을 한 벌
+            # 더 들면 두 곳이 어긋난다(`0.10.0` vs `0.9.0` 같은 자리에서 갈린다).
+            "outdated": bool(installed) and compare_versions(latest, installed) > 0,
+        }
+
     @app.post("/api/extensions/install")
     async def api_extension_install_start(req: Request):
         if not _is_local_request(req):

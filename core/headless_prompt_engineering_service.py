@@ -1066,49 +1066,47 @@ class HeadlessPromptEngineeringService:
 
     @staticmethod
     def _nai_v5_recommended_module_settings() -> dict[str, Any]:
-        """NAI Diffusion V5 용 추천 프롬프트 묶음.
+        """NAI Diffusion V5 용 추천 프롬프트 묶음(`recommend_6` 기준).
 
-        사용자가 직접 튜닝해 쓰던 `test_v5` 프리셋의 값을 그대로 기준선으로 삼았다
-        (지시 2026-08-21). V4.5 추천과 **작가 구성부터 다르다** - V5 는 같은 프롬프트에
-        다르게 반응해서, 4.5 것을 그대로 쓰면 추천이라 부를 수 없다.
+        사용자 지시 2026-08-31: NAI5 사양이 바뀌어 `recommend_6` 로 동기화했다.
+        V4.5 추천과 **작가 구성부터 다르다** - V5 는 같은 프롬프트에 다르게
+        반응해서, 4.5 것을 그대로 쓰면 추천이라 부를 수 없다.
+
+        ⚠️ 이 블록은 프리셋 파일에서 **생성**했다. 다시 동기화할 때도 손으로
+        옮기지 말 것 - 프롬프트가 길어 반드시 틀린다.
         """
         return {
             "pre_prompt": (
-                "1.2::artist:utatanecocoa ::, artist:nasuuni, 0.55::epi zero, artist:e-note ::, "
-                "0.35::artist:sushispin ::, -0.85::artist collaboration ::"
+                "0.6::artist:utatanecocoa ::, 0.7::artist:nasuuni ::, 0.65::epi zero, artist:e-note ::, "
+                "0.5::artist:sushispin ::, -1::artist collaboration ::"
             ),
             "post_prompt": (
-                "0.35::crosshatching ::, 0.8::perspective, low-angle view ::, "
-                "0.15::light particles ::, 0.33::oekaki, cel shading, hatching (texture), "
-                "graphite (medium), thin jaggy lines ::, 0.03::hong (white spider) ::, "
-                # 사용자 보정(2026-08-21): 이 묶음에서 `artist:yonchan, channel
-                # (caststation)` 을 빼고 `dino (dinoartforame)` 만 남긴다.
-                "0.15::dino (dinoartforame) ::, "
-                "0.5::depth of field, foreshortening ::, sharpening, amazing quality, "
-                "great quality, absurdly detailed composition, incredibly absurdres, "
-                "very aesthetic, year 2024, highly aesthetic Pixiv style illustration, "
+                "0.35::crosshatching, countershading, ::, 0.8::perspective, low-angle view ::, "
+                "0.15::light particles ::, 0.33::oekaki, cel shading, hatching (texture), graphite (medium), "
+                "thin jaggy lines ::, 0.4::hong (white spider) ::, 0.55::dino (dinoartforame) ::, "
+                "0.5::depth of field, foreshortening ::, best quality, very aesthetic, amazing quality, "
+                "incredibly absurdres, year 2024, highly aesthetic Pixiv style illustration, "
                 "clean composition, very thin lineart, high contrast, beautiful background, "
-                "high-quality digital art"
+                "high-quality digital art, high complexity, -0.25::low complexity ::"
             ),
             "auto_hide_prompt": (
-                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, "
-                "bad id, _logo, bad twitter id, comic, __background__, ~blurry background, "
-                "~sky background, character doll, stuffed animal, stuffed toy, speech bubble, cyclops, "
-                "pov, 3d, glasses, mole, text focus, thought bubble, watermark, web address, "
-                "body writing, fake screenshot, facing away, |_|, __piercing__, tattoo, _tattoo, "
-                "_text, sound effects, greyscale, multiple views, __pubic hair__, peeing, rabbit, "
-                "__censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, child on child, "
-                "covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, multiple boys, "
-                "__measuring__, multiple views, big belly, curvy, doll joints, dark-skinned male, "
-                "looking at viewer, timestamp, battery indicator, tan, fake phone screenshot, "
-                "stomach bulge, __beach__, __shower__, on table, huge penis, __bug__, giant insect, "
-                "belly, eye mask, circle cut, dark nipples, signature, alternate race, alternate species, "
-                "dark nipples, livestream, slap mark, x-ray, armpit hair, health bar, snapchat, "
-                "facial mark, emoji, command spell, dark areolae, __piercing__, __bed__, __pillow__, "
-                "__sheet__, body markings, obese, __long tongue__, toddlercon, __name__, handprint, "
-                "__pasties__, mini person, __butt plug__, __eyepatch__, oppai loli, sex toy, loli, "
-                "chibi, chibi inset, makeup, mascara, large breasts, runny makeup, third eye, "
-                "anal hair, __halo__, __(style)__, __(cosplay)__"
+                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, bad id, "
+                "_logo, bad twitter id, comic, __background__, ~blurry background, ~sky background, "
+                "character doll, stuffed animal, stuffed toy, speech bubble, cyclops, pov, 3d, glasses, mole, "
+                "text focus, thought bubble, watermark, web address, body writing, fake screenshot, "
+                "facing away, |_|, __piercing__, tattoo, _tattoo, _text, sound effects, greyscale, "
+                "multiple views, __pubic hair__, peeing, rabbit, __censor__, pregnant, __chess__, "
+                "trading card, __(medium)__, __theme__, child on child, covered clitoris, _gag, sketch, "
+                "poke_, __pokemon__, recording, viewfinder, multiple boys, __measuring__, multiple views, "
+                "big belly, curvy, doll joints, dark-skinned male, looking at viewer, timestamp, "
+                "battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, "
+                "on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, "
+                "signature, alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, "
+                "armpit hair, health bar, snapchat, facial mark, emoji, command spell, dark areolae, "
+                "__piercing__, __bed__, __pillow__, __sheet__, body markings, obese, __long tongue__, "
+                "toddlercon, __name__, handprint, __pasties__, mini person, __butt plug__, __eyepatch__, "
+                "oppai loli, sex toy, loli, chibi, chibi inset, makeup, mascara, large breasts, runny makeup, "
+                "third eye, anal hair, __halo__, __(style)__, __(cosplay)__"
             ),
             "preprocessing_options": {
                 "remove_author": True,
@@ -1117,7 +1115,6 @@ class HeadlessPromptEngineeringService:
                 "remove_character_features": False,
                 "remove_clothes": False,
                 "remove_clothing_event": False,
-                # 사용자 지정(2026-08-22): V5 추천에서만 켜져 있던 것을 끈다.
                 "remove_color": False,
                 "remove_location_and_background_color": False,
                 "remove_expression": False,
@@ -1129,39 +1126,74 @@ class HeadlessPromptEngineeringService:
                 "e621_auto_boost": False,
                 "danbooru_auto_weight": False,
                 "tag_implication_compression": False,
+                "category_annotation": False,
+            },
+            # recommend_6 이 함께 담고 있는 보조 설정 - 추천이 재현되려면
+            # 이것들도 같이 가야 한다(가중치·부스트가 딴 값이면 결과가 달라진다).
+            "e621_settings": {
+                "weight": 1.05,
+                "hidden_tags": [],
+                "mode": "confused",
+            },
+            "danbooru_weight_settings": {
+                "magnitude": 3,
+                "rating_blend": 0.3,
+                "override_on": False,
+                "override_scale": 0.42,
+                "override_min": 0.65,
+                "override_max": 1.47,
+                "rating_override_on": True,
+                "rating_override": "s",
+                "invert_weight": False,
+            },
+            "ollama_boost_settings": {
+                "nl_weight": 1.5,
+                "effort": "rich",
+                "include_prefix": False,
+                "include_postfix": False,
+                "include_e621": False,
+                "allow_scent_style": True,
+                "allow_material_style": True,
+                "allow_light_style": False,
+                "emphasize_framing": False,
             },
         }
-
     @staticmethod
     def _nai_v5_recommended_main_settings() -> dict[str, Any]:
-        """V5 추천 생성 파라미터(`test_v5` 기준).
+        """V5 추천 생성 파라미터(`recommend_6` 기준).
+
+        사용자 지시 2026-08-31: NAI5 사양이 바뀌어 `recommend_6` 로 동기화.
+        이 블록은 그 프리셋 파일에서 **생성**했다 - 긴 프롬프트를 손으로 옮기면
+        반드시 틀린다.
 
         ⚠️ `random_resolution` / `auto_fit_resolution` 은 **프리셋에 저장되지 않는
-        세션 전역 키**라 `test_v5` 파일에는 없다(`PRESET_RUNTIME_STATE_KEYS`).
-        화면에서 켜져 있던 상태(Rnd Res 켬 / Auto Res 끔)를 그대로 적었다.
+        세션 전역 키**라(`PRESET_RUNTIME_STATE_KEYS`) recommend_6 에도 없다.
+        그래서 동기화 대상이 아니고 예전 값을 그대로 둔다.
         """
         return {
             "model": "NAID5F",
             "sampler": "k_euler_ancestral",
             "scheduler": "karras",
-            "resolution": "1024 x 1024",
-            # V5 는 28 이 아니라 23 이다. 무료 구간(28 이하)에 그대로 들어간다.
+            "resolution": "896 x 1152",
+            "width": 896,
+            "height": 1152,
             "steps": 23,
-            "cfg_scale": 6.5,
-            "cfg_rescale": 0.28,
+            "cfg_scale": 7.0,
+            "cfg_rescale": 0.0,
             "negative": (
-                "lowres, bad quality, normal quality, very displeasing, abstract, mutated, "
-                "monochrome, bleed through, gif artifacts, jpeg artifacts, scan artifacts, "
-                "bad hands, artistic error, bad anatomy, extra digits, glitch, "
-                "chromatic aberration abuse, distortion, haze, anaglyph, faded, 1.5::moire ::, "
-                "high contrast, flipnote studio (medium), ink (medium), cubism, saturated, "
-                "outline, retro artstyle, partially colored, flat color, blending, ukiyo-e, "
-                "sumi-e, minimalism, ai-generated, 1980s (style), bkub (style), "
-                "yasuhiko yoshikazu (style), blender (medium), 1.15::multiple views ::, "
-                "muted color, 0.5::low contrast ::"
+                "lowres, bad quality, normal quality, very displeasing, abstract, mutated, monochrome, "
+                "bleed through, gif artifacts, jpeg artifacts, scan artifacts, bad hands, artistic error, "
+                "bad anatomy, extra digits, glitch, chromatic aberration abuse, distortion, haze, anaglyph, "
+                "faded, 1.5::moire ::, high contrast, flipnote studio (medium), ink (medium), cubism, "
+                "saturated, outline, retro artstyle, partially colored, flat color, blending, ukiyo-e, "
+                "sumi-e, minimalism, ai-generated, 1980s (style), bkub (style), yasuhiko yoshikazu (style), "
+                "blender (medium), 1.15::multiple views ::"
             ),
-            "seed": "883731701",
+            "seed": 7911702124,
             "seed_fixed": False,
+            "prompt_fixed": False,
+            "wildcard_standalone": False,
+            # 프리셋이 담지 못하는 세션 전역 키 - 예전 값 유지.
             "random_resolution": True,
             "auto_fit_resolution": False,
             "SMEA": False,
@@ -1169,7 +1201,6 @@ class HeadlessPromptEngineeringService:
             "VAR+": False,
             "DECRISP": True,
         }
-
     @staticmethod
     def _nai_recommended_main_settings() -> dict[str, Any]:
         return {

@@ -17515,6 +17515,16 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .chunk-context-tagfilter b {
   font-weight: 700;
 }
+/* 자동 숨김 항목(사용자 지정 2026-08-31). Tag Filter 의 파랑/빨강과 **다른 색**을
+   준다 - 같은 색이면 무엇을 누르는지 순간적으로 안 갈린다. 사전에 없는 태그일 때는
+   disabled 라 기본 규칙이 알아서 흐리게 만든다(따로 색을 주지 않는다). */
+.chunk-context-hide:not(:disabled) span:first-child {
+  color: #e8c98a;
+  font-weight: 600;
+}
+.chunk-context-hide b {
+  font-weight: 700;
+}
 /* 대상 태그를 항목 오른쪽에 옅게 붙여 무엇이 들어가는지 눈으로 확인시킨다.
    길면 잘라서 메뉴 폭이 태그 길이에 끌려다니지 않게 한다. */
 .result-context-tag {

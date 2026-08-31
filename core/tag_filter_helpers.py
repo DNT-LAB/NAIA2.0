@@ -182,6 +182,38 @@ def _apply_round_overrides(temp, main_tags, exclude, include):
     return result
 
 
+def _apply_category_hide(main_tags, removed_tags, category_overrides):
+    """개별 숨김 - 카테고리별 `hide` 목록을 **라운드 스위치와 무관하게** 적용한다.
+
+    ⚠️ 왜 include 로 안 하는가: include 는 `if enabled:` 안에서만 돈다. 그런데
+       사전에 있는 태그는 그 라운드가 켜지면 **어차피** 지워지므로, 사전 태그에
+       대한 include 는 언제나 no-op 다(실측 2026-08-31: remove_clothes OFF ->
+       swimsuit 남음 / ON -> 의상 전체 사라짐. 두 경우 다 include 가 한 일이 없다).
+       우클릭 '자동 숨김 (랜덤 프롬프트 - 의상)' 은 **그 태그 하나만** 지워야 하고,
+       사용자는 라운드를 켜지 않는다(실측: 사용자 설정의 remove_* 는 전부 OFF).
+       그래서 스위치를 안 보는 목록이 따로 필요하다.
+
+    exclude(보호)가 hide 를 이긴다 - 기존 우선순위(exclude > include)와 같은 방향이라,
+    미리보기에서 지워진 칩을 눌러 exclude 에 넣는 동작이 그대로 '되돌리기'가 된다.
+    """
+    if not isinstance(category_overrides, dict) or not category_overrides:
+        return
+    # 화이트리스트를 다시 들지 않고 맵 자신을 돈다 - 로더가 이미 정규화한 SSOT 라,
+    # 여기서 키 목록을 한 벌 더 들면 카테고리가 늘 때 두 곳이 어긋난다.
+    for _option_key, entry in category_overrides.items():
+        if not isinstance(entry, dict):
+            continue
+        hide = _parse_override_terms(entry.get('hide'))
+        if _terms_empty(hide):
+            continue
+        exclude = _parse_override_terms(entry.get('exclude'))
+        # 리스트를 돌면서 지우면 인덱스가 밀린다 - 지울 것을 먼저 모은다.
+        doomed = [k for k in main_tags
+                  if _matches_terms(k, hide) and not _matches_terms(k, exclude)]
+        for keyword in doomed:
+            main_tags.remove(keyword)
+            removed_tags.append(keyword)
+
 def _is_color_exception(tag: str) -> bool:
     """
     색상 필터링 예외 여부를 판단합니다.
@@ -303,6 +335,7 @@ def apply_tag_filters(
 
     처리 순서:
     1. Auto Hide (보호 키워드 + 패턴 매칭)
+    1.5 개별 숨김 (category_overrides 의 hide - 라운드 스위치와 무관)
     2. remove_character_features → filter_manager.characteristic_list
     3. remove_clothes → filter_manager.clothes_list (+ region 추적)
     3.5 remove_clothing_event → filter_manager._clothing_event_set (+ category 추적)
@@ -319,9 +352,10 @@ def apply_tag_filters(
         filter_manager: FilterDataManager 인스턴스 (None이면 필터 건너뜀)
         track_clothing_regions: 의류 Region 추적 여부
         category_overrides: 카테고리별 사용자 오버라이드
-            {option_key: {"exclude": [...], "include": [...]}}.
+            {option_key: {"exclude": [...], "include": [...], "hide": [...]}}.
             exclude=해당 라운드가 어떤 방식으로 매칭했든 제거하지 않음(보호).
             include=라운드 enabled 일 때만 정확일치 태그를 함께 제거.
+            hide=**라운드 스위치와 무관하게 항상** 제거(개별 숨김). exclude 가 이긴다.
             Auto Hide(라운드 1)는 자체 문법을 가지므로 오버라이드 대상 아님.
 
     Returns:
@@ -339,6 +373,17 @@ def apply_tag_filters(
         'enabled': True,
         'removed': removed_tags[before_len:],
     })
+
+    # 1.5 개별 숨김 - filter_manager 가 없어도 돈다(사전이 필요 없는 정확일치 목록).
+    before_len = len(removed_tags)
+    _apply_category_hide(main_tags, removed_tags, category_overrides)
+    if len(removed_tags) > before_len:
+        filter_log.append({
+            'name': '개별 숨김',
+            'key': 'category_hide',
+            'enabled': True,
+            'removed': removed_tags[before_len:],
+        })
 
     if not filter_manager:
         result['filter_log'] = filter_log

@@ -86,6 +86,24 @@ class HeadlessRandomPromptResult:
         return payload
 
 
+def ensure_filter_data_manager(context):
+    """읽기 전용 사전 조회를 위해 filter_data_manager 만 좁게 보장하고 돌려준다.
+
+    ⚠️ 이 일을 하는 자리가 둘이었다(카테고리 사전 라우트 · 우클릭 자동 숨김).
+       진입점이 둘이면 한쪽만 고친 건 안 고친 것이라 하나로 합친다.
+       전체 런타임(_ensure_headless_runtime)을 세우지 않는다 - 와일드카드 매니저와
+       파이프라인 훅까지 끌어오면 조회 한 번이 부팅만큼 무거워진다.
+    """
+    try:
+        service = getattr(context, "headless_random_prompt_service", None)
+        if service is None:
+            service = HeadlessRandomPromptService(context)
+            context.headless_random_prompt_service = service
+        service._ensure_filter_data_manager()
+    except Exception:
+        pass
+    return getattr(context, "filter_data_manager", None)
+
 class HeadlessRandomPromptService:
     """Generate Remote Web random prompts without RemoteBridge or Qt widgets."""
 

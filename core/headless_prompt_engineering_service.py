@@ -51,6 +51,103 @@ class HeadlessPromptEngineeringService:
             "implication_info": copy.deepcopy(metadata.get("implication_compressed_tags") or []),
         }
 
+    # ── 우클릭 '자동 숨김' ───────────────────────────────────────────────
+    #
+    # 사용자 지정 2026-08-31: 프롬프트에서 태그를 우클릭해 두 곳 중 하나로 숨긴다.
+    #   auto_hide_add     -> Auto-Hide 목록(모드 전체에 걸리는 한 칸)
+    #   category_hide_add -> 그 태그가 속한 카테고리의 개별 숨김 목록
+    #
+    # ⚠️ 붙이기를 **백엔드에서** 한다. 화면이 현재 값을 읽어 이어 붙여 보내면,
+    #    창이 둘이거나 디바운스가 겹칠 때 뒤에 도착한 쪽이 앞의 추가를 지운다.
+    #    여기서는 언제나 살아 있는 값에 얹는다.
+
+    @staticmethod
+    def _clean_hidden_tag(value: Any) -> str:
+        # 위생화 규칙을 따로 두지 않는다 - 화면이 Tag Index 조회로 이미 걸러,
+        # 색인에 없는 글자(부분 선택 · 여러 태그를 한꺼번에 끈 것)로는 버튼이 안 눌린다.
+        return str(value or '').strip()
+
+    def _classify_hidden_tag(self, tag: str) -> tuple[str, str]:
+        """(option_key, 카테고리 이름). 어느 사전에도 없으면 ("", "").
+
+        ⚠️ 실존하지 않는 태그(부분 선택 등)는 랜덤 프롬프트의 어떤 카테고리로도
+           나오지 않으므로 숨길 자리가 없다(사용자 지정). 화면에서도 그 항목을
+           막지만, 규칙은 **여기서도** 지킨다 - 한쪽만 막으면 안 막은 것이다.
+        """
+        from core.headless_random_prompt_service import ensure_filter_data_manager
+        from core.prompt_category_annotation import (
+            CATEGORY_REMOVAL_OPTION,
+            _category_sets,
+            category_label,
+            classify,
+        )
+
+        manager = ensure_filter_data_manager(self.context)
+        if manager is None:
+            return '', ''
+        key = classify(tag, _category_sets(manager))
+        option_key = CATEGORY_REMOVAL_OPTION.get(key, '')
+        return (option_key, category_label(key)) if option_key else ('', '')
+
+    def _add_hidden_tag(self, key: str, value: Any):
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        context = self.context
+        tag = self._clean_hidden_tag(value)
+        if not tag:
+            return context._toast('숨길 태그를 고르세요.', level='error')
+
+        if key == 'auto_hide_add':
+            store = get_prompt_engineering_store(context)
+            settings = store.state(context.get_api_mode())['settings']
+            current = str(settings.get('auto_hide_prompt') or '')
+            existing = {part.strip().lower() for part in current.replace(chr(10), ',').split(',')}
+            if tag.lower() in existing:
+                return [
+                    context._toast(f'이미 Auto-Hide 에 있습니다: {tag}', level='info'),
+                    self.state(),
+                ]
+            merged = f'{current.rstrip().rstrip(chr(44))}, {tag}' if current.strip() else tag
+            store.apply_settings({'auto_hide_prompt': merged})
+            return [
+                context._toast(f'Auto-Hide 에 추가: {tag}', level='success'),
+                self.state(),
+            ]
+
+        option_key, label = self._classify_hidden_tag(tag)
+        if not option_key:
+            return context._toast(
+                f'사전에 없는 태그라 카테고리로 숨길 수 없습니다: {tag}', level='error')
+
+        from core.prompt_engineering_settings import (
+            load_category_filter_overrides,
+            sanitize_tag_list,
+            save_category_filter_overrides,
+        )
+
+        save_root = getattr(getattr(context, 'runtime_paths', None), 'save_dir', None)
+        overrides = load_category_filter_overrides(save_root=save_root)
+        entry = overrides.get(option_key) if isinstance(overrides.get(option_key), dict) else {}
+        hide = list(entry.get('hide') or [])
+        if tag.lower() in {item.strip().lower() for item in hide}:
+            return [
+                context._toast(f'이미 [{label}] 숨김 목록에 있습니다: {tag}', level='info'),
+                self.state(),
+            ]
+        hide.append(tag)
+        overrides[option_key] = {
+            'exclude': list(entry.get('exclude') or []),
+            'include': list(entry.get('include') or []),
+            'hide': sanitize_tag_list(hide),
+        }
+        save_category_filter_overrides(overrides, save_root=save_root)
+        context._pp_category_filter_cache = load_category_filter_overrides(save_root=save_root)
+        return [
+            context._toast(
+                '숨김 처리를 되돌릴려면 [ 프롬프트 엔지니어링 > Setting & Preview >'
+                ' 개별 제외 태그 ] 에서 수정합니다.', level='info'),
+            self.state(),
+        ]
     def debug_snapshot(self) -> dict[str, Any]:
         current_context = getattr(self.context, "current_prompt_context", None)
         current_metadata = getattr(current_context, "metadata", None)
@@ -327,9 +424,14 @@ class HeadlessPromptEngineeringService:
             store.save_ollama_boost_settings(normalized)
             store.apply_settings({"ollama_boost_settings": normalized})
         elif key == "category_filters":
-            # 단일 카테고리 부분 업데이트: {"category": <option_key>, "exclude": [...], "include": [...]}.
+            # 단일 카테고리 부분 업데이트:
+            #   {"category": <option_key>, "exclude": [...], "include": [...], "hide": [...]}
             # 전체 맵에 머지 후 전역 디스크 SSOT(pp_category_filters.json)에 영속화하고
-            # 런타임 캐시를 write-through 갱신한다. 둘 다 비면 해당 카테고리 삭제.
+            # 런타임 캐시를 write-through 갱신한다. 셋 다 비면 해당 카테고리 삭제.
+            #
+            # ⚠️ **없는 키는 지우지 않고 그대로 둔다.** 이 한 줄이 없으면 좁은 동기화가
+            #    레코드 전체를 덮는다 - ⚙ 편집기는 exclude/include 만 보내므로, 우클릭이
+            #    넣어 둔 hide 가 저장 한 번에 통째로 날아간다(옛 클라이언트도 마찬가지).
             from core.prompt_engineering_settings import (
                 CATEGORY_FILTER_OPTION_KEYS,
                 load_category_filter_overrides,
@@ -346,21 +448,27 @@ class HeadlessPromptEngineeringService:
             category = str(payload.get("category") or "").strip()
             if category not in CATEGORY_FILTER_OPTION_KEYS:
                 return context._toast(f"Unknown filter category: {category}", level="error")
-            raw_exclude = payload.get("exclude", [])
-            raw_include = payload.get("include", [])
-            if not isinstance(raw_exclude, list) or not isinstance(raw_include, list):
-                return context._toast("Invalid category filter tags", level="error")
-            exclude = sanitize_tag_list(raw_exclude)
-            include = sanitize_tag_list(raw_include)
             save_root = getattr(getattr(context, "runtime_paths", None), "save_dir", None)
             overrides = load_category_filter_overrides(save_root=save_root)
-            if exclude or include:
-                overrides[category] = {"exclude": exclude, "include": include}
+            current = overrides.get(category) if isinstance(overrides.get(category), dict) else {}
+            lists: dict[str, list[str]] = {}
+            for field in ("exclude", "include", "hide"):
+                if field not in payload:
+                    lists[field] = list(current.get(field) or [])
+                    continue
+                raw = payload.get(field)
+                if not isinstance(raw, list):
+                    return context._toast("Invalid category filter tags", level="error")
+                lists[field] = sanitize_tag_list(raw)
+            if any(lists.values()):
+                overrides[category] = lists
             else:
                 overrides.pop(category, None)
             save_category_filter_overrides(overrides, save_root=save_root)
             # 다음 생성이 디스크 재읽기 없이 반영하도록 런타임 캐시를 갱신(정규화된 SSOT 재적재).
             context._pp_category_filter_cache = load_category_filter_overrides(save_root=save_root)
+        elif key in ("auto_hide_add", "category_hide_add"):
+            return self._add_hidden_tag(key, text_value)
         elif key == "debug_refresh":
             pass
         elif key == "ollama_auto_boost":

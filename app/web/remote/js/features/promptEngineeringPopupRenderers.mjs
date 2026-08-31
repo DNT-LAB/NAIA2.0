@@ -100,6 +100,7 @@ export function createPromptEngineeringPopupRenderers({
       if (!excludeDisplay.has(n)) excludeDisplay.set(n, String(tag));
     });
     const include = Array.isArray(entry.include) ? entry.include.join(', ') : '';
+    const hide = Array.isArray(entry.hide) ? entry.hide.join(', ') : '';
     return {
       key,
       q: '',
@@ -111,6 +112,7 @@ export function createPromptEngineeringPopupRenderers({
       workingExclude,
       excludeDisplay,
       workingInclude: include,
+      workingHide: hide,
       dirty: false,
       loading: false,
       error: null,
@@ -552,7 +554,9 @@ export function createPromptEngineeringPopupRenderers({
       const status = !entry.enabled ? 'OFF' : (removed.length ? `ON · ${removed.length} removed` : 'ON');
       const catKey = String(entry.key || '');
       // Auto Hide(자체 문법)는 카테고리 오버라이드 대상이 아니므로 ⚙ 미노출.
-      const editable = catKey && catKey !== 'auto_hide';
+      // Auto Hide(자체 문법)와 개별 숨김(여러 카테고리가 섞인 합계)은 한 카테고리의
+    // 편집기로 열 수 없다 - ⚙ 를 달면 어느 서랍을 여는지 말할 수 없다.
+    const editable = catKey && catKey !== 'auto_hide' && catKey !== 'category_hide';
       const isOpen = editable && editorState && editorState.key === catKey;
       const gear = editable
         ? `<button type="button" class="mod-debug-gear${isOpen ? ' is-open' : ''}" data-cat-gear="${escHtml(catKey)}"`
@@ -798,7 +802,7 @@ export function createPromptEngineeringPopupRenderers({
   // ===== 카테고리 편집기 엔진 (editorState 단일 소스) ===== //
   // 설명문은 UI 에서 빼고 ⚙ 버튼의 data-naia-guide 툴팁으로 옮긴다(텍스트 다이어트).
   const CATEGORY_GUIDES = {
-    default: '제외 태그: 이 카테고리가 ON이어도 제거되지 않습니다(보호).\n추가 제거: 이 카테고리가 ON일 때 함께 제거됩니다.\n사전 태그를 클릭하거나, 미리보기의 제거된 태그를 클릭해 제외하세요.',
+    default: '제외 태그: 이 카테고리가 ON이어도 제거되지 않습니다(보호).\n추가 제거: 이 카테고리가 ON일 때 함께 제거됩니다.\n개별 숨김: 이 카테고리가 OFF여도 항상 제거됩니다 (프롬프트 우클릭 > 자동 숨김).\n사전 태그를 클릭하거나, 미리보기의 제거된 태그를 클릭해 제외하세요.',
     remove_color: '색상은 단어 부분일치로 제거됩니다.\n사전의 색상 단어를 제외하면 그 색상 전체가 보호됩니다 (예: blue → blue hair, blue dress 유지).\n미리보기의 제거된 태그를 클릭하면 그 태그 하나만 보호됩니다.\n추가 제거: 이 카테고리가 ON일 때 함께 제거됩니다.',
     remove_noise_tags: '빈도 기반이라 사전 목록이 없습니다.\n미리보기의 제거된 태그를 클릭해 제외하거나, 추가 제거 태그를 직접 입력하세요.',
   };
@@ -1035,8 +1039,9 @@ export function createPromptEngineeringPopupRenderers({
     if (!editorState || typeof saveCategoryFilter !== 'function') return;
     const exclude = [...editorState.workingExclude].map(n => editorState.excludeDisplay.get(n) || n);
     const include = parseTagInput(editorState.workingInclude);
+    const hide = parseTagInput(editorState.workingHide);
     // 전송 실패(재연결 중 등) 시 dirty 유지 — 미저장 상태가 조용히 사라지지 않게 한다.
-    const sent = saveCategoryFilter(editorState.key, exclude, include);
+    const sent = saveCategoryFilter(editorState.key, exclude, include, hide);
     if (sent === false) {
       updateSaveDirty();
       return;
@@ -1146,6 +1151,12 @@ export function createPromptEngineeringPopupRenderers({
           <textarea class="mod-textarea ${CATEGORY_EDITOR_INPUT_CLASS}" data-cat-include rows="2"
                     placeholder="함께 제거할 태그 (쉼표)">${escHtml(editorState.workingInclude)}</textarea>
         </div>
+        <div class="mod-debug-cat-sec">
+          <div class="mod-debug-cat-sechead"><span class="mod-debug-cat-sectitle">개별 숨김</span>
+            <span class="mod-debug-cat-note">이 카테고리가 OFF여도 항상 제거</span></div>
+          <textarea class="mod-textarea ${CATEGORY_EDITOR_INPUT_CLASS}" data-cat-hide rows="2"
+                    placeholder="항상 숨길 태그 (쉼표)">${escHtml(editorState.workingHide)}</textarea>
+        </div>
         <div class="mod-debug-cat-actions">
           <button type="button" class="mod-debug-cat-save${editorState.dirty ? ' is-dirty' : (isSavedFlashing() ? ' is-saved' : '')}" data-cat-save>${saveButtonLabel(!!editorState.dirty)}</button>
         </div>
@@ -1160,16 +1171,19 @@ export function createPromptEngineeringPopupRenderers({
         searchDebounceTimer = setTimeout(() => fetchCategoryTags(true), 250);
       });
     }
-    const includeInput = container.querySelector('[data-cat-include]');
-    if (includeInput) {
-      includeInput.addEventListener('input', () => {
-        if (!editorState) return;
-        editorState.workingInclude = includeInput.value;
-        editorState.dirty = true;
-        updateSaveDirty();
+    // 두 칸이 같은 모양이라 하나로 묶는다 - 따로 쓰면 한쪽만 고치게 된다.
+    [['[data-cat-include]', 'workingInclude'], ['[data-cat-hide]', 'workingHide']]
+      .forEach(([selector, field]) => {
+        const input = container.querySelector(selector);
+        if (!input) return;
+        input.addEventListener('input', () => {
+          if (!editorState) return;
+          editorState[field] = input.value;
+          editorState.dirty = true;
+          updateSaveDirty();
+        });
+        if (typeof bindTagAssist === 'function') bindTagAssist(input);
       });
-      if (typeof bindTagAssist === 'function') bindTagAssist(includeInput);
-    }
     const saveBtn = container.querySelector('[data-cat-save]');
     if (saveBtn) saveBtn.addEventListener('click', saveEditor);
 

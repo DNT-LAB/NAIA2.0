@@ -208,15 +208,18 @@ export function createPromptEngineeringActions({
   }
 
   // 카테고리별 전처리 필터 오버라이드 저장(단일 카테고리 부분 업데이트).
-  // exclude/include 는 이미 프론트에서 split+trim+빈 항목 제거된 배열.
+  // exclude/include/hide 는 이미 프론트에서 split+trim+빈 항목 제거된 배열.
+  // ⚠️ 세 목록을 **다 보낸다**. 하나를 빼면 백엔드가 그 값을 그대로 두므로(부분
+  //    업데이트) 편집기에서 비운 목록이 안 비워진다.
   // 반환: 전송 성공 여부 — 실패(재연결 중 등) 시 호출부가 dirty 를 유지해야 한다.
-  function saveCategoryFilter(category, exclude, include) {
+  function saveCategoryFilter(category, exclude, include, hide) {
     const name = String(category || '').trim();
     if (!name) return false;
     const sent = setModuleParam('prompt_engineering', 'category_filters', JSON.stringify({
       category: name,
       exclude: Array.isArray(exclude) ? exclude : [],
       include: Array.isArray(include) ? include : [],
+      hide: Array.isArray(hide) ? hide : [],
     }));
     if (typeof showToast === 'function') {
       if (sent) showToast('카테고리 필터 저장됨', 'success');

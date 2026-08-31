@@ -395,7 +395,11 @@ class PromptEngineeringHeadlessPostHook:
             auto_hide,
             filter_manager,
             track_clothing_regions=True,
-            category_overrides=self._category_filter_overrides(),
+            # ⚠️ 전처리를 건너뛰는 경로에서는 오버라이드도 넘기지 않는다. 예전에는
+            #    라운드 본문이 전부 `if enabled:` 안이라 빈 checkbox_options 만으로
+            #    막혔지만, 개별 숨김(hide)은 스위치를 안 보므로 여기서 막아야 한다.
+            #    '전처리 건너뛰기' 인데 태그가 사라지면 사용자는 원인을 못 찾는다.
+            category_overrides=None if skip_preprocessing else self._category_filter_overrides(),
         )
         if filter_result.get("removed_clothes_by_region"):
             context.metadata["removed_clothes_by_region"] = filter_result["removed_clothes_by_region"]

@@ -271,6 +271,8 @@ export function createChunkPanel({
     selectionMenu.innerHTML = `
       <div class="result-context-group" data-requires-filter-tag="1" data-filter-slot></div>
       <div class="result-context-separator" data-requires-filter-tag="1"></div>
+      <div class="result-context-group" data-requires-filter-tag="1" data-hide-slot></div>
+      <div class="result-context-separator" data-requires-filter-tag="1"></div>
       <div class="result-context-group">
         <button class="result-context-item" type="button" data-action="undo"><span>Undo</span></button>
         <button class="result-context-item" type="button" data-action="redo"><span>Redo</span></button>
@@ -353,7 +355,17 @@ export function createChunkPanel({
     hideSelectionMenu();
     if (target) target.focus();
     try {
-      if (action.startsWith('tagfilter-')) {
+      if (action === 'hide-auto' || action === 'hide-category') {
+        const tag = (payload.filterTag || '').trim();
+        if (!tag) {
+          showToast('숨길 태그를 고르세요.', 'info');
+        } else {
+          // 붙이기는 백엔드가 한다 - 화면이 현재 값을 읽어 이어 붙이면 창이 둘일 때
+          // 뒤에 도착한 쪽이 앞의 추가를 지운다. 토스트도 백엔드가 낸다.
+          setModuleParam('prompt_engineering',
+            action === 'hide-auto' ? 'auto_hide_add' : 'category_hide_add', tag);
+        }
+      } else if (action.startsWith('tagfilter-')) {
         // 본체는 호스트가 주입한다(quickFilter 는 app.js 가 소유). 여기서는 어느
         // 목록에 무엇을 넣을지만 넘긴다 - 필터 상태를 두 곳이 만지면 갈린다.
         const tag = (payload.filterTag || '').trim();
@@ -489,6 +501,63 @@ export function createChunkPanel({
         : item('tagfilter-exact-on', `<b>${name}</b> 퍼펙트 매칭 적용`, tone));
   }
 
+  // ── 자동 숨김(사용자 지정 2026-08-31) ────────────────────────────────
+  //
+  // 판정은 **조회 한 번**이 다 한다(사용자 지정):
+  //   indexed - Tag Index 에 있는 태그인가  -> Auto-Hide 항목을 켠다
+  //   known   - 개별 그룹에 속하는가        -> 랜덤 프롬프트 항목을 켠다
+  //
+  // 색인에 없는 글자(부분 선택 등)는 둘 다 막힌다 - 그것으로 충분해서 따로
+  // 위생화 규칙을 두지 않는다. 넣는 것은 **고른 태그 그대로**, 묶음 문법 없이.
+  const classifyCache = new Map();
+
+  async function classifyTag(tag) {
+    if (classifyCache.has(tag)) return classifyCache.get(tag);
+    let result = null;
+    try {
+      const res = await fetch(
+        `/api/prompt-engineering/classify-tag?tag=${encodeURIComponent(tag)}`,
+        { headers: { Accept: 'application/json' } });
+      if (res.ok) result = await res.json();
+    } catch (_error) { result = null; }
+    // 조회 실패는 캐시하지 않는다 - 한 번 끊겼다고 그 태그를 영영 못 숨기면 안 된다.
+    if (result) classifyCache.set(tag, result);
+    return result;
+  }
+
+  function hideItemHtml(action, inner, {disabled = false, tag = ''} = {}) {
+    const attrs = [
+      `class='result-context-item chunk-context-hide'`,
+      `type='button'`,
+      `data-action='${action}'`,
+      disabled ? 'disabled' : '',
+    ].filter(Boolean).join(' ');
+    // 대상 태그를 오른쪽에 옅게 붙여 무엇이 들어가는지 눈으로 확인시킨다(Tag Filter 와 동일).
+    const tail = tag ? `<span class='result-context-tag'>${escHtml(tag)}</span>` : '';
+    return `<button ${attrs}><span>${inner}</span>${tail}</button>`;
+  }
+
+  // 응답을 기다리는 동안에도 **줄 수가 변하지 않게** 두 줄을 먼저 막아 둔 채 그린다
+  // - 메뉴가 뒤늦게 커지면 사용자가 엉뚱한 항목을 누른다.
+  function renderHideItems(menu, tag) {
+    const slot = menu.querySelector('[data-hide-slot]');
+    if (!slot) return;
+    if (!tag) { slot.innerHTML = ''; return; }
+    const paint = (indexed, label) => {
+      slot.innerHTML =
+        hideItemHtml('hide-auto', '자동 숨김 <b>(Auto-hide 에 추가)</b>',
+          {tag, disabled: !indexed})
+        + hideItemHtml('hide-category',
+          `자동 숨김 <b>(랜덤 프롬프트 - ${escHtml(label || '없음')})</b>`,
+          {tag, disabled: !label});
+    };
+    paint(false, '');
+    classifyTag(tag).then(info => {
+      // 늦게 온 응답이 다음 태그의 메뉴를 덮지 않게 한다.
+      if (!selectionMenuPayload || selectionMenuPayload.filterTag !== tag) return;
+      paint(!!(info && info.indexed), (info && info.known && info.label) || '');
+    });
+  }
   function showSelectionMenu(target, event, extra = {}) {
     // 선택이 없어도 메뉴를 띄운다(데스크톱 마우스 우클릭) — 선택 의존 항목
     // (Cut/Copy/Add to Chunk)은 no-selection 클래스로 숨긴다. 모바일 롱프레스는
@@ -511,6 +580,7 @@ export function createChunkPanel({
     menu.classList.toggle('no-selection', !selection);
     menu.classList.toggle('no-filter-tag', !selectionMenuPayload.filterTag);
     renderFilterItems(menu, selectionMenuPayload.filterTag);
+    renderHideItems(menu, selectionMenuPayload.filterTag);
     placeSelectionMenu(event);
     return true;
   }

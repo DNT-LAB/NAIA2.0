@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from core.headless_random_prompt_service import HeadlessRandomPromptService
+from core.headless_random_prompt_service import ensure_filter_data_manager
 from core.prompt_engineering_settings import CATEGORY_FILTER_OPTION_KEYS
 from core.tag_filter_helpers import compile_hide_pattern
 from core.web_session_context import WebSessionContext
@@ -52,17 +52,9 @@ def _filter_manager(context: Any):
     filter_data_manager 는 워밍업/첫 생성 시점에 lazy 생성되므로, 서버 기동 직후
     이 API 가 먼저 맞으면 None 이다. 읽기 전용 사전 조회가 와일드카드 매니저/
     파이프라인 훅까지 세우지 않도록 전체 _ensure_headless_runtime() 대신 전용
-    _ensure_filter_data_manager() 만 호출한다(Codex 리뷰 반영). run_in_thread
+    ensure_filter_data_manager() 만 호출한다(Codex 리뷰 반영). run_in_thread
     안에서 호출되므로 이벤트 루프 비차단."""
-    try:
-        service = getattr(context, "headless_random_prompt_service", None)
-        if service is None:
-            service = HeadlessRandomPromptService(context)
-            context.headless_random_prompt_service = service
-        service._ensure_filter_data_manager()
-    except Exception:
-        pass
-    return getattr(context, "filter_data_manager", None)
+    return ensure_filter_data_manager(context)
 
 
 def _sorted_category_tags(context: Any, category: str):
@@ -86,6 +78,35 @@ def _sorted_category_tags(context: Any, category: str):
     cache[category] = tags
     return tags
 
+
+def classify_tag_payload(context: Any, tag: str) -> tuple[dict[str, Any], int]:
+    """우클릭 '자동 숨김' 두 항목의 **활성/비활성**을 한 번에 답한다.
+
+    indexed - Tag Index 에 색인된 태그인가       -> Auto-Hide 항목
+    known   - 개별 카테고리 그룹에 속하는가       -> 랜덤 프롬프트 항목 (label 이 그 이름)
+
+    조회 하나가 두 판정을 다 내므로 화면은 왕복을 한 번만 한다. 색인에 없는 글자
+    (부분 선택 · 여러 태그를 한꺼번에 끈 것)는 indexed=False 라 두 항목 모두 막힌다
+    - 그래서 따로 위생화 규칙을 둘 필요가 없다.
+    """
+    from app.backend.server.autocomplete_commands import ensure_tag_search_index
+
+    text = str(tag or "").strip()
+    if not text:
+        return {"tag": "", "indexed": False, "known": False, "category": "", "label": ""}, 200
+    try:
+        indexed = ensure_tag_search_index(context).entry_for(text) is not None
+    except Exception:
+        indexed = False
+    service = context._prompt_engineering_service()
+    option_key, label = service._classify_hidden_tag(text)
+    return {
+        "tag": text,
+        "indexed": indexed,
+        "known": bool(option_key),
+        "category": option_key,
+        "label": label,
+    }, 200
 
 def category_tags_payload(
     context: Any,
@@ -193,6 +214,16 @@ def register_pe_filter_routes(
     *,
     run_in_thread: AsyncRunner,
 ) -> None:
+    @app.get("/api/prompt-engineering/classify-tag")
+    async def api_pe_classify_tag(tag: str = ''):
+        try:
+            payload, status = await run_in_thread(classify_tag_payload, session_context, tag)
+        except Exception as exc:
+            return JSONResponse({"error": f"Classify failed: {exc}"}, status_code=500)
+        if status != 200:
+            return JSONResponse(payload, status_code=status)
+        return payload
+
     @app.get("/api/prompt-engineering/category-tags")
     async def api_pe_category_tags(
         category: str = "",

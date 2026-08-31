@@ -288,6 +288,11 @@ def save_ollama_boost_settings(settings: dict[str, Any], *, save_root: str | Pat
 # 각 전처리 카테고리(remove_* 체크박스)마다 exclude(자동 제거에서 보호할 태그)/
 # include(해당 카테고리 ON일 때 함께 제거할 추가 태그)를 사용자가 지정한다.
 # Auto Hide 라운드는 자체 문법(~/__..__)을 가지므로 여기서 제외한다.
+# 세 번째 목록 hide(개별 숨김) 는 **라운드 스위치와 무관하게 항상** 제거한다.
+# ⚠️ include 로는 이 일을 못 한다 - include 는 라운드가 ON 일 때만 도는데, 사전에
+#    있는 태그는 그때 어차피 지워진다. 즉 사전 태그에 대해 include 는 언제나
+#    no-op 다(실측 2026-08-31). 우클릭 '자동 숨김' 이 약속을 지키려면 별도 목록이
+#    있어야 한다. 우선순위는 exclude(보호) > hide - 보호가 언제나 이긴다.
 CATEGORY_FILTER_OPTION_KEYS = (
     "remove_character_features",
     "remove_clothes",
@@ -325,8 +330,8 @@ def sanitize_tag_list(value: Any) -> list[str]:
 
 def normalize_category_filter_overrides(overrides: Any) -> dict[str, Any]:
     """전체 오버라이드 맵을 정규화. {schema_version, categories:{...}} 래핑 형태와
-    맨 {option_key: {...}} 형태를 모두 받아 화이트리스트 키만, exclude/include 가
-    하나라도 있는 카테고리만 남긴다(파일 청결 유지)."""
+    맨 {option_key: {...}} 형태를 모두 받아 화이트리스트 키만, 세 목록 중 하나라도
+    있는 카테고리만 남긴다(파일 청결 유지)."""
     data = overrides if isinstance(overrides, dict) else {}
     categories_raw = data.get("categories") if isinstance(data.get("categories"), dict) else data
     if not isinstance(categories_raw, dict):
@@ -338,8 +343,9 @@ def normalize_category_filter_overrides(overrides: Any) -> dict[str, Any]:
             continue
         exclude = sanitize_tag_list(entry.get("exclude"))
         include = sanitize_tag_list(entry.get("include"))
-        if exclude or include:
-            result[key] = {"exclude": exclude, "include": include}
+        hide = sanitize_tag_list(entry.get("hide"))
+        if exclude or include or hide:
+            result[key] = {"exclude": exclude, "include": include, "hide": hide}
     return result
 
 

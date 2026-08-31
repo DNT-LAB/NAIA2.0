@@ -58,6 +58,33 @@ MAIN_CATEGORY_ORDER: tuple[tuple[str, str, str], ...] = (
     (EXTRA_KEY, "#추가:", ""),
 )
 
+# 주석 카테고리 -> 전처리 라운드(option_key). 우클릭 '자동 숨김 (랜덤 프롬프트 - X)'
+# 이 숨김 목록을 어느 카테고리 서랍에 넣을지 정한다.
+# ⚠️ `extra` 는 **없다** - 어느 사전에도 없는 태그(부분 선택 등)는 랜덤 프롬프트의
+#    어떤 카테고리로도 나오지 않으므로 숨길 자리가 없다(사용자 지정 2026-08-31).
+CATEGORY_REMOVAL_OPTION: dict[str, str] = {
+    "features": "remove_character_features",
+    "clothes": "remove_clothes",
+    "clothing_event": "remove_clothing_event",
+    "expression": "remove_expression",
+    "pose_action": "remove_pose_action",
+    "object": "remove_object_tags",
+    "location": "remove_location_and_background_color",
+    "meta": "remove_meta_tags",
+}
+
+
+def category_label(key: str) -> str:
+    """주석 표식에서 사람이 읽는 이름만 뽑는다(`#의상:` -> `의상`).
+
+    ⚠️ 이름을 따로 적지 않는다 - 사용자가 프롬프트에서 이미 보는 그 글자여야
+       메뉴의 '랜덤 프롬프트 - 의상' 과 화면이 맞는다.
+    """
+    for candidate, marker, _attribute in MAIN_CATEGORY_ORDER:
+        if candidate == key:
+            return marker.strip("#:").strip()
+    return ""
+
 LEGACY_MAIN_MARKER = "#랜덤프롬프트"
 
 # 프롬프트 문자열에서 **본문이 시작하는 자리**를 찾는 표식들.

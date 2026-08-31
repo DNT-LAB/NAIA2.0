@@ -2567,7 +2567,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter4')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-autohide1')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,
@@ -10037,7 +10037,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260724-catfilter9')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260831-cathide1')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -10352,7 +10352,7 @@ const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260723-catfilter9')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260831-cathide1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
@@ -11088,9 +11088,13 @@ function refreshPromptEngineeringDebug() {
   if (promptEngineeringActions) promptEngineeringActions.refreshDebug();
 }
 
-function savePromptEngineeringCategoryFilter(category, exclude, include) {
+// ⚠️ 인자를 **하나도 빠뜨리지 않고** 넘긴다. 이 얇은 감싸개가 `hide` 를 흘려
+//    `undefined` 로 만들면 저장이 그 목록을 통째로 비운다(실측 2026-08-31:
+//    개별 숨김 두 개가 저장 한 번에 사라졌다). 모듈과 호출부만 고치고 여기를
+//    지나치면, 고친 것처럼 보이면서 데이터를 지운다.
+function savePromptEngineeringCategoryFilter(category, exclude, include, hide) {
   if (!promptEngineeringActions) return false;
-  return promptEngineeringActions.saveCategoryFilter(category, exclude, include);
+  return promptEngineeringActions.saveCategoryFilter(category, exclude, include, hide);
 }
 
 function stampedEdit(value, stamp) {

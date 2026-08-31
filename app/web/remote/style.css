@@ -26898,12 +26898,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 
 /* ── Image Tagger (WD14, 원격) ────────────────────────
+   사용자 지정 2026-08-31: **오른쪽 구석**에 작게 둔다 - 가운데에 두면 프롬프트를
+   가려서 이걸 보면서 프롬프트/캐릭터를 고칠 수가 없다. 목록은 아이콘만.
    `imgtag-` 로 전부 고유하다 - 뒤쪽 같은 특이도에 밀릴 일이 없어 파일 끝에 둔다. */
 .imgtag-popup {
   position: fixed; z-index: var(--z-floating-module-aux);
-  left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: min(900px, calc(100vw - 16px));
-  height: min(600px, calc(100vh - 16px));
+  right: 14px; top: 50%; transform: translateY(-50%);
+  width: min(430px, calc(100vw - 20px));
+  height: min(520px, calc(100vh - 90px));
   display: flex; flex-direction: column;
   border: 1px solid rgba(130,150,255,0.30); border-radius: 8px;
   background: rgba(15,15,23,0.98);
@@ -26912,63 +26914,67 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .imgtag-popup.is-over { border-color: var(--accent); }
 .imgtag-head {
-  min-height: 32px; display: flex; align-items: center; gap: 8px;
-  padding: 0 6px 0 12px;
+  min-height: 28px; display: flex; align-items: center; gap: 6px;
+  padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--border-dim); background: rgba(22,24,38,0.9);
 }
-.imgtag-title { font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  letter-spacing: 0.4px; color: var(--text-primary); }
-.imgtag-status { flex: 1; font-size: 10px; color: var(--text-dim); }
+.imgtag-title { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.3px; color: var(--text-primary); }
+.imgtag-status { flex: 1; min-width: 0; font-size: 9.5px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .imgtag-status.ok { color: var(--success, #4caf50); }
 .imgtag-status.busy { color: var(--accent-glow); }
-.imgtag-target { height: 22px; max-width: 160px; padding: 0 6px;
-  border: 1px solid var(--border-dim); border-radius: 5px;
-  background: rgba(0,0,0,0.3); color: var(--text-primary); font-size: 10.5px; }
+.imgtag-target { height: 20px; max-width: 108px; padding: 0 4px;
+  border: 1px solid var(--border-dim); border-radius: 4px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary); font-size: 9.5px; }
 .imgtag-x { border: 0; background: transparent; color: var(--text-dim);
-  font-size: 15px; line-height: 1; padding: 2px 7px; cursor: pointer; }
+  font-size: 14px; line-height: 1; padding: 2px 5px; cursor: pointer; }
 .imgtag-x:hover { color: var(--text-primary); }
 /* 출처 한 줄. 경고가 아니라 표시다(사용자 판단: 검증된 Provider). */
-.imgtag-notice { padding: 5px 12px; font-size: 10px; color: var(--text-dim);
-  border-bottom: 1px solid var(--border-dim); }
+.imgtag-notice { padding: 4px 10px; font-size: 9px; color: var(--text-dim);
+  border-bottom: 1px solid var(--border-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .imgtag-notice:empty { display: none; }
 .imgtag-notice a { color: var(--accent-glow); text-decoration: none; }
 .imgtag-notice a:hover { text-decoration: underline; }
 /* ⚠️ `min-height: 0` 이 없으면 flex 자식이 내용만큼 부풀어 스크롤이 안 생긴다. */
-.imgtag-body { flex: 1; min-height: 0; display: flex; gap: 10px; padding: 10px; }
-.imgtag-left { flex: 0 0 216px; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
-.imgtag-left-head { font-family: var(--font-mono); font-size: 9.5px;
-  letter-spacing: 0.4px; color: var(--text-dim); }
+.imgtag-body { flex: 1; min-height: 0; display: flex; gap: 7px; padding: 7px; }
+/* 왼쪽은 **아이콘 줄**. 이름을 빼서 좁게 유지한다(사용자 지정). */
+.imgtag-left { flex: 0 0 54px; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.imgtag-left-head { font-family: var(--font-mono); font-size: 8.5px;
+  letter-spacing: 0.3px; color: var(--text-dim); text-align: center; }
 .imgtag-list { flex: 1; min-height: 0; overflow-y: auto; display: flex;
-  flex-direction: column; gap: 4px; }
-.imgtag-empty { font-size: 10.5px; color: var(--text-dim); padding: 10px 2px; }
+  flex-direction: column; gap: 4px; align-items: center; }
+.imgtag-empty { font-size: 9px; color: var(--text-dim); padding: 8px 0; text-align: center; }
 .imgtag-item {
-  display: flex; align-items: center; gap: 7px; padding: 4px 6px;
+  position: relative; flex: none; width: 46px; height: 46px; padding: 0;
   border: 1px solid var(--border-dim); border-radius: 6px;
-  background: rgba(0,0,0,0.26); color: var(--text-primary);
-  font-size: 10.5px; cursor: pointer; text-align: left;
+  background: rgba(0,0,0,0.26); cursor: pointer; overflow: hidden;
 }
 .imgtag-item:hover { border-color: var(--accent); }
-.imgtag-item.is-active { border-color: var(--accent); background: rgba(90,120,255,0.16); }
-.imgtag-thumb { flex: none; width: 30px; height: 30px; object-fit: cover;
-  border-radius: 4px; background: rgba(0,0,0,0.4); }
-.imgtag-item-name { flex: 1; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
-.imgtag-badge { flex: none; display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 3px 1px 6px; border-radius: 4px; font-size: 9px;
-  background: rgba(90,120,255,0.22); color: #b9c6ff; }
-.imgtag-badge.is-err { background: rgba(224,108,117,0.2); color: #e79aa1; padding: 1px 6px; }
-.imgtag-badge.is-off { background: rgba(255,255,255,0.08); color: var(--text-dim); padding: 1px 6px; }
-.imgtag-badge-x { border: 0; background: transparent; color: inherit;
-  font-size: 12px; line-height: 1; padding: 0 3px; cursor: pointer; }
-.imgtag-badge-x.is-solo { color: var(--text-dim); opacity: 0; }
-.imgtag-item:hover .imgtag-badge-x.is-solo { opacity: 1; }
-.imgtag-badge-x:hover { color: #fff; }
-.imgtag-add { height: 26px; border: 1px dashed var(--border-dim); border-radius: 6px;
-  background: rgba(0,0,0,0.22); color: var(--text-dim); font-size: 10.5px; cursor: pointer; }
+.imgtag-item.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.imgtag-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 상태는 글자 대신 **점**으로 - 46px 안에 글자를 넣으면 아무것도 안 읽힌다. */
+.imgtag-dot { position: absolute; left: 3px; top: 3px; width: 7px; height: 7px;
+  border-radius: 50%; background: #7d9bff; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
+.imgtag-dot.is-err { background: #e06c75; }
+.imgtag-dot.is-off { background: #8a8a95; }
+/* 취소·지우기. 대기 중인 것은 늘 보이고, 끝난 것은 올려야 보인다. */
+.imgtag-x-mini {
+  position: absolute; right: 1px; top: 1px; width: 15px; height: 15px;
+  border: 0; border-radius: 4px; padding: 0; cursor: pointer;
+  background: rgba(0,0,0,0.62); color: #fff; font-size: 11px; line-height: 15px;
+}
+.imgtag-x-mini.is-solo { opacity: 0; }
+.imgtag-item:hover .imgtag-x-mini.is-solo { opacity: 1; }
+.imgtag-x-mini:hover { background: rgba(224,108,117,0.85); }
+.imgtag-add { height: 22px; flex: none; width: 46px;
+  border: 1px dashed var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.22); color: var(--text-dim); font-size: 12px; cursor: pointer; }
 .imgtag-add:hover { border-color: var(--accent); color: var(--text-primary); }
 .imgtag-right { flex: 1; min-width: 0; min-height: 0; display: flex;
-  flex-direction: column; gap: 8px; }
-/* 거울 + textarea. **여백·글꼴·줄높이가 한 필이라도 다르면 글자가 어긋난다** -
+  flex-direction: column; gap: 6px; }
+/* 거울 + textarea. **여백·글꼴·줄높이가 한 톨이라도 다르면 글자가 어긋난다** -
    그래서 두 규칙이 같은 값을 쓴다. 고칠 때 반드시 둘 다 고칠 것. */
 .imgtag-editor { position: relative; flex: 1; min-height: 0;
   border: 1px solid var(--border-dim); border-radius: 6px;
@@ -26976,13 +26982,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .imgtag-editor:focus-within { border-color: var(--accent); }
 .imgtag-mirror, .imgtag-area {
   position: absolute; inset: 0; margin: 0;
-  padding: 8px 10px; border: 0; box-sizing: border-box;
-  font-family: var(--font-editor); font-size: 11.5px; line-height: 1.6;
+  padding: 7px 9px; border: 0; box-sizing: border-box;
+  font-family: var(--font-editor); font-size: 11px; line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
   overflow-y: auto;
 }
 .imgtag-mirror { color: var(--text-primary); pointer-events: none; z-index: 0; }
-/* 사용자 지정: "#로 기입되는 주석형 컨텐츠들은 전부 연노랑색 하이라이팅" */
+/* 사용자 지정: #로 기입되는 주석형 컨텐츠들은 전부 연노랑색 하이라이팅 */
 .imgtag-cmt { color: #f2e2a6; }
 .imgtag-area {
   z-index: 1; background: transparent; resize: none; outline: none;
@@ -26991,19 +26997,20 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 /* placeholder 는 거울이 못 그린다 - textarea 쪽에서만 보이게 색을 되돌린다. */
 .imgtag-area::placeholder { color: var(--text-dim); -webkit-text-fill-color: var(--text-dim); }
-.imgtag-acts { display: flex; gap: 5px; justify-content: flex-end; }
-.imgtag-act { height: 24px; padding: 0 12px;
+.imgtag-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.imgtag-act { height: 22px; padding: 0 10px;
   border: 1px solid var(--border-dim); border-radius: 5px;
   background: rgba(0,0,0,0.28); color: var(--text-dim);
-  font-size: 10.5px; cursor: pointer; }
+  font-size: 10px; cursor: pointer; }
 .imgtag-act:hover { border-color: var(--accent); color: var(--text-primary); }
-/* 최소화 칩 - Interactive 의 Recent/Scene 과 같은 자리(사용자 지정). */
+/* 최소화 칩 - 창과 **같은 쪽(오른쪽)**에 둔다. 왼쪽 구석에는 다른 플로트가 있어
+   글자가 겹쳤다(사용자 지적 2026-08-31). */
 .imgtag-chip-float { position: fixed; z-index: 1; display: none; gap: 4px; }
 .imgtag-chip-float.open { display: flex; }
 .imgtag-chip-btn {
   display: flex; align-items: center; gap: 5px;
   padding: 3px 9px; border-radius: 6px; cursor: pointer;
-  background: rgba(20,20,28,0.62); border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(20,20,28,0.72); border: 1px solid rgba(255,255,255,0.14);
   color: var(--text-secondary); font-size: 10.5px;
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
@@ -27011,59 +27018,11 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .imgtag-chip-btn.is-x { padding: 3px 8px; }
 .imgtag-chip-count { font-family: var(--font-mono); font-size: 9.5px;
   padding: 0 4px; border-radius: 999px; background: rgba(90,120,255,0.3); color: #cdd8ff; }
-@media (max-width: 700px) {
-  .imgtag-body { flex-direction: column; }
-  .imgtag-left { flex: 0 0 150px; }
+/* 좁은 화면에서는 가운데로 - 오른쪽에 붙일 자리가 없다. */
+@media (max-width: 760px) {
+  .imgtag-popup { right: 50%; transform: translate(50%, -50%);
+    width: calc(100vw - 16px); height: min(70vh, calc(100vh - 16px)); }
 }
-
-/* 일괄 저장/다운로드 번호 순서 (사용자 요청 2026-08-31). 저장 버튼 바로 밑. */
-.auto-save-order-row {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 6px;
-}
-.auto-save-order-label { font-size: 10.5px; color: var(--text-dim); }
-.auto-save-order-seg { display: flex; gap: 0; }
-.auto-save-order-btn {
-  height: 24px; padding: 0 10px;
-  border: 1px solid var(--border-dim);
-  background: rgba(0,0,0,0.28); color: var(--text-dim);
-  font-size: 10.5px; cursor: pointer;
-}
-.auto-save-order-btn:first-child { border-radius: 5px 0 0 5px; }
-.auto-save-order-btn:last-child { border-radius: 0 5px 5px 0; border-left-width: 0; }
-.auto-save-order-btn.is-active {
-  border-color: var(--accent); color: var(--text-primary);
-  background: rgba(90,120,255,0.20);
-}
-/* ⚠️ 눌린 칸이 오른쪽이면 왼쪽 칸의 오른쪽 테두리가 그 위를 덮는다 -
-   눌린 칸의 왼쪽 테두리를 되살리고 위로 올린다. */
-.auto-save-order-btn.is-active:last-child { border-left-width: 1px; margin-left: -1px; }
-.auto-save-order-btn:hover { color: var(--text-primary); }
-
-/* 확장 없이 다시 시작 (안전 재시작). 확장이 호스트를 몽키패치할 수 있어
-   앱이 이상해질 수 있는데, 지금까지 앱 안에 빠져나올 길이 없었다. */
-.ext-safe-row {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin: 10px 0 4px; padding: 7px 10px;
-  border: 1px solid var(--border-dim); border-radius: 6px;
-  background: rgba(0,0,0,0.22);
-}
-/* 프론트가 실제로 가로채져 있으면 눈에 띄게 - 증상과 원인을 잇는다. */
-.ext-safe-row.is-warn {
-  border-color: rgba(240,198,116,0.38);
-  background: rgba(240,198,116,0.10);
-}
-.ext-safe-text { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-dim); }
-.ext-safe-row.is-warn .ext-safe-text { color: #f0c674; }
-.ext-safe-btn {
-  flex: none; height: 24px; padding: 0 11px;
-  border: 1px solid var(--border-dim); border-radius: 5px;
-  background: rgba(0,0,0,0.3); color: var(--text-primary);
-  font-size: 10.5px; cursor: pointer;
-}
-.ext-safe-btn:hover { border-color: var(--accent); }
-.ext-safe-btn:disabled { opacity: 0.5; cursor: default; }
-
 /* 캐릭터 에셋 액자 줄 - 평소 인페인트에는 안 보인다(canvas_purpose 로 가른다).
    ⚠️ 열(`ic-cols`) 안에 끼우면 자리가 없어 마스크 버튼과 **글자가 겹쳤다**
    (사용자 지적 2026-08-31). 머리 줄 바로 아래 **자기 줄**로 뺀다. */

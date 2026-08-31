@@ -278,9 +278,12 @@ export function createImageTaggerResultPanel({
     const info = document.querySelector('.result-info-panel');
     if (!stage) return;
     const box = stage.getBoundingClientRect();
-    // 결과 정보 패널 **위**에 앉힌다 - Recent/Scene 이 앉는 그 줄이다.
+    // 결과 정보 패널 **위**에 앉힌다.
     const bottom = info ? win.innerHeight - info.getBoundingClientRect().top + 8 : 56;
-    chip.style.left = `${Math.round(box.left + 12)}px`;
+    // ⚠️ **오른쪽**에 붙인다. 왼쪽 구석에는 이미 다른 플로트가 있어 글자가 겹쳤다
+    //    (사용자 지적 2026-08-31). 창 본체도 오른쪽이라 손이 한 곳에 머문다.
+    chip.style.right = `${Math.round(win.innerWidth - box.right + 12)}px`;
+    chip.style.left = 'auto';
     chip.style.bottom = `${Math.round(bottom)}px`;
   }
 
@@ -307,23 +310,24 @@ export function createImageTaggerResultPanel({
   }
 
   // ── 그리기 ───────────────────────────────────────────────────
-  function stateLabel(item) {
+  /** 상태 표시. 아이콘만 남기기로 했으므로 **글자 대신 배지**로 얹는다.
+   *  ⚠️ 대기·진행 중인 것은 취소(×)가 반드시 닿아야 한다 - 사용자 지정이다.
+   */
+  function stateBadge(item) {
     if (item.state === 'queued' || item.state === 'running') {
-      // 사용자 지정: "[In Queue X] 라벨이 붙고, 언제든지 X 버튼을 눌러 취소"
-      return `<span class="imgtag-badge">In Queue<button type="button" class="imgtag-badge-x"
-                data-cancel="${escHtml(item.id)}" aria-label="취소">×</button></span>`;
+      return `<span class="imgtag-dot is-q" title="In Queue"></span>
+        <button type="button" class="imgtag-x-mini" data-cancel="${escHtml(item.id)}"
+          aria-label="취소" title="취소">×</button>`;
     }
-    // ⚠️ 취소·실패 항목에도 지우기를 준다 - 없으면 미리보기 blob 이 페이지가
-    //    닫힐 때까지 남고 목록 상한(MAX_ITEMS)만 차지한다(Codex CONCERN).
     if (item.state === 'error' || item.state === 'cancelled') {
-      const label = item.state === 'error' ? '실패' : '취소됨';
       const tone = item.state === 'error' ? 'is-err' : 'is-off';
-      return `<span class="imgtag-badge ${tone}">${label}<button type="button"
-                class="imgtag-badge-x" data-cancel="${escHtml(item.id)}"
-                aria-label="목록에서 지우기">×</button></span>`;
+      const label = item.state === 'error' ? '실패' : '취소됨';
+      return `<span class="imgtag-dot ${tone}" title="${label}"></span>
+        <button type="button" class="imgtag-x-mini" data-cancel="${escHtml(item.id)}"
+          aria-label="목록에서 지우기" title="목록에서 지우기">×</button>`;
     }
-    return `<button type="button" class="imgtag-badge-x is-solo" data-cancel="${escHtml(item.id)}"
-              aria-label="목록에서 지우기">×</button>`;
+    return `<button type="button" class="imgtag-x-mini is-solo" data-cancel="${escHtml(item.id)}"
+      aria-label="목록에서 지우기" title="목록에서 지우기">×</button>`;
   }
 
   function renderTargets() {
@@ -350,15 +354,15 @@ export function createImageTaggerResultPanel({
       ? `[ ${escHtml(notice)} : <a href="${escHtml(spaceUrl)}" target="_blank" rel="noopener noreferrer">${escHtml(spaceUrl)}</a> ]`
       : '';
 
+    // 사용자 지정 2026-08-31: 파일 이름 없이 **아이콘만**. 이름은 툴팁으로 남긴다.
     pick('.imgtag-list').innerHTML = items.length
       ? items.map(item => `
         <button type="button" class="imgtag-item${item.id === activeId ? ' is-active' : ''}"
                 data-open="${escHtml(item.id)}" title="${escHtml(item.name)}">
-          <img class="imgtag-thumb" src="${escHtml(item.url)}" alt="">
-          <span class="imgtag-item-name">${escHtml(item.name)}</span>
-          ${stateLabel(item)}
+          <img class="imgtag-thumb" src="${escHtml(item.url)}" alt="${escHtml(item.name)}">
+          ${stateBadge(item)}
         </button>`).join('')
-      : '<div class="imgtag-empty">아직 올린 이미지가 없습니다.</div>';
+      : '<div class="imgtag-empty">비어 있음</div>';
 
     const active = byId(activeId);
     const area = pick('.imgtag-area');
@@ -400,9 +404,9 @@ export function createImageTaggerResultPanel({
       <div class="imgtag-notice"></div>
       <div class="imgtag-body">
         <div class="imgtag-left">
-          <div class="imgtag-left-head">이번 세션 업로드</div>
+          <div class="imgtag-left-head" title="이번 세션에 올린 이미지">업로드</div>
           <div class="imgtag-list"></div>
-          <button type="button" class="imgtag-add" data-act="add">＋ 이미지 추가</button>
+          <button type="button" class="imgtag-add" data-act="add" title="이미지 추가">＋</button>
           <input class="imgtag-file" type="file" accept="image/*" multiple hidden>
         </div>
         <div class="imgtag-right">

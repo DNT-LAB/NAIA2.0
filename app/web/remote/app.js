@@ -1292,7 +1292,7 @@ async function runImageTagger(payload) {
     release();
   }
 }
-const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-tagger3')
+const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-taggerright')
   .then(({createImageTaggerResultPanel}) => {
     imageTaggerPanel = createImageTaggerResultPanel({
       document,

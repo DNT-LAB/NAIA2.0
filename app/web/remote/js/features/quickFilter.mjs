@@ -959,6 +959,10 @@ export function createQuickFilterController(deps) {
       toggleBtn.classList.toggle('assigned', active);
     }
     updateHighlight();
+    // ⚠️ **다른 탭/기기의 변경은 이 길로 들어온다**(백엔드 권위 상태 -> searchPanel ->
+    //    applyPreferences). assign/clear 에만 걸어 두면 여기로 들어온 변경 뒤에는
+    //    프롬프트의 색·밑줄이 옛 필터를 가리킨 채 남는다(Codex 지적).
+    if (!sameTags) notifyFilterChanged();
 
     if (options.send !== false && isSocketOpen()) {
       send({type: 'set_active_ratings', ratings: pref.ratings});

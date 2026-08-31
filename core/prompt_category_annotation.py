@@ -68,6 +68,8 @@ MAIN_BLOCK_MARKERS: tuple[str, ...] = tuple(
 PARAGRAPH_BREAK = "\n\n"
 
 _WEBUI_WEIGHT_RE = re.compile(r"^\((.*):\s*-?\d+(?:\.\d+)?\)$")
+# 여러 태그를 감싸는 NAI 가중치 그룹의 **여는 쪽**: `0.8::tag`
+_NAI_WEIGHT_OPEN_RE = re.compile(r"^-?\d+(?:\.\d+)?::")
 
 
 def find_main_block_start(prompt: str) -> int:
@@ -132,6 +134,65 @@ def match_key(tag: Any) -> str:
     return value.strip().lower()
 
 
+def _opens_group(token: str) -> bool:
+    """이 토큰이 **여러 태그를 감싸는** 가중치 그룹을 여는가.
+
+    e621 Auto-Boost 는 추천 묶음을 하나의 그룹으로 감싼다
+    (`headless_prompt_boost_service`): 첫 태그에 여는 쪽, **마지막 태그**에 닫는 쪽.
+
+        non-NAI : `(satisfied` ... `panting:0.8)`
+        NAI     : `0.8::satisfied` ... `panting ::`
+
+    ⚠️ `0.83::open clothes ::` 처럼 **한 토큰 안에서 닫히는** 것은 그룹이 아니다
+       (Danbooru Auto-Weight 가 태그마다 붙인다).
+    """
+    value = token.strip()
+    if not value:
+        return False
+    if value.count("(") > value.count(")"):
+        return True
+    match = _NAI_WEIGHT_OPEN_RE.match(value)
+    return bool(match) and not value.endswith("::")
+
+
+def _closes_group(token: str) -> bool:
+    value = token.strip()
+    if not value:
+        return False
+    if value.count(")") > value.count("("):
+        return True
+    return value.endswith("::") and not _NAI_WEIGHT_OPEN_RE.match(value)
+
+
+def _group_units(tags: list) -> list:
+    """토큰을 **원자 단위**로 묶는다. 보통은 한 개짜리, 그룹이면 그 전체.
+
+    ⚠️ 안 묶으면 카테고리로 재배치하면서 그룹의 여는 쪽과 닫는 쪽이 갈라지고,
+       **사이에 낀 남의 태그가 그 가중치를 뒤집어쓴다.** 실측 2026-08-31:
+       `(satisfied, panting:0.8)` + 그룹 밖 `sitting` ->
+       `(satisfied, sitting, panting:0.8)` (부스트한 적 없는 sitting 이 0.8 을 먹는다).
+    """
+    units: list[list] = []
+    index = 0
+    total = len(tags)
+    while index < total:
+        token = tags[index]
+        if _opens_group(token) and not _closes_group(token):
+            run = [token]
+            index += 1
+            while index < total:
+                run.append(tags[index])
+                closed = _closes_group(tags[index])
+                index += 1
+                if closed:
+                    break
+            units.append(run)
+            continue
+        units.append([token])
+        index += 1
+    return units
+
+
 def _category_sets(filter_manager: Any) -> dict[str, frozenset]:
     """카테고리별 조회 세트. filter_manager 인스턴스에 한 번만 만들어 붙인다.
 
@@ -183,8 +244,14 @@ def build_annotated_main_tags(tags: Iterable[Any], filter_manager: Any) -> list[
 
     category_sets = _category_sets(filter_manager) if filter_manager else {}
     buckets: dict[str, list[str]] = {key: [] for key, _m, _a in MAIN_CATEGORY_ORDER}
-    for tag in ordered:
-        buckets[classify(tag, category_sets)].append(tag)
+    for unit in _group_units(ordered):
+        if len(unit) > 1:
+            # 여러 태그를 감싼 가중치 그룹은 **쪼개지 않는다.** 어느 카테고리에도
+            # 온전히 속하지 않으므로 `#추가:` 에 통째로 둔다 - 사용자 사양에서도
+            # e621 은 추가 뒤에 붙는다.
+            buckets[EXTRA_KEY].extend(unit)
+            continue
+        buckets[classify(unit[0], category_sets)].append(unit[0])
 
     result: list[str] = []
     for key, marker, _attribute in MAIN_CATEGORY_ORDER:

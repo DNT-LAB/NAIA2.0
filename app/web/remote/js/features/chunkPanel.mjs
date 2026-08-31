@@ -413,6 +413,30 @@ export function createChunkPanel({
   // (사용자 사양 2026-08-31). 안 들어 있으면 추가 두 개, 들어 있으면 그 목록의
   // 제거 + 퍼펙트 매칭 토글만 낸다 - 이미 들어 있는데 "추가" 를 내면 눌러도
   // "이미 있습니다" 만 나온다.
+  // 선택 문자열에서 가중치 문법만 벗긴다. 괄호가 이름의 일부인 태그
+  // (`hakurei reimu (touhou)`)는 건드리지 않는다 - 짝이 맞으면 그대로 둔다.
+  function stripTagWeight(raw) {
+    let value = String(raw || '').trim();
+    if (!value) return '';
+    // NAI: `0.8::tag ::`
+    while (value.endsWith('::')) value = value.slice(0, -2).trimEnd();
+    const sep = value.indexOf('::');
+    if (sep > 0 && !Number.isNaN(Number(value.slice(0, sep).trim()))) {
+      value = value.slice(sep + 2).trimStart();
+    }
+    // WEBUI/ComfyUI: `(tag:1.2)`
+    const weighted = value.match(/^\((.*):\s*-?\d+(?:\.\d+)?\)$/);
+    if (weighted) value = weighted[1].trim();
+    // e621 그룹 괄호는 짝이 안 맞을 때만 벗긴다.
+    while (value.startsWith('(') && (value.split('(').length > value.split(')').length)) {
+      value = value.slice(1).trimStart();
+    }
+    while (value.endsWith(')') && (value.split(')').length > value.split('(').length)) {
+      value = value.slice(0, -1).trimEnd();
+    }
+    return value.trim();
+  }
+
   function renderFilterItems(menu, tag) {
     const slot = menu.querySelector('[data-filter-slot]');
     if (!slot) return;
@@ -449,7 +473,11 @@ export function createChunkPanel({
       key: selection ? suggestKeyFromValue(selection) : '',
       // Tag Filter 항목이 쓸 대상: **선택이 있으면 선택, 없으면 커서 밑 태그**
       // (사용자 지정 2026-08-31). 둘 다 없으면 그 항목만 흐려진다.
-      filterTag: (selection || extra.tagAtCursor || '').trim(),
+      //
+      // ⚠️ 선택은 사용자가 끈 그대로라 가중치가 딸려 온다 - `0.8::open clothes ::`
+      //    를 그대로 넣으면 `0.8::open_clothes_::` 라는 없는 태그가 필터에 박힌다
+      //    (백엔드도 가중치를 안 벗긴다). 커서 경로는 tagAssist 가 이미 벗겨서 준다.
+      filterTag: stripTagWeight(selection || extra.tagAtCursor || ''),
     };
     const menu = ensureSelectionMenu();
     menu.classList.toggle('no-selection', !selection);

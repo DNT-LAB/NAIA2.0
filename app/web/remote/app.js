@@ -671,7 +671,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-tagfilter')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-tagfilter2')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -2399,7 +2399,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter2')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,
@@ -9076,8 +9076,20 @@ async function addPromptTagToFilter(action, tag) {
   const beforeCount = currentPromptPoolCount();
   const found = quickFilter.findTag(tag);
 
-  // 어느 동작이든 **필터를 한 번 바꾸고** 같은 팝업으로 앞뒤 개수를 보여 준다.
-  // 바뀐 방식이 달라도 사용자가 묻는 것은 하나다 - "이렇게 줄었는데 둘까?"
+  // ⚠️ 훅을 **바꾸기 전에** 건다. 마지막 칩을 지우면 `removeTagAt` 이 그 자리에서
+  //    `clearFilter()` 로 들어가 **동기로** flush 하는데, 그 뒤에 걸면 아무도 못 받아
+  //    8초 안전망이 끝날 때까지 팝업이 안 뜬다(Codex 지적, 실측 확인).
+  const settled = new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    quickFilter.onceAssigned(finish);
+    // 소켓이 끊겼거나 결과가 안 오면 팝업이 영영 안 뜬다 - 그러면 사용자는 방금
+    // 무슨 일이 일어났는지 모른 채 필터만 바뀐 화면을 본다.
+    window.setTimeout(finish, 8000);
+  });
+
+  // 추가·퍼펙트 매칭은 팝업으로 앞뒤 개수를 보여 주고 묻는다. **제거만 안 묻는다**
+  // (사용자 사양) - 되돌리기 쉬운 동작이라 토스트로 알리기만 한다.
   let title;
   if (action === 'include' || action === 'exclude') {
     const label = action === 'exclude' ? '제외' : '포함';
@@ -9095,9 +9107,17 @@ async function addPromptTagToFilter(action, tag) {
     }
     const label = found.list === 'exclude' ? '제외' : '포함';
     if (action === 'remove') {
-      title = `Tag Filter [${label}] 에서 제거`;
+      // 제거는 **묻지 않는다**(사용자 사양 2026-08-31). 되돌리기 쉬운 동작이라
+      // 확인창을 세우면 손만 더 간다 - 무엇이 빠지고 얼마가 남았는지만 알린다.
       quickFilter.removeTagAt(found.list, found.index);
-    } else {
+      await settled;
+      const left = await poolCountAfterChange(beforeCount);
+      showToast(
+        `제거됨 : ${tag} · 남은 프롬프트 : ${left == null ? '?' : left.toLocaleString()}개`,
+        'success');
+      return;
+    }
+    {
       const on = action === 'exact-on';
       title = `[${label}] 퍼펙트 매칭 ${on ? '적용' : '취소'}`;
       // ⚠️ `setChipExact` 는 자기가 적용까지 한다 - 여기서 또 부르면 두 번 돈다.
@@ -9105,17 +9125,9 @@ async function addPromptTagToFilter(action, tag) {
     }
   }
 
-  const settled = new Promise(resolve => {
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(); } };
-    quickFilter.onceAssigned(finish);
-    // ⚠️ 안전망. 소켓이 끊겼거나 결과가 안 오면 팝업이 영영 안 뜬다 - 그러면
-    //    사용자는 방금 무슨 일이 일어났는지 모른 채 필터만 바뀐 화면을 본다.
-    window.setTimeout(finish, 8000);
-  });
   await settled;
 
-  const afterCount = currentPromptPoolCount();
+  const afterCount = await poolCountAfterChange(beforeCount);
   const snapshot = quickFilter.snapshotTags();
   const line = (name, tags) =>
     `<b>${name}</b> : ${tags.length ? escHtml(tags.join(', ')) : '<i>없음</i>'}`;
@@ -9149,6 +9161,22 @@ async function addPromptTagToFilter(action, tag) {
     return;
   }
   if (choice === 'search') openModule('search');
+}
+
+// 풀 숫자가 실제로 움직일 때까지 잠깐 기다린다.
+//
+// ⚠️ assign 이 끝났다고 `Prompt: N` 이 벌써 바뀐 것은 아니다. 특히 **필터를 지우는
+//    쪽**은 서버가 풀을 되돌려 주므로 숫자가 늦게 온다 - 바로 읽으면 걸러진 옛 값을
+//    그대로 말한다(실측 2026-08-31: 해제 직후 토스트가 28,614 라고 했는데 실제
+//    풀은 58,205 였다). 안 바뀌는 경우도 있으므로 짧게 끊는다.
+async function poolCountAfterChange(before, timeoutMs = 1500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const now = currentPromptPoolCount();
+    if (now !== before) return now;
+    await new Promise(resolve => window.setTimeout(resolve, 80));
+  }
+  return currentPromptPoolCount();
 }
 
 // 툴바의 `Prompt: N` — 현재 풀에 남은 프롬프트 수(그 자리가 권위값이다).
@@ -9753,7 +9781,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260829-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260831-annotation')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260831-tagfilter2')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

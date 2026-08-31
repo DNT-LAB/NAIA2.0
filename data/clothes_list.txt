@@ -208,7 +208,6 @@ animal-themed eyewear
 animal-themed footwear
 animal-themed umbrella
 anime ace (font)
-anime coloring
 animegao
 anjanath (armor)
 ankh earrings
@@ -10788,7 +10787,6 @@ yuanlingpao
 zhijupao
 zhouzi jin (headwear)
 zhuang hat
-1950s (style)
 agejo gyaru
 air max
 amekaji gyaru

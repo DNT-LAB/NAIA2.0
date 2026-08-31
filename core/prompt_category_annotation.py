@@ -117,9 +117,14 @@ def match_key(tag: Any) -> str:
     # ⚠️ 이스케이프된 괄호는 태그의 일부다(`hakurei reimu \(cosplay\)`).
     #    `strip("()")` 로 한꺼번에 벗기면 닫는 `\)` 의 `)` 만 뜯겨 백슬래시가 남고,
     #    그 태그는 어느 세트에도 안 걸려 통째로 `#추가:` 로 떨어진다.
-    while value.startswith("("):
+    # ⚠️ **짝이 맞지 않을 때만** 벗긴다. 그냥 벗기면 `1930s (style)` ·
+    #    `female byleth (fire emblem)` 처럼 괄호가 이름의 일부인 태그의 닫는 괄호를
+    #    뜯어 세트 조회가 통째로 실패한다(실측 2026-08-31: 그래서 `1930s (style)` 이
+    #    메타에 있는데도 `#추가:` 로 떨어졌다).
+    while value.startswith("(") and value.count("(") > value.count(")"):
         value = value[1:].lstrip()
-    while value.endswith(")") and not value.endswith(r"\)"):
+    while (value.endswith(")") and not value.endswith(r"\)")
+           and value.count(")") > value.count("(")):
         value = value[:-1].rstrip()
 
     # non-NAI 는 리터럴 괄호를 이스케이프해 둔다 - 되돌려야 세트와 맞는다.

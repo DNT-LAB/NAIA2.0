@@ -20978,6 +20978,52 @@ body.detached-module .mod-grid-3 {
 }
 .ext-apply-hint { margin-left: 5px; font-size: 9px; color: var(--text-muted); }
 .ext-field-error { width: 100%; font-size: 10px; color: #ff7a7a; margin-left: 118px; }
+/* 설치할 수 있는 확장 (사용자 지정 2026-08-31). A1111 의 Available 탭과 같은 역할이나
+   원격 인덱스가 아니라 **앱에 박아 둔 고정 목록**이다. */
+.ext-avail {
+  margin-top: 18px;
+  border: 1px solid rgba(232,232,240,0.12);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ext-avail-head {
+  padding: 9px 14px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(232,232,240,0.10);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.ext-avail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+}
+.ext-avail-row + .ext-avail-row { border-top: 1px solid rgba(232,232,240,0.08); }
+.ext-avail-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ext-avail-name { color: var(--text-primary); font-size: 12.5px; font-weight: 700; }
+.ext-avail-desc { color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
+.ext-avail-link,
+.ext-avail-inline-link { color: #a9c6ff; font-size: 11px; text-decoration: none; word-break: break-all; }
+.ext-avail-link:hover,
+.ext-avail-inline-link:hover { text-decoration: underline; }
+.ext-avail-install {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 6px 16px;
+  border: 1px solid var(--accent-blue);
+  border-radius: 6px;
+  background: transparent;
+  color: #a9c6ff;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ext-avail-install:hover:not(:disabled) { background: rgba(40,120,216,0.18); }
+.ext-avail-install:disabled { border-color: rgba(232,232,240,0.16); color: var(--text-muted); cursor: default; }
+
 .ext-empty {
   text-align: center; color: var(--text-muted); font-size: 12px; line-height: 1.9; padding: 18px 8px;
 }

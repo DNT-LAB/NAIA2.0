@@ -30,6 +30,34 @@ export function createExtensionsUi(deps) {
   ];
   const ERROR_STATUSES = new Set(['error', 'dependency_error']);
 
+  // 설치할 수 있는 확장 목록 — **앱에 박아 둔 고정 인덱스**(사용자 지정 2026-08-31).
+  // A1111 은 위키 URL 을 받아오지만, 여기서는 원격 의존 없이 오프라인에서도 뜨게 한다.
+  // 항목을 늘리려면 이 배열에 한 줄 더 넣으면 된다.
+  const AVAILABLE_EXTENSIONS = [
+    {
+      name: 'NAIA-EXten',
+      url: 'https://github.com/okawaritsuika/NAIA-EXten',
+      description: 'NAIA 2.0 편의 기능 종합 확장 — 검색 모듈 개선(Parquet 실시간 동기화 · '
+        + '확률 분배), 프롬프트 엔지니어링(PromptServer 연동), 만화 생성(Comic Maker), '
+        + '개발 핫리로드. 상세 설명 : https://arca.live/b/aiart/181547591',
+    },
+  ];
+
+  // 이미 깔린 것은 다시 설치하지 않는다. GitHub 주소로 대조한다 - 확장 id 는
+  // 저장소 이름과 다를 수 있어서(extension.json 이 정한다) 주소가 유일한 공통 열쇠다.
+  function normalizeRepoUrl(url) {
+    return String(url || '').trim().toLowerCase()
+      .replace(/^https?:\/\//, '').replace(/^www\./, '')
+      .replace(/\.git$/, '').replace(/\/+$/, '');
+  }
+
+  function installedRepoUrls() {
+    const items = (lastState && Array.isArray(lastState.extensions)) ? lastState.extensions : [];
+    return new Set(items
+      .map(item => normalizeRepoUrl(item && (item.source_url || item.homepage || item.repository)))
+      .filter(Boolean));
+  }
+
   let lastState = null;
   let confirmingId = null; // 미승인 확장 활성화 전 신뢰 경고 인라인 확인
   let openMenuId = null;
@@ -559,6 +587,33 @@ export function createExtensionsUi(deps) {
     }
   }
 
+  // 설치 가능한 확장 표 — [ 이름 | 설명 | GitHub 링크 ] [ 설치 ] (사용자 지정 구조).
+  function availableExtensionsHtml() {
+    const installed = installedRepoUrls();
+    const rows = AVAILABLE_EXTENSIONS.map((entry) => {
+      const already = installed.has(normalizeRepoUrl(entry.url));
+      const busy = !!(installState && installState.active);
+      // ⚠️ 설명 안의 링크는 **텍스트로 이스케이프한 뒤** 앵커로 바꾼다. 원문을 그대로
+      //    넣으면 확장 작성자가 쓴 문자열이 마크업이 된다.
+      const described = escHtml(entry.description).replace(
+        /(https?:\/\/[^\s<]+)/g,
+        '<a href="$1" class="ext-avail-inline-link" target="_blank" rel="noopener noreferrer">$1</a>');
+      return `<div class="ext-avail-row">
+        <div class="ext-avail-main">
+          <div class="ext-avail-name">${escHtml(entry.name)}</div>
+          <div class="ext-avail-desc">${described}</div>
+          <a class="ext-avail-link" href="${escHtml(entry.url)}" target="_blank" rel="noopener noreferrer">${escHtml(entry.url)}</a>
+        </div>
+        <button type="button" class="ext-avail-install" data-url="${escHtml(entry.url)}"
+          ${already || busy ? 'disabled' : ''}>${already ? '설치됨' : '설치'}</button>
+      </div>`;
+    }).join('');
+    return `<div class="ext-avail">
+      <div class="ext-avail-head">설치할 수 있는 확장</div>
+      ${rows}
+    </div>`;
+  }
+
   function renderSettingsPane() {
     const root = pane();
     if (!root || !lastState) return;
@@ -579,7 +634,7 @@ export function createExtensionsUi(deps) {
            <div class="ext-empty-cta">
              <button type="button" class="ext-install-sample">샘플 바로 사용하기</button>
            </div></div>`;
-    root.innerHTML = `<div class="ext-panel">${head}${body}</div>`;
+    root.innerHTML = `<div class="ext-panel">${head}${body}${availableExtensionsHtml()}</div>`;
     bindSettingsPane(root);
     restoreFocus(root, saved);
   }
@@ -641,6 +696,13 @@ export function createExtensionsUi(deps) {
         if (event.key === 'Enter') { event.preventDefault(); startInstall(urlInput.value); }
       });
     }
+    root.querySelectorAll('.ext-avail-install').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        // 기존 GitHub 설치 경로를 그대로 쓴다 - 설치 로직을 두 벌로 만들지 않는다.
+        startInstall(btn.dataset.url || '');
+      });
+    });
     const installBtn = root.querySelector('.ext-install-btn');
     if (installBtn) installBtn.addEventListener('click', () =>
       startInstall(root.querySelector('.ext-install-url')?.value || installUrlDraft));

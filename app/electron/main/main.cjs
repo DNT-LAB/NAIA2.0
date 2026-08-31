@@ -71,7 +71,10 @@ const UPDATE_DIR_NAME = ".updates";
 //  UTF-8 스크립트를 ANSI 로 읽는 환경이 있다.)
 const APPLY_SCRIPT_PS1 = `param([string]$ConfigPath)
 $ErrorActionPreference = 'Stop'
-$cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+# Read the config as UTF-8 explicitly. Node writes it without a BOM, and Windows
+# PowerShell 5.1 falls back to ANSI for BOM-less input -- a Korean user name or
+# install path would come back mangled and every path in this script would be wrong.
+$cfg = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
 function Write-ApplyLog($m) {
   try { "$([DateTime]::Now.ToString('s')) $m" | Out-File -LiteralPath $cfg.logPath -Append -Encoding utf8 } catch {}
 }
@@ -1390,6 +1393,39 @@ async function downloadUpdate() {
     }
   })();
   return updateDownloadPromise;
+}
+
+// 스왑 잠금 검사가 항목을 `.__swap_probe__` 로 바꿔 놓고 되돌리지 못한 흔적을 치운다.
+//
+// ⚠️ 이 복구는 **업데이트 헬퍼 안에도** 있다(Repair-ProbeResidue). 그런데 헬퍼는
+//    업데이트를 시도할 때만 돈다 - 사용자에게 "다시 실행하면 자동 복구" 라고
+//    안내해 놓고 부팅 경로에는 아무것도 없으면 그 안내가 거짓말이 된다.
+//    앱이 뜰 수 있는 손상이라면 여기서 고치고, 못 뜨는 손상은 다음 헬퍼가 고친다.
+const SWAP_PROBE_SUFFIX = ".__swap_probe__";
+function repairSwapProbeResidue() {
+  if (process.platform !== "win32" || !app.isPackaged) {
+    return;
+  }
+  try {
+    const installRoot = path.dirname(app.getPath("exe"));
+    for (const name of fs.readdirSync(installRoot)) {
+      if (!name.endsWith(SWAP_PROBE_SUFFIX)) continue;
+      const original = name.slice(0, -SWAP_PROBE_SUFFIX.length);
+      if (!original) continue;
+      const originalPath = path.join(installRoot, original);
+      // 원래 이름이 이미 있으면 덮지 않는다 - 그건 더 나쁜 손상이다.
+      if (fs.existsSync(originalPath)) continue;
+      try {
+        fs.renameSync(path.join(installRoot, name), originalPath);
+        appendBackendLog("shell", `Repaired swap probe residue: ${name} -> ${original}`);
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        appendBackendLog("shell", `Swap probe residue repair FAILED for ${name}: ${message}`);
+      }
+    }
+  } catch (_e) {
+    // 복구 실패는 기동을 막지 않는다
+  }
 }
 
 // 직전 자동 업데이트 스왑이 중단/실패했으면(marker 존재) 사용자에게 표면화한다.
@@ -2998,6 +3034,7 @@ if (!lock) {
   app.whenReady().then(async () => {
     configureApplicationMenu();
     configureDownloads();
+    repairSwapProbeResidue();
     surfaceLastApplyError();
     // Resolve the Grok proxy port first so the backend env carries it (multi-instance).
     await resolveGrokProxyPort();

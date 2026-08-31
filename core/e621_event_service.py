@@ -252,16 +252,32 @@ class E621EventService:
         tags.sort(key=lambda item: int(item.get("count") or 0), reverse=True)
         return tags
 
+    @staticmethod
+    def _search_key(value: Any) -> str:
+        """검색 비교용 정규화 — 밑줄을 공백으로 보고, 이어진 공백을 하나로 줄인다.
+
+        앱의 다른 태그 경로(`core.tag_axis_registry.normalize_tag`)가 쓰는 규칙과 같다.
+        여기만 날것으로 비교하고 있어서 이 모듈만 밑줄 태그를 못 찾았다.
+        """
+        return " ".join(str(value or "").replace("_", " ").lower().split())
+
     def _filter_tags(self, tags: list[dict[str, Any]], *, include_search: bool = True) -> list[dict[str, Any]]:
         result = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys]
         if self.view_mode == "starred":
             result = [tag for tag in result if tag.get("tag", "") in self.starred_keys]
         if include_search and self.search_text:
-            needle = self.search_text.lower()
+            # ⚠️ e621 태그 이름은 밑줄로 이어져 있다(`worm's-eye_view`). 사용자는 공백으로
+            #    친다. 예전에는 날것끼리 부분일치를 봐서 공백으로 치면 **이름으로는 하나도**
+            #    안 잡혔다 — 이름에 밑줄이 든 14,901개(71%)가 통째로 안 보였다.
+            #    `bird's-eye view` 가 되는 것처럼 보였던 건 우연히 **위키 본문**에 그 표현이
+            #    공백형으로 적혀 있어서다(실측: 그때 나온 3건은 전부 위키 매치였다).
+            #    밑줄과 공백을 같은 것으로 보고 맞춘다 — 어느 쪽으로 쳐도 잡힌다.
+            needle = self._search_key(self.search_text)
             filtered = []
             for tag in result:
-                name = str(tag.get("tag") or "").lower()
-                wiki = "" if self.disable_wiki_search else str(tag.get("wiki_body") or tag.get("wiki_preview") or "").lower()
+                name = self._search_key(tag.get("tag"))
+                wiki = "" if self.disable_wiki_search else self._search_key(
+                    tag.get("wiki_body") or tag.get("wiki_preview"))
                 if needle in name or needle in wiki:
                     copied = dict(tag)
                     copied["matched_in_wiki"] = needle not in name and needle in wiki

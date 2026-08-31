@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
+import asyncio
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -35,6 +37,12 @@ from core.wd_tagger_service import (
 )
 
 AsyncRunner = Callable[..., Awaitable[Any]]
+
+# ⚠️ 외부 서버 왕복이 4~13초다. 제한이 없으면 여러 요청이 공유 스레드 풀을 오래
+# 붙들어 **태거뿐 아니라 생성·파일 작업까지 굶는다**(Codex CONCERN).
+# 남의 서버에 무례하지 않은 수준이기도 하다.
+_MAX_IN_FLIGHT = 2
+_in_flight = asyncio.Semaphore(_MAX_IN_FLIGHT)
 
 # 사용자 판단 2026-08-31: "Huggingface 시스템이고 검증된 Provider라 괜찮을 것
 # 같습니다. [ 웹에서 사용 : 링크 ] 형태로만 붙여주시면 될 것 같습니다."
@@ -114,6 +122,12 @@ def register_tagger_routes(
 
     @app.post("/api/tagger/analyze")
     async def tagger_analyze(req: Request):
+        # ⚠️ **본문을 읽기 전에** 크기를 본다. `await req.body()` 로 다 받아 놓고
+        #    재면 거절하기 전에 이미 메모리를 먹는다(Codex BLOCK) - 헤더가 없거나
+        #    거짓일 수 있으므로 아래 실제 길이 검사도 그대로 둔다(둘 다 필요하다).
+        declared = req.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > UPLOAD_MAX_BYTES:
+            return JSONResponse({"ok": False, "error": "이미지가 너무 큽니다."}, status_code=413)
         image_bytes = await req.body()
         if not image_bytes:
             return JSONResponse({"ok": False, "error": "이미지가 없습니다."}, status_code=400)
@@ -133,8 +147,14 @@ def register_tagger_routes(
                 model_repo=model,
             )
 
+        if _in_flight.locked() and _in_flight._value <= 0:
+            # 기다리게 두면 공유 풀이 막힌다 - 바로 돌려보내고 다시 누르게 한다.
+            return JSONResponse(
+                {"ok": False, "error": "태그 분석이 이미 진행 중입니다. 잠시 후 다시 시도하세요."},
+                status_code=429)
         try:
-            result = await run_in_thread(_run)
+            async with _in_flight:
+                result = await run_in_thread(_run)
         except TaggerError as exc:
             # 사용자에게 그대로 보여도 되는 문구다 - 502 로 원인이 우리 밖임을 알린다.
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)

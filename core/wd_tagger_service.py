@@ -27,8 +27,12 @@ NAIA 출력에는 강한 NSFW 가 있을 수 있다. 화면에 반드시 명시�
 
 - 콜드 스타트 ~13s · 웜 3.5~4.2s. 인증 불필요.
 - 832x1216 PNG 를 그대로 올리면 업로드만 2.3~2.5s(3MB) — 합 6.0~6.7s.
-- **정사각 패딩 후 448 로 줄여 보내도 태그가 완전히 같다**(6/6 일치). 모델이
-  어차피 448 로 줄이므로 그 전처리를 여기서 해 업로드를 줄인다 -> 합 ~4.4s.
+- 448 로 줄여 보내 업로드를 깎는다 -> 합 ~4.4s.
+  ⚠️ **"완전히 같다" 는 정정한다.** 처음에 그렇게 적었는데, 그때 잰 것은
+  *패딩 후 축소* 순서였다. 메모리 안전을 위해 *축소 후 패딩* 으로 바꾼 뒤 다시
+  재니 **정사각 이미지는 동일**하지만 비정사각은 경계값 태그가 하나 갈릴 수 있다
+  (실측 3종: square 5/5 동일 · stripes·wide 는 각 1종 차이). 기하는 같고 흰 여백의
+  리샘플링만 다르다. 그 한 종을 얻으려고 7GB 폭탄 경로를 되살리지는 않는다.
 
 ## 미측정
 
@@ -70,6 +74,8 @@ MODEL_INPUT_SIZE = 448
 # 원본이 이보다 작으면 **확대하지 않는다.** 확대는 태그를 바꾼다(실측: 61x68 짜리를
 # 448 로 키웠더니 9종 중 4종이 달라졌다) — 서버가 알아서 하게 둔다.
 UPLOAD_MAX_BYTES = 32 * 1024 * 1024
+# 한 변 상한. 정상적인 그림에는 넉넉하고, 극단 비율 폭탄은 막는다.
+MAX_INPUT_EDGE = 20000
 
 # 콜드 스타트가 13초쯤 걸린다(실측). 넉넉히 주되 무한은 아니다.
 TIMEOUT_UPLOAD = 90.0
@@ -111,31 +117,49 @@ def _requests():
 
 
 def prepare_upload_bytes(image_bytes: bytes) -> tuple[bytes, tuple[int, int]]:
-    """업로드용으로 줄인다 — **정사각 패딩 후 448**(모델 전처리와 같은 순서).
+    """업로드용으로 줄인다 — **긴 변을 448 로 맞춘 뒤 정사각 패딩**.
 
-    ⚠️ 원본이 448 보다 작으면 그대로 보낸다. 확대는 태그를 바꾼다(실측).
+    ⚠️ 원본이 448 보다 작으면 그대로 보낸다. 확대는 태그를 바꾼다(실측: 61x68 을
+    448 로 키웠더니 9종 중 4종이 달라졌다).
+
+    ⚠️⚠️ **순서가 안전의 전부다.** 처음에는 원본 크기로 정사각 패딩을 한 뒤 줄였다 -
+    그러면 `1 x 50,000` 같은 극단 비율에서 `50,000²` RGB 버퍼(**실측 7.0GB**)를
+    잡으려 든다. 그 PNG 는 0.3KB 라 업로드 상한(32MB)도, Pillow 의 통상적인
+    decompression-bomb 제한(픽셀 수 기준)도 통과한다 - 원격에서 백엔드를 OOM 으로
+    죽일 수 있었다(Codex 리뷰 BLOCK). 먼저 줄이면 최대 버퍼가 448² 로 묶인다.
     """
     from PIL import Image
 
     with Image.open(io.BytesIO(image_bytes)) as raw:
+        width, height = raw.size
+        if width <= 0 or height <= 0:
+            raise TaggerError("이미지 크기를 읽지 못했습니다.")
+        # 방어선 하나 더: 어느 한 변이라도 터무니없이 길면 열지 않는다. 위 순서
+        # 교정만으로도 버퍼는 448² 로 묶이지만, 디코딩 자체도 비용이다.
+        if max(width, height) > MAX_INPUT_EDGE:
+            raise TaggerError(f"이미지 한 변이 너무 깁니다({max(width, height)}px).")
         raw.load()
         image = raw.convert("RGB")
 
-    width, height = image.size
     side = max(width, height)
     if side <= MODEL_INPUT_SIZE:
-        # 이미 작다 — 손대면 오히려 결과가 달라진다.
+        # 이미 작다 - 손대면 오히려 결과가 달라진다.
         buf = io.BytesIO()
         image.save(buf, "PNG")
         return buf.getvalue(), (width, height)
 
-    square = Image.new("RGB", (side, side), (255, 255, 255))
-    square.paste(image, ((side - width) // 2, (side - height) // 2))
-    small = square.resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.BICUBIC)
+    # ① 긴 변을 448 로 맞춰 **먼저 줄인다**(여기서 버퍼 상한이 정해진다).
+    scale = MODEL_INPUT_SIZE / float(side)
+    scaled = image.resize(
+        (max(1, round(width * scale)), max(1, round(height * scale))), Image.BICUBIC
+    )
+    # ② 그다음 정사각으로 채운다(모델 전처리와 같은 모양).
+    square = Image.new("RGB", (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), (255, 255, 255))
+    square.paste(scaled, ((MODEL_INPUT_SIZE - scaled.width) // 2,
+                          (MODEL_INPUT_SIZE - scaled.height) // 2))
     buf = io.BytesIO()
-    small.save(buf, "PNG")
+    square.save(buf, "PNG")
     return buf.getvalue(), (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE)
-
 
 def _confidences(block: Any) -> list[dict[str, Any]]:
     """Gradio Label 컴포넌트의 `{label, confidences:[{label, confidence}]}` 를 편다."""

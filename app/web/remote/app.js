@@ -1264,12 +1264,20 @@ async function analyzeImageForTagger(blob) {
   return data;
 }
 async function runImageTagger(payload) {
+  // ⚠️ 어느 갈래로 나가든 팝업이 넘겨준 objectURL 을 놓아야 한다. 예전에는 아래
+  //    이른 return 들이 `try/finally` 앞에 있어서 그 경로에서만 blob 이 남았다
+  //    (Codex CONCERN - 주석은 "여기서 놓는다" 인데 실제로는 안 놓았다).
+  const release = () => {
+    try { if (payload && typeof payload.revokeImageUrl === 'function') payload.revokeImageUrl(); }
+    catch (e) { /* 무해 */ }
+  };
   const blob = payload && payload.blob;
-  if (!blob) { showToast('이미지를 읽지 못했습니다.', 'error'); return; }
+  if (!blob) { showToast('이미지를 읽지 못했습니다.', 'error'); release(); return; }
   // ⚠️ 출처 표시를 못 받았으면 **보내지 않는다.** 어디로 가는지 안 보이는 채로
   //    이미지를 내보내지 않는다(사용자 결정: 링크로 명시).
   if (!(await loadImageTaggerInfo())) {
     showToast('태거 안내를 불러오지 못해 분석을 멈췄습니다.', 'error');
+    release();
     return;
   }
   showToast('태그 분석 중… 외부 서버 응답을 기다립니다(보통 4초).', 'info');
@@ -1281,7 +1289,7 @@ async function runImageTagger(payload) {
   } finally {
     // 팝업이 close({releaseImageUrl:false}) 로 넘겨준 objectURL 을 여기서 놓는다.
     // 패널은 자기 몫의 objectURL 을 따로 만든다.
-    try { if (typeof payload.revokeImageUrl === 'function') payload.revokeImageUrl(); } catch (e) { /* 무해 */ }
+    release();
   }
 }
 const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-tagger3')
@@ -2289,7 +2297,7 @@ function setExtensionLauncherItems(items, onClick) {
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
 }
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-offmeansoff2')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-saferestart')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,
@@ -2299,6 +2307,7 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026083
       requestState: () => requestModuleState('extensions'),
       setLauncherItems: setExtensionLauncherItems,
       openExternalUrl: openUrlInSystemBrowser,
+      confirmDialog: showConfirmDialog,
     });
     if (lastExtensionsState) extensionsPanel.onState(lastExtensionsState);
   })

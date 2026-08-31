@@ -11,6 +11,9 @@
 export function createExtensionsUi(deps) {
   const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems,
     openExternalUrl} = deps;
+  // 되돌릴 수 없는 동작(앱 재시작) 앞에서 한 번 묻는다. 안 주면 그냥 진행하지
+  // 않는다 - 묻지 않고 재시작하는 것보다 안 되는 편이 낫다.
+  const confirmDialog = deps.confirmDialog || (() => false);
 
   // 퀵 버튼 배치 선택지 — 도구바(독립 바) / 자동화·고급 기능 카테고리 / 없음.
   const PLACEMENT_OPTIONS = [
@@ -617,6 +620,28 @@ export function createExtensionsUi(deps) {
   }
 
   // 접고 펼치는 섹션 머리. 개수를 함께 보여 줘 접어 둔 채로도 몇 개인지 알 수 있게 한다.
+  /** 확장이 앱을 이상하게 만들었을 때의 **탈출구**.
+   *
+   *  확장은 in-process 임의 파이썬이고 호스트 내부를 몽키패치할 수 있다 - 공식
+   *  프론트 확장 경로가 없어 서드파티가 실제로 그렇게 한다(`_web_file`). 그래서
+   *  NAIA 가 바뀔 때마다 그 패치가 어긋나 앱이 이상해질 수 있는데, 지금까지
+   *  앱 안에서 빠져나올 길이 `NAIA_DISABLE_EXTENSIONS=1` 환경변수뿐이었다
+   *  (README 에만 있고 UI 에서 안 닿는다).
+   *
+   *  ⚠️ **한 번만** 듣는다 - 안전 모드에 갇히면 '확장이 안 돈다' 를 겪는다.
+   */
+  function safeRestartHtml() {
+    const patched = lastState && lastState.web_frontend_patched === true;
+    return `
+      <div class="ext-safe-row${patched ? ' is-warn' : ''}">
+        <span class="ext-safe-text">${patched
+          ? '⚠ 확장이 화면 코드를 바꾸고 있습니다. 앱이 이상하면 아래로 빠져나오세요.'
+          : '확장 때문에 앱이 이상할 때 쓰세요.'}</span>
+        <button type="button" class="ext-safe-btn" data-safe-restart>
+          확장 없이 다시 시작 (1회)</button>
+      </div>`;
+  }
+
   function sectionHeadHtml(key, title, count) {
     const isOpen = !collapsed[key];
     return `<button type="button" class="ext-section-head" data-section="${key}"
@@ -704,12 +729,31 @@ export function createExtensionsUi(deps) {
       ${sectionHeadHtml('installed', '설치된 확장', items.length)}
       ${collapsed.installed ? '' : listHtml}
     </div>`;
-    root.innerHTML = `<div class="ext-panel">${head}${body}${availableExtensionsHtml()}</div>`;
+    root.innerHTML = `<div class="ext-panel">${head}${body}${safeRestartHtml()}
+      ${availableExtensionsHtml()}</div>`;
     bindSettingsPane(root);
     restoreFocus(root, saved);
   }
 
   function bindSettingsPane(root) {
+    root.querySelectorAll('[data-safe-restart]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const shell = (typeof window !== 'undefined') ? window.naiaShell : null;
+        if (!shell || typeof shell.restartWithoutExtensions !== 'function') {
+          showToast('이 기능은 NAIA 앱에서만 쓸 수 있습니다(브라우저 X).', 'error');
+          return;
+        }
+        if (!await Promise.resolve(confirmDialog(
+          '확장을 모두 끈 채로 NAIA를 다시 시작합니다. 이번 한 번만 적용되고, '
+          + '다음 실행부터는 평소대로 돌아옵니다. 계속할까요?'))) return;
+        el.disabled = true;
+        const result = await shell.restartWithoutExtensions();
+        if (!result || result.ok !== true) {
+          el.disabled = false;
+          showToast((result && result.message) || '다시 시작하지 못했습니다.', 'error');
+        }
+      });
+    });
     root.querySelectorAll('.ext-toggle').forEach(el => {
       el.addEventListener('change', () => {
         const ext = findExt(el.dataset.ext);

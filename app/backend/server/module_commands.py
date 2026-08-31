@@ -59,6 +59,17 @@ async def _run_vibe_encode(
             await broadcast_json(clients, message)
 
 
+def _truthy(value: Any) -> bool:
+    """일반 dispatch(`_coerce_bool`)와 **같은 잣대**로 읽는다.
+
+    ⚠️ `bool("false")` 는 True 다 - 문자열로 오는 클라이언트의 끄기 요청이
+    켜기로 읽히면 안 된다.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
 async def _run_extension_load(
     context: WebSessionContext,
     clients: set[WebSocket],
@@ -133,11 +144,22 @@ async def handle_module_command(
         and (
             str(command.get("key") or "").split(":", 1)[0] in {"approve", "retry", "retry_errors"}
             or (str(command.get("key") or "").split(":", 1)[0] == "enabled"
-                and bool(command.get("value")))
+                # ⚠️ `bool("false")` 는 True 다 - 문자열 "false" 를 보내는 클라이언트의
+                #    끄기 요청이 켜기로 가로채질 수 있었다(Codex CONCERN).
+                #    일반 dispatch 와 같은 잣대로 읽는다.
+                and _truthy(command.get("value")))
         )
     ):
         import asyncio
 
+        from core.extension_runtime import load_extensions
+
+        # ⚠️ 플래그는 **여기서 동기적으로** 쓴다. WS 메시지는 순서대로 처리되므로
+        #    ON/OFF 가 도착 순서대로 확정된다. 백그라운드 태스크 안에서 쓰면 늦게
+        #    깨어나 뒤이어 온 OFF 를 덮는다(Codex BLOCK - 실측 재현했다).
+        key = str(command.get("key") or "")
+        if key.split(":", 1)[0] == "enabled":
+            load_extensions(context).apply_panel_param(key, True)
         asyncio.create_task(_run_extension_load(context, clients, command))
         return True
 

@@ -804,9 +804,11 @@ class ExtensionContext:
         게이트는 ``enqueue_generation``과 **같다**(armed 또는 action 컨텍스트).
         둘이 어긋나면 "넣기는 됐는데 시작이 안 되는" 상태가 생긴다.
 
-        ok=False는 **아무것도 시작되지 않았다**는 뜻이다 — 붙은 웹 클라이언트가
-        없거나 브릿지가 없으면 러너에 닿을 수 없으므로 정직하게 실패로 돌린다
-        (여기서 ok를 참으로 돌리면 확장은 영영 오지 않을 결과를 기다린다).
+        ⚠️ ok=False 는 **브릿지가 없다**는 뜻이다(웹 세션 밖). 붙은 클라이언트
+        수는 보지 않는다 - 러너는 클라이언트가 0이어도 큐를 소비하므로 그것이
+        옳다. 예전 주석은 "클라이언트가 없으면 ok=False" 라고 했는데 구현과
+        달랐다(Codex NIT). 메인 루프가 없어 브릿지가 요청을 버리는 경우까지는
+        여기서 알 수 없다.
         """
         if not self._record.is_active and not (
             _in_action_context()
@@ -1725,11 +1727,14 @@ class ExtensionManager:
                     record.approved = True
                     self._write_config_locked()
                 if action == "enabled":
-                    # ⚠️ 이 경로는 일반 dispatch 를 **안 탄다**(module_commands 가
-                    # 가로챈다). 그쪽이 세우던 플래그를 여기서 대신 세운다 -
-                    # 안 하면 로드는 되는데 `is_active` 가 계속 False 다.
-                    record.enabled = True
-                    self._write_config_locked()
+                    # ⚠️ **여기서 플래그를 세우지 않는다.** 이 태스크는 백그라운드라
+                    # 늦게 깨어난다 - 그 사이 사용자가 껐다면 여기서 True 로 쓰는
+                    # 순간 **마지막 의도가 뒤집힌다**(Codex BLOCK, 실측 재현:
+                    # OFF 반영 후 늦은 ON 태스크가 다시 True 로 만들었다).
+                    # 플래그는 명령 도착 순서대로 handle_module_command 가 이미
+                    # 동기적으로 썼다. 여기서는 **지금 켜져 있는지만** 본다.
+                    if not record.enabled:
+                        continue
                 if record.approved and not record.blocked and record.status in {"discovered", "loading", "error", "dependency_error"}:
                     # ②단계: 선언 의존성이 미설치면 import 전에 격리 설치(host 재사용·
                     # 무거운 ML 차단·wheel-only). 실패하면 로드하지 않고 사유를 남긴다.

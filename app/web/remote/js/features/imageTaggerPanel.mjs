@@ -165,17 +165,22 @@ export function createImageTaggerResultPanel({
         render();
         try {
           const result = await analyze(next.blob);
-          // 도는 동안 사용자가 취소했으면 결과를 버린다.
-          if (next.state !== 'running') continue;
-          next.state = 'done';
-          next.result = result;
-          // 방금 끝난 것을 보여 준다 - 기다린 사람이 보고 싶은 것은 그것이다.
-          activeId = next.id;
+          // 도는 동안 사용자가 취소했으면 **결과만 버린다**(상태는 그대로 둔다).
+          // ⚠️ 예전에는 여기서 `continue` 했는데, 그러면 아래 2초 간격을 건너뛰어
+          //    다음 요청이 즉시 나갔다(Codex CONCERN). 남의 서버에 대한 간격은
+          //    이쪽 사정(취소)과 무관하다.
+          if (next.state === 'running') {
+            next.state = 'done';
+            next.result = result;
+            // 방금 끝난 것을 보여 준다 - 기다린 사람이 보고 싶은 것은 그것이다.
+            activeId = next.id;
+          }
         } catch (error) {
-          if (next.state !== 'running') continue;
-          next.state = 'error';
-          next.error = String(error && error.message ? error.message : error);
-          showToast(next.error, 'error');
+          if (next.state === 'running') {
+            next.state = 'error';
+            next.error = String(error && error.message ? error.message : error);
+            showToast(next.error, 'error');
+          }
         }
         render();
         if (!items.some(item => item.state === 'queued')) break;
@@ -294,6 +299,8 @@ export function createImageTaggerResultPanel({
   }
 
   function closeAll() {
+    // 닫아 놓고 최대 2초 뒤 깨어나 다시 그리던 타이머를 놓는다.
+    if (gapTimer) { clearTimeoutFn(gapTimer); gapTimer = null; }
     minimized = false;
     if (chip) { chip.classList.remove('open'); chip.innerHTML = ''; }
     if (popup) popup.style.display = 'none';
@@ -306,8 +313,15 @@ export function createImageTaggerResultPanel({
       return `<span class="imgtag-badge">In Queue<button type="button" class="imgtag-badge-x"
                 data-cancel="${escHtml(item.id)}" aria-label="취소">×</button></span>`;
     }
-    if (item.state === 'error') return '<span class="imgtag-badge is-err">실패</span>';
-    if (item.state === 'cancelled') return '<span class="imgtag-badge is-off">취소됨</span>';
+    // ⚠️ 취소·실패 항목에도 지우기를 준다 - 없으면 미리보기 blob 이 페이지가
+    //    닫힐 때까지 남고 목록 상한(MAX_ITEMS)만 차지한다(Codex CONCERN).
+    if (item.state === 'error' || item.state === 'cancelled') {
+      const label = item.state === 'error' ? '실패' : '취소됨';
+      const tone = item.state === 'error' ? 'is-err' : 'is-off';
+      return `<span class="imgtag-badge ${tone}">${label}<button type="button"
+                class="imgtag-badge-x" data-cancel="${escHtml(item.id)}"
+                aria-label="목록에서 지우기">×</button></span>`;
+    }
     return `<button type="button" class="imgtag-badge-x is-solo" data-cancel="${escHtml(item.id)}"
               aria-label="목록에서 지우기">×</button>`;
   }
@@ -457,7 +471,11 @@ export function createImageTaggerResultPanel({
     popup.style.display = '';
     renderChip();
     const file = blob;
-    if (file) {
+    // ⚠️ `addFiles` 만 상한을 보던 탓에 이 문(DETECTED IMAGE 팝업)으로는 무제한으로
+    //    쌓였다 - 미리보기 blob 이 계속 는다(Codex CONCERN).
+    if (file && items.length >= MAX_ITEMS) {
+      showToast(`목록이 가득 찼습니다(${MAX_ITEMS}장). 오래된 항목을 지우세요.`, 'warning');
+    } else if (file) {
       seq += 1;
       items.push({
         id: `it${seq}`,

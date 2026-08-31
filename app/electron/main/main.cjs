@@ -258,6 +258,8 @@ let runtimeInstallChoiceMade = false;
 let bootstrapMigrationActive = false;
 let runtimeBootstrapState = null;
 let quitting = false;
+// 이번 부팅에서만 확장을 끈다(안전 재시작). ready 에서 플래그를 소비해 정한다.
+let safeModeThisBoot = false;
 let backendPortConfirmed = false;
 let cachedAppVersion = null;
 let updateCheckPromise = null;
@@ -804,8 +806,12 @@ function backendArgs() {
 }
 
 function backendEnvironment(root) {
+  // 안전 재시작으로 뜬 부팅에서만 확장을 통째로 끈다(one-shot - 아래에서 이미
+  // 플래그를 지웠으므로 다음 실행은 평소대로 돈다).
+  const extras = safeModeThisBoot ? {NAIA_DISABLE_EXTENSIONS: "1"} : {};
   return {
     ...process.env,
+    ...extras,
     NAIA_ELECTRON: "1",
     NAIA_HEADLESS_OPEN_BROWSER: "0",
     NAIA_RESOURCE_ROOT: process.env.NAIA_RESOURCE_ROOT || root,
@@ -2912,6 +2918,59 @@ function spawnGrok(args, opts = {}) {
 // 설정은 `user-data` 에 둔다(포터블에서 보존 대상이라 업데이트를 넘어 살아남는다).
 let grokAlwaysActiveCache = null;
 
+// ── 확장 없이 한 번만 시작 (안전 재시작) ───────────────────────────────
+// 확장은 in-process 임의 파이썬이고 **호스트 내부를 몽키패치할 수 있다**(공식
+// 프론트 확장 경로가 없어 서드파티가 그렇게 한다). 그래서 확장이 앱을 이상하게
+// 만들면 사용자가 앱 안에서 빠져나올 길이 없었다 - `NAIA_DISABLE_EXTENSIONS=1`
+// 환경변수는 README 에만 있고 UI 에서 닿지 않는다(사용자 지적 2026-08-31:
+// "기존에 저 Extension 을 받은 사람들도 나중에 비슷한 문제를 겪을 것").
+//
+// ⚠️ **한 번만** 듣는다. 켜 두면 사용자가 안전 모드에 갇힌 줄도 모르고 '확장이
+// 안 돈다' 고 겪는다. 안전 모드에서 문제 확장을 끄고 평소대로 다시 켜는 것이
+// 의도한 흐름이다.
+function safeModeFlagPath() {
+  try {
+    return path.join(runtimeDataRoot(), "naia-safe-mode.json");
+  } catch (_error) {
+    return null;
+  }
+}
+
+function armSafeModeOnce() {
+  const target = safeModeFlagPath();
+  if (!target) return false;
+  try {
+    fs.mkdirSync(path.dirname(target), {recursive: true});
+    fs.writeFileSync(target, JSON.stringify({skipExtensionsOnce: true}), "utf8");
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+/** 플래그를 **읽고 곧바로 지운다**(one-shot). 지우기가 실패하면 안전 모드로
+ *  가지 않는다 - 지울 수 없는 플래그로 켜면 영영 갇힌다. */
+function consumeSafeModeOnce() {
+  const target = safeModeFlagPath();
+  if (!target) return false;
+  let armed = false;
+  try {
+    const raw = JSON.parse(fs.readFileSync(target, "utf8"));
+    armed = raw && raw.skipExtensionsOnce === true;
+  } catch (_error) {
+    return false;
+  }
+  if (!armed) return false;
+  try {
+    fs.unlinkSync(target);
+  } catch (_error) {
+    appendBackendLog("[safe-mode] flag could not be removed - staying in normal mode");
+    return false;
+  }
+  return true;
+}
+
+
 function grokConfigPath() {
   try {
     return path.join(runtimeDataRoot(), "naia-grok.json");
@@ -3090,6 +3149,24 @@ async function stopOwnedProcessesForUpdate(timeoutMs = 12000) {
 
 ipcMain.handle("naia:grok-state", () => grokState());
 
+/** 확장 없이 한 번만 다시 시작한다.
+ *
+ *  ⚠️ 확장이 앱을 이상하게 만들었을 때의 **탈출구**다. 실패하면 절대 재시작하지
+ *     않는다 - 플래그를 못 남긴 채 재시작하면 같은 상태로 돌아와 사용자가
+ *     "눌러도 아무 일이 없다" 를 겪는다.
+ */
+ipcMain.handle("naia:restart-without-extensions", () => {
+  if (!armSafeModeOnce()) {
+    return {ok: false, message: "안전 모드 표식을 남기지 못했습니다."};
+  }
+  appendBackendLog("[safe-mode] restart requested by user");
+  // 종료 훅이 백엔드/Grok 트리를 정리하도록 평소 경로로 나간다.
+  app.relaunch();
+  quitting = true;
+  app.quit();
+  return {ok: true, message: ""};
+});
+
 ipcMain.handle("naia:grok-set-always-active", (_event, enabled) => {
   const next = setGrokAlwaysActive(enabled);
   if (!next) {
@@ -3195,6 +3272,12 @@ if (!lock) {
   });
 
   app.whenReady().then(async () => {
+    // ⚠️ **백엔드가 뜨기 전에** 정해야 한다 - backendEnvironment() 가 이 값을 읽는다.
+    //    읽는 즉시 플래그를 지우므로(one-shot) 다음 실행은 평소대로 돈다.
+    safeModeThisBoot = consumeSafeModeOnce();
+    if (safeModeThisBoot) {
+      appendBackendLog("[safe-mode] starting without extensions (one shot)");
+    }
     configureApplicationMenu();
     configureDownloads();
     repairSwapProbeResidue();

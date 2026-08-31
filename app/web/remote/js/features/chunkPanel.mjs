@@ -413,11 +413,24 @@ export function createChunkPanel({
   // (사용자 사양 2026-08-31). 안 들어 있으면 추가 두 개, 들어 있으면 그 목록의
   // 제거 + 퍼펙트 매칭 토글만 낸다 - 이미 들어 있는데 "추가" 를 내면 눌러도
   // "이미 있습니다" 만 나온다.
-  // 선택 문자열에서 가중치 문법만 벗긴다. 괄호가 이름의 일부인 태그
+  // 선택 문자열을 **필터에 넣을 태그 하나**로 만든다. 괄호가 이름의 일부인 태그
   // (`hakurei reimu (touhou)`)는 건드리지 않는다 - 짝이 맞으면 그대로 둔다.
+  //
+  // ⚠️ 커서 경로는 tagAssist 가 이미 걸러 준다(`raw.startsWith('#')` 면 null).
+  //    **선택 경로에는 그 가드가 없다** - 표식을 드래그하면 `#랜덤프롬프트` 나
+  //    `#특징:` 가 그대로 필터에 박혀 아무것도 안 맞는 칩이 되고 풀이 0 이 된다
+  //    (실측 2026-08-31). 여러 태그를 걸쳐 끌면 `black skin, colored skin` 이
+  //    통째로 한 태그가 됐다 - 첫 태그만 쓰고, 무엇이 들어가는지 라벨로 보여 준다.
   function stripTagWeight(raw) {
     let value = String(raw || '').trim();
     if (!value) return '';
+    // 여러 태그를 걸친 선택: 첫 조각만.
+    if (value.includes(',')) {
+      value = (value.split(',').map(part => part.trim()).find(Boolean) || '');
+      if (!value) return '';
+    }
+    // 주석 표식은 태그가 아니다.
+    if (value.startsWith('#')) return '';
     // NAI: `0.8::tag ::`
     while (value.endsWith('::')) value = value.slice(0, -2).trimEnd();
     const sep = value.indexOf('::');
@@ -434,7 +447,8 @@ export function createChunkPanel({
     while (value.endsWith(')') && (value.split(')').length > value.split('(').length)) {
       value = value.slice(0, -1).trimEnd();
     }
-    return value.trim();
+    value = value.trim();
+    return value.startsWith('#') ? '' : value;
   }
 
   function renderFilterItems(menu, tag) {

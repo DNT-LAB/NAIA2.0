@@ -2399,7 +2399,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter2')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter3')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,

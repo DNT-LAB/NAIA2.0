@@ -36,6 +36,10 @@ export function createExtensionsUi(deps) {
   const AVAILABLE_EXTENSIONS = [
     {
       name: 'NAIA-EXten',
+      // 설치되면 이 id 로 잡힌다(`extension.json` 이 정한다). ⚠️ 주소만으로는 못
+      // 알아본다 - 이 확장의 매니페스트에는 `homepage`/`source_url` 이 없어서
+      // 설치 후에도 레코드의 주소가 빈 문자열이다(실측 2026-08-31).
+      id: 'naia_exten',
       url: 'https://github.com/okawaritsuika/NAIA-EXten',
       description: 'NAIA 2.0 편의 기능 종합 확장 — 검색 모듈 개선(Parquet 실시간 동기화 · '
         + '확률 분배), 프롬프트 엔지니어링(PromptServer 연동), 만화 생성(Comic Maker), '
@@ -56,6 +60,18 @@ export function createExtensionsUi(deps) {
     return new Set(items
       .map(item => normalizeRepoUrl(item && (item.source_url || item.homepage || item.repository)))
       .filter(Boolean));
+  }
+
+  function installedIds() {
+    const items = (lastState && Array.isArray(lastState.extensions)) ? lastState.extensions : [];
+    return new Set(items.map(item => String((item && item.id) || '')).filter(Boolean));
+  }
+
+  // 이미 깔렸는가. **id 를 먼저** 본다 - 매니페스트에 주소가 없는 확장이 있어서
+  // 주소만으로는 설치 후에도 '설치' 로 남는다. 주소 대조는 id 가 바뀐 경우의 폴백.
+  function isAlreadyInstalled(entry, ids, urls) {
+    if (entry.id && ids.has(entry.id)) return true;
+    return urls.has(normalizeRepoUrl(entry.url));
   }
 
   let lastState = null;
@@ -589,9 +605,10 @@ export function createExtensionsUi(deps) {
 
   // 설치 가능한 확장 표 — [ 이름 | 설명 | GitHub 링크 ] [ 설치 ] (사용자 지정 구조).
   function availableExtensionsHtml() {
-    const installed = installedRepoUrls();
+    const urls = installedRepoUrls();
+    const ids = installedIds();
     const rows = AVAILABLE_EXTENSIONS.map((entry) => {
-      const already = installed.has(normalizeRepoUrl(entry.url));
+      const already = isAlreadyInstalled(entry, ids, urls);
       const busy = !!(installState && installState.active);
       // ⚠️ 설명 안의 링크는 **텍스트로 이스케이프한 뒤** 앵커로 바꾼다. 원문을 그대로
       //    넣으면 확장 작성자가 쓴 문자열이 마크업이 된다.

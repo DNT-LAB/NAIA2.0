@@ -1074,6 +1074,10 @@ class HeadlessPromptEngineeringService:
 
         ⚠️ 이 블록은 프리셋 파일에서 **생성**했다. 다시 동기화할 때도 손으로
         옮기지 말 것 - 프롬프트가 길어 반드시 틀린다.
+
+        ⚠️ 단, `preprocessing_options.category_annotation` 만 **일부러 recommend_6
+        과 다르다**(프리셋은 False, 여기는 True - 사용자 지시). 재생성하면 이 한
+        줄은 다시 손으로 켜야 한다.
         """
         return {
             "pre_prompt": (
@@ -1126,7 +1130,11 @@ class HeadlessPromptEngineeringService:
                 "e621_auto_boost": False,
                 "danbooru_auto_weight": False,
                 "tag_implication_compression": False,
-                "category_annotation": False,
+                # ⚠️ **recommend_6 과 일부러 다르다**(그쪽은 False). 사용자 지시
+                # 2026-08-31: "category_annotation(True) 좋아보이네요. 그거 켜주세요".
+                # 다음에 recommend_6 으로 재동기화할 때 **이 줄이 조용히 False 로
+                # 되돌아가지 않게** 할 것 - 생성 스크립트는 프리셋 값을 그대로 쓴다.
+                "category_annotation": True,
             },
             # recommend_6 이 함께 담고 있는 보조 설정 - 추천이 재현되려면
             # 이것들도 같이 가야 한다(가중치·부스트가 딴 값이면 결과가 달라진다).

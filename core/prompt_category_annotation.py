@@ -70,6 +70,8 @@ PARAGRAPH_BREAK = "\n\n"
 _WEBUI_WEIGHT_RE = re.compile(r"^\((.*):\s*-?\d+(?:\.\d+)?\)$")
 # 여러 태그를 감싸는 NAI 가중치 그룹의 **여는 쪽**: `0.8::tag`
 _NAI_WEIGHT_OPEN_RE = re.compile(r"^-?\d+(?:\.\d+)?::")
+# 여러 태그를 감싸는 non-NAI 그룹의 **닫는 쪽**: `tag:0.8)`
+_E621_WEIGHT_CLOSE_RE = re.compile(r":\s*-?\d+(?:\.\d+)?\)$")
 
 
 def find_main_block_start(prompt: str) -> int:
@@ -149,7 +151,11 @@ def _opens_group(token: str) -> bool:
     value = token.strip()
     if not value:
         return False
-    if value.count("(") > value.count(")"):
+    # ⚠️ 괄호 **개수**만 보면 안 된다. `>:(` `;(` 는 실제 Danbooru 태그다
+    #    (최근 6샤드에서 164회 · 9회). 그것들을 여는 쪽으로 읽으면 뒤따르는 태그를
+    #    **전부 삼켜** 통째로 `#추가:` 로 몰아넣는다(실측 2026-08-31).
+    #    e621 은 태그 **앞에** 여는 괄호를 붙이므로 `(` 로 시작해야 한다.
+    if value.startswith("(") and value.count("(") > value.count(")"):
         return True
     match = _NAI_WEIGHT_OPEN_RE.match(value)
     return bool(match) and not value.endswith("::")
@@ -159,7 +165,10 @@ def _closes_group(token: str) -> bool:
     value = token.strip()
     if not value:
         return False
-    if value.count(")") > value.count("("):
+    # 닫는 쪽도 모양이 정해져 있다 - e621 은 마지막 태그에 `:<가중치>)` 를 붙인다.
+    # ⚠️ `:)` `;)` 같은 이모티콘 태그를 닫는 쪽으로 읽으면 그룹이 **일찍 끊겨**
+    #    진짜 닫는 토큰이 밖에 남는다.
+    if _E621_WEIGHT_CLOSE_RE.search(value):
         return True
     return value.endswith("::") and not _NAI_WEIGHT_OPEN_RE.match(value)
 

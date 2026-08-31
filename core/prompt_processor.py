@@ -4,10 +4,7 @@ import pandas as pd
 import weakref
 from collections import Counter
 from typing import Dict, Any
-from core.prompt_category_annotation import (
-    build_annotated_main_tags,
-    build_identity_block,
-)
+from core.prompt_category_annotation import build_annotated_main_tags
 from core.prompt_context import PromptContext
 from core.safe_console import safe_print
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 파이프라인 seam 계측
@@ -852,20 +849,6 @@ class PromptProcessor:
                 context.prefix_tags = context.prefix_tags + anima_tags
                 safe_print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
 
-        elif annotate:
-            # 인원 수 -> #작품: -> #캐릭터: -> #아티스트: -> 선행고정
-            #
-            # ⚠️ 문단을 가르는 빈 줄은 **직접 넣지 않는다.** `get_all_tags()` 가
-            #    prefix 와 main 꼬리에 `\n\n` 을 이미 붙인다(`prompt_context.py`).
-            #    여기서 또 넣으면 빈 줄이 두 겹으로 나온다 - 실제로 그렇게 나왔다.
-            identity_block = build_identity_block(
-                context.metadata.get('annotation_copyright', ''),
-                context.metadata.get('annotation_character', ''),
-                context.metadata.get('annotation_artist', ''),
-            )
-            context.prefix_tags = (
-                sorted_person_tags + identity_block + context.prefix_tags
-            )
         else:
             # 기존 방식: 맨 앞에 삽입
             context.prefix_tags = sorted_person_tags + context.prefix_tags

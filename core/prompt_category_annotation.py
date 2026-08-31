@@ -7,6 +7,11 @@
 
 끄면 예전 그대로 `#랜덤프롬프트` 한 줄이다.
 
+⚠️ 작품·캐릭터·아티스트에는 **주석을 안 단다**(사용자 회수 2026-08-31:
+   "칸만 차지하네요"). 값이 한 줄인데 주석이 두 줄을 먹었고, 특히 `#아티스트:` 는
+   바로 뒤에 오는 선행고정 와일드카드와 붙어 그것들이 아티스트인 것처럼 읽혔다.
+   그 셋은 예전 그대로 선행고정 프롬프트 머리에 꽂힌다 - 배치도 순서도 안 바뀐다.
+
 ## 왜 이렇게 되는가
 
 `_step_final_format` 은 `#` 로 시작하는 태그를 `\\n{tag}\\n` 으로 감싸 **자기 줄**로
@@ -37,12 +42,6 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-# 앞머리(인원 수 다음, 선행고정 프롬프트 앞)
-COPYRIGHT_MARKER = "#작품:"
-CHARACTER_MARKER = "#캐릭터:"
-ARTIST_MARKER = "#아티스트:"
-IDENTITY_MARKERS = (COPYRIGHT_MARKER, CHARACTER_MARKER, ARTIST_MARKER)
-
 # 본문. **나열 순서가 곧 분류 우선순위**다.
 EXTRA_KEY = "extra"
 MAIN_CATEGORY_ORDER: tuple[tuple[str, str, str], ...] = (
@@ -62,8 +61,6 @@ MAIN_CATEGORY_ORDER: tuple[tuple[str, str, str], ...] = (
 LEGACY_MAIN_MARKER = "#랜덤프롬프트"
 
 # 프롬프트 문자열에서 **본문이 시작하는 자리**를 찾는 표식들.
-# ⚠️ 앞머리 표식(작품/캐릭터/아티스트)은 **선행고정 프롬프트보다 앞**에 오므로
-#    여기 넣으면 안 된다 - 넣으면 reference inset 이 prefix 앞에 끼어든다.
 MAIN_BLOCK_MARKERS: tuple[str, ...] = tuple(
     marker for _, marker, _ in MAIN_CATEGORY_ORDER
 ) + (LEGACY_MAIN_MARKER,)
@@ -168,30 +165,6 @@ def classify(tag: Any, category_sets: dict[str, frozenset]) -> str:
         if key in category_sets.get(category, frozenset()):
             return category
     return EXTRA_KEY
-
-
-def build_identity_block(
-    copyright_value: str = "",
-    character_value: str = "",
-    artist_value: str = "",
-) -> list[str]:
-    """`#작품: · #캐릭터: · #아티스트:` 앞머리. **공란은 주석도 안 낸다.**
-
-    ⚠️ 순서가 기존과 다르다. 예전 코드는 prefix 머리에 copyright -> artist -> character
-       순으로 밀어 넣어 결과가 `캐릭터, 아티스트, 작품` 이었다. 사용자가 적어 준 순서는
-       `작품, 캐릭터, 아티스트` 다.
-    """
-    block: list[str] = []
-    for marker, value in (
-        (COPYRIGHT_MARKER, copyright_value),
-        (CHARACTER_MARKER, character_value),
-        (ARTIST_MARKER, artist_value),
-    ):
-        text = str(value or "").strip()
-        if text:
-            block.append(marker)
-            block.append(text)
-    return block
 
 
 def build_annotated_main_tags(tags: Iterable[Any], filter_manager: Any) -> list[str]:

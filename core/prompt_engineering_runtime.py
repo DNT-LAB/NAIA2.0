@@ -349,22 +349,11 @@ class PromptEngineeringHeadlessPostHook:
             sampling_mode = context.settings.get("comfyui_sampling_mode")
             is_anima_mode = api_mode == "COMFYUI" and sampling_mode == "anima"
 
-            # Category Annotation 이 켜져 있으면 이 셋을 prefix 에 **안 꽂는다.**
-            # 최종 포맷 단계가 `#작품: · #캐릭터: · #아티스트:` 주석과 함께,
-            # 사용자가 적어 준 순서로 직접 내보낸다.
-            #
-            # ⚠️ 여기서 꽂아 놓고 나중에 값으로 찾아 빼면 안 된다 - 사용자의 선행고정
-            #    프롬프트에 같은 문자열이 있으면 엉뚱한 것을 뽑는다. 꽂는 자리를
-            #    하나로 두고 그 자리에서 갈라야 한다.
-            annotate = bool(checkbox_options.get("category_annotation")) and not is_anima_mode
-
             if not checkbox_options.get("remove_work_title"):
                 copyright = source_row.get("copyright")
                 if isinstance(copyright, str) and copyright:
                     if is_anima_mode:
                         context.metadata["anima_copyright"] = copyright
-                    elif annotate:
-                        context.metadata["annotation_copyright"] = copyright
                     else:
                         prefix_tags.insert(0, copyright)
 
@@ -373,8 +362,6 @@ class PromptEngineeringHeadlessPostHook:
                 if isinstance(artist, str) and artist:
                     if is_anima_mode:
                         context.metadata["anima_artist"] = artist
-                    elif annotate:
-                        context.metadata["annotation_artist"] = artist
                     else:
                         prefix_tags.insert(0, artist)
 
@@ -383,12 +370,15 @@ class PromptEngineeringHeadlessPostHook:
                 if isinstance(character, str) and character:
                     if is_anima_mode:
                         context.metadata["anima_character"] = character
-                    elif annotate:
-                        context.metadata["annotation_character"] = character
                     else:
                         prefix_tags.insert(0, character)
 
-            if annotate:
+            # ⚠️ 주석은 **본문(랜덤 프롬프트)에만** 단다. 작품·캐릭터·아티스트에는
+            #    안 단다(사용자 회수 2026-08-31: "칸만 차지하네요"). 값이 짧은데
+            #    주석이 두 줄을 먹었고, 특히 `#아티스트:` 는 바로 뒤 선행고정
+            #    와일드카드와 붙어 그것들이 아티스트인 것처럼 읽혔다.
+            #    이 셋은 예전 그대로 prefix 머리에 꽂는다.
+            if checkbox_options.get("category_annotation") and not is_anima_mode:
                 context.metadata["category_annotation"] = True
 
         auto_hide = [] if skip_preprocessing else list(options.get("auto_hide") or [])

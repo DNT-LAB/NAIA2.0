@@ -9647,7 +9647,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260829-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260829-anlas')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260831-annotation')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

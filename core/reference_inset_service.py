@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from core.prompt_category_annotation import find_main_block_start
+
 
 # 인셋 마커 태그. Dev0714의 "reference inset"을 "borderless panels"로 교체(사용자
 # 지시 2026-07-18). "2koma" 동반 확장은 품질 이슈로 취소 - 단독 태그만 쓴다.
@@ -227,7 +229,10 @@ def inject_reference_inset_into_prompt(
         # 최종 문자열에서 prefix 가 끝나는 자리는 **`#랜덤프롬프트` 표식 바로 앞**이다
         # (파이프라인이 main_tags 앞에 꽂는다). 표식이 없으면 - 와일드카드 단독처럼
         # prefix 가 없는 프롬프트다 - 맨 앞에 둔다.
-        marker_at = prompt.find(MAIN_TAGS_MARKER)
+        # ⚠️ 예전에는 `#랜덤프롬프트` 하나만 찾았다. Category Annotation 을 켜면 그
+        #    표식이 사라지고 `#특징:` 같은 카테고리 표식으로 갈리므로, 여기만 두면
+        #    앵커를 못 찾아 조용히 **맨 앞**으로 떨어진다(2koma 가 prefix 앞에 붙는다).
+        marker_at = find_main_block_start(prompt)
         if marker_at < 0:
             return ", ".join(missing) + f", {prompt}"
         head = prompt[:marker_at].rstrip()

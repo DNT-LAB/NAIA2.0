@@ -28,6 +28,7 @@ PREPROCESSING_OPTION_KEYS = (
     "e621_auto_boost",
     "danbooru_auto_weight",
     "tag_implication_compression",
+    "category_annotation",
 )
 
 

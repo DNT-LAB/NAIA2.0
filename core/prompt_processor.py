@@ -4,6 +4,10 @@ import pandas as pd
 import weakref
 from collections import Counter
 from typing import Dict, Any
+from core.prompt_category_annotation import (
+    build_annotated_main_tags,
+    build_identity_block,
+)
 from core.prompt_context import PromptContext
 from core.safe_console import safe_print
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 파이프라인 seam 계측
@@ -701,7 +705,21 @@ class PromptProcessor:
         }
 
         converted_main_tags = [tag_conversion_map.get(tag, tag) for tag in new_main_tags]
-        if converted_main_tags:
+
+        # Category Annotation: `#랜덤프롬프트` 한 줄 대신 카테고리 주석으로 펼친다.
+        # filter_manager 가 없으면(데이터 미적재) 분류가 전부 `#추가:` 로 쏟아지므로
+        # 켜져 있어도 **예전 동작으로 되돌린다** - 주석만 있고 분류가 없는 화면이
+        # 더 나쁘다.
+        annotate = bool(context.metadata.get('category_annotation'))
+        annotation_filter_manager = getattr(self.app_context, 'filter_data_manager', None)
+        if annotate and not annotation_filter_manager:
+            annotate = False
+            context.metadata['category_annotation_degraded'] = True
+
+        if annotate:
+            converted_main_tags = build_annotated_main_tags(
+                converted_main_tags, annotation_filter_manager)
+        elif converted_main_tags:
             converted_main_tags.insert(0, '#랜덤프롬프트')  # Ensure 'main tags' is always the first tag
 
         # 4. context 최종 업데이트
@@ -718,6 +736,15 @@ class PromptProcessor:
             if not is_nai and first_non_hash < len(context.main_tags)
             else set()
         )
+        # ⚠️ 주석을 켜면 표식이 **본문 중간에도** 온다. 가중치 래핑은 비가중치 구간을
+        #    통째로 `(...:1.2)` 로 감싸는데, 표식이 그 구간에 끼면 `(#의상:` 이 나온다.
+        #    예전에는 표식이 맨 앞 하나뿐이라 `first_non_hash` 로 충분했다.
+        #    표식 자리를 제외 집합에 넣어 구간이 거기서 끊기게 한다.
+        if not is_nai:
+            weighted_indices = set(weighted_indices) | {
+                index for index, tag in enumerate(context.main_tags)
+                if isinstance(tag, str) and tag.startswith('#')
+            }
 
         # 4-0b. non-NAI 모드: main_tags 리터럴 괄호 이스케이프 (인덱스 기반)
         if not is_nai:
@@ -825,6 +852,20 @@ class PromptProcessor:
                 context.prefix_tags = context.prefix_tags + anima_tags
                 safe_print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
 
+        elif annotate:
+            # 인원 수 -> #작품: -> #캐릭터: -> #아티스트: -> 선행고정
+            #
+            # ⚠️ 문단을 가르는 빈 줄은 **직접 넣지 않는다.** `get_all_tags()` 가
+            #    prefix 와 main 꼬리에 `\n\n` 을 이미 붙인다(`prompt_context.py`).
+            #    여기서 또 넣으면 빈 줄이 두 겹으로 나온다 - 실제로 그렇게 나왔다.
+            identity_block = build_identity_block(
+                context.metadata.get('annotation_copyright', ''),
+                context.metadata.get('annotation_character', ''),
+                context.metadata.get('annotation_artist', ''),
+            )
+            context.prefix_tags = (
+                sorted_person_tags + identity_block + context.prefix_tags
+            )
         else:
             # 기존 방식: 맨 앞에 삽입
             context.prefix_tags = sorted_person_tags + context.prefix_tags

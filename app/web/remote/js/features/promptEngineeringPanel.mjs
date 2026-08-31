@@ -16,6 +16,7 @@ const PP_OPTIONS = [
   ['e621_auto_boost', 'e621 Auto-Boost'],
   ['danbooru_auto_weight', 'Danbooru Auto-Weight'],
   ['tag_implication_compression', 'Tag Implication'],
+  ['category_annotation', 'Category Annotation'],
 ];
 
 const PP_OPTION_TONES = {
@@ -26,6 +27,7 @@ const PP_OPTION_TONES = {
   e621_auto_boost: 'pe-tone-pink',
   danbooru_auto_weight: 'pe-tone-teal',
   tag_implication_compression: 'pe-tone-teal',
+  category_annotation: 'pe-tone-teal',
 };
 
 // Preprocessing Options 각 항목의 700ms 호버 툴팁(간단 기능 설명).
@@ -47,6 +49,7 @@ const PP_DESCRIPTIONS = {
   e621_auto_boost: 'e621 태그에 자동으로 가중치를 적용합니다.',
   danbooru_auto_weight: 'Danbooru 태그에 빈도 기반 자동 가중치를 적용합니다.',
   tag_implication_compression: '상위 태그가 함의하는 중복 하위 태그를 압축(제거)합니다.',
+  category_annotation: '랜덤 프롬프트를 카테고리별로 묶고 #작품: #캐릭터: #특징: 같은 주석을 줄마다 붙여 보여줍니다. 주석은 생성에 나가지 않습니다. 태그가 카테고리 순서로 재배치되므로 같은 시드라도 그림이 달라집니다.',
 };
 const PE_PREPROCESSING_GUIDE = 'Preprocessing Options — 랜덤(Danbooru) 프롬프트에서 원치 않는 카테고리 태그를 자동으로 걸러내거나, 가중치·태그 정합을 적용해 프롬프트를 다듬습니다.\\n\\n각 항목에 마우스를 올리면 기능 설명이 나옵니다. (WC Solo 모드에서는 적용되지 않습니다)';
 

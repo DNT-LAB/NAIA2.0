@@ -2141,7 +2141,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260609-s
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
   });
-const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260806-getstate1')
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260831-saveorder')
   .then(({createAutoSavePanel}) => {
     autoSavePanel = createAutoSavePanel({
       document,
@@ -10693,6 +10693,9 @@ function onAutoSaveWebpChange(checked) {
   if (autoSavePanel) autoSavePanel.onWebpChange(checked);
 }
 
+function onBulkSaveOrderChange(value) {
+  if (autoSavePanel) autoSavePanel.onBulkSaveOrderChange(value);
+}
 function onQuicksaveModeChange(value) {
   if (autoSavePanel) autoSavePanel.onQuicksaveModeChange(value);
 }

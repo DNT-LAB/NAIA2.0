@@ -21,6 +21,7 @@ export function createAutoSavePanel({
       auto_save: enabled,
       save_as_webp: false,
       history_limit_enabled: false,
+      bulk_save_order: 'oldest',
       quicksave_mode: 'copy',
       quicksave_dir: '',
       quicksave_folder: 'date',
@@ -76,6 +77,12 @@ export function createAutoSavePanel({
     // 네이티브 폴더 선택은 Electron 쉘에서만(원격 브라우저는 텍스트 입력 폴백).
     // 쉘이 있다는 것은 곧 이 PC에서 돌고 있다는 뜻이라 백엔드의 loopback 경계와 일치한다.
     const canPickFolder = !!(globalThis.naiaShell && globalThis.naiaShell.pickSaveDirectory);
+    // 백엔드가 준 선택지를 쓴다. 못 받았으면(구버전 백엔드) 화면을 비우지 말고
+    // 알고 있는 두 칸을 그린다 - 버튼이 사라지면 사용자는 기능이 없어진 줄 안다.
+    const orderOptions = (panelState.bulk_save_order_options || []).length
+      ? panelState.bulk_save_order_options
+      : [{value: 'oldest', label: '오래된 이미지 먼저'},
+         {value: 'newest', label: '최근 이미지 먼저'}];
     const modeOptions = (panelState.quicksave_mode_options || []).map(o =>
       `<option value="${escHtml(String(o.value))}"${
         String(panelState.quicksave_mode) === String(o.value) ? ' selected' : ''
@@ -108,6 +115,19 @@ export function createAutoSavePanel({
                   onclick="clearResultHistory()" ${bulkBusy ? 'disabled' : ''}>
             히스토리 초기화
           </button>
+        </div>
+        <!-- 일괄 저장/다운로드의 번호 순서(사용자 요청 2026-08-31). 기록은 새것이
+             앞이라 예전에는 가장 나중에 만든 것부터 번호가 붙었다. -->
+        <div class="auto-save-order-row">
+          <span class="auto-save-order-label">저장 순서</span>
+          <div class="auto-save-order-seg" role="group" aria-label="일괄 저장 순서">
+            ${orderOptions.map(o => `
+              <button type="button" class="auto-save-order-btn${
+                String(panelState.bulk_save_order) === String(o.value) ? ' is-active' : ''}"
+                onclick="onBulkSaveOrderChange('${escHtml(String(o.value))}')"
+                aria-pressed="${String(panelState.bulk_save_order) === String(o.value)}"
+                >${escHtml(o.label)}</button>`).join('')}
+          </div>
         </div>
         <div class="mod-field">
           <span class="mod-field-label">Policy</span>
@@ -195,6 +215,13 @@ export function createAutoSavePanel({
     if (getCurrentModuleId() === 'auto_save' && isModulePopupOpen()) {
       render();
     }
+  }
+
+  function onBulkSaveOrderChange(value) {
+    const clean = String(value) === 'newest' ? 'newest' : 'oldest';
+    if (lastState) lastState.bulk_save_order = clean;
+    render();                                   // 눌린 칸이 바로 보이게
+    setModuleParam('auto_save', 'bulk_save_order', clean);
   }
 
   function onQuicksaveModeChange(value) {
@@ -380,5 +407,6 @@ export function createAutoSavePanel({
     onHistoryLimitActionChange,
     saveAllUnsavedHistory,
     downloadUnsavedHistory,
+    onBulkSaveOrderChange,
   };
 }

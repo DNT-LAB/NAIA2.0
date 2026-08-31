@@ -347,8 +347,15 @@ class HeadlessResultStore:
     def history_total(self) -> int:
         return len(self._items)
 
-    def unsaved_items(self) -> list[HeadlessHistoryItem]:
-        return [item for item in self._items if not item.filepath]
+    def unsaved_items(self, *, oldest_first: bool = False) -> list[HeadlessHistoryItem]:
+        """아직 파일로 안 남은 기록들.
+
+        ⚠️ `_items` 는 **새것이 앞**이다(`insert(0, ...)`). 그래서 기본 순서로
+        일괄 저장하면 **가장 나중에 만든 것부터** 번호가 붙는다 - 사용자 제보로
+        확인된 동작이다. `oldest_first=True` 면 만든 순서대로 번호가 붙는다.
+        """
+        items = [item for item in self._items if not item.filepath]
+        return list(reversed(items)) if oldest_first else items
 
     def unsaved_history_count(self) -> int:
         return len(self.unsaved_items())
@@ -398,8 +405,8 @@ class HeadlessResultStore:
             "total": len(self._items),
         }
 
-    def unsaved_zip_payload(self) -> tuple[bytes, str]:
-        items = self.unsaved_items()
+    def unsaved_zip_payload(self, *, oldest_first: bool = False) -> tuple[bytes, str]:
+        items = self.unsaved_items(oldest_first=oldest_first)
         if not items:
             raise FileNotFoundError("No unsaved history")
         buffer = io.BytesIO()

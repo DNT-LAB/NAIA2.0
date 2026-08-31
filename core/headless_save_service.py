@@ -24,10 +24,17 @@ AUTO_SAVE_DEFAULTS = {
     #                    Auto Save 가 꺼져 있으면 원본이 없으므로 항상 새로 쓴다.
     #   quicksave_dir    빈 문자열이면 저장 폴더와 같은 곳을 쓴다
     #   quicksave_folder date = 세션 시작 일자 폴더 아래 / flat = 지정 경로 바로 아래
+    # 일괄 저장/다운로드 순서(사용자 요청 2026-08-31). 기록은 새것이 앞이라
+    # 예전에는 **가장 나중에 만든 것부터** 번호가 붙었다 - 만든 순서가 자연스럽다.
+    "bulk_save_order": "oldest",
     "quicksave_mode": "copy",
     "quicksave_dir": "",
     "quicksave_folder": "date",
 }
+BULK_SAVE_ORDER_OPTIONS = [
+    {"value": "oldest", "label": "오래된 이미지 먼저"},
+    {"value": "newest", "label": "최근 이미지 먼저"},
+]
 QUICKSAVE_MODE_OPTIONS = [
     {"value": "copy", "label": "복사 (원본 유지)"},
     {"value": "move", "label": "이동 (원본 삭제)"},
@@ -73,6 +80,10 @@ class HeadlessSaveService:
         state["memory_action"] = int(state["memory_action"] or 1)
         state["unsaved_history_count"] = context.result_store.unsaved_history_count()
         state["memory_action_options"] = list(AUTO_SAVE_MEMORY_ACTION_OPTIONS)
+        state["bulk_save_order"] = (str(state.get("bulk_save_order") or "oldest")
+                                    if str(state.get("bulk_save_order")) in {"oldest", "newest"}
+                                    else "oldest")
+        state["bulk_save_order_options"] = list(BULK_SAVE_ORDER_OPTIONS)
         state["quicksave_mode"] = (str(state.get("quicksave_mode") or "copy")
                                    if str(state.get("quicksave_mode")) in {"copy", "move"}
                                    else "copy")
@@ -157,6 +168,11 @@ class HeadlessSaveService:
             if client_host is not None and not is_loopback_host(client_host):
                 return self.auto_save_state_payload()
             context.auto_save_state[key] = str(value or "")
+        elif key == "bulk_save_order":
+            clean = str(value or "")
+            if clean not in {o["value"] for o in BULK_SAVE_ORDER_OPTIONS}:
+                return None
+            context.auto_save_state[key] = clean
         elif key in {"quicksave_mode", "quicksave_folder"}:
             allowed = ({o["value"] for o in QUICKSAVE_MODE_OPTIONS}
                        if key == "quicksave_mode"
@@ -226,7 +242,9 @@ class HeadlessSaveService:
 
     def save_unsaved_history(self) -> dict[str, Any]:
         context = self.context
-        items = context.result_store.unsaved_items()
+        # 사용자 요청 2026-08-31: 번호가 **만든 순서**로 붙게 고를 수 있다.
+        oldest_first = self.auto_save_state_payload().get("bulk_save_order") != "newest"
+        items = context.result_store.unsaved_items(oldest_first=oldest_first)
         if not items:
             return {"saved": 0, "remaining": 0, "paths": []}
         save_as_webp = context._coerce_bool(self.auto_save_state_payload().get("save_as_webp"))

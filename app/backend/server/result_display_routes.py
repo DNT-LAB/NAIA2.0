@@ -1215,7 +1215,11 @@ def register_result_display_routes(
     @app.get("/api/history/unsaved/download")
     async def api_history_unsaved_download():
         try:
-            zip_bytes, filename = session_context.result_store.unsaved_zip_payload()
+            # 압축 안의 순서도 일괄 저장과 같은 규칙을 따른다 - 두 버튼이
+            # 나란히 있는데 순서가 다르면 사용자가 둘을 못 믿는다.
+            oldest_first = (session_context.auto_save_state.get("bulk_save_order") or "oldest") != "newest"
+            zip_bytes, filename = session_context.result_store.unsaved_zip_payload(
+                oldest_first=oldest_first)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         return Response(

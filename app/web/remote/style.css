@@ -27015,3 +27015,27 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   .imgtag-body { flex-direction: column; }
   .imgtag-left { flex: 0 0 150px; }
 }
+
+/* 일괄 저장/다운로드 번호 순서 (사용자 요청 2026-08-31). 저장 버튼 바로 밑. */
+.auto-save-order-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 6px;
+}
+.auto-save-order-label { font-size: 10.5px; color: var(--text-dim); }
+.auto-save-order-seg { display: flex; gap: 0; }
+.auto-save-order-btn {
+  height: 24px; padding: 0 10px;
+  border: 1px solid var(--border-dim);
+  background: rgba(0,0,0,0.28); color: var(--text-dim);
+  font-size: 10.5px; cursor: pointer;
+}
+.auto-save-order-btn:first-child { border-radius: 5px 0 0 5px; }
+.auto-save-order-btn:last-child { border-radius: 0 5px 5px 0; border-left-width: 0; }
+.auto-save-order-btn.is-active {
+  border-color: var(--accent); color: var(--text-primary);
+  background: rgba(90,120,255,0.20);
+}
+/* ⚠️ 눌린 칸이 오른쪽이면 왼쪽 칸의 오른쪽 테두리가 그 위를 덮는다 -
+   눌린 칸의 왼쪽 테두리를 되살리고 위로 올린다. */
+.auto-save-order-btn.is-active:last-child { border-left-width: 1px; margin-left: -1px; }
+.auto-save-order-btn:hover { color: var(--text-primary); }

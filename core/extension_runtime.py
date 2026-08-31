@@ -791,6 +791,113 @@ class ExtensionContext:
             "message": str(getattr(dispatch, "blocked_reason", "") or ""),
         }
 
+    # ── 큐 소비 루프 기동 ────────────────────────────────────────
+    def start_generation_queue(self) -> dict[str, Any]:
+        """큐에 쌓아 둔 요청을 소비할 러너를 깨운다 → {ok, message}.
+
+        ``enqueue_generation()``은 **큐에 넣기만 한다.** 소비 루프는 큐가 비면
+        종료하므로, 생성 흐름 **밖에서**(패널 action 버튼 클릭 등) 넣은 요청은
+        아무도 집어가지 않는다 — 이 메서드가 그 짝이다. 훅/이벤트 콜백처럼 이미
+        도는 루프 안에서 넣었다면 부를 필요가 없다(호출해도 무해 — 러너 기동은
+        멱등이라 이미 돌고 있으면 no-op).
+
+        게이트는 ``enqueue_generation``과 **같다**(armed 또는 action 컨텍스트).
+        둘이 어긋나면 "넣기는 됐는데 시작이 안 되는" 상태가 생긴다.
+
+        ok=False는 **아무것도 시작되지 않았다**는 뜻이다 — 붙은 웹 클라이언트가
+        없거나 브릿지가 없으면 러너에 닿을 수 없으므로 정직하게 실패로 돌린다
+        (여기서 ok를 참으로 돌리면 확장은 영영 오지 않을 결과를 기다린다).
+        """
+        if not self._record.is_active and not (
+            _in_action_context()
+            and self._record.status == "loaded"
+            and self._record.enabled
+            and not self._record.blocked
+        ):
+            return {"ok": False, "message": "extension disabled"}
+        if not callable(getattr(self._app_context, "extension_queue_start_bridge", None)):
+            message = "생성 러너 브릿지가 없습니다(웹 세션 밖에서는 큐를 시작할 수 없습니다)"
+            self.log(f"start_generation_queue: {message}")
+            return {"ok": False, "message": message}
+        try:
+            self._app_context.publish("extension_queue_start", {"ext_id": self.ext_id})
+        except (SystemExit, Exception) as exc:
+            message = _safe_error_text(exc)
+            self.log(f"start_generation_queue failed: {message}")
+            return {"ok": False, "message": message}
+        self.log("start_generation_queue: 러너 기동 요청")
+        return {"ok": True, "message": ""}
+
+    # ── 사용자 확인 대화 ─────────────────────────────────────────
+    def request_confirmation(
+        self,
+        message: Any,
+        *,
+        title: str | None = None,
+        confirm_action: str,
+        cancel_action: str | None = None,
+        confirm_label: str | None = None,
+        cancel_label: str | None = None,
+    ) -> bool:
+        """사용자에게 확인 대화를 띄운다 → **띄웠는지** 여부(답이 아니다).
+
+        ⚠️ 답을 기다리지 않는다(블로킹하면 이벤트 루프가 멈춘다). 사용자의 선택은
+        ``register_panel(on_action=...)`` 핸들러로 돌아온다 — ``confirm_action`` /
+        ``cancel_action``에 준 **필드 키**가 그대로 ``on_action(key)``에 전달된다.
+        따라서 두 키는 패널에 ``type: "action"``으로 **선언돼 있어야 한다**
+        (``visible_when``으로 숨겨 두면 버튼은 안 보이고 대화 응답만 받는다).
+        선언 안 된 키는 호스트가 무시하므로 답이 영영 오지 않는다.
+
+        비싼 작업(다중 생성 등)에 들어가기 전 사용자 동의를 받는 용도다.
+
+        반환 False = 확장이 꺼져 있다. 대화를 **보낼 수 없는** 경우(붙은 클라이언트
+        없음 / 브릿지 없음)는 ``RuntimeError``다 — 조용히 False로 뭉개면 "꺼져 있다"와
+        "아무도 못 봤다"가 구별되지 않는다.
+        """
+        if not self._record.is_active and not (
+            _in_action_context()
+            and self._record.status == "loaded"
+            and self._record.enabled
+            and not self._record.blocked
+        ):
+            return False
+        text = str(message or "").strip()
+        if not text:
+            raise ValueError("request_confirmation: message가 비어 있습니다")
+        confirm_key = str(confirm_action or "").strip()
+        if not confirm_key:
+            raise ValueError("request_confirmation: confirm_action이 필요합니다")
+        reach = getattr(self._app_context, "extension_confirm_reach", None)
+        if not callable(reach):
+            raise RuntimeError("확인 대화 브릿지가 없습니다(웹 세션 밖)")
+        try:
+            viewers = int(reach())
+        except Exception:
+            viewers = 0
+        if viewers <= 0:
+            raise RuntimeError("연결된 웹 클라이언트가 없습니다")
+        cancel_key = str(cancel_action or "").strip()
+        payload = {
+            "ext_id": self.ext_id,
+            "message": text[:1200],
+            "title": str(title or self._record.name or self.ext_id)[:120],
+            "confirm_label": str(confirm_label or "확인")[:40],
+            "cancel_label": str(cancel_label or "취소")[:40],
+            # 프런트는 이 키를 그대로 set_module_param으로 되돌려 보낸다 — 패널의
+            # action 버튼이 보내는 것과 **같은 형식**이어야 한다
+            # (extensionsPanel.mjs: `setting:${ext}:${field}`). 점(.)으로 이으면
+            # apply_panel_param의 partition(":")이 못 알아듣고 조용히 버린다.
+            # 임의 키가 와도 apply_panel_param이 "선언된 action 필드"만 실행한다.
+            "confirm_key": f"setting:{self.ext_id}:{confirm_key}",
+            "cancel_key": f"setting:{self.ext_id}:{cancel_key}" if cancel_key else "",
+        }
+        try:
+            self._app_context.publish("extension_confirm", payload)
+        except (SystemExit, Exception) as exc:
+            raise RuntimeError(_safe_error_text(exc)) from exc
+        self.log(f"request_confirmation: {text[:80]}")
+        return True
+
     # ── 대기 요청 취소 ───────────────────────────────────────────
     def cancel_generation(self, request_id: Any) -> dict[str, Any]:
         """대기(pending) 중인 생성 요청을 큐에서 제거한다 → {ok, message}.

@@ -73,6 +73,62 @@ def _register_extension_toast_bridge(context: WebSessionContext, clients: set[We
     context.subscribe("extension_toast", _on_extension_toast)
 
 
+def _register_extension_queue_bridge(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """확장 → 생성 러너 기동 브릿지(ctx.start_generation_queue의 수신단).
+
+    ``enqueue_generation``은 큐에 넣기만 하고, 소비 루프는 큐가 비면 끝난다.
+    패널 버튼처럼 **생성 흐름 밖에서** 넣은 요청은 이 브릿지가 러너를 깨워야
+    소비된다. 코어(``core/``)가 ``app/backend`` 의 러너를 직접 import 할 수는
+    없으므로 토스트와 같은 이벤트 브릿지 모양을 쓴다.
+
+    ``extension_queue_start_bridge`` 를 컨텍스트에 달아 둔다 — 코어가 "받는 쪽이
+    있는가" 를 정직하게 판단하는 근거다(없으면 ok=False 로 돌린다)."""
+    import asyncio
+
+    def _on_queue_start(payload: Any) -> None:
+        try:
+            loop = getattr(context, "headless_main_loop", None)
+            if loop is None:
+                return
+            # ensure_generation_runner 는 멱등이다(돌고 있으면 no-op). 다만 태스크
+            # 생성이므로 반드시 메인 루프 위에서 불러야 한다.
+            loop.call_soon_threadsafe(lambda: ensure_generation_runner(context, clients))
+        except Exception:
+            pass
+
+    context.subscribe("extension_queue_start", _on_queue_start)
+    context.extension_queue_start_bridge = _on_queue_start
+
+
+def _register_extension_confirm_bridge(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """확장 → 사용자 확인 대화 브릿지(ctx.request_confirmation의 수신단).
+
+    사용자의 선택은 프런트가 ``set_module_param`` 으로 되돌려 보내며, 그것은
+    패널 action 버튼을 누른 것과 **같은 경로**다(선언된 action 필드만 실행된다).
+
+    ``extension_confirm_reach`` 로 현재 붙은 클라이언트 수를 코어에 노출한다 —
+    아무도 없는데 "띄웠다" 고 답하면 확장이 오지 않을 답을 기다린다."""
+    import asyncio
+
+    def _on_confirm(payload: Any) -> None:
+        try:
+            if not isinstance(payload, dict):
+                return
+            loop = getattr(context, "headless_main_loop", None)
+            if loop is None:
+                return
+            message = dict(payload)
+            message["type"] = "extension_confirm"
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(broadcast_json(clients, message))
+            )
+        except Exception:
+            pass
+
+    context.subscribe("extension_confirm", _on_confirm)
+    context.extension_confirm_reach = lambda: len(clients)
+
+
 def _register_search_loading_bridge(context: WebSessionContext, clients: set[WebSocket]) -> None:
     """검색 풀 청크 로딩 진행률/완료 브릿지.
 
@@ -109,6 +165,8 @@ def register_headless_routes(
     register_web_shell_routes(app, root_web_dir)
     _register_extension_toast_bridge(context, clients)
     _register_search_loading_bridge(context, clients)
+    _register_extension_queue_bridge(context, clients)
+    _register_extension_confirm_bridge(context, clients)
 
     register_state_routes(
         app,

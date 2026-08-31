@@ -4108,6 +4108,28 @@ const wsMessageHandlers = {
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,
+  // 확장이 비싼 작업 전에 사용자 동의를 받는 창(ctx.request_confirmation).
+  // 답은 **패널 action 버튼을 누른 것과 같은 경로**로 되돌아간다 - 백엔드가
+  // 준 key 를 그대로 set_module_param 으로 보낸다. 임의 key 가 와도
+  // apply_panel_param 이 '선언된 action 필드' 만 실행하므로 안전하다.
+  extension_confirm: m => {
+    const confirmKey = String(m.confirm_key || '');
+    if (!confirmKey) return;
+    // 확장이 준 줄바꿈을 살린다. showAppDialog 는 message 를 통째로 escHtml
+    // 하므로 줄바꿈이 뭉개진다 - 줄마다 escape 한 뒤 <br> 로 잇는다
+    // (messageHtml 계약: 호출자가 sanitize 한다).
+    const lines = String(m.message || '').split(String.fromCharCode(10)).map(escHtml).join('<br>');
+    showAppDialog('', {
+      title: m.title || '확인',
+      messageHtml: lines,
+      okText: m.confirm_label || '확인',
+      cancelText: m.cancel_label || '취소',
+    }).then(ok => {
+      const key = ok ? confirmKey : String(m.cancel_key || '');
+      if (!key) return;   // 취소 키를 안 준 확장은 취소를 알릴 곳이 없다.
+      setModuleParam('extensions', key, true);
+    });
+  },
   toast: m => { showToast(m.message, m.level || 'success'); if (m.sound) playNotifySound(); if (m.sound === 'complete') flashTaskbarAttention(); },
   comfyui_sampling_mode_swapped: m => {
     // 백엔드 ComfyUI 자동 EPS↔ANIMA 스왑 확정 — UI sampling 플래그를 새 모드로 동기화.

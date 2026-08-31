@@ -228,7 +228,13 @@ export function createQuickFilterController(deps) {
       const input = getEl(id);
       return input && input.value.trim();
     });
-    button.disabled = !hasPendingText;
+    // ⚠️ 예전에는 **입력칸에 글자가 있을 때만** 눌렸다. 그래서 칩이 걸려 있어도
+    //    입력칸이 비면 Commit 이 죽었고, 랜덤 풀이 소진돼 "No matches" 가 된 뒤에는
+    //    사용자가 칩을 넣거나 빼기 전까지 **재검색할 길이 아예 없었다**
+    //    (사용자 제보 2026-08-31 - 치명적이라고 짚은 그 파생 버그).
+    //    같은 칩으로 다시 거는 것은 정당한 동작이다 - 걸 것이 있으면 누를 수 있다.
+    const hasChips = includeTags.length > 0 || excludeTags.length > 0;
+    button.disabled = !(hasPendingText || hasChips);
   }
 
   function load() {
@@ -428,7 +434,13 @@ export function createQuickFilterController(deps) {
     const excludeInput = getEl('tagFilterExcludeInput');
     const includeText = includeInput ? includeInput.value.trim() : '';
     const excludeText = excludeInput ? excludeInput.value.trim() : '';
-    if (!includeText && !excludeText) return;
+    if (!includeText && !excludeText) {
+      // ⚠️ 여기서 그냥 돌아가던 것이 **버튼을 켜도 아무 일이 없던** 나머지 절반이다.
+      //    입력칸이 비어도 걸린 칩이 있으면 **같은 조건으로 다시 건다** - 랜덤 풀이
+      //    소진돼 "No matches" 가 된 뒤 빠져나갈 유일한 길이었다(사용자 제보).
+      if (includeTags.length || excludeTags.length) apply();
+      return;
+    }
     let changed = false;
     if (includeText) changed = commitTags('include', includeText) || changed;
     if (excludeText) changed = commitTags('exclude', excludeText) || changed;

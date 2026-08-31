@@ -401,6 +401,37 @@ def _random_pool_has_hidden_rows(context: WebSessionContext) -> bool:
     return False
 
 
+def _restore_tag_filter_snapshot(context: WebSessionContext) -> dict[str, Any] | None:
+    """소모돼 빈 풀을 **검색이 적용된 순간의 스냅샷으로 되돌린다**.
+
+    사용자 지정 2026-08-31. 예전에는 등급을 전체로 열고 태그 필터를 해제했는데,
+    그러면 사용자가 걸어 둔 조건이 말없이 사라졌다 - 그리고 해제된 상태는
+    "No matches" 로 서서, 칩을 건드리기 전에는 Commit 으로 재검색도 못 했다.
+
+    ⚠️ 등급도 칩도 **건드리지 않는다.** 풀만 다시 채운다.
+    스냅샷이 없으면 `None` - 호출부가 예전 회복 경로로 떨어진다.
+    """
+    snapshot = getattr(context, "active_tag_filter_snapshot", None)
+    if not isinstance(snapshot, dict) or not snapshot.get("ids"):
+        return None
+    ids = set(snapshot.get("ids") or set())
+    context.active_tag_filter_ids = set(ids)
+    context.active_tag_filter = {
+        "tags": list(snapshot.get("tags") or []),
+        "ids": set(ids),
+        "count": int(snapshot.get("count") or len(ids)),
+        "request_id": str(snapshot.get("request_id") or ""),
+        "rating_counts": dict(snapshot.get("rating_counts") or {}),
+    }
+    # 프레임 귀속을 다시 맞춘다 - 안 하면 다음 뽑기가 스냅샷 경로로 안 간다.
+    context.active_tag_filter_frame_for = context.active_tag_filter_ids
+    # 상태 페이로드는 해제 경로와 **같은 함수**로 만든다 - 두 벌을 만들면 화면이
+    # 경로에 따라 다른 모양을 받는다.
+    from app.backend.server.search_runtime import apply_search_runtime_filters
+
+    return apply_search_runtime_filters(context)
+
+
 def _reset_random_pool_to_gsqe(context: WebSessionContext) -> dict[str, Any]:
     """막힌 랜덤 풀 회복: 풀 등급을 gsqe로 강제 + 활성 태그필터 '할당' 해제(저장 칩은 보존) 후
     재적용. 재적용된 search_state(payload)를 반환한다. (등급은 디스크+메모리 모두 gsqe로 영속.)"""
@@ -453,19 +484,37 @@ async def handle_random_command(
         and not pool_already_full
         and _random_pool_has_hidden_rows(context)
     ):
-        recovered_state = await asyncio.to_thread(_reset_random_pool_to_gsqe, context)
-        await _broadcast_json(clients, recovered_state)
-        await _broadcast_json(clients, {
-            "type": "toast",
-            "level": "warning",
-            "message": "랜덤 풀이 비어 있어 등급을 전체(G/S/Q/E)로 열고 태그 필터를 해제했습니다. (저장한 필터 칩은 보존됨)",
-        })
-        result = await asyncio.to_thread(
-            random_service(context).generate,
-            active_ratings={"g", "s", "q", "e"},
-            overrides=overrides,
-            random_request_id=request_id,
-        )
+        # ① 먼저 **스냅샷 복원**을 시도한다(사용자 지정 2026-08-31). 등급도 칩도
+        #    건드리지 않고 검색이 적용된 순간의 풀을 그대로 되돌린다.
+        restored = await asyncio.to_thread(_restore_tag_filter_snapshot, context)
+        if restored is not None:
+            await _broadcast_json(clients, restored)
+            await _broadcast_json(clients, {
+                "type": "toast",
+                "level": "info",
+                "message": "랜덤 풀을 다 써서 검색 시점으로 되돌렸습니다. (등급·필터 그대로)",
+            })
+            result = await asyncio.to_thread(
+                random_service(context).generate,
+                active_ratings=active_ratings,
+                overrides=overrides,
+                random_request_id=request_id,
+            )
+        else:
+            # ② 스냅샷이 없을 때만 예전 회복 경로 - 등급을 열고 필터 할당을 뗀다.
+            recovered_state = await asyncio.to_thread(_reset_random_pool_to_gsqe, context)
+            await _broadcast_json(clients, recovered_state)
+            await _broadcast_json(clients, {
+                "type": "toast",
+                "level": "warning",
+                "message": "랜덤 풀이 비어 있어 등급을 전체(G/S/Q/E)로 열고 태그 필터를 해제했습니다. (저장한 필터 칩은 보존됨)",
+            })
+            result = await asyncio.to_thread(
+                random_service(context).generate,
+                active_ratings={"g", "s", "q", "e"},
+                overrides=overrides,
+                random_request_id=request_id,
+            )
     # 수동 1회 random: 그 시점에 동기 부스트(프런트가 Random 버튼을 응답까지 disable).
     # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
     await apply_ollama_auto_boost(context, result)

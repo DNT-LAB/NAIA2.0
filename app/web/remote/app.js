@@ -673,7 +673,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-tagfilter2')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-snapshot')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,

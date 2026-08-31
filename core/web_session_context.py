@@ -69,6 +69,9 @@ class WebSessionContext:
     search_results_master_base_snapshot: Any = None
     search_query_ratings: set[str] = field(default_factory=lambda: set(DEFAULT_ACTIVE_RATINGS))
     active_tag_filter_ids: set[Any] | None = None
+    # 검색이 적용된 순간의 태그 필터 스냅샷. 풀이 소모돼 비면 여기서 되돌린다
+    # (사용자 지정 2026-08-31) - 등급을 열거나 필터를 해제하지 않는다.
+    active_tag_filter_snapshot: dict[str, Any] | None = None
     pending_tag_filter: dict[str, Any] | None = None
     pending_tag_filters: dict[str, dict[str, Any]] = field(default_factory=dict)
     active_tag_filter: dict[str, Any] | None = None

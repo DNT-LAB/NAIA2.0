@@ -141,6 +141,8 @@ def normalize_custom_parquet_frame(frame):
 
 def _reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
     context.active_tag_filter_ids = None
+    # 스냅샷도 함께 버린다 - 남겨 두면 해제한 조건이 되살아난다.
+    context.active_tag_filter_snapshot = None
     context.pending_tag_filter = None
     pending_by_client = getattr(context, "pending_tag_filters", None)
     if isinstance(pending_by_client, dict):
@@ -594,6 +596,18 @@ def commit_pending_tag_filter_assignment(
             "count": int(pending.get("count") or 0),
             "request_id": request_id,
             "rating_counts": dict(pending.get("rating_counts") or {}),
+        }
+        # ⚠️ **여기가 "검색이 적용되는 시점"** 이다 - 스냅샷은 여기서 뜬다
+        #    (사용자 지정 2026-08-31). `active_tag_filter_ids` 는 뽑을 때마다 하나씩
+        #    소모되는 집합이라, 다 쓰고 나면 풀이 빈다. 그때 등급을 열고 필터를
+        #    해제하던 것이 **오작동**이었다 - 사용자가 걸어 둔 조건이 말없이 사라졌다.
+        #    이제는 이 스냅샷을 되돌려 **같은 조건으로 다시 채운다**.
+        context.active_tag_filter_snapshot = {
+            "ids": set(context.active_tag_filter_ids),
+            "tags": list(tags),
+            "count": int(pending.get("count") or 0),
+            "rating_counts": dict(pending.get("rating_counts") or {}),
+            "request_id": request_id,
         }
         mark_tag_filter_changed(context)
         context.save_search_filter_state(

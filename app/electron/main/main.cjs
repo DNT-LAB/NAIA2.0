@@ -1446,7 +1446,11 @@ function surfaceLastApplyError() {
     //    복원했습니다" 라고 단정해, 반쪽만 복원된 설치를 사용자가 멀쩡한 줄 알고 썼다.
     let friendly;
     if (raw.startsWith("LOCKED:")) {
-      friendly = `업데이트를 적용하지 못했습니다 — 설치 폴더를 다른 프로세스가 사용 중이었습니다 (${raw.slice(7).trim()}). 설치는 그대로입니다. Ollama/Cloudflared 등을 종료한 뒤 다시 시도하세요.`;
+      // ⚠️ 경로만 알려주면 사용자가 할 수 있는 일이 없다. 잠그는 것은 거의 항상
+      //    우리가 띄운 자식이다 - 무엇을 닫아야 하는지 이름으로 말한다.
+      friendly = `업데이트를 적용하지 못했습니다 — 설치 폴더를 다른 프로세스가 사용 중이었습니다 (${raw.slice(7).trim()}). `
+        + `설치는 그대로입니다. 보통 백엔드가 띄운 Ollama·Cloudflared 나 Grok 이 남아 있는 경우입니다 — `
+        + `작업 관리자에서 ollama / cloudflared / NAIA 를 모두 종료한 뒤 다시 시도하세요.`;
     } else if (raw.startsWith("PROBE_RESIDUE:")) {
       friendly = `업데이트를 중단했지만 설치 폴더가 손상되었을 수 있습니다 (${raw.slice(14).trim()}). 앱을 완전히 종료한 뒤 다시 실행하면 자동 복구를 시도합니다. 실행되지 않으면 릴리스 페이지에서 새로 받아 설치하세요.`;
     } else if (raw.startsWith("RESTORE_INCOMPLETE:")) {
@@ -1520,16 +1524,53 @@ async function applyUpdate() {
     return updateState;
   }
   setUpdateState({ phase: "applying", error: "" });
+
+  // ⚠️ **자식들을 먼저 끄고, 정말 사라졌는지 확인한 뒤에** 헬퍼를 띄운다.
+  //    예전에는 헬퍼를 먼저 spawn 하고 그 다음에 백엔드를 껐다 - 그러면 자식이
+  //    안 죽었을 때 되돌릴 방법이 없었고, 앱은 이미 종료 예약된 뒤였다.
+  //    잠그는 주범이 바로 이 자식들이다: 백엔드가 낳은 ollama serve / cloudflared 는
+  //    `resources/naia-backend` 를, Grok 자식은 `NAIA.exe` 자체를 잡는다.
+  quitting = true;
+  const survivors = await stopOwnedProcessesForUpdate();
+  if (survivors.length) {
+    quitting = false;
+    const names = survivors.map((entry) => entry.name).join(", ");
+    appendBackendLog("shell", `Update aborted: owned processes still alive (${names})`);
+    setUpdateState({
+      phase: "error",
+      error: `업데이트를 시작하지 않았습니다 — ${names} 가 종료되지 않았습니다. `
+        + `앱을 완전히 종료한 뒤 다시 시도하거나, 릴리스 페이지에서 새로 받아 설치하세요. `
+        + `(설치는 그대로입니다)`,
+    });
+    return updateState;
+  }
+
   appendBackendLog("shell", `Applying update: swap helper for ${config.installRoot}`);
   const child = spawn(process.env.COMSPEC || "cmd.exe", ["/c", launchCmdPath], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
   });
+  // ⚠️ `spawn` 실패는 **비동기 error 이벤트**로 온다. 안 받으면 헬퍼가 뜨지도 않았는데
+  //    앱만 꺼져 사용자가 영문 모른 채 남는다.
+  let helperFailed = false;
+  child.on("error", (error) => {
+    helperFailed = true;
+    const message = error && error.message ? error.message : String(error);
+    appendBackendLog("shell", `Update helper spawn FAILED: ${message}`);
+  });
   child.unref();
-  quitting = true;
-  stopBackend();
-  setTimeout(() => app.quit(), 800);
+  setTimeout(() => {
+    if (helperFailed) {
+      quitting = false;
+      setUpdateState({
+        phase: "error",
+        error: `업데이트 도우미를 실행하지 못했습니다. 설치는 그대로입니다. 릴리스 페이지에서 새로 받아 설치하세요.`,
+      });
+      return;
+    }
+    app.quit();
+  }, 800);
   return { ok: true, applying: true };
 }
 
@@ -1757,6 +1798,51 @@ async function ensureBackendReady() {
   }
 }
 
+// Windows 트리 종료. `taskkill /T` 만이 백엔드가 낳은 상주 자식
+// (ollama serve · cloudflared)까지 함께 죽인다.
+//
+// ⚠️ `spawnSync` 는 접근 거부·timeout·ENOENT 에도 **던지지 않는다** - 결과 객체를 봐야
+//    한다. 이걸 안 보면 "죽였다" 고 믿은 채 스왑에 들어가 설치를 파손한다.
+function killProcessTree(pid, label) {
+  if (!pid) return true;
+  if (process.platform !== "win32") return false;
+  try {
+    const result = spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      timeout: 10000,
+    });
+    if (!result.error && result.status === 0) return true;
+    const why = result.error ? result.error.message : `exit ${result.status}`;
+    appendBackendLog("shell", `taskkill(${label} pid=${pid}) failed: ${why}`);
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    appendBackendLog("shell", `taskkill(${label} pid=${pid}) threw: ${message}`);
+  }
+  return false;
+}
+
+function processAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+// 업데이트 스왑 전에 **우리가 띄운 것들이 정말 사라졌는지** 확인한다.
+// 이름을 돌려주는 이유: 사용자에게 "무엇을 닫아야 하는지" 를 말해 줘야 조치가 된다.
+async function waitForOwnedProcessesToExit(entries, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  let alive = entries.filter((entry) => processAlive(entry.pid));
+  while (alive.length && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    alive = alive.filter((entry) => processAlive(entry.pid));
+  }
+  return alive;
+}
+
 function stopBackend() {
   if (!backendProcess) {
     return;
@@ -1768,29 +1854,7 @@ function stopBackend() {
   // 남아 자동 업데이트 스왑을 실패시키고 설치를 파손시켰다(2.0.29 업데이트 사고 —
   // apply.log 'being used by another process'). 외부에서 사용자가 직접 켠 프로세스는
   // 이 트리에 속하지 않으므로 건드리지 않는다.
-  if (process.platform === "win32" && backendProcess.pid) {
-    let killed = false;
-    try {
-      const result = spawnSync("taskkill", ["/PID", String(backendProcess.pid), "/T", "/F"], {
-        windowsHide: true,
-        timeout: 10000,
-      });
-      // ⚠️ `spawnSync` 는 실패해도 **던지지 않는다.** 접근 거부·timeout·ENOENT 는
-      //    예외가 아니라 결과 객체(`error`/`status`)로 돌아온다. 예전에는 곧장
-      //    `return` 해서 폴백 `kill()` 이 영영 안 돌았고, 그러면 백엔드 트리가
-      //    살아남아 `resources/naia-backend` 를 잠근 채 남는다 - 이 함수가 막으려던
-      //    바로 그 상황이다(2.0.29 업데이트 사고). 결과를 보고 갈린다.
-      killed = !result.error && result.status === 0;
-      if (!killed) {
-        const why = result.error ? result.error.message : `exit ${result.status}`;
-        appendBackendLog("shell", `taskkill failed (${why}); falling back to kill()`);
-      }
-    } catch (error) {
-      const message = error && error.message ? error.message : String(error);
-      appendBackendLog("shell", `taskkill threw (${message}); falling back to kill()`);
-    }
-    if (killed) return;
-  }
+  if (killProcessTree(backendProcess.pid, "backend")) return;
   backendProcess.kill();
 }
 
@@ -2934,11 +2998,36 @@ function startGrokProxy() {
   });
 }
 
+// ⚠️ Grok 자식은 **`NAIA.exe` 자체**를 Node 로 띄운다(`spawnGrok` 의
+//    `spawn(process.execPath, ...)`). 그래서 살아남으면 exe 를 잡아 업데이트 스왑의
+//    exe 교체를 실패시킨다 - `resources` 를 어떻게 다루든 해결되지 않는 경로다.
+//    `.kill()` 은 본체만 죽이므로 트리째 종료한다. 종료를 **기다리는** 것은
+//    `stopOwnedProcessesForUpdate` 가 한다(여기서 막으면 UI 가 멈춘다).
 function stopGrokProxy() {
-  if (grokLoginProcess) { try { grokLoginProcess.kill(); } catch (_e) {} grokLoginProcess = null; }
+  if (grokLoginProcess) {
+    if (!killProcessTree(grokLoginProcess.pid, "grok-login")) {
+      try { grokLoginProcess.kill(); } catch (_e) {}
+    }
+    grokLoginProcess = null;
+  }
   if (!grokProxyProcess) return;
-  try { grokProxyProcess.kill(); } catch (_e) {}
+  if (!killProcessTree(grokProxyProcess.pid, "grok-proxy")) {
+    try { grokProxyProcess.kill(); } catch (_e) {}
+  }
   grokProxyProcess = null;
+}
+
+// 업데이트 직전: 우리가 띄운 것들을 모두 끄고 **정말 사라졌는지 확인**한다.
+// 살아남은 것이 있으면 그 이름을 돌려준다 - 사용자에게 무엇을 닫아야 하는지 말해야 한다.
+async function stopOwnedProcessesForUpdate(timeoutMs = 12000) {
+  const tracked = [
+    { pid: backendProcess && backendProcess.pid, name: "백엔드(Ollama·Cloudflared 포함)" },
+    { pid: grokProxyProcess && grokProxyProcess.pid, name: "Grok 프록시" },
+    { pid: grokLoginProcess && grokLoginProcess.pid, name: "Grok 로그인" },
+  ].filter((entry) => entry.pid);
+  stopGrokProxy();
+  stopBackend();
+  return waitForOwnedProcessesToExit(tracked, timeoutMs);
 }
 
 ipcMain.handle("naia:grok-state", () => grokState());

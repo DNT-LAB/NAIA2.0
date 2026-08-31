@@ -2904,8 +2904,63 @@ function spawnGrok(args, opts = {}) {
   });
 }
 
+// Grok 상시 활성 설정. **기본은 꺼짐**(사용자 지정 2026-08-31: "Grok 은 이제 거의
+// 사용되지 않는 사양"). 예전에는 로그인 흔적만 있으면 부팅 때 자동 기동했는데,
+// 그 자식은 `NAIA.exe` 자체를 물고 있어(`spawnGrok` 의 `spawn(process.execPath, ...)`)
+// 업데이트 스왑의 exe 교체를 실패시킨다 - 안 쓰는 기능이 업데이트를 막던 셈이다.
+//
+// 설정은 `user-data` 에 둔다(포터블에서 보존 대상이라 업데이트를 넘어 살아남는다).
+let grokAlwaysActiveCache = null;
+
+function grokConfigPath() {
+  try {
+    return path.join(runtimeDataRoot(), "naia-grok.json");
+  } catch (_error) {
+    return null;
+  }
+}
+
+function grokAlwaysActive() {
+  if (grokAlwaysActiveCache !== null) return grokAlwaysActiveCache;
+  let enabled = false;
+  try {
+    const configPath = grokConfigPath();
+    if (configPath && fs.existsSync(configPath)) {
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      enabled = raw && raw.alwaysActive === true;
+    }
+  } catch (_error) {
+    enabled = false;
+  }
+  grokAlwaysActiveCache = enabled;
+  return enabled;
+}
+
+function setGrokAlwaysActive(enabled) {
+  const next = enabled === true;
+  grokAlwaysActiveCache = next;
+  try {
+    const configPath = grokConfigPath();
+    if (configPath) {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify({ alwaysActive: next }, null, 2), "utf8");
+    }
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    appendBackendLog("shell", `Grok always-active save failed: ${message}`);
+  }
+  return next;
+}
+
 function grokState() {
-  return { available: !!grokProgrokEntry(), proxyState: grokProxyState, host: GROK_PROXY_HOST, port: grokProxyPort };
+  return {
+    available: !!grokProgrokEntry(),
+    proxyState: grokProxyState,
+    host: GROK_PROXY_HOST,
+    port: grokProxyPort,
+    alwaysActive: grokAlwaysActive(),
+    loggedIn: grokAuthFilePresent(),
+  };
 }
 
 function broadcastGrokState() {
@@ -2973,6 +3028,9 @@ async function resolveGrokProxyPort() {
 
 function startGrokProxy() {
   if (!grokProgrokEntry()) { setGrokProxyState("unavailable"); return; }
+  // ⚠️ 게이트는 **프로세스가 실제로 뜨는 목**에 건다. 부팅 갈래에만 두면
+  //    로그인 완료·restart-proxy IPC 같은 다른 진입로가 꺼진 상태에서도 띄운다.
+  if (!grokAlwaysActive()) { setGrokProxyState("stopped"); return; }
   if (grokProxyProcess) return;
   let authRequired = false;
   const child = spawnGrok(["proxy", "--host", GROK_PROXY_HOST, "--port", String(grokProxyPort)], {
@@ -3031,6 +3089,22 @@ async function stopOwnedProcessesForUpdate(timeoutMs = 12000) {
 }
 
 ipcMain.handle("naia:grok-state", () => grokState());
+
+ipcMain.handle("naia:grok-set-always-active", (_event, enabled) => {
+  const next = setGrokAlwaysActive(enabled);
+  if (!next) {
+    // 끄면 지금 떠 있는 것도 내린다 - 안 내리면 이번 실행 동안 계속 exe 를 문다.
+    stopGrokProxy();
+    setGrokProxyState(grokProgrokEntry() ? "stopped" : "unavailable");
+  } else if (!grokProgrokEntry()) {
+    setGrokProxyState("unavailable");
+  } else if (grokAuthFilePresent()) {
+    startGrokProxy();
+  } else {
+    setGrokProxyState("auth_required");
+  }
+  return grokState();
+});
 
 ipcMain.handle("naia:grok-restart-proxy", () => {
   stopGrokProxy();
@@ -3128,14 +3202,20 @@ if (!lock) {
     // Resolve the Grok proxy port first so the backend env carries it (multi-instance).
     await resolveGrokProxyPort();
     createMainWindow();
-    // Grok(제거 가능): 로그인 흔적(~/.progrok/auth.json)이 있는 사용자만 번들
-    // progrok 프록시를 자동 기동. 미로그인 유저에게는 프로세스를 띄우지 않고
-    // auth_required 상태만 노출 — 로그인(naia:grok-login) 종료 시 기존 로직이
-    // 프록시를 기동한다.
-    if (grokAuthFilePresent()) {
+    // Grok(제거 가능): **기본은 꺼짐**(사용자 지정 2026-08-31). API 메뉴에서 '상시
+    // 활성' 을 켠 사용자만 부팅 때 프록시를 기동한다.
+    //
+    // ⚠️ 예전에는 로그인 흔적만 있으면 자동 기동했다. 그 자식은 `NAIA.exe` 자체를
+    //    물고 있어 업데이트 스왑의 exe 교체를 실패시킨다 - 거의 안 쓰는 기능이
+    //    업데이트를 막고 있었다.
+    if (!grokProgrokEntry()) {
+      setGrokProxyState("unavailable");
+    } else if (!grokAlwaysActive()) {
+      setGrokProxyState("stopped");
+    } else if (grokAuthFilePresent()) {
       startGrokProxy();
     } else {
-      setGrokProxyState(grokProgrokEntry() ? "auth_required" : "unavailable");
+      setGrokProxyState("auth_required");
     }
   });
   app.on("activate", () => {

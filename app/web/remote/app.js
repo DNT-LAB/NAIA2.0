@@ -1884,7 +1884,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
   });
 // --- Grok(xAI) I2I 연동 패널 (제거 가능): Setup 모달의 격리된 REST 전용 컨트롤러 ---
 let grokConnectPanel = null;
-const grokConnectPanelReady = import('./js/features/grokConnectPanel.mjs?v=20260602-grok8')
+const grokConnectPanelReady = import('./js/features/grokConnectPanel.mjs?v=20260831-grokoff')
   .then(({createGrokConnectPanel}) => {
     grokConnectPanel = createGrokConnectPanel({document, fetch: window.fetch.bind(window), showToast});
   })
@@ -9028,6 +9028,11 @@ function grokLogin() {
 
 function grokLogout() {
   if (grokConnectPanel) grokConnectPanel.logout();
+}
+
+// Grok 상시 활성 토글 (사용자 지정 2026-08-31: 기본 꺼짐, API 메뉴에서만 켠다).
+function setGrokAlwaysActive(enabled) {
+  if (grokConnectPanel) grokConnectPanel.setAlwaysActive(enabled);
 }
 
 function onClearApiResult(m) {

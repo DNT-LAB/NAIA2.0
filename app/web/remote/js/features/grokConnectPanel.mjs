@@ -49,6 +49,18 @@ export function createGrokConnectPanel({document, fetch: fetchFn, showToast = ()
   // Electron main 의 연결 상태 → 상태줄 + 좌측 nav 서브 + dot (사용자 친화 문구, 내부 용어 숨김).
   function applyShellState(state) {
     if (!state) { setStatus('Electron 앱에서만 사용 가능'); setNavSub('사용 불가'); setDot('err'); return; }
+    // 상시 활성 토글을 실제 설정에 맞춘다(서버가 SSOT - 화면이 앞서 나가면 안 된다).
+    const toggle = byId('setupGrokAlwaysActive');
+    if (toggle) toggle.checked = state.alwaysActive === true;
+    // 꺼져 있으면 로그인 버튼을 눌러도 프록시가 안 뜬다 - 먼저 켜라고 말한다.
+    const login = loginBtn();
+    if (login) login.disabled = state.alwaysActive !== true;
+    if (state.alwaysActive !== true) {
+      setStatus('꺼져 있습니다 — 사용하려면 상시 활성을 켜세요');
+      setNavSub('꺼짐');
+      setDot('warn');
+      return;
+    }
     const map = {
       ready: ['연결됨 (로그인 완료)', '로그인됨', 'ok'],
       starting: ['연결 중…', '연결 중', 'warn'],
@@ -61,6 +73,20 @@ export function createGrokConnectPanel({document, fetch: fetchFn, showToast = ()
     setStatus(text);
     setNavSub(sub);
     setDot(tone);
+  }
+
+  async function setAlwaysActive(enabled) {
+    const s = shell();
+    if (!s || typeof s.grokSetAlwaysActive !== 'function') {
+      showToast('Electron 앱에서만 변경할 수 있습니다.', 'error');
+      return;
+    }
+    try {
+      applyShellState(await s.grokSetAlwaysActive(!!enabled));
+      showToast(enabled ? 'Grok 상시 활성을 켰습니다.' : 'Grok 을 껐습니다.', 'success');
+    } catch (error) {
+      showToast('Grok 설정을 바꾸지 못했습니다.', 'error');
+    }
   }
 
   async function refreshShellState() {
@@ -148,5 +174,5 @@ export function createGrokConnectPanel({document, fetch: fetchFn, showToast = ()
     setNavSub('사용 불가');
   }
 
-  return {login, logout, refreshShellState};
+  return {login, logout, refreshShellState, setAlwaysActive};
 }

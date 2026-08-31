@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260831-tagfilter2">
+<link rel="stylesheet" href="style.css?v=20260831-grokoff">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -163,6 +163,16 @@
           <div class="setup-meta-line"><span>상태</span><span class="setup-meta-val" id="setupGrokStatus">확인 중…</span></div>
           <p class="setup-sub"><b>Grok 로그인</b>을 누르면 브라우저가 열립니다. 본인 xAI/SuperGrok 계정으로 로그인하면 자동으로 연결됩니다. 결과/외부 이미지를 <b>우클릭 → 변형(I2I)·영상(I2V)</b> 할 때만 사용되며, 단독 생성 모드는 제공하지 않습니다.</p>
           <p class="setup-sub setup-sub-warn">⚠️ OAuth 기반 비공식 연동이라 xAI의 <b>ToS(이용약관) 이슈</b>가 발생할 수 있습니다. 이 때문에 <b>자동화(Automation)는 제공하지 않으며</b>, 사용으로 인한 <b>어떠한 책임도 지지 않습니다</b>. (xAI 정책 변경 시 예고 없이 중단될 수 있습니다.)</p>
+          <!-- 기본은 꺼짐(사용자 지정 2026-08-31). 켠 사용자만 프로그램 실행 때
+               프록시가 뜬다 - 그 자식이 NAIA.exe 를 물고 있어 자동 업데이트를
+               막던 전력이 있다. -->
+          <label class="setup-toggle-row" for="setupGrokAlwaysActive">
+            <input type="checkbox" id="setupGrokAlwaysActive" onchange="setGrokAlwaysActive(this.checked)">
+            <span class="setup-toggle-text">
+              <b>상시 활성</b>
+              <span class="setup-toggle-hint">프로그램을 켤 때마다 Grok 연결을 준비합니다. 꺼 두면 Grok 기능이 동작하지 않습니다.</span>
+            </span>
+          </label>
           <div class="setup-actions">
             <button class="setup-btn-primary" id="setupBtnGrokLogin" onclick="grokLogin()">Grok 로그인</button>
             <button class="setup-btn-ghost" id="setupBtnGrokLogout" onclick="grokLogout()">로그아웃</button>
@@ -1358,6 +1368,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260831-tagfilter4"></script>
+<script src="app.js?v=20260831-grokoff"></script>
 </body>
 </html>

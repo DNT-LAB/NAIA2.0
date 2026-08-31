@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("naiaShell", {
   grokState: () => ipcRenderer.invoke("naia:grok-state"),
   grokLogin: () => ipcRenderer.invoke("naia:grok-login"),
   grokRestartProxy: () => ipcRenderer.invoke("naia:grok-restart-proxy"),
+  grokSetAlwaysActive: (enabled) => ipcRenderer.invoke("naia:grok-set-always-active", enabled),
   onGrokStateChanged: (callback) => {
     if (typeof callback !== "function") {
       return () => {};

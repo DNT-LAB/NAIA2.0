@@ -223,10 +223,11 @@ export function createImageTaggerResultPanel({
                 ok === false ? 'error' : 'success');
       return;
     }
+    // ⚠️ 드롭다운은 없앴다(사용자 지정 2026-08-31: "영원히 캐릭터 없음").
+    //    대상은 **첫 번째 활성 캐릭터** - 고를 것이 사실상 하나뿐이었다.
     const characters = getCharacters() || [];
-    if (!characters.length) { showToast('활성화된 캐릭터가 없습니다.', 'warning'); return; }
-    const select = pick('.imgtag-target');
-    const index = select ? Number(select.value) || 0 : 0;
+    const index = characters.findIndex(row => row && row.active !== false);
+    if (index < 0) { showToast('활성화된 캐릭터가 없습니다.', 'warning'); return; }
     const ok = typeof onInsertCharacter === 'function' && onInsertCharacter(index, text);
     showToast(ok === false ? '캐릭터 프롬프트에 넣지 못했습니다.' : `캐릭터 ${index + 1} 에 넣었습니다.`,
               ok === false ? 'error' : 'success');
@@ -315,7 +316,12 @@ export function createImageTaggerResultPanel({
    */
   function stateBadge(item) {
     if (item.state === 'queued' || item.state === 'running') {
-      return `<span class="imgtag-dot is-q" title="In Queue"></span>
+      // 사용자 지정 2026-08-31: 아직 안 끝난 것은 **반투명 검은 막**을 덮어 한눈에
+      // 가른다. 그 위에서 대기=파랑 / 진행 중=노랑으로 다시 가른다.
+      const running = item.state === 'running';
+      return `<span class="imgtag-veil"></span>
+        <span class="imgtag-dot ${running ? 'is-run' : 'is-q'}"
+          title="${running ? '분석 중' : '대기 중'}"></span>
         <button type="button" class="imgtag-x-mini" data-cancel="${escHtml(item.id)}"
           aria-label="취소" title="취소">×</button>`;
     }
@@ -330,24 +336,8 @@ export function createImageTaggerResultPanel({
       aria-label="목록에서 지우기" title="목록에서 지우기">×</button>`;
   }
 
-  function renderTargets() {
-    const select = pick('.imgtag-target');
-    if (!select) return;
-    const characters = getCharacters() || [];
-    const keep = select.value;
-    select.innerHTML = characters.length
-      ? characters.map((character, index) => {
-          const name = String(character?.custom_name || '').trim();
-          return `<option value="${index}">캐릭터 ${index + 1}${name ? ` · ${escHtml(name)}` : ''}</option>`;
-        }).join('')
-      : '<option value="0">캐릭터 없음</option>';
-    if (keep && select.querySelector(`option[value="${keep}"]`)) select.value = keep;
-    select.disabled = !characters.length;
-  }
-
   function render() {
     if (!popup || !pick('.imgtag-list')) { renderChip(); return; }
-    renderTargets();
 
     const link = pick('.imgtag-notice');
     link.innerHTML = notice && spaceUrl
@@ -397,7 +387,6 @@ export function createImageTaggerResultPanel({
       <div class="imgtag-head">
         <span class="imgtag-title">Image Tagger</span>
         <span class="imgtag-status"></span>
-        <select class="imgtag-target" aria-label="캐릭터 대상"></select>
         <button type="button" class="imgtag-x" data-act="min" aria-label="최소화">_</button>
         <button type="button" class="imgtag-x" data-act="close" aria-label="닫기">&times;</button>
       </div>
@@ -447,9 +436,6 @@ export function createImageTaggerResultPanel({
       paintMirror();
     });
     area.addEventListener('scroll', paintMirror);
-    const target = pick('.imgtag-target');
-    target.addEventListener('pointerdown', renderTargets);
-    target.addEventListener('focus', renderTargets);
     // 창 어디에나 끌어다 놓을 수 있다 - 왼쪽 목록만 받으면 조준이 필요해진다.
     popup.addEventListener('dragover', event => { event.preventDefault(); popup.classList.add('is-over'); });
     popup.addEventListener('dragleave', event => {

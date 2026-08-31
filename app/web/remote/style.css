@@ -26970,8 +26970,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 상태는 글자 대신 **점**으로 - 46px 안에 글자를 넣으면 아무것도 안 읽힌다. */
 .imgtag-dot { position: absolute; left: 3px; top: 3px; width: 7px; height: 7px;
   border-radius: 50%; background: #7d9bff; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
+.imgtag-dot.is-run { background: #f0c674; }   /* 진행 중 = 노랑(사용자 지정) */
 .imgtag-dot.is-err { background: #e06c75; }
 .imgtag-dot.is-off { background: #8a8a95; }
+/* 아직 안 끝난 것 위에 덮는 반투명 검은 막 - 끝난 것과 한눈에 갈린다.
+   ⚠️ `pointer-events: none` 이 없으면 이 막이 클릭을 먹어 항목을 못 고른다. */
+.imgtag-veil { position: absolute; inset: 0; background: rgba(0,0,0,0.55);
+  pointer-events: none; }
 /* 취소·지우기. 대기 중인 것은 늘 보이고, 끝난 것은 올려야 보인다. */
 .imgtag-x-mini {
   position: absolute; right: 1px; top: 1px; width: 15px; height: 15px;
@@ -27031,10 +27036,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .imgtag-chip-btn.is-x { padding: 3px 8px; }
 .imgtag-chip-count { font-family: var(--font-mono); font-size: 9.5px;
   padding: 0 4px; border-radius: 999px; background: rgba(90,120,255,0.3); color: #cdd8ff; }
-/* 좁은 화면에서는 가운데로 - 오른쪽에 붙일 자리가 없다. */
-@media (max-width: 760px) {
-  .imgtag-popup { right: 50%; transform: translate(50%, -50%);
-    width: calc(100vw - 16px); height: min(70vh, calc(100vh - 16px)); }
+/* ⚠️ **좁아져도 가운데로 보내지 않는다.** 한때 760px 이하에서 가운데 정렬로
+   되돌렸는데, 그러면 폭이 화면 전체로 벌어지면서 정확히 '자리가 좁을 때' 프롬프트를
+   통째로 덮었다(사용자 지적: "얜 위치가 왜이럴까요" - 740px 에서 724px 짜리가
+   가운데에 떴다). 오른쪽에 붙이라던 이유가 바로 그것이다.
+   폭은 위의 `min(430px, 100vw - 20px)` 이 이미 좁은 화면을 감당한다. */
+@media (max-height: 620px) {
+  /* 세로가 짧으면 높이만 줄인다 - 가로 위치는 건드리지 않는다. */
+  .imgtag-popup { height: calc(100vh - 24px); }
 }
 /* 캐릭터 에셋 액자 줄 - 평소 인페인트에는 안 보인다(canvas_purpose 로 가른다).
    ⚠️ 열(`ic-cols`) 안에 끼우면 자리가 없어 마스크 버튼과 **글자가 겹쳤다**

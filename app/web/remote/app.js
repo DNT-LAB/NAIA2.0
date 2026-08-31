@@ -1292,7 +1292,7 @@ async function runImageTagger(payload) {
     release();
   }
 }
-const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-taggerright')
+const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-progress')
   .then(({createImageTaggerResultPanel}) => {
     imageTaggerPanel = createImageTaggerResultPanel({
       document,
@@ -1309,7 +1309,15 @@ const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260
         onModTextEdit('character', `char_prompt_${index}`, merged);
         return true;
       },
-      getCharacters: () => (characterPanel ? characterPanel.getCharacters() : []),
+      // ⚠️ `characterPanel` 은 그 모듈을 **한 번도 열지 않으면 비어 있다** - 그래서
+      //    태거의 대상 칸이 영원히 '캐릭터 없음' 이었다(사용자 지적 2026-08-31).
+      //    화면이 늘 들고 있는 모듈 상태 캐시를 쓴다(Result 안 CHARACTER 칸과 같은 원).
+      getCharacters: () => {
+        const cached = moduleStateCache.get('character');
+        const rows = (cached && Array.isArray(cached.characters)) ? cached.characters : null;
+        if (rows && rows.length) return rows;
+        return characterPanel ? characterPanel.getCharacters() : [];
+      },
     });
   })
   .catch(error => {

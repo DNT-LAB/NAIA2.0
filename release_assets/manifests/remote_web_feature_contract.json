@@ -414,6 +414,11 @@
           "method": "POST",
           "path": "/api/character-asset/bench/save",
           "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/stage-canvas",
+          "smoke": "asset_runtime"
         }
       ]
     },
@@ -620,7 +625,8 @@
       ],
       "legacy_dependency": "none",
       "routes": [
-        {"method": "GET", "path": "/api/prompt-engineering/category-tags", "smoke": "non_destructive"}
+        {"method": "GET", "path": "/api/prompt-engineering/category-tags", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/prompt-engineering/classify-tag", "smoke": "non_destructive"}
       ]
     },
     {

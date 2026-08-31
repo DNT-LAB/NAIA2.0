@@ -27063,3 +27063,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ext-safe-btn:hover { border-color: var(--accent); }
 .ext-safe-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* 캐릭터 에셋 액자 줄 - 평소 인페인트에는 안 보인다(canvas_purpose 로 가른다). */
+.ic-col-asset { border-left: 2px solid rgba(240,198,116,0.45); padding-left: 8px; }
+.ic-asset-label { color: #f0c674; }
+.ic-btn-asset { border-color: rgba(240,198,116,0.5); color: #f0c674; }

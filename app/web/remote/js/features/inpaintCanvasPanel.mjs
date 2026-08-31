@@ -72,6 +72,10 @@ export function createInpaintCanvasPanel({
   onSlider = () => {},
   onRepeat = () => {},
   onGenerate = () => {},
+  // 캐릭터 에셋 액자 모드에서만 쓰인다(사용자 지정 2026-08-31).
+  //   'frame'     -> 지금 놓인 그대로 저장(생성 없음 = 0 Anlas)
+  //   'generated' -> 인페인트로 빈 곳을 메운 뒤 그 결과를 저장
+  onSaveCharacterAssetFrame = () => {},
   // 지금 생성이 도는 중인가(사용자 지정 2026-08-29: 생성 중에는 또 못 누른다).
   isGenerating = () => false,
   onClose = () => {},
@@ -352,6 +356,16 @@ export function createInpaintCanvasPanel({
     const genTitle = state.requires_mask
       ? ' title="생성 전에 마스크를 칠하거나 베이스를 옮겨 빈 자리를 여세요"' : '';
     return `
+      ${state.canvas_purpose === 'character_asset' ? `
+      <section class="ic-col ic-col-asset" aria-label="캐릭터 에셋 액자">
+        <div class="ic-row">
+          <span class="ic-label ic-asset-label">캐릭터 에셋 액자</span>
+          <button type="button" class="ic-btn ic-btn-asset" data-ic="asset-save-frame"
+            title="지금 액자에 놓인 그대로 저장합니다 (생성하지 않음)">이 프레임으로 저장</button>
+          <button type="button" class="ic-btn" data-ic="asset-save-generated"
+            title="빈 곳을 인페인트로 메운 뒤 그 결과를 저장합니다 (Anlas 소모)">생성 후 저장</button>
+        </div>
+      </section>` : ''}
       <section class="ic-col" aria-label="인페인트 실행">
         <div class="ic-row">
           <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>
@@ -597,6 +611,16 @@ export function createInpaintCanvasPanel({
       showGrid = !showGrid;
       write(GRID_KEY, showGrid ? '1' : '0');
       return render();
+    }
+    if (action === 'asset-save-frame') {
+      // 조작이 아직 서버에 안 갔으면 먼저 흘려보낸다 - 안 그러면 방금 맞춘
+      // 위치가 빠진 합성본이 저장된다(슬라이더는 마지막 값만 보낸다).
+      flushTransforms();
+      return onSaveCharacterAssetFrame('frame');
+    }
+    if (action === 'asset-save-generated') {
+      flushTransforms();
+      return onSaveCharacterAssetFrame('generated');
     }
     if (action === 'undo') return undoTransform();
     if (action === 'reset') {

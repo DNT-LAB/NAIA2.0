@@ -557,6 +557,9 @@ class HeadlessImg2ImgService:
             # 사용자가 캔버스를 끄면 패널까지 사라져 다시 켤 방법이 없어진다.
             "canvas_supported": bool(state.get("canvas_supported")),
             "canvas_active": bool(state.get("canvas_active")),
+            # 무엇 하러 연 캔버스인가. 화면은 이 값으로 '캐릭터 에셋 액자' 버튼을
+            # 그때만 띄운다 - 늘 띄우면 평소 인페인트에 쓸데없는 버튼이 붙는다.
+            "canvas_purpose": str(state.get("canvas_purpose") or ""),
             "canvas_width": int(state.get("canvas_width") or 0),
             "canvas_height": int(state.get("canvas_height") or 0),
             "position_mode": str(state.get("position_mode") or "custom"),
@@ -1296,6 +1299,26 @@ class HeadlessImg2ImgService:
         state["base_offset_y"] = int(round(position["y"]))
         state["canvas_active"] = True
         return self._recompose_canvas()
+
+    def composed_canvas_png(self) -> bytes:
+        """지금 캔버스에 놓인 그대로를 PNG 로 굽는다 — **생성하지 않는다**.
+
+        캐릭터 에셋은 세로 스탠딩을 기대하는데 결과가 가로면 그대로 저장돼 오작동한다
+        (사용자 제보 2026-08-31: 1152x896 을 저장했다). 그래서 저장 전에 704x1344
+        캔버스에 맞춰 놓고, 그 합성본을 에셋으로 넘긴다.
+
+        ⚠️ 조작 때마다 굽지 않는다(`encode_canvas=False` 가 기본, 실측 62ms).
+           여기서만 한 번 굽는다.
+        """
+        state = self.context.img2img_session
+        if not state.get("canvas_active"):
+            raise ValueError("캔버스가 열려 있지 않습니다.")
+        if state.get("canvas_dirty", True) or not state.get("image_bytes"):
+            self._recompose_canvas(encode_canvas=True)
+        data = state.get("image_bytes") or b""
+        if not data:
+            raise ValueError("캔버스를 합성하지 못했습니다.")
+        return bytes(data)
 
     def generation_commands(self, *, submission_id: str = "") -> list[dict[str, Any]]:
         state = self.context.img2img_session

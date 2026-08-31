@@ -1541,6 +1541,21 @@ export function createCharacterAssetTabController({
 
   // ---------------------------------------------------------------- staging
 
+  /** 경로가 아닌 **소스 서술자**를 바로 건다(예: 가상 캔버스 합성본).
+   *
+   *  ⚠️ `stageFromContext` 는 뷰어 경로를 핀한다 - 캔버스 합성본은 경로가 없다.
+   *     저장 시점에 백엔드가 그때의 캔버스를 합성한다(0 Anlas).
+   */
+  function stageSource(source, label) {
+    if (!source || !source.kind) {
+      showToast('저장할 이미지를 특정할 수 없습니다', 'error');
+      return;
+    }
+    staged = {source, label: String(label || source.kind)};
+    creationBench?.close();
+    render();
+  }
+
   function stageFromContext(context = {}) {
     // The caller must pin a stable path (history rel_path or saved rel_path) at
     // click time - a floating "current result" reference could save a different
@@ -1778,5 +1793,6 @@ export function createCharacterAssetTabController({
     handleGenerationError,
     handleHistoryRemoved,
     stageFromContext,
+    stageSource,
   };
 }

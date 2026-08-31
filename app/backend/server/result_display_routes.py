@@ -1722,6 +1722,26 @@ def register_result_display_routes(
                     )
 
                 state = await run_in_thread(_open_img2img_with_embedded_prompt)
+                # 캐릭터 에셋 액자 맞추기: 저장 전에 **고정 크기 캔버스**로 먼저 맞춘다
+                # (사용자 지정 2026-08-31 - 가로 이미지를 그대로 저장해 오작동했다).
+                # 크기는 질의로 받는다 - 여기서 704x1344 를 박으면 다른 규격이
+                # 생겼을 때 두 곳이 갈린다.
+                purpose = (req.query_params.get("purpose") or "").strip()
+                canvas = (req.query_params.get("canvas") or "").strip()
+                if action == "inpaint" and canvas:
+                    def _frame():
+                        from core.headless_img2img_service import HeadlessImg2ImgService
+
+                        service = HeadlessImg2ImgService(session_context)
+                        # ⚠️ **크기를 바꾸기 전에** 적는다. `set_param` 이 돌려주는
+                        #    상태는 그 시점에 만들어지므로, 뒤에 적으면 화면까지
+                        #    안 실려 저장 버튼이 안 뜬다(실측으로 잡았다).
+                        if purpose:
+                            session_context.img2img_session["canvas_purpose"] = purpose
+                        framed = service.set_param("canvas_size", canvas)
+                        return framed or service.module_state()
+
+                    state = await run_in_thread(_frame)
                 # 진입점이 둘이다(WS 우클릭 · 여기 HTTP 업로드) - **같은 함수**를 쓴다.
                 from app.backend.server.result_commands import stop_loops_for_inpaint
 

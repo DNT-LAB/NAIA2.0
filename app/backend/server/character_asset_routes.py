@@ -115,6 +115,14 @@ def _resolve_source_bytes(context: WebSessionContext, source: dict[str, Any]) ->
         if path is None:
             raise ValueError("invalid viewer path")
         return path.read_bytes()
+    if kind == "canvas":
+        # 인페인트 가상 캔버스에 놓인 그대로(합성본). 생성하지 않는다 - 0 Anlas.
+        # ⚠️ 위 두 종류와 달리 경로가 아니라 **세션 상태**를 읽는다. 사용자가
+        #    버튼을 누른 그 순간의 캔버스가 곧 저장 대상이므로 '떠다니는 현재
+        #    결과' 와 같은 위험은 없다 - 사용자가 보고 있는 것이 그것이다.
+        from core.headless_img2img_service import HeadlessImg2ImgService
+
+        return HeadlessImg2ImgService(context).composed_canvas_png()
     raise ValueError(f"unknown source kind: {kind or '(empty)'}")
 
 

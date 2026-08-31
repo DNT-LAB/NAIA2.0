@@ -821,7 +821,7 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260825-strip2')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260831-assetframe')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -1315,6 +1315,57 @@ const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Image Tagger result panel', error);
   });
+// ── 캐릭터 에셋 액자 맞추기 ───────────────────────────────────────────────
+// 캐릭터 에셋은 **세로 스탠딩**을 기대한다. 가로 결과를 그대로 저장하면 오작동한다
+// (사용자 제보 2026-08-31). 저장 전에 이 크기로 고정된 캔버스에서 먼저 맞춘다.
+const CHARACTER_ASSET_FRAME = '704 x 1344';
+// 액자를 맞추는 동안 어느 이미지를 저장하려던 것인지 기억해 둔다(취소하면 버린다).
+let characterAssetFramePending = null;
+// '생성 후 저장' 을 눌렀는가 - 다음 결과 한 장만 저장 대기로 올린다.
+let characterAssetAwaitGenerated = false;
+async function stageCharacterAssetThroughFrame(pinnedPath, context) {
+  // 뷰어 경로에서 바이트를 가져온다(`__history_item__/…` 도 이 라우트가 푼다).
+  let blob = null;
+  try {
+    const image = await fetch('/api/viewer/image/' + encodeURI(pinnedPath));
+    if (image.ok) blob = await image.blob();
+  } catch (error) { /* 아래에서 걸러낸다 */ }
+  if (!blob) { showToast('이미지를 읽지 못했습니다.', 'error'); return; }
+  characterAssetFramePending = {path: pinnedPath, label: String(context?.label || pinnedPath)};
+  const query = new URLSearchParams({
+    label: characterAssetFramePending.label,
+    canvas: CHARACTER_ASSET_FRAME,
+    purpose: 'character_asset',
+  });
+  try {
+    const response = await fetch(`/api/image-action/inpaint?${query}`, {
+      method: 'POST',
+      headers: {'Content-Type': blob.type || 'image/png'},
+      body: blob,
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data || data.ok !== true) {
+      characterAssetFramePending = null;
+      showToast((data && data.error) || `액자를 열지 못했습니다 (HTTP ${response.status})`, 'error');
+      return;
+    }
+    if (data.state) onModuleState(data.state);
+    showToast(`${CHARACTER_ASSET_FRAME} 액자에 맞춘 뒤 저장하세요.`, 'info');
+  } catch (error) {
+    characterAssetFramePending = null;
+    showToast(`액자를 열지 못했습니다: ${error}`, 'error');
+  }
+}
+
+/** 액자에 맞춘 합성본을 그대로 에셋 저장 대기로 넘긴다(생성 없음 = 0 Anlas). */
+function stageFramedCharacterAsset() {
+  if (!characterAssetControl) { showToast('Character Asset tab is not ready', 'error'); return; }
+  const label = characterAssetFramePending?.label || 'framed';
+  characterAssetControl.stageSource({kind: 'canvas'}, `${label} (${CHARACTER_ASSET_FRAME})`);
+  characterAssetFramePending = null;
+  switchRightTab('charAssets');
+}
+
 const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260831-tagger')
   .then(({createImageActionPopup}) => {
     imageActionPopup = createImageActionPopup({
@@ -1435,8 +1486,10 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
           showToast('저장할 이미지를 특정할 수 없습니다', 'error');
           return;
         }
-        characterAssetControl.stageFromContext({...(context || {}), path: pinnedPath});
-        switchRightTab('charAssets');
+        // ⚠️ 바로 저장하지 않는다. 결과가 **가로**면 그대로 들어가 에셋이 오작동한다
+        //    (사용자 제보 2026-08-31: 1152x896 을 저장했다). 먼저 704x1344 로 고정된
+        //    가상 캔버스를 열어 스탠딩 이미지를 액자에 맞추게 한다.
+        stageCharacterAssetThroughFrame(pinnedPath, context);
       },
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
@@ -2569,7 +2622,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260830-undo2')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20260831-assetframe')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -2584,6 +2637,19 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       // 도크의 [지우기] 도 에디터의 [초기화] 와 **같은 함수**를 쓴다 - 그쪽만
       // 클라이언트 초안까지 지운다.
       onClearMask: () => img2imgPanel?.clearMask?.(),
+      // 캐릭터 에셋 액자(사용자 지정 2026-08-31). 'frame' 은 생성 없이 지금 놓인
+      // 그대로, 'generated' 는 인페인트로 메운 뒤 그 결과를 저장한다.
+      onSaveCharacterAssetFrame: how => {
+        if (how === 'generated') {
+          // 생성이 끝나면 그 결과를 저장하도록 표식만 남기고 평소 경로로 보낸다 -
+          // 여기서 생성 규약을 한 벌 더 짜면 두 길이 갈린다.
+          characterAssetAwaitGenerated = true;
+          img2imgPanel?.generate?.();
+          showToast('생성이 끝나면 그 결과를 저장 대기로 올립니다.', 'info');
+          return;
+        }
+        stageFramedCharacterAsset();
+      },
       onSlider: (key, value) => img2imgPanel?.slider?.(key, value),
       onRepeat: value => img2imgPanel?.repeat?.(value),
       onGenerate: () => img2imgPanel?.generate?.(),
@@ -4445,6 +4511,18 @@ function renderResultUnsavedActions(asset = null) {
   const assetPath = String(asset?.path || '');
   if (preview && preview.dataset.source === 'current' && assetPath.startsWith('__history_item__/')) {
     preview.dataset.path = assetPath;
+  }
+  // 캐릭터 에셋 '생성 후 저장' - 방금 도착한 **한 장만** 저장 대기로 올린다.
+  // ⚠️ 표식을 먼저 내린다. 저장이 실패해도 다음 결과까지 끌려가면 안 된다.
+  if (characterAssetAwaitGenerated && assetPath.startsWith('__history_item__/')) {
+    characterAssetAwaitGenerated = false;
+    if (characterAssetControl) {
+      characterAssetControl.stageSource({kind: 'viewer', rel_path: assetPath},
+        characterAssetFramePending?.label || assetPath);
+      characterAssetFramePending = null;
+      switchRightTab('charAssets');
+      showToast('생성 결과를 저장 대기로 올렸습니다.', 'success');
+    }
   }
   const visible = isUnsavedHistoryAsset(asset);
   if (resultUnsavedActions) resultUnsavedActions.hidden = !visible;

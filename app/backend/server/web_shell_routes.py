@@ -18,6 +18,19 @@ def _web_file(path: Path, media_type: str):
     return FileResponse(str(path), media_type=media_type, headers=_no_cache_headers())
 
 
+# 이 모듈의 `_web_file` 은 **확장이 몽키패치하는 자리**다(공식 프론트 확장 경로가
+# 없어서 서드파티가 여기를 감싸 서빙되는 JS 뒤에 자기 코드를 덧붙인다).
+# 원본을 기억해 두면 '지금 프론트가 확장에 의해 바뀌어 있는가' 를 정직하게 답할 수
+# 있다 - 되돌릴 수는 없지만(남의 패치다), **사용자에게 새로고침이 필요하다고
+# 알려 줄 수는 있다**(확장을 꺼도 이미 받아 간 페이지에는 그 코드가 살아 있다).
+_ORIGINAL_WEB_FILE = _web_file
+
+
+def web_frontend_is_patched() -> bool:
+    """확장이 프론트 서빙을 가로채고 있는가."""
+    return _web_file is not _ORIGINAL_WEB_FILE
+
+
 def _web_asset(root: Path, asset_path: str, *, default_media_type: str = "application/octet-stream"):
     try:
         target = (root / asset_path).resolve()

@@ -646,6 +646,22 @@ export function createExtensionsUi(deps) {
     </div>`;
   }
 
+  /** 확장이 프론트 서빙을 가로채고 있으면 **새로고침이 필요하다**고 알린다.
+   *
+   *  ⚠️ 공식 프론트 확장 경로가 없어서 서드파티는 `_web_file` 을 감싸 서빙되는
+   *     `app.js` 뒤에 자기 코드를 덧붙인다(실측: 65,358자). 확장을 꺼도
+   *     **이미 받아 간 페이지에는 그 코드가 그대로 살아 있고**, 호스트는 남의
+   *     몽키패치를 되돌릴 수 없다. 그 코드가 `renderPromptEngineering` 같은
+   *     전역을 바꿔치기해 둔 상태라 화면이 이상해질 수 있다 - 그래서 되돌리는
+   *     대신 **말해 준다**(사용자 제보 2026-08-31: 끄고 나서 PE 모듈이 안 열림).
+   */
+  function noticeReloadIfFrontendPatched(nowEnabled) {
+    if (!lastState || lastState.web_frontend_patched !== true) return;
+    showToast(
+      (nowEnabled ? '확장을 켰습니다.' : '확장을 껐습니다.') +
+      ' 화면에 완전히 반영하려면 새로고침(F5)하세요.', 'warning');
+  }
+
   function renderSettingsPane() {
     const root = pane();
     if (!root || !lastState) return;
@@ -688,6 +704,7 @@ export function createExtensionsUi(deps) {
           return;
         }
         setModuleParam('extensions', `enabled:${ext.id}`, el.checked);
+        noticeReloadIfFrontendPatched(el.checked);
       });
     });
     root.querySelectorAll('.ext-approve-btn').forEach(el => {

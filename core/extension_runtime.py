@@ -1540,6 +1540,11 @@ class ExtensionManager:
                 "extensions": entries,
                 "install_dir": str(root) if root is not None else "",
                 "grandfathered": notice,
+                # 확장이 프론트 서빙을 가로채고 있는가. 그렇다면 켜고 끈 결과가
+                # **이미 열려 있는 화면에는 반영되지 않는다** - 받아 간 JS 는 그대로
+                # 살아 있고, 호스트는 남의 몽키패치를 되돌릴 수 없다.
+                # 되돌리는 대신 화면이 "새로고침하세요" 라고 말하게 한다.
+                "web_frontend_patched": _web_frontend_patched(),
             }
 
     def _panel_settings_locked(self, record: ExtensionRecord) -> dict[str, Any] | None:
@@ -1768,6 +1773,20 @@ class ExtensionManager:
         if action == "retry_errors":
             return [record for record in self.records if record.status in {"error", "dependency_error", "loading"}]
         return []
+
+
+def _web_frontend_patched() -> bool:
+    """확장이 프론트 파일 서빙을 감싸고 있는가(있으면 새로고침이 필요하다).
+
+    ⚠️ core 가 app.backend 를 import 하는 것은 층을 거스른다 - 그래서 **호출 시점에
+    지연 import** 하고 실패하면 조용히 False 로 떨어진다(웹 세션 밖에서도 돈다).
+    """
+    try:
+        from app.backend.server.web_shell_routes import web_frontend_is_patched
+
+        return bool(web_frontend_is_patched())
+    except Exception:
+        return False
 
 
 def load_extensions(app_context: Any) -> ExtensionManager:

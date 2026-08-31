@@ -671,7 +671,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260823-tfexact2')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-tagfilter')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -2393,7 +2393,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260606-remote-entry1')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,
@@ -2411,7 +2411,7 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260606-remote-e
       onPromptEdit: onPromptAuthoredEdit,
       fireModuleOninput: _fireModuleOninput,
       escHtml,
-      onOpenRemote: target => openRemotePanel(target),
+      onTagFilterAdd: (list, tag) => { void addPromptTagToFilter(list, tag); },
     });
   })
   .catch(error => {
@@ -8829,6 +8829,9 @@ function showAppDialog(message, options = {}) {
   // resolve 값의 모양을 바꾸지 않으므로 기존 호출부는 아무 영향이 없다 - 이 함수는
   // 앱 전체가 쓴다(사용자 지정 2026-08-30: 삭제창의 '이번 실행 동안 묻지 않기').
   const checkbox = (options.checkbox && options.checkbox.label) ? options.checkbox : null;
+  // 취소 버튼 숨김. **선택지 모드에서만** 쓴다 - 확인/취소 두 버튼짜리에서
+  // 취소를 없애면 빠져나갈 길이 버튼에서 사라진다(Esc 는 남지만 안 보인다).
+  const hideCancel = !!options.hideCancel && choices.length > 0;
   const checkboxHtml = checkbox ? `
           <label class="app-confirm-check">
             <input type="checkbox" data-dialog-check${checkbox.checked ? ' checked' : ''}>
@@ -8854,7 +8857,7 @@ function showAppDialog(message, options = {}) {
         </div>
         <div class="app-confirm-actions">
           ${choiceHtml || `<button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(okText)}</button>`}
-          <button class="app-confirm-btn" data-confirm-action="cancel" type="button">${escHtml(cancelText)}</button>
+          ${hideCancel ? '' : `<button class="app-confirm-btn" data-confirm-action="cancel" type="button">${escHtml(cancelText)}</button>`}
         </div>
       </section>
     `;
@@ -9046,10 +9049,82 @@ function copyCloudflaredUrl() {
   if (cloudflaredControls) cloudflaredControls.copyUrl();
 }
 
-// 리모트 패널 진입점 — 프롬프트 영역 컨텍스트 메뉴 최상단 "리모트" 항목.
-// 패널 본체(Dev0714 RemoteWindow 이식)는 후속 작업; 지금은 자리만 잡아둔다.
-function openRemotePanel(_target) {
-  showToast('리모트 패널은 준비 중입니다 — 다음 업데이트에서 제공됩니다.', 'info');
+// 프롬프트 우클릭 -> Tag Filter [포함]/[제외] 에 추가 (사용자 요청 2026-08-31).
+//
+// 흐름: 스냅샷 -> 칩 추가 -> **바로 적용**(사용자 지정: 팝업이 뜰 때는 이미 적용된
+// 상태) -> 적용이 끝나면 앞뒤 개수를 나란히 보여 주고 묻는다.
+//
+//   [설정 적용]        그대로 둔다(적용·저장은 이미 끝났다)
+//   [되돌리기]         스냅샷으로 되돌리고 다시 적용한다
+//   [검색창 열기 (적용)] 그대로 두고 SEARCH 패널을 연다
+//
+// ⚠️ 칩 목록은 quickFilter 가 소유한다 - 여기서 직접 만지지 않고 API 로만 넘긴다.
+//    두 곳이 만지면 화면의 칩과 실제 적용된 필터가 갈린다.
+async function addPromptTagToFilter(list, tag) {
+  if (!quickFilter) {
+    showToast('Tag Filter 가 아직 준비되지 않았습니다.', 'error');
+    return;
+  }
+  const label = list === 'exclude' ? '제외' : '포함';
+  const before = quickFilter.snapshotTags();
+  const beforeCount = currentPromptPoolCount();
+  if (!quickFilter.addTag(list, tag)) {
+    showToast(`이미 ${label} 목록에 있습니다: ${tag}`, 'info');
+    return;
+  }
+
+  const settled = new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    quickFilter.onceAssigned(finish);
+    // ⚠️ 안전망. 소켓이 끊겼거나 결과가 안 오면 팝업이 영영 안 뜬다 - 그러면
+    //    사용자는 방금 무슨 일이 일어났는지 모른 채 필터만 바뀐 화면을 본다.
+    window.setTimeout(finish, 8000);
+  });
+  quickFilter.apply();
+  await settled;
+
+  const afterCount = currentPromptPoolCount();
+  const snapshot = quickFilter.snapshotTags();
+  const line = (name, tags) =>
+    `<b>${name}</b> : ${tags.length ? escHtml(tags.join(', ')) : '<i>없음</i>'}`;
+  const messageHtml = [
+    line('Include', snapshot.include),
+    line('Exclude', snapshot.exclude),
+    // join 이 앞뒤로 <br> 을 하나씩 더 넣으므로 여기는 빈 칸이면 된다 - '<br>' 을
+    // 두면 빈 줄이 두 겹으로 나온다(실측 2026-08-31).
+    '',
+    `기존 프롬프트 수 : ${beforeCount == null ? '?' : beforeCount.toLocaleString()}개`,
+    `검색 프롬프트 수 : ${afterCount == null ? '?' : afterCount.toLocaleString()}개`,
+  ].join('<br>');
+
+  const choice = await showAppDialog('', {
+    title: `Tag Filter [${label}] 에 추가`,
+    messageHtml,
+    choices: [
+      {key: 'keep', label: '설정 적용'},
+      {key: 'revert', label: '되돌리기'},
+      {key: 'search', label: '검색창 열기 (적용)'},
+    ],
+    // ⚠️ 여기서는 '취소' 가 '설정 적용' 과 **같은 일**을 한다(이미 적용된 뒤라
+    //    아무것도 안 하는 것이 곧 유지다). 같은 결과를 내는 버튼이 둘이면 사용자가
+    //    무엇이 다른지 찾느라 멈춘다 - 세 개만 낸다(사용자 스펙도 셋이다).
+    hideCancel: true,
+  });
+
+  if (choice === 'revert') {
+    quickFilter.restoreTags(before);
+    showToast('필터를 되돌렸습니다.', 'info');
+    return;
+  }
+  if (choice === 'search') openModule('search');
+}
+
+// 툴바의 `Prompt: N` — 현재 풀에 남은 프롬프트 수(그 자리가 권위값이다).
+function currentPromptPoolCount() {
+  const raw = document.getElementById('searchCount')?.textContent || '';
+  const digits = raw.replace(/[^0-9]/g, '');
+  return digits ? Number(digits) : null;
 }
 
 function applySetupGate(m) {
@@ -12039,7 +12114,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260824-connmark1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260831-tagfilter')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

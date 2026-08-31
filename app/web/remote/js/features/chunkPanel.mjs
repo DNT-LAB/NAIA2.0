@@ -14,7 +14,7 @@ export function createChunkPanel({
   onPromptEdit,
   fireModuleOninput,
   escHtml,
-  onOpenRemote = null,
+  onTagFilterAdd = null,
 }) {
   const CHUNK_PANEL_WIDTH = 420;
   const CHUNK_PANEL_MIN_WIDTH = 320;
@@ -268,12 +268,15 @@ export function createChunkPanel({
     selectionMenu = document.createElement('div');
     selectionMenu.className = 'result-context-menu chunk-selection-menu';
     selectionMenu.innerHTML = `
-      <div class="result-context-group">
-        <button class="result-context-item chunk-context-remote" type="button" data-action="open-remote">
-          <span>리모트</span><span class="result-context-arrow">›</span>
+      <div class="result-context-group" data-requires-filter-tag="1">
+        <button class="result-context-item chunk-context-tagfilter" type="button" data-action="tagfilter-include">
+          <span>Tag Filter <b>[포함]</b> 에 추가</span><span class="result-context-tag" data-filter-tag-label></span>
+        </button>
+        <button class="result-context-item chunk-context-tagfilter" type="button" data-action="tagfilter-exclude">
+          <span>Tag Filter <b>[제외]</b> 에 추가</span><span class="result-context-tag" data-filter-tag-label></span>
         </button>
       </div>
-      <div class="result-context-separator"></div>
+      <div class="result-context-separator" data-requires-filter-tag="1"></div>
       <div class="result-context-group">
         <button class="result-context-item" type="button" data-action="undo"><span>Undo</span></button>
         <button class="result-context-item" type="button" data-action="redo"><span>Redo</span></button>
@@ -356,10 +359,18 @@ export function createChunkPanel({
     hideSelectionMenu();
     if (target) target.focus();
     try {
-      if (action === 'open-remote') {
-        // 리모트 패널 진입점 (Dev0714 RemoteWindow 이식) — 본체는 호스트가 주입.
-        if (typeof onOpenRemote === 'function') onOpenRemote(target);
-        else showToast('리모트 패널은 준비 중입니다.', 'info');
+      if (action === 'tagfilter-include' || action === 'tagfilter-exclude') {
+        // 본체는 호스트가 주입한다(quickFilter 는 app.js 가 소유). 여기서는 어느
+        // 목록에 무엇을 넣을지만 넘긴다 - 필터 상태를 두 곳이 만지면 갈린다.
+        const list = action === 'tagfilter-include' ? 'include' : 'exclude';
+        const tag = (payload.filterTag || '').trim();
+        if (!tag) {
+          showToast('필터에 넣을 태그를 고르세요.', 'info');
+        } else if (typeof onTagFilterAdd === 'function') {
+          onTagFilterAdd(list, tag);
+        } else {
+          showToast('Tag Filter 를 열 수 없습니다.', 'error');
+        }
       } else if (action === 'add-chunk') {
         pendingAddPrefill = { value, key };
         openPanel(getAnchor(target), false);
@@ -405,7 +416,7 @@ export function createChunkPanel({
     menu.style.top = `${top}px`;
   }
 
-  function showSelectionMenu(target, event) {
+  function showSelectionMenu(target, event, extra = {}) {
     // 선택이 없어도 메뉴를 띄운다(데스크톱 마우스 우클릭) — 선택 의존 항목
     // (Cut/Copy/Add to Chunk)은 no-selection 클래스로 숨긴다. 모바일 롱프레스는
     // 호출부(tagAssist의 shouldUseNativeTextContextMenu)가 이미 네이티브로 보낸다.
@@ -415,9 +426,16 @@ export function createChunkPanel({
       target,
       value: selection || '',
       key: selection ? suggestKeyFromValue(selection) : '',
+      // Tag Filter 항목이 쓸 대상: **선택이 있으면 선택, 없으면 커서 밑 태그**
+      // (사용자 지정 2026-08-31). 둘 다 없으면 그 항목만 흐려진다.
+      filterTag: (selection || extra.tagAtCursor || '').trim(),
     };
     const menu = ensureSelectionMenu();
     menu.classList.toggle('no-selection', !selection);
+    menu.classList.toggle('no-filter-tag', !selectionMenuPayload.filterTag);
+    menu.querySelectorAll('[data-filter-tag-label]').forEach(node => {
+      node.textContent = selectionMenuPayload.filterTag || '';
+    });
     placeSelectionMenu(event);
     return true;
   }

@@ -17473,9 +17473,31 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .chunk-selection-menu.no-selection [data-requires-selection] {
   display: none;
 }
-.chunk-context-remote span:first-child {
+/* Tag Filter 항목(사용자 요청 2026-08-31). 넣을 태그가 없으면 - 선택도 없고 커서
+   밑에도 태그가 없으면 - 통째로 숨긴다. 눌러도 아무 일이 없는 항목을 남기면
+   "왜 안 되지" 가 된다. */
+.chunk-selection-menu.no-filter-tag [data-requires-filter-tag] {
+  display: none;
+}
+.chunk-context-tagfilter span:first-child {
   color: var(--accent-blue);
   font-weight: 600;
+}
+.chunk-context-tagfilter b {
+  font-weight: 700;
+}
+/* 대상 태그를 항목 오른쪽에 옅게 붙여 무엇이 들어가는지 눈으로 확인시킨다.
+   길면 잘라서 메뉴 폭이 태그 길이에 끌려다니지 않게 한다. */
+.result-context-tag {
+  margin-left: auto;
+  padding-left: 12px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
 }
 @media (max-width: 767px) {
   .chunk-add-grid {

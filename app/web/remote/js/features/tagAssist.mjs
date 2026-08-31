@@ -2997,7 +2997,12 @@ export function createTagAssistController({
       }
       acTarget = textarea;
       hideAutocomplete();
-      if (chunkPanelControl.showSelectionMenu(textarea, e)) {
+      // 선택이 없을 때 쓸 **커서 밑 태그**를 함께 넘긴다(사용자 지정 2026-08-31:
+      // "open clothes 에서 우클릭"). 크롬은 우클릭으로 캐럿을 옮기므로 클릭한
+      // 자리의 태그가 잡힌다. 이 함수는 여기(tagAssist)에만 있다.
+      if (chunkPanelControl.showSelectionMenu(textarea, e, {
+        tagAtCursor: getTagAtCursor(textarea) || '',
+      })) {
         e.preventDefault();
       }
     });

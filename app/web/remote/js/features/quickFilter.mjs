@@ -621,6 +621,56 @@ export function createQuickFilterController(deps) {
     scheduleSearch();
   }
 
+  // ── 프롬프트 우클릭에서 들어오는 입구 (사용자 요청 2026-08-31) ────────────
+  //
+  // ⚠️ 칩 목록을 바깥에서 직접 만지지 못하게 한다. 필터 상태의 주인은 여기 하나다 -
+  //    두 곳이 만지면 화면(칩)과 실제(적용된 필터)가 갈린다.
+
+  function snapshotTags() {
+    return {include: [...includeTags], exclude: [...excludeTags], active};
+  }
+
+  /** 스냅샷으로 되돌리고 **다시 적용까지** 한다. 비어 있었으면 필터를 끈다. */
+  function restoreTags(snapshot) {
+    const include = normalizeTags(snapshot && snapshot.include);
+    const exclude = normalizeTags(snapshot && snapshot.exclude);
+    if (!include.length && !exclude.length) {
+      clearFilter();
+      return;
+    }
+    includeTags = include;
+    excludeTags = exclude;
+    renderChips();
+    updateHighlight();
+    apply();
+  }
+
+  /** 목록에 태그를 더한다. 이미 있으면 false(부를 쪽이 안내한다). */
+  function addTag(list, rawTag) {
+    const [tag] = normalizeTags([rawTag]);
+    if (!tag) return false;
+    const target = list === 'exclude' ? excludeTags : includeTags;
+    if (target.some(existing => existing.toLowerCase() === tag.toLowerCase())) return false;
+    target.push(tag);
+    renderChips();
+    updateHighlight();
+    return true;
+  }
+
+  // 적용이 **실제로 끝났을 때** 한 번만 부른다. 검색->assign 왕복이라 apply() 직후에
+  // 세면 옛 숫자를 읽는다.
+  let assignedOnce = [];
+  function onceAssigned(callback) {
+    if (typeof callback === 'function') assignedOnce.push(callback);
+  }
+  function flushAssignedOnce() {
+    const waiting = assignedOnce;
+    assignedOnce = [];
+    waiting.forEach(callback => {
+      try { callback(); } catch (error) { console.error('onceAssigned failed', error); }
+    });
+  }
+
   // Custom parquet load/merge swapped the pool: the backend deactivated the
   // filter and kept the chips as a draft, so the cached 'N matched' count is now
   // stale (old pool). Auto re-apply the chips to the NEW pool (fresh search +
@@ -758,6 +808,7 @@ export function createQuickFilterController(deps) {
     }
     // 등급 인식 카운트(활성 등급 합)로 표시 — 등급 토글에 라이브 반응하고 RATING 옆에서 유지된다.
     renderMatchedCount('assigned');
+    flushAssignedOnce();
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
     // The backend commit already persisted this assignment. Sending another
@@ -1068,5 +1119,9 @@ export function createQuickFilterController(deps) {
     payload,
     isActive: () => active,
     getRatingCounts: () => ratingCounts,
+    snapshotTags,
+    restoreTags,
+    addTag,
+    onceAssigned,
   };
 }

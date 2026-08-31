@@ -9818,6 +9818,11 @@ function refreshTransparentBgPill() {
   if (!pill) return;
   const visible = naiModelIsV5();
   pill.hidden = !visible;
+  // 알약이 뜨면 토큰 줄을 왼쪽으로 붙이고 알약 자리를 비운다(사용자 제보 2026-08-31).
+  // 알약은 absolute 라 흐름에 없어서, 가운데 정렬이면 글자가 그 밑으로 파고들어
+  // 잘린다 - 캐릭터가 없을 때(한 줄일 때) 특히 그렇다.
+  document.getElementById('promptTokenFooter')
+    ?.classList.toggle('has-bg-pill', visible);
   if (!visible) return;
   pill.setAttribute('aria-pressed', transparentBgEnabled ? 'true' : 'false');
   const mark = document.getElementById('transparentBgMark');

@@ -9567,6 +9567,17 @@ body.resizing-result-info {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 투명 BG 알약이 떠 있을 때의 토큰 줄. 사용자 제보 2026-08-31.
+   알약은 `position: absolute` 라 흐름에 없다 - 가운데 정렬된 글자가 그 밑으로
+   파고들어 **잘렸다**(`... (Main 127 + Character` 까지만 보이고 `0)` 이 사라짐;
+   부모가 `overflow: hidden` 이다). 왼쪽으로 붙이고 알약 자리를 비워 둔다.
+   ⚠️ `.has-activated`(캐릭터 요약이 붙은 세로 배열)보다 **뒤에** 둬야 한다 -
+      특이도가 같아 앞에 두면 그쪽 `padding` 에 진다.
+   실측 2026-08-31: 알약 76px + `right: 10px` -> 96px 이면 10px 이 남는다. */
+.prompt-token-footer.has-bg-pill {
+  justify-content: flex-start;
+  padding-right: 96px;
+}
 /* 투명 배경 알약(NAI V5 전용). 사용자 지정 2026-08-29.
    ⚠️ 부모(.prompt-token-footer)가 `pointer-events: none` 이다 - 알약만 다시 열어
       준다. 안 열면 보이긴 하는데 **눌러지지 않는다**.

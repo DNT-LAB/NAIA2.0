@@ -157,7 +157,7 @@ function matchPresetPromptToken(text, index) {
   return text.substring(index, end);
 }
 
-export function createPromptHighlighter({document, promptEdit, escHtml}) {
+export function createPromptHighlighter({document, promptEdit, escHtml, getTagFilterState = null}) {
   const highlight = document.getElementById('promptHighlight');
   const wrap = highlight ? highlight.parentElement : null;
   const tagClassifier = createPromptTagClassifier();
@@ -199,6 +199,21 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     return html;
   }
 
+  // Tag Filter 에 든 태그를 프롬프트에서 알아볼 수 있게 한다(사용자 사양 2026-08-31).
+  //
+  // 색과 밑줄은 CSS 가 정하고, 이 오버레이는 **계산된 스타일을 그대로 범위로 옮긴다**
+  // (`paintWithHighlights`). 그래서 클래스만 붙이면 Custom Highlight API 경로와
+  // span 폴백 경로가 함께 따라온다 - 두 곳을 따로 손댈 필요가 없다.
+  function tagFilterClassFor(core) {
+    if (typeof getTagFilterState !== 'function') return '';
+    let found = null;
+    try { found = getTagFilterState(core); } catch (_error) { return ''; }
+    if (!found) return '';
+    return found.exact
+      ? 'prompt-token-tagfilter prompt-token-tagfilter-exact'
+      : 'prompt-token-tagfilter';
+  }
+
   function formatTagTokenSegment(segment) {
     if (!segment) return '';
     const leading = segment.match(/^\s*/)?.[0] || '';
@@ -221,9 +236,11 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
         escHtml(trailing);
     }
     const classification = tagClassifier.classify(core);
-    if (!classification.className) return escHtml(segment);
+    const filterClass = tagFilterClassFor(core);
+    const className = [classification.className, filterClass].filter(Boolean).join(' ');
+    if (!className) return escHtml(segment);
     return escHtml(leading) +
-      `<span class="${classification.className}">${escHtml(core)}</span>` +
+      `<span class="${className}">${escHtml(core)}</span>` +
       escHtml(trailing);
   }
 

@@ -15,6 +15,7 @@ export function createChunkPanel({
   fireModuleOninput,
   escHtml,
   onTagFilterAdd = null,
+  onTagFilterState = null,
 }) {
   const CHUNK_PANEL_WIDTH = 420;
   const CHUNK_PANEL_MIN_WIDTH = 320;
@@ -268,14 +269,7 @@ export function createChunkPanel({
     selectionMenu = document.createElement('div');
     selectionMenu.className = 'result-context-menu chunk-selection-menu';
     selectionMenu.innerHTML = `
-      <div class="result-context-group" data-requires-filter-tag="1">
-        <button class="result-context-item chunk-context-tagfilter" type="button" data-action="tagfilter-include">
-          <span>Tag Filter <b>[포함]</b> 에 추가</span><span class="result-context-tag" data-filter-tag-label></span>
-        </button>
-        <button class="result-context-item chunk-context-tagfilter" type="button" data-action="tagfilter-exclude">
-          <span>Tag Filter <b>[제외]</b> 에 추가</span><span class="result-context-tag" data-filter-tag-label></span>
-        </button>
-      </div>
+      <div class="result-context-group" data-requires-filter-tag="1" data-filter-slot></div>
       <div class="result-context-separator" data-requires-filter-tag="1"></div>
       <div class="result-context-group">
         <button class="result-context-item" type="button" data-action="undo"><span>Undo</span></button>
@@ -359,15 +353,14 @@ export function createChunkPanel({
     hideSelectionMenu();
     if (target) target.focus();
     try {
-      if (action === 'tagfilter-include' || action === 'tagfilter-exclude') {
+      if (action.startsWith('tagfilter-')) {
         // 본체는 호스트가 주입한다(quickFilter 는 app.js 가 소유). 여기서는 어느
         // 목록에 무엇을 넣을지만 넘긴다 - 필터 상태를 두 곳이 만지면 갈린다.
-        const list = action === 'tagfilter-include' ? 'include' : 'exclude';
         const tag = (payload.filterTag || '').trim();
         if (!tag) {
           showToast('필터에 넣을 태그를 고르세요.', 'info');
         } else if (typeof onTagFilterAdd === 'function') {
-          onTagFilterAdd(list, tag);
+          onTagFilterAdd(action.slice('tagfilter-'.length), tag);
         } else {
           showToast('Tag Filter 를 열 수 없습니다.', 'error');
         }
@@ -416,6 +409,34 @@ export function createChunkPanel({
     menu.style.top = `${top}px`;
   }
 
+  // Tag Filter 항목은 **그 태그가 지금 어디에 있는지**에 따라 달라진다
+  // (사용자 사양 2026-08-31). 안 들어 있으면 추가 두 개, 들어 있으면 그 목록의
+  // 제거 + 퍼펙트 매칭 토글만 낸다 - 이미 들어 있는데 "추가" 를 내면 눌러도
+  // "이미 있습니다" 만 나온다.
+  function renderFilterItems(menu, tag) {
+    const slot = menu.querySelector('[data-filter-slot]');
+    if (!slot) return;
+    if (!tag) { slot.innerHTML = ''; return; }
+    const found = typeof onTagFilterState === 'function' ? onTagFilterState(tag) : null;
+    const label = value => `<span class="result-context-tag">${escHtml(value)}</span>`;
+    const item = (action, html, extraClass = '') =>
+      `<button class="result-context-item chunk-context-tagfilter${extraClass}" type="button"`
+      + ` data-action="${action}"><span>${html}</span>${label(tag)}</button>`;
+
+    if (!found) {
+      slot.innerHTML = item('tagfilter-include', 'Tag Filter <b>[포함]</b> 에 추가')
+        // 제외는 빨간 글씨(사용자 사양) - 푸는 쪽과 거르는 쪽을 색으로 가른다.
+        + item('tagfilter-exclude', 'Tag Filter <b>[제외]</b> 에 추가', ' is-exclude');
+      return;
+    }
+    const name = found.list === 'exclude' ? '[제외]' : '[포함]';
+    const tone = found.list === 'exclude' ? ' is-exclude' : '';
+    slot.innerHTML = item('tagfilter-remove', `Tag Filter <b>${name}</b> 에서 제거`, tone)
+      + (found.exact
+        ? item('tagfilter-exact-off', `<b>${name}</b> 퍼펙트 매칭 취소`, tone)
+        : item('tagfilter-exact-on', `<b>${name}</b> 퍼펙트 매칭 적용`, tone));
+  }
+
   function showSelectionMenu(target, event, extra = {}) {
     // 선택이 없어도 메뉴를 띄운다(데스크톱 마우스 우클릭) — 선택 의존 항목
     // (Cut/Copy/Add to Chunk)은 no-selection 클래스로 숨긴다. 모바일 롱프레스는
@@ -433,9 +454,7 @@ export function createChunkPanel({
     const menu = ensureSelectionMenu();
     menu.classList.toggle('no-selection', !selection);
     menu.classList.toggle('no-filter-tag', !selectionMenuPayload.filterTag);
-    menu.querySelectorAll('[data-filter-tag-label]').forEach(node => {
-      node.textContent = selectionMenuPayload.filterTag || '';
-    });
+    renderFilterItems(menu, selectionMenuPayload.filterTag);
     placeSelectionMenu(event);
     return true;
   }

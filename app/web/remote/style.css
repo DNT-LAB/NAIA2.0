@@ -17473,15 +17473,38 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .chunk-selection-menu.no-selection [data-requires-selection] {
   display: none;
 }
+/* 프롬프트 안에서 Tag Filter 에 든 태그(사용자 사양 2026-08-31).
+   퍼펙트 매칭은 **밑줄이 더 붙는다** - 색만으로 가르면 이미 색을 쓰는 아티스트·
+   캐릭터 토큰과 겹쳐 서로 흐려진다(취소선을 쓴 `-태그` 와 같은 이유).
+
+   ⚠️ 오버레이는 span 을 그대로 그리지 않는다. 계산된 `color`/`text-decoration` 을
+      읽어 Custom Highlight API 범위로 옮긴다(`promptHighlighter.paintWithHighlights`).
+      그래서 여기 값만 정하면 두 경로(하이라이트 API·span 폴백)가 함께 따라온다.
+   ⚠️ 이 규칙은 토큰 분류(.prompt-token-artist 등)보다 **뒤에** 와야 이긴다 -
+      특이도가 같으면 파일 순서로 진다. */
+.prompt-token-tagfilter {
+  color: #ff9f9f;
+}
+.prompt-token-tagfilter-exact {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
 /* Tag Filter 항목(사용자 요청 2026-08-31). 넣을 태그가 없으면 - 선택도 없고 커서
    밑에도 태그가 없으면 - 통째로 숨긴다. 눌러도 아무 일이 없는 항목을 남기면
    "왜 안 되지" 가 된다. */
 .chunk-selection-menu.no-filter-tag [data-requires-filter-tag] {
   display: none;
 }
+/* 메뉴 글씨는 **하얀색에 가까운** 파랑/빨강(사용자 사양 2026-08-31). 어두운 원색은
+   메뉴 배경에서 읽기 어렵고, 옆의 Undo/Paste 와 무게가 안 맞았다. */
 .chunk-context-tagfilter span:first-child {
-  color: var(--accent-blue);
+  color: #a9c6ff;
   font-weight: 600;
+}
+.chunk-context-tagfilter.is-exclude span:first-child {
+  color: #ffb0b0;
 }
 .chunk-context-tagfilter b {
   font-weight: 700;

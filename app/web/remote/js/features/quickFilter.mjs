@@ -562,6 +562,8 @@ export function createQuickFilterController(deps) {
     if (sendClear) send({type: 'tag_filter_clear'});
     if (persist) save();
     else updateHighlight();
+    notifyFilterChanged();
+    flushAssignedOnce();
   }
 
   function reset(options = {}) {
@@ -645,6 +647,28 @@ export function createQuickFilterController(deps) {
     apply();
   }
 
+  /** 그 태그가 지금 필터 어디에 있는지. 없으면 null.
+   *
+   * ⚠️ `*` 는 **퍼펙트 매칭 표식**이지 태그의 일부가 아니다 - 벗기고 비교해야
+   *    `*sky` 가 들어 있는 상태에서 `sky` 로 우클릭한 사용자에게 "추가" 가 아니라
+   *    "제거 / 퍼펙트 매칭 취소" 를 보여 줄 수 있다.
+   */
+  function findTag(rawTag) {
+    const [normalized] = normalizeTags([rawTag]);
+    if (!normalized) return null;
+    const needle = baseTag(normalized).toLowerCase();
+    for (const [list, arr] of [['include', includeTags], ['exclude', excludeTags]]) {
+      const index = arr.findIndex(tag => baseTag(tag).toLowerCase() === needle);
+      if (index >= 0) return {list, index, exact: isExactTag(arr[index]), tag: arr[index]};
+    }
+    return null;
+  }
+
+  function removeTagAt(list, index) {
+    if (String(list) === 'exclude') removeExcludeTag(index);
+    else removeIncludeTag(index);
+  }
+
   /** 목록에 태그를 더한다. 이미 있으면 false(부를 쪽이 안내한다). */
   function addTag(list, rawTag) {
     const [tag] = normalizeTags([rawTag]);
@@ -663,6 +687,15 @@ export function createQuickFilterController(deps) {
   function onceAssigned(callback) {
     if (typeof callback === 'function') assignedOnce.push(callback);
   }
+  // 필터가 실제로 바뀌었다 - 프롬프트 하이라이팅이 따라와야 한다.
+  // ⚠️ 우클릭 경로에서만 부르면 **Quick Filter 패널에서 바꿨을 때 하이라이팅이
+  //    낡은 채로 남는다.** 상태가 굳는 자리(assign·clear)에 건다.
+  function notifyFilterChanged() {
+    if (typeof deps.onFilterChanged === 'function') {
+      try { deps.onFilterChanged(); } catch (error) { console.error('onFilterChanged failed', error); }
+    }
+  }
+
   function flushAssignedOnce() {
     const waiting = assignedOnce;
     assignedOnce = [];
@@ -808,6 +841,7 @@ export function createQuickFilterController(deps) {
     }
     // 등급 인식 카운트(활성 등급 합)로 표시 — 등급 토글에 라이브 반응하고 RATING 옆에서 유지된다.
     renderMatchedCount('assigned');
+    notifyFilterChanged();
     flushAssignedOnce();
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
@@ -1122,6 +1156,9 @@ export function createQuickFilterController(deps) {
     snapshotTags,
     restoreTags,
     addTag,
+    findTag,
+    removeTagAt,
+    setChipExact,
     onceAssigned,
   };
 }

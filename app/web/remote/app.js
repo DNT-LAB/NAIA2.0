@@ -690,6 +690,10 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-tagfil
       showToast,
       lockTagSurface,
       unlockTagSurface,
+      // 필터가 바뀌면 프롬프트 하이라이팅을 다시 칠한다. ⚠️ 우클릭 경로에서만
+      // 부르면 **Quick Filter 패널에서 바꿨을 때 낡은 채로 남는다** - 상태가 굳는
+      // 자리에서 한 번만 울리게 두고 여기서 받는다.
+      onFilterChanged: () => updatePromptHighlight(),
     });
     quickFilter.bindInputs();
   })
@@ -1780,12 +1784,14 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260824-minustoken1')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260831-tagfilter')
   .then(({createPromptHighlighter}) => {
     promptHighlighter = createPromptHighlighter({
       document,
       promptEdit,
       escHtml,
+      // Tag Filter 에 든 태그를 프롬프트에서 알아보게 한다(사용자 사양 2026-08-31).
+      getTagFilterState: tag => (quickFilter ? quickFilter.findTag(tag) : null),
     });
     if (_bootFinalized) schedulePromptHighlightIndexLoad();
   })
@@ -2411,7 +2417,8 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilte
       onPromptEdit: onPromptAuthoredEdit,
       fireModuleOninput: _fireModuleOninput,
       escHtml,
-      onTagFilterAdd: (list, tag) => { void addPromptTagToFilter(list, tag); },
+      onTagFilterAdd: (action, tag) => { void addPromptTagToFilter(action, tag); },
+      onTagFilterState: tag => (quickFilter ? quickFilter.findTag(tag) : null),
     });
   })
   .catch(error => {
@@ -9060,17 +9067,42 @@ function copyCloudflaredUrl() {
 //
 // ⚠️ 칩 목록은 quickFilter 가 소유한다 - 여기서 직접 만지지 않고 API 로만 넘긴다.
 //    두 곳이 만지면 화면의 칩과 실제 적용된 필터가 갈린다.
-async function addPromptTagToFilter(list, tag) {
+async function addPromptTagToFilter(action, tag) {
   if (!quickFilter) {
     showToast('Tag Filter 가 아직 준비되지 않았습니다.', 'error');
     return;
   }
-  const label = list === 'exclude' ? '제외' : '포함';
   const before = quickFilter.snapshotTags();
   const beforeCount = currentPromptPoolCount();
-  if (!quickFilter.addTag(list, tag)) {
-    showToast(`이미 ${label} 목록에 있습니다: ${tag}`, 'info');
-    return;
+  const found = quickFilter.findTag(tag);
+
+  // 어느 동작이든 **필터를 한 번 바꾸고** 같은 팝업으로 앞뒤 개수를 보여 준다.
+  // 바뀐 방식이 달라도 사용자가 묻는 것은 하나다 - "이렇게 줄었는데 둘까?"
+  let title;
+  if (action === 'include' || action === 'exclude') {
+    const label = action === 'exclude' ? '제외' : '포함';
+    if (!quickFilter.addTag(action, tag)) {
+      showToast(`이미 ${label} 목록에 있습니다: ${tag}`, 'info');
+      return;
+    }
+    title = `Tag Filter [${label}] 에 추가`;
+    quickFilter.apply();
+  } else {
+    // 제거·퍼펙트 매칭은 **지금 들어 있는 목록**을 대상으로 한다.
+    if (!found) {
+      showToast(`필터에 없는 태그입니다: ${tag}`, 'info');
+      return;
+    }
+    const label = found.list === 'exclude' ? '제외' : '포함';
+    if (action === 'remove') {
+      title = `Tag Filter [${label}] 에서 제거`;
+      quickFilter.removeTagAt(found.list, found.index);
+    } else {
+      const on = action === 'exact-on';
+      title = `[${label}] 퍼펙트 매칭 ${on ? '적용' : '취소'}`;
+      // ⚠️ `setChipExact` 는 자기가 적용까지 한다 - 여기서 또 부르면 두 번 돈다.
+      quickFilter.setChipExact(found.list, found.index, on);
+    }
   }
 
   const settled = new Promise(resolve => {
@@ -9081,7 +9113,6 @@ async function addPromptTagToFilter(list, tag) {
     //    사용자는 방금 무슨 일이 일어났는지 모른 채 필터만 바뀐 화면을 본다.
     window.setTimeout(finish, 8000);
   });
-  quickFilter.apply();
   await settled;
 
   const afterCount = currentPromptPoolCount();
@@ -9099,7 +9130,7 @@ async function addPromptTagToFilter(list, tag) {
   ].join('<br>');
 
   const choice = await showAppDialog('', {
-    title: `Tag Filter [${label}] 에 추가`,
+    title,
     messageHtml,
     choices: [
       {key: 'keep', label: '설정 적용'},

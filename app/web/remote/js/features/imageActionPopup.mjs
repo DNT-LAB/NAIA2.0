@@ -10,6 +10,7 @@ export function createImageActionPopup({
   onDanbooru = null,
   onVibeTransfer = null,
   onInsertHistory = null,
+  onTagger = null,
   canUseDesktopImg2Img = () => true,
 }) {
   let root = null;
@@ -74,6 +75,12 @@ export function createImageActionPopup({
           runOptional(onVibeTransfer, 'Import Vibe Transfer');
         } else if (action === 'insert-history') {
           runOptional(onInsertHistory, 'Insert to history');
+        } else if (action === 'tagger') {
+          // ⚠️ 보내는 즉시 **창을 닫는다**(사용자 지정). 응답까지 4초쯤 걸리므로
+          //    창을 붙들고 있으면 멈춘 것처럼 보인다. 결과는 별도 창으로 온다.
+          //    이미지 URL 은 놓아 주지 않는다 - 호출부가 blob 을 계속 쓴다.
+          const handled = typeof onTagger === 'function' ? onTagger(activePayload) : false;
+          close({releaseImageUrl: !handled});
         }
       });
     });
@@ -119,6 +126,7 @@ export function createImageActionPopup({
           ${showDesktopImg2ImgActions ? actionButton({action: 'inpaint', icon: '✎', label: 'Inpaint 전송'}) : ''}
           ${hasMetadata ? actionButton({action: 'metadata', icon: '▤', label: '메타데이터', tone: 'metadata'}) : ''}
           ${showVibe ? actionButton({action: 'vibe', icon: '◇', label: 'Vibe Transfer', tone: 'vibe'}) : ''}
+          ${onTagger ? actionButton({action: 'tagger', icon: '⌗', label: '태그 분석', tone: 'tagger'}) : ''}
           ${onInsertHistory ? actionButton({action: 'insert-history', icon: '＋', label: '이미지 히스토리에 추가', tone: 'history'}) : ''}
         </div>
       </section>`;

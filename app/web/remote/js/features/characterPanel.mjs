@@ -537,7 +537,12 @@ export function createCharacterPanel({
     lastRenderedStructureSignature = structureSignature;
   }
 
+  // 다른 창(예: Image Tagger 결과)이 '어느 캐릭터에 넣을까' 를 물으려면
+  // 슬롯 목록이 필요하다. 렌더 상태를 그대로 빌려준다(사본).
+  const getCharacters = () => (Array.isArray(lastState?.characters) ? [...lastState.characters] : []);
+
   return {
+    getCharacters,
     addSlot,
     removeSlot,
     refreshPreview,

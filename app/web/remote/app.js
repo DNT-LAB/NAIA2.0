@@ -186,6 +186,8 @@ let resultContextMenu = null;
 let resultImageInput = null;
 let queuePanel = null;
 let imageActionPopup = null;
+let imageTaggerPanel = null;      // Image Tagger 결과 창(지연 로드)
+let imageTaggerNotice = '';       // 외부 전송 고지 - 백엔드가 SSOT
 let metadataViewer = null;
 let pendingResultEnhanceConfig = null;
 let resultEnhanceAssetRequestId = 0;
@@ -1229,7 +1231,71 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260825-
   .catch(error => {
     console.error('Failed to initialize metadata viewer module', error);
   });
-const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260602-insert-history1')
+// ── Image Tagger (WD14, 원격) ────────────────────────────────────────────
+// DETECTED IMAGE 팝업의 [태그 분석] 이 여기로 온다. 보내는 즉시 그 창은 닫히고
+// (팝업이 스스로 닫는다) 여기서는 토스트로만 알린 뒤 기다린다 - 응답이 4초쯤
+// 걸리므로 화면을 붙들면 멈춘 것처럼 보인다(사용자 지정).
+async function runImageTagger(payload) {
+  const blob = payload && payload.blob;
+  if (!blob) { showToast('이미지를 읽지 못했습니다.', 'error'); return; }
+  // ⚠️ 고지 문구를 못 받았으면 **보내지 않는다.** 외부 전송을 알리지 않은 채
+  //    이미지를 내보내는 일이 없어야 한다(사용자 결정: 명시하기).
+  if (!imageTaggerNotice) {
+    try {
+      const info = await fetch('/api/tagger/info');
+      if (info.ok) imageTaggerNotice = (await info.json()).external_notice || '';
+    } catch (error) { /* 아래에서 걸러낸다 */ }
+  }
+  if (!imageTaggerNotice) {
+    showToast('태거 안내를 불러오지 못해 분석을 멈췄습니다.', 'error');
+    return;
+  }
+  showToast('태그 분석 중… 외부 서버 응답을 기다립니다(보통 4초).', 'info');
+  try {
+    const response = await fetch('/api/tagger/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': blob.type || 'image/png'},
+      body: blob,
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data || data.ok !== true) {
+      showToast((data && data.error) || `태그 분석 실패 (HTTP ${response.status})`, 'error');
+      return;
+    }
+    await imageTaggerPanelReady;
+    if (!imageTaggerPanel) { showToast('결과 창을 불러오지 못했습니다.', 'error'); return; }
+    imageTaggerPanel.show(data, {externalNotice: imageTaggerNotice});
+  } catch (error) {
+    showToast(`태거에 연결하지 못했습니다: ${error}`, 'error');
+  } finally {
+    // 팝업이 close({releaseImageUrl:false}) 로 넘겨준 objectURL 을 여기서 놓는다.
+    // 안 놓으면 분석할 때마다 blob 이 쌓인다.
+    try { if (typeof payload.revokeImageUrl === 'function') payload.revokeImageUrl(); } catch (e) { /* 무해 */ }
+  }
+}
+const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-tagger2')
+  .then(({createImageTaggerResultPanel}) => {
+    imageTaggerPanel = createImageTaggerResultPanel({
+      document,
+      window,
+      escHtml,
+      showToast,
+      onInsertMain: text => insertTagIntoPrompt(text),
+      onInsertCharacter: (index, text) => {
+        const list = characterPanel ? characterPanel.getCharacters() : [];
+        const current = String(list[index] && list[index].prompt || '');
+        const merged = current.trim() ? `${current.replace(/,\s*$/, '')}, ${text}` : text;
+        // 사용자가 그 칸에 직접 친 것과 **같은 경로**로 보낸다.
+        onModTextEdit('character', `char_prompt_${index}`, merged);
+        return true;
+      },
+      getCharacters: () => (characterPanel ? characterPanel.getCharacters() : []),
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Image Tagger result panel', error);
+  });
+const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260831-tagger')
   .then(({createImageActionPopup}) => {
     imageActionPopup = createImageActionPopup({
       document,
@@ -1243,6 +1309,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260
       onDanbooru: payload => callResultImageAction('requestPopupImageAction', payload, 'danbooru'),
       onVibeTransfer: payload => callResultImageAction('requestPopupImageAction', payload, 'vibe'),
       onInsertHistory: payload => callResultImageAction('insertExternalToHistory', payload),
+      onTagger: payload => { runImageTagger(payload); return true; },
       onMetadata: payload => {
         // 모바일은 메타데이터 탭이 없다 — 보이지 않는 곳에 로드하고 Result로
         // 강제되는 침묵 동작 대신 명시적으로 안내한다.
@@ -2112,7 +2179,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260824-codexfix1')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260831-tagger')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,

@@ -30,6 +30,7 @@ from app.backend.server.install_manager_routes import register_install_manager_r
 from app.backend.server.module_storage_routes import register_module_storage_routes
 from app.backend.server.nai_model_routes import register_nai_model_routes
 from app.backend.server.ollama_routes import register_ollama_routes
+from app.backend.server.tagger_routes import register_tagger_routes
 from app.backend.server.translation_history_routes import register_translation_history_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
 from app.backend.server.prompt_engineering_filter_routes import register_pe_filter_routes
@@ -186,6 +187,7 @@ def register_headless_routes(
     register_extension_install_routes(app, context, run_in_thread=run_in_thread)
     register_ollama_routes(app, context, run_in_thread=run_in_thread)
     register_translation_history_routes(app, context, run_in_thread=run_in_thread)
+    register_tagger_routes(app, context, run_in_thread=run_in_thread)
     register_params_workflow_routes(
         app,
         context,

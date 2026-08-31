@@ -1235,51 +1235,63 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260825-
 // DETECTED IMAGE 팝업의 [태그 분석] 이 여기로 온다. 보내는 즉시 그 창은 닫히고
 // (팝업이 스스로 닫는다) 여기서는 토스트로만 알린 뒤 기다린다 - 응답이 4초쯤
 // 걸리므로 화면을 붙들면 멈춘 것처럼 보인다(사용자 지정).
+//
+// ⚠️ 큐(2초 간격·취소)는 **패널이 들고 있다.** 여기서는 이미지 하나를 밀어 넣을
+//    뿐이다 - 큐를 양쪽에 두면 어느 쪽이 진짜인지 알 수 없게 된다.
+let imageTaggerSpaceUrl = '';
+async function loadImageTaggerInfo() {
+  if (imageTaggerNotice) return true;
+  try {
+    const info = await fetch('/api/tagger/info');
+    if (info.ok) {
+      const data = await info.json();
+      imageTaggerNotice = data.external_notice || '';
+      imageTaggerSpaceUrl = data.space_url || '';
+    }
+  } catch (error) { /* 아래에서 걸러낸다 */ }
+  return !!imageTaggerNotice;
+}
+async function analyzeImageForTagger(blob) {
+  const response = await fetch('/api/tagger/analyze', {
+    method: 'POST',
+    headers: {'Content-Type': blob.type || 'image/png'},
+    body: blob,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data || data.ok !== true) {
+    throw new Error((data && data.error) || `태그 분석 실패 (HTTP ${response.status})`);
+  }
+  return data;
+}
 async function runImageTagger(payload) {
   const blob = payload && payload.blob;
   if (!blob) { showToast('이미지를 읽지 못했습니다.', 'error'); return; }
-  // ⚠️ 고지 문구를 못 받았으면 **보내지 않는다.** 외부 전송을 알리지 않은 채
-  //    이미지를 내보내는 일이 없어야 한다(사용자 결정: 명시하기).
-  if (!imageTaggerNotice) {
-    try {
-      const info = await fetch('/api/tagger/info');
-      if (info.ok) imageTaggerNotice = (await info.json()).external_notice || '';
-    } catch (error) { /* 아래에서 걸러낸다 */ }
-  }
-  if (!imageTaggerNotice) {
+  // ⚠️ 출처 표시를 못 받았으면 **보내지 않는다.** 어디로 가는지 안 보이는 채로
+  //    이미지를 내보내지 않는다(사용자 결정: 링크로 명시).
+  if (!(await loadImageTaggerInfo())) {
     showToast('태거 안내를 불러오지 못해 분석을 멈췄습니다.', 'error');
     return;
   }
   showToast('태그 분석 중… 외부 서버 응답을 기다립니다(보통 4초).', 'info');
   try {
-    const response = await fetch('/api/tagger/analyze', {
-      method: 'POST',
-      headers: {'Content-Type': blob.type || 'image/png'},
-      body: blob,
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data || data.ok !== true) {
-      showToast((data && data.error) || `태그 분석 실패 (HTTP ${response.status})`, 'error');
-      return;
-    }
     await imageTaggerPanelReady;
     if (!imageTaggerPanel) { showToast('결과 창을 불러오지 못했습니다.', 'error'); return; }
-    imageTaggerPanel.show(data, {externalNotice: imageTaggerNotice});
-  } catch (error) {
-    showToast(`태거에 연결하지 못했습니다: ${error}`, 'error');
+    imageTaggerPanel.push(blob, payload.label || '이미지',
+      {externalNotice: imageTaggerNotice, url: imageTaggerSpaceUrl});
   } finally {
     // 팝업이 close({releaseImageUrl:false}) 로 넘겨준 objectURL 을 여기서 놓는다.
-    // 안 놓으면 분석할 때마다 blob 이 쌓인다.
+    // 패널은 자기 몫의 objectURL 을 따로 만든다.
     try { if (typeof payload.revokeImageUrl === 'function') payload.revokeImageUrl(); } catch (e) { /* 무해 */ }
   }
 }
-const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-tagger2')
+const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-tagger3')
   .then(({createImageTaggerResultPanel}) => {
     imageTaggerPanel = createImageTaggerResultPanel({
       document,
       window,
       escHtml,
       showToast,
+      analyze: analyzeImageForTagger,
       onInsertMain: text => insertTagIntoPrompt(text),
       onInsertCharacter: (index, text) => {
         const list = characterPanel ? characterPanel.getCharacters() : [];

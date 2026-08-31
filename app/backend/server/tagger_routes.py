@@ -9,8 +9,10 @@
 본문을 원시 바이트로 받는 것은 `/api/metadata/extract` 와 같은 규약이다 —
 멀티파트 파서 없이 `fetch(url, {body: blob})` 하나면 된다.
 
-⚠️ **이 경로는 사용자의 이미지를 제3자 서버로 보낸다.** 그래서 `info` 가 고지
-문구를 함께 돌려준다 — 화면이 그것을 반드시 띄운다(사용자 결정 2026-08-31).
+이 경로는 사용자의 이미지를 HuggingFace Space 로 보낸다. 사용자 판단으로 경고가
+아니라 **출처 표시**로 다룬다 — `info` 가 `[ 웹에서 사용 : <링크> ]` 를 돌려주고
+화면이 그것을 띄운다. 여전히 **문구를 못 받으면 전송하지 않는다**(어디로 가는지
+안 보이는 채로 내보내지 않는다).
 
 루프백 게이트는 **걸지 않는다.** 이것은 호스트의 상태를 바꾸는 동작이 아니라
 사용자가 직접 누르는 기능이고, 원격에서 쓰라고 있는 앱이다(생성과 같은 성격).
@@ -34,10 +36,11 @@ from core.wd_tagger_service import (
 
 AsyncRunner = Callable[..., Awaitable[Any]]
 
-EXTERNAL_NOTICE = (
-    "이미지가 외부 서버(huggingface.co)로 전송되어 분석됩니다. "
-    "NAIA 밖으로 나가는 것이 곤란한 이미지에는 사용하지 마세요."
-)
+# 사용자 판단 2026-08-31: "Huggingface 시스템이고 검증된 Provider라 괜찮을 것
+# 같습니다. [ 웹에서 사용 : 링크 ] 형태로만 붙여주시면 될 것 같습니다."
+# -> 경고 배너를 걷고 **출처 링크 한 줄**만 남긴다. 어디로 가는지는 여전히 보인다.
+SPACE_URL = "https://huggingface.co/spaces/SmilingWolf/wd-tagger"
+EXTERNAL_NOTICE = "웹에서 사용"
 
 
 def _grouped_by_category(tags: list[str], context: Any) -> list[dict[str, Any]]:
@@ -106,6 +109,7 @@ def register_tagger_routes(
             # 화면이 이 문구를 띄운다. 여기(백엔드)를 SSOT 로 둬서 분리창·모바일이
             # 제각기 다른 문구를 쓰는 일이 없게 한다.
             "external_notice": EXTERNAL_NOTICE,
+            "space_url": SPACE_URL,
         }
 
     @app.post("/api/tagger/analyze")

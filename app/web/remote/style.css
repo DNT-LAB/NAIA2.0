@@ -26897,87 +26897,121 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   outline-offset: -1px;
 }
 
-/* ── Image Tagger 결과 창 (WD14, 원격) ─────────────────────────────────────
-   `imgtag-` 접두사로 전부 고유하다 - 뒤쪽 같은 특이도에 밀릴 일이 없어 파일 끝에 둔다. */
+/* ── Image Tagger (WD14, 원격) ────────────────────────
+   `imgtag-` 로 전부 고유하다 - 뒤쪽 같은 특이도에 밀릴 일이 없어 파일 끝에 둔다. */
 .imgtag-popup {
-  position: fixed;
-  z-index: var(--z-floating-module-aux);
+  position: fixed; z-index: var(--z-floating-module-aux);
   left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: min(680px, calc(100vw - 16px));
-  max-height: min(78vh, calc(100vh - 16px));
+  width: min(900px, calc(100vw - 16px));
+  height: min(600px, calc(100vh - 16px));
   display: flex; flex-direction: column;
-  border: 1px solid rgba(240,198,116,0.34);
-  border-radius: 8px;
+  border: 1px solid rgba(130,150,255,0.30); border-radius: 8px;
   background: rgba(15,15,23,0.98);
   box-shadow: 0 18px 42px rgba(0,0,0,0.42);
   overflow: hidden;
 }
+.imgtag-popup.is-over { border-color: var(--accent); }
 .imgtag-head {
   min-height: 32px; display: flex; align-items: center; gap: 8px;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--border-dim);
-  background: rgba(22,24,38,0.9);
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border-dim); background: rgba(22,24,38,0.9);
 }
-.imgtag-title {
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  letter-spacing: 0.4px; color: var(--text-primary);
-}
+.imgtag-title { font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.4px; color: var(--text-primary); }
 .imgtag-status { flex: 1; font-size: 10px; color: var(--text-dim); }
 .imgtag-status.ok { color: var(--success, #4caf50); }
-.imgtag-status.error { color: var(--danger, #e06c75); }
-.imgtag-target {
-  height: 22px; max-width: 168px; padding: 0 6px;
+.imgtag-status.busy { color: var(--accent-glow); }
+.imgtag-target { height: 22px; max-width: 160px; padding: 0 6px;
   border: 1px solid var(--border-dim); border-radius: 5px;
-  background: rgba(0,0,0,0.3); color: var(--text-primary); font-size: 10.5px;
-}
-.imgtag-x {
-  border: 0; background: transparent; color: var(--text-dim);
-  font-size: 16px; line-height: 1; padding: 2px 6px; cursor: pointer;
-}
+  background: rgba(0,0,0,0.3); color: var(--text-primary); font-size: 10.5px; }
+.imgtag-x { border: 0; background: transparent; color: var(--text-dim);
+  font-size: 15px; line-height: 1; padding: 2px 7px; cursor: pointer; }
 .imgtag-x:hover { color: var(--text-primary); }
-/* 외부 전송 고지. 접히거나 스크롤에 묻히면 안 된다 - 머리 바로 밑에 늘 보인다. */
-.imgtag-notice {
-  display: flex; align-items: flex-start; gap: 6px;
-  padding: 7px 12px; font-size: 10.5px; line-height: 1.45;
-  color: #f0c674;
-  background: rgba(240,198,116,0.10);
-  border-bottom: 1px solid rgba(240,198,116,0.28);
-}
+/* 출처 한 줄. 경고가 아니라 표시다(사용자 판단: 검증된 Provider). */
+.imgtag-notice { padding: 5px 12px; font-size: 10px; color: var(--text-dim);
+  border-bottom: 1px solid var(--border-dim); }
 .imgtag-notice:empty { display: none; }
-.imgtag-notice-mark { flex: none; font-size: 11px; }
+.imgtag-notice a { color: var(--accent-glow); text-decoration: none; }
+.imgtag-notice a:hover { text-decoration: underline; }
 /* ⚠️ `min-height: 0` 이 없으면 flex 자식이 내용만큼 부풀어 스크롤이 안 생긴다. */
-.imgtag-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 12px; }
-.imgtag-hint { font-size: 11px; color: var(--text-dim); padding: 12px 2px; line-height: 1.6; }
-.imgtag-section { padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-.imgtag-section:last-child { border-bottom: 0; }
-/* 첫 칸(Full Prompt)은 나머지와 격을 달리한다 - 상단이라는 것이 보여야 한다. */
-.imgtag-section:first-child { padding-top: 2px; border-bottom-color: rgba(240,198,116,0.24); }
-.imgtag-section-head {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+.imgtag-body { flex: 1; min-height: 0; display: flex; gap: 10px; padding: 10px; }
+.imgtag-left { flex: 0 0 216px; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.imgtag-left-head { font-family: var(--font-mono); font-size: 9.5px;
+  letter-spacing: 0.4px; color: var(--text-dim); }
+.imgtag-list { flex: 1; min-height: 0; overflow-y: auto; display: flex;
+  flex-direction: column; gap: 4px; }
+.imgtag-empty { font-size: 10.5px; color: var(--text-dim); padding: 10px 2px; }
+.imgtag-item {
+  display: flex; align-items: center; gap: 7px; padding: 4px 6px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.26); color: var(--text-primary);
+  font-size: 10.5px; cursor: pointer; text-align: left;
 }
-.imgtag-section-title {
-  flex: 1; min-width: 0;
-  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
-  color: var(--text-primary); letter-spacing: 0.3px;
+.imgtag-item:hover { border-color: var(--accent); }
+.imgtag-item.is-active { border-color: var(--accent); background: rgba(90,120,255,0.16); }
+.imgtag-thumb { flex: none; width: 30px; height: 30px; object-fit: cover;
+  border-radius: 4px; background: rgba(0,0,0,0.4); }
+.imgtag-item-name { flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.imgtag-badge { flex: none; display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 3px 1px 6px; border-radius: 4px; font-size: 9px;
+  background: rgba(90,120,255,0.22); color: #b9c6ff; }
+.imgtag-badge.is-err { background: rgba(224,108,117,0.2); color: #e79aa1; padding: 1px 6px; }
+.imgtag-badge.is-off { background: rgba(255,255,255,0.08); color: var(--text-dim); padding: 1px 6px; }
+.imgtag-badge-x { border: 0; background: transparent; color: inherit;
+  font-size: 12px; line-height: 1; padding: 0 3px; cursor: pointer; }
+.imgtag-badge-x.is-solo { color: var(--text-dim); opacity: 0; }
+.imgtag-item:hover .imgtag-badge-x.is-solo { opacity: 1; }
+.imgtag-badge-x:hover { color: #fff; }
+.imgtag-add { height: 26px; border: 1px dashed var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.22); color: var(--text-dim); font-size: 10.5px; cursor: pointer; }
+.imgtag-add:hover { border-color: var(--accent); color: var(--text-primary); }
+.imgtag-right { flex: 1; min-width: 0; min-height: 0; display: flex;
+  flex-direction: column; gap: 8px; }
+/* 거울 + textarea. **여백·글꼴·줄높이가 한 필이라도 다르면 글자가 어긋난다** -
+   그래서 두 규칙이 같은 값을 쓴다. 고칠 때 반드시 둘 다 고칠 것. */
+.imgtag-editor { position: relative; flex: 1; min-height: 0;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.3); overflow: hidden; }
+.imgtag-editor:focus-within { border-color: var(--accent); }
+.imgtag-mirror, .imgtag-area {
+  position: absolute; inset: 0; margin: 0;
+  padding: 8px 10px; border: 0; box-sizing: border-box;
+  font-family: var(--font-editor); font-size: 11.5px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+  overflow-y: auto;
 }
-.imgtag-acts { display: flex; gap: 4px; flex: none; }
-.imgtag-act {
-  height: 21px; padding: 0 8px;
-  border: 1px solid var(--border-dim); border-radius: 4px;
-  background: rgba(0,0,0,0.28); color: var(--text-dim);
-  font-size: 10px; cursor: pointer;
-}
-.imgtag-act:hover { border-color: var(--accent); color: var(--text-primary); }
+.imgtag-mirror { color: var(--text-primary); pointer-events: none; z-index: 0; }
+/* 사용자 지정: "#로 기입되는 주석형 컨텐츠들은 전부 연노랑색 하이라이팅" */
+.imgtag-cmt { color: #f2e2a6; }
 .imgtag-area {
-  width: 100%; resize: vertical; box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--border-dim); border-radius: 5px;
-  background: rgba(0,0,0,0.3); color: var(--text-primary);
-  font-family: var(--font-editor); font-size: 11.5px; line-height: 1.5;
-  outline: none;
+  z-index: 1; background: transparent; resize: none; outline: none;
+  color: transparent; -webkit-text-fill-color: transparent;
+  caret-color: var(--text-primary);
 }
-.imgtag-area:focus { border-color: var(--accent); }
-@media (max-width: 640px) {
-  .imgtag-section-head { flex-wrap: wrap; }
-  .imgtag-target { max-width: 118px; }
+/* placeholder 는 거울이 못 그린다 - textarea 쪽에서만 보이게 색을 되돌린다. */
+.imgtag-area::placeholder { color: var(--text-dim); -webkit-text-fill-color: var(--text-dim); }
+.imgtag-acts { display: flex; gap: 5px; justify-content: flex-end; }
+.imgtag-act { height: 24px; padding: 0 12px;
+  border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(0,0,0,0.28); color: var(--text-dim);
+  font-size: 10.5px; cursor: pointer; }
+.imgtag-act:hover { border-color: var(--accent); color: var(--text-primary); }
+/* 최소화 칩 - Interactive 의 Recent/Scene 과 같은 자리(사용자 지정). */
+.imgtag-chip-float { position: fixed; z-index: 1; display: none; gap: 4px; }
+.imgtag-chip-float.open { display: flex; }
+.imgtag-chip-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 6px; cursor: pointer;
+  background: rgba(20,20,28,0.62); border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-secondary); font-size: 10.5px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.imgtag-chip-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.imgtag-chip-btn.is-x { padding: 3px 8px; }
+.imgtag-chip-count { font-family: var(--font-mono); font-size: 9.5px;
+  padding: 0 4px; border-radius: 999px; background: rgba(90,120,255,0.3); color: #cdd8ff; }
+@media (max-width: 700px) {
+  .imgtag-body { flex-direction: column; }
+  .imgtag-left { flex: 0 0 150px; }
 }

@@ -2399,7 +2399,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter3')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-tagfilter4')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,
@@ -9067,11 +9067,31 @@ function copyCloudflaredUrl() {
 //
 // ⚠️ 칩 목록은 quickFilter 가 소유한다 - 여기서 직접 만지지 않고 API 로만 넘긴다.
 //    두 곳이 만지면 화면의 칩과 실제 적용된 필터가 갈린다.
+let promptTagFilterBusy = false;
+
 async function addPromptTagToFilter(action, tag) {
   if (!quickFilter) {
     showToast('Tag Filter 가 아직 준비되지 않았습니다.', 'error');
     return;
   }
+  // ⚠️ 한 번에 하나만 처리한다(Codex 지적). `flushAssignedOnce` 는 요청을 가리지 않고
+  //    **대기 중인 콜백을 전부** 깨우므로, 첫 assign 이 끝나기 전에 두 번째 태그를
+  //    누르면 두 호출이 함께 확인창을 연다. 확인창은 싱글턴이라 나중 것이 앞의 것을
+  //    `null` 로 닫아 버리고, `null` 은 되돌리기가 아니라서 **첫 변경이 확인 없이
+  //    남는다.** 둘째의 되돌리기도 둘째 직전까지만 되돌린다.
+  if (promptTagFilterBusy) {
+    showToast('앞선 Tag Filter 변경을 처리하는 중입니다.', 'info');
+    return;
+  }
+  promptTagFilterBusy = true;
+  try {
+    await runPromptTagFilterAction(action, tag);
+  } finally {
+    promptTagFilterBusy = false;
+  }
+}
+
+async function runPromptTagFilterAction(action, tag) {
   const before = quickFilter.snapshotTags();
   const beforeCount = currentPromptPoolCount();
   const found = quickFilter.findTag(tag);

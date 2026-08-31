@@ -444,9 +444,23 @@ export function createChunkPanel({
     while (value.startsWith('(') && (value.split('(').length > value.split(')').length)) {
       value = value.slice(1).trimStart();
     }
+    let closedGroup = false;
     while (value.endsWith(')') && (value.split(')').length > value.split('(').length)) {
       value = value.slice(0, -1).trimEnd();
+      closedGroup = true;
     }
+    // ⚠️ e621 은 그룹의 **마지막 태그**에 `:<가중치>)` 를 붙인다. 닫는 괄호만 떼면
+    //    `panting:0.8` 이 남아 실제 `panting` 과 안 맞는다(Codex 지적, 실측 확인).
+    //    그룹을 실제로 닫았을 때만 벗긴다 - 아무 태그에서나 `:숫자` 를 떼면
+    //    이름에 콜론이 든 정상 태그를 망가뜨린다.
+    if (closedGroup) value = value.replace(/:\s*-?\d+(?:\.\d+)?$/, '').trimEnd();
+
+    // ⚠️ non-NAI 는 리터럴 괄호를 이스케이프해 둔다. 커서 경로는 tagAssist 가 이미
+    //    되돌려 주는데 **선택 경로에는 그 단계가 없어**, 드래그하면
+    //    `hakurei reimu \(touhou\)` 가 그대로 필터에 박혔다(백엔드도 백슬래시를
+    //    보존한다). 괄호를 다 정리한 **뒤에** 되돌린다.
+    value = value.replace(/\\([()])/g, '$1');
+
     value = value.trim();
     return value.startsWith('#') ? '' : value;
   }

@@ -2210,7 +2210,7 @@ function setExtensionLauncherItems(items, onClick) {
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
 }
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-available')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-sections')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,

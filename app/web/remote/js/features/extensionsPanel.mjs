@@ -83,6 +83,10 @@ export function createExtensionsUi(deps) {
   let installState = null;
   let installUrlDraft = '';
   let installPollTimer = null;
+  // 섹션 접힘 상태 — **기본은 전부 펼침**(사용자 지정 2026-08-31).
+  // ⚠️ `renderSettingsPane()` 이 innerHTML 을 통째로 다시 그린다. DOM 에 두면
+  //    상태 갱신(설치 진행·토글 등)마다 도로 펼쳐진다.
+  const collapsed = {installed: false, available: false};
 
   // ── 공용: 칩/필드 렌더러 (설정 페이지·퀵 팝업 공유) ──────────
   function chipFor(ext) {
@@ -603,6 +607,17 @@ export function createExtensionsUi(deps) {
     }
   }
 
+  // 접고 펼치는 섹션 머리. 개수를 함께 보여 줘 접어 둔 채로도 몇 개인지 알 수 있게 한다.
+  function sectionHeadHtml(key, title, count) {
+    const isOpen = !collapsed[key];
+    return `<button type="button" class="ext-section-head" data-section="${key}"
+      aria-expanded="${isOpen ? 'true' : 'false'}">
+      <span class="ext-section-caret">${isOpen ? '▾' : '▸'}</span>
+      <span class="ext-section-title">${escHtml(title)}</span>
+      ${count == null ? '' : `<span class="ext-section-count">${count}</span>`}
+    </button>`;
+  }
+
   // 설치 가능한 확장 표 — [ 이름 | 설명 | GitHub 링크 ] [ 설치 ] (사용자 지정 구조).
   function availableExtensionsHtml() {
     const urls = installedRepoUrls();
@@ -626,8 +641,8 @@ export function createExtensionsUi(deps) {
       </div>`;
     }).join('');
     return `<div class="ext-avail">
-      <div class="ext-avail-head">설치할 수 있는 확장</div>
-      ${rows}
+      ${sectionHeadHtml('available', '설치할 수 있는 확장', AVAILABLE_EXTENSIONS.length)}
+      ${collapsed.available ? '' : rows}
     </div>`;
   }
 
@@ -643,7 +658,7 @@ export function createExtensionsUi(deps) {
         <button class="ext-copy-install">복사</button>
         ${errors ? `<button class="ext-retry-all">오류 ${errors}건 재시도</button>` : ''}
       </div>${installFormHtml()}`;
-    const body = items.length
+    const listHtml = items.length
       ? items.map(rowHtml).join('')
       : `<div class="ext-empty">설치된 확장이 없습니다.<br>
            위 폴더에 <code>&lt;확장-id&gt;/extension.json + main.py</code>를 넣으면 이 목록에 나타납니다.<br>
@@ -651,6 +666,10 @@ export function createExtensionsUi(deps) {
            <div class="ext-empty-cta">
              <button type="button" class="ext-install-sample">샘플 바로 사용하기</button>
            </div></div>`;
+    const body = `<div class="ext-installed">
+      ${sectionHeadHtml('installed', '설치된 확장', items.length)}
+      ${collapsed.installed ? '' : listHtml}
+    </div>`;
     root.innerHTML = `<div class="ext-panel">${head}${body}${availableExtensionsHtml()}</div>`;
     bindSettingsPane(root);
     restoreFocus(root, saved);
@@ -713,6 +732,14 @@ export function createExtensionsUi(deps) {
         if (event.key === 'Enter') { event.preventDefault(); startInstall(urlInput.value); }
       });
     }
+    root.querySelectorAll('.ext-section-head').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.section;
+        if (!(key in collapsed)) return;
+        collapsed[key] = !collapsed[key];
+        renderSettingsPane();
+      });
+    });
     root.querySelectorAll('.ext-avail-install').forEach((btn) => {
       btn.addEventListener('click', () => {
         if (btn.disabled) return;

@@ -20978,6 +20978,44 @@ body.detached-module .mod-grid-3 {
 }
 .ext-apply-hint { margin-left: 5px; font-size: 9px; color: var(--text-muted); }
 .ext-field-error { width: 100%; font-size: 10px; color: #ff7a7a; margin-left: 118px; }
+/* 접고 펼치는 섹션 머리 (사용자 지정 2026-08-31: 기본 전부 펼침).
+   ⚠️ 클릭 대상이 <button> 이므로 폼 기본 스타일을 걷어내야 줄로 보인다. */
+.ext-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 14px;
+  border: 0;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-align: left;
+  cursor: pointer;
+}
+.ext-section-head:hover { background: rgba(255,255,255,0.07); }
+.ext-section-caret { color: var(--text-muted); font-size: 10px; width: 10px; }
+.ext-section-title { flex: 1; }
+.ext-section-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(232,232,240,0.10);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.ext-installed {
+  margin-top: 12px;
+  border: 1px solid rgba(232,232,240,0.12);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ext-installed .ext-section-head { border-bottom: 1px solid rgba(232,232,240,0.10); }
+.ext-installed[data-empty] .ext-section-head { border-bottom: 0; }
+
 /* 설치할 수 있는 확장 (사용자 지정 2026-08-31). A1111 의 Available 탭과 같은 역할이나
    원격 인덱스가 아니라 **앱에 박아 둔 고정 목록**이다. */
 .ext-avail {
@@ -20986,15 +21024,7 @@ body.detached-module .mod-grid-3 {
   border-radius: 10px;
   overflow: hidden;
 }
-.ext-avail-head {
-  padding: 9px 14px;
-  background: rgba(255,255,255,0.04);
-  border-bottom: 1px solid rgba(232,232,240,0.10);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
+.ext-avail .ext-section-head { border-bottom: 1px solid rgba(232,232,240,0.10); }
 .ext-avail-row {
   display: flex;
   align-items: flex-start;

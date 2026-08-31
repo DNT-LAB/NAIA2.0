@@ -304,6 +304,16 @@ export function createInpaintCanvasPanel({
           ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 방향키=1px(Shift 16) · 0=초기화 · 숫자 위치는 POS 에서'
           : '생성 결과를 보는 중입니다.'}</span>
       </div>
+      ${state.canvas_purpose === 'character_asset' ? `
+      <div class="ic-bar ic-bar-asset ic-nowrap">
+        <span class="ic-asset-label">캐릭터 에셋 액자</span>
+        <span class="ic-asset-hint">액자 안에 스탠딩을 맞춘 뒤 저장하세요.</span>
+        <span class="ic-spacer"></span>
+        <button type="button" class="ic-btn ic-btn-asset" data-ic="asset-save-frame"
+          title="지금 액자에 놓인 그대로 저장합니다 (생성하지 않음)">이 프레임으로 저장</button>
+        <button type="button" class="ic-btn" data-ic="asset-save-generated"
+          title="빈 곳을 인페인트로 메운 뒤 그 결과를 저장합니다 (Anlas 소모)">생성 후 저장</button>
+      </div>` : ''}
       <div class="ic-cols">
         <section class="ic-col" aria-label="캔버스">
           <div class="ic-row">
@@ -356,16 +366,6 @@ export function createInpaintCanvasPanel({
     const genTitle = state.requires_mask
       ? ' title="생성 전에 마스크를 칠하거나 베이스를 옮겨 빈 자리를 여세요"' : '';
     return `
-      ${state.canvas_purpose === 'character_asset' ? `
-      <section class="ic-col ic-col-asset" aria-label="캐릭터 에셋 액자">
-        <div class="ic-row">
-          <span class="ic-label ic-asset-label">캐릭터 에셋 액자</span>
-          <button type="button" class="ic-btn ic-btn-asset" data-ic="asset-save-frame"
-            title="지금 액자에 놓인 그대로 저장합니다 (생성하지 않음)">이 프레임으로 저장</button>
-          <button type="button" class="ic-btn" data-ic="asset-save-generated"
-            title="빈 곳을 인페인트로 메운 뒤 그 결과를 저장합니다 (Anlas 소모)">생성 후 저장</button>
-        </div>
-      </section>` : ''}
       <section class="ic-col" aria-label="인페인트 실행">
         <div class="ic-row">
           <button type="button" class="ic-btn ic-btn-mask" data-ic="mask" ${editing ? '' : 'disabled'}>마스크 그리기</button>

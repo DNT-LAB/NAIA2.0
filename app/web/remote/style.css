@@ -27064,7 +27064,23 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ext-safe-btn:hover { border-color: var(--accent); }
 .ext-safe-btn:disabled { opacity: 0.5; cursor: default; }
 
-/* 캐릭터 에셋 액자 줄 - 평소 인페인트에는 안 보인다(canvas_purpose 로 가른다). */
-.ic-col-asset { border-left: 2px solid rgba(240,198,116,0.45); padding-left: 8px; }
-.ic-asset-label { color: #f0c674; }
+/* 캐릭터 에셋 액자 줄 - 평소 인페인트에는 안 보인다(canvas_purpose 로 가른다).
+   ⚠️ 열(`ic-cols`) 안에 끼우면 자리가 없어 마스크 버튼과 **글자가 겹쳤다**
+   (사용자 지적 2026-08-31). 머리 줄 바로 아래 **자기 줄**로 뺀다. */
+.ic-bar-asset {
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(240,198,116,0.28);
+  background: rgba(240,198,116,0.08);
+}
+.ic-asset-label {
+  flex: none; color: #f0c674;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+}
+/* 좁아지면 설명부터 접는다 - 버튼이 먼저 밀리면 안 된다. */
+.ic-asset-hint { flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; color: var(--text-dim); }
 .ic-btn-asset { border-color: rgba(240,198,116,0.5); color: #f0c674; }
+.ic-bar-asset .ic-btn { flex: none; }
+@media (max-width: 900px) { .ic-asset-hint { display: none; } }

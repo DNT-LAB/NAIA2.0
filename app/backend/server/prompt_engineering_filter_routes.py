@@ -80,29 +80,21 @@ def _sorted_category_tags(context: Any, category: str):
 
 
 def classify_tag_payload(context: Any, tag: str) -> tuple[dict[str, Any], int]:
-    """우클릭 '자동 숨김' 두 항목의 **활성/비활성**을 한 번에 답한다.
+    """우클릭 '자동 숨김 (랜덤 프롬프트 - X)' 항목의 이름과 활성 여부.
 
-    indexed - Tag Index 에 색인된 태그인가       -> Auto-Hide 항목
-    known   - 개별 카테고리 그룹에 속하는가       -> 랜덤 프롬프트 항목 (label 이 그 이름)
+    known=True 면 그 태그가 개별 카테고리 그룹에 속한다는 뜻이고, label 이 그 이름이다.
+    어느 그룹에도 없으면 랜덤 프롬프트로 나오지 않으므로 화면이 그 항목을 막는다.
 
-    조회 하나가 두 판정을 다 내므로 화면은 왕복을 한 번만 한다. 색인에 없는 글자
-    (부분 선택 · 여러 태그를 한꺼번에 끈 것)는 indexed=False 라 두 항목 모두 막힌다
-    - 그래서 따로 위생화 규칙을 둘 필요가 없다.
+    ⚠️ **Auto-Hide 항목은 여기를 보지 않는다**(사양 변경 2026-08-31). Tag Index 수록
+       여부로 막았더니 실재하지만 미수록인 태그를 숨길 방법이 없었다.
     """
-    from app.backend.server.autocomplete_commands import ensure_tag_search_index
-
     text = str(tag or "").strip()
     if not text:
-        return {"tag": "", "indexed": False, "known": False, "category": "", "label": ""}, 200
-    try:
-        indexed = ensure_tag_search_index(context).entry_for(text) is not None
-    except Exception:
-        indexed = False
+        return {"tag": "", "known": False, "category": "", "label": ""}, 200
     service = context._prompt_engineering_service()
     option_key, label = service._classify_hidden_tag(text)
     return {
         "tag": text,
-        "indexed": indexed,
         "known": bool(option_key),
         "category": option_key,
         "label": label,

@@ -63,9 +63,17 @@ class HeadlessPromptEngineeringService:
 
     @staticmethod
     def _clean_hidden_tag(value: Any) -> str:
-        # 위생화 규칙을 따로 두지 않는다 - 화면이 Tag Index 조회로 이미 걸러,
-        # 색인에 없는 글자(부분 선택 · 여러 태그를 한꺼번에 끈 것)로는 버튼이 안 눌린다.
-        return str(value or '').strip()
+        """태그 하나만 받는다. 쉼표·개행이 들어오면 거절한다.
+
+        ⚠️ Auto-Hide 항목이 색인 여부를 안 보게 되면서(사양 변경 2026-08-31) 이 문이
+           다시 열렸다. 여러 태그를 한꺼번에 끌어 놓으면 `a, b` 가 **한 항목으로**
+           박혀 어떤 태그와도 안 맞는 죽은 줄이 남는다. 미수록 태그는 통과시키되
+           태그가 아닌 것은 막는다 - 이 둘은 다른 이야기다.
+        """
+        text = str(value or '').strip().strip(',').strip()
+        if not text or ',' in text or chr(10) in text:
+            return ''
+        return text
 
     def _classify_hidden_tag(self, tag: str) -> tuple[str, str]:
         """(option_key, 카테고리 이름). 어느 사전에도 없으면 ("", "").

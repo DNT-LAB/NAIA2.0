@@ -1292,7 +1292,7 @@ async function runImageTagger(payload) {
     release();
   }
 }
-const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-onechip')
+const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260831-lower1')
   .then(({createImageTaggerResultPanel}) => {
     imageTaggerPanel = createImageTaggerResultPanel({
       document,
@@ -2567,7 +2567,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-autohide1')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-autohide2')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,
@@ -3764,6 +3764,9 @@ const optBoxes = {
   auto_generate: $('optAutoGen'),
   wildcard_standalone: $('optWcStandalone'),
   nai_streaming_preview: $('optNaiStreaming'),
+  // Tag Filter 패널 안에 있지만 상태 통로는 다른 토글과 완전히 같다 - 여기 없으면
+  // 서버가 보낸 값이 화면에 안 붙어 새로고침 때마다 꺼진 것처럼 보인다.
+  stop_autogen_on_tag_exhaust: $('optStopAutogenOnExhaust'),
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
@@ -10021,7 +10024,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260829-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260831-tagfilter2')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260831-noseedwarn')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

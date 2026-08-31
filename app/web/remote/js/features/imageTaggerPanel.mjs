@@ -276,6 +276,30 @@ export function createImageTaggerResultPanel({
     positionChip();
   }
 
+  // 창을 **아래로** 내린다(사용자 지정 2026-08-31: 가운데에 뜨면 그림 위쪽을 가린다).
+  //
+  // ⚠️ 결과 정보 패널(#resultInfoPanel)은 **드래그로 높이가 변한다** - CSS 에 고정
+  //    offset 을 박으면 사용자가 그 패널을 키우는 순간 창이 그 아래로 파묻힌다.
+  //    그래서 칩과 **같은 기준**을 실측해서 쓴다.
+  function positionPopup() {
+    if (!popup || minimized) return;
+    const stage = document.querySelector('.viewer-wrapper');
+    const info = document.querySelector('.result-info-panel');
+    if (!stage) return;
+    const box = stage.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return;
+    popup.style.top = 'auto';
+    popup.style.transform = 'none';
+    popup.style.right = `${Math.round(win.innerWidth - box.right + 14)}px`;
+    const infoTop = info ? info.getBoundingClientRect().top : box.bottom;
+    const wanted = win.innerHeight - Math.min(infoTop, box.bottom) + 10;
+    popup.style.bottom = `${Math.round(wanted)}px`;
+    // ⚠️ 자리가 모자라면 **창을 줄인다.** 예전에는 위로 넘친 만큼 아래로 밀었는데,
+    //    그러면 결과 정보 패널을 그대로 덮는다(실측 2026-08-31: 패널을 260px 로
+    //    키우니 창이 68px 겹쳤다). 밀지 말고 남은 높이에 맞춰야 둘 다 보인다.
+    const room = Math.min(infoTop, box.bottom) - box.top - 18;
+    popup.style.maxHeight = `${Math.round(Math.max(160, room))}px`;
+  }
   function positionChip() {
     if (!chip || !minimized) return;
     const stage = document.querySelector('.viewer-wrapper');
@@ -317,6 +341,7 @@ export function createImageTaggerResultPanel({
     renderChip();
     if (!popup) build();
     popup.style.display = '';
+    positionPopup();
     render();
   }
 
@@ -467,7 +492,8 @@ export function createImageTaggerResultPanel({
     popup.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); minimize(); }
     });
-    win.addEventListener('resize', positionChip);
+    win.addEventListener('resize', () => { positionChip(); positionPopup(); });
+    positionPopup();
   }
 
   /** 바깥(DETECTED IMAGE 팝업)에서 이미지를 밀어 넣는 문. */
@@ -478,6 +504,7 @@ export function createImageTaggerResultPanel({
     minimized = false;
     popup.style.display = '';
     renderChip();
+    positionPopup();
     const file = blob;
     // ⚠️ `addFiles` 만 상한을 보던 탓에 이 문(DETECTED IMAGE 팝업)으로는 무제한으로
     //    쌓였다 - 미리보기 blob 이 계속 는다(Codex CONCERN).

@@ -12395,6 +12395,52 @@ body.detached-metadata .metadata-layout {
   flex-direction: column;
   gap: 8px;
 }
+/* 일괄 저장 번호 순서(사용자 요청 2026-08-31).
+   ⚠️ 이 네 규칙이 **없이 나갔다** - 마크업만 넣고 스타일을 안 써서 브라우저 기본
+      버튼(흰 배경·검은 글씨)이 그대로 보였다(사용자 제보). 클래스를 새로 만들면
+      CSS 도 같은 커밋에 넣을 것. */
+.auto-save-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.auto-save-order-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+/* 둘 중 하나를 고르는 칸이라 붙여 놓는다 - 가운데 테두리를 겹쳐 한 덩어리로 보이게. */
+.auto-save-order-seg {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-dim);
+}
+.auto-save-order-btn {
+  padding: 5px 11px;
+  border: 0;
+  border-left: 1px solid var(--border-dim);
+  background: rgba(0,0,0,0.26);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.auto-save-order-btn:first-child {
+  border-left: 0;
+}
+.auto-save-order-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.06);
+}
+.auto-save-order-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
 .auto-save-unsaved-section {
   display: flex;
   align-items: center;
@@ -18198,6 +18244,22 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   background: rgba(244,67,54,0.12); border-color: rgba(244,67,54,0.3);
   color: #f47066;
 }
+/* Auto Gen 중 소진 시 중단 스위치(사용자 지정 2026-08-31). 액션 줄 바로 위에 둔다 -
+   이 필터가 다 떨어졌을 때의 행동이라 필터 옆에 있어야 뜻이 통한다. */
+.tag-filter-stop-row {
+  display: flex;
+  margin-bottom: 6px;
+}
+.tag-filter-stop-toggle {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 7px;
+}
+.tag-filter-stop-toggle .opt-label {
+  font-size: 10.5px;
+  white-space: normal;
+  text-align: left;
+}
 .tag-filter-actions {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding-top: 4px;
@@ -21057,6 +21119,31 @@ body.detached-module .mod-grid-3 {
 .ext-avail-inline-link:hover { text-decoration: underline; }
 /* [설치됨] 아래에 [업데이트 확인] - 세로로 쌓는다(사용자 지정 2026-08-31). */
 .ext-avail-actions { display: flex; flex-direction: column; gap: 4px; flex: none; }
+/* 확장 탈출구 줄(사용자 제보 2026-08-31: 글자와 버튼이 기본 스타일로 보였다).
+   ⚠️ `auto-save-order-*` 와 같은 실수였다 - 마크업만 넣고 CSS 를 안 썼다. */
+.ext-safe-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; padding: 7px 9px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(18,18,28,0.72);
+}
+/* 확장이 실제로 화면 코드를 바꾸고 있을 때만 경고색 - 평소에는 조용하다. */
+.ext-safe-row.is-warn {
+  border-color: rgba(240,198,116,0.45);
+  background: rgba(60,48,18,0.34);
+}
+.ext-safe-text {
+  flex: 1; min-width: 0;
+  color: var(--text-dim); font-size: 10.5px; line-height: 1.5;
+}
+.ext-safe-row.is-warn .ext-safe-text { color: #f0c674; }
+.ext-safe-btn {
+  height: 22px; padding: 0 9px;
+  border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(0,0,0,0.26); color: var(--text-dim);
+  font-size: 10px; cursor: pointer; white-space: nowrap;
+}
+.ext-safe-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .ext-avail-update {
   height: 22px; padding: 0 8px;
   border: 1px solid var(--border-dim); border-radius: 5px;
@@ -26941,7 +27028,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    `imgtag-` 로 전부 고유하다 - 뒤쪽 같은 특이도에 밀릴 일이 없어 파일 끝에 둔다. */
 .imgtag-popup {
   position: fixed; z-index: var(--z-floating-module-aux);
-  right: 14px; top: 50%; transform: translateY(-50%);
+  /* 아래쪽에 앉힌다(사용자 지정 2026-08-31). 정확한 값은 JS 가 결과 정보 패널을
+     실측해서 덮어쓴다 - 그 패널은 드래그로 높이가 변하기 때문이다. */
+  right: 14px; bottom: 96px;
   width: min(430px, calc(100vw - 20px));
   height: min(520px, calc(100vh - 90px));
   display: flex; flex-direction: column;

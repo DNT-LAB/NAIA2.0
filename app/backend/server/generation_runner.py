@@ -1388,6 +1388,22 @@ async def _maybe_continue_auto_generation(
             if not story_run_id and not is_special_request(params, context._coerce_bool):
                 from app.backend.server.generation_commands import apply_ollama_auto_boost
                 await apply_ollama_auto_boost(context, result)
+        # ⚠️ **풀이 비었으면 수동 Random 과 똑같이 되살린다**(사용자 지정 2026-08-31).
+        #    예전에는 회복이 수동 경로에만 있어서, Auto Gen 도중 태그가 소진되면
+        #    생성만 멈추고 Auto Gen 은 켜진 채로 남았다. 사양은 한 자리에 있고
+        #    (`recover_exhausted_random_pool`) 둘이 같이 쓴다.
+        #    사용자가 Tag Filter 의 [Auto Gen 상태에서 태그 소진시 자동 중단] 을 켜 두면
+        #    되살리지 않는다 - 아래 실패 분기가 Auto Gen 체크까지 함께 해제한다.
+        stop_on_exhaust = context._coerce_bool(
+            context.get_options().get("stop_autogen_on_tag_exhaust", False))
+        if not stop_on_exhaust:
+            from app.backend.server.generation_commands import recover_exhausted_random_pool
+            result = await recover_exhausted_random_pool(
+                context, clients, result,
+                active_ratings=context.get_active_ratings(),
+                overrides=overrides,
+                request_id=request_id,
+            )
         await persist_prompt_engineering_settings(context)
         # Use Vibe 인코딩(2 Anlas)이 이 페이지 전진에서 일어났다면 잔액 차감 즉시 반영
         # (자동 사이클 continuation 경로).
@@ -1398,8 +1414,18 @@ async def _maybe_continue_auto_generation(
             await broadcast_json(clients, {
                 "type": "toast",
                 "level": "error",
-                "message": payload.get("message") or "Auto Generate stopped: random prompt failed.",
+                "message": (
+                    "태그를 다 써서 Auto Gen 을 멈췄습니다. (Tag Filter 의 자동 중단 설정)"
+                    if stop_on_exhaust else
+                    (payload.get("message") or "Auto Generate stopped: random prompt failed.")
+                ),
             })
+            # ⚠️ 루프만 끝내고 스위치를 켜 둔 채 나가면, 화면은 '돌고 있다' 고 말하는데
+            #    아무것도 안 돈다(사용자 제보 2026-08-31). 회복까지 실패했으면 끈다.
+            if not story_run_id and not automation_run_id:
+                if context._coerce_bool(context.get_options().get("auto_generate", False)):
+                    context.set_option("auto_generate", False)
+                    await broadcast_json(clients, {"type": "options", **context.get_options()})
             if story_run_id:
                 failure = context._storyteller_service().fail(
                     story_run_id,

@@ -503,12 +503,13 @@ export function createChunkPanel({
 
   // ── 자동 숨김(사용자 지정 2026-08-31) ────────────────────────────────
   //
-  // 판정은 **조회 한 번**이 다 한다(사용자 지정):
-  //   indexed - Tag Index 에 있는 태그인가  -> Auto-Hide 항목을 켠다
-  //   known   - 개별 그룹에 속하는가        -> 랜덤 프롬프트 항목을 켠다
+  // **Auto-Hide 는 언제나 열려 있다**(사양 변경 2026-08-31). Tag Index 는 NAIA 가
+  // 수록했는지일 뿐이라, 실재하지만 미수록인 태그(`full page comic` 등)를 막으면
+  // 그것들을 숨길 방법이 아예 없어진다.
   //
-  // 색인에 없는 글자(부분 선택 등)는 둘 다 막힌다 - 그것으로 충분해서 따로
-  // 위생화 규칙을 두지 않는다. 넣는 것은 **고른 태그 그대로**, 묶음 문법 없이.
+  // 랜덤 프롬프트 항목만 조회로 가른다 - 개별 그룹에 속해야 그 이름을 지을 수 있고,
+  // 어느 그룹에도 없으면 랜덤 프롬프트로 나오지 않아 숨길 자리가 없다.
+  // 넣는 것은 **고른 태그 그대로**, 묶음 문법 없이.
   const classifyCache = new Map();
 
   async function classifyTag(tag) {
@@ -543,19 +544,18 @@ export function createChunkPanel({
     const slot = menu.querySelector('[data-hide-slot]');
     if (!slot) return;
     if (!tag) { slot.innerHTML = ''; return; }
-    const paint = (indexed, label) => {
+    const paint = label => {
       slot.innerHTML =
-        hideItemHtml('hide-auto', '자동 숨김 <b>(Auto-hide 에 추가)</b>',
-          {tag, disabled: !indexed})
+        hideItemHtml('hide-auto', '자동 숨김 <b>(Auto-hide 에 추가)</b>', {tag})
         + hideItemHtml('hide-category',
           `자동 숨김 <b>(랜덤 프롬프트 - ${escHtml(label || '없음')})</b>`,
           {tag, disabled: !label});
     };
-    paint(false, '');
+    paint('');
     classifyTag(tag).then(info => {
       // 늦게 온 응답이 다음 태그의 메뉴를 덮지 않게 한다.
       if (!selectionMenuPayload || selectionMenuPayload.filterTag !== tag) return;
-      paint(!!(info && info.indexed), (info && info.known && info.label) || '');
+      paint((info && info.known && info.label) || '');
     });
   }
   function showSelectionMenu(target, event, extra = {}) {

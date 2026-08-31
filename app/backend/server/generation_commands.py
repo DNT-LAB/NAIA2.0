@@ -445,6 +445,63 @@ def _reset_random_pool_to_gsqe(context: WebSessionContext) -> dict[str, Any]:
     return clear_active_tag_filter(context, False)
 
 
+async def recover_exhausted_random_pool(
+    context: WebSessionContext,
+    clients,
+    result,
+    *,
+    active_ratings,
+    overrides,
+    request_id: str,
+):
+    """랜덤 풀이 비어 실패했으면 되살리고 한 번 더 뽑는다. 회복이 필요 없으면 받은 그대로 돌려준다.
+
+    ⚠️ **이 함수를 부르는 자리가 둘이다** - 수동 Random 과 Auto Gen 연쇄 루프.
+       예전에는 수동 쪽에만 있어서, Auto Gen 도중 태그가 소진되면 생성만 멈추고
+       Auto Gen 은 켜진 채로 남았다(사용자 제보 2026-08-31). 사양은 한 자리에
+       두고 둘이 같이 쓴다 - 한쪽만 고치면 안 고친 것이다.
+
+    순서:
+      ① 검색이 적용된 순간의 **스냅샷 복원** - 등급도 칩도 건드리지 않는다.
+      ② 스냅샷이 없을 때만 예전 경로(등급을 전체로 열고 필터 할당 해제).
+    """
+    if result.success or bool((overrides or {}).get("wildcard_standalone")):
+        return result
+    pool_already_full = set(active_ratings) == {"g", "s", "q", "e"} and not (
+        getattr(context, "active_tag_filter", None) or getattr(context, "active_tag_filter_ids", None)
+    )
+    if pool_already_full or not _random_pool_has_hidden_rows(context):
+        return result
+
+    restored = await asyncio.to_thread(_restore_tag_filter_snapshot, context)
+    if restored is not None:
+        await _broadcast_json(clients, restored)
+        await _broadcast_json(clients, {
+            "type": "toast",
+            "level": "info",
+            "message": "랜덤 풀을 다 써서 검색 시점으로 되돌렸습니다. (등급·필터 그대로)",
+        })
+        return await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=active_ratings,
+            overrides=overrides,
+            random_request_id=request_id,
+        )
+
+    recovered_state = await asyncio.to_thread(_reset_random_pool_to_gsqe, context)
+    await _broadcast_json(clients, recovered_state)
+    await _broadcast_json(clients, {
+        "type": "toast",
+        "level": "warning",
+        "message": "랜덤 풀이 비어 있어 등급을 전체(G/S/Q/E)로 열고 태그 필터를 해제했습니다. (저장한 필터 칩은 보존됨)",
+    })
+    return await asyncio.to_thread(
+        random_service(context).generate,
+        active_ratings={"g", "s", "q", "e"},
+        overrides=overrides,
+        random_request_id=request_id,
+    )
+
 async def handle_random_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -475,46 +532,12 @@ async def handle_random_command(
     # 회복한다. (등급 desync = 검색이 풀을 gsqe 로 열어도 프론트가 gsq 로 되돌려 explicit 결과를
     # 못 뽑던 케이스 / stale 태그필터가 풀을 비운 케이스 모두 흡수.) 이미 gsqe·태그필터 없음이면
     # 재시도해도 의미 없으므로 건너뛴다.
-    pool_already_full = set(active_ratings) == {"g", "s", "q", "e"} and not (
-        getattr(context, "active_tag_filter", None) or getattr(context, "active_tag_filter_ids", None)
+    result = await recover_exhausted_random_pool(
+        context, clients, result,
+        active_ratings=active_ratings,
+        overrides=overrides,
+        request_id=request_id,
     )
-    if (
-        not result.success
-        and not bool((overrides or {}).get("wildcard_standalone"))
-        and not pool_already_full
-        and _random_pool_has_hidden_rows(context)
-    ):
-        # ① 먼저 **스냅샷 복원**을 시도한다(사용자 지정 2026-08-31). 등급도 칩도
-        #    건드리지 않고 검색이 적용된 순간의 풀을 그대로 되돌린다.
-        restored = await asyncio.to_thread(_restore_tag_filter_snapshot, context)
-        if restored is not None:
-            await _broadcast_json(clients, restored)
-            await _broadcast_json(clients, {
-                "type": "toast",
-                "level": "info",
-                "message": "랜덤 풀을 다 써서 검색 시점으로 되돌렸습니다. (등급·필터 그대로)",
-            })
-            result = await asyncio.to_thread(
-                random_service(context).generate,
-                active_ratings=active_ratings,
-                overrides=overrides,
-                random_request_id=request_id,
-            )
-        else:
-            # ② 스냅샷이 없을 때만 예전 회복 경로 - 등급을 열고 필터 할당을 뗀다.
-            recovered_state = await asyncio.to_thread(_reset_random_pool_to_gsqe, context)
-            await _broadcast_json(clients, recovered_state)
-            await _broadcast_json(clients, {
-                "type": "toast",
-                "level": "warning",
-                "message": "랜덤 풀이 비어 있어 등급을 전체(G/S/Q/E)로 열고 태그 필터를 해제했습니다. (저장한 필터 칩은 보존됨)",
-            })
-            result = await asyncio.to_thread(
-                random_service(context).generate,
-                active_ratings={"g", "s", "q", "e"},
-                overrides=overrides,
-                random_request_id=request_id,
-            )
     # 수동 1회 random: 그 시점에 동기 부스트(프런트가 Random 버튼을 응답까지 disable).
     # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
     await apply_ollama_auto_boost(context, result)

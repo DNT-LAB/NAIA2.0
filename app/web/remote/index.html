@@ -448,6 +448,15 @@
       <button class="tag-filter-btn-action save" onclick="confirmSaveTagFilterPreset()">저장</button>
     </div>
     <div class="tag-filter-presets" id="tagFilterPresets" hidden></div>
+    <div class="tag-filter-stop-row">
+      <button type="button" class="opt-toggle tag-filter-stop-toggle" id="optStopAutogenOnExhaust"
+              data-option="stop_autogen_on_tag_exhaust" data-checked="false" aria-pressed="false"
+              data-naia-guide="Auto Gen 이 도는 중에 이 필터의 태그를 다 쓰면, 되살리지 않고 자동 생성을 멈춥니다(Auto Gen 체크도 함께 해제됩니다).&#10;&#10;끄면 검색을 걸었던 시점의 풀로 되돌려 계속 돕니다 - 등급과 칩은 그대로 둡니다."
+              onclick="toggleOptionButton('stop_autogen_on_tag_exhaust')">
+        <span class="opt-box" aria-hidden="true"></span>
+        <span class="opt-label">Auto Gen 상태에서 태그 소진시 자동 중단</span>
+      </button>
+    </div>
     <div class="tag-filter-actions">
       <button class="tag-filter-btn-action assign" id="tagFilterCommitBtn" onclick="commitPendingTagFilterText()" disabled>Commit</button>
       <button class="tag-filter-btn-action save" onclick="toggleSaveTagFilterRow()">Save Filter</button>

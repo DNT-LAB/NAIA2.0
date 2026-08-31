@@ -17,6 +17,9 @@ REMOTE_OPTION_DEFAULTS = {
     "wildcard_standalone": False,
     "auto_save": True,
     "nai_streaming_preview": False,
+    # Auto Gen 중 태그 필터 풀이 소진됐을 때 **되살리지 않고 멈춘다**(사용자 지정
+    # 2026-08-31). 기본 꺼짐 = 검색 시점 스냅샷으로 되살려 계속 돈다.
+    "stop_autogen_on_tag_exhaust": False,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",

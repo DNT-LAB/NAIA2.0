@@ -12,6 +12,7 @@ from core.tag_knowledge import (
     apply_translation_overrides,
     merge_parquet_tag_records,
     merge_rating_count_records,
+    merge_e621_research_records,
 )
 
 
@@ -135,6 +136,15 @@ def load_kr_tag_records(
             (_first_existing(resolved_data_roots, "e621_KR_tags.parquet"), 2),
         ],
     )
+    # 연구모듈이 보는 e621 전체 어휘. 번역 파켓(5,450)은 부분집합이라, 이것을
+    # 안 붙이면 8,864개가 자동완성/Tag Search 에서 아예 안 잡힌다.
+    e621_research_stats = merge_e621_research_records(
+        raw,
+        _first_existing(resolved_data_roots, "e621_data"),
+    )
+    for error in e621_research_stats.errors:
+        _warn(warnings, f"e621 research merge warning - {error}", warn)
+
     override_stats = apply_translation_overrides(
         raw,
         _first_existing(resolved_data_roots, Path("tag_index") / "tag_translation_overrides.json"),

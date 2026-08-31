@@ -223,6 +223,71 @@ def merge_parquet_tag_records(
     return stats
 
 
+def merge_e621_research_records(
+    raw: MutableMapping[str, MutableMapping[str, Any]],
+    data_path: str | Path,
+    src_key: int = 14,
+) -> ParquetTagMergeStats:
+    """E621 연구모듈이 쓰는 전체 어휘(`data/e621_data`)를 색인에 채운다.
+
+    ⚠️ `e621_KR_tags.parquet` 은 **한국어 번역이 붙은 것만** 담은 5,450개짜리
+       부분집합이다. 연구모듈이 실제로 보는 어휘는 20,987개라, 그 차이만큼
+       (8,864개) 자동완성·Tag Search 에서 아예 검색되지 않았다 - `mammal`
+       `anthro` 같은 e621 기본어까지 통째로 빠져 있었다(사용자 제보 2026-08-31:
+       "worm's 로 검색이 안 된다").
+
+    이미 있는 태그는 건드리지 않는다 - Danbooru 쪽 설명/빈도가 이깁니다.
+    위키 본문은 **싣지 않는다**(15MB짜리 파일이고, 색인에 넣으면 상주 메모리가
+    그만큼 늘어난다). 이름·빈도·한국어 이름만 가져온다.
+    """
+    stats = ParquetTagMergeStats()
+    path = Path(data_path)
+    if not path.exists():
+        stats.missing_sources.append(str(path))
+        return stats
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        stats.errors.append(f"{path}: {exc}")
+        return stats
+
+    def walk(node: Any, group: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, str(key))
+            return
+        if not isinstance(node, list):
+            return
+        for item in node:
+            if not isinstance(item, dict) or "tag" not in item:
+                continue
+            tag_raw = normalize_display_tag(item.get("tag"))
+            tag_lower = normalize_tag_key(tag_raw)
+            if not tag_lower or tag_lower in raw:
+                continue
+            try:
+                freq = int(item.get("count") or 0)
+            except (TypeError, ValueError):
+                freq = 0
+            korean = str(item.get("kor") or "").strip()
+            entry: dict[str, Any] = {
+                "_tag": tag_raw,
+                "_src": src_key,
+                "_cat": "e621",
+                "freq": freq,
+                "description": "",
+                "group": group,
+                "subgroup": "",
+                "keywords_kr": korean,
+                "_translation_source": str(path),
+            }
+            _refresh_lookup_fields(entry)
+            raw[tag_lower] = entry
+            stats.added += 1
+
+    walk(payload, "e621")
+    return stats
+
 def merge_rating_count_records(
     raw: MutableMapping[str, MutableMapping[str, Any]],
     counts_path: str | Path,

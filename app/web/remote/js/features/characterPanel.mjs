@@ -265,15 +265,14 @@ export function createCharacterPanel({
         data-cw-group-filter="${escAttr(name)}">${escHtml(name)}</button>`).join('');
     const list = rows.length
       ? rows.map(({character, index}) => `
-          <div class="cw-li" data-cw-li="${index}">
+          <div class="cw-li" data-cw-li="${index}" data-cw-load="${index}"
+            title="누르면 슬롯 맨 아래에 담긴다 · 우클릭으로 그룹">
             <button type="button" class="cw-li-star${character.favorite ? ' is-on' : ''}"
               data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
-            <span class="cw-li-text" data-cw-load="${index}"
-              title="${escAttr(character.prompt || '')}">${escHtml(slotLabel(character, {full: true}))}</span>
+            <span class="cw-li-text">${escHtml(slotLabel(character, {full: true}))}</span>
             ${groupOf(character)
-              ? `<span class="cw-li-group" data-cw-editgroup="${index}">${escHtml(groupOf(character))}</span>`
-              : `<span class="cw-li-group" data-cw-editgroup="${index}">+ 그룹</span>`}
-            <button type="button" class="cw-li-load" data-cw-load="${index}">→ 담기</button>
+              ? `<span class="cw-li-group">${escHtml(groupOf(character))}</span>`
+              : ''}
           </div>`).join('')
       : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ▼ 로 내리면 여기에 쌓입니다 (최대 500개).'}</div>`;
     return `
@@ -447,8 +446,7 @@ export function createCharacterPanel({
       }
       const rename = hit('[data-cw-rename]');
       if (rename) { void renameSlot(Number(rename.dataset.cwRename)); return; }
-      const group = hit('[data-cw-editgroup]');
-      if (group) { void editGroup(Number(group.dataset.cwEditgroup)); return; }
+
 
       if (hit('[data-cw-fav-only]')) { favouritesOnly = !favouritesOnly; rerender(); return; }
       const groupFilterBtn = hit('[data-cw-group-filter]');
@@ -459,10 +457,18 @@ export function createCharacterPanel({
     });
 
     root.addEventListener('contextmenu', event => {
-      const row = event.target.closest('[data-cw-rename]');
+      // 슬롯은 이름 바꾸기, 히스토리는 그룹. 둘 다 자주 쓰지 않는 조작이라
+      // 행을 버튼으로 채우지 않는다(사용자 지정: 그룹/담기 버튼을 노출하지 말 것).
+      const slot = event.target.closest('[data-cw-rename]');
+      if (slot) {
+        event.preventDefault();
+        void renameSlot(Number(slot.dataset.cwRename));
+        return;
+      }
+      const row = event.target.closest('[data-cw-li]');
       if (!row) return;
       event.preventDefault();
-      void renameSlot(Number(row.dataset.cwRename));
+      void editGroup(Number(row.dataset.cwLi));
     });
   }
 

@@ -13727,18 +13727,21 @@ body.detached-metadata .metadata-layout {
 }
 .cw-empty { padding: 18px 12px; text-align: center; font-size: 11px; color: var(--text-dim); }
 /* 히스토리 한 줄 - `.tagsearch-item` 값 */
+/* ⚠️ **행 전체가 버튼**이다(사용자 지정: 그룹/담기 버튼을 노출하지 말 것).
+   누르면 슬롯 맨 아래에 담기고, 우클릭이면 그룹을 고친다. */
 .cw-li {
   display: flex; align-items: center; gap: 8px; padding: 5px 10px;
   border: 1px solid var(--border-dim); border-radius: 6px;
   background: rgba(0,0,0,0.2); color: var(--text-primary);
   font-family: var(--font-editor); font-size: 11.5px; text-align: left;
+  cursor: pointer;
 }
 .cw-li:hover { background: rgba(96,120,255,0.12); border-color: var(--accent); }
 .cw-li-star { flex: 0 0 auto; font-size: 11px; color: #4a4a58; cursor: pointer;
   background: transparent; border: 0; padding: 0; }
 .cw-li-star.is-on { color: #f0c674; }
 .cw-li-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; cursor: pointer; }
+  white-space: nowrap; }
 .cw-li-group {
   flex: 0 0 auto; padding: 1px 7px;
   border: 1px solid var(--border-dim); border-radius: 999px;

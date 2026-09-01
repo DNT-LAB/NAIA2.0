@@ -17,6 +17,14 @@
 
    프리뷰를 안 쓰는 **일반 생성에서도** 그 글자가 NAI 로 나간다. 그래서 콜론을 안쪽으로
    옮겨 `#:프리뷰 프롬프트 종료` 로 쓴다 - 대칭은 지키면서 지워진다.
+
+⚠️ **사용자의 서식을 건드리지 않는다**(사용자 지정 2026-09-01: "기존 
+, 
+
+ 등을
+   소거해서는 안됩니다"). 처음엔 쉼표로 끊어 `', '` 로 다시 붙였는데, 그러면 줄바꿈과
+   들여쓰기가 통째로 사라졌다(실측: 줄바꿈 5 -> 0). 그래서 표식은 **원문 좌표에 끼워
+   넣고**, 걷을 때도 표식과 붙은 쉼표 하나만 도려낸다. 넣었다 걷으면 원문 그대로다.
 """
 
 from __future__ import annotations
@@ -30,9 +38,27 @@ END_MARKER = "#:프리뷰 프롬프트 종료"
 PERSON_ANCHORS = ("1girl", "1boy")
 
 
+def split_spans(text: str) -> list[tuple[int, int, str]]:
+    """쉼표로 끊되 **원문 좌표를 들고 있는다** - 줄바꿈·들여쓰기를 지키기 위해.
+
+    각 조각은 (앞뒤 공백을 뺀 시작, 끝, 그 사이 글자). 빈 칸은 버린다.
+    """
+    raw = str(text or "")
+    spans: list[tuple[int, int, str]] = []
+    pos = 0
+    for part in raw.split(","):
+        end = pos + len(part)
+        head = pos + (len(part) - len(part.lstrip()))
+        tail = end - (len(part) - len(part.rstrip()))
+        if tail > head:
+            spans.append((head, tail, raw[head:tail]))
+        pos = end + 1
+    return spans
+
+
 def split_tags(text: str) -> list[str]:
     """쉼표로 끊고 공백을 정리한다. 빈 칸은 버린다."""
-    return [part.strip() for part in str(text or "").split(",") if part.strip()]
+    return [content for _, _, content in split_spans(text)]
 
 
 def join_tags(tags: list[str]) -> str:
@@ -40,8 +66,30 @@ def join_tags(tags: list[str]) -> str:
 
 
 def strip_markers(text: str) -> str:
-    """이미 박혀 있는 표식을 걷어낸다(두 번 넣지 않기 위해)."""
-    return join_tags([t for t in split_tags(text) if not _is_marker(t)])
+    """이미 박혀 있는 표식을 걷어낸다(두 번 넣지 않기 위해).
+
+    ⚠️ 표식과 **붙은 쉼표 하나**만 도려낸다 - 다시 짜 맞추면 줄바꿈이 사라진다.
+    """
+    raw = str(text or "")
+    hits = [(head, tail) for head, tail, content in split_spans(raw) if _is_marker(content)]
+    for head, tail in reversed(hits):
+        cut_head, cut_tail = head, tail
+        # 뒤따르는 쉼표(+공백)를 함께 지운다. 없으면 앞의 쉼표를 지운다.
+        probe = tail
+        while probe < len(raw) and raw[probe] in " 	":
+            probe += 1
+        if probe < len(raw) and raw[probe] == ",":
+            cut_tail = probe + 1
+            while cut_tail < len(raw) and raw[cut_tail] == " ":
+                cut_tail += 1
+        else:
+            probe = head - 1
+            while probe >= 0 and raw[probe] in " 	":
+                probe -= 1
+            if probe >= 0 and raw[probe] == ",":
+                cut_head = probe
+        raw = raw[:cut_head] + raw[cut_tail:]
+    return raw
 
 
 def _is_marker(tag: str) -> bool:
@@ -113,7 +161,9 @@ def insert_markers(main_prompt: str, prefix_prompt: str, postfix_prompt: str) ->
 
     이미 표식이 있으면 걷어내고 다시 계산한다 - Prefix/Postfix 가 바뀌면 자리도 바뀐다.
     """
-    main_tags = split_tags(strip_markers(main_prompt))
+    base = strip_markers(main_prompt)
+    spans = split_spans(base)
+    main_tags = [content for _, _, content in spans]
     prefix_tags = split_tags(prefix_prompt)
     postfix_tags = split_tags(postfix_prompt)
 
@@ -124,8 +174,21 @@ def insert_markers(main_prompt: str, prefix_prompt: str, postfix_prompt: str) ->
     if end < start:
         end = len(main_tags)
 
-    tagged = main_tags[:start] + [START_MARKER] + main_tags[start:end] + [END_MARKER] + main_tags[end:]
-    return join_tags(tagged)
+    # ⚠️ 조각을 다시 짜 맞추지 않는다 - 원문 좌표에 표식만 끼워 넣는다.
+    #    (짜 맞추면 사용자의 줄바꿈·들여쓰기가 사라진다: 실측 5 -> 0)
+    edits: list[tuple[int, str]] = []
+    if end >= len(spans):
+        edits.append((spans[-1][1] if spans else len(base), ", " + END_MARKER))
+    else:
+        edits.append((spans[end][0], END_MARKER + ", "))
+    if start >= len(spans):
+        edits.append((spans[-1][1] if spans else len(base), ", " + START_MARKER))
+    else:
+        edits.append((spans[start][0], START_MARKER + ", "))
+    out = base
+    for at, text in sorted(edits, key=lambda item: -item[0]):
+        out = out[:at] + text + out[at:]
+    return out
 
 
 def extract_between(main_prompt: str) -> str:

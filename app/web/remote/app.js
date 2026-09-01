@@ -4915,7 +4915,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     if (isMyRandom) unlockRandomButton();   // 내가 요청한 random 응답일 때만 버튼 unlock(브로드캐스트로 온 남/재연결분은 패널만 갱신)
     // 랜덤 연동 프리뷰(기본 비활성). ⚠️ **내가 누른 랜덤일 때만** 건다 - 다른 탭이
     //    돌린 랜덤의 브로드캐스트에도 걸면 안 시킨 프리뷰가 나간다(무료지만 큐를 먹는다).
-    if (isMyRandom) maybeRunV45PreviewAfterRandom();
+    if (isMyRandom) void maybeRunV45PreviewAfterRandom();
     if (promptSendTimer) {
       clearTimeout(promptSendTimer);
       promptSendTimer = null;
@@ -10283,9 +10283,17 @@ function extractPreviewSegment(text) {
   return tags.slice(start + 1, end).join(', ');
 }
 
-async function runV45Preview() {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.segmentConfirmed] 서버가 방금 구간을 확인해 줬다.
+ *        ⚠️ 표식은 서버가 넣고 `prompt_sync` 로 되돌려 준다 - 그 왕복이 끝나기 전에는
+ *           화면 글에 표식이 없어서 아래 관문이 튕긴다(랜덤 연동이 여기서 막혔다).
+ *           보내는 글은 어차피 **서버가** 자기 상태에서 뽑으므로 화면은 늦어도 된다.
+ */
+async function runV45Preview(opts) {
   if (preview45Busy) return;
-  if (!extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
+  if (!(opts && opts.segmentConfirmed)
+      && !extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
     showToast('프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
     return;
   }
@@ -10311,7 +10319,18 @@ async function runV45Preview() {
   //    잠금은 nai_preview_result / 생성 종료 신호가 푼다.
 }
 
-async function applyV45PreviewMarkers(action) {
+/**
+ * 표식을 넣거나 걷는다.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.silent]     토스트를 띄우지 않는다(랜덤 연동용).
+ * @param {boolean} [opts.useServerPrompt]  화면 글 대신 서버의 글을 쓴다.
+ *        ⚠️ 랜덤은 **서버가** 뽑은 것이라 서버 쪽이 최신이다 - 화면 글을 보내면
+ *           방금 굴린 프롬프트 대신 직전 것에 표식을 박는다.
+ * @returns {Promise<boolean>} 표식이 실제로 자리 잡았는지.
+ */
+async function applyV45PreviewMarkers(action, opts) {
+  const {silent = false, useServerPrompt = false} = opts || {};
   closeV45PreviewMenu();
   try {
     const res = await fetch('/api/nai-preview/markers', {
@@ -10319,20 +10338,30 @@ async function applyV45PreviewMarkers(action) {
       headers: {'Content-Type': 'application/json'},
       // ⚠️ 화면의 현재 글을 함께 보낸다 - 서버의 프롬프트는 500ms 디바운스라
       //    방금 친 태그가 아직 안 갔을 수 있다(Codex CONCERN 1).
-      body: JSON.stringify({action, prompt: promptEdit ? promptEdit.value : undefined}),
+      body: JSON.stringify({
+        action,
+        prompt: (useServerPrompt || !promptEdit) ? undefined : promptEdit.value,
+      }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.error || '표식을 바꾸지 못했습니다.', 'error'); return; }
-    if (action === 'remove') showToast('프리뷰 표식을 걷었습니다.', 'success');
-    else showToast(data.segment ? ('프리뷰 구간: ' + data.segment) : '프리뷰 표식을 넣었습니다.', 'success');
+    if (!res.ok) {
+      if (!silent) showToast(data.error || '표식을 바꾸지 못했습니다.', 'error');
+      return false;
+    }
+    if (!silent) {
+      if (action === 'remove') showToast('프리뷰 표식을 걷었습니다.', 'success');
+      else showToast(data.segment ? ('프리뷰 구간: ' + data.segment) : '프리뷰 표식을 넣었습니다.', 'success');
+    }
+    return action === 'remove' ? true : !!data.segment;
   } catch (error) {
-    showToast('표식 요청 실패: ' + error.message, 'error');
+    if (!silent) showToast('표식 요청 실패: ' + error.message, 'error');
+    return false;
   }
 }
 
 // 설정 패널(지연 로드). ⚠️ 값의 SSOT 는 백엔드다 - 여기서는 열고 닫기만 한다.
 let naiPreviewSettingsPanel = null;
-const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260901-pv45')
+const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260901-pv45b')
   .then(({createNaiPreviewSettingsPanel}) => {
     naiPreviewSettingsPanel = createNaiPreviewSettingsPanel({
       document,
@@ -10340,6 +10369,12 @@ const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mj
       showToast,
       escHtml,
       onMarkers: action => { void applyV45PreviewMarkers(action); },
+    });
+    // ⚠️ 설정을 **미리 받아 둔다.** 안 그러면 톱니를 한 번도 안 연 세션에서는
+    //    `current()` 가 null 이라 랜덤 연동·ALT+P 가 기본값으로 떨어진다 - 서버에는
+    //    on_random:true 인데 화면은 false 로 알고 아무 일도 안 했다(라이브 실측).
+    return naiPreviewSettingsPanel.refresh().catch(error => {
+      console.error('Failed to prime NAI preview settings', error);
     });
   })
   .catch(error => {
@@ -10364,11 +10399,22 @@ function v45PreviewSetting(key, fallback) {
   return current[key];
 }
 
-/** 랜덤 버튼이 돌 때 함께 요청한다(기본 비활성). */
-function maybeRunV45PreviewAfterRandom() {
+/**
+ * 랜덤 버튼이 돌 때 함께 요청한다(기본 비활성).
+ *
+ * ⚠️ **표식을 여기서 직접 넣는다**(사용자 지정 2026-09-01: "활성화를 하면 랜덤버튼을
+ *    누를 때 바로 삽입"). 랜덤은 메인 프롬프트를 통째로 갈아 끼우므로 지난 판의 표식이
+ *    사라진다 - 넣지 않으면 매번 '프리뷰 구간이 없습니다' 만 뜬다(사용자 제보).
+ */
+async function maybeRunV45PreviewAfterRandom() {
   if (!naiModelIsV5()) return;
+  // 설정이 아직 안 왔으면 기다린다 - 안 기다리면 첫 랜덤이 기본값으로 떨어진다.
+  await naiPreviewSettingsReady;
   if (!v45PreviewSetting('on_random', false)) return;
-  void runV45Preview();
+  // 조용히 넣는다 - 랜덤을 돌릴 때마다 구간 토스트가 뜨면 화면을 덮는다.
+  const ok = await applyV45PreviewMarkers('insert', {silent: true, useServerPrompt: true});
+  if (!ok) { showToast('프리뷰 구간을 잡지 못했습니다.', 'info'); return; }
+  await runV45Preview({segmentConfirmed: true});
 }
 
 function refreshV5DependentChrome() {

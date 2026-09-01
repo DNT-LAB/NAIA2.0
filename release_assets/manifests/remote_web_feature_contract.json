@@ -18,6 +18,7 @@
     "app/backend/server/interactive_thumbnail_routes.py",
     "app/backend/server/module_storage_routes.py",
     "app/backend/server/nai_model_routes.py",
+    "app/backend/server/nai_preview_routes.py",
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_engineering_filter_routes.py",
     "app/backend/server/prompt_tools_routes.py",
@@ -610,6 +611,20 @@
         {"method": "GET", "path": "/api/nai-models", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/nai-models", "smoke": "state_mutation"},
         {"method": "DELETE", "path": "/api/nai-models/{model_key}", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "nai_v45_preview",
+      "name": "NAI V4.5 Preview (V5 할당량을 안 쓰고 구도만 미리 본다)",
+      "source_files": [
+        "app/backend/server/nai_preview_routes.py",
+        "core/nai_preview_service.py",
+        "core/nai_free_usage.py",
+        "core/auto_generation_flags.py"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "POST", "path": "/api/nai-preview/generate", "smoke": "skip"}
       ]
     },
     {

@@ -29,6 +29,7 @@ from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
 from app.backend.server.nai_model_routes import register_nai_model_routes
+from app.backend.server.nai_preview_routes import register_nai_preview_routes
 from app.backend.server.ollama_routes import register_ollama_routes
 from app.backend.server.tagger_routes import register_tagger_routes
 from app.backend.server.translation_history_routes import register_translation_history_routes
@@ -211,6 +212,13 @@ def register_headless_routes(
         run_in_thread=run_in_thread,
         clients=clients,
         broadcast_json=broadcast_json,
+    )
+    register_nai_preview_routes(
+        app,
+        context,
+        run_in_thread=run_in_thread,
+        clients=clients,
+        start_generation_runner=ensure_generation_runner,
     )
     register_pe_filter_routes(app, context, run_in_thread=run_in_thread)
     register_module_storage_routes(app, context, run_in_thread=run_in_thread)

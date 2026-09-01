@@ -5,6 +5,9 @@ export function createTokenDisplay({
   negativeTokenLabel,
   modeSelect,
   getCurrentMode,
+  // 지금 고른 NAI 모델이 V5 인가. ⚠️ 판정을 여기서 다시 짜지 않는다 - 호스트의
+  //    `naiModelIsV5()` 하나가 답한다(사용자 등록 모델도 그것으로 갈린다).
+  isNaiV5 = () => false,
 }) {
   let lastCharacterTokenCount = 0;
   let lastCharacterPromptText = '';
@@ -43,8 +46,14 @@ export function createTokenDisplay({
     return Math.max(1, Math.ceil(base * correction));
   }
 
+  // V5 에서만 짧게 쓴다(사용자 지정 2026-09-01: `E.tokens : 226 (M : x, C : y)`).
+  // 이 줄이 길어서 옆에 무엇도 못 놓는 상태였다 - 자리를 만드는 것이 목적이다.
+  // ⚠️ V5 **만** 이다. 다른 모드/모델은 익숙한 긴 이름을 그대로 둔다.
   function formatPromptTokenLabel(main, character, mode) {
     if (mode === 'NAI') {
+      if (isNaiV5()) {
+        return `E.tokens : ${main + character} (M : ${main}, C : ${character})`;
+      }
       return `Estimated Tokens : ${main + character} (Main ${main} + Character ${character})`;
     }
     return `Estimated Tokens : ${main}`;

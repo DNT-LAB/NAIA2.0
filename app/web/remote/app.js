@@ -1965,7 +1965,7 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
   });
-const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260829-mark0')
+const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260901-v5short')
   .then(({createTokenDisplay}) => {
     tokenDisplayControl = createTokenDisplay({
       promptEdit,
@@ -1974,6 +1974,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260829-mark
       negativeTokenLabel,
       modeSelect,
       getCurrentMode: () => currentMode,
+      isNaiV5: () => naiModelIsV5(),
     });
   })
   .catch(error => {
@@ -5430,7 +5431,7 @@ function updateParams(m) {
     transparentBgEnabled = (m.transparent_background === true
       || String(m.transparent_background).toLowerCase() === 'true');
   }
-  refreshTransparentBgPill();
+  refreshV5DependentChrome();
 }
 
 function setParam(key, value) {
@@ -5509,7 +5510,7 @@ function setParam(key, value) {
   // 열려 있으면 닫기)하고, 인페인트 강도 슬라이더 표시 여부도 갱신한다(V3=디노이징 미지원).
   if (key === 'model') {
     // 투명 BG 알약은 V5 에서만 보인다. 에코를 기다리면 한 박자 늦게 사라진다.
-    refreshTransparentBgPill();
+    refreshV5DependentChrome();
     if (moduleLauncherControl) moduleLauncherControl.updateState();
     if (['character', 'character_reference', 'vibe_transfer'].includes(currentModuleId)
         && naiModelBlocksReference()
@@ -8902,7 +8903,7 @@ function syncMode(mode) {
   // 투명 BG 알약은 NAI V5 전용이다. `params` 에코에서도 다시 보지만, 그 메시지가
   // `mode` 보다 **먼저** 도착하면 `currentMode` 가 앞 모드라 한 박자 늦게 사라진다.
   // 두 순서 어느 쪽이든 맞도록 여기서도 한 번 본다.
-  refreshTransparentBgPill();
+  refreshV5DependentChrome();
   applyComfyUiFreeParamLock(mode);
   // Upscale 은 NAI 전용이라 모드가 바뀌면 다시 판정해야 한다(Director 는 모드 무관이라
   // 지금까지 이 자리에서 갱신할 이유가 없었다).
@@ -10190,6 +10191,13 @@ function naiModelIsV5() {
   return String(naiModelMetaByKey.get(model)?.payload_profile || '') === 'v5';
 }
 
+// V5 여부에 따라 달라지는 화면을 **함께** 갱신한다. 토큰 줄이 빠지면 모델을 바꿔도
+// 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
+function refreshV5DependentChrome() {
+  refreshTransparentBgPill();
+  if (tokenDisplayControl) tokenDisplayControl.updatePromptTokenEstimate();
+}
+
 function refreshTransparentBgPill() {
   const pill = document.getElementById('transparentBgPill');
   if (!pill) return;
@@ -10210,7 +10218,7 @@ function refreshTransparentBgPill() {
 
 function toggleTransparentBackground() {
   transparentBgEnabled = !transparentBgEnabled;
-  refreshTransparentBgPill();
+  refreshV5DependentChrome();
   setParam('transparent_background', String(transparentBgEnabled));
 }
 

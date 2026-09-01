@@ -25,11 +25,19 @@ from core.preview_prompt_markers import (
 )
 from core.nai_preview_service import (
     PREVIEW_MODEL_KEY,
-    PREVIEW_STEPS,
     PreviewNotFree,
     assert_free,
     build_preview_overrides,
+    build_preview_prompt,
 )
+from core.nai_preview_settings import (
+    RESOLUTION_MODES,
+    SAMPLERS,
+    SCHEDULERS,
+    custom_resolution_candidates,
+)
+from core.nai_preview_settings import load as load_preview_settings
+from core.nai_preview_settings import save as save_preview_settings
 from core.headless_generation_service import HeadlessGenerationService
 from core.web_session_context import WebSessionContext
 
@@ -54,11 +62,19 @@ def register_nai_preview_routes(
     broadcast_json: Callable[..., Awaitable[Any]],
 ) -> None:
 
-    def _build(request_id: str) -> dict[str, Any]:
-        overrides = build_preview_overrides(session_context, request_id)
+    def _save_root():
+        return getattr(getattr(session_context, "runtime_paths", None), "save_dir", None)
+
+    def _build(request_id: str) -> tuple[dict[str, Any], str, str]:
+        settings = load_preview_settings(_save_root())
+        overrides = build_preview_overrides(session_context, request_id, settings)
         # ⚠️ **마지막 문.** 여기서 걸리면 아무것도 큐에 안 들어간다.
         assert_free(session_context, overrides)
-        return overrides
+        prompt = build_preview_prompt(session_context, settings)
+        if not prompt:
+            raise PreviewNotFree(
+                "프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.")
+        return overrides, prompt, str(settings.get("negative") or "")
 
     def _pe_prompts() -> tuple[str, str]:
         """지금 모드의 Prefix/Postfix. 표식 자리를 정하는 기준이다."""
@@ -67,6 +83,36 @@ def register_nai_preview_routes(
         store = get_prompt_engineering_store(session_context)
         settings = store.state(session_context.get_api_mode())["settings"]
         return str(settings.get("pre_prompt") or ""), str(settings.get("post_prompt") or "")
+
+    @app.get("/api/nai-preview/settings")
+    async def api_nai_preview_settings_get():
+        """설정 + 화면이 그릴 선택지(샘플러·스케줄러·직접 선택 후보)."""
+        settings = await run_in_thread(load_preview_settings, _save_root())
+        return {
+            "settings": settings,
+            "options": {
+                "resolution_modes": list(RESOLUTION_MODES),
+                "samplers": list(SAMPLERS),
+                "schedulers": list(SCHEDULERS),
+                "custom_resolutions": [
+                    {"width": w, "height": h, "label": f"{w} x {h}"}
+                    for w, h in custom_resolution_candidates()
+                ],
+            },
+        }
+
+    @app.post("/api/nai-preview/settings")
+    async def api_nai_preview_settings_post(req: Request):
+        """⚠️ 저장 전에 정규화한다 - 범위를 벗어난 값이 디스크에 남으면 다음 실행에서
+           그대로 실린다. `save` 가 clamp 까지 한다."""
+        try:
+            body = await req.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid settings body"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Invalid settings body"}, status_code=400)
+        settings = await run_in_thread(save_preview_settings, body, _save_root())
+        return {"ok": True, "settings": settings}
 
     @app.post("/api/nai-preview/markers")
     async def api_nai_preview_markers(req: Request):
@@ -117,7 +163,7 @@ def register_nai_preview_routes(
                 {"error": "Preview 는 NAI 모드에서만 사용할 수 있습니다."}, status_code=400)
 
         try:
-            overrides = await run_in_thread(_build, request_id)
+            overrides, prompt, negative = await run_in_thread(_build, request_id)
         except PreviewNotFree as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
@@ -128,7 +174,15 @@ def register_nai_preview_routes(
             generation.enqueue_remote_request,
             # api_mode 를 못박는다 - 위 확인과 이 enqueue 사이에 모드가 바뀔 수 있다
             # (캐릭터 에셋 벤치가 같은 이유로 같은 일을 한다).
-            {"type": "generate", "api_mode": "NAI", "overrides": overrides},
+            {
+                "type": "generate",
+                "api_mode": "NAI",
+                "overrides": overrides,
+                # 프리뷰는 **자기 프롬프트**로 나간다 - 표식 사이 general 태그에
+                # 설정의 선행/후행을 붙인 것. 메인 프롬프트 그대로가 아니다.
+                "prompt": prompt,
+                "negative_prompt": negative,
+            },
         )
         if not dispatch.ok:
             return JSONResponse(dispatch.websocket_payload(), status_code=409)
@@ -138,7 +192,7 @@ def register_nai_preview_routes(
             "ok": True,
             "requestId": request_id,
             "model": PREVIEW_MODEL_KEY,
-            "steps": PREVIEW_STEPS,
+            "steps": overrides["steps"],
             "width": overrides["width"],
             "height": overrides["height"],
         }

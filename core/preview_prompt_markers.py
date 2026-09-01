@@ -145,7 +145,10 @@ def extract_between(main_prompt: str) -> str:
         end = tags.index(END_MARKER, start + 1)
     except ValueError:
         return ""
-    return join_tags(tags[start + 1:end])
+    # ⚠️ 주석 태그(`#랜덤프롬프트` · Category Annotation 의 `#의상:` 등)는 내용이 아니다.
+    #    구간 안에 섞여 들어오므로 여기서 뺀다 - 어차피 API 직전에 지워지지만,
+    #    프리뷰 프롬프트에 남으면 사용자가 무엇이 나갔는지 읽기 어렵다.
+    return join_tags([t for t in tags[start + 1:end] if not t.startswith(chr(35))])
 
 
 def has_markers(main_prompt: str) -> bool:

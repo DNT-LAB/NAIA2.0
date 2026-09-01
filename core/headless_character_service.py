@@ -93,6 +93,13 @@ def _seed_missing_positions(settings: dict) -> None:
 MAX_CHARACTER_SLOTS = 25
 
 
+def _active_slot_count(frames: Any) -> int:
+    """NAI 로 실제 나가는 슬롯 수. 히스토리(비활성/cold)는 세지 않는다."""
+    return sum(1 for frame in (frames or [])
+               if isinstance(frame, dict)
+               and str(frame.get("slot_state") or "").strip().lower() == "active")
+
+
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
@@ -451,8 +458,13 @@ class HeadlessCharacterService:
         elif key == "add_character":
             # ⚠️ 상한을 **만들 때** 막는다. 넘겨서 보내면 `NAICharacterData` 가 거부하고,
             #    그러면 생성 자체가 막힌다(예전에는 캐릭터가 통째로 빠진 채 나갔다).
-            #    화면도 25에서 [+ Add] 를 잠그지만, 여기가 마지막 문이다.
-            if len(frames) < MAX_CHARACTER_SLOTS:
+            #    화면도 상한에서 [+ Add] 를 잠그지만, 여기가 마지막 문이다.
+            #
+            # ⚠️ **활성만 센다.** 처음엔 `len(frames)` 로 셌는데, 그러면 히스토리가
+            #    슬롯 자리를 먹는다 - 사용자 화면에서 `1 active · 39 stored` 인데
+            #    `+ Add Character (40/25)` 로 잠겨 캐릭터를 못 늘렸다(제보).
+            #    상한은 **NAI 로 나가는 개수**의 상한이고, 히스토리는 나가지 않는다.
+            if _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
                 frames.append({"prompt": "", "uc": "", "is_enabled": True,
                                "slot_state": "active", "custom_name": ""})
                 invalidate_snapshot = True

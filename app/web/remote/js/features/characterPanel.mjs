@@ -217,7 +217,13 @@ export function createCharacterPanel({
   function renderSlots(activeSlots, total, maxSlots) {
     // ⚠️ 상한은 **서버가 준 값**을 쓴다. 프런트가 자기 숫자를 들고 있으면 둘이
     //    어긋나 "눌리는데 안 늘어나는" 버튼이 된다(백엔드는 조용히 거절한다).
-    const full = maxSlots > 0 && total >= maxSlots;
+    //
+    // ⚠️ **활성만 센다.** 처음엔 전체 프레임 수로 셌는데, 그러면 히스토리가 슬롯
+    //    자리를 먹는다 - `1 active · 39 stored` 인데 `+ Add Character (40/25)` 로
+    //    잠겨 캐릭터를 못 늘렸다(사용자 제보). 상한은 **나가는 개수**의 상한이고,
+    //    히스토리는 나가지 않는다.
+    const used = activeSlots.length;
+    const full = maxSlots > 0 && used >= maxSlots;
     const body = activeSlots.length
       ? activeSlots.map(({character, index}, i) => renderSlot(character, index, i + 1)).join('')
       : '<div class="cw-slots-empty">활성 슬롯이 없습니다.<br>히스토리에서 담거나 새로 추가하세요.</div>';
@@ -225,13 +231,13 @@ export function createCharacterPanel({
       <div class="cw-slots">
         <div class="cw-slots-head">
           <span>슬롯</span><span class="cw-sp"></span>
-          <span>${activeSlots.length} / ${total}${maxSlots ? ` · max ${maxSlots}` : ''}</span>
+          <span>${used}${maxSlots ? ` / ${maxSlots}` : ''}</span>
         </div>
         <div class="cw-slots-scroll">
           ${body}
           <button type="button" class="cw-add" data-cw-add="1"${full ? ' disabled' : ''}
-            title="${full ? `슬롯은 최대 ${maxSlots}개입니다` : ''}">${
-            full ? `+ Add Character (${total}/${maxSlots})` : '+ Add Character'}</button>
+            title="${full ? `활성 슬롯은 최대 ${maxSlots}개입니다` : ''}">${
+            full ? `+ Add Character (${used}/${maxSlots})` : '+ Add Character'}</button>
         </div>
       </div>`;
   }
@@ -412,7 +418,7 @@ export function createCharacterPanel({
       if (add) {
         if (add.disabled) {
           const max = Number(lastState?.max_slots) || 0;
-          showToastSafe(`캐릭터 슬롯은 최대 ${max}개입니다.`);
+          showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`);
           return;
         }
         addSlot();

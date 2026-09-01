@@ -624,7 +624,8 @@
       ],
       "legacy_dependency": "none",
       "routes": [
-        {"method": "POST", "path": "/api/nai-preview/generate", "smoke": "skip"}
+        {"method": "POST", "path": "/api/nai-preview/generate", "smoke": "skip"},
+        {"method": "POST", "path": "/api/nai-preview/markers", "smoke": "skip"}
       ]
     },
     {

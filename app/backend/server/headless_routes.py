@@ -219,6 +219,7 @@ def register_headless_routes(
         run_in_thread=run_in_thread,
         clients=clients,
         start_generation_runner=ensure_generation_runner,
+        broadcast_json=broadcast_json,
     )
     register_pe_filter_routes(app, context, run_in_thread=run_in_thread)
     register_module_storage_routes(app, context, run_in_thread=run_in_thread)

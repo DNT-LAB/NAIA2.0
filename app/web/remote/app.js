@@ -10193,8 +10193,125 @@ function naiModelIsV5() {
 
 // V5 여부에 따라 달라지는 화면을 **함께** 갱신한다. 토큰 줄이 빠지면 모델을 바꿔도
 // 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
+// ── V4.5 프리뷰 ────────────────────────────────────────────────────────
+//
+// V5 할당량을 안 쓰고 구도만 먼저 본다. 실제로 나가는 것은 4.5 · Small · 10스텝이라
+// Anlas 도 V5 사용량도 안 깎인다(라이브 실증: 6,458 -> 6,458).
+//
+// ⚠️ 보내는 것은 **표식 사이**의 general 태그뿐이다. 표식이 없으면 보내지 않는다 -
+//    메인 전체를 보내면 Prefix 의 아티스트·품질 태그가 실려 구도가 흐려진다.
+const PREVIEW45_START = '#프리뷰 프롬프트 시작:';
+const PREVIEW45_END = '#:프리뷰 프롬프트 종료';
+let preview45Busy = false;
+
+// 표식 사이만 읽는다. ⚠️ **자리를 정하는 규칙은 백엔드가 갖는다** - 여기서는 읽기만
+//    한다. 규칙이 두 곳에 있으면 한쪽만 고치게 된다.
+function extractPreviewSegment(text) {
+  const tags = String(text || '').split(',').map(t => t.trim()).filter(Boolean);
+  const start = tags.indexOf(PREVIEW45_START);
+  if (start < 0) return '';
+  const end = tags.indexOf(PREVIEW45_END, start + 1);
+  if (end < 0) return '';
+  return tags.slice(start + 1, end).join(', ');
+}
+
+async function runV45Preview() {
+  if (preview45Busy) return;
+  if (!extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
+    showToast('프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
+    return;
+  }
+  preview45Busy = true;
+  const btn = document.getElementById('preview45RunBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/nai-preview/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({requestId: String(Date.now())}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(data.error || data.message || '프리뷰를 시작하지 못했습니다.', 'error');
+      return;
+    }
+    showToast('V4.5 프리뷰 생성 중… ' + data.width + 'x' + data.height + ', ' + data.steps + ' steps', 'info');
+  } catch (error) {
+    showToast('프리뷰 요청 실패: ' + error.message, 'error');
+  } finally {
+    preview45Busy = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function applyV45PreviewMarkers(action) {
+  closeV45PreviewMenu();
+  try {
+    const res = await fetch('/api/nai-preview/markers', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || '표식을 바꾸지 못했습니다.', 'error'); return; }
+    if (action === 'remove') showToast('프리뷰 표식을 걷었습니다.', 'success');
+    else showToast(data.segment ? ('프리뷰 구간: ' + data.segment) : '프리뷰 표식을 넣었습니다.', 'success');
+  } catch (error) {
+    showToast('표식 요청 실패: ' + error.message, 'error');
+  }
+}
+
+function v45PreviewMenu() {
+  let menu = document.getElementById('preview45Menu');
+  if (menu) return menu;
+  menu = document.createElement('div');
+  menu.className = 'preview45-menu';
+  menu.id = 'preview45Menu';
+  menu.innerHTML = '<button type="button" class="preview45-menu-item" data-act="insert">프리뷰 표식 삽입</button>'
+    + '<button type="button" class="preview45-menu-item" data-act="remove">프리뷰 표식 제거</button>'
+    + '<div class="preview45-menu-note">표식 사이의 태그만 프리뷰로 나갑니다.<br>선행/후행 · Steps · 해상도 설정은 준비 중입니다.</div>';
+  menu.addEventListener('click', event => {
+    const item = event.target.closest('[data-act]');
+    if (item) void applyV45PreviewMarkers(item.dataset.act);
+  });
+  document.body.appendChild(menu);
+  document.addEventListener('pointerdown', event => {
+    if (menu.classList.contains('open') && !menu.contains(event.target)
+        && event.target.id !== 'preview45GearBtn') closeV45PreviewMenu();
+  }, true);
+  return menu;
+}
+
+function closeV45PreviewMenu() {
+  const menu = document.getElementById('preview45Menu');
+  if (menu) menu.classList.remove('open');
+  document.getElementById('preview45GearBtn')?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleV45PreviewMenu() {
+  const menu = v45PreviewMenu();
+  const gear = document.getElementById('preview45GearBtn');
+  if (!gear) return;
+  if (menu.classList.contains('open')) { closeV45PreviewMenu(); return; }
+  menu.classList.add('open');
+  gear.setAttribute('aria-expanded', 'true');
+  // ⚠️ 그린 **뒤에** 재서 화면 안으로 가둔다 - 메뉴 높이는 내용에 따라 변한다.
+  const box = gear.getBoundingClientRect();
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(box.right - rect.width, window.innerWidth - rect.width - 8));
+  menu.style.left = Math.round(left) + 'px';
+  menu.style.top = Math.round(Math.max(8, box.top - rect.height - 6)) + 'px';
+}
+
 function refreshV5DependentChrome() {
   refreshTransparentBgPill();
+  // 프리뷰는 V5 에서만 뜻이 있다 - 4.5 에서 4.5 를 미리 볼 이유가 없다.
+  const previewSplit = document.getElementById('preview45Split');
+  const previewOn = naiModelIsV5();
+  if (previewSplit) previewSplit.hidden = !previewOn;
+  document.getElementById('promptTokenFooter')
+    ?.classList.toggle('has-preview45', previewOn);
+  if (!previewOn) closeV45PreviewMenu();
   if (tokenDisplayControl) tokenDisplayControl.updatePromptTokenEstimate();
 }
 

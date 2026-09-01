@@ -9584,6 +9584,109 @@ body.resizing-result-info {
   justify-content: flex-start;
   padding-right: 96px;
 }
+/* V4.5 프리뷰 버튼이 떠 있을 때. 알약 몫(96px)만으로는 라벨이 **버튼 밑까지** 늘어난다
+   - 지금 글자가 짧아 안 겹쳤을 뿐이고, 자릿수가 늘면(`E.tokens : 9999 (M : 8888, C : 1111)`)
+   파고든다. 버튼 130px + 오른쪽 94px + 여유 8px 를 함께 비운다.
+   ⚠️ `.has-bg-pill` **뒤에** 둬야 한다 - 특이도가 같아 앞에 두면 96px 에 진다
+      ([[feedback_css_file_order_cascade]]). */
+.prompt-token-footer.has-preview45 {
+  padding-right: 232px;
+}
+/* V4.5 프리뷰 스플릿 버튼(사용자 지정 2026-09-01).
+   자리는 토큰 줄을 V5 에서 압축해 만든 102px 다. 투명 BG 알약 **왼쪽**에 붙는다.
+   ⚠️ 부모(.prompt-token-footer)가 `pointer-events: none` 이라 여기서 다시 연다.
+   치수는 Memo·Tagger 계열을 따른다 - 높이 22px · 글자 10px · 라운드 5px
+   ([[feedback_popup_compact_style]]). */
+.preview45-split {
+  position: absolute;
+  right: 94px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: stretch;
+  height: 22px;
+  border: 1px solid rgba(232,232,240,0.16);
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(20,22,34,0.86);
+}
+.preview45-split[hidden] {
+  /* `hidden` 은 `display: inline-flex` 에 진다 - 짝을 반드시 쓴다. */
+  display: none;
+}
+.preview45-run, .preview45-gear {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .12s ease, background .12s ease;
+}
+.preview45-run { padding: 0 9px; }
+/* 톱니는 정사각으로 - 글자 버튼과 함께 한 알약처럼 보여야 한다. */
+.preview45-gear {
+  width: 22px;
+  padding: 0;
+  border-left: 1px solid rgba(232,232,240,0.16);
+  font-size: 11px;
+}
+.preview45-run:hover, .preview45-gear:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.07);
+}
+.preview45-run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.preview45-gear[aria-expanded="true"] {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.1);
+}
+.preview45-run:focus-visible, .preview45-gear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* 설정 드롭다운 - Tag Filter 칩 팝업과 같은 결(사용자 지정). */
+.preview45-menu {
+  position: fixed;
+  z-index: var(--z-floating-module-aux);
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid rgba(130,150,255,0.30);
+  border-radius: 8px;
+  background: rgba(15,15,23,0.98);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.42);
+  display: none;
+}
+.preview45-menu.open { display: block; }
+.preview45-menu-item {
+  width: 100%;
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.preview45-menu-item:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.preview45-menu-note {
+  padding: 5px 8px 3px;
+  color: var(--text-dim);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
 /* 투명 배경 알약(NAI V5 전용). 사용자 지정 2026-08-29.
    ⚠️ 부모(.prompt-token-footer)가 `pointer-events: none` 이다 - 알약만 다시 열어
       준다. 안 열면 보이긴 하는데 **눌러지지 않는다**.

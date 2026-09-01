@@ -15,6 +15,14 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from core.preview_prompt_markers import (
+    END_MARKER,
+    START_MARKER,
+    extract_between,
+    has_markers,
+    insert_markers,
+    strip_markers,
+)
 from core.nai_preview_service import (
     PREVIEW_MODEL_KEY,
     PREVIEW_STEPS,
@@ -43,6 +51,7 @@ def register_nai_preview_routes(
     run_in_thread: AsyncRunner,
     clients: set[Any],
     start_generation_runner: Callable[..., Any],
+    broadcast_json: Callable[..., Awaitable[Any]],
 ) -> None:
 
     def _build(request_id: str) -> dict[str, Any]:
@@ -50,6 +59,49 @@ def register_nai_preview_routes(
         # ⚠️ **마지막 문.** 여기서 걸리면 아무것도 큐에 안 들어간다.
         assert_free(session_context, overrides)
         return overrides
+
+    def _pe_prompts() -> tuple[str, str]:
+        """지금 모드의 Prefix/Postfix. 표식 자리를 정하는 기준이다."""
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        store = get_prompt_engineering_store(session_context)
+        settings = store.state(session_context.get_api_mode())["settings"]
+        return str(settings.get("pre_prompt") or ""), str(settings.get("post_prompt") or "")
+
+    @app.post("/api/nai-preview/markers")
+    async def api_nai_preview_markers(req: Request):
+        """메인 프롬프트에 프리뷰 구간 표식을 꽂거나 걷는다.
+
+        ⚠️ 표식 계산을 화면에서 하지 않는다 - 규칙(Prefix 마지막부터 · 가중치 벗기기 ·
+           뒤집힌 구간 보정)이 두 곳으로 갈리면 한쪽만 고치게 된다.
+        """
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+        action = str((body or {}).get("action") or "insert").strip().lower()
+        current = str(getattr(session_context, "prompt_text", "") or "")
+        if action == "remove":
+            updated = strip_markers(current)
+        else:
+            pre, post = await run_in_thread(_pe_prompts)
+            updated = insert_markers(current, pre, post)
+        session_context.prompt_text = updated
+        await broadcast_json(clients, {
+            "type": "prompt_sync",
+            "prompt": updated,
+            "negative": session_context.negative_prompt_text,
+            "negative_prompt": session_context.negative_prompt_text,
+            # force - 사용자가 방금 친 글이 아니라 우리가 고쳐 넣은 값이다.
+            "force": True,
+        })
+        return {
+            "ok": True,
+            "action": action,
+            "prompt": updated,
+            "hasMarkers": has_markers(updated),
+            "segment": extract_between(updated),
+        }
 
     @app.post("/api/nai-preview/generate")
     async def api_nai_preview_generate(req: Request):

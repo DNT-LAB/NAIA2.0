@@ -554,6 +554,16 @@
               <div class="activated-summary hidden" id="activatedSummary" aria-live="polite"></div>
               <!-- 투명 배경. **NAI V5 일 때만** 보인다(app.js 가 hidden 을 제어).
                    상태는 앞글자로 읽는다: 꺼지면 x · 켜지면 v (사용자 지정). -->
+              <!-- V4.5 프리뷰. **NAI V5 일 때만** 보인다 - 4.5 에서 4.5 를 미리 보는 것은
+                   뜻이 없다. 투명 BG 알약과 같은 조건이라 같은 갱신 함수가 켜고 끈다.
+                   ⚠️ 부모가 `pointer-events: none` 이다 - 여기서 다시 열어야 눌린다. -->
+              <div class="preview45-split" id="preview45Split" hidden>
+                <button type="button" class="preview45-run" id="preview45RunBtn"
+                        onclick="runV45Preview()">V4.5 프리뷰 생성</button>
+                <button type="button" class="preview45-gear" id="preview45GearBtn"
+                        aria-haspopup="true" aria-expanded="false" aria-label="프리뷰 설정"
+                        onclick="toggleV45PreviewMenu()">⚙</button>
+              </div>
               <button type="button" class="transparent-bg-pill" id="transparentBgPill" hidden
                       aria-pressed="false" onclick="toggleTransparentBackground()">
                 <span class="transparent-bg-mark" id="transparentBgMark">x</span>투명 BG

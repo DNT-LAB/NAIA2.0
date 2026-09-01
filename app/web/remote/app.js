@@ -10264,7 +10264,9 @@ async function applyV45PreviewMarkers(action) {
     const res = await fetch('/api/nai-preview/markers', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action}),
+      // ⚠️ 화면의 현재 글을 함께 보낸다 - 서버의 프롬프트는 500ms 디바운스라
+      //    방금 친 태그가 아직 안 갔을 수 있다(Codex CONCERN 1).
+      body: JSON.stringify({action, prompt: promptEdit ? promptEdit.value : undefined}),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { showToast(data.error || '표식을 바꾸지 못했습니다.', 'error'); return; }

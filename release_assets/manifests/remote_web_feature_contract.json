@@ -626,10 +626,10 @@
       ],
       "legacy_dependency": "none",
       "routes": [
-        {"method": "POST", "path": "/api/nai-preview/generate", "smoke": "skip"},
-        {"method": "POST", "path": "/api/nai-preview/markers", "smoke": "skip"},
+        {"method": "POST", "path": "/api/nai-preview/generate", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/nai-preview/markers", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/nai-preview/settings", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/nai-preview/settings", "smoke": "skip"}
+        {"method": "POST", "path": "/api/nai-preview/settings", "smoke": "state_mutation"}
       ]
     },
     {

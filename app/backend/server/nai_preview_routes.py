@@ -126,7 +126,13 @@ def register_nai_preview_routes(
         except Exception:
             body = {}
         action = str((body or {}).get("action") or "insert").strip().lower()
-        current = str(getattr(session_context, "prompt_text", "") or "")
+        # ⚠️ **화면이 보내 준 프롬프트를 우선한다**(Codex CONCERN 1). 프롬프트 동기화는
+        #    500ms 디바운스라, 태그를 친 직후 표식을 누르면 서버는 아직 **옛 글**을
+        #    들고 있다. 그것에 표식을 넣어 `force` 로 되밀면 방금 친 태그가 화면과
+        #    서버 양쪽에서 사라진다.
+        sent = body.get("prompt") if isinstance(body, dict) else None
+        current = (str(sent) if isinstance(sent, str)
+                   else str(getattr(session_context, "prompt_text", "") or ""))
         if action == "remove":
             updated = strip_markers(current)
         else:

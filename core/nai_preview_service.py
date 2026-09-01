@@ -121,6 +121,15 @@ def build_preview_overrides(context: Any, request_id: str = "",
         "auto_generate": False,
         # 업스케일/인핸스는 유료 경로다. 프리뷰에는 뜻도 없다.
         "enable_hr": False,
+        # ⚠️ **Codex BLOCK 2 (실증됨).** Vibe 주입은 `is_special_request` 가 아니라
+        #    이 플래그로 갈린다(`headless_image_module_param_service.apply`).
+        #    특수 요청 마커만 믿었던 것이 틀렸다 - Vibe 는 **인코딩만으로 2 Anlas** 라
+        #    `assert_free` 로는 잡히지도 않는다.
+        "_skip_vibe_transfer_late_binding": True,
+        # ⚠️ **Codex BLOCK 1 (실증됨).** 사용자가 커스텀 API 파라미터를 켜 두면 그 JSON 이
+        #    `api_parameters` 를 직접 덮어써 steps/해상도가 통째로 바뀐다. 프리뷰는
+        #    모델·스텝·해상도를 못박는 것이 존재 이유이므로 그 경로를 끈다.
+        "use_custom_api_params": False,
     }
     if not settings.get("send_character", True):
         # ⚠️ 기존 플래그를 재사용한다 - 캐릭터를 안 실을 때 쓰는 그 문이다.
@@ -138,8 +147,21 @@ def assert_free(context: Any, overrides: dict[str, Any]) -> None:
 
     ⚠️ 이 문이 마지막이다. 위에서 치수를 잘못 계산해도, 누가 스텝 상수를 올려도,
        여기서 멈춘다. `is_free_generation` 은 모르면 유료로 눕는 fail-safe 다.
+
+    ⚠️ **오버라이드만 보면 안 된다**(Codex BLOCK 1, 실증됨). 실제로 나가는 것은
+       `remote_params` 에 오버라이드를 얹은 값이라, 세션에 켜져 있던
+       `use_custom_api_params` 같은 키가 오버라이드에는 없어서 검사를 통과했다.
+       `_normalized_params` 와 **같은 순서**로 병합해서 본다.
     """
-    if not is_free_generation(context, overrides):
+    merged = dict(getattr(context, "remote_params", {}) or {})
+    options = getattr(context, "get_options", None)
+    if callable(options):
+        try:
+            merged.update(options() or {})
+        except Exception:
+            pass
+    merged.update(overrides)
+    if not is_free_generation(context, merged):
         width = overrides.get("width")
         height = overrides.get("height")
         steps = overrides.get("steps")

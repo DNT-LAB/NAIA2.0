@@ -8,9 +8,9 @@
  * ⚠️ 이 그림은 **저장되지 않는다**(사용자 지정). 서버가 결과 저장소에서 빼고 디스크에도
  *    안 쓴다 - [Save] 를 눌렀을 때만 쓴다. 그래서 창을 닫으면 그림은 사라진다.
  *
- * ⚠️ [Generate] 는 **진짜 생성**이다 - V5 로 돈/할당량을 쓴다. 프리뷰가 마음에 들어야
- *    누르는 버튼이므로 가장 크게 둔다(사용자 지정). 프리뷰를 한 장 더 뽑는 버튼이
- *    아니다 - 그건 툴바의 [V4.5 프리뷰 생성] 이다.
+ * ⚠️ [Generate] 는 **4.5 재생성**이다(사용자 지정 2026-09-01) - 프롬프트를 고쳐 가며
+ *    다시 보는 것이 이 창의 쓰임새다. V5 로 진짜 생성하는 버튼이 **아니다**.
+ *    그래서 눌러도 창을 닫지 않는다 - 새 그림이 같은 자리에 갈린다.
  */
 export function createNaiPreviewWindow({
   document: doc,
@@ -42,7 +42,8 @@ export function createNaiPreviewWindow({
       if (!btn) return;
       if (btn.dataset.pvw === 'close') { close(); return; }
       if (btn.dataset.pvw === 'save') { void save(btn); return; }
-      if (btn.dataset.pvw === 'generate') { close(); onGenerate?.(); }
+      // ⚠️ 닫지 않는다 - 같은 자리에서 새 프리뷰로 갈린다(재테스트 루프).
+      if (btn.dataset.pvw === 'generate') onGenerate?.();
     });
     doc.addEventListener('keydown', event => {
       if (event.key === 'Escape' && isOpen()) close();
@@ -105,5 +106,13 @@ export function createNaiPreviewWindow({
     place();
   }
 
-  return {show, close, isOpen};
+  /** 재생성이 도는 동안 [Generate] 를 잠근다 - 연타하면 요청이 쌓인다. */
+  function setBusy(busy) {
+    const btn = root && root.querySelector('[data-pvw="generate"]');
+    if (!btn) return;
+    btn.disabled = !!busy;
+    btn.textContent = busy ? '생성 중…' : 'Generate';
+  }
+
+  return {show, close, isOpen, setBusy};
 }

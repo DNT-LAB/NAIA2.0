@@ -4209,6 +4209,12 @@ const wsMessageHandlers = {
   // (Codex 리뷰 2026-08-08).
   status: m => {
     if (!m.is_generating) lastGenerationOk = (String(m.message || '') === 'completed');
+    // 프리뷰가 실패로 끝나면 `nai_preview_result` 가 영영 안 온다 - 여기서 푼다.
+    // 단, 시작을 본 뒤의 종료만 종료다(큐 직후의 false 는 시작이 아니다).
+    if (preview45Busy) {
+      if (m.is_generating) preview45Started = true;
+      else if (preview45Started) setPreview45Busy(false);
+    }
     // V5 Scene 연속 생성의 런 표. 완료가 **누구 것인지** 가르는 유일한 단서다 -
     // 이 알림은 모든 탭에 가므로, 표가 없으면 남의 완료로 자기 컷을 넘긴다.
     lastGenerationRunTag = String(m.v5_scene_run || '');
@@ -10211,15 +10217,15 @@ document.addEventListener('keydown', event => {
 // 프리뷰 창(지연 로드). ⚠️ 이 그림은 **저장되지 않는다** - 서버가 결과 저장소에서
 //    빼고 디스크에도 안 쓴다. [Save] 를 눌렀을 때만 쓴다.
 let naiPreviewWindow = null;
-const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260901-pvw')
+const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260901-pvw2')
   .then(({createNaiPreviewWindow}) => {
     naiPreviewWindow = createNaiPreviewWindow({
       document,
       window,
       showToast,
-      // ⚠️ [Generate] 는 **진짜 생성**이다 - 프리뷰를 한 장 더 뽑는 것이 아니라
-      //    사용자가 지금 보는 구도로 V5 생성을 낸다(돈/할당량을 쓴다).
-      onGenerate: () => { generateAction(); },
+      // ⚠️ [Generate] 는 **4.5 재생성**이다(사용자 지정) - 프롬프트를 고쳐 가며 다시
+      //    보는 루프가 이 창의 쓰임새다. V5 진짜 생성이 아니다.
+      onGenerate: () => { void runV45Preview(); },
     });
   })
   .catch(error => {
@@ -10227,6 +10233,7 @@ const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260
   });
 
 async function onNaiPreviewResult(message) {
+  setPreview45Busy(false);
   await naiPreviewWindowReady;
   if (!naiPreviewWindow) { showToast('프리뷰 창을 불러오지 못했습니다.', 'error'); return; }
   naiPreviewWindow.show(message);
@@ -10242,6 +10249,28 @@ async function onNaiPreviewResult(message) {
 const PREVIEW45_START = '#프리뷰 프롬프트 시작:';
 const PREVIEW45_END = '#:프리뷰 프롬프트 종료';
 let preview45Busy = false;
+let preview45ReleaseTimer = 0;
+// ⚠️ 큐에 넣은 직후에도 `is_generating:false` 상태가 한 번 온다(라이브 실측: 3초에
+//    풀렸다). 그래서 **시작을 본 뒤**의 종료만 종료로 친다.
+let preview45Started = false;
+
+/**
+ * 프리뷰 잠금 - 툴바 버튼과 창의 [Generate] 를 함께 잠근다.
+ *
+ * ⚠️ **생성이 끝날 때까지** 잠근다. 처음엔 kickoff POST 의 finally 에서 풀었는데,
+ *    그 응답은 '큐에 넣었다' 는 뜻이라 200ms 만에 풀렸다 - 30초 생성 내내 버튼이
+ *    열려 있어 연타하면 그만큼 큐에 쌓였다(라이브 실측).
+ * ⚠️ 결과 알림이 유실되면 영영 잠긴다 - 안전 타이머로 반드시 되돌린다.
+ */
+function setPreview45Busy(busy) {
+  preview45Busy = !!busy;
+  if (busy) preview45Started = false;
+  const btn = document.getElementById('preview45RunBtn');
+  if (btn) btn.disabled = !!busy;
+  naiPreviewWindow?.setBusy(!!busy);
+  if (preview45ReleaseTimer) { clearTimeout(preview45ReleaseTimer); preview45ReleaseTimer = 0; }
+  if (busy) preview45ReleaseTimer = setTimeout(() => setPreview45Busy(false), 180000);
+}
 
 // 표식 사이만 읽는다. ⚠️ **자리를 정하는 규칙은 백엔드가 갖는다** - 여기서는 읽기만
 //    한다. 규칙이 두 곳에 있으면 한쪽만 고치게 된다.
@@ -10260,9 +10289,7 @@ async function runV45Preview() {
     showToast('프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
     return;
   }
-  preview45Busy = true;
-  const btn = document.getElementById('preview45RunBtn');
-  if (btn) btn.disabled = true;
+  setPreview45Busy(true);
   try {
     const res = await fetch('/api/nai-preview/generate', {
       method: 'POST',
@@ -10272,15 +10299,16 @@ async function runV45Preview() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       showToast(data.error || data.message || '프리뷰를 시작하지 못했습니다.', 'error');
+      setPreview45Busy(false);   // 시작조차 못 했다 - 기다릴 결과가 없다.
       return;
     }
     showToast('V4.5 프리뷰 생성 중… ' + data.width + 'x' + data.height + ', ' + data.steps + ' steps', 'info');
   } catch (error) {
     showToast('프리뷰 요청 실패: ' + error.message, 'error');
-  } finally {
-    preview45Busy = false;
-    if (btn) btn.disabled = false;
+    setPreview45Busy(false);
   }
+  // ⚠️ finally 에서 풀지 않는다 - 여기까지는 '큐에 넣었다' 일 뿐이다.
+  //    잠금은 nai_preview_result / 생성 종료 신호가 푼다.
 }
 
 async function applyV45PreviewMarkers(action) {

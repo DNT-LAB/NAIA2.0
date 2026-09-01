@@ -3018,6 +3018,14 @@ export function createTagAssistController({
     textarea.addEventListener('keydown', e => {
       if (imeState.composing || e.isComposing || e.keyCode === 229) return;
       if (!acMode || !acResults.length) return;
+      // ⚠️ **Ctrl/⌘ + Enter 는 자동완성보다 세다**(사용자 지정 2026-09-01).
+      //    아래 Enter 가지가 `preventDefault + stopPropagation` 을 걸어 전역
+      //    Ctrl+Enter(=생성)를 삼키고 있었다 - 태그를 치다 생성하려고 누르면
+      //    후보만 들어가고 그림이 안 나갔다. 팝업은 닫고 키는 흘려보낸다.
+      if ((e.key === 'Enter' || e.key === 'Tab') && (e.ctrlKey || e.metaKey)) {
+        hideAutocomplete();
+        return;
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         moveAutocompleteSelection(1);

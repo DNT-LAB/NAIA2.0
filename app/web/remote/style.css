@@ -13660,12 +13660,7 @@ body.detached-metadata .metadata-layout {
   border-color: rgba(124,106,239,0.6); color: rgb(178,166,247);
   background: rgba(124,106,239,0.22);
 }
-.cw-slot-title {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-editor); font-size: 11px; color: var(--text-primary); text-align: left;
-}
 /* 끈 슬롯은 자리를 지킨 채 흐려진다(Quick 과 같은 규약). */
-.cw-slot.is-muted .cw-slot-title { opacity: 0.42; text-decoration: line-through; }
 .cw-slot.is-muted .cw-input { opacity: 0.5; }
 .cw-slot-btn {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
@@ -13688,6 +13683,24 @@ body.detached-metadata .metadata-layout {
 }
 .cw-input:focus { outline: none; border-color: rgba(124,106,239,0.55); }
 .cw-input.is-uc { color: var(--text-dim); }
+
+/* ⚠️ **숨은 우클릭을 꺼낸 자리**(사용자 지정 2026-09-01: "숨긴 우클릭들은 다
+   꺼내야합니다"). 자주 쓰지 않는 조작이라 늘 보이면 줄이 복잡해지고, 우클릭에만
+   두면 찾을 수 없다 - Tagger(`.imgtag-x-mini.is-solo`)와 같은 절충이다:
+   **행에 마우스를 올리면 나타난다.** 우클릭도 그대로 둔다(익숙한 사람용 지름길).
+   ⚠️ 키보드로 오는 사람을 막지 않으려면 `:focus-visible` 에서도 보여야 한다. */
+.cw-reveal { opacity: 0; transition: opacity 0.12s; }
+.cw-slot-row:hover .cw-reveal,
+.cw-li:hover .cw-reveal,
+.cw-reveal:focus-visible { opacity: 1; }
+.cw-slot-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-editor); font-size: 11px; color: var(--text-primary);
+}
+.cw-slot.is-muted .cw-slot-name { opacity: 0.42; text-decoration: line-through; }
+/* 그룹 칩이 버튼이 됐다 - 이름이 있으면 늘 보이고(정보), 없으면 hover 로 나온다. */
+button.cw-li-group { cursor: pointer; }
+button.cw-li-group:hover { border-color: var(--accent); color: var(--text-primary); }
 
 /* 오른쪽 - 작업 영역 */
 .cw-work { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }

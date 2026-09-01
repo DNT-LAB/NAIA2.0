@@ -196,8 +196,12 @@ export function createCharacterPanel({
         <div class="cw-slot-row">
           <button type="button" class="cw-slot-en${muted ? '' : ' is-on'}"
             data-cw-mute="${index}" title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">✔</button>
-          <span class="cw-slot-title" data-cw-rename="${index}"
-            title="우클릭 또는 클릭으로 이름 바꾸기">C${ordinal} · ${escHtml(slotLabel(character))}</span>
+          <span class="cw-slot-name">C${ordinal} · ${escHtml(slotLabel(character))}</span>
+          <!-- ⚠️ 이름 바꾸기는 **우클릭에만** 있었다 - 화면 어디에도 표시가 없어
+               찾을 수 없었다(내가 조사에서 지적하고 내가 또 만들었다). Tagger 와
+               같은 방식으로 **행에 마우스를 올리면 나타난다**. -->
+          <button type="button" class="cw-slot-btn cw-reveal" data-cw-rename="${index}"
+            title="이름 바꾸기">✎</button>
           <button type="button" class="cw-slot-btn${character.favorite ? ' is-star' : ''}"
             data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
           <button type="button" class="cw-slot-btn" data-cw-down="${index}"
@@ -266,13 +270,15 @@ export function createCharacterPanel({
     const list = rows.length
       ? rows.map(({character, index}) => `
           <div class="cw-li" data-cw-li="${index}" data-cw-load="${index}"
-            title="누르면 슬롯 맨 아래에 담긴다 · 우클릭으로 그룹">
+            title="누르면 슬롯 맨 아래에 담긴다">
             <button type="button" class="cw-li-star${character.favorite ? ' is-on' : ''}"
               data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
             <span class="cw-li-text">${escHtml(slotLabel(character, {full: true}))}</span>
             ${groupOf(character)
-              ? `<span class="cw-li-group">${escHtml(groupOf(character))}</span>`
-              : ''}
+              ? `<button type="button" class="cw-li-group" data-cw-editgroup="${index}"
+                  title="그룹 바꾸기">${escHtml(groupOf(character))}</button>`
+              : `<button type="button" class="cw-li-group cw-reveal" data-cw-editgroup="${index}"
+                  title="그룹에 넣기">+ 그룹</button>`}
           </div>`).join('')
       : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ▼ 로 내리면 여기에 쌓입니다 (최대 500개).'}</div>`;
     return `
@@ -433,6 +439,8 @@ export function createCharacterPanel({
       }
       const down = hit('[data-cw-down]');
       if (down) { setSlotState(Number(down.dataset.cwDown), 'inactive'); return; }
+      const group = hit('[data-cw-editgroup]');
+      if (group) { void editGroup(Number(group.dataset.cwEditgroup)); return; }
       const load = hit('[data-cw-load]');
       if (load) { setSlotState(Number(load.dataset.cwLoad), 'active'); return; }
       const remove = hit('[data-cw-remove]');
@@ -457,18 +465,22 @@ export function createCharacterPanel({
     });
 
     root.addEventListener('contextmenu', event => {
-      // 슬롯은 이름 바꾸기, 히스토리는 그룹. 둘 다 자주 쓰지 않는 조작이라
-      // 행을 버튼으로 채우지 않는다(사용자 지정: 그룹/담기 버튼을 노출하지 말 것).
-      const slot = event.target.closest('[data-cw-rename]');
-      if (slot) {
-        event.preventDefault();
-        void renameSlot(Number(slot.dataset.cwRename));
+      // 버튼을 꺼낸 뒤에도 우클릭은 **지름길로 남긴다**(익숙한 사람용).
+      // ⚠️ 슬롯은 **머리줄에서만** 받는다 - 프롬프트 칸에서 우클릭하면 붙여넣기
+      //    같은 브라우저 기본 메뉴가 떠야 한다.
+      const row = event.target.closest('.cw-slot-row');
+      if (row) {
+        const holder = row.closest('[data-cw-slot]');
+        if (holder) {
+          event.preventDefault();
+          void renameSlot(Number(holder.dataset.cwSlot));
+        }
         return;
       }
-      const row = event.target.closest('[data-cw-li]');
-      if (!row) return;
+      const item = event.target.closest('[data-cw-li]');
+      if (!item) return;
       event.preventDefault();
-      void editGroup(Number(row.dataset.cwLi));
+      void editGroup(Number(item.dataset.cwLi));
     });
   }
 

@@ -2280,7 +2280,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260901-rowclick')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260901-reveal')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -12671,7 +12671,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260831-tagfilter')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260901-ctrlenter')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

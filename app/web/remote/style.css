@@ -11794,7 +11794,11 @@ body.resizing-result-info {
      e621 과 같은 기하다 - 좌측 프롬프트 패널(480px)을 비켜서고 우측 레일을 남긴다. */
   .module-popup.module-popup-character {
     left: 492px;
-    right: 148px;
+    /* ⚠️ **히스토리 레일까지 덮는다**(사용자 지정 2026-09-01: "공간이 협소하니").
+       e621 은 148px 을 비워 두는데, 그 자리는 히스토리 패널이 **열렸을 때만**
+       쓰인다(평소 width 0). 캐릭터는 좌우 두 칸을 나눠 써야 해서 그 136px 이
+       아깝다 - 닫기(×)는 팝업 머리에 있으니 가려도 갇히지 않는다. */
+    right: 12px;
     top: 12px;
     bottom: 12px;
     width: auto;

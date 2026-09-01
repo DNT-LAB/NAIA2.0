@@ -4906,6 +4906,9 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   // 명시적인 prompt 생성 이벤트는 서버의 generation state가 authoritative하다.
   if (acceptsGeneratedPrompt) {
     if (isMyRandom) unlockRandomButton();   // 내가 요청한 random 응답일 때만 버튼 unlock(브로드캐스트로 온 남/재연결분은 패널만 갱신)
+    // 랜덤 연동 프리뷰(기본 비활성). ⚠️ **내가 누른 랜덤일 때만** 건다 - 다른 탭이
+    //    돌린 랜덤의 브로드캐스트에도 걸면 안 시킨 프리뷰가 나간다(무료지만 큐를 먹는다).
+    if (isMyRandom) maybeRunV45PreviewAfterRandom();
     if (promptSendTimer) {
       clearTimeout(promptSendTimer);
       promptSendTimer = null;
@@ -10193,6 +10196,17 @@ function naiModelIsV5() {
 
 // V5 여부에 따라 달라지는 화면을 **함께** 갱신한다. 토큰 줄이 빠지면 모델을 바꿔도
 // 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
+// ALT + P 로 요청(기본 활성). ⚠️ 입력 칸 안에서도 동작해야 한다 - 프롬프트를 고치다
+//    바로 눌러 보는 것이 이 기능의 쓰임새다. 그래서 target 을 가리지 않는다.
+document.addEventListener('keydown', event => {
+  if (!event.altKey || event.ctrlKey || event.metaKey) return;
+  if (String(event.key || '').toLowerCase() !== 'p') return;
+  if (!naiModelIsV5()) return;
+  if (!v45PreviewSetting('alt_p_hotkey', true)) return;
+  event.preventDefault();
+  void runV45Preview();
+});
+
 // ── V4.5 프리뷰 ────────────────────────────────────────────────────────
 //
 // V5 할당량을 안 쓰고 구도만 먼저 본다. 실제로 나가는 것은 4.5 · Small · 10스텝이라
@@ -10261,46 +10275,45 @@ async function applyV45PreviewMarkers(action) {
   }
 }
 
-function v45PreviewMenu() {
-  let menu = document.getElementById('preview45Menu');
-  if (menu) return menu;
-  menu = document.createElement('div');
-  menu.className = 'preview45-menu';
-  menu.id = 'preview45Menu';
-  menu.innerHTML = '<button type="button" class="preview45-menu-item" data-act="insert">프리뷰 표식 삽입</button>'
-    + '<button type="button" class="preview45-menu-item" data-act="remove">프리뷰 표식 제거</button>'
-    + '<div class="preview45-menu-note">표식 사이의 태그만 프리뷰로 나갑니다.<br>선행/후행 · Steps · 해상도 설정은 준비 중입니다.</div>';
-  menu.addEventListener('click', event => {
-    const item = event.target.closest('[data-act]');
-    if (item) void applyV45PreviewMarkers(item.dataset.act);
+// 설정 패널(지연 로드). ⚠️ 값의 SSOT 는 백엔드다 - 여기서는 열고 닫기만 한다.
+let naiPreviewSettingsPanel = null;
+const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260901-pv45')
+  .then(({createNaiPreviewSettingsPanel}) => {
+    naiPreviewSettingsPanel = createNaiPreviewSettingsPanel({
+      document,
+      window,
+      showToast,
+      escHtml,
+      onMarkers: action => { void applyV45PreviewMarkers(action); },
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize NAI preview settings panel', error);
   });
-  document.body.appendChild(menu);
-  document.addEventListener('pointerdown', event => {
-    if (menu.classList.contains('open') && !menu.contains(event.target)
-        && event.target.id !== 'preview45GearBtn') closeV45PreviewMenu();
-  }, true);
-  return menu;
-}
 
 function closeV45PreviewMenu() {
-  const menu = document.getElementById('preview45Menu');
-  if (menu) menu.classList.remove('open');
-  document.getElementById('preview45GearBtn')?.setAttribute('aria-expanded', 'false');
+  naiPreviewSettingsPanel?.close();
 }
 
-function toggleV45PreviewMenu() {
-  const menu = v45PreviewMenu();
-  const gear = document.getElementById('preview45GearBtn');
-  if (!gear) return;
-  if (menu.classList.contains('open')) { closeV45PreviewMenu(); return; }
-  menu.classList.add('open');
-  gear.setAttribute('aria-expanded', 'true');
-  // ⚠️ 그린 **뒤에** 재서 화면 안으로 가둔다 - 메뉴 높이는 내용에 따라 변한다.
-  const box = gear.getBoundingClientRect();
-  const rect = menu.getBoundingClientRect();
-  const left = Math.max(8, Math.min(box.right - rect.width, window.innerWidth - rect.width - 8));
-  menu.style.left = Math.round(left) + 'px';
-  menu.style.top = Math.round(Math.max(8, box.top - rect.height - 6)) + 'px';
+async function toggleV45PreviewMenu() {
+  await naiPreviewSettingsReady;
+  if (!naiPreviewSettingsPanel) { showToast('프리뷰 설정을 불러오지 못했습니다.', 'error'); return; }
+  naiPreviewSettingsPanel.toggle();
+}
+
+// ⚠️ 설정을 **묻기만** 한다. 패널을 한 번도 안 열었으면 값이 없으므로, 그때는
+//    기본값(SPEC 그대로)으로 답한다 - 서버에 매번 물으면 랜덤 연타가 왕복을 만든다.
+function v45PreviewSetting(key, fallback) {
+  const current = naiPreviewSettingsPanel?.current();
+  if (!current || !(key in current)) return fallback;
+  return current[key];
+}
+
+/** 랜덤 버튼이 돌 때 함께 요청한다(기본 비활성). */
+function maybeRunV45PreviewAfterRandom() {
+  if (!naiModelIsV5()) return;
+  if (!v45PreviewSetting('on_random', false)) return;
+  void runV45Preview();
 }
 
 function refreshV5DependentChrome() {

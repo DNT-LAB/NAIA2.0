@@ -618,6 +618,7 @@
       "name": "NAI V4.5 Preview (V5 할당량을 안 쓰고 구도만 미리 본다)",
       "source_files": [
         "app/backend/server/nai_preview_routes.py",
+        "app/backend/server/generation_runner.py",
         "core/nai_preview_service.py",
         "core/nai_preview_settings.py",
         "core/preview_prompt_markers.py",
@@ -629,7 +630,8 @@
         {"method": "POST", "path": "/api/nai-preview/generate", "smoke": "external_live"},
         {"method": "POST", "path": "/api/nai-preview/markers", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/nai-preview/settings", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/nai-preview/settings", "smoke": "state_mutation"}
+        {"method": "POST", "path": "/api/nai-preview/settings", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/nai-preview/save", "smoke": "state_mutation"}
       ]
     },
     {

@@ -4263,6 +4263,7 @@ const wsMessageHandlers = {
   setup_blocked: onSetupBlocked,
   probe_result: onProbeResult,
   anlas_update: onAnlasUpdate,
+  nai_preview_result: onNaiPreviewResult,
   nai_usage_update: onNaiUsageUpdate,
   nai_accounts: m => { if (naiAccountPanel) naiAccountPanel.onAccounts(m); },
   nai_account_result: m => { if (naiAccountPanel) naiAccountPanel.onAccountResult(m); },
@@ -10206,6 +10207,30 @@ document.addEventListener('keydown', event => {
   event.preventDefault();
   void runV45Preview();
 });
+
+// 프리뷰 창(지연 로드). ⚠️ 이 그림은 **저장되지 않는다** - 서버가 결과 저장소에서
+//    빼고 디스크에도 안 쓴다. [Save] 를 눌렀을 때만 쓴다.
+let naiPreviewWindow = null;
+const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260901-pvw')
+  .then(({createNaiPreviewWindow}) => {
+    naiPreviewWindow = createNaiPreviewWindow({
+      document,
+      window,
+      showToast,
+      // ⚠️ [Generate] 는 **진짜 생성**이다 - 프리뷰를 한 장 더 뽑는 것이 아니라
+      //    사용자가 지금 보는 구도로 V5 생성을 낸다(돈/할당량을 쓴다).
+      onGenerate: () => { generateAction(); },
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize NAI preview window', error);
+  });
+
+async function onNaiPreviewResult(message) {
+  await naiPreviewWindowReady;
+  if (!naiPreviewWindow) { showToast('프리뷰 창을 불러오지 못했습니다.', 'error'); return; }
+  naiPreviewWindow.show(message);
+}
 
 // ── V4.5 프리뷰 ────────────────────────────────────────────────────────
 //

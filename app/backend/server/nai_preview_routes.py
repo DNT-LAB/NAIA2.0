@@ -84,6 +84,24 @@ def register_nai_preview_routes(
         settings = store.state(session_context.get_api_mode())["settings"]
         return str(settings.get("pre_prompt") or ""), str(settings.get("post_prompt") or "")
 
+    @app.post("/api/nai-preview/save")
+    async def api_nai_preview_save():
+        """프리뷰는 기본적으로 저장되지 않는다 - [Save] 를 눌렀을 때만 디스크에 쓴다.
+
+        ⚠️ 마지막 한 장만 저장할 수 있다. 다음 프리뷰가 그 칸을 덮는다 - 여러 장을
+           들고 있으면 어느 것을 저장하는지 화면과 서버가 어긋난다.
+        """
+        item = getattr(session_context, "nai_preview_last_item", None)
+        if item is None:
+            return JSONResponse({"error": "저장할 프리뷰가 없습니다."}, status_code=404)
+        try:
+            result = await run_in_thread(session_context.save_history_item, item)
+        except Exception as exc:
+            return JSONResponse({"error": f"프리뷰 저장 실패: {exc}"}, status_code=500)
+        if isinstance(result, dict) and result.get("error"):
+            return JSONResponse({"error": str(result["error"])}, status_code=500)
+        return {"ok": True, "result": result}
+
     @app.get("/api/nai-preview/settings")
     async def api_nai_preview_settings_get():
         """설정 + 화면이 그릴 선택지(샘플러·스케줄러·직접 선택 후보)."""

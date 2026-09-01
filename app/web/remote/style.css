@@ -9592,6 +9592,72 @@ body.resizing-result-info {
 .prompt-token-footer.has-preview45 {
   padding-right: 232px;
 }
+/* V4.5 프리뷰 창(사용자 지정 2026-09-01). 결과 스테이지 가운데에 뜬다.
+   ⚠️ 이 그림은 **저장되지 않는다** - 창을 닫으면 사라진다. 그래서 [Save] 가 있다.
+   액션 줄: Generate 가 크고 Save/Close 는 좌우 구석에 작게(사용자 지정). */
+.pvw-window {
+  position: fixed;
+  z-index: var(--z-floating-module-aux);
+  width: min(420px, calc(100vw - 24px));
+  display: none;
+  flex-direction: column;
+  border: 1px solid rgba(130,150,255,0.30);
+  border-radius: 8px;
+  background: rgba(15,15,23,0.98);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.42);
+  overflow: hidden;
+}
+.pvw-window.open { display: flex; }
+.pvw-head {
+  min-height: 28px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-dim);
+  background: rgba(22,24,38,0.9);
+}
+.pvw-title {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.3px; color: var(--text-primary);
+}
+/* 무엇이 나갔는지 한 줄로 - 크기·스텝·모델. 프리뷰의 값어치가 여기 있다. */
+.pvw-meta {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+}
+/* 체크무늬 없이 어두운 바닥 - 투명 배경 프리뷰도 여기서는 구도만 보면 된다. */
+.pvw-stage {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px;
+  background: rgba(0,0,0,0.32);
+}
+.pvw-img {
+  max-width: 100%;
+  max-height: min(460px, calc(100vh - 190px));
+  display: block; border-radius: 4px;
+}
+.pvw-actions {
+  display: flex; align-items: stretch; gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border-dim);
+}
+/* ⚠️ Generate 가 남는 자리를 다 먹는다 - 좌우 버튼은 자기 폭만 갖는다. */
+.pvw-main {
+  flex: 1; min-width: 0; height: 32px;
+  border: 1px solid rgba(124,106,239,0.55); border-radius: 6px;
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.3px; cursor: pointer;
+}
+.pvw-main:hover { filter: brightness(1.08); }
+.pvw-side {
+  flex: 0 0 auto; height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.26); color: var(--text-dim);
+  font-size: 10px; cursor: pointer; white-space: nowrap;
+}
+.pvw-side:hover { border-color: var(--accent); color: var(--text-primary); }
+.pvw-side:disabled { opacity: 0.5; cursor: default; }
+.pvw-close:hover { border-color: rgba(224,108,117,0.6); color: #ffb0b0; }
 /* V4.5 프리뷰 설정 패널(사용자 SPEC 2026-09-01).
    ⚠️ 새 팝업은 Memo·Tagger 계열을 따른다 - 높이 22px · 글자 10px · 라운드 5px
       ([[feedback_popup_compact_style]]). 설정 항목이 많아 좁고 길게 간다.

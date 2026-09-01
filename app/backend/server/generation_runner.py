@@ -524,6 +524,15 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 except Exception:
                     pass
                 continue
+            # ── V4.5 프리뷰 ─────────────────────────────────────────
+            # 사용자 지정: "저장이 되지 않는 이미지". 디스크에도 안 쓰고 히스토리에도
+            # 안 남긴다 - 여기서 갈라져 나가므로 아래 auto_save / broadcast_image /
+            # viewer_new_image_payload 를 **하나도** 타지 않는다.
+            if (getattr(request, "params", {}) or {}).get("nai_preview_request"):
+                context.is_generating = False
+                await _finish_nai_preview(context, clients, request, stored)
+                continue
+
             img2img_completed = bool(
                 img2img_service
                 and img2img_service.record_generation_completed(request_params, request.request_id)
@@ -1677,6 +1686,41 @@ async def _wait_for_automation_delay(
         await asyncio.sleep(min(1.0, max(0.05, remaining)))
 
 
+
+async def _finish_nai_preview(context: WebSessionContext, clients, request, stored) -> None:
+    """프리뷰 한 장을 프리뷰 창으로 보내고 **흔적을 지운다**.
+
+    ⚠️ `execute_request` 는 이미 결과 저장소에 넣어 두었다. 안 빼면 새로고침했을 때
+       히스토리에 나타난다 - 사용자는 저장한 적이 없는 그림을 보게 된다.
+    ⚠️ 그래도 **바이트는 들고 있는다**([Save] 를 누르면 그때 되살린다). 화면이 base64 를
+       되보내게 하면 큰 본문이 왕복하고, 그 사이 사용자가 다른 프리뷰를 뽑으면 어느
+       것을 저장하는지 헷갈린다.
+    """
+    import base64
+
+    params = getattr(request, "params", {}) or {}
+    item = stored.item
+    # [Save] 가 쓸 한 칸. 다음 프리뷰가 덮는다 - 마지막 것만 저장할 수 있다.
+    context.nai_preview_last_item = item
+    try:
+        context.result_store.remove_item(item)
+    except Exception as exc:
+        print(f"[NaiPreview] result store cleanup failed: {exc}", flush=True)
+
+    await broadcast_json(clients, {
+        "type": "status",
+        "is_generating": False,
+        "message": "completed",
+    })
+    await broadcast_json(clients, {
+        "type": "nai_preview_result",
+        "requestId": str(params.get("nai_preview_request_id") or ""),
+        "width": int(params.get("width") or 0),
+        "height": int(params.get("height") or 0),
+        "steps": int(params.get("steps") or 0),
+        "model": str(params.get("model") or ""),
+        "image": base64.b64encode(item.webp_bytes).decode("ascii"),
+    })
 async def _auto_save_generated_history_item(context: WebSessionContext, item):
     if not context._coerce_bool(context.auto_save_state.get("auto_save", True)):
         return None

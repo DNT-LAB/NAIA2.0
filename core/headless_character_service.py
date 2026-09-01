@@ -87,6 +87,12 @@ def _seed_missing_positions(settings: dict) -> None:
             frame["position"] = position
 
 
+# NAI V5 에서 캐릭터 개수 상한이 풀렸다(사용자 지정 2026-09-01: 최대 25개).
+# ⚠️ `core/generation_request.py` 의 NAICharacterData 와 **같은 값이어야 한다** -
+#    거기가 넘치면 생성이 막힌다.
+MAX_CHARACTER_SLOTS = 25
+
+
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
@@ -443,8 +449,13 @@ class HeadlessCharacterService:
                 str(payload.get("existing") or "inactive"),
             )
         elif key == "add_character":
-            frames.append({"prompt": "", "uc": "", "is_enabled": True, "slot_state": "active", "custom_name": ""})
-            invalidate_snapshot = True
+            # ⚠️ 상한을 **만들 때** 막는다. 넘겨서 보내면 `NAICharacterData` 가 거부하고,
+            #    그러면 생성 자체가 막힌다(예전에는 캐릭터가 통째로 빠진 채 나갔다).
+            #    화면도 25에서 [+ Add] 를 잠그지만, 여기가 마지막 문이다.
+            if len(frames) < MAX_CHARACTER_SLOTS:
+                frames.append({"prompt": "", "uc": "", "is_enabled": True,
+                               "slot_state": "active", "custom_name": ""})
+                invalidate_snapshot = True
         elif key == "preview_refresh":
             refresh_snapshot = True
         elif key.startswith("remove_character_"):
@@ -514,7 +525,17 @@ class HeadlessCharacterService:
                     #    원본을 자식 **뒤로** 보내고, 그러면 "앞만 가리킨다" 규칙에
                     #    걸려 `_prune_character_links` 가 자식의 링크를 지운다.
                     #    함께 옮기면 무리 안 상대 순서가 보존돼(안정 정렬) 링크가 산다.
+                    # ⏰ 활성에서 **내려올 때** 시각을 찍는다 - 히스토리 정렬과
+                    #    500개 잘라내기의 잣대다. ⚠️ 상태를 바꾸는 **이 자리에서**
+                    #    찍는다 - 프론트가 따로 보내게 하면 한쪽만 도착해 순서가 엉킨다.
+                    was_active = str(frame.get("slot_state") or "") == "active"
                     targets = [frame, *self._connected_children(frames, frame)]
+                    if was_active and requested != "active":
+                        import time
+
+                        stamp = time.time()
+                        for target in targets:
+                            target["used_at"] = stamp
                     for target in targets:
                         if requested == "cold":
                             target["return_slot_state"] = str(target.get("slot_state") or "inactive")
@@ -528,6 +549,19 @@ class HeadlessCharacterService:
             if index is not None:
                 self.ensure_frame(frames, index)["custom_name"] = str(value or "")
                 invalidate_snapshot = True
+        elif key.startswith("char_favorite_"):
+            index = context._index_from_key(key, "char_favorite_")
+            if index is not None:
+                frame = self.ensure_frame(frames, index)
+                frame["favorite"] = context._coerce_bool(value)
+                # ⚠️ 스냅샷을 무효화하지 **않는다** - 즐겨찾기는 프롬프트를 안 바꾼다.
+                #    무효화하면 별 하나 눌렀다고 굴린 캐릭터가 다시 굴러 버린다.
+        elif key.startswith("char_group_"):
+            index = context._index_from_key(key, "char_group_")
+            if index is not None:
+                frame = self.ensure_frame(frames, index)
+                frame["group"] = str(value or "").strip()
+                # 그룹도 프롬프트와 무관하다 - 스냅샷을 건드리지 않는다.
         elif key.startswith("char_connect_"):
             # Connect - 앞선 활성 슬롯의 전개 결과를 물려받는다. 값은 원본 슬롯의
             # **uuid**(빈 문자열이면 연결 해제).

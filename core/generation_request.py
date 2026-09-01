@@ -76,7 +76,7 @@ class NAICharacterData:
     Character Module 데이터 (NAID4 캐릭터 프롬프트)
 
     Attributes:
-        characters: 캐릭터별 프롬프트 리스트 (최대 5개)
+        characters: 캐릭터별 프롬프트 리스트 (최대 25개 - V5 에서 NAI 상한이 풀렸다)
         uc: 캐릭터별 Negative Prompt 리스트
         character_positions: 캐릭터별 위치 좌표 리스트
 
@@ -99,8 +99,15 @@ class NAICharacterData:
         if not self.characters:
             raise ValueError("characters list cannot be empty")
 
-        if len(self.characters) > 5:
-            raise ValueError(f"Maximum 5 characters allowed, got {len(self.characters)}")
+        # NAI V5 에서 캐릭터 개수 상한이 풀렸다(사용자 확인 2026-09-01). 25 는
+        # NAIA 가 두는 안전선일 뿐 NAI 의 값이 아니다.
+        #
+        # ⚠️ 이 검사는 **조용히 전부 지운다.**  가 던지면 호출부
+        #    (headless_generation_service._nai_extras)가  으로
+        #    삼켜  이 된다 - 하나가 드롭되는 것이 아니라
+        #    캐릭터가 통째로 빠진 채 생성된다(실측: 6개 -> ValueError -> None).
+        if len(self.characters) > 25:
+            raise ValueError(f"Maximum 25 characters allowed, got {len(self.characters)}")
 
         if len(self.uc) != len(self.characters):
             raise ValueError(

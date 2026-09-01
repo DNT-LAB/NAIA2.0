@@ -325,9 +325,13 @@ function defaultFieldsFor(slotKey) {
 }
 
 const MAX_CHIPS = 6;
-// NAI char_captions 상한. core/generation_request.py NAICharacterData 가 5 초과를 거부하므로
-// 슬롯도 5 로 맞춘다(6 을 허용하면 생성 시 조용히 하나가 드롭된다).
-const MAX_NAI_CHARACTERS = 5;
+// NAI char_captions 상한. **V5 에서 NAI 가 개수 제한을 풀었다**(사용자 지정 2026-09-01).
+//
+// ⚠️  의 NAICharacterData 와 **같은 값이어야 한다.** 거기서
+//    던지는 예외를 호출부가 삼켜  이 되므로, 프론트만 올리면
+//    캐릭터가 하나 드롭되는 것이 아니라 **통째로 사라진 채** 생성된다(실측).
+//    (옛 주석은 "조용히 하나가 드롭된다" 라고 적혀 있었는데 사실이 아니었다.)
+const MAX_NAI_CHARACTERS = 25;
 
 export function createInteractivePanel({
   document,

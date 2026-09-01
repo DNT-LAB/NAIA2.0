@@ -1,3 +1,29 @@
+/**
+ * 캐릭터 워크스페이스 — [ 캐릭터 슬롯 | 작업 영역(탭) ]
+ *
+ * 사용자 지정 2026-09-01:
+ *   "1. 기본 디자인 기조 : 메모와 유사합니다.
+ *    2. 슬롯 디자인 기조 : 캐릭터 퀵 프롬프트 슬롯과 동일합니다.
+ *    3. 구조는 [ 캐릭터 슬롯 | 작업 영역 (탭) ] 입니다."
+ *   "캐릭터 프롬프트 모듈에서는 슬롯을 전부 펼칩니다."
+ *   "[a] 왼쪽은 활성만 · Add Character 는 목록 바로 밑"
+ *
+ * ## 무엇이 문제였나 (실측 2026-09-01, 슬롯 8개)
+ *
+ *     창          420 x 696  = 뷰포트 720 의 **97%**
+ *     슬롯 하나   163px      (Quick 은 같은 내용을 22~99px 로 그린다)
+ *     한 화면에   **4개**
+ *     스크롤      **1,086px** - 그리고 슬롯을 만들수록 끝없이 길어졌다
+ *
+ * 스크롤 길이가 "여태 만든 슬롯 전부" 에 비례했다. 이제 왼쪽에는 **활성만** 두므로
+ * 지금 생성에 나가는 것에만 비례한다. 나머지는 **히스토리** 탭이 유일한 보관처다 - 썼던 슬롯을 최대 500개 누적한다
+ * (사용자 지정 2026-09-01: 기존 비활성의 역할을 대신한다).
+ *
+ * ⚠️ Cold 는 **동작이 없는 세 번째 상태**였다(`is_enabled` 는 `active and not muted`
+ *    뿐이라 inactive 와 하는 일이 같았다). 서랍을 파서 줄을 숨겼을 뿐이라 진짜 문제인
+ *    줄 높이는 그대로였다. 이제 **그룹**으로 접는다 - 옛 `cold` 슬롯은 그룹 "Cold" 로
+ *    읽힌다(저장은 안 바꾼다).
+ */
 export function createCharacterPanel({
   document,
   escHtml,
@@ -7,539 +33,461 @@ export function createCharacterPanel({
   showPromptDialog = null,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
-  let coldSearch = '';
-  let coldPanelOpen = false;
+
+  const TABS = [
+    {key: 'history', label: '히스토리'},
+    {key: 'assets', label: '에셋'},
+    {key: 'search', label: '검색'},
+    {key: 'groups', label: '그룹'},
+    {key: 'tools', label: '도구'},
+  ];
+
   let lastState = null;
-  let coldTooltipEl = null;
-  let coldPanelHost = null;
-  let resizeBound = false;
   let lastRenderedStructureSignature = '';
   let deferredFocusedRenderState = null;
   let deferredFocusTarget = null;
+  let tab = 'history';
+  let query = '';
+  let favouritesOnly = false;
+  let groupFilter = '';
+
+  /** 이 패널은 showToast 를 주입받지 않는다 - 전역이 있으면 쓴다. */
+  function showToastSafe(message) {
+    if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+      window.showToast(message, 'info');
+    }
+  }
 
   function escAttr(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/"/g, '&quot;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    return escHtml(String(value ?? '')).replace(/"/g, '&quot;');
   }
 
   function slotState(character) {
-    const state = String(character?.slot_state || '').toLowerCase();
-    if (state === 'cold') return 'cold';
+    const raw = String(character?.slot_state || '').toLowerCase();
+    if (raw === 'active' || raw === 'inactive' || raw === 'cold') return raw;
     return character?.active ? 'active' : 'inactive';
   }
 
-  function firstPromptLine(prompt) {
-    return String(prompt || '').split(/\r?\n/)[0].trim();
+  /**
+   * 목록 한 줄에 보일 이름. 사용자가 지은 이름이 있으면 그것이 이긴다.
+   *
+   * ⚠️ 히스토리에서는 **프롬프트 전문**을 쓴다(넘치면 CSS 가 자른다). 첫 태그만
+   *    잘라 쓰면 `1girl` 이 여럿이라 서로 구분이 안 된다(실측: 보관 4줄 중 3줄이
+   *    `1girl`/`1boy` 였다). 슬롯 쪽은 아래에 프롬프트 칸이 붙어 있으니 짧아도 된다.
+   */
+  function slotLabel(character, {full = false} = {}) {
+    const custom = String(character?.custom_name || '').trim();
+    if (custom) return custom;
+    const prompt = String(character?.prompt || '').trim();
+    if (!prompt) return '(비어 있음)';
+    return full ? prompt : prompt.split(',')[0].trim();
   }
 
-  function coldSummary(character) {
-    const customName = String(character?.custom_name || '').trim();
-    if (customName) return customName;
-    const firstLine = firstPromptLine(character?.prompt);
-    const parts = firstLine.split(',').map(part => part.trim()).filter(Boolean);
-    if (parts.length && ['girl', 'boy'].includes(parts[0].toLowerCase())) {
-      parts.shift();
-    }
-    return parts.join(', ') || firstLine || '(empty prompt)';
+  function groupOf(character) {
+    return String(character?.group || '').trim();
   }
 
-  function coldTooltip(character) {
-    const prompt = String(character?.prompt || '').trim() || '(empty)';
-    const uc = String(character?.uc || '').trim() || '(empty)';
-    const customName = String(character?.custom_name || '').trim();
-    return {
-      title: customName ? `${customName} - C${character?.id || ''}` : `C${character?.id || ''}`,
-      prompt,
-      uc,
-    };
-  }
+  // ── 편집 중 재렌더 방지 ────────────────────────────────────────────────
+  //
+  // ⚠️ 서버 에코가 **포커스된 textarea 를 갈아치우면** 태그 자동완성이 고르기 전에
+  //    닫힌다. 구조가 그대로면 다시 그리지 않고 미뤄 둔다.
 
-  function coldSearchText(character, index) {
+  function characterStructureSignature(state) {
+    const chars = state?.characters || [];
     return [
-      `c${character?.id || index + 1}`,
-      character?.custom_name || '',
-      coldSummary(character),
-      character?.prompt || '',
-      character?.uc || '',
-    ].join('\n').toLowerCase();
-  }
-
-  function applyColdSearchFilter() {
-    const query = coldSearch.trim().toLowerCase();
-    const root = coldPanelHost || moduleBody;
-    const cards = Array.from(root.querySelectorAll('.mod-cold-card'));
-    let visibleCount = 0;
-    cards.forEach(card => {
-      const visible = !query || String(card.dataset.coldSearch || '').includes(query);
-      card.hidden = !visible;
-      if (visible) visibleCount += 1;
-    });
-    const count = root.querySelector('[data-cold-count]');
-    if (count) count.textContent = `${visibleCount} / ${cards.length} stored`;
-    const empty = root.querySelector('.mod-cold-empty');
-    if (empty) empty.hidden = visibleCount > 0;
-  }
-
-  function ensureColdPanelHost() {
-    if (coldPanelHost) return coldPanelHost;
-    coldPanelHost = document.createElement('div');
-    coldPanelHost.className = 'mod-character-cold-layer';
-    document.body.append(coldPanelHost);
-    if (!resizeBound) {
-      window.addEventListener('resize', positionColdPanel);
-      resizeBound = true;
-    }
-    return coldPanelHost;
-  }
-
-  function positionColdPanel() {
-    const panel = coldPanelHost?.querySelector('.mod-character-cold-panel.open');
-    const popup = document.getElementById('modulePopup');
-    if (!panel || !popup) return;
-    const popupRect = popup.getBoundingClientRect();
-    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-    if (viewportWidth < 768) {
-      panel.style.left = '4vw';
-      panel.style.right = '4vw';
-      panel.style.top = '72px';
-      panel.style.width = 'auto';
-      return;
-    }
-    const minWidth = 240;
-    const availableRight = viewportWidth - popupRect.right - 24;
-    const width = Math.max(minWidth, Math.min(340, availableRight >= minWidth ? availableRight : viewportWidth - 24));
-    const left = availableRight >= minWidth
-      ? popupRect.right + 12
-      : Math.max(12, viewportWidth - width - 12);
-    panel.style.left = `${Math.round(left)}px`;
-    panel.style.right = 'auto';
-    panel.style.top = `${Math.max(12, Math.round(popupRect.top))}px`;
-    panel.style.width = `${Math.round(width)}px`;
-  }
-
-  function ensureColdTooltip() {
-    if (coldTooltipEl) return coldTooltipEl;
-    coldTooltipEl = document.createElement('div');
-    coldTooltipEl.className = 'mod-cold-tooltip';
-    document.body.append(coldTooltipEl);
-    return coldTooltipEl;
-  }
-
-  function hideColdTooltip() {
-    if (coldTooltipEl) coldTooltipEl.classList.remove('open');
-  }
-
-  function showColdTooltip(card) {
-    const index = Number(card?.dataset?.coldIndex);
-    const character = lastState?.characters?.[index];
-    if (!character) return;
-    const tooltip = ensureColdTooltip();
-    const payload = coldTooltip(character);
-    tooltip.innerHTML = `
-      <div class="mod-cold-tooltip-title">${escHtml(payload.title)}</div>
-      <div class="mod-cold-tooltip-label">Prompt</div>
-      <pre>${escHtml(payload.prompt)}</pre>
-      <div class="mod-cold-tooltip-label">UC</div>
-      <pre>${escHtml(payload.uc)}</pre>
-    `;
-    tooltip.classList.add('open');
-    const rect = card.getBoundingClientRect();
-    const tipRect = tooltip.getBoundingClientRect();
-    const gap = 10;
-    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-    let left = rect.left - tipRect.width - gap;
-    if (left < gap) left = Math.min(rect.right + gap, viewportWidth - tipRect.width - gap);
-    let top = Math.min(rect.top, viewportHeight - tipRect.height - gap);
-    top = Math.max(gap, top);
-    tooltip.style.left = `${Math.round(left)}px`;
-    tooltip.style.top = `${Math.round(top)}px`;
-  }
-
-  function bindColdInteractions() {
-    (coldPanelHost || moduleBody).querySelectorAll('.mod-cold-card').forEach(card => {
-      card.addEventListener('mouseenter', () => showColdTooltip(card));
-      card.addEventListener('mouseleave', hideColdTooltip);
-      card.addEventListener('focusin', () => showColdTooltip(card));
-      card.addEventListener('focusout', hideColdTooltip);
-      card.addEventListener('contextmenu', event => {
-        event.preventDefault();
-        renameSlot(Number(card.dataset.coldIndex));
-      });
-    });
-    moduleBody.querySelectorAll('.mod-char-block').forEach(block => {
-      block.addEventListener('contextmenu', event => {
-        event.preventDefault();
-        renameSlot(Number(block.dataset.charIndex));
-      });
-    });
-  }
-
-  function addSlot() {
-    flushCharacterEdits();
-    setModuleParam('character', 'add_character', 'true');
-  }
-
-  function removeSlot(index) {
-    flushCharacterEdits();
-    setModuleParam('character', `remove_character_${index}`, 'true');
-  }
-
-  function refreshPreview() {
-    flushCharacterEdits();
-    setModuleParam('character', 'preview_refresh', 'true');
-  }
-
-  function setSlotState(index, state) {
-    flushCharacterEdits();
-    setModuleParam('character', `char_slot_state_${index}`, state);
-  }
-
-  function setColdSearch(value) {
-    coldSearch = String(value || '');
-    applyColdSearchFilter();
-  }
-
-  function toggleColdPanel() {
-    coldPanelOpen = !coldPanelOpen;
-    if (lastState) render(lastState);
-  }
-
-  function hideColdPanel() {
-    coldPanelOpen = false;
-    hideColdTooltip();
-    if (coldPanelHost) coldPanelHost.innerHTML = '';
-  }
-
-  async function renameSlot(index) {
-    const character = lastState?.characters?.[index];
-    if (!character) return;
-    const originalId = character.id;
-    const current = String(character.custom_name || '').trim();
-    hideColdTooltip();
-    if (!showPromptDialog) return;
-    const next = await showPromptDialog('표시 이름을 입력하세요. 비우면 프롬프트 요약을 사용합니다.', {
-      title: `Cold Slot C${character.id}`,
-      okText: 'Apply',
-      cancelText: 'Cancel',
-      defaultValue: current,
-      placeholder: coldSummary(character),
-    });
-    if (next === null) return;
-    const currentCharacter = lastState?.characters?.[index];
-    if (!currentCharacter || currentCharacter.id !== originalId) return;
-    setModuleParam('character', `char_slot_name_${index}`, next.trim());
-  }
-
-  function captureTextareaHeights() {
-    const heights = {};
-    moduleBody.querySelectorAll('.mod-char-block[data-char-index]').forEach(block => {
-      const index = block.dataset.charIndex;
-      const prompt = block.querySelector('.mod-char-prompt');
-      const uc = block.querySelector('.mod-char-uc');
-      if (prompt?.style?.height) heights[`prompt:${index}`] = prompt.style.height;
-      if (uc?.style?.height) heights[`uc:${index}`] = uc.style.height;
-    });
-    return heights;
-  }
-
-  function restoreTextareaHeights(heights) {
-    if (!heights) return;
-    moduleBody.querySelectorAll('.mod-char-block[data-char-index]').forEach(block => {
-      const index = block.dataset.charIndex;
-      const prompt = block.querySelector('.mod-char-prompt');
-      const uc = block.querySelector('.mod-char-uc');
-      const promptHeight = heights[`prompt:${index}`];
-      const ucHeight = heights[`uc:${index}`];
-      if (prompt && promptHeight) prompt.style.height = promptHeight;
-      if (uc && ucHeight) uc.style.height = ucHeight;
-    });
+      state?.activated ? 1 : 0,
+      state?.reroll_on_generate ? 1 : 0,
+      tab, query, favouritesOnly ? 1 : 0, groupFilter,
+      chars.length,
+      chars.map(item => [
+        item.slot_uuid, slotState(item), item.muted ? 1 : 0,
+        item.favorite ? 1 : 0, groupOf(item), item.custom_name || '',
+      ].join(':')).join('|'),
+    ].join('#');
   }
 
   function focusedCharacterTextarea() {
     const active = document.activeElement;
-    if (!active || !moduleBody.contains(active)) return null;
-    if (!active.classList?.contains('mod-char-prompt') && !active.classList?.contains('mod-char-uc')) return null;
-    if (!active.closest?.('.mod-char-block[data-char-index]')) return null;
-    return active;
-  }
-
-  function characterStructureSignature(state) {
-    const chars = Array.isArray(state?.characters) ? state.characters : [];
-    return JSON.stringify({
-      activated: !!state?.activated,
-      reroll_on_generate: !!state?.reroll_on_generate,
-      characters: chars.map(character => [
-        character?.id,
-        slotState(character),
-        !!character?.active,
-        character?.custom_name || '',
-      ]),
-    });
+    if (!active || active.tagName !== 'TEXTAREA') return null;
+    return active.closest('.cw-slot') ? active : null;
   }
 
   function clearDeferredFocusedRender() {
     if (deferredFocusTarget) {
       deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
+      deferredFocusTarget = null;
     }
-    deferredFocusTarget = null;
     deferredFocusedRenderState = null;
   }
 
   function queueDeferredFocusedRender(textarea, state) {
     deferredFocusedRenderState = state;
     if (deferredFocusTarget === textarea) return;
-    if (deferredFocusTarget) {
-      deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
-    }
+    if (deferredFocusTarget) deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
     deferredFocusTarget = textarea;
-    textarea.addEventListener('blur', flushDeferredFocusedRender, {once: true});
+    textarea.addEventListener('blur', flushDeferredFocusedRender);
   }
 
   function flushDeferredFocusedRender() {
-    const pendingState = deferredFocusedRenderState;
-    deferredFocusTarget = null;
-    deferredFocusedRenderState = null;
-    if (!pendingState) return;
-    globalThis.setTimeout(() => {
-      if (!focusedCharacterTextarea()) render(pendingState);
-    }, 0);
+    const pending = deferredFocusedRenderState;
+    clearDeferredFocusedRender();
+    if (pending) render(pending);
   }
 
-  /** 비활성 슬롯의 이름표. 프롬프트 앞 태그 2개면 보통 `girl, 캐릭터명` 이다.
-   *  비활성은 번호를 갖지 않는다 - 번호는 활성 무리 안의 자리이고, 올라올 때 받는다. */
-  function inactiveLabel(character) {
-    const customName = String(character.custom_name || '').trim();
-    if (customName) return escHtml(customName);
-    const tags = firstPromptLine(character.prompt)
-      .split(',').map(part => part.trim()).filter(Boolean);
-    return tags.length ? escHtml(tags.slice(0, 2).join(', ')) : '<span class="mod-char-id-muted">(empty)</span>';
+  /** Quick 과 같은 규약: 최소 줄수는 지키되 넘치면 한 줄씩 늘어난다. */
+  function autoGrow(element) {
+    const rows = element.dataset.cwMin === 'uc' ? 1 : 2;
+    const line = 1.4 * 11;                       // .cw-input 의 line-height * font-size
+    const min = Math.round(rows * line) + 12;    // + 세로 패딩
+    element.style.height = 'auto';
+    element.style.height = Math.max(min, element.scrollHeight) + 'px';
   }
 
-  /**
-   * @param ordinal  활성 슬롯이면 활성 무리 안의 1-based 번호(C1, C2...), 아니면 0.
-   * @param lastActive  마지막 활성 슬롯인가 - 그러면 ▼ 를 내주지 않는다.
-   *   "활성은 최소 하나" 는 여기(UI)에서만 세운다. 백엔드에 강제하면 활성 0을
-   *   정상 상태로 쓰는 기존 경로 두 개가 깨진다(Cold 로 비우기 · 조건부 스킵 판정).
-   */
-  /** Connect 드롭다운. **자기보다 앞선 활성 슬롯만** 후보다(사용자 지정).
-   *
-   *  그 제약이 곧 안전장치다 - 백엔드 전개 루프가 활성 프레임을 화면 순서대로 한 번
-   *  훑으므로, 앞만 가리키면 참조 시점에 값이 이미 확정돼 있고 순환이 생길 수 없다.
-   *  값은 표시 번호가 아니라 **slot_uuid** 다 - 번호는 ▲▼·비활성화로 밀린다.
-   *  C1 은 앞이 없으므로 아예 그리지 않는다. */
-  /** 연결 상태 **표시만** 한다. 거는 것은 퀵 편집 슬롯에서만 한다(사용자 지정).
-   *
-   *  ⚠️ 예전에는 여기에도 드롭다운이 있었는데, 사슬 금지 규칙(이미 연결된 슬롯은
-   *     후보에서 빼기 · 원본 역할이면 Connect 를 주지 않기)이 퀵 패널에만 있어
-   *     이 팝업으로는 금지된 상태를 만들 수 있었다. 그러면 백엔드가 남의 링크를
-   *     조용히 지운다 — C3→C2 를 걸어 둔 채 여기서 C2→C1 을 걸면 C3 의 연결이
-   *     사라졌다(Codex 리뷰 2026-08-24 #1).
-   *     같은 규칙을 두 곳에 두면 언젠가 한쪽이 뒤처진다. 조작은 한 곳에만 둔다.
-   *     대신 표시는 남긴다 — 없으면 이 팝업이 침묵으로 거짓말을 한다. */
-  function connectControl(character, index, ordinal, activeSlots) {
-    if (!character.active) return '';
-    const current = String(character.connect_to || '');
-    if (!current) return '';
-    const source = (activeSlots || []).findIndex(
-      item => String(item.character.slot_uuid || '') === current) + 1;
-    return `<span class="mod-char-connect is-on is-readonly"`
-      + ` data-naia-guide="C${source || '?'} 의 캐릭터를 물려받는 중입니다.`
-      + `\\n연결을 바꾸려면 결과 화면의 CHARACTER 패널에서 하세요.">`
-      + `<span class="mod-char-connect-tag">&#128279; C${source || '?'}</span></span>`;
+  // ── 조작 ────────────────────────────────────────────────────────────────
+
+  function addSlot() {
+    if (flushCharacterEdits) flushCharacterEdits();
+    setModuleParam('character', 'add_character', 'true');
   }
 
-  /** 이 슬롯을 물려받는 슬롯이 몇 개인가. 원본 쪽에는 Connect 컨트롤이 없어서
-   *  (앞을 가리킬 대상이 없으므로) **자기가 원본이라는 사실을 알 길이 없었다.**
-   *  구간 마커(`&connect: … &end`)를 쓰는 자리도 원본이라 여기서 함께 안내한다. */
-  function connectSourceBadge(character, activeSlots) {
-    const uuid = String(character.slot_uuid || '');
-    if (!character.active || !uuid) return '';
-    const takers = (activeSlots || []).filter(item => String(item.character.connect_to || '') === uuid);
-    if (!takers.length) return '';
-    const hasRegion = /&connect/i.test(String(character.prompt || '') + String(character.uc || ''));
-    return `<span class="mod-char-source${hasRegion ? ' has-region' : ''}"`
-      + ` data-naia-guide="이 슬롯을 ${takers.length}개가 물려받고 있습니다.`
-      + `\\n\\n${hasRegion
-          ? '&connect: … &end 구간만 물려주는 중입니다. 구간 밖은 이 슬롯에만 남습니다.'
-          : '지금은 전체를 물려줍니다. 일부만 주려면 프롬프트에 &connect: … &end 로 구간을 잡으세요.'}">`
-      + `&#8681; ${takers.length}</span>`;
+  function removeSlot(index) {
+    setModuleParam('character', `remove_character_${index}`, 'true');
   }
 
-  function renderWorkingSlot(character, index, totalCount, ordinal, lastActive, activeSlots) {
-    const active = !!character.active;
-    const customName = String(character.custom_name || '').trim();
-    const label = active
-      ? (customName
-          ? `${escHtml(customName)} <span class="mod-char-id-muted">C${ordinal}</span>`
-          : `C${ordinal}`)
-      : inactiveLabel(character);
-    const moveBtn = active
-      ? (lastActive
-          ? ''
-          : `<button class="mod-btn-square" aria-label="Deactivate" data-naia-title="비활성으로 내린다" onclick="setCharacterSlotState(${index}, 'inactive')">&#9660;</button>`)
-      : `<button class="mod-btn-square mod-char-promote" aria-label="Activate" data-naia-title="활성 맨 아래로 올린다" onclick="setCharacterSlotState(${index}, 'active')">&#9650;</button>`;
-    // ✔/✘ - **제자리에서** 끈다(NAI 공식 구현과 같다). 끈 슬롯은 활성 무리에
-    // 그대로 남아 번호(C3)도 유지하고, 페이로드에서만 빠진다.
-    // ⚠️ ▼(비활성으로 내림)와 **다른 축**이다. 그쪽은 목록에서 치우고 번호를
-    //    다시 매긴다. 예전에는 축이 하나라 체크박스가 곧 ▼ 였고, 무리를 나누며
-    //    체크박스를 걷어내자 제자리에서 끌 방법이 사라졌다(사용자 제보).
-    // 연결 중이면 두 칸의 뜻이 바뀐다 - 대체가 아니라 **덧붙이기**다(사용자 지정).
-    const connected = active && !!String(character.connect_to || '');
+  function refreshPreview() {
+    if (flushCharacterEdits) flushCharacterEdits();
+    setModuleParam('character', 'preview_refresh', 'true');
+  }
+
+  function setSlotState(index, state) {
+    setModuleParam('character', `char_slot_state_${index}`, state);
+  }
+
+  async function renameSlot(index) {
+    const character = (lastState?.characters || [])[index];
+    if (!character || !showPromptDialog) return;
+    const next = await showPromptDialog({
+      title: '슬롯 이름',
+      message: '이 캐릭터를 목록에서 무엇으로 부를까요? (비우면 프롬프트 앞머리)',
+      value: String(character.custom_name || ''),
+    });
+    if (next === null) return;
+    setModuleParam('character', `char_slot_name_${index}`, String(next).trim());
+  }
+
+  async function editGroup(index) {
+    const character = (lastState?.characters || [])[index];
+    if (!character || !showPromptDialog) return;
+    const next = await showPromptDialog({
+      title: '그룹',
+      message: '이 캐릭터를 어느 그룹에 둘까요? (비우면 그룹 없음)',
+      value: groupOf(character),
+    });
+    if (next === null) return;
+    setModuleParam('character', `char_group_${index}`, String(next).trim());
+  }
+
+  // ── 왼쪽: 활성 슬롯 (전부 펼침) ─────────────────────────────────────────
+
+  function renderSlot(character, index, ordinal) {
     const muted = !!character.muted;
-    const enableBox = active
-      ? `<label class="mod-char-en" data-naia-title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">`
-        + `<input type="checkbox" ${muted ? '' : 'checked'}`
-        + ` oninput="setModuleParam('character','char_muted_${index}',String(!this.checked))"></label>`
-      : '';
     return `
-      <div class="mod-char-block ${active ? 'is-active' : 'is-inactive'}${muted ? ' is-muted' : ''}${connected ? ' is-connected' : ''}" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
-        <div class="mod-char-header">
-          ${enableBox}
-          <span class="mod-char-title">${label}</span>
-          <div class="mod-char-card-actions">
-            ${connectSourceBadge(character, activeSlots)}
-            ${connectControl(character, index, ordinal, activeSlots || [])}
-            ${moveBtn}
-            <button class="mod-btn-square" aria-label="Move to Cold" data-naia-title="Cold 보관함으로" onclick="setCharacterSlotState(${index}, 'cold')">-</button>
-            <button class="mod-btn-sm mod-btn-danger" ${totalCount > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${index})">Remove</button>
-          </div>
+      <div class="cw-slot${muted ? ' is-muted' : ''}" data-cw-slot="${index}">
+        <div class="cw-slot-row">
+          <button type="button" class="cw-slot-en${muted ? '' : ' is-on'}"
+            data-cw-mute="${index}" title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">✔</button>
+          <span class="cw-slot-title" data-cw-rename="${index}"
+            title="우클릭 또는 클릭으로 이름 바꾸기">C${ordinal} · ${escHtml(slotLabel(character))}</span>
+          <button type="button" class="cw-slot-btn${character.favorite ? ' is-star' : ''}"
+            data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
+          <button type="button" class="cw-slot-btn" data-cw-down="${index}"
+            title="히스토리로 내린다 (거기서 다시 담을 수 있다)">▼</button>
+          <button type="button" class="cw-slot-btn is-danger" data-cw-remove="${index}"
+            title="삭제">✕</button>
         </div>
-        <textarea class="mod-textarea mod-char-prompt" placeholder="${connected ? '추가할 캐릭터 프롬프트...' : 'character prompt...'}" oninput="onModTextEdit('character','char_prompt_${index}',this.value)">${escHtml(character.prompt)}</textarea>
-        <textarea class="mod-textarea mod-uc mod-char-uc" placeholder="${connected ? '추가할 캐릭터 네거티브...' : 'negative prompt (UC)...'}" oninput="onModTextEdit('character','char_uc_${index}',this.value)">${escHtml(character.uc)}</textarea>
+        <div class="cw-slot-body">
+          <textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-min="prompt"
+            rows="2" placeholder="캐릭터 프롬프트">${escHtml(character.prompt || '')}</textarea>
+          <textarea class="cw-input is-uc" data-cw-field="char_uc_${index}" data-cw-min="uc"
+            rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(character.uc || '')}</textarea>
+        </div>
+      </div>`;
+  }
+
+  function renderSlots(activeSlots, total, maxSlots) {
+    // ⚠️ 상한은 **서버가 준 값**을 쓴다. 프런트가 자기 숫자를 들고 있으면 둘이
+    //    어긋나 "눌리는데 안 늘어나는" 버튼이 된다(백엔드는 조용히 거절한다).
+    const full = maxSlots > 0 && total >= maxSlots;
+    const body = activeSlots.length
+      ? activeSlots.map(({character, index}, i) => renderSlot(character, index, i + 1)).join('')
+      : '<div class="cw-slots-empty">활성 슬롯이 없습니다.<br>히스토리에서 담거나 새로 추가하세요.</div>';
+    return `
+      <div class="cw-slots">
+        <div class="cw-slots-head">
+          <span>슬롯</span><span class="cw-sp"></span>
+          <span>${activeSlots.length} / ${total}${maxSlots ? ` · max ${maxSlots}` : ''}</span>
+        </div>
+        <div class="cw-slots-scroll">
+          ${body}
+          <button type="button" class="cw-add" data-cw-add="1"${full ? ' disabled' : ''}
+            title="${full ? `슬롯은 최대 ${maxSlots}개입니다` : ''}">${
+            full ? `+ Add Character (${total}/${maxSlots})` : '+ Add Character'}</button>
+        </div>
+      </div>`;
+  }
+
+  // ── 오른쪽: 작업 영역 ───────────────────────────────────────────────────
+
+  function matchesQuery(character) {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return [character.prompt, character.uc, character.custom_name, groupOf(character)]
+      .join(' ').toLowerCase().includes(needle);
+  }
+
+  function renderHistory(storedSlots, groups) {
+    // ⚠️ 히스토리는 **최근에 쓴 것이 위**다. 백엔드 배열 순서는 저장 순서라
+    //    그대로 두면 오래된 것이 위에 남는다(index 주소는 건드리지 않는다 -
+    //    보이는 순서만 바꾸고 각 행은 자기 index 를 그대로 들고 다닌다).
+    const rows = [...storedSlots]
+      .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0))
+      .filter(({character}) => !favouritesOnly || character.favorite)
+      .filter(({character}) => !groupFilter || groupOf(character) === groupFilter)
+      .filter(({character}) => matchesQuery(character));
+    const groupChips = groups.map(name =>
+      `<button type="button" class="cw-chip${groupFilter === name ? ' is-on' : ''}"
+        data-cw-group-filter="${escAttr(name)}">${escHtml(name)}</button>`).join('');
+    const list = rows.length
+      ? rows.map(({character, index}) => `
+          <div class="cw-li" data-cw-li="${index}">
+            <button type="button" class="cw-li-star${character.favorite ? ' is-on' : ''}"
+              data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
+            <span class="cw-li-text" data-cw-load="${index}"
+              title="${escAttr(character.prompt || '')}">${escHtml(slotLabel(character, {full: true}))}</span>
+            ${groupOf(character)
+              ? `<span class="cw-li-group" data-cw-editgroup="${index}">${escHtml(groupOf(character))}</span>`
+              : `<span class="cw-li-group" data-cw-editgroup="${index}">+ 그룹</span>`}
+            <button type="button" class="cw-li-load" data-cw-load="${index}">→ 담기</button>
+          </div>`).join('')
+      : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ▼ 로 내리면 여기에 쌓입니다 (최대 500개).'}</div>`;
+    return `
+      <div class="cw-filters">
+        <input class="cw-search" type="search" value="${escAttr(query)}"
+          placeholder="캐릭터 · 태그 · 그룹 검색…" data-cw-search="1">
+        <button type="button" class="cw-chip${favouritesOnly ? ' is-on' : ''}" data-cw-fav-only="1"
+          title="즐겨찾기만">★</button>
+        <button type="button" class="cw-chip${groupFilter ? '' : ' is-on'}" data-cw-group-filter="">전체</button>
+        ${groupChips}
       </div>
-    `;
+      <div class="cw-list">${list}</div>`;
   }
 
-  function renderColdSlot(character, index, totalCount) {
-    const summary = coldSummary(character);
-    const searchText = coldSearchText(character, index);
-    const hasCustomName = Boolean(String(character.custom_name || '').trim());
+  function renderGroups(storedSlots, groups) {
+    const counts = new Map();
+    storedSlots.forEach(({character}) => {
+      const name = groupOf(character) || '(그룹 없음)';
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    const rows = [...counts.entries()].map(([name, count]) => `
+      <div class="cw-li">
+        <span class="cw-li-text">${escHtml(name)}</span>
+        <span class="cw-li-group">${count}</span>
+      </div>`).join('');
+    return `<div class="cw-list">${rows || '<div class="cw-empty">그룹이 없습니다.</div>'}</div>`;
+  }
+
+  function renderTools(state) {
+    const preview = String(state.processed_preview_text || '');
     return `
-      <article class="mod-cold-card" tabindex="0" data-cold-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}" data-cold-search="${escAttr(searchText)}">
-        <span class="mod-cold-id">C${character.id}</span>
-        <div class="mod-cold-summary ${hasCustomName ? 'custom' : ''}">${escHtml(summary)}</div>
-        <div class="mod-cold-actions">
-          <button class="mod-btn-square" aria-label="Restore to Active/Inactive" onclick="setCharacterSlotState(${index}, 'restore')">+</button>
-          <button class="mod-btn-square danger" aria-label="Remove" ${totalCount > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${index})">x</button>
+      <div class="cw-tools">
+        <label class="cw-tool-row">
+          <input type="checkbox" ${state.reroll_on_generate ? 'checked' : ''} data-cw-reroll="1">
+          <span>Generate 버튼을 누를 때 캐릭터 와일드카드 재굴림</span>
+        </label>
+        <div class="cw-tool-row">
+          <button type="button" class="cw-chip" data-cw-refresh="1">Refresh Preview</button>
+          <button type="button" class="cw-chip" data-cw-assets="1">Assets ↗</button>
         </div>
-      </article>
-    `;
+        <div class="cw-tool-note">
+          미리보기는 저장된 롤을 그대로 보여 줍니다 — 열어도 다시 굴리지 않습니다.
+        </div>
+        ${preview.trim()
+          ? `<pre class="mod-char-preview-text">${escHtml(preview)}</pre>`
+          : '<div class="cw-empty">아직 미리보기가 없습니다. [Refresh Preview] 를 누르세요.</div>'}
+      </div>`;
   }
 
-  function renderColdPanel(coldSlots, totalCount) {
-    const host = ensureColdPanelHost();
-    const coldHtml = [
-      `<div class="mod-empty mod-cold-empty" ${coldSlots.length ? 'hidden' : ''}>No Cold slots match.</div>`,
-      coldSlots.map(({character, index}) => renderColdSlot(character, index, totalCount)).join(''),
-    ].join('');
-    host.innerHTML = `
-      <aside class="mod-character-cold-panel ${coldPanelOpen ? 'open' : ''}">
-        <div class="mod-cold-header">
-          <div>
-            <div class="mod-section-label">Cold</div>
-            <div class="mod-char-meta" data-cold-count>${coldSlots.length} / ${coldSlots.length} stored</div>
-          </div>
-          <button class="module-popup-icon-btn" aria-label="Close Cold panel" onclick="toggleCharacterColdPanel()">x</button>
-        </div>
-        <input class="mod-cold-search" type="search" value="${escAttr(coldSearch)}" placeholder="Search cold slots..." oninput="setCharacterColdSearch(this.value)">
-        <div class="mod-cold-stack">
-          ${coldHtml}
-        </div>
-      </aside>
-    `;
-    positionColdPanel();
+  function renderWork(state, storedSlots, groups) {
+    const tabs = TABS.map(item =>
+      `<button type="button" class="cw-tab${tab === item.key ? ' is-active' : ''}"
+        data-cw-tab="${item.key}">${item.label}</button>`).join('');
+    let body;
+    if (tab === 'history') body = renderHistory(storedSlots, groups);
+    else if (tab === 'groups') body = renderGroups(storedSlots, groups);
+    else if (tab === 'tools') body = renderTools(state);
+    else if (tab === 'assets') {
+      // ⚠️ 기존 에셋 기능을 **옮기지 않는다**(사용자 지정: "기존 기능 제거는 아님").
+      //    여기서는 그 화면으로 보내기만 한다 - 29개 라우트짜리 별개 계보다.
+      body = `<div class="cw-empty">캐릭터 에셋은 이미지 기반의 별도 보관함입니다.<br><br>
+        <button type="button" class="cw-chip" data-cw-assets="1">에셋 탭 열기 ↗</button></div>`;
+    } else {
+      body = `<div class="cw-empty">캐릭터 검색(Danbooru)은 Characters 탭에 있습니다.<br><br>
+        <button type="button" class="cw-chip" data-cw-search-tab="1">Characters 탭 열기 ↗</button></div>`;
+    }
+    return `<div class="cw-work"><div class="cw-tabs">${tabs}<span class="cw-tab-fill"></span></div>${body}</div>`;
   }
+
+  // ── 렌더 ────────────────────────────────────────────────────────────────
 
   function render(state) {
-    hideColdTooltip();
     const nextState = state || {};
     const structureSignature = characterStructureSignature(nextState);
     const focusedTextarea = focusedCharacterTextarea();
     if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
-      // Server echo for local text edits must not replace the focused textarea;
-      // replacing it collapses tag autocomplete before the user can choose.
       lastState = nextState;
       queueDeferredFocusedRender(focusedTextarea, nextState);
       return;
     }
     clearDeferredFocusedRender();
-    const textareaHeights = captureTextareaHeights();
     lastState = nextState;
+
     const chars = nextState.characters || [];
-    const workingSlots = chars
-      .map((character, index) => ({character, index}))
-      .filter(item => slotState(item.character) !== 'cold');
-    const coldSlots = chars
-      .map((character, index) => ({character, index}))
-      .filter(item => slotState(item.character) === 'cold');
-    // 화면은 활성/비활성 두 무리다. 배열은 백엔드에서 [active][inactive][cold] 로
-    // 정렬돼 오므로(core/character_settings.sort_character_frames) 여기서 다시
-    // 순서를 만들지 않는다 - 만들면 index 주소가 저장 순서와 어긋난다.
-    const activeSlots = workingSlots.filter(item => item.character.active);
-    const inactiveSlots = workingSlots.filter(item => !item.character.active);
-    const addBtn = `
-      <button class="mod-char-add" onclick="addCharacterSlot()">+ Add Character</button>`;
-    const charsHtml = workingSlots.length
-      ? [
-          activeSlots.map(({character, index}, i) =>
-            renderWorkingSlot(character, index, chars.length, i + 1, activeSlots.length <= 1, activeSlots)).join(''),
-          addBtn,
-          inactiveSlots.length
-            ? `<div class="mod-section-label mod-char-group-label">비활성 (${inactiveSlots.length})</div>`
-            : '',
-          inactiveSlots.map(({character, index}) =>
-            renderWorkingSlot(character, index, chars.length, 0, false)).join(''),
-        ].join('')
-      : `<div class="mod-empty">No active or inactive slots. Restore a Cold slot or add one.</div>${addBtn}`;
-    renderColdPanel(coldSlots, chars.length);
-    const previewText = nextState.processed_preview_text || '';
-    const previewEmpty = !previewText.trim();
+    const indexed = chars.map((character, index) => ({character, index}));
+    // ⚠️ 배열은 백엔드가 [active][inactive][cold] 로 정렬해 보낸다. 여기서 순서를
+    //    다시 만들지 않는다 - 만들면 index 주소가 저장 순서와 어긋난다.
+    const activeSlots = indexed.filter(item => slotState(item.character) === 'active');
+    const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');
+    const groups = [...new Set(storedSlots.map(item => groupOf(item.character)).filter(Boolean))].sort();
 
     moduleBody.innerHTML = `
       <div class="mod-character-shell">
-        <section class="mod-character-workspace">
-          <div>
-            <label class="mod-checkbox-item">
-              <input type="checkbox" ${nextState.activated ? 'checked' : ''} oninput="setModuleParam('character','activated',String(this.checked))">
-              <span class="mod-checkbox-label">캐릭터 프롬프트를 활성화 합니다 (NAID4 이상)</span>
-            </label>
-          </div>
-          <div>
-            <label class="mod-checkbox-item">
-              <input type="checkbox" ${nextState.reroll_on_generate ? 'checked' : ''} oninput="setModuleParam('character','reroll_on_generate',String(this.checked))">
-              <span class="mod-checkbox-label">Generate 버튼을 누를 때 캐릭터 와일드카드 재굴림</span>
-            </label>
-          </div>
-          <div class="mod-char-actions">
-            <button class="mod-btn-sm mod-btn-encode" onclick="refreshCharacterPreview()">Refresh Preview</button>
-            <button class="mod-btn-sm mod-cold-toggle ${coldPanelOpen ? 'active' : ''}" onclick="toggleCharacterColdPanel()">Cold (${coldSlots.length})</button>
-            <button class="mod-btn-sm mod-btn-assets" title="캐릭터 에셋 라이브러리 (이미지 기반 영구 보관함)" onclick="openCharacterAssetTab()">Assets</button>
-            <span class="mod-char-meta">${nextState.active_count || 0} active / ${workingSlots.length} work / ${coldSlots.length} cold</span>
-          </div>
-          ${charsHtml}
-          <div class="mod-char-preview">
-            <div class="mod-section-label">Final Applied Character Prompt</div>
-            ${previewEmpty
-              ? '<div class="mod-empty">No preview yet. Use Refresh Preview to process wildcards and show the applied character prompts.</div>'
-              : `<pre class="mod-char-preview-text">${escHtml(previewText)}</pre>`}
-          </div>
-        </section>
-      </div>
-    `;
-    moduleBody.querySelectorAll('.mod-textarea:not(.mod-uc)').forEach(element => bindTagAssist(element));
-    restoreTextareaHeights(textareaHeights);
-    applyColdSearchFilter();
-    bindColdInteractions();
+        <div class="cw-slots-head" style="border-bottom:1px solid var(--border-dim)">
+          <label class="cw-tool-row" style="gap:6px">
+            <input type="checkbox" ${nextState.activated ? 'checked' : ''} data-cw-activated="1">
+            <span>캐릭터 프롬프트 활성화</span>
+          </label>
+          <span class="cw-sp"></span>
+          <span>${nextState.active_count || 0} active · ${storedSlots.length} stored</span>
+        </div>
+        <div class="cw-body">
+          ${renderSlots(activeSlots, chars.length, Number(nextState.max_slots) || 0)}
+          ${renderWork(nextState, storedSlots, groups)}
+        </div>
+      </div>`;
+
+    moduleBody.querySelectorAll('.cw-input').forEach(element => {
+      autoGrow(element);
+      if (!element.classList.contains('is-uc')) bindTagAssist(element);
+    });
+    bindEvents();
     lastRenderedStructureSignature = structureSignature;
+  }
+
+  // ── 이벤트 (렌더마다 새 뿌리에 건다 - innerHTML 이 옛 리스너를 함께 지운다) ──
+
+  function bindEvents() {
+    const root = moduleBody.querySelector('.mod-character-shell');
+    if (!root) return;
+
+    root.addEventListener('input', event => {
+      const field = event.target.closest('[data-cw-field]');
+      if (field) {
+        autoGrow(field);
+        setModuleParam('character', field.dataset.cwField, field.value);
+        return;
+      }
+      const search = event.target.closest('[data-cw-search]');
+      if (search) { query = search.value; scheduleRerender(); return; }
+      const activated = event.target.closest('[data-cw-activated]');
+      if (activated) { setModuleParam('character', 'activated', String(activated.checked)); return; }
+      const reroll = event.target.closest('[data-cw-reroll]');
+      if (reroll) setModuleParam('character', 'reroll_on_generate', String(reroll.checked));
+    });
+
+    root.addEventListener('click', event => {
+      const hit = selector => event.target.closest(selector);
+      const tabBtn = hit('[data-cw-tab]');
+      if (tabBtn) { tab = tabBtn.dataset.cwTab; rerender(); return; }
+      const add = hit('[data-cw-add]');
+      if (add) {
+        if (add.disabled) {
+          const max = Number(lastState?.max_slots) || 0;
+          showToastSafe(`캐릭터 슬롯은 최대 ${max}개입니다.`);
+          return;
+        }
+        addSlot();
+        return;
+      }
+
+      const fav = hit('[data-cw-fav]');
+      if (fav) {
+        const index = Number(fav.dataset.cwFav);
+        const character = (lastState?.characters || [])[index];
+        setModuleParam('character', `char_favorite_${index}`, String(!character?.favorite));
+        return;
+      }
+      const down = hit('[data-cw-down]');
+      if (down) { setSlotState(Number(down.dataset.cwDown), 'inactive'); return; }
+      const load = hit('[data-cw-load]');
+      if (load) { setSlotState(Number(load.dataset.cwLoad), 'active'); return; }
+      const remove = hit('[data-cw-remove]');
+      if (remove) { removeSlot(Number(remove.dataset.cwRemove)); return; }
+      const mute = hit('[data-cw-mute]');
+      if (mute) {
+        const index = Number(mute.dataset.cwMute);
+        const character = (lastState?.characters || [])[index];
+        setModuleParam('character', `char_muted_${index}`, String(!character?.muted));
+        return;
+      }
+      const rename = hit('[data-cw-rename]');
+      if (rename) { void renameSlot(Number(rename.dataset.cwRename)); return; }
+      const group = hit('[data-cw-editgroup]');
+      if (group) { void editGroup(Number(group.dataset.cwEditgroup)); return; }
+
+      if (hit('[data-cw-fav-only]')) { favouritesOnly = !favouritesOnly; rerender(); return; }
+      const groupFilterBtn = hit('[data-cw-group-filter]');
+      if (groupFilterBtn) { groupFilter = groupFilterBtn.dataset.cwGroupFilter; rerender(); return; }
+      if (hit('[data-cw-refresh]')) { refreshPreview(); return; }
+      if (hit('[data-cw-assets]')) { window.openCharacterAssetTab?.(); return; }
+      if (hit('[data-cw-search-tab]')) window.openCharacterViewerTab?.();
+    });
+
+    root.addEventListener('contextmenu', event => {
+      const row = event.target.closest('[data-cw-rename]');
+      if (!row) return;
+      event.preventDefault();
+      void renameSlot(Number(row.dataset.cwRename));
+    });
+  }
+
+  /** 검색어처럼 서버를 안 거치는 값은 그 자리에서 다시 그린다. */
+  function rerender() {
+    lastRenderedStructureSignature = '';
+    render(lastState || {});
+  }
+
+  // ⚠️ 검색은 글자마다 다시 그리면 입력 칸이 갈리며 커서가 튄다. 목록만 갈아 끼운다.
+  function scheduleRerender() {
+    const list = moduleBody.querySelector('.cw-list');
+    if (!list) { rerender(); return; }
+    const chars = lastState?.characters || [];
+    const indexed = chars.map((character, index) => ({character, index}));
+    const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');
+    const groups = [...new Set(storedSlots.map(item => groupOf(item.character)).filter(Boolean))].sort();
+    const html = renderHistory(storedSlots, groups);
+    const parsed = document.createElement('div');
+    parsed.innerHTML = html;
+    const nextList = parsed.querySelector('.cw-list');
+    if (nextList) list.innerHTML = nextList.innerHTML;
   }
 
   // 다른 창(예: Image Tagger 결과)이 '어느 캐릭터에 넣을까' 를 물으려면
   // 슬롯 목록이 필요하다. 렌더 상태를 그대로 빌려준다(사본).
   const getCharacters = () => (Array.isArray(lastState?.characters) ? [...lastState.characters] : []);
+
+  // ⚠️ Cold 서랍은 사라졌다(그룹으로 접었다). app.js 의 옛 호출부가 남아 있으므로
+  //    빈 껍데기를 남겨 둔다 - 없애면 `characterPanel.hideColdPanel is not a function`.
+  const noop = () => {};
 
   return {
     getCharacters,
@@ -547,10 +495,10 @@ export function createCharacterPanel({
     removeSlot,
     refreshPreview,
     setSlotState,
-    toggleColdPanel,
-    hideColdPanel,
     renameSlot,
-    setColdSearch,
     render,
+    toggleColdPanel: noop,
+    hideColdPanel: noop,
+    setColdSearch: noop,
   };
 }

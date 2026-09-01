@@ -11790,6 +11790,18 @@ body.resizing-result-info {
     width: min(860px, calc(100vw - 520px));
     max-height: calc(100dvh - 24px);
   }
+  /* 캐릭터 워크스페이스는 **Result 영역 폭**을 쓴다(사용자 지정 2026-09-01).
+     e621 과 같은 기하다 - 좌측 프롬프트 패널(480px)을 비켜서고 우측 레일을 남긴다. */
+  .module-popup.module-popup-character {
+    left: 492px;
+    right: 148px;
+    top: 12px;
+    bottom: 12px;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    border-radius: 10px;
+  }
   .module-popup.module-popup-conditional {
     left: 24px;
     right: 24px;
@@ -11867,6 +11879,14 @@ body.resizing-result-info {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* ⚠️ 워크스페이스는 자기 안에서 좌우가 각자 스크롤한다 - 본문이 스크롤하면
+   두 겹이 되어 슬롯 칸이 팝업 밖으로 밀린다. 패딩도 없앤다(칸이 테두리까지 간다). */
+.module-popup.module-popup-character .module-popup-body {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
 }
 .module-popup.module-popup-e621 .module-popup-body {
   overflow: hidden;
@@ -13584,8 +13604,167 @@ body.detached-metadata .metadata-layout {
 }
 
 /* Module: character block */
+/* == 캐릭터 워크스페이스 (사용자 지정 2026-09-01) ==========================
+   기조는 **Memo**(=`.tagsearch-*`), 슬롯은 **캐릭터 퀵 프롬프트와 동일**(=`.cq-*`).
+   구조는 [ 캐릭터 슬롯 340px | 작업 영역(탭) ].
+
+   ⚠️ 왼쪽에는 **활성 슬롯만** 둔다(사용자 결정). 썼던 슬롯은 **히스토리** 탭이 유일한
+      보관처다 - 예전에는 비활성이 아래에 쌓여 스크롤이 끝없이 길어졌다(주요 제보).
+   ⚠️ 340px 은 Quick 패널 폭 그대로다. 300px 에서 제목이 잘린 전력이 있다.
+   ⚠️ `min-height: 0` 이 빠지면 좌우가 각자 스크롤하지 못하고 팝업 밖으로 넘친다. */
+.cw-body { flex: 1; min-height: 0; display: flex; }
+
+/* 왼쪽 - 캐릭터 슬롯 */
+.cw-slots {
+  flex: 0 0 340px; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border-dim);
+}
+.cw-slots-head {
+  height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  border-bottom: 1px solid var(--border-dim); background: rgba(20,24,42,0.5);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--text-dim);
+}
+.cw-slots-head .cw-sp { flex: 1; }
+.cw-slots-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* ⚠️ [+ Add] 는 **목록 바로 밑**이다(사용자 지정) - 패널 맨 아래에 고정하면
+   슬롯이 적을 때 멀리 떨어져 보인다. */
+.cw-add {
+  width: calc(100% - 8px); margin: 4px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--border-glow); border-radius: 6px;
+  background: transparent; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+}
+.cw-add:hover { border-color: var(--accent); color: var(--text-primary); }
+.cw-slots-empty { padding: 14px 10px; text-align: center; font-size: 10.5px; color: var(--text-dim); }
+
+/* 슬롯 한 칸 - `.cq-*` 값을 그대로 입는다(사용자 지정: 퀵과 동일) */
+.cw-slot { border-bottom: 1px solid rgba(42,42,61,0.4); background: rgba(255,255,255,0.02); }
+.cw-slot-row {
+  display: flex; align-items: center; width: 100%; height: 22px;
+  padding-left: 4px; background: rgba(255,255,255,0.04);
+}
+.cw-slot-en {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-right: 5px; padding: 0; cursor: pointer;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  font-size: 8.5px; line-height: 1;
+}
+.cw-slot-en.is-on {
+  border-color: rgba(124,106,239,0.6); color: rgb(178,166,247);
+  background: rgba(124,106,239,0.22);
+}
+.cw-slot-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-editor); font-size: 11px; color: var(--text-primary); text-align: left;
+}
+/* 끈 슬롯은 자리를 지킨 채 흐려진다(Quick 과 같은 규약). */
+.cw-slot.is-muted .cw-slot-title { opacity: 0.42; text-decoration: line-through; }
+.cw-slot.is-muted .cw-input { opacity: 0.5; }
+.cw-slot-btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; margin-right: 3px; padding: 0; cursor: pointer;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 8px; line-height: 1;
+}
+.cw-slot-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.cw-slot-btn.is-star { color: #f0c674; border-color: rgba(240,198,116,0.42); }
+.cw-slot-btn.is-danger:hover { border-color: rgba(224,108,117,0.6); color: #ffb0b0; }
+/* 전부 펼친다(사용자 지정) - 접는 상태가 없다. */
+.cw-slot-body { display: flex; flex-direction: column; gap: 3px; padding: 3px 4px 4px; }
+.cw-input {
+  width: 100%; resize: none; overflow: hidden;
+  padding: 4px 6px; border-radius: 5px;
+  background: rgba(0,0,0,0.34); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-family: var(--font-editor); font-size: 11px;
+  line-height: 1.4;
+}
+.cw-input:focus { outline: none; border-color: rgba(124,106,239,0.55); }
+.cw-input.is-uc { color: var(--text-dim); }
+
+/* 오른쪽 - 작업 영역 */
+.cw-work { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.cw-tabs { display: flex; border-bottom: 1px solid var(--border-dim); }
+.cw-tab {
+  flex: 0 0 auto; min-width: 96px; height: 26px; padding: 0 14px;
+  border: 0; border-right: 1px solid var(--border-dim);
+  background: rgba(20,24,42,0.5); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+}
+.cw-tab:hover { color: var(--text-primary); }
+.cw-tab.is-active { background: rgba(96,120,255,0.22); color: var(--text-primary); }
+.cw-tab-fill { flex: 1; border-right: 0; background: rgba(20,24,42,0.5); }
+.cw-filters { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border-dim); }
+.cw-search {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.28); color: var(--text-primary);
+  font-family: var(--font-editor); font-size: 12px; outline: none;
+}
+.cw-search:focus { border-color: var(--accent); }
+.cw-chip {
+  flex: 0 0 auto; height: 32px; padding: 0 11px;
+  display: flex; align-items: center;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.26); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700; cursor: pointer;
+}
+.cw-chip:hover { color: var(--text-primary); }
+.cw-chip.is-on { background: rgba(96,120,255,0.22); color: var(--text-primary); border-color: var(--accent); }
+/* 남는 폭을 전부 쓴다 - 넓은 화면이면 열이 늘어난다. */
+.cw-list {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 6px; align-content: start;
+}
+.cw-empty { padding: 18px 12px; text-align: center; font-size: 11px; color: var(--text-dim); }
+/* 히스토리 한 줄 - `.tagsearch-item` 값 */
+.cw-li {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(0,0,0,0.2); color: var(--text-primary);
+  font-family: var(--font-editor); font-size: 11.5px; text-align: left;
+}
+.cw-li:hover { background: rgba(96,120,255,0.12); border-color: var(--accent); }
+.cw-li-star { flex: 0 0 auto; font-size: 11px; color: #4a4a58; cursor: pointer;
+  background: transparent; border: 0; padding: 0; }
+.cw-li-star.is-on { color: #f0c674; }
+.cw-li-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; cursor: pointer; }
+.cw-li-group {
+  flex: 0 0 auto; padding: 1px 7px;
+  border: 1px solid var(--border-dim); border-radius: 999px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted);
+}
+.cw-li-load {
+  flex: 0 0 auto; padding: 1px 6px;
+  border: 1px solid rgba(124,106,239,0.45); border-radius: 4px;
+  background: transparent; color: var(--accent-glow);
+  font-family: var(--font-mono); font-size: 9px; cursor: pointer;
+}
+.cw-li-load:hover { background: rgba(124,106,239,0.18); color: var(--text-primary); }
+/* 도구 탭 */
+.cw-tools {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.cw-tool-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.cw-tool-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+
 .mod-character-shell {
   display: block;
+}
+/* ⚠️ `display: block` 이면 안쪽 flex 가 높이를 못 받아 슬롯 칸이 340px 에서 멈춘다
+   (실측: .cw-slots-scroll clientHeight 340 - 팝업은 1056 이었다). */
+.module-popup-character .mod-character-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 .mod-character-workspace,
 .mod-character-cold-panel {

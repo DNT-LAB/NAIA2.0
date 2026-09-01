@@ -62,6 +62,57 @@ def default_character_settings() -> dict:
     }
 
 
+LEGACY_COLD_GROUP = "Cold"
+
+# 히스토리 상한 (사용자 지정 2026-09-01: "최대 500개까지 사용했던 캐릭터 슬롯을 누적").
+#
+# ⚠️ 예전 비활성 무리는 **상한이 없었다** - 슬롯을 만들수록 목록이 끝없이 길어져
+#    스크롤이 늘어졌다(주요 제보). 히스토리가 그 역할을 대신하되 여기서 끊는다.
+HISTORY_LIMIT = 500
+
+# 화면에 알려 줄 슬롯 상한. 실제 차단은 `HeadlessCharacterService` 가 한다.
+MAX_CHARACTER_SLOTS_HINT = 25
+
+
+def _as_used_at(value: Any) -> float:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def trim_history(frames: list[dict]) -> list[dict]:
+    """히스토리를 500개로 끊는다. 활성 슬롯은 세지 않는다.
+
+    ⚠️ **즐겨찾기는 보호한다.** 상한은 '자동으로 쌓인 것' 을 끊으려는 장치인데,
+       별을 단 캐릭터는 사용자가 남기겠다고 표시한 것이다. 즐겨찾기만으로 상한을
+       넘으면 그때는 즐겨찾기 중 오래된 것부터 버린다 - 무한히 늘게 두지 않는다.
+    """
+    stored = [frame for frame in frames if str(frame.get("slot_state") or "") != "active"]
+    if len(stored) <= HISTORY_LIMIT:
+        return frames
+    # 남길 것을 고른다: 즐겨찾기 먼저, 그 다음 최근에 쓴 것.
+    ranked = sorted(
+        stored,
+        key=lambda frame: (bool(frame.get("favorite")), _as_used_at(frame.get("used_at"))),
+        reverse=True,
+    )
+    keep = {id(frame) for frame in ranked[:HISTORY_LIMIT]}
+    dropped = len(stored) - len(keep)
+    if dropped > 0:
+        print(f"[Character] history trimmed: dropped {dropped} slot(s)", flush=True)
+    return [frame for frame in frames
+            if str(frame.get("slot_state") or "") == "active" or id(frame) in keep]
+
+
+def _default_group(frame: Any, slot_state: str) -> str:
+    """그룹 이름. 비어 있는 옛 `cold` 슬롯만 "Cold" 로 읽어 준다(저장은 안 바꾼다)."""
+    group = str(frame.get("group") or "").strip()
+    if group:
+        return group
+    return LEGACY_COLD_GROUP if slot_state == "cold" else ""
+
+
 def normalize_slot_state(value: Any, is_enabled: bool = False) -> str:
     state = str(value or "").strip().lower()
     if state in {"active", "inactive", "cold"}:
@@ -175,12 +226,32 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 #    날 조용히 다른 캐릭터를 가리킨다. "자기보다 낮은 번호만" 은 화면에서
                 #    거는 제약이고, 저장은 안정 uuid 로 한다.
                 "connect_to": str(frame.get("connect_to") or ""),
+                # 즐겨찾기 · 그룹 (사용자 지정 2026-09-01, 캐릭터 워크스페이스).
+                #
+                # ⚠️ `cold` 는 **동작이 없는 세 번째 상태**였다 - `is_enabled` 는
+                #    `active and not muted` 뿐이라 inactive 와 하는 일이 같았고,
+                #    따로 보는 곳은 정렬과 개수 표시뿐이었다. 서랍을 하나 더 파는
+                #    대신 **그룹**으로 접는다(사용자: "기존 Cold는 이제 그룹으로").
+                # ⚠️ 마이그레이션을 하지 않는다. 옛 `cold` 슬롯은 그룹이 비어 있으면
+                #    읽을 때만 "Cold" 로 보여 준다 - 저장을 건드리지 않으므로
+                #    구버전으로 되돌아가도 그대로 열린다.
+                "favorite": bool(frame.get("favorite")),
+                "group": _default_group(frame, slot_state),
+                # 마지막으로 활성에서 내려온 시각. 히스토리 정렬과 500개 잘라내기의 잣대다.
+                # 0 이면 아직 한 번도 안 내려왔다는 뜻이라 **가장 오래된 것으로 친다**.
+                "used_at": _as_used_at(frame.get("used_at")),
                 # V5 Scene 이 만든 슬롯인가. 씬을 잇달아 불러올 때 **이전 씬이 남긴
                 # 칸만** 골라 버리려고 둔다 - 사용자가 손으로 만든 칸은 그대로 남는다.
                 # 이게 없으면 비활성 무리에 씬 찌꺼기가 끝없이 쌓인다(사용자 제보).
                 "from_scene": bool(frame.get("from_scene", False)),
             })
-    settings["character_frames"] = _prune_character_links(sort_character_frames(normalized_frames))
+    # ⚠️ 500개 잘라내기는 **읽기·쓰기가 함께 지나는 이 자리**에서 한 번만 한다.
+    #    호출부마다 걸면 하나가 빠지고, 빠진 경로로 들어온 저장본이 상한을 넘긴다.
+    #    자르기는 정렬 **앞**이다 - 자르면서 없어진 프레임의 링크를 그 다음
+    #    `_prune_character_links` 가 정리해야 하기 때문이다.
+    settings["character_frames"] = _prune_character_links(
+        sort_character_frames(trim_history(normalized_frames))
+    )
     # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.
     #   · AUTO   - **AI's Choice**. 좌표를 안 보낸다(`use_coords:false`) - NAI 가
     #              캡션과 등장 순서(`use_order`)로 알아서 놓는다.
@@ -1628,6 +1699,8 @@ def character_state_from_settings(
             # `_prune_character_links` 가 정규화에서 이미 지웠으므로 여기 오는 값은
             # **항상 앞선 슬롯**을 가리킨다.
             "connect_to": str(frame.get("connect_to") or ""),
+            "favorite": bool(frame.get("favorite")),
+            "group": _default_group(frame, slot_state),
         })
 
     # SSOT: the preview reads the stored roll snapshot for this mode — it NEVER
@@ -1660,6 +1733,9 @@ def character_state_from_settings(
         #    "3 Characters" 라고 말한다(Codex 지적).
         "enabled_count": sum(1 for item in characters if item.get("enabled")),
         "cold_count": sum(1 for item in characters if item.get("slot_state") == "cold"),
+        # 화면이 [+ Add] 를 잠그는 잣대. 백엔드가 SSOT 다 - 프런트가 자기 숫자를
+        # 들고 있으면 둘이 어긋나 "눌리는데 안 늘어나는" 버튼이 된다.
+        "max_slots": MAX_CHARACTER_SLOTS_HINT,
         "processed_characters": processed_characters,
         "processed_ucs": processed_ucs,
         "character_token_count": 0,

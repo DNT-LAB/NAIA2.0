@@ -2280,7 +2280,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260831-tagger')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260901-cap25')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -10498,6 +10498,7 @@ function openModule(moduleId, options = {}) {
   modulePopup.classList.toggle('module-popup-e621', moduleId === 'e621_event');
   modulePopup.classList.toggle('module-popup-img2img', moduleId === 'img2img');
   modulePopup.classList.toggle('module-popup-conditional', moduleId === 'conditional_prompt');
+  modulePopup.classList.toggle('module-popup-character', moduleId === 'character');
   modulePopup.classList.remove('module-popup-inpaint');
   modulePopup.classList.add('open');
   relayoutFloatingPanels();
@@ -10554,6 +10555,7 @@ function closeModule(options = {}) {
   modulePopup.classList.remove('module-popup-e621');
   modulePopup.classList.remove('module-popup-img2img');
   modulePopup.classList.remove('module-popup-conditional');
+  modulePopup.classList.remove('module-popup-character');
   modulePopup.classList.remove('module-popup-inpaint');
   closeAuxiliaryPopups(null, { keepChunk: options.keepChunk !== false });
   currentModuleId = null;
@@ -11624,6 +11626,13 @@ function renderCharacter(m) {
 function openCharacterAssetTab() {
   closeModule();
   switchRightTab('charAssets');
+}
+
+// 캐릭터 워크스페이스의 [검색] 탭에서 부른다 - Danbooru 캐릭터 열람은 이미
+// Characters 탭에 있다(사용자 지정: 기존 기능을 옮기지 않는다).
+function openCharacterViewerTab() {
+  closeModule();
+  switchRightTab('characters');
 }
 
 // ---- Conditional Prompt module ----

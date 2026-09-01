@@ -111,6 +111,14 @@ def _event_safe_copy(value: Any, _depth: int = 0) -> Any:
         return "<unrepresentable>"
 
 
+class NaiCharacterDataError(ValueError):
+    """캐릭터 데이터가 NAI 로 나갈 수 없는 모양이다(개수 상한·길이 불일치 등).
+
+    ⚠️ 조용히 넘어가면 캐릭터 없는 그림이 나가고 Anlas 만 쓴다. 생성을 막고
+       이유를 화면에 보여 준다 - 모델 해석 실패와 같은 통로다.
+    """
+
+
 @dataclass
 class HeadlessGenerationDispatch:
     request: GenerationRequest | None
@@ -239,7 +247,16 @@ class HeadlessGenerationService:
             # 직접 생성 런(_create_direct_prompt_run)은 조작이 없으므로 자연 no-op.
             self._apply_conditional_negative(params, prompt_run_id)
         priority = self._priority(command)
-        nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params, api_mode)
+        try:
+            nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(
+                params, api_mode
+            )
+        except NaiCharacterDataError as exc:
+            return HeadlessGenerationDispatch(
+                request=None,
+                api_mode=api_mode,
+                blocked_reason=f"캐릭터 프롬프트를 보낼 수 없습니다: {exc}",
+            )
         request = GenerationRequest(
             params=params,
             source_row=source_row,
@@ -987,10 +1004,14 @@ class HeadlessGenerationService:
         nai_characters = None
         nai_vibe_transfer = None
         nai_character_reference = None
+        # ⚠️ 캐릭터 실패는 **삼키면 안 된다.** 예전에는 여기서 None 으로 눕혔는데,
+        #    그러면 캐릭터가 하나 빠지는 것이 아니라 **통째로 빠진 채** 그림이 나간다
+        #    (실측: 슬롯 6개 -> ValueError -> None -> 캐릭터 0명으로 생성).
+        #    사용자는 Anlas 를 쓰고 엉뚱한 그림을 받는다. 위로 올려 생성을 막는다.
         try:
             nai_characters = NAICharacterData.from_params(params)
-        except Exception:
-            nai_characters = None
+        except ValueError as exc:
+            raise NaiCharacterDataError(str(exc)) from exc
         try:
             nai_vibe_transfer = NAIVibeTransferData.from_params(params)
         except Exception:

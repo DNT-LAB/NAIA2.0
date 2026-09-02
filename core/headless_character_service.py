@@ -575,7 +575,7 @@ class HeadlessCharacterService:
             if name:
                 settings["groups"] = normalize_groups([*(settings.get("groups") or []), name], frames)
         elif key == "remove_group":
-            from core.character_settings import COLD_STORAGE_GROUP, normalize_groups
+            from core.character_settings import normalize_groups
 
             name = str(value or "").strip()
             # 그룹을 지우면 안에 든 캐릭터는 **그룹 없음**으로 남는다 - 캐릭터를 지우지 않는다.
@@ -584,9 +584,6 @@ class HeadlessCharacterService:
                     frame["group"] = ""
             settings["groups"] = normalize_groups(
                 [g for g in (settings.get("groups") or []) if str(g).strip() != name], frames)
-            if name == COLD_STORAGE_GROUP:
-                # Cold Storage 는 항상 있다(normalize 가 다시 넣는다) - 비우기만 된다.
-                pass
         elif key.startswith("char_group_"):
             index = context._index_from_key(key, "char_group_")
             if index is not None:

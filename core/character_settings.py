@@ -61,7 +61,7 @@ def default_character_settings() -> dict:
         "character_frames": [],
         # 사용자가 만든 그룹 이름들. 프레임에 붙은 그룹과 **합집합**으로 읽는다 -
         # 빈 그룹(아직 아무도 안 넣은)을 만들 수 있어야 하므로 따로 든다.
-        "groups": [COLD_STORAGE_GROUP],
+        "groups": [],
     }
 
 
@@ -113,10 +113,14 @@ def trim_history(frames: list[dict]) -> list[dict]:
 
 
 def normalize_groups(stored: Any, frames: list[dict]) -> list[str]:
-    """그룹 목록 = 저장된 이름 ∪ 프레임에 붙은 이름. Cold Storage 는 항상 있다.
+    """그룹 목록 = 저장된 이름 ∪ 프레임에 붙은 이름.
 
     순서는 저장된 순서를 지키고(사용자가 만든 차례), 프레임에서만 발견된 것은 뒤에
     붙인다. 옛 이름 "Cold" 는 Cold Storage 로 접는다.
+
+    ⚠️ Cold Storage 를 **강제로 넣지 않는다**(사용자 지적 2026-09-02). Cold 로 보내는
+       길이 이제 없으므로 이 그룹은 옛 저장본을 옮겨 담는 **일회성 버킷**이다 - 옛
+       cold 슬롯이 있을 때 한 번 생기고, 사용자가 지우면 다른 그룹처럼 사라진다.
     """
     seen: list[str] = []
     def add(name: Any) -> None:
@@ -125,7 +129,6 @@ def normalize_groups(stored: Any, frames: list[dict]) -> list[str]:
             text = COLD_STORAGE_GROUP
         if text and text not in seen:
             seen.append(text)
-    add(COLD_STORAGE_GROUP)
     for name in (stored if isinstance(stored, list) else []):
         add(name)
     for frame in frames:
@@ -224,6 +227,14 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 continue
             is_enabled = bool(frame.get("is_enabled", False))
             slot_state = normalize_slot_state(frame.get("slot_state"), is_enabled)
+            # ⚠️ cold 는 **폐기된 상태**다(2026-09-02). 읽을 때 inactive 로 눕히고 그룹만
+            #    Cold Storage 로 남긴다(`_default_group` 이 원래 상태를 본다). 상태를 남겨
+            #    두면 사용자가 그 그룹을 지운 뒤 다음 정규화에서 그룹이 **되살아난다**
+            #    (group 이 비고 state 가 cold 라 다시 붙는다).
+            group_source_state = slot_state
+            if slot_state == "cold":
+                slot_state = "inactive"
+                migrated = True
             # ⚠️ 슬롯은 **두 축**이다(NAI 공식 구현과 같다).
             #   · slot_state - 목록의 어느 무리에 있나 (▲/▼ · Cold)
             #   · is_muted   - 활성 무리 안에서 이번 생성에 나가나 (✔/✘)
@@ -268,7 +279,7 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 #    읽을 때만 "Cold" 로 보여 준다 - 저장을 건드리지 않으므로
                 #    구버전으로 되돌아가도 그대로 열린다.
                 "favorite": bool(frame.get("favorite")),
-                "group": _default_group(frame, slot_state),
+                "group": _default_group(frame, group_source_state),
                 # 마지막으로 활성에서 내려온 시각. 히스토리 정렬과 500개 잘라내기의 잣대다.
                 # 0 이면 아직 한 번도 안 내려왔다는 뜻이라 **가장 오래된 것으로 친다**.
                 "used_at": _as_used_at(frame.get("used_at")),
@@ -1771,7 +1782,6 @@ def character_state_from_settings(
         "max_slots": MAX_CHARACTER_SLOTS_HINT,
         # 사용자가 만든 그룹(빈 것 포함). 화면의 그룹 탭·필터 칩·"그룹에 전달" 이 읽는다.
         "groups": list(normalized.get("groups") or []),
-        "cold_storage_group": COLD_STORAGE_GROUP,
         "processed_characters": processed_characters,
         "processed_ucs": processed_ucs,
         "character_token_count": 0,

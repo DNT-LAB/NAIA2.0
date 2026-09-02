@@ -64,9 +64,7 @@ export function createCharacterPanel({
     const list = Array.isArray(state?.groups) ? state.groups.map(g => String(g || '').trim()).filter(Boolean) : [];
     return [...new Set(list)];
   }
-  function coldStorageName(state) {
-    return String(state?.cold_storage_group || 'Cold Storage');
-  }
+
 
   /** 이 패널은 showToast 를 주입받지 않는다 - 전역이 있으면 쓴다. */
   function showToastSafe(message) {
@@ -351,10 +349,10 @@ export function createCharacterPanel({
    *
    * ⚠️ 즐겨찾기는 **그룹처럼** 보이되 항상 맨 위다(사용자 지정). 실제로는 플래그라
    *    지울 수 없다 - 그래서 ✕ 가 없다.
-   * ⚠️ Cold 는 폐기된 상태다. 남은 것은 "Cold Storage" 라는 그룹 하나 - 다른 그룹과
-   *    같이 다루되, 비우기만 되고 사라지지는 않는다(백엔드가 항상 다시 넣는다).
+   * ⚠️ Cold 는 폐기된 상태다. 옛 cold 슬롯이 있으면 "Cold Storage" 그룹이 **한 번**
+   *    생기고, 그 뒤로는 다른 그룹과 똑같다 - 지우면 사라진다(사용자 지적 2026-09-02).
    */
-  function renderGroups(storedSlots, groups, state) {
+  function renderGroups(storedSlots, groups) {
     const counts = new Map();
     let favCount = 0;
     let noGroup = 0;
@@ -364,7 +362,6 @@ export function createCharacterPanel({
       if (name) counts.set(name, (counts.get(name) || 0) + 1);
       else noGroup += 1;
     });
-    const cold = coldStorageName(state);
     const row = (name, count, {pinned = false, deletable = true, fav = false} = {}) => `
       <div class="cw-grp${pinned ? ' is-pinned' : ''}">
         <button type="button" class="cw-grp-open" ${fav ? 'data-cw-open-fav="1"' : `data-cw-open-group="${escAttr(name)}"`}
@@ -377,7 +374,7 @@ export function createCharacterPanel({
       </div>`;
     const rows = [
       row('즐겨찾기', favCount, {pinned: true, deletable: false, fav: true}),
-      ...groups.map(name => row(name, counts.get(name) || 0, {deletable: name !== cold})),
+      ...groups.map(name => row(name, counts.get(name) || 0)),
     ].join('');
     return `
       <div class="cw-filters">
@@ -417,7 +414,7 @@ export function createCharacterPanel({
         data-cw-tab="${item.key}">${item.label}</button>`).join('');
     let body;
     if (tab === 'history') body = renderHistory(storedSlots, groups);
-    else if (tab === 'groups') body = renderGroups(storedSlots, groups, state);
+    else if (tab === 'groups') body = renderGroups(storedSlots, groups);
     else if (tab === 'tools') body = renderTools(state);
     else if (tab === 'assets') {
       // ⚠️ 기존 에셋 기능을 **옮기지 않는다**(사용자 지정: "기존 기능 제거는 아님").

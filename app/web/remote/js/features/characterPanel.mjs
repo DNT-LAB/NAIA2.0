@@ -49,7 +49,6 @@ export function createCharacterPanel({
   let tab = 'history';
   let query = '';
   let favouritesOnly = false;
-  let groupFilter = '';
   // ⚠️ **uuid 로 잡는다.** index 는 슬롯이 무리를 옮길 때마다 밀려서, 펼쳐 둔
   //    항목이 조용히 다른 캐릭터로 바뀐다.
   const openHistory = new Set();
@@ -141,7 +140,7 @@ export function createCharacterPanel({
     return [
       state?.activated ? 1 : 0,
       state?.reroll_on_generate ? 1 : 0,
-      tab, query, favouritesOnly ? 1 : 0, groupFilter,
+      tab, query, favouritesOnly ? 1 : 0,
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
       [...openGroups].sort().join(','),
@@ -307,7 +306,17 @@ export function createCharacterPanel({
   }
 
   /** 히스토리 한 항목. 히스토리 탭과 그룹 탭(펼친 그룹 안)이 **같은 것**을 그린다. */
-  function renderHistoryItem(character, index, groups) {
+  /**
+   * 히스토리 한 항목. 히스토리 탭과 그룹 탭(펼친 그룹 안)이 **같은 것**을 그린다.
+   *
+   * @param inGroup 그룹 탭에서 그린다면 그 행의 키(`fav` · `none` · `g:이름`).
+   *   ⚠️ 오른쪽 끝 버튼의 **뜻이 달라진다**(사용자 제보 2026-09-02):
+   *     히스토리 -> ✕ 영구 삭제 (전체 목록이니 그것이 옳다)
+   *     그룹 안  -> − 이 그룹에서 빼기 (거기 있는 것은 **한 그룹의 사본이 아니라
+   *                같은 캐릭터**다 - 지우면 즐겨찾기·히스토리에서 함께 사라진다.
+   *                실제로 사용자가 그렇게 잃었다.)
+   */
+  function renderHistoryItem(character, index, groups, inGroup) {
     const uuid = String(character.slot_uuid || '');
     const open = openHistory.has(uuid);
     return `
@@ -326,8 +335,12 @@ export function createCharacterPanel({
           : ''}
         <!-- 오른쪽 끝 = 삭제(사용자 지정). 여기가 **영영 지우는 유일한 길**이다 -
              슬롯의 ✕ 는 히스토리로 보낼 뿐이다. -->
-        <button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"
-          title="영구 삭제">✕</button>
+        ${inGroup
+          ? `<button type="button" class="cw-li-btn" data-cw-ungroup="${index}"
+              data-cw-ungroup-key="${escAttr(inGroup)}"
+              title="${inGroup === GRP_FAV ? '즐겨찾기에서 뺀다' : '이 그룹에서 뺀다 (캐릭터는 남는다)'}">−</button>`
+          : `<button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"
+              title="영구 삭제">✕</button>`}
       </div>
       ${open ? `
       <div class="cw-li-body">
@@ -358,11 +371,8 @@ export function createCharacterPanel({
     const rows = [...storedSlots]
       .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0))
       .filter(({character}) => !favouritesOnly || character.favorite)
-      .filter(({character}) => !groupFilter || groupOf(character) === groupFilter)
       .filter(({character}) => matchesQuery(character));
-    const groupChips = groups.map(name =>
-      `<button type="button" class="cw-chip${groupFilter === name ? ' is-on' : ''}"
-        data-cw-group-filter="${escAttr(name)}">${escHtml(name)}</button>`).join('');
+
     const list = rows.length
       ? rows.map(({character, index}) => renderHistoryItem(character, index, groups)).join('')
       : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ✕ 로 지우면 여기에 쌓입니다 (최대 500개).'}</div>`;
@@ -372,8 +382,9 @@ export function createCharacterPanel({
           placeholder="캐릭터 · 태그 · 그룹 검색…" data-cw-search="1">
         <button type="button" class="cw-chip${favouritesOnly ? ' is-on' : ''}" data-cw-fav-only="1"
           title="즐겨찾기만">★</button>
-        <button type="button" class="cw-chip${groupFilter ? '' : ' is-on'}" data-cw-group-filter="">전체</button>
-        ${groupChips}
+        <!-- ⚠️ 그룹 칩은 걷었다(사용자 지정 2026-09-02). 그룹을 둘러보는 일은
+             **그룹 탭**이 펼쳐서 한다 - 여기 두면 같은 길이 둘이고, 그룹이 늘수록
+             검색칸을 밀어낸다. 전체 칩도 그것들을 지우려고 있던 것이라 함께 걷는다. -->
       </div>
       <div class="cw-list">${list}</div>`;
   }
@@ -410,7 +421,7 @@ export function createCharacterPanel({
             title="그룹 삭제 (안의 캐릭터는 그룹 없음으로 남는다)">✕</button>` : ''}
         </div>
         ${open ? `<div class="cw-grp-items">${items.length
-          ? items.map(({character, index}) => renderHistoryItem(character, index, groups)).join('')
+          ? items.map(({character, index}) => renderHistoryItem(character, index, groups, key)).join('')
           : '<div class="cw-empty">비어 있습니다.</div>'}</div>` : ''}
       </div>`;
     };
@@ -617,6 +628,17 @@ export function createCharacterPanel({
         setSlotState(index, 'active');
         return;
       }
+      const ungroup = hit('[data-cw-ungroup]');
+      if (ungroup) {
+        const index = Number(ungroup.dataset.cwUngroup);
+        // ⚠️ **빼기지 삭제가 아니다.** 캐릭터는 히스토리에 그대로 남는다.
+        if (ungroup.dataset.cwUngroupKey === GRP_FAV) {
+          setModuleParam('character', `char_favorite_${index}`, 'false');
+        } else {
+          setModuleParam('character', `char_group_${index}`, '');
+        }
+        return;
+      }
       const remove = hit('[data-cw-remove]');
       if (remove) { removeSlot(Number(remove.dataset.cwRemove)); return; }
       const mute = hit('[data-cw-mute]');
@@ -640,8 +662,7 @@ export function createCharacterPanel({
 
 
       if (hit('[data-cw-fav-only]')) { favouritesOnly = !favouritesOnly; rerender(); return; }
-      const groupFilterBtn = hit('[data-cw-group-filter]');
-      if (groupFilterBtn) { groupFilter = groupFilterBtn.dataset.cwGroupFilter; rerender(); return; }
+
       if (hit('[data-cw-refresh]')) { refreshPreview(); return; }
       if (hit('[data-cw-assets]')) { window.openCharacterAssetTab?.(); return; }
       if (hit('[data-cw-search-tab]')) window.openCharacterViewerTab?.();

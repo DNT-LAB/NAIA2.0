@@ -132,6 +132,19 @@ export function createCharacterPanel({
     return full ? prompt : prompt.split(',')[0].trim();
   }
 
+  /** 그룹 배경 색조. 서버가 **만들 때 무작위로** 배정해 둔 값이다. */
+  function hueOf(name) {
+    const map = lastState?.group_colors;
+    const raw = map && Object.prototype.hasOwnProperty.call(map, name) ? map[name] : null;
+    return Number.isFinite(Number(raw)) ? Number(raw) : null;
+  }
+
+  /** 색을 인라인으로 문다 - 그룹 수가 정해져 있지 않아 CSS 클래스로는 못 쓴다. */
+  function hueStyle(name) {
+    const hue = name ? hueOf(name) : null;
+    return hue === null ? '' : ` style="--cw-grp-hue:${hue}"`;
+  }
+
   function groupOf(character) {
     return String(character?.group || '').trim();
   }
@@ -147,6 +160,7 @@ export function createCharacterPanel({
       state?.activated ? 1 : 0,
       state?.reroll_on_generate ? 1 : 0,
       tab, query, groupQuery,
+      JSON.stringify(state?.group_colors || {}),
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
       [...openGroups].sort().join(','),
@@ -343,17 +357,22 @@ export function createCharacterPanel({
     const uuid = String(character.slot_uuid || '');
     const open = openHistory.has(uuid);
     return `
-    <div class="cw-li${open ? ' is-open' : ''}" data-cw-li="${index}">
+    <div class="cw-li${open ? ' is-open' : ''}${groupOf(character) ? ' has-hue' : ''}"
+      data-cw-li="${index}"${hueStyle(groupOf(character))}>
+      <!-- ⚠️ 툴팁은 **프롬프트 전문**이다(사용자 지정 2026-09-02). 조작 설명을 띄우면
+           정작 궁금한 것(잘린 뒷부분)을 볼 길이 없다. -->
       <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}" draggable="true"
         data-cw-drag="${index}" data-cw-drag-uuid="${escAttr(uuid)}"
-        title="누르면 프롬프트를 펼친다 · 끌어서 그룹 행에 놓으면 옮겨진다">
+        title="${escAttr(character.prompt || '(비어 있음)')}">
         <!-- 왼쪽 끝 = 복원(사용자 지정 2026-09-02). 슬롯 맨 아래로 간다. -->
         <button type="button" class="cw-li-btn" data-cw-load="${index}"
           title="슬롯으로 복원">↩</button>
         <!-- ⚠️ 즐겨찾기는 이제 **표시**다(조작은 펼친 뒤에 있다) - 안 보이면
              위의 ★ 필터가 무엇을 거르는지 알 수 없다. -->
       <span class="cw-li-text">${character.favorite ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(slotLabel(character, {full: true}))}</span>
-        ${groupOf(character)
+        <!-- ⚠️ 그룹 안에서는 칩을 안 그린다 - **머리줄이 이미 그 이름**이다.
+             히스토리·즐겨찾기에는 머리줄이 없으니 거기서는 남긴다. -->
+        ${!inGroup && groupOf(character)
           ? `<span class="cw-li-group">${escHtml(groupOf(character))}</span>`
           : ''}
         <!-- 오른쪽 끝 = 삭제(사용자 지정). 여기가 **영영 지우는 유일한 길**이다 -
@@ -445,7 +464,8 @@ export function createCharacterPanel({
       if (needle && !items.length) return '';
       const open = needle ? true : openGroups.has(key);
       return `
-      <div class="cw-grp${pinned ? ' is-pinned' : ''}${open ? ' is-open' : ''}">
+      <div class="cw-grp${pinned ? ' is-pinned' : ''}${open ? ' is-open' : ''}${
+        grpName(key) ? ' has-hue' : ''}"${hueStyle(grpName(key))}>
         <div class="cw-grp-row" data-cw-drop="${escAttr(key)}">
           <button type="button" class="cw-grp-open" data-cw-toggle-group="${escAttr(key)}"
             title="${open ? '접는다' : '펼친다'}">

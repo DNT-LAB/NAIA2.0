@@ -13753,6 +13753,14 @@ body.detached-metadata .metadata-layout {
   /* overflow 를 hidden 으로 두지 않는다 - 그리드 최소 높이를 0 으로 만든다(위 주석). */
 }
 .cw-li:hover { border-color: var(--accent); }
+/* 그룹 색 - **매우 어둡게**(사용자 지정 2026-09-02). 색조만 그룹이 정하고 채도·명도는
+   여기서 못 박아, 어떤 색이 뽑혀도 글자가 읽히고 목록이 시끄럽지 않다.
+   ⚠️ 그룹 수가 정해져 있지 않아 클래스로는 못 쓴다 - JS 가 `--cw-grp-hue` 를 문다. */
+.cw-li.has-hue { background: hsl(var(--cw-grp-hue) 38% 9%); border-color: hsl(var(--cw-grp-hue) 30% 20%); }
+.cw-li.has-hue .cw-li-row:hover { background: hsl(var(--cw-grp-hue) 40% 14%); }
+.cw-li.has-hue.is-open { background: hsl(var(--cw-grp-hue) 40% 11%); border-color: hsl(var(--cw-grp-hue) 40% 28%); }
+.cw-grp.has-hue .cw-grp-open { background: hsl(var(--cw-grp-hue) 38% 11%); border-color: hsl(var(--cw-grp-hue) 32% 24%); }
+.cw-grp.has-hue .cw-grp-open:hover { background: hsl(var(--cw-grp-hue) 40% 15%); }
 .cw-li.is-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
 .cw-li-row {
   display: flex; align-items: center; gap: 8px; padding: 4px 6px;
@@ -13810,6 +13818,13 @@ body.detached-metadata .metadata-layout {
 .cw-grp-row.is-dropzone .cw-grp-open { border-style: dashed; }
 .cw-grp-row.is-drop .cw-grp-open { border-color: var(--accent); background: rgba(124,106,239,0.22); border-style: solid; }
 .cw-grp.is-open .cw-grp-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
+/* ⚠️ 위 규칙이 **뒤에 있어** 같은 특이도의 색 규칙(13762)을 이겼다 - 펼친 그룹의 머리줄이
+   회색 보라로 돌아갔다(실측: hue 는 붙었는데 bg 가 rgba(124,106,239,0.07)).
+   `!important` 대신 클래스 한 톨을 더해 이긴다. */
+.cw-grp.has-hue.is-open .cw-grp-open {
+  background: hsl(var(--cw-grp-hue) 40% 14%); border-color: hsl(var(--cw-grp-hue) 42% 32%);
+}
+.cw-grp.has-hue.is-open .cw-grp-open:hover { background: hsl(var(--cw-grp-hue) 42% 18%); }
 /* 펼친 그룹 안 - 히스토리 항목이 그대로 들어온다. 살짝 들여 써서 소속을 보인다. */
 .cw-grp-items { display: flex; flex-direction: column; gap: 6px; padding: 0 0 4px 16px; }
 .cw-grp.is-pinned { margin-bottom: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--border-dim); }

@@ -58,6 +58,7 @@ def default_character_settings() -> dict:
     return {
         "is_active": False,
         "reroll_on_generate": False,
+        "group_colors": {},
         "character_frames": [],
         # 사용자가 만든 그룹 이름들. 프레임에 붙은 그룹과 **합집합**으로 읽는다 -
         # 빈 그룹(아직 아무도 안 넣은)을 만들 수 있어야 하므로 따로 든다.
@@ -110,6 +111,27 @@ def trim_history(frames: list[dict]) -> list[dict]:
         print(f"[Character] history trimmed: dropped {dropped} slot(s)", flush=True)
     return [frame for frame in frames
             if str(frame.get("slot_state") or "") == "active" or id(frame) in keep]
+
+
+def normalize_group_colors(stored: Any, groups: list[str]) -> dict[str, int]:
+    """그룹마다 배경 색조(0-359). 사용자 지정 2026-09-02: 만들 때 **무작위로** 준다.
+
+    ⚠️ 이름에서 해시로 뽑지 않는다 - 그러면 이름을 고칠 때 색이 따라 바뀌어, 눈으로
+       기억해 둔 색이 어긋난다. 한 번 준 색은 그 그룹이 사라질 때까지 그대로 둔다.
+    ⚠️ 사라진 그룹의 색은 버린다 - 안 버리면 저장본이 끝없이 는다.
+    """
+    import random
+
+    previous = stored if isinstance(stored, dict) else {}
+    colors: dict[str, int] = {}
+    for name in groups:
+        raw = previous.get(name)
+        try:
+            hue = int(raw) % 360
+        except (TypeError, ValueError):
+            hue = random.randint(0, 359)
+        colors[name] = hue
+    return colors
 
 
 def normalize_groups(stored: Any, frames: list[dict]) -> list[str]:
@@ -296,6 +318,8 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
         sort_character_frames(trim_history(normalized_frames))
     )
     settings["groups"] = normalize_groups(stored_groups, settings["character_frames"])
+    settings["group_colors"] = normalize_group_colors(
+        data.get("group_colors"), settings["groups"])
     # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.
     #   · AUTO   - **AI's Choice**. 좌표를 안 보낸다(`use_coords:false`) - NAI 가
     #              캡션과 등장 순서(`use_order`)로 알아서 놓는다.
@@ -1782,6 +1806,8 @@ def character_state_from_settings(
         "max_slots": MAX_CHARACTER_SLOTS_HINT,
         # 사용자가 만든 그룹(빈 것 포함). 화면의 그룹 탭·필터 칩·"그룹에 전달" 이 읽는다.
         "groups": list(normalized.get("groups") or []),
+        # 그룹마다 배경 색조(0-359). 만들 때 무작위로 배정하고 그대로 지킨다.
+        "group_colors": dict(normalized.get("group_colors") or {}),
         "processed_characters": processed_characters,
         "processed_ucs": processed_ucs,
         "character_token_count": 0,

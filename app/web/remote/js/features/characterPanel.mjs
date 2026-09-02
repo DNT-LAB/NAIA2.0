@@ -125,6 +125,9 @@ export function createCharacterPanel({
   // 드래그 규약은 interactiveScenePanel 과 같다: 우리 자료형 하나로 **우리 것만** 받고,
   // 끌기 도중 다시 그려져 원본이 사라지면 `dragend` 가 오지 않으므로 표를 직접 버린다.
   const DND_MIME = 'application/x-naia-charslot';
+  // 워크스페이스 **밖에서** 오는 것(에셋·도감). 슬롯이 아니라 **내용**을 싣는다 -
+  // 이것들은 `lastState.characters` 에 없으므로 uuid 로는 찾을 수가 없다.
+  const DND_MIME_SRC = 'application/x-naia-charsource';
   let dragUuid = '';
 
   /** 그룹 목록은 **서버가 SSOT** 다(빈 그룹도 있어야 하므로 프레임에서 뽑지 않는다). */
@@ -161,9 +164,14 @@ export function createCharacterPanel({
     const el = event.target && event.target.closest ? event.target.closest('[data-cw-drop]') : null;
     if (!el) return null;
     const types = (event.dataTransfer && event.dataTransfer.types) || [];
-    const mine = types.includes ? types.includes(DND_MIME)
-      : Array.prototype.indexOf.call(types, DND_MIME) >= 0;
-    return mine ? el : null;
+    const has = name => (types.includes
+      ? types.includes(name)
+      : Array.prototype.indexOf.call(types, name) >= 0);
+    // ⚠️ **타입으로만** 가른다(끌기 도중에는 값을 못 읽는 브라우저가 있다).
+    //    바깥에서 온 것은 슬롯 칸에만 놓는다 - 그룹 행은 히스토리의 것을 옮기는 자리다.
+    if (has(DND_MIME)) return el;
+    if (has(DND_MIME_SRC)) return el.dataset.cwDrop === GRP_SLOT ? el : null;
+    return null;
   }
   /**
    * 각 틈에 "여기 놓으면 C몇 이 된다" 를 적는다.
@@ -174,7 +182,11 @@ export function createCharacterPanel({
    */
   function labelGaps() {
     const actives = (lastState?.characters || []).filter(c => slotState(c) === 'active');
-    const from = actives.findIndex(c => String(c.slot_uuid || '') === dragUuid);
+    // ⚠️ 바깥에서 온 것은 목록에 **없다** - 빠지며 당겨질 자기 자리가 없으므로
+    //    보정하면 안 된다(`from = -1` 이 그 뜻이다).
+    const from = dragUuid
+      ? actives.findIndex(c => String(c.slot_uuid || '') === dragUuid)
+      : -1;
     moduleBody.querySelectorAll('.cw-slot-gap').forEach(el => {
       const ordinal = Number(el.dataset.cwGap || 0);
       const seat = from >= 0 && from < ordinal ? ordinal - 1 : ordinal;
@@ -213,6 +225,74 @@ export function createCharacterPanel({
     return event.clientY < gaps[0].getBoundingClientRect().top ? gaps[0] : gaps[gaps.length - 1];
   }
 
+  // 지금 끌고 있는 바깥 항목의 내용. 놓을 때 쓴다.
+  let dragSource = null;
+
+  /**
+   * 에셋 타일·도감 행을 든다.
+   *
+   * ⚠️ 프롬프트는 **아직 없다** - 둘 다 상세를 따로 받아야 안다. 표식만 먼저 싣고
+   *    내용은 뒤따라 채운다(놓기까지는 시간이 넉넉하다). 못 채운 채 놓으면 아무
+   *    일도 안 난다 - 조용히 빈 슬롯을 만들지 않는다.
+   */
+  function startSourceDrag(event, node) {
+    dragSource = null;
+    try {
+      event.dataTransfer.setData(DND_MIME_SRC, '1');
+      event.dataTransfer.setData('text/plain', node.textContent.trim().slice(0, 60));
+      event.dataTransfer.effectAllowed = 'copy';
+      const name = node.querySelector('.cw-tile-name, .cw-dex-name');
+      event.dataTransfer.setDragImage(
+        dragChip((name?.textContent || '캐릭터').trim().slice(0, 40)), 12, 11);
+    } catch (_) { /* 무시 */ }
+    node.classList.add('is-dragging');
+    moduleBody.querySelectorAll('.cw-slots, .cw-slot-gap')
+      .forEach(el => el.classList.add('is-dropzone'));
+    labelGaps();
+    if (node.dataset.cwSrc === 'asset') {
+      const id = node.dataset.cwSrcId || '';
+      void fetch(`/api/character-asset/detail?id=${encodeURIComponent(id)}`)
+        .then(res => res.json())
+        .then(data => { dragSource = {
+          prompt: String(data.character_prompt || ''),
+          uc: String(data.character_uc || ''),
+          custom_name: String(data.display_name || ''),
+        }; })
+        .catch(() => { dragSource = null; });
+      return;
+    }
+    const group = node.dataset.cwDexGroup || '';
+    const character = node.dataset.cwDexChar || '';
+    void fetch('/api/character-viewer/detail', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({group, character, variant: '',
+                            options: {hide_charname: false, cosplay_enabled: false}}),
+    })
+      .then(res => res.json())
+      .then(data => { dragSource = {
+        prompt: String(data.prompt?.character_prompt || ''),
+        uc: '', custom_name: character,
+      }; })
+      .catch(() => { dragSource = null; });
+  }
+
+  /** 바깥에서 온 것을 슬롯에 꽂는다. `at` 이 없으면 맨 아래. */
+  function dropSourceIntoSlots(at, seed) {
+    dragSource = null;
+    if (!seed || !String(seed.prompt || '').trim()) {
+      showToastSafe('프롬프트를 아직 못 읽었습니다. 다시 시도해 주세요.');
+      return;
+    }
+    const max = Number(lastState?.max_slots) || 0;
+    const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
+    if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+    const payload = {prompt: seed.prompt, uc: seed.uc || '',
+                     custom_name: seed.custom_name || ''};
+    if (at !== undefined) payload.at = Number(at);
+    setModuleParam('character', 'add_character', JSON.stringify(payload));
+  }
+
   /** 실제로 겨눠진 것. 슬롯 칸이면 **틈까지** 좁혀 준다. */
   function aimed(event) {
     const target = dropTarget(event);
@@ -223,6 +303,7 @@ export function createCharacterPanel({
 
   function clearDrag() {
     dragUuid = '';
+    dragSource = null;
     const kill = ['is-dragging', 'is-drop', 'is-dropzone', 'is-self'];
     moduleBody.querySelectorAll('.' + kill.join(', .'))
       .forEach(el => el.classList.remove(...kill));
@@ -597,6 +678,7 @@ export function createCharacterPanel({
     }
     return rows.map(row => `
       <button type="button" class="cw-tile${row.id === assetPicked ? ' is-on' : ''}"
+        draggable="true" data-cw-src="asset" data-cw-src-id="${escAttr(row.id)}"
         data-cw-asset="${escAttr(row.id)}" title="${escAttr(assetLabel(row))}">
         <img class="cw-tile-img" loading="lazy" decoding="async" alt=""
           src="${escAttr(assetThumbUrl(row.id, '', row.revision))}">
@@ -799,6 +881,7 @@ export function createCharacterPanel({
       const thin = Number(row.count) < 50;
       return `
       <button type="button" class="cw-dex${key === picked ? ' is-on' : ''}"
+        draggable="true" data-cw-src="dex"
         data-cw-dex-group="${escAttr(row.group)}" data-cw-dex-char="${escAttr(row.character)}"
         title="${escAttr(`${row.character} · ${row.group}`)}">
         ${row.thumbnail_url
@@ -1469,6 +1552,10 @@ export function createCharacterPanel({
       pressedButton = !!(event.target && event.target.closest && event.target.closest('button'));
     });
     root.addEventListener('dragstart', event => {
+      // 바깥에서 오는 것(에셋 타일 · 도감 행) - **내용**을 싣는다.
+      const src = event.target && event.target.closest
+        ? event.target.closest('[data-cw-src]') : null;
+      if (src) { startSourceDrag(event, src); return; }
       const row = event.target && event.target.closest ? event.target.closest('[data-cw-drag]') : null;
       if (!row) return;
       if (pressedButton) { event.preventDefault(); return; }
@@ -1524,6 +1611,17 @@ export function createCharacterPanel({
       event.preventDefault();
       let uuid = '';
       try { uuid = event.dataTransfer.getData(DND_MIME); } catch (_) { uuid = ''; }
+      // 바깥에서 온 것 - 슬롯이 아니라 **내용**을 꽂는다.
+      if (!uuid && dragSource) {
+        const gapAt = target.dataset.cwGap;
+        // ⚠️ **먼저 챙기고 지운다.** `clearDrag()` 가 `dragSource` 도 비우므로,
+        //    지운 뒤에 읽으면 늘 비어 있다(실측: "프롬프트를 아직 못 읽었습니다"
+        //    토스트만 뜨고 슬롯이 안 늘었다).
+        const seed = dragSource;
+        clearDrag();
+        dropSourceIntoSlots(gapAt, seed);
+        return;
+      }
       const key = target.dataset.cwDrop;
       // ⚠️ 놓은 뒤 표시를 붙잡아 두는 장치는 **안 넣는다.** 서버 에코가 화면을 바꾸기까지
       //    **16ms** 다(실측 2026-09-02, 놓은 순간부터 순서가 바뀔 때까지). 데스크톱

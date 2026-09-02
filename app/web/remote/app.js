@@ -2280,7 +2280,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-search5')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-srcdrag2')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,

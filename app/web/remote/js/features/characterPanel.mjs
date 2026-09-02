@@ -56,6 +56,19 @@ export function createCharacterPanel({
   //    항목이 조용히 다른 캐릭터로 바뀐다.
   const openHistory = new Set();
 
+  /**
+   * 펼친 항목을 **하나로** 유지한다 (사용자 지정 2026-09-02: "여러개의 아이템을
+   * 동시에 펼칠 수 있는 문제를 수정합니다").
+   *
+   * ⚠️ 펼친 항목은 세 줄(프롬프트·UC·조작)을 더 차지한다. 여럿이 열리면 목록이
+   *    통째로 밀려 방금 찾은 것이 화면 밖으로 나간다. 자료형은 Set 그대로 둔다 -
+   *    렌더·서명이 이미 그것을 읽는다.
+   */
+  function openOnly(uuid) {
+    openHistory.clear();
+    if (uuid) openHistory.add(uuid);
+  }
+
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
   // 그룹 탭의 검색어. **그룹 안의 항목**을 찾는다(사용자 지정 2026-09-02) - 그룹
@@ -866,9 +879,10 @@ export function createCharacterPanel({
       const toggle = hit('[data-cw-toggle]');
       if (toggle) {
         const uuid = toggle.dataset.cwToggle;
-        if (openHistory.has(uuid)) openHistory.delete(uuid);
-        else openHistory.add(uuid);
-        rerender();
+        openOnly(openHistory.has(uuid) ? '' : uuid);
+        // ⚠️ **부분 갱신**이다. 전체를 다시 그리면 검색 입력칸이 새로 만들어지고,
+        //    무엇보다 `.cw-list` 가 스크롤 컨테이너라 자리가 맨 위로 튄다.
+        scheduleRerender();
         return;
       }
 
@@ -1004,7 +1018,7 @@ export function createCharacterPanel({
       event.preventDefault();
       const character = (lastState?.characters || [])[Number(item.dataset.cwLi)];
       const uuid = String(character?.slot_uuid || '');
-      if (uuid) { openHistory.add(uuid); groupPickerUuid = uuid; rerender(); }
+      if (uuid) { openOnly(uuid); groupPickerUuid = uuid; scheduleRerender(); }
     });
   }
 
@@ -1034,7 +1048,14 @@ export function createCharacterPanel({
     const parsed = document.createElement('div');
     parsed.innerHTML = html;
     const nextList = parsed.querySelector('.cw-list');
-    if (nextList) list.innerHTML = nextList.innerHTML;
+    if (!nextList) return;
+    // ⚠️ `.cw-list` 가 **스크롤 컨테이너**다(overflow-y: auto). innerHTML 을 갈아
+    //    끼우면 브라우저가 scrollTop 을 0 으로 되돌린다 - 목록을 한참 내려간 뒤
+    //    항목 하나를 눌렀는데 맨 위로 튀었다(사용자 제보 2026-09-02).
+    //    내용이 줄어들면 브라우저가 알아서 clamp 하므로 그대로 되돌려 주면 된다.
+    const keep = list.scrollTop;
+    list.innerHTML = nextList.innerHTML;
+    if (keep) list.scrollTop = keep;
   }
 
   // 다른 창(예: Image Tagger 결과)이 '어느 캐릭터에 넣을까' 를 물으려면

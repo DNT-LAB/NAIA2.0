@@ -13802,6 +13802,11 @@ body.detached-metadata .metadata-layout {
 .cw-grp { display: flex; flex-direction: column; gap: 4px; }
 .cw-grp-row { display: flex; align-items: center; gap: 6px; }
 .cw-grp-caret { flex: none; width: 10px; font-size: 9px; color: var(--text-dim); }
+/* 끌어 놓기 - 끌리는 항목은 흐려지고, 놓을 수 있는 그룹 행은 점선, 위에 있으면 밝아진다. */
+.cw-li.is-dragging { opacity: 0.45; }
+.cw-li-row[draggable="true"] { cursor: grab; }
+.cw-grp-row.is-dropzone .cw-grp-open { border-style: dashed; }
+.cw-grp-row.is-drop .cw-grp-open { border-color: var(--accent); background: rgba(124,106,239,0.22); border-style: solid; }
 .cw-grp.is-open .cw-grp-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
 /* 펼친 그룹 안 - 히스토리 항목이 그대로 들어온다. 살짝 들여 써서 소속을 보인다. */
 .cw-grp-items { display: flex; flex-direction: column; gap: 6px; padding: 0 0 4px 16px; }

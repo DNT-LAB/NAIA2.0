@@ -60,6 +60,10 @@ export function createCharacterPanel({
   let groupPickerUuid = '';
   // 그룹 탭에서 펼쳐 둔 그룹. 키는 그룹 이름, 즐겨찾기는 '★', 그룹 없음은 ''.
   const openGroups = new Set();
+  // 드래그 규약은 interactiveScenePanel 과 같다: 우리 자료형 하나로 **우리 것만** 받고,
+  // 끌기 도중 다시 그려져 원본이 사라지면 `dragend` 가 오지 않으므로 표를 직접 버린다.
+  const DND_MIME = 'application/x-naia-charslot';
+  let dragUuid = '';
 
   /** 그룹 목록은 **서버가 SSOT** 다(빈 그룹도 있어야 하므로 프레임에서 뽑지 않는다). */
   function groupsOf(state) {
@@ -67,6 +71,21 @@ export function createCharacterPanel({
     return [...new Set(list)];
   }
 
+
+  /** 우리 자료형을 든 끌기가 그룹 행 위에 있을 때만 그 행. 파일·남의 글은 무시한다. */
+  function dropTarget(event) {
+    const el = event.target && event.target.closest ? event.target.closest('[data-cw-drop]') : null;
+    if (!el) return null;
+    const types = (event.dataTransfer && event.dataTransfer.types) || [];
+    const mine = types.includes ? types.includes(DND_MIME)
+      : Array.prototype.indexOf.call(types, DND_MIME) >= 0;
+    return mine ? el : null;
+  }
+  function clearDrag() {
+    dragUuid = '';
+    moduleBody.querySelectorAll('.is-dragging, .is-drop, .is-dropzone')
+      .forEach(el => el.classList.remove('is-dragging', 'is-drop', 'is-dropzone'));
+  }
 
   /** 이 패널은 showToast 를 주입받지 않는다 - 전역이 있으면 쓴다. */
   function showToastSafe(message) {
@@ -285,8 +304,9 @@ export function createCharacterPanel({
     const open = openHistory.has(uuid);
     return `
     <div class="cw-li${open ? ' is-open' : ''}" data-cw-li="${index}">
-      <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}"
-        title="누르면 프롬프트를 펼친다">
+      <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}" draggable="true"
+        data-cw-drag="${index}" data-cw-drag-uuid="${escAttr(uuid)}"
+        title="누르면 프롬프트를 펼친다 · 끌어서 그룹 행에 놓으면 옮겨진다">
         <!-- 왼쪽 끝 = 복원(사용자 지정 2026-09-02). 슬롯 맨 아래로 간다. -->
         <button type="button" class="cw-li-btn" data-cw-load="${index}"
           title="슬롯으로 복원">↩</button>
@@ -371,7 +391,7 @@ export function createCharacterPanel({
       const open = openGroups.has(key);
       return `
       <div class="cw-grp${pinned ? ' is-pinned' : ''}${open ? ' is-open' : ''}">
-        <div class="cw-grp-row">
+        <div class="cw-grp-row" data-cw-drop="${escAttr(key)}">
           <button type="button" class="cw-grp-open" data-cw-toggle-group="${escAttr(key)}"
             title="${open ? '접는다' : '펼친다'}">
             <span class="cw-grp-caret">${open ? '▾' : '▸'}</span>
@@ -484,6 +504,7 @@ export function createCharacterPanel({
     });
     bindEvents();
     lastRenderedStructureSignature = structureSignature;
+    if (dragUuid && !moduleBody.querySelector(`[data-cw-drag-uuid="${dragUuid.replace(/"/g, '')}"]`)) clearDrag();
     // '즉시 생성' 의 두 번째 박자 - 복원이 반영됐으면 그때 쏜다.
     if (pendingGenerateUuid) {
       const landed = chars.find(item => String(item.slot_uuid || '') === pendingGenerateUuid);
@@ -612,6 +633,49 @@ export function createCharacterPanel({
       if (hit('[data-cw-refresh]')) { refreshPreview(); return; }
       if (hit('[data-cw-assets]')) { window.openCharacterAssetTab?.(); return; }
       if (hit('[data-cw-search-tab]')) window.openCharacterViewerTab?.();
+    });
+
+    root.addEventListener('dragstart', event => {
+      const row = event.target && event.target.closest ? event.target.closest('[data-cw-drag]') : null;
+      if (!row) return;
+      dragUuid = row.dataset.cwDragUuid || '';
+      try {
+        event.dataTransfer.setData(DND_MIME, row.dataset.cwDrag);
+        // 일부 브라우저는 표준 자료형이 하나도 없으면 끌기를 취소한다.
+        event.dataTransfer.setData('text/plain', row.dataset.cwDrag);
+        event.dataTransfer.effectAllowed = 'move';
+      } catch (_) { /* 무시 */ }
+      row.closest('.cw-li')?.classList.add('is-dragging');
+      moduleBody.querySelectorAll('[data-cw-drop]').forEach(el => el.classList.add('is-dropzone'));
+    });
+    root.addEventListener('dragend', () => clearDrag());
+    root.addEventListener('dragover', event => {
+      const target = dropTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (!target.classList.contains('is-drop')) {
+        moduleBody.querySelectorAll('.is-drop').forEach(el => el.classList.remove('is-drop'));
+        target.classList.add('is-drop');
+      }
+    });
+    root.addEventListener('dragleave', event => {
+      const target = event.target && event.target.closest ? event.target.closest('[data-cw-drop]') : null;
+      if (target && !target.contains(event.relatedTarget)) target.classList.remove('is-drop');
+    });
+    root.addEventListener('drop', event => {
+      const target = dropTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      let raw = '';
+      try { raw = event.dataTransfer.getData(DND_MIME); } catch (_) { raw = ''; }
+      const index = Number(raw);
+      const key = target.dataset.cwDrop;
+      clearDrag();
+      if (!Number.isFinite(index)) return;
+      // ★ 행은 그룹이 아니라 플래그다 - 즐겨찾기를 켠다. 나머지는 그룹 이름('' = 해제).
+      if (key === '★') setModuleParam('character', `char_favorite_${index}`, 'true');
+      else setModuleParam('character', `char_group_${index}`, key);
     });
 
     root.addEventListener('keydown', event => {

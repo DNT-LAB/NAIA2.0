@@ -9668,6 +9668,16 @@ body.resizing-result-info {
 .pvw-side:hover { border-color: var(--accent); color: var(--text-primary); }
 .pvw-side:disabled { opacity: 0.5; cursor: default; }
 .pvw-close:hover { border-color: rgba(224,108,117,0.6); color: #ffb0b0; }
+/* 머리줄의 닫기. 관례대로 오른쪽 끝의 [X] 다 - 아래 [Close] 와 같은 일을 한다. */
+.pvw-x {
+  flex: none; width: 20px; height: 20px;   /* .pvw-meta 가 flex:1 로 밀어 준다 */
+  border: 1px solid var(--border-dim); border-radius: 4px;
+  background: rgba(0,0,0,0.26); color: var(--text-dim);
+  font-size: 11px; line-height: 1; cursor: pointer;
+}
+.pvw-x:hover { border-color: rgba(224,108,117,0.6); color: #ffb0b0; }
+/* 캐릭터 테스트 생성 결과에는 [Save]·[Generate] 가 없다 - 남은 [Close] 가 줄을 채운다. */
+.pvw-window.is-character .pvw-close { flex: 1 1 auto; font-size: 12px; }
 /* V4.5 프리뷰 설정 패널(사용자 SPEC 2026-09-01).
    ⚠️ 새 팝업은 Memo·Tagger 계열을 따른다 - 높이 22px · 글자 10px · 라운드 5px
       ([[feedback_popup_compact_style]]). 설정 항목이 많아 좁고 길게 간다.

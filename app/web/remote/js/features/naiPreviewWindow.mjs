@@ -31,6 +31,9 @@ export function createNaiPreviewWindow({
       <div class="pvw-head">
         <span class="pvw-title" id="preview45WindowTitle">V4.5 PREVIEW</span>
         <span class="pvw-meta" id="preview45WindowMeta"></span>
+        <!-- 창을 닫는 길은 **위아래 둘**이다(사용자 지정 2026-09-02). 위는 관례대로 [X]. -->
+        <button type="button" class="pvw-x" data-pvw="close"
+          title="닫는다 (Esc)">✕</button>
       </div>
       <div class="pvw-stage"><img class="pvw-img" id="preview45Image" alt=""></div>
       <div class="pvw-actions">
@@ -112,8 +115,14 @@ export function createNaiPreviewWindow({
     // ⚠️ 캐릭터 테스트 생성 결과는 **이미 저장됐다**(Results 에 있다) - [Save] 는
     //    뜻이 없어 감춘다. 프리뷰의 그림만 저장 안 된 것이다.
     const character = String(message?.kind || '') === 'character';
+    // ⚠️ [Generate] 도 감춘다(사용자 지정 2026-09-02: "Generate 버튼이 거기에
+    //    달려있을 필요는 없어 보이고, 상하 Close 버튼만 있으면 충분"). 이 창은
+    //    이미 나간 결과를 보여 줄 뿐이고, 다시 뽑는 것은 슬롯의 [▶] 가 한다.
+    //    V4.5 프리뷰에는 그대로 남는다 - 거기서는 다시 뽑는 것이 창의 쓰임새다.
     const saveBtn = root.querySelector('[data-pvw="save"]');
     if (saveBtn) saveBtn.hidden = character;
+    const genBtn = root.querySelector('[data-pvw="generate"]');
+    if (genBtn) genBtn.hidden = character;
     root.classList.toggle('is-character', character);
     const bytes = atob(String(message.image || ''));
     const buffer = new Uint8Array(bytes.length);

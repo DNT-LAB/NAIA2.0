@@ -60,7 +60,8 @@ export function createCharacterPanel({
   let pendingGenerateUuid = '';
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
-  // 그룹 탭의 검색어. 그룹 **이름**만 거른다(안의 캐릭터는 히스토리 검색이 찾는다).
+  // 그룹 탭의 검색어. **그룹 안의 항목**을 찾는다(사용자 지정 2026-09-02) - 그룹
+  // 이름을 찾는 것이 아니다. 이름은 눈에 다 보이지만 안에 무엇이 들었는지는 안 보인다.
   let groupQuery = '';
   // 그룹 탭에서 펼쳐 둔 그룹. 키는 `g:이름` · 즐겨찾기 `fav` · 그룹 없음 `none`.
   const openGroups = new Set();
@@ -429,12 +430,20 @@ export function createCharacterPanel({
     // 최근에 쓴 것이 위 - 히스토리 탭과 같은 순서.
     const ordered = [...storedSlots]
       .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0));
-    const members = key => ordered.filter(({character}) => groupOf(character) === grpName(key));
+    const needle = groupQuery.trim().toLowerCase();
+    const hit = character => !needle ||
+      [character.prompt, character.uc, character.custom_name]
+        .join(' ').toLowerCase().includes(needle);
+    const members = key => ordered.filter(({character}) =>
+      groupOf(character) === grpName(key) && hit(character));
     // ⚠️ 누르면 **그 자리에서 펼친다**(사용자 지정 2026-09-02: 탭을 옮기는 것은
     //    싫다). 펼친 안쪽은 히스토리 탭과 같은 항목이라 복원·삭제·펼침이 그대로 된다.
     const row = (key, label, {pinned = false, deletable = true} = {}) => {
       const items = members(key);
-      const open = openGroups.has(key);
+      // ⚠️ 검색 중에는 **맞는 것이 든 그룹만** 보이고 자동으로 펼친다 - 접힌 채
+      //    개수만 바뀌면 어디에 있는지 알 수 없어 한 번 더 눌러야 한다.
+      if (needle && !items.length) return '';
+      const open = needle ? true : openGroups.has(key);
       return `
       <div class="cw-grp${pinned ? ' is-pinned' : ''}${open ? ' is-open' : ''}">
         <div class="cw-grp-row" data-cw-drop="${escAttr(key)}">
@@ -455,19 +464,16 @@ export function createCharacterPanel({
     const rows = [
       // ⚠️ 즐겨찾기는 여기 없다 - **플래그이지 그룹이 아니다**(사용자 지정 2026-09-02).
       //    자기 탭에 있다.
-      ...groups.filter(name => !groupQuery.trim()
-          || name.toLowerCase().includes(groupQuery.trim().toLowerCase()))
-        .map(name => row(grpKey(name), name)),
+      ...groups.map(name => row(grpKey(name), name)),
       // 그룹 없음도 한 줄이다 - 안 그러면 34개가 어디 있는지 찾을 길이 없다.
-      ...(!groupQuery.trim() || '그룹 없음'.includes(groupQuery.trim())
-        ? [row(GRP_NONE, '그룹 없음', {deletable: false})] : []),
+      row(GRP_NONE, '그룹 없음', {deletable: false}),
     ].join('');
     return `
       <div class="cw-filters">
         <!-- ⚠️ 여기는 **검색**이다(사용자 지정 2026-09-02). 예전엔 새 그룹 이름을 받는
              칸이었는데, 그룹이 늘면 정작 찾을 길이 없었다. 만들기는 팝업이 받는다. -->
         <input class="cw-search" type="search" value="${escAttr(groupQuery)}"
-          placeholder="그룹 검색…" data-cw-group-search="1">
+          placeholder="그룹 안에서 검색…" data-cw-group-search="1">
         <button type="button" class="cw-chip is-go" data-cw-add-group="1">+ 만들기</button>
       </div>
       <div class="cw-list cw-list-groups">${rows}</div>`;
@@ -583,7 +589,9 @@ export function createCharacterPanel({
         return;
       }
       const groupSearch = event.target.closest('[data-cw-group-search]');
-      if (groupSearch) { groupQuery = groupSearch.value; rerender(); return; }
+      // ⚠️ 히스토리와 **같은 규약**이다(사용자 제보 2026-09-02: 한 글자마다 포커스가
+      //    빠졌다). `rerender()` 는 입력칸까지 새로 만들어 커서를 잃는다.
+      if (groupSearch) { groupQuery = groupSearch.value; scheduleRerender(); return; }
       const search = event.target.closest('[data-cw-search]');
       if (search) { query = search.value; scheduleRerender(); return; }
       const activated = event.target.closest('[data-cw-activated]');
@@ -768,13 +776,20 @@ export function createCharacterPanel({
   // ⚠️ 검색은 글자마다 다시 그리면 입력 칸이 갈리며 커서가 튄다. 목록만 갈아 끼운다.
   function scheduleRerender() {
     const list = moduleBody.querySelector('.cw-list');
-    // ⚠️ 그룹 탭은 펼친 그룹 안에 항목을 그리므로 목록만 갈아 끼우면 안 된다.
-    if (!list || (tab !== 'history' && tab !== 'favourites')) { rerender(); return; }
+    // ⚠️ 그룹 탭도 여기로 온다. 펼친 그룹 안의 항목은 `.cw-grp-items` 안에 있고 그것은
+    //    다시 `.cw-list` 안이라, 목록만 갈아 끼워도 전부 갱신된다. 전체를 다시 그리면
+    //    검색 입력칸이 새로 만들어져 **한 글자마다 커서를 잃는다**(사용자 제보).
+    if (!list || (tab !== 'history' && tab !== 'favourites' && tab !== 'groups')) {
+      rerender();
+      return;
+    }
     const chars = lastState?.characters || [];
     const indexed = chars.map((character, index) => ({character, index}));
     const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');
     const groups = groupsOf(lastState);
-    const html = renderHistory(storedSlots, groups, tab === 'favourites');
+    const html = tab === 'groups'
+      ? renderGroups(storedSlots, groups)
+      : renderHistory(storedSlots, groups, tab === 'favourites');
     const parsed = document.createElement('div');
     parsed.innerHTML = html;
     const nextList = parsed.querySelector('.cw-list');

@@ -13791,7 +13791,12 @@ body.detached-metadata .metadata-layout {
 .cw-li-actions { display: flex; gap: 5px; }
 /* 그룹 탭 한 줄 - 이름·개수·삭제. 즐겨찾기는 맨 위 고정(사용자 지정). */
 .cw-list-groups { grid-template-columns: 1fr; }
-.cw-grp { display: flex; align-items: center; gap: 6px; }
+.cw-grp { display: flex; flex-direction: column; gap: 4px; }
+.cw-grp-row { display: flex; align-items: center; gap: 6px; }
+.cw-grp-caret { flex: none; width: 10px; font-size: 9px; color: var(--text-dim); }
+.cw-grp.is-open .cw-grp-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
+/* 펼친 그룹 안 - 히스토리 항목이 그대로 들어온다. 살짝 들여 써서 소속을 보인다. */
+.cw-grp-items { display: flex; flex-direction: column; gap: 6px; padding: 0 0 4px 16px; }
 .cw-grp.is-pinned { margin-bottom: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--border-dim); }
 .cw-grp-open {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;

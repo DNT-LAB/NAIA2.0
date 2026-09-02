@@ -58,6 +58,8 @@ export function createCharacterPanel({
   let pendingGenerateUuid = '';
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
+  // 그룹 탭에서 펼쳐 둔 그룹. 키는 그룹 이름, 즐겨찾기는 '★', 그룹 없음은 ''.
+  const openGroups = new Set();
 
   /** 그룹 목록은 **서버가 SSOT** 다(빈 그룹도 있어야 하므로 프레임에서 뽑지 않는다). */
   function groupsOf(state) {
@@ -115,6 +117,7 @@ export function createCharacterPanel({
       tab, query, favouritesOnly ? 1 : 0, groupFilter,
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
+      [...openGroups].sort().join(','),
       chars.length,
       chars.map(item => [
         item.slot_uuid, slotState(item), item.muted ? 1 : 0,
@@ -276,6 +279,50 @@ export function createCharacterPanel({
       .join(' ').toLowerCase().includes(needle);
   }
 
+  /** 히스토리 한 항목. 히스토리 탭과 그룹 탭(펼친 그룹 안)이 **같은 것**을 그린다. */
+  function renderHistoryItem(character, index, groups) {
+    const uuid = String(character.slot_uuid || '');
+    const open = openHistory.has(uuid);
+    return `
+    <div class="cw-li${open ? ' is-open' : ''}" data-cw-li="${index}">
+      <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}"
+        title="누르면 프롬프트를 펼친다">
+        <!-- 왼쪽 끝 = 복원(사용자 지정 2026-09-02). 슬롯 맨 아래로 간다. -->
+        <button type="button" class="cw-li-btn" data-cw-load="${index}"
+          title="슬롯으로 복원">↩</button>
+        <!-- ⚠️ 즐겨찾기는 이제 **표시**다(조작은 펼친 뒤에 있다) - 안 보이면
+             위의 ★ 필터가 무엇을 거르는지 알 수 없다. -->
+      <span class="cw-li-text">${character.favorite ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(slotLabel(character, {full: true}))}</span>
+        ${groupOf(character)
+          ? `<span class="cw-li-group">${escHtml(groupOf(character))}</span>`
+          : ''}
+        <!-- 오른쪽 끝 = 삭제(사용자 지정). 여기가 **영영 지우는 유일한 길**이다 -
+             슬롯의 ✕ 는 히스토리로 보낼 뿐이다. -->
+        <button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"
+          title="영구 삭제">✕</button>
+      </div>
+      ${open ? `
+      <div class="cw-li-body">
+        <div class="cw-li-field">${escHtml(character.prompt || '(비어 있음)')}</div>
+        <div class="cw-li-field is-uc">${escHtml(character.uc || '(네거티브 없음)')}</div>
+        ${groupPickerUuid === uuid ? `
+        <div class="cw-li-picker">
+          ${groups.map(name => `<button type="button" class="cw-chip${groupOf(character) === name ? ' is-on' : ''}"
+            data-cw-pick-group="${index}" data-cw-group-name="${escAttr(name)}">${escHtml(name)}</button>`).join('')}
+          <button type="button" class="cw-chip" data-cw-pick-group="${index}" data-cw-group-name="">그룹 해제</button>
+          <button type="button" class="cw-chip is-go" data-cw-new-group-for="${index}">+ 새 그룹</button>
+        </div>` : ''}
+        <div class="cw-li-actions">
+          <button type="button" class="cw-li-act${groupPickerUuid === uuid ? ' is-on' : ''}" data-cw-editgroup="${index}"
+            data-cw-uuid="${escAttr(uuid)}">그룹에 전달</button>
+          <button type="button" class="cw-li-act${character.favorite ? ' is-on' : ''}"
+            data-cw-fav="${index}">${character.favorite ? '즐겨찾기 해제' : '즐겨찾기 등록'}</button>
+          <button type="button" class="cw-li-act is-go" data-cw-gen="${index}">즉시 생성</button>
+        </div>
+      </div>` : ''}
+    </div>`;
+  }
+
   function renderHistory(storedSlots, groups) {
     // ⚠️ 히스토리는 **최근에 쓴 것이 위**다. 백엔드 배열 순서는 저장 순서라
     //    그대로 두면 오래된 것이 위에 남는다(index 주소는 건드리지 않는다 -
@@ -289,48 +336,7 @@ export function createCharacterPanel({
       `<button type="button" class="cw-chip${groupFilter === name ? ' is-on' : ''}"
         data-cw-group-filter="${escAttr(name)}">${escHtml(name)}</button>`).join('');
     const list = rows.length
-      ? rows.map(({character, index}) => {
-          const uuid = String(character.slot_uuid || '');
-          const open = openHistory.has(uuid);
-          return `
-          <div class="cw-li${open ? ' is-open' : ''}" data-cw-li="${index}">
-            <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}"
-              title="누르면 프롬프트를 펼친다">
-              <!-- 왼쪽 끝 = 복원(사용자 지정 2026-09-02). 슬롯 맨 아래로 간다. -->
-              <button type="button" class="cw-li-btn" data-cw-load="${index}"
-                title="슬롯으로 복원">↩</button>
-              <!-- ⚠️ 즐겨찾기는 이제 **표시**다(조작은 펼친 뒤에 있다) - 안 보이면
-                   위의 ★ 필터가 무엇을 거르는지 알 수 없다. -->
-            <span class="cw-li-text">${character.favorite ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(slotLabel(character, {full: true}))}</span>
-              ${groupOf(character)
-                ? `<span class="cw-li-group">${escHtml(groupOf(character))}</span>`
-                : ''}
-              <!-- 오른쪽 끝 = 삭제(사용자 지정). 여기가 **영영 지우는 유일한 길**이다 -
-                   슬롯의 ✕ 는 히스토리로 보낼 뿐이다. -->
-              <button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"
-                title="영구 삭제">✕</button>
-            </div>
-            ${open ? `
-            <div class="cw-li-body">
-              <div class="cw-li-field">${escHtml(character.prompt || '(비어 있음)')}</div>
-              <div class="cw-li-field is-uc">${escHtml(character.uc || '(네거티브 없음)')}</div>
-              ${groupPickerUuid === uuid ? `
-              <div class="cw-li-picker">
-                ${groups.map(name => `<button type="button" class="cw-chip${groupOf(character) === name ? ' is-on' : ''}"
-                  data-cw-pick-group="${index}" data-cw-group-name="${escAttr(name)}">${escHtml(name)}</button>`).join('')}
-                <button type="button" class="cw-chip" data-cw-pick-group="${index}" data-cw-group-name="">그룹 해제</button>
-                <button type="button" class="cw-chip is-go" data-cw-new-group-for="${index}">+ 새 그룹</button>
-              </div>` : ''}
-              <div class="cw-li-actions">
-                <button type="button" class="cw-li-act${groupPickerUuid === uuid ? ' is-on' : ''}" data-cw-editgroup="${index}"
-                  data-cw-uuid="${escAttr(uuid)}">그룹에 전달</button>
-                <button type="button" class="cw-li-act${character.favorite ? ' is-on' : ''}"
-                  data-cw-fav="${index}">${character.favorite ? '즐겨찾기 해제' : '즐겨찾기 등록'}</button>
-                <button type="button" class="cw-li-act is-go" data-cw-gen="${index}">즉시 생성</button>
-              </div>
-            </div>` : ''}
-          </div>`;
-        }).join('')
+      ? rows.map(({character, index}) => renderHistoryItem(character, index, groups)).join('')
       : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ✕ 로 지우면 여기에 쌓입니다 (최대 500개).'}</div>`;
     return `
       <div class="cw-filters">
@@ -353,40 +359,46 @@ export function createCharacterPanel({
    *    생기고, 그 뒤로는 다른 그룹과 똑같다 - 지우면 사라진다(사용자 지적 2026-09-02).
    */
   function renderGroups(storedSlots, groups) {
-    const counts = new Map();
-    let favCount = 0;
-    let noGroup = 0;
-    storedSlots.forEach(({character}) => {
-      if (character.favorite) favCount += 1;
-      const name = groupOf(character);
-      if (name) counts.set(name, (counts.get(name) || 0) + 1);
-      else noGroup += 1;
-    });
-    const row = (name, count, {pinned = false, deletable = true, fav = false} = {}) => `
-      <div class="cw-grp${pinned ? ' is-pinned' : ''}">
-        <button type="button" class="cw-grp-open" ${fav ? 'data-cw-open-fav="1"' : `data-cw-open-group="${escAttr(name)}"`}
-          title="히스토리에서 이 그룹만 본다">
-          ${fav ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(name)}
-          <span class="cw-grp-count">${count}</span>
-        </button>
-        ${deletable ? `<button type="button" class="cw-li-btn is-danger" data-cw-remove-group="${escAttr(name)}"
-          title="그룹 삭제 (안의 캐릭터는 그룹 없음으로 남는다)">✕</button>` : ''}
+    // 최근에 쓴 것이 위 - 히스토리 탭과 같은 순서.
+    const ordered = [...storedSlots]
+      .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0));
+    const members = key => ordered.filter(({character}) =>
+      key === '★' ? !!character.favorite : groupOf(character) === key);
+    // ⚠️ 누르면 **그 자리에서 펼친다**(사용자 지정 2026-09-02: 탭을 옮기는 것은
+    //    싫다). 펼친 안쪽은 히스토리 탭과 같은 항목이라 복원·삭제·펼침이 그대로 된다.
+    const row = (key, label, {pinned = false, deletable = true, fav = false} = {}) => {
+      const items = members(key);
+      const open = openGroups.has(key);
+      return `
+      <div class="cw-grp${pinned ? ' is-pinned' : ''}${open ? ' is-open' : ''}">
+        <div class="cw-grp-row">
+          <button type="button" class="cw-grp-open" data-cw-toggle-group="${escAttr(key)}"
+            title="${open ? '접는다' : '펼친다'}">
+            <span class="cw-grp-caret">${open ? '▾' : '▸'}</span>
+            ${fav ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(label)}
+            <span class="cw-grp-count">${items.length}</span>
+          </button>
+          ${deletable ? `<button type="button" class="cw-li-btn is-danger" data-cw-remove-group="${escAttr(key)}"
+            title="그룹 삭제 (안의 캐릭터는 그룹 없음으로 남는다)">✕</button>` : ''}
+        </div>
+        ${open ? `<div class="cw-grp-items">${items.length
+          ? items.map(({character, index}) => renderHistoryItem(character, index, groups)).join('')
+          : '<div class="cw-empty">비어 있습니다.</div>'}</div>` : ''}
       </div>`;
+    };
     const rows = [
-      row('즐겨찾기', favCount, {pinned: true, deletable: false, fav: true}),
-      ...groups.map(name => row(name, counts.get(name) || 0)),
+      row('★', '즐겨찾기', {pinned: true, deletable: false, fav: true}),
+      ...groups.map(name => row(name, name)),
+      // 그룹 없음도 한 줄이다 - 안 그러면 34개가 어디 있는지 찾을 길이 없다.
+      row('', '그룹 없음', {deletable: false}),
     ].join('');
     return `
       <div class="cw-filters">
         <input class="cw-search" type="text" placeholder="새 그룹 이름…" data-cw-new-group="1">
         <button type="button" class="cw-chip is-go" data-cw-add-group="1">+ 만들기</button>
       </div>
-      <div class="cw-list cw-list-groups">
-        ${rows}
-        ${noGroup ? `<div class="cw-tool-note">그룹 없는 캐릭터 ${noGroup}개</div>` : ''}
-      </div>`;
+      <div class="cw-list cw-list-groups">${rows}</div>`;
   }
-
   function renderTools(state) {
     const preview = String(state.processed_preview_text || '');
     return `
@@ -553,9 +565,14 @@ export function createCharacterPanel({
       }
       const removeGroup = hit('[data-cw-remove-group]');
       if (removeGroup) { setModuleParam('character', 'remove_group', removeGroup.dataset.cwRemoveGroup); return; }
-      const openGroup = hit('[data-cw-open-group]');
-      if (openGroup) { groupFilter = openGroup.dataset.cwOpenGroup; favouritesOnly = false; tab = 'history'; rerender(); return; }
-      if (hit('[data-cw-open-fav]')) { favouritesOnly = true; groupFilter = ''; tab = 'history'; rerender(); return; }
+      const toggleGroup = hit('[data-cw-toggle-group]');
+      if (toggleGroup) {
+        const key = toggleGroup.dataset.cwToggleGroup;
+        if (openGroups.has(key)) openGroups.delete(key);
+        else openGroups.add(key);
+        rerender();
+        return;
+      }
       const load = hit('[data-cw-load]');
       if (load) { setSlotState(Number(load.dataset.cwLoad), 'active'); return; }
       const gen = hit('[data-cw-gen]');
@@ -627,7 +644,8 @@ export function createCharacterPanel({
   // ⚠️ 검색은 글자마다 다시 그리면 입력 칸이 갈리며 커서가 튄다. 목록만 갈아 끼운다.
   function scheduleRerender() {
     const list = moduleBody.querySelector('.cw-list');
-    if (!list) { rerender(); return; }
+    // ⚠️ 그룹 탭은 펼친 그룹 안에 항목을 그리므로 목록만 갈아 끼우면 안 된다.
+    if (!list || tab !== 'history') { rerender(); return; }
     const chars = lastState?.characters || [];
     const indexed = chars.map((character, index) => ({character, index}));
     const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');

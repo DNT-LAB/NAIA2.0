@@ -59,10 +59,17 @@ def default_character_settings() -> dict:
         "is_active": False,
         "reroll_on_generate": False,
         "character_frames": [],
+        # 사용자가 만든 그룹 이름들. 프레임에 붙은 그룹과 **합집합**으로 읽는다 -
+        # 빈 그룹(아직 아무도 안 넣은)을 만들 수 있어야 하므로 따로 든다.
+        "groups": [COLD_STORAGE_GROUP],
     }
 
 
-LEGACY_COLD_GROUP = "Cold"
+# Cold 는 **폐기된 상태**다(사용자 결정 2026-09-02). 남은 것은 그룹 이름 하나.
+# ⚠️ 옛 저장본의 `group: "Cold"` 도 이 이름으로 읽는다(`_default_group`).
+COLD_STORAGE_GROUP = "Cold Storage"
+LEGACY_COLD_GROUP = COLD_STORAGE_GROUP
+_OLD_COLD_NAME = "Cold"
 
 # 히스토리 상한 (사용자 지정 2026-09-01: "최대 500개까지 사용했던 캐릭터 슬롯을 누적").
 #
@@ -105,12 +112,36 @@ def trim_history(frames: list[dict]) -> list[dict]:
             if str(frame.get("slot_state") or "") == "active" or id(frame) in keep]
 
 
+def normalize_groups(stored: Any, frames: list[dict]) -> list[str]:
+    """그룹 목록 = 저장된 이름 ∪ 프레임에 붙은 이름. Cold Storage 는 항상 있다.
+
+    순서는 저장된 순서를 지키고(사용자가 만든 차례), 프레임에서만 발견된 것은 뒤에
+    붙인다. 옛 이름 "Cold" 는 Cold Storage 로 접는다.
+    """
+    seen: list[str] = []
+    def add(name: Any) -> None:
+        text = str(name or "").strip()
+        if text == _OLD_COLD_NAME:
+            text = COLD_STORAGE_GROUP
+        if text and text not in seen:
+            seen.append(text)
+    add(COLD_STORAGE_GROUP)
+    for name in (stored if isinstance(stored, list) else []):
+        add(name)
+    for frame in frames:
+        if isinstance(frame, dict):
+            add(frame.get("group"))
+    return seen
+
+
 def _default_group(frame: Any, slot_state: str) -> str:
     """그룹 이름. 비어 있는 옛 `cold` 슬롯만 "Cold" 로 읽어 준다(저장은 안 바꾼다)."""
     group = str(frame.get("group") or "").strip()
+    if group == _OLD_COLD_NAME:
+        return COLD_STORAGE_GROUP     # 어제 하루치 저장본의 옛 이름
     if group:
         return group
-    return LEGACY_COLD_GROUP if slot_state == "cold" else ""
+    return COLD_STORAGE_GROUP if slot_state == "cold" else ""
 
 
 def normalize_slot_state(value: Any, is_enabled: bool = False) -> str:
@@ -183,6 +214,7 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
     settings = default_character_settings()
     settings["is_active"] = bool(data.get("is_active", settings["is_active"]))
     settings["reroll_on_generate"] = bool(data.get("reroll_on_generate", settings["reroll_on_generate"]))
+    stored_groups = data.get("groups")
     frames = data.get("character_frames", [])
     normalized_frames = []
     migrated = False
@@ -252,6 +284,7 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
     settings["character_frames"] = _prune_character_links(
         sort_character_frames(trim_history(normalized_frames))
     )
+    settings["groups"] = normalize_groups(stored_groups, settings["character_frames"])
     # POS 는 세 상태다(사용자 지정 2026-08-23): AUTO -> CUSTOM -> RAND -> AUTO.
     #   · AUTO   - **AI's Choice**. 좌표를 안 보낸다(`use_coords:false`) - NAI 가
     #              캡션과 등장 순서(`use_order`)로 알아서 놓는다.
@@ -1736,6 +1769,9 @@ def character_state_from_settings(
         # 화면이 [+ Add] 를 잠그는 잣대. 백엔드가 SSOT 다 - 프런트가 자기 숫자를
         # 들고 있으면 둘이 어긋나 "눌리는데 안 늘어나는" 버튼이 된다.
         "max_slots": MAX_CHARACTER_SLOTS_HINT,
+        # 사용자가 만든 그룹(빈 것 포함). 화면의 그룹 탭·필터 칩·"그룹에 전달" 이 읽는다.
+        "groups": list(normalized.get("groups") or []),
+        "cold_storage_group": COLD_STORAGE_GROUP,
         "processed_characters": processed_characters,
         "processed_ucs": processed_ucs,
         "character_token_count": 0,

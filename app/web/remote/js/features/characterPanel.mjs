@@ -21,7 +21,7 @@
  *
  * ⚠️ Cold 는 **동작이 없는 세 번째 상태**였다(`is_enabled` 는 `active and not muted`
  *    뿐이라 inactive 와 하는 일이 같았다). 서랍을 파서 줄을 숨겼을 뿐이라 진짜 문제인
- *    줄 높이는 그대로였다. 이제 **그룹**으로 접는다 - 옛 `cold` 슬롯은 그룹 "Cold" 로
+ *    줄 높이는 그대로였다. 이제 **그룹**으로 접는다 - 옛 `cold` 슬롯은 그룹 "Cold Storage" 로
  *    읽힌다(저장은 안 바꾼다).
  */
 export function createCharacterPanel({
@@ -56,6 +56,17 @@ export function createCharacterPanel({
   // '즉시 생성' 은 복원이 서버에 반영된 **뒤에** 생성해야 한다 - 바로 부르면
   // 아직 활성이 아닌 상태로 나간다. 되돌아온 상태에서 활성이 된 것을 보고 쏜다.
   let pendingGenerateUuid = '';
+  // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
+  let groupPickerUuid = '';
+
+  /** 그룹 목록은 **서버가 SSOT** 다(빈 그룹도 있어야 하므로 프레임에서 뽑지 않는다). */
+  function groupsOf(state) {
+    const list = Array.isArray(state?.groups) ? state.groups.map(g => String(g || '').trim()).filter(Boolean) : [];
+    return [...new Set(list)];
+  }
+  function coldStorageName(state) {
+    return String(state?.cold_storage_group || 'Cold Storage');
+  }
 
   /** 이 패널은 showToast 를 주입받지 않는다 - 전역이 있으면 쓴다. */
   function showToastSafe(message) {
@@ -105,6 +116,7 @@ export function createCharacterPanel({
       state?.reroll_on_generate ? 1 : 0,
       tab, query, favouritesOnly ? 1 : 0, groupFilter,
       [...openHistory].sort().join(','),
+      groupsOf(state).join(','), groupPickerUuid,
       chars.length,
       chars.map(item => [
         item.slot_uuid, slotState(item), item.muted ? 1 : 0,
@@ -195,7 +207,7 @@ export function createCharacterPanel({
     if (!character || !showPromptDialog) return;
     const next = await showPromptDialog({
       title: '그룹',
-      message: '이 캐릭터를 어느 그룹에 둘까요? (비우면 그룹 없음)',
+      message: '새 그룹 이름을 적으면 만들어서 넣습니다.',
       value: groupOf(character),
     });
     if (next === null) return;
@@ -304,8 +316,16 @@ export function createCharacterPanel({
             <div class="cw-li-body">
               <div class="cw-li-field">${escHtml(character.prompt || '(비어 있음)')}</div>
               <div class="cw-li-field is-uc">${escHtml(character.uc || '(네거티브 없음)')}</div>
+              ${groupPickerUuid === uuid ? `
+              <div class="cw-li-picker">
+                ${groups.map(name => `<button type="button" class="cw-chip${groupOf(character) === name ? ' is-on' : ''}"
+                  data-cw-pick-group="${index}" data-cw-group-name="${escAttr(name)}">${escHtml(name)}</button>`).join('')}
+                <button type="button" class="cw-chip" data-cw-pick-group="${index}" data-cw-group-name="">그룹 해제</button>
+                <button type="button" class="cw-chip is-go" data-cw-new-group-for="${index}">+ 새 그룹</button>
+              </div>` : ''}
               <div class="cw-li-actions">
-                <button type="button" class="cw-li-act" data-cw-editgroup="${index}">그룹에 전달</button>
+                <button type="button" class="cw-li-act${groupPickerUuid === uuid ? ' is-on' : ''}" data-cw-editgroup="${index}"
+                  data-cw-uuid="${escAttr(uuid)}">그룹에 전달</button>
                 <button type="button" class="cw-li-act${character.favorite ? ' is-on' : ''}"
                   data-cw-fav="${index}">${character.favorite ? '즐겨찾기 해제' : '즐겨찾기 등록'}</button>
                 <button type="button" class="cw-li-act is-go" data-cw-gen="${index}">즉시 생성</button>
@@ -326,18 +346,48 @@ export function createCharacterPanel({
       <div class="cw-list">${list}</div>`;
   }
 
-  function renderGroups(storedSlots, groups) {
+  /**
+   * 그룹 탭 - 만들고, 지우고, 들여다본다(사용자 지정 2026-09-02).
+   *
+   * ⚠️ 즐겨찾기는 **그룹처럼** 보이되 항상 맨 위다(사용자 지정). 실제로는 플래그라
+   *    지울 수 없다 - 그래서 ✕ 가 없다.
+   * ⚠️ Cold 는 폐기된 상태다. 남은 것은 "Cold Storage" 라는 그룹 하나 - 다른 그룹과
+   *    같이 다루되, 비우기만 되고 사라지지는 않는다(백엔드가 항상 다시 넣는다).
+   */
+  function renderGroups(storedSlots, groups, state) {
     const counts = new Map();
+    let favCount = 0;
+    let noGroup = 0;
     storedSlots.forEach(({character}) => {
-      const name = groupOf(character) || '(그룹 없음)';
-      counts.set(name, (counts.get(name) || 0) + 1);
+      if (character.favorite) favCount += 1;
+      const name = groupOf(character);
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+      else noGroup += 1;
     });
-    const rows = [...counts.entries()].map(([name, count]) => `
-      <div class="cw-li">
-        <span class="cw-li-text">${escHtml(name)}</span>
-        <span class="cw-li-group">${count}</span>
-      </div>`).join('');
-    return `<div class="cw-list">${rows || '<div class="cw-empty">그룹이 없습니다.</div>'}</div>`;
+    const cold = coldStorageName(state);
+    const row = (name, count, {pinned = false, deletable = true, fav = false} = {}) => `
+      <div class="cw-grp${pinned ? ' is-pinned' : ''}">
+        <button type="button" class="cw-grp-open" ${fav ? 'data-cw-open-fav="1"' : `data-cw-open-group="${escAttr(name)}"`}
+          title="히스토리에서 이 그룹만 본다">
+          ${fav ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(name)}
+          <span class="cw-grp-count">${count}</span>
+        </button>
+        ${deletable ? `<button type="button" class="cw-li-btn is-danger" data-cw-remove-group="${escAttr(name)}"
+          title="그룹 삭제 (안의 캐릭터는 그룹 없음으로 남는다)">✕</button>` : ''}
+      </div>`;
+    const rows = [
+      row('즐겨찾기', favCount, {pinned: true, deletable: false, fav: true}),
+      ...groups.map(name => row(name, counts.get(name) || 0, {deletable: name !== cold})),
+    ].join('');
+    return `
+      <div class="cw-filters">
+        <input class="cw-search" type="text" placeholder="새 그룹 이름…" data-cw-new-group="1">
+        <button type="button" class="cw-chip is-go" data-cw-add-group="1">+ 만들기</button>
+      </div>
+      <div class="cw-list cw-list-groups">
+        ${rows}
+        ${noGroup ? `<div class="cw-tool-note">그룹 없는 캐릭터 ${noGroup}개</div>` : ''}
+      </div>`;
   }
 
   function renderTools(state) {
@@ -367,7 +417,7 @@ export function createCharacterPanel({
         data-cw-tab="${item.key}">${item.label}</button>`).join('');
     let body;
     if (tab === 'history') body = renderHistory(storedSlots, groups);
-    else if (tab === 'groups') body = renderGroups(storedSlots, groups);
+    else if (tab === 'groups') body = renderGroups(storedSlots, groups, state);
     else if (tab === 'tools') body = renderTools(state);
     else if (tab === 'assets') {
       // ⚠️ 기존 에셋 기능을 **옮기지 않는다**(사용자 지정: "기존 기능 제거는 아님").
@@ -401,7 +451,7 @@ export function createCharacterPanel({
     //    다시 만들지 않는다 - 만들면 index 주소가 저장 순서와 어긋난다.
     const activeSlots = indexed.filter(item => slotState(item.character) === 'active');
     const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');
-    const groups = [...new Set(storedSlots.map(item => groupOf(item.character)).filter(Boolean))].sort();
+    const groups = groupsOf(nextState);
 
     moduleBody.innerHTML = `
       <div class="mod-character-shell">
@@ -480,8 +530,35 @@ export function createCharacterPanel({
       }
       const down = hit('[data-cw-down]');
       if (down) { setSlotState(Number(down.dataset.cwDown), 'inactive'); return; }
+      const pick = hit('[data-cw-pick-group]');
+      if (pick) {
+        setModuleParam('character', `char_group_${Number(pick.dataset.cwPickGroup)}`, pick.dataset.cwGroupName || '');
+        groupPickerUuid = '';
+        return;
+      }
+      const newFor = hit('[data-cw-new-group-for]');
+      if (newFor) { void editGroup(Number(newFor.dataset.cwNewGroupFor)); groupPickerUuid = ''; return; }
       const group = hit('[data-cw-editgroup]');
-      if (group) { void editGroup(Number(group.dataset.cwEditgroup)); return; }
+      if (group) {
+        // 그룹 목록에서 고른다 - 이름을 매번 치게 하지 않는다(사용자 지정: "편히").
+        const uuid = group.dataset.cwUuid || '';
+        groupPickerUuid = groupPickerUuid === uuid ? '' : uuid;
+        rerender();
+        return;
+      }
+      if (hit('[data-cw-add-group]')) {
+        const input = moduleBody.querySelector('[data-cw-new-group]');
+        const name = String(input?.value || '').trim();
+        if (!name) { showToastSafe('그룹 이름을 적어 주세요.'); return; }
+        setModuleParam('character', 'add_group', name);
+        if (input) input.value = '';
+        return;
+      }
+      const removeGroup = hit('[data-cw-remove-group]');
+      if (removeGroup) { setModuleParam('character', 'remove_group', removeGroup.dataset.cwRemoveGroup); return; }
+      const openGroup = hit('[data-cw-open-group]');
+      if (openGroup) { groupFilter = openGroup.dataset.cwOpenGroup; favouritesOnly = false; tab = 'history'; rerender(); return; }
+      if (hit('[data-cw-open-fav]')) { favouritesOnly = true; groupFilter = ''; tab = 'history'; rerender(); return; }
       const load = hit('[data-cw-load]');
       if (load) { setSlotState(Number(load.dataset.cwLoad), 'active'); return; }
       const gen = hit('[data-cw-gen]');
@@ -523,6 +600,14 @@ export function createCharacterPanel({
       if (hit('[data-cw-search-tab]')) window.openCharacterViewerTab?.();
     });
 
+    root.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      const input = event.target.closest('[data-cw-new-group]');
+      if (!input) return;
+      event.preventDefault();
+      moduleBody.querySelector('[data-cw-add-group]')?.click();
+    });
+
     root.addEventListener('contextmenu', event => {
       // ⚠️ 슬롯 행에서는 아무것도 가로채지 않는다 - 이름 조작이 히스토리로 갔고,
       //    프롬프트 칸에서 우클릭하면 붙여넣기 같은 기본 메뉴가 떠야 한다.
@@ -530,7 +615,9 @@ export function createCharacterPanel({
       const item = event.target.closest('[data-cw-li]');
       if (!item) return;
       event.preventDefault();
-      void editGroup(Number(item.dataset.cwLi));
+      const character = (lastState?.characters || [])[Number(item.dataset.cwLi)];
+      const uuid = String(character?.slot_uuid || '');
+      if (uuid) { openHistory.add(uuid); groupPickerUuid = uuid; rerender(); }
     });
   }
 
@@ -547,7 +634,7 @@ export function createCharacterPanel({
     const chars = lastState?.characters || [];
     const indexed = chars.map((character, index) => ({character, index}));
     const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');
-    const groups = [...new Set(storedSlots.map(item => groupOf(item.character)).filter(Boolean))].sort();
+    const groups = groupsOf(lastState);
     const html = renderHistory(storedSlots, groups);
     const parsed = document.createElement('div');
     parsed.innerHTML = html;

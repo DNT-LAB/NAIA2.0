@@ -568,6 +568,25 @@ class HeadlessCharacterService:
                 frame["favorite"] = context._coerce_bool(value)
                 # ⚠️ 스냅샷을 무효화하지 **않는다** - 즐겨찾기는 프롬프트를 안 바꾼다.
                 #    무효화하면 별 하나 눌렀다고 굴린 캐릭터가 다시 굴러 버린다.
+        elif key == "add_group":
+            from core.character_settings import normalize_groups
+
+            name = str(value or "").strip()
+            if name:
+                settings["groups"] = normalize_groups([*(settings.get("groups") or []), name], frames)
+        elif key == "remove_group":
+            from core.character_settings import COLD_STORAGE_GROUP, normalize_groups
+
+            name = str(value or "").strip()
+            # 그룹을 지우면 안에 든 캐릭터는 **그룹 없음**으로 남는다 - 캐릭터를 지우지 않는다.
+            for frame in frames:
+                if isinstance(frame, dict) and str(frame.get("group") or "").strip() == name:
+                    frame["group"] = ""
+            settings["groups"] = normalize_groups(
+                [g for g in (settings.get("groups") or []) if str(g).strip() != name], frames)
+            if name == COLD_STORAGE_GROUP:
+                # Cold Storage 는 항상 있다(normalize 가 다시 넣는다) - 비우기만 된다.
+                pass
         elif key.startswith("char_group_"):
             index = context._index_from_key(key, "char_group_")
             if index is not None:

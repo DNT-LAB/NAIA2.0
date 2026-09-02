@@ -13895,6 +13895,68 @@ body.detached-metadata .metadata-layout {
       공중에서는 무너진다. 브라우저가 어차피 반투명을 한 겹 입히므로 그 상태에서
       읽히도록 밝은 테두리를 준다.
    ⚠️ 화면 밖 좌표로 숨긴다 - display:none 이면 **빈 그림**이 된다. */
+/* ── 에셋 탭 (사용자 지정 2026-09-02: 상하 절반) ─────────────────────────
+   위: 캐릭터 고르기 / 아래: 프롬프트·변형·담기.
+   ⚠️ 스플리터는 만들지 않는다 - 이 팝업 규약("안 쓸 땐 칩으로 접는다")에 이미 더
+      싼 답이 있다. 고른 것이 없으면 아래가 22px 로 접힌다. */
+.cw-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cw-pane-top { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 8px 10px; }
+.cw-pane-bot { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  border-top: 1px solid var(--border-dim); padding: 6px 10px 8px; }
+/* 고른 것이 없으면 한 줄로 접힌다 - 위가 전부 차지한다. */
+.cw-pane-bot.is-folded { flex: 0 0 22px; overflow: hidden; padding: 0 10px;
+  display: flex; align-items: center; }
+.cw-pane-count { flex: none; padding: 3px 10px; text-align: right;
+  font-family: var(--font-mono, monospace); font-size: 9px; color: var(--text-dim);
+  border-top: 1px solid var(--border-dim); }
+/* ⚠️ `minmax(min(72px,100%),1fr)` - 좁은 창에서 열 최소치가 컨테이너를 넘으면
+      가로 스크롤이 생긴다(`.cw-list` 가 같은 이유로 이미 그렇게 쓴다). */
+.cw-tiles { display: grid; gap: 5px; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(72px, 100%), 1fr));
+  grid-auto-rows: max-content; }
+.cw-tile { position: relative; display: block; padding: 0; overflow: hidden;
+  border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(0,0,0,0.26); cursor: pointer; }
+.cw-tile:hover { border-color: var(--accent); }
+.cw-tile.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+/* 얼굴은 위 20~35% 에 있다. 4:7 원본대로 두면 한 화면에 두세 줄뿐이라 4:5 로 자른다
+   (Interactive 가 검증한 `center 33%` 와 같은 계열). */
+.cw-tile-img { display: block; width: 100%; aspect-ratio: 4 / 5;
+  object-fit: cover; object-position: center 20%; }
+.cw-tile-name { display: block; padding: 2px 4px; font-size: 9.5px; line-height: 1.2;
+  color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-tile.is-on .cw-tile-name { color: var(--text-primary); }
+.cw-tile-badge { position: absolute; top: 3px; right: 3px; padding: 0 4px;
+  border-radius: 4px; background: rgba(0,0,0,0.66); color: #cfc8ff;
+  font-family: var(--font-mono, monospace); font-size: 9px; }
+.cw-detail-hint { font-size: 10px; color: var(--text-dim); }
+.cw-detail-head { display: flex; align-items: center; gap: 6px; height: 22px; }
+.cw-detail-name { font-size: 11px; font-weight: 600; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-detail-id { font-family: var(--font-mono, monospace); font-size: 9px; color: var(--text-dim); }
+.cw-detail-body { display: flex; gap: 8px; margin-top: 6px; align-items: flex-start; }
+.cw-detail-left { flex: 0 0 160px; min-width: 0; }
+/* ⚠️ 높이를 가둔다. 4:7 그림이 160px 폭이면 280px 가 되어 아래 칸을 혼자 채우고,
+   정작 읽어야 할 프롬프트가 옆에서 한 줄로 눌린다(실측). */
+.cw-detail-img { display: block; width: 100%; max-height: 200px; object-fit: contain;
+  object-position: top; border-radius: 5px; border: 1px solid var(--border-dim);
+  background: rgba(0,0,0,0.3); }
+/* ⚠️ 변형은 **줄바꿈**이다. 기존 에셋 탭은 가로 스크롤 스트립을 쓰는데, 여기서는
+      가로 스크롤이 금지다(사용자 지정). */
+.cw-detail-vars { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.cw-var { position: relative; width: 40px; height: 70px; padding: 0; overflow: hidden;
+  border: 1px solid var(--border-dim); border-radius: 4px;
+  background: rgba(0,0,0,0.26); cursor: pointer; }
+.cw-var img { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; }
+.cw-var.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.cw-var-star { position: absolute; top: 1px; left: 2px; font-size: 8px; color: #ffd479;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.cw-detail-fields { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* 프롬프트는 길다 - 줄바꿈으로 받고, 긴 태그도 가로로 밀지 않는다. */
+.cw-detail-fields .cw-li-field { white-space: pre-wrap; overflow-wrap: anywhere; }
+.cw-dim { color: var(--text-dim); }
+
 .cw-drag-chip {
   position: fixed; left: -10000px; top: 0; pointer-events: none;
   display: flex; align-items: center;

@@ -76,6 +76,19 @@ export function createCharacterPanel({
   // 그룹 탭의 검색어. **그룹 안의 항목**을 찾는다(사용자 지정 2026-09-02) - 그룹
   // 이름을 찾는 것이 아니다. 이름은 눈에 다 보이지만 안에 무엇이 들었는지는 안 보인다.
   let groupQuery = '';
+  // ── 에셋 탭 ────────────────────────────────────────────────────────────
+  //
+  // ⚠️ 목록 라우트는 **페이지가 없다**(전체를 한 번에 준다). 그래서 한 번 받아
+  //    세션에 들고, `↻` 나 담기 성공에만 다시 받는다.
+  let assetRows = null;          // null = 아직 안 받음
+  let assetLoading = false;
+  let assetQuery = '';
+  let assetPicked = '';          // 고른 캐릭터 id
+  let assetVariation = '';       // 고른 변형 hash ('' = 대표)
+  let assetDetail = null;        // /detail 응답
+  let assetSeq = 0;              // 낡은 응답을 버리는 표
+  let assetError = '';
+
   // 그룹 탭에서 펼쳐 둔 그룹. 키는 `g:이름` · 즐겨찾기 `fav` · 그룹 없음 `none`.
   const openGroups = new Set();
   // ⚠️ 그룹 행의 키를 **그룹 이름 그대로 쓰면 안 된다.** 사용자가 `★` 이라는 그룹을
@@ -282,6 +295,9 @@ export function createCharacterPanel({
     const chars = state?.characters || [];
     return [
       tab, query, groupQuery,
+      // 에셋 탭의 고른 것·검색어·불러온 수도 작업 영역의 일부다.
+      assetQuery, assetPicked, assetVariation, assetLoading ? 1 : 0,
+      (assetRows || []).length, assetDetail ? assetDetail.variation : '~',
       JSON.stringify(state?.group_colors || {}),
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
@@ -446,6 +462,190 @@ export function createCharacterPanel({
     });
     if (next === null) return;
     setModuleParam('character', `char_group_${index}`, String(next).trim());
+  }
+
+  // ── 에셋 ───────────────────────────────────────────────────────────────
+
+  /**
+   * 썸네일 주소.
+   *
+   * ⚠️ `size` 는 **반드시 `grid`** 다. 다른 값이면 서버가 **원본 PNG 전체**(수 MB)를
+   *    준다(`character_asset_routes.character_asset_thumb_payload`). 오타 하나로
+   *    격자 한 화면에 수십 MB 가 흐른다.
+   * ⚠️ `v=` 는 revision(파일 mtime_ns) 이다. 안 붙이면 승격·편집 뒤에도 브라우저가
+   *    옛 그림을 그대로 쓴다(썸네일 캐시가 폴백을 못 덮은 사고와 같은 계열).
+   */
+  function assetThumbUrl(id, variation, revision) {
+    const parts = [`id=${encodeURIComponent(id)}`, 'size=grid'];
+    if (variation) parts.push(`variation=${encodeURIComponent(variation)}`);
+    if (revision) parts.push(`v=${encodeURIComponent(String(revision))}`);
+    return `/api/character-asset/thumb?${parts.join('&')}`;
+  }
+
+  function assetLabel(row) {
+    return String(row?.display_name || '').trim() || String(row?.id || '').slice(0, 8);
+  }
+
+  async function loadAssets({force = false} = {}) {
+    if (assetLoading) return;
+    if (assetRows && !force) return;
+    assetLoading = true;
+    assetError = '';
+    scheduleRerender();
+    try {
+      const res = await fetch('/api/character-asset/list');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '에셋 목록을 불러오지 못했습니다.');
+      assetRows = Array.isArray(data.characters) ? data.characters : [];
+    } catch (error) {
+      assetRows = [];
+      assetError = error.message || String(error);
+    } finally {
+      assetLoading = false;
+      rerender();
+    }
+  }
+
+  /** 고른 캐릭터(또는 변형)의 프롬프트를 받아 온다. */
+  async function loadAssetDetail(id, variation) {
+    const seq = ++assetSeq;
+    try {
+      const parts = [`id=${encodeURIComponent(id)}`];
+      if (variation) parts.push(`variation=${encodeURIComponent(variation)}`);
+      const res = await fetch(`/api/character-asset/detail?${parts.join('&')}`);
+      const data = await res.json().catch(() => ({}));
+      // ⚠️ 낡은 응답을 버린다 - 타일을 빠르게 훑으면 먼저 보낸 것이 나중에 온다.
+      if (seq !== assetSeq) return;
+      if (!res.ok) { assetError = data.error || '상세를 불러오지 못했습니다.'; assetDetail = null; }
+      else { assetDetail = data; assetError = ''; }
+    } catch (error) {
+      if (seq !== assetSeq) return;
+      assetDetail = null;
+      assetError = error.message || String(error);
+    }
+    rerender();
+  }
+
+  function pickAsset(id) {
+    if (assetPicked === id) return;
+    assetPicked = id;
+    assetVariation = '';
+    assetDetail = null;
+    rerender();
+    void loadAssetDetail(id, '');
+  }
+
+  /** 고른 것을 **새 활성 슬롯**으로 담는다 (맨 아래). */
+  async function addAssetToSlot() {
+    if (!assetPicked) return;
+    // 상한은 백엔드의 `add_slot` 이 **안 본다** - 여기서 먼저 막는다.
+    const max = Number(lastState?.max_slots) || 0;
+    const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
+    if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+    try {
+      const res = await fetch('/api/character-asset/apply', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: assetPicked, variation: assetVariation, mode: 'add_slot'}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showToastSafe(data.error || '슬롯에 담지 못했습니다.'); return; }
+      showToastSafe('슬롯 맨 아래에 담았습니다.');
+    } catch (error) {
+      showToastSafe('담기 실패: ' + error.message);
+    }
+  }
+
+  function assetMatches(row) {
+    const needle = assetQuery.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.display_name || ''} ${row.id || ''}`.toLowerCase().includes(needle);
+  }
+
+  /** 위 칸 - 캐릭터 타일 격자. */
+  function renderAssetTiles() {
+    if (assetLoading && !assetRows) return '<div class="cw-empty">불러오는 중…</div>';
+    if (assetError && !assetRows?.length) return `<div class="cw-empty">${escHtml(assetError)}</div>`;
+    const rows = (assetRows || []).filter(assetMatches);
+    if (!rows.length) {
+      return `<div class="cw-empty">${assetRows?.length
+        ? '조건에 맞는 에셋이 없습니다.'
+        : '저장된 캐릭터 에셋이 없습니다.'}</div>`;
+    }
+    return rows.map(row => `
+      <button type="button" class="cw-tile${row.id === assetPicked ? ' is-on' : ''}"
+        data-cw-asset="${escAttr(row.id)}" title="${escAttr(assetLabel(row))}">
+        <img class="cw-tile-img" loading="lazy" decoding="async" alt=""
+          src="${escAttr(assetThumbUrl(row.id, '', row.revision))}">
+        ${row.variation_count > 0
+          ? `<span class="cw-tile-badge">+${row.variation_count}</span>` : ''}
+        <span class="cw-tile-name">${escHtml(assetLabel(row))}</span>
+      </button>`).join('');
+  }
+
+  /** 아래 칸 - 고른 것의 그림·프롬프트·변형. */
+  function renderAssetDetail() {
+    if (!assetPicked) {
+      return '<div class="cw-detail-hint">캐릭터를 고르면 여기에 프롬프트가 나옵니다.</div>';
+    }
+    const row = (assetRows || []).find(item => item.id === assetPicked);
+    const name = assetLabel(row || {id: assetPicked});
+    if (!assetDetail) return '<div class="cw-detail-hint">불러오는 중…</div>';
+    const variations = Array.isArray(assetDetail.variations) ? assetDetail.variations : [];
+    const tiles = [{hash: '', revision: assetDetail.revision}, ...variations].map(entry => `
+      <button type="button" class="cw-var${entry.hash === assetVariation ? ' is-on' : ''}"
+        data-cw-asset-var="${escAttr(entry.hash)}"
+        title="${entry.hash ? '변형' : '대표'}">
+        <img loading="lazy" decoding="async" alt=""
+          src="${escAttr(assetThumbUrl(assetPicked, entry.hash, entry.revision))}">
+        ${entry.hash ? '' : '<span class="cw-var-star">★</span>'}
+      </button>`).join('');
+    const prompt = String(assetDetail.character_prompt || '');
+    const uc = String(assetDetail.character_uc || '');
+    return `
+      <div class="cw-detail-head">
+        <span class="cw-detail-name">${escHtml(name)}</span>
+        <span class="cw-detail-id">${escHtml(String(assetPicked).slice(0, 8))}</span>
+        <span class="cw-sp"></span>
+        <button type="button" class="cw-li-btn" data-cw-asset-copy="1"
+          title="프롬프트를 복사한다">⧉</button>
+        <button type="button" class="cw-chip is-go" data-cw-asset-add="1"
+          ${prompt ? '' : 'disabled'}
+          title="${prompt ? '새 슬롯으로 담는다 (맨 아래)' : 'NAI 캐릭터 블록이 없어 담을 수 없습니다'}">+ 슬롯</button>
+      </div>
+      <div class="cw-detail-body">
+        <div class="cw-detail-left">
+          <img class="cw-detail-img" alt="" decoding="async"
+            src="${escAttr(assetThumbUrl(assetPicked, assetVariation,
+              assetVariation ? (variations.find(v => v.hash === assetVariation) || {}).revision
+                             : assetDetail.revision))}">
+          <div class="cw-detail-vars">${tiles}</div>
+        </div>
+        <div class="cw-detail-fields">
+          <div class="cw-li-field">${prompt
+            ? escHtml(prompt)
+            : '<span class="cw-dim">NAI 캐릭터 블록이 없습니다 (복구 불가)</span>'}</div>
+          ${uc ? `<div class="cw-li-field is-uc">${escHtml(uc)}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function renderAssetsTab() {
+    const count = (assetRows || []).filter(assetMatches).length;
+    return `
+      <div class="cw-filters">
+        <input class="cw-search" type="search" value="${escAttr(assetQuery)}"
+          placeholder="이름 · id 검색…" data-cw-asset-search="1">
+        <button type="button" class="cw-chip" data-cw-asset-reload="1" title="다시 읽는다">↻</button>
+        <button type="button" class="cw-chip" data-cw-assets="1" title="편집·삭제는 여기서">에셋 탭 ↗</button>
+      </div>
+      <div class="cw-pane">
+        <div class="cw-pane-top">
+          <div class="cw-tiles">${renderAssetTiles()}</div>
+        </div>
+        <div class="cw-pane-bot${assetPicked ? '' : ' is-folded'}">${renderAssetDetail()}</div>
+      </div>
+      <div class="cw-pane-count">${count}개</div>`;
   }
 
   // ── 왼쪽: 활성 슬롯 (전부 펼침) ─────────────────────────────────────────
@@ -729,10 +929,11 @@ export function createCharacterPanel({
     else if (tab === 'groups') body = renderGroups(storedSlots, groups);
     else if (tab === 'tools') body = renderTools(state);
     else if (tab === 'assets') {
-      // ⚠️ 기존 에셋 기능을 **옮기지 않는다**(사용자 지정: "기존 기능 제거는 아님").
-      //    여기서는 그 화면으로 보내기만 한다 - 29개 라우트짜리 별개 계보다.
-      body = `<div class="cw-empty">캐릭터 에셋은 이미지 기반의 별도 보관함입니다.<br><br>
-        <button type="button" class="cw-chip" data-cw-assets="1">에셋 탭 열기 ↗</button></div>`;
+      // ⚠️ **편집·삭제·C1 적용은 여기 두지 않는다**(사용자 지정: "기존 기능 제거는
+      //    아님"). 워크스페이스는 **소비**하는 자리다 - 고르고, 보고, 담는다.
+      //    나머지는 `[에셋 탭 ↗]` 칩이 여는 원래 화면이 한다.
+      body = renderAssetsTab();
+      void loadAssets();
     } else {
       body = `<div class="cw-empty">캐릭터 검색(Danbooru)은 Characters 탭에 있습니다.<br><br>
         <button type="button" class="cw-chip" data-cw-search-tab="1">Characters 탭 열기 ↗</button></div>`;
@@ -843,6 +1044,8 @@ export function createCharacterPanel({
         setModuleParam('character', field.dataset.cwField, field.value);
         return;
       }
+      const assetSearch = event.target.closest('[data-cw-asset-search]');
+      if (assetSearch) { assetQuery = assetSearch.value; scheduleRerender(); return; }
       const groupSearch = event.target.closest('[data-cw-group-search]');
       // ⚠️ 히스토리와 **같은 규약**이다(사용자 제보 2026-09-02: 한 글자마다 포커스가
       //    빠졌다). `rerender()` 는 입력칸까지 새로 만들어 커서를 잃는다.
@@ -875,6 +1078,31 @@ export function createCharacterPanel({
         const index = Number(fav.dataset.cwFav);
         const character = (lastState?.characters || [])[index];
         setModuleParam('character', `char_favorite_${index}`, String(!character?.favorite));
+        return;
+      }
+      // ── 에셋 탭 ────────────────────────────────────────────────────────
+      const tile = hit('[data-cw-asset]');
+      if (tile) { pickAsset(tile.dataset.cwAsset || ''); return; }
+      const varTile = hit('[data-cw-asset-var]');
+      if (varTile) {
+        assetVariation = varTile.dataset.cwAssetVar || '';
+        // 선택 표시는 **즉시**, 글은 응답 뒤 - 기존 에셋 탭과 같은 순서다.
+        rerender();
+        void loadAssetDetail(assetPicked, assetVariation);
+        return;
+      }
+      if (hit('[data-cw-asset-add]')) { void addAssetToSlot(); return; }
+      if (hit('[data-cw-asset-reload]')) {
+        assetPicked = ''; assetVariation = ''; assetDetail = null;
+        void loadAssets({force: true});
+        return;
+      }
+      if (hit('[data-cw-asset-copy]')) {
+        const text = String(assetDetail?.character_prompt || '');
+        if (!text) { showToastSafe('복사할 프롬프트가 없습니다.'); return; }
+        navigator.clipboard?.writeText(text)
+          .then(() => showToastSafe('프롬프트를 복사했습니다.'))
+          .catch(() => showToastSafe('복사하지 못했습니다.'));
         return;
       }
       const test = hit('[data-cw-test]');
@@ -1109,6 +1337,19 @@ export function createCharacterPanel({
     // ⚠️ 그룹 탭도 여기로 온다. 펼친 그룹 안의 항목은 `.cw-grp-items` 안에 있고 그것은
     //    다시 `.cw-list` 안이라, 목록만 갈아 끼워도 전부 갱신된다. 전체를 다시 그리면
     //    검색 입력칸이 새로 만들어져 **한 글자마다 커서를 잃는다**(사용자 제보).
+    // 에셋 탭은 `.cw-list` 가 아니라 `.cw-tiles` 를 갈아 끼운다.
+    if (tab === 'assets') {
+      const tiles = moduleBody.querySelector('.cw-tiles');
+      if (!tiles) { rerender(); return; }
+      const keepTiles = tiles.parentElement ? tiles.parentElement.scrollTop : 0;
+      tiles.innerHTML = renderAssetTiles();
+      if (tiles.parentElement && keepTiles) tiles.parentElement.scrollTop = keepTiles;
+      const count = moduleBody.querySelector('.cw-pane-count');
+      if (count) count.textContent = `${(assetRows || []).filter(assetMatches).length}개`;
+      lastRenderedWorkSignature = workSignature(lastState);
+      lastRenderedStructureSignature = characterStructureSignature(lastState);
+      return;
+    }
     if (!list || (tab !== 'history' && tab !== 'favourites' && tab !== 'groups')) {
       rerender();
       return;

@@ -832,10 +832,15 @@ export function createCharacterPanel({
           showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`);
           return;
         }
-        // 사이 자리에 놓았으면 그 번째로, 빈 곳에 놓았으면 맨 아래로.
+        // 사이 자리에 놓았으면 그 번째로, **빈 곳에 놓았으면 맨 마지막**으로.
+        //
+        // ⚠️ 빈 곳을 `setSlotState(index, 'active')` 로 처리하면 **이미 활성인 것은
+        //    아무 일도 안 난다**(같은 상태를 다시 쓸 뿐이다). 사용자 제보 2026-09-02:
+        //    "Add Character 아래에 DnD 핸들러가 가면 항상 마지막 자리에 배치할 수
+        //    있도록". 그래서 두 경우를 **한 길**로 모은다 - 자리 번호만 다르다.
         const gap = target.dataset.cwGap;
-        if (gap === undefined) setSlotState(index, 'active');
-        else setModuleParam('character', `char_reorder_${index}`, gap);
+        const last = String(used);   // 활성 개수 = 마지막 자리 번호
+        setModuleParam('character', `char_reorder_${index}`, gap === undefined ? last : gap);
         return;
       }
       // 그룹 행 - **활성 슬롯이면 복제본**을 넣는다(사용자 지정 2026-09-02:

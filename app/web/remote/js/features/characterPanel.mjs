@@ -73,6 +73,8 @@ export function createCharacterPanel({
   const GRP_NONE = 'none';
   // 슬롯 칸에 놓으면 **활성으로 복원**한다. 그룹 이름이 될 수 없는 토큰이라 안전하다.
   const GRP_SLOT = 'slot';
+  // 히스토리 목록 자체가 드롭 대상이다 - 슬롯을 끌어다 놓으면 ✕ 와 같은 일이 난다.
+  const GRP_HIST = 'hist';
   const grpKey = name => 'g:' + name;
   const grpName = key => (String(key || '').slice(0, 2) === 'g:' ? String(key).slice(2) : '');
   // 드래그 규약은 interactiveScenePanel 과 같다: 우리 자료형 하나로 **우리 것만** 받고,
@@ -467,7 +469,10 @@ export function createCharacterPanel({
              펼쳐서 보여 주고 즐겨찾기는 **자기 탭**이 있다 - 여기 두면 같은 길이
              둘이고, 늘수록 검색칸을 밀어낸다. -->
       </div>
-      <div class="cw-list">${list}</div>`;
+      <!-- ⚠️ 목록 **전체**가 수납 대상이다(사용자 지정 2026-09-02: "히스토리에서는
+           사실상 X버튼을 누른것과 동일하게 작동"). 즐겨찾기 탭에는 안 단다 - 거기
+           놓으면 별이 없어 그 탭에서 바로 사라져 보인다. -->
+      <div class="cw-list"${onlyFav ? '' : ` data-cw-drop="${GRP_HIST}"`}>${list}</div>`;
   }
 
   /**
@@ -772,7 +777,14 @@ export function createCharacterPanel({
         event.dataTransfer.effectAllowed = 'move';
       } catch (_) { /* 무시 */ }
       row.closest('.cw-li, .cw-slot')?.classList.add('is-dragging');
-      moduleBody.querySelectorAll('[data-cw-drop]').forEach(el => el.classList.add('is-dropzone'));
+      // ⚠️ 히스토리 목록은 **활성 슬롯을 끌 때만** 불이 켜진다 - 히스토리의 것을
+      //    히스토리에 놓는 것은 아무 일도 아닌데 받을 것처럼 보이면 거짓말이다.
+      const stowing = (lastState?.characters || []).some(
+        c => String(c.slot_uuid || '') === dragUuid && slotState(c) === 'active');
+      moduleBody.querySelectorAll('[data-cw-drop]').forEach(el => {
+        if (el.dataset.cwDrop === GRP_HIST && !stowing) return;
+        el.classList.add('is-dropzone');
+      });
       labelGaps();
     });
     root.addEventListener('dragend', () => clearDrag());
@@ -804,8 +816,14 @@ export function createCharacterPanel({
       if (!uuid || index < 0) return;
       // 슬롯 칸 -> 활성으로 복원(맨 아래로 붙는다). 그룹 행 -> 그룹 이동(`none` = 해제).
       // 즐겨찾기는 그룹이 아니라 플래그라 드롭 대상이 아니다 - 항목을 펼쳐서 켠다.
+      const active = slotState((lastState?.characters || [])[index]) === 'active';
+      if (key === GRP_HIST) {
+        // 이미 히스토리에 있는 것을 히스토리에 놓는 것은 아무 일도 아니다.
+        if (active) setSlotState(index, 'inactive');
+        return;
+      }
       if (key === GRP_SLOT) {
-        const already = slotState((lastState?.characters || [])[index]) === 'active';
+        const already = active;
         // 상한을 넘으면 백엔드가 조용히 거절한다 - 여기서 먼저 알려 준다.
         // ⚠️ 이미 활성인 것을 **자리만 옮기는** 경우는 개수가 안 늘어나니 막지 않는다.
         const max = Number(lastState?.max_slots) || 0;
@@ -818,6 +836,14 @@ export function createCharacterPanel({
         const gap = target.dataset.cwGap;
         if (gap === undefined) setSlotState(index, 'active');
         else setModuleParam('character', `char_reorder_${index}`, gap);
+        return;
+      }
+      // 그룹 행 - **활성 슬롯이면 복제본**을 넣는다(사용자 지정 2026-09-02:
+      // "그룹에서는 복제본을 삽입합니다"). 슬롯은 그대로 두고 조합만 챙겨 둔다.
+      // 히스토리의 것을 끌었으면 예전처럼 **옮긴다**(사본이 쌓이면 안 된다).
+      if (active) {
+        setModuleParam('character', `char_copy_to_group_${index}`, grpName(key));
+        showToastSafe(`${grpName(key) || '그룹 없음'} 에 복제본을 넣었습니다.`);
         return;
       }
       setModuleParam('character', `char_group_${index}`, grpName(key));

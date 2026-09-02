@@ -627,6 +627,37 @@ class HeadlessCharacterService:
                     frame["group"] = ""
             settings["groups"] = normalize_groups(
                 [g for g in (settings.get("groups") or []) if str(g).strip() != name], frames)
+        elif key.startswith("char_copy_to_group_"):
+            # 활성 슬롯을 그룹에 **복제본으로** 넣는다(사용자 지정 2026-09-02:
+            # "그룹에서는 복제본을 삽입합니다"). 원본은 슬롯에 그대로 남는다 -
+            # 슬롯을 비우지 않고 지금 조합만 챙겨 두는 동작이다.
+            #
+            # ⚠️ 스냅샷은 건드리지 않는다 - 활성 내용이 하나도 안 바뀐다.
+            from core.character_settings import _new_character_uuid
+
+            index = context._index_from_key(key, "char_copy_to_group_")
+            if index is not None and 0 <= index < len(frames):
+                source = frames[index]
+                if isinstance(source, dict):
+                    import copy as _copy
+                    import time
+
+                    clone = _copy.deepcopy(source)
+                    # ⚠️ 새 정체를 준다. uuid 를 물려받으면 좌표·Connect·스냅샷이
+                    #    원본과 같은 것을 가리켜 둘이 서로를 덮어쓴다.
+                    clone.pop("slot_uuid", None)
+                    clone.pop("id", None)
+                    clone.pop("return_slot_state", None)
+                    clone["uuid"] = _new_character_uuid()
+                    clone["slot_state"] = "inactive"
+                    clone["group"] = str(value or "").strip()
+                    # ⚠️ 링크는 지운다. 복제본은 **글의 사본**이지 관계의 사본이
+                    #    아니다 - 물고 있는 채로 두면 순서에 따라 조용히 잘리거나
+                    #    (`_prune_character_links`) 사슬 금지에 걸린다.
+                    clone["connect_to"] = ""
+                    # 히스토리는 최근 순이다 - 방금 넣은 것이 위로 온다.
+                    clone["used_at"] = time.time()
+                    frames.append(clone)
         elif key.startswith("char_group_"):
             index = context._index_from_key(key, "char_group_")
             if index is not None:

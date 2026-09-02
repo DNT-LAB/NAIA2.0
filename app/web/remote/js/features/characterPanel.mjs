@@ -58,8 +58,16 @@ export function createCharacterPanel({
   let pendingGenerateUuid = '';
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
-  // 그룹 탭에서 펼쳐 둔 그룹. 키는 그룹 이름, 즐겨찾기는 '★', 그룹 없음은 ''.
+  // 그룹 탭에서 펼쳐 둔 그룹. 키는 `g:이름` · 즐겨찾기 `fav` · 그룹 없음 `none`.
   const openGroups = new Set();
+  // ⚠️ 그룹 행의 키를 **그룹 이름 그대로 쓰면 안 된다.** 사용자가 `★` 이라는 그룹을
+  //    만들 수 있고(백엔드가 막지 않는다), 그러면 즐겨찾기 행과 키가 겹쳐 그 그룹의
+  //    멤버가 영영 안 보이고 드롭도 즐겨찾기로 샌다(실측 재현).
+  //    이름은 `g:` 뒤에만 둔다 - 그러면 어떤 이름도 `fav`/`none` 과 겹치지 않는다.
+  const GRP_FAV = 'fav';
+  const GRP_NONE = 'none';
+  const grpKey = name => 'g:' + name;
+  const grpName = key => (String(key || '').slice(0, 2) === 'g:' ? String(key).slice(2) : '');
   // 드래그 규약은 interactiveScenePanel 과 같다: 우리 자료형 하나로 **우리 것만** 받고,
   // 끌기 도중 다시 그려져 원본이 사라지면 `dragend` 가 오지 않으므로 표를 직접 버린다.
   const DND_MIME = 'application/x-naia-charslot';
@@ -383,7 +391,7 @@ export function createCharacterPanel({
     const ordered = [...storedSlots]
       .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0));
     const members = key => ordered.filter(({character}) =>
-      key === '★' ? !!character.favorite : groupOf(character) === key);
+      key === GRP_FAV ? !!character.favorite : groupOf(character) === grpName(key));
     // ⚠️ 누르면 **그 자리에서 펼친다**(사용자 지정 2026-09-02: 탭을 옮기는 것은
     //    싫다). 펼친 안쪽은 히스토리 탭과 같은 항목이라 복원·삭제·펼침이 그대로 된다.
     const row = (key, label, {pinned = false, deletable = true, fav = false} = {}) => {
@@ -407,10 +415,10 @@ export function createCharacterPanel({
       </div>`;
     };
     const rows = [
-      row('★', '즐겨찾기', {pinned: true, deletable: false, fav: true}),
-      ...groups.map(name => row(name, name)),
+      row(GRP_FAV, '즐겨찾기', {pinned: true, deletable: false, fav: true}),
+      ...groups.map(name => row(grpKey(name), name)),
       // 그룹 없음도 한 줄이다 - 안 그러면 34개가 어디 있는지 찾을 길이 없다.
-      row('', '그룹 없음', {deletable: false}),
+      row(GRP_NONE, '그룹 없음', {deletable: false}),
     ].join('');
     return `
       <div class="cw-filters">
@@ -585,7 +593,11 @@ export function createCharacterPanel({
         return;
       }
       const removeGroup = hit('[data-cw-remove-group]');
-      if (removeGroup) { setModuleParam('character', 'remove_group', removeGroup.dataset.cwRemoveGroup); return; }
+      if (removeGroup) {
+        // 백엔드는 **이름**을 받는다 - 화면 키(`g:이름`)를 그대로 보내면 안 지워진다.
+        setModuleParam('character', 'remove_group', grpName(removeGroup.dataset.cwRemoveGroup));
+        return;
+      }
       const toggleGroup = hit('[data-cw-toggle-group]');
       if (toggleGroup) {
         const key = toggleGroup.dataset.cwToggleGroup;
@@ -640,9 +652,12 @@ export function createCharacterPanel({
       if (!row) return;
       dragUuid = row.dataset.cwDragUuid || '';
       try {
-        event.dataTransfer.setData(DND_MIME, row.dataset.cwDrag);
+        // ⚠️ **uuid 를 싣는다.** index 를 실으면 끌기 도중 다른 에코가 목록을 다시
+        //    정렬했을 때 그 번호가 이미 남의 것이라 **엉뚱한 캐릭터가 옮겨진다**.
+        //    index 는 놓는 순간 현재 상태에서 다시 찾는다.
+        event.dataTransfer.setData(DND_MIME, dragUuid);
         // 일부 브라우저는 표준 자료형이 하나도 없으면 끌기를 취소한다.
-        event.dataTransfer.setData('text/plain', row.dataset.cwDrag);
+        event.dataTransfer.setData('text/plain', dragUuid);
         event.dataTransfer.effectAllowed = 'move';
       } catch (_) { /* 무시 */ }
       row.closest('.cw-li')?.classList.add('is-dragging');
@@ -667,15 +682,17 @@ export function createCharacterPanel({
       const target = dropTarget(event);
       if (!target) return;
       event.preventDefault();
-      let raw = '';
-      try { raw = event.dataTransfer.getData(DND_MIME); } catch (_) { raw = ''; }
-      const index = Number(raw);
+      let uuid = '';
+      try { uuid = event.dataTransfer.getData(DND_MIME); } catch (_) { uuid = ''; }
       const key = target.dataset.cwDrop;
       clearDrag();
-      if (!Number.isFinite(index)) return;
-      // ★ 행은 그룹이 아니라 플래그다 - 즐겨찾기를 켠다. 나머지는 그룹 이름('' = 해제).
-      if (key === '★') setModuleParam('character', `char_favorite_${index}`, 'true');
-      else setModuleParam('character', `char_group_${index}`, key);
+      // 놓는 **지금**의 상태에서 번호를 찾는다(끌던 사이에 목록이 밀렸을 수 있다).
+      const index = (lastState?.characters || []).findIndex(
+        item => String(item.slot_uuid || '') === uuid);
+      if (!uuid || index < 0) return;
+      // 즐겨찾기 행은 그룹이 아니라 플래그다. 나머지는 그룹 이름(`none` -> '' = 해제).
+      if (key === GRP_FAV) setModuleParam('character', `char_favorite_${index}`, 'true');
+      else setModuleParam('character', `char_group_${index}`, grpName(key));
     });
 
     root.addEventListener('keydown', event => {

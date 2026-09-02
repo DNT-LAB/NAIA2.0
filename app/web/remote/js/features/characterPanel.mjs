@@ -96,6 +96,23 @@ export function createCharacterPanel({
       : Array.prototype.indexOf.call(types, DND_MIME) >= 0;
     return mine ? el : null;
   }
+  /**
+   * 각 틈에 "여기 놓으면 C몇 이 된다" 를 적는다.
+   *
+   * ⚠️ 이미 활성인 슬롯을 **자기보다 아래로** 끌면, 자기가 빠지면서 뒤가 한 칸
+   *    당겨진다(백엔드 `char_reorder_` 도 같은 보정을 한다). 그 보정을 여기서도
+   *    하지 않으면 이름이 한 칸씩 거짓말을 한다.
+   */
+  function labelGaps() {
+    const actives = (lastState?.characters || []).filter(c => slotState(c) === 'active');
+    const from = actives.findIndex(c => String(c.slot_uuid || '') === dragUuid);
+    moduleBody.querySelectorAll('.cw-slot-gap').forEach(el => {
+      const ordinal = Number(el.dataset.cwGap || 0);
+      const seat = from >= 0 && from < ordinal ? ordinal - 1 : ordinal;
+      el.dataset.cwLabel = `C${seat + 1}`;
+    });
+  }
+
   function clearDrag() {
     dragUuid = '';
     moduleBody.querySelectorAll('.is-dragging, .is-drop, .is-dropzone')
@@ -313,8 +330,12 @@ export function createCharacterPanel({
     const full = maxSlots > 0 && used >= maxSlots;
     // 사이사이에 **끼워 넣을 자리**를 둔다(사용자 지정 2026-09-02). 끄는 동안에만 보인다 -
     // 늘 보이면 목록이 시끄럽고, 안 보이면 어디에 꽂히는지 알 수 없다.
+    //
+    // `data-cw-label` 은 여기 놓으면 **몇 번 슬롯이 되는지**다(사용자 지정: "삽입되는
+    // 공간을 좀 크게 한 뒤 C2에 할당됩니다"). 여기 적는 것은 순진한 값이고, 활성 슬롯을
+    // 아래로 끌 때는 한 칸 당겨지므로 `labelGaps()` 가 끌기 시작에 다시 적는다.
     const gap = ordinal => `<div class="cw-slot-gap" data-cw-drop="${GRP_SLOT}"
-      data-cw-gap="${ordinal}"></div>`;
+      data-cw-gap="${ordinal}" data-cw-label="C${ordinal + 1}"></div>`;
     const body = activeSlots.length
       ? gap(0) + activeSlots.map(({character, index}, i) =>
           renderSlot(character, index, i + 1) + gap(i + 1)).join('')
@@ -752,6 +773,7 @@ export function createCharacterPanel({
       } catch (_) { /* 무시 */ }
       row.closest('.cw-li, .cw-slot')?.classList.add('is-dragging');
       moduleBody.querySelectorAll('[data-cw-drop]').forEach(el => el.classList.add('is-dropzone'));
+      labelGaps();
     });
     root.addEventListener('dragend', () => clearDrag());
     root.addEventListener('dragover', event => {

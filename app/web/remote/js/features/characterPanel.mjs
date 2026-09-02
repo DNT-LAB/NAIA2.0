@@ -228,6 +228,19 @@ export function createCharacterPanel({
     return hue === null ? '' : ` style="--cw-grp-hue:${hue}"`;
   }
 
+  /**
+   * 사용자가 **아무것도 넣지 않은** 슬롯인가.
+   *
+   * ⚠️ 프롬프트만 보면 안 된다 - 이름만 붙였거나 좌표만 잡아 둔 자리표시자는
+   *    사용자가 만든 것이다. 잣대는 백엔드(`_slot_is_untouched`)와 같아야 한다.
+   */
+  function isEmptySlot(character) {
+    if (!character) return false;
+    const filled = ['prompt', 'uc', 'custom_name']
+      .some(key => String(character[key] || '').trim());
+    return !filled && !(character.position && typeof character.position === 'object');
+  }
+
   function groupOf(character) {
     return String(character?.group || '').trim();
   }
@@ -743,7 +756,15 @@ export function createCharacterPanel({
         return;
       }
       const down = hit('[data-cw-down]');
-      if (down) { setSlotState(Number(down.dataset.cwDown), 'inactive'); return; }
+      if (down) {
+        const index = Number(down.dataset.cwDown);
+        // 빈 슬롯은 히스토리로 안 보낸다 - 되살려도 할 일이 없는데 자리만 차지한다
+        // (사용자 지정 2026-09-02). 백엔드도 저장할 때 같은 잣대로 걷는다.
+        const slot = (lastState?.characters || [])[index];
+        if (slot && isEmptySlot(slot)) { setModuleParam('character', `remove_character_${index}`, 'true'); return; }
+        setSlotState(index, 'inactive');
+        return;
+      }
       const pick = hit('[data-cw-pick-group]');
       if (pick) {
         setModuleParam('character', `char_group_${Number(pick.dataset.cwPickGroup)}`, pick.dataset.cwGroupName || '');

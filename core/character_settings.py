@@ -89,6 +89,33 @@ def _as_used_at(value: Any) -> float:
         return 0.0
 
 
+def drop_empty_history(frames: list[dict]) -> list[dict]:
+    """히스토리에 남은 **빈** 슬롯을 걷는다.
+
+    사용자 지정 2026-09-02: "저런 (비어 있음) 같은 경우 그냥 즉시 삭제되면 좋겠어요."
+    되살려도 할 일이 없는데 목록에서 자리는 그대로 차지한다.
+
+    ⚠️ **활성은 건드리지 않는다.** 기본 상태의 빈 C1 이 활성이고, 그것까지 지우면
+       사용자가 지금 채우려던 칸이 발밑에서 사라진다.
+    ⚠️ 잣대는 `headless_character_service._slot_is_untouched` 와 같아야 한다 -
+       이름만 붙였거나 좌표만 잡아 둔 자리표시자는 **빈 것이 아니다**(사용자가
+       만든 것이다).
+    """
+    def empty(frame: dict) -> bool:
+        if str(frame.get("slot_state") or "") == "active":
+            return False
+        if any(str(frame.get(key) or "").strip()
+               for key in ("prompt", "uc", "custom_name")):
+            return False
+        return not isinstance(frame.get("position"), dict)
+
+    kept = [frame for frame in frames if not empty(frame)]
+    dropped = len(frames) - len(kept)
+    if dropped > 0:
+        print(f"[Character] dropped {dropped} empty history slot(s)", flush=True)
+    return kept
+
+
 def trim_history(frames: list[dict]) -> list[dict]:
     """히스토리를 500개로 끊는다. 활성 슬롯은 세지 않는다.
 
@@ -315,7 +342,9 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
     #    자르기는 정렬 **앞**이다 - 자르면서 없어진 프레임의 링크를 그 다음
     #    `_prune_character_links` 가 정리해야 하기 때문이다.
     settings["character_frames"] = _prune_character_links(
-        sort_character_frames(trim_history(normalized_frames))
+        # ⚠️ 빈 것 걷기가 **먼저**다. 그래야 500 상한이 빈 껍데기 대신 진짜 내용을
+        #    센다 - 빈 것이 자리를 차지해 쓸 만한 것이 밀려나면 안 된다.
+        sort_character_frames(trim_history(drop_empty_history(normalized_frames)))
     )
     settings["groups"] = normalize_groups(stored_groups, settings["character_frames"])
     settings["group_colors"] = normalize_group_colors(

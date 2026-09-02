@@ -13725,9 +13725,14 @@ body.detached-metadata .metadata-layout {
 .cw-chip:hover { color: var(--text-primary); }
 .cw-chip.is-on { background: rgba(96,120,255,0.22); color: var(--text-primary); border-color: var(--accent); }
 /* 남는 폭을 전부 쓴다 - 넓은 화면이면 열이 늘어난다. */
+/* ⚠️ `grid-auto-rows: max-content` 가 없으면 **트랙이 눌린다**(사용자 제보: "점자블록").
+   높이가 고정된 그리드에서 `auto` 트랙의 최소치는 아이템의 최소 높이인데,
+   아이템에 `overflow: hidden` 이 있으면 그 최소치가 0 이 되어 39줄이 1~2px 로
+   찌부러졌다. 트랙을 내용 높이로 못 박아야 남는 것이 **스크롤**로 간다. */
 .cw-list {
   flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-auto-rows: max-content;
   gap: 6px; align-content: start;
 }
 .cw-empty { padding: 18px 12px; text-align: center; font-size: 11px; color: var(--text-dim); }
@@ -13739,7 +13744,7 @@ body.detached-metadata .metadata-layout {
   border: 1px solid var(--border-dim); border-radius: 6px;
   background: rgba(0,0,0,0.2); color: var(--text-primary);
   font-family: var(--font-editor); font-size: 11.5px; text-align: left;
-  overflow: hidden;
+  /* overflow 를 hidden 으로 두지 않는다 - 그리드 최소 높이를 0 으로 만든다(위 주석). */
 }
 .cw-li:hover { border-color: var(--accent); }
 .cw-li.is-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
@@ -13747,6 +13752,7 @@ body.detached-metadata .metadata-layout {
   display: flex; align-items: center; gap: 8px; padding: 4px 6px;
   cursor: pointer;
 }
+.cw-li-row { border-radius: 5px; }
 .cw-li-row:hover { background: rgba(96,120,255,0.10); }
 /* 머리줄 양끝 버튼 - Quick 의 `.cq-slot-btn` 크기를 따른다. */
 .cw-li-btn {

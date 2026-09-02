@@ -13816,6 +13816,10 @@ body.detached-metadata .metadata-layout {
 .cw-li.is-dragging { opacity: 0.45; }
 .cw-li-row[draggable="true"] { cursor: grab; }
 .cw-grp-row.is-dropzone .cw-grp-open { border-style: dashed; }
+/* 슬롯 칸에 던져 넣기 - 끄는 동안 칸 전체가 받을 수 있음을 보인다. */
+.cw-slots.is-dropzone { outline: 1px dashed var(--border-glow); outline-offset: -3px; }
+.cw-slots.is-drop { outline: 1px solid var(--accent); outline-offset: -3px;
+  background: rgba(124,106,239,0.10); }
 .cw-grp-row.is-drop .cw-grp-open { border-color: var(--accent); background: rgba(124,106,239,0.22); border-style: solid; }
 .cw-grp.is-open .cw-grp-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
 /* ⚠️ 위 규칙이 **뒤에 있어** 같은 특이도의 색 규칙(13762)을 이겼다 - 펼친 그룹의 머리줄이

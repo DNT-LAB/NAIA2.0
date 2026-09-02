@@ -71,6 +71,8 @@ export function createCharacterPanel({
   //    이름은 `g:` 뒤에만 둔다 - 그러면 어떤 이름도 `fav`/`none` 과 겹치지 않는다.
   const GRP_FAV = 'fav';
   const GRP_NONE = 'none';
+  // 슬롯 칸에 놓으면 **활성으로 복원**한다. 그룹 이름이 될 수 없는 토큰이라 안전하다.
+  const GRP_SLOT = 'slot';
   const grpKey = name => 'g:' + name;
   const grpName = key => (String(key || '').slice(0, 2) === 'g:' ? String(key).slice(2) : '');
   // 드래그 규약은 interactiveScenePanel 과 같다: 우리 자료형 하나로 **우리 것만** 받고,
@@ -311,7 +313,10 @@ export function createCharacterPanel({
       ? activeSlots.map(({character, index}, i) => renderSlot(character, index, i + 1)).join('')
       : '<div class="cw-slots-empty">활성 슬롯이 없습니다.<br>히스토리에서 담거나 새로 추가하세요.</div>';
     return `
-      <div class="cw-slots">
+      <!-- ⚠️ 칸 **전체**가 드롭 대상이다(사용자 지정 2026-09-02). 프롬프트 칸 위에
+           떨어뜨려도 우리가 받는다 - 안 받으면 브라우저가 uuid 를 글자로 꽂는다
+           (text/plain 을 함께 싣기 때문이다). dragover 의 preventDefault 가 막는다. -->
+      <div class="cw-slots" data-cw-drop="${GRP_SLOT}">
         <div class="cw-slots-head">
           <span>슬롯</span><span class="cw-sp"></span>
           <span>${used}${maxSlots ? ` / ${maxSlots}` : ''}</span>
@@ -768,8 +773,16 @@ export function createCharacterPanel({
       const index = (lastState?.characters || []).findIndex(
         item => String(item.slot_uuid || '') === uuid);
       if (!uuid || index < 0) return;
-      // 그룹 행만 드롭 대상이다(`none` -> '' = 그룹 해제). 즐겨찾기는 그룹이 아니라
-      // 플래그라 여기 없다 - 항목을 펼쳐 [즐겨찾기 등록] 으로 켠다.
+      // 슬롯 칸 -> 활성으로 복원(맨 아래로 붙는다). 그룹 행 -> 그룹 이동(`none` = 해제).
+      // 즐겨찾기는 그룹이 아니라 플래그라 드롭 대상이 아니다 - 항목을 펼쳐서 켠다.
+      if (key === GRP_SLOT) {
+        // 상한을 넘으면 백엔드가 조용히 거절한다 - 여기서 먼저 알려 준다.
+        const max = Number(lastState?.max_slots) || 0;
+        const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
+        if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+        setSlotState(index, 'active');
+        return;
+      }
       setModuleParam('character', `char_group_${index}`, grpName(key));
     });
 

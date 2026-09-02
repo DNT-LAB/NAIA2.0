@@ -584,6 +584,12 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 await _broadcast_prompt_preset_thumbnail_update(context, clients, stored, params)
             if params.get("character_viewer_request"):
                 await _save_character_viewer_thumbnail(context, stored, params)
+            if params.get("character_instant_request"):
+                # ⚠️ **결과를 빼돌리지 않는다.** 위에서 이미 저장·히스토리·Result 를
+                #    다 탔다. 여기서는 프리뷰 창에 **한 번 더** 띄울 뿐이다 -
+                #    사용자 제보 2026-09-02: "캐릭터 모듈은 Result 윈도우를 덮으므로,
+                #    프리뷰가 보여야 합니다."
+                await _broadcast_character_instant_preview(clients, stored, params)
             if params.get("artist_thumb_request"):
                 await _save_artist_thumbnail(context, stored, params)
             if params.get("character_asset_request"):
@@ -1690,6 +1696,33 @@ async def _wait_for_automation_delay(
             return context._automation_service().is_running(automation_run_id)
         await asyncio.sleep(min(1.0, max(0.05, remaining)))
 
+
+
+async def _broadcast_character_instant_preview(clients, stored, params) -> None:
+    """캐릭터 즉시 생성 결과를 프리뷰 창에도 띄운다.
+
+    ⚠️ 결과 저장소에서 **빼지 않는다**(프리뷰와 다른 점). 이 그림은 평소 생성이라
+       히스토리에 남아야 한다 - 여기서 빼면 사용자가 Results 에서 못 찾는다.
+    """
+    import base64
+
+    item = stored.item
+    executed = getattr(item, "generation_params", None) or {}
+    await broadcast_json(clients, {
+        "type": "nai_preview_result",
+        "requestId": str(params.get("character_instant_request_id") or ""),
+        # 창이 갈래를 안다 - [Save] 는 감추고(이미 저장됐다) [Generate] 는 이 캐릭터로
+        # 다시 뽑는다.
+        "kind": "character",
+        "uuid": str(params.get("character_instant_uuid") or ""),
+        "title": str(params.get("nai_preview_title") or ""),
+        "width": int(params.get("width") or 0),
+        "height": int(params.get("height") or 0),
+        "steps": int(params.get("steps") or 0),
+        "model": str(params.get("model") or ""),
+        "characters": [str(c) for c in (executed.get("_executed_characters") or [])],
+        "image": base64.b64encode(item.webp_bytes).decode("ascii"),
+    })
 
 
 async def _finish_nai_preview(context: WebSessionContext, clients, request, stored) -> None:

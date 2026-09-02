@@ -88,7 +88,7 @@ def register_character_instant_routes(
                 {"error": "빈 캐릭터는 생성할 것이 없습니다."}, status_code=400)
 
         prompt = await run_in_thread(build_instant_prompt, session_context, frame)
-        overrides = build_instant_overrides(request_id, frame)
+        overrides = build_instant_overrides(request_id, frame, uuid)
 
         generation = _generation_service(session_context)
         dispatch = await run_in_thread(

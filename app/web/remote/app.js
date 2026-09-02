@@ -2280,7 +2280,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-instant2')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-test')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2289,10 +2289,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-
       flushCharacterEdits,
       setModuleParam,
       showPromptDialog,
-      // 즉시 생성이 만든 메인 프롬프트를 화면에 적는다. `authored` 로 두어야
-      // 사용자가 쓴 글로 취급돼 프리셋 표식이 따라간다(아티스트 탭과 같다).
-      setPromptFields: (prompt, negative) => applyPromptFields(
-        prompt, negative != null ? negative : negEdit?.value, {authored: true}),
+
     });
   })
   .catch(error => {
@@ -10221,7 +10218,7 @@ document.addEventListener('keydown', event => {
 // 프리뷰 창(지연 로드). ⚠️ 이 그림은 **저장되지 않는다** - 서버가 결과 저장소에서
 //    빼고 디스크에도 안 쓴다. [Save] 를 눌렀을 때만 쓴다.
 let naiPreviewWindow = null;
-const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260902-place2')
+const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260902-kind')
   .then(({createNaiPreviewWindow}) => {
     naiPreviewWindow = createNaiPreviewWindow({
       document,
@@ -10229,7 +10226,15 @@ const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260
       showToast,
       // ⚠️ [Generate] 는 **4.5 재생성**이다(사용자 지정) - 프롬프트를 고쳐 가며 다시
       //    보는 루프가 이 창의 쓰임새다. V5 진짜 생성이 아니다.
-      onGenerate: () => { void runV45Preview(); },
+      // ⚠️ 캐릭터 테스트 생성 결과가 떠 있으면 **그 캐릭터로** 다시 뽑는다. 여기서
+      //    V4.5 프리뷰를 돌리면 사용자가 보던 것과 다른 그림이 같은 자리에 갈린다.
+      onGenerate: showing => {
+        if (String(showing?.kind || '') === 'character' && showing.uuid) {
+          void characterPanel?.instantGenerate?.(showing.uuid);
+          return;
+        }
+        void runV45Preview();
+      },
     });
   })
   .catch(error => {
@@ -10237,7 +10242,9 @@ const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260
   });
 
 async function onNaiPreviewResult(message) {
-  setPreview45Busy(false);
+  // ⚠️ 캐릭터 테스트 생성은 **프리뷰 잠금을 안 쓴다** - 그 잠금은 툴바의 V4.5
+  //    버튼용이다. 여기서 풀면 마침 돌고 있던 프리뷰의 잠금이 남의 결과에 풀린다.
+  if (String(message.kind || '') !== 'character') setPreview45Busy(false);
   await naiPreviewWindowReady;
   if (!naiPreviewWindow) { showToast('프리뷰 창을 불러오지 못했습니다.', 'error'); return; }
   naiPreviewWindow.show(message);

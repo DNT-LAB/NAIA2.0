@@ -20,6 +20,8 @@ export function createNaiPreviewWindow({
 }) {
   let root = null;
   let objectUrl = '';
+  // 지금 띄운 것. [Generate] 가 **무엇을 다시 뽑을지**를 이것으로 가른다.
+  let showing = null;
 
   function build() {
     root = doc.createElement('div');
@@ -43,7 +45,7 @@ export function createNaiPreviewWindow({
       if (btn.dataset.pvw === 'close') { close(); return; }
       if (btn.dataset.pvw === 'save') { void save(btn); return; }
       // ⚠️ 닫지 않는다 - 같은 자리에서 새 프리뷰로 갈린다(재테스트 루프).
-      if (btn.dataset.pvw === 'generate') onGenerate?.();
+      if (btn.dataset.pvw === 'generate') onGenerate?.(showing);
     });
     doc.addEventListener('keydown', event => {
       if (event.key === 'Escape' && isOpen()) close();
@@ -106,6 +108,13 @@ export function createNaiPreviewWindow({
   /** 서버가 보낸 `nai_preview_result` 를 받아 띄운다. */
   function show(message) {
     if (!root) build();
+    showing = message || null;
+    // ⚠️ 캐릭터 테스트 생성 결과는 **이미 저장됐다**(Results 에 있다) - [Save] 는
+    //    뜻이 없어 감춘다. 프리뷰의 그림만 저장 안 된 것이다.
+    const character = String(message?.kind || '') === 'character';
+    const saveBtn = root.querySelector('[data-pvw="save"]');
+    if (saveBtn) saveBtn.hidden = character;
+    root.classList.toggle('is-character', character);
     const bytes = atob(String(message.image || ''));
     const buffer = new Uint8Array(bytes.length);
     for (let i = 0; i < bytes.length; i += 1) buffer[i] = bytes.charCodeAt(i);

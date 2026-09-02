@@ -9,11 +9,16 @@
 
 ## 무엇이 어디서 오는가
 
-    메인 프롬프트   PE 모듈의 pre_prompt + **1girl|1boy** + post_prompt
+    메인 프롬프트   **1girl|1boy** + PE 모듈의 pre_prompt + post_prompt
+                    (주어는 맨 앞. 캐릭터에 girl/boy 가 없으면 주어를 아예 안 넣는다)
     캐릭터          그 프레임의 prompt/uc 를 `characters`/`uc` 로 **직접** 싣는다
     파라미터        사용자의 현재 값 그대로 (모델·해상도·스텝·샘플러…)
     결과            **Results** (평소 생성과 같다 - 디스크·히스토리·Result 탭)
-                    만든 메인 프롬프트는 **메인 프롬프트 창**에 적는다
+                    + 프리뷰 창에 한 번 더 (캐릭터 모듈이 Result 를 덮는다)
+
+⚠️ 메인 프롬프트 창은 **안 건드린다**(사용자 지정 2026-09-02: "사용자는 본인의
+   메인 프롬프트가 덮이는걸 매우 싫어합니다"). 무엇이 나갔는지는 프리뷰 창의
+   머리글·메타와 저장된 이미지의 메타데이터가 말해 준다.
 
 ## 왜 슬롯을 안 거치는가
 
@@ -57,17 +62,22 @@ def _tags(text: Any) -> list[str]:
 
 
 def detect_subject(prompt: Any) -> str:
-    """캐릭터 프롬프트를 보고 `1girl` / `1boy` 중 하나를 고른다.
+    """캐릭터 프롬프트를 보고 `1girl` / `1boy` / **아무것도 아님**(빈 문자열).
 
-    ⚠️ 둘 다 있으면 **girl** 이다. 근거를 못 대는 추측 대신 기존 기본값을 지킨다 -
-       NAIA 의 다른 자리들도 여자를 기본으로 둔다.
+    ⚠️ 둘 다 있으면 **girl** 이다. 근거를 못 대는 추측 대신 기존 기본값을 지킨다.
+    ⚠️ **둘 다 없으면 안 넣는다**(사용자 지정 2026-09-02: "이게 안가는 경우는
+       사용자가 캐릭터 프롬프트에 girl이나 boy를 안 써서 아예 1girl, 1boy 주입이
+       안되는 경우에만 한정됩니다"). `object, chandelier` 같은 캐릭터에 사람을
+       지어내면 안 된다.
     """
     from core.character_settings import strip_connect_markers
 
     tags = set(_tags(strip_connect_markers(str(prompt or ''))))
     if tags & _BOY_TAGS and not (tags & _GIRL_TAGS):
         return SUBJECT_BOY
-    return SUBJECT_GIRL
+    if tags & _GIRL_TAGS:
+        return SUBJECT_GIRL
+    return ""
 
 
 def _pe_settings(context: Any) -> dict[str, Any]:
@@ -86,15 +96,18 @@ def build_instant_prompt(context: Any, frame: dict[str, Any]) -> str:
        넣으면 같은 태그가 두 번 실려 그 캐릭터가 화면을 뒤덮는다.
     """
     settings = _pe_settings(context)
+    # ⚠️ 주어는 **맨 앞**이다(사용자 지정 2026-09-02). NAI 는 앞에 온 태그를 더 세게
+    #    본다 - 아티스트 가중치 뒤에 끼면 인원 수가 흔들린다.
     parts = [
-        str(settings.get("pre_prompt") or "").strip(),
         detect_subject(frame.get("prompt")),
+        str(settings.get("pre_prompt") or "").strip(),
         str(settings.get("post_prompt") or "").strip(),
     ]
     return ", ".join(part for part in parts if part)
 
 
-def build_instant_overrides(request_id: str, frame: dict[str, Any]) -> dict[str, Any]:
+def build_instant_overrides(request_id: str, frame: dict[str, Any],
+                           uuid: str = "") -> dict[str, Any]:
     """생성 요청에 얹을 것. **파라미터는 안 건드린다** - 사용자 현재 값 그대로 나간다.
 
     ⚠️ `uc` 는 `characters` 와 **길이가 같아야** 한다. 어긋나면
@@ -120,4 +133,9 @@ def build_instant_overrides(request_id: str, frame: dict[str, Any]) -> dict[str,
         #    Auto Gen 연쇄와 Vibe 주입에서 빠지기 위한 것뿐이다.
         INSTANT_REQUEST_FLAG: True,
         "character_instant_request_id": str(request_id or ""),
+        # 프리뷰 창이 [Generate] 로 **같은 캐릭터**를 다시 뽑을 수 있게.
+        "character_instant_uuid": str(uuid or ""),
+        "nai_preview_title": str(
+            frame.get("custom_name") or strip_connect_markers(
+                str(frame.get("prompt") or "")))[:60],
     }

@@ -163,6 +163,14 @@ export function createCharacterPanel({
     setModuleParam('character', `char_slot_state_${index}`, state);
   }
 
+  /**
+   * 슬롯 별칭. **화면에는 버튼이 없다**(사용자 지정 2026-09-02):
+   *   "이름 바꾸기는 필요없는것이, 애초에 검색을 통해 내부 컨텐츠를 읽을 수
+   *    있으면 문제없기 때문입니다."
+   * 히스토리 검색이 프롬프트 전문을 훑으므로 별칭 없이도 찾을 수 있다.
+   * ⚠️ 함수는 남긴다 - `app.js` 의 전역 `renameCharacterSlot` 이 이것을 부르고,
+   *    이미 붙어 있는 별칭은 목록에서 계속 이름으로 쓰인다(`slotLabel`).
+   */
   async function renameSlot(index) {
     const character = (lastState?.characters || [])[index];
     if (!character || !showPromptDialog) return;
@@ -197,17 +205,13 @@ export function createCharacterPanel({
           <button type="button" class="cw-slot-en${muted ? '' : ' is-on'}"
             data-cw-mute="${index}" title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">✔</button>
           <span class="cw-slot-name">C${ordinal} · ${escHtml(slotLabel(character))}</span>
-          <!-- ⚠️ 이름 바꾸기는 **우클릭에만** 있었다 - 화면 어디에도 표시가 없어
-               찾을 수 없었다(내가 조사에서 지적하고 내가 또 만들었다). Tagger 와
-               같은 방식으로 **행에 마우스를 올리면 나타난다**. -->
-          <button type="button" class="cw-slot-btn cw-reveal" data-cw-rename="${index}"
-            title="이름 바꾸기">✎</button>
           <button type="button" class="cw-slot-btn${character.favorite ? ' is-star' : ''}"
             data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
+          <!-- ⚠️ **지우면 히스토리로 간다**(사용자 지정 2026-09-02). 그래서 위험
+               색을 쓰지 않는다 - 잃는 것이 없다. 예전의 ▼(내리기)와 ✕(삭제)가
+               같은 일이 되어 컨트롤이 하나로 줄었다. -->
           <button type="button" class="cw-slot-btn" data-cw-down="${index}"
-            title="히스토리로 내린다 (거기서 다시 담을 수 있다)">▼</button>
-          <button type="button" class="cw-slot-btn is-danger" data-cw-remove="${index}"
-            title="삭제">✕</button>
+            title="히스토리로 보낸다 (거기서 다시 담을 수 있다)">✕</button>
         </div>
         <div class="cw-slot-body">
           <textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-min="prompt"
@@ -274,6 +278,7 @@ export function createCharacterPanel({
             <button type="button" class="cw-li-star${character.favorite ? ' is-on' : ''}"
               data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
             <span class="cw-li-text">${escHtml(slotLabel(character, {full: true}))}</span>
+
             ${groupOf(character)
               ? `<button type="button" class="cw-li-group" data-cw-editgroup="${index}"
                   title="그룹 바꾸기">${escHtml(groupOf(character))}</button>`
@@ -452,8 +457,6 @@ export function createCharacterPanel({
         setModuleParam('character', `char_muted_${index}`, String(!character?.muted));
         return;
       }
-      const rename = hit('[data-cw-rename]');
-      if (rename) { void renameSlot(Number(rename.dataset.cwRename)); return; }
 
 
       if (hit('[data-cw-fav-only]')) { favouritesOnly = !favouritesOnly; rerender(); return; }
@@ -465,18 +468,9 @@ export function createCharacterPanel({
     });
 
     root.addEventListener('contextmenu', event => {
-      // 버튼을 꺼낸 뒤에도 우클릭은 **지름길로 남긴다**(익숙한 사람용).
-      // ⚠️ 슬롯은 **머리줄에서만** 받는다 - 프롬프트 칸에서 우클릭하면 붙여넣기
-      //    같은 브라우저 기본 메뉴가 떠야 한다.
-      const row = event.target.closest('.cw-slot-row');
-      if (row) {
-        const holder = row.closest('[data-cw-slot]');
-        if (holder) {
-          event.preventDefault();
-          void renameSlot(Number(holder.dataset.cwSlot));
-        }
-        return;
-      }
+      // ⚠️ 슬롯 행에서는 아무것도 가로채지 않는다 - 이름 조작이 히스토리로 갔고,
+      //    프롬프트 칸에서 우클릭하면 붙여넣기 같은 기본 메뉴가 떠야 한다.
+      // 히스토리 행은 그룹의 지름길로 남긴다(버튼도 함께 보인다).
       const item = event.target.closest('[data-cw-li]');
       if (!item) return;
       event.preventDefault();

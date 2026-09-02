@@ -89,8 +89,6 @@ def register_character_instant_routes(
 
         prompt = await run_in_thread(build_instant_prompt, session_context, frame)
         overrides = build_instant_overrides(request_id, frame)
-        overrides["nai_preview_title"] = str(
-            frame.get("custom_name") or frame.get("prompt") or "")[:60]
 
         generation = _generation_service(session_context)
         dispatch = await run_in_thread(
@@ -113,5 +111,6 @@ def register_character_instant_routes(
             "requestId": request_id,
             "subject": detect_subject(frame.get("prompt")),
             "prompt": prompt,
-            "character": str(frame.get("prompt") or ""),
+            # 화면이 메인 프롬프트 창에 적을 값(아티스트 Random Prompt 와 같은 사양).
+            "character": overrides["characters"][0],
         }

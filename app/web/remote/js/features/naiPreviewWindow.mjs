@@ -55,18 +55,31 @@ export function createNaiPreviewWindow({
     return !!(root && root.classList.contains('open'));
   }
 
-  /** 결과 스테이지 **안에** 가둔다 - 밖으로 나가면 다른 패널을 덮는다. */
+  /**
+   * **메인 프롬프트 창 자리**에 띄운다(사용자 지정 2026-09-02).
+   *
+   * ⚠️ 예전에는 결과 스테이지(`.viewer-wrapper`) 한가운데였다. 넓은 화면에서는
+   *    그 자리가 오른쪽 끝이라 방금 만든 프롬프트에서 눈이 멀어지고, 무엇보다
+   *    **창이 스테이지보다 커지면 [Close] 줄이 화면 밖으로 밀려 닫을 수 없었다**
+   *    (사용자 제보: "창을 닫을 수 없게 되었습니다").
+   * ⚠️ 그래서 자리는 프롬프트 창에 맞추되, **뷰포트 안으로 반드시 가둔다.**
+   *    높이 제한은 CSS 가 함께 건다(`max-height`) - 둘 중 하나만으로는 샌다.
+   */
   function place() {
     if (!isOpen()) return;
-    const stage = doc.querySelector('.viewer-wrapper');
-    if (!stage) return;
-    const box = stage.getBoundingClientRect();
-    if (box.width <= 0 || box.height <= 0) return;
+    const anchor = doc.getElementById('promptEdit') || doc.querySelector('.viewer-wrapper');
     const rect = root.getBoundingClientRect();
-    const left = box.left + (box.width - rect.width) / 2;
-    const top = box.top + (box.height - rect.height) / 2;
-    root.style.left = `${Math.round(Math.max(box.left + 8, left))}px`;
-    root.style.top = `${Math.round(Math.max(box.top + 8, top))}px`;
+    const box = anchor ? anchor.getBoundingClientRect() : null;
+    const wantLeft = box && box.width > 0
+      ? box.left + (box.width - rect.width) / 2
+      : (win.innerWidth - rect.width) / 2;
+    const wantTop = box && box.height > 0
+      ? box.top + (box.height - rect.height) / 2
+      : (win.innerHeight - rect.height) / 2;
+    const clamp = (value, span, room) => Math.round(
+      Math.max(8, Math.min(value, room - span - 8)));
+    root.style.left = `${clamp(wantLeft, rect.width, win.innerWidth)}px`;
+    root.style.top = `${clamp(wantTop, rect.height, win.innerHeight)}px`;
   }
 
   async function save(btn) {
@@ -99,7 +112,13 @@ export function createNaiPreviewWindow({
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = URL.createObjectURL(new Blob([buffer], {type: 'image/webp'}));
     const img = doc.getElementById('preview45Image');
-    if (img) img.src = objectUrl;
+    if (img) {
+      // ⚠️ **그림이 그려진 뒤에 다시 자리를 잡는다.** 지금 재면 창은 아직 옛 크기라,
+      //    세로로 긴 그림이 들어와 자라면 아래쪽이 화면 밖으로 나간다 - 실측:
+      //    높이 683 인데 340 으로 재고 자리를 잡아 밑변이 1103(화면 1080)이었다.
+      img.addEventListener('load', place, {once: true});
+      img.src = objectUrl;
+    }
     const meta = doc.getElementById('preview45WindowMeta');
     // 실려 나간 캐릭터 수를 함께 적는다 - 0 이면 캐릭터가 빠진 것이고, 그것은
     // 화면만 봐서는 알 수 없다(예전에 조용히 사라지던 자리다).

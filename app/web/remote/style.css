@@ -9595,7 +9595,10 @@ body.resizing-result-info {
 /* V4.5 프리뷰 창(사용자 지정 2026-09-01). 결과 스테이지 가운데에 뜬다.
    ⚠️ 이 그림은 **저장되지 않는다** - 창을 닫으면 사라진다. 그래서 [Save] 가 있다.
    액션 줄: Generate 가 크고 Save/Close 는 좌우 구석에 작게(사용자 지정). */
+/* ⚠️ 높이를 **반드시** 가둔다. 세로로 긴 그림이 오면 창이 화면보다 커져 [Close] 줄이
+   밖으로 밀린다 - 사용자가 닫지 못한다(제보 2026-09-02). 줄어드는 쪽은 그림이다. */
 .pvw-window {
+  max-height: calc(100vh - 16px);
   position: fixed;
   z-index: var(--z-floating-module-aux);
   width: min(420px, calc(100vw - 24px));
@@ -9608,6 +9611,13 @@ body.resizing-result-info {
   overflow: hidden;
 }
 .pvw-window.open { display: flex; }
+/* 그림 칸이 남는 높이를 먹고, 넘치면 스스로 줄어든다(min-height:0 이 없으면 flex
+   자식은 콘텐츠 크기 아래로 안 줄어 창이 그대로 커진다). */
+.pvw-window .pvw-stage { flex: 1 1 auto; min-height: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; }
+.pvw-window .pvw-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.pvw-window .pvw-actions { flex: none; }
+.pvw-window .pvw-head { flex: none; }
 .pvw-head {
   min-height: 28px;
   display: flex; align-items: center; gap: 8px;

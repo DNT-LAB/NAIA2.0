@@ -528,9 +528,12 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # 사용자 지정: "저장이 되지 않는 이미지". 디스크에도 안 쓰고 히스토리에도
             # 안 남긴다 - 여기서 갈라져 나가므로 아래 auto_save / broadcast_image /
             # viewer_new_image_payload 를 **하나도** 타지 않는다.
-            # 캐릭터 '즉시 생성' 도 같은 길이다 - 프롬프트 창에 띄우고 흔적을 안 남긴다.
+            # ⚠️ 캐릭터 '즉시 생성' 은 **여기로 오지 않는다**(사용자 제보 2026-09-02:
+            #    "사용자는 Results에 결과가 남는 것을 원할 것 입니다"). 평소 길로 흘러
+            #    디스크·히스토리·Result 탭을 모두 탄다 - 그래야 메타데이터로 PE 설정이
+            #    실제로 실렸는지도 확인할 수 있다.
             _params = getattr(request, "params", {}) or {}
-            if _params.get("nai_preview_request") or _params.get("character_instant_request"):
+            if _params.get("nai_preview_request"):
                 context.is_generating = False
                 await _finish_nai_preview(context, clients, request, stored)
                 continue

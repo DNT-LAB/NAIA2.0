@@ -31,6 +31,8 @@ export function createCharacterPanel({
   flushCharacterEdits,
   setModuleParam,
   showPromptDialog = null,
+  // 즉시 생성이 만든 메인 프롬프트를 화면에 적는다(아티스트 Random Prompt 와 같은 사양).
+  setPromptFields = null,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
 
@@ -342,10 +344,11 @@ export function createCharacterPanel({
   }
 
   /**
-   * 즉시 생성 - 이 캐릭터 하나만 시험 삼아 뽑아 프롬프트 창에 띄운다.
+   * 즉시 생성 - 이 캐릭터 하나만 시험 삼아 뽑는다.
    *
-   * 메인 프롬프트는 서버가 만든다(PE 선행 + `1girl|1boy` + 후행). 파라미터는
-   * 사용자의 현재 값 그대로다.
+   * 메인 프롬프트는 서버가 만든다(PE 선행 + `1girl|1boy` + 후행) - 그것을 화면에도
+   * 적어 눈으로 대조할 수 있게 한다. 파라미터는 사용자의 현재 값 그대로이고,
+   * 결과는 **Results 에 남는다**(평소 생성과 같은 길).
    *
    * ⚠️ **슬롯을 안 건드린다.** 예전에는 이 캐릭터를 슬롯으로 복원한 뒤 평소의
    *    Generate 를 눌렀다 - 메인 프롬프트가 화면의 것 그대로 나갔고, 시험 삼아
@@ -366,6 +369,11 @@ export function createCharacterPanel({
         showToastSafe(data.error || data.message || '즉시 생성을 시작하지 못했습니다.');
         return;
       }
+      // ⚠️ 만든 메인 프롬프트를 **화면에도 적는다**(사용자 제보 2026-09-02:
+      //    PE 설정값이 실렸는지 확인할 길이 없었다). 아티스트 탭의
+      //    [Generate with Random Prompt] 가 쓰는 사양과 같다 - 보낸 글이 눈앞에
+      //    남아야 결과와 대조할 수 있다.
+      if (typeof setPromptFields === 'function' && data.prompt) setPromptFields(data.prompt);
       showToastSafe(`즉시 생성 중… (${data.subject})`);
     } catch (error) {
       showToastSafe('즉시 생성 요청 실패: ' + error.message);

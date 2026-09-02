@@ -2280,7 +2280,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-instant')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-instant2')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2289,6 +2289,10 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-
       flushCharacterEdits,
       setModuleParam,
       showPromptDialog,
+      // 즉시 생성이 만든 메인 프롬프트를 화면에 적는다. `authored` 로 두어야
+      // 사용자가 쓴 글로 취급돼 프리셋 표식이 따라간다(아티스트 탭과 같다).
+      setPromptFields: (prompt, negative) => applyPromptFields(
+        prompt, negative != null ? negative : negEdit?.value, {authored: true}),
     });
   })
   .catch(error => {
@@ -10217,7 +10221,7 @@ document.addEventListener('keydown', event => {
 // 프리뷰 창(지연 로드). ⚠️ 이 그림은 **저장되지 않는다** - 서버가 결과 저장소에서
 //    빼고 디스크에도 안 쓴다. [Save] 를 눌렀을 때만 쓴다.
 let naiPreviewWindow = null;
-const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260902-cast')
+const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260902-place2')
   .then(({createNaiPreviewWindow}) => {
     naiPreviewWindow = createNaiPreviewWindow({
       document,

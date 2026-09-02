@@ -12,7 +12,8 @@
     메인 프롬프트   PE 모듈의 pre_prompt + **1girl|1boy** + post_prompt
     캐릭터          그 프레임의 prompt/uc 를 `characters`/`uc` 로 **직접** 싣는다
     파라미터        사용자의 현재 값 그대로 (모델·해상도·스텝·샘플러…)
-    결과            프롬프트 창의 프리뷰 (디스크·히스토리·Result 탭을 안 탄다)
+    결과            **Results** (평소 생성과 같다 - 디스크·히스토리·Result 탭)
+                    만든 메인 프롬프트는 **메인 프롬프트 창**에 적는다
 
 ## 왜 슬롯을 안 거치는가
 
@@ -61,7 +62,9 @@ def detect_subject(prompt: Any) -> str:
     ⚠️ 둘 다 있으면 **girl** 이다. 근거를 못 대는 추측 대신 기존 기본값을 지킨다 -
        NAIA 의 다른 자리들도 여자를 기본으로 둔다.
     """
-    tags = set(_tags(prompt))
+    from core.character_settings import strip_connect_markers
+
+    tags = set(_tags(strip_connect_markers(str(prompt or ''))))
     if tags & _BOY_TAGS and not (tags & _GIRL_TAGS):
         return SUBJECT_BOY
     return SUBJECT_GIRL
@@ -97,8 +100,14 @@ def build_instant_overrides(request_id: str, frame: dict[str, Any]) -> dict[str,
     ⚠️ `uc` 는 `characters` 와 **길이가 같아야** 한다. 어긋나면
        `NAICharacterData` 가 거부한다(이제는 조용히 사라지지 않고 막힌다).
     """
+    from core.character_settings import strip_connect_markers
+
     return {
-        "characters": [str(frame.get("prompt") or "")],
+        # ⚠️ `&connect: … &end` 를 걷는다(사용자 지정 2026-09-02). Connect 원본이면
+        #    그 표식이 프롬프트에 **박혀 있다**(`_sync_connect_markers` 가 넣는다).
+        #    혼자 나가는 시험 생성에는 물릴 상대가 없어 뜻이 없고, 그대로 실으면
+        #    NAI 가 그것을 글자로 받는다.
+        "characters": [strip_connect_markers(str(frame.get("prompt") or ""))],
         "uc": [str(frame.get("uc") or "")],
         # 캐릭터 모듈·레퍼런스가 나중에 자기 슬롯으로 덮어쓰지 못하게 막는다.
         "_skip_character_late_binding": True,
@@ -107,8 +116,8 @@ def build_instant_overrides(request_id: str, frame: dict[str, Any]) -> dict[str,
         "_skip_vibe_transfer_late_binding": True,
         # 이 한 장으로 끝난다 - Auto Gen 연쇄를 이어받으면 시키지 않은 그림이 계속 나간다.
         "auto_generate": False,
+        # ⚠️ 이 표식은 **결과를 빼돌리지 않는다**(사용자 제보: Results 에 남아야 한다).
+        #    Auto Gen 연쇄와 Vibe 주입에서 빠지기 위한 것뿐이다.
         INSTANT_REQUEST_FLAG: True,
-        # ⚠️ 결과를 프롬프트 창으로 돌리는 배선은 프리뷰와 **같은 것**을 쓴다
-        #    (`generation_runner._finish_nai_preview`). 그래서 요청 id 키도 같다.
-        "nai_preview_request_id": str(request_id or ""),
+        "character_instant_request_id": str(request_id or ""),
     }

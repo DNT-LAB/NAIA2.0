@@ -89,6 +89,28 @@ export function createCharacterPanel({
   }
 
 
+  /**
+   * 커서에 붙일 **작은 칩**. 기본 고스트는 행 전체(340px)를 찍어 잘린 글자·버튼·
+   * 배경이 통째로 딸려 오고, 잡은 지점에 따라 화면 밖으로 뻗는다.
+   *
+   * ⚠️ 화면 **밖 좌표**로 숨긴다. `display:none`·`visibility:hidden`·`opacity:0` 은
+   *    빈 그림이 된다(기본 고스트로 돌아가지 않는다).
+   * ⚠️ `document.body` 에 붙인다. 팝업 안에 두면 팝업의 `transform` 이 `fixed` 의
+   *    기준을 바꾸고 `overflow: hidden` 이 잘라 낸다.
+   * ⚠️ 한 번 만들고 **안 지운다**. dragstart 안에서 지우면 브라우저가 스냅샷을
+   *    찍기 전에 사라진다(스냅샷은 핸들러가 끝난 뒤에 찍힌다).
+   */
+  let dragChipNode = null;
+  function dragChip(text) {
+    if (!dragChipNode) {
+      dragChipNode = document.createElement('div');
+      dragChipNode.className = 'cw-drag-chip';
+      document.body.appendChild(dragChipNode);
+    }
+    dragChipNode.textContent = text;   // setDragImage 보다 **먼저**
+    return dragChipNode;
+  }
+
   /** 우리 자료형을 든 끌기가 그룹 행 위에 있을 때만 그 행. 파일·남의 글은 무시한다. */
   function dropTarget(event) {
     const el = event.target && event.target.closest ? event.target.closest('[data-cw-drop]') : null;
@@ -112,13 +134,53 @@ export function createCharacterPanel({
       const ordinal = Number(el.dataset.cwGap || 0);
       const seat = from >= 0 && from < ordinal ? ordinal - 1 : ordinal;
       el.dataset.cwLabel = `C${seat + 1}`;
+      // 든 것의 **바로 위·아래** 틈은 놓아도 제자리다 - 자라지도, 번호를 띄우지도
+      // 않는다. 겨눌 것이 둘 줄고 거짓 목표가 사라진다.
+      el.classList.toggle('is-self', from >= 0 && (ordinal === from || ordinal === from + 1));
     });
   }
 
+  /**
+   * 슬롯 칸 안에서 커서가 가리키는 **틈**. 카드 위에 있어도 가까운 쪽을 고른다.
+   *
+   * ⚠️ 이것이 "드래그가 둔감하다"(사용자 제보 2026-09-02)의 본체였다. 틈은 26px
+   *    띠인데 카드는 100px 이 넘는다 - 나머지 위에서는 아무것도 안 잡혀 목록 위에
+   *    있는데도 반응이 없었다. 이제 **카드 어디에 있어도** 위/아래 절반으로 갈라
+   *    가까운 틈이 켜진다.
+   * ⚠️ `getBoundingClientRect` 는 카드 **하나만** 잰다. 스물다섯 개를 재면 이벤트
+   *    마다 레이아웃을 강제한다.
+   */
+  function slotGapAt(event) {
+    const gaps = [...moduleBody.querySelectorAll('.cw-slot-gap')];
+    if (!gaps.length) return null;
+    const at = ordinal => gaps.find(g => Number(g.dataset.cwGap) === ordinal)
+      || gaps[gaps.length - 1];
+    const node = event.target && event.target.closest ? event.target : null;
+    const card = node ? node.closest('.cw-slot') : null;
+    if (card) {
+      const box = card.getBoundingClientRect();
+      const seat = [...moduleBody.querySelectorAll('.cw-slot')].indexOf(card);
+      return at(seat + (event.clientY > box.top + box.height / 2 ? 1 : 0));
+    }
+    const onGap = node ? node.closest('.cw-slot-gap') : null;
+    if (onGap) return onGap;
+    // 머리줄 위쪽이면 첫 자리, 그 밖(= `+ Add Character` 아래 빈 곳)이면 마지막.
+    return event.clientY < gaps[0].getBoundingClientRect().top ? gaps[0] : gaps[gaps.length - 1];
+  }
+
+  /** 실제로 겨눠진 것. 슬롯 칸이면 **틈까지** 좁혀 준다. */
+  function aimed(event) {
+    const target = dropTarget(event);
+    if (!target || target.dataset.cwDrop !== GRP_SLOT) return target;
+    return slotGapAt(event) || target;
+  }
+
+
   function clearDrag() {
     dragUuid = '';
-    moduleBody.querySelectorAll('.is-dragging, .is-drop, .is-dropzone')
-      .forEach(el => el.classList.remove('is-dragging', 'is-drop', 'is-dropzone'));
+    const kill = ['is-dragging', 'is-drop', 'is-dropzone', 'is-self'];
+    moduleBody.querySelectorAll('.' + kill.join(', .'))
+      .forEach(el => el.classList.remove(...kill));
   }
 
   /** 이 패널은 showToast 를 주입받지 않는다 - 전역이 있으면 쓴다. */
@@ -763,9 +825,17 @@ export function createCharacterPanel({
       if (hit('[data-cw-search-tab]')) window.openCharacterViewerTab?.();
     });
 
+    // ⚠️ 버튼을 누른 채 3px 만 밀려도 브라우저는 행을 끌기 시작한다 - 그러면 그
+    //    클릭이 사라진다(✕ 를 눌렀는데 아무 일도 안 나는 것으로 보인다). dragstart 의
+    //    target 은 **끌리는 요소**라 거기서는 버튼을 알 수 없어, 누른 자리를 기억한다.
+    let pressedButton = false;
+    root.addEventListener('mousedown', event => {
+      pressedButton = !!(event.target && event.target.closest && event.target.closest('button'));
+    });
     root.addEventListener('dragstart', event => {
       const row = event.target && event.target.closest ? event.target.closest('[data-cw-drag]') : null;
       if (!row) return;
+      if (pressedButton) { event.preventDefault(); return; }
       dragUuid = row.dataset.cwDragUuid || '';
       try {
         // ⚠️ **uuid 를 싣는다.** index 를 실으면 끌기 도중 다른 에코가 목록을 다시
@@ -775,6 +845,9 @@ export function createCharacterPanel({
         // 일부 브라우저는 표준 자료형이 하나도 없으면 끌기를 취소한다.
         event.dataTransfer.setData('text/plain', dragUuid);
         event.dataTransfer.effectAllowed = 'move';
+        const name = row.querySelector('.cw-slot-name, .cw-li-text');
+        event.dataTransfer.setDragImage(
+          dragChip((name?.textContent || '캐릭터').trim().slice(0, 40)), 12, 11);
       } catch (_) { /* 무시 */ }
       row.closest('.cw-li, .cw-slot')?.classList.add('is-dragging');
       // ⚠️ 히스토리 목록은 **활성 슬롯을 끌 때만** 불이 켜진다 - 히스토리의 것을
@@ -789,10 +862,16 @@ export function createCharacterPanel({
     });
     root.addEventListener('dragend', () => clearDrag());
     root.addEventListener('dragover', event => {
-      const target = dropTarget(event);
+      const target = aimed(event);
       if (!target) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
+      // 제자리 틈은 놓아도 아무 일이 없다 - 커서로 그렇게 말한다.
+      const dead = target.classList.contains('is-self');
+      event.dataTransfer.dropEffect = dead ? 'none' : 'move';
+      if (dead) {
+        moduleBody.querySelectorAll('.is-drop').forEach(el => el.classList.remove('is-drop'));
+        return;
+      }
       if (!target.classList.contains('is-drop')) {
         moduleBody.querySelectorAll('.is-drop').forEach(el => el.classList.remove('is-drop'));
         target.classList.add('is-drop');
@@ -803,12 +882,19 @@ export function createCharacterPanel({
       if (target && !target.contains(event.relatedTarget)) target.classList.remove('is-drop');
     });
     root.addEventListener('drop', event => {
-      const target = dropTarget(event);
+      const target = aimed(event);
       if (!target) return;
+      if (target.classList.contains('is-self')) { event.preventDefault(); clearDrag(); return; }
       event.preventDefault();
       let uuid = '';
       try { uuid = event.dataTransfer.getData(DND_MIME); } catch (_) { uuid = ''; }
       const key = target.dataset.cwDrop;
+      // ⚠️ 놓은 뒤 표시를 붙잡아 두는 장치는 **안 넣는다.** 서버 에코가 화면을 바꾸기까지
+      //    **16ms** 다(실측 2026-09-02, 놓은 순간부터 순서가 바뀔 때까지). 데스크톱
+      //    앱도 같은 기계의 백엔드와 이야기하고, 지연이 있을 모바일에서는 HTML5 끌기가
+      //    아예 안 뜬다 - 붙잡을 공백 자체가 없다.
+      //    (설계 상담에 내가 "300~600ms" 라고 **재지 않은 숫자**를 넘겨 이 장치를
+      //     한 번 만들었다 되물렸다. 숫자를 넘기기 전에 재라.)
       clearDrag();
       // 놓는 **지금**의 상태에서 번호를 찾는다(끌던 사이에 목록이 밀렸을 수 있다).
       const index = (lastState?.characters || []).findIndex(

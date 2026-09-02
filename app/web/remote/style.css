@@ -13838,25 +13838,52 @@ body.detached-metadata .metadata-layout {
 .cw-slot-gap { height: 0; border-radius: 4px; }
 .cw-slots.is-dropzone .cw-slot-gap {
   position: relative; z-index: 3;
-  height: 26px; margin: -13px 0;
-  background: rgba(124,106,239,0.12);
-  border: 1px dashed rgba(124,106,239,0.45); }
+  height: 26px; margin: -13px 0; }
+/* 쉬는 틈은 **한 가닥 선**이다. 점선 상자 여섯 개가 동시에 뜨면 시끄럽다 - 겨눔
+   영역(26px)은 투명하게 두고 가운데에 실선만 긋는다. 높이에 참여하면 안 된다. */
+.cw-slots.is-dropzone .cw-slot-gap::before {
+  content: ''; position: absolute; left: 6px; right: 6px; top: 50%;
+  height: 1px; background: var(--accent); opacity: 0.35; }
 /* 맨 위 틈은 위로 걸칠 곳이 없다(스크롤 밖으로 잘린다) - 그래서 **아래로만** 걸친다.
    실측: 이걸 안 하면 끌기 시작에 목록 전체가 13px 내려앉는다. */
 .cw-slots.is-dropzone .cw-slot-gap:first-child { margin: 0 0 -26px; }
 .cw-slots.is-dropzone .cw-slot-gap.is-drop {
-  height: 56px; margin-bottom: 0;
-  background: rgba(124,106,239,0.26);
-  border-style: solid; border-color: var(--accent); }
+  height: 40px; margin-bottom: 0;
+  background: rgba(124,106,239,0.16);
+  border: 1px solid var(--accent); }
+.cw-slots.is-dropzone .cw-slot-gap.is-drop::before { display: none; }
+/* 든 것의 바로 위·아래 틈은 놓아도 제자리다 - 선도 안 긋는다(거짓 목표 제거). */
+.cw-slots.is-dropzone .cw-slot-gap.is-self::before { display: none; }
 /* 자리 이름(C2 …)은 **가리켰을 때만** 보인다 - 다섯 개가 한꺼번에 외치면 시끄럽다. */
 .cw-slots.is-dropzone .cw-slot-gap::after {
   content: attr(data-cw-label); position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
   color: var(--accent); opacity: 0; pointer-events: none; }
 .cw-slots.is-dropzone .cw-slot-gap.is-drop::after {
   color: var(--text-primary); opacity: 1; }
-.cw-slot.is-dragging { opacity: 0.45; }
+/* 든 것은 자리를 지키고 흐려진다. 자리를 지우면 목록이 통째로 당겨져 틈 번호와
+   백엔드의 자리 계산이 어긋난다. 점선 한 톨로 "지금 공중에 있다" 를 말한다. */
+.cw-slot.is-dragging, .cw-li.is-dragging { opacity: 0.38;
+  outline: 1px dashed rgba(124,106,239,0.45); outline-offset: -1px; }
+.cw-slot-row[draggable="true"], .cw-li-row[draggable="true"] { cursor: grab; }
+.cw-slot-row[draggable="true"]:active, .cw-li-row[draggable="true"]:active { cursor: grabbing; }
+/* 커서에 붙는 칩. 기본 고스트는 행 전체(340px)를 찍어 잘린 글자·버튼·배경이 통째로
+   딸려 온다.
+   ⚠️ 배경은 **불투명 리터럴**이어야 한다 - 반투명 토큰은 패널 위에서만 성립하고
+      공중에서는 무너진다. 브라우저가 어차피 반투명을 한 겹 입히므로 그 상태에서
+      읽히도록 밝은 테두리를 준다.
+   ⚠️ 화면 밖 좌표로 숨긴다 - display:none 이면 **빈 그림**이 된다. */
+.cw-drag-chip {
+  position: fixed; left: -10000px; top: 0; pointer-events: none;
+  display: flex; align-items: center;
+  height: 22px; max-width: 200px; padding: 0 8px;
+  background: #1b1c2b; border: 1px solid var(--accent); border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px;
+  color: var(--text-primary); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
 .cw-slots.is-drop { outline: 1px solid var(--accent); outline-offset: -3px;
   background: rgba(124,106,239,0.10); }
 .cw-grp-row.is-drop .cw-grp-open { border-color: var(--accent); background: rgba(124,106,239,0.22); border-style: solid; }

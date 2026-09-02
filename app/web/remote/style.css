@@ -13957,6 +13957,39 @@ body.detached-metadata .metadata-layout {
 .cw-detail-fields .cw-li-field { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cw-dim { color: var(--text-dim); }
 
+/* ── 검색 탭 (Danbooru 도감) ─────────────────────────────────────────────
+   ⚠️ **타일이 아니라 행**이다. 도감 13,497명 중 그림이 있는 것은 3,000명뿐이라
+      타일 격자로 두면 이니셜 상자의 벽이 된다(Interactive 가 검증한 행 모양을 쓴다). */
+.cw-dex-list { display: grid; gap: 4px; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr));
+  grid-auto-rows: max-content; }
+.cw-dex { display: flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 3px; border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(0,0,0,0.22); cursor: pointer; text-align: left; }
+.cw-dex:hover { border-color: var(--accent); }
+.cw-dex.is-on { border-color: var(--accent); background: rgba(124,106,239,0.16); }
+.cw-dex-img { flex: none; width: 40px; height: 52px; border-radius: 3px;
+  object-fit: cover; object-position: center 20%; background: rgba(0,0,0,0.4); }
+.cw-dex-img.is-initial { display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono, monospace); font-size: 15px; color: var(--text-dim); }
+.cw-dex-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cw-dex-name { font-size: 10.5px; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-dex-sub { font-family: var(--font-mono, monospace); font-size: 9px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 게시물이 50 미만이면 태그가 얕다 - 색으로 미리 말해 준다(Interactive 와 같은 잣대). */
+.cw-dex-sub.is-thin { color: #d0a45f; }
+.cw-dex-more { grid-column: 1 / -1; height: 24px; border-radius: 5px;
+  border: 1px dashed var(--border-dim); background: transparent;
+  color: var(--text-dim); font-size: 10px; cursor: pointer; }
+.cw-dex-more:hover { border-color: var(--accent); color: var(--text-primary); }
+.cw-detail-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 4px; }
+/* 칩이 없으면 줄 자체가 자리를 안 먹는다. */
+.cw-dex-scope-row:empty { display: none; }
+.cw-detail-img.is-initial { display: flex; align-items: center; justify-content: center;
+  height: 120px; font-family: var(--font-mono, monospace); font-size: 34px;
+  color: var(--text-dim); }
+
 .cw-drag-chip {
   position: fixed; left: -10000px; top: 0; pointer-events: none;
   display: flex; align-items: center;

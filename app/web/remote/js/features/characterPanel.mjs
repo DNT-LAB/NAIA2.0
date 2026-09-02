@@ -89,6 +89,25 @@ export function createCharacterPanel({
   let assetSeq = 0;              // 낡은 응답을 버리는 표
   let assetError = '';
 
+  // ── 검색 탭 (Danbooru 도감) ────────────────────────────────────────────
+  //
+  // ⚠️ 도감은 **13,497명**이다(2026-09-02 실측 · 코드 주석의 9,738 은 낡았다).
+  //    전부 받을 수 없으므로 40건씩 페이지로 받는다.
+  let dexRows = [];
+  let dexPage = 0;
+  let dexPages = 1;
+  let dexTotal = 0;
+  let dexQuery = '';
+  let dexGroup = '';            // 작품으로 좁히기('' = 전체)
+  let dexGroups = [];           // 이름 검색 중 함께 뜨는 작품 칩
+  let dexLoading = false;
+  let dexSeq = 0;
+  let dexPicked = null;         // {group, character}
+  let dexDetail = null;
+  let dexVariant = '';
+  let dexError = '';
+  let dexTimer = 0;
+
   // 그룹 탭에서 펼쳐 둔 그룹. 키는 `g:이름` · 즐겨찾기 `fav` · 그룹 없음 `none`.
   const openGroups = new Set();
   // ⚠️ 그룹 행의 키를 **그룹 이름 그대로 쓰면 안 된다.** 사용자가 `★` 이라는 그룹을
@@ -298,6 +317,9 @@ export function createCharacterPanel({
       // 에셋 탭의 고른 것·검색어·불러온 수도 작업 영역의 일부다.
       assetQuery, assetPicked, assetVariation, assetLoading ? 1 : 0,
       (assetRows || []).length, assetDetail ? assetDetail.variation : '~',
+      dexQuery, dexGroup, dexRows.length, dexLoading ? 1 : 0, dexVariant,
+      dexPicked ? `${dexPicked.group}/${dexPicked.character}` : '',
+      dexDetail ? 1 : 0, dexGroups.length,
       JSON.stringify(state?.group_colors || {}),
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
@@ -502,7 +524,8 @@ export function createCharacterPanel({
       assetError = error.message || String(error);
     } finally {
       assetLoading = false;
-      rerender();
+      // 목록만 바뀐다 - 검색칸의 캐럿을 지키려면 부분 갱신이어야 한다.
+      scheduleRerender();
     }
   }
 
@@ -646,6 +669,211 @@ export function createCharacterPanel({
         <div class="cw-pane-bot${assetPicked ? '' : ' is-folded'}">${renderAssetDetail()}</div>
       </div>
       <div class="cw-pane-count">${count}개</div>`;
+  }
+
+  // ── 검색(도감) ──────────────────────────────────────────────────────────
+
+  const DEX_PER_PAGE = 40;
+
+  /** 이름의 첫 글자 - 그림이 없는 캐릭터의 폴백. 도감의 97% 는 그림이 없다. */
+  function dexInitial(name) {
+    return String(name || '?').trim().charAt(0).toUpperCase() || '?';
+  }
+
+  async function loadDex({reset = false} = {}) {
+    if (dexLoading) return;
+    if (reset) { dexPage = 0; dexRows = []; }
+    else if (dexPage >= dexPages) return;
+    dexLoading = true;
+    const seq = ++dexSeq;
+    try {
+      const parts = [
+        `group=${encodeURIComponent(dexGroup || '__ALL__')}`,
+        `query=${encodeURIComponent(dexQuery.trim())}`,
+        `page=${dexPage}`, `per_page=${DEX_PER_PAGE}`, 'thumb_first=true',
+      ];
+      const res = await fetch(`/api/character-viewer/list?${parts.join('&')}`);
+      const data = await res.json().catch(() => ({}));
+      // ⚠️ 낡은 응답은 버린다 - 한 글자마다 요청이 나가면 순서가 뒤집힌다.
+      if (seq !== dexSeq) return;
+      if (!res.ok) throw new Error(data.error || '캐릭터를 불러오지 못했습니다.');
+      const items = Array.isArray(data.items) ? data.items : [];
+      dexRows = reset ? items : dexRows.concat(items);
+      dexTotal = Number(data.total) || dexRows.length;
+      dexPages = Number(data.total_pages) || 1;
+      dexPage = (Number(data.page) || 0) + 1;
+      dexError = '';
+    } catch (error) {
+      if (seq !== dexSeq) return;
+      dexError = error.message || String(error);
+    } finally {
+      // ⚠️ **부분 갱신**이다. 전체를 다시 그리면 검색칸이 새로 만들어져 한 글자마다
+      //    커서를 잃는다(히스토리 검색이 같은 이유로 이미 이렇게 한다).
+      if (seq === dexSeq) { dexLoading = false; scheduleRerender(); }
+    }
+  }
+
+  /** 작품 칩. **이름 모드에서만** 뜬다(`*태그` 검색에는 뜻이 없다). */
+  async function loadDexGroups() {
+    const needle = dexQuery.trim();
+    if (!needle || needle.startsWith('*')) { dexGroups = []; return; }
+    try {
+      const res = await fetch(`/api/character-viewer/groups?query=${encodeURIComponent(needle)}`);
+      const data = await res.json().catch(() => ({}));
+      // ⚠️ 첫 항목은 언제나 **`All` 센티널**이다(`build_groups` 가 맨 앞에 넣는다).
+      //    칩으로 내면 누르는 순간 작품 이름이 `__ALL__` 인 것으로 좁혀 0건이 된다.
+      const rows = (Array.isArray(data.items) ? data.items : [])
+        .filter(row => String(row.key || '') !== '__ALL__');
+      dexGroups = rows.slice(0, 8).map(row => String(row.key || row.name || ''));
+    } catch (_) {
+      dexGroups = [];
+    }
+  }
+
+  function scheduleDexSearch() {
+    if (dexTimer) clearTimeout(dexTimer);
+    // 180ms - 프리셋 패널이 쓰는 값이다(사람이 한 글자 치는 사이).
+    dexTimer = setTimeout(() => {
+      dexTimer = 0;
+      void loadDexGroups().then(() => loadDex({reset: true}));
+    }, 180);
+  }
+
+  async function loadDexDetail(group, character, variant) {
+    const seq = ++dexSeq;
+    try {
+      const res = await fetch('/api/character-viewer/detail', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        // ⚠️ 옵션을 **못 박는다**. 안 넘기면 Characters 탭에 저장된 값을 읽어,
+        //    거기서 `hide_charname` 을 켜 뒀으면 여기서도 이름 대신 `original` 이
+        //    나온다. 워크스페이스는 늘 캐릭터 이름을 넣는다.
+        body: JSON.stringify({group, character, variant: variant || '',
+                              options: {hide_charname: false, cosplay_enabled: false}}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (seq !== dexSeq) return;
+      if (!res.ok) { dexError = data.error || '상세를 불러오지 못했습니다.'; dexDetail = null; }
+      else { dexDetail = data; dexError = ''; }
+    } catch (error) {
+      if (seq !== dexSeq) return;
+      dexDetail = null;
+      dexError = error.message || String(error);
+    }
+    rerender();
+  }
+
+  function pickDex(group, character) {
+    dexPicked = {group, character};
+    dexVariant = '';
+    dexDetail = null;
+    rerender();
+    void loadDexDetail(group, character, '');
+  }
+
+  /** 고른 캐릭터를 **새 활성 슬롯**으로 담는다 - 에셋 탭과 같은 규약. */
+  function addDexToSlot() {
+    const prompt = String(dexDetail?.prompt?.character_prompt || '').trim();
+    if (!prompt) { showToastSafe('담을 프롬프트가 없습니다.'); return; }
+    const max = Number(lastState?.max_slots) || 0;
+    const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
+    if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+    // ⚠️ **한 번**에 끝낸다. 예전처럼 빈 슬롯을 만들고 번호를 찾아 채우면, 그 사이
+    //    다른 클라이언트의 에코가 끼어 남의 슬롯을 덮는다(Fable 조사).
+    setModuleParam('character', 'add_character', JSON.stringify({
+      prompt,
+      uc: '',
+      custom_name: String(dexPicked?.character || ''),
+    }));
+    showToastSafe('슬롯 맨 아래에 담았습니다.');
+  }
+
+  function renderDexRows() {
+    if (dexError && !dexRows.length) return `<div class="cw-empty">${escHtml(dexError)}</div>`;
+    if (!dexRows.length) {
+      return `<div class="cw-empty">${dexLoading ? '찾는 중…' : '맞는 캐릭터가 없습니다.'}</div>`;
+    }
+    const picked = dexPicked ? `${dexPicked.group}\u0000${dexPicked.character}` : '';
+    return dexRows.map(row => {
+      const key = `${row.group}\u0000${row.character}`;
+      const thin = Number(row.count) < 50;
+      return `
+      <button type="button" class="cw-dex${key === picked ? ' is-on' : ''}"
+        data-cw-dex-group="${escAttr(row.group)}" data-cw-dex-char="${escAttr(row.character)}"
+        title="${escAttr(`${row.character} · ${row.group}`)}">
+        ${row.thumbnail_url
+          ? `<img class="cw-dex-img" loading="lazy" decoding="async" alt=""
+               src="${escAttr(row.thumbnail_url)}">`
+          : `<span class="cw-dex-img is-initial">${escHtml(dexInitial(row.character))}</span>`}
+        <span class="cw-dex-text">
+          <span class="cw-dex-name">${escHtml(row.character)}</span>
+          <span class="cw-dex-sub${thin ? ' is-thin' : ''}">${escHtml(row.group)} · ${row.count}</span>
+        </span>
+      </button>`;
+    }).join('') + (dexPage < dexPages
+      ? `<button type="button" class="cw-dex-more" data-cw-dex-more="1">${
+          dexLoading ? '불러오는 중…' : `더 보기 (${dexRows.length} / ${dexTotal})`}</button>`
+      : '');
+  }
+
+  function renderDexDetail() {
+    if (!dexPicked) return '<div class="cw-detail-hint">캐릭터를 고르면 여기에 프롬프트가 나옵니다.</div>';
+    if (!dexDetail) return '<div class="cw-detail-hint">불러오는 중…</div>';
+    const prompt = String(dexDetail.prompt?.character_prompt || '');
+    const variants = Array.isArray(dexDetail.variants) ? dexDetail.variants : [];
+    const chips = variants.length > 1 ? variants.map(v => `
+      <button type="button" class="cw-chip${(v.name || '') === dexVariant ? ' is-go' : ''}"
+        data-cw-dex-variant="${escAttr(v.name || '')}">${escHtml(v.label || v.name || '기본')}</button>`
+      ).join('') : '';
+    const thumb = dexDetail.thumbnail_url || dexDetail.default_thumbnail_url || '';
+    return `
+      <div class="cw-detail-head">
+        <span class="cw-detail-name">${escHtml(dexPicked.character)}</span>
+        <span class="cw-detail-id">${escHtml(dexPicked.group)} · ${dexDetail.count || 0}</span>
+        <span class="cw-sp"></span>
+        <button type="button" class="cw-li-btn" data-cw-dex-copy="1" title="프롬프트를 복사한다">⧉</button>
+        <button type="button" class="cw-chip is-go" data-cw-dex-add="1"
+          ${prompt ? '' : 'disabled'} title="새 슬롯으로 담는다 (맨 아래)">+ 슬롯</button>
+      </div>
+      ${chips ? `<div class="cw-detail-chips">${chips}</div>` : ''}
+      <div class="cw-detail-body">
+        <div class="cw-detail-left">
+          ${thumb
+            ? `<img class="cw-detail-img" alt="" decoding="async" src="${escAttr(thumb)}">`
+            : `<div class="cw-detail-img is-initial">${escHtml(dexInitial(dexPicked.character))}</div>`}
+        </div>
+        <div class="cw-detail-fields">
+          <div class="cw-li-field">${prompt ? escHtml(prompt) : '<span class="cw-dim">프롬프트 없음</span>'}</div>
+        </div>
+      </div>`;
+  }
+
+  /** 작품으로 좁히는 칩 줄. 좁혀 뒀으면 **푸는 칩 하나**만 보인다. */
+  function renderDexScopeChips() {
+    if (dexGroup) {
+      return `<button type="button" class="cw-chip is-go" data-cw-dex-group-clear="1">`
+        + `✕ ${escHtml(dexGroup)}</button>`;
+    }
+    return dexGroups.map(g => `<button type="button" class="cw-chip"
+      data-cw-dex-scope="${escAttr(g)}">${escHtml(g)}</button>`).join('');
+  }
+
+  function renderSearchTab() {
+    const scoped = renderDexScopeChips();
+    return `
+      <div class="cw-filters">
+        <input class="cw-search" type="search" value="${escAttr(dexQuery)}"
+          placeholder="캐릭터 이름 · *태그 검색…" data-cw-dex-search="1">
+        <button type="button" class="cw-chip" data-cw-search-tab="1" title="썸네일 등록·옵션은 여기서">Characters ↗</button>
+      </div>
+      <!-- 자기 클래스를 준다. 아래 칸의 변형 칩도 cw-detail-chips 라, 같은 이름이면
+           부분 갱신이 엉뚱한 줄을 갈아 끼운다. (템플릿 안 주석에 백틱 금지) -->
+      <div class="cw-detail-chips cw-dex-scope-row">${scoped}</div>
+      <div class="cw-pane">
+        <div class="cw-pane-top"><div class="cw-dex-list">${renderDexRows()}</div></div>
+        <div class="cw-pane-bot${dexPicked ? '' : ' is-folded'}">${renderDexDetail()}</div>
+      </div>
+      <div class="cw-pane-count">${dexRows.length} / ${dexTotal}명</div>`;
   }
 
   // ── 왼쪽: 활성 슬롯 (전부 펼침) ─────────────────────────────────────────
@@ -935,8 +1163,8 @@ export function createCharacterPanel({
       body = renderAssetsTab();
       void loadAssets();
     } else {
-      body = `<div class="cw-empty">캐릭터 검색(Danbooru)은 Characters 탭에 있습니다.<br><br>
-        <button type="button" class="cw-chip" data-cw-search-tab="1">Characters 탭 열기 ↗</button></div>`;
+      body = renderSearchTab();
+      if (!dexRows.length && !dexLoading && !dexError) void loadDex({reset: true});
     }
     return `<div class="cw-work"><div class="cw-tabs">${tabs}<span class="cw-tab-fill"></span></div>${body}</div>`;
   }
@@ -1044,6 +1272,8 @@ export function createCharacterPanel({
         setModuleParam('character', field.dataset.cwField, field.value);
         return;
       }
+      const dexSearch = event.target.closest('[data-cw-dex-search]');
+      if (dexSearch) { dexQuery = dexSearch.value; scheduleDexSearch(); return; }
       const assetSearch = event.target.closest('[data-cw-asset-search]');
       if (assetSearch) { assetQuery = assetSearch.value; scheduleRerender(); return; }
       const groupSearch = event.target.closest('[data-cw-group-search]');
@@ -1078,6 +1308,41 @@ export function createCharacterPanel({
         const index = Number(fav.dataset.cwFav);
         const character = (lastState?.characters || [])[index];
         setModuleParam('character', `char_favorite_${index}`, String(!character?.favorite));
+        return;
+      }
+      // ── 검색 탭(도감) ──────────────────────────────────────────────────
+      const dexRow = hit('[data-cw-dex-group]');
+      if (dexRow) {
+        pickDex(dexRow.dataset.cwDexGroup || '', dexRow.dataset.cwDexChar || '');
+        return;
+      }
+      if (hit('[data-cw-dex-more]')) { void loadDex(); return; }
+      const scope = hit('[data-cw-dex-scope]');
+      if (scope) {
+        dexGroup = scope.dataset.cwDexScope || '';
+        dexGroups = [];
+        void loadDex({reset: true});
+        return;
+      }
+      if (hit('[data-cw-dex-group-clear]')) {
+        dexGroup = '';
+        void loadDex({reset: true});
+        return;
+      }
+      const dexVar = hit('[data-cw-dex-variant]');
+      if (dexVar) {
+        dexVariant = dexVar.dataset.cwDexVariant || '';
+        rerender();
+        void loadDexDetail(dexPicked?.group || '', dexPicked?.character || '', dexVariant);
+        return;
+      }
+      if (hit('[data-cw-dex-add]')) { addDexToSlot(); return; }
+      if (hit('[data-cw-dex-copy]')) {
+        const text = String(dexDetail?.prompt?.character_prompt || '');
+        if (!text) { showToastSafe('복사할 프롬프트가 없습니다.'); return; }
+        navigator.clipboard?.writeText(text)
+          .then(() => showToastSafe('프롬프트를 복사했습니다.'))
+          .catch(() => showToastSafe('복사하지 못했습니다.'));
         return;
       }
       // ── 에셋 탭 ────────────────────────────────────────────────────────
@@ -1337,6 +1602,24 @@ export function createCharacterPanel({
     // ⚠️ 그룹 탭도 여기로 온다. 펼친 그룹 안의 항목은 `.cw-grp-items` 안에 있고 그것은
     //    다시 `.cw-list` 안이라, 목록만 갈아 끼워도 전부 갱신된다. 전체를 다시 그리면
     //    검색 입력칸이 새로 만들어져 **한 글자마다 커서를 잃는다**(사용자 제보).
+    // 검색 탭은 `.cw-dex-list` 를 갈아 끼운다 - 검색칸을 새로 만들면 캐럿을 잃는다.
+    if (tab === 'search') {
+      const rows = moduleBody.querySelector('.cw-dex-list');
+      if (!rows) { rerender(); return; }
+      const scroller = rows.parentElement;
+      const keepRows = scroller ? scroller.scrollTop : 0;
+      rows.innerHTML = renderDexRows();
+      if (scroller && keepRows) scroller.scrollTop = keepRows;
+      const dexCount = moduleBody.querySelector('.cw-pane-count');
+      if (dexCount) dexCount.textContent = `${dexRows.length} / ${dexTotal}명`;
+      // ⚠️ 작품 칩도 함께 고친다. 목록만 갈아 끼우면 칩은 상태만 바뀌고 화면에
+      //    안 나타난다(실측: `touhou` 를 쳐도 칩이 하나도 안 떴다).
+      const scopeRow = moduleBody.querySelector('.cw-dex-scope-row');
+      if (scopeRow) scopeRow.innerHTML = renderDexScopeChips();
+      lastRenderedWorkSignature = workSignature(lastState);
+      lastRenderedStructureSignature = characterStructureSignature(lastState);
+      return;
+    }
     // 에셋 탭은 `.cw-list` 가 아니라 `.cw-tiles` 를 갈아 끼운다.
     if (tab === 'assets') {
       const tiles = moduleBody.querySelector('.cw-tiles');

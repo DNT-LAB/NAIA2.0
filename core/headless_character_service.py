@@ -464,9 +464,45 @@ class HeadlessCharacterService:
             #    슬롯 자리를 먹는다 - 사용자 화면에서 `1 active · 39 stored` 인데
             #    `+ Add Character (40/25)` 로 잠겨 캐릭터를 못 늘렸다(제보).
             #    상한은 **NAI 로 나가는 개수**의 상한이고, 히스토리는 나가지 않는다.
+            #
+            # ⚠️ **값을 읽는다**(사용자 지정 2026-09-02, Fable 조사). 예전에는 값을
+            #    통째로 무시해서, 채워진 슬롯을 만들려면 두 번 왕복해야 했다
+            #    (`add_character` -> 에코를 기다려 N 을 찾고 -> `char_prompt_N`).
+            #    그 사이 다른 클라이언트의 에코가 끼면 **남의 슬롯을 덮는다.**
+            #    이제 JSON 하나로 끝난다 - 에셋·도감·끌어 놓기가 같은 목을 쓴다.
+            #    `'true'` 같은 옛 값은 그대로 빈 슬롯을 만든다(하위 호환).
+            seed = {}
+            if isinstance(value, dict):
+                seed = value
+            elif isinstance(value, str) and value.strip().startswith("{"):
+                try:
+                    parsed = json.loads(value)
+                except (TypeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    seed = parsed
             if _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
-                frames.append({"prompt": "", "uc": "", "is_enabled": True,
-                               "slot_state": "active", "custom_name": ""})
+                muted = bool(seed.get("muted"))
+                made = {
+                    "prompt": str(seed.get("prompt") or ""),
+                    "uc": str(seed.get("uc") or ""),
+                    "is_enabled": not muted,
+                    "is_muted": muted,
+                    "slot_state": "active",
+                    "custom_name": str(seed.get("custom_name") or ""),
+                }
+                # 자리를 지정했으면 그 번째 활성 자리에 꽂는다(끌어 놓기가 쓴다).
+                # ⚠️ `char_reorder_` 와 **같은 셈법**이다 - 갈라 두면 하나가 어긋난다.
+                try:
+                    at = int(str(seed.get("at")).strip())
+                except (TypeError, ValueError):
+                    at = -1
+                if at >= 0:
+                    spots = [i for i, other in enumerate(frames)
+                             if isinstance(other, dict) and _state_of(other) == "active"]
+                    frames.insert(spots[at] if at < len(spots) else len(frames), made)
+                else:
+                    frames.append(made)
                 invalidate_snapshot = True
         elif key == "preview_refresh":
             refresh_snapshot = True

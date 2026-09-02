@@ -50,6 +50,12 @@ export function createCharacterPanel({
   let query = '';
   let favouritesOnly = false;
   let groupFilter = '';
+  // ⚠️ **uuid 로 잡는다.** index 는 슬롯이 무리를 옮길 때마다 밀려서, 펼쳐 둔
+  //    항목이 조용히 다른 캐릭터로 바뀐다.
+  const openHistory = new Set();
+  // '즉시 생성' 은 복원이 서버에 반영된 **뒤에** 생성해야 한다 - 바로 부르면
+  // 아직 활성이 아닌 상태로 나간다. 되돌아온 상태에서 활성이 된 것을 보고 쏜다.
+  let pendingGenerateUuid = '';
 
   /** 이 패널은 showToast 를 주입받지 않는다 - 전역이 있으면 쓴다. */
   function showToastSafe(message) {
@@ -98,6 +104,7 @@ export function createCharacterPanel({
       state?.activated ? 1 : 0,
       state?.reroll_on_generate ? 1 : 0,
       tab, query, favouritesOnly ? 1 : 0, groupFilter,
+      [...openHistory].sort().join(','),
       chars.length,
       chars.map(item => [
         item.slot_uuid, slotState(item), item.muted ? 1 : 0,
@@ -272,20 +279,41 @@ export function createCharacterPanel({
       `<button type="button" class="cw-chip${groupFilter === name ? ' is-on' : ''}"
         data-cw-group-filter="${escAttr(name)}">${escHtml(name)}</button>`).join('');
     const list = rows.length
-      ? rows.map(({character, index}) => `
-          <div class="cw-li" data-cw-li="${index}" data-cw-load="${index}"
-            title="누르면 슬롯 맨 아래에 담긴다">
-            <button type="button" class="cw-li-star${character.favorite ? ' is-on' : ''}"
-              data-cw-fav="${index}" title="즐겨찾기">${character.favorite ? '★' : '☆'}</button>
-            <span class="cw-li-text">${escHtml(slotLabel(character, {full: true}))}</span>
-
-            ${groupOf(character)
-              ? `<button type="button" class="cw-li-group" data-cw-editgroup="${index}"
-                  title="그룹 바꾸기">${escHtml(groupOf(character))}</button>`
-              : `<button type="button" class="cw-li-group cw-reveal" data-cw-editgroup="${index}"
-                  title="그룹에 넣기">+ 그룹</button>`}
-          </div>`).join('')
-      : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ▼ 로 내리면 여기에 쌓입니다 (최대 500개).'}</div>`;
+      ? rows.map(({character, index}) => {
+          const uuid = String(character.slot_uuid || '');
+          const open = openHistory.has(uuid);
+          return `
+          <div class="cw-li${open ? ' is-open' : ''}" data-cw-li="${index}">
+            <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}"
+              title="누르면 프롬프트를 펼친다">
+              <!-- 왼쪽 끝 = 복원(사용자 지정 2026-09-02). 슬롯 맨 아래로 간다. -->
+              <button type="button" class="cw-li-btn" data-cw-load="${index}"
+                title="슬롯으로 복원">↩</button>
+              <!-- ⚠️ 즐겨찾기는 이제 **표시**다(조작은 펼친 뒤에 있다) - 안 보이면
+                   위의 ★ 필터가 무엇을 거르는지 알 수 없다. -->
+            <span class="cw-li-text">${character.favorite ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(slotLabel(character, {full: true}))}</span>
+              ${groupOf(character)
+                ? `<span class="cw-li-group">${escHtml(groupOf(character))}</span>`
+                : ''}
+              <!-- 오른쪽 끝 = 삭제(사용자 지정). 여기가 **영영 지우는 유일한 길**이다 -
+                   슬롯의 ✕ 는 히스토리로 보낼 뿐이다. -->
+              <button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"
+                title="영구 삭제">✕</button>
+            </div>
+            ${open ? `
+            <div class="cw-li-body">
+              <div class="cw-li-field">${escHtml(character.prompt || '(비어 있음)')}</div>
+              <div class="cw-li-field is-uc">${escHtml(character.uc || '(네거티브 없음)')}</div>
+              <div class="cw-li-actions">
+                <button type="button" class="cw-li-act" data-cw-editgroup="${index}">그룹에 전달</button>
+                <button type="button" class="cw-li-act${character.favorite ? ' is-on' : ''}"
+                  data-cw-fav="${index}">${character.favorite ? '즐겨찾기 해제' : '즐겨찾기 등록'}</button>
+                <button type="button" class="cw-li-act is-go" data-cw-gen="${index}">즉시 생성</button>
+              </div>
+            </div>` : ''}
+          </div>`;
+        }).join('')
+      : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ✕ 로 지우면 여기에 쌓입니다 (최대 500개).'}</div>`;
     return `
       <div class="cw-filters">
         <input class="cw-search" type="search" value="${escAttr(query)}"
@@ -397,6 +425,14 @@ export function createCharacterPanel({
     });
     bindEvents();
     lastRenderedStructureSignature = structureSignature;
+    // '즉시 생성' 의 두 번째 박자 - 복원이 반영됐으면 그때 쏜다.
+    if (pendingGenerateUuid) {
+      const landed = chars.find(item => String(item.slot_uuid || '') === pendingGenerateUuid);
+      if (landed && slotState(landed) === 'active') {
+        pendingGenerateUuid = '';
+        window.generateAction?.();
+      }
+    }
   }
 
   // ── 이벤트 (렌더마다 새 뿌리에 건다 - innerHTML 이 옛 리스너를 함께 지운다) ──
@@ -448,6 +484,15 @@ export function createCharacterPanel({
       if (group) { void editGroup(Number(group.dataset.cwEditgroup)); return; }
       const load = hit('[data-cw-load]');
       if (load) { setSlotState(Number(load.dataset.cwLoad), 'active'); return; }
+      const gen = hit('[data-cw-gen]');
+      if (gen) {
+        const index = Number(gen.dataset.cwGen);
+        // ⚠️ 복원이 서버에 닿기 **전에** 생성하면 이 캐릭터 없이 나간다.
+        //    표를 남기고, 되돌아온 상태에서 활성이 된 것을 보고 쏜다.
+        pendingGenerateUuid = String((lastState?.characters || [])[index]?.slot_uuid || '');
+        setSlotState(index, 'active');
+        return;
+      }
       const remove = hit('[data-cw-remove]');
       if (remove) { removeSlot(Number(remove.dataset.cwRemove)); return; }
       const mute = hit('[data-cw-mute]');
@@ -455,6 +500,17 @@ export function createCharacterPanel({
         const index = Number(mute.dataset.cwMute);
         const character = (lastState?.characters || [])[index];
         setModuleParam('character', `char_muted_${index}`, String(!character?.muted));
+        return;
+      }
+      // ⚠️ **펼침 토글은 맨 마지막**이다. 이 표는 행 전체에 붙어 있어서, 위의
+      //    버튼들보다 먼저 보면 행 안의 버튼(↩ ✕)을 눌러도 펼쳐지기만 한다
+      //    (라이브에서 삭제가 안 먹었다: 히스토리 1개 -> 눌러도 1개).
+      const toggle = hit('[data-cw-toggle]');
+      if (toggle) {
+        const uuid = toggle.dataset.cwToggle;
+        if (openHistory.has(uuid)) openHistory.delete(uuid);
+        else openHistory.add(uuid);
+        rerender();
         return;
       }
 

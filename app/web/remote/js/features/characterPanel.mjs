@@ -34,8 +34,12 @@ export function createCharacterPanel({
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
 
+  // ⚠️ 즐겨찾기는 **그룹이 아니라 플래그**다. 그룹 탭에 한 줄로 섞어 뒀더니 사용자가
+  //    그룹으로 오해했다(제보 2026-09-02: 거기서 빼면 그룹에서 빠지는 줄 알았다).
+  //    히스토리 옆 **자기 탭**으로 뗀다 - 같은 목록의 다른 보기라는 뜻이 또렷해진다.
   const TABS = [
     {key: 'history', label: '히스토리'},
+    {key: 'favourites', label: '즐겨찾기'},
     {key: 'assets', label: '에셋'},
     {key: 'search', label: '검색'},
     {key: 'groups', label: '그룹'},
@@ -48,7 +52,6 @@ export function createCharacterPanel({
   let deferredFocusTarget = null;
   let tab = 'history';
   let query = '';
-  let favouritesOnly = false;
   // ⚠️ **uuid 로 잡는다.** index 는 슬롯이 무리를 옮길 때마다 밀려서, 펼쳐 둔
   //    항목이 조용히 다른 캐릭터로 바뀐다.
   const openHistory = new Set();
@@ -140,7 +143,7 @@ export function createCharacterPanel({
     return [
       state?.activated ? 1 : 0,
       state?.reroll_on_generate ? 1 : 0,
-      tab, query, favouritesOnly ? 1 : 0,
+      tab, query,
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
       [...openGroups].sort().join(','),
@@ -364,27 +367,33 @@ export function createCharacterPanel({
     </div>`;
   }
 
-  function renderHistory(storedSlots, groups) {
-    // ⚠️ 히스토리는 **최근에 쓴 것이 위**다. 백엔드 배열 순서는 저장 순서라
-    //    그대로 두면 오래된 것이 위에 남는다(index 주소는 건드리지 않는다 -
-    //    보이는 순서만 바꾸고 각 행은 자기 index 를 그대로 들고 다닌다).
+  /**
+   * 히스토리 · 즐겨찾기 목록. 둘은 **같은 목록의 다른 보기**라 한 함수로 그린다.
+   *
+   * @param onlyFav 즐겨찾기 탭이면 true - 별을 단 것만 보이고, 오른쪽 끝 버튼이
+   *   `−`(즐겨찾기 해제)가 된다. 히스토리에서만 `✕`(영구 삭제)다.
+   */
+  function renderHistory(storedSlots, groups, onlyFav) {
+    // ⚠️ 최근에 쓴 것이 위다. 백엔드 배열 순서는 저장 순서라 그대로 두면 오래된 것이
+    //    위에 남는다(index 주소는 건드리지 않는다 - 보이는 순서만 바꾼다).
     const rows = [...storedSlots]
       .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0))
-      .filter(({character}) => !favouritesOnly || character.favorite)
+      .filter(({character}) => !onlyFav || character.favorite)
       .filter(({character}) => matchesQuery(character));
-
+    const empty = onlyFav
+      ? (storedSlots.length ? '조건에 맞는 즐겨찾기가 없습니다.' : '즐겨찾기가 없습니다. 항목을 펼쳐 [즐겨찾기 등록] 을 누르세요.')
+      : (storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ✕ 로 지우면 여기에 쌓입니다 (최대 500개).');
     const list = rows.length
-      ? rows.map(({character, index}) => renderHistoryItem(character, index, groups)).join('')
-      : `<div class="cw-empty">${storedSlots.length ? '조건에 맞는 캐릭터가 없습니다.' : '아직 히스토리가 없습니다. 슬롯의 ✕ 로 지우면 여기에 쌓입니다 (최대 500개).'}</div>`;
+      ? rows.map(({character, index}) =>
+          renderHistoryItem(character, index, groups, onlyFav ? GRP_FAV : '')).join('')
+      : `<div class="cw-empty">${empty}</div>`;
     return `
       <div class="cw-filters">
         <input class="cw-search" type="search" value="${escAttr(query)}"
           placeholder="캐릭터 · 태그 · 그룹 검색…" data-cw-search="1">
-        <button type="button" class="cw-chip${favouritesOnly ? ' is-on' : ''}" data-cw-fav-only="1"
-          title="즐겨찾기만">★</button>
-        <!-- ⚠️ 그룹 칩은 걷었다(사용자 지정 2026-09-02). 그룹을 둘러보는 일은
-             **그룹 탭**이 펼쳐서 한다 - 여기 두면 같은 길이 둘이고, 그룹이 늘수록
-             검색칸을 밀어낸다. 전체 칩도 그것들을 지우려고 있던 것이라 함께 걷는다. -->
+        <!-- ⚠️ 그룹 칩과 ★ 칩은 걷었다(사용자 지정 2026-09-02). 그룹은 **그룹 탭**이
+             펼쳐서 보여 주고 즐겨찾기는 **자기 탭**이 있다 - 여기 두면 같은 길이
+             둘이고, 늘수록 검색칸을 밀어낸다. -->
       </div>
       <div class="cw-list">${list}</div>`;
   }
@@ -401,11 +410,10 @@ export function createCharacterPanel({
     // 최근에 쓴 것이 위 - 히스토리 탭과 같은 순서.
     const ordered = [...storedSlots]
       .sort((a, b) => (b.character.used_at || 0) - (a.character.used_at || 0));
-    const members = key => ordered.filter(({character}) =>
-      key === GRP_FAV ? !!character.favorite : groupOf(character) === grpName(key));
+    const members = key => ordered.filter(({character}) => groupOf(character) === grpName(key));
     // ⚠️ 누르면 **그 자리에서 펼친다**(사용자 지정 2026-09-02: 탭을 옮기는 것은
     //    싫다). 펼친 안쪽은 히스토리 탭과 같은 항목이라 복원·삭제·펼침이 그대로 된다.
-    const row = (key, label, {pinned = false, deletable = true, fav = false} = {}) => {
+    const row = (key, label, {pinned = false, deletable = true} = {}) => {
       const items = members(key);
       const open = openGroups.has(key);
       return `
@@ -414,7 +422,7 @@ export function createCharacterPanel({
           <button type="button" class="cw-grp-open" data-cw-toggle-group="${escAttr(key)}"
             title="${open ? '접는다' : '펼친다'}">
             <span class="cw-grp-caret">${open ? '▾' : '▸'}</span>
-            ${fav ? '<span class="cw-li-fav">★</span> ' : ''}${escHtml(label)}
+            ${escHtml(label)}
             <span class="cw-grp-count">${items.length}</span>
           </button>
           ${deletable ? `<button type="button" class="cw-li-btn is-danger" data-cw-remove-group="${escAttr(key)}"
@@ -426,7 +434,8 @@ export function createCharacterPanel({
       </div>`;
     };
     const rows = [
-      row(GRP_FAV, '즐겨찾기', {pinned: true, deletable: false, fav: true}),
+      // ⚠️ 즐겨찾기는 여기 없다 - **플래그이지 그룹이 아니다**(사용자 지정 2026-09-02).
+      //    자기 탭에 있다.
       ...groups.map(name => row(grpKey(name), name)),
       // 그룹 없음도 한 줄이다 - 안 그러면 34개가 어디 있는지 찾을 길이 없다.
       row(GRP_NONE, '그룹 없음', {deletable: false}),
@@ -464,7 +473,8 @@ export function createCharacterPanel({
       `<button type="button" class="cw-tab${tab === item.key ? ' is-active' : ''}"
         data-cw-tab="${item.key}">${item.label}</button>`).join('');
     let body;
-    if (tab === 'history') body = renderHistory(storedSlots, groups);
+    if (tab === 'history') body = renderHistory(storedSlots, groups, false);
+    else if (tab === 'favourites') body = renderHistory(storedSlots, groups, true);
     else if (tab === 'groups') body = renderGroups(storedSlots, groups);
     else if (tab === 'tools') body = renderTools(state);
     else if (tab === 'assets') {
@@ -661,7 +671,6 @@ export function createCharacterPanel({
       }
 
 
-      if (hit('[data-cw-fav-only]')) { favouritesOnly = !favouritesOnly; rerender(); return; }
 
       if (hit('[data-cw-refresh]')) { refreshPreview(); return; }
       if (hit('[data-cw-assets]')) { window.openCharacterAssetTab?.(); return; }
@@ -711,9 +720,9 @@ export function createCharacterPanel({
       const index = (lastState?.characters || []).findIndex(
         item => String(item.slot_uuid || '') === uuid);
       if (!uuid || index < 0) return;
-      // 즐겨찾기 행은 그룹이 아니라 플래그다. 나머지는 그룹 이름(`none` -> '' = 해제).
-      if (key === GRP_FAV) setModuleParam('character', `char_favorite_${index}`, 'true');
-      else setModuleParam('character', `char_group_${index}`, grpName(key));
+      // 그룹 행만 드롭 대상이다(`none` -> '' = 그룹 해제). 즐겨찾기는 그룹이 아니라
+      // 플래그라 여기 없다 - 항목을 펼쳐 [즐겨찾기 등록] 으로 켠다.
+      setModuleParam('character', `char_group_${index}`, grpName(key));
     });
 
     root.addEventListener('keydown', event => {
@@ -747,12 +756,12 @@ export function createCharacterPanel({
   function scheduleRerender() {
     const list = moduleBody.querySelector('.cw-list');
     // ⚠️ 그룹 탭은 펼친 그룹 안에 항목을 그리므로 목록만 갈아 끼우면 안 된다.
-    if (!list || tab !== 'history') { rerender(); return; }
+    if (!list || (tab !== 'history' && tab !== 'favourites')) { rerender(); return; }
     const chars = lastState?.characters || [];
     const indexed = chars.map((character, index) => ({character, index}));
     const storedSlots = indexed.filter(item => slotState(item.character) !== 'active');
     const groups = groupsOf(lastState);
-    const html = renderHistory(storedSlots, groups);
+    const html = renderHistory(storedSlots, groups, tab === 'favourites');
     const parsed = document.createElement('div');
     parsed.innerHTML = html;
     const nextList = parsed.querySelector('.cw-list');

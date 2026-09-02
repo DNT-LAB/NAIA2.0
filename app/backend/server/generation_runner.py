@@ -528,7 +528,9 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # 사용자 지정: "저장이 되지 않는 이미지". 디스크에도 안 쓰고 히스토리에도
             # 안 남긴다 - 여기서 갈라져 나가므로 아래 auto_save / broadcast_image /
             # viewer_new_image_payload 를 **하나도** 타지 않는다.
-            if (getattr(request, "params", {}) or {}).get("nai_preview_request"):
+            # 캐릭터 '즉시 생성' 도 같은 길이다 - 프롬프트 창에 띄우고 흔적을 안 남긴다.
+            _params = getattr(request, "params", {}) or {}
+            if _params.get("nai_preview_request") or _params.get("character_instant_request"):
                 context.is_generating = False
                 await _finish_nai_preview(context, clients, request, stored)
                 continue
@@ -1700,6 +1702,8 @@ async def _finish_nai_preview(context: WebSessionContext, clients, request, stor
 
     params = getattr(request, "params", {}) or {}
     item = stored.item
+    # 실행본 기록은 결과 항목이 들고 있다(위 주석 참조).
+    executed = getattr(item, "generation_params", None) or {}
     # [Save] 가 쓸 한 칸. 다음 프리뷰가 덮는다 - 마지막 것만 저장할 수 있다.
     context.nai_preview_last_item = item
     try:
@@ -1715,6 +1719,18 @@ async def _finish_nai_preview(context: WebSessionContext, clients, request, stor
     await broadcast_json(clients, {
         "type": "nai_preview_result",
         "requestId": str(params.get("nai_preview_request_id") or ""),
+        # 창의 머리글. 프리뷰와 즉시 생성이 **같은 창**을 쓰므로 무엇을 보고 있는지
+        # 말해 줘야 한다(기본값은 프리뷰 - 옛 경로가 이 키를 안 싣는다).
+        "title": str(params.get("nai_preview_title") or ""),
+        # ⚠️ **정말로 실려 나간** 캐릭터다. `api_service` 가 페이로드를 만들 때 적는
+        #    `_executed_characters` 라, 요청에 적은 것이 아니라 `char_captions` 에
+        #    들어간 것 - '전달됐는가' 를 여기서 확인할 수 있다.
+        #
+        # ⚠️ **요청이 아니라 결과 항목에서 읽는다.** 생성 서비스가
+        #    `params = dict(request.params)` 로 사본을 뜨고 실행하므로, api_service 가
+        #    적은 값은 요청 쪽으로 **안 돌아온다**(라이브 실측: 캐릭터가 실제로는
+        #    실려 나갔는데 여기서는 빈 배열이었다).
+        "characters": [str(c) for c in (executed.get("_executed_characters") or [])],
         "width": int(params.get("width") or 0),
         "height": int(params.get("height") or 0),
         "steps": int(params.get("steps") or 0),

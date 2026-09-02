@@ -55,9 +55,7 @@ export function createCharacterPanel({
   // ⚠️ **uuid 로 잡는다.** index 는 슬롯이 무리를 옮길 때마다 밀려서, 펼쳐 둔
   //    항목이 조용히 다른 캐릭터로 바뀐다.
   const openHistory = new Set();
-  // '즉시 생성' 은 복원이 서버에 반영된 **뒤에** 생성해야 한다 - 바로 부르면
-  // 아직 활성이 아닌 상태로 나간다. 되돌아온 상태에서 활성이 된 것을 보고 쏜다.
-  let pendingGenerateUuid = '';
+
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
   // 그룹 탭의 검색어. **그룹 안의 항목**을 찾는다(사용자 지정 2026-09-02) - 그룹
@@ -341,6 +339,37 @@ export function createCharacterPanel({
     });
     if (next === null) return;
     setModuleParam('character', `char_slot_name_${index}`, String(next).trim());
+  }
+
+  /**
+   * 즉시 생성 - 이 캐릭터 하나만 시험 삼아 뽑아 프롬프트 창에 띄운다.
+   *
+   * 메인 프롬프트는 서버가 만든다(PE 선행 + `1girl|1boy` + 후행). 파라미터는
+   * 사용자의 현재 값 그대로다.
+   *
+   * ⚠️ **슬롯을 안 건드린다.** 예전에는 이 캐릭터를 슬롯으로 복원한 뒤 평소의
+   *    Generate 를 눌렀다 - 메인 프롬프트가 화면의 것 그대로 나갔고, 시험 삼아
+   *    눌렀을 뿐인데 캐릭터가 슬롯에 남았다.
+   * ⚠️ **uuid 로 보낸다.** index 는 요청이 닿기까지 정렬이 한 번 지나가면 남의
+   *    것이 된다.
+   */
+  async function instantGenerate(uuid) {
+    if (!uuid) return;
+    try {
+      const res = await fetch('/api/character/instant-generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({uuid, requestId: String(Date.now())}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToastSafe(data.error || data.message || '즉시 생성을 시작하지 못했습니다.');
+        return;
+      }
+      showToastSafe(`즉시 생성 중… (${data.subject})`);
+    } catch (error) {
+      showToastSafe('즉시 생성 요청 실패: ' + error.message);
+    }
   }
 
   /** 새 그룹. **내장 팝업**이 이름을 받는다(사용자 지정 2026-09-02). */
@@ -698,14 +727,7 @@ export function createCharacterPanel({
     bindEvents();
     lastRenderedStructureSignature = structureSignature;
     if (dragUuid && !moduleBody.querySelector(`[data-cw-drag-uuid="${dragUuid.replace(/"/g, '')}"]`)) clearDrag();
-    // '즉시 생성' 의 두 번째 박자 - 복원이 반영됐으면 그때 쏜다.
-    if (pendingGenerateUuid) {
-      const landed = chars.find(item => String(item.slot_uuid || '') === pendingGenerateUuid);
-      if (landed && slotState(landed) === 'active') {
-        pendingGenerateUuid = '';
-        window.generateAction?.();
-      }
-    }
+
   }
 
   // ── 이벤트 (렌더마다 새 뿌리에 건다 - innerHTML 이 옛 리스너를 함께 지운다) ──
@@ -801,10 +823,7 @@ export function createCharacterPanel({
       const gen = hit('[data-cw-gen]');
       if (gen) {
         const index = Number(gen.dataset.cwGen);
-        // ⚠️ 복원이 서버에 닿기 **전에** 생성하면 이 캐릭터 없이 나간다.
-        //    표를 남기고, 되돌아온 상태에서 활성이 된 것을 보고 쏜다.
-        pendingGenerateUuid = String((lastState?.characters || [])[index]?.slot_uuid || '');
-        setSlotState(index, 'active');
+        void instantGenerate(String((lastState?.characters || [])[index]?.slot_uuid || ''));
         return;
       }
       const ungroup = hit('[data-cw-ungroup]');

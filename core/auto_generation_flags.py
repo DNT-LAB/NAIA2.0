@@ -34,6 +34,9 @@ AUTO_GENERATE_SUPPRESSED_FLAGS = {
     # 전부 빠진다 - **Vibe 는 인코딩만으로 2 Anlas 라** 무료 판정으로는 안 잡힌다.
     # Auto Gen 연쇄에서 빠지는 것도 필수다(프리뷰가 진짜 생성을 몰면 안 된다).
     "nai_preview_request",
+    # 캐릭터 '즉시 생성'. 히스토리의 캐릭터 하나를 시험 삼아 뽑는 한 장이라 같은
+    # 이유로 전부 빠져야 한다 - 특히 Vibe(인코딩만으로 2 Anlas)와 Auto Gen 연쇄.
+    "character_instant_request",
 }
 
 # img2img류 요청 타입: 위 플래그와 동일하게 특수 취급.

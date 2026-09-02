@@ -27,7 +27,7 @@ export function createNaiPreviewWindow({
     root.id = 'preview45Window';
     root.innerHTML = `
       <div class="pvw-head">
-        <span class="pvw-title">V4.5 PREVIEW</span>
+        <span class="pvw-title" id="preview45WindowTitle">V4.5 PREVIEW</span>
         <span class="pvw-meta" id="preview45WindowMeta"></span>
       </div>
       <div class="pvw-stage"><img class="pvw-img" id="preview45Image" alt=""></div>
@@ -101,7 +101,17 @@ export function createNaiPreviewWindow({
     const img = doc.getElementById('preview45Image');
     if (img) img.src = objectUrl;
     const meta = doc.getElementById('preview45WindowMeta');
-    if (meta) meta.textContent = `${message.width}x${message.height} · ${message.steps} steps · ${message.model}`;
+    // 실려 나간 캐릭터 수를 함께 적는다 - 0 이면 캐릭터가 빠진 것이고, 그것은
+    // 화면만 봐서는 알 수 없다(예전에 조용히 사라지던 자리다).
+    const cast = Array.isArray(message.characters) ? message.characters.length : 0;
+    if (meta) {
+      meta.textContent = `${message.width}x${message.height} · ${message.steps} steps`
+        + ` · ${message.model}` + (cast ? ` · ${cast} char` : '');
+      meta.title = (message.characters || []).join(' | ');
+    }
+    // 프리뷰와 캐릭터 즉시 생성이 **같은 창**을 쓴다 - 무엇을 보고 있는지 말해 준다.
+    const title = doc.getElementById('preview45WindowTitle');
+    if (title) title.textContent = String(message.title || '').trim() || 'V4.5 PREVIEW';
     root.classList.add('open');
     place();
   }

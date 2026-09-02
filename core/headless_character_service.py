@@ -351,6 +351,11 @@ class HeadlessCharacterService:
         frames = settings.setdefault("character_frames", [])
         apply_mode = str(mode or "c1").strip().lower()
         if apply_mode == "add_slot":
+            # ⚠️ **여기도 상한을 본다**(Codex BLOCK 1). `add_character` 만 막고 있어서
+            #    에셋 [새 슬롯으로 추가] 로 26번째가 들어갔다. 조용히 넘기지 말고
+            #    말하고 멈춘다 - 라우트가 400 으로 되돌린다.
+            if _active_slot_count(frames) >= MAX_CHARACTER_SLOTS:
+                raise ValueError(f"활성 캐릭터 슬롯은 최대 {MAX_CHARACTER_SLOTS}개입니다.")
             frames.append({
                 "prompt": str(prompt or ""),
                 "uc": str(uc or ""),
@@ -508,7 +513,13 @@ class HeadlessCharacterService:
             refresh_snapshot = True
         elif key.startswith("remove_character_"):
             index = context._index_from_key(key, "remove_character_")
-            if index is not None and 0 <= index < len(frames) and len(frames) > 1:
+            # ⚠️ `len(frames) > 1` 은 **슬롯 칸을 비우지 않으려는** 규칙인데, 히스토리의
+            #    ✕(영구 삭제)까지 같은 문을 지나서 마지막 하나가 남으면 눌러도 아무
+            #    일이 없었다(Codex CONCERN 5 · 실측 1 -> 1).
+            #    **저장된 것은 언제나 지운다** - 슬롯 칸의 개수와 무관하다.
+            _target = frames[index] if index is not None and 0 <= index < len(frames) else None
+            _stored = isinstance(_target, dict) and _state_of(_target) != "active"
+            if _target is not None and (len(frames) > 1 or _stored):
                 # 삭제로 활성이 0이 될 수 있다. 승격시키지 않는다 - 캐릭터 0은
                 # 유효한 상태이고(모듈을 끄거나 Cold 로 비우는 경로가 이미 그렇다)
                 # 사용자가 지우려던 것을 되살리는 쪽이 더 놀랍다.
@@ -612,6 +623,16 @@ class HeadlessCharacterService:
                 if requested == "restore":
                     requested = str(frame.get("return_slot_state") or "inactive")
                 if requested in {"active", "inactive", "cold"}:
+                    # ⚠️ **복원도 상한을 넘을 수 없다**(Codex BLOCK 1 · 실측 25 -> 26).
+                    #    `add_character` 만 막고 있었는데 히스토리의 ↩ 는 이 길로
+                    #    들어와 26번째를 만들었다 - 그러면 다음 Generate 가 통째로
+                    #    막힌다(NAICharacterData: Maximum 25 characters allowed).
+                    #    ⚠️ 이미 활성인 것을 다시 활성으로 쓰는 것은 개수가 안 느니
+                    #       막지 않는다(자리 이동·자식 동반 이동이 그 길을 쓴다).
+                    _was = str(frame.get("slot_state") or "") == "active"
+                    if (requested == "active" and not _was
+                            and _active_slot_count(frames) >= MAX_CHARACTER_SLOTS):
+                        return None
                     # ⚠️ 자식도 같은 무리로 옮긴다. 원본만 비활성으로 내리면 정렬이
                     #    원본을 자식 **뒤로** 보내고, 그러면 "앞만 가리킨다" 규칙에
                     #    걸려 `_prune_character_links` 가 자식의 링크를 지운다.

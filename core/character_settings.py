@@ -1798,6 +1798,10 @@ def character_state_from_settings(
             "connect_to": str(frame.get("connect_to") or ""),
             "favorite": bool(frame.get("favorite")),
             "group": _default_group(frame, slot_state),
+            # ⚠️ 화면이 히스토리를 **최근 순**으로 세운다. 이걸 안 보내면 전부 0 이
+            #    되어 정렬이 통째로 무효가 된다 - 방금 내린 것이 맨 아래에 남았다
+            #    (Codex NIT 8 · 실측).
+            "used_at": _as_used_at(frame.get("used_at")),
         })
 
     # SSOT: the preview reads the stored roll snapshot for this mode — it NEVER

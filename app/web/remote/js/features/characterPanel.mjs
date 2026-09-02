@@ -101,7 +101,11 @@ export function createCharacterPanel({
   let dexGroup = '';            // 작품으로 좁히기('' = 전체)
   let dexGroups = [];           // 이름 검색 중 함께 뜨는 작품 칩
   let dexLoading = false;
-  let dexSeq = 0;
+  // ⚠️ 목록과 상세는 **표를 따로** 쓴다(Codex CONCERN 4). 하나를 나눠 쓰면, 더 보기가
+  //    도는 중에 행을 누르는 순간 목록 응답이 낡은 것이 되어 `dexLoading` 이 참으로
+  //    남고, 그 뒤 검색과 더 보기가 **영영 안 먹는다.**
+  let dexSeq = 0;          // 목록
+  let dexDetailSeq = 0;    // 상세
   let dexPicked = null;         // {group, character}
   let dexDetail = null;
   let dexVariant = '';
@@ -225,8 +229,22 @@ export function createCharacterPanel({
     return event.clientY < gaps[0].getBoundingClientRect().top ? gaps[0] : gaps[gaps.length - 1];
   }
 
+  // 테스트 생성이 도는 중인가. 버튼을 잠가 연타를 막는다(Codex BLOCK 2).
+  let instantBusy = false;
+  let instantRelease = 0;
+
+  function setInstantBusy(busy) {
+    instantBusy = !!busy;
+    moduleBody.querySelectorAll('[data-cw-test], [data-cw-gen]')
+      .forEach(el => { el.disabled = !!busy; });
+    if (instantRelease) { clearTimeout(instantRelease); instantRelease = 0; }
+    // ⚠️ 결과 알림이 유실되면 영영 잠긴다 - 안전 타이머로 반드시 되돌린다.
+    if (busy) instantRelease = setTimeout(() => setInstantBusy(false), 180000);
+  }
+
   // 지금 끌고 있는 바깥 항목의 내용. 놓을 때 쓴다.
   let dragSource = null;
+  let dragSourceSeq = 0;
 
   /**
    * 에셋 타일·도감 행을 든다.
@@ -236,6 +254,9 @@ export function createCharacterPanel({
    *    일도 안 난다 - 조용히 빈 슬롯을 만들지 않는다.
    */
   function startSourceDrag(event, node) {
+    // ⚠️ **세대를 매긴다**(Codex CONCERN 6). 앞 끌기의 늦은 응답이 도착해 지금 끌고
+    //    있는 것의 내용을 덮으면, 놓았을 때 **다른 캐릭터**가 들어간다.
+    const gen = ++dragSourceSeq;
     dragSource = null;
     try {
       event.dataTransfer.setData(DND_MIME_SRC, '1');
@@ -253,12 +274,15 @@ export function createCharacterPanel({
       const id = node.dataset.cwSrcId || '';
       void fetch(`/api/character-asset/detail?id=${encodeURIComponent(id)}`)
         .then(res => res.json())
-        .then(data => { dragSource = {
-          prompt: String(data.character_prompt || ''),
-          uc: String(data.character_uc || ''),
-          custom_name: String(data.display_name || ''),
-        }; })
-        .catch(() => { dragSource = null; });
+        .then(data => {
+          if (gen !== dragSourceSeq) return;
+          dragSource = {
+            prompt: String(data.character_prompt || ''),
+            uc: String(data.character_uc || ''),
+            custom_name: String(data.display_name || ''),
+          };
+        })
+        .catch(() => { if (gen === dragSourceSeq) dragSource = null; });
       return;
     }
     const group = node.dataset.cwDexGroup || '';
@@ -270,11 +294,12 @@ export function createCharacterPanel({
                             options: {hide_charname: false, cosplay_enabled: false}}),
     })
       .then(res => res.json())
-      .then(data => { dragSource = {
-        prompt: String(data.prompt?.character_prompt || ''),
-        uc: '', custom_name: character,
-      }; })
-      .catch(() => { dragSource = null; });
+      .then(data => {
+        if (gen !== dragSourceSeq) return;
+        dragSource = {prompt: String(data.prompt?.character_prompt || ''),
+                      uc: '', custom_name: character};
+      })
+      .catch(() => { if (gen === dragSourceSeq) dragSource = null; });
   }
 
   /** 바깥에서 온 것을 슬롯에 꽂는다. `at` 이 없으면 맨 아래. */
@@ -304,6 +329,8 @@ export function createCharacterPanel({
   function clearDrag() {
     dragUuid = '';
     dragSource = null;
+    // 세대를 넘겨 **아직 오는 중인 응답**을 무효로 만든다.
+    dragSourceSeq += 1;
     const kill = ['is-dragging', 'is-drop', 'is-dropzone', 'is-self'];
     moduleBody.querySelectorAll('.' + kill.join(', .'))
       .forEach(el => el.classList.remove(...kill));
@@ -521,6 +548,12 @@ export function createCharacterPanel({
    */
   async function instantGenerate(uuid) {
     if (!uuid) return;
+    // ⚠️ **연타를 막는다**(Codex BLOCK 2). 유료 설정에서 두 번 누르면 요청 둘이
+    //    큐에 들어가 Anlas 를 두 번 쓴다 - 큐는 중복을 안 본다.
+    //    결과(또는 오류)가 화면에 닿을 때까지 잠근다. 알림이 유실되어 영영 잠기지
+    //    않게 안전 타이머도 함께 건다(프리뷰 잠금이 같은 이유로 그렇게 한다).
+    if (instantBusy) { showToastSafe('테스트 생성이 이미 돌고 있습니다.'); return; }
+    setInstantBusy(true);
     try {
       const res = await fetch('/api/character/instant-generate', {
         method: 'POST',
@@ -529,6 +562,8 @@ export function createCharacterPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // 시작조차 못 했다 - 기다릴 결과가 없으므로 그 자리에서 푼다.
+        setInstantBusy(false);
         showToastSafe(data.error || data.message || '즉시 생성을 시작하지 못했습니다.');
         return;
       }
@@ -540,6 +575,7 @@ export function createCharacterPanel({
         ? `테스트 생성 중… (${data.subject})`
         : '테스트 생성 중… (girl/boy 가 없어 주어를 안 넣었습니다)');
     } catch (error) {
+      setInstantBusy(false);
       showToastSafe('즉시 생성 요청 실패: ' + error.message);
     }
   }
@@ -791,7 +827,9 @@ export function createCharacterPanel({
     } finally {
       // ⚠️ **부분 갱신**이다. 전체를 다시 그리면 검색칸이 새로 만들어져 한 글자마다
       //    커서를 잃는다(히스토리 검색이 같은 이유로 이미 이렇게 한다).
-      if (seq === dexSeq) { dexLoading = false; scheduleRerender(); }
+      // ⚠️ 잠금은 **언제나** 푼다. 낡은 응답이라고 안 풀면 그대로 멈춘다.
+      dexLoading = false;
+      if (seq === dexSeq) scheduleRerender();
     }
   }
 
@@ -822,7 +860,7 @@ export function createCharacterPanel({
   }
 
   async function loadDexDetail(group, character, variant) {
-    const seq = ++dexSeq;
+    const seq = ++dexDetailSeq;
     try {
       const res = await fetch('/api/character-viewer/detail', {
         method: 'POST',
@@ -834,11 +872,11 @@ export function createCharacterPanel({
                               options: {hide_charname: false, cosplay_enabled: false}}),
       });
       const data = await res.json().catch(() => ({}));
-      if (seq !== dexSeq) return;
+      if (seq !== dexDetailSeq) return;
       if (!res.ok) { dexError = data.error || '상세를 불러오지 못했습니다.'; dexDetail = null; }
       else { dexDetail = data; dexError = ''; }
     } catch (error) {
-      if (seq !== dexSeq) return;
+      if (seq !== dexDetailSeq) return;
       dexDetail = null;
       dexError = error.message || String(error);
     }
@@ -1497,7 +1535,15 @@ export function createCharacterPanel({
         return;
       }
       const load = hit('[data-cw-load]');
-      if (load) { setSlotState(Number(load.dataset.cwLoad), 'active'); return; }
+      if (load) {
+        // 백엔드가 이제 상한에서 거절한다(Codex BLOCK 1) - 조용히 아무 일도 안 나면
+        // 사용자는 이유를 모른다. 여기서 먼저 말해 준다.
+        const max = Number(lastState?.max_slots) || 0;
+        const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
+        if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+        setSlotState(Number(load.dataset.cwLoad), 'active');
+        return;
+      }
       const gen = hit('[data-cw-gen]');
       if (gen) {
         const index = Number(gen.dataset.cwGen);
@@ -1727,6 +1773,13 @@ export function createCharacterPanel({
       if (tiles.parentElement && keepTiles) tiles.parentElement.scrollTop = keepTiles;
       const count = moduleBody.querySelector('.cw-pane-count');
       if (count) count.textContent = `${(assetRows || []).filter(assetMatches).length}개`;
+      // ⚠️ 아래 칸도 함께 고친다(Codex NIT 9). `↻` 는 고른 것을 지우는데 상세는
+      //    그대로 남아, 보이는 [+ 슬롯] 을 눌러도 아무 일이 안 났다.
+      const bot = moduleBody.querySelector('.cw-pane-bot');
+      if (bot) {
+        bot.innerHTML = renderAssetDetail();
+        bot.classList.toggle('is-folded', !assetPicked);
+      }
       lastRenderedWorkSignature = workSignature(lastState);
       lastRenderedStructureSignature = characterStructureSignature(lastState);
       return;
@@ -1777,6 +1830,8 @@ export function createCharacterPanel({
     renameSlot,
     // 프리뷰 창의 [Generate] 가 같은 캐릭터로 다시 뽑을 때 부른다.
     instantGenerate,
+    // 결과(또는 오류)가 화면에 닿았다 - 연타 잠금을 푼다.
+    instantDone: () => setInstantBusy(false),
     render,
     toggleColdPanel: noop,
     hideColdPanel: noop,

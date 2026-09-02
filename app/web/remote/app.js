@@ -2280,7 +2280,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-srcdrag2')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260902-codex')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -10245,6 +10245,8 @@ async function onNaiPreviewResult(message) {
   // ⚠️ 캐릭터 테스트 생성은 **프리뷰 잠금을 안 쓴다** - 그 잠금은 툴바의 V4.5
   //    버튼용이다. 여기서 풀면 마침 돌고 있던 프리뷰의 잠금이 남의 결과에 풀린다.
   if (String(message.kind || '') !== 'character') setPreview45Busy(false);
+  // 캐릭터 테스트 생성은 자기 잠금을 쓴다(연타 방지) - 결과가 닿았으니 푼다.
+  else characterPanel?.instantDone?.();
   await naiPreviewWindowReady;
   if (!naiPreviewWindow) { showToast('프리뷰 창을 불러오지 못했습니다.', 'error'); return; }
   naiPreviewWindow.show(message);

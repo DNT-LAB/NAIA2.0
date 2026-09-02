@@ -246,7 +246,22 @@ async def handle_module_command(
             extra_messages = [item for item in raw_messages if isinstance(item, dict)]
     for message in extra_messages:
         await _send_json(ws, message)
-    await _send_json(ws, module_state)
+    # ⚠️ 캐릭터 모듈만은 **모두에게** 보낸다(Codex BLOCK 3).
+    #
+    #    이 모듈의 편집 명령은 전부 배열 **인덱스**로 주소를 매긴다(`char_prompt_3`).
+    #    탭이 둘 열려 있는데 A 가 순서를 바꾸면 B 의 화면은 옛 배열 그대로다 - B 가
+    #    화면상 C2 를 고치면 서버에서는 새 인덱스 1 의 **다른 캐릭터**를 덮는다.
+    #    프롬프트에는 되돌리기가 없어 그대로 유실이다.
+    #
+    #    ⚠️ 다른 모듈까지 넓히지 않는다 - 각자 에코를 받고 무엇을 하는지 안 봤다.
+    #       캐릭터는 이미 에셋 REST 경로가 같은 페이로드를 방송하고 있어
+    #       (`character_asset_routes`), 화면이 받을 준비가 되어 있는 것이 확인된다.
+    if str(command.get("module_id") or "") == "character":
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        await broadcast_json(clients, module_state)
+    else:
+        await _send_json(ws, module_state)
     if str(command.get("module_id") or "") == "automation":
         # A timer automation must finish on wall-clock time even when no
         # generation is running; spawn the independent expiry watcher.

@@ -7,6 +7,7 @@
     "core/web_session_app.py",
     "app/backend/server/artist_thumbnail_routes.py",
     "app/backend/server/character_asset_routes.py",
+    "app/backend/server/character_instant_routes.py",
     "app/backend/server/character_viewer_routes.py",
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
@@ -244,6 +245,8 @@
       "source_files": [
         "core/web_session_app.py",
         "app/backend/server/character_viewer_routes.py",
+        "app/backend/server/character_instant_routes.py",
+        "core/character_instant_service.py",
         "app/backend/server/style_thumbnail_routes.py",
         "core/character_viewer_service.py",
         "app/web/remote/js/features/thumbTab.mjs",
@@ -263,7 +266,8 @@
         {"method": "GET", "path": "/api/character-viewer/thumbnail", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/character-preset", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/character-viewer/thumbnail/delete", "smoke": "state_mutation"},
-        {"method": "POST", "path": "/api/character-viewer/generate", "smoke": "external_live"}
+        {"method": "POST", "path": "/api/character-viewer/generate", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/character/instant-generate", "smoke": "external_live"}
       ]
     },
     {
@@ -384,6 +388,11 @@
         {
           "method": "POST",
           "path": "/api/character-asset/inset/unpin",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/canvas",
           "smoke": "state_mutation"
         },
         {

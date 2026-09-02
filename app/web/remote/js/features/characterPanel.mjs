@@ -48,6 +48,8 @@ export function createCharacterPanel({
 
   let lastState = null;
   let lastRenderedStructureSignature = '';
+  // 작업 영역(오른쪽 탭)의 서명. 이것이 그대로면 왼쪽만 다시 그린다.
+  let lastRenderedWorkSignature = '';
   let deferredFocusedRenderState = null;
   let deferredFocusTarget = null;
   let tab = 'history';
@@ -261,11 +263,24 @@ export function createCharacterPanel({
   // ⚠️ 서버 에코가 **포커스된 textarea 를 갈아치우면** 태그 자동완성이 고르기 전에
   //    닫힌다. 구조가 그대로면 다시 그리지 않고 미뤄 둔다.
 
-  function characterStructureSignature(state) {
+  /** 슬롯 칸이 바뀌었는가. 여기가 그대로면 왼쪽은 안 건드린다. */
+  function slotsSignature(state) {
     const chars = state?.characters || [];
     return [
       state?.activated ? 1 : 0,
-      state?.reroll_on_generate ? 1 : 0,
+      Number(state?.max_slots) || 0,
+      chars.length,
+      chars.map(item => [
+        item.slot_uuid, slotState(item), item.muted ? 1 : 0,
+        item.favorite ? 1 : 0, item.custom_name || '',
+      ].join(':')).join('|'),
+    ].join('#');
+  }
+
+  /** 작업 영역(탭)이 바뀌었는가. */
+  function workSignature(state) {
+    const chars = state?.characters || [];
+    return [
       tab, query, groupQuery,
       JSON.stringify(state?.group_colors || {}),
       [...openHistory].sort().join(','),
@@ -273,16 +288,34 @@ export function createCharacterPanel({
       [...openGroups].sort().join(','),
       chars.length,
       chars.map(item => [
-        item.slot_uuid, slotState(item), item.muted ? 1 : 0,
-        item.favorite ? 1 : 0, groupOf(item), item.custom_name || '',
+        item.slot_uuid, slotState(item), item.favorite ? 1 : 0,
+        groupOf(item), item.custom_name || '',
       ].join(':')).join('|'),
     ].join('#');
   }
 
+  function characterStructureSignature(state) {
+    return [
+      state?.reroll_on_generate ? 1 : 0,
+      slotsSignature(state), workSignature(state),
+    ].join('#');
+  }
+
+  /**
+   * 지금 사람이 치고 있는 칸. 다시 그리면 그 손을 끊는다.
+   *
+   * ⚠️ 슬롯의 textarea 뿐 아니라 **작업 영역의 입력칸**도 본다. 히스토리·그룹
+   *    검색은 이미 부분 갱신으로 피했지만, 앞으로 들어올 에셋·검색 탭의 검색칸은
+   *    에코 한 번에 캐럿을 잃는다(Fable 조사 2026-09-02 · 실제로 Assets 바가 같은
+   *    이유로 스크롤을 손수 넘긴다).
+   */
   function focusedCharacterTextarea() {
     const active = document.activeElement;
-    if (!active || active.tagName !== 'TEXTAREA') return null;
-    return active.closest('.cw-slot') ? active : null;
+    if (!active) return null;
+    if (active.tagName === 'TEXTAREA' && active.closest('.cw-slot')) return active;
+    if (active.closest && active.closest('.cw-work')
+        && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return active;
+    return null;
   }
 
   function clearDeferredFocusedRender() {
@@ -707,6 +740,34 @@ export function createCharacterPanel({
     return `<div class="cw-work"><div class="cw-tabs">${tabs}<span class="cw-tab-fill"></span></div>${body}</div>`;
   }
 
+  /**
+   * 슬롯 칸만 갈아 끼운다. 작업 영역은 손대지 않는다.
+   *
+   * ⚠️ 슬롯 칸 안에도 스크롤이 있다(`.cw-slots-scroll`) - 그 자리를 되돌려 준다.
+   *    이벤트는 뿌리에 위임돼 있어 다시 걸 필요가 없다.
+   */
+  function renderSlotsOnly(state) {
+    const column = moduleBody.querySelector('.cw-slots');
+    if (!column) return;
+    const chars = state.characters || [];
+    const indexed = chars.map((character, index) => ({character, index}));
+    const activeSlots = indexed.filter(item => slotState(item.character) === 'active');
+    const scroller = column.querySelector('.cw-slots-scroll');
+    const keep = scroller ? scroller.scrollTop : 0;
+    const parsed = document.createElement('div');
+    parsed.innerHTML = renderSlots(activeSlots, chars.length, Number(state.max_slots) || 0);
+    const next = parsed.querySelector('.cw-slots');
+    if (!next) return;
+    column.innerHTML = next.innerHTML;
+    const again = column.querySelector('.cw-slots-scroll');
+    if (again && keep) again.scrollTop = keep;
+    // 새로 만든 textarea 는 높이를 맞추고 자동완성을 다시 건다.
+    column.querySelectorAll('.cw-input').forEach(element => {
+      autoGrow(element);
+      if (!element.classList.contains('is-uc')) bindTagAssist(element);
+    });
+  }
+
   // ── 렌더 ────────────────────────────────────────────────────────────────
 
   function render(state) {
@@ -719,6 +780,19 @@ export function createCharacterPanel({
       return;
     }
     clearDeferredFocusedRender();
+    // ⚠️ **작업 영역이 그대로면 왼쪽만 갈아 끼운다.** 전체를 다시 쓰면 오른쪽 탭의
+    //    입력칸·이미지·무한 스크롤 감시가 에코마다 새로 만들어진다(Fable 조사).
+    //    슬롯 칸은 자기 안에 스크롤을 갖고 있으므로 그 자리도 지켜 준다.
+    const workSig = workSignature(nextState);
+    const shell = moduleBody.querySelector('.mod-character-shell');
+    const slotColumn = moduleBody.querySelector('.cw-slots');
+    if (shell && slotColumn && lastRenderedWorkSignature === workSig
+        && lastRenderedStructureSignature !== structureSignature) {
+      lastState = nextState;
+      renderSlotsOnly(nextState);
+      lastRenderedStructureSignature = structureSignature;
+      return;
+    }
     lastState = nextState;
 
     const chars = nextState.characters || [];
@@ -751,6 +825,7 @@ export function createCharacterPanel({
     });
     bindEvents();
     lastRenderedStructureSignature = structureSignature;
+    lastRenderedWorkSignature = workSig;
     if (dragUuid && !moduleBody.querySelector(`[data-cw-drag-uuid="${dragUuid.replace(/"/g, '')}"]`)) clearDrag();
 
   }
@@ -1056,6 +1131,11 @@ export function createCharacterPanel({
     const keep = list.scrollTop;
     list.innerHTML = nextList.innerHTML;
     if (keep) list.scrollTop = keep;
+    // ⚠️ 부분 갱신도 **서명을 갱신해야** 한다. 안 그러면 화면은 새것인데 기록은
+    //    옛것이라, 다음 에코가 "작업 영역이 바뀌었다" 고 보고 전부 다시 그린다
+    //    (실측: 검색어를 한 글자 친 뒤 슬롯을 음소거하면 오른쪽이 통째로 새로 만들어졌다).
+    lastRenderedWorkSignature = workSignature(lastState);
+    lastRenderedStructureSignature = characterStructureSignature(lastState);
   }
 
   // 다른 창(예: Image Tagger 결과)이 '어느 캐릭터에 넣을까' 를 물으려면

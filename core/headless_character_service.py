@@ -525,6 +525,49 @@ class HeadlessCharacterService:
                         str(child.get("slot_state") or "") == "active" and not muted
                     )
                 invalidate_snapshot = True
+        elif key.startswith("char_reorder_"):
+            # 활성 무리의 **몇 번째 자리**로 옮긴다(사용자 지정 2026-09-02: 슬롯 사이에
+            # 끼워 넣기). 비활성이면 활성으로 올리면서 그 자리에 꽂는다.
+            #
+            # ⚠️ 화면 순서 = 배열 순서다(`sort_character_frames` 는 무리별로만 모으고
+            #    무리 안 상대 순서는 보존한다). 그래서 배열에서 옮기는 것으로 충분하다.
+            index = context._index_from_key(key, "char_reorder_")
+            if index is not None and 0 <= index < len(frames):
+                try:
+                    target = int(str(value).strip())
+                except (TypeError, ValueError):
+                    target = -1
+                if target >= 0:
+                    # ⚠️ target 은 **지금 보이는 목록**의 자리다. 자기보다 아래로 옮기면
+                    #    자기가 빠지면서 뒤가 한 칸 당겨지므로 그만큼 빼 준다. 안 그러면
+                    #    '바로 아래로' 가 늘 한 칸씩 더 내려간다.
+                    before = [i for i, other in enumerate(frames)
+                              if isinstance(other, dict) and _state_of(other) == "active"]
+                    if index in before and before.index(index) < target:
+                        target -= 1
+                    # ⚠️ **자식을 데리고 간다.** Connect 는 '앞 슬롯을 물려받는다' 는
+                    #    관계라, 원본만 아래로 옮기면 자식보다 뒤로 가면서
+                    #    `_prune_character_links` 가 자식의 링크를 **조용히 지운다.**
+                    #    `char_slot_state_` 도 같은 이유로 함께 옮긴다.
+                    frame = frames[index]
+                    party = [frame, *self._connected_children(frames, frame)]
+                    # ⚠️ `list.remove` 는 == 로 찾는다. 프레임은 같은 모양이 될 수
+                    #    있으니 **정체**로 빼낸다.
+                    travelling = {id(member) for member in party}
+                    frames[:] = [f for f in frames if id(f) not in travelling]
+                    frame["slot_state"] = "active"
+                    # ⚠️ `is_enabled` 는 손대지 않는다 - **파생값**이라 정규화가
+                    #    `slot_state`+`is_muted` 로 다시 만든다
+                    #    (character_settings: "is_enabled": slot_state == active and not is_muted).
+                    #    여기서 또 쓰면 두 곳이 같은 값을 정하게 되어, 한쪽만 고치는 날
+                    #    조용히 어긋난다. 실측: 이 줄을 True 로 부러뜨려도 결과가 같았다.
+                    # 남은 것들 중 활성의 자리를 세어 target 번째 앞에 꽂는다.
+                    # 범위를 넘기면 맨 뒤에 둔다 - 정렬이 활성 무리로 끌어올린다.
+                    spots = [i for i, other in enumerate(frames)
+                             if isinstance(other, dict) and _state_of(other) == "active"]
+                    at = spots[target] if target < len(spots) else len(frames)
+                    frames[at:at] = party
+                    invalidate_snapshot = True
         elif key.startswith("char_slot_state_"):
             index = context._index_from_key(key, "char_slot_state_")
             if index is not None:

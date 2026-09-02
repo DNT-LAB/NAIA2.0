@@ -278,7 +278,9 @@ export function createCharacterPanel({
     const muted = !!character.muted;
     return `
       <div class="cw-slot${muted ? ' is-muted' : ''}" data-cw-slot="${index}">
-        <div class="cw-slot-row">
+        <!-- 머리줄을 끌면 슬롯끼리 순서를 바꾼다(같은 사이 자리에 놓는다). -->
+        <div class="cw-slot-row" draggable="true"
+          data-cw-drag="${index}" data-cw-drag-uuid="${escAttr(character.slot_uuid || '')}">
           <button type="button" class="cw-slot-en${muted ? '' : ' is-on'}"
             data-cw-mute="${index}" title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">✔</button>
           <span class="cw-slot-name">C${ordinal} · ${escHtml(slotLabel(character))}</span>
@@ -309,8 +311,13 @@ export function createCharacterPanel({
     //    히스토리는 나가지 않는다.
     const used = activeSlots.length;
     const full = maxSlots > 0 && used >= maxSlots;
+    // 사이사이에 **끼워 넣을 자리**를 둔다(사용자 지정 2026-09-02). 끄는 동안에만 보인다 -
+    // 늘 보이면 목록이 시끄럽고, 안 보이면 어디에 꽂히는지 알 수 없다.
+    const gap = ordinal => `<div class="cw-slot-gap" data-cw-drop="${GRP_SLOT}"
+      data-cw-gap="${ordinal}"></div>`;
     const body = activeSlots.length
-      ? activeSlots.map(({character, index}, i) => renderSlot(character, index, i + 1)).join('')
+      ? gap(0) + activeSlots.map(({character, index}, i) =>
+          renderSlot(character, index, i + 1) + gap(i + 1)).join('')
       : '<div class="cw-slots-empty">활성 슬롯이 없습니다.<br>히스토리에서 담거나 새로 추가하세요.</div>';
     return `
       <!-- ⚠️ 칸 **전체**가 드롭 대상이다(사용자 지정 2026-09-02). 프롬프트 칸 위에
@@ -743,7 +750,7 @@ export function createCharacterPanel({
         event.dataTransfer.setData('text/plain', dragUuid);
         event.dataTransfer.effectAllowed = 'move';
       } catch (_) { /* 무시 */ }
-      row.closest('.cw-li')?.classList.add('is-dragging');
+      row.closest('.cw-li, .cw-slot')?.classList.add('is-dragging');
       moduleBody.querySelectorAll('[data-cw-drop]').forEach(el => el.classList.add('is-dropzone'));
     });
     root.addEventListener('dragend', () => clearDrag());
@@ -776,11 +783,19 @@ export function createCharacterPanel({
       // 슬롯 칸 -> 활성으로 복원(맨 아래로 붙는다). 그룹 행 -> 그룹 이동(`none` = 해제).
       // 즐겨찾기는 그룹이 아니라 플래그라 드롭 대상이 아니다 - 항목을 펼쳐서 켠다.
       if (key === GRP_SLOT) {
+        const already = slotState((lastState?.characters || [])[index]) === 'active';
         // 상한을 넘으면 백엔드가 조용히 거절한다 - 여기서 먼저 알려 준다.
+        // ⚠️ 이미 활성인 것을 **자리만 옮기는** 경우는 개수가 안 늘어나니 막지 않는다.
         const max = Number(lastState?.max_slots) || 0;
         const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
-        if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
-        setSlotState(index, 'active');
+        if (!already && max && used >= max) {
+          showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`);
+          return;
+        }
+        // 사이 자리에 놓았으면 그 번째로, 빈 곳에 놓았으면 맨 아래로.
+        const gap = target.dataset.cwGap;
+        if (gap === undefined) setSlotState(index, 'active');
+        else setModuleParam('character', `char_reorder_${index}`, gap);
         return;
       }
       setModuleParam('character', `char_group_${index}`, grpName(key));

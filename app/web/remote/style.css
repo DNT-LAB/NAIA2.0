@@ -13818,6 +13818,14 @@ body.detached-metadata .metadata-layout {
 .cw-grp-row.is-dropzone .cw-grp-open { border-style: dashed; }
 /* 슬롯 칸에 던져 넣기 - 끄는 동안 칸 전체가 받을 수 있음을 보인다. */
 .cw-slots.is-dropzone { outline: 1px dashed var(--border-glow); outline-offset: -3px; }
+/* 슬롯 사이에 끼워 넣을 자리 - **끄는 동안에만** 자리를 차지한다. 늘 보이면 목록이
+   시끄럽고, 안 보이면 어디에 꽂히는지 알 수 없다.
+   ⚠️ 놓을 곳을 가리켜도 **크기는 안 바꾼다**. 커지면 그 자리에서 배치가 밀려 커서가
+      빠져나가고, dragleave/dragover 가 번갈아 튀어 깜빡인다. 색만 바꾼다. */
+.cw-slot-gap { height: 0; border-radius: 3px; }
+.cw-slots.is-dropzone .cw-slot-gap { height: 10px; background: rgba(124,106,239,0.14); }
+.cw-slots.is-dropzone .cw-slot-gap.is-drop { background: var(--accent); }
+.cw-slot.is-dragging { opacity: 0.45; }
 .cw-slots.is-drop { outline: 1px solid var(--accent); outline-offset: -3px;
   background: rgba(124,106,239,0.10); }
 .cw-grp-row.is-drop .cw-grp-open { border-color: var(--accent); background: rgba(124,106,239,0.22); border-style: solid; }

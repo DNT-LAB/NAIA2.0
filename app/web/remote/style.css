@@ -13697,11 +13697,13 @@ body.detached-metadata .metadata-layout {
 /* 오른쪽 - 작업 영역 */
 .cw-work { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; }
 .cw-tabs { display: flex; border-bottom: 1px solid var(--border-dim); }
-/* ⚠️ 탭은 **줄어들어야** 한다(`.tagsearch-tab` 과 같이 `flex: 1 1 0; min-width: 0`).
-   `min-width: 96px` x 5 = 480px 이 좁은 창에서 작업 영역을 밀어 가로 스크롤을 만들었다
+/* ⚠️ 탭은 **글자만큼만 차지하고, 좁아지면 줄어든다**(`flex: 0 1 auto; min-width: 0`).
+   `1 1 0` 은 여섯을 똑같이 나눠 짧은 이름(도구·에셋)이 자리를 낭비했다(사용자 지정
+   2026-09-02). `min-width: 96px` x 5 = 480px 이 좁은 창에서 작업 영역을 밀어 가로
+   스크롤을 만들었던 것도 같은 자리다
    (실측: 작업 영역 client 162 / scroll 480). 글자는 말줄임으로 자른다. */
 .cw-tab {
-  flex: 1 1 0; min-width: 0; height: 26px; padding: 0 14px;
+  flex: 0 1 auto; min-width: 0; height: 26px; padding: 0 11px;
   border: 0; border-right: 1px solid var(--border-dim);
   background: rgba(20,24,42,0.5); color: var(--text-dim);
   font-family: var(--font-mono); font-size: 10px; font-weight: 700;

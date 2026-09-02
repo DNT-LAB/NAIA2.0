@@ -60,6 +60,8 @@ export function createCharacterPanel({
   let pendingGenerateUuid = '';
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
+  // 그룹 탭의 검색어. 그룹 **이름**만 거른다(안의 캐릭터는 히스토리 검색이 찾는다).
+  let groupQuery = '';
   // 그룹 탭에서 펼쳐 둔 그룹. 키는 `g:이름` · 즐겨찾기 `fav` · 그룹 없음 `none`.
   const openGroups = new Set();
   // ⚠️ 그룹 행의 키를 **그룹 이름 그대로 쓰면 안 된다.** 사용자가 `★` 이라는 그룹을
@@ -143,7 +145,7 @@ export function createCharacterPanel({
     return [
       state?.activated ? 1 : 0,
       state?.reroll_on_generate ? 1 : 0,
-      tab, query,
+      tab, query, groupQuery,
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
       [...openGroups].sort().join(','),
@@ -223,22 +225,31 @@ export function createCharacterPanel({
   async function renameSlot(index) {
     const character = (lastState?.characters || [])[index];
     if (!character || !showPromptDialog) return;
-    const next = await showPromptDialog({
-      title: '슬롯 이름',
-      message: '이 캐릭터를 목록에서 무엇으로 부를까요? (비우면 프롬프트 앞머리)',
-      value: String(character.custom_name || ''),
+    const next = await showPromptDialog('이 캐릭터를 목록에서 무엇으로 부를까요? (비우면 프롬프트 앞머리)', {
+      title: '슬롯 이름', defaultValue: String(character.custom_name || ''),
     });
     if (next === null) return;
     setModuleParam('character', `char_slot_name_${index}`, String(next).trim());
   }
 
+  /** 새 그룹. **내장 팝업**이 이름을 받는다(사용자 지정 2026-09-02). */
+  async function createGroup() {
+    if (!showPromptDialog) return;
+    // ⚠️ 시그니처는 `showPromptDialog(message, options)` 다 - 객체 하나로 부르면
+    //    `escHtml(object)` 에서 터진다(실측: TypeError s.replace is not a function).
+    const next = await showPromptDialog('만들 그룹의 이름을 적어 주세요.', {
+      title: '새 그룹', okText: '만들기', defaultValue: '',
+    });
+    const name = String(next ?? '').trim();
+    if (!name) return;
+    setModuleParam('character', 'add_group', name);
+  }
+
   async function editGroup(index) {
     const character = (lastState?.characters || [])[index];
     if (!character || !showPromptDialog) return;
-    const next = await showPromptDialog({
-      title: '그룹',
-      message: '새 그룹 이름을 적으면 만들어서 넣습니다.',
-      value: groupOf(character),
+    const next = await showPromptDialog('새 그룹 이름을 적으면 만들어서 넣습니다.', {
+      title: '그룹', okText: '넣기', defaultValue: groupOf(character),
     });
     if (next === null) return;
     setModuleParam('character', `char_group_${index}`, String(next).trim());
@@ -301,10 +312,18 @@ export function createCharacterPanel({
 
   // ── 오른쪽: 작업 영역 ───────────────────────────────────────────────────
 
+  /**
+   * 히스토리·즐겨찾기 검색. **프롬프트 쪽만 본다.**
+   *
+   * ⚠️ 그룹 이름은 빼 뒀다(사용자 지정 2026-09-02: "히스토리에서는 그룹까지 검색하는
+   *    것이 비현실적입니다"). 그룹 하나에 수십 개가 들어 있으면 그 이름을 친 순간
+   *    목록이 통째로 나와, 찾으려던 캐릭터가 오히려 묻힌다. 그룹으로 좁히는 일은
+   *    **그룹 탭**이 펼쳐서 한다.
+   */
   function matchesQuery(character) {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    return [character.prompt, character.uc, character.custom_name, groupOf(character)]
+    return [character.prompt, character.uc, character.custom_name]
       .join(' ').toLowerCase().includes(needle);
   }
 
@@ -390,7 +409,7 @@ export function createCharacterPanel({
     return `
       <div class="cw-filters">
         <input class="cw-search" type="search" value="${escAttr(query)}"
-          placeholder="캐릭터 · 태그 · 그룹 검색…" data-cw-search="1">
+          placeholder="프롬프트 · 태그 검색…" data-cw-search="1">
         <!-- ⚠️ 그룹 칩과 ★ 칩은 걷었다(사용자 지정 2026-09-02). 그룹은 **그룹 탭**이
              펼쳐서 보여 주고 즐겨찾기는 **자기 탭**이 있다 - 여기 두면 같은 길이
              둘이고, 늘수록 검색칸을 밀어낸다. -->
@@ -436,13 +455,19 @@ export function createCharacterPanel({
     const rows = [
       // ⚠️ 즐겨찾기는 여기 없다 - **플래그이지 그룹이 아니다**(사용자 지정 2026-09-02).
       //    자기 탭에 있다.
-      ...groups.map(name => row(grpKey(name), name)),
+      ...groups.filter(name => !groupQuery.trim()
+          || name.toLowerCase().includes(groupQuery.trim().toLowerCase()))
+        .map(name => row(grpKey(name), name)),
       // 그룹 없음도 한 줄이다 - 안 그러면 34개가 어디 있는지 찾을 길이 없다.
-      row(GRP_NONE, '그룹 없음', {deletable: false}),
+      ...(!groupQuery.trim() || '그룹 없음'.includes(groupQuery.trim())
+        ? [row(GRP_NONE, '그룹 없음', {deletable: false})] : []),
     ].join('');
     return `
       <div class="cw-filters">
-        <input class="cw-search" type="text" placeholder="새 그룹 이름…" data-cw-new-group="1">
+        <!-- ⚠️ 여기는 **검색**이다(사용자 지정 2026-09-02). 예전엔 새 그룹 이름을 받는
+             칸이었는데, 그룹이 늘면 정작 찾을 길이 없었다. 만들기는 팝업이 받는다. -->
+        <input class="cw-search" type="search" value="${escAttr(groupQuery)}"
+          placeholder="그룹 검색…" data-cw-group-search="1">
         <button type="button" class="cw-chip is-go" data-cw-add-group="1">+ 만들기</button>
       </div>
       <div class="cw-list cw-list-groups">${rows}</div>`;
@@ -557,6 +582,8 @@ export function createCharacterPanel({
         setModuleParam('character', field.dataset.cwField, field.value);
         return;
       }
+      const groupSearch = event.target.closest('[data-cw-group-search]');
+      if (groupSearch) { groupQuery = groupSearch.value; rerender(); return; }
       const search = event.target.closest('[data-cw-search]');
       if (search) { query = search.value; scheduleRerender(); return; }
       const activated = event.target.closest('[data-cw-activated]');
@@ -605,14 +632,7 @@ export function createCharacterPanel({
         rerender();
         return;
       }
-      if (hit('[data-cw-add-group]')) {
-        const input = moduleBody.querySelector('[data-cw-new-group]');
-        const name = String(input?.value || '').trim();
-        if (!name) { showToastSafe('그룹 이름을 적어 주세요.'); return; }
-        setModuleParam('character', 'add_group', name);
-        if (input) input.value = '';
-        return;
-      }
+      if (hit('[data-cw-add-group]')) { void createGroup(); return; }
       const removeGroup = hit('[data-cw-remove-group]');
       if (removeGroup) {
         // 백엔드는 **이름**을 받는다 - 화면 키(`g:이름`)를 그대로 보내면 안 지워진다.
@@ -725,13 +745,6 @@ export function createCharacterPanel({
       setModuleParam('character', `char_group_${index}`, grpName(key));
     });
 
-    root.addEventListener('keydown', event => {
-      if (event.key !== 'Enter') return;
-      const input = event.target.closest('[data-cw-new-group]');
-      if (!input) return;
-      event.preventDefault();
-      moduleBody.querySelector('[data-cw-add-group]')?.click();
-    });
 
     root.addEventListener('contextmenu', event => {
       // ⚠️ 슬롯 행에서는 아무것도 가로채지 않는다 - 이름 조작이 히스토리로 갔고,

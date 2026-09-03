@@ -323,9 +323,15 @@ export function createWildcardChunkPopup({
   function position() {
     if (!popup) return;
     const margin = 10;
-    const host = doc.getElementById('resultViewer')
+    // 모바일에서는 **스테이지를 무시하고 화면을 쓴다**(사용자 지정 2026-09-03).
+    // 좁은 화면의 Result 스테이지는 그림 높이만 하다 - 거기 맞춰 줄이면 아래위로
+    // 쌓은 목록·편집 칸이 둘 다 못 쓰게 눌린다. 폭·높이 상한은 CSS 의
+    // `calc(100vw - 16px)` / `calc(100vh - 16px)` 가 이미 쥐고 있다.
+    const narrow = typeof win.matchMedia === 'function'
+      && win.matchMedia('(max-width: 767px)').matches;
+    const host = narrow ? null : (doc.getElementById('resultViewer')
       || doc.getElementById('rightTabResult')
-      || doc.querySelector('.right-tab-pane.active');
+      || doc.querySelector('.right-tab-pane.active'));
     const rect = host ? host.getBoundingClientRect() : null;
 
     // ⚠️ **밀지 말고 줄인다**([[feedback-popup-compact-style]]). 예전에는 "스테이지에

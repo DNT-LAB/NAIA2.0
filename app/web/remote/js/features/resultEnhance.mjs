@@ -89,7 +89,15 @@ export function createResultEnhanceController({
     return isNaiMode() || isWebUiMode();
   }
 
+  // 좁은 화면 판정 - 앱의 기준폭 767px 과 같다(`app.js` 의 히스토리 미디어쿼리와 한 값).
+  const narrowQuery = typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(max-width: 767px)') : null;
+
   function label() {
+    // ⚠️ 모바일에서는 **`Enhance` 한 낱말**로 줄인다(사용자 지정 2026-09-03).
+    //    `Enhance x1.5 | 0.2` 는 결과 도구 줄에서 옆 버튼들을 밀어낸다. 배율과 강도는
+    //    옆 톱니(Enhance settings)에서 그대로 볼 수 있으니 여기서 잃는 것이 없다.
+    if (narrowQuery?.matches) return 'Enhance';
     if (isWebUiMode()) {
       const settings = normalizeWebUiHiresSettings();
       return `Enhance x${formatFlexibleNumber(settings.hr_scale, 1)} | ${formatFlexibleNumber(settings.denoising_strength, 2)}`;
@@ -110,6 +118,10 @@ export function createResultEnhanceController({
   function canRequest(meta = currentMeta) {
     return !getDisabledReason(meta);
   }
+
+  // 폭이 기준선을 넘나들면 라벨을 다시 그린다 - 안 그러면 회전하거나 창을 줄여도
+  // 옛 글자가 남는다.
+  narrowQuery?.addEventListener?.('change', () => update());
 
   function update() {
     if (!button) return;

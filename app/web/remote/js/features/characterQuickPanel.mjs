@@ -31,6 +31,12 @@ const VIEWER_GAP = 8;
 // 바닥을 넘고, 넘은 부분은 뷰어가 잘라낸다.
 const STAGE_FLOOR = 48;
 
+/** 좁은 화면 판정 - 앱의 기준폭 767px(다른 곳의 미디어쿼리와 한 값). */
+function isNarrowViewport() {
+  return typeof window !== 'undefined' && !!window.matchMedia
+    && window.matchMedia('(max-width: 767px)').matches;
+}
+
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
   openCharacterModule = () => {},
@@ -1208,6 +1214,9 @@ export function createCharacterQuickPanel({
     }
     if (event.target.closest('[data-cq-posedit]')) { setPosPeek(false); setPosEditing(true); return; }
     if (event.target.closest('[data-cq-posdone]')) { setPosEditing(false); return; }
+    // ⚠️ 여기서 좁은 화면을 따로 막지 않는다. 모바일에서는 버튼을 아예 안 그리고,
+    //    혹 넓혔다 좁히는 사이에 남은 버튼이 눌려도 `openModule` 이 **목에서** 막고
+    //    이유까지 말해 준다. 여기서 조용히 삼키면 아무 일도 안 일어나 보인다.
     if (event.target.closest('[data-cq-manage]')) { openCharacterModule(); return; }
     if (event.target.closest('[data-cq-add]')) {
       // 지금 활성 슬롯 수를 적어 둔다 - 에코가 이보다 늘면 그게 새 슬롯이다.
@@ -1277,7 +1286,12 @@ export function createCharacterQuickPanel({
         // (여기에는 비활성 무리가 보이지 않는다).
         + `<div class="cq-foot">`
         + `<button type="button" class="cq-add" data-cq-add="1">+ Add Character</button>`
-        + `<button type="button" class="cq-manage" data-cq-manage="1">Manage</button>`
+        // ⚠️ 모바일에서는 **Manage 를 내보내지 않는다**(사용자 지정 2026-09-03).
+        //    이 버튼이 여는 캐릭터 모듈 팝업은 좁은 화면에 맞춰져 있지 않아, 열면
+        //    화면을 덮고 빠져나오기 어렵다. 여기서 안 그리는 것이 가장 확실하다.
+        + (isNarrowViewport()
+          ? ''
+          : `<button type="button" class="cq-manage" data-cq-manage="1">Manage</button>`)
         + `</div></div>`
       : '';
     // 머리는 **버튼 하나가 아니라 줄**이다. 활성화 토글과 POS 를 나란히 두어야
@@ -1389,6 +1403,13 @@ export function createCharacterQuickPanel({
         attributes: true, attributeFilter: ['src', 'class'],
       });
     }
+  }
+
+  // 폭이 기준선을 넘나들면 Manage 버튼의 유무가 뒤집힌다. 다시 그려 주지 않으면
+  // 창을 넓힌 뒤에도 버튼이 안 돌아오고, 좁힌 뒤에도 남아 있다.
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    window.matchMedia('(max-width: 767px)')
+      .addEventListener?.('change', () => render(null, true));
   }
 
   return {render, setVisible, isOpen: () => open};

@@ -15,6 +15,15 @@ let presetAutoGenToken = 0;
 let presetAutoGenTimer = null;
 let latestImageMeta = null;
 
+// 좁은 화면(모바일) 판정. 앱의 기준폭은 767px 하나다 — CSS 의 `@media (max-width: 767px)`
+// 와 `mobileHistoryMediaQuery` 와 반드시 같은 값이어야 한다. 이 값으로 갈리는 것들:
+// Interactive 진입 · 캐릭터 프롬프트 모듈 진입 · 퀵 패널의 Manage · Enhance 버튼 글자.
+const narrowViewportQuery = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(max-width: 767px)') : null;
+function isNarrowViewport() {
+  return Boolean(narrowViewportQuery?.matches);
+}
+
 // --- GPU 절약: 창이 비포커스/숨김일 때 모든 CSS 애니메이션 정지 ---
 // Electron 컴포지터는 창이 가려져도 무한 애니메이션 때문에 매 프레임을 계속 그려
 // backdrop-filter 재계산으로 GPU를 점유한다. 앞에 없을 땐 html.anims-paused로 멈춘다.
@@ -1148,7 +1157,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260830-ra
   .catch(error => {
     console.error('Failed to initialize result history module', error);
   });
-const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260517-webui-enhance-queue1')
+const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260903-mobile1')
   .then(({createResultEnhanceController}) => {
     resultEnhance = createResultEnhanceController({
       document,
@@ -1613,6 +1622,14 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       panelMount: $('iaPanel'),
       toggleButton: $('iaModeToggle'),
       canEnter: () => {
+        // 모바일 차단(사용자 지정 2026-09-03). Interactive 는 블록 캔버스 + 슬롯 패널을
+        // 가로로 나란히 펴는 화면이라 767px 아래에서는 쓸 수 없다.
+        // ⚠️ **진입만 막는다.** 이미 켜 놓고 창을 좁힌 사람은 끌 수 있어야 한다 —
+        //    인페인트 잠금에서 한 번 밟은 함정이다(위 setLock 주석).
+        if (isNarrowViewport()) {
+          showToast('모바일에서는 Interactive 를 쓸 수 없습니다 (화면이 좁습니다)', 'error');
+          return false;
+        }
         if (!virtualCharacterSession()) return true;
         showToast('인페인트 세션 중에는 Interactive 로 들어갈 수 없습니다 (세션 닫기 후)', 'error');
         return false;
@@ -2300,7 +2317,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260903-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260830-posmode2')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260903-mobile2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -7205,7 +7222,7 @@ if (memoBtn) {
 // 와일드카드 청크 — Memo 와 같은 자리·같은 옷(사용자 지정 2026-09-03).
 // ⚠️ 이 창이 생기기 전까지 인스턴트 키를 고칠 길이 **아예 없었다** - 옛 `instant_wildcard`
 //    모듈 팝업은 런처에 없고 여는 호출이 0건이었다(실측).
-wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk5')
+wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk6')
   .then(({createWildcardChunkPopup}) => {
     wildcardChunkPopup = createWildcardChunkPopup({
       document,
@@ -7499,7 +7516,10 @@ async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
   if (!canApplyCharactersNow()) return;
 
   if (withSettings) applyMetadataSettings(payload, {silent: true});
-  if (currentModuleId !== 'character') {
+  // ⚠️ 모바일에서는 **부르지 않는다.** 부르면 위 가드가 "열 수 없습니다" 토스트를
+  //    띄우는데, 여기서는 적용이 실패한 게 아니다 — 아래 전송은 팝업이 닫혀 있어도
+  //    그대로 간다(백엔드는 어느 팝업이 떠 있는지 모른다). 엉뚱한 실패 안내만 남는다.
+  if (currentModuleId !== 'character' && !isNarrowViewport()) {
     openModule('character');
   }
   const sent = setModuleParam('character', 'bulk_characters', JSON.stringify({
@@ -10036,7 +10056,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-nochunk2')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-mobile1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -10599,6 +10619,15 @@ function openModule(moduleId, options = {}) {
   // NAID3 에서 Character / CR / VT 차단 (다른 사양 — 일시 미지원)
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && naiModelBlocksReference()) {
     showToast('NAID3에서는 Character / Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'error');
+    return;
+  }
+  // 모바일 차단(사용자 지정 2026-09-03).
+  //
+  // ⚠️ 여기가 **목**이다. 캐릭터 모듈로 들어오는 길은 셋이다 - 런처 버튼
+  //    (`moduleLauncher.launchModule`), 퀵 패널의 Manage, 메타데이터 캐릭터 적용.
+  //    셋 다 이 함수를 지나므로 런처 쪽 회색 처리만 믿지 말고 여기서 한 번 더 막는다.
+  if (moduleId === 'character' && isNarrowViewport()) {
+    showToast('모바일에서는 캐릭터 프롬프트 모듈을 열 수 없습니다 (화면이 좁습니다)', 'error');
     return;
   }
   if (imageModulePanels && moduleId !== 'vibe_transfer') {

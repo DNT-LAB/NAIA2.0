@@ -7463,7 +7463,25 @@ body.resizing-result-info {
        으로 줄어들 수 있게 해야 비로소 접힌다(실측: 그전엔 420 / 375 로 45px 넘침). */
     flex: 1 1 100%;
     min-width: 0;
+    /* ⚠️ 여기서 **줄바꿈을 다시 끈다**(사용자 지적 2026-09-03: 글자를 줄였는데도
+       여전히 접혔다). 글자는 범인이 아니었다 - 공용 `min-width: 118px` 이었다.
+       여섯 칸 합이 408px 이라 359px 짜리 줄에 절대 안 들어간다(실측). 아래에서
+       그 하한을 풀어 주므로 이제 한 줄에 편다. */
+    flex-wrap: nowrap;
+    gap: 3px;
   }
+  /* 하한을 풀고 남는 자리를 고르게 나눈다. 글자는 넘치면 …로 자른다 - 잘리는
+     것보다 줄이 늘어나 결과 그림을 밀어내는 쪽이 나빴다. */
+  .result-enhance-controls .result-enhance-btn {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 톱니는 정사각형이다 - 같이 늘어나면 아이콘이 가운데서 뜬다. */
+  .result-enhance-controls .result-enhance-settings-btn { flex: 0 0 22px; }
   /* 배지가 내려가면 그 아래 붙는 팝오버도 같이 내려가야 앵커가 안 어긋난다. */
   .nai-acct-pop {
     top: 74px;
@@ -21256,6 +21274,39 @@ body.detached-module .mod-grid-3 {
 .wcchunk-popup .tagsearch-act.is-primary {
   border-color: rgba(130,150,255,0.45); background: rgba(130,150,255,0.16); color: var(--text-primary);
 }
+/* ---- 청크 창 · 모바일(<=767px) ----------------------------------------
+   왜: 기본 배치는 [목록 208px | 편집] 가로 두 칸이다. 375px 화면에서는 창이
+   359px 이라 편집 칸이 131px 밖에 안 남아 값 상자가 못 쓰게 된다(실측).
+   그래서 **위아래로 쌓는다** - 목록을 낮게 깔고 편집 칸에 나머지를 다 준다.
+
+   ⚠️ 이 규칙은 위의 `.wcchunk-*` 기본값보다 **뒤에** 있어야 이긴다. 특이도가
+      같아 파일 순서로 갈린다([[feedback-css-file-order-cascade]]) - 위로 올리지 마라. */
+@media (max-width: 767px) {
+  .wcchunk-popup {
+    width: calc(100vw - 16px);
+    height: min(560px, calc(100vh - 16px));
+  }
+  /* 그룹 셀렉트가 168px 을 고정으로 먹으면 옆의 검색칸이 찌그러진다. 줄어들게 둔다.
+     ⚠️ 원본 <select> 와 대체 위젯 **둘 다**에 걸어야 한다(위 주석 참조). */
+  .wcchunk-popup .wcchunk-group,
+  .wcchunk-popup .custom-wcchunk-group { flex: 1 1 0; min-width: 0; }
+  .wcchunk-popup .wcchunk-grouprow { flex-wrap: wrap; }
+  .wcchunk-popup .wcchunk-grouprow .tagsearch-input { flex: 1 1 100%; }
+  /* 칸머리는 목록 것만 남긴다 - 쌓고 나면 오른쪽 머리가 목록 위에 앉아 거짓말을 한다.
+     편집 칸이 무엇인지는 그 안의 토큰 줄이 이미 말해 준다. */
+  .wcchunk-colhead-left { flex: 1 1 auto; padding: 0 6px; }
+  .wcchunk-colhead-right { display: none; }
+  /* 본론: 가로 두 칸 -> 세로 두 칸. */
+  .wcchunk-popup .tagsearch-body { flex-direction: column; }
+  .wcchunk-popup .tagsearch-left {
+    flex: 0 0 auto; max-height: 33vh;
+    border-right: none; border-bottom: 1px solid var(--border-dim);
+  }
+  .wcchunk-popup .tagsearch-desc { padding: 8px; }
+  /* 값 상자는 줄어들 수 있어야 한다 - 겹침 가드와 같은 이유다. */
+  .wcchunk-value { min-height: 84px; font-size: 12px; }
+}
+
 .memo-popup .tagsearch-searchrow { display: flex; gap: 6px; align-items: center; }
 .memo-popup .tagsearch-input { flex: 1; min-width: 0; }
 .memo-popup .memo-new { flex: 0 0 auto; height: 24px; padding: 0 10px; }

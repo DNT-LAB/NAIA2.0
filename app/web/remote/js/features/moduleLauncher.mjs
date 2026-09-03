@@ -1,3 +1,17 @@
+/**
+ * 모바일(좁은 폭)에서 진입을 막는 모듈.
+ *
+ * 왜: 이 팝업들은 가로로 펼치는 배치라 767px 아래에서 화면을 덮고, 닫는 버튼까지
+ * 밀려나 빠져나올 수 없었다(사용자 지정 2026-09-03).
+ */
+const MOBILE_BLOCKED_MODULES = new Set(['character']);
+
+/** 좁은 화면 판정 - 앱의 기준폭 767px(다른 곳의 미디어쿼리와 한 값). */
+function isNarrowViewport() {
+  return typeof window !== 'undefined' && !!window.matchMedia
+    && window.matchMedia('(max-width: 767px)').matches;
+}
+
 const MODULE_REGISTRY = {
   prompt_engineering: {
     label: '프롬프트 엔지니어링',
@@ -210,6 +224,7 @@ export function createModuleLauncher({
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
+  let narrowQuery = null;
   let updateQueued = false;
   let tooltipEl = null;
   let tooltipOwner = null;
@@ -298,6 +313,10 @@ export function createModuleLauncher({
     if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && naiReferenceBlocked()) {
       return true;
     }
+    // 모바일 차단(사용자 지정 2026-09-03). 캐릭터 프롬프트 모듈 팝업은 슬롯 다섯 + POS
+    // 캔버스를 가로로 펼치는 화면이라 좁은 폭에서 쓸 수 없다. 모바일에서는 결과 화면의
+    // 빠른 캐릭터 패널만 쓰게 한다(그쪽도 Manage 를 같은 이유로 감춘다).
+    if (MOBILE_BLOCKED_MODULES.has(moduleId) && isNarrowViewport()) return true;
     if (moduleId === 'comfyui_workflow_default') {
       const state = typeof getComfyUiWorkflowState === 'function' ? getComfyUiWorkflowState() : null;
       return !Boolean(state?.has_custom);
@@ -724,10 +743,18 @@ export function createModuleLauncher({
     });
     observer = new MutationObserver(scheduleUpdateState);
     observeRoot();
+    // 폭이 기준선을 넘나들면 MOBILE_BLOCKED_MODULES 의 판정이 뒤집힌다. 여기서
+    // 다시 그려 주지 않으면 창을 좁힌 뒤에도 캐릭터 버튼이 살아 있다.
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      narrowQuery = window.matchMedia('(max-width: 767px)');
+      narrowQuery.addEventListener?.('change', scheduleUpdateState);
+    }
     updateState();
   }
 
   function cleanup() {
+    narrowQuery?.removeEventListener?.('change', scheduleUpdateState);
+    narrowQuery = null;
     if (observer) observer.disconnect();
     observer = null;
     hideTooltip();

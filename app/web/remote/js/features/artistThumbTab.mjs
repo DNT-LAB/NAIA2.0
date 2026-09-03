@@ -747,6 +747,11 @@ export function createArtistThumbController({
       }
       return;
     }
+    // ⚠️ 이 둘은 **막던 분기 안에만** 있었다. 갱신 중에도 목록을 그리게 바꾸면서 그
+    //    분기를 안 타게 됐고, 그 바람에 [Update] 버튼이 통째로 사라졌다(사용자 제보
+    //    2026-09-03). 어느 길로 오든 도구 줄은 다시 그려야 한다.
+    updateDownloadUi();
+    updateRandomUi();
     randomViewActive = Boolean(options.random);
     setStatus(mode ? 'Loading artist thumbnails...' : '모드를 선택하면 썸네일을 로드합니다.', mode ? 'busy' : '');
     if (gridEl) gridEl.classList.add('loading');

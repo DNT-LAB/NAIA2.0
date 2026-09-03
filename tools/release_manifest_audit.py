@@ -137,6 +137,10 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/tag_cooccurrence.json",
     "data/character_presets.json",
     "data/character_preview_thumbs.json",
+    # 캐릭터가 코퍼스에 처음 나타난 달(검색 탭 [최신] 토글). 도감에는 날짜가 없어
+    # 태그 코퍼스에서 미리 뽑아 둔 요약이다 — 코퍼스 자체(1.4GB)는 런타임 다운로드고
+    # 이 408KB 만 실린다. 안 실으면 토글이 **조용히 0건**이 된다.
+    "data/character_debut.json",
     # v2.0.34 검토: Interactive 확장이 런타임에 읽는 정적 표 5개(합 3.8MB).
     # include 패턴에는 이미 있었는데 이 예외 목록에서 빠져 게이트가 막았다.
     # 공개 미러에 올린 것이 아니라 페이로드로 실어야 한다 — 안 실으면 배포판에서
@@ -168,6 +172,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/tag_cooccurrence.json",
     "*/data/character_presets.json",
     "*/data/character_preview_thumbs.json",
+    "*/data/character_debut.json",
     # v2.0.34 Interactive 확장분(위 bare 패턴과 짝) — 스테이징 경로는
     # `resources/naia-backend/data/...` 라 `*/data/...` 형태가 따로 필요하다.
     "*/data/interactive_axis_tags.json",

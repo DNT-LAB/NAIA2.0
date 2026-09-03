@@ -10220,7 +10220,7 @@ document.addEventListener('keydown', event => {
 // 프리뷰 창(지연 로드). ⚠️ 이 그림은 **저장되지 않는다** - 서버가 결과 저장소에서
 //    빼고 디스크에도 안 쓴다. [Save] 를 눌렀을 때만 쓴다.
 let naiPreviewWindow = null;
-const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260903-stage')
+const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260903-stageleft')
   .then(({createNaiPreviewWindow}) => {
     naiPreviewWindow = createNaiPreviewWindow({
       document,

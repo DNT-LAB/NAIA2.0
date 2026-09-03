@@ -61,7 +61,10 @@ export function createNaiPreviewWindow({
   }
 
   /**
-   * **Result 스테이지(`.viewer-wrapper`) 한가운데**에 띄운다(사용자 지정 2026-09-03).
+   * **Result 스테이지(`.viewer-wrapper`) 왼쪽 끝에 붙여** 띄운다(사용자 지정 2026-09-03).
+   *
+   * ⚠️ 가운데가 아니다. 가운데에 두면 결과 그림을 한복판에서 가려 방금 나온 것을 못 본다
+   *    - 왼쪽에 붙이면 오른쪽 절반이 그대로 남는다. 세로는 그대로 가운데다.
    *
    * ⚠️ 자리가 두 번 바뀌었다. 처음엔 여기였고, 2026-09-02 에 프롬프트 창 쪽으로
    *    옮겼다 - **창이 스테이지보다 커지면 [Close] 줄이 화면 밖으로 밀려 닫을 수
@@ -78,7 +81,7 @@ export function createNaiPreviewWindow({
     const rect = root.getBoundingClientRect();
     const box = anchor ? anchor.getBoundingClientRect() : null;
     const wantLeft = box && box.width > 0
-      ? box.left + (box.width - rect.width) / 2
+      ? box.left
       : (win.innerWidth - rect.width) / 2;
     const wantTop = box && box.height > 0
       ? box.top + (box.height - rect.height) / 2

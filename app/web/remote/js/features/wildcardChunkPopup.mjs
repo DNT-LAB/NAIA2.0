@@ -4,15 +4,39 @@
  * 사용자 지정 2026-09-03: "청크를 기존 UI에서 빼고 Memo UI를 따라 리디자인. 편집·추가·
  * 관리를 전부 지원하며 사용 가이드라인($)도 제공."
  *
- * ⚠️ **Tag Search 의 뼈대를 그대로 쓴다**(Memo 가 그렇게 한다). 클래스를 갈아 끼우지
- *    않고 `wcchunk-popup` 을 갈고리로 두 곳만 손본다 — 팝업마다 제 옷을 지으면 화면에
- *    앉힐 자리가 사라진다([[feedback-popup-compact-style]]).
- * ⚠️ 값의 SSOT 는 **백엔드**(`core/instant_wildcard_service.py`)다. 여기서는 서버가 준
- *    상태를 그리고, 바꾸면 `set_param` 으로 되돌려 보낸 뒤 **서버가 준 것으로 다시 그린다.**
- *    화면에 사본을 두면 두 잣대가 어긋난다.
- * ⚠️ 이 창이 열리기 전까지 인스턴트 키를 고칠 길이 **아예 없었다**(옛 `instant_wildcard`
- *    모듈 팝업은 런처에 등록돼 있지 않고 여는 호출이 0건이었다 — 실측 2026-09-03).
+ * ## 자리 배치 (사용자 지정 2026-09-03 2차)
+ *
+ *     머리줄   와일드카드 청크 · N개 로드됨 ······················ [ⓘ 가이드] [×]
+ *     그룹줄   [그룹 ▾] [+ 그룹] ························ [키·값 검색      ]
+ *     칸머리   키                          [+ 키 추가] │ 키값
+ *     몸통     (키 목록)                              │ (값 편집 · 토큰 · 동작)
+ *
+ * ⚠️ **그룹과 키를 다른 줄로 갈랐다.** 한 줄에 [+ 그룹][+ 키] 를 붙여 뒀더니 무엇이
+ *    무엇을 만드는지 읽히지 않았다. 그룹은 그룹줄에서, 키는 자기 목록 머리에서 만든다.
+ * ⚠️ **편집 칸에 키 이름 입력을 두지 않는다.** 키는 왼쪽 목록이 정하고 이름 바꾸기는
+ *    [이름] 이 한다. 예전에는 토큰 줄이 서버 키를, 버튼이 입력칸 키를 써서 이름을
+ *    고치는 중에 둘이 어긋났다 - 입력칸을 없애 그 어긋남 자체를 없앴다.
+ * ⚠️ 사용법은 `<details>` 가 아니라 **머리줄의 [ⓘ 가이드]** 다(다른 모듈과 같은
+ *    `header-guide-btn` + `data-naia-guide`). 접이식은 펼칠 때마다 아래 칸을 밀어냈다.
+ *
+ * ⚠️ Tag Search 의 뼈대를 그대로 쓴다(Memo 가 그렇게 한다). 자체 `<style>` 주입 금지 —
+ *    새 클래스는 언제나 `style.css` 에, 같은 커밋에([[feedback-popup-compact-style]]).
+ * ⚠️ 값의 SSOT 는 백엔드(`core/instant_wildcard_service.py`)다.
  */
+
+/** `$` 문법 안내. ⚠️ **코드와 맞춰 적는다** — `core/wildcard_processor.py:135-150` 실측. */
+const CHUNK_GUIDE = [
+  '$그룹 — 그 그룹에서 아무 키나 하나를 뽑습니다.',
+  '',
+  '$그룹:글자 — 이름에 그 글자가 들어가는 키들 중 하나를 뽑습니다. 정확히 일치할 필요가 없고,'
+  + ' 하나만 걸리면 늘 그것이 나옵니다.',
+  '',
+  '⚠️ 걸리는 키가 하나도 없으면 그룹 전체에서 아무거나 나옵니다 — 오타를 내도 오류가 아니라'
+  + ' 조용히 다른 것이 뽑힙니다.',
+  '',
+  '⚠️ 값 안에 __파일__ 을 써도 풀리지 않습니다. 값은 쉼표로만 나눕니다.',
+].join('\n');
+
 export function createWildcardChunkPopup({
   document: doc,
   window: win,
@@ -52,6 +76,15 @@ export function createWildcardChunkPopup({
     return String(state?.current_group || '');
   }
 
+  function currentKey() {
+    return String(state?.current_key || '');
+  }
+
+  function token() {
+    const key = currentKey();
+    return key ? `$${currentGroup()}:${key}` : `$${currentGroup()}`;
+  }
+
   function setStatus(text, tone = '') {
     const el = pick('.tagsearch-status');
     if (!el) return;
@@ -74,11 +107,10 @@ export function createWildcardChunkPopup({
     const shown = visibleItems();
     if (!shown.length) {
       list.innerHTML = `<div class="tagsearch-empty">${escHtml(
-        items().length ? '찾는 키가 없습니다.' : '이 그룹에 키가 없습니다. [+ 새 키] 로 만드세요.')}</div>`;
+        items().length ? '찾는 키가 없습니다.' : '이 그룹에 키가 없습니다. [+ 키 추가] 를 누르세요.')}</div>`;
       return;
     }
-    // ⚠️ 선택 표시는 `.is-active` 다(Tag Search·Memo 와 같은 이름). `is-on` 을 쓰면
-    //    CSS 가 없어 아무 표시도 안 난다.
+    // ⚠️ 선택 표시는 `.is-active` 다(Tag Search·Memo 와 같은 이름).
     list.innerHTML = shown.map(item => `
       <button type="button" class="tagsearch-item wcchunk-item${item.selected ? ' is-active' : ''}"
               data-key="${escHtml(String(item.key || ''))}">
@@ -98,79 +130,51 @@ export function createWildcardChunkPopup({
   }
 
   /**
-   * 오른쪽 편집 칸.
+   * 오른쪽 편집 칸 — **값과 동작만** 있다(키 이름은 왼쪽 목록이 정한다).
    *
-   * ⚠️ 치고 있는 중에는 다시 그리지 않는다({keepFields}) - 서버 응답이 올 때마다 커서가
-   *    튀고 방금 친 글자가 사라진다(설정 패널이 같은 함정을 밟았다).
+   * ⚠️ 치고 있는 중에는 다시 그리지 않는다(`keepFields`) - 상태 에코가 올 때마다 다시
+   *    그리면 방금 친 글자가 사라진다.
    */
   function renderEditor({keepFields = false} = {}) {
     const box = pick('.tagsearch-desc');
     if (!box) return;
     if (keepFields && box.querySelector('.wcchunk-value')) return;
-    const key = String(state?.current_key || '');
-    const value = String(state?.current_value || '');
-    const group = currentGroup();
-    const token = key ? `$${group}:${key}` : `$${group}`;
+    const key = currentKey();
+    if (!key) {
+      box.innerHTML = `<div class="tagsearch-empty">${escHtml(
+        '왼쪽에서 키를 고르거나 [+ 키 추가] 를 누르세요.')}</div>`;
+      return;
+    }
     box.innerHTML = `
       <div class="wcchunk-edit">
-        <label class="wcchunk-field">
-          <span>키</span>
-          <input class="wcchunk-key-input" type="text" spellcheck="false"
-                 placeholder="girl" value="${escHtml(key)}">
-        </label>
-        <label class="wcchunk-field wcchunk-field-grow">
-          <span>값</span>
-          <textarea class="wcchunk-value" spellcheck="false"
-                    placeholder="1girl, solo, looking at viewer">${escHtml(value)}</textarea>
-        </label>
-        <!-- ⚠️ 여기 적힌 토큰과 [복사]·[넣기] 가 쓰는 값은 **같아야 한다.** 예전에는
-             글자는 서버 키, 버튼은 입력칸 키를 써서 이름을 고치는 중에 서로 달랐다.
-             이제 입력칸이 바뀌면 이 줄도 함께 고쳐진다(아래 input 처리). -->
+        <textarea class="wcchunk-value" spellcheck="false"
+                  placeholder="1girl, solo, looking at viewer">${escHtml(String(state?.current_value || ''))}</textarea>
         <div class="wcchunk-token">
-          <code>${escHtml(token)}</code>
+          <code>${escHtml(token())}</code>
           <button type="button" class="tagsearch-act" data-act="copy">복사</button>
-          <button type="button" class="tagsearch-act" data-act="insert">프롬프트에 넣기</button>
+          <button type="button" class="tagsearch-act" data-act="insert">넣기</button>
         </div>
         <div class="tagsearch-desc-actions">
           <button type="button" class="tagsearch-act is-primary" data-act="save">저장</button>
-          <button type="button" class="tagsearch-act" data-act="rename"${key ? '' : ' disabled'}>이름</button>
-          <button type="button" class="tagsearch-act is-danger" data-act="delete"${key ? '' : ' disabled'}>삭제</button>
+          <button type="button" class="tagsearch-act" data-act="rename">이름</button>
+          <button type="button" class="tagsearch-act is-danger" data-act="delete">삭제</button>
         </div>
-        <details class="wcchunk-guide">
-          <summary>$ 사용법</summary>
-          <div><code>$${escHtml(group || '그룹')}</code> — 그 그룹에서 <b>아무 키나 하나</b></div>
-          <div><code>$${escHtml(group || '그룹')}:${escHtml(key || '키')}</code> — 이름에
-            <b>그 글자가 들어가는</b> 키들 중 하나. 하나만 걸리면 늘 그것이 나옵니다.</div>
-          <div class="wcchunk-guide-note">⚠️ 걸리는 키가 <b>하나도 없으면 그룹 전체에서
-            아무거나</b> 나옵니다 — 오타를 내도 조용히 다른 것이 뽑힙니다.
-            값 안에 <code>__파일__</code> 을 써도 <b>풀리지 않습니다</b>(쉼표로만 나눕니다).</div>
-        </details>
       </div>`;
-    const valueBox = box.querySelector('.wcchunk-value');
-    const keyBox = box.querySelector('.wcchunk-key-input');
-    [valueBox, keyBox].forEach(el => el?.addEventListener('input', () => {
+    box.querySelector('.wcchunk-value')?.addEventListener('input', () => {
       dirty = true;
       setStatus('저장 안 됨', 'warn');
-    }));
-    // 키를 고치면 토큰 줄도 그 자리에서 따라 바뀐다 - 보이는 것과 버튼이 쓰는 것이
-    // 어긋나면 엉뚱한 토큰을 복사하게 된다.
-    keyBox?.addEventListener('input', () => {
-      const code = box.querySelector('.wcchunk-token code');
-      if (!code) return;
-      const now = String(keyBox.value || '').trim();
-      code.textContent = now ? `$${currentGroup()}:${now}` : `$${currentGroup()}`;
     });
   }
 
-  function editedKey() {
-    return String(pick('.wcchunk-key-input')?.value || '').trim();
+  function editedValue() {
+    return String(pick('.wcchunk-value')?.value ?? '');
   }
 
   /**
    * 고치던 값을 버리고 자리를 옮겨도 되는지 묻고, 좋다고 하면 `go()` 를 부른다.
    *
-   * ⚠️ 자리를 옮기는 **모든 길**이 여기를 지나야 한다(목록 클릭 · 그룹 전환 · 새 키 ·
-   *    닫기). 한 길만 막아 두면 나머지로 값이 조용히 사라진다 —
+   * ⚠️ 자리를 옮기는 **모든 길**이 여기를 지나야 한다(목록 클릭 · 그룹 전환 · 키 추가 ·
+   *    닫기). 한 길만 막으면 나머지로 값이 조용히 사라진다 —
    *    [[feedback-two-entry-points]] 와 같은 함정이다.
    */
   async function leaveCurrent(go) {
@@ -178,21 +182,18 @@ export function createWildcardChunkPopup({
       const ok = await Promise.resolve(confirmDialog('저장하지 않은 값이 있습니다. 버리고 옮길까요?', {
         title: '청크 편집', okText: '버리고 이동', cancelText: '취소',
       }));
-      if (!ok) return;
+      if (!ok) return false;
     }
     dirty = false;
     go();
-  }
-
-  function editedValue() {
-    return String(pick('.wcchunk-value')?.value ?? '');
+    return true;
   }
 
   function save() {
-    const key = editedKey();
-    if (!key) { showToast('키 이름이 필요합니다', 'error'); return; }
+    const key = currentKey();
+    if (!key) { showToast('고른 키가 없습니다', 'error'); return; }
     // ⚠️ 보내기 **전에** `dirty` 를 내리지 않는다. 내려 두면 전송이 실패해도 화면은
-    //    저장된 것처럼 굴고, 다음 에코가 방금 친 값을 덮어 쓴다. 성공을 확인하고 내린다.
+    //    저장된 것처럼 굴고, 다음 에코가 방금 친 값을 덮어 쓴다.
     const sent = setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
       file: currentFile(), key, value: editedValue(),
     }));
@@ -206,19 +207,26 @@ export function createWildcardChunkPopup({
   }
 
   async function rename() {
-    const oldKey = String(state?.current_key || '');
+    const oldKey = currentKey();
     if (!oldKey) return;
     const next = await Promise.resolve(promptDialog('새 키 이름', {
       title: '키 이름 바꾸기', okText: '변경', cancelText: '취소', defaultValue: oldKey,
     }));
     if (!next || next === oldKey) return;
+    // ⚠️ 같은 이름이 이미 있으면 서버가 **조용히 덮어쓴다** - 먼저 묻는다.
+    if (items().some(item => String(item.key || '') === next)) {
+      const ok = await Promise.resolve(confirmDialog(`'${next}' 가 이미 있습니다. 덮어쓸까요?`, {
+        title: '키 덮어쓰기', okText: '덮어쓰기', cancelText: '취소',
+      }));
+      if (!ok) return;
+    }
     setModuleParam('instant_wildcard', 'rename', JSON.stringify({
       file: currentFile(), old_key: oldKey, new_key: next,
     }));
   }
 
   async function removeKey() {
-    const key = String(state?.current_key || '');
+    const key = currentKey();
     if (!key) return;
     const ok = await Promise.resolve(confirmDialog(`'${key}' 를 지웁니다.`, {
       title: '청크 키 삭제', okText: '삭제', cancelText: '취소',
@@ -235,21 +243,25 @@ export function createWildcardChunkPopup({
     setModuleParam('instant_wildcard', 'add_group', name);
   }
 
-  /** 새 키는 편집 칸을 비우는 것으로 시작한다 - 저장을 눌러야 서버에 생긴다. */
-  function newKey() {
-    if (state) { state.current_key = ''; state.current_value = ''; }
-    renderEditor();
-    renderList();
-    setStatus('새 키 - 저장을 누르면 만들어집니다');
-    pick('.wcchunk-key-input')?.focus();
+  /** 이름을 먼저 묻고 빈 값으로 만든다 - 편집 칸에 이름 입력을 두지 않기 때문이다. */
+  async function addKey() {
+    const name = await Promise.resolve(promptDialog('새 키 이름', {
+      title: '청크 키 추가', okText: '추가', cancelText: '취소', placeholder: 'girl',
+    }));
+    if (!name) return;
+    if (items().some(item => String(item.key || '') === name)) {
+      showToast(`'${name}' 는 이미 있습니다`, 'error');
+      return;
+    }
+    setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
+      file: currentFile(), key: name, value: '',
+    }));
   }
 
   function onState(message) {
-    const previousKey = String(state?.current_key || '');
+    const previousKey = currentKey();
     const nextKey = String(message?.current_key || '');
-    // ⚠️ **치고 있는 중에는 편집 칸을 갈아 끼우지 않는다.** 상태 에코는 아무 때나 오는데,
-    //    그때마다 다시 그리면 방금 친 글자가 사라진다. 고른 키가 **바뀐 경우**에만 새로
-    //    그린다 - 그건 사용자가 옮겨 간 것이라 새 값을 보여 주는 게 맞다.
+    // ⚠️ 치는 중에는 편집 칸을 갈아 끼우지 않는다. 고른 키가 **바뀐 경우**에만 새로 그린다.
     const typing = dirty && nextKey === previousKey;
     state = message || null;
     if (!typing) dirty = false;
@@ -266,8 +278,8 @@ export function createWildcardChunkPopup({
   function position() {
     if (!popup) return;
     const margin = 10;
-    const pw = popup.offsetWidth || 560;
-    const ph = popup.offsetHeight || 380;
+    const pw = popup.offsetWidth || 660;
+    const ph = popup.offsetHeight || 440;
     const host = doc.getElementById('resultViewer')
       || doc.getElementById('rightTabResult')
       || doc.querySelector('.right-tab-pane.active');
@@ -299,14 +311,21 @@ export function createWildcardChunkPopup({
       <div class="tagsearch-head">
         <span class="tagsearch-title">와일드카드 청크</span>
         <span class="tagsearch-status"></span>
+        <button type="button" class="header-guide-btn" data-naia-guide="${escHtml(CHUNK_GUIDE)}">ⓘ 가이드</button>
         <button type="button" class="tagsearch-x" data-act="close" aria-label="닫기">&times;</button>
       </div>
-      <div class="tagsearch-searchrow">
+      <div class="tagsearch-searchrow wcchunk-grouprow">
         <select class="mod-select wcchunk-group" aria-label="청크 그룹"></select>
-        <input class="tagsearch-input" type="search" autocomplete="off" spellcheck="false"
-               placeholder="키·값 안에서 찾기">
-        <button type="button" class="tagsearch-act" data-act="new">+ 키</button>
         <button type="button" class="tagsearch-act" data-act="group">+ 그룹</button>
+        <input class="tagsearch-input" type="search" autocomplete="off" spellcheck="false"
+               placeholder="키·값 검색">
+      </div>
+      <div class="wcchunk-colhead">
+        <div class="wcchunk-colhead-left">
+          <span>키</span>
+          <button type="button" class="tagsearch-act" data-act="newkey">+ 키 추가</button>
+        </div>
+        <div class="wcchunk-colhead-right"><span>키값</span></div>
       </div>
       <div class="tagsearch-body">
         <div class="tagsearch-left"><div class="tagsearch-list"></div></div>
@@ -317,38 +336,34 @@ export function createWildcardChunkPopup({
     const input = popup.querySelector('.tagsearch-input');
     input.addEventListener('input', () => { query = input.value; renderList(); });
     input.addEventListener('keydown', event => {
-      if (event.key === 'Escape') { event.preventDefault(); close(); }
+      if (event.key === 'Escape') { event.preventDefault(); void leaveCurrent(close); }
     });
     const groupSelect = popup.querySelector('.wcchunk-group');
     groupSelect.addEventListener('change', event => {
       const next = event.target.value || '';
       void leaveCurrent(() => {
         setModuleParam('instant_wildcard', 'select_file', next);
-      }).then(() => {
-        // 취소했으면 고르개를 원래 그룹으로 되돌린다 - 안 되돌리면 화면은 새 그룹인데
-        // 목록은 옛 그룹이라 서로 다른 답이 보인다.
-        if (dirty) groupSelect.value = currentFile();
+      }).then(moved => {
+        // 취소했으면 고르개를 원래 그룹으로 되돌린다 - 안 되돌리면 고르개는 새 그룹인데
+        // 목록은 옛 그룹이라 한 화면이 두 답을 보인다.
+        if (!moved) groupSelect.value = currentFile();
       });
     });
 
     popup.addEventListener('click', event => {
-      // ⚠️ 키 줄은 동작 버튼보다 **나중에** 본다 - 줄이 목록 전체를 덮고 있어서
-      //    순서를 뒤집으면 위쪽 버튼이 먹히지 않는다.
+      // ⚠️ 동작 버튼을 **줄보다 먼저** 본다 - 줄이 목록 전체를 덮고 있다.
       const act = event.target.closest('[data-act]');
       if (act) {
         const action = act.dataset.act;
         if (action === 'close') { void leaveCurrent(close); return; }
-        if (action === 'new') { void leaveCurrent(newKey); return; }
         if (action === 'group') { void addGroup(); return; }
+        if (action === 'newkey') { void leaveCurrent(() => { void addKey(); }); return; }
         if (action === 'save') { save(); return; }
         if (action === 'rename') { void rename(); return; }
         if (action === 'delete') { void removeKey(); return; }
-        const group = currentGroup();
-        const key = editedKey();
-        const token = key ? `$${group}:${key}` : `$${group}`;
         if (action === 'copy') {
-          win.navigator?.clipboard?.writeText(token)
-            .then(() => showToast(`${token} 복사했습니다`, 'success'))
+          win.navigator?.clipboard?.writeText(token())
+            .then(() => showToast(`${token()} 복사했습니다`, 'success'))
             .catch(() => showToast('복사하지 못했습니다', 'error'));
           return;
         }
@@ -357,16 +372,14 @@ export function createWildcardChunkPopup({
             showToast('프롬프트에 넣을 수 없습니다', 'error');
             return;
           }
-          const ok = onInsertText(token);
-          showToast(ok === false ? '프롬프트에 넣지 못했습니다' : `${token} 를 넣었습니다`,
+          const ok = onInsertText(token());
+          showToast(ok === false ? '프롬프트에 넣지 못했습니다' : `${token()} 를 넣었습니다`,
                     ok === false ? 'error' : 'success');
         }
         return;
       }
       const row = event.target.closest('[data-key]');
       if (!row) return;
-      // ⚠️ **`win.confirm` 을 쓰지 않는다.** Electron 에서 네이티브 창이 초점을 잠근다 -
-      //    Memo 가 같은 이유로 주입받은 `confirmDialog` 만 쓴다. 여기도 그것을 쓴다.
       void leaveCurrent(() => {
         setModuleParam('instant_wildcard', 'select_key', row.dataset.key || '');
       });
@@ -388,7 +401,7 @@ export function createWildcardChunkPopup({
   }
 
   function toggle() {
-    if (isOpen()) close();
+    if (isOpen()) void leaveCurrent(close);
     else open();
   }
 

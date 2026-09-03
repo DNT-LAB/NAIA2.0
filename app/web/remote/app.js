@@ -10278,10 +10278,10 @@ let preview45Started = false;
 function setPreview45Busy(busy) {
   preview45Busy = !!busy;
   if (busy) preview45Started = false;
-  // ⚠️ 툴바 버튼은 **안 잠근다**(2026-09-03). 이제 이 버튼은 생성이 아니라 설정 팝업을
-  //    여는 자리라, 잠그면 도는 동안 설정을 볼 수도 닫을 수도 없다. 표시만 남긴다.
+  // 글자 버튼(생성)만 잠근다. ⚠️ **톱니는 안 잠근다** - 도는 동안에도 설정을 열어
+  //    다음 판의 값을 고칠 수 있어야 한다.
   const btn = document.getElementById('preview45RunBtn');
-  if (btn) btn.classList.toggle('is-busy', !!busy);
+  if (btn) btn.disabled = !!busy;
   naiPreviewSettingsPanel?.setBusy(!!busy);
   naiPreviewWindow?.setBusy(!!busy);
   if (preview45ReleaseTimer) { clearTimeout(preview45ReleaseTimer); preview45ReleaseTimer = 0; }
@@ -10310,7 +10310,7 @@ async function runV45Preview(opts) {
   if (preview45Busy) return;
   if (!(opts && opts.segmentConfirmed)
       && !extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
-    showToast('프리뷰 구간이 없습니다. [4.5 프리뷰] > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
+    showToast('프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
     return;
   }
   setPreview45Busy(true);
@@ -10385,7 +10385,8 @@ const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mj
       showToast,
       escHtml,
       onMarkers: action => { void applyV45PreviewMarkers(action); },
-      // 톱니를 없앤 뒤로 **여기가 생성 진입로**다(사용자 지정 2026-09-03).
+      // 팝업 머리줄의 [생성]. 값을 고쳐 가며 다시 뽑는 용도라 창을 닫지 않는다
+      //  - 툴바의 글자 버튼과 **같은 일**을 한다(잠금도 함께 걸린다).
       onGenerate: () => { void runV45Preview(); },
     });
     // 잠금은 이미 켜져 있을 수 있다(팝업은 지연 로드다) - 지금 상태를 한 번 물려준다.

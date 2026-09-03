@@ -9584,19 +9584,21 @@ body.resizing-result-info {
   justify-content: flex-start;
   padding-right: 96px;
 }
-/* V4.5 프리뷰 버튼이 떠 있을 때. 알약 몫(96px)만으로는 라벨이 **버튼 밑까지** 늘어난다.
-   비우는 폭 = 버튼 75px + 오른쪽 94px + 여유 8px = 177px.
+/* V4.5 프리뷰 묶음이 떠 있을 때. 알약 몫(96px)만으로는 라벨이 **버튼 밑까지** 늘어난다.
+   비우는 폭 = 묶음 97px(글자 73 + 톱니 22 + 테두리 2) + 오른쪽 94px + 여유 8px = 199px.
 
-   ⚠️ 2026-09-03 **다시 쟀다**(톱니를 없애 버튼이 130 -> 75 로 줄고, 라벨은 `M`·`C` 가
-      `Main`·`Char` 로 늘었다). 옛 값 232 를 그대로 두면 라벨 자리가 202px 인데 최악의
-      라벨이 정확히 202px 라 **여유가 0** 이었다 - 자릿수가 하나만 늘어도 파고든다.
-      실측(1280x720 · footer 450px · `E.tokens : 9999 (Main : 8888, Char : 1111)`):
-        라벨 16~218(202px) · 버튼 281~356(75px) · 알약 365~440
-      177 로 비우면 라벨 자리가 257px 이라 55px(약 9글자) 남는다.
+   ⚠️ 2026-09-03 **직접 쟀다**(옛 값 232 는 물려받은 수치였고 지금 화면과 안 맞았다).
+      실측: 묶음 97 · 라벨 글자 `E.tokens : 153 (Main : 153, Char : 0)` = 237px ·
+      세 자리씩이면 250 · 네 자리 총합이면 262.
+      라벨 자리 = footer - 16 - 199 이라, footer 가 452 이상이면 지금 라벨이 다 보인다.
+      1280x720(footer 450)에서는 2px 이 모자라 **말줄임 한 글자**가 생긴다 - 옛 값 232
+      에서는 같은 라벨이 35px 잘렸으니 그보다 훨씬 낫다. 넓은 창에서는 다 보인다.
+   ⚠️ 넘쳐도 버튼 밑으로 **파고들지는 않는다** - 라벨에 `overflow:hidden` + 말줄임이
+      걸려 있다. 그 두 속성이 진짜 가드다(이 여백은 잘림을 줄이는 몫이다).
    ⚠️ `.has-bg-pill` **뒤에** 둬야 한다 - 특이도가 같아 앞에 두면 96px 에 진다
       ([[feedback_css_file_order_cascade]]). */
 .prompt-token-footer.has-preview45 {
-  padding-right: 177px;
+  padding-right: 199px;
 }
 /* V4.5 프리뷰 창(사용자 지정 2026-09-01). 결과 스테이지 가운데에 뜬다.
    ⚠️ 이 그림은 **저장되지 않는다** - 창을 닫으면 사라진다. 그래서 [Save] 가 있다.
@@ -9840,8 +9842,10 @@ body.resizing-result-info {
   /* `hidden` 은 `display: inline-flex` 에 진다 - 짝을 반드시 쓴다. */
   display: none;
 }
-/* 톱니를 없애고 하나로 합쳤다(2026-09-03) - 이 버튼이 설정 팝업을 연다. */
-.preview45-run {
+/* 글자 = 생성 · 톱니 = 설정. 한 알약처럼 보이게 둘을 붙여 둔다.
+   ⚠️ 2026-09-03: 톱니를 지웠다가 되돌렸다 - 표식 삽입/제거가 잦아 설정이 버튼 옆에
+      있어야 한다(사용자 지정). 지우지 마라. */
+.preview45-run, .preview45-gear {
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -9851,27 +9855,30 @@ body.resizing-result-info {
   letter-spacing: 0.2px;
   white-space: nowrap;
   cursor: pointer;
-  padding: 0 9px;
   transition: color .12s ease, background .12s ease;
 }
-.preview45-run:hover {
+.preview45-run { padding: 0 9px; }
+/* 톱니는 정사각으로 - 글자 버튼과 함께 한 알약처럼 보여야 한다. */
+.preview45-gear {
+  width: 22px;
+  padding: 0;
+  border-left: 1px solid rgba(232,232,240,0.16);
+  font-size: 11px;
+}
+.preview45-run:hover, .preview45-gear:hover {
   color: var(--text-primary);
   background: rgba(255,255,255,0.07);
 }
+/* 생성 중에는 글자 쪽만 잠근다 - 톱니는 계속 눌려야 설정을 보고 고칠 수 있다. */
 .preview45-run:disabled {
   opacity: 0.5;
   cursor: default;
 }
-/* 도는 중. 잠그지는 않는다 - 설정은 계속 열 수 있어야 한다. */
-.preview45-run.is-busy {
-  color: var(--accent);
-  opacity: 0.75;
-}
-.preview45-run[aria-expanded="true"] {
+.preview45-gear[aria-expanded="true"] {
   color: var(--text-primary);
   background: rgba(255,255,255,0.1);
 }
-.preview45-run:focus-visible {
+.preview45-run:focus-visible, .preview45-gear:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }

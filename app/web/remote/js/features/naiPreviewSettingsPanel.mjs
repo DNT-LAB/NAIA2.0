@@ -1,8 +1,9 @@
 /**
  * V4.5 프리뷰 설정 패널 — 툴바의 [4.5 프리뷰] 를 누르면 뜨는 팝업.
  *
- * ⚠️ 2026-09-03: 톱니를 없애고 이 팝업을 **버튼 하나**에 통합했다(사용자 지정).
- *    그래서 생성 진입로가 팝업 밖에 없다 — 머리줄의 [생성] 이 그 자리다.
+ * ⚠️ 2026-09-03: 톱니를 없앴다가 **되돌렸다**(사용자 지정). 표식 삽입/제거가 잦아서
+ *    설정이 한 클릭 더 멀어지는 값이 footer 23px 보다 크다. 툴바에서 **글자 = 생성 ·
+ *    톱니 = 설정** 이고, 머리줄의 [생성] 은 값을 고쳐 가며 다시 뽑는 용도로 남는다.
  *    폭은 **메인 프롬프트 텍스트창에 맞춘다**(같은 지정) — 왼쪽 끝까지 맞춰 겹쳐 놓으면
  *    어느 글을 두고 하는 설정인지가 눈으로 이어진다.
  *
@@ -23,8 +24,8 @@ export function createNaiPreviewSettingsPanel({
   onGenerate,
 }) {
   const SETTINGS_URL = '/api/nai-preview/settings';
-  // 팝업을 여는 버튼. 톱니를 없앤 뒤로 이 하나가 앵커이자 상태 표시다.
-  const ANCHOR_ID = 'preview45RunBtn';
+  // 팝업을 여는 톱니. 위치의 기준이자 열림 표시(`aria-expanded`)를 다는 자리다.
+  const ANCHOR_ID = 'preview45GearBtn';
   // 폭을 맞출 대상 - 메인 프롬프트 텍스트창.
   const WIDTH_SOURCE_ID = 'promptEdit';
   let panel = null;
@@ -237,7 +238,7 @@ export function createNaiPreviewSettingsPanel({
     panel.style.top = `${Math.round(top)}px`;
   }
 
-  /** 생성 중에는 팝업의 [생성] 만 잠근다 - 버튼은 설정을 열어야 하니 안 잠근다. */
+  /** 생성 중에는 팝업의 [생성] 도 함께 잠근다(툴바 글자 버튼과 같은 잠금). */
   function setBusy(busy) {
     const run = el('preview45PanelRunBtn');
     if (run) run.disabled = !!busy;

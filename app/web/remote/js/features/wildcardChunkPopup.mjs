@@ -243,10 +243,34 @@ export function createWildcardChunkPopup({
     setModuleParam('instant_wildcard', 'add_group', name);
   }
 
-  /** 이름을 먼저 묻고 빈 값으로 만든다 - 편집 칸에 이름 입력을 두지 않기 때문이다. */
-  async function addKey() {
+  /**
+   * 값의 첫 태그에서 키 이름을 짐작한다. 옛 청크 패널의 규칙을 그대로 옮겼다 —
+   * 두 곳이 다른 이름을 지으면 같은 글을 담아도 결과가 달라진다.
+   */
+  function suggestKeyFromValue(value) {
+    const firstToken = (value || '')
+      .split(/[,\n]/)
+      .map(part => part.trim())
+      .find(Boolean) || '';
+    const cleaned = firstToken
+      .replace(/^[({[\s]+|[)}\]\s]+$/g, '')
+      .replace(/^[+-]?\d+(?:\.\d+)?::\s*/, '')
+      .replace(/\s*::\s*$/, '')
+      .replace(/^#+/, '')
+      .replace(/[^\p{L}\p{N}_-]+/gu, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+    return cleaned || `chunk_${Date.now().toString(36)}`;
+  }
+
+  /**
+   * 이름을 먼저 묻고 만든다 - 편집 칸에 이름 입력을 두지 않기 때문이다.
+   * `value` 를 주면 그 값으로 바로 만든다(프롬프트에서 고른 글을 청크로 만드는 길).
+   */
+  async function addKey({value = '', suggested = ''} = {}) {
     const name = await Promise.resolve(promptDialog('새 키 이름', {
       title: '청크 키 추가', okText: '추가', cancelText: '취소', placeholder: 'girl',
+      defaultValue: suggested || (value ? suggestKeyFromValue(value) : ''),
     }));
     if (!name) return;
     if (items().some(item => String(item.key || '') === name)) {
@@ -254,8 +278,29 @@ export function createWildcardChunkPopup({
       return;
     }
     setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
-      file: currentFile(), key: name, value: '',
+      file: currentFile(), key: name, value,
     }));
+  }
+
+  /**
+   * 프롬프트에서 고른 글을 청크로 만든다 — **옛 청크 패널을 대신하는 길**이다.
+   *
+   * ⚠️ 팝업을 새로 만들지 않는다. 이미 있는 이 창을 열고 이름만 물어 바로 만든다
+   *    (사용자 지적: 팝업을 또 만드는 것은 번거롭다).
+   * ⚠️ 상태가 아직 없으면 그룹을 몰라 `upsert` 가 갈 곳이 없다 - 먼저 받고 나서 만든다.
+   */
+  async function addFromSelection(value) {
+    const text = String(value || '').trim();
+    if (!text) { showToast('고른 글이 없습니다', 'error'); return; }
+    open();
+    if (!currentFile()) {
+      requestModuleState('instant_wildcard');
+      for (let i = 0; i < 20 && !currentFile(); i += 1) {
+        await new Promise(resolve => win.setTimeout(resolve, 100));
+      }
+    }
+    if (!currentFile()) { showToast('청크 그룹을 불러오지 못했습니다', 'error'); return; }
+    await addKey({value: text});
   }
 
   function onState(message) {
@@ -405,5 +450,5 @@ export function createWildcardChunkPopup({
     else open();
   }
 
-  return {open, close, toggle, isOpen, onState};
+  return {open, close, toggle, isOpen, onState, addFromSelection};
 }

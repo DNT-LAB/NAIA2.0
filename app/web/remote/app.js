@@ -2571,9 +2571,16 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260831-autohide2')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260903-tochunkwin')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
+      // 우클릭 [Add to Chunk] 를 **새 청크 창**으로 보낸다(2026-09-03) - 팝업을 또
+      // 만들지 않고 이미 있는 창을 쓴다. 이 줄이 옛 패널의 마지막 일감을 걷어 간다.
+      onAddToChunkWindow: async value => {
+        await wildcardChunkPopupReady;
+        if (!wildcardChunkPopup) { showToast('청크 창을 불러오지 못했습니다.', 'error'); return; }
+        void wildcardChunkPopup.addFromSelection(value);
+      },
       document,
       panel: chunkPanel,
       moduleBody,
@@ -7198,7 +7205,7 @@ if (memoBtn) {
 // 와일드카드 청크 — Memo 와 같은 자리·같은 옷(사용자 지정 2026-09-03).
 // ⚠️ 이 창이 생기기 전까지 인스턴트 키를 고칠 길이 **아예 없었다** - 옛 `instant_wildcard`
 //    모듈 팝업은 런처에 없고 여는 호출이 0건이었다(실측).
-wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk3')
+wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk4')
   .then(({createWildcardChunkPopup}) => {
     wildcardChunkPopup = createWildcardChunkPopup({
       document,

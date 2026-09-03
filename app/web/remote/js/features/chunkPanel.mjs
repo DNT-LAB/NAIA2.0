@@ -1,4 +1,6 @@
 export function createChunkPanel({
+  // 우클릭 [Add to Chunk] 를 받아 갈 새 청크 창(2026-09-03). 없으면 옛 Add 폼으로 떨어진다.
+  onAddToChunkWindow,
   document,
   panel,
   moduleBody,
@@ -377,8 +379,15 @@ export function createChunkPanel({
           showToast('Tag Filter 를 열 수 없습니다.', 'error');
         }
       } else if (action === 'add-chunk') {
-        pendingAddPrefill = { value, key };
-        openPanel(getAnchor(target), false);
+        // ⚠️ **새 청크 창으로 보낸다**(사용자 지정 2026-09-03). 예전에는 이 패널을
+        //    열어 자체 Add 폼을 채웠는데, 같은 일을 하는 화면이 둘이 됐다.
+        //    팝업을 또 만들지 않고 이미 있는 창을 쓴다. 주입이 없으면 옛 길로 떨어진다.
+        if (typeof onAddToChunkWindow === 'function') {
+          onAddToChunkWindow(value);
+        } else {
+          pendingAddPrefill = { value, key };
+          openPanel(getAnchor(target), false);
+        }
       } else if (action === 'undo' || action === 'redo') {
         document.execCommand?.(action);
         notifyTextChanged(target);

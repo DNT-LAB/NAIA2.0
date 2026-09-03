@@ -21208,16 +21208,23 @@ body.detached-module .mod-grid-3 {
 .wcchunk-popup .custom-wcchunk-group { flex: 0 0 168px; height: 24px; font-size: 10.5px; }
 .wcchunk-popup .wcchunk-grouprow .tagsearch-act { flex: 0 0 auto; height: 24px; padding: 0 9px; }
 .wcchunk-popup .wcchunk-grouprow .tagsearch-input { flex: 1; min-width: 0; }
-/* 칸머리 - 아래 두 칸이 무엇인지 한 줄로 말한다. 좌우 폭은 몸통과 **같은 값**을 쓴다. */
+/* 칸머리 - 아래 두 칸이 무엇인지 한 줄로 말한다.
+   ⚠️ **몸통과 같은 자를 써야 한다.** 여기에만 좌우 10px 여백을 뒀더니 칸이 통째로 10px
+      밀려, [+ 키 추가] 가 목록 칸(1~209)을 넘어 **219 까지 나가 값 칸 위에 올라탔다**
+      (사용자 제보 2026-09-03 · 실측). `.tagsearch-body` 는 여백이 0 이다 - 바깥 여백을
+      빼고, 안쪽에서 각 칸의 글자 들여쓰기만 따로 준다. */
 .wcchunk-colhead {
-  display: flex; align-items: center; gap: 8px;
-  padding: 2px 10px 0; font-size: 10px; color: var(--text-dim);
+  display: flex; align-items: center; gap: 0;
+  padding: 2px 0 0; font-size: 10px; color: var(--text-dim);
 }
 .wcchunk-colhead-left {
-  flex: 0 0 208px; display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  /* 목록 칸과 **같은 208px**. 오른쪽 8px 은 버튼을 칸 경계에서 떼어 놓는 몫이다. */
+  flex: 0 0 208px; box-sizing: border-box; padding: 0 8px 0 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
 }
 .wcchunk-colhead-left .tagsearch-act { height: 20px; padding: 0 8px; font-size: 9.5px; }
-.wcchunk-colhead-right { flex: 1; min-width: 0; }
+/* 값 칸의 안쪽 여백(`.tagsearch-desc` 의 10px)과 글자를 맞춘다. */
+.wcchunk-colhead-right { flex: 1; min-width: 0; box-sizing: border-box; padding-left: 10px; }
 /* ⚠️ `min-height: 0` 이 없으면 몸통이 내용만큼 부풀어 창 밖으로 넘친다. */
 .wcchunk-popup .tagsearch-body { min-height: 0; }
 /* 키가 짧고 값이 길다 - 목록을 넓혀 값 미리보기를 한 줄 보여 준다. */

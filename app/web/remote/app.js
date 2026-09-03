@@ -1965,7 +1965,7 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
   });
-const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260901-v5short')
+const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260903-mainchar')
   .then(({createTokenDisplay}) => {
     tokenDisplayControl = createTokenDisplay({
       promptEdit,
@@ -2028,7 +2028,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20260829-anlas')
+    return import('./js/features/naiAccountPanel.mjs?v=20260903-renewdays')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,
@@ -10210,6 +10210,8 @@ document.addEventListener('keydown', event => {
   if (!event.altKey || event.ctrlKey || event.metaKey) return;
   if (String(event.key || '').toLowerCase() !== 'p') return;
   if (!naiModelIsV5()) return;
+  // ⚠️ 꺼져 있으면 단축키도 안 먹는다 - 버튼은 회색인데 키만 도는 상태를 만들지 않는다.
+  if (v45PreviewState() === 'off') return;
   if (!v45PreviewSetting('alt_p_hotkey', true)) return;
   event.preventDefault();
   void runV45Preview();
@@ -10377,7 +10379,10 @@ async function applyV45PreviewMarkers(action, opts) {
 
 // 설정 패널(지연 로드). ⚠️ 값의 SSOT 는 백엔드다 - 여기서는 열고 닫기만 한다.
 let naiPreviewSettingsPanel = null;
-const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260903-pv45merge')
+// ⚠️ **모듈을 고치면 이 `?v=` 를 반드시 올린다.** 브라우저는 URL 로 ES 모듈을 캐시해서,
+//    안 올리면 새로고침해도 옛 모듈이 그대로 돈다 - 실제로 활성화 토글이 안 뜨는 것으로
+//    한 번 나타났다(2026-09-03 실측).
+const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260903-pv45state2')
   .then(({createNaiPreviewSettingsPanel}) => {
     naiPreviewSettingsPanel = createNaiPreviewSettingsPanel({
       document,
@@ -10388,6 +10393,8 @@ const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mj
       // 팝업 머리줄의 [생성]. 값을 고쳐 가며 다시 뽑는 용도라 창을 닫지 않는다
       //  - 툴바의 글자 버튼과 **같은 일**을 한다(잠금도 함께 걸린다).
       onGenerate: () => { void runV45Preview(); },
+      // 켜짐/랜덤 연동이 바뀌면 툴바 버튼 색과 Random 라벨이 따라 바뀐다.
+      onSettingsChange: () => { refreshV45PreviewState(); },
     });
     // 잠금은 이미 켜져 있을 수 있다(팝업은 지연 로드다) - 지금 상태를 한 번 물려준다.
     naiPreviewSettingsPanel.setBusy(preview45Busy);
@@ -10404,6 +10411,58 @@ const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mj
 
 function closeV45PreviewMenu() {
   naiPreviewSettingsPanel?.close();
+}
+
+/**
+ * 툴바 버튼의 **세 가지 상태**(사용자 지정 2026-09-03).
+ *
+ *   꺼짐   회색   · 누르면 설정이 열린다(팝업의 활성화 줄이 점멸해 다음 할 일을 가리킨다)
+ *   켜짐   연두   · 누르면 생성
+ *   랜덤   분홍   · 켜짐 + 랜덤 연동. Random 버튼도 `Random (프리뷰)` 로 바뀐다
+ *
+ * ⚠️ 랜덤은 **켜짐의 하위 상태**다. 꺼져 있는데 랜덤 연동만 켜 두면 아무 일도
+ *    안 일어나므로 분홍으로 칠하면 거짓말이 된다.
+ */
+function v45PreviewState() {
+  if (!v45PreviewSetting('enabled', false)) return 'off';
+  return v45PreviewSetting('on_random', false) ? 'random' : 'on';
+}
+
+function refreshV45PreviewState() {
+  const state = v45PreviewState();
+  const btn = document.getElementById('preview45RunBtn');
+  if (btn) {
+    btn.classList.toggle('is-off', state === 'off');
+    btn.classList.toggle('is-on', state === 'on');
+    btn.classList.toggle('is-random', state === 'random');
+    btn.title = state === 'off'
+      ? 'V4.5 프리뷰가 꺼져 있습니다 - 눌러서 설정을 엽니다'
+      : (state === 'random' ? 'Random 을 누를 때 함께 나갑니다' : '4.5 프리뷰를 생성합니다');
+  }
+  // Random 라벨. ⚠️ 라벨은 단축키 힌트 <span> 뒤의 **맨 뒤 텍스트 노드**다
+  //    (Generate 의 인페인트 표기와 같은 방식 - 노드를 지우면 힌트까지 날아간다).
+  // ⚠️ 프리뷰 묶음이 안 보이는 모드(V5 아님)에서는 표기하지 않는다 - 그때는 랜덤이
+  //    프리뷰를 부르지 않는다.
+  const rnd = document.getElementById('btnRnd');
+  if (rnd) {
+    const linked = state === 'random' && naiModelIsV5();
+    const label = Array.from(rnd.childNodes).reverse().find(n => n.nodeType === 3);
+    if (label) label.textContent = linked ? 'Random (프리뷰)' : 'Random';
+    rnd.classList.toggle('is-preview-linked', linked);
+  }
+}
+
+/**
+ * 툴바 글자 버튼. **꺼져 있으면 생성하지 않고 설정을 연다**(사용자 지정 2026-09-03).
+ *
+ * 꺼진 채로 눌렀을 때 토스트만 띄우면 어디서 켜는지를 다시 찾아야 한다 - 켜는 자리를
+ * 바로 열어 주고, 그 줄이 점멸해 무엇을 누를지 가리킨다.
+ */
+async function onV45PreviewButton() {
+  // 설정이 아직 안 왔으면 기다린다 - 안 기다리면 첫 클릭이 늘 '꺼짐' 으로 읽힌다.
+  await naiPreviewSettingsReady;
+  if (v45PreviewState() === 'off') { await toggleV45PreviewMenu(); return; }
+  void runV45Preview();
 }
 
 async function toggleV45PreviewMenu() {
@@ -10431,7 +10490,9 @@ async function maybeRunV45PreviewAfterRandom() {
   if (!naiModelIsV5()) return;
   // 설정이 아직 안 왔으면 기다린다 - 안 기다리면 첫 랜덤이 기본값으로 떨어진다.
   await naiPreviewSettingsReady;
-  if (!v45PreviewSetting('on_random', false)) return;
+  // ⚠️ 기능이 꺼져 있으면 랜덤 연동도 없다 - `on_random` 만 보면 꺼 둔 사람에게
+  //    랜덤마다 프리뷰가 나간다(상태는 `enabled` 가 위다).
+  if (v45PreviewState() !== 'random') return;
   // 조용히 넣는다 - 랜덤을 돌릴 때마다 구간 토스트가 뜨면 화면을 덮는다.
   const ok = await applyV45PreviewMarkers('insert', {silent: true, useServerPrompt: true});
   if (!ok) { showToast('프리뷰 구간을 잡지 못했습니다.', 'info'); return; }
@@ -10446,6 +10507,8 @@ function refreshV5DependentChrome() {
   if (previewSplit) previewSplit.hidden = !previewOn;
   document.getElementById('promptTokenFooter')
     ?.classList.toggle('has-preview45', previewOn);
+  // 모드가 바뀌면 Random 라벨도 다시 계산한다 - V5 를 벗어나면 `(프리뷰)` 를 떼야 한다.
+  refreshV45PreviewState();
   if (!previewOn) closeV45PreviewMenu();
   if (tokenDisplayControl) tokenDisplayControl.updatePromptTokenEstimate();
 }

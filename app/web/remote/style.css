@@ -9776,6 +9776,23 @@ body.resizing-result-info {
 }
 .pv45-toggle.on { color: var(--text-primary); }
 .pv45-toggle.on .pv45-box { border-color: var(--accent); background: var(--accent); }
+/* 기능이 꺼져 있을 때의 활성화 줄 - 연노랑으로 점멸해 다음 할 일을 가리킨다
+   (사용자 지정 2026-09-03). 켜면 `.pv45-callout` 이 빠지면서 바로 멎는다.
+   ⚠️ 글자는 **애니메이션과 무관하게 늘 읽힌다** - 색만 오간다. 움직임을 못 보는
+      환경에서도 내용이 사라지면 안 된다([[feedback_transition_gates_content]]). */
+.pv45-toggle.pv45-callout {
+  color: #e9dc8e;
+  animation: pv45CalloutBlink 1.15s ease-in-out infinite;
+}
+.pv45-toggle.pv45-callout .pv45-box { border-color: #e9dc8e; }
+@keyframes pv45CalloutBlink {
+  0%, 100% { color: #e9dc8e; }
+  50%      { color: #6f6a44; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 점멸을 멈추되 **색은 남긴다** - 눈에 걸려야 하는 줄이라는 사실은 그대로다. */
+  .pv45-toggle.pv45-callout { animation: none; }
+}
 /* 세그먼트 - 가운데 테두리를 겹쳐 한 덩어리로. */
 .pv45-seg { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 5px; overflow: hidden; }
 .pv45-seg-btn {
@@ -9865,9 +9882,28 @@ body.resizing-result-info {
   border-left: 1px solid rgba(232,232,240,0.16);
   font-size: 11px;
 }
+/* 세 가지 상태(사용자 지정 2026-09-03). 색만으로 지금 무엇이 일어날지 읽혀야 한다.
+     회색 = 꺼짐(누르면 설정) · 연두 = 켜짐(누르면 생성) · 분홍 = 랜덤 연동.
+   ⚠️ `:hover` **앞에** 둔다 - 특이도가 같아 뒤에 두면 hover 색을 덮는다
+      ([[feedback_css_file_order_cascade]]). */
+.preview45-run.is-off {
+  color: #7e7e93;
+}
+.preview45-run.is-on {
+  color: #8fd48a;
+  background: rgba(143,212,138,0.10);
+}
+.preview45-run.is-random {
+  color: #f093c0;
+  background: rgba(240,147,192,0.12);
+}
 .preview45-run:hover, .preview45-gear:hover {
   color: var(--text-primary);
   background: rgba(255,255,255,0.07);
+}
+/* Random 이 프리뷰까지 부르는 상태 - 버튼 이름이 `Random (프리뷰)` 로 바뀐다. */
+.ctrl-btn.btn-rnd.is-preview-linked {
+  box-shadow: inset 0 0 0 1px rgba(240,147,192,0.55);
 }
 /* 생성 중에는 글자 쪽만 잠근다 - 톱니는 계속 눌려야 설정을 보고 고칠 수 있다. */
 .preview45-run:disabled {

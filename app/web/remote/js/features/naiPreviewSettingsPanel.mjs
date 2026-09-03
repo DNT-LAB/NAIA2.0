@@ -22,6 +22,7 @@ export function createNaiPreviewSettingsPanel({
   escHtml,
   onMarkers,
   onGenerate,
+  onSettingsChange,
 }) {
   const SETTINGS_URL = '/api/nai-preview/settings';
   // 팝업을 여는 톱니. 위치의 기준이자 열림 표시(`aria-expanded`)를 다는 자리다.
@@ -33,6 +34,7 @@ export function createNaiPreviewSettingsPanel({
   let options = null;
   let saveTimer = null;
   let activeTab = 'prompt';
+  let busyNow = false;
 
   const el = id => doc.getElementById(id);
 
@@ -46,11 +48,20 @@ export function createNaiPreviewSettingsPanel({
     const data = await res.json();
     settings = data.settings || {};
     options = data.options || {};
+    // 툴바 버튼의 색과 Random 라벨이 이 값으로 갈린다 - 값이 바뀔 때마다 알린다.
+    onSettingsChange?.(settings);
+    // ⚠️ 열려 있으면 몸통도 다시 그린다. 서버 값이 밖에서 바뀌었는데 안 그리면 툴바
+    //    버튼만 새 상태고 팝업 안의 체크는 옛 상태로 남는다 - 같은 것을 두고 두 답이
+    //    보인다. (`render` 는 편집 중인 칸이 있으면 스스로 비켜선다.)
+    render();
   }
 
   /** 바뀐 값을 보내고 **서버가 정규화한 것**으로 갈아 낀다. 잘린 값이 화면에 바로 보인다. */
   function queueSave(patch) {
     Object.assign(settings, patch);
+    // ⚠️ **먼저** 알린다. 저장은 350ms 디바운스라, 응답을 기다리면 눌렀는데 버튼 색이
+    //    한 박자 늦게 바뀐다 - 서버가 눕힌 값은 아래 응답에서 다시 알린다.
+    onSettingsChange?.(settings);
     if (saveTimer) win.clearTimeout(saveTimer);
     saveTimer = win.setTimeout(async () => {
       saveTimer = null;
@@ -63,6 +74,7 @@ export function createNaiPreviewSettingsPanel({
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { showToast(data.error || '프리뷰 설정을 저장하지 못했습니다.', 'error'); return; }
         settings = data.settings || settings;
+        onSettingsChange?.(settings);
         render();
       } catch (error) {
         showToast('프리뷰 설정 저장 실패: ' + error.message, 'error');
@@ -70,9 +82,9 @@ export function createNaiPreviewSettingsPanel({
     }, 350);
   }
 
-  function toggleRow(key, label) {
+  function toggleRow(key, label, extra = '') {
     const on = !!settings[key];
-    return `<button type="button" class="pv45-toggle${on ? ' on' : ''}" data-toggle="${key}"
+    return `<button type="button" class="pv45-toggle${on ? ' on' : ''}${extra}" data-toggle="${key}"
               aria-pressed="${on}"><span class="pv45-box"></span>${escHtml(label)}</button>`;
   }
 
@@ -102,7 +114,12 @@ export function createNaiPreviewSettingsPanel({
     const resList = (options.custom_resolutions || []).map(r => `${r.width} x ${r.height}`);
     const currentRes = `${settings.custom_width} x ${settings.custom_height}`;
 
+    // ⚠️ 꺼져 있으면 **활성화 줄이 점멸한다**(사용자 지정 2026-09-03). 회색 버튼을 눌러
+    //    여기까지 온 사람이 다음에 무엇을 눌러야 하는지가 이 줄이다. 켜는 순간 멎는다.
+    const off = !settings.enabled;
     body.innerHTML = `
+      ${toggleRow('enabled', 'V4.5 프리뷰 활성화', off ? ' pv45-callout' : '')}
+      <div class="pv45-sep"></div>
       <div class="pv45-row pv45-markers">
         <button type="button" class="pv45-btn" data-act="insert">프리뷰 표식 삽입</button>
         <button type="button" class="pv45-btn" data-act="remove">제거</button>
@@ -147,6 +164,8 @@ export function createNaiPreviewSettingsPanel({
         <div class="pv45-field"><span class="pv45-label">네거티브 프롬프트</span>
           <textarea class="pv45-area" data-text="negative" rows="5">${escHtml(settings.negative || '')}</textarea></div>`}
     `;
+    // 머리줄 [생성] 은 몸통 밖이라 여기서 함께 맞춰 준다(꺼져 있으면 잠긴다).
+    syncRunButton();
   }
 
   function build() {
@@ -238,10 +257,18 @@ export function createNaiPreviewSettingsPanel({
     panel.style.top = `${Math.round(top)}px`;
   }
 
-  /** 생성 중에는 팝업의 [생성] 도 함께 잠근다(툴바 글자 버튼과 같은 잠금). */
-  function setBusy(busy) {
+  /**
+   * 팝업의 [생성] 은 **두 가지 이유**로 잠긴다: 생성 중이거나, 기능이 꺼져 있거나.
+   * 둘을 한 자리에서 계산한다 - 나눠 두면 한쪽이 다른 쪽을 되살린다.
+   */
+  function syncRunButton() {
     const run = el('preview45PanelRunBtn');
-    if (run) run.disabled = !!busy;
+    if (run) run.disabled = busyNow || !(settings && settings.enabled);
+  }
+
+  function setBusy(busy) {
+    busyNow = !!busy;
+    syncRunButton();
   }
 
   function close() {

@@ -50,6 +50,10 @@ PREVIEW_SETTINGS_FILE = "nai_preview_settings.json"
 
 DEFAULTS: dict[str, Any] = {
     # 토글 — 기본값은 사용자 SPEC 그대로다.
+    # ⚠️ `enabled` 는 **기본이 꺼짐**이다(사용자 지정 2026-09-03). 툴바 버튼의 상태를
+    #    가르는 값이라 - 꺼짐이면 회색이고 눌러도 설정만 열린다. 켜야 생성이 나간다.
+    #    켜져 있다고 착각한 채 랜덤을 돌리면 매 장이 한 번 더 나가므로, 시작은 꺼짐이다.
+    "enabled": False,            # V4.5 프리뷰 기능 자체를 켜고 끈다
     "on_random": False,          # 랜덤 버튼이 작동할 때 V4.5 생성을 요청
     "send_character": True,      # 캐릭터 프롬프트를 함께 보냄
     "alt_p_hotkey": True,        # ALT+P 로 요청
@@ -114,7 +118,8 @@ def normalize(raw: Any) -> dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     out = dict(DEFAULTS)
 
-    for key in ("on_random", "send_character", "alt_p_hotkey", "var_plus", "decrisp"):
+    for key in ("enabled", "on_random", "send_character", "alt_p_hotkey",
+                "var_plus", "decrisp"):
         if key in data:
             out[key] = _coerce_bool(data.get(key))
 

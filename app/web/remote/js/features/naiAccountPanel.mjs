@@ -295,6 +295,23 @@ export function createNaiAccountPanel({
           .map(a => ({ ...a, available: false, percent: 0 }));
   }
 
+  /**
+   * 재결제까지 남은 일수의 급함(사용자 지정 2026-09-03).
+   *
+   *   8일 이상 → 기본(약간 덜 밝은 흰색) · 4~7 → 연노랑 · 2~3 → 연주황 · 1 → 주황 ·
+   *   0 → 빨강에 가까운 주황
+   *
+   * ⚠️ 경계를 **아래에서 위로** 본다. 위에서부터 `>= 8` 로 시작하면 음수가 기본색으로
+   *    빠진다 - 백엔드가 0 으로 깎아 보내지만 이 함수만 따로 쓰이면 그때 무너진다.
+   */
+  function renewClass(days) {
+    if (days <= 0) return ' is-due';      // 오늘 빠진다
+    if (days <= 1) return ' is-d1';
+    if (days <= 3) return ' is-d3';
+    if (days <= 7) return ' is-d7';
+    return '';                            // 8일 이상 - 아직 급하지 않다
+  }
+
   function accountRowsHtml() {
     const rows = accountUsageRows();
     if (!rows.length) {
@@ -365,7 +382,8 @@ export function createNaiAccountPanel({
         // 백엔드가 **내림**한 정수를 주므로 시간 단위로 남으면 "0일" 이다 - 정확한
         // 시각은 일부러 안 보여 준다. 모르면(null) 칸을 비운다.
         + (Number.isInteger(row.renews_in_days)
-          ? `<span class="nai-acct-renew">갱신 ${row.renews_in_days}일</span>`
+          ? `<span class="nai-acct-renew${renewClass(row.renews_in_days)}">`
+            + `갱신 ${row.renews_in_days}일</span>`
           : '')
         + '</div>'
         + (forced ? '<span class="nai-acct-only">이 계정만 사용</span>' : '')

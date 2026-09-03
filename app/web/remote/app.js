@@ -10278,8 +10278,11 @@ let preview45Started = false;
 function setPreview45Busy(busy) {
   preview45Busy = !!busy;
   if (busy) preview45Started = false;
+  // ⚠️ 툴바 버튼은 **안 잠근다**(2026-09-03). 이제 이 버튼은 생성이 아니라 설정 팝업을
+  //    여는 자리라, 잠그면 도는 동안 설정을 볼 수도 닫을 수도 없다. 표시만 남긴다.
   const btn = document.getElementById('preview45RunBtn');
-  if (btn) btn.disabled = !!busy;
+  if (btn) btn.classList.toggle('is-busy', !!busy);
+  naiPreviewSettingsPanel?.setBusy(!!busy);
   naiPreviewWindow?.setBusy(!!busy);
   if (preview45ReleaseTimer) { clearTimeout(preview45ReleaseTimer); preview45ReleaseTimer = 0; }
   if (busy) preview45ReleaseTimer = setTimeout(() => setPreview45Busy(false), 180000);
@@ -10307,7 +10310,7 @@ async function runV45Preview(opts) {
   if (preview45Busy) return;
   if (!(opts && opts.segmentConfirmed)
       && !extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
-    showToast('프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
+    showToast('프리뷰 구간이 없습니다. [4.5 프리뷰] > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
     return;
   }
   setPreview45Busy(true);
@@ -10374,7 +10377,7 @@ async function applyV45PreviewMarkers(action, opts) {
 
 // 설정 패널(지연 로드). ⚠️ 값의 SSOT 는 백엔드다 - 여기서는 열고 닫기만 한다.
 let naiPreviewSettingsPanel = null;
-const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260901-pv45b')
+const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260903-pv45merge')
   .then(({createNaiPreviewSettingsPanel}) => {
     naiPreviewSettingsPanel = createNaiPreviewSettingsPanel({
       document,
@@ -10382,8 +10385,12 @@ const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mj
       showToast,
       escHtml,
       onMarkers: action => { void applyV45PreviewMarkers(action); },
+      // 톱니를 없앤 뒤로 **여기가 생성 진입로**다(사용자 지정 2026-09-03).
+      onGenerate: () => { void runV45Preview(); },
     });
-    // ⚠️ 설정을 **미리 받아 둔다.** 안 그러면 톱니를 한 번도 안 연 세션에서는
+    // 잠금은 이미 켜져 있을 수 있다(팝업은 지연 로드다) - 지금 상태를 한 번 물려준다.
+    naiPreviewSettingsPanel.setBusy(preview45Busy);
+    // ⚠️ 설정을 **미리 받아 둔다.** 안 그러면 팝업을 한 번도 안 연 세션에서는
     //    `current()` 가 null 이라 랜덤 연동·ALT+P 가 기본값으로 떨어진다 - 서버에는
     //    on_random:true 인데 화면은 false 로 알고 아무 일도 안 했다(라이브 실측).
     return naiPreviewSettingsPanel.refresh().catch(error => {

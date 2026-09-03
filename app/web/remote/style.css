@@ -9584,13 +9584,19 @@ body.resizing-result-info {
   justify-content: flex-start;
   padding-right: 96px;
 }
-/* V4.5 프리뷰 버튼이 떠 있을 때. 알약 몫(96px)만으로는 라벨이 **버튼 밑까지** 늘어난다
-   - 지금 글자가 짧아 안 겹쳤을 뿐이고, 자릿수가 늘면(`E.tokens : 9999 (M : 8888, C : 1111)`)
-   파고든다. 버튼 130px + 오른쪽 94px + 여유 8px 를 함께 비운다.
+/* V4.5 프리뷰 버튼이 떠 있을 때. 알약 몫(96px)만으로는 라벨이 **버튼 밑까지** 늘어난다.
+   비우는 폭 = 버튼 75px + 오른쪽 94px + 여유 8px = 177px.
+
+   ⚠️ 2026-09-03 **다시 쟀다**(톱니를 없애 버튼이 130 -> 75 로 줄고, 라벨은 `M`·`C` 가
+      `Main`·`Char` 로 늘었다). 옛 값 232 를 그대로 두면 라벨 자리가 202px 인데 최악의
+      라벨이 정확히 202px 라 **여유가 0** 이었다 - 자릿수가 하나만 늘어도 파고든다.
+      실측(1280x720 · footer 450px · `E.tokens : 9999 (Main : 8888, Char : 1111)`):
+        라벨 16~218(202px) · 버튼 281~356(75px) · 알약 365~440
+      177 로 비우면 라벨 자리가 257px 이라 55px(약 9글자) 남는다.
    ⚠️ `.has-bg-pill` **뒤에** 둬야 한다 - 특이도가 같아 앞에 두면 96px 에 진다
       ([[feedback_css_file_order_cascade]]). */
 .prompt-token-footer.has-preview45 {
-  padding-right: 232px;
+  padding-right: 177px;
 }
 /* V4.5 프리뷰 창(사용자 지정 2026-09-01). 결과 스테이지 가운데에 뜬다.
    ⚠️ 이 그림은 **저장되지 않는다** - 창을 닫으면 사라진다. 그래서 [Save] 가 있다.
@@ -9704,10 +9710,30 @@ body.resizing-result-info {
   border-bottom: 1px solid var(--border-dim);
   background: rgba(22,24,38,0.9);
 }
+/* ⚠️ 머리줄에 [생성] 이 들어와 자식이 셋이 됐다. `space-between` 만 두면 가운데로
+   밀리므로, 제목이 남는 폭을 먹어 나머지 둘을 오른쪽에 붙인다. */
 .pv45-title {
+  flex: 1;
   font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
   letter-spacing: 0.3px; color: var(--text-primary);
 }
+/* 팝업 안의 생성 버튼 - 톱니를 없애면서 유일한 생성 진입로가 됐다(2026-09-03).
+   치수는 Memo·Tagger 계열(높이 22 · 글자 10 · 라운드 5). */
+.pv45-run {
+  height: 22px;
+  padding: 0 10px;
+  margin-right: 2px;
+  border: 1px solid rgba(130,150,255,0.35);
+  border-radius: 5px;
+  background: rgba(130,150,255,0.14);
+  color: var(--text-primary);
+  font-family: inherit; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.2px; white-space: nowrap; cursor: pointer;
+  transition: background .12s ease, opacity .12s ease;
+}
+.pv45-run:hover { background: rgba(130,150,255,0.24); }
+.pv45-run:disabled { opacity: 0.45; cursor: default; }
+.pv45-run:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pv45-x {
   border: 0; background: transparent; color: var(--text-dim);
   font-size: 14px; line-height: 1; padding: 2px 5px; cursor: pointer;
@@ -9814,7 +9840,8 @@ body.resizing-result-info {
   /* `hidden` 은 `display: inline-flex` 에 진다 - 짝을 반드시 쓴다. */
   display: none;
 }
-.preview45-run, .preview45-gear {
+/* 톱니를 없애고 하나로 합쳤다(2026-09-03) - 이 버튼이 설정 팝업을 연다. */
+.preview45-run {
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -9824,17 +9851,10 @@ body.resizing-result-info {
   letter-spacing: 0.2px;
   white-space: nowrap;
   cursor: pointer;
+  padding: 0 9px;
   transition: color .12s ease, background .12s ease;
 }
-.preview45-run { padding: 0 9px; }
-/* 톱니는 정사각으로 - 글자 버튼과 함께 한 알약처럼 보여야 한다. */
-.preview45-gear {
-  width: 22px;
-  padding: 0;
-  border-left: 1px solid rgba(232,232,240,0.16);
-  font-size: 11px;
-}
-.preview45-run:hover, .preview45-gear:hover {
+.preview45-run:hover {
   color: var(--text-primary);
   background: rgba(255,255,255,0.07);
 }
@@ -9842,11 +9862,16 @@ body.resizing-result-info {
   opacity: 0.5;
   cursor: default;
 }
-.preview45-gear[aria-expanded="true"] {
+/* 도는 중. 잠그지는 않는다 - 설정은 계속 열 수 있어야 한다. */
+.preview45-run.is-busy {
+  color: var(--accent);
+  opacity: 0.75;
+}
+.preview45-run[aria-expanded="true"] {
   color: var(--text-primary);
   background: rgba(255,255,255,0.1);
 }
-.preview45-run:focus-visible, .preview45-gear:focus-visible {
+.preview45-run:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -19890,9 +19915,15 @@ select.setup-input { cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 .nai-acct-sub i { font-style: normal; color: #45455a; }
-/* 재결제까지 남은 일수 - 줄 오른쪽 빈자리(퍼센트 아래)에 붙는다. 한 톤 낮춰
-   Anlas·잔량과 겨루지 않게 한다. */
-.nai-acct-sub .nai-acct-renew { margin-left: auto; padding-right: 2px; color: #5a5a72; }
+/* 재결제까지 남은 일수 - 줄 오른쪽 빈자리(퍼센트 아래)에 붙는다.
+   급할수록 따뜻한 쪽으로 간다(사용자 지정 2026-09-03):
+     8일 이상 = 약간 덜 밝은 흰색 · 4~7 = 연노랑 · 2~3 = 연주황 · 1 = 주황 · 0 = 빨강에
+     가까운 주황. ⚠️ 기본이 회색조였는데 그러면 0일이 와도 눈에 안 걸린다. */
+.nai-acct-sub .nai-acct-renew { margin-left: auto; padding-right: 2px; color: #c6c6d2; }
+.nai-acct-sub .nai-acct-renew.is-d7  { color: #e6d98c; }
+.nai-acct-sub .nai-acct-renew.is-d3  { color: #efb877; }
+.nai-acct-sub .nai-acct-renew.is-d1  { color: #f5964f; }
+.nai-acct-sub .nai-acct-renew.is-due { color: #f76a3c; font-weight: 700; }
 .nai-acct-name {
   flex: 0 0 62px; font-size: 11px; color: #b6b6cc;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

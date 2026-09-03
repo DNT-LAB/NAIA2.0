@@ -46,13 +46,15 @@ export function createTokenDisplay({
     return Math.max(1, Math.ceil(base * correction));
   }
 
-  // V5 에서만 짧게 쓴다(사용자 지정 2026-09-01: `E.tokens : 226 (M : x, C : y)`).
-  // 이 줄이 길어서 옆에 무엇도 못 놓는 상태였다 - 자리를 만드는 것이 목적이다.
+  // V5 에서만 짧게 쓴다(사용자 지정 2026-09-01). 이 줄이 길어서 옆에 무엇도 못 놓는
+  // 상태였고, 자리를 만드는 것이 목적이었다.
+  // ⚠️ 2026-09-03: 속칭 `M`·`C` 는 **다시 `Main`·`Char`** 다(사용자 지정). 한 글자는
+  //    아낀 폭에 비해 읽는 값이 너무 컸다. 폭은 톱니를 없애고 버튼 이름을 줄여서 벌었다.
   // ⚠️ V5 **만** 이다. 다른 모드/모델은 익숙한 긴 이름을 그대로 둔다.
   function formatPromptTokenLabel(main, character, mode) {
     if (mode === 'NAI') {
       if (isNaiV5()) {
-        return `E.tokens : ${main + character} (M : ${main}, C : ${character})`;
+        return `E.tokens : ${main + character} (Main : ${main}, Char : ${character})`;
       }
       return `Estimated Tokens : ${main + character} (Main ${main} + Character ${character})`;
     }

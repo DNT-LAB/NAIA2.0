@@ -557,12 +557,13 @@
               <!-- V4.5 프리뷰. **NAI V5 일 때만** 보인다 - 4.5 에서 4.5 를 미리 보는 것은
                    뜻이 없다. 투명 BG 알약과 같은 조건이라 같은 갱신 함수가 켜고 끈다.
                    ⚠️ 부모가 `pointer-events: none` 이다 - 여기서 다시 열어야 눌린다. -->
+              <!-- ⚠️ 톱니를 따로 두지 않는다(사용자 지정 2026-09-03) - 이 버튼 하나가
+                   설정 팝업을 연다. **생성은 팝업 안의 [생성]** 과 ALT+P 다. 이름에서
+                   '생성' 을 뺀 것이 그 뜻이다. -->
               <div class="preview45-split" id="preview45Split" hidden>
                 <button type="button" class="preview45-run" id="preview45RunBtn"
-                        onclick="runV45Preview()">V4.5 프리뷰 생성</button>
-                <button type="button" class="preview45-gear" id="preview45GearBtn"
-                        aria-haspopup="true" aria-expanded="false" aria-label="프리뷰 설정"
-                        onclick="toggleV45PreviewMenu()">⚙</button>
+                        aria-haspopup="true" aria-expanded="false"
+                        onclick="toggleV45PreviewMenu()">4.5 프리뷰</button>
               </div>
               <button type="button" class="transparent-bg-pill" id="transparentBgPill" hidden
                       aria-pressed="false" onclick="toggleTransparentBackground()">

@@ -1,5 +1,10 @@
 /**
- * V4.5 프리뷰 설정 패널 — 톱니를 누르면 뜨는 컴팩트 팝업.
+ * V4.5 프리뷰 설정 패널 — 툴바의 [4.5 프리뷰] 를 누르면 뜨는 팝업.
+ *
+ * ⚠️ 2026-09-03: 톱니를 없애고 이 팝업을 **버튼 하나**에 통합했다(사용자 지정).
+ *    그래서 생성 진입로가 팝업 밖에 없다 — 머리줄의 [생성] 이 그 자리다.
+ *    폭은 **메인 프롬프트 텍스트창에 맞춘다**(같은 지정) — 왼쪽 끝까지 맞춰 겹쳐 놓으면
+ *    어느 글을 두고 하는 설정인지가 눈으로 이어진다.
  *
  * 사용자 SPEC 2026-09-01. 치수는 Memo·Tagger 계열을 따른다(높이 22px · 글자 10px ·
  * 라운드 5px) — 앞으로 팝업 모듈의 기준이라는 사용자 지정.
@@ -15,8 +20,13 @@ export function createNaiPreviewSettingsPanel({
   showToast,
   escHtml,
   onMarkers,
+  onGenerate,
 }) {
   const SETTINGS_URL = '/api/nai-preview/settings';
+  // 팝업을 여는 버튼. 톱니를 없앤 뒤로 이 하나가 앵커이자 상태 표시다.
+  const ANCHOR_ID = 'preview45RunBtn';
+  // 폭을 맞출 대상 - 메인 프롬프트 텍스트창.
+  const WIDTH_SOURCE_ID = 'promptEdit';
   let panel = null;
   let settings = null;
   let options = null;
@@ -142,9 +152,12 @@ export function createNaiPreviewSettingsPanel({
     panel = doc.createElement('div');
     panel.className = 'pv45-panel';
     panel.id = 'preview45Panel';
+    // ⚠️ [생성] 은 **머리줄**에 둔다. 몸통(`.pv45-body`)은 값이 바뀔 때마다 통째로 다시
+    //    그려서, 거기 두면 누르는 순간 사라질 수 있다. 머리줄은 한 번만 만든다.
     panel.innerHTML = `
       <div class="pv45-head">
         <span class="pv45-title">V4.5 PREVIEW</span>
+        <button type="button" class="pv45-run" id="preview45PanelRunBtn" data-generate>생성</button>
         <button type="button" class="pv45-x" data-close aria-label="닫기">&times;</button>
       </div>
       <div class="pv45-body"></div>`;
@@ -152,6 +165,8 @@ export function createNaiPreviewSettingsPanel({
 
     panel.addEventListener('click', event => {
       if (event.target.closest('[data-close]')) { close(); return; }
+      // 생성은 창을 닫지 않는다 - 결과를 보고 값을 고쳐 다시 뽑는 것이 이 팝업의 쓰임새다.
+      if (event.target.closest('[data-generate]')) { onGenerate?.(); return; }
       const act = event.target.closest('[data-act]');
       if (act) { onMarkers?.(act.dataset.act); return; }
       const toggle = event.target.closest('[data-toggle]');
@@ -183,7 +198,7 @@ export function createNaiPreviewSettingsPanel({
     });
     doc.addEventListener('pointerdown', event => {
       if (isOpen() && !panel.contains(event.target)
-          && event.target.id !== 'preview45GearBtn') close();
+          && event.target.id !== ANCHOR_ID) close();
     }, true);
     doc.addEventListener('keydown', event => {
       if (event.key === 'Escape' && isOpen()) close();
@@ -191,22 +206,46 @@ export function createNaiPreviewSettingsPanel({
     win.addEventListener('resize', place);
   }
 
-  /** 톱니 위에 띄우고 **그린 뒤 재서** 화면 안으로 가둔다(내용에 따라 높이가 변한다). */
+  /**
+   * 버튼 위에 띄우고 **그린 뒤 재서** 화면 안으로 가둔다(내용에 따라 높이가 변한다).
+   *
+   * 폭과 왼쪽 끝을 **메인 프롬프트 텍스트창에 맞춘다**(사용자 지정 2026-09-03). 폭을
+   * 먼저 정하고 나서 높이를 재야 한다 — 넓어지면 줄이 덜 접혀 높이가 줄어든다.
+   * 텍스트창을 못 찾으면 CSS 기본 폭으로 두고 예전처럼 버튼 오른쪽에 맞춘다.
+   */
   function place() {
     if (!isOpen()) return;
-    const gear = el('preview45GearBtn');
-    if (!gear) return;
-    const box = gear.getBoundingClientRect();
+    const anchor = el(ANCHOR_ID);
+    if (!anchor) return;
+    const box = anchor.getBoundingClientRect();
+
+    const source = el(WIDTH_SOURCE_ID);
+    const sourceBox = source ? source.getBoundingClientRect() : null;
+    // 폭 0 은 숨겨져 있다는 뜻이다 - 그때는 손대지 않는다(0px 짜리 팝업이 뜬다).
+    const wide = sourceBox && sourceBox.width > 0;
+    if (wide) {
+      panel.style.width = `${Math.round(Math.min(sourceBox.width, win.innerWidth - 16))}px`;
+    } else {
+      panel.style.width = '';
+    }
+
     const rect = panel.getBoundingClientRect();
-    const left = Math.max(8, Math.min(box.right - rect.width, win.innerWidth - rect.width - 8));
+    const preferredLeft = wide ? sourceBox.left : box.right - rect.width;
+    const left = Math.max(8, Math.min(preferredLeft, win.innerWidth - rect.width - 8));
     const top = Math.max(8, box.top - rect.height - 6);
     panel.style.left = `${Math.round(left)}px`;
     panel.style.top = `${Math.round(top)}px`;
   }
 
+  /** 생성 중에는 팝업의 [생성] 만 잠근다 - 버튼은 설정을 열어야 하니 안 잠근다. */
+  function setBusy(busy) {
+    const run = el('preview45PanelRunBtn');
+    if (run) run.disabled = !!busy;
+  }
+
   function close() {
     if (panel) panel.classList.remove('open');
-    el('preview45GearBtn')?.setAttribute('aria-expanded', 'false');
+    el(ANCHOR_ID)?.setAttribute('aria-expanded', 'false');
   }
 
   async function open() {
@@ -219,7 +258,7 @@ export function createNaiPreviewSettingsPanel({
     }
     render();
     panel.classList.add('open');
-    el('preview45GearBtn')?.setAttribute('aria-expanded', 'true');
+    el(ANCHOR_ID)?.setAttribute('aria-expanded', 'true');
     place();
   }
 
@@ -233,5 +272,5 @@ export function createNaiPreviewSettingsPanel({
     return settings;
   }
 
-  return {open, close, toggle, isOpen, current, refresh: load};
+  return {open, close, toggle, isOpen, current, setBusy, refresh: load};
 }

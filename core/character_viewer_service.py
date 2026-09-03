@@ -12,6 +12,10 @@ from urllib.parse import quote
 
 class CharacterViewerService:
     GROUP_ALL = "__ALL__"
+    # [최신] 토글이 남기는 데뷔 하한의 기본값. 산출물에 적힌 값이 우선한다.
+    RECENT_SINCE = "2025-01"
+    # 작품 칩은 이만큼만 낸다 - 줄 하나에 들어가는 수다.
+    SCOPE_CHIP_LIMIT = 12
     DEFAULT_PREFIX = "1girl, artist:rento (rukeai), solo, cowboy shot, standing"
     DEFAULT_POSTFIX = (
         "simple background, white background, very aesthetic, extremely absurdres, "
@@ -38,6 +42,10 @@ class CharacterViewerService:
         # 캐릭터마다 대표 태그를 Interactive 슬롯으로 미리 갈라 둔 것이라
         # `character_analysis.json` 과 같은 번들 데이터 루트에 있다.
         self.presets_path = self.data_dir / "character_presets.json"
+        # 캐릭터가 코퍼스에 **처음 나타난 달**(tools/build_character_debut.py 산출물).
+        # 코퍼스 자체(`data/tags/*.parquet` 1.4GB)는 배포본에 없고 사용자가 따로
+        # 내려받는 것이라, 요약해 둔 이 파일만 번들 데이터 루트에 둔다.
+        self.debut_path = self.data_dir / "character_debut.json"
         # 번들 미리보기 팩(폴백). 사용자 썸네일과 같은 성격이 아니라 **배포에 딸려오는**
         # 것이라 번들 데이터 루트에 둔다 — 업데이트 때 갱신되는 것이 맞다.
         self.preview_path = self.data_dir / "character_preview_thumbs.json"
@@ -69,6 +77,8 @@ class CharacterViewerService:
         self._preview_rev: str | None = None
         self._presets: dict[str, Any] | None = None
         self._preview_pack: dict[str, str] | None = None
+        self._debut: dict[str, str] | None = None
+        self._recent_since: str = ""
 
     def data_available(self) -> bool:
         return self.groups_path.exists() and self.analysis_path.exists()
@@ -88,6 +98,31 @@ class CharacterViewerService:
         if self._analysis is None:
             self._analysis = self._load_json(self.analysis_path, {})
         return self._analysis
+
+    def debut_index(self) -> dict[str, str]:
+        """캐릭터 이름 -> 처음 나타난 달("YYYY-MM"). 파일이 없으면 빈 사전이다.
+
+        ⚠️ 왼쪽 끝은 잘려 있다 - 코퍼스가 2015-12 에서 시작하므로 그 이전에 데뷔한
+           캐릭터는 전부 그 달로 뭉친다. [최신] 은 **반대쪽 끝**만 보므로 무관하다.
+        """
+        if self._debut is None:
+            raw = self._load_json(self.debut_path, {})
+            table = raw.get("debut") if isinstance(raw, dict) else None
+            self._debut = table if isinstance(table, dict) else {}
+            since = raw.get("recent_since") if isinstance(raw, dict) else ""
+            self._recent_since = str(since or self.RECENT_SINCE)
+        return self._debut
+
+    def recent_since(self) -> str:
+        """[최신] 이 남기는 데뷔 하한. 산출물에 적힌 값을 따른다(없으면 기본값)."""
+        self.debut_index()
+        return self._recent_since or self.RECENT_SINCE
+
+    def is_recent(self, name: str) -> bool:
+        debut = self.debut_index().get(str(name or ""))
+        # ⚠️ 모르는 캐릭터는 **최신이 아니다.** '모름' 과 '최근' 을 뭉개면 토글이
+        #    코퍼스에 없는 336명을 함께 끌고 온다(실측).
+        return bool(debut) and debut >= self.recent_since()
 
     def character_presets(self) -> dict[str, Any]:
         """캐릭터 프리셋 사전을 **한 번만** 읽어 캐시한다.
@@ -436,6 +471,8 @@ class CharacterViewerService:
             "has_thumbnail": (self._thumb_key(group_key, name) in thumbs
                               or f"{group_key}::{name}" in self.preview_pack()),
         }
+        # 화면이 '요즘 캐릭터' 를 가릴 수 있게 함께 보낸다(모르면 빈 문자열).
+        item["debut"] = self.debut_index().get(name, "")
         if include_tags:
             item["tags"] = self._tag_search_str(data)
         if include_thumbnail_url:
@@ -450,6 +487,7 @@ class CharacterViewerService:
         per_page: int = 48,
         thumb_first: bool = True,
         include_all: bool = False,
+        recent_only: bool = False,
     ) -> dict[str, Any]:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
@@ -460,6 +498,21 @@ class CharacterViewerService:
                 if isinstance(data, dict)
             ]
         chars = [item for item in chars if self._matches_query(item[1], item[2], query)]
+        if recent_only:
+            chars = [item for item in chars if self.is_recent(item[1])]
+        # 작품 칩은 **지금 걸린 것들**에서 뽑는다. 예전에는 검색어를 작품 **이름**에
+        # 맞춰 보는 딴 길(`build_groups`)로 뽑아서, 캐릭터 이름을 치면 칩이 거의
+        # 안 떴다(실측: `elysia` -> 0개). 작품을 이미 골랐으면 셀 것이 하나뿐이라
+        # 세지 않는다 - 그 때 화면은 **푸는 칩** 하나만 보여 준다.
+        scope: list[dict[str, Any]] = []
+        if group_key == self.GROUP_ALL:
+            counts: dict[str, int] = {}
+            for gk, _name, _data in chars:
+                counts[gk] = counts.get(gk, 0) + 1
+            scope = [
+                {"key": key, "count": count}
+                for key, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+            ][:self.SCOPE_CHIP_LIMIT]
         thumbs = self.thumb_index()
         if thumb_first:
             chars.sort(
@@ -495,6 +548,9 @@ class CharacterViewerService:
             "total": total,
             "total_pages": total_pages,
             "thumb_first": bool(thumb_first),
+            "recent_only": bool(recent_only),
+            "recent_since": self.recent_since(),
+            "scope": scope,
             "items": [
                 self._serialize_list_item(
                     index,

@@ -99,7 +99,11 @@ export function createCharacterPanel({
   let dexTotal = 0;
   let dexQuery = '';
   let dexGroup = '';            // 작품으로 좁히기('' = 전체)
-  let dexGroups = [];           // 이름 검색 중 함께 뜨는 작품 칩
+  let dexGroups = [];           // 지금 걸린 것들의 작품 칩 [{key, count}]
+  // [최신] - 요즘 단부루에 나타나기 시작한 캐릭터만 남긴다. 하한은 백엔드가
+  // 산출물에서 읽어 함께 보낸다(지금은 2025-01 · 도감 13,497 중 557명).
+  let dexRecent = false;
+  let dexRecentSince = '';
   let dexLoading = false;
   // ⚠️ 목록과 상세는 **표를 따로** 쓴다(Codex CONCERN 4). 하나를 나눠 쓰면, 더 보기가
   //    도는 중에 행을 누르는 순간 목록 응답이 낡은 것이 되어 `dexLoading` 이 참으로
@@ -110,6 +114,9 @@ export function createCharacterPanel({
   let dexDetail = null;
   let dexVariant = '';
   let dexError = '';
+  // ⚠️ 상세의 오류는 **따로** 담는다. 목록 오류와 한 통에 담으면 서로를 덮어,
+  //    아래 칸이 이유도 없이 '불러오는 중…' 에 멈춘 것처럼 보인다.
+  let dexDetailError = '';
   let dexTimer = 0;
 
   // 그룹 탭에서 펼쳐 둔 그룹. 키는 `g:이름` · 즐겨찾기 `fav` · 그룹 없음 `none`.
@@ -426,8 +433,14 @@ export function createCharacterPanel({
       assetQuery, assetPicked, assetVariation, assetLoading ? 1 : 0,
       (assetRows || []).length, assetDetail ? assetDetail.variation : '~',
       dexQuery, dexGroup, dexRows.length, dexLoading ? 1 : 0, dexVariant,
+      dexRecent ? 1 : 0,
       dexPicked ? `${dexPicked.group}/${dexPicked.character}` : '',
-      dexDetail ? 1 : 0, dexGroups.length,
+      // ⚠️ **있다/없다로 세면 안 된다.** 변형을 바꾸면 상세만 갈리는데 이 값이
+      //    1 -> 1 이라 서명이 안 움직이고, 그 뒤 렌더가 '슬롯만 갈아 끼우는' 길로
+      //    빠져 아래 칸이 옛 프롬프트에 멈춘다(실측 2026-09-03: 응답은 왔는데
+      //    화면만 안 바뀌었다). 에셋 탭이 `assetDetail.variation` 을 싣는 것과
+      //    같은 이유다 - **응답을 세라, 상태 말고.**
+      dexDetail ? `d:${dexDetail.variant || ''}` : `e:${dexDetailError}`, dexGroups.length,
       JSON.stringify(state?.group_colors || {}),
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
@@ -809,6 +822,7 @@ export function createCharacterPanel({
         `group=${encodeURIComponent(dexGroup || '__ALL__')}`,
         `query=${encodeURIComponent(dexQuery.trim())}`,
         `page=${dexPage}`, `per_page=${DEX_PER_PAGE}`, 'thumb_first=true',
+        `recent_only=${dexRecent ? 'true' : 'false'}`,
       ];
       const res = await fetch(`/api/character-viewer/list?${parts.join('&')}`);
       const data = await res.json().catch(() => ({}));
@@ -820,6 +834,13 @@ export function createCharacterPanel({
       dexTotal = Number(data.total) || dexRows.length;
       dexPages = Number(data.total_pages) || 1;
       dexPage = (Number(data.page) || 0) + 1;
+      // ⚠️ 작품 칩은 **이 응답**에서 온다. 예전에는 딴 길로 따로 물었는데, 그 길은
+      //    검색어를 작품 **이름**에 맞춰 봐서 캐릭터를 치면 칩이 안 떴다
+      //    (실측: `elysia` -> 0개 · 지금은 honkai 계열 4개).
+      dexGroups = (Array.isArray(data.scope) ? data.scope : [])
+        .map(row => ({key: String(row.key || ''), count: Number(row.count) || 0}))
+        .filter(row => row.key);
+      dexRecentSince = String(data.recent_since || '');
       dexError = '';
     } catch (error) {
       if (seq !== dexSeq) return;
@@ -833,29 +854,12 @@ export function createCharacterPanel({
     }
   }
 
-  /** 작품 칩. **이름 모드에서만** 뜬다(`*태그` 검색에는 뜻이 없다). */
-  async function loadDexGroups() {
-    const needle = dexQuery.trim();
-    if (!needle || needle.startsWith('*')) { dexGroups = []; return; }
-    try {
-      const res = await fetch(`/api/character-viewer/groups?query=${encodeURIComponent(needle)}`);
-      const data = await res.json().catch(() => ({}));
-      // ⚠️ 첫 항목은 언제나 **`All` 센티널**이다(`build_groups` 가 맨 앞에 넣는다).
-      //    칩으로 내면 누르는 순간 작품 이름이 `__ALL__` 인 것으로 좁혀 0건이 된다.
-      const rows = (Array.isArray(data.items) ? data.items : [])
-        .filter(row => String(row.key || '') !== '__ALL__');
-      dexGroups = rows.slice(0, 8).map(row => String(row.key || row.name || ''));
-    } catch (_) {
-      dexGroups = [];
-    }
-  }
-
   function scheduleDexSearch() {
     if (dexTimer) clearTimeout(dexTimer);
     // 180ms - 프리셋 패널이 쓰는 값이다(사람이 한 글자 치는 사이).
     dexTimer = setTimeout(() => {
       dexTimer = 0;
-      void loadDexGroups().then(() => loadDex({reset: true}));
+      void loadDex({reset: true});
     }, 180);
   }
 
@@ -873,12 +877,12 @@ export function createCharacterPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (seq !== dexDetailSeq) return;
-      if (!res.ok) { dexError = data.error || '상세를 불러오지 못했습니다.'; dexDetail = null; }
-      else { dexDetail = data; dexError = ''; }
+      if (!res.ok) { dexDetailError = data.error || '상세를 불러오지 못했습니다.'; dexDetail = null; }
+      else { dexDetail = data; dexDetailError = ''; }
     } catch (error) {
       if (seq !== dexDetailSeq) return;
       dexDetail = null;
-      dexError = error.message || String(error);
+      dexDetailError = error.message || String(error);
     }
     rerender();
   }
@@ -887,6 +891,7 @@ export function createCharacterPanel({
     dexPicked = {group, character};
     dexVariant = '';
     dexDetail = null;
+    dexDetailError = '';
     rerender();
     void loadDexDetail(group, character, '');
   }
@@ -911,7 +916,10 @@ export function createCharacterPanel({
   function renderDexRows() {
     if (dexError && !dexRows.length) return `<div class="cw-empty">${escHtml(dexError)}</div>`;
     if (!dexRows.length) {
-      return `<div class="cw-empty">${dexLoading ? '찾는 중…' : '맞는 캐릭터가 없습니다.'}</div>`;
+      const none = dexRecent
+        ? '[최신] 을 끄면 더 나옵니다.'
+        : '맞는 캐릭터가 없습니다.';
+      return `<div class="cw-empty">${dexLoading ? '찾는 중…' : none}</div>`;
     }
     const picked = dexPicked ? `${dexPicked.group}\u0000${dexPicked.character}` : '';
     return dexRows.map(row => {
@@ -939,12 +947,20 @@ export function createCharacterPanel({
 
   function renderDexDetail() {
     if (!dexPicked) return '<div class="cw-detail-hint">캐릭터를 고르면 여기에 프롬프트가 나옵니다.</div>';
-    if (!dexDetail) return '<div class="cw-detail-hint">불러오는 중…</div>';
+    if (!dexDetail) {
+      return `<div class="cw-detail-hint">${dexDetailError
+        ? escHtml(dexDetailError) : '불러오는 중…'}</div>`;
+    }
     const prompt = String(dexDetail.prompt?.character_prompt || '');
     const variants = Array.isArray(dexDetail.variants) ? dexDetail.variants : [];
+    // ⚠️ **보내는 것은 `label`(밑줄), 보이는 것은 `name`(공백)** 이다. 백엔드의
+    //    `_resolve_variant` 는 `label` 로만 찾고, 못 찾으면 KeyError -> 404 를 낸다.
+    //    뒤집어 보내고 있어서 변형을 고르면 아래 칸이 영영 '불러오는 중…' 에서
+    //    멈췄다 - `Default` 칩까지(그건 label 이 빈 문자열이다) 그랬다.
+    //    (사용자 제보 2026-09-03 · 실측: 'miss pink elf' -> KeyError)
     const chips = variants.length > 1 ? variants.map(v => `
-      <button type="button" class="cw-chip${(v.name || '') === dexVariant ? ' is-go' : ''}"
-        data-cw-dex-variant="${escAttr(v.name || '')}">${escHtml(v.label || v.name || '기본')}</button>`
+      <button type="button" class="cw-chip${(v.label || '') === dexVariant ? ' is-go' : ''}"
+        data-cw-dex-variant="${escAttr(v.label || '')}">${escHtml(v.name || '기본')}</button>`
       ).join('') : '';
     const thumb = dexDetail.thumbnail_url || dexDetail.default_thumbnail_url || '';
     return `
@@ -969,14 +985,25 @@ export function createCharacterPanel({
       </div>`;
   }
 
-  /** 작품으로 좁히는 칩 줄. 좁혀 뒀으면 **푸는 칩 하나**만 보인다. */
+  /**
+   * 검색칸 아래 **한 줄** - 왼쪽에 [최신], 오른쪽에 작품(사용자 지정 2026-09-03).
+   *
+   * [최신] 은 '요즘 그려지기 시작한 캐릭터' 다. 도감에는 날짜가 없어서 태그
+   * 코퍼스에서 **처음 나타난 달**을 미리 뽑아 뒀다(tools/build_character_debut.py).
+   * 작품은 좁혀 뒀으면 **푸는 칩 하나**만 보인다.
+   */
   function renderDexScopeChips() {
-    if (dexGroup) {
-      return `<button type="button" class="cw-chip is-go" data-cw-dex-group-clear="1">`
-        + `✕ ${escHtml(dexGroup)}</button>`;
-    }
-    return dexGroups.map(g => `<button type="button" class="cw-chip"
-      data-cw-dex-scope="${escAttr(g)}">${escHtml(g)}</button>`).join('');
+    const since = dexRecentSince ? `${dexRecentSince.replace('-', '.')} 이후` : '요즘';
+    const recent = `<button type="button" class="cw-chip cw-dex-recent${dexRecent ? ' is-go' : ''}"
+      data-cw-dex-recent="1"
+      title="${escAttr(`${since} 단부루에 처음 나타난 캐릭터만 봅니다`)}">최신</button>`;
+    const rest = dexGroup
+      ? `<button type="button" class="cw-chip is-go" data-cw-dex-group-clear="1">`
+        + `✕ ${escHtml(dexGroup)}</button>`
+      : dexGroups.map(g => `<button type="button" class="cw-chip"
+          data-cw-dex-scope="${escAttr(g.key)}"
+          title="${escAttr(`${g.key} · ${g.count}명`)}">${escHtml(g.key)}</button>`).join('');
+    return recent + `<span class="cw-dex-scope-gap"></span>` + rest;
   }
 
   function renderSearchTab() {
@@ -989,7 +1016,7 @@ export function createCharacterPanel({
       </div>
       <!-- 자기 클래스를 준다. 아래 칸의 변형 칩도 cw-detail-chips 라, 같은 이름이면
            부분 갱신이 엉뚱한 줄을 갈아 끼운다. (템플릿 안 주석에 백틱 금지) -->
-      <div class="cw-detail-chips cw-dex-scope-row">${scoped}</div>
+      <div class="cw-dex-scope-row">${scoped}</div>
       <div class="cw-pane">
         <div class="cw-pane-top"><div class="cw-dex-list">${renderDexRows()}</div></div>
         <div class="cw-pane-bot${dexPicked ? '' : ' is-folded'}">${renderDexDetail()}</div>
@@ -1443,6 +1470,13 @@ export function createCharacterPanel({
         dexGroup = scope.dataset.cwDexScope || '';
         dexGroups = [];
         void loadDex({reset: true});
+        return;
+      }
+      if (hit('[data-cw-dex-recent]')) {
+        dexRecent = !dexRecent;
+        // 걸러진 목록은 처음부터 다시 센다 - 페이지를 이어 붙이면 섞인다.
+        void loadDex({reset: true});
+        rerender();
         return;
       }
       if (hit('[data-cw-dex-group-clear]')) {

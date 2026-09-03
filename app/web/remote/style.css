@@ -13984,8 +13984,21 @@ body.detached-metadata .metadata-layout {
   color: var(--text-dim); font-size: 10px; cursor: pointer; }
 .cw-dex-more:hover { border-color: var(--accent); color: var(--text-primary); }
 .cw-detail-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 4px; }
-/* 칩이 없으면 줄 자체가 자리를 안 먹는다. */
-.cw-dex-scope-row:empty { display: none; }
+
+/* 검색칸 아래 **한 줄**(사용자 지정 2026-09-03). 접히지 않는다 - 작품이 많아도 줄이
+   늘면 목록이 그만큼 밀린다. 넘치는 것은 옆으로 흘려 보낸다. */
+.cw-dex-scope-row {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  height: 34px; padding: 0 10px; margin-bottom: 4px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.cw-dex-scope-row::-webkit-scrollbar { height: 0; }
+.cw-dex-scope-row .cw-chip { height: 24px; padding: 0 9px; }
+/* [최신] 은 작품 칩과 성격이 다르다 - 가는 줄 하나로 갈라 놓는다. */
+.cw-dex-scope-gap { flex: 0 0 1px; align-self: stretch; margin: 5px 3px;
+  background: var(--border-dim); }
+.cw-dex-recent.is-go { background: rgba(96,120,255,0.22); border-color: var(--accent);
+  color: var(--text-primary); }
 .cw-detail-img.is-initial { display: flex; align-items: center; justify-content: center;
   height: 120px; font-family: var(--font-mono, monospace); font-size: 34px;
   color: var(--text-dim); }

@@ -43,6 +43,7 @@
       "data/tag_bucket_dates.json",
       "data/character_analysis.json",
       "data/character_presets.json",
+      "data/character_debut.json",
       "data/interactive_thumbnails.json",
       "data/tag_cooccurrence.json",
       "data/interactive_clothing_harmony.json",

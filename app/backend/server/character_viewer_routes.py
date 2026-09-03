@@ -139,6 +139,7 @@ def register_character_viewer_routes(
         per_page: int = 48,
         thumb_first: bool = True,
         include_all: bool = False,
+        recent_only: bool = False,
     ):
         try:
             group_key = str(group or CharacterViewerService.GROUP_ALL)
@@ -150,6 +151,7 @@ def register_character_viewer_routes(
                 per_page,
                 thumb_first,
                 include_all,
+                recent_only,
             )
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer list failed: {exc}"}, status_code=500)

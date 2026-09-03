@@ -70,6 +70,12 @@ class CharacterViewerService:
         self.legacy_thumb_dir = self.root / "data" / "character_thumbnails"
         self.thumb_index_path = self.thumb_dir / "index.json"
         self.tags_path = self.save_dir / "character_viewer_tags.json"
+        # 도감 즐겨찾기. **사용자가 고른 것**이라 썸네일과 같은 이유로 save_dir(사용자
+        # 데이터)에 둔다 - 번들 data_dir 에 쓰면 업데이트 한 번에 사라진다.
+        # ⚠️ 슬롯 즐겨찾기(`character_settings.py` 의 프레임 `favorite` 플래그)와 **다른
+        #    것**이다. 저건 지금 쓰는 슬롯의 별표고, 이건 도감 13,497명 중 고른 것이다.
+        #    같은 낱말이라 헷갈리기 쉬우니 저장소도 이름도 갈라 둔다.
+        self.favorites_path = self.save_dir / "character_viewer_favorites.json"
         self._groups: dict[str, Any] | None = None
         self._analysis: dict[str, Any] | None = None
         self._tag_index: dict[str, tuple[str, dict[str, Any]]] | None = None
@@ -79,6 +85,7 @@ class CharacterViewerService:
         self._preview_pack: dict[str, str] | None = None
         self._debut: dict[str, str] | None = None
         self._recent_since: str = ""
+        self._favorites: set[str] | None = None
 
     def data_available(self) -> bool:
         return self.groups_path.exists() and self.analysis_path.exists()
@@ -318,6 +325,7 @@ class CharacterViewerService:
             "group_count": len(group_counts),
             "character_count": character_count,
             "thumbnail_count": len(thumbs),
+            "favorite_count": len(self.favorites()),
             "options": self.load_options(),
         }
 
@@ -384,6 +392,53 @@ class CharacterViewerService:
                 if term
             )
         return all(term in display or term in tag_str for term in terms)
+
+    # ── 도감 즐겨찾기 ────────────────────────────────────────────────────
+    #
+    # 키는 썸네일·번들 폴백과 **같은 모양**(`group::name`)이다 - 한 캐릭터를 가리키는
+    # 이름이 세 가지가 되면 어느 하나만 고치게 된다.
+
+    def favorites(self) -> set[str]:
+        if self._favorites is None:
+            # ⚠️ **깨진 파일에 죽지 않는다.** 이건 사용자 데이터 루트의 파일이라
+            #    중간에 전원이 나가거나 손으로 고치다 깨질 수 있는데, 그때 예외가
+            #    올라가면 `build_list` 와 `state` 가 함께 죽어 **도감 탭이 통째로**
+            #    안 뜬다. 별 몇 개를 잃는 것이 탭을 잃는 것보다 낫다.
+            #    (번들 데이터를 읽는 `_load_json` 은 그대로 둔다 - 거기서 깨지는 것은
+            #     배포가 잘못된 것이라 조용히 넘기면 안 된다.)
+            try:
+                raw = self._load_json(self.favorites_path, {})
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+                print(f"[warn] character favorites unreadable, starting empty: {exc}",
+                      flush=True)
+                raw = {}
+            items = raw.get("favorites") if isinstance(raw, dict) else raw
+            self._favorites = ({str(x) for x in items if isinstance(x, str) and x}
+                               if isinstance(items, list) else set())
+        return self._favorites
+
+    def is_favorite(self, group_key: str, name: str) -> bool:
+        return f"{group_key}::{name}" in self.favorites()
+
+    def set_favorite(self, group_key: str, name: str, on: bool) -> dict[str, Any]:
+        """별을 켜고 끈다. **없는 캐릭터는 거절한다** - 조용히 받아 두면 목록에 영영
+        안 뜨는 유령이 쌓이고, 사용자는 즐겨찾기 수만 늘어난 것을 보게 된다."""
+        self._get_character(group_key, name)          # 없으면 KeyError
+        key = f"{group_key}::{name}"
+        favorites = self.favorites()
+        if on:
+            favorites.add(key)
+        else:
+            favorites.discard(key)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        with open(self.favorites_path, "w", encoding="utf-8") as handle:
+            json.dump({"favorites": sorted(favorites)}, handle, ensure_ascii=False, indent=1)
+        return {
+            "group": group_key,
+            "character": name,
+            "favorite": bool(on),
+            "favorite_count": len(favorites),
+        }
 
     def _thumb_key(self, group_key: str, name: str, variant_label: str = "") -> str:
         key = f"{group_key}::{name}"
@@ -473,6 +528,8 @@ class CharacterViewerService:
         }
         # 화면이 '요즘 캐릭터' 를 가릴 수 있게 함께 보낸다(모르면 빈 문자열).
         item["debut"] = self.debut_index().get(name, "")
+        # 별 상태. 카드마다 따로 물으면 13,497번을 묻게 된다 - 목록에 실어 보낸다.
+        item["favorite"] = f"{group_key}::{name}" in self.favorites()
         if include_tags:
             item["tags"] = self._tag_search_str(data)
         if include_thumbnail_url:
@@ -488,6 +545,7 @@ class CharacterViewerService:
         thumb_first: bool = True,
         include_all: bool = False,
         recent_only: bool = False,
+        favorites_only: bool = False,
     ) -> dict[str, Any]:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
@@ -500,6 +558,11 @@ class CharacterViewerService:
         chars = [item for item in chars if self._matches_query(item[1], item[2], query)]
         if recent_only:
             chars = [item for item in chars if self.is_recent(item[1])]
+        if favorites_only:
+            # ⚠️ 걸러 낸 뒤에도 **작품 칩은 아래에서 이 목록으로 다시 센다** - 즐겨찾기만
+            #    보는 중에는 즐겨찾기 안의 작품만 칩으로 떠야 한다.
+            favorites = self.favorites()
+            chars = [item for item in chars if f"{item[0]}::{item[1]}" in favorites]
         # 작품 칩은 **지금 걸린 것들**에서 뽑는다. 예전에는 검색어를 작품 **이름**에
         # 맞춰 보는 딴 길(`build_groups`)로 뽑아서, 캐릭터 이름을 치면 칩이 거의
         # 안 떴다(실측: `elysia` -> 0개). 작품을 이미 골랐으면 셀 것이 하나뿐이라
@@ -550,6 +613,8 @@ class CharacterViewerService:
             "thumb_first": bool(thumb_first),
             "recent_only": bool(recent_only),
             "recent_since": self.recent_since(),
+            "favorites_only": bool(favorites_only),
+            "favorite_count": len(self.favorites()),
             "scope": scope,
             "items": [
                 self._serialize_list_item(
@@ -633,6 +698,7 @@ class CharacterViewerService:
             "aliases": data.get("aliases", []) or [],
             "variant": variant_label,
             "variants": variants,
+            "favorite": self.is_favorite(group_key, name),
             "thumbnail_url": self._thumb_url(group_key, name, variant_label),
             "default_thumbnail_url": self._thumb_url(group_key, name),
             "sections": {

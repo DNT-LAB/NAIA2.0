@@ -104,6 +104,11 @@ export function createCharacterPanel({
   // 산출물에서 읽어 함께 보낸다(지금은 2025-01 · 도감 13,497 중 833명).
   let dexRecent = false;
   let dexRecentSince = '';
+  // [즐겨찾기] - 별을 켜 둔 캐릭터만 남긴다(사용자 요청 2026-09-03).
+  // ⚠️ 저장소는 **백엔드 한 곳**이다(`character_viewer_favorites.json`). 캐릭터 탭과
+  //    이 검색 탭이 같은 목록을 보므로, 여기서 켠 별이 저쪽에서도 보여야 한다.
+  let dexFav = false;
+  let dexFavCount = 0;
   let dexLoading = false;
   // 도는 중에 조건이 바뀌었는가. 끝나면 한 번 더 돈다(아래 `loadDex`).
   let dexPending = false;
@@ -436,6 +441,11 @@ export function createCharacterPanel({
       (assetRows || []).length, assetDetail ? assetDetail.variation : '~',
       dexQuery, dexGroup, dexRows.length, dexLoading ? 1 : 0, dexVariant,
       dexRecent ? 1 : 0,
+      // ⚠️ 별 상태를 **세어서** 싣는다. 켜고 끄면 목록 길이도 필터도 안 바뀌므로,
+      //    이것이 없으면 서명이 안 움직여 별이 화면에서 안 갈린다
+      //    ([[feedback_measure_the_response_not_the_state]] 와 같은 함정).
+      dexFav ? 1 : 0, dexFavCount,
+      dexRows.reduce((n, r) => n + (r.favorite ? 1 : 0), 0),
       dexPicked ? `${dexPicked.group}/${dexPicked.character}` : '',
       // ⚠️ **있다/없다로 세면 안 된다.** 변형을 바꾸면 상세만 갈리는데 이 값이
       //    1 -> 1 이라 서명이 안 움직이고, 그 뒤 렌더가 '슬롯만 갈아 끼우는' 길로
@@ -832,6 +842,7 @@ export function createCharacterPanel({
         `query=${encodeURIComponent(dexQuery.trim())}`,
         `page=${dexPage}`, `per_page=${DEX_PER_PAGE}`, 'thumb_first=true',
         `recent_only=${dexRecent ? 'true' : 'false'}`,
+        `favorites_only=${dexFav ? 'true' : 'false'}`,
       ];
       const res = await fetch(`/api/character-viewer/list?${parts.join('&')}`);
       const data = await res.json().catch(() => ({}));
@@ -850,6 +861,7 @@ export function createCharacterPanel({
         .map(row => ({key: String(row.key || ''), count: Number(row.count) || 0}))
         .filter(row => row.key);
       dexRecentSince = String(data.recent_since || '');
+      dexFavCount = Number(data.favorite_count) || 0;
       dexError = '';
     } catch (error) {
       if (seq !== dexSeq) return;
@@ -861,6 +873,39 @@ export function createCharacterPanel({
       dexLoading = false;
       if (seq === dexSeq) scheduleRerender();
       if (dexPending) { dexPending = false; void loadDex({reset: true}); }
+    }
+  }
+
+  /**
+   * 도감 즐겨찾기를 켜고 끈다(사용자 요청 2026-09-03).
+   *
+   * ⚠️ 서버 응답으로 화면을 고친다 - 낙관적으로 먼저 뒤집으면, 거절당했을 때(없는
+   *    캐릭터·쓰기 실패) 화면만 별이 켜진 채로 남는다.
+   * ⚠️ [즐겨찾기] 로 걸러 보는 중에 별을 끄면 그 줄은 목록에서 빠져야 한다 - 그때만
+   *    다시 불러온다. 아니면 그 줄만 고쳐 스크롤을 지킨다.
+   */
+  async function toggleDexFavorite(group, character) {
+    if (!group || !character) return;
+    const row = dexRows.find(r => r.group === group && r.character === character);
+    const next = !(row ? row.favorite : (dexDetail && dexDetail.favorite));
+    try {
+      const res = await fetch('/api/character-viewer/favorite', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group, character, favorite: next}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '즐겨찾기를 바꾸지 못했습니다.');
+      dexFavCount = Number(data.favorite_count) || 0;
+      if (row) row.favorite = !!data.favorite;
+      if (dexDetail && dexPicked
+          && dexPicked.group === group && dexPicked.character === character) {
+        dexDetail.favorite = !!data.favorite;
+      }
+      if (dexFav && !data.favorite) { void loadDex({reset: true}); return; }
+      rerender();
+    } catch (error) {
+      showToastSafe(error.message || String(error));
     }
   }
 
@@ -926,9 +971,9 @@ export function createCharacterPanel({
   function renderDexRows() {
     if (dexError && !dexRows.length) return `<div class="cw-empty">${escHtml(dexError)}</div>`;
     if (!dexRows.length) {
-      const none = dexRecent
-        ? '[최신] 을 끄면 더 나옵니다.'
-        : '맞는 캐릭터가 없습니다.';
+      const none = dexFav
+        ? '즐겨찾기가 비어 있습니다. 줄 오른쪽 ☆ 를 눌러 넣으세요.'
+        : (dexRecent ? '[최신] 을 끄면 더 나옵니다.' : '맞는 캐릭터가 없습니다.');
       return `<div class="cw-empty">${dexLoading ? '찾는 중…' : none}</div>`;
     }
     const picked = dexPicked ? `${dexPicked.group}\u0000${dexPicked.character}` : '';
@@ -948,6 +993,13 @@ export function createCharacterPanel({
           <span class="cw-dex-name">${escHtml(row.character)}</span>
           <span class="cw-dex-sub${thin ? ' is-thin' : ''}">${escHtml(row.group)} · ${row.count}</span>
         </span>
+        <!-- 별. 줄 전체가 이미 button 이라 **button 을 겹쳐 넣을 수 없다** - span 으로
+             두고 위임 클릭에서 줄보다 먼저 잡는다. -->
+        <span class="cw-dex-star${row.favorite ? ' is-on' : ''}" role="button" tabindex="-1"
+          data-cw-dex-star="1" data-cw-dex-star-group="${escAttr(row.group)}"
+          data-cw-dex-star-char="${escAttr(row.character)}"
+          title="${escAttr(row.favorite ? '즐겨찾기에서 뺍니다' : '즐겨찾기에 넣습니다')}"
+          >${row.favorite ? '★' : '☆'}</span>
       </button>`;
     }).join('') + (dexPage < dexPages
       ? `<button type="button" class="cw-dex-more" data-cw-dex-more="1">${
@@ -978,6 +1030,11 @@ export function createCharacterPanel({
         <span class="cw-detail-name">${escHtml(dexPicked.character)}</span>
         <span class="cw-detail-id">${escHtml(dexPicked.group)} · ${dexDetail.count || 0}</span>
         <span class="cw-sp"></span>
+        <button type="button" class="cw-li-btn cw-dex-star-btn${dexDetail.favorite ? ' is-on' : ''}"
+          data-cw-dex-star="1" data-cw-dex-star-group="${escAttr(dexPicked.group)}"
+          data-cw-dex-star-char="${escAttr(dexPicked.character)}"
+          title="${escAttr(dexDetail.favorite ? '즐겨찾기에서 뺍니다' : '즐겨찾기에 넣습니다')}"
+          >${dexDetail.favorite ? '★' : '☆'}</button>
         <button type="button" class="cw-li-btn" data-cw-dex-copy="1" title="프롬프트를 복사한다">⧉</button>
         <button type="button" class="cw-chip is-go" data-cw-dex-add="1"
           ${prompt ? '' : 'disabled'} title="새 슬롯으로 담는다 (맨 아래)">+ 슬롯</button>
@@ -1007,13 +1064,17 @@ export function createCharacterPanel({
     const recent = `<button type="button" class="cw-chip cw-dex-recent${dexRecent ? ' is-go' : ''}"
       data-cw-dex-recent="1"
       title="${escAttr(`${since} 단부루에 처음 나타난 캐릭터만 봅니다`)}">최신</button>`;
+    // [즐겨찾기] - 별을 켜 둔 것만. 하나도 없으면 눌러도 빈 목록이라 수를 함께 적는다.
+    const fav = `<button type="button" class="cw-chip cw-dex-fav${dexFav ? ' is-go' : ''}"
+      data-cw-dex-fav="1"
+      title="${escAttr('별을 켜 둔 캐릭터만 봅니다 (캐릭터 탭과 같은 목록)')}">★ ${dexFavCount}</button>`;
     const rest = dexGroup
       ? `<button type="button" class="cw-chip is-go" data-cw-dex-group-clear="1">`
         + `✕ ${escHtml(dexGroup)}</button>`
       : dexGroups.map(g => `<button type="button" class="cw-chip"
           data-cw-dex-scope="${escAttr(g.key)}"
           title="${escAttr(`${g.key} · ${g.count}명`)}">${escHtml(g.key)}</button>`).join('');
-    return recent + `<span class="cw-dex-scope-gap"></span>` + rest;
+    return recent + fav + `<span class="cw-dex-scope-gap"></span>` + rest;
   }
 
   function renderSearchTab() {
@@ -1469,6 +1530,14 @@ export function createCharacterPanel({
         return;
       }
       // ── 검색 탭(도감) ──────────────────────────────────────────────────
+      // ⚠️ 별은 **줄보다 먼저** 본다. 별이 줄 안에 들어 있어서, 순서를 뒤집으면
+      //    별을 눌러도 줄이 먼저 걸려 캐릭터만 골라진다.
+      const star = hit('[data-cw-dex-star]');
+      if (star) {
+        void toggleDexFavorite(star.dataset.cwDexStarGroup || '',
+                               star.dataset.cwDexStarChar || '');
+        return;
+      }
       const dexRow = hit('[data-cw-dex-group]');
       if (dexRow) {
         pickDex(dexRow.dataset.cwDexGroup || '', dexRow.dataset.cwDexChar || '');
@@ -1480,6 +1549,12 @@ export function createCharacterPanel({
         dexGroup = scope.dataset.cwDexScope || '';
         dexGroups = [];
         void loadDex({reset: true});
+        return;
+      }
+      if (hit('[data-cw-dex-fav]')) {
+        dexFav = !dexFav;
+        void loadDex({reset: true});
+        rerender();
         return;
       }
       if (hit('[data-cw-dex-recent]')) {

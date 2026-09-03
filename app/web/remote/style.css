@@ -2985,6 +2985,31 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+/* 도감 즐겨찾기 별(사용자 요청 2026-09-03). 작품 칩과 **반대쪽 위 구석**에 둔다 -
+   같은 구석에 두면 겹치고, 그림 한가운데를 가리면 고를 때 방해가 된다.
+   꺼져 있을 땐 흐리게, hover 에서 드러나고, 켜면 늘 노랗다. */
+.character-viewer-card-star {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(20, 22, 34, 0.55);
+  color: rgba(245, 245, 255, 0.35);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, color .12s ease;
+}
+.character-viewer-card:hover .character-viewer-card-star { opacity: 1; }
+.character-viewer-card-star.is-on { opacity: 1; color: #f0c453; }
+.character-viewer-card-star:hover { color: #f0c453; }
 .character-viewer-card-group {
   position: absolute;
   right: 6px;
@@ -14047,6 +14072,24 @@ body.detached-metadata .metadata-layout {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 게시물이 50 미만이면 태그가 얕다 - 색으로 미리 말해 준다(Interactive 와 같은 잣대). */
 .cw-dex-sub.is-thin { color: #d0a45f; }
+/* 도감 즐겨찾기 별(사용자 요청 2026-09-03). 줄 안에 있지만 **줄과 다른 일**을 하므로
+   누를 자리를 넉넉히 준다. 꺼져 있을 땐 흐리게 두고 hover 에서만 드러낸다 -
+   13,497줄 전부에 노란 별이 켜져 있으면 켜 둔 것을 못 고른다. */
+.cw-dex-star {
+  flex: none; width: 20px; align-self: stretch;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; line-height: 1; color: #4d4d63; cursor: pointer;
+}
+.cw-dex:hover .cw-dex-star { color: #8a8aa3; }
+.cw-dex-star.is-on, .cw-dex:hover .cw-dex-star.is-on { color: #f0c453; }
+.cw-dex-star:hover { color: #f0c453; }
+/* 상세 머리줄의 별 - 여기서는 button 이라 `.cw-li-btn` 치수를 그대로 쓴다. */
+.cw-dex-star-btn { color: #6a6a82; }
+.cw-dex-star-btn.is-on { color: #f0c453; }
+.cw-dex-star-btn:hover { color: #f0c453; }
+/* [★ N] 칩 - 켜면 다른 칩과 같은 `is-go` 를 쓰되 별만 노랗게 남긴다. */
+.cw-chip.cw-dex-fav { color: #c8b06a; }
+.cw-chip.cw-dex-fav.is-go { color: var(--text-primary); }
 .cw-dex-more { grid-column: 1 / -1; height: 24px; border-radius: 5px;
   border: 1px dashed var(--border-dim); background: transparent;
   color: var(--text-dim); font-size: 10px; cursor: pointer; }

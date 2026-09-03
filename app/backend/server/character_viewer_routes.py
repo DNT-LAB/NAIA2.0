@@ -140,6 +140,7 @@ def register_character_viewer_routes(
         thumb_first: bool = True,
         include_all: bool = False,
         recent_only: bool = False,
+        favorites_only: bool = False,
     ):
         try:
             group_key = str(group or CharacterViewerService.GROUP_ALL)
@@ -152,9 +153,43 @@ def register_character_viewer_routes(
                 thumb_first,
                 include_all,
                 recent_only,
+                favorites_only,
             )
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer list failed: {exc}"}, status_code=500)
+
+    @app.post("/api/character-viewer/favorite")
+    async def api_character_viewer_favorite(req: Request):
+        """도감 즐겨찾기를 켜고 끈다.
+
+        ⚠️ 두 화면(캐릭터 탭 · 캐릭터 모듈 검색 탭)이 **같은 목록**을 본다. 저장소를
+           하나로 두는 것이 이 라우트의 요점이다 - 나누면 한쪽에서 별을 켜고 다른 쪽에서
+           안 보이는 상태가 된다.
+        """
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        group_key = str(payload.get("group") or "").strip()
+        name = str(payload.get("character") or "").strip()
+        if not group_key or not name:
+            return JSONResponse({"error": "group and character are required"}, status_code=400)
+        favorite = bool(payload.get("favorite", True))
+        try:
+            return await run_in_thread(
+                character_viewer_service(session_context).set_favorite,
+                group_key,
+                name,
+                favorite,
+            )
+        except KeyError:
+            return JSONResponse({"error": f"Character not found: {group_key}::{name}"},
+                                status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character Viewer favorite failed: {exc}"},
+                                status_code=500)
 
     @app.post("/api/character-viewer/detail")
     async def api_character_viewer_detail(req: Request):

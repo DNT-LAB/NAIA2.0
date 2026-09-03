@@ -16,6 +16,9 @@ export function createCharacterViewerController({
   const statusEl = document.getElementById('characterViewerStatus');
   const gridEl = document.getElementById('characterViewerGrid');
   const thumbFirstEl = document.getElementById('characterViewerThumbFirst');
+  // 도감 즐겨찾기(사용자 요청 2026-09-03). ⚠️ 저장소는 백엔드 한 곳이라 캐릭터 모듈의
+  // 검색 탭과 **같은 목록**이다 - 여기서 켠 별이 저쪽에도 그대로 보인다.
+  const favOnlyEl = document.getElementById('characterViewerFavOnly');
   const prevBtn = document.getElementById('characterViewerPrevBtn');
   const nextBtn = document.getElementById('characterViewerNextBtn');
   const pageLabel = document.getElementById('characterViewerPageLabel');
@@ -326,11 +329,19 @@ export function createCharacterViewerController({
       const activeClass = selected && selected.group === item.group && selected.character === item.character ? ' active' : '';
       const thumbClass = item.has_thumbnail ? ' has-thumb' : ' no-thumb';
       const index = Number(item.index || 0);
+      // 별은 카드 안에 있지만 **카드와 다른 일**을 한다. 카드가 이미 button 이라
+      // button 을 겹쳐 넣을 수 없어 span 으로 두고, 클릭에서 카드보다 먼저 잡는다.
+      const star = `<span class="character-viewer-card-star${item.favorite ? ' is-on' : ''}"
+        role="button" tabindex="-1" data-favorite-toggle="1"
+        data-fav-group="${html(item.group)}" data-fav-character="${html(item.character)}"
+        title="${item.favorite ? '즐겨찾기에서 뺍니다' : '즐겨찾기에 넣습니다'}"
+        >${item.favorite ? '★' : '☆'}</span>`;
       return `
         <button type="button" class="character-viewer-card${activeClass}${thumbClass}" data-group="${html(item.group)}" data-character="${html(item.character)}" data-index="${index}" title="${html(item.character)} · ${html(item.group)} · ${formatCount(item.count)}">
           <div class="character-viewer-card-image">
             ${thumbnailMarkup(item)}
             <span class="character-viewer-card-group">[${html(item.group)}]</span>
+            ${star}
           </div>
           <div class="character-viewer-card-name">${html(item.character)}</div>
         </button>
@@ -344,6 +355,45 @@ export function createCharacterViewerController({
     else gridEl.scrollTop = 0;
   }
 
+  /**
+   * 도감 즐겨찾기를 켜고 끈다. 저장소는 백엔드 한 곳이라 캐릭터 모듈 검색 탭과 같다.
+   *
+   * ⚠️ 응답으로 화면을 고친다 - 먼저 뒤집어 두면 거절당했을 때 별만 켜진 채 남는다.
+   * ⚠️ [★ 즐겨찾기] 로 걸러 보는 중에 별을 끄면 그 카드는 빠져야 하므로 다시 부른다.
+   *    아니면 손에 든 두 목록(`allItems` · 지금 페이지)만 고쳐 스크롤을 지킨다.
+   */
+  async function toggleFavorite(group, character) {
+    if (!group || !character) return;
+    const findIn = list => (Array.isArray(list) ? list : []).find(
+      row => row.group === group && row.character === character);
+    const known = findIn(allItems);
+    const next = !(known ? known.favorite : false);
+    try {
+      const res = await fetch('/api/character-viewer/favorite', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group, character, favorite: next}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Favorite failed');
+      if (favOnlyEl?.checked && !data.favorite) {
+        await loadPage(currentPage, {includeAll: true, skipAutoSelect: true});
+        return;
+      }
+      if (known) known.favorite = !!data.favorite;
+      const cards = gridEl ? gridEl.querySelectorAll('[data-favorite-toggle]') : [];
+      cards.forEach(node => {
+        if (node.dataset.favGroup !== group || node.dataset.favCharacter !== character) return;
+        node.classList.toggle('is-on', !!data.favorite);
+        node.textContent = data.favorite ? '★' : '☆';
+        node.title = data.favorite ? '즐겨찾기에서 뺍니다' : '즐겨찾기에 넣습니다';
+      });
+      setStatus(`${formatCount(currentTotal)} characters · ★ ${formatCount(data.favorite_count || 0)}`, 'ok');
+    } catch (error) {
+      setStatus(String(error.message || error), 'error');
+    }
+  }
+
   async function loadPage(page = 0, options = {}) {
     const requestId = ++listRequestId;
     const query = String(searchEl?.value || '').trim();
@@ -355,6 +405,7 @@ export function createCharacterViewerController({
       per_page: String(PAGE_SIZE),
       thumb_first: String(Boolean(thumbFirstEl?.checked)),
       include_all: String(includeAll),
+      favorites_only: String(Boolean(favOnlyEl?.checked)),
     });
     setStatus('Loading characters...', 'busy');
     try {
@@ -1202,6 +1253,11 @@ export function createCharacterViewerController({
       scheduleSaveOptions();
       loadPage(0, {anchor: 'top', includeAll: true, resetList: true});
     });
+    // ⚠️ 이 체크는 **옵션으로 저장하지 않는다.** 즐겨찾기만 보는 것은 지금의 시선이지
+    //    설정이 아니다 - 저장하면 다음에 탭을 열었을 때 도감이 텅 빈 것처럼 보인다.
+    favOnlyEl?.addEventListener('change', () => {
+      loadPage(0, {anchor: 'top', includeAll: true, resetList: true});
+    });
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     listEl?.addEventListener('scroll', scheduleListRender, {passive: true});
     listEl?.addEventListener('click', event => {
@@ -1214,6 +1270,14 @@ export function createCharacterViewerController({
       );
     });
     gridEl?.addEventListener('click', event => {
+      // ⚠️ 별을 **카드보다 먼저** 본다. 별이 카드 안에 있어서 순서를 뒤집으면 별을
+      //    눌러도 카드가 먼저 걸려 상세만 열린다.
+      const star = event.target.closest('[data-favorite-toggle]');
+      if (star && gridEl.contains(star)) {
+        event.preventDefault();
+        void toggleFavorite(star.dataset.favGroup || '', star.dataset.favCharacter || '');
+        return;
+      }
       const item = event.target.closest('[data-group][data-character]');
       if (!item || !gridEl.contains(item)) return;
       selectCharacter(item.dataset.group || '', item.dataset.character || '', '', {openDetail: true});

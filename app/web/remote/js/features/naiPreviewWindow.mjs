@@ -61,18 +61,20 @@ export function createNaiPreviewWindow({
   }
 
   /**
-   * **메인 프롬프트 창 자리**에 띄운다(사용자 지정 2026-09-02).
+   * **Result 스테이지(`.viewer-wrapper`) 한가운데**에 띄운다(사용자 지정 2026-09-03).
    *
-   * ⚠️ 예전에는 결과 스테이지(`.viewer-wrapper`) 한가운데였다. 넓은 화면에서는
-   *    그 자리가 오른쪽 끝이라 방금 만든 프롬프트에서 눈이 멀어지고, 무엇보다
-   *    **창이 스테이지보다 커지면 [Close] 줄이 화면 밖으로 밀려 닫을 수 없었다**
-   *    (사용자 제보: "창을 닫을 수 없게 되었습니다").
-   * ⚠️ 그래서 자리는 프롬프트 창에 맞추되, **뷰포트 안으로 반드시 가둔다.**
-   *    높이 제한은 CSS 가 함께 건다(`max-height`) - 둘 중 하나만으로는 샌다.
+   * ⚠️ 자리가 두 번 바뀌었다. 처음엔 여기였고, 2026-09-02 에 프롬프트 창 쪽으로
+   *    옮겼다 - **창이 스테이지보다 커지면 [Close] 줄이 화면 밖으로 밀려 닫을 수
+   *    없었기 때문**이다(제보: "창을 닫을 수 없게 되었습니다"). 그때 자리를 옮긴 것은
+   *    증상 대증요법이었고, 진짜 고침은 그 뒤에 들어간 **뷰포트 가둠**(아래 `clamp`)과
+   *    CSS 의 `max-height: calc(100vh - 16px)` 둘이다.
+   *    그 둘이 있는 지금은 스테이지에 놓아도 닫기 줄이 밖으로 못 나간다 - 그래서
+   *    사용자가 원래 원하던 자리로 되돌린다.
+   * ⚠️ **가둠과 높이 제한을 걷어내지 마라.** 하나만 빠져도 옛 사고가 그대로 돌아온다.
    */
   function place() {
     if (!isOpen()) return;
-    const anchor = doc.getElementById('promptEdit') || doc.querySelector('.viewer-wrapper');
+    const anchor = doc.querySelector('.viewer-wrapper') || doc.getElementById('promptEdit');
     const rect = root.getBoundingClientRect();
     const box = anchor ? anchor.getBoundingClientRect() : null;
     const wantLeft = box && box.width > 0

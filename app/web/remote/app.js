@@ -10312,7 +10312,9 @@ async function runV45Preview(opts) {
   if (preview45Busy) return;
   if (!(opts && opts.segmentConfirmed)
       && !extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
-    showToast('프리뷰 구간이 없습니다. 톱니 > [프리뷰 표식 삽입] 을 먼저 누르세요.', 'info');
+    // ⚠️ **실패다 - 붉게 띄운다**(사용자 지정 2026-09-03). 눌렀는데 아무 그림도 안 나오는
+    //    상황이라, 안내(파랑)로 흘리면 눌린 줄 알고 기다리게 된다.
+    showToast('프리뷰 표식이 없어 생성하지 못했습니다. 톱니 > [재삽입] 을 누르세요.', 'error');
     return;
   }
   setPreview45Busy(true);
@@ -10348,8 +10350,9 @@ async function runV45Preview(opts) {
  * @returns {Promise<boolean>} 표식이 실제로 자리 잡았는지.
  */
 async function applyV45PreviewMarkers(action, opts) {
-  const {silent = false, useServerPrompt = false} = opts || {};
-  closeV45PreviewMenu();
+  const {silent = false, useServerPrompt = false, keepOpen = false} = opts || {};
+  // 활성화 토글이 부른 것이면 창을 열어 둔다 - 켜자마자 닫히면 이어서 값을 못 고친다.
+  if (!keepOpen) closeV45PreviewMenu();
   try {
     const res = await fetch('/api/nai-preview/markers', {
       method: 'POST',
@@ -10382,14 +10385,14 @@ let naiPreviewSettingsPanel = null;
 // ⚠️ **모듈을 고치면 이 `?v=` 를 반드시 올린다.** 브라우저는 URL 로 ES 모듈을 캐시해서,
 //    안 올리면 새로고침해도 옛 모듈이 그대로 돈다 - 실제로 활성화 토글이 안 뜨는 것으로
 //    한 번 나타났다(2026-09-03 실측).
-const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260903-pv45state2')
+const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260903-pv45markers')
   .then(({createNaiPreviewSettingsPanel}) => {
     naiPreviewSettingsPanel = createNaiPreviewSettingsPanel({
       document,
       window,
       showToast,
       escHtml,
-      onMarkers: action => { void applyV45PreviewMarkers(action); },
+      onMarkers: (action, opts) => { void applyV45PreviewMarkers(action, opts); },
       // 팝업 머리줄의 [생성]. 값을 고쳐 가며 다시 뽑는 용도라 창을 닫지 않는다
       //  - 툴바의 글자 버튼과 **같은 일**을 한다(잠금도 함께 걸린다).
       onGenerate: () => { void runV45Preview(); },

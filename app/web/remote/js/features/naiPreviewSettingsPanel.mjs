@@ -120,9 +120,11 @@ export function createNaiPreviewSettingsPanel({
     body.innerHTML = `
       ${toggleRow('enabled', 'V4.5 프리뷰 활성화', off ? ' pv45-callout' : '')}
       <div class="pv45-sep"></div>
+      <!-- ⚠️ [제거] 는 없다(사용자 지정 2026-09-03). 표식은 **활성화를 켜고 끄는 순간**
+           함께 들어가고 걷힌다 - 손으로 지우는 버튼이 따로 있으면 켜 놓고 표식만 없는
+           어긋난 상태가 만들어진다. 이 버튼은 프롬프트를 고친 뒤 **다시** 잡는 용도다. -->
       <div class="pv45-row pv45-markers">
-        <button type="button" class="pv45-btn" data-act="insert">프리뷰 표식 삽입</button>
-        <button type="button" class="pv45-btn" data-act="remove">제거</button>
+        <button type="button" class="pv45-btn" data-act="insert">재삽입</button>
       </div>
       <div class="pv45-sep"></div>
       ${toggleRow('on_random', '랜덤 버튼이 작동할 때 함께 요청')}
@@ -190,7 +192,17 @@ export function createNaiPreviewSettingsPanel({
       const act = event.target.closest('[data-act]');
       if (act) { onMarkers?.(act.dataset.act); return; }
       const toggle = event.target.closest('[data-toggle]');
-      if (toggle) { queueSave({[toggle.dataset.toggle]: !settings[toggle.dataset.toggle]}); render(); return; }
+      if (toggle) {
+        const key = toggle.dataset.toggle;
+        const next = !settings[key];
+        queueSave({[key]: next});
+        render();
+        // ⚠️ 활성화는 **표식까지 함께 움직인다**(사용자 지정 2026-09-03: "활성화 하는
+        //    순간에 바로 적용되어야 함"). 그래서 [제거] 버튼이 없어졌다 - 끄면 걷힌다.
+        //    창은 닫지 않는다: 켜자마자 닫히면 이어서 값을 고칠 수가 없다.
+        if (key === 'enabled') onMarkers?.(next ? 'insert' : 'remove', {keepOpen: true});
+        return;
+      }
       const seg = event.target.closest('[data-seg]');
       if (seg) { queueSave({[seg.dataset.seg]: seg.dataset.value}); render(); return; }
       const tab = event.target.closest('[data-tab]');

@@ -23,6 +23,14 @@ export function createNaiPreviewWindow({
   // 지금 띄운 것. [Generate] 가 **무엇을 다시 뽑을지**를 이것으로 가른다.
   let showing = null;
 
+  // ⚠️ 이 버튼의 이름은 **한 곳에서만** 정한다. 마크업과 `setBusy` 두 군데에 적혀
+  //    있었는데, 그러면 생성이 한 번 돌고 난 뒤 이름이 옛것으로 되돌아간다
+  //    ([[feedback_two_entry_points]]).
+  // ⚠️ 모델을 이름에 적는 이유: 아래 큰 [Generate] 와 **다른 것**이다. 저건 V5 진짜
+  //    생성이고 이건 4.5 재생성이라, 이름이 같으면 돈이 나가는 줄 알고 안 누르거나
+  //    반대로 눌러 버린다(사용자 지정 2026-09-03).
+  const GENERATE_LABEL = 'Generate (V4.5F)';
+
   function build() {
     root = doc.createElement('div');
     root.className = 'pvw-window';
@@ -38,7 +46,7 @@ export function createNaiPreviewWindow({
       <div class="pvw-stage"><img class="pvw-img" id="preview45Image" alt=""></div>
       <div class="pvw-actions">
         <button type="button" class="pvw-side" data-pvw="save">Save</button>
-        <button type="button" class="pvw-main" data-pvw="generate">Generate</button>
+        <button type="button" class="pvw-main" data-pvw="generate">${GENERATE_LABEL}</button>
         <button type="button" class="pvw-side pvw-close" data-pvw="close">Close</button>
       </div>`;
     doc.body.appendChild(root);
@@ -163,7 +171,7 @@ export function createNaiPreviewWindow({
     const btn = root && root.querySelector('[data-pvw="generate"]');
     if (!btn) return;
     btn.disabled = !!busy;
-    btn.textContent = busy ? '생성 중…' : 'Generate';
+    btn.textContent = busy ? '생성 중…' : GENERATE_LABEL;
   }
 
   return {show, close, isOpen, setBusy};

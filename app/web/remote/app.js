@@ -468,6 +468,8 @@ let tagSearchPopup = null;
 let tagSearchPopupReady = null;
 let memoPopup = null;
 let memoPopupReady = null;
+let wildcardChunkPopup = null;
+let wildcardChunkPopupReady = null;
 let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
@@ -7193,6 +7195,38 @@ if (memoBtn) {
   });
 }
 
+// 와일드카드 청크 — Memo 와 같은 자리·같은 옷(사용자 지정 2026-09-03).
+// ⚠️ 이 창이 생기기 전까지 인스턴트 키를 고칠 길이 **아예 없었다** - 옛 `instant_wildcard`
+//    모듈 팝업은 런처에 없고 여는 호출이 0건이었다(실측).
+wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk1')
+  .then(({createWildcardChunkPopup}) => {
+    wildcardChunkPopup = createWildcardChunkPopup({
+      document,
+      window,
+      escHtml,
+      showToast,
+      confirmDialog: showConfirmDialog,
+      promptDialog: showPromptDialog,
+      setModuleParam,
+      requestModuleState,
+      onInsertText: insertTagIntoPrompt,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Wildcard Chunk popup', error);
+  });
+const wcChunkBtn = $('wcChunkBtn');
+if (wcChunkBtn) {
+  wcChunkBtn.addEventListener('click', async () => {
+    await wildcardChunkPopupReady;
+    if (!wildcardChunkPopup) {
+      showToast('청크 모듈을 불러오지 못했습니다.', 'error');
+      return;
+    }
+    wildcardChunkPopup.toggle();
+  });
+}
+
 function loadMetadataImageBlob(blob, label = 'Input Image') {
   if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {
     showToast('Metadata viewer is not ready', 'error');
@@ -11106,6 +11140,14 @@ function onModuleState(m) {
     if (m.module_id !== currentModuleId) img2imgPanel?.render?.(m);
   }
 
+  // 청크 창은 **모듈 팝업이 아니다**(Memo 자리에 뜬다). 아래 관문은 '지금 열린 모듈'
+  // 것만 통과시키므로, 여기서 먼저 넣어 주지 않으면 상태가 영영 안 온다 - 옛 Instant
+  // 패널이 죽어 있던 이유의 절반이 이것이었다(나머지 절반은 여는 길이 없던 것).
+  // 창이 닫혀 있어도 흘려 넣는다: 다음에 열 때 이미 최신이다(img2img 와 같은 선례).
+  if (m.module_id === 'instant_wildcard' && wildcardChunkPopup) {
+    wildcardChunkPopup.onState(m);
+  }
+
   if (m.module_id !== currentModuleId) return;
   renderModuleState(m);
 }
@@ -11779,6 +11821,8 @@ function renderWildcard(m) {
 }
 
 // ---- Instant Wildcard editor ----
+// ⚠️ 새 청크 창은 여기로 오지 않는다 - `onModuleState` 의 관문 **앞에서** 이미 받았다
+//    (이 함수는 '지금 열린 모듈' 일 때만 불린다). 옛 모듈 패널만 남는다.
 function renderInstantWildcard(m) {
   if (instantWildcardPanel) instantWildcardPanel.render(m);
 }

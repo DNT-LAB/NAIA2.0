@@ -21178,6 +21178,54 @@ body.detached-module .mod-grid-3 {
 /* ── Memo ────────────────────────────────────────────────────────────────
    Tag Search 의 뼈대를 그대로 입는다(사용자 지정). 여기서 손보는 것은 셋뿐:
    ① 검색줄 오른쪽의 [+ 새 메모], ② 목록/본문의 폭 배분, ③ 본문 편집 칸. */
+/* ── 와일드카드 청크(사용자 지정 2026-09-03) ──────────────────────────────
+   Tag Search 뼈대를 그대로 쓰고 여기서 **다른 곳만** 손본다(Memo 와 같은 방식).
+   ⚠️ 자체 <style> 주입 금지 - 옛 와일드카드 편집기가 그렇게 해서 CSS 가 세 집에
+      살았다. 새 클래스는 언제나 이 파일에. */
+.wcchunk-popup .tagsearch-searchrow { display: flex; gap: 6px; align-items: center; }
+.wcchunk-popup .tagsearch-input { flex: 1; min-width: 0; }
+/* 그룹 고르개는 좁게 - 이름이 길어도 목록을 밀지 않는다. */
+.wcchunk-popup .wcchunk-group { flex: 0 0 132px; height: 24px; font-size: 10.5px; }
+.wcchunk-popup .tagsearch-searchrow .tagsearch-act { flex: 0 0 auto; height: 24px; padding: 0 9px; }
+/* 키가 짧고 값이 길다 - 목록을 넓혀 값 미리보기를 한 줄 보여 준다(메모와 반대). */
+.wcchunk-popup .tagsearch-left { flex: 0 0 208px; }
+.wcchunk-popup .wcchunk-item { flex-direction: column; align-items: flex-start; gap: 1px; }
+.wcchunk-popup .wcchunk-val {
+  width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+}
+.wcchunk-popup .tagsearch-desc { display: flex; padding: 10px; }
+.wcchunk-edit { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.wcchunk-field { display: flex; align-items: center; gap: 7px; }
+.wcchunk-field > span { flex: 0 0 26px; font-size: 10px; color: var(--text-dim); }
+.wcchunk-field-grow { align-items: stretch; flex: 1; min-height: 0; }
+.wcchunk-field-grow > span { padding-top: 4px; }
+.wcchunk-key-input, .wcchunk-value {
+  flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--border-dim);
+  border-radius: 6px; background: rgba(0,0,0,0.22); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+}
+.wcchunk-value { resize: none; min-height: 76px; }
+.wcchunk-key-input:focus, .wcchunk-value:focus { outline: none; border-color: rgba(130,150,255,0.55); }
+/* 토큰 줄 - 여기가 이 창의 요점이다. 눈에 걸리게 둔다. */
+.wcchunk-token { display: flex; align-items: center; gap: 6px; }
+.wcchunk-token code {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 5px 8px; border: 1px solid rgba(130,150,255,0.3); border-radius: 6px;
+  background: rgba(130,150,255,0.1); color: #a8b6ff;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.wcchunk-popup .tagsearch-act.is-primary {
+  border-color: rgba(130,150,255,0.45); background: rgba(130,150,255,0.16); color: var(--text-primary);
+}
+.wcchunk-guide { font-size: 10px; color: var(--text-dim); }
+.wcchunk-guide summary { cursor: pointer; color: var(--text-muted); }
+.wcchunk-guide > div { margin-top: 4px; line-height: 1.6; }
+.wcchunk-guide code {
+  font-family: var(--font-mono); color: #a8b6ff; background: rgba(0,0,0,0.28);
+  border-radius: 4px; padding: 1px 4px;
+}
+.wcchunk-guide-note { color: var(--text-dim); }
 .memo-popup .tagsearch-searchrow { display: flex; gap: 6px; align-items: center; }
 .memo-popup .tagsearch-input { flex: 1; min-width: 0; }
 .memo-popup .memo-new { flex: 0 0 auto; height: 24px; padding: 0 10px; }

@@ -10029,7 +10029,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260829-anlas')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-nochunk')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,

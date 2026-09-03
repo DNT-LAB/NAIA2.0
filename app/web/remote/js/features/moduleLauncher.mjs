@@ -23,6 +23,9 @@ const MODULE_REGISTRY = {
     category: 'prompt_tools',
     action: 'module',
   },
+  // ⚠️ 어느 카테고리에도 안 실린다 = 드롭다운에 안 뜬다(2026-09-03). 항목만 지우고
+  //    이 표는 남긴다 - `moduleIsActive('chunk')` 가 우클릭으로 열린 패널의 상태를
+  //    여기로 물어보기 때문이다. 표까지 지우면 그 조회가 조용히 undefined 가 된다.
   chunk: {
     label: '와일드카드 청크',
     title: '와일드카드 청크',
@@ -152,7 +155,12 @@ const CATEGORY_REGISTRY = [
     id: 'prompt_tools',
     label: '프롬프트 도구',
     title: '프롬프트 도구',
-    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'chunk', 'conditional_prompt', 'danbooru_browser'],
+    // ⚠️ `chunk` 를 뺐다(사용자 지정 2026-09-03). 청크는 이제 도구 칩 줄의 [Chunk] 창이
+    //    맡는다 - 편집·추가·관리가 전부 거기 있다.
+    //    옛 청크 패널은 **죽지 않았다**: 프롬프트에서 글을 골라 우클릭 › [Add to Chunk] 가
+    //    자기 `openPanel` 로 연다(`chunkPanel.mjs` 의 `add-chunk`). 고른 글이 값으로
+    //    미리 채워지는 그 흐름은 새 창이 아직 못 하므로 남겨 둔다.
+    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser'],
     // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
     splitBadges: true,
   },

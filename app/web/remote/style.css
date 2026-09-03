@@ -10706,9 +10706,11 @@ body.resizing-result-info {
   background: rgba(20, 24, 42, 0.56);
 }
 .assistants-ollama-btn {
-  min-width: 54px;
+  /* 옆 칩들과 함께 좁혔다(2026-09-03). `min-width` 가 여백보다 먼저 폭을 정하므로
+     그것부터 줄여야 실제로 줄어든다 - 여백만 줄이면 54px 에 걸려 아무 변화가 없다. */
+  min-width: 44px;
   height: 18px;
-  padding: 0 9px;
+  padding: 0 7px;
   border: 0;
   border-right: 1px solid rgba(130, 150, 255, 0.28);
   border-radius: 0;
@@ -23130,16 +23132,19 @@ body.detached-module .mod-grid-3 {
    형제로 두면 제목과 Ollama 사이로 밀려나 혼자 떠 있었다(사용자 지적). */
 .assistants-actions {
   flex: 0 0 auto;
-  display: inline-flex; align-items: center; gap: 6px;
+  /* 칩이 다섯이 되면서 줄이 빠듯하다(사용자 지적 2026-09-03) - 사이를 6 -> 4 로. */
+  display: inline-flex; align-items: center; gap: 4px;
 }
 .ia-mode-toggle {
   display: inline-flex; align-items: center;
-  height: 22px; padding: 0 10px;
+  /* ⚠️ 좌우 여백을 10 -> 7 로 줄였다(같은 지적). 높이 22 와 글자 크기는 그대로 둔다 -
+     그것까지 건드리면 옆의 Ollama 칩과 결이 어긋난다. */
+  height: 22px; padding: 0 7px;
   border: 1px solid var(--border-glow); border-radius: 6px;
   /* 옆의 Ollama 버튼과 밝기를 맞춘다 — 꺼져 있어도 읽히는 밝기여야 한다. */
   background: rgba(96,120,255,0.12); color: var(--text-primary);
   font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
-  letter-spacing: 0.3px; cursor: pointer; white-space: nowrap;
+  letter-spacing: 0.2px; cursor: pointer; white-space: nowrap;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .ia-mode-toggle:hover { background: rgba(96,120,255,0.2); border-color: var(--accent); }

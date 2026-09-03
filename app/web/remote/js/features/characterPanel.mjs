@@ -101,7 +101,7 @@ export function createCharacterPanel({
   let dexGroup = '';            // 작품으로 좁히기('' = 전체)
   let dexGroups = [];           // 지금 걸린 것들의 작품 칩 [{key, count}]
   // [최신] - 요즘 단부루에 나타나기 시작한 캐릭터만 남긴다. 하한은 백엔드가
-  // 산출물에서 읽어 함께 보낸다(지금은 2025-01 · 도감 13,497 중 557명).
+  // 산출물에서 읽어 함께 보낸다(지금은 2025-01 · 도감 13,497 중 833명).
   let dexRecent = false;
   let dexRecentSince = '';
   let dexLoading = false;

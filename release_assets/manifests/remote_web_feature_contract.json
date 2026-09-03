@@ -229,6 +229,7 @@
         {"method": "GET", "path": "/api/artist-thumb/list", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/favorite-image", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/artist-thumb/generated-image", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/artist-thumb/favorite", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/artist-thumb/ban", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/artist-thumb/options", "smoke": "state_mutation"},
@@ -266,6 +267,7 @@
         {"method": "GET", "path": "/api/character-viewer/thumbnail", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/character-preset", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/character-viewer/thumbnail/delete", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/character-viewer/favorite", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/character-viewer/generate", "smoke": "external_live"},
         {"method": "POST", "path": "/api/character/instant-generate", "smoke": "external_live"}
       ]

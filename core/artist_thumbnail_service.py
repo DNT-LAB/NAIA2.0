@@ -110,6 +110,9 @@ class ArtistThumbnailService:
         self.legacy_wildcards_root = self.repo_root / "wildcards"
         self._mode_getter = mode_getter or (lambda: "NAI")
         self._data_cache: dict[str, dict] = {}
+        # 캐시한 팩의 **바이트 크기**. 갱신 중에도 옛 팩을 계속 보여 주되,
+        # 다 받아 크기가 바뀌면 그때 새로 읽게 하는 열쇠다(2026-09-03).
+        self._data_cache_size: dict[str, int] = {}
         self._image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
         self._random_history: dict[tuple[str, str, str, int], list[str]] = {}
         self._lock = threading.RLock()
@@ -613,23 +616,29 @@ class ArtistThumbnailService:
         with self._lock:
             info = self._mode_info(key)
             file_state = self._file_state(info)
+            # ⚠️ **낡아도 있으면 쓴다**(사용자 지정 2026-09-03).
+            #    예전에는 `needs_update` 면 캐시를 버리고 예외를 던져서, 2.5GB 를 받는
+            #    내내 그리드가 "No matching artists." 로 비어 있었다 - 옛 팩이 디스크에
+            #    멀쩡히 있는데도 아무것도 못 봤다. 갱신은 **알리는 것**이지 막는 것이
+            #    아니다. 다 받으면 파일 크기가 바뀌고, 아래 캐시 열쇠가 그걸 알아채
+            #    새 팩으로 갈아 끼운다.
             cached = self._data_cache.get(key)
-            if cached is not None and not file_state["needs_update"]:
+            if cached is not None and self._data_cache_size.get(key) == file_state["size"]:
                 if key == "NAID4.5F-31000":
                     self.sync_favorite_thumbnail_cache(key, cached)
                 return cached
-            if not file_state["available"]:
+            if not file_state["exists"]:
                 self._data_cache.pop(key, None)
-                path = self._mode_path(key)
-                if file_state["needs_update"]:
-                    raise RuntimeError(f"Artist thumbnail data needs update: {path}")
-                raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
+                self._data_cache_size.pop(key, None)
+                raise FileNotFoundError(f"Artist thumbnail data not found: {self._mode_path(key)}")
             data = json.loads(self._mode_path(key).read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 raise ValueError("Artist thumbnail data is invalid")
             self._data_cache.clear()
+            self._data_cache_size.clear()
             self._image_cache.clear()
             self._data_cache[key] = data
+            self._data_cache_size[key] = file_state["size"]
             if key == "NAID4.5F-31000":
                 self.sync_favorite_thumbnail_cache(key, data)
             return data
@@ -715,7 +724,9 @@ class ArtistThumbnailService:
                 "label": str(info.get("label") or key),
                 "available": file_state["available"],
                 "needs_update": file_state["needs_update"],
-                "loaded": key in self._data_cache and file_state["available"],
+                # ⚠️ `available` 로 세지 않는다 - 갱신 중이어도 옛 팩을 들고 있으면
+            #    화면은 그것을 그려야 한다(빈 그리드를 보여 주지 않는다).
+            "loaded": key in self._data_cache and file_state["exists"],
                 "size": file_state["size"],
                 "expected_size": file_state["expected_size"],
                 "size_mb": file_state["size_mb"],

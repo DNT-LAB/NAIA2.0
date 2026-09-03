@@ -323,15 +323,30 @@ export function createWildcardChunkPopup({
   function position() {
     if (!popup) return;
     const margin = 10;
-    const pw = popup.offsetWidth || 660;
-    const ph = popup.offsetHeight || 440;
     const host = doc.getElementById('resultViewer')
       || doc.getElementById('rightTabResult')
       || doc.querySelector('.right-tab-pane.active');
     const rect = host ? host.getBoundingClientRect() : null;
+
+    // ⚠️ **밀지 말고 줄인다**([[feedback-popup-compact-style]]). 예전에는 "스테이지에
+    //    안 들어가면 창 구석" 이었는데, 창을 540x360 에서 660x440 으로 키우면서 좁은
+    //    화면에서 그 관문이 실패해 **프롬프트 칸 위로 떨어졌다**(사용자 제보 2026-09-03 ·
+    //    실측: 뷰포트 948 에서 스테이지 폭이 467 뿐이라 창이 left:10 으로 갔다).
+    //    이제 스테이지에 맞춰 **줄인 뒤** 그 안에 놓는다 - 자리를 벗어나지 않는다.
+    if (rect && rect.width > 0 && rect.height > 0) {
+      popup.style.maxWidth = `${Math.round(Math.max(280, rect.width - margin * 2))}px`;
+      popup.style.maxHeight = `${Math.round(Math.max(240, rect.height - margin * 2))}px`;
+    } else {
+      popup.style.maxWidth = '';
+      popup.style.maxHeight = '';
+    }
+
+    // 줄인 **뒤에** 재야 한다 - 줄기 전 치수로 자리를 잡으면 그만큼 어긋난다.
+    const pw = popup.offsetWidth || 660;
+    const ph = popup.offsetHeight || 440;
     let left;
     let top;
-    if (rect && rect.width > pw + margin * 2 && rect.height > ph + margin * 2) {
+    if (rect && rect.width > 0 && rect.height > 0) {
       left = rect.left + margin;
       top = rect.bottom - ph - margin;
     } else {
@@ -401,10 +416,13 @@ export function createWildcardChunkPopup({
       if (act) {
         const action = act.dataset.act;
         if (action === 'close') { void leaveCurrent(close); return; }
-        if (action === 'group') { void addGroup(); return; }
+        // ⚠️ [+ 그룹]·[이름] 도 **자리를 옮긴다**(서버가 current_file/current_key 를 갈아
+        //    끼운다). Codex 리뷰 2026-09-03: 이 둘만 관문을 안 지나서 미저장 값이 조용히
+        //    사라졌다. 이탈 경로는 하나도 빠짐없이 `leaveCurrent` 를 지나야 한다.
+        if (action === 'group') { void leaveCurrent(() => { void addGroup(); }); return; }
         if (action === 'newkey') { void leaveCurrent(() => { void addKey(); }); return; }
         if (action === 'save') { save(); return; }
-        if (action === 'rename') { void rename(); return; }
+        if (action === 'rename') { void leaveCurrent(() => { void rename(); }); return; }
         if (action === 'delete') { void removeKey(); return; }
         if (action === 'copy') {
           win.navigator?.clipboard?.writeText(token())
@@ -437,6 +455,10 @@ export function createWildcardChunkPopup({
     renderGroups();
     renderList();
     renderEditor({keepFields: true});
+    // ⚠️ **먼저 떼고 건다.** `open()` 이 이미 열린 창에도 불릴 수 있어서(우클릭
+    //    Add to Chunk), 안 떼면 부를 때마다 리스너가 쌓이고 `close()` 는 마지막 하나만
+    //    뗀다(Codex 리뷰 2026-09-03).
+    if (onResize) win.removeEventListener('resize', onResize);
     onResize = () => position();
     win.addEventListener('resize', onResize);
     position();

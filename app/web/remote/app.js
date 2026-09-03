@@ -7205,7 +7205,7 @@ if (memoBtn) {
 // 와일드카드 청크 — Memo 와 같은 자리·같은 옷(사용자 지정 2026-09-03).
 // ⚠️ 이 창이 생기기 전까지 인스턴트 키를 고칠 길이 **아예 없었다** - 옛 `instant_wildcard`
 //    모듈 팝업은 런처에 없고 여는 호출이 0건이었다(실측).
-wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk4')
+wildcardChunkPopupReady = import('./js/features/wildcardChunkPopup.mjs?v=20260903-chunk5')
   .then(({createWildcardChunkPopup}) => {
     wildcardChunkPopup = createWildcardChunkPopup({
       document,

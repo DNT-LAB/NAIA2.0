@@ -105,6 +105,8 @@ export function createCharacterPanel({
   let dexRecent = false;
   let dexRecentSince = '';
   let dexLoading = false;
+  // 도는 중에 조건이 바뀌었는가. 끝나면 한 번 더 돈다(아래 `loadDex`).
+  let dexPending = false;
   // ⚠️ 목록과 상세는 **표를 따로** 쓴다(Codex CONCERN 4). 하나를 나눠 쓰면, 더 보기가
   //    도는 중에 행을 누르는 순간 목록 응답이 낡은 것이 되어 `dexLoading` 이 참으로
   //    남고, 그 뒤 검색과 더 보기가 **영영 안 먹는다.**
@@ -812,7 +814,14 @@ export function createCharacterPanel({
   }
 
   async function loadDex({reset = false} = {}) {
-    if (dexLoading) return;
+    if (dexLoading) {
+      // ⚠️ **조건이 바뀐 요청은 버리면 안 된다**(실측 2026-09-03: `더 보기` 가 도는
+      //    중에 [최신] 을 누르면 칩만 켜지고 목록은 13,497 그대로였다).
+      //    검색어·작품·[최신] 이 바뀐 것이라, 버리면 **화면과 목록이 어긋난 채**
+      //    남는다. 지금 것이 끝나면 곧바로 다시 돈다.
+      if (reset) dexPending = true;
+      return;
+    }
     if (reset) { dexPage = 0; dexRows = []; }
     else if (dexPage >= dexPages) return;
     dexLoading = true;
@@ -851,6 +860,7 @@ export function createCharacterPanel({
       // ⚠️ 잠금은 **언제나** 푼다. 낡은 응답이라고 안 풀면 그대로 멈춘다.
       dexLoading = false;
       if (seq === dexSeq) scheduleRerender();
+      if (dexPending) { dexPending = false; void loadDex({reset: true}); }
     }
   }
 

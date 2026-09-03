@@ -123,6 +123,9 @@ export function createWildcardChunkPopup({
           <textarea class="wcchunk-value" spellcheck="false"
                     placeholder="1girl, solo, looking at viewer">${escHtml(value)}</textarea>
         </label>
+        <!-- ⚠️ 여기 적힌 토큰과 [복사]·[넣기] 가 쓰는 값은 **같아야 한다.** 예전에는
+             글자는 서버 키, 버튼은 입력칸 키를 써서 이름을 고치는 중에 서로 달랐다.
+             이제 입력칸이 바뀌면 이 줄도 함께 고쳐진다(아래 input 처리). -->
         <div class="wcchunk-token">
           <code>${escHtml(token)}</code>
           <button type="button" class="tagsearch-act" data-act="copy">복사</button>
@@ -135,10 +138,12 @@ export function createWildcardChunkPopup({
         </div>
         <details class="wcchunk-guide">
           <summary>$ 사용법</summary>
-          <div><code>$${escHtml(group || '그룹')}</code> — 그 그룹에서 <b>아무거나 하나</b></div>
-          <div><code>$${escHtml(group || '그룹')}:${escHtml(key || '키')}</code> — 그 키의 값을 <b>그대로</b></div>
-          <div class="wcchunk-guide-note">프롬프트 어디에 써도 됩니다. 값 안에
-            <code>__파일__</code> 같은 와일드카드를 또 써도 풀립니다.</div>
+          <div><code>$${escHtml(group || '그룹')}</code> — 그 그룹에서 <b>아무 키나 하나</b></div>
+          <div><code>$${escHtml(group || '그룹')}:${escHtml(key || '키')}</code> — 이름에
+            <b>그 글자가 들어가는</b> 키들 중 하나. 하나만 걸리면 늘 그것이 나옵니다.</div>
+          <div class="wcchunk-guide-note">⚠️ 걸리는 키가 <b>하나도 없으면 그룹 전체에서
+            아무거나</b> 나옵니다 — 오타를 내도 조용히 다른 것이 뽑힙니다.
+            값 안에 <code>__파일__</code> 을 써도 <b>풀리지 않습니다</b>(쉼표로만 나눕니다).</div>
         </details>
       </div>`;
     const valueBox = box.querySelector('.wcchunk-value');
@@ -147,10 +152,36 @@ export function createWildcardChunkPopup({
       dirty = true;
       setStatus('저장 안 됨', 'warn');
     }));
+    // 키를 고치면 토큰 줄도 그 자리에서 따라 바뀐다 - 보이는 것과 버튼이 쓰는 것이
+    // 어긋나면 엉뚱한 토큰을 복사하게 된다.
+    keyBox?.addEventListener('input', () => {
+      const code = box.querySelector('.wcchunk-token code');
+      if (!code) return;
+      const now = String(keyBox.value || '').trim();
+      code.textContent = now ? `$${currentGroup()}:${now}` : `$${currentGroup()}`;
+    });
   }
 
   function editedKey() {
     return String(pick('.wcchunk-key-input')?.value || '').trim();
+  }
+
+  /**
+   * 고치던 값을 버리고 자리를 옮겨도 되는지 묻고, 좋다고 하면 `go()` 를 부른다.
+   *
+   * ⚠️ 자리를 옮기는 **모든 길**이 여기를 지나야 한다(목록 클릭 · 그룹 전환 · 새 키 ·
+   *    닫기). 한 길만 막아 두면 나머지로 값이 조용히 사라진다 —
+   *    [[feedback-two-entry-points]] 와 같은 함정이다.
+   */
+  async function leaveCurrent(go) {
+    if (dirty) {
+      const ok = await Promise.resolve(confirmDialog('저장하지 않은 값이 있습니다. 버리고 옮길까요?', {
+        title: '청크 편집', okText: '버리고 이동', cancelText: '취소',
+      }));
+      if (!ok) return;
+    }
+    dirty = false;
+    go();
   }
 
   function editedValue() {
@@ -160,11 +191,18 @@ export function createWildcardChunkPopup({
   function save() {
     const key = editedKey();
     if (!key) { showToast('키 이름이 필요합니다', 'error'); return; }
-    dirty = false;
-    setStatus('저장 중…');
-    setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
+    // ⚠️ 보내기 **전에** `dirty` 를 내리지 않는다. 내려 두면 전송이 실패해도 화면은
+    //    저장된 것처럼 굴고, 다음 에코가 방금 친 값을 덮어 쓴다. 성공을 확인하고 내린다.
+    const sent = setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
       file: currentFile(), key, value: editedValue(),
     }));
+    if (sent === false) {
+      showToast('저장하지 못했습니다 - 연결을 확인하세요', 'error');
+      setStatus('저장 안 됨', 'warn');
+      return;
+    }
+    dirty = false;
+    setStatus('저장 중…');
   }
 
   async function rename() {
@@ -207,13 +245,20 @@ export function createWildcardChunkPopup({
   }
 
   function onState(message) {
+    const previousKey = String(state?.current_key || '');
+    const nextKey = String(message?.current_key || '');
+    // ⚠️ **치고 있는 중에는 편집 칸을 갈아 끼우지 않는다.** 상태 에코는 아무 때나 오는데,
+    //    그때마다 다시 그리면 방금 친 글자가 사라진다. 고른 키가 **바뀐 경우**에만 새로
+    //    그린다 - 그건 사용자가 옮겨 간 것이라 새 값을 보여 주는 게 맞다.
+    const typing = dirty && nextKey === previousKey;
     state = message || null;
-    dirty = false;
+    if (!typing) dirty = false;
     renderGroups();
     renderList();
-    renderEditor();
+    renderEditor({keepFields: typing});
     const count = Number(state?.flat_count) || 0;
-    setStatus(count ? `${count.toLocaleString()}개 로드됨` : '');
+    if (typing) setStatus('저장 안 됨', 'warn');
+    else setStatus(count ? `${count.toLocaleString()}개 로드됨` : '');
   }
 
   // ── 위치 ── Memo·Tag Search 와 **같은 자리**(결과 이미지 영역 좌하단). ──────────
@@ -274,8 +319,16 @@ export function createWildcardChunkPopup({
     input.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); close(); }
     });
-    popup.querySelector('.wcchunk-group').addEventListener('change', event => {
-      setModuleParam('instant_wildcard', 'select_file', event.target.value || '');
+    const groupSelect = popup.querySelector('.wcchunk-group');
+    groupSelect.addEventListener('change', event => {
+      const next = event.target.value || '';
+      void leaveCurrent(() => {
+        setModuleParam('instant_wildcard', 'select_file', next);
+      }).then(() => {
+        // 취소했으면 고르개를 원래 그룹으로 되돌린다 - 안 되돌리면 화면은 새 그룹인데
+        // 목록은 옛 그룹이라 서로 다른 답이 보인다.
+        if (dirty) groupSelect.value = currentFile();
+      });
     });
 
     popup.addEventListener('click', event => {
@@ -284,8 +337,8 @@ export function createWildcardChunkPopup({
       const act = event.target.closest('[data-act]');
       if (act) {
         const action = act.dataset.act;
-        if (action === 'close') { close(); return; }
-        if (action === 'new') { newKey(); return; }
+        if (action === 'close') { void leaveCurrent(close); return; }
+        if (action === 'new') { void leaveCurrent(newKey); return; }
         if (action === 'group') { void addGroup(); return; }
         if (action === 'save') { save(); return; }
         if (action === 'rename') { void rename(); return; }
@@ -312,10 +365,11 @@ export function createWildcardChunkPopup({
       }
       const row = event.target.closest('[data-key]');
       if (!row) return;
-      // ⚠️ 고치던 것이 있으면 알리고 넘어간다 - 조용히 버리면 방금 친 값이 사라진다.
-      if (dirty && !win.confirm('저장하지 않은 값이 있습니다. 버리고 옮길까요?')) return;
-      dirty = false;
-      setModuleParam('instant_wildcard', 'select_key', row.dataset.key || '');
+      // ⚠️ **`win.confirm` 을 쓰지 않는다.** Electron 에서 네이티브 창이 초점을 잠근다 -
+      //    Memo 가 같은 이유로 주입받은 `confirmDialog` 만 쓴다. 여기도 그것을 쓴다.
+      void leaveCurrent(() => {
+        setModuleParam('instant_wildcard', 'select_key', row.dataset.key || '');
+      });
     });
   }
 

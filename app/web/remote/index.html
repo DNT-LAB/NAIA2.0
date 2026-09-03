@@ -788,8 +788,10 @@
                       data-naia-guide="Memo. 프롬프트를 만들다 떠오른 것을 적어 두는 메모장입니다. 첫 줄이 제목이 되고, 저장은 이 PC(서버)에 남아 폰으로 열어도 같은 메모가 보입니다.">
                 <span>Memo</span>
               </button>
-              <!-- 와일드카드 청크(사용자 지정 2026-09-03). 프롬프트 도구 드롭다운에서 빼서
-                   Memo·Tag Search 와 같은 자리·같은 옷으로 옮겼다. -->
+              <!-- 와일드카드 청크(사용자 지정 2026-09-03). Memo·Tag Search 와 같은 자리·같은 옷.
+                   ⚠️ 프롬프트 도구의 [와일드카드 청크] 는 **아직 남아 있다** - `openChunkPanel`
+                      의 호출처가 그 항목 하나뿐이라, 빼면 커서 삽입 줄이 통째로 닿을 수 없게
+                      된다. 삽입까지 이 창으로 옮긴 뒤에 뺀다. -->
               <button type="button" class="ia-mode-toggle" id="wcChunkBtn" aria-pressed="false"
                       data-naia-guide="와일드카드 청크. 자주 쓰는 태그 묶음을 $그룹:키 로 저장해 두고 프롬프트 어디서나 불러 씁니다. 키를 만들고 고치고 지우는 것을 여기서 다 합니다.">
                 <span>Chunk</span>

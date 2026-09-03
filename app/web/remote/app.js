@@ -10483,21 +10483,30 @@ function v45PreviewSetting(key, fallback) {
 }
 
 /**
- * 랜덤 버튼이 돌 때 함께 요청한다(기본 비활성).
+ * 랜덤이 돈 뒤의 뒤처리. **두 가지가 층이 다르다.**
  *
- * ⚠️ **표식을 여기서 직접 넣는다**(사용자 지정 2026-09-01: "활성화를 하면 랜덤버튼을
- *    누를 때 바로 삽입"). 랜덤은 메인 프롬프트를 통째로 갈아 끼우므로 지난 판의 표식이
- *    사라진다 - 넣지 않으면 매번 '프리뷰 구간이 없습니다' 만 뜬다(사용자 제보).
+ *   켜짐(`enabled`)       -> 표식을 **다시 넣는다**
+ *   랜덤 연동(`on_random`) -> 거기에 더해 프리뷰까지 **생성한다**
+ *
+ * ⚠️ 표식은 켜져 있기만 하면 언제나 다시 넣는다(사용자 제보 2026-09-03). 랜덤은 메인
+ *    프롬프트를 통째로 갈아 끼워 지난 판의 표식을 지워 버린다 - 예전에는 랜덤 연동을
+ *    켰을 때만 다시 넣어서, 연동을 끄고 쓰는 사람은 랜덤을 누를 때마다 [4.5 프리뷰]가
+ *    **붉게 실패**했다. 켜 뒀는데 매번 톱니를 열어 [재삽입]을 눌러야 했던 셈이다.
+ * ⚠️ 표식만 지키는 판에서는 **아무 토스트도 띄우지 않는다.** 랜덤을 돌릴 때마다
+ *    안내가 뜨면 화면을 덮는다 - 잡지 못했다면 다음 [4.5 프리뷰] 가 그 자리에서
+ *    붉게 알려 준다.
  */
 async function maybeRunV45PreviewAfterRandom() {
   if (!naiModelIsV5()) return;
   // 설정이 아직 안 왔으면 기다린다 - 안 기다리면 첫 랜덤이 기본값으로 떨어진다.
   await naiPreviewSettingsReady;
-  // ⚠️ 기능이 꺼져 있으면 랜덤 연동도 없다 - `on_random` 만 보면 꺼 둔 사람에게
-  //    랜덤마다 프리뷰가 나간다(상태는 `enabled` 가 위다).
-  if (v45PreviewState() !== 'random') return;
+  // ⚠️ 꺼져 있으면 아무것도 안 한다 - `on_random` 만 보면 꺼 둔 사람에게도 표식이 박힌다.
+  const state = v45PreviewState();
+  if (state === 'off') return;
   // 조용히 넣는다 - 랜덤을 돌릴 때마다 구간 토스트가 뜨면 화면을 덮는다.
   const ok = await applyV45PreviewMarkers('insert', {silent: true, useServerPrompt: true});
+  // 생성까지 가는 것은 **랜덤 연동을 켰을 때만**이다.
+  if (state !== 'random') return;
   if (!ok) { showToast('프리뷰 구간을 잡지 못했습니다.', 'info'); return; }
   await runV45Preview({segmentConfirmed: true});
 }

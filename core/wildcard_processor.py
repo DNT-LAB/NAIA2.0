@@ -137,9 +137,14 @@ class WildcardProcessor:
                         if not group_dict:
                             produced = [tag]  # 그룹 비어있으면 원본 유지
                         else:
-                            src = group_dict
+                            # ⚠️ **값이 빈 키는 뽑지 않는다**(Fable 리뷰 2026-09-03).
+                            #    청크 창에서 키를 만들고 값을 안 채운 채 두면 그 키가
+                            #    뽑힐 때마다 태그가 조용히 사라졌다 - 오류도 안 난다.
+                            #    전부 비었을 때만 원래 표를 그대로 쓴다(지금과 같은 결과).
+                            non_empty = {k: v for k, v in group_dict.items() if str(v).strip()}
+                            src = non_empty or group_dict
                             if filter_text:
-                                filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
+                                filtered_dict = {k: v for k, v in src.items() if filter_text in k.lower()}
                                 if filtered_dict:
                                     src = filtered_dict
                             random_key = random.choice(list(src.keys()))

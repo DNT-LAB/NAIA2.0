@@ -724,9 +724,11 @@ class ArtistThumbnailService:
                 "label": str(info.get("label") or key),
                 "available": file_state["available"],
                 "needs_update": file_state["needs_update"],
-                # ⚠️ `available` 로 세지 않는다 - 갱신 중이어도 옛 팩을 들고 있으면
-            #    화면은 그것을 그려야 한다(빈 그리드를 보여 주지 않는다).
-            "loaded": key in self._data_cache and file_state["exists"],
+                # ⚠️ 화면은 **`exists` 로 판단해야 한다.** `available` 은 "최신인가" 지
+                #    "볼 수 있는가" 가 아니다 - 갱신 중에도 옛 팩이 있으면 그려야 한다
+                #    (사용자 제보 2026-09-03: 2.5GB 받는 내내 빈 격자였다).
+                "exists": file_state["exists"],
+                "loaded": key in self._data_cache and file_state["exists"],
                 "size": file_state["size"],
                 "expected_size": file_state["expected_size"],
                 "size_mb": file_state["size_mb"],

@@ -430,9 +430,15 @@ class CharacterViewerService:
             favorites.add(key)
         else:
             favorites.discard(key)
+        # ⚠️ **원자적으로 쓴다.** 곧바로 `"w"` 로 열면 쓰다 만 파일이 남을 수 있고,
+        #    그 파일은 아래 `favorites()` 가 **빈 목록**으로 읽는다 - 그 뒤 별을 하나만
+        #    눌러도 옛 별 전부가 그 한 개로 덮여 **영영 사라진다**(Fable 리뷰 2026-09-03).
+        #    같은 파일의 `_write_thumb_index` 가 이미 tmp+replace 를 쓴다 - 그것을 따른다.
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.favorites_path, "w", encoding="utf-8") as handle:
+        tmp_path = self.favorites_path.with_name(self.favorites_path.name + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as handle:
             json.dump({"favorites": sorted(favorites)}, handle, ensure_ascii=False, indent=1)
+        tmp_path.replace(self.favorites_path)
         return {
             "group": group_key,
             "character": name,

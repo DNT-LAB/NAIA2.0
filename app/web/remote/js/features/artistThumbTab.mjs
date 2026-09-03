@@ -533,7 +533,15 @@ export function createArtistThumbController({
     const mode = currentMode();
     const modeText = mode || '목록';
     const statusPrefix = randomViewActive ? 'Random artists' : modeText;
-    setStatus(`${statusPrefix} · ${currentListFilterName || '전체 목록'} · ${Number(currentListTotal || 0).toLocaleString()} artists`, 'ok');
+    const base = `${statusPrefix} · ${currentListFilterName || '전체 목록'} · ${Number(currentListTotal || 0).toLocaleString()} artists`;
+    // 갱신이 걸려 있으면 **지금 보는 것이 옛 팩**이라고 말해 준다 - 막지는 않지만
+    // 모른 채로 두지도 않는다(사용자 제보 2026-09-03).
+    const info = currentModeInfo();
+    if (info?.needs_update) {
+      setStatus(`${base} · 옛 데이터입니다 — [Update] 로 갱신하세요`, 'busy');
+      return;
+    }
+    setStatus(base, 'ok');
   }
 
   function updateRandomUi() {
@@ -716,7 +724,13 @@ export function createArtistThumbController({
     const requestId = ++listRequestId;
     const mode = currentMode();
     const info = currentModeInfo();
-    if (info && (!info.available || info.needs_update)) {
+    // ⚠️ **파일이 아예 없을 때만 막는다**(사용자 제보 2026-09-03).
+    //    예전에는 `!available || needs_update` 로 막아, 갱신이 걸린 순간부터 2.5GB 를
+    //    다 받을 때까지 격자가 "No matching artists." 로 비어 있었다 - 옛 팩이 디스크에
+    //    멀쩡히 있는데도 아무것도 못 봤다. 갱신은 **알리는 것**이지 막는 것이 아니다.
+    //    (`available` 은 "최신인가" 지 "볼 수 있는가" 가 아니다 - `exists` 로 본다.)
+    const hasFile = info ? (info.exists !== undefined ? info.exists : info.available) : false;
+    if (info && !hasFile) {
       randomViewActive = false;
       currentPage = 0;
       totalPages = 1;
@@ -728,8 +742,6 @@ export function createArtistThumbController({
       const download = state?.download || {};
       if (download.active && download.mode === mode) {
         setStatus(download.message || 'Artist Thumbnail 데이터 다운로드 중...', 'busy');
-      } else if (info.needs_update) {
-        setStatus(`${info.label || mode} 데이터 업데이트가 필요합니다. Update 버튼으로 갱신할 수 있습니다.`, 'error');
       } else {
         setStatus(`${info.label || mode} 데이터가 없습니다. Download 버튼으로 받을 수 있습니다.`, 'error');
       }

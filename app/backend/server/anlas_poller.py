@@ -141,6 +141,18 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
 # 계정이 하나면 아래 메인 조회 한 번으로 이미 끝난 이야기다.
 
 
+def renews_in_days(expires_at: Any, now: float | None = None) -> int | None:
+    """구독 갱신 epoch -> 남은 **정수 일수**. 하루 미만이면 0, 이미 지났어도 0.
+
+    ⚠️ 올림이 아니라 **내림**이다(사용자 명세: "시간 단위로 남았으면 0일" - 정확한
+    시각을 화면에서 못 읽게 한다). 모르면 None.
+    """
+    if not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool):
+        return None
+    current = time.time() if now is None else now
+    return max(0, int((float(expires_at) - current) // 86400))
+
+
 def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
     """메인을 뺀 나머지 계정의 **Anlas + 사용량**을 동시에 조회한다.
 
@@ -175,6 +187,7 @@ def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
                     "percent": int(usage.get("percent", 0)),
                     "is_negative": bool(usage.get("is_negative", False)),
                     "anlas": summary.get("anlas"),
+                    "expires_at": summary.get("expires_at"),
                 }
     return out
 
@@ -241,6 +254,9 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any],
             "percent": int(usage.get("percent", 0)) if known else 0,
             "is_negative": bool(usage.get("is_negative")) if known else False,
             "anlas": int(anlas) if isinstance(anlas, int) else None,
+            # 재결제까지 남은 **일수**(사용자 요청 2026-09-03). 시간 단위로 남았으면 0 -
+            # 정확한 시각은 일부러 안 보여 준다. 모르면 None(화면은 칸을 비운다).
+            "renews_in_days": renews_in_days(usage.get("expires_at") if known else None),
             # 이번 라운드에 생성할 계정. 화면이 여기를 강조한다.
             "is_next": row["id"] == next_account_id,
             # 이번 세션에 이 계정으로 나간 장수(사용자 요청 2026-08-21: "총 ****장").
@@ -288,6 +304,7 @@ def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> d
                 "percent": int(main_usage.get("percent", 0)),
                 "is_negative": bool(main_usage.get("is_negative", False)),
                 "anlas": main_summary.get("anlas"),
+                "expires_at": main_summary.get("expires_at"),
             }
         extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
         usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))

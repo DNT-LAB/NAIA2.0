@@ -361,6 +361,12 @@ export function createNaiAccountPanel({
           : session.onV5
             ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>`
             : `<i>|</i><span>${esc(rotationText(row))}</span>`)
+        // 재결제까지 남은 일수(사용자 요청 2026-09-03). 줄 오른쪽 빈자리에 붙는다.
+        // 백엔드가 **내림**한 정수를 주므로 시간 단위로 남으면 "0일" 이다 - 정확한
+        // 시각은 일부러 안 보여 준다. 모르면(null) 칸을 비운다.
+        + (Number.isInteger(row.renews_in_days)
+          ? `<span class="nai-acct-renew">갱신 ${row.renews_in_days}일</span>`
+          : '')
         + '</div>'
         + (forced ? '<span class="nai-acct-only">이 계정만 사용</span>' : '')
         + (pickable ? '</button>' : '</div>');

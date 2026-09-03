@@ -257,7 +257,7 @@ def fetch_nai_subscription_summary(token: str) -> dict:
     반환: `{"anlas": int|None, "usage": dict|None}` (실패한 쪽은 None).
     타임아웃은 5초가 아니라 8초 — 5초는 이 엔드포인트에 빠듯하다(실측).
     """
-    out: dict = {"anlas": None, "usage": None}
+    out: dict = {"anlas": None, "usage": None, "expires_at": None}
     token = (token or "").strip()
     if not token:
         return out
@@ -305,6 +305,12 @@ def fetch_nai_subscription_summary(token: str) -> dict:
             }
         except Exception:  # pragma: no cover
             out["usage"] = None
+
+    # 구독 갱신(재결제) 시각. unix epoch(초). 계정 패널이 "며칠 남았다" 로 보여 준다
+    # (사용자 요청 2026-09-03). 없거나 형식이 다르면 None - 화면은 그 칸을 비운다.
+    expires = data.get("expiresAt")
+    if isinstance(expires, (int, float)) and not isinstance(expires, bool) and expires > 0:
+        out["expires_at"] = int(expires)
     return out
 
 

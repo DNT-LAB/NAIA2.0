@@ -19890,6 +19890,9 @@ select.setup-input { cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 .nai-acct-sub i { font-style: normal; color: #45455a; }
+/* 재결제까지 남은 일수 - 줄 오른쪽 빈자리(퍼센트 아래)에 붙는다. 한 톤 낮춰
+   Anlas·잔량과 겨루지 않게 한다. */
+.nai-acct-sub .nai-acct-renew { margin-left: auto; padding-right: 2px; color: #5a5a72; }
 .nai-acct-name {
   flex: 0 0 62px; font-size: 11px; color: #b6b6cc;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

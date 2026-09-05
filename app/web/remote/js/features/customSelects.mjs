@@ -301,6 +301,7 @@ export function createCustomSelectController({
 
   function openSelect(state) {
     closeOpen();
+    detailCache.clear();   // 한 판에 한 번만 읽는다(저장 뒤 낡은 값이 남지 않게)
     state.searchOpen = false;     // 검색 경로면 부른 쪽이 다시 켠다
     openState = state;
     state.wrapper.classList.add('is-open');
@@ -449,6 +450,104 @@ export function createCustomSelectController({
     if (at < text.length) host.append(document.createTextNode(text.slice(at)));
   }
 
+  /* ── 저장된 Main / Negative ──────────────────────────────────────────
+     옵션 `data-preview-*` 에는 Prefix/Postfix 만 실려 있다. 본문까지 실으면
+     프리셋 수 x 수천 자가 **모듈 상태 방송마다** 따라다닌다. 그래서 여기서만,
+     짚은 프리셋 하나를 읽기 전용 라우트로 가져온다(아무것도 쓰지 않는다). */
+  const detailCache = new Map();          // `${mode}\0${name}` -> detail | null
+  let detailSeq = 0;
+
+  function presetDetailWanted(state, option) {
+    // ⚠️ `prompt-preset` 종류는 캐릭터 프로필 선택도 함께 쓴다(같은 미리보기 판을
+    //    빌려 쓴다). 이름이 겹치면 **남의 프리셋 본문**을 보여 주게 되므로,
+    //    진짜 프리셋 목록만 `data-preset-detail` 로 따로 켠다.
+    if (state.select?.dataset.presetDetail !== '1') return null;
+    const name = String(option?.dataset?.previewName || '').trim();
+    const mode = String(option?.dataset?.previewMode || '').trim().toUpperCase();
+    if (!name || name === '*randomized' || !mode) return null;
+    return {name, mode};
+  }
+
+  async function loadPresetDetail({mode, name}) {
+    const key = `${mode}\u0000${name}`;
+    if (detailCache.has(key)) return detailCache.get(key);
+    let detail = null;
+    try {
+      const url = `/api/prompt-engineering/preset-detail?${new URLSearchParams({mode, name})}`;
+      const response = await fetch(url, {cache: 'no-store'});
+      detail = response.ok ? await response.json() : null;
+    } catch { detail = null; }
+    detailCache.set(key, detail);
+    return detail;
+  }
+
+  /** 쉼표로 끊어 태그 하나씩 색을 준다. **태그 사전은 보지 않는다** — 그건
+   *  17만 항목을 들고 있어야 하는 일이고, 여기서 필요한 건 긴 본문을 눈으로
+   *  훑을 수 있을 만큼의 구분이다. 색은 프롬프트 편집기와 같은 `prompt-token-*`.
+   *  네임스페이스가 있으면 그 색이 이기고(편집기와 같다), 없으면 가중치로 밝기를
+   *  준다. 음수 가중치는 배경/밑줄이라 겹쳐 쓴다. */
+  const TAG_WEIGHT_RE = /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))::/;
+  const TAG_NAMESPACE_RE = /(?:^|::\s*)(artist|character|copyright)\s*:/i;
+
+  function tagTokenClasses(tag) {
+    const text = tag.trim();
+    if (!text) return [];
+    if (text.startsWith('#')) return ['prompt-token-comment'];
+    const classes = [];
+    const weight = TAG_WEIGHT_RE.exec(text);
+    const namespace = TAG_NAMESPACE_RE.exec(text);
+    if (namespace) classes.push(`prompt-token-${namespace[1].toLowerCase()}`);
+    if (weight) {
+      const value = Number(weight[1]);
+      if (value < 0) classes.push('prompt-token-minus');
+      if (!namespace && value >= 0) {
+        classes.push(value >= 1.05 ? 'prompt-token-high'
+          : value <= 0.8 ? 'prompt-token-low' : 'prompt-token-mid');
+      }
+    } else if (!namespace && text.startsWith('@')) {
+      classes.push('prompt-token-artist');
+    }
+    return classes;
+  }
+
+  /** 구문 색 + 검색어 형광펜을 함께 칠한다. innerHTML 은 쓰지 않는다
+   *  (본문은 사용자가 적은 것이고 `<` 가 얼마든지 들어간다). */
+  function paintPromptBody(host, text, terms) {
+    host.textContent = '';
+    // 쉼표와 줄바꿈은 **자리를 지켜야** 원문 그대로 보인다 → 구분자도 조각으로 남긴다.
+    const pieces = String(text).split(/(,|\n)/);
+    pieces.forEach(piece => {
+      if (!piece) return;
+      const classes = piece === ',' || piece === '\n' ? [] : tagTokenClasses(piece);
+      if (!classes.length) {
+        const plain = document.createElement('span');
+        paintTerms(plain, piece, terms);
+        host.append(plain);
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = classes.join(' ');
+      paintTerms(span, piece, terms);
+      host.append(span);
+    });
+  }
+
+  function appendPreviewField(copy, label, note) {
+    const cap = document.createElement('div');
+    cap.className = 'custom-select-preview-cap';
+    cap.textContent = label;
+    if (note) {
+      const small = document.createElement('span');
+      small.className = 'custom-select-preview-cap-note';
+      small.textContent = note;
+      cap.append(small);
+    }
+    const pre = document.createElement('pre');
+    pre.className = 'custom-select-preview-prefix';
+    copy.append(cap, pre);
+    return pre;
+  }
+
   function renderPreview(state, item) {
     if (!hasPreview(state)) return;
     const option = optionForItem(state, item);
@@ -526,10 +625,39 @@ export function createCustomSelectController({
       cap.textContent = label;
       const pre = document.createElement('pre');
       pre.className = 'custom-select-preview-prefix';
-      if (value) paintTerms(pre, value, terms);
+      if (value) paintPromptBody(pre, value, terms);
       else pre.textContent = fallback;
       copy.append(cap, pre);
     });
+
+    // 저장된 Main/Negative 는 비동기로 채운다. 자리를 **먼저** 만들어 두어야
+    // 답이 왔을 때 판이 덜컥 커지지 않는다.
+    const identity = presetDetailWanted(state, option);
+    if (identity) {
+      const seq = ++detailSeq;
+      const slots = [
+        ['Main', 'main', appendPreviewField(copy, 'Main')],
+        ['Negative', 'negative', appendPreviewField(copy, 'Negative')],
+      ];
+      slots.forEach(([, , pre]) => {
+        pre.classList.add('custom-select-preview-body', 'is-loading');
+        pre.textContent = '읽는 중…';
+      });
+      loadPresetDetail(identity).then(detail => {
+        // 늦게 온 답이 지금 짚은 프리셋을 덮으면 **다른 프리셋 본문**이 보인다.
+        if (seq !== detailSeq) return;
+        slots.forEach(([, key, pre]) => {
+          if (!pre.isConnected) return;            // 그 사이에 다시 그렸다
+          pre.classList.remove('is-loading');
+          if (!detail) { pre.textContent = '불러오지 못했습니다'; return; }
+          const value = detail.fields ? detail.fields[key] : null;
+          if (value === null || value === undefined) { pre.textContent = '저장된 값 없음'; return; }
+          if (!value) { pre.textContent = '비어 있음'; return; }
+          paintPromptBody(pre, value, terms);
+        });
+        positionPreview(state);
+      });
+    }
 
     preview.append(thumb, copy);
     if (state.select.dataset.previewActions !== 'none') {

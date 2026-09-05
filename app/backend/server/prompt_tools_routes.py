@@ -554,7 +554,7 @@ def register_prompt_tools_routes(
     @app.get("/api/prompt-engineering/preset-detail")
     async def api_prompt_engineering_preset_detail(name: str = "", mode: str = ""):
         from core.prompt_engineering_settings import (
-            list_preset_names, read_preset_data, sanitize_preset_name,
+            list_preset_names, load_mode_settings, read_preset_data, sanitize_preset_name,
         )
 
         mode_key = mode.upper()
@@ -567,16 +567,24 @@ def register_prompt_tools_routes(
         def read_detail():
             # These readers neither initialize a store nor create directories.
             if name not in list_preset_names(mode_key, save_root=save_root):
-                return None
-            data = read_preset_data(name, mode_key, save_root=save_root)
-            if not data:
-                raise ValueError("프리셋 내용을 읽을 수 없습니다. 파일을 확인하세요.")
-            module = data.get("module_settings") or {}
-            main = data.get("main_settings") or {}
+                # `default` 는 파일이 아니라 preset_options 가 합성하는 이름이라,
+                # 저장한 적 없는 프로필/모드에서는 파일이 없다. 그때의 실제 값은
+                # 모드 기본값이다 - 404 대신 그걸 읽어 준다(쓰지 않는다).
+                if name != "default":
+                    return None
+                module = load_mode_settings(mode_key, save_root=save_root)
+                main, source = {}, "mode_default"
+            else:
+                data = read_preset_data(name, mode_key, save_root=save_root)
+                if not data:
+                    raise ValueError("프리셋 내용을 읽을 수 없습니다. 파일을 확인하세요.")
+                module = data.get("module_settings") or {}
+                main = data.get("main_settings") or {}
+                source = "preset"
             def field(section, key):
                 value = section.get(key) if isinstance(section, dict) else None
                 return value if isinstance(value, str) else None
-            return {"name": name, "mode": mode_key, "fields": {
+            return {"name": name, "mode": mode_key, "source": source, "fields": {
                 "prefix": field(module, "pre_prompt"), "postfix": field(module, "post_prompt"),
                 "main": field(main, "prompt"), "negative": field(main, "negative_prompt"),
                 "auto_hide": field(module, "auto_hide_prompt"),

@@ -517,7 +517,7 @@ export function createPromptEngineeringPanel({
     <div>
       <div class="mod-section-label has-actions"><span>Quick Preset<input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"><span class="pe-preset-count" id="modPresetCount"></span></span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-preset-toolbar">
-        <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset"${presetFilterAttrs} onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
+        <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" data-preset-detail="1"${presetFilterAttrs} onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetManagePanel()">Manage</button>
       </div>

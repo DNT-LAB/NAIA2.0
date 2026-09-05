@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import copy
 from typing import Any
 
 import pandas as pd
@@ -154,18 +155,27 @@ class PromptGenerationService:
         return pd.Series(processed_dict)
 
     def generate_instant_source_silent(self, instant_row: dict | pd.Series, settings: dict) -> str | None:
+        return self.generate_instant_source_result_silent(instant_row, settings).final_prompt
+
+    def generate_instant_source_result_silent(
+        self, instant_row: dict | pd.Series, settings: dict,
+    ) -> PromptGenerationResult:
+        """Return simulation metadata without registering a run or replacing live state."""
         saved_source = getattr(self.app_context, "current_source_row", None)
         saved_context = getattr(self.app_context, "current_prompt_context", None)
         try:
             source_row = self.normalize_instant_source(instant_row)
             if source_row is None:
-                return None
-            self.set_current_context(source_row, settings, track_run=False)
+                return PromptGenerationResult(error="Invalid simulation source")
+            context = self.set_current_context(source_row, copy.deepcopy(settings), track_run=False)
+            context.wildcard_state = copy.deepcopy(context.wildcard_state)
             final_context = self.processor.process()
-            return final_context.final_prompt if final_context else None
+            if final_context is None:
+                return PromptGenerationResult(error="Simulation produced no context")
+            return PromptGenerationResult(context=final_context, final_prompt=final_context.final_prompt)
         except Exception as e:
             print(f"[TagInterrogation] Silent generation error: {e}")
-            return None
+            return PromptGenerationResult(error=str(e))
         finally:
             self.app_context.current_source_row = saved_source
             self.app_context.current_prompt_context = saved_context

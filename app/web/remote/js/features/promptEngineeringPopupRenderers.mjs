@@ -3,6 +3,7 @@ export function createPromptEngineeringPopupRenderers({
   requestAnimationFrame,
   escHtml,
   createPromptPreset,
+  applyPromptPreset,
   addRandomizedPreset,
   removeRandomizedPreset,
   switchRandomizedPreset,
@@ -29,6 +30,8 @@ export function createPromptEngineeringPopupRenderers({
   let editorState = null;
   let searchDebounceTimer = null;
   let savedFlashUntil = 0;   // "저장됨" 피드백이 재렌더에도 잠깐 유지되도록 하는 만료 타임스탬프
+  let presetBrowser = null;
+  let presetDetailRequest = 0;
 
   function parseTagInput(value) {
     return String(value || '')
@@ -347,20 +350,129 @@ export function createPromptEngineeringPopupRenderers({
     if (title) title.textContent = m.preset === '*randomized' ? 'Manage Randomized' : 'Manage Preset';
 
     if (m.preset === '*randomized') {
+      presetDetailRequest += 1;
+      presetBrowser = null;
       renderRandomizedManage(body, m);
       return;
     }
 
     const canSaveCurrent = !!m.preset_can_save_current;
     const canDeleteCurrent = !!m.preset_can_delete;
+    const mode = String(m.api_mode || '');
+    const names = (m.preset_options || []).filter(name => name !== '*randomized');
+    const listKey = JSON.stringify(names);
+    // Server pushes must not replace a selection, text range, or pending response.
+    if (presetBrowser?.mode === mode && presetBrowser.listKey === listKey
+        && body.contains(presetBrowser.root)) {
+      presetBrowser.currentPreset = m.preset;
+      body.querySelector('[data-current-preset]').textContent = m.preset || '(none)';
+      body.querySelector('[data-save-current]').disabled = !canSaveCurrent;
+      body.querySelector('[data-delete-current]').disabled = !canDeleteCurrent;
+      presetBrowser.updateApply();
+      return;
+    }
+    const previous = presetBrowser?.mode === mode ? presetBrowser : null;
+    presetDetailRequest += 1;
     body.innerHTML = `
     <div class="mod-section-label">Current Preset</div>
-    <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>
+    <div class="mod-info-chip" data-current-preset>${escHtml(m.preset || '(none)')}</div>
     <div class="mod-inline-row">
-      <button class="mod-btn-secondary" ${canSaveCurrent ? '' : 'disabled'} onclick="saveCurrentPromptPreset()">Save Current</button>
-      <button class="mod-btn-danger" ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
+      <button class="mod-btn-secondary" data-save-current ${canSaveCurrent ? '' : 'disabled'} onclick="saveCurrentPromptPreset()">Save Current</button>
+      <button class="mod-btn-danger" data-delete-current ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
+    </div>
+    <div class="pe-preset-browser">
+      <div class="mod-section-label">저장된 프롬프트 미리보기 · ${escHtml(mode)}</div>
+      <p class="pe-preset-hint">선택해서 내용을 확인하고 복사하세요. 현재 편집 내용은 ‘적용’을 눌러야 바뀝니다.</p>
+      <input class="mod-input" type="search" aria-label="프리셋 검색" placeholder="프리셋 검색">
+      <select class="mod-select" size="4" aria-label="미리볼 프리셋"></select>
+      <div class="mod-inline-row">
+        <button type="button" class="mod-btn-secondary" data-detail-refresh>새로고침</button>
+        <button type="button" class="mod-btn-secondary" data-detail-apply disabled>선택 프리셋 적용</button>
+      </div>
+      <div class="pe-preset-hint" role="status" aria-live="polite"></div>
+      <div data-preset-fields></div>
     </div>
   `;
+    const root = body.querySelector('.pe-preset-browser');
+    const search = root.querySelector('input');
+    const select = root.querySelector('select');
+    const status = root.querySelector('[role="status"]');
+    const fields = root.querySelector('[data-preset-fields]');
+    const apply = root.querySelector('[data-detail-apply]');
+    const browser = {
+      root, mode, listKey, currentPreset: m.preset, ready: false,
+      selected: names.includes(previous?.selected) ? previous.selected : (names.includes(m.preset) ? m.preset : names[0] || ''),
+      query: previous?.query || '',
+      updateApply: () => { apply.disabled = !browser.ready || browser.selected === browser.currentPreset; },
+    };
+    presetBrowser = browser;
+    search.value = browser.query;
+
+    async function loadDetail() {
+      const request = ++presetDetailRequest;
+      const name = browser.selected;
+      browser.ready = false;
+      browser.updateApply();
+      fields.replaceChildren();
+      status.textContent = name ? `${name} 불러오는 중…` : '검색 결과가 없습니다.';
+      if (!name) return;
+      try {
+        const response = await fetch(`/api/prompt-engineering/preset-detail?${new URLSearchParams({mode, name})}`, {cache: 'no-store'});
+        const detail = await response.json();
+        if (request !== presetDetailRequest || presetBrowser !== browser || !body.contains(root)) return;
+        if (!response.ok) throw new Error(detail.error || '프리셋을 불러오지 못했습니다.');
+        if (detail.mode !== mode || detail.name !== name) throw new Error('프리셋 응답이 일치하지 않습니다. 다시 선택하세요.');
+        const labels = {prefix: 'Prefix', postfix: 'Postfix', main: 'Main', negative: 'Negative', auto_hide: 'Auto-Hide'};
+        for (const [key, label] of Object.entries(labels)) {
+          const value = detail.fields?.[key];
+          const text = typeof value === 'string' ? value : '';
+          const section = document.createElement('div');
+          section.className = 'pe-preset-detail-field';
+          section.innerHTML = `<div class="pe-preset-detail-label"><span>${label} <small>${value == null ? '저장된 값 없음' : text ? '' : '비어 있음'}</small></span><button type="button" class="mod-btn-secondary mod-btn-compact" ${text ? '' : 'disabled'}>${label} 복사</button></div><textarea class="mod-textarea" aria-label="${label} 미리보기" readonly rows="3"></textarea>`;
+          const textarea = section.querySelector('textarea');
+          textarea.value = text;
+          section.querySelector('button').addEventListener('click', async () => {
+            try {
+              let copied = false;
+              if (globalThis.navigator?.clipboard?.writeText) {
+                try { await navigator.clipboard.writeText(text); copied = true; } catch (_error) {}
+              }
+              if (!copied) {
+                textarea.focus();
+                textarea.select();
+                if (!document.execCommand('copy')) throw new Error('clipboard unavailable');
+              }
+              status.textContent = `${name} · ${label} 복사됨`;
+            } catch (_error) {
+              textarea.focus();
+              textarea.select();
+              status.textContent = '복사할 내용을 선택했습니다. Ctrl+C 또는 복사 메뉴를 사용하세요.';
+            }
+          });
+          fields.appendChild(section);
+        }
+        status.textContent = `${name} · 저장된 내용 (편집 중인 값은 저장 후 새로고침)`;
+        browser.ready = true;
+        browser.updateApply();
+      } catch (error) {
+        if (request === presetDetailRequest && presetBrowser === browser && body.contains(root)) status.textContent = error.message;
+      }
+    }
+    function filterNames() {
+      browser.query = search.value;
+      const filtered = names.filter(name => name.toLocaleLowerCase().includes(browser.query.toLocaleLowerCase()));
+      if (!filtered.includes(browser.selected)) browser.selected = filtered[0] || '';
+      select.innerHTML = filtered.map(name => `<option value="${escHtml(name)}">${escHtml(name)}</option>`).join('');
+      select.value = browser.selected;
+      loadDetail();
+    }
+    search.addEventListener('input', filterNames);
+    select.addEventListener('change', () => { browser.selected = select.value; loadDetail(); });
+    root.querySelector('[data-detail-refresh]').addEventListener('click', loadDetail);
+    apply.addEventListener('click', () => {
+      if (browser.ready && browser.selected !== browser.currentPreset) applyPromptPreset(browser.selected);
+    });
+    filterNames();
   }
 
   function renderRandomizedManage(body, m) {

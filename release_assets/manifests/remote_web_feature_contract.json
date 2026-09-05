@@ -159,6 +159,7 @@
         {"method": "GET", "path": "/api/prompt-highlight-index", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/tag/lookup", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/prompt-engineering/preset-thumbnail", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/prompt-engineering/preset-detail", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/prompt-engineering/preset-thumbnail/upload", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/prompt-engineering/preset-thumbnail/generate", "smoke": "external_live"}
       ]

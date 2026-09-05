@@ -904,6 +904,7 @@ class HeadlessConditionalRuleEngine:
         *,
         max_passes: int = 1,
         stop_on_match: bool = False,
+        negative_only: bool = False,
     ):
         rules = self._parse_rules(rules_text)
         if not rules:
@@ -925,13 +926,14 @@ class HeadlessConditionalRuleEngine:
                     recorder = getattr(self.app_context, "session_cond_simulate", None)
                     if isinstance(recorder, list):
                         recorder.append(str(rule.get("original") or ""))
-                    prefix_tags, main_tags, postfix_tags = self._execute_action(
-                        scope_context,
-                        rule["action"],
-                        prefix_tags,
-                        main_tags,
-                        postfix_tags,
+                    action = rule["action"]
+                    is_negative = action.get("type") == "set_negative" or (
+                        action.get("type") == "append_to_list" and action.get("target") == "neg"
                     )
+                    if not negative_only or is_negative:
+                        prefix_tags, main_tags, postfix_tags = self._execute_action(
+                            scope_context, action, prefix_tags, main_tags, postfix_tags,
+                        )
                     matched = True
                     if stop_on_match:
                         break
@@ -971,7 +973,7 @@ class ConditionalPromptHeadlessHook:
         override = getattr(self.app_context, "session_cond_override", None)
         return override if isinstance(override, dict) else None
 
-    def _active_settings(self) -> dict[str, Any] | None:
+    def _active_settings(self, mode: str | None = None) -> dict[str, Any] | None:
         override = self._session_override()
         if override is not None:
             if not override.get("enabled"):
@@ -990,7 +992,7 @@ class ConditionalPromptHeadlessHook:
                 "active_preset": None,
             }
 
-        settings = self._store.collect_settings()
+        settings = self._store.collect_settings(mode)
         if not settings.get("enabled"):
             return None
         editor_mode = str(settings.get("editor_mode") or "legacy")
@@ -1011,6 +1013,47 @@ class ConditionalPromptHeadlessHook:
         if middle_controller is None or not hasattr(middle_controller, "get_module_instance"):
             return None
         return middle_controller.get_module_instance("PromptListModifierModule")
+
+    def direct_negative_ops(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Evaluate current request text only, with no stale Random/character context.
+
+        Non-negative matches still honor stop_on_match, but cannot rewrite the
+        prompt or introduce new conditions. Source-row/rating predicates have no
+        inherited sample. Wildcards expand only inside matched negative actions.
+        """
+        from types import SimpleNamespace
+        import pandas as pd
+        from core.auto_generation_flags import is_special_request
+        from core.prompt_context import PromptContext
+
+        # Enhance, previews, and composed/special requests own their payloads.
+        if is_special_request(params):
+            return []
+        settings = self._active_settings(params.get("api_mode"))
+        if settings is None:
+            return []
+        rules_key = "rules_v2" if settings.get("editor_mode") == "v2" else "rules"
+        rules = str(settings.get(rules_key) or "")
+        if getattr(self.app_context, "wildcard_manager", None) is None and any(token in rules for token in ("__", "<", "$")):
+            from core.headless_random_prompt_service import HeadlessRandomPromptService
+            HeadlessRandomPromptService(self.app_context)._ensure_wildcard_manager()
+        # This facade deliberately has no live character frames or simulation recorder.
+        scope_app = SimpleNamespace(wildcard_manager=getattr(self.app_context, "wildcard_manager", None))
+        engine = HeadlessConditionalRuleEngine(scope_app)
+        characters = (params.get("characters") or []) if params.get("api_mode") == "NAI" else []
+        if not isinstance(characters, list):
+            characters = []
+        context = PromptContext(
+            source_row=pd.Series(dtype=object), settings={},
+            main_tags=engine._flatten_tag_elements([str(params.get("input") or "")]),
+            metadata={"_conditional_character_slots": [
+                {"prompt": str(prompt or ""), "uc": "", "active": bool(str(prompt or "").strip())}
+                for prompt in characters if isinstance(prompt, str)
+            ]},
+        )
+        options = settings.get("engine_options") or {}
+        engine.apply(context, rules, negative_only=True, **options)
+        return context.metadata.get("conditional_negative_ops", [])
 
     def execute_pipeline_hook(self, context):
         active_settings = self._active_settings()

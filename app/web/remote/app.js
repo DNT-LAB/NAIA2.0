@@ -2346,7 +2346,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260823-cond-permode4')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260905-uq2')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -10762,13 +10762,14 @@ const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260831-cathide1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260905-uq2')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,
       createPromptPreset,
+      applyPromptPreset: onPromptPresetChange,
       addRandomizedPreset: addRandomizedPromptPreset,
       removeRandomizedPreset: removeRandomizedPromptPreset,
       switchRandomizedPreset: switchRandomizedPromptPreset,
@@ -12617,6 +12618,7 @@ const refineView = $('refineView');
 function getFloatingPanelWidth(panel) {
   if (panel === chunkPanel) return 420;
   if (panel === peDebugPanel) return 520;
+  if (panel === pePresetManagePanel) return 520;
   if (panel?.classList?.contains('vibe-cluster-popover')) return 560;
   if (panel?.classList?.contains('vibe-cluster-save-popover')) return 560;
   if (panel?.classList?.contains('wc-editor-popup')) return 560;

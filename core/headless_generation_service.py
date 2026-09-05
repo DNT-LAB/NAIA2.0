@@ -244,7 +244,7 @@ class HeadlessGenerationService:
         if prompt_run_id:
             params["prompt_run_id"] = prompt_run_id
             # 조건부 규칙(neg 타겟)이 이 프롬프트 런에 기록한 네거티브 조작을 병합한다.
-            # 직접 생성 런(_create_direct_prompt_run)은 조작이 없으므로 자연 no-op.
+            # Direct requests record freshly evaluated negative-only operations.
             self._apply_conditional_negative(params, prompt_run_id)
         priority = self._priority(command)
         try:
@@ -915,7 +915,12 @@ class HeadlessGenerationService:
         ops = self._conditional_negative_ops(prompt_run_id)
         if not ops:
             return
-        negative = str(params.get("negative_prompt") or "")
+        params["negative_prompt"] = self.merge_negative_ops(str(params.get("negative_prompt") or ""), ops)
+        params["_conditional_negative_applied"] = True
+
+    @staticmethod
+    def merge_negative_ops(negative: str, ops: list[dict[str, Any]]) -> str:
+        """Shared ordered set/append semantics for generation and Test previews."""
         for op in ops:
             kind = str(op.get("op") or "")
             tags = [str(tag).strip() for tag in (op.get("tags") or []) if str(tag).strip()]
@@ -927,8 +932,7 @@ class HeadlessGenerationService:
                 if fresh:
                     joined = ", ".join(fresh)
                     negative = f"{negative}, {joined}" if negative.strip() else joined
-        params["negative_prompt"] = negative
-        params["_conditional_negative_applied"] = True
+        return negative
 
     def _conditional_negative_ops(self, prompt_run_id: str) -> list[dict[str, Any]]:
         if not prompt_run_id:
@@ -971,6 +975,11 @@ class HeadlessGenerationService:
             or params.get("requestId")
             or ""
         )
+        # A manually edited prompt no longer belongs to the previous Random run.
+        # Evaluate only neg actions on this request, never replay the main pipeline.
+        from core.conditional_prompt_runtime import ConditionalPromptHeadlessHook
+
+        negative_ops = ConditionalPromptHeadlessHook(self.context).direct_negative_ops(params)
         run = starter(
             source="direct_generation",
             source_row=source_row,
@@ -984,6 +993,8 @@ class HeadlessGenerationService:
             metadata={
                 "prompt_source": "direct_generation",
                 "api_mode": params.get("api_mode", ""),
+                "conditional_negative_ops": negative_ops,
+                "conditional_evaluation_scope": "request_negative_only",
             },
         )
         return run.prompt_run_id

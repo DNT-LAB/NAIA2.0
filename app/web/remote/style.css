@@ -11077,6 +11077,16 @@ body.resizing-result-info {
 }
 /* Quick Preset 검색창. **제목 바로 옆**(왼쪽 정렬)에 앉는다 — 오른쪽 끝으로
    밀어 두면 제목과 멀어져 무엇을 검색하는 칸인지 읽히지 않는다(사용자 지정). */
+/* Saved preset browsing is independent of the active prompt draft. */
+#pePresetManagePanel { width: min(520px, calc(100vw - 24px)); }
+.pe-preset-browser { display: grid; gap: 6px; min-width: 0; }
+.pe-preset-browser select { width: 100%; min-height: 78px; }
+.pe-preset-hint { margin: 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.pe-preset-detail-field { margin-top: 8px; }
+.pe-preset-detail-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 11px; }
+.pe-preset-detail-label small { color: var(--text-dim); font-weight: normal; }
+.pe-preset-detail-field textarea { width: 100%; resize: vertical; min-height: 54px; max-height: 240px; user-select: text; }
+
 .pe-preset-search {
   margin-left: 10px; vertical-align: middle;
   width: 140px; padding: 3px 7px; border-radius: 6px;

@@ -1194,6 +1194,8 @@ export function createConditionalPromptPanel({
     const sample = result.sample || {};
     const lines = [
       `[시뮬레이션 성공] 매칭 ${Number(result.matched_count || 0)}개`,
+      `검색 샘플 테스트 · 모듈 ON 가정 · max_passes=${result.engine_options?.max_passes ?? 1} · stop_on_match=${!!result.engine_options?.stop_on_match}`,
+      '수동 Generate는 현재 입력에서 neg 규칙만 평가합니다. 테스트 샘플과 조건이 다를 수 있습니다.',
     ];
     if (sample.rating || sample.character || sample.artist) {
       lines.push(`샘플: rating=${sample.rating || '-'} / character=${sample.character || '-'} / artist=${sample.artist || '-'}`);
@@ -1208,6 +1210,8 @@ export function createConditionalPromptPanel({
       lines.push('', '[최종 프롬프트]');
       lines.push(String(result.final_prompt));
     }
+    lines.push('', '[네거티브 적용 전]', String(result.negative_before || '(비어 있음)'),
+      '[네거티브 적용 후]', String(result.negative_after || '(비어 있음)'));
     return lines.join('\n');
   }
 

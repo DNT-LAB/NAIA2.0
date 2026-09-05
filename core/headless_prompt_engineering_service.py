@@ -246,6 +246,7 @@ class HeadlessPromptEngineeringService:
         current_thumbs = preset_thumbnail_url_map(context, list(preset_options), current_mode_key)
         webui_thumbs = preset_thumbnail_url_map(context, list(webui_presets), "WEBUI")
         payload = {
+            "api_mode": current_mode_key,
             "preset": state["current_preset"],
             "preset_options": preset_options,
             "preset_summaries": [preset_summary(name, thumbnails=current_thumbs) for name in preset_options],
@@ -354,6 +355,17 @@ class HeadlessPromptEngineeringService:
         elif key == "auto_hide":
             store.apply_settings({"auto_hide_prompt": text_value})
         elif key == "preset":
+            # The client flushes stamped edits before this explicit user switch.
+            # Persist only the departing module draft; generated Main is not a save.
+            if text_value not in store.preset_options():
+                return context._toast(f"프리셋을 찾을 수 없습니다: {text_value}", level="error")
+            try:
+                store.persist_active_settings()
+            except OSError as exc:
+                return [
+                    context._toast(f"현재 프리셋 저장 실패 — 전환을 취소했습니다: {exc}", level="error"),
+                    self.state(),
+                ]
             if not store.set_preset(text_value):
                 return context._toast(f"프리셋을 찾을 수 없습니다: {text_value}", level="error")
             return self._apply_preset_main_settings_response(store, text_value)

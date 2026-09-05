@@ -494,14 +494,16 @@ class HeadlessConditionalPromptService:
                     "final_prompt": None,
                     "sample": None,
                 })
-            result = self._run_simulation(dsl)
+            result = self._run_simulation(dsl, {
+                "max_passes": book.max_passes, "stop_on_match": book.stop_on_match,
+            })
             return self._state_with(simulation=result)
 
         # legacy "test"
         # ⚠️ 예전 식은 `str(A if cond else B or "")` 이라 우선순위가 어긋나 있었다 -
         #    v2 인데 `rules_v2` 가 비어 있으면 `str(None)` = **문자열 "None"** 이
         #    DSL 로 파싱됐다. 헬퍼 한 곳으로 모은다.
-        result = self._run_simulation(self._active_rules(settings))
+        result = self._run_simulation(self._active_rules(settings), self._active_engine_options(settings))
         self._last_log = self._format_sim_log(result)
         return self.state()
 
@@ -510,6 +512,9 @@ class HeadlessConditionalPromptService:
         if not result.get("ok"):
             return f"=== 시뮬레이션 실패 ===\nError: {result.get('error') or '알 수 없는 오류'}"
         lines = [f"=== 시뮬레이션 성공 — 매칭 {int(result.get('matched_count') or 0)}개 ==="]
+        options = result.get("engine_options") or {}
+        lines.append(f"검색 샘플 테스트 · 모듈 ON 가정 · max_passes={options.get('max_passes', 1)} · stop_on_match={options.get('stop_on_match', False)}")
+        lines.append("수동 Generate는 현재 입력에서 neg 규칙만 평가합니다. 테스트 샘플과 조건이 다를 수 있습니다.")
         sample = result.get("sample") or {}
         if sample:
             lines.append(
@@ -521,9 +526,16 @@ class HeadlessConditionalPromptService:
         if result.get("final_prompt"):
             lines.append("")
             lines.append(str(result["final_prompt"]))
+        lines.extend(["", "[네거티브 적용 전]", str(result.get("negative_before") or "(비어 있음)"),
+                      "[네거티브 적용 후]", str(result.get("negative_after") or "(비어 있음)")])
         return "\n".join(lines)
 
-    def _run_simulation(self, dsl_text: str) -> dict[str, Any]:
+    def _run_simulation(self, dsl_text: str, engine_options: dict[str, Any] | None = None) -> dict[str, Any]:
+        from core.conditional_prompt_settings import normalize_conditional_engine_options
+        from core.headless_generation_service import HeadlessGenerationService
+
+        options = normalize_conditional_engine_options(engine_options or {})
+        base_negative = str(getattr(self.context, "negative_prompt_text", "") or "")
         result: dict[str, Any] = {
             "ok": False,
             "error": None,
@@ -531,6 +543,11 @@ class HeadlessConditionalPromptService:
             "matched_count": 0,
             "final_prompt": None,
             "sample": None,
+            "engine_options": options,
+            "forced_enabled": True,
+            "negative_before": base_negative,
+            "negative_after": base_negative,
+            "conditional_negative_ops": [],
         }
         text = str(dsl_text or "").strip()
         if not text:
@@ -565,11 +582,16 @@ class HeadlessConditionalPromptService:
         saved_recorder = getattr(context, "session_cond_simulate", None)
         recorder: list[str] = []
         try:
-            context.session_cond_override = {"enabled": True, "rules": text}
+            context.session_cond_override = {"enabled": True, "rules": text, "engine_options": options}
             context.session_cond_simulate = recorder
-            final = service.generate_instant_source_silent(sample_row, settings)
+            generated = service.generate_instant_source_result_silent(sample_row, settings)
+            if generated.error or generated.context is None:
+                raise RuntimeError(generated.error or "시뮬레이션 결과가 없습니다.")
+            ops = generated.context.metadata.get("conditional_negative_ops") or []
             result["ok"] = True
-            result["final_prompt"] = final
+            result["final_prompt"] = generated.final_prompt
+            result["conditional_negative_ops"] = ops
+            result["negative_after"] = HeadlessGenerationService.merge_negative_ops(base_negative, ops)
             matched = [r for r in recorder if r]
             result["matched_rule_texts"] = matched
             result["matched_count"] = len(set(matched))

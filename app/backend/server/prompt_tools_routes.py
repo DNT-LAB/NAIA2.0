@@ -551,6 +551,45 @@ def register_prompt_tools_routes(
             headers=_no_cache_headers(),
         )
 
+    @app.get("/api/prompt-engineering/preset-detail")
+    async def api_prompt_engineering_preset_detail(name: str = "", mode: str = ""):
+        from core.prompt_engineering_settings import (
+            list_preset_names, read_preset_data, sanitize_preset_name,
+        )
+
+        mode_key = mode.upper()
+        if (mode_key not in PROMPT_ENGINEERING_PRESET_MODES or not name
+                or name != sanitize_preset_name(name) or name == "*randomized"
+                or name.endswith(".hires")):
+            return JSONResponse({"error": "유효한 모드와 프리셋 이름이 필요합니다."}, status_code=400)
+        save_root = session_context.runtime_paths.save_dir
+
+        def read_detail():
+            # These readers neither initialize a store nor create directories.
+            if name not in list_preset_names(mode_key, save_root=save_root):
+                return None
+            data = read_preset_data(name, mode_key, save_root=save_root)
+            if not data:
+                raise ValueError("프리셋 내용을 읽을 수 없습니다. 파일을 확인하세요.")
+            module = data.get("module_settings") or {}
+            main = data.get("main_settings") or {}
+            def field(section, key):
+                value = section.get(key) if isinstance(section, dict) else None
+                return value if isinstance(value, str) else None
+            return {"name": name, "mode": mode_key, "fields": {
+                "prefix": field(module, "pre_prompt"), "postfix": field(module, "post_prompt"),
+                "main": field(main, "prompt"), "negative": field(main, "negative_prompt"),
+                "auto_hide": field(module, "auto_hide_prompt"),
+            }}
+
+        try:
+            detail = await run_in_thread(read_detail)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422, headers=_no_cache_headers())
+        if detail is None:
+            return JSONResponse({"error": "프리셋을 찾을 수 없습니다."}, status_code=404, headers=_no_cache_headers())
+        return JSONResponse(detail, headers=_no_cache_headers())
+
     @app.post("/api/prompt-engineering/preset-thumbnail/upload")
     async def api_prompt_engineering_preset_thumbnail_upload(req: Request, name: str = "", mode: str = ""):
         try:

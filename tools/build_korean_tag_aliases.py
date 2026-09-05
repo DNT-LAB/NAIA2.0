@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from core.tag_knowledge import has_hangul, normalize_tag_key as norm
 from core.kr_tag_loader import load_kr_tag_records
 from core.llm_search_index import LLMSearchIndex
+from tools.korean_translation_policy import exclusion, load_policy
 
 
 def keyword_forms(record):
@@ -47,7 +48,7 @@ def candidates(tag, rules):
         yield alias, "direct:" + tag
     if tag in nouns and tag not in excluded and tag not in rules.get("excluded_bare_nouns", []):
         yield nouns[tag], "noun:" + tag
-    for kind in ("colors", "patterns", "materials", "states", "appearance", "size"):
+    for kind in ("colors", "patterns", "materials", "states", "appearance", "size", "garment_states"):
         for prefix, translations in rules[kind].items():
             if not tag.startswith(prefix + " "):
                 continue
@@ -73,12 +74,23 @@ def candidates(tag, rules):
     match = re.fullmatch(r"([2-9]|1[0-9]) (.+)", tag)
     if match and match[2] in groups["counts"]:
         yield match[1] + "개의 " + nouns[match[2]], "count:" + match[1] + "+noun:" + match[2]
+    for subject, ko_subject in rules.get('contact_subjects', {}).items():
+        for owner, ko_owner in rules['contact_owners'].items():
+            prefix = subject + ' on ' + owner
+            if tag.startswith(prefix) and (part := tag[len(prefix):]) in rules['contact_nouns']:
+                scope = '자기 ' if not owner and tag in rules.get('contact_self_tags', []) else ko_owner
+                yield scope + nouns[part] + '에 ' + ko_subject + '을 댐', f'contact:{subject}+{owner}{part}'
+    for state, ko_state in rules.get('limb_states', {}).items():
+        prefix = state + ' '
+        if tag.startswith(prefix) and (part := tag[len(prefix):]) in groups.get('limbs', []):
+            plural = part in ('arms', 'legs', 'hands', 'feet', 'knees', 'fingers', 'ears')
+            count = '두 개 이상의 ' if plural else '한쪽 '
+            yield ko_state + ' ' + count + nouns[part], f'limb_state:{state}+{part}'
 
 
-_UNUSABLE = re.compile(r"더 이상 사용|사용하지 (?:말|마)|모호한 태그|애매한 태그|태그는 .{0,80}(?:이동|폐기)|deprecated|ambiguous tag", re.I)
-
-
-def build(raw, rules):
+def build(raw, rules, reviewed=None, policy=None):
+    policy = policy if policy is not None else load_policy()
+    reviewed = reviewed or {}
     records = corpus(raw)
     eligible = {row.tag for row in LLMSearchIndex.from_raw_tag_records(raw)._recs}
     covered = {tag for tag, rows in records.items() if any(list(keyword_forms(r)) for r in rows)}
@@ -90,12 +102,22 @@ def build(raw, rules):
     proposed = defaultdict(dict)
     excluded = []
     for tag in sorted(eligible):
-        if tag in covered and tag not in rules["direct"]:
+        if tag in covered and tag not in rules["direct"] and tag not in reviewed:
             continue
-        if any(_UNUSABLE.search(str(row.get("description") or "")) for row in records[tag]):
-            excluded.append({"tag": tag, "reason": "unusable_description"})
+        reason = exclusion(tag, records[tag], policy)
+        if reason:
+            excluded.append({"tag": tag, **reason})
             continue
-        for alias, basis in candidates(tag, rules):
+        evidence = reviewed.get(tag)
+        extras = []
+        if evidence:
+            if (evidence.get('status') != 'reviewed_lexical' or not evidence.get('definition') or
+                    not evidence.get('source') or not evidence.get('aliases')):
+                raise ValueError(f'Unreviewed or evidence-free translation: {tag}')
+            extras = [(a, 'definition_translation:' + tag) for a in evidence['aliases']]
+        # A sense-reviewed full tag overrides generic composition for that tag;
+        # e.g. hand on chest allows one OR both hands, unlike many other hand tags.
+        for alias, basis in (extras if evidence else candidates(tag, rules)):
             if not has_hangul(alias):
                 raise ValueError(f"Non-Korean rule for {tag}: {alias}")
             proposed[tag].setdefault(norm(alias), []).append(basis)
@@ -137,9 +159,19 @@ def build(raw, rules):
     return accepted, report
 
 
+def removed_aliases(previous, current):
+    return {tag: sorted({a['text'] for a in row['aliases']} -
+                        {a['text'] for a in current.get(tag, {}).get('aliases', [])})
+            for tag, row in previous.items()
+            if {a['text'] for a in row['aliases']} -
+               {a['text'] for a in current.get(tag, {}).get('aliases', [])}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rules", type=Path, default=ROOT / "tools/korean_alias_rules.json")
+    parser.add_argument("--reviewed", type=Path, default=ROOT / "tools/korean_alias_reviewed.json")
+    parser.add_argument("--previous", type=Path, default=ROOT / "data/tag_index/korean_alias_supplement.json")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
@@ -147,11 +179,23 @@ def main():
         parser.error("Use new output paths; existing evidence/data is never overwritten")
     raw = load_kr_tag_records(include_korean_supplement=False).raw
     rules = json.loads(args.rules.read_text(encoding="utf-8"))
-    accepted, report = build(raw, rules)
+    reviewed = json.loads(args.reviewed.read_text(encoding='utf-8')) if args.reviewed.exists() else {'translations': {}}
+    accepted, report = build(raw, rules, reviewed['translations'])
+    previous = json.loads(args.previous.read_text(encoding='utf-8'))['translations'] if args.previous.exists() else {}
+    removed = removed_aliases(previous, accepted)
+    if removed:
+        raise ValueError(f'Existing aliases would disappear; resolve new rule collisions before promotion: {removed}')
+    report['previous_alias_tags'] = len(previous)
+    report['additional_alias_tags'] = len(set(accepted) - set(previous))
+    report['additional_aliases'] = sum(len(r['aliases']) for r in accepted.values()) - sum(len(r['aliases']) for r in previous.values())
+    report['removed_aliases'] = removed
     payload = {"schema_version": 1, "version": rules["version"],
                "kind": "korean_lexical_alias_supplement",
                "source": {"rules": args.rules.name, "rules_sha256": hashlib.sha256(args.rules.read_bytes()).hexdigest(),
                           "builder_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                          "reviewed_sha256": hashlib.sha256(args.reviewed.read_bytes()).hexdigest() if args.reviewed.exists() else None,
+                          "policy_sha256": hashlib.sha256(Path(__file__).with_name('korean_translation_policy.json').read_bytes()).hexdigest(),
+                          "policy_code_sha256": hashlib.sha256(Path(__file__).with_name('korean_translation_policy.py').read_bytes()).hexdigest(),
                           "corpus_sha256": hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()},
                "semantic_certified": False, "translations": accepted}
     for path, value in ((args.output, payload), (args.report, report)):

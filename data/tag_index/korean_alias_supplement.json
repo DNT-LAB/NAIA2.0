@@ -1,11 +1,14 @@
 {
   "schema_version": 1,
-  "version": "2026-09-05-v1",
+  "version": "2026-09-06-v2",
   "kind": "korean_lexical_alias_supplement",
   "source": {
     "rules": "korean_alias_rules.json",
-    "rules_sha256": "dd24353c6e544dcdc927e8380c62be73404db1f5aca6c165ba65dfc128638314",
-    "builder_sha256": "edd11e718395e409e523ffcfa110793d55071b3f206a688580cda8f6a1e40a0c",
+    "rules_sha256": "c44f7d441c00eb9f0f1da83e76a86c2a8eb5111fc4472cd546922695ef10fbf6",
+    "builder_sha256": "6f4669f6c76445944daf9002ddf42a3122592fc897c5eefc90760354b55efe0e",
+    "reviewed_sha256": "ba4333bd7ee9c8b5a7dd17fafb8da655b2ba00aa15a07113ded10f4a8896cd18",
+    "policy_sha256": "a5063ca83e70fb9970f21fe64825f1a077bcf01183d69405971713ab9939719a",
+    "policy_code_sha256": "0d8faf434562964ab40c6b919e62a764ffcba67dcce2955895b98381120a4413",
     "corpus_sha256": "478ea317dc0da63052af89952eff62085284bb440971300bb37478ade89fe5f8"
   },
   "semantic_certified": false,
@@ -420,6 +423,36 @@
         }
       ]
     },
+    "alternative fashion": {
+      "aliases": [
+        {
+          "text": "대안 패션",
+          "basis": [
+            "definition_translation:alternative fashion"
+          ]
+        }
+      ]
+    },
+    "amber eyes": {
+      "aliases": [
+        {
+          "text": "호박색 눈",
+          "basis": [
+            "definition_translation:amber eyes"
+          ]
+        }
+      ]
+    },
+    "amber sclera": {
+      "aliases": [
+        {
+          "text": "호박색 공막",
+          "basis": [
+            "colors:amber+noun:sclera"
+          ]
+        }
+      ]
+    },
     "amphibian humanoid": {
       "aliases": [
         {
@@ -453,6 +486,26 @@
           "text": "동물 수인",
           "basis": [
             "direct:anthro"
+          ]
+        }
+      ]
+    },
+    "anthro focus": {
+      "aliases": [
+        {
+          "text": "비수인과 함께 있는 수인에 초점을 둔 구도",
+          "basis": [
+            "definition_translation:anthro focus"
+          ]
+        }
+      ]
+    },
+    "anthro on anthro": {
+      "aliases": [
+        {
+          "text": "수인 사이의 연애 또는 성적 상호작용",
+          "basis": [
+            "definition_translation:anthro on anthro"
           ]
         }
       ]
@@ -773,6 +826,16 @@
           "text": "청록색 줄무늬",
           "basis": [
             "colors:aqua+noun:stripes"
+          ]
+        }
+      ]
+    },
+    "aqua suit": {
+      "aliases": [
+        {
+          "text": "청록색 정장",
+          "basis": [
+            "colors:aqua+noun:suit"
           ]
         }
       ]
@@ -1137,6 +1200,36 @@
         }
       ]
     },
+    "arms above head": {
+      "aliases": [
+        {
+          "text": "머리보다 높게 뻗은 팔",
+          "basis": [
+            "definition_translation:arms above head"
+          ]
+        }
+      ]
+    },
+    "arms bent": {
+      "aliases": [
+        {
+          "text": "두 개 이상의 팔을 팔꿈치에서 굽힘",
+          "basis": [
+            "definition_translation:arms bent"
+          ]
+        }
+      ]
+    },
+    "arms tied": {
+      "aliases": [
+        {
+          "text": "팔이 묶인",
+          "basis": [
+            "definition_translation:arms tied"
+          ]
+        }
+      ]
+    },
     "armwear": {
       "aliases": [
         {
@@ -1153,6 +1246,66 @@
           "text": "절지 동물",
           "basis": [
             "direct:arthropod"
+          ]
+        }
+      ]
+    },
+    "asian clothing": {
+      "aliases": [
+        {
+          "text": "아시아 의상",
+          "basis": [
+            "definition_translation:asian clothing"
+          ]
+        }
+      ]
+    },
+    "athletic": {
+      "aliases": [
+        {
+          "text": "탄탄한 체격",
+          "basis": [
+            "definition_translation:athletic"
+          ]
+        }
+      ]
+    },
+    "athletic anthro": {
+      "aliases": [
+        {
+          "text": "운동 체형의 수인",
+          "basis": [
+            "definition_translation:athletic anthro"
+          ]
+        }
+      ]
+    },
+    "athletic female": {
+      "aliases": [
+        {
+          "text": "탄탄한 체형의 여성",
+          "basis": [
+            "definition_translation:athletic female"
+          ]
+        }
+      ]
+    },
+    "athletic male": {
+      "aliases": [
+        {
+          "text": "운동형 체격의 남성",
+          "basis": [
+            "definition_translation:athletic male"
+          ]
+        }
+      ]
+    },
+    "avian feet": {
+      "aliases": [
+        {
+          "text": "조류의 발",
+          "basis": [
+            "definition_translation:avian feet"
           ]
         }
       ]
@@ -1217,6 +1370,36 @@
         }
       ]
     },
+    "ball tuft": {
+      "aliases": [
+        {
+          "text": "음낭 중앙 틈의 작은 털뭉치",
+          "basis": [
+            "definition_translation:ball tuft"
+          ]
+        }
+      ]
+    },
+    "bandage": {
+      "aliases": [
+        {
+          "text": "의료용 붕대",
+          "basis": [
+            "definition_translation:bandage"
+          ]
+        }
+      ]
+    },
+    "bangs": {
+      "aliases": [
+        {
+          "text": "이마를 덮는 앞머리",
+          "basis": [
+            "definition_translation:bangs"
+          ]
+        }
+      ]
+    },
     "bat humanoid": {
       "aliases": [
         {
@@ -1233,6 +1416,16 @@
           "text": "박쥐 꼬리",
           "basis": [
             "animal:bat+suffix:tail"
+          ]
+        }
+      ]
+    },
+    "bdsm": {
+      "aliases": [
+        {
+          "text": "비디에스엠",
+          "basis": [
+            "definition_translation:bdsm"
           ]
         }
       ]
@@ -1367,6 +1560,16 @@
         }
       ]
     },
+    "bell collar": {
+      "aliases": [
+        {
+          "text": "방울 달린 목줄",
+          "basis": [
+            "definition_translation:bell collar"
+          ]
+        }
+      ]
+    },
     "belly piercing": {
       "aliases": [
         {
@@ -1387,12 +1590,92 @@
         }
       ]
     },
+    "bent arm": {
+      "aliases": [
+        {
+          "text": "한쪽 팔을 팔꿈치에서 굽힘",
+          "basis": [
+            "definition_translation:bent arm"
+          ]
+        }
+      ]
+    },
+    "bent ear": {
+      "aliases": [
+        {
+          "text": "구부린 한쪽 귀",
+          "basis": [
+            "limb_state:bent+ear"
+          ]
+        }
+      ]
+    },
+    "bent knees": {
+      "aliases": [
+        {
+          "text": "구부린 두 개 이상의 무릎",
+          "basis": [
+            "limb_state:bent+knees"
+          ]
+        }
+      ]
+    },
+    "bent leg": {
+      "aliases": [
+        {
+          "text": "구부린 한쪽 다리",
+          "basis": [
+            "limb_state:bent+leg"
+          ]
+        }
+      ]
+    },
+    "bent legs": {
+      "aliases": [
+        {
+          "text": "두 개 이상의 다리를 구부림",
+          "basis": [
+            "definition_translation:bent legs"
+          ]
+        }
+      ]
+    },
+    "bent wrist": {
+      "aliases": [
+        {
+          "text": "구부린 한쪽 손목",
+          "basis": [
+            "limb_state:bent+wrist"
+          ]
+        }
+      ]
+    },
     "big claws": {
       "aliases": [
         {
           "text": "큰 발톱",
           "basis": [
             "size:big+noun:claws"
+          ]
+        }
+      ]
+    },
+    "big dom small sub": {
+      "aliases": [
+        {
+          "text": "성적 관계에서 큰 지배역과 작은 복종역",
+          "basis": [
+            "definition_translation:big dom small sub"
+          ]
+        }
+      ]
+    },
+    "big ears": {
+      "aliases": [
+        {
+          "text": "폭이 넓고 큰 귀",
+          "basis": [
+            "definition_translation:big ears"
           ]
         }
       ]
@@ -1423,6 +1706,26 @@
           "text": "큰 다리",
           "basis": [
             "size:big+noun:legs"
+          ]
+        }
+      ]
+    },
+    "big muscles": {
+      "aliases": [
+        {
+          "text": "크고 뚜렷한 근육",
+          "basis": [
+            "definition_translation:big muscles"
+          ]
+        }
+      ]
+    },
+    "big pecs": {
+      "aliases": [
+        {
+          "text": "큰 대흉근",
+          "basis": [
+            "definition_translation:big pecs"
           ]
         }
       ]
@@ -1833,6 +2136,22 @@
         }
       ]
     },
+    "black tabard": {
+      "aliases": [
+        {
+          "text": "검은 타바드",
+          "basis": [
+            "colors:black+noun:tabard"
+          ]
+        },
+        {
+          "text": "검정색 타바드",
+          "basis": [
+            "colors:black+noun:tabard"
+          ]
+        }
+      ]
+    },
     "black teeth": {
       "aliases": [
         {
@@ -2117,6 +2436,22 @@
           "text": "파란색 손",
           "basis": [
             "colors:blue+noun:hands"
+          ]
+        }
+      ]
+    },
+    "blue happi": {
+      "aliases": [
+        {
+          "text": "파란 핫피",
+          "basis": [
+            "colors:blue+noun:happi"
+          ]
+        },
+        {
+          "text": "파란색 핫피",
+          "basis": [
+            "colors:blue+noun:happi"
           ]
         }
       ]
@@ -2425,12 +2760,82 @@
         }
       ]
     },
+    "blurred background": {
+      "aliases": [
+        {
+          "text": "흐릿한 배경",
+          "basis": [
+            "definition_translation:blurred background"
+          ]
+        }
+      ]
+    },
     "boar tail": {
       "aliases": [
         {
           "text": "멧돼지 꼬리",
           "basis": [
             "animal:boar+suffix:tail"
+          ]
+        }
+      ]
+    },
+    "body part in ass": {
+      "aliases": [
+        {
+          "text": "신체 부위의 항문 삽입",
+          "basis": [
+            "definition_translation:body part in ass"
+          ]
+        }
+      ]
+    },
+    "bottom heavy": {
+      "aliases": [
+        {
+          "text": "상체보다 하체가 유난히 큰 체형",
+          "basis": [
+            "definition_translation:bottom heavy"
+          ]
+        }
+      ]
+    },
+    "bottomless anthro": {
+      "aliases": [
+        {
+          "text": "상의는 입고 하의와 아래 속옷은 없는 수인",
+          "basis": [
+            "definition_translation:bottomless anthro"
+          ]
+        }
+      ]
+    },
+    "bottomless female": {
+      "aliases": [
+        {
+          "text": "상의는 입고 하의와 아래 속옷은 없는 여성",
+          "basis": [
+            "definition_translation:bottomless female"
+          ]
+        }
+      ]
+    },
+    "bottomless male": {
+      "aliases": [
+        {
+          "text": "상의는 입고 하의와 아래 속옷은 없는 남성",
+          "basis": [
+            "definition_translation:bottomless male"
+          ]
+        }
+      ]
+    },
+    "bottomwear down": {
+      "aliases": [
+        {
+          "text": "허벅지 아래로 내려간 하의",
+          "basis": [
+            "definition_translation:bottomwear down"
           ]
         }
       ]
@@ -2451,6 +2856,26 @@
           "text": "소과 동물형 인간",
           "basis": [
             "animal:bovid+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "bovine": {
+      "aliases": [
+        {
+          "text": "소아과 동물",
+          "basis": [
+            "definition_translation:bovine"
+          ]
+        }
+      ]
+    },
+    "bow ribbon": {
+      "aliases": [
+        {
+          "text": "리본 매듭",
+          "basis": [
+            "definition_translation:bow ribbon"
           ]
         }
       ]
@@ -2491,6 +2916,16 @@
           "text": "갈색 반다나",
           "basis": [
             "colors:brown+noun:bandana"
+          ]
+        }
+      ]
+    },
+    "brown bandeau": {
+      "aliases": [
+        {
+          "text": "갈색 반도형 상의",
+          "basis": [
+            "colors:brown+noun:bandeau"
           ]
         }
       ]
@@ -2745,6 +3180,16 @@
         }
       ]
     },
+    "brown tabard": {
+      "aliases": [
+        {
+          "text": "갈색 타바드",
+          "basis": [
+            "colors:brown+noun:tabard"
+          ]
+        }
+      ]
+    },
     "brown umbrella": {
       "aliases": [
         {
@@ -2811,6 +3256,16 @@
           "text": "낙타 꼬리",
           "basis": [
             "animal:camel+suffix:tail"
+          ]
+        }
+      ]
+    },
+    "camel toe": {
+      "aliases": [
+        {
+          "text": "옷 위로 드러난 외음부 윤곽",
+          "basis": [
+            "definition_translation:camel toe"
           ]
         }
       ]
@@ -3085,6 +3540,16 @@
         }
       ]
     },
+    "canine": {
+      "aliases": [
+        {
+          "text": "개아과 동물",
+          "basis": [
+            "definition_translation:canine"
+          ]
+        }
+      ]
+    },
     "canis": {
       "aliases": [
         {
@@ -3095,12 +3560,32 @@
         }
       ]
     },
+    "caprine": {
+      "aliases": [
+        {
+          "text": "염소아과 동물",
+          "basis": [
+            "definition_translation:caprine"
+          ]
+        }
+      ]
+    },
     "cat humanoid": {
       "aliases": [
         {
           "text": "고양이형 인간",
           "basis": [
             "animal:cat+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "censor bar": {
+      "aliases": [
+        {
+          "text": "검열 막대",
+          "basis": [
+            "definition_translation:censor bar"
           ]
         }
       ]
@@ -3141,6 +3626,16 @@
           "text": "체커보드 무늬 애스콧 타이",
           "basis": [
             "patterns:checkered+noun:ascot"
+          ]
+        }
+      ]
+    },
+    "checkered bandeau": {
+      "aliases": [
+        {
+          "text": "체커보드 무늬 반도형 상의",
+          "basis": [
+            "patterns:checkered+noun:bandeau"
           ]
         }
       ]
@@ -3390,7 +3885,8 @@
         {
           "text": "볼 털뭉치",
           "basis": [
-            "body:cheek+suffix:tuft"
+            "body:cheek+suffix:tuft",
+            "noun:cheek tuft"
           ]
         }
       ]
@@ -3435,6 +3931,26 @@
         }
       ]
     },
+    "christmas clothing": {
+      "aliases": [
+        {
+          "text": "크리스마스 의상",
+          "basis": [
+            "definition_translation:christmas clothing"
+          ]
+        }
+      ]
+    },
+    "christmas headwear": {
+      "aliases": [
+        {
+          "text": "크리스마스용 머리 착용물",
+          "basis": [
+            "definition_translation:christmas headwear"
+          ]
+        }
+      ]
+    },
     "clothed": {
       "aliases": [
         {
@@ -3461,6 +3977,96 @@
           "text": "착용 의류",
           "basis": [
             "direct:clothing"
+          ]
+        }
+      ]
+    },
+    "clothing pull": {
+      "aliases": [
+        {
+          "text": "옷을 잡아당김",
+          "basis": [
+            "definition_translation:clothing pull"
+          ]
+        }
+      ]
+    },
+    "cloven hooves": {
+      "aliases": [
+        {
+          "text": "갈라진 발굽",
+          "basis": [
+            "definition_translation:cloven hooves"
+          ]
+        }
+      ]
+    },
+    "colored nails": {
+      "aliases": [
+        {
+          "text": "색깔 있는 손톱",
+          "basis": [
+            "definition_translation:colored nails"
+          ]
+        }
+      ]
+    },
+    "convenient censorship": {
+      "aliases": [
+        {
+          "text": "앞쪽 사물이나 신체로 가리는 검열",
+          "basis": [
+            "definition_translation:convenient censorship"
+          ]
+        }
+      ]
+    },
+    "countershade face": {
+      "aliases": [
+        {
+          "text": "얼굴 아랫부분의 대비색 무늬",
+          "basis": [
+            "definition_translation:countershade face"
+          ]
+        }
+      ]
+    },
+    "countershade feet": {
+      "aliases": [
+        {
+          "text": "발의 다른 부분과 색이 다른 발바닥",
+          "basis": [
+            "definition_translation:countershade feet"
+          ]
+        }
+      ]
+    },
+    "countershade fur": {
+      "aliases": [
+        {
+          "text": "털의 일부 영역에 있는 대비색 무늬",
+          "basis": [
+            "definition_translation:countershade fur"
+          ]
+        }
+      ]
+    },
+    "countershade tail": {
+      "aliases": [
+        {
+          "text": "꼬리 아랫면의 대비색 무늬",
+          "basis": [
+            "definition_translation:countershade tail"
+          ]
+        }
+      ]
+    },
+    "countershade torso": {
+      "aliases": [
+        {
+          "text": "몸통 아랫부분의 대비색 무늬",
+          "basis": [
+            "definition_translation:countershade torso"
           ]
         }
       ]
@@ -3505,6 +4111,86 @@
         }
       ]
     },
+    "cropped cardigan": {
+      "aliases": [
+        {
+          "text": "짧게 재단한 카디건",
+          "basis": [
+            "garment_states:cropped+noun:cardigan"
+          ]
+        }
+      ]
+    },
+    "cropped coat": {
+      "aliases": [
+        {
+          "text": "짧게 재단한 코트",
+          "basis": [
+            "garment_states:cropped+noun:coat"
+          ]
+        }
+      ]
+    },
+    "cropped kimono": {
+      "aliases": [
+        {
+          "text": "짧게 재단한 기모노",
+          "basis": [
+            "garment_states:cropped+noun:kimono"
+          ]
+        }
+      ]
+    },
+    "cropped tank top": {
+      "aliases": [
+        {
+          "text": "짧게 재단한 탱크톱",
+          "basis": [
+            "garment_states:cropped+noun:tank top"
+          ]
+        }
+      ]
+    },
+    "cropped topwear": {
+      "aliases": [
+        {
+          "text": "짧게 재단한 상의",
+          "basis": [
+            "garment_states:cropped+noun:topwear"
+          ]
+        }
+      ]
+    },
+    "crossed feet": {
+      "aliases": [
+        {
+          "text": "교차한 두 개 이상의 발",
+          "basis": [
+            "limb_state:crossed+feet"
+          ]
+        }
+      ]
+    },
+    "crossed hands": {
+      "aliases": [
+        {
+          "text": "교차한 두 개 이상의 손",
+          "basis": [
+            "limb_state:crossed+hands"
+          ]
+        }
+      ]
+    },
+    "crossed knees": {
+      "aliases": [
+        {
+          "text": "교차한 두 개 이상의 무릎",
+          "basis": [
+            "limb_state:crossed+knees"
+          ]
+        }
+      ]
+    },
     "crow humanoid": {
       "aliases": [
         {
@@ -3521,6 +4207,76 @@
           "text": "갑각류형 인간",
           "basis": [
             "animal:crustacean+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "curling toes": {
+      "aliases": [
+        {
+          "text": "발가락을 오므림",
+          "basis": [
+            "definition_translation:curling toes"
+          ]
+        }
+      ]
+    },
+    "curved horn": {
+      "aliases": [
+        {
+          "text": "굽은 뿔",
+          "basis": [
+            "definition_translation:curved horn"
+          ]
+        }
+      ]
+    },
+    "curvy figure": {
+      "aliases": [
+        {
+          "text": "굴곡진 체형",
+          "basis": [
+            "definition_translation:curvy figure"
+          ]
+        }
+      ]
+    },
+    "cute fangs": {
+      "aliases": [
+        {
+          "text": "귀여운 덧니",
+          "basis": [
+            "definition_translation:cute fangs"
+          ]
+        }
+      ]
+    },
+    "dark blue hair": {
+      "aliases": [
+        {
+          "text": "짙은 파란색 머리카락",
+          "basis": [
+            "colors:dark blue+noun:hair"
+          ]
+        }
+      ]
+    },
+    "dark green hair": {
+      "aliases": [
+        {
+          "text": "짙은 초록색 머리카락",
+          "basis": [
+            "colors:dark green+noun:hair"
+          ]
+        }
+      ]
+    },
+    "dark red hair": {
+      "aliases": [
+        {
+          "text": "짙은 빨간색 머리카락",
+          "basis": [
+            "colors:dark red+noun:hair"
           ]
         }
       ]
@@ -3625,6 +4381,46 @@
         }
       ]
     },
+    "detailed bulge": {
+      "aliases": [
+        {
+          "text": "상세하게 묘사된 성기 윤곽",
+          "basis": [
+            "definition_translation:detailed bulge"
+          ]
+        }
+      ]
+    },
+    "dialogue": {
+      "aliases": [
+        {
+          "text": "등장인물의 대사",
+          "basis": [
+            "definition_translation:dialogue"
+          ]
+        }
+      ]
+    },
+    "different sound effects": {
+      "aliases": [
+        {
+          "text": "서로 다른 효과음",
+          "basis": [
+            "definition_translation:different sound effects"
+          ]
+        }
+      ]
+    },
+    "digit ring": {
+      "aliases": [
+        {
+          "text": "손가락/발가락 반지",
+          "basis": [
+            "definition_translation:digit ring"
+          ]
+        }
+      ]
+    },
     "dinosaur humanoid": {
       "aliases": [
         {
@@ -3641,6 +4437,26 @@
           "text": "공룡 그림 무늬",
           "basis": [
             "animal:dinosaur+suffix:print"
+          ]
+        }
+      ]
+    },
+    "dipstick ears": {
+      "aliases": [
+        {
+          "text": "끝의 색이 다른 귀",
+          "basis": [
+            "definition_translation:dipstick ears"
+          ]
+        }
+      ]
+    },
+    "dipstick tail": {
+      "aliases": [
+        {
+          "text": "끝의 색이 다른 꼬리",
+          "basis": [
+            "definition_translation:dipstick tail"
           ]
         }
       ]
@@ -3745,6 +4561,26 @@
         }
       ]
     },
+    "duo focus": {
+      "aliases": [
+        {
+          "text": "두 명에게 집중된 구도",
+          "basis": [
+            "definition_translation:duo focus"
+          ]
+        }
+      ]
+    },
+    "ear fins": {
+      "aliases": [
+        {
+          "text": "귀 지느러미",
+          "basis": [
+            "noun:ear fins"
+          ]
+        }
+      ]
+    },
     "ear markings": {
       "aliases": [
         {
@@ -3755,12 +4591,52 @@
         }
       ]
     },
+    "ear ring": {
+      "aliases": [
+        {
+          "text": "귀의 링 피어싱",
+          "basis": [
+            "definition_translation:ear ring"
+          ]
+        }
+      ]
+    },
     "ear tuft": {
       "aliases": [
         {
           "text": "귀 털뭉치",
           "basis": [
             "body:ear+suffix:tuft"
+          ]
+        }
+      ]
+    },
+    "east asian clothing": {
+      "aliases": [
+        {
+          "text": "동아시아 의상",
+          "basis": [
+            "definition_translation:east asian clothing"
+          ]
+        }
+      ]
+    },
+    "elbow tuft": {
+      "aliases": [
+        {
+          "text": "팔꿈치 털뭉치",
+          "basis": [
+            "definition_translation:elbow tuft"
+          ]
+        }
+      ]
+    },
+    "ellipsis": {
+      "aliases": [
+        {
+          "text": "생략을 뜻하는 말줄임표",
+          "basis": [
+            "definition_translation:ellipsis"
           ]
         }
       ]
@@ -3785,12 +4661,72 @@
         }
       ]
     },
+    "equine": {
+      "aliases": [
+        {
+          "text": "말아과 동물",
+          "basis": [
+            "definition_translation:equine"
+          ]
+        }
+      ]
+    },
     "exclamation point": {
       "aliases": [
         {
           "text": "느낌표 기호",
           "basis": [
             "direct:exclamation point"
+          ]
+        }
+      ]
+    },
+    "exposure variation": {
+      "aliases": [
+        {
+          "text": "노출 정도가 다른 그림 변형본",
+          "basis": [
+            "definition_translation:exposure variation"
+          ]
+        }
+      ]
+    },
+    "extreme size difference": {
+      "aliases": [
+        {
+          "text": "극단적인 크기 차이",
+          "basis": [
+            "definition_translation:extreme size difference"
+          ]
+        }
+      ]
+    },
+    "eye patch": {
+      "aliases": [
+        {
+          "text": "한쪽 눈을 가리는 안대",
+          "basis": [
+            "definition_translation:eye patch"
+          ]
+        }
+      ]
+    },
+    "eye scar": {
+      "aliases": [
+        {
+          "text": "눈을 가로지르는 흉터",
+          "basis": [
+            "definition_translation:eye scar"
+          ]
+        }
+      ]
+    },
+    "eyebrow through hair": {
+      "aliases": [
+        {
+          "text": "머리카락을 투과해 보이는 눈썹",
+          "basis": [
+            "definition_translation:eyebrow through hair"
           ]
         }
       ]
@@ -3835,12 +4771,42 @@
         }
       ]
     },
+    "faceless human": {
+      "aliases": [
+        {
+          "text": "얼굴이 가려지거나 화면 밖인 인간",
+          "basis": [
+            "definition_translation:faceless human"
+          ]
+        }
+      ]
+    },
     "facial markings": {
       "aliases": [
         {
           "text": "얼굴 무늬",
           "basis": [
             "noun:facial markings"
+          ]
+        }
+      ]
+    },
+    "facial piercing": {
+      "aliases": [
+        {
+          "text": "얼굴 피어싱",
+          "basis": [
+            "definition_translation:facial piercing"
+          ]
+        }
+      ]
+    },
+    "facial scar": {
+      "aliases": [
+        {
+          "text": "얼굴의 흉터",
+          "basis": [
+            "definition_translation:facial scar"
           ]
         }
       ]
@@ -3955,6 +4921,16 @@
         }
       ]
     },
+    "feline": {
+      "aliases": [
+        {
+          "text": "고양이아과 동물",
+          "basis": [
+            "definition_translation:feline"
+          ]
+        }
+      ]
+    },
     "felis": {
       "aliases": [
         {
@@ -3981,12 +4957,92 @@
         }
       ]
     },
+    "female focus": {
+      "aliases": [
+        {
+          "text": "여러 인물 중 여성이 중심인 구도",
+          "basis": [
+            "definition_translation:female focus"
+          ]
+        }
+      ]
+    },
+    "female on top": {
+      "aliases": [
+        {
+          "text": "다른 인물 위에 있는 여성",
+          "basis": [
+            "definition_translation:female on top"
+          ]
+        }
+      ]
+    },
+    "fin": {
+      "aliases": [
+        {
+          "text": "몸에 달린 지느러미",
+          "basis": [
+            "definition_translation:fin"
+          ]
+        }
+      ]
+    },
+    "fin frill": {
+      "aliases": [
+        {
+          "text": "지느러미 막",
+          "basis": [
+            "noun:fin frill"
+          ]
+        }
+      ]
+    },
+    "finger claws": {
+      "aliases": [
+        {
+          "text": "손가락 끝의 동물형 발톱",
+          "basis": [
+            "definition_translation:finger claws"
+          ]
+        }
+      ]
+    },
+    "fingers": {
+      "aliases": [
+        {
+          "text": "손의 손가락",
+          "basis": [
+            "definition_translation:fingers"
+          ]
+        }
+      ]
+    },
     "fish humanoid": {
       "aliases": [
         {
           "text": "물고기형 인간",
           "basis": [
             "animal:fish+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "fishnet clothing": {
+      "aliases": [
+        {
+          "text": "망사 의상",
+          "basis": [
+            "definition_translation:fishnet clothing"
+          ]
+        }
+      ]
+    },
+    "fishnet topwear": {
+      "aliases": [
+        {
+          "text": "그물망 상의",
+          "basis": [
+            "noun:fishnet topwear"
           ]
         }
       ]
@@ -4001,12 +5057,32 @@
         }
       ]
     },
+    "flat chested": {
+      "aliases": [
+        {
+          "text": "유방 돌출이 없는 평평한 가슴",
+          "basis": [
+            "definition_translation:flat chested"
+          ]
+        }
+      ]
+    },
     "floral clothing": {
       "aliases": [
         {
           "text": "꽃무늬 의복",
           "basis": [
             "patterns:floral+noun:clothing"
+          ]
+        }
+      ]
+    },
+    "flower in hair": {
+      "aliases": [
+        {
+          "text": "머리카락에 꽂은 꽃",
+          "basis": [
+            "definition_translation:flower in hair"
           ]
         }
       ]
@@ -4152,6 +5228,16 @@
         }
       ]
     },
+    "foot play": {
+      "aliases": [
+        {
+          "text": "발을 이용한 애무",
+          "basis": [
+            "definition_translation:foot play"
+          ]
+        }
+      ]
+    },
     "foot tuft": {
       "aliases": [
         {
@@ -4168,6 +5254,16 @@
           "text": "신발류",
           "basis": [
             "noun:footwear"
+          ]
+        }
+      ]
+    },
+    "formal": {
+      "aliases": [
+        {
+          "text": "격식 있는",
+          "basis": [
+            "definition_translation:formal"
           ]
         }
       ]
@@ -4218,6 +5314,16 @@
           "text": "프릴 달린 팔뚝 장신구",
           "basis": [
             "states:frilled+noun:armlet"
+          ]
+        }
+      ]
+    },
+    "frilled bandeau": {
+      "aliases": [
+        {
+          "text": "프릴 달린 반도형 상의",
+          "basis": [
+            "states:frilled+noun:bandeau"
           ]
         }
       ]
@@ -4444,12 +5550,62 @@
         }
       ]
     },
+    "ftg crossgender": {
+      "aliases": [
+        {
+          "text": "원래 여성인 캐릭터를 가이노모프로 재해석",
+          "basis": [
+            "definition_translation:ftg crossgender"
+          ]
+        }
+      ]
+    },
+    "fti crossgender": {
+      "aliases": [
+        {
+          "text": "원래 여성인 캐릭터를 인터섹스로 재해석",
+          "basis": [
+            "definition_translation:fti crossgender"
+          ]
+        }
+      ]
+    },
     "fully clothed": {
       "aliases": [
         {
           "text": "완전히 옷을 입은 상태",
           "basis": [
             "direct:fully clothed"
+          ]
+        }
+      ]
+    },
+    "fully inside": {
+      "aliases": [
+        {
+          "text": "다른 캐릭터 몸 안에 전신이 들어간 상태",
+          "basis": [
+            "definition_translation:fully inside"
+          ]
+        }
+      ]
+    },
+    "fur markings": {
+      "aliases": [
+        {
+          "text": "털 무늬",
+          "basis": [
+            "definition_translation:fur markings"
+          ]
+        }
+      ]
+    },
+    "furgonomics": {
+      "aliases": [
+        {
+          "text": "수인의 신체에 맞춘 물건 설계",
+          "basis": [
+            "definition_translation:furgonomics"
           ]
         }
       ]
@@ -4490,6 +5646,26 @@
           "text": "털로 덮인 꼬리",
           "basis": [
             "appearance:furry+noun:tail"
+          ]
+        }
+      ]
+    },
+    "furry-specific piercing": {
+      "aliases": [
+        {
+          "text": "수인 전용 피어싱",
+          "basis": [
+            "definition_translation:furry-specific piercing"
+          ]
+        }
+      ]
+    },
+    "glass container": {
+      "aliases": [
+        {
+          "text": "유리 용기",
+          "basis": [
+            "definition_translation:glass container"
           ]
         }
       ]
@@ -6072,6 +7248,22 @@
         }
       ]
     },
+    "green bandeau": {
+      "aliases": [
+        {
+          "text": "초록색 반도형 상의",
+          "basis": [
+            "colors:green+noun:bandeau"
+          ]
+        },
+        {
+          "text": "녹색 반도형 상의",
+          "basis": [
+            "colors:green+noun:bandeau"
+          ]
+        }
+      ]
+    },
     "green blanket": {
       "aliases": [
         {
@@ -6552,6 +7744,22 @@
         }
       ]
     },
+    "green tabard": {
+      "aliases": [
+        {
+          "text": "초록색 타바드",
+          "basis": [
+            "colors:green+noun:tabard"
+          ]
+        },
+        {
+          "text": "녹색 타바드",
+          "basis": [
+            "colors:green+noun:tabard"
+          ]
+        }
+      ]
+    },
     "green teeth": {
       "aliases": [
         {
@@ -6674,6 +7882,16 @@
           "text": "회색 반다나",
           "basis": [
             "colors:grey+noun:bandana"
+          ]
+        }
+      ]
+    },
+    "grey bandeau": {
+      "aliases": [
+        {
+          "text": "회색 반도형 상의",
+          "basis": [
+            "colors:grey+noun:bandeau"
           ]
         }
       ]
@@ -6928,6 +8146,16 @@
         }
       ]
     },
+    "grey tabard": {
+      "aliases": [
+        {
+          "text": "회색 타바드",
+          "basis": [
+            "colors:grey+noun:tabard"
+          ]
+        }
+      ]
+    },
     "grey tiara": {
       "aliases": [
         {
@@ -6998,12 +8226,402 @@
         }
       ]
     },
+    "group": {
+      "aliases": [
+        {
+          "text": "세 명 이상의 인물 집단",
+          "basis": [
+            "definition_translation:group"
+          ]
+        }
+      ]
+    },
+    "hair": {
+      "aliases": [
+        {
+          "text": "사람이나 동물의 머리카락",
+          "basis": [
+            "definition_translation:hair"
+          ]
+        }
+      ]
+    },
+    "hair over eye": {
+      "aliases": [
+        {
+          "text": "한쪽 눈을 가리는 머리카락",
+          "basis": [
+            "definition_translation:hair over eye"
+          ]
+        }
+      ]
+    },
+    "hand behind head": {
+      "aliases": [
+        {
+          "text": "머리 뒤로 한 손을 둠",
+          "basis": [
+            "definition_translation:hand behind head"
+          ]
+        }
+      ]
+    },
     "hand markings": {
       "aliases": [
         {
           "text": "손 무늬",
           "basis": [
             "body:hand+suffix:markings"
+          ]
+        }
+      ]
+    },
+    "hand on another's belly": {
+      "aliases": [
+        {
+          "text": "다른 인물의 배에 한 손을 댐",
+          "basis": [
+            "contact:hand+another's belly"
+          ]
+        }
+      ]
+    },
+    "hand on another's breast": {
+      "aliases": [
+        {
+          "text": "다른 인물의 유방에 한 손을 댐",
+          "basis": [
+            "contact:hand+another's breast"
+          ]
+        }
+      ]
+    },
+    "hand on another's foot": {
+      "aliases": [
+        {
+          "text": "다른 인물의 발에 한 손을 댐",
+          "basis": [
+            "contact:hand+another's foot"
+          ]
+        }
+      ]
+    },
+    "hand on another's forehead": {
+      "aliases": [
+        {
+          "text": "다른 인물의 이마에 한 손을 댐",
+          "basis": [
+            "contact:hand+another's forehead"
+          ]
+        }
+      ]
+    },
+    "hand on another's nape": {
+      "aliases": [
+        {
+          "text": "다른 인물의 목덜미에 한 손을 댐",
+          "basis": [
+            "contact:hand+another's nape"
+          ]
+        }
+      ]
+    },
+    "hand on another's tail": {
+      "aliases": [
+        {
+          "text": "다른 인물의 꼬리에 한 손을 댐",
+          "basis": [
+            "contact:hand+another's tail"
+          ]
+        }
+      ]
+    },
+    "hand on arm": {
+      "aliases": [
+        {
+          "text": "팔에 한 손을 댐",
+          "basis": [
+            "contact:hand+arm"
+          ]
+        }
+      ]
+    },
+    "hand on belly": {
+      "aliases": [
+        {
+          "text": "배에 손을 댐",
+          "basis": [
+            "definition_translation:hand on belly"
+          ]
+        }
+      ]
+    },
+    "hand on calf": {
+      "aliases": [
+        {
+          "text": "종아리에 한 손을 댐",
+          "basis": [
+            "contact:hand+calf"
+          ]
+        }
+      ]
+    },
+    "hand on cheek": {
+      "aliases": [
+        {
+          "text": "볼에 한 손을 댐",
+          "basis": [
+            "contact:hand+cheek"
+          ]
+        }
+      ]
+    },
+    "hand on chest": {
+      "aliases": [
+        {
+          "text": "가슴 부위에 손을 댐",
+          "basis": [
+            "definition_translation:hand on chest"
+          ]
+        }
+      ]
+    },
+    "hand on chin": {
+      "aliases": [
+        {
+          "text": "턱끝에 한 손을 댐",
+          "basis": [
+            "contact:hand+chin"
+          ]
+        }
+      ]
+    },
+    "hand on crotch": {
+      "aliases": [
+        {
+          "text": "사타구니에 한 손을 댐",
+          "basis": [
+            "contact:hand+crotch"
+          ]
+        }
+      ]
+    },
+    "hand on ear": {
+      "aliases": [
+        {
+          "text": "귀에 한 손을 댐",
+          "basis": [
+            "contact:hand+ear"
+          ]
+        }
+      ]
+    },
+    "hand on elbow": {
+      "aliases": [
+        {
+          "text": "팔꿈치에 한 손을 댐",
+          "basis": [
+            "contact:hand+elbow"
+          ]
+        }
+      ]
+    },
+    "hand on face": {
+      "aliases": [
+        {
+          "text": "얼굴에 한 손을 댐",
+          "basis": [
+            "contact:hand+face"
+          ]
+        }
+      ]
+    },
+    "hand on foot": {
+      "aliases": [
+        {
+          "text": "발에 한 손을 댐",
+          "basis": [
+            "contact:hand+foot"
+          ]
+        }
+      ]
+    },
+    "hand on hair": {
+      "aliases": [
+        {
+          "text": "머리카락에 한 손을 댐",
+          "basis": [
+            "contact:hand+hair"
+          ]
+        }
+      ]
+    },
+    "hand on hip": {
+      "aliases": [
+        {
+          "text": "자기 골반에 한 손을 댐",
+          "basis": [
+            "definition_translation:hand on hip"
+          ]
+        }
+      ]
+    },
+    "hand on knee": {
+      "aliases": [
+        {
+          "text": "무릎에 한 손을 댐",
+          "basis": [
+            "contact:hand+knee"
+          ]
+        }
+      ]
+    },
+    "hand on mouth": {
+      "aliases": [
+        {
+          "text": "입에 한 손을 댐",
+          "basis": [
+            "contact:hand+mouth"
+          ]
+        }
+      ]
+    },
+    "hand on neck": {
+      "aliases": [
+        {
+          "text": "목에 한 손을 댐",
+          "basis": [
+            "contact:hand+neck"
+          ]
+        }
+      ]
+    },
+    "hand on own back": {
+      "aliases": [
+        {
+          "text": "자기 등에 한 손을 댐",
+          "basis": [
+            "contact:hand+own back"
+          ]
+        }
+      ]
+    },
+    "hand on own belly": {
+      "aliases": [
+        {
+          "text": "자기 배에 한 손을 댐",
+          "basis": [
+            "contact:hand+own belly"
+          ]
+        }
+      ]
+    },
+    "hand on own breast": {
+      "aliases": [
+        {
+          "text": "자기 유방에 한 손을 댐",
+          "basis": [
+            "contact:hand+own breast"
+          ]
+        }
+      ]
+    },
+    "hand on own calf": {
+      "aliases": [
+        {
+          "text": "자기 종아리에 한 손을 댐",
+          "basis": [
+            "contact:hand+own calf"
+          ]
+        }
+      ]
+    },
+    "hand on own shin": {
+      "aliases": [
+        {
+          "text": "자기 정강이에 한 손을 댐",
+          "basis": [
+            "contact:hand+own shin"
+          ]
+        }
+      ]
+    },
+    "hand on own tail": {
+      "aliases": [
+        {
+          "text": "자기 꼬리에 한 손을 댐",
+          "basis": [
+            "contact:hand+own tail"
+          ]
+        }
+      ]
+    },
+    "hand on partner's head": {
+      "aliases": [
+        {
+          "text": "상대의 머리에 한 손을 댐",
+          "basis": [
+            "contact:hand+partner's head"
+          ]
+        }
+      ]
+    },
+    "hand on partner's leg": {
+      "aliases": [
+        {
+          "text": "상대의 다리에 한 손을 댐",
+          "basis": [
+            "contact:hand+partner's leg"
+          ]
+        }
+      ]
+    },
+    "hand on shin": {
+      "aliases": [
+        {
+          "text": "정강이에 한 손을 댐",
+          "basis": [
+            "contact:hand+shin"
+          ]
+        }
+      ]
+    },
+    "hand on side": {
+      "aliases": [
+        {
+          "text": "옆구리에 한 손을 댐",
+          "basis": [
+            "contact:hand+side"
+          ]
+        }
+      ]
+    },
+    "hand on tail": {
+      "aliases": [
+        {
+          "text": "꼬리에 한 손을 댐",
+          "basis": [
+            "contact:hand+tail"
+          ]
+        }
+      ]
+    },
+    "hand on torso": {
+      "aliases": [
+        {
+          "text": "몸통에 한 손을 댐",
+          "basis": [
+            "contact:hand+torso"
+          ]
+        }
+      ]
+    },
+    "hand on wrist": {
+      "aliases": [
+        {
+          "text": "손목에 한 손을 댐",
+          "basis": [
+            "contact:hand+wrist"
           ]
         }
       ]
@@ -7018,12 +8636,192 @@
         }
       ]
     },
+    "hands behind back": {
+      "aliases": [
+        {
+          "text": "등 뒤로 양손을 둠",
+          "basis": [
+            "definition_translation:hands behind back"
+          ]
+        }
+      ]
+    },
+    "hands behind head": {
+      "aliases": [
+        {
+          "text": "머리 뒤로 양손을 둠",
+          "basis": [
+            "definition_translation:hands behind head"
+          ]
+        }
+      ]
+    },
+    "hands on another's crotch": {
+      "aliases": [
+        {
+          "text": "다른 인물의 사타구니에 양손을 댐",
+          "basis": [
+            "contact:hands+another's crotch"
+          ]
+        }
+      ]
+    },
+    "hands on another's shoulder": {
+      "aliases": [
+        {
+          "text": "다른 인물의 어깨에 양손을 댐",
+          "basis": [
+            "contact:hands+another's shoulder"
+          ]
+        }
+      ]
+    },
+    "hands on another's thigh": {
+      "aliases": [
+        {
+          "text": "다른 인물의 허벅지에 양손을 댐",
+          "basis": [
+            "contact:hands+another's thigh"
+          ]
+        }
+      ]
+    },
+    "hands on back": {
+      "aliases": [
+        {
+          "text": "등에 양손을 댐",
+          "basis": [
+            "contact:hands+back"
+          ]
+        }
+      ]
+    },
+    "hands on crotch": {
+      "aliases": [
+        {
+          "text": "사타구니에 양손을 댐",
+          "basis": [
+            "contact:hands+crotch"
+          ]
+        }
+      ]
+    },
+    "hands on leg": {
+      "aliases": [
+        {
+          "text": "다리에 양손을 댐",
+          "basis": [
+            "contact:hands+leg"
+          ]
+        }
+      ]
+    },
+    "hands on neck": {
+      "aliases": [
+        {
+          "text": "목에 양손을 댐",
+          "basis": [
+            "contact:hands+neck"
+          ]
+        }
+      ]
+    },
+    "hands on own back": {
+      "aliases": [
+        {
+          "text": "자기 등에 양손을 댐",
+          "basis": [
+            "contact:hands+own back"
+          ]
+        }
+      ]
+    },
+    "hands on own belly": {
+      "aliases": [
+        {
+          "text": "자기 배에 양손을 댐",
+          "basis": [
+            "contact:hands+own belly"
+          ]
+        }
+      ]
+    },
+    "hands on own crotch": {
+      "aliases": [
+        {
+          "text": "자기 사타구니에 양손을 댐",
+          "basis": [
+            "contact:hands+own crotch"
+          ]
+        }
+      ]
+    },
+    "hands on own leg": {
+      "aliases": [
+        {
+          "text": "자기 다리에 양손을 댐",
+          "basis": [
+            "contact:hands+own leg"
+          ]
+        }
+      ]
+    },
+    "hands on own thigh": {
+      "aliases": [
+        {
+          "text": "자기 허벅지에 양손을 댐",
+          "basis": [
+            "contact:hands+own thigh"
+          ]
+        }
+      ]
+    },
+    "hands on waist": {
+      "aliases": [
+        {
+          "text": "허리에 양손을 댐",
+          "basis": [
+            "contact:hands+waist"
+          ]
+        }
+      ]
+    },
+    "hands tied": {
+      "aliases": [
+        {
+          "text": "손이나 손목을 끈 등으로 묶음",
+          "basis": [
+            "definition_translation:hands tied"
+          ]
+        }
+      ]
+    },
+    "happy trail": {
+      "aliases": [
+        {
+          "text": "치골에서 배꼽 쪽으로 이어지는 체모",
+          "basis": [
+            "definition_translation:happy trail"
+          ]
+        }
+      ]
+    },
     "hare": {
       "aliases": [
         {
           "text": "산토끼",
           "basis": [
             "noun:hare"
+          ]
+        }
+      ]
+    },
+    "hat only": {
+      "aliases": [
+        {
+          "text": "모자만 착용",
+          "basis": [
+            "definition_translation:hat only"
           ]
         }
       ]
@@ -7058,6 +8856,16 @@
         }
       ]
     },
+    "headgear only": {
+      "aliases": [
+        {
+          "text": "머리 착용 장비만 착용",
+          "basis": [
+            "definition_translation:headgear only"
+          ]
+        }
+      ]
+    },
     "headwear": {
       "aliases": [
         {
@@ -7084,6 +8892,16 @@
           "text": "하트가 인쇄된 속옷",
           "basis": [
             "patterns:heart print+noun:underwear"
+          ]
+        }
+      ]
+    },
+    "heart symbol": {
+      "aliases": [
+        {
+          "text": "하트 모양 기호",
+          "basis": [
+            "definition_translation:heart symbol"
           ]
         }
       ]
@@ -7208,6 +9026,26 @@
         }
       ]
     },
+    "holidays": {
+      "aliases": [
+        {
+          "text": "명절과 기념일",
+          "basis": [
+            "definition_translation:holidays"
+          ]
+        }
+      ]
+    },
+    "hooded swimsuit": {
+      "aliases": [
+        {
+          "text": "후드가 달린 수영복",
+          "basis": [
+            "garment_states:hooded+noun:swimsuit"
+          ]
+        }
+      ]
+    },
     "horn": {
       "aliases": [
         {
@@ -7288,6 +9126,26 @@
         }
       ]
     },
+    "huge hips": {
+      "aliases": [
+        {
+          "text": "매우 넓고 큰 골반",
+          "basis": [
+            "definition_translation:huge hips"
+          ]
+        }
+      ]
+    },
+    "huge muscles": {
+      "aliases": [
+        {
+          "text": "보디빌더 수준의 매우 큰 근육",
+          "basis": [
+            "definition_translation:huge muscles"
+          ]
+        }
+      ]
+    },
     "huge tail": {
       "aliases": [
         {
@@ -7344,6 +9202,16 @@
           "text": "인간 귀",
           "basis": [
             "animal:human+suffix:ears"
+          ]
+        }
+      ]
+    },
+    "human on humanoid": {
+      "aliases": [
+        {
+          "text": "인간과 인간형 생물의 성적 상호작용",
+          "basis": [
+            "definition_translation:human on humanoid"
           ]
         }
       ]
@@ -7408,6 +9276,26 @@
         }
       ]
     },
+    "ineffective censorship": {
+      "aliases": [
+        {
+          "text": "불충분한 검열",
+          "basis": [
+            "definition_translation:ineffective censorship"
+          ]
+        }
+      ]
+    },
+    "inflatable": {
+      "aliases": [
+        {
+          "text": "공기를 채워 넣도록 만든 물체나 캐릭터",
+          "basis": [
+            "definition_translation:inflatable"
+          ]
+        }
+      ]
+    },
     "inner ear fluff": {
       "aliases": [
         {
@@ -7424,6 +9312,16 @@
           "text": "곤충형 인간",
           "basis": [
             "animal:insect+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "inside": {
+      "aliases": [
+        {
+          "text": "건물 안쪽 공간",
+          "basis": [
+            "definition_translation:inside"
           ]
         }
       ]
@@ -7628,6 +9526,26 @@
         }
       ]
     },
+    "larger female": {
+      "aliases": [
+        {
+          "text": "상대보다 큰 여성",
+          "basis": [
+            "definition_translation:larger female"
+          ]
+        }
+      ]
+    },
+    "larger male": {
+      "aliases": [
+        {
+          "text": "상대보다 큰 남성",
+          "basis": [
+            "definition_translation:larger male"
+          ]
+        }
+      ]
+    },
     "latex arm warmers": {
       "aliases": [
         {
@@ -7818,6 +9736,16 @@
         }
       ]
     },
+    "latex suit": {
+      "aliases": [
+        {
+          "text": "라텍스 정장",
+          "basis": [
+            "materials:latex+noun:suit"
+          ]
+        }
+      ]
+    },
     "latex thigh boots": {
       "aliases": [
         {
@@ -7894,6 +9822,16 @@
           "text": "라벤더색 치마",
           "basis": [
             "colors:lavender+noun:skirt"
+          ]
+        }
+      ]
+    },
+    "leashed collar": {
+      "aliases": [
+        {
+          "text": "리드줄이 연결된 목줄",
+          "basis": [
+            "definition_translation:leashed collar"
           ]
         }
       ]
@@ -8198,12 +10136,92 @@
         }
       ]
     },
+    "lidded eyes": {
+      "aliases": [
+        {
+          "text": "눈꺼풀이 자연스럽게 처져 일부 가린 눈",
+          "basis": [
+            "definition_translation:lidded eyes"
+          ]
+        }
+      ]
+    },
+    "light blue background": {
+      "aliases": [
+        {
+          "text": "연한 파란색 배경",
+          "basis": [
+            "colors:light blue+noun:background"
+          ]
+        }
+      ]
+    },
+    "light blue dress": {
+      "aliases": [
+        {
+          "text": "연한 파란색 드레스",
+          "basis": [
+            "colors:light blue+noun:dress"
+          ]
+        }
+      ]
+    },
+    "light blue hair": {
+      "aliases": [
+        {
+          "text": "연한 파란색 머리카락",
+          "basis": [
+            "colors:light blue+noun:hair"
+          ]
+        }
+      ]
+    },
+    "light blue jacket": {
+      "aliases": [
+        {
+          "text": "연한 파란색 재킷",
+          "basis": [
+            "colors:light blue+noun:jacket"
+          ]
+        }
+      ]
+    },
     "light brown hair": {
       "aliases": [
         {
           "text": "밝은 갈색 머리카락",
           "basis": [
             "direct:light brown hair"
+          ]
+        }
+      ]
+    },
+    "light green background": {
+      "aliases": [
+        {
+          "text": "연한 초록색 배경",
+          "basis": [
+            "colors:light green+noun:background"
+          ]
+        }
+      ]
+    },
+    "light green hair": {
+      "aliases": [
+        {
+          "text": "연한 초록색 머리카락",
+          "basis": [
+            "colors:light green+noun:hair"
+          ]
+        }
+      ]
+    },
+    "light purple hair": {
+      "aliases": [
+        {
+          "text": "연한 보라색 머리카락",
+          "basis": [
+            "colors:light purple+noun:hair"
           ]
         }
       ]
@@ -8324,6 +10342,82 @@
         }
       ]
     },
+    "loose dress": {
+      "aliases": [
+        {
+          "text": "헐렁한 드레스",
+          "basis": [
+            "garment_states:loose+noun:dress"
+          ]
+        }
+      ]
+    },
+    "loose footwear": {
+      "aliases": [
+        {
+          "text": "헐렁한 신발류",
+          "basis": [
+            "garment_states:loose+noun:footwear"
+          ]
+        }
+      ]
+    },
+    "loose gloves": {
+      "aliases": [
+        {
+          "text": "헐렁한 장갑",
+          "basis": [
+            "garment_states:loose+noun:gloves"
+          ]
+        }
+      ]
+    },
+    "loose kimono": {
+      "aliases": [
+        {
+          "text": "헐렁한 기모노",
+          "basis": [
+            "garment_states:loose+noun:kimono"
+          ]
+        }
+      ]
+    },
+    "loose neckerchief": {
+      "aliases": [
+        {
+          "text": "헐렁한 네커치프",
+          "basis": [
+            "garment_states:loose+noun:neckerchief"
+          ]
+        }
+      ]
+    },
+    "loose skirt": {
+      "aliases": [
+        {
+          "text": "헐렁한 치마",
+          "basis": [
+            "garment_states:loose+noun:skirt"
+          ]
+        }
+      ]
+    },
+    "love": {
+      "aliases": [
+        {
+          "text": "사랑",
+          "basis": [
+            "definition_translation:love"
+          ]
+        },
+        {
+          "text": "애정과 사랑의 표현",
+          "basis": [
+            "definition_translation:love"
+          ]
+        }
+      ]
+    },
     "lynx": {
       "aliases": [
         {
@@ -8370,6 +10464,26 @@
         }
       ]
     },
+    "male on bottom": {
+      "aliases": [
+        {
+          "text": "다른 인물 아래에 있는 남성",
+          "basis": [
+            "definition_translation:male on bottom"
+          ]
+        }
+      ]
+    },
+    "male on top": {
+      "aliases": [
+        {
+          "text": "다른 인물 위에 있는 남성",
+          "basis": [
+            "definition_translation:male on top"
+          ]
+        }
+      ]
+    },
     "mammal": {
       "aliases": [
         {
@@ -8386,6 +10500,26 @@
           "text": "포유류형 인간",
           "basis": [
             "animal:mammal+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "mature anthro": {
+      "aliases": [
+        {
+          "text": "중년 수인",
+          "basis": [
+            "definition_translation:mature anthro"
+          ]
+        }
+      ]
+    },
+    "medial ring": {
+      "aliases": [
+        {
+          "text": "음경 중간의 고리형 구조",
+          "basis": [
+            "definition_translation:medial ring"
           ]
         }
       ]
@@ -8502,6 +10636,16 @@
           "text": "금속 손목 커프스",
           "basis": [
             "materials:metal+noun:wrist cuffs"
+          ]
+        }
+      ]
+    },
+    "micro": {
+      "aliases": [
+        {
+          "text": "주변 세계에 비해 극도로 작은 캐릭터",
+          "basis": [
+            "definition_translation:micro"
           ]
         }
       ]
@@ -8632,6 +10776,16 @@
           "text": "단색 장갑",
           "basis": [
             "patterns:monotone+noun:gloves"
+          ]
+        }
+      ]
+    },
+    "monotone hair": {
+      "aliases": [
+        {
+          "text": "단색 머리카락",
+          "basis": [
+            "definition_translation:monotone hair"
           ]
         }
       ]
@@ -8896,6 +11050,66 @@
         }
       ]
     },
+    "mouth shot": {
+      "aliases": [
+        {
+          "text": "열린 입의 내부를 강조한 구도",
+          "basis": [
+            "definition_translation:mouth shot"
+          ]
+        }
+      ]
+    },
+    "mtf crossgender": {
+      "aliases": [
+        {
+          "text": "원래 남성인 캐릭터를 여성으로 재해석",
+          "basis": [
+            "definition_translation:mtf crossgender"
+          ]
+        }
+      ]
+    },
+    "multi arm": {
+      "aliases": [
+        {
+          "text": "팔이 세 개 이상인 모습",
+          "basis": [
+            "definition_translation:multi arm"
+          ]
+        }
+      ]
+    },
+    "multi ear": {
+      "aliases": [
+        {
+          "text": "귀가 세 개 이상인 모습",
+          "basis": [
+            "definition_translation:multi ear"
+          ]
+        }
+      ]
+    },
+    "multi eye": {
+      "aliases": [
+        {
+          "text": "눈이 세 개 이상이거나 다른 신체 부위에도 있는 모습",
+          "basis": [
+            "definition_translation:multi eye"
+          ]
+        }
+      ]
+    },
+    "multi limb": {
+      "aliases": [
+        {
+          "text": "해당 종의 정상 개수보다 많은 팔다리",
+          "basis": [
+            "definition_translation:multi limb"
+          ]
+        }
+      ]
+    },
     "multi tail": {
       "aliases": [
         {
@@ -9014,6 +11228,22 @@
           "text": "다색 가방",
           "basis": [
             "colors:multicolored+noun:bag"
+          ]
+        }
+      ]
+    },
+    "multicolored bandeau": {
+      "aliases": [
+        {
+          "text": "여러 색의 반도형 상의",
+          "basis": [
+            "colors:multicolored+noun:bandeau"
+          ]
+        },
+        {
+          "text": "다색 반도형 상의",
+          "basis": [
+            "colors:multicolored+noun:bandeau"
           ]
         }
       ]
@@ -10072,6 +12302,16 @@
         }
       ]
     },
+    "multiple angles": {
+      "aliases": [
+        {
+          "text": "같은 자세나 장면을 여러 각도에서 묘사",
+          "basis": [
+            "definition_translation:multiple angles"
+          ]
+        }
+      ]
+    },
     "murid": {
       "aliases": [
         {
@@ -10092,12 +12332,82 @@
         }
       ]
     },
+    "musclegut": {
+      "aliases": [
+        {
+          "text": "근육질이면서 배가 두툼한 체형",
+          "basis": [
+            "definition_translation:musclegut"
+          ]
+        }
+      ]
+    },
     "muscular anthro": {
       "aliases": [
         {
           "text": "근육질 수인",
           "basis": [
             "direct:muscular anthro"
+          ]
+        }
+      ]
+    },
+    "muscular arms": {
+      "aliases": [
+        {
+          "text": "근육질 팔",
+          "basis": [
+            "definition_translation:muscular arms"
+          ]
+        }
+      ]
+    },
+    "muscular humanoid": {
+      "aliases": [
+        {
+          "text": "근육질 휴머노이드",
+          "basis": [
+            "definition_translation:muscular humanoid"
+          ]
+        }
+      ]
+    },
+    "muscular intersex": {
+      "aliases": [
+        {
+          "text": "근육이 강조된 인터섹스 캐릭터",
+          "basis": [
+            "definition_translation:muscular intersex"
+          ]
+        }
+      ]
+    },
+    "muscular thighs": {
+      "aliases": [
+        {
+          "text": "근육질 허벅지",
+          "basis": [
+            "definition_translation:muscular thighs"
+          ]
+        }
+      ]
+    },
+    "musical instrument": {
+      "aliases": [
+        {
+          "text": "음악 연주용 악기",
+          "basis": [
+            "definition_translation:musical instrument"
+          ]
+        }
+      ]
+    },
+    "musk clouds": {
+      "aliases": [
+        {
+          "text": "구름으로 표현된 체취",
+          "basis": [
+            "definition_translation:musk clouds"
           ]
         }
       ]
@@ -10152,6 +12462,26 @@
         }
       ]
     },
+    "nature background": {
+      "aliases": [
+        {
+          "text": "자연 배경",
+          "basis": [
+            "definition_translation:nature background"
+          ]
+        }
+      ]
+    },
+    "neck bulge": {
+      "aliases": [
+        {
+          "text": "무언가를 삼켜 목이 불룩한 모습",
+          "basis": [
+            "definition_translation:neck bulge"
+          ]
+        }
+      ]
+    },
     "neck markings": {
       "aliases": [
         {
@@ -10202,6 +12532,86 @@
         }
       ]
     },
+    "no underwear": {
+      "aliases": [
+        {
+          "text": "속옷을 입지 않은 상태",
+          "basis": [
+            "definition_translation:no underwear"
+          ]
+        }
+      ]
+    },
+    "not furry": {
+      "aliases": [
+        {
+          "text": "퍼리 아님",
+          "basis": [
+            "definition_translation:not furry"
+          ]
+        }
+      ]
+    },
+    "not furry focus": {
+      "aliases": [
+        {
+          "text": "퍼리와 함께 있는 비퍼리 인물에 초점을 둔 구도",
+          "basis": [
+            "definition_translation:not furry focus"
+          ]
+        }
+      ]
+    },
+    "number": {
+      "aliases": [
+        {
+          "text": "숫자 기호",
+          "basis": [
+            "definition_translation:number"
+          ]
+        }
+      ]
+    },
+    "obese anthro": {
+      "aliases": [
+        {
+          "text": "비만 수인",
+          "basis": [
+            "definition_translation:obese anthro"
+          ]
+        }
+      ]
+    },
+    "obese female": {
+      "aliases": [
+        {
+          "text": "비만 여성",
+          "basis": [
+            "definition_translation:obese female"
+          ]
+        }
+      ]
+    },
+    "obese male": {
+      "aliases": [
+        {
+          "text": "비만인 남성",
+          "basis": [
+            "definition_translation:obese male"
+          ]
+        }
+      ]
+    },
+    "object in mouth": {
+      "aliases": [
+        {
+          "text": "입에 문 물체",
+          "basis": [
+            "definition_translation:object in mouth"
+          ]
+        }
+      ]
+    },
     "octopus costume": {
       "aliases": [
         {
@@ -10232,6 +12642,176 @@
         }
       ]
     },
+    "offscreen character": {
+      "aliases": [
+        {
+          "text": "화면 밖에 있는 캐릭터",
+          "basis": [
+            "definition_translation:offscreen character"
+          ]
+        }
+      ]
+    },
+    "older female": {
+      "aliases": [
+        {
+          "text": "나이가 더 많은 여성",
+          "basis": [
+            "definition_translation:older female"
+          ]
+        }
+      ]
+    },
+    "older male": {
+      "aliases": [
+        {
+          "text": "상대보다 나이가 많은 남성",
+          "basis": [
+            "definition_translation:older male"
+          ]
+        }
+      ]
+    },
+    "on one leg": {
+      "aliases": [
+        {
+          "text": "한 발로 서 있는",
+          "basis": [
+            "definition_translation:on one leg"
+          ]
+        }
+      ]
+    },
+    "one eye obstructed": {
+      "aliases": [
+        {
+          "text": "한쪽 눈이 가려짐",
+          "basis": [
+            "definition_translation:one eye obstructed"
+          ]
+        }
+      ]
+    },
+    "one leg up": {
+      "aliases": [
+        {
+          "text": "무릎을 거의 펴고 한쪽 다리를 위로 듦",
+          "basis": [
+            "definition_translation:one leg up"
+          ]
+        }
+      ]
+    },
+    "open bottomwear": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 하의",
+          "basis": [
+            "garment_states:open+noun:bottomwear"
+          ]
+        }
+      ]
+    },
+    "open clothing": {
+      "aliases": [
+        {
+          "text": "여밈을 푼 의복",
+          "basis": [
+            "definition_translation:open clothing"
+          ]
+        }
+      ]
+    },
+    "open dress shirt": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 드레스 셔츠",
+          "basis": [
+            "garment_states:open+noun:dress shirt"
+          ]
+        }
+      ]
+    },
+    "open happi": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 핫피",
+          "basis": [
+            "garment_states:open+noun:happi"
+          ]
+        }
+      ]
+    },
+    "open hood": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 후드",
+          "basis": [
+            "garment_states:open+noun:hood"
+          ]
+        }
+      ]
+    },
+    "open kigurumi": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 키구루미",
+          "basis": [
+            "garment_states:open+noun:kigurumi"
+          ]
+        }
+      ]
+    },
+    "open onesie": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 원피스 잠옷",
+          "basis": [
+            "garment_states:open+noun:onesie"
+          ]
+        }
+      ]
+    },
+    "open suit": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 정장",
+          "basis": [
+            "garment_states:open+noun:suit"
+          ]
+        }
+      ]
+    },
+    "open swimsuit": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 수영복",
+          "basis": [
+            "garment_states:open+noun:swimsuit"
+          ]
+        }
+      ]
+    },
+    "open topwear": {
+      "aliases": [
+        {
+          "text": "앞이 열린 상의",
+          "basis": [
+            "definition_translation:open topwear"
+          ]
+        }
+      ]
+    },
+    "open zipper": {
+      "aliases": [
+        {
+          "text": "잠금이 열린 지퍼",
+          "basis": [
+            "garment_states:open+noun:zipper"
+          ]
+        }
+      ]
+    },
     "opossum": {
       "aliases": [
         {
@@ -10258,6 +12838,16 @@
           "text": "주황색 팔",
           "basis": [
             "colors:orange+noun:arms"
+          ]
+        }
+      ]
+    },
+    "orange bandeau": {
+      "aliases": [
+        {
+          "text": "주황색 반도형 상의",
+          "basis": [
+            "colors:orange+noun:bandeau"
           ]
         }
       ]
@@ -10532,6 +13122,16 @@
         }
       ]
     },
+    "orange suit": {
+      "aliases": [
+        {
+          "text": "주황색 정장",
+          "basis": [
+            "colors:orange+noun:suit"
+          ]
+        }
+      ]
+    },
     "orange teeth": {
       "aliases": [
         {
@@ -10632,6 +13232,16 @@
         }
       ]
     },
+    "outside": {
+      "aliases": [
+        {
+          "text": "야외 공간",
+          "basis": [
+            "definition_translation:outside"
+          ]
+        }
+      ]
+    },
     "overweight anthro": {
       "aliases": [
         {
@@ -10702,12 +13312,52 @@
         }
       ]
     },
+    "pantherine": {
+      "aliases": [
+        {
+          "text": "표범아과 동물",
+          "basis": [
+            "definition_translation:pantherine"
+          ]
+        }
+      ]
+    },
+    "panties down": {
+      "aliases": [
+        {
+          "text": "내려간 팬티",
+          "basis": [
+            "definition_translation:panties down"
+          ]
+        }
+      ]
+    },
+    "pants down": {
+      "aliases": [
+        {
+          "text": "내려간 바지",
+          "basis": [
+            "definition_translation:pants down"
+          ]
+        }
+      ]
+    },
     "partially clothed": {
       "aliases": [
         {
           "text": "일부만 옷을 입은 상태",
           "basis": [
             "direct:partially clothed"
+          ]
+        }
+      ]
+    },
+    "partially inside": {
+      "aliases": [
+        {
+          "text": "다른 캐릭터 몸 안에 몸 일부가 들어간 상태",
+          "basis": [
+            "definition_translation:partially inside"
           ]
         }
       ]
@@ -11082,12 +13732,38 @@
         }
       ]
     },
+    "paws": {
+      "aliases": [
+        {
+          "text": "동물형 손발",
+          "basis": [
+            "definition_translation:paws"
+          ]
+        },
+        {
+          "text": "포유동물형 손발",
+          "basis": [
+            "definition_translation:paws"
+          ]
+        }
+      ]
+    },
     "peacock print": {
       "aliases": [
         {
           "text": "공작 그림 무늬",
           "basis": [
             "animal:peacock+suffix:print"
+          ]
+        }
+      ]
+    },
+    "pecs": {
+      "aliases": [
+        {
+          "text": "가슴의 대흉근",
+          "basis": [
+            "definition_translation:pecs"
           ]
         }
       ]
@@ -11128,6 +13804,22 @@
           "text": "돼지 그림 무늬",
           "basis": [
             "animal:pig+suffix:print"
+          ]
+        }
+      ]
+    },
+    "pink bandeau": {
+      "aliases": [
+        {
+          "text": "분홍색 반도형 상의",
+          "basis": [
+            "colors:pink+noun:bandeau"
+          ]
+        },
+        {
+          "text": "핑크색 반도형 상의",
+          "basis": [
+            "colors:pink+noun:bandeau"
           ]
         }
       ]
@@ -11500,6 +14192,22 @@
         }
       ]
     },
+    "pink suit": {
+      "aliases": [
+        {
+          "text": "분홍색 정장",
+          "basis": [
+            "colors:pink+noun:suit"
+          ]
+        },
+        {
+          "text": "핑크색 정장",
+          "basis": [
+            "colors:pink+noun:suit"
+          ]
+        }
+      ]
+    },
     "pink sword": {
       "aliases": [
         {
@@ -11512,6 +14220,22 @@
           "text": "핑크색 검",
           "basis": [
             "colors:pink+noun:sword"
+          ]
+        }
+      ]
+    },
+    "pink tabard": {
+      "aliases": [
+        {
+          "text": "분홍색 타바드",
+          "basis": [
+            "colors:pink+noun:tabard"
+          ]
+        },
+        {
+          "text": "핑크색 타바드",
+          "basis": [
+            "colors:pink+noun:tabard"
           ]
         }
       ]
@@ -11608,6 +14332,16 @@
           "text": "핑크색 손목 밴드",
           "basis": [
             "colors:pink+noun:wristband"
+          ]
+        }
+      ]
+    },
+    "pivoted ears": {
+      "aliases": [
+        {
+          "text": "돌아간 귀",
+          "basis": [
+            "definition_translation:pivoted ears"
           ]
         }
       ]
@@ -12272,6 +15006,26 @@
         }
       ]
     },
+    "prick ears": {
+      "aliases": [
+        {
+          "text": "쫑긋 선 귀",
+          "basis": [
+            "definition_translation:prick ears"
+          ]
+        }
+      ]
+    },
+    "pride colors": {
+      "aliases": [
+        {
+          "text": "프라이드 컬러",
+          "basis": [
+            "definition_translation:pride colors"
+          ]
+        }
+      ]
+    },
     "primate": {
       "aliases": [
         {
@@ -12328,6 +15082,16 @@
           "text": "그림이 인쇄된 반다나",
           "basis": [
             "patterns:print+noun:bandana"
+          ]
+        }
+      ]
+    },
+    "print bandeau": {
+      "aliases": [
+        {
+          "text": "그림이 인쇄된 반도형 상의",
+          "basis": [
+            "patterns:print+noun:bandeau"
           ]
         }
       ]
@@ -12622,6 +15386,16 @@
         }
       ]
     },
+    "print tabard": {
+      "aliases": [
+        {
+          "text": "그림이 인쇄된 타바드",
+          "basis": [
+            "patterns:print+noun:tabard"
+          ]
+        }
+      ]
+    },
     "print topwear": {
       "aliases": [
         {
@@ -12658,6 +15432,36 @@
           "text": "라쿤과 동물",
           "basis": [
             "direct:procyonid"
+          ]
+        }
+      ]
+    },
+    "pseudo hair": {
+      "aliases": [
+        {
+          "text": "가짜 머리카락",
+          "basis": [
+            "definition_translation:pseudo hair"
+          ]
+        }
+      ]
+    },
+    "pupils": {
+      "aliases": [
+        {
+          "text": "눈의 동공",
+          "basis": [
+            "definition_translation:pupils"
+          ]
+        }
+      ]
+    },
+    "purple bandeau": {
+      "aliases": [
+        {
+          "text": "보라색 반도형 상의",
+          "basis": [
+            "colors:purple+noun:bandeau"
           ]
         }
       ]
@@ -12778,6 +15582,16 @@
           "text": "보라색 하오리",
           "basis": [
             "colors:purple+noun:haori"
+          ]
+        }
+      ]
+    },
+    "purple happi": {
+      "aliases": [
+        {
+          "text": "보라색 핫피",
+          "basis": [
+            "colors:purple+noun:happi"
           ]
         }
       ]
@@ -13232,12 +16046,118 @@
         }
       ]
     },
+    "raised arm": {
+      "aliases": [
+        {
+          "text": "들어 올린 팔",
+          "basis": [
+            "definition_translation:raised arm"
+          ]
+        }
+      ]
+    },
+    "raised arms": {
+      "aliases": [
+        {
+          "text": "들어 올린 두 개 이상의 팔",
+          "basis": [
+            "limb_state:raised+arms"
+          ]
+        }
+      ]
+    },
+    "raised clothing": {
+      "aliases": [
+        {
+          "text": "들어 올리는 동작 없이 들려 있는 옷",
+          "basis": [
+            "definition_translation:raised clothing"
+          ]
+        }
+      ]
+    },
+    "raised finger": {
+      "aliases": [
+        {
+          "text": "들어 올린 한쪽 손가락",
+          "basis": [
+            "limb_state:raised+finger"
+          ]
+        }
+      ]
+    },
+    "raised foot": {
+      "aliases": [
+        {
+          "text": "들어 올린 한쪽 발",
+          "basis": [
+            "limb_state:raised+foot"
+          ]
+        }
+      ]
+    },
+    "raised hand": {
+      "aliases": [
+        {
+          "text": "들어 올린 한쪽 손",
+          "basis": [
+            "limb_state:raised+hand"
+          ]
+        }
+      ]
+    },
+    "raised hands": {
+      "aliases": [
+        {
+          "text": "들어 올린 두 개 이상의 손",
+          "basis": [
+            "limb_state:raised+hands"
+          ]
+        }
+      ]
+    },
+    "raised leg": {
+      "aliases": [
+        {
+          "text": "한쪽 다리 들기",
+          "basis": [
+            "definition_translation:raised leg"
+          ]
+        }
+      ]
+    },
+    "raised shirt": {
+      "aliases": [
+        {
+          "text": "들어 올리는 동작 없이 들려 있는 셔츠",
+          "basis": [
+            "definition_translation:raised shirt"
+          ]
+        }
+      ]
+    },
     "raised tail": {
       "aliases": [
         {
           "text": "들어 올린 꼬리",
           "basis": [
             "direct:raised tail"
+          ]
+        },
+        {
+          "text": "들어 올린 한쪽 꼬리",
+          "basis": [
+            "limb_state:raised+tail"
+          ]
+        }
+      ]
+    },
+    "raised topwear": {
+      "aliases": [
+        {
+          "text": "위로 들려 올라간 상의",
+          "basis": [
+            "definition_translation:raised topwear"
           ]
         }
       ]
@@ -13544,6 +16464,22 @@
           "text": "붉은 하오리",
           "basis": [
             "colors:red+noun:haori"
+          ]
+        }
+      ]
+    },
+    "red happi": {
+      "aliases": [
+        {
+          "text": "빨간 핫피",
+          "basis": [
+            "colors:red+noun:happi"
+          ]
+        },
+        {
+          "text": "붉은 핫피",
+          "basis": [
+            "colors:red+noun:happi"
           ]
         }
       ]
@@ -13908,6 +16844,166 @@
         }
       ]
     },
+    "ribbed bandeau": {
+      "aliases": [
+        {
+          "text": "골지 조직의 반도형 상의",
+          "basis": [
+            "garment_states:ribbed+noun:bandeau"
+          ]
+        }
+      ]
+    },
+    "ribbed bikini": {
+      "aliases": [
+        {
+          "text": "골지 조직의 비키니",
+          "basis": [
+            "garment_states:ribbed+noun:bikini"
+          ]
+        }
+      ]
+    },
+    "ribbed bra": {
+      "aliases": [
+        {
+          "text": "골지 조직의 브래지어",
+          "basis": [
+            "garment_states:ribbed+noun:bra"
+          ]
+        }
+      ]
+    },
+    "ribbed camisole": {
+      "aliases": [
+        {
+          "text": "골지 조직의 캐미솔",
+          "basis": [
+            "garment_states:ribbed+noun:camisole"
+          ]
+        }
+      ]
+    },
+    "ribbed clothing": {
+      "aliases": [
+        {
+          "text": "골지 조직의 의복",
+          "basis": [
+            "garment_states:ribbed+noun:clothing"
+          ]
+        }
+      ]
+    },
+    "ribbed coat": {
+      "aliases": [
+        {
+          "text": "골지 조직의 코트",
+          "basis": [
+            "garment_states:ribbed+noun:coat"
+          ]
+        }
+      ]
+    },
+    "ribbed collar": {
+      "aliases": [
+        {
+          "text": "골지 조직의 칼라",
+          "basis": [
+            "garment_states:ribbed+noun:collar"
+          ]
+        }
+      ]
+    },
+    "ribbed hat": {
+      "aliases": [
+        {
+          "text": "골지 조직의 모자",
+          "basis": [
+            "garment_states:ribbed+noun:hat"
+          ]
+        }
+      ]
+    },
+    "ribbed jacket": {
+      "aliases": [
+        {
+          "text": "골지 조직의 재킷",
+          "basis": [
+            "garment_states:ribbed+noun:jacket"
+          ]
+        }
+      ]
+    },
+    "ribbed jumpsuit": {
+      "aliases": [
+        {
+          "text": "골지 조직의 점프슈트",
+          "basis": [
+            "garment_states:ribbed+noun:jumpsuit"
+          ]
+        }
+      ]
+    },
+    "ribbed leg warmers": {
+      "aliases": [
+        {
+          "text": "골지 조직의 다리 토시",
+          "basis": [
+            "garment_states:ribbed+noun:leg warmers"
+          ]
+        }
+      ]
+    },
+    "ribbed pants": {
+      "aliases": [
+        {
+          "text": "골지 조직의 바지",
+          "basis": [
+            "garment_states:ribbed+noun:pants"
+          ]
+        }
+      ]
+    },
+    "ribbed pantyhose": {
+      "aliases": [
+        {
+          "text": "골지 조직의 팬티스타킹",
+          "basis": [
+            "garment_states:ribbed+noun:pantyhose"
+          ]
+        }
+      ]
+    },
+    "ribbed shorts": {
+      "aliases": [
+        {
+          "text": "골지 조직의 반바지",
+          "basis": [
+            "garment_states:ribbed+noun:shorts"
+          ]
+        }
+      ]
+    },
+    "ribbed skirt": {
+      "aliases": [
+        {
+          "text": "골지 조직의 치마",
+          "basis": [
+            "garment_states:ribbed+noun:skirt"
+          ]
+        }
+      ]
+    },
+    "ring piercing": {
+      "aliases": [
+        {
+          "text": "링 피어싱",
+          "basis": [
+            "definition_translation:ring piercing"
+          ]
+        }
+      ]
+    },
     "rodent humanoid": {
       "aliases": [
         {
@@ -13928,6 +17024,16 @@
         }
       ]
     },
+    "romantic couple": {
+      "aliases": [
+        {
+          "text": "로맨틱한 커플",
+          "basis": [
+            "definition_translation:romantic couple"
+          ]
+        }
+      ]
+    },
     "rooster tail": {
       "aliases": [
         {
@@ -13938,12 +17044,42 @@
         }
       ]
     },
+    "round glasses": {
+      "aliases": [
+        {
+          "text": "둥근 안경",
+          "basis": [
+            "definition_translation:round glasses"
+          ]
+        }
+      ]
+    },
     "rubber clothing": {
       "aliases": [
         {
           "text": "고무 의복",
           "basis": [
             "materials:rubber+noun:clothing"
+          ]
+        }
+      ]
+    },
+    "rumbling stomach": {
+      "aliases": [
+        {
+          "text": "꼬르륵거리는 배 소리",
+          "basis": [
+            "definition_translation:rumbling stomach"
+          ]
+        }
+      ]
+    },
+    "saliva on tongue": {
+      "aliases": [
+        {
+          "text": "혀 위의 침",
+          "basis": [
+            "definition_translation:saliva on tongue"
           ]
         }
       ]
@@ -14028,6 +17164,26 @@
         }
       ]
     },
+    "scut tail": {
+      "aliases": [
+        {
+          "text": "짧고 곧게 선 동물 꼬리",
+          "basis": [
+            "definition_translation:scut tail"
+          ]
+        }
+      ]
+    },
+    "sea": {
+      "aliases": [
+        {
+          "text": "바닷물로 이루어진 해역",
+          "basis": [
+            "definition_translation:sea"
+          ]
+        }
+      ]
+    },
     "seal": {
       "aliases": [
         {
@@ -14064,6 +17220,16 @@
           "text": "비치는 팔 토시",
           "basis": [
             "states:see-through+noun:arm warmers"
+          ]
+        }
+      ]
+    },
+    "see-through bandeau": {
+      "aliases": [
+        {
+          "text": "비치는 반도형 상의",
+          "basis": [
+            "states:see-through+noun:bandeau"
           ]
         }
       ]
@@ -14248,6 +17414,16 @@
         }
       ]
     },
+    "see-through tabard": {
+      "aliases": [
+        {
+          "text": "비치는 타바드",
+          "basis": [
+            "states:see-through+noun:tabard"
+          ]
+        }
+      ]
+    },
     "see-through tank top": {
       "aliases": [
         {
@@ -14284,6 +17460,16 @@
           "text": "비치는 손목 커프스",
           "basis": [
             "states:see-through+noun:wrist cuffs"
+          ]
+        }
+      ]
+    },
+    "septum piercing": {
+      "aliases": [
+        {
+          "text": "비중격 피어싱",
+          "basis": [
+            "definition_translation:septum piercing"
           ]
         }
       ]
@@ -14424,6 +17610,36 @@
           "text": "짧은 갈기",
           "basis": [
             "size:short+noun:mane"
+          ]
+        }
+      ]
+    },
+    "short stack": {
+      "aliases": [
+        {
+          "text": "키가 작고 하체 굴곡이 큰 여성형 체형",
+          "basis": [
+            "definition_translation:short stack"
+          ]
+        }
+      ]
+    },
+    "shoulder tuft": {
+      "aliases": [
+        {
+          "text": "어깨의 털 뭉치",
+          "basis": [
+            "definition_translation:shoulder tuft"
+          ]
+        }
+      ]
+    },
+    "shower": {
+      "aliases": [
+        {
+          "text": "샤워 공간",
+          "basis": [
+            "definition_translation:shower"
           ]
         }
       ]
@@ -14738,6 +17954,16 @@
         }
       ]
     },
+    "simple eyes": {
+      "aliases": [
+        {
+          "text": "단순한 눈",
+          "basis": [
+            "definition_translation:simple eyes"
+          ]
+        }
+      ]
+    },
     "skunk": {
       "aliases": [
         {
@@ -14818,6 +18044,46 @@
         }
       ]
     },
+    "slightly chubby anthro": {
+      "aliases": [
+        {
+          "text": "약간 통통한 수인",
+          "basis": [
+            "definition_translation:slightly chubby anthro"
+          ]
+        }
+      ]
+    },
+    "slightly chubby female": {
+      "aliases": [
+        {
+          "text": "약간 통통한 여성",
+          "basis": [
+            "definition_translation:slightly chubby female"
+          ]
+        }
+      ]
+    },
+    "slightly chubby male": {
+      "aliases": [
+        {
+          "text": "약간 통통한 남성",
+          "basis": [
+            "definition_translation:slightly chubby male"
+          ]
+        }
+      ]
+    },
+    "slim": {
+      "aliases": [
+        {
+          "text": "가늘고 날씬한 체형",
+          "basis": [
+            "definition_translation:slim"
+          ]
+        }
+      ]
+    },
     "sloth": {
       "aliases": [
         {
@@ -14854,6 +18120,16 @@
           "text": "작은 발톱",
           "basis": [
             "size:small+noun:claws"
+          ]
+        }
+      ]
+    },
+    "small dom big sub": {
+      "aliases": [
+        {
+          "text": "성적 관계에서 작은 지배역과 큰 복종역",
+          "basis": [
+            "definition_translation:small dom big sub"
           ]
         }
       ]
@@ -14898,6 +18174,36 @@
         }
       ]
     },
+    "small waist": {
+      "aliases": [
+        {
+          "text": "가는 허리",
+          "basis": [
+            "definition_translation:small waist"
+          ]
+        }
+      ]
+    },
+    "smaller female": {
+      "aliases": [
+        {
+          "text": "상대보다 작은 여성",
+          "basis": [
+            "definition_translation:smaller female"
+          ]
+        }
+      ]
+    },
+    "smaller male": {
+      "aliases": [
+        {
+          "text": "상대보다 작은 남성",
+          "basis": [
+            "definition_translation:smaller male"
+          ]
+        }
+      ]
+    },
     "snake costume": {
       "aliases": [
         {
@@ -14918,12 +18224,232 @@
         }
       ]
     },
+    "spade tail": {
+      "aliases": [
+        {
+          "text": "끝이 스페이드 모양인 꼬리",
+          "basis": [
+            "definition_translation:spade tail"
+          ]
+        }
+      ]
+    },
     "spider humanoid": {
       "aliases": [
         {
           "text": "거미형 인간",
           "basis": [
             "animal:spider+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "spiked armband": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 팔 밴드",
+          "basis": [
+            "garment_states:spiked+noun:armband"
+          ]
+        }
+      ]
+    },
+    "spiked bikini": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 비키니",
+          "basis": [
+            "garment_states:spiked+noun:bikini"
+          ]
+        }
+      ]
+    },
+    "spiked bra": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 브래지어",
+          "basis": [
+            "garment_states:spiked+noun:bra"
+          ]
+        }
+      ]
+    },
+    "spiked cape": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 케이프",
+          "basis": [
+            "garment_states:spiked+noun:cape"
+          ]
+        }
+      ]
+    },
+    "spiked clothing": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 의복",
+          "basis": [
+            "garment_states:spiked+noun:clothing"
+          ]
+        }
+      ]
+    },
+    "spiked cuffs": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 소맷단",
+          "basis": [
+            "garment_states:spiked+noun:cuffs"
+          ]
+        }
+      ]
+    },
+    "spiked dress": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 드레스",
+          "basis": [
+            "garment_states:spiked+noun:dress"
+          ]
+        }
+      ]
+    },
+    "spiked hat": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 모자",
+          "basis": [
+            "garment_states:spiked+noun:hat"
+          ]
+        }
+      ]
+    },
+    "spiked hood": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 후드",
+          "basis": [
+            "garment_states:spiked+noun:hood"
+          ]
+        }
+      ]
+    },
+    "spiked legband": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 다리 밴드",
+          "basis": [
+            "garment_states:spiked+noun:legband"
+          ]
+        }
+      ]
+    },
+    "spiked mask": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 마스크",
+          "basis": [
+            "garment_states:spiked+noun:mask"
+          ]
+        }
+      ]
+    },
+    "spiked sandals": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 샌들",
+          "basis": [
+            "garment_states:spiked+noun:sandals"
+          ]
+        }
+      ]
+    },
+    "spiked shirt": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 셔츠",
+          "basis": [
+            "garment_states:spiked+noun:shirt"
+          ]
+        }
+      ]
+    },
+    "spiked shorts": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 반바지",
+          "basis": [
+            "garment_states:spiked+noun:shorts"
+          ]
+        }
+      ]
+    },
+    "spiked shoulder pads": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 어깨 패드",
+          "basis": [
+            "garment_states:spiked+noun:shoulder pads"
+          ]
+        }
+      ]
+    },
+    "spiked sleeves": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 소매",
+          "basis": [
+            "garment_states:spiked+noun:sleeves"
+          ]
+        }
+      ]
+    },
+    "spiked tailband": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 꼬리 밴드",
+          "basis": [
+            "garment_states:spiked+noun:tailband"
+          ]
+        }
+      ]
+    },
+    "spiked thigh strap": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 허벅지 끈",
+          "basis": [
+            "garment_states:spiked+noun:thigh strap"
+          ]
+        }
+      ]
+    },
+    "spiked thighhighs": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 허벅지 높이 양말",
+          "basis": [
+            "garment_states:spiked+noun:thighhighs"
+          ]
+        }
+      ]
+    },
+    "spiked wristband": {
+      "aliases": [
+        {
+          "text": "스파이크 장식이 달린 손목 밴드",
+          "basis": [
+            "garment_states:spiked+noun:wristband"
+          ]
+        }
+      ]
+    },
+    "split form": {
+      "aliases": [
+        {
+          "text": "몸이 서로 다른 종의 두 부분으로 나뉜 형태",
+          "basis": [
+            "definition_translation:split form"
           ]
         }
       ]
@@ -14974,6 +18500,16 @@
           "text": "반점 무늬 깃털",
           "basis": [
             "patterns:spotted+noun:feathers"
+          ]
+        }
+      ]
+    },
+    "spotted markings": {
+      "aliases": [
+        {
+          "text": "점박이 무늬",
+          "basis": [
+            "definition_translation:spotted markings"
           ]
         }
       ]
@@ -15064,6 +18600,56 @@
           "text": "다람쥐 그림 무늬",
           "basis": [
             "animal:squirrel+suffix:print"
+          ]
+        }
+      ]
+    },
+    "star": {
+      "aliases": [
+        {
+          "text": "천체인 별",
+          "basis": [
+            "definition_translation:star"
+          ]
+        }
+      ]
+    },
+    "straight arm": {
+      "aliases": [
+        {
+          "text": "곧게 편 한쪽 팔",
+          "basis": [
+            "limb_state:straight+arm"
+          ]
+        }
+      ]
+    },
+    "straight arms": {
+      "aliases": [
+        {
+          "text": "곧게 편 두 개 이상의 팔",
+          "basis": [
+            "limb_state:straight+arms"
+          ]
+        }
+      ]
+    },
+    "straight leg": {
+      "aliases": [
+        {
+          "text": "곧게 편 한쪽 다리",
+          "basis": [
+            "limb_state:straight+leg"
+          ]
+        }
+      ]
+    },
+    "straight legs": {
+      "aliases": [
+        {
+          "text": "곧게 편 두 개 이상의 다리",
+          "basis": [
+            "limb_state:straight+legs"
           ]
         }
       ]
@@ -15238,6 +18824,16 @@
         }
       ]
     },
+    "striped markings": {
+      "aliases": [
+        {
+          "text": "몸에 있는 줄무늬 표시",
+          "basis": [
+            "definition_translation:striped markings"
+          ]
+        }
+      ]
+    },
     "striped overalls": {
       "aliases": [
         {
@@ -15308,6 +18904,36 @@
         }
       ]
     },
+    "stripes": {
+      "aliases": [
+        {
+          "text": "길게 이어지는 띠무늬",
+          "basis": [
+            "definition_translation:stripes"
+          ]
+        }
+      ]
+    },
+    "suggestive": {
+      "aliases": [
+        {
+          "text": "성적 행위나 신체 부위를 암시하는 표현",
+          "basis": [
+            "definition_translation:suggestive"
+          ]
+        }
+      ]
+    },
+    "sweaty legs": {
+      "aliases": [
+        {
+          "text": "땀에 젖은 다리",
+          "basis": [
+            "definition_translation:sweaty legs"
+          ]
+        }
+      ]
+    },
     "swimwear": {
       "aliases": [
         {
@@ -15324,6 +18950,36 @@
           "text": "꼬리 장신구",
           "basis": [
             "noun:tail accessory"
+          ]
+        }
+      ]
+    },
+    "tail feathers": {
+      "aliases": [
+        {
+          "text": "꼬리깃",
+          "basis": [
+            "definition_translation:tail feathers"
+          ]
+        }
+      ]
+    },
+    "tail fetish": {
+      "aliases": [
+        {
+          "text": "꼬리 페티시",
+          "basis": [
+            "definition_translation:tail fetish"
+          ]
+        }
+      ]
+    },
+    "tail fin": {
+      "aliases": [
+        {
+          "text": "꼬리 지느러미",
+          "basis": [
+            "noun:tail fin"
           ]
         }
       ]
@@ -15350,6 +19006,26 @@
         }
       ]
     },
+    "tail motion": {
+      "aliases": [
+        {
+          "text": "꼬리의 움직임",
+          "basis": [
+            "definition_translation:tail motion"
+          ]
+        }
+      ]
+    },
+    "tail play": {
+      "aliases": [
+        {
+          "text": "꼬리를 이용한 성적 자극",
+          "basis": [
+            "definition_translation:tail play"
+          ]
+        }
+      ]
+    },
     "tail tuft": {
       "aliases": [
         {
@@ -15361,12 +19037,62 @@
         }
       ]
     },
+    "talking to another": {
+      "aliases": [
+        {
+          "text": "다른 이와 대화 중인",
+          "basis": [
+            "definition_translation:talking to another"
+          ]
+        }
+      ]
+    },
     "tan sweater": {
       "aliases": [
         {
           "text": "황갈색 스웨터",
           "basis": [
             "colors:tan+noun:sweater"
+          ]
+        }
+      ]
+    },
+    "teeth showing": {
+      "aliases": [
+        {
+          "text": "의도적으로 드러내지 않아도 보이는 치아",
+          "basis": [
+            "definition_translation:teeth showing"
+          ]
+        }
+      ]
+    },
+    "text": {
+      "aliases": [
+        {
+          "text": "화면 안의 글자",
+          "basis": [
+            "definition_translation:text"
+          ]
+        }
+      ]
+    },
+    "text on clothing": {
+      "aliases": [
+        {
+          "text": "옷에 적힌 글자",
+          "basis": [
+            "definition_translation:text on clothing"
+          ]
+        }
+      ]
+    },
+    "text on topwear": {
+      "aliases": [
+        {
+          "text": "상의에 글자가 있는",
+          "basis": [
+            "definition_translation:text on topwear"
           ]
         }
       ]
@@ -15401,12 +19127,32 @@
         }
       ]
     },
+    "thigh highs": {
+      "aliases": [
+        {
+          "text": "허벅지 높이까지 오는 다리 의류",
+          "basis": [
+            "definition_translation:thigh highs"
+          ]
+        }
+      ]
+    },
     "thin arms": {
       "aliases": [
         {
           "text": "가는 팔",
           "basis": [
             "size:thin+noun:arms"
+          ]
+        }
+      ]
+    },
+    "thin calves": {
+      "aliases": [
+        {
+          "text": "가는 종아리",
+          "basis": [
+            "definition_translation:thin calves"
           ]
         }
       ]
@@ -15441,6 +19187,116 @@
         }
       ]
     },
+    "tight bikini": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 비키니",
+          "basis": [
+            "garment_states:tight+noun:bikini"
+          ]
+        }
+      ]
+    },
+    "tight bottomwear": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 하의",
+          "basis": [
+            "garment_states:tight+noun:bottomwear"
+          ]
+        }
+      ]
+    },
+    "tight bra": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 브래지어",
+          "basis": [
+            "garment_states:tight+noun:bra"
+          ]
+        }
+      ]
+    },
+    "tight clothing": {
+      "aliases": [
+        {
+          "text": "꽉 끼는 옷",
+          "basis": [
+            "definition_translation:tight clothing"
+          ]
+        }
+      ]
+    },
+    "tight legwear": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 다리 의류",
+          "basis": [
+            "garment_states:tight+noun:legwear"
+          ]
+        }
+      ]
+    },
+    "tight panties": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 팬티",
+          "basis": [
+            "garment_states:tight+noun:panties"
+          ]
+        }
+      ]
+    },
+    "tight skirt": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 치마",
+          "basis": [
+            "garment_states:tight+noun:skirt"
+          ]
+        }
+      ]
+    },
+    "tight suit": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 정장",
+          "basis": [
+            "garment_states:tight+noun:suit"
+          ]
+        }
+      ]
+    },
+    "tight swimwear": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 수영 의류",
+          "basis": [
+            "garment_states:tight+noun:swimwear"
+          ]
+        }
+      ]
+    },
+    "tight topwear": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 상의",
+          "basis": [
+            "garment_states:tight+noun:topwear"
+          ]
+        }
+      ]
+    },
+    "tight underwear": {
+      "aliases": [
+        {
+          "text": "몸에 밀착되는 속옷",
+          "basis": [
+            "garment_states:tight+noun:underwear"
+          ]
+        }
+      ]
+    },
     "tights": {
       "aliases": [
         {
@@ -15457,6 +19313,36 @@
           "text": "발가락 발톱",
           "basis": [
             "direct:toe claws"
+          ]
+        }
+      ]
+    },
+    "toony": {
+      "aliases": [
+        {
+          "text": "만화 같은 화풍",
+          "basis": [
+            "definition_translation:toony"
+          ]
+        }
+      ]
+    },
+    "topless anthro": {
+      "aliases": [
+        {
+          "text": "상의가 없는 수인",
+          "basis": [
+            "definition_translation:topless anthro"
+          ]
+        }
+      ]
+    },
+    "topwear only": {
+      "aliases": [
+        {
+          "text": "상의만 착용",
+          "basis": [
+            "definition_translation:topwear only"
           ]
         }
       ]
@@ -15827,6 +19713,16 @@
           "text": "셋이 있는 장면",
           "basis": [
             "direct:trio"
+          ]
+        }
+      ]
+    },
+    "tuft": {
+      "aliases": [
+        {
+          "text": "한데 모인 털 다발",
+          "basis": [
+            "definition_translation:tuft"
           ]
         }
       ]
@@ -16571,6 +20467,16 @@
         }
       ]
     },
+    "two-tone bandeau": {
+      "aliases": [
+        {
+          "text": "두 가지 색의 반도형 상의",
+          "basis": [
+            "colors:two-tone+noun:bandeau"
+          ]
+        }
+      ]
+    },
     "two-tone belt": {
       "aliases": [
         {
@@ -16791,6 +20697,26 @@
         }
       ]
     },
+    "underwear aside": {
+      "aliases": [
+        {
+          "text": "옆으로 젖힌 속옷",
+          "basis": [
+            "definition_translation:underwear aside"
+          ]
+        }
+      ]
+    },
+    "underwear down": {
+      "aliases": [
+        {
+          "text": "내려간 속옷",
+          "basis": [
+            "definition_translation:underwear down"
+          ]
+        }
+      ]
+    },
     "unicorn humanoid": {
       "aliases": [
         {
@@ -16811,12 +20737,42 @@
         }
       ]
     },
+    "unusual anatomy": {
+      "aliases": [
+        {
+          "text": "특이한 신체 구조",
+          "basis": [
+            "definition_translation:unusual anatomy"
+          ]
+        }
+      ]
+    },
+    "unusual tail": {
+      "aliases": [
+        {
+          "text": "특이한 꼬리",
+          "basis": [
+            "definition_translation:unusual tail"
+          ]
+        }
+      ]
+    },
     "vein": {
       "aliases": [
         {
           "text": "정맥",
           "basis": [
             "noun:vein"
+          ]
+        }
+      ]
+    },
+    "ventral scales": {
+      "aliases": [
+        {
+          "text": "배 쪽의 넓은 판 형태 비늘",
+          "basis": [
+            "definition_translation:ventral scales"
           ]
         }
       ]
@@ -16837,6 +20793,16 @@
           "text": "말벌형 인간",
           "basis": [
             "animal:wasp+suffix:humanoid"
+          ]
+        }
+      ]
+    },
+    "wearing glasses": {
+      "aliases": [
+        {
+          "text": "안경을 쓴",
+          "basis": [
+            "definition_translation:wearing glasses"
           ]
         }
       ]
@@ -16937,6 +20903,16 @@
           "text": "젖은 스포츠 브래지어",
           "basis": [
             "states:wet+noun:sports bra"
+          ]
+        }
+      ]
+    },
+    "wet suit": {
+      "aliases": [
+        {
+          "text": "젖은 정장",
+          "basis": [
+            "states:wet+noun:suit"
           ]
         }
       ]
@@ -17343,6 +21319,26 @@
         }
       ]
     },
+    "wide eyed": {
+      "aliases": [
+        {
+          "text": "눈을 크게 뜬",
+          "basis": [
+            "definition_translation:wide eyed"
+          ]
+        }
+      ]
+    },
+    "wide hipped female": {
+      "aliases": [
+        {
+          "text": "골반이 넓은 여성",
+          "basis": [
+            "definition_translation:wide hipped female"
+          ]
+        }
+      ]
+    },
     "wolf humanoid": {
       "aliases": [
         {
@@ -17433,6 +21429,26 @@
         }
       ]
     },
+    "worm's-eye view": {
+      "aliases": [
+        {
+          "text": "지면 높이에서 올려다본 구도",
+          "basis": [
+            "definition_translation:worm's-eye view"
+          ]
+        }
+      ]
+    },
+    "wraps": {
+      "aliases": [
+        {
+          "text": "감은 천",
+          "basis": [
+            "definition_translation:wraps"
+          ]
+        }
+      ]
+    },
     "yellow arm warmers": {
       "aliases": [
         {
@@ -17445,6 +21461,22 @@
           "text": "노란색 팔 토시",
           "basis": [
             "colors:yellow+noun:arm warmers"
+          ]
+        }
+      ]
+    },
+    "yellow bandeau": {
+      "aliases": [
+        {
+          "text": "노란 반도형 상의",
+          "basis": [
+            "colors:yellow+noun:bandeau"
+          ]
+        },
+        {
+          "text": "노란색 반도형 상의",
+          "basis": [
+            "colors:yellow+noun:bandeau"
           ]
         }
       ]
@@ -17637,6 +21669,22 @@
           "text": "노란색 하오리",
           "basis": [
             "colors:yellow+noun:haori"
+          ]
+        }
+      ]
+    },
+    "yellow happi": {
+      "aliases": [
+        {
+          "text": "노란 핫피",
+          "basis": [
+            "colors:yellow+noun:happi"
+          ]
+        },
+        {
+          "text": "노란색 핫피",
+          "basis": [
+            "colors:yellow+noun:happi"
           ]
         }
       ]
@@ -17865,12 +21913,44 @@
         }
       ]
     },
+    "yellow suit": {
+      "aliases": [
+        {
+          "text": "노란 정장",
+          "basis": [
+            "colors:yellow+noun:suit"
+          ]
+        },
+        {
+          "text": "노란색 정장",
+          "basis": [
+            "colors:yellow+noun:suit"
+          ]
+        }
+      ]
+    },
     "yellow swimsuit": {
       "aliases": [
         {
           "text": "노란색 수영복",
           "basis": [
             "colors:yellow+noun:swimsuit"
+          ]
+        }
+      ]
+    },
+    "yellow tabard": {
+      "aliases": [
+        {
+          "text": "노란 타바드",
+          "basis": [
+            "colors:yellow+noun:tabard"
+          ]
+        },
+        {
+          "text": "노란색 타바드",
+          "basis": [
+            "colors:yellow+noun:tabard"
           ]
         }
       ]
@@ -17983,6 +22063,26 @@
           "text": "노란색 손목 밴드",
           "basis": [
             "colors:yellow+noun:wristband"
+          ]
+        }
+      ]
+    },
+    "younger female": {
+      "aliases": [
+        {
+          "text": "상대보다 나이가 어린 여성",
+          "basis": [
+            "definition_translation:younger female"
+          ]
+        }
+      ]
+    },
+    "younger male": {
+      "aliases": [
+        {
+          "text": "상대보다 나이가 어린 남성",
+          "basis": [
+            "definition_translation:younger male"
           ]
         }
       ]

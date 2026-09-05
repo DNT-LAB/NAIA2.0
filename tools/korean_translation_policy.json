@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "version": "2026-09-06-v1",
+  "scope": "Exclude from NEW Korean translation proposals only; retain original tags and current dictionary data.",
+  "explicit": {
+    "patreon exclusive": {"reason": "distribution_metadata", "evidence": "data/e621_data: For content that was released on Patreon primarily, first or only."},
+    "patreon artist": {"reason": "account_metadata", "evidence": "data/e621_data: A tag indicating that the artist of the work has a Patreon account."}
+  },
+  "description_patterns": [
+    "(?:^|[.!?]\\s*)(?:이\\s*)?태그(?:는|가)?\\s*(?:더 이상 사용되지|폐기된|쓸모가 없)",
+    "^(?:폐기된|더 이상 사용되지 않는|모호한|애매한) 태그",
+    "이 태그(?:는|가) .{0,100}(?:으로|로) 이동(?:했|되)",
+    "이 태그를 사용하지 (?:마세요|말 것)",
+    "이 태그는 쓸모가 없음",
+    "^(?:this tag is |a )?(?:deprecated|invalid|obsolete|ambiguous)(?: tag|[.!])"
+  ],
+  "preserve": [
+    "Low frequency alone is not an exclusion reason.",
+    "NSFW, species, fictional anatomy and visual metadata are not excluded as categories.",
+    "A conditional usage warning is not a declaration that a tag is useless.",
+    "Missing definitions remain pending, not excluded or counted as translated.",
+    "Site/source disagreements require sense review before new aliases are added."
+  ]
+}

@@ -44,7 +44,7 @@ def _keyword_evidence(context, index, tag: str, query: str) -> dict:
     return {'keyword_origin': origin, 'keyword_evidence': evidence}
 
 
-def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
+def _search_chat_keywords(context, query: str, limit: int = 6) -> list[dict]:
     """Chat search lane: exact Korean keywords, existing English retrieval.
 
     Autocomplete ranks partial/description matches for typing assistance. They
@@ -84,6 +84,35 @@ def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
         if len(rows) >= min(limit, 12):
             break
     return rows
+
+
+def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
+    """Overlay reviewed Chat aliases without changing shared Search data."""
+    from core.ollama_chat_semantics import alias_senses, annotate, norm
+    from app.backend.server.ollama_routes import ensure_llm_search_index
+
+    if not str(query).strip() or len(query) > 160 or limit <= 0:
+        return []
+    rows = _search_chat_keywords(context, query, limit)
+    senses = alias_senses(query)
+    general = None
+    existing = {norm(row['tag']) for row in rows}
+    for sense in senses:
+        for tag in sense['tags']:
+            if norm(tag) in existing:
+                continue
+            if general is None:
+                general = ensure_llm_search_index(context)
+            canonical = next((r for r in general.search(tag, 1) if norm(r['tag']) == norm(tag)), None)
+            if canonical is not None:
+                rows.append({**canonical, 'match_kind': 'reviewed_alias_exact',
+                             'matched_query': query, 'matched_keyword': query,
+                             'keyword_origin': 'reviewed_alias', 'keyword_evidence': [],
+                             'reviewed_sense_id': sense['id']})
+                existing.add(norm(tag))
+    reviewed_tags = {norm(tag) for sense in senses for tag in sense['tags']}
+    rows.sort(key=lambda row: norm(row['tag']) not in reviewed_tags)
+    return [annotate(row, query) for row in rows[:min(limit, 12)]]
 
 
 def search_characters(context, query: str) -> dict:

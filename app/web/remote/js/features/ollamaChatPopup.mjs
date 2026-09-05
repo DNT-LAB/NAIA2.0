@@ -6,10 +6,18 @@ import {
   setOllamaModelSelectOptions,
 } from './ollamaModelSelect.mjs?v=20260618-related-curated';
 
-export function formatDirectedScene(scene) {
+export function sceneReview(payload) {
+  const complete = payload.completion === 'complete';
+  return {complete, label: complete ? '검토 범위의 의미 확인' : '의미 확인 필요',
+    issues: (payload.semantic_review?.issues || []).map(issue => String(issue.message || '')).filter(Boolean)};
+}
+
+export function formatDirectedScene(scene, payload = {}) {
   const actors = scene.actors || [];
   const names = new Map(actors.map(a => [a.id, a.name]));
-  const lines = [`공통: ${(scene.common_tags || []).join(', ')}`];
+  const review = sceneReview(payload);
+  const lines = [review.label, ...review.issues.map(issue => `확인 필요: ${issue}`),
+    `공통: ${(scene.common_tags || []).join(', ')}`];
   actors.forEach((a, i) => lines.push(`Character ${i + 1} (${a.name}): ${(a.tags || []).join(', ')}`));
   (scene.relations || []).forEach(r => lines.push(
     `${names.get(r.actor_id) || r.actor_id} → ${r.negated ? '[하지 않음] ' : ''}${r.action} → ${names.get(r.target_id) || r.target_id}`));
@@ -287,11 +295,24 @@ export function createOllamaChatPopup({
       body.textContent = msg.content || '';
       item.appendChild(role);
       item.appendChild(body);
+      if (msg.role === 'assistant' && msg.completion) {
+        const status = document.createElement('div');
+        status.className = 'ollama-chat-scene-note ollama-chat-semantic-status';
+        status.textContent = msg.completion === 'needs_clarification' ? '추가 설명 필요' : sceneReview(msg).label;
+        item.appendChild(status);
+      }
       if (msg.role === 'assistant' && msg.type === 'scene_agent' && msg.scene && !msg.dismissed) {
         const scene = msg.scene;
+        const review = sceneReview(msg);
         const panel = document.createElement('div');
         panel.className = 'ollama-chat-chip-panel ollama-chat-directed-scene';
         panel.appendChild(makePanelHead(index, '인물별 장면'));
+        review.issues.forEach(issue => {
+          const note = document.createElement('div');
+          note.className = 'ollama-chat-scene-note';
+          note.textContent = issue;
+          panel.appendChild(note);
+        });
         const names = new Map(scene.actors.map(a => [a.id, a.name]));
         for (const interpretation of scene.interpretations || []) {
           const note = document.createElement('div');
@@ -316,16 +337,21 @@ export function createOllamaChatPopup({
           row.appendChild(label);
           const chips = document.createElement('div');
           chips.className = 'ollama-chat-chips';
-          group.tags.forEach(tag => chips.appendChild(makeChip(tag, {})));
+          group.tags.forEach(tag => {
+            const chip = makeChip(tag, {});
+            chip.disabled = !review.complete;
+            if (!review.complete) chip.title = '의미 확인이 필요한 결과입니다. 아래의 확인 내용 포함 복사를 이용하세요.';
+            chips.appendChild(chip);
+          });
           row.appendChild(chips);
-          if (group.tags.length) row.appendChild(makeCopyAllRow(group.tags));
+          if (group.tags.length && review.complete) row.appendChild(makeCopyAllRow(group.tags));
           panel.appendChild(row);
         });
         const copy = document.createElement('button');
         copy.type = 'button';
         copy.className = 'ollama-chat-combo-copy';
-        copy.textContent = '인물·관계 포함 복사';
-        copy.addEventListener('click', () => { void copyChip(formatDirectedScene(scene)); });
+        copy.textContent = review.complete ? '인물·관계 포함 복사' : '확인 내용 포함 복사';
+        copy.addEventListener('click', () => { void copyChip(formatDirectedScene(scene, msg)); });
         panel.appendChild(copy);
         item.appendChild(panel);
       }
@@ -676,6 +702,8 @@ export function createOllamaChatPopup({
         messages.push({role: 'assistant', type: 'chat', content: String(payload.message || '')});
       }
       messages[messages.length - 1].toolTrace = Array.isArray(payload.toolTrace) ? payload.toolTrace : [];
+      messages[messages.length - 1].completion = payload.completion || null;
+      messages[messages.length - 1].semantic_review = payload.semantic_review || null;
       renderMessages();
       if (payload.model) {
         connModel = String(payload.model);

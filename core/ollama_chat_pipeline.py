@@ -238,6 +238,7 @@ class OllamaChatPipeline:
 
                 def search_tags(queries):
                     from core.llm_search_index import normalize_query, stem_token
+                    from core.ollama_chat_semantics import alias_senses, annotate, norm
 
                     def strict_stems(text):
                         return {stem_token(t) for t in re.findall(r"[a-z0-9]+", normalize_query(text))
@@ -255,14 +256,18 @@ class OllamaChatPipeline:
                             # evidence. No English stem test, substring expansion,
                             # or dropping English modifiers from mixed queries.
                             q = normalize_search_query(query)
+                            reviewed = {(s['id'], norm(tag)) for s in alias_senses(query) for tag in s['tags']}
                             found = [{"tag": row["tag"], "count": row.get("count", 0),
                                       "desc": str(row.get("desc") or "")[:200],
-                                      "match_kind": "keyword_exact",
+                                      "match_kind": row['match_kind'],
                                       "matched_keyword": row["matched_keyword"],
                                       "keyword_origin": row.get("keyword_origin", "unknown"),
-                                      "keyword_evidence": row.get("keyword_evidence", [])}
+                                      "keyword_evidence": row.get("keyword_evidence", []),
+                                      "reviewed_sense_id": row.get("reviewed_sense_id")}
                                      for row in raw if row.get("tag")
-                                     and row.get("match_kind") == "keyword_exact"
+                                     and (row.get("match_kind") == "keyword_exact" or
+                                          (row.get('match_kind') == 'reviewed_alias_exact' and
+                                           (row.get('reviewed_sense_id'), norm(row['tag'])) in reviewed))
                                      and normalize_search_query(row.get("matched_query")) == q
                                      and normalize_search_query(row.get("matched_keyword")) == q][:6]
                             if not found:
@@ -275,6 +280,7 @@ class OllamaChatPipeline:
                             else:
                                 note = ("Exact Korean keyword candidates include alias-field matches, not verified synonyms. "
                                         "Check each definition against the requested meaning; retry in English if it differs.")
+                            found = [annotate(row, query) for row in found]
                             searches.append({"query": query, "variants": [], "results": found, "note": note})
                             for row in found:
                                 rows[row["tag"]] = row
@@ -309,9 +315,16 @@ class OllamaChatPipeline:
                         allowed_stems = strict_stems(query)
                         candidates = exact or [row for row in unique.values()
                             if strict_stems(row["tag"]).issubset(allowed_stems)]
+                        reviewed = {(s['id'], norm(tag)) for s in alias_senses(query) for tag in s['tags']}
+                        candidates += [row for row in unique.values() if row not in candidates
+                            and row.get('match_kind') == 'reviewed_alias_exact'
+                            and (row.get('reviewed_sense_id'), norm(row['tag'])) in reviewed]
                         found = [{"tag": row["tag"], "count": row.get("count", 0),
-                                  "desc": str(row.get("desc") or "")[:200]}
+                                  "desc": str(row.get("desc") or "")[:200],
+                                  **{key: row[key] for key in ('match_kind', 'matched_query', 'matched_keyword',
+                                      'keyword_origin', 'keyword_evidence', 'reviewed_sense_id') if key in row}}
                                  for row in candidates[:6]]
+                        found = [annotate(row, query) for row in found]
                         searches.append({"query": query, "variants": variants, "results": found})
                         for row in found:
                             rows[row["tag"]] = row

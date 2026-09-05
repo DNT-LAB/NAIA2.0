@@ -87,6 +87,22 @@ def assess(case, result):
     return {"checks": checks, "passed": all(checks.values()), "relations": relations, "tags": sorted(tags)}
 
 
+def assess_review(case, result, criteria):
+    """Independent, versioned expectations; never import the runtime rule table."""
+    expected = copy.deepcopy(case)
+    expected['forbidden'] = list(dict.fromkeys(case.get('forbidden', []) + criteria.get('forbidden', [])))
+    outcome = assess(expected, result)
+    if 'max_actors' in criteria:
+        outcome['checks']['actor_count'] = len(result.get('scene', {}).get('actors', [])) <= criteria['max_actors']
+    outcome['content_passed'] = all(outcome['checks'].values())
+    completion = result.get('completion', 'unavailable')
+    outcome['completion'] = completion
+    outcome['checks']['semantic_completion'] = completion == (
+        'needs_clarification' if expected.get('type') == 'clarification' else 'complete')
+    outcome['passed'] = all(outcome['checks'].values())
+    return outcome
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, default=ROOT / "release_assets/ollama_chat_agent_cases.json")
@@ -96,6 +112,8 @@ def main(argv=None):
     parser.add_argument("--ids", nargs="*")
     parser.add_argument("--system-file", type=Path, help="Offline experiment only: replace the agent system instructions")
     parser.add_argument("--event-data-root", type=Path, help="Read existing Event Preset assets from this data root")
+    parser.add_argument("--review-cases", type=Path, help="Additional versioned meaning expectations; base score stays unchanged")
+    parser.add_argument("--seed", type=int, help="Offline sampling experiment; default keeps the production seed")
     args = parser.parse_args(argv)
     if args.system_file:
         import core.ollama_chat_agent as agent_module
@@ -110,18 +128,23 @@ def main(argv=None):
         from core.event_preset_service import EventPresetService
         context.event_preset_service = EventPresetService(ROOT, data_root=args.event_data_root.resolve())
     fixture = json.loads(args.cases.read_text(encoding="utf-8"))
+    review = json.loads(args.review_cases.read_text(encoding='utf-8')) if args.review_cases else None
     ids = [case["id"] for case in fixture.get("cases", [])]
     if not ids or len(ids) != len(set(ids)):
         parser.error("cases must be nonempty and have unique ids")
     if args.ids and set(args.ids) - set(ids):
         parser.error("unknown case ids: " + ", ".join(sorted(set(args.ids) - set(ids))))
-    if args.output.resolve() in {args.cases.resolve(), args.system_file.resolve() if args.system_file else None}:
+    if args.output.resolve() in {args.cases.resolve(), args.system_file.resolve() if args.system_file else None,
+                               args.review_cases.resolve() if args.review_cases else None}:
         parser.error("output must not overwrite an input fixture or system file")
     model_show = request_json(args.base_url, "/api/show", {"model": args.model}).json()
     model_tags = request_json(args.base_url, "/api/tags").json()
     calls = []
     def post(path, payload, **kwargs):
         started = time.monotonic()
+        payload = copy.deepcopy(payload)
+        if path == '/api/chat' and args.seed is not None:
+            payload.setdefault('options', {})['seed'] = args.seed
         snapshot = copy.deepcopy(payload)
         timeout = kwargs.get("timeout", 125)
         if isinstance(timeout, tuple):
@@ -144,10 +167,15 @@ def main(argv=None):
         "model_record": [m for m in model_tags.get("models", []) if m.get("name") == args.model],
         "code_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in (
             "core/ollama_chat_agent.py", "core/ollama_chat_pipeline.py", "core/ollama_assistant_service.py",
+            "core/ollama_chat_semantics.py",
             "app/backend/server/ollama_chat_tools.py", "app/backend/server/ollama_routes.py",
             "app/backend/server/autocomplete_commands.py", "core/tag_search_index.py",
             "core/llm_search_index.py", "core/kr_tag_loader.py", "core/tag_knowledge.py",
             "tools/ollama_chat_agent_eval.py")}, "cases": []}
+    if review is not None:
+        report['meaning_criteria'] = {'sha256': digest(review), 'fixture': review}
+    if args.seed is not None:
+        report['sampling_experiment'] = {'seed': args.seed, 'scope': 'Only the local evaluation request options'}
     if args.system_file:
         report["system_experiment"] = {"path": str(args.system_file),
             "sha256": hashlib.sha256(args.system_file.read_bytes()).hexdigest()}
@@ -170,9 +198,14 @@ def main(argv=None):
             result = run_production_case(client, case)
             row = {"id": case["id"], "input": case["input"], "baseline": baseline,
                    "expected": case, "result": result, "assessment": assess(case, result), "calls": list(calls)}
+            if review is not None:
+                row['meaning_assessment'] = assess_review(case, result, review.get('cases', {}).get(case['id'], {}))
             report["cases"].append(row)
             report["summary"] = {"attempted": len(report["cases"]),
                                  "passed": sum(c["assessment"]["passed"] for c in report["cases"])}
+            if review is not None:
+                report['summary']['meaning_content_passed'] = sum(c['meaning_assessment']['content_passed'] for c in report['cases'])
+                report['summary']['meaning_complete_passed'] = sum(c['meaning_assessment']['passed'] for c in report['cases'])
             args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             print(json.dumps({"id": case["id"], **row["assessment"], "error": result.get("error", "")}, ensure_ascii=False), flush=True)
     return 0 if all(c["assessment"]["passed"] for c in report["cases"]) else 1

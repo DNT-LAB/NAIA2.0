@@ -9,6 +9,7 @@ import json
 import re
 import time
 from typing import Any, Callable
+from core.ollama_chat_semantics import assessed_result, request_requirements, request_hint
 
 
 SYSTEM = """You answer the LAST user message as a Korean image-scene/tag assistant.
@@ -141,6 +142,15 @@ class _ToolSchemaError(ValueError):
         super().__init__(f"{path}: expected {expected}; {reason}")
 
 
+class _SemanticRepair(ValueError):
+    def __init__(self, result):
+        self.result = result
+        review = result['semantic_review']
+        super().__init__('Meaning check failed. Correct the selection using these reviewed requirements; '
+                         'a tag existing in the dictionary is not enough. ' + json.dumps(
+                             {'issues': review['issues'], 'requirements': review['requirements']}, ensure_ascii=False))
+
+
 def _validate(value, schema, path="arguments"):
     kind = schema["type"]
     if kind == "object":
@@ -228,7 +238,16 @@ class OllamaChatAgent:
             context = None
         if unresolved_action_reference(user_input, context, history):
             return {"handled": True, "ok": True, "type": "clarification", "examples": [],
-                    "question": "‘그거’가 어떤 행동을 뜻하나요? 동작을 구체적으로 알려주세요.", "toolTrace": []}
+                    "question": "‘그거’가 어떤 행동을 뜻하나요? 동작을 구체적으로 알려주세요.", "toolTrace": [],
+                    "completion": "needs_clarification"}
+        req = request_requirements(user_input)
+        prior = list(history or [])
+        if prior and prior[-1].get('role') == 'user' and str(prior[-1].get('content') or '').strip() == user_input:
+            prior.pop()
+        if req['ambiguous'] and not req['positive'] and not prior:
+            return {'handled': True, 'ok': True, 'type': 'clarification', 'examples': [],
+                    'completion': 'needs_clarification', 'toolTrace': [],
+                    'question': '‘' + ', '.join(req['ambiguous']) + '’은 해부학 용어인가요, 물건·장식 용어인가요? 원하시는 뜻을 알려주세요.'}
         try:
             with self.assistant.reasoning_chat_session() as model:
                 return self._run(user_input, model=model, context=context, history=history)
@@ -249,11 +268,18 @@ class OllamaChatAgent:
             content = str(item.get("content") or "")[:4000]
             if item.get("role") == "assistant" and isinstance(item.get("scene"), dict):
                 content += "\nPrevious scene data: " + json.dumps(item["scene"], ensure_ascii=False)[:5000]
+                content += "\nPrevious review status (reference only, recheck for this request): " + json.dumps(
+                    {"completion": item.get('completion', 'unverified'),
+                     "semantic_review": item.get('semantic_review', {})}, ensure_ascii=False)[:3000]
             if content:
                 messages.append({"role": item["role"], "content": content})
         # One current user turn. An extra user message with an empty UI prompt
         # made E4B treat that empty prompt as the request and ignore the real text.
         current = user_input
+        requirements = request_requirements(user_input)
+        if requirements['positive'] or requirements['negative'] or requirements['ambiguous']:
+            current += "\n\nReviewed local lexical meanings (preserve the request and search the listed concepts; " \
+                       "do not add unrelated senses): " + json.dumps(request_hint(requirements), ensure_ascii=False)
         glosses = korean_scene_glosses(user_input)
         if glosses:
             current += "\n\nPossible meanings of phrases IN this request (verify the context; search tags before selecting): " + json.dumps(glosses, ensure_ascii=False)
@@ -265,6 +291,26 @@ class OllamaChatAgent:
         ledger, trace, cache = {}, [], {}
         calls_used = 0
         schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
+        semantic_repairs, semantic_partial = 0, None
+
+        def remember(output, tool, arguments, origin='model', wanted=None):
+            # Preserve every query's evidence, including later stronger matches.
+            rows = [(row, search.get('query')) for search in output.get('searches', [])
+                    for row in search.get('results', [])]
+            rows += [(row, row.get('search_query')) for row in output.get('tags', [])]
+            for row, query in rows:
+                tag = str(row.get('tag') or '').strip()
+                if not tag or (wanted is not None and _norm(tag) not in wanted):
+                    continue
+                entry = ledger.setdefault(_norm(tag), {'tag': tag, 'source': tool, 'names': [], 'evidence': []})
+                if tool == 'search_characters':
+                    entry['source'] = tool
+                entry['names'] = list(dict.fromkeys(entry.get('names', []) + row.get('names', [])))
+                evidence = {k: row[k] for k in ('desc', 'match_kind', 'matched_keyword', 'keyword_origin',
+                    'keyword_evidence', 'reviewed_sense_id', 'semantic_senses', 'semantic_version') if k in row}
+                evidence.update(tool=tool, query=query, arguments=arguments, origin=origin)
+                if evidence not in entry['evidence']:
+                    entry['evidence'].append(evidence)
 
         def validate_exact_tags(missing):
             nonlocal calls_used
@@ -282,8 +328,7 @@ class OllamaChatAgent:
             cache[key] = output
             wanted = {_norm(t) for t in missing}
             verified = [r for r in output.get("tags", []) if _norm(r.get("tag")) in wanted]
-            for row in verified:
-                ledger.setdefault(_norm(row["tag"]), {"tag": row["tag"], "source": "search_tags"})
+            remember(output, 'search_tags', {'queries': missing}, 'validation', wanted)
             trace.append({"tool": "search_tags", "origin": "validation", "arguments": {"queries": missing},
                           "status": "ok" if verified else "no_match", "tagCount": len(verified), "cached": cached})
 
@@ -335,13 +380,18 @@ class OllamaChatAgent:
                         if not isinstance(output, dict):
                             raise ValueError("Tool provider returned invalid data")
                         cache[key] = output
-                        for row in output.get("tags", []):
-                            tag = str(row.get("tag") or "").strip()
-                            if tag:
-                                ledger.setdefault(_norm(tag), {"tag": tag, "source": name,
-                                                              "names": row.get("names", [])})
+                        remember(output, name, args)
                         trace.append({"tool": name, "arguments": args, "status": output.get("status", "ok"),
                                       "tagCount": len(output.get("tags", [])), "cached": cached})
+                    except _SemanticRepair as exc:
+                        semantic_repairs += 1
+                        semantic_partial = exc.result
+                        trace.append({'tool': str(name), 'status': 'error', 'errorType': 'semantic', 'error': str(exc)})
+                        if semantic_repairs >= 2:
+                            semantic_partial.update(handled=True, model=model, toolTrace=trace, turns=turn+1,
+                                elapsed_seconds=round(time.monotonic()-started, 2))
+                            return semantic_partial
+                        output = {'status': 'error', 'error': str(exc)}
                     except _ToolSchemaError as exc:
                         signature = (name, *exc.signature)
                         if signature != schema_failure:
@@ -362,6 +412,10 @@ class OllamaChatAgent:
                         trace.append({"tool": str(name), "status": "error", "error": str(exc)})
                     messages.append({"role": "tool", "tool_name": str(name),
                                      "content": json.dumps(output, ensure_ascii=False)})
+            if semantic_partial is not None:
+                semantic_partial.update(handled=True, model=model, toolTrace=trace,
+                    elapsed_seconds=round(time.monotonic()-started, 2))
+                return semantic_partial
             raise RuntimeError("추론·도구 호출 한도 안에서 결과를 확정하지 못했습니다. 요청을 나누어 주세요.")
         except Exception as exc:
             # Never drop a failed directed scene into the legacy flat-tag pipeline.
@@ -379,8 +433,12 @@ class OllamaChatAgent:
             question = args.get("question", "").strip()
             if not question:
                 raise ValueError("A specific clarification question is required")
-            return {"ok": True, "type": "clarification", "question": question, "examples": []}
+            return {"ok": True, "type": "clarification", "question": question, "examples": [],
+                    "completion": "needs_clarification"}
         if kind == "chat":
+            req = request_requirements(source)
+            if req['positive']:
+                return assessed_result(source, {'actors': [], 'relations': [], 'common_tags': [], 'interpretations': []}, ledger)
             return {"ok": True, "type": "chat", "message": args["summary"]}
         if not ledger and validate_exact is None:
             raise ValueError("No verified tags yet. Search or ask a clarification.")
@@ -441,5 +499,9 @@ class OllamaChatAgent:
         selected = scene["common_tags"] + [t for a in scene["actors"] for t in a["tags"]]
         if not selected:
             raise ValueError("Scene has no selected tags; ask a clarification instead")
-        return {"ok": True, "type": "scene_agent", "message": args["summary"], "scene": scene,
-                "provenance": {tag: ledger[_norm(tag)]["source"] for tag in selected}}
+        result = assessed_result(source, scene, ledger)
+        result['provenance'] = {tag: ledger[_norm(tag)]['source'] for tag in selected}
+        result['tag_evidence'] = {tag: ledger[_norm(tag)].get('evidence', []) for tag in selected}
+        if result['semantic_review']['repairable']:
+            raise _SemanticRepair(result)
+        return result

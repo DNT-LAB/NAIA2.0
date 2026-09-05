@@ -606,6 +606,7 @@
         "core/ollama_assistant_service.py",
         "core/ollama_model_spec.py",
         "core/ollama_chat_agent.py",
+        "core/ollama_chat_semantics.py",
         "core/ollama_chat_pipeline.py",
         "app/backend/server/ollama_chat_tools.py",
         "core/semantic_tag_discovery.py",

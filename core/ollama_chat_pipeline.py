@@ -258,14 +258,24 @@ class OllamaChatPipeline:
                             found = [{"tag": row["tag"], "count": row.get("count", 0),
                                       "desc": str(row.get("desc") or "")[:200],
                                       "match_kind": "keyword_exact",
-                                      "matched_keyword": row["matched_keyword"]}
+                                      "matched_keyword": row["matched_keyword"],
+                                      "keyword_origin": row.get("keyword_origin", "unknown"),
+                                      "keyword_evidence": row.get("keyword_evidence", [])}
                                      for row in raw if row.get("tag")
                                      and row.get("match_kind") == "keyword_exact"
                                      and normalize_search_query(row.get("matched_query")) == q
                                      and normalize_search_query(row.get("matched_keyword")) == q][:6]
-                            searches.append({"query": query, "variants": [], "results": found,
-                                "note": ("Exact Korean keyword candidates; check their meanings."
-                                         if found else "No exact Korean keyword match. Retry a concise English concept or a complete Korean alias; do not drop requested modifiers.")})
+                            if not found:
+                                note = "No exact Korean keyword match. Retry a concise English concept or a complete Korean alias; do not drop requested modifiers."
+                            elif all(row['keyword_origin'] == 'label' for row in found):
+                                note = ("All candidates matched category labels only, not aliases. Labels can name a broader or different concept. "
+                                        "Search a concise English concept to verify the requested meaning before selecting; do not reinterpret a candidate's definition.")
+                            elif any(row['keyword_origin'] == 'unknown' for row in found):
+                                note = "Some keyword origins are unknown. Verify the requested meaning with an English concept search before selecting."
+                            else:
+                                note = ("Exact Korean keyword candidates include alias-field matches, not verified synonyms. "
+                                        "Check each definition against the requested meaning; retry in English if it differs.")
+                            searches.append({"query": query, "variants": [], "results": found, "note": note})
                             for row in found:
                                 rows[row["tag"]] = row
                             continue

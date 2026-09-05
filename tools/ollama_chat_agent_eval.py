@@ -135,6 +135,8 @@ def main(argv=None):
     assistant = OllamaAssistantService(base_url=args.base_url, default_model=args.model, http_post=post)
     report = {"schema_version": 2, "baseline_source": "Codex-authored expected roles and direct local queries; not a live Codex API",
         "execution_path": "POST /api/ollama/chat via register_ollama_routes (in-process ASGI; live Ollama)",
+        "context": {"type": "SimpleNamespace", "runtime_paths": None,
+                    "scope": "Production route/factory with supplied local data; not full WebSessionContext lifecycle"},
         "baseline_stage": "production pipeline searcher, before Chat tool postfilter",
         "tag_data_roots": [str(ROOT / 'data')],
         "fixture_sha256": digest(fixture), "records_sha256": digest(records.raw),

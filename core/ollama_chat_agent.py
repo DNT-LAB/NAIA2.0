@@ -135,28 +135,37 @@ def unresolved_action_reference(source, context, history):
         r"(?:해\s*줘|만들어\s*줘|찾아\s*줘|추천해\s*줘|좀)?[.!?]*$", source))
 
 
+class _ToolSchemaError(ValueError):
+    def __init__(self, path, expected, reason):
+        self.signature = (path, expected, reason)
+        super().__init__(f"{path}: expected {expected}; {reason}")
+
+
 def _validate(value, schema, path="arguments"):
     kind = schema["type"]
     if kind == "object":
         if not isinstance(value, dict):
-            raise ValueError(f"{path} must be an object")
+            raise _ToolSchemaError(path, kind, "invalid type")
         props = schema["properties"]
         if set(value) - set(props) or set(schema["required"]) - set(value):
-            raise ValueError(f"{path} has unknown or missing fields")
+            missing, unknown = sorted(set(schema["required"]) - set(value)), sorted(set(value) - set(props))
+            raise _ToolSchemaError(path, kind, f"missing fields {missing}; unknown fields {unknown}")
         for key, item in value.items():
             _validate(item, props[key], f"{path}.{key}")
     elif kind == "array":
-        if not isinstance(value, list) or not schema.get("minItems", 0) <= len(value) <= schema["maxItems"]:
-            raise ValueError(f"{path} has invalid length/type")
+        if not isinstance(value, list):
+            raise _ToolSchemaError(path, kind, "invalid type; use [] for an empty array")
+        if not schema.get("minItems", 0) <= len(value) <= schema["maxItems"]:
+            raise _ToolSchemaError(path, kind, f"length must be {schema.get('minItems', 0)}..{schema['maxItems']}")
         for item in value:
             _validate(item, schema["items"], path)
     elif kind == "string":
         if not isinstance(value, str) or len(value) > 1200 or "\x00" in value:
-            raise ValueError(f"{path} must be a short string")
+            raise _ToolSchemaError(path, kind, "must be a short string without null characters")
         if "enum" in schema and value not in schema["enum"]:
-            raise ValueError(f"{path} has invalid value")
+            raise _ToolSchemaError(path, kind, f"value must be one of {schema['enum']}")
     elif kind == "boolean" and not isinstance(value, bool):
-        raise ValueError(f"{path} must be boolean")
+        raise _ToolSchemaError(path, kind, "invalid type")
 
 
 def _norm(tag):
@@ -205,6 +214,7 @@ class OllamaChatAgent:
     MAX_TURNS = 6
     MAX_CALLS = 14
     MAX_SECONDS = 240
+    MAX_REPEATED_SCHEMA_ERRORS = 2
 
     def __init__(self, assistant, *, tag_search: Callable, character_search: Callable,
                  event_search: Callable, progress: Callable | None = None):
@@ -254,6 +264,7 @@ class OllamaChatAgent:
         messages.append({"role": "user", "content": current})
         ledger, trace, cache = {}, [], {}
         calls_used = 0
+        schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
 
         def validate_exact_tags(missing):
             nonlocal calls_used
@@ -302,6 +313,9 @@ class OllamaChatAgent:
                         if name not in TOOL_SCHEMAS:
                             raise ValueError("Unknown tool; only listed read-only tools are allowed")
                         _validate(args, TOOL_SCHEMAS[name][1])
+                        # A valid schema is repair progress even when a later
+                        # grounding/direction check still rejects the content.
+                        schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
                         if name == "finish":
                             # A parallel finish hasn't seen results from the same assistant turn.
                             if len(calls) != 1:
@@ -328,7 +342,22 @@ class OllamaChatAgent:
                                                               "names": row.get("names", [])})
                         trace.append({"tool": name, "arguments": args, "status": output.get("status", "ok"),
                                       "tagCount": len(output.get("tags", [])), "cached": cached})
+                    except _ToolSchemaError as exc:
+                        signature = (name, *exc.signature)
+                        if signature != schema_failure:
+                            schema_repetitions = 1
+                        elif schema_failure_turn != turn:
+                            schema_repetitions += 1
+                        schema_failure, schema_failure_turn = signature, turn
+                        output = {"status": "error", "error": str(exc)}
+                        trace.append({"tool": str(name), "status": "error", "error": str(exc),
+                                      "errorType": "schema", "repetitions": schema_repetitions})
+                        # Multiple calls in one response have not read feedback.
+                        # Only a repeat in a subsequent response spends repair.
+                        if schema_repetitions >= self.MAX_REPEATED_SCHEMA_ERRORS:
+                            raise RuntimeError("모델이 같은 응답 형식 오류를 반복해 처리를 중단했습니다. 잠시 후 다시 시도해 주세요.")
                     except (ValueError, TypeError, KeyError) as exc:
+                        schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
                         output = {"status": "error", "error": str(exc)}
                         trace.append({"tool": str(name), "status": "error", "error": str(exc)})
                     messages.append({"role": "tool", "tool_name": str(name),

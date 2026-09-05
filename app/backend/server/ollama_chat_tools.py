@@ -3,6 +3,47 @@ from __future__ import annotations
 import re
 
 
+def _keyword_evidence(context, index, tag: str, query: str) -> dict:
+    """Recover syntactic origins from raw fields, never flattened index order.
+
+    Keep references, not another copy of the vocabulary. Rebuild on either raw
+    replacement or shared-index invalidation (the data provisioning contract).
+    """
+    from core.tag_axis_registry import normalize_tag
+    from core.tag_search_index import normalize_search_query
+
+    raw = getattr(context, 'kr_tags_raw', None)
+    cached = getattr(context, '_chat_keyword_records', None)
+    if cached is None or cached[0] is not raw or cached[1] is not index:
+        by_tag = {}
+        for record in (raw or {}).values():
+            canonical = normalize_tag(str(record.get('_tag', '') or record.get('tag', '')))
+            if canonical:
+                by_tag.setdefault(canonical, []).append(record)
+        cached = (raw, index, by_tag)
+        context._chat_keyword_records = cached
+    evidence = []
+    for record in cached[2].get(normalize_tag(tag), []):
+        for field in ('keywords_kr', 'keywords'):
+            parts = [part.strip() for part in str(record.get(field, '') or '').split(',') if part.strip()]
+            for position, part in enumerate(parts):
+                if normalize_search_query(part.replace('<', '').replace('>', '')) != query:
+                    continue
+                if position == 0 and re.fullmatch(r'<[^<>]+>', part):
+                    kind = 'label'
+                elif '<' in part or '>' in part:
+                    kind = 'unknown'
+                else:
+                    kind = 'alias'
+                item = {'field': field, 'kind': kind}
+                if item not in evidence:
+                    evidence.append(item)
+    kinds = {item['kind'] for item in evidence}
+    origin = ('both' if kinds == {'label', 'alias'} else
+              next(iter(kinds)) if len(kinds) == 1 else 'unknown')
+    return {'keyword_origin': origin, 'keyword_evidence': evidence}
+
+
 def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
     """Chat search lane: exact Korean keywords, existing English retrieval.
 
@@ -38,7 +79,8 @@ def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
         if canonical is None:
             continue
         rows.append({**canonical, 'match_kind': 'keyword_exact',
-                     'matched_query': q, 'matched_keyword': keyword})
+                     'matched_query': q, 'matched_keyword': keyword,
+                     **_keyword_evidence(context, index, result.tag, q)})
         if len(rows) >= min(limit, 12):
             break
     return rows

@@ -3,6 +3,36 @@ from __future__ import annotations
 import re
 
 
+def _spacing_keywords(context, index):
+    """Cache cross-spelling conflicts for this raw/index version, Chat only.
+
+    Include all indexed tags before general-vocabulary filtering. Otherwise an
+    excluded entity could hide a conflicting spelling. A shared category label
+    with several targets is not itself a spacing conflict; differing target SETS
+    across existing spellings are. Unseen semantic ambiguity remains unreviewed.
+    """
+    from core.ollama_chat_semantics import korean_spacing_key
+    from core.tag_search_index import normalize_search_query
+
+    raw = getattr(context, 'kr_tags_raw', None)
+    cached = getattr(context, '_chat_spacing_keywords', None)
+    if cached is not None and cached[0] is raw and cached[1] is index:
+        return cached[2]
+    forms = {}
+    for tag, entry in index._entries.items():
+        for keyword in entry.keywords:
+            form = normalize_search_query(keyword)
+            # Ineligible query spellings (e.g. separated numbers) can still
+            # reveal a collision; do not hide them from the exclusion set.
+            key = korean_spacing_key(form.replace(' ', ''))
+            if key:
+                forms.setdefault(key, {}).setdefault(form, set()).add(tag)
+    unsafe = frozenset(key for key, spellings in forms.items()
+                       if len({frozenset(tags) for tags in spellings.values()}) > 1)
+    context._chat_spacing_keywords = (raw, index, unsafe)
+    return unsafe
+
+
 def _keyword_evidence(context, index, tag: str, query: str) -> dict:
     """Recover syntactic origins from raw fields, never flattened index order.
 
@@ -45,13 +75,14 @@ def _keyword_evidence(context, index, tag: str, query: str) -> dict:
 
 
 def _search_chat_keywords(context, query: str, limit: int = 6) -> list[dict]:
-    """Chat search lane: exact Korean keywords, existing English retrieval.
+    """Exact Korean keywords, collision-checked spacing, existing English retrieval.
 
     Autocomplete ranks partial/description matches for typing assistance. They
     must not become selected concepts just because a native tool used Korean.
     Read its structured entries without changing the shared index or ranking.
     """
     from core.tag_knowledge import has_hangul
+    from core.ollama_chat_semantics import korean_spacing_key
     from core.tag_search_index import normalize_search_query
     from app.backend.server.ollama_routes import ensure_llm_search_index, search_llm_tags
 
@@ -64,23 +95,35 @@ def _search_chat_keywords(context, query: str, limit: int = 6) -> list[dict]:
 
     index = ensure_tag_search_index(context)
     general = ensure_llm_search_index(context)
+    compact = korean_spacing_key(q)
+    allow_spacing = bool(compact) and compact not in _spacing_keywords(context, index)
+    matches = []
     rows = []
     # Filter before limiting: a popular partial match must not crowd an exact
     # low-frequency keyword out of the candidate window.
     for result in index.search_semantic(q, limit=None):
         keyword = next((kw for kw in result.entry.keywords
                         if normalize_search_query(kw) == q), None)
-        if keyword is None:
-            continue
+        kind = 'keyword_exact'
+        if keyword is None and allow_spacing:
+            keyword = next((kw for kw in result.entry.keywords
+                            if korean_spacing_key(normalize_search_query(kw)) == compact), None)
+            kind = 'keyword_spacing_variant'
+        if keyword is not None:
+            matches.append((kind, result.tag, keyword))
+    # Weak variants cannot displace an existing exact result at the limit.
+    matches.sort(key=lambda match: match[0] != 'keyword_exact')
+    for kind, tag, keyword in matches:
         # Keep the same named-entity, parenthesis and frequency boundary as the
         # English general vocabulary; characters have their own search tool.
-        canonical = next((row for row in general.search(result.tag, 1)
-                          if normalize_search_query(row['tag']) == normalize_search_query(result.tag)), None)
+        canonical = next((row for row in general.search(tag, 1)
+                          if normalize_search_query(row['tag']) == normalize_search_query(tag)), None)
         if canonical is None:
             continue
-        rows.append({**canonical, 'match_kind': 'keyword_exact',
+        rows.append({**canonical, 'match_kind': kind,
                      'matched_query': q, 'matched_keyword': keyword,
-                     **_keyword_evidence(context, index, result.tag, q)})
+                     **({'spacing_collision_free': True} if kind == 'keyword_spacing_variant' else {}),
+                     **_keyword_evidence(context, index, tag, normalize_search_query(keyword))})
         if len(rows) >= min(limit, 12):
             break
     return rows

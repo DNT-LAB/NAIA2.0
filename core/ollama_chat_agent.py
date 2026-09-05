@@ -307,7 +307,7 @@ class OllamaChatAgent:
                     entry['source'] = tool
                 entry['names'] = list(dict.fromkeys(entry.get('names', []) + row.get('names', [])))
                 evidence = {k: row[k] for k in ('desc', 'match_kind', 'matched_keyword', 'keyword_origin',
-                    'keyword_evidence', 'reviewed_sense_id', 'semantic_senses', 'semantic_version') if k in row}
+                    'keyword_evidence', 'spacing_collision_free', 'reviewed_sense_id', 'semantic_senses', 'semantic_version') if k in row}
                 evidence.update(tool=tool, query=query, arguments=arguments, origin=origin)
                 if evidence not in entry['evidence']:
                     entry['evidence'].append(evidence)

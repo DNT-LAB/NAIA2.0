@@ -238,7 +238,7 @@ class OllamaChatPipeline:
 
                 def search_tags(queries):
                     from core.llm_search_index import normalize_query, stem_token
-                    from core.ollama_chat_semantics import alias_senses, annotate, norm
+                    from core.ollama_chat_semantics import alias_senses, annotate, norm, korean_spacing_key
 
                     def strict_stems(text):
                         return {stem_token(t) for t in re.findall(r"[a-z0-9]+", normalize_query(text))
@@ -252,24 +252,32 @@ class OllamaChatPipeline:
                         if re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", query):
                             from core.tag_search_index import normalize_search_query
 
-                            # The server adapter supplies exact whole-keyword
-                            # evidence. No English stem test, substring expansion,
-                            # or dropping English modifiers from mixed queries.
+                            # The adapter checks corpus-wide spelling collisions.
+                            # Independently require complete matching evidence;
+                            # never drop modifiers or accept substring expansion.
                             q = normalize_search_query(query)
                             reviewed = {(s['id'], norm(tag)) for s in alias_senses(query) for tag in s['tags']}
+                            def keyword_matches(row):
+                                if normalize_search_query(row.get('matched_query')) != q:
+                                    return False
+                                keyword = normalize_search_query(row.get('matched_keyword'))
+                                kind = row.get('match_kind')
+                                if kind == 'keyword_spacing_variant':
+                                    compact = korean_spacing_key(q)
+                                    return (row.get('spacing_collision_free') is True and bool(compact)
+                                            and q != keyword and compact == korean_spacing_key(keyword))
+                                return keyword == q and (kind == 'keyword_exact' or
+                                    (kind == 'reviewed_alias_exact' and
+                                     (row.get('reviewed_sense_id'), norm(row['tag'])) in reviewed))
                             found = [{"tag": row["tag"], "count": row.get("count", 0),
                                       "desc": str(row.get("desc") or "")[:200],
                                       "match_kind": row['match_kind'],
                                       "matched_keyword": row["matched_keyword"],
                                       "keyword_origin": row.get("keyword_origin", "unknown"),
                                       "keyword_evidence": row.get("keyword_evidence", []),
+                                      **({'spacing_collision_free': True} if row['match_kind'] == 'keyword_spacing_variant' else {}),
                                       "reviewed_sense_id": row.get("reviewed_sense_id")}
-                                     for row in raw if row.get("tag")
-                                     and (row.get("match_kind") == "keyword_exact" or
-                                          (row.get('match_kind') == 'reviewed_alias_exact' and
-                                           (row.get('reviewed_sense_id'), norm(row['tag'])) in reviewed))
-                                     and normalize_search_query(row.get("matched_query")) == q
-                                     and normalize_search_query(row.get("matched_keyword")) == q][:6]
+                                     for row in raw if row.get("tag") and keyword_matches(row)][:6]
                             if not found:
                                 note = "No exact Korean keyword match. Retry a concise English concept or a complete Korean alias; do not drop requested modifiers."
                             elif all(row['keyword_origin'] == 'label' for row in found):
@@ -280,6 +288,11 @@ class OllamaChatPipeline:
                             else:
                                 note = ("Exact Korean keyword candidates include alias-field matches, not verified synonyms. "
                                         "Check each definition against the requested meaning; retry in English if it differs.")
+                            if any(row['match_kind'] == 'keyword_spacing_variant' for row in found):
+                                note = ("Some candidates use whole Korean keyword spacing variants. No cross-spelling "
+                                        "target conflict was found in the current dictionary; this is not verified meaning. "
+                                        "Check definitions and use English to resolve uncertainty. " +
+                                        note.replace("Exact Korean keyword candidates", "Korean keyword candidates"))
                             found = [annotate(row, query) for row in found]
                             searches.append({"query": query, "variants": [], "results": found, "note": note})
                             for row in found:

@@ -60,6 +60,19 @@ def norm(text):
     return re.sub(r"\s+", " ", str(text or "").replace("_", " ").strip().casefold())
 
 
+def korean_spacing_key(normalized_text):
+    """Whole-keyword spacing only; callers normalize with Search's contract.
+
+    English/mixed text, punctuation and separated numbers are not eligible.
+    Equal keys are spelling evidence, never a certification of shared meaning.
+    """
+    text = str(normalized_text or "")
+    if (not re.fullmatch(r"[가-힣0-9 ]+", text) or not re.search(r"[가-힣]", text)
+            or re.search(r"[0-9] +[0-9]", text)):
+        return ""
+    return text.replace(" ", "")
+
+
 def alias_senses(query):
     query = norm(query)
     ids = set(AMBIGUOUS.get(query, ()))

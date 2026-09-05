@@ -644,7 +644,7 @@ def register_ollama_routes(
             return _chat_pipeline_service()
 
     def _chat_pipeline_service() -> OllamaChatPipeline:
-        from app.backend.server.ollama_chat_tools import search_characters, search_events
+        from app.backend.server.ollama_chat_tools import search_chat_tags, search_characters, search_events
 
         existing = getattr(context, "ollama_chat_pipeline", None)
         assistant = service()
@@ -655,6 +655,7 @@ def register_ollama_routes(
         if isinstance(existing, OllamaChatPipeline):
             existing.assistant = assistant
             existing.assist = assist
+            existing.searcher = lambda query, limit, gen_context: search_chat_tags(context, query, limit)
             existing.clothes_provider = _clothes_provider
             existing.related_provider = lambda seeds, limit: related_tags_for_chat(context, seeds, limit=limit)
             existing.character_search = lambda **args: search_characters(context, **args)
@@ -663,9 +664,7 @@ def register_ollama_routes(
         existing = OllamaChatPipeline(
             assistant=assistant,
             assist_helpers=assist,
-            searcher=lambda query, limit, gen_context: (
-                [] if _HANGUL_RE.search(str(query or "")) else search_llm_tags(context, query, limit=limit)
-            ),
+            searcher=lambda query, limit, gen_context: search_chat_tags(context, query, limit),
             event_provider=lambda rating, person_id, query, top: _event_combo_tag_stats(
                 context, rating, person_id, query, top
             ),
@@ -897,8 +896,8 @@ def register_ollama_routes(
         return "\n\n".join(parts)
 
     def _chat_tool_searcher(query: str, limit: int, _gen_context: GenerationInfoContext) -> list[dict[str, Any]]:
-        # Chat 도구 검색은 pipeline에서 영어 subject/expansion으로 정리된 뒤 들어온다.
-        # Hangul/mixed query는 pipeline의 최후 fallback에서만 도달한다.
+        # Legacy intent/blocked paths use this helper. Native Chat has its own
+        # search_chat_tags adapter and may issue Korean or mixed-language queries.
         rows = search_llm_tags(context, query, limit=limit)
         if rows or _HANGUL_RE.search(str(query or "")):
             return rows

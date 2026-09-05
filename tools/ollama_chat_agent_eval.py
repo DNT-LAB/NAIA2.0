@@ -18,11 +18,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.ollama_assistant_service import OllamaAssistantService
-from core.ollama_chat_pipeline import OllamaChatPipeline
 from core.intent_action_pipeline import GenerationInfoContext
 from core.llm_search_index import LLMSearchIndex, normalize_query
 from tools.ollama_chat_query_eval import digest, request_json
-from app.backend.server.ollama_chat_tools import search_characters, search_events
+
+
+def production_chat_client(context, assistant):
+    """Use the actual HTTP route/factory, never rebuild its searcher in an eval."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.backend.server.ollama_routes import register_ollama_routes
+
+    context.ollama_assistant_service = assistant
+    app = FastAPI()
+    async def inline(fn, *args):
+        return fn(*args)
+    register_ollama_routes(app, context, run_in_thread=inline)
+    return TestClient(app)
+
+
+def run_production_case(client, case):
+    response = client.post('/api/ollama/chat', json={
+        'messages': [*case.get('history', []), {'role': 'user', 'content': case['input']}],
+        'context': case.get('context', {})})
+    response.raise_for_status()
+    return response.json()
 
 
 def assess(case, result):
@@ -82,8 +102,10 @@ def main(argv=None):
         agent_module.SYSTEM = args.system_file.read_text(encoding="utf-8")
     from core.kr_tag_loader import load_kr_tag_records
     records = load_kr_tag_records(str(ROOT), data_roots=[ROOT / "data"])
-    index = LLMSearchIndex.from_raw_tag_records(records.raw)
-    context = SimpleNamespace(repo_root=ROOT, runtime_paths=None, kr_tags_raw=records.raw)
+    index = LLMSearchIndex.from_raw_tag_records(records.raw, built_from=records.raw)
+    context = SimpleNamespace(repo_root=ROOT, runtime_paths=None, kr_tags_raw=records.raw,
+        llm_search_index=index, autocomplete_state=SimpleNamespace(kr_tags_loaded=True),
+        subscribe=lambda *a: None)
     if args.event_data_root:
         from core.event_preset_service import EventPresetService
         context.event_preset_service = EventPresetService(ROOT, data_root=args.event_data_root.resolve())
@@ -111,17 +133,19 @@ def main(argv=None):
                           "elapsed_seconds": time.monotonic() - started})
         return result
     assistant = OllamaAssistantService(base_url=args.base_url, default_model=args.model, http_post=post)
-    pipeline = OllamaChatPipeline(assistant=assistant, assist_helpers=None,
-        searcher=lambda q, limit, _: index.search(q, limit), event_provider=lambda *a: [],
-        character_search=lambda **kw: search_characters(context, **kw),
-        event_search=lambda **kw: search_events(context, **kw))
-    report = {"schema_version": 1, "baseline_source": "Codex-authored expected roles and direct local queries; not a live Codex API",
+    report = {"schema_version": 2, "baseline_source": "Codex-authored expected roles and direct local queries; not a live Codex API",
+        "execution_path": "POST /api/ollama/chat via register_ollama_routes (in-process ASGI; live Ollama)",
+        "baseline_stage": "production pipeline searcher, before Chat tool postfilter",
+        "tag_data_roots": [str(ROOT / 'data')],
         "fixture_sha256": digest(fixture), "records_sha256": digest(records.raw),
         "model": args.model, "model_show": model_show,
         "model_record": [m for m in model_tags.get("models", []) if m.get("name") == args.model],
         "code_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in (
             "core/ollama_chat_agent.py", "core/ollama_chat_pipeline.py", "core/ollama_assistant_service.py",
-            "app/backend/server/ollama_chat_tools.py", "tools/ollama_chat_agent_eval.py")}, "cases": []}
+            "app/backend/server/ollama_chat_tools.py", "app/backend/server/ollama_routes.py",
+            "app/backend/server/autocomplete_commands.py", "core/tag_search_index.py",
+            "core/llm_search_index.py", "core/kr_tag_loader.py", "core/tag_knowledge.py",
+            "tools/ollama_chat_agent_eval.py")}, "cases": []}
     if args.system_file:
         report["system_experiment"] = {"path": str(args.system_file),
             "sha256": hashlib.sha256(args.system_file.read_bytes()).hexdigest()}
@@ -132,20 +156,23 @@ def main(argv=None):
         report["event_data"] = {"path": str(asset), "exists": asset.is_file(),
             "sha256": hashlib.sha256(asset.read_bytes()).hexdigest() if asset.is_file() else None}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    for case in fixture["cases"]:
-        if args.ids and case["id"] not in args.ids:
-            continue
-        calls.clear()
-        # Direct baseline uses exactly the same local general tag index.
-        baseline = [{"query": q, "rows": index.search(q, 6)} for q in case.get("baseline_queries", [])]
-        result = pipeline.run(case["input"], gen_context=GenerationInfoContext(), history=case.get("history", []))
-        row = {"id": case["id"], "input": case["input"], "baseline": baseline,
-               "expected": case, "result": result, "assessment": assess(case, result), "calls": list(calls)}
-        report["cases"].append(row)
-        report["summary"] = {"attempted": len(report["cases"]),
-                             "passed": sum(c["assessment"]["passed"] for c in report["cases"])}
-        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(json.dumps({"id": case["id"], **row["assessment"], "error": result.get("error", "")}, ensure_ascii=False), flush=True)
+    with production_chat_client(context, assistant) as client:
+        # Creates/reuses exactly the same production pipeline as a Chat request.
+        client.get('/api/ollama/chat/progress').raise_for_status()
+        for case in fixture["cases"]:
+            if args.ids and case["id"] not in args.ids:
+                continue
+            calls.clear()
+            baseline = [{"query": q, "rows": context.ollama_chat_pipeline.searcher(
+                q, 6, GenerationInfoContext())} for q in case.get("baseline_queries", [])]
+            result = run_production_case(client, case)
+            row = {"id": case["id"], "input": case["input"], "baseline": baseline,
+                   "expected": case, "result": result, "assessment": assess(case, result), "calls": list(calls)}
+            report["cases"].append(row)
+            report["summary"] = {"attempted": len(report["cases"]),
+                                 "passed": sum(c["assessment"]["passed"] for c in report["cases"])}
+            args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(json.dumps({"id": case["id"], **row["assessment"], "error": result.get("error", "")}, ensure_ascii=False), flush=True)
     return 0 if all(c["assessment"]["passed"] for c in report["cases"]) else 1
 
 

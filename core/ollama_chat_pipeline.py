@@ -248,6 +248,27 @@ class OllamaChatPipeline:
                         if not query.strip() or len(query) > 160:
                             raise ValueError("Search queries must be 1-160 characters")
                         raw = self.searcher(query, 6, gen_context)
+                        if re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", query):
+                            from core.tag_search_index import normalize_search_query
+
+                            # The server adapter supplies exact whole-keyword
+                            # evidence. No English stem test, substring expansion,
+                            # or dropping English modifiers from mixed queries.
+                            q = normalize_search_query(query)
+                            found = [{"tag": row["tag"], "count": row.get("count", 0),
+                                      "desc": str(row.get("desc") or "")[:200],
+                                      "match_kind": "keyword_exact",
+                                      "matched_keyword": row["matched_keyword"]}
+                                     for row in raw if row.get("tag")
+                                     and row.get("match_kind") == "keyword_exact"
+                                     and normalize_search_query(row.get("matched_query")) == q
+                                     and normalize_search_query(row.get("matched_keyword")) == q][:6]
+                            searches.append({"query": query, "variants": [], "results": found,
+                                "note": ("Exact Korean keyword candidates; check their meanings."
+                                         if found else "No exact Korean keyword match. Retry a concise English concept or a complete Korean alias; do not drop requested modifiers.")})
+                            for row in found:
+                                rows[row["tag"]] = row
+                            continue
                         # A compound may be indexed as headpat while the model
                         # asks for head patting. Recover exact compound stems;
                         # don't widen this into fuzzy new actions/attributes.

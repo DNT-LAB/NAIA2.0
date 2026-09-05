@@ -3,6 +3,47 @@ from __future__ import annotations
 import re
 
 
+def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
+    """Chat search lane: exact Korean keywords, existing English retrieval.
+
+    Autocomplete ranks partial/description matches for typing assistance. They
+    must not become selected concepts just because a native tool used Korean.
+    Read its structured entries without changing the shared index or ranking.
+    """
+    from core.tag_knowledge import has_hangul
+    from core.tag_search_index import normalize_search_query
+    from app.backend.server.ollama_routes import ensure_llm_search_index, search_llm_tags
+
+    if not has_hangul(query):
+        return search_llm_tags(context, query, limit=limit)
+    q = normalize_search_query(query)
+    if not q or len(query) > 160 or limit <= 0:
+        return []
+    from app.backend.server.autocomplete_commands import ensure_tag_search_index
+
+    index = ensure_tag_search_index(context)
+    general = ensure_llm_search_index(context)
+    rows = []
+    # Filter before limiting: a popular partial match must not crowd an exact
+    # low-frequency keyword out of the candidate window.
+    for result in index.search_semantic(q, limit=None):
+        keyword = next((kw for kw in result.entry.keywords
+                        if normalize_search_query(kw) == q), None)
+        if keyword is None:
+            continue
+        # Keep the same named-entity, parenthesis and frequency boundary as the
+        # English general vocabulary; characters have their own search tool.
+        canonical = next((row for row in general.search(result.tag, 1)
+                          if normalize_search_query(row['tag']) == normalize_search_query(result.tag)), None)
+        if canonical is None:
+            continue
+        rows.append({**canonical, 'match_kind': 'keyword_exact',
+                     'matched_query': q, 'matched_keyword': keyword})
+        if len(rows) >= min(limit, 12):
+            break
+    return rows
+
+
 def search_characters(context, query: str) -> dict:
     from app.backend.server.character_viewer_routes import character_viewer_service
 

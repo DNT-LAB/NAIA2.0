@@ -1,0 +1,153 @@
+"""Live full Chat-agent evaluation against Codex-authored role/query fixtures.
+
+No generation, downloads, prompt edits, or external translation calls. Unlike
+the decomposition harness, exercises native thinking, tools, feedback and finish.
+"""
+from __future__ import annotations
+import argparse
+import copy
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+import time
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from core.ollama_assistant_service import OllamaAssistantService
+from core.ollama_chat_pipeline import OllamaChatPipeline
+from core.intent_action_pipeline import GenerationInfoContext
+from core.llm_search_index import LLMSearchIndex, normalize_query
+from tools.ollama_chat_query_eval import digest, request_json
+from app.backend.server.ollama_chat_tools import search_characters, search_events
+
+
+def assess(case, result):
+    scene = result.get("scene", {})
+    names = {a["id"]: a["name"] for a in scene.get("actors", [])}
+    relations = [{**r, "actor": names.get(r["actor_id"], ""),
+                  "target": names.get(r["target_id"], "")} for r in scene.get("relations", [])]
+    tags = {normalize_query(t) for a in scene.get("actors", []) for t in a.get("tags", [])}
+    tags.update(map(normalize_query, scene.get("common_tags", [])))
+    checks = {"completed": result.get("ok") is True,
+              "type": result.get("type") == case.get("type", "scene_agent")}
+    for expected in case.get("relations", []):
+        key = f"relation:{expected['actor']}->{expected['target']}:{expected['action']}"
+        checks[f"direction:{expected['actor']}->{expected['target']}"] = any(
+            expected["actor"].casefold() in r["actor"].casefold()
+            and expected["target"].casefold() in r["target"].casefold()
+            and r["negated"] == expected.get("negated", False) for r in relations)
+        checks[key] = any(expected["actor"].casefold() in r["actor"].casefold()
+                          and expected["target"].casefold() in r["target"].casefold()
+                          and re.search(expected["action"], r["action"], re.I)
+                          and r["negated"] == expected.get("negated", False) for r in relations)
+    if case.get("relations") and not case.get("allow_extra_relations"):
+        checks["positive_relation_count"] = sum(not r["negated"] for r in relations) == sum(
+            not r.get("negated", False) for r in case["relations"])
+    for name, expected in case.get("actor_tags", {}).items():
+        actual = {normalize_query(t) for a in scene.get("actors", [])
+                  if name.casefold() == a["name"].casefold() for t in a["tags"]}
+        checks[f"actor_tags:{name}"] = set(map(normalize_query, expected)).issubset(actual)
+    for alternatives in case.get("tag_any", []):
+        checks["tag:" + "|".join(alternatives)] = bool(tags.intersection(map(normalize_query, alternatives)))
+    for tag in case.get("forbidden", []):
+        checks[f"absent:{tag}"] = normalize_query(tag) not in tags
+    # Server-side exact validation is not a model-initiated tool call.
+    used = {t["tool"] for t in result.get("toolTrace", [])
+            if t.get("origin") != "validation" and t.get("status") != "error"}
+    for tool in case.get("tools", []):
+        checks[f"tool:{tool}"] = tool in used
+    successful = {t["tool"] for t in result.get("toolTrace", [])
+                  if t.get("origin") != "validation" and t.get("status") == "ok" and t.get("tagCount", 0) > 0}
+    for tool in case.get("successful_tools", []):
+        checks[f"tool_success:{tool}"] = tool in successful
+    return {"checks": checks, "passed": all(checks.values()), "relations": relations, "tags": sorted(tags)}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cases", type=Path, default=ROOT / "release_assets/ollama_chat_agent_cases.json")
+    parser.add_argument("--model", default="naia-gemma4-e4b-q4_k_m:think")
+    parser.add_argument("--base-url", default="http://127.0.0.1:11434")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--ids", nargs="*")
+    parser.add_argument("--system-file", type=Path, help="Offline experiment only: replace the agent system instructions")
+    parser.add_argument("--event-data-root", type=Path, help="Read existing Event Preset assets from this data root")
+    args = parser.parse_args(argv)
+    if args.system_file:
+        import core.ollama_chat_agent as agent_module
+        agent_module.SYSTEM = args.system_file.read_text(encoding="utf-8")
+    from core.kr_tag_loader import load_kr_tag_records
+    records = load_kr_tag_records(str(ROOT), data_roots=[ROOT / "data"])
+    index = LLMSearchIndex.from_raw_tag_records(records.raw)
+    context = SimpleNamespace(repo_root=ROOT, runtime_paths=None, kr_tags_raw=records.raw)
+    if args.event_data_root:
+        from core.event_preset_service import EventPresetService
+        context.event_preset_service = EventPresetService(ROOT, data_root=args.event_data_root.resolve())
+    fixture = json.loads(args.cases.read_text(encoding="utf-8"))
+    ids = [case["id"] for case in fixture.get("cases", [])]
+    if not ids or len(ids) != len(set(ids)):
+        parser.error("cases must be nonempty and have unique ids")
+    if args.ids and set(args.ids) - set(ids):
+        parser.error("unknown case ids: " + ", ".join(sorted(set(args.ids) - set(ids))))
+    if args.output.resolve() in {args.cases.resolve(), args.system_file.resolve() if args.system_file else None}:
+        parser.error("output must not overwrite an input fixture or system file")
+    model_show = request_json(args.base_url, "/api/show", {"model": args.model}).json()
+    model_tags = request_json(args.base_url, "/api/tags").json()
+    calls = []
+    def post(path, payload, **kwargs):
+        started = time.monotonic()
+        snapshot = copy.deepcopy(payload)
+        timeout = kwargs.get("timeout", 125)
+        if isinstance(timeout, tuple):
+            timeout = timeout[-1]
+        result = request_json(args.base_url, path, payload, timeout=timeout)
+        if path == "/api/chat":
+            # Record original source, actual arguments/results and native tool turns.
+            calls.append({"request": snapshot, "response": result.json(),
+                          "elapsed_seconds": time.monotonic() - started})
+        return result
+    assistant = OllamaAssistantService(base_url=args.base_url, default_model=args.model, http_post=post)
+    pipeline = OllamaChatPipeline(assistant=assistant, assist_helpers=None,
+        searcher=lambda q, limit, _: index.search(q, limit), event_provider=lambda *a: [],
+        character_search=lambda **kw: search_characters(context, **kw),
+        event_search=lambda **kw: search_events(context, **kw))
+    report = {"schema_version": 1, "baseline_source": "Codex-authored expected roles and direct local queries; not a live Codex API",
+        "fixture_sha256": digest(fixture), "records_sha256": digest(records.raw),
+        "model": args.model, "model_show": model_show,
+        "model_record": [m for m in model_tags.get("models", []) if m.get("name") == args.model],
+        "code_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in (
+            "core/ollama_chat_agent.py", "core/ollama_chat_pipeline.py", "core/ollama_assistant_service.py",
+            "app/backend/server/ollama_chat_tools.py", "tools/ollama_chat_agent_eval.py")}, "cases": []}
+    if args.system_file:
+        report["system_experiment"] = {"path": str(args.system_file),
+            "sha256": hashlib.sha256(args.system_file.read_bytes()).hexdigest()}
+    if args.event_data_root:
+        asset = args.event_data_root.resolve() / "event_preset/naia_prompt_preset"
+        if args.output.resolve() == asset:
+            parser.error("output must not overwrite the Event Preset archive")
+        report["event_data"] = {"path": str(asset), "exists": asset.is_file(),
+            "sha256": hashlib.sha256(asset.read_bytes()).hexdigest() if asset.is_file() else None}
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    for case in fixture["cases"]:
+        if args.ids and case["id"] not in args.ids:
+            continue
+        calls.clear()
+        # Direct baseline uses exactly the same local general tag index.
+        baseline = [{"query": q, "rows": index.search(q, 6)} for q in case.get("baseline_queries", [])]
+        result = pipeline.run(case["input"], gen_context=GenerationInfoContext(), history=case.get("history", []))
+        row = {"id": case["id"], "input": case["input"], "baseline": baseline,
+               "expected": case, "result": result, "assessment": assess(case, result), "calls": list(calls)}
+        report["cases"].append(row)
+        report["summary"] = {"attempted": len(report["cases"]),
+                             "passed": sum(c["assessment"]["passed"] for c in report["cases"])}
+        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({"id": case["id"], **row["assessment"], "error": result.get("error", "")}, ensure_ascii=False), flush=True)
+    return 0 if all(c["assessment"]["passed"] for c in report["cases"]) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

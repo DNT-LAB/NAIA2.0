@@ -1098,7 +1098,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260829-noroom')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260905-presetbody')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -2130,7 +2130,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
     console.error('Failed to initialize ollama assistant popup module', error);
   });
 let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260905-ollama-think')
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260905-chat-tools-context')
   .then(({createOllamaChatPopup}) => {
     ollamaChatPopup = createOllamaChatPopup({
       document, window, showToast, escHtml,
@@ -10097,7 +10097,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260831-noseedwarn')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260905-presetbody')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

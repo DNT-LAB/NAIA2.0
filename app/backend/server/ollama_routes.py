@@ -49,6 +49,7 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 _ASSIST_SVC_LOCK = threading.Lock()
 # LLM 검색 인덱스 첫 빌드 직렬화(빌드 ~1s, 중복 빌드 낭비 방지).
 _LLM_INDEX_LOCK = threading.Lock()
+_CHAT_PIPELINE_LOCK = threading.Lock()
 
 _CHAT_GENERAL_HINTS = (
     "점심", "저녁", "아침", "메뉴", "음식", "레시피", "맛집", "날씨", "뉴스",
@@ -631,13 +632,20 @@ def register_ollama_routes(
     run_in_thread: AsyncRunner,
 ) -> None:
     def service() -> OllamaAssistantService:
-        existing = getattr(context, "ollama_assistant_service", None)
-        if existing is None:
-            existing = OllamaAssistantService()
-            context.ollama_assistant_service = existing
-        return existing
+        with _ASSIST_SVC_LOCK:
+            existing = getattr(context, "ollama_assistant_service", None)
+            if existing is None:
+                existing = OllamaAssistantService()
+                context.ollama_assistant_service = existing
+            return existing
 
     def chat_pipeline_service() -> OllamaChatPipeline:
+        with _CHAT_PIPELINE_LOCK:
+            return _chat_pipeline_service()
+
+    def _chat_pipeline_service() -> OllamaChatPipeline:
+        from app.backend.server.ollama_chat_tools import search_characters, search_events
+
         existing = getattr(context, "ollama_chat_pipeline", None)
         assistant = service()
         assist = get_assist_service(context)
@@ -649,6 +657,8 @@ def register_ollama_routes(
             existing.assist = assist
             existing.clothes_provider = _clothes_provider
             existing.related_provider = lambda seeds, limit: related_tags_for_chat(context, seeds, limit=limit)
+            existing.character_search = lambda **args: search_characters(context, **args)
+            existing.event_search = lambda **args: search_events(context, **args)
             return existing
         existing = OllamaChatPipeline(
             assistant=assistant,
@@ -662,6 +672,8 @@ def register_ollama_routes(
             clothes_provider=_clothes_provider,
             related_provider=lambda seeds, limit: related_tags_for_chat(context, seeds, limit=limit),
             translator=_korean_to_english,
+            character_search=lambda **args: search_characters(context, **args),
+            event_search=lambda **args: search_events(context, **args),
         )
         context.ollama_chat_pipeline = existing
         return existing

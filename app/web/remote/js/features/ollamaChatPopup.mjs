@@ -6,6 +6,16 @@ import {
   setOllamaModelSelectOptions,
 } from './ollamaModelSelect.mjs?v=20260618-related-curated';
 
+export function formatDirectedScene(scene) {
+  const actors = scene.actors || [];
+  const names = new Map(actors.map(a => [a.id, a.name]));
+  const lines = [`공통: ${(scene.common_tags || []).join(', ')}`];
+  actors.forEach((a, i) => lines.push(`Character ${i + 1} (${a.name}): ${(a.tags || []).join(', ')}`));
+  (scene.relations || []).forEach(r => lines.push(
+    `${names.get(r.actor_id) || r.actor_id} → ${r.negated ? '[하지 않음] ' : ''}${r.action} → ${names.get(r.target_id) || r.target_id}`));
+  return lines.join('\n');
+}
+
 export function createOllamaChatPopup({
   document,
   window: win = window,
@@ -262,7 +272,7 @@ export function createOllamaChatPopup({
     if (!messages.length) {
       const empty = document.createElement('div');
       empty.className = 'ollama-chat-empty';
-      empty.textContent = '현재 프롬프트와 선택된 결과를 컨텍스트로 사용합니다.';
+      empty.textContent = '현재 프롬프트나 결과를 언급하면 참고합니다.';
       log.appendChild(empty);
       return;
     }
@@ -277,6 +287,66 @@ export function createOllamaChatPopup({
       body.textContent = msg.content || '';
       item.appendChild(role);
       item.appendChild(body);
+      if (msg.role === 'assistant' && msg.type === 'scene_agent' && msg.scene && !msg.dismissed) {
+        const scene = msg.scene;
+        const panel = document.createElement('div');
+        panel.className = 'ollama-chat-chip-panel ollama-chat-directed-scene';
+        panel.appendChild(makePanelHead(index, '인물별 장면'));
+        const names = new Map(scene.actors.map(a => [a.id, a.name]));
+        for (const interpretation of scene.interpretations || []) {
+          const note = document.createElement('div');
+          note.className = 'ollama-chat-scene-note';
+          note.textContent = `${interpretation.source} → ${interpretation.meaning}`;
+          panel.appendChild(note);
+        }
+        for (const relation of scene.relations) {
+          const row = document.createElement('div');
+          row.className = 'ollama-chat-scene-note ollama-chat-relation';
+          row.textContent = `${names.get(relation.actor_id)} → ${relation.negated ? '[하지 않음] ' : ''}${relation.action} → ${names.get(relation.target_id)}`;
+          panel.appendChild(row);
+        }
+        const groups = [{name: '공통 태그', tags: scene.common_tags},
+          ...scene.actors.map((a, i) => ({name: `Character ${i + 1} · ${a.name}`, tags: a.tags}))];
+        groups.forEach(group => {
+          const row = document.createElement('div');
+          row.className = 'ollama-chat-scene-seg';
+          const label = document.createElement('div');
+          label.className = 'ollama-chat-scene-label';
+          label.textContent = group.name;
+          row.appendChild(label);
+          const chips = document.createElement('div');
+          chips.className = 'ollama-chat-chips';
+          group.tags.forEach(tag => chips.appendChild(makeChip(tag, {})));
+          row.appendChild(chips);
+          if (group.tags.length) row.appendChild(makeCopyAllRow(group.tags));
+          panel.appendChild(row);
+        });
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'ollama-chat-combo-copy';
+        copy.textContent = '인물·관계 포함 복사';
+        copy.addEventListener('click', () => { void copyChip(formatDirectedScene(scene)); });
+        panel.appendChild(copy);
+        item.appendChild(panel);
+      }
+      if (Array.isArray(msg.toolTrace) && msg.toolTrace.length && !msg.dismissed) {
+        const details = document.createElement('details');
+        details.className = 'ollama-chat-tool-trace';
+        const summary = document.createElement('summary');
+        summary.textContent = `검색 기록 (${msg.toolTrace.length})`;
+        details.appendChild(summary);
+        const labels = {search_tags: '태그', search_characters: '캐릭터', search_events: '이벤트', finish: '결과 확인'};
+        msg.toolTrace.forEach(trace => {
+          const row = document.createElement('div');
+          row.className = 'ollama-chat-scene-note';
+          const query = trace.arguments?.queries?.join(', ') || trace.arguments?.query || '';
+          const status = {ok: '완료', no_match: '검색 결과 없음', unavailable: '데이터 미설치',
+            choose_partition: '인원·등급 확인', partition_unavailable: '해당 인원·등급 데이터 없음', error: '오류'}[trace.status] || trace.status;
+          row.textContent = `${labels[trace.tool] || trace.tool} · ${query} · ${status}`;
+          details.appendChild(row);
+        });
+        item.appendChild(details);
+      }
       if (msg.role === 'assistant' && msg.type === 'chips' && Array.isArray(msg.chips) && msg.chips.length && !msg.dismissed) {
         const panel = document.createElement('div');
         panel.className = 'ollama-chat-chip-panel';
@@ -540,7 +610,10 @@ export function createOllamaChatPopup({
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
-      if (payload.type === 'chips') {
+      if (payload.type === 'scene_agent') {
+        messages.push({role: 'assistant', type: 'scene_agent', content: String(payload.message || ''),
+          scene: payload.scene, anchor: String(payload.anchor || text)});
+      } else if (payload.type === 'chips') {
         messages.push({
           role: 'assistant',
           type: 'chips',
@@ -602,6 +675,7 @@ export function createOllamaChatPopup({
       } else {
         messages.push({role: 'assistant', type: 'chat', content: String(payload.message || '')});
       }
+      messages[messages.length - 1].toolTrace = Array.isArray(payload.toolTrace) ? payload.toolTrace : [];
       renderMessages();
       if (payload.model) {
         connModel = String(payload.model);
@@ -839,7 +913,7 @@ export function createOllamaChatPopup({
     }
     const error = ds?.error ? `<span class="ollama-chat-ready-msg err">${escHtml(ds.error)}</span>` : '';
     renderDatasetState(`
-      ${error || '<span class="ollama-chat-ready-msg warn">이벤트 데이터가 없어 장면 자동 보강이 비활성화됩니다.</span>'}
+      ${error || '<span class="ollama-chat-ready-msg warn">이벤트 데이터를 받으면 Chat에서 이벤트 프리셋을 검색할 수 있습니다.</span>'}
       <button type="button" class="ollama-chat-ready-btn" data-dataset-act="download">이벤트 데이터 받기</button>
       <button type="button" class="ollama-chat-ready-btn secondary" data-dataset-act="recheck">다시 확인</button>`);
   }

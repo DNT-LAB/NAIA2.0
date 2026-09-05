@@ -286,6 +286,7 @@ class OllamaAssistantService:
         self._model_spec = OllamaModelSpec(self._http_get, self._http_post)
         self._server_spawner = server_spawner or self._default_server_spawner
         self._lock = Lock()
+        self._reasoning_active = False
         self._pull_state: dict[str, Any] = dict(_IDLE_PULL_STATE)
         self._pull_thread: Thread | None = None
         self._pull_cancel = False
@@ -309,6 +310,8 @@ class OllamaAssistantService:
         이미 만들어진 :class:`OllamaTagAssistService`는 생성 시점 값을 들고 있으므로
         라우트가 그쪽에도 ``set_endpoint``를 호출해 동기화해야 한다."""
         with self._lock:
+            if self._reasoning_active:
+                raise RuntimeError("Chat 추론·검색이 끝난 뒤 연결을 변경하세요.")
             if self._pull_state.get("active"):
                 raise RuntimeError("모델 다운로드·사양 준비가 끝난 뒤 연결을 변경하세요.")
             if base_url is not None:
@@ -629,6 +632,57 @@ class OllamaAssistantService:
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc) or "Ollama Chat 요청 실패"}
+
+    def reasoning_chat_session(self):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def session():
+            with self._lock:
+                if self._reasoning_active or self._pull_state.get("active"):
+                    raise RuntimeError("진행 중인 Chat 또는 모델 준비가 끝난 뒤 다시 시도하세요.")
+                self._reasoning_active = True
+            try:
+                yield self.reasoning_chat_model()
+            finally:
+                with self._lock:
+                    self._reasoning_active = False
+        return session()
+
+    def reasoning_chat_model(self) -> str:
+        status = self.status(include_details=False)
+        if not status.get("running") or not status.get("model_installed"):
+            raise RuntimeError("Ollama 서버와 Chat 모델 준비 상태를 확인해 주세요.")
+        model = self.default_model
+        capabilities = set(self._model_spec.show(model).get("capabilities") or [])
+        if not {"thinking", "tools"}.issubset(capabilities):
+            raise RuntimeError("Chat 추론·검색에는 thinking/tools 모델이 필요합니다. 모델의 think 사양을 준비해 주세요.")
+        return model
+
+    def reasoning_chat_turn(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]],
+        *, model: str, timeout: float = 120,
+    ) -> dict[str, Any]:
+        """One native thinking/tool turn; messages are built by the server agent.
+
+        Keep the complete assistant message for the next turn (including native
+        thinking and tool calls). It is not the public Chat response.
+        """
+        response = self._http_post("/api/chat", {
+            "model": model, "messages": messages, "tools": tools,
+            "stream": False, "think": True, "keep_alive": "5m",
+            "options": {"temperature": 0.2, "seed": 42,
+                        "num_ctx": 16384, "num_predict": 4096},
+        }, timeout=(5, max(1, min(120, timeout))))
+        data = response.json() or {}
+        if int(getattr(response, "status_code", 0)) != 200:
+            raise RuntimeError(_friendly_ollama_error(data.get("error")) or "Ollama tool request failed")
+        message = data.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("Ollama tool response has no message")
+        if data.get("done_reason") == "length":
+            raise ValueError("추론 응답이 길이 제한에 도달했습니다. 요청을 짧게 나누어 주세요.")
+        return message
 
     def extract_intent_decision(
         self,

@@ -1,0 +1,298 @@
+{
+  "version": 1,
+  "scope": "Korean slang and directed scene calibration; representative, not exhaustive",
+  "cases": [
+    {
+      "id": "give_ab",
+      "input": "빨간 셔츠를 입은 A가 파란 셔츠를 입은 B에게 선물을 건네는 장면 태그를 찾아줘.",
+      "relations": [
+        {
+          "actor": "A",
+          "target": "B",
+          "action": "giv|hand|present"
+        }
+      ],
+      "actor_tags": {
+        "A": [
+          "red shirt"
+        ],
+        "B": [
+          "blue shirt"
+        ]
+      },
+      "tag_any": [
+        [
+          "gift",
+          "present"
+        ]
+      ],
+      "forbidden": [
+        "solo",
+        "presenting"
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "red shirt",
+        "blue shirt",
+        "gift",
+        "giving"
+      ]
+    },
+    {
+      "id": "give_ba",
+      "input": "빨간 셔츠를 입은 A에게 파란 셔츠를 입은 B가 선물을 건네는 장면 태그를 찾아줘.",
+      "relations": [
+        {
+          "actor": "B",
+          "target": "A",
+          "action": "giv|hand|present"
+        }
+      ],
+      "actor_tags": {
+        "A": [
+          "red shirt"
+        ],
+        "B": [
+          "blue shirt"
+        ]
+      },
+      "tag_any": [
+        [
+          "gift",
+          "present"
+        ]
+      ],
+      "forbidden": [
+        "solo",
+        "presenting"
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "red shirt",
+        "blue shirt",
+        "gift",
+        "giving"
+      ]
+    },
+    {
+      "id": "passive",
+      "input": "빨간 셔츠의 A는 파란 셔츠의 B에게 머리를 쓰다듬 받는 장면이야. 태그 추천해줘.",
+      "relations": [
+        {
+          "actor": "B",
+          "target": "A",
+          "action": "pat|strok|pet"
+        }
+      ],
+      "actor_tags": {
+        "A": [
+          "red shirt"
+        ],
+        "B": [
+          "blue shirt"
+        ]
+      },
+      "tag_any": [
+        [
+          "headpat",
+          "head pat",
+          "headpatting"
+        ]
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "headpat",
+        "red shirt",
+        "blue shirt"
+      ]
+    },
+    {
+      "id": "slang_laugh",
+      "input": "A가 B를 째려보는데 B는 빵 터져서 웃는 짤 태그 찾아줘.",
+      "relations": [
+        {
+          "actor": "A",
+          "target": "B",
+          "action": "glar|stare"
+        }
+      ],
+      "tag_any": [
+        [
+          "glaring"
+        ],
+        [
+          "laughing"
+        ]
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "glaring",
+        "laughing"
+      ],
+      "actor_tags": {
+        "B": [
+          "laughing"
+        ]
+      }
+    },
+    {
+      "id": "slang_pat",
+      "input": "A가 B 머리를 쓰담쓰담해 주는 장면 태그 좀.",
+      "relations": [
+        {
+          "actor": "A",
+          "target": "B",
+          "action": "pat|strok|pet"
+        }
+      ],
+      "tag_any": [
+        [
+          "headpat",
+          "head pat",
+          "headpatting"
+        ]
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "headpat"
+      ]
+    },
+    {
+      "id": "slang_tease",
+      "input": "A가 B한테 메롱해서 킹받게 하는 짤 태그 추천해줘. B는 짜증난 표정이야.",
+      "relations": [
+        {
+          "actor": "A",
+          "target": "B",
+          "action": "teas|tongue|taunt"
+        }
+      ],
+      "tag_any": [
+        [
+          "tongue out"
+        ],
+        [
+          "annoyed",
+          "anger vein",
+          "angry"
+        ]
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "tongue out",
+        "annoyed"
+      ],
+      "actor_tags": {
+        "A": [
+          "tongue out"
+        ]
+      }
+    },
+    {
+      "id": "named",
+      "input": "하츠네 미쿠가 카가미네 린에게 선물을 주는 장면의 캐릭터와 태그를 찾아줘.",
+      "relations": [
+        {
+          "actor": "미쿠",
+          "target": "린",
+          "action": "giv|hand|present"
+        }
+      ],
+      "tag_any": [
+        [
+          "hatsune miku"
+        ],
+        [
+          "kagamine rin"
+        ],
+        [
+          "gift",
+          "present"
+        ]
+      ],
+      "tools": [
+        "search_tags",
+        "search_characters"
+      ],
+      "baseline_queries": [
+        "gift"
+      ],
+      "forbidden": [
+        "presenting"
+      ]
+    },
+    {
+      "id": "event",
+      "input": "성인 여성 A가 성인 남성 B에게 꽃을 건네는 일반 등급 이벤트 프리셋과 태그를 찾아줘.",
+      "relations": [
+        {
+          "actor": "A",
+          "target": "B",
+          "action": "giv|hand|present"
+        }
+      ],
+      "tag_any": [
+        [
+          "flower",
+          "bouquet"
+        ]
+      ],
+      "tools": [
+        "search_events",
+        "search_tags"
+      ],
+      "successful_tools": [
+        "search_events"
+      ],
+      "baseline_queries": [
+        "flower",
+        "giving"
+      ]
+    },
+    {
+      "id": "ambiguous",
+      "input": "A가 B한테 그거 해주는 짤로 해줘.",
+      "type": "clarification",
+      "baseline_queries": []
+    },
+    {
+      "id": "negation",
+      "input": "A가 B를 때리는 게 아니라 B에게 손을 흔들어 인사하는 장면 태그를 찾아줘.",
+      "relations": [
+        {
+          "actor": "A",
+          "target": "B",
+          "action": "wav|greet"
+        }
+      ],
+      "tag_any": [
+        [
+          "waving"
+        ]
+      ],
+      "forbidden": [
+        "punching",
+        "slapping",
+        "hitting"
+      ],
+      "tools": [
+        "search_tags"
+      ],
+      "baseline_queries": [
+        "waving"
+      ]
+    }
+  ]
+}

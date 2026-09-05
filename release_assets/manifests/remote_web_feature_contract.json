@@ -585,11 +585,14 @@
     },
     {
       "id": "ollama_chat",
-      "name": "Ollama chat, grounded queries and curated thinking runtime preparation",
+      "name": "Ollama native thinking tools, directed scenes and curated runtime preparation",
       "source_files": [
         "app/backend/server/ollama_routes.py",
         "core/ollama_assistant_service.py",
         "core/ollama_model_spec.py",
+        "core/ollama_chat_agent.py",
+        "core/ollama_chat_pipeline.py",
+        "app/backend/server/ollama_chat_tools.py",
         "core/semantic_tag_discovery.py",
         "app/web/remote/js/features/ollamaChatPopup.mjs",
         "app/web/remote/js/features/ollamaAssistantPopup.mjs"
@@ -734,6 +737,25 @@
     }
   ],
   "data_dependencies": [
+    {
+      "feature": "ollama_chat",
+      "description": "Bilingual tag and named-character grounding for read-only Chat tools.",
+      "paths": [
+        "data/KR_tags.parquet",
+        "data/e621_KR_tags.parquet",
+        "data/character_analysis.json"
+      ],
+      "provisioning": "bundled"
+    },
+    {
+      "feature": "ollama_chat",
+      "description": "Optional Event Preset reads; Chat reports unavailable and never starts a download itself.",
+      "paths": [
+        "data/event_preset/**"
+      ],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/event-preset/download"
+    },
     {
       "feature": "character_asset",
       "description": "Creation bench random slot pools (one comma-separated tag set per line).",

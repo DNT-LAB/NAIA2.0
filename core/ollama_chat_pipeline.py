@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import re
 import time
 import uuid
+from threading import Lock
 from typing import Any, Callable, Iterable
 
 from core.intent_action_pipeline import GenerationInfoContext
@@ -188,6 +189,8 @@ class OllamaChatPipeline:
         clothes_provider: ClothesProvider | None = None,
         related_provider: RelatedProvider | None = None,
         translator: Callable[[str], str | None] | None = None,
+        character_search: Callable | None = None,
+        event_search: Callable | None = None,
     ) -> None:
         self.assistant = assistant
         self.assist = assist_helpers
@@ -196,7 +199,10 @@ class OllamaChatPipeline:
         self.clothes_provider = clothes_provider
         self.related_provider = related_provider
         self.translator = translator
+        self.character_search = character_search
+        self.event_search = event_search
         self._progress = ChatPipelineProgress()
+        self._run_lock = Lock()
 
     def progress(self) -> dict[str, Any]:
         return self._progress.snapshot()
@@ -222,9 +228,70 @@ class OllamaChatPipeline:
         gen_context: GenerationInfoContext,
         history: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        if not self._run_lock.acquire(blocking=False):
+            return {"handled": True, "ok": False, "type": "chat", "error": "진행 중인 Chat 검색이 끝난 뒤 다시 시도하세요."}
         run_id = uuid.uuid4().hex
         self._begin(run_id, "intent")
         try:
+            if self.character_search is not None and self.event_search is not None:
+                from core.ollama_chat_agent import OllamaChatAgent
+
+                def search_tags(queries):
+                    from core.llm_search_index import normalize_query, stem_token
+
+                    def strict_stems(text):
+                        return {stem_token(t) for t in re.findall(r"[a-z0-9]+", normalize_query(text))
+                                if t not in {"a", "an", "the", "and", "of"}}
+
+                    rows, searches = {}, []
+                    for query in queries:
+                        if not query.strip() or len(query) > 160:
+                            raise ValueError("Search queries must be 1-160 characters")
+                        raw = self.searcher(query, 6, gen_context)
+                        # A compound may be indexed as headpat while the model
+                        # asks for head patting. Recover exact compound stems;
+                        # don't widen this into fuzzy new actions/attributes.
+                        stemmed = " ".join(stem_token(t) for t in normalize_query(query).split())
+                        variants = []
+                        compact_matches = {stemmed.replace(" ", "")}
+                        if stemmed != normalize_query(query):
+                            variants.append(stemmed)
+                            compact = stemmed.replace(" ", "")
+                            extra = self.searcher(stemmed, 6, gen_context)
+                            raw = [r for r in extra if normalize_query(r.get("tag")).replace(" ", "") == compact] + raw
+                        parts = sorted(strict_stems(query))
+                        if len(parts) == 2:
+                            # Tag compounds often invert a verb/object phrase:
+                            # patting head -> headpat; accept only exact matches.
+                            for compound in ("".join(parts), "".join(reversed(parts))):
+                                if compound in compact_matches:
+                                    continue
+                                compact_matches.add(compound)
+                                variants.append(compound)
+                                extra = self.searcher(compound, 3, gen_context)
+                                raw = [r for r in extra if normalize_query(r.get("tag")).replace(" ", "") == compound] + raw
+                        unique = {row["tag"]: row for row in raw if row.get("tag")}
+                        exact = [row for row in unique.values() if normalize_query(row["tag"]) == normalize_query(query)
+                                 or normalize_query(row["tag"]).replace(" ", "") in compact_matches]
+                        # The tool answers this concept, not an autocomplete
+                        # popularity expansion (gift -> gift art / giving wedgie).
+                        allowed_stems = strict_stems(query)
+                        candidates = exact or [row for row in unique.values()
+                            if strict_stems(row["tag"]).issubset(allowed_stems)]
+                        found = [{"tag": row["tag"], "count": row.get("count", 0),
+                                  "desc": str(row.get("desc") or "")[:200]}
+                                 for row in candidates[:6]]
+                        searches.append({"query": query, "variants": variants, "results": found})
+                        for row in found:
+                            rows[row["tag"]] = row
+                    return {"status": "ok" if rows else "no_match", "searches": searches,
+                            "tags": list(rows.values())}
+
+                self._progress.total = OllamaChatAgent.MAX_TURNS
+                return OllamaChatAgent(self.assistant, tag_search=search_tags,
+                                       character_search=self.character_search,
+                                       event_search=self.event_search, progress=self._stage).run(
+                    user_input, context=gen_context.summary(), history=history)
             raw_intent = self._analyze(user_input, gen_context, history or [])
             intent = self._clamp_intent(raw_intent, user_input, gen_context)
             if not intent.proceed:
@@ -299,6 +366,7 @@ class OllamaChatPipeline:
             return {"handled": False, "error": str(exc) or "chat pipeline failed"}
         finally:
             self._end()
+            self._run_lock.release()
 
     def _clarification(self, user_input: str, intent: ClampedIntent) -> dict[str, Any]:
         question = (

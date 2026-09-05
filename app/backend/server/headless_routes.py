@@ -14,6 +14,7 @@ from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.grok_routes import register_grok_routes  # Grok 연동 (제거 가능)
 from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.extension_install_routes import register_extension_install_routes
+from app.backend.server.fast_search_routes import register_fast_search_routes
 from app.backend.server.font_routes import register_font_routes
 from app.backend.server.interactive_thumbnail_routes import register_interactive_thumbnail_routes
 from app.backend.server.interactive_advice_routes import register_interactive_advice_routes
@@ -278,6 +279,8 @@ def register_headless_routes(
         clients=clients,
         start_generation_runner=ensure_generation_runner,
     )
+    # Ctrl+F 한 칸 검색. 읽기 전용이고 다른 갈래의 검색기를 빌려 쓴다.
+    register_fast_search_routes(app, context, run_in_thread=run_in_thread)
     register_character_asset_routes(
         app,
         context,

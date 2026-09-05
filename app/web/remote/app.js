@@ -1098,7 +1098,11 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260905-presetbody')
+// Ctrl+F 한 칸 검색. 고른 것은 **클립보드로만** 간다 - 프롬프트에 넣지 않는다.
+import('./js/features/fastSearch.mjs?v=20260905-fastsearch')
+  .then(({initFastSearch}) => { window.fastSearch = initFastSearch(); })
+  .catch(error => console.error('Failed to initialize Fast Search', error));
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260905-fastsearch')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -10097,7 +10101,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260905-presetbody')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260905-fastsearch')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

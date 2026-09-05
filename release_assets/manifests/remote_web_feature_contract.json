@@ -12,6 +12,7 @@
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
+    "app/backend/server/fast_search_routes.py",
     "app/backend/server/font_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/interactive_advice_routes.py",
@@ -163,6 +164,20 @@
         {"method": "GET", "path": "/api/prompt-engineering/preset-detail", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/prompt-engineering/preset-thumbnail/upload", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/prompt-engineering/preset-thumbnail/generate", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "fast_search",
+      "name": "Fast Search (Ctrl+F) across tags, artists, characters, wildcards, presets, events",
+      "source_files": [
+        "app/backend/server/fast_search_routes.py",
+        "app/backend/server/autocomplete_commands.py",
+        "app/backend/server/ollama_chat_tools.py",
+        "app/web/remote/js/features/fastSearch.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/fast-search", "smoke": "non_destructive"}
       ]
     },
     {

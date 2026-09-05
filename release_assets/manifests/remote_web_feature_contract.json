@@ -812,6 +812,7 @@
         "data/e621_KR_tags.parquet",
         "data/interactive_tags.json",
         "data/tag_index/**",
+        "data/tag_index/korean_alias_supplement.json",
         "artist_dictionary.py",
         "danbooru_character.py",
         "result_dict_copyright.py"

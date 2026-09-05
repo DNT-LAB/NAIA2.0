@@ -66,6 +66,9 @@ def _keyword_evidence(context, index, tag: str, query: str) -> dict:
                 else:
                     kind = 'alias'
                 item = {'field': field, 'kind': kind}
+                source = record.get('_korean_alias_sources', {}).get(query)
+                if source and kind == 'alias':
+                    item.update(source)
                 if item not in evidence:
                     evidence.append(item)
     kinds = {item['kind'] for item in evidence}

@@ -293,6 +293,11 @@ class OllamaChatPipeline:
                                         "target conflict was found in the current dictionary; this is not verified meaning. "
                                         "Check definitions and use English to resolve uncertainty. " +
                                         note.replace("Exact Korean keyword candidates", "Korean keyword candidates"))
+                            if any(e.get('source') == 'korean_lexical_supplement'
+                                   for row in found for e in row['keyword_evidence']):
+                                note += (" Some aliases come from explicit lexical translation/composition rules, "
+                                         "not independent sense review. Their basis is in keyword_evidence; "
+                                         "verify the canonical English concept before assigning scene roles.")
                             found = [annotate(row, query) for row in found]
                             searches.append({"query": query, "variants": [], "results": found, "note": note})
                             for row in found:

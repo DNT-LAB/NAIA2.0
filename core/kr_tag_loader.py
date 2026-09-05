@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.tag_knowledge import (
+    apply_korean_alias_supplement,
     apply_translation_overrides,
     merge_parquet_tag_records,
     merge_rating_count_records,
@@ -28,6 +29,7 @@ class KrTagLoadResult:
     parquet_stats: Any | None = None
     rating_count_stats: Any | None = None
     override_stats: Any | None = None
+    supplement_stats: Any | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -89,6 +91,7 @@ def load_kr_tag_records(
     *,
     data_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
     warn: Callable[[str], None] | None = None,
+    include_korean_supplement: bool = True,
 ) -> KrTagLoadResult:
     """Load the merged KR tag corpus without depending on RemoteBridge."""
 
@@ -235,6 +238,13 @@ def load_kr_tag_records(
     for error in rating_count_stats.errors:
         _warn(warnings, f"tag count merge warning - {error}", warn)
 
+    supplement_stats = None
+    if include_korean_supplement:
+        supplement_stats = apply_korean_alias_supplement(
+            raw, _first_existing(resolved_data_roots, Path("tag_index") / "korean_alias_supplement.json"))
+        for error in supplement_stats["errors"]:
+            _warn(warnings, f"Korean alias supplement warning - {error}", warn)
+
     return KrTagLoadResult(
         raw=raw,
         interactive_count=interactive_count,
@@ -243,6 +253,7 @@ def load_kr_tag_records(
         parquet_stats=parquet_stats,
         rating_count_stats=rating_count_stats,
         override_stats=override_stats,
+        supplement_stats=supplement_stats,
         warnings=warnings,
     )
 
@@ -261,5 +272,6 @@ def format_kr_tag_load_summary(result: KrTagLoadResult) -> str:
         f"kw replace {getattr(parquet, 'keywords_replaced', 0)}) "
         f"+ {getattr(rating_counts, 'records_updated', 0)} rating-count fills "
         f"+ {getattr(overrides, 'applied', 0)} overrides "
+        f"+ {(result.supplement_stats or {}).get('aliases', 0)} lexical aliases "
         f"+ {result.filter_count} filter + {result.dict_count} dict = {len(result.raw)} total"
     )

@@ -81,6 +81,81 @@ def _refresh_lookup_fields(record: MutableMapping[str, Any]) -> None:
     record["_kw_lower"] = keywords.replace("<", "").replace(">", "").lower() if keywords else ""
 
 
+def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
+    """Append lexical aliases without replacing descriptions, labels or counts.
+
+    Recheck target existence and spelling collisions against the ACTIVE corpus,
+    including user data and excluded named entities. A compiled file from an
+    older corpus is not permission to override a newer spelling's meaning.
+    """
+    from collections import defaultdict
+
+    stats = {"tags": 0, "aliases": 0, "missing_tags": 0, "collisions": 0, "errors": []}
+    path = Path(path)
+    if not path.exists():
+        return stats
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (payload.get("schema_version") != 1 or
+                payload.get("kind") != "korean_lexical_alias_supplement" or
+                payload.get("semantic_certified") is not False or
+                not isinstance(payload.get("translations"), dict)):
+            raise ValueError("invalid Korean lexical supplement schema")
+        proposals = []
+        for tag, value in payload["translations"].items():
+            if normalize_tag_key(tag) != tag or not isinstance(value, dict):
+                raise ValueError(f"invalid canonical tag: {tag!r}")
+            aliases = value.get("aliases")
+            if not isinstance(aliases, list) or not 1 <= len(aliases) <= 12:
+                raise ValueError(f"invalid aliases for {tag!r}")
+            for item in aliases:
+                alias, basis = item.get("text"), item.get("basis")
+                if (not isinstance(alias, str) or not has_hangul(alias) or
+                        alias != normalize_tag_key(alias) or len(alias) > 160 or
+                        any(c in alias for c in ",<>\n\r") or not isinstance(basis, list) or
+                        not basis or not all(isinstance(b, str) and 0 < len(b) <= 160 for b in basis)):
+                    raise ValueError(f"invalid alias evidence for {tag!r}")
+                proposals.append((tag, alias, basis))
+    except Exception as exc:
+        stats["errors"].append(f"{path}: {exc}")
+        return stats
+    records, owners = defaultdict(list), defaultdict(set)
+    for key, record in raw.items():
+        tag = normalize_tag_key(record.get("_tag") or key)
+        records[tag].append(record)
+        for field_name in ("keywords_kr", "keywords"):
+            for part in str(record.get(field_name) or "").split(","):
+                keyword = normalize_tag_key(part.replace("<", "").replace(">", ""))
+                if has_hangul(keyword):
+                    owners[keyword.replace(" ", "")].add(tag)
+    for tag, alias, _ in proposals:
+        if tag in records:
+            owners[alias.replace(" ", "")].add(tag)
+    changed = set()
+    for tag, alias, basis in proposals:
+        if tag not in records:
+            stats["missing_tags"] += 1
+            continue
+        if owners[alias.replace(" ", "")] - {tag}:
+            stats["collisions"] += 1
+            continue
+        record = records[tag][0]
+        existing = {normalize_tag_key(k.replace("<", "").replace(">", ""))
+                    for r in records[tag] for field_name in ("keywords_kr", "keywords")
+                    for k in str(r.get(field_name) or "").split(",")}
+        if alias in existing:
+            continue
+        previous = str(record.get("keywords_kr") or "")
+        record["keywords_kr"] = previous + (", " if previous.strip() else "") + alias
+        record.setdefault("_korean_alias_sources", {})[alias] = {
+            "source": "korean_lexical_supplement", "version": payload.get("version"), "basis": basis}
+        _refresh_lookup_fields(record)
+        changed.add(tag)
+        stats["aliases"] += 1
+    stats["tags"] = len(changed)
+    return stats
+
+
 def _merge_text_field(
     record: MutableMapping[str, Any],
     *,

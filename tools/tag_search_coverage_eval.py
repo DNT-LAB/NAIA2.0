@@ -290,6 +290,8 @@ def main(argv=None):
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True, help="New directory; never overwrite a prior run")
     parser.add_argument("--sample-per-stratum", type=int, default=24)
+    parser.add_argument("--frozen-self", type=Path,
+                        help="Reuse a previous self-queries-frozen.json for a paired data-change comparison")
     args = parser.parse_args(argv)
     if args.out.exists() or args.sample_per_stratum < 0:
         parser.error("Output must be a new directory and sample size must be nonnegative")
@@ -320,7 +322,14 @@ def main(argv=None):
     raw = context.kr_tags_raw
     print(f"Loaded raw={len(raw)} TagSearchIndex={len(index._entries)} LLMSearchIndex={len(general._recs)}", flush=True)
     totals, pool, inventory = census(raw, index, general, out)
-    samples, strata = deterministic_samples(pool, args.sample_per_stratum)
+    self_fixture_hash = file_hash(args.frozen_self) if args.frozen_self else None
+    if args.frozen_self:
+        frozen = json.loads(args.frozen_self.read_text(encoding="utf-8"))
+        samples, strata = frozen["cases"], frozen["strata"]
+        if not isinstance(samples, list) or len({c["id"] for c in samples}) != len(samples):
+            parser.error("Frozen self cases must have unique IDs")
+    else:
+        samples, strata = deterministic_samples(pool, args.sample_per_stratum)
     write_json(out / "self-queries-frozen.json", {"strata": strata, "cases": samples})
     write_json(out / "census.json", {"inventory": inventory, "cohorts": totals})
     all_cases = [("public", c) for c in cases] + [("self", c) for c in samples]
@@ -373,7 +382,8 @@ def main(argv=None):
         copied = json.loads(json.dumps(measured[case["query"]], ensure_ascii=False))
         results[cohort].append(measure_case(case, copied, index, general_tags))
     after = snapshot()
-    stable = before == after and fixture_hash == file_hash(args.cases)
+    stable = (before == after and fixture_hash == file_hash(args.cases) and
+              (not args.frozen_self or self_fixture_hash == file_hash(args.frozen_self)))
     report = {"schema_version": 1, "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "execution_path": "WebSessionContext -> register_ollama_routes -> POST /api/ollama/chat -> native search_tags",
         "model": "Scripted native tool calls through OllamaAssistantService; no inference/no network",
@@ -381,6 +391,7 @@ def main(argv=None):
                     "fallback_data_root": str(ROOT / "data")},
         "code_and_data_stable": stable, "source_before": before, "source_after": after,
         "fixture_sha256": fixture_hash, "records_sha256": digest(raw),
+        "self_fixture_sha256": self_fixture_hash,
         "inventory": inventory, "cohorts": totals, "sample_strata": strata,
         "summary": {name: summarize(rows) for name, rows in results.items()},
         "mutation_witness": witness, "elapsed_seconds": time.perf_counter() - started,

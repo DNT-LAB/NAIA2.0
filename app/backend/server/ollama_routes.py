@@ -514,6 +514,12 @@ def get_assist_service(context: WebSessionContext) -> "Any":
     # double-checked locking — 락 밖 빠른 경로(이미 캐시됨) + 락 안 재확인(첫 생성 직렬화).
     existing = getattr(context, "ollama_tag_assist_service", None)
     if existing is not None:
+        assistant = getattr(context, "ollama_assistant_service", None)
+        active_model = str(getattr(assistant, "default_model", "") or "")
+        if active_model and active_model != str(getattr(existing, "default_model", "")):
+            # Pull completion may activate the verified runtime before the next
+            # browser status poll. Chat/Auto Boost must use that same model now.
+            existing.set_endpoint(default_model=active_model)
         return existing
     with _ASSIST_SVC_LOCK:
         existing = getattr(context, "ollama_tag_assist_service", None)
@@ -795,7 +801,6 @@ def register_ollama_routes(
             # 입력은 있었지만 정규화가 비웠다 = 유효하지 않은 URL → 저장 않고 거부.
             if raw_endpoint and not norm["endpoint"]:
                 return {"ok": False, "error": "올바른 http(s) 엔드포인트 주소가 아닙니다."}
-            save_ollama_connection_settings(norm)
             # 영속값(빈값=리셋)을 라이브 base_url/model로 환원: 빈 endpoint→env→기본.
             resolved_url = (
                 norm["endpoint"]
@@ -805,7 +810,11 @@ def register_ollama_routes(
             resolved_model = norm["model"] or DEFAULT_MODEL
             # 양 서비스 라이브 갱신(재시작 불요).
             assistant = service()
-            assistant.set_connection(base_url=resolved_url, default_model=resolved_model)
+            try:
+                assistant.set_connection(base_url=resolved_url, default_model=resolved_model)
+            except RuntimeError as exc:
+                return {"ok": False, "error": str(exc)}
+            save_ollama_connection_settings(norm)
             tag_svc = getattr(context, "ollama_tag_assist_service", None)
             if tag_svc is not None:
                 try:

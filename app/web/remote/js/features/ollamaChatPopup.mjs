@@ -716,10 +716,11 @@ export function createOllamaChatPopup({
       const label = escHtml(String(item?.label || shortModelLabel(model)));
       const size = item?.size ? ` <span class="ollama-chat-ready-msg">${escHtml(String(item.size))}</span>` : '';
       const installed = !!item?.installed;
-      const btn = (!installed && canControl && model)
-        ? ` <button type="button" class="ollama-chat-ready-btn" data-act="pull-model" data-model="${escHtml(model)}">다운로드</button>`
+      const needsSpec = installed && item?.runtime_model && !item?.spec_ready;
+      const btn = ((!installed || needsSpec) && canControl && model)
+        ? ` <button type="button" class="ollama-chat-ready-btn" data-act="pull-model" data-model="${escHtml(model)}">${needsSpec ? 'think 사양 준비' : '다운로드'}</button>`
         : '';
-      const state = installed ? '설치됨' : '미설치';
+      const state = item?.spec_ready ? 'think 준비됨' : (installed ? '설치됨' : '미설치');
       return `<div class="ollama-chat-curated-row"><span>${label}${size} · ${escHtml(state)}</span>${btn}</div>`;
     }).join('');
     return `<div class="ollama-chat-curated">${rows}</div>`;
@@ -795,7 +796,8 @@ export function createOllamaChatPopup({
       return;
     }
     serverReady = true;
-    renderReadiness('');
+    renderReadiness(curatedModels.some(item => item?.installed && item?.runtime_model && !item?.spec_ready)
+      ? curatedDownloadHtml(canControl) : '');
     updateSendGate();
     void checkEventDatasetOnce();
   }

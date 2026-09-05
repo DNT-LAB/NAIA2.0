@@ -22,6 +22,8 @@ import time
 from threading import Lock, Thread
 from typing import Any, Callable
 
+from core.ollama_model_spec import OllamaModelSpec, RUNTIME_MODELS, source_model
+
 DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434"
 # 프론트(ollamaAssistantPopup.mjs)의 DEFAULT_MODEL과 미러 — 요청에 model이 없을 때 폴백.
 # E4B는 현재 기본 권장 모델이다. 더 가벼운/강한 모델은 CURATED_MODELS에서
@@ -64,7 +66,6 @@ _SCENE_SCAFFOLD_CONCEPTS = frozenset({
     "composition",
     "구도",
     "소녀",
-    "dog",
     "hands",
     "pose",
 })
@@ -81,7 +82,7 @@ _SCENE_SOURCE_CONCEPT_RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] =
     (("양손", "팔을 묶", "arms bound", "arms tied"), "양손을 묶인", "action", "arms behind back"),
     (("묶", "구속", "속박", "bound", "tied"), "묶인", "action", "bound"),
     (("개 같은", "네발", "all fours"), "네발기기 자세", "action", "all fours"),
-    (("viewer", "카메라", "올려다", "looking at viewer"), "viewer를 보는", "gaze", "looking at viewer"),
+    (("viewer", "카메라", "looking at viewer"), "viewer를 보는", "gaze", "looking at viewer"),
     (("째려", "노려", "glaring"), "째려보는", "expression", "glaring"),
     (("혀", "tongue"), "혀를 내미는", "expression", "tongue out"),
     (("무릎", "kneel"), "무릎 꿇은", "action", "kneeling"),
@@ -242,6 +243,10 @@ def _augment_scene_segments_from_source(
     text = str(source_text or "").lower()
     if not text:
         return segments
+    # Literal keyword repair cannot determine the scope of a negated clause.
+    # Keep the model's decomposition instead of re-adding an excluded attribute.
+    if re.search(r"\b(?:no|not|without|exclude\w*|excluding|instead of)\b|않|없|제외|대신|(?:^|\s)안\s", text):
+        return segments
     seen = {
         _normalize_scene_concept(concept)
         for segment in segments
@@ -278,6 +283,7 @@ class OllamaAssistantService:
         self._http_get = http_get or self._default_http_get
         self._http_post = http_post or self._default_http_post
         self._http_stream = http_stream or self._default_http_stream
+        self._model_spec = OllamaModelSpec(self._http_get, self._http_post)
         self._server_spawner = server_spawner or self._default_server_spawner
         self._lock = Lock()
         self._pull_state: dict[str, Any] = dict(_IDLE_PULL_STATE)
@@ -302,10 +308,14 @@ class OllamaAssistantService:
         ``base_url``을 바꾸면 다음 status/제어 호출이 즉시 새 호스트를 가리킨다. 단
         이미 만들어진 :class:`OllamaTagAssistService`는 생성 시점 값을 들고 있으므로
         라우트가 그쪽에도 ``set_endpoint``를 호출해 동기화해야 한다."""
-        if base_url is not None:
-            self.base_url = str(base_url).rstrip("/")
-        if default_model is not None and str(default_model).strip():
-            self.default_model = str(default_model).strip()
+        with self._lock:
+            if self._pull_state.get("active"):
+                raise RuntimeError("모델 다운로드·사양 준비가 끝난 뒤 연결을 변경하세요.")
+            if base_url is not None:
+                self.base_url = str(base_url).rstrip("/")
+            self._model_spec.clear()
+            if default_model is not None and str(default_model).strip():
+                self.default_model = str(default_model).strip()
 
     # ------------------------------------------------------------------
     # 기본 IO 구현
@@ -433,11 +443,13 @@ class OllamaAssistantService:
         installed = version is not None
         running = False
         models: list[str] = []
+        model_records: list[dict] = []
         try:
             response = self._http_get("/api/tags", timeout=1.5)
             if getattr(response, "status_code", 0) == 200:
                 running = True
                 payload = response.json() or {}
+                model_records = payload.get("models", [])
                 models = [
                     str(item.get("name") or "")
                     for item in payload.get("models", [])
@@ -449,18 +461,27 @@ class OllamaAssistantService:
         # 원격: 로컬 CLI 프로브가 불가하므로 도달성만으로 판정.
         if running:
             installed = True
-        model_installed = any(_model_name_matches(name, target) for name in models if name)
+        ready_models = self._model_spec.ready_models(model_records, fresh=fresh)
+        resolved = ready_models.get(target, target)
+        if model is None and resolved != target:
+            self.default_model = resolved
+            target = resolved
+        curated_target = target in RUNTIME_MODELS or target in RUNTIME_MODELS.values()
+        model_installed = (target in models if curated_target else
+                           any(_model_name_matches(name, target) for name in models if name))
+        if target in RUNTIME_MODELS.values():
+            model_installed = model_installed and ready_models.get(source_model(target)) == target
         # 설정/기본 모델(E4B 등)이 미설치여도 큐레이션 모델(E2B/E4B/E26B) 중 설치된 게 하나라도
         # 있으면 그걸 활성 모델로 채택한다 — 사용자가 받은 모델로 어시스턴트가 바로 켜지게(다운로드한
         # 모델이 무시되고 model_installed=False 로 "대상 모델 없음"에 갇히던 버그). self.default_model
         # 을 갱신하므로 이후 모든 어시스트 호출(= self.default_model 사용)이 설치된 모델을 쓴다.
         # model 인자가 명시된 호출(특정 모델 조회)은 건드리지 않고, CURATED_MODELS 순서로 첫 설치본 선택.
-        if not model_installed and model is None:
+        if not model_installed and model is None and target not in RUNTIME_MODELS.values():
             for _item in CURATED_MODELS:
                 _cm = str(_item.get("model") or "").strip()
-                if _cm and any(_model_name_matches(name, _cm) for name in models if name):
-                    self.default_model = _cm
-                    target = _cm
+                if _cm and _cm in models:
+                    self.default_model = ready_models.get(_cm, _cm)
+                    target = self.default_model
                     model_installed = True
                     break
         if not include_details:
@@ -486,11 +507,9 @@ class OllamaAssistantService:
             "curated": [
                 {
                     **item,
-                    "installed": any(
-                        _model_name_matches(name, item.get("model", ""))
-                        for name in models
-                        if name
-                    ),
+                    "runtime_model": RUNTIME_MODELS[item["model"]],
+                    "spec_ready": item["model"] in ready_models,
+                    "installed": item["model"] in models,
                 }
                 for item in CURATED_MODELS
             ],
@@ -586,6 +605,9 @@ class OllamaAssistantService:
             "model": self.default_model,
             "messages": cleaned[-16:],
             "stream": False,
+            # Gemma4's native renderer defaults to thinking; the short chat
+            # response budget is for content, as in the structured calls below.
+            "think": False,
             "options": {
                 "temperature": max(0.0, min(1.5, float(temperature))),
                 "num_predict": max(32, min(2048, int(num_predict))),
@@ -894,7 +916,11 @@ class OllamaAssistantService:
             "action includes pose, restraint, and body-position tags. body is physical attributes only, not poses or restraints.\n"
             "Use gaze for looking at viewer / looking up / camera gaze concepts.\n"
             "Do not add tags that are not visible or strongly implied by the scene.\n"
-            "Avoid scaffold words like girl, character, scene, composition, pose, hands, dog.\n"
+            "Avoid scaffold words like character, scene, composition, pose, hands.\n"
+            "Preserve subject counts with booru tags such as 1girl, 2girls, 1boy, rather than 'two women' or 'male'.\n"
+            "For anthropomorphic animals use anthro and the literal species (dog, wolf, fox, rabbit); do not invent supernatural species.\n"
+            "Camera viewpoint (from above, from below, from behind, profile) is separate from where the subject looks.\n"
+            "Include only positive visible concepts. Omit attributes the user excludes with no, not, without, or Korean negation.\n"
             "Examples:\n"
             "교복을 입은 -> {\"phrase\":\"교복을 입은\",\"axis\":\"clothing\",\"concepts\":[\"school uniform\"]}\n"
             "양손을 묶인 -> {\"phrase\":\"양손을 묶인\",\"axis\":\"action\",\"concepts\":[\"arms behind back\",\"bound\"]}\n"
@@ -997,7 +1023,7 @@ class OllamaAssistantService:
     def start_pull(self, model: str | None = None) -> dict[str, Any]:
         # 모델 미지정 시 연결 설정의 기본 모델(self.default_model)을 받는다 — 커스텀
         # 엔드포인트/모델에서도 옳은 모델을 pull(모듈 상수 DEFAULT_MODEL 폴백 금지).
-        target = str(model or self.default_model).strip()
+        target = source_model(str(model or self.default_model).strip())
         with self._lock:
             if self._pull_state.get("active"):
                 return dict(self._pull_state)
@@ -1022,6 +1048,16 @@ class OllamaAssistantService:
     def _run_pull(self, model: str) -> None:
         response = None
         try:
+            # Existing downloads can prepare their runtime without another pull.
+            # Exact names preserve the curated quantization; no base-name match.
+            if model in RUNTIME_MODELS:
+                inventory = self._http_get("/api/tags", timeout=5)
+                if inventory.status_code == 200 and any(
+                    row.get("name") == model for row in (inventory.json() or {}).get("models", [])
+                    if isinstance(row, dict)
+                ):
+                    self._finish_model_pull(model)
+                    return
             response = self._http_stream("/api/pull", {"model": model, "stream": True})
             with self._lock:
                 self._pull_response = response
@@ -1037,6 +1073,7 @@ class OllamaAssistantService:
                 except Exception:
                     pass
                 raise RuntimeError(detail or f"Ollama HTTP {status_code}")
+            downloaded = False
             for raw_line in response.iter_lines():
                 if self._pull_cancel:
                     self._set_pull(active=False, status="취소됨", error="", done=False)
@@ -1058,12 +1095,11 @@ class OllamaAssistantService:
                     updates["completed_mb"] = round(completed / (1024 * 1024), 1)
                     updates["total_mb"] = round(total / (1024 * 1024), 1)
                 if status == "success":
-                    updates.update({"percent": 100, "done": True})
+                    downloaded = True
+                    updates.update({"percent": 100})
                 self._set_pull(**updates)
-            with self._lock:
-                done = bool(self._pull_state.get("done"))
-            if done:
-                self._set_pull(active=False, status="모델 다운로드 완료", error="")
+            if downloaded:
+                self._finish_model_pull(model)
             else:
                 self._set_pull(active=False, error="다운로드가 완료 신호 없이 종료되었습니다.")
         except Exception as exc:
@@ -1080,3 +1116,20 @@ class OllamaAssistantService:
                     response.close()
                 except Exception:
                     pass
+
+    def _finish_model_pull(self, model: str) -> None:
+        if self._pull_cancel:
+            self._set_pull(active=False, status="취소됨", error="", done=False)
+            return
+        runtime = model
+        if model in RUNTIME_MODELS:
+            self._set_pull(status="다운로드 완료 · think 사양 준비 중...", done=False)
+            runtime = self._model_spec.prepare(model)
+        if self._pull_cancel:
+            self._set_pull(active=False, status="취소됨", error="", done=False)
+            return
+        # Selecting a different model while a download runs must not be undone.
+        if source_model(self.default_model) == model:
+            self.default_model = runtime
+        self._set_pull(active=False, status="모델 다운로드 완료", error="", done=True,
+                       percent=100, runtime_model=runtime)

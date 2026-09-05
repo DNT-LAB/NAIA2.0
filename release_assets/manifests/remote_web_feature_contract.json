@@ -20,6 +20,7 @@
     "app/backend/server/module_storage_routes.py",
     "app/backend/server/nai_model_routes.py",
     "app/backend/server/nai_preview_routes.py",
+    "app/backend/server/ollama_routes.py",
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_engineering_filter_routes.py",
     "app/backend/server/prompt_tools_routes.py",
@@ -580,6 +581,34 @@
         {"method": "GET", "path": "/api/translation-history", "smoke": "non_destructive"},
         {"method": "DELETE", "path": "/api/translation-history/{record_id}", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/translation-history/{record_id}/pin", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "ollama_chat",
+      "name": "Ollama chat, grounded queries and curated thinking runtime preparation",
+      "source_files": [
+        "app/backend/server/ollama_routes.py",
+        "core/ollama_assistant_service.py",
+        "core/ollama_model_spec.py",
+        "core/semantic_tag_discovery.py",
+        "app/web/remote/js/features/ollamaChatPopup.mjs",
+        "app/web/remote/js/features/ollamaAssistantPopup.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/ollama/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ollama/server/start", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ollama/pull", "smoke": "external_live"},
+        {"method": "GET", "path": "/api/ollama/pull/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ollama/pull/cancel", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/ollama/dataset", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ollama/dataset", "smoke": "external_live"},
+        {"method": "GET", "path": "/api/ollama/connection", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ollama/connection", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/ollama/assist/progress", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/ollama/chat/progress", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ollama/assist", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/ollama/chat", "smoke": "external_live"}
       ]
     },
     {

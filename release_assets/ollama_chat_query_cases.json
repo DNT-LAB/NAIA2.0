@@ -1,0 +1,503 @@
+{
+  "schema_version": 1,
+  "source": "Codex-authored fixture; not live Codex API output",
+  "scope": "Representative semantic categories including species terms; vocabulary coverage is not exhaustive. Missing indexed expectations are reported, never silently removed.",
+  "cases": [
+    {
+      "id": "query-01",
+      "category": "clothing",
+      "input": "흰 셔츠와 검은 치마를 입은 사람",
+      "segments": [
+        {
+          "phrase": "흰 셔츠와 검은 치마를 입은 사람",
+          "axis": "general",
+          "concepts": [
+            "white shirt",
+            "black skirt"
+          ]
+        }
+      ],
+      "expected": [
+        "white shirt",
+        "black skirt"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-02",
+      "category": "clothing",
+      "input": "교복에 넥타이를 매고 있어",
+      "segments": [
+        {
+          "phrase": "교복에 넥타이를 매고 있어",
+          "axis": "general",
+          "concepts": [
+            "school uniform",
+            "necktie"
+          ]
+        }
+      ],
+      "expected": [
+        "school uniform",
+        "necktie"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-03",
+      "category": "clothing",
+      "input": "긴 코트와 부츠를 입은 모습",
+      "segments": [
+        {
+          "phrase": "긴 코트와 부츠를 입은 모습",
+          "axis": "general",
+          "concepts": [
+            "coat",
+            "boots"
+          ]
+        }
+      ],
+      "expected": [
+        "coat",
+        "boots"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-04",
+      "category": "pose",
+      "input": "의자에 앉아 다리를 꼬고 있는 사람",
+      "segments": [
+        {
+          "phrase": "의자에 앉아 다리를 꼬고 있는 사람",
+          "axis": "general",
+          "concepts": [
+            "sitting",
+            "crossed legs"
+          ]
+        }
+      ],
+      "expected": [
+        "sitting",
+        "crossed legs"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-05",
+      "category": "pose",
+      "input": "바닥에 무릎을 꿇고 있어",
+      "segments": [
+        {
+          "phrase": "바닥에 무릎을 꿇고 있어",
+          "axis": "general",
+          "concepts": [
+            "kneeling"
+          ]
+        }
+      ],
+      "expected": [
+        "kneeling"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-06",
+      "category": "pose",
+      "input": "팔짱을 끼고 서 있는 사람",
+      "segments": [
+        {
+          "phrase": "팔짱을 끼고 서 있는 사람",
+          "axis": "general",
+          "concepts": [
+            "standing",
+            "crossed arms"
+          ]
+        }
+      ],
+      "expected": [
+        "standing",
+        "crossed arms"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-07",
+      "category": "pose",
+      "input": "손을 흔들며 웃고 있어",
+      "segments": [
+        {
+          "phrase": "손을 흔들며 웃고 있어",
+          "axis": "general",
+          "concepts": [
+            "waving",
+            "smile"
+          ]
+        }
+      ],
+      "expected": [
+        "waving",
+        "smile"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-08",
+      "category": "background",
+      "input": "비 내리는 도시의 밤거리",
+      "segments": [
+        {
+          "phrase": "비 내리는 도시의 밤거리",
+          "axis": "general",
+          "concepts": [
+            "rain",
+            "city",
+            "night"
+          ]
+        }
+      ],
+      "expected": [
+        "rain",
+        "city",
+        "night"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-09",
+      "category": "background",
+      "input": "눈이 내리는 숲",
+      "segments": [
+        {
+          "phrase": "눈이 내리는 숲",
+          "axis": "general",
+          "concepts": [
+            "snow",
+            "forest"
+          ]
+        }
+      ],
+      "expected": [
+        "snow",
+        "forest"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-10",
+      "category": "background",
+      "input": "모래사장과 바다가 보이는 해변",
+      "segments": [
+        {
+          "phrase": "모래사장과 바다가 보이는 해변",
+          "axis": "general",
+          "concepts": [
+            "beach",
+            "ocean"
+          ]
+        }
+      ],
+      "expected": [
+        "beach",
+        "ocean"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-11",
+      "category": "background",
+      "input": "도서관의 책장 앞",
+      "segments": [
+        {
+          "phrase": "도서관의 책장 앞",
+          "axis": "general",
+          "concepts": [
+            "library",
+            "bookshelf"
+          ]
+        }
+      ],
+      "expected": [
+        "library",
+        "bookshelf"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-12",
+      "category": "viewpoint",
+      "input": "뒤에서 본 인물",
+      "segments": [
+        {
+          "phrase": "뒤에서 본 인물",
+          "axis": "general",
+          "concepts": [
+            "from behind"
+          ]
+        }
+      ],
+      "expected": [
+        "from behind"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-13",
+      "category": "viewpoint",
+      "input": "위에서 내려다본 인물",
+      "segments": [
+        {
+          "phrase": "위에서 내려다본 인물",
+          "axis": "general",
+          "concepts": [
+            "from above"
+          ]
+        }
+      ],
+      "expected": [
+        "from above"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-14",
+      "category": "viewpoint",
+      "input": "아래에서 올려다본 인물",
+      "segments": [
+        {
+          "phrase": "아래에서 올려다본 인물",
+          "axis": "general",
+          "concepts": [
+            "from below"
+          ]
+        }
+      ],
+      "expected": [
+        "from below"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-15",
+      "category": "viewpoint",
+      "input": "인물의 옆모습",
+      "segments": [
+        {
+          "phrase": "인물의 옆모습",
+          "axis": "general",
+          "concepts": [
+            "profile"
+          ]
+        }
+      ],
+      "expected": [
+        "profile"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-16",
+      "category": "material",
+      "input": "가죽 재킷을 입은 사람",
+      "segments": [
+        {
+          "phrase": "가죽 재킷을 입은 사람",
+          "axis": "general",
+          "concepts": [
+            "leather jacket"
+          ]
+        }
+      ],
+      "expected": [
+        "leather jacket"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-17",
+      "category": "material",
+      "input": "금속 갑옷을 입은 기사",
+      "segments": [
+        {
+          "phrase": "금속 갑옷을 입은 기사",
+          "axis": "general",
+          "concepts": [
+            "armor"
+          ]
+        }
+      ],
+      "expected": [
+        "armor"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-18",
+      "category": "material",
+      "input": "투명한 우산을 든 사람",
+      "segments": [
+        {
+          "phrase": "투명한 우산을 든 사람",
+          "axis": "general",
+          "concepts": [
+            "transparent umbrella",
+            "holding umbrella"
+          ]
+        }
+      ],
+      "expected": [
+        "transparent umbrella",
+        "holding umbrella"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-19",
+      "category": "multi-subject",
+      "input": "두 여성이 손을 잡고 있어",
+      "segments": [
+        {
+          "phrase": "두 여성이 손을 잡고 있어",
+          "axis": "general",
+          "concepts": [
+            "2girls",
+            "holding hands"
+          ]
+        }
+      ],
+      "expected": [
+        "2girls",
+        "holding hands"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-20",
+      "category": "multi-subject",
+      "input": "남성과 여성이 서로 마주 보고 있어",
+      "segments": [
+        {
+          "phrase": "남성과 여성이 서로 마주 보고 있어",
+          "axis": "general",
+          "concepts": [
+            "1boy",
+            "1girl",
+            "facing another"
+          ]
+        }
+      ],
+      "expected": [
+        "1boy",
+        "1girl",
+        "facing another"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-21",
+      "category": "negation",
+      "input": "모자 없이 안경을 쓴 사람",
+      "segments": [
+        {
+          "phrase": "모자 없이 안경을 쓴 사람",
+          "axis": "general",
+          "concepts": [
+            "glasses"
+          ]
+        }
+      ],
+      "expected": [
+        "glasses"
+      ],
+      "forbidden": [
+        "hat"
+      ]
+    },
+    {
+      "id": "query-22",
+      "category": "negation",
+      "input": "앉지 않고 서 있는 사람",
+      "segments": [
+        {
+          "phrase": "앉지 않고 서 있는 사람",
+          "axis": "general",
+          "concepts": [
+            "standing"
+          ]
+        }
+      ],
+      "expected": [
+        "standing"
+      ],
+      "forbidden": [
+        "sitting"
+      ]
+    },
+    {
+      "id": "query-23",
+      "category": "species",
+      "input": "늑대 수인이 숲에 서 있어",
+      "segments": [
+        {
+          "phrase": "늑대 수인이 숲에 서 있어",
+          "axis": "general",
+          "concepts": [
+            "wolf",
+            "anthro",
+            "forest",
+            "standing"
+          ]
+        }
+      ],
+      "expected": [
+        "wolf",
+        "anthro",
+        "forest",
+        "standing"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-24",
+      "category": "species",
+      "input": "여우 수인이 꼬리를 흔들고 있어",
+      "segments": [
+        {
+          "phrase": "여우 수인이 꼬리를 흔들고 있어",
+          "axis": "general",
+          "concepts": [
+            "fox",
+            "anthro",
+            "tail"
+          ]
+        }
+      ],
+      "expected": [
+        "fox",
+        "anthro",
+        "tail"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "query-25",
+      "category": "species",
+      "input": "토끼 귀를 가진 수인",
+      "segments": [
+        {
+          "phrase": "토끼 귀를 가진 수인",
+          "axis": "general",
+          "concepts": [
+            "rabbit ears",
+            "anthro"
+          ]
+        }
+      ],
+      "expected": [
+        "rabbit ears",
+        "anthro"
+      ],
+      "forbidden": []
+    }
+  ]
+}

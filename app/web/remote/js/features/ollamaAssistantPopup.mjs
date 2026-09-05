@@ -444,9 +444,10 @@ export function createOllamaAssistantPopup({
       const model = String(item?.model || '').trim();
       const label = escHtml(String(item?.label || shortOllamaModel(model)));
       const size = item?.size ? ` · ${escHtml(String(item.size))}` : '';
-      const state = item?.installed ? '설치됨' : '미설치';
-      const button = (!item?.installed && canControl && model)
-        ? `<button type="button" class="ollama-assistant-action" data-act="pull" data-model="${escHtml(model)}">${label}${size} 다운로드</button>`
+      const state = item?.spec_ready ? 'think 준비됨' : (item?.installed ? '설치됨' : '미설치');
+      const needsSpec = item?.installed && item?.runtime_model && !item?.spec_ready;
+      const button = ((!item?.installed || needsSpec) && canControl && model)
+        ? `<button type="button" class="ollama-assistant-action" data-act="pull" data-model="${escHtml(model)}">${label}${needsSpec ? ' · think 사양 준비' : `${size} 다운로드`}</button>`
         : `<span class="ollama-assistant-natural-line">${label}${size} · ${escHtml(state)}</span>`;
       return button;
     }).join('');
@@ -666,7 +667,7 @@ export function createOllamaAssistantPopup({
       setBadge(`실행 중 · 모델 준비됨 ✓`, 'ok');
       setStatus('아래에 원하는 장면을 한국어로 적으면 실제 태그로 변환합니다.');
       setAssistVisible(true);
-      renderActions('');  // 어시스트 UI만 — 복사 버튼 제거(사용자 요청)
+      renderActions(curatedModelActions(canControl));
       // 브릿지: 이벤트 데이터셋이 받아지는 중이면 진행 UI를 이어받는다. 미설치라도
       // 별도 버튼 없이 — 모델 다운로드와 병렬로 받거나, Manual 선택 시 자동 시작.
       const ds = await fetchDatasetState();
@@ -790,7 +791,9 @@ export function createOllamaAssistantPopup({
       }
       // 모델과 함께 이벤트 데이터셋(조합)도 병렬로 받아둔다 — 미설치일 때만
       // 백그라운드로 시작(진행 UI는 모델 우선, 모델 완료 후 데이터셋으로 인계).
-      kickDatasetIfMissing();
+      if (!curatedModels.some(item => item?.model === targetModel && item?.installed)) {
+        kickDatasetIfMissing();
+      }
       enterPullMode();
     } catch (error) {
       showToast('다운로드 시작 실패', 'error');

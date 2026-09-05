@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "split": "holdout",
+  "source": "Codex-authored fixture; frozen unseen holdout, not live Codex API output",
+  "scope": "Ten neutral unseen cases; index-only preflight does not measure model accuracy.",
+  "cases": [
+    {
+      "id": "holdout-01",
+      "split": "holdout",
+      "category": "species",
+      "input": "개 한 마리가 잔디 위에 누워 있다",
+      "segments": [
+        {
+          "phrase": "개 한 마리가 잔디 위에 누워 있다",
+          "axis": "general",
+          "concepts": [
+            "dog",
+            "grass",
+            "lying"
+          ]
+        }
+      ],
+      "expected": [
+        "dog",
+        "grass",
+        "lying"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "holdout-02",
+      "split": "holdout",
+      "category": "species",
+      "input": "고양이가 상자 안에서 고개를 내밀고 있다",
+      "segments": [
+        {
+          "phrase": "고양이가 상자 안에서 고개를 내밀고 있다",
+          "axis": "general",
+          "concepts": [
+            "cat",
+            "box"
+          ]
+        }
+      ],
+      "expected": [
+        "cat",
+        "box"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "holdout-03",
+      "split": "holdout",
+      "category": "clothing",
+      "input": "빨간 스웨터에 청바지를 입고 있다",
+      "segments": [
+        {
+          "phrase": "빨간 스웨터에 청바지를 입고 있다",
+          "axis": "general",
+          "concepts": [
+            "red sweater",
+            "jeans"
+          ]
+        }
+      ],
+      "expected": [
+        "red sweater",
+        "jeans"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "holdout-04",
+      "split": "holdout",
+      "category": "background",
+      "input": "산과 호수가 보이는 풍경",
+      "segments": [
+        {
+          "phrase": "산과 호수가 보이는 풍경",
+          "axis": "general",
+          "concepts": [
+            "mountain",
+            "lake"
+          ]
+        }
+      ],
+      "expected": [
+        "mountain",
+        "lake"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "holdout-05",
+      "split": "holdout",
+      "category": "pose",
+      "input": "벽에 기대어 웅크린 사람",
+      "segments": [
+        {
+          "phrase": "벽에 기대어 웅크린 사람",
+          "axis": "general",
+          "concepts": [
+            "leaning against wall",
+            "crouching"
+          ]
+        }
+      ],
+      "expected": [
+        "leaning against wall",
+        "crouching"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "holdout-06",
+      "split": "holdout",
+      "category": "negation",
+      "input": "수영복 대신 후드티를 입고 있다",
+      "segments": [
+        {
+          "phrase": "수영복 대신 후드티를 입고 있다",
+          "axis": "general",
+          "concepts": [
+            "hoodie"
+          ]
+        }
+      ],
+      "expected": [
+        "hoodie"
+      ],
+      "forbidden": [
+        "swimsuit"
+      ]
+    },
+    {
+      "id": "holdout-07",
+      "split": "holdout",
+      "category": "negation",
+      "input": "교복은 입지 않고 가방을 들고 있다",
+      "segments": [
+        {
+          "phrase": "교복은 입지 않고 가방을 들고 있다",
+          "axis": "general",
+          "concepts": [
+            "bag",
+            "holding bag"
+          ]
+        }
+      ],
+      "expected": [
+        "bag",
+        "holding bag"
+      ],
+      "forbidden": [
+        "school uniform"
+      ]
+    },
+    {
+      "id": "holdout-08",
+      "split": "holdout",
+      "category": "negation",
+      "input": "선글라스 없이 목걸이를 착용한 사람",
+      "segments": [
+        {
+          "phrase": "선글라스 없이 목걸이를 착용한 사람",
+          "axis": "general",
+          "concepts": [
+            "necklace"
+          ]
+        }
+      ],
+      "expected": [
+        "necklace"
+      ],
+      "forbidden": [
+        "sunglasses"
+      ]
+    },
+    {
+      "id": "holdout-09",
+      "split": "holdout",
+      "category": "multi-subject",
+      "input": "세 여성이 함께 걷고 있다",
+      "segments": [
+        {
+          "phrase": "세 여성이 함께 걷고 있다",
+          "axis": "general",
+          "concepts": [
+            "3girls",
+            "walking"
+          ]
+        }
+      ],
+      "expected": [
+        "3girls",
+        "walking"
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "holdout-10",
+      "split": "holdout",
+      "category": "multi-subject",
+      "input": "두 남성이 나란히 앉아 있다",
+      "segments": [
+        {
+          "phrase": "두 남성이 나란히 앉아 있다",
+          "axis": "general",
+          "concepts": [
+            "2boys",
+            "sitting"
+          ]
+        }
+      ],
+      "expected": [
+        "2boys",
+        "sitting"
+      ],
+      "forbidden": []
+    }
+  ]
+}

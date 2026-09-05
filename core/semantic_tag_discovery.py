@@ -12,6 +12,8 @@ from math import log10
 import re
 from typing import Any, Callable, Iterable
 
+from core.llm_search_index import query_stems
+
 SearchFn = Callable[[str, int, Any], list[dict[str, Any]]]
 TranslatorFn = Callable[[str], str | None]
 
@@ -119,24 +121,24 @@ _CATEGORY_AXIS_ALLOWED_TOPS = {
         "패션", "의상", "복장", "의류", "복식", "코스프레", "코스튬", "특정 의상",
         "의상 조합", "복장 조합", "의상/상태", "의상/사물", "의상/디테일",
         "캐릭터/의상", "신발", "신발/디테일", "액세서리", "악세사리", "장신구",
-        "모자", "갑옷", "스킨", "clothing", "fashion", "attire",
+        "모자", "갑옷", "스킨", "clothing", "fashion", "attire", "Clothing_Wear",
     }),
     "action": frozenset({
         "행위", "행동", "동작", "자세", "자세/행동", "포즈", "표정/행동",
         "신체 자세", "성행위", "성적 행위", "체위", "활동", "놀이", "움직임",
         "상호작용", "구속", "신체 구속", "BDSM", "Actions", "action", "actions",
-        "pose",
+        "pose", "Expression_Action",
     }),
     "expression": frozenset({
         "표정", "표현", "표정/행동", "표정/상태", "Expressions", "감정", "얼굴",
-        "눈", "화장", "메이크업", "expression", "expressions",
+        "눈", "화장", "메이크업", "expression", "expressions", "Expression_Action",
     }),
     "background": frozenset({
         "배경", "장소", "자연", "풍경", "환경", "지형", "지리", "건축", "건물",
-        "배경/사물", "배경/문화", "background", "location", "nature",
+        "배경/사물", "배경/문화", "background", "location", "nature", "Location_Background",
     }),
-    "body": frozenset({"신체", "body"}),
-    "object": frozenset({"사물", "물체", "오브젝트", "사물/음식", "음식", "object", "prop"}),
+    "body": frozenset({"신체", "body", "Person_Body"}),
+    "object": frozenset({"사물", "물체", "오브젝트", "사물/음식", "음식", "object", "prop", "Food_Object"}),
 }
 _CATEGORY_AXIS_TOP_MARKERS = {
     # The corpus has many one-off franchise labels such as "블루 아카이브 복식".
@@ -225,7 +227,7 @@ def ground_scene_segments(
         tags: list[dict[str, Any]] = []
         for concept_raw in concepts_raw:
             concept = normalize_scene_concept(concept_raw)
-            if not concept or _HANGUL_RE.search(concept):
+            if not concept or concept in seen_tags or _HANGUL_RE.search(concept):
                 continue
             try:
                 rows = list(searcher(concept, limit, context) or [])
@@ -237,9 +239,23 @@ def ground_scene_segments(
                 seen_tags.add(tag)
                 tags.append(_scene_grounded_row(exact_row, concept, "exact"))
                 continue
+            # Keep real negative-form tags (e.g. no humans) through exact lookup,
+            # but never turn an unsupported "no hat" query into positive "hat".
+            if re.match(r"^(?:no|not|without|excluding)\b", concept):
+                continue
             for row in rows:
                 tag = _norm_tag(row.get("tag"))
                 if not tag or tag in seen_tags:
+                    continue
+                # Partial retrieval offers related tags too. Grounding is a
+                # statement of what was requested: do not introduce an action
+                # or attribute merely because it shares the other query words.
+                # Preserve inflections, word order, and compound spelling.
+                compact = lambda text: re.sub(r"[\s-]+", "", text)
+                if (compact(tag) != compact(concept)
+                        and not query_stems(tag).issubset(query_stems(concept))):
+                    continue
+                if (set(tag.split()) & {"on", "in"}) - set(concept.split()):
                     continue
                 if _is_scene_fuzzy_franchise_row(tag, row):
                     continue

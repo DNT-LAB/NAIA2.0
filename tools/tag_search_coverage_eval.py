@@ -33,6 +33,7 @@ CODE = (
     "core/tag_search_index.py", "core/tag_knowledge.py", "core/kr_tag_loader.py",
     "core/tag_axis_registry.py", "core/named_entity_groups.py", "core/llm_search_index.py",
     "core/ollama_chat_pipeline.py", "core/ollama_chat_agent.py", "core/ollama_chat_semantics.py",
+    "core/ollama_chat_plan.py",
     "core/ollama_assistant_service.py", "core/web_session_context.py", "core/headless_context_bootstrap.py",
     "app/backend/runtime/paths.py", "app/backend/server/autocomplete_commands.py",
     "app/backend/server/ollama_chat_tools.py", "app/backend/server/ollama_routes.py",
@@ -196,11 +197,21 @@ class SearchProbe:
                 raise AssertionError("Unexpected model endpoint: " + path)
             self.turn += 1
             if self.turn == 1:
-                name, arguments = "search_tags", {"queries": self.queries}
+                name, arguments = 'plan_search', {
+                    'mode': 'lookup', 'output': {'format': 'tags', 'language': 'en'}, 'actors': [],
+                    'requirements': [{'id': 'probe', 'source': '사전 검색 경로를 측정합니다.',
+                                      'kind': 'entity', 'actors': [], 'depends_on': []}],
+                    'searches': [{'requirement_ids': ['probe'], 'tool': 'search_tags', 'query': q}
+                                 for q in self.queries]}
             elif self.turn == 2:
                 self.output = next(json.loads(m["content"]) for m in reversed(payload["messages"])
-                    if m.get("role") == "tool" and m.get("tool_name") == "search_tags")
-                name, arguments = "finish", {"kind": "chat", "summary": "검색 경로 측정 완료",
+                    if m.get("role") == "tool" and m.get("tool_name") == "plan_search")
+                if self.output.get('status') != 'error':
+                    self.output = {'status': 'ok', 'searches': [s for result in self.output['results']
+                                                             for s in result.get('searches', [])]}
+                # Probe measures returned candidates only, not semantic finish.
+                name, arguments = "finish", {"kind": "clarification", "summary": "검색 경로 측정 완료",
+                                             'question': '어느 검색 결과를 검토할까요?',
                                              "actors": [], "relations": [], "common_tags": []}
             else:
                 raise AssertionError("Probe must finish in two native turns")

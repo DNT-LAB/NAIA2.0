@@ -661,7 +661,7 @@ class OllamaAssistantService:
 
     def reasoning_chat_turn(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]],
-        *, model: str, timeout: float = 120,
+        *, model: str, timeout: float = 120, think: bool = True,
     ) -> dict[str, Any]:
         """One native thinking/tool turn; messages are built by the server agent.
 
@@ -670,7 +670,7 @@ class OllamaAssistantService:
         """
         response = self._http_post("/api/chat", {
             "model": model, "messages": messages, "tools": tools,
-            "stream": False, "think": True, "keep_alive": "5m",
+            "stream": False, "think": think, "keep_alive": "5m",
             "options": {"temperature": 0.2, "seed": 42,
                         "num_ctx": 16384, "num_predict": 4096},
         }, timeout=(5, max(1, min(120, timeout))))

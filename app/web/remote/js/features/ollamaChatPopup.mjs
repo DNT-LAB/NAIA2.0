@@ -6,6 +6,9 @@ import {
   setOllamaModelSelectOptions,
 } from './ollamaModelSelect.mjs?v=20260618-related-curated';
 
+const REQUIREMENT_STATES = {selected: '후보 선택', missing: '미충족', ambiguous: '뜻 확인 필요',
+  unrepresentable: '태그 표현 한계'};
+
 export function sceneReview(payload) {
   const complete = payload.completion === 'complete';
   return {complete, label: complete ? '검토 범위의 의미 확인' : '의미 확인 필요',
@@ -18,6 +21,11 @@ export function formatDirectedScene(scene, payload = {}) {
   const review = sceneReview(payload);
   const lines = [review.label, ...review.issues.map(issue => `확인 필요: ${issue}`),
     `공통: ${(scene.common_tags || []).join(', ')}`];
+  if (payload.output?.format === 'sentence' && payload.output.prompt) {
+    lines.splice(1, 0, `문장형 프롬프트 (${payload.output.language || ''}): ${payload.output.prompt}`);
+  }
+  (payload.coverage?.requirements || []).forEach(r => lines.push(
+    `요구: ${r.source} · ${REQUIREMENT_STATES[r.state] || r.state} · ${(r.selected_tags || []).join(', ')}`));
   actors.forEach((a, i) => lines.push(`Character ${i + 1} (${a.name}): ${(a.tags || []).join(', ')}`));
   (scene.relations || []).forEach(r => lines.push(
     `${names.get(r.actor_id) || r.actor_id} → ${r.negated ? '[하지 않음] ' : ''}${r.action} → ${names.get(r.target_id) || r.target_id}`));
@@ -307,6 +315,30 @@ export function createOllamaChatPopup({
         const panel = document.createElement('div');
         panel.className = 'ollama-chat-chip-panel ollama-chat-directed-scene';
         panel.appendChild(makePanelHead(index, '인물별 장면'));
+        if (msg.output?.format === 'sentence' && msg.output.prompt) {
+          const prompt = document.createElement('div');
+          prompt.className = 'ollama-chat-scene-note ollama-chat-sentence';
+          prompt.textContent = `문장형 프롬프트 (${msg.output.language || ''})\n${msg.output.prompt}`;
+          panel.appendChild(prompt);
+        }
+        if (msg.coverage?.requirements?.length) {
+          const details = document.createElement('details');
+          details.className = 'ollama-chat-requirement-coverage';
+          const title = document.createElement('summary');
+          title.textContent = '요구별 검색·선택 (의미 검증과 별도)';
+          details.appendChild(title);
+          const actorNames = new Map((msg.intent_plan?.actors || scene.actors).map(a => [a.id, a.name]));
+          const requirementNames = new Map(msg.coverage.requirements.map(r => [r.id, r.source]));
+          for (const req of msg.coverage.requirements) {
+            const row = document.createElement('div');
+            row.className = 'ollama-chat-scene-note';
+            row.textContent = `${req.source} · ${REQUIREMENT_STATES[req.state] || req.state}`
+              + (req.actors?.length ? ` · 인물: ${req.actors.map(id => actorNames.get(id) || id).join(', ')}` : '')
+              + (req.depends_on?.length ? ` · 연결 요구: ${req.depends_on.map(id => requirementNames.get(id) || id).join(', ')}` : '');
+            details.appendChild(row);
+          }
+          panel.appendChild(details);
+        }
         review.issues.forEach(issue => {
           const note = document.createElement('div');
           note.className = 'ollama-chat-scene-note';
@@ -361,7 +393,7 @@ export function createOllamaChatPopup({
         const summary = document.createElement('summary');
         summary.textContent = `검색 기록 (${msg.toolTrace.length})`;
         details.appendChild(summary);
-        const labels = {search_tags: '태그', search_characters: '캐릭터', search_events: '이벤트', finish: '결과 확인'};
+        const labels = {plan_search: '요구·검색 계획', search_tags: '태그', search_characters: '캐릭터', search_events: '이벤트', finish: '결과 확인'};
         msg.toolTrace.forEach(trace => {
           const row = document.createElement('div');
           row.className = 'ollama-chat-scene-note';
@@ -704,6 +736,9 @@ export function createOllamaChatPopup({
       messages[messages.length - 1].toolTrace = Array.isArray(payload.toolTrace) ? payload.toolTrace : [];
       messages[messages.length - 1].completion = payload.completion || null;
       messages[messages.length - 1].semantic_review = payload.semantic_review || null;
+      messages[messages.length - 1].intent_plan = payload.intent_plan || null;
+      messages[messages.length - 1].coverage = payload.coverage || null;
+      messages[messages.length - 1].output = payload.output || null;
       renderMessages();
       if (payload.model) {
         connModel = String(payload.model);

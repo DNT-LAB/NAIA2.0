@@ -114,16 +114,30 @@ def main(argv=None):
     parser.add_argument("--event-data-root", type=Path, help="Read existing Event Preset assets from this data root")
     parser.add_argument("--review-cases", type=Path, help="Additional versioned meaning expectations; base score stays unchanged")
     parser.add_argument("--seed", type=int, help="Offline sampling experiment; default keeps the production seed")
+    parser.add_argument('--think-policy', choices=['always', 'first'],
+                        help='Isolated comparison: only the per-turn think policy changes')
     args = parser.parse_args(argv)
     if args.system_file:
         import core.ollama_chat_agent as agent_module
         agent_module.SYSTEM = args.system_file.read_text(encoding="utf-8")
-    from core.kr_tag_loader import load_kr_tag_records
-    records = load_kr_tag_records(str(ROOT), data_roots=[ROOT / "data"])
-    index = LLMSearchIndex.from_raw_tag_records(records.raw, built_from=records.raw)
-    context = SimpleNamespace(repo_root=ROOT, runtime_paths=None, kr_tags_raw=records.raw,
-        llm_search_index=index, autocomplete_state=SimpleNamespace(kr_tags_loaded=True),
-        subscribe=lambda *a: None)
+    if args.output.exists():
+        parser.error('output already exists; choose a new evidence path')
+    if args.think_policy:
+        from core.ollama_chat_agent import OllamaChatAgent
+        OllamaChatAgent.THINK_POLICY = args.think_policy
+    from app.backend.runtime.paths import RuntimePaths
+    from core.web_session_context import WebSessionContext
+    from core.headless_token_store import InMemoryTokenManager
+    from app.backend.server.ollama_routes import ensure_llm_search_index
+    from app.backend.server.autocomplete_commands import ensure_tag_search_index
+    runtime_root = args.output.resolve().with_suffix('.runtime')
+    if runtime_root.exists():
+        parser.error('isolated runtime path already exists')
+    paths = RuntimePaths(project_root=ROOT, resource_root=ROOT, user_root=runtime_root, portable=True)
+    context = WebSessionContext(repo_root=ROOT, runtime_paths=paths, token_manager=InMemoryTokenManager())
+    context.headless_generation_execute_enabled = False
+    ensure_tag_search_index(context)
+    ensure_llm_search_index(context)
     if args.event_data_root:
         from core.event_preset_service import EventPresetService
         context.event_preset_service = EventPresetService(ROOT, data_root=args.event_data_root.resolve())
@@ -139,6 +153,7 @@ def main(argv=None):
         parser.error("output must not overwrite an input fixture or system file")
     model_show = request_json(args.base_url, "/api/show", {"model": args.model}).json()
     model_tags = request_json(args.base_url, "/api/tags").json()
+    model_shows = {args.model: model_show}
     calls = []
     def post(path, payload, **kwargs):
         started = time.monotonic()
@@ -149,25 +164,33 @@ def main(argv=None):
         timeout = kwargs.get("timeout", 125)
         if isinstance(timeout, tuple):
             timeout = timeout[-1]
-        result = request_json(args.base_url, path, payload, timeout=timeout)
+        try:
+            result = request_json(args.base_url, path, payload, timeout=timeout)
+        except Exception as exc:
+            if path == '/api/chat':
+                calls.append({'request': snapshot, 'error': str(exc),
+                              'elapsed_seconds': time.monotonic() - started})
+            raise
         if path == "/api/chat":
-            # Record original source, actual arguments/results and native tool turns.
             calls.append({"request": snapshot, "response": result.json(),
                           "elapsed_seconds": time.monotonic() - started})
+        elif path == '/api/show':
+            model_shows[payload['model']] = result.json()
         return result
     assistant = OllamaAssistantService(base_url=args.base_url, default_model=args.model, http_post=post)
-    report = {"schema_version": 2, "baseline_source": "Codex-authored expected roles and direct local queries; not a live Codex API",
+    report = {"schema_version": 3, "baseline_source": "Codex-authored expected roles and direct local queries; not a live Codex API",
         "execution_path": "POST /api/ollama/chat via register_ollama_routes (in-process ASGI; live Ollama)",
-        "context": {"type": "SimpleNamespace", "runtime_paths": None,
-                    "scope": "Production route/factory with supplied local data; not full WebSessionContext lifecycle"},
+        "context": {"type": "WebSessionContext", "runtime_paths": str(runtime_root),
+                    "scope": "Production route/factory, isolated writable state, generation disabled"},
         "baseline_stage": "production pipeline searcher, before Chat tool postfilter",
         "tag_data_roots": [str(ROOT / 'data')],
-        "fixture_sha256": digest(fixture), "records_sha256": digest(records.raw),
+        "fixture_sha256": digest(fixture), "records_sha256": digest(context.kr_tags_raw),
         "model": args.model, "model_show": model_show,
+        "model_inventory": model_tags, "model_shows": model_shows,
         "model_record": [m for m in model_tags.get("models", []) if m.get("name") == args.model],
         "code_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in (
             "core/ollama_chat_agent.py", "core/ollama_chat_pipeline.py", "core/ollama_assistant_service.py",
-            "core/ollama_chat_semantics.py",
+            "core/ollama_chat_semantics.py", "core/ollama_chat_plan.py",
             "app/backend/server/ollama_chat_tools.py", "app/backend/server/ollama_routes.py",
             "app/backend/server/autocomplete_commands.py", "core/tag_search_index.py",
             "core/llm_search_index.py", "core/kr_tag_loader.py", "core/tag_knowledge.py",
@@ -176,6 +199,8 @@ def main(argv=None):
         report['meaning_criteria'] = {'sha256': digest(review), 'fixture': review}
     if args.seed is not None:
         report['sampling_experiment'] = {'seed': args.seed, 'scope': 'Only the local evaluation request options'}
+    if args.think_policy:
+        report['think_policy'] = args.think_policy
     if args.system_file:
         report["system_experiment"] = {"path": str(args.system_file),
             "sha256": hashlib.sha256(args.system_file.read_bytes()).hexdigest()}
@@ -208,6 +233,12 @@ def main(argv=None):
                 report['summary']['meaning_complete_passed'] = sum(c['meaning_assessment']['passed'] for c in report['cases'])
             args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             print(json.dumps({"id": case["id"], **row["assessment"], "error": result.get("error", "")}, ensure_ascii=False), flush=True)
+    report['code_sha256_after'] = {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest()
+                                   for p in report['code_sha256']}
+    report['records_sha256_after'] = digest(context.kr_tags_raw)
+    report['unchanged_during_run'] = (report['code_sha256'] == report['code_sha256_after']
+                                    and report['records_sha256'] == report['records_sha256_after'])
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     return 0 if all(c["assessment"]["passed"] for c in report["cases"]) else 1
 
 

@@ -269,6 +269,18 @@ export function createOllamaChatPopup({
         const review = sceneReview(msg);
         const panel = document.createElement('div');
         panel.className = 'ollama-chat-chip-panel ollama-chat-directed-scene';
+        if (msg.event_provenance?.bundles?.length) {
+          const note = document.createElement('div');
+          note.className = 'ollama-chat-scene-note ollama-chat-event-provenance';
+          const labels = {matches_observation: '관측 조합과 태그 일치',
+            subset_of_observation: '관측 조합에서 일부 태그 선택', recomposed: '검색 태그를 재조합'};
+          note.textContent = `${labels[msg.event_provenance.tag_set_status] || '이벤트 검색 근거'} · 인물 배정과 관계는 별도 확인`;
+          note.title = msg.event_provenance.bundles.map(b => {
+            const c = b.conditions || {};
+            return `${c.person_id || ''} / ${c.rating || ''} / ${c.detail || ''}: ${(b.tags || []).join(', ')}`;
+          }).join('\n');
+          panel.appendChild(note);
+        }
         panel.appendChild(makePanelHead(index, '인물별 장면'));
         if (msg.output?.format === 'sentence' && msg.output.prompt) {
           const prompt = document.createElement('div');
@@ -694,6 +706,7 @@ export function createOllamaChatPopup({
       messages[messages.length - 1].intent_plan = payload.intent_plan || null;
       messages[messages.length - 1].coverage = payload.coverage || null;
       messages[messages.length - 1].output = payload.output || null;
+      messages[messages.length - 1].event_provenance = payload.event_provenance || null;
       renderMessages();
       if (payload.model) {
         connModel = String(payload.model);

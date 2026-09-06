@@ -84,6 +84,19 @@ def assess(case, result):
                   if t.get("origin") != "validation" and t.get("status") == "ok" and t.get("tagCount", 0) > 0}
     for tool in case.get("successful_tools", []):
         checks[f"tool_success:{tool}"] = tool in successful
+    if case.get('expected_output'):
+        for key, value in case['expected_output'].items():
+            actual = result.get('output', {}).get(key)
+            # PLAN_SCHEMA accepts a language string, not an ISO-only enum.
+            checks['output:' + key] = (str(actual).strip().casefold() in {'en', 'english', '영어'}
+                                      if key == 'language' and value == 'en' else actual == value)
+        if case['expected_output'].get('format') == 'sentence':
+            checks['sentence_present'] = bool(result.get('output', {}).get('prompt', '').strip())
+    if case.get('event_tag_set_status'):
+        checks['event_tag_set_status'] = result.get('event_provenance', {}).get('tag_set_status') == case['event_tag_set_status']
+    if case.get('event_detail'):
+        checks['event_detail'] = any(b.get('conditions', {}).get('detail') == case['event_detail']
+                                   for b in result.get('event_provenance', {}).get('bundles', []))
     return {"checks": checks, "passed": all(checks.values()), "relations": relations, "tags": sorted(tags)}
 
 
@@ -116,6 +129,8 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, help="Offline sampling experiment; default keeps the production seed")
     parser.add_argument('--think-policy', choices=['always', 'first'],
                         help='Isolated comparison: only the per-turn think policy changes')
+    parser.add_argument('--selection-format', choices=['legacy', 'compact'],
+                        help='Isolated comparison: completion tool/contract; retrieval and think stay fixed')
     args = parser.parse_args(argv)
     if args.system_file:
         import core.ollama_chat_agent as agent_module
@@ -125,6 +140,9 @@ def main(argv=None):
     if args.think_policy:
         from core.ollama_chat_agent import OllamaChatAgent
         OllamaChatAgent.THINK_POLICY = args.think_policy
+    if args.selection_format:
+        from core.ollama_chat_agent import OllamaChatAgent
+        OllamaChatAgent.SELECTION_FORMAT = args.selection_format
     from app.backend.runtime.paths import RuntimePaths
     from core.web_session_context import WebSessionContext
     from core.headless_token_store import InMemoryTokenManager
@@ -190,7 +208,9 @@ def main(argv=None):
         "model_record": [m for m in model_tags.get("models", []) if m.get("name") == args.model],
         "code_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in (
             "core/ollama_chat_agent.py", "core/ollama_chat_pipeline.py", "core/ollama_assistant_service.py",
-            "core/ollama_chat_semantics.py", "core/ollama_chat_plan.py",
+            "core/ollama_chat_semantics.py", "core/ollama_chat_plan.py", "core/ollama_chat_selection.py",
+            "core/event_preset/fast_search_catalog.py", "core/event_preset/fast_search_catalog.json",
+            "core/event_preset/fast_search_catalog_deep.json",
             "app/backend/server/ollama_chat_tools.py", "app/backend/server/ollama_routes.py",
             "app/backend/server/autocomplete_commands.py", "core/tag_search_index.py",
             "core/llm_search_index.py", "core/kr_tag_loader.py", "core/tag_knowledge.py",
@@ -201,6 +221,8 @@ def main(argv=None):
         report['sampling_experiment'] = {'seed': args.seed, 'scope': 'Only the local evaluation request options'}
     if args.think_policy:
         report['think_policy'] = args.think_policy
+    if args.selection_format:
+        report['selection_format'] = args.selection_format
     if args.system_file:
         report["system_experiment"] = {"path": str(args.system_file),
             "sha256": hashlib.sha256(args.system_file.read_bytes()).hexdigest()}

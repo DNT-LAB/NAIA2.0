@@ -1,5 +1,7 @@
 """Read-only adapters for the thinking Chat agent; no downloads or mutations."""
 from __future__ import annotations
+import hashlib
+import json
 import re
 
 
@@ -223,10 +225,16 @@ def search_events(context, query: str, rating: str, person_id: str, detail: str 
             matches, matched_query = candidate, shorter
     events, tags = [], {}
     for event, variant in matches:
+        # Identity describes a tag set in one partition/detail, independent of
+        # query spelling, anchor label, rank and model choices.
+        identity = json.dumps([1, rating, person_id, detail, sorted(variant.tags)], ensure_ascii=False)
+        bundle_id = 'ev_' + hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]
         events.append({'id': event.tag, 'label': event.label,
-                       'combos': [{'tags': list(variant.tags), 'count': variant.count}]})
+                       'combos': [{'bundle_id': bundle_id, 'tags': list(variant.tags), 'count': variant.count}]})
         for tag in variant.tags:
-            tags[tag] = {'tag': tag}
+            row = tags.setdefault(tag, {'tag': tag, 'bundle_ids': []})
+            if bundle_id not in row['bundle_ids']:
+                row['bundle_ids'].append(bundle_id)
     return {"status": "ok" if events else "no_match", "events": events, "tags": list(tags.values()),
             "rating": rating, "person_id": person_id, "query": query, "matched_query": matched_query,
             'source': 'bundled_event_catalog', 'detail': detail,

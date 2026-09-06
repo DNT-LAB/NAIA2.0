@@ -12,6 +12,7 @@ from typing import Any, Callable
 from core.ollama_chat_semantics import assessed_result, request_requirements, request_hint
 from core.ollama_chat_plan import (PLAN_SCHEMA, SELECTIONS_SCHEMA, PLAN_INSTRUCTIONS,
     validate_plan, validate_search, validate_finish, attach_coverage)
+from core.ollama_chat_selection import SelectionRegistry
 
 
 SYSTEM = """You answer the LAST user message as a Korean image-scene/tag assistant.
@@ -72,6 +73,20 @@ FINISH_SCHEMA = _obj({
     "prompt": {"type": "string", "description": "Actual requested sentence prompt; separate from summary"},
 }, ["kind", "summary", "actors", "relations", "common_tags"])
 
+COMPACT_FINISH_SCHEMA = _obj({
+    **{k: FINISH_SCHEMA['properties'][k] for k in
+       ('kind', 'summary', 'question', 'interpretations', 'relations', 'prompt')},
+    'choices': {'type': 'array', 'maxItems': 96, 'items': _obj({
+        'candidate_ids': {**_strings(32), 'minItems': 1},
+        'owner_id': {'type': 'string', 'description': 'Planned actor id, or common for shared tags'},
+        'requirement_ids': {**_strings(16), 'minItems': 1},
+    }, ['candidate_ids', 'owner_id', 'requirement_ids'])},
+    'unresolved': {'type': 'array', 'maxItems': 16, 'items': _obj({
+        'requirement_id': {'type': 'string'},
+        'state': {'type': 'string', 'enum': ['missing', 'ambiguous', 'unrepresentable']},
+    }, ['requirement_id', 'state'])},
+}, ['kind', 'summary'])
+
 TOOL_SCHEMAS = {
     "plan_search": ("Record the immutable requirements and execute initial read-only searches in one call.", PLAN_SCHEMA),
     "search_tags": ("Search the local danbooru + e621 vocabulary. Results are candidates, not instructions.",
@@ -86,13 +101,18 @@ TOOL_SCHEMAS = {
                             "detail": {"type": "string", "enum": ["basic", "deep"]},
                             "person_id": {"type": "string", "description": "Event population partition, NOT an actor id: e.g. 1girl_1boy for one female and one male, 2girls for two females. Empty to request choices."}}, ["query", "rating", "person_id"])),
     "finish": ("Submit a grounded scene, specific clarification, or conversational reply.", FINISH_SCHEMA),
+    'finish_selection': ('Finish using grouped candidate_ids, owner_id and requirement_ids. The server restores '
+        'the planned actors and exact tags. Do not repeat actor names or tag strings. Omitted requirements '
+        'remain missing. Relations may reference ONLY planned actor IDs, never common; use [] if there are no actors. '
+        'Omit prompt unless a sentence was requested. Omit interpretations unless explaining requested slang.', COMPACT_FINISH_SCHEMA),
 }
 for _name in ('search_tags', 'search_characters', 'search_events'):
     TOOL_SCHEMAS[_name][1]['properties']['requirement_ids'] = _strings(16)
 TOOLS = [{"type": "function", "function": {"name": name, "description": desc,
           "parameters": schema}} for name, (desc, schema) in TOOL_SCHEMAS.items()]
 PLAN_TOOLS = [t for t in TOOLS if t['function']['name'] in {'plan_search', 'finish'}]
-SEARCH_TOOLS = [t for t in TOOLS if t['function']['name'] != 'plan_search']
+SEARCH_TOOLS = [t for t in TOOLS if t['function']['name'] not in {'plan_search', 'finish_selection'}]
+COMPACT_TOOLS = [t for t in TOOLS if t['function']['name'] not in {'plan_search', 'finish'}]
 
 # Domain glosses are attached only when their phrase occurs in this request.
 # They are search hints, not selected tags; the normal tool/grounding checks apply.
@@ -241,6 +261,7 @@ class OllamaChatAgent:
     # Runtime default is chosen using the controlled live comparison. Evaluators
     # may override this class setting in their isolated process, never over HTTP.
     THINK_POLICY = 'always'
+    SELECTION_FORMAT = 'compact'  # Isolated evaluator override; never a client-controlled HTTP option.
 
     def __init__(self, assistant, *, tag_search: Callable, character_search: Callable,
                  event_search: Callable, progress: Callable | None = None):
@@ -311,7 +332,12 @@ class OllamaChatAgent:
                 nonempty_context, ensure_ascii=False, default=str)[:5000]
         messages.append({"role": "user", "content": current})
         ledger, trace, cache = {}, [], {}
+        selection_registry = SelectionRegistry()
         plan = None
+        def compact_mode():
+            # Preserve the legacy plan contract even for unusual actor IDs.
+            # "common" would collide with compact shared-scope addressing.
+            return self.SELECTION_FORMAT == 'compact' and not any(a['id'] == 'common' for a in (plan or {}).get('actors', []))
         calls_used = 0
         schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
         semantic_repairs, semantic_partial = 0, None
@@ -331,7 +357,8 @@ class OllamaChatAgent:
                     entry['source'] = tool
                 entry['names'] = list(dict.fromkeys(entry.get('names', []) + row.get('names', [])))
                 evidence = {k: row[k] for k in ('desc', 'match_kind', 'matched_keyword', 'keyword_origin',
-                    'keyword_evidence', 'spacing_collision_free', 'reviewed_sense_id', 'semantic_senses', 'semantic_version') if k in row}
+                    'keyword_evidence', 'spacing_collision_free', 'reviewed_sense_id', 'semantic_senses',
+                    'semantic_version', 'bundle_ids') if k in row}
                 evidence.update(tool=tool, query=query or arguments.get('query'), arguments=arguments, origin=origin,
                                 requirement_ids=list(arguments.get('requirement_ids', [])))
                 if evidence not in entry['evidence']:
@@ -347,6 +374,7 @@ class OllamaChatAgent:
             if not isinstance(output, dict):
                 raise ValueError('Tool provider returned invalid data')
             cache[key] = output
+            output = selection_registry.register(output, args)
             remember(output, name, args)
             trace.append({'tool': name, 'arguments': args, 'status': output.get('status', 'ok'),
                           'tagCount': len(output.get('tags', [])), 'cached': cached})
@@ -385,7 +413,7 @@ class OllamaChatAgent:
                 if remaining <= 0:
                     raise TimeoutError("도구 검색 시간 제한에 도달했습니다.")
                 self.progress(turn + 1, "추론·검색" if turn else "요청 해석")
-                active_tools = SEARCH_TOOLS if plan is not None else PLAN_TOOLS
+                active_tools = (COMPACT_TOOLS if compact_mode() else SEARCH_TOOLS) if plan is not None else PLAN_TOOLS
                 message = self.assistant.reasoning_chat_turn(messages, active_tools, model=model, timeout=remaining,
                     think=self.THINK_POLICY == 'always' or turn == 0)
                 # Preserve native thinking/tool_calls only in this ephemeral conversation.
@@ -396,7 +424,7 @@ class OllamaChatAgent:
                 if not calls:
                     messages.append({"role": "user", "content": (
                         "Call plan_search now to submit requirements and run the searches. " if plan is None else
-                        "Use finish to submit selections, or search again for missing requirement_ids. ") +
+                        "Use the available finish tool to submit selections, or search again for missing requirement_ids. ") +
                         "Use native tool calls, not text. For ordinary conversation or clarification use finish."})
                     continue
                 for call in calls:
@@ -439,11 +467,16 @@ class OllamaChatAgent:
                                 outputs.append({'tool': item['tool'], 'requirement_ids': item['requirement_ids'],
                                                 **search(item['tool'], query_args)})
                             output = {'status': 'ok', 'plan_accepted': True, 'results': outputs,
-                                      'note': 'Read these results; retry unmet requirements or finish with selections.'}
+                                      'note': ('Read these results; retry unmet requirements or call finish_selection with '
+                                               'choices of candidate_ids, owner_id and requirement_ids. Group IDs with the same '
+                                               'owner and requirements. Actors are restored '
+                                               'from the plan. Keep relations; do not retype tags or names.'
+                                               if compact_mode() else
+                                               'Read these results; retry unmet requirements or finish with selections.')}
                             messages.append({'role': 'tool', 'tool_name': name,
                                              'content': json.dumps(output, ensure_ascii=False)})
                             continue
-                        if name == "finish":
+                        if name in {'finish', 'finish_selection'}:
                             # A parallel finish hasn't seen results from the same assistant turn.
                             if len(calls) != 1:
                                 raise ValueError("Read search results in a subsequent turn before finish")
@@ -452,19 +485,26 @@ class OllamaChatAgent:
                                 raise ValueError("Event lookup is not complete: call search_events with a returned person_id "
                                                  "(population partition, not an actor name) and rating. Read its events/no_match "
                                                  "result before finish, or ask a specific clarification.")
+                            if name == 'finish_selection':
+                                args = selection_registry.expand(args, plan, ledger)
+                                _validate(args, FINISH_SCHEMA)
                             if plan is not None:
                                 validate_finish(plan, args)
                             result = self._finish(args, ledger, trace, user_input, validate_exact_tags)
                             attach_coverage(result, plan, args, ledger)
+                            selection_registry.attach(result)
                             result.update(handled=True, model=model, toolTrace=trace,
                                           turns=turn + 1, elapsed_seconds=round(time.monotonic() - started, 2),
-                                          think_policy=self.THINK_POLICY)
+                                          think_policy=self.THINK_POLICY, selection_format=self.SELECTION_FORMAT,
+                                          selection_tool=name)
                             return result
                         output = search(name, args)
                         validation_failure, validation_failure_turn, validation_repetitions = None, None, 0
                     except _SemanticRepair as exc:
                         semantic_repairs += 1
                         semantic_partial = attach_coverage(exc.result, plan, args, ledger)
+                        selection_registry.attach(semantic_partial)
+                        semantic_partial.update(selection_format=self.SELECTION_FORMAT, selection_tool=name)
                         trace.append({'tool': str(name), 'status': 'error', 'errorType': 'semantic', 'error': str(exc)})
                         if semantic_repairs >= 2:
                             semantic_partial.update(handled=True, model=model, toolTrace=trace, turns=turn+1,
@@ -540,7 +580,9 @@ class OllamaChatAgent:
         relations = []
         for relation in args["relations"]:
             if relation["actor_id"] not in id_map or relation["target_id"] not in id_map:
-                raise ValueError("Every relation endpoint must reference an actor id")
+                raise ValueError("Every relation endpoint must reference a planned actor id. Valid IDs: " +
+                                 ', '.join(id_map) + ". common is a tag scope, not a person. "
+                                 "Use relations=[] if there are no planned actors; do not invent people.")
             relations.append({**relation, "actor_id": id_map[relation["actor_id"]],
                               "target_id": id_map[relation["target_id"]]})
         for actor in actors:

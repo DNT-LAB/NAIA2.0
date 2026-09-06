@@ -40,8 +40,10 @@ PLAN_SCHEMA = obj({
         'requirement_ids': {**strings(16), 'minItems': 1},
         'tool': {'type': 'string', 'enum': ['search_tags', 'search_characters', 'search_events']},
         'query': {'type': 'string'},
-        'rating': {'type': 'string'}, 'person_id': {'type': 'string'},
-        'detail': {'type': 'string', 'enum': ['basic', 'deep']},
+        'rating': {'type': 'string', 'description': 'ONLY for search_events: g/s/q/e. OMIT for other tools.'},
+        'person_id': {'type': 'string', 'description': 'ONLY for search_events: population such as 2girls; never an actor id. OMIT for other tools.'},
+        'detail': {'type': 'string', 'enum': ['basic', 'deep'],
+                   'description': 'ONLY for search_events. OMIT this field entirely for search_tags and search_characters.'},
     }, ['requirement_ids', 'tool', 'query'])},
 }, ['mode', 'output', 'actors', 'requirements', 'searches'])
 
@@ -69,6 +71,8 @@ specified direction in its source. Never invent an unspecified direction.
 Requirements are immutable after the first accepted plan. Search queries may
 change after reading evidence, but later searches must name requirement_ids.
 Searches are independent; event partition choices require a later follow-up.
+For search_tags and search_characters OMIT rating, person_id and detail entirely.
+Event population filters are not named actors; do not invent actor names for them.
 Select only relevant returned tags in their original actor/common scopes.
 finish.selections maps EVERY requirement_id to selected tags and state:
 selected, missing, ambiguous, or unrepresentable. Exclusions must not become
@@ -124,7 +128,9 @@ def validate_plan(plan, source, reference_names=()):
         if len(search['query']) > 160 or (not search['query'].strip() and search['tool'] != 'search_events'):
             raise ValueError('Search queries must be 1-160 characters (event partition lookup may be empty)')
         if search['tool'] != 'search_events' and (search.get('rating') or search.get('person_id') or search.get('detail')):
-            raise ValueError('Only event searches accept rating/person_id/detail')
+            raise ValueError('Only event searches accept rating/person_id/detail. Remove these fields entirely '
+                             'from search_tags and search_characters entries (including detail=basic). '
+                             'Actor ownership belongs in requirement.actors, not search.person_id.')
     return copy.deepcopy(plan)
 
 

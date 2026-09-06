@@ -352,7 +352,8 @@ class OllamaChatPipeline:
                 self._progress.total = OllamaChatAgent.MAX_TURNS
                 return OllamaChatAgent(self.assistant, tag_search=search_tags,
                                        character_search=self.character_search,
-                                       event_search=self.event_search, progress=self._stage).run(
+                                       event_search=self.event_search, progress=self._stage,
+                                       source_search=lambda query: self.searcher(query, 6, gen_context)).run(
                     user_input, context=gen_context.summary(), history=history)
             raw_intent = self._analyze(user_input, gen_context, history or [])
             intent = self._clamp_intent(raw_intent, user_input, gen_context)

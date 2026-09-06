@@ -55,6 +55,7 @@ def main():
     ensure_llm_search_index(context)
     files = ['core/ollama_chat_agent.py','core/ollama_chat_plan.py','core/ollama_chat_selection.py',
              'core/ollama_chat_semantics.py','core/ollama_chat_pipeline.py','core/ollama_assistant_service.py',
+             'core/ollama_chat_execution.py',
              'app/backend/server/ollama_routes.py','app/backend/server/ollama_chat_tools.py',
              'core/tag_search_index.py','core/llm_search_index.py','core/kr_tag_loader.py',
              'core/tag_knowledge.py','app/backend/server/autocomplete_commands.py',

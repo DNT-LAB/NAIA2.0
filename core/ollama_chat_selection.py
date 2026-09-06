@@ -67,21 +67,29 @@ class SelectionRegistry:
         for choice in compact.get('choices', []):
             owner = choice['owner_id']
             if owner not in scopes:
-                raise ValueError('Unknown owner_id; use a planned actor id or common')
+                raise ValueError('Unknown owner_id; valid scopes: ' + ', '.join(scopes) +
+                                 '. Use common for a word lookup; copy an ID, not an actor name.')
             rids = choice['requirement_ids']
             if not rids or len(rids) != len(set(rids)) or not set(rids).issubset(claims):
                 raise ValueError('Choice must reference unique planned requirement_ids')
             for cid in choice['candidate_ids']:
                 key = self.candidates.get(cid)
                 if key is None or key not in ledger:
-                    raise ValueError('Unknown candidate_id; use IDs returned in this request')
+                    raise ValueError('Unknown candidate_id; current choices: ' + ', '.join(
+                        f'{cid}={ledger[k]["tag"]}' for cid, k in self.candidates.items() if k in ledger))
                 entry = ledger[key]
                 evidence = {rid for e in entry.get('evidence', []) for rid in e.get('requirement_ids', [])}
-                if not set(rids).issubset(evidence):
-                    raise ValueError('Candidate was not retrieved for these requirement_ids; search again')
+                unbound = {rid for e in entry.get('evidence', []) for rid in e.get('unattributed_requirement_ids', [])}
+                if not set(rids).issubset(evidence | unbound):
+                    raise ValueError('Candidate was not retrieved for these requirement_ids; ' +
+                        f'{cid}={entry["tag"]} links to {sorted(evidence)}. Select its linked requirements, '
+                        'leave others unresolved, or search their concepts.')
+                linked = [rid for rid in rids if rid in evidence]
+                if not linked:
+                    continue  # A partial query hit cannot select an unbound requirement.
                 if entry['tag'] not in scopes[owner]:
                     scopes[owner].append(entry['tag'])
-                for rid in rids:
+                for rid in linked:
                     claim = claims[rid]
                     claim['state'] = 'selected'
                     if entry['tag'] not in claim['tags']:

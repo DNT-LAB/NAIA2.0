@@ -78,6 +78,12 @@ finish.selections maps EVERY requirement_id to selected tags and state:
 selected, missing, ambiguous, or unrepresentable. Exclusions must not become
 positive tags. A complex relationship/cause is not proven by a matching word.
 Keep missing requirements visible; do not relabel a failed scene as chat.
+Use separate queries for independent concepts; keep compound concepts intact.
+Do not combine a character name, age and expression into one query. The server
+also tries the original requirement text and routes named identities to the
+character catalog. Source lookup can miss Korean verb forms or match category
+labels; translate the missing concept, not the whole scene, to English.
+Returned requirement_ids indicate candidate linkage, not meaning certification.
 """
 
 
@@ -159,7 +165,7 @@ def validate_finish(plan, args):
         raise ValueError('A sentence request requires an actual prompt in finish.prompt')
 
 
-def attach_coverage(result, plan, args, ledger):
+def attach_coverage(result, plan, args, ledger, grounding=None):
     """Compare model selection claims with actual scoped, searched, safe output."""
     result['intent_plan'] = copy.deepcopy(plan) if plan else None
     if result.get('type') != 'scene_agent':
@@ -201,6 +207,8 @@ def attach_coverage(result, plan, args, ledger):
         row = {'id': rid, 'source': req['source'], 'kind': req['kind'], 'actors': req['actors'],
                'depends_on': req['depends_on'], 'state': state, 'candidate_tags': sorted(candidates),
                'selected_tags': sorted(chosen & candidates & allowed), 'semantic_certified': False}
+        if grounding:
+            row['meaning_review'] = grounding.review(rid, row['selected_tags'])
         rows.append(row)
         if state != 'selected':
             review['issues'].append({'code': 'requirement_' + state, 'requirement_id': rid,

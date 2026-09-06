@@ -13,6 +13,7 @@ from core.ollama_chat_semantics import assessed_result, request_requirements, re
 from core.ollama_chat_plan import (PLAN_SCHEMA, SELECTIONS_SCHEMA, PLAN_INSTRUCTIONS,
     validate_plan, validate_search, validate_finish, attach_coverage)
 from core.ollama_chat_selection import SelectionRegistry
+from core.ollama_chat_execution import ExecutionTrace, SourceGrounding, validation_failure_key
 
 
 SYSTEM = """You answer the LAST user message as a Korean image-scene/tag assistant.
@@ -254,7 +255,7 @@ def validate_korean_direction(source, actors, relations):
 
 
 class OllamaChatAgent:
-    MAX_TURNS = 6
+    MAX_TURNS = 4
     MAX_CALLS = 14
     MAX_SECONDS = 240
     MAX_REPEATED_SCHEMA_ERRORS = 2
@@ -264,11 +265,13 @@ class OllamaChatAgent:
     SELECTION_FORMAT = 'compact'  # Isolated evaluator override; never a client-controlled HTTP option.
 
     def __init__(self, assistant, *, tag_search: Callable, character_search: Callable,
-                 event_search: Callable, progress: Callable | None = None):
+                 event_search: Callable, progress: Callable | None = None,
+                 source_search: Callable | None = None):
         self.assistant = assistant
         self.providers = {"search_tags": tag_search, "search_characters": character_search,
                           "search_events": event_search}
         self.progress = progress or (lambda step, label: None)
+        self.source_search = source_search
 
     def run(self, user_input, *, context=None, history=None):
         if not references_ui_context(user_input):
@@ -293,6 +296,7 @@ class OllamaChatAgent:
 
     def _run(self, user_input, *, model, context=None, history=None):
         started = time.monotonic()
+        execution = ExecutionTrace()
         if len(user_input) > 8000:
             return {"handled": True, "ok": False, "type": "chat", "error": "요청을 8,000자 이하로 나누어 주세요."}
         messages = [{"role": "system", "content": SYSTEM}]
@@ -334,14 +338,27 @@ class OllamaChatAgent:
         ledger, trace, cache = {}, [], {}
         selection_registry = SelectionRegistry()
         plan = None
+        grounding = None
         def compact_mode():
             # Preserve the legacy plan contract even for unusual actor IDs.
             # "common" would collide with compact shared-scope addressing.
             return self.SELECTION_FORMAT == 'compact' and not any(a['id'] == 'common' for a in (plan or {}).get('actors', []))
         calls_used = 0
-        schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
-        semantic_repairs, semantic_partial = 0, None
-        validation_failure, validation_failure_turn, validation_repetitions = None, None, 0
+        semantic_partial = None
+
+        def checked(stage, fn, *args, **kw):
+            with execution.measure(stage):
+                return fn(*args, **kw)
+
+        def charge(units=1):
+            nonlocal calls_used
+            calls_used += units
+            if calls_used > self.MAX_CALLS or time.monotonic() - started >= self.MAX_SECONDS:
+                raise TimeoutError('도구 검색 한도에 도달했습니다.')
+
+        def observed(result):
+            result['execution'] = execution.snapshot(calls_used, grounding)
+            return result
 
         def remember(output, tool, arguments, origin='model', wanted=None):
             # Preserve every query's evidence, including later stronger matches.
@@ -359,47 +376,131 @@ class OllamaChatAgent:
                 evidence = {k: row[k] for k in ('desc', 'match_kind', 'matched_keyword', 'keyword_origin',
                     'keyword_evidence', 'spacing_collision_free', 'reviewed_sense_id', 'semantic_senses',
                     'semantic_version', 'bundle_ids') if k in row}
-                evidence.update(tool=tool, query=query or arguments.get('query'), arguments=arguments, origin=origin,
-                                requirement_ids=list(arguments.get('requirement_ids', [])))
+                attribution = (grounding.attribute({**row, **({'search_query': query} if query else {})},
+                    tool, arguments, origin) if grounding else
+                    {'requirement_ids': list(arguments.get('requirement_ids', []))})
+                evidence.update(tool=tool, query=query or row.get('search_query') or arguments.get('query'),
+                                arguments=arguments, origin=origin, **attribution)
+                if row.get('lookup_id'):
+                    evidence['lookup_id'] = row['lookup_id']
                 if evidence not in entry['evidence']:
                     entry['evidence'].append(evidence)
 
-        def search(name, args):
+        def search_one(name, args, origin='model'):
             if plan is not None:
-                validate_search(plan, name, args)
-            provider_args = {k: v for k, v in args.items() if k != 'requirement_ids'}
+                checked('validate_search', validate_search, plan, name, args)
+            charge(len(args.get('queries', [])) if name == 'search_tags' else 1)
+            provider_args = {k: v for k, v in args.items() if k != 'requirement_ids' and not k.startswith('_')}
             key = json.dumps([name, provider_args], sort_keys=True, ensure_ascii=False)
             cached = key in cache
-            output = cache.get(key) if cached else self.providers[name](**provider_args)
+            output = cache.get(key) if cached else checked('provider_search', self.providers[name], **provider_args)
             if not isinstance(output, dict):
                 raise ValueError('Tool provider returned invalid data')
             cache[key] = output
             output = selection_registry.register(output, args)
-            remember(output, name, args)
+            if grounding:
+                grounding.lookup_count += 1
+                rows = list(output.get('tags', [])) + [r for s in output.get('searches', []) for r in s.get('results', [])]
+                for row in rows:
+                    row.update(grounding.attribute(row, name, args, origin), lookup_id=f'l{grounding.lookup_count}')
+            checked('attribute_evidence', remember, output, name, args, origin)
             trace.append({'tool': name, 'arguments': args, 'status': output.get('status', 'ok'),
-                          'tagCount': len(output.get('tags', [])), 'cached': cached})
+                          'tagCount': len(output.get('tags', [])), 'cached': cached, 'origin': origin})
             return output
 
+        def search(name, args):
+            if grounding and name == 'search_tags':
+                checked('validate_search', validate_search, plan, name, args)
+                named = grounding.named_jobs(args.get('requirement_ids', []))
+                if named:
+                    outputs = [{'tool': 'search_characters', **search_one('search_characters', job, 'server_named')}
+                               for job in named]
+                    remaining = [rid for rid in args['requirement_ids'] if rid not in grounding.named]
+                    if remaining and name == 'search_tags':
+                        outputs.append({'tool': name, **search_one(name, {**args, 'requirement_ids': remaining,
+                            '_mixed_requirements': True})})
+                    return {'status': 'ok' if any(o.get('tags') for o in outputs) else 'no_match',
+                            'routed_searches': outputs,
+                            'tags': list({r['candidate_id']: r for o in outputs for r in o.get('tags', [])}.values()),
+                            'note': 'Named identity uses the original full name in the character catalog. '
+                                    'Other requirements need their own concept queries.'}
+            return search_one(name, args)
+
+        def source_lookups():
+            if not self.source_search:
+                return []
+            # Auxiliary work is bounded and charged as actual lookup jobs. Keep
+            # room for planned lookups and a final response/repair, never guess
+            # that unprobed requirements have been semantically fulfilled.
+            reserved = len(plan['searches']) + len(grounding.named_jobs(list(grounding.named))) + 2
+            remaining = max(0, min(4, self.MAX_CALLS-calls_used-reserved))
+            raw_cache, source_errors, outputs = {}, {}, []
+            for rid, req in grounding.requirements.items():
+                if rid in grounding.named:
+                    continue
+                query = req['source']
+                targets = [s for s in plan['searches'] if rid in s['requirement_ids']]
+                if targets and all(s['tool'] == 'search_events' for s in targets):
+                    grounding.observations[rid] = {'query': query, 'status': 'not_probed',
+                        'reason': 'event_only', 'candidate_tags': [], 'meaning_status': 'unknown'}
+                    continue  # Pure catalog lookup must not initialize tag search.
+                if len(query) > 160 or (query not in raw_cache and remaining <= 0):
+                    grounding.observations[rid] = {'query': query, 'status': 'not_probed', 'candidate_tags': [],
+                                                   'meaning_status': 'unknown'}
+                    continue
+                if query not in raw_cache:
+                    charge()
+                    remaining -= 1
+                    try:
+                        raw_cache[query] = checked('source_search', self.source_search, query)
+                        if not isinstance(raw_cache[query], list):
+                            raise ValueError('Source provider returned invalid rows')
+                    except Exception as exc:
+                        # This is optional evidence, not a replacement for the
+                        # normal model search. Surface its failure in diagnostics.
+                        raw_cache[query] = []
+                        source_errors[query] = str(exc)
+                        trace.append({'tool': 'search_tags', 'origin': 'source',
+                                      'status': 'unavailable', 'arguments': {'query': query}, 'error': str(exc)})
+                rows = grounding.source_rows(rid, raw_cache[query])
+                if query in source_errors:
+                    grounding.observations[rid]['status'] = 'unavailable'
+                args = {'query': query, 'requirement_ids': [rid]}
+                output = selection_registry.register({'tags': rows}, args)
+                grounding.lookup_count += 1
+                for row in output['tags']:
+                    row.update(grounding.attribute(row, 'search_tags', args, 'source'),
+                               lookup_id=f'l{grounding.lookup_count}')
+                checked('attribute_evidence', remember, output, 'search_tags', args, 'source')
+                trace.append({'tool': 'search_tags', 'origin': 'source', 'arguments': args,
+                              'status': grounding.observations[rid]['status'], 'tagCount': len(rows)})
+                outputs.append({'requirement_ids': [rid], 'source': query, **output,
+                    'status': grounding.observations[rid]['status'],
+                    'note': 'Auxiliary source candidates only; empty/category-only results remain unknown. '
+                            'Translate an unmet concept to English if needed.'})
+            return outputs
+
         def stopped(reason, turn):
-            return {'handled': True, 'ok': True, 'type': 'clarification',
+            if semantic_partial is not None:
+                return observed({**semantic_partial, 'handled': True, 'model': model,
+                    'toolTrace': trace, 'turns': turn+1, 'stop_reason': reason,
+                    'elapsed_seconds': round(time.monotonic()-started, 2)})
+            return observed({'handled': True, 'ok': True, 'type': 'clarification',
                 'completion': 'needs_clarification', 'stop_reason': reason, 'examples': [],
                 'question': '모델이 응답을 정리하지 못했습니다. 조건을 줄이거나 요청을 나누어 다시 알려주세요.',
                 'intent_plan': plan, 'toolTrace': trace, 'model': model, 'turns': turn + 1,
-                'elapsed_seconds': round(time.monotonic() - started, 2), 'think_policy': self.THINK_POLICY}
+                    'elapsed_seconds': round(time.monotonic() - started, 2), 'think_policy': self.THINK_POLICY})
 
         def validate_exact_tags(missing):
-            nonlocal calls_used
             # 'Not searched yet' is not the same as 'not a real tag'. E4B
             # deleted valid requested traits when every unsearched tag caused
             # a retry. Validate its proposed spelling exactly, with no expansion.
             if len(missing) > 8:
                 return
-            calls_used += 1
-            if calls_used > self.MAX_CALLS or time.monotonic() - started >= self.MAX_SECONDS:
-                raise TimeoutError("태그 검증 한도에 도달했습니다.")
+            charge(len(missing))
             key = json.dumps(["exact_validation", missing], ensure_ascii=False)
             cached = key in cache
-            output = cache.get(key) if cached else self.providers["search_tags"](queries=missing)
+            output = cache.get(key) if cached else checked('exact_search', self.providers["search_tags"], queries=missing)
             cache[key] = output
             wanted = {_norm(t) for t in missing}
             verified = [r for r in output.get("tags", []) if _norm(r.get("tag")) in wanted]
@@ -414,8 +515,9 @@ class OllamaChatAgent:
                     raise TimeoutError("도구 검색 시간 제한에 도달했습니다.")
                 self.progress(turn + 1, "추론·검색" if turn else "요청 해석")
                 active_tools = (COMPACT_TOOLS if compact_mode() else SEARCH_TOOLS) if plan is not None else PLAN_TOOLS
-                message = self.assistant.reasoning_chat_turn(messages, active_tools, model=model, timeout=remaining,
-                    think=self.THINK_POLICY == 'always' or turn == 0)
+                execution.model_calls += 1
+                message = checked('model_http', self.assistant.reasoning_chat_turn, messages, active_tools,
+                    model=model, timeout=remaining, think=self.THINK_POLICY == 'always' or turn == 0)
                 # Preserve native thinking/tool_calls only in this ephemeral conversation.
                 messages.append({**message, "role": "assistant"})
                 calls = message.get("tool_calls") or []
@@ -428,18 +530,14 @@ class OllamaChatAgent:
                         "Use native tool calls, not text. For ordinary conversation or clarification use finish."})
                     continue
                 for call in calls:
-                    calls_used += 1
-                    if calls_used > self.MAX_CALLS or time.monotonic() - started >= self.MAX_SECONDS:
-                        raise TimeoutError("도구 호출 한도에 도달했습니다.")
                     function = call.get("function", {}) if isinstance(call, dict) else {}
                     name, args = function.get("name"), function.get("arguments")
+                    if name not in self.providers:
+                        charge()
                     try:
                         if name not in TOOL_SCHEMAS:
                             raise ValueError("Unknown tool; only listed read-only tools are allowed")
-                        _validate(args, TOOL_SCHEMAS[name][1])
-                        # A valid schema is repair progress even when a later
-                        # grounding/direction check still rejects the content.
-                        schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
+                        checked('validate_schema', _validate, args, TOOL_SCHEMAS[name][1])
                         if name == 'plan_search':
                             if plan is not None or any(t.get('status') != 'error' for t in trace):
                                 raise ValueError('Submit the plan before searching; accepted requirements cannot be replaced')
@@ -450,13 +548,16 @@ class OllamaChatAgent:
                             reference_names = [a.get('name') for m in previous[-8:]
                                 if isinstance(m.get('scene'), dict) for a in m['scene'].get('actors', [])
                                 if isinstance(a, dict)] if refers_previous else []
-                            plan = validate_plan(args, user_input, reference_names)
+                            plan = checked('validate_plan', validate_plan, args, user_input, reference_names)
+                            grounding = SourceGrounding(plan)
                             trace.append({'tool': name, 'status': 'ok', 'requirementCount': len(plan['requirements'])})
                             outputs = []
+                            source_outputs = source_lookups()
+                            searched = {rid for item in plan['searches'] if item['tool'] != 'search_events'
+                                        for rid in item['requirement_ids']}
+                            for job in grounding.named_jobs([rid for rid in grounding.named if rid not in searched]):
+                                outputs.append({'tool': 'search_characters', **search_one('search_characters', job, 'server_named')})
                             for item in plan['searches']:
-                                calls_used += 1
-                                if calls_used > self.MAX_CALLS or time.monotonic() - started >= self.MAX_SECONDS:
-                                    raise TimeoutError('초기 검색 한도에 도달했습니다.')
                                 query_args = ({'queries': [item['query']]} if item['tool'] == 'search_tags' else
                                               {'query': item['query']})
                                 if item['tool'] == 'search_events':
@@ -467,6 +568,7 @@ class OllamaChatAgent:
                                 outputs.append({'tool': item['tool'], 'requirement_ids': item['requirement_ids'],
                                                 **search(item['tool'], query_args)})
                             output = {'status': 'ok', 'plan_accepted': True, 'results': outputs,
+                                      'source_results': source_outputs,
                                       'note': ('Read these results; retry unmet requirements or call finish_selection with '
                                                'choices of candidate_ids, owner_id and requirement_ids. Group IDs with the same '
                                                'owner and requirements. Actors are restored '
@@ -486,38 +588,33 @@ class OllamaChatAgent:
                                                  "(population partition, not an actor name) and rating. Read its events/no_match "
                                                  "result before finish, or ask a specific clarification.")
                             if name == 'finish_selection':
-                                args = selection_registry.expand(args, plan, ledger)
-                                _validate(args, FINISH_SCHEMA)
+                                args = checked('expand_selection', selection_registry.expand, args, plan, ledger)
+                                checked('validate_schema', _validate, args, FINISH_SCHEMA)
                             if plan is not None:
-                                validate_finish(plan, args)
-                            result = self._finish(args, ledger, trace, user_input, validate_exact_tags)
-                            attach_coverage(result, plan, args, ledger)
+                                checked('validate_finish', validate_finish, plan, args)
+                            result = checked('finish_review', self._finish, args, ledger, trace, user_input, validate_exact_tags)
+                            checked('coverage', attach_coverage, result, plan, args, ledger, grounding)
                             selection_registry.attach(result)
                             result.update(handled=True, model=model, toolTrace=trace,
                                           turns=turn + 1, elapsed_seconds=round(time.monotonic() - started, 2),
                                           think_policy=self.THINK_POLICY, selection_format=self.SELECTION_FORMAT,
                                           selection_tool=name)
-                            return result
+                            return observed(result)
                         output = search(name, args)
-                        validation_failure, validation_failure_turn, validation_repetitions = None, None, 0
                     except _SemanticRepair as exc:
-                        semantic_repairs += 1
-                        semantic_partial = attach_coverage(exc.result, plan, args, ledger)
+                        semantic_repairs = execution.failure('semantic', turn)
+                        semantic_partial = checked('coverage', attach_coverage, exc.result, plan, args, ledger, grounding)
                         selection_registry.attach(semantic_partial)
                         semantic_partial.update(selection_format=self.SELECTION_FORMAT, selection_tool=name)
                         trace.append({'tool': str(name), 'status': 'error', 'errorType': 'semantic', 'error': str(exc)})
                         if semantic_repairs >= 2:
                             semantic_partial.update(handled=True, model=model, toolTrace=trace, turns=turn+1,
                                 elapsed_seconds=round(time.monotonic()-started, 2), think_policy=self.THINK_POLICY)
-                            return semantic_partial
+                            return observed(semantic_partial)
                         output = {'status': 'error', 'error': str(exc)}
                     except _ToolSchemaError as exc:
                         signature = (name, *exc.signature)
-                        if signature != schema_failure:
-                            schema_repetitions = 1
-                        elif schema_failure_turn != turn:
-                            schema_repetitions += 1
-                        schema_failure, schema_failure_turn = signature, turn
+                        schema_repetitions = execution.failure(signature, turn)
                         output = {"status": "error", "error": str(exc)}
                         trace.append({"tool": str(name), "status": "error", "error": str(exc),
                                       "errorType": "schema", "repetitions": schema_repetitions})
@@ -526,15 +623,10 @@ class OllamaChatAgent:
                         if schema_repetitions >= self.MAX_REPEATED_SCHEMA_ERRORS:
                             return stopped('repeated_schema_error', turn)
                     except (ValueError, TypeError, KeyError) as exc:
-                        schema_failure, schema_failure_turn, schema_repetitions = None, None, 0
                         output = {"status": "error", "error": str(exc)}
                         trace.append({"tool": str(name), "status": "error", "error": str(exc)})
-                        signature = (name, str(exc))
-                        if signature != validation_failure:
-                            validation_repetitions = 1
-                        elif validation_failure_turn != turn:
-                            validation_repetitions += 1
-                        validation_failure, validation_failure_turn = signature, turn
+                        signature = validation_failure_key(name, exc)
+                        validation_repetitions = execution.failure(signature, turn)
                         if validation_repetitions >= 2:
                             return stopped('repeated_validation_error', turn)
                     messages.append({"role": "tool", "tool_name": str(name),
@@ -542,13 +634,13 @@ class OllamaChatAgent:
             if semantic_partial is not None:
                 semantic_partial.update(handled=True, model=model, toolTrace=trace,
                     elapsed_seconds=round(time.monotonic()-started, 2), think_policy=self.THINK_POLICY)
-                return semantic_partial
-            raise RuntimeError("추론·도구 호출 한도 안에서 결과를 확정하지 못했습니다. 요청을 나누어 주세요.")
+                return observed(semantic_partial)
+            return stopped('model_turn_limit', self.MAX_TURNS-1)
         except Exception as exc:
             # Never drop a failed directed scene into the legacy flat-tag pipeline.
-            return {"handled": True, "ok": False, "type": "chat", "error": str(exc),
+            return observed({"handled": True, "ok": False, "type": "chat", "error": str(exc),
                     "model": model, "toolTrace": trace, 'intent_plan': plan,
-                    'think_policy': self.THINK_POLICY, 'elapsed_seconds': round(time.monotonic()-started, 2)}
+                    'think_policy': self.THINK_POLICY, 'elapsed_seconds': round(time.monotonic()-started, 2)})
 
     @staticmethod
     def _finish(args, ledger, trace, source="", validate_exact=None):

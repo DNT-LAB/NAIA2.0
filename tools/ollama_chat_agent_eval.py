@@ -208,6 +208,7 @@ def main(argv=None):
         "model_record": [m for m in model_tags.get("models", []) if m.get("name") == args.model],
         "code_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in (
             "core/ollama_chat_agent.py", "core/ollama_chat_pipeline.py", "core/ollama_assistant_service.py",
+            "core/ollama_chat_execution.py",
             "core/ollama_chat_semantics.py", "core/ollama_chat_plan.py", "core/ollama_chat_selection.py",
             "core/event_preset/fast_search_catalog.py", "core/event_preset/fast_search_catalog.json",
             "core/event_preset/fast_search_catalog_deep.json",
@@ -242,9 +243,12 @@ def main(argv=None):
             calls.clear()
             baseline = [{"query": q, "rows": context.ollama_chat_pipeline.searcher(
                 q, 6, GenerationInfoContext())} for q in case.get("baseline_queries", [])]
+            request_started = time.monotonic()
             result = run_production_case(client, case)
+            request_wall_seconds = time.monotonic() - request_started
             row = {"id": case["id"], "input": case["input"], "baseline": baseline,
-                   "expected": case, "result": result, "assessment": assess(case, result), "calls": list(calls)}
+                   "expected": case, "result": result, "assessment": assess(case, result), "calls": list(calls),
+                   "request_wall_seconds": request_wall_seconds}
             if review is not None:
                 row['meaning_assessment'] = assess_review(case, result, review.get('cases', {}).get(case['id'], {}))
             report["cases"].append(row)

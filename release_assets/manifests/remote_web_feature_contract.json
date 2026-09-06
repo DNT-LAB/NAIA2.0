@@ -611,6 +611,7 @@
         "core/ollama_chat_agent.py",
         "core/ollama_chat_plan.py",
         "core/ollama_chat_selection.py",
+        "core/ollama_chat_execution.py",
         "core/ollama_chat_semantics.py",
         "core/ollama_chat_pipeline.py",
         "core/event_preset/fast_search_catalog.py",

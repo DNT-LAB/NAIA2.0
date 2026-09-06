@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -68,7 +69,25 @@ def _tag_data_roots(context: WebSessionContext) -> list[Path]:
     return roots
 
 
+_TAG_LOCK_CREATION = threading.Lock()
+
+
+def _tag_index_lock(context):
+    with _TAG_LOCK_CREATION:
+        lock = getattr(context, '_tag_index_init_lock', None)
+        if lock is None:
+            lock = threading.RLock()
+            context._tag_index_init_lock = lock
+        return lock
+
+
 def _ensure_kr_raw(context: WebSessionContext) -> dict[str, Any]:
+    # Fast Search sources and autocomplete can arrive together on a cold session.
+    with _tag_index_lock(context):
+        return _load_kr_raw_once(context)
+
+
+def _load_kr_raw_once(context: WebSessionContext) -> dict[str, Any]:
     """KR 병합 raw 레코드를 세션당 1회만 로드한다.
 
     tag_search_index / relation_ranker / browse_index 가 전부 이 raw 위에 빌드된다. 각자
@@ -92,10 +111,13 @@ def ensure_tag_search_index(context: WebSessionContext):
         return index
     from core.tag_search_index import TagSearchIndex
 
-    raw = _ensure_kr_raw(context)
-    index = TagSearchIndex.from_raw_tag_records(raw)
-    context.tag_search_index = index
-    return index
+    with _tag_index_lock(context):
+        index = getattr(context, "tag_search_index", None)
+        if index is None:
+            raw = _ensure_kr_raw(context)
+            index = TagSearchIndex.from_raw_tag_records(raw)
+            context.tag_search_index = index
+        return index
 
 
 def _autocomplete_row(result: Any) -> dict[str, Any]:

@@ -202,6 +202,7 @@ class EventPresetService:
         subcategory_id: str = "",
         event_id: str = "",
         limit: int | None = None,
+        preview_combos: bool = False,
     ) -> dict[str, Any]:
         status = self.status()
         if status["dataAvailability"]["main"] != "ready":
@@ -232,6 +233,14 @@ class EventPresetService:
         partition_data = self._load_projected_partition(partition)
         persons = self._person_options(rating)
         categories = self._build_categories(search, partition_data, limit=limit)
+        if preview_combos:
+            # Search needs only the first observed combo for each result. Reuse
+            # this partition instead of rebuilding its taxonomy per event.
+            for category in categories:
+                for subcategory in category.get("subcategories", []):
+                    for event in subcategory.get("events", []):
+                        combos = self._observed_combos(event["id"], partition_data, limit=1)
+                        event["previewCombo"] = combos[0] if combos else None
         selected = self._resolve_selected(categories, {
             "ratingId": rating,
             "personId": person,

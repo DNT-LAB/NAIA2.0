@@ -26,7 +26,10 @@ export function initFastSearch() {
   let open = false, seq = 0, timer = null;
   let rows = [];            // 평면화된 결과 - 키보드 이동의 단위
   let active = -1;
-  let enabled = new Set(SOURCES.map(s => s.id));
+  // Other dictionaries are only requested when their source is selected.
+  let enabled = new Set(['tag']);
+  let groups = new Map(), pending = new Set();
+  const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -49,7 +52,7 @@ export function initFastSearch() {
         <input class="fs-input" type="search" autocomplete="off" spellcheck="false"
                aria-label="빠른 검색"
                placeholder="태그 · 아티스트 · 캐릭터 · 와일드카드 · 프리셋 · 이벤트">
-        <span class="fs-count"></span>
+        <span class="fs-count" role="status" aria-live="polite"></span>
         <button type="button" class="fs-close" aria-label="닫기">×</button>
       </div>
       <div class="fs-chips"></div>
@@ -62,7 +65,7 @@ export function initFastSearch() {
     chipRow = overlay.querySelector('.fs-chips');
 
     chipRow.innerHTML = SOURCES.map(s =>
-      `<button type="button" class="fs-chip is-on" data-fs-source="${s.id}">${esc(s.label)}</button>`).join('');
+      `<button type="button" class="fs-chip${enabled.has(s.id) ? ' is-on' : ''}" aria-pressed="${enabled.has(s.id)}" data-fs-source="${s.id}">${esc(s.label)}</button>`).join('');
     chipRow.addEventListener('click', event => {
       const chip = event.target.closest('[data-fs-source]');
       if (!chip) return;
@@ -71,6 +74,7 @@ export function initFastSearch() {
       if (enabled.has(id) && enabled.size === 1) return;
       if (enabled.has(id)) enabled.delete(id); else enabled.add(id);
       chip.classList.toggle('is-on', enabled.has(id));
+      chip.setAttribute('aria-pressed', String(enabled.has(id)));
       schedule(0);
     });
 
@@ -116,27 +120,70 @@ export function initFastSearch() {
 
   function schedule(delay) {
     clearTimeout(timer);
-    timer = setTimeout(run, delay);
+    const mine = ++seq; // Invalidate before the debounce, including Enter/copy.
+    for (const slot of requests.values()) slot.wanted = null;
+    rows = [];
+    active = -1;
+    groups = new Map();
+    const query = input.value.trim();
+    pending = new Set([...enabled].filter(id => query || id === 'wildcard'));
+    renderCurrent(query);
+    timer = setTimeout(() => run(mine), delay);
   }
 
-  async function run() {
-    const query = input.value.trim();
-    const mine = ++seq;
-    const params = new URLSearchParams({
-      q: query, sources: [...enabled].join(','), limit: String(PER_SOURCE),
-    });
-    let payload = null;
-    try {
-      const response = await fetch(`/api/fast-search?${params}`, { cache: 'no-store' });
-      payload = response.ok ? await response.json() : null;
-    } catch { payload = null; }
-    // 늦게 온 답이 지금 친 글자를 덮으면 화면과 입력이 어긋난다.
+  function run(mine) {
     if (mine !== seq || !open) return;
-    render(payload, query);
+    const query = input.value.trim();
+    for (const source of SOURCES) {
+      if (!pending.has(source.id)) continue;
+      requests.get(source.id).wanted = {query, mine};
+      void drain(source);
+    }
+  }
+
+  async function drain(source) {
+    const slot = requests.get(source.id);
+    if (slot.busy) return;
+    slot.busy = true;
+    try {
+      // One in-flight request and at most one latest pending query per source.
+      // Aborting fetch does not stop Python's worker, so don't enqueue a new
+      // cold initialization for every keystroke while the first one is running.
+      while (slot.wanted) {
+        const {query, mine} = slot.wanted;
+        slot.wanted = null;
+        const params = new URLSearchParams({q: query, sources: source.id, limit: String(PER_SOURCE)});
+        let group;
+        try {
+          const response = await fetch(`/api/fast-search?${params}`, {cache: 'no-store'});
+          if (!response.ok) throw new Error('search failed');
+          const payload = await response.json();
+          group = payload.groups?.find(g => g.source === source.id);
+          if (!group || !Array.isArray(group.items)) throw new Error('invalid group');
+        } catch {
+          group = {source: source.id, label: source.label, items: [], note: '검색에 실패했습니다. 다시 입력해 주세요.'};
+        }
+        if (mine !== seq || !open || !enabled.has(source.id)) continue;
+        groups.set(source.id, group);
+        pending.delete(source.id);
+        renderCurrent(query);
+      }
+    } finally {
+      slot.busy = false;
+    }
+  }
+
+  function renderCurrent(query) {
+    const current = SOURCES.filter(s => enabled.has(s.id)).map(source =>
+      groups.get(source.id) || {source: source.id, label: source.label, items: [],
+        note: pending.has(source.id) ? '준비 및 검색 중…' : ''});
+    render({groups: current}, query);
   }
 
   function render(payload, query) {
+    const selectedKey = rows[active]?._searchKey;
     rows = [];
+    body.setAttribute('aria-busy', String(pending.size > 0));
     if (!payload) {
       body.innerHTML = '<div class="fs-empty">검색에 실패했습니다.</div>';
       countEl.textContent = '';
@@ -150,7 +197,7 @@ export function initFastSearch() {
         + '</div>');
       for (const item of group.items) {
         const index = rows.length;
-        rows.push(item);
+        rows.push({...item, _searchKey: `${group.source}\u0000${item.value}`});
         parts.push(`<button type="button" class="fs-row" data-fs-index="${index}">`
           + `<span class="fs-title">${esc(item.title)}</span>`
           + (item.subtitle ? `<span class="fs-sub">${esc(item.subtitle)}</span>` : '')
@@ -158,12 +205,13 @@ export function initFastSearch() {
           + '</button>');
       }
     }
-    if (!rows.length) {
+    if (!rows.length && !pending.size) {
       parts.push(`<div class="fs-empty">${query ? '찾은 것이 없습니다.' : '검색어를 입력하세요.'}</div>`);
     }
     body.innerHTML = parts.join('');
-    countEl.textContent = rows.length ? `${rows.length}` : '';
-    active = rows.length ? 0 : -1;
+    countEl.textContent = pending.size ? `${rows.length} · 검색 중` : (rows.length ? `${rows.length}` : '');
+    const previousIndex = selectedKey == null ? -1 : rows.findIndex(r => r._searchKey === selectedKey);
+    active = previousIndex >= 0 ? previousIndex : (rows.length ? 0 : -1);
     paintActive();
   }
 
@@ -230,6 +278,10 @@ export function initFastSearch() {
     open = false;
     overlay.hidden = true;
     clearTimeout(timer);
+    for (const slot of requests.values()) slot.wanted = null;
+    rows = [];
+    active = -1;
+    pending.clear();
     seq += 1;                 // 도는 중인 요청의 결과를 버린다
   }
 

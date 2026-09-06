@@ -84,7 +84,9 @@ def _search_artist(context, query: str, limit: int, _opts) -> tuple[list[dict], 
 
 def _search_character(context, query: str, limit: int, _opts) -> tuple[list[dict], str]:
     from app.backend.server.ollama_chat_tools import search_characters
+    from app.backend.server.autocomplete_commands import _ensure_kr_raw
 
+    _ensure_kr_raw(context)
     payload = search_characters(context, query)
     rows = payload.get("characters") or []
     items = [_item(r["tag"], r["tag"], str(r.get("work") or ""), _count_meta(r.get("count")))
@@ -131,14 +133,15 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
 
     svc = event_preset_service(context)
     if svc.status().get("dataAvailability", {}).get("main") != "ready":
-        return [], "이벤트 프리셋 데이터가 설치되어 있지 않습니다."
+        return [], "이벤트 데이터가 없습니다. Event Preset 화면의 Download 버튼으로 설치할 수 있습니다."
     rating = str(opts.get("rating") or "s").strip().casefold()
     person = str(opts.get("person") or "").strip() or PERSON_PARTITION_ORDER[0]
     if rating not in {"g", "s", "q", "e"}:
         rating = "s"
     if person not in PERSON_PARTITION_ORDER:
         person = PERSON_PARTITION_ORDER[0]
-    boot = svc.bootstrap(rating_id=rating, person_id=person, search=query, limit=limit)
+    boot = svc.bootstrap(rating_id=rating, person_id=person, search=query, limit=limit,
+                         preview_combos=True)
     selected = boot.get("selected") or {}
     if selected.get("ratingId") != rating or selected.get("personId") != person:
         return [], f"{rating}/{person} 분면을 쓸 수 없습니다."
@@ -150,8 +153,7 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
                     break
                 eid = event.get("id") or ""
                 label = str(event.get("label") or eid)
-                detail = svc.observed_combos({"ratingId": rating, "personId": person, "eventId": eid})
-                combos = ((detail.get("event") or {}).get("observedCombos") or [])[:1]
+                combos = [event["previewCombo"]] if event.get("previewCombo") else []
                 tags = [t for t in (combos[0].get("tags") if combos else []) or [] if t][:16]
                 # 복사되는 값은 **실제로 쓸 수 있는 태그 줄**이다. 관측 조합이 없으면
                 # 이벤트 id 로 물러선다(그것도 태그다).

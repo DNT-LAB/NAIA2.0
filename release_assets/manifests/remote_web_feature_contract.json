@@ -173,6 +173,8 @@
         "app/backend/server/fast_search_routes.py",
         "app/backend/server/autocomplete_commands.py",
         "app/backend/server/ollama_chat_tools.py",
+        "core/event_preset/fast_search_catalog.py",
+        "core/event_preset/fast_search_catalog.json",
         "app/web/remote/js/features/fastSearch.mjs"
       ],
       "legacy_dependency": "none",
@@ -754,6 +756,12 @@
     }
   ],
   "data_dependencies": [
+    {
+      "feature": "fast_search",
+      "description": "Lazy read-only observed event combinations across ratings and person groups; independent of the optional Event Preset archive download.",
+      "paths": ["core/event_preset/fast_search_catalog.json"],
+      "provisioning": "bundled"
+    },
     {
       "feature": "ollama_chat",
       "description": "Bilingual tag and named-character grounding for read-only Chat tools.",

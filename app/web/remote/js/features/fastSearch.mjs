@@ -26,8 +26,8 @@ export function initFastSearch() {
   let open = false, seq = 0, timer = null;
   let rows = [];            // 평면화된 결과 - 키보드 이동의 단위
   let active = -1;
-  // Other dictionaries are only requested when their source is selected.
-  let enabled = new Set(['tag']);
+  // Lightweight dictionaries are enabled together; other sources remain opt-in.
+  let enabled = new Set(['tag', 'artist', 'character']);
   let groups = new Map(), pending = new Set();
   const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
 

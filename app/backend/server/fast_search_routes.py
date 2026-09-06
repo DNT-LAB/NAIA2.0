@@ -4,17 +4,16 @@
 생성 상태를 건드리지 않는다. 고른 결과는 **클립보드로만** 간다(사용자 지시 2026-09-05)
 — 메인 프롬프트에 자동으로 넣지 않는다.
 
-검색기는 전부 이미 있는 것을 빌려 쓴다. 여기서 새로 만드는 것은 **한 자리로 모으는
-계약**뿐이다:
+갈래별 검색 소유권:
 
     tag/artist  autocomplete_commands.search_kr_tags   (`@`/`artist:` 접두어로 갈래)
     character   ollama_chat_tools.search_characters    (도감 - 작품·수록 수를 안다)
     wildcard    autocomplete_commands.search_wildcards
     preset      prompt_engineering_settings            (파일 목록 + 저장된 내용)
-    event       event_preset_service.bootstrap         (rating·인원 분면이 필요하다)
+    event       event_preset.fast_search_catalog         (기본 제공 정적 관측 조합)
 
-⚠️ **한 갈래가 실패해도 나머지는 낸다.** 이벤트 데이터가 안 깔린 기계가 흔하고, 그때
-   검색창 전체가 죽으면 안 된다. 실패한 갈래는 빈 목록 + `note` 로 이유를 말한다.
+⚠️ **한 갈래가 실패해도 나머지는 낸다.** 실패한 갈래는 빈 목록 + `note` 로
+   이유를 말한다. 이벤트 검색에는 별도 Event Preset 다운로드가 필요 없다.
 """
 from __future__ import annotations
 
@@ -128,39 +127,21 @@ def _search_preset(context, query: str, limit: int, opts) -> tuple[list[dict], s
 
 
 def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], str]:
-    from app.backend.server.preset_services import event_preset_service
-    from core.event_preset.engines import PERSON_PARTITION_ORDER
+    from core.event_preset.fast_search_catalog import search_catalog
 
-    svc = event_preset_service(context)
-    if svc.status().get("dataAvailability", {}).get("main") != "ready":
-        return [], "이벤트 데이터가 없습니다. Event Preset 화면의 Download 버튼으로 설치할 수 있습니다."
-    rating = str(opts.get("rating") or "s").strip().casefold()
-    person = str(opts.get("person") or "").strip() or PERSON_PARTITION_ORDER[0]
-    if rating not in {"g", "s", "q", "e"}:
-        rating = "s"
-    if person not in PERSON_PARTITION_ORDER:
-        person = PERSON_PARTITION_ORDER[0]
-    boot = svc.bootstrap(rating_id=rating, person_id=person, search=query, limit=limit,
-                         preview_combos=True)
-    selected = boot.get("selected") or {}
-    if selected.get("ratingId") != rating or selected.get("personId") != person:
-        return [], f"{rating}/{person} 분면을 쓸 수 없습니다."
-    items: list[dict[str, Any]] = []
-    for category in boot.get("categories") or []:
-        for sub in category.get("subcategories") or []:
-            for event in sub.get("events") or []:
-                if len(items) >= limit:
-                    break
-                eid = event.get("id") or ""
-                label = str(event.get("label") or eid)
-                combos = [event["previewCombo"]] if event.get("previewCombo") else []
-                tags = [t for t in (combos[0].get("tags") if combos else []) or [] if t][:16]
-                # 복사되는 값은 **실제로 쓸 수 있는 태그 줄**이다. 관측 조합이 없으면
-                # 이벤트 id 로 물러선다(그것도 태그다).
-                value = ", ".join(tags) if tags else eid
-                items.append(_item(value, label, ", ".join(tags[:8]),
-                                   _count_meta(combos[0].get("count") if combos else 0)))
-    return items, f"{rating} · {person} 분면 · 관측 조합"
+    rating = str(opts.get("rating") or "").strip().casefold()
+    person = str(opts.get("person") or "").strip()
+    if rating and rating not in {"g", "s", "q", "e"}:
+        return [], "알 수 없는 이벤트 등급입니다."
+    matches = search_catalog(query, limit, rating=rating, person=person)
+    items = []
+    for event, variant in matches:
+        tags = variant.copy_tags
+        title = event.tag if event.label == event.tag else f"{event.tag} · {event.label}"
+        meta = f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(tags)}태그 · 관측 {variant.count:,}"
+        items.append(_item(", ".join(tags), title, ", ".join(tags), meta))
+    scope = f"{rating.upper() if rating else '전체 등급'} · {person if person else '전체 인원'}"
+    return items, f"{scope} · 기본 제공 조합"
 
 
 SEARCHERS = {

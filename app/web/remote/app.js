@@ -1099,7 +1099,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
     console.error('Failed to initialize Studio tab module', error);
   });
 // Ctrl+F 한 칸 검색. 고른 것은 **클립보드로만** 간다 - 프롬프트에 넣지 않는다.
-import('./js/features/fastSearch.mjs?v=20260906-fastsearch-events')
+import('./js/features/fastSearch.mjs?v=20260906-event-deep')
   .then(({initFastSearch}) => { window.fastSearch = initFastSearch(); })
   .catch(error => console.error('Failed to initialize Fast Search', error));
 const customSelectsReady = import('./js/features/customSelects.mjs?v=20260905-fastsearch')
@@ -2134,7 +2134,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
     console.error('Failed to initialize ollama assistant popup module', error);
   });
 let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260905-chat-intent-plan')
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260906-event-deep')
   .then(({createOllamaChatPopup}) => {
     ollamaChatPopup = createOllamaChatPopup({
       document, window, showToast, escHtml,

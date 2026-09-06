@@ -1,7 +1,7 @@
-"""Build the read-only Ctrl+F catalog from local observed Event Preset rows.
+"""Build shared read-only event search catalogs from local observed rows.
 
 This is an offline build tool, not a runtime dependency or downloader. It keeps
-one strongest qualifying observation per taxonomy anchor and partition, without
+one strongest qualifying observation per taxonomy anchor, partition and length band, without
 appending retained dependency tags or inventing prompt combinations. The shared
 archive and translation corpus are never changed.
 """
@@ -22,6 +22,7 @@ TRANSLATIONS = ROOT / 'core/event_preset/event_preset_category_translations_ko.j
 TAXONOMY_MEMBER = 'base/event_taxonomy_v2_1.parquet'
 MIN_MEANINGFUL_TAGS = 3
 MAX_TOTAL_TAGS = 8
+DEEP_MAX_TAGS = 16
 POPULATION_TAGS = frozenset({
     '1girl', '2girls', '3girls', '4girls', '5girls', '6+girls',
     '1boy', '2boys', '3boys', '4boys', '5boys', '6+boys',
@@ -92,17 +93,19 @@ def write_catalog(path: Path, payload: dict) -> None:
     path.write_text('\n'.join(lines), encoding='utf-8', newline='\n')
 
 
-def build(archive_path: Path, output_path: Path, report_path: Path) -> dict:
+def build(archive_path: Path, output_path: Path, report_path: Path, deep_output_path: Path | None = None) -> dict:
     import pandas as pd  # Only the offline builder needs parquet dependencies.
 
     archive_path = archive_path.resolve()
     output_path = output_path.resolve()
     report_path = report_path.resolve()
-    if archive_path in (output_path, report_path) or output_path == report_path:
-        raise ValueError('Archive, catalog, and report must be separate files')
+    deep_output_path = (deep_output_path or output_path.with_stem(output_path.stem + '_deep')).resolve()
+    if len({archive_path, output_path, report_path, deep_output_path}) != 4:
+        raise ValueError('Archive, basic/deep catalogs, and report must be separate files')
     translation_bytes = TRANSLATIONS.read_bytes()
     translations = json.loads(translation_bytes)['events']
     variants = defaultdict(list)
+    deep_variants = defaultdict(list)
     partition_metrics = []
     age_hits = Counter()
     with zipfile.ZipFile(archive_path) as archive:
@@ -127,10 +130,11 @@ def build(archive_path: Path, output_path: Path, report_path: Path) -> dict:
             frame['_has_anchor'] = [anchor in tags for anchor, tags in zip(frame.event_tag, frame['_tags'])]
             qualified = frame[(frame['count'] > 0) & frame['_has_anchor']
                               & (frame['_meaningful'] >= MIN_MEANINGFUL_TAGS)
-                              & (frame['_total'] <= MAX_TOTAL_TAGS)].copy()
+                              & (frame['_total'] <= DEEP_MAX_TAGS)].copy()
             metrics.update({
                 'under_three_meaningful_rows': int((frame['_meaningful'] < MIN_MEANINGFUL_TAGS).sum()),
                 'over_eight_total_rows': int((frame['_total'] > MAX_TOTAL_TAGS).sum()),
+                'over_sixteen_total_rows': int((frame['_total'] > DEEP_MAX_TAGS).sum()),
                 'missing_anchor_rows': int((~frame['_has_anchor']).sum()),
                 'nonpositive_count_rows': int((frame['count'] <= 0).sum()),
                 'qualified_before_age_filter': len(qualified),
@@ -143,12 +147,17 @@ def build(archive_path: Path, output_path: Path, report_path: Path) -> dict:
             qualified = qualified.loc[allowed]
             metrics['age_filtered_rows'] = metrics['qualified_before_age_filter'] - len(qualified)
             qualified.sort_values(['count', 'observed_event_combo'], ascending=[False, True], kind='stable', inplace=True)
-            best = qualified.drop_duplicates('event_tag')
+            best = qualified[qualified['_total'] <= MAX_TOTAL_TAGS].drop_duplicates('event_tag')
+            deep_best = qualified[qualified['_total'] > MAX_TOTAL_TAGS].drop_duplicates('event_tag')
             metrics['selected_anchor_partition_rows'] = len(best)
             metrics['selected_count_one_rows'] = int((best['count'] == 1).sum())
+            metrics['deep_selected_anchor_partition_rows'] = len(deep_best)
+            metrics['combined_selected_anchors'] = len(set(best.event_tag) | set(deep_best.event_tag))
             partition_metrics.append(metrics)
             for anchor, tags, count in zip(best.event_tag, best['_tags'], best['count']):
                 variants[anchor].append({'partition': partition, 'tags': list(tags), 'count': int(count)})
+            for anchor, tags, count in zip(deep_best.event_tag, deep_best['_tags'], deep_best['count']):
+                deep_variants[anchor].append({'partition': partition, 'tags': list(tags), 'count': int(count)})
 
     events = {}
     for anchor in sorted(variants):
@@ -183,6 +192,15 @@ def build(archive_path: Path, output_path: Path, report_path: Path) -> dict:
         'events': events,
     }
     write_catalog(output_path, payload)
+    deep_events = {}
+    for anchor in sorted(deep_variants):
+        label, aliases = translated_terms(anchor, translations)
+        deep_events[anchor] = {'label': label, 'aliases': aliases,
+                              'variants': sorted(deep_variants[anchor], key=lambda row: row['partition'])}
+    deep_payload = {**payload, 'events': deep_events,
+                    'policy': {**payload['policy'], 'min_total_unique_tags': MAX_TOTAL_TAGS + 1,
+                               'max_total_unique_tags': DEEP_MAX_TAGS}}
+    write_catalog(deep_output_path, deep_payload)
     report = {
         'archive': str(archive_path), 'output': str(output_path),
         'source': payload['source'], 'policy': payload['policy'],
@@ -190,6 +208,13 @@ def build(archive_path: Path, output_path: Path, report_path: Path) -> dict:
         'taxonomy_anchors': len(taxonomy_anchors), 'selected_anchors': len(events),
         'selected_anchor_partition_rows': sum(len(event['variants']) for event in events.values()),
         'selected_unique_bundles': len({tuple(row['tags']) for event in events.values() for row in event['variants']}),
+        'deep_output': str(deep_output_path),
+        'deep_catalog_sha256': sha256(deep_output_path),
+        'deep_catalog_bytes': deep_output_path.stat().st_size,
+        'deep_selected_anchors': len(deep_events),
+        'deep_selected_anchor_partition_rows': sum(len(e['variants']) for e in deep_events.values()),
+        'combined_selected_anchors': len(set(events) | set(deep_events)),
+        'combined_anchor_partition_rows': sum(m['combined_selected_anchors'] for m in partition_metrics),
         'age_marker_row_hits': dict(sorted(age_hits.items())),
         'partition_metrics': partition_metrics,
         'verification': {
@@ -210,8 +235,9 @@ def main() -> None:
     parser.add_argument('--archive', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
+    parser.add_argument('--deep-output', type=Path)
     args = parser.parse_args()
-    report = build(args.archive, args.output, args.report)
+    report = build(args.archive, args.output, args.report, args.deep_output)
     print(json.dumps({key: report[key] for key in ('catalog_sha256', 'catalog_bytes', 'selected_anchors',
                                                  'selected_anchor_partition_rows', 'selected_unique_bundles')}, ensure_ascii=False))
 

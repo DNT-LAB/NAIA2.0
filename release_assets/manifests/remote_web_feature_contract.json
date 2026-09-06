@@ -175,6 +175,7 @@
         "app/backend/server/ollama_chat_tools.py",
         "core/event_preset/fast_search_catalog.py",
         "core/event_preset/fast_search_catalog.json",
+        "core/event_preset/fast_search_catalog_deep.json",
         "app/web/remote/js/features/fastSearch.mjs"
       ],
       "legacy_dependency": "none",
@@ -611,6 +612,9 @@
         "core/ollama_chat_plan.py",
         "core/ollama_chat_semantics.py",
         "core/ollama_chat_pipeline.py",
+        "core/event_preset/fast_search_catalog.py",
+        "core/event_preset/fast_search_catalog.json",
+        "core/event_preset/fast_search_catalog_deep.json",
         "app/backend/server/ollama_chat_tools.py",
         "core/semantic_tag_discovery.py",
         "app/web/remote/js/features/ollamaChatPopup.mjs",
@@ -759,7 +763,7 @@
     {
       "feature": "fast_search",
       "description": "Lazy read-only observed event combinations across ratings and person groups; independent of the optional Event Preset archive download.",
-      "paths": ["core/event_preset/fast_search_catalog.json"],
+      "paths": ["core/event_preset/fast_search_catalog.json", "core/event_preset/fast_search_catalog_deep.json"],
       "provisioning": "bundled"
     },
     {
@@ -774,7 +778,13 @@
     },
     {
       "feature": "ollama_chat",
-      "description": "Optional Event Preset reads; Chat reports unavailable and never starts a download itself.",
+      "description": "Shared deterministic event lookup; basic and opt-in deep observed combinations load independently without an Event Preset download.",
+      "paths": ["core/event_preset/fast_search_catalog.json", "core/event_preset/fast_search_catalog_deep.json"],
+      "provisioning": "bundled"
+    },
+    {
+      "feature": "ollama_chat",
+      "description": "Optional legacy Ollama Assist event data; native Chat search does not use this archive.",
       "paths": [
         "data/event_preset/**"
       ],

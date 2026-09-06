@@ -20,6 +20,10 @@ const SOURCES = [
 ];
 const DEBOUNCE_MS = 170;
 const PER_SOURCE = 8;
+const DEEP_SOURCE = {id: 'event_deep', label: '이벤트 더 보기'};
+const PERSON_OPTIONS = ['1girl_solo', '1girl', '1girl_1boy', '1girl_multiple_boys',
+  '2girls', 'multiple_girls', '1boy_solo', '1boy', '1boy_multiple_girls',
+  '2boys', 'multiple_boys', 'multiple_girls_multiple_boys', 'other'];
 
 export function initFastSearch() {
   let overlay = null, input = null, body = null, countEl = null, chipRow = null;
@@ -29,7 +33,8 @@ export function initFastSearch() {
   // Lightweight dictionaries are enabled together; other sources remain opt-in.
   let enabled = new Set(['tag', 'artist', 'character']);
   let groups = new Map(), pending = new Set();
-  const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
+  let eventOptions = null, eventRating = '', eventPerson = '', expanded = false;
+  const requests = new Map([...SOURCES, DEEP_SOURCE].map(s => [s.id, {busy: false, wanted: null, active: null}]));
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -56,6 +61,11 @@ export function initFastSearch() {
         <button type="button" class="fs-close" aria-label="닫기">×</button>
       </div>
       <div class="fs-chips"></div>
+      <div class="fs-event-options" hidden>
+        <label>인원 <select data-fs-person aria-label="이벤트 인원"><option value="">전체 인원</option>${PERSON_OPTIONS.map(id => `<option value="${id}">${id.replaceAll('_', ' ')}</option>`).join('')}</select></label>
+        <label>등급 <select data-fs-rating aria-label="이벤트 등급"><option value="">전체 등급</option><option value="g">G · General</option><option value="s">S · Sensitive</option><option value="q">Q · Questionable</option><option value="e">E · Explicit</option></select></label>
+        <span>태그 여러 개는 쉼표로 구분</span>
+      </div>
       <div class="fs-body"></div>
       <div class="fs-foot">↑↓ 이동 · <b>Enter</b> 복사 · Esc 닫기 — 프롬프트에는 넣지 않습니다</div>`;
     document.body.append(overlay);
@@ -63,6 +73,12 @@ export function initFastSearch() {
     body = overlay.querySelector('.fs-body');
     countEl = overlay.querySelector('.fs-count');
     chipRow = overlay.querySelector('.fs-chips');
+    eventOptions = overlay.querySelector('.fs-event-options');
+    eventOptions.addEventListener('change', () => {
+      eventRating = eventOptions.querySelector('[data-fs-rating]').value;
+      eventPerson = eventOptions.querySelector('[data-fs-person]').value;
+      schedule(0);
+    });
 
     chipRow.innerHTML = SOURCES.map(s =>
       `<button type="button" class="fs-chip${enabled.has(s.id) ? ' is-on' : ''}" aria-pressed="${enabled.has(s.id)}" data-fs-source="${s.id}">${esc(s.label)}</button>`).join('');
@@ -82,6 +98,10 @@ export function initFastSearch() {
     input.addEventListener('input', () => schedule(DEBOUNCE_MS));
     input.addEventListener('keydown', onKeyDown);
     body.addEventListener('click', event => {
+      if (event.target.closest('[data-fs-more]')) {
+        toggleMore();
+        return;
+      }
       const row = event.target.closest('[data-fs-index]');
       if (!row) return;
       active = Number(row.dataset.fsIndex);
@@ -125,6 +145,8 @@ export function initFastSearch() {
     rows = [];
     active = -1;
     groups = new Map();
+    expanded = false;
+    eventOptions.hidden = !enabled.has('event');
     const query = input.value.trim();
     pending = new Set([...enabled].filter(id => query || id === 'wildcard'));
     renderCurrent(query);
@@ -136,9 +158,29 @@ export function initFastSearch() {
     const query = input.value.trim();
     for (const source of SOURCES) {
       if (!pending.has(source.id)) continue;
-      requests.get(source.id).wanted = {query, mine};
+      requests.get(source.id).wanted = {query, mine, rating: eventRating, person: eventPerson};
       void drain(source);
     }
+  }
+
+  function toggleMore() {
+    const query = input.value.trim();
+    if (!query || !enabled.has('event')) return;
+    expanded = !expanded;
+    const slot = requests.get('event_deep');
+    if (expanded) {
+      pending.add('event_deep');
+      // Reuse an identical in-flight deep request after collapse/reopen.
+      if (!slot.active || slot.active.mine !== seq) {
+        slot.wanted = {query, mine: seq, rating: eventRating, person: eventPerson};
+      }
+      void drain(DEEP_SOURCE);
+    } else {
+      slot.wanted = null;
+      groups.delete('event_deep');
+      pending.delete('event_deep');
+    }
+    renderCurrent(query);
   }
 
   async function drain(source) {
@@ -150,31 +192,43 @@ export function initFastSearch() {
       // Aborting fetch does not stop Python's worker, so don't enqueue a new
       // cold initialization for every keystroke while the first one is running.
       while (slot.wanted) {
-        const {query, mine} = slot.wanted;
+        const request = slot.wanted;
+        const {query, mine, rating, person} = request;
+        slot.active = request;
         slot.wanted = null;
-        const params = new URLSearchParams({q: query, sources: source.id, limit: String(PER_SOURCE)});
+        const isDeep = source.id === 'event_deep';
+        const requestSource = isDeep ? 'event' : source.id;
+        const params = new URLSearchParams({q: query, sources: requestSource, limit: String(PER_SOURCE)});
+        if (requestSource === 'event') {
+          params.set('rating', rating);
+          params.set('person', person);
+          params.set('event_detail', isDeep ? 'deep' : 'basic');
+        }
         let group;
         try {
           const response = await fetch(`/api/fast-search?${params}`, {cache: 'no-store'});
           if (!response.ok) throw new Error('search failed');
           const payload = await response.json();
-          group = payload.groups?.find(g => g.source === source.id);
+          group = payload.groups?.find(g => g.source === requestSource);
           if (!group || !Array.isArray(group.items)) throw new Error('invalid group');
+          group = {...group, source: source.id, label: source.label};
         } catch {
           group = {source: source.id, label: source.label, items: [], note: '검색에 실패했습니다. 다시 입력해 주세요.'};
         }
-        if (mine !== seq || !open || !enabled.has(source.id)) continue;
+        if (mine !== seq || !open || !enabled.has(requestSource) || (isDeep && !expanded)) continue;
         groups.set(source.id, group);
         pending.delete(source.id);
         renderCurrent(query);
       }
     } finally {
       slot.busy = false;
+      slot.active = null;
     }
   }
 
   function renderCurrent(query) {
-    const current = SOURCES.filter(s => enabled.has(s.id)).map(source =>
+    const visible = [...SOURCES.filter(s => enabled.has(s.id)), ...(expanded ? [DEEP_SOURCE] : [])];
+    const current = visible.map(source =>
       groups.get(source.id) || {source: source.id, label: source.label, items: [],
         note: pending.has(source.id) ? '준비 및 검색 중…' : ''});
     render({groups: current}, query);
@@ -197,13 +251,17 @@ export function initFastSearch() {
         + '</div>');
       for (const item of group.items) {
         const index = rows.length;
+        const subtitle = group.source === 'event_deep' ? item.value : item.subtitle;
         rows.push({...item, _searchKey: `${group.source}\u0000${item.value}`});
-        parts.push(`<button type="button" class="fs-row" data-fs-index="${index}">`
+        parts.push(`<button type="button" class="fs-row${group.source === 'event_deep' ? ' fs-row-deep' : ''}" data-fs-index="${index}">`
           + `<span class="fs-title">${esc(item.title)}</span>`
-          + (item.subtitle ? `<span class="fs-sub">${esc(item.subtitle)}</span>` : '')
+          + (subtitle ? `<span class="fs-sub">${esc(subtitle)}</span>` : '')
           + (item.meta ? `<span class="fs-meta">${esc(item.meta)}</span>` : '')
           + '</button>');
       }
+    }
+    if (enabled.has('event') && query) {
+      parts.push(`<button type="button" class="fs-more" data-fs-more aria-expanded="${expanded}">${expanded ? '기본 결과만 보기' : '더 보기 · 최대 16태그'}</button>`);
     }
     if (!rows.length && !pending.size) {
       parts.push(`<div class="fs-empty">${query ? '찾은 것이 없습니다.' : '검색어를 입력하세요.'}</div>`);

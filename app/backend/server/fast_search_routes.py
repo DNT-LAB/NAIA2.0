@@ -133,7 +133,8 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
     person = str(opts.get("person") or "").strip()
     if rating and rating not in {"g", "s", "q", "e"}:
         return [], "알 수 없는 이벤트 등급입니다."
-    matches = search_catalog(query, limit, rating=rating, person=person)
+    detail = str(opts.get('event_detail') or 'basic')
+    matches = search_catalog(query, limit, rating=rating, person=person, detail=detail)
     items = []
     for event, variant in matches:
         tags = variant.copy_tags
@@ -141,7 +142,7 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
         meta = f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(tags)}태그 · 관측 {variant.count:,}"
         items.append(_item(", ".join(tags), title, ", ".join(tags), meta))
     scope = f"{rating.upper() if rating else '전체 등급'} · {person if person else '전체 인원'}"
-    return items, f"{scope} · 기본 제공 조합"
+    return items, f"{scope} · {'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
 
 
 SEARCHERS = {
@@ -159,7 +160,7 @@ def register_fast_search_routes(
 
     @app.get("/api/fast-search")
     async def api_fast_search(q: str = "", sources: str = "", limit: int = DEFAULT_LIMIT,
-                              rating: str = "", person: str = "", mode: str = ""):
+                              rating: str = "", person: str = "", mode: str = "", event_detail: str = "basic"):
         query = str(q or "").strip()
         if len(query) > MAX_QUERY:
             return JSONResponse({"error": "검색어가 너무 깁니다."}, status_code=400,
@@ -169,8 +170,10 @@ def register_fast_search_routes(
         if unknown:
             return JSONResponse({"error": f"알 수 없는 검색 갈래: {', '.join(unknown)}"},
                                 status_code=400, headers=_no_store())
+        if 'event' in wanted and event_detail not in {'basic', 'deep'}:
+            return JSONResponse({'error': '알 수 없는 이벤트 상세 범위입니다.'}, status_code=400, headers=_no_store())
         per_source = max(1, min(MAX_LIMIT, int(limit or DEFAULT_LIMIT)))
-        opts = {"rating": rating, "person": person, "mode": mode}
+        opts = {"rating": rating, "person": person, "mode": mode, 'event_detail': event_detail}
 
         def run_all():
             groups = []

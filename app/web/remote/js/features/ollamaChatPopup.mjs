@@ -45,8 +45,6 @@ export function createOllamaChatPopup({
   let onResize = null;
   let busy = false;
   let serverReady = false;
-  let eventChecked = false;
-  let eventPollTimer = null;
   let modelPullTimer = null;
   let connModel = DEFAULT_MODEL;
   let connEndpointBase = '';
@@ -61,7 +59,6 @@ export function createOllamaChatPopup({
 
   function close() {
     if (typeof hideTagInfo === 'function') hideTagInfo();
-    stopEventDatasetPolling();
     stopModelPullPolling();
     if (onResize) {
       win.removeEventListener('resize', onResize);
@@ -123,48 +120,6 @@ export function createOllamaChatPopup({
     if (!el) return;
     el.className = 'ollama-chat-status' + (type ? ' ' + type : '');
     el.textContent = text || '';
-  }
-
-  function eventMainAvailability(payload) {
-    const availability = payload?.availability || payload?.dataAvailability || {};
-    return String(availability.main || payload?.main || '').toLowerCase();
-  }
-
-  function stopEventDatasetPolling() {
-    if (eventPollTimer) {
-      win.clearInterval(eventPollTimer);
-      eventPollTimer = null;
-    }
-  }
-
-  function renderDatasetState(html) {
-    const el = pick('.ollama-chat-dataset');
-    if (!el) return;
-    if (!html) {
-      el.hidden = true;
-      el.innerHTML = '';
-      return;
-    }
-    el.hidden = false;
-    el.innerHTML = html;
-    el.querySelectorAll('[data-dataset-act]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (btn.dataset.datasetAct === 'download') void startEventDatasetDownload();
-        else void checkEventDatasetOnce({force: true});
-      });
-    });
-  }
-
-  function renderDatasetDownload(payload) {
-    const percent = Math.max(0, Math.min(100, Number(payload?.percent) || 0));
-    const mb = payload?.total_mb
-      ? `${Number(payload.downloaded_mb || 0).toFixed(1)} / ${Number(payload.total_mb || 0).toFixed(1)} MB`
-      : `${Number(payload?.downloaded_mb || 0).toFixed(1)} MB`;
-    const msg = escHtml(String(payload?.message || '이벤트 데이터를 받는 중입니다.'));
-    renderDatasetState(`
-      <span class="ollama-chat-ready-msg">${msg}</span>
-      <span class="ollama-chat-dataset-meter"><span style="width:${percent}%"></span></span>
-      <span class="ollama-chat-dataset-mb">${escHtml(mb)}</span>`);
   }
 
   function updateModelSelect() {
@@ -936,7 +891,6 @@ export function createOllamaChatPopup({
     renderReadiness(curatedModels.some(item => item?.installed && item?.runtime_model && !item?.spec_ready)
       ? curatedDownloadHtml(canControl) : '');
     updateSendGate();
-    void checkEventDatasetOnce();
   }
 
   async function startServer() {
@@ -949,57 +903,6 @@ export function createOllamaChatPopup({
       if (data && data.running) break;
     }
     await refreshReadiness();
-  }
-
-  async function checkEventDatasetOnce({force = false} = {}) {
-    if (eventChecked && !force) return;
-    eventChecked = true;
-    let ds = {};
-    try {
-      ds = (await fetchJson('/api/ollama/dataset')).payload;
-    } catch (_) {
-      renderDatasetState('');
-      return;
-    }
-    if (!popup) return;
-    if (ds && ds.active) {
-      renderDatasetDownload(ds);
-      if (!eventPollTimer) {
-        eventPollTimer = win.setInterval(() => { void checkEventDatasetOnce({force: true}); }, 1200);
-      }
-      return;
-    }
-    stopEventDatasetPolling();
-    if (eventMainAvailability(ds) === 'ready') {
-      renderDatasetState('');
-      return;
-    }
-    const error = ds?.error ? `<span class="ollama-chat-ready-msg err">${escHtml(ds.error)}</span>` : '';
-    renderDatasetState(`
-      ${error || '<span class="ollama-chat-ready-msg warn">이벤트 데이터를 받으면 Chat에서 이벤트 프리셋을 검색할 수 있습니다.</span>'}
-      <button type="button" class="ollama-chat-ready-btn" data-dataset-act="download">이벤트 데이터 받기</button>
-      <button type="button" class="ollama-chat-ready-btn secondary" data-dataset-act="recheck">다시 확인</button>`);
-  }
-
-  async function startEventDatasetDownload() {
-    renderDatasetState('<span class="ollama-chat-ready-msg">이벤트 데이터 다운로드 시작 중…</span>');
-    try {
-      const result = (await fetchJson('/api/ollama/dataset', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({force: true}),
-      })).payload;
-      if (result && result.error) {
-        renderDatasetState(`<span class="ollama-chat-ready-msg err">${escHtml(result.error)}</span>`);
-        return;
-      }
-      renderDatasetDownload(result || {});
-    } catch (_) {
-      renderDatasetState('<span class="ollama-chat-ready-msg err">이벤트 데이터 다운로드를 시작하지 못했습니다.</span>');
-      return;
-    }
-    stopEventDatasetPolling();
-    eventPollTimer = win.setInterval(() => { void checkEventDatasetOnce({force: true}); }, 1200);
   }
 
   function open() {
@@ -1024,7 +927,6 @@ export function createOllamaChatPopup({
       </div>
       <div class="ollama-chat-bodywrap">
         <div class="ollama-chat-ready" hidden></div>
-        <div class="ollama-chat-dataset" hidden></div>
         <div class="ollama-chat-log"></div>
         <textarea class="ollama-chat-input" rows="3" placeholder="현재 프롬프트/결과에 대해 질문..."></textarea>
         <div class="ollama-chat-actions">

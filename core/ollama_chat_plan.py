@@ -41,6 +41,7 @@ PLAN_SCHEMA = obj({
         'tool': {'type': 'string', 'enum': ['search_tags', 'search_characters', 'search_events']},
         'query': {'type': 'string'},
         'rating': {'type': 'string'}, 'person_id': {'type': 'string'},
+        'detail': {'type': 'string', 'enum': ['basic', 'deep']},
     }, ['requirement_ids', 'tool', 'query'])},
 }, ['mode', 'output', 'actors', 'requirements', 'searches'])
 
@@ -122,8 +123,8 @@ def validate_plan(plan, source, reference_names=()):
         validate_search(plan, search['tool'], search)
         if len(search['query']) > 160 or (not search['query'].strip() and search['tool'] != 'search_events'):
             raise ValueError('Search queries must be 1-160 characters (event partition lookup may be empty)')
-        if search['tool'] != 'search_events' and (search.get('rating') or search.get('person_id')):
-            raise ValueError('Only event searches accept rating/person_id')
+        if search['tool'] != 'search_events' and (search.get('rating') or search.get('person_id') or search.get('detail')):
+            raise ValueError('Only event searches accept rating/person_id/detail')
     return copy.deepcopy(plan)
 
 

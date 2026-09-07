@@ -174,6 +174,8 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
         row = _item(", ".join(tags), title, ", ".join(tags), meta)
         # 앵커(핵심 태그) - 프론트가 이웃 조회(/event-neighbors)에 되돌려 보낸다.
         row["anchor"] = event.tag
+        # 관측 수 - 프론트가 관측 1회를 '더보기' 로 접는다(사용자 지정 2026-09-07). meta 를 파싱하지 않게.
+        row["count"] = variant.count
         items.append(row)
     # 등급·인원 문구는 뺐다 - 토글 줄이 이미 보여 주는 것을 캡션이 한 번 더 반복했다
     # (사용자 지적 2026-09-07).
@@ -209,6 +211,7 @@ def _event_neighbor_items(anchor: str, tags: list[str], rating: str, person: str
             row = _item(", ".join(copy), title, ", ".join(copy), meta)
             row["anchor"] = event.tag
             row["detail"] = detail
+            row["count"] = variant.count
             out.append(row)
         return out
 

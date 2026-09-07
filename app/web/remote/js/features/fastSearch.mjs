@@ -55,7 +55,9 @@ const SOURCES = [
 const DEBOUNCE_MS = 170;
 const PER_SOURCE = 8;
 const EVENT_PAGE = 8;
-const EVENT_SEEK_PAGE = 64;              // 칩으로 묶음을 찾아가는 동안은 큰 쪽으로 받는다
+// 칩으로 묶음을 찾아가는 동안은 큰 쪽으로 받는다. ⚠️ 서버 MAX_LIMIT(20)을 넘기면 잘려 오고, 그걸
+// '끝' 으로 오판해 basic 단계가 잘렸다(실측 2026-09-07, 64 로 두었을 때). 서버 상한과 같게 둔다.
+const EVENT_SEEK_PAGE = 20;
 const EVENT_PHASES = ['basic', 'deep'];   // 3–8태그 -> 9–16태그 -> 끝
 const RATING_OPTIONS = [
   { id: 'g', label: 'G', title: 'General' },
@@ -94,6 +96,9 @@ export function initFastSearch() {
   let eventOff = new Set();
   let currentAnchor = null;   // 지금 화면 위쪽에 보이는 묶음(칩 연노랑)
   let seekAnchor = null;      // 칩을 눌러 찾아가는 중인 이벤트 - 다음 쪽을 이어 받으며 찾는다
+  // 필터·칩으로 이벤트만 다시 불러올 때 지킬 스크롤 위치. 새 내용이 더 짧아 클램프되면 그 위치가
+  // 들어올 때까지 다음 쪽을 이어 받는다(예전엔 목록을 비운 순간 0 으로 클램프돼 맨 위로 튀었다).
+  let restoreScroll = null;
   // 이벤트 페이징 상태. phase 는 EVENT_PHASES 의 인덱스, offset 은 그 phase 안의 위치.
   let eventPaging = freshEventPaging();
   // 높이 상한. base = 결과 칸의 50%(이미지를 통째로 가리지 않는다), hard = 75%. 이벤트 구역이
@@ -504,11 +509,13 @@ export function initFastSearch() {
     eventOff = new Set();
     currentAnchor = null;
     seekAnchor = null;
+    restoreScroll = null;
     inline = null;
     paintEventChips();
     if (!enabled.has('event')) closePersonPopup();
     const query = input.value.trim();
     pending = new Set([...enabled].filter(id => query || id === 'wildcard'));
+    body.scrollTop = 0;                   // 새 질의는 맨 위에서
     render(query);
     timer = setTimeout(() => run(mine), delay);
   }
@@ -520,9 +527,10 @@ export function initFastSearch() {
     const mine = seq;
     const slot = requests.get('event');
     slot.wanted = null;
-    groups.delete('event');
+    // 옛 행은 새 첫 쪽이 올 때까지 그대로 둔다 - 비우면 내용이 짧아져 스크롤이 0 으로 클램프된다.
     eventPaging = freshEventPaging();
     seekAnchor = null;
+    restoreScroll = body.scrollTop;
     inline = null;
     const query = input.value.trim();
     if (query) pending.add('event');
@@ -613,7 +621,8 @@ export function initFastSearch() {
           }
           eventPaging.items.push(...group.items);
           eventPaging.offset += group.items.length;
-          const exhausted = group.exhausted === true || group.items.length < request.limit;
+          // 끝 판정은 서버 말을 우선한다 - 서버가 limit 을 잘랐을 수 있어 길이 비교만으로는 오판한다.
+          const exhausted = typeof group.exhausted === 'boolean' ? group.exhausted : group.items.length < request.limit;
           if (exhausted) {
             if (eventPaging.phase + 1 < EVENT_PHASES.length) { eventPaging.phase += 1; eventPaging.offset = 0; }
             else eventPaging.done = true;
@@ -621,6 +630,12 @@ export function initFastSearch() {
           groups.set('event', {source: 'event', label: source.label, items: eventPaging.items, note: group.note || ''});
           pending.delete('event');
           render(query);
+          if (restoreScroll != null) {
+            // 다시 불러온 뒤 옛 스크롤 위치로. 내용이 아직 짧아 못 가면 다음 쪽을 이어 받는다.
+            body.scrollTop = restoreScroll;
+            if (Math.abs(body.scrollTop - restoreScroll) <= 2 || eventPaging.done || seekAnchor) restoreScroll = null;
+            else { requestEventPage(mine); continue; }
+          }
           if (seekAnchor) {
             // 칩으로 찾아가는 중: 머리글이 나타났으면 거기로, 아니면 다음 쪽을 이어 받는다.
             const header = headerFor(seekAnchor);
@@ -781,7 +796,9 @@ export function initFastSearch() {
     countEl.textContent = pending.size ? `${rows.length} · 검색 중` : (rows.length ? `${rows.length}` : '');
     const previousIndex = selectedKey == null ? -1 : rows.findIndex(r => r._searchKey === selectedKey);
     active = previousIndex >= 0 ? previousIndex : (rows.length ? 0 : -1);
-    paintActive(previousIndex >= 0);
+    // 다시 그릴 때는 스크롤을 건드리지 않는다. 예전엔 고른 행이 사라지면 첫 행으로 scrollIntoView 해서
+    // 필터·칩을 만질 때마다 맨 위로 튀었다(사용자 지적 2026-09-07). 키보드 이동(move)만 따라간다.
+    paintActive(true);
     fitHeight();                          // 이벤트 구역이 보일 만큼 상한을 맞춘다
     updateCurrentAnchor();
   }

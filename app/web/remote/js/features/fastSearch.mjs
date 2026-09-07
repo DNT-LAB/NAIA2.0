@@ -11,7 +11,8 @@
  *
  * 크기 규약(사용자 지적 2026-09-07): Spotlight 처럼 **작게**. 결과 칸 폭의 가운데에
  * 최대 720px, 높이는 내용을 따라 자라되 결과 칸의 **절반**을 넘지 않는다 — 결과
- * 이미지를 통째로 가리면 안 된다. 나머지는 안에서 스크롤한다.
+ * 이미지를 통째로 가리면 안 된다. 나머지는 안에서 스크롤한다. 앞 갈래들이 길어 이벤트
+ * 구역이 밀리면 머리 + 행 다섯 줄이 들어올 만큼만 늘린다(최대 75%, fitHeight).
  *
  * 몸통(.fs-body)은 두 칸이다: 앞의 갈래들(태그·아티스트·캐릭터·와일드카드·프리셋)을 그리는
  * `.fs-lanes` 와, 마지막의 **이벤트 구역**(.fs-event-section). 이벤트에만 필요한 것들은 전부
@@ -20,11 +21,14 @@
  *    · 인원은 Interactive 의 ALT 팝업과 같은 체크 목록(여럿 켬). 기본은 **여성이 들어간
  *      구성 전부**(8/13). 남성만·기타는 꺼져 있다.
  *    · 등급은 Quick Filter 의 G S Q E 알약을 그대로 쓴다(여럿 켬, 기본 전부).
- *  - 걸린 이벤트가 둘 이상이면 **토글 칩** 한 줄(asphyxiation · 질식 3 / smother · 질식 2 …).
- *    끄면 그 이벤트의 행이 빠진다. 서버에는 끈 것(OFF 목록)만 보낸다 — deep 단계에서
+ *  - 걸린 이벤트가 둘 이상이면 **칩** 한 줄. 칩 본문을 누르면 그 이벤트 묶음으로 **이동**하고
+ *    (지금 보이는 묶음의 칩은 연노랑), 칩의 × 를 눌러야만 그 이벤트가 **숨겨진다**(줄 그은
+ *    칩으로 남아 다시 누르면 돌아온다). 서버에는 숨긴 것(OFF 목록)만 보낸다 — deep 단계에서
  *    이벤트가 더 발견돼도 파라미터가 안 바뀌어 스크롤 페이징이 흔들리지 않는다.
- *  머리는 조건 칸이 포커스를 잃지 않게 **한 번만 만들고** 다시 그리지 않는다(innerHTML 로
- *  다시 만들면 "안에서 찾기" 를 치는 중에 커서가 날아간다). 목록만 다시 그린다.
+ *    이름이 아니라 조합 안의 태그로만 걸린 이벤트(rank 4)는 "그 외 N개" 칩 하나로 묶는다.
+ *  머리는 이벤트 구역 **위에 고정**돼 내용과 함께 스크롤된다(sticky 로 따라오게 했더니
+ *  공간을 너무 먹었다 — 사용자 지적 2026-09-07). 머리는 조건 칸이 포커스를 잃지 않게 **한
+ *  번만 만들고** 다시 그리지 않는다(innerHTML 로 다시 만들면 '안에서 찾기' 커서가 날아간다).
  *
  * 이벤트는 "더 보기" 버튼 없이 **스크롤로 이어서** 본다: 3–8태그 조합을 다 보이면
  * 9–16태그 조합으로 넘어가고, 끝나면 끝이라고 말한다.
@@ -33,9 +37,11 @@
  * 반복"): 서버가 이벤트별로 묶어 보내고(grouped), 여기서는 이벤트가 바뀌는 자리에 이름을
  * 한 번만 찍는다. 행의 본문은 태그 조합이고 제목·번역은 행마다 반복하지 않는다.
  *
- * 이벤트 행을 고르면 복사하고 **끝나지 않는다**: 아래에 섬(`.fs-island`)을 하나 더 띄워
+ * 이벤트 행을 고르면 복사하고 **끝나지 않는다**: 그 행 바로 아래가 **인라인으로 펼쳐져**
  * (1) 고른 조합을 전부 포함하는 더 긴 조합, (2) 핵심(앵커) 태그를 뺀 나머지가 한 태그만
- * 다른 조합을 낸다. (1)에 든 것은 (2)에 다시 나오지 않는다. 섬의 행도 누르면 복사.
+ * 다른 조합을 낸다. (1)에 든 것은 (2)에 다시 나오지 않는다. 펼친 칸의 × 로 닫고, 행을 다시
+ * 누르면 다시 펼쳐진다. 펼친 행도 누르면 복사. (처음엔 창 아래 별도 섬이었다 — 사용자
+ * 지정 2026-09-07 로 인라인으로.)
  */
 
 const SOURCES = [
@@ -49,6 +55,7 @@ const SOURCES = [
 const DEBOUNCE_MS = 170;
 const PER_SOURCE = 8;
 const EVENT_PAGE = 8;
+const EVENT_SEEK_PAGE = 64;              // 칩으로 묶음을 찾아가는 동안은 큰 쪽으로 받는다
 const EVENT_PHASES = ['basic', 'deep'];   // 3–8태그 -> 9–16태그 -> 끝
 const RATING_OPTIONS = [
   { id: 'g', label: 'G', title: 'General' },
@@ -67,6 +74,7 @@ const PERSON_IDS = PERSON_GROUPS.flatMap(group => group.ids);
 // 기본값: 여성이 들어간 구성 전부(사용자 지정). 남성만·기타는 꺼짐.
 const DEFAULT_PERSONS = [...PERSON_GROUPS[0].ids, ...PERSON_GROUPS[1].ids];
 const NEIGHBOR_LIMIT = 20;
+const REST_KEY = '__rest__';
 
 export function initFastSearch() {
   let overlay = null, input = null, body = null, countEl = null, chipRow = null;
@@ -81,16 +89,18 @@ export function initFastSearch() {
   let eventRatings = new Set(RATING_OPTIONS.map(r => r.id));
   let eventPersons = new Set(DEFAULT_PERSONS);
   let personBtn = null, personPopup = null;
-  // 이 질의에 걸린 이벤트들({tag,label,count}) 과 사용자가 끈 것. 질의가 바뀌면 둘 다 비운다.
+  // 이 질의에 걸린 이벤트들({tag,label,count,rank}) 과 사용자가 숨긴 것. 질의가 바뀌면 둘 다 비운다.
   let eventCatalog = [];
   let eventOff = new Set();
+  let currentAnchor = null;   // 지금 화면 위쪽에 보이는 묶음(칩 연노랑)
+  let seekAnchor = null;      // 칩을 눌러 찾아가는 중인 이벤트 - 다음 쪽을 이어 받으며 찾는다
   // 이벤트 페이징 상태. phase 는 EVENT_PHASES 의 인덱스, offset 은 그 phase 안의 위치.
   let eventPaging = freshEventPaging();
   // 높이 상한. base = 결과 칸의 50%(이미지를 통째로 가리지 않는다), hard = 75%. 이벤트 구역이
   // 아래로 밀려 머리만 보이면 base 와 hard 사이에서 **필요한 만큼만** 늘린다(fitHeight).
   let heightCaps = {base: 0, hard: 0};
-  // 아래 섬(이웃 조합). 고른 이벤트 행 하나에 붙는다.
-  let island = null, islandBody = null, islandTitle = null, islandSeq = 0, islandRows = [];
+  // 인라인으로 펼친 이웃 조합. 한 행만 펼친다.
+  let inline = null, inlineSeq = 0, inlineRows = [];
   const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
 
   const esc = value => String(value == null ? '' : value)
@@ -107,7 +117,7 @@ export function initFastSearch() {
     }
   }
 
-  /** 서버에 보내는 등급·인원·끈 이벤트. 전부 켜져 있으면 빈 문자열(= 필터 없음). */
+  /** 서버에 보내는 등급·인원·숨긴 이벤트. 전부 켜져 있으면 빈 문자열(= 필터 없음). */
   function filterParams() {
     const rating = eventRatings.size === RATING_OPTIONS.length ? ''
       : RATING_OPTIONS.map(r => r.id).filter(id => eventRatings.has(id)).join(',');
@@ -185,22 +195,30 @@ export function initFastSearch() {
       scheduleEvents(DEBOUNCE_MS);
     });
     refine.addEventListener('keydown', onKeyDown);
-    // 이벤트 토글 칩 - 끄면 그 이벤트의 행이 빠진다. 최소 하나는 켜져 있어야 한다.
+    // 이벤트 칩: 본문 = 그 묶음으로 이동(숨긴 칩이면 다시 보이기), × = 숨기기. 최소 하나는 보인다.
+    eventChips.addEventListener('mousedown', event => event.preventDefault());   // 포커스는 검색 칸에
     eventChips.addEventListener('click', event => {
-      const chip = event.target.closest('[data-fs-ev], [data-fs-ev-rest]');
+      const chip = event.target.closest('[data-fs-ev-key]');
       if (!chip) return;
-      if (chip.dataset.fsEvRest) {
-        // "그 외" 묶음 - 전부 같이 켜고 끈다. 마지막 켜진 칩이면 끄지 않는다.
-        const rest = restEvents();
-        if (restIsOn()) { if (onChipCount() <= 1) return; rest.forEach(e => eventOff.add(e.tag)); }
-        else rest.forEach(e => eventOff.delete(e.tag));
-      } else {
-        const tag = chip.dataset.fsEv;
-        if (!eventOff.has(tag) && onChipCount() <= 1) return;
-        if (eventOff.has(tag)) eventOff.delete(tag); else eventOff.add(tag);
+      const key = chip.dataset.fsEvKey;
+      const isRest = key === REST_KEY;
+      const hide = !!event.target.closest('[data-fs-ev-x]');
+      const off = isRest ? !restIsOn() : eventOff.has(key);
+      if (hide) {
+        if (off || onChipCount() <= 1) return;
+        if (isRest) restEvents().forEach(e => eventOff.add(e.tag)); else eventOff.add(key);
+        paintEventChips();
+        scheduleEvents(0);
+        return;
       }
-      paintEventChips();
-      scheduleEvents(0);
+      if (off) {
+        if (isRest) restEvents().forEach(e => eventOff.delete(e.tag)); else eventOff.delete(key);
+        paintEventChips();
+        scheduleEvents(0);
+        return;
+      }
+      const target = isRest ? (restEvents().find(e => !eventOff.has(e.tag)) || {}).tag : key;
+      if (target) seekToAnchor(target);
     });
 
     chipRow.innerHTML = SOURCES.map(s =>
@@ -221,6 +239,17 @@ export function initFastSearch() {
     input.addEventListener('input', () => schedule(DEBOUNCE_MS));
     input.addEventListener('keydown', onKeyDown);
     body.addEventListener('click', event => {
+      if (event.target.closest('[data-fs-inline-close]')) { closeInline(); return; }
+      const inlineRow = event.target.closest('[data-fs-inline-index]');
+      if (inlineRow) {
+        const item = inlineRows[Number(inlineRow.dataset.fsInlineIndex)];
+        if (item && item.value) {
+          eventList.querySelectorAll('[data-fs-inline-index]').forEach(node =>
+            node.classList.toggle('is-active', node === inlineRow));
+          void copyText(String(item.value));
+        }
+        return;
+      }
       const row = event.target.closest('[data-fs-index]');
       if (!row) return;
       active = Number(row.dataset.fsIndex);
@@ -229,13 +258,12 @@ export function initFastSearch() {
     });
     // 이벤트는 버튼 없이 스크롤로 이어 본다 - 바닥에 가까워지면 다음 쪽을 부른다.
     // 인원 팝업은 버튼 자리에 고정돼 있어 스크롤하면 떨어져 보인다 - 닫는다.
-    body.addEventListener('scroll', () => { closePersonPopup(); maybeLoadMoreEvents(); }, {passive: true});
-    // 바깥을 누르면 닫는다. 창·섬·인원 팝업 안의 클릭은 각자 처리한다.
+    body.addEventListener('scroll', () => { closePersonPopup(); updateCurrentAnchor(); maybeLoadMoreEvents(); }, {passive: true});
+    // 바깥을 누르면 닫는다. 창·인원 팝업 안의 클릭은 각자 처리한다.
     document.addEventListener('pointerdown', event => {
       if (!open) return;
       const t = event.target;
       if (overlay.contains(t)) return;
-      if (island && !island.hidden && island.contains(t)) return;
       if (personPopup && !personPopup.hidden && personPopup.contains(t)) return;
       close();
     }, true);
@@ -333,10 +361,11 @@ export function initFastSearch() {
     closePersonPopup();
   }
 
-  // ── 이벤트 토글 칩 ────────────────────────────────────────────────────────
+  // ── 이벤트 칩 ─────────────────────────────────────────────────────────────
   /** 이름으로 걸린 이벤트(rank ≤ 3)는 칩 하나씩. 쉼표 AND 로 행 안의 태그만 걸린 이벤트(rank 4)는
-   *  "그 외 N" 칩 하나로 묶어 한 번에 켜고 끈다 - 26개가 늘어서면 붙어 있는 머리가 목록을 밀어낸다
-   *  (실측 '질식' + hetero). 칩이 둘 이상일 때만 보인다 - 하나면 끌 것도 없다. */
+   *  "그 외 N" 칩 하나로 묶어 한 번에 숨기고 되살린다 - 26개가 늘어서면 머리가 목록을 밀어낸다
+   *  (실측 '질식' + hetero). 칩이 둘 이상일 때만 보인다 - 하나면 숨길 것도 없다.
+   *  칩 본문 = 그 묶음으로 이동, × = 숨기기(사용자 지정 2026-09-07). 지금 보이는 묶음은 연노랑. */
   function namedEvents() { return eventCatalog.filter(e => e.rank <= 3); }
   function restEvents() { return eventCatalog.filter(e => e.rank > 3); }
   function restIsOn() { return restEvents().some(e => !eventOff.has(e.tag)); }
@@ -346,23 +375,26 @@ export function initFastSearch() {
     const named = namedEvents(), rest = restEvents();
     if (named.length + (rest.length ? 1 : 0) < 2) { eventChips.hidden = true; eventChips.innerHTML = ''; return; }
     eventChips.hidden = false;
-    const chip = (key, attr, on, label, count, title) =>
-      `<button type="button" class="fs-ev-toggle${on ? ' is-on' : ''}" ${attr} data-fs-ev-key="${esc(key)}"
-        aria-pressed="${on}" title="${esc(title)}">${esc(label)}<b>${count}</b></button>`;
-    const parts = named.map(e => chip(e.tag, `data-fs-ev="${esc(e.tag)}"`, !eventOff.has(e.tag),
+    const chip = (key, on, current, label, count, hideTitle) => on
+      ? `<span class="fs-ev-toggle is-on${current ? ' is-current' : ''}" data-fs-ev-key="${esc(key)}">`
+        + `<button type="button" class="fs-ev-jump" title="이 묶음으로 이동">${esc(label)}<b>${count}</b></button>`
+        + `<button type="button" class="fs-ev-x" data-fs-ev-x="1" aria-label="${esc(label)} 숨기기" title="${esc(hideTitle)}">×</button></span>`
+      : `<span class="fs-ev-toggle is-off" data-fs-ev-key="${esc(key)}">`
+        + `<button type="button" class="fs-ev-jump" title="다시 보이기">${esc(label)}<b>${count}</b></button></span>`;
+    const parts = named.map(e => chip(e.tag, !eventOff.has(e.tag), e.tag === currentAnchor,
       e.label && e.label !== e.tag ? `${e.tag} · ${e.label}` : e.tag, Number(e.count) || 0,
-      eventOff.has(e.tag) ? '켜면 다시 보입니다' : '끄면 이 이벤트의 조합이 빠집니다'));
+      '이 이벤트의 조합을 숨깁니다'));
     if (rest.length) {
-      parts.push(chip('__rest__', 'data-fs-ev-rest="1"', restIsOn(), `그 외 ${rest.length}개 이벤트`,
-        rest.reduce((n, e) => n + (Number(e.count) || 0), 0),
-        '이름이 아니라 조합 안의 태그로 걸린 이벤트들 - 한 번에 켜고 끕니다: ' + rest.map(e => e.tag).join(', ')));
+      parts.push(chip(REST_KEY, restIsOn(), rest.some(e => e.tag === currentAnchor),
+        `그 외 ${rest.length}개 이벤트`, rest.reduce((n, e) => n + (Number(e.count) || 0), 0),
+        '이름이 아니라 조합 안의 태그로 걸린 이벤트들을 한 번에 숨깁니다: ' + rest.map(e => e.tag).join(', ')));
     }
     eventChips.innerHTML = parts.join('');
   }
 
   /** 서버가 첫 쪽에 실어 보낸 이벤트 목록. basic 첫 쪽은 **교체**(replace) - 등급·인원을 조작해
    *  조합이 하나도 안 남는 이벤트의 칩은 조용히 사라져야 한다(사용자 지적 2026-09-07). deep 첫 쪽은
-   *  합친다(더 찾을 수 있다). 끈 기록(eventOff)은 건드리지 않아 필터를 되돌리면 꺼진 채 돌아온다. */
+   *  합친다(더 찾을 수 있다). 숨긴 기록(eventOff)은 건드리지 않아 필터를 되돌리면 숨긴 채 돌아온다. */
   function mergeEventCatalog(list, replace = false) {
     if (!Array.isArray(list)) return;
     if (replace) eventCatalog = [];
@@ -373,6 +405,46 @@ export function initFastSearch() {
       known.add(e.tag);
     }
     paintEventChips();
+  }
+
+  /** 지금 화면 위쪽에 걸린 묶음 = 머리글이 몸통 위 가장자리 위로 지나간 마지막 것. 없으면 첫 보이는 것. */
+  function updateCurrentAnchor() {
+    if (!eventList || eventSection.hidden) { setCurrentAnchor(null); return; }
+    const headers = eventList.querySelectorAll('.fs-cap-ev[data-anchor]');
+    if (!headers.length) { setCurrentAnchor(null); return; }
+    const b = body.getBoundingClientRect();
+    let current = null, firstVisible = null;
+    for (const header of headers) {
+      const top = header.getBoundingClientRect().top;
+      if (top <= b.top + 12) current = header.dataset.anchor;
+      else if (firstVisible == null && top < b.bottom) firstVisible = header.dataset.anchor;
+    }
+    setCurrentAnchor(current ?? firstVisible);
+  }
+
+  function setCurrentAnchor(tag) {
+    if (tag === currentAnchor) return;
+    currentAnchor = tag;
+    paintEventChips();
+  }
+
+  function headerFor(tag) {
+    return eventList.querySelector(`.fs-cap-ev[data-anchor="${CSS.escape(tag)}"]`);
+  }
+
+  function scrollToHeader(header) {
+    const top = header.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+    body.scrollTop = Math.max(0, Math.round(top - 2));
+    updateCurrentAnchor();
+  }
+
+  /** 칩 본문: 그 이벤트 묶음으로 이동. 아직 안 받은 쪽에 있으면 큰 쪽으로 이어 받으며 찾는다. */
+  function seekToAnchor(tag) {
+    const header = headerFor(tag);
+    if (header) { seekAnchor = null; scrollToHeader(header); setCurrentAnchor(tag); return; }
+    if (eventPaging.done) return;
+    seekAnchor = tag;
+    requestEventPage(seq);
   }
 
   /** Spotlight 크기. 결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반. */
@@ -387,7 +459,6 @@ export function initFastSearch() {
       overlay.style.width = 'min(680px, calc(100vw - 32px))';
       heightCaps = {base: Math.min(420, window.innerHeight - 96), hard: Math.round(window.innerHeight * 0.75)};
       fitHeight();
-      positionIsland();
       return;
     }
     const pad = 14;
@@ -401,7 +472,6 @@ export function initFastSearch() {
     overlay.style.width = `${width}px`;
     heightCaps = {base: maxH, hard: Math.round(Math.min(r.height - pad * 2, r.height * 0.75))};
     fitHeight();
-    positionIsland();
   }
 
   /** 높이 상한을 내용에 맞춘다. 기본은 base. 이벤트 구역이 앞 갈래들에 밀려 머리만 바닥에 걸리면
@@ -429,9 +499,12 @@ export function initFastSearch() {
     active = -1;
     groups = new Map();
     eventPaging = freshEventPaging();
-    // 질의가 바뀌면 걸린 이벤트도 끈 것도 새로 시작한다.
+    // 질의가 바뀌면 걸린 이벤트도 숨긴 것도 펼친 것도 새로 시작한다.
     eventCatalog = [];
     eventOff = new Set();
+    currentAnchor = null;
+    seekAnchor = null;
+    inline = null;
     paintEventChips();
     if (!enabled.has('event')) closePersonPopup();
     const query = input.value.trim();
@@ -440,7 +513,7 @@ export function initFastSearch() {
     timer = setTimeout(() => run(mine), delay);
   }
 
-  /** 이벤트 조건(인원·등급·안에서 찾기·끈 이벤트)만 바뀌었을 때 - 다른 갈래는 그대로 둔다. */
+  /** 이벤트 조건(인원·등급·안에서 찾기·숨긴 이벤트)만 바뀌었을 때 - 다른 갈래는 그대로 둔다. */
   function scheduleEvents(delay) {
     clearTimeout(eventTimer);
     if (!enabled.has('event')) return;
@@ -449,6 +522,8 @@ export function initFastSearch() {
     slot.wanted = null;
     groups.delete('event');
     eventPaging = freshEventPaging();
+    seekAnchor = null;
+    inline = null;
     const query = input.value.trim();
     if (query) pending.add('event');
     render(query);
@@ -478,6 +553,7 @@ export function initFastSearch() {
     slot.wanted = {
       query, mine, rating, person, exclude, refine: eventRefine,
       detail: EVENT_PHASES[eventPaging.phase], offset: eventPaging.offset,
+      limit: seekAnchor ? EVENT_SEEK_PAGE : EVENT_PAGE,
     };
     void drain(SOURCES.find(s => s.id === 'event'));
   }
@@ -503,7 +579,7 @@ export function initFastSearch() {
         const {query, mine} = request;
         slot.wanted = null;
         const isEvent = source.id === 'event';
-        const params = new URLSearchParams({q: query, sources: source.id, limit: String(isEvent ? EVENT_PAGE : PER_SOURCE)});
+        const params = new URLSearchParams({q: query, sources: source.id, limit: String(isEvent ? request.limit : PER_SOURCE)});
         if (isEvent) {
           // 이벤트 안에서 찾기 = 서버의 쉼표 AND 조건에 그대로 붙인다.
           params.set('q', request.refine ? `${query}, ${request.refine}` : query);
@@ -537,7 +613,7 @@ export function initFastSearch() {
           }
           eventPaging.items.push(...group.items);
           eventPaging.offset += group.items.length;
-          const exhausted = group.exhausted === true || group.items.length < EVENT_PAGE;
+          const exhausted = group.exhausted === true || group.items.length < request.limit;
           if (exhausted) {
             if (eventPaging.phase + 1 < EVENT_PHASES.length) { eventPaging.phase += 1; eventPaging.offset = 0; }
             else eventPaging.done = true;
@@ -545,6 +621,13 @@ export function initFastSearch() {
           groups.set('event', {source: 'event', label: source.label, items: eventPaging.items, note: group.note || ''});
           pending.delete('event');
           render(query);
+          if (seekAnchor) {
+            // 칩으로 찾아가는 중: 머리글이 나타났으면 거기로, 아니면 다음 쪽을 이어 받는다.
+            const header = headerFor(seekAnchor);
+            if (header) { const tag = seekAnchor; seekAnchor = null; scrollToHeader(header); setCurrentAnchor(tag); }
+            else if (!eventPaging.done) { requestEventPage(mine); continue; }
+            else seekAnchor = null;
+          }
           // 한 쪽으로 화면이 안 차면 스크롤이 생길 때까지 이어서 부른다.
           if (!eventPaging.done && body.scrollHeight <= body.clientHeight + 4) requestEventPage(mine);
           continue;
@@ -567,14 +650,49 @@ export function initFastSearch() {
   }
 
   /** 이벤트 행: 본문은 태그 조합(줄바꿈해 전부 보인다). 이벤트 이름은 머리글이 맡으므로
-   *  행에 다시 쓰지 않는다. `chip` 이 있으면(섬에서 앵커와 다른 이벤트) 작은 칩으로 앞에 단다. */
-  function eventRowHtml(item, attr, chip) {
-    return `<button type="button" class="fs-row fs-row-ev" ${attr}>`
+   *  행에 다시 쓰지 않는다. `chip` 이 있으면(이웃 중 앵커와 다른 이벤트) 작은 칩으로 앞에 단다. */
+  function eventRowHtml(item, attr, chip, extraClass = '') {
+    return `<button type="button" class="fs-row fs-row-ev${extraClass}" ${attr}>`
       + '<span class="fs-ev-main">'
       + (chip ? `<span class="fs-ev-chip">${esc(chip)}</span>` : '')
       + `<span class="fs-sub">${esc(item.value)}</span></span>`
       + (item.meta ? `<span class="fs-meta">${esc(item.meta)}</span>` : '')
       + '</button>';
+  }
+
+  /** 펼친 이웃 칸. 행 바로 아래에 들어간다. inlineRows 는 여기서 다시 채운다. */
+  function inlineHtml() {
+    inlineRows = [];
+    const parts = [`<div class="fs-inline" data-fs-inline>`
+      + '<div class="fs-inline-bar"><span class="fs-inline-kicker">이웃 조합</span>'
+      + `<span class="fs-inline-title" title="${esc(inline.tags)}">${esc(inline.tags)}</span>`
+      + '<button type="button" class="fs-close" data-fs-inline-close aria-label="이웃 조합 닫기">×</button></div>'
+      + '<div class="fs-inline-body">'];
+    if (inline.loading) {
+      parts.push('<div class="fs-empty">이웃 조합을 찾는 중…</div>');
+    } else if (!inline.payload || inline.payload.error) {
+      parts.push('<div class="fs-empty">이웃 조합을 불러오지 못했습니다.</div>');
+    } else {
+      const sections = [
+        ['supersets', '전부 포함하는 더 긴 조합', '더 긴 조합이 없습니다'],
+        ['near', `핵심 태그(${inline.anchor}) 외 한 태그만 다른 조합`, '한 태그만 다른 조합이 없습니다'],
+      ];
+      for (const [key, label, empty] of sections) {
+        const items = Array.isArray(inline.payload[key]) ? inline.payload[key] : [];
+        parts.push(`<div class="fs-cap">${esc(label)}<span class="fs-note">${items.length}</span></div>`);
+        if (!items.length) { parts.push(`<div class="fs-end">${empty}</div>`); continue; }
+        for (const item of items) {
+          const index = inlineRows.length;
+          inlineRows.push(item);
+          // 이벤트 이름은 앵커와 **다른** 이벤트 밑에 사는 조합에만 칩으로 단다 - 같은
+          // 이벤트면 펼친 칸의 머리줄이 이미 말하고 있어 행마다 반복할 이유가 없다.
+          const foreign = item.anchor && item.anchor !== inline.anchor ? item.title : '';
+          parts.push(eventRowHtml(item, `data-fs-inline-index="${index}"`, foreign));
+        }
+      }
+    }
+    parts.push('</div></div>');
+    return parts.join('');
   }
 
   /** 몸통을 다시 그린다. 앞 갈래들은 `.fs-lanes` 에, 이벤트 목록은 `.fs-event-list` 에 -
@@ -583,6 +701,7 @@ export function initFastSearch() {
     const selectedKey = rows[active]?._searchKey;
     const keepScroll = body.scrollTop;
     rows = [];
+    inlineRows = [];
     body.setAttribute('aria-busy', String(pending.size > 0));
 
     // ── 앞 갈래들 ──
@@ -617,6 +736,7 @@ export function initFastSearch() {
       const eventPending = pending.has('event');
       eventNote.textContent = group?.note || '';
       const eparts = [];
+      let inlineShown = false;
       if (group && group.items.length) {
         let lastAnchor = null;
         group.items.forEach((item, i) => {
@@ -625,14 +745,17 @@ export function initFastSearch() {
             lastAnchor = null;              // 단계가 바뀌면 이벤트 머리글을 다시 찍는다
           }
           const index = rows.length;
-          rows.push({...item, _source: 'event', _searchKey: `event ${item.value}`});
+          const key = `event ${item.value}`;
+          rows.push({...item, _source: 'event', _searchKey: key});
           // 이벤트 = 카테고리. 서버가 이벤트별로 묶어 보내니 바뀌는 자리에만 이름을 찍는다.
           const anchor = item.anchor || item.title;
           if (anchor !== lastAnchor) {
-            eparts.push(`<div class="fs-cap fs-cap-ev">${esc(item.title)}</div>`);
+            eparts.push(`<div class="fs-cap fs-cap-ev" data-anchor="${esc(anchor)}">${esc(item.title)}</div>`);
             lastAnchor = anchor;
           }
-          eparts.push(eventRowHtml(item, `data-fs-index="${index}"`, ''));
+          const expanded = inline && inline.key === key;
+          eparts.push(eventRowHtml(item, `data-fs-index="${index}"`, '', expanded ? ' is-expanded' : ''));
+          if (expanded) { eparts.push(inlineHtml()); inlineShown = true; }
         });
         eparts.push(`<div class="fs-end">${eventPaging.done ? '이벤트 끝' : '아래로 내리면 더 불러옵니다…'}</div>`);
       } else if (eventPending) {
@@ -640,7 +763,10 @@ export function initFastSearch() {
       } else if (query) {
         eparts.push(`<div class="fs-end">${group && /실패/.test(group.note || '') ? esc(group.note) : '조건에 맞는 조합이 없습니다'}</div>`);
       }
+      if (inline && !inlineShown) inline = null;   // 펼친 행이 목록에서 사라졌다(필터 변경 등)
       eventList.innerHTML = eparts.join('');
+    } else if (inline) {
+      inline = null;
     }
 
     // ── 빈 상태 ──
@@ -657,7 +783,7 @@ export function initFastSearch() {
     active = previousIndex >= 0 ? previousIndex : (rows.length ? 0 : -1);
     paintActive(previousIndex >= 0);
     fitHeight();                          // 이벤트 구역이 보일 만큼 상한을 맞춘다
-    positionIsland();                     // 창 높이가 바뀌면 섬이 따라 내려간다
+    updateCurrentAnchor();
   }
 
   function paintActive(keepView = false) {
@@ -705,111 +831,40 @@ export function initFastSearch() {
     if (!item) return;
     const text = String(item.value || '');
     if (!text) return;
-    // 이벤트 행은 복사하고 끝나지 않는다 - 아래 섬에 이웃 조합을 띄운다(사용자 지정 2026-09-07).
-    if (item._source === 'event') openIsland(item);
+    // 이벤트 행은 복사하고 끝나지 않는다 - 그 아래에 이웃 조합을 펼친다(사용자 지정 2026-09-07).
+    if (item._source === 'event') openInline(item);
     await copyText(text);
   }
 
-  // ── 아래 섬: 고른 이벤트 조합의 이웃 ─────────────────────────────────────
-  function ensureIsland() {
-    if (island) return island;
-    island = document.createElement('div');
-    island.className = 'fs-island';
-    island.hidden = true;
-    island.innerHTML = `
-      <div class="fs-island-bar">
-        <span class="fs-island-kicker">이웃 조합</span>
-        <span class="fs-island-title" data-fs-island-title></span>
-        <button type="button" class="fs-close" aria-label="이웃 조합 닫기">×</button>
-      </div>
-      <div class="fs-island-body" data-fs-island-body></div>`;
-    document.body.append(island);
-    islandBody = island.querySelector('[data-fs-island-body]');
-    islandTitle = island.querySelector('[data-fs-island-title]');
-    island.querySelector('.fs-close').addEventListener('click', closeIsland);
-    // 포커스는 검색 칸에 둔다 - 섬을 눌러도 ↑↓·Esc 가 계속 먹어야 한다.
-    island.addEventListener('mousedown', event => event.preventDefault());
-    islandBody.addEventListener('click', event => {
-      const row = event.target.closest('[data-fs-island-index]');
-      if (!row) return;
-      const item = islandRows[Number(row.dataset.fsIslandIndex)];
-      if (!item || !item.value) return;
-      islandBody.querySelectorAll('[data-fs-island-index]').forEach(node =>
-        node.classList.toggle('is-active', node === row));
-      void copyText(String(item.value));
-    });
-    return island;
-  }
-
-  /** 섬은 창 바로 아래, 같은 폭. 높이는 결과 칸의 30% 를 넘지 않고 칸 바닥 안에 머문다. */
-  function positionIsland() {
-    if (!island || island.hidden || !overlay || overlay.hidden) return;
-    const o = overlay.getBoundingClientRect();
-    const host = document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
-    const r = host ? host.getBoundingClientRect() : null;
-    const bottom = r && r.height >= 160 ? r.bottom : window.innerHeight;
-    const top = Math.round(o.bottom + 8);
-    const room = bottom - 14 - top;
-    const cap = r && r.height >= 160 ? Math.max(150, r.height * 0.3) : 240;
-    island.style.left = `${Math.round(o.left)}px`;
-    island.style.width = `${Math.round(o.width)}px`;
-    island.style.top = `${top}px`;
-    island.style.maxHeight = `${Math.round(Math.max(96, Math.min(cap, room)))}px`;
-  }
-
-  function openIsland(item) {
+  // ── 인라인 이웃 조합 ────────────────────────────────────────────────────
+  function openInline(item) {
     const anchor = String(item.anchor || String(item.title || '').split(' · ')[0] || '').trim();
     const tags = String(item.value || '').trim();
     if (!anchor || !tags) return;
-    ensureIsland();
-    const mine = ++islandSeq;
-    islandRows = [];
-    islandTitle.textContent = tags;
-    islandTitle.title = tags;
-    islandBody.innerHTML = '<div class="fs-empty">이웃 조합을 찾는 중…</div>';
-    island.hidden = false;
-    positionIsland();
+    const mine = ++inlineSeq;
+    inline = {key: item._searchKey, anchor, tags, payload: null, loading: true, seq: mine};
+    const query = input.value.trim();
+    render(query);
+    // 펼친 행이 펼친 칸과 함께 보이게 - 행을 몸통 위쪽으로 올린다.
+    const row = body.querySelector(`[data-fs-index="${active}"]`);
+    if (row) {
+      const top = row.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+      body.scrollTop = Math.max(0, Math.round(top - 30));
+      updateCurrentAnchor();
+    }
     const {rating, person} = filterParams();
     const params = new URLSearchParams({tags, anchor, rating, person, limit: String(NEIGHBOR_LIMIT)});
     fetch(`/api/fast-search/event-neighbors?${params}`, {cache: 'no-store'})
       .then(response => { if (!response.ok) throw new Error('neighbors failed'); return response.json(); })
-      .then(payload => { if (mine === islandSeq && !island.hidden) renderIsland(payload, anchor); })
-      .catch(() => {
-        if (mine !== islandSeq || island.hidden) return;
-        islandBody.innerHTML = '<div class="fs-empty">이웃 조합을 불러오지 못했습니다.</div>';
-        positionIsland();
-      });
+      .then(payload => { if (inline && inline.seq === mine) { inline.payload = payload; inline.loading = false; render(input.value.trim()); } })
+      .catch(() => { if (inline && inline.seq === mine) { inline.payload = {error: true}; inline.loading = false; render(input.value.trim()); } });
   }
 
-  function renderIsland(payload, anchor) {
-    islandRows = [];
-    const parts = [];
-    const sections = [
-      ['supersets', '전부 포함하는 더 긴 조합', '더 긴 조합이 없습니다'],
-      ['near', `핵심 태그(${anchor}) 외 한 태그만 다른 조합`, '한 태그만 다른 조합이 없습니다'],
-    ];
-    for (const [key, label, empty] of sections) {
-      const items = Array.isArray(payload?.[key]) ? payload[key] : [];
-      parts.push(`<div class="fs-cap">${esc(label)}<span class="fs-note">${items.length}</span></div>`);
-      if (!items.length) { parts.push(`<div class="fs-end">${empty}</div>`); continue; }
-      for (const item of items) {
-        const index = islandRows.length;
-        islandRows.push(item);
-        // 이벤트 이름은 앵커와 **다른** 이벤트 밑에 사는 조합에만 칩으로 단다 - 같은
-        // 이벤트면 머리줄의 앵커가 이미 말하고 있어 행마다 반복할 이유가 없다.
-        const foreign = item.anchor && item.anchor !== anchor ? item.title : '';
-        parts.push(eventRowHtml(item, `data-fs-island-index="${index}"`, foreign));
-      }
-    }
-    islandBody.innerHTML = parts.join('');
-    islandBody.scrollTop = 0;
-    positionIsland();
-  }
-
-  function closeIsland() {
-    islandSeq += 1;
-    islandRows = [];
-    if (island) { island.hidden = true; islandBody.innerHTML = ''; }
+  function closeInline() {
+    if (!inline) return;
+    inline = null;
+    inlineSeq += 1;
+    render(input.value.trim());
   }
 
   function onKeyDown(event) {
@@ -834,7 +889,9 @@ export function initFastSearch() {
     open = false;
     overlay.hidden = true;                // CSS 의 .fs-overlay[hidden] 이 실제로 감춘다
     closePersonPopup();
-    closeIsland();
+    inline = null;
+    inlineSeq += 1;
+    seekAnchor = null;
     clearTimeout(timer);
     clearTimeout(eventTimer);
     for (const slot of requests.values()) slot.wanted = null;

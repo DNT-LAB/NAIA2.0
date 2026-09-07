@@ -77,7 +77,7 @@ _CAMERA_CONTRADICTIONS: dict[str, str] = {
 # portrait를 한꺼번에 적층하던 단조로움을 차단하기 위해 결과에 최대 1개만 허용한다(angle/
 # depth 축과는 별개라 from below·depth of field 등과는 함께 쓸 수 있다).
 _SHOT_DISTANCE_TAGS = frozenset({
-    "close-up", "upper body", "portrait", "cowboy shot", "wide shot",
+    "close-up", "upper body", "portrait", "cowboy shot", "wide shot", "full body",
 })
 
 # 톤 팔레트 — *사실이 아닌 단어 힌트*(Codex E). LLM 묘사의 어조만 끌고, 명사/행위는 안 만든다.
@@ -142,8 +142,8 @@ _EYE_COLOR_TARGET_RE = re.compile(
     r"gold|golden|gray|grey|green|pink|purple|red|silver|teal|turquoise|violet|white|yellow)-eyed\b",
     re.I,
 )
-# 스타일 감지 정규식 — 입력 소스 탐지(_contains_style_source)와 설명문 필터(filter_descriptions)
-# 양쪽에 쓰인다. \b…\b 단어 매칭이라 형태 변화형(scented/silky/glowing/hazy…)이 새던 것을
+# 스타일 감지 정규식 — 설명문 필터 및 향/재질 입력 소스 탐지에 사용한다.
+# 광원 입력은 아래 전체 태그 집합으로 별도 판정한다. \b…\b 단어 매칭이라 형태 변화형이 새던 것을
 # 명시 변형으로 보강한다(불명확한 stem은 피하고 확실한 스타일 단어만 — 오탐 최소화).
 _SCENT_RE = re.compile(
     r"\b(scent|scented|smell|smells|smelling|aroma|aromatic|fragrance|fragrant|perfume|perfumed|"
@@ -161,6 +161,25 @@ _LIGHT_STYLE_RE = re.compile(
     r"rays?|flares?|illumination|spotlight|shadow|shadowy|golden hour)\b",
     re.I,
 )
+# Input evidence is a whole tag, not a word inside an expression, color, prop or
+# character name (light smile / eye shadow / manta ray / moonlight butterfly).
+# Keep the prose regex above for detecting lighting inside generated sentences.
+_LIGHT_SOURCE_TAGS = frozenset({
+    "light", "lighting", "illumination", "sunlight", "dappled sunlight", "sunbeam", "sunbeams",
+    "moonlight", "dappled moonlight", "moonlit", "sunlit", "daylight", "golden hour",
+    "backlight", "backlighting", "backlit", "sidelighting", "rim light", "rim lighting",
+    "soft light", "soft lighting", "dim lighting", "low light", "dramatic lighting",
+    "spotlight", "neon lights", "lamplight", "candlelight", "candlelit", "fire light",
+    "screen light", "window light", "ambient light", "reflected light", "volumetric lighting",
+    "god rays", "light rays", "light beam", "light particles", "light trail", "pillar of light",
+    "lens flare", "heavy lens flare", "non-circular lens flare", "lens flare abuse",
+    "glow", "glowing", "outer glow", "glow-in-the-dark", "glowing eyes", "glowing eye",
+    "glowing pupils", "glowing halo", "glowing markings", "glowing skin", "glowing tattoo",
+    "shadow", "shadows", "in shadow", "face in shadow", "eyes in shadow", "one eye in shadow",
+    "long shadow", "dramatic shadow", "colored shadow", "window shadow", "chiaroscuro",
+    "haze", "heat haze", "hazy", "blue light", "green light", "orange light", "pink light",
+    "purple light", "red light", "yellow light", "ultraviolet light", "black light", "white-light",
+})
 _LIGHT_COLOR_CONTEXT_RE = re.compile(
     r"\b(amber|gold|golden|blue|white|pink|red|purple|violet|orange|silver)\s+"
     r"(light|lighting|glow|haze|rays?|flare|illumination|sunlight|moonlight|daylight|hour)\b|"
@@ -226,10 +245,10 @@ def parse_prompt(prompt: str) -> dict[str, Any]:
 
     반환::
         {original, descriptive:[bare 서술태그], protected:[원래토큰], subject_count:[...],
-         existing_camera:[풀에 있는 기존 구도태그], all_words:set(에코 판정용)}
+         existing_camera:[풀/샷 거리 집합의 기존 구도태그], all_words:set(에코 판정용)}
     """
     original = str(prompt or "").strip()
-    pool_tags = {tag for tag, _ in _COMPOSITION_POOL}
+    pool_tags = {tag for tag, _ in _COMPOSITION_POOL} | _SHOT_DISTANCE_TAGS
     descriptive: list[str] = []
     protected: list[str] = []
     subject_count: list[str] = []
@@ -292,6 +311,10 @@ def _input_eye_colors(tags: list[str]) -> set[str]:
 
 def _contains_style_source(tags: list[str], pattern: re.Pattern[str]) -> bool:
     return any(pattern.search(str(tag or "")) for tag in tags or [])
+
+
+def _contains_light_source(tags: list[str]) -> bool:
+    return any(" ".join(_bare_tag(tag).split()) in _LIGHT_SOURCE_TAGS for tag in tags or [])
 
 
 def _description_has_uninput_color(text: str, allowed_colors: set[str], *, allow_light_style: bool) -> bool:
@@ -460,12 +483,15 @@ def composition_candidates(
     테스트 가능). run_scene_boost가 장면 태그에서 안정 해시를 만들어 전달한다."""
     prefer = "moody" if rating in ("q", "e") else "bright"
     existing = set(existing_camera or [])
+    has_existing_shot = bool(existing & _SHOT_DISTANCE_TAGS)
     blocked = {_CAMERA_CONTRADICTIONS.get(t) for t in existing}
     blocked.discard(None)
 
     def _eligible(tag: str) -> bool:
         if tag in existing or tag in blocked:
             return False                   # 이미 있음/모순 → 제외
+        if has_existing_shot and tag in _SHOT_DISTANCE_TAGS:
+            return False                   # 명시된 샷 거리는 후보 단계부터 보존
         if tag_allowed is not None and not tag_allowed(tag, "e"):
             return False
         if validate_tag is not None:
@@ -527,7 +553,7 @@ def filter_descriptions(
     allowed_eye_colors = _input_eye_colors(input_tags)
     has_scent_source = _contains_style_source(input_tags, _SCENT_RE)
     has_material_source = _contains_style_source(input_tags, _MATERIAL_RE)
-    has_light_source = _contains_style_source(input_tags, _LIGHT_STYLE_RE)
+    has_light_source = _contains_light_source(input_tags)
     out: list[str] = []
     seen: set[str] = set()
     # echo만 걸린(다른 모든 가드는 통과한) 후보 — 전부 echo로 잘려 빈 출력이 되는 것을 막는
@@ -773,7 +799,7 @@ def build_instruction(
     # '광원·색조 허용'(allow_light_style) OFF면 지시문 자체가 조명/톤을 권하지 않도록 한다
     # (긍정 지시·few-shot 예시가 부정 지시를 무력화하던 모순 제거). 입력에 이미 조명 태그가
     # 있으면 면제 — 구도 후보 게이트·설명문 필터와 동일 기준.
-    light_ok = bool(style["allow_light_style"]) or _contains_style_source(descriptive, _LIGHT_STYLE_RE)
+    light_ok = bool(style["allow_light_style"]) or _contains_light_source(descriptive)
 
     # 접지 블록(코드가 만든 라벨:값) — 지시문 선두에 둬서 모델이 일반 분위기로 도망가지
     # 않고 *이* 장면의 구체 앵커를 프레이밍하게 한다. Priority는 명물(역할/소품/포즈) 우선.
@@ -961,9 +987,7 @@ def run_scene_boost(
     # '광원·색조 허용'(allow_light_style) OFF면 조명 구도 태그도 후보에서 제외한다.
     # 단, 입력 태그에 이미 조명 소스가 있으면 설명문 가드와 동일하게 면제(이미 그 장면의
     # 사실이므로 강조해도 환각 아님).
-    allow_lighting = bool(style["allow_light_style"]) or _contains_style_source(
-        descriptive, _LIGHT_STYLE_RE
-    )
+    allow_lighting = bool(style["allow_light_style"]) or _contains_light_source(descriptive)
     # 장면 태그에서 안정 해시(PYTHONHASHSEED 무관) → 후보 enum 회전 시드. 장면마다 제시되는
     # 카메라 후보 선두/구성이 달라져, 광원 차단 후 close-up만 반복하던 고착을 분산한다.
     variety_seed = sum(ord(c) for c in "".join(descriptive))

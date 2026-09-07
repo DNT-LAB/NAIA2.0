@@ -1099,7 +1099,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
     console.error('Failed to initialize Studio tab module', error);
   });
 // Ctrl+F 한 칸 검색. 고른 것은 **클립보드로만** 간다 - 프롬프트에 넣지 않는다.
-import('./js/features/fastSearch.mjs?v=20260906-event-deep')
+import('./js/features/fastSearch.mjs?v=20260907-fs-spotlight')
   .then(({initFastSearch}) => { window.fastSearch = initFastSearch(); })
   .catch(error => console.error('Failed to initialize Fast Search', error));
 const customSelectsReady = import('./js/features/customSelects.mjs?v=20260905-fastsearch')

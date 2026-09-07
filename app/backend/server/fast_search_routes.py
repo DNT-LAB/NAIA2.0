@@ -134,7 +134,14 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
     if rating and rating not in {"g", "s", "q", "e"}:
         return [], "알 수 없는 이벤트 등급입니다."
     detail = str(opts.get('event_detail') or 'basic')
-    matches = search_catalog(query, limit, rating=rating, person=person, detail=detail)
+    # 페이징: search_catalog 는 결정적이고 앞에서부터 채우므로 `offset+limit` 로 부른 뒤
+    # 앞 offset 개를 잘라내면 **안정된 다음 쪽**이 된다(앞쪽은 limit 이 커져도 같다).
+    # 프론트가 '더 보기' 버튼 없이 스크롤로 이어 받는다(사용자 지정 2026-09-07).
+    offset = max(0, int(opts.get('event_offset') or 0))
+    fetched = search_catalog(query, offset + limit, rating=rating, person=person, detail=detail)
+    matches = fetched[offset:]
+    # 요청한 만큼 못 채웠으면 이 phase 는 끝이다 - 프론트가 다음 단계(deep)로 넘어간다.
+    exhausted = len(fetched) < offset + limit
     items = []
     for event, variant in matches:
         tags = variant.copy_tags
@@ -142,7 +149,9 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
         meta = f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(tags)}태그 · 관측 {variant.count:,}"
         items.append(_item(", ".join(tags), title, ", ".join(tags), meta))
     scope = f"{rating.upper() if rating else '전체 등급'} · {person if person else '전체 인원'}"
-    return items, f"{scope} · {'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
+    note = f"{scope} · {'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
+    # 세 번째 값은 갈래별 부가 정보 - run_all 이 group 에 얹는다.
+    return items, note, {"exhausted": exhausted, "offset": offset}
 
 
 SEARCHERS = {
@@ -160,7 +169,8 @@ def register_fast_search_routes(
 
     @app.get("/api/fast-search")
     async def api_fast_search(q: str = "", sources: str = "", limit: int = DEFAULT_LIMIT,
-                              rating: str = "", person: str = "", mode: str = "", event_detail: str = "basic"):
+                              rating: str = "", person: str = "", mode: str = "", event_detail: str = "basic",
+                              event_offset: int = 0):
         query = str(q or "").strip()
         if len(query) > MAX_QUERY:
             return JSONResponse({"error": "검색어가 너무 깁니다."}, status_code=400,
@@ -173,7 +183,11 @@ def register_fast_search_routes(
         if 'event' in wanted and event_detail not in {'basic', 'deep'}:
             return JSONResponse({'error': '알 수 없는 이벤트 상세 범위입니다.'}, status_code=400, headers=_no_store())
         per_source = max(1, min(MAX_LIMIT, int(limit or DEFAULT_LIMIT)))
-        opts = {"rating": rating, "person": person, "mode": mode, 'event_detail': event_detail}
+        if event_offset < 0 or event_offset > 10000:
+            return JSONResponse({"error": "이벤트 offset 이 범위를 벗어났습니다."}, status_code=400,
+                                headers=_no_store())
+        opts = {"rating": rating, "person": person, "mode": mode, 'event_detail': event_detail,
+                'event_offset': event_offset}
 
         def run_all():
             groups = []
@@ -183,13 +197,16 @@ def register_fast_search_routes(
                 items, note = [], ""
                 # 와일드카드는 빈 쿼리로 전체 목록을 내는 계약이라 그대로 둔다.
                 # 나머지는 빈 쿼리에 온 사전을 쏟지 않는다.
+                extra = {}
                 if query or source == "wildcard":
                     try:
-                        items, note = SEARCHERS[source](session_context, query, per_source, opts)
+                        result = SEARCHERS[source](session_context, query, per_source, opts)
+                        items, note = result[0], result[1]
+                        extra = result[2] if len(result) > 2 and isinstance(result[2], dict) else {}
                     except Exception as exc:
                         items, note = [], f"검색 실패: {exc}"
                 groups.append({"source": source, "label": SOURCE_LABELS[source],
-                               "items": items, "note": note})
+                               "items": items, "note": note, **extra})
             return groups
 
         groups = await run_in_thread(run_all)

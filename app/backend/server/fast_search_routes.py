@@ -149,7 +149,6 @@ def _warm_neighbor_index_once() -> None:
 def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], str]:
     from core.event_preset.fast_search_catalog import search_catalog
 
-    _warm_neighbor_index_once()
     # 등급·인원은 쉼표로 여럿 올 수 있다(한 줄 토글). 검증은 카탈로그가 한다 - 모르는
     # 값이 하나라도 있으면 빈 결과지, 넓어지는 일은 없다.
     rating = str(opts.get("rating") or "").strip().casefold()
@@ -175,6 +174,8 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
     # 등급·인원 문구는 뺐다 - 토글 줄이 이미 보여 주는 것을 캡션이 한 번 더 반복했다
     # (사용자 지적 2026-09-07).
     note = f"{'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
+    # 결과를 다 만든 뒤에 데운다 - 앞에서 시작하면 데우기가 잡은 락에 이 검색이 기다린다.
+    _warm_neighbor_index_once()
     # 세 번째 값은 갈래별 부가 정보 - run_all 이 group 에 얹는다.
     return items, note, {"exhausted": exhausted, "offset": offset}
 

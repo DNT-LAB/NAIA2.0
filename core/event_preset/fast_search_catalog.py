@@ -92,22 +92,30 @@ def load_catalog(detail: str = 'basic') -> tuple[Event, ...]:
 
 def _tag_index(events, detail):
     """tag -> row postings for one catalog. Built once per catalog object, shared by
-    multi-tag search and the neighbor lookup."""
+    multi-tag search and the neighbor lookup.
+
+    The build (~0.6 s per catalog) runs **outside** `_load_lock`: the result is immutable,
+    so two racing builders only waste CPU, while a build under the lock stalled every
+    concurrent catalog load (measured 2026-09-07: first event search 4.4 s)."""
+    with _load_lock:
+        existing = _tag_indexes.get(detail)
+    if existing is not None and existing[0] is events:
+        return existing
+    postings, aliases, rows = {}, {}, []
+    for ei, event in enumerate(events):
+        for term in event.terms:
+            aliases.setdefault(term, set()).add(normalize(event.tag))
+        for variant in event.variants:
+            row_id = len(rows)
+            rows.append((ei, variant))
+            for tag in variant.tags:
+                # Reuse one integer per row in all of its tag postings.
+                postings.setdefault(normalize(tag), set()).add(row_id)
+    built = (events, postings, aliases, rows)
     with _load_lock:
         existing = _tag_indexes.get(detail)
         if existing is None or existing[0] is not events:
-            postings, aliases, rows = {}, {}, []
-            for ei, event in enumerate(events):
-                for term in event.terms:
-                    aliases.setdefault(term, set()).add(normalize(event.tag))
-                for variant in event.variants:
-                    row_id = len(rows)
-                    rows.append((ei, variant))
-                    for tag in variant.tags:
-                        # Reuse one integer per row in all of its tag postings.
-                        postings.setdefault(normalize(tag), set()).add(row_id)
-            existing = (events, postings, aliases, rows)
-            _tag_indexes[detail] = existing
+            _tag_indexes[detail] = existing = built
     return existing
 
 
@@ -207,6 +215,10 @@ def search_catalog(query: str, limit: int, *, rating: str = '', person: str = ''
 def warm_neighbor_index() -> None:
     """Load both catalogs and build their tag postings. Idempotent; safe from a
     daemon thread. The first neighbor lookup otherwise pays ~1.2 s (measured 2026-09-07)."""
+    # Loads first (the deep page is requested soon after the basic list), indexes after
+    # (only the neighbor island needs them).
+    for detail in ('basic', 'deep'):
+        load_catalog(detail)
     for detail in ('basic', 'deep'):
         _tag_index(load_catalog(detail), detail)
 

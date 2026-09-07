@@ -6845,10 +6845,13 @@ body.resizing-result-info {
 }
 .danbooru-mode-btn:hover { background: rgba(139, 118, 255, 0.22); }
 
-/* Minimized floating island — anchored near the Auto Save pill */
+/* 단부루 최소화 섬. 자리는 JS(positionIsland)가 CHARACTER 알약 오른쪽으로 잡는다.
+   ⚠️ 모듈 팝업(--z-floating-module 2200) **아래**에 둔다. 2300 이었을 때 캐릭터/조건부
+   팝업이 이 구석까지 덮으면서 팝업의 × 위에 섬의 × 가 얹혔다(사용자 제보 2026-09-07).
+   최소화 칩이 열린 모듈 위에 떠 있을 이유가 없다 - 팝업이 열리면 뒤로 가고 닫히면 다시 보인다. */
 .danbooru-mini-island {
   position: fixed;
-  z-index: 2300;
+  z-index: calc(var(--z-floating-module) - 10);
   display: flex;
   align-items: center;
   gap: 6px;

@@ -754,7 +754,7 @@ async function loadRuntimeCapabilities() {
 }
 
 loadRuntimeCapabilities();
-const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260714-a3fix')
+const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260907-island-anchor')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({
       document,

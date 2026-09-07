@@ -74,6 +74,7 @@ export function createDanbooruBrowserController({
   let minimized = false;
   let islandEl = null;
   let islandReposition = null;
+  let islandObserver = null;   // 알약 열림/닫힘·탭 전환을 따라 자리를 다시 잡는다
   let islandRaf = 0;
 
   function escHtml(value) {
@@ -448,26 +449,40 @@ export function createDanbooruBrowserController({
 
   function positionIsland() {
     if (!islandEl || islandEl.hidden) return;
-    // Top axis: vertically centered in the right tab bar (the topmost toolbar where
-    // "브라우저에서 열기" lives); horizontally right-aligned to the Auto Save column.
-    const bar = document.querySelector('.right-tab-bar');
-    const save = document.getElementById('statsSave');
-    const barRect = bar && bar.getBoundingClientRect();
-    const saveRect = save && save.getBoundingClientRect();
-    if (saveRect && saveRect.width > 0) {
-      islandEl.style.right = `${Math.round(Math.max(8, win.innerWidth - saveRect.right))}px`;
+    // 자리: 결과 칸 위쪽 알약 줄, CHARACTER 알약(.cq-box) **바로 오른쪽**(사용자 지정 2026-09-07).
+    // 예전엔 Auto Save 에 우측 정렬해 탭 바 줄에 띄웠는데, 캐릭터/조건부 모듈 팝업이
+    // right:12px 까지 덮어서 **팝업의 ×·↗ 위에 이 섬의 × 가 얹혔다**(실측: 팝업 × x1383-1411,
+    // 섬 × x1395-1417). 알약이 없으면(다른 탭·비-NAI·캐릭터 0) 같은 줄 왼쪽 끝으로 물러선다.
+    // 세로는 알약 **머리줄**에 맞춘다 - 패널이 펼쳐지면 .cq-box 가 길어지는데 그 가운데로
+    // 내려가면 안 된다.
+    const doc = win.document;
+    const wrapper = doc.querySelector('.viewer-wrapper');
+    const box = doc.querySelector('.cq-float.open .cq-box');
+    const head = box && (box.querySelector('.cq-head-row') || box);
+    const boxRect = box && box.getBoundingClientRect();
+    const headRect = head && head.getBoundingClientRect();
+    const wrapRect = wrapper && wrapper.getBoundingClientRect();
+    const h = islandEl.offsetHeight;
+    const w = islandEl.offsetWidth;
+    let left;
+    let top;
+    if (boxRect && boxRect.width > 0 && headRect && headRect.height > 0) {
+      left = boxRect.right + 8;
+      top = headRect.top + (headRect.height - h) / 2;
+    } else if (wrapRect && wrapRect.width > 0) {
+      // .cq-float 의 기본 자리(left:12px; top:40px, 머리 23px)와 같은 줄.
+      left = wrapRect.left + 12;
+      top = wrapRect.top + 40 + (23 - h) / 2;
     } else {
-      islandEl.style.right = '14px';
+      left = 12;
+      top = 8;
     }
-    islandEl.style.left = 'auto';
-    if (barRect && barRect.height > 0) {
-      // Center vertically in the bar, clamped so it can never settle off-screen.
-      const centered = barRect.top + (barRect.height - islandEl.offsetHeight) / 2;
-      const maxTop = win.innerHeight - islandEl.offsetHeight - 8;
-      islandEl.style.top = `${Math.max(8, Math.min(Math.round(centered), maxTop))}px`;
-    } else {
-      islandEl.style.top = '10px';
-    }
+    // 화면 밖으로 나가지 않게 - 좁은 창에서 알약 오른쪽이 없으면 안쪽으로 접는다.
+    left = Math.max(8, Math.min(Math.round(left), win.innerWidth - w - 8));
+    top = Math.max(8, Math.min(Math.round(top), win.innerHeight - h - 8));
+    islandEl.style.right = 'auto';
+    islandEl.style.left = `${left}px`;
+    islandEl.style.top = `${top}px`;
   }
 
   function schedulePositionIsland() {
@@ -489,6 +504,14 @@ export function createDanbooruBrowserController({
       win.addEventListener('resize', islandReposition, true);
       win.addEventListener('scroll', islandReposition, {capture: true, passive: true});
     }
+    // 알약은 resize/scroll 없이도 움직인다(펼침/접힘, 캐릭터 수, 탭 전환). 최소화 중에만 본다.
+    if (!islandObserver && typeof win.MutationObserver === 'function') {
+      islandObserver = new win.MutationObserver(() => schedulePositionIsland());
+      const wrapper = win.document.querySelector('.viewer-wrapper');
+      if (wrapper) islandObserver.observe(wrapper, {childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style']});
+      const pane = win.document.getElementById('rightTabResult');
+      if (pane) islandObserver.observe(pane, {attributes: true, attributeFilter: ['class']});
+    }
   }
 
   function hideIsland() {
@@ -497,6 +520,10 @@ export function createDanbooruBrowserController({
       win.removeEventListener('resize', islandReposition, true);
       win.removeEventListener('scroll', islandReposition, true);
       islandReposition = null;
+    }
+    if (islandObserver) {
+      islandObserver.disconnect();
+      islandObserver = null;
     }
     if (islandRaf) {
       win.cancelAnimationFrame(islandRaf);

@@ -351,15 +351,43 @@ _AMBIENT_ALLOW = frozenset({
 })
 
 
+_FABRIC_OWNER_RE = re.compile(
+    # Overlap so 'the fabric' cannot hide 'fabric of the hoodie'.
+    r"(?=\b(?P<owner_before>[a-z]+)(?:['’]s)?\s+(?P<fabric_after>fabric)\b"
+    r"|\b(?P<fabric_before>fabric)\s+of\s+(?:(?:the|her|his|their|its)\s+)?"
+    r"(?P<owner_after>[a-z]+)\b)"
+)
+
+
+def _fabric_material_spans(
+    text: str, input_words: set[str], classify_axes: Callable[[str], frozenset[str]]
+) -> set[tuple[int, int]]:
+    """Only fabric directly attached to an existing garment is material, not a new prop."""
+    spans: set[tuple[int, int]] = set()
+    for match in _FABRIC_OWNER_RE.finditer(text):
+        owner = match.group("owner_before") or match.group("owner_after")
+        # Tag 'gloves' is commonly rendered as 'glove fabric' in prose.
+        if any(word in input_words and CLOTHING in classify_axes(word)
+               for word in (owner, owner + "s")):
+            group = "fabric_after" if match.group("fabric_after") else "fabric_before"
+            spans.add(match.span(group))
+    return spans
+
+
 def _introduces_object(
     text: str, input_words: set[str], classify_axes: Callable[[str], frozenset[str]]
 ) -> bool:
     """미입력 OBJECT/SETTING 태그(prop/장소/동물)를 새로 도입하면 True(환각). 분위기/프레이밍
     어휘(_AMBIENT_ALLOW)와 입력 태그 단어, body/clothing 류는 면제 — 'duck'/'bed'/'flower'는
     잡고 'skin'/'hand'/'shadow'/'sky'는 통과시킨다(가드 후필터, classify_axes 주입 시만 작동)."""
-    for w in re.findall(r"[a-z']{3,}", str(text or "").lower()):
+    low = str(text or "").lower()
+    material_spans = _fabric_material_spans(low, input_words, classify_axes) if "fabric" in low else set()
+    for match in re.finditer(r"[a-z']{3,}", low):
+        w = match.group()
         if w in _STOPWORDS or w in _AMBIENT_ALLOW or w in input_words:
             continue
+        if w == "fabric" and match.span() in material_spans:
+            continue  # The separate material/style guard still applies.
         axes = classify_axes(w)
         if OBJECT in axes or SETTING in axes:
             return True

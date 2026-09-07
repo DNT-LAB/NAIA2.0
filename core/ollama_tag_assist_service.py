@@ -202,9 +202,19 @@ _EXPLICIT_REQUEST_KEYWORDS = _SEXUAL_KEYWORDS + (
 )
 
 
+_ANAL_RATING_RE = re.compile(r"\banal(?:ly)?\b")
+
+
+def _rating_keyword_hit(keywords: tuple[str, ...], text: str) -> bool:
+    # Limit this correction to the observed canal/analog collision. Other
+    # existing compound matches (cumshot, autofellatio, etc.) stay unchanged.
+    t = str(text or "").lower()
+    anal_match = bool(_ANAL_RATING_RE.search(t.replace("_", " "))) if "anal" in t else False
+    return any(anal_match if kw == "anal" else kw in t for kw in keywords)
+
+
 def _is_sexual_tag(tag_norm: str) -> bool:
-    t = tag_norm.lower()
-    return any(kw in t for kw in _SEXUAL_KEYWORDS)
+    return _rating_keyword_hit(_SEXUAL_KEYWORDS, tag_norm)
 
 
 # 하드코어 키워드 — 분포에 없거나 약하게 잡혀도 무조건 E로 끌어올린다.
@@ -215,6 +225,11 @@ _HARDCORE_KEYWORDS = (
     "doggystyle", "cowgirl", "clitoris", "vulva", "rape", "ahegao",
     "fucked", "fucking", "during sex", "spread pussy",
 )
+
+
+def _is_hardcore_tag(tag_norm: str) -> bool:
+    return _rating_keyword_hit(_HARDCORE_KEYWORDS, tag_norm)
+
 
 # 맥락-중립 위치/장소 태그 — explicit 장면과 공기율(co-occurrence)이 높지만 태그
 # 자체는 비명시적이다. 전체-아카이브 rating-count 도입 후 이런 위치 태그의 explicit
@@ -553,7 +568,7 @@ def _tag_rating(tag_norm: str) -> str:
             else:
                 rating = "g"
     # 키워드 하드 오버라이드 — 분포가 약해도 명백한 성적 태그는 끌어올린다.
-    if any(kw in t for kw in _HARDCORE_KEYWORDS):
+    if _is_hardcore_tag(t):
         return "e"
     if _RATING_ORDER[rating] < _RATING_ORDER["q"] and _is_sexual_tag(t):
         rating = "q"
@@ -1397,7 +1412,7 @@ class OllamaTagAssistService:
                     validate_tag=self._validate_tag,
                     tag_allowed=_tag_allowed,
                     is_sexual=_is_sexual_tag,
-                    is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
+                    is_hardcore=_is_hardcore_tag,
                     has_hangul=_has_hangul,
                     classify_axes=self._get_axis_classifier(),
                 )

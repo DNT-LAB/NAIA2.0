@@ -38,11 +38,14 @@
  * 2026-09-07 — 카탈로그의 62% 가 관측 1 이라 그대로 두면 목록이 잡음으로 찬다).
  *
  * 이벤트 행을 누르거나 Enter 하면 **복사하지 않고** 그 행 바로 아래가 인라인으로 펼쳐진다:
- * 머리 = [선택한 조합] [프롬프트 복사] [이웃 조합에서 찾기] [×], 몸 = (1) 고른 조합을 전부
+ * 머리 = [선택한 조합] [프롬프트 복사] [×], 몸 = (1) 고른 조합을 전부
  * 포함하는 더 긴 조합, (2) 핵심(앵커) 태그를 뺀 나머지가 한 태그만 다른 조합. (1)에 든 것은
  * (2)에 다시 나오지 않는다. 비어 있는 절은 아예 안 그리고 둘 다 비면 머리만 남는다. 이웃 행을
  * 누르면 그것이 복사 대상이 되고(연한 강조), [프롬프트 복사] 가 대상을 복사한다. 이웃 행도
- * 관측 1회는 절마다 더보기로 접는다. 찾기 칸은 **이 펼침 안에서만** 거른다(국소 검색).
+ * 관측 1회는 절마다 더보기로 접는다.
+ *
+ * **국소 찾기**는 묶음 머리글 줄에 있다(사용자 정정 2026-09-07): 머리글 오른쪽 칸에 치면 그 묶음의
+ * 행만 거른다(관측 1회 포함). 묶음이 아직 다 안 왔으면 끝까지 이어 받아 전체를 대상으로 한다.
  */
 
 const SOURCES = [
@@ -102,13 +105,16 @@ export function initFastSearch() {
   let restoreScroll = null;
   // "관측 1회 N개 더보기" 를 펼친 묶음. 키 = `${단계}:${앵커}`.
   let moreOpen = new Set();
+  // 묶음별 국소 찾기 문구(키 = `${단계}:${앵커}`) 와, 찾는 묶음을 끝까지 채우는 중인 키.
+  let groupSearch = new Map();
+  let fillKey = null;
   // 이벤트 페이징 상태. phase 는 EVENT_PHASES 의 인덱스, offset 은 그 phase 안의 위치.
   let eventPaging = freshEventPaging();
   // 높이 상한. base = 결과 칸의 50%(이미지를 통째로 가리지 않는다), hard = 75%. 이벤트 구역이
   // 아래로 밀려 머리만 보이면 base 와 hard 사이에서 **필요한 만큼만** 늘린다(fitHeight).
   let heightCaps = {base: 0, hard: 0};
   // 인라인으로 펼친 이웃 조합. 한 행만 펼친다.
-  // {key, anchor, tags, payload, loading, seq, search, target, more:Set}
+  // {key, anchor, tags, payload, loading, seq, target, more:Set}
   let inline = null, inlineSeq = 0, inlineRows = [];
   const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
 
@@ -250,7 +256,7 @@ export function initFastSearch() {
       const t = event.target;
       if (t.closest('[data-fs-inline-close]')) { closeInline(); return; }
       if (t.closest('[data-fs-inline-copy]')) { void copyInlineTarget(); return; }
-      if (t.closest('[data-fs-inline-search]')) return;              // 입력 칸 - 아무것도 안 한다
+      if (t.closest('[data-fs-group-search]')) return;               // 묶음 찾기 칸 - 아무것도 안 한다
       const more = t.closest('[data-fs-more]');
       if (more) { toggleMore(more.dataset.fsMore, more.dataset.fsMoreScope); return; }
       const inlineRow = t.closest('[data-fs-inline-index]');
@@ -270,15 +276,18 @@ export function initFastSearch() {
       paintActive();
       commit();
     });
-    // 펼친 칸의 찾기: 그 펼침 안의 이웃 행만 거른다(국소). 몸통 innerHTML 전체를 다시 만들지
-    // 않고 펼친 칸의 몸만 갈아서 커서가 날아가지 않게 한다.
+    // 묶음 머리글의 찾기: 그 묶음의 행만 거른다(국소). render 가 커서를 되돌린다(아래 render 참고).
     eventList.addEventListener('input', event => {
-      if (!event.target.matches('[data-fs-inline-search]') || !inline) return;
-      inline.search = event.target.value.trim();
-      paintInlineBody();
+      if (!event.target.matches('[data-fs-group-search]')) return;
+      const key = event.target.dataset.fsGroupSearch;
+      const value = event.target.value.trim();
+      if (value) groupSearch.set(key, value); else groupSearch.delete(key);
+      fillKey = value ? key : null;
+      render(input.value.trim());
+      if (fillKey && !groupComplete(fillKey) && !eventPaging.done) requestEventPage(seq);
     });
     eventList.addEventListener('keydown', event => {
-      if (!event.target.matches('[data-fs-inline-search]')) return;
+      if (!event.target.matches('[data-fs-group-search]')) return;
       // ↑↓·Enter 는 찾기 칸 안에서는 목록을 움직이지 않는다(문서 Esc 만 그대로).
       if (['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) event.stopPropagation();
     });
@@ -472,6 +481,23 @@ export function initFastSearch() {
     requestEventPage(seq);
   }
 
+  /** 묶음(`${단계}:${앵커}`)이 끝까지 왔는가 - 같은 단계에서 그 뒤에 다른 앵커가 왔거나, 단계가 넘어갔거나, 다 끝났다. */
+  function groupComplete(key) {
+    if (eventPaging.done) return true;
+    const [phase, anchor] = [key.slice(0, 1), key.slice(2)];
+    if (phase === 'b' && eventPaging.phase >= 1) return true;
+    const items = eventPaging.items;
+    const start = phase === 'd' ? Math.max(0, eventPaging.deepStart) : 0;
+    const end = phase === 'b' && eventPaging.deepStart >= 0 ? eventPaging.deepStart : items.length;
+    let seen = false;
+    for (let i = start; i < end; i += 1) {
+      const a = items[i].anchor || items[i].title;
+      if (a === anchor) seen = true;
+      else if (seen) return true;
+    }
+    return false;
+  }
+
   /** "관측 1회 N개 더보기/접기". scope = 'list'(묶음) | 'inline'(펼친 칸의 절). */
   function toggleMore(key, scope) {
     if (scope === 'inline') {
@@ -542,6 +568,8 @@ export function initFastSearch() {
     seekAnchor = null;
     restoreScroll = null;
     moreOpen = new Set();
+    groupSearch = new Map();
+    fillKey = null;
     inline = null;
     paintEventChips();
     if (!enabled.has('event')) closePersonPopup();
@@ -564,6 +592,8 @@ export function initFastSearch() {
     seekAnchor = null;
     restoreScroll = body.scrollTop;
     moreOpen = new Set();
+    groupSearch = new Map();
+    fillKey = null;
     inline = null;
     const query = input.value.trim();
     if (query) pending.add('event');
@@ -594,7 +624,7 @@ export function initFastSearch() {
     slot.wanted = {
       query, mine, rating, person, exclude,
       detail: EVENT_PHASES[eventPaging.phase], offset: eventPaging.offset,
-      limit: seekAnchor ? EVENT_SEEK_PAGE : EVENT_PAGE,
+      limit: (seekAnchor || fillKey) ? EVENT_SEEK_PAGE : EVENT_PAGE,
     };
     void drain(SOURCES.find(s => s.id === 'event'));
   }
@@ -667,6 +697,12 @@ export function initFastSearch() {
             if (Math.abs(body.scrollTop - restoreScroll) <= 2 || eventPaging.done || seekAnchor) restoreScroll = null;
             else { requestEventPage(mine); continue; }
           }
+          if (fillKey) {
+            // 묶음 찾기 중: 그 묶음이 끝까지 오도록 이어 받는다.
+            if (groupComplete(fillKey)) fillKey = null;
+            else if (!eventPaging.done) { requestEventPage(mine); continue; }
+            else fillKey = null;
+          }
           if (seekAnchor) {
             // 칩으로 찾아가는 중: 머리글이 나타났으면 거기로, 아니면 다음 쪽을 이어 받는다.
             const header = headerFor(seekAnchor);
@@ -712,22 +748,20 @@ export function initFastSearch() {
   }
 
   /** 펼친 칸의 몸(두 절). 비어 있는 절은 안 그리고, 둘 다 비면 빈 문자열(머리만 남는다).
-   *  관측 1회 행은 절마다 더보기로 접는다. 찾기 문구가 있으면 그것에 걸리는 행만, 접지 않고 전부. */
+   *  관측 1회 행은 절마다 더보기로 접는다. */
   function inlineBodyHtml() {
     inlineRows = [];
     if (!inline || inline.loading) return '<div class="fs-empty">이웃 조합을 찾는 중…</div>';
     if (!inline.payload || inline.payload.error) return '<div class="fs-empty">이웃 조합을 불러오지 못했습니다.</div>';
-    const needle = String(inline.search || '').toLowerCase();
     const sections = [
       ['supersets', '전부 포함하는 더 긴 조합'],
       ['near', `핵심 태그(${inline.anchor}) 외 한 태그만 다른 조합`],
     ];
     const parts = [];
     for (const [key, label] of sections) {
-      let items = Array.isArray(inline.payload[key]) ? inline.payload[key] : [];
-      if (needle) items = items.filter(item => String(item.value || '').toLowerCase().includes(needle));
+      const items = Array.isArray(inline.payload[key]) ? inline.payload[key] : [];
       if (!items.length) continue;
-      const isOpen = !!needle || inline.more.has(key);
+      const isOpen = inline.more.has(key);
       const shown = isOpen ? items : items.filter(item => observed(item) !== 1);
       const hidden = items.length - shown.length;
       parts.push(`<div class="fs-cap">${esc(label)}<span class="fs-note">${items.length}</span></div>`);
@@ -739,28 +773,26 @@ export function initFastSearch() {
         const isTarget = inline.target != null && String(item.value) === inline.target;
         parts.push(eventRowHtml(item, `data-fs-inline-index="${index}"`, foreign, isTarget ? ' is-active' : ''));
       }
-      if (hidden || (isOpen && !needle && items.some(item => observed(item) === 1))) {
-        parts.push(moreHtml(key, 'inline', isOpen ? items.filter(item => observed(item) === 1).length : hidden, isOpen));
-      }
+      const singles = items.filter(item => observed(item) === 1).length;
+      if (singles) parts.push(moreHtml(key, 'inline', singles, isOpen));
     }
-    if (!parts.length && needle) return '<div class="fs-end">찾는 문구에 맞는 이웃 조합이 없습니다</div>';
     return parts.join('');
   }
 
-  /** 펼친 칸 전체. 머리 = [선택한 조합] [프롬프트 복사] [찾기] [×]. 몸은 비어 있으면 아예 없다. */
+  /** 펼친 칸 전체. 머리 = [선택한 조합] [프롬프트 복사] [×]. 몸은 비어 있으면 아예 없다. */
   function inlineHtml() {
     const bodyHtml = inlineBodyHtml();
     return `<div class="fs-inline" data-fs-inline>`
       + '<div class="fs-inline-bar">'
       + '<span class="fs-inline-kicker">선택한 조합</span>'
       + '<button type="button" class="fs-inline-copy" data-fs-inline-copy title="선택한 조합(이웃 행을 눌렀으면 그것)을 클립보드로">프롬프트 복사</button>'
-      + `<input class="fs-inline-search" type="search" data-fs-inline-search autocomplete="off" spellcheck="false" placeholder="이웃 조합에서 찾기" aria-label="이웃 조합에서 찾기" value="${esc(inline.search || '')}">`
+      + '<span class="fs-inline-spacer"></span>'
       + '<button type="button" class="fs-close" data-fs-inline-close aria-label="펼침 닫기">×</button></div>'
       + (bodyHtml ? `<div class="fs-inline-body">${bodyHtml}</div>` : '')
       + '</div>';
   }
 
-  /** 펼친 칸의 몸만 갈아 끼운다(찾기 입력 중 커서 보존). 몸이 없던 자리에 생기거나 사라지면 만들고 뗀다. */
+  /** 펼친 칸의 몸만 갈아 끼운다(더보기 토글). 몸이 없던 자리에 생기거나 사라지면 만들고 뗀다. */
   function paintInlineBody() {
     const panel = eventList.querySelector('[data-fs-inline]');
     if (!panel || !inline) return;
@@ -776,8 +808,9 @@ export function initFastSearch() {
   function render(query) {
     const selectedKey = rows[active]?._searchKey;
     const keepScroll = body.scrollTop;
-    // 펼친 칸의 찾기 칸에 커서가 있으면 다시 그린 뒤 되돌린다(innerHTML 이 그것을 지운다).
-    const searchEl = document.activeElement?.matches?.('[data-fs-inline-search]') ? document.activeElement : null;
+    // 묶음 찾기 칸에 커서가 있으면 다시 그린 뒤 되돌린다(innerHTML 이 그것을 지운다 - 쪽이 이어 오는 중에도).
+    const searchEl = document.activeElement?.matches?.('[data-fs-group-search]') ? document.activeElement : null;
+    const searchKey = searchEl ? searchEl.dataset.fsGroupSearch : null;
     const caret = searchEl ? searchEl.selectionStart : null;
     rows = [];
     inlineRows = [];
@@ -829,11 +862,18 @@ export function initFastSearch() {
                  && !(j === eventPaging.deepStart && j !== i)) j += 1;
           const run = items.slice(i, j);
           const moreKey = `${phase}:${anchor}`;
+          const needle = String(groupSearch.get(moreKey) || '').toLowerCase();
           const isOpen = moreOpen.has(moreKey);
           const singles = run.filter(item => observed(item) === 1).length;
-          eparts.push(`<div class="fs-cap fs-cap-ev" data-anchor="${esc(anchor)}">${esc(items[i].title)}</div>`);
+          // 머리글 줄 = 이름 + 이 묶음에서 찾기(국소). 찾는 동안은 관측 1회도 전부 보이고 더보기는 숨는다.
+          eparts.push(`<div class="fs-cap fs-cap-ev" data-anchor="${esc(anchor)}">`
+            + `<span class="fs-cap-ev-name">${esc(items[i].title)}</span>`
+            + `<input class="fs-group-search" type="search" data-fs-group-search="${esc(moreKey)}" autocomplete="off" spellcheck="false"`
+            + ` placeholder="이 묶음에서 찾기" aria-label="${esc(anchor)} 묶음에서 찾기" value="${esc(groupSearch.get(moreKey) || '')}"></div>`);
+          let matched = 0;
           for (const item of run) {
-            if (!isOpen && observed(item) === 1) continue;
+            if (needle) { if (!String(item.value || '').toLowerCase().includes(needle)) continue; matched += 1; }
+            else if (!isOpen && observed(item) === 1) continue;
             const index = rows.length;
             const key = `event ${item.value}`;
             rows.push({...item, _source: 'event', _searchKey: key});
@@ -841,7 +881,10 @@ export function initFastSearch() {
             eparts.push(eventRowHtml(item, `data-fs-index="${index}"`, '', expanded ? ' is-expanded' : ''));
             if (expanded) { eparts.push(inlineHtml()); inlineShown = true; }
           }
-          if (singles) eparts.push(moreHtml(moreKey, 'list', singles, isOpen));
+          if (needle) {
+            if (!matched) eparts.push(`<div class="fs-end">${groupComplete(moreKey) ? '이 묶음에 맞는 조합이 없습니다' : '이 묶음을 끝까지 불러오는 중…'}</div>`);
+            else if (!groupComplete(moreKey)) eparts.push('<div class="fs-end">이 묶음을 끝까지 불러오는 중…</div>');
+          } else if (singles) eparts.push(moreHtml(moreKey, 'list', singles, isOpen));
           i = j;
         }
         eparts.push(`<div class="fs-end">${eventPaging.done ? '이벤트 끝' : '아래로 내리면 더 불러옵니다…'}</div>`);
@@ -870,8 +913,8 @@ export function initFastSearch() {
     active = previousIndex >= 0 ? previousIndex : (rows.length ? 0 : -1);
     // 다시 그릴 때는 스크롤을 건드리지 않는다. 키보드 이동(move)만 따라간다.
     paintActive(true);
-    if (searchEl && inline) {
-      const again = eventList.querySelector('[data-fs-inline-search]');
+    if (searchKey != null) {
+      const again = eventList.querySelector(`[data-fs-group-search="${CSS.escape(searchKey)}"]`);
       if (again) { again.focus({preventScroll: true}); if (caret != null) again.setSelectionRange(caret, caret); }
     }
     fitHeight();                          // 이벤트 구역이 보일 만큼 상한을 맞춘다
@@ -935,7 +978,7 @@ export function initFastSearch() {
     if (!anchor || !tags) return;
     if (inline && inline.key === item._searchKey) return;     // 이미 펼쳐져 있다
     const mine = ++inlineSeq;
-    inline = {key: item._searchKey, anchor, tags, payload: null, loading: true, seq: mine, search: '', target: null, more: new Set()};
+    inline = {key: item._searchKey, anchor, tags, payload: null, loading: true, seq: mine, target: null, more: new Set()};
     const query = input.value.trim();
     render(query);
     // 펼친 행이 펼친 칸과 함께 보이게 - 행을 몸통 위쪽으로 올린다.

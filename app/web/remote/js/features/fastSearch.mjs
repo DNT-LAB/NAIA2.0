@@ -13,15 +13,21 @@
  * 최대 720px, 높이는 내용을 따라 자라되 결과 칸의 **절반**을 넘지 않는다 — 결과
  * 이미지를 통째로 가리면 안 된다. 나머지는 안에서 스크롤한다.
  *
- * 이벤트는 "더 보기" 버튼 없이 **스크롤로 이어서** 본다: 3–8태그 조합을 다 보이면
- * 9–16태그 조합으로 넘어가고, 끝나면 끝이라고 말한다. 이벤트 안에서 다시 좁히는
- * 칸(AND)이 따로 있다.
+ * 몸통(.fs-body)은 두 칸이다: 앞의 갈래들(태그·아티스트·캐릭터·와일드카드·프리셋)을 그리는
+ * `.fs-lanes` 와, 마지막의 **이벤트 구역**(.fs-event-section). 이벤트에만 필요한 것들은 전부
+ * 이벤트 구역 머리에 있다(사용자 지정 2026-09-07 "이벤트 관련 기능은 이벤트 쪽에 묶어라"):
+ *  - 조건 한 줄 [이벤트 · 3–8태그 조합] [인원 ▾] [G S Q E] [안에서 찾기]
+ *    · 인원은 Interactive 의 ALT 팝업과 같은 체크 목록(여럿 켬). 기본은 **여성이 들어간
+ *      구성 전부**(8/13). 남성만·기타는 꺼져 있다.
+ *    · 등급은 Quick Filter 의 G S Q E 알약을 그대로 쓴다(여럿 켬, 기본 전부).
+ *  - 걸린 이벤트가 둘 이상이면 **토글 칩** 한 줄(asphyxiation · 질식 3 / smother · 질식 2 …).
+ *    끄면 그 이벤트의 행이 빠진다. 서버에는 끈 것(OFF 목록)만 보낸다 — deep 단계에서
+ *    이벤트가 더 발견돼도 파라미터가 안 바뀌어 스크롤 페이징이 흔들리지 않는다.
+ *  머리는 조건 칸이 포커스를 잃지 않게 **한 번만 만들고** 다시 그리지 않는다(innerHTML 로
+ *  다시 만들면 "안에서 찾기" 를 치는 중에 커서가 날아간다). 목록만 다시 그린다.
  *
- * 이벤트 조건은 **한 줄**이다(사용자 지정 2026-09-07): [인원 ▾] [G S Q E] [안에서 찾기].
- *  - 인원은 Interactive 의 ALT 팝업과 같은 체크 목록(여럿 켬). 기본은 **여성이 들어간
- *    구성 전부**(8/13). 남성만·기타는 꺼져 있다.
- *  - 등급은 Quick Filter 의 G S Q E 알약을 그대로 쓴다(여럿 켬, 기본 전부).
- *  - 예전엔 select 두 개 + 캡션 문구로 같은 것을 두 번 보여 줬다.
+ * 이벤트는 "더 보기" 버튼 없이 **스크롤로 이어서** 본다: 3–8태그 조합을 다 보이면
+ * 9–16태그 조합으로 넘어가고, 끝나면 끝이라고 말한다.
  *
  * 이벤트 목록은 **이벤트가 카테고리**다(사용자 지적 2026-09-07 "쓸데없는 단어와 번역이
  * 반복"): 서버가 이벤트별로 묶어 보내고(grouped), 여기서는 이벤트가 바뀌는 자리에 이름을
@@ -64,8 +70,9 @@ const NEIGHBOR_LIMIT = 20;
 
 export function initFastSearch() {
   let overlay = null, input = null, body = null, countEl = null, chipRow = null;
+  let lanesEl = null, eventSection = null, eventList = null, eventChips = null, eventNote = null;
   let open = false, seq = 0, timer = null, eventTimer = null;
-  let rows = [];            // 평면화된 결과 - 키보드 이동의 단위
+  let rows = [];            // 평면화된 결과 - 키보드 이동의 단위(갈래들 + 이벤트 순)
   let active = -1;
   // 가벼운 사전들만 기본으로 켠다. 나머지는 사용자가 칩으로 켠다(지연 로딩).
   let enabled = new Set(['tag', 'artist', 'character']);
@@ -74,6 +81,9 @@ export function initFastSearch() {
   let eventRatings = new Set(RATING_OPTIONS.map(r => r.id));
   let eventPersons = new Set(DEFAULT_PERSONS);
   let personBtn = null, personPopup = null;
+  // 이 질의에 걸린 이벤트들({tag,label,count}) 과 사용자가 끈 것. 질의가 바뀌면 둘 다 비운다.
+  let eventCatalog = [];
+  let eventOff = new Set();
   // 이벤트 페이징 상태. phase 는 EVENT_PHASES 의 인덱스, offset 은 그 phase 안의 위치.
   let eventPaging = freshEventPaging();
   // 아래 섬(이웃 조합). 고른 이벤트 행 하나에 붙는다.
@@ -94,13 +104,14 @@ export function initFastSearch() {
     }
   }
 
-  /** 서버에 보내는 등급·인원. 전부 켜져 있으면 빈 문자열(= 필터 없음). */
+  /** 서버에 보내는 등급·인원·끈 이벤트. 전부 켜져 있으면 빈 문자열(= 필터 없음). */
   function filterParams() {
     const rating = eventRatings.size === RATING_OPTIONS.length ? ''
       : RATING_OPTIONS.map(r => r.id).filter(id => eventRatings.has(id)).join(',');
     const person = eventPersons.size === PERSON_IDS.length ? ''
       : PERSON_IDS.filter(id => eventPersons.has(id)).join(',');
-    return {rating, person};
+    const exclude = eventOff.size ? eventCatalog.map(e => e.tag).filter(tag => eventOff.has(tag)).join(',') : '';
+    return {rating, person, exclude};
   }
 
   function build() {
@@ -118,23 +129,37 @@ export function initFastSearch() {
         <button type="button" class="fs-close" aria-label="닫기">×</button>
       </div>
       <div class="fs-chips"></div>
-      <div class="fs-event-options" hidden>
-        <button type="button" class="fs-person-btn" data-fs-person-btn aria-haspopup="dialog"
-                aria-expanded="false" title="이벤트 인원 구성 고르기">인원 <b data-fs-person-count></b></button>
-        <span class="fs-rating-bar" role="group" aria-label="이벤트 등급">${RATING_OPTIONS.map(r =>
-          `<button type="button" class="fs-rating-btn active" data-r="${r.id}" aria-pressed="true" title="${r.title}">${r.label}</button>`).join('')}</span>
-        <input class="fs-event-refine" type="search" autocomplete="off" spellcheck="false"
-               data-fs-event-refine aria-label="이벤트 안에서 찾기"
-               placeholder="이벤트 안에서 찾기 (쉼표 = AND)">
+      <div class="fs-body">
+        <div class="fs-lanes" data-fs-lanes></div>
+        <div class="fs-event-section" data-fs-event-section hidden>
+          <div class="fs-event-head">
+            <div class="fs-event-options">
+              <span class="fs-cap fs-cap-inline">이벤트<span class="fs-note" data-fs-event-note></span></span>
+              <button type="button" class="fs-person-btn" data-fs-person-btn aria-haspopup="dialog"
+                      aria-expanded="false" title="이벤트 인원 구성 고르기">인원 <b data-fs-person-count></b></button>
+              <span class="fs-rating-bar" role="group" aria-label="이벤트 등급">${RATING_OPTIONS.map(r =>
+                `<button type="button" class="fs-rating-btn active" data-r="${r.id}" aria-pressed="true" title="${r.title}">${r.label}</button>`).join('')}</span>
+              <input class="fs-event-refine" type="search" autocomplete="off" spellcheck="false"
+                     data-fs-event-refine aria-label="이벤트 안에서 찾기"
+                     placeholder="이벤트 안에서 찾기 (쉼표 = AND)">
+            </div>
+            <div class="fs-ev-chips" data-fs-event-chips role="group" aria-label="걸린 이벤트" hidden></div>
+          </div>
+          <div class="fs-event-list" data-fs-event-list></div>
+        </div>
       </div>
-      <div class="fs-body"></div>
       <div class="fs-foot">↑↓ 이동 · <b>Enter</b> 복사 · Esc 닫기 — 프롬프트에는 넣지 않습니다</div>`;
     document.body.append(overlay);
     input = overlay.querySelector('.fs-input');
     body = overlay.querySelector('.fs-body');
     countEl = overlay.querySelector('.fs-count');
     chipRow = overlay.querySelector('.fs-chips');
-    eventOptions = overlay.querySelector('.fs-event-options');
+    lanesEl = body.querySelector('[data-fs-lanes]');
+    eventSection = body.querySelector('[data-fs-event-section]');
+    eventList = body.querySelector('[data-fs-event-list]');
+    eventChips = body.querySelector('[data-fs-event-chips]');
+    eventNote = body.querySelector('[data-fs-event-note]');
+    eventOptions = body.querySelector('.fs-event-options');
     personBtn = eventOptions.querySelector('[data-fs-person-btn]');
     personBtn.addEventListener('click', () => {
       if (personPopup && !personPopup.hidden) closePersonPopup(); else openPersonPopup();
@@ -157,6 +182,23 @@ export function initFastSearch() {
       scheduleEvents(DEBOUNCE_MS);
     });
     refine.addEventListener('keydown', onKeyDown);
+    // 이벤트 토글 칩 - 끄면 그 이벤트의 행이 빠진다. 최소 하나는 켜져 있어야 한다.
+    eventChips.addEventListener('click', event => {
+      const chip = event.target.closest('[data-fs-ev], [data-fs-ev-rest]');
+      if (!chip) return;
+      if (chip.dataset.fsEvRest) {
+        // "그 외" 묶음 - 전부 같이 켜고 끈다. 마지막 켜진 칩이면 끄지 않는다.
+        const rest = restEvents();
+        if (restIsOn()) { if (onChipCount() <= 1) return; rest.forEach(e => eventOff.add(e.tag)); }
+        else rest.forEach(e => eventOff.delete(e.tag));
+      } else {
+        const tag = chip.dataset.fsEv;
+        if (!eventOff.has(tag) && onChipCount() <= 1) return;
+        if (eventOff.has(tag)) eventOff.delete(tag); else eventOff.add(tag);
+      }
+      paintEventChips();
+      scheduleEvents(0);
+    });
 
     chipRow.innerHTML = SOURCES.map(s =>
       `<button type="button" class="fs-chip${enabled.has(s.id) ? ' is-on' : ''}" aria-pressed="${enabled.has(s.id)}" data-fs-source="${s.id}">${esc(s.label)}</button>`).join('');
@@ -183,7 +225,8 @@ export function initFastSearch() {
       commit();
     });
     // 이벤트는 버튼 없이 스크롤로 이어 본다 - 바닥에 가까워지면 다음 쪽을 부른다.
-    body.addEventListener('scroll', maybeLoadMoreEvents, {passive: true});
+    // 인원 팝업은 버튼 자리에 고정돼 있어 스크롤하면 떨어져 보인다 - 닫는다.
+    body.addEventListener('scroll', () => { closePersonPopup(); maybeLoadMoreEvents(); }, {passive: true});
     // 바깥을 누르면 닫는다. 창·섬·인원 팝업 안의 클릭은 각자 처리한다.
     document.addEventListener('pointerdown', event => {
       if (!open) return;
@@ -274,7 +317,9 @@ export function initFastSearch() {
   }
 
   function closePersonPopup() {
-    if (personPopup) { personPopup.hidden = true; personPopup.innerHTML = ''; }
+    if (!personPopup || personPopup.hidden) return;
+    personPopup.hidden = true;
+    personPopup.innerHTML = '';
     if (personBtn) personBtn.setAttribute('aria-expanded', 'false');
     document.removeEventListener('pointerdown', onPersonOutside, true);
   }
@@ -283,6 +328,45 @@ export function initFastSearch() {
     if (personPopup && personPopup.contains(event.target)) return;
     if (event.target.closest?.('[data-fs-person-btn]')) return;   // 버튼 자체가 토글한다
     closePersonPopup();
+  }
+
+  // ── 이벤트 토글 칩 ────────────────────────────────────────────────────────
+  /** 이름으로 걸린 이벤트(rank ≤ 3)는 칩 하나씩. 쉼표 AND 로 행 안의 태그만 걸린 이벤트(rank 4)는
+   *  "그 외 N" 칩 하나로 묶어 한 번에 켜고 끈다 - 26개가 늘어서면 붙어 있는 머리가 목록을 밀어낸다
+   *  (실측 '질식' + hetero). 칩이 둘 이상일 때만 보인다 - 하나면 끌 것도 없다. */
+  function namedEvents() { return eventCatalog.filter(e => e.rank <= 3); }
+  function restEvents() { return eventCatalog.filter(e => e.rank > 3); }
+  function restIsOn() { return restEvents().some(e => !eventOff.has(e.tag)); }
+  function onChipCount() { return namedEvents().filter(e => !eventOff.has(e.tag)).length + (restEvents().length && restIsOn() ? 1 : 0); }
+  function paintEventChips() {
+    if (!eventChips) return;
+    const named = namedEvents(), rest = restEvents();
+    if (named.length + (rest.length ? 1 : 0) < 2) { eventChips.hidden = true; eventChips.innerHTML = ''; return; }
+    eventChips.hidden = false;
+    const chip = (key, attr, on, label, count, title) =>
+      `<button type="button" class="fs-ev-toggle${on ? ' is-on' : ''}" ${attr} data-fs-ev-key="${esc(key)}"
+        aria-pressed="${on}" title="${esc(title)}">${esc(label)}<b>${count}</b></button>`;
+    const parts = named.map(e => chip(e.tag, `data-fs-ev="${esc(e.tag)}"`, !eventOff.has(e.tag),
+      e.label && e.label !== e.tag ? `${e.tag} · ${e.label}` : e.tag, Number(e.count) || 0,
+      eventOff.has(e.tag) ? '켜면 다시 보입니다' : '끄면 이 이벤트의 조합이 빠집니다'));
+    if (rest.length) {
+      parts.push(chip('__rest__', 'data-fs-ev-rest="1"', restIsOn(), `그 외 ${rest.length}개 이벤트`,
+        rest.reduce((n, e) => n + (Number(e.count) || 0), 0),
+        '이름이 아니라 조합 안의 태그로 걸린 이벤트들 - 한 번에 켜고 끕니다: ' + rest.map(e => e.tag).join(', ')));
+    }
+    eventChips.innerHTML = parts.join('');
+  }
+
+  /** 서버가 첫 쪽에 실어 보낸 이벤트 목록을 합친다(deep 단계가 더 찾을 수 있다). 순서는 처음 본 순서. */
+  function mergeEventCatalog(list) {
+    if (!Array.isArray(list)) return;
+    const known = new Set(eventCatalog.map(e => e.tag));
+    for (const e of list) {
+      if (!e || typeof e.tag !== 'string' || known.has(e.tag)) continue;
+      eventCatalog.push({tag: e.tag, label: String(e.label || e.tag), count: Number(e.count) || 0, rank: Number.isFinite(Number(e.rank)) ? Number(e.rank) : 4});
+      known.add(e.tag);
+    }
+    paintEventChips();
   }
 
   /** Spotlight 크기. 결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반. */
@@ -321,15 +405,18 @@ export function initFastSearch() {
     active = -1;
     groups = new Map();
     eventPaging = freshEventPaging();
-    eventOptions.hidden = !enabled.has('event');
-    if (eventOptions.hidden) closePersonPopup();
+    // 질의가 바뀌면 걸린 이벤트도 끈 것도 새로 시작한다.
+    eventCatalog = [];
+    eventOff = new Set();
+    paintEventChips();
+    if (!enabled.has('event')) closePersonPopup();
     const query = input.value.trim();
     pending = new Set([...enabled].filter(id => query || id === 'wildcard'));
-    renderCurrent(query);
+    render(query);
     timer = setTimeout(() => run(mine), delay);
   }
 
-  /** 이벤트 조건(인원·등급·안에서 찾기)만 바뀌었을 때 - 다른 갈래는 그대로 둔다. */
+  /** 이벤트 조건(인원·등급·안에서 찾기·끈 이벤트)만 바뀌었을 때 - 다른 갈래는 그대로 둔다. */
   function scheduleEvents(delay) {
     clearTimeout(eventTimer);
     if (!enabled.has('event')) return;
@@ -340,7 +427,7 @@ export function initFastSearch() {
     eventPaging = freshEventPaging();
     const query = input.value.trim();
     if (query) pending.add('event');
-    renderCurrent(query);
+    render(query);
     eventTimer = setTimeout(() => {
       if (mine !== seq || !open || !query) return;
       requestEventPage(mine);
@@ -363,9 +450,9 @@ export function initFastSearch() {
     const query = input.value.trim();
     if (!query) return;
     const slot = requests.get('event');
-    const {rating, person} = filterParams();
+    const {rating, person, exclude} = filterParams();
     slot.wanted = {
-      query, mine, rating, person, refine: eventRefine,
+      query, mine, rating, person, exclude, refine: eventRefine,
       detail: EVENT_PHASES[eventPaging.phase], offset: eventPaging.offset,
     };
     void drain(SOURCES.find(s => s.id === 'event'));
@@ -398,6 +485,7 @@ export function initFastSearch() {
           params.set('q', request.refine ? `${query}, ${request.refine}` : query);
           params.set('rating', request.rating);
           params.set('person', request.person);
+          params.set('event_exclude', request.exclude);
           params.set('event_detail', request.detail);
           params.set('event_offset', String(request.offset));
         }
@@ -414,9 +502,12 @@ export function initFastSearch() {
         if (mine !== seq || !open || !enabled.has(source.id)) continue;
         if (isEvent) {
           // 같은 phase/offset/조건이 아니면 낡은 쪽이다 - 조건이 바뀐 뒤에 온 답.
+          // (걸린 이벤트 목록을 합치기 **전**에 비교한다 - 합친 뒤엔 exclude 문구가 달라질 수 있다.)
           const now = filterParams();
           if (request.detail !== EVENT_PHASES[eventPaging.phase] || request.offset !== eventPaging.offset
-              || request.refine !== eventRefine || request.rating !== now.rating || request.person !== now.person) continue;
+              || request.refine !== eventRefine || request.rating !== now.rating || request.person !== now.person
+              || request.exclude !== now.exclude) continue;
+          mergeEventCatalog(group.events);
           if (eventPaging.phase === 1 && eventPaging.deepStart < 0 && group.items.length) {
             eventPaging.deepStart = eventPaging.items.length;
           }
@@ -429,30 +520,22 @@ export function initFastSearch() {
           }
           groups.set('event', {source: 'event', label: source.label, items: eventPaging.items, note: group.note || ''});
           pending.delete('event');
-          renderCurrent(query);
+          render(query);
           // 한 쪽으로 화면이 안 차면 스크롤이 생길 때까지 이어서 부른다.
           if (!eventPaging.done && body.scrollHeight <= body.clientHeight + 4) requestEventPage(mine);
           continue;
         }
         groups.set(source.id, group);
         pending.delete(source.id);
-        renderCurrent(query);
+        render(query);
       }
     } finally {
       slot.busy = false;
     }
   }
 
-  function renderCurrent(query) {
-    const visible = SOURCES.filter(s => enabled.has(s.id));
-    const current = visible.map(source =>
-      groups.get(source.id) || {source: source.id, label: source.label, items: [],
-        note: pending.has(source.id) ? '준비 및 검색 중…' : ''});
-    render({groups: current}, query);
-  }
-
-  function rowHtml(item, attr, extraClass, subtitle) {
-    return `<button type="button" class="fs-row${extraClass || ''}" ${attr}>`
+  function rowHtml(item, attr, subtitle) {
+    return `<button type="button" class="fs-row" ${attr}>`
       + `<span class="fs-title">${esc(item.title)}</span>`
       + (subtitle ? `<span class="fs-sub">${esc(subtitle)}</span>` : '')
       + (item.meta ? `<span class="fs-meta">${esc(item.meta)}</span>` : '')
@@ -470,54 +553,80 @@ export function initFastSearch() {
       + '</button>';
   }
 
-  function render(payload, query) {
+  /** 몸통을 다시 그린다. 앞 갈래들은 `.fs-lanes` 에, 이벤트 목록은 `.fs-event-list` 에 -
+   *  이벤트 구역 머리(조건 줄·칩)는 다시 만들지 않는다(입력 포커스 보존). */
+  function render(query) {
     const selectedKey = rows[active]?._searchKey;
     const keepScroll = body.scrollTop;
     rows = [];
     body.setAttribute('aria-busy', String(pending.size > 0));
-    if (!payload) {
-      body.innerHTML = '<div class="fs-empty">검색에 실패했습니다.</div>';
-      countEl.textContent = '';
-      return;
-    }
+
+    // ── 앞 갈래들 ──
     const parts = [];
-    for (const group of payload.groups || []) {
+    let lanePending = false;
+    for (const source of SOURCES) {
+      if (source.id === 'event' || !enabled.has(source.id)) continue;
+      const group = groups.get(source.id) || {source: source.id, label: source.label, items: [],
+        note: pending.has(source.id) ? '준비 및 검색 중…' : ''};
+      if (pending.has(source.id)) lanePending = true;
       if (!group.items.length && !group.note) continue;
-      const isEvent = group.source === 'event';
       parts.push(`<div class="fs-cap">${esc(group.label)}`
         + (group.note ? `<span class="fs-note">${esc(group.note)}</span>` : '')
         + '</div>');
-      let lastAnchor = null;
-      group.items.forEach((item, i) => {
-        if (isEvent && i === eventPaging.deepStart) {
-          parts.push('<div class="fs-cap fs-cap-sub">9–16태그 조합</div>');
-          lastAnchor = null;              // 단계가 바뀌면 이벤트 머리글을 다시 찍는다
-        }
+      for (const item of group.items) {
         const index = rows.length;
         rows.push({...item, _source: group.source, _searchKey: `${group.source} ${item.value}`});
-        if (!isEvent) {
-          parts.push(rowHtml(item, `data-fs-index="${index}"`, '', item.subtitle));
-          return;
-        }
-        // 이벤트 = 카테고리. 서버가 이벤트별로 묶어 보내니 바뀌는 자리에만 이름을 찍는다.
-        const anchor = item.anchor || item.title;
-        if (anchor !== lastAnchor) {
-          parts.push(`<div class="fs-cap fs-cap-ev">${esc(item.title)}</div>`);
-          lastAnchor = anchor;
-        }
-        parts.push(eventRowHtml(item, `data-fs-index="${index}"`, ''));
-      });
-      if (isEvent && group.items.length) {
-        parts.push(`<div class="fs-end">${eventPaging.done ? '이벤트 끝' : '아래로 내리면 더 불러옵니다…'}</div>`);
-      } else if (!group.items.length && !pending.has(group.source) && query) {
+        parts.push(rowHtml(item, `data-fs-index="${index}"`, item.subtitle));
+      }
+      if (!group.items.length && !pending.has(source.id) && query) {
         // 갈래 머리만 남고 아래가 비면 "안 왔나?" 로 읽힌다 - 없다고 말한다.
-        parts.push(`<div class="fs-end">${isEvent ? '조건에 맞는 조합이 없습니다' : '찾은 것이 없습니다'}</div>`);
+        parts.push('<div class="fs-end">찾은 것이 없습니다</div>');
       }
     }
-    if (!rows.length && !pending.size) {
-      parts.push(`<div class="fs-empty">${query ? '찾은 것이 없습니다.' : '검색어를 입력하세요.'}</div>`);
+    const laneRows = rows.length;
+
+    // ── 이벤트 구역 ──
+    const showEvents = enabled.has('event');
+    eventSection.hidden = !showEvents;
+    if (showEvents) {
+      const group = groups.get('event');
+      const eventPending = pending.has('event');
+      eventNote.textContent = group?.note || '';
+      const eparts = [];
+      if (group && group.items.length) {
+        let lastAnchor = null;
+        group.items.forEach((item, i) => {
+          if (i === eventPaging.deepStart) {
+            eparts.push('<div class="fs-cap fs-cap-sub">9–16태그 조합</div>');
+            lastAnchor = null;              // 단계가 바뀌면 이벤트 머리글을 다시 찍는다
+          }
+          const index = rows.length;
+          rows.push({...item, _source: 'event', _searchKey: `event ${item.value}`});
+          // 이벤트 = 카테고리. 서버가 이벤트별로 묶어 보내니 바뀌는 자리에만 이름을 찍는다.
+          const anchor = item.anchor || item.title;
+          if (anchor !== lastAnchor) {
+            eparts.push(`<div class="fs-cap fs-cap-ev">${esc(item.title)}</div>`);
+            lastAnchor = anchor;
+          }
+          eparts.push(eventRowHtml(item, `data-fs-index="${index}"`, ''));
+        });
+        eparts.push(`<div class="fs-end">${eventPaging.done ? '이벤트 끝' : '아래로 내리면 더 불러옵니다…'}</div>`);
+      } else if (eventPending) {
+        eparts.push('<div class="fs-end">조합을 찾는 중…</div>');
+      } else if (query) {
+        eparts.push(`<div class="fs-end">${group && /실패/.test(group.note || '') ? esc(group.note) : '조건에 맞는 조합이 없습니다'}</div>`);
+      }
+      eventList.innerHTML = eparts.join('');
     }
-    body.innerHTML = parts.join('');
+
+    // ── 빈 상태 ──
+    if (!query) {
+      parts.push('<div class="fs-empty">검색어를 입력하세요.</div>');
+    } else if (!laneRows && !lanePending && !showEvents) {
+      parts.push('<div class="fs-empty">찾은 것이 없습니다.</div>');
+    }
+    lanesEl.innerHTML = parts.join('');
+
     body.scrollTop = keepScroll;          // 이어 붙인 뒤 위로 튀지 않게
     countEl.textContent = pending.size ? `${rows.length} · 검색 중` : (rows.length ? `${rows.length}` : '');
     const previousIndex = selectedKey == null ? -1 : rows.findIndex(r => r._searchKey === selectedKey);

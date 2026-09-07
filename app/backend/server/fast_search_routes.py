@@ -147,7 +147,7 @@ def _warm_neighbor_index_once() -> None:
 
 
 def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], str]:
-    from core.event_preset.fast_search_catalog import search_catalog
+    from core.event_preset.fast_search_catalog import matched_events, search_catalog
 
     # 등급·인원은 쉼표로 여럿 올 수 있다(한 줄 토글). 검증은 카탈로그가 한다 - 모르는
     # 값이 하나라도 있으면 빈 결과지, 넓어지는 일은 없다.
@@ -158,9 +158,11 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
     # 앞 offset 개를 잘라내면 **안정된 다음 쪽**이 된다(앞쪽은 limit 이 커져도 같다).
     # 프론트가 '더 보기' 버튼 없이 스크롤로 이어 받는다(사용자 지정 2026-09-07).
     offset = max(0, int(opts.get('event_offset') or 0))
+    # 사용자가 끈 이벤트 칩(OFF 목록). ON 목록이 아닌 이유는 catalog.search_catalog 참고.
+    exclude = [a.strip() for a in str(opts.get('event_exclude') or '').split(',') if a.strip()]
     # grouped: 이벤트별로 묶어 낸다 - 프론트가 이벤트 이름을 머리글로 한 번만 찍는다.
     fetched = search_catalog(query, offset + limit, rating=rating, person=person, detail=detail,
-                             grouped=True)
+                             grouped=True, exclude=exclude)
     matches = fetched[offset:]
     # 요청한 만큼 못 채웠으면 이 phase 는 끝이다 - 프론트가 다음 단계(deep)로 넘어간다.
     exhausted = len(fetched) < offset + limit
@@ -179,7 +181,15 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
     # 결과를 다 만든 뒤에 데운다 - 앞에서 시작하면 데우기가 잡은 락에 이 검색이 기다린다.
     _warm_neighbor_index_once()
     # 세 번째 값은 갈래별 부가 정보 - run_all 이 group 에 얹는다.
-    return items, note, {"exhausted": exhausted, "offset": offset}
+    extra = {"exhausted": exhausted, "offset": offset}
+    if offset == 0:
+        # 첫 쪽에만: 이 질의·필터에 걸린 이벤트 전부(토글 칩). 끈 이벤트를 빼기 **전** 목록이라
+        # 끈 칩도 남아 있어 다시 켤 수 있다.
+        # rank ≤ 3 = 이름으로 걸린 이벤트(칩 하나씩), 4 = 쉼표 AND 로 행 안의 태그만 걸린 이벤트
+        # (프론트가 "그 외 N" 칩 하나로 묶는다 - 26개가 늘어서면 머리가 목록을 밀어낸다, 실측).
+        extra["events"] = [{"tag": event.tag, "label": event.label, "count": count, "rank": rank}
+                           for event, count, rank in matched_events(query, rating=rating, person=person, detail=detail)]
+    return items, note, extra
 
 
 def _event_neighbor_items(anchor: str, tags: list[str], rating: str, person: str, limit: int) -> dict:
@@ -221,7 +231,7 @@ def register_fast_search_routes(
     @app.get("/api/fast-search")
     async def api_fast_search(q: str = "", sources: str = "", limit: int = DEFAULT_LIMIT,
                               rating: str = "", person: str = "", mode: str = "", event_detail: str = "basic",
-                              event_offset: int = 0):
+                              event_offset: int = 0, event_exclude: str = ""):
         query = str(q or "").strip()
         if len(query) > MAX_QUERY:
             return JSONResponse({"error": "검색어가 너무 깁니다."}, status_code=400,
@@ -237,8 +247,11 @@ def register_fast_search_routes(
         if event_offset < 0 or event_offset > 10000:
             return JSONResponse({"error": "이벤트 offset 이 범위를 벗어났습니다."}, status_code=400,
                                 headers=_no_store())
+        if len(event_exclude) > 4000:
+            return JSONResponse({"error": "제외 이벤트 목록이 너무 깁니다."}, status_code=400,
+                                headers=_no_store())
         opts = {"rating": rating, "person": person, "mode": mode, 'event_detail': event_detail,
-                'event_offset': event_offset}
+                'event_offset': event_offset, 'event_exclude': event_exclude}
 
         def run_all():
             groups = []

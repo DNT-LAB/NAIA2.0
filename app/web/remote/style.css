@@ -28290,10 +28290,29 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-family: var(--font-mono); font-size: 10px;
 }
 .fs-chip.is-on { border-color: rgba(139,118,255,0.55); background: rgba(88,76,170,0.28); color: var(--text-primary); }
-/* 이벤트 조건 한 줄: [인원 ▾] [G S Q E] [안에서 찾기]. 예전의 select 두 개 + 캡션 문구는
-   같은 것을 두 번 보여 줬다(사용자 지적 2026-09-07). */
-.fs-event-options { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border-dim); color: var(--text-muted); font-size: 10px; }
-.fs-event-options[hidden] { display: none; }
+/* 이벤트 구역 - 결과 몸통의 마지막 구역. 조건 줄과 토글 칩은 **이 구역의 머리**에 있다(태그·아티스트·
+   캐릭터 갈래에는 필요 없는 것이라 창 위에 두지 않는다 - 사용자 지정 2026-09-07). 머리는 이벤트 목록을
+   스크롤하는 동안 붙어 있다(sticky, 스크롤 상자는 .fs-body). */
+.fs-event-section[hidden] { display: none; }
+.fs-event-head { position: sticky; top: 0; z-index: 1; background: rgba(15,15,23,0.985); border-bottom: 1px solid var(--border-dim); }
+/* 조건 한 줄: [이벤트 · 3-8태그 조합] [인원 ▾] [G S Q E] [안에서 찾기]. 예전의 select 두 개 + 캡션
+   문구는 같은 것을 두 번 보여 줬다(사용자 지적 2026-09-07). */
+.fs-event-options { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding: 7px 10px 5px; color: var(--text-muted); font-size: 10px; }
+.fs-cap.fs-cap-inline { padding: 0; margin-right: 2px; }
+/* 걸린 이벤트 토글 칩(둘 이상일 때만). 끄면 그 이벤트의 행이 빠진다 - 최소 하나는 켜져 있다. */
+/* 두 줄 남짓을 넘으면 안에서 스크롤 - 붙어 있는 머리가 목록을 밀어내지 않게. */
+.fs-ev-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; max-height: 58px; overflow-y: auto; }
+.fs-ev-chips[hidden] { display: none; }
+.fs-ev-toggle {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 2px 8px; border: 1px solid var(--border-dim); border-radius: 999px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px; text-decoration: line-through;
+}
+.fs-ev-toggle b { font-weight: 600; font-size: 9px; color: var(--text-dim); }
+.fs-ev-toggle:hover { border-color: var(--text-dim); }
+.fs-ev-toggle.is-on { border-color: rgba(230,168,74,0.45); background: rgba(230,168,74,0.10); color: var(--text-primary); text-decoration: none; }
+.fs-ev-toggle.is-on b { color: #e6a84a; }
 /* 인원 버튼 - 누르면 아래 체크 목록. 켜진 수를 같이 보여 준다(8/13 · 전체). */
 .fs-person-btn {
   display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px;

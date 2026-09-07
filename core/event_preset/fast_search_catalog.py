@@ -158,26 +158,17 @@ def _filter_sets(rating, person):
     return ratings, persons
 
 
-def search_catalog(query: str, limit: int, *, rating: str = '', person: str = '',
-                   detail: str = 'basic', grouped: bool = False) -> list[tuple[Event, Variant]]:
-    """Observed combinations matching `query`, best first, at most `limit`.
-
-    grouped=False (Chat): within a match rank, round-robin across events so a short
-    list shows different events. grouped=True (Fast Search list): events are
-    categories - all variants of one event stay together (rank, then the event's
-    top count, then tag), so the screen prints each event name once instead of on
-    every row (user request 2026-09-07). An event has at most ~52 variants, so a
-    category is about one screen. Both orders are total orders: offset paging
-    (`search_catalog(q, offset + n)[offset:]`) stays a stable prefix.
-    """
+def _matched(query: str, rating: str, person: str, detail: str):
+    """Events matching `query` under the rating/person filters, each with its variants
+    sorted by observed count, ordered (rank, -top count, tag). None = invalid input."""
     # Comma-separated tags are a set of required conditions, never a prompt
     # assembled from independent observations. Order cannot alter selection.
     terms = tuple(sorted({normalize(t) for t in str(query).split(',') if normalize(t)}))
-    if not terms or limit <= 0:
-        return []
+    if not terms:
+        return None
     filters = _filter_sets(rating, person)
     if filters is None:
-        return []
+        return None
     ratings, persons = filters
     events = load_catalog(detail)
     compound = _compound_candidates(events, terms, detail) if len(terms) > 1 else None
@@ -200,6 +191,44 @@ def search_catalog(query: str, limit: int, *, rating: str = '', person: str = ''
         if variants:
             matches.append((rank if rank is not None else 4, -variants[0].count, event, variants))
     matches.sort(key=lambda m: (m[0], m[1], m[2].tag))
+    return matches
+
+
+def matched_events(query: str, *, rating: str = '', person: str = '',
+                   detail: str = 'basic') -> list[tuple[Event, int, int]]:
+    """Every event the query reaches under the filters as (event, variant count, rank),
+    in list order. Drives the event toggle chips; never narrowed by `exclude`.
+    rank 0-3 = the query names the event (tag/alias/prefix/substring); rank 4 = a
+    comma-AND query only found the tags inside this event's rows."""
+    matches = _matched(query, rating, person, detail)
+    return [] if matches is None else [(event, len(variants), rank) for rank, _t, event, variants in matches]
+
+
+def search_catalog(query: str, limit: int, *, rating: str = '', person: str = '',
+                   detail: str = 'basic', grouped: bool = False,
+                   exclude=None) -> list[tuple[Event, Variant]]:
+    """Observed combinations matching `query`, best first, at most `limit`.
+
+    grouped=False (Chat): within a match rank, round-robin across events so a short
+    list shows different events. grouped=True (Fast Search list): events are
+    categories - all variants of one event stay together (rank, then the event's
+    top count, then tag), so the screen prints each event name once instead of on
+    every row (user request 2026-09-07). An event has at most ~52 variants, so a
+    category is about one screen. Both orders are total orders: offset paging
+    (`search_catalog(q, offset + n)[offset:]`) stays a stable prefix.
+
+    exclude: event tags switched off by the user's chips. It is an OFF list on purpose:
+    the deep catalog may reveal more events mid-scroll, and an ON list would change
+    between pages and break the prefix property.
+    """
+    if limit <= 0:
+        return []
+    matches = _matched(query, rating, person, detail)
+    if matches is None:
+        return []
+    if exclude:
+        off = {normalize(a) for a in exclude if normalize(a)}
+        matches = [m for m in matches if normalize(m[2].tag) not in off]
     selected, seen = [], set()
     if grouped:
         for _rank, _top, event, variants in matches:

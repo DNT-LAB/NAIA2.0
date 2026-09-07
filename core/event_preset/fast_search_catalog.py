@@ -159,7 +159,17 @@ def _filter_sets(rating, person):
 
 
 def search_catalog(query: str, limit: int, *, rating: str = '', person: str = '',
-                   detail: str = 'basic') -> list[tuple[Event, Variant]]:
+                   detail: str = 'basic', grouped: bool = False) -> list[tuple[Event, Variant]]:
+    """Observed combinations matching `query`, best first, at most `limit`.
+
+    grouped=False (Chat): within a match rank, round-robin across events so a short
+    list shows different events. grouped=True (Fast Search list): events are
+    categories - all variants of one event stay together (rank, then the event's
+    top count, then tag), so the screen prints each event name once instead of on
+    every row (user request 2026-09-07). An event has at most ~52 variants, so a
+    category is about one screen. Both orders are total orders: offset paging
+    (`search_catalog(q, offset + n)[offset:]`) stays a stable prefix.
+    """
     # Comma-separated tags are a set of required conditions, never a prompt
     # assembled from independent observations. Order cannot alter selection.
     terms = tuple(sorted({normalize(t) for t in str(query).split(',') if normalize(t)}))
@@ -191,6 +201,17 @@ def search_catalog(query: str, limit: int, *, rating: str = '', person: str = ''
             matches.append((rank if rank is not None else 4, -variants[0].count, event, variants))
     matches.sort(key=lambda m: (m[0], m[1], m[2].tag))
     selected, seen = [], set()
+    if grouped:
+        for _rank, _top, event, variants in matches:
+            for variant in variants:
+                key = tuple(sorted(variant.copy_tags))
+                if key in seen:
+                    continue
+                selected.append((event, variant))
+                seen.add(key)
+                if len(selected) == limit:
+                    return selected
+        return selected
     # Exact anchors win over loose matches. Within each rank, show different
     # anchors before filling remaining slots with further observed variants.
     for rank in sorted({m[0] for m in matches}):

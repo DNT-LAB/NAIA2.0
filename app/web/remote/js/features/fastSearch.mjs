@@ -23,6 +23,10 @@
  *  - 등급은 Quick Filter 의 G S Q E 알약을 그대로 쓴다(여럿 켬, 기본 전부).
  *  - 예전엔 select 두 개 + 캡션 문구로 같은 것을 두 번 보여 줬다.
  *
+ * 이벤트 목록은 **이벤트가 카테고리**다(사용자 지적 2026-09-07 "쓸데없는 단어와 번역이
+ * 반복"): 서버가 이벤트별로 묶어 보내고(grouped), 여기서는 이벤트가 바뀌는 자리에 이름을
+ * 한 번만 찍는다. 행의 본문은 태그 조합이고 제목·번역은 행마다 반복하지 않는다.
+ *
  * 이벤트 행을 고르면 복사하고 **끝나지 않는다**: 아래에 섬(`.fs-island`)을 하나 더 띄워
  * (1) 고른 조합을 전부 포함하는 더 긴 조합, (2) 핵심(앵커) 태그를 뺀 나머지가 한 태그만
  * 다른 조합을 낸다. (1)에 든 것은 (2)에 다시 나오지 않는다. 섬의 행도 누르면 복사.
@@ -455,6 +459,17 @@ export function initFastSearch() {
       + '</button>';
   }
 
+  /** 이벤트 행: 본문은 태그 조합(줄바꿈해 전부 보인다). 이벤트 이름은 머리글이 맡으므로
+   *  행에 다시 쓰지 않는다. `chip` 이 있으면(섬에서 앵커와 다른 이벤트) 작은 칩으로 앞에 단다. */
+  function eventRowHtml(item, attr, chip) {
+    return `<button type="button" class="fs-row fs-row-ev" ${attr}>`
+      + '<span class="fs-ev-main">'
+      + (chip ? `<span class="fs-ev-chip">${esc(chip)}</span>` : '')
+      + `<span class="fs-sub">${esc(item.value)}</span></span>`
+      + (item.meta ? `<span class="fs-meta">${esc(item.meta)}</span>` : '')
+      + '</button>';
+  }
+
   function render(payload, query) {
     const selectedKey = rows[active]?._searchKey;
     const keepScroll = body.scrollTop;
@@ -472,15 +487,25 @@ export function initFastSearch() {
       parts.push(`<div class="fs-cap">${esc(group.label)}`
         + (group.note ? `<span class="fs-note">${esc(group.note)}</span>` : '')
         + '</div>');
+      let lastAnchor = null;
       group.items.forEach((item, i) => {
         if (isEvent && i === eventPaging.deepStart) {
           parts.push('<div class="fs-cap fs-cap-sub">9–16태그 조합</div>');
+          lastAnchor = null;              // 단계가 바뀌면 이벤트 머리글을 다시 찍는다
         }
         const index = rows.length;
-        const deep = isEvent && eventPaging.deepStart >= 0 && i >= eventPaging.deepStart;
-        const subtitle = deep ? item.value : item.subtitle;
         rows.push({...item, _source: group.source, _searchKey: `${group.source} ${item.value}`});
-        parts.push(rowHtml(item, `data-fs-index="${index}"`, deep ? ' fs-row-deep' : '', subtitle));
+        if (!isEvent) {
+          parts.push(rowHtml(item, `data-fs-index="${index}"`, '', item.subtitle));
+          return;
+        }
+        // 이벤트 = 카테고리. 서버가 이벤트별로 묶어 보내니 바뀌는 자리에만 이름을 찍는다.
+        const anchor = item.anchor || item.title;
+        if (anchor !== lastAnchor) {
+          parts.push(`<div class="fs-cap fs-cap-ev">${esc(item.title)}</div>`);
+          lastAnchor = anchor;
+        }
+        parts.push(eventRowHtml(item, `data-fs-index="${index}"`, ''));
       });
       if (isEvent && group.items.length) {
         parts.push(`<div class="fs-end">${eventPaging.done ? '이벤트 끝' : '아래로 내리면 더 불러옵니다…'}</div>`);
@@ -636,8 +661,10 @@ export function initFastSearch() {
       for (const item of items) {
         const index = islandRows.length;
         islandRows.push(item);
-        // 긴 조합은 줄바꿈해서 전부 보인다(deep 행과 같은 모양).
-        parts.push(rowHtml(item, `data-fs-island-index="${index}"`, ' fs-row-deep', item.value));
+        // 이벤트 이름은 앵커와 **다른** 이벤트 밑에 사는 조합에만 칩으로 단다 - 같은
+        // 이벤트면 머리줄의 앵커가 이미 말하고 있어 행마다 반복할 이유가 없다.
+        const foreign = item.anchor && item.anchor !== anchor ? item.title : '';
+        parts.push(eventRowHtml(item, `data-fs-island-index="${index}"`, foreign));
       }
     }
     islandBody.innerHTML = parts.join('');

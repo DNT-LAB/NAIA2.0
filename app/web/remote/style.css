@@ -28360,9 +28360,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .fs-event-refine::-webkit-search-cancel-button { display: none; }
 /* 이벤트 목록 끝/이어받기 안내. 버튼이 아니다 - 스크롤이 다음 쪽을 부른다. */
 .fs-end { padding: 6px 10px 8px; color: var(--text-dim); font-family: var(--font-mono); font-size: 9.5px; text-align: center; }
-.fs-cap-sub { margin-top: 10px; color: var(--text-muted); }
-.fs-row-deep { flex-wrap: wrap; }
-.fs-row-deep .fs-sub { flex-basis: 100%; order: 3; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+/* ⚠️ 아래 둘은 .fs-cap 보다 파일 앞에 있어 같은 특이도면 진다(대문자·8.5px 가 이겼다, 실측). */
+.fs-cap.fs-cap-sub { margin-top: 10px; color: var(--text-muted); }
+/* 이벤트 머리글 - 이벤트 이름·번역은 여기 한 번. 대문자 변환 없이 읽히는 크기로. */
+.fs-cap.fs-cap-ev { padding-top: 7px; font-size: 10px; letter-spacing: 0.2px; text-transform: none; color: var(--text-secondary); }
+/* 이벤트 행 - 본문이 태그 조합이다(제목 없음). [본문 | meta] 2열: 태그가 줄바꿈돼도 meta 는
+   오른쪽 칸에 머문다(flex-wrap 이었을 땐 meta 가 혼자 다음 줄로 떨어졌다). */
+/* ⚠️ `.fs-row` 가 뒤에 있어 `.fs-row-ev` 홑 선택자로는 display:flex 에 진다(실측). */
+.fs-row.fs-row-ev { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; padding-left: 18px; }
+.fs-ev-main { min-width: 0; line-height: 1.45; }
+.fs-row-ev .fs-sub { display: inline; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; color: #ebe9ff; }
+/* 섬에서 앵커와 다른 이벤트 밑에 사는 조합에만 붙는 이벤트 이름 칩 - 본문 앞에 inline 으로 흐른다 */
+.fs-ev-chip { display: inline-block; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: baseline; margin-right: 6px; padding: 0 6px; border: 1px solid var(--border-dim); border-radius: 999px; color: var(--text-muted); font-size: 9.5px; line-height: 1.6; }
 .fs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0 6px; }
 .fs-cap {
   display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 3px;
@@ -28411,5 +28420,5 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 @media (max-width: 640px) {
   .fs-title { max-width: 60%; }
   .fs-sub { display: none; }
-  .fs-row-deep .fs-sub { display: block; }
+  .fs-row-ev .fs-sub { display: inline; }
 }

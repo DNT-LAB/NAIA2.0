@@ -158,7 +158,9 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
     # 앞 offset 개를 잘라내면 **안정된 다음 쪽**이 된다(앞쪽은 limit 이 커져도 같다).
     # 프론트가 '더 보기' 버튼 없이 스크롤로 이어 받는다(사용자 지정 2026-09-07).
     offset = max(0, int(opts.get('event_offset') or 0))
-    fetched = search_catalog(query, offset + limit, rating=rating, person=person, detail=detail)
+    # grouped: 이벤트별로 묶어 낸다 - 프론트가 이벤트 이름을 머리글로 한 번만 찍는다.
+    fetched = search_catalog(query, offset + limit, rating=rating, person=person, detail=detail,
+                             grouped=True)
     matches = fetched[offset:]
     # 요청한 만큼 못 채웠으면 이 phase 는 끝이다 - 프론트가 다음 단계(deep)로 넘어간다.
     exhausted = len(fetched) < offset + limit

@@ -90,8 +90,9 @@ def load_catalog(detail: str = 'basic') -> tuple[Event, ...]:
     return cached
 
 
-def _compound_candidates(events, terms, detail):
-    """Intersect literal tag/declared-alias postings, only built for multi-tag input."""
+def _tag_index(events, detail):
+    """tag -> row postings for one catalog. Built once per catalog object, shared by
+    multi-tag search and the neighbor lookup."""
     with _load_lock:
         existing = _tag_indexes.get(detail)
         if existing is None or existing[0] is not events:
@@ -107,7 +108,12 @@ def _compound_candidates(events, terms, detail):
                         postings.setdefault(normalize(tag), set()).add(row_id)
             existing = (events, postings, aliases, rows)
             _tag_indexes[detail] = existing
-    _, postings, aliases, rows = existing
+    return existing
+
+
+def _compound_candidates(events, terms, detail):
+    """Intersect literal tag/declared-alias postings, only built for multi-tag input."""
+    _, postings, aliases, rows = _tag_index(events, detail)
     candidates = None
     for term in terms:
         targets = {term} if term in postings else aliases.get(term, {term})
@@ -134,6 +140,16 @@ def _match_rank(event: Event, query: str) -> int | None:
     return None
 
 
+def _filter_sets(rating, person):
+    """Comma-separated (or single) rating/person filters -> frozensets. Empty = all.
+    Any unknown id makes the whole filter invalid (None) - a typo must not widen a search."""
+    ratings = frozenset(r.strip().casefold() for r in str(rating or '').split(',') if r.strip())
+    persons = frozenset(p.strip() for p in str(person or '').split(',') if p.strip())
+    if not ratings <= frozenset(RATING_IDS) or not persons <= frozenset(PERSON_IDS):
+        return None
+    return ratings, persons
+
+
 def search_catalog(query: str, limit: int, *, rating: str = '', person: str = '',
                    detail: str = 'basic') -> list[tuple[Event, Variant]]:
     # Comma-separated tags are a set of required conditions, never a prompt
@@ -141,8 +157,10 @@ def search_catalog(query: str, limit: int, *, rating: str = '', person: str = ''
     terms = tuple(sorted({normalize(t) for t in str(query).split(',') if normalize(t)}))
     if not terms or limit <= 0:
         return []
-    if (rating and rating not in RATING_IDS) or (person and person not in PERSON_IDS):
+    filters = _filter_sets(rating, person)
+    if filters is None:
         return []
+    ratings, persons = filters
     events = load_catalog(detail)
     compound = _compound_candidates(events, terms, detail) if len(terms) > 1 else None
     matches = []
@@ -156,16 +174,13 @@ def search_catalog(query: str, limit: int, *, rating: str = '', person: str = ''
         if compound is None and rank is None:
             continue
         variants = [v for v in (compound.get(ei, ()) if compound is not None else event.variants)
-                    if (not rating or v.rating == rating) and (not person or v.person == person)]
+                    if (not ratings or v.rating in ratings) and (not persons or v.person in persons)]
+        # Observed count decides the order inside an event, regardless of rating or
+        # person (user decision 2026-09-07). An earlier "different persons first"
+        # reorder pushed an 86-count row behind five 1-2 count rows (measured: yuri).
         variants.sort(key=lambda v: (-v.count, v.partition, v.tags))
         if variants:
-            # Offer distinct person contexts before another rating of the
-            # same context. Do not synthesize or append population tags.
-            first, rest, persons = [], [], set()
-            for variant in variants:
-                (rest if variant.person in persons else first).append(variant)
-                persons.add(variant.person)
-            matches.append((rank if rank is not None else 4, -variants[0].count, event, first + rest))
+            matches.append((rank if rank is not None else 4, -variants[0].count, event, variants))
     matches.sort(key=lambda m: (m[0], m[1], m[2].tag))
     selected, seen = [], set()
     # Exact anchors win over loose matches. Within each rank, show different
@@ -187,3 +202,53 @@ def search_catalog(query: str, limit: int, *, rating: str = '', person: str = ''
                     break
             buckets = remaining
     return selected
+
+
+def warm_neighbor_index() -> None:
+    """Load both catalogs and build their tag postings. Idempotent; safe from a
+    daemon thread. The first neighbor lookup otherwise pays ~1.2 s (measured 2026-09-07)."""
+    for detail in ('basic', 'deep'):
+        _tag_index(load_catalog(detail), detail)
+
+
+def event_neighbors(anchor: str, tags, *, rating: str = '', person: str = '', limit: int = 20):
+    """Read-only neighbors of one chosen combination, across both catalogs.
+
+    `anchor` is the event tag the row came from; `tags` is the copied combination.
+    Let S = tags minus anchor. Every candidate row must contain the anchor. Then:
+      supersets - S is a strict subset of the row (longer combinations that keep all of it);
+      near      - the row differs from S by at most one tag on each side and is not a
+                  superset (one tag swapped, or one tag dropped). Supersets never repeat here.
+    Both lists are sorted by observed count; identical tag sets are reported once.
+    """
+    filters = _filter_sets(rating, person)
+    anchor_key = normalize(anchor)
+    chosen = {normalize(t) for t in tags if normalize(t)}
+    if filters is None or not anchor_key or limit <= 0:
+        return {'supersets': [], 'near': []}
+    ratings, persons = filters
+    core = chosen - {anchor_key}
+    supersets, near, seen = [], [], {tuple(sorted(chosen))}
+    for detail in ('basic', 'deep'):
+        events = load_catalog(detail)
+        _, postings, _aliases, rows = _tag_index(events, detail)
+        for row_id in postings.get(anchor_key, ()):
+            ei, variant = rows[row_id]
+            if (ratings and variant.rating not in ratings) or (persons and variant.person not in persons):
+                continue
+            row_tags = {normalize(t) for t in variant.tags}
+            key = tuple(sorted(row_tags))
+            if key in seen:
+                continue
+            rest = row_tags - {anchor_key}
+            if core < rest:
+                supersets.append((events[ei], variant, detail))
+            elif len(core - rest) <= 1 and len(rest - core) <= 1:
+                near.append((events[ei], variant, detail))
+            else:
+                continue
+            seen.add(key)
+    order = lambda m: (-m[1].count, len(m[1].tags), m[1].partition, m[1].tags)
+    supersets.sort(key=order)
+    near.sort(key=order)
+    return {'supersets': supersets[:limit], 'near': near[:limit]}

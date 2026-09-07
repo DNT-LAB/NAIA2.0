@@ -16,6 +16,16 @@
  * 이벤트는 "더 보기" 버튼 없이 **스크롤로 이어서** 본다: 3–8태그 조합을 다 보이면
  * 9–16태그 조합으로 넘어가고, 끝나면 끝이라고 말한다. 이벤트 안에서 다시 좁히는
  * 칸(AND)이 따로 있다.
+ *
+ * 이벤트 조건은 **한 줄**이다(사용자 지정 2026-09-07): [인원 ▾] [G S Q E] [안에서 찾기].
+ *  - 인원은 Interactive 의 ALT 팝업과 같은 체크 목록(여럿 켬). 기본은 **여성이 들어간
+ *    구성 전부**(8/13). 남성만·기타는 꺼져 있다.
+ *  - 등급은 Quick Filter 의 G S Q E 알약을 그대로 쓴다(여럿 켬, 기본 전부).
+ *  - 예전엔 select 두 개 + 캡션 문구로 같은 것을 두 번 보여 줬다.
+ *
+ * 이벤트 행을 고르면 복사하고 **끝나지 않는다**: 아래에 섬(`.fs-island`)을 하나 더 띄워
+ * (1) 고른 조합을 전부 포함하는 더 긴 조합, (2) 핵심(앵커) 태그를 뺀 나머지가 한 태그만
+ * 다른 조합을 낸다. (1)에 든 것은 (2)에 다시 나오지 않는다. 섬의 행도 누르면 복사.
  */
 
 const SOURCES = [
@@ -30,9 +40,23 @@ const DEBOUNCE_MS = 170;
 const PER_SOURCE = 8;
 const EVENT_PAGE = 8;
 const EVENT_PHASES = ['basic', 'deep'];   // 3–8태그 -> 9–16태그 -> 끝
-const PERSON_OPTIONS = ['1girl_solo', '1girl', '1girl_1boy', '1girl_multiple_boys',
-  '2girls', 'multiple_girls', '1boy_solo', '1boy', '1boy_multiple_girls',
-  '2boys', 'multiple_boys', 'multiple_girls_multiple_boys', 'other'];
+const RATING_OPTIONS = [
+  { id: 'g', label: 'G', title: 'General' },
+  { id: 's', label: 'S', title: 'Sensitive' },
+  { id: 'q', label: 'Q', title: 'Questionable' },
+  { id: 'e', label: 'E', title: 'Explicit' },
+];
+// 서버 카탈로그의 13개 인원 분면. 묶음 머리글은 ALT 팝업과 같은 방식(무엇을 고르는지).
+const PERSON_GROUPS = [
+  { g: '여성', ids: ['1girl_solo', '1girl', '2girls', 'multiple_girls'] },
+  { g: '혼성', ids: ['1girl_1boy', '1girl_multiple_boys', '1boy_multiple_girls', 'multiple_girls_multiple_boys'] },
+  { g: '남성', ids: ['1boy_solo', '1boy', '2boys', 'multiple_boys'] },
+  { g: '기타', ids: ['other'] },
+];
+const PERSON_IDS = PERSON_GROUPS.flatMap(group => group.ids);
+// 기본값: 여성이 들어간 구성 전부(사용자 지정). 남성만·기타는 꺼짐.
+const DEFAULT_PERSONS = [...PERSON_GROUPS[0].ids, ...PERSON_GROUPS[1].ids];
+const NEIGHBOR_LIMIT = 20;
 
 export function initFastSearch() {
   let overlay = null, input = null, body = null, countEl = null, chipRow = null;
@@ -42,9 +66,14 @@ export function initFastSearch() {
   // 가벼운 사전들만 기본으로 켠다. 나머지는 사용자가 칩으로 켠다(지연 로딩).
   let enabled = new Set(['tag', 'artist', 'character']);
   let groups = new Map(), pending = new Set();
-  let eventOptions = null, eventRating = '', eventPerson = '', eventRefine = '';
+  let eventOptions = null, eventRefine = '';
+  let eventRatings = new Set(RATING_OPTIONS.map(r => r.id));
+  let eventPersons = new Set(DEFAULT_PERSONS);
+  let personBtn = null, personPopup = null;
   // 이벤트 페이징 상태. phase 는 EVENT_PHASES 의 인덱스, offset 은 그 phase 안의 위치.
   let eventPaging = freshEventPaging();
+  // 아래 섬(이웃 조합). 고른 이벤트 행 하나에 붙는다.
+  let island = null, islandBody = null, islandTitle = null, islandSeq = 0, islandRows = [];
   const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
 
   const esc = value => String(value == null ? '' : value)
@@ -59,6 +88,15 @@ export function initFastSearch() {
     if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
       window.showToast(message, kind || 'info');
     }
+  }
+
+  /** 서버에 보내는 등급·인원. 전부 켜져 있으면 빈 문자열(= 필터 없음). */
+  function filterParams() {
+    const rating = eventRatings.size === RATING_OPTIONS.length ? ''
+      : RATING_OPTIONS.map(r => r.id).filter(id => eventRatings.has(id)).join(',');
+    const person = eventPersons.size === PERSON_IDS.length ? ''
+      : PERSON_IDS.filter(id => eventPersons.has(id)).join(',');
+    return {rating, person};
   }
 
   function build() {
@@ -77,8 +115,10 @@ export function initFastSearch() {
       </div>
       <div class="fs-chips"></div>
       <div class="fs-event-options" hidden>
-        <label>인원 <select data-fs-person aria-label="이벤트 인원"><option value="">전체 인원</option>${PERSON_OPTIONS.map(id => `<option value="${id}">${id.replaceAll('_', ' ')}</option>`).join('')}</select></label>
-        <label>등급 <select data-fs-rating aria-label="이벤트 등급"><option value="">전체 등급</option><option value="g">G · General</option><option value="s">S · Sensitive</option><option value="q">Q · Questionable</option><option value="e">E · Explicit</option></select></label>
+        <button type="button" class="fs-person-btn" data-fs-person-btn aria-haspopup="dialog"
+                aria-expanded="false" title="이벤트 인원 구성 고르기">인원 <b data-fs-person-count></b></button>
+        <span class="fs-rating-bar" role="group" aria-label="이벤트 등급">${RATING_OPTIONS.map(r =>
+          `<button type="button" class="fs-rating-btn active" data-r="${r.id}" aria-pressed="true" title="${r.title}">${r.label}</button>`).join('')}</span>
         <input class="fs-event-refine" type="search" autocomplete="off" spellcheck="false"
                data-fs-event-refine aria-label="이벤트 안에서 찾기"
                placeholder="이벤트 안에서 찾기 (쉼표 = AND)">
@@ -91,10 +131,20 @@ export function initFastSearch() {
     countEl = overlay.querySelector('.fs-count');
     chipRow = overlay.querySelector('.fs-chips');
     eventOptions = overlay.querySelector('.fs-event-options');
-    eventOptions.addEventListener('change', event => {
-      if (event.target.matches('[data-fs-event-refine]')) return;
-      eventRating = eventOptions.querySelector('[data-fs-rating]').value;
-      eventPerson = eventOptions.querySelector('[data-fs-person]').value;
+    personBtn = eventOptions.querySelector('[data-fs-person-btn]');
+    personBtn.addEventListener('click', () => {
+      if (personPopup && !personPopup.hidden) closePersonPopup(); else openPersonPopup();
+    });
+    paintPersonButton();
+    eventOptions.addEventListener('click', event => {
+      const pill = event.target.closest('.fs-rating-btn');
+      if (!pill) return;
+      const id = pill.dataset.r;
+      // 마지막 하나까지 끄면 아무것도 안 나온다 - 최소 하나는 남긴다(소스 칩과 같은 규칙).
+      if (eventRatings.has(id) && eventRatings.size === 1) return;
+      if (eventRatings.has(id)) eventRatings.delete(id); else eventRatings.add(id);
+      pill.classList.toggle('active', eventRatings.has(id));
+      pill.setAttribute('aria-pressed', String(eventRatings.has(id)));
       scheduleEvents(0);
     });
     const refine = eventOptions.querySelector('[data-fs-event-refine]');
@@ -130,13 +180,105 @@ export function initFastSearch() {
     });
     // 이벤트는 버튼 없이 스크롤로 이어 본다 - 바닥에 가까워지면 다음 쪽을 부른다.
     body.addEventListener('scroll', maybeLoadMoreEvents, {passive: true});
-    // 바깥을 누르면 닫는다. 창 안의 클릭은 위에서 이미 처리했다.
+    // 바깥을 누르면 닫는다. 창·섬·인원 팝업 안의 클릭은 각자 처리한다.
     document.addEventListener('pointerdown', event => {
-      if (!open || overlay.contains(event.target)) return;
+      if (!open) return;
+      const t = event.target;
+      if (overlay.contains(t)) return;
+      if (island && !island.hidden && island.contains(t)) return;
+      if (personPopup && !personPopup.hidden && personPopup.contains(t)) return;
       close();
     }, true);
     window.addEventListener('resize', position);
     return overlay;
+  }
+
+  // ── 인원 팝업 (Interactive ALT 팝업과 같은 체크 목록) ─────────────────────
+  function ensurePersonPopup() {
+    if (personPopup) return personPopup;
+    personPopup = document.createElement('div');
+    personPopup.className = 'fs-person-popup';
+    personPopup.hidden = true;
+    document.body.append(personPopup);
+    // 포커스를 검색 칸에서 빼앗지 않는다(ALT 팝업과 같다).
+    personPopup.addEventListener('mousedown', event => event.preventDefault());
+    personPopup.addEventListener('click', event => {
+      const quick = event.target.closest('[data-fs-person-set]');
+      if (quick) {
+        const which = quick.dataset.fsPersonSet;
+        eventPersons = new Set(which === 'all' ? PERSON_IDS : DEFAULT_PERSONS);
+        paintPersonPopup();
+        paintPersonButton();
+        scheduleEvents(0);
+        return;
+      }
+      const row = event.target.closest('[data-fs-person]');
+      if (!row) return;
+      const id = row.dataset.fsPerson;
+      if (eventPersons.has(id) && eventPersons.size === 1) return;   // 최소 하나
+      if (eventPersons.has(id)) eventPersons.delete(id); else eventPersons.add(id);
+      row.classList.toggle('is-on', eventPersons.has(id));
+      row.setAttribute('aria-pressed', String(eventPersons.has(id)));
+      paintPersonButton();
+      scheduleEvents(120);      // 연달아 여러 개를 켜고 끄는 동안 요청을 줄 세우지 않는다
+    });
+    return personPopup;
+  }
+
+  function personPopupHtml() {
+    const list = PERSON_GROUPS.map(group =>
+      `<div class="fs-person-group">${esc(group.g)}</div>` + group.ids.map(id =>
+        `<button type="button" class="fs-person-row${eventPersons.has(id) ? ' is-on' : ''}"
+           data-fs-person="${esc(id)}" aria-pressed="${eventPersons.has(id)}">
+           <span class="fs-person-box"></span>
+           <span class="fs-person-label">${esc(id.replaceAll('_', ' '))}</span></button>`).join('')).join('');
+    return `<div class="fs-person-head">인원 구성
+        <span class="fs-person-quick">
+          <button type="button" data-fs-person-set="default" title="여성이 들어간 구성 전부 (기본)">기본</button>
+          <button type="button" data-fs-person-set="all">전체</button>
+        </span></div>
+      <div class="fs-person-list">${list}</div>
+      <div class="fs-person-foot">여럿을 켤 수 있습니다. 기본은 <b>여성이 들어간 구성 전부</b>입니다.</div>`;
+  }
+
+  function paintPersonPopup() {
+    if (!personPopup || personPopup.hidden) return;
+    personPopup.innerHTML = personPopupHtml();
+  }
+
+  function paintPersonButton() {
+    if (!personBtn) return;
+    const count = personBtn.querySelector('[data-fs-person-count]');
+    const all = eventPersons.size === PERSON_IDS.length;
+    count.textContent = all ? '전체' : `${eventPersons.size}/${PERSON_IDS.length}`;
+    personBtn.classList.toggle('is-filtered', !all);
+  }
+
+  function openPersonPopup() {
+    const popup = ensurePersonPopup();
+    popup.innerHTML = personPopupHtml();
+    popup.hidden = false;
+    personBtn.setAttribute('aria-expanded', 'true');
+    const rect = personBtn.getBoundingClientRect();
+    const pr = popup.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - pr.width - 8));
+    let top = rect.bottom + 6;
+    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, rect.top - pr.height - 6);
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+    document.addEventListener('pointerdown', onPersonOutside, true);
+  }
+
+  function closePersonPopup() {
+    if (personPopup) { personPopup.hidden = true; personPopup.innerHTML = ''; }
+    if (personBtn) personBtn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onPersonOutside, true);
+  }
+
+  function onPersonOutside(event) {
+    if (personPopup && personPopup.contains(event.target)) return;
+    if (event.target.closest?.('[data-fs-person-btn]')) return;   // 버튼 자체가 토글한다
+    closePersonPopup();
   }
 
   /** Spotlight 크기. 결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반. */
@@ -150,6 +292,7 @@ export function initFastSearch() {
       overlay.style.top = '64px';
       overlay.style.width = 'min(680px, calc(100vw - 32px))';
       overlay.style.maxHeight = 'min(420px, calc(100dvh - 96px))';
+      positionIsland();
       return;
     }
     const pad = 14;
@@ -162,6 +305,7 @@ export function initFastSearch() {
     overlay.style.top = `${Math.round(r.top + pad)}px`;
     overlay.style.width = `${width}px`;
     overlay.style.maxHeight = `${maxH}px`;
+    positionIsland();
   }
 
   function schedule(delay) {
@@ -174,6 +318,7 @@ export function initFastSearch() {
     groups = new Map();
     eventPaging = freshEventPaging();
     eventOptions.hidden = !enabled.has('event');
+    if (eventOptions.hidden) closePersonPopup();
     const query = input.value.trim();
     pending = new Set([...enabled].filter(id => query || id === 'wildcard'));
     renderCurrent(query);
@@ -214,8 +359,9 @@ export function initFastSearch() {
     const query = input.value.trim();
     if (!query) return;
     const slot = requests.get('event');
+    const {rating, person} = filterParams();
     slot.wanted = {
-      query, mine, rating: eventRating, person: eventPerson, refine: eventRefine,
+      query, mine, rating, person, refine: eventRefine,
       detail: EVENT_PHASES[eventPaging.phase], offset: eventPaging.offset,
     };
     void drain(SOURCES.find(s => s.id === 'event'));
@@ -263,9 +409,10 @@ export function initFastSearch() {
         }
         if (mine !== seq || !open || !enabled.has(source.id)) continue;
         if (isEvent) {
-          // 같은 phase/offset 이 아니면 낡은 쪽이다 - 조건이 바뀐 뒤에 온 답.
+          // 같은 phase/offset/조건이 아니면 낡은 쪽이다 - 조건이 바뀐 뒤에 온 답.
+          const now = filterParams();
           if (request.detail !== EVENT_PHASES[eventPaging.phase] || request.offset !== eventPaging.offset
-              || request.refine !== eventRefine || request.rating !== eventRating || request.person !== eventPerson) continue;
+              || request.refine !== eventRefine || request.rating !== now.rating || request.person !== now.person) continue;
           if (eventPaging.phase === 1 && eventPaging.deepStart < 0 && group.items.length) {
             eventPaging.deepStart = eventPaging.items.length;
           }
@@ -300,6 +447,14 @@ export function initFastSearch() {
     render({groups: current}, query);
   }
 
+  function rowHtml(item, attr, extraClass, subtitle) {
+    return `<button type="button" class="fs-row${extraClass || ''}" ${attr}>`
+      + `<span class="fs-title">${esc(item.title)}</span>`
+      + (subtitle ? `<span class="fs-sub">${esc(subtitle)}</span>` : '')
+      + (item.meta ? `<span class="fs-meta">${esc(item.meta)}</span>` : '')
+      + '</button>';
+  }
+
   function render(payload, query) {
     const selectedKey = rows[active]?._searchKey;
     const keepScroll = body.scrollTop;
@@ -324,12 +479,8 @@ export function initFastSearch() {
         const index = rows.length;
         const deep = isEvent && eventPaging.deepStart >= 0 && i >= eventPaging.deepStart;
         const subtitle = deep ? item.value : item.subtitle;
-        rows.push({...item, _searchKey: `${group.source} ${item.value}`});
-        parts.push(`<button type="button" class="fs-row${deep ? ' fs-row-deep' : ''}" data-fs-index="${index}">`
-          + `<span class="fs-title">${esc(item.title)}</span>`
-          + (subtitle ? `<span class="fs-sub">${esc(subtitle)}</span>` : '')
-          + (item.meta ? `<span class="fs-meta">${esc(item.meta)}</span>` : '')
-          + '</button>');
+        rows.push({...item, _source: group.source, _searchKey: `${group.source} ${item.value}`});
+        parts.push(rowHtml(item, `data-fs-index="${index}"`, deep ? ' fs-row-deep' : '', subtitle));
       });
       if (isEvent && group.items.length) {
         parts.push(`<div class="fs-end">${eventPaging.done ? '이벤트 끝' : '아래로 내리면 더 불러옵니다…'}</div>`);
@@ -347,6 +498,7 @@ export function initFastSearch() {
     const previousIndex = selectedKey == null ? -1 : rows.findIndex(r => r._searchKey === selectedKey);
     active = previousIndex >= 0 ? previousIndex : (rows.length ? 0 : -1);
     paintActive(previousIndex >= 0);
+    positionIsland();                     // 창 높이가 바뀌면 섬이 따라 내려간다
   }
 
   function paintActive(keepView = false) {
@@ -365,11 +517,7 @@ export function initFastSearch() {
     maybeLoadMoreEvents();
   }
 
-  async function commit() {
-    const item = rows[active];
-    if (!item) return;
-    const text = String(item.value || '');
-    if (!text) return;
+  async function copyText(text) {
     let ok = false;
     try {
       await navigator.clipboard.writeText(text);
@@ -390,6 +538,117 @@ export function initFastSearch() {
     }
     toast(ok ? `복사했습니다 — ${text.slice(0, 40)}` : '복사가 막혔습니다. 직접 선택해 Ctrl+C 하세요.',
       ok ? 'success' : 'error');
+    return ok;
+  }
+
+  async function commit() {
+    const item = rows[active];
+    if (!item) return;
+    const text = String(item.value || '');
+    if (!text) return;
+    // 이벤트 행은 복사하고 끝나지 않는다 - 아래 섬에 이웃 조합을 띄운다(사용자 지정 2026-09-07).
+    if (item._source === 'event') openIsland(item);
+    await copyText(text);
+  }
+
+  // ── 아래 섬: 고른 이벤트 조합의 이웃 ─────────────────────────────────────
+  function ensureIsland() {
+    if (island) return island;
+    island = document.createElement('div');
+    island.className = 'fs-island';
+    island.hidden = true;
+    island.innerHTML = `
+      <div class="fs-island-bar">
+        <span class="fs-island-kicker">이웃 조합</span>
+        <span class="fs-island-title" data-fs-island-title></span>
+        <button type="button" class="fs-close" aria-label="이웃 조합 닫기">×</button>
+      </div>
+      <div class="fs-island-body" data-fs-island-body></div>`;
+    document.body.append(island);
+    islandBody = island.querySelector('[data-fs-island-body]');
+    islandTitle = island.querySelector('[data-fs-island-title]');
+    island.querySelector('.fs-close').addEventListener('click', closeIsland);
+    // 포커스는 검색 칸에 둔다 - 섬을 눌러도 ↑↓·Esc 가 계속 먹어야 한다.
+    island.addEventListener('mousedown', event => event.preventDefault());
+    islandBody.addEventListener('click', event => {
+      const row = event.target.closest('[data-fs-island-index]');
+      if (!row) return;
+      const item = islandRows[Number(row.dataset.fsIslandIndex)];
+      if (!item || !item.value) return;
+      islandBody.querySelectorAll('[data-fs-island-index]').forEach(node =>
+        node.classList.toggle('is-active', node === row));
+      void copyText(String(item.value));
+    });
+    return island;
+  }
+
+  /** 섬은 창 바로 아래, 같은 폭. 높이는 결과 칸의 30% 를 넘지 않고 칸 바닥 안에 머문다. */
+  function positionIsland() {
+    if (!island || island.hidden || !overlay || overlay.hidden) return;
+    const o = overlay.getBoundingClientRect();
+    const host = document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
+    const r = host ? host.getBoundingClientRect() : null;
+    const bottom = r && r.height >= 160 ? r.bottom : window.innerHeight;
+    const top = Math.round(o.bottom + 8);
+    const room = bottom - 14 - top;
+    const cap = r && r.height >= 160 ? Math.max(150, r.height * 0.3) : 240;
+    island.style.left = `${Math.round(o.left)}px`;
+    island.style.width = `${Math.round(o.width)}px`;
+    island.style.top = `${top}px`;
+    island.style.maxHeight = `${Math.round(Math.max(96, Math.min(cap, room)))}px`;
+  }
+
+  function openIsland(item) {
+    const anchor = String(item.anchor || String(item.title || '').split(' · ')[0] || '').trim();
+    const tags = String(item.value || '').trim();
+    if (!anchor || !tags) return;
+    ensureIsland();
+    const mine = ++islandSeq;
+    islandRows = [];
+    islandTitle.textContent = tags;
+    islandTitle.title = tags;
+    islandBody.innerHTML = '<div class="fs-empty">이웃 조합을 찾는 중…</div>';
+    island.hidden = false;
+    positionIsland();
+    const {rating, person} = filterParams();
+    const params = new URLSearchParams({tags, anchor, rating, person, limit: String(NEIGHBOR_LIMIT)});
+    fetch(`/api/fast-search/event-neighbors?${params}`, {cache: 'no-store'})
+      .then(response => { if (!response.ok) throw new Error('neighbors failed'); return response.json(); })
+      .then(payload => { if (mine === islandSeq && !island.hidden) renderIsland(payload, anchor); })
+      .catch(() => {
+        if (mine !== islandSeq || island.hidden) return;
+        islandBody.innerHTML = '<div class="fs-empty">이웃 조합을 불러오지 못했습니다.</div>';
+        positionIsland();
+      });
+  }
+
+  function renderIsland(payload, anchor) {
+    islandRows = [];
+    const parts = [];
+    const sections = [
+      ['supersets', '전부 포함하는 더 긴 조합', '더 긴 조합이 없습니다'],
+      ['near', `핵심 태그(${anchor}) 외 한 태그만 다른 조합`, '한 태그만 다른 조합이 없습니다'],
+    ];
+    for (const [key, label, empty] of sections) {
+      const items = Array.isArray(payload?.[key]) ? payload[key] : [];
+      parts.push(`<div class="fs-cap">${esc(label)}<span class="fs-note">${items.length}</span></div>`);
+      if (!items.length) { parts.push(`<div class="fs-end">${empty}</div>`); continue; }
+      for (const item of items) {
+        const index = islandRows.length;
+        islandRows.push(item);
+        // 긴 조합은 줄바꿈해서 전부 보인다(deep 행과 같은 모양).
+        parts.push(rowHtml(item, `data-fs-island-index="${index}"`, ' fs-row-deep', item.value));
+      }
+    }
+    islandBody.innerHTML = parts.join('');
+    islandBody.scrollTop = 0;
+    positionIsland();
+  }
+
+  function closeIsland() {
+    islandSeq += 1;
+    islandRows = [];
+    if (island) { island.hidden = true; islandBody.innerHTML = ''; }
   }
 
   function onKeyDown(event) {
@@ -413,6 +672,8 @@ export function initFastSearch() {
     if (!overlay) return;
     open = false;
     overlay.hidden = true;                // CSS 의 .fs-overlay[hidden] 이 실제로 감춘다
+    closePersonPopup();
+    closeIsland();
     clearTimeout(timer);
     clearTimeout(eventTimer);
     for (const slot of requests.values()) slot.wanted = null;
@@ -424,9 +685,16 @@ export function initFastSearch() {
 
   // Ctrl+F. 브라우저에서는 기본 찾기 막대를 대신 가져오고(preventDefault),
   // Electron 에는 기본 동작이 없어 그대로 우리 것이 된다.
-  // Esc 는 창 안 어디에 포커스가 있든 닫는다 - 행을 누른 뒤에도.
+  // Esc 는 창 안 어디에 포커스가 있든 닫는다 - 행을 누른 뒤에도. 인원 팝업이 열려
+  // 있으면 그것만 먼저 닫는다(전파를 끊어 입력 칸의 Esc 핸들러가 창까지 닫지 않게).
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && open) { event.preventDefault(); close(); return; }
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
+      close();
+      return;
+    }
     const hit = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
       && String(event.key || '').toLowerCase() === 'f';
     if (!hit) return;

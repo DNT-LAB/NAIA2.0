@@ -180,7 +180,8 @@
       ],
       "legacy_dependency": "none",
       "routes": [
-        {"method": "GET", "path": "/api/fast-search", "smoke": "non_destructive"}
+        {"method": "GET", "path": "/api/fast-search", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/fast-search/event-neighbors", "smoke": "non_destructive"}
       ]
     },
     {

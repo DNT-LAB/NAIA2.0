@@ -126,13 +126,34 @@ def _search_preset(context, query: str, limit: int, opts) -> tuple[list[dict], s
     return items, f"{mode} 모드에 저장된 프리셋" if items else ""
 
 
+_neighbor_warm_started = False
+
+
+def _warm_neighbor_index_once() -> None:
+    """첫 이벤트 검색에서 한 번, 이웃 조회용 색인을 뒤에서 데운다(첫 섬이 1.2초 걸리지 않게)."""
+    global _neighbor_warm_started
+    if _neighbor_warm_started:
+        return
+    _neighbor_warm_started = True
+    from core.event_preset.fast_search_catalog import warm_neighbor_index
+    import threading
+
+    def run():
+        try:
+            warm_neighbor_index()
+        except Exception:
+            pass        # 데우기 실패는 조용히 - 실제 조회가 다시 시도한다
+    threading.Thread(target=run, name='fast-search-neighbor-warm', daemon=True).start()
+
+
 def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], str]:
     from core.event_preset.fast_search_catalog import search_catalog
 
+    _warm_neighbor_index_once()
+    # 등급·인원은 쉼표로 여럿 올 수 있다(한 줄 토글). 검증은 카탈로그가 한다 - 모르는
+    # 값이 하나라도 있으면 빈 결과지, 넓어지는 일은 없다.
     rating = str(opts.get("rating") or "").strip().casefold()
     person = str(opts.get("person") or "").strip()
-    if rating and rating not in {"g", "s", "q", "e"}:
-        return [], "알 수 없는 이벤트 등급입니다."
     detail = str(opts.get('event_detail') or 'basic')
     # 페이징: search_catalog 는 결정적이고 앞에서부터 채우므로 `offset+limit` 로 부른 뒤
     # 앞 offset 개를 잘라내면 **안정된 다음 쪽**이 된다(앞쪽은 limit 이 커져도 같다).
@@ -147,11 +168,38 @@ def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], st
         tags = variant.copy_tags
         title = event.tag if event.label == event.tag else f"{event.tag} · {event.label}"
         meta = f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(tags)}태그 · 관측 {variant.count:,}"
-        items.append(_item(", ".join(tags), title, ", ".join(tags), meta))
-    scope = f"{rating.upper() if rating else '전체 등급'} · {person if person else '전체 인원'}"
-    note = f"{scope} · {'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
+        row = _item(", ".join(tags), title, ", ".join(tags), meta)
+        # 앵커(핵심 태그) - 프론트가 이웃 조회(/event-neighbors)에 되돌려 보낸다.
+        row["anchor"] = event.tag
+        items.append(row)
+    # 등급·인원 문구는 뺐다 - 토글 줄이 이미 보여 주는 것을 캡션이 한 번 더 반복했다
+    # (사용자 지적 2026-09-07).
+    note = f"{'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
     # 세 번째 값은 갈래별 부가 정보 - run_all 이 group 에 얹는다.
     return items, note, {"exhausted": exhausted, "offset": offset}
+
+
+def _event_neighbor_items(anchor: str, tags: list[str], rating: str, person: str, limit: int) -> dict:
+    """고른 조합의 이웃. (1) 전부 포함하는 더 긴 조합 (2) 앵커를 뺀 나머지가 한 태그만 다른 조합.
+    (1)에 든 것은 (2)에 다시 나오지 않는다(사용자 지정 2026-09-07). 읽기 전용."""
+    from core.event_preset.fast_search_catalog import event_neighbors
+
+    found = event_neighbors(anchor, tags, rating=rating, person=person, limit=limit)
+
+    def rows(matches):
+        out = []
+        for event, variant, detail in matches:
+            copy = variant.copy_tags
+            title = event.tag if event.label == event.tag else f"{event.tag} · {event.label}"
+            meta = (f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(copy)}태그"
+                    f" · 관측 {variant.count:,}")
+            row = _item(", ".join(copy), title, ", ".join(copy), meta)
+            row["anchor"] = event.tag
+            row["detail"] = detail
+            out.append(row)
+        return out
+
+    return {"supersets": rows(found["supersets"]), "near": rows(found["near"])}
 
 
 SEARCHERS = {
@@ -213,3 +261,21 @@ def register_fast_search_routes(
         return JSONResponse({"query": query, "groups": groups,
                              "total": sum(len(g["items"]) for g in groups)},
                             headers=_no_store())
+
+    @app.get("/api/fast-search/event-neighbors")
+    async def api_fast_search_event_neighbors(tags: str = "", anchor: str = "", rating: str = "",
+                                              person: str = "", limit: int = 20):
+        """고른 이벤트 조합의 이웃(아래 섬). 클립보드 후보일 뿐 - 아무것도 쓰지 않는다."""
+        chosen = [t.strip() for t in str(tags or "").split(",") if t.strip()]
+        anchor_tag = str(anchor or "").strip()
+        if not chosen or not anchor_tag or len(tags) > 1200:
+            return JSONResponse({"error": "tags 와 anchor 가 필요합니다."}, status_code=400,
+                                headers=_no_store())
+        if len(chosen) > 32:
+            return JSONResponse({"error": "태그가 너무 많습니다."}, status_code=400, headers=_no_store())
+        per_group = max(1, min(60, int(limit or 20)))
+        payload = await run_in_thread(
+            lambda: _event_neighbor_items(anchor_tag, chosen, rating, person, per_group))
+        payload["anchor"] = anchor_tag
+        payload["tags"] = chosen
+        return JSONResponse(payload, headers=_no_store())

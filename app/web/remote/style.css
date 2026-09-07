@@ -28301,7 +28301,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .fs-cap.fs-cap-inline { padding: 0; margin-right: 2px; }
 /* 걸린 이벤트 토글 칩(둘 이상일 때만). 끄면 그 이벤트의 행이 빠진다 - 최소 하나는 켜져 있다. */
 /* 두 줄 남짓을 넘으면 안에서 스크롤 - 붙어 있는 머리가 목록을 밀어내지 않게. */
-.fs-ev-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; max-height: 58px; overflow-y: auto; }
+.fs-ev-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; max-height: 84px; overflow-y: auto; }
 .fs-ev-chips[hidden] { display: none; }
 .fs-ev-toggle {
   display: inline-flex; align-items: center; gap: 5px; max-width: 100%;

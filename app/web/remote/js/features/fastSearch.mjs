@@ -86,6 +86,9 @@ export function initFastSearch() {
   let eventOff = new Set();
   // 이벤트 페이징 상태. phase 는 EVENT_PHASES 의 인덱스, offset 은 그 phase 안의 위치.
   let eventPaging = freshEventPaging();
+  // 높이 상한. base = 결과 칸의 50%(이미지를 통째로 가리지 않는다), hard = 75%. 이벤트 구역이
+  // 아래로 밀려 머리만 보이면 base 와 hard 사이에서 **필요한 만큼만** 늘린다(fitHeight).
+  let heightCaps = {base: 0, hard: 0};
   // 아래 섬(이웃 조합). 고른 이벤트 행 하나에 붙는다.
   let island = null, islandBody = null, islandTitle = null, islandSeq = 0, islandRows = [];
   const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
@@ -357,9 +360,12 @@ export function initFastSearch() {
     eventChips.innerHTML = parts.join('');
   }
 
-  /** 서버가 첫 쪽에 실어 보낸 이벤트 목록을 합친다(deep 단계가 더 찾을 수 있다). 순서는 처음 본 순서. */
-  function mergeEventCatalog(list) {
+  /** 서버가 첫 쪽에 실어 보낸 이벤트 목록. basic 첫 쪽은 **교체**(replace) - 등급·인원을 조작해
+   *  조합이 하나도 안 남는 이벤트의 칩은 조용히 사라져야 한다(사용자 지적 2026-09-07). deep 첫 쪽은
+   *  합친다(더 찾을 수 있다). 끈 기록(eventOff)은 건드리지 않아 필터를 되돌리면 꺼진 채 돌아온다. */
+  function mergeEventCatalog(list, replace = false) {
     if (!Array.isArray(list)) return;
+    if (replace) eventCatalog = [];
     const known = new Set(eventCatalog.map(e => e.tag));
     for (const e of list) {
       if (!e || typeof e.tag !== 'string' || known.has(e.tag)) continue;
@@ -379,7 +385,8 @@ export function initFastSearch() {
       overlay.style.transform = 'translateX(-50%)';
       overlay.style.top = '64px';
       overlay.style.width = 'min(680px, calc(100vw - 32px))';
-      overlay.style.maxHeight = 'min(420px, calc(100dvh - 96px))';
+      heightCaps = {base: Math.min(420, window.innerHeight - 96), hard: Math.round(window.innerHeight * 0.75)};
+      fitHeight();
       positionIsland();
       return;
     }
@@ -392,8 +399,25 @@ export function initFastSearch() {
     overlay.style.left = `${Math.round(r.left + (r.width - width) / 2)}px`;
     overlay.style.top = `${Math.round(r.top + pad)}px`;
     overlay.style.width = `${width}px`;
-    overlay.style.maxHeight = `${maxH}px`;
+    heightCaps = {base: maxH, hard: Math.round(Math.min(r.height - pad * 2, r.height * 0.75))};
+    fitHeight();
     positionIsland();
+  }
+
+  /** 높이 상한을 내용에 맞춘다. 기본은 base. 이벤트 구역이 앞 갈래들에 밀려 머리만 바닥에 걸리면
+   *  (실측 'covered': 태그 8 + 아티스트 1 뒤에 머리만 보이고 행은 0) 머리 + 행 다섯 줄이 들어올
+   *  만큼만 늘린다. hard(75%) 를 넘지 않는다 - 이미지 전체를 가리지 않는다는 규약은 그대로. */
+  function fitHeight() {
+    if (!overlay || overlay.hidden || !heightCaps.base) return;
+    let want = heightCaps.base;
+    if (eventSection && !eventSection.hidden && eventList.children.length) {
+      const chrome = overlay.offsetHeight - body.clientHeight;      // 검색 줄 + 칩 줄 + 발 + 테두리
+      const top = eventSection.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+      const headH = eventSection.querySelector('.fs-event-head').offsetHeight;
+      const rowsH = Math.min(eventList.offsetHeight, 5 * 24 + 26);
+      want = Math.max(want, Math.ceil(chrome + top + headH + rowsH));
+    }
+    overlay.style.maxHeight = `${Math.round(Math.min(heightCaps.hard, want))}px`;
   }
 
   function schedule(delay) {
@@ -507,7 +531,7 @@ export function initFastSearch() {
           if (request.detail !== EVENT_PHASES[eventPaging.phase] || request.offset !== eventPaging.offset
               || request.refine !== eventRefine || request.rating !== now.rating || request.person !== now.person
               || request.exclude !== now.exclude) continue;
-          mergeEventCatalog(group.events);
+          mergeEventCatalog(group.events, request.detail === 'basic' && request.offset === 0);
           if (eventPaging.phase === 1 && eventPaging.deepStart < 0 && group.items.length) {
             eventPaging.deepStart = eventPaging.items.length;
           }
@@ -632,6 +656,7 @@ export function initFastSearch() {
     const previousIndex = selectedKey == null ? -1 : rows.findIndex(r => r._searchKey === selectedKey);
     active = previousIndex >= 0 ? previousIndex : (rows.length ? 0 : -1);
     paintActive(previousIndex >= 0);
+    fitHeight();                          // 이벤트 구역이 보일 만큼 상한을 맞춘다
     positionIsland();                     // 창 높이가 바뀌면 섬이 따라 내려간다
   }
 

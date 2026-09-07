@@ -9,7 +9,7 @@ import {
   postOllamaConnectionModel,
   setOllamaModelSelectOptions,
   shortOllamaModel,
-} from './ollamaModelSelect.mjs?v=20260618-related-curated';
+} from './ollamaModelSelect.mjs?v=20260907-ai-backend';
 
 const DEFAULT_ENDPOINT = 'http://localhost:11434/v1';
 const DOWNLOAD_PAGE = 'https://ollama.com/download';

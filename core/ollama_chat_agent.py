@@ -266,12 +266,13 @@ class OllamaChatAgent:
 
     def __init__(self, assistant, *, tag_search: Callable, character_search: Callable,
                  event_search: Callable, progress: Callable | None = None,
-                 source_search: Callable | None = None):
+                 source_search: Callable | None = None, max_seconds: float | None = None):
         self.assistant = assistant
         self.providers = {"search_tags": tag_search, "search_characters": character_search,
                           "search_events": event_search}
         self.progress = progress or (lambda step, label: None)
         self.source_search = source_search
+        self.max_seconds = max_seconds
 
     def run(self, user_input, *, context=None, history=None):
         if not references_ui_context(user_input):
@@ -296,6 +297,7 @@ class OllamaChatAgent:
 
     def _run(self, user_input, *, model, context=None, history=None):
         started = time.monotonic()
+        max_seconds = self.MAX_SECONDS if self.max_seconds is None else self.max_seconds
         execution = ExecutionTrace()
         if len(user_input) > 8000:
             return {"handled": True, "ok": False, "type": "chat", "error": "요청을 8,000자 이하로 나누어 주세요."}
@@ -353,7 +355,7 @@ class OllamaChatAgent:
         def charge(units=1):
             nonlocal calls_used
             calls_used += units
-            if calls_used > self.MAX_CALLS or time.monotonic() - started >= self.MAX_SECONDS:
+            if calls_used > self.MAX_CALLS or time.monotonic() - started >= max_seconds:
                 raise TimeoutError('도구 검색 한도에 도달했습니다.')
 
         def observed(result):
@@ -510,7 +512,7 @@ class OllamaChatAgent:
 
         try:
             for turn in range(self.MAX_TURNS):
-                remaining = self.MAX_SECONDS - (time.monotonic() - started)
+                remaining = max_seconds - (time.monotonic() - started)
                 if remaining <= 0:
                     raise TimeoutError("도구 검색 시간 제한에 도달했습니다.")
                 self.progress(turn + 1, "추론·검색" if turn else "요청 해석")

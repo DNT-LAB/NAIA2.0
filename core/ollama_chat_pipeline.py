@@ -350,10 +350,15 @@ class OllamaChatPipeline:
                             "tags": list(rows.values())}
 
                 self._progress.total = OllamaChatAgent.MAX_TURNS
+                from core.ai_backend import AIBackend
+                backend = getattr(self.assistant, "backend", None)
+                time_budget = (backend.profile.session_seconds("chat", self.assistant.default_model)
+                               if isinstance(backend, AIBackend) else None)
                 return OllamaChatAgent(self.assistant, tag_search=search_tags,
                                        character_search=self.character_search,
                                        event_search=self.event_search, progress=self._stage,
-                                       source_search=lambda query: self.searcher(query, 6, gen_context)).run(
+                                       source_search=lambda query: self.searcher(query, 6, gen_context),
+                                       max_seconds=time_budget).run(
                     user_input, context=gen_context.summary(), history=history)
             raw_intent = self._analyze(user_input, gen_context, history or [])
             intent = self._clamp_intent(raw_intent, user_input, gen_context)

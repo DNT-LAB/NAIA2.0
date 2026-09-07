@@ -23,12 +23,12 @@ from threading import Lock, Thread
 from typing import Any, Callable
 
 from core.ollama_model_spec import OllamaModelSpec, RUNTIME_MODELS, source_model
+from core.ai_backend import AIBackend, MINIMUM_MODEL
 
 DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434"
 # 프론트(ollamaAssistantPopup.mjs)의 DEFAULT_MODEL과 미러 — 요청에 model이 없을 때 폴백.
-# E4B는 현재 기본 권장 모델이다. 더 가벼운/강한 모델은 CURATED_MODELS에서
-# 다운로드·활성화할 수 있고, DEFAULT_MODEL은 첫 실행/연결 실패 시의 단일 폴백만 담당한다.
-DEFAULT_MODEL = "hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M"
+# GPU 없는 시스템도 첫 실행 가능해야 한다. 저장된 사용자 모델 선택은 우선한다.
+DEFAULT_MODEL = MINIMUM_MODEL
 CURATED_MODELS: tuple[dict[str, str], ...] = (
     {
         "model": "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M",
@@ -273,11 +273,15 @@ class OllamaAssistantService:
         http_post: Callable[..., Any] | None = None,
         http_stream: Callable[..., Any] | None = None,
         server_spawner: Callable[[], Any] | None = None,
+        backend: AIBackend | None = None,
     ):
         # 우선순위: 명시 인자(테스트 주입) > 영속 설정 > env > 코드 기본.
         resolved_url, resolved_model = _resolve_connection_defaults()
         self.base_url = str(base_url or resolved_url).rstrip("/")
         self.default_model = str(default_model or resolved_model)
+        self._backend = backend or AIBackend(self.base_url)
+        if self._backend.base_url != self.base_url:
+            raise ValueError("AI backend endpoint must match the assistant endpoint")
         # 테스트 주입 지점들 — 실환경에서는 전부 기본 구현 사용.
         self._version_probe = version_probe or self._probe_cli_version
         self._http_get = http_get or self._default_http_get
@@ -310,6 +314,8 @@ class OllamaAssistantService:
         이미 만들어진 :class:`OllamaTagAssistService`는 생성 시점 값을 들고 있으므로
         라우트가 그쪽에도 ``set_endpoint``를 호출해 동기화해야 한다."""
         with self._lock:
+            if self.backend.busy:
+                raise RuntimeError("AI 실행·대기가 끝난 뒤 연결을 변경하세요.")
             if self._reasoning_active:
                 raise RuntimeError("Chat 추론·검색이 끝난 뒤 연결을 변경하세요.")
             if self._pull_state.get("active"):
@@ -319,6 +325,13 @@ class OllamaAssistantService:
             self._model_spec.clear()
             if default_model is not None and str(default_model).strip():
                 self.default_model = str(default_model).strip()
+
+    @property
+    def backend(self) -> AIBackend:
+        existing = getattr(self, "_backend", None)
+        if existing is None or existing.base_url != self.base_url:
+            self._backend = AIBackend(self.base_url, profile=existing.profile if existing else None)
+        return self._backend
 
     # ------------------------------------------------------------------
     # 기본 IO 구현
@@ -340,9 +353,7 @@ class OllamaAssistantService:
             return None
 
     def _default_http_get(self, path: str, *, timeout: float = 1.5) -> Any:
-        import requests
-
-        return requests.get(f"{self.base_url}{path}", timeout=timeout)
+        return self.backend.get(path, timeout=timeout)
 
     def _default_http_stream(self, path: str, payload: dict[str, Any]) -> Any:
         import requests
@@ -354,8 +365,6 @@ class OllamaAssistantService:
     def _default_http_post(
         self, path: str, payload: dict[str, Any], *, timeout: Any = (5, 180)
     ) -> Any:
-        import requests
-
         # 모든 generate/chat 호출에 유휴 언로드(keep_alive) 기본 주입 — 모델이 VRAM에 무기한 남지
         # 않도록(사용자 요청: 3분 유휴 후 자동 해제). 호출부가 keep_alive를 명시했으면 존중한다.
         if (
@@ -364,7 +373,7 @@ class OllamaAssistantService:
             and "keep_alive" not in payload
         ):
             payload = {**payload, "keep_alive": OLLAMA_KEEP_ALIVE_DEFAULT}
-        return requests.post(f"{self.base_url}{path}", json=payload, timeout=timeout)
+        return self.backend.post(path, payload, timeout=timeout, task="chat")
 
     def _default_server_spawner(self) -> Any:
         """``ollama serve``를 창 없이 분리 실행 (Dev0714 start_server 동일).
@@ -643,7 +652,8 @@ class OllamaAssistantService:
                     raise RuntimeError("진행 중인 Chat 또는 모델 준비가 끝난 뒤 다시 시도하세요.")
                 self._reasoning_active = True
             try:
-                yield self.reasoning_chat_model()
+                with self.backend.operation("chat", model=self.default_model):
+                    yield self.reasoning_chat_model()
             finally:
                 with self._lock:
                     self._reasoning_active = False
@@ -672,8 +682,8 @@ class OllamaAssistantService:
             "model": model, "messages": messages, "tools": tools,
             "stream": False, "think": think, "keep_alive": "5m",
             "options": {"temperature": 0.2, "seed": 42,
-                        "num_ctx": 16384, "num_predict": 4096},
-        }, timeout=(5, max(1, min(120, timeout))))
+                        "num_ctx": self.backend.profile.context_size("chat", model), "num_predict": 4096},
+        }, timeout=(5, max(1, min(self.backend.profile.call_seconds("chat", model), timeout))))
         data = response.json() or {}
         if int(getattr(response, "status_code", 0)) != 200:
             raise RuntimeError(_friendly_ollama_error(data.get("error")) or "Ollama tool request failed")

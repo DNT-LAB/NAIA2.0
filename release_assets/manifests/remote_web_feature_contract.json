@@ -607,6 +607,7 @@
       "source_files": [
         "app/backend/server/ollama_routes.py",
         "core/ollama_assistant_service.py",
+        "core/ai_backend.py",
         "core/ollama_model_spec.py",
         "core/ollama_chat_agent.py",
         "core/ollama_chat_plan.py",
@@ -624,6 +625,7 @@
       ],
       "legacy_dependency": "none",
       "routes": [
+        {"method": "GET", "path": "/api/ai/status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/ollama/status", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ollama/server/start", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ollama/pull", "smoke": "external_live"},

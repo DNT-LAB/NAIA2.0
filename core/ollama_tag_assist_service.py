@@ -977,9 +977,14 @@ class OllamaTagAssistService:
         event_combo_provider: Callable[..., list[tuple[str, int]]] | None = None,
         translator: Callable[[str], "str | None"] | None = None,
         unloader: Callable[[str], None] | None = None,
+        backend=None,
     ):
         self.base_url = str(base_url).rstrip("/")
         self.default_model = default_model
+        from core.ai_backend import AIBackend
+        self._backend = backend or AIBackend(self.base_url)
+        if self._backend.base_url != self.base_url:
+            raise ValueError("AI backend endpoint must match the Assist endpoint")
         # searcher(query, limit) -> [{tag, count, desc, group, cat}] — NAIA 태그 인덱스.
         self._searcher = searcher
         self._chat = chat or self._default_chat
@@ -1012,6 +1017,14 @@ class OllamaTagAssistService:
         self._progress: dict[str, Any] = {
             "active": False, "step": 0, "total": 0, "stage": "", "started_at": 0.0, "done": True,
         }
+
+    @property
+    def backend(self):
+        from core.ai_backend import AIBackend
+        existing = getattr(self, "_backend", None)
+        if existing is None or existing.base_url != self.base_url:
+            self._backend = AIBackend(self.base_url, profile=existing.profile if existing else None)
+        return self._backend
 
     def set_endpoint(
         self, *, base_url: str | None = None, default_model: str | None = None
@@ -1110,13 +1123,11 @@ class OllamaTagAssistService:
                 pass
             return
         try:
-            import requests
-
             # /api/generate에 빈 프롬프트 + keep_alive=0 → 해당 모델 언로드.
-            requests.post(
-                f"{self.base_url}/api/generate",
-                json={"model": model, "keep_alive": 0},
+            self.backend.post(
+                "/api/generate", {"model": model, "keep_alive": 0},
                 timeout=10,
+                task="unload",
             )
         except Exception:
             pass
@@ -1153,8 +1164,6 @@ class OllamaTagAssistService:
         timeout: Any = None,
         think: Any = False,
     ) -> dict[str, Any]:
-        import requests
-
         options: dict[str, Any] = {"temperature": float(temperature)}
         # num_predict: 출력 토큰 상한(속도 backstop). 스키마 강제라 정상 출력은 안 잘리고,
         # 폭주만 막는다. None이면 무제한(기존 동작).
@@ -1181,10 +1190,9 @@ class OllamaTagAssistService:
         # 기본. 매 호출이 타이머를 리셋하므로 활성 사용 중엔 상주하고, 3분간 호출이 없으면 자동 언로드된다
         # (사용자 요청: 무기한 상주 폐지로 VRAM 점유 방지). 0=즉시 언로드.
         payload["keep_alive"] = _KEEP_ALIVE_DEFAULT if keep_alive is None else keep_alive
-        response = requests.post(
-            f"{self.base_url}/api/chat",
-            json=payload,
-            timeout=timeout or (5, 180),
+        response = self.backend.post(
+            "/api/chat", payload,
+            timeout=timeout or (5, self.backend.profile.call_seconds("assist", model)),
         )
         if response.status_code != 200:
             detail = ""
@@ -1246,11 +1254,18 @@ class OllamaTagAssistService:
         if not str(text or "").strip():
             return {"ok": False, "error": "요청 텍스트가 비어 있습니다."}
         target_model = str(model or self.default_model).strip()
+        return self._run_assist(self._assist_oneshot, text, target_model, options)
+
+    def _run_assist(self, run, text, model, options):
         try:
-            return self._assist_oneshot(text, model=model, options=options)
-        finally:
-            self._end_progress()
-            self._finalize_residency(target_model)
+            with self.backend.operation("assist", model=model):
+                try:
+                    return run(text, model=model, options=options)
+                finally:
+                    self._end_progress()
+                    self._finalize_residency(model)
+        except Exception as exc:
+            return {"ok": False, "stage": "runtime", "error": str(exc)}
 
     def _assist_oneshot(
         self, text: str, *, model: str | None = None, options: dict[str, Any] | None = None,
@@ -1372,18 +1387,24 @@ class OllamaTagAssistService:
             kwargs.setdefault("think", False)
             return self._chat(*args, **kwargs)
 
-        result = run_scene_boost(
-            prompt, options or {},
-            chat=_boost_chat,
-            default_model=target_model,
-            tag_rating=_tag_rating,
-            validate_tag=self._validate_tag,
-            tag_allowed=_tag_allowed,
-            is_sexual=_is_sexual_tag,
-            is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
-            has_hangul=_has_hangul,
-            classify_axes=self._get_axis_classifier(),
-        )
+        try:
+            with self.backend.operation("boost", model=target_model):
+                result = run_scene_boost(
+                    prompt, options or {},
+                    chat=_boost_chat,
+                    default_model=target_model,
+                    tag_rating=_tag_rating,
+                    validate_tag=self._validate_tag,
+                    tag_allowed=_tag_allowed,
+                    is_sexual=_is_sexual_tag,
+                    is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
+                    has_hangul=_has_hangul,
+                    classify_axes=self._get_axis_classifier(),
+                )
+        except Exception as exc:
+            result = {"ok": False, "stage": "runtime", "error": str(exc),
+                      "prompt": str(prompt or ""),
+                      "additions": {"composition_tags": [], "descriptions": []}}
         # 레이스 backstop: 이 boost가 keep_alive=-1을 보낸 사이 토글이 OFF로 뒤집혔거나
         # 상주 모델이 교체됐다면 모델이 재적재됐을 수 있다 → best-effort 언로드
         # (전체 조건 재확인 — _finalize_residency와 동일 패턴, Codex R1 HIGH 미러).
@@ -1408,13 +1429,11 @@ class OllamaTagAssistService:
         if not target:
             return False
         try:
-            import requests
-
-            resp = requests.post(
-                f"{self.base_url}/api/generate",
-                json={"model": target, "prompt": "", "stream": False,
+            resp = self.backend.post(
+                "/api/generate", {"model": target, "prompt": "", "stream": False,
                       "keep_alive": _KEEP_ALIVE_RESIDENT},
-                timeout=(5, 120),
+                timeout=(5, self.backend.profile.call_seconds("warmup", target)),
+                task="warmup",
             )
             return getattr(resp, "status_code", 0) == 200
         except Exception:
@@ -1545,11 +1564,7 @@ class OllamaTagAssistService:
         if not str(text or "").strip():
             return {"ok": False, "error": "요청 텍스트가 비어 있습니다."}
         target_model = str(model or self.default_model).strip()
-        try:
-            return self._assist(text, model=model, options=options)
-        finally:
-            self._end_progress()
-            self._finalize_residency(target_model)
+        return self._run_assist(self._assist, text, target_model, options)
 
     def _assist(
         self, text: str, *, model: str | None = None, options: dict[str, Any] | None = None,

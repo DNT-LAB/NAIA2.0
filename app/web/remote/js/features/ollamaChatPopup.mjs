@@ -4,7 +4,7 @@ import {
   fetchOllamaStatus,
   postOllamaConnectionModel,
   setOllamaModelSelectOptions,
-} from './ollamaModelSelect.mjs?v=20260618-related-curated';
+} from './ollamaModelSelect.mjs?v=20260907-ai-backend';
 
 const REQUIREMENT_STATES = {selected: '후보 선택', missing: '미충족', ambiguous: '뜻 확인 필요',
   unrepresentable: '태그 표현 한계'};

@@ -533,6 +533,7 @@ def get_assist_service(context: WebSessionContext) -> "Any":
         svc = OllamaTagAssistService(
             base_url=assistant.base_url,
             default_model=assistant.default_model,
+            backend=getattr(assistant, "backend", None),
             # LLM 전용 검색(exact 레인+whole-word 부분 레인) — UI autocomplete 재사용이
             # 모든 태그 오염의 뿌리였다(OLLAMA_LLM_SEARCH_INDEX_PLAN.md). 빌드 실패 시
             # search_kr_tags 폴백은 search_llm_tags 내부에서 처리.
@@ -676,6 +677,11 @@ def register_ollama_routes(
         )
         context.ollama_chat_pipeline = existing
         return existing
+
+    @app.get("/api/ai/status")
+    async def ai_status(request: Request):
+        # Queue/profile inspection is local and never probes/loads a model.
+        return service().backend.status(include_details=_is_local_request(request))
 
     @app.get("/api/ollama/status")
     async def ollama_status(request: Request, fresh: int = 0):

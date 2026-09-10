@@ -259,6 +259,30 @@ class HeadlessImg2ImgService:
                 return out
         return []
 
+    def preview_restore_source(self, value: dict[str, Any]) -> dict[str, Any]:
+        """고른 이미지에 **무엇이 들어 있는지**만 본다. 세션은 건드리지 않는다.
+
+        무엇을 복원할지 묻는 대화상자가 이 값을 쓴다 - 없는 선택지를 내밀면
+        사용자가 고른 뒤에야 실패를 보게 된다(사용자 지정 2026-09-10: 이미지를 먼저
+        고르고, 그 다음에 묻는다).
+
+        ⚠️ 조립은 `_restore_prompts` 와 **같은 함수**로 한다. 여기서 따로 세면 대화상자가
+           말한 개수와 실제로 들어가는 개수가 갈린다.
+        """
+        state = self.context.img2img_session
+        prompt_ctx = value.get("prompt_context") if isinstance(value.get("prompt_context"), dict) else {}
+        params = value.get("generation_params") if isinstance(value.get("generation_params"), dict) else {}
+        characters = self._session_characters_from_sources(
+            params, prompt_ctx, int(state.get("width") or 0), int(state.get("height") or 0))
+        main_prompt = str(prompt_ctx.get("main_prompt") or prompt_ctx.get("final_prompt") or "").strip()
+        return {
+            "label": str(value.get("label") or ""),
+            "has_main": bool(main_prompt),
+            "main_preview": main_prompt[:160],
+            "character_count": len(characters),
+            "character_previews": [str(c.get("prompt") or "")[:60] for c in characters[:4]],
+        }
+
     def _restore_prompts(self, value: Any) -> dict[str, Any] | None:
         """EXIF 를 잃은 그림으로 연 세션에, **다른 출처의 프롬프트만** 되살린다.
 
@@ -292,11 +316,23 @@ class HeadlessImg2ImgService:
             # 여기서 조용히 성공하면 사용자는 "복원했는데 그대로" 를 보게 된다.
             return context._toast("그 이미지에는 복원할 프롬프트가 없습니다", level="error")
 
+        # 무엇을 되살릴지는 **이미지를 고른 뒤** 사용자가 정한다(사용자 지정 2026-09-10).
+        # 그림에 든 것과 고른 것이 어긋날 수 있으므로(캐릭터만 골랐는데 캐릭터가 없다)
+        # 교집합이 비면 조용히 넘어가지 말고 그 사실을 말한다.
+        scope = str(value.get("scope") or "both").strip().lower()
+        if scope not in {"both", "main", "characters"}:
+            scope = "both"
+        want_main = scope in {"both", "main"} and bool(main_prompt)
+        want_chars = scope in {"both", "characters"} and bool(characters)
+        if not want_main and not want_chars:
+            missing = "캐릭터" if scope == "characters" else "메인 프롬프트"
+            return context._toast(f"그 이미지에는 {missing}가 없습니다", level="error")
+
         restored = []
-        if main_prompt:
+        if want_main:
             state["main_prompt"] = main_prompt
             restored.append("메인 프롬프트")
-        if characters:
+        if want_chars:
             state["characters"] = characters
             state["position_mode"] = _session_position_mode(characters)
             restored.append(f"캐릭터 {len(characters)}명")

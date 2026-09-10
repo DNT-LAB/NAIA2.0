@@ -1684,6 +1684,27 @@ def register_result_display_routes(
 
         content_type = (req.headers.get("content-type") or "").lower()
         body = await req.body()
+        # 2단계: 대화상자에서 고른 뒤에는 **쥐고 있던 것**에 scope 만 얹어 적용한다
+        # (그림을 다시 나르지 않는다).
+        if str(req.query_params.get("pending") or "").strip().lower() in {"1", "true", "yes"}:
+            pending = session_context.img2img_session.get("_restore_pending")
+            if not isinstance(pending, dict):
+                return JSONResponse({"error": "고른 이미지가 만료됐습니다. 다시 골라 주세요"},
+                                    status_code=409)
+            scope = str(req.query_params.get("scope") or "both").strip().lower()
+            pending = dict(pending)
+            pending["scope"] = scope if scope in {"main", "characters", "both"} else "both"
+
+            def _apply_pending():
+                from core.headless_img2img_service import HeadlessImg2ImgService
+
+                return HeadlessImg2ImgService(session_context).set_param("restore_prompts", pending)
+
+            state = await run_in_thread(_apply_pending)
+            session_context.img2img_session.pop("_restore_pending", None)
+            if state:
+                await broadcast_json(clients, state)
+            return {"ok": True, "state": state}
         if not body:
             return JSONResponse({"error": "No data"}, status_code=400)
 
@@ -1722,12 +1743,28 @@ def register_result_display_routes(
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
-        def _apply():
+        # 이미지를 먼저 고르고, **무엇을 복원할지는 그 뒤에 묻는다**(사용자 지정 2026-09-10).
+        # 그래서 고른 직후에는 적용하지 않고 내용만 돌려준다 - 대화상자가 없는 선택지를
+        # 내밀지 않도록.
+        probe = str(req.query_params.get("probe") or "").strip().lower() in {"1", "true", "yes"}
+        scope = str(req.query_params.get("scope") or "").strip().lower()
+        if scope in {"main", "characters", "both"}:
+            value["scope"] = scope
+
+        def _service():
             from core.headless_img2img_service import HeadlessImg2ImgService
 
-            return HeadlessImg2ImgService(session_context).set_param("restore_prompts", value)
+            return HeadlessImg2ImgService(session_context)
 
-        state = await run_in_thread(_apply)
+        if probe:
+            found = await run_in_thread(lambda: _service().preview_restore_source(value))
+            # ⚠️ 고른 것을 **서버가 쥐고 있는다.** 브라우저로 돌려보냈다가 되받으면
+            #    업로드한 그림을 두 번 나르고(수 MB), 히스토리 갈래는 값이 왕복하는
+            #    사이에 바뀔 수 있다. module_state 는 키를 골라 담으므로 이 키는 새지 않는다.
+            session_context.img2img_session["_restore_pending"] = value
+            return {"ok": True, "probe": True, "found": found}
+
+        state = await run_in_thread(lambda: _service().set_param("restore_prompts", value))
         if state:
             await broadcast_json(clients, state)
         return {"ok": True, "state": state}

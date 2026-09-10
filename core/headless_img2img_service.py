@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 from typing import Any
 
 from core.headless_image_utils import image_to_png_bytes
@@ -257,6 +258,55 @@ class HeadlessImg2ImgService:
             if out:
                 return out
         return []
+
+    def _restore_prompts(self, value: Any) -> dict[str, Any] | None:
+        """EXIF 를 잃은 그림으로 연 세션에, **다른 출처의 프롬프트만** 되살린다.
+
+        제보(2026-09-10): 만화를 그리는 사용자가 포토샵으로 고친 그림을 다시 들여오면
+        메타데이터가 없어 캐릭터·메인 프롬프트가 빈 채로 인페인트가 열린다. 세션은
+        "그 그림의 캐릭터만 쓴다"는 규칙이라(라이브 UI 폴백 없음) 빈 것이 정상 동작이고,
+        고칠 자리는 **사용자가 출처를 직접 지목하는 길**이다.
+
+        ⚠️ 캐릭터 조립은 반드시 `_session_characters_from_sources` 를 쓴다. 세션을 열 때와
+           같은 함수여야 한다 - 손으로 다시 짜면 두 길이 갈린다(같은 실수 이력이 있다).
+        ⚠️ **그림·마스크·캔버스는 건드리지 않는다.** 프롬프트만 바꾼다(사용자 지정).
+           좌표는 캐릭터에 딸려 오므로 `position_mode` 는 원본을 따라 다시 정한다.
+        """
+        context = self.context
+        state = context.img2img_session
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                return context._toast("프롬프트 복원 값을 읽지 못했습니다", level="error")
+        if not isinstance(value, dict):
+            return context._toast("프롬프트 복원 값이 비어 있습니다", level="error")
+
+        prompt_ctx = value.get("prompt_context") if isinstance(value.get("prompt_context"), dict) else {}
+        params = value.get("generation_params") if isinstance(value.get("generation_params"), dict) else {}
+        characters = self._session_characters_from_sources(
+            params, prompt_ctx, int(state.get("width") or 0), int(state.get("height") or 0))
+        main_prompt = str(prompt_ctx.get("main_prompt") or prompt_ctx.get("final_prompt") or "").strip()
+
+        if not characters and not main_prompt:
+            # 여기서 조용히 성공하면 사용자는 "복원했는데 그대로" 를 보게 된다.
+            return context._toast("그 이미지에는 복원할 프롬프트가 없습니다", level="error")
+
+        restored = []
+        if main_prompt:
+            state["main_prompt"] = main_prompt
+            restored.append("메인 프롬프트")
+        if characters:
+            state["characters"] = characters
+            state["position_mode"] = _session_position_mode(characters)
+            restored.append(f"캐릭터 {len(characters)}명")
+        label = str(value.get("label") or "").strip()
+        return self.module_state({
+            "_headless_extra_messages": [
+                context._toast(
+                    f"{' · '.join(restored)} 복원{f' ({label})' if label else ''}", level="success")
+            ]
+        })
 
     @staticmethod
     def _session_has_user_work(state: dict[str, Any]) -> bool:
@@ -753,7 +803,8 @@ class HeadlessImg2ImgService:
     #    도 없는 빈 세션으로 보고 다른 그림을 **묻지도 않고** 덮어썼다 - 새 세션이
     #    열리면 window_id 가 바뀌어 초안이 통째로 미아가 된다(Codex HIGH 2026-08-28).
     _USER_EDIT_KEYS = ("main_prompt", "negative_prompt", "strength", "noise",
-                       "add_character", "mask_draft_dirty", "position_mode")
+                       "add_character", "mask_draft_dirty", "position_mode",
+                       "restore_prompts")
     _USER_EDIT_PREFIXES = ("char_prompt_", "char_uc_", "char_active_",
                            "remove_character_", "char_position_")
 
@@ -776,6 +827,8 @@ class HeadlessImg2ImgService:
             context.img2img_session["main_prompt"] = str(value or "")
         elif key == "negative_prompt":
             context.img2img_session["negative_prompt"] = str(value or "")
+        elif key == "restore_prompts":
+            return self._restore_prompts(value)
         elif key == "strength":
             context.img2img_session["strength"] = max(1, min(99, int(float(value))))
         elif key == "noise":

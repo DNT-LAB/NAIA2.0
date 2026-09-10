@@ -1664,6 +1664,74 @@ def register_result_display_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
+    @app.post("/api/img2img/restore-prompts")
+    async def api_img2img_restore_prompts(req: Request):
+        """열려 있는 인페인트/img2img 세션에 **프롬프트만** 다른 출처에서 되살린다.
+
+        제보(2026-09-10): 포토샵 등으로 고쳐 EXIF 가 사라진 그림을 들여와 인페인트하면
+        캐릭터·메인 프롬프트가 비어 있다. 세션은 "그 그림의 캐릭터만" 쓰므로 빈 것이
+        의도된 동작이고, 사용자가 출처를 직접 지목하는 길이 없던 것이 문제였다.
+
+        두 갈래를 받는다:
+          - JSON  `{path|file_path|source, label}` : 히스토리/디스크 이미지
+          - 이미지 바이트                          : EXIF 가 살아 있는 파일 업로드
+
+        ⚠️ 그림·마스크·캔버스는 건드리지 않는다. 세션 자체를 다시 열면 사용자가 잡아 둔
+           마스크와 배치가 날아간다 - 그래서 `open_...` 이 아니라 `set_param` 을 쓴다.
+        """
+        if not session_context.img2img_session.get("active"):
+            return JSONResponse({"error": "열려 있는 인페인트 세션이 없습니다"}, status_code=409)
+
+        content_type = (req.headers.get("content-type") or "").lower()
+        body = await req.body()
+        if not body:
+            return JSONResponse({"error": "No data"}, status_code=400)
+
+        def _from_image_bytes(image_bytes: bytes, label: str) -> dict[str, Any]:
+            # 세션을 열 때와 **같은 추출기**를 쓴다(두 길이 갈리지 않게).
+            from utils.image_info import character_prompts_from_embedded, extract_embedded_metadata
+
+            embedded = extract_embedded_metadata(image_bytes) or {}
+            prompt_ctx: dict[str, Any] = {}
+            if str(embedded.get("prompt") or ""):
+                prompt_ctx["main_prompt"] = str(embedded.get("prompt") or "")
+            slots = character_prompts_from_embedded(embedded)
+            if slots:
+                prompt_ctx["character_prompts"] = slots
+            return {"prompt_context": prompt_ctx, "generation_params": {}, "label": label}
+
+        try:
+            if "application/json" in content_type:
+                payload = json.loads(body.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    return JSONResponse({"error": "Invalid payload"}, status_code=400)
+
+                def _resolve():
+                    _png, label, params, prompt_ctx = resolve_result_image_action_source(
+                        session_context, payload)
+                    return {"prompt_context": dict(prompt_ctx or {}),
+                            "generation_params": dict(params or {}),
+                            "label": str(payload.get("label") or label or "")}
+
+                value = await run_in_thread(_resolve)
+            else:
+                if len(body) > 64 * 1024 * 1024:
+                    return JSONResponse({"error": "Image is too large"}, status_code=413)
+                label = (req.query_params.get("label") or "Uploaded Image")[:120]
+                value = await run_in_thread(_from_image_bytes, body, label)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        def _apply():
+            from core.headless_img2img_service import HeadlessImg2ImgService
+
+            return HeadlessImg2ImgService(session_context).set_param("restore_prompts", value)
+
+        state = await run_in_thread(_apply)
+        if state:
+            await broadcast_json(clients, state)
+        return {"ok": True, "state": state}
+
     @app.post("/api/image-action/{action}")
     async def api_image_action(action: str, req: Request):
         action = (action or "").strip().lower()

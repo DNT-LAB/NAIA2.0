@@ -1314,6 +1314,12 @@ export function createCharacterQuickPanel({
     const posMode = posBlockedByRandom() ? 'auto' : posModeOf(current);
     const custom = posMode === 'custom';
     const posLocked = hasConnectedSlot(current) || posBlockedByRandom();
+    // ⚠️ 이 아래 `innerHTML` 이 `.cq-grid` 를 **새 요소로 갈아치운다** - 스크롤이 0 으로
+    //    돌아간다. 서명이 바뀌는 일은 편집 중에도 일어나므로(해상도 변경 · Rnd Res 로
+    //    생성 · 슬롯 접기 · Connect · POS 전환 · 활성화 토글), 길게 적던 사용자는 보던
+    //    자리를 잃는다(사용자 제보: "프롬 적는데 자꾸 스크롤이 맨 위로 갱신된다").
+    //    실측: 해상도 하나만 바꿔도 284 -> 0. 자리는 여기서 쥐고 아래에서 되돌린다.
+    const keepScroll = mount.querySelector('.cq-grid')?.scrollTop || 0;
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`
@@ -1349,6 +1355,13 @@ export function createCharacterQuickPanel({
     syncValues(current);
     bindAssist();          // 렌더가 칸을 새로 만들었다 - 반드시 다시 건다
     fitGridHeight();
+    // 쥐고 있던 스크롤을 되돌린다. **`syncValues`(칸 높이) 와 `fitGridHeight`(높이 상한)
+    // 뒤라야 한다** - 그 둘이 scrollHeight 와 clientHeight 를 정하므로, 먼저 넣으면
+    // 브라우저가 아직 짧은 내용에 맞춰 다시 잘라낸다.
+    if (keepScroll) {
+      const grid = mount.querySelector('.cq-grid');
+      if (grid) grid.scrollTop = keepScroll;
+    }
     syncViewerShift();
     if (posEditing) renderStage();      // 좌표가 서버에서 돌아오면 원도 맞춘다
   }

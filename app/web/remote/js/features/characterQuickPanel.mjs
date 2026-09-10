@@ -67,9 +67,6 @@ export function createCharacterQuickPanel({
   restoreCanvasViewMode = () => {},
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
-  // 프롬프트 복원이 **이미지를 고른 뒤** 무엇을 되살릴지 묻는다(사용자 지정 2026-09-10).
-  // 없으면 조용히 '둘 다' 로 간다 - 물어볼 수단이 없는데 막아 세우는 것보다 낫다.
-  showConfirmDialog = null,
 }) {
   let mount = null;
   let open = false;
@@ -79,7 +76,6 @@ export function createCharacterQuickPanel({
   let lastSignature = '';
   let visible = false;
   let anchorWatcher = null;      // 결과 패널이 늦게 생기면 다시 붙는다
-  let restorePop = null;         // 프롬프트 복원 - 출처 고르는 팝업
   let stage = null;              // POS 편집 무대(원이 놓이는 판)
   let chips = null;              // 무대 위 캐릭터 칩 줄
   let posEditing = false;
@@ -1103,119 +1099,6 @@ export function createCharacterQuickPanel({
    *
    *  CSS 의 vh 로는 못 한다 - 결과 정보 패널의 높이가 접힘/펼침에 따라 변하고,
    *  패널 자체도 뷰포트 맨 위에서 시작하지 않는다. 그릴 때마다 실제로 잰다. */
-  /** 인페인트 세션에서만 나오는 프롬프트 복원 줄.
-   *
-   *  제보(2026-09-10): 포토샵으로 고쳐 EXIF 가 사라진 그림을 들여와 인페인트하면
-   *  캐릭터가 비어 있다. 세션은 **그 그림의 캐릭터만** 쓰므로(라이브 UI 폴백 없음)
-   *  빈 것 자체는 의도된 동작이고, 없던 것은 사용자가 출처를 지목하는 길이다.
-   *
-   *  ⚠️ `virtual` 일 때만 그린다 - 메인 캐릭터 패널에 나오면 안 된다(사용자 지정:
-   *     "해당 기능은 인페인트 윈도우에서만 작동할 수 있어야함").
-   *  비어 있을 때는 **왜** 비었는지까지 말하고, 채워져 있으면 칩 하나로 접는다
-   *  (안 쓸 땐 접는다 - 이 저장소의 팝업 규약).
-   */
-  function restoreRowHtml(state) {
-    if (!state || !state.virtual) return '';
-    const empty = !activeSlots(state).length;
-    return `<div class="cq-restore${empty ? ' is-empty' : ''}">`
-      + (empty
-          ? `<span class="cq-restore-why">이 이미지에 캐릭터 프롬프트가 없습니다</span>`
-          : '')
-      + `<button type="button" class="cq-restore-btn" data-cq-restore="1"`
-      + ` title="다른 이미지에서 프롬프트를 가져옵니다 (이미지를 먼저 고른 뒤 무엇을 복원할지 묻습니다)">`
-      + `프롬프트 복원</button></div>`;
-  }
-
-  /** 복원 흐름 1단계 - 출처 이미지를 고른다.
-   *
-   *  사용자 지정 2026-09-10: **이미지를 먼저 고르고**, 무엇을 되살릴지는 그 뒤에 묻는다.
-   *  그래서 여기서는 scope 를 정하지 않고 `probe` 로 내용만 확인한다.
-   */
-  async function openRestorePicker(anchor) {
-    closeRestorePicker();
-    // ⚠️ `.cq-box` 가 아니라 **`.cq-float` 에 붙인다.** 상자는 `overflow: hidden` 이라
-    //    팝업이 잘리고, `position` 도 없어 기준이 되지 못한다(부유창이 기준이다).
-    const host = mount;
-    if (!host) return;
-    const pop = document.createElement('div');
-    pop.className = 'cq-restore-pop';
-    pop.innerHTML = `<div class="cq-restore-pop-head">`
-      + `<span>어느 이미지에서 가져올까요?</span>`
-      + `<button type="button" class="cq-restore-x" data-cq-restore-close="1">&#10005;</button></div>`
-      + `<button type="button" class="cq-restore-file" data-cq-restore-file="1">`
-      + `파일에서 열기…</button>`
-      + `<div class="cq-restore-hint">EXIF 가 살아 있는 원본을 고르세요</div>`
-      + `<div class="cq-restore-list" data-cq-restore-list="1">불러오는 중…</div>`;
-    host.appendChild(pop);
-    restorePop = pop;
-
-    // 히스토리는 곁들이다 - 없거나 실패해도 파일 열기는 그대로 쓸 수 있어야 한다.
-    try {
-      const response = await fetch('/api/history/list?page=0&per_page=24');
-      const data = await response.json();
-      const images = Array.isArray(data && data.images) ? data.images : [];
-      const list = pop.querySelector('[data-cq-restore-list]');
-      if (!list) return;
-      list.innerHTML = images.length
-        ? images.map(item => `<button type="button" class="cq-restore-item"`
-            + ` data-cq-restore-path="${escHtml(String(item.rel_path || ''))}"`
-            + ` title="${escHtml(String(item.filename || ''))}">`
-            + `<img src="${escHtml(String(item.thumb_url || ''))}" alt="" loading="lazy">`
-            + `</button>`).join('')
-        : `<div class="cq-restore-hint">히스토리가 비어 있습니다</div>`;
-    } catch (_error) {
-      const list = pop.querySelector('[data-cq-restore-list]');
-      if (list) list.innerHTML = `<div class="cq-restore-hint">히스토리를 못 읽었습니다</div>`;
-    }
-  }
-
-  function closeRestorePicker() {
-    if (restorePop && restorePop.parentElement) restorePop.parentElement.removeChild(restorePop);
-    restorePop = null;
-  }
-
-  /** 복원 흐름 2단계 - 고른 것에 무엇이 들었는지 보고, 무엇을 되살릴지 묻는다. */
-  async function runRestore(init) {
-    try {
-      const probe = await fetch('/api/img2img/restore-prompts?probe=1', init);
-      const data = await probe.json().catch(() => ({}));
-      if (!probe.ok) throw new Error(data.error || `HTTP ${probe.status}`);
-      const found = data.found || {};
-      const hasMain = !!found.has_main;
-      const count = Number(found.character_count || 0);
-      if (!hasMain && !count) {
-        showToast('그 이미지에는 복원할 프롬프트가 없습니다', 'error');
-        return;
-      }
-      // 없는 선택지는 아예 내밀지 않는다 - 고른 뒤에 실패를 보면 안 된다.
-      const choices = [];
-      if (hasMain && count) choices.push({key: 'both', label: `둘 다 (메인 + 캐릭터 ${count}명)`});
-      if (count) choices.push({key: 'characters', label: `캐릭터 프롬프트만 (${count}명)`});
-      if (hasMain) choices.push({key: 'main', label: '메인 프롬프트만'});
-      let scope = 'both';
-      if (typeof showConfirmDialog === 'function' && choices.length > 1) {
-        const lines = [];
-        if (hasMain) lines.push(`메인: ${String(found.main_preview || '').slice(0, 60)}`);
-        (found.character_previews || []).forEach((text, i) => lines.push(`C${i + 1}: ${text}`));
-        scope = await showConfirmDialog('무엇을 복원할까요?', {
-          title: found.label ? `${found.label} 에서 복원` : '프롬프트 복원',
-          messageHtml: lines.map(line => escHtml(line)).join('<br>'),
-          choices,
-        });
-        if (!scope) return;                       // 취소 - 아무것도 안 한다
-      } else if (choices.length === 1) {
-        scope = choices[0].key;
-      }
-      const applied = await fetch(
-        `/api/img2img/restore-prompts?pending=1&scope=${encodeURIComponent(scope)}`,
-        {method: 'POST'});
-      const result = await applied.json().catch(() => ({}));
-      if (!applied.ok) throw new Error(result.error || `HTTP ${applied.status}`);
-    } catch (error) {
-      showToast(error.message || '프롬프트 복원에 실패했습니다', 'error');
-    }
-  }
-
   function fitGridHeight() {
     if (anchorWatcher) anchorWatcher();
     const grid = mount && mount.querySelector('.cq-grid');
@@ -1258,41 +1141,6 @@ export function createCharacterQuickPanel({
     // TODO(POS): 캐릭터 좌표 편집. 규약은 확정됨(좌상단 원점 · 0~1 · 소수 3자리)
     //   이고 백엔드도 준비됐다(use_coords). 앵커 UI 만 남았다.
     if (event.target.closest('[data-cq-pos]')) return;
-    // ── 프롬프트 복원(인페인트 세션 전용) ────────────────────────────────
-    if (event.target.closest('[data-cq-restore-close]')) { closeRestorePicker(); return; }
-    const restoreBtn = event.target.closest('[data-cq-restore]');
-    if (restoreBtn) {
-      if (restorePop) closeRestorePicker();
-      else openRestorePicker(restoreBtn);
-      return;
-    }
-    if (event.target.closest('[data-cq-restore-file]')) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.addEventListener('change', async () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        closeRestorePicker();
-        await runRestore({
-          method: 'POST',
-          headers: {'Content-Type': file.type || 'application/octet-stream'},
-          body: file,
-        });
-      });
-      input.click();
-      return;
-    }
-    const restoreItem = event.target.closest('[data-cq-restore-path]');
-    if (restoreItem) {
-      closeRestorePicker();
-      runRestore({
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({path: restoreItem.dataset.cqRestorePath}),
-      });
-      return;
-    }
     const head = event.target.closest('[data-cq-head]');
     if (head) { open = !open; render(lastState, true); return; }
     // ▼ 와 - 는 슬롯 배열을 바꾼다. 번호는 활성 무리 안의 자리라 서버가 새 상태를
@@ -1431,8 +1279,7 @@ export function createCharacterQuickPanel({
     // POS 편집 중에는 패널을 통째로 감춘다(사용자 결정 A안) - 그림 위를 가장 적게
     // 가리는 길이고, 나가는 문은 띠의 종료 버튼이 맡는다.
     const body = open
-      ? restoreRowHtml(current)
-        + `<div class="cq-grid">`
+      ? `<div class="cq-grid">`
         + slots.map(({character, index}, i) =>
             slotHtml(character, index, i + 1, slots.length, slots)).join('')
         // Manage 는 모듈 팝업을 연다 - 실수로 ▼ 로 내린 슬롯을 되살릴 곳이 거기다
@@ -1473,9 +1320,6 @@ export function createCharacterQuickPanel({
     //    자리를 잃는다(사용자 제보: "프롬 적는데 자꾸 스크롤이 맨 위로 갱신된다").
     //    실측: 해상도 하나만 바꿔도 284 -> 0. 자리는 여기서 쥐고 아래에서 되돌린다.
     const keepScroll = mount.querySelector('.cq-grid')?.scrollTop || 0;
-    // 복원 팝업은 `.cq-box` 안에 있으므로 아래 innerHTML 이 통째로 지운다 - 손잡이만
-    // 남으면 다음 클릭이 이미 사라진 노드를 지우려 든다.
-    restorePop = null;
     mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`

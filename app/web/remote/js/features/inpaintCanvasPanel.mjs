@@ -64,6 +64,8 @@ const wrapDeg = (v) => ((Math.round(Number(v) || 0) % 360) + 360) % 360;
 
 export function createInpaintCanvasPanel({
   panel, plane, viewer, escHtml, setModuleParam, showToast,
+  // 프롬프트 복원이 이미지를 고른 뒤 무엇을 되살릴지 묻는다(사용자 지정 2026-09-10).
+  showConfirmDialog = null,
   openMaskEditor = () => {},
   // 마스크를 지우는 **하나뿐인 목**. 서버만 지우면 브라우저에 남은 초안이 살아 있어,
   // 다시 [마스크 그리기] 를 열면 지운 것이 그대로 되살아난다(사용자 제보 2026-08-30).
@@ -84,6 +86,7 @@ export function createInpaintCanvasPanel({
   getFreePixels = () => 1048576,
 }) {
   let state = null;
+  let restorePop = null;   // 프롬프트 복원 - 출처 고르는 팝업
   let stageEl = null;
   let posStage = null;
   // 편집(캔버스) / 결과 보기. 화면에서만 쓰는 값이라 서버에 안 보낸다 - 다른 기기에서
@@ -230,6 +233,9 @@ export function createInpaintCanvasPanel({
     // 접기는 없앴다(사용자 지정 2026-08-29: "실용성이 없다"). 도크는 늘 펼쳐져 있고,
     // 닫는 길은 `세션 닫기` 와 헤더의 Inpaint 버튼 두 곳이다.
     panel.className = 'inpaint-canvas-panel';
+    // 도크를 다시 그리면 팝업이 통째로 지워진다 - 손잡이만 남으면
+    // 다음 클릭이 이미 사라진 노드를 지우려 든다.
+    restorePop = null;
     panel.innerHTML = dockHtml();
     flashModes = false;          // 한 번만 번쩍인다(그린 순간 표를 내린다)
     renderPlane();
@@ -286,6 +292,25 @@ export function createInpaintCanvasPanel({
 
   // 좌우 2단(사용자 지정 2026-08-26). 왼쪽은 **캔버스의 기하**, 오른쪽은 **인페인트의
   // 실행**이다. 한 단으로 늘어놓으면 세 줄이 넉 줄이 되고, 그만큼 캔버스가 눌린다.
+  /** 프롬프트 복원 단추. 머리줄의 [편집 | 결과 보기] 옆이 자리다(사용자 지정 2026-09-10).
+   *
+   *  제보: 포토샵으로 고쳐 EXIF 가 사라진 그림을 들여와 인페인트하면 캐릭터·메인
+   *  프롬프트를 잃는다. 세션은 **그 그림의 캐릭터만** 쓰므로(라이브 UI 폴백 없음) 빈 것
+   *  자체는 의도된 동작이고, 없던 것은 사용자가 출처를 지목하는 길이다.
+   *
+   *  ⚠️ 처음엔 캐릭터 패널에 줄을 하나 더 얹었다가 물렀다 - 줄 하나를 통째로 먹으면서
+   *     버튼만 놓아 **빈 공간만 늘었다**(사용자 지적). 여기는 이미 있는 줄이라 폭만 쓴다.
+   *  캐릭터가 비어 있으면 색을 준다 - 자리를 더 쓰지 않고 눈에만 띄게 한다.
+   */
+  function restoreButtonHtml() {
+    const empty = !((state && state.characters) || []).some(c => c && String(c.prompt || '').trim());
+    return `<button type="button" class="ic-btn ic-restore${empty ? ' is-empty' : ''}"`
+      + ` data-ic="restore-prompts"`
+      + ` title="${empty
+          ? '이 이미지에는 캐릭터 프롬프트가 없습니다. 다른 이미지에서 가져옵니다'
+          : '다른 이미지에서 프롬프트를 가져옵니다'}">프롬프트 복원</button>`;
+  }
+
   function dockHtml() {
     const {w, h} = canvasSize();
     const editing = viewMode === 'edit';
@@ -299,6 +324,7 @@ export function createInpaintCanvasPanel({
           <button type="button" class="ic-btn${editing ? ' is-on' : ''}" data-ic="mode-edit">편집</button>
           <button type="button" class="ic-btn${editing ? '' : ' is-on'}" data-ic="mode-result">결과 보기</button>
         </div>
+        ${restoreButtonHtml()}
         <span class="ic-spacer"></span>
         <span class="ic-hint">${editing
           ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 방향키=1px(Shift 16) · 0=초기화 · 숫자 위치는 POS 에서'
@@ -602,9 +628,138 @@ export function createInpaintCanvasPanel({
     sendTransform(key === 'scale' ? 'base_scale' : 'base_rotation', payload);
   }
 
+  /** 복원 1단계 - 출처 이미지를 고른다.
+   *
+   *  사용자 지정 2026-09-10: **이미지를 먼저 고르고**, 무엇을 되살릴지는 그 뒤에 묻는다.
+   *  그래서 여기서는 scope 를 정하지 않고 `probe` 로 내용만 확인한다.
+   */
+  async function openRestorePicker(anchor) {
+    closeRestorePicker();
+    if (!panel) return;
+    const pop = document.createElement('div');
+    pop.className = 'ic-restore-pop';
+    // 누른 단추 아래에 선다. 머리줄은 폭이 좁으므로 왼쪽 끝을 도크 기준으로 맞춘다.
+    const box = panel.getBoundingClientRect();
+    const at = anchor ? anchor.getBoundingClientRect() : box;
+    pop.style.left = `${Math.max(6, Math.min(at.left - box.left, box.width - 306))}px`;
+    pop.style.top = `${at.bottom - box.top + 4}px`;
+    pop.innerHTML = `<div class="ic-restore-head">`
+      + `<span>어느 이미지에서 가져올까요?</span>`
+      + `<button type="button" class="ic-restore-x" data-ic="restore-close">&#10005;</button></div>`
+      + `<button type="button" class="ic-restore-file" data-ic="restore-file">파일에서 열기…</button>`
+      + `<div class="ic-restore-hint">EXIF 가 살아 있는 원본을 고르세요</div>`
+      + `<div class="ic-restore-list" data-ic-list="1">불러오는 중…</div>`;
+    panel.appendChild(pop);
+    restorePop = pop;
+    // ⚠️ 도크는 뷰어 **아래쪽**에 붙어 있다(`bottom: 6px`). 아래로 펴면 화면 밖으로
+    //    나가므로, 붙인 뒤 실제로 재 보고 모자라면 위로 뒤집는다.
+    const popRect = pop.getBoundingClientRect();
+    if (popRect.bottom > window.innerHeight - 8) {
+      pop.style.top = `${Math.max(6, at.top - box.top - popRect.height - 4)}px`;
+    }
+
+    // 히스토리는 곁들이다 - 없거나 실패해도 파일 열기는 그대로 쓸 수 있어야 한다.
+    try {
+      const response = await fetch('/api/history/list?page=0&per_page=24');
+      const data = await response.json();
+      const images = Array.isArray(data && data.images) ? data.images : [];
+      const list = pop.querySelector('[data-ic-list]');
+      if (!list) return;
+      list.innerHTML = images.length
+        ? images.map(item => `<button type="button" class="ic-restore-item"`
+            + ` data-ic-path="${escHtml(String(item.rel_path || ''))}"`
+            + ` title="${escHtml(String(item.filename || ''))}">`
+            + `<img src="${escHtml(String(item.thumb_url || ''))}" alt="" loading="lazy"></button>`).join('')
+        : `<div class="ic-restore-hint">히스토리가 비어 있습니다</div>`;
+    } catch (_error) {
+      const list = pop.querySelector('[data-ic-list]');
+      if (list) list.innerHTML = `<div class="ic-restore-hint">히스토리를 못 읽었습니다</div>`;
+    }
+  }
+
+  function closeRestorePicker() {
+    if (restorePop && restorePop.parentElement) restorePop.parentElement.removeChild(restorePop);
+    restorePop = null;
+  }
+
+  /** 복원 2단계 - 고른 것에 무엇이 들었는지 보고, 무엇을 되살릴지 묻는다. */
+  async function runRestore(init) {
+    try {
+      const probe = await fetch('/api/img2img/restore-prompts?probe=1', init);
+      const data = await probe.json().catch(() => ({}));
+      if (!probe.ok) throw new Error(data.error || `HTTP ${probe.status}`);
+      const found = data.found || {};
+      const hasMain = !!found.has_main;
+      const count = Number(found.character_count || 0);
+      if (!hasMain && !count) {
+        showToast('그 이미지에는 복원할 프롬프트가 없습니다', 'error');
+        return;
+      }
+      // 없는 선택지는 아예 내밀지 않는다 - 고른 뒤에 실패를 보면 안 된다.
+      const choices = [];
+      if (hasMain && count) choices.push({key: 'both', label: `둘 다 (메인 + 캐릭터 ${count}명)`});
+      if (count) choices.push({key: 'characters', label: `캐릭터 프롬프트만 (${count}명)`});
+      if (hasMain) choices.push({key: 'main', label: '메인 프롬프트만'});
+      let scope = choices.length === 1 ? choices[0].key : 'both';
+      if (typeof showConfirmDialog === 'function' && choices.length > 1) {
+        const lines = [];
+        if (hasMain) lines.push(`메인: ${String(found.main_preview || '').slice(0, 60)}`);
+        (found.character_previews || []).forEach((text, i) => lines.push(`C${i + 1}: ${text}`));
+        scope = await showConfirmDialog('무엇을 복원할까요?', {
+          title: found.label ? `${found.label} 에서 복원` : '프롬프트 복원',
+          messageHtml: lines.map(line => escHtml(line)).join('<br>'),
+          choices,
+        });
+        if (!scope) return;                       // 취소 - 아무것도 안 한다
+      }
+      const applied = await fetch(
+        `/api/img2img/restore-prompts?pending=1&scope=${encodeURIComponent(scope)}`,
+        {method: 'POST'});
+      const result = await applied.json().catch(() => ({}));
+      if (!applied.ok) throw new Error(result.error || `HTTP ${applied.status}`);
+    } catch (error) {
+      showToast(error.message || '프롬프트 복원에 실패했습니다', 'error');
+    }
+  }
+
   function onClick(event) {
+    // ── 프롬프트 복원 ─────────────────────────────────────────────────
+    if (event.target.closest?.('[data-ic-path]')) {
+      const path = event.target.closest('[data-ic-path]').dataset.icPath;
+      closeRestorePicker();
+      runRestore({
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path}),
+      });
+      return;
+    }
     const action = event.target.closest?.('[data-ic]')?.dataset.ic;
     if (!action) return;
+    if (action === 'restore-close') return closeRestorePicker();
+    if (action === 'restore-prompts') {
+      const button = event.target.closest('[data-ic]');
+      if (restorePop) closeRestorePicker();
+      else openRestorePicker(button);
+      return;
+    }
+    if (action === 'restore-file') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.addEventListener('change', async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        closeRestorePicker();
+        await runRestore({
+          method: 'POST',
+          headers: {'Content-Type': file.type || 'application/octet-stream'},
+          body: file,
+        });
+      });
+      input.click();
+      return;
+    }
     if (action === 'mode-edit') return setViewMode('edit');
     if (action === 'mode-result') return setViewMode('result');
     if (action === 'grid') {

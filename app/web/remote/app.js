@@ -2341,8 +2341,6 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
       //    기본값이 빈 함수라 아무 일도 안 일어났다 - 오류도 안 난다.
       bindTagAssist,
       showToast,
-      // 프롬프트 복원이 이미지를 고른 뒤 무엇을 되살릴지 묻는다(사용자 지정 2026-09-10).
-      showConfirmDialog,
     });
     syncCharacterQuickPanelVisibility();
     // ⚠️ 여기서 메인 캐시를 바로 그리면 안 된다 - 이 import 는 늦게 끝나서, 이미 열려
@@ -2692,6 +2690,8 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202608
       plane: $('inpaintCanvasPlane'),
       viewer: $('resultViewer'),
       escHtml, setModuleParam, showToast,
+      // 프롬프트 복원이 이미지를 고른 뒤 무엇을 되살릴지 묻는다(사용자 지정 2026-09-10).
+      showConfirmDialog,
       // V5 는 팝업을 안 여니 조작도 이쪽에 있어야 한다. 다만 **로직은 옮기지 않는다** -
       // 마스크 디코드/슬라이더 디바운스/생성 규약은 img2img 패널이 계속 SSOT 다.
       openMaskEditor: () => img2imgPanel?.openMaskEditor?.(),

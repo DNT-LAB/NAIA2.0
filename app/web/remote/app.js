@@ -2341,6 +2341,8 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
       //    기본값이 빈 함수라 아무 일도 안 일어났다 - 오류도 안 난다.
       bindTagAssist,
       showToast,
+      // 프롬프트 복원이 이미지를 고른 뒤 무엇을 되살릴지 묻는다(사용자 지정 2026-09-10).
+      showConfirmDialog,
     });
     syncCharacterQuickPanelVisibility();
     // ⚠️ 여기서 메인 캐시를 바로 그리면 안 된다 - 이 import 는 늦게 끝나서, 이미 열려

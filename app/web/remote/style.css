@@ -24829,6 +24829,61 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-slot-body:not(:empty) {
   display: flex; flex-direction: column; gap: 3px; padding: 3px 4px 4px;
 }
+/* ── 프롬프트 복원(인페인트 세션 전용) ───────────────────────────────────
+   제보 2026-09-10: EXIF 를 잃은 그림을 들여와 인페인트하면 캐릭터가 비어 있다.
+   비었을 때는 **왜** 비었는지까지 말하고(is-empty), 채워져 있으면 버튼만 남긴다 -
+   안 쓸 땐 접는다(이 저장소의 팝업 규약). 자리는 머리줄 바로 아래다(사용자 지정). */
+.cq-restore {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.cq-restore.is-empty { background: rgba(233,196,106,0.09); }
+.cq-restore-why {
+  flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cq-restore-btn {
+  margin-left: auto; padding: 3px 8px; border-radius: 5px;
+  background: rgba(124,106,239,0.18); border: 1px solid rgba(124,106,239,0.42);
+  color: var(--text-primary); font-size: 10.5px; cursor: pointer;
+}
+.cq-restore-btn:hover { background: rgba(124,106,239,0.3); }
+/* 팝업은 `.cq-float`(부유창) 기준으로 선다. `.cq-box` 는 `overflow: hidden` 이라
+   거기 붙이면 잘리고, `position` 도 없어 기준이 되지 못한다. */
+.cq-restore-pop {
+  position: absolute; left: 6px; right: 6px; top: 30px; z-index: 30;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 7px; border-radius: 7px;
+  background: rgba(16,16,24,0.98); border: 1px solid rgba(124,106,239,0.4);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+}
+.cq-restore-pop-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; color: var(--text-secondary);
+}
+.cq-restore-x {
+  margin-left: auto; width: 18px; height: 18px; line-height: 1;
+  background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
+}
+.cq-restore-file {
+  padding: 5px 8px; border-radius: 5px; cursor: pointer;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-size: 11px;
+}
+.cq-restore-file:hover { background: rgba(255,255,255,0.12); }
+.cq-restore-hint { font-size: 10px; color: var(--text-secondary); }
+.cq-restore-list {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px;
+  max-height: 168px; overflow-y: auto;
+  font-size: 10px; color: var(--text-secondary);
+}
+.cq-restore-item {
+  padding: 0; border-radius: 4px; overflow: hidden; cursor: pointer;
+  background: rgba(0,0,0,0.35); border: 1px solid var(--border-dim); aspect-ratio: 1;
+}
+.cq-restore-item:hover { border-color: rgba(124,106,239,0.7); }
+.cq-restore-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
 /* resize:none - 높이는 내용이 정한다(자동 증가). 손잡이를 두면 두 규칙이 싸운다. */
 .cq-input {
   width: 100%; resize: none; overflow: hidden;

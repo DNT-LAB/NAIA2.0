@@ -59,7 +59,7 @@ function savePrefs(persons, ratings) {
   try { localStorage.setItem(PREF_KEY, JSON.stringify({ persons: [...persons], ratings: [...ratings] })); } catch { /* 저장 못 해도 동작한다 */ }
 }
 
-export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
+export function initEventMap({ insertTag, showToast } = {}) {
   let overlay = null, input = null, statusEl = null, trailEl = null, bodyEl = null;
   let filtersEl = null, personBtn = null, personPopup = null, footEl = null, tabBtn = null;
   let sideEl = null;              // 실제 조합 둘째 패널
@@ -73,8 +73,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   let roles = new Set();          // 대분류 필터(갈래 id). 비면 전부
   let group = '';                 // 첫 화면에서 고른 대분류(핀이 없을 때만 뜻이 있다)
   let browse = null;              // 마지막 browse 결과
-  let seed = null;                // /resolve 응답 - 프롬프트에서 고를 씨앗
-  let promptPerson = '';          // 프롬프트의 인원 태그가 가리킨 분면(칩으로 보인다)
   let result = null;              // 마지막 explore
   let suggest = null;             // 마지막 suggest (검색 칸에 글자가 있을 때만)
   let samples = null;             // 실제 조합
@@ -90,23 +88,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   // ── 프롬프트 -> 태그 목록 ────────────────────────────────────────────────
   /** 프롬프트 칸의 글을 태그로 쪼갠다. 가중치(`0.8::x ::`·`-0.25::y`)는 벗기고, `#주석` 줄과
    *  빈 조각은 버린다. 무엇이 맵에 있는지는 서버(`/resolve`)가 정한다. */
-  function promptTags() {
-    const text = typeof getPromptText === 'function' ? String(getPromptText() || '') : '';
-    const out = [];
-    const seen = new Set();
-    for (const line of text.split(/\r?\n/)) {
-      if (line.trim().startsWith('#')) continue;
-      for (let piece of line.split(',')) {
-        piece = piece.replace(/^\s*-?\d*\.?\d+\s*::\s*/, '').replace(/\s*::\s*$/, '').trim();
-        if (!piece || seen.has(piece)) continue;
-        seen.add(piece);
-        out.push(piece);
-        if (out.length >= 64) return out;
-      }
-    }
-    return out;
-  }
-
   // ── 서버 ─────────────────────────────────────────────────────────────────
   async function getJson(path, params) {
     const query = new URLSearchParams();
@@ -135,18 +116,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     }
     personLabels = new Map((mapState.persons || []).map(p => [p.id, p.label]));
     return mapState;
-  }
-
-  async function loadSeed() {
-    const tags = promptTags();
-    seed = null; promptPerson = '';
-    if (!tags.length || !mapState || mapState.state !== 'ready') return;
-    try {
-      seed = await getJson('/api/event-map/resolve', { tags: tags.join(',') });
-      promptPerson = seed.person_group || '';
-      // ⚠️ 인원 필터를 자동으로 바꾸지 않는다(사용자 지정 2026-09-12). 프롬프트의 인원은 칩으로
-      //    보여 주고, 누르면 그때 적용한다.
-    } catch { seed = null; }
   }
 
   async function loadBrowse() {
@@ -325,12 +294,17 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   /** 카테고리 탭 줄. 서버가 준 갈래별 후보 수로 그린다(접힌 팝업 대신 - 사용자 지정 2026-09-12).
    *  핀이 있으면 탭 = 후보 필터, 대분류 목록이면 탭 = 대분류 바꾸기. */
   function catsHtml(counts, activeId, total) {
-    if (!counts || !counts.length) return '';
-    const order = new Map((mapState?.groups || []).map((g, i) => [g.id, i]));
-    const rows = counts.slice().sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
-    const tab = (id, label, n, on) => `<button type="button" class="em-cat em-g-${esc(id)}${on ? ' is-on' : ''}" data-em-cat="${esc(id)}"
-        title="${esc(label)} · ${fmt(n)}"><span class="em-tag">${esc(label)}</span><span class="em-cat-n">${fmt(n)}</span></button>`;
-    return `<div class="em-cats" role="tablist">${total != null ? tab('', '전체', total, !activeId) : ''}${rows.map(r => tab(r.id, r.label, r.count, r.id === activeId)).join('')}</div>`;
+    // 갈래는 **항상 전부** 그린다(핀을 고른 뒤에도 - 사용자 지정 2026-09-12). counts 는 있으면 얹는다;
+    // 없으면(옛 백엔드) 수 없이 그리고, 0 인 갈래는 흐리게 두고 못 누른다.
+    const groups = (mapState?.groups || []).filter(g => g.id !== 'unsorted' && g.tags > 0);
+    if (!groups.length) return '';
+    const byId = counts ? new Map(counts.map(r => [r.id, r.count])) : null;
+    const tab = (id, label, n, on) => {
+      const empty = byId != null && id && !n;
+      return `<button type="button" class="em-cat em-g-${esc(id)}${on ? ' is-on' : ''}${empty ? ' is-empty' : ''}" data-em-cat="${esc(id)}"
+        ${empty ? 'disabled' : ''} title="${esc(label)}${n != null ? ' · ' + fmt(n) : ''}"><span class="em-tag">${esc(label)}</span>${n != null ? `<span class="em-cat-n">${fmt(n)}</span>` : ''}</button>`;
+    };
+    return `<div class="em-cats" role="tablist">${total != null ? tab('', '전체', total, !activeId) : ''}${groups.map(g => tab(g.id, g.label, byId ? (byId.get(g.id) || 0) : null, g.id === activeId)).join('')}</div>`;
   }
 
   /** 접기 표의 대분류 12개(서버가 준다). 첫 화면 축(depth1)과 나머지로 묶는다. */
@@ -364,30 +338,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   function roleLabel(id) {
     const found = (mapState?.groups || []).find(g => g.id === id);
     return found ? found.label : id;
-  }
-
-  function seedHtml() {
-    if (!seed) return '';
-    const pinnable = (seed.items || []).filter(it => it.pinnable && !pins.includes(it.tag));
-    const blocked = (seed.items || []).filter(it => !it.pinnable && it.role !== 'population');
-    const person = promptPerson
-      ? `<button type="button" class="em-seed-person" data-em-apply-person="${esc(promptPerson)}"
-           title="프롬프트의 인원 태그(${esc((seed.population || []).join(', '))})는 핀이 아니라 분면 필터입니다. 누르면 인원을 이것으로 맞춥니다">
-           인원 → ${esc(personLabels.get(promptPerson) || promptPerson)}</button>` : '';
-    if (!pinnable.length && !person) return '';
-    const MAX_SEED = 14;
-    const sorted = pinnable.slice().sort((a, b) => (b.observed || 0) - (a.observed || 0));
-    const shown = sorted.slice(0, MAX_SEED);
-    const more = sorted.length - shown.length;
-    return `<div class="em-seed">
-      <div class="em-cap">지금 프롬프트에 있는 태그${person}</div>
-      <div class="em-seed-note">프롬프트 칸의 태그 중 맵에 있는 것입니다(가중치·아티스트·품질어는 뺐습니다). 하나를 누르면 그것이 첫 핀이 됩니다. 색은 대분류.</div>
-      <div class="em-seed-chips">${shown.map(it =>
-        `<button type="button" class="em-seed-chip em-g-${esc(it.group || 'unsorted')}" data-em-pin="${esc(it.tag)}"
-                 title="${esc(roleLabel(it.group || 'unsorted'))} · 관측 ${fmt(it.observed)}"><span class="em-tag">${esc(it.tag)}</span></button>`).join('')}
-        ${more > 0 ? `<span class="em-seed-more" title="관측 순 상위 ${MAX_SEED}개만 보입니다. 나머지는 위 칸에 쳐서 찾으세요">+${more}</span>` : ''}
-        ${blocked.slice(0, 6).map(it => `<span class="em-seed-chip is-off" title="${it.color_only ? '색상은 이벤트로 이어지지 않아 맵에서 늘 뺍니다' : '후보가 아닌 태그'}">${esc(it.tag)}</span>`).join('')}
-      </div></div>`;
   }
 
   function suggestHtml() {
@@ -427,7 +377,7 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     rows = cs.map(c => c.tag);
     setStatus(`${fmt(browse.observed_posts)}건${browse.sampled ? ' · 표본' : ''}`, 'ok',
       `${Math.round(browse.elapsed_ms || 0)}ms · 이 분면에서의 비율 ÷ 코퍼스 전체에서의 비율`);
-    const tabs = (mapState?.groups || []).filter(g => g.tags > 0 && g.id !== 'unsorted').map(g => ({ id: g.id, label: g.label, count: g.tags }));
+    const tabs = (mapState?.groups || []).filter(g => g.tags > 0 && g.id !== 'unsorted').map(g => ({ id: g.id, count: g.tags }));
     return catsHtml(tabs, group, null)
       + `<div class="em-cap">${esc(roleLabel(group))} <span class="em-note">이 인원·등급에서 특징적인 순 · ${cs.length}개</span></div>`
       + (cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">이 분면에서 5건 이상인 태그가 없습니다.</div>`);
@@ -492,7 +442,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
       html += browseHtml();
     } else if (!pins.length) {
       html += groupsHtml();
-      html += seedHtml() || '';
       setStatus(`태그 ${fmt(mapState.tags)} · 게시물 ${fmt(mapState.posts)}`);
     } else if (result) {
       if (result.status === 'error') {
@@ -507,8 +456,8 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
       } else {
         const cs = result.candidates || [];
         rows = cs.map(c => c.tag);
-        const gc = result.group_counts || [];
-        html += catsHtml(gc, roles.size ? [...roles][0] : '', gc.reduce((n, r) => n + r.count, 0));
+        const gc = result.group_counts || null;   // 옛 백엔드(재시작 전)는 이 키가 없다 - 그래도 탭은 그린다
+        html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + r.count, 0) : null);
         html += `<div class="em-cap">함께 달린 태그 <span class="em-note">lift 순 · ${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}</span></div>`;
         html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">5건 이상 함께 달린 태그가 없습니다.</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
@@ -684,8 +633,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
         else if (id) pickGroup(id);
         return;
       }
-      const ap = t.closest('[data-em-apply-person]');
-      if (ap) { persons = new Set([ap.dataset.emApplyPerson]); savePrefs(persons, ratings); paintPersonButton(); void explore(); return; }
       const row = t.closest('[data-em-pin]');
       if (row) pin(row.dataset.emPin);
     });
@@ -792,7 +739,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     position();
     setStatus('여는 중…', 'busy');
     await loadState();
-    await loadSeed();
     render();
     if (pins.length) void explore();
     position();

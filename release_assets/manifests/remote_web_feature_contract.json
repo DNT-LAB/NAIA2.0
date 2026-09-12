@@ -197,6 +197,7 @@
         "core/event_map/service.py",
         "core/event_map/categories.py",
         "core/event_map/kr_category_fold.json",
+        "core/event_map/pe_filter.py",
         "app/web/remote/js/features/eventMapPanel.mjs"
       ],
       "legacy_dependency": "none",
@@ -207,7 +208,8 @@
         {"method": "GET", "path": "/api/event-map/sample", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/describe", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/resolve", "smoke": "non_destructive"},
-        {"method": "GET", "path": "/api/event-map/browse", "smoke": "non_destructive"}
+        {"method": "GET", "path": "/api/event-map/browse", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/pe-filter", "smoke": "non_destructive"}
       ]
     },
     {

@@ -29,6 +29,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from core.event_map.pe_filter import MAX_TAGS as PE_MAX_TAGS, hidden_by_prompt_engineering
 from core.event_map.service import EventMapService, MapQueryError, default_roots
 from core.web_session_context import WebSessionContext
 
@@ -174,6 +175,26 @@ def register_event_map_routes(
             payload = await run_in_thread(_call, service.describe, tag)
         except MapQueryError as exc:
             return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/pe-filter")
+    async def api_event_map_pe_filter(tags: str = ""):
+        """이 태그들 중 **지금 프롬프트 엔지니어링 설정**이 지우는 것(사용자 지정 2026-09-12 밤).
+
+        후보 목록·실제 조합을 진한 회색으로 칠하는 데 쓴다. 색인이 없어도 답한다 - 설정은
+        색인과 무관하다. 규칙은 생성이 쓰는 `apply_tag_filters` 그대로다.
+        """
+        items = [p.strip() for p in str(tags or "").split(",") if p.strip()]
+        if len(items) > PE_MAX_TAGS:
+            return JSONResponse(
+                MapQueryError("too_many_tags", "태그는 %d개까지다." % PE_MAX_TAGS, limit=PE_MAX_TAGS).to_payload(),
+                status_code=400, headers=_no_store())
+        try:
+            payload = await run_in_thread(hidden_by_prompt_engineering, session_context, items)
+        except Exception as exc:                                  # pragma: no cover
+            print(f"Headless Remote: event map pe-filter failed - {exc}", flush=True)
+            return JSONResponse({"ok": False, "code": "internal_error", "message": str(exc)},
+                                status_code=500, headers=_no_store())
         return JSONResponse(payload, headers=_no_store())
 
     @app.get("/api/event-map/resolve")

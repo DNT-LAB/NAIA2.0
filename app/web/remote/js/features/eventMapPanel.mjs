@@ -78,6 +78,10 @@ export function initEventMap({ insertTag, showToast } = {}) {
   let result = null;              // 마지막 explore
   let suggest = null;             // 마지막 suggest (검색 칸에 글자가 있을 때만)
   let samples = null;             // 실제 조합
+  // 프롬프트 엔지니어링 설정(Auto-Hide · Remove ...)이 지우는 태그 -> 라운드 이름. 후보와 실제 조합을
+  // 진한 회색으로 칠하고, 넣기·복사에서 뺀다(사용자 지정 2026-09-12 밤). 매 결과마다 다시 묻는다 -
+  // 패널을 열어 둔 채 설정을 바꿀 수 있다.
+  let peHidden = new Map();
   let rows = [];                  // 키보드 이동 단위(지금 보이는 목록)
   let active = -1;
   let heightCaps = { base: 0, hard: 0 };
@@ -120,11 +124,24 @@ export function initEventMap({ insertTag, showToast } = {}) {
     return mapState;
   }
 
+  /** 이 태그들 중 지금 PE 설정이 지우는 것을 서버에 묻는다. 실패하면 조용히 '아무것도 안 지움'. */
+  async function loadPeHidden(tags) {
+    const list = [...new Set((tags || []).filter(Boolean))].slice(0, 400);
+    if (!list.length) { peHidden = new Map(); return; }
+    try {
+      const body = await getJson('/api/event-map/pe-filter', { tags: list.join(',') });
+      peHidden = new Map(Object.entries(body.hidden || {}));
+    } catch { peHidden = new Map(); }
+  }
+  const peTitle = tag => peHidden.has(tag) ? ` · 프롬프트 엔지니어링 설정(${peHidden.get(tag)})이 지웁니다` : '';
+
   async function loadBrowse() {
     const mine = ++seq;
     setStatus('찾는 중…', 'busy');
     try {
       const body = await getJson('/api/event-map/browse', { group, limit: CANDIDATE_LIMIT, ...filterParams(), groups: '' });
+      if (mine !== seq) return;
+      await loadPeHidden((body.candidates || []).map(c => c.tag));
       if (mine !== seq) return;
       browse = body;
     } catch (error) {
@@ -147,6 +164,8 @@ export function initEventMap({ insertTag, showToast } = {}) {
       const body = await getJson('/api/event-map/explore', {
         pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, ...filterParams(),
       });
+      if (mine !== seq) return;
+      await loadPeHidden((body.candidates || []).map(c => c.tag));
       if (mine !== seq) return;
       result = body;
     } catch (error) {
@@ -183,6 +202,10 @@ export function initEventMap({ insertTag, showToast } = {}) {
         pins: pins.join(','), exclude: excludes.join(','), n: SAMPLE_COUNT,
         seed: Date.now() % 1000003, ...filterParams(),
       });
+      if (mine !== seq) return;
+      // 후보 목록의 회색도 유지해야 하니 후보 태그까지 같이 묻는다.
+      const shown = (result?.candidates || browse?.candidates || []).map(c => c.tag);
+      await loadPeHidden([...shown, ...(body.samples || []).flatMap(s => s.tags || [])]);
       if (mine !== seq) return;
       samples = body;
     } catch (error) {
@@ -222,6 +245,13 @@ export function initEventMap({ insertTag, showToast } = {}) {
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
+  /** 실제 조합 i 를 넣거나 복사할 문자열 - PE 설정이 지우는 태그는 뺀다(화면의 회색과 같은 것). */
+  function samplePrompt(i) {
+    const s = (samples?.samples || [])[i];
+    if (!s) return '';
+    const tags = s.tags || String(s.prompt || '').split(', ');
+    return tags.filter(t => t && !peHidden.has(t)).join(', ');
+  }
   function insertText(text) {
     const clean = String(text || '').trim();
     if (!clean) return;
@@ -332,8 +362,9 @@ export function initEventMap({ insertTag, showToast } = {}) {
     const liftText = lift >= 100 ? `×${Math.round(lift)}` : `×${lift.toFixed(lift >= 10 ? 0 : 1)}`;
     const obs = c.observed_estimate != null && c.observed_estimate !== c.observed
       ? `≈${fmt(c.observed_estimate)}` : fmt(c.observed);
-    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}" role="option">
-      <span class="em-tag" title="${esc(roleLabel(c.group || 'unsorted'))}">${esc(c.tag)}</span>
+    const hid = peHidden.has(c.tag);
+    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}${hid ? ' is-pe-hidden' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}" role="option">
+      <span class="em-tag" title="${esc(roleLabel(c.group || 'unsorted'))}${esc(peTitle(c.tag))}">${esc(c.tag)}</span>
       <span class="em-lift" title="핀이 있을 때 이 태그가 나올 확률이 평소의 몇 배인가">${liftText}</span>
       <span class="em-obs" title="핀과 같은 게시물에 함께 달린 수">${obs}</span>
       <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>
@@ -400,10 +431,12 @@ export function initEventMap({ insertTag, showToast } = {}) {
         <button type="button" class="em-mini" data-em-samples-again title="다시 뽑기">↻</button>
         <button type="button" class="em-close" data-em-side-close aria-label="닫기">×</button>
       </div>
-      <div class="em-side-note">핀을 전부 포함하는 게시물 하나에 <b>실제로 함께 달린</b> 태그입니다. 이어 붙인 것이 아닙니다.</div>
+      <div class="em-side-note">핀을 전부 포함하는 게시물 하나에 <b>실제로 함께 달린</b> 태그입니다. 이어 붙인 것이 아닙니다.${
+        peHidden.size ? ' <span class="em-pe-hidden">회색</span>은 프롬프트 엔지니어링 설정이 지우는 태그 - 넣기·복사에서 빠집니다.' : ''}</div>
       <div class="em-body em-side-body">${list.map((s, i) => `
         <div class="em-sample">
-          <div class="em-sample-tags">${esc(s.prompt)}</div>
+          <div class="em-sample-tags">${(s.tags || String(s.prompt || '').split(', ')).map(t =>
+            peHidden.has(t) ? `<span class="em-pe-hidden" title="${esc(peTitle(t).slice(3))}">${esc(t)}</span>` : esc(t)).join(', ')}</div>
           <div class="em-sample-actions">
             <span class="em-note">${esc(String(s.partition || '').replace(/_/g, ' '))}</span>
             <button type="button" data-em-sample-insert="${i}">넣기</button>
@@ -624,9 +657,9 @@ export function initEventMap({ insertTag, showToast } = {}) {
       const again = t.closest('[data-em-samples-again]');
       if (again) { void drawSamples(); return; }
       const si = t.closest('[data-em-sample-insert]');
-      if (si) { insertText((samples?.samples || [])[Number(si.dataset.emSampleInsert)]?.prompt); return; }
+      if (si) { insertText(samplePrompt(Number(si.dataset.emSampleInsert))); return; }
       const sc = t.closest('[data-em-sample-copy]');
-      if (sc) { void copyText((samples?.samples || [])[Number(sc.dataset.emSampleCopy)]?.prompt || ''); return; }
+      if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); return; }
       const gb = t.closest('[data-em-group]');
       if (gb) { pickGroup(gb.dataset.emGroup); return; }
       const cat = t.closest('[data-em-cat]');
@@ -667,9 +700,9 @@ export function initEventMap({ insertTag, showToast } = {}) {
       if (t.closest('[data-em-side-close]')) { samples = null; render(); return; }
       if (t.closest('[data-em-samples-again]')) { void drawSamples(); return; }
       const si = t.closest('[data-em-sample-insert]');
-      if (si) { insertText((samples?.samples || [])[Number(si.dataset.emSampleInsert)]?.prompt); return; }
+      if (si) { insertText(samplePrompt(Number(si.dataset.emSampleInsert))); return; }
       const sc = t.closest('[data-em-sample-copy]');
-      if (sc) { void copyText((samples?.samples || [])[Number(sc.dataset.emSampleCopy)]?.prompt || ''); }
+      if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); }
     });
     return overlay;
   }

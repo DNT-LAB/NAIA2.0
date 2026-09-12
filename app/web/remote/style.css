@@ -28694,6 +28694,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-sample-tags { color: #ebe9ff; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .em-sample-actions { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .em-sample-actions .em-note { flex: 1 1 auto; }
+.em-sample-run { margin-right: auto; }
+.em-sample-run button:first-child { border-color: rgba(139,118,255,0.55); color: var(--text-primary); }
 .em-sample-actions button { height: 20px; padding: 0 7px; border: 1px solid var(--border-dim); border-radius: 4px;
   background: transparent; color: var(--text-muted); font-family: var(--font-mono); font-size: 9.5px; cursor: pointer; }
 .em-sample-actions button:hover { border-color: var(--accent); color: var(--text-primary); }

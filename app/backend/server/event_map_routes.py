@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """이벤트 맵(Ctrl+E) — 태그를 꽂고 **같은 게시물에 실제로 함께 달린** 태그를 따라간다.
 
-**읽기 전용이다.** 이 라우트는 사용자 데이터를 쓰지 않고, 활성 프리셋·프롬프트·생성 상태를
+**조회 라우트는 읽기 전용이다.** 사용자 데이터를 쓰지 않고, 활성 프리셋·프롬프트·생성 상태를
 건드리지 않는다. 프롬프트에 넣는 것은 프론트가 자기 입력칸에 하는 일이고(사용자 지시
 2026-09-11: **삽입과 복사 둘 다** 지원), 여기서는 넣을 문자열을 주기만 한다.
+예외 둘(사용자 지정 2026-09-12 밤) - 실제 조합의 [적용]·[생성]:
+  POST /api/event-map/apply     조합을 **랜덤 프롬프트와 같은 파이프라인**에 태워 메인 프롬프트로 보낸다.
+  POST /api/event-map/generate  조합을 가상 메인 프롬프트로 태워 **바이패스 생성**한다 - 이벤트 프리셋의
+                                Generate 와 같은 경로라 메인 프롬프트는 그대로다(prompt_generated 를 안 쏜다).
 ⚠️ Fast Search(Ctrl+F)는 **클립보드 전용**이라 계약이 다르다 - 두 기능을 같은 규칙으로
    묶지 말 것(`app/backend/server/fast_search_routes.py` 머리 주석).
 
@@ -24,9 +28,10 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from typing import Any, Awaitable, Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from core.event_map.pe_filter import MAX_TAGS as PE_MAX_TAGS, hidden_by_prompt_engineering
@@ -93,12 +98,51 @@ def _error(exc: MapQueryError) -> JSONResponse:
                         headers=_no_store())
 
 
+def _combo_source_row(payload: dict[str, Any]) -> dict[str, Any]:
+    """실제 조합 하나를 검색 행 모양으로. 이벤트 프리셋의 source_row 와 같은 열을 둔다."""
+    tags = payload.get("tags")
+    if isinstance(tags, str):
+        tags = [p.strip() for p in tags.split(",")]
+    if not isinstance(tags, (list, tuple)):
+        tags = []
+    clean = [str(t or "").strip() for t in tags]
+    clean = [t for t in clean if t]
+    if not clean:
+        raise ValueError("조합이 비어 있다.")
+    if len(clean) > 200:
+        raise ValueError("조합은 200개까지다.")
+    rating = str(payload.get("rating") or "").strip()[:1]
+    if rating not in {"g", "s", "q", "e"}:
+        rating = "s"
+    return {
+        "general": ", ".join(clean),
+        "rating": rating,
+        "character": None, "copyright": None, "artist": None, "meta": None,
+        "event_map_combo": True,
+    }
+
+
+async def _read_json(req: Request) -> dict[str, Any]:
+    try:
+        payload = await req.json()
+    except Exception:
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def register_event_map_routes(
     app: FastAPI,
     session_context: WebSessionContext,
     *,
     run_in_thread: AsyncRunner,
+    clients: set[Any] | None = None,
+    broadcast_json: Callable[..., Awaitable[None]] | None = None,
+    start_generation_runner: Callable[..., Any] | None = None,
 ) -> None:
+    async def _broadcast(message: dict[str, Any]) -> None:
+        if clients is not None and broadcast_json is not None:
+            await broadcast_json(clients, message)
+
 
     def _call(fn, *args, **kwargs):
         """서비스 호출을 스레드에서 돌리고 예외를 payload 로 바꾼다."""
@@ -196,6 +240,95 @@ def register_event_map_routes(
             return JSONResponse({"ok": False, "code": "internal_error", "message": str(exc)},
                                 status_code=500, headers=_no_store())
         return JSONResponse(payload, headers=_no_store())
+
+    @app.post("/api/event-map/apply")
+    async def api_event_map_apply(req: Request):
+        """[적용] 조합 → 랜덤 프롬프트와 **같은** 파이프라인(PE 앞뒤·auto hide·remove_*·와일드카드·
+        인물 정렬) → 메인 프롬프트. Random 버튼이 하는 일과 같이 prompt_generated 를 **브로드캐스트**한다."""
+        payload = await _read_json(req)
+        try:
+            source_row = _combo_source_row(payload)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "code": "bad_request", "message": str(exc)},
+                                status_code=400, headers=_no_store())
+        from app.backend.server.generation_commands import (
+            _broadcast_wildcard_state, random_service)
+
+        request_id = str(payload.get("requestId") or uuid.uuid4().hex)
+        try:
+            result = await run_in_thread(
+                random_service(session_context).generate_from_source_row,
+                source_row, random_request_id=request_id, source="event_map", update_context=True)
+        except Exception as exc:                                  # pragma: no cover
+            print(f"Headless Remote: event map apply failed - {exc}", flush=True)
+            return JSONResponse({"ok": False, "code": "internal_error", "message": str(exc)},
+                                status_code=500, headers=_no_store())
+        if not result.success:
+            return JSONResponse({"ok": False, "code": "pipeline_failed", "message": result.error},
+                                status_code=400, headers=_no_store())
+        await _broadcast(result.websocket_payload())
+        for message in result.extra_messages:
+            await _broadcast(message)
+        if clients is not None:
+            try:
+                await _broadcast_wildcard_state(session_context, clients)
+            except Exception:
+                pass
+        return JSONResponse({"ok": True, "prompt": result.prompt, "requestId": request_id,
+                             "promptRunId": result.prompt_run_id}, headers=_no_store())
+
+    @app.post("/api/event-map/generate")
+    async def api_event_map_generate(req: Request):
+        """[생성] 조합을 가상 메인 프롬프트로 파이프라인에 태우고 바이패스로 생성한다.
+
+        이벤트 프리셋의 Generate 와 **같은 함수**를 쓴다(`_generate_event_preset_prompt` 는 파이프라인을
+        돌린 뒤 메인 프롬프트·컨텍스트를 되돌린다). 다른 점 하나: prompt_generated 를 쏘지 않는다 -
+        메인 프롬프트를 오염시키지 않는 것이 이 단추의 뜻이다. 모드별 도구(캐릭터 등)는 파이프라인과
+        생성 서비스가 세션 상태에서 그대로 참조한다.
+        """
+        payload = await _read_json(req)
+        try:
+            source_row = _combo_source_row(payload)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "code": "bad_request", "message": str(exc)},
+                                status_code=400, headers=_no_store())
+        from app.backend.server.event_preset_routes import (
+            _generate_event_preset_prompt, _generation_service, _preset_source_to_generation_command)
+
+        request_id = str(payload.get("requestId") or uuid.uuid4().hex)
+        try:
+            processed = await run_in_thread(
+                _generate_event_preset_prompt, session_context, source_row,
+                overrides={}, request_id=request_id, source="event_map")
+            if not processed.success:
+                return JSONResponse({"ok": False, "code": "pipeline_failed",
+                                     "message": processed.error or "prompt processing failed"},
+                                    status_code=400, headers=_no_store())
+            result = {"requestId": request_id, "sourceRow": source_row, "sourceName": f"event_map:{request_id}"}
+            command = _preset_source_to_generation_command(
+                session_context, result, source="preset", overrides={},
+                prompt_override=processed.prompt, prompt_run_id_override=processed.prompt_run_id)
+            command["overrides"]["_remote_queue_label"] = "event_map"
+            dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
+        except RuntimeError as exc:
+            return JSONResponse({"ok": False, "code": "blocked", "message": str(exc)},
+                                status_code=409, headers=_no_store())
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "code": "bad_request", "message": str(exc)},
+                                status_code=400, headers=_no_store())
+        except Exception as exc:                                  # pragma: no cover
+            print(f"Headless Remote: event map generate failed - {exc}", flush=True)
+            return JSONResponse({"ok": False, "code": "internal_error", "message": str(exc)},
+                                status_code=500, headers=_no_store())
+        if not dispatch.ok:
+            return JSONResponse({"ok": False, "code": "blocked", **dispatch.websocket_payload()},
+                                status_code=409, headers=_no_store())
+        if start_generation_runner is not None and clients is not None \
+                and getattr(session_context, "headless_generation_execute_enabled", False):
+            start_generation_runner(session_context, clients)
+        return JSONResponse({"ok": True, "status": "generation_requested", "requestId": request_id,
+                             "prompt": processed.prompt, "promptRunId": processed.prompt_run_id},
+                            headers=_no_store())
 
     @app.get("/api/event-map/resolve")
     async def api_event_map_resolve(tags: str = ""):

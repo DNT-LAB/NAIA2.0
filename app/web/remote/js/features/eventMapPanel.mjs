@@ -61,7 +61,7 @@ function savePrefs(persons, ratings) {
   try { localStorage.setItem(PREF_KEY, JSON.stringify({ persons: [...persons], ratings: [...ratings] })); } catch { /* 저장 못 해도 동작한다 */ }
 }
 
-export function initEventMap({ insertTag, showToast } = {}) {
+export function initEventMap({ insertTag, showToast, getPromptText, generateNow } = {}) {
   let overlay = null, input = null, statusEl = null, trailEl = null, bodyEl = null;
   let filtersEl = null, personBtn = null, personPopup = null, footEl = null, tabBtn = null;
   let sideEl = null;              // 실제 조합 둘째 패널
@@ -239,6 +239,41 @@ export function initEventMap({ insertTag, showToast } = {}) {
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
+  /** 실제 조합 i 를 파이프라인에 태운다. 회색(PE 가 지울 것)도 **그대로 보낸다** - 파이프라인이
+   *  스스로 지우는 것이 '랜덤 프롬프트와 같은 방식' 이다. */
+  async function postJson(path, body) {
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) { const e = new Error(data.message || `HTTP ${res.status}`); e.code = data.code; throw e; }
+    return data;
+  }
+  async function runSample(i, mode, btn) {
+    const s = (samples?.samples || [])[i];
+    if (!s || !s.tags?.length) return;
+    const body = { tags: s.tags, rating: String(s.partition || 's').slice(0, 1) };
+    const box = btn?.closest('.em-sample-run');
+    box?.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try {
+      if (mode === 'generate') {
+        await postJson('/api/event-map/generate', body);
+        toast('이 조합으로 생성을 요청했습니다 (메인 프롬프트는 그대로)', 'success');
+        return;
+      }
+      const applied = await postJson('/api/event-map/apply', body);
+      if (mode === 'apply') { toast('메인 프롬프트에 적용했습니다', 'success'); return; }
+      // 적용+생성: prompt_generated 가 WS 로 와서 칸을 채운 뒤에 Generate 를 눌러야 한다 -
+      // HTTP 응답이 먼저 올 수 있으니 칸이 바뀌는 것을 잠깐 기다린다(최대 2초).
+      const want = String(applied.prompt || '').trim();
+      const read = () => (typeof getPromptText === 'function' ? String(getPromptText() || '') : '').trim();
+      for (let n = 0; n < 20 && want && read() !== want; n++) await new Promise(r => setTimeout(r, 100));
+      if (typeof generateNow === 'function') { generateNow(); toast('적용 후 생성을 눌렀습니다', 'success'); }
+      else toast('적용했지만 생성 단추가 연결되지 않았습니다', 'error');
+    } catch (error) {
+      toast(`${mode === 'generate' ? '생성' : '적용'} 실패 — ${error.message}`, 'error');
+    } finally {
+      box?.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    }
+  }
   /** 실제 조합 i 를 넣거나 복사할 문자열 - PE 설정이 지우는 태그는 뺀다(화면의 회색과 같은 것). */
   function samplePrompt(i) {
     const s = (samples?.samples || [])[i];
@@ -431,6 +466,11 @@ export function initEventMap({ insertTag, showToast } = {}) {
           <div class="em-sample-tags">${(s.tags || String(s.prompt || '').split(', ')).map(t =>
             peHidden.has(t) ? `<span class="em-pe-hidden" title="${esc(peTitle(t).slice(3))}">${esc(t)}</span>` : esc(t)).join(', ')}</div>
           <div class="em-sample-actions">
+            <span class="em-actions em-sample-run">
+              <button type="button" data-em-sample-apply="${i}" title="이 조합을 Random 과 같은 파이프라인에 태워 메인 프롬프트로">적용</button>
+              <button type="button" data-em-sample-generate="${i}" title="메인 프롬프트는 두고, 이 조합으로 바로 생성(바이패스)">생성</button>
+              <button type="button" data-em-sample-apply-generate="${i}" title="적용한 뒤 Generate">적용+생성</button>
+            </span>
             <span class="em-note">${esc(String(s.partition || '').replace(/_/g, ' '))}</span>
             <button type="button" data-em-sample-insert="${i}">넣기</button>
             <button type="button" data-em-sample-copy="${i}">복사</button>
@@ -695,7 +735,13 @@ export function initEventMap({ insertTag, showToast } = {}) {
       const si = t.closest('[data-em-sample-insert]');
       if (si) { insertText(samplePrompt(Number(si.dataset.emSampleInsert))); return; }
       const sc = t.closest('[data-em-sample-copy]');
-      if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); }
+      if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); return; }
+      const sa = t.closest('[data-em-sample-apply]');
+      if (sa) { void runSample(Number(sa.dataset.emSampleApply), 'apply', sa); return; }
+      const sg = t.closest('[data-em-sample-generate]');
+      if (sg) { void runSample(Number(sg.dataset.emSampleGenerate), 'generate', sg); return; }
+      const sag = t.closest('[data-em-sample-apply-generate]');
+      if (sag) { void runSample(Number(sag.dataset.emSampleApplyGenerate), 'apply+generate', sag); }
     });
     return overlay;
   }

@@ -209,7 +209,9 @@
         {"method": "GET", "path": "/api/event-map/describe", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/resolve", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/browse", "smoke": "non_destructive"},
-        {"method": "GET", "path": "/api/event-map/pe-filter", "smoke": "non_destructive"}
+        {"method": "GET", "path": "/api/event-map/pe-filter", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-map/apply", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/event-map/generate", "smoke": "external_live"}
       ]
     },
     {

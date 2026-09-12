@@ -1104,12 +1104,14 @@ import('./js/features/fastSearch.mjs?v=20260907-fs-groupsearch')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20260912-em8')
+import('./js/features/eventMapPanel.mjs?v=20260912-em9')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
       showToast,
       getPromptText: () => (promptEdit ? promptEdit.value : ''),
+      // [적용+생성]: 적용된 프롬프트가 칸에 들어온 뒤 **Generate 버튼과 같은 길**로 낸다.
+      generateNow: () => generateAction(),
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
@@ -4935,6 +4937,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     || isPresetSource
     || source === 'auto_generate'
     || source === 'result_reroll'
+    || source === 'event_map'     // Ctrl+E 실제 조합 [적용] - Random 과 같은 파이프라인 산출물
     || source === 'storyteller'   // RC-3: 스토리텔러 자동생성 프롬프트도 좌측 패널에 반영
     || source === 'automation'    // RC-3: 자동화 프롬프트도 좌측 패널에 반영
   );

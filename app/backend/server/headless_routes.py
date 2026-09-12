@@ -283,7 +283,9 @@ def register_headless_routes(
     # Ctrl+F 한 칸 검색. 읽기 전용이고 다른 갈래의 검색기를 빌려 쓴다.
     register_fast_search_routes(app, context, run_in_thread=run_in_thread)
     # Ctrl+E 이벤트 맵. 읽기 전용. 색인(별도 파일)이 없으면 /state 가 missing 을 말한다.
-    register_event_map_routes(app, context, run_in_thread=run_in_thread)
+    register_event_map_routes(
+        app, context, run_in_thread=run_in_thread,
+        clients=clients, broadcast_json=broadcast_json, start_generation_runner=ensure_generation_runner)
     register_character_asset_routes(
         app,
         context,

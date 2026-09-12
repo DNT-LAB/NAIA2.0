@@ -12,6 +12,7 @@ from app.backend.server.v5_scene_routes import register_v5_scene_routes
 from app.backend.server.data_migration_routes import register_data_migration_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.grok_routes import register_grok_routes  # Grok 연동 (제거 가능)
+from app.backend.server.event_map_routes import register_event_map_routes
 from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.extension_install_routes import register_extension_install_routes
 from app.backend.server.fast_search_routes import register_fast_search_routes
@@ -281,6 +282,8 @@ def register_headless_routes(
     )
     # Ctrl+F 한 칸 검색. 읽기 전용이고 다른 갈래의 검색기를 빌려 쓴다.
     register_fast_search_routes(app, context, run_in_thread=run_in_thread)
+    # Ctrl+E 이벤트 맵. 읽기 전용. 색인(별도 파일)이 없으면 /state 가 missing 을 말한다.
+    register_event_map_routes(app, context, run_in_thread=run_in_thread)
     register_character_asset_routes(
         app,
         context,

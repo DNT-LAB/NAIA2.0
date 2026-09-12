@@ -11,6 +11,7 @@
     "app/backend/server/character_viewer_routes.py",
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
+    "app/backend/server/event_map_routes.py",
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/fast_search_routes.py",
     "app/backend/server/font_routes.py",
@@ -182,6 +183,26 @@
       "routes": [
         {"method": "GET", "path": "/api/fast-search", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/fast-search/event-neighbors", "smoke": "non_destructive"}
+      ]
+    },
+    {
+      "id": "event_map",
+      "name": "Event Map (Ctrl+E) pinned tag co-occurrence over the observed corpus",
+      "source_files": [
+        "app/backend/server/event_map_routes.py",
+        "core/event_map/__init__.py",
+        "core/event_map/index.py",
+        "core/event_map/pack.py",
+        "core/event_map/policy.py",
+        "core/event_map/service.py"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/event-map/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/suggest", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/explore", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/sample", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/describe", "smoke": "non_destructive"}
       ]
     },
     {
@@ -770,6 +791,13 @@
       "description": "Lazy read-only observed event combinations across ratings and person groups; independent of the optional Event Preset archive download.",
       "paths": ["core/event_preset/fast_search_catalog.json", "core/event_preset/fast_search_catalog_deep.json"],
       "provisioning": "bundled"
+    },
+    {
+      "feature": "event_map",
+      "description": "Optional event map index built by tools/build_event_map_index.py and placed under the user data root. Absent by default: GET /api/event-map/state reports state=missing and the query routes answer 503 unavailable. NAIA_EVENT_MAP_INDEX overrides the path for development.",
+      "paths": ["<user-data>/data/event_map/event_map.naiamap"],
+      "provisioning": "runtime_generated",
+      "provisioned_by": "GET /api/event-map/state"
     },
     {
       "feature": "ollama_chat",

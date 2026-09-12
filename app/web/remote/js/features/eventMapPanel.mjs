@@ -747,7 +747,8 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   }
 
   /** 결과 칸의 **왼쪽**에 붙는다(사용자 지정 2026-09-12): 폭은 Fast Search 의 절반(≤ 360),
-   *  높이 ≤ 결과 칸의 절반(내용이 길면 75%까지). 이미지 왼편 가장자리를 살짝 가리는 정도. */
+   *  높이는 빈 화면이면 결과 칸의 절반, 목록이 길면 결과 칸 높이까지 자란다(한 번에 보이는 태그를
+   *  늘리자는 사용자 지정 2026-09-12). 이미지 왼편 가장자리를 살짝 가리는 정도. */
   function position() {
     if (!overlay || overlay.hidden) return;
     const host = document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
@@ -755,7 +756,7 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     if (!r || r.width < 240 || r.height < 160) {
       overlay.style.left = '16px'; overlay.style.transform = 'none'; overlay.style.top = '64px';
       overlay.style.width = 'min(360px, calc(100vw - 32px))';
-      heightCaps = { base: Math.min(440, window.innerHeight - 96), hard: Math.round(window.innerHeight * 0.75) };
+      heightCaps = { base: Math.min(440, window.innerHeight - 96), hard: window.innerHeight - 32 };
       fitHeight(); return;
     }
     const pad = 14;
@@ -766,16 +767,15 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     overlay.style.top = `${Math.round(r.top + pad)}px`;
     overlay.style.width = `${width}px`;
     heightCaps = { base: Math.round(Math.min(r.height - pad * 2, Math.max(280, r.height * 0.5))),
-                   hard: Math.round(Math.min(r.height - pad * 2, r.height * 0.75)) };
+                   hard: Math.round(r.height - pad * 2) };
     fitHeight();
   }
   function fitHeight() {
     if (!overlay || overlay.hidden || !heightCaps.base) return;
-    // 후보 목록이 있으면 여덟 줄이 들어올 만큼은 늘린다(hard 를 넘지 않게).
+    // 몸통이 내용만큼 자란다(hard 를 넘지 않게). 8줄 상한은 걷어냈다 - 사용자가 더 보고 싶어했다.
     let want = heightCaps.base;
     const chrome = overlay.offsetHeight - bodyEl.clientHeight;
-    const rowsH = Math.min(bodyEl.scrollHeight, 8 * 26 + 30);
-    want = Math.max(want, Math.ceil(chrome + rowsH));
+    want = Math.max(want, Math.ceil(chrome + bodyEl.scrollHeight + 4));
     overlay.style.maxHeight = `${Math.round(Math.min(heightCaps.hard, want))}px`;
     positionSide();
   }

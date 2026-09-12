@@ -28710,6 +28710,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .em-foot b { color: var(--text-muted); }
 .em-keys { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.em-foot .em-random { border-color: rgba(139,118,255,0.55); color: var(--text-primary); }
 .em-foot .em-actions { margin-left: auto; }
 
 /* 인원 팝업 - Fast Search 의 것과 같은 체크 목록. 창(aux) 위에 뜬다. */

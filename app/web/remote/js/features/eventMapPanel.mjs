@@ -239,6 +239,25 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
+  /** [랜덤 프롬프트 할당] - 고른 분면(핀·제외가 있으면 그 안)에서 게시물 하나 → [적용] 과 같은 길. */
+  async function randomAssign(btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const fp = filterParams();
+      const body = await getJson('/api/event-map/sample', {
+        pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: Date.now() % 1000003,
+        ratings: fp.ratings, persons: fp.persons,
+      });
+      const s = (body.samples || [])[0];
+      if (!s || !s.tags?.length) { toast(body.status === 'no_match' ? '이 조건에 맞는 게시물이 없습니다' : '뽑지 못했습니다', 'error'); return; }
+      await postJson('/api/event-map/apply', { tags: s.tags, rating: String(s.partition || 's').slice(0, 1) });
+      toast(`랜덤 프롬프트를 할당했습니다 (${String(s.partition || '').replace(/_/g, ' ')})`, 'success');
+    } catch (error) {
+      toast(`랜덤 프롬프트 실패 — ${error.message}`, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
   /** 실제 조합 i 를 파이프라인에 태운다. 회색(PE 가 지울 것)도 **그대로 보낸다** - 파이프라인이
    *  스스로 지우는 것이 '랜덤 프롬프트와 같은 방식' 이다. */
   async function postJson(path, body) {
@@ -632,7 +651,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       <div class="em-filters"></div>
       <div class="em-body" role="listbox"></div>
       <div class="em-foot">
-        <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 한 단계 위로 · 우클릭 제외 · Esc 닫기"><b>Enter</b> 꽂기 · <b>−</b> 제외 · <b>⌫</b> 위로</span>
+        <span class="em-actions"><button type="button" class="em-random" data-em-random
+            title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 프롬프트 할당</button></span>
+        <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
         <span class="em-actions">
           <button type="button" data-em-insert disabled title="핀 전부를 프롬프트 커서 자리에">넣기</button>
           <button type="button" data-em-copy disabled title="핀 전부를 클립보드로">복사</button>
@@ -665,6 +686,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       const t = event.target;
       if (t.closest('[data-em-insert]')) { insertText(currentPrompt()); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
+      const rb = t.closest('[data-em-random]');
+      if (rb) { void randomAssign(rb); return; }
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;

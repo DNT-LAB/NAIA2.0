@@ -580,10 +580,11 @@ class EventMapIndex:
             (`brown eyes` 등)와 메타(`monochrome` 등)는 원래 게시물에 있었어도 빠진다.
           - 색상은 기본으로 뺀다(맵 정책). 단 **핀으로 꽂은 태그는 색상이어도 남긴다.**
           - 교집합 전체에서 고르게 뽑는다 - 표본 상한(SCAN_CAP)과 무관하다.
+          - 핀이 없으면 분면(인원·등급) 전체에서 뽑는다 - [랜덤 프롬프트 할당](사용자 지정 2026-09-12 밤).
         """
         started = time.perf_counter()
-        if not isinstance(pins, (list, tuple)) or not 1 <= len(pins) <= MAX_PINS:
-            raise ValueError("핀은 1~%d개여야 한다" % MAX_PINS)
+        if not isinstance(pins, (list, tuple)) or len(pins) > MAX_PINS:
+            raise ValueError("핀은 %d개까지다" % MAX_PINS)
         if exclude is not None and (not isinstance(exclude, (list, tuple))
                                     or len(exclude) > MAX_EXCLUDE):
             raise ValueError("제외 태그는 %d개까지다" % MAX_EXCLUDE)
@@ -602,11 +603,12 @@ class EventMapIndex:
             "kind": "observed_post_tag_set",
             "note": "게시물 하나에 실제로 함께 달린 태그다(색인 어휘 안에서). 합성하지 않았다.",
         }
-        if unknown or not wanted:
-            out["status"] = "unknown_tag" if unknown else "no_pins"
+        if unknown:
+            out["status"] = "unknown_tag"
             return out
-        rids = self._without(self._matching_posts(wanted, self._partition_filter(ratings, persons)),
-                             excluded)
+        parts = self._partition_filter(ratings, persons)
+        pool = self._matching_posts(wanted, parts) if wanted else self._live_posts(parts)
+        rids = self._without(pool, excluded)
         out["observed_posts"] = int(rids.size)
         if rids.size == 0:
             out["status"] = "no_match"

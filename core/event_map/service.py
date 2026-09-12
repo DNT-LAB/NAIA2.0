@@ -496,11 +496,12 @@ class EventMapService:
 
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                persons: Any = None, n: Any = 5, seed: Any = None) -> dict[str, Any]:
-        """핀을 포함하는 **실제 게시물**의 태그 조합. Dev0714 Quick Search 의 랜덤과 같다."""
+        """핀을 포함하는 **실제 게시물**의 태그 조합. Dev0714 Quick Search 의 랜덤과 같다.
+
+        핀이 없으면 분면(인원·등급) 전체에서 뽑는다([랜덤 프롬프트 할당] - 사용자 지정 2026-09-12 밤).
+        """
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
-        if not wanted:
-            raise MapQueryError("no_pins", "핀이 하나는 있어야 한다.")
         excluded = self._tags(exclude, cap=MAX_EXCLUDE, what="제외 태그",
                               code="too_many_exclude")
         want_r, want_p = self._filters(idx, ratings, persons)

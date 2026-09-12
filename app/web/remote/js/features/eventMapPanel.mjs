@@ -483,9 +483,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   function paintActions() {
     if (!footEl) return;
     const on = pins.length > 0;
-    footEl.querySelector('[data-em-insert]').disabled = !on;
-    footEl.querySelector('[data-em-copy]').disabled = !on;
-    const sb = overlay.querySelector('[data-em-samples]');   // 조건 줄 오른쪽에 산다(사용자 지정 2026-09-12 밤)
+    // 넣기/복사/실제 조합 셋 다 조건 줄 오른쪽에 산다(사용자 지정 2026-09-12 밤 - 발줄에선 못 찾았다)
+    overlay.querySelectorAll('[data-em-insert], [data-em-copy]').forEach(b => { b.disabled = !on; });
+    const sb = overlay.querySelector('[data-em-samples]');
     if (sb) { sb.disabled = !on; sb.classList.toggle('is-on', !!samples); }
   }
 
@@ -496,7 +496,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       <span class="em-rating-bar" role="group" aria-label="등급">${RATING_OPTIONS.map(r =>
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
                  aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
-      <span class="em-actions em-actions-right"><button type="button" data-em-samples disabled
+      <span class="em-actions em-actions-right"><button type="button" data-em-insert disabled
+              title="지금 고른 태그 전부를 프롬프트 커서 자리에">넣기</button><button type="button" data-em-copy disabled
+              title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
               title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button></span>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
     paintPersonButton();
@@ -789,10 +791,6 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
             title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
             title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span>
         <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
-        <span class="em-actions">
-          <button type="button" data-em-insert disabled title="핀 전부를 프롬프트 커서 자리에">넣기</button>
-          <button type="button" data-em-copy disabled title="핀 전부를 클립보드로">복사</button>
-        </span>
       </div>`;
     busyEl = document.createElement('div');
     busyEl.className = 'em-busy';
@@ -824,13 +822,13 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     });
     footEl.addEventListener('click', event => {
       const t = event.target;
-      if (t.closest('[data-em-insert]')) { insertText(currentPrompt()); return; }
-      if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
       const rb = t.closest('[data-em-random]');
       if (rb) { void randomAssign(rb, rb.dataset.emRandom === 'generate'); return; }
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
+      if (t.closest('[data-em-insert]')) { insertText(currentPrompt()); return; }
+      if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
       if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return; }
       if (t.closest('[data-em-person]')) {
         if (personPopup && !personPopup.hidden) closePersonPopup(); else openPersonPopup();

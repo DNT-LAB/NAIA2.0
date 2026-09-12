@@ -441,6 +441,7 @@ class EventMapIndex:
         keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0)
         if not include_color:
             keep &= ~self.color_arr
+        out["_pool"] = keep.copy()      # 갈래 필터 전의 풀(카테고리 탭의 개수용). 서비스가 지운다.
         if allowed is not None:
             keep &= allowed
         # ⚠️ 첫 화면은 explore 의 눌린 점수로 세우면 안 된다. `1girl_solo` 는 코퍼스의 절반이라
@@ -555,6 +556,7 @@ class EventMapIndex:
                 if role in roles:
                     by_role[tid] = True
             keep &= by_role
+        out["_pool"] = keep.copy()      # 갈래 필터 전의 풀(카테고리 탭의 개수용). 서비스가 지운다.
         if allowed is not None:
             keep &= allowed
 

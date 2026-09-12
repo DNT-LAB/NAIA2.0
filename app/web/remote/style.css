@@ -28608,6 +28608,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-chip.is-on { border-color: rgba(139,118,255,0.55); background: rgba(88,76,170,0.28); color: var(--text-primary); }
 
 .em-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0 6px; }
+/* 카테고리 탭 줄 - 후보 목록 바로 위. 접힌 팝업이 목록을 가리던 것을 대신한다(사용자 지정 2026-09-12). */
+.em-cats { display: flex; flex-wrap: wrap; gap: 3px; padding: 2px 8px 5px; border-bottom: 1px solid var(--border-dim); margin-bottom: 2px; }
+.em-cat {
+  display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 8px;
+  border: 1px solid var(--border-dim); border-radius: 999px; background: transparent;
+  color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+}
+.em-cat .em-tag { flex: 0 0 auto; }
+.em-cat-n { color: var(--text-dim); font-size: 9px; font-variant-numeric: tabular-nums; }
+.em-cat:hover { border-color: var(--text-dim); }
+.em-cat.is-on { border-color: rgba(139,118,255,0.7); background: rgba(88,76,170,0.30); }
+.em-cat.is-on .em-tag, .em-cat.is-on .em-cat-n { color: #fff; }
 .em-cap {
   display: flex; align-items: center; gap: 8px; padding: 6px 10px 3px;
   color: var(--text-dim); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.6px; text-transform: uppercase;

@@ -62,7 +62,6 @@ function savePrefs(persons, ratings) {
 export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   let overlay = null, input = null, statusEl = null, trailEl = null, bodyEl = null;
   let filtersEl = null, personBtn = null, personPopup = null, footEl = null, tabBtn = null;
-  let roleBtn = null, rolePopup = null;
   let sideEl = null;              // 실제 조합 둘째 패널
   let open = false, seq = 0, suggestSeq = 0, timer = null;
   let mapState = null;            // /state 응답. 열 때마다 새로 받는다(색인이 바뀔 수 있다).
@@ -318,13 +317,20 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
               title="인원 구성 고르기">인원 <b data-em-person-count></b></button>
       <span class="em-rating-bar" role="group" aria-label="등급">${RATING_OPTIONS.map(r =>
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
-                 aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
-      <button type="button" class="em-person-btn" data-em-rolebtn aria-haspopup="dialog" aria-expanded="false"
-              title="후보를 어느 대분류로 가둘지">대분류 <b data-em-role-count></b></button>`;
+                 aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
-    roleBtn = filtersEl.querySelector('[data-em-rolebtn]');
     paintPersonButton();
-    paintRoleButton();
+  }
+
+  /** 카테고리 탭 줄. 서버가 준 갈래별 후보 수로 그린다(접힌 팝업 대신 - 사용자 지정 2026-09-12).
+   *  핀이 있으면 탭 = 후보 필터, 대분류 목록이면 탭 = 대분류 바꾸기. */
+  function catsHtml(counts, activeId, total) {
+    if (!counts || !counts.length) return '';
+    const order = new Map((mapState?.groups || []).map((g, i) => [g.id, i]));
+    const rows = counts.slice().sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+    const tab = (id, label, n, on) => `<button type="button" class="em-cat em-g-${esc(id)}${on ? ' is-on' : ''}" data-em-cat="${esc(id)}"
+        title="${esc(label)} · ${fmt(n)}"><span class="em-tag">${esc(label)}</span><span class="em-cat-n">${fmt(n)}</span></button>`;
+    return `<div class="em-cats" role="tablist">${total != null ? tab('', '전체', total, !activeId) : ''}${rows.map(r => tab(r.id, r.label, r.count, r.id === activeId)).join('')}</div>`;
   }
 
   /** 접기 표의 대분류 12개(서버가 준다). 첫 화면 축(depth1)과 나머지로 묶는다. */
@@ -332,15 +338,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     const all = (mapState?.groups || []).filter(g => g.tags > 0);
     return [{ g: '축', items: all.filter(g => g.depth1) }, { g: '함께 오는 것', items: all.filter(g => !g.depth1) }]
       .filter(x => x.items.length);
-  }
-  function paintRoleButton() {
-    if (!roleBtn) return;
-    const count = roleBtn.querySelector('[data-em-role-count]');
-    const total = roleOptions().reduce((n, g) => n + g.items.length, 0);
-    if (!roles.size) count.textContent = '전체';
-    else if (roles.size === 1) count.textContent = roleLabel([...roles][0]);
-    else count.textContent = `${roles.size}/${total}`;
-    roleBtn.classList.toggle('is-filtered', roles.size > 0);
   }
 
   function paintPersonButton() {
@@ -430,7 +427,9 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     rows = cs.map(c => c.tag);
     setStatus(`${fmt(browse.observed_posts)}건${browse.sampled ? ' · 표본' : ''}`, 'ok',
       `${Math.round(browse.elapsed_ms || 0)}ms · 이 분면에서의 비율 ÷ 코퍼스 전체에서의 비율`);
-    return `<div class="em-cap">${esc(roleLabel(group))} <span class="em-note">이 인원·등급에서 특징적인 순 · ${cs.length}개</span></div>`
+    const tabs = (mapState?.groups || []).filter(g => g.tags > 0 && g.id !== 'unsorted').map(g => ({ id: g.id, label: g.label, count: g.tags }));
+    return catsHtml(tabs, group, null)
+      + `<div class="em-cap">${esc(roleLabel(group))} <span class="em-note">이 인원·등급에서 특징적인 순 · ${cs.length}개</span></div>`
       + (cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">이 분면에서 5건 이상인 태그가 없습니다.</div>`);
   }
 
@@ -508,6 +507,8 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
       } else {
         const cs = result.candidates || [];
         rows = cs.map(c => c.tag);
+        const gc = result.group_counts || [];
+        html += catsHtml(gc, roles.size ? [...roles][0] : '', gc.reduce((n, r) => n + r.count, 0));
         html += `<div class="em-cap">함께 달린 태그 <span class="em-note">lift 순 · ${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}</span></div>`;
         html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">5건 이상 함께 달린 태그가 없습니다.</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
@@ -591,66 +592,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     closePersonPopup();
   }
 
-  // ── 갈래 팝업 (인원 팝업과 같은 체크 목록. 비면 전부) ────────────────────
-  function ensureRolePopup() {
-    if (rolePopup) return rolePopup;
-    rolePopup = document.createElement('div');
-    rolePopup.className = 'em-person-popup';
-    rolePopup.hidden = true;
-    rolePopup.setAttribute('role', 'dialog');
-    document.body.append(rolePopup);
-    rolePopup.addEventListener('click', event => {
-      const quick = event.target.closest('[data-em-quick]');
-      if (quick) {
-        const which = quick.dataset.emQuick;
-        if (which === 'all') roles = new Set();
-        else { const g = roleOptions().find(x => x.g === which); if (g) roles = new Set(g.items.map(r => r.id)); }
-      } else {
-        const row = event.target.closest('[data-em-role-id]');
-        if (!row) return;
-        const id = row.dataset.emRoleId;
-        if (roles.has(id)) roles.delete(id); else roles.add(id);
-      }
-      rolePopup.innerHTML = rolePopupHtml();
-      paintRoleButton();
-      void explore();
-    });
-    return rolePopup;
-  }
-  function rolePopupHtml() {
-    return `<div class="em-person-head"><span>대분류</span><span class="em-person-quick">
-        <button type="button" data-em-quick="all">전체</button>
-        ${roleOptions().map(g => `<button type="button" data-em-quick="${esc(g.g)}">${esc(g.g)}</button>`).join('')}</span></div>
-      <div class="em-person-list">${roleOptions().map(g => `<div class="em-person-group">${esc(g.g)}</div>`
-        + g.items.map(r => `<button type="button" class="em-person-row em-g-${esc(r.id)}${roles.has(r.id) ? ' is-on' : ''}" data-em-role-id="${esc(r.id)}"
-            title="태그 ${fmt(r.tags)}">
-            <span class="em-person-check">${roles.has(r.id) ? '✓' : ''}</span><span class="em-tag">${esc(r.label || r.id)}</span></button>`).join('')).join('')}</div>`;
-  }
-  function openRolePopup() {
-    const popup = ensureRolePopup();
-    popup.innerHTML = rolePopupHtml();
-    popup.hidden = false;
-    roleBtn.setAttribute('aria-expanded', 'true');
-    const rect = roleBtn.getBoundingClientRect();
-    const pr = popup.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - pr.width - 8));
-    let top = rect.bottom + 6;
-    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, rect.top - pr.height - 6);
-    popup.style.left = `${Math.round(left)}px`;
-    popup.style.top = `${Math.round(top)}px`;
-    document.addEventListener('pointerdown', onRoleOutside, true);
-  }
-  function closeRolePopup() {
-    if (!rolePopup || rolePopup.hidden) return;
-    rolePopup.hidden = true; rolePopup.innerHTML = '';
-    if (roleBtn) roleBtn.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', onRoleOutside, true);
-  }
-  function onRoleOutside(event) {
-    if (rolePopup && rolePopup.contains(event.target)) return;
-    if (event.target.closest?.('[data-em-rolebtn]')) return;
-    closeRolePopup();
-  }
 
   // ── 창 ───────────────────────────────────────────────────────────────────
   function build() {
@@ -711,15 +652,10 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     filtersEl.addEventListener('click', event => {
       const t = event.target;
       if (t.closest('[data-em-person]')) {
-        closeRolePopup();
         if (personPopup && !personPopup.hidden) closePersonPopup(); else openPersonPopup();
         return;
       }
-      if (t.closest('[data-em-rolebtn]')) {
-        closePersonPopup();
-        if (rolePopup && !rolePopup.hidden) closeRolePopup(); else openRolePopup();
-        return;
-      }
+
       const pill = t.closest('[data-em-r]');
       if (pill) {
         const id = pill.dataset.emR;
@@ -741,6 +677,13 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
       if (sc) { void copyText((samples?.samples || [])[Number(sc.dataset.emSampleCopy)]?.prompt || ''); return; }
       const gb = t.closest('[data-em-group]');
       if (gb) { pickGroup(gb.dataset.emGroup); return; }
+      const cat = t.closest('[data-em-cat]');
+      if (cat) {
+        const id = cat.dataset.emCat;
+        if (pins.length) { roles = id ? new Set([id]) : new Set(); void explore(); }
+        else if (id) pickGroup(id);
+        return;
+      }
       const ap = t.closest('[data-em-apply-person]');
       if (ap) { persons = new Set([ap.dataset.emApplyPerson]); savePrefs(persons, ratings); paintPersonButton(); void explore(); return; }
       const row = t.closest('[data-em-pin]');
@@ -854,7 +797,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
   function close() {
     if (!overlay) return;
     closePersonPopup();
-    closeRolePopup();
     overlay.hidden = true;
     open = false;
     if (sideEl) { sideEl.hidden = true; sideEl.innerHTML = ''; }
@@ -874,7 +816,6 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
     if (event.key === 'Escape' && open) {
       event.preventDefault(); event.stopPropagation();
       if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
-      if (rolePopup && !rolePopup.hidden) { closeRolePopup(); return; }
       close(); return;
     }
     const hit = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey

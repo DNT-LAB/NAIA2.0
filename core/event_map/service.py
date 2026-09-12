@@ -453,7 +453,7 @@ class EventMapService:
                 include_color=False)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
-        self._attach_groups(result.get("candidates") or [])
+        self._attach_groups(result.get("candidates") or [], result)
         result["ok"] = True
         return result
 
@@ -472,19 +472,27 @@ class EventMapService:
                                 state="ready")
         result = idx.browse(ratings=want_r, persons=want_p, allowed=mask,
                             limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES))
-        self._attach_groups(result.get("candidates") or [])
+        self._attach_groups(result.get("candidates") or [], result)
         result["group"] = gid
         result["ok"] = True
         return result
 
-    def _attach_groups(self, candidates: list[dict]) -> None:
+    def _attach_groups(self, candidates: list[dict], result: dict | None = None) -> None:
+        """후보마다 갈래를 붙이고, 결과에 **갈래별 후보 수**(카테고리 탭)를 단다."""
         idx = self._index
+        pool = result.pop("_pool", None) if isinstance(result, dict) else None
         if idx is None or self._group_arr is None:
             return
         for c in candidates:
             tid = idx.by_name.get(c.get("tag"))
             if tid is not None:
                 c["group"] = self.group_of(tid)
+        if result is not None and pool is not None:
+            counts = np.bincount(self._group_arr[pool], minlength=len(self._group_rows))
+            result["group_counts"] = [
+                {"id": g["id"], "label": g["label"], "count": int(counts[i])}
+                for i, g in enumerate(self._group_rows) if counts[i]
+            ]
 
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                persons: Any = None, n: Any = 5, seed: Any = None) -> dict[str, Any]:

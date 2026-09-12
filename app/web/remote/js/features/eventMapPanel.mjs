@@ -702,6 +702,9 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
       event.preventDefault();
     });
     window.addEventListener('resize', position);
+    // Generation Info 를 끌어 키우면 뷰어가 줄어든다 - 창 크기가 아니라 뷰어 크기를 따라간다.
+    const viewer = document.querySelector('#resultViewer');
+    if (viewer && typeof ResizeObserver === 'function') new ResizeObserver(() => position()).observe(viewer);
 
     sideEl = document.createElement('div');
     sideEl.className = 'em-overlay em-side';
@@ -751,7 +754,8 @@ export function initEventMap({ insertTag, showToast, getPromptText } = {}) {
    *  늘리자는 사용자 지정 2026-09-12). 이미지 왼편 가장자리를 살짝 가리는 정도. */
   function position() {
     if (!overlay || overlay.hidden) return;
-    const host = document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
+    // 뷰어(이미지 칸)만 호스트다 - #rightTabResult 로 재면 Generation Info 위까지 내려간다(사용자 제보).
+    const host = document.querySelector('#resultViewer') || document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
     const r = host ? host.getBoundingClientRect() : null;
     if (!r || r.width < 240 || r.height < 160) {
       overlay.style.left = '16px'; overlay.style.transform = 'none'; overlay.style.top = '64px';

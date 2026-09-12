@@ -1022,8 +1022,22 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       && String(event.key || '').toLowerCase() === 'e';
     if (!hit) return;
     event.preventDefault();
-    if (open) { input.select(); input.focus(); return; }
+    // Ctrl+E 를 다시 치면 닫는다(Esc 와 같다 - 사용자 지정 2026-09-12 밤). 전에는 검색 칸으로 되돌아갔다.
+    if (open) { close(); return; }
     void show();
+  }, true);
+
+  // 패널 밖을 누르면 닫는다 - 빈 이미지 영역·상단 메뉴·다른 도구 어디든. 생성된 이미지를 패널이 가려
+  // 바로 못 보던 문제(사용자 지정 2026-09-12 밤). **예외 하나**: 메인 프롬프트 칸은 안 닫는다 - 패널을
+  // 보면서 프롬프트를 고치는 흐름이 있다. 패널·둘째 패널·인원 팝업·툴팁·E 단추 자신은 '안'이다.
+  document.addEventListener('pointerdown', event => {
+    if (!open) return;
+    const t = event.target;
+    if (!(t instanceof Element)) return;
+    if (overlay?.contains(t) || sideEl?.contains(t) || personPopup?.contains(t) || tipEl?.contains(t)) return;
+    if (tabBtn && (t === tabBtn || tabBtn.contains(t))) return;     // toggle 이 처리한다
+    if (t.closest('#promptEdit, .prompt-highlight-wrap')) return;    // 메인 프롬프트 칸 - 예외
+    close();
   }, true);
 
   return { show, close, toggle, isOpen: () => open, pins: () => pins.slice() };

@@ -28649,7 +28649,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .em-tip.open { display: block; }
 .em-tip-row { display: flex; gap: 10px; align-items: flex-start; }
-.em-tip-main { flex: 0 0 200px; width: 200px; min-width: 0; }   /* 왼쪽은 폭을 고정하고 줄을 넘긴다 */
+.em-tip-main { flex: 0 0 200px; width: 200px; min-width: 0; display: flex; flex-direction: column; }   /* 왼쪽은 폭 고정·줄넘김 */
+.em-tip-foot { margin-top: auto; padding-top: 6px; }   /* 포함/제외·안내를 바닥에 - 썸네일 높이만큼 남던 빈자리를 없앤다 */
 .em-tip-head { display: flex; align-items: baseline; gap: 10px; }
 .em-tip-tag { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: #f7f6ff; overflow-wrap: anywhere; }
 .em-tip-src { flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); white-space: nowrap; }

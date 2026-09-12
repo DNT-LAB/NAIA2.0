@@ -295,9 +295,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || 'unsorted'))}</span></div>
         ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
         <div class="em-tip-stats">lift ${esc(row.dataset.emLift || '')}${info?.count ? ` · Danbooru ${fmt(info.count)}` : ''}</div>
-      </div>${thumb}</div>
-      ${tipComboLine(row)}
-      <div class="em-tip-hint">클릭 꽂기 · 우클릭 제외</div>`;
+        <div class="em-tip-foot">${tipComboLine(row)}<div class="em-tip-hint">클릭 꽂기 · 우클릭 제외</div></div>
+      </div>${thumb}</div>`;
     tip.classList.add('open');
     // **항상 같은 자리**: 행 가운데의 살짝 오른쪽, 행 바로 아래(사용자 지정 2026-09-12 밤 - 창 크기에
     // 따라 좌우로 튀던 것). 아래가 모자라면 위로만 올린다. 좌우는 화면 밖으로 나가지 않게만 민다.

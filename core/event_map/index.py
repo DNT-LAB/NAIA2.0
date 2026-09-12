@@ -243,10 +243,12 @@ class EventMapIndex:
         self.eligible = {}
         self.lane = {}
         self.color = {}
-        # 색상 제외는 질의 시점 정책이다. `--policy none` 으로 만든 색인은 meta 에
-        # color_policy=off 가 적혀 있고, 그러면 색상 태그를 보통 태그로 다룬다.
+        # 색상은 **정책과 무관하게 항상** 후보에서 뺀다(사용자 지정 2026-09-12). 색상은 이벤트로
+        # 이어지지 않는다는 것이 정책이 아니라 맵의 전제라서다. meta 의 color_policy 는 기록으로만
+        # 남고 여기서는 읽지 않는다 - `--policy none` 판(full-20260912)에서 `black bikini`·
+        # `yellow shirt` 가 후보로 올라오던 것이 그 값을 읽던 흔적이다.
         self.policy_mode = self.meta.get("policy_mode", "full")
-        color_on = self.meta.get("color_policy", "on") != "off"
+        color_on = True
         for tid, (name, observed, role, lane) in enumerate(rows):
             self.by_id[tid] = name
             self.by_name[name] = tid
@@ -403,8 +405,84 @@ class EventMapIndex:
             keep.add(pid)
         return keep
 
+    def _live_posts(self, parts: set[int] | None) -> np.ndarray:
+        """본문이 비지 않은 게시물 전부(분면을 주면 그 분면만). rid 오름차순."""
+        lengths = np.diff(self.offsets.astype(np.int64))
+        live = lengths > 0
+        if parts is not None:
+            owner = self.part_arr[:lengths.size]
+            live &= np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))
+        return np.flatnonzero(live).astype(np.int64)
+
+    def browse(self, *, ratings=None, persons=None, allowed=None, limit=40, min_posts=5,
+               include_color=False, scan_cap=SCAN_CAP, prior=RANK_PRIOR) -> dict:
+        """핀 **없이** 고른 분면(인원·등급)에서 특징적인 태그를 낸다 - 첫 화면(대분류 → 태그)용.
+
+        기준선은 코퍼스 전체다: 그 분면에서의 비율 ÷ 전체에서의 비율. `allowed` (태그 불리언
+        마스크)로 대분류 하나에 가둔다. 분면의 게시물이 많으면 explore 와 같이 고르게 표본을 뜬다
+        - 여기서 세는 것은 흔한 태그들이라 표본으로 충분하다.
+        """
+        started = time.perf_counter()
+        parts = self._partition_filter(ratings, persons)
+        rids = self._live_posts(parts)
+        out = {"schema": SCHEMA, "ratings": sorted(ratings or []), "persons": sorted(persons or []),
+               "observed_posts": int(rids.size), "candidates": [], "corpus_posts": self.total_posts,
+               "count_meaning": "고른 분면의 게시물 수", "note": NOTE}
+        if rids.size == 0:
+            out["status"] = "no_match"
+            return out
+        scanned = rids
+        sampled = rids.size > scan_cap > 0
+        if sampled:
+            scanned = rids[np.linspace(0, rids.size - 1, scan_cap).astype(np.int64)]
+        out["scanned_posts"] = int(scanned.size)
+        out["sampled"] = sampled
+        counts = self._count_tags(scanned)
+        keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0)
+        if not include_color:
+            keep &= ~self.color_arr
+        if allowed is not None:
+            keep &= allowed
+        # ⚠️ 첫 화면은 explore 의 눌린 점수로 세우면 안 된다. `1girl_solo` 는 코퍼스의 절반이라
+        #    어떤 태그도 그 분면에 크게 치우치지 않고, 표본에서 5건 겨우 넘긴 희귀 태그가 lift 2 로
+        #    맨 위에 온다(실측: `shirt in mouth`·`double fox shadow puppet`). 여기서는
+        #    **지지도 × lift** 로 세운다 - 많이 나오면서 이 분면에 치우친 것이 위다.
+        out["candidates"] = self._rank(counts, keep, int(scanned.size), rids.size, sampled, limit, prior,
+                                       support_weighted=True)
+        out["candidate_pool"] = int(keep.sum())
+        out["status"] = "matched" if out["candidates"] else "no_match"
+        out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        return out
+
+    def _rank(self, counts, keep, base, matched, sampled, limit, prior,
+              support_weighted: bool = False) -> list[dict]:
+        """explore/browse 공통 줄 세우기. lift 는 언제나 날 값으로 보인다.
+
+        explore : `관측/(기댓값+PRIOR)` - 핀 교집합 안에서 **치우친** 것.
+        browse  : `관측 × lift` - 분면 안에서 **많이 나오면서** 치우친 것(첫 화면용).
+        """
+        total = self.total_posts or 1
+        picked = np.flatnonzero(keep)
+        seen_arr = counts[picked].astype(np.float64)
+        global_arr = self.obs_arr[picked].astype(np.float64)
+        share_arr = seen_arr / base
+        expected_arr = base * global_arr / total
+        lift_arr = share_arr / (global_arr / total)
+        score_arr = seen_arr * lift_arr if support_weighted else seen_arr / (expected_arr + prior)
+        rows = sorted(zip(score_arr.tolist(), lift_arr.tolist(), share_arr.tolist(),
+                          counts[picked].tolist(), picked.tolist()), reverse=True)
+        factor = (matched / base) if base else 1.0
+        return [
+            {"tag": self.by_id[tid], "observed": seen,
+             "observed_estimate": seen if not sampled else int(round(seen * factor)),
+             "share": round(share, 6), "lift": round(lift, 2), "score": round(score, 3),
+             "role": self.role.get(tid), "lane": self.lane.get(tid),
+             "observed_total": self.observed.get(tid)}
+            for score, lift, share, seen, tid in rows[:limit]
+        ]
+
     def explore(self, pins, *, exclude=None, ratings=None, persons=None, limit=24,
-                min_posts=5, include_color=False, roles=None,
+                min_posts=5, include_color=False, roles=None, allowed=None,
                 scan_cap=SCAN_CAP, prior=RANK_PRIOR) -> dict:
         """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다."""
         started = time.perf_counter()
@@ -472,34 +550,18 @@ class EventMapIndex:
         keep[[t for t in wanted + excluded]] = False
         if roles:
             roles = set(roles)
-            allowed = np.zeros(self.n_tags, dtype=bool)
+            by_role = np.zeros(self.n_tags, dtype=bool)
             for tid, role in self.role.items():
                 if role in roles:
-                    allowed[tid] = True
+                    by_role[tid] = True
+            keep &= by_role
+        if allowed is not None:
             keep &= allowed
 
-        picked = np.flatnonzero(keep)
-        seen_arr = counts[picked].astype(np.float64)
-        global_arr = self.obs_arr[picked].astype(np.float64)
-        share_arr = seen_arr / base
-        expected_arr = base * global_arr / total
-        score_arr = seen_arr / (expected_arr + prior)
-        lift_arr = share_arr / (global_arr / total)
-        rows = sorted(zip(score_arr.tolist(), lift_arr.tolist(), share_arr.tolist(),
-                          counts[picked].tolist(), picked.tolist()), reverse=True)
         # 표본을 떴으면 `observed` 는 **표본 안에서 센 수**다. 화면이 곱셈을 잘못하는 일이
         # 없도록 교집합 전체로 환산한 추정치를 따로 실어 보낸다(표본이 아니면 같은 값).
-        factor = (rids.size / base) if base else 1.0
-        out["candidates"] = [
-            {"tag": self.by_id[tid], "observed": seen,
-             "observed_estimate": seen if not sampled else int(round(seen * factor)),
-             "share": round(share, 6), "lift": round(lift, 2),
-             "score": round(score, 3),
-             "role": self.role.get(tid), "lane": self.lane.get(tid),
-             "observed_total": self.observed.get(tid)}
-            for score, lift, share, seen, tid in rows[:limit]
-        ]
-        out["candidate_pool"] = len(rows)
+        out["candidates"] = self._rank(counts, keep, base, rids.size, sampled, limit, prior)
+        out["candidate_pool"] = int(keep.sum())
         out["status"] = "matched"
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return out

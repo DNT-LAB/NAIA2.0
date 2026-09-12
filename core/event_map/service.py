@@ -39,8 +39,14 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+import numpy as np
+
+from core.event_map import categories as C
 from core.event_map.index import (
     MAX_EXCLUDE, MAX_PINS, MAX_SAMPLES, SCAN_CAP, EventMapIndex)
+
+# 대분류 재료. `data/KR_tags.parquet` 의 category 를 접기 표로 접는다(사용자 결정 2026-09-12).
+KR_TAGS_REL = Path("data") / "KR_tags.parquet"
 
 ENV_PATH = "NAIA_EVENT_MAP_INDEX"
 # 서브디렉터리에 두는 것을 기본으로 한다 - 나중에 같은 폴더에 설명/해시 파일이 붙는다.
@@ -107,10 +113,15 @@ def default_roots(context: Any) -> list[Path]:
 class EventMapService:
     """맵 색인을 지연 개방하고 질의를 검증해 넘긴다. 스레드 안전."""
 
-    def __init__(self, roots: Sequence[Path] | None = None) -> None:
+    def __init__(self, roots: Sequence[Path] | None = None,
+                 kr_tags_path: Path | None = None) -> None:
         self._roots = [Path(r) for r in (roots or [])]
+        self._kr_tags_path = kr_tags_path
         self._lock = threading.Lock()
         self._index: EventMapIndex | None = None
+        # 대분류: 태그 id -> 갈래 순번(groups() 순서). 색인을 열 때 같이 만든다.
+        self._group_arr: np.ndarray | None = None
+        self._group_rows: list[dict] = []
         self._state = "unknown"
         self._message = ""
         self._path: Path | None = None
@@ -162,6 +173,7 @@ class EventMapService:
                 self._path = path
                 self._state, self._message = "ready", ""
                 self._sorted_names = sorted(idx.by_name)
+                self._load_groups(idx)
                 return idx
             if self._state != "corrupt":
                 self._state = "missing"
@@ -169,12 +181,71 @@ class EventMapService:
             raise MapQueryError("unavailable", self._message or "이벤트 맵 색인이 없다.",
                                 state=self._state, searched=self._tried)
 
+    def _load_groups(self, idx: EventMapIndex) -> None:
+        """KR_tags 의 category 를 접기 표로 접어 태그마다 갈래를 붙인다.
+
+        parquet 이 없거나 못 읽으면 전부 `unsorted` 다 - 맵은 그래도 돈다(대분류 화면만 빈다).
+        ⚠️ 정규화는 색인 쪽 `resolve` 를 쓴다 - 표기(밑줄·대소문자)가 갈리면 분류가 통째로 빈다.
+        """
+        groups = C.groups()
+        order = {g["id"]: i for i, g in enumerate(groups)}
+        unsorted = order[C.UNSORTED]
+        arr = np.full(idx.n_tags, unsorted, dtype=np.int16)
+        source = ""
+        path = self._kr_tags_path
+        if path is None:
+            for root in self._roots:
+                # roots 는 `<user-data>/data` · `<repo>/data` 다 - KR_tags.parquet 은 그 바로 아래.
+                cand = Path(root) / KR_TAGS_REL.name
+                if cand.is_file():
+                    path = cand
+                    break
+        if path is not None and Path(path).is_file():
+            try:
+                import pandas as pd
+                frame = pd.read_parquet(path, columns=["tag", "category"])
+                hit = 0
+                for tag, cat in zip(frame["tag"].astype(str), frame["category"].astype(str)):
+                    tid = idx.resolve(tag)
+                    if tid is None:
+                        continue
+                    gid, _sub = C.fold_category(cat)
+                    arr[tid] = order.get(gid, unsorted)
+                    hit += 1
+                source = "%s (%d tags matched)" % (path, hit)
+            except Exception as exc:                                  # pragma: no cover
+                source = "failed: %s" % exc
+        self._group_arr = arr
+        counts = np.bincount(arr, minlength=len(groups))
+        obs = np.bincount(arr, weights=idx.obs_arr, minlength=len(groups))
+        self._group_rows = [
+            {**g, "tags": int(counts[i]), "observed": int(obs[i])}
+            for i, g in enumerate(groups)
+        ]
+        self._group_source = source
+
+    def group_mask(self, group_ids: Iterable[str]) -> np.ndarray | None:
+        """갈래 id 들 -> 태그 불리언 마스크. 모르는 id 는 무시하고, 하나도 안 남으면 None."""
+        if self._group_arr is None:
+            return None
+        order = {g["id"]: i for i, g in enumerate(C.groups())}
+        wanted = [order[g] for g in group_ids if g in order]
+        if not wanted:
+            return None
+        return np.isin(self._group_arr, np.array(wanted, dtype=np.int16))
+
+    def group_of(self, tid: int) -> str:
+        if self._group_arr is None:
+            return C.UNSORTED
+        return C.groups()[int(self._group_arr[tid])]["id"]
+
     def invalidate(self) -> None:
         """내려받기·마이그레이션 뒤에 다시 찾게 한다."""
         with self._lock:
             idx, self._index = self._index, None
             self._state, self._message, self._path = "unknown", "", None
             self._sorted_names = []
+            self._group_arr, self._group_rows = None, []
         if idx is not None:
             try:
                 idx.close()
@@ -227,6 +298,10 @@ class EventMapService:
             # ⚠️ 갈래 칩은 색인에서 뽑는다. 프론트에 박으면 판이 바뀔 때 갈라진다.
             "roles": [{"id": k, "label": ROLE_LABELS.get(k, k), "tags": v}
                       for k, v in sorted(roles.items(), key=lambda kv: -kv[1])],
+            # 대분류(접기 표 12갈래). 첫 화면의 축이고 후보 필터다. 태그 수 0 인 갈래도 보낸다 -
+            # 화면이 "없다" 를 그릴 수 있게.
+            "groups": [dict(row) for row in self._group_rows],
+            "group_source": getattr(self, "_group_source", ""),
             "ratings": [{"id": r, "label": RATING_LABELS.get(r, r)} for r in ratings],
             "persons": [{"id": p, "label": PERSON_LABELS.get(p, p.replace("_", " "))}
                         for p in persons],
@@ -356,9 +431,11 @@ class EventMapService:
         return {"ok": True, "status": "matched" if items else "no_match",
                 "query": raw, "items": items, "translated": translated}
 
+    # 색상은 앱 경로에서 **항상** 뺀다(사용자 지정 2026-09-12). 리더의 include_color 는 시험대
+    # (tools/event_map_playground.py)가 연구용으로만 쓴다 - 여기서는 켤 길을 두지 않는다.
     def explore(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
-                persons: Any = None, roles: Any = None, limit: Any = DEFAULT_CANDIDATES,
-                include_color: bool = False) -> dict[str, Any]:
+                persons: Any = None, roles: Any = None, groups: Any = None,
+                limit: Any = DEFAULT_CANDIDATES) -> dict[str, Any]:
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
         if not wanted:
@@ -367,20 +444,50 @@ class EventMapService:
                               code="too_many_exclude")
         want_r, want_p = self._filters(idx, ratings, persons)
         want_roles = self._tags(roles, cap=32, what="갈래", code="bad_role")
+        want_groups = self._tags(groups, cap=16, what="대분류", code="bad_group")
         try:
             result = idx.explore(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
-                roles=want_roles or None,
+                roles=want_roles or None, allowed=self.group_mask(want_groups),
                 limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES),
-                include_color=bool(include_color))
+                include_color=False)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
+        self._attach_groups(result.get("candidates") or [])
         result["ok"] = True
         return result
 
+    def browse(self, *, group: Any, ratings: Any = None, persons: Any = None,
+               limit: Any = DEFAULT_CANDIDATES) -> dict[str, Any]:
+        """첫 화면: 핀 없이 대분류 하나를 골라 그 분면(인원·등급)에서 특징적인 태그를 본다."""
+        idx = self.index()
+        gid = str(group or "").strip()
+        known = {g["id"] for g in C.groups()}
+        if gid not in known:
+            raise MapQueryError("bad_group", "모르는 대분류다: %s" % gid, known=sorted(known))
+        want_r, want_p = self._filters(idx, ratings, persons)
+        mask = self.group_mask([gid])
+        if mask is None:
+            raise MapQueryError("unavailable", "대분류 표를 못 만들었다(KR_tags.parquet 없음).",
+                                state="ready")
+        result = idx.browse(ratings=want_r, persons=want_p, allowed=mask,
+                            limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES))
+        self._attach_groups(result.get("candidates") or [])
+        result["group"] = gid
+        result["ok"] = True
+        return result
+
+    def _attach_groups(self, candidates: list[dict]) -> None:
+        idx = self._index
+        if idx is None or self._group_arr is None:
+            return
+        for c in candidates:
+            tid = idx.by_name.get(c.get("tag"))
+            if tid is not None:
+                c["group"] = self.group_of(tid)
+
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
-               persons: Any = None, n: Any = 5, include_color: bool = False,
-               seed: Any = None) -> dict[str, Any]:
+               persons: Any = None, n: Any = 5, seed: Any = None) -> dict[str, Any]:
         """핀을 포함하는 **실제 게시물**의 태그 조합. Dev0714 Quick Search 의 랜덤과 같다."""
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
@@ -396,7 +503,7 @@ class EventMapService:
         try:
             result = idx.sample(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
-                n=self._count(n, 5, MAX_SAMPLES), include_color=bool(include_color),
+                n=self._count(n, 5, MAX_SAMPLES), include_color=False,
                 seed=seed_value)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
@@ -412,3 +519,44 @@ class EventMapService:
         if info is None:
             return {"ok": True, "status": "unknown_tag", "tag": name}
         return {"ok": True, "status": "matched", **info}
+
+    def resolve_many(self, tags: Any) -> dict[str, Any]:
+        """프롬프트에 든 태그 여러 개를 한 번에 맵 어휘로 푼다(Ctrl+E 패널의 씨앗 칩).
+
+        돌려주는 것
+          items        맵에 있는 것만. 가중치(`0.8::x ::`)·아티스트·품질어는 여기서 떨어진다.
+          unknown      맵에 없는 것(화면이 "왜 안 뜨나" 를 답할 수 있게).
+          person_group 인원 태그(1girl·solo...)로 정한 분면. ⚠️ 인원 태그는 **핀이 아니라
+                       분면 필터**로 가야 한다 - 핀으로 꽂으면 `1girl+solo` 교집합 457만건에
+                       1초가 들고 후보는 잡음인데, 분면으로 보내면 112ms 에 같은 답이 나온다
+                       (실측 2026-09-12). 규칙은 core/tag_combo/person.py 가 SSOT 다.
+        """
+        from core.tag_combo.person import person_group_of
+
+        idx = self.index()
+        wanted = self._tags(tags, cap=64, what="태그", code="too_many_tags")
+        items, unknown, population = [], [], []
+        seen: set[str] = set()
+        for raw in wanted:
+            tid = idx.resolve(raw)
+            if tid is None:
+                unknown.append(raw)
+                continue
+            name = idx.by_id[tid]
+            if name in seen:
+                continue
+            seen.add(name)
+            role = idx.role.get(tid) or "unreviewed"
+            if role == "population":
+                population.append(name)
+            items.append({"tag": name, "observed": idx.observed[tid], "role": role,
+                          "role_label": ROLE_LABELS.get(role, ""), "lane": idx.lane.get(tid),
+                          "group": self.group_of(tid),
+                          "color_only": bool(idx.color[tid]),
+                          "pinnable": bool(idx.eligible[tid]) and not idx.color[tid]
+                          and role != "population"})
+        group = person_group_of(population) if population else ""
+        known = {name[2:] for name in idx.partitions}
+        return {"ok": True, "items": items, "unknown": unknown, "population": population,
+                "person_group": group if group in known else "",
+                "person_label": PERSON_LABELS.get(group, "") if group in known else ""}

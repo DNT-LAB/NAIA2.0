@@ -194,7 +194,10 @@
         "core/event_map/index.py",
         "core/event_map/pack.py",
         "core/event_map/policy.py",
-        "core/event_map/service.py"
+        "core/event_map/service.py",
+        "core/event_map/categories.py",
+        "core/event_map/kr_category_fold.json",
+        "app/web/remote/js/features/eventMapPanel.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
@@ -202,7 +205,9 @@
         {"method": "GET", "path": "/api/event-map/suggest", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/explore", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/sample", "smoke": "non_destructive"},
-        {"method": "GET", "path": "/api/event-map/describe", "smoke": "non_destructive"}
+        {"method": "GET", "path": "/api/event-map/describe", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/resolve", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/browse", "smoke": "non_destructive"}
       ]
     },
     {

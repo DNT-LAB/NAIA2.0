@@ -92,10 +92,6 @@ def _error(exc: MapQueryError) -> JSONResponse:
                         headers=_no_store())
 
 
-def _flag(value: Any) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def register_event_map_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -133,27 +129,40 @@ def register_event_map_routes(
 
     @app.get("/api/event-map/explore")
     async def api_event_map_explore(pins: str = "", exclude: str = "", ratings: str = "",
-                                    persons: str = "", roles: str = "", limit: int = 24,
-                                    color: str = ""):
+                                    persons: str = "", roles: str = "", groups: str = "",
+                                    limit: int = 24):
+        """색상 태그는 **항상** 후보에서 빠진다(켜는 파라미터를 두지 않는다 - 사용자 지정 2026-09-12).
+        `groups` 는 접기 표의 갈래 id(쉼표) - 후보를 그 대분류로 가둔다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.explore, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, roles=roles, limit=limit, include_color=_flag(color))
+                persons=persons, roles=roles, groups=groups, limit=limit)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/browse")
+    async def api_event_map_browse(group: str = "", ratings: str = "", persons: str = "",
+                                   limit: int = 40):
+        """첫 화면: 핀 없이 대분류 하나 → 그 인원·등급에서 특징적인 태그(코퍼스 대비 lift)."""
+        service = ensure_event_map_service(session_context)
+        try:
+            payload = await run_in_thread(
+                _call, service.browse, group=group, ratings=ratings, persons=persons, limit=limit)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())
 
     @app.get("/api/event-map/sample")
     async def api_event_map_sample(pins: str = "", exclude: str = "", ratings: str = "",
-                                   persons: str = "", n: int = 5, color: str = "",
-                                   seed: str = ""):
+                                   persons: str = "", n: int = 5, seed: str = ""):
         """뽑힌 조합의 `prompt` 가 프롬프트에 넣거나 복사할 문자열이다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.sample, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, n=n, include_color=_flag(color), seed=seed)
+                persons=persons, n=n, seed=seed)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())
@@ -163,6 +172,19 @@ def register_event_map_routes(
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(_call, service.describe, tag)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/resolve")
+    async def api_event_map_resolve(tags: str = ""):
+        """프롬프트의 태그들을 한 번에 맵 어휘로 푼다(패널이 열릴 때 씨앗 칩을 만든다).
+
+        인원 태그는 `person_group` 으로 따로 돌려준다 - 핀이 아니라 분면 필터로 써야 한다.
+        """
+        service = ensure_event_map_service(session_context)
+        try:
+            payload = await run_in_thread(_call, service.resolve_many, tags)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

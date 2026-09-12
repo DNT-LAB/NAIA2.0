@@ -33,6 +33,11 @@ TAG_INCREMENT_ARCHIVE_URL = (
 )
 TAG_INCREMENT_MARKER = "tags_174.parquet"
 
+# 신규 설치가 갖춰야 하는 태그 데이터 = 베이스 + 증분. 순서가 의미다(베이스 없이 증분만
+# 받으면 반쪽 코퍼스가 된다). ⚠️ 이걸 한 아카이브로 합치지 말 것 - 두 파일이 같은
+# `tags/` 를 공유하고, 합치면 기존 사용자가 1.4GB 를 다시 받는다.
+TAG_DATA_CHAIN = ("tag_archive", "tag_archive_increment")
+
 # Event Corpus (Interactive 모드의 태그 공기 추천). Dev0714 QuickSearchBlock 이 쓰던 것과
 # 동일한 아카이브다. Dev0714 는 zip_ref.extractall() 을 그대로 써서 traversal 에 무방비였는데,
 # 여기서는 아래 _extract_archive 의 basename 평탄화 + 확장자 화이트리스트를 그대로 태운다.
@@ -363,6 +368,15 @@ class RuntimeInstallManager:
     def start_tag_increment_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("tag_archive_increment", blocking=blocking)
 
+    def start_tag_data_install(self, *, blocking: bool = False) -> dict[str, Any]:
+        """신규 설치용. 베이스(150) 뒤에 증분(150~174)까지 이어 받아 **175개**로 끝낸다.
+
+        이미 있는 것은 건너뛴다. 그래서 150개만 가진 기존 사용자가 이걸 불러도 275MB 만
+        받고, 175개를 갖춘 사용자는 아무것도 받지 않는다.
+        ⚠️ `start_archive_download("tag_archive")` 와 다르다 - 그쪽은 베이스 하나만 받는다.
+        """
+        return self.start_archive_chain(TAG_DATA_CHAIN, blocking=blocking)
+
     def cancel_tag_archive_download(self) -> dict[str, Any]:
         return self.cancel_archive_download()
 
@@ -370,19 +384,33 @@ class RuntimeInstallManager:
         return self.start_archive_download("corpus_archive", blocking=blocking)
 
     def start_archive_download(self, key: str, *, blocking: bool = False) -> dict[str, Any]:
-        spec = self._spec(key)
+        """아카이브 **하나**를 받는다. 여러 개를 이어 받으려면 `start_archive_chain`."""
+        return self.start_archive_chain((key,), blocking=blocking)
+
+    def start_archive_chain(self, keys, *, blocking: bool = False) -> dict[str, Any]:
+        """`keys` 순서대로, **아직 없는 것만** 이어 받는다.
+
+        진행률 상태(`_download_state`)는 하나뿐이라 여러 아카이브를 동시에 받을 수 없다.
+        그래서 워커 하나가 순서대로 돈다 - 받는 동안 `active` 가 계속 True 라 화면의
+        폴링이 끊기지 않는다(부트스트랩 패널이 `active` 로 폴링을 멈춘다).
+        """
+        specs = [self._spec(str(key)) for key in keys]
+        if not specs:
+            raise ValueError("체인이 비어 있다")
         self.initialize()
-        if self._archive_ready(spec):
+        pending = [spec for spec in specs if spec.url and not self._archive_ready(spec)]
+        if not pending:
             return self._set_state(
                 active=False,
                 phase="complete",
                 percent=100,
                 downloaded_mb=0.0,
                 total_mb=0.0,
-                message=f"{spec.label}가 이미 설치되어 있습니다.",
+                message=f"{specs[0].label}가 이미 설치되어 있습니다.",
                 error="",
                 done=True,
             )
+        spec = pending[0]
 
         with self._lock:
             # 다운로더는 단일 비행이다. 2GB 태그 아카이브와 코퍼스를 동시에 받으면
@@ -403,8 +431,8 @@ class RuntimeInstallManager:
             })
             if not blocking:
                 worker = Thread(
-                    target=self._run_archive_download,
-                    args=(spec,),
+                    target=self._run_archive_chain,
+                    args=(pending,),
                     daemon=True,
                     name=f"runtime-{spec.key}-download",
                 )
@@ -412,7 +440,7 @@ class RuntimeInstallManager:
                 worker.start()
                 return dict(self._download_state)
 
-        self._run_archive_download(spec)
+        self._run_archive_chain(pending)
         with self._lock:
             return dict(self._download_state)
 
@@ -427,6 +455,61 @@ class RuntimeInstallManager:
         return state
 
     def _run_archive_download(self, spec: ArchiveSpec) -> None:
+        self._run_archive_chain([spec])
+
+    def _run_archive_chain(self, specs: list[ArchiveSpec]) -> None:
+        """체인을 순서대로 설치한다. 하나가 실패하면 **거기서 멈춘다**.
+
+        ⚠️ 앞의 것이 성공한 뒤 뒤의 것이 실패하면 "설치 실패" 로만 말하면 안 된다.
+           베이스 1.4GB 를 받아 놓고도 사용자는 전부 실패한 줄 안다. 어디까지 됐는지 적는다.
+        """
+        installed: list[str] = []
+        for index, spec in enumerate(specs):
+            if self._cancel.is_set():
+                return
+            if index:
+                # 다음 아카이브로 넘어간다. `active` 는 계속 True 라 폴링이 끊기지 않는다.
+                self._set_state(
+                    phase=spec.key,
+                    percent=0,
+                    downloaded_mb=0.0,
+                    total_mb=0.0,
+                    message=f"{spec.label} 다운로드 준비 중...",
+                )
+            try:
+                extracted = self._install_archive(spec)
+            except InterruptedError as exc:
+                self._set_state(active=False, message=str(exc), error=str(exc), done=False)
+                return
+            except urllib.error.HTTPError as exc:
+                self._fail_chain(spec, installed, f"HTTP 오류 {exc.code}: {exc.reason}")
+                return
+            except urllib.error.URLError as exc:
+                self._fail_chain(spec, installed, f"네트워크 오류: {exc.reason}")
+                return
+            except Exception as exc:
+                self._fail_chain(spec, installed, str(exc))
+                return
+            installed.append(f"{spec.label} {extracted}개")
+        self._set_state(
+            active=False,
+            phase="complete",
+            percent=100,
+            message="설치 완료 (%s)" % ", ".join(installed),
+            error="",
+            done=True,
+        )
+
+    def _fail_chain(self, spec: ArchiveSpec, installed: list[str], reason: str) -> None:
+        if installed:
+            message = "%s는 설치했지만 %s 설치에 실패했습니다: %s" % (
+                ", ".join(installed), spec.label, reason)
+        else:
+            message = f"{spec.label} 설치 실패: {reason}"
+        self._set_state(active=False, message=message, error=message, done=False)
+
+    def _install_archive(self, spec: ArchiveSpec) -> int:
+        """아카이브 하나를 받아 풀고 검증한다. 성공하면 푼 파일 수를 돌려준다."""
         temp_zip = self.runtime_paths.downloads_dir / spec.temp_name
         target = self._archive_dir(spec)
         try:
@@ -450,25 +533,7 @@ class RuntimeInstallManager:
             hook = self._completion_hooks.get(spec.key)
             if hook is not None:
                 hook()
-            self._set_state(
-                active=False,
-                phase="complete",
-                percent=100,
-                message=f"{spec.label} 설치 완료 ({extracted}개 파일)",
-                error="",
-                done=True,
-            )
-        except InterruptedError as exc:
-            self._set_state(active=False, message=str(exc), error=str(exc), done=False)
-        except urllib.error.HTTPError as exc:
-            message = f"HTTP 오류 {exc.code}: {exc.reason}"
-            self._set_state(active=False, message=message, error=message, done=False)
-        except urllib.error.URLError as exc:
-            message = f"네트워크 오류: {exc.reason}"
-            self._set_state(active=False, message=message, error=message, done=False)
-        except Exception as exc:
-            message = f"{spec.label} 설치 실패: {exc}"
-            self._set_state(active=False, message=message, error=message, done=False)
+            return extracted
         finally:
             try:
                 temp_zip.unlink(missing_ok=True)

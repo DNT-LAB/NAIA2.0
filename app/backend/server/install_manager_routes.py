@@ -138,11 +138,18 @@ def register_install_manager_routes(
 
     @app.post("/api/install-manager/tag-archive/download")
     async def api_install_manager_tag_archive_download(req: Request):
+        """태그 데이터를 설치한다 - 베이스(150) **뒤에 증분(150~174)까지** 이어 받는다.
+
+        신규 설치가 150개에서 끝나면 안 된다(2026-09-12 사용자 지시). 이미 있는 것은
+        건너뛰므로 150개만 가진 사용자가 눌러도 275MB 만 받는다.
+        ⚠️ 베이스의 완성 판정(`TAG_ARCHIVE_EXPECTED_COUNT`)은 150 그대로다. 175 로 올리면
+           150개를 가진 기존 사용자 전원이 1.4GB 를 다시 받는다.
+        """
         if not _is_local_request(req):
             return _loopback_only_response()
         try:
             manager = runtime_install_manager(session_context)
-            await run_in_thread(manager.start_tag_archive_download)
+            await run_in_thread(manager.start_tag_data_install)
             return await run_in_thread(manager.snapshot)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Tag archive download failed: {exc}"}, status_code=500)

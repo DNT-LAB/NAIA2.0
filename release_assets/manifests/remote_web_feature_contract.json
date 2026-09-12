@@ -873,10 +873,17 @@
     },
     {
       "feature": "install_manager",
-      "description": "Tag search parquet archive downloaded by the first-run install manager.",
+      "description": "Base tag search parquet archive (buckets 0-149) downloaded by the first-run install manager. The route chains the increment below so a clean install ends with 175 files; base readiness stays at 150 so existing users are never judged incomplete.",
       "paths": ["data/tags/**"],
       "provisioning": "downloader",
       "provisioned_by": "POST /api/install-manager/tag-archive/download"
+    },
+    {
+      "feature": "install_manager",
+      "description": "Tag corpus increment (buckets 150-174, 275MB). Same tags/ directory as the base, so readiness is decided by the last file name (tags_174.parquet), never by count. Fetched as the second leg of the bootstrap install and offered again by the search panel update button.",
+      "paths": ["data/tags/**"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/tag-archive-increment/download"
     },
     {
       "feature": "install_manager",

@@ -70,8 +70,10 @@ export function createDataBootstrapPanel({
     const missing = Math.max(0, Number(archive.missing_count || 0));
 
     if (elStatus) {
-      if (ready) elStatus.textContent = `설치 완료 (${fileCount}개)`;
-      else if (active) elStatus.textContent = '다운로드 중…';
+      // ⚠️ `active` 가 `ready` 보다 먼저다. 베이스(150)를 받은 뒤 증분을 이어 받는 동안
+      //    베이스 기준으로는 ready 라, ready 를 먼저 보면 받는 중에 "설치 완료" 라고 한다.
+      if (active) elStatus.textContent = '다운로드 중…';
+      else if (ready) elStatus.textContent = `설치 완료 (${fileCount}개)`;
       else if (fileCount > 0) elStatus.textContent = `부분 설치 (${fileCount} / ${expectedCount || '?'})`;
       else elStatus.textContent = '미설치';
     }

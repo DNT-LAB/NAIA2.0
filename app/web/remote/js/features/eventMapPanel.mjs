@@ -322,8 +322,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   }
 
   /** [랜덤 프롬프트 할당] - 고른 분면(핀·제외가 있으면 그 안)에서 게시물 하나 → [적용] 과 같은 길. */
-  async function randomAssign(btn) {
-    if (btn) btn.disabled = true;
+  async function randomAssign(btn, andGenerate = false) {
+    const group = btn?.closest('.em-actions');
+    group?.querySelectorAll('button').forEach(b => { b.disabled = true; });
     try {
       const fp = filterParams();
       const body = await getJson('/api/event-map/sample', {
@@ -332,13 +333,28 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       });
       const s = (body.samples || [])[0];
       if (!s || !s.tags?.length) { toast(body.status === 'no_match' ? '이 조건에 맞는 게시물이 없습니다' : '뽑지 못했습니다', 'error'); return; }
-      await postJson('/api/event-map/apply', { tags: s.tags, rating: String(s.partition || 's').slice(0, 1) });
-      toast(`랜덤 프롬프트를 할당했습니다 (${String(s.partition || '').replace(/_/g, ' ')})`, 'success');
+      const where = String(s.partition || '').replace(/_/g, ' ');
+      if (andGenerate) {
+        await applyThenGenerate(s.tags, String(s.partition || 's').slice(0, 1));
+        toast(`랜덤 프롬프트를 적용하고 생성을 눌렀습니다 (${where})`, 'success');
+      } else {
+        await postJson('/api/event-map/apply', { tags: s.tags, rating: String(s.partition || 's').slice(0, 1) });
+        toast(`랜덤 프롬프트를 할당했습니다 (${where})`, 'success');
+      }
     } catch (error) {
       toast(`랜덤 프롬프트 실패 — ${error.message}`, 'error');
     } finally {
-      if (btn) btn.disabled = false;
+      group?.querySelectorAll('button').forEach(b => { b.disabled = false; });
     }
+  }
+  /** 적용 → prompt_generated 가 WS 로 와서 칸을 채운 뒤(최대 2초) → Generate 버튼과 같은 길. 실패는 throw. */
+  async function applyThenGenerate(tags, rating) {
+    const applied = await postJson('/api/event-map/apply', { tags, rating });
+    const want = String(applied.prompt || '').trim();
+    const read = () => (typeof getPromptText === 'function' ? String(getPromptText() || '') : '').trim();
+    for (let n = 0; n < 20 && want && read() !== want; n++) await new Promise(r => setTimeout(r, 100));
+    if (typeof generateNow !== 'function') throw new Error('생성 단추가 연결되지 않았습니다');
+    generateNow();
   }
   /** 실제 조합 i 를 파이프라인에 태운다. 회색(PE 가 지울 것)도 **그대로 보낸다** - 파이프라인이
    *  스스로 지우는 것이 '랜덤 프롬프트와 같은 방식' 이다. */
@@ -360,20 +376,22 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         toast('이 조합으로 생성을 요청했습니다 (메인 프롬프트는 그대로)', 'success');
         return;
       }
-      const applied = await postJson('/api/event-map/apply', body);
-      if (mode === 'apply') { toast('메인 프롬프트에 적용했습니다', 'success'); return; }
-      // 적용+생성: prompt_generated 가 WS 로 와서 칸을 채운 뒤에 Generate 를 눌러야 한다 -
-      // HTTP 응답이 먼저 올 수 있으니 칸이 바뀌는 것을 잠깐 기다린다(최대 2초).
-      const want = String(applied.prompt || '').trim();
-      const read = () => (typeof getPromptText === 'function' ? String(getPromptText() || '') : '').trim();
-      for (let n = 0; n < 20 && want && read() !== want; n++) await new Promise(r => setTimeout(r, 100));
-      if (typeof generateNow === 'function') { generateNow(); toast('적용 후 생성을 눌렀습니다', 'success'); }
-      else toast('적용했지만 생성 단추가 연결되지 않았습니다', 'error');
+      if (mode === 'apply') {
+        await postJson('/api/event-map/apply', body);
+        toast('메인 프롬프트에 적용했습니다', 'success'); return;
+      }
+      await applyThenGenerate(body.tags, body.rating);
+      toast('적용 후 생성을 눌렀습니다', 'success');
     } catch (error) {
       toast(`${mode === 'generate' ? '생성' : '적용'} 실패 — ${error.message}`, 'error');
     } finally {
       box?.querySelectorAll('button').forEach(b => { b.disabled = false; });
     }
+  }
+  /** 화면용 순서: 남는 태그 먼저, 회색(PE 가 지울) 태그는 뒤로(사용자 지정). 보내는 순서는 원본 그대로다. */
+  function sampleTagsForDisplay(s) {
+    const tags = s.tags || String(s.prompt || '').split(', ');
+    return [...tags.filter(t => !peHidden.has(t)), ...tags.filter(t => peHidden.has(t))];
   }
   /** 실제 조합 i 를 넣거나 복사할 문자열 - PE 설정이 지우는 태그는 뺀다(화면의 회색과 같은 것). */
   function samplePrompt(i) {
@@ -566,7 +584,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         peHidden.size ? ' <span class="em-pe-hidden">회색</span>은 프롬프트 엔지니어링 설정이 지우는 태그 - 넣기·복사에서 빠집니다.' : ''}</div>
       <div class="em-body em-side-body">${list.map((s, i) => `
         <div class="em-sample">
-          <div class="em-sample-tags">${(s.tags || String(s.prompt || '').split(', ')).map(t =>
+          <div class="em-sample-tags">${sampleTagsForDisplay(s).map(t =>
             peHidden.has(t) ? `<span class="em-pe-hidden" title="${esc(peTitle(t).slice(3))}">${esc(t)}</span>` : esc(t)).join(', ')}</div>
           <div class="em-sample-actions">
             <span class="em-actions em-sample-run">
@@ -736,8 +754,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       <div class="em-filters"></div>
       <div class="em-body" role="listbox"></div>
       <div class="em-foot">
-        <span class="em-actions"><button type="button" class="em-random" data-em-random
-            title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 프롬프트 할당</button></span>
+        <span class="em-actions"><button type="button" class="em-random" data-em-random="select"
+            title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
+            title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span>
         <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
         <span class="em-actions">
           <button type="button" data-em-insert disabled title="핀 전부를 프롬프트 커서 자리에">넣기</button>
@@ -772,7 +791,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       if (t.closest('[data-em-insert]')) { insertText(currentPrompt()); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
       const rb = t.closest('[data-em-random]');
-      if (rb) { void randomAssign(rb); return; }
+      if (rb) { void randomAssign(rb, rb.dataset.emRandom === 'generate'); return; }
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;

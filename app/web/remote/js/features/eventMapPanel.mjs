@@ -492,7 +492,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   function paintFilters() {
     filtersEl.innerHTML = `
       <button type="button" class="em-person-btn" data-em-person aria-haspopup="dialog" aria-expanded="false"
-              title="인원 구성 고르기">인원 <b data-em-person-count></b></button>
+              title="인원 구성 고르기"><b data-em-person-count></b></button>
       <span class="em-rating-bar" role="group" aria-label="등급">${RATING_OPTIONS.map(r =>
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
                  aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>

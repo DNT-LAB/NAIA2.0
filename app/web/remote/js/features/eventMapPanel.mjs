@@ -79,7 +79,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
-  let sortMode = prefs?.sort || 'lift';
+  let sortMode = prefs?.sort || 'mix';   // 기본 = mix(사용자 지정 2026-09-12 밤 - 밸런스)
   let roles = new Set();          // 대분류 필터(갈래 id). 비면 전부
   let group = '';                 // 첫 화면에서 고른 대분류(핀이 없을 때만 뜻이 있다)
   let browse = null;              // 마지막 browse 결과

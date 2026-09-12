@@ -28576,6 +28576,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
 .em-actions button:disabled { opacity: 0.35; cursor: default; }
 .em-actions button.is-on { border-color: rgba(230,168,74,0.6); background: rgba(230,168,74,0.12); color: #e6a84a; }
+.em-filters .em-actions-right { margin-left: auto; }
 
 /* 조건 줄: 인원 · 등급 · 갈래 · 색상. 값은 Fast Search 의 이벤트 구역 머리와 같다. */
 .em-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 5px 8px; border-bottom: 1px solid var(--border-dim); }

@@ -43,8 +43,10 @@ const PERSON_GROUPS = [
 const PERSON_IDS = PERSON_GROUPS.flatMap(group => group.ids);
 // 첫 시작 기본값(사용자 지정 2026-09-12): 여1 단독 · 여1 · 여1 남1 · 여1 남다수. 그 뒤로는
 // 사용자가 바꾼 대로 브라우저에 기억한다(프롬프트의 인원 태그로 **덮어쓰지 않는다**).
-const DEFAULT_PERSONS = ['1girl_solo', '1girl', '1girl_1boy', '1girl_multiple_boys'];
-const PREF_KEY = 'naia_event_map_prefs';
+// 기본 = 여1 단독 · S 등급(사용자 지정 2026-09-12 밤). 키를 v2 로 올려 기존 저장값 대신 이 기본이 한 번 먹는다.
+const DEFAULT_PERSONS = ['1girl_solo'];
+const DEFAULT_RATINGS = ['s'];
+const PREF_KEY = 'naia_event_map_prefs_v2';
 
 function loadPrefs() {
   try {
@@ -68,7 +70,7 @@ export function initEventMap({ insertTag, showToast } = {}) {
   let personLabels = new Map();   // id -> 화면 문구 (서버가 준다)
   let pins = [], excludes = [];
   const prefs = loadPrefs();
-  let ratings = new Set(prefs?.ratings || RATING_OPTIONS.map(r => r.id));
+  let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
   let roles = new Set();          // 대분류 필터(갈래 id). 비면 전부
   let group = '';                 // 첫 화면에서 고른 대분류(핀이 없을 때만 뜻이 있다)
@@ -275,9 +277,8 @@ export function initEventMap({ insertTag, showToast } = {}) {
     const on = pins.length > 0;
     footEl.querySelector('[data-em-insert]').disabled = !on;
     footEl.querySelector('[data-em-copy]').disabled = !on;
-    const sb = footEl.querySelector('[data-em-samples]');
-    sb.disabled = !on;
-    sb.classList.toggle('is-on', !!samples);
+    const sb = overlay.querySelector('[data-em-samples]');   // 조건 줄 오른쪽에 산다(사용자 지정 2026-09-12 밤)
+    if (sb) { sb.disabled = !on; sb.classList.toggle('is-on', !!samples); }
   }
 
   function paintFilters() {
@@ -286,9 +287,12 @@ export function initEventMap({ insertTag, showToast } = {}) {
               title="인원 구성 고르기">인원 <b data-em-person-count></b></button>
       <span class="em-rating-bar" role="group" aria-label="등급">${RATING_OPTIONS.map(r =>
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
-                 aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>`;
+                 aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
+      <span class="em-actions em-actions-right"><button type="button" data-em-samples disabled
+              title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button></span>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
     paintPersonButton();
+    paintActions();
   }
 
   /** 카테고리 탭 줄. 서버가 준 갈래별 후보 수로 그린다(접힌 팝업 대신 - 사용자 지정 2026-09-12).
@@ -566,7 +570,6 @@ export function initEventMap({ insertTag, showToast } = {}) {
         <span class="em-actions">
           <button type="button" data-em-insert disabled title="핀 전부를 프롬프트 커서 자리에">넣기</button>
           <button type="button" data-em-copy disabled title="핀 전부를 클립보드로">복사</button>
-          <button type="button" data-em-samples disabled title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button>
         </span>
       </div>`;
     document.body.append(overlay);
@@ -596,10 +599,10 @@ export function initEventMap({ insertTag, showToast } = {}) {
       const t = event.target;
       if (t.closest('[data-em-insert]')) { insertText(currentPrompt()); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
-      if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); }
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
+      if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return; }
       if (t.closest('[data-em-person]')) {
         if (personPopup && !personPopup.hidden) closePersonPopup(); else openPersonPopup();
         return;

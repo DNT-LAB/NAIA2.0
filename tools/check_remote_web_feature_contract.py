@@ -24,7 +24,11 @@ ALLOWED_SMOKE_LEVELS = {"static", "non_destructive", "state_mutation", "asset_ru
 #  - bundled:           shipped inside the release payload (must match a manifest include glob)
 #  - downloader:        fetched at runtime via a real download route (provisioned_by must be a contract route)
 #  - runtime_generated: produced by the running app/user actions (no static guarantee required)
+# `provisioned_by` is optional, but when present it must name something real:
+# either a documented contract route, or `tool: <repo-relative path>` for an asset
+# built outside the app. Only `downloader` REQUIRES it.
 ALLOWED_DATA_PROVISIONING = {"bundled", "downloader", "runtime_generated"}
+TOOL_PROVISIONER_PREFIX = "tool: "
 
 
 def load_contract(path: str | Path = DEFAULT_CONTRACT) -> dict[str, Any]:
@@ -256,6 +260,31 @@ def validate_remote_web_feature_contract(
                         "feature": feature_id,
                         "provisioned_by": provisioned_by,
                         "reason": "downloader data dependency provisioned_by is not a contract route",
+                    }
+                )
+
+        # A stated provisioner must name something real for EVERY kind, not just
+        # `downloader`. Checking it there only let a runtime_generated entry point at a
+        # route that does not exist (POST /api/character-viewer/thumbnail) and pass.
+        # Keep this outside the chain above: a `bundled` entry can carry a stale one too.
+        provisioned_by = str(dependency.get("provisioned_by") or "")
+        if provisioning != "downloader" and provisioned_by:
+            if provisioned_by.startswith(TOOL_PROVISIONER_PREFIX):
+                tool = provisioned_by[len(TOOL_PROVISIONER_PREFIX):].strip()
+                if not tool or not (root / tool).exists():
+                    violations.append(
+                        {
+                            "feature": feature_id,
+                            "provisioned_by": provisioned_by,
+                            "reason": "provisioned_by names a tool that does not exist",
+                        }
+                    )
+            elif provisioned_by not in route_strings:
+                violations.append(
+                    {
+                        "feature": feature_id,
+                        "provisioned_by": provisioned_by,
+                        "reason": "provisioned_by is not a contract route",
                     }
                 )
 

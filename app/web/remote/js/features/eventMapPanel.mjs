@@ -84,6 +84,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   let peHidden = new Map();
   // 행 툴팁(Interactive 칩 툴팁 꼴 + 썸네일 + 포함/제외 수). 설명은 태그별 캐시, 썸네일 표는 세션에 한 번.
   let tipEl = null, tipOwner = null;
+  let busyEl = null, busyCount = 0;   // 질의 중 덮개(반투명 검정). 겹치는 요청은 세어서 마지막이 걷는다.
+  const QUERY_TIMEOUT_MS = 20000;
   const tipInfo = new Map();        // tag -> {desc, group, count} | null(없음)
   const tipAsked = new Set();
   let thumbAxis = null;             // tag -> axis (Interactive 팩). null = 아직 안 받음
@@ -106,10 +108,27 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     for (const [key, value] of Object.entries(params || {})) {
       if (value !== '' && value != null) query.set(key, String(value));
     }
-    const res = await fetch(`${path}?${query.toString()}`, { cache: 'no-store' });
+    // 흔한 태그(rating S 의 breasts 등)는 몇 초가 걸린다 - 그래도 영영 기다리진 않는다(20초).
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), QUERY_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(`${path}?${query.toString()}`, { cache: 'no-store', signal: ctl.signal });
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw Object.assign(new Error(`시간 초과 (${QUERY_TIMEOUT_MS / 1000}초)`), { code: 'timeout' });
+      throw error;
+    } finally { clearTimeout(timer); }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(body.message || res.statusText), { code: body.code, body });
     return body;
+  }
+  /** 질의 중 덮개. 머리줄(검색 칸)은 남기고 그 아래를 덮는다 - 타이핑은 되고 클릭만 막힌다. */
+  function setBusy(on) {
+    busyCount = Math.max(0, busyCount + (on ? 1 : -1));
+    if (!busyEl) return;
+    const bar = overlay?.querySelector('.em-bar');
+    if (bar) busyEl.style.top = `${bar.offsetHeight}px`;
+    busyEl.classList.toggle('open', busyCount > 0);
   }
 
   function filterParams() {
@@ -144,6 +163,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   async function loadBrowse() {
     const mine = ++seq;
     setStatus('찾는 중…', 'busy');
+    setBusy(true);
     try {
       const body = await getJson('/api/event-map/browse', { group, limit: CANDIDATE_LIMIT, ...filterParams(), groups: '' });
       if (mine !== seq) return;
@@ -151,7 +171,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     } catch (error) {
       if (mine !== seq) return;
       browse = { status: 'error', message: error.message, candidates: [] };
-    }
+    } finally { setBusy(false); }
     render();
   }
 
@@ -164,6 +184,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     }
     const mine = ++seq;
     setStatus('찾는 중…', 'busy');
+    setBusy(true);
     try {
       const body = await getJson('/api/event-map/explore', {
         pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, ...filterParams(),
@@ -173,7 +194,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     } catch (error) {
       if (mine !== seq) return;
       result = { status: 'error', message: error.message, code: error.code, candidates: [] };
-    }
+    } finally { setBusy(false); }
     render();
   }
 
@@ -199,6 +220,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     if (!pins.length) return;
     const mine = ++seq;
     setStatus('실제 조합을 뽑는 중…', 'busy');
+    setBusy(true);
     try {
       const body = await getJson('/api/event-map/sample', {
         pins: pins.join(','), exclude: excludes.join(','), n: SAMPLE_COUNT,
@@ -211,7 +233,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     } catch (error) {
       if (mine !== seq) return;
       samples = { status: 'error', message: error.message, samples: [] };
-    }
+    } finally { setBusy(false); }
     render();
   }
 
@@ -763,6 +785,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
           <button type="button" data-em-copy disabled title="핀 전부를 클립보드로">복사</button>
         </span>
       </div>`;
+    busyEl = document.createElement('div');
+    busyEl.className = 'em-busy';
+    busyEl.innerHTML = '<span class="em-busy-label">찾는 중…</span>';
+    busyEl.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); });
+    overlay.append(busyEl);
     document.body.append(overlay);
     input = overlay.querySelector('.em-input');
     statusEl = overlay.querySelector('.em-status');
@@ -950,12 +977,18 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     open = true;
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'true');
     position();
+    focusInput();                   // 열자마자 - 바로 칠 수 있게(사용자 지정 2026-09-12 밤)
     setStatus('여는 중…', 'busy');
     await loadState();
     render();
     if (pins.length) void explore();
     position();
-    input.focus();
+    focusInput();                   // 그려진 뒤 한 번 더(그 사이 누가 가져갔어도)
+  }
+  function focusInput() {
+    if (!input || !open) return;
+    input.focus({ preventScroll: true });
+    requestAnimationFrame(() => { if (open && document.activeElement !== input) input.focus({ preventScroll: true }); });
   }
   function close() {
     if (!overlay) return;
@@ -971,7 +1004,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
 
   // 프롬프트 옆의 작은 E 단추(index.html 의 #eventMapTab). 없어도 Ctrl+E 는 된다.
   tabBtn = document.getElementById('eventMapTab');
-  if (tabBtn) tabBtn.addEventListener('click', toggle);
+  if (tabBtn) {
+    // 단추가 포커스를 가져가면 열린 뒤 검색 칸으로 옮겨야 한다 - 아예 안 가져가게 한다.
+    tabBtn.addEventListener('mousedown', event => event.preventDefault());
+    tabBtn.addEventListener('click', toggle);
+  }
 
   // Ctrl+E. 브라우저의 기본 동작(주소창 검색)은 막는다. Esc 는 어디에 포커스가 있든 닫되,
   // 인원 팝업이 열려 있으면 그것만 먼저 닫는다.

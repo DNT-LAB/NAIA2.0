@@ -28639,6 +28639,12 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-row:hover { background: rgba(255,255,255,0.05); }
 .em-row.is-active { background: rgba(88,76,170,0.34); }
 .em-row.is-off { opacity: 0.45; cursor: default; }
+/* 질의 중 덮개(사용자 지정 2026-09-12 밤): 머리줄 아래를 반투명 검정으로 덮어 클릭을 막는다. top 은 JS 가 머리줄 높이로. */
+.em-busy { display: none; position: absolute; left: 0; right: 0; bottom: 0; top: 33px; z-index: 6;
+  background: rgba(0,0,0,0.45); align-items: center; justify-content: center; cursor: progress; }
+.em-busy.open { display: flex; }
+.em-busy-label { font-family: var(--font-mono); font-size: 11px; color: rgba(255,255,255,0.75); padding: 4px 10px;
+  border-radius: 999px; background: rgba(15,15,23,0.8); border: 1px solid rgba(139,118,255,0.4); }
 /* 행 툴팁 - Interactive 칩 툴팁(.ia-tip)과 같은 꼴 + 오른쪽 썸네일 + 포함/제외 조합 수. 패널 위 층. */
 .em-tip {
   display: none; position: fixed; z-index: calc(var(--z-floating-module-aux) + 3);

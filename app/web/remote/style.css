@@ -28610,7 +28610,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 .em-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0 6px; }
 /* 카테고리 탭 줄 - 후보 목록 바로 위. 접힌 팝업이 목록을 가리던 것을 대신한다(사용자 지정 2026-09-12). */
-.em-cats { display: flex; flex-wrap: wrap; gap: 3px; padding: 2px 8px 5px; border-bottom: 1px solid var(--border-dim); margin-bottom: 2px; }
+/* 목록을 내려도 탭 줄은 붙어 있다(사용자 지정 2026-09-12 밤). 몸통(.em-body)이 스크롤 상자라 sticky 가 그 안에서 먹는다.
+   배경은 패널과 같은 색으로 채워야 아래 행이 비쳐 보이지 않는다. */
+.em-cats { position: sticky; top: -4px; z-index: 2; background: rgba(15,15,23,0.985); display: flex; flex-wrap: wrap; gap: 3px; padding: 6px 8px 5px; border-bottom: 1px solid var(--border-dim); margin-bottom: 2px; }
 .em-cat {
   display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 8px;
   border: 1px solid var(--border-dim); border-radius: 999px; background: transparent;

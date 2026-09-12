@@ -78,9 +78,9 @@ export function initEventMap({ insertTag, showToast } = {}) {
   let result = null;              // 마지막 explore
   let suggest = null;             // 마지막 suggest (검색 칸에 글자가 있을 때만)
   let samples = null;             // 실제 조합
-  // 프롬프트 엔지니어링 설정(Auto-Hide · Remove ...)이 지우는 태그 -> 라운드 이름. 후보와 실제 조합을
-  // 진한 회색으로 칠하고, 넣기·복사에서 뺀다(사용자 지정 2026-09-12 밤). 매 결과마다 다시 묻는다 -
-  // 패널을 열어 둔 채 설정을 바꿀 수 있다.
+  // 프롬프트 엔지니어링 설정(Auto-Hide · Remove ...)이 지우는 태그 -> 라운드 이름. **실제 조합에서만**
+  // 진한 회색으로 칠하고 넣기·복사에서 뺀다(후보 목록에도 칠했다가 되돌렸다 - 사용자 지정 2026-09-12 밤).
+  // 조합을 뽑을 때마다 다시 묻는다 - 패널을 열어 둔 채 설정을 바꿀 수 있다.
   let peHidden = new Map();
   let rows = [];                  // 키보드 이동 단위(지금 보이는 목록)
   let active = -1;
@@ -141,8 +141,6 @@ export function initEventMap({ insertTag, showToast } = {}) {
     try {
       const body = await getJson('/api/event-map/browse', { group, limit: CANDIDATE_LIMIT, ...filterParams(), groups: '' });
       if (mine !== seq) return;
-      await loadPeHidden((body.candidates || []).map(c => c.tag));
-      if (mine !== seq) return;
       browse = body;
     } catch (error) {
       if (mine !== seq) return;
@@ -164,8 +162,6 @@ export function initEventMap({ insertTag, showToast } = {}) {
       const body = await getJson('/api/event-map/explore', {
         pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, ...filterParams(),
       });
-      if (mine !== seq) return;
-      await loadPeHidden((body.candidates || []).map(c => c.tag));
       if (mine !== seq) return;
       result = body;
     } catch (error) {
@@ -203,9 +199,7 @@ export function initEventMap({ insertTag, showToast } = {}) {
         seed: Date.now() % 1000003, ...filterParams(),
       });
       if (mine !== seq) return;
-      // 후보 목록의 회색도 유지해야 하니 후보 태그까지 같이 묻는다.
-      const shown = (result?.candidates || browse?.candidates || []).map(c => c.tag);
-      await loadPeHidden([...shown, ...(body.samples || []).flatMap(s => s.tags || [])]);
+      await loadPeHidden((body.samples || []).flatMap(s => s.tags || []));
       if (mine !== seq) return;
       samples = body;
     } catch (error) {
@@ -362,9 +356,8 @@ export function initEventMap({ insertTag, showToast } = {}) {
     const liftText = lift >= 100 ? `×${Math.round(lift)}` : `×${lift.toFixed(lift >= 10 ? 0 : 1)}`;
     const obs = c.observed_estimate != null && c.observed_estimate !== c.observed
       ? `≈${fmt(c.observed_estimate)}` : fmt(c.observed);
-    const hid = peHidden.has(c.tag);
-    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}${hid ? ' is-pe-hidden' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}" role="option">
-      <span class="em-tag" title="${esc(roleLabel(c.group || 'unsorted'))}${esc(peTitle(c.tag))}">${esc(c.tag)}</span>
+    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}" role="option">
+      <span class="em-tag" title="${esc(roleLabel(c.group || 'unsorted'))}">${esc(c.tag)}</span>
       <span class="em-lift" title="핀이 있을 때 이 태그가 나올 확률이 평소의 몇 배인가">${liftText}</span>
       <span class="em-obs" title="핀과 같은 게시물에 함께 달린 수">${obs}</span>
       <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>

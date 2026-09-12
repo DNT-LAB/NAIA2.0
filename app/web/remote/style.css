@@ -28637,8 +28637,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-row:hover { background: rgba(255,255,255,0.05); }
 .em-row.is-active { background: rgba(88,76,170,0.34); }
 .em-row.is-off { opacity: 0.45; cursor: default; }
-/* 프롬프트 엔지니어링 설정이 지우는 태그 - 진한 회색(대분류 색보다 특이도가 높아 이긴다). */
-.em-row.is-pe-hidden .em-tag, .em-row.is-pe-hidden .em-lift, .em-row.is-pe-hidden .em-obs { color: #4d4b5c; }
+/* 프롬프트 엔지니어링 설정이 지우는 태그 - 실제 조합에서만 진한 회색(후보 목록은 칠하지 않는다). */
 .em-pe-hidden { color: #4d4b5c; }
 .em-tag { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 대분류(접기 표 12갈래)는 배지가 아니라 **태그 글자색**이다 - 폭 360 에서 배지가 이름을 잘라먹었다.

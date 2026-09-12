@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>이벤트 맵 시험대</title>
+<style>
+  :root {
+    --bg: #16181d; --panel: #1e2128; --line: #2c313b; --line2: #3a414e;
+    --ink: #e6e9ef; --dim: #98a1b3; --dim2: #6c7688;
+    --hot: #ffb454; --core: #7fd1b9; --state: #8fb8ff; --obj: #d3a0e8; --rel: #e0c069;
+    --bad: #ff7a7a; --adult: #ff8fa3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 13px/1.5 "Segoe UI", "Malgun Gothic", system-ui, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+           background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  header .hint { color: var(--dim2); font-size: 11px; }
+  header .meta { color: var(--dim2); font-size: 11px; margin-left: auto; }
+
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; padding: 12px; }
+  @media (max-width: 980px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .card > h2 { margin: 0; padding: 7px 10px; font-size: 11px; font-weight: 600;
+               color: var(--dim); border-bottom: 1px solid var(--line);
+               text-transform: uppercase; letter-spacing: .06em;
+               display: flex; align-items: center; gap: 8px; }
+  .card > h2 .grow { flex: 1; }
+  .card > .body { padding: 10px; }
+
+  /* 핀 · 제외 */
+  .pins { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .pin { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 9px;
+         background: #2a3140; border: 1px solid var(--line2); border-radius: 4px; }
+  .pin.ex { background: #3a2226; border-color: #6b3038; color: #ffc2c2; }
+  .pin.ex b::before { content: "− "; color: var(--bad); }
+  .pin b { font-weight: 600; }
+  .pin button { background: none; border: 0; color: var(--dim); cursor: pointer;
+                padding: 0 2px; font-size: 14px; line-height: 1; }
+  .pin button:hover { color: var(--bad); }
+  .pins .empty { color: var(--dim2); }
+  .pins .sep { width: 1px; align-self: stretch; background: var(--line2); margin: 0 4px; }
+
+  /* 검색 */
+  .seek { position: relative; }
+  .seek input { width: 100%; padding: 7px 9px; background: #14161b;
+                border: 1px solid var(--line2); border-radius: 4px; }
+  .seek input:focus { outline: 1px solid #4d6fa8; }
+  .drop { position: absolute; z-index: 9; left: 0; right: 0; top: 100%; margin-top: 3px;
+          background: #1a1d24; border: 1px solid var(--line2); border-radius: 4px;
+          max-height: 280px; overflow: auto; box-shadow: 0 8px 22px #0009; }
+  .drop div { padding: 5px 9px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  .drop div:hover, .drop div.on { background: #2a3140; }
+  .drop .n { margin-left: auto; color: var(--dim2); font-variant-numeric: tabular-nums; }
+  .drop .no { color: var(--bad); font-size: 11px; }
+
+  /* 거르개 */
+  .filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .grp { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  .grp > span { color: var(--dim2); font-size: 11px; margin-right: 2px; }
+  .tog { padding: 2px 8px; background: #14161b; border: 1px solid var(--line2);
+         border-radius: 3px; color: var(--dim); cursor: pointer; }
+  .tog.on { background: #35507c; border-color: #4d6fa8; color: #fff; }
+
+  /* 실제 조합 */
+  .roll { padding: 3px 12px; background: #35507c; border: 1px solid #4d6fa8; border-radius: 4px;
+          color: #fff; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 12px; }
+  .roll:hover { background: #41639a; }
+  .roll:disabled { opacity: .45; cursor: default; }
+  .nsel { background: #14161b; border: 1px solid var(--line2); border-radius: 3px; padding: 1px 4px;
+          text-transform: none; letter-spacing: 0; font-size: 11px; }
+  .combos { display: flex; flex-direction: column; gap: 8px; }
+  .combo { border: 1px solid var(--line); border-radius: 5px; padding: 7px 8px; background: #1a1d23; }
+  .combo.used { border-color: #4d6fa8; }
+  .combo .head { display: flex; gap: 8px; align-items: center; margin-bottom: 5px;
+                 font-size: 11px; color: var(--dim2); }
+  .combo .head .grow { flex: 1; }
+  .combo .head button { padding: 1px 8px; background: #2a3140; border: 1px solid var(--line2);
+                        border-radius: 3px; cursor: pointer; font-size: 11px; }
+  .combo .head button:hover { background: #35507c; border-color: #4d6fa8; }
+  .tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .t { padding: 0 6px; border-radius: 3px; background: #262b35; font-size: 12px; cursor: pointer;
+       border: 1px solid transparent; }
+  .t:hover { border-color: var(--line2); }
+  .t.pinned { background: #4a3a1a; color: var(--hot); }
+  .t.pop { color: var(--dim); }
+
+  /* 결과 */
+  .stat { display: flex; gap: 16px; align-items: baseline; padding: 8px 10px;
+          border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .stat b { font-size: 19px; font-variant-numeric: tabular-nums; }
+  .stat .s { color: var(--hot); font-size: 11px; }
+  .stat .t2 { color: var(--dim2); font-size: 11px; margin-left: auto; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10px; color: var(--dim2); font-weight: 600;
+       padding: 5px 8px; border-bottom: 1px solid var(--line); text-transform: uppercase; }
+  th.r, td.r { text-align: right; font-variant-numeric: tabular-nums; }
+  td { padding: 4px 8px; border-bottom: 1px solid #22262e; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #252b36; }
+  .tag { font-weight: 600; }
+  .role { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #262b35; }
+  .role.event_core { color: var(--core); } .role.actor_state { color: var(--state); }
+  .role.scene_object { color: var(--obj); } .role.scene_relation { color: var(--rel); }
+  .role.adult_act, .role.adult_body, .role.adult_object, .role.adult,
+  .role.adult_taboo, .role.adult_gore, .role.adult_dark, .role.adult_meta { color: var(--adult); }
+  .role.population { color: var(--rel); } .role.unreviewed { color: var(--dim2); }
+  .bar { height: 3px; background: var(--hot); border-radius: 2px; min-width: 1px; opacity:.75 }
+  .go { color: var(--dim2); font-size: 11px; }
+
+  .note { padding: 10px; color: var(--dim2); font-size: 11px; }
+  .err { padding: 10px; color: var(--bad); }
+
+  /* 프롬프트 */
+  .prompt { width: 100%; min-height: 120px; padding: 8px; background: #14161b;
+            border: 1px solid var(--line2); border-radius: 4px; resize: vertical;
+            font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .row { display: flex; gap: 6px; margin-top: 8px; }
+  .btn { flex: 1; padding: 6px; background: #2a3140; border: 1px solid var(--line2);
+         border-radius: 4px; cursor: pointer; }
+  .btn:hover { background: #35507c; border-color: #4d6fa8; }
+  .src { font-size: 11px; color: var(--dim2); margin-bottom: 6px; }
+  .trail { display: flex; flex-wrap: wrap; gap: 4px; }
+  .trail button { padding: 2px 7px; background: #14161b; border: 1px solid var(--line);
+                  border-radius: 3px; color: var(--dim); cursor: pointer; font-size: 11px; }
+  .trail button:hover { color: var(--ink); border-color: var(--line2); }
+  .parts { font-size: 11px; color: var(--dim); line-height: 1.7; }
+  .parts span { display: inline-block; margin-right: 10px; }
+  .parts i { color: var(--dim2); font-style: normal; }
+</style>
+</head>
+<body>
+<header>
+  <h1>이벤트 맵 시험대</h1>
+  <span class="hint">좌클릭 = 핀 · 우클릭 = 제외</span>
+  <span class="meta" id="meta">…</span>
+</header>
+
+<div class="wrap">
+  <div class="col">
+    <div class="card">
+      <h2>핀 · 제외 — 핀은 전부 포함, 제외는 하나라도 있으면 뺀다</h2>
+      <div class="body">
+        <div class="pins" id="pins"><span class="empty">아래에서 태그를 골라 시작하세요</span></div>
+        <div class="seek" style="margin-top:8px">
+          <input id="seek" placeholder="태그 이름으로 찾기 — Enter 핀 · Shift+Enter 제외" autocomplete="off">
+          <div class="drop" id="drop" hidden></div>
+        </div>
+        <div class="filters" style="margin-top:10px">
+          <div class="grp" id="ratings"><span>등급</span></div>
+          <div class="grp" id="persons"><span>인원</span></div>
+          <div class="grp" id="roles"><span>갈래</span></div>
+          <div class="grp"><span>색상</span>
+            <button class="tog" data-color>색상 태그 포함</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="grow">실제 조합 — 핀 전부를 포함하는 게시물에서 무작위로</span>
+        <select class="nsel" id="nsel">
+          <option value="1">1개</option><option value="5" selected>5개</option>
+          <option value="10">10개</option><option value="20">20개</option>
+        </select>
+        <button class="roll" id="roll" disabled>실제 조합 뽑기</button>
+      </h2>
+      <div class="body" id="combos"><span class="note" style="padding:0">핀을 꽂고 [실제 조합 뽑기] 를 누르세요</span></div>
+    </div>
+
+    <div class="card">
+      <h2>다음 후보 — 좌클릭 핀 · 우클릭 제외</h2>
+      <div class="stat" id="stat"><span class="note" style="padding:0">핀이 없습니다</span></div>
+      <div id="out"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>프롬프트</h2>
+      <div class="body">
+        <div class="src" id="src">핀</div>
+        <textarea class="prompt" id="prompt" spellcheck="false"></textarea>
+        <div class="row">
+          <button class="btn" id="copy">복사</button>
+          <button class="btn" id="clear">비우기</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>지나온 길</h2>
+      <div class="body trail" id="trail"><span class="note" style="padding:0">비어 있음</span></div>
+    </div>
+    <div class="card">
+      <h2>분면 내역 (교집합 전체 · 정확)</h2>
+      <div class="body parts" id="parts"><span class="note" style="padding:0">—</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PERSONS = [
+  ['1girl_solo','1girl 단독'], ['1girl','1girl'], ['2girls','2girls'], ['multiple_girls','여럿(여)'],
+  ['1girl_1boy','1녀1남'], ['1girl_multiple_boys','1녀 다남'], ['1boy_multiple_girls','1남 다녀'],
+  ['multiple_girls_multiple_boys','다녀 다남'],
+  ['1boy_solo','1boy 단독'], ['1boy','1boy'], ['2boys','2boys'], ['multiple_boys','여럿(남)'],
+  ['other','기타'],
+];
+// Full 판(어휘 10만)은 여기 없는 갈래가 대부분이다 - `unreviewed` 가 85,007개다.
+// 갈래 칩이 없으면 그 태그들을 걸러 볼 수가 없어 화면에서 검증이 안 된다.
+const ROLES = [['event_core','행동'], ['actor_state','상태'], ['scene_object','사물'], ['scene_relation','구도'],
+               ['population','인원'], ['unreviewed','미분류'],
+               ['adult_act','성인·행위'], ['adult_body','성인·신체'], ['adult_object','성인·사물'],
+               ['adult','성인·기타'], ['adult_taboo','성인·금기'], ['adult_gore','성인·고어'],
+               ['adult_dark','성인·다크'], ['adult_meta','성인·메타']];
+const POP = new Set(['1girl','1boy','2girls','2boys','solo','multiple girls','multiple boys']);
+
+let pins = [], excludes = [], ratings = new Set(), persons = new Set(), roles = new Set();
+let withColor = false, trail = [], seq = 0, rollSeq = 0;
+
+const $ = id => document.getElementById(id);
+const nf = n => (n ?? 0).toLocaleString('ko-KR');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function chips(host, items, set) {
+  for (const [id, label] of items) {
+    const b = document.createElement('button');
+    b.className = 'tog'; b.textContent = label;
+    b.onclick = () => { set.has(id) ? set.delete(id) : set.add(id);
+                        b.classList.toggle('on'); changed(false); };
+    host.appendChild(b);
+  }
+}
+chips($('ratings'), [['g','G'],['s','S'],['q','Q'],['e','E']], ratings);
+chips($('persons'), PERSONS, persons);
+chips($('roles'), ROLES, roles);
+document.querySelector('[data-color]').onclick = e => {
+  withColor = !withColor; e.target.classList.toggle('on'); changed(false);
+};
+
+fetch('/api/meta').then(r => r.json()).then(m => {
+  const files = (m.files || []).map(f => `${f.name} ${nf(f.mb)}MB`).join(' + ');
+  const kind = m.format === 'naiamap' ? '한 파일' : '두 파일(예전)';
+  const b = m.build || {};
+  // 어느 판인지 - 정책/거르개/연령 하한이 다른 판을 여러 개 시험한다. 머리줄에서 구별되어야 한다.
+  const build = [
+    b.policy_mode ? `정책 ${b.policy_mode}` : null,
+    b.row_guard ? `거르개 ${b.row_guard}` : null,
+    b.age_floor ? `연령하한 ${b.age_floor}` : null,
+  ].filter(Boolean).join(' · ');
+  $('meta').textContent = `${kind}: ${files} · 태그 ${nf(m.tags)} · 게시물 ${nf(m.posts)} · 분면 ${m.partitions.length}`
+    + (build ? ` · [${build}]` : '');
+  const lanes = Object.entries(b.lanes || {}).map(([k, v]) => `${k} ${nf(v)}`).join(', ');
+  $('meta').title = m.index + (lanes ? `\n갈래: ${lanes}` : '')
+    + (b.built_at ? `\n빌드: ${b.built_at}` : '')
+    + (b.source_schema ? `\n원본: ${b.source_schema}` : '');
+});
+
+function query(extra) {
+  return new URLSearchParams({
+    pins: pins.join(','), exclude: excludes.join(','),
+    ratings: [...ratings].join(','), persons: [...persons].join(','),
+    color: withColor ? '1' : '0', ...extra,
+  });
+}
+
+// ── 핀 · 제외 ──────────────────────────────────────────────────────────
+function addPin(tag) {
+  if (!tag || pins.includes(tag)) return;
+  excludes = excludes.filter(t => t !== tag);
+  pins.push(tag); changed(true);
+}
+function addExclude(tag) {
+  if (!tag || excludes.includes(tag)) return;
+  pins = pins.filter(t => t !== tag);
+  excludes.push(tag); changed(true);
+}
+function drawPins() {
+  const host = $('pins'); host.innerHTML = '';
+  if (!pins.length && !excludes.length) {
+    host.innerHTML = '<span class="empty">아래에서 태그를 골라 시작하세요</span>';
+  }
+  const chip = (tag, cls, drop) => {
+    const el = document.createElement('span');
+    el.className = 'pin' + cls;
+    el.innerHTML = `<b></b><button title="빼기">×</button>`;
+    el.querySelector('b').textContent = tag;
+    el.querySelector('button').onclick = () => { drop(); changed(true); };
+    host.appendChild(el);
+  };
+  pins.forEach((p, i) => chip(p, '', () => pins.splice(i, 1)));
+  if (pins.length && excludes.length) {
+    const s = document.createElement('span'); s.className = 'sep'; host.appendChild(s);
+  }
+  excludes.forEach((p, i) => chip(p, ' ex', () => excludes.splice(i, 1)));
+  $('roll').disabled = !pins.length;
+}
+function setPrompt(text, source) {
+  $('prompt').value = text;
+  $('src').textContent = source;
+}
+// 조건이 바뀌면 이미 뽑아 둔 조합은 새 조건과 안 맞으므로 비운다.
+function changed(record) {
+  if (record) {
+    if (pins.length) trail.push({pins: pins.slice(), excludes: excludes.slice()});
+    // 지금 보고 있는 자리를 주소에 남긴다 - `#핀,핀!제외,제외`
+    location.replace('#' + encodeURIComponent(pins.join(',')
+      + (excludes.length ? '!' + excludes.join(',') : '')));
+    drawTrail();
+  }
+  drawPins();
+  setPrompt(pins.join(', '), '핀');
+  $('combos').innerHTML = pins.length
+    ? '<span class="note" style="padding:0">조건이 바뀌었습니다 — [실제 조합 뽑기] 로 다시 뽑으세요</span>'
+    : '<span class="note" style="padding:0">핀을 꽂고 [실제 조합 뽑기] 를 누르세요</span>';
+  explore();
+}
+function drawTrail() {
+  const host = $('trail'); host.innerHTML = '';
+  if (!trail.length) { host.innerHTML = '<span class="note" style="padding:0">비어 있음</span>'; return; }
+  trail.slice(-14).reverse().forEach(step => {
+    const b = document.createElement('button');
+    b.textContent = step.pins.join(' + ') + (step.excludes.length ? '  − ' + step.excludes.join(', ') : '');
+    b.onclick = () => { pins = step.pins.slice(); excludes = step.excludes.slice(); changed(false); };
+    host.appendChild(b);
+  });
+}
+
+// ── 찾기 ──────────────────────────────────────────────────────────────
+let seekTimer = null, hits = [], cursor = -1;
+$('seek').addEventListener('input', () => {
+  clearTimeout(seekTimer);
+  seekTimer = setTimeout(runSeek, 140);
+});
+$('seek').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { $('drop').hidden = true; return; }
+  if (!hits.length || $('drop').hidden) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    cursor = Math.max(0, Math.min(hits.length - 1, cursor + (e.key === 'ArrowDown' ? 1 : -1)));
+    drawDrop();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (cursor >= 0) pickHit(hits[cursor], e.shiftKey);
+  }
+});
+async function runSeek() {
+  const q = $('seek').value.trim();
+  if (!q) { $('drop').hidden = true; hits = []; return; }
+  const r = await fetch('/api/suggest?q=' + encodeURIComponent(q)).then(x => x.json());
+  hits = r.items || []; cursor = hits.length ? 0 : -1; drawDrop();
+}
+function drawDrop() {
+  const d = $('drop'); d.innerHTML = ''; d.hidden = !hits.length;
+  hits.forEach((h, i) => {
+    const el = document.createElement('div');
+    if (i === cursor) el.className = 'on';
+    el.innerHTML = `<span class="tag"></span><span class="role ${h.role||''}"></span>`
+                 + (h.blocked ? `<span class="no"></span>` : '')
+                 + `<span class="n">${nf(h.observed)}</span>`;
+    el.querySelector('.tag').textContent = h.tag;
+    el.querySelector('.role').textContent = h.role || '';
+    if (h.blocked) el.querySelector('.no').textContent = h.blocked;
+    el.onclick = () => pickHit(h, false);
+    el.oncontextmenu = ev => { ev.preventDefault(); pickHit(h, true); };
+    d.appendChild(el);
+  });
+}
+function pickHit(hit, asExclude) {
+  if (!hit) return;
+  $('seek').value = ''; $('drop').hidden = true; hits = [];
+  asExclude ? addExclude(hit.tag) : addPin(hit.tag);
+}
+
+// ── 실제 조합 뽑기 ─────────────────────────────────────────────────────
+$('roll').onclick = async () => {
+  if (!pins.length) return;
+  const mine = ++rollSeq;
+  $('combos').innerHTML = '<span class="note" style="padding:0">뽑는 중…</span>';
+  const r = await fetch('/api/sample?' + query({n: $('nsel').value})).then(x => x.json());
+  if (mine !== rollSeq) return;
+  if (r.status === 'error') { $('combos').innerHTML = '<div class="err"></div>';
+    $('combos').querySelector('.err').textContent = r.error; return; }
+  const ss = r.samples || [];
+  if (!ss.length) {
+    $('combos').innerHTML = `<span class="note" style="padding:0">${
+      r.status === 'unknown_tag' ? '색인에 없는 태그: ' + esc((r.unknown_pins||[]).join(', '))
+                                 : '이 조건을 모두 만족하는 게시물이 없습니다'}</span>`;
+    return;
+  }
+  const pinned = new Set(pins);
+  const host = document.createElement('div'); host.className = 'combos';
+  const top = document.createElement('div');
+  top.className = 'note'; top.style.padding = '0';
+  top.textContent = `매칭 ${nf(r.observed_posts)}건 중 ${ss.length}개 · ${r.elapsed_ms} ms`
+    + ' — 게시물 하나에 실제로 함께 달린 태그입니다(색인 어휘 안에서)';
+  host.appendChild(top);
+  ss.forEach(s => {
+    const box = document.createElement('div'); box.className = 'combo';
+    box.innerHTML = `<div class="head"><span class="grow"></span>
+        <button data-use>프롬프트에 넣기</button><button data-copy>복사</button></div>
+      <div class="tags"></div>`;
+    box.querySelector('.grow').textContent = `${s.partition || ''} · 태그 ${s.tags.length}개`
+      + (s.dropped_color ? ` · 색상 ${s.dropped_color}개 뺌` : '');
+    const tags = box.querySelector('.tags');
+    s.tags.forEach(t => {
+      const el = document.createElement('span');
+      el.className = 't' + (pinned.has(t) ? ' pinned' : POP.has(t) ? ' pop' : '');
+      el.textContent = t;
+      el.title = '좌클릭 핀 · 우클릭 제외';
+      el.onclick = () => addPin(t);
+      el.oncontextmenu = ev => { ev.preventDefault(); addExclude(t); };
+      tags.appendChild(el);
+    });
+    box.querySelector('[data-use]').onclick = () => {
+      host.querySelectorAll('.combo.used').forEach(b => b.classList.remove('used'));
+      box.classList.add('used');
+      setPrompt(s.prompt, `실제 조합 (${s.partition || ''})`);
+    };
+    box.querySelector('[data-copy]').onclick = async ev => {
+      await navigator.clipboard.writeText(s.prompt);
+      ev.target.textContent = '복사됨'; setTimeout(() => ev.target.textContent = '복사', 900);
+    };
+    host.appendChild(box);
+  });
+  $('combos').innerHTML = ''; $('combos').appendChild(host);
+};
+
+// ── 탐색 ──────────────────────────────────────────────────────────────
+async function explore() {
+  const mine = ++seq;
+  if (!pins.length) {
+    $('stat').innerHTML = '<span class="note" style="padding:0">핀이 없습니다</span>';
+    $('out').innerHTML = ''; $('parts').innerHTML = '<span class="note" style="padding:0">—</span>';
+    return;
+  }
+  $('stat').innerHTML = '<span class="note" style="padding:0">세는 중…</span>';
+  const r = await fetch('/api/explore?' + query({roles: [...roles].join(','), limit: '40'}))
+                  .then(x => x.json());
+  if (mine !== seq) return;                 // 늦게 온 답은 버린다
+  if (r.status === 'error') { $('out').innerHTML = `<div class="err"></div>`;
+    $('out').querySelector('.err').textContent = r.error; return; }
+
+  $('stat').innerHTML =
+      `<span><i style="color:var(--dim2);font-style:normal">관측</i> <b>${nf(r.observed_posts)}</b> 건</span>`
+    + (r.sampled ? `<span class="s">순위는 ${nf(r.scanned_posts)}건 표본 · 관측 수는 정확</span>` : '')
+    + (r.status === 'unknown_tag' ? `<span class="s">색인에 없는 태그: ${esc((r.unknown_pins||[]).join(', '))}</span>` : '')
+    + ((r.unknown_exclude||[]).length ? `<span class="s">색인에 없는 제외 태그(무시): ${esc(r.unknown_exclude.join(', '))}</span>` : '')
+    + `<span class="t2">${r.elapsed_ms ?? '?'} ms · 후보 ${nf(r.candidate_pool || 0)}개 중 ${(r.candidates||[]).length}개</span>`;
+
+  const cs = r.candidates || [];
+  if (!cs.length) {
+    $('out').innerHTML = '<div class="note">여기서 더 갈라지는 후보가 없습니다. 핀을 하나 빼 보세요.</div>';
+  } else {
+    const top = cs[0].score || 1;
+    const rows = cs.map(c => `<tr>
+        <td><span class="tag"></span></td>
+        <td><span class="role ${c.role||''}"></span></td>
+        <td class="r go">→ ${nf(c.observed_estimate ?? c.observed)}건</td>
+        <td class="r">${(c.share*100).toFixed(1)}%</td>
+        <td class="r">${c.lift.toFixed(1)}</td>
+        <td style="width:90px"><div class="bar" style="width:${Math.max(2, 100*(c.score/top))}%"></div></td>
+      </tr>`).join('');
+    $('out').innerHTML = `<table><thead><tr>
+        <th>태그</th><th>갈래</th><th class="r">누르면</th>
+        <th class="r">비중</th><th class="r">lift</th><th>점수</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    $('out').querySelectorAll('tbody tr').forEach((tr, i) => {
+      tr.querySelector('.tag').textContent = cs[i].tag;
+      tr.querySelector('.role').textContent = cs[i].role || '';
+      tr.onclick = () => addPin(cs[i].tag);
+      tr.oncontextmenu = ev => { ev.preventDefault(); addExclude(cs[i].tag); };
+    });
+  }
+
+  const parts = r.counts_by_partition || [];
+  $('parts').innerHTML = parts.length
+    ? parts.slice(0, 12).map(p => `<span><i>${p.partition}</i> ${nf(p.posts)}</span>`).join('')
+    : '<span class="note" style="padding:0">—</span>';
+}
+
+// ── 프롬프트 ──────────────────────────────────────────────────────────
+$('copy').onclick = async () => {
+  await navigator.clipboard.writeText($('prompt').value);
+  $('copy').textContent = '복사됨'; setTimeout(() => $('copy').textContent = '복사', 900);
+};
+$('clear').onclick = () => { pins = []; excludes = []; changed(true); };
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.seek')) $('drop').hidden = true;
+});
+
+// 주소에 핀이 실려 있으면 그 자리에서 시작한다: #armpits,arms%20up!sleeveless
+{
+  const raw = decodeURIComponent(location.hash.slice(1));
+  const [p = '', x = ''] = raw.split('!');
+  const split = s => s.split(',').map(t => t.trim()).filter(Boolean);
+  pins = split(p); excludes = split(x);
+  changed(false);
+}
+</script>
+</body>
+</html>

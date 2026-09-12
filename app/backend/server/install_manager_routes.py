@@ -71,7 +71,7 @@ def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
         }
     sanitized.pop("samples", None)
     # 아카이브가 늘어날 때 여기를 빠뜨리면 절대 경로가 원격으로 샌다.
-    for key in ("tag_archive", "corpus_archive"):
+    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map"):
         archive = sanitized.get(key)
         if isinstance(archive, dict):
             archive = dict(archive)
@@ -102,10 +102,18 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
 
             invalidate_event_corpus_service(context)
 
+        def refresh_event_map_state() -> None:
+            # 색인이 방금 제자리에 놓였다. 서비스는 "없다" 를 캐시하고 있으므로 버려야
+            # 재시작 없이 Ctrl+E 가 연다.
+            from app.backend.server.event_map_routes import invalidate_event_map_service
+
+            invalidate_event_map_service(context)
+
         service = RuntimeInstallManager(
             runtime_paths,
             on_tag_archive_complete=refresh_tag_state,
             on_corpus_archive_complete=refresh_corpus_state,
+            on_event_map_complete=refresh_event_map_state,
         )
         context.runtime_install_manager = service
     return service
@@ -197,6 +205,33 @@ def register_install_manager_routes(
             return await run_in_thread(manager.snapshot)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Corpus archive download cancel failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/event-map/download")
+    async def api_install_manager_event_map_download(req: Request):
+        """이벤트 맵 색인(약 880MB, 파일 하나)을 받는다. Ctrl+E 패널이 부른다.
+
+        ⚠️ 다운로더는 단일 비행이다 - 태그 데이터를 받는 중이면 그 진행 상태가 그대로
+           돌아온다(`phase` 로 구분한다). 새 다운로드를 끼워 넣지 않는다.
+        """
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.start_event_map_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Event map download failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/event-map/download/cancel")
+    async def api_install_manager_event_map_download_cancel(req: Request):
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.cancel_archive_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Event map download cancel failed: {exc}"}, status_code=500)
 
     @app.post("/api/install-manager/tag-archive/download/cancel")
     async def api_install_manager_tag_archive_download_cancel(req: Request):

@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Any, Callable
+import os
+import shutil
 import ssl
 import time
 import urllib.error
@@ -45,6 +47,21 @@ CORPUS_ARCHIVE_URL = (
     "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/naia-tag-events.zip"
 )
 
+# 이벤트 맵 색인(Ctrl+E). 다른 셋과 달리 **zip 이 아니라 파일 하나**다 - 자체 포맷이 이미
+# 촘촘한 uint32 본문이라 압축이 거의 안 먹고(≈0.52 는 옛 v2 기준), 880MB 를 한 번 더
+# 풀어 쓰는 동안 디스크에 두 벌이 놓인다. 그래서 받은 파일을 그대로 제자리에 놓는다.
+#
+# ⚠️ 같은 URL 에 **다른 내용을 덮어 올리면 안 된다.** 다운로더가 Range 로 이어받으므로
+#    중간까지 받아 둔 사용자의 임시 파일이 조용히 깨진다. 판이 바뀌면 파일 이름을 바꾼다.
+# 현재 올려 둔 것 = `full-min5-20260912`(921,765,311 바이트, min_posts=5).
+EVENT_MAP_INDEX_URL = (
+    "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/2026/"
+    "NAIA_event_map_260912.naiamap"
+)
+EVENT_MAP_INDEX_NAME = "event_map.naiamap"
+# 시작 전 고지용 근사치(실제 크기는 응답의 Content-Length 가 준다).
+EVENT_MAP_INDEX_APPROX_MB = 879
+
 
 @dataclass(frozen=True)
 class ArchiveSpec:
@@ -64,6 +81,8 @@ class ArchiveSpec:
     expected_count: int = 0
     required_names: tuple[str, ...] = ()       # 반드시 존재해야 하는 파일명
     min_count: int = 1
+    # 압축이 아니라 파일 하나를 그대로 놓는 아카이브면 그 **최종 파일명**. 비어 있으면 zip 이다.
+    raw_name: str = ""
 
 
 # ⚠️ 이 목록과 taglist/*.json 은 **앱 소유 사전**이다. 앱 어디에서도 쓰지 않는
@@ -197,6 +216,8 @@ class RuntimeInstallManager:
         tag_increment_archive_url: str = TAG_INCREMENT_ARCHIVE_URL,
         corpus_archive_url: str = CORPUS_ARCHIVE_URL,
         on_corpus_archive_complete: Callable[[], None] | None = None,
+        event_map_url: str = EVENT_MAP_INDEX_URL,
+        on_event_map_complete: Callable[[], None] | None = None,
     ):
         self.runtime_paths = runtime_paths
         self.tag_archive_url = tag_archive_url
@@ -205,6 +226,8 @@ class RuntimeInstallManager:
         self.tag_increment_archive_url = tag_increment_archive_url
         self.corpus_archive_url = corpus_archive_url
         self._on_corpus_archive_complete = on_corpus_archive_complete
+        self.event_map_url = event_map_url
+        self._on_event_map_complete = on_event_map_complete
         self._specs: dict[str, ArchiveSpec] = {
             "tag_archive": ArchiveSpec(
                 key="tag_archive",
@@ -240,6 +263,20 @@ class RuntimeInstallManager:
                 required_names=("metadata.tgpm",),
                 min_count=1,
             ),
+            # 이벤트 맵 색인. 서비스가 찾는 자리(`<user-data>/data/event_map/event_map.naiamap`)와
+            # 같은 곳에 놓으므로 받자마자 Ctrl+E 가 연다(완료 훅이 캐시를 버린다).
+            "event_map": ArchiveSpec(
+                key="event_map",
+                url=event_map_url,
+                subdir="event_map",
+                suffixes=(".naiamap",),
+                label="이벤트 맵 색인",
+                temp_name="naia_event_map.naiamap.download_tmp",
+                count_glob="*.naiamap",
+                required_names=(EVENT_MAP_INDEX_NAME,),
+                min_count=1,
+                raw_name=EVENT_MAP_INDEX_NAME,
+            ),
         }
         self._completion_hooks: dict[str, Callable[[], None] | None] = {
             "tag_archive": on_tag_archive_complete,
@@ -247,6 +284,7 @@ class RuntimeInstallManager:
             # 같고, 검색·자동완성이 목록을 다시 잡아야 한다.
             "tag_archive_increment": on_tag_archive_complete,
             "corpus_archive": on_corpus_archive_complete,
+            "event_map": on_event_map_complete,
         }
         self._lock = RLock()
         self._cancel = Event()
@@ -355,6 +393,10 @@ class RuntimeInstallManager:
                 "base_ready": ready,
             },
             "corpus_archive": self._archive_snapshot(self._spec("corpus_archive"), download),
+            "event_map": {
+                **self._archive_snapshot(self._spec("event_map"), download),
+                "approx_mb": EVENT_MAP_INDEX_APPROX_MB,
+            },
             "samples": {
                 "app_data_template": str(self.runtime_paths.resource_path("app_data_template")),
                 "release_samples": str(self.runtime_paths.resource_path("release_assets/samples")),
@@ -382,6 +424,9 @@ class RuntimeInstallManager:
 
     def start_corpus_archive_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("corpus_archive", blocking=blocking)
+
+    def start_event_map_download(self, *, blocking: bool = False) -> dict[str, Any]:
+        return self.start_archive_download("event_map", blocking=blocking)
 
     def start_archive_download(self, key: str, *, blocking: bool = False) -> dict[str, Any]:
         """아카이브 **하나**를 받는다. 여러 개를 이어 받으려면 `start_archive_chain`."""
@@ -516,7 +561,8 @@ class RuntimeInstallManager:
             self.runtime_paths.ensure_writable_dirs()
             target.mkdir(parents=True, exist_ok=True)
             self._download_archive(spec, temp_zip)
-            extracted = self._extract_archive(spec, temp_zip)
+            extracted = (self._install_raw_file(spec, temp_zip) if spec.raw_name
+                         else self._extract_archive(spec, temp_zip))
             if spec.expected_count and extracted < spec.expected_count:
                 raise ValueError(
                     f"{spec.label} 파일이 부족합니다 ({extracted}/{spec.expected_count})"
@@ -562,7 +608,7 @@ class RuntimeInstallManager:
 
         for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
             if self._cancel.is_set():
-                raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
+                raise InterruptedError(f"{spec.label} 다운로드가 취소되었습니다.")
             headers = {"User-Agent": "NAIA/2.0.43 RuntimeInstallManager"}
             if downloaded > 0:
                 headers["Range"] = f"bytes={downloaded}-"
@@ -621,12 +667,13 @@ class RuntimeInstallManager:
                     break
                 # 취소에 즉시 반응해야 하므로 sleep 대신 이벤트 대기를 쓴다.
                 if self._cancel.wait(min(_DOWNLOAD_BACKOFF_CAP, 2 ** (attempt - 1))):
-                    raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
+                    raise InterruptedError(f"{spec.label} 다운로드가 취소되었습니다.")
 
         if last_error is not None:
             raise last_error
-        if not temp_zip.exists() or temp_zip.stat().st_size < 1024:
-            raise ValueError(f"다운로드된 {spec.label} ZIP 파일이 너무 작습니다.")
+        minimum = 1024 * 1024 if spec.raw_name else 1024
+        if not temp_zip.exists() or temp_zip.stat().st_size < minimum:
+            raise ValueError(f"다운로드된 {spec.label} 파일이 너무 작습니다.")
 
     def _stream_to_file(self, spec: ArchiveSpec, response: Any, temp_zip: Path,
                         mode: str, downloaded: int, total_size: int) -> int:
@@ -636,7 +683,7 @@ class RuntimeInstallManager:
         with temp_zip.open(mode) as output:
             while True:
                 if self._cancel.is_set():
-                    raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
+                    raise InterruptedError(f"{spec.label} 다운로드가 취소되었습니다.")
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break
@@ -658,6 +705,30 @@ class RuntimeInstallManager:
                     last_update = now
         return downloaded
 
+    def _install_raw_file(self, spec: ArchiveSpec, temp_file: Path) -> int:
+        """압축이 아닌 아카이브 - 받은 파일 하나를 그대로 제자리에 놓는다.
+
+        ⚠️ 목표 이름으로 **바로** 옮기면 안 된다. 옮기는 도중에 서비스가 열면 반쪽 색인을
+           연다. `.install_tmp` 로 옮긴 뒤 같은 폴더 안에서 rename(원자적) 한다.
+        ⚠️ 이름은 spec 이 정한다(서버가 준 Content-Disposition 을 쓰지 않는다) - 응답이
+           경로를 끼워 넣어도 다른 곳에 쓰지 못한다.
+        """
+        name = spec.raw_name
+        if not name.endswith(spec.suffixes) or Path(name).name != name:
+            raise ValueError(f"안전하지 않은 {spec.label} 파일명입니다: {name}")
+        self._set_state(percent=92, message=f"{spec.label} 설치 중...")
+        target = self._archive_dir(spec) / name
+        staging = target.with_name(target.name + ".install_tmp")
+        try:
+            staging.unlink(missing_ok=True)
+        except Exception:
+            pass
+        # downloads_dir 와 data_dir 가 다른 볼륨일 수 있다(사용자가 user-data 를 옮긴 경우).
+        shutil.move(str(temp_file), str(staging))
+        os.replace(staging, target)
+        self._set_state(percent=99, message=f"{spec.label} 설치 중... 1/1")
+        return 1
+
     def _extract_archive(self, spec: ArchiveSpec, temp_zip: Path) -> int:
         self._set_state(percent=90, message=f"{spec.label} 압축 해제 중...")
         extracted = 0
@@ -673,7 +744,7 @@ class RuntimeInstallManager:
                 )
             for index, info in enumerate(members, 1):
                 if self._cancel.is_set():
-                    raise InterruptedError("태그 데이터 설치가 취소되었습니다.")
+                    raise InterruptedError(f"{spec.label} 설치가 취소되었습니다.")
                 filename = Path(info.filename).name
                 # basename 평탄화 + 확장자 화이트리스트 = path traversal 차단.
                 if not filename or filename in seen_names or not filename.endswith(spec.suffixes):
@@ -714,6 +785,9 @@ class RuntimeInstallManager:
 
 __all__ = [
     "BOOTSTRAP_DATA_FILES",
+    "EVENT_MAP_INDEX_APPROX_MB",
+    "EVENT_MAP_INDEX_NAME",
+    "EVENT_MAP_INDEX_URL",
     "BOOTSTRAP_TAGLIST_GLOB",
     "RuntimeInstallManager",
     "TAG_ARCHIVE_EXPECTED_COUNT",

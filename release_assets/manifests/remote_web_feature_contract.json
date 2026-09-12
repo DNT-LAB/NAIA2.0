@@ -121,7 +121,9 @@
         {"method": "POST", "path": "/api/install-manager/tag-archive/download/cancel", "smoke": "state_mutation"},
       {"method": "POST", "path": "/api/install-manager/tag-archive-increment/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/corpus-archive/download", "smoke": "asset_runtime"},
-        {"method": "POST", "path": "/api/install-manager/corpus-archive/download/cancel", "smoke": "state_mutation"}
+        {"method": "POST", "path": "/api/install-manager/corpus-archive/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/install-manager/event-map/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/install-manager/event-map/download/cancel", "smoke": "state_mutation"}
       ]
     },
     {
@@ -804,10 +806,10 @@
     },
     {
       "feature": "event_map",
-      "description": "Optional event map index built by tools/build_event_map_index.py and placed under the user data root. Absent by default: GET /api/event-map/state reports state=missing and the query routes answer 503 unavailable. NAIA_EVENT_MAP_INDEX overrides the path for development.",
+      "description": "Optional event map index (single 879MB .naiamap file, not a zip) downloaded on demand by the install manager into the user data root; also buildable with tools/build_event_map_index.py. Absent by default: GET /api/event-map/state reports state=missing plus an install block describing the download, state=downloading while it runs, and the query routes answer 503 unavailable. NAIA_EVENT_MAP_INDEX overrides the path for development.",
       "paths": ["<user-data>/data/event_map/event_map.naiamap"],
-      "provisioning": "runtime_generated",
-      "provisioned_by": "tool: tools/build_event_map_index.py"
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/event-map/download"
     },
     {
       "feature": "ollama_chat",

@@ -19,9 +19,11 @@
     GET /api/event-map/sample?pins=       핀을 포함하는 **실제 게시물**의 태그 조합
     GET /api/event-map/describe?tag=      그 태그가 맵에서 어떻게 다뤄지나
 
-색인은 별도 파일(744MB~1.4GB)이고 기본 배포에 없다. **없는 것은 고장이 아니다** -
+색인은 별도 파일(880MB~1.4GB)이고 기본 배포에 없다. **없는 것은 고장이 아니다** -
 `/state` 가 `state: missing` 과 찾아본 경로를 돌려주고, 나머지 라우트는 503 + `code`
-`unavailable` 을 준다. 화면은 그때 내려받기를 안내해야 한다.
+`unavailable` 을 준다. 내려받기는 **설치 관리자**가 한다(`POST /api/install-manager/event-map/download`,
+루프백 전용) - `/state` 는 그 진행 상황을 `install` 에 실어 주고, 받는 중이면 `state: downloading`
+이 된다. 이 라우트는 다운로드를 **시작하지 않는다**(GET 이 부작용을 내면 안 된다).
 
 무거운 질의(교집합 + 집계)는 `run_in_thread` 로 넘긴다 - 이벤트 루프를 막지 않는다.
 """
@@ -48,6 +50,36 @@ STATUS_BY_CODE = {"unavailable": 503, "internal_error": 500}
 
 def _no_store() -> dict[str, str]:
     return {"Cache-Control": "no-store, max-age=0"}
+
+def _install_view(context: WebSessionContext, can_start: bool) -> dict[str, Any]:
+    """색인 다운로드 상황. 설치 관리자를 못 잡아도 /state 는 절대 실패하지 않는다.
+
+    ⚠️ 다운로더는 **단일 비행**이다. 태그 아카이브를 받는 중이면 색인은 시작도 못 한다 -
+       그 경우를 `busy_other` 로 구분해 준다("다른 다운로드가 끝나야 합니다").
+    """
+    try:
+        from app.backend.server.install_manager_routes import runtime_install_manager
+
+        snapshot = runtime_install_manager(context).snapshot()
+    except Exception:
+        return {}
+    archive = snapshot.get("event_map")
+    if not isinstance(archive, dict):
+        return {}
+    download = dict(archive.get("download") or {})
+    running = bool(download.get("active"))
+    mine = running and str(download.get("phase") or "") == "event_map"
+    return {
+        "ready": bool(archive.get("ready")),
+        "downloadable": bool(archive.get("downloadable")),
+        "approx_mb": archive.get("approx_mb"),
+        "label": archive.get("label"),
+        "active": mine,
+        "busy_other": running and not mine,
+        # 루프백에서만 시작할 수 있다 - 폰으로 열었으면 "PC 에서 받으세요" 를 띄워야 한다.
+        "can_start": bool(can_start),
+        "download": download,
+    }
 
 
 def ensure_event_map_service(context: WebSessionContext) -> EventMapService:
@@ -155,10 +187,22 @@ def register_event_map_routes(
             raise MapQueryError("internal_error", str(exc)) from exc
 
     @app.get("/api/event-map/state")
-    async def api_event_map_state():
-        """절대 실패하지 않는다. 색인이 없으면 `state: missing` + 찾아본 경로."""
+    async def api_event_map_state(req: Request):
+        """절대 실패하지 않는다. 색인이 없으면 `state: missing` + 찾아본 경로.
+
+        색인이 준비되지 않았을 때만 `install`(다운로드 진행/가능 여부)을 얹는다. 받는 중이면
+        `state` 를 `downloading` 으로 바꿔 화면이 검색 대신 진행 막대를 그리게 한다.
+        """
+        from app.backend.server.install_manager_routes import _is_local_request
+
         service = ensure_event_map_service(session_context)
         payload = await run_in_thread(service.status)
+        if payload.get("state") != "ready":
+            install = await run_in_thread(_install_view, session_context, _is_local_request(req))
+            if install:
+                payload["install"] = install
+                if install.get("active"):
+                    payload["state"] = "downloading"
         return JSONResponse(payload, headers=_no_store())
 
     @app.get("/api/event-map/suggest")

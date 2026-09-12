@@ -54,12 +54,19 @@ function loadPrefs() {
     if (!raw || typeof raw !== 'object') return null;
     const persons = Array.isArray(raw.persons) ? raw.persons.filter(id => PERSON_IDS.includes(id)) : [];
     const ratings = Array.isArray(raw.ratings) ? raw.ratings.filter(id => RATING_OPTIONS.some(r => r.id === id)) : [];
-    return { persons: persons.length ? persons : null, ratings: ratings.length ? ratings : null };
+    const sort = SORT_MODES.some(m => m.id === raw.sort) ? raw.sort : null;
+    return { persons: persons.length ? persons : null, ratings: ratings.length ? ratings : null, sort };
   } catch { return null; }
 }
-function savePrefs(persons, ratings) {
-  try { localStorage.setItem(PREF_KEY, JSON.stringify({ persons: [...persons], ratings: [...ratings] })); } catch { /* 저장 못 해도 동작한다 */ }
+function savePrefs(persons, ratings, sort) {
+  try { localStorage.setItem(PREF_KEY, JSON.stringify({ persons: [...persons], ratings: [...ratings], sort })); } catch { /* 저장 못 해도 동작한다 */ }
 }
+// 후보 정렬(사용자 지정 2026-09-12 밤). 서버가 세운다 - 상위 40 만 내려오므로 화면에서 다시 세우면 안 된다.
+const SORT_MODES = [
+  { id: 'lift', label: 'lift 순', title: '핀이 있을 때 평소보다 몇 배 자주 나오나(관측/(기댓값+3)). 핀이 흔하면 희귀 태그가 위로 온다' },
+  { id: 'posts', label: 'post 순', title: '핀과 함께 달린 게시물 수. 흔한 태그가 위로 온다' },
+  { id: 'mix', label: 'mix 순', title: '관측 × ln(lift) - 많이 나오면서 치우친 것(G² 기여분). 둘의 절충' },
+];
 
 export function initEventMap({ insertTag, showToast, getPromptText, generateNow } = {}) {
   let overlay = null, input = null, statusEl = null, trailEl = null, bodyEl = null;
@@ -72,6 +79,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
+  let sortMode = prefs?.sort || 'lift';
   let roles = new Set();          // 대분류 필터(갈래 id). 비면 전부
   let group = '';                 // 첫 화면에서 고른 대분류(핀이 없을 때만 뜻이 있다)
   let browse = null;              // 마지막 browse 결과
@@ -187,7 +195,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     setBusy(true);
     try {
       const body = await getJson('/api/event-map/explore', {
-        pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, ...filterParams(),
+        pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, sort: sortMode, ...filterParams(),
       });
       if (mine !== seq) return;
       result = body;
@@ -672,7 +680,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         rows = cs.map(c => c.tag);
         const gc = result.group_counts || null;   // 옛 백엔드(재시작 전)는 이 키가 없다 - 그래도 탭은 그린다
         html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + r.count, 0) : null);
-        html += `<div class="em-cap">함께 달린 태그 <span class="em-note">lift 순 · ${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}</span></div>`;
+        const sm = SORT_MODES.find(m => m.id === sortMode) || SORT_MODES[0];
+        html += `<div class="em-cap">함께 달린 태그 <button type="button" class="em-sort" data-em-sort title="${esc(sm.title)} · 눌러서 바꾸기">${esc(sm.label)} ▾</button><span class="em-note">${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}</span></div>`;
         html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">5건 이상 함께 달린 태그가 없습니다.</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);
@@ -716,7 +725,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       }
       personPopup.innerHTML = personPopupHtml();
       paintPersonButton();
-      savePrefs(persons, ratings);
+      savePrefs(persons, ratings, sortMode);
       void explore();
     });
     return personPopup;
@@ -833,7 +842,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         const id = pill.dataset.emR;
         if (ratings.has(id) && ratings.size === 1) return;      // 최소 하나는 남긴다
         if (ratings.has(id)) ratings.delete(id); else ratings.add(id);
-        savePrefs(persons, ratings);
+        savePrefs(persons, ratings, sortMode);
         void explore(); return;
       }
     });
@@ -849,6 +858,14 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); return; }
       const gb = t.closest('[data-em-group]');
       if (gb) { pickGroup(gb.dataset.emGroup); return; }
+      const sb = t.closest('[data-em-sort]');
+      if (sb) {
+        const i = SORT_MODES.findIndex(m => m.id === sortMode);
+        sortMode = SORT_MODES[(i + 1) % SORT_MODES.length].id;
+        savePrefs(persons, ratings, sortMode);
+        void explore();
+        return;
+      }
       const cat = t.closest('[data-em-cat]');
       if (cat) {
         const id = cat.dataset.emCat;

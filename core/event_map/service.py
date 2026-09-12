@@ -42,7 +42,7 @@ from typing import Any, Callable, Iterable, Sequence
 import numpy as np
 
 from core.event_map import categories as C
-from core.event_map.index import (
+from core.event_map.index import (SORT_MODES, 
     MAX_EXCLUDE, MAX_PINS, MAX_SAMPLES, SCAN_CAP, EventMapIndex)
 
 # 대분류 재료. `data/KR_tags.parquet` 의 category 를 접기 표로 접는다(사용자 결정 2026-09-12).
@@ -435,11 +435,14 @@ class EventMapService:
     # (tools/event_map_playground.py)가 연구용으로만 쓴다 - 여기서는 켤 길을 두지 않는다.
     def explore(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                 persons: Any = None, roles: Any = None, groups: Any = None,
-                limit: Any = DEFAULT_CANDIDATES) -> dict[str, Any]:
+                limit: Any = DEFAULT_CANDIDATES, sort: Any = "lift") -> dict[str, Any]:
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
         if not wanted:
             raise MapQueryError("no_pins", "핀이 하나는 있어야 한다.")
+        sort_mode = str(sort or "lift").strip().lower() or "lift"
+        if sort_mode not in SORT_MODES:
+            raise MapQueryError("bad_sort", "정렬은 %s 중 하나다." % "/".join(SORT_MODES), allowed=list(SORT_MODES))
         excluded = self._tags(exclude, cap=MAX_EXCLUDE, what="제외 태그",
                               code="too_many_exclude")
         want_r, want_p = self._filters(idx, ratings, persons)
@@ -450,7 +453,7 @@ class EventMapService:
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
                 roles=want_roles or None, allowed=self.group_mask(want_groups),
                 limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES),
-                include_color=False)
+                include_color=False, sort=sort_mode)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         self._attach_groups(result.get("candidates") or [], result)

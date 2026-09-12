@@ -28630,6 +28630,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: var(--text-dim); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.6px; text-transform: uppercase;
 }
 .em-note { text-transform: none; letter-spacing: 0; color: var(--text-muted); font-size: 9.5px; }
+/* 정렬 토글(사용자 지정 2026-09-12 밤) - 머리줄 안의 작은 단추. 누를 때마다 lift → post → mix. */
+.em-sort { margin: 0 6px 0 4px; padding: 0 6px; height: 16px; border: 1px solid var(--border-dim); border-radius: 4px;
+  background: transparent; color: #e6a84a; font-family: var(--font-mono); font-size: 9.5px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.em-sort:hover { border-color: rgba(230,168,74,0.6); }
 .em-mini { margin-left: auto; border: 1px solid var(--border-dim); border-radius: 4px; background: transparent; color: var(--text-dim);
   font-size: 11px; line-height: 1; padding: 1px 5px; cursor: pointer; }
 .em-row {

@@ -62,6 +62,7 @@ SCAN_CAP = 120_000
 #    태그는 PRIOR 가 묻혀 원래 lift 그대로다.
 #    ⚠️ 화면에 보여 주는 `lift` 는 **날 lift 그대로**다 - 그게 사용자가 읽는 값이고,
 #       줄 세우기에만 눌린 점수를 쓴다. 둘을 같은 이름으로 합치지 말 것.
+SORT_MODES = ("lift", "posts", "mix")   # explore 후보 정렬(사용자 지정 2026-09-12 밤)
 RANK_PRIOR = 3.0
 
 
@@ -263,6 +264,8 @@ class EventMapIndex:
         self.obs_arr = np.array([self.observed[t] for t in range(size)], dtype=np.int64)
         self.usable_arr = np.array([self.eligible[t] for t in range(size)], dtype=bool)
         self.color_arr = np.array([self.color[t] for t in range(size)], dtype=bool)
+        # 인원 태그(1girl·solo ...)는 핀이 아니라 분면 필터다 - explore 후보에서 뺀다(post/mix 정렬에서 맨 위를 차지했다).
+        self.population_arr = np.array([self.role.get(t) == "population" for t in range(size)], dtype=bool)
 
     def tag_rows(self) -> list:
         """태그표를 `.naiamap` 의 tags 구역 모양으로 돌려준다(변환 도구가 쓴다)."""
@@ -456,10 +459,14 @@ class EventMapIndex:
         return out
 
     def _rank(self, counts, keep, base, matched, sampled, limit, prior,
-              support_weighted: bool = False) -> list[dict]:
+              support_weighted: bool = False, sort: str = "lift") -> list[dict]:
         """explore/browse 공통 줄 세우기. lift 는 언제나 날 값으로 보인다.
 
-        explore : `관측/(기댓값+PRIOR)` - 핀 교집합 안에서 **치우친** 것.
+        explore : `sort` 로 고른다(사용자 지정 2026-09-12 밤).
+            lift  `관측/(기댓값+PRIOR)` - 핀 교집합 안에서 **치우친** 것. 핀이 흔하면(breasts) 희귀 태그가 위.
+            posts `관측` - 많이 함께 달린 순. 흔한 태그가 위.
+            mix   `관측 × ln(lift)` - G² 통계량의 태그별 기여분. 지지도와 치우침을 곱으로 절충한다.
+                  lift ≤ 1 은 0 이하라 맨 뒤로 간다.
         browse  : `관측 × lift` - 분면 안에서 **많이 나오면서** 치우친 것(첫 화면용).
         """
         total = self.total_posts or 1
@@ -469,7 +476,14 @@ class EventMapIndex:
         share_arr = seen_arr / base
         expected_arr = base * global_arr / total
         lift_arr = share_arr / (global_arr / total)
-        score_arr = seen_arr * lift_arr if support_weighted else seen_arr / (expected_arr + prior)
+        if support_weighted:
+            score_arr = seen_arr * lift_arr
+        elif sort == "posts":
+            score_arr = seen_arr
+        elif sort == "mix":
+            score_arr = seen_arr * np.log(np.maximum(lift_arr, 1e-9))
+        else:
+            score_arr = seen_arr / (expected_arr + prior)
         rows = sorted(zip(score_arr.tolist(), lift_arr.tolist(), share_arr.tolist(),
                           counts[picked].tolist(), picked.tolist()), reverse=True)
         factor = (matched / base) if base else 1.0
@@ -484,7 +498,7 @@ class EventMapIndex:
 
     def explore(self, pins, *, exclude=None, ratings=None, persons=None, limit=24,
                 min_posts=5, include_color=False, roles=None, allowed=None,
-                scan_cap=SCAN_CAP, prior=RANK_PRIOR) -> dict:
+                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift") -> dict:
         """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다."""
         started = time.perf_counter()
         if not isinstance(pins, (list, tuple)) or not 1 <= len(pins) <= MAX_PINS:
@@ -548,6 +562,7 @@ class EventMapIndex:
         keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0)
         if not include_color:
             keep &= ~self.color_arr
+        keep &= ~self.population_arr      # 인원은 분면 필터 - 후보로 내지 않는다
         keep[[t for t in wanted + excluded]] = False
         if roles:
             roles = set(roles)
@@ -562,7 +577,10 @@ class EventMapIndex:
 
         # 표본을 떴으면 `observed` 는 **표본 안에서 센 수**다. 화면이 곱셈을 잘못하는 일이
         # 없도록 교집합 전체로 환산한 추정치를 따로 실어 보낸다(표본이 아니면 같은 값).
-        out["candidates"] = self._rank(counts, keep, base, rids.size, sampled, limit, prior)
+        if sort not in SORT_MODES:
+            raise ValueError("정렬은 %s 중 하나다" % "/".join(SORT_MODES))
+        out["sort"] = sort
+        out["candidates"] = self._rank(counts, keep, base, rids.size, sampled, limit, prior, sort=sort)
         out["candidate_pool"] = int(keep.sum())
         out["status"] = "matched"
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)

@@ -902,6 +902,11 @@
                접힌다(사용자 지정 2026-08-26: "하단에 컨트롤 패널이 있는게 불편"). -->
           <div class="inpaint-canvas-panel" id="inpaintCanvasPanel" hidden></div>
           <div class="frozen-wc-bar" id="frozenWcBar" aria-label="고정된 와일드카드" hidden></div>
+          <!-- 이벤트 맵(Ctrl+E). 결과 이미지 plane 의 **왼쪽 가장자리**에 붙는 반구 단추
+               (사용자 지정 2026-09-12: 프롬프트 칸이 아니라 Result 쪽으로, 둥근 면이 안쪽).
+               눌린 상태(aria-pressed)는 js/features/eventMapPanel.mjs 가 관리한다. -->
+          <button type="button" class="em-tab" id="eventMapTab" aria-pressed="false" aria-label="이벤트 맵 (Ctrl+E)"
+                  data-naia-title="이벤트 맵 · Ctrl+E 로도 열립니다">E</button>
           <!-- Img2Img/Inpaint 재개 dock (Grok I2V pill 방식) — 결과 뷰어 하단 중앙 플로팅. -->
           <div class="img2img-resume-dock" id="img2imgResumeDock" hidden>
             <button class="img2img-resume-btn" id="img2imgResumeBtn" type="button" onclick="resumeImg2ImgSession()">↺ Inpaint</button>

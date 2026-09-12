@@ -1102,6 +1102,17 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
 import('./js/features/fastSearch.mjs?v=20260907-fs-groupsearch')
   .then(({initFastSearch}) => { window.fastSearch = initFastSearch(); })
   .catch(error => console.error('Failed to initialize Fast Search', error));
+// Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
+// Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
+import('./js/features/eventMapPanel.mjs?v=20260912-em2')
+  .then(({initEventMap}) => {
+    window.eventMap = initEventMap({
+      insertTag: text => insertTagIntoPrompt(text),
+      showToast,
+      getPromptText: () => (promptEdit ? promptEdit.value : ''),
+    });
+  })
+  .catch(error => console.error('Failed to initialize Event Map', error));
 const customSelectsReady = import('./js/features/customSelects.mjs?v=20260905-fastsearch')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({

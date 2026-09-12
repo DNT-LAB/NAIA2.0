@@ -82,6 +82,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   // 진한 회색으로 칠하고 넣기·복사에서 뺀다(후보 목록에도 칠했다가 되돌렸다 - 사용자 지정 2026-09-12 밤).
   // 조합을 뽑을 때마다 다시 묻는다 - 패널을 열어 둔 채 설정을 바꿀 수 있다.
   let peHidden = new Map();
+  // 행 툴팁(Interactive 칩 툴팁 꼴 + 썸네일 + 포함/제외 수). 설명은 태그별 캐시, 썸네일 표는 세션에 한 번.
+  let tipEl = null, tipOwner = null;
+  const tipInfo = new Map();        // tag -> {desc, group, count} | null(없음)
+  const tipAsked = new Set();
+  let thumbAxis = null;             // tag -> axis (Interactive 팩). null = 아직 안 받음
+  let thumbAsked = false;
   let rows = [];                  // 키보드 이동 단위(지금 보이는 목록)
   let active = -1;
   let heightCaps = { base: 0, hard: 0 };
@@ -239,6 +245,81 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
+  // ── 행 툴팁 ──────────────────────────────────────────────────────────────
+  function ensureTip() {
+    if (tipEl && document.body.contains(tipEl)) return tipEl;
+    tipEl = document.createElement('div');
+    tipEl.className = 'em-tip';
+    document.body.appendChild(tipEl);    // body 직계 - 패널 안에 두면 overflow 에 잘린다
+    return tipEl;
+  }
+  async function askTipInfo(tag) {
+    if (tipInfo.has(tag) || tipAsked.has(tag)) return;
+    tipAsked.add(tag);
+    try {
+      const r = await fetch(`/api/tag/lookup?tag=${encodeURIComponent(tag)}`);
+      const d = r.ok ? await r.json() : null;
+      tipInfo.set(tag, d && d.tag ? { desc: d.desc || '', group: d.group || '', count: d.count || 0 } : null);
+    } catch { tipInfo.set(tag, null); }
+    if (tipOwner && tipOwner.dataset.emPin === tag) paintTip(tipOwner);
+  }
+  async function ensureThumbIndex() {
+    if (thumbAxis || thumbAsked) return;
+    thumbAsked = true;
+    try {
+      const r = await fetch('/api/interactive-thumb/index');
+      const axes = r.ok ? (await r.json()).axes || {} : {};
+      thumbAxis = new Map();
+      for (const [axis, tags] of Object.entries(axes)) for (const t of tags) if (!thumbAxis.has(t)) thumbAxis.set(t, axis);
+    } catch { thumbAxis = new Map(); }
+    if (tipOwner) paintTip(tipOwner);
+  }
+  function tipComboLine(row) {
+    // 포함 = 이 태그도 달린 게시물(후보의 observed) · 제외 = 지금 조건의 게시물 - 포함. 왕복 없이 계산.
+    const src = pins.length ? result : browse;
+    const total = Number(src?.observed_posts || 0);
+    const inc = Number(row.dataset.emEst || 0);
+    if (!total || !inc) return '';
+    const approx = src?.sampled ? '≈' : '';
+    return `<div class="em-tip-combo"><span>포함 <b>${approx}${fmt(inc)}</b></span><span>제외 <b>${approx}${fmt(Math.max(0, total - inc))}</b></span><span class="em-tip-combo-note">${pins.length ? '핀 조합' : '이 분면'}의 게시물 ${fmt(total)}건 중</span></div>`;
+  }
+  function paintTip(row) {
+    const tip = ensureTip();
+    const tag = row.dataset.emPin || '';
+    const info = tipInfo.get(tag);
+    const axis = thumbAxis?.get(tag);
+    const thumb = axis ? `<img class="em-tip-thumb" alt="" src="/api/interactive-thumb?axis=${encodeURIComponent(axis)}&tag=${encodeURIComponent(tag)}">` : '';
+    tip.innerHTML = `<div class="em-tip-row">
+      <div class="em-tip-main">
+        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || 'unsorted'))}${info?.group ? ' · ' + esc(info.group) : ''}</span></div>
+        ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
+        <div class="em-tip-stats">lift ${esc(row.dataset.emLift || '')}${info?.count ? ` · Danbooru ${fmt(info.count)}` : ''}</div>
+      </div>${thumb}</div>
+      ${tipComboLine(row)}
+      <div class="em-tip-hint">클릭 꽂기 · 우클릭 제외</div>`;
+    tip.classList.add('open');
+    // 패널 오른쪽에 붙인다(결과 칸 쪽이 비어 있다). 안 들어가면 왼쪽, 그래도 안 되면 행 아래.
+    const a = row.getBoundingClientRect(), p = overlay.getBoundingClientRect(), b = tip.getBoundingClientRect();
+    const gap = 8, margin = 8;
+    let left = p.right + gap;
+    if (left + b.width > window.innerWidth - margin) left = p.left - b.width - gap;
+    let top = a.top;
+    if (left < margin) { left = Math.max(margin, a.left); top = a.bottom + gap; }
+    if (top + b.height > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - b.height - margin);
+    tip.style.left = `${Math.round(left)}px`; tip.style.top = `${Math.round(top)}px`;
+  }
+  function showTip(row) {
+    if (!row || row === tipOwner) return;
+    tipOwner = row;
+    void askTipInfo(row.dataset.emPin || '');
+    void ensureThumbIndex();
+    paintTip(row);
+  }
+  function hideTip() {
+    tipOwner = null;
+    if (tipEl) tipEl.classList.remove('open');
+  }
+
   /** [랜덤 프롬프트 할당] - 고른 분면(핀·제외가 있으면 그 안)에서 게시물 하나 → [적용] 과 같은 길. */
   async function randomAssign(btn) {
     if (btn) btn.disabled = true;
@@ -410,10 +491,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     const liftText = lift >= 100 ? `×${Math.round(lift)}` : `×${lift.toFixed(lift >= 10 ? 0 : 1)}`;
     const obs = c.observed_estimate != null && c.observed_estimate !== c.observed
       ? `≈${fmt(c.observed_estimate)}` : fmt(c.observed);
-    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}" role="option">
-      <span class="em-tag" title="${esc(roleLabel(c.group || 'unsorted'))}">${esc(c.tag)}</span>
-      <span class="em-lift" title="핀이 있을 때 이 태그가 나올 확률이 평소의 몇 배인가">${liftText}</span>
-      <span class="em-obs" title="핀과 같은 게시물에 함께 달린 수">${obs}</span>
+    const est = c.observed_estimate != null ? c.observed_estimate : c.observed;
+    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
+        data-em-g="${esc(c.group || 'unsorted')}" data-em-est="${Number(est) || 0}" data-em-lift="${liftText}" role="option">
+      <span class="em-tag">${esc(c.tag)}</span>
+      <span class="em-lift">${liftText}</span>
+      <span class="em-obs">${obs}</span>
       <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>
     </div>`;
   }
@@ -509,6 +592,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
 
   function render() {
     if (!overlay) return;
+    hideTip();                      // 행이 다시 그려지면 주인이 사라진다 - 유령 툴팁을 막는다
     paintTrail();
     paintFilters();
     rows = [];
@@ -728,6 +812,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       const row = t.closest('[data-em-pin]');
       if (row) pin(row.dataset.emPin);
     });
+    bodyEl.addEventListener('pointerover', event => {
+      const row = event.target.closest ? event.target.closest('.em-row[data-em-pin]') : null;
+      if (row) showTip(row);
+    });
+    bodyEl.addEventListener('pointerout', event => {
+      const row = event.target.closest ? event.target.closest('.em-row[data-em-pin]') : null;
+      if (!row) return;
+      if (event.relatedTarget && row.contains(event.relatedTarget)) return;
+      hideTip();
+    });
+    bodyEl.addEventListener('scroll', hideTip, { passive: true });
     // 우클릭 = 제외(시험대와 같은 손버릇).
     bodyEl.addEventListener('contextmenu', event => {
       const row = event.target.closest('[data-em-pin]');

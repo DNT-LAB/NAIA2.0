@@ -281,7 +281,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     const inc = Number(row.dataset.emEst || 0);
     if (!total || !inc) return '';
     const approx = src?.sampled ? '≈' : '';
-    return `<div class="em-tip-combo"><span>포함 <b>${approx}${fmt(inc)}</b></span><span>제외 <b>${approx}${fmt(Math.max(0, total - inc))}</b></span><span class="em-tip-combo-note">${pins.length ? '핀 조합' : '이 분면'}의 게시물 ${fmt(total)}건 중</span></div>`;
+    return `<div class="em-tip-combo"><span>포함 <b>${approx}${fmt(inc)}</b></span><span>제외 <b>${approx}${fmt(Math.max(0, total - inc))}</b></span></div>
+      <div class="em-tip-combo-note">${pins.length ? '핀 조합' : '이 분면'}의 게시물 ${fmt(total)}건 중</div>`;
   }
   function paintTip(row) {
     const tip = ensureTip();
@@ -291,21 +292,22 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     const thumb = axis ? `<img class="em-tip-thumb" alt="" src="/api/interactive-thumb?axis=${encodeURIComponent(axis)}&tag=${encodeURIComponent(tag)}">` : '';
     tip.innerHTML = `<div class="em-tip-row">
       <div class="em-tip-main">
-        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || 'unsorted'))}${info?.group ? ' · ' + esc(info.group) : ''}</span></div>
+        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || 'unsorted'))}</span></div>
         ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
         <div class="em-tip-stats">lift ${esc(row.dataset.emLift || '')}${info?.count ? ` · Danbooru ${fmt(info.count)}` : ''}</div>
       </div>${thumb}</div>
       ${tipComboLine(row)}
       <div class="em-tip-hint">클릭 꽂기 · 우클릭 제외</div>`;
     tip.classList.add('open');
-    // 패널 오른쪽에 붙인다(결과 칸 쪽이 비어 있다). 안 들어가면 왼쪽, 그래도 안 되면 행 아래.
-    const a = row.getBoundingClientRect(), p = overlay.getBoundingClientRect(), b = tip.getBoundingClientRect();
-    const gap = 8, margin = 8;
-    let left = p.right + gap;
-    if (left + b.width > window.innerWidth - margin) left = p.left - b.width - gap;
-    let top = a.top;
-    if (left < margin) { left = Math.max(margin, a.left); top = a.bottom + gap; }
-    if (top + b.height > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - b.height - margin);
+    // **항상 같은 자리**: 행 가운데의 살짝 오른쪽, 행 바로 아래(사용자 지정 2026-09-12 밤 - 창 크기에
+    // 따라 좌우로 튀던 것). 아래가 모자라면 위로만 올린다. 좌우는 화면 밖으로 나가지 않게만 민다.
+    const a = row.getBoundingClientRect(), b = tip.getBoundingClientRect();
+    const gap = 6, margin = 8;
+    let left = a.left + a.width * 0.5 + 16;
+    left = Math.max(margin, Math.min(left, window.innerWidth - b.width - margin));
+    let top = a.bottom + gap;
+    if (top + b.height > window.innerHeight - margin) top = a.top - b.height - gap;
+    top = Math.max(margin, top);
     tip.style.left = `${Math.round(left)}px`; tip.style.top = `${Math.round(top)}px`;
   }
   function showTip(row) {

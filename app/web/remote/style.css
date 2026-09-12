@@ -28647,18 +28647,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .em-tip.open { display: block; }
 .em-tip-row { display: flex; gap: 10px; align-items: flex-start; }
-.em-tip-main { flex: 1 1 auto; min-width: 140px; max-width: 260px; }
+.em-tip-main { flex: 0 0 200px; width: 200px; min-width: 0; }   /* 왼쪽은 폭을 고정하고 줄을 넘긴다 */
 .em-tip-head { display: flex; align-items: baseline; gap: 10px; }
 .em-tip-tag { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: #f7f6ff; overflow-wrap: anywhere; }
 .em-tip-src { flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); white-space: nowrap; }
 .em-tip-desc { margin-top: 3px; font-size: 10px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
 .em-tip-wait { color: var(--text-dim); }
 .em-tip-stats { margin-top: 3px; font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); }
-.em-tip-thumb { flex: 0 0 auto; width: 96px; height: 96px; object-fit: cover; border-radius: 5px; border: 1px solid rgba(255,255,255,0.10); background: #0e0e15; }
-.em-tip-combo { display: flex; gap: 10px; align-items: baseline; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.10);
+.em-tip-thumb { flex: 0 0 auto; width: 128px; height: 128px; object-fit: cover; border-radius: 5px; border: 1px solid rgba(255,255,255,0.10); background: #0e0e15; }
+.em-tip-combo { display: flex; gap: 12px; align-items: baseline; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.10);
   font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .em-tip-combo b { color: #e6a84a; font-weight: 700; }
-.em-tip-combo-note { margin-left: auto; font-size: 8.5px; color: var(--text-dim); }
+.em-tip-combo-note { margin-top: 2px; font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); }
 .em-tip-hint { margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.10); font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); }
 /* 프롬프트 엔지니어링 설정이 지우는 태그 - 실제 조합에서만 진한 회색(후보 목록은 칠하지 않는다). */
 .em-pe-hidden { color: #4d4b5c; }

@@ -550,6 +550,7 @@
         {"method": "POST", "path": "/api/result/action/queue", "smoke": "external_live"},
         {"method": "POST", "path": "/api/result/action/save", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/result/action/delete", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/img2img/restore-prompts", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/image-action/{action}", "smoke": "external_live"}
       ]
     },

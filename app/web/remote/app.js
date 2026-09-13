@@ -13119,12 +13119,9 @@ function slashCommandRegistry() {
     {name: 'preset', desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /preset 이름·본문 으로 좁힌다`,
       choices: slashPresetChoices, filters: slashPresetFilters},
     {name: 'pe', desc: 'Prompt Engineering — prefix · postfix · autohide · tools · 옵션', choices: slashPeChoices},
-    // 바로가기(사용자 지정 2026-09-13: 당장은 여는 것만). 검색은 셋이 있어 고른다.
-    {name: 'search', desc: '검색 열기 — Tag Search · Fast Search(Ctrl+F) · Event Map(Ctrl+E)', choices: () => [
-      {label: 'Tag Search', desc: '태그 이름 일부로 찾고 한글 설명을 본다', run: () => { tagSearchBtn?.click(); }},
-      {label: 'Fast Search (Ctrl+F)', desc: '한 칸 검색 - 고른 것은 클립보드로', run: () => { window.fastSearch?.show?.(); }},
-      {label: 'Event Map (Ctrl+E)', desc: '함께 달린 태그를 따라간다', run: () => { window.eventMap?.show?.(); }},
-    ]},
+    // 바로가기(사용자 지정 2026-09-13: 당장은 여는 것만). /search 는 Tag Search 하나다 -
+    // Fast Search(Ctrl+F)·Event Map(Ctrl+E)은 제 단축키가 있다.
+    {name: 'search', desc: 'Tag Search 열기 (태그 이름 일부로 찾고 한글 설명을 본다)', run: () => { tagSearchBtn?.click(); }},
     {name: 'quick', desc: 'Quick 태그 필터 열기 (활성 풀을 태그로 즉시 좁힌다)', run: () => openTagFilter()},
   ].map(withDesc);
 }

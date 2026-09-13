@@ -1104,7 +1104,7 @@ import('./js/features/fastSearch.mjs?v=20260907-fs-groupsearch')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20260913-em21')
+import('./js/features/eventMapPanel.mjs?v=20260913-em25')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -13119,9 +13119,10 @@ function slashCommandRegistry() {
     {name: 'preset', desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /preset 이름·본문 으로 좁힌다`,
       choices: slashPresetChoices, filters: slashPresetFilters},
     {name: 'pe', desc: 'Prompt Engineering — prefix · postfix · autohide · tools · 옵션', choices: slashPeChoices},
-    // 바로가기(사용자 지정 2026-09-13: 당장은 여는 것만). /search 는 Tag Search 하나다 -
-    // Fast Search(Ctrl+F)·Event Map(Ctrl+E)은 제 단축키가 있다.
-    {name: 'search', desc: 'Tag Search 열기 (태그 이름 일부로 찾고 한글 설명을 본다)', run: () => { tagSearchBtn?.click(); }},
+    // 바로가기(사용자 지정 2026-09-13: 당장은 여는 것만). /search = **프롬프트 검색 패널**(상단 Prompt: N 단추와 같은 것) -
+    // 키워드·제외·등급·기간으로 아카이브를 검색해 생성 풀을 만드는 그 화면. Tag Search 가 아니다(한 번 헛짚었다).
+    {name: 'search', desc: `프롬프트 검색 패널 열기 (풀 ${document.getElementById('searchCount')?.textContent || '-'})`,
+      run: () => openModule('search', {forceOpen: true})},
     {name: 'quick', desc: 'Quick 태그 필터 열기 (활성 풀을 태그로 즉시 좁힌다)', run: () => openTagFilter()},
   ].map(withDesc);
 }

@@ -124,6 +124,8 @@ class HeadlessGenerationDispatch:
     request: GenerationRequest | None
     api_mode: str
     blocked_reason: str = ""
+    # 시퀀스 구문(:begin/:seq/:end)이면 큐에 들어간 컷 수. `request` 는 첫 컷이다.
+    sequence_count: int = 1
 
     @property
     def request_id(self) -> str:
@@ -153,6 +155,7 @@ class HeadlessGenerationDispatch:
             "api_mode": self.api_mode,
             "priority": self.request.priority,
             "queued": True,
+            "sequence_count": int(self.sequence_count or 1),
             "params": {
                 "width": params.get("width"),
                 "height": params.get("height"),
@@ -221,6 +224,28 @@ class HeadlessGenerationService:
             )
 
         params = self._normalized_params(command, api_mode, credential)
+        if self.is_sequence_command_text(params.get("_raw_input")):
+            if not enqueue:
+                # Enhance 같은 비-큐 경로는 요청 하나만 돌려줄 수 있다 - N 컷을 놓을 자리가 없다.
+                return HeadlessGenerationDispatch(
+                    request=None, api_mode=api_mode,
+                    blocked_reason="시퀀스 구문(:begin/:seq/:end)은 이 경로에서 쓸 수 없습니다.",
+                )
+            return self._enqueue_sequence(command, params, api_mode)
+        return self._dispatch_params(command, params, api_mode, enqueue=enqueue)
+
+    def _dispatch_params(
+        self,
+        command: dict[str, Any],
+        params: dict[str, Any],
+        api_mode: str,
+        *,
+        enqueue: bool,
+        shared_nai: tuple | None = None,
+    ) -> HeadlessGenerationDispatch:
+        """정규화된 params 하나를 요청 하나로 만든다(큐 삽입 · 런 연결 · 이벤트 발행까지).
+        `shared_nai` 가 있으면 캐릭터·Vibe·레퍼런스를 새로 뽑지 않고 그것을 쓴다 -
+        시퀀스의 전 컷이 첫 컷의 캐릭터를 공유한다(사용자 지정 2026-09-13)."""
         source_row = self._source_row(params)
         params.pop("_source_row_data", None)
         params.pop("_source_name", None)
@@ -248,9 +273,12 @@ class HeadlessGenerationService:
             self._apply_conditional_negative(params, prompt_run_id)
         priority = self._priority(command)
         try:
-            nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(
-                params, api_mode
-            )
+            if shared_nai is not None:
+                nai_characters, nai_vibe_transfer, nai_character_reference = shared_nai
+            else:
+                nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(
+                    params, api_mode
+                )
         except NaiCharacterDataError as exc:
             return HeadlessGenerationDispatch(
                 request=None,
@@ -341,6 +369,129 @@ class HeadlessGenerationService:
             flush=True,
         )
         return HeadlessGenerationDispatch(request=request, api_mode=api_mode)
+
+    # ------------------------------------------------------------------
+    # 시퀀스 구문 (:begin / :seq / :end) - Dev0714 패리티
+    # ------------------------------------------------------------------
+    #
+    # 파서(`core/sequence_parser.py`)는 v2.0.0 부터 살아 있었지만 **부르는 곳이 없었다** -
+    # 유일한 호출자였던 Qt `generation_controller` 가 헤드리스 전환 때 함께 지워졌고,
+    # 그 뒤로 `:seq1 smile` 같은 구문이 태그로 그대로 NAI 에 나갔다(버그 리포트 2026-09-11 #2).
+    #
+    # 여기(목)에 거는 이유: `enqueue_remote_request` 를 부르는 진입로가 17곳이다(Generate ·
+    # Auto Gen · 프리셋 · 캐릭터 뷰어 · 확장 …). Generate 하나만 고치면 나머지에서는 여전히
+    # 구문이 태그로 나간다. 사용자 지정 2026-09-13: "enqueue 해야 캐릭터 프롬프트가 고정된다" -
+    # 컷마다 캐릭터를 다시 뽑지 않고 **첫 컷의 NAI 데이터를 전 컷이 공유**한다.
+    #
+    # Dev0714 규칙(future01 `_handle_sequence_generation`, 옮길 때 지킨 것):
+    #   1. 공통 구간(prefix · begin · end)의 와일드카드는 **한 번만** 전개해 전 컷이 같은 값.
+    #      `:seq` 안의 와일드카드는 컷마다 새로(실행 시점 `_expand_input_wildcards`가 한다).
+    #   2. 해상도는 첫 세트 기준 고정 - `resolution:WxH` 가 있으면 그 값, 없으면 지금 설정.
+    #   3. 컷별 `seed:N` 을 읽고 프롬프트에서 지운다. 없으면 NAI 는 시드 미고정일 때 컷마다
+    #      새 시드, WEBUI/ComfyUI 는 기본 시드 유지.
+    #   4. 네거티브(공통 구간에서 `-태그` 로 옮겨진 것 포함)는 전 컷 공유.
+    #   5. 전 컷을 큐에 일괄 등록.
+    #   6. 검증 실패(`:begin`/`:end` 중복 · 순서 역전 · `:seq` 0개)는 생성하지 않고 알린다.
+    _SEQ_SEED_RE = re.compile(r"seed:(\d+),?\s*", re.IGNORECASE)
+    _SEQ_RESOLUTION_RE = re.compile(r"resolution:(\d+)x(\d+),?\s*", re.IGNORECASE)
+
+    @staticmethod
+    def is_sequence_command_text(text: Any) -> bool:
+        from core.sequence_parser import SequenceParser
+
+        return isinstance(text, str) and bool(text.strip()) and SequenceParser.is_sequence_prompt(text)
+
+    def _enqueue_sequence(
+        self, command: dict[str, Any], params: dict[str, Any], api_mode: str,
+    ) -> HeadlessGenerationDispatch:
+        """시퀀스 프롬프트를 컷 N개로 갈라 전부 큐에 넣는다. 반환은 **첫 컷**의 dispatch 에
+        `sequence_count` 를 실은 것 - 기존 호출자는 request 하나만 보므로 그대로 동작한다."""
+        from core.sequence_parser import SequenceParser
+
+        raw = str(params.get("_raw_input") or params.get("input") or "")
+        try:
+            parsed = SequenceParser.parse_prompt(raw)
+        except ValueError as exc:
+            return HeadlessGenerationDispatch(request=None, api_mode=api_mode,
+                                              blocked_reason=f"시퀀스 파싱 오류: {exc}")
+        ok, message = SequenceParser.validate_structure(parsed)
+        if not ok:
+            return HeadlessGenerationDispatch(request=None, api_mode=api_mode,
+                                              blocked_reason=f"시퀀스 검증 실패: {message}")
+        parsed = self._expand_sequence_static_sections(parsed, params)
+        prompt_sets = SequenceParser.generate_prompt_sets(parsed)
+        if not prompt_sets:
+            return HeadlessGenerationDispatch(request=None, api_mode=api_mode,
+                                              blocked_reason="시퀀스에 컷이 없습니다.")
+
+        width, height = self._sequence_resolution(prompt_sets[0], params)
+        seed_fixed = self._to_bool(params.get("seed_fixed"))
+        shared_nai: tuple | None = None
+        first: HeadlessGenerationDispatch | None = None
+        total = len(prompt_sets)
+        for index, text in enumerate(prompt_sets, 1):
+            cut = dict(params)
+            seed_match = self._SEQ_SEED_RE.search(text)
+            if seed_match:
+                cut["seed"] = int(seed_match.group(1))
+                text = self._SEQ_SEED_RE.sub("", text).strip().strip(",").strip()
+            elif api_mode == "NAI" and not seed_fixed:
+                # `_normalize_numbers` 가 이미 시드 하나를 뽑아 params 에 박았다 - 그대로
+                # 복사하면 전 컷이 **같은 시드**가 된다. Dev0714 처럼 컷마다 새로 뽑는다.
+                cut["seed"] = random.randint(0, 9_999_999_999)
+            text = self._SEQ_RESOLUTION_RE.sub("", text).strip().strip(",").strip()
+            cut["input"] = text
+            cut["_raw_input"] = text
+            cut["width"] = width
+            cut["height"] = height
+            cut["resolution"] = f"{width} x {height}"
+            cut["_sequence_cut"] = {"index": index, "total": total}
+            dispatch = self._dispatch_params(command, cut, api_mode, enqueue=True, shared_nai=shared_nai)
+            if not dispatch.ok or dispatch.request is None:
+                queued = index - 1
+                reason = dispatch.blocked_reason or "요청을 만들지 못했습니다."
+                if queued:
+                    reason = f"시퀀스 {index}/{total}번째 컷에서 막혔습니다({queued}컷은 큐에 있음): {reason}"
+                return HeadlessGenerationDispatch(request=None, api_mode=api_mode, blocked_reason=reason)
+            if shared_nai is None:
+                request = dispatch.request
+                shared_nai = (request.nai_characters, request.nai_vibe_transfer, request.nai_character_reference)
+            if first is None:
+                first = dispatch
+        assert first is not None
+        first.sequence_count = total
+        print(f"Headless Remote: sequence prompt queued cuts={total} size={width}x{height}", flush=True)
+        return first
+
+    def _expand_sequence_static_sections(self, parsed: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """공통 구간(prefix · begin · end)의 와일드카드·프리셋·`-태그` 를 **지금 한 번** 전개한다.
+        `:seq` 구간은 원문으로 둔다 - 실행 시점에 컷마다 새로 뽑힌다(Dev0714 규칙 1).
+        공통 구간에서 네거티브로 옮겨진 `-태그` 는 params 의 네거티브에 쌓여 전 컷이 공유한다."""
+        expanded = dict(parsed)
+        negative = str(params.get("negative_prompt") or "")
+        for section in ("prefix", "begin", "end"):
+            text = str(expanded.get(section) or "")
+            if not text.strip():
+                continue
+            probe = {"input": text, "negative_prompt": negative}
+            self._expand_input_wildcards(probe)
+            expanded[section] = str(probe.get("input") or "")
+            negative = str(probe.get("negative_prompt") or "")
+        params["negative_prompt"] = negative
+        return expanded
+
+    def _sequence_resolution(self, first_prompt: str, params: dict[str, Any]) -> tuple[int, int]:
+        """첫 세트 기준 고정(Dev0714 규칙 2). `resolution:WxH` 우선, 없으면 지금 설정.
+        NAI 는 64 배수로 맞춘다 - `_normalize_resolution` 과 같은 잣대."""
+        match = self._SEQ_RESOLUTION_RE.search(first_prompt)
+        if match:
+            width, height = int(match.group(1)), int(match.group(2))
+        else:
+            width = self._to_int(params.get("width"), 832) or 832
+            height = self._to_int(params.get("height"), 1216) or 1216
+        if str(params.get("api_mode") or "").strip().upper() == "NAI":
+            width, height = snap_resolution_to_multiple(width, height, 64)
+        return width, height
 
     @staticmethod
     def _derived_generation_params(params: dict[str, Any]) -> dict[str, Any]:

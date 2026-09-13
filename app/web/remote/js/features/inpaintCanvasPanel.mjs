@@ -638,11 +638,10 @@ export function createInpaintCanvasPanel({
     if (!panel) return;
     const pop = document.createElement('div');
     pop.className = 'ic-restore-pop';
-    // 누른 단추 아래에 선다. 머리줄은 폭이 좁으므로 왼쪽 끝을 도크 기준으로 맞춘다.
+    // 머리줄은 폭이 좁으므로 왼쪽 끝을 도크 기준으로 맞춘다. 위/아래는 `placeRestorePop` 이 잰다.
     const box = panel.getBoundingClientRect();
     const at = anchor ? anchor.getBoundingClientRect() : box;
     pop.style.left = `${Math.max(6, Math.min(at.left - box.left, box.width - 306))}px`;
-    pop.style.top = `${at.bottom - box.top + 4}px`;
     pop.innerHTML = `<div class="ic-restore-head">`
       + `<span>어느 이미지에서 가져올까요?</span>`
       + `<button type="button" class="ic-restore-x" data-ic="restore-close">&#10005;</button></div>`
@@ -651,12 +650,7 @@ export function createInpaintCanvasPanel({
       + `<div class="ic-restore-list" data-ic-list="1">불러오는 중…</div>`;
     panel.appendChild(pop);
     restorePop = pop;
-    // ⚠️ 도크는 뷰어 **아래쪽**에 붙어 있다(`bottom: 6px`). 아래로 펴면 화면 밖으로
-    //    나가므로, 붙인 뒤 실제로 재 보고 모자라면 위로 뒤집는다.
-    const popRect = pop.getBoundingClientRect();
-    if (popRect.bottom > window.innerHeight - 8) {
-      pop.style.top = `${Math.max(6, at.top - box.top - popRect.height - 4)}px`;
-    }
+    placeRestorePop(pop, at, box);
 
     // 히스토리는 곁들이다 - 없거나 실패해도 파일 열기는 그대로 쓸 수 있어야 한다.
     try {
@@ -671,9 +665,28 @@ export function createInpaintCanvasPanel({
             + ` title="${escHtml(String(item.filename || ''))}">`
             + `<img src="${escHtml(String(item.thumb_url || ''))}" alt="" loading="lazy"></button>`).join('')
         : `<div class="ic-restore-hint">히스토리가 비어 있습니다</div>`;
+      // 썸네일이 들어오면 키가 자란다 - 다시 잰다(첫 배치는 '불러오는 중…' 한 줄로 쟀다).
+      if (restorePop === pop) placeRestorePop(pop, at, box);
     } catch (_error) {
       const list = pop.querySelector('[data-ic-list]');
       if (list) list.innerHTML = `<div class="ic-restore-hint">히스토리를 못 읽었습니다</div>`;
+    }
+  }
+
+  /** 팝업의 위/아래를 정한다. 도크는 뷰어 **아래쪽**에 붙어 있어(`bottom: 6px`) 아래로 펴면
+   *  GENERATION INFO 바 밑으로 들어가 히스토리 줄이 잘렸다(사용자 제보 2026-09-13). 그래서
+   *  **위로 펴는 것이 기본**이고, 위가 모자랄 때만 아래로 편다. 썸네일이 늦게 들어와 키가 자라므로
+   *  붙인 직후와 목록이 찬 뒤 두 번 부른다. */
+  function placeRestorePop(pop, at, box) {
+    const height = pop.getBoundingClientRect().height;
+    const roomAbove = at.top - 8;
+    const roomBelow = window.innerHeight - at.bottom - 8;
+    if (roomAbove >= height || roomAbove >= roomBelow) {
+      pop.style.top = 'auto';
+      pop.style.bottom = `${Math.max(4, box.bottom - at.top + 4)}px`;
+    } else {
+      pop.style.bottom = 'auto';
+      pop.style.top = `${at.bottom - box.top + 4}px`;
     }
   }
 

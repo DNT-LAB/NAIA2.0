@@ -93,6 +93,7 @@ export function createTagAssistController({
   fmtCount,
   catStyle,
   showToast,
+  getSlashCommands = null,       // app.js 가 주입하는 명령 레지스트리(호출 시점에 읽는다)
   getEventPresetPanel,
   // 태그 정보 툴팁(캐럿 위 태그 설명 + RELATED)을 억제할지 묻는 훅. Interactive 편집 팝업처럼
   // 화면을 이미 점유한 UI 위에 큰 툴팁이 겹치면 방해가 된다. 자동완성 드롭다운은 영향 없다.
@@ -2581,6 +2582,7 @@ export function createTagAssistController({
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
       const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : ''))));
+      // 슬래시 선택지(slash_choice)는 접두가 없다 - 위 표에서 '' 로 떨어진다.
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const displayTag = wcType === 'preset_path'
@@ -2663,7 +2665,7 @@ export function createTagAssistController({
     if (!canSelectAutocomplete(r, options)) return;
     const target = acTarget || promptEdit;
     if (isImeComposing(target)) return;
-    if (r._wc_type === 'slash') { runSlashCommand(r); return; }
+    if (r._wc_type === 'slash' || r._wc_type === 'slash_choice' || r._wc_type === 'slash_arg') { runSlashCommand(r); return; }
     const info = getActiveTokenInfo(target);
     if (!info) return;
     let newTag = r.tag;
@@ -2832,31 +2834,81 @@ export function createTagAssistController({
   //    158,800 · 이벤트 맵 어휘 100,537 전부 0건). `/` 를 **품는** 태그(`fate/stay night`·`\m/`)는 토큰 안이라
   //    안 걸린다.
   const SEQUENCE_SKELETON = ':begin,\n:seq1 text,\n:seq2 text,\n:end';
-  const SLASH_COMMANDS = [
-    {name: 'seq', desc: '시퀀스 뼈대 삽입 (:begin / :seq1 / :seq2 / :end)'},
+  // 명령 하나 = {name, aliases?, desc, insert?(→ 캐럿에 넣을 글) | run?() | choices?() → [{label, desc?, current?, run()}]}
+  // choice.run() 이 {next: [...]} 를 돌려주면 엔트리는 **안 닫히고** 그 목록으로 이어진다(해상도 Preset ▸).
+  const BUILTIN_SLASH_COMMANDS = [
+    {name: 'seq', desc: '시퀀스 뼈대 삽입 (:begin / :seq1 / :seq2 / :end)', insert: () => SEQUENCE_SKELETON},
   ];
-  let slashEntry = null;        // {el, input, textarea, caret} - 열려 있을 때만
+  function allSlashCommands() {
+    let injected = [];
+    try { injected = typeof getSlashCommands === 'function' ? (getSlashCommands() || []) : []; }
+    catch (error) { console.warn('slash command registry failed', error); }
+    return [...BUILTIN_SLASH_COMMANDS, ...injected.filter(c => c && c.name)];
+  }
+  let slashEntry = null;        // {el, input, label, textarea, caret, valueAtOpen, stage} - 열려 있을 때만
   function isTokenStart(text, caret) {
     return /(^|[,\n])[ \t]*$/.test(String(text || '').slice(0, caret));
   }
   function slashRows(query) {
     const q = String(query || '').trim().toLowerCase();
-    return SLASH_COMMANDS
-      .filter(c => !q || c.name.startsWith(q))
-      .map(c => ({tag: c.name, _wc_type: 'slash', group: '명령', desc: c.desc, cat: ''}));
+    const stage = slashEntry?.stage;
+    if (stage && stage.arg) {
+      // 값을 받는 명령(/step 23 …): 목록 대신 "이 값으로 적용" 한 줄. Enter 가 입력칸의 값을 읽는다.
+      const raw = String(query || '').trim();
+      return [{tag: raw ? `${stage.cmd.name} ${raw}` : `${stage.cmd.name} …`, _wc_type: 'slash_arg', group: raw ? '↵ 적용' : '값 입력',
+        desc: stage.arg.hint || '', cat: ''}];
+    }
+    if (stage) {
+      return (stage.choices || [])
+        .filter(c => !q || String(c.label || '').toLowerCase().includes(q))
+        .map(c => ({tag: String(c.label || ''), _wc_type: 'slash_choice', group: c.current ? '✓ 현재' : '', desc: c.desc || '', cat: '', _choice: c}));
+    }
+    // `step 23` 처럼 값을 이어 쳤으면 **첫 낱말**로만 명령을 찾는다(값은 실행 때 읽는다).
+    const head = q.split(/\s+/)[0] || '';
+    return allSlashCommands()
+      .filter(c => !head || c.name.startsWith(head) || (c.aliases || []).some(a => String(a).startsWith(head)))
+      .map(c => ({tag: c.name, _wc_type: 'slash', group: '명령', desc: c.desc || '', cat: '', _cmd: c}));
+  }
+  /** 엔트리 입력에서 명령 이름 뒤의 값(`step 23` → `23`). 없으면 ''. */
+  function slashArgText(input) {
+    const parts = String(input || '').trim().split(/\s+/);
+    return parts.length > 1 ? parts.slice(1).join(' ') : '';
+  }
+  function runSlashArg(cmd, raw) {
+    const arg = cmd.arg || {};
+    const text = String(raw || '').trim();
+    if (!text) { showToast?.(`/${cmd.name} 에는 값이 필요합니다`, 'error'); return false; }
+    let value = text;
+    if (arg.type === 'number') {
+      value = Number(text);
+      if (!Number.isFinite(value)) { showToast?.(`/${cmd.name}: 숫자가 아닙니다 — ${text}`, 'error'); return false; }
+      if (arg.integer) value = Math.round(value);
+      if (typeof arg.min === 'number' && value < arg.min) { showToast?.(`/${cmd.name}: 최소 ${arg.min}`, 'error'); return false; }
+      if (typeof arg.max === 'number' && value > arg.max) { showToast?.(`/${cmd.name}: 최대 ${arg.max}`, 'error'); return false; }
+    }
+    try { cmd.run(value); } catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); return false; }
+    return true;
   }
   function renderSlashList(query) {
     acResults = slashRows(query);
     acSel = acResults.length ? 0 : -1;
     acMode = true;
     if (!acResults.length) {
-      tagTooltip.innerHTML = '<div class="chunk-ac-loading">맞는 명령이 없습니다 (Esc 로 닫기)</div>';
+      tagTooltip.innerHTML = '<div class="chunk-ac-loading">맞는 항목이 없습니다 (Esc 로 닫기)</div>';
       tagTooltip.classList.add('open', 'ac-mode');
       tagTooltip.classList.remove('chunk-ac-mode');
       positionTagTooltip();
       return;
     }
     renderAutocomplete();
+  }
+  function setSlashStage(stage) {
+    if (!slashEntry) return;
+    slashEntry.stage = stage;
+    slashEntry.label.textContent = stage ? `/${stage.cmd.name} ›` : '/';
+    slashEntry.input.value = '';
+    slashEntry.input.placeholder = stage ? (stage.arg ? (stage.arg.hint || '값') : '고르기') : '명령';
+    renderSlashList('');
   }
   function openSlashEntry(textarea, caret) {
     closeSlashEntry({restoreFocus: false});
@@ -2868,12 +2920,13 @@ export function createTagAssistController({
     el.className = 'slash-entry';
     el.innerHTML = '<span class="slash-entry-mark">/</span>' +
       '<input class="slash-entry-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="명령">';
+    const label = el.querySelector('.slash-entry-mark');
     el.style.left = `${Math.round(point?.left ?? rect.left)}px`;
     el.style.top = `${Math.round(point?.top ?? rect.top)}px`;
     el.style.height = `${Math.round(lineHeight)}px`;
     document.body.appendChild(el);
     const input = el.querySelector('input');
-    slashEntry = {el, input, textarea, caret, valueAtOpen: String(textarea.value || '')};
+    slashEntry = {el, input, label, textarea, caret, valueAtOpen: String(textarea.value || ''), stage: null};
     input.addEventListener('input', () => renderSlashList(input.value));
     input.addEventListener('keydown', onSlashEntryKey);
     input.focus();
@@ -2882,7 +2935,11 @@ export function createTagAssistController({
   function onSlashEntryKey(e) {
     if (!slashEntry) return;
     if (e.key === 'Escape') { e.preventDefault(); closeSlashEntry({restoreFocus: true}); return; }
-    if (e.key === 'Backspace' && !slashEntry.input.value) { e.preventDefault(); closeSlashEntry({restoreFocus: true}); return; }
+    if (e.key === 'Backspace' && !slashEntry.input.value) {
+      e.preventDefault();
+      if (slashEntry.stage) setSlashStage(null); else closeSlashEntry({restoreFocus: true});
+      return;
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (acResults.length) { moveAutocompleteSelection(e.key === 'ArrowDown' ? 1 : -1); renderAutocomplete(); }
@@ -2908,13 +2965,54 @@ export function createTagAssistController({
   function runSlashCommand(row) {
     const open = slashEntry;
     if (!open) return;
+    if (row._wc_type === 'slash_arg') {
+      const cmd = open.stage?.cmd;
+      if (cmd && runSlashArg(cmd, open.input.value)) closeSlashEntry({restoreFocus: true});
+      else open.input.focus();
+      return;
+    }
+    if (row._wc_type === 'slash_choice') {
+      const choice = row._choice;
+      let result = null;
+      try { result = typeof choice?.run === 'function' ? choice.run() : null; }
+      catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
+      if (result && Array.isArray(result.next)) {
+        // 안 닫힌다 - 다음 목록으로 이어진다(해상도 Preset ▸ 뒤에 그 밴드의 해상도들).
+        setSlashStage({cmd: open.stage?.cmd || {name: ''}, choices: result.next});
+        open.input.focus();
+        return;
+      }
+      closeSlashEntry({restoreFocus: true});
+      return;
+    }
+    const cmd = row._cmd;
+    if (!cmd) { closeSlashEntry({restoreFocus: true}); return; }
+    if (cmd.arg) {
+      // 값을 이어 쳤으면(`step 23`) 바로 적용, 아니면 값 단계로 들어간다.
+      const raw = slashArgText(open.input.value);
+      if (raw) { if (runSlashArg(cmd, raw)) closeSlashEntry({restoreFocus: true}); else open.input.focus(); return; }
+      setSlashStage({cmd, choices: [], arg: cmd.arg});
+      open.input.focus();
+      return;
+    }
+    if (typeof cmd.choices === 'function') {
+      let choices = [];
+      try { choices = cmd.choices() || []; }
+      catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
+      setSlashStage({cmd, choices});
+      open.input.focus();
+      return;
+    }
     const {textarea} = open;
     // 열려 있는 동안 본문이 바뀌었으면(WS prompt_sync 등) 기억한 캐럿은 낡았다 - 지금 캐럿을 쓴다.
     const same = String(textarea.value || '') === open.valueAtOpen;
     const caret = same ? open.caret : Math.min(textarea.selectionStart ?? open.caret, String(textarea.value || '').length);
     closeSlashEntry({restoreFocus: true});
     if (!same) textarea.setSelectionRange(caret, caret);
-    applySlashCommand(textarea, caret, row);
+    if (typeof cmd.insert === 'function') { applySlashInsert(textarea, caret, cmd); return; }
+    if (typeof cmd.run === 'function') {
+      try { cmd.run(); } catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
+    }
   }
   /** 토큰 첫머리에서 `/` 가 눌리면 가로챈다(데스크톱). 모바일 IME 는 keydown 이 229 로 와서 못 잡는다 - 아래 input 폴백. */
   function maybeOpenSlashEntryOnKey(textarea, e) {
@@ -2954,18 +3052,19 @@ export function createTagAssistController({
       textarea.dispatchEvent(new Event('input', {bubbles: true}));
     }
   }
-  function applySlashCommand(textarea, caret, row) {
-    const name = String(row?.tag || '');
-    if (name === 'seq') {
-      if (/:begin\b/i.test(String(textarea.value || ''))) {
-        showToast?.('이미 시퀀스(:begin)가 있습니다. 하나만 둘 수 있습니다.', 'error');
-        return;
-      }
-      replaceRangeUndoable(textarea, caret, caret, SEQUENCE_SKELETON);
+  function applySlashInsert(textarea, caret, cmd) {
+    if (cmd.name === 'seq' && /:begin\b/i.test(String(textarea.value || ''))) {
+      showToast?.('이미 시퀀스(:begin)가 있습니다. 하나만 둘 수 있습니다.', 'error');
+      return;
+    }
+    const text = String(cmd.insert(caret) || '');
+    if (!text) return;
+    replaceRangeUndoable(textarea, caret, caret, text);
+    if (cmd.name === 'seq') {
       const firstText = caret + ':begin,\n:seq1 '.length;
       textarea.setSelectionRange(firstText, firstText + 'text'.length);
-      if (textarea === promptEdit) onPromptEdit();
     }
+    if (textarea === promptEdit) onPromptEdit();
   }
 
   function bindTagAssist(textarea, options = {}) {

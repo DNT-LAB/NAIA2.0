@@ -12869,7 +12869,138 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashentry')
+// ---- 슬래시 명령 레지스트리 (사용자 지정 2026-09-13) ----
+//
+// 메인 프롬프트에서 `/` 를 치면 뜨는 인라인 엔트리가 **호출 시점에** 이 목록을 읽는다.
+// 사람이 마우스로 하던 일(샘플러·해상도·토글)을 타이핑으로 한다. 나중에 에이전트도 같은
+// 표면을 쓴다 - `window.naia.commands.run('sampler', 'euler_a')`. 그래서 실행은 전부 기존
+// 손잡이(setParam · setOption · setResFlag · 밴드/프리셋 세터)를 부르지 화면을 흉내 내지 않는다.
+//
+// 명령 꼴: {name, aliases?, desc, run?() | choices?() → [{label, desc?, current?, run()}]}
+//   choice.run() 이 {next: [...]} 를 돌려주면 엔트리가 안 닫히고 그 목록으로 이어진다.
+function slashResolutionListChoices(resolutions) {
+  const currentLabel = String(qResolution?.value || '');
+  return (resolutions || []).map(label => ({
+    label,
+    current: label === currentLabel,
+    run: () => {
+      // 지정 해상도를 고르면 랜덤·자동 해상도는 **끈다**(사용자 지정) - 안 그러면 다음 생성이 덮어쓴다.
+      setResFlag('random_resolution', false);
+      setResFlag('auto_fit_resolution', false);
+      setParam('resolution', label);
+      showToast(`해상도 ${label}`, 'success');
+    },
+  }));
+}
+
+function slashResolutionChoices() {
+  const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
+  const rnd = !!qRndRes?.classList.contains('on');
+  const auto = !!qAutoRes?.classList.contains('on');
+  const rows = [
+    {label: 'rand+auto', desc: '랜덤 해상도 + 자동 해상도', current: rnd && auto,
+      run: () => { setResFlag('random_resolution', true); setResFlag('auto_fit_resolution', true); showToast('Rnd Res + Auto Res', 'success'); }},
+    {label: 'auto', desc: '자동 해상도(Auto Res)만', current: auto && !rnd,
+      run: () => { setResFlag('random_resolution', false); setResFlag('auto_fit_resolution', true); showToast('Auto Res', 'success'); }},
+    {label: 'random', desc: '랜덤 해상도(Rnd Res)만', current: rnd && !auto,
+      run: () => { setResFlag('random_resolution', true); setResFlag('auto_fit_resolution', false); showToast('Rnd Res', 'success'); }},
+  ];
+  if (mode === 'NAI') {
+    if (naiResolutionBands.length) {
+      rows.push({label: 'Preset ▸', desc: naiResolutionBands.map(b => b.label).join(' · '),
+        run: () => ({next: naiResolutionBands.map(band => ({
+          label: band.label, desc: (band.resolutions || []).join(' · '),
+          current: !!naiBandState.enabled && naiBandState.id === band.id,
+          // 고르면 안 닫힌다: 밴드를 켜고 **그 밴드의 해상도 목록**으로 이어진다(사용자 지정).
+          run: () => { setNaiResolutionBand(band.id); return {next: slashResolutionListChoices(band.resolutions)}; },
+        }))}),
+      });
+    }
+  } else {
+    rows.push({label: 'Preset ▸', desc: RESOLUTION_PRESET_DEFS.map(p => p.label).join(' · '),
+      run: () => ({next: RESOLUTION_PRESET_DEFS.map(preset => ({
+        label: preset.label, desc: preset.resolutions.join(' · '),
+        current: isResolutionPresetEnabled(mode) && activeResolutionPresetState(mode)?.preset === preset.id,
+        run: () => { setResolutionPreset(mode, preset.id); return {next: slashResolutionListChoices(preset.resolutions)}; },
+      }))}),
+    });
+  }
+  rows.push(...slashResolutionListChoices(Array.from(qResolution?.options || []).map(o => o.value)));
+  return rows;
+}
+
+function slashToggleCommand(name, key, title) {
+  return {
+    name, desc: () => `${title} ${getOptionChecked(key) ? '끄기' : '켜기'} (지금 ${getOptionChecked(key) ? 'ON' : 'OFF'})`,
+    run: () => { const next = !getOptionChecked(key); setOption(key, next); showToast(`${title} ${next ? 'ON' : 'OFF'}`, 'success'); },
+  };
+}
+
+// 셀렉트 하나를 그대로 선택지로(샘플러·스케줄러). ⚠️ **모델은 여기에 넣지 않는다**(사용자 지정) -
+// 세션 중 모델 교체는 유료 인페인트를 엉뚱한 모델로 보낼 수 있어 setParam 도 목에서 막고 있다.
+function slashSelectCommand(name, key, title) {
+  const select = paramEls[key];
+  return {
+    name, desc: `${title} 바꾸기 (지금 ${select?.value || '-'})`,
+    choices: () => Array.from(select?.options || []).map(o => ({
+      label: o.value, desc: o.textContent !== o.value ? o.textContent : '', current: o.value === select.value,
+      run: () => { select.value = o.value; setParam(key, o.value); showToast(`${title} ${o.value}`, 'success'); },
+    })),
+  };
+}
+
+// 숫자 하나를 받는 명령(/step 23 · /cfg_scale 6.8 · /cfg_rescale 0.25). 범위는 PARAMS 탭 입력칸과 같다.
+function slashNumberCommand(name, key, title, {min, max, integer = false, aliases = []} = {}) {
+  const el = paramEls[key];
+  const hint = `${min}~${max}${integer ? ' 정수' : ''} (지금 ${el?.value ?? '-'})`;
+  return {
+    name, aliases, desc: `${title} 값 지정 — /${name} 23 처럼 (지금 ${el?.value ?? '-'})`,
+    arg: {type: 'number', min, max, integer, hint},
+    run: value => { if (el) el.value = String(value); setParam(key, String(value)); showToast(`${title} ${value}`, 'success'); },
+  };
+}
+
+function slashCommandRegistry() {
+  const withDesc = cmd => ({...cmd, desc: typeof cmd.desc === 'function' ? cmd.desc() : cmd.desc});
+  return [
+    slashSelectCommand('sampler', 'sampler', '샘플러'),
+    slashSelectCommand('scheduler', 'scheduler', '스케줄러'),
+    {name: 'resolution', aliases: ['res'], desc: `해상도 (지금 ${qResolution?.value || '-'})`, choices: slashResolutionChoices},
+    slashNumberCommand('steps', 'steps', 'Steps', {min: 1, max: 150, integer: true, aliases: ['step']}),
+    slashNumberCommand('cfg_scale', 'cfg_scale', 'CFG Scale', {min: 0, max: 30, aliases: ['cfg']}),
+    slashNumberCommand('cfg_rescale', 'cfg_rescale', 'CFG Rescale', {min: 0, max: 1, aliases: ['rescale']}),
+    slashToggleCommand('autogen', 'auto_generate', 'Auto Gen'),
+    slashToggleCommand('promptfix', 'prompt_fixed', 'Prompt Fixed'),
+    slashToggleCommand('wcsolo', 'wildcard_standalone', 'WC Solo'),
+  ].map(withDesc);
+}
+
+// 에이전트·외부 스크립트용 같은 표면: run('resolution', '832 x 1216') / run('autogen') / list().
+window.naia = window.naia || {};
+window.naia.commands = {
+  list: () => slashCommandRegistry().map(c => ({name: c.name, aliases: c.aliases || [], desc: c.desc,
+    choices: typeof c.choices === 'function' ? c.choices().map(ch => ({label: ch.label, current: !!ch.current})) : null})),
+  run: (name, value) => {
+    if (String(name) === 'model') throw new Error('model cannot be changed through commands');   // 사용자 지정
+    const cmd = slashCommandRegistry().find(c => c.name === name || (c.aliases || []).includes(name));
+    if (!cmd) throw new Error(`unknown command: ${name}`);
+    if (cmd.arg) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) throw new Error(`/${cmd.name} needs a number`);
+      const v = cmd.arg.integer ? Math.round(n) : n;
+      if (v < cmd.arg.min || v > cmd.arg.max) throw new Error(`/${cmd.name} out of range ${cmd.arg.min}~${cmd.arg.max}`);
+      return cmd.run(v);
+    }
+    if (typeof cmd.choices === 'function') {
+      const choice = cmd.choices().find(ch => ch.label === value);
+      if (!choice) throw new Error(`unknown choice for /${name}: ${value}`);
+      return choice.run();
+    }
+    return cmd.run?.();
+  },
+};
+
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashreg')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -12890,6 +13021,7 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashentry
       fmtCount,
       catStyle,
       showToast,
+      getSlashCommands: slashCommandRegistry,
       getEventPresetPanel: () => eventPresetPanel,
       // Interactive 슬롯 편집 중에는 태그 정보 툴팁(설명 + RELATED)을 띄우지 않는다 —
       // 앵커 팝업(팔레트/썸네일) 위에 겹쳐 가린다. 자동완성 드롭다운은 그대로 동작한다.

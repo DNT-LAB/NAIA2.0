@@ -4,6 +4,8 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
+
+from app.backend.server.install_manager_routes import _is_local_request
 from fastapi.responses import JSONResponse, Response
 
 from core.artist_thumbnail_service import ArtistThumbnailService
@@ -59,14 +61,26 @@ def register_artist_thumbnail_routes(
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     @app.get("/api/artist-thumb/state")
-    async def api_artist_thumb_state():
+    async def api_artist_thumb_state(req: Request):
         try:
-            return await run_in_thread(artist_thumbnail_service(session_context).state)
+            payload = await run_in_thread(artist_thumbnail_service(session_context).state)
+            # 호스트에서만 되는 동작(폴더 열기)의 단추를 원격에서 숨기기 위한 표시.
+            if isinstance(payload, dict):
+                payload = {**payload, "local": _is_local_request(req)}
+            return payload
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb state failed: {exc}"}, status_code=500)
 
     @app.post("/api/artist-thumb/open-folder")
-    async def api_artist_thumb_open_folder():
+    async def api_artist_thumb_open_folder(req: Request):
+        # 탐색기 창은 **NAIA 를 돌리는 PC** 에 뜬다 - 원격이 호스트 화면을 여는 길을 막는다
+        # (이 저장소의 다른 호스트 동작과 같은 규칙).
+        if not _is_local_request(req):
+            return JSONResponse(
+                {"ok": False, "error": "폴더 열기는 NAIA 를 실행 중인 PC 에서만 가능합니다."},
+                status_code=403,
+            )
+
         def _open_folder():
             import os
             import subprocess

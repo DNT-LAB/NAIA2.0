@@ -580,6 +580,8 @@ export function createArtistThumbController({
 
   function renderState() {
     if (!state) return;
+    // 폴더 열기는 호스트 PC 의 탐색기를 연다 - 원격(폰·다른 PC)에서는 숨긴다(라우트도 403 으로 막는다).
+    if (openFolderBtn) openFolderBtn.hidden = state.local === false;
     if (modeEl) {
       const previous = modeEl.value || '';
       const modes = state.modes || [];

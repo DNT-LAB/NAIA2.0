@@ -1550,8 +1550,7 @@ export function createTagAssistController({
       lower.startsWith('__') ||
       lower.startsWith('$') ||
       lower.startsWith('vibe:') ||
-      lower.startsWith('preset:') ||
-      lower.startsWith('/')
+      lower.startsWith('preset:')
     )) return query;
     for (const namespace of ['artist', 'character']) {
       const prefix = namespace + ':';
@@ -1572,8 +1571,7 @@ export function createTagAssistController({
     return lower.startsWith('__') ||
       lower.startsWith('$') ||
       lower.startsWith('vibe:') ||
-      lower.startsWith('preset:') ||
-      lower.startsWith('/');
+      lower.startsWith('preset:');
   }
 
   function clearAutocompleteTranslationTimer() {
@@ -1694,9 +1692,7 @@ export function createTagAssistController({
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
-    // 슬래시 명령은 **메인 프롬프트에서만** - 네거티브·모듈 칸에 `/seq` 가 들어갈 자리는 없다.
-    const isSlashTrigger = !!(info && target === promptEdit && info.stripped.startsWith('/'));
-    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && !isPresetTrigger && !isSlashTrigger && info.stripped.length < 2)) {
+    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && !isPresetTrigger && info.stripped.length < 2)) {
       hideAutocomplete();
       checkTagHint();
       return;
@@ -1730,8 +1726,6 @@ export function createTagAssistController({
         sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('preset:')) {
         requestPresetAutocomplete(s);
-      } else if (target === promptEdit && s.startsWith('/')) {
-        showSlashCommands(s);            // 클라이언트 목록 - 서버에 물을 것이 없다
       } else {
         sendWs({type: 'autocomplete', query: s});
       }
@@ -2669,6 +2663,7 @@ export function createTagAssistController({
     if (!canSelectAutocomplete(r, options)) return;
     const target = acTarget || promptEdit;
     if (isImeComposing(target)) return;
+    if (r._wc_type === 'slash') { runSlashCommand(r); return; }
     const info = getActiveTokenInfo(target);
     if (!info) return;
     let newTag = r.tag;
@@ -2705,11 +2700,7 @@ export function createTagAssistController({
       hideAutocomplete();
       return;
     }
-    if (r._wc_type === 'slash') {
-      hideAutocomplete();
-      applySlashCommand(target, info, r);
-      return;
-    }
+
     if (r._wc_type === 'vibe_cluster') {
       swapToken(target, info, r.value || `vibe:${r.tag}`);
       hideAutocomplete();
@@ -2831,27 +2822,124 @@ export function createTagAssistController({
     clearAutocompletePositionStyles();
   }
 
-  // 슬래시 팔레트(사용자 승인 2026-09-13). 메인 프롬프트에서 토큰 첫머리에 `/` 를 치면 명령 목록이
-  // 뜨고, 고르면 그 토큰이 **결과로 치환**된다. 명령은 프론트에서 소비되어 백엔드로 안 나간다
-  // (그래도 남은 `/명령` 은 백엔드가 생성 직전에 무시한다 - `_strip_slash_commands`).
-  // 전에 있던 `:begin` 자동 펼침은 뺐다 - 타이핑을 가로챘고, 규칙이 둘이면 배우는 것도 둘이다.
+  // 슬래시 인라인 엔트리(사용자 지정 2026-09-13). 메인 프롬프트에서 토큰 첫머리에 `/` 를 치면 그 글자를
+  // **textarea 에 넣지 않고** 캐럿 자리에 입력칸을 띄운다 - 사용자는 치던 자리에서 그대로 명령을 친다.
+  // 아래에는 자동완성 팝업이 명령 목록을 그린다(같은 캐럿 기준으로 자리를 잡으니 엔트리 바로 밑이다).
+  // 고르면 엔트리가 닫히고 결과만 캐럿에 들어간다 - 명령은 메인 프롬프트에 한 글자도 안 들어간다.
+  // (붙여넣기·옛 저장본으로 남은 `/명령` 은 경고색 + 백엔드 `_strip_slash_commands` 가 안전망.)
   //
-  // ⚠️ 토큰 첫머리 `/` 는 어떤 문법도 안 쓴다(프리셋 토큰의 `/` 는 토큰 **안**이다). 그래서 충돌 없이
-  //    다섯 번째 트리거(`__`·`$`·`preset:`·`vibe:` 다음)로 얹었다.
+  // ⚠️ 토큰 첫머리 `/` 로 시작하는 태그는 없다(2026-09-13 실측: 사전 33,895 · e621 5,450 · danbooru 카운트
+  //    158,800 · 이벤트 맵 어휘 100,537 전부 0건). `/` 를 **품는** 태그(`fate/stay night`·`\m/`)는 토큰 안이라
+  //    안 걸린다.
   const SEQUENCE_SKELETON = ':begin,\n:seq1 text,\n:seq2 text,\n:end';
   const SLASH_COMMANDS = [
     {name: 'seq', desc: '시퀀스 뼈대 삽입 (:begin / :seq1 / :seq2 / :end)'},
   ];
-  function showSlashCommands(query) {
-    const q = String(query || '').slice(1).trim().toLowerCase();
-    const rows = SLASH_COMMANDS.filter(c => !q || c.name.startsWith(q));
-    if (!rows.length) { hideAutocomplete(); checkTagHint(); return; }
-    acResults = rows.map(c => ({tag: c.name, _wc_type: 'slash', group: '명령', desc: c.desc, cat: ''}));
-    acSel = 0;
+  let slashEntry = null;        // {el, input, textarea, caret} - 열려 있을 때만
+  function isTokenStart(text, caret) {
+    return /(^|[,\n])[ \t]*$/.test(String(text || '').slice(0, caret));
+  }
+  function slashRows(query) {
+    const q = String(query || '').trim().toLowerCase();
+    return SLASH_COMMANDS
+      .filter(c => !q || c.name.startsWith(q))
+      .map(c => ({tag: c.name, _wc_type: 'slash', group: '명령', desc: c.desc, cat: ''}));
+  }
+  function renderSlashList(query) {
+    acResults = slashRows(query);
+    acSel = acResults.length ? 0 : -1;
     acMode = true;
+    if (!acResults.length) {
+      tagTooltip.innerHTML = '<div class="chunk-ac-loading">맞는 명령이 없습니다 (Esc 로 닫기)</div>';
+      tagTooltip.classList.add('open', 'ac-mode');
+      tagTooltip.classList.remove('chunk-ac-mode');
+      positionTagTooltip();
+      return;
+    }
     renderAutocomplete();
   }
-  /** 토큰 [start, end) 를 `replacement` 로 바꾼다. `execCommand('insertText')` 라 네이티브 undo 한 단계.
+  function openSlashEntry(textarea, caret) {
+    closeSlashEntry({restoreFocus: false});
+    acTarget = textarea;
+    const point = getInputCaretPoint(textarea);
+    const rect = textarea.getBoundingClientRect();
+    const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight) || 18;
+    const el = document.createElement('div');
+    el.className = 'slash-entry';
+    el.innerHTML = '<span class="slash-entry-mark">/</span>' +
+      '<input class="slash-entry-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="명령">';
+    el.style.left = `${Math.round(point?.left ?? rect.left)}px`;
+    el.style.top = `${Math.round(point?.top ?? rect.top)}px`;
+    el.style.height = `${Math.round(lineHeight)}px`;
+    document.body.appendChild(el);
+    const input = el.querySelector('input');
+    slashEntry = {el, input, textarea, caret, valueAtOpen: String(textarea.value || '')};
+    input.addEventListener('input', () => renderSlashList(input.value));
+    input.addEventListener('keydown', onSlashEntryKey);
+    input.focus();
+    renderSlashList('');
+  }
+  function onSlashEntryKey(e) {
+    if (!slashEntry) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeSlashEntry({restoreFocus: true}); return; }
+    if (e.key === 'Backspace' && !slashEntry.input.value) { e.preventDefault(); closeSlashEntry({restoreFocus: true}); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (acResults.length) { moveAutocompleteSelection(e.key === 'ArrowDown' ? 1 : -1); renderAutocomplete(); }
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const row = acResults[acSel] || acResults[0];
+      if (row) runSlashCommand(row); else closeSlashEntry({restoreFocus: true});
+    }
+  }
+  function closeSlashEntry({restoreFocus = true} = {}) {
+    const open = slashEntry;
+    if (!open) return;
+    slashEntry = null;
+    open.el.remove();
+    hideAutocomplete();
+    if (restoreFocus) {
+      open.textarea.focus({preventScroll: true});
+      open.textarea.setSelectionRange(open.caret, open.caret);
+    }
+  }
+  function runSlashCommand(row) {
+    const open = slashEntry;
+    if (!open) return;
+    const {textarea} = open;
+    // 열려 있는 동안 본문이 바뀌었으면(WS prompt_sync 등) 기억한 캐럿은 낡았다 - 지금 캐럿을 쓴다.
+    const same = String(textarea.value || '') === open.valueAtOpen;
+    const caret = same ? open.caret : Math.min(textarea.selectionStart ?? open.caret, String(textarea.value || '').length);
+    closeSlashEntry({restoreFocus: true});
+    if (!same) textarea.setSelectionRange(caret, caret);
+    applySlashCommand(textarea, caret, row);
+  }
+  /** 토큰 첫머리에서 `/` 가 눌리면 가로챈다(데스크톱). 모바일 IME 는 keydown 이 229 로 와서 못 잡는다 - 아래 input 폴백. */
+  function maybeOpenSlashEntryOnKey(textarea, e) {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return false;
+    // ⚠️ `imeState` 는 bindTagAssist 의 클로저다 - 여기서는 못 본다. 조합 중 여부는 부르는 쪽이 먼저 거른다.
+    if (e.isComposing || e.keyCode === 229) return false;
+    const caret = textarea.selectionStart;
+    if (caret == null || caret !== textarea.selectionEnd) return false;
+    if (!isTokenStart(textarea.value, caret)) return false;
+    e.preventDefault();
+    openSlashEntry(textarea, caret);
+    return true;
+  }
+  /** 폴백: `/` 가 이미 들어와 버렸으면(모바일) 그 한 글자를 도로 빼고 엔트리를 연다. */
+  function maybeOpenSlashEntryOnInput(textarea, e) {
+    if (!e || e.inputType !== 'insertText' || e.data !== '/') return false;
+    const caret = textarea.selectionStart;
+    if (caret == null || caret < 1 || textarea.value[caret - 1] !== '/') return false;
+    if (!isTokenStart(textarea.value, caret - 1)) return false;
+    textarea.setRangeText('', caret - 1, caret, 'end');
+    if (textarea === promptEdit) onPromptEdit();
+    openSlashEntry(textarea, caret - 1);
+    return true;
+  }
+  /** [start, end) 를 `replacement` 로. `execCommand('insertText')` 라 네이티브 undo 한 단계.
    *  (setRangeText 는 undo 스택을 끊는다 - 안 되는 런타임에서만 폴백.) */
   function replaceRangeUndoable(textarea, start, end, replacement) {
     textarea.focus({preventScroll: true});
@@ -2866,15 +2954,15 @@ export function createTagAssistController({
       textarea.dispatchEvent(new Event('input', {bubbles: true}));
     }
   }
-  function applySlashCommand(textarea, info, row) {
+  function applySlashCommand(textarea, caret, row) {
     const name = String(row?.tag || '');
     if (name === 'seq') {
       if (/:begin\b/i.test(String(textarea.value || ''))) {
         showToast?.('이미 시퀀스(:begin)가 있습니다. 하나만 둘 수 있습니다.', 'error');
         return;
       }
-      replaceRangeUndoable(textarea, info.start, info.end, SEQUENCE_SKELETON);
-      const firstText = info.start + ':begin,\n:seq1 '.length;
+      replaceRangeUndoable(textarea, caret, caret, SEQUENCE_SKELETON);
+      const firstText = caret + ':begin,\n:seq1 '.length;
       textarea.setSelectionRange(firstText, firstText + 'text'.length);
       if (textarea === promptEdit) onPromptEdit();
     }
@@ -3025,6 +3113,7 @@ export function createTagAssistController({
         window.clearTimeout(imeState.stableTimer);
         imeState.stableTimer = null;
       }
+      if (textarea === promptEdit && maybeOpenSlashEntryOnInput(textarea, e)) return;
       scheduleAutocomplete({target: textarea});
     });
     textarea.addEventListener('click', () => {
@@ -3068,7 +3157,8 @@ export function createTagAssistController({
     });
     textarea.addEventListener('blur', () => {
       window.setTimeout(() => {
-        if (document.activeElement !== textarea && !tagTooltip.contains(document.activeElement)) {
+        if (document.activeElement !== textarea && !tagTooltip.contains(document.activeElement)
+            && !(slashEntry && slashEntry.el.contains(document.activeElement))) {
           hideAutocomplete();
           hideTagChipInfoTooltip();
           tagTooltip.classList.remove('open', 'ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
@@ -3077,6 +3167,7 @@ export function createTagAssistController({
     });
     textarea.addEventListener('keydown', e => {
       if (imeState.composing || e.isComposing || e.keyCode === 229) return;
+      if (textarea === promptEdit && maybeOpenSlashEntryOnKey(textarea, e)) return;
       if (!acMode || !acResults.length) return;
       // ⚠️ **Ctrl/⌘ + Enter 는 자동완성보다 세다**(사용자 지정 2026-09-01).
       //    아래 Enter 가지가 `preventDefault + stopPropagation` 을 걸어 전역
@@ -3112,6 +3203,11 @@ export function createTagAssistController({
     bindTagAssist(negEdit);
   }
 
+  document.addEventListener('mousedown', e => {
+    if (slashEntry && !slashEntry.el.contains(e.target) && !tagTooltip?.contains(e.target)) {
+      closeSlashEntry({restoreFocus: false});
+    }
+  }, true);
   document.addEventListener('mousedown', e => {
     if (!promptInfoTooltip || !promptInfoTooltip.classList.contains('open')) return;
     const target = e.target;

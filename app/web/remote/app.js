@@ -12869,7 +12869,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slash')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashentry')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

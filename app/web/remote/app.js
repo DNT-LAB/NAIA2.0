@@ -12909,7 +12909,7 @@ function slashResolutionChoices() {
     if (naiResolutionBands.length) {
       rows.push({label: 'Preset ▸', desc: naiResolutionBands.map(b => b.label).join(' · '),
         run: () => ({next: naiResolutionBands.map(band => ({
-          label: band.label, desc: (band.resolutions || []).join(' · '),
+          label: band.label, desc: '',
           current: !!naiBandState.enabled && naiBandState.id === band.id,
           // 고르면 안 닫힌다: 밴드를 켜고 **그 밴드의 해상도 목록**으로 이어진다(사용자 지정).
           run: () => { setNaiResolutionBand(band.id); return {next: slashResolutionListChoices(band.resolutions)}; },
@@ -12919,7 +12919,7 @@ function slashResolutionChoices() {
   } else {
     rows.push({label: 'Preset ▸', desc: RESOLUTION_PRESET_DEFS.map(p => p.label).join(' · '),
       run: () => ({next: RESOLUTION_PRESET_DEFS.map(preset => ({
-        label: preset.label, desc: preset.resolutions.join(' · '),
+        label: preset.label, desc: '',
         current: isResolutionPresetEnabled(mode) && activeResolutionPresetState(mode)?.preset === preset.id,
         run: () => { setResolutionPreset(mode, preset.id); return {next: slashResolutionListChoices(preset.resolutions)}; },
       }))}),
@@ -12995,23 +12995,42 @@ const SLASH_PE_OPTIONS = [
 ];
 function slashPeOptionChoice(key, title) {
   const on = !!(slashPeState().preprocessing || {})[key];
-  return {label: title, desc: `${on ? 'ON → 끄기' : 'OFF → 켜기'}`, current: on,
-    run: () => { setPromptEngineeringOption(key, !on); showToast(`${title} ${!on ? 'ON' : 'OFF'}`, 'success'); }};
+  // 토글: 창이 안 닫히고 배경색이 바뀐다(사용자 지정) - 토스트는 안 띄운다.
+  return {label: title, desc: '', current: on, toggle: true,
+    run: () => { setPromptEngineeringOption(key, !on); return {stay: true}; }};
+}
+/** 작은 임시 편집창으로 PE 칸 하나를 고친다. 저장은 모듈 파라미터 + (열려 있으면) 그 칸 동기화. */
+function slashPeEditor(key, elementId, title) {
+  return () => ({editor: {
+    title,
+    get: () => String(slashPeState()[key] || ''),
+    set: value => {
+      const m = slashPeState();
+      const text = String(value ?? '');
+      setModuleParam('prompt_engineering', key, stampedEdit(text, m.preset || ''));
+      const el = document.getElementById(elementId);
+      if (el) el.value = text;
+    },
+  }});
 }
 function slashPeChoices() {
   const m = slashPeState();
-  const ollamaOn = !!m.ollama_auto_boost;
-  return [
-    {label: 'prefix ▸', desc: `Prefix 칸을 열어 바로 고친다 (${m.preset || '-'})`, run: () => slashFocusPeBox('modPrePrompt')},
-    {label: 'postfix ▸', desc: 'Postfix 칸을 열어 바로 고친다', run: () => slashFocusPeBox('modPostPrompt')},
-    {label: 'autohide ▸', desc: 'Auto-Hide 칸을 열어 바로 고친다', run: () => slashFocusPeBox('modAutoHide')},
-    {label: 'tools ▸', desc: 'preview · e621 · autoweight · ollama', run: () => ({next: [
+  const tools = () => {
+    const ollamaOn = !!slashPeState().ollama_auto_boost;
+    return [
       {label: 'preview', desc: 'Setting & Preview 열기', run: () => openPeDebugPanel()},
       slashPeOptionChoice('e621_auto_boost', 'e621'),
       slashPeOptionChoice('danbooru_auto_weight', 'autoweight'),
-      {label: 'ollama', desc: `Ollama Auto-Boost ${ollamaOn ? 'ON → 끄기' : 'OFF → 켜기'}`, current: ollamaOn,
-        run: () => { setPromptEngineeringOllamaAutoBoost(!ollamaOn); showToast(`Ollama Auto-Boost ${!ollamaOn ? 'ON' : 'OFF'}`, 'success'); }},
-    ]})},
+      {label: 'ollama', desc: '', current: ollamaOn, toggle: true,
+        run: () => { setPromptEngineeringOllamaAutoBoost(!ollamaOn); return {stay: true}; }},
+    ];
+  };
+  return [
+    // 셋은 모듈을 여는 대신 **작은 임시 편집창**(사용자 지정 2026-09-13).
+    {label: 'prefix ▸', desc: `Prefix 프롬프트 (${m.preset || '-'})`, run: slashPeEditor('pre_prompt', 'modPrePrompt', 'Prefix Prompt')},
+    {label: 'postfix ▸', desc: 'Postfix 프롬프트', run: slashPeEditor('post_prompt', 'modPostPrompt', 'Postfix Prompt')},
+    {label: 'autohide ▸', desc: 'Auto-Hide (Filter)', run: slashPeEditor('auto_hide', 'modAutoHide', 'Auto-Hide (Filter)')},
+    {label: 'tools ▸', desc: 'preview · e621 · autoweight · ollama', run: () => ({next: tools(), refresh: tools})},
     ...SLASH_PE_OPTIONS.map(([key, title]) => slashPeOptionChoice(key, title)),
   ];
 }
@@ -13080,7 +13099,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashpe')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashtoggle')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

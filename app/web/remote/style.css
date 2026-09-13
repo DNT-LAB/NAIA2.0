@@ -10289,6 +10289,22 @@ body.resizing-result-info {
 .slash-entry-input { width: 96px; min-width: 60px; border: 0; outline: 0; background: transparent;
   color: var(--text-primary); font: inherit; padding: 0; }
 .slash-entry-input::placeholder { color: var(--text-dim); }
+/* 토글 줄(사용자 지정): ON/OFF 는 배경색으로. 선택(selected)보다 약하게 깔린다. */
+.tag-ac-item.slash-on { background: rgba(88, 196, 128, 0.16); }
+.tag-ac-item.slash-on .tag-ac-group { color: #6fd39a; font-weight: 700; }
+.tag-ac-item.slash-off { background: rgba(255, 255, 255, 0.025); }
+.tag-ac-item.slash-off .tag-ac-group { color: var(--text-dim); }
+.tag-ac-item.slash-on.selected { background: rgba(88, 196, 128, 0.30); }
+/* 작은 임시 편집창(prefix/postfix/autohide) - PE 의 PREFIX PROMPT 칸과 같은 어법 */
+.slash-editor { position: fixed; z-index: 10002; width: min(560px, calc(100vw - 16px)); padding: 8px 10px 10px;
+  border-radius: 8px; background: #16151f; border: 1px solid rgba(139,118,255,0.75); box-shadow: 0 6px 24px rgba(0,0,0,0.55); }
+.slash-editor-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--text-muted); text-transform: uppercase; }
+.slash-editor-hint { text-transform: none; letter-spacing: 0; color: var(--text-dim); }
+.slash-editor-text { width: 100%; box-sizing: border-box; resize: vertical; min-height: 84px; padding: 8px 10px;
+  border-radius: 6px; border: 1px solid var(--border-dim); background: #0f0e16; color: var(--text-primary);
+  font-family: var(--font-editor, var(--font-mono)); font-size: 12px; line-height: 1.5; outline: none; }
+.slash-editor-text:focus { border-color: var(--accent); }
 /* 회수 안 된 슬래시 명령(`/seq` 등) - 태그가 아니다. 생성 직전에 무시된다(2026-09-13). */
 .prompt-token-slash { color: #ffb86b; background: rgba(255, 184, 107, 0.14); text-decoration: underline dotted; }
 /* `-태그` = 생성 직전에 네거티브로 빠지는 것.

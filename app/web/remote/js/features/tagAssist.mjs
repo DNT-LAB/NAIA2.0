@@ -2593,7 +2593,7 @@ export function createTagAssistController({
         : (wcType ? (r.desc || '') : fmtCount(r.count));
       const inlinePreview = wcType === 'chunk_group' ? (r.preview || '') : '';
       const hoverTitle = wcType === 'preset_status' ? (r.tag || '') : displayTag;
-      html += `<div class="tag-ac-item${itemClass}${sel}" data-idx="${i}"${autocompleteInfoAttrs(r, hoverTitle)}>` +
+      html += `<div class="tag-ac-item${itemClass}${sel}${r._rowClass || ''}" data-idx="${i}"${autocompleteInfoAttrs(r, hoverTitle)}>` +
         `<span class="tag-ac-tag"${tagColor}>${escHtml(displayTag)}</span>` +
         `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
         `<span class="tag-ac-count">${escHtml(metaText)}</span>` +
@@ -2861,7 +2861,13 @@ export function createTagAssistController({
     if (stage) {
       return (stage.choices || [])
         .filter(c => !q || String(c.label || '').toLowerCase().includes(q))
-        .map(c => ({tag: String(c.label || ''), _wc_type: 'slash_choice', group: c.current ? '✓ 현재' : '', desc: c.desc || '', cat: '', _choice: c}));
+        .map(c => ({
+          tag: String(c.label || ''), _wc_type: 'slash_choice', cat: '', _choice: c,
+          // 토글 줄은 ON/OFF 를 **배경색**으로 말한다(사용자 지정) - 글로 또 말하지 않는다.
+          group: c.toggle ? (c.current ? 'ON' : 'OFF') : (c.current ? '✓ 현재' : ''),
+          desc: c.desc || '',
+          _rowClass: c.toggle ? (c.current ? ' slash-on' : ' slash-off') : '',
+        }));
     }
     // `step 23` 처럼 값을 이어 쳤으면 **첫 낱말**로만 명령을 찾는다(값은 실행 때 읽는다).
     const head = q.split(/\s+/)[0] || '';
@@ -2901,6 +2907,18 @@ export function createTagAssistController({
       return;
     }
     renderAutocomplete();
+  }
+  /** 토글 뒤: 목록을 다시 만들어 같은 검색어·같은 줄로 다시 그린다 - 창은 그대로. */
+  function refreshSlashStage() {
+    const open = slashEntry;
+    if (!open || !open.stage) return;
+    const stage = open.stage;
+    if (typeof stage.refresh === 'function') {
+      try { stage.choices = stage.refresh() || []; } catch (_error) { /* 옛 목록 그대로 */ }
+    }
+    const keepSel = acSel;
+    renderSlashList(open.input.value);
+    if (keepSel >= 0 && keepSel < acResults.length) { acSel = keepSel; renderAutocomplete(); }
   }
   function setSlashStage(stage) {
     if (!slashEntry) return;
@@ -2951,6 +2969,47 @@ export function createTagAssistController({
       if (row) runSlashCommand(row); else closeSlashEntry({restoreFocus: true});
     }
   }
+  /** 작은 임시 편집창. editor = {title, get() → 글, set(글)}. Ctrl+Enter 저장 · Esc 취소.
+   *  엔트리와 같은 자리(캐럿)에 뜨고, 저장/취소 뒤 textarea 캐럿으로 돌아간다. */
+  function openSlashEditor(open, editor) {
+    const {textarea, caret} = open;
+    const left = open.el.style.left, top = open.el.style.top;
+    closeSlashEntry({restoreFocus: false});
+    const box = document.createElement('div');
+    box.className = 'slash-editor';
+    box.style.left = left;
+    box.style.top = top;
+    box.innerHTML = `<div class="slash-editor-head"><span class="slash-editor-title"></span>` +
+      `<span class="slash-editor-hint">Ctrl+Enter 저장 · Esc 취소</span></div>` +
+      `<textarea class="slash-editor-text" rows="4" spellcheck="false"></textarea>`;
+    box.querySelector('.slash-editor-title').textContent = String(editor.title || '');
+    const text = box.querySelector('textarea');
+    let value = '';
+    try { value = String(editor.get() || ''); } catch (_error) { value = ''; }
+    text.value = value;
+    document.body.appendChild(box);
+    // 화면 밖으로 나가면 안쪽으로 당긴다
+    const rect = box.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (rect.right > vw - 8) box.style.left = `${Math.max(8, vw - rect.width - 8)}px`;
+    if (rect.bottom > vh - 8) box.style.top = `${Math.max(8, vh - rect.height - 8)}px`;
+    const done = (save) => {
+      if (!box.isConnected) return;
+      if (save) { try { editor.set(text.value); } catch (error) { showToast?.(`저장 실패 — ${error?.message || error}`, 'error'); } }
+      box.remove();
+      document.removeEventListener('mousedown', outside, true);
+      textarea.focus({preventScroll: true});
+      textarea.setSelectionRange(caret, caret);
+    };
+    const outside = (e) => { if (!box.contains(e.target)) done(false); };
+    text.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); done(false); return; }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(true); }
+    });
+    document.addEventListener('mousedown', outside, true);
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
+  }
   function closeSlashEntry({restoreFocus = true} = {}) {
     const open = slashEntry;
     if (!open) return;
@@ -2976,9 +3035,21 @@ export function createTagAssistController({
       let result = null;
       try { result = typeof choice?.run === 'function' ? choice.run() : null; }
       catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
+      if (result && result.stay) {
+        // 토글 - 창은 그대로, 상태만 다시 그린다(사용자 지정: 닫히지 않게 · 토스트 없이).
+        refreshSlashStage();
+        open.input.focus();
+        return;
+      }
+      if (result && result.editor) {
+        // 작은 임시 편집창(prefix/postfix/autohide) - 엔트리 자리에 뜬다.
+        openSlashEditor(open, result.editor);
+        return;
+      }
       if (result && Array.isArray(result.next)) {
         // 안 닫힌다 - 다음 목록으로 이어진다(해상도 Preset ▸ 뒤에 그 밴드의 해상도들).
-        setSlashStage({cmd: open.stage?.cmd || {name: ''}, choices: result.next});
+        setSlashStage({cmd: open.stage?.cmd || {name: ''}, choices: result.next,
+          refresh: typeof result.refresh === 'function' ? result.refresh : null});
         open.input.focus();
         return;
       }
@@ -3005,7 +3076,7 @@ export function createTagAssistController({
       let choices = [];
       try { choices = cmd.choices() || []; }
       catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
-      setSlashStage({cmd, choices});
+      setSlashStage({cmd, choices, refresh: () => cmd.choices() || []});
       if (seed) { open.input.value = seed; renderSlashList(seed); }
       open.input.focus();
       return;

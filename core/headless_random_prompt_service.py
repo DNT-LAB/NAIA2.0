@@ -52,6 +52,7 @@ class HeadlessRandomPromptResult:
     detected_resolution: tuple[int, int] | None = None
     reset_resolution_detected: bool = False
     extra_messages: list[dict[str, Any]] = field(default_factory=list)
+    event_map_revision: int | None = None
 
     def websocket_payload(self) -> dict[str, Any]:
         if not self.success:
@@ -139,6 +140,40 @@ class HeadlessRandomPromptService:
         random_request_id: str = "",
         source_row_override: Any = None,
     ) -> HeadlessRandomPromptResult:
+        from core.event_map.random_link import ensure_event_map_service, link_state
+        link = link_state(self.context)
+        if link["enabled"]:
+            from core.event_map.service import MapQueryError
+            revision = link["revision"]
+            if link.get("pending"):
+                return HeadlessRandomPromptResult(False, error="EV Random: 선택 조건을 반영하는 중입니다.",
+                                                 event_map_revision=revision)
+            stream = getattr(self.context, "event_stream_runtime", None)
+            if getattr(stream, "is_active", False) or (overrides or {}).get("_storyteller_page"):
+                return HeadlessRandomPromptResult(False, error="Story 실행 중에는 랜덤 버튼 연결을 해제해주세요.",
+                                                 event_map_revision=revision)
+            try:
+                body = ensure_event_map_service(self.context).sample(
+                    **{k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}, n=1)
+                samples = body.get("samples") or []
+                if not samples:
+                    raise MapQueryError("no_match", "EV Random: 이 조건에 맞는 게시물이 없습니다.")
+                if link_state(self.context)["revision"] != revision:
+                    raise MapQueryError("cancelled", "EV Random: 선택 조건이 변경되어 취소했습니다.")
+                sample = samples[0]
+                row = {"general": ", ".join(sample["tags"]),
+                       "rating": str(sample.get("partition") or "s")[:1],
+                       "character": None, "copyright": None, "artist": None, "meta": None,
+                       "event_map_combo": True}
+                result = self.generate_from_source_row(
+                    row, overrides={**(overrides or {}), "wildcard_standalone": False},
+                    active_ratings=set(link.get("ratings", "").replace(",", "")) or set(DEFAULT_RATINGS),
+                    random_request_id=random_request_id, source="random", update_context=True)
+                result.event_map_revision = revision
+                return result
+            except MapQueryError as exc:
+                return HeadlessRandomPromptResult(False, error=str(exc), random_request_id=random_request_id,
+                                                 event_map_revision=revision)
         settings = self._random_settings(overrides)
         ratings = self._normalize_ratings(active_ratings)
         self._ensure_headless_runtime()

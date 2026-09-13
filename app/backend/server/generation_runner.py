@@ -229,7 +229,9 @@ def _ollama_boost_settings_token(context: WebSessionContext) -> tuple:
 def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
     """예약 행/boost 유효성 토큰. 검색풀 교체(재검색)·등급·API모드·토글·boost 설정 변경을 잡는다.
     (풀 count는 매 생성 변하므로 제외 — 풀 advance는 명시 무효화[수동 random]로 처리.)"""
+    from core.event_map.random_link import link_state
     return (
+        link_state(context)["revision"],
         id(getattr(context, "search_results", None)),
         tuple(sorted(ratings or [])),
         str(getattr(context, "current_api_mode", "") or ""),
@@ -241,6 +243,9 @@ def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
 def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     """프리페치 자격: 토글 ON·일반 Auto Gen(또는 Automation)·Story/Preset/특수 아님·
     prompt_fixed 아님·활성 태그필터 없음."""
+    from core.event_map.random_link import link_state
+    if link_state(context)["enabled"]:
+        return False
     if not getattr(context, "ollama_auto_boost", False):
         return False
     # include_*(prefix/postfix/e621) 중 하나라도 ON이면 prefetch 비활성 → 동기 폴백. 오버랩
@@ -401,11 +406,17 @@ async def _consume_auto_gen_prefetch(context: WebSessionContext, overrides, requ
             random_request_id=request_id,
             source_row_override=source_row,
         )
+        if holder.get("state_key") != _auto_gen_prefetch_state_key(context, ratings):
+            if task is not None and not task.done():
+                task.cancel()
+            return None
         if getattr(result, "success", False):
             # boost는 이미지 생성과 겹쳐 대부분 이미 완료. 아직이면 짧게만 기다리고, 그래도
             # 안 되면 이번 컷은 boost 생략한다 — **2차 Ollama 호출은 절대 하지 않는다**(중복/지연 방지).
             try:
                 boost = await asyncio.wait_for(asyncio.shield(task), timeout=_PREFETCH_BOOST_GRACE)
+                if holder.get("state_key") != _auto_gen_prefetch_state_key(context, ratings):
+                    return None
                 _apply_prefetched_boost(context, result, boost, holder.get("settings"))
             except Exception:
                 if task is not None and not task.done():
@@ -1428,6 +1439,8 @@ async def _maybe_continue_auto_generation(
         # Use Vibe 인코딩(2 Anlas)이 이 페이지 전진에서 일어났다면 잔액 차감 즉시 반영
         # (자동 사이클 continuation 경로).
         await broadcast_anlas_if_vibe_encoded(context, clients)
+        from core.event_map.random_link import reject_stale_result
+        reject_stale_result(context, result)
         payload = result.websocket_payload()
         if not result.success:
             await broadcast_json(clients, payload)
@@ -1490,6 +1503,13 @@ async def _maybe_continue_auto_generation(
                 width=overrides.get("width"),
                 height=overrides.get("height"),
             )
+
+    if not effective_prompt_fixed:
+        from core.event_map.random_link import result_is_current
+        if not result_is_current(context, result):
+            return False
+        if getattr(result, "event_map_revision", None) is not None:
+            overrides["wildcard_standalone"] = False
 
     # ⚠️ **여기서 한 번 더 본다.** 위쪽 `_should_continue_auto_generation` 검사와 이
     #    줄 사이에 프롬프트 생성(`to_thread`)·Ollama boost·broadcast 가 여럿 끼어

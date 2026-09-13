@@ -266,3 +266,6 @@ data/tag_combo/
 # 레포에는 넣지 않는다.
 build_tags_increment/
 
+# Event Map classification audit/intermediate data; compact subcategories are bundled.
+/data/event_map_category_mapping.json
+

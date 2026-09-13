@@ -465,6 +465,8 @@ async def recover_exhausted_random_pool(
       ① 검색이 적용된 순간의 **스냅샷 복원** - 등급도 칩도 건드리지 않는다.
       ② 스냅샷이 없을 때만 예전 경로(등급을 전체로 열고 필터 할당 해제).
     """
+    if getattr(result, "event_map_revision", None) is not None:
+        return result
     if result.success or bool((overrides or {}).get("wildcard_standalone")):
         return result
     pool_already_full = set(active_ratings) == {"g", "s", "q", "e"} and not (
@@ -520,7 +522,9 @@ async def handle_random_command(
     # 직접 재구성한다. 안 하면 필터가 무시된 전체 풀에서 뽑혀(result.success=True) 아래 failsafe 도
     # 안 걸리고, 표시 카운트(필터 기준)와 실제 풀(전체)이 어긋난다(사용자 리포트). no-op if already assigned.
     from app.backend.server.search_runtime import reconstruct_active_tag_filter
-    await asyncio.to_thread(reconstruct_active_tag_filter, context)
+    from core.event_map.random_link import link_state
+    if not link_state(context)["enabled"]:
+        await asyncio.to_thread(reconstruct_active_tag_filter, context)
     result = await asyncio.to_thread(
         random_service(context).generate,
         active_ratings=active_ratings,
@@ -542,6 +546,11 @@ async def handle_random_command(
     # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
     await apply_ollama_auto_boost(context, result)
     await persist_prompt_engineering_settings(context)
+    from core.event_map.random_link import reject_stale_result
+    reject_stale_result(context, result)
+    if not result.success and getattr(result, "event_map_revision", None) is not None:
+        context.set_option("auto_generate", False)
+        await _broadcast_json(clients, {"type": "options", **context.get_options()})
     # prompt_generated 는 유니캐스트가 아니라 브로드캐스트한다 — 요청 소켓이 half-open/끊긴 직후라도
     # (재연결한 새 소켓 포함) 모든 클라이언트가 좌측 패널에 적용 프롬프트를 받게 한다(RC-1: 적용은
     # 됐는데 좌측 창에 안 뜨던 버그). source 는 "random" 유지 — 프런트는 패널 갱신은 무조건 수용하고
@@ -1015,10 +1024,19 @@ async def _maybe_enqueue_random_auto_generation(
 ):
     if not result.success:
         return None
+    from core.event_map.random_link import result_is_current
+    if not result_is_current(context, result):
+        return None
+    if getattr(result, "event_map_revision", None) is not None:
+        # Live OFF must beat stale request options after sampling/boost awaits.
+        if not context._coerce_bool(context.get_options().get("auto_generate", False)):
+            return None
     if not _should_auto_generate_after_random(context, command, overrides):
         return None
 
     generation_overrides = dict(overrides) if isinstance(overrides, dict) else {}
+    if getattr(result, "event_map_revision", None) is not None:
+        generation_overrides["wildcard_standalone"] = False
     generation_overrides["auto_generate"] = True
     generation_overrides["_remote_queue_source"] = queue_source
     generation_overrides["_remote_queue_label"] = queue_source
@@ -1089,7 +1107,9 @@ def register_generation_rest_routes(
         # WS Random과 동일하게 영속 활성 태그필터를 백엔드가 재조립(재시작/가져오기 후 REST random 이
         # 필터를 무시하고 전체 풀에서 뽑는 것 방지 — Codex F3). no-op if already assigned.
         from app.backend.server.search_runtime import reconstruct_active_tag_filter
-        await asyncio.to_thread(reconstruct_active_tag_filter, context)
+        from core.event_map.random_link import link_state
+        if not link_state(context)["enabled"]:
+            await asyncio.to_thread(reconstruct_active_tag_filter, context)
         result = await asyncio.to_thread(
             random_service(context).generate,
             active_ratings=active_ratings,
@@ -1101,6 +1121,8 @@ def register_generation_rest_routes(
         await persist_prompt_engineering_settings(context)
         # Use Vibe 인코딩(2 Anlas) 발생 시 잔액 차감 즉시 반영(REST random 경로).
         await broadcast_anlas_if_vibe_encoded(context, clients)
+        from core.event_map.random_link import reject_stale_result
+        reject_stale_result(context, result)
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)

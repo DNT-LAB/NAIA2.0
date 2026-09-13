@@ -190,6 +190,8 @@
     {
       "id": "event_map",
       "name": "Event Map (Ctrl+E) pinned tag co-occurrence over the observed corpus",
+      "subcategories": "GET explore/browse accept subcategory with a single selected group. subcategories counts cover the entire matching group before the subcategory filter; unknown and pending tags remain accessible. Compact mapping is bundled as data/event_map_subcategories.json.",
+      "pagination": "GET explore/browse accept zero-based offset and bounded limit; return offset, next_offset and has_more. The panel appends 40 candidates on bottom scroll and resets on query changes.",
       "source_files": [
         "app/backend/server/event_map_routes.py",
         "core/event_map/__init__.py",
@@ -197,7 +199,11 @@
         "core/event_map/pack.py",
         "core/event_map/policy.py",
         "core/event_map/service.py",
+        "core/event_map/random_link.py",
+        "core/event_map/library.py",
+        "app/web/remote/js/features/eventMapLibrary.mjs",
         "core/event_map/categories.py",
+        "data/event_map_subcategories.json",
         "core/event_map/kr_category_fold.json",
         "core/event_map/pe_filter.py",
         "app/web/remote/js/features/eventMapPanel.mjs"
@@ -205,6 +211,10 @@
       "legacy_dependency": "none",
       "routes": [
         {"method": "GET", "path": "/api/event-map/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/random-link", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/library", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-map/library", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/event-map/random-link", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/event-map/suggest", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/explore", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/sample", "smoke": "non_destructive"},

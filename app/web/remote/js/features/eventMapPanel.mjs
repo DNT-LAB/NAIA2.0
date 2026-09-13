@@ -23,6 +23,8 @@
  * 크기 규약은 Fast Search 와 같다(결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반).
  */
 
+import { initEventMapLibrary } from './eventMapLibrary.mjs?v=20260913-library3';
+
 const DEBOUNCE_MS = 150;
 const CANDIDATE_LIMIT = 40;
 const SUGGEST_LIMIT = 12;
@@ -68,10 +70,55 @@ const SORT_MODES = [
   { id: 'mix', label: 'mix 순', title: '관측 × ln(lift) - 많이 나오면서 치우친 것(G² 기여분). 둘의 절충' },
 ];
 
-export function initEventMap({ insertTag, showToast, getPromptText, generateNow } = {}) {
+export function initEventMap({ insertTag, showToast, getPromptText, generateNow, onRandomLinkChange } = {}) {
+  let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
+  let linkUncertain = false;
+  let linkQueue = Promise.resolve(), linkKey = '';
+  function paintRandomLink() {
+    const checkbox = footEl?.querySelector('[data-em-random-link]');
+    if (checkbox) { checkbox.checked = randomLink.enabled; checkbox.disabled = linkPending > 0; }
+    onRandomLinkChange?.(randomLink.enabled, linkPending > 0 || linkUncertain);
+  }
+  function receiveRandomLink(state) {
+    if (!state || state.revision < randomLink.revision) return;
+    randomLink = state;
+    linkUncertain = false;
+    if (state.enabled && !linkPending) {
+      pins = (state.pins || '').split(',').filter(Boolean);
+      excludes = (state.exclude || '').split(',').filter(Boolean);
+      ratings = new Set((state.ratings || RATING_OPTIONS.map(r => r.id).join(',')).split(','));
+      persons = new Set((state.persons || PERSON_IDS.join(',')).split(','));
+      const fp = filterParams();
+      linkKey = JSON.stringify({ enabled: true, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons });
+      if (open) void explore();
+    }
+    paintRandomLink();
+  }
+  function syncRandomLink(enabled = randomLink.enabled) {
+    const fp = filterParams();
+    const payload = { enabled, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons };
+    const key = JSON.stringify(payload);
+    if (key === linkKey) return linkQueue;
+    linkKey = key;
+    linkPending++;
+    paintRandomLink();
+    linkQueue = linkQueue.then(async () => {
+      try { receiveRandomLink(await postJson('/api/event-map/random-link', payload, AbortSignal.timeout(20000))); }
+      catch (error) {
+        linkKey = '';
+        toast(`랜덤 버튼 연결 실패 — ${error.message}`, 'error');
+        // Never leave the backend generating from a previous selection silently.
+        try { receiveRandomLink(await postJson('/api/event-map/random-link', { enabled: false }, AbortSignal.timeout(20000))); }
+        catch { linkUncertain = true; toast('서버 연결을 확인해주세요. 랜덤 버튼 연결 상태를 확인할 수 없습니다.', 'error'); }
+      } finally { linkPending--; paintRandomLink(); }
+    });
+    return linkQueue;
+  }
   let overlay = null, input = null, statusEl = null, trailEl = null, bodyEl = null;
   let filtersEl = null, personBtn = null, personPopup = null, footEl = null, tabBtn = null;
+  let subEl = null, subcategory = '';
   let sideEl = null;              // 실제 조합 둘째 패널
+  let library = null;
   let open = false, seq = 0, suggestSeq = 0, timer = null;
   let mapState = null;            // /state 응답. 열 때마다 새로 받는다(색인이 바뀔 수 있다).
   let personLabels = new Map();   // id -> 화면 문구 (서버가 준다)
@@ -82,6 +129,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   let sortMode = prefs?.sort || 'mix';   // 기본 = mix(사용자 지정 2026-09-12 밤 - 밸런스)
   let roles = new Set();          // 대분류 필터(갈래 id). 비면 전부
   let group = '';                 // 첫 화면에서 고른 대분류(핀이 없을 때만 뜻이 있다)
+  let moreRequest = null, moreError = '';
   let browse = null;              // 마지막 browse 결과
   let result = null;              // 마지막 explore
   let suggest = null;             // 마지막 suggest (검색 칸에 글자가 있을 때만)
@@ -134,6 +182,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   /** 질의 중 덮개. 머리줄(검색 칸)은 남기고 그 아래를 덮는다 - 타이핑은 되고 클릭만 막힌다. */
   function setBusy(on) {
     busyCount = Math.max(0, busyCount + (on ? 1 : -1));
+    if (subEl) subEl.inert = busyCount > 0;
     if (!busyEl) return;
     const bar = overlay?.querySelector('.em-bar');
     if (bar) busyEl.style.top = `${bar.offsetHeight}px`;
@@ -145,6 +194,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       ratings: ratings.size === RATING_OPTIONS.length ? '' : RATING_OPTIONS.map(r => r.id).filter(id => ratings.has(id)).join(','),
       persons: persons.size === PERSON_IDS.length ? '' : PERSON_IDS.filter(id => persons.has(id)).join(','),
       groups: roles.size ? [...roles].join(',') : '',
+      subcategory: selectedCategory() ? subcategory : '',
     };
   }
 
@@ -170,6 +220,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   const peTitle = tag => peHidden.has(tag) ? ` · 프롬프트 엔지니어링 설정(${peHidden.get(tag)})이 지웁니다` : '';
 
   async function loadBrowse() {
+    if (randomLink.enabled) void syncRandomLink();
+    moreRequest = null; moreError = '';
+    active = -1;
+    browse = null;
+    if (bodyEl) bodyEl.scrollTop = 0;
     const mine = ++seq;
     setStatus('찾는 중…', 'busy');
     setBusy(true);
@@ -185,6 +240,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   }
 
   async function explore() {
+    if (randomLink.enabled) void syncRandomLink();
+    moreRequest = null; moreError = '';
+    active = -1;
+    ++seq; // 핀이 전부 사라져도 이전 응답을 무효화한다.
+    result = null;
+    if (bodyEl) bodyEl.scrollTop = 0;
     samples = null;
     if (!pins.length) {
       result = null;
@@ -207,7 +268,53 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     render();
   }
 
+  function currentCandidates() {
+    if (!open || mapState?.state !== 'ready' || input?.value.trim()) return null;
+    return pins.length ? result : (group ? browse : null);
+  }
+
+  function moreHtml() {
+    const source = currentCandidates();
+    if (!source?.has_more) return '';
+    return `<div class="em-cap" data-em-more role="status">${moreRequest ? '40개 더 불러오는 중…' : moreError
+      ? '<button type="button" class="em-mini" data-em-more-retry>불러오기 실패 · 다시 시도</button>'
+      : '아래로 스크롤하면 40개 더 표시합니다'}</div>`;
+  }
+
+  async function loadMore() {
+    const source = currentCandidates();
+    if (!source?.has_more || moreRequest || busyCount) return;
+    const mine = seq;
+    const ticket = {};
+    moreRequest = ticket; moreError = '';
+    const footer = bodyEl.querySelector('[data-em-more]');
+    if (footer) footer.outerHTML = moreHtml();
+    const exploring = pins.length > 0;
+    const params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...filterParams() };
+    if (exploring) Object.assign(params, { pins: pins.join(','), exclude: excludes.join(','), sort: sortMode });
+    else Object.assign(params, { group, groups: '' });
+    try {
+      const page = await getJson(`/api/event-map/${exploring ? 'explore' : 'browse'}`, params);
+      if (mine !== seq || moreRequest !== ticket || currentCandidates() !== source) return;
+      // 구형 서버가 offset을 무시해 첫 페이지를 다시 보내면 중복해서 붙이지 않는다.
+      if (page.offset !== params.offset) throw new Error('서버를 재시작한 뒤 다시 시도해 주세요.');
+      source.candidates.push(...(page.candidates || []));
+      source.has_more = page.has_more;
+      source.next_offset = page.next_offset;
+    } catch (error) {
+      if (mine !== seq || moreRequest !== ticket || currentCandidates() !== source) return;
+      moreError = error.message;
+      toast(`추가 목록을 불러오지 못했습니다 — ${error.message}`, 'error');
+    } finally {
+      if (moreRequest === ticket) {
+        moreRequest = null;
+        if (mine === seq && currentCandidates() === source) render(true);
+      }
+    }
+  }
+
   function scheduleSuggest() {
+    moreRequest = null; moreError = '';
     clearTimeout(timer);
     const q = input.value.trim();
     if (!q) { suggest = null; render(); return; }
@@ -226,6 +333,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   }
 
   async function drawSamples() {
+    library?.close();
     if (!pins.length) return;
     const mine = ++seq;
     setStatus('실제 조합을 뽑는 중…', 'busy');
@@ -248,6 +356,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
 
   // ── 상태 조작 ────────────────────────────────────────────────────────────
   function pin(tag) {
+    if (!pins.length) subcategory = '';
     const clean = String(tag || '').trim();
     if (!clean || pins.includes(clean)) return;
     const max = Number(mapState?.limits?.max_pins || 16);
@@ -264,15 +373,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     pins = pins.filter(t => t !== clean);
     void explore();
   }
-  function goTo(depth) {          // depth = 남길 핀 개수
+  function goTo(depth) {
+    subcategory = '';          // depth = 남길 핀 개수
     pins = pins.slice(0, Math.max(0, depth));
     void explore();
   }
   function goBack() {
+    subcategory = '';
     if (pins.length) { goTo(pins.length - 1); return; }
     if (group) { group = ''; browse = null; render(); }
   }
-  function pickGroup(id) { group = id; browse = null; void loadBrowse(); }
+  function pickGroup(id) { subcategory = ''; group = id; browse = null; void loadBrowse(); }
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
@@ -402,8 +513,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   }
   /** 실제 조합 i 를 파이프라인에 태운다. 회색(PE 가 지울 것)도 **그대로 보낸다** - 파이프라인이
    *  스스로 지우는 것이 '랜덤 프롬프트와 같은 방식' 이다. */
-  async function postJson(path, body) {
-    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  async function postJson(path, body, signal) {
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) { const e = new Error(data.message || `HTTP ${res.status}`); e.code = data.code; throw e; }
     return data;
@@ -713,19 +824,90 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         </div>`).join('') || '<div class="em-empty">조합이 없습니다</div>'}</div>`;
     positionSide();
   }
-  function positionSide() {
-    if (!sideEl || sideEl.hidden || !overlay) return;
-    const r = overlay.getBoundingClientRect();
-    const width = Math.round(Math.min(360, Math.max(240, window.innerWidth - r.right - 24)));
-    sideEl.style.left = `${Math.round(r.right + 8)}px`;
-    sideEl.style.top = `${Math.round(r.top)}px`;
-    sideEl.style.width = `${width}px`;
-    sideEl.style.height = `${Math.round(r.height)}px`;
+  function selectedCategory() {
+    return pins.length ? (roles.size === 1 ? [...roles][0] : '') : group;
   }
 
-  function render() {
+  function paintSubcategories() {
+    if (!subEl) return;
+    const gid = selectedCategory();
+    const source = currentCandidates();
+    subEl.hidden = !open || !gid || !!input?.value.trim() || mapState?.state !== 'ready';
+    if (subEl.hidden) return;
+    const previousScroll = subEl.querySelector('.em-sublist')?.scrollTop || 0;
+    const focused = subEl.contains(document.activeElement) ? document.activeElement.dataset.emSub : undefined;
+    const rows = source?.subcategories || [];
+    const total = source?.subcategory_total ?? source?.candidate_pool ?? 0;
+    const button = (id, label, count) => `<button type="button" class="em-subitem${id === subcategory ? ' is-on' : ''}"
+      data-em-sub="${esc(id)}" aria-pressed="${id === subcategory}" title="${esc(label)}">
+      <span>${esc(label)}</span><span class="em-subcount">${fmt(count)}</span></button>`;
+    subEl.innerHTML = `<button type="button" class="em-subheading" data-em-sub-toggle aria-expanded="${subEl.dataset.expanded === 'true'}">
+        <span>${esc(roleLabel(gid))}<small>소분류</small></span><span class="em-subchevron">⌄</span></button>
+      <div class="em-sublist" role="group" aria-label="${esc(roleLabel(gid))} 소분류">
+        ${button('', '전체', total)}
+        ${rows.map(row => button(row.id, row.label, row.count)).join('')}
+        ${!source ? '<div class="em-subempty">불러오는 중…</div>' : !rows.length ? '<div class="em-subempty">이 조건에 맞는 소분류가 없습니다.</div>' : ''}
+      </div>`;
+    subEl.inert = busyCount > 0;
+    positionSubcategories();
+    subEl.querySelector('.em-sublist').scrollTop = previousScroll;
+    if (focused !== undefined) {
+      [...subEl.querySelectorAll('[data-em-sub]')].find(button => button.dataset.emSub === focused)?.focus({ preventScroll: true });
+    }
+  }
+
+  function positionSubcategories() {
+    if (library?.isOpen()) { if (subEl) subEl.hidden = true; return; }
+    if (!subEl || subEl.hidden || !overlay) return;
+    const r = overlay.getBoundingClientRect();
+    // 실제 조합 패널이 열려 있으면 레일이 그것을 밀어내지 않도록 메인 패널 안으로 들어간다(사용자 제보).
+    const sideOpen = !!(sideEl && !sideEl.hidden);
+    const inline = sideOpen || window.innerWidth - r.right < 156;
+    if (inline) {
+      if (subEl.parentElement !== overlay) overlay.insertBefore(subEl, bodyEl);
+      subEl.classList.add('is-inline');
+      for (const key of ['left', 'top', 'width', 'height']) subEl.style[key] = '';
+    } else {
+      if (subEl.parentElement !== document.body) document.body.append(subEl);
+      subEl.classList.remove('is-inline');
+      const top = Math.min(bodyEl.getBoundingClientRect().top, window.innerHeight - 160);
+      // Keep the rail independent of the candidate list shrinking after a filter.
+      const viewerBottom = document.querySelector('#resultViewer')?.getBoundingClientRect().bottom;
+      const bottom = Math.min(window.innerHeight - 16, viewerBottom > top ? viewerBottom - 14 : window.innerHeight - 16);
+      const contentHeight = (subEl.querySelector('.em-subheading')?.offsetHeight || 0)
+        + (subEl.querySelector('.em-sublist')?.scrollHeight || 0) + 2;
+      const height = Math.max(100, Math.min(contentHeight, bottom - top));
+      Object.assign(subEl.style, { left: `${Math.round(r.right + 8)}px`, top: `${Math.round(top)}px`,
+        width: '140px', height: `${Math.round(height)}px` });
+    }
+  }
+
+  function positionSide() {
+    if (library?.isOpen()) { if (sideEl) sideEl.hidden = true; library.position(); return; }
+    if (!sideEl || sideEl.hidden || !overlay) return;
+    // 레일이 아직 바깥에 떠 있으면 먼저 안으로 들인다(열리는 순서와 무관하게 같은 배치).
+    if (subEl && !subEl.hidden && !subEl.classList.contains('is-inline')) positionSubcategories();
+    const r = overlay.getBoundingClientRect();
+    const railRight = subEl && !subEl.hidden && !subEl.classList.contains('is-inline')
+      ? subEl.getBoundingClientRect().right : r.right;
+    const width = Math.round(Math.min(360, Math.max(240, window.innerWidth - railRight - 24)));
+    // Use the left side if there is no room beside the subcategory rail.
+    const sideLeft = railRight + 8 + width <= window.innerWidth - 8 ? railRight + 8
+      : Math.max(8, r.left - width - 8);
+    // 높이는 메인 패널이 아니라 결과 칸(호스트) 바닥까지 — 메인 패널이 짧아도 조합 목록은 길게 본다(사용자 제보).
+    const host = document.querySelector('#resultViewer')?.getBoundingClientRect();
+    const bottom = Math.min(window.innerHeight - 16, host && host.bottom > r.top + 160 ? host.bottom - 14 : window.innerHeight - 16);
+    sideEl.style.left = `${Math.round(sideLeft)}px`;
+    sideEl.style.top = `${Math.round(r.top)}px`;
+    sideEl.style.width = `${width}px`;
+    sideEl.style.height = `${Math.round(Math.max(r.height, bottom - r.top))}px`;
+  }
+
+  function render(preserveScroll = false) {
     if (!overlay) return;
+    const scrollTop = bodyEl.scrollTop;
     hideTip();                      // 행이 다시 그려지면 주인이 사라진다 - 유령 툴팁을 막는다
+    library?.update();
     paintTrail();
     paintFilters();
     rows = [];
@@ -734,6 +916,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     // 빌드 안내도 두지 않는다 - 열면 알아서 받는다. 그 동안 검색·조건·발줄은 잠근다.
     setLocked(mapState?.state !== 'ready');
     if (!mapState || mapState.state !== 'ready') {
+      if (subEl) subEl.hidden = true;
       bodyEl.innerHTML = downloadHtml();
       const info = mapState?.install;
       const pct = Number(info?.download?.percent || 0);
@@ -770,19 +953,21 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);
       }
     }
-    bodyEl.innerHTML = html;
+    bodyEl.innerHTML = html + moreHtml();
+    paintSubcategories();
     paintSide();
     if (active >= rows.length) active = rows.length - 1;
-    paintActive();
+    paintActive(!preserveScroll);
     fitHeight();
+    if (preserveScroll) bodyEl.scrollTop = scrollTop;
   }
 
-  function paintActive() {
+  function paintActive(scroll = true) {
     bodyEl.querySelectorAll('[data-em-row]').forEach(el => {
       el.classList.toggle('is-active', Number(el.dataset.emRow) === active);
     });
     const el = bodyEl.querySelector(`[data-em-row="${active}"]`);
-    if (el) el.scrollIntoView({ block: 'nearest' });
+    if (el && scroll) el.scrollIntoView({ block: 'nearest' });
   }
 
   // ── 인원 팝업 (Fast Search 와 같은 체크 목록) ────────────────────────────
@@ -866,12 +1051,15 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       </div>
       <div class="em-trail"></div>
       <div class="em-filters"></div>
+      <div class="em-library-bar"><button type="button" data-library-mode="save" aria-expanded="false">이 조합 저장하기</button><button type="button" data-library-mode="load" aria-expanded="false">조합 불러오기</button></div>
+      <div class="em-library-panel" hidden></div>
       <div class="em-body" role="listbox"></div>
       <div class="em-foot">
         <span class="em-actions"><button type="button" class="em-random" data-em-random="select"
             title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
             title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span>
         <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
+        <label class="em-random-link" title="메인 Random과 Auto Gen이 현재 핀·제외·인원·등급을 사용합니다. 패널을 닫아도 연결됩니다."><input type="checkbox" data-em-random-link>랜덤 버튼 연결</label>
       </div>`;
     busyEl = document.createElement('div');
     busyEl.className = 'em-busy';
@@ -885,6 +1073,26 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     filtersEl = overlay.querySelector('.em-filters');
     bodyEl = overlay.querySelector('.em-body');
     footEl = overlay.querySelector('.em-foot');
+    library = initEventMapLibrary({
+      bar: overlay.querySelector('.em-library-bar'), panel: overlay.querySelector('.em-library-panel'), anchor: overlay,
+      onClose: () => paintSubcategories(),
+      onOpen: () => { samples = null; if (sideEl) sideEl.hidden = true; if (subEl) subEl.hidden = true; },
+      getSelection: () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons] }),
+      applySelection: async selection => {
+        if (linkPending || linkUncertain) throw new Error('랜덤 연결 상태를 확인한 뒤 다시 불러와주세요.');
+        pins = selection.pins.slice(); excludes = selection.exclude.slice();
+        ratings = new Set(selection.ratings); persons = new Set(selection.persons);
+        group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
+        input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
+        savePrefs(persons, ratings, sortMode);
+        if (randomLink.enabled) await syncRandomLink();
+        await explore();
+      }, toast, resize: fitHeight,
+    });
+    paintRandomLink();
+    footEl.querySelector('[data-em-random-link]').addEventListener('change', event => {
+      void syncRandomLink(event.target.checked);
+    });
 
     overlay.querySelector('.em-close').addEventListener('click', close);
     input.addEventListener('input', () => { active = -1; scheduleSuggest(); });
@@ -898,7 +1106,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       if (unpin) { pins = pins.filter(x => x !== unpin.dataset.emUnpin); void explore(); return; }
       const unex = t.closest('[data-em-unexclude]');
       if (unex) { clearExclude(unex.dataset.emUnexclude); return; }
-      if (t.closest('[data-em-group-back]')) { pins = []; excludes = []; browse = null; void loadBrowse(); return; }
+      if (t.closest('[data-em-group-back]')) { subcategory = ''; pins = []; excludes = []; browse = null; void loadBrowse(); return; }
       if (t.closest('[data-em-back]')) { goBack(); return; }
     });
     footEl.addEventListener('click', event => {
@@ -926,6 +1134,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       }
     });
     bodyEl.addEventListener('click', event => {
+      if (event.target.closest('[data-em-more-retry]')) { void loadMore(); return; }
       const t = event.target;
       const ex = t.closest('[data-em-exclude]');
       if (ex) { event.stopPropagation(); exclude(ex.dataset.emExclude); return; }
@@ -948,7 +1157,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       const cat = t.closest('[data-em-cat]');
       if (cat) {
         const id = cat.dataset.emCat;
-        if (pins.length) { roles = id ? new Set([id]) : new Set(); void explore(); }
+        if (pins.length) { subcategory = ''; roles = id ? new Set([id]) : new Set(); void explore(); }
         else if (id) pickGroup(id);
         return;
       }
@@ -965,7 +1174,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
       if (event.relatedTarget && row.contains(event.relatedTarget)) return;
       hideTip();
     });
-    bodyEl.addEventListener('scroll', hideTip, { passive: true });
+    bodyEl.addEventListener('scroll', () => {
+      hideTip();
+      if (!moreError && bodyEl.scrollHeight > bodyEl.clientHeight
+          && bodyEl.scrollHeight - bodyEl.clientHeight - bodyEl.scrollTop <= 8) void loadMore();
+    }, { passive: true });
     // 우클릭 = 제외(시험대와 같은 손버릇).
     bodyEl.addEventListener('contextmenu', event => {
       const row = event.target.closest('[data-em-pin]');
@@ -982,6 +1195,28 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     // Generation Info 를 끌어 키우면 뷰어가 줄어든다 - 창 크기가 아니라 뷰어 크기를 따라간다.
     const viewer = document.querySelector('#resultViewer');
     if (viewer && typeof ResizeObserver === 'function') new ResizeObserver(() => position()).observe(viewer);
+
+    subEl = document.createElement('div');
+    subEl.className = 'em-subpanel';
+    subEl.hidden = true;
+    subEl.dataset.expanded = 'false';
+    subEl.setAttribute('aria-label', '소분류 선택');
+    document.body.append(subEl);
+    subEl.addEventListener('click', event => {
+      const toggle = event.target.closest('[data-em-sub-toggle]');
+      if (toggle) {
+        if (subEl.classList.contains('is-inline')) {
+          subEl.dataset.expanded = subEl.dataset.expanded === 'true' ? 'false' : 'true';
+          toggle.setAttribute('aria-expanded', subEl.dataset.expanded);
+          fitHeight();
+        }
+        return;
+      }
+      const button = event.target.closest('[data-em-sub]');
+      if (!button || busyCount || button.dataset.emSub === subcategory) return;
+      subcategory = button.dataset.emSub;
+      if (pins.length) void explore(); else void loadBrowse();
+    });
 
     sideEl = document.createElement('div');
     sideEl.className = 'em-overlay em-side';
@@ -1064,7 +1299,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     const chrome = overlay.offsetHeight - bodyEl.clientHeight;
     want = Math.max(want, Math.ceil(chrome + bodyEl.scrollHeight + 4));
     overlay.style.maxHeight = `${Math.round(Math.min(heightCaps.hard, want))}px`;
+    positionSubcategories();
     positionSide();
+    library?.position();
   }
 
   async function show() {
@@ -1089,10 +1326,13 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     requestAnimationFrame(() => { if (open && document.activeElement !== input) input.focus({ preventScroll: true }); });
   }
   function close() {
+    library?.close();
+    moreRequest = null; moreError = '';
     if (!overlay) return;
     closePersonPopup();
     overlay.hidden = true;
     open = false;
+    if (subEl) subEl.hidden = true;
     if (sideEl) { sideEl.hidden = true; sideEl.innerHTML = ''; }
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'false');
     clearTimeout(timer);
@@ -1115,6 +1355,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     if (event.key === 'Escape' && open) {
       event.preventDefault(); event.stopPropagation();
       if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
+      if (library?.isOpen()) {
+        library.close();
+        overlay.querySelector('.em-library-bar button')?.focus();
+        return;
+      }
       close(); return;
     }
     const hit = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
@@ -1133,11 +1378,15 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     if (!open) return;
     const t = event.target;
     if (!(t instanceof Element)) return;
-    if (overlay?.contains(t) || sideEl?.contains(t) || personPopup?.contains(t) || tipEl?.contains(t)) return;
+    if (library?.contains(t) || overlay?.contains(t) || subEl?.contains(t) || sideEl?.contains(t) || personPopup?.contains(t) || tipEl?.contains(t)) return;
     if (tabBtn && (t === tabBtn || tabBtn.contains(t))) return;     // toggle 이 처리한다
     if (t.closest('#promptEdit, .prompt-highlight-wrap')) return;    // 메인 프롬프트 칸 - 예외
     close();
   }, true);
 
-  return { show, close, toggle, isOpen: () => open, pins: () => pins.slice() };
+  const refreshRandomLink = () => getJson('/api/event-map/random-link').then(receiveRandomLink).catch(() => {});
+  void refreshRandomLink();
+  return { show, close, toggle, isOpen: () => open, pins: () => pins.slice(),
+    isRandomLinked: () => randomLink.enabled, isRandomLinkPending: () => linkPending > 0 || linkUncertain,
+    receiveRandomLink, refreshRandomLink };
 }

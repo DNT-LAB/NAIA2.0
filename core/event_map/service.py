@@ -34,6 +34,7 @@ user-data 가 먼저다 - 내려받은 색인이 그쪽에 떨어진다. 같은 
 from __future__ import annotations
 
 import bisect
+import json
 import os
 import threading
 from pathlib import Path
@@ -122,6 +123,8 @@ class EventMapService:
         # 대분류: 태그 id -> 갈래 순번(groups() 순서). 색인을 열 때 같이 만든다.
         self._group_arr: np.ndarray | None = None
         self._group_rows: list[dict] = []
+        self._sub_arr: np.ndarray | None = None
+        self._sub_names: list[str] = []
         self._state = "unknown"
         self._message = ""
         self._path: Path | None = None
@@ -215,6 +218,40 @@ class EventMapService:
                 source = "%s (%d tags matched)" % (path, hit)
             except Exception as exc:                                  # pragma: no cover
                 source = "failed: %s" % exc
+        # Compact projection of the reviewed mapping; unavailable data falls back
+        # to the original Parquet categories and an unclassified subcategory.
+        sub_names = ["__unclassified__", "__pending__"]
+        sub_ids = {name: i for i, name in enumerate(sub_names)}
+        sub_arr = np.zeros(idx.n_tags, dtype=np.int32)
+        for root in self._roots:
+            candidate = root / "event_map_subcategories.json"
+            if not candidate.is_file():
+                continue
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+                if data.get("schema") != "naia-event-map-subcategories-v1":
+                    raise ValueError("unsupported subcategory schema")
+                entries = data["tags"]
+                if not isinstance(entries, dict) or any(
+                    not isinstance(value, list) or len(value) != 2
+                    or value[0] not in order or not isinstance(value[1], str)
+                    or not value[1] for value in entries.values()
+                ):
+                    raise ValueError("invalid subcategory entries")
+            except (ValueError, KeyError, TypeError, OSError):
+                continue
+            for tag, (gid, sub) in entries.items():
+                tid = idx.resolve(tag)
+                if tid is None:
+                    continue
+                arr[tid] = order[gid]
+                if sub not in sub_ids:
+                    sub_ids[sub] = len(sub_names)
+                    sub_names.append(sub)
+                sub_arr[tid] = sub_ids[sub]
+            source += f"; subcategories: {candidate}"
+            break
+        self._sub_arr, self._sub_names = sub_arr, sub_names
         self._group_arr = arr
         counts = np.bincount(arr, minlength=len(groups))
         obs = np.bincount(arr, weights=idx.obs_arr, minlength=len(groups))
@@ -246,6 +283,7 @@ class EventMapService:
             self._state, self._message, self._path = "unknown", "", None
             self._sorted_names = []
             self._group_arr, self._group_rows = None, []
+            self._sub_arr, self._sub_names = None, []
         if idx is not None:
             try:
                 idx.close()
@@ -435,11 +473,12 @@ class EventMapService:
     # (tools/event_map_playground.py)가 연구용으로만 쓴다 - 여기서는 켤 길을 두지 않는다.
     def explore(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                 persons: Any = None, roles: Any = None, groups: Any = None,
-                limit: Any = DEFAULT_CANDIDATES, sort: Any = "lift") -> dict[str, Any]:
+                limit: Any = DEFAULT_CANDIDATES, sort: Any = "lift", offset: Any = 0, subcategory: str = "") -> dict[str, Any]:
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
         if not wanted:
             raise MapQueryError("no_pins", "핀이 하나는 있어야 한다.")
+        offset = self._page_offset(offset, idx.n_tags)
         sort_mode = str(sort or "lift").strip().lower() or "lift"
         if sort_mode not in SORT_MODES:
             raise MapQueryError("bad_sort", "정렬은 %s 중 하나다." % "/".join(SORT_MODES), allowed=list(SORT_MODES))
@@ -448,22 +487,26 @@ class EventMapService:
         want_r, want_p = self._filters(idx, ratings, persons)
         want_roles = self._tags(roles, cap=32, what="갈래", code="bad_role")
         want_groups = self._tags(groups, cap=16, what="대분류", code="bad_group")
+        allowed = self._subcategory_mask(want_groups, subcategory)
         try:
             result = idx.explore(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
-                roles=want_roles or None, allowed=self.group_mask(want_groups),
+                roles=want_roles or None, allowed=allowed,
                 limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES),
-                include_color=False, sort=sort_mode)
+                include_color=False, sort=sort_mode, offset=offset)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
+        self._attach_subcategories(result, want_groups, subcategory)
+        self._attach_page(result, offset)
         self._attach_groups(result.get("candidates") or [], result)
         result["ok"] = True
         return result
 
     def browse(self, *, group: Any, ratings: Any = None, persons: Any = None,
-               limit: Any = DEFAULT_CANDIDATES) -> dict[str, Any]:
+               limit: Any = DEFAULT_CANDIDATES, offset: Any = 0, subcategory: str = "") -> dict[str, Any]:
         """첫 화면: 핀 없이 대분류 하나를 골라 그 분면(인원·등급)에서 특징적인 태그를 본다."""
         idx = self.index()
+        offset = self._page_offset(offset, idx.n_tags)
         gid = str(group or "").strip()
         known = {g["id"] for g in C.groups()}
         if gid not in known:
@@ -473,12 +516,57 @@ class EventMapService:
         if mask is None:
             raise MapQueryError("unavailable", "대분류 표를 못 만들었다(KR_tags.parquet 없음).",
                                 state="ready")
+        mask = self._subcategory_mask([gid], subcategory)
         result = idx.browse(ratings=want_r, persons=want_p, allowed=mask,
-                            limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES))
+                            limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=offset)
+        self._attach_subcategories(result, [gid], subcategory)
+        self._attach_page(result, offset)
         self._attach_groups(result.get("candidates") or [], result)
         result["group"] = gid
         result["ok"] = True
         return result
+
+    def _subcategory_mask(self, group_ids: list[str], subcategory: str) -> np.ndarray | None:
+        mask = self.group_mask(group_ids)
+        if not subcategory:
+            return mask
+        if len(group_ids) != 1 or mask is None or subcategory not in self._sub_names:
+            raise MapQueryError("bad_subcategory", "소분류는 대분류 하나를 선택한 뒤 지정해야 합니다.")
+        return mask & (self._sub_arr == self._sub_names.index(subcategory))
+
+    def _attach_subcategories(self, result: dict, group_ids: list[str], selected: str) -> None:
+        result["subcategory"] = selected
+        result["subcategories"] = []
+        if len(group_ids) != 1 or self._sub_arr is None:
+            return
+        group_mask = self.group_mask(group_ids)
+        pool = result.get("_pool")
+        if pool is None or group_mask is None:
+            return
+        counts = np.bincount(self._sub_arr[pool & group_mask], minlength=len(self._sub_names))
+        labels = {"__unclassified__": "미분류", "__pending__": "검토 보류"}
+        rows = [{"id": sub, "label": labels.get(sub, sub), "count": int(counts[i])}
+                for i, sub in enumerate(self._sub_names) if counts[i] or sub == selected]
+        rows.sort(key=lambda row: (row["id"].startswith("__"), -row["count"], row["label"]))
+        result["subcategory_total"] = int(counts.sum())
+        result["subcategories"] = rows
+
+    @staticmethod
+    def _page_offset(value: Any, cap: int) -> int:
+        try:
+            offset = int(value)
+        except (TypeError, ValueError):
+            raise MapQueryError("bad_offset", "offset은 0 이상의 정수여야 합니다.")
+        if offset < 0:
+            raise MapQueryError("bad_offset", "offset은 0 이상의 정수여야 합니다.")
+        return min(offset, cap)
+
+    @staticmethod
+    def _attach_page(result: dict, offset: int) -> None:
+        end = offset + len(result.get("candidates") or [])
+        result["offset"] = offset
+        result["has_more"] = end < result.get("candidate_pool", 0)
+        result["next_offset"] = end if result["has_more"] else None
 
     def _attach_groups(self, candidates: list[dict], result: dict | None = None) -> None:
         """후보마다 갈래를 붙이고, 결과에 **갈래별 후보 수**(카테고리 탭)를 단다."""

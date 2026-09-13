@@ -418,7 +418,7 @@ class EventMapIndex:
         return np.flatnonzero(live).astype(np.int64)
 
     def browse(self, *, ratings=None, persons=None, allowed=None, limit=40, min_posts=5,
-               include_color=False, scan_cap=SCAN_CAP, prior=RANK_PRIOR) -> dict:
+               include_color=False, scan_cap=SCAN_CAP, prior=RANK_PRIOR, offset=0) -> dict:
         """핀 **없이** 고른 분면(인원·등급)에서 특징적인 태그를 낸다 - 첫 화면(대분류 → 태그)용.
 
         기준선은 코퍼스 전체다: 그 분면에서의 비율 ÷ 전체에서의 비율. `allowed` (태그 불리언
@@ -452,14 +452,14 @@ class EventMapIndex:
         #    맨 위에 온다(실측: `shirt in mouth`·`double fox shadow puppet`). 여기서는
         #    **지지도 × lift** 로 세운다 - 많이 나오면서 이 분면에 치우친 것이 위다.
         out["candidates"] = self._rank(counts, keep, int(scanned.size), rids.size, sampled, limit, prior,
-                                       support_weighted=True)
+                                       support_weighted=True, offset=offset)
         out["candidate_pool"] = int(keep.sum())
         out["status"] = "matched" if out["candidates"] else "no_match"
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return out
 
     def _rank(self, counts, keep, base, matched, sampled, limit, prior,
-              support_weighted: bool = False, sort: str = "lift") -> list[dict]:
+              support_weighted: bool = False, sort: str = "lift", offset: int = 0) -> list[dict]:
         """explore/browse 공통 줄 세우기. lift 는 언제나 날 값으로 보인다.
 
         explore : `sort` 로 고른다(사용자 지정 2026-09-12 밤).
@@ -493,12 +493,12 @@ class EventMapIndex:
              "share": round(share, 6), "lift": round(lift, 2), "score": round(score, 3),
              "role": self.role.get(tid), "lane": self.lane.get(tid),
              "observed_total": self.observed.get(tid)}
-            for score, lift, share, seen, tid in rows[:limit]
+            for score, lift, share, seen, tid in rows[offset:offset + limit]
         ]
 
     def explore(self, pins, *, exclude=None, ratings=None, persons=None, limit=24,
                 min_posts=5, include_color=False, roles=None, allowed=None,
-                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift") -> dict:
+                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift", offset=0) -> dict:
         """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다."""
         started = time.perf_counter()
         if not isinstance(pins, (list, tuple)) or not 1 <= len(pins) <= MAX_PINS:
@@ -580,7 +580,7 @@ class EventMapIndex:
         if sort not in SORT_MODES:
             raise ValueError("정렬은 %s 중 하나다" % "/".join(SORT_MODES))
         out["sort"] = sort
-        out["candidates"] = self._rank(counts, keep, base, rids.size, sampled, limit, prior, sort=sort)
+        out["candidates"] = self._rank(counts, keep, base, rids.size, sampled, limit, prior, sort=sort, offset=offset)
         out["candidate_pool"] = int(keep.sum())
         out["status"] = "matched"
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)

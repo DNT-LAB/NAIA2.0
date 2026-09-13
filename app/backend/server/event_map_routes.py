@@ -4,7 +4,8 @@
 **조회 라우트는 읽기 전용이다.** 사용자 데이터를 쓰지 않고, 활성 프리셋·프롬프트·생성 상태를
 건드리지 않는다. 프롬프트에 넣는 것은 프론트가 자기 입력칸에 하는 일이고(사용자 지시
 2026-09-11: **삽입과 복사 둘 다** 지원), 여기서는 넣을 문자열을 주기만 한다.
-예외 둘(사용자 지정 2026-09-12 밤) - 실제 조합의 [적용]·[생성]:
+명시적인 상태 변경 - 실제 조합의 [적용]·[생성] 및 Random 연결:
+  POST /api/event-map/random-link 세션의 Random/Auto Gen 소스를 현재 맵 조건으로 연결·해제한다.
   POST /api/event-map/apply     조합을 **랜덤 프롬프트와 같은 파이프라인**에 태워 메인 프롬프트로 보낸다.
   POST /api/event-map/generate  조합을 가상 메인 프롬프트로 태워 **바이패스 생성**한다 - 이벤트 프리셋의
                                 Generate 와 같은 경로라 메인 프롬프트는 그대로다(prompt_generated 를 안 쏜다).
@@ -29,7 +30,6 @@
 """
 from __future__ import annotations
 
-import threading
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -37,15 +37,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from core.event_map.pe_filter import MAX_TAGS as PE_MAX_TAGS, hidden_by_prompt_engineering
-from core.event_map.service import EventMapService, MapQueryError, default_roots
+from core.event_map.service import MapQueryError
+from core.event_map.random_link import ensure_event_map_service, link_state
 from core.web_session_context import WebSessionContext
 
 AsyncRunner = Callable[..., Awaitable[Any]]
 
-_SERVICE_LOCK = threading.Lock()
 
 # `code` -> HTTP 상태. 나머지는 400.
-STATUS_BY_CODE = {"unavailable": 503, "internal_error": 500}
+STATUS_BY_CODE = {"unavailable": 503, "internal_error": 500, "library_error": 500, "duplicate": 409, "not_found": 404}
 
 
 def _no_store() -> dict[str, str]:
@@ -80,20 +80,6 @@ def _install_view(context: WebSessionContext, can_start: bool) -> dict[str, Any]
         "can_start": bool(can_start),
         "download": download,
     }
-
-
-def ensure_event_map_service(context: WebSessionContext) -> EventMapService:
-    """세션에 하나만 둔다. 색인은 1GB 대라 두 번 열면 mmap 도 두 배가 된다."""
-    service = getattr(context, "event_map_service", None)
-    if service is not None:
-        return service
-    with _SERVICE_LOCK:
-        service = getattr(context, "event_map_service", None)
-        if service is not None:
-            return service
-        service = EventMapService(default_roots(context))
-        context.event_map_service = service
-        return service
 
 
 def invalidate_event_map_service(context: WebSessionContext) -> None:
@@ -197,6 +183,7 @@ def register_event_map_routes(
 
         service = ensure_event_map_service(session_context)
         payload = await run_in_thread(service.status)
+        payload["random_link"] = link_state(session_context)
         if payload.get("state") != "ready":
             install = await run_in_thread(_install_view, session_context, _is_local_request(req))
             if install:
@@ -204,6 +191,69 @@ def register_event_map_routes(
                 if install.get("active"):
                     payload["state"] = "downloading"
         return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/library")
+    async def api_event_map_library():
+        from core.event_map.library import EventMapLibrary
+        try:
+            payload = await run_in_thread(EventMapLibrary(session_context._save_path("event_map", "combinations.json")).list)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.post("/api/event-map/library")
+    async def api_event_map_library_save(req: Request):
+        from core.event_map.library import EventMapLibrary
+        try:
+            body = await _read_json(req)
+            library = EventMapLibrary(session_context._save_path("event_map", "combinations.json"))
+            payload = await run_in_thread(library.mutate if body.get("action") else library.save, body)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/random-link")
+    async def api_event_map_random_link_state():
+        return JSONResponse(link_state(session_context), headers=_no_store())
+
+    @app.post("/api/event-map/random-link")
+    async def api_event_map_random_link(req: Request):
+        payload = await _read_json(req)
+        if not isinstance(payload.get("enabled"), bool):
+            return JSONResponse({"message": "enabled must be boolean"}, status_code=400)
+        state = {"enabled": payload["enabled"]}
+        if state["enabled"]:
+            for key in ("pins", "exclude", "ratings", "persons"):
+                value = payload.get(key, "")
+                if not isinstance(value, str) or len(value) > 8192:
+                    return JSONResponse({"message": f"Invalid {key}"}, status_code=400)
+                state[key] = value
+            revision = link_state(session_context)["revision"] + 1
+            session_context.event_map_random_link = {**state, "revision": revision, "pending": True}
+            try:
+                # Validate the same query used by Random. Empty matches are valid;
+                # generation must fail closed rather than broaden the conditions.
+                await run_in_thread(ensure_event_map_service(session_context).sample,
+                                    **{k: state[k] for k in ("pins", "exclude", "ratings", "persons")}, n=1)
+            except MapQueryError as exc:
+                if link_state(session_context)["revision"] == revision:
+                    session_context.event_map_random_link = {"enabled": False, "revision": revision}
+                    await _broadcast({"type": "event_map_random_link", **link_state(session_context)})
+                return _error(exc)
+            if link_state(session_context)["revision"] != revision:
+                return JSONResponse({"message": "다른 연결 설정이 적용되었습니다."}, status_code=409)
+        state["revision"] = link_state(session_context)["revision"] + 1
+        session_context.event_map_random_link = state
+        from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+        invalidate_auto_gen_prefetch(session_context)
+        if state["enabled"] and session_context._coerce_bool(
+                session_context.get_options().get("wildcard_standalone", False)):
+            session_context.set_option("wildcard_standalone", False)
+            await _broadcast({"type": "options", **session_context.get_options()})
+            await _broadcast({"type": "toast", "level": "info",
+                              "message": "이벤트 맵의 랜덤 버튼 연결을 위해 WC Solo를 자동 해제했습니다."})
+        await _broadcast({"type": "event_map_random_link", **state})
+        return JSONResponse(state, headers=_no_store())
 
     @app.get("/api/event-map/suggest")
     async def api_event_map_suggest(q: str = "", limit: int = 20):
@@ -219,26 +269,26 @@ def register_event_map_routes(
     @app.get("/api/event-map/explore")
     async def api_event_map_explore(pins: str = "", exclude: str = "", ratings: str = "",
                                     persons: str = "", roles: str = "", groups: str = "",
-                                    limit: int = 24, sort: str = "lift"):
+                                    limit: int = 24, sort: str = "lift", offset: int = 0, subcategory: str = ""):
         """색상 태그는 **항상** 후보에서 빠진다(켜는 파라미터를 두지 않는다 - 사용자 지정 2026-09-12).
         `groups` 는 접기 표의 갈래 id(쉼표) - 후보를 그 대분류로 가둔다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.explore, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, roles=roles, groups=groups, limit=limit, sort=sort)
+                persons=persons, roles=roles, groups=groups, limit=limit, sort=sort, offset=offset, subcategory=subcategory)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())
 
     @app.get("/api/event-map/browse")
     async def api_event_map_browse(group: str = "", ratings: str = "", persons: str = "",
-                                   limit: int = 40):
+                                   limit: int = 40, offset: int = 0, subcategory: str = ""):
         """첫 화면: 핀 없이 대분류 하나 → 그 인원·등급에서 특징적인 태그(코퍼스 대비 lift)."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
-                _call, service.browse, group=group, ratings=ratings, persons=persons, limit=limit)
+                _call, service.browse, group=group, ratings=ratings, persons=persons, limit=limit, offset=offset, subcategory=subcategory)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

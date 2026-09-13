@@ -1104,7 +1104,7 @@ import('./js/features/fastSearch.mjs?v=20260907-fs-groupsearch')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20260913-em26')
+import('./js/features/eventMapPanel.mjs?v=20260913-em29')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1112,6 +1112,7 @@ import('./js/features/eventMapPanel.mjs?v=20260913-em26')
       getPromptText: () => (promptEdit ? promptEdit.value : ''),
       // [적용+생성]: 적용된 프롬프트가 칸에 들어온 뒤 **Generate 버튼과 같은 길**로 낸다.
       generateNow: () => generateAction(),
+      onRandomLinkChange: () => updateGenerateButtonMode(),
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
@@ -4075,6 +4076,7 @@ function onInitComplete() {
 }
 
 function afterWsJsonMessage(m) {
+  if (m.type === 'event_map_random_link') window.eventMap?.receiveRandomLink?.(m);
   // Update search count from prompt_generated
   if (m.type === 'prompt_generated' && 'remaining' in m) {
     if (searchPanelControl) searchPanelControl.updatePromptGeneratedCount(m);
@@ -4419,6 +4421,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
       onMessageError: onWsMessageError,
       onSocketChange: socket => { ws = socket; },
       onOpen: socket => {
+        void window.eventMap?.refreshRandomLink?.();
         _initDone = false;
         setBootIndicator('Loading state…', 60, false);
         if (setupController) setupController.resetInitialProbe();
@@ -8337,7 +8340,9 @@ function runStorytellerCycle(request) {
 
 function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   flushPromptEngineeringEdits();
-  if (activePromptTab === 'preset') {
+  if (window.eventMap?.isRandomLinkPending?.()) return false;
+  if (window.eventMap?.isRandomLinked?.() && awaitingMyRandom) return false;
+  if (activePromptTab === 'preset' && !window.eventMap?.isRandomLinked?.()) {
     if (!force) void randomizeFromPresetTab();
     return false;
   }
@@ -8376,7 +8381,7 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   // free the button mid-boost and let the user spam it. Extend the safety timeout
   // to 15s only while the boost is on; normal random keeps the existing 2s behavior.
   const boostArmed = !!(lastPromptEngineeringState && lastPromptEngineeringState.ollama_auto_boost);
-  const randomSafetyTimeoutMs = boostArmed ? 15000 : 2000;
+  const randomSafetyTimeoutMs = window.eventMap?.isRandomLinked?.() ? 30000 : (boostArmed ? 15000 : 2000);
   // Ollama 모드: Random 버튼에 boost 재작성 경과시간을 실시간 표시(Generate 버튼처럼).
   if (boostArmed) startRndTimer();
   window._randomTimeout = setTimeout(() => {
@@ -8508,6 +8513,10 @@ function send(cmd) {
     return;
   }
   if (cmd === 'random') {
+    if (window.eventMap?.isRandomLinked?.() || window.eventMap?.isRandomLinkPending?.()) {
+      requestRandomPrompt();
+      return;
+    }
     // Pool still loading (chunk load / parquet load-merge-upload) → block Random
     // (covers the ALT+ENTER shortcut, which bypasses the button's pointer-events).
     if (poolLoad.isActive()) {
@@ -8598,9 +8607,10 @@ function updateGenerateButtonMode() {
   btnGen.classList.toggle('preset-mode', presetMode);
   if (btnRnd) {
     const promptFixed = getOptionChecked('prompt_fixed');
-    btnRnd.disabled = presetMode
+    btnRnd.disabled = window.eventMap?.isRandomLinkPending?.() || (presetMode && !window.eventMap?.isRandomLinked?.()
       ? (promptFixed || !!presetGenerationPending || generating || !eventPresetPanel?.canRandomize?.())
-      : (promptFixed || awaitingMyRandom);
+      : (promptFixed || awaitingMyRandom));
+    if (!rndTimer) btnRnd.innerHTML = randomButtonHtml();
   }
   if (!generating) {
     const promptFixed = getOptionChecked('prompt_fixed');
@@ -8736,8 +8746,13 @@ function stopRndTimer() {
   if (rndTimer) {
     clearInterval(rndTimer);
     rndTimer = null;
-    if (btnRnd) btnRnd.innerHTML = _RND_BTN_LABEL;  // 'Random' 라벨 복원
+    if (btnRnd) btnRnd.innerHTML = randomButtonHtml();
   }
+}
+
+function randomButtonHtml() {
+  return window.eventMap?.isRandomLinked?.()
+    ? '<span class="shortcut-hint">ALT + ENTER</span>EV Random' : _RND_BTN_LABEL;
 }
 
 // ---- Generation Progress Bar ----

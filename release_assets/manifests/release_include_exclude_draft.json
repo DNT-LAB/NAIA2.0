@@ -34,6 +34,7 @@
     ],
     "clean_machine_data": [
       "data/KR_tags.parquet",
+      "data/event_map_subcategories.json",
       "data/e621_KR_tags.parquet",
       "data/interactive_tags.json",
       "data/interactive_axis_tags.json",

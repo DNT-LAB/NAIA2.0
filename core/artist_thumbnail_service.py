@@ -59,6 +59,31 @@ class ArtistThumbnailService:
             "expected_size": 2633376969,
             "sha256": "9997E0FA2509D7EB19AC7EABC0CC11FACEEEC0FFA97D2C4975E5E88418ECF547",
         },
+        # NAID5 분할 팩 3종(2026-09-13, 사용자 지시). 게시물 수 구간별로 갈랐다 - 이름의 숫자가
+        # 그 구간이다(6333~165 · 164~84 · 83~, WIP 는 아직 채우는 중). 방안 A(새 키 + 새 경로).
+        # 지문은 업로드 원본에서 실측(같은 폴더의 NAID5-*). ⚠️ WIP 판을 나중에 채워 갈아끼울
+        # 때는 **경로를 그대로 두고** expected_size/sha256 만 바꿔야 `(update)` 가 선다.
+        "NAID5-6333-165": {
+            "label": "NAID5-6333-165",
+            "path": Path("data/artist_thumbnail_naid5_6333_165.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-6333-165",
+            "expected_size": 1532623111,
+            "sha256": "ECB2D2CCD2F03A41C7C2AA569828CBC994A26985193AEDD10D7AD474AD8C4248",
+        },
+        "NAID5-164-84": {
+            "label": "NAID5-164-84",
+            "path": Path("data/artist_thumbnail_naid5_164_84.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-164-84",
+            "expected_size": 1554305817,
+            "sha256": "88EE78511D48EE651C6E34AAE2392718921E24275E367E6F8B48E44B66354B24",
+        },
+        "NAID5-83-WIP": {
+            "label": "NAID5-83-WIP",
+            "path": Path("data/artist_thumbnail_naid5_83_wip.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-83-WIP",
+            "expected_size": 1535887765,
+            "sha256": "03F5E8DD387F7ED0C1FCBAA6BC47EEAC6C274C9D5687DBE69C90402BC56CA7E9",
+        },
         "NAID4.5F-31000": {
             "label": "NAID4.5F-31000",
             "path": Path("data/artist_thumbnail_nai.json"),

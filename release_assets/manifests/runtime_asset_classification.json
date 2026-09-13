@@ -23,7 +23,13 @@
       "patterns": [
         "data/artist_thumbnail.json",
         "data/artist_thumbnail_nai.json",
-        "data/artist_thumbnail_anima.json"
+        "data/artist_thumbnail_anima.json",
+        "data/artist_thumbnail_anima_bucket2.json",
+        "data/artist_thumbnail_anima_bucket3.json",
+        "data/artist_thumbnail_naid5f.json",
+        "data/artist_thumbnail_naid5_6333_165.json",
+        "data/artist_thumbnail_naid5_164_84.json",
+        "data/artist_thumbnail_naid5_83_wip.json"
       ],
       "decision": "runtime_downloaded_optional_bundle",
       "runtime_destination": "ui_assets/artist_thumb",

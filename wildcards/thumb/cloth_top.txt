@@ -145,3 +145,42 @@ print shirt
 vertical-striped shirt
 turtleneck shirt
 sleeveless sweater
+collared coat
+collared vest
+short-sleeved jacket
+spiked jacket
+virgin destroyer sweater
+off-shoulder coat
+quilted jacket
+ribbed cardigan
+american flag shirt
+asymmetrical jacket
+see-through coat
+safari jacket
+knit sweater
+lace-trimmed camisole
+asymmetrical shirt
+life vest
+ribbed tank top
+impossible jacket
+fur-trimmed sweater
+denim vest
+see-through raincoat
+tuxedo shirt
+flapper shirt
+frilled tube top
+frilled sweater
+heart ring top
+ribbon-trimmed vest
+latex top
+feather-trimmed coat
+hooded top
+arts shirt
+overshirt
+quick shirt
+creeparka
+impossible vest
+denim shirt
+frog raincoat
+sleeveless blazer
+peacoat

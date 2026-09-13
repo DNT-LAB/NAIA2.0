@@ -177,3 +177,64 @@ lid
 washbowl
 dvd case
 drink can
+blister pack
+shipping container
+medicine bottle
+milk churn
+glass teapot
+pepper shaker
+serving dome
+ice bucket
+hip flask
+soy sauce bottle
+squeeze bottle
+glass bowl
+honeypot
+sugar bowl
+mustard bottle
+mayonnaise bottle
+tank cupola
+box stack
+bowl stack
+gas can
+spyglass
+tasting plate
+jerry can
+dumpster
+tumbler
+piggy bank
+matchbox
+ohitsu
+manila envelope
+safe (container)
+jewelry box
+measuring cup
+juubako
+women's wallet
+capsule
+terrarium
+can to cheek
+food delivery box
+scroll tube
+recruitment bag (arknights)
+egg carton
+skull cup
+japanese cylindrical postbox
+sushi geta
+card holster
+liquid-in-glass thermometer
+cookie jar
+mexican standoff
+medicine box
+mikan box
+gas tank
+mamezara
+washtub
+side handle teapot
+mess kit
+disposable coffee cup
+tiered tray
+food packaging
+bug cage
+empty plate
+toy packaging

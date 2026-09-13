@@ -55,3 +55,96 @@ constellation print
 striped clothes
 plaid clothes
 polka dot
+paw print
+argyle
+crescent print
+clover print
+frog print
+fish print
+bear print
+anchor print
+musical note print
+sparkle print
+hitodama print
+maple leaf print
+triangle print
+bird print
+lightning bolt print
+eye print
+skeleton print
+hexagon print
+number print
+yin yang print
+spider print
+snake print
+space print
+text print
+sun print
+sky print
+shark print
+cherry print
+zebra print
+carrot print
+onigiri print
+lemon print
+piano print
+arrow print
+bone print
+ghost print
+peony print
+vine print
+wave print
+musical staff print
+morning glory print
+sunflower print
+bamboo print
+wing print
+moon print
+diamond print
+digital camouflage
+chrysanthemum print
+hibiscus print
+watermelon print
+grid print
+woodland camouflage
+giraffe print
+whale print
+triforce print
+dog print
+sword print
+spider lily print
+jack-o'-lantern print
+petal print
+shield print
+plum blossom print
+horizontal-striped clothes
+camellia print
+orange print
+apple print
+horse print
+crown print
+gear print
+broken heart print
+goldfish print
+tree print
+pineapple print
+union jack print
+lotus print
+teeth print
+splatter print
+circuit board print
+lily print
+italian flag print
+racing colors
+mustache print
+duck print
+pumpkin print
+honeycomb print
+fireworks print
+thorn print
+candy print
+feather print
+peach print
+shoe print
+panther print
+japari symbol print

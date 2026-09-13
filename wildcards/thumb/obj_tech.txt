@@ -148,3 +148,102 @@ treadmill
 circuit board
 computer keyboard
 computer mouse
+single mechanical leg
+film reel
+robot dog
+binaural microphone
+mobile armor
+digivice
+security camera
+game boy advance
+computer chip
+toaster
+canards
+videocassette
+electric kettle
+gamecube
+blender (object)
+camera phone
+radar dish
+effects pedal
+dualsense
+purikura
+mixing console
+alarm siren
+pokegear
+music box
+radio tower
+scoreboard
+electronic cigarette
+broken screen
+transformer
+cd player
+webcam
+projector
+x-ray film
+game boy color
+calculator
+pip boy
+microscope
+omnic
+super famicom
+furnace
+xtransceiver
+dial
+switch
+playstation 1
+wii remote
+photocopier
+super famicom gamepad
+nintendo switch pro controller
+droid
+radiator
+graphics card
+gerwalk
+holographic touchscreen
+nintendo switch lite
+floodlights
+sega dreamcast
+xbox controller
+nintendo 64
+jukebox
+boom microphone
+purah pad
+entry plug
+aircraft catapult
+gaia memory
+game boy advance sp
+toaster oven
+maximal
+playstation 2
+horn speaker
+hirschgeweih antennas
+iphone 11 pro
+dslr
+gn drive
+server
+sega saturn
+chocolate fountain
+cpu
+sega mega drive
+twin-lens reflex camera
+playstation vr
+externally piloted mecha
+iphone x
+robot fish
+canon (company)
+jaeger (pacific rim)
+augma
+wii u
+arm slave (mecha)
+arc phone
+bladeless fan
+metal gear (robot)
+tourbox
+hypnosis app
+digital walkman
+vernier thrusters
+walkman nw-s203f
+device
+wii
+ipod nano

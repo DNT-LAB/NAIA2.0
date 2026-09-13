@@ -71,3 +71,11 @@ monsterification
 turtle shell
 rayman limbs
 wolf paws
+spiked shell
+dog nose
+carapace
+fake claws
+lion mane
+skeletal hand
+skeletal arm
+exposed internal machinery

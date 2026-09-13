@@ -220,3 +220,127 @@ traditional halo
 interface headset
 super crown
 v-fin
+see-through veil
+xiao guan (headdress)
+metal hairband
+animal ear hood
+chinese hairpin
+pom pom beanie
+dalachi (headdress)
+winged halo
+frilled bonnet
+horned hat
+heart hat ornament
+floating crown
+pickelhaube
+cowl
+butterfly hat ornament
+glowing halo
+ribbon-trimmed hairband
+conical hat
+triangle halo
+food-themed hat
+phrygian cap
+anchor hat ornament
+bear hat
+frog hat
+cavalier hat
+mining helmet
+lace-trimmed veil
+character hat
+jack-o'-lantern hat ornament
+mini santa hat
+native american headdress
+skull-shaped hat
+bird hat
+mian guan
+see-through headwear
+gakuseibou
+lace hairband
+broken helmet
+penguin hat
+floating hat
+field cap
+mascot head
+tam (ragnarok online)
+oversized hat
+minnie mouse ears
+food-themed hat ornament
+mini shako cap
+dinosaur hood
+fatal fury cap
+fox hood
+head mirror
+keffiyeh
+boonie hat
+checkered headwear
+duellist's cap (tier 6)
+diving helmet
+chullo
+tall hat
+squid hat
+master crown
+winged hairband
+glowing headgear
+snake hood
+paper kabuto
+panda hat
+hat writing
+unworn headband
+eye on hat
+eggshell hat
+hammerhead shark
+biretta
+jack-o'-lantern head
+kettle helm
+nemes
+m1 helmet
+chinese hat
+snowflake hat ornament
+hat under hood
+boar hood
+dog hat
+pumpkin hat ornament
+headband around neck
+bird hood
+frilled hood
+wolf hat
+hair net
+chajinbou
+sheep hood
+blueberry hair ornament
+hamburger hat
+disguised pyra (xenoblade)
+cake hat
+shampoo hat
+hat bobbles
+unworn hair bow
+hamster hood
+rectangular halo
+crown of thorns
+cross halo
+print headwear
+spiked halo
+pointed crown
+camouflage headwear
+liquid halo
+pom pom hat ornament
+crescent halo
+earflap beanie
+arched crown
+distorted halo
+guan hat
+picture hat
+wimple
+flower hat
+headphones over headwear
+holly hat ornament
+reindeer hood
+rabbit earmuffs
+veil over eyes
+fez hat
+uraeus
+altyn helmet
+gear hat ornament
+deviruchi hat
+traffic cone on head

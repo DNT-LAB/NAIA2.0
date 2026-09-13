@@ -342,3 +342,255 @@ x buster
 war hammer
 sheathed
 ship turret
+needle (hollow knight)
+metal baseball bat
+evoker
+sig mcx
+arm mounted weapon
+ai arctic warfare
+butter knife
+clima-tact
+zweihander
+ornate weapon
+spiked bat
+chokutou
+energy arrow
+em-2
+guan dao
+ak-74
+torn bow
+rifle cartridge
+h&k usp
+double-barreled shotgun
+autocannon
+e-liter 4k (splatoon)
+mac-10/11
+sword in front of face
+jamadhar
+heart arrow
+cs/ls06
+bren lmg
+rpg-7
+remington 870
+minecraft sword
+p14 enfield
+ak-74m
+aks-74u
+wrist blades
+prosthetic weapon
+splat dualies (splatoon)
+n-zap (splatoon)
+m1 garand
+colt single action army
+wooden shield
+boys anti tank rifle
+tri-stringer (splatoon)
+sword in head
+silence glaive
+fire axe
+lahti-saloranta m/26
+bakuzan
+pile bunker
+nuclear weapon
+moriya's iron rings
+living weapon
+planted knife
+fn scar 17
+sword of dios
+stg44
+yato (fire emblem)
+flanged mace
+war fan
+m134 minigun
+taser
+ots-14 groza
+h&k mp5k
+stun gun
+hydra splatling (splatoon)
+ak-15
+sai (weapon)
+obsidian slasher
+moonlight greatsword
+star rod
+tnt block (minecraft)
+carcano
+tsuka-ito
+heavy splatling (splatoon)
+kodachi
+guillotine
+winchester model 1897
+cz 75
+daewoo k2
+javelin (spear)
+kama (weapon)
+kusarigama
+areadbhar (fire emblem)
+aymr (fire emblem)
+molotov cocktail
+mjolnir (marvel)
+bois de justice
+sky mirage
+skorpion vz. 61
+bit (gundam)
+walther p38
+fusion swords
+makarov pm
+aa-12
+improvised weapon
+weapon on floor
+acog
+fn five-seven
+benelli m4
+nagant m1895
+milkor mgl
+kukri
+rpk-16
+sig sauer p320
+sword hilt
+colt 9mm smg
+steyr aug
+jitte
+beretta ar70/90
+ntw-20
+tsuka (handle)
+smith & wesson
+h&k mg5
+favonius sword (genshin impact)
+liquid weapon
+energy spear
+m1918 bar
+crusader (tank)
+vsk-94
+stick grenade
+r-301 carbine
+panzerfaust
+vasavi shakti (fate)
+m203
+luna blaster (splatoon)
+garnet rod
+slosher (splatoon)
+grizzly win mag
+micro uzi
+m16a2
+deku shield
+9a-91
+expandable baton
+panther (tank)
+blue rose sword
+splash-o-matic (splatoon)
+m320
+gasterblaster
+yari
+syringe gun
+fn fnc
+desert tech mdr
+octobrush (splatoon)
+lasgun
+adapted weapon
+pkp pecheneg
+mistsplitter reforged (genshin impact)
+tyrfing (fire emblem)
+oath of judah
+h&k g36c
+.52 gal (splatoon)
+centurion (tank)
+de lisle carbine
+planted spear
+fujin yumi (fire emblem)
+fim-92 stinger
+elucidator
+b&t mp9
+colt python
+pepperbox revolver
+cz scorpion evo 3
+marmyadose (fate)
+planted arrow
+hamayumi (genshin impact)
+e-liter 3k (splatoon)
+multishot rocket launcher
+macuahuitl
+mortar (weapon)
+laser rifle
+burst bomb (splatoon)
+balisong
+thunderseal
+dominator (gun)
+clip (weapon)
+mg34
+h&k mark 23
+stechkin aps
+gladius
+hannya (arknights)
+howa type 64
+excalibur galatine (fate)
+sword cane
+steyr iws 2000
+chi xiao (arknights)
+m1 bazooka
+catalyst scimitar
+himitsucalibur (fate)
+phalanx ciws
+h&k g41
+angled foregrip
+sawed-off shotgun
+balmung (fate/apocrypha)
+yoru (sword)
+sv-98
+imi negev
+kel-tec rfb
+shiny rod (little witch academia)
+r-99 smg
+graviton beam emitter
+pkm
+fn f2000
+bowgun
+chain blades
+thompson/center contender
+sks
+sten gun
+horn lance
+favonius greatsword (genshin impact)
+dsr-50
+webley revolver
+dp-27
+spear of cassius
+caladbolg (fate)
+type 91 armor-piercing shell
+arondight (fate)
+raijinto (fire emblem)
+durandal (fire emblem)
+adaptive combat rifle
+pp-19 bizon
+liberation (fire emblem)
+ithaca m37
+agni gandiva
+kel-tec ksg
+bolverk
+milo and akouo
+general dynamics lwmmg
+crucible (doom)
+parker-hale idw
+remington arms
+lion's roar (genshin impact)
+brynhildr romantia
+ar-57
+type 10 (tank)
+healing wand
+magpul
+fabarm sat-8
+sr-3mp
+saiga-12
+calico m950
+panjandrum
+p2020 (pistol)
+freikugel (weapon)
+depth charge
+smoking barrel
+bo staff
+browning m2
+double blade
+standard manufacturing dp-12
+cat o' nine tails
+uzi
+manually-operated mounted gun
+paw stick

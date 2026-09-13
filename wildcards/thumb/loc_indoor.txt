@@ -73,3 +73,41 @@ seafloor
 hole in wall
 on wall
 checkered wall
+aquarium
+dark room
+greenhouse
+public restroom
+mall
+garage
+museum
+theater
+karaoke box
+hotel
+ferris wheel interior
+dressing room
+nightclub
+clubroom
+refrigerator interior
+dining room
+clothes shop
+flower shop
+bookstore
+courtroom
+warehouse
+ballroom
+backstage
+cafeteria
+throne room
+dance studio
+otaku room
+confessional
+recording studio
+in cell
+storage room
+ofuro
+conservatory
+conveyor belt sushi
+escape room
+workshop
+candy store
+planetarium

@@ -96,3 +96,131 @@ streetcar
 formula racer
 warp star
 battleship
+steam locomotive
+mazda rx-7
+sailing ship
+rocket ship
+jet ski
+chevrolet
+battleship (eve online)
+duck innertube
+nissan skyline gt-r
+nissan silvia
+food truck
+bomber
+hover bike
+moped
+semi truck
+trailer
+vespa
+go-kart
+mitsubishi motors
+pullcart
+frilled innertube
+military truck
+gondola
+right-hand drive
+nissan fairlady z
+knightmare frame
+porsche 911
+windshield
+armored personnel carrier
+tricycle
+volkswagen
+hover vehicle
+rally car
+mazda mx-5
+mazda rx-7 fd
+itasha
+battlecruiser (eve online)
+stroller
+f-15 eagle
+honda super cub
+quadcopter
+cruiser (eve online)
+dodge (company)
+toyota supra
+cruiser
+honda civic
+carrier
+segway
+le mans prototype
+kettenkrad
+flying car
+minecart
+canoe
+nissan skyline r34
+flying boat
+frigate (eve online)
+mini cooper
+ambulance
+kv-2
+ford mustang
+audi
+f-14 tomcat
+kaneda shoutarou's bike
+vending cart
+left-hand drive
+m3 lee
+mclaren
+yamaha vino
+space shuttle
+fairey swordfish
+f6f hellcat
+sidecar
+chevrolet corvette
+t-34-85
+honda motocompo
+jagdpanzer 38(t)
+jeep
+type 97 chi-ha
+volkswagen beetle
+unconventional vehicle
+subaru impreza
+excavator
+toyota 86
+pushcart
+f-22 raptor
+shinkansen
+type 89 i-gou
+kick scooter
+mitsubishi lancer evolution
+armored trooper
+chariot
+tractor
+unicycle
+tank destroyer
+f-35 lightning ii
+sv001 (metal slug)
+nissan gt-r
+palanquin ship
+self-propelled artillery
+m1 abrams
+is-2
+sturmgeschutz iii
+carro armato p40
+volkswagen type 2
+fiat 500
+delorean
+aston martin
+bf 109
+cable car
+panzer ii
+platform truck
+f4u corsair
+half-track
+sbd dauntless
+tiger (p)
+supermarine spitfire
+a5m
+type 95 ha-gou
+h8k
+mark iv tank
+panzer iii
+warship
+powered wheelchair
+propeller fighter
+jet airliner
+box truck
+kei truck
+attack helicopter

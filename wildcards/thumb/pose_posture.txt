@@ -97,3 +97,9 @@ sitting on desk
 on vehicle
 sitting on tree stump
 stuck
+a-pose
+bent back
+leaning over
+bending
+bending backward
+bent

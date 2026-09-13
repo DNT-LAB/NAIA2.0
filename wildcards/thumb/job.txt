@@ -45,3 +45,40 @@ sukeban
 firefighter
 military operator
 clown
+train conductor
+cowboy
+primarch
+prince
+stripper
+priestess
+queen
+store clerk
+dj
+cashier
+housewife
+barista
+oiran
+wrestler
+scientist
+king
+conductor
+necromancer
+school nurse
+mailman
+barmaid
+ouendan
+kindergarten teacher
+space marine
+military police
+traditional nun
+jester
+astronaut
+onmyouji
+cowgirl (western)
+tour guide
+blacksmith
+buddhist nun
+artist painter
+carhop
+ronin
+janitor

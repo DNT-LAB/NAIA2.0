@@ -41,3 +41,11 @@ movie poster
 purple border
 comic cover
 orange border
+ornate border
+square 4koma
+transparent border
+fading border
+splash page
+dvd cover
+lace border
+numbered panels

@@ -100,3 +100,46 @@ hand on sheath
 holding nunchaku
 holding wreath
 holding mistletoe
+holding swim ring
+holding ofuda
+holding calligraphy brush
+holding baton
+elbow carry
+holding crowbar
+holding ticket
+holding tennis racket
+holding lead pipe
+holding dumbbell
+holding rocket launcher
+holding eyeball
+holding cleaver
+holding paint palette
+holding pastry bag
+holding sewing needle
+holding flamethrower
+holding pitchfork
+holding scalpel
+holding vial
+holding jug
+holding cue stick
+pointing melee weapon
+holding picture frame
+holding ruler
+holding sickle
+holding pregnancy test
+holding vase
+holding telescope
+holding razor
+holding barcode scanner
+swinging baseball bat
+holding turret
+cocking gun
+holding table tennis paddle
+holding chair
+holding boombox
+holding radio
+holding jump rope
+holding frame
+holding dustpan
+holding luggage
+waving flag

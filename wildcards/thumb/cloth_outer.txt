@@ -28,3 +28,14 @@ gingham apron
 lace-trimmed apron
 ribbon-trimmed apron
 collared jacket
+collared cape
+collared capelet
+fur-trimmed robe
+two-sided capelet
+shoulder cape
+wing cape
+see-through cape
+lace-trimmed capelet
+heart apron
+frilled cape
+detached cape

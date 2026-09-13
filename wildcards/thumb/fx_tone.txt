@@ -32,3 +32,6 @@ sepia background
 partially colored
 faux retro artstyle
 faux figurine
+warm colored
+saturated
+cool colored

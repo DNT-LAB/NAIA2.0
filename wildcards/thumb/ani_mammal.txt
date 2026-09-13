@@ -45,3 +45,32 @@ giraffe
 doberman
 alpaca
 siamese cat
+tabby cat
+tuxedo cat
+red panda
+ermine
+golden retriever
+hippopotamus
+leopard
+german shepherd
+camel
+dobermann
+chipmunk
+donkey
+chihuahua
+pug
+hyena
+border collie
+scottish fold
+jaguar
+bernese mountain dog
+zebra
+beaver
+llama
+kangaroo
+rhinoceros
+poodle
+moose
+mammoth
+dachshund
+boston terrier

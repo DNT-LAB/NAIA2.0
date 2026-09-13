@@ -106,3 +106,12 @@ holding headphones
 holding sheath
 holding unworn clothes
 holding flute
+holding weapon behind back
+asymmetrical dual wielding
+hand to weapon
+hand on blade
+holding sword behind back
+hand to blade
+leaning on weapon
+holding polearm behind back
+gangsta hold

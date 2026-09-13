@@ -36,3 +36,18 @@ cub
 dead animal
 serval
 ape
+baby animal
+small dragon
+gecko
+winged animal
+alligator
+chameleon
+tortoise
+prehistoric animal
+pterosaur
+toad (animal)
+reptile
+salamander
+armored animal
+iguana
+flying animal

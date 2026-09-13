@@ -213,3 +213,45 @@ minimized
 shatter
 projectile trail
 sparkling aura
+see-through body
+loving aura
+shout lines
+blood on body
+glowing markings
+blurry edges
+glowing gem
+smear frame
+dna
+blood drop
+glowing clothes
+wet spot
+fake transparency
+optical illusion
+psychedelic
+pile of corpses
+moire
+animate object
+tornado
+spell
+lcl
+color switch
+afterburner
+knifed
+ink stain
+smudge
+kakera
+window shadow
+breath weapon
+scanlines
+shattered
+bishie sparkle
+heavy chromatic aberration
+vhs artifacts
+dripping eye
+falling paper
+falling money
+wheel o feet
+aerokinesis
+mushroom cloud
+disappear
+teleportation

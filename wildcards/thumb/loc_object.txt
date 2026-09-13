@@ -52,3 +52,45 @@ scarlet devil mansion
 pagoda
 guard rail
 temple
+red carpet
+iron fence
+muntins
+dilapidated
+greco-roman architecture
+burning building
+pedestrian bridge
+hut
+pedestrian lights
+water tank
+palace
+water tower
+treehouse
+stable
+igloo
+jungle gym
+bleachers
+bollard
+traffic barrier
+doghouse
+shed
+post and rail fence
+ledge
+water wheel
+storm drain
+shack
+arch bridge
+bell tower
+wet floor sign
+retaining wall
+moon gate
+under bridge
+sandbox
+megastructure
+catwalk (walkway)
+steeple
+fortress
+corrugated galvanized iron sheet
+complex exterior
+birdhouse
+emergency exit
+one way sign

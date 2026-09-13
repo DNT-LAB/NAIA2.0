@@ -102,3 +102,48 @@ holding skewer
 holding own knot
 holding pickaxe
 holding bow (music)
+holding unworn hat
+holding burger
+holding candy apple
+holding donut
+holding bass guitar
+holding crepe
+holding cotton candy
+holding juice box
+holding sandwich
+holding watermelon
+holding milk carton
+holding mahjong tile
+holding over opposite shoulder
+holding hair tie
+holding sandals
+hugging book
+holding snowman
+holding hairband
+holding paper airplane
+holding charm
+holding crystal
+holding cigarette pack
+holding manga
+holding unworn dress
+holding dress
+holding bandages
+holding pinwheel
+holding pill
+holding recorder
+holding belt
+holding tera orb
+holding bandaid
+holding cd
+holding water
+holding planet
+holding eyepatch
+holding shawl
+holding unworn skirt
+cradling phone
+holding unworn cape
+holding diploma
+quadruple wielding
+holding unworn scarf
+holding hoodie
+holding shorts

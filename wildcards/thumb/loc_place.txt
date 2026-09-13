@@ -149,3 +149,48 @@ war
 battlefield
 world war i
 after battle
+ukraine
+taiwan
+argentina
+akihabara (tokyo)
+london
+shinjuku (tokyo)
+paris
+indonesia
+england
+vietnam
+venice
+hokkaido
+poland
+korea
+greece
+finland
+sweden
+australia
+ooarai (ibaraki)
+on rooftop
+baseball stadium
+subway station
+construction site
+circus
+arena
+colosseum
+hell
+convention
+gas station
+skating rink
+trench
+soccer field
+sewer
+runway
+wasteland
+carnival
+junkyard
+heaven
+shooting gallery
+floating city
+floating castle
+drive-thru
+shooting range
+golf course
+boardwalk

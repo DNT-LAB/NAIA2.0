@@ -3050,7 +3050,7 @@ export function createTagAssistController({
   }
   function onSlashEntryKey(e) {
     if (!slashEntry) return;
-    if (e.key === 'Escape') { e.preventDefault(); closeSlashEntry({restoreFocus: true}); return; }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSlashEntry({restoreFocus: true}); return; }
     if (e.key === 'Backspace' && !slashEntry.input.value) {
       e.preventDefault();
       if (slashEntry.stage) setSlashStage(null); else closeSlashEntry({restoreFocus: true});
@@ -3063,6 +3063,7 @@ export function createTagAssistController({
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
+      e.stopPropagation();   // Ctrl+Enter 가 명령 실행과 함께 Generate 를 누르던 것
       const row = acResults[acSel] || acResults[0];
       if (row) runSlashCommand(row); else closeSlashEntry({restoreFocus: true});
     }
@@ -3101,8 +3102,10 @@ export function createTagAssistController({
     };
     const outside = (e) => { if (!box.contains(e.target)) done(false); };
     text.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { e.preventDefault(); done(false); return; }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(true); }
+      // ⚠️ 글로벌 단축키는 document 의 **버블** 단계에 붙어 있다 - 전파를 끊지 않으면
+      //    Ctrl+Enter 가 저장과 **동시에 Generate** 를 눌렀다(사용자 제보 2026-09-13).
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); return; }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); done(true); }
     });
     document.addEventListener('mousedown', outside, true);
     text.focus();

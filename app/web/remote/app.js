@@ -8314,16 +8314,16 @@ function updateRandomStreamBadge(state) {
     if (node.nodeType === 3 && node.textContent.trim()) textNode = node;
   });
   if (!textNode) {
-    textNode = document.createTextNode('Random');
+    textNode = document.createTextNode(randomButtonLabel());
     btn.appendChild(textNode);
   }
   const active = state?.active === true || String(state?.active).toLowerCase() === 'true';
   const total = Number(state?.node_count) || 0;
   if (active && total > 0) {
     const position = ((Number(state?.current_index) || 0) % total) + 1;
-    textNode.textContent = `Random (${position}/${total})`;
+    textNode.textContent = `${randomButtonLabel()} (${position}/${total})`;
   } else {
-    textNode.textContent = 'Random';
+    textNode.textContent = randomButtonLabel();
   }
 }
 
@@ -8755,9 +8755,15 @@ function stopRndTimer() {
   }
 }
 
+/** Random 버튼의 **기본 글자**. 이벤트 맵에 연결돼 있으면 EV Random 이다.
+ *  ⚠️ 버튼 글자를 쓰는 자리가 셋이다(여기 · 스트림 배지 · V4.5 프리뷰 표기). 리터럴 'Random' 을
+ *     쓰면 연결 표시가 지워진다 - 생성 중 프리뷰 표기가 EV Random 을 덮던 사용자 제보(2026-09-13). */
+function randomButtonLabel() {
+  return window.eventMap?.isRandomLinked?.() ? 'EV Random' : 'Random';
+}
+
 function randomButtonHtml() {
-  return window.eventMap?.isRandomLinked?.()
-    ? '<span class="shortcut-hint">ALT + ENTER</span>EV Random' : _RND_BTN_LABEL;
+  return `<span class="shortcut-hint">ALT + ENTER</span>${randomButtonLabel()}`;
 }
 
 // ---- Generation Progress Bar ----
@@ -10560,7 +10566,7 @@ function refreshV45PreviewState() {
   if (rnd) {
     const linked = state === 'random' && naiModelIsV5();
     const label = Array.from(rnd.childNodes).reverse().find(n => n.nodeType === 3);
-    if (label) label.textContent = linked ? 'Random (프리뷰)' : 'Random';
+    if (label) label.textContent = linked ? `${randomButtonLabel()} (프리뷰)` : randomButtonLabel();
     rnd.classList.toggle('is-preview-linked', linked);
   }
 }
@@ -13181,7 +13187,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashpreset2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slash-nokeyleak')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

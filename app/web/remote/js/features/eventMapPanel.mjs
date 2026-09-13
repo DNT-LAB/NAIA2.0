@@ -675,6 +675,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
   function groupInfo(id) { return (mapState?.groups || []).find(g => g.id === id) || null; }
 
+  /** 고른 것을 한 번에 비운다: 핀 · 제외 · 소분류 · 대분류. 등급/인원은 **그대로 둔다**
+   *  (그건 한 번 눌러 두는 취향이지, 하나씩 닫아야 하는 것이 아니다 - 사용자 지정 2026-09-13). */
+  function resetSelection() {
+    subcategory = '';
+    pins = [];
+    excludes = [];
+    browse = null;
+    samples = null;
+    void loadBrowse();
+  }
+
   /** 동작 단추는 발줄 오른쪽에 산다 - 부스러기 줄에 두면 핀이 셋만 돼도 겹쳤다. */
   function paintActions() {
     if (!footEl) return;
@@ -683,6 +694,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     overlay.querySelectorAll('[data-em-insert], [data-em-copy]').forEach(b => { b.disabled = !on; });
     const sb = overlay.querySelector('[data-em-samples]');
     if (sb) { sb.disabled = !on; sb.classList.toggle('is-on', !!samples); }
+    const rs = overlay.querySelector('[data-em-reset]');
+    if (rs) rs.disabled = !(pins.length || excludes.length || subcategory || group);
   }
 
   function paintFilters() {
@@ -692,6 +705,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       <span class="em-rating-bar" role="group" aria-label="등급">${RATING_OPTIONS.map(r =>
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
                  aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
+      <button type="button" class="em-reset" data-em-reset
+              title="핀 · 제외 · 소분류를 한 번에 비우고 대분류로 돌아간다">초기화</button>
       <span class="em-actions em-actions-right"><button type="button" data-em-insert disabled
               title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-copy disabled
               title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
@@ -1125,7 +1140,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (unpin) { pins = pins.filter(x => x !== unpin.dataset.emUnpin); void explore(); return; }
       const unex = t.closest('[data-em-unexclude]');
       if (unex) { clearExclude(unex.dataset.emUnexclude); return; }
-      if (t.closest('[data-em-group-back]')) { subcategory = ''; pins = []; excludes = []; browse = null; void loadBrowse(); return; }
+      if (t.closest('[data-em-group-back]')) { resetSelection(); return; }
       if (t.closest('[data-em-back]')) { goBack(); return; }
     });
     footEl.addEventListener('click', event => {
@@ -1135,6 +1150,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
+      if (t.closest('[data-em-reset]')) { resetSelection(); return; }
       if (t.closest('[data-em-insert]')) { void applyPins(t.closest('[data-em-insert]')); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
       if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return; }

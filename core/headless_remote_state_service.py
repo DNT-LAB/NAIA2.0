@@ -20,6 +20,9 @@ REMOTE_OPTION_DEFAULTS = {
     # Auto Gen 중 태그 필터 풀이 소진됐을 때 **되살리지 않고 멈춘다**(사용자 지정
     # 2026-08-31). 기본 꺼짐 = 검색 시점 스냅샷으로 되살려 계속 돈다.
     "stop_autogen_on_tag_exhaust": False,
+    # 이벤트 맵 진입 반구 단추(E)를 숨긴다. 숨겨도 **Ctrl+E 는 그대로 열린다**
+    # (사용자 지시 2026-09-13 - 화면에서 치우고 싶을 뿐, 기능을 끄는 것이 아니다).
+    "hide_event_map_button": False,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",

@@ -28993,6 +28993,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-tab:hover, .em-tab:focus-visible { opacity: 1; background: rgba(76,66,120,0.92); color: #fff; }
 .em-tab[aria-pressed="true"] { opacity: 1; background: rgba(88,76,170,0.92); color: #fff; }
 .em-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Settings > 화면 > 이벤트 맵 단추 숨기기. `display:inline-flex` 가 [hidden] 을 이기므로 짝 규칙이 필요하다. */
+.em-tab[hidden] { display: none; }
 @media (max-width: 640px) {
   .em-obs { display: none; }
   .em-person-list { grid-template-columns: 1fr; }

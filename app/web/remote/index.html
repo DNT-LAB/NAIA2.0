@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260913-em-reset">
+<link rel="stylesheet" href="style.css?v=20260913-hide-em-tab">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -1353,6 +1353,18 @@
               <p class="settings-toggle-desc">생성 이미지를 저장할 폴더, 파일명 규칙, 하위 폴더 분류 방식을 설정합니다. (Auto Save 패널에서도 동일하게 열 수 있습니다.)</p>
             </div>
           </div>
+          <div class="settings-group">
+            <h3 class="settings-group-title">화면</h3>
+            <div class="settings-toggle-row">
+              <button type="button" class="opt-toggle settings-toggle" id="optHideEventMapTab"
+                      data-option="hide_event_map_button" data-checked="false" aria-pressed="false"
+                      onclick="toggleOptionButton('hide_event_map_button')">
+                <span class="opt-box" aria-hidden="true"></span>
+                <span class="opt-label">이벤트 맵 단추 숨기기</span>
+              </button>
+              <p class="settings-toggle-desc">결과 이미지 왼쪽 가장자리에 붙는 반구 단추(<b>E</b>)를 감춥니다. 숨겨도 <b>Ctrl+E</b> 로는 그대로 열립니다.</p>
+            </div>
+          </div>
           <div class="settings-empty">
             <p>그 외 전역 설정이 이곳으로 모일 예정입니다 (API 연결 · Web Session · 가시성).</p>
           </div>
@@ -1409,6 +1421,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260913-artist-folder-fsmap-fsdownload"></script>
+<script src="app.js?v=20260913-hide-em-tab"></script>
 </body>
 </html>

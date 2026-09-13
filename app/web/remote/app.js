@@ -3829,6 +3829,7 @@ const optBoxes = {
   // Tag Filter 패널 안에 있지만 상태 통로는 다른 토글과 완전히 같다 - 여기 없으면
   // 서버가 보낸 값이 화면에 안 붙어 새로고침 때마다 꺼진 것처럼 보인다.
   stop_autogen_on_tag_exhaust: $('optStopAutogenOnExhaust'),
+  hide_event_map_button: $('optHideEventMapTab'),
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
@@ -8805,6 +8806,12 @@ function applyOptionState(key, value, options = {}) {
   }
   if (key === 'prompt_fixed' || key === 'wildcard_standalone') {
     syncRatingBarVisibility();
+  }
+  if (key === 'hide_event_map_button') {
+    // 단추만 감춘다 - Ctrl+E 는 그대로 둔다(사용자 지시 2026-09-13).
+    // ⚠️ `.em-tab` 이 display:inline-flex 라 [hidden] 만으로는 안 사라진다 - style.css 에 짝 규칙이 있다.
+    const emTab = document.getElementById('eventMapTab');
+    if (emTab) emTab.hidden = next;
   }
   return true;
 }

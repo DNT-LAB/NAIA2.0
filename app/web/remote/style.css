@@ -3979,6 +3979,64 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.025);
 }
+/* 패널 폭 기준 컨테이너 쿼리 — 아티스트 탭은 우측 패널 안에 살아서 창이 넓어도 좁을 수 있다.
+   아래 1100px 창 폭 미디어쿼리는 그 경우를 못 잡는다(제목·모드 선택·검색 칸이 잘렸다). */
+.artist-thumb-panel {
+  container-type: inline-size;
+  container-name: artist-thumb-panel;
+}
+@container artist-thumb-panel (max-width: 780px) {
+  .artist-thumb-panel-head {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 8px;
+  }
+  /* 숨긴 Download 단추 때문에 grid 의 auto 열에 검색 칸이 떨어져 180px 로 굳는다 - flex 로 폭을 나눈다. */
+  .artist-thumb-toolbar-controls {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .artist-thumb-panel-head .custom-artist-thumb-select,
+  .artist-thumb-panel-head .artist-thumb-select:not(.native-select-hidden) {
+    flex: 1 1 220px;
+    width: auto;
+  }
+  .artist-thumb-download-btn {
+    flex: 0 0 auto;
+  }
+  .artist-thumb-search {
+    flex: 1 1 200px;
+    width: auto;
+    min-width: 0;
+  }
+  .artist-thumb-status-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .artist-thumb-status {
+    white-space: normal;
+  }
+}
+@container artist-thumb-panel (max-width: 520px) {
+  .artist-thumb-toolbar-controls {
+    grid-template-columns: 1fr;
+  }
+  .artist-thumb-bulk-controls {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+  .artist-thumb-bulk-wrap {
+    flex: 1 1 120px;
+  }
+  .artist-thumb-bulk-btn,
+  .artist-thumb-random-btn {
+    width: 100%;
+    min-width: 0;
+  }
+  .artist-thumb-random-btn {
+    flex: 1 1 160px;
+  }
+}
 @media (max-width: 1100px) {
   .artist-thumb-panel-head {
     align-items: stretch;

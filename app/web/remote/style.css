@@ -13861,6 +13861,9 @@ body.detached-metadata .metadata-layout {
   font-family: var(--font-editor); font-size: 11px; color: var(--text-primary);
 }
 .cw-slot.is-muted .cw-slot-name { opacity: 0.42; text-decoration: line-through; }
+/* 보관함(즐겨찾기/그룹)에서 꺼낸 사본 표식(복원 = 복사, 2026-09-13) */
+.cw-slot-copy { font-size: 9px; padding: 0 4px; margin-left: 2px; border-radius: 3px; vertical-align: 1px;
+  color: #e6a84a; border: 1px solid rgba(230,168,74,0.45); background: rgba(230,168,74,0.10); }
 /* 그룹 칩이 버튼이 됐다 - 이름이 있으면 늘 보이고(정보), 없으면 hover 로 나온다. */
 
 /* 오른쪽 - 작업 영역 */

@@ -93,6 +93,63 @@ def _seed_missing_positions(settings: dict) -> None:
 MAX_CHARACTER_SLOTS = 25
 
 
+def _is_stored_keepsake(frame: Any) -> bool:
+    """보관함 항목인가 - 즐겨찾기이거나 그룹에 든 **비활성** 프레임. 이것을 꺼내면 옮기지
+    않고 **복사**한다(사용자 결정 2026-09-13). 그냥 히스토리(둘 다 아님)는 전처럼 옮긴다 -
+    "히스토리 = 슬롯에서 내려온 것" 이라 사본을 남길 이유가 없다."""
+    if not isinstance(frame, dict) or _state_of(frame) == "active":
+        return False
+    return bool(frame.get("favorite")) or bool(str(frame.get("group") or "").strip())
+
+
+def _content_fingerprint(frame: Any) -> tuple:
+    """사본이 원본과 '같은가' 의 잣대 - 프롬프트·UC·이름·좌표. 슬롯 상태(켜짐·mute·
+    used_at·즐겨찾기·그룹)는 **내용이 아니다**."""
+    from core.character_settings import normalize_position
+
+    if not isinstance(frame, dict):
+        return ()
+    pos = normalize_position(frame.get("position"))
+    return (
+        str(frame.get("prompt") or "").strip(),
+        str(frame.get("uc") or "").strip(),
+        str(frame.get("custom_name") or "").strip(),
+        (pos["x"], pos["y"]) if pos else None,
+    )
+
+
+def _clone_for_restore(source: dict[str, Any]) -> dict[str, Any]:
+    """보관함 항목의 사본을 만든다. `char_copy_to_group_` 의 복제 규칙과 같다(새 uuid ·
+    링크 끊음) - 거기에 원본 uuid 를 적고, 즐겨찾기·그룹은 **떼어 낸다**: 사본이 내려올
+    때 '다르면 일반 저장' 이어야 하므로 보관함 표식을 물려받으면 안 된다."""
+    import copy as _copy
+
+    from core.character_settings import _frame_uuid, _new_character_uuid
+
+    clone = _copy.deepcopy(source)
+    clone.pop("slot_uuid", None)
+    clone.pop("id", None)
+    clone.pop("return_slot_state", None)
+    clone["uuid"] = _new_character_uuid()
+    clone["origin_uuid"] = str(_frame_uuid(source) or "")
+    clone["favorite"] = False
+    clone["group"] = ""
+    clone["connect_to"] = ""
+    clone["used_at"] = 0
+    return clone
+
+
+def _find_by_uuid(frames: Any, uuid: str) -> dict[str, Any] | None:
+    from core.character_settings import _frame_uuid
+
+    if not uuid:
+        return None
+    for frame in frames or []:
+        if isinstance(frame, dict) and str(_frame_uuid(frame) or "") == uuid:
+            return frame
+    return None
+
+
 def _active_slot_count(frames: Any) -> int:
     """NAI 로 실제 나가는 슬롯 수. 히스토리(비활성/cold)는 세지 않는다."""
     return sum(1 for frame in (frames or [])
@@ -597,10 +654,20 @@ class HeadlessCharacterService:
                     #    `_prune_character_links` 가 자식의 링크를 **조용히 지운다.**
                     #    `char_slot_state_` 도 같은 이유로 함께 옮긴다.
                     frame = frames[index]
-                    party = [frame, *self._connected_children(frames, frame)]
-                    # ⚠️ `list.remove` 는 == 로 찾는다. 프레임은 같은 모양이 될 수
-                    #    있으니 **정체**로 빼낸다.
-                    travelling = {id(member) for member in party}
+                    if _is_stored_keepsake(frame):
+                        # 보관함(즐겨찾기·그룹)에서 끌어왔다 - 원본은 두고 **사본**을 꽂는다
+                        # (사용자 결정 2026-09-13, ↩ 와 같은 규칙). 사본은 링크가 없으니
+                        # 자식도 없다. 상한은 ↩ 와 같은 잣대로 막는다.
+                        if _active_slot_count(frames) >= MAX_CHARACTER_SLOTS:
+                            return None
+                        frame = _clone_for_restore(frame)
+                        party = [frame]
+                        travelling = set()
+                    else:
+                        party = [frame, *self._connected_children(frames, frame)]
+                        # ⚠️ `list.remove` 는 == 로 찾는다. 프레임은 같은 모양이 될 수
+                        #    있으니 **정체**로 빼낸다.
+                        travelling = {id(member) for member in party}
                     frames[:] = [f for f in frames if id(f) not in travelling]
                     frame["slot_state"] = "active"
                     # ⚠️ `is_enabled` 는 손대지 않는다 - **파생값**이라 정규화가
@@ -642,19 +709,41 @@ class HeadlessCharacterService:
                     #    찍는다 - 프론트가 따로 보내게 하면 한쪽만 도착해 순서가 엉킨다.
                     was_active = str(frame.get("slot_state") or "") == "active"
                     targets = [frame, *self._connected_children(frames, frame)]
-                    if was_active and requested != "active":
-                        import time
+                    vanish = False
+                    if requested == "active" and _is_stored_keepsake(frame):
+                        # 보관함(즐겨찾기·그룹)에서 ↩ - 원본은 목록에 남기고 **사본**을
+                        # 활성으로(사용자 결정 2026-09-13, 버그 리포트 #3). 전에는 같은
+                        # 레코드를 옮겨서 즐겨찾기 탭에서 사라졌고, 슬롯에서 고치면
+                        # 원본이 바뀌었다. 사본은 링크가 없으니 자식도 없다.
+                        clone = _clone_for_restore(frame)
+                        frames.append(clone)          # 정렬이 활성 무리 맨 뒤로 올린다
+                        targets = [clone]
+                    elif (requested != "active" and was_active
+                            and str(frame.get("origin_uuid") or "")):
+                        # 사본을 내린다. 원본과 **같으면 소멸**(같은 것을 두 번 보관하지
+                        # 않는다), 다르면 표식을 떼고 일반 히스토리로 간다.
+                        origin = _find_by_uuid(frames, str(frame.get("origin_uuid") or ""))
+                        if origin is not None and _content_fingerprint(origin) == _content_fingerprint(frame):
+                            vanish = True
+                        else:
+                            frame["origin_uuid"] = ""
+                    if vanish:
+                        gone = {id(member) for member in targets}
+                        frames[:] = [f for f in frames if id(f) not in gone]
+                    else:
+                        if was_active and requested != "active":
+                            import time
 
-                        stamp = time.time()
+                            stamp = time.time()
+                            for target in targets:
+                                target["used_at"] = stamp
                         for target in targets:
-                            target["used_at"] = stamp
-                    for target in targets:
-                        if requested == "cold":
-                            target["return_slot_state"] = str(target.get("slot_state") or "inactive")
-                        target["slot_state"] = requested
-                        target["is_enabled"] = (
-                            requested == "active" and not bool(target.get("is_muted"))
-                        )
+                            if requested == "cold":
+                                target["return_slot_state"] = str(target.get("slot_state") or "inactive")
+                            target["slot_state"] = requested
+                            target["is_enabled"] = (
+                                requested == "active" and not bool(target.get("is_muted"))
+                            )
                     invalidate_snapshot = True
         elif key.startswith("char_slot_name_"):
             index = context._index_from_key(key, "char_slot_name_")

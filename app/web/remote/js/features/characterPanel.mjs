@@ -1106,7 +1106,9 @@ export function createCharacterPanel({
           data-cw-drag="${index}" data-cw-drag-uuid="${escAttr(character.slot_uuid || '')}">
           <button type="button" class="cw-slot-en${muted ? '' : ' is-on'}"
             data-cw-mute="${index}" title="${muted ? '이 슬롯을 켠다' : '이 슬롯을 끈다 (자리는 그대로)'}">✔</button>
-          <span class="cw-slot-name">C${ordinal} · ${escHtml(slotLabel(character))}</span>
+          <span class="cw-slot-name">C${ordinal} · ${escHtml(slotLabel(character))}${character.origin_uuid
+            ? ' <span class="cw-slot-copy" title="즐겨찾기/그룹 원본의 사본 - ✕ 로 내릴 때 원본과 같으면 사라지고, 다르면 히스토리에 남는다">사본</span>'
+            : ''}</span>
           <!-- 테스트 생성 - 이 슬롯 하나만 뽑아 본다(사용자 지정 2026-09-02).
                히스토리 항목의 [즉시 생성] 과 같은 길이다. -->
           <button type="button" class="cw-slot-btn"

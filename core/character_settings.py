@@ -336,6 +336,10 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 # 칸만** 골라 버리려고 둔다 - 사용자가 손으로 만든 칸은 그대로 남는다.
                 # 이게 없으면 비활성 무리에 씬 찌꺼기가 끝없이 쌓인다(사용자 제보).
                 "from_scene": bool(frame.get("from_scene", False)),
+                # 보관함(즐겨찾기·그룹)에서 **복원한 사본**이면 원본의 uuid. 내릴 때
+                # 원본과 같으면 소멸시키는 근거다(사용자 결정 2026-09-13: 복원 = 복사).
+                # ⚠️ 여기 안 넣으면 정규화가 조용히 떨어뜨려 사본이 그냥 히스토리가 된다.
+                "origin_uuid": str(frame.get("origin_uuid") or ""),
             })
     # ⚠️ 500개 잘라내기는 **읽기·쓰기가 함께 지나는 이 자리**에서 한 번만 한다.
     #    호출부마다 걸면 하나가 빠지고, 빠진 경로로 들어온 저장본이 상한을 넘긴다.
@@ -1798,6 +1802,8 @@ def character_state_from_settings(
             "connect_to": str(frame.get("connect_to") or ""),
             "favorite": bool(frame.get("favorite")),
             "group": _default_group(frame, slot_state),
+            # 보관함에서 꺼낸 사본인가(화면이 '사본' 표시를 단다).
+            "origin_uuid": str(frame.get("origin_uuid") or ""),
             # ⚠️ 화면이 히스토리를 **최근 순**으로 세운다. 이걸 안 보내면 전부 0 이
             #    되어 정렬이 통째로 무효가 된다 - 방금 내린 것이 맨 아래에 남았다
             #    (Codex NIT 8 · 실측).

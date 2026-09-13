@@ -1392,9 +1392,24 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     close();
   }, true);
 
+  async function searchCombination(item) {
+    if (!Array.isArray(item.tags) || item.tags.length < 3 || item.tags.length > 8) return;
+    if (!RATING_OPTIONS.some(r => r.id === item.rating) || !PERSON_IDS.includes(item.person)) return;
+    if (linkPending || linkUncertain) { toast('랜덤 연결 상태를 확인한 뒤 다시 검색해주세요.', 'error'); return; }
+    await show();
+    library?.close();
+    pins = item.tags.slice(); excludes = [];
+    ratings = new Set([item.rating]); persons = new Set([item.person]);
+    group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
+    input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
+    savePrefs(persons, ratings, sortMode);
+    if (randomLink.enabled) await syncRandomLink();
+    await explore();
+  }
+
   const refreshRandomLink = () => getJson('/api/event-map/random-link').then(receiveRandomLink).catch(() => {});
   void refreshRandomLink();
   return { show, close, toggle, isOpen: () => open, pins: () => pins.slice(),
     isRandomLinked: () => randomLink.enabled, isRandomLinkPending: () => linkPending > 0 || linkUncertain,
-    receiveRandomLink, refreshRandomLink };
+    receiveRandomLink, refreshRandomLink, searchCombination };
 }

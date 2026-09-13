@@ -1,7 +1,7 @@
 /* Fast Search — Ctrl+F 로 여는 한 칸 검색.
  *
  * 태그·아티스트·캐릭터·와일드카드·프리셋·이벤트를 한 자리에서 찾고,
- * 고른 것은 **클립보드로만** 간다(사용자 지시 2026-09-05).
+ * 고른 것은 클립보드로 복사하거나 이벤트 맵의 검색 조건으로 전달한다.
  *
  * ⚠️ 이 창은 **프롬프트를 절대 건드리지 않는다.** 붙여넣기는 사용자가 한다.
  *    "메인 프롬프트가 덮이는 것"은 이 저장소에서 반복해서 지적받은 사항이라,
@@ -24,13 +24,12 @@
  *  - 걸린 이벤트가 둘 이상이면 **칩** 줄(전부 보인다, 스크롤 없음). 칩 본문을 누르면 그 이벤트
  *    묶음으로 **이동**하고(지금 보이는 묶음의 칩은 연노랑), 칩의 × 를 눌러야만 그 이벤트가
  *    **숨겨진다**(줄 그은 칩으로 남아 다시 누르면 돌아온다). 서버에는 숨긴 것(OFF 목록)만
- *    보낸다 — deep 단계에서 이벤트가 더 발견돼도 파라미터가 안 바뀌어 페이징이 흔들리지 않는다.
+ *    보낸다 — 페이지 이동 중에도 검색 조건을 유지한다.
  *    이름이 아니라 조합 안의 태그로만 걸린 이벤트(rank 4)는 "그 외 N개" 칩 하나로 묶는다.
  *  머리는 이벤트 구역 **위에 고정**돼 내용과 함께 스크롤된다. 조건 칸이 포커스를 잃지 않게
  *  **한 번만 만들고** 다시 그리지 않는다(목록만 다시 그린다).
  *
- * 이벤트는 "더 보기" 버튼 없이 **스크롤로 이어서** 본다: 3–8태그 조합을 다 보이면
- * 9–16태그 조합으로 넘어가고, 끝나면 끝이라고 말한다.
+ * 이벤트는 "더 보기" 버튼 없이 **스크롤로 이어서** 본다: 3–8태그 조합만 표시하고, 끝나면 끝이라고 말한다.
  *
  * 이벤트 목록은 **이벤트가 카테고리**다: 서버가 이벤트별로 묶어 보내고, 여기서는 이벤트가
  * 바뀌는 자리에 이름을 한 번만 찍는다(머리글 줄은 배경색으로 구분). 행의 본문은 태그 조합이다.
@@ -38,7 +37,7 @@
  * 2026-09-07 — 카탈로그의 62% 가 관측 1 이라 그대로 두면 목록이 잡음으로 찬다).
  *
  * 이벤트 행을 누르거나 Enter 하면 **복사하지 않고** 그 행 바로 아래가 인라인으로 펼쳐진다:
- * 머리 = [선택한 조합] [프롬프트 복사] [×], 몸 = (1) 고른 조합을 전부
+ * 머리 = [선택한 조합] [프롬프트 복사] [이벤트 맵에서 검색] [×], 몸 = (1) 고른 조합을 전부
  * 포함하는 더 긴 조합, (2) 핵심(앵커) 태그를 뺀 나머지가 한 태그만 다른 조합. (1)에 든 것은
  * (2)에 다시 나오지 않는다. 비어 있는 절은 아예 안 그리고 둘 다 비면 머리만 남는다. 이웃 행을
  * 누르면 그것이 복사 대상이 되고(연한 강조), [프롬프트 복사] 가 대상을 복사한다. 이웃 행도
@@ -62,7 +61,7 @@ const EVENT_PAGE = 8;
 // 칩으로 묶음을 찾아가는 동안은 큰 쪽으로 받는다. ⚠️ 서버 MAX_LIMIT(20)을 넘기면 잘려 오고, 그걸
 // '끝' 으로 오판해 basic 단계가 잘렸다(실측 2026-09-07, 64 로 두었을 때). 서버 상한과 같게 둔다.
 const EVENT_SEEK_PAGE = 20;
-const EVENT_PHASES = ['basic', 'deep'];   // 3–8태그 -> 9–16태그 -> 끝
+const EVENT_PHASES = ['basic'];   // 3–8태그만
 const RATING_OPTIONS = [
   { id: 'g', label: 'G', title: 'General' },
   { id: 's', label: 'S', title: 'Sensitive' },
@@ -82,7 +81,7 @@ const DEFAULT_PERSONS = [...PERSON_GROUPS[0].ids, ...PERSON_GROUPS[1].ids];
 const NEIGHBOR_LIMIT = 20;
 const REST_KEY = '__rest__';
 
-export function initFastSearch() {
+export function initFastSearch({searchEventMap} = {}) {
   let overlay = null, input = null, body = null, countEl = null, chipRow = null;
   let lanesEl = null, eventSection = null, eventList = null, eventChips = null, eventNote = null;
   let open = false, seq = 0, timer = null, eventTimer = null;
@@ -255,6 +254,7 @@ export function initFastSearch() {
     body.addEventListener('click', event => {
       const t = event.target;
       if (t.closest('[data-fs-inline-close]')) { closeInline(); return; }
+      if (t.closest('[data-fs-inline-map]')) { void searchInlineInMap(); return; }
       if (t.closest('[data-fs-inline-copy]')) { void copyInlineTarget(); return; }
       if (t.closest('[data-fs-group-search]')) return;               // 묶음 찾기 칸 - 아무것도 안 한다
       const more = t.closest('[data-fs-more]');
@@ -265,6 +265,7 @@ export function initFastSearch() {
         const item = inlineRows[Number(inlineRow.dataset.fsInlineIndex)];
         if (inline && item && item.value) {
           inline.target = String(item.value);
+          inline.targetItem = item;
           eventList.querySelectorAll('[data-fs-inline-index]').forEach(node =>
             node.classList.toggle('is-active', node === inlineRow));
         }
@@ -688,9 +689,15 @@ export function initFastSearch() {
             if (eventPaging.phase + 1 < EVENT_PHASES.length) { eventPaging.phase += 1; eventPaging.offset = 0; }
             else eventPaging.done = true;
           }
-          groups.set('event', {source: 'event', label: source.label, items: eventPaging.items, note: group.note || ''});
+          groups.set('event', {source: 'event', label: source.label, items: eventPaging.items, note: group.note || '', state: group.state});
           pending.delete('event');
           render(query);
+          if (group.state === 'downloading') {
+            clearTimeout(eventTimer);
+            eventTimer = setTimeout(() => {
+              if (mine === seq && open && enabled.has('event') && input.value.trim() === query) scheduleEvents(0);
+            }, 3000);
+          }
           if (restoreScroll != null) {
             // 다시 불러온 뒤 옛 스크롤 위치로. 내용이 아직 짧아 못 가면 다음 쪽을 이어 받는다.
             body.scrollTop = restoreScroll;
@@ -744,7 +751,7 @@ export function initFastSearch() {
 
   function moreHtml(key, scope, hidden, isOpen) {
     return `<button type="button" class="fs-more" data-fs-more="${esc(key)}" data-fs-more-scope="${scope}" aria-expanded="${isOpen}">`
-      + `${isOpen ? '▾' : '▸'} 관측 1회 ${hidden}개 ${isOpen ? '접기' : '더보기'}</button>`;
+      + `${isOpen ? '▾' : '▸'} 1회 집계 ${hidden}개 ${isOpen ? '접기' : '더보기'}</button>`;
   }
 
   /** 펼친 칸의 몸(두 절). 비어 있는 절은 안 그리고, 둘 다 비면 빈 문자열(머리만 남는다).
@@ -779,13 +786,14 @@ export function initFastSearch() {
     return parts.join('');
   }
 
-  /** 펼친 칸 전체. 머리 = [선택한 조합] [프롬프트 복사] [×]. 몸은 비어 있으면 아예 없다. */
+  /** 펼친 칸 전체. 머리 = [선택한 조합] [프롬프트 복사] [이벤트 맵에서 검색] [×]. 몸은 비어 있으면 아예 없다. */
   function inlineHtml() {
     const bodyHtml = inlineBodyHtml();
     return `<div class="fs-inline" data-fs-inline>`
       + '<div class="fs-inline-bar">'
       + '<span class="fs-inline-kicker">선택한 조합</span>'
       + '<button type="button" class="fs-inline-copy" data-fs-inline-copy title="선택한 조합(이웃 행을 눌렀으면 그것)을 클립보드로">프롬프트 복사</button>'
+      + '<button type="button" class="fs-inline-copy" data-fs-inline-map>이벤트 맵에서 검색</button>'
       + '<span class="fs-inline-spacer"></span>'
       + '<button type="button" class="fs-close" data-fs-inline-close aria-label="펼침 닫기">×</button></div>'
       + (bodyHtml ? `<div class="fs-inline-body">${bodyHtml}</div>` : '')
@@ -854,7 +862,6 @@ export function initFastSearch() {
         const items = group.items;
         let i = 0;
         while (i < items.length) {
-          if (i === eventPaging.deepStart) eparts.push('<div class="fs-cap fs-cap-sub">9–16태그 조합</div>');
           const anchor = items[i].anchor || items[i].title;
           const phase = eventPaging.deepStart >= 0 && i >= eventPaging.deepStart ? 'd' : 'b';
           let j = i;
@@ -875,7 +882,7 @@ export function initFastSearch() {
             if (needle) { if (!String(item.value || '').toLowerCase().includes(needle)) continue; matched += 1; }
             else if (!isOpen && observed(item) === 1) continue;
             const index = rows.length;
-            const key = `event ${item.value}`;
+            const key = `event ${item.rating || ""} ${item.person || ""} ${item.value}`;
             rows.push({...item, _source: 'event', _searchKey: key});
             const expanded = inline && inline.key === key;
             eparts.push(eventRowHtml(item, `data-fs-index="${index}"`, '', expanded ? ' is-expanded' : ''));
@@ -891,7 +898,7 @@ export function initFastSearch() {
       } else if (eventPending) {
         eparts.push('<div class="fs-end">조합을 찾는 중…</div>');
       } else if (query) {
-        eparts.push(`<div class="fs-end">${group && /실패/.test(group.note || '') ? esc(group.note) : '조건에 맞는 조합이 없습니다'}</div>`);
+        eparts.push(`<div class="fs-end">${group && (group.state || /실패/.test(group.note || '')) ? esc(group.note) : '조건에 맞는 조합이 없습니다'}</div>`);
       }
       if (inline && !inlineShown) inline = null;   // 펼친 행이 목록에서 사라졌다(필터 변경·접힘 등)
       eventList.innerHTML = eparts.join('');
@@ -978,7 +985,7 @@ export function initFastSearch() {
     if (!anchor || !tags) return;
     if (inline && inline.key === item._searchKey) return;     // 이미 펼쳐져 있다
     const mine = ++inlineSeq;
-    inline = {key: item._searchKey, anchor, tags, payload: null, loading: true, seq: mine, target: null, more: new Set()};
+    inline = {item, key: item._searchKey, anchor, tags, payload: null, loading: true, seq: mine, target: null, more: new Set()};
     const query = input.value.trim();
     render(query);
     // 펼친 행이 펼친 칸과 함께 보이게 - 행을 몸통 위쪽으로 올린다.
@@ -988,7 +995,7 @@ export function initFastSearch() {
       body.scrollTop = Math.max(0, Math.round(top - 30));
       updateCurrentAnchor();
     }
-    const {rating, person} = filterParams();
+    const rating = item.rating || filterParams().rating, person = item.person || filterParams().person;
     const params = new URLSearchParams({tags, anchor, rating, person, limit: String(NEIGHBOR_LIMIT)});
     fetch(`/api/fast-search/event-neighbors?${params}`, {cache: 'no-store'})
       .then(response => { if (!response.ok) throw new Error('neighbors failed'); return response.json(); })
@@ -1000,6 +1007,14 @@ export function initFastSearch() {
   async function copyInlineTarget() {
     if (!inline) return;
     await copyText(inline.target || inline.tags);
+  }
+
+  async function searchInlineInMap() {
+    if (!inline || typeof searchEventMap !== 'function') return;
+    const item = inline.targetItem || inline.item;
+    if (!item || !Array.isArray(item.tags) || item.tags.length < 3 || item.tags.length > 8) return;
+    close();
+    await searchEventMap(item);
   }
 
   function closeInline() {

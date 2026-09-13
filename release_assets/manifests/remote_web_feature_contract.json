@@ -171,14 +171,14 @@
     },
     {
       "id": "fast_search",
+      "events": "Read observed event sets from the shared naiamap service; only 3-8 tags, including neighbors. Bounded scans label sampled counts. Copy leaves the prompt unchanged; Event Map handoff restores the selected tags, rating, and person without generating.",
       "name": "Fast Search (Ctrl+F) across tags, artists, characters, wildcards, presets, events",
       "source_files": [
         "app/backend/server/fast_search_routes.py",
         "app/backend/server/autocomplete_commands.py",
         "app/backend/server/ollama_chat_tools.py",
-        "core/event_preset/fast_search_catalog.py",
-        "core/event_preset/fast_search_catalog.json",
-        "core/event_preset/fast_search_catalog_deep.json",
+        "core/event_map/quick_search.py",
+        "core/event_map/service.py",
         "app/web/remote/js/features/fastSearch.mjs"
       ],
       "legacy_dependency": "none",

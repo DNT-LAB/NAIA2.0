@@ -1,8 +1,8 @@
 """Fast Search (Ctrl+F) — 한 칸에서 태그·아티스트·캐릭터·와일드카드·프리셋·이벤트를 찾는다.
 
 **읽기 전용이다.** 이 라우트는 어떤 사용자 데이터도 쓰지 않고, 활성 프리셋·프롬프트·
-생성 상태를 건드리지 않는다. 고른 결과는 **클립보드로만** 간다(사용자 지시 2026-09-05)
-— 메인 프롬프트에 자동으로 넣지 않는다.
+생성 상태를 건드리지 않는다. 고른 결과는 복사하거나 이벤트 맵 검색 조건으로 넘긴다.
+메인 프롬프트에 자동으로 넣지 않는다.
 
 갈래별 검색 소유권:
 
@@ -10,7 +10,7 @@
     character   ollama_chat_tools.search_characters    (도감 - 작품·수록 수를 안다)
     wildcard    autocomplete_commands.search_wildcards
     preset      prompt_engineering_settings            (파일 목록 + 저장된 내용)
-    event       event_preset.fast_search_catalog         (기본 제공 정적 관측 조합)
+    event       event_map.quick_search                  (현재 naiamap 관측 조합)
 
 ⚠️ **한 갈래가 실패해도 나머지는 낸다.** 실패한 갈래는 빈 목록 + `note` 로
    이유를 말한다. 이벤트 검색에는 별도 Event Preset 다운로드가 필요 없다.
@@ -126,96 +126,25 @@ def _search_preset(context, query: str, limit: int, opts) -> tuple[list[dict], s
     return items, f"{mode} 모드에 저장된 프리셋" if items else ""
 
 
-_neighbor_warm_started = False
+def _search_event(context, query: str, limit: int, opts):
+    from core.event_map.quick_search import search
+    from app.backend.server.event_map_routes import _kr_lookup, _install_view
+    from core.event_map.service import MapQueryError
+    try:
+        return search(context, query, limit, opts, _kr_lookup(context))
+    except MapQueryError as exc:
+        if exc.code != "unavailable":
+            raise
+        downloading = bool(_install_view(context, can_start=False).get("active"))
+        note = "다운로드 중" if downloading else "이벤트 맵 파일이 없습니다. 이벤트 맵에서 다운로드해주세요."
+        return [], note, {"state": "downloading" if downloading else "unavailable",
+                          "exhausted": True, "events": []}
 
 
-def _warm_neighbor_index_once() -> None:
-    """첫 이벤트 검색에서 한 번, 이웃 조회용 색인을 뒤에서 데운다(첫 섬이 1.2초 걸리지 않게)."""
-    global _neighbor_warm_started
-    if _neighbor_warm_started:
-        return
-    _neighbor_warm_started = True
-    from core.event_preset.fast_search_catalog import warm_neighbor_index
-    import threading
 
-    def run():
-        try:
-            warm_neighbor_index()
-        except Exception:
-            pass        # 데우기 실패는 조용히 - 실제 조회가 다시 시도한다
-    threading.Thread(target=run, name='fast-search-neighbor-warm', daemon=True).start()
-
-
-def _search_event(context, query: str, limit: int, opts) -> tuple[list[dict], str]:
-    from core.event_preset.fast_search_catalog import matched_events, search_catalog
-
-    # 등급·인원은 쉼표로 여럿 올 수 있다(한 줄 토글). 검증은 카탈로그가 한다 - 모르는
-    # 값이 하나라도 있으면 빈 결과지, 넓어지는 일은 없다.
-    rating = str(opts.get("rating") or "").strip().casefold()
-    person = str(opts.get("person") or "").strip()
-    detail = str(opts.get('event_detail') or 'basic')
-    # 페이징: search_catalog 는 결정적이고 앞에서부터 채우므로 `offset+limit` 로 부른 뒤
-    # 앞 offset 개를 잘라내면 **안정된 다음 쪽**이 된다(앞쪽은 limit 이 커져도 같다).
-    # 프론트가 '더 보기' 버튼 없이 스크롤로 이어 받는다(사용자 지정 2026-09-07).
-    offset = max(0, int(opts.get('event_offset') or 0))
-    # 사용자가 끈 이벤트 칩(OFF 목록). ON 목록이 아닌 이유는 catalog.search_catalog 참고.
-    exclude = [a.strip() for a in str(opts.get('event_exclude') or '').split(',') if a.strip()]
-    # grouped: 이벤트별로 묶어 낸다 - 프론트가 이벤트 이름을 머리글로 한 번만 찍는다.
-    fetched = search_catalog(query, offset + limit, rating=rating, person=person, detail=detail,
-                             grouped=True, exclude=exclude)
-    matches = fetched[offset:]
-    # 요청한 만큼 못 채웠으면 이 phase 는 끝이다 - 프론트가 다음 단계(deep)로 넘어간다.
-    exhausted = len(fetched) < offset + limit
-    items = []
-    for event, variant in matches:
-        tags = variant.copy_tags
-        title = event.tag if event.label == event.tag else f"{event.tag} · {event.label}"
-        meta = f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(tags)}태그 · 관측 {variant.count:,}"
-        row = _item(", ".join(tags), title, ", ".join(tags), meta)
-        # 앵커(핵심 태그) - 프론트가 이웃 조회(/event-neighbors)에 되돌려 보낸다.
-        row["anchor"] = event.tag
-        # 관측 수 - 프론트가 관측 1회를 '더보기' 로 접는다(사용자 지정 2026-09-07). meta 를 파싱하지 않게.
-        row["count"] = variant.count
-        items.append(row)
-    # 등급·인원 문구는 뺐다 - 토글 줄이 이미 보여 주는 것을 캡션이 한 번 더 반복했다
-    # (사용자 지적 2026-09-07).
-    note = f"{'9–16태그' if detail == 'deep' else '3–8태그'} 조합"
-    # 결과를 다 만든 뒤에 데운다 - 앞에서 시작하면 데우기가 잡은 락에 이 검색이 기다린다.
-    _warm_neighbor_index_once()
-    # 세 번째 값은 갈래별 부가 정보 - run_all 이 group 에 얹는다.
-    extra = {"exhausted": exhausted, "offset": offset}
-    if offset == 0:
-        # 첫 쪽에만: 이 질의·필터에 걸린 이벤트 전부(토글 칩). 끈 이벤트를 빼기 **전** 목록이라
-        # 끈 칩도 남아 있어 다시 켤 수 있다.
-        # rank ≤ 3 = 이름으로 걸린 이벤트(칩 하나씩), 4 = 쉼표 AND 로 행 안의 태그만 걸린 이벤트
-        # (프론트가 "그 외 N" 칩 하나로 묶는다 - 26개가 늘어서면 머리가 목록을 밀어낸다, 실측).
-        extra["events"] = [{"tag": event.tag, "label": event.label, "count": count, "rank": rank}
-                           for event, count, rank in matched_events(query, rating=rating, person=person, detail=detail)]
-    return items, note, extra
-
-
-def _event_neighbor_items(anchor: str, tags: list[str], rating: str, person: str, limit: int) -> dict:
-    """고른 조합의 이웃. (1) 전부 포함하는 더 긴 조합 (2) 앵커를 뺀 나머지가 한 태그만 다른 조합.
-    (1)에 든 것은 (2)에 다시 나오지 않는다(사용자 지정 2026-09-07). 읽기 전용."""
-    from core.event_preset.fast_search_catalog import event_neighbors
-
-    found = event_neighbors(anchor, tags, rating=rating, person=person, limit=limit)
-
-    def rows(matches):
-        out = []
-        for event, variant, detail in matches:
-            copy = variant.copy_tags
-            title = event.tag if event.label == event.tag else f"{event.tag} · {event.label}"
-            meta = (f"{variant.rating.upper()} · {variant.person.replace('_', ' ')} · {len(copy)}태그"
-                    f" · 관측 {variant.count:,}")
-            row = _item(", ".join(copy), title, ", ".join(copy), meta)
-            row["anchor"] = event.tag
-            row["detail"] = detail
-            row["count"] = variant.count
-            out.append(row)
-        return out
-
-    return {"supersets": rows(found["supersets"]), "near": rows(found["near"])}
+def _event_neighbor_items(context, anchor, tags, rating, person, limit):
+    from core.event_map.quick_search import neighbors
+    return neighbors(context, anchor, tags, rating, person, limit)
 
 
 SEARCHERS = {
@@ -290,11 +219,16 @@ def register_fast_search_routes(
         if not chosen or not anchor_tag or len(tags) > 1200:
             return JSONResponse({"error": "tags 와 anchor 가 필요합니다."}, status_code=400,
                                 headers=_no_store())
-        if len(chosen) > 32:
-            return JSONResponse({"error": "태그가 너무 많습니다."}, status_code=400, headers=_no_store())
+        if not 3 <= len(chosen) <= 8:
+            return JSONResponse({"error": "조합은 3~8개 태그여야 합니다."}, status_code=400, headers=_no_store())
         per_group = max(1, min(60, int(limit or 20)))
-        payload = await run_in_thread(
-            lambda: _event_neighbor_items(anchor_tag, chosen, rating, person, per_group))
+        from core.event_map.service import MapQueryError
+        try:
+            payload = await run_in_thread(
+                lambda: _event_neighbor_items(session_context, anchor_tag, chosen, rating, person, per_group))
+        except MapQueryError as exc:
+            return JSONResponse(exc.to_payload(), status_code=503 if exc.code == "unavailable" else 400,
+                                headers=_no_store())
         payload["anchor"] = anchor_tag
         payload["tags"] = chosen
         return JSONResponse(payload, headers=_no_store())

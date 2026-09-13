@@ -2982,7 +2982,11 @@ export function createTagAssistController({
         open.input.focus();
         return;
       }
-      closeSlashEntry({restoreFocus: true});
+      // ⚠️ 초점 복귀는 실행이 준 초점을 덮으면 안 된다(prefix ▸ 가 PE 칸에 초점을 준다).
+      //    실행이 초점을 옮겼으면 textarea 로 되돌리지 않는다.
+      const moved = document.activeElement && document.activeElement !== open.input
+        && document.activeElement !== open.textarea && document.activeElement !== document.body;
+      closeSlashEntry({restoreFocus: !moved});
       return;
     }
     const cmd = row._cmd;
@@ -2996,10 +3000,13 @@ export function createTagAssistController({
       return;
     }
     if (typeof cmd.choices === 'function') {
+      // `/preset recom` 처럼 이름 뒤에 이어 친 글은 선택지 단계의 **첫 검색어**가 된다 - 빠른 자동완성.
+      const seed = slashArgText(open.input.value);
       let choices = [];
       try { choices = cmd.choices() || []; }
       catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
       setSlashStage({cmd, choices});
+      if (seed) { open.input.value = seed; renderSlashList(seed); }
       open.input.focus();
       return;
     }

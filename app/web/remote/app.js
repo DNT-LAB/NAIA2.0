@@ -12960,8 +12960,86 @@ function slashNumberCommand(name, key, title, {min, max, integer = false, aliase
   };
 }
 
+// ---- /preset · /pe (사용자 지정 2026-09-13 2차) ----
+function slashPeState() {
+  return moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState || {};
+}
+/** PE 모듈을 열고(이미 열려 있으면 그대로) 렌더가 끝난 뒤 그 칸에 초점을 준다. */
+function slashFocusPeBox(id, after = null) {
+  openModule('prompt_engineering', {forceOpen: true});
+  let tries = 0;
+  const tick = () => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (typeof after === 'function') { after(el); return; }
+      el.focus();
+      try { el.setSelectionRange(el.value.length, el.value.length); } catch (_) {}
+      el.scrollIntoView({block: 'center'});
+      return;
+    }
+    if (tries++ < 30) setTimeout(tick, 50);
+  };
+  tick();
+}
+// PE 의 Preprocessing 옵션 키·이름. ⚠️ `promptEngineeringPanel.mjs` 의 PP_OPTIONS 와 같은 목록이다 -
+//    거기 항목이 늘면 여기도 늘려야 슬래시에서 보인다(패널이 내보내지 않아 복사해 둔다).
+const SLASH_PE_OPTIONS = [
+  ['remove_author', 'Remove Artist'], ['remove_work_title', 'Remove Work Title'],
+  ['remove_character_name', 'Remove Character Name'], ['remove_character_features', 'Remove Char Features'],
+  ['remove_clothes', 'Remove Clothing'], ['remove_clothing_event', 'Remove Clothing Events'],
+  ['remove_color', 'Remove Color Tags'], ['remove_location_and_background_color', 'Remove Location/BG'],
+  ['remove_expression', 'Remove Expression'], ['remove_pose_action', 'Remove Pose/Action'],
+  ['remove_meta_tags', 'Remove Meta Tags'], ['remove_object_tags', 'Remove Object Tags'],
+  ['remove_noise_tags', 'Remove Low-freq Tags'], ['closed_eyes_sync', 'Closed Eyes Sync'],
+  ['tag_implication_compression', 'Tag Implication'], ['category_annotation', 'Category Annotation'],
+];
+function slashPeOptionChoice(key, title) {
+  const on = !!(slashPeState().preprocessing || {})[key];
+  return {label: title, desc: `${on ? 'ON → 끄기' : 'OFF → 켜기'}`, current: on,
+    run: () => { setPromptEngineeringOption(key, !on); showToast(`${title} ${!on ? 'ON' : 'OFF'}`, 'success'); }};
+}
+function slashPeChoices() {
+  const m = slashPeState();
+  const ollamaOn = !!m.ollama_auto_boost;
+  return [
+    {label: 'prefix ▸', desc: `Prefix 칸을 열어 바로 고친다 (${m.preset || '-'})`, run: () => slashFocusPeBox('modPrePrompt')},
+    {label: 'postfix ▸', desc: 'Postfix 칸을 열어 바로 고친다', run: () => slashFocusPeBox('modPostPrompt')},
+    {label: 'autohide ▸', desc: 'Auto-Hide 칸을 열어 바로 고친다', run: () => slashFocusPeBox('modAutoHide')},
+    {label: 'tools ▸', desc: 'preview · e621 · autoweight · ollama', run: () => ({next: [
+      {label: 'preview', desc: 'Setting & Preview 열기', run: () => openPeDebugPanel()},
+      slashPeOptionChoice('e621_auto_boost', 'e621'),
+      slashPeOptionChoice('danbooru_auto_weight', 'autoweight'),
+      {label: 'ollama', desc: `Ollama Auto-Boost ${ollamaOn ? 'ON → 끄기' : 'OFF → 켜기'}`, current: ollamaOn,
+        run: () => { setPromptEngineeringOllamaAutoBoost(!ollamaOn); showToast(`Ollama Auto-Boost ${!ollamaOn ? 'ON' : 'OFF'}`, 'success'); }},
+    ]})},
+    ...SLASH_PE_OPTIONS.map(([key, title]) => slashPeOptionChoice(key, title)),
+  ];
+}
+function slashPresetChoices() {
+  const m = slashPeState();
+  const summaries = new Map((m.preset_summaries || []).map(s => [String(s?.name || ''), s]));
+  const rows = (m.preset_options || []).map(name => {
+    const s = summaries.get(String(name));
+    return {label: String(name), desc: String(s?.description || s?.api_mode || ''), current: String(name) === String(m.preset || ''),
+      run: () => { onPromptPresetChange(String(name)); showToast(`프리셋 ${name}`, 'success'); }};
+  });
+  if (!rows.length) {
+    try { requestModuleState('prompt_engineering'); } catch (_) {}
+    rows.push({label: '불러오는 중…', desc: '프리셋 목록을 청했습니다 - Backspace 로 나갔다가 다시 들어오세요', run: () => {}});
+  }
+  return [
+    // 화면(목록 · 미리보기 · 썸네일)을 그대로 띄운다 - 프리셋 드롭다운의 브라우저를 연다.
+    {label: '⊞ 프리셋 화면', desc: '목록 · 미리보기 · 썸네일', run: () => slashFocusPeBox('modPreset', select => {
+      if (!(typeof customSelectsControl?.openFor === 'function' && customSelectsControl.openFor(select))) select.focus();
+    })},
+    ...rows,
+  ];
+}
+
 function slashCommandRegistry() {
   const withDesc = cmd => ({...cmd, desc: typeof cmd.desc === 'function' ? cmd.desc() : cmd.desc});
+  // PE 상태는 모듈을 열어야 캐시에 든다 - `/preset`·`/pe` 가 빈 목록을 보이지 않게 엔트리를 여는 순간 청해 둔다.
+  if (!Array.isArray(slashPeState().preset_options)) { try { requestModuleState('prompt_engineering'); } catch (_) {} }
   return [
     slashSelectCommand('sampler', 'sampler', '샘플러'),
     slashSelectCommand('scheduler', 'scheduler', '스케줄러'),
@@ -12972,6 +13050,8 @@ function slashCommandRegistry() {
     slashToggleCommand('autogen', 'auto_generate', 'Auto Gen'),
     slashToggleCommand('promptfix', 'prompt_fixed', 'Prompt Fixed'),
     slashToggleCommand('wcsolo', 'wildcard_standalone', 'WC Solo'),
+    {name: 'preset', desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /preset 이름 으로 바로 좁힌다`, choices: slashPresetChoices},
+    {name: 'pe', desc: 'Prompt Engineering — prefix · postfix · autohide · tools · 옵션', choices: slashPeChoices},
   ].map(withDesc);
 }
 
@@ -13000,7 +13080,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashreg')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashpe')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

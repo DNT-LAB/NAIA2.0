@@ -673,11 +673,13 @@ class OllamaChatAgent:
         # one transaction, instead of spending a model turn on id spelling.
         id_map = {old: chr(ord("a") + i) for i, old in enumerate(ids)}
         relations = []
+        dropped_relations = []
         for relation in args["relations"]:
             if relation["actor_id"] not in id_map or relation["target_id"] not in id_map:
-                raise ValueError("Every relation endpoint must reference a planned actor id. Valid IDs: " +
-                                 ', '.join(id_map) + ". common is a tag scope, not a person. "
-                                 "Use relations=[] if there are no planned actors; do not invent people.")
+                # 인물이 아닌 대상(밤하늘·common)으로 향한 관계는 거부하지 않고 그 관계만 버린다 - 거부하면
+                # 작은 모델(E4B)이 같은 관계를 두 번 내고 중단됐다(2026-09-13 실측). 태그 선택은 살린다.
+                dropped_relations.append(relation)
+                continue
             relations.append({**relation, "actor_id": id_map[relation["actor_id"]],
                               "target_id": id_map[relation["target_id"]]})
         for actor in actors:
@@ -725,6 +727,14 @@ class OllamaChatAgent:
         if not selected:
             raise ValueError("Scene has no selected tags; ask a clarification instead")
         result = assessed_result(source, scene, ledger)
+        if dropped_relations:
+            review = result['semantic_review']
+            for relation in dropped_relations:
+                review['issues'].append({'code': 'dropped_relation',
+                    'message': '인물이 아닌 대상으로 향한 관계는 뺐습니다: '
+                               f"{relation.get('actor_id', '')} -> {relation.get('action', '')} -> {relation.get('target_id', '')}"})
+            review['status'] = result['completion'] = 'partial'
+            result['dropped_relations'] = dropped_relations
         result['provenance'] = {tag: ledger[_norm(tag)]['source'] for tag in selected}
         result['tag_evidence'] = {tag: ledger[_norm(tag)].get('evidence', []) for tag in selected}
         if result['semantic_review']['repairable']:

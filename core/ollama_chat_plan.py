@@ -46,7 +46,7 @@ PLAN_SCHEMA = obj({
         'detail': {'type': 'string', 'enum': ['basic', 'deep'],
                    'description': 'ONLY for search_events. OMIT this field entirely for search_tags and search_characters.'},
     }, ['requirement_ids', 'tool', 'query'])},
-}, ['mode', 'output', 'actors', 'requirements', 'searches'])
+}, ['mode', 'actors', 'requirements', 'searches'])  # output 은 선택(없으면 서버 기본값)
 
 SELECTIONS_SCHEMA = {'type': 'array', 'maxItems': 16, 'items': obj({
     'requirement_id': {'type': 'string'}, 'tags': strings(32),
@@ -116,11 +116,12 @@ def compose_scene_prompt(scene, prompt):
     tags = scene_flat_tags(scene)
     if not tags:
         return text
+    # 문장에 없는 선택 태그만 앞에 붙인다(E2B 실측: 8개 중 3개가 빠진 채 "대체로 있음" 으로 통과했다).
     low = text.lower()
-    present = sum(1 for t in tags if t.lower() in low)
-    if text and present * 10 >= len(tags) * 6:
+    missing = [t for t in tags if t.lower() not in low]
+    if text and not missing:
         return text
-    head = ', '.join(tags)
+    head = ', '.join(missing if text else tags)
     return f'{head}, {text}' if text else head
 
 
@@ -135,8 +136,12 @@ def validate_plan(plan, source, reference_names=()):
     """Called after JSON schema validation, before *any* planned provider call."""
     actors = _unique_ids(plan['actors'], 'Actor')
     requirements = _unique_ids(plan['requirements'], 'Requirement')
-    if not plan['output']['language'].strip():
-        raise ValueError('Output language is required')
+    # output 을 빠뜨린 작은 모델(E2B 실측)은 거부하지 않고 서버 기본값을 채운다 - 형식은 어차피 서버가 정한다.
+    if not isinstance(plan.get('output'), dict):
+        plan['output'] = {'format': 'tags' if plan['mode'] == 'lookup' else 'sentence', 'language': 'en'}
+    plan['output'].setdefault('format', 'tags' if plan['mode'] == 'lookup' else 'sentence')
+    if not str(plan['output'].get('language') or '').strip():
+        plan['output']['language'] = 'en'
     # 장면 구성(compose)은 늘 "완성 프롬프트"가 결과다(사용자 제보 2026-09-13: 모델이 tags 를 고르면
     # 감사 장부만 돌아왔다). 태그만 달라는 명시가 없으면 서버가 sentence/en 으로 못 박는다.
     if plan['mode'] == 'compose' and not tags_only_requested(source):

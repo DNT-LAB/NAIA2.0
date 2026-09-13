@@ -1550,7 +1550,8 @@ export function createTagAssistController({
       lower.startsWith('__') ||
       lower.startsWith('$') ||
       lower.startsWith('vibe:') ||
-      lower.startsWith('preset:')
+      lower.startsWith('preset:') ||
+      lower.startsWith('/')
     )) return query;
     for (const namespace of ['artist', 'character']) {
       const prefix = namespace + ':';
@@ -1571,7 +1572,8 @@ export function createTagAssistController({
     return lower.startsWith('__') ||
       lower.startsWith('$') ||
       lower.startsWith('vibe:') ||
-      lower.startsWith('preset:');
+      lower.startsWith('preset:') ||
+      lower.startsWith('/');
   }
 
   function clearAutocompleteTranslationTimer() {
@@ -1692,7 +1694,9 @@ export function createTagAssistController({
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
-    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && !isPresetTrigger && info.stripped.length < 2)) {
+    // 슬래시 명령은 **메인 프롬프트에서만** - 네거티브·모듈 칸에 `/seq` 가 들어갈 자리는 없다.
+    const isSlashTrigger = !!(info && target === promptEdit && info.stripped.startsWith('/'));
+    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && !isPresetTrigger && !isSlashTrigger && info.stripped.length < 2)) {
       hideAutocomplete();
       checkTagHint();
       return;
@@ -1726,6 +1730,8 @@ export function createTagAssistController({
         sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('preset:')) {
         requestPresetAutocomplete(s);
+      } else if (target === promptEdit && s.startsWith('/')) {
+        showSlashCommands(s);            // 클라이언트 목록 - 서버에 물을 것이 없다
       } else {
         sendWs({type: 'autocomplete', query: s});
       }
@@ -2580,7 +2586,7 @@ export function createTagAssistController({
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
-      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : '')));
+      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : ''))));
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const displayTag = wcType === 'preset_path'
@@ -2697,6 +2703,11 @@ export function createTagAssistController({
     if (r._wc_type === 'chunk') {
       swapToken(target, info, r.value || '');
       hideAutocomplete();
+      return;
+    }
+    if (r._wc_type === 'slash') {
+      hideAutocomplete();
+      applySlashCommand(target, info, r);
       return;
     }
     if (r._wc_type === 'vibe_cluster') {
@@ -2820,44 +2831,53 @@ export function createTagAssistController({
     clearAutocompletePositionStyles();
   }
 
-  // 시퀀스 뼈대 자동완성(사용자 지정 2026-09-12): 메인 프롬프트에 `:begin` 을 **처음** 치면
+  // 슬래시 팔레트(사용자 승인 2026-09-13). 메인 프롬프트에서 토큰 첫머리에 `/` 를 치면 명령 목록이
+  // 뜨고, 고르면 그 토큰이 **결과로 치환**된다. 명령은 프론트에서 소비되어 백엔드로 안 나간다
+  // (그래도 남은 `/명령` 은 백엔드가 생성 직전에 무시한다 - `_strip_slash_commands`).
+  // 전에 있던 `:begin` 자동 펼침은 뺐다 - 타이핑을 가로챘고, 규칙이 둘이면 배우는 것도 둘이다.
   //
-  //     :begin,
-  //     :seq1 text,
-  //     :seq2 text,
-  //     :end
-  //
-  // 로 펼치고 첫 `text` 를 선택해 둔다(바로 덮어쓰게). NAIA 1.5 는 `:seq` 단추가 같은 일을 했다.
-  // ⚠️ 한 번만 - 이미 `:begin` 이 둘이거나 `:seq`/`:end` 가 있으면 안 펼친다(파서는 `:begin` 2개를 오류로 본다).
-  // ⚠️ **타이핑에만** 반응한다(`insertText`). 붙여넣기·되돌리기로 들어온 `:begin` 을 펼치면 사용자 글을 망친다.
-  // ⚠️ 되돌리기 한 번에 지워져야 한다 - `execCommand('insertText')` 가 네이티브 undo 에 한 단계로 얹힌다.
-  //    (setRangeText 는 undo 스택을 끊는다.) 안 되는 런타임이면 setRangeText 로 물러난다.
+  // ⚠️ 토큰 첫머리 `/` 는 어떤 문법도 안 쓴다(프리셋 토큰의 `/` 는 토큰 **안**이다). 그래서 충돌 없이
+  //    다섯 번째 트리거(`__`·`$`·`preset:`·`vibe:` 다음)로 얹었다.
   const SEQUENCE_SKELETON = ':begin,\n:seq1 text,\n:seq2 text,\n:end';
-  function expandSequenceSkeleton(textarea, event) {
-    if (!textarea || (event && event.inputType && event.inputType !== 'insertText')) return false;
-    const value = String(textarea.value || '');
-    const caret = textarea.selectionStart;
-    if (typeof caret !== 'number' || textarea.selectionEnd !== caret) return false;
-    const before = value.slice(0, caret);
-    if (!/:begin$/i.test(before)) return false;
-    const lower = value.toLowerCase();
-    if (lower.indexOf(':begin') !== lower.lastIndexOf(':begin')) return false;
-    if (/:seq[a-z0-9]*\b/i.test(lower) || /:end\b/i.test(lower)) return false;
-    const start = caret - ':begin'.length;
-    textarea.setSelectionRange(start, caret);
+  const SLASH_COMMANDS = [
+    {name: 'seq', desc: '시퀀스 뼈대 삽입 (:begin / :seq1 / :seq2 / :end)'},
+  ];
+  function showSlashCommands(query) {
+    const q = String(query || '').slice(1).trim().toLowerCase();
+    const rows = SLASH_COMMANDS.filter(c => !q || c.name.startsWith(q));
+    if (!rows.length) { hideAutocomplete(); checkTagHint(); return; }
+    acResults = rows.map(c => ({tag: c.name, _wc_type: 'slash', group: '명령', desc: c.desc, cat: ''}));
+    acSel = 0;
+    acMode = true;
+    renderAutocomplete();
+  }
+  /** 토큰 [start, end) 를 `replacement` 로 바꾼다. `execCommand('insertText')` 라 네이티브 undo 한 단계.
+   *  (setRangeText 는 undo 스택을 끊는다 - 안 되는 런타임에서만 폴백.) */
+  function replaceRangeUndoable(textarea, start, end, replacement) {
+    textarea.focus({preventScroll: true});
+    textarea.setSelectionRange(start, end);
     let inserted = false;
     try {
       inserted = typeof document.execCommand === 'function'
-        && document.execCommand('insertText', false, SEQUENCE_SKELETON);
+        && document.execCommand('insertText', false, replacement);
     } catch (_error) { inserted = false; }
-    if (!inserted || !String(textarea.value || '').slice(start).startsWith(SEQUENCE_SKELETON)) {
-      textarea.setRangeText(SEQUENCE_SKELETON, start, caret, 'end');
+    if (!inserted || !String(textarea.value || '').slice(start).startsWith(replacement)) {
+      textarea.setRangeText(replacement, start, end, 'end');
       textarea.dispatchEvent(new Event('input', {bubbles: true}));
     }
-    const firstText = start + ':begin,\n:seq1 '.length;
-    textarea.setSelectionRange(firstText, firstText + 'text'.length);
-    if (textarea === promptEdit) onPromptEdit();
-    return true;
+  }
+  function applySlashCommand(textarea, info, row) {
+    const name = String(row?.tag || '');
+    if (name === 'seq') {
+      if (/:begin\b/i.test(String(textarea.value || ''))) {
+        showToast?.('이미 시퀀스(:begin)가 있습니다. 하나만 둘 수 있습니다.', 'error');
+        return;
+      }
+      replaceRangeUndoable(textarea, info.start, info.end, SEQUENCE_SKELETON);
+      const firstText = info.start + ':begin,\n:seq1 '.length;
+      textarea.setSelectionRange(firstText, firstText + 'text'.length);
+      if (textarea === promptEdit) onPromptEdit();
+    }
   }
 
   function bindTagAssist(textarea, options = {}) {
@@ -3005,7 +3025,6 @@ export function createTagAssistController({
         window.clearTimeout(imeState.stableTimer);
         imeState.stableTimer = null;
       }
-      if (textarea === promptEdit && expandSequenceSkeleton(textarea, e)) return;
       scheduleAutocomplete({target: textarea});
     });
     textarea.addEventListener('click', () => {

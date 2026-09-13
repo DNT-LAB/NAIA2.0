@@ -231,6 +231,13 @@ export function createPromptHighlighter({document, promptEdit, escHtml, getTagFi
     const trailing = segment.match(/\s*$/)?.[0] || '';
     const core = segment.substring(leading.length, segment.length - trailing.length);
     if (!core) return escHtml(segment);
+    // 회수 안 된 슬래시 명령(`/seq` 를 치고 고르지 않은 채 둔 것). 태그가 아니라 명령이라는 것을
+    // 색으로 알린다 - 백엔드는 생성 직전에 이 토큰을 무시한다(`_strip_slash_commands`).
+    if (core.length > 1 && core.startsWith('/') && !/\s/.test(core[1])) {
+      return escHtml(leading) +
+        `<span class="prompt-token-slash">${escHtml(core)}</span>` +
+        escHtml(trailing);
+    }
     const seqHead = core.match(SEQUENCE_HEAD_RE);
     if (seqHead) {
       const head = seqHead[0];

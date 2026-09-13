@@ -10281,6 +10281,8 @@ body.resizing-result-info {
 .prompt-token-seq-begin { color: #87CEEB; font-weight: 600; }
 .prompt-token-seq-step { color: #FFD700; font-weight: 600; }
 .prompt-token-seq-end { color: #DDA0DD; font-weight: 600; }
+/* 회수 안 된 슬래시 명령(`/seq` 등) - 태그가 아니다. 생성 직전에 무시된다(2026-09-13). */
+.prompt-token-slash { color: #ffb86b; background: rgba(255, 184, 107, 0.14); text-decoration: underline dotted; }
 /* `-태그` = 생성 직전에 네거티브로 빠지는 것.
    ⚠️ **취소선을 쓰지 않는다.** 선이 글자 한가운데를 지나 정작 무슨 태그인지 읽기가
       불편했다(사용자 지적). 대신 캐릭터 슬롯의 빼기 강조와 **같은 어법**으로

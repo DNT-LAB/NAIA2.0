@@ -493,6 +493,26 @@ class HeadlessGenerationService:
             width, height = snap_resolution_to_multiple(width, height, 64)
         return width, height
 
+    # 토큰 첫머리 `/` + 공백 아닌 글자 = 슬래시 명령. 프리셋 토큰의 `/`(`preset:events/…`)는 토큰
+    # **안**이라 안 걸리고, `1.2::/seq::` 같은 가중치 안의 것은 그대로 둔다(명령이 아니라 사용자 글).
+    _SLASH_COMMAND_RE = re.compile(r"^\s*/\S")
+
+    @classmethod
+    def _strip_slash_commands(cls, text: Any) -> str:
+        """메인 프롬프트에서 회수 안 된 `/명령` 토큰을 뺀다. 구분자(`,`·줄바꿈)는 보존한다 -
+        `:seq1 …` 줄바꿈 구문이 뭉개지면 안 된다."""
+        if not isinstance(text, str) or "/" not in text:
+            return text if isinstance(text, str) else ""
+        out: list[str] = []
+        for line in text.split("\n"):
+            parts = line.split(",")
+            kept = [part for part in parts if not cls._SLASH_COMMAND_RE.match(part)]
+            if kept and len(kept) < len(parts) and parts and cls._SLASH_COMMAND_RE.match(parts[0]):
+                # 맨 앞 토큰을 뺐으면 뒤에 남은 첫 토큰의 앞 공백을 정리한다
+                kept[0] = kept[0].lstrip()
+            out.append(",".join(kept))
+        return "\n".join(out)
+
     @staticmethod
     def _derived_generation_params(params: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -873,6 +893,10 @@ class HeadlessGenerationService:
             params["negative_prompt"] = str(negative)
         elif "negative_prompt" not in params:
             params["negative_prompt"] = str(self.context.negative_prompt_text or "")
+        # 회수 안 된 슬래시 명령(`/seq` 를 치고 고르지 않은 채 둔 것)은 태그가 아니다 - 여기서
+        # 걷는다(사용자 지정 2026-09-13). 시퀀스 판정보다 **앞**이어야 `/seq, :begin …` 도 맞다.
+        params["input"] = self._strip_slash_commands(params.get("input"))
+        params["_raw_input"] = self._strip_slash_commands(params.get("_raw_input"))
 
         params["api_mode"] = api_mode
         params["credential"] = credential

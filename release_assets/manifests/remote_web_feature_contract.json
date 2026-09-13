@@ -279,6 +279,7 @@
       "legacy_dependency": "legacy_compat",
       "routes": [
         {"method": "GET", "path": "/api/artist-thumb/state", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/artist-thumb/open-folder", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/artist-thumb/list", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/favorite-image", "smoke": "asset_runtime"},

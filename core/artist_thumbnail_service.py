@@ -43,22 +43,6 @@ class ArtistThumbnailService:
         #    (ARTIST_THUMBNAIL_DATASET_UPDATE_REPORT.md 0절).
         # ⚠️ `expected_size`/`sha256` 은 **앱 소스에 박힌다** = 데이터셋 갱신에는
         #    앱 릴리즈가 따라야 사용자에게 닿는다.
-        "NAID5F-20000-Q": {
-            "label": "NAID5F-20000-Q",
-            # ⚠️ **경로는 옛 판과 같다.** 이것이 갱신 통보의 전부다 - 사용자 기기의 파일
-            #    크기가 아래 `expected_size` 와 달라지는 순간 `needs_update` 가 서고
-            #    드롭다운이 `(update)`, 버튼이 `Update` 로 바뀐다. 새 경로를 주면 항목이
-            #    둘로 늘고 옛 1.3GB 가 디스크에 남는다(ANIMA 계열이 쓰는 방식이 이것이다).
-            "path": Path("data/artist_thumbnail_naid5f.json"),
-            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5F-20000-Q",
-            # 2026-09-03 판(10000-Q 를 대체). 지문은 업로드 원본에서 실측:
-            #   C:\VNR\artist_thumb_tool\data\artist_thumb\nai-diffusion-5-full\json\NAID5F-20000-Q
-            #   2,633,376,969 bytes · 2,511.38 MB
-            # ⚠️ 옛 판(10000-Q · 1,373,203,772 · 54252858…BAF19)은 **여기서 지운다** =
-            #    드롭다운에서 사라진다(사용자 지정: 기존 10000-Q 는 숨긴다).
-            "expected_size": 2633376969,
-            "sha256": "9997E0FA2509D7EB19AC7EABC0CC11FACEEEC0FFA97D2C4975E5E88418ECF547",
-        },
         # NAID5 분할 팩 3종(2026-09-13, 사용자 지시). 게시물 수 구간별로 갈랐다 - 이름의 숫자가
         # 그 구간이다(6333~165 · 164~84 · 83~, WIP 는 아직 채우는 중). 방안 A(새 키 + 새 경로).
         # 지문은 업로드 원본에서 실측(같은 폴더의 NAID5-*). ⚠️ WIP 판을 나중에 채워 갈아끼울
@@ -114,6 +98,22 @@ class ArtistThumbnailService:
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima_bucket3.json",
             "expected_size": 1882040677,
             "sha256": "C564F0A473F32A81DEA43696FBF1CAA477184C957C7C1A8B5B2B21781334FB7B",
+        },
+        "NAID5F-20000-Q": {
+            "label": "NAID5F-20000-Q (old)",
+            # ⚠️ **경로는 옛 판과 같다.** 이것이 갱신 통보의 전부다 - 사용자 기기의 파일
+            #    크기가 아래 `expected_size` 와 달라지는 순간 `needs_update` 가 서고
+            #    드롭다운이 `(update)`, 버튼이 `Update` 로 바뀐다. 새 경로를 주면 항목이
+            #    둘로 늘고 옛 1.3GB 가 디스크에 남는다(ANIMA 계열이 쓰는 방식이 이것이다).
+            "path": Path("data/artist_thumbnail_naid5f.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5F-20000-Q",
+            # 2026-09-03 판(10000-Q 를 대체). 지문은 업로드 원본에서 실측:
+            #   C:\VNR\artist_thumb_tool\data\artist_thumb\nai-diffusion-5-full\json\NAID5F-20000-Q
+            #   2,633,376,969 bytes · 2,511.38 MB
+            # ⚠️ 옛 판(10000-Q · 1,373,203,772 · 54252858…BAF19)은 **여기서 지운다** =
+            #    드롭다운에서 사라진다(사용자 지정: 기존 10000-Q 는 숨긴다).
+            "expected_size": 2633376969,
+            "sha256": "9997E0FA2509D7EB19AC7EABC0CC11FACEEEC0FFA97D2C4975E5E88418ECF547",
         },
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")

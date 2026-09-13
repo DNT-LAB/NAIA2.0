@@ -3919,6 +3919,7 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   text-align: center;
 }
 .artist-thumb-pager {
+  position: relative;
   min-height: 46px;
   display: flex;
   align-items: center;
@@ -3932,6 +3933,17 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .artist-thumb-page-btn {
   min-width: 76px;
   min-height: 30px;
+}
+.artist-thumb-open-folder {
+  position: absolute;
+  left: 10px;
+}
+@container artist-thumb-panel (max-width: 680px) {
+  .artist-thumb-pager { flex-wrap: wrap; }
+  .artist-thumb-open-folder {
+    position: static;
+    margin-right: auto;
+  }
 }
 .artist-thumb-goto {
   display: inline-flex;

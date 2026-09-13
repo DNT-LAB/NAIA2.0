@@ -20,6 +20,7 @@ export function createArtistThumbController({
   const summaryEl = document.getElementById('artistThumbSummary');
   const statusEl = document.getElementById('artistThumbStatus');
   const gridEl = document.getElementById('artistThumbGrid');
+  const openFolderBtn = document.getElementById('artistThumbOpenFolderBtn');
   const prevBtn = document.getElementById('artistThumbPrevBtn');
   const nextBtn = document.getElementById('artistThumbNextBtn');
   const downloadBtn = document.getElementById('artistThumbDownloadBtn');
@@ -1936,7 +1937,23 @@ export function createArtistThumbController({
     }
   }
 
+  async function openThumbnailFolder() {
+    if (!openFolderBtn || openFolderBtn.disabled) return;
+    openFolderBtn.disabled = true;
+    try {
+      const response = await fetch('/api/artist-thumb/open-folder', {method: 'POST'});
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      showToast?.(`NAIA 실행 PC에서 폴더를 열었습니다: ${data.path}`, 'success');
+    } catch (error) {
+      showToast?.(error.message || '폴더를 열지 못했습니다.', 'error');
+    } finally {
+      openFolderBtn.disabled = false;
+    }
+  }
+
   function bind() {
+    openFolderBtn?.addEventListener('click', openThumbnailFolder);
     modeEl?.addEventListener('change', () => loadPage(0, {anchor: 'top'}));
     filterEl?.addEventListener('change', () => loadPage(0, {anchor: 'top'}));
     searchEl?.addEventListener('input', () => {

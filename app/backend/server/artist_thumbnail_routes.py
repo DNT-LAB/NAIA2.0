@@ -65,6 +65,29 @@ def register_artist_thumbnail_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb state failed: {exc}"}, status_code=500)
 
+    @app.post("/api/artist-thumb/open-folder")
+    async def api_artist_thumb_open_folder():
+        def _open_folder():
+            import os
+            import subprocess
+            import sys
+
+            folder = artist_thumbnail_service(session_context).mode_data_root.resolve()
+            folder.mkdir(parents=True, exist_ok=True)
+            if os.name == "nt":
+                os.startfile(str(folder))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(folder)])
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+            return str(folder)
+
+        try:
+            opened = await run_in_thread(_open_folder)
+            return {"ok": True, "path": opened}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
     @app.get("/api/artist-thumb/list")
     async def api_artist_thumb_list(
         mode: str = "",

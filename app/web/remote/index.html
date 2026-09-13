@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260913-artist-head-wrap">
+<link rel="stylesheet" href="style.css?v=20260913-artist-folder">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -1170,6 +1170,7 @@
           </div>
           <div class="artist-thumb-grid" id="artistThumbGrid"></div>
           <footer class="artist-thumb-pager">
+            <button type="button" class="artist-thumb-page-btn artist-thumb-open-folder" id="artistThumbOpenFolderBtn" title="NAIA 실행 PC의 Artist Thumbnail 데이터 폴더를 엽니다">폴더 열기</button>
             <button type="button" class="artist-thumb-page-btn" id="artistThumbPrevBtn">Prev</button>
             <span id="artistThumbPageLabel">0 / 0</span>
             <label class="artist-thumb-goto">
@@ -1408,6 +1409,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260913-gap3385"></script>
+<script src="app.js?v=20260913-artist-folder"></script>
 </body>
 </html>

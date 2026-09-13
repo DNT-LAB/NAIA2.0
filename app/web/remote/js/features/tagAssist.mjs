@@ -2820,6 +2820,46 @@ export function createTagAssistController({
     clearAutocompletePositionStyles();
   }
 
+  // 시퀀스 뼈대 자동완성(사용자 지정 2026-09-12): 메인 프롬프트에 `:begin` 을 **처음** 치면
+  //
+  //     :begin,
+  //     :seq1 text,
+  //     :seq2 text,
+  //     :end
+  //
+  // 로 펼치고 첫 `text` 를 선택해 둔다(바로 덮어쓰게). NAIA 1.5 는 `:seq` 단추가 같은 일을 했다.
+  // ⚠️ 한 번만 - 이미 `:begin` 이 둘이거나 `:seq`/`:end` 가 있으면 안 펼친다(파서는 `:begin` 2개를 오류로 본다).
+  // ⚠️ **타이핑에만** 반응한다(`insertText`). 붙여넣기·되돌리기로 들어온 `:begin` 을 펼치면 사용자 글을 망친다.
+  // ⚠️ 되돌리기 한 번에 지워져야 한다 - `execCommand('insertText')` 가 네이티브 undo 에 한 단계로 얹힌다.
+  //    (setRangeText 는 undo 스택을 끊는다.) 안 되는 런타임이면 setRangeText 로 물러난다.
+  const SEQUENCE_SKELETON = ':begin,\n:seq1 text,\n:seq2 text,\n:end';
+  function expandSequenceSkeleton(textarea, event) {
+    if (!textarea || (event && event.inputType && event.inputType !== 'insertText')) return false;
+    const value = String(textarea.value || '');
+    const caret = textarea.selectionStart;
+    if (typeof caret !== 'number' || textarea.selectionEnd !== caret) return false;
+    const before = value.slice(0, caret);
+    if (!/:begin$/i.test(before)) return false;
+    const lower = value.toLowerCase();
+    if (lower.indexOf(':begin') !== lower.lastIndexOf(':begin')) return false;
+    if (/:seq[a-z0-9]*\b/i.test(lower) || /:end\b/i.test(lower)) return false;
+    const start = caret - ':begin'.length;
+    textarea.setSelectionRange(start, caret);
+    let inserted = false;
+    try {
+      inserted = typeof document.execCommand === 'function'
+        && document.execCommand('insertText', false, SEQUENCE_SKELETON);
+    } catch (_error) { inserted = false; }
+    if (!inserted || !String(textarea.value || '').slice(start).startsWith(SEQUENCE_SKELETON)) {
+      textarea.setRangeText(SEQUENCE_SKELETON, start, caret, 'end');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+    const firstText = start + ':begin,\n:seq1 '.length;
+    textarea.setSelectionRange(firstText, firstText + 'text'.length);
+    if (textarea === promptEdit) onPromptEdit();
+    return true;
+  }
+
   function bindTagAssist(textarea, options = {}) {
     if (!textarea) return;
     textarea._excludeE621Autocomplete = !!options.excludeE621;
@@ -2965,6 +3005,7 @@ export function createTagAssistController({
         window.clearTimeout(imeState.stableTimer);
         imeState.stableTimer = null;
       }
+      if (textarea === promptEdit && expandSequenceSkeleton(textarea, e)) return;
       scheduleAutocomplete({target: textarea});
     });
     textarea.addEventListener('click', () => {

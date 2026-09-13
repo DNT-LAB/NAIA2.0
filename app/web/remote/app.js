@@ -1987,7 +1987,7 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260831-tagfilter')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260913-seqcolor')
   .then(({createPromptHighlighter}) => {
     promptHighlighter = createPromptHighlighter({
       document,
@@ -12869,7 +12869,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260901-ctrlenter')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-seqskel')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

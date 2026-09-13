@@ -214,12 +214,32 @@ export function createPromptHighlighter({document, promptEdit, escHtml, getTagFi
       : 'prompt-token-tagfilter';
   }
 
+  // 시퀀스 구문(:begin / :seqN / :end)의 **앞머리만** 칠한다 - Dev0714 `PromptHighlighter` 와 같은
+  // 규칙·같은 색. 내용(`:seq1 smile` 의 smile)은 뒤따르는 태그 분류색이 그대로 맡는다.
+  // ⚠️ 다른 규칙보다 **먼저** 본다(Dev0714 순서). 뒤집으면 `:seq1 smile` 전체가 다른 규칙에 먹힌다.
+  const SEQUENCE_HEAD_RE = /^:(begin|end|seq[a-z0-9]*)\b/i;
+  function sequenceHeadClass(head) {
+    const word = head.slice(1).toLowerCase();
+    if (word === 'begin') return 'prompt-token-seq-begin';
+    if (word === 'end') return 'prompt-token-seq-end';
+    return 'prompt-token-seq-step';
+  }
+
   function formatTagTokenSegment(segment) {
     if (!segment) return '';
     const leading = segment.match(/^\s*/)?.[0] || '';
     const trailing = segment.match(/\s*$/)?.[0] || '';
     const core = segment.substring(leading.length, segment.length - trailing.length);
     if (!core) return escHtml(segment);
+    const seqHead = core.match(SEQUENCE_HEAD_RE);
+    if (seqHead) {
+      const head = seqHead[0];
+      const rest = core.substring(head.length);
+      return escHtml(leading) +
+        `<span class="${sequenceHeadClass(head)}">${escHtml(head)}</span>` +
+        (rest ? formatTagTokenSegment(rest) : '') +
+        escHtml(trailing);
+    }
     // `-태그` 는 생성 직전에 **네거티브로 옮겨진다**
     // (headless_generation_service._expand_input_wildcards). 여기서 알려 주지 않으면
     // 사용자는 그 태그가 포지티브에 남아 있는 줄 안다(사용자 지적).

@@ -92,6 +92,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   let peHidden = new Map();
   // 행 툴팁(Interactive 칩 툴팁 꼴 + 썸네일 + 포함/제외 수). 설명은 태그별 캐시, 썸네일 표는 세션에 한 번.
   let tipEl = null, tipOwner = null;
+  let dlTimer = null, dlFailed = false, dlError = '';   // 색인 자동 내려받기(사용자 결정 2026-09-13)
   let busyEl = null, busyCount = 0;   // 질의 중 덮개(반투명 검정). 겹치는 요청은 세어서 마지막이 걷는다.
   const QUERY_TIMEOUT_MS = 20000;
   const tipInfo = new Map();        // tag -> {desc, group, count} | null(없음)
@@ -394,6 +395,74 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     if (!res.ok || data.ok === false) { const e = new Error(data.message || `HTTP ${res.status}`); e.code = data.code; throw e; }
     return data;
   }
+  // ── 색인 자동 내려받기 ───────────────────────────────────────────────────
+  //
+  // 색인(879MB)은 배포본에 없다. 사용자에게 단추를 보여 주고 누르게 하지 않는다 -
+  // 패널을 열면 그 자리에서 받기 시작하고, 받는 동안 화면이 진행 막대가 된다.
+  // ⚠️ 시작은 **루프백에서만** 된다(폰으로 연 화면은 879MB 를 시킬 수 없다) - 그때는
+  //    can_start:false 로 오므로 안내만 한다. 다른 다운로드가 도는 중이면 줄을 선다.
+  async function autoDownload() {
+    const info = mapState?.install;
+    if (!info || info.ready || !info.downloadable) return;
+    if (info.active || info.busy_other || !info.can_start || dlFailed) return;
+    // 실패했거나(회선 끊김) 사용자가 취소한 뒤다. 여기서 안 멈추면 폴링이 2초마다 처음부터
+    // 다시 받는다 - 879MB 를 무한히 되풀이한다. 패널을 닫았다 다시 열면 그때 다시 시도한다.
+    const last = info.download || {};
+    if (last.error && String(last.phase || '') === 'event_map') {
+      dlFailed = true;
+      dlError = String(last.error);
+      return;
+    }
+    try {
+      await postJson('/api/install-manager/event-map/download', {});
+    } catch (error) {
+      // 여기서 멈춰 세우지 않으면 폴링이 2초마다 같은 실패를 되풀이한다.
+      dlFailed = true;
+      dlError = String(error && error.message || error);
+    }
+    await loadState();
+  }
+  function stopDlPoll() { if (dlTimer) { clearInterval(dlTimer); dlTimer = null; } }
+  /** 받는 동안만 돈다. 다 받으면 스스로 멈추고 패널을 되살린다(닫았다 열 필요 없다). */
+  function startDlPoll() {
+    if (dlTimer) return;
+    dlTimer = setInterval(async () => {
+      if (!open) { stopDlPoll(); return; }
+      await loadState();
+      if (mapState?.state === 'ready') {
+        stopDlPoll();
+        render();
+        focusInput();
+        return;
+      }
+      await autoDownload();
+      render();
+    }, 1500);
+  }
+  /** 색인이 준비되기 전에는 검색 칸·조건 줄·발줄을 못 만지게 한다. */
+  function setLocked(on) {
+    if (!overlay) return;
+    overlay.classList.toggle('em-locked', !!on);
+    if (input) input.disabled = !!on;
+  }
+  function downloadHtml() {
+    const info = mapState?.install;
+    const dl = info?.download || {};
+    const pct = Math.max(0, Math.min(100, Number(dl.percent || 0)));
+    const size = info?.approx_mb ? `${fmt(info.approx_mb)}MB` : '';
+    let note;
+    if (dlFailed) note = `내려받기에 실패했습니다 — ${esc(dlError)}`;
+    else if (info?.active) note = `${pct}% ${dl.total_mb ? `(${dl.downloaded_mb} / ${dl.total_mb} MB)` : ''}`;
+    else if (info?.busy_other) note = '다른 데이터를 받는 중입니다 — 끝나면 이어서 받습니다.';
+    else if (info && !info.can_start) note = '이 기기에서는 시작할 수 없습니다. NAIA 를 켠 PC 에서 열면 자동으로 받습니다.';
+    else if (info) note = '내려받기를 시작하는 중…';
+    else note = esc(mapState?.message || '색인을 찾지 못했습니다.');
+    const bar = info?.active
+      ? `<div class="em-dl-bar"><i style="width:${pct}%"></i></div>` : '';
+    return `<div class="em-missing"><b>이벤트 맵 색인을 준비하는 중입니다.</b>
+      <div class="em-note">${size ? `약 ${size} · ` : ''}한 번만 받습니다. 이 창을 닫아도 계속 받습니다.</div>
+      ${bar}<div class="em-dl-note">${note}</div></div>`;
+  }
   async function runSample(i, mode, btn) {
     const s = (samples?.samples || [])[i];
     if (!s || !s.tags?.length) return;
@@ -648,15 +717,14 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     paintFilters();
     rows = [];
     let html = '';
+    // 색인이 없으면 화면은 **내려받기 진행 표면**이 된다(사용자 결정 2026-09-13). 단추도 직접
+    // 빌드 안내도 두지 않는다 - 열면 알아서 받는다. 그 동안 검색·조건·발줄은 잠근다.
+    setLocked(mapState?.state !== 'ready');
     if (!mapState || mapState.state !== 'ready') {
-      const searched = (mapState?.searched || []).map(p => `<li>${esc(p)}</li>`).join('');
-      html = `<div class="em-missing"><b>이벤트 맵 색인이 없습니다.</b>
-        <div>${esc(mapState?.message || '')}</div>
-        ${searched ? `<div class="em-note">찾아본 곳</div><ul>${searched}</ul>` : ''}
-        <div class="em-note">색인은 <code>tools/build_event_map_index.py</code> 로 만들고
-        <code>&lt;user-data&gt;/data/event_map/event_map.naiamap</code> 에 둡니다.</div></div>`;
-      bodyEl.innerHTML = html;
-      setStatus('미설치', 'error');
+      bodyEl.innerHTML = downloadHtml();
+      const info = mapState?.install;
+      const pct = Number(info?.download?.percent || 0);
+      setStatus(info?.active ? `내려받는 중 ${pct}%` : '색인 준비 중', info?.active ? 'busy' : 'error');
       return;
     }
     if (input.value.trim()) {
@@ -994,9 +1062,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     position();
     focusInput();                   // 열자마자 - 바로 칠 수 있게(사용자 지정 2026-09-12 밤)
     setStatus('여는 중…', 'busy');
+    dlFailed = false; dlError = '';      // 다시 열면 다시 시도한다
     await loadState();
+    if (mapState?.state !== 'ready') { await autoDownload(); startDlPoll(); }
     render();
-    if (pins.length) void explore();
+    if (mapState?.state === 'ready' && pins.length) void explore();
     position();
     focusInput();                   // 그려진 뒤 한 번 더(그 사이 누가 가져갔어도)
   }
@@ -1013,6 +1083,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     if (sideEl) { sideEl.hidden = true; sideEl.innerHTML = ''; }
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'false');
     clearTimeout(timer);
+    stopDlPoll();                   // 화면 폴링만 멈춘다 - 내려받기는 서버에서 계속 돈다
     seq += 1; suggestSeq += 1;
   }
   function toggle() { if (open) close(); else void show(); }

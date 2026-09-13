@@ -28649,6 +28649,12 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-row:hover { background: rgba(255,255,255,0.05); }
 .em-row.is-active { background: rgba(88,76,170,0.34); }
 .em-row.is-off { opacity: 0.45; cursor: default; }
+/* 색인을 받는 동안(사용자 결정 2026-09-13): 검색 칸·조건 줄·발줄을 잠근다 - 눌러도 소용없다 */
+.em-locked .em-filters, .em-locked .em-foot, .em-locked .em-trail { pointer-events: none; opacity: 0.4; }
+.em-locked .em-input { opacity: 0.5; }
+.em-dl-bar { height: 6px; margin: 8px 0 6px; border-radius: 999px; background: rgba(139,118,255,0.15); overflow: hidden; }
+.em-dl-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.em-dl-note { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 /* 질의 중 덮개(사용자 지정 2026-09-12 밤): 머리줄 아래를 반투명 검정으로 덮어 클릭을 막는다. top 은 JS 가 머리줄 높이로. */
 .em-busy { display: none; position: absolute; left: 0; right: 0; bottom: 0; top: 33px; z-index: 6;
   background: rgba(0,0,0,0.45); align-items: center; justify-content: center; cursor: progress; }

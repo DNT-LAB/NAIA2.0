@@ -269,14 +269,17 @@ def register_event_map_routes(
     @app.get("/api/event-map/explore")
     async def api_event_map_explore(pins: str = "", exclude: str = "", ratings: str = "",
                                     persons: str = "", roles: str = "", groups: str = "",
-                                    limit: int = 24, sort: str = "lift", offset: int = 0, subcategory: str = ""):
+                                    limit: int = 24, sort: str = "lift", offset: int = 0, subcategory: str = "",
+                                    relax: int = 0):
         """색상 태그는 **항상** 후보에서 빠진다(켜는 파라미터를 두지 않는다 - 사용자 지정 2026-09-12).
-        `groups` 는 접기 표의 갈래 id(쉼표) - 후보를 그 대분류로 가둔다."""
+        `groups` 는 접기 표의 갈래 id(쉼표) - 후보를 그 대분류로 가둔다.
+        `relax=1` 은 [-1 허용] - 핀 n개 중 n-1개만 있는 게시물까지 센다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.explore, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, roles=roles, groups=groups, limit=limit, sort=sort, offset=offset, subcategory=subcategory)
+                persons=persons, roles=roles, groups=groups, limit=limit, sort=sort, offset=offset, subcategory=subcategory,
+                relax=relax)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

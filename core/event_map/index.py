@@ -71,6 +71,20 @@ BODY_HEADER = 24         # magic 8 + 게시물 수 8 + 오프셋 표 위치 8
 GATHER_BATCH = 250_000   # 한 번에 긁는 게시물 수. 색인 배열이 메모리를 먹지 않게 끊는다.
 
 
+def _intersect_sorted(acc: np.ndarray, arr: np.ndarray) -> np.ndarray:
+    """오름차순·중복 없는 두 배열의 교집합. 한쪽이 훨씬 크면 작은 쪽을 큰 쪽에서 이진 탐색한다 -
+    `np.intersect1d` 는 둘을 이어 붙여 정렬하므로 큰 쪽(수백만) 크기만큼 비용을 낸다.
+    작은 쪽 |a| 에 대해 O(|a| log |b|) 로 끝난다(2026-09-13 실측: [-1 허용] 1.2s -> 수백 ms)."""
+    if acc.size == 0 or arr.size == 0:
+        return np.empty(0, dtype=np.int64)
+    small, big = (acc, arr) if acc.size <= arr.size else (arr, acc)
+    if big.size < small.size * 8:
+        return np.intersect1d(acc, arr, assume_unique=True)
+    at = np.searchsorted(big, small)
+    at[at == big.size] = 0
+    return small[big[at] == small]
+
+
 def decode_postings(buf: bytes) -> np.ndarray:
     """`개수 + 차분 varint` 를 오름차순 절대값 배열로 편다. **postings 전용**이다.
 
@@ -339,11 +353,28 @@ class EventMapIndex:
             return np.empty(0, dtype=np.int64)
         acc = lists[0]
         for arr in lists[1:]:
-            # 양쪽 다 오름차순 · 중복 없음이라 assume_unique 를 켤 수 있다.
-            acc = np.intersect1d(acc, arr, assume_unique=True)
+            acc = _intersect_sorted(acc, arr)
             if acc.size == 0:
                 return acc
         if parts is not None:
+            acc, owner = self._partition_of(acc)
+            acc = acc[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
+        return acc
+
+    def _matching_posts_relaxed(self, tids: list[int], parts: set[int] | None) -> np.ndarray:
+        """핀 n개 중 **n-1개 이상**이 달린 게시물([-1 허용], 사용자 지시 2026-09-13).
+
+        '하나 뺀 교집합' n개의 합집합이다 - 전부 달린 게시물도 당연히 들어온다. 합집합을 먼저
+        만들면 흔한 핀(breasts 수백만)의 postings 를 통째로 정렬해야 해서 이 길로 간다.
+        """
+        if len(tids) < 2:
+            return self._matching_posts(tids, parts)
+        acc = np.empty(0, dtype=np.int64)
+        for skip in range(len(tids)):
+            part = self._matching_posts(tids[:skip] + tids[skip + 1:], None)
+            if part.size:
+                acc = part if acc.size == 0 else np.union1d(acc, part)
+        if parts is not None and acc.size:
             acc, owner = self._partition_of(acc)
             acc = acc[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
         return acc
@@ -498,8 +529,9 @@ class EventMapIndex:
 
     def explore(self, pins, *, exclude=None, ratings=None, persons=None, limit=24,
                 min_posts=5, include_color=False, roles=None, allowed=None,
-                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift", offset=0) -> dict:
-        """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다."""
+                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift", offset=0, relax=0) -> dict:
+        """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다.
+        `relax=1` 이면 핀 n개 중 n-1개만 있는 게시물까지 센다([-1 허용]) - `strict_posts` 에 정확 일치 수를 같이 준다."""
         started = time.perf_counter()
         if not isinstance(pins, (list, tuple)) or not 1 <= len(pins) <= MAX_PINS:
             raise ValueError("핀은 1~%d개여야 한다" % MAX_PINS)
@@ -529,6 +561,12 @@ class EventMapIndex:
 
         parts = self._partition_filter(ratings, persons)
         rids = self._without(self._matching_posts(wanted, parts), excluded)
+        out["strict_posts"] = int(rids.size)
+        out["relaxed"] = False
+        if relax and len(wanted) >= 2:
+            rids = self._without(self._matching_posts_relaxed(wanted, parts), excluded)
+            out["relaxed"] = True
+            out["count_meaning"] = "핀 %d개 중 %d개 이상이 같은 게시물에 함께 달린 수" % (len(wanted), len(wanted) - 1)
         out["observed_posts"] = int(rids.size)
         if rids.size == 0:
             out["status"] = "no_match"

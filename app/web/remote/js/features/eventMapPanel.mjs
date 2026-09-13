@@ -127,6 +127,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
   let sortMode = prefs?.sort || 'mix';   // 기본 = mix(사용자 지정 2026-09-12 밤 - 밸런스)
+  let relaxOne = false;                  // [-1 허용]: 핀 n개 중 n-1개만 있는 게시물까지(사용자 지정 2026-09-13)
   let roles = new Set();          // 대분류 필터(갈래 id). 비면 전부
   let group = '';                 // 첫 화면에서 고른 대분류(핀이 없을 때만 뜻이 있다)
   let moreRequest = null, moreError = '';
@@ -257,7 +258,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     setBusy(true);
     try {
       const body = await getJson('/api/event-map/explore', {
-        pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, sort: sortMode, ...filterParams(),
+        pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, sort: sortMode,
+        relax: relaxOne && pins.length >= 2 ? 1 : 0, ...filterParams(),
       });
       if (mine !== seq) return;
       result = body;
@@ -291,7 +293,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (footer) footer.outerHTML = moreHtml();
     const exploring = pins.length > 0;
     const params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...filterParams() };
-    if (exploring) Object.assign(params, { pins: pins.join(','), exclude: excludes.join(','), sort: sortMode });
+    if (exploring) Object.assign(params, { pins: pins.join(','), exclude: excludes.join(','), sort: sortMode,
+      relax: relaxOne && pins.length >= 2 ? 1 : 0 });
     else Object.assign(params, { group, groups: '' });
     try {
       const page = await getJson(`/api/event-map/${exploring ? 'explore' : 'browse'}`, params);
@@ -947,7 +950,10 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         const gc = result.group_counts || null;   // 옛 백엔드(재시작 전)는 이 키가 없다 - 그래도 탭은 그린다
         html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + r.count, 0) : null);
         const sm = SORT_MODES.find(m => m.id === sortMode) || SORT_MODES[0];
-        html += `<div class="em-cap">함께 달린 태그 <button type="button" class="em-sort" data-em-sort title="${esc(sm.title)} · 눌러서 바꾸기">${esc(sm.label)} ▾</button><span class="em-note">${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}</span></div>`;
+        const relaxNote = result.relaxed
+          ? ` · ${pins.length - 1}/${pins.length} 일치 · 정확 ${fmt(result.strict_posts || 0)}건` : '';
+        html += `<div class="em-cap"><span class="em-cap-label">함께 달린 태그</span> <button type="button" class="em-sort" data-em-sort title="${esc(sm.title)} · 눌러서 바꾸기">${esc(sm.label)} ▾</button><span class="em-note">${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}${relaxNote}</span>`
+          + `<button type="button" class="em-relax${relaxOne ? ' is-on' : ''}" data-em-relax aria-pressed="${relaxOne}" ${pins.length >= 2 ? '' : 'disabled'} title="핀 ${pins.length}개 중 ${Math.max(1, pins.length - 1)}개만 있는 게시물까지 센다 - 정확한 교집합이 쪼그라들 때">-1 허용</button></div>`;
         html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">5건 이상 함께 달린 태그가 없습니다.</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);
@@ -1146,6 +1152,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); return; }
       const gb = t.closest('[data-em-group]');
       if (gb) { pickGroup(gb.dataset.emGroup); return; }
+      const rb = t.closest('[data-em-relax]');
+      if (rb) { relaxOne = !relaxOne; void explore(); return; }
       const sb = t.closest('[data-em-sort]');
       if (sb) {
         const i = SORT_MODES.findIndex(m => m.id === sortMode);

@@ -473,8 +473,10 @@ class EventMapService:
     # (tools/event_map_playground.py)가 연구용으로만 쓴다 - 여기서는 켤 길을 두지 않는다.
     def explore(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                 persons: Any = None, roles: Any = None, groups: Any = None,
-                limit: Any = DEFAULT_CANDIDATES, sort: Any = "lift", offset: Any = 0, subcategory: str = "") -> dict[str, Any]:
+                limit: Any = DEFAULT_CANDIDATES, sort: Any = "lift", offset: Any = 0, subcategory: str = "",
+                relax: Any = 0) -> dict[str, Any]:
         idx = self.index()
+        relax_one = str(relax or "").strip().lower() in ("1", "true", "on", "yes")
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
         if not wanted:
             raise MapQueryError("no_pins", "핀이 하나는 있어야 한다.")
@@ -493,7 +495,7 @@ class EventMapService:
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
                 roles=want_roles or None, allowed=allowed,
                 limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES),
-                include_color=False, sort=sort_mode, offset=offset)
+                include_color=False, sort=sort_mode, offset=offset, relax=1 if relax_one else 0)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         self._attach_subcategories(result, want_groups, subcategory)

@@ -546,6 +546,81 @@ def search_kr_tags_with_translation(
     return rows[:limit], translated
 
 
+# 와일드카드 본문 캐시: 경로 -> (mtime, 줄 목록). 파일이 바뀐 것만 다시 읽는다.
+_WILDCARD_LINE_CACHE: dict[str, tuple[float, list[str]]] = {}
+# 줄 앞의 가중치(`100:텍스트`). NAI 가중치(`100::`)는 아니다 - 규칙의 주인은 core/wildcard_manager.py 다.
+_WC_WEIGHT_RE = re.compile(r"^(\d+):(?!:)(.*)$")
+
+
+def _wildcard_lines(path: Path) -> list[str]:
+    key = str(path)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        _WILDCARD_LINE_CACHE.pop(key, None)
+        return []
+    hit = _WILDCARD_LINE_CACHE.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        raw = []
+    lines = []
+    for line in raw:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = _WC_WEIGHT_RE.match(line)
+        lines.append((m.group(2).strip() or line) if m else line)
+    _WILDCARD_LINE_CACHE[key] = (mtime, lines)
+    return lines
+
+
+def search_wildcard_lines(context: WebSessionContext, query: str, limit: int = 12,
+                          per_file: int = 3) -> list[dict[str, Any]]:
+    """와일드카드 **본문**에서 찾는다 - 파일명이 아니라 줄 안의 글자.
+
+    `search_wildcards` 는 키 이름만 본다(자동완성이 `__키__` 를 넣는 길이라 그게 맞다).
+    Ctrl+F 는 "이 태그가 어느 와일드카드에 들어 있나" 를 묻는 자리라 본문을 봐야 한다(사용자 제보).
+    한 파일이 목록을 다 먹지 않도록 파일당 `per_file` 줄까지만 낸다.
+    """
+    q = str(query or "").strip().lower()
+    if not q:
+        return []
+    try:
+        base = context._wildcard_base_dir()
+    except Exception:
+        return []      # 와일드카드 폴더를 못 찾으면 본문 결과만 없다 - 이름 검색은 계속 된다.
+    if base is None or not base.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in sorted(base.rglob("*.txt")):
+        try:
+            rel = path.relative_to(base).with_suffix("").as_posix()
+        except Exception:
+            continue
+        taken = 0
+        for line in _wildcard_lines(path):
+            if q not in line.lower():
+                continue
+            key = line.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"tag": line, "key": rel, "exact": line.lower() == q,
+                        "starts": line.lower().startswith(q)})
+            taken += 1
+            if taken >= per_file or len(out) >= limit * 4:
+                break
+        if len(out) >= limit * 4:
+            break
+    # 정확 일치 · 앞머리 일치 · 짧은 줄 순. 짧은 줄이 대개 태그 하나라 쓸모가 크다.
+    out.sort(key=lambda r: (not r["exact"], not r["starts"], len(r["tag"])))
+    return out[:limit]
+
+
 def search_wildcards(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:
     # 빈 쿼리(`__` 만 입력)도 허용 → 전체 와일드카드 상위 N개를 나열한다.
     q = str(query or "").strip().lower()

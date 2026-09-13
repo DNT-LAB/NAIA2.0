@@ -94,12 +94,19 @@ def _search_character(context, query: str, limit: int, _opts) -> tuple[list[dict
 
 
 def _search_wildcard(context, query: str, limit: int, _opts) -> tuple[list[dict], str]:
-    from app.backend.server.autocomplete_commands import search_wildcards
+    """이름(파일) 먼저, 그 뒤에 **본문**(줄). 본문 몫을 최소 4칸 남긴다 - 이름이 많이 걸려도
+    "이 태그가 어느 와일드카드에 있나" 를 볼 수 있어야 한다(사용자 제보 2026-09-13)."""
+    from app.backend.server.autocomplete_commands import search_wildcard_lines, search_wildcards
 
-    rows = search_wildcards(context, query, limit=limit)
+    lines = search_wildcard_lines(context, query, limit=limit)
+    name_room = max(1, limit - min(len(lines), 4)) if lines else limit
+    rows = search_wildcards(context, query, limit=name_room)
     # 쓸 수 있는 형태로 준다 - 키 이름이 아니라 프롬프트에 그대로 넣는 `__key__` 다.
     items = [_item(f"__{r['tag']}__", f"__{r['tag']}__", r.get("desc") or "",
                    _count_meta(r.get("count"))) for r in rows]
+    # 본문 일치는 **그 줄**을 넣는다(키를 넣으면 다른 줄이 뽑힌다). 어디서 왔는지는 부제로.
+    items += [_item(r["tag"], r["tag"], f"__{r['key']}__", "본문")
+              for r in lines[:max(0, limit - len(items))]]
     return items, ""
 
 

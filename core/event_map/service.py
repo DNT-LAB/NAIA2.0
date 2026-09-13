@@ -125,6 +125,7 @@ class EventMapService:
         self._group_rows: list[dict] = []
         self._sub_arr: np.ndarray | None = None
         self._sub_names: list[str] = []
+        self._candidate_excluded: np.ndarray | None = None
         self._state = "unknown"
         self._message = ""
         self._path: Path | None = None
@@ -223,6 +224,7 @@ class EventMapService:
         sub_names = ["__unclassified__", "__pending__"]
         sub_ids = {name: i for i, name in enumerate(sub_names)}
         sub_arr = np.zeros(idx.n_tags, dtype=np.int32)
+        candidate_excluded = np.zeros(idx.n_tags, dtype=bool)
         for root in self._roots:
             candidate = root / "event_map_subcategories.json"
             if not candidate.is_file():
@@ -232,6 +234,12 @@ class EventMapService:
                 if data.get("schema") != "naia-event-map-subcategories-v1":
                     raise ValueError("unsupported subcategory schema")
                 entries = data["tags"]
+                exclusions = data.get("candidate_exclusions", {})
+                if not isinstance(exclusions, dict) or any(
+                    not isinstance(tag, str) or reason not in ("color", "ambiguous")
+                    for tag, reason in exclusions.items()
+                ):
+                    raise ValueError("invalid candidate exclusions")
                 if not isinstance(entries, dict) or any(
                     not isinstance(value, list) or len(value) != 2
                     or value[0] not in order or not isinstance(value[1], str)
@@ -249,9 +257,14 @@ class EventMapService:
                     sub_ids[sub] = len(sub_names)
                     sub_names.append(sub)
                 sub_arr[tid] = sub_ids[sub]
+            for tag, reason in data.get("candidate_exclusions", {}).items():
+                tid = idx.resolve(tag)
+                if tid is not None and reason in ("color", "ambiguous"):
+                    candidate_excluded[tid] = True
             source += f"; subcategories: {candidate}"
             break
         self._sub_arr, self._sub_names = sub_arr, sub_names
+        self._candidate_excluded = candidate_excluded
         self._group_arr = arr
         counts = np.bincount(arr, minlength=len(groups))
         obs = np.bincount(arr, weights=idx.obs_arr, minlength=len(groups))
@@ -283,6 +296,7 @@ class EventMapService:
             self._state, self._message, self._path = "unknown", "", None
             self._sorted_names = []
             self._group_arr, self._group_rows = None, []
+            self._candidate_excluded = None
             self._sub_arr, self._sub_names = None, []
         if idx is not None:
             try:
@@ -454,7 +468,11 @@ class EventMapService:
             except Exception:
                 translated = []      # 사전이 없어도 영문 검색은 계속 된다
 
-        picked.sort(key=lambda row: (-row[0], row[1]))
+        # The dictionary already ranks translated candidates by query relevance.
+        # Sorting them by corpus frequency would bury precise Korean matches.
+        translation_rank = {name: rank for rank, name in enumerate(translated)}
+        picked.sort(key=lambda row: (1, translation_rank[row[1]]) if row[1] in translation_rank
+                    else (0, -row[0], row[1]))
         items = []
         for observed, name, tid in picked[:limit]:
             blocked = None
@@ -463,6 +481,7 @@ class EventMapService:
             elif not idx.eligible[tid]:
                 blocked = "후보 아님"
             items.append({"tag": name, "observed": observed,
+                          "group": self.group_of(tid),
                           "role": idx.role.get(tid), "lane": idx.lane.get(tid),
                           "role_label": ROLE_LABELS.get(idx.role.get(tid) or "", ""),
                           "blocked": blocked})
@@ -490,17 +509,29 @@ class EventMapService:
         want_roles = self._tags(roles, cap=32, what="갈래", code="bad_role")
         want_groups = self._tags(groups, cap=16, what="대분류", code="bad_group")
         allowed = self._subcategory_mask(want_groups, subcategory)
+        # Unclassified tags are opt-in after two distinct pins. Keep their
+        # counts in _pool so the UI can offer a separate exploration entry.
+        distinct_pins = {idx.resolve(tag) for tag in wanted} - {None}
+        unclassified_available = len(distinct_pins) >= 2
+        unsorted = self.group_mask([C.UNSORTED])
+        if unsorted is not None:
+            if C.UNSORTED not in want_groups or not unclassified_available:
+                allowed = (allowed & ~unsorted) if allowed is not None else ~unsorted
         try:
             result = idx.explore(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
                 roles=want_roles or None, allowed=allowed,
                 limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES),
-                include_color=False, sort=sort_mode, offset=offset, relax=1 if relax_one else 0)
+                include_color=False, sort=sort_mode, offset=offset, relax=1 if relax_one else 0,
+                candidate_excluded=self._candidate_excluded)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         self._attach_subcategories(result, want_groups, subcategory)
         self._attach_page(result, offset)
         self._attach_groups(result.get("candidates") or [], result)
+        result["unclassified_available"] = unclassified_available
+        result["unclassified_count"] = next((g["count"] for g in result.get("group_counts", [])
+                                             if g["id"] == C.UNSORTED), 0)
         result["ok"] = True
         return result
 

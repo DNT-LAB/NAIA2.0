@@ -28738,7 +28738,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-filters .em-rating-btn { padding: 4px 7px; }
 
 /* 조건 줄: 인원 · 등급 · 갈래 · 색상. 값은 Fast Search 의 이벤트 구역 머리와 같다. */
-.em-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 5px 8px; border-bottom: 1px solid var(--border-dim); }
+.em-filters { display: flex; flex-wrap: nowrap; overflow-x: auto; align-items: center; gap: 4px 6px; padding: 5px 8px; border-bottom: 1px solid var(--border-dim); }
 .em-person-btn {
   display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px;
   border: 1px solid var(--border-dim); border-radius: 5px; background: transparent;
@@ -29040,3 +29040,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-saved-panel .em-library-search input { width: 0; }
 .em-saved-panel .em-library-error { padding: 0 8px; }
 .em-saved-panel .em-bar > b { flex: 1; font-size: 11px; }
+/* Keep controls readable even at the viewport limit. */
+.em-filters > * { flex-shrink: 0; }
+
+/* Query pins remain recognizable in actual combinations, including PE-filtered tags. */
+.em-sample-tags .em-query-tag { color: #f2df9b; }
+
+.em-unclassified { padding: 4px 10px; border-bottom: 1px solid var(--border-dim); }
+.em-unclassified .em-note { display: block; margin-top: 3px; }
+.em-row.em-row-unclassified { grid-template-columns: minmax(0, 1fr) 48px 115px 16px; }
+.em-obs-detail { line-height: 1.35; font-size: 9px; }
+.em-obs-detail small { display: block; font-size: inherit; opacity: .75; }

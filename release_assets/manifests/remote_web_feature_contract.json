@@ -190,6 +190,7 @@
     {
       "id": "event_map",
       "name": "Event Map (Ctrl+E) pinned tag co-occurrence over the observed corpus",
+      "unclassified_exploration": "GET explore excludes unsorted candidates by default. Explicit groups=unsorted requires at least two distinct resolved pins. unclassified_available/unclassified_count expose the opt-in entry; group_counts include unsorted while candidate_pool and paging describe the selected list. Minimum observed co-occurrence remains five; sampled responses are labelled, and unsampled responses show exact co-occurrence alongside observed_total. Reviewed candidate_exclusions in the bundled compact mapping remove color/ambiguous recommendations without deleting posts or blocking explicit search.",
       "subcategories": "GET explore/browse accept subcategory with a single selected group. subcategories counts cover the entire matching group before the subcategory filter; unknown and pending tags remain accessible. Compact mapping is bundled as data/event_map_subcategories.json.",
       "pagination": "GET explore/browse accept zero-based offset and bounded limit; return offset, next_offset and has_more. The panel appends 40 candidates on bottom scroll and resets on query changes.",
       "source_files": [

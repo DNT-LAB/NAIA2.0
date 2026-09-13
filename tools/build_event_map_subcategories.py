@@ -85,7 +85,8 @@ def build(source: Path, target: Path) -> None:
               "source_sha256": hashlib.sha256(raw).hexdigest(),
               "display_grouping": "compact-v1",
               "grouping_rules_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-              "tags": tags}
+              "tags": tags,
+              "candidate_exclusions": document.get("reviewed_candidate_exclusions", {})}
     target.write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     print(f"Exported {len(tags)} tags: {target} ({target.stat().st_size} bytes)")
 

@@ -241,6 +241,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
 
   async function explore() {
+    if (pins.length < 2 && roles.has('unsorted')) { roles.delete('unsorted'); subcategory = ''; }
     if (randomLink.enabled) void syncRandomLink();
     moreRequest = null; moreError = '';
     active = -1;
@@ -268,6 +269,14 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       result = { status: 'error', message: error.message, code: error.code, candidates: [] };
     } finally { setBusy(false); }
     render();
+    // Open actual posts only when the whole candidate pool is exhausted,
+    // not merely when the selected category has no candidates.
+    if (mine === seq && open && result?.observed_posts > 0
+        && Array.isArray(result.group_counts)
+        && !result.group_counts.some(g => Number(g.count) > 0
+          && (g.id !== 'unsorted' || result.unclassified_available))) {
+      void drawSamples();
+    }
   }
 
   function currentCandidates() {
@@ -419,7 +428,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       const d = r.ok ? await r.json() : null;
       tipInfo.set(tag, d && d.tag ? { desc: d.desc || '', group: d.group || '', count: d.count || 0 } : null);
     } catch { tipInfo.set(tag, null); }
-    if (tipOwner && tipOwner.dataset.emPin === tag) paintTip(tipOwner);
+    if (tipOwner && (tipOwner.dataset.emPin || tipOwner.dataset.emTipTag) === tag) paintTip(tipOwner);
   }
   async function ensureThumbIndex() {
     if (thumbAxis || thumbAsked) return;
@@ -444,16 +453,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
   function paintTip(row) {
     const tip = ensureTip();
-    const tag = row.dataset.emPin || '';
+    const tag = row.dataset.emPin || row.dataset.emTipTag || '';
+    const returning = row.hasAttribute('data-em-goto');
     const info = tipInfo.get(tag);
     const axis = thumbAxis?.get(tag);
     const thumb = axis ? `<img class="em-tip-thumb" alt="" src="/api/interactive-thumb?axis=${encodeURIComponent(axis)}&tag=${encodeURIComponent(tag)}">` : '';
     tip.innerHTML = `<div class="em-tip-row">
       <div class="em-tip-main">
-        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || 'unsorted'))}</span></div>
+        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || info?.group || 'unsorted'))}</span></div>
         ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
-        <div class="em-tip-stats">lift ${esc(row.dataset.emLift || '')}${info?.count ? ` · Danbooru ${fmt(info.count)}` : ''}</div>
-        <div class="em-tip-foot">${tipComboLine(row)}<div class="em-tip-hint">클릭 꽂기 · 우클릭 제외</div></div>
+        <div class="em-tip-stats">${row.dataset.emLift ? `lift ${esc(row.dataset.emLift)} · ` : ''}${info?.count ? `Danbooru ${fmt(info.count)}` : ''}</div>
+        <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : "클릭 꽂기 · 우클릭 제외"}</div></div>
       </div>${thumb}</div>`;
     tip.classList.add('open');
     // **항상 같은 자리**: 행 가운데의 살짝 오른쪽, 행 바로 아래(사용자 지정 2026-09-12 밤 - 창 크기에
@@ -470,7 +480,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function showTip(row) {
     if (!row || row === tipOwner) return;
     tipOwner = row;
-    void askTipInfo(row.dataset.emPin || '');
+    void askTipInfo(row.dataset.emPin || row.dataset.emTipTag || '');
     void ensureThumbIndex();
     paintTip(row);
   }
@@ -660,7 +670,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function paintTrail() {
     const crumbs = pins.map((tag, i) =>
       `<span class="em-crumb${i === pins.length - 1 ? ' is-last' : ''}">`
-      + `<button type="button" class="em-crumb-go" data-em-goto="${i + 1}" title="이 단계로 돌아가기">${esc(tag)}</button>`
+      + `<button type="button" class="em-crumb-go" data-em-goto="${i + 1}" data-em-tip-tag="${esc(tag)}" aria-label="${esc(tag)}: 이 단계로 돌아가기">${esc(tag)}</button>`
       + `<button type="button" class="em-crumb-x" data-em-unpin="${esc(tag)}" aria-label="${esc(tag)} 빼기">×</button></span>`)
       .join('<span class="em-sep">›</span>');
     const ex = excludes.map(tag =>
@@ -749,16 +759,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
 
   function candidateRow(c, i) {
+    const unclassified = c.group === 'unsorted';
     const lift = Number(c.lift || 0);
     const liftText = lift >= 100 ? `×${Math.round(lift)}` : `×${lift.toFixed(lift >= 10 ? 0 : 1)}`;
     const obs = c.observed_estimate != null && c.observed_estimate !== c.observed
       ? `≈${fmt(c.observed_estimate)}` : fmt(c.observed);
     const est = c.observed_estimate != null ? c.observed_estimate : c.observed;
-    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
+    return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${unclassified ? ' em-row-unclassified' : ''}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
         data-em-g="${esc(c.group || 'unsorted')}" data-em-est="${Number(est) || 0}" data-em-lift="${liftText}" role="option">
       <span class="em-tag">${esc(c.tag)}</span>
       <span class="em-lift">${liftText}</span>
-      <span class="em-obs">${obs}</span>
+      <span class="em-obs${unclassified ? ' em-obs-detail' : ''}">${unclassified ? `함께 ${obs}건<small>전체 ${fmt(c.observed_total)}건</small>` : obs}</span>
       <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>
     </div>`;
   }
@@ -772,12 +783,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const items = suggest.items || [];
     if (!items.length) return `<div class="em-empty">${esc(suggest.error || '맞는 태그가 없습니다')}</div>`;
     let k = 0;
-    return `<div class="em-cap">검색${suggest.translated?.length ? `<span class="em-note">한글 → ${esc(suggest.translated.slice(0, 3).join(', '))}</span>` : ''}</div>
+    return `<div class="em-cap"><span class="em-cap-label">검색</span>${suggest.translated?.length ? '<span class="em-note">한글 검색 · 관련도 순</span>' : ''}</div>
       ${items.map(it => {
         const usable = !it.blocked && !pins.includes(it.tag);
         const i = usable ? k++ : -1;
-        return `<div class="em-row em-g-${esc(it.group || 'unsorted')}${usable ? '' : ' is-off'}${i === active ? ' is-active' : ''}" ${usable ? `data-em-row="${i}" data-em-pin="${esc(it.tag)}"` : ''} role="option">
-          <span class="em-tag" title="${esc(roleLabel(it.group || 'unsorted'))}">${esc(it.tag)}</span>
+        return `<div class="em-row em-g-${esc(it.group || 'unsorted')}${usable ? '' : ' is-off'}${i === active ? ' is-active' : ''}" data-em-g="${esc(it.group || 'unsorted')}" ${usable ? `data-em-row="${i}" data-em-pin="${esc(it.tag)}"` : ''} role="option">
+          <span class="em-tag">${esc(it.tag)}</span>
           <span class="em-obs">${fmt(it.observed)}</span>${it.blocked ? `<span class="em-blocked">${esc(it.blocked)}</span>` : ''}
         </div>`;
       }).join('')}`;
@@ -828,7 +839,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       <div class="em-body em-side-body">${list.map((s, i) => `
         <div class="em-sample">
           <div class="em-sample-tags">${sampleTagsForDisplay(s).map(t =>
-            peHidden.has(t) ? `<span class="em-pe-hidden" title="${esc(peTitle(t).slice(3))}">${esc(t)}</span>` : esc(t)).join(', ')}</div>
+            `<span class="${peHidden.has(t) ? 'em-pe-hidden ' : ''}${pins.includes(t) ? 'em-query-tag' : ''}"${peHidden.has(t) ? ` title="${esc(peTitle(t).slice(3))}"` : ''}>${esc(t)}</span>`).join(', ')}</div>
           <div class="em-sample-actions">
             <span class="em-actions em-sample-run">
               <button type="button" data-em-sample-apply="${i}" title="이 조합을 Random 과 같은 파이프라인에 태워 메인 프롬프트로">적용</button>
@@ -843,6 +854,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     positionSide();
   }
   function selectedCategory() {
+    if (roles.has('unsorted')) return '';
     return pins.length ? (roles.size === 1 ? [...roles][0] : '') : group;
   }
 
@@ -980,9 +992,15 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         const cs = result.candidates || [];
         rows = cs.map(c => c.tag);
         const gc = result.group_counts || null;   // 옛 백엔드(재시작 전)는 이 키가 없다 - 그래도 탭은 그린다
-        html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + r.count, 0) : null);
+        html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + (r.id === 'unsorted' ? 0 : r.count), 0) : null);
+        if (result.unclassified_available && result.unclassified_count > 0) {
+          const expanded = roles.has('unsorted');
+          html += `<div class="em-unclassified"><button type="button" class="em-mini" data-em-unclassified aria-expanded="${expanded}">${expanded ? '▾ 미분류 후보 접기' : '▸ 미분류 후보 더 보기'} · ${fmt(result.unclassified_count)}</button>${expanded
+            ? `<span class="em-note">${result.sampled ? '표본 집계 · 범위를 좁히면 전체 집계' : '전체 집계'} · 5건 이상 함께 등장 · 분류 검토 중</span>` : ''}</div>`;
+        }
         html += candidateCapHtml(result, cs.length);
-        html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">5건 이상 함께 달린 태그가 없습니다.</div>`;
+        html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">${result.unclassified_count > 0 && !roles.has('unsorted')
+          ? (result.unclassified_available ? '분류된 후보가 없습니다. 미분류 후보 또는 실제 조합을 확인하세요.' : '분류된 후보가 없습니다. 실제 조합을 확인하세요.') : '5건 이상 함께 달린 태그가 없습니다.'}</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);
       }
@@ -1192,6 +1210,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         return;
       }
       const cat = t.closest('[data-em-cat]');
+      if (t.closest('[data-em-unclassified]')) {
+        if (!result?.unclassified_available) return;
+        roles = roles.has('unsorted') ? new Set() : new Set(['unsorted']);
+        subcategory = ''; void explore(); return;
+      }
       if (cat) {
         const id = cat.dataset.emCat;
         if (pins.length) { subcategory = ''; roles = id ? new Set([id]) : new Set(); void explore(); }
@@ -1201,12 +1224,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       const row = t.closest('[data-em-pin]');
       if (row) pin(row.dataset.emPin);
     });
-    bodyEl.addEventListener('pointerover', event => {
-      const row = event.target.closest ? event.target.closest('.em-row[data-em-pin]') : null;
+    overlay.addEventListener('pointerover', event => {
+      const row = event.target.closest ? event.target.closest('.em-row[data-em-pin], [data-em-tip-tag]') : null;
       if (row) showTip(row);
     });
-    bodyEl.addEventListener('pointerout', event => {
-      const row = event.target.closest ? event.target.closest('.em-row[data-em-pin]') : null;
+    overlay.addEventListener('pointerout', event => {
+      const row = event.target.closest ? event.target.closest('.em-row[data-em-pin], [data-em-tip-tag]') : null;
       if (!row) return;
       if (event.relatedTarget && row.contains(event.relatedTarget)) return;
       hideTip();
@@ -1307,6 +1330,14 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   /** 결과 칸의 **왼쪽**에 붙는다(사용자 지정 2026-09-12): 폭은 Fast Search 의 절반(≤ 360),
    *  높이는 빈 화면이면 결과 칸의 절반, 목록이 길면 결과 칸 높이까지 자란다(한 번에 보이는 태그를
    *  늘리자는 사용자 지정 2026-09-12). 이미지 왼편 가장자리를 살짝 가리는 정도. */
+  function panelMinimumWidth() {
+    if (!filtersEl) return 400;
+    const css = getComputedStyle(filtersEl);
+    const children = [...filtersEl.children];
+    return Math.max(400, Math.ceil(children.reduce((n, el) => n + el.getBoundingClientRect().width, 0)
+      + Math.max(0, children.length - 1) * (parseFloat(css.columnGap) || 0)
+      + (parseFloat(css.paddingLeft) || 0) + (parseFloat(css.paddingRight) || 0) + 4));
+  }
   function position() {
     if (!overlay || overlay.hidden) return;
     // 뷰어(이미지 칸)만 호스트다 - #rightTabResult 로 재면 Generation Info 위까지 내려간다(사용자 제보).
@@ -1314,15 +1345,15 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const r = host ? host.getBoundingClientRect() : null;
     if (!r || r.width < 240 || r.height < 160) {
       overlay.style.left = '16px'; overlay.style.transform = 'none'; overlay.style.top = '64px';
-      overlay.style.width = 'min(360px, calc(100vw - 32px))';
+      overlay.style.width = `${Math.min(panelMinimumWidth(), window.innerWidth - 16)}px`;
       heightCaps = { base: Math.min(440, window.innerHeight - 96), hard: window.innerHeight - 32 };
       fitHeight(); return;
     }
     const pad = 14;
     // E 단추(반구, 24px)가 왼쪽 가장자리에 있으니 그 오른쪽부터 시작한다.
-    const width = Math.round(Math.min(360, Math.max(240, (r.width - pad * 2) / 2)));
+    const width = Math.min(panelMinimumWidth(), window.innerWidth - 16);
     overlay.style.transform = 'none';
-    overlay.style.left = `${Math.round(r.left + pad + 20)}px`;
+    overlay.style.left = `${Math.round(Math.max(8, Math.min(r.left + pad + 20, window.innerWidth - width - 8)))}px`;
     overlay.style.top = `${Math.round(r.top + pad)}px`;
     overlay.style.width = `${width}px`;
     heightCaps = { base: Math.round(Math.min(r.height - pad * 2, Math.max(280, r.height * 0.5))),
@@ -1332,6 +1363,10 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function fitHeight() {
     if (!overlay || overlay.hidden || !heightCaps.base) return;
     // 몸통이 내용만큼 자란다(hard 를 넘지 않게). 8줄 상한은 걷어냈다 - 사용자가 더 보고 싶어했다.
+    const width = Math.min(panelMinimumWidth(), window.innerWidth - 16);
+    overlay.style.width = `${width}px`;
+    if (overlay.getBoundingClientRect().right > window.innerWidth - 8)
+      overlay.style.left = `${Math.max(8, window.innerWidth - width - 8)}px`;
     let want = heightCaps.base;
     const chrome = overlay.offsetHeight - bodyEl.clientHeight;
     want = Math.max(want, Math.ceil(chrome + bodyEl.scrollHeight + 4));

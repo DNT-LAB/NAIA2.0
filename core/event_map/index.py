@@ -529,7 +529,8 @@ class EventMapIndex:
 
     def explore(self, pins, *, exclude=None, ratings=None, persons=None, limit=24,
                 min_posts=5, include_color=False, roles=None, allowed=None,
-                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift", offset=0, relax=0) -> dict:
+                scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift", offset=0, relax=0,
+                candidate_excluded=None) -> dict:
         """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다.
         `relax=1` 이면 핀 n개 중 n-1개만 있는 게시물까지 센다([-1 허용]) - `strict_posts` 에 정확 일치 수를 같이 준다."""
         started = time.perf_counter()
@@ -609,6 +610,8 @@ class EventMapIndex:
                 if role in roles:
                     by_role[tid] = True
             keep &= by_role
+        if candidate_excluded is not None:
+            keep &= ~candidate_excluded
         out["_pool"] = keep.copy()      # 갈래 필터 전의 풀(카테고리 탭의 개수용). 서비스가 지운다.
         if allowed is not None:
             keep &= allowed

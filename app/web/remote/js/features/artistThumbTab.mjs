@@ -658,6 +658,7 @@ export function createArtistThumbController({
     gridEl.innerHTML = items.map(item => {
       const active = item.artist === selectedArtist ? ' active' : '';
       const favorite = item.favorite ? ' favorite' : '';
+      const banned = item.banned ? ' banned' : '';        // 제외 작가 - 해제 토글의 근거(버그 리포트 #1)
       const remembered = resultMemory.has(item.artist) ? ' remembered' : '';
       const queued = !selectionMode && hasQueuedArtist(item.artist) ? ' in-queue' : '';
       const selectable = selectionMode ? ' selectable' : '';
@@ -672,7 +673,7 @@ export function createArtistThumbController({
       const memoryHtml = remembered ? '<span class="artist-thumb-memory-mark">RESULT</span>' : '';
       const queueHtml = queued ? '<span class="artist-thumb-queue-mark">IN QUEUE</span>' : '';
       return `
-        <button type="button" class="artist-thumb-card${active}${favorite}${remembered}${queued}${selectable}${batchSelected}${batchDim}" data-artist="${escHtml(item.artist)}" data-weight="${escHtml(String(item.weight || 0))}">
+        <button type="button" class="artist-thumb-card${active}${favorite}${banned}${remembered}${queued}${selectable}${batchSelected}${batchDim}" data-artist="${escHtml(item.artist)}" data-weight="${escHtml(String(item.weight || 0))}">
           ${checkHtml}
           ${memoryHtml}
           ${queueHtml}
@@ -695,6 +696,7 @@ export function createArtistThumbController({
       image_url: image,
       weight,
       favorite: card.classList.contains('favorite'),
+      banned: card.classList.contains('banned'),
     };
   }
 
@@ -877,8 +879,10 @@ export function createArtistThumbController({
     selectedMeta.textContent = [
       weight ? `weight ${weight}` : '',
       item.favorite ? 'favorite' : '',
+      item.banned ? '제외 작가' : '',
     ].filter(Boolean).join(' · ');
   }
+  function banLabel(item) { return item?.banned ? '제외 해제' : '제외'; }
 
   function applyFavoriteState(item, favorite) {
     if (!item) return;
@@ -931,6 +935,7 @@ export function createArtistThumbController({
       if (button) button.disabled = false;
     });
     if (favoriteBtn) favoriteBtn.textContent = item.favorite ? '관심 작가 해제' : '관심 작가 등록';
+    if (banBtn) banBtn.textContent = banLabel(item);
     gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
       card.classList.toggle('active', card.dataset.artist === item.artist);
     });
@@ -1042,6 +1047,7 @@ export function createArtistThumbController({
     menu.setAttribute('role', 'menu');
     contextMenuEl = menu;
     const favoriteLabel = item.favorite ? '관심 해제' : '관심 추가';
+    const banMenuLabel = item.banned ? '제외 해제' : '제외 추가';
     const queued = hasQueuedArtist(item.artist);
     const queueGroupHtml = queued
       ? `
@@ -1066,7 +1072,7 @@ export function createArtistThumbController({
           <span>${favoriteLabel}</span>
         </button>
         <button type="button" class="result-context-item danger" data-action="ban" role="menuitem">
-          <span>제외 추가</span>
+          <span>${banMenuLabel}</span>
         </button>
       </div>
     `;
@@ -1294,11 +1300,21 @@ export function createArtistThumbController({
     }
   }
 
+  /** 제외 토글. 이미 제외된 작가면 **해제**한다(버그 리포트 #1 - 전에는 언제나 추가라 한번 제외하면 영구였다).
+   *  카드는 지금 필터에서 **보이면 안 되는 쪽**일 때만 지운다: 추가 → 일반 필터에서, 해제 → '제외 작가' 필터에서. */
   async function banItem(item) {
     if (!item) return;
-    state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned: true});
+    const banned = !item.banned;
+    state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned});
     const artist = item.artist;
-    const shouldRemoveFromGrid = currentFilter() !== 'banned';
+    const inBannedFilter = currentFilter() === 'banned';
+    const shouldRemoveFromGrid = banned ? !inBannedFilter : inBannedFilter;
+    item.banned = banned;
+    if (selected && selected.artist === artist) {
+      selected.banned = banned;
+      renderSelectedMeta(selected);
+      if (banBtn) banBtn.textContent = banLabel(selected);
+    }
     renderState();
     let removedCount = 0;
     if (shouldRemoveFromGrid) {
@@ -1316,10 +1332,14 @@ export function createArtistThumbController({
       updatePager();
       updateListStatus();
     }
-    if (selected?.artist === artist) {
+    if (shouldRemoveFromGrid && selected?.artist === artist) {
       clearSelectedArtist();
+    } else {
+      gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+        if (card.dataset.artist === artist) card.classList.toggle('banned', banned);
+      });
     }
-    showToast?.('제외 작가에 추가했습니다.', 'success');
+    showToast?.(banned ? '제외 작가에 추가했습니다.' : '제외 작가에서 뺐습니다.', 'success');
   }
 
   async function banSelected() {

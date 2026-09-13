@@ -259,7 +259,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     try {
       const body = await getJson('/api/event-map/explore', {
         pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, sort: sortMode,
-        relax: relaxOne && pins.length >= 2 ? 1 : 0, ...filterParams(),
+        relax: relaxOne && canRelax() ? 1 : 0, ...filterParams(),
       });
       if (mine !== seq) return;
       result = body;
@@ -294,7 +294,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const exploring = pins.length > 0;
     const params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...filterParams() };
     if (exploring) Object.assign(params, { pins: pins.join(','), exclude: excludes.join(','), sort: sortMode,
-      relax: relaxOne && pins.length >= 2 ? 1 : 0 });
+      relax: relaxOne && canRelax() ? 1 : 0 });
     else Object.assign(params, { group, groups: '' });
     try {
       const page = await getJson(`/api/event-map/${exploring ? 'explore' : 'browse'}`, params);
@@ -906,6 +906,20 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     sideEl.style.height = `${Math.round(Math.max(r.height, bottom - r.top))}px`;
   }
 
+  /** 핀이 둘 이상이어야 '하나 빼기' 가 뜻이 있다. */
+  function canRelax() { return pins.length >= 2; }
+
+  /** 후보 목록 머리줄: [정렬 ▾] 개수·완화 안내 [-1 허용]. **0건일 때도 그린다** - 넓히는 단추가
+   *  거기 있어야 한다(사용자 제보 2026-09-13). */
+  function candidateCapHtml(result, count) {
+    const sm = SORT_MODES.find(m => m.id === sortMode) || SORT_MODES[0];
+    const relaxNote = result.relaxed
+      ? ` · ${pins.length - 1}/${pins.length} 일치 · 정확 ${fmt(result.strict_posts || 0)}건` : '';
+    return `<div class="em-cap"><span class="em-cap-label">함께 달린 태그</span> <button type="button" class="em-sort" data-em-sort title="${esc(sm.title)} · 눌러서 바꾸기">${esc(sm.label)} ▾</button>`
+      + `<span class="em-note">${count}개${result.sampled ? ' · 표본으로 셈' : ''}${relaxNote}</span>`
+      + `<button type="button" class="em-relax${relaxOne ? ' is-on' : ''}" data-em-relax aria-pressed="${relaxOne}" ${canRelax() ? '' : 'disabled'} title="핀 ${pins.length}개 중 ${Math.max(1, pins.length - 1)}개만 있는 게시물까지 센다 - 정확한 교집합이 쪼그라들 때">-1 허용</button></div>`;
+  }
+
   function render(preserveScroll = false) {
     if (!overlay) return;
     const scrollTop = bodyEl.scrollTop;
@@ -942,18 +956,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         html += `<div class="em-empty">맵에 없는 태그: ${esc((result.unknown_pins || []).join(', '))}</div>`;
         setStatus('모르는 태그', 'error');
       } else if (!result.observed_posts) {
-        html += `<div class="em-empty">이 조합으로 달린 게시물이 없습니다. ← 로 한 단계 올라가 보세요.</div>`;
+        // ⚠️ 0건이야말로 [-1 허용] 이 필요한 자리다 - 캡 줄을 같이 그린다(사용자 제보 2026-09-13).
+        html += candidateCapHtml(result, 0);
+        html += `<div class="em-empty">이 조합으로 달린 게시물이 없습니다. ${canRelax() && !relaxOne
+          ? '위의 <b>-1 허용</b> 을 켜면 핀 하나를 뺀 조합까지 봅니다.' : '← 로 한 단계 올라가 보세요.'}</div>`;
         setStatus('0건', 'error');
       } else {
         const cs = result.candidates || [];
         rows = cs.map(c => c.tag);
         const gc = result.group_counts || null;   // 옛 백엔드(재시작 전)는 이 키가 없다 - 그래도 탭은 그린다
         html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + r.count, 0) : null);
-        const sm = SORT_MODES.find(m => m.id === sortMode) || SORT_MODES[0];
-        const relaxNote = result.relaxed
-          ? ` · ${pins.length - 1}/${pins.length} 일치 · 정확 ${fmt(result.strict_posts || 0)}건` : '';
-        html += `<div class="em-cap"><span class="em-cap-label">함께 달린 태그</span> <button type="button" class="em-sort" data-em-sort title="${esc(sm.title)} · 눌러서 바꾸기">${esc(sm.label)} ▾</button><span class="em-note">${cs.length}개${result.sampled ? ' · 표본으로 셈' : ''}${relaxNote}</span>`
-          + `<button type="button" class="em-relax${relaxOne ? ' is-on' : ''}" data-em-relax aria-pressed="${relaxOne}" ${pins.length >= 2 ? '' : 'disabled'} title="핀 ${pins.length}개 중 ${Math.max(1, pins.length - 1)}개만 있는 게시물까지 센다 - 정확한 교집합이 쪼그라들 때">-1 허용</button></div>`;
+        html += candidateCapHtml(result, cs.length);
         html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">5건 이상 함께 달린 태그가 없습니다.</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);

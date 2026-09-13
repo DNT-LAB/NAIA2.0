@@ -112,6 +112,8 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # mirror, so they ship with the payload instead of via a runtime download.
     "data/KR_tags.parquet",
     "data/e621_KR_tags.parquet",
+    # 이벤트 맵 소분류 표(876KB). 색인(.naiamap)은 런타임 다운로드지만 이 표는 번들이다.
+    "data/event_map_subcategories.json",
     "data/tag_index/*",
     "data/copyright_groups.json",
     "data/character_analysis.json",
@@ -160,6 +162,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # mirroring Event Preset. So it is intentionally absent from this allowlist.
     "*/data/KR_tags.parquet",
     "*/data/e621_KR_tags.parquet",
+    "*/data/event_map_subcategories.json",
     "*/data/tag_index/*",
     "*/data/copyright_groups.json",
     "*/data/character_analysis.json",

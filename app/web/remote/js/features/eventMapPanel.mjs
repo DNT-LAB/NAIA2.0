@@ -276,6 +276,19 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
+  /** [넣기] = 랜덤 대치(사용자 지정 2026-09-13): 고른 핀을 Random 과 같은 파이프라인에 태워 메인 프롬프트를
+   *  **갈아끼운다**(/api/event-map/apply). 전에는 커서 자리에 끼워 넣었다. 등급은 지금 고른 등급이 하나면 그것, 아니면 s. */
+  async function applyPins(btn) {
+    if (!pins.length) return;
+    const rating = ratings.size === 1 ? [...ratings][0] : 's';
+    if (btn) btn.disabled = true;
+    try {
+      await postJson('/api/event-map/apply', { tags: pins.slice(), rating });
+      toast(`메인 프롬프트를 대치했습니다 — ${pins.join(', ').slice(0, 40)}`, 'success');
+    } catch (error) {
+      toast(`대치 실패 — ${error.message}`, 'error');
+    } finally { if (btn) btn.disabled = !pins.length; }
+  }
   // ── 행 툴팁 ──────────────────────────────────────────────────────────────
   function ensureTip() {
     if (tipEl && document.body.contains(tipEl)) return tipEl;
@@ -566,7 +579,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
                  aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
       <span class="em-actions em-actions-right"><button type="button" data-em-insert disabled
-              title="지금 고른 태그 전부를 프롬프트 커서 자리에">넣기</button><button type="button" data-em-copy disabled
+              title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-copy disabled
               title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
               title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button></span>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
@@ -895,7 +908,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow 
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
-      if (t.closest('[data-em-insert]')) { insertText(currentPrompt()); return; }
+      if (t.closest('[data-em-insert]')) { void applyPins(t.closest('[data-em-insert]')); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
       if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return; }
       if (t.closest('[data-em-person]')) {

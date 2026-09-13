@@ -10305,6 +10305,19 @@ body.resizing-result-info {
   border-radius: 6px; border: 1px solid var(--border-dim); background: #0f0e16; color: var(--text-primary);
   font-family: var(--font-editor, var(--font-mono)); font-size: 12px; line-height: 1.5; outline: none; }
 .slash-editor-text:focus { border-color: var(--accent); }
+/* /preset 갈래 칩(목록 위) · 상세 패널(오른쪽) */
+.slash-filterbar { display: flex; gap: 4px; padding: 6px 8px 4px; border-bottom: 1px solid var(--border-dim); }
+.slash-filter-btn { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border-dim); background: transparent;
+  color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; cursor: pointer; }
+.slash-filter-btn.is-active { border-color: var(--accent); color: var(--text-primary); background: rgba(139,118,255,0.14); }
+.slash-detail { position: fixed; z-index: 10001; width: 340px; max-height: 70vh; overflow: auto; padding: 8px 10px 10px;
+  border-radius: 8px; background: #16151f; border: 1px solid var(--border-dim); box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+.slash-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.slash-detail-thumb { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-dim); }
+.slash-detail-label { margin-top: 6px; font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); }
+.slash-detail-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; max-height: 9em; overflow: hidden; }
+.slash-detail-text.is-empty { color: var(--text-dim); }
 /* 회수 안 된 슬래시 명령(`/seq` 등) - 태그가 아니다. 생성 직전에 무시된다(2026-09-13). */
 .prompt-token-slash { color: #ffb86b; background: rgba(255, 184, 107, 0.14); text-decoration: underline dotted; }
 /* `-태그` = 생성 직전에 네거티브로 빠지는 것.

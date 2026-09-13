@@ -2860,7 +2860,7 @@ export function createTagAssistController({
     }
     if (stage) {
       return (stage.choices || [])
-        .filter(c => !q || String(c.label || '').toLowerCase().includes(q))
+        .filter(c => !q || String(c.label || '').toLowerCase().includes(q) || String(c.search || '').toLowerCase().includes(q))
         .map(c => ({
           tag: String(c.label || ''), _wc_type: 'slash_choice', cat: '', _choice: c,
           // 토글 줄은 ON/OFF 를 **배경색**으로 말한다(사용자 지정) - 글로 또 말하지 않는다.
@@ -2884,6 +2884,13 @@ export function createTagAssistController({
     const arg = cmd.arg || {};
     const text = String(raw || '').trim();
     if (!text) { showToast?.(`/${cmd.name} 에는 값이 필요합니다`, 'error'); return false; }
+    if (arg.type === 'text' && typeof arg.apply === 'function') {
+      // 선택지가 연 글 단계(예: 새 프리셋 이름). apply 가 문자열을 돌려주면 그것이 거절 사유다.
+      let problem = null;
+      try { problem = arg.apply(text); } catch (error) { problem = error?.message || String(error); }
+      if (problem) { showToast?.(String(problem), 'error'); return false; }
+      return true;
+    }
     let value = text;
     if (arg.type === 'number') {
       value = Number(text);
@@ -2904,9 +2911,12 @@ export function createTagAssistController({
       tagTooltip.classList.add('open', 'ac-mode');
       tagTooltip.classList.remove('chunk-ac-mode');
       positionTagTooltip();
+      hideSlashDetail();
+      afterSlashRender();          // 칩 바는 남긴다 - 빈 갈래에서 다른 갈래로 돌아가야 한다
       return;
     }
     renderAutocomplete();
+    afterSlashRender();
   }
   /** 토글 뒤: 목록을 다시 만들어 같은 검색어·같은 줄로 다시 그린다 - 창은 그대로. */
   function refreshSlashStage() {
@@ -2914,11 +2924,99 @@ export function createTagAssistController({
     if (!open || !open.stage) return;
     const stage = open.stage;
     if (typeof stage.refresh === 'function') {
-      try { stage.choices = stage.refresh() || []; } catch (_error) { /* 옛 목록 그대로 */ }
+      try { stage.choices = stage.refresh(stage.filters?.active) || []; } catch (_error) { /* 옛 목록 그대로 */ }
     }
     const keepSel = acSel;
     renderSlashList(open.input.value);
-    if (keepSel >= 0 && keepSel < acResults.length) { acSel = keepSel; renderAutocomplete(); }
+    if (keepSel >= 0 && keepSel < acResults.length) { acSel = keepSel; renderAutocomplete(); afterSlashRender(); }
+  }
+  // ── 갈래 칩 · 상세 패널(/preset) ────────────────────────────────────────────
+  //
+  // 목록 위 칩: stage.filters = {groups:[{key,label}], active}. 누르면 refresh(active) 로 다시 만든다.
+  // 상세: 고르는 줄에 c.detail() 이 있으면 오른쪽에 PREFIX/POSTFIX/MAIN/NEGATIVE + 썸네일을 띄운다 -
+  // PE 프리셋 화면의 미리보기와 같은 사양(사용자 지정). 값은 캐시한다.
+  let slashDetailEl = null;
+  const slashDetailCache = new Map();
+  let slashDetailSeq = 0;
+  function afterSlashRender() {
+    const open = slashEntry;
+    if (!open || !open.stage) return;
+    const stage = open.stage;
+    const listEl = tagTooltip.querySelector('.tag-ac-list') || tagTooltip.firstElementChild;
+    if (stage.filters && Array.isArray(stage.filters.groups) && listEl && !tagTooltip.querySelector('.slash-filterbar')) {
+      const bar = document.createElement('div');
+      bar.className = 'slash-filterbar';
+      stage.filters.groups.forEach(g => {
+        if (!g || !g.key) return;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'slash-filter-btn' + (String(g.key) === String(stage.filters.active || '') ? ' is-active' : '');
+        b.textContent = String(g.label || g.key);
+        b.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+        b.addEventListener('click', e => {
+          e.preventDefault(); e.stopPropagation();
+          // 같은 칩을 다시 누르면 기본(현재 갈래)으로 돌아간다.
+          stage.filters.active = String(g.key) === String(stage.filters.active || '') ? '' : String(g.key);
+          acSel = 0;
+          refreshSlashStage();
+          open.input.focus();
+        });
+        bar.appendChild(b);
+      });
+      listEl.parentNode.insertBefore(bar, listEl);
+    }
+    // 마우스가 올라간 줄도 '고르는 줄'이다 - 상세가 따라간다.
+    tagTooltip.querySelectorAll('.tag-ac-item').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const idx = +el.dataset.idx;
+        if (Number.isInteger(idx) && idx !== acSel) { acSel = idx; renderAutocomplete(); afterSlashRender(); }
+      });
+    });
+    updateSlashDetail();
+  }
+  function hideSlashDetail() {
+    if (slashDetailEl) { slashDetailEl.remove(); slashDetailEl = null; }
+  }
+  function updateSlashDetail() {
+    const row = acResults[acSel];
+    const choice = row?._choice;
+    if (!slashEntry || !choice || typeof choice.detail !== 'function') { hideSlashDetail(); return; }
+    if (!slashDetailEl) {
+      slashDetailEl = document.createElement('div');
+      slashDetailEl.className = 'slash-detail';
+      document.body.appendChild(slashDetailEl);
+    }
+    const key = String(choice.label || '');
+    const mine = ++slashDetailSeq;
+    const paint = (data) => {
+      if (mine !== slashDetailSeq || !slashDetailEl) return;
+      const f = data?.fields || {};
+      const block = (title, text) => `<div class="slash-detail-label">${escHtml(title)}</div>` +
+        `<div class="slash-detail-text${text ? '' : ' is-empty'}">${escHtml(text || '저장된 값 없음')}</div>`;
+      slashDetailEl.innerHTML = `<div class="slash-detail-head"><b>${escHtml(key)}</b>` +
+        (data?.thumbnail ? `<img class="slash-detail-thumb" src="${escHtml(data.thumbnail)}" alt="">` : '') + '</div>' +
+        block('PREFIX', f.prefix) + block('POSTFIX', f.postfix) + block('MAIN', f.main) + block('NEGATIVE', f.negative);
+      positionSlashDetail();
+    };
+    if (slashDetailCache.has(key)) { paint(slashDetailCache.get(key)); return; }
+    slashDetailEl.innerHTML = `<div class="slash-detail-head"><b>${escHtml(key)}</b></div><div class="slash-detail-text is-empty">불러오는 중…</div>`;
+    positionSlashDetail();
+    Promise.resolve().then(() => choice.detail()).then(data => {
+      slashDetailCache.set(key, data || {});
+      paint(data || {});
+    }).catch(() => paint({}));
+  }
+  function positionSlashDetail() {
+    if (!slashDetailEl) return;
+    const tip = tagTooltip.getBoundingClientRect();
+    const box = slashDetailEl.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = tip.right + 8;
+    if (left + box.width > vw - 8) left = Math.max(8, tip.left - box.width - 8);
+    let top = tip.top;
+    if (top + box.height > vh - 8) top = Math.max(8, vh - box.height - 8);
+    slashDetailEl.style.left = `${Math.round(left)}px`;
+    slashDetailEl.style.top = `${Math.round(top)}px`;
   }
   function setSlashStage(stage) {
     if (!slashEntry) return;
@@ -2960,7 +3058,7 @@ export function createTagAssistController({
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      if (acResults.length) { moveAutocompleteSelection(e.key === 'ArrowDown' ? 1 : -1); renderAutocomplete(); }
+      if (acResults.length) { moveAutocompleteSelection(e.key === 'ArrowDown' ? 1 : -1); renderAutocomplete(); afterSlashRender(); }
       return;
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
@@ -3015,6 +3113,7 @@ export function createTagAssistController({
     if (!open) return;
     slashEntry = null;
     open.el.remove();
+    hideSlashDetail();
     hideAutocomplete();
     if (restoreFocus) {
       open.textarea.focus({preventScroll: true});
@@ -3026,7 +3125,9 @@ export function createTagAssistController({
     if (!open) return;
     if (row._wc_type === 'slash_arg') {
       const cmd = open.stage?.cmd;
-      if (cmd && runSlashArg(cmd, open.input.value)) closeSlashEntry({restoreFocus: true});
+      // ⚠️ 선택지가 연 글 단계(ask)는 arg 가 stage 에 있다 - 명령의 arg 를 보면 undefined 다.
+      const spec = cmd ? {...cmd, arg: open.stage?.arg || cmd.arg} : null;
+      if (spec && runSlashArg(spec, open.input.value)) closeSlashEntry({restoreFocus: true});
       else open.input.focus();
       return;
     }
@@ -3038,6 +3139,13 @@ export function createTagAssistController({
       if (result && result.stay) {
         // 토글 - 창은 그대로, 상태만 다시 그린다(사용자 지정: 닫히지 않게 · 토스트 없이).
         refreshSlashStage();
+        open.input.focus();
+        return;
+      }
+      if (result && result.ask) {
+        // 글을 묻는다(새 프리셋 이름). Enter 가 ask.apply(text) 를 부른다.
+        setSlashStage({cmd: open.stage?.cmd || {name: ''}, choices: [],
+          arg: {type: 'text', hint: result.ask.hint || '', apply: result.ask.apply}});
         open.input.focus();
         return;
       }
@@ -3076,7 +3184,8 @@ export function createTagAssistController({
       let choices = [];
       try { choices = cmd.choices() || []; }
       catch (error) { showToast?.(`명령 실패 — ${error?.message || error}`, 'error'); }
-      setSlashStage({cmd, choices, refresh: () => cmd.choices() || []});
+      const filters = typeof cmd.filters === 'function' ? cmd.filters() : null;
+      setSlashStage({cmd, choices, filters, refresh: active => cmd.choices(active) || []});
       if (seed) { open.input.value = seed; renderSlashList(seed); }
       open.input.focus();
       return;

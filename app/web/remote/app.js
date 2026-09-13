@@ -13034,23 +13034,70 @@ function slashPeChoices() {
     ...SLASH_PE_OPTIONS.map(([key, title]) => slashPeOptionChoice(key, title)),
   ];
 }
-function slashPresetChoices() {
+/** 현재 갈래 = 지금 프리셋의 모델 갈래(프리셋이 모델을 품는다). 없으면 etc. */
+function slashPresetCurrentGroup(m) {
+  const cur = (m.preset_summaries || []).find(s => String(s?.name || '') === String(m.preset || ''));
+  return String(cur?.model_group || 'etc');
+}
+/** 목록 위 칩: NAI 모드에서만, `all` 과 **현재 갈래는 뺀다**(사용자 지정 - 기본이 현재 갈래라 칩이 필요 없다). */
+function slashPresetFilters() {
+  const m = slashPeState();
+  const groups = Array.isArray(m.preset_filter_groups) ? m.preset_filter_groups : [];
+  if (groups.length < 2) return null;
+  const current = slashPresetCurrentGroup(m);
+  const chips = groups.filter(g => g && g.key && g.key !== 'all' && String(g.key) !== current);
+  return chips.length ? {groups: chips, active: ''} : null;
+}
+async function slashPresetDetail(name) {
+  const m = slashPeState();
+  const s = (m.preset_summaries || []).find(x => String(x?.name || '') === String(name));
+  const mode = String(m.api_mode || currentMode || modeSelect?.value || 'NAI').toUpperCase();
+  let fields = {prefix: s?.pre_prompt_preview || '', postfix: s?.post_prompt_preview || '', main: '', negative: ''};
+  try {
+    const res = await fetch(`/api/prompt-engineering/preset-detail?${new URLSearchParams({mode, name: String(name)})}`, {cache: 'no-store'});
+    if (res.ok) { const d = await res.json(); if (d && d.fields) fields = d.fields; }
+  } catch (_) { /* 요약으로 버틴다 */ }
+  return {fields, thumbnail: String(s?.thumbnail_url || '')};
+}
+function slashPresetChoices(activeGroup = '') {
   const m = slashPeState();
   const summaries = new Map((m.preset_summaries || []).map(s => [String(s?.name || ''), s]));
-  const rows = (m.preset_options || []).map(name => {
+  const filters = slashPresetFilters();
+  // 기본 = 현재 갈래(NAI). 칩을 누르면 그 갈래만. 갈래 정보가 없는 모드는 목록 전부.
+  const wanted = filters ? (activeGroup || slashPresetCurrentGroup(m)) : '';
+  const rows = (m.preset_options || []).filter(name => {
+    if (!wanted) return true;
+    if (String(name) === '*randomized' || String(name) === 'default') return true;   // 합성 이름 - 모델이 없다
     const s = summaries.get(String(name));
-    return {label: String(name), desc: String(s?.description || s?.api_mode || ''), current: String(name) === String(m.preset || ''),
-      run: () => { onPromptPresetChange(String(name)); showToast(`프리셋 ${name}`, 'success'); }};
+    return String(s?.model_group || 'etc') === wanted;
+  }).map(name => {
+    const s = summaries.get(String(name));
+    return {
+      label: String(name), desc: String(s?.model_label || ''), current: String(name) === String(m.preset || ''),
+      // 검색은 이름 + prefix + postfix(auto-hide 는 뺀다 - 프리셋끼리 같은 값을 나눠 써 필터가 무뎌진다).
+      search: [name, s?.pre_prompt_preview, s?.post_prompt_preview].map(v => String(v || '')).join('\n'),
+      detail: () => slashPresetDetail(name),
+      run: () => { onPromptPresetChange(String(name)); },
+    };
   });
-  if (!rows.length) {
+  if (!(m.preset_options || []).length) {
     try { requestModuleState('prompt_engineering'); } catch (_) {}
     rows.push({label: '불러오는 중…', desc: '프리셋 목록을 청했습니다 - Backspace 로 나갔다가 다시 들어오세요', run: () => {}});
   }
+  const known = new Set([...(m.preset_options || []), ...(m.preset_summaries || []).map(s => String(s?.name || ''))].map(String));
   return [
-    // 화면(목록 · 미리보기 · 썸네일)을 그대로 띄운다 - 프리셋 드롭다운의 브라우저를 연다.
-    {label: '⊞ 프리셋 화면', desc: '목록 · 미리보기 · 썸네일', run: () => slashFocusPeBox('modPreset', select => {
-      if (!(typeof customSelectsControl?.openFor === 'function' && customSelectsControl.openFor(select))) select.focus();
-    })},
+    {label: '+ 새 프리셋', desc: '이름을 묻고 만든 뒤 바로 전환', run: () => ({ask: {
+      hint: '새 프리셋 이름',
+      apply: name => {
+        const clean = String(name || '').trim();
+        if (!clean) return '이름이 비었습니다';
+        if (/[\\/:*?"<>|]/.test(clean)) return '이름에 쓸 수 없는 글자가 있습니다';
+        if (known.has(clean)) return `이미 있는 프리셋입니다: ${clean}`;
+        // preset_create 는 만든 뒤 현재 프리셋으로 바꾼다(promptEngineeringActions.createPreset 주석).
+        setModuleParam('prompt_engineering', 'preset_create', clean);
+        return null;
+      },
+    }})},
     ...rows,
   ];
 }
@@ -13069,7 +13116,8 @@ function slashCommandRegistry() {
     slashToggleCommand('autogen', 'auto_generate', 'Auto Gen'),
     slashToggleCommand('promptfix', 'prompt_fixed', 'Prompt Fixed'),
     slashToggleCommand('wcsolo', 'wildcard_standalone', 'WC Solo'),
-    {name: 'preset', desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /preset 이름 으로 바로 좁힌다`, choices: slashPresetChoices},
+    {name: 'preset', desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /preset 이름·본문 으로 좁힌다`,
+      choices: slashPresetChoices, filters: slashPresetFilters},
     {name: 'pe', desc: 'Prompt Engineering — prefix · postfix · autohide · tools · 옵션', choices: slashPeChoices},
   ].map(withDesc);
 }
@@ -13099,7 +13147,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashtoggle')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slashpreset2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -38,6 +38,41 @@ class CaptureOnly(RuntimeError):
     pass
 
 
+def stop_private_process(process):
+    """Stop our Popen tree before its parent; Windows terminate() orphans runners.
+
+    Never target an image name or discover/kill other servers. An already exited
+    parent cannot be used to prove child ownership; report that case explicitly.
+    """
+    if process is None:
+        return {"method": "not_started", "tree_stopped": True}
+    if process.poll() is not None:
+        return {"method": "parent_already_exited", "tree_stopped": False}
+    if sys.platform == "win32":
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+        if completed.returncode != 0:
+            raise RuntimeError(f"Private process tree cleanup failed for PID {process.pid}: "
+                               f"{completed.stderr.decode(errors='replace').strip()}")
+        process.wait(timeout=5)
+        return {"method": "taskkill_owned_tree", "root_pid": process.pid,
+                "tree_stopped": True, "returncode": completed.returncode}
+    # Private servers start a dedicated session on POSIX; kill only that group.
+    import signal
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+    return {"method": "private_process_group", "root_pid": process.pid,
+            "tree_stopped": True}
+
+
 @contextmanager
 def private_ollama(output, model, executable=None):
     """Launch only the installed runtime and model; own/stop only our child."""
@@ -57,7 +92,8 @@ def private_ollama(output, model, executable=None):
     try:
         with (output / "ollama-server.log").open("wb") as log:
             process = subprocess.Popen([executable, "serve"], env=env, cwd=output, stdout=log, stderr=log,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                start_new_session=sys.platform != "win32")
             metadata["private_server_pid"] = process.pid
             deadline = time.monotonic() + 30
             while True:
@@ -80,15 +116,14 @@ def private_ollama(output, model, executable=None):
             yield endpoint, metadata
             metadata["ps"] = requests.get(endpoint + "/api/ps", timeout=5).json()
     finally:
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        metadata["private_server_stopped"] = process is None or process.poll() is not None
-        write_json(output / "runtime.json", metadata)
+        try:
+            metadata["cleanup"] = stop_private_process(process)
+        except Exception as exc:
+            metadata["cleanup"] = {"tree_stopped": False, "error": str(exc)}
+            raise
+        finally:
+            metadata["private_server_stopped"] = process is None or process.poll() is not None
+            write_json(output / "runtime.json", metadata)
 
 
 def make_context(output, endpoint, model, transport, api_mode, settings):

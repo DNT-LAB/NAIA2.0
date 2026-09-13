@@ -2124,7 +2124,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260907-ai-backend')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260913-eject')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -2147,7 +2147,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
     console.error('Failed to initialize ollama assistant popup module', error);
   });
 let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260907-ai-backend')
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260913-prompt-out')
   .then(({createOllamaChatPopup}) => {
     ollamaChatPopup = createOllamaChatPopup({
       document, window, showToast, escHtml,
@@ -2163,6 +2163,15 @@ const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=2026090
       }),
       lookupTagInfo: lookupPromptInfoTag,
       hideTagInfo: () => tagAssist?.hidePromptInfoTooltip?.(),
+      // 채팅의 완성 프롬프트(태그 + 자연어)를 메인 프롬프트 끝에 덧붙인다(어시스트와 같은 길).
+      onInsertTags: text => {
+        const tags = String(text || '').trim();
+        if (!tags || !promptEdit) return;
+        const current = promptEdit.value.replace(/[,\s]+$/, '');
+        promptEdit.value = current ? `${current}, ${tags}` : tags;
+        onPromptAuthoredEdit();
+        showToast('프롬프트에 추가했습니다.', 'success');
+      },
     });
   })
   .catch(error => {

@@ -586,6 +586,27 @@ class OllamaAssistantService:
                 continue
         return {"ok": False, "running": False, "error": "서버가 제한 시간 안에 응답하지 않았습니다."}
 
+    def unload_model(self, model: str | None = None) -> dict[str, Any]:
+        """모델을 VRAM 에서 즉시 내린다(Eject). 사용자 지시 2026-09-13 — 유휴 3분을 기다리지
+        않고 ComfyUI 등에 VRAM 을 바로 돌려주는 단추. Ollama 규약: /api/generate 에 프롬프트 없이
+        keep_alive=0 을 보내면 그 모델을 언로드한다(tag-assist 의 _unload_model 과 같은 방식)."""
+        target = str(model or self.default_model or "").strip()
+        if not target:
+            return {"ok": False, "error": "unload target model is empty"}
+        try:
+            response = self._http_post("/api/generate", {"model": target, "keep_alive": 0}, timeout=(5, 30))
+        except Exception as exc:  # noqa: BLE001 - 서버 꺼짐/네트워크
+            return {"ok": False, "model": target, "error": f"unload failed: {exc}"}
+        code = int(getattr(response, "status_code", 0) or 0)
+        if code != 200:
+            detail = ""
+            try:
+                detail = str((response.json() or {}).get("error") or "")
+            except Exception:
+                pass
+            return {"ok": False, "model": target, "error": _friendly_ollama_error(detail) or f"HTTP {code}"}
+        return {"ok": True, "model": target, "message": "model unloaded"}
+
     # ------------------------------------------------------------------
     # 자유 Chat (Ollama Assist와 분리된 신규 surface)
     # ------------------------------------------------------------------

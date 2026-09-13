@@ -666,6 +666,7 @@
         {"method": "POST", "path": "/api/ollama/pull", "smoke": "external_live"},
         {"method": "GET", "path": "/api/ollama/pull/status", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ollama/pull/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ollama/unload", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/ollama/dataset", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ollama/dataset", "smoke": "external_live"},
         {"method": "GET", "path": "/api/ollama/connection", "smoke": "non_destructive"},

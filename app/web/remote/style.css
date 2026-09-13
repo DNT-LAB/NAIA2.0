@@ -20686,8 +20686,23 @@ body.detached-module .mod-grid-3 {
   padding: 8px 10px; font-size: 12px; font-family: var(--font-editor-inherit); line-height: 1.45;
 }
 .ollama-assist-input:focus { outline: none; border-color: var(--border-glow); }
-.ollama-assist-modelnote { font-size: 10.5px; color: var(--text-dim); }
+.ollama-assist-modelnote { font-size: 10.5px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ollama-assist-modelnote code { font-family: var(--font-mono); color: var(--text-muted); }
+/* 모델 배출(Eject) — 모델명 줄 끝의 작은 단추 */
+.ollama-assist-eject {
+  margin-left: auto; padding: 2px 8px; border-radius: 6px; font-size: 10.5px; font-weight: 700; cursor: pointer;
+  border: 1px solid rgba(255, 170, 110, 0.42); background: rgba(255, 150, 80, 0.10); color: #ffc08a;
+}
+.ollama-assist-eject:hover { background: rgba(255, 150, 80, 0.22); border-color: rgba(255, 170, 110, 0.7); }
+.ollama-assist-eject:disabled { opacity: 0.5; cursor: default; }
+/* E2B/E4B/E26B 안내 — 작은 글씨 가로 한 줄(줄 넘치면 감싼다) */
+.ollama-main-actions { flex-wrap: wrap; }
+.ollama-assist-curated {
+  flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px;
+  font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);
+}
+.ollama-assist-curated-item { white-space: nowrap; }
+.ollama-assist-curated .ollama-assistant-action { flex: 0 0 auto; padding: 3px 8px; font-size: 10.5px; }
 .ollama-conn-remote { color: #e5b567; font-weight: 700; }
 .ollama-model-select-row {
   display: flex;
@@ -21745,6 +21760,18 @@ body.detached-module .mod-grid-3 {
 .ollama-chat-copyall-btn:hover:not(:disabled) { background: rgba(96,120,255,0.32); }
 .ollama-chat-copyall-btn:disabled { opacity: 0.5; cursor: default; }
 .ollama-chat-scene-note { font-size: 11px; color: var(--text-secondary, #b9c0d4); padding: 4px 10px 0; line-height: 1.4; }
+/* 장면 요청의 답 = 완성 프롬프트(태그 + 자연어). 본문으로 크게, 바로 아래 [프롬프트에 추가]·[복사]. */
+.ollama-chat-prompt {
+  margin: 4px 0 0; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid rgba(130, 150, 255, 0.35); background: rgba(96, 120, 255, 0.10);
+  font-family: var(--font-editor); font-size: 12.5px; line-height: 1.5; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word; user-select: text;
+}
+.ollama-chat-prompt-actions { display: flex; gap: 6px; padding: 6px 0 2px; }
+.ollama-chat-prompt-note { padding-left: 0; color: var(--text-dim); }
+/* 접힌 확인 사항·검색 기록 제목은 본문보다 작게(summary 기본 글씨가 답보다 컸다) */
+.ollama-chat-popup details > summary { font-size: 11px; color: var(--text-secondary, #b9c0d4); cursor: pointer; padding: 4px 10px 0; }
+.ollama-chat-combo-copy.secondary { background: rgba(255,255,255,0.08); color: var(--text-muted); }
 .ollama-chat-scene-en { color: var(--text-dim, #8089a3); font-style: italic; }
 .ollama-chat-clarify-examples { display: flex; flex-direction: column; gap: 4px; padding: 4px 10px 8px; }
 .ollama-chat-clarify-example {

@@ -71,7 +71,7 @@ FINISH_SCHEMA = _obj({
         "negated": {"type": "boolean"}}, ["actor_id", "target_id", "action", "negated"])},
     "common_tags": _strings(32),
     "selections": SELECTIONS_SCHEMA,
-    "prompt": {"type": "string", "description": "Actual requested sentence prompt; separate from summary"},
+    "prompt": {"type": "string", "description": "Finished English image prompt: the selected tags comma-separated, then one or two short natural-language scene sentences. Required for compose (format=sentence); separate from summary"},
 }, ["kind", "summary", "actors", "relations", "common_tags"])
 
 COMPACT_FINISH_SCHEMA = _obj({
@@ -105,7 +105,8 @@ TOOL_SCHEMAS = {
     'finish_selection': ('Finish using grouped candidate_ids, owner_id and requirement_ids. The server restores '
         'the planned actors and exact tags. Do not repeat actor names or tag strings. Omitted requirements '
         'remain missing. Relations may reference ONLY planned actor IDs, never common; use [] if there are no actors. '
-        'Omit prompt unless a sentence was requested. Omit interpretations unless explaining requested slang.', COMPACT_FINISH_SCHEMA),
+        'prompt is REQUIRED when the plan output format is sentence (every compose): the selected English tags '
+        'comma-separated, then one or two short English scene sentences. Omit interpretations unless explaining requested slang.', COMPACT_FINISH_SCHEMA),
 }
 for _name in ('search_tags', 'search_characters', 'search_events'):
     TOOL_SCHEMAS[_name][1]['properties']['requirement_ids'] = _strings(16)

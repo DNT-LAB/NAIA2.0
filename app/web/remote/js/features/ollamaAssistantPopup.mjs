@@ -425,7 +425,30 @@ export function createOllamaAssistantPopup({
     // connModel은 status.model(공개 sanitized에도 포함)에서 채워지므로 원격
     // 클라이언트도 실제 구성 모델명을 표시한다(엔드포인트 URL은 비노출 유지).
     const remote = connIsCustom ? ' <span class="ollama-conn-remote">· 원격</span>' : '';
-    note.innerHTML = `Model: <code>${escHtml(shortOllamaModel(connModel))}</code>${remote}`;
+    // 배출(Eject): VRAM 에서 즉시 내린다 — 라우트가 루프백 전용이라 이 PC 에서만 보인다.
+    const eject = canConfigure
+      ? ` <button type="button" class="ollama-assist-eject" title="모델을 VRAM 에서 즉시 내린다 (다음 호출 때 다시 올라옴)">⏏ 배출</button>`
+      : '';
+    note.innerHTML = `Model: <code>${escHtml(shortOllamaModel(connModel))}</code>${remote}${eject}`;
+  }
+
+  async function ejectModel(button) {
+    if (button) button.disabled = true;
+    setStatus(`${shortOllamaModel(connModel)} 내리는 중…`);
+    try {
+      const {status, payload} = await fetchJson('/api/ollama/unload', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({model: connModel}),
+      });
+      if (status === 200 && payload?.ok) {
+        setStatus(`${shortOllamaModel(payload.model || connModel)} 를 VRAM 에서 내렸습니다. 다음 변환 때 다시 올라옵니다.`);
+      } else {
+        setStatus(String(payload?.error || `배출 실패 (HTTP ${status})`), 'error');
+      }
+    } catch (error) {
+      setStatus(`배출 실패 — ${error?.message || error}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   function updateModelSelect() {
@@ -437,20 +460,23 @@ export function createOllamaAssistantPopup({
     });
   }
 
+  // E2B/E4B/E26B 설명은 작은 글씨 가로 한 줄(사용자 지시) — 받을 게 있는 항목만 단추.
   function curatedModelActions(canControl) {
     const items = Array.isArray(curatedModels) ? curatedModels : [];
     if (!items.length) return '';
-    return items.map(item => {
+    return '<div class="ollama-assist-curated">' + items.map(item => {
       const model = String(item?.model || '').trim();
       const label = escHtml(String(item?.label || shortOllamaModel(model)));
       const size = item?.size ? ` · ${escHtml(String(item.size))}` : '';
       const state = item?.spec_ready ? 'think 준비됨' : (item?.installed ? '설치됨' : '미설치');
       const needsSpec = item?.installed && item?.runtime_model && !item?.spec_ready;
+      // 한 줄에 셋이 들어가게 짧게: 준비된 것은 ✓ 하나(전체 상태는 title 로).
+      const glyph = item?.spec_ready ? ' ✓' : (item?.installed ? ' · 설치됨' : ' · 미설치');
       const button = ((!item?.installed || needsSpec) && canControl && model)
         ? `<button type="button" class="ollama-assistant-action" data-act="pull" data-model="${escHtml(model)}">${label}${needsSpec ? ' · think 사양 준비' : `${size} 다운로드`}</button>`
-        : `<span class="ollama-assistant-natural-line">${label}${size} · ${escHtml(state)}</span>`;
+        : `<span class="ollama-assist-curated-item" title="${label}${size} · ${escHtml(state)}">${label}${size.replace(' · ~', ' ')}${glyph}</span>`;
       return button;
-    }).join('');
+    }).join('') + '</div>';
   }
 
   function toggleConnEditor(forceOpen) {
@@ -948,6 +974,11 @@ export function createOllamaAssistantPopup({
     pick('.ollama-assistant-pop-min')?.addEventListener('click', toggleMinimize);
     pick('.ollama-assist-model-select')?.addEventListener('change', event => {
       void saveSelectedModel(event.target.value);
+    });
+    // 모델노트는 innerHTML 로 다시 그려지므로 배출 단추는 위임으로 잡는다.
+    pick('.ollama-assist-modelnote')?.addEventListener('click', event => {
+      const btn = event.target.closest('.ollama-assist-eject');
+      if (btn) void ejectModel(btn);
     });
     // 최소화 상태에서 헤더(타이틀) 클릭 시 다시 펼친다.
     pick('.ollama-assistant-pop-header')?.addEventListener('click', (e) => {

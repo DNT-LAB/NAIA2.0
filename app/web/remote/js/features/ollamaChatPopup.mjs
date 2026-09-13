@@ -40,6 +40,7 @@ export function createOllamaChatPopup({
   getContext = () => ({}),
   lookupTagInfo = null,
   hideTagInfo = null,
+  onInsertTags = null,
 }) {
   let popup = null;
   let onResize = null;
@@ -257,6 +258,34 @@ export function createOllamaChatPopup({
       body.className = 'ollama-chat-body';
       body.textContent = msg.content || '';
       item.appendChild(role);
+      // 장면 요청의 답은 완성 프롬프트(태그 + 자연어)다 — 그것을 본문으로 크게 보이고, 한국어 안내는
+      // 작은 줄로 내린다(사용자 제보 2026-09-13: 감사 장부가 답처럼 튀어나왔다).
+      const finalPrompt = String(msg.output?.prompt || '').trim();
+      if (msg.role === 'assistant' && msg.type === 'scene_agent' && finalPrompt) {
+        const promptBox = document.createElement('div');
+        promptBox.className = 'ollama-chat-prompt';
+        promptBox.textContent = finalPrompt;
+        item.appendChild(promptBox);
+        const actions = document.createElement('div');
+        actions.className = 'ollama-chat-prompt-actions';
+        const insert = document.createElement('button');
+        insert.type = 'button';
+        insert.className = 'ollama-chat-combo-copy';
+        insert.textContent = '프롬프트에 추가';
+        insert.addEventListener('click', () => {
+          if (typeof onInsertTags === 'function') onInsertTags(finalPrompt);
+          else void copyChip(finalPrompt);
+        });
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'ollama-chat-combo-copy secondary';
+        copyBtn.textContent = '복사';
+        copyBtn.addEventListener('click', () => { void copyChip(finalPrompt); });
+        actions.appendChild(insert);
+        actions.appendChild(copyBtn);
+        item.appendChild(actions);
+        body.className = 'ollama-chat-scene-note ollama-chat-prompt-note';
+      }
       item.appendChild(body);
       if (msg.role === 'assistant' && msg.completion) {
         const status = document.createElement('div');
@@ -282,12 +311,6 @@ export function createOllamaChatPopup({
           panel.appendChild(note);
         }
         panel.appendChild(makePanelHead(index, '인물별 장면'));
-        if (msg.output?.format === 'sentence' && msg.output.prompt) {
-          const prompt = document.createElement('div');
-          prompt.className = 'ollama-chat-scene-note ollama-chat-sentence';
-          prompt.textContent = `문장형 프롬프트 (${msg.output.language || ''})\n${msg.output.prompt}`;
-          panel.appendChild(prompt);
-        }
         if (msg.coverage?.requirements?.length) {
           const details = document.createElement('details');
           details.className = 'ollama-chat-requirement-coverage';
@@ -306,12 +329,21 @@ export function createOllamaChatPopup({
           }
           panel.appendChild(details);
         }
-        review.issues.forEach(issue => {
-          const note = document.createElement('div');
-          note.className = 'ollama-chat-scene-note';
-          note.textContent = issue;
-          panel.appendChild(note);
-        });
+        if (review.issues.length) {
+          // 확인 사항은 접어 둔다 — 답(프롬프트)보다 앞에 펼쳐지면 그게 답처럼 보인다.
+          const issueBox = document.createElement('details');
+          issueBox.className = 'ollama-chat-requirement-coverage';
+          const issueTitle = document.createElement('summary');
+          issueTitle.textContent = `확인 필요 ${review.issues.length}건`;
+          issueBox.appendChild(issueTitle);
+          review.issues.forEach(issue => {
+            const note = document.createElement('div');
+            note.className = 'ollama-chat-scene-note';
+            note.textContent = issue;
+            issueBox.appendChild(note);
+          });
+          panel.appendChild(issueBox);
+        }
         const names = new Map(scene.actors.map(a => [a.id, a.name]));
         for (const interpretation of scene.interpretations || []) {
           const note = document.createElement('div');

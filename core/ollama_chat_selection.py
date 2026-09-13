@@ -97,8 +97,10 @@ class SelectionRegistry:
         unresolved = set()
         for item in compact.get('unresolved', []):
             rid = item['requirement_id']
+            # 모르는 id·중복·이미 선택된 요구는 건너뛴다(선택이 이긴다). 예전엔 ValueError 로 turn 을
+            # 태웠고, 26B 가 그 뒤 plan_search 를 다시 불러 stopped 로 끝났다(2026-09-13 실측).
             if rid not in claims or rid in unresolved or claims[rid]['tags']:
-                raise ValueError('Unresolved requirement is unknown, duplicate or already selected')
+                continue
             unresolved.add(rid)
             claims[rid]['state'] = item['state']
         result = {k: copy.deepcopy(v) for k, v in compact.items()

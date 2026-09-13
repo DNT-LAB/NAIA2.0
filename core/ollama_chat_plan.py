@@ -7,6 +7,7 @@ the meaning of arbitrary tags, relationships, or generated sentences.
 from __future__ import annotations
 
 import copy
+import re
 from core.ollama_chat_semantics import norm
 
 VERSION = 'intent-search-v1'
@@ -56,8 +57,12 @@ PLAN_INSTRUCTIONS = """
 For tag lookup or prompt composition, first call plan_search. It records your
 intent plan AND executes its initial searches in this same turn; no extra turn
 is needed to acknowledge a plan. Use mode=lookup for vocabulary, compose for a
-scene. Tags/sentence and output language are independent options. A sentence
-request needs an actual prompt in finish.prompt, not just a Korean summary.
+scene. For compose the output is ALWAYS format=sentence and language=en: the
+user receives a finished image prompt, never only a tag audit. finish.prompt
+must be the selected English tags comma-separated, followed by one or two short
+English natural-language sentences describing the scene (mood, light,
+composition). Use format=tags only for lookup, or when the user explicitly asks
+for tags only. The Korean summary is separate from finish.prompt.
 For a word lookup use actors=[] and requirement.actors=[]. Actors are depicted
 people, never words, objects, or abstract concepts. Use short queries: the
 concept name itself, without filler words such as "object", "tag", or "scene".
@@ -87,6 +92,38 @@ Returned requirement_ids indicate candidate linkage, not meaning certification.
 """
 
 
+_TAGS_ONLY_RE = re.compile(r'태그\s*만|tags?\s+only|only\s+tags?', re.I)
+
+
+def tags_only_requested(source):
+    """사용자가 "태그만" 을 명시했을 때만 tags 형식을 허용한다."""
+    return bool(_TAGS_ONLY_RE.search(str(source or '')))
+
+
+def scene_flat_tags(scene):
+    seen = []
+    for tag in list(scene.get('common_tags', [])) + [t for a in scene.get('actors', []) for t in a.get('tags', [])]:
+        tag = str(tag or '').strip()
+        if tag and tag not in seen:
+            seen.append(tag)
+    return seen
+
+
+def compose_scene_prompt(scene, prompt):
+    """모델의 finish.prompt 를 완성 프롬프트로 다듬는다: 선택 태그가 앞에 없으면 서버가 붙인다.
+    (모델이 자연어 문장만 쓰고 태그를 빼먹는 경우 — 사용자는 태그 + 자연어를 한 덩어리로 받아야 한다.)"""
+    text = ' '.join(str(prompt or '').split()).strip()
+    tags = scene_flat_tags(scene)
+    if not tags:
+        return text
+    low = text.lower()
+    present = sum(1 for t in tags if t.lower() in low)
+    if text and present * 10 >= len(tags) * 6:
+        return text
+    head = ', '.join(tags)
+    return f'{head}, {text}' if text else head
+
+
 def _unique_ids(items, name):
     ids = [item['id'] for item in items]
     if any(not i.strip() for i in ids) or len(set(ids)) != len(ids):
@@ -100,6 +137,11 @@ def validate_plan(plan, source, reference_names=()):
     requirements = _unique_ids(plan['requirements'], 'Requirement')
     if not plan['output']['language'].strip():
         raise ValueError('Output language is required')
+    # 장면 구성(compose)은 늘 "완성 프롬프트"가 결과다(사용자 제보 2026-09-13: 모델이 tags 를 고르면
+    # 감사 장부만 돌아왔다). 태그만 달라는 명시가 없으면 서버가 sentence/en 으로 못 박는다.
+    if plan['mode'] == 'compose' and not tags_only_requested(source):
+        plan['output']['format'] = 'sentence'
+        plan['output']['language'] = 'en'
     if any(not a['name'].strip() for a in plan['actors']):
         raise ValueError('Actor name is required')
     if any(a['name'] not in source and a['name'] not in reference_names for a in plan['actors']):
@@ -161,8 +203,8 @@ def validate_finish(plan, args):
     ids = [s['requirement_id'] for s in args.get('selections', [])]
     if len(ids) != len(set(ids)) or not set(ids).issubset({r['id'] for r in plan['requirements']}):
         raise ValueError('Selection references duplicate or unknown requirement ids')
-    if plan['output']['format'] == 'sentence' and not args.get('prompt', '').strip():
-        raise ValueError('A sentence request requires an actual prompt in finish.prompt')
+    # sentence 인데 finish.prompt 가 비어도 거부하지 않는다 — 거부는 모델 턴을 태워 stopped 로 떨어뜨린다.
+    # attach_coverage 가 선택 태그만으로 합성하고 'missing_sentence' 확인 항목을 단다.
 
 
 def attach_coverage(result, plan, args, ledger, grounding=None):
@@ -221,9 +263,14 @@ def attach_coverage(result, plan, args, ledger, grounding=None):
         'requirements': rows}
     result['output'] = dict(plan['output'])
     if plan['output']['format'] == 'sentence':
-        result['output']['prompt'] = args.get('prompt', '').strip()
-        review['issues'].append({'code': 'unreviewed_sentence',
-            'message': '문장형 프롬프트의 추가·누락 의미는 직접 확인해 주세요.'})
+        model_prompt = str(args.get('prompt', '') or '').strip()
+        result['output']['prompt'] = compose_scene_prompt(scene, model_prompt)
+        if model_prompt:
+            review['issues'].append({'code': 'unreviewed_sentence',
+                'message': '문장형 프롬프트의 추가·누락 의미는 직접 확인해 주세요.'})
+        else:
+            review['issues'].append({'code': 'missing_sentence',
+                'message': '모델이 자연어 문장을 쓰지 않아 선택 태그만 담았습니다.'})
     if review['issues']:
         result['completion'] = review['status'] = 'partial'
         result['message'] = '요구별 검색 결과와 확인이 필요한 내용을 표시했습니다.'

@@ -761,6 +761,19 @@ def register_ollama_routes(
             return _loopback_only_response()
         return service().cancel_pull()
 
+    @app.post("/api/ollama/unload")
+    async def ollama_unload(request: Request):
+        """모델 배출(Eject) — VRAM 에서 즉시 내린다. 호스트 자원이라 루프백 전용."""
+        if not _is_local_request(request):
+            return _loopback_only_response()
+        body: dict = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        model = str((body or {}).get("model") or "") if isinstance(body, dict) else ""
+        return await run_in_thread(lambda: service().unload_model(model or None))
+
     # ── 고급 연결 설정 — 셀프호스팅(cloudflared 등) Ollama 엔드포인트/모델 지정. ──
     @app.get("/api/ollama/connection")
     async def ollama_connection_get(request: Request):

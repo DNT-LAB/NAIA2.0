@@ -52,8 +52,8 @@ export function createRemoteController({
     width: 430,
     minWidth: 260,
     maxWidth: 900,
-    // 썸네일 격자가 본론이라 두 줄은 보여야 한다. 화면이 낮으면 place() 가 줄인다.
-    height: 560,
+    // 썸네일 격자가 본론이라 **세 줄**은 보여야 한다(사용자 지정). 화면이 낮으면 place() 가 줄인다.
+    height: 640,
     minHeight: 200,
     resizable: true,
     collapsible: true,
@@ -76,10 +76,14 @@ export function createRemoteController({
       record.tag = `rctl-${tag}`;
       node.classList.add(record.tag);
     }
+    // 자리 표식. 큰 구멍(격자)에는 안내를 띄우고, 격자 칸 안에서 빠져나간 조각에는
+    // **얇은 표식**을 남긴다 - 안 남기면 남은 형제들이 칸을 밀고 들어와 탭이 뒤틀린다
+    // (`.artist-thumb-toolbar-controls` 는 3열 grid 다).
     if (ghost) {
+      const spec = (typeof ghost === 'string') ? {text: ghost} : (ghost || {});
       const mark = doc.createElement('div');
-      mark.className = 'rctl-ghost';
-      mark.innerHTML = `<span>${escHtml(ghost)}</span>`;
+      mark.className = spec.slim ? 'rctl-ghost is-slim' : 'rctl-ghost';
+      mark.innerHTML = `<span>${escHtml(spec.text || '')}</span>`;
       record.parent.insertBefore(mark, node);
       record.ghost = mark;
     }
@@ -145,7 +149,8 @@ export function createRemoteController({
    *   - title      리모컨 제목/구획 이름
    *   - rows       [{nodes:[HTMLElement], fill?:boolean, className?:string}]
    *                `fill` 인 줄이 남는 높이를 다 먹는다(썸네일 격자).
-   *   - ghosts     Map(node -> '자리에 남길 안내 문구') - 큰 구멍에만 쓴다
+   *   - ghosts     Map(node -> '안내 문구' | {text, slim}) - 조각이 빠진 자리에 남길 표식.
+   *                `slim` 은 칸만 지키는 얇은 것(격자 칸이 무너지지 않게).
    *   - onRelease  리모컨이 이 조각을 놓을 때(닫힘·해제) 불린다. 모듈의 토글을 끈다.
    *   - hoverPreview {selector, resolve(el) -> {src, title, note} | null}
    *                마우스를 올리면 창 **옆**에 크게 띄운다(리모컨에서는 썸네일이 작다).

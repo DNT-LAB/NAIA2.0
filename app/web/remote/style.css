@@ -86,6 +86,10 @@
   --z-drag-panel: 10150;
   /* 창 옆에 뜨는 확대 보기. 창 더미(10150~) 위여야 하고 제목 툴팁(10200) 아래여야 한다. */
   --z-drag-panel-zoom: 10195;
+  /* ⚠️ **열려 있는** 드롭다운은 떠 있는 창보다 위여야 한다. 리모컨(10150)에 올라간
+     셀렉트의 메뉴가 기본값(10100)이면 창 뒤로 숨어 고를 수가 없다. 닫힌 메뉴는
+     그대로 두고 열린 것만 올린다. */
+  --z-floating-select-open: 10196;
   --z-app-confirm: 11000;
   --z-toast: 11100;
 }
@@ -358,6 +362,7 @@ header {
   border-top: 0;
   border-bottom: 5px solid #77778c;
 }
+.custom-select-menu:not([hidden]) { z-index: var(--z-floating-select-open); }
 .custom-select-menu {
   position: fixed;
   z-index: var(--z-floating-select);
@@ -3795,6 +3800,9 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .artist-thumb-card.favorite .artist-thumb-card-weight {
   color: rgba(179, 235, 196, 0.74);
 }
+/* 지금 고른 작가 - 격자에서 이름을 연노랑으로(사용자 지정). `favorite` 도 이름 색을
+   주므로 **그 뒤에** 둔다(같은 특이도라 나중 것이 이긴다) - 고른 것이 더 급한 정보다. */
+.artist-thumb-card.active .artist-thumb-card-name { color: #ffe9a3; }
 .artist-thumb-card.remembered {
   border-color: rgba(255, 122, 188, 0.58);
   background: rgba(255, 90, 170, 0.16);
@@ -29151,50 +29159,85 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   margin: 10px; border: 1px dashed var(--border-dim); border-radius: 10px;
   color: var(--text-dim); font-size: 11px; text-align: center; padding: 16px;
 }
+/* 칸만 지키는 얇은 표식 - 3열 grid 에서 조각이 빠지면 남은 칸이 밀려 들어온다. */
+.rctl-ghost.is-slim {
+  flex: 0 1 auto; margin: 0; padding: 0; min-height: 30px;
+  border-radius: 6px; border-style: dashed; opacity: 0.35;
+}
 
 /* ── 좁은 창에 맞춘 Artist Thumbnail 조각 ─────────────────────────────────
-   원본은 탭 전체 폭(1000px+)을 전제로 한다. 리모컨은 400px 언저리라 카드가 한 칸밖에
-   안 나온다 - 여기서만 줄인다(원본 규칙은 건드리지 않는다). */
+   원본은 탭 전체 폭(1000px+)을 전제로 한다. 리모컨은 430px 언저리다 - 여기서만 줄인다
+   (원본 규칙은 건드리지 않는다). 목표는 **가로 3칸 · 세로 3줄**(사용자 지정). */
 .dragpanel.rctl .artist-thumb-grid {
-  --artist-card-height: clamp(132px, 17vh, 176px);
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-  gap: 6px; padding: 2px; border-radius: 8px;
+  --artist-card-height: clamp(104px, 13vh, 128px);
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 5px; padding: 2px; border-radius: 8px;
 }
+/* 이름 칸을 절반으로(44px -> 22px). 남는 높이는 전부 그림이 가져간다. */
+.dragpanel.rctl .artist-thumb-card { grid-template-rows: minmax(0, 1fr) 22px; }
+.dragpanel.rctl .artist-thumb-card-info { padding: 0 6px; gap: 4px; }
 .dragpanel.rctl .artist-thumb-card-name { font-size: 10px; }
 .dragpanel.rctl .artist-thumb-card-weight { font-size: 9px; }
+/* 썸네일은 결국 **얼굴**을 본다 - 위쪽을 기준으로 잡고 조금 더 당긴다(사용자 지정). */
+.dragpanel.rctl .artist-thumb-card-image { overflow: hidden; }
+.dragpanel.rctl .artist-thumb-card-image img {
+  object-position: 50% 16%;
+  transform: scale(1.18);
+  transform-origin: 50% 16%;
+}
 .dragpanel.rctl .artist-thumb-pager {
   flex: 0 0 auto; gap: 4px; padding: 0; font-size: 10px; border-top: none; background: none;
 }
 /* 페이지 줄은 원래 `.artist-thumb-pager` 가 글꼴/색을 주고 있었다 - 거기서 떼어 오면
-   그것을 잃는다. 옮긴 줄에 같은 값을 다시 준다(옮긴 노드 자체는 건드리지 않는다). */
+   그것을 잃는다. 옮긴 줄에 같은 값을 다시 준다(옮긴 노드 자체는 건드리지 않는다).
+   [앞] [n / N] [뒤] --- [점프] : 앞뒤는 붙이고 점프는 오른쪽 끝으로 민다. */
 .dragpanel.rctl .rctl-pager {
-  justify-content: center; gap: 8px;
+  gap: 4px;
   font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
 }
-/* 고른 작가 칸 - 미리보기 그림(왼쪽) + 이름/가중치(오른쪽) 두 줄.
-   ⚠️ 칸 이름(`rctl-pic` 등)은 온보딩할 때 js 가 붙이고 되돌릴 때 뗀다. `:nth-child` 로
-      자리를 세면 줄에 조각 하나만 늘어도 조용히 어긋난다. */
+.dragpanel.rctl .rctl-pager .rctl-prev,
+.dragpanel.rctl .rctl-pager .rctl-next {
+  flex: 0 0 auto; min-width: 46px; padding: 4px 8px; font-size: 11px;
+}
+.dragpanel.rctl .rctl-pager .rctl-page {
+  flex: 0 0 auto; min-width: 74px; text-align: center;
+  color: var(--text-primary); font-size: 11px;
+}
+.dragpanel.rctl .rctl-pager .rctl-goto {
+  flex: 1 1 auto; justify-content: flex-end; gap: 4px; min-height: 0;
+}
+/* 'GO TO' 글자는 뺀다 - 좁은 줄에서 칸만 먹고, 옆의 입력칸이 곧 설명이다. */
+.dragpanel.rctl .rctl-pager .rctl-goto > span { display: none; }
+.dragpanel.rctl .rctl-pager .rctl-goto input { width: 54px; height: 26px; font-size: 11px; }
+.dragpanel.rctl .rctl-pager .rctl-goto button { min-width: 34px; height: 26px; font-size: 11px; padding: 0 6px; }
+
+/* [모드] [필터] [Get Random Artist] = 1 : 1 : 2 (사용자 지정).
+   네이티브 `<select>` 는 `display:none` 이라 칸을 안 먹는다 - 껍데기만 센다. */
+.dragpanel.rctl .rctl-source { gap: 5px; }
+.dragpanel.rctl .rctl-source > .rctl-mode,
+.dragpanel.rctl .rctl-source > .rctl-filter { flex: 1 1 0; min-width: 0; }
+.dragpanel.rctl .rctl-source > .rctl-rnd { flex: 2 2 0; min-width: 0; }
+.dragpanel.rctl .rctl-source .custom-select-button { padding: 4px 7px; font-size: 11px; }
+
+/* 고른 작가 한 줄 - [가중치가 반영된 프롬프트 | 슬라이더](사용자 지정).
+   아래에 썸네일을 또 두는 것은 격자와 겹치는 중복이라 뺐다. */
 .dragpanel.rctl .rctl-artist-head {
   display: grid; align-items: center;
-  grid-template-columns: 58px minmax(0, 1fr);
-  grid-template-areas: "pic name" "pic weight";
-  gap: 3px 8px;
+  grid-template-columns: minmax(0, 1fr) 164px;
+  gap: 6px;
 }
-.dragpanel.rctl .rctl-artist-head .rctl-pic {
-  grid-area: pic; width: 58px; height: 58px; min-height: 0;
-  border-radius: 8px; overflow: hidden; background: var(--bg-deep);
-  border: 1px solid var(--border-dim);
-  display: flex; align-items: center; justify-content: center;
+.dragpanel.rctl .rctl-artist-head .rctl-name {
+  min-width: 0; height: 30px; min-height: 0; resize: none; padding: 6px 8px;
+  font-size: 11px; line-height: 1.4;
+  white-space: pre; overflow-x: auto; overflow-y: hidden;
 }
-.dragpanel.rctl .rctl-artist-head .rctl-pic img { width: 100%; height: 100%; object-fit: cover; }
-.dragpanel.rctl .rctl-artist-head .rctl-pic span { font-size: 9px; color: var(--text-dim); }
-.dragpanel.rctl .rctl-artist-head .rctl-name { grid-area: name; }
 .dragpanel.rctl .rctl-artist-head .rctl-weight {
-  grid-area: weight; display: flex; align-items: center; gap: 6px; min-width: 0;
+  display: flex; align-items: center; gap: 6px; min-width: 0;
 }
-.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-slider { flex: 1 1 auto; min-width: 0; }
-.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input { flex: 0 0 52px; }
-
+.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-slider { flex: 1 1 auto; min-width: 0; height: 20px; }
+.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input {
+  flex: 0 0 50px; height: 30px; padding: 0 6px; font-size: 11px;
+}
 /* 격자 스크롤 - 기존 탭과 같은 얇은 막대. 리모컨에서는 조금 더 굵게 잡아야 손이 닿는다. */
 .dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar { width: 7px; }
 .dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar-thumb {

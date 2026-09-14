@@ -1998,6 +1998,8 @@ export function createArtistThumbController({
       closeBatchMenu();
     });
     randomBtn?.addEventListener('click', loadRandomArtists);
+    modeEl?.addEventListener('change', syncRemoteSelectTitles);
+    filterEl?.addEventListener('change', syncRemoteSelectTitles);
     remoteBtn?.addEventListener('click', () => setRemote(!remoteOnboarded));
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     gridEl?.addEventListener('click', event => {
@@ -2150,28 +2152,71 @@ export function createArtistThumbController({
   //     비활성 상태를 두 곳에서 관리하게 된다.
   const REMOTE_KEY = 'artists';
 
+  /** 향상된 `<select>` 는 네이티브(숨김) + `.custom-select` 껍데기 **두 조각**이다.
+   *  둘을 같이 옮겨야 한다 - 껍데기만 옮기면 값이 안 따라오고, 네이티브만 옮기면
+   *  화면에 아무것도 안 보인다(네이티브는 `display:none`). 메뉴는 이미 body 에 산다. */
+  function selectPair(select) {
+    if (!select) return [];
+    const shell = select.nextElementSibling?.classList?.contains('custom-select')
+      ? select.nextElementSibling : null;
+    return shell ? [select, shell] : [select];
+  }
+
   function remoteRows() {
-    // 고른 작가 칸 - 미리보기 그림 + 이름 + 가중치를 한 줄에 묶는다(사용자 지정).
-    // 제외/관심을 누르기 전에 **무엇을 고쳤는지** 보여야 하고, 가중치는 Generate 를
-    // 누르기 직전에 만지는 값이라 같이 있어야 손이 탭으로 돌아가지 않는다.
-    const stage = selectedImage?.closest('.artist-thumb-selected-stage') || null;
     const weight = weightSlider?.closest('.artist-thumb-weight-control') || null;
+    const goto = gotoInput?.closest('.artist-thumb-goto') || null;
+    const modePair = selectPair(modeEl);
+    const filterPair = selectPair(filterEl);
     return [
       // 남는 높이를 다 먹는 줄. 관찰이 본론이라 격자가 가장 크다.
       {nodes: [gridEl], fill: true},
-      {nodes: [prevBtn, pageLabel, nextBtn], className: 'rctl-pager'},
-      {nodes: [randomBtn], className: 'rctl-row-split'},
+      // 페이지 - 앞/뒤 + 몇 쪽인지 + 바로 뛰기.
+      {
+        className: 'rctl-pager',
+        nodes: [
+          {node: prevBtn, tag: 'prev'},
+          {node: pageLabel, tag: 'page'},
+          {node: nextBtn, tag: 'next'},
+          {node: goto, tag: 'goto'},
+        ],
+      },
+      // 1 : 1 : 2 - [모드][필터][Get Random Artist](사용자 지정).
+      {
+        className: 'rctl-source',
+        nodes: [
+          ...modePair.map(node => ({node, tag: 'mode'})),
+          ...filterPair.map(node => ({node, tag: 'filter'})),
+          {node: randomBtn, tag: 'rnd'},
+        ],
+      },
+      // 고른 작가 한 줄 - **이름 칸은 가중치가 반영된 프롬프트 그 자체**다(사용자 지정).
+      // 아래에 썸네일을 또 보여 주는 것은 격자와 겹치는 중복이라 뺐다.
       {
         className: 'rctl-artist-head',
         nodes: [
-          {node: stage, tag: 'pic'},
-          {node: selectedName, tag: 'name'},
+          {node: positiveEl, tag: 'name'},
           {node: weight, tag: 'weight'},
         ],
       },
       {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
       {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
     ];
+  }
+
+  /** 모드/필터는 좁은 칸이라 글자가 잘린다 - 지금 보고 있는 것을 툴팁으로 준다. */
+  function syncRemoteSelectTitles() {
+    if (!remoteOnboarded) return;
+    const label = (select, prefix) => {
+      if (!select) return;
+      const text = select.options?.[select.selectedIndex]?.textContent?.trim() || '';
+      const title = text ? `${prefix}: ${text}` : prefix;
+      select.title = title;
+      const shell = select.nextElementSibling?.classList?.contains('custom-select')
+        ? select.nextElementSibling : null;
+      if (shell) shell.title = title;
+    };
+    label(modeEl, '썸네일 모드');
+    label(filterEl, '필터');
   }
 
   /** 리모컨에서는 카드가 112px 까지 줄어든다 - 마우스를 올리면 창 옆에 크게 띄운다. */
@@ -2205,7 +2250,12 @@ export function createArtistThumbController({
     }
     if (want === remoteOnboarded) return;
     if (want) {
-      const ghosts = new Map([[gridEl, '썸네일이 리모컨에 있습니다. [리모컨] 을 다시 누르면 돌아옵니다.']]);
+      const ghosts = new Map([
+        [gridEl, '썸네일이 리모컨에 있습니다. [리모컨] 을 다시 누르면 돌아옵니다.'],
+        // 이 둘은 3열 grid 안이라 표식을 안 남기면 남은 칸이 밀려 머리줄이 뒤틀린다.
+        [modeEl, {text: '', slim: true}],
+        [filterEl, {text: '', slim: true}],
+      ]);
       const ok = remote.onboard(REMOTE_KEY, {
         title: 'Artist Thumbnail',
         rows: remoteRows(),
@@ -2219,6 +2269,7 @@ export function createArtistThumbController({
         return;
       }
       remoteOnboarded = true;
+      syncRemoteSelectTitles();
     } else {
       remoteOnboarded = false;
       if (!fromRemote) remote?.offboard?.(REMOTE_KEY);

@@ -29120,13 +29120,67 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 .dragpanel-grip:hover { opacity: 1; }
 
-/* Remote 컨트롤러 — dragpanel 위에 입히는 옷 (js/features/remoteController.mjs) */
+/* ══ Remote 컨트롤러 — dragpanel 위에 입히는 옷 (js/features/remoteController.mjs) ══
+   본문은 **탭에서 들어 올린 진짜 요소**들이다. 베낀 것이 아니므로 원래 클래스를 그대로
+   달고 온다 - 여기서는 자리(줄/구획)만 잡고, 좁은 창에 맞게 몇 가지를 줄인다. */
 .dragpanel.rctl { border-color: rgba(130, 150, 255, 0.42); }
 .dragpanel.rctl .dragpanel-head { background: rgba(130, 150, 255, 0.10); }
-.rctl-placeholder { font-size: 11px; line-height: 1.55; color: var(--text-dim); margin: 2px 0 0; }
-.rctl-foot { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 6px; }
-.rctl-reset {
-  border: 1px solid var(--border-dim); background: transparent; color: var(--text-muted);
-  font-size: 11px; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+.dragpanel.rctl .dragpanel-body { padding: 7px 8px 8px; gap: 6px; overflow: hidden; }
+
+.rctl-sec { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0; }
+.rctl-sec-head {
+  flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-dim); padding-top: 2px;
 }
-.rctl-reset:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.rctl-row { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rctl-row > * { min-width: 0; }
+/* 남는 높이를 다 먹는 줄 - 썸네일 격자가 여기 들어온다.
+   ⚠️ `align-items: center` 를 물려받으면 안에 든 것이 **늘어나지 못해** 내용 높이
+      그대로 삐져나온다(실측: 560px 창 안에서 격자가 2,705px). stretch 로 덮는다. */
+.rctl-row.rctl-fill { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+.rctl-row.rctl-fill > * { min-height: 0; max-height: 100%; }
+/* 단추 줄은 반반으로 나눠 가진다(글자 길이가 제각각이라 그냥 두면 들쭉날쭉하다). */
+.rctl-row-split > button { flex: 1 1 0; }
+
+/* 조각이 빠져나간 자리에 남기는 표식. 큰 구멍(격자)에만 쓴다 - 단추 자리까지 남기면
+   원래 화면이 점선으로 뒤덮인다. */
+.rctl-ghost {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  margin: 10px; border: 1px dashed var(--border-dim); border-radius: 10px;
+  color: var(--text-dim); font-size: 11px; text-align: center; padding: 16px;
+}
+
+/* ── 좁은 창에 맞춘 Artist Thumbnail 조각 ─────────────────────────────────
+   원본은 탭 전체 폭(1000px+)을 전제로 한다. 리모컨은 400px 언저리라 카드가 한 칸밖에
+   안 나온다 - 여기서만 줄인다(원본 규칙은 건드리지 않는다). */
+.dragpanel.rctl .artist-thumb-grid {
+  --artist-card-height: clamp(132px, 17vh, 176px);
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 6px; padding: 2px; border-radius: 8px;
+}
+.dragpanel.rctl .artist-thumb-card-name { font-size: 10px; }
+.dragpanel.rctl .artist-thumb-card-weight { font-size: 9px; }
+.dragpanel.rctl .artist-thumb-pager {
+  flex: 0 0 auto; gap: 4px; padding: 0; font-size: 10px; border-top: none; background: none;
+}
+/* 페이지 줄은 원래 `.artist-thumb-pager` 가 글꼴/색을 주고 있었다 - 거기서 떼어 오면
+   그것을 잃는다. 옮긴 줄에 같은 값을 다시 준다(옮긴 노드 자체는 건드리지 않는다). */
+.dragpanel.rctl .rctl-pager {
+  justify-content: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+}
+.dragpanel.rctl .artist-thumb-btn,
+.dragpanel.rctl .artist-thumb-random-btn { font-size: 11px; padding: 5px 8px; }
+.dragpanel.rctl .artist-thumb-generate { font-size: 12px; padding: 7px 10px; }
+/* 고른 작가 이름 - 제외/관심을 누르기 전에 무엇을 고쳤는지 보여야 한다. */
+.dragpanel.rctl .artist-thumb-selected-name {
+  font-size: 12px; font-weight: 700; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 탭 안의 리모컨 토글 - 켜져 있으면 켜진 것이 보여야 한다. */
+.artist-thumb-remote-btn.is-on {
+  border-color: rgba(130, 150, 255, 0.75);
+  background: rgba(130, 150, 255, 0.20);
+  color: var(--text-primary);
+}

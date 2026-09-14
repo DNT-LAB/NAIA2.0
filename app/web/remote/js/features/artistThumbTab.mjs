@@ -13,6 +13,8 @@ export function createArtistThumbController({
   getUserChosenResolution = null,
   isComfyUiAnimaMode = () => false,
   isAnimaArtistMode = null,
+  // 리모컨(떠 있는 조작판). 둘 다 지연 로드라 인스턴스를 직접 받지 않고 그때그때 묻는다.
+  getRemoteController = () => null,
 }) {
   const modeEl = document.getElementById('artistThumbMode');
   const filterEl = document.getElementById('artistThumbFilter');
@@ -25,6 +27,7 @@ export function createArtistThumbController({
   const nextBtn = document.getElementById('artistThumbNextBtn');
   const downloadBtn = document.getElementById('artistThumbDownloadBtn');
   const randomBtn = document.getElementById('artistThumbRandomBtn');
+  const remoteBtn = document.getElementById('artistThumbRemoteBtn');
   const selectBtn = document.getElementById('artistThumbSelectBtn');
   const batchBtn = document.getElementById('artistThumbBatchBtn');
   const batchMenu = document.getElementById('artistThumbBatchMenu');
@@ -107,6 +110,14 @@ export function createArtistThumbController({
   let resultPreviewOpen = false;
   let resultExpanded = false;
   let artistTabActive = document.querySelector('[data-right-pane="artists"]')?.classList.contains('active') || false;
+  // 리모컨에 올라가 있는가. 올라가 있으면 탭이 안 떠 있어도 격자는 **보이는 중**이다.
+  let remoteOnboarded = false;
+
+  /** 격자가 사람 눈에 닿아 있는가 - 탭이 떠 있거나, 리모컨에 올라가 있거나.
+   *  ⚠️ `artistTabActive` 하나로 판단하면 리모컨에 올려 둔 격자가 조용히 낡는다. */
+  function gridVisible() {
+    return artistTabActive || remoteOnboarded;
+  }
   let suppressResultCollapseClick = false;
   let suppressResultCollapseClickTimer = null;
   let contextMenuEl = null;
@@ -1987,6 +1998,7 @@ export function createArtistThumbController({
       closeBatchMenu();
     });
     randomBtn?.addEventListener('click', loadRandomArtists);
+    remoteBtn?.addEventListener('click', () => setRemote(!remoteOnboarded));
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     gridEl?.addEventListener('click', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
@@ -2130,6 +2142,62 @@ export function createArtistThumbController({
     }
   }
 
+  // ── 리모컨(사용자 지정 2026-09-14) ─────────────────────────────────────
+  //  Artist Thumbnail 로 랜덤 그림을 계속 뽑아 보려면 탭 하나를 포기해야 했다 - 그림은
+  //  Result 탭, 다음 작가는 Artists 탭. 여기 조각만 떠 있는 창으로 옮겨 둘 다 본다.
+  //  ⚠️ **베끼지 않고 진짜 노드를 옮긴다.** 이 모듈이 요소를 id 로 한 번만 잡아 두고 그
+  //     참조로만 일하기 때문에 자리를 옮겨도 배선/렌더링이 그대로 산다. 베끼면 라벨과
+  //     비활성 상태를 두 곳에서 관리하게 된다.
+  const REMOTE_KEY = 'artists';
+
+  function remoteRows() {
+    return [
+      // 남는 높이를 다 먹는 줄. 관찰이 본론이라 격자가 가장 크다.
+      {nodes: [gridEl], fill: true},
+      {nodes: [prevBtn, pageLabel, nextBtn], className: 'rctl-pager'},
+      {nodes: [randomBtn], className: 'rctl-row-split'},
+      // 제외/관심을 누르기 전에 **무엇을 고쳤는지** 보여야 한다.
+      {nodes: [selectedName]},
+      {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
+      {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
+    ];
+  }
+
+  function syncRemoteButton() {
+    if (!remoteBtn) return;
+    remoteBtn.classList.toggle('is-on', remoteOnboarded);
+    remoteBtn.setAttribute('aria-pressed', remoteOnboarded ? 'true' : 'false');
+  }
+
+  function setRemote(next, {fromRemote = false} = {}) {
+    const want = Boolean(next);
+    const remote = getRemoteController?.();
+    if (want && !remote) {
+      showToast('리모컨을 아직 불러오지 못했습니다.', 'error');
+      return;
+    }
+    if (want === remoteOnboarded) return;
+    if (want) {
+      const ghosts = new Map([[gridEl, '썸네일이 리모컨에 있습니다. [리모컨] 을 다시 누르면 돌아옵니다.']]);
+      const ok = remote.onboard(REMOTE_KEY, {
+        title: 'Artist Thumbnail',
+        rows: remoteRows(),
+        ghosts,
+        // 리모컨을 [x] 로 닫으면 조각이 제자리로 돌아온다 - 토글도 같이 꺼져야 한다.
+        onRelease: () => setRemote(false, {fromRemote: true}),
+      });
+      if (!ok) {
+        showToast('리모컨으로 옮길 항목을 찾지 못했습니다.', 'error');
+        return;
+      }
+      remoteOnboarded = true;
+    } else {
+      remoteOnboarded = false;
+      if (!fromRemote) remote?.offboard?.(REMOTE_KEY);
+    }
+    syncRemoteButton();
+  }
+
   bind();
 
   return {
@@ -2147,7 +2215,7 @@ export function createArtistThumbController({
       if (!state) return;
       try {
         await fetchState({force: true});
-        if (artistTabActive) await loadPage(currentPage, {anchor: 'top'});
+        if (gridVisible()) await loadPage(currentPage, {anchor: 'top'});
       } catch (_) { /* 상태 갱신 실패가 모드 전환을 막으면 안 된다 */ }
     },
     handleResultMeta,

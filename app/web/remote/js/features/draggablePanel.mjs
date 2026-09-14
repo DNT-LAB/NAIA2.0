@@ -66,6 +66,10 @@ export function createDraggablePanel({
   // 처음 열릴 때의 자리. right/bottom 은 화면 오른쪽/아래에서 잰 값.
   initial = {},
   width = 300,
+  // ⚠️ `resizable` 창은 **처음부터 높이가 정해져 있어야 한다.** 안 그러면 내용만큼
+  //    자란다 - 썸네일 격자를 넣었더니 창이 2,942px 이 됐다(실측). 화면을 넘는 창은
+  //    머리줄만 잡힐 뿐 아래쪽을 영영 못 본다.
+  height = 360,
   minWidth = 200,
   minHeight = 96,
   maxWidth = 720,
@@ -238,6 +242,10 @@ export function createDraggablePanel({
       return;
     }
     placeRetry = 0;
+    if (resizable && !el.style.height) {
+      el.style.height = `${Math.round(clamp(height, minHeight, vh - 16))}px`;
+      heldHeight = el.style.height;
+    }
     const saved = readMemory();
     if (saved) {
       if (Number.isFinite(saved.w)) el.style.width = `${clamp(saved.w, minWidth, Math.min(maxWidth, vw - 8))}px`;
@@ -265,6 +273,13 @@ export function createDraggablePanel({
   function refit() {
     // 아직 자리를 못 정했으면(0x0 이었다) 이제 잴 수 있는지 다시 본다.
     if (!placed) { if (isOpen()) place(); return; }
+    // 화면보다 큰 창은 줄인다 - 창을 줄이면 아래쪽이 영영 화면 밖에 남는다.
+    const {w: vw, h: vh} = viewport();
+    if (vw > 0 && vh > 0) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > vw - 8) el.style.width = `${Math.max(minWidth, vw - 8)}px`;
+      if (resizable && rect.height > vh - 8) el.style.height = `${Math.max(minHeight, vh - 8)}px`;
+    }
     const next = clampPos(pos.x, pos.y);
     if (next.x !== pos.x || next.y !== pos.y) {
       pos = next;

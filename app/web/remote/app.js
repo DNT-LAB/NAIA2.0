@@ -2183,6 +2183,31 @@ const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=2026091
   .catch(error => {
     console.error('Failed to initialize ollama chat popup module', error);
   });
+// --- Remote 컨트롤러(사용자 지정 2026-09-14): 화면 위에 떠 있는 조작판. Web-Remote(폰으로 여는
+//     원격 화면)와는 다른 것 - 같은 화면 안에서 자리를 정해 두고 쓰는 리모컨이다.
+//     지금 실린 것은 **드래그 뼈대(draggablePanel)** 뿐이고 조작 항목은 다음 단계에서 얹는다.
+//     켜고 끄기는 Settings > 화면 의 [Remote 컨트롤러] 토글. ---
+let remoteController = null;
+let remoteControllerWanted = false;
+let remoteControllerSyncing = false;
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260914-rctl1')
+  .then(({createRemoteController}) => {
+    remoteController = createRemoteController({
+      document, window, showToast, escHtml,
+      // 창의 [x] 로 닫으면 설정 토글도 함께 꺼진다 - 닫았는데 다음 실행에 되살아나면
+      // 고장으로 보인다. 반대로 토글이 부른 close() 는 여기 오면 안 되므로 빗장을 본다.
+      onOpenChange: open => {
+        if (remoteControllerSyncing) return;
+        if (!open && getOptionChecked('show_remote_controller')) {
+          toggleOptionButton('show_remote_controller');
+        }
+      },
+    });
+    if (remoteControllerWanted) remoteController.open();
+  })
+  .catch(error => {
+    console.error('Failed to initialize remote controller module', error);
+  });
 // --- Translation History: Ollama 팝업이 소유하는 우측 도킹 2단 패널(translationHistoryPanel).
 // 팝업의 작은 [🕘 기록] 버튼이 토글하며, 첫 클릭 때 지연 로드된다(ollamaAssistantPopup.mjs).
 // app.js는 더 이상 직접 인스턴스화하지 않는다. ---
@@ -3830,6 +3855,7 @@ const optBoxes = {
   // 서버가 보낸 값이 화면에 안 붙어 새로고침 때마다 꺼진 것처럼 보인다.
   stop_autogen_on_tag_exhaust: $('optStopAutogenOnExhaust'),
   hide_event_map_button: $('optHideEventMapTab'),
+  show_remote_controller: $('optRemoteController'),
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
@@ -8812,6 +8838,16 @@ function applyOptionState(key, value, options = {}) {
     // ⚠️ `.em-tab` 이 display:inline-flex 라 [hidden] 만으로는 안 사라진다 - style.css 에 짝 규칙이 있다.
     const emTab = document.getElementById('eventMapTab');
     if (emTab) emTab.hidden = next;
+  }
+  if (key === 'show_remote_controller') {
+    // 모듈이 아직 안 실렸을 수 있다(지연 로드) - 원하는 상태만 적어 두고 실리면 따라간다.
+    remoteControllerWanted = next;
+    if (remoteController) {
+      // 열고 닫는 동안 onOpenChange 가 다시 토글을 부르지 않게 막는다(무한 왕복).
+      remoteControllerSyncing = true;
+      if (next) remoteController.open(); else remoteController.close();
+      remoteControllerSyncing = false;
+    }
   }
   return true;
 }

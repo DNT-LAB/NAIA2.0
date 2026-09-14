@@ -23,6 +23,10 @@ REMOTE_OPTION_DEFAULTS = {
     # 이벤트 맵 진입 반구 단추(E)를 숨긴다. 숨겨도 **Ctrl+E 는 그대로 열린다**
     # (사용자 지시 2026-09-13 - 화면에서 치우고 싶을 뿐, 기능을 끄는 것이 아니다).
     "hide_event_map_button": False,
+    # 화면 위에 떠 있는 조작판(Remote 컨트롤러, 사용자 지정 2026-09-14). Web-Remote 와는
+    # 다른 것 - 같은 화면 안에서 자리를 정해 두고 쓰는 리모컨이다. **자리**는 기기마다
+    # 달라야 해서 브라우저 localStorage 가 들고, 여기 있는 것은 켜짐/꺼짐뿐이다.
+    "show_remote_controller": False,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",

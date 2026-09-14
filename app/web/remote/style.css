@@ -3782,11 +3782,8 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   border-color: var(--accent);
   background: rgba(124, 106, 239, 0.08);
 }
-.artist-thumb-card.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(157, 139, 255, 0.35);
-  background: rgba(124, 106, 239, 0.13);
-}
+/* 고른 카드의 모양은 아래 `favorite` 뒤 한 곳에서만 정한다 - 여기에 또 두면 둘이
+   싸우고, 나중에 색을 바꿀 때 한쪽만 고치게 된다(이번에 실제로 그렇게 됐다). */
 .artist-thumb-card.favorite {
   border-color: rgba(92, 184, 122, 0.42);
 }
@@ -3800,9 +3797,24 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .artist-thumb-card.favorite .artist-thumb-card-weight {
   color: rgba(179, 235, 196, 0.74);
 }
-/* 지금 고른 작가 - 격자에서 이름을 연노랑으로(사용자 지정). `favorite` 도 이름 색을
-   주므로 **그 뒤에** 둔다(같은 특이도라 나중 것이 이긴다) - 고른 것이 더 급한 정보다. */
-.artist-thumb-card.active .artist-thumb-card-name { color: #ffe9a3; }
+/* 지금 고른 작가(사용자 제안 2026-09-14). 보라 테두리는 카드가 작아지자 옆 칸과
+   구분이 안 됐다 - **연노랑 굵은 테두리 + 이름 칸 색반전** 둘 다 쓴다. 색반전 쪽이
+   멀리서도 먼저 잡힌다.
+   ⚠️ `favorite` 도 이름 칸의 바탕·글자색을 주므로 **그 뒤에** 둔다(같은 특이도라
+      나중 것이 이긴다) - 지금 고른 것이 더 급한 정보다.
+   ⚠️ 테두리를 2px 로 키워도 카드 크기는 그대로다(전역 `box-sizing: border-box`). */
+.artist-thumb-card.active {
+  border-width: 2px;
+  border-color: #ffe07a;
+  box-shadow: 0 0 0 1px rgba(255, 224, 122, 0.3);
+  background: rgba(255, 224, 122, 0.08);
+}
+.artist-thumb-card.active .artist-thumb-card-info {
+  background: #ffe9a3;
+  border-top: 1px solid #ffe9a3;
+}
+.artist-thumb-card.active .artist-thumb-card-name { color: #2a2106; }
+.artist-thumb-card.active .artist-thumb-card-weight { color: rgba(42, 33, 6, 0.66); }
 .artist-thumb-card.remembered {
   border-color: rgba(255, 122, 188, 0.58);
   background: rgba(255, 90, 170, 0.16);
@@ -29169,9 +29181,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    원본은 탭 전체 폭(1000px+)을 전제로 한다. 리모컨은 430px 언저리다 - 여기서만 줄인다
    (원본 규칙은 건드리지 않는다). 목표는 **가로 3칸 · 세로 3줄**(사용자 지정). */
 .dragpanel.rctl .artist-thumb-grid {
-  --artist-card-height: clamp(104px, 13vh, 128px);
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 5px; padding: 2px; border-radius: 8px;
+  /* 눌린 카드는 얼굴이 안 보인다(사용자 지적) - 창을 키운 만큼 카드도 키웠다.
+     세로 3줄은 유지한다. */
+  --artist-card-height: clamp(132px, 17vh, 176px);
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 6px; padding: 2px; border-radius: 8px;
 }
 /* 이름 칸을 절반으로(44px -> 22px). 남는 높이는 전부 그림이 가져간다. */
 .dragpanel.rctl .artist-thumb-card { grid-template-rows: minmax(0, 1fr) 22px; }

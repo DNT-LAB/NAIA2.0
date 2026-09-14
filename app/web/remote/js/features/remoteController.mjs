@@ -48,12 +48,14 @@ export function createRemoteController({
     variant: 'rctl',
     title: 'Remote',
     storageKey: 'remote-controller',
-    // 썸네일 격자가 들어오므로 좁으면 쓸모가 없다. 두 칸은 나와야 한다.
-    width: 430,
+    // 썸네일 격자가 들어오므로 좁으면 쓸모가 없다. 세 칸 + 여유 한 뼘(사용자 지정:
+    // "대충 Next 단추 하나만큼 마진 여유가 있다").
+    width: 500,
     minWidth: 260,
     maxWidth: 900,
-    // 썸네일 격자가 본론이라 **세 줄**은 보여야 한다(사용자 지정). 화면이 낮으면 place() 가 줄인다.
-    height: 640,
+    // 썸네일 격자가 본론이라 **세 줄**은 보여야 하고, 그 세 줄이 눌리면 안 된다
+    // (사용자 지적: "너무 압착되었습니다"). 화면이 낮으면 place() 가 줄인다.
+    height: 740,
     minHeight: 200,
     resizable: true,
     collapsible: true,

@@ -7,6 +7,8 @@ export function createCustomSelectController({
 }) {
   const SELECTOR = 'select:not([multiple]):not([data-native-select])';
   const enhanced = new WeakMap();
+  // 항목 글자가 잘리지 않을 만큼은 벌려 준다(좁은 자리에 놓인 셀렉트 대비).
+  const MENU_MIN_WIDTH = 220;
   const states = new Set();
   let openState = null;
   let syncTimer = null;
@@ -917,7 +919,7 @@ export function createCustomSelectController({
       return {top: 0, bottom: window.innerHeight, height: window.innerHeight};
     }
     const top = vv.offsetTop || 0;
-    return {top, bottom: top + vv.height, height: vv.height};
+    return {top, bottom: top + vv.height, height: vv.height, width: vv.width || window.innerWidth};
   }
 
   function positionMenu(state) {
@@ -943,8 +945,15 @@ export function createCustomSelectController({
     const available = Math.max(44, openUpward ? above : below);
     const height = Math.min(menuMaxHeight, desiredHeight, available);
 
-    state.menu.style.left = `${Math.round(rect.left)}px`;
-    state.menu.style.width = `${Math.round(rect.width)}px`;
+    // ⚠️ **메뉴 너비는 단추 너비와 별개다.** 예전에는 그대로 베꼈는데, 리모컨처럼 좁은
+    //    자리(96px)에 놓인 셀렉트에서는 항목이 전부 '전체 목록 …' 으로 잘려 무엇을
+    //    고르는지 알 수 없었다(사용자 지적). 단추보다 좁아지지 않되 최소 폭을 보장하고,
+    //    넓어진 만큼 화면 밖으로 나가지 않게 왼쪽을 다시 잡는다.
+    const menuMinWidth = Math.min(MENU_MIN_WIDTH, Math.max(120, band.width - viewportGap * 2));
+    const menuWidth = Math.max(Math.round(rect.width), menuMinWidth);
+    const maxLeft = band.width - menuWidth - viewportGap;
+    state.menu.style.left = `${Math.round(Math.max(viewportGap, Math.min(rect.left, maxLeft)))}px`;
+    state.menu.style.width = `${menuWidth}px`;
     state.menu.style.maxHeight = `${Math.round(height)}px`;
     // 위로 열 때는 메뉴의 '아래' 끝을 버튼 바로 위에 고정(bottom-anchor)한다. top + 추정높이 방식은
     // 옵션 높이를 과대추정(옵션당 36px 가정)할 때 실제 짧은 메뉴가 버튼에서 떨어져 보이는 간격이 생긴다.

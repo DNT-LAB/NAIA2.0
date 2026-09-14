@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl7';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl8';
 
 export function createRemoteController({
   document: doc,
@@ -53,10 +53,13 @@ export function createRemoteController({
     width: 500,
     minWidth: 260,
     maxWidth: 900,
-    // 썸네일 격자가 본론이다 - **네 줄**(사용자 지정 "썸네일 라인 하나만 추가").
-    // 창 높이 = 격자(4*150 + 3*6) + 나머지 줄·여백 242 = 860 언저리.
-    // ⚠️ 화면이 낮으면 place()/refit 이 `vh - 16` 으로 줄인다 - 그때는 줄 수가 준다.
-    height: 866,
+    // 썸네일 격자가 본론이지만 창이 화면을 다 덮으면 리모컨이 아니다.
+    // ⚠️ **740 은 사용자가 실물을 보고 정한 값이다**(2026-09-14). 그 전까지 내가 올리던
+    //    560->640->740->866 은 **한 번도 사용자 화면에 닿지 않았다** - 저장본이 첫 값
+    //    (560)에서 굳어 기본값을 덮고 있었다(`sized` 로 고침). 그러니 이 숫자를 다시
+    //    올릴 때는 **저장본을 심어 놓고** 실물로 확인할 것.
+    // 카드 150px 기준 세 줄 남짓 보인다. 화면이 낮으면 place()/refit 이 줄인다.
+    height: 740,
     minHeight: 200,
     resizable: true,
     collapsible: true,

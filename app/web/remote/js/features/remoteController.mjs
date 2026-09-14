@@ -69,6 +69,10 @@ export function createRemoteController({
     initial: {right: 24, y: 96},
     escHtml,
     onClose: () => releaseAll(),
+    // 창이 움직이거나 접히면 확대창의 자리가 의미를 잃는다. 끄는 중에는 pointerdown 이
+    // 이미 걷지만, **키보드 화살표 이동**과 **접기**는 그 길로 안 온다(실측).
+    onMove: () => hideZoom(),
+    onCollapse: () => hideZoom(),
   });
 
   // 탭 열쇠 -> {title, rows, onRelease, moved:[{node, parent, next}], ghosts:[...]}
@@ -290,6 +294,16 @@ export function createRemoteController({
     if (!event.relatedTarget || !panel.body.contains(event.relatedTarget)) hideZoom();
     else if (!hoverSpecFor(event.relatedTarget)) hideZoom();
   });
+  // ⚠️ **대상이 사라지면 걷는다.** `Get Random Artist`/페이지 넘김은 격자를 통째로 다시
+  //    그리는데, 커서가 그대로면 `pointerout` 이 안 온다 - 없는 카드를 계속 크게 보여
+  //    주고 있었다(실측). 확대창은 '살아 있는 대상' 에 묶여 있어야 한다.
+  if (typeof MutationObserver === 'function') {
+    const gone = new MutationObserver(() => {
+      if (hoverTarget && !panel.body.contains(hoverTarget)) hideZoom();
+    });
+    gone.observe(panel.body, {childList: true, subtree: true});
+  }
+
   // 스크롤·드래그·창 닫힘에는 바로 걷는다(자리가 어긋난 채 떠 있으면 방해만 된다).
   panel.body.addEventListener('scroll', hideZoom, true);
   // ⚠️ 카드를 **누를 때는 걷지 않는다**(사용자 지정 2026-09-14) - 크게 보면서 고르는

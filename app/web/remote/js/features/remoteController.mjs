@@ -67,9 +67,15 @@ export function createRemoteController({
   const boarded = new Map();
 
   // ── 노드를 들어 올리고 되돌리기 ────────────────────────────────────────
-  function lift(entry, node, {ghost = null} = {}) {
+  function lift(entry, node, {ghost = null, tag = ''} = {}) {
     if (!node || !node.parentNode) return null;
-    const record = {node, parent: node.parentNode, next: node.nextSibling, ghost: null};
+    const record = {node, parent: node.parentNode, next: node.nextSibling, ghost: null, tag: ''};
+    // 줄 안에서 어느 칸인지 CSS 에 알려 준다. `:nth-child` 로 자리를 세면 조각 하나만
+    // 늘어도 조용히 어긋나므로 이름을 붙인다. 되돌릴 때 다시 뗀다(원본을 안 남긴다).
+    if (tag) {
+      record.tag = `rctl-${tag}`;
+      node.classList.add(record.tag);
+    }
     if (ghost) {
       const mark = doc.createElement('div');
       mark.className = 'rctl-ghost';
@@ -84,7 +90,8 @@ export function createRemoteController({
   function restore(entry) {
     // 거꾸로 - 서로 형제였던 노드들의 nextSibling 이 살아 있어야 제자리에 앉는다.
     for (let i = entry.moved.length - 1; i >= 0; i -= 1) {
-      const {node, parent, next, ghost} = entry.moved[i];
+      const {node, parent, next, ghost, tag} = entry.moved[i];
+      if (tag) node.classList.remove(tag);
       try {
         if (next && next.parentNode === parent) parent.insertBefore(node, next);
         else parent.appendChild(node);
@@ -93,6 +100,9 @@ export function createRemoteController({
     }
     entry.moved.length = 0;
   }
+
+  /** 줄의 항목은 요소 그대로거나 `{node, tag}` 다(tag = 줄 안에서의 칸 이름). */
+  const asNode = item => (item && item.nodeType === 1 ? item : (item?.node || null));
 
   // ── 그리기 ────────────────────────────────────────────────────────────
   function render() {
@@ -114,7 +124,7 @@ export function createRemoteController({
         sec.appendChild(head);
       }
       entry.rows.forEach(row => {
-        const nodes = (row.nodes || []).filter(Boolean);
+        const nodes = (row.nodes || []).map(asNode).filter(Boolean);
         if (!nodes.length) return;
         const wrap = doc.createElement('div');
         wrap.className = ['rctl-row', row.fill ? 'rctl-fill' : '', row.className || '']
@@ -137,13 +147,17 @@ export function createRemoteController({
    *                `fill` 인 줄이 남는 높이를 다 먹는다(썸네일 격자).
    *   - ghosts     Map(node -> '자리에 남길 안내 문구') - 큰 구멍에만 쓴다
    *   - onRelease  리모컨이 이 조각을 놓을 때(닫힘·해제) 불린다. 모듈의 토글을 끈다.
+   *   - hoverPreview {selector, resolve(el) -> {src, title, note} | null}
+   *                마우스를 올리면 창 **옆**에 크게 띄운다(리모컨에서는 썸네일이 작다).
    */
-  function onboard(key, {title = '', rows = [], ghosts = null, onRelease = null} = {}) {
+  function onboard(key, {title = '', rows = [], ghosts = null, onRelease = null,
+                         hoverPreview = null} = {}) {
     if (!key) return false;
     if (boarded.has(key)) offboard(key, {silent: true});
-    const entry = {title, rows, onRelease, moved: []};
-    rows.forEach(row => (row.nodes || []).forEach(node => {
-      lift(entry, node, {ghost: ghosts?.get?.(node) || null});
+    const entry = {title, rows, onRelease, hoverPreview, moved: []};
+    rows.forEach(row => (row.nodes || []).forEach(item => {
+      const node = asNode(item);
+      lift(entry, node, {ghost: ghosts?.get?.(node) || null, tag: item?.tag || ''});
     }));
     if (!entry.moved.length) return false;
     boarded.set(key, entry);
@@ -178,10 +192,95 @@ export function createRemoteController({
         try { entry.onRelease?.(key); } catch (error) { console.error('remote onRelease', error); }
       });
       panel.body.innerHTML = '';
+      hideZoom();
     } finally {
       releasing = false;
     }
   }
+
+  // ── 마우스를 올리면 옆에 크게 ──────────────────────────────────────────
+  //  리모컨 안에서는 썸네일이 112px 까지 줄어든다 - 그림을 보려고 켠 창인데 정작 그림이
+  //  안 보인다. 창 **바깥** 좌우 중 넓은 쪽에 띄운다(창 안에 띄우면 격자를 가린다).
+  const HOVER_DELAY_MS = 140;
+  const HOVER_WIDTH = 320;
+  let hoverEl = null;
+  let hoverTimer = null;
+  let hoverTarget = null;
+
+  function hoverBox() {
+    if (hoverEl) return hoverEl;
+    hoverEl = doc.createElement('div');
+    hoverEl.className = 'rctl-zoom';
+    hoverEl.hidden = true;
+    doc.body.appendChild(hoverEl);
+    return hoverEl;
+  }
+
+  function hideZoom() {
+    hoverTarget = null;
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    if (hoverEl) hoverEl.hidden = true;
+  }
+
+  function showZoom(target, info) {
+    const box = hoverBox();
+    box.innerHTML = `<img src="${escHtml(info.src)}" alt="">`
+      + `<div class="rctl-zoom-cap"><b>${escHtml(info.title || '')}</b>`
+      + (info.note ? `<span>${escHtml(info.note)}</span>` : '') + '</div>';
+    box.hidden = false;
+
+    const panelRect = panel.el.getBoundingClientRect();
+    const cardRect = target.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    const vw = win?.innerWidth || doc.documentElement.clientWidth;
+    const vh = win?.innerHeight || doc.documentElement.clientHeight;
+    // 넓은 쪽에 붙인다. 왼쪽에 자리가 있으면 왼쪽(오른쪽 가장자리에 둔 창이 흔하다).
+    const roomLeft = panelRect.left;
+    const roomRight = vw - panelRect.right;
+    const left = (roomLeft >= boxRect.width + 16 || roomLeft > roomRight)
+      ? panelRect.left - boxRect.width - 10
+      : panelRect.right + 10;
+    // 세로는 올린 칸에 맞추되 화면 안에 들인다.
+    const top = cardRect.top + cardRect.height / 2 - boxRect.height / 2;
+    box.style.left = `${Math.round(Math.max(6, Math.min(left, vw - boxRect.width - 6)))}px`;
+    box.style.top = `${Math.round(Math.max(6, Math.min(top, vh - boxRect.height - 6)))}px`;
+  }
+
+  function hoverSpecFor(node) {
+    for (const entry of boarded.values()) {
+      const spec = entry.hoverPreview;
+      if (!spec?.selector) continue;
+      const target = node?.closest?.(spec.selector);
+      if (target && panel.body.contains(target)) return {spec, target};
+    }
+    return null;
+  }
+
+  panel.body.addEventListener('pointerover', event => {
+    // 손가락은 hover 가 없다 - 터치로는 띄우지 않는다(눌러야 할 칸을 가린다).
+    if (event.pointerType === 'touch') return;
+    const found = hoverSpecFor(event.target);
+    if (!found) { hideZoom(); return; }
+    if (found.target === hoverTarget) return;
+    hoverTarget = found.target;
+    if (hoverTimer) clearTimeout(hoverTimer);
+    // 격자를 훑고 지나갈 때마다 번쩍이지 않게 조금 기다린다.
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null;
+      if (hoverTarget !== found.target) return;
+      const info = found.spec.resolve?.(found.target);
+      if (info?.src) showZoom(found.target, info);
+      else if (hoverEl) hoverEl.hidden = true;
+    }, HOVER_DELAY_MS);
+  });
+  panel.body.addEventListener('pointerout', event => {
+    if (!event.relatedTarget || !panel.body.contains(event.relatedTarget)) hideZoom();
+    else if (!hoverSpecFor(event.relatedTarget)) hideZoom();
+  });
+  // 스크롤·드래그·창 닫힘에는 바로 걷는다(자리가 어긋난 채 떠 있으면 방해만 된다).
+  panel.body.addEventListener('scroll', hideZoom, true);
+  panel.el.addEventListener('pointerdown', hideZoom, true);
+  win?.addEventListener?.('resize', hideZoom);
 
   return {
     ...panel,

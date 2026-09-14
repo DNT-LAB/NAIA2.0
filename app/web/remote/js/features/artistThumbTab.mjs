@@ -2151,16 +2151,43 @@ export function createArtistThumbController({
   const REMOTE_KEY = 'artists';
 
   function remoteRows() {
+    // 고른 작가 칸 - 미리보기 그림 + 이름 + 가중치를 한 줄에 묶는다(사용자 지정).
+    // 제외/관심을 누르기 전에 **무엇을 고쳤는지** 보여야 하고, 가중치는 Generate 를
+    // 누르기 직전에 만지는 값이라 같이 있어야 손이 탭으로 돌아가지 않는다.
+    const stage = selectedImage?.closest('.artist-thumb-selected-stage') || null;
+    const weight = weightSlider?.closest('.artist-thumb-weight-control') || null;
     return [
       // 남는 높이를 다 먹는 줄. 관찰이 본론이라 격자가 가장 크다.
       {nodes: [gridEl], fill: true},
       {nodes: [prevBtn, pageLabel, nextBtn], className: 'rctl-pager'},
       {nodes: [randomBtn], className: 'rctl-row-split'},
-      // 제외/관심을 누르기 전에 **무엇을 고쳤는지** 보여야 한다.
-      {nodes: [selectedName]},
+      {
+        className: 'rctl-artist-head',
+        nodes: [
+          {node: stage, tag: 'pic'},
+          {node: selectedName, tag: 'name'},
+          {node: weight, tag: 'weight'},
+        ],
+      },
       {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
       {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
     ];
+  }
+
+  /** 리모컨에서는 카드가 112px 까지 줄어든다 - 마우스를 올리면 창 옆에 크게 띄운다. */
+  function remoteHoverPreview() {
+    return {
+      selector: '.artist-thumb-card[data-artist]',
+      resolve: card => {
+        const src = card.querySelector('img')?.getAttribute('src') || '';
+        if (!src) return null;   // 'No Image' 칸은 띄울 것이 없다
+        return {
+          src,
+          title: card.dataset.artist || '',
+          note: card.querySelector('.artist-thumb-card-weight')?.textContent || '',
+        };
+      },
+    };
   }
 
   function syncRemoteButton() {
@@ -2182,6 +2209,7 @@ export function createArtistThumbController({
       const ok = remote.onboard(REMOTE_KEY, {
         title: 'Artist Thumbnail',
         rows: remoteRows(),
+        hoverPreview: remoteHoverPreview(),
         ghosts,
         // 리모컨을 [x] 로 닫으면 조각이 제자리로 돌아온다 - 토글도 같이 꺼져야 한다.
         onRelease: () => setRemote(false, {fromRemote: true}),

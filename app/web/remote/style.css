@@ -84,6 +84,8 @@
      툴팁이 자기 창 뒤로 숨으면 안 되고, 확인을 물을 때는 확인이 앞이어야 한다.
      여러 장이 겹치면 js 가 +1 씩 올려 앞뒤를 바꾼다(10200 을 넘지 않는다). */
   --z-drag-panel: 10150;
+  /* 창 옆에 뜨는 확대 보기. 창 더미(10150~) 위여야 하고 제목 툴팁(10200) 아래여야 한다. */
+  --z-drag-panel-zoom: 10195;
   --z-app-confirm: 11000;
   --z-toast: 11100;
 }
@@ -29169,6 +29171,55 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   justify-content: center; gap: 8px;
   font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
 }
+/* 고른 작가 칸 - 미리보기 그림(왼쪽) + 이름/가중치(오른쪽) 두 줄.
+   ⚠️ 칸 이름(`rctl-pic` 등)은 온보딩할 때 js 가 붙이고 되돌릴 때 뗀다. `:nth-child` 로
+      자리를 세면 줄에 조각 하나만 늘어도 조용히 어긋난다. */
+.dragpanel.rctl .rctl-artist-head {
+  display: grid; align-items: center;
+  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-areas: "pic name" "pic weight";
+  gap: 3px 8px;
+}
+.dragpanel.rctl .rctl-artist-head .rctl-pic {
+  grid-area: pic; width: 58px; height: 58px; min-height: 0;
+  border-radius: 8px; overflow: hidden; background: var(--bg-deep);
+  border: 1px solid var(--border-dim);
+  display: flex; align-items: center; justify-content: center;
+}
+.dragpanel.rctl .rctl-artist-head .rctl-pic img { width: 100%; height: 100%; object-fit: cover; }
+.dragpanel.rctl .rctl-artist-head .rctl-pic span { font-size: 9px; color: var(--text-dim); }
+.dragpanel.rctl .rctl-artist-head .rctl-name { grid-area: name; }
+.dragpanel.rctl .rctl-artist-head .rctl-weight {
+  grid-area: weight; display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-slider { flex: 1 1 auto; min-width: 0; }
+.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input { flex: 0 0 52px; }
+
+/* 격자 스크롤 - 기존 탭과 같은 얇은 막대. 리모컨에서는 조금 더 굵게 잡아야 손이 닿는다. */
+.dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar { width: 7px; }
+.dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar-thumb {
+  background: var(--border-glow); border-radius: 4px;
+}
+.dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+.dragpanel.rctl .artist-thumb-grid { scrollbar-width: thin; }
+
+/* 마우스를 올렸을 때 창 **바깥** 옆에 크게. 창 안에 띄우면 정작 격자를 가린다. */
+.rctl-zoom {
+  position: fixed; z-index: var(--z-drag-panel-zoom);
+  width: 320px; max-width: 42vw;
+  background: var(--bg-elevated); border: 1px solid var(--border-glow);
+  border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.6);
+  overflow: hidden; pointer-events: none;
+}
+.rctl-zoom[hidden] { display: none !important; }
+.rctl-zoom img { display: block; width: 100%; max-height: 62vh; object-fit: contain; background: var(--bg-deep); }
+.rctl-zoom-cap {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 10px 7px; border-top: 1px solid var(--border-dim);
+}
+.rctl-zoom-cap b { font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rctl-zoom-cap span { margin-left: auto; font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); }
+
 .dragpanel.rctl .artist-thumb-btn,
 .dragpanel.rctl .artist-thumb-random-btn { font-size: 11px; padding: 5px 8px; }
 .dragpanel.rctl .artist-thumb-generate { font-size: 12px; padding: 7px 10px; }

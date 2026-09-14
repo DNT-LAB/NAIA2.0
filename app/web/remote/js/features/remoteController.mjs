@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl8';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl9';
 
 export function createRemoteController({
   document: doc,
@@ -48,9 +48,9 @@ export function createRemoteController({
     variant: 'rctl',
     title: 'Remote',
     storageKey: 'remote-controller',
-    // 썸네일 격자가 들어오므로 좁으면 쓸모가 없다. 세 칸 + 여유 한 뼘(사용자 지정:
-    // "대충 Next 단추 하나만큼 마진 여유가 있다").
-    width: 500,
+    // 썸네일 격자가 들어오므로 좁으면 쓸모가 없다. 세 칸 + 여유 한 뼘.
+    // 500 -> 490 (사용자 지정 2026-09-14: "너비를 10만큼만 줄입니다").
+    width: 490,
     minWidth: 260,
     maxWidth: 900,
     // 썸네일 격자가 본론이지만 창이 화면을 다 덮으면 리모컨이 아니다.

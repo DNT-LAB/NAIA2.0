@@ -3797,11 +3797,24 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .artist-thumb-card.favorite .artist-thumb-card-weight {
   color: rgba(179, 235, 196, 0.74);
 }
+.artist-thumb-card.remembered {
+  border-color: rgba(255, 122, 188, 0.58);
+  background: rgba(255, 90, 170, 0.16);
+}
+.artist-thumb-card.remembered .artist-thumb-card-image {
+  background: #211018;
+}
+.artist-thumb-card.remembered .artist-thumb-card-info {
+  background: rgba(92, 26, 65, 0.62);
+  border-top: 1px solid rgba(255, 122, 188, 0.28);
+}
 /* 지금 고른 작가(사용자 제안 2026-09-14). 보라 테두리는 카드가 작아지자 옆 칸과
    구분이 안 됐다 - **연노랑 굵은 테두리 + 이름 칸 색반전** 둘 다 쓴다. 색반전 쪽이
    멀리서도 먼저 잡힌다.
-   ⚠️ `favorite` 도 이름 칸의 바탕·글자색을 주므로 **그 뒤에** 둔다(같은 특이도라
-      나중 것이 이긴다) - 지금 고른 것이 더 급한 정보다.
+   ⚠️ **`favorite`·`remembered` 뒤에 와야 한다**(같은 특이도라 나중 것이 이긴다).
+      둘 다 이름 칸의 바탕을 칠하는데, 바탕만 저쪽이 이기고 글자색은 이쪽이 이기면
+      **어두운 바탕에 어두운 글자**가 된다 - 생성이 끝나 RESULT 가 붙은 카드에서
+      이름이 검게 보인다는 제보가 정확히 그것이었다(실측). 바탕과 글자는 한 짝이다.
    ⚠️ 테두리를 2px 로 키워도 카드 크기는 그대로다(전역 `box-sizing: border-box`). */
 .artist-thumb-card.active {
   border-width: 2px;
@@ -3815,17 +3828,6 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 }
 .artist-thumb-card.active .artist-thumb-card-name { color: #2a2106; }
 .artist-thumb-card.active .artist-thumb-card-weight { color: rgba(42, 33, 6, 0.66); }
-.artist-thumb-card.remembered {
-  border-color: rgba(255, 122, 188, 0.58);
-  background: rgba(255, 90, 170, 0.16);
-}
-.artist-thumb-card.remembered .artist-thumb-card-image {
-  background: #211018;
-}
-.artist-thumb-card.remembered .artist-thumb-card-info {
-  background: rgba(92, 26, 65, 0.62);
-  border-top: 1px solid rgba(255, 122, 188, 0.28);
-}
 .artist-thumb-card.in-queue {
   border-color: rgba(112, 200, 255, 0.62);
 }

@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl9';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl10';
 
 export function createRemoteController({
   document: doc,
@@ -51,7 +51,9 @@ export function createRemoteController({
     // 썸네일 격자가 들어오므로 좁으면 쓸모가 없다. 세 칸 + 여유 한 뼘.
     // 500 -> 490 (사용자 지정 2026-09-14: "너비를 10만큼만 줄입니다").
     width: 490,
-    minWidth: 260,
+    // ⚠️ **설계값 아래로는 못 줄인다**(사용자 지정) - 격자가 3칸 고정이라 더 좁히면
+    //    카드가 설계보다 작아진다. 화면이 이보다 좁으면 그때는 화면에 맞춘다.
+    minWidth: 490,
     maxWidth: 900,
     // 썸네일 격자가 본론이지만 창이 화면을 다 덮으면 리모컨이 아니다.
     // ⚠️ **740 은 사용자가 실물을 보고 정한 값이다**(2026-09-14). 그 전까지 내가 올리던
@@ -290,7 +292,12 @@ export function createRemoteController({
   });
   // 스크롤·드래그·창 닫힘에는 바로 걷는다(자리가 어긋난 채 떠 있으면 방해만 된다).
   panel.body.addEventListener('scroll', hideZoom, true);
-  panel.el.addEventListener('pointerdown', hideZoom, true);
+  // ⚠️ 카드를 **누를 때는 걷지 않는다**(사용자 지정 2026-09-14) - 크게 보면서 고르는
+  //    것이 이 기능의 쓸모인데 누르는 순간 닫히면 확인이 안 된다. 창이 움직이는
+  //    경우(머리줄·크기 손잡이)에만 걷는다 - 그때는 자리가 어긋나기 때문이다.
+  panel.el.addEventListener('pointerdown', event => {
+    if (event.target.closest('.dragpanel-head, .dragpanel-grip')) hideZoom();
+  }, true);
   win?.addEventListener?.('resize', hideZoom);
 
   return {

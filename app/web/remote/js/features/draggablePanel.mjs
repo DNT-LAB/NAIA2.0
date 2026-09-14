@@ -205,6 +205,13 @@ export function createDraggablePanel({
     return {x, y};
   }
 
+  /** 가로 하한. 보통은 `minWidth` 지만 화면이 그보다 좁으면 화면이 이긴다 -
+   *  안 그러면 폰에서 창이 화면을 넘는다. */
+  function widthFloor() {
+    const {w: vw} = viewport();
+    return vw > 0 ? Math.min(minWidth, Math.max(120, vw - 8)) : minWidth;
+  }
+
   function applyPos() {
     el.style.left = `${Math.round(pos.x)}px`;
     el.style.top = `${Math.round(pos.y)}px`;
@@ -235,7 +242,7 @@ export function createDraggablePanel({
     const {w: vw, h: vh} = viewport();
     userSized = true;
     if (Number.isFinite(w)) {
-      el.style.width = `${Math.round(clamp(w, minWidth, Math.min(maxWidth, vw - 8)))}px`;
+      el.style.width = `${Math.round(clamp(w, widthFloor(), Math.min(maxWidth, vw - 8)))}px`;
     }
     if (resizable && Number.isFinite(h) && h > 0) {
       el.style.height = `${Math.round(clamp(h, minHeight, vh - 8))}px`;
@@ -269,7 +276,7 @@ export function createDraggablePanel({
       //    그때의 크기를 씌우면 기본값을 고쳐도 반영되지 않는다(사용자 제보).
       userSized = !!saved.sized;
       if (userSized && Number.isFinite(saved.w)) {
-        el.style.width = `${clamp(saved.w, minWidth, Math.min(maxWidth, vw - 8))}px`;
+        el.style.width = `${clamp(saved.w, widthFloor(), Math.min(maxWidth, vw - 8))}px`;
       }
       if (userSized && resizable && Number.isFinite(saved.h) && saved.h > 0) {
         el.style.height = `${clamp(saved.h, minHeight, vh - 8)}px`;
@@ -302,7 +309,7 @@ export function createDraggablePanel({
     const {w: vw, h: vh} = viewport();
     if (vw > 0 && vh > 0) {
       const rect = el.getBoundingClientRect();
-      if (rect.width > vw - 8) el.style.width = `${Math.max(minWidth, vw - 8)}px`;
+      if (rect.width > vw - 8) el.style.width = `${Math.max(widthFloor(), vw - 8)}px`;
       if (resizable && rect.height > vh - 8) el.style.height = `${Math.max(minHeight, vh - 8)}px`;
     }
     const next = clampPos(pos.x, pos.y);
@@ -375,7 +382,7 @@ export function createDraggablePanel({
     event.preventDefault();
     if (drag.mode === 'resize') {
       const {w: vw, h: vh} = viewport();
-      el.style.width = `${Math.round(clamp(drag.originW + dx, minWidth, Math.min(maxWidth, vw - 8)))}px`;
+      el.style.width = `${Math.round(clamp(drag.originW + dx, widthFloor(), Math.min(maxWidth, vw - 8)))}px`;
       el.style.height = `${Math.round(clamp(drag.originH + dy, minHeight, vh - 8))}px`;
       heldHeight = el.style.height;
       userSized = true;

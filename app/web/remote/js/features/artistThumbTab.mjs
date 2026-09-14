@@ -311,8 +311,15 @@ export function createArtistThumbController({
    *
    *  ⚠️ 목록을 다시 불러오지 않는다 — 그러면 스크롤·선택이 튀고, 일괄생성
    *     중이라면 매 장마다 전체 목록을 재조회하게 된다.
-   *  ⚠️ 매번 덮어쓰므로 URL 이 같다 — 캐시 버스터가 없으면 역 그림이 남는다.
+   *  ⚠️ 매번 덮어쓰므로 URL 이 같다 — 캐시 버스터가 없으면 옛 그림이 남는다.
+   *  ⚠️ **공식 팩/즐겨찾기 그림은 밀어내지 않는다**(사용자 지정 2026-09-14).
+   *     서버는 이미 `모드 팩 -> 즐겨찾기 -> 생성물` 순으로 골라 준다
+   *     (`artist_thumbnail_service.item_image_url`). 그런데 여기서 무조건 갈아 끼우는
+   *     바람에, 생성 직후부터 새로고침 전까지 팩 그림이 사라져 보였다. 같은 규약을
+   *     여기에도 건다 - **빈 칸이거나 내가 만든 그림일 때만** 덮는다.
    */
+  const GENERATED_IMAGE_PATH = '/api/artist-thumb/generated-image';
+
   function applySavedThumbnail(artist, url) {
     const key = String(artist || '').trim();
     if (!key || !url) return;
@@ -321,6 +328,7 @@ export function createArtistThumbController({
     if (!host) return;
     const src = `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`;
     let img = host.querySelector('img');
+    if (img && !String(img.getAttribute('src') || '').includes(GENERATED_IMAGE_PATH)) return;
     if (!img) {
       host.innerHTML = '';
       img = document.createElement('img');

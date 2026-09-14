@@ -29149,7 +29149,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    달고 온다 - 여기서는 자리(줄/구획)만 잡고, 좁은 창에 맞게 몇 가지를 줄인다. */
 .dragpanel.rctl { border-color: rgba(130, 150, 255, 0.42); }
 .dragpanel.rctl .dragpanel-head { background: rgba(130, 150, 255, 0.10); }
-.dragpanel.rctl .dragpanel-body { padding: 7px 8px 8px; gap: 6px; overflow: hidden; }
+.dragpanel.rctl .dragpanel-body {
+  padding: 7px 8px 8px; gap: 6px; overflow: hidden;
+  /* 격자 카드 높이가 이 폭을 따라간다(위 `30cqw`). */
+  container-type: inline-size;
+}
 
 .rctl-sec { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0; }
 .rctl-sec-head {
@@ -29187,8 +29191,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
      ⚠️ 여기만 **vh 를 안 쓴다.** 창 높이가 정해져 있는데 카드가 화면 높이를 따라가면
         줄 수가 화면마다 달라진다 - 4줄을 약속했으면 고정이어야 한다(탭 쪽 원본은
         패널이 화면 높이를 다 쓰므로 vh 가 맞다). 창을 늘리면 줄이 더 나온다. */
-  --artist-card-height: 150px;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  /* ⚠️ **줄당 3칸 고정**(사용자 지정 2026-09-14). auto-fill 이면 창을 넓힐 때 칸이
+     늘어나 그림이 도로 작아진다 - 창을 키우는 목적은 '더 많이' 가 아니라 '더 크게' 다.
+     창을 못 줄이게 하는 최소 너비(remoteController.minWidth = 490)와 한 짝이다. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 칸이 넓어지면 높이도 따라가야 그림 비율이 유지된다. 30cqw ≈ 3칸일 때의 칸 너비.
+     ⚠️ `cqw` 는 **조상** 컨테이너를 잰다 - 격자 자신에게 container-type 을 걸면 자기를
+        못 잰다. 그래서 컨테이너는 `.dragpanel-body` 에 둔다(아래). */
+  --artist-card-height: max(150px, 30cqw);
   gap: 6px; padding: 2px; border-radius: 8px;
 }
 /* 이름 칸을 절반으로(44px -> 22px). 남는 높이는 전부 그림이 가져간다. */
@@ -29241,7 +29251,7 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    아래에 썸네일을 또 두는 것은 격자와 겹치는 중복이라 뺐다. */
 .dragpanel.rctl .rctl-artist-head {
   display: grid; align-items: center;
-  grid-template-columns: minmax(0, 1fr) 164px;
+  grid-template-columns: minmax(0, 1fr) 178px;
   gap: 6px;
 }
 .dragpanel.rctl .rctl-artist-head .rctl-name {
@@ -29253,8 +29263,16 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   display: flex; align-items: center; gap: 6px; min-width: 0;
 }
 .dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-slider { flex: 1 1 auto; min-width: 0; height: 20px; }
+/* ⚠️ `type=number` 는 크롬이 스피너 자리를 **안쪽에** 잡아 둔다 - 50px 에 좌우 여백
+   6px 씩이면 `0.85` 의 마지막 글자가 잘렸다(사용자 제보). 스피너를 없애고 칸을 넓힌다
+   (슬라이더가 있으니 화살표는 쓸 일이 없다). */
 .dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input {
-  flex: 0 0 50px; height: 30px; padding: 0 6px; font-size: 11px;
+  flex: 0 0 64px; height: 30px; padding: 0 4px; font-size: 11px; text-align: center;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input::-webkit-outer-spin-button,
+.dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
 }
 /* 격자 스크롤 - 기존 탭과 같은 얇은 막대. 리모컨에서는 조금 더 굵게 잡아야 손이 닿는다. */
 .dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar { width: 7px; }

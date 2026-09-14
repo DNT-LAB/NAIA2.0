@@ -138,6 +138,9 @@ export function createDraggablePanel({
   let drag = null;
   let placeRetry = 0;
   let heldHeight = '';   // 접기 전의 세로 크기(펴면 되돌린다)
+  // 사용자가 **직접** 크기를 잡았는가. 안 잡았으면 기본값을 따라간다 - 안 그러면
+  // 기본값을 고쳐도 한 번이라도 창을 옮긴 사람에게는 영영 안 먹는다(사용자 제보).
+  let userSized = false;
   let rafId = 0;
   let pending = null;
 
@@ -162,6 +165,8 @@ export function createDraggablePanel({
           ? (collapsed ? Number.parseInt(heldHeight, 10) || 0
                        : Math.round(el.getBoundingClientRect().height))
           : 0,
+        // 이 표가 없으면(옛 기록 포함) 크기는 안 되살린다.
+        sized: userSized,
         collapsed,
       }));
     } catch { /* 사파리 프라이빗 모드 등 - 위치를 못 외우는 것뿐이다 */ }
@@ -228,6 +233,7 @@ export function createDraggablePanel({
 
   function sizeTo(w, h) {
     const {w: vw, h: vh} = viewport();
+    userSized = true;
     if (Number.isFinite(w)) {
       el.style.width = `${Math.round(clamp(w, minWidth, Math.min(maxWidth, vw - 8)))}px`;
     }
@@ -259,8 +265,13 @@ export function createDraggablePanel({
     }
     const saved = readMemory();
     if (saved) {
-      if (Number.isFinite(saved.w)) el.style.width = `${clamp(saved.w, minWidth, Math.min(maxWidth, vw - 8))}px`;
-      if (resizable && Number.isFinite(saved.h) && saved.h > 0) {
+      // ⚠️ 크기는 **사용자가 직접 잡았을 때만** 되살린다. 자리만 옮긴 사람에게까지
+      //    그때의 크기를 씌우면 기본값을 고쳐도 반영되지 않는다(사용자 제보).
+      userSized = !!saved.sized;
+      if (userSized && Number.isFinite(saved.w)) {
+        el.style.width = `${clamp(saved.w, minWidth, Math.min(maxWidth, vw - 8))}px`;
+      }
+      if (userSized && resizable && Number.isFinite(saved.h) && saved.h > 0) {
         el.style.height = `${clamp(saved.h, minHeight, vh - 8)}px`;
         heldHeight = el.style.height;
       }
@@ -306,6 +317,7 @@ export function createDraggablePanel({
     el.style.width = `${width}px`;
     el.style.height = '';
     heldHeight = '';
+    userSized = false;
     setCollapsed(false, {persist: false});
     placed = false;
     place();
@@ -366,6 +378,7 @@ export function createDraggablePanel({
       el.style.width = `${Math.round(clamp(drag.originW + dx, minWidth, Math.min(maxWidth, vw - 8)))}px`;
       el.style.height = `${Math.round(clamp(drag.originH + dy, minHeight, vh - 8))}px`;
       heldHeight = el.style.height;
+      userSized = true;
       refit();
       return;
     }

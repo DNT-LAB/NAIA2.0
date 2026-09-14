@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl6';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl7';
 
 export function createRemoteController({
   document: doc,

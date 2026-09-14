@@ -29181,9 +29181,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    원본은 탭 전체 폭(1000px+)을 전제로 한다. 리모컨은 430px 언저리다 - 여기서만 줄인다
    (원본 규칙은 건드리지 않는다). 목표는 **가로 3칸 · 세로 3줄**(사용자 지정). */
 .dragpanel.rctl .artist-thumb-grid {
-  /* 눌린 카드는 얼굴이 안 보인다(사용자 지적) - 창을 키운 만큼 카드도 키웠다.
-     세로 3줄은 유지한다. */
-  --artist-card-height: clamp(132px, 17vh, 176px);
+  /* 눌린 카드는 얼굴이 안 보인다(사용자 지적) - 처음 125px 에서 키웠다.
+     ⚠️ 여기만 **vh 를 안 쓴다.** 창 높이가 정해져 있는데 카드가 화면 높이를 따라가면
+        줄 수가 화면마다 달라진다 - 4줄을 약속했으면 고정이어야 한다(탭 쪽 원본은
+        패널이 화면 높이를 다 쓰므로 vh 가 맞다). 창을 늘리면 줄이 더 나온다. */
+  --artist-card-height: 150px;
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   gap: 6px; padding: 2px; border-radius: 8px;
 }

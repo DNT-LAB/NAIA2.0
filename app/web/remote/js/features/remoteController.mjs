@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl2';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl6';
 
 export function createRemoteController({
   document: doc,
@@ -53,9 +53,10 @@ export function createRemoteController({
     width: 500,
     minWidth: 260,
     maxWidth: 900,
-    // 썸네일 격자가 본론이라 **세 줄**은 보여야 하고, 그 세 줄이 눌리면 안 된다
-    // (사용자 지적: "너무 압착되었습니다"). 화면이 낮으면 place() 가 줄인다.
-    height: 740,
+    // 썸네일 격자가 본론이다 - **네 줄**(사용자 지정 "썸네일 라인 하나만 추가").
+    // 창 높이 = 격자(4*150 + 3*6) + 나머지 줄·여백 242 = 860 언저리.
+    // ⚠️ 화면이 낮으면 place()/refit 이 `vh - 16` 으로 줄인다 - 그때는 줄 수가 준다.
+    height: 866,
     minHeight: 200,
     resizable: true,
     collapsible: true,

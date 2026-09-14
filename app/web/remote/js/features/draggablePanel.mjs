@@ -189,6 +189,17 @@ export function createDraggablePanel({
     };
   }
 
+  /** 처음 놓을 때만 - 창이 통째로 들어갈 수 있으면 들어가게 위로 당긴다.
+   *  ⚠️ 끄는 중의 clampPos 와 섞지 말 것. 그쪽은 '머리줄만 잡히면 된다' 가 규칙이고
+   *     (가장자리에 걸쳐 두는 것은 사용자의 자유), 이쪽은 '처음에는 다 보여야 한다' 다.
+   *     안 그러면 아래쪽 단추가 잘린 채 뜬다(실측: 866px 창 + 900px 화면). */
+  function fitWholePanel(x, y) {
+    const {h: vh} = viewport();
+    const h = el.getBoundingClientRect().height || minHeight;
+    if (h <= vh - 12 && y + h > vh - 8) return {x, y: Math.max(8, vh - h - 8)};
+    return {x, y};
+  }
+
   function applyPos() {
     el.style.left = `${Math.round(pos.x)}px`;
     el.style.top = `${Math.round(pos.y)}px`;
@@ -255,7 +266,9 @@ export function createDraggablePanel({
       }
       if (saved.collapsed && collapsible) setCollapsed(true, {persist: false});
       if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-        moveTo(saved.x, saved.y, {persist: false});
+        // 더 큰 화면에서 정한 자리일 수 있다 - 들어갈 수 있으면 들여놓는다.
+        const fit = fitWholePanel(saved.x, saved.y);
+        moveTo(fit.x, fit.y, {persist: false});
         return;
       }
     }
@@ -266,7 +279,8 @@ export function createDraggablePanel({
       : (Number.isFinite(initial.right) ? vw - w - initial.right : vw - w - 24);
     const y = Number.isFinite(initial.y) ? initial.y
       : (Number.isFinite(initial.bottom) ? vh - h - initial.bottom : Math.max(24, vh * 0.28));
-    moveTo(x, y, {persist: false});
+    const fit = fitWholePanel(x, y);
+    moveTo(fit.x, fit.y, {persist: false});
   }
 
   /** 화면이 바뀌었다(창 크기·폰 회전·주소창 접힘) → 다시 안으로 들인다. */

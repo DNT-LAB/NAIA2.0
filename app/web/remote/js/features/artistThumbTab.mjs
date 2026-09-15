@@ -2279,9 +2279,16 @@ export function createArtistThumbController({
   /** 믹스 큐가 조립한 글을 ARTIST PROMPT 칸으로 보낸다(사용자 지정 - 그 칸이
    *  Generate 와 Generate with Random Prompt 가 쓰는 자리다). */
   function applyMixComposition(text) {
-    if (!positiveEl) return;
-    positiveEl.value = text;
-    positiveAutoValue = text;
+    if (positiveEl) {
+      positiveEl.value = text;
+      positiveAutoValue = text;
+    }
+    // 접혀 있는 동안 그림 위에 얹을 줄들 - 켜진 블럭만, 큐에 보이는 그대로.
+    // 가중치는 뺀다(접힘은 훑어보기다 - 9px 로 `0.9::artist:x ::` 는 잡음이다).
+    const lines = (mixQueue?.snapshot() || [])
+      .filter(b => b.enabled && String(b.artist || '').trim())
+      .map(b => (b.withPrefix ? `artist:${b.artist}` : b.artist));
+    getRemoteController?.()?.setSideSummary?.(lines);
   }
 
   async function ensureMixQueue() {

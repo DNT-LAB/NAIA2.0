@@ -29447,6 +29447,50 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   color: var(--text-primary);
 }
 
+/* ── 가만히 두면 접힌다(5초) ────────────────────────────────────────────
+   이 판은 그림 위에 뜬다 - 관심이 없으면 제목줄만 남기고 말아 올리고, 그 아래에
+   지금 걸린 아티스트를 아주 작은 글씨로 얹는다(사용자 지정 '그림같은 느낌').
+   ⚠️ 끝 상태는 **클래스가 전부 쥔다**. 애니메이션이 안 돌아도(throttle 된 창은
+      프레임을 안 만든다) 결과는 같아야 한다. */
+.rctl-side .mixq-list,
+.rctl-side .mixq-foot,
+.rctl-side .peq {
+  transition: max-height .24s ease, opacity .16s ease, padding .24s ease;
+  max-height: 70vh;
+}
+.rctl-side.is-folded { gap: 0; }
+/* 접히면 제목줄 높이만 남는다 - min-height 가 남아 있으면 빈 상자가 그림을 가린다. */
+.rctl-side.is-folded > .mixq { flex: 0 0 auto; min-height: 0; }
+.rctl-side.is-folded .mixq-list,
+.rctl-side.is-folded .mixq-foot,
+.rctl-side.is-folded .peq {
+  max-height: 0; opacity: 0; overflow: hidden;
+  padding-top: 0; padding-bottom: 0; border-top-width: 0;
+  pointer-events: none;
+}
+/* 접히면 제목줄만 남는다 - 아래 모서리도 같이 둥글려 작은 알약처럼 보이게. */
+.rctl-side.is-folded .mixq-head { border-bottom-color: transparent; }
+
+.rctl-side-summary {
+  display: none; flex-direction: column; gap: 1px;
+  padding: 5px 2px 0; pointer-events: none; user-select: none;
+}
+.rctl-side.is-folded .rctl-side-summary { display: flex; }
+.rctl-side-summary.is-empty { display: none !important; }
+.rctl-side-summary span {
+  font-family: var(--font-mono); font-size: 9px; line-height: 1.45;
+  color: rgba(255, 255, 255, 0.82);
+  /* 어떤 그림 위에 얹혀도 읽혀야 한다 - 상자 대신 글자에 그림자를 준다. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.8);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rctl-side .mixq-list,
+  .rctl-side .mixq-foot,
+  .rctl-side .peq { transition: none; }
+}
+
 /* ══ PE 빠른 수정 (js/features/peQuickEdit.mjs) ═══════════════════════════
    믹스 판 아래에 붙는 접이식 칸 둘. Prompt Engineering 의 prefix·postfix 를
    그대로 비추는 부분 미러라 옷도 `.mixq` 와 같은 값을 쓴다. */

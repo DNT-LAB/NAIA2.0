@@ -274,14 +274,66 @@ export function createRemoteController({
   //  확대 보기가 뜨던 그 자리를 쓴다(사용자 지정). 확대 보기보다 **아래** 층이라
   //  격자 칸에 마우스를 올리면 그 위로 덮인다.
   let sideEl = null;
+  let sideSummaryEl = null;
+  let idleTimer = null;
+  let folded = false;
 
   function sideHost() {
     if (sideEl) return sideEl;
     sideEl = doc.createElement('div');
     sideEl.className = 'rctl-side';
     sideEl.hidden = true;
+    sideSummaryEl = doc.createElement('div');
+    sideSummaryEl.className = 'rctl-side-summary';
     doc.body.appendChild(sideEl);
+    // 관심을 주면 다시 펴진다. 보조 판과 창 **둘 다** 본다 - 사용자가 격자를 훑는
+    // 동안 옆의 큐가 접히면 안 된다.
+    for (const target of [sideEl, panel.el]) {
+      for (const type of ['pointermove', 'pointerdown', 'pointerup', 'wheel', 'keydown', 'focusin']) {
+        target.addEventListener(type, poke, {passive: true});
+      }
+    }
     return sideEl;
+  }
+
+  // ── 가만히 두면 접힌다 ────────────────────────────────────────────────
+  //  이 판은 그림 위에 뜬다(사용자 지정). 5초간 아무 관심이 없으면 제목줄 + 아주
+  //  작은 글씨의 아티스트 목록만 남기고 말아 올린다.
+  const IDLE_FOLD_MS = 5000;
+
+  /** 지금 손이 이 안에 있는가. 있으면 **절대** 접지 않는다 -
+   *  prefix/postfix 를 치다가 잠깐 생각하는 사이에 칸이 말려 올라가면 최악이다. */
+  function attentionHeld() {
+    const active = doc.activeElement;
+    if (!active || active === doc.body) return false;
+    return sideEl?.contains(active) || panel.el.contains(active);
+  }
+
+  function setFolded(next) {
+    const want = Boolean(next) && !attentionHeld();
+    if (want === folded) return;
+    folded = want;
+    sideEl?.classList.toggle('is-folded', folded);
+    placeSide();
+  }
+
+  function poke() {
+    setFolded(false);
+    if (idleTimer) clearTimeout(idleTimer);
+    if (!sideEl || sideEl.hidden) { idleTimer = null; return; }
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (attentionHeld()) { poke(); return; }   // 치는 중이면 그냥 다시 센다
+      setFolded(true);
+    }, IDLE_FOLD_MS);
+  }
+
+  /** 접혔을 때 보여 줄 줄들. 그림 위에 얹는 글이라 상자도 배경도 없다. */
+  function setSideSummary(lines) {
+    sideHost();
+    const rows = (Array.isArray(lines) ? lines : []).map(v => String(v || '').trim()).filter(Boolean);
+    sideSummaryEl.innerHTML = rows.map(v => `<span>${escHtml(v)}</span>`).join('');
+    sideSummaryEl.classList.toggle('is-empty', rows.length === 0);
   }
 
   function placeSide() {
@@ -293,18 +345,25 @@ export function createRemoteController({
     placeBeside(sideEl, panelRect, panelRect.top);
   }
 
+  /** 시험·바깥에서 상태를 물을 때. */
+  function sideFolded() {
+    return folded;
+  }
+
   /** 보조 판에 조각을 **쌓는다**(믹스 큐 + 그 아래 PE 빠른 수정). 부를 때마다 비운다. */
   function mountSide(...nodes) {
     const host = sideHost();
     host.innerHTML = '';
     nodes.flat().forEach(node => { if (node) host.appendChild(node); });
+    host.appendChild(sideSummaryEl);   // 접혔을 때만 보이는 요약 - 늘 마지막에 둔다
     return host;
   }
 
   function showSide(open) {
     const host = sideHost();
     host.hidden = !open;
-    if (open) placeSide();
+    if (open) { placeSide(); poke(); }
+    else if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     return !host.hidden;
   }
 
@@ -377,6 +436,10 @@ export function createRemoteController({
     showSide,
     placeSide,
     sideRect,
+    // 가만히 두면 접히고, 접힌 동안 이 줄들을 아주 작게 보여 준다.
+    setSideSummary,
+    sideFolded,
+    foldSideNow: () => setFolded(true),
     /** 믹스 블럭처럼 **창이 아닌 것** 옆에 확대 보기를 띄울 때. */
     showZoomBeside: (target, info, anchorRect) => showZoom(target, info, anchorRect),
     hideZoom: () => hideZoom(),

@@ -21,6 +21,9 @@ export function createArtistThumbController({
   setPeField = null,
   getPePreset = () => '',
   requestPeState = () => {},
+  // 리모컨을 켜면 오른쪽 화면을 Result 로 보낸다(사용자 지정) - 조각이 창으로 빠져
+  // 나가 이 탭에는 자리 표시만 남기 때문이다.
+  showResultTab = () => {},
 }) {
   const modeEl = document.getElementById('artistThumbMode');
   const filterEl = document.getElementById('artistThumbFilter');
@@ -2401,6 +2404,9 @@ export function createArtistThumbController({
       }
       remoteOnboarded = true;
       syncRemoteSelectTitles();
+      // 조각을 실제로 옮긴 뒤에만 옮겨 간다. 끌 때는 되돌리지 않는다 - 그때쯤이면
+      // 사용자가 다른 것을 보고 있고, 화면을 낚아채는 쪽이 더 나쁘다.
+      showResultTab();
     } else {
       remoteOnboarded = false;
       // 믹스 판은 리모컨에 붙어 있다 - 창이 내려가면 같이 내린다.

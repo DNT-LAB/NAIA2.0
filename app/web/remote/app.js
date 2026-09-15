@@ -812,6 +812,8 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260915-peq
       isAnimaArtistMode,
       // 리모컨은 더 늦게 실린다(둘 다 지연 로드) - 그때그때 물어본다.
       getRemoteController: () => remoteController,
+      // 리모컨을 켜면 Result 로 보낸다(사용자 지정).
+      showResultTab: () => { try { switchRightTab('result'); } catch (_) {} },
       // 믹스 판 아래 PE 빠른 수정. `/pe` 임시 편집창과 **같은 길**을 쓴다.
       getPeField: key => String(slashPeState()[key] || ''),
       setPeField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),

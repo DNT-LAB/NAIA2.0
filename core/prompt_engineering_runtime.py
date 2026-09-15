@@ -3,6 +3,7 @@ import random
 import re
 from typing import Any, Set
 
+from core.artist_anchor import expand_tags as expand_anchor_tags
 from core.prompt_context import PromptContext
 from core.prompt_engineering_settings import (
     get_prompt_engineering_store,
@@ -287,6 +288,8 @@ class PromptEngineeringHeadlessPostHook:
                 "post_prompt": split_tags_smart(session_override.get("post_prompt", "")),
                 "auto_hide": split_tags_smart(session_override.get("auto_hide", "")),
                 "preprocessing_options": dict(session_override.get("preprocessing_options") or {}),
+                # 앵커 그룹은 오버라이드에 얹혀 온다 - 수명·복원 경로를 하나로 둔다.
+                "anchor_groups": dict(session_override.get("anchor_groups") or {}),
             }
 
         controller = getattr(self.app_context, "middle_section_controller", None)
@@ -330,6 +333,12 @@ class PromptEngineeringHeadlessPostHook:
 
         prefix_tags = list(options.get("pre_prompt") or []) + list(context.prefix_tags)
         postfix_tags = list(context.postfix_tags) + list(options.get("post_prompt") or [])
+        # `<anchor:ID>` 를 그 그룹의 아티스트 태그로 갈아 끼운다(사용자 지정).
+        # ⚠️ 그룹이 없어도 부른다 - 짝 없는 표식을 **반드시** 걷어내야 한다.
+        #    남겨 두면 `<anchor:1>` 이 그대로 모델에 그려 달라고 나간다.
+        anchor_groups = options.get("anchor_groups") or {}
+        prefix_tags = expand_anchor_tags(prefix_tags, anchor_groups)
+        postfix_tags = expand_anchor_tags(postfix_tags, anchor_groups)
         main_tags = context.main_tags
         removed_tags = context.removed_tags
         source_row = context.source_row

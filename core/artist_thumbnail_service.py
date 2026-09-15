@@ -1182,17 +1182,39 @@ class ArtistThumbnailService:
                 prompt_parts.append(value)
         return ", ".join(prompt_parts).strip()
 
-    def random_prompt_override(self, artist_prompt: str, module_settings: dict | None = None) -> dict:
-        artist_value = str(artist_prompt or "").strip().rstrip(",")
-        if not artist_value:
-            raise ValueError("artist_prompt is required")
+    def random_prompt_override(
+        self,
+        artist_prompt: str,
+        module_settings: dict | None = None,
+        anchor_groups: dict | None = None,
+    ) -> dict:
+        """이번 생성 한 번에만 씌울 PE 설정.
+
+        `artist_prompt` 는 **첫 앵커보다 앞에 있는 블럭들**이다 - 예전처럼 prefix 앞에
+        붙는다. 앵커 그룹은 글에 박힌 `<anchor:ID>` 자리에서 펼쳐지므로 여기서는 그대로
+        실어 보내기만 한다(펼치는 것은 PE 훅 = `core.artist_anchor`).
+
+        ⚠️ 둘 중 **하나만** 있으면 된다. 모든 블럭이 앵커에 들어가면 앞에 붙일 것이
+           없다 - 예전 계약(`artist_prompt` 필수)이 그 경우를 막고 있었다.
+        """
+        from core.artist_anchor import normalize_groups
+
+        artist_value = str(artist_prompt or "").strip().rstrip(",").strip()
+        groups = normalize_groups(anchor_groups)
+        if not artist_value and not groups:
+            raise ValueError("artist_prompt or anchor_groups is required")
         settings = module_settings if isinstance(module_settings, dict) else {}
         pre_prompt = str(settings.get("pre_prompt") or "").strip()
+        if artist_value:
+            merged_pre = f"{artist_value}, {pre_prompt}" if pre_prompt else artist_value
+        else:
+            merged_pre = pre_prompt
         return {
-            "pre_prompt": f"{artist_value}, {pre_prompt}" if pre_prompt else artist_value,
+            "pre_prompt": merged_pre,
             "post_prompt": str(settings.get("post_prompt") or ""),
             "auto_hide": str(settings.get("auto_hide_prompt") or settings.get("auto_hide") or ""),
             "preprocessing_options": dict(settings.get("preprocessing_options") or {}),
+            "anchor_groups": groups,
         }
 
     def _resolution_allowed(self, width: int, height: int) -> bool:

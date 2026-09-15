@@ -282,8 +282,13 @@ def register_artist_thumbnail_routes(
         if not isinstance(payload, dict):
             payload = {}
         artist_prompt = str(payload.get("artist_prompt") or "").strip()
-        if not artist_prompt:
-            return JSONResponse({"error": "artist_prompt is required"}, status_code=400)
+        # 앵커 그룹이 오면 선행 아티스트는 비어 있을 수 있다(전부 앵커 안에 들어간 경우).
+        raw_groups = payload.get("anchor_groups")
+        if raw_groups is not None and not isinstance(raw_groups, dict):
+            return JSONResponse({"error": "anchor_groups must be an object"}, status_code=400)
+        if not artist_prompt and not raw_groups:
+            return JSONResponse(
+                {"error": "artist_prompt or anchor_groups is required"}, status_code=400)
         try:
             from core.prompt_engineering_settings import get_prompt_engineering_store
 
@@ -294,6 +299,7 @@ def register_artist_thumbnail_routes(
                 artist_thumbnail_service(session_context).random_prompt_override,
                 artist_prompt,
                 module_settings,
+                raw_groups,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)

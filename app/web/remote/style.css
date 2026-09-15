@@ -29363,7 +29363,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   background: rgba(255,255,255,0.03); cursor: grab; user-select: none;
 }
 .mixq-block:hover { border-color: var(--accent); }
-.mixq-block.is-selected { border-color: #ffe07a; background: rgba(255, 224, 122, 0.10); }
+/* ⚠️ 상태 셋이 **서로 다른 종류의 신호**여야 한다. 전에는 선택도 임시도 '테두리가
+   다르다' 라 구분이 안 됐다(제보). 선택 = 왼쪽 레일 · 임시 = 점선+배지 · 비활성 = 반투명. */
+.mixq-block.is-selected {
+  border-color: rgba(255, 224, 122, 0.55);
+  background: rgba(255, 224, 122, 0.16);
+  box-shadow: inset 3px 0 0 0 #ffe07a;
+  padding-left: 9px;                 /* 레일이 먹은 만큼 (6 + 3) */
+}
 /* 비활성 - 반투명하되 **끌 수는 있다**(사용자 지정). 조립에서만 빠진다. */
 .mixq-block.is-off { opacity: 0.42; }
 .mixq-block.is-temp { border-style: dashed; }

@@ -130,8 +130,17 @@ export function createMixQueuePanel({
         ${b.temp ? '<span class="mixq-badge">임시</span>' : ''}
       </div>`;
     }).join('');
+    paintFoot();
+  }
+
+  /** 아래 단추는 **대상이 있을 때만** 살아난다 - 단추가 켜지는 것이 곧 '고른 것이
+   *  무엇에 쓰이는지' 의 설명이다(상태가 뜻을 못 전달한다는 제보). */
+  function paintFoot() {
     const commit = el.querySelector('[data-mixq-act="commit"]');
     if (commit) commit.disabled = !tempBlock();
+    const picked = blocks.filter(b => b.selected).length;
+    el.querySelectorAll('[data-mixq-act="remove"], [data-mixq-act="disable"]')
+      .forEach(btn => { btn.disabled = picked === 0; });
   }
 
   function refresh() {
@@ -238,6 +247,7 @@ export function createMixQueuePanel({
     if (!block) return;
     block.selected = !block.selected;
     host.classList.toggle('is-selected', block.selected);
+    paintFoot();   // ⚠️ 여기서 render() 를 부르면 스크롤이 튄다 - 단추만 다시 그린다.
   });
 
   listEl.addEventListener('contextmenu', event => {

@@ -787,7 +787,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260915-mix1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260915-peq1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -812,6 +812,11 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260915-mix
       isAnimaArtistMode,
       // 리모컨은 더 늦게 실린다(둘 다 지연 로드) - 그때그때 물어본다.
       getRemoteController: () => remoteController,
+      // 믹스 판 아래 PE 빠른 수정. `/pe` 임시 편집창과 **같은 길**을 쓴다.
+      getPeField: key => String(slashPeState()[key] || ''),
+      setPeField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),
+      getPePreset: () => String(slashPeState().preset || ''),
+      requestPeState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },
     });
   })
   .catch(error => {
@@ -2191,7 +2196,7 @@ const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=2026091
 //        마지막 하나가 빠지면 닫힌다. 표시/숨김 설정을 따로 두지 않는다(규칙이 둘이면
 //        어긋난다). 지금 온보딩하는 곳은 Artists 탭 하나뿐이다. ---
 let remoteController = null;
-const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260915-mix1')
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260915-peq1')
   .then(({createRemoteController}) => {
     remoteController = createRemoteController({document, window, showToast, escHtml});
   })
@@ -11207,6 +11212,9 @@ function onModuleState(m) {
   if (m.module_id === 'prompt_engineering') {
     lastPromptEngineeringState = m;
     syncPromptEngineeringPopups();
+    // 리모컨의 빠른 수정도 같은 값을 비춘다 - 안 걸면 프리셋을 바꾼 뒤 옛 글에
+    // 도장만 새로 찍혀 나간다.
+    try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
     refreshHiresPresetSwapOptions(m);
   }
   if (m.module_id === 'chunk' && isChunkOpen()) {
@@ -13056,18 +13064,26 @@ function slashPeOptionChoice(key, title) {
   return {label: title, desc: '', current: on, toggle: true,
     run: () => { setPromptEngineeringOption(key, !on); return {stay: true}; }};
 }
-/** 작은 임시 편집창으로 PE 칸 하나를 고친다. 저장은 모듈 파라미터 + (열려 있으면) 그 칸 동기화. */
-function slashPeEditor(key, elementId, title) {
+/** PE 칸 하나를 고치는 **유일한 길**. `/pe` 임시 편집창과 리모컨의 빠른 수정이 함께 쓴다.
+ *  ⚠️ `stampedEdit` 는 낡은 편집 방지 도장이다 - 편집을 시작한 뒤 프리셋이 바뀌면 서버가
+ *     그 값을 버릴 수 있게 한다. 이 규칙이 두 곳에 있으면 한쪽이 엉뚱한 프리셋에 쓴다. */
+const PE_FIELD_ELEMENTS = {pre_prompt: 'modPrePrompt', post_prompt: 'modPostPrompt', auto_hide: 'modAutoHide'};
+function slashPeSetField(key, value, seenPreset = null) {
+  const text = String(value ?? '');
+  // 도장은 **보고 친 프리셋**이다. 상주 패널처럼 전환을 걸쳐 열려 있을 수 있는 쪽은
+  // 채울 때 기억해 둔 이름을 넘긴다 - 저장 순간의 이름을 찍으면 도장이 무의미해진다.
+  const stamp = seenPreset == null ? (slashPeState().preset || '') : String(seenPreset || '');
+  setModuleParam('prompt_engineering', key, stampedEdit(text, stamp));
+  // PE 모듈이 열려 있으면 그 칸도 맞춘다(반대 방향은 모듈 상태가 돌아올 때 온다).
+  const el = document.getElementById(PE_FIELD_ELEMENTS[key] || '');
+  if (el) el.value = text;
+}
+/** 작은 임시 편집창으로 PE 칸 하나를 고친다. */
+function slashPeEditor(key, _elementId, title) {
   return () => ({editor: {
     title,
     get: () => String(slashPeState()[key] || ''),
-    set: value => {
-      const m = slashPeState();
-      const text = String(value ?? '');
-      setModuleParam('prompt_engineering', key, stampedEdit(text, m.preset || ''));
-      const el = document.getElementById(elementId);
-      if (el) el.value = text;
-    },
+    set: value => slashPeSetField(key, value),
   }});
 }
 function slashPeChoices() {

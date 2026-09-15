@@ -29323,8 +29323,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    믹스 블럭 확대는 이 판 **옆으로** 비킨다(판 기준). */
 .rctl-side {
   position: fixed; z-index: var(--z-drag-panel-side);
-  width: 288px; display: flex; flex-direction: column; min-height: 0;
+  width: 288px; display: flex; flex-direction: column; min-height: 0; gap: 6px;
 }
+/* 판이 둘이면 줄어드는 쪽은 큐다 - 빠른 수정 칸은 제 높이를 지킨다. */
+.rctl-side > .mixq { flex: 1 1 auto; min-height: 90px; }
+.rctl-side > .peq { flex: 0 0 auto; }
 .rctl-side[hidden] { display: none !important; }
 
 .mixq {
@@ -29423,3 +29426,42 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   background: rgba(130, 150, 255, 0.22);
   color: var(--text-primary);
 }
+
+/* ══ PE 빠른 수정 (js/features/peQuickEdit.mjs) ═══════════════════════════
+   믹스 판 아래에 붙는 접이식 칸 둘. Prompt Engineering 의 prefix·postfix 를
+   그대로 비추는 부분 미러라 옷도 `.mixq` 와 같은 값을 쓴다. */
+.peq {
+  display: flex; flex-direction: column; gap: 1px; padding: 4px;
+  background: var(--bg-elevated); border: 1px solid rgba(130, 150, 255, 0.42);
+  border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.55);
+}
+.peq[hidden] { display: none !important; }
+
+.peq-row { display: flex; flex-direction: column; min-width: 0; }
+
+.peq-head {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  padding: 5px 7px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text-primary);
+  font-size: 11px; text-align: left; cursor: pointer;
+}
+.peq-head:hover { background: rgba(255,255,255,0.06); }
+.peq-caret { flex: 0 0 auto; font-size: 9px; color: var(--text-muted); }
+.peq-label {
+  flex: 0 0 auto; font-family: var(--font-mono); font-weight: 700;
+  letter-spacing: .02em;
+}
+/* 접혀 있어도 들어 있는지는 보여야 한다 - 안 그러면 열어 봐야만 안다. */
+.peq-len { flex: 1 1 auto; text-align: right; font-size: 9px; color: var(--text-muted); }
+.peq-row.is-empty .peq-len { color: var(--text-dim); }
+
+.peq-text {
+  /* ⚠️ textarea 는 [hidden] 이어도 display 가 살아 있다 - 짝 규칙이 필요하다. */
+  display: block; width: 100%; box-sizing: border-box; resize: vertical;
+  margin: 0 0 4px; padding: 5px 6px;
+  border: 1px solid var(--border-dim); border-radius: 6px; outline: none;
+  background: rgba(0,0,0,0.26); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.45;
+}
+.peq-text[hidden] { display: none !important; }
+.peq-text:focus { border-color: var(--accent); }

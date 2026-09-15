@@ -291,10 +291,11 @@ export function createRemoteController({
     placeBeside(sideEl, panelRect, panelRect.top);
   }
 
-  function mountSide(node) {
+  /** 보조 판에 조각을 **쌓는다**(믹스 큐 + 그 아래 PE 빠른 수정). 부를 때마다 비운다. */
+  function mountSide(...nodes) {
     const host = sideHost();
     host.innerHTML = '';
-    if (node) host.appendChild(node);
+    nodes.flat().forEach(node => { if (node) host.appendChild(node); });
     return host;
   }
 

@@ -15,6 +15,12 @@ export function createArtistThumbController({
   isAnimaArtistMode = null,
   // 리모컨(떠 있는 조작판). 둘 다 지연 로드라 인스턴스를 직접 받지 않고 그때그때 묻는다.
   getRemoteController = () => null,
+  // Prompt Engineering 의 부분 미러(믹스 판 아래 빠른 수정). 셋 다 app.js 가 쥔 길이다 -
+  // 특히 쓰기에는 프리셋 도장이 필요해서 여기서 만들면 안 된다.
+  getPeField = null,
+  setPeField = null,
+  getPePreset = () => '',
+  requestPeState = () => {},
 }) {
   const modeEl = document.getElementById('artistThumbMode');
   const filterEl = document.getElementById('artistThumbFilter');
@@ -114,6 +120,7 @@ export function createArtistThumbController({
   let remoteOnboarded = false;
   // 믹스 모드(리모컨 전용). 켜져 있으면 ARTIST PROMPT 칸의 주인이 **큐**로 넘어간다.
   let mixQueue = null;
+  let peQuick = null;
   let mixOn = false;
   const mixBtn = document.createElement('button');
   mixBtn.type = 'button';
@@ -2287,7 +2294,18 @@ export function createArtistThumbController({
       },
       onLeaveBlock: () => remote.hideZoom?.(),
     });
-    remote.mountSide?.(mixQueue.el);
+    // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
+    if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {
+      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20260915-peq1');
+      peQuick = createPeQuickEdit({
+        document, escHtml, showToast,
+        getField: key => getPeField(key),
+        setField: (key, text, seenPreset) => setPeField(key, text, seenPreset),
+        getPreset: () => getPePreset(),
+        requestState: () => requestPeState(),
+      });
+    }
+    remote.mountSide?.(mixQueue.el, peQuick?.el);
     return mixQueue;
   }
 
@@ -2309,7 +2327,10 @@ export function createArtistThumbController({
     mixBtn.classList.toggle('is-on', mixOn);
     mixBtn.setAttribute('aria-pressed', mixOn ? 'true' : 'false');
     queue?.setOpen(mixOn);
+    // 펼친 채 닫으면 마지막 편집이 날아간다 - 칸을 벗어난 것과 같이 친다.
+    if (!mixOn) peQuick?.flush();
     remote?.showSide?.(mixOn);
+    if (mixOn) peQuick?.sync();
     if (mixOn) {
       if (selected) queue.setTempArtist(selected.artist, selected.image_url || '');
       applyMixComposition(queue.compose());
@@ -2401,5 +2422,8 @@ export function createArtistThumbController({
     },
     handleResultMeta,
     handleResultBlob,
+    /** PE 상태가 새로 오면(프리셋 전환 등) 빠른 수정 칸도 따라가야 한다.
+     *  ⚠️ 치는 중인 칸은 건드리지 않는다 - 그 판정은 패널이 한다. */
+    syncPromptEngineering: () => peQuick?.sync(),
   };
 }

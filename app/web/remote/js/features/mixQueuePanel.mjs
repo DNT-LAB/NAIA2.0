@@ -56,6 +56,8 @@ export function createMixQueuePanel({
   // ⚠️ 이 콜백은 **큐가 원인일 때만** 부른다. 메인에서 들어온 값(`setTempWeight`)에
   //    다시 부르면 둘이 서로를 밀어 무한히 돈다.
   onTempWeight = () => {},
+  // 고정 토글(자동 접힘 끄기). 상태는 리모컨이 쥔다 - 여기서는 누른 것만 알린다.
+  onPin = () => {},
 } = {}) {
   const el = doc.createElement('div');
   el.className = 'mixq';
@@ -64,6 +66,8 @@ export function createMixQueuePanel({
     <div class="mixq-head">
       <span class="mixq-title">믹스 모드</span>
       <span class="mixq-hint">끌어서 순서 · 우클릭으로 더 보기</span>
+      <button type="button" class="mixq-pin" aria-pressed="false"
+              title="고정 - 가만히 둬도 접히지 않습니다">📌</button>
     </div>
     <div class="mixq-list" role="list"></div>
     <div class="mixq-foot">
@@ -75,6 +79,14 @@ export function createMixQueuePanel({
   `;
   const listEl = el.querySelector('.mixq-list');
   const menuEl = el.querySelector('.mixq-menu');
+  // 제목줄은 접혀도 남는 유일한 띠라, 고정 단추는 두 상태 모두에서 손이 닿는다.
+  const pinEl = el.querySelector('.mixq-pin');
+  pinEl.addEventListener('click', () => {
+    const next = pinEl.getAttribute('aria-pressed') !== 'true';
+    pinEl.setAttribute('aria-pressed', next ? 'true' : 'false');
+    pinEl.classList.toggle('is-on', next);
+    onPin(next);
+  });
 
   /** 큐. 마지막의 collab 블럭은 못 지우지만 **움직일 수는 있다**(사용자 지정). */
   let blocks = [collabBlock()];

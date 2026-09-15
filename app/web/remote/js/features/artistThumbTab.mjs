@@ -2311,6 +2311,7 @@ export function createArtistThumbController({
       onLeaveBlock: () => remote.hideZoom?.(),
       // 큐 안에서 임시 블럭의 가중치가 바뀌면 메인 손잡이도 따라간다(사용자 지정).
       onTempWeight: value => paintWeightControls(value),
+      onPin: on => remote.setSidePinned?.(on),
     });
     // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
     if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {

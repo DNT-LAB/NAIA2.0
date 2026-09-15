@@ -277,6 +277,7 @@ export function createRemoteController({
   let sideSummaryEl = null;
   let idleTimer = null;
   let folded = false;
+  let pinned = false;
 
   function sideHost() {
     if (sideEl) return sideEl;
@@ -310,7 +311,8 @@ export function createRemoteController({
   }
 
   function setFolded(next) {
-    const want = Boolean(next) && !attentionHeld();
+    // 고정해 두면 접지 않는다 - 큐를 한참 붙들고 일할 때를 위한 빗장(사용자 지정).
+    const want = Boolean(next) && !pinned && !attentionHeld();
     if (want === folded) return;
     folded = want;
     sideEl?.classList.toggle('is-folded', folded);
@@ -320,12 +322,21 @@ export function createRemoteController({
   function poke() {
     setFolded(false);
     if (idleTimer) clearTimeout(idleTimer);
-    if (!sideEl || sideEl.hidden) { idleTimer = null; return; }
+    // 고정 중에는 시계를 아예 돌리지 않는다.
+    if (pinned || !sideEl || sideEl.hidden) { idleTimer = null; return; }
     idleTimer = setTimeout(() => {
       idleTimer = null;
       if (attentionHeld()) { poke(); return; }   // 치는 중이면 그냥 다시 센다
       setFolded(true);
     }, IDLE_FOLD_MS);
+  }
+
+  /** 고정 = 자동 접힘 끄기. 켜는 순간 이미 접혀 있었다면 펴 준다. */
+  function setSidePinned(next) {
+    pinned = Boolean(next);
+    sideHost().classList.toggle('is-pinned', pinned);
+    poke();          // 켜면 펴고 시계를 멈추고, 끄면 다시 5초를 센다
+    return pinned;
   }
 
   /** 접혔을 때 보여 줄 줄들. 그림 위에 얹는 글이라 상자도 배경도 없다. */
@@ -438,6 +449,8 @@ export function createRemoteController({
     sideRect,
     // 가만히 두면 접히고, 접힌 동안 이 줄들을 아주 작게 보여 준다.
     setSideSummary,
+    setSidePinned,
+    sidePinned: () => pinned,
     sideFolded,
     foldSideNow: () => setFolded(true),
     /** 믹스 블럭처럼 **창이 아닌 것** 옆에 확대 보기를 띄울 때. */

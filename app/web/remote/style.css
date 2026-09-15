@@ -29348,7 +29348,22 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   background: rgba(130, 150, 255, 0.10);
 }
 .mixq-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
-.mixq-hint { font-size: 9px; color: var(--text-dim); margin-left: auto; }
+.mixq-hint {
+  font-size: 9px; color: var(--text-dim); margin-left: auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 고정 - 제목줄은 접혀도 남는 유일한 띠라, 두 상태 모두에서 손이 닿는다. */
+.mixq-pin {
+  flex: 0 0 auto; width: 20px; height: 18px; padding: 0; margin-left: 4px;
+  border: 1px solid transparent; border-radius: 5px; cursor: pointer;
+  background: transparent; font-size: 10px; line-height: 1;
+  filter: grayscale(1); opacity: 0.5;
+}
+.mixq-pin:hover { opacity: 0.85; }
+.mixq-pin.is-on {
+  filter: none; opacity: 1;
+  border-color: rgba(255, 224, 122, 0.55); background: rgba(255, 224, 122, 0.16);
+}
 
 .mixq-list {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;

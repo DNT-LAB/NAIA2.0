@@ -238,16 +238,25 @@ export function createMixQueuePanel({
     applyWeight(block, next);
   });
 
-  // 블럭을 누르면 고름(아래 단추들의 대상). 단추·입력칸은 제외한다.
+  /** 블럭을 누르면 고름 = 아래 두 단추의 대상. **하나만** 잡힌다(사용자 결정).
+   *  여럿을 잡게 두면 몇 개가 걸려 있는지 계속 기억해야 하는데, 한 번에 여러 개를
+   *  정리하는 일은 우클릭(블럭별 제거·비활성)이 이미 감당한다.
+   *  다른 블럭을 누르면 선택이 옮겨 가고, 같은 블럭을 다시 누르면 풀린다. */
+  function selectOnly(id) {
+    const wanted = find(id);
+    const turnOff = !wanted || wanted.selected;
+    blocks.forEach(b => { b.selected = !turnOff && b === wanted; });
+    // ⚠️ render() 를 부르면 스크롤이 튄다 - 칠만 다시 한다.
+    listEl.querySelectorAll('[data-mixq-id]').forEach(node => {
+      node.classList.toggle('is-selected', find(node.dataset.mixqId)?.selected === true);
+    });
+    paintFoot();
+  }
+
   listEl.addEventListener('click', event => {
     if (event.target.closest('[data-mixq-step], .mixq-weight')) return;
     const host = event.target.closest('[data-mixq-id]');
-    if (!host) return;
-    const block = find(host.dataset.mixqId);
-    if (!block) return;
-    block.selected = !block.selected;
-    host.classList.toggle('is-selected', block.selected);
-    paintFoot();   // ⚠️ 여기서 render() 를 부르면 스크롤이 튄다 - 단추만 다시 그린다.
+    if (host) selectOnly(host.dataset.mixqId);
   });
 
   listEl.addEventListener('contextmenu', event => {
@@ -342,16 +351,13 @@ export function createMixQueuePanel({
       refresh();
       return;
     }
-    const picked = blocks.filter(b => b.selected);
-    if (!picked.length) { showToast('블럭을 먼저 고르세요.', 'error'); return; }
+    const picked = blocks.find(b => b.selected) || null;
+    if (!picked) { showToast('블럭을 먼저 고르세요.', 'error'); return; }
     if (action === 'remove') {
-      const locked = picked.filter(b => b.locked);
-      blocks = blocks.filter(b => !(b.selected && !b.locked));
-      if (locked.length) showToast('못 지우는 블럭은 남겼습니다.', 'info');
+      if (picked.locked) { showToast('이 블럭은 지울 수 없습니다.', 'error'); return; }
+      blocks = blocks.filter(b => b !== picked);
     } else if (action === 'disable') {
-      // 하나라도 켜져 있으면 전부 끈다 - 눌렀는데 절반만 바뀌면 뭘 한 건지 모른다.
-      const anyOn = picked.some(b => b.enabled);
-      picked.forEach(b => { b.enabled = !anyOn; });
+      picked.enabled = !picked.enabled;
     }
     refresh();
   });

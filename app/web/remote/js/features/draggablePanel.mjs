@@ -63,6 +63,11 @@ export function createDraggablePanel({
   // 위치를 기억할 열쇠. 비우면 기억하지 않는다.
   storageKey = '',
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
+  // ⚠️ **크기는 이번 실행에만** 산다(사용자 지정). 앱을 다시 켜면 새 창이라 이 저장소가
+  //    비어 있고 크기가 기본값으로 돌아온다 - 새로고침(F5)에는 남는다.
+  //    자리를 기억하는 것과 규칙이 다른 이유: 화면에 안 맞는 크기가 저장되면 손잡이가
+  //    닿지 않는 자리로 가서, 고치려면 앱을 최대화해야 했다(사용자 제보).
+  sizeStorage = (typeof sessionStorage !== 'undefined' ? sessionStorage : null),
   // 처음 열릴 때의 자리. right/bottom 은 화면 오른쪽/아래에서 잰 값.
   initial = {},
   width = 300,
@@ -146,30 +151,46 @@ export function createDraggablePanel({
 
   // ── 기억 ────────────────────────────────────────────────────────────
   const memoryKey = storageKey ? `naia.dragpanel.${storageKey}` : '';
+  const sizeKey = storageKey ? `naia.dragpanel.size.${storageKey}` : '';
 
-  function readMemory() {
-    if (!memoryKey || !storage) return null;
+  function readSlot(key, box) {
+    if (!key || !box) return null;
     try {
-      const parsed = JSON.parse(storage.getItem(memoryKey) || 'null');
+      const parsed = JSON.parse(box.getItem(key) || 'null');
       return (parsed && typeof parsed === 'object') ? parsed : null;
     } catch { return null; }
   }
 
+  /** 자리(오래 간다) + 크기(이번 실행만)를 하나로 합쳐 돌려준다. */
+  function readMemory() {
+    const where = readSlot(memoryKey, storage);
+    const size = readSlot(sizeKey, sizeStorage);
+    if (!where && !size) return null;
+    return {...(where || {}), ...(size || {})};
+  }
+
   function writeMemory() {
-    if (!memoryKey || !storage) return;
-    try {
-      storage.setItem(memoryKey, JSON.stringify({
-        x: Math.round(pos.x), y: Math.round(pos.y),
-        w: Math.round(el.getBoundingClientRect().width) || width,
-        h: resizable
-          ? (collapsed ? Number.parseInt(heldHeight, 10) || 0
-                       : Math.round(el.getBoundingClientRect().height))
-          : 0,
-        // 이 표가 없으면(옛 기록 포함) 크기는 안 되살린다.
-        sized: userSized,
-        collapsed,
-      }));
-    } catch { /* 사파리 프라이빗 모드 등 - 위치를 못 외우는 것뿐이다 */ }
+    if (memoryKey && storage) {
+      try {
+        storage.setItem(memoryKey, JSON.stringify({
+          x: Math.round(pos.x), y: Math.round(pos.y),
+          collapsed,
+        }));
+      } catch { /* 사파리 프라이빗 모드 등 - 위치를 못 외우는 것뿐이다 */ }
+    }
+    if (sizeKey && sizeStorage) {
+      try {
+        sizeStorage.setItem(sizeKey, JSON.stringify({
+          w: Math.round(el.getBoundingClientRect().width) || width,
+          h: resizable
+            ? (collapsed ? Number.parseInt(heldHeight, 10) || 0
+                         : Math.round(el.getBoundingClientRect().height))
+            : 0,
+          // 이 표가 없으면(옛 기록 포함) 크기는 안 되살린다.
+          sized: userSized,
+        }));
+      } catch { /* noop */ }
+    }
   }
 
   // ── 자리 ────────────────────────────────────────────────────────────
@@ -199,10 +220,18 @@ export function createDraggablePanel({
    *     (가장자리에 걸쳐 두는 것은 사용자의 자유), 이쪽은 '처음에는 다 보여야 한다' 다.
    *     안 그러면 아래쪽 단추가 잘린 채 뜬다(실측: 866px 창 + 900px 화면). */
   function fitWholePanel(x, y) {
-    const {h: vh} = viewport();
-    const h = el.getBoundingClientRect().height || minHeight;
-    if (h <= vh - 12 && y + h > vh - 8) return {x, y: Math.max(8, vh - h - 8)};
-    return {x, y};
+    const {w: vw, h: vh} = viewport();
+    const rect = el.getBoundingClientRect();
+    const h = rect.height || minHeight;
+    const w = rect.width || width;
+    let nx = x;
+    let ny = y;
+    if (h <= vh - 12 && y + h > vh - 8) ny = Math.max(8, vh - h - 8);
+    // ⚠️ 가로도 같이 들여놓는다. 안 하면 `clampPos` 로 흘러가 72px 만 남기고 걸치는데,
+    //    그 규칙은 **끄는 중**의 것이다. 좁아진 화면에서 다시 열면 오른쪽이 - 크기
+    //    손잡이째 - 화면 밖에 놓인다(실측: 저장 x=1086, 화면 502, 490 창이 x=430).
+    if (w <= vw - 12 && x + w > vw - 8) nx = Math.max(8, vw - w - 8);
+    return {x: nx, y: ny};
   }
 
   /** 가로 하한. 보통은 `minWidth` 지만 화면이 그보다 좁으면 화면이 이긴다 -
@@ -321,6 +350,7 @@ export function createDraggablePanel({
 
   function resetGeometry() {
     if (memoryKey && storage) { try { storage.removeItem(memoryKey); } catch { /* noop */ } }
+    if (sizeKey && sizeStorage) { try { sizeStorage.removeItem(sizeKey); } catch { /* noop */ } }
     el.style.width = `${width}px`;
     el.style.height = '';
     heldHeight = '';

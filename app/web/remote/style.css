@@ -29262,6 +29262,12 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   font-size: 11px; line-height: 1.4;
   white-space: pre; overflow-x: auto; overflow-y: hidden;
 }
+/* 믹스 모드에서는 이 칸이 여러 명을 담는다 - 한 줄 `pre` 로 두면 둘째 작가부터
+   가로로 밀려 안 보인다(값은 멀쩡한데 잘린 것처럼 읽힌다는 제보). 그때만 접어 보인다. */
+.dragpanel.rctl.is-mix .rctl-artist-head .rctl-name {
+  height: 54px; white-space: pre-wrap; word-break: break-word;
+  overflow-x: hidden; overflow-y: auto;
+}
 .dragpanel.rctl .rctl-artist-head .rctl-weight {
   display: flex; align-items: center; gap: 6px; min-width: 0;
 }
@@ -29419,9 +29425,16 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-menu button:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
 .mixq-menu button:disabled { opacity: 0.4; cursor: default; }
 
-/* 페이지 줄의 믹스 토글(Next 와 Go 사이). */
-.dragpanel.rctl .rctl-pager .rctl-mix { flex: 0 0 auto; min-width: 92px; padding: 4px 8px; font-size: 10px; }
-.dragpanel.rctl .rctl-pager .rctl-mix.is-on {
+/* 페이지 줄의 믹스 토글(Next 와 Go 사이).
+   ⚠️ 클래스는 `.rctl-mix-btn` 이다 - 전에 `.rctl-mix` 로 적어 두어 글꼴도 ON 색도
+      통째로 안 먹었다(혼자 폰트가 다르다는 제보). */
+.dragpanel.rctl .rctl-pager .rctl-mix-btn {
+  /* 글꼴은 이웃(Prev/Next/Go)과 같아야 한다 - 10px 로 줄여 뒀더니 혼자 다르게 보였다.
+     ⚠️ 단추는 줄의 font-size 를 **물려받지 않는다**(폼 컨트롤 기본값 13.3px) -
+        이웃들처럼 11px 을 직접 줘야 한다. */
+  flex: 0 0 auto; min-width: 104px; padding: 4px 8px; font-size: 11px;
+}
+.dragpanel.rctl .rctl-pager .rctl-mix-btn.is-on {
   border-color: rgba(130, 150, 255, 0.75);
   background: rgba(130, 150, 255, 0.22);
   color: var(--text-primary);

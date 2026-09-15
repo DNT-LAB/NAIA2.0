@@ -1312,16 +1312,22 @@ export function createArtistThumbController({
     activeOptionsMode = nextMode;
   }
 
-  function setArtistWeight(value) {
+  /** 손잡이와 숫자칸에 값을 **그리기만** 한다. 되돌려 밀지 않는다 -
+   *  큐에서 올라온 값을 여기서 다시 큐로 보내면 둘이 서로를 밀어 무한히 돈다. */
+  function paintWeightControls(value) {
     const raw = Number.parseFloat(String(value ?? '1'));
     const next = Number.isFinite(raw) ? Math.max(0, Math.min(5, raw)) : 1;
     const display = formatArtistWeight(next) || '0';
     // 입력 중에는 재포맷 writeback 금지 — 타이핑마다 .value를 덮어쓰면 캐럿이 끝으로 튄다
     // (type=number라 selectionStart 복원 불가). 커밋(change/blur) 시에만 정규화한다.
     if (weightInput && document.activeElement !== weightInput) weightInput.value = display;
-    if (weightSlider) {
-      weightSlider.value = String(Math.max(0, Math.min(2, next)));
-    }
+    // ⚠️ 손잡이는 0~2 지만 큐는 음수도 받는다 - 범위 밖이면 끝에 붙여 둔다.
+    if (weightSlider) weightSlider.value = String(Math.max(0, Math.min(2, next)));
+    return next;
+  }
+
+  function setArtistWeight(value) {
+    const next = paintWeightControls(value);
     // 믹스 모드에서는 슬라이더가 **임시 블럭**을 민다(죽은 손잡이를 남기지 않는다).
     if (mixOn && mixQueue?.setTempWeight(next)) return;
     syncPromptFormat();
@@ -2293,6 +2299,8 @@ export function createArtistThumbController({
         remote.showZoomBeside?.(element, {src, title: block.artist, note: ''}, remote.sideRect?.());
       },
       onLeaveBlock: () => remote.hideZoom?.(),
+      // 큐 안에서 임시 블럭의 가중치가 바뀌면 메인 손잡이도 따라간다(사용자 지정).
+      onTempWeight: value => paintWeightControls(value),
     });
     // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
     if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {
@@ -2326,6 +2334,8 @@ export function createArtistThumbController({
     mixBtn.textContent = `믹스 모드 ${mixOn ? 'ON' : 'OFF'}`;
     mixBtn.classList.toggle('is-on', mixOn);
     mixBtn.setAttribute('aria-pressed', mixOn ? 'true' : 'false');
+    // 이 칸이 여러 명을 담게 되니 줄바꿈을 허용한다(옷은 `.is-mix` 가 쥔다).
+    mixBtn.closest('.dragpanel')?.classList.toggle('is-mix', mixOn);
     queue?.setOpen(mixOn);
     // 펼친 채 닫으면 마지막 편집이 날아간다 - 칸을 벗어난 것과 같이 친다.
     if (!mixOn) peQuick?.flush();

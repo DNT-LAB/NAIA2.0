@@ -21,21 +21,24 @@
 const COLLAB_ID = '__collab__';
 const HOLD_FIRST_MS = 320;     // 누르고 있을 때 반복이 시작되기까지
 const HOLD_STEP_MS = 100;      // 그 뒤 0.1초마다 (사용자 지정)
-const STEP = 0.1;
+const STEP = 0.01;             // 한 번 누르면 (사용자 지정)
+// 길게 누를 때는 0.1초당 **0.1**(사용자 지정). 0.1 은 0.01 의 배수라 눈금이 어긋나지
+// 않는다 - 톡 누르면 미세 조정, 쥐고 있으면 성큼 움직인다.
+const HOLD_STEP = 0.1;
 
 let seq = 0;
 const nextId = () => `mq${++seq}`;
 
-/** 0.1 씩 더하면 부동소수 찌꺼기가 붙는다(0.7000000000000001). 한 자리로 고정한다. */
+/** 0.01 씩 더하면 부동소수 찌꺼기가 붙는다(0.7000000000000001). 두 자리로 고정한다. */
 function roundStep(value) {
   const n = Number.parseFloat(value);
   if (!Number.isFinite(n)) return 1;
-  return Math.round(n * 10) / 10;
+  return Math.round(n * 100) / 100;
 }
 
+/** 꼬리 0 은 뗀다 - 44px 칸에 `0.90` 보다 `0.9` 가 낫다. */
 function weightText(value) {
-  const n = roundStep(value);
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  return String(roundStep(value));
 }
 
 export function createMixQueuePanel({
@@ -48,6 +51,10 @@ export function createMixQueuePanel({
   onChange = () => {},        // (조립된 문자열) => void
   onHoverBlock = () => {},    // (element, {artist}) => void   확대 보기 요청
   onLeaveBlock = () => {},
+  // 임시 블럭의 가중치가 큐 안에서 바뀌었다 - 메인 슬라이더도 따라와야 한다(사용자 지정).
+  // ⚠️ 이 콜백은 **큐가 원인일 때만** 부른다. 메인에서 들어온 값(`setTempWeight`)에
+  //    다시 부르면 둘이 서로를 밀어 무한히 돈다.
+  onTempWeight = () => {},
 } = {}) {
   const el = doc.createElement('div');
   el.className = 'mixq';
@@ -132,13 +139,22 @@ export function createMixQueuePanel({
   }
 
   // ── 가중치 ────────────────────────────────────────────────────────────
-  function bump(id, direction) {
+  /** 가중치를 바꾸는 **모든 길**이 여기로 모인다 - 임시 블럭이면 메인 가중치도
+   *  같이 움직여야 한다(사용자 지정). 길이 셋(+/- · 타이핑 · 커밋)이라 한 곳에
+   *  모으지 않으면 넷째 길이 생길 때 또 빠뜨린다. */
+  function applyWeight(block, value) {
+    block.weight = value;
+    if (block.temp) onTempWeight(block.weight);
+    emit();          // ⚠️ 여기서 render() 를 부르면 누르고 있는 단추가 사라진다
+  }
+
+  function bump(id, direction, step = STEP) {
     const block = find(id);
     if (!block) return;
-    block.weight = roundStep(block.weight + direction * STEP);
+    const next = roundStep(block.weight + direction * step);
     const input = listEl.querySelector(`[data-mixq-id="${CSS.escape(id)}"] .mixq-weight`);
-    if (input) input.value = weightText(block.weight);
-    emit();          // ⚠️ 여기서 render() 를 부르면 누르고 있는 단추가 사라진다
+    if (input) input.value = weightText(next);
+    applyWeight(block, next);
   }
 
   let holdTimer = null;
@@ -156,7 +172,7 @@ export function createMixQueuePanel({
     // 한 번 누르려던 것이 두세 번 먹으면 미세 조정이 안 된다.
     holdTimer = setTimeout(() => {
       holdTimer = null;
-      holdRepeat = setInterval(() => bump(id, direction), HOLD_STEP_MS);
+      holdRepeat = setInterval(() => bump(id, direction, HOLD_STEP), HOLD_STEP_MS);
     }, HOLD_FIRST_MS);
   }
 
@@ -200,16 +216,16 @@ export function createMixQueuePanel({
     if (!block) return;
     // 타이핑 도중에는 값을 다시 쓰지 않는다 - 캐럿이 끝으로 튄다.
     const parsed = Number.parseFloat(input.value);
-    if (Number.isFinite(parsed)) { block.weight = parsed; emit(); }
+    if (Number.isFinite(parsed)) applyWeight(block, parsed);
   });
   listEl.addEventListener('change', event => {
     const input = event.target.closest('.mixq-weight');
     if (!input) return;
     const block = find(input.closest('[data-mixq-id]')?.dataset.mixqId || '');
     if (!block) return;
-    block.weight = roundStep(input.value);
-    input.value = weightText(block.weight);
-    emit();
+    const next = roundStep(input.value);
+    input.value = weightText(next);
+    applyWeight(block, next);
   });
 
   // 블럭을 누르면 고름(아래 단추들의 대상). 단추·입력칸은 제외한다.
@@ -367,6 +383,7 @@ export function createMixQueuePanel({
     setTempWeight(value) {
       const temp = tempBlock();
       if (!temp) return false;
+      // ⚠️ 메인에서 들어온 값이다 - `onTempWeight` 로 되돌려 부르지 않는다(서로 민다).
       temp.weight = roundStep(value);
       const input = listEl.querySelector(`[data-mixq-id="${CSS.escape(temp.id)}"] .mixq-weight`);
       if (input) input.value = weightText(temp.weight);

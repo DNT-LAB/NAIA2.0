@@ -2164,7 +2164,11 @@ export function createArtistThumbController({
     copyBtn?.addEventListener('click', copySelected);
     insertBtn?.addEventListener('click', insertSelected);
     generateBtn?.addEventListener('click', generateSelected);
-    randomGenerateBtn?.addEventListener('click', generateWithRandomPrompt);
+    randomGenerateBtn?.addEventListener('click', () => {
+      // 생성을 눌렀으면 이제 그림을 볼 차례다 - 판은 스스로 비켜 준다(사용자 지정).
+      getRemoteController?.()?.foldSideNow?.();
+      generateWithRandomPrompt();
+    });
     resultExpandBtn?.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();

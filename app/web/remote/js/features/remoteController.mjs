@@ -294,6 +294,14 @@ export function createRemoteController({
         target.addEventListener(type, poke, {passive: true});
       }
     }
+    // 바깥을 누르면 곧바로 말아 올린다(사용자 지정) - 5초를 더 기다릴 이유가 없다.
+    // ⚠️ 고정(pin)은 그대로 이긴다. 바깥 클릭이 고정을 뚫으면 고정이 무의미해진다 -
+    //    결국 언젠가는 바깥을 누르기 때문이다.
+    doc.addEventListener('pointerdown', event => {
+      if (!sideEl || sideEl.hidden || folded) return;
+      const inside = sideEl.contains(event.target) || panel.el.contains(event.target);
+      if (!inside) setFolded(true);
+    }, true);
     return sideEl;
   }
 

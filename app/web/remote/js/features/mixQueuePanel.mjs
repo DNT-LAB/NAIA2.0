@@ -98,7 +98,7 @@ export function createMixQueuePanel({
 
   /** 큐. 마지막의 collab 블럭은 못 지우지만 **움직일 수는 있다**(사용자 지정). */
   let blocks = [collabBlock()];
-  let dragId = '';
+  let drag = null;       // {id, node, startY, moved, pointerId}
   let menuFor = '';
   let menuAt = -1;
 
@@ -211,7 +211,7 @@ export function createMixQueuePanel({
     const title = b.broken
       ? `${anchorToken(b.anchorId)} 를 프롬프트에서 찾지 못했습니다 - 우클릭으로 되돌리세요`
       : `${anchorToken(b.anchorId)} 자리에 아래 태그들이 들어갑니다`;
-    return `<div class="${classes.join(' ')}" role="listitem" draggable="true"
+    return `<div class="${classes.join(' ')}" role="listitem"
                  data-mixq-id="${escHtml(b.id)}" title="${escHtml(title)}">
       <span class="mixq-anchor-mark">${escHtml(anchorToken(b.anchorId))}</span>
       ${b.syncWeights ? '<span class="mixq-anchor-tag">동기화</span>' : ''}
@@ -228,7 +228,7 @@ export function createMixQueuePanel({
       if (b.temp) classes.push('is-temp');
       if (b.locked) classes.push('is-locked');
       const name = b.withPrefix ? `artist:${b.artist}` : b.artist;
-      return `<div class="${classes.join(' ')}" role="listitem" draggable="true"
+      return `<div class="${classes.join(' ')}" role="listitem"
                    data-mixq-id="${escHtml(b.id)}" title="${escHtml(name)}">
         <button type="button" class="mixq-step" data-mixq-step="-1" aria-label="가중치 내리기">−</button>
         <input class="mixq-weight" type="text" inputmode="decimal"
@@ -399,6 +399,7 @@ export function createMixQueuePanel({
   }
 
   listEl.addEventListener('click', event => {
+    if (swallowClick) { swallowClick = false; return; }
     if (event.target.closest('[data-mixq-step], .mixq-weight')) return;
     const host = event.target.closest('[data-mixq-id]');
     if (host) selectOnly(host.dataset.mixqId);
@@ -467,53 +468,79 @@ export function createMixQueuePanel({
     if (!event.target.closest('.mixq-menu')) closeMenu();
   }, true);
 
-  // 끌어서 순서 바꾸기. 임시 블럭과 collab 블럭도 움직인다(사용자 지정).
-  listEl.addEventListener('dragstart', event => {
+  // ── 끌어서 순서 바꾸기 ────────────────────────────────────────────────
+  //  ⚠️ HTML5 drag-and-drop 을 **쓰지 않는다**. 그쪽은 브라우저가 유령 그림을 따로
+  //     그리고 줄 자체는 제자리에 있어서, 손이 간 곳과 보이는 것이 어긋난다
+  //     ("상당히 부자연스럽네요"). 덜 부드럽더라도 **이동을 따라가게** 한다
+  //     (사용자 지정) - 이웃의 가운데를 지나는 순간 줄을 그 자리로 옮긴다.
+  //     유령도 드롭 표시도 없다. 보이는 것이 곧 결과다.
+  const DRAG_SLOP = 4;   // 이만큼은 움직여야 끌기다 - 아니면 고르기(클릭)가 죽는다
+
+  /** 끌기가 끝난 뒤 따라오는 click 한 번을 삼킨다 - 안 그러면 놓자마자 선택이 토글된다. */
+  let swallowClick = false;
+
+  function blocksFromDom() {
+    const byId = new Map(blocks.map(b => [b.id, b]));
+    const order = [...listEl.children].map(node => node.dataset.mixqId);
+    const next = order.map(id => byId.get(id)).filter(Boolean);
+    // 목록에 없던 것이 있으면 버리지 않는다(방어) - 길이가 맞을 때만 갈아 끼운다.
+    if (next.length === blocks.length) blocks = next;
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag.node.classList.remove('is-dragging');
+    try { listEl.releasePointerCapture(drag.pointerId); } catch { /* 이미 풀림 */ }
+    drag = null;
+    if (!moved) return;
+    swallowClick = true;
+    refresh();          // 순서가 바뀌었으니 조립을 다시 낸다
+  }
+
+  listEl.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    // 단추·입력칸에서 시작한 것은 끌기가 아니다(+/- 는 누르고 있는 조작이 따로 있다).
+    if (event.target.closest('[data-mixq-step], .mixq-weight, .mixq-menu')) return;
     const host = event.target.closest('[data-mixq-id]');
     if (!host) return;
-    dragId = host.dataset.mixqId;
-    host.classList.add('is-dragging');
-    try { event.dataTransfer.setData('text/plain', dragId); } catch { /* 일부 브라우저 */ }
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    drag = {id: host.dataset.mixqId, node: host, startY: event.clientY,
+            moved: false, pointerId: event.pointerId};
   });
-  listEl.addEventListener('dragend', () => {
-    dragId = '';
-    listEl.querySelectorAll('.is-dragging, .is-drop-before, .is-drop-after')
-      .forEach(node => node.classList.remove('is-dragging', 'is-drop-before', 'is-drop-after'));
-  });
-  listEl.addEventListener('dragover', event => {
-    if (!dragId) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    const host = event.target.closest('[data-mixq-id]');
-    listEl.querySelectorAll('.is-drop-before, .is-drop-after')
-      .forEach(node => node.classList.remove('is-drop-before', 'is-drop-after'));
-    if (!host || host.dataset.mixqId === dragId) return;
-    const rect = host.getBoundingClientRect();
-    host.classList.add(event.clientY < rect.top + rect.height / 2 ? 'is-drop-before' : 'is-drop-after');
-  });
-  listEl.addEventListener('drop', event => {
-    if (!dragId) return;
-    event.preventDefault();
-    const host = event.target.closest('[data-mixq-id]');
-    const from = blocks.findIndex(b => b.id === dragId);
-    if (from < 0) return;
-    const moved = blocks[from];
-    blocks.splice(from, 1);
-    let to = blocks.length;
-    if (host && host.dataset.mixqId !== dragId) {
-      const rect = host.getBoundingClientRect();
-      const at = blocks.findIndex(b => b.id === host.dataset.mixqId);
-      to = at < 0 ? blocks.length : at + (event.clientY < rect.top + rect.height / 2 ? 0 : 1);
+
+  listEl.addEventListener('pointermove', event => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.abs(event.clientY - drag.startY) < DRAG_SLOP) return;
+      drag.moved = true;
+      drag.node.classList.add('is-dragging');
+      onLeaveBlock();                       // 끄는 동안 확대 보기는 방해만 된다
+      try { listEl.setPointerCapture(drag.pointerId); } catch { /* 옛 브라우저 */ }
     }
-    blocks.splice(to, 0, moved);
-    dragId = '';
-    refresh();
+    event.preventDefault();
+    const over = [...listEl.children].find(node => {
+      if (node === drag.node) return false;
+      const rect = node.getBoundingClientRect();
+      return event.clientY >= rect.top && event.clientY <= rect.bottom;
+    });
+    if (!over) return;
+    const rect = over.getBoundingClientRect();
+    const before = event.clientY < rect.top + rect.height / 2;
+    const want = before ? over : over.nextSibling;
+    if (want === drag.node) return;
+    // ⚠️ 여기서 render() 를 부르면 끌고 있던 노드가 사라져 끌기가 죽는다.
+    //    DOM 을 직접 옮기고, 목록은 그 순서에서 다시 읽는다.
+    listEl.insertBefore(drag.node, want);
+    blocksFromDom();
   });
+
+  doc.addEventListener('pointerup', endDrag);
+  doc.addEventListener('pointercancel', endDrag);
 
   // 블럭에 마우스를 올리면 확대 보기(3-f). 격자 쪽과 달리 **믹스 판 옆**에 뜬다.
   listEl.addEventListener('pointerover', event => {
     if (event.pointerType === 'touch') return;
+    if (drag?.moved) return;        // 끄는 중에는 확대 보기가 방해만 된다
     const host = event.target.closest('[data-mixq-id]');
     if (!host) { onLeaveBlock(); return; }
     const block = find(host.dataset.mixqId);

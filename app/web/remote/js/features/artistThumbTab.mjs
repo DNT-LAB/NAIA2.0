@@ -112,6 +112,15 @@ export function createArtistThumbController({
   let artistTabActive = document.querySelector('[data-right-pane="artists"]')?.classList.contains('active') || false;
   // 리모컨에 올라가 있는가. 올라가 있으면 탭이 안 떠 있어도 격자는 **보이는 중**이다.
   let remoteOnboarded = false;
+  // 믹스 모드(리모컨 전용). 켜져 있으면 ARTIST PROMPT 칸의 주인이 **큐**로 넘어간다.
+  let mixQueue = null;
+  let mixOn = false;
+  const mixBtn = document.createElement('button');
+  mixBtn.type = 'button';
+  mixBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
+  mixBtn.textContent = '믹스 모드 OFF';
+  mixBtn.setAttribute('aria-pressed', 'false');
+  mixBtn.title = '아티스트 여러 명을 순서·가중치와 함께 쌓습니다. 켜면 창 옆에 큐가 열립니다.';
 
   /** 격자가 사람 눈에 닿아 있는가 - 탭이 떠 있거나, 리모컨에 올라가 있거나.
    *  ⚠️ `artistTabActive` 하나로 판단하면 리모컨에 올려 둔 격자가 조용히 낡는다. */
@@ -203,27 +212,42 @@ export function createArtistThumbController({
     return Number(value).toFixed(2).replace(/\.?0+$/, '');
   }
 
-  function formatArtistPrompt(artist) {
+  /** 아티스트 토큰 하나. **서식은 이 함수만 만든다** - 믹스 큐도 이것을 받아 쓴다.
+   *  두 곳에서 만들면 반드시 어긋난다(모드별 표기가 셋이다).
+   *  @param withPrefix `artist:` 를 붙일지(NAI 에서만 뜻이 있다 - SD 계열엔 그런 접두어가 없다)
+   */
+  function formatArtistToken(artist, weight = 1, options = {}) {
     const name = String(artist || '').trim();
     if (!name) return '';
+    const withPrefix = options.withPrefix !== false;
+    const raw = Number.parseFloat(weight);
+    const value = Number.isFinite(raw) ? raw : 1;
+    const weighted = value !== 1;
+    const formattedWeight = weighted ? formatArtistWeight(value) : '';
     try {
-      const weight = artistWeightValue();
-      if (weight == null) return baseArtistPrompt(name);
-      const formattedWeight = formatArtistWeight(weight);
-      if (!formattedWeight) return baseArtistPrompt(name);
-      if (currentGenerationMode() === 'NAI') return `${formattedWeight}::artist:${name} ::`;
-      const escaped = escapeStableDiffusionArtistName(name);
-      if (usesAnimaArtistSyntax()) {
-        return `(@${escaped}:${formattedWeight})`;
+      if (currentGenerationMode() === 'NAI') {
+        const body = withPrefix ? `artist:${name}` : name;
+        return weighted && formattedWeight ? `${formattedWeight}::${body} ::` : body;
       }
-      return `(${escaped}:${formattedWeight})`;
+      const escaped = escapeStableDiffusionArtistName(name);
+      const body = usesAnimaArtistSyntax() ? `@${escaped}` : escaped;
+      return weighted && formattedWeight ? `(${body}:${formattedWeight})` : body;
     } catch (_) {
       return baseArtistPrompt(name);
     }
   }
 
+  function formatArtistPrompt(artist) {
+    const name = String(artist || '').trim();
+    if (!name) return '';
+    const weight = artistWeightValue();
+    return formatArtistToken(name, weight == null ? 1 : weight, {withPrefix: true});
+  }
+
   function syncPromptFormat() {
     syncOptionsForCurrentMode();
+    // 믹스 모드에서는 칸의 주인이 큐다 - 여기서 덮으면 조립 결과가 날아간다.
+    if (mixOn && mixQueue) { applyMixComposition(mixQueue.compose()); return; }
     if (!selected || !positiveEl) return;
     const nextValue = formatArtistPrompt(selected.artist);
     if (!positiveAutoValue || positiveEl.value === positiveAutoValue) {
@@ -942,7 +966,10 @@ export function createArtistThumbController({
 
   function selectArtist(item, options = {}) {
     selected = item;
-    if (positiveEl) {
+    if (mixOn && mixQueue) {
+      // 격자에서 고른 작가는 **임시 블럭** 한 자리를 차지하고 다음 선택에 갈린다.
+      mixQueue.setTempArtist(item.artist, item.image_url || '');
+    } else if (positiveEl) {
       positiveAutoValue = formatArtistPrompt(item.artist);
       positiveEl.value = positiveAutoValue;
     }
@@ -1288,6 +1315,8 @@ export function createArtistThumbController({
     if (weightSlider) {
       weightSlider.value = String(Math.max(0, Math.min(2, next)));
     }
+    // 믹스 모드에서는 슬라이더가 **임시 블럭**을 민다(죽은 손잡이를 남기지 않는다).
+    if (mixOn && mixQueue?.setTempWeight(next)) return;
     syncPromptFormat();
   }
 
@@ -2009,6 +2038,7 @@ export function createArtistThumbController({
     modeEl?.addEventListener('change', syncRemoteSelectTitles);
     filterEl?.addEventListener('change', syncRemoteSelectTitles);
     remoteBtn?.addEventListener('click', () => setRemote(!remoteOnboarded));
+    mixBtn.addEventListener('click', () => { void setMixMode(!mixOn); });
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     gridEl?.addEventListener('click', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
@@ -2185,6 +2215,9 @@ export function createArtistThumbController({
           {node: prevBtn, tag: 'prev'},
           {node: pageLabel, tag: 'page'},
           {node: nextBtn, tag: 'next'},
+          // Next 와 Go 사이의 빈 자리(사용자 지정). 리모컨에서만 만든 단추라 원래
+          // 자리가 없다 - `lift` 가 부모 없는 노드는 그냥 지나가고 창과 함께 사라진다.
+          {node: mixBtn, tag: 'mix'},
           {node: goto, tag: 'goto'},
         ],
       },
@@ -2225,6 +2258,65 @@ export function createArtistThumbController({
     };
     label(modeEl, '썸네일 모드');
     label(filterEl, '필터');
+  }
+
+  /** 믹스 큐가 조립한 글을 ARTIST PROMPT 칸으로 보낸다(사용자 지정 - 그 칸이
+   *  Generate 와 Generate with Random Prompt 가 쓰는 자리다). */
+  function applyMixComposition(text) {
+    if (!positiveEl) return;
+    positiveEl.value = text;
+    positiveAutoValue = text;
+  }
+
+  async function ensureMixQueue() {
+    if (mixQueue) return mixQueue;
+    const remote = getRemoteController?.();
+    if (!remote) return null;
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260915-mix1');
+    mixQueue = createMixQueuePanel({
+      document,
+      escHtml,
+      showToast,
+      formatToken: (artist, weight, options) => formatArtistToken(artist, weight, options),
+      onChange: applyMixComposition,
+      // 블럭에 올린 확대 보기는 **믹스 판 옆**에 뜬다(격자 칸은 창 옆 - 판을 덮는다).
+      onHoverBlock: (element, block) => {
+        const src = mixThumbUrl(block);
+        if (!src) { remote.hideZoom?.(); return; }
+        remote.showZoomBeside?.(element, {src, title: block.artist, note: ''}, remote.sideRect?.());
+      },
+      onLeaveBlock: () => remote.hideZoom?.(),
+    });
+    remote.mountSide?.(mixQueue.el);
+    return mixQueue;
+  }
+
+  /** 블럭의 그림 - 격자에 그 카드가 떠 있으면 그 주소를 그대로 쓴다. */
+  function mixThumbUrl(block) {
+    if (block?.image) return block.image;
+    const card = gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(block?.artist || '')}"]`);
+    return card?.querySelector('img')?.getAttribute('src') || '';
+  }
+
+  async function setMixMode(next) {
+    const want = Boolean(next);
+    const remote = getRemoteController?.();
+    if (want && !remote) { showToast('리모컨에서만 쓸 수 있습니다.', 'error'); return; }
+    const queue = want ? await ensureMixQueue() : mixQueue;
+    if (want && !queue) { showToast('믹스 큐를 열지 못했습니다.', 'error'); return; }
+    mixOn = want;
+    mixBtn.textContent = `믹스 모드 ${mixOn ? 'ON' : 'OFF'}`;
+    mixBtn.classList.toggle('is-on', mixOn);
+    mixBtn.setAttribute('aria-pressed', mixOn ? 'true' : 'false');
+    queue?.setOpen(mixOn);
+    remote?.showSide?.(mixOn);
+    if (mixOn) {
+      if (selected) queue.setTempArtist(selected.artist, selected.image_url || '');
+      applyMixComposition(queue.compose());
+    } else if (selected) {
+      // 큐를 닫으면 칸의 주인이 다시 '고른 작가 하나' 로 돌아온다.
+      syncPromptFormat();
+    }
   }
 
   /** 리모컨에서는 카드가 112px 까지 줄어든다 - 마우스를 올리면 창 옆에 크게 띄운다. */
@@ -2280,6 +2372,8 @@ export function createArtistThumbController({
       syncRemoteSelectTitles();
     } else {
       remoteOnboarded = false;
+      // 믹스 판은 리모컨에 붙어 있다 - 창이 내려가면 같이 내린다.
+      if (mixOn) void setMixMode(false);
       if (!fromRemote) remote?.offboard?.(REMOTE_KEY);
     }
     syncRemoteButton();

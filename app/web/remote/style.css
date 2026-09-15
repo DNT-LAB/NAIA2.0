@@ -86,6 +86,9 @@
   --z-drag-panel: 10150;
   /* 창 옆에 뜨는 확대 보기. 창 더미(10150~) 위여야 하고 제목 툴팁(10200) 아래여야 한다. */
   --z-drag-panel-zoom: 10195;
+  /* 창 옆 보조 판(믹스 큐). ⚠️ 확대 보기보다 **아래** - 격자 칸에 마우스를 올리면
+     확대가 이 판 위로 그대로 덮여야 한다(사용자 지정 충돌 정책). */
+  --z-drag-panel-side: 10193;
   /* ⚠️ **열려 있는** 드롭다운은 떠 있는 창보다 위여야 한다. 리모컨(10150)에 올라간
      셀렉트의 메뉴가 기본값(10100)이면 창 뒤로 숨어 고를 수가 없다. 닫힌 메뉴는
      그대로 두고 열린 것만 올린다. */
@@ -29312,5 +29315,111 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .artist-thumb-remote-btn.is-on {
   border-color: rgba(130, 150, 255, 0.75);
   background: rgba(130, 150, 255, 0.20);
+  color: var(--text-primary);
+}
+
+/* ══ 창 옆 보조 판 + 믹스 큐 (js/features/mixQueuePanel.mjs) ══════════════
+   확대 보기가 뜨던 자리를 쓴다. 격자 칸 확대는 이 판 **위로** 덮이고(창 기준),
+   믹스 블럭 확대는 이 판 **옆으로** 비킨다(판 기준). */
+.rctl-side {
+  position: fixed; z-index: var(--z-drag-panel-side);
+  width: 288px; display: flex; flex-direction: column; min-height: 0;
+}
+.rctl-side[hidden] { display: none !important; }
+
+.mixq {
+  display: flex; flex-direction: column; min-height: 0; position: relative;
+  background: var(--bg-elevated); border: 1px solid rgba(130, 150, 255, 0.42);
+  border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.55); overflow: hidden;
+}
+.mixq[hidden] { display: none !important; }
+.mixq-head {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px;
+  padding: 7px 10px 6px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(130, 150, 255, 0.10);
+}
+.mixq-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.mixq-hint { font-size: 9px; color: var(--text-dim); margin-left: auto; }
+
+.mixq-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 6px; display: flex; flex-direction: column; gap: 4px;
+}
+.mixq-list::-webkit-scrollbar { width: 7px; }
+.mixq-list::-webkit-scrollbar-thumb { background: var(--border-glow); border-radius: 4px; }
+
+.mixq-block {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+  padding: 4px 6px; border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(255,255,255,0.03); cursor: grab; user-select: none;
+}
+.mixq-block:hover { border-color: var(--accent); }
+.mixq-block.is-selected { border-color: #ffe07a; background: rgba(255, 224, 122, 0.10); }
+/* 비활성 - 반투명하되 **끌 수는 있다**(사용자 지정). 조립에서만 빠진다. */
+.mixq-block.is-off { opacity: 0.42; }
+.mixq-block.is-temp { border-style: dashed; }
+.mixq-block.is-dragging { opacity: 0.5; cursor: grabbing; }
+.mixq-block.is-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.mixq-block.is-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+
+.mixq-step {
+  flex: 0 0 auto; width: 20px; height: 22px; padding: 0;
+  border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(0,0,0,0.22); color: var(--text-muted);
+  font-size: 13px; line-height: 1; cursor: pointer;
+}
+.mixq-step:hover { color: var(--text-primary); border-color: var(--accent); }
+.mixq-weight {
+  /* min-width:auto 를 0 으로 눌러야 44px 이 지켜진다 - 입력칸의 고유 너비(size=20,
+     약 150px)가 flex 바닥값이 되어 이름 칸을 밀어낸 적이 있다(실측 147px). */
+  flex: 0 0 44px; width: 44px; min-width: 0;
+  height: 22px; padding: 0 3px; text-align: center;
+  border: 1px solid var(--border-dim); border-radius: 5px; outline: none;
+  background: rgba(0,0,0,0.22); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+}
+.mixq-weight:focus { border-color: var(--accent); }
+.mixq-name {
+  flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mixq-badge {
+  flex: 0 0 auto; font-size: 8px; font-weight: 700; letter-spacing: .04em;
+  color: #0f1020; background: #ffe9a3; border-radius: 4px; padding: 1px 4px;
+}
+
+.mixq-foot {
+  flex: 0 0 auto; display: flex; gap: 4px; padding: 6px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.mixq-btn {
+  flex: 1 1 0; min-width: 0; padding: 5px 4px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(255,255,255,0.04); color: var(--text-muted);
+  font-size: 10px; cursor: pointer;
+}
+.mixq-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--accent); }
+.mixq-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* 우클릭 메뉴 - 블럭이 좁아 단추를 더 못 놓는다(사용자 지정). */
+.mixq-menu {
+  position: absolute; z-index: 3; min-width: 132px; padding: 3px;
+  border: 1px solid var(--border-glow); border-radius: 8px;
+  background: var(--bg-surface); box-shadow: 0 14px 30px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.mixq-menu[hidden] { display: none !important; }
+.mixq-menu button {
+  border: none; background: transparent; color: var(--text-primary);
+  font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;
+}
+.mixq-menu button:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+.mixq-menu button:disabled { opacity: 0.4; cursor: default; }
+
+/* 페이지 줄의 믹스 토글(Next 와 Go 사이). */
+.dragpanel.rctl .rctl-pager .rctl-mix { flex: 0 0 auto; min-width: 92px; padding: 4px 8px; font-size: 10px; }
+.dragpanel.rctl .rctl-pager .rctl-mix.is-on {
+  border-color: rgba(130, 150, 255, 0.75);
+  background: rgba(130, 150, 255, 0.22);
   color: var(--text-primary);
 }

@@ -787,7 +787,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260914-keep-pack-thumb')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260915-mix1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -2191,7 +2191,7 @@ const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=2026091
 //        마지막 하나가 빠지면 닫힌다. 표시/숨김 설정을 따로 두지 않는다(규칙이 둘이면
 //        어긋난다). 지금 온보딩하는 곳은 Artists 탭 하나뿐이다. ---
 let remoteController = null;
-const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260914-rctl11')
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260915-mix1')
   .then(({createRemoteController}) => {
     remoteController = createRemoteController({document, window, showToast, escHtml});
   })

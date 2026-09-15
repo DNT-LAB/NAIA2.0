@@ -71,8 +71,8 @@ export function createRemoteController({
     onClose: () => releaseAll(),
     // 창이 움직이거나 접히면 확대창의 자리가 의미를 잃는다. 끄는 중에는 pointerdown 이
     // 이미 걷지만, **키보드 화살표 이동**과 **접기**는 그 길로 안 온다(실측).
-    onMove: () => hideZoom(),
-    onCollapse: () => hideZoom(),
+    onMove: () => { hideZoom(); placeSide(); },
+    onCollapse: () => { hideZoom(); placeSide(); },
   });
 
   // 탭 열쇠 -> {title, rows, onRelease, moved:[{node, parent, next}], ghosts:[...]}
@@ -239,28 +239,74 @@ export function createRemoteController({
     if (hoverEl) hoverEl.hidden = true;
   }
 
-  function showZoom(target, info) {
+  /** 창(또는 다른 기준 상자) **바깥** 좌우 중 넓은 쪽에 붙인다.
+   *  ⚠️ 확대 보기와 보조 판이 같은 규칙을 써야 서로 겹쳐도 말이 된다. */
+  function placeBeside(box, anchorRect, top) {
+    const boxRect = box.getBoundingClientRect();
+    const vw = win?.innerWidth || doc.documentElement.clientWidth;
+    const vh = win?.innerHeight || doc.documentElement.clientHeight;
+    const roomLeft = anchorRect.left;
+    const roomRight = vw - anchorRect.right;
+    const left = (roomLeft >= boxRect.width + 16 || roomLeft > roomRight)
+      ? anchorRect.left - boxRect.width - 10
+      : anchorRect.right + 10;
+    box.style.left = `${Math.round(Math.max(6, Math.min(left, vw - boxRect.width - 6)))}px`;
+    box.style.top = `${Math.round(Math.max(6, Math.min(top, vh - boxRect.height - 6)))}px`;
+  }
+
+  function showZoom(target, info, anchorRect = null) {
     const box = hoverBox();
     box.innerHTML = `<img src="${escHtml(info.src)}" alt="">`
       + `<div class="rctl-zoom-cap"><b>${escHtml(info.title || '')}</b>`
       + (info.note ? `<span>${escHtml(info.note)}</span>` : '') + '</div>';
     box.hidden = false;
-
-    const panelRect = panel.el.getBoundingClientRect();
     const cardRect = target.getBoundingClientRect();
     const boxRect = box.getBoundingClientRect();
-    const vw = win?.innerWidth || doc.documentElement.clientWidth;
+    // 세로는 올린 칸에 맞춘다. 가로 기준은 호출자가 정한다 - 격자 칸은 **창** 기준
+    // (믹스 판 위에 그대로 덮는다), 믹스 블럭은 **믹스 판** 기준(그 옆으로 비킨다).
+    placeBeside(box, anchorRect || panel.el.getBoundingClientRect(),
+                cardRect.top + cardRect.height / 2 - boxRect.height / 2);
+  }
+
+  // ── 창 옆 보조 판(믹스 큐) ────────────────────────────────────────────
+  //  확대 보기가 뜨던 그 자리를 쓴다(사용자 지정). 확대 보기보다 **아래** 층이라
+  //  격자 칸에 마우스를 올리면 그 위로 덮인다.
+  let sideEl = null;
+
+  function sideHost() {
+    if (sideEl) return sideEl;
+    sideEl = doc.createElement('div');
+    sideEl.className = 'rctl-side';
+    sideEl.hidden = true;
+    doc.body.appendChild(sideEl);
+    return sideEl;
+  }
+
+  function placeSide() {
+    if (!sideEl || sideEl.hidden) return;
+    const panelRect = panel.el.getBoundingClientRect();
     const vh = win?.innerHeight || doc.documentElement.clientHeight;
-    // 넓은 쪽에 붙인다. 왼쪽에 자리가 있으면 왼쪽(오른쪽 가장자리에 둔 창이 흔하다).
-    const roomLeft = panelRect.left;
-    const roomRight = vw - panelRect.right;
-    const left = (roomLeft >= boxRect.width + 16 || roomLeft > roomRight)
-      ? panelRect.left - boxRect.width - 10
-      : panelRect.right + 10;
-    // 세로는 올린 칸에 맞추되 화면 안에 들인다.
-    const top = cardRect.top + cardRect.height / 2 - boxRect.height / 2;
-    box.style.left = `${Math.round(Math.max(6, Math.min(left, vw - boxRect.width - 6)))}px`;
-    box.style.top = `${Math.round(Math.max(6, Math.min(top, vh - boxRect.height - 6)))}px`;
+    // 창과 위를 맞추고, 창보다 길어지지 않게 자른다(안에서 스크롤한다).
+    sideEl.style.maxHeight = `${Math.round(Math.min(panelRect.height, vh - 16))}px`;
+    placeBeside(sideEl, panelRect, panelRect.top);
+  }
+
+  function mountSide(node) {
+    const host = sideHost();
+    host.innerHTML = '';
+    if (node) host.appendChild(node);
+    return host;
+  }
+
+  function showSide(open) {
+    const host = sideHost();
+    host.hidden = !open;
+    if (open) placeSide();
+    return !host.hidden;
+  }
+
+  function sideRect() {
+    return sideEl && !sideEl.hidden ? sideEl.getBoundingClientRect() : null;
   }
 
   function hoverSpecFor(node) {
@@ -312,13 +358,25 @@ export function createRemoteController({
   panel.el.addEventListener('pointerdown', event => {
     if (event.target.closest('.dragpanel-head, .dragpanel-grip')) hideZoom();
   }, true);
-  win?.addEventListener?.('resize', hideZoom);
+  win?.addEventListener?.('resize', () => { hideZoom(); placeSide(); });
+  // 창 크기를 손잡이로 바꿀 때도 따라와야 한다(resize 이벤트가 안 온다).
+  if (typeof ResizeObserver === 'function') {
+    try { new ResizeObserver(() => placeSide()).observe(panel.el); } catch { /* noop */ }
+  }
 
   return {
     ...panel,
     onboard,
     offboard,
     releaseAll,
+    // 창 옆 보조 판(믹스 큐) - 확대 보기와 같은 자리를 쓴다.
+    mountSide,
+    showSide,
+    placeSide,
+    sideRect,
+    /** 믹스 블럭처럼 **창이 아닌 것** 옆에 확대 보기를 띄울 때. */
+    showZoomBeside: (target, info, anchorRect) => showZoom(target, info, anchorRect),
+    hideZoom: () => hideZoom(),
     isOnboarded: key => boarded.has(key),
     onboardedKeys: () => [...boarded.keys()],
     toggleOnboard(key, spec) {

@@ -138,6 +138,10 @@ export function createPeQuickEdit({
   });
 
   FIELDS.forEach(f => paintLen(rowFor(f.key), readField(f.key)));
+  // ⚠️ PE 상태는 그 모듈을 한 번 열어야 캐시에 든다 - 펼칠 때까지 기다리면 접힌 줄이
+  //    "비어 있음" 이라고 거짓말을 한다(사용자 제보). 만들자마자 한 번 청해 둔다.
+  //    답이 오면 `sync()` 가 줄을 다시 그린다.
+  requestState();
 
   return {
     el,

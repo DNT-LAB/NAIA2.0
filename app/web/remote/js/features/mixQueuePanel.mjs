@@ -18,6 +18,8 @@
  *     좁아 단추를 더 못 놓는다(사용자 지정).
  */
 
+import { anchorToken, nextAnchorId } from './artistAnchors.mjs?v=20260915-anchor1';
+
 const COLLAB_ID = '__collab__';
 const HOLD_FIRST_MS = 320;     // 누르고 있을 때 반복이 시작되기까지
 // 그 뒤 0.5초마다 (사용자 지정). ⚠️ 0.1초마다로 두었더니 1초만 쥐어도 0.6 이
@@ -58,6 +60,12 @@ export function createMixQueuePanel({
   onTempWeight = () => {},
   // 고정 토글(자동 접힘 끄기). 상태는 리모컨이 쥔다 - 여기서는 누른 것만 알린다.
   onPin = () => {},
+  // ── 앵커 ──
+  // 표식이 아직 prefix/postfix 에 살아 있는가. 큐는 글을 안 갖고 있어 물어본다.
+  hasAnchorIn = () => true,
+  // 표식을 글에 넣어 달라 / 빼 달라(넣는 자리는 prefix 맨 뒤 - 사용자 지정).
+  onAnchorAdd = () => {},
+  onAnchorRemove = () => {},
 } = {}) {
   const el = doc.createElement('div');
   el.className = 'mixq';
@@ -92,6 +100,7 @@ export function createMixQueuePanel({
   let blocks = [collabBlock()];
   let dragId = '';
   let menuFor = '';
+  let menuAt = -1;
 
   function collabBlock() {
     return {
@@ -108,24 +117,111 @@ export function createMixQueuePanel({
   }
 
   const find = id => blocks.find(b => b.id === id) || null;
-  const tempBlock = () => blocks.find(b => b.temp) || null;
+  const tempBlock = () => blocks.find(b => b.temp && !isAnchor(b)) || null;
+
+  // ── 앵커 ──────────────────────────────────────────────────────────────
+  //  앵커는 **같은 목록 안의 줄**이다. 블럭은 바로 위 앵커에 속한다 - 그래서 끌어서
+  //  순서를 바꾸는 것이 곧 '레이어 안으로 넣기' 가 된다(따로 배선할 것이 없다).
+  const isAnchor = b => b?.kind === 'anchor';
+  const anchorRows = () => blocks.filter(isAnchor);
+
+  function anchorBlock(anchorId) {
+    return {
+      id: nextId(), kind: 'anchor', anchorId: String(anchorId),
+      syncWeights: false,   // 앵커 정책: 그룹 첫 태그가 Master, 나머지가 Slave
+      broken: false,        // 글에서 표식이 사라졌다
+      selected: false, locked: false, temp: false, enabled: true,
+      artist: '', weight: 1, withPrefix: false, image: '',
+    };
+  }
+
+  /** 이 블럭이 속한 앵커(위쪽에서 가장 가까운 것). 없으면 선행부다. */
+  function ownerAnchor(block) {
+    const at = blocks.indexOf(block);
+    for (let i = at - 1; i >= 0; i -= 1) {
+      if (isAnchor(blocks[i])) return blocks[i];
+    }
+    return null;
+  }
+
+  /** 한 앵커에 딸린 블럭들(다음 앵커 전까지). 순서 그대로 - 첫째가 Master 다. */
+  function membersOf(anchor) {
+    const at = blocks.indexOf(anchor);
+    const out = [];
+    for (let i = at + 1; i < blocks.length; i += 1) {
+      if (isAnchor(blocks[i])) break;
+      out.push(blocks[i]);
+    }
+    return out;
+  }
+
+  /** 글에서 표식이 사라졌는지 다시 본다. 사라지면 빨강, 돌아오면 원래대로 -
+   *  ⚠️ **회복도 추적해야 한다**(사용자 지정). 표식을 옮기는 동안에는 잘라내기와
+   *     붙여넣기 사이에서 잠깐 사라진다 - 그때마다 그룹이 영영 죽으면 못 쓴다. */
+  function refreshAnchorHealth() {
+    let changed = false;
+    for (const row of anchorRows()) {
+      const broken = !hasAnchorIn(row.anchorId);
+      if (broken !== row.broken) { row.broken = broken; changed = true; }
+    }
+    return changed;
+  }
 
   // ── 조립 ──────────────────────────────────────────────────────────────
-  function compose() {
-    return blocks
+  function tokensOf(list) {
+    return list
+      .filter(b => !isAnchor(b))
       .filter(b => b.enabled && String(b.artist || '').trim())
       .map(b => formatToken(b.artist, b.weight, {withPrefix: b.withPrefix}))
-      .filter(Boolean)
-      .join(', ');
+      .filter(Boolean);
+  }
+
+  /** 첫 앵커보다 **앞**에 있는 블럭들. 예전처럼 ARTIST PROMPT 칸으로 간다(사용자 지정).
+   *  앵커가 하나도 없으면 큐 전체가 여기다 - 앵커를 안 쓰면 예전 그대로다. */
+  function compose() {
+    const at = blocks.findIndex(isAnchor);
+    return tokensOf(at < 0 ? blocks : blocks.slice(0, at)).join(', ');
+  }
+
+  /** `{앵커 아이디: 합친 글}`. 표식이 깨진 앵커는 **보내지 않는다** - 서버가 짝 없는
+   *  표식을 지우므로, 보내 봐야 갈 곳이 없고 조용히 사라지는 편이 낫다. */
+  function composeGroups() {
+    const out = {};
+    for (const row of anchorRows()) {
+      if (row.broken) continue;
+      const text = tokensOf(membersOf(row)).join(', ');
+      if (text) out[row.anchorId] = out[row.anchorId]
+        ? `${out[row.anchorId]}, ${text}` : text;
+    }
+    return out;
   }
 
   function emit() {
-    onChange(compose());
+    onChange(compose(), composeGroups());
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────
+  /** 앵커 줄. 블럭과 **다른 모양**이어야 한다 - 같은 목록에 섞여 있으니
+   *  한눈에 '여기서부터 다른 자리' 라고 읽혀야 한다. */
+  function anchorRowHtml(b) {
+    const classes = ['mixq-anchor'];
+    if (b.broken) classes.push('is-broken');
+    if (b.selected) classes.push('is-selected');
+    if (b.syncWeights) classes.push('is-sync');
+    const title = b.broken
+      ? `${anchorToken(b.anchorId)} 를 프롬프트에서 찾지 못했습니다 - 우클릭으로 되돌리세요`
+      : `${anchorToken(b.anchorId)} 자리에 아래 태그들이 들어갑니다`;
+    return `<div class="${classes.join(' ')}" role="listitem" draggable="true"
+                 data-mixq-id="${escHtml(b.id)}" title="${escHtml(title)}">
+      <span class="mixq-anchor-mark">${escHtml(anchorToken(b.anchorId))}</span>
+      ${b.syncWeights ? '<span class="mixq-anchor-tag">동기화</span>' : ''}
+      ${b.broken ? '<span class="mixq-anchor-tag is-warn">표식 없음</span>' : ''}
+    </div>`;
+  }
+
   function render() {
     listEl.innerHTML = blocks.map(b => {
+      if (isAnchor(b)) return anchorRowHtml(b);
       const classes = ['mixq-block'];
       if (!b.enabled) classes.push('is-off');
       if (b.selected) classes.push('is-selected');
@@ -164,9 +260,26 @@ export function createMixQueuePanel({
   /** 가중치를 바꾸는 **모든 길**이 여기로 모인다 - 임시 블럭이면 메인 가중치도
    *  같이 움직여야 한다(사용자 지정). 길이 셋(+/- · 타이핑 · 커밋)이라 한 곳에
    *  모으지 않으면 넷째 길이 생길 때 또 빠뜨린다. */
+  /** 앵커 정책: 그룹의 **첫** 아티스트가 Master, 나머지가 Slave(사용자 지정).
+   *  ⚠️ 여기서 render() 를 부르면 누르고 있던 단추가 사라진다 - 칸만 직접 고친다. */
+  function syncGroupWeights(anchor) {
+    if (!anchor?.syncWeights) return;
+    const members = membersOf(anchor);
+    const master = members[0];
+    if (!master) return;
+    for (const slave of members.slice(1)) {
+      slave.weight = master.weight;
+      const input = listEl.querySelector(`[data-mixq-id="${CSS.escape(slave.id)}"] .mixq-weight`);
+      if (input) input.value = weightText(slave.weight);
+    }
+  }
+
   function applyWeight(block, value) {
     block.weight = value;
     if (block.temp) onTempWeight(block.weight);
+    const owner = ownerAnchor(block);
+    // Master 를 움직였을 때만 번진다 - Slave 를 직접 만지는 것은 그 하나로 끝난다.
+    if (owner?.syncWeights && membersOf(owner)[0] === block) syncGroupWeights(owner);
     emit();          // ⚠️ 여기서 render() 를 부르면 누르고 있는 단추가 사라진다
   }
 
@@ -199,13 +312,30 @@ export function createMixQueuePanel({
   }
 
   // ── 우클릭 메뉴 (artist: 토글 · 비활성 · 제거) ─────────────────────────
-  function openMenu(block, x, y) {
-    menuFor = block.id;
-    menuEl.innerHTML = `
+  function menuHtmlFor(block) {
+    // 빈 공간 - 여기에 새 앵커(사용자 지정: '이 자리에').
+    if (!block) {
+      return '<button type="button" data-mixq-menu="anchor-here">여기에 앵커 추가</button>';
+    }
+    if (isAnchor(block)) {
+      return `
+      <button type="button" data-mixq-menu="anchor-sync">${block.syncWeights ? '가중치 동기화 끄기' : '가중치 동기화'}</button>
+      <button type="button" data-mixq-menu="anchor-restore"${block.broken ? '' : ' disabled'}>표식 되돌리기</button>
+      <button type="button" data-mixq-menu="anchor-remove">앵커 제거</button>
+    `;
+    }
+    return `
       <button type="button" data-mixq-menu="prefix"${block.locked ? ' disabled' : ''}>${block.withPrefix ? '`artist:` 떼기' : '`artist:` 붙이기'}</button>
       <button type="button" data-mixq-menu="enabled">${block.enabled ? '비활성으로' : '다시 켜기'}</button>
       <button type="button" data-mixq-menu="remove"${block.locked ? ' disabled' : ''}>제거</button>
+      <button type="button" data-mixq-menu="anchor-above">앵커 추가 · 이 위에</button>
+      <button type="button" data-mixq-menu="anchor-below">앵커 추가 · 이 아래에</button>
     `;
+  }
+
+  function openMenu(block, x, y) {
+    menuFor = block ? block.id : '';
+    menuEl.innerHTML = menuHtmlFor(block);
     menuEl.hidden = false;
     const box = el.getBoundingClientRect();
     const menu = menuEl.getBoundingClientRect();
@@ -256,6 +386,9 @@ export function createMixQueuePanel({
    *  다른 블럭을 누르면 선택이 옮겨 가고, 같은 블럭을 다시 누르면 풀린다. */
   function selectOnly(id) {
     const wanted = find(id);
+    // 앵커 줄은 고르지 않는다 - 아래 두 단추는 아티스트 태그를 다루는 것이고,
+    // 앵커에 할 일(동기화·복원·제거)은 전부 우클릭에 있다.
+    if (isAnchor(wanted)) return;
     const turnOff = !wanted || wanted.selected;
     blocks.forEach(b => { b.selected = !turnOff && b === wanted; });
     // ⚠️ render() 를 부르면 스크롤이 튄다 - 칠만 다시 한다.
@@ -273,17 +406,55 @@ export function createMixQueuePanel({
 
   listEl.addEventListener('contextmenu', event => {
     const host = event.target.closest('[data-mixq-id]');
-    if (!host) return;
+    if (!host) {
+      // 빈 공간 - 그래도 메뉴는 연다(사용자 지정: '혹은 이 자리에 (빈 공간)').
+      event.preventDefault();
+      menuAt = blocks.length;
+      openMenu(null, event.clientX, event.clientY);
+      return;
+    }
+    menuAt = blocks.indexOf(find(host.dataset.mixqId));
     event.preventDefault();
     const block = find(host.dataset.mixqId);
     if (block) openMenu(block, event.clientX, event.clientY);
   });
 
+  /** 새 앵커를 목록의 `at` 자리에 끼우고, 표식을 글 맨 뒤에 넣어 달라고 알린다. */
+  function addAnchorAt(at) {
+    const used = anchorRows().map(r => r.anchorId);
+    const row = anchorBlock(nextAnchorId(used));
+    const where = Math.max(0, Math.min(Number.isFinite(at) ? at : blocks.length, blocks.length));
+    blocks.splice(where, 0, row);
+    // 표식이 글에 들어가기 전까지는 '깨진' 상태다 - 넣어 준 뒤 다시 잰다.
+    row.broken = true;
+    onAnchorAdd(row.anchorId);
+    refresh();
+    return row;
+  }
+
   menuEl.addEventListener('click', event => {
     const action = event.target.closest('[data-mixq-menu]')?.dataset.mixqMenu;
+    const at = menuAt;
     const block = find(menuFor);
     closeMenu();
-    if (!action || !block) return;
+    if (!action) return;
+    if (action === 'anchor-here') { addAnchorAt(at < 0 ? blocks.length : at); return; }
+    if (!block) return;
+    if (action === 'anchor-above') { addAnchorAt(blocks.indexOf(block)); return; }
+    if (action === 'anchor-below') { addAnchorAt(blocks.indexOf(block) + 1); return; }
+    if (action === 'anchor-sync') {
+      block.syncWeights = !block.syncWeights;
+      if (block.syncWeights) syncGroupWeights(block);
+      refresh();
+      return;
+    }
+    if (action === 'anchor-restore') { onAnchorAdd(block.anchorId); refresh(); return; }
+    if (action === 'anchor-remove') {
+      blocks = blocks.filter(b => b !== block);
+      onAnchorRemove(block.anchorId);
+      refresh();
+      return;
+    }
     if (action === 'prefix') { if (block.locked) return; block.withPrefix = !block.withPrefix; }
     else if (action === 'enabled') block.enabled = !block.enabled;
     else if (action === 'remove') {
@@ -420,6 +591,15 @@ export function createMixQueuePanel({
       return true;
     },
     compose,
+    composeGroups,
+    /** 글이 바뀌었다 - 표식이 살아 있는지 다시 재고, 달라졌으면 다시 그린다.
+     *  ⚠️ 표식을 옮기는 동안의 **일시 소실과 회복**이 이 길로 들어온다. */
+    recheckAnchors() {
+      if (refreshAnchorHealth()) refresh();
+      else emit();
+      return anchorRows().map(r => ({id: r.anchorId, broken: r.broken, sync: r.syncWeights}));
+    },
+    anchors: () => anchorRows().map(r => ({id: r.anchorId, broken: r.broken, sync: r.syncWeights})),
     blockFor: id => find(id),
     snapshot: () => blocks.map(b => ({...b})),
   };

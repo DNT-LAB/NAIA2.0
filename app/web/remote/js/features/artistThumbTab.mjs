@@ -125,6 +125,9 @@ export function createArtistThumbController({
   let mixQueue = null;
   let peQuick = null;
   let mixOn = false;
+  // 앵커 그룹 `{아이디: 합친 글}`. 생성 요청에 실어 보내면 서버가 `<anchor:ID>` 자리에
+  // 꽂는다(`core/artist_anchor.py`). 큐가 바뀔 때마다 갱신된다.
+  let mixAnchorGroups = {};
   const mixBtn = document.createElement('button');
   mixBtn.type = 'button';
   mixBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
@@ -1625,6 +1628,9 @@ export function createArtistThumbController({
 
       const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
         artist_prompt: artistPrompt,
+        // 앵커 그룹은 `<anchor:ID>` 자리에서 펼쳐진다. 선행부(첫 앵커 이전)만
+        // `artist_prompt` 로 간다 - 둘 다 비면 서버가 400 을 준다.
+        anchor_groups: mixOn ? mixAnchorGroups : undefined,
         timeout: 45,
       }, {
         timeoutMs: ARTIST_RANDOM_PROMPT_TIMEOUT_MS,
@@ -2278,7 +2284,8 @@ export function createArtistThumbController({
 
   /** 믹스 큐가 조립한 글을 ARTIST PROMPT 칸으로 보낸다(사용자 지정 - 그 칸이
    *  Generate 와 Generate with Random Prompt 가 쓰는 자리다). */
-  function applyMixComposition(text) {
+  function applyMixComposition(text, groups) {
+    mixAnchorGroups = groups && typeof groups === 'object' ? groups : {};
     if (positiveEl) {
       positiveEl.value = text;
       positiveAutoValue = text;
@@ -2291,11 +2298,43 @@ export function createArtistThumbController({
     getRemoteController?.()?.setSideSummary?.(lines);
   }
 
+  // ── 앵커 <-> prefix/postfix 글 ────────────────────────────────────────
+  //  큐는 글을 안 갖고 있고, PE 는 큐를 모른다. 둘을 아는 곳은 여기뿐이다.
+  const PE_ANCHOR_FIELDS = ['pre_prompt', 'post_prompt'];
+
+  function peText(key) {
+    try { return String(getPeField?.(key) ?? ''); } catch (_) { return ''; }
+  }
+
+  function peTextHasAnchor(id) {
+    return PE_ANCHOR_FIELDS.some(key => anchorsApi?.hasAnchorId(peText(key), id));
+  }
+
+  function putAnchorInPrefix(id) {
+    if (!anchorsApi || typeof setPeField !== 'function') return;
+    const next = anchorsApi.appendAnchor(peText('pre_prompt'), id);
+    setPeField('pre_prompt', next, getPePreset?.() ?? '');
+    peQuick?.sync();
+  }
+
+  function dropAnchorFromText(id) {
+    if (!anchorsApi || typeof setPeField !== 'function') return;
+    for (const key of PE_ANCHOR_FIELDS) {
+      const before = peText(key);
+      if (!anchorsApi.hasAnchorId(before, id)) continue;
+      setPeField(key, anchorsApi.removeAnchor(before, id), getPePreset?.() ?? '');
+    }
+    peQuick?.sync();
+  }
+
+  let anchorsApi = null;
+
   async function ensureMixQueue() {
     if (mixQueue) return mixQueue;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260915-mix1');
+    if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260915-anchor1');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260915-anchor1');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2312,6 +2351,11 @@ export function createArtistThumbController({
       // 큐 안에서 임시 블럭의 가중치가 바뀌면 메인 손잡이도 따라간다(사용자 지정).
       onTempWeight: value => paintWeightControls(value),
       onPin: on => remote.setSidePinned?.(on),
+      // 표식이 prefix/postfix 에 살아 있는가. 글의 주인은 PE 라 여기서 물어 준다.
+      hasAnchorIn: id => peTextHasAnchor(id),
+      // 추가/복원 = prefix **맨 뒤**에 표식을 넣는다(사용자 지정).
+      onAnchorAdd: id => putAnchorInPrefix(id),
+      onAnchorRemove: id => dropAnchorFromText(id),
     });
     // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
     if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {
@@ -2448,6 +2492,11 @@ export function createArtistThumbController({
     handleResultBlob,
     /** PE 상태가 새로 오면(프리셋 전환 등) 빠른 수정 칸도 따라가야 한다.
      *  ⚠️ 치는 중인 칸은 건드리지 않는다 - 그 판정은 패널이 한다. */
-    syncPromptEngineering: () => peQuick?.sync(),
+    syncPromptEngineering: () => {
+      peQuick?.sync();
+      // ⚠️ 표식을 옮기는 동안 잘라내기와 붙여넣기 사이에서 잠깐 사라진다 -
+      //    **회복도 추적**해야 해서 올 때마다 다시 잰다(사용자 지정).
+      mixQueue?.recheckAnchors();
+    },
   };
 }

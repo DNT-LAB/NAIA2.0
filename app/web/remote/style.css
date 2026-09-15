@@ -29393,6 +29393,34 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-block.is-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
 .mixq-block.is-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 
+/* 앵커 줄 - 블럭과 **다른 모양**이어야 한다. 같은 목록에 섞여 있어서, 여기서부터
+   다른 자리로 간다는 것이 한눈에 읽혀야 한다(블럭은 상자, 앵커는 띠). */
+.mixq-anchor {
+  display: flex; align-items: center; gap: 5px; min-width: 0;
+  padding: 3px 6px; border-radius: 6px; cursor: grab; user-select: none;
+  background: rgba(255, 224, 122, 0.10);
+  border: 1px dashed rgba(255, 224, 122, 0.55);
+}
+.mixq-anchor:hover { border-color: #ffe07a; }
+.mixq-anchor.is-selected { box-shadow: inset 3px 0 0 0 #ffe07a; padding-left: 9px; }
+.mixq-anchor-mark {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  color: #ffe07a;
+}
+.mixq-anchor-tag {
+  flex: 0 0 auto; font-size: 8px; font-weight: 700; letter-spacing: .04em;
+  color: #0f1020; background: #ffe9a3; border-radius: 4px; padding: 1px 4px;
+}
+/* 표식이 글에서 사라졌다 - 이 그룹은 갈 곳이 없다. 색만으로 끝내지 않고 글자도 붙인다. */
+.mixq-anchor.is-broken {
+  background: rgba(255, 96, 96, 0.14);
+  border-color: rgba(255, 96, 96, 0.75);
+}
+.mixq-anchor.is-broken .mixq-anchor-mark { color: #ff8b8b; text-decoration: line-through; }
+.mixq-anchor-tag.is-warn { color: #2a0d0d; background: #ff9c9c; }
+
 .mixq-step {
   flex: 0 0 auto; width: 20px; height: 22px; padding: 0;
   border: 1px solid var(--border-dim); border-radius: 5px;

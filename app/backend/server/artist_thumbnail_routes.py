@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from app.backend.server.install_manager_routes import _is_local_request
 from fastapi.responses import JSONResponse, Response
 
+from core.artist_groups import ArtistGroupError, ArtistGroupStore
 from core.artist_thumbnail_service import ArtistThumbnailService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
@@ -16,6 +17,39 @@ from core.web_session_context import WebSessionContext
 
 AsyncRunner = Callable[..., Awaitable[Any]]
 GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
+
+
+def artist_group_store(context: WebSessionContext) -> ArtistGroupStore:
+    """그룹 저장소는 세션에 하나. 파일은 artist_state.json 과 **같은 폴더, 다른 파일**이다."""
+    store = getattr(context, "artist_group_store", None)
+    if store is None:
+        store = ArtistGroupStore(artist_thumbnail_service(context).state_root)
+        context.artist_group_store = store
+    return store
+
+
+# 한 라우트가 op 로 갈라 받는다 - 프론트 호출부가 작아지고 검증이 한 곳에 모인다.
+_GROUP_OPS = {"create", "rename", "delete", "add", "remove", "reorder", "weight"}
+
+
+def _apply_group_op(store: ArtistGroupStore, payload: dict) -> dict:
+    op = str(payload.get("op") or "").strip()
+    gid = payload.get("id")
+    if op == "create":
+        return store.create(payload.get("name"), payload.get("items"))
+    if op == "rename":
+        return store.rename(gid, payload.get("name"))
+    if op == "delete":
+        return store.delete(gid)
+    if op == "add":
+        return store.add(gid, payload.get("items"))
+    if op == "remove":
+        return store.remove(gid, payload.get("artists"))
+    if op == "reorder":
+        return store.reorder(gid, payload.get("artists"))
+    if op == "weight":
+        return store.set_weight(gid, payload.get("artist"), payload.get("weight"))
+    raise ArtistGroupError(f"unknown op: {op or '(empty)'}")
 
 
 def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailService:
@@ -189,6 +223,32 @@ def register_artist_thumbnail_routes(
             media_type=media_type,
             headers={"Cache-Control": "no-cache"},
         )
+
+    @app.get("/api/artist-groups")
+    async def api_artist_groups_list():
+        try:
+            groups = await run_in_thread(artist_group_store(session_context).list)
+            return {"groups": groups}
+        except Exception as exc:
+            # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
+            return JSONResponse({"error": f"Artist groups unreadable: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-groups")
+    async def api_artist_groups_mutate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        if str(payload.get("op") or "") not in _GROUP_OPS:
+            return JSONResponse({"error": f"op must be one of {sorted(_GROUP_OPS)}"}, status_code=400)
+        try:
+            return await run_in_thread(_apply_group_op, artist_group_store(session_context), payload)
+        except ArtistGroupError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist groups update failed: {exc}"}, status_code=500)
 
     @app.post("/api/artist-thumb/favorite")
     async def api_artist_thumb_favorite(req: Request):

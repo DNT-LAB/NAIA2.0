@@ -373,6 +373,43 @@ export function createMixQueuePanel({
   doc.addEventListener('pointerup', stopHold);
   doc.addEventListener('pointercancel', stopHold);
 
+  // 숫자 칸 위에서 휠 = 0.01 씩(사용자 지정). 값은 +/- 와 **같은 문**(bump)으로 간다 -
+  // 임시 블럭이면 메인 가중치도 따라온다.
+  // ⚠️ 휠 한 칸의 deltaY 는 **환경마다 다르다**(100 · 120 · 53 · 배율이 붙으면 150 -
+  //    실측: 100 을 보냈는데 -150 으로 왔다). 픽셀 문턱으로 '한 칸' 을 정하면 한 칸에
+  //    0.02 가 움직였다. 그래서 규칙은 크기가 아니라 **사건**이다:
+  //      - 큰 delta 한 번(마우스 휠 한 칸) = 정확히 한 걸음
+  //      - 작은 delta(터치패드가 수십 번 쏘는 것)만 모아서 WHEEL_NOTCH 마다 한 걸음
+  // ⚠️ passive:false 로 걸어야 막을 수 있다. 안 막으면 값이 바뀌면서 목록도 같이 굴러간다.
+  const WHEEL_NOTCH = 40;
+  let wheelAcc = 0;
+  let wheelFor = '';
+  listEl.addEventListener('wheel', event => {
+    const input = event.target.closest('.mixq-weight');
+    if (!input) return;
+    const id = input.closest('[data-mixq-id]')?.dataset.mixqId || '';
+    if (!id) return;
+    event.preventDefault();
+    // 줄 단위(파이어폭스)·쪽 단위를 픽셀로 맞춘다.
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+    const dy = event.deltaY * unit;
+    if (!dy) return;
+    // 위로 굴리면(deltaY<0) 올라간다.
+    if (Math.abs(dy) >= WHEEL_NOTCH) {
+      wheelAcc = 0;
+      bump(id, dy < 0 ? 1 : -1, STEP);
+      return;
+    }
+    // 칸이 바뀌거나 방향이 바뀌면 모은 것을 버린다.
+    if (wheelFor !== id || Math.sign(dy) !== Math.sign(wheelAcc)) wheelAcc = 0;
+    wheelFor = id;
+    wheelAcc += dy;
+    if (Math.abs(wheelAcc) >= WHEEL_NOTCH) {
+      bump(id, wheelAcc < 0 ? 1 : -1, STEP);
+      wheelAcc = 0;
+    }
+  }, {passive: false});
+
   listEl.addEventListener('input', event => {
     const input = event.target.closest('.mixq-weight');
     if (!input) return;

@@ -224,6 +224,24 @@ def register_artist_thumbnail_routes(
             headers={"Cache-Control": "no-cache"},
         )
 
+    @app.post("/api/artist-thumb/describe")
+    async def api_artist_thumb_describe(req: Request):
+        """이름 목록 -> 격자 카드와 같은 모양(그림 주소 포함). 그룹 창이 쓴다."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict) or not isinstance(payload.get("artists"), list):
+            return JSONResponse({"error": "artists list required"}, status_code=400)
+        try:
+            return await run_in_thread(
+                artist_thumbnail_service(session_context).describe_artists,
+                payload.get("mode", ""),
+                payload.get("artists"),
+            )
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist describe failed: {exc}"}, status_code=500)
+
     @app.get("/api/artist-groups")
     async def api_artist_groups_list():
         try:

@@ -820,6 +820,69 @@ class ArtistThumbnailService:
             artists = base_list[page * per_page:page * per_page + per_page]
         favorite_set = set(self._favorites())
         banned_set = set(self._banned())
+        item_image_url = self._image_url_resolver(mode_key, filter_key, thumb_data)
+        return {
+            "mode": mode_key,
+            "filter": str(filter_key or "all"),
+            "filter_name": filter_name,
+            "query": query,
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "random": bool(random_sample),
+            "excluded_count": len(banned_set),
+            "items": [
+                {
+                    "artist": artist,
+                    "weight": self._format_count(weights.get(artist, 0)),
+                    "favorite": artist in favorite_set,
+                    "banned": artist in banned_set,
+                    "has_image": bool(item_image_url(artist)),
+                    "image_url": item_image_url(artist),
+                }
+                for artist in artists
+            ],
+        }
+
+    def describe_artists(self, mode: str = "", artists: Any = None) -> dict:
+        """이름 목록 -> 격자 카드와 **같은 모양**의 항목들. 그룹 창이 쓴다.
+
+        ⚠️ 그림 주소 규칙은 `_image_url_resolver` 하나다 - 격자와 그룹 창이 서로 다른
+           그림을 보여 주면 "같은 작가인데 왜 다르냐" 가 된다.
+        목록에 없는 이름(사전에 없는 작가)도 버리지 않는다 - 사용자가 넣은 것이다.
+        """
+        mode_key = str(mode or "").strip()
+        names = []
+        seen = set()
+        for raw in (artists if isinstance(artists, list) else [])[:2000]:
+            name = " ".join(str(raw or "").split())
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+        thumb_data = self.load_data(mode_key) if mode_key else {}
+        weights = self._artist_weights(mode_key)
+        favorite_set = set(self._favorites())
+        banned_set = set(self._banned())
+        item_image_url = self._image_url_resolver(mode_key, "all", thumb_data)
+        return {
+            "mode": mode_key,
+            "items": [
+                {
+                    "artist": artist,
+                    "weight": self._format_count(weights.get(artist, 0)),
+                    "known": artist in weights,
+                    "favorite": artist in favorite_set,
+                    "banned": artist in banned_set,
+                    "has_image": bool(item_image_url(artist)),
+                    "image_url": item_image_url(artist),
+                }
+                for artist in names
+            ],
+        }
+
+    def _image_url_resolver(self, mode_key: str, filter_key: str, thumb_data: dict):
+        """작가 이름 -> 썸네일 주소. 순서가 규약이다(아래 주석)."""
         try:
             favorite_thumb_items = self._load_thumbnail_cache().get("items", {})
         except Exception:
@@ -860,29 +923,7 @@ class ArtistThumbnailService:
                 return self._generated_image_url(artist, generated_lookup[artist], api_key)
             return ""
 
-        return {
-            "mode": mode_key,
-            "filter": str(filter_key or "all"),
-            "filter_name": filter_name,
-            "query": query,
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "total_pages": total_pages,
-            "random": bool(random_sample),
-            "excluded_count": len(banned_set),
-            "items": [
-                {
-                    "artist": artist,
-                    "weight": self._format_count(weights.get(artist, 0)),
-                    "favorite": artist in favorite_set,
-                    "banned": artist in banned_set,
-                    "has_image": bool(item_image_url(artist)),
-                    "image_url": item_image_url(artist),
-                }
-                for artist in artists
-            ],
-        }
+        return item_image_url
 
     @staticmethod
     def media_type(image_bytes: bytes) -> str:

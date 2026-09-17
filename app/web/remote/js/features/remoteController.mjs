@@ -31,6 +31,8 @@
  *  탭마다 한 구획이 쌓인다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl10';
+// ⚠️ 모든 곳이 **같은 주소**로 불러야 중개자가 하나다(계약 시험이 대조).
+import {dragBrokerFor} from './dragBroker.mjs?v=20260917-grp1';
 
 export function createRemoteController({
   document: doc,
@@ -273,6 +275,7 @@ export function createRemoteController({
   // ── 창 옆 보조 판(믹스 큐) ────────────────────────────────────────────
   //  확대 보기가 뜨던 그 자리를 쓴다(사용자 지정). 확대 보기보다 **아래** 층이라
   //  격자 칸에 마우스를 올리면 그 위로 덮인다.
+  const broker = dragBrokerFor(doc, win);
   let sideEl = null;
   let sideSummaryEl = null;
   let idleTimer = null;
@@ -299,9 +302,16 @@ export function createRemoteController({
     //    결국 언젠가는 바깥을 누르기 때문이다.
     doc.addEventListener('pointerdown', event => {
       if (!sideEl || sideEl.hidden || folded) return;
-      const inside = sideEl.contains(event.target) || panel.el.contains(event.target);
+      // 그룹 창(짝꿍 창)도 안쪽으로 친다 - 거기서 끌기를 시작하는 순간 큐가 접히면 안 된다.
+      const inside = sideEl.contains(event.target) || panel.el.contains(event.target)
+        || Boolean(event.target.closest?.('[data-rctl-companion]'));
       if (!inside) setFolded(true);
     }, true);
+    // 끌기가 시작되면 펴 둔다(놓을 자리가 보여야 한다), 끝나면 다시 5초를 센다.
+    broker.subscribe(state => {
+      if (state === 'start') { hideZoom(); setFolded(false); }
+      else if (state === 'end') poke();
+    });
     return sideEl;
   }
 
@@ -320,7 +330,8 @@ export function createRemoteController({
 
   function setFolded(next) {
     // 고정해 두면 접지 않는다 - 큐를 한참 붙들고 일할 때를 위한 빗장(사용자 지정).
-    const want = Boolean(next) && !pinned && !attentionHeld();
+    // ⚠️ 끄는 중에도 접지 않는다 - 큐는 놓을 자리다. 접히면 놓을 곳이 사라진다.
+    const want = Boolean(next) && !pinned && !attentionHeld() && !broker.isDragging();
     if (want === folded) return;
     folded = want;
     sideEl?.classList.toggle('is-folded', folded);
@@ -403,6 +414,8 @@ export function createRemoteController({
   panel.body.addEventListener('pointerover', event => {
     // 손가락은 hover 가 없다 - 터치로는 띄우지 않는다(눌러야 할 칸을 가린다).
     if (event.pointerType === 'touch') return;
+    // 끄는 중에는 유령 밑의 카드마다 pointerover 가 온다 - 확대 보기는 방해만 된다.
+    if (broker.isDragging()) return;
     const found = hoverSpecFor(event.target);
     if (!found) { hideZoom(); return; }
     if (found.target === hoverTarget) return;

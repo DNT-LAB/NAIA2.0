@@ -128,6 +128,10 @@ export function createArtistThumbController({
   // 앵커 그룹 `{아이디: 합친 글}`. 생성 요청에 실어 보내면 서버가 `<anchor:ID>` 자리에
   // 꽂는다(`core/artist_anchor.py`). 큐가 바뀔 때마다 갱신된다.
   let mixAnchorGroups = {};
+  // 아티스트 그룹(저장 + 임시). 스토어가 유일한 주인이고 창·메뉴는 구독만 한다.
+  let groupsApi = null;        // {store, createWindow, broker}
+  const groupWindows = new Map();   // groupId -> window api
+  let lastTempGroupId = '';
   const mixBtn = document.createElement('button');
   mixBtn.type = 'button';
   mixBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
@@ -1100,6 +1104,15 @@ export function createArtistThumbController({
 
   function openContextMenu(event, item) {
     if (!item?.artist) return;
+    if (!groupsApi) {
+      // 처음 한 번은 그룹을 읽은 뒤 연다 - 빈 목록을 보여 주면 '그룹이 없다' 로 읽힌다.
+      const {clientX, clientY} = event;
+      event.preventDefault();
+      event.stopPropagation();
+      void ensureGroups().then(() => openContextMenu(
+        {clientX, clientY, preventDefault() {}, stopPropagation() {}}, item));
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     closeContextMenu();
@@ -1137,6 +1150,7 @@ export function createArtistThumbController({
           <span>${banMenuLabel}</span>
         </button>
       </div>
+      ${groupMenuHtml(true)}
     `;
     menu.addEventListener('contextmenu', e => e.preventDefault());
     menu.addEventListener('click', event => {
@@ -1146,7 +1160,14 @@ export function createArtistThumbController({
       event.stopPropagation();
       const action = button.dataset.action || '';
       const targetItem = contextMenuItem;
+      if (action === 'group-new') {
+        // 메뉴를 닫지 않고 이름 칸을 편다. 만들면서 이 작가를 넣는다.
+        revealNewGroupForm(menu, name => createGroupWith(name, targetItem));
+        return;
+      }
       closeContextMenu();
+      if (action === 'temp-add') { void putInTempWindow(targetItem); return; }
+      if (action === 'group-pick') { void addToGroup(button.dataset.groupId, targetItem); return; }
       if (action === 'favorite') {
         setFavoriteForItem(targetItem, !targetItem.favorite).catch(error => {
           showToast?.(error.message || 'Favorite failed', 'error');
@@ -2153,6 +2174,21 @@ export function createArtistThumbController({
       }
     });
 
+    // 격자 카드는 끌기 원본이다. 4px 를 넘기 전에는 아무 일도 없어 클릭(선택)은 그대로다.
+    gridEl?.addEventListener('pointerdown', event => {
+      const card = event.target.closest('.artist-thumb-card[data-artist]');
+      if (!card || !gridEl.contains(card)) return;
+      const item = itemFromCard(card);
+      if (!item?.artist) return;
+      void ensureGroups().then(({broker}) => {
+        // 모듈을 처음 불러오는 사이에 손을 뗐으면 끌기를 걸지 않는다.
+        if (!(event.buttons & 1)) return;
+        broker.arm(event, {kind: 'artist', artist: item.artist, weight: 1,
+                           image: item.image_url || '', label: item.artist},
+                   {onStart: () => getRemoteController?.()?.hideZoom?.()});
+      });
+    });
+
     gridEl?.addEventListener('contextmenu', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
       if (!card || !gridEl.contains(card)) return;
@@ -2302,6 +2338,206 @@ export function createArtistThumbController({
     getRemoteController?.()?.setSideSummary?.(lines);
   }
 
+  // ── 아티스트 그룹 ──────────────────────────────────────────────────────
+  //  ⚠️ 세 모듈은 **다른 곳과 같은 주소**로 불러야 한다(중개자가 둘로 뜨면 받는 쪽이
+  //     서로 안 보인다). 계약 시험이 주소를 대조한다.
+  async function ensureGroups() {
+    if (groupsApi) return groupsApi;
+    const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
+      import('./artistGroupsStore.mjs?v=20260917-grp1'),
+      import('./artistGroupWindow.mjs?v=20260917-grp1'),
+      import('./dragBroker.mjs?v=20260917-grp1'),
+    ]);
+    const store = createArtistGroupsStore({fetch});
+    groupsApi = {store, createWindow: createArtistGroupWindow, broker: dragBrokerFor(document)};
+    try { await store.load(); } catch (error) {
+      showToast?.(`그룹 목록을 읽지 못했습니다 — ${error.message}`, 'error');
+    }
+    return groupsApi;
+  }
+
+  /** 이름 목록 -> {이름: {image_url, known}}. 격자와 **같은 그림 규칙**(서버 한 곳). */
+  async function describeArtists(names) {
+    const data = await postJson('/api/artist-thumb/describe', {mode: currentMode(), artists: names});
+    const out = {};
+    for (const item of data?.items || []) out[item.artist] = item;
+    return out;
+  }
+
+  /** 그룹 창의 카드를 누름 = 격자에서 고른 것과 같다. */
+  function pickFromGroup(artist) {
+    const card = gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(artist)}"]`);
+    const item = card ? itemFromCard(card) : {artist, image_url: '', weight: '', favorite: false, banned: false};
+    selectArtist(item);
+  }
+
+  /** 그룹 -> 믹스 큐. 믹스 모드가 꺼져 있으면 먼저 켠다(큐가 곧 받을 곳이다). */
+  async function sendToQueue(items) {
+    if (!mixOn) await setMixMode(true);
+    if (!mixQueue) { showToast?.('믹스 큐를 열지 못했습니다.', 'error'); return; }
+    const n = mixQueue.insertArtists(items);
+    if (n) showToast?.(`${n}명을 큐에 넣었습니다.`, 'info');
+  }
+
+  async function openGroupWindow(groupId) {
+    const {store, createWindow} = await ensureGroups();
+    const open = groupWindows.get(groupId);
+    if (open) { open.focus(); return open; }
+    if (!store.get(groupId)) { showToast?.('그룹을 찾지 못했습니다.', 'error'); return null; }
+    const remote = getRemoteController?.();
+    const win = createWindow({
+      document,
+      store,
+      groupId,
+      escHtml,
+      showToast: (msg, kind) => showToast?.(msg, kind),
+      describe: describeArtists,
+      onPick: pickFromGroup,
+      onSendToQueue: items => { void sendToQueue(items); },
+      onDragStart: () => remote?.hideZoom?.(),
+      onClosed: info => {
+        groupWindows.delete(groupId);
+        if (lastTempGroupId === groupId) lastTempGroupId = '';
+        if (info?.reopen) void openGroupWindow(info.reopen);
+      },
+    });
+    groupWindows.set(groupId, win);
+    if (store.isTemp(groupId)) lastTempGroupId = groupId;
+    return win;
+  }
+
+  async function newTempWindow(items = []) {
+    const {store} = await ensureGroups();
+    const group = store.createTemp(items);
+    return openGroupWindow(group.id);
+  }
+
+  /** 우클릭 [임시 창에 올리기]: 열린 임시 창이 있으면 거기, 없으면 새로. */
+  async function putInTempWindow(item) {
+    const {store} = await ensureGroups();
+    const payload = [{artist: item.artist}];
+    if (lastTempGroupId && store.get(lastTempGroupId) && groupWindows.has(lastTempGroupId)) {
+      await store.add(lastTempGroupId, payload);
+      groupWindows.get(lastTempGroupId).focus();
+      return;
+    }
+    await newTempWindow(payload);
+  }
+
+  async function addToGroup(groupId, item) {
+    const {store} = await ensureGroups();
+    try {
+      const result = await store.add(groupId, [{artist: item.artist}]);
+      const name = store.get(groupId)?.name || '그룹';
+      showToast?.(result.added ? `'${name}' 에 넣었습니다.` : `이미 '${name}' 에 있습니다.`, 'info');
+    } catch (error) {
+      showToast?.(`그룹에 넣지 못했습니다 — ${error.message}`, 'error');
+    }
+  }
+
+  async function createGroupWith(name, item) {
+    const {store} = await ensureGroups();
+    try {
+      const group = await store.create(name, item ? [{artist: item.artist}] : []);
+      showToast?.(`'${group.name}' 그룹을 만들었습니다.`, 'info');
+      return group;
+    } catch (error) {
+      showToast?.(error.message, 'error');
+      return null;
+    }
+  }
+
+  function groupMenuHtml(withTempAdd) {
+    const store = groupsApi?.store;
+    const saved = store ? store.all().filter(g => !store.isTemp(g.id)) : [];
+    const rows = saved.map(g => `
+        <button type="button" class="result-context-item artist-thumb-group-item"
+                data-action="group-pick" data-group-id="${escHtml(g.id)}" role="menuitem">
+          <span>${escHtml(g.name)}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
+        </button>`).join('');
+    return `
+      <div class="result-context-group artist-thumb-group-section">
+        ${withTempAdd ? `<button type="button" class="result-context-item" data-action="temp-add" role="menuitem">
+          <span>임시 창에 올리기</span></button>` : ''}
+        <div class="artist-thumb-group-label">${withTempAdd ? '그룹에 등록' : '그룹 창 열기'}</div>
+        <div class="artist-thumb-group-list">${rows || '<div class="artist-thumb-group-empty">아직 그룹이 없습니다</div>'}</div>
+        <button type="button" class="result-context-item" data-action="group-new" role="menuitem">
+          <span>+ 새 그룹…</span></button>
+        <form class="artist-thumb-group-new" hidden>
+          <input type="text" maxlength="40" spellcheck="false" placeholder="그룹 이름">
+          <button type="submit">만들기</button>
+        </form>
+      </div>`;
+  }
+
+  /** 메뉴 안의 [+ 새 그룹…] - 메뉴를 닫지 않고 이름 칸을 편다. */
+  function revealNewGroupForm(menu, onName) {
+    const form = menu.querySelector('.artist-thumb-group-new');
+    if (!form) return;
+    form.hidden = false;
+    const input = form.querySelector('input');
+    input.focus();
+    input.addEventListener('keydown', event => {
+      event.stopPropagation();               // Ctrl+Enter 등 전역 단축키가 새지 않게
+      if (event.key === 'Escape') closeContextMenu();
+    });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      closeContextMenu();
+      void onName(name);
+    }, {once: true});
+  }
+
+  /** 믹스 판 머리의 [그룹] - 그룹 창을 열거나 새로 만든다. */
+  async function openGroupsLauncher(anchor) {
+    await ensureGroups();
+    closeContextMenu();
+    const {store} = groupsApi;
+    const temps = store.all().filter(g => store.isTemp(g.id));
+    const tempRows = temps.map((g, i) => `
+        <button type="button" class="result-context-item" data-action="group-pick" data-group-id="${escHtml(g.id)}" role="menuitem">
+          <span>임시 창 ${i + 1}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
+        </button>`).join('');
+    const menu = document.createElement('div');
+    menu.className = 'result-context-menu artist-thumb-context-menu artist-thumb-groups-launcher open';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = `
+      <div class="result-context-group">
+        <button type="button" class="result-context-item" data-action="temp-new" role="menuitem">
+          <span>+ 임시 창</span></button>
+        ${tempRows}
+      </div>
+      ${groupMenuHtml(false)}`;
+    contextMenuEl = menu;
+    menu.addEventListener('contextmenu', e => e.preventDefault());
+    menu.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const action = button.dataset.action;
+      if (action === 'group-new') {
+        revealNewGroupForm(menu, async name => {
+          const group = await createGroupWith(name, null);
+          if (group) void openGroupWindow(group.id);
+        });
+        return;
+      }
+      closeContextMenu();
+      if (action === 'temp-new') void newTempWindow([]);
+      else if (action === 'group-pick') void openGroupWindow(button.dataset.groupId);
+    });
+    document.body.appendChild(menu);
+    const r = anchor?.getBoundingClientRect?.() || {left: 100, bottom: 100};
+    positionContextMenu(menu, r.left, r.bottom + 4);
+    document.addEventListener('pointerdown', onContextMenuPointerDown, true);
+    document.addEventListener('keydown', onContextMenuKeyDown, true);
+    window.addEventListener('blur', closeContextMenu);
+    window.addEventListener('resize', closeContextMenu);
+  }
+
   // ── 앵커 <-> prefix/postfix 글 ────────────────────────────────────────
   //  큐는 글을 안 갖고 있고, PE 는 큐를 모른다. 둘을 아는 곳은 여기뿐이다.
   const PE_ANCHOR_FIELDS = ['pre_prompt', 'post_prompt'];
@@ -2338,7 +2574,8 @@ export function createArtistThumbController({
     const remote = getRemoteController?.();
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260915-anchor1');
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260917-drag2');
+    await ensureGroups();
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260917-grp1');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2360,6 +2597,8 @@ export function createArtistThumbController({
       // 추가/복원 = prefix **맨 뒤**에 표식을 넣는다(사용자 지정).
       onAnchorAdd: id => putAnchorInPrefix(id),
       onAnchorRemove: id => dropAnchorFromText(id),
+      onGroupsMenu: anchor => { void openGroupsLauncher(anchor); },
+      onDragStart: () => remote.hideZoom?.(),
     });
     // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
     if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {
@@ -2460,6 +2699,8 @@ export function createArtistThumbController({
       }
       remoteOnboarded = true;
       syncRemoteSelectTitles();
+      // 첫 끌기가 모듈 로딩에 먹히지 않게 미리 올린다(카드를 잡는 순간엔 이미 준비돼 있다).
+      void ensureGroups();
       // 조각을 실제로 옮긴 뒤에만 옮겨 간다. 끌 때는 되돌리지 않는다 - 그때쯤이면
       // 사용자가 다른 것을 보고 있고, 화면을 낚아채는 쪽이 더 나쁘다.
       showResultTab();

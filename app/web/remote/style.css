@@ -89,6 +89,9 @@
   /* 창 옆 보조 판(믹스 큐). ⚠️ 확대 보기보다 **아래** - 격자 칸에 마우스를 올리면
      확대가 이 판 위로 그대로 덮여야 한다(사용자 지정 충돌 정책). */
   --z-drag-panel-side: 10193;
+  /* 창을 건너는 끌기의 유령. 확대 보기(10195)·열린 셀렉트(10196) 위, 제목 툴팁(10200)
+     아래. ⚠️ 받는 쪽 강조는 z 를 바꾸지 않는다(outline 만) - 창 순서가 흔들린다. */
+  --z-drag-ghost: 10199;
   /* ⚠️ **열려 있는** 드롭다운은 떠 있는 창보다 위여야 한다. 리모컨(10150)에 올라간
      셀렉트의 메뉴가 기본값(10100)이면 창 뒤로 숨어 고를 수가 없다. 닫힌 메뉴는
      그대로 두고 열린 것만 올린다. */
@@ -29572,3 +29575,137 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 .peq-text[hidden] { display: none !important; }
 .peq-text:focus { border-color: var(--accent); }
+
+/* ══ 창을 건너는 끌기 (js/features/dragBroker.mjs) ══════════════════════════ */
+/* ⚠️ 유령은 pointer-events:none 이라야 elementFromPoint 가 **밑의** 받는 쪽을 돌려준다. */
+.drag-ghost {
+  position: fixed; left: 0; top: 0; z-index: var(--z-drag-ghost);
+  pointer-events: none; user-select: none;
+  display: flex; align-items: center; gap: 6px; max-width: 240px;
+  padding: 4px 8px 4px 4px; border-radius: 8px;
+  background: var(--bg-surface); border: 1px solid #ffe07a;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55); opacity: 0.94;
+}
+.drag-ghost img, .drag-ghost-noimg {
+  flex: 0 0 auto; width: 36px; height: 44px; border-radius: 5px; object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+}
+.drag-ghost-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; font-weight: 700; color: var(--text-primary);
+}
+/* 끄는 동안에는 글자 선택이 따라오지 않게. */
+html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important; cursor: grabbing !important; }
+/* 받는 쪽 강조 - z 는 그대로, 테두리만. */
+.is-drop-hover { outline: 2px dashed #ffe07a; outline-offset: -3px; }
+/* 브라우저의 네이티브 그림 끌기가 유령을 가로채지 않게(가로채면 pointercancel 이 온다). */
+.artist-thumb-card img, .agw-card img, .mixq-block img { -webkit-user-drag: none; user-drag: none; }
+
+/* 믹스 판 머리의 [그룹] */
+.mixq-groups {
+  flex: 0 0 auto; height: 18px; padding: 0 6px; margin-left: 4px;
+  border: 1px solid var(--border-dim); border-radius: 5px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); color: var(--text-muted); font-size: 10px;
+}
+.mixq-groups:hover { color: var(--text-primary); border-color: var(--accent); }
+
+/* ══ 아티스트 그룹 창 (js/features/artistGroupWindow.mjs) ══════════════════ */
+.dragpanel.agw .dragpanel-body {
+  display: flex; flex-direction: column; min-height: 0; gap: 6px; padding: 6px;
+}
+.agw-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.agw-count { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.agw-spacer { flex: 1 1 auto; }
+.agw-btn {
+  flex: 0 0 auto; height: 22px; padding: 0 7px;
+  border: 1px solid var(--border-dim); border-radius: 5px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); color: var(--text-muted); font-size: 10px;
+}
+.agw-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.agw-btn.danger:hover { color: #ff9c9c; border-color: rgba(255, 96, 96, 0.7); }
+.agw-name { flex: 0 0 auto; display: flex; gap: 4px; }
+.agw-name[hidden] { display: none !important; }
+.agw-name-input {
+  flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 6px;
+  border: 1px solid var(--accent); border-radius: 5px; outline: none;
+  background: rgba(0, 0, 0, 0.26); color: var(--text-primary); font-size: 11px;
+}
+.agw-grid {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px;
+  align-content: start; padding: 1px;
+}
+.agw-empty {
+  flex: 0 0 auto; padding: 18px 8px; text-align: center;
+  font-size: 11px; color: var(--text-dim);
+  border: 1px dashed var(--border-dim); border-radius: 8px;
+}
+.agw-empty[hidden] { display: none !important; }
+.agw-card {
+  display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden;
+  border: 1px solid var(--border-dim); border-radius: 7px; cursor: grab;
+  background: rgba(0, 0, 0, 0.22); color: var(--text-primary); text-align: left;
+  user-select: none;
+}
+.agw-card:hover { border-color: var(--accent); }
+.agw-img { display: block; aspect-ratio: 3 / 4; background: rgba(255, 255, 255, 0.04); }
+.agw-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.agw-noimg {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  font-size: 9px; color: var(--text-dim);
+}
+.agw-label {
+  display: flex; align-items: center; gap: 3px; min-width: 0; padding: 3px 5px;
+  font-size: 10px; font-weight: 700;
+}
+.agw-name-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agw-weight {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px; color: #ffe07a;
+}
+/* 이미 있는 작가를 놓았다 / 방금 들어왔다 - 잠깐 빛난다. */
+.agw-card.is-flash { animation: agw-flash 0.9s ease-out; }
+@keyframes agw-flash {
+  0% { box-shadow: 0 0 0 2px #ffe07a; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .agw-card.is-flash { animation: none; } }
+.agw-menu {
+  position: fixed; z-index: var(--z-drag-ghost); min-width: 128px; padding: 3px;
+  display: flex; flex-direction: column; gap: 1px;
+  border: 1px solid var(--border-glow); border-radius: 8px;
+  background: var(--bg-surface); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+}
+.agw-menu button {
+  border: none; background: transparent; color: var(--text-primary);
+  font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;
+}
+.agw-menu button:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* ══ 우클릭 메뉴의 그룹 줄 (artistThumbTab.groupMenuHtml) ═══════════════════ */
+/* ⚠️ 아티스트 메뉴는 떠 있는 창(10150대) **위**여야 한다. 기본 결과 메뉴 층(2400)에
+   두었더니 리모컨 안의 카드를 우클릭하면 메뉴가 창 **뒤**에 떠 보이지도 눌리지도 않았다
+   (리모컨 도입 이후 잠복 - 진짜 마우스 검증에서 드러남). 열린 셀렉트와 같은 층. */
+.result-context-menu.artist-thumb-context-menu { z-index: var(--z-floating-select-open); }
+.artist-thumb-group-label {
+  padding: 5px 10px 2px; font-size: 9px; font-weight: 700; letter-spacing: .06em;
+  color: var(--text-dim); text-transform: uppercase;
+}
+.artist-thumb-group-list { max-height: 220px; overflow-y: auto; }
+.artist-thumb-group-empty { padding: 4px 10px 6px; font-size: 10px; color: var(--text-dim); }
+.artist-thumb-group-item { justify-content: space-between; }
+.artist-thumb-group-count {
+  margin-left: auto; padding-left: 10px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+}
+.artist-thumb-group-new { display: flex; gap: 4px; padding: 4px 6px 6px; }
+.artist-thumb-group-new[hidden] { display: none !important; }
+.artist-thumb-group-new input {
+  flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 6px;
+  border: 1px solid var(--accent); border-radius: 5px; outline: none;
+  background: rgba(0, 0, 0, 0.26); color: var(--text-primary); font-size: 11px;
+}
+.artist-thumb-group-new button {
+  flex: 0 0 auto; height: 24px; padding: 0 8px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary); font-size: 10px;
+}

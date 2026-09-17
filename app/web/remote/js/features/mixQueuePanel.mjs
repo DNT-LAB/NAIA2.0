@@ -19,6 +19,9 @@
  */
 
 import { anchorToken, nextAnchorId } from './artistAnchors.mjs?v=20260915-anchor1';
+// ⚠️ 중개자는 **모든 곳에서 같은 주소**로 불러야 한다. 주소(쿼리 포함)가 다르면 모듈이
+//    둘로 뜨고, 한쪽에 등록한 받는 쪽을 다른 쪽이 못 본다. 계약 시험이 대조한다.
+import { dragBrokerFor } from './dragBroker.mjs?v=20260917-grp1';
 
 const COLLAB_ID = '__collab__';
 const HOLD_FIRST_MS = 320;     // 누르고 있을 때 반복이 시작되기까지
@@ -66,6 +69,10 @@ export function createMixQueuePanel({
   // 표식을 글에 넣어 달라 / 빼 달라(넣는 자리는 prefix 맨 뒤 - 사용자 지정).
   onAnchorAdd = () => {},
   onAnchorRemove = () => {},
+  // [그룹] 단추 - 무엇을 보여 줄지는 주인이 정한다(그룹 목록·새 그룹·임시 창).
+  onGroupsMenu = () => {},
+  // 큐 블럭을 끌어 내기 시작했다(확대 보기 끄기 등).
+  onDragStart = () => {},
 } = {}) {
   const el = doc.createElement('div');
   el.className = 'mixq';
@@ -74,6 +81,7 @@ export function createMixQueuePanel({
     <div class="mixq-head">
       <span class="mixq-title">믹스 모드</span>
       <span class="mixq-hint">끌어서 순서 · 우클릭으로 더 보기</span>
+      <button type="button" class="mixq-groups" title="아티스트 그룹 · 임시 창">그룹</button>
       <button type="button" class="mixq-pin" aria-pressed="false"
               title="고정 - 가만히 둬도 접히지 않습니다">📌</button>
     </div>
@@ -89,6 +97,10 @@ export function createMixQueuePanel({
   const menuEl = el.querySelector('.mixq-menu');
   // 제목줄은 접혀도 남는 유일한 띠라, 고정 단추는 두 상태 모두에서 손이 닿는다.
   const pinEl = el.querySelector('.mixq-pin');
+  const broker = dragBrokerFor(doc);
+  el.querySelector('.mixq-groups').addEventListener('click', event => {
+    onGroupsMenu(event.currentTarget);
+  });
   pinEl.addEventListener('click', () => {
     const next = pinEl.getAttribute('aria-pressed') !== 'true';
     pinEl.setAttribute('aria-pressed', next ? 'true' : 'false');
@@ -380,6 +392,50 @@ export function createMixQueuePanel({
     applyWeight(block, next);
   });
 
+  /** 포인터 Y -> 몇 번째 앞에 넣을지. 재배치와 **같은 규칙**(이웃의 가운데 기준).
+   *  빈 곳(모든 줄 아래)이면 collab 블럭 앞 - setTempArtist 와 같은 자리다. */
+  function insertionIndexAt(clientY) {
+    const nodes = [...listEl.children];
+    for (let i = 0; i < nodes.length; i += 1) {
+      const r = nodes[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    const collab = blocks.findIndex(b => b.id === COLLAB_ID);
+    return collab < 0 ? blocks.length : collab;
+  }
+
+  /** 정식 블럭으로 넣는다(임시가 아니다 - 임시는 다음 격자 클릭에 갈린다).
+   *  큐는 같은 작가를 두 번 허용한다 - 다른 앵커 밑이면 뜻이 다르다. */
+  function insertArtists(items, clientY = null) {
+    let at = clientY == null ? insertionIndexAt(Infinity) : insertionIndexAt(clientY);
+    const added = [];
+    for (const raw of items || []) {
+      const artist = String(raw?.artist || '').trim();
+      if (!artist) continue;
+      const w = Number.parseFloat(raw.weight);
+      const block = {
+        id: nextId(), artist, weight: roundStep(Number.isFinite(w) ? w : 1),
+        withPrefix: raw.withPrefix !== false, enabled: true, temp: false,
+        locked: false, selected: false, image: String(raw.image || ''),
+      };
+      blocks.splice(at, 0, block);
+      at += 1;
+      added.push(block);
+    }
+    if (added.length) refresh();
+    return added.length;
+  }
+
+  broker.registerZone(listEl, {
+    kind: 'artist',
+    canAccept: payload => payload?.kind === 'artist' && !payload.sourceQueue,
+    accept: (payload, point) => {
+      // ⚠️ 큐 자신의 재배치가 진행 중이면 받지 않는다 - 다시 그리면 그 줄이 죽는다.
+      if (drag) return false;
+      return insertArtists([payload], point.y) > 0;
+    },
+  });
+
   /** 블럭을 누르면 고름 = 아래 두 단추의 대상. **하나만** 잡힌다(사용자 결정).
    *  여럿을 잡게 두면 몇 개가 걸려 있는지 계속 기억해야 하는데, 한 번에 여러 개를
    *  정리하는 일은 우클릭(블럭별 제거·비활성)이 이미 감당한다.
@@ -498,6 +554,31 @@ export function createMixQueuePanel({
     if (next.length === blocks.length) blocks = next;
   }
 
+  /** 줄을 **원래 자리로 되돌리고** 중개자에게 넘긴다. 복사이므로 큐는 그대로여야 한다. */
+  function handOffToBroker(event) {
+    const block = find(drag.id);
+    const node = drag.node;
+    const home = listEl.children[drag.startIndex] || null;
+    if (home !== node) listEl.insertBefore(node, home);
+    blocksFromDom();
+    node.classList.remove('is-dragging');
+    try { listEl.releasePointerCapture(drag.pointerId); } catch { /* 이미 풀림 */ }
+    drag = null;
+    // ⚠️ 여기서 swallowClick 을 세우지 않는다. 놓는 곳은 다른 창이라 그 click 은 큐로
+    //    안 온다 - 세워 두면 사용자의 **다음 진짜 클릭**을 삼킨다. 삼키기는 중개자가
+    //    문서 단위로 한 번 한다.
+    if (!block || isAnchor(block) || !String(block.artist || '').trim()) return;
+    onDragStart();
+    broker.takeOver(event, {
+      kind: 'artist',
+      artist: block.artist,
+      weight: block.weight,
+      image: block.image || '',
+      label: block.withPrefix ? `artist:${block.artist}` : block.artist,
+      sourceQueue: true,
+    });
+  }
+
   function endDrag() {
     if (!drag) return;
     const moved = drag.moved;
@@ -521,6 +602,7 @@ export function createMixQueuePanel({
     const host = event.target.closest('[data-mixq-id]');
     if (!host) return;
     drag = {id: host.dataset.mixqId, node: host, startY: event.clientY,
+            startIndex: [...listEl.children].indexOf(host),
             moved: false, pointerId: event.pointerId};
   });
 
@@ -534,6 +616,13 @@ export function createMixQueuePanel({
       try { listEl.setPointerCapture(drag.pointerId); } catch { /* 옛 브라우저 */ }
     }
     event.preventDefault();
+    // 가로로 목록을 벗어나면 **복사 끌기**로 바꾼다(다른 창으로 가져가는 중).
+    // 세로 이탈은 넣지 않는다 - 목록 끝에 놓으려다 아래로 조금 넘치는 것이 자연스럽다.
+    const box = listEl.getBoundingClientRect();
+    if (event.clientX < box.left - 6 || event.clientX > box.right + 6) {
+      handOffToBroker(event);
+      return;
+    }
     const over = [...listEl.children].find(node => {
       if (node === drag.node) return false;
       const rect = node.getBoundingClientRect();
@@ -635,6 +724,8 @@ export function createMixQueuePanel({
     },
     compose,
     composeGroups,
+    /** 그룹 창의 [큐에 넣기] · [큐에 전부] 가 쓴다. 끝(collab 앞)에 넣는다. */
+    insertArtists: items => insertArtists(items, null),
     /** 글이 바뀌었다 - 표식이 살아 있는지 다시 재고, 달라졌으면 다시 그린다.
      *  ⚠️ 표식을 옮기는 동안의 **일시 소실과 회복**이 이 길로 들어온다. */
     recheckAnchors() {

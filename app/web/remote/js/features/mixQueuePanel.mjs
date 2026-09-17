@@ -464,8 +464,19 @@ export function createMixQueuePanel({
     }
     refresh();
   });
-  el.addEventListener('pointerdown', event => {
-    if (!event.target.closest('.mixq-menu')) closeMenu();
+  // 메뉴는 **관심이 떠나면** 닫힌다 - 바깥 누름 · 바깥으로 간 초점 · Esc.
+  // ⚠️ `.mixq` 안의 누름에만 걸어 두었더니 옆 판(postfix 칸)으로 초점이 가도 그대로
+  //    떠 있었다(사용자 제보). document 의 캡처 단계에 건다 - 아래에서 이벤트를 삼켜도
+  //    여기가 먼저다. 열리는 순서도 맞다: 우클릭의 pointerdown 이 먼저 와서 (닫힌 메뉴에)
+  //    아무 일도 안 하고, 그 뒤 contextmenu 가 연다.
+  const closeMenuIfOutside = event => {
+    if (menuEl.hidden) return;
+    if (!menuEl.contains(event.target)) closeMenu();
+  };
+  doc.addEventListener('pointerdown', closeMenuIfOutside, true);
+  doc.addEventListener('focusin', closeMenuIfOutside, true);
+  doc.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !menuEl.hidden) closeMenu();
   }, true);
 
   // ── 끌어서 순서 바꾸기 ────────────────────────────────────────────────
@@ -500,8 +511,13 @@ export function createMixQueuePanel({
 
   listEl.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
-    // 단추·입력칸에서 시작한 것은 끌기가 아니다(+/- 는 누르고 있는 조작이 따로 있다).
-    if (event.target.closest('[data-mixq-step], .mixq-weight, .mixq-menu')) return;
+    // +/- 는 누르고 있는 조작이 따로 있어 끌기가 아니다.
+    if (event.target.closest('[data-mixq-step], .mixq-menu')) return;
+    // 가중치 칸은 **편집 중(초점 있음)일 때만** 뺀다. 통째로 빼 두었더니 줄 왼쪽 1/3 이
+    // 죽은 자리가 되어 "안 따라간다" 로 보였다(실측: 손이 44px 칸에 내려갔다).
+    // 그냥 누르면 초점이 가고, 누른 채 움직이면 줄이 끌린다.
+    const weightBox = event.target.closest('.mixq-weight');
+    if (weightBox && doc.activeElement === weightBox) return;
     const host = event.target.closest('[data-mixq-id]');
     if (!host) return;
     drag = {id: host.dataset.mixqId, node: host, startY: event.clientY,

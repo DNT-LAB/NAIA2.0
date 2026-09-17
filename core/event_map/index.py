@@ -65,6 +65,19 @@ SCAN_CAP = 120_000
 SORT_MODES = ("lift", "posts", "mix")   # explore 후보 정렬(사용자 지정 2026-09-12 밤)
 RANK_PRIOR = 3.0
 
+# explore 후보 문턱(`min_posts`)을 교집합 크기에 맞춰 내린다.
+#
+# ⚠️ 고정 5건이면 교집합이 5건일 때 **다섯 게시물 전부에 달린 태그만** 남는다(제보 2026-09-17:
+#    핀 5개로 좁혔더니 '함께 달린 태그' 가 6개뿐이고 실제 조합에 보이는 태그 대부분이 빠졌다).
+#    문턱은 큰 교집합의 잡음을 거르는 것이지 성능 장치가 아니다 - 세는 비용은 문턱과 무관하다.
+#    교집합 MIN_POSTS_STEP 건마다 1씩 올려 `min_posts` 에서 멈춘다(200건 미만 = 1건이면 나온다).
+#    희귀 태그는 줄 세우기의 PRIOR 가 이미 아래로 민다.
+MIN_POSTS_STEP = 100
+
+
+def effective_min_posts(matched: int, min_posts: int) -> int:
+    return max(1, min(int(min_posts), int(matched) // MIN_POSTS_STEP))
+
 
 BODY_MAGIC = b"NAIAMAPR"
 BODY_HEADER = 24         # magic 8 + 게시물 수 8 + 오프셋 표 위치 8
@@ -598,7 +611,9 @@ class EventMapIndex:
         counts = self._count_tags(scanned)
         base = int(scanned.size)
         total = self.total_posts or 1
-        keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0)
+        floor = effective_min_posts(rids.size, min_posts)
+        out["min_posts"] = floor
+        keep = (counts >= floor) & self.usable_arr & (self.obs_arr > 0)
         if not include_color:
             keep &= ~self.color_arr
         keep &= ~self.population_arr      # 인원은 분면 필터 - 후보로 내지 않는다

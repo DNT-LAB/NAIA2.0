@@ -117,6 +117,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let overlay = null, input = null, statusEl = null, trailEl = null, bodyEl = null;
   let filtersEl = null, personBtn = null, personPopup = null, footEl = null, tabBtn = null;
   let subEl = null, subcategory = '';
+  let widenNote = '';             // 고른 분류가 비어 전체로 되돌렸을 때 한 번 보여 주는 문구
   let sideEl = null;              // 실제 조합 둘째 패널
   let library = null;
   let open = false, seq = 0, suggestSeq = 0, timer = null;
@@ -220,7 +221,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
   const peTitle = tag => peHidden.has(tag) ? ` · 프롬프트 엔지니어링 설정(${peHidden.get(tag)})이 지웁니다` : '';
 
-  async function loadBrowse() {
+  async function loadBrowse(keepWidenNote = false) {
+    if (!keepWidenNote) widenNote = '';
     if (randomLink.enabled) void syncRandomLink();
     moreRequest = null; moreError = '';
     active = -1;
@@ -237,10 +239,48 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (mine !== seq) return;
       browse = { status: 'error', message: error.message, candidates: [] };
     } finally { setBusy(false); }
+    // 대분류 목록에서도 소분류가 비면 전체로 되돌린다. 여기서 대분류 자체는 '보고 있는 화면'
+    // 이므로 바꾸지 않는다 - 소분류만 푼다.
+    if (mine === seq && browse?.status !== 'error' && subcategory && widenEmptySelection(
+      { ...browse, status: 'matched', group_counts: null })) { void loadBrowse(true); return; }
     render();
   }
 
-  async function explore() {
+  /** 고른 갈래·소분류에 후보가 **하나도 없으면 전체로 되돌린다**(사용자 지정 2026-09-18).
+   *
+   *  핀을 더할수록 좁아지다 보면 "고른 분류에만" 후보가 없는 자리에 닿는다. 거기서 빈 목록을
+   *  보여 주면 사용자는 **조합 자체에 데이터가 없다**고 읽는다 - 실제로는 다른 갈래에 남아 있다.
+   *  갈래별·소분류별 개수는 **갈래 필터를 걸기 전 풀**에서 나오므로(service `_pool`) 이 응답
+   *  하나로 판정할 수 있다. 되돌린 뒤 다시 물어야 그 후보들이 실려 온다.
+   *  ⚠️ 전체로 가도 빈 화면이면 되돌리지 않는다 - 그때는 정말로 후보가 없는 것이고,
+   *     괜히 사용자가 고른 갈래만 잃는다.
+   *  되돌린 자리는 `roles`/`subcategory` 가 이미 비어 있으니 두 번 돌 수 없다. */
+  function widenEmptySelection(r) {
+    if (!r || r.status !== 'matched') return false;
+    const gid = roles.size === 1 ? [...roles][0] : '';
+    const counts = Array.isArray(r.group_counts)
+      ? new Map(r.group_counts.map(g => [g.id, Number(g.count) || 0])) : null;
+    if (gid && counts && !counts.get(gid)) {
+      const elsewhere = [...counts].some(([id, n]) => n > 0 && (id !== 'unsorted' || r.unclassified_available));
+      roles.delete(gid); subcategory = '';
+      widenNote = elsewhere ? `${roleLabel(gid)} → 전체 (비어서 자동 전환)` : '';
+      return elsewhere;
+    }
+    if (subcategory) {
+      const row = (r.subcategories || []).find(s => s.id === subcategory);
+      if (!row || !row.count) {
+        const label = row?.label || subcategory;
+        subcategory = '';
+        const elsewhere = (r.subcategory_total || 0) > 0;
+        widenNote = elsewhere ? `${label} → 전체 (비어서 자동 전환)` : '';
+        return elsewhere;
+      }
+    }
+    return false;
+  }
+
+  async function explore(keepWidenNote = false) {
+    if (!keepWidenNote) widenNote = '';
     if (pins.length < 2 && roles.has('unsorted')) { roles.delete('unsorted'); subcategory = ''; }
     if (randomLink.enabled) void syncRandomLink();
     moreRequest = null; moreError = '';
@@ -268,6 +308,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (mine !== seq) return;
       result = { status: 'error', message: error.message, code: error.code, candidates: [] };
     } finally { setBusy(false); }
+    if (mine === seq && widenEmptySelection(result)) { void explore(true); return; }
     render();
     // Open actual posts only when the whole candidate pool is exhausted,
     // not merely when the selected category has no candidates.
@@ -817,8 +858,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       `${Math.round(browse.elapsed_ms || 0)}ms · 이 분면에서의 비율 ÷ 코퍼스 전체에서의 비율`);
     const tabs = (mapState?.groups || []).filter(g => g.tags > 0 && g.id !== 'unsorted').map(g => ({ id: g.id, count: g.tags }));
     return catsHtml(tabs, group, null)
-      + `<div class="em-cap">${esc(roleLabel(group))} <span class="em-note">이 인원·등급에서 특징적인 순 · ${cs.length}개</span></div>`
-      + (cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">이 분면에서 5건 이상인 태그가 없습니다.</div>`);
+      + `<div class="em-cap">${esc(roleLabel(group))} <span class="em-note">이 인원·등급에서 특징적인 순 · ${cs.length}개${widenNote ? ` · ${esc(widenNote)}` : ''}</span></div>`
+      + (cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">이 분면에 ${floorPhrase(browse, '나온 태그가 없습니다.')}</div>`);
   }
 
   /** 실제 조합은 본문 아래가 아니라 **오른쪽 둘째 패널**에 그린다(사용자 지정 2026-09-12) -
@@ -936,6 +977,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   /** 핀이 둘 이상이어야 '하나 빼기' 가 뜻이 있다. */
   function canRelax() { return pins.length >= 2; }
 
+  /** 후보 문턱은 **교집합이 작으면 백엔드가 낮춘다**(1~5건). 그러니 문구에 숫자를 박지 말고
+   *  응답이 말한 값을 쓴다 - 5로 박아 두면 "5건 이상 없습니다" 가 거짓말이 된다. */
+  function floorOf(r) { return Math.max(1, Number(r?.min_posts) || 5); }
+  function floorPhrase(r, tail) { const n = floorOf(r); return n > 1 ? `${n}건 이상 ${tail}` : tail; }
+
   /** 후보 목록 머리줄: [정렬 ▾] 개수·완화 안내 [-1 허용]. **0건일 때도 그린다** - 넓히는 단추가
    *  거기 있어야 한다(사용자 제보 2026-09-13). */
   function candidateCapHtml(result, count) {
@@ -943,7 +989,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const relaxNote = result.relaxed
       ? ` · ${pins.length - 1}/${pins.length} 일치 · 정확 ${fmt(result.strict_posts || 0)}건` : '';
     return `<div class="em-cap"><span class="em-cap-label">함께 달린 태그</span> <button type="button" class="em-sort" data-em-sort title="${esc(sm.title)} · 눌러서 바꾸기">${esc(sm.label)} ▾</button>`
-      + `<span class="em-note">${count}개${result.sampled ? ' · 표본으로 셈' : ''}${relaxNote}</span>`
+      + `<span class="em-note">${count}개${result.sampled ? ' · 표본으로 셈' : ''}${relaxNote}${widenNote ? ` · ${esc(widenNote)}` : ''}</span>`
       + `<button type="button" class="em-relax${relaxOne ? ' is-on' : ''}" data-em-relax aria-pressed="${relaxOne}" ${canRelax() ? '' : 'disabled'} title="핀 ${pins.length}개 중 ${Math.max(1, pins.length - 1)}개만 있는 게시물까지 센다 - 정확한 교집합이 쪼그라들 때">-1 허용</button></div>`;
   }
 
@@ -996,11 +1042,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         if (result.unclassified_available && result.unclassified_count > 0) {
           const expanded = roles.has('unsorted');
           html += `<div class="em-unclassified"><button type="button" class="em-mini" data-em-unclassified aria-expanded="${expanded}">${expanded ? '▾ 미분류 후보 접기' : '▸ 미분류 후보 더 보기'} · ${fmt(result.unclassified_count)}</button>${expanded
-            ? `<span class="em-note">${result.sampled ? '표본 집계 · 범위를 좁히면 전체 집계' : '전체 집계'} · 5건 이상 함께 등장 · 분류 검토 중</span>` : ''}</div>`;
+            ? `<span class="em-note">${result.sampled ? '표본 집계 · 범위를 좁히면 전체 집계' : '전체 집계'}${floorOf(result) > 1 ? ` · ${floorOf(result)}건 이상 함께 등장` : ''} · 분류 검토 중</span>` : ''}</div>`;
         }
         html += candidateCapHtml(result, cs.length);
         html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">${result.unclassified_count > 0 && !roles.has('unsorted')
-          ? (result.unclassified_available ? '분류된 후보가 없습니다. 미분류 후보 또는 실제 조합을 확인하세요.' : '분류된 후보가 없습니다. 실제 조합을 확인하세요.') : '5건 이상 함께 달린 태그가 없습니다.'}</div>`;
+          ? (result.unclassified_available ? '분류된 후보가 없습니다. 미분류 후보 또는 실제 조합을 확인하세요.' : '분류된 후보가 없습니다. 실제 조합을 확인하세요.') : floorPhrase(result, '함께 달린 태그가 없습니다.')}</div>`;
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);
       }

@@ -485,6 +485,7 @@ class EventMapIndex:
         out["scanned_posts"] = int(scanned.size)
         out["sampled"] = sampled
         counts = self._count_tags(scanned)
+        out["min_posts"] = int(min_posts)   # 화면 문구가 문턱을 글자로 박지 않게 같이 보낸다
         keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0)
         if not include_color:
             keep &= ~self.color_arr

@@ -285,6 +285,7 @@
         "core/web_session_app.py",
         "app/backend/server/artist_thumbnail_routes.py",
         "core/artist_thumbnail_service.py",
+        "core/artist_groups.py",
         "app/web/remote/js/features/artistThumbTab.mjs"
       ],
       "legacy_dependency": "legacy_compat",
@@ -302,6 +303,9 @@
         {"method": "POST", "path": "/api/artist-thumb/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/artist-thumb/download/cancel", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/artist-thumb/random-prompt", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/artist-thumb/describe", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/artist-groups", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/artist-groups", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/artist-thumb/generate", "smoke": "external_live"}
       ]
     },

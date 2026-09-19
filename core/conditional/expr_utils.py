@@ -107,6 +107,78 @@ def strip_redundant_outer_parens(expression: str) -> str:
     return expression
 
 
+def starts_new_rule(text: str, pos: int) -> bool:
+    """`pos` 부터 공백을 건너뛴 자리가 **새 규칙의 시작**인가.
+
+    규칙 경계 판정의 **단일 구현**. 새 규칙은 `#`(꺼진 규칙) 이거나, 짝이 되는 `)` 바로
+    뒤에 `:` 가 오는 `(`(조건 그룹)로 시작한다. 뒤 조건이 없으면 액션 안의 괄호 태그
+    (`main+=x,(b:1.2)`)까지 새 규칙으로 오인한다.
+
+    ⚠️ 이 판정이 **세 곳에 복제돼 있었다** — 런타임 분할기, `iter_condition_spans`,
+    그리고 New Editor 파서(이쪽은 아예 쉼표만 보고 잘랐다). 그래서 같은 텍스트를
+    런타임은 2규칙으로, 블록 편집기는 1규칙으로 읽었다(실측). 조건 토큰 파서가 둘이라
+    의미가 갈렸던 것과 같은 병이라 같은 약을 쓴다 - 여기 하나만 고친다.
+    """
+    text = str(text or "")
+    length = len(text)
+    cursor = pos
+    while cursor < length and text[cursor] in " \t\r\n":
+        cursor += 1
+    if cursor >= length:
+        return False
+    if text[cursor] == "#":
+        return True
+    if text[cursor] != "(":
+        return False
+    close = matching_paren(text, cursor)
+    return close >= 0 and close + 1 < length and text[close + 1] == ":"
+
+
+def split_rules(text: str, *, keep_disabled: bool = True) -> list[str]:
+    """규칙 텍스트를 규칙 단위로 나눈다. 따옴표/괄호 깊이를 존중한다.
+
+    최상위 `,` 또는 개행이 경계이되, **다음 자리가 새 규칙일 때만** 자른다
+    (`starts_new_rule`). 그래서 액션의 태그 목록에 들어 있는 쉼표·개행은 안 잘린다.
+
+    `keep_disabled=False` 는 `#` 규칙을 버린다 - 실행하는 런타임의 동작이다.
+    New Editor 는 `True` 로 받아 꺼진 규칙을 토글로 되살릴 수 있게 한다.
+    """
+    text = str(text or "")
+    rules: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    depth = 0
+
+    def flush() -> None:
+        rule = "".join(current).strip()
+        if rule and (keep_disabled or not rule.startswith("#")):
+            rules.append(rule)
+        current.clear()
+
+    for index, char in enumerate(text):
+        if char == '"' and (index == 0 or text[index - 1] != "\\"):
+            in_quotes = not in_quotes
+            current.append(char)
+        elif not in_quotes and char == "(":
+            depth += 1
+            current.append(char)
+        elif not in_quotes and char == ")":
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif (
+            not in_quotes
+            and depth == 0
+            and char in ",\n\r"
+            and starts_new_rule(text, index + 1)
+        ):
+            flush()
+        else:
+            current.append(char)
+
+    flush()
+    return rules
+
+
 def iter_condition_spans(text: str):
     """규칙 텍스트에서 조건식이 차지하는 구간만 훑는다.
 
@@ -124,20 +196,6 @@ def iter_condition_spans(text: str):
     """
     text = str(text or "")
     length = len(text)
-
-    def starts_new_rule(pos: int) -> bool:
-        cursor = pos
-        while cursor < length and text[cursor] in " \t\r\n":
-            cursor += 1
-        if cursor >= length:
-            return False
-        if text[cursor] == "#":
-            return True
-        if text[cursor] != "(":
-            return False
-        close = matching_paren(text, cursor)
-        return close >= 0 and close + 1 < length and text[close + 1] == ":"
-
     index = 0
     depth = 0
     in_quotes = False
@@ -171,6 +229,6 @@ def iter_condition_spans(text: str):
             depth += 1
         elif char == ")":
             depth = max(0, depth - 1)
-        elif depth == 0 and char in ",\n\r" and starts_new_rule(index + 1):
+        elif depth == 0 and char in ",\n\r" and starts_new_rule(text, index + 1):
             at_rule_start = True
         index += 1

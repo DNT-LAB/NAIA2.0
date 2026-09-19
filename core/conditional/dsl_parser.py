@@ -38,6 +38,7 @@ from core.conditional.expr_utils import (  # noqa: E402
     CHAR_ON_RE as _CHAR_ON_RE,
     KNOWN_RATING_SOURCES as _KNOWN_RATING_SOURCES,
     RATING_FUNC_RE as _RATING_FUNC_RE,
+    split_rules as _expr_split_rules,
 )
 _FUNC_ACTION_RE = re.compile(r'^([a-z_]+)\s*\(\s*(.*)\s*\)$', re.DOTALL)
 _CHAR_UC_TARGET_RE = re.compile(r'^(char|uc):(\d+|\*)$')
@@ -367,35 +368,19 @@ def _split_rule(line: str) -> Tuple[str, str]:
 
 
 def _split_rules(text: str) -> List[str]:
-    """쉼표 분할. 괄호/따옴표 내부는 무시. # 주석 라인 보존.
+    """규칙 분할. 런타임과 **같은 구현**(`expr_utils.split_rules`)을 쓴다.
 
-    엔진의 `_split_rules_with_quotes` 와 동일 로직이지만 `#` 라인을 drop 하지
-    않고 유지한다 (블록 에디터에서 enabled 토글로 복원 가능).
+    ⚠️ 예전에는 여기만 **쉼표를 무조건** 경계로 봤다. 런타임은 쉼표·개행 모두를 보되
+    "다음 자리가 새 규칙일 때만" 자른다. 그래서 같은 텍스트를 서로 다르게 읽었다(실측):
+    개행으로 나눈 두 규칙을 런타임은 2개로 실행하는데 블록 편집기는 **1개**로 봤고
+    (주석 줄을 머리에 단 묶음은 통째로 '꺼진 규칙 하나'가 됐다 - 거기서 지우면 실제로
+    돌던 규칙이 사라진다), 반대로 액션의 태그 목록 `main+=x,y,z` 는 런타임이 1규칙인데
+    편집기는 **3규칙**으로 쪼개 가짜 규칙 `y`·`z` 를 만들었다.
+
+    `#` 라인은 유지한다(블록 에디터에서 enabled 토글로 복원 가능) — 실행하는 런타임만
+    `keep_disabled=False` 로 버린다.
     """
-    rules: List[str] = []
-    current = ""
-    in_quotes = False
-    paren_depth = 0
-
-    for i, ch in enumerate(text):
-        if ch == "(":
-            paren_depth += 1
-        elif ch == ")":
-            paren_depth -= 1
-
-        if ch == '"' and (i == 0 or text[i - 1] != "\\"):
-            in_quotes = not in_quotes
-
-        if ch == "," and not in_quotes and paren_depth == 0:
-            if current.strip():
-                rules.append(current.strip())
-            current = ""
-        else:
-            current += ch
-
-    if current.strip():
-        rules.append(current.strip())
-    return rules
+    return _expr_split_rules(text, keep_disabled=True)
 
 
 def _matching_paren(s: str, start: int) -> int:

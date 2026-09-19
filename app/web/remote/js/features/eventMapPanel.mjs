@@ -1439,10 +1439,19 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       || document.querySelector('#promptEdit');
     const r = host ? host.getBoundingClientRect() : null;
     if (!r || r.width < 200 || r.height < 80) return false;
+    // 위아래는 바짝(칸이 낮아 한 줄이 아깝다), **좌우는 넉넉히**(사용자 지정
+    // 2026-09-19: "속이 답답하다 - 조금만 오른쪽으로"). 칸 가장자리에 딱 붙으면
+    // 글이 벽에 눌린 것처럼 보인다.
     const pad = 6;
-    const width = Math.round(Math.max(panelMinimumWidth(), Math.min(r.width - pad * 2, window.innerWidth - 16)));
+    const sidePad = 18;
+    const width = Math.round(Math.max(panelMinimumWidth(), Math.min(r.width - sidePad * 2, window.innerWidth - 16)));
     overlay.style.transform = 'none';
-    overlay.style.left = `${Math.round(Math.max(8, Math.min(r.left + pad, window.innerWidth - width - 8)))}px`;
+    // ⚠️ 폭이 `panelMinimumWidth()` 에 걸려 줄지 않을 수 있다(조건 줄이 요구하는 만큼
+    //    넓힌다). 그때 `left` 를 `sidePad` 로 못 박으면 오른쪽이 칸 밖으로 넘친다 -
+    //    **남는 자리를 반씩** 나눠 가진다(넘칠 땐 자연히 0 에 가까워진다).
+    const slack = Math.max(0, r.width - width);
+    const leftPad = Math.min(sidePad, Math.round(slack / 2));
+    overlay.style.left = `${Math.round(Math.max(8, Math.min(r.left + leftPad, window.innerWidth - width - 8)))}px`;
     overlay.style.top = `${Math.round(r.top + pad)}px`;
     overlay.style.width = `${width}px`;
     const cap = Math.max(160, Math.round(r.height - pad * 2));

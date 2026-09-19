@@ -26,6 +26,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
+import heapq
 import threading
 import zlib
 from pathlib import Path
@@ -474,8 +476,6 @@ class ArtistAffinityPack:
             "rows": rows,
         }
 
-    #: 앞글자에 걸리는 후보를 이만큼까지만 모은다(그 뒤는 세지도 않는다).
-    SUGGEST_SCAN_CAP = 600
     #: 실제로 풀어서 **정확히** 세는 개수. 화면에 보일 것보다 넉넉하게.
     SUGGEST_COUNT_CAP = 60
 
@@ -484,17 +484,19 @@ class ArtistAffinityPack:
         index = self._index[axis]
         return int(index[tid + 1]) - int(index[tid])
 
+    @staticmethod
+    def _suggest_ranker(key: str):
+        # Preserve punctuation in the query: (nte and nte) are useful fragments.
+        boundary = re.compile(r"(?<!\w)" + re.escape(key) + r"(?!\w)")
+        return lambda tag: 2 if tag == key else int(bool(boundary.search(tag)))
+
     def suggest(self, prefix: str, axis: str | None = None, limit: int = 20
                 ) -> list[dict[str, Any]]:
-        """앞글자로 태그 찾기 - **게시물 수를 달아** 많은 것부터(사용자 지정).
+        """Substring suggestions, with exact names/words before interior matches.
 
-        ⚠️ 먼저 찾은 것부터 주면 안 된다. 어휘가 27만인 character 축에서 `a` 를 치면
-           아무도 안 쓰는 태그만 스무 개가 나온다 - 실제로 그렇게 보였다.
-
-        비용은 두 단계로 누른다: 후보는 압축된 **바이트 길이**로 굵은 것부터 고르고
-        (풀지 않는다), 그중 앞쪽 것만 실제로 풀어 정확한 수를 센다. 바이트 길이는
-        게시물 수와 같이 자라므로 순서를 고르는 데는 충분하고, **보여 주는 숫자는
-        늘 정확하다**.
+        Scan the whole vocabulary; stopping at the first 600 matches loses later
+        names. Only the best compressed spans are decoded to obtain post counts.
+        Counts are exact; selection within a match tier remains approximate.
         """
         if not self._load():
             return []
@@ -505,41 +507,31 @@ class ArtistAffinityPack:
         if axis == GENERAL_AXIS:
             return self._suggest_general(key, want)
         axes = [axis] if axis else list(self._names)
-        rough: list[tuple[int, str, str, int]] = []
-        for name in axes:
-            if name not in self._lookup:
-                continue
-            for tag, tid in self._lookup[name].items():
-                if not tag.startswith(key):
-                    continue
-                rough.append((self._span_of(name, tid), name, tag, tid))
-                if len(rough) >= self.SUGGEST_SCAN_CAP:
-                    break
-            if len(rough) >= self.SUGGEST_SCAN_CAP:
-                break
-        rough.sort(key=lambda row: -row[0])
-        out: list[dict[str, Any]] = []
-        for _span, name, tag, tid in rough[:max(want, self.SUGGEST_COUNT_CAP)]:
-            out.append({"tag": self._names[name][tid], "axis": name,
-                        "posts": int(self._posting(name, tid).size)})
-        out.sort(key=lambda row: (-row["posts"], row["tag"]))
-        return out[:want]
+        rank = self._suggest_ranker(key)
+        candidates = (
+            (rank(tag), self._span_of(name, tid), name, tag, tid)
+            for name in axes for tag, tid in self._lookup.get(name, {}).items()
+            if key in tag
+        )
+        rough = heapq.nlargest(max(want, self.SUGGEST_COUNT_CAP), candidates)
+        out = [(tier, {"tag": self._names[name][tid], "axis": name,
+                       "posts": int(self._posting(name, tid).size)})
+               for tier, _span, name, tag, tid in rough]
+        out.sort(key=lambda row: (-row[0], -row[1]["posts"], row[1]["tag"]))
+        return [row for _tier, row in out[:want]]
 
     def _suggest_general(self, key: str, want: int) -> list[dict[str, Any]]:
-        """general 은 **아무것도 안 푼다** - 굽는 쪽이 게시물 수를 적어 두었다."""
+        """General uses stored counts; suggestions never decode postings."""
         if not self._load_general():
             return []
         g = self._general
-        posts = g["posts"]
-        rough: list[tuple[int, str]] = []
-        for tag, tid in g["lookup"].items():
-            if tag.startswith(key):
-                rough.append((int(posts[tid]), g["names"][tid]))
-                if len(rough) >= self.SUGGEST_SCAN_CAP:
-                    break
-        rough.sort(key=lambda row: (-row[0], row[1]))
-        return [{"tag": name, "axis": GENERAL_AXIS, "posts": count}
-                for count, name in rough[:want]]
+        rank = self._suggest_ranker(key)
+        candidates = (
+            (-rank(tag), -int(g["posts"][tid]), g["names"][tid])
+            for tag, tid in g["lookup"].items() if key in tag
+        )
+        return [{"tag": name, "axis": GENERAL_AXIS, "posts": -count}
+                for _tier, count, name in heapq.nsmallest(want, candidates)]
 
 
 _default: ArtistAffinityPack | None = None

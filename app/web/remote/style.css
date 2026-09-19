@@ -29212,10 +29212,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    ⚠️ 둘은 같은 자리에 번갈아 뜬다(← 는 안 고정일 때, → 는 고정일 때). 그래서 `top` 이
       같아도 겹치지 않는다 - 겹칠 일이 생기면 그것은 상태가 어긋난 것이다. */
 .em-move {
-  position: absolute; left: 0; top: calc(50% + 24px); z-index: 6;
-  width: 20px; height: 26px; padding: 0 3px 0 0; box-sizing: border-box;
+  /* E 와 **같은 크기·같은 반구**다(사용자 지정 2026-09-19 - 나란히 붙어 있는데
+     하나만 작으면 덜 중요한 것처럼 보인다). 자리만 E 바로 아래:
+     E 는 `top:50%` + `translateY(-50%)` 라 아래 가장자리가 `50% + 19px` 이고,
+     여기에 2px 만 띄운다. */
+  position: absolute; left: 0; top: calc(50% + 21px); z-index: 6;
+  width: 20px; height: 38px; padding: 0 3px 0 0; box-sizing: border-box;
   display: inline-flex; align-items: center; justify-content: center;
-  border: 0; border-radius: 0 26px 26px 0;
+  border: 0; border-radius: 0 38px 38px 0;
   background: rgba(214, 92, 158, 0.82);
   color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 700; line-height: 1;
   cursor: pointer; opacity: 0.72;
@@ -30128,3 +30132,8 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .setup-no-api:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
 .setup-no-api:disabled { opacity: .5; cursor: default; }
 .mode-api-combo.reference-only .setup-launcher { color: #93c5fd; border-color: #3b82f6; }
+
+/* Explicit expansion from compact search to Tag Search. */
+.search-more-btn { border: 1px solid var(--border); border-radius: 5px; padding: 3px 10px; background: var(--bg-secondary); color: var(--text); cursor: pointer; font: inherit; }
+.search-more-btn:hover, .search-more-btn:focus-visible { border-color: #9581ed; color: #c4b5fd; }
+.tag-ac-footer { padding: 5px 10px; border-top: 1px solid var(--border); }

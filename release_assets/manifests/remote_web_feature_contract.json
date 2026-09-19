@@ -171,6 +171,7 @@
     },
     {
       "id": "fast_search",
+      "tag_search_handoff": "Autocomplete and Fast Search offer 더보기+ to open Tag Search with the current query and ALL selected; opening never inserts or generates.",
       "events": "Read observed event sets from the shared naiamap service; only 3-8 tags, including neighbors. Bounded scans label sampled counts. Copy leaves the prompt unchanged; Event Map handoff restores the selected tags, rating, and person without generating.",
       "name": "Fast Search (Ctrl+F) across tags, artists, characters, wildcards, presets, events",
       "source_files": [
@@ -675,6 +676,9 @@
         "core/ollama_chat_selection.py",
         "core/ollama_chat_execution.py",
         "core/ollama_chat_semantics.py",
+        "core/english_tag_keywords.py",
+        "core/named_entity_aliases.py",
+        "core/llm_search_index.py",
         "core/ollama_chat_pipeline.py",
         "core/event_preset/fast_search_catalog.py",
         "core/event_preset/fast_search_catalog.json",
@@ -904,6 +908,7 @@
         "data/interactive_tags.json",
         "data/tag_index/**",
         "data/tag_index/korean_alias_supplement.json",
+        "data/tag_index/named_entity_aliases.json",
         "artist_dictionary.py",
         "danbooru_character.py",
         "result_dict_copyright.py"

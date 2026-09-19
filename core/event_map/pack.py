@@ -50,8 +50,15 @@ class PackWriter:
        도중에 끊긴 파일을 색인으로 잘못 여는 일이 없다.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, required: tuple[str, ...] = REQUIRED):
+        """`required` 는 닫을 때 있어야 하는 구역 이름. 기본은 이벤트 맵의 것이다.
+
+        같은 그릇(MAGIC·목차·정렬)을 쓰되 구역 구성이 다른 팩 - 예: 작가 친화도
+        (`tools/build_artist_affinity_pack.py`) - 은 자기 목록을 넘긴다. 그릇을
+        따로 구현하면 두 벌이 갈라지므로 여기 한 곳만 둔다.
+        """
         self.path = Path(path)
+        self.required = tuple(required)
         self.f = self.path.open("wb")
         self.f.write(bytes(HEADER_SIZE))
         self.sections: dict[str, list[int]] = {}
@@ -87,7 +94,7 @@ class PackWriter:
     def close(self) -> None:
         if self._open:
             raise ValueError("닫히지 않은 구역: %s" % self._open)
-        missing = [n for n in REQUIRED if n not in self.sections]
+        missing = [n for n in self.required if n not in self.sections]
         if missing:
             raise ValueError("빠진 구역: %s" % ", ".join(missing))
         toc = json.dumps({"container": CONTAINER, "sections": self.sections},

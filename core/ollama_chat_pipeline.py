@@ -249,6 +249,25 @@ class OllamaChatPipeline:
                         if not query.strip() or len(query) > 160:
                             raise ValueError("Search queries must be 1-160 characters")
                         raw = self.searcher(query, 6, gen_context)
+                        from core.named_entity_aliases import is_named_entity_result
+
+                        names = [row for row in raw if is_named_entity_result(row, query)]
+                        if names:
+                            from core.tag_search_index import normalize_search_query
+
+                            q = normalize_search_query(query)
+                            alternatives = [r for r in raw if r not in names
+                                and r.get('match_kind') == 'keyword_exact'
+                                and normalize_search_query(r.get('matched_query')) == q
+                                and normalize_search_query(r.get('matched_keyword')) == q]
+                            found = [annotate(row, query) for row in [*names, *alternatives]]
+                            searches.append({'query': query, 'variants': [], 'results': found,
+                                'note': 'Exact named entity binding. Keep the full canonical name. '
+                                        'Multiple identities are alternatives, not a combined scene; '
+                                        'clarify the work/full name when ambiguous.'})
+                            for row in found:
+                                rows[row['tag']] = row
+                            continue
                         if re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", query):
                             from core.tag_search_index import normalize_search_query
 
@@ -326,8 +345,13 @@ class OllamaChatPipeline:
                                 extra = self.searcher(compound, 3, gen_context)
                                 raw = [r for r in extra if normalize_query(r.get("tag")).replace(" ", "") == compound] + raw
                         unique = {row["tag"]: row for row in raw if row.get("tag")}
+                        from core.english_tag_keywords import is_english_keyword_match
+
                         exact = [row for row in unique.values() if normalize_query(row["tag"]) == normalize_query(query)
-                                 or normalize_query(row["tag"]).replace(" ", "") in compact_matches]
+                                 or normalize_query(row["tag"]).replace(" ", "") in compact_matches
+                                 or (row.get('match_kind') == 'english_keyword_exact'
+                                     and normalize_query(row.get('matched_query')) == normalize_query(query)
+                                     and is_english_keyword_match(query, row['tag']))]
                         # The tool answers this concept, not an autocomplete
                         # popularity expansion (gift -> gift art / giving wedgie).
                         allowed_stems = strict_stems(query)

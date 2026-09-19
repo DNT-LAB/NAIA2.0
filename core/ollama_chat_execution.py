@@ -95,7 +95,10 @@ class SourceGrounding:
             matched = norm(row.get('matched_keyword'))
             spelling = matched == source or (row.get('spacing_collision_free') is True
                 and matched.replace(' ', '') == source.replace(' ', ''))
-            if tag and (tag in reviewed or tag == source or (exact_alias and spelling)):
+            from core.named_entity_aliases import is_named_entity_result
+
+            if tag and (tag in reviewed or tag == source or (exact_alias and spelling)
+                        or is_named_entity_result(row, source)):
                 accepted.append(copy.deepcopy(row))
         self.observations[rid] = {
             'query': req['source'], 'status': ('candidates' if accepted else

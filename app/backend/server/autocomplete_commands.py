@@ -310,7 +310,7 @@ def search_kr_tags(context: WebSessionContext, query: str, limit: int = 20) -> l
         cats = {"artist"}
         q = normalize_search_query(q[1:])
     else:
-        for prefix in ("artist:", "character:"):
+        for prefix in ("artist:", "character:", "copyright:"):
             if q.startswith(prefix):
                 cats = {prefix[:-1]}
                 q = normalize_search_query(q[len(prefix):])
@@ -319,9 +319,16 @@ def search_kr_tags(context: WebSessionContext, query: str, limit: int = 20) -> l
         return []
     index = ensure_tag_search_index(context)
     rows = [_autocomplete_row(result) for result in index.search_autocomplete(q, limit=limit, cats=cats)]
+    from core.named_entity_aliases import ensure_named_entity_index, KINDS
+
+    # Exact names outrank description/category hits (란마 must not start with
+    # a style tag). Keep homonyms as separate candidates; never auto-pick one.
+    named = ensure_named_entity_index(context).search(q, categories=cats or KINDS, limit=limit)
+    named_tags = {row['tag'] for row in named}
+    rows = [*named, *(row for row in rows if row['tag'] not in named_tags)][:limit]
     if len(rows) < limit and re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", raw_query):
         seen = {row["tag"] for row in rows}
-        for result in index.search_metadata_fallback(q, limit=limit, exclude_noisy_categories=True):
+        for result in index.search_metadata_fallback(q, limit=limit, cats=cats, exclude_noisy_categories=True):
             row = _autocomplete_row(result)
             if row["tag"] in seen:
                 continue

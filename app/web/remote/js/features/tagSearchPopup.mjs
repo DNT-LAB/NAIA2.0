@@ -397,11 +397,25 @@ export function createTagSearchPopup({
     });
   }
 
-  function open() {
+  function open(options = {}) {
     if (!popup) build();
+    if (options.query !== undefined) {
+      if (timer) { clearTimeoutFn(timer); timer = null; }
+      activeTab = 'all';
+      popup.querySelectorAll('[data-tab]').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.tab === activeTab);
+      });
+      pick('.tagsearch-input').value = String(options.query || '').trim();
+      rows = [];
+      selectedTag = '';
+      pendingQuery = pick('.tagsearch-input').value;
+      triedTranslate = false;
+    }
     popup.style.display = 'flex';
+    if (options.query !== undefined) schedule({immediate: true});
     renderList();
     renderDesc();
+    if (onResize) win.removeEventListener('resize', onResize);
     onResize = () => position();
     win.addEventListener('resize', onResize);
     position();

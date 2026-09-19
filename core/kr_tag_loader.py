@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from core.tag_knowledge import (
     apply_korean_alias_supplement,
+    apply_korean_keyword_supplement,
     apply_translation_overrides,
     merge_parquet_tag_records,
     merge_rating_count_records,
@@ -30,6 +31,8 @@ class KrTagLoadResult:
     rating_count_stats: Any | None = None
     override_stats: Any | None = None
     supplement_stats: Any | None = None
+    keyword_supplement_stats: Any | None = None
+    named_entity_stats: Any | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -92,6 +95,8 @@ def load_kr_tag_records(
     data_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
     warn: Callable[[str], None] | None = None,
     include_korean_supplement: bool = True,
+    include_korean_keyword_supplement: bool = True,
+    include_named_entity_aliases: bool = True,
 ) -> KrTagLoadResult:
     """Load the merged KR tag corpus without depending on RemoteBridge."""
 
@@ -245,6 +250,26 @@ def load_kr_tag_records(
         for error in supplement_stats["errors"]:
             _warn(warnings, f"Korean alias supplement warning - {error}", warn)
 
+    keyword_supplement_stats = None
+    if include_korean_keyword_supplement:
+        keyword_supplement_stats = apply_korean_keyword_supplement(
+            raw,
+            _first_existing(
+                resolved_data_roots,
+                Path("tag_index") / "korean_keyword_supplement.json",
+            ),
+        )
+        for error in keyword_supplement_stats["errors"]:
+            _warn(warnings, f"Korean keyword supplement warning - {error}", warn)
+
+    from core.named_entity_aliases import apply_named_entity_aliases
+
+    named_entity_stats = (apply_named_entity_aliases(
+        raw, _first_existing(resolved_data_roots, Path('tag_index') / 'named_entity_aliases.json'))
+        if include_named_entity_aliases else {'errors': []})
+    for error in named_entity_stats['errors']:
+        _warn(warnings, f'Named entity aliases warning - {error}', warn)
+
     return KrTagLoadResult(
         raw=raw,
         interactive_count=interactive_count,
@@ -254,6 +279,8 @@ def load_kr_tag_records(
         rating_count_stats=rating_count_stats,
         override_stats=override_stats,
         supplement_stats=supplement_stats,
+        keyword_supplement_stats=keyword_supplement_stats,
+        named_entity_stats=named_entity_stats,
         warnings=warnings,
     )
 
@@ -262,6 +289,7 @@ def format_kr_tag_load_summary(result: KrTagLoadResult) -> str:
     parquet = result.parquet_stats
     rating_counts = result.rating_count_stats
     overrides = result.override_stats
+    keyword_supplement = result.keyword_supplement_stats or {}
     return (
         f"{result.interactive_count} interactive + {getattr(parquet, 'added', 0)} parquet "
         f"+ {getattr(parquet, 'records_updated', 0)} KR merges "
@@ -273,5 +301,7 @@ def format_kr_tag_load_summary(result: KrTagLoadResult) -> str:
         f"+ {getattr(rating_counts, 'records_updated', 0)} rating-count fills "
         f"+ {getattr(overrides, 'applied', 0)} overrides "
         f"+ {(result.supplement_stats or {}).get('aliases', 0)} lexical aliases "
+        f"+ {keyword_supplement.get('aliases', 0)} CSV keyword aliases "
+        f"+ {(result.named_entity_stats or {}).get('aliases', 0)} entity names "
         f"+ {result.filter_count} filter + {result.dict_count} dict = {len(result.raw)} total"
     )

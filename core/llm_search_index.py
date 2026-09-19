@@ -29,7 +29,8 @@
   retriever 카테고리 게이트가 거른다).
 
 쿼리는 영어 전용(한국어는 래퍼 `search_llm_tags`가 구 검색으로 위임). 한국어
-키워드·설명은 색인하지 않는다.
+키워드·설명은 색인하지 않는다. 선별된 영어 동의어만 별도 whole-query 레인으로
+조회한다. 동의어를 부분 레인에 넣지 않아 기존 태그 토큰 검색을 오염시키지 않는다.
 """
 from __future__ import annotations
 
@@ -214,9 +215,11 @@ class LLMSearchIndex:
     재빌드한다(패널 B #4 — 스테일 인덱스 자가 무효화).
     """
 
-    def __init__(self, records: Iterable[_Rec], *, built_from: Any = None):
+    def __init__(self, records: Iterable[_Rec], *, built_from: Any = None,
+                 include_english_keywords: bool = True):
         self._recs: list[_Rec] = list(records)
         self.built_from = built_from
+        self.include_english_keywords = include_english_keywords
         # exact 레인: 정규화 키 → rec 인덱스. 실태그(원형) 키가 파생키(despaced/
         # 하이픈 변형)를 항상 이기고, 같은 계급 충돌은 count 높은 쪽이 이긴다.
         exact: dict[str, int] = {}
@@ -233,6 +236,7 @@ class LLMSearchIndex:
             if key not in exact:
                 exact[key] = i
         self._exact = exact
+        self._canonical = {rec.tag: i for i, rec in enumerate(self._recs)}
         # 부분 레인: 토큰 스템 → rec 인덱스 튜플(역색인).
         postings: dict[str, list[int]] = {}
         for i, rec in enumerate(self._recs):
@@ -252,6 +256,7 @@ class LLMSearchIndex:
         records: Mapping[str, Mapping[str, Any]],
         *,
         built_from: Any = None,
+        include_english_keywords: bool = True,
     ) -> "LLMSearchIndex":
         """`core.kr_tag_loader.load_kr_tag_records` 병합 레코드에서 빌드.
         (autocomplete `TagSearchIndex.from_raw_tag_records`와 동일 원천 — 태그
@@ -287,7 +292,7 @@ class LLMSearchIndex:
                 tokens=frozenset(tokens),
                 n_tokens=len(tokens),
             ))
-        return cls(recs, built_from=built_from)
+        return cls(recs, built_from=built_from, include_english_keywords=include_english_keywords)
 
     # ------------------------------------------------------------------
     # 검색
@@ -311,6 +316,17 @@ class LLMSearchIndex:
 
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
+
+        # Existing canonical/orthographic keys retain their entire old result
+        # order. Aliases resolve only to active, eligible canonical records;
+        # never to another alias, an excluded entity, or a new synthetic tag.
+        target = self.resolve_english_keyword(q)
+        if target is not None:
+            rec = self._recs[self._canonical[target]]
+            seen.add(rec.tag)
+            out.append(self._row(rec))
+            if len(out) >= lim:
+                return out
 
         for probe in self._exact_probes(q):
             idx = self._exact.get(probe)
@@ -385,6 +401,16 @@ class LLMSearchIndex:
                 if len(out) >= lim:
                     break
         return out
+
+    def resolve_english_keyword(self, query: str) -> str | None:
+        """Return evidence only when the alias lane actually owns this query."""
+        q = normalize_query(query)
+        if not self.include_english_keywords or q in self._exact:
+            return None
+        from core.english_tag_keywords import english_keyword_target
+
+        target = english_keyword_target(q)
+        return target if target in self._canonical else None
 
     def stats(self) -> dict[str, int]:
         return {

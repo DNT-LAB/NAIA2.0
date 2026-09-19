@@ -81,12 +81,20 @@ def _refresh_lookup_fields(record: MutableMapping[str, Any]) -> None:
     record["_kw_lower"] = keywords.replace("<", "").replace(">", "").lower() if keywords else ""
 
 
-def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
-    """Append lexical aliases without replacing descriptions, labels or counts.
+def _apply_korean_supplement(
+    raw,
+    path: str | Path,
+    *,
+    expected_kind: str,
+    source_name: str,
+    evidence_field: str,
+) -> dict[str, Any]:
+    """Apply a bounded, additive Korean keyword supplement.
 
-    Recheck target existence and spelling collisions against the ACTIVE corpus,
-    including user data and excluded named entities. A compiled file from an
-    older corpus is not permission to override a newer spelling's meaning.
+    Both the reviewed lexical supplement and the extracted Danbooru keyword
+    supplement use the same runtime safety checks. In particular, a compiled
+    file may not override the active corpus: canonical tags are rechecked and
+    compact Korean spellings that already belong to another tag are skipped.
     """
     from collections import defaultdict
 
@@ -97,10 +105,10 @@ def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (payload.get("schema_version") != 1 or
-                payload.get("kind") != "korean_lexical_alias_supplement" or
+                payload.get("kind") != expected_kind or
                 payload.get("semantic_certified") is not False or
                 not isinstance(payload.get("translations"), dict)):
-            raise ValueError("invalid Korean lexical supplement schema")
+            raise ValueError(f"invalid {source_name} schema")
         proposals = []
         for tag, value in payload["translations"].items():
             if normalize_tag_key(tag) != tag or not isinstance(value, dict):
@@ -147,13 +155,35 @@ def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
             continue
         previous = str(record.get("keywords_kr") or "")
         record["keywords_kr"] = previous + (", " if previous.strip() else "") + alias
-        record.setdefault("_korean_alias_sources", {})[alias] = {
-            "source": "korean_lexical_supplement", "version": payload.get("version"), "basis": basis}
+        record.setdefault(evidence_field, {})[alias] = {
+            "source": source_name, "version": payload.get("version"), "basis": basis}
         _refresh_lookup_fields(record)
         changed.add(tag)
         stats["aliases"] += 1
     stats["tags"] = len(changed)
     return stats
+
+
+def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
+    """Append reviewed lexical aliases without replacing metadata."""
+    return _apply_korean_supplement(
+        raw,
+        path,
+        expected_kind="korean_lexical_alias_supplement",
+        source_name="korean_lexical_supplement",
+        evidence_field="_korean_alias_sources",
+    )
+
+
+def apply_korean_keyword_supplement(raw, path: str | Path) -> dict[str, Any]:
+    """Append bounded aliases extracted from classified tag keywords."""
+    return _apply_korean_supplement(
+        raw,
+        path,
+        expected_kind="korean_keyword_supplement",
+        source_name="danbooru_keyword_supplement",
+        evidence_field="_korean_keyword_sources",
+    )
 
 
 def _merge_text_field(

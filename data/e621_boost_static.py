@@ -5216,7 +5216,7 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
     "fart_fetish": frozenset({"tall_female"}),
     "female_rape": frozenset({"assertive_female"}),
     "female_farting": frozenset({"tall_female"}),
-    "fully_bound": frozenset({"blindfold", "folded", "metal_collar", "wrist_cuffs"}),
+    "fully_bound": frozenset({"blindfold", "folded", "metal_collar", "wrist_cuffs", "earplugs", "industrial", "science_fiction"}),
     "fart_cloud": frozenset({"tall_female"}),
     "farting_on_another": frozenset({"tall_female"}),
     "glare": frozenset({"nipple_jewelry"}),
@@ -5259,6 +5259,124 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
     "tight_fit": frozenset({"torogao"}),
     "tongue_on_penis": frozenset({"hand_on_another's_head"}),
     "vaginal_tugging": frozenset({"torogao"}),
+    "multiple_positions": frozenset({"assertive_female"}),
+    "larger_intersex": frozenset({"between_breasts", "head_between_breasts"}),
+    "stealing": frozenset({"bikini_top_only"}),
+    "bouncing_balls": frozenset({"bouncing_breasts"}),
+    "motion_outline": frozenset({"breasts_apart", "full-face_blush", "glint", "hand_on_another's_thigh"}),
+    "butt_from_the_front": frozenset({"covered_navel"}),
+    "worried_look": frozenset({"cracked_wall", "teaching"}),
+    "cum_in_hair": frozenset({"cum_on_breasts"}),
+    "low-angle_view": frozenset({"dutch_angle"}),
+    "smug_grin": frozenset({"feet_up"}),
+    "pinch": frozenset({"front-tie_top"}),
+    "choking": frozenset({"fur_trim"}),
+    "cruelty": frozenset({"furrowed_brow"}),
+    "helpless": frozenset({"furrowed_brow"}),
+    "slime": frozenset({"gym_uniform"}),
+    "lying_on_bed": frozenset({"hand_on_own_chest"}),
+    "rainbow_pride_colors": frozenset({"heart_necklace", "lotion_bottle"}),
+    "cross-popping_vein": frozenset({"knee_up"}),
+    "sitting_on_sofa": frozenset({"knee_up"}),
+    "leaning_backward": frozenset({"knee_up"}),
+    "enjoying": frozenset({"knees_up"}),
+    "musk": frozenset({"penis_awe", "puckered_anus", "dirty_talk"}),
+    "blushing_profusely": frozenset({"pussy_juice_trail", "after_fingering"}),
+    "smiling_at_viewer": frozenset({"round_eyewear"}),
+    "star_eyes": frozenset({"short_eyebrows"}),
+    "tail_in_water": frozenset({"soaking_feet", "shallow_water"}),
+    "freckled_breasts": frozenset({"steaming_body"}),
+    "glowing_vulva": frozenset({"steaming_body"}),
+    "ass_to_ass": frozenset({"take_your_pick"}),
+    "innocent_expression": frozenset({"teaching"}),
+    "smiling_at_partner": frozenset({"teaching"}),
+    "first_person_view": frozenset({"assertive_female"}),
+    "on_bottom": frozenset({"assertive_female"}),
+    "closed_smile": frozenset({"clear_sky"}),
+    "cum_on_face": frozenset({"cum_on_breasts"}),
+    "brainwashing": frozenset({"earplugs"}),
+    "vowelless_sound_effect": frozenset({"fruit_print"}),
+    "shorts_down": frozenset({"gym_uniform"}),
+    "painting": frozenset({"industrial"}),
+    "glowing_nipples": frozenset({"steaming_body"}),
+}
+
+# Reviewed pair-specific context. Alternatives are OR; groups within each
+# alternative are AND; tags within each group are ANY. Other sources retain
+# their existing behavior. No global conflict veto: multi-person/multi-panel
+# prompts can legitimately contain multiple expressions or positions.
+_PAIR_CONTEXT_GATES: dict[tuple[str, str], tuple[tuple[frozenset[str], ...], ...]] = {
+    ("sweat", "musk"): (
+        (
+            frozenset({
+                "excessive_musk", "musk", "musk_clouds", "musk_sniffing", "musk_worship",
+                "musky_armpit", "musky_balls", "musky_body", "musky_breasts", "musky_butt",
+                "musky_crotch", "musky_feet", "musky_genitalia", "musky_penis", "musky_pussy",
+            }),
+        ),
+    ),
+    ("symbol-shaped_pupils", "heart_eyes"): (
+        (
+            frozenset({
+                "heart-shaped_pupils", "heart_catchlight", "heart_eyes", "heart_in_pupils",
+                "heart_oculama", "heart_pupils",
+            }),
+        ),
+    ),
+    ("holding_umbrella", "raining"): (
+        (
+            frozenset({"rain", "raining"}),
+        ),
+    ),
+    ("wavy_mouth", "wavy_smile"): (
+        (
+            frozenset({"smile", "wavy_smile"}),
+        ),
+    ),
+    ("gangbang", "gang_rape"): (
+        (
+            frozenset({"forced_sex", "gang_rape", "rape"}),
+        ),
+    ),
+    ("object_insertion", "pussy_torture"): (
+        (
+            frozenset({
+                "pussy_spanking", "pussy_torture", "pussy_wound", "vaginal_impalement",
+            }),
+        ),
+        (
+            frozenset({"genital_torture", "sexual_torture", "torture"}),
+            frozenset({"object_in_pussy", "vaginal_object_insertion"}),
+        ),
+    ),
+    ("on_back", "missionary_position"): (
+        (
+            frozenset({"missionary", "missionary_position", "wrapped_missionary_position"}),
+        ),
+    ),
+    ("on_side", "spoon_position"): (
+        (
+            frozenset({"spoon_position"}),
+        ),
+        (
+            frozenset({"spooning"}),
+            frozenset({
+                "anal", "grinding", "penetration", "sex", "sexual_activity", "tribadism",
+                "vaginal",
+            }),
+        ),
+    ),
+    ("spooning", "spoon_position"): (
+        (
+            frozenset({
+                "anal", "grinding", "penetration", "sex", "sexual_activity", "tribadism",
+                "vaginal",
+            }),
+        ),
+        (
+            frozenset({"spoon_position"}),
+        ),
+    ),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -6119,6 +6237,25 @@ _SINGLE_SOURCE_GATE = _build_single_source_gate()
 del _build_single_source_gate
 
 
+# Manual semantic bridges reviewed against local e621 wiki definitions.
+# These scores are a conservative ranking policy, NOT observed co-occurrence
+# statistics. Keep the generated map intact above. Merge AFTER building the
+# statistical single-source gate so curated aliases cannot unlock other edges.
+_CURATED_BRIDGES: dict[str, tuple[str, str]] = {
+    'holding_bag': ('holding_container', "Actions"),
+    'holding_axe': ('holding_melee_weapon', "Actions"),
+    'holding_hands': ('hand_holding', "Actions"),
+    'kiss': ('kissing', "Actions"),
+    'holding_suitcase': ('holding_container', "Actions"),
+    "rain": ("raining", "Effects"),
+    "winking": ("wink", "Expressions"),
+    "anger_vein": ("cross-popping_vein", "Effects"),
+}
+for _source, (_target, _category) in _CURATED_BRIDGES.items():
+    _BOOST_MAP.setdefault(_source, []).append((_target, DEFAULT_SCORE_FLOOR, _category))
+del _source, _target, _category
+
+
 def _check_single_source_gate(source_tag: str, e621_tag: str) -> bool:
     """단독 source gate. True=통과, False=차단."""
     if e621_tag not in _SINGLE_SOURCE_GATE:
@@ -6187,6 +6324,15 @@ def _check_domain_gate(e621_tag: str, prompt_tags: frozenset[str]) -> bool:
     if anchors is None:
         return True
     return bool(prompt_tags & anchors)
+
+
+def _check_pair_context(source_tag: str, e621_tag: str, prompt_tags: frozenset[str]) -> bool:
+    """Require evidence for reviewed source-specific semantic expansions."""
+    alternatives = _PAIR_CONTEXT_GATES.get((source_tag, e621_tag))
+    return alternatives is None or any(
+        all(prompt_tags & anchors for anchors in groups)
+        for groups in alternatives
+    )
 
 
 def _check_pair_block(e621_tag: str, source_tag: str) -> bool:
@@ -6371,6 +6517,8 @@ def recommend_detailed(
                 continue
             # Domain gate: keyword split으로 잡히지 않는 도메인 (scat 등)
             if not _check_domain_gate(e621_tag, tags_set):
+                continue
+            if not _check_pair_context(tag_us, e621_tag, tags_set):
                 continue
             if _check_pair_block(e621_tag, tag_us):
                 continue

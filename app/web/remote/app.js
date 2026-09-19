@@ -1122,8 +1122,8 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
     console.error('Failed to initialize Studio tab module', error);
   });
 // Ctrl+F 한 칸 검색. 복사하거나 이벤트 맵으로 검색 조건을 전달한다. 프롬프트에 자동 삽입하지 않는다.
-import('./js/features/fastSearch.mjs?v=20260913-fs-naiamap-download')
-  .then(({initFastSearch}) => { window.fastSearch = initFastSearch({searchEventMap: async item => {
+import('./js/features/fastSearch.mjs?v=20260919-search-more')
+  .then(({initFastSearch}) => { window.fastSearch = initFastSearch({openTagSearch: openTagSearchAll, searchEventMap: async item => {
     try {
       if (!window.eventMap) throw new Error("이벤트 맵을 아직 불러오지 못했습니다.");
       await window.eventMap.searchCombination(item);
@@ -1132,7 +1132,7 @@ import('./js/features/fastSearch.mjs?v=20260913-fs-naiamap-download')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20260919-empin')
+import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -2082,7 +2082,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs?v=20260716-sleepwake-reprobe1')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260919-no-api')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,
@@ -7304,7 +7304,7 @@ function openOllamaMenu() {
   window.addEventListener('scroll', ollamaMenuDismiss, true);
   ollamaMenuEl.querySelector('.ollama-menu-btn')?.focus();
 }
-tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260825-comp3')
+tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260919-search-more')
   .then(({createTagSearchPopup}) => {
     tagSearchPopup = createTagSearchPopup({
       document,
@@ -7318,6 +7318,15 @@ tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260825-comp3'
   .catch(error => {
     console.error('Failed to initialize Tag Search popup', error);
   });
+async function openTagSearchAll(query) {
+  await tagSearchPopupReady;
+  if (!tagSearchPopup) {
+    showToast('Tag Search 모듈을 불러오지 못했습니다.', 'error');
+    return;
+  }
+  const text = String(query || '').replace(/^(?:artist:|character:|copyright:|@)\s*/i, '').trim();
+  tagSearchPopup.open({query: text});
+}
 if (tagSearchBtn) {
   // 재클릭 = 토글(Ollama·Interactive 와 같은 규약).
   tagSearchBtn.addEventListener('click', async () => {
@@ -13381,7 +13390,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-slashapi')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-search-more')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -13402,6 +13411,7 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-slashapi')
       fmtCount,
       catStyle,
       showToast,
+      openTagSearch: openTagSearchAll,
       getSlashCommands: slashCommandRegistry,
       getEventPresetPanel: () => eventPresetPanel,
       // Interactive 슬롯 편집 중에는 태그 정보 툴팁(설명 + RELATED)을 띄우지 않는다 —

@@ -81,7 +81,7 @@ const DEFAULT_PERSONS = [...PERSON_GROUPS[0].ids, ...PERSON_GROUPS[1].ids];
 const NEIGHBOR_LIMIT = 20;
 const REST_KEY = '__rest__';
 
-export function initFastSearch({searchEventMap} = {}) {
+export function initFastSearch({searchEventMap, openTagSearch} = {}) {
   let overlay = null, input = null, body = null, countEl = null, chipRow = null;
   let lanesEl = null, eventSection = null, eventList = null, eventChips = null, eventNote = null;
   let open = false, seq = 0, timer = null, eventTimer = null;
@@ -180,9 +180,15 @@ export function initFastSearch({searchEventMap} = {}) {
           <div class="fs-event-list" data-fs-event-list></div>
         </div>
       </div>
-      <div class="fs-foot">↑↓ 이동 · <b>Enter</b> 복사 (이벤트는 펼치기) · Esc 닫기 — 프롬프트에는 넣지 않습니다</div>`;
+      <div class="fs-foot"><button type="button" class="search-more-btn" data-fs-more title="Tag Search에서 ALL 검색">더보기+</button> ↑↓ 이동 · <b>Enter</b> 복사 (이벤트는 펼치기) · Esc 닫기 — 프롬프트에는 넣지 않습니다</div>`;
     document.body.append(overlay);
     input = overlay.querySelector('.fs-input');
+    overlay.querySelector('[data-fs-more]').addEventListener('click', () => {
+      const query = input.value.trim();
+      if (!query || typeof openTagSearch !== 'function') return;
+      close();
+      void openTagSearch(query);
+    });
     body = overlay.querySelector('.fs-body');
     countEl = overlay.querySelector('.fs-count');
     chipRow = overlay.querySelector('.fs-chips');

@@ -93,6 +93,7 @@ export function createTagAssistController({
   fmtCount,
   catStyle,
   showToast,
+  openTagSearch = null,
   getSlashCommands = null,       // app.js 가 주입하는 명령 레지스트리(호출 시점에 읽는다)
   getEventPresetPanel,
   // 태그 정보 툴팁(캐럿 위 태그 설명 + RELATED)을 억제할지 묻는 훅. Interactive 편집 팝업처럼
@@ -2626,7 +2627,20 @@ export function createTagAssistController({
     html += chunkMode
       ? `</div><div class="chunk-ac-preview">${chunkPreviewHtml(acResults[Math.max(0, acSel)] || acResults[0])}</div></div>`
       : '</div>';
+    const moreQuery = String(lastAcQuery || '').replace(/^(?:artist:|character:|copyright:|@)\s*/i, '').trim();
+    const showMore = typeof openTagSearch === 'function' && moreQuery
+      && !isAutocompleteControlQuery(lastAcQuery, true)
+      && !String(lastAcQuery).startsWith('/') && !acResults.some(r => r._wc_type);
+    if (showMore) html += '<div class="tag-ac-footer"><button type="button" class="search-more-btn" data-ac-more title="Tag Search에서 ALL 검색">더보기+</button></div>';
     tagTooltip.innerHTML = html;
+    const more = tagTooltip.querySelector('[data-ac-more]');
+    if (more) {
+      more.addEventListener('mousedown', e => e.preventDefault());
+      more.addEventListener('click', () => {
+        hideAutocomplete();
+        void openTagSearch(moreQuery);
+      });
+    }
     tagTooltip.classList.add('open', 'ac-mode');
     tagTooltip.classList.remove('preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     tagTooltip.classList.toggle('chunk-ac-mode', chunkMode);
@@ -2760,7 +2774,7 @@ export function createTagAssistController({
     if (sLower.startsWith('@') && !newTag.startsWith('@')) {
       newTag = '@' + newTag;
     } else {
-      for (const pfx of ['artist:', 'character:']) {
+      for (const pfx of ['artist:', 'character:', 'copyright:']) {
         if (sLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {
           newTag = pfx + newTag;
           break;

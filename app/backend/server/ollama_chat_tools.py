@@ -141,7 +141,32 @@ def search_chat_tags(context, query: str, limit: int = 6) -> list[dict]:
 
     if not str(query).strip() or len(query) > 160 or limit <= 0:
         return []
+    from core.named_entity_aliases import ensure_named_entity_index
+
+    named = ensure_named_entity_index(context).search(query, limit=limit)
+    if named:
+        # Names can also be ordinary words (샴푸, 유리). Keep exact general
+        # lexical candidates as alternatives, not an implicit identity choice.
+        from core.tag_knowledge import normalize_tag_key
+
+        general_rows = _search_chat_keywords(context, query, limit)
+        general_rows = [r for r in general_rows if r.get('match_kind') in
+                        {'keyword_exact', 'keyword_spacing_variant'}
+                        and normalize_tag_key(r.get('matched_query', '')) == normalize_tag_key(query)]
+        if general_rows:
+            named = [{**r, 'ambiguous': True} for r in named]
+        return [annotate(row, query) for row in [*named, *general_rows][:min(limit, 12)]]
     rows = _search_chat_keywords(context, query, limit)
+    # Retrieval synonyms are evidence of a whole English phrase only. They
+    # do not extend the scene/role-certified vocabulary in alias_senses.
+    from core.english_tag_keywords import VERSION, is_english_keyword_match
+
+    for row in rows:
+        if (is_english_keyword_match(query, row['tag'])
+                and ensure_llm_search_index(context).resolve_english_keyword(query) == row['tag']):
+            row.update(match_kind='english_keyword_exact', matched_query=query,
+                       matched_keyword=query, keyword_origin='english_keyword',
+                       keyword_evidence=[{'source': VERSION}])
     senses = alias_senses(query)
     general = None
     existing = {norm(row['tag']) for row in rows}
@@ -168,6 +193,15 @@ def search_characters(context, query: str) -> dict:
 
     if not query.strip() or len(query) > 160:
         return {"status": "invalid_query", "characters": [], "tags": []}
+    from core.named_entity_aliases import ensure_named_entity_index
+
+    bound = ensure_named_entity_index(context).search(query, categories={'character'}, limit=6, prefix=True)
+    if bound:
+        rows = [{**row, 'work': row['group'], 'exact': row['match_kind'] != 'entity_name_prefix'} for row in bound]
+        return {'status': 'ok', 'characters': rows, 'tags': rows,
+                'ambiguous': rows[0]['entity_candidate_count'] > 1,
+                'note': 'Name bindings are candidates. Preserve the full canonical name and work. '
+                        'If ambiguous, ask for the work or full name; do not choose by popularity.'}
     svc = character_viewer_service(context)
     if not isinstance(getattr(context, "kr_tags_raw", None), dict):
         from app.backend.server.ollama_routes import ensure_llm_search_index

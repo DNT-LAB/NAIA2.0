@@ -288,7 +288,8 @@
         "core/artist_groups.py",
         "core/artist_affinity.py",
         "core/artist_search.py",
-        "app/web/remote/js/features/artistThumbTab.mjs"
+        "app/web/remote/js/features/artistThumbTab.mjs",
+        "app/web/remote/js/features/artistSearchPanel.mjs"
       ],
       "legacy_dependency": "legacy_compat",
       "routes": [

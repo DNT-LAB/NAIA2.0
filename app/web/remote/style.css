@@ -29399,6 +29399,151 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .rctl-side > * { flex: 1 1 auto; min-height: 0; }
 .rctl-side[hidden] { display: none !important; }
 
+/* ══ 아티스트 매칭 검색 (js/features/artistSearchPanel.mjs) ══════════
+   믹스 큐가 비우고 나간 보조 판의 새 주인(사용자 지정 2026-09-19).
+   머리줄은 남기고 몸통만 말려 올라간다 - 그래서 `.rctl-fold-body` 를 몸에만 단다. */
+.asx {
+  display: flex; flex-direction: column; min-height: 0; gap: 5px;
+  padding: 6px; border-radius: 9px;
+  border: 1px solid var(--border-dim); background: rgba(12, 14, 22, 0.92);
+  backdrop-filter: blur(6px);
+}
+.asx-head { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
+.asx-title { font-size: 11px; font-weight: 700; color: var(--text-primary); }
+.asx-count { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+.asx-spacer { flex: 1 1 auto; }
+.asx-body { display: flex; flex-direction: column; min-height: 0; gap: 5px; }
+.asx-btn {
+  flex: 0 0 auto; height: 22px; padding: 0 7px;
+  border: 1px solid var(--border-dim); border-radius: 5px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); color: var(--text-muted); font-size: 10px;
+}
+.asx-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.asx-btn.primary { color: var(--text-primary); border-color: var(--accent); }
+
+/* 빵부스러기 - 칩 하나가 depth 하나다. 누르면 거기까지만 남는다. */
+.asx-stack {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+}
+.asx-stack-empty { font-size: 10px; color: var(--text-dim); }
+.asx-chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 2px 6px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary); font-size: 10px; line-height: 1.5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.asx-chip:hover { border-color: var(--accent); }
+.asx-chip b { font-family: var(--font-mono); font-size: 9px; color: var(--accent); font-weight: 700; }
+.asx-chip-arrow { font-size: 10px; color: var(--text-dim); }
+
+/* 입력줄 - 태그와 등급이 같은 자리를 쓴다(사용자: depth 당 한 개). */
+.asx-form { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; }
+.asx-form.is-busy { opacity: 0.55; pointer-events: none; }
+.asx-tag[hidden], .asx-rating[hidden], .asx-num[hidden] { display: none !important; }
+/* 본론 줄 - 갈래에 따라 입력칸 또는 등급 세그먼트가 오고, 끝에 항상 [추가] 가 있다. */
+.asx-main { display: flex; align-items: center; gap: 4px; }
+.asx-tag { flex: 1 1 auto; min-width: 0; display: flex; }
+.asx-rating { flex: 1 1 auto; display: flex; gap: 4px; }
+.asx-input-wrap { position: relative; display: flex; flex: 1 1 auto; min-width: 0; }
+.asx-input {
+  flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 6px;
+  border: 1px solid var(--border-dim); border-radius: 5px; outline: none;
+  background: rgba(0, 0, 0, 0.3); color: var(--text-primary); font-size: 11px;
+}
+.asx-input:focus { border-color: var(--accent); }
+
+/* 자동완성 - 칸 바로 아래에 떠는 작은 목록. 판 안에서도 위에 서게 한층 올린다. */
+.asx-sugg {
+  position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 2;
+  max-height: 168px; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--accent); border-radius: 6px; background: #12141d;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+}
+.asx-sugg[hidden] { display: none !important; }
+.asx-sugg button {
+  display: flex; align-items: center; gap: 6px; padding: 3px 6px;
+  border: 0; background: transparent; cursor: pointer; text-align: left;
+  color: var(--text-primary); font-size: 10px; line-height: 1.6;
+}
+.asx-sugg button:hover { background: rgba(255, 255, 255, 0.09); }
+.asx-sugg em {
+  margin-left: auto; font-style: normal; font-family: var(--font-mono);
+  font-size: 9px; color: var(--text-dim);
+}
+
+.asx-nums { display: flex; align-items: center; gap: 4px; }
+.asx-num { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.asx-num span { font-size: 9px; color: var(--text-muted); white-space: nowrap; }
+.asx-unit { margin-left: -2px; }
+.asx-n {
+  width: 44px; height: 22px; padding: 0 4px;
+  border: 1px solid var(--border-dim); border-radius: 5px; outline: none;
+  background: rgba(0, 0, 0, 0.3); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10px;
+}
+.asx-n:focus { border-color: var(--accent); }
+
+/* 세그먼트 단추(태그/등급 · e/q+e · 개수/비중 · 정렬 셋). */
+.asx-seg {
+  display: flex; flex: 0 0 auto;
+  border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden;
+}
+.asx-seg button {
+  flex: 1 1 auto; min-width: 0; padding: 2px 6px; border: 0; cursor: pointer;
+  background: rgba(255, 255, 255, 0.03); color: var(--text-muted);
+  font-size: 10px; line-height: 1.6; white-space: nowrap;
+}
+.asx-seg button + button { border-left: 1px solid var(--border-dim); }
+.asx-seg button:hover { color: var(--text-primary); }
+.asx-seg button.is-on { background: var(--accent); color: #0d1020; font-weight: 700; }
+.asx-orders { flex: 0 0 auto; }
+
+/* 결과 - 숫자가 본론이라 카드 격자가 아니라 **줄**로 그린다. */
+.asx-rows {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 3px; padding: 1px;
+}
+/* ⚠️ `flex: 0 0 auto` 가 **없으면 줄이 납작해진다**. 세로 flex 안의 아이템은
+   기본이 `0 1 auto` 라, 200장이 들어오면 넘치는 대신 **서로 쥐어짜다**(실측 1.33px).
+   `overflow-y: auto` 는 그제야 일을 한다. */
+.asx-card {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0;
+  border: 1px solid var(--border-dim); border-radius: 6px; cursor: grab;
+  background: rgba(0, 0, 0, 0.24); color: var(--text-primary); text-align: left;
+  overflow: hidden; user-select: none;
+}
+.asx-card:hover { border-color: var(--accent); }
+.asx-img {
+  flex: 0 0 auto; width: 33px; aspect-ratio: 3 / 4; display: block;
+  background: rgba(255, 255, 255, 0.04);
+}
+.asx-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.asx-noimg {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  font-size: 9px; color: var(--text-dim);
+}
+.asx-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; padding: 3px 5px 3px 0; }
+.asx-name {
+  font-size: 10px; font-weight: 700; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.asx-nums-row {
+  display: flex; gap: 4px; font-family: var(--font-mono); font-size: 9px;
+  color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.asx-nums-row .asx-w { margin-left: auto; color: #ffe07a; }
+.asx-empty { padding: 14px 8px; text-align: center; font-size: 10px; color: var(--text-dim); }
+.asx-note { flex: 0 0 auto; font-size: 9px; line-height: 1.5; color: var(--text-dim); }
+.asx-note.is-bad { color: #ff9c9c; }
+.asx-note:empty { display: none; }
+/* 팩이 없으면 입력은 잠기고 사유만 남는다 - 고장이 아니다. */
+.asx.is-missing .asx-form,
+.asx.is-missing .asx-orders,
+.asx.is-missing .asx-rows { display: none !important; }
+
 /* ══ 믹스 띠 (js/features/mixQueuePanel.mjs) ══════════════════════════════
    리모컨 창 **안쪽, 격자 바로 위**의 가로 썸네일 띠(사용자 지정 2026-09-19).
    칸 = 세 상자(썸네일·이름·가중치), 높이는 일반 썸네일의 **2/3**.

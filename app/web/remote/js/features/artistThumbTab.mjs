@@ -153,6 +153,17 @@ export function createArtistThumbController({
   mixBtn.setAttribute('aria-pressed', 'false');
   mixBtn.title = '아티스트 여러 명을 순서·가중치와 함께 쌓습니다. 켜면 창 옆에 큐가 열립니다.';
 
+  // 아티스트 매칭 검색(리모컨 전용). 판은 **믹스 큐가 비우고 나간 그 자리**에 산다
+  // (사용자 지정 2026-09-19) - 그 자리는 `.rctl-side` 라 리모컨 없이는 없다.
+  let searchPanel = null;
+  let searchOn = false;
+  const searchBtn = document.createElement('button');
+  searchBtn.type = 'button';
+  searchBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
+  searchBtn.textContent = '검색 OFF';
+  searchBtn.setAttribute('aria-pressed', 'false');
+  searchBtn.title = 'character·copyright·general·rating 로 아티스트를 좁힙니다. 켜면 창 옆에 판이 열립니다.';
+
   /** 격자가 사람 눈에 닿아 있는가 - 탭이 떠 있거나, 리모컨에 올라가 있거나.
    *  ⚠️ `artistTabActive` 하나로 판단하면 리모컨에 올려 둔 격자가 조용히 낡는다. */
   function gridVisible() {
@@ -1055,6 +1066,14 @@ export function createArtistThumbController({
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  /** GET 한 번 -> JSON. `postJson` 의 짝인데 여태 필요가 없었다. */
+  async function getJson(url) {
+    const response = await fetch(url, {cache: 'no-store'});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
   }
 
   function waitForArtistResult(requestId, artist) {
@@ -2097,6 +2116,7 @@ export function createArtistThumbController({
     filterEl?.addEventListener('change', syncRemoteSelectTitles);
     remoteBtn?.addEventListener('click', () => setRemote(!remoteOnboarded));
     mixBtn.addEventListener('click', () => { void setMixMode(!mixOn); });
+    searchBtn.addEventListener('click', () => { void setSearchMode(!searchOn); });
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     gridEl?.addEventListener('click', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
@@ -2297,6 +2317,7 @@ export function createArtistThumbController({
           // Next 와 Go 사이의 빈 자리(사용자 지정). 리모컨에서만 만든 단추라 원래
           // 자리가 없다 - `lift` 가 부모 없는 노드는 그냥 지나가고 창과 함께 사라진다.
           {node: mixBtn, tag: 'mix'},
+          {node: searchBtn, tag: 'search'},
           {node: goto, tag: 'goto'},
         ],
       },
@@ -2803,13 +2824,56 @@ export function createArtistThumbController({
     }
   }
 
+  /** 아티스트 매칭 검색 판. 보조 판(`.rctl-side`)의 **유일한 주인**이다. */
+  async function ensureSearchPanel() {
+    if (searchPanel) return searchPanel;
+    const remote = getRemoteController?.();
+    if (!remote) return null;
+    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-asx');
+    searchPanel = createArtistSearchPanel({
+      document, escHtml, showToast, getJson, postJson,
+      // 그림은 격자와 **같은 서버 한 곳**에서 받는다 - 두 벌이 되면 언젠가 갈린다.
+      describe: describeArtists,
+      onPick: artist => pickFromGroup(artist),
+      onDragStart: () => remote.hideZoom?.(),
+      // 끌기는 그룹 창과 **같은 중개인**을 쓴다(격자 -> 띠 와 한 길).
+      getBroker: () => ensureGroups().then(({broker}) => broker),
+      // 판이 접히면 머리줄 아래에 지금 조건과 결과 수만 남는다.
+      onUpdate: () => remote.setSideSummary?.(searchPanel.summary()),
+    });
+    return searchPanel;
+  }
+
+  async function setSearchMode(next) {
+    const want = Boolean(next);
+    const remote = getRemoteController?.();
+    if (want && !remote) { showToast('리모컨에서만 쓸 수 있습니다.', 'error'); return; }
+    const panel = want ? await ensureSearchPanel() : searchPanel;
+    if (want && !panel) { showToast('검색 판을 열지 못했습니다.', 'error'); return; }
+    searchOn = want;
+    searchBtn.textContent = `검색 ${searchOn ? 'ON' : 'OFF'}`;
+    searchBtn.classList.toggle('is-on', searchOn);
+    searchBtn.setAttribute('aria-pressed', searchOn ? 'true' : 'false');
+    if (searchOn) {
+      remote.mountSide(panel.el);
+      remote.showSide(true);
+      remote.setSideSummary?.(panel.summary());
+      // 팩이 없으면 판이 스스로 잠긴다 - 단추는 그대로 두고 이유를 판이 말한다.
+      await panel.ensureState();
+      panel.focus();
+    } else {
+      remote?.showSide(false);
+      remote?.setSideSummary?.([]);
+    }
+  }
+
   /** 리모컨에서는 카드가 112px 까지 줄어든다 - 마우스를 올리면 창 옆에 크게 띄운다. */
   function remoteHoverPreview() {
     return {
       // ⚠️ 띠 칸도 **같은 문**으로 확대한다(사용자 지정: 기존 인프라 재사용).
       //    선택자만 늘리면 리모컨은 한 줄도 안 고친다 - `resolve` 가 `data-artist` 와
       //    안쪽 `img` 만 읽기 때문이다.
-      selector: '.artist-thumb-card[data-artist], .mixq-block[data-artist]',
+      selector: '.artist-thumb-card[data-artist], .mixq-block[data-artist], .asx-card[data-artist]',
       resolve: card => {
         const src = card.querySelector('img')?.getAttribute('src') || '';
         if (!src) return null;   // 'No Image' 칸은 띄울 것이 없다
@@ -2875,6 +2939,10 @@ export function createArtistThumbController({
       // 믹스 판·PE 창은 리모컨에 붙어 있다 - 창이 내려가면 같이 내린다.
       //    (여는 단추가 머리줄에 있어서, 남겨 두면 다시 열 길이 없다.)
       if (mixOn) void setMixMode(false);
+      // 검색 판은 보조 판에 얹혀 있다 - 리모컨이 내려가면 그 자리가 통째로 사라진다.
+      if (searchOn) void setSearchMode(false);
+      searchPanel?.destroy();
+      searchPanel = null;
       unmountPeWindow();
       if (!fromRemote) remote?.offboard?.(REMOTE_KEY);
     }

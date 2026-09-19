@@ -50,9 +50,16 @@ const RATING_SETS = [
 /** 사용자 지정 2026-09-19: **세 단계까지**. 백엔드의 `MAX_DEPTH` 와 같은 값이다. */
 const MAX_DEPTH = 3;
 
-/** 첫 depth 만 문턱이 다르다(사용자 예시: 최소 post 200 -> 그 뒤 100). */
-function tagDefaults(depth) {
-  return {minCount: 10, minPosts: depth === 0 ? 200 : 100};
+/** 작가의 총 게시물 문턱. **기본값이자 하한**이다(사용자 지정 2026-09-19).
+ *
+ *  ⚠️ 처음 사양은 첫 단계 200 · 그 뒤 100 이었는데 너무 높았다 - 지금은 단계를
+ *     가리지 않고 30 이고, 그보다 낮게는 **못 내린다**. 30장도 안 그린 작가는
+ *     비중이 널뛰어서(1/3 이 33%다) 줄 세울 수가 없다.
+ */
+const POST_FLOOR = 30;
+
+function tagDefaults() {
+  return {minCount: 10, minPosts: POST_FLOOR};
 }
 
 const fmt = n => Number(n || 0).toLocaleString('en-US');
@@ -111,8 +118,11 @@ export function createArtistSearchPanel({
             </div>
           </div>
           <!-- ⚠️ 자동완성 목록 **위**에 있어야 한다. 아래에 두면 목록이 덮어
-               포인터를 먹고, 단추를 영영 못 누른다(실측). -->
+               포인터를 먹고, 단추를 영영 못 누른다(실측). [갱신] 도 같은 이유로
+               문턱 칸이 아니라 여기 산다. -->
           <button type="button" class="asx-btn primary" data-asx-act="add">추가</button>
+          <button type="button" class="asx-btn" data-asx-act="refresh"
+                  title="쌓인 단계 전부에 지금 문턱을 얹고 다시 검색합니다">갱신</button>
         </div>
         <div class="asx-nums">
           <label class="asx-num" data-asx-for="count"><span>count ≥</span>
@@ -140,6 +150,7 @@ export function createArtistSearchPanel({
   const rowsEl = el.querySelector('.asx-rows');
   const noteEl = el.querySelector('.asx-note');
   const addBtn = el.querySelector('[data-asx-act="add"]');
+  const refreshBtn = el.querySelector('[data-asx-act="refresh"]');
   const numEls = {
     count: el.querySelector('[data-asx-num="count"]'),
     ratio: el.querySelector('[data-asx-num="ratio"]'),
@@ -280,6 +291,8 @@ export function createArtistSearchPanel({
     });
     const full = stack.length >= MAX_DEPTH;
     addBtn.disabled = full || !kindUsable(kind);
+    // 쌓인 것이 없으면 갱신할 것도 없다.
+    refreshBtn.disabled = busy || !stack.length;
     formEl.classList.toggle('is-busy', busy);
     formEl.classList.toggle('is-full', full);
   }
@@ -288,13 +301,14 @@ export function createArtistSearchPanel({
   const floorOf = value => Math.max(1, Number(axisFloor.get(value)) || 1);
 
   function resetNums() {
-    const defaults = tagDefaults(stack.length);
+    const defaults = tagDefaults();
     const floor = isTagKind(kind) ? floorOf(kind) : 1;
     // ⚠️ 입력칸의 바닥을 안 잡아 주면 사용자가 5를 넣고 **조용히 10의 답**을 본다.
     numEls.count.min = String(floor);
     numEls.count.value = String(Math.max(defaults.minCount, floor));
     numEls.ratio.value = '45';
-    numEls.posts.value = String(isTagKind(kind) ? defaults.minPosts : 100);
+    numEls.posts.min = String(POST_FLOOR);
+    numEls.posts.value = String(defaults.minPosts);
   }
 
   function note(text, kindName = '') {
@@ -305,7 +319,7 @@ export function createArtistSearchPanel({
   // ── 서버 ──────────────────────────────────────────────────────────────
 
   /** `candidate` 를 끝에 붙여 본다. 서버가 받아 주면 그때 `stack` 이 된다. */
-  async function run(nextStack, {commit = true} = {}) {
+  async function run(nextStack, {commit = true, keepNums = false} = {}) {
     if (!nextStack.length) {
       stack = []; steps = []; rows = []; total = 0; thumbs = new Map();
       paintStack(); paintRows(); paintForm(); note('');
@@ -348,7 +362,9 @@ export function createArtistSearchPanel({
       : floored ? `이 축은 ${floored.min_count_floor}회 이상만 셉니다 `
                   + `(${floored.min_count_asked} -> ${floored.min_count}).`
       : stack.length >= MAX_DEPTH ? `${MAX_DEPTH}단계까지입니다.` : '');
-    resetNums();
+    // ⚠️ 갱신 뒤에는 칸을 되돌리지 않는다 - 방금 사용자가 넣은 값이 곧 지금
+    //    stack 의 값이라, 기본값으로 되돌리면 화면과 조건이 어긋나 보인다.
+    if (!keepNums) resetNums();
     onUpdate?.();
     void loadThumbs(mine);
     return true;
@@ -365,15 +381,26 @@ export function createArtistSearchPanel({
     paintRows();
   }
 
+  /** 지금 칸의 값. ⚠️ `min` 속성은 **타자를 막지 않는다** - 여기서 한 번 더 건다.
+   *
+   *  ⚠️ 누른 값은 **칸에 돌려쓴다**. 안 그러면 칸에는 1 이 남고 답은 30 의 답이라
+   *     화면과 조건이 어긋나 보인다(실측: 1을 치고 갱신하니 9,464명 그대로였다).
+   */
+  function currentThresholds() {
+    const minPosts = Math.max(Number(numEls.posts.value) || 0, POST_FLOOR);
+    if (numEls.posts.value !== String(minPosts)) numEls.posts.value = String(minPosts);
+    return {minPosts, minCount: Math.max(Number(numEls.count.value) || 0, 0)};
+  }
+
   function buildStep() {
-    const minPosts = Math.max(Number(numEls.posts.value) || 0, 0);
+    const {minPosts} = currentThresholds();
     if (isTagKind(kind)) {
       const tag = inputEl.value.trim();
       if (!tag) { note(`${kindLabel(kind)} 를 적어 주세요.`, 'bad'); inputEl.focus(); return null; }
       // ⚠️ 축은 **화면이 정한다**(고른 갈래 그대로). 서버가 추정하게 두면 같은
       //    낱말이 두 축에 있을 때 사용자가 안 고른 쪽이 잡힌다.
       return {kind: 'tag', tag, axis: kind,
-              min_count: Math.max(Number(numEls.count.value) || 0, 0), min_posts: minPosts};
+              min_count: currentThresholds().minCount, min_posts: minPosts};
     }
     const ratings = ratingsPick.split('+');
     if (ratingMode === 'ratio') {
@@ -381,7 +408,24 @@ export function createArtistSearchPanel({
       return {kind: 'rating', ratings, mode: 'ratio', min_ratio: pct / 100, min_posts: minPosts};
     }
     return {kind: 'rating', ratings, mode: 'count',
-            min_count: Math.max(Number(numEls.count.value) || 0, 0), min_posts: minPosts};
+            min_count: currentThresholds().minCount, min_posts: minPosts};
+  }
+
+  /** 쌓인 단계 **전부**에 지금 문턱을 얹고 다시 돌린다(사용자 지정).
+   *
+   *  ⚠️ 비중으로 건 등급 단계는 `min_count` 를 안 쓴다 - 거기에 얹으면 화면에는
+   *     안 보이는 값이 조용히 바뀐다. 그 단계는 `min_posts` 만 갈아 준다.
+   */
+  async function refreshStack() {
+    if (busy || !stack.length || packState?.state !== 'ready') return;
+    const {minPosts, minCount} = currentThresholds();
+    const next = stack.map(step => {
+      const out = {...step, min_posts: minPosts};
+      if (step.kind === 'rating' && step.mode === 'ratio') return out;
+      return {...out, min_count: minCount};
+    });
+    note('');
+    await run(next, {keepNums: true});
   }
 
   async function addDepth() {
@@ -443,6 +487,7 @@ export function createArtistSearchPanel({
     const act = event.target.closest('[data-asx-act]')?.dataset.asxAct;
     if (act === 'reset') { void run([]); note(''); return; }
     if (act === 'add') { void addDepth(); return; }
+    if (act === 'refresh') { void refreshStack(); return; }
 
     const kindBtn = event.target.closest('[data-asx-kind]');
     if (kindBtn) {
@@ -518,7 +563,13 @@ export function createArtistSearchPanel({
 
   el.querySelectorAll('.asx-n').forEach(input => {
     input.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); void addDepth(); }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      // 문턱 칸에서 Enter = 방금 고친 값을 **쌓인 것에 얹는다**. 새 단계를 넣는
+      // 중이면(태그를 적어 두었으면) 그쪽이 먼저다.
+      if (isTagKind(kind) && inputEl.value.trim()) { void addDepth(); return; }
+      if (stack.length) { void refreshStack(); return; }
+      void addDepth();
     });
   });
 

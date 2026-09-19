@@ -5633,15 +5633,21 @@ function setParam(key, value) {
       closeModule();
       showToast('NAID3에서는 Character / Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'info');
     }
-    // 모델이 못 쓰는 CR/VT 는 백엔드가 이 set_param 의 목에서 꺼 준다
-    // (headless_remote_state_service._disable_unsupported_reference_frames).
-    // 배지는 module_state 로만 움직이므로 여기서 다시 청해야 꺼진 것이 보인다 —
-    // publish 는 WS 가 아니라서 백엔드가 껐다는 사실이 저절로 오지 않는다.
-    naiRefreshUnsupportedToolState();
+    // 못 쓰는 도구가 열려 있으면 먼저 닫는다(순수 프런트 판단이라 왕복이 필요 없다).
+    naiCloseUnsupportedTool();
     if (img2imgPanel) img2imgPanel.refresh();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
+  }
+  if (key === 'model') {
+    // ⚠️ **반드시 위 ws.send 뒤다.** 모델이 못 쓰는 CR/VT 는 백엔드가 set_param 의
+    //    목에서 꺼 주는데(headless_remote_state_service._disable_unsupported_reference_frames),
+    //    그 사실은 저절로 오지 않는다 - publish 는 WS 가 아니다. 그래서 module_state 를
+    //    다시 청해야 배지가 꺼진 것을 본다.
+    //    앞에서 부르면 **백엔드가 새 모델을 알기도 전에** 묻게 되어 옛 모델의 답
+    //    (is_naid45=true, 프레임 켜짐)이 캐시에 앉는다 - 실측으로 확인한 경합이다.
+    naiRefreshReferenceToolBadges();
   }
   if (moduleBadges && ['enable_hr', 'hr_scale', 'anima_weight'].includes(key)) {
     moduleBadges.updateComfyUiParams(_collectCurrentParams());
@@ -10423,19 +10429,25 @@ function naiModelToolUnsupported(moduleId) {
   return capabilities[capKey] === false;
 }
 
-// 모델이 바뀐 직후 CR/VT 화면 상태를 맞춘다: 열려 있으면 닫고, 배지는 다시 청한다.
-function naiRefreshUnsupportedToolState() {
-  const unsupported = Object.keys(NAI_TOOL_CAPABILITY_KEY).filter(naiModelToolUnsupported);
-  if (!unsupported.length) return;
+// 모델이 바뀐 직후 CR/VT 화면 상태를 맞춘다. **두 갈래로 나눠 둔 이유**:
+// 닫기는 프런트 혼자 아는 일이라 즉시 하면 되지만, 배지는 백엔드가 프레임을 끈
+// 뒤라야 뜻이 있다. 한 함수로 묶어 모델 변경 분기에서 부르면 `ws.send` 보다 앞서
+// 돌아 옛 모델의 답을 캐시에 앉힌다(실측 2026-09-19).
+function naiCloseUnsupportedTool() {
   // ⚠️ 이름을 **먼저** 집는다. closeModule() 이 currentModuleId 를 비우므로
   //    닫은 뒤에 읽으면 토스트에 빈 이름이 나간다.
-  const openTool = unsupported.includes(currentModuleId) ? currentModuleId : '';
-  if (openTool && modulePopup.classList.contains('open')) {
-    closeModule();
-    showToast(`${NAI_TOOL_LABELS[openTool] || openTool}는 이 모델에서 지원하지 않아 해제했습니다`, 'info');
-  }
-  // 백엔드가 프레임을 껐다 — 그 결과를 배지에 싣는다.
-  unsupported.forEach(requestModuleState);
+  const openTool = naiModelToolUnsupported(currentModuleId) ? currentModuleId : '';
+  if (!openTool || !modulePopup.classList.contains('open')) return;
+  closeModule();
+  showToast(`${NAI_TOOL_LABELS[openTool] || openTool}는 이 모델에서 지원하지 않아 해제했습니다`, 'info');
+}
+
+// ⚠️ 못 쓰는 쪽만 청하면 **반대 방향이 낡는다.** V5 -> V4.5 로 내려오면 CR/VT 가
+//    다시 쓸 수 있게 되는데, 그때 청하지 않으면 배지와 패널이 V5 시절의 답
+//    (is_naid45=false)을 그대로 들고 있다(실측 2026-09-19). 양쪽 다 청한다 -
+//    module_state 두 번이라 비용도 없다.
+function naiRefreshReferenceToolBadges() {
+  Object.keys(NAI_TOOL_CAPABILITY_KEY).forEach(requestModuleState);
 }
 
 // 투명 배경(Transparent BG) - 사용자 지정 2026-08-29.

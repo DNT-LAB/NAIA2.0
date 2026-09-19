@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl10';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-noloop';
 // ⚠️ 모든 곳이 **같은 주소**로 불러야 중개자가 하나다(계약 시험이 대조).
 import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
 
@@ -390,7 +390,13 @@ export function createRemoteController({
     const panelRect = panel.el.getBoundingClientRect();
     const vh = win?.innerHeight || doc.documentElement.clientHeight;
     // 창과 위를 맞추고, 창보다 길어지지 않게 자른다(안에서 스크롤한다).
-    sideEl.style.maxHeight = `${Math.round(Math.min(panelRect.height, vh - 16))}px`;
+    // ⚠️ **접힌 창의 높이는 빌리지 않는다.** 접으면 `panelRect.height` 가 머리줄
+    //    하나(34px)라, 그대로 쓰면 이 판이 34px 로 쪼그라든다 - 상자가 사라지니
+    //    배경도 같이 사라져 글자만 허공에 뜬 것처럼 보였다(사용자 제보 2026-09-19).
+    //    창을 접는 것은 **격자를 치우는 것**이지 이 판을 닫는 것이 아니다.
+    const collapsed = panel.el.classList.contains('is-collapsed');
+    const cap = collapsed ? vh - 16 : Math.min(panelRect.height, vh - 16);
+    sideEl.style.maxHeight = `${Math.round(cap)}px`;
     placeBeside(sideEl, panelRect, panelRect.top);
   }
 

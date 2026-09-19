@@ -2383,7 +2383,7 @@ export function createArtistThumbController({
     if (groupsApi) return groupsApi;
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260919-srvtemp'),
+      import('./artistGroupWindow.mjs?v=20260919-noloop'),
       import('./dragBroker.mjs?v=20260919-strip'),
     ]);
     const store = createArtistGroupsStore({fetch});
@@ -2710,7 +2710,7 @@ export function createArtistThumbController({
         requestState: () => requestPeState(),
       });
     }
-    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260914-rctl10');
+    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260919-noloop');
     const width = 320;
     const height = 260;
     const spot = remote.besideSpot?.(width, height) || {x: 24, y: 120};
@@ -2830,7 +2830,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-pct');
+    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-noloop');
     searchPanel = createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
       // 그림은 격자와 **같은 서버 한 곳**에서 받는다 - 두 벌이 되면 언젠가 갈린다.

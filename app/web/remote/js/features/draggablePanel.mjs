@@ -140,6 +140,10 @@ export function createDraggablePanel({
   let pos = {x: 0, y: 0};
   let collapsed = false;
   let placed = false;          // 한 번이라도 자리를 정했는가
+  // ⚠️ `place()` 는 **자기 안에서 다시 불릴 수 있다**: 기억에서 `collapsed` 를
+  //    되살리면 `setCollapsed -> refit -> place` 로 돌아온다. 그때 `placed` 는
+  //    아직 false 라 `refit` 이 또 `place` 를 부른다 - 스택이 터진다(실측).
+  let placing = false;
   let drag = null;
   let placeRetry = 0;
   let heldHeight = '';   // 접기 전의 세로 크기(펴면 되돌린다)
@@ -281,6 +285,18 @@ export function createDraggablePanel({
 
   /** 첫 자리 — 기억 > initial > 오른쪽 아래에서 살짝 띄운 기본값. */
   function place() {
+    // 재진입 빗장. 되돌아온 호출은 그냥 지나간다 - 바깥의 `place` 가 끝까지 가서
+    // `moveTo` 로 자리를 정하면 `placed` 가 서고 다음부터는 정상 경로로 돈다.
+    if (placing) return;
+    placing = true;
+    try {
+      placeBody();
+    } finally {
+      placing = false;
+    }
+  }
+
+  function placeBody() {
     const {w: vw, h: vh} = viewport();
     // ⚠️ 화면을 **못 재는 순간**(숨은 탭·최소화·접힌 pane — innerWidth 가 0)에 자리를
     //    정하면 창이 화면 밖에 놓인다. 그런데 refit 은 정해진 자리를 안으로 들일 뿐

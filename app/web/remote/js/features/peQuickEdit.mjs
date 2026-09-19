@@ -1,8 +1,11 @@
 /** Prompt Engineering 빠른 수정 — 믹스 모드 판 아래에 붙는 접이식 칸 둘.
  *
  *  `/pe` 의 prefix·postfix 임시 편집창과 **같은 값의 다른 창**이다(사용자: "부분 미러").
- *  다른 점은 수명뿐 - 슬래시 쪽은 바깥을 누르면 사라지는 일회성이고, 이쪽은 리모컨에
- *  상주하며 접었다 편다. 저장은 **칸을 벗어날 때 자동**(사용자 지정).
+ *  다른 점은 수명뿐 - 슬래시 쪽은 바깥을 누르면 사라지는 일회성이고, 이쪽은 떠 있는
+ *  창에 상주하며 접었다 편다. 저장은 **칸을 벗어날 때 자동**(사용자 지정).
+ *
+ *  ⚠️ 리모컨 머리줄의 [prefix]/[postfix] 가 `openField()` 로 이 칸들을 **탭처럼** 연다 -
+ *     한 번에 한 칸만 펴는 이유는 창이 좁아 둘을 펴면 각각이 쓸모없이 낮아지기 때문이다.
  *
  *      ┌ 믹스 모드 ──────────┐
  *      │  … 큐 …             │
@@ -212,6 +215,21 @@ export function createPeQuickEdit({
 
   return {
     el,
+    /** 머리줄 단추가 부른다 - 그 칸만 펴고 나머지는 접는다(탭). 이미 펴져 있으면
+     *  초점만 옮긴다(단추를 두 번 눌렀다고 방금 친 글을 접어 버리면 안 된다). */
+    openField(key) {
+      const row = rowFor(key);
+      if (!row) return false;
+      FIELDS.forEach(f => {
+        const other = rowFor(f.key);
+        if (other !== row && isOpen(other)) setOpen(other, false);
+      });
+      if (!isOpen(row)) setOpen(row, true);
+      else row.querySelector('.peq-text').focus();
+      return true;
+    },
+    /** 지금 펴져 있는 칸(없으면 ''). 머리줄 단추의 눌림 표시가 이걸 읽는다. */
+    openKey: () => (FIELDS.find(f => isOpen(rowFor(f.key)))?.key || ''),
     /** 바깥에서 값이 바뀌었을 때(프리셋 전환 등). **치는 중인 칸은 건드리지 않는다** -
      *  사용자가 쓰고 있는 글을 서버 에코가 지우면 그게 제일 나쁜 종류의 버그다.
      *

@@ -245,17 +245,29 @@ export function createRemoteController({
 
   /** 창(또는 다른 기준 상자) **바깥** 좌우 중 넓은 쪽에 붙인다.
    *  ⚠️ 확대 보기와 보조 판이 같은 규칙을 써야 서로 겹쳐도 말이 된다. */
-  function placeBeside(box, anchorRect, top) {
-    const boxRect = box.getBoundingClientRect();
+  /** '창 옆' 의 **좌표**. 넓은 쪽에 붙이고 화면 안으로 밀어 넣는다.
+   *  ⚠️ 자리를 스스로 관리하는 떠 있는 창(PE 창)은 style 을 직접 쓰면 안 된다
+   *     (moveTo 가 기억·클램프를 맡는다) - 그래서 좌표만 내주는 문을 따로 둔다.
+   *     규칙이 둘로 갈리면 확대 보기·보조 판·PE 창이 제각각 다른 자리에 뜬다. */
+  function besideSpot(width, height, anchorRect, top) {
     const vw = win?.innerWidth || doc.documentElement.clientWidth;
     const vh = win?.innerHeight || doc.documentElement.clientHeight;
     const roomLeft = anchorRect.left;
     const roomRight = vw - anchorRect.right;
-    const left = (roomLeft >= boxRect.width + 16 || roomLeft > roomRight)
-      ? anchorRect.left - boxRect.width - 10
+    const left = (roomLeft >= width + 16 || roomLeft > roomRight)
+      ? anchorRect.left - width - 10
       : anchorRect.right + 10;
-    box.style.left = `${Math.round(Math.max(6, Math.min(left, vw - boxRect.width - 6)))}px`;
-    box.style.top = `${Math.round(Math.max(6, Math.min(top, vh - boxRect.height - 6)))}px`;
+    return {
+      x: Math.round(Math.max(6, Math.min(left, vw - width - 6))),
+      y: Math.round(Math.max(6, Math.min(top, vh - height - 6))),
+    };
+  }
+
+  function placeBeside(box, anchorRect, top) {
+    const boxRect = box.getBoundingClientRect();
+    const spot = besideSpot(boxRect.width, boxRect.height, anchorRect, top);
+    box.style.left = `${spot.x}px`;
+    box.style.top = `${spot.y}px`;
   }
 
   function showZoom(target, info, anchorRect = null) {
@@ -468,6 +480,9 @@ export function createRemoteController({
     showSide,
     placeSide,
     sideRect,
+    /** 떠 있는 창을 리모컨 **옆**에 둘 좌표(보조 판·확대 보기와 같은 규칙). */
+    besideSpot: (width, height) => besideSpot(
+      width, height, panel.el.getBoundingClientRect(), panel.el.getBoundingClientRect().top),
     // 가만히 두면 접히고, 접힌 동안 이 줄들을 아주 작게 보여 준다.
     setSideSummary,
     setSidePinned,

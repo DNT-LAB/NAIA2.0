@@ -29352,7 +29352,6 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 /* 판이 둘이면 줄어드는 쪽은 큐다 - 빠른 수정 칸은 제 높이를 지킨다. */
 .rctl-side > .mixq { flex: 1 1 auto; min-height: 90px; }
-.rctl-side > .peq { flex: 0 0 auto; }
 .rctl-side[hidden] { display: none !important; }
 
 .mixq {
@@ -29518,8 +29517,7 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    ⚠️ 끝 상태는 **클래스가 전부 쥔다**. 애니메이션이 안 돌아도(throttle 된 창은
       프레임을 안 만든다) 결과는 같아야 한다. */
 .rctl-side .mixq-list,
-.rctl-side .mixq-foot,
-.rctl-side .peq {
+.rctl-side .mixq-foot {
   transition: max-height .24s ease, opacity .16s ease, padding .24s ease;
   max-height: 70vh;
 }
@@ -29527,8 +29525,7 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 /* 접히면 제목줄 높이만 남는다 - min-height 가 남아 있으면 빈 상자가 그림을 가린다. */
 .rctl-side.is-folded > .mixq { flex: 0 0 auto; min-height: 0; }
 .rctl-side.is-folded .mixq-list,
-.rctl-side.is-folded .mixq-foot,
-.rctl-side.is-folded .peq {
+.rctl-side.is-folded .mixq-foot {
   max-height: 0; opacity: 0; overflow: hidden;
   padding-top: 0; padding-bottom: 0; border-top-width: 0;
   pointer-events: none;
@@ -29553,8 +29550,36 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .rctl-side .mixq-list,
   .rctl-side .mixq-foot,
-  .rctl-side .peq { transition: none; }
 }
+
+/* 리모컨 머리줄의 [prefix] [postfix](사용자 지정 2026-09-19) - PE 창을 탭처럼 연다.
+   제목과 닫기 단추 사이의 빈 칸(`.dragpanel-slot`)에 산다. */
+.rctl-pe-btn {
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted); font-family: var(--font-mono); font-size: 10px;
+  line-height: 1.5; cursor: pointer;
+}
+.rctl-pe-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.rctl-pe-btn.is-on {
+  color: #0d1020; background: var(--accent); border-color: var(--accent);
+}
+
+/* PE 빠른 수정이 사는 떠 있는 창. 창이 이미 상자라 안쪽 `.peq` 는 옷을 벗는다 -
+   상자 안의 상자가 되면 좁은 창에서 테두리만 두 겹으로 보인다. */
+.dragpanel.pewin .dragpanel-body {
+  display: flex; flex-direction: column; min-height: 0; padding: 6px; gap: 0;
+}
+.dragpanel.pewin .peq {
+  flex: 1 1 auto; min-height: 0;
+  padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none;
+}
+/* 펴 놓은 칸이 창의 남은 높이를 다 먹는다 - 창을 키운 만큼 글칸이 커져야 한다. */
+.dragpanel.pewin .peq-row:has(> .peq-box:not([hidden])) { flex: 1 1 auto; min-height: 0; }
+.dragpanel.pewin .peq-box:not([hidden]) {
+  flex: 1 1 auto; min-height: 0; display: flex;
+}
+.dragpanel.pewin .peq-text { flex: 1 1 auto; min-height: 54px; resize: none; }
 
 /* ══ PE 빠른 수정 (js/features/peQuickEdit.mjs) ═══════════════════════════
    믹스 판 아래에 붙는 접이식 칸 둘. Prompt Engineering 의 prefix·postfix 를

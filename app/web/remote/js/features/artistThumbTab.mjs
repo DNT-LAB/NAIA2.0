@@ -131,6 +131,8 @@ export function createArtistThumbController({
   // 믹스 모드(리모컨 전용). 켜져 있으면 ARTIST PROMPT 칸의 주인이 **큐**로 넘어간다.
   let mixQueue = null;
   let peQuick = null;
+  let peWindow = null;         // PE 빠른 수정이 사는 떠 있는 창
+  let peHeadButtons = null;    // 리모컨 머리줄의 [prefix] [postfix]
   let mixOn = false;
   // 앵커 그룹 `{아이디: 합친 글}`. 생성 요청에 실어 보내면 서버가 `<anchor:ID>` 자리에
   // 꽂는다(`core/artist_anchor.py`). 큐가 바뀔 때마다 갱신된다.
@@ -2639,14 +2641,33 @@ export function createArtistThumbController({
       // 표식이 prefix/postfix 에 살아 있는가. 글의 주인은 PE 라 여기서 물어 준다.
       hasAnchorIn: id => peTextHasAnchor(id),
       // 추가/복원 = prefix **맨 뒤**에 표식을 넣는다(사용자 지정).
-      onAnchorAdd: id => putAnchorInPrefix(id),
+      // ⚠️ 표식이 **글**로 들어가므로 그 글을 볼 창이 함께 떠야 한다(사용자 지정:
+      //    "이를 위해 prefix, postfix 가 믹스 모드에서 노출되는 것"). 앵커를 안 쓰면
+      //    안 띄운다 - 화면만 가린다.
+      onAnchorAdd: id => { putAnchorInPrefix(id); void togglePeField('pre_prompt', {openOnly: true}); },
       onAnchorRemove: id => dropAnchorFromText(id),
       onGroupsMenu: anchor => { void openGroupsLauncher(anchor); },
       onDragStart: () => remote.hideZoom?.(),
     });
-    // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
-    if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {
-      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20260919-peqhl');
+    await ensurePeWindow();
+    remote.mountSide?.(mixQueue.el);
+    return mixQueue;
+  }
+
+  /** PE 빠른 수정이 사는 **떠 있는 창**(사용자 지정 2026-09-19).
+   *
+   *  전에는 리모컨 옆 보조 판 아래에 얹혀 있었다. 그 자리를 비우면서 제 창을 갖고,
+   *  여는 길은 리모컨 **머리줄의 단추 둘**이 된다(탭처럼 한 칸씩).
+   *  ⚠️ 처음 뜨는 자리는 보조 판이 뜨던 그 자리다(사용자 지정: "위치는 기존과 동일") -
+   *     `besideSpot` 이 확대 보기·보조 판과 **같은 규칙**을 내준다.
+   */
+  async function ensurePeWindow() {
+    if (peWindow) return peWindow;
+    if (typeof getPeField !== 'function' || typeof setPeField !== 'function') return null;
+    const remote = getRemoteController?.();
+    if (!remote) return null;
+    if (!peQuick) {
+      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20260919-pewin');
       peQuick = createPeQuickEdit({
         document, escHtml, showToast,
         // 강조도 자동완성도 **메인 프롬프트의 것을 그대로** 빌린다(사용자 지정).
@@ -2659,8 +2680,74 @@ export function createArtistThumbController({
         requestState: () => requestPeState(),
       });
     }
-    remote.mountSide?.(mixQueue.el, peQuick?.el);
-    return mixQueue;
+    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260914-rctl10');
+    const width = 320;
+    const height = 260;
+    const spot = remote.besideSpot?.(width, height) || {x: 24, y: 120};
+    peWindow = createDraggablePanel({
+      document, window,
+      variant: 'pewin',
+      title: 'Prompt Engineering',
+      storageKey: 'pe-quick',
+      width, height, minWidth: 240, maxWidth: 720, minHeight: 120,
+      resizable: true,
+      initial: {x: spot.x, y: spot.y},
+      escHtml,
+      // 펼친 채 닫으면 마지막 편집이 날아간다 - 칸을 벗어난 것과 같이 친다.
+      onClose: () => { peQuick?.flush(); paintPeButtons(); },
+    });
+    // 리모컨의 '바깥 누름' 판정에서 **안쪽**으로 친다 - 여기서 치는 동안 보조 판이
+    // 접히면 안 된다. 자동완성 팝업의 층 판별(`.dragpanel`)도 이 창을 알아본다.
+    peWindow.el.setAttribute('data-rctl-companion', 'pe');
+    peWindow.body.appendChild(peQuick.el);
+    return peWindow;
+  }
+
+  /** 머리줄 단추의 눌림 표시 - 창이 닫혀 있으면 둘 다 꺼진다. */
+  function paintPeButtons() {
+    if (!peHeadButtons) return;
+    const key = (peWindow && peWindow.isOpen()) ? (peQuick?.openKey() || '') : '';
+    peHeadButtons.forEach((btn, field) => {
+      btn.classList.toggle('is-on', field === key);
+      btn.setAttribute('aria-pressed', field === key ? 'true' : 'false');
+    });
+  }
+
+  /** 머리줄 단추가 눌렸다. 같은 칸을 다시 누르면 **닫는다**(토글). */
+  async function togglePeField(key, {openOnly = false} = {}) {
+    const win = await ensurePeWindow();
+    if (!win) { if (!openOnly) showToast?.('Prompt Engineering 을 열지 못했습니다.', 'error'); return; }
+    if (win.isOpen() && peQuick?.openKey() === key) { if (!openOnly) win.close(); return; }
+    win.open();
+    win.raise();
+    peQuick?.sync();
+    peQuick?.openField(key);
+    paintPeButtons();
+  }
+
+  /** 리모컨 머리줄에 [prefix] [postfix] 를 단다(사용자 지정). 창과 함께 사라진다. */
+  function mountPeHeadButtons() {
+    const remote = getRemoteController?.();
+    if (!remote?.slot || peHeadButtons) return;
+    peHeadButtons = new Map();
+    for (const [key, label] of [['pre_prompt', 'prefix'], ['post_prompt', 'postfix']]) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'rctl-pe-btn';
+      btn.textContent = label;
+      btn.setAttribute('aria-pressed', 'false');
+      btn.title = `${label} 를 고칩니다`;
+      btn.addEventListener('click', () => { void togglePeField(key); });
+      remote.slot.appendChild(btn);
+      peHeadButtons.set(key, btn);
+    }
+  }
+
+  function unmountPeWindow() {
+    peQuick?.flush();
+    peWindow?.close();
+    peHeadButtons?.forEach(btn => btn.remove());
+    peHeadButtons = null;
   }
 
   /** 블럭의 그림 - 격자에 그 카드가 떠 있으면 그 주소를 그대로 쓴다. */
@@ -2683,11 +2770,12 @@ export function createArtistThumbController({
     // 이 칸이 여러 명을 담게 되니 줄바꿈을 허용한다(옷은 `.is-mix` 가 쥔다).
     mixBtn.closest('.dragpanel')?.classList.toggle('is-mix', mixOn);
     queue?.setOpen(mixOn);
-    // 펼친 채 닫으면 마지막 편집이 날아간다 - 칸을 벗어난 것과 같이 친다.
-    if (!mixOn) peQuick?.flush();
     remote?.showSide?.(mixOn);
-    if (mixOn) peQuick?.sync();
     if (mixOn) {
+      peQuick?.sync();
+      // ⚠️ 자동 개방은 **앵커를 쓸 때만**(사용자 지정). 앵커가 없으면 prefix/postfix 를
+      //    볼 이유가 없고 화면만 가린다 - 그때는 머리줄 단추로 직접 연다.
+      if ((queue.anchors() || []).length) void togglePeField('pre_prompt');
       if (selected) queue.setTempArtist(selected.artist, selected.image_url || '');
       applyMixComposition(queue.compose());
     } else if (selected) {
@@ -2753,6 +2841,7 @@ export function createArtistThumbController({
         return;
       }
       remoteOnboarded = true;
+      mountPeHeadButtons();
       syncRemoteSelectTitles();
       // 첫 끌기가 모듈 로딩에 먹히지 않게 미리 올린다(카드를 잡는 순간엔 이미 준비돼 있다).
       void ensureGroups();
@@ -2761,8 +2850,10 @@ export function createArtistThumbController({
       showResultTab();
     } else {
       remoteOnboarded = false;
-      // 믹스 판은 리모컨에 붙어 있다 - 창이 내려가면 같이 내린다.
+      // 믹스 판·PE 창은 리모컨에 붙어 있다 - 창이 내려가면 같이 내린다.
+      //    (여는 단추가 머리줄에 있어서, 남겨 두면 다시 열 길이 없다.)
       if (mixOn) void setMixMode(false);
+      unmountPeWindow();
       if (!fromRemote) remote?.offboard?.(REMOTE_KEY);
     }
     syncRemoteButton();

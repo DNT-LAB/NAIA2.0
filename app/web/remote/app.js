@@ -5633,6 +5633,11 @@ function setParam(key, value) {
       closeModule();
       showToast('NAID3에서는 Character / Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'info');
     }
+    // 모델이 못 쓰는 CR/VT 는 백엔드가 이 set_param 의 목에서 꺼 준다
+    // (headless_remote_state_service._disable_unsupported_reference_frames).
+    // 배지는 module_state 로만 움직이므로 여기서 다시 청해야 꺼진 것이 보인다 —
+    // publish 는 WS 가 아니라서 백엔드가 껐다는 사실이 저절로 오지 않는다.
+    naiRefreshUnsupportedToolState();
     if (img2imgPanel) img2imgPanel.refresh();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -10222,6 +10227,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-
       openComfyUiWeb,
       setModuleParam,
       naiReferenceBlocked: () => naiModelBlocksReference(),
+      naiToolUnsupported: moduleId => naiModelToolUnsupported(moduleId),
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();
@@ -10384,6 +10390,52 @@ function naiModelBlocksReference() {
   const metadata = naiModelMetaByKey.get(model);
   if (metadata?.capabilities && metadata.capabilities.v4_payload === false) return true;
   return model.includes('NAID3');
+}
+
+// 모델별 **도구 능력**. `naiModelBlocksReference()` 와 다른 질문이다 —
+// 그쪽은 V3 처럼 사양이 통째로 다른 세대를 셋(Character/CR/VT) 다 막고,
+// 이쪽은 계약의 능력 플래그(`capabilities.character_reference` / `.vibe`)를
+// 도구 하나씩 본다.
+//
+// ⚠️ 셋을 한 덩어리로 묶으면 안 된다. V5 는 CR·VT 는 못 쓰지만 **Character 는
+//    쓴다**(V5 도 `v4_prompt` 를 그대로 쓴다 — core/nai_model_contract.py).
+//    기존 공용 게이트를 넓혔다가는 V5 에서 멀쩡한 캐릭터 프롬프트 모듈이 잠긴다.
+// ⚠️ 모델을 모르거나(커스텀·미확정) 플래그가 없으면 **막지 않는다**. 모르는 것을
+//    막으면 사용자가 등록한 모델이 조용히 잠긴다.
+const NAI_TOOL_CAPABILITY_KEY = {
+  character_reference: 'character_reference',
+  vibe_transfer: 'vibe',
+};
+const NAI_TOOL_LABELS = {
+  character_reference: 'Character Reference',
+  vibe_transfer: 'Vibe Transfer',
+};
+
+function naiModelToolUnsupported(moduleId) {
+  const capKey = NAI_TOOL_CAPABILITY_KEY[moduleId];
+  if (!capKey) return false;
+  if ((currentMode || modeSelect.value) !== 'NAI') return false;
+  const sel = document.getElementById('pModel');
+  const model = sel ? String(sel.value || '').trim().toUpperCase() : '';
+  if (!model) return false;
+  const capabilities = naiModelMetaByKey.get(model)?.capabilities;
+  if (!capabilities) return false;
+  return capabilities[capKey] === false;
+}
+
+// 모델이 바뀐 직후 CR/VT 화면 상태를 맞춘다: 열려 있으면 닫고, 배지는 다시 청한다.
+function naiRefreshUnsupportedToolState() {
+  const unsupported = Object.keys(NAI_TOOL_CAPABILITY_KEY).filter(naiModelToolUnsupported);
+  if (!unsupported.length) return;
+  // ⚠️ 이름을 **먼저** 집는다. closeModule() 이 currentModuleId 를 비우므로
+  //    닫은 뒤에 읽으면 토스트에 빈 이름이 나간다.
+  const openTool = unsupported.includes(currentModuleId) ? currentModuleId : '';
+  if (openTool && modulePopup.classList.contains('open')) {
+    closeModule();
+    showToast(`${NAI_TOOL_LABELS[openTool] || openTool}는 이 모델에서 지원하지 않아 해제했습니다`, 'info');
+  }
+  // 백엔드가 프레임을 껐다 — 그 결과를 배지에 싣는다.
+  unsupported.forEach(requestModuleState);
 }
 
 // 투명 배경(Transparent BG) - 사용자 지정 2026-08-29.
@@ -10767,6 +10819,12 @@ function openModule(moduleId, options = {}) {
   // NAID3 에서 Character / CR / VT 차단 (다른 사양 — 일시 미지원)
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && naiModelBlocksReference()) {
     showToast('NAID3에서는 Character / Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'error');
+    return;
+  }
+  // 모델이 못 쓰는 도구(예: V5 의 CR/VT)는 열지 않는다. 런처 회색 처리만 믿지
+  // 않는다 - 여기가 목이라 퀵 패널·복원 경로도 함께 막힌다.
+  if (naiModelToolUnsupported(moduleId)) {
+    showToast(`${NAI_TOOL_LABELS[moduleId] || moduleId}는 이 모델에서 지원하지 않습니다`, 'error');
     return;
   }
   // 모바일 차단(사용자 지정 2026-09-03).

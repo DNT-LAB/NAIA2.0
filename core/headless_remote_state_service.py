@@ -161,8 +161,58 @@ class HeadlessRemoteStateService:
         self.context.remote_params[clean_key] = coerced
         self._sync_cached_selection(clean_key, self.context.remote_params[clean_key])
         self._sync_resolution_dimensions(clean_key, self.context.remote_params[clean_key])
+        self._disable_unsupported_reference_frames(clean_key)
         self.context.save_remote_ui_state()
         self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
+
+    def _disable_unsupported_reference_frames(self, key: str) -> list[str]:
+        """새 모델이 못 쓰는 Character Reference / Vibe Transfer 를 꺼 둔다.
+
+        ⚠️ **여기가 목이다.** 모델을 바꾸는 길은 하나가 아니다 - UI 드롭다운뿐
+           아니라 프리셋 적용·메타데이터 불러오기가 전부 이 set_param 으로 온다
+           (`guarded_nai_model_key` 주석 참조). 프론트의 모델 변경 분기에 걸면
+           프리셋으로 V5 가 된 사람은 그대로 지나간다.
+
+        V4.5 에서 CR/VT 를 켜고 V5 로 넘어가면 켜진 채로 남아 있었다(사용자 제보
+        2026-09-19). 생성 자체는 이미 안전하다 - CR 은 `active_params()` 가
+        V4.5 가 아니면 `{}` 를 주고, VT 도 같은 가드를 갖는다. 그래서 그림이
+        틀리게 나오진 않았지만, **화면은 켜졌다고 말하고 있었다**.
+
+        끄는 것은 `disable_all_frames()` 로 한다 - CR↔VT 상호배타가 쓰는 것과
+        같은 영속 진입점이다. 그 함수는 `_ensure_loaded()` 로 시작해 **미로드
+        상대까지 깨워** 디스크의 enabled 를 끄고 저장한다. 모듈을 한 번도 연 적
+        없는 세션에서 목록이 비어 보인다고 건너뛰면, 나중에 모듈을 열 때 디스크의
+        켜진 프레임이 그대로 되살아난다.
+
+        그래서 '켜진 게 있나' 를 미리 보고 거르지 **않는다**. 로드는 모드당 1회
+        캐시(`_character_reference_frames_loaded_mode`)라 반복 비용도 없고,
+        끌 것이 없으면 `disable_all_frames()` 는 저장도 하지 않는다.
+
+        ⚠️ 되돌려 주지 않는다. V4.5 로 되돌아가도 사용자가 다시 켜야 한다 -
+           기존 cross-disable 과 같은 성질이다.
+
+        반환: 꺼 달라고 청한 도구 id 목록. 모델 키가 아니거나 NAI 모드가 아니면
+        빈 목록.
+        """
+        if key != "model" or self.get_api_mode() != "NAI":
+            return []
+        disabled: list[str] = []
+        if not self.is_naid45_model():
+            self._call_context("_disable_all_character_reference_frames")
+            disabled.append("character_reference")
+        if not self.nai_model_supports_vibe():
+            self._call_context("_disable_all_vibe_frames")
+            disabled.append("vibe_transfer")
+        return disabled
+
+    def _call_context(self, method_name: str) -> None:
+        method = getattr(self.context, method_name, None)
+        if not callable(method):
+            return
+        try:
+            method()
+        except Exception as exc:  # noqa: BLE001 - 끄기 실패가 모델 변경을 막으면 안 된다
+            print(f"[warn] {method_name} failed: {exc}", flush=True)
 
     def _sync_resolution_dimensions(self, key: str, value: Any) -> None:
         """`resolution` 라벨을 바꾸면 `width`/`height` 도 **함께** 옮긴다.

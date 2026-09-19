@@ -221,6 +221,7 @@ export function createModuleLauncher({
   openComfyUiWeb,
   setModuleParam,
   naiReferenceBlocked = () => false,
+  naiToolUnsupported = () => false,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -313,6 +314,9 @@ export function createModuleLauncher({
     if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && naiReferenceBlocked()) {
       return true;
     }
+    // 모델별 도구 능력(계약의 capabilities). V5 는 CR/VT 를 못 쓰지만 Character 는
+    // 쓰므로 위 셋 묶음과 **따로** 본다.
+    if (naiToolUnsupported(moduleId)) return true;
     // 모바일 차단(사용자 지정 2026-09-03). 캐릭터 프롬프트 모듈 팝업은 슬롯 다섯 + POS
     // 캔버스를 가로로 펼치는 화면이라 좁은 폭에서 쓸 수 없다. 모바일에서는 결과 화면의
     // 빠른 캐릭터 패널만 쓰게 한다(그쪽도 Manage 를 같은 이유로 감춘다).

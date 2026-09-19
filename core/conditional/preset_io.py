@@ -275,6 +275,26 @@ class PresetStorage:
                     infos.append(info)
         return infos
 
+    def user_conflict(self, name: str) -> Optional[PresetInfo]:
+        """이 이름으로 저장하면 **덮어쓰게 될** 사용자 프리셋. 없으면 None.
+
+        ⚠️ 이름 비교로 판정하면 안 된다. 파일명은 `_sanitize_name` 을 지나고
+        Windows 는 대소문자를 구분하지 않으므로, 표시 이름이 서로 달라도 같은
+        파일로 간다(`V5:기본` 과 `V5기본`, `Default` 와 `default`). 그래서
+        **실제 경로 존재**로 잰다. 번들은 `save()` 가 이미 거부하므로 제외.
+        """
+        safe = _sanitize_name(name)
+        if not safe:
+            return None
+        path = self.save_dir / f"{safe}.json"
+        if not path.exists():
+            return None
+        # 깨진 JSON 이면 `_peek` 이 None 을 준다 - 그래도 **파일은 있다.** 여기서
+        # None 을 돌려주면 읽을 수 없다는 이유로 확인 없이 덮어쓰게 된다.
+        return _peek(path, is_bundled=False) or PresetInfo(
+            name=path.stem, path=path, description="", is_bundled=False, rule_count=0,
+        )
+
     def exists(self, name: str, *, include_bundled: bool = True) -> bool:
         safe = _sanitize_name(name)
         if not safe:

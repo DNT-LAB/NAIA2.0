@@ -143,6 +143,8 @@ class HeadlessConditionalPromptService:
             #    안 일어난다. 모드별로 규칙을 따로 두는 기능이라 한쪽이 빈 채 남기
             #    쉽고, 그 상태는 생성 결과에서만 드러난다 - 화면이 말해 줘야 한다.
             "active_rules_empty": not active_rules.strip(),
+            # 프리셋 로드·복제로 규칙이 갈렸을 때 되돌릴 것이 있는지(본문은 안 싣는다).
+            "rules_undo": self._undo_summary(settings),
             "presets": self._preset_infos(),
             "can_test_rules": True,
             "can_manage_presets": True,
@@ -160,11 +162,17 @@ class HeadlessConditionalPromptService:
         *,
         messages: list[dict[str, Any]] | None = None,
         simulation: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = self.state()
         if simulation is not None:
             payload["simulation"] = simulation
             payload["local_dirty"] = True
+        # ⚠️ `extra` 는 **한 번 실린 뒤 사라지는** 값이다(다음 `state()` 에는 없다).
+        #    프런트가 이걸로 대화상자를 여는 경우 플래그를 자기 쪽에 복사해 둬야
+        #    다른 에코가 끼어들어도 상자가 닫히지 않는다.
+        if extra:
+            payload.update(extra)
         if messages:
             payload["_headless_extra_messages"] = messages
         return payload
@@ -222,6 +230,8 @@ class HeadlessConditionalPromptService:
             return self._handle_preset_load(store, settings, text_value)
         elif key == "preset_delete":
             return self._handle_preset_delete(store, settings, text_value)
+        elif key == "rules_undo":
+            return self._handle_rules_undo(store, settings)
         elif key in {"simulate_v2", "test"}:
             return self._handle_simulation(key, settings, text_value)
         else:
@@ -254,8 +264,92 @@ class HeadlessConditionalPromptService:
         return str(settings.get(cls._rules_key(settings)) or "")
 
     @classmethod
-    def _write_active_rules(cls, settings: dict[str, Any], dsl: str) -> None:
-        settings[cls._rules_key(settings)] = dsl
+    def _write_active_rules(cls, settings: dict[str, Any], dsl: str, *, reason: str = "") -> None:
+        """규칙 칸을 **통째로** 갈아 끼운다. 갈리기 전 값은 한 세대 보관한다.
+
+        ⚠️ 이 함수를 지나는 것은 프리셋 로드·복제·활성화처럼 **사용자가 직접 친
+        글이 아닌 것으로 칸을 덮는** 경로뿐이다. 그 셋이 실제로 사용자의 손으로 쓴
+        Legacy DSL 을 되돌릴 길 없이 지웠다(제보 2026-09-19). 타이핑 경로
+        (`rules_legacy` / `rules_v2` set_param)는 여기를 지나지 않으므로 한 타마다
+        보관본이 갈리는 일은 없다.
+        """
+        key = cls._rules_key(settings)
+        previous = str(settings.get(key) or "")
+        if previous.strip() and previous != dsl:
+            cls._stash_undo(settings, previous, reason)
+        settings[key] = dsl
+
+    # ------------------------------------------------------------------
+    # 되돌리기 한 세대
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _undo_slot(cls, settings: dict[str, Any]) -> str:
+        return "v2" if cls._editor_mode(settings) == "v2" else "legacy"
+
+    @classmethod
+    def _stash_undo(cls, settings: dict[str, Any], text: str, reason: str) -> None:
+        from datetime import datetime
+
+        undo = dict(settings.get("rules_undo") or {})
+        undo[cls._undo_slot(settings)] = {
+            "text": text,
+            "reason": reason,
+            "at": datetime.now().isoformat(timespec="seconds"),
+        }
+        settings["rules_undo"] = undo
+
+    @classmethod
+    def _undo_entry(cls, settings: dict[str, Any]) -> dict[str, Any] | None:
+        entry = (settings.get("rules_undo") or {}).get(cls._undo_slot(settings))
+        if not isinstance(entry, dict):
+            return None
+        return entry if str(entry.get("text") or "").strip() else None
+
+    @classmethod
+    def _undo_summary(cls, settings: dict[str, Any]) -> dict[str, Any]:
+        """화면에 실을 요약. **본문은 싣지 않는다.**
+
+        ⚠️ 규칙 텍스트를 state 에 더 실으면 패널의 재렌더 시그니처가 규칙과 함께
+        요동쳐 타이핑 중 캐럿이 날아간다(이 파일 계열의 회귀). 되돌릴 것이 있는지와
+        사유·시각만 보낸다 - 본문은 서버가 쥐고 있다가 `rules_undo` 요청에 쓴다.
+        """
+        entry = cls._undo_entry(settings)
+        if entry is None:
+            return {"available": False}
+        return {
+            "available": True,
+            "reason": str(entry.get("reason") or ""),
+            "at": str(entry.get("at") or ""),
+        }
+
+    def _handle_rules_undo(self, store, settings: dict[str, Any]) -> dict[str, Any]:
+        entry = self._undo_entry(settings)
+        if entry is None:
+            return self._state_with(messages=[
+                self._toast_message("되돌릴 이전 규칙이 없습니다.", "error"),
+            ])
+        key = self._rules_key(settings)
+        current = str(settings.get(key) or "")
+        settings[key] = str(entry["text"])
+        # 되돌리기 자체도 한 세대를 남긴다 - 잘못 눌렀으면 다시 누르면 제자리로 온다.
+        undo = dict(settings.get("rules_undo") or {})
+        slot = self._undo_slot(settings)
+        if current.strip():
+            from datetime import datetime
+
+            undo[slot] = {
+                "text": current,
+                "reason": "되돌리기 직전",
+                "at": datetime.now().isoformat(timespec="seconds"),
+            }
+        else:
+            undo.pop(slot, None)
+        settings["rules_undo"] = undo
+        store.apply_settings(settings)
+        return self._state_with(messages=[
+            self._toast_message("이전 규칙으로 되돌렸습니다.", "success"),
+        ])
 
     # ⚠️ 프리셋 이름도 **모드별**이다. 규칙 칸이 나뉘어 있는데 이름표만 하나면,
     #    모드를 바꿨을 때 규칙은 이쪽 것인데 이름은 저쪽 것이 뜬다(실측). 모드마다
@@ -337,12 +431,14 @@ class HeadlessConditionalPromptService:
         if not isinstance(payload, dict):
             payload = {}
 
+        def _flag(key: str) -> bool:
+            raw = payload.get(key, False)
+            return raw is True or (isinstance(raw, str) and raw.strip().lower() == "true")
+
         name = str(payload.get("name") or "").strip()
         source_preset = str(payload.get("source_preset") or "").strip()
-        activate_raw = payload.get("activate", False)
-        activate = activate_raw is True or (
-            isinstance(activate_raw, str) and activate_raw.strip().lower() == "true"
-        )
+        activate = _flag("activate")
+        overwrite = _flag("overwrite")
         book_data = payload.get("book") if isinstance(payload.get("book"), dict) else None
 
         if not name:
@@ -351,6 +447,24 @@ class HeadlessConditionalPromptService:
         storage = self._storage()
         if any(info.name == name and info.is_bundled for info in storage.list_all()):
             return self._state_with(messages=[self._toast_message("번들 프리셋과 같은 이름으로 저장할 수 없습니다.", "error")])
+
+        # ⚠️ 덮어쓰기는 **물어보고** 한다. 프리셋 이름칸이 활성 프리셋 이름으로 미리
+        #    채워져 있어서(패널 `renderPresetPane`), [저장]을 누르면 지금 걸려 있는
+        #    프리셋이 아무 경고 없이 갈렸다 - New Editor 에서 눌렀다면 Legacy 에서
+        #    만든 프리셋이 통째로 v2 내용이 된다(사용자 제보 2026-09-19, 실측 재현).
+        #    이름이 아니라 **파일 존재**로 재는 이유는 `user_conflict` 주석에 있다.
+        conflict = storage.user_conflict(name)
+        if conflict is not None and not overwrite:
+            return self._state_with(
+                extra={"preset_overwrite_prompt": {
+                    "name": name,
+                    "existing": conflict.name,
+                    "rule_count": int(conflict.rule_count),
+                    # 정규화 때문에 다른 이름을 덮게 되는 경우 - 이걸 말해 주지 않으면
+                    # 사용자는 자기가 무엇을 지우는지 모른다.
+                    "renamed": conflict.name != name,
+                }},
+            )
 
         book = None
         try:
@@ -377,15 +491,28 @@ class HeadlessConditionalPromptService:
             return self._state_with(messages=[self._toast_message("프리셋 저장 실패: 규칙을 해석할 수 없습니다.", "error")])
 
         storage.save(name, book)
-        self._set_active_preset(settings, name)
+        # ⚠️ 이름표는 **화면의 규칙이 그 프리셋일 때만** 건다. 복제나 빈 프리셋은
+        #    파일만 만들고 화면을 안 건드리므로(아래 activate 참조), 여기서 이름표를
+        #    걸면 "이름은 V5 인데 규칙은 옛것" 인 불일치가 남는다.
+        from_screen = book_data is None and not source_preset
+        if activate or from_screen:
+            self._set_active_preset(settings, name)
         if activate:
-            self._write_active_rules(settings, serialize_rulebook(book))
+            self._write_active_rules(
+                settings, serialize_rulebook(book), reason=f"프리셋 적용: {name}",
+            )
             self._set_engine_options(settings, {
                 "max_passes": book.max_passes,
                 "stop_on_match": book.stop_on_match,
             })
         store.apply_settings(settings)
-        return self._state_with(messages=[self._toast_message(f"조건부 프리셋 저장: {name}", "success")])
+        if from_screen or activate:
+            note = f"조건부 프리셋 저장: {name}"
+        else:
+            # 복제·빈 프리셋은 더 이상 지금 규칙을 갈아치우지 않는다 - 그 사실을
+            # 말해 주지 않으면 "복제했는데 아무 일도 안 일어난다" 로 보인다.
+            note = f"조건부 프리셋 생성: {name} — 현재 규칙은 그대로입니다"
+        return self._state_with(messages=[self._toast_message(note, "success")])
 
     def _handle_preset_load(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         from core.conditional.dsl_serializer import serialize_rulebook
@@ -406,7 +533,9 @@ class HeadlessConditionalPromptService:
         # `editor_mode` 를 v2 로 못박아서, Legacy 를 쓰던 사용자는 프리셋을 부르는
         # 순간 낯선 블록 편집기로 끌려가고 자기 규칙은 화면에서 사라졌다
         # (`settings["rules"]` 에 남아 있지만 비활성이라 보이지 않는다).
-        self._write_active_rules(settings, serialize_rulebook(book))
+        self._write_active_rules(
+            settings, serialize_rulebook(book), reason=f"프리셋 불러오기: {name}",
+        )
         # 프리셋의 옵션은 **그 프리셋을 부른 모드에만** 실린다.
         self._set_engine_options(settings, {
             "max_passes": book.max_passes,

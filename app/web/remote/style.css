@@ -17241,6 +17241,35 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   background: rgba(255, 183, 77, 0.12);
   color: #ffcc80;
 }
+/* 프리셋 로드·적용으로 규칙이 통째로 갈렸을 때만 뜨는 되돌리기 칩
+   (core/headless_conditional_prompt_service.py `_undo_summary`). 칩 모양을 그대로
+   쓰되 눌리는 것임을 알 수 있게 손가락 커서와 호버를 준다. */
+.cond-undo-chip {
+  cursor: pointer;
+  border-color: rgba(129, 199, 132, 0.46);
+  background: rgba(129, 199, 132, 0.12);
+  color: #a5d6a7;
+}
+.cond-undo-chip:hover {
+  border-color: rgba(129, 199, 132, 0.78);
+  background: rgba(129, 199, 132, 0.22);
+  color: #e8f5e9;
+}
+/* 덮어쓰기 확인 상자의 본문·경고 줄 */
+.cond-preset-dialog-body {
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.cond-preset-dialog-warn {
+  border: 1px solid rgba(255, 183, 77, 0.42);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 183, 77, 0.1);
+  color: #ffcc80;
+  font-size: 11px;
+  line-height: 1.6;
+}
 /* 조건 린트 경고 — 규칙을 막지 않는 알림용 배지 (core/conditional/lint.py) */
 .cond-lint-box {
   flex: 0 0 auto;

@@ -4,6 +4,10 @@ export function createConditionalPromptPanel({
   onModTextEdit,
   setModuleParam,
   bindTagAssist = () => {},
+  // ⚠️ `window.confirm` 을 쓰면 안 된다 - Electron 에서 네이티브 모달이 뜨거나
+  //    아예 안 뜬다(v5ScenePanel 주석과 같은 함정). 앱 대화상자를 받아 쓰고,
+  //    없으면 그때만 네이티브로 내려간다.
+  confirmDialog = null,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
   const sendModuleParam = setModuleParam || ((moduleId, key, value) => {
@@ -26,6 +30,11 @@ export function createConditionalPromptPanel({
   let presetDialogName = '';
   let presetDialogMode = 'empty';
   let presetDialogSource = '';
+  // 서버가 "이 이름은 이미 있다" 고 되돌려 보낸 내용. 여기에 옮겨 두고 상자를 그린다.
+  let overwritePrompt = null;
+  // 그 상자에서 [덮어쓰기] 를 누르면 **그대로 다시 보낼** 요청. 책을 통째로 다시
+  // 만들면 그 사이 편집이 섞이므로 보낸 것을 그대로 쥐고 있는다.
+  let pendingSavePayload = null;
   let dirty = false;
   let bound = false;
   let lastRenderedStructureSignature = '';
@@ -585,6 +594,9 @@ export function createConditionalPromptPanel({
     if (sourcePreset) payload.source_preset = sourcePreset;
     else if (book) payload.book = book;
     if (options.activate) payload.activate = true;
+    if (options.overwrite) payload.overwrite = true;
+    // 서버가 덮어쓰기 확인을 요구하면 이걸 그대로 다시 보낸다.
+    pendingSavePayload = payload;
     sendModuleParam('conditional_prompt', 'preset_save', JSON.stringify(payload));
     if (options.activate && currentState && !sourcePreset) {
       currentState.active_preset = name;
@@ -617,6 +629,16 @@ export function createConditionalPromptPanel({
     }
     dirty = false;
     updateDynamicText();
+  }
+
+  /** 프리셋 삭제 - 한 번 묻고 지운다. 프리셋 파일에는 백업이 없다. */
+  async function askDeletePreset(name) {
+    const message = `프리셋 "${name}" 을(를) 지웁니다. 되돌릴 수 없습니다.`;
+    const ok = (typeof confirmDialog === 'function')
+      ? await confirmDialog(message, {title: '프리셋 삭제', okText: '지우기', cancelText: '취소'})
+      : (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true);
+    if (!ok) return;
+    sendModuleParam('conditional_prompt', 'preset_delete', name);
   }
 
   function focusPresetDialogInput() {
@@ -664,10 +686,16 @@ export function createConditionalPromptPanel({
     }
     presetDialogOpen = false;
     presetDialogName = '';
+    // ⚠️ **activate 를 붙이지 않는다.** 예전에는 둘 다 `activate: true` 였고,
+    //    백엔드의 activate 는 **지금 모드의 규칙 칸을 통째로 갈아 끼운다**. 그래서
+    //    Legacy DSL 을 쓰던 사용자가 프리셋을 하나 복제하면 손으로 쓴 규칙이 그
+    //    자리에서 사라졌고(빈 프리셋이면 아예 빈 칸이 됐다), 되돌릴 길이 없었다
+    //    (사용자 제보 2026-09-19, 실측 재현). 만들기는 만들기만 한다 - 쓰려면
+    //    [불러오기] 를 누르면 되고, 그 경로에는 되돌리기가 걸려 있다.
     if (mode === 'clone') {
-      savePreset(name, {sourcePreset: source, activate: true});
+      savePreset(name, {sourcePreset: source});
     } else {
-      savePreset(name, {book: emptyPresetBook(name), activate: true});
+      savePreset(name, {book: emptyPresetBook(name)});
     }
     render(currentState);
   }
@@ -711,6 +739,15 @@ export function createConditionalPromptPanel({
       ? `<button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
           ${presetLabel}`
       : '';
+    // 프리셋을 부르면 이 편집기의 규칙이 통째로 갈린다. 갈리기 전 값을 서버가 한
+    // 세대 쥐고 있으므로, 있을 때만 되돌릴 자리를 내어 준다(본문은 서버에 있다).
+    const undo = m.rules_undo && m.rules_undo.available ? m.rules_undo : null;
+    const undoTitle = undo
+      ? `${safeText(undo.reason) || '규칙 교체'} 직전 규칙으로 되돌립니다${undo.at ? ` (${safeText(undo.at)})` : ''}`
+      : '';
+    const undoControl = undo
+      ? `<button type="button" class="cond-status-chip cond-undo-chip" data-cond-action="undo-rules" title="${escapeAttr(undoTitle)}">↩ 이전 규칙</button>`
+      : '';
     return `
       <div class="cond-topbar">
         <label class="mod-checkbox-item cond-enable-row">
@@ -723,6 +760,7 @@ export function createConditionalPromptPanel({
         </div>
         <div class="cond-status-row">
           ${presetControl}
+          ${undoControl}
           <a class="cond-guide-link" href="/guides/conditional-prompt.html" data-open-external="1" target="_blank" rel="noopener noreferrer" title="조건부 프롬프트 문법 가이드를 브라우저에서 엽니다">📖 가이드</a>
           <span class="cond-status-chip" id="condDirtyChip">${dirty ? '미적용 변경' : '적용됨'}</span>
         </div>
@@ -921,7 +959,40 @@ export function createConditionalPromptPanel({
     }
   }
 
+  /** "이 이름은 이미 있습니다" 확인 상자. 서버가 파일 존재로 판정해 보내 준다.
+   *
+   *  ⚠️ 이름만 견주면 안 된다 - 파일명은 `:` 같은 글자가 빠지고 Windows 는
+   *  대소문자를 안 가리므로 `V5:기본` 이 `V5기본` 을 덮는다. 그래서 서버가 무엇을
+   *  덮게 되는지 이름째로 알려 주고, 여기서는 그대로 보여 주기만 한다.
+   */
+  function renderOverwriteDialog() {
+    const p = overwritePrompt || {};
+    const target = safeText(p.existing || p.name);
+    const count = Number.isFinite(Number(p.rule_count)) ? Number(p.rule_count) : 0;
+    const renamedNote = p.renamed
+      ? `<div class="cond-preset-dialog-warn">입력하신 이름 <b>${escHtml(safeText(p.name))}</b> 은(는) 파일 이름으로 쓸 수 없는 글자가 빠져 <b>${escHtml(target)}</b> 이(가) 됩니다.</div>`
+      : '';
+    return `
+      <div class="cond-preset-dialog-backdrop" role="presentation">
+        <section class="cond-preset-dialog" role="dialog" aria-modal="true" aria-labelledby="condOverwriteTitle">
+          <div class="cond-preset-dialog-title-row">
+            <div class="cond-preset-dialog-title" id="condOverwriteTitle">프리셋 덮어쓰기</div>
+            <button type="button" class="cond-preset-dialog-close" data-cond-action="cancel-overwrite" aria-label="닫기">×</button>
+          </div>
+          <div class="cond-preset-dialog-body">
+            이미 있는 프리셋 <b>${escHtml(target)}</b>(규칙 ${count}개)을(를) 덮어씁니다. 되돌릴 수 없습니다.
+          </div>
+          ${renamedNote}
+          <div class="cond-preset-dialog-actions">
+            <button type="button" data-cond-action="cancel-overwrite">취소</button>
+            <button type="button" class="primary" data-cond-action="confirm-overwrite">덮어쓰기</button>
+          </div>
+        </section>
+      </div>`;
+  }
+
   function renderPresetDialog() {
+    if (overwritePrompt) return renderOverwriteDialog();
     if (!presetDialogOpen) return '';
     const presets = Array.isArray(currentState?.presets) ? currentState.presets : [];
     const sourceOptions = presets.map(preset => {
@@ -1572,11 +1643,32 @@ export function createConditionalPromptPanel({
       closePresetDialog();
     } else if (action === 'confirm-new-preset') {
       confirmPresetDialog();
+    } else if (action === 'confirm-overwrite') {
+      const payload = pendingSavePayload;
+      overwritePrompt = null;
+      pendingSavePayload = null;
+      if (!payload) {
+        if (typeof globalThis.showToast === 'function') {
+          globalThis.showToast('저장 요청을 잃었습니다 — 다시 눌러 주세요', 'error');
+        }
+        render(currentState);
+        return;
+      }
+      sendModuleParam('conditional_prompt', 'preset_save',
+                      JSON.stringify({...payload, overwrite: true}));
+      render(currentState);
+    } else if (action === 'cancel-overwrite') {
+      overwritePrompt = null;
+      pendingSavePayload = null;
+      render(currentState);
+    } else if (action === 'undo-rules') {
+      sendModuleParam('conditional_prompt', 'rules_undo', '1');
     } else if (action === 'delete-preset') {
       if (currentState?.can_manage_presets === false) return;
       const select = document.getElementById('condPresetSelect');
       const name = safeText(select?.value).trim();
-      if (name) sendModuleParam('conditional_prompt', 'preset_delete', name);
+      // 삭제도 한 번 묻는다 - 프리셋 파일에는 백업이 없다.
+      if (name) askDeletePreset(name);
     } else if (action === 'load-selected-preset') {
       if (currentState?.can_manage_presets === false) return;
       const select = document.getElementById('condPresetSelect');
@@ -1787,6 +1879,14 @@ export function createConditionalPromptPanel({
 
   function render(state) {
     bindEvents();
+    // ⚠️ `preset_overwrite_prompt` 는 서버가 **그 응답에만** 실어 보내는 값이다
+    //    (`_state_with(extra=...)`). 아래 시그니처 가드에 걸려 렌더가 blur 까지
+    //    미뤄질 수 있고 다음 에코에는 이 값이 없으므로, 가드보다 **먼저** 우리
+    //    쪽으로 옮겨 둔다 - 안 그러면 확인 상자가 영영 안 뜨고 저장만 조용히
+    //    무시된 것처럼 보인다.
+    if (state && state.preset_overwrite_prompt) {
+      overwritePrompt = state.preset_overwrite_prompt;
+    }
     // Skip the destructive innerHTML rebuild when the Legacy DSL rules editor (or raw
     // DSL editor) is focused and only the rules text changed — replacing the textarea
     // drops focus mid-typing (same regression as Character/Img2Img: 38d3898 / c9edf4b).
@@ -1800,6 +1900,9 @@ export function createConditionalPromptPanel({
     lastRenderedStructureSignature = structureSignature;
     const preserveDirty = state === currentState;
     currentState = normalizeState(state);
+    // 위에서 우리 쪽(`overwritePrompt`)으로 옮겼다. 상태에 남겨 두면 확인·취소 뒤
+    // `render(currentState)` 가 그걸 다시 주워 상자가 영영 안 닫힌다.
+    delete currentState.preset_overwrite_prompt;
     if (!preserveDirty) dirty = Boolean(currentState.local_dirty);
     if (currentState.editor_mode === 'v2') renderV2(currentState);
     else renderLegacy(currentState);

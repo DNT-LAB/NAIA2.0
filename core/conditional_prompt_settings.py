@@ -38,8 +38,18 @@ DEFAULT_CONDITIONAL_SETTINGS = {
     "active_preset_v2": None,
     # 옛 단일 키. 읽기 전용 하위호환 - 마이그레이션이 위 둘로 옮긴다.
     "active_preset": None,
+    # ⚠️ 규칙 칸이 **사용자 타이핑이 아닌 경로**(프리셋 로드·복제·활성화)로 통째로
+    # 갈릴 때 직전 값을 한 세대 보관한다. 이 저장소에는 백업이 전혀 없어서(파일은
+    # `write_text` 로 덮어쓴다) 한 번 덮이면 되돌릴 방법이 아예 없었다 - 사용자가
+    # 손으로 쓴 Legacy DSL 을 프리셋 복제 한 번으로 잃었다(제보 2026-09-19).
+    # 모드별로 따로 둔다(`legacy` / `v2`). 타이핑 경로에는 걸지 않는다 - 한 타마다
+    # 갈리면 되돌릴 지점이 직전 글자가 되어 무의미하다.
+    "rules_undo": {},
     "precedence_schema": PRECEDENCE_SCHEMA,
 }
+
+# `rules_undo` 의 슬롯. 규칙 칸(`rules` / `rules_v2`)과 짝이다.
+UNDO_SLOTS = ("legacy", "v2")
 
 
 def normalize_conditional_mode(mode: Any = None) -> str:
@@ -131,6 +141,25 @@ def migrate_precedence_payload(payload: Any) -> Any:
     return migrated
 
 
+def normalize_rules_undo(raw: Any = None) -> dict[str, Any]:
+    """`rules_undo` 정규화. 빈 텍스트는 슬롯째 버린다(되돌려도 얻을 것이 없다)."""
+    source = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {}
+    for slot in UNDO_SLOTS:
+        entry = source.get(slot)
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        out[slot] = {
+            "text": text,
+            "reason": str(entry.get("reason") or ""),
+            "at": str(entry.get("at") or ""),
+        }
+    return out
+
+
 def normalize_conditional_settings(raw: Any = None) -> dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
     settings = copy.deepcopy(DEFAULT_CONDITIONAL_SETTINGS)
@@ -183,6 +212,7 @@ def normalize_conditional_settings(raw: Any = None) -> dict[str, Any]:
     # 지금 모드의 이름을 옛 키에도 비춰 둔다 - 이 키를 읽는 곳이 아직 남아 있고,
     # 저장본을 되돌려 열어도 뜻이 통해야 한다.
     settings["active_preset"] = v2_name if settings["editor_mode"] == "v2" else legacy_name
+    settings["rules_undo"] = normalize_rules_undo(source.get("rules_undo"))
     return settings
 
 

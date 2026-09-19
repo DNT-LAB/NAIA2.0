@@ -2420,6 +2420,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
       onModTextEdit,
       setModuleParam,
       bindTagAssist,
+      confirmDialog: showConfirmDialog,
     });
   })
   .catch(error => {

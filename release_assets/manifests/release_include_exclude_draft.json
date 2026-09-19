@@ -52,6 +52,7 @@
       "data/interactive_adult_tags.json",
       "data/character_preview_thumbs.json",
       "data/e621_data",
+      "data/artist_tag_affinity.naiapack",
       "artist_dictionary.py",
       "danbooru_character.py",
       "result_dict_copyright.py"

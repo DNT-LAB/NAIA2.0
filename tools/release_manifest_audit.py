@@ -190,6 +190,12 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/random_outfits.txt",
     "*/data/random_character.txt",
     "*/data/random_outfits.txt",
+    # 작가 x 태그 친화도 팩(tools/build_artist_affinity_pack.py 산출물, 69.9MB).
+    # copyright/character 축의 역색인 + 행->작가 + 행->등급. 없으면 "이 태그를 자주
+    # 그리는 작가" 가 전수 주사(태그당 23초)로 내려간다 - 조용히 느려질 뿐 안 죽는다.
+    # general 축은 여기 없다(이미 event_map .naiamap 이 갖고 있다).
+    "data/artist_tag_affinity.naiapack",
+    "*/data/artist_tag_affinity.naiapack",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

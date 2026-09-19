@@ -1172,7 +1172,8 @@ export function createArtistThumbController({
         return;
       }
       closeContextMenu();
-      if (action === 'temp-add') { void putInTempWindow(targetItem); return; }
+      if (action === 'temp-add') { void putInTempWindow(targetItem, button.dataset.groupId || ''); return; }
+      if (action === 'temp-new') { void newTempWindow([{artist: targetItem.artist}]); return; }
       if (action === 'group-pick') { void addToGroup(button.dataset.groupId, targetItem); return; }
       if (action === 'favorite') {
         setFavoriteForItem(targetItem, !targetItem.favorite).catch(error => {
@@ -2351,7 +2352,7 @@ export function createArtistThumbController({
     if (groupsApi) return groupsApi;
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260917-grp1'),
-      import('./artistGroupWindow.mjs?v=20260917-grp1'),
+      import('./artistGroupWindow.mjs?v=20260919-tempwin'),
       import('./dragBroker.mjs?v=20260917-grp1'),
     ]);
     const store = createArtistGroupsStore({fetch});
@@ -2418,16 +2419,23 @@ export function createArtistThumbController({
     return openGroupWindow(group.id);
   }
 
-  /** 우클릭 [임시 창에 올리기]: 열린 임시 창이 있으면 거기, 없으면 새로. */
-  async function putInTempWindow(item) {
+  /** 우클릭 [임시 창에 올리기]: 메뉴에서 **고른 창**으로. 안 고르면 마지막으로 쓰던
+   *  임시 창, 그것도 없으면 새로 연다.
+   *
+   *  ⚠️ 창이 닫혀 있어도 그룹이 남아 있으면 **다시 연다**. 예전에는 열린 창만
+   *     대상이라, 창을 닫아 둔 그룹에 넣으려면 메뉴를 두 번 거쳐야 했다.
+   */
+  async function putInTempWindow(item, groupId = '') {
     const {store} = await ensureGroups();
     const payload = [{artist: item.artist}];
-    if (lastTempGroupId && store.get(lastTempGroupId) && groupWindows.has(lastTempGroupId)) {
-      await store.add(lastTempGroupId, payload);
-      groupWindows.get(lastTempGroupId).focus();
-      return;
-    }
-    await newTempWindow(payload);
+    const target = groupId && store.get(groupId) ? groupId
+      : (lastTempGroupId && store.get(lastTempGroupId) ? lastTempGroupId : '');
+    if (!target) { await newTempWindow(payload); return; }
+    await store.add(target, payload);
+    lastTempGroupId = target;
+    const open = groupWindows.get(target);
+    if (open) open.focus();
+    else await openGroupWindow(target);
   }
 
   async function addToGroup(groupId, item) {
@@ -2453,6 +2461,27 @@ export function createArtistThumbController({
     }
   }
 
+  /** 우클릭 메뉴의 임시 창 칸. **이번 실행의 임시 그룹 전부**를 줄로 보여 주고
+   *  맨 아래에 새로 여는 길을 둔다.
+   *
+   *  ⚠️ 전에는 단추 하나뿐이라 **늘 마지막 창**으로만 갔다 - 그 메뉴에서는 둘째
+   *     임시 창을 영영 열 수 없었다(사용자 제보). 창을 닫아 둔 그룹도 줄에 남는다.
+   */
+  function tempMenuRowsHtml() {
+    const store = groupsApi?.store;
+    const temps = store ? store.all().filter(g => store.isTemp(g.id)) : [];
+    const rows = temps.map((g, i) => `
+        <button type="button" class="result-context-item artist-thumb-group-item"
+                data-action="temp-add" data-group-id="${escHtml(g.id)}" role="menuitem">
+          <span>임시 창 ${i + 1}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
+        </button>`).join('');
+    return `
+        <div class="artist-thumb-group-label">임시 창에 올리기</div>
+        ${rows}
+        <button type="button" class="result-context-item" data-action="temp-new" role="menuitem">
+          <span>+ 새 임시 창</span></button>`;
+  }
+
   function groupMenuHtml(withTempAdd) {
     const store = groupsApi?.store;
     const saved = store ? store.all().filter(g => !store.isTemp(g.id)) : [];
@@ -2463,8 +2492,7 @@ export function createArtistThumbController({
         </button>`).join('');
     return `
       <div class="result-context-group artist-thumb-group-section">
-        ${withTempAdd ? `<button type="button" class="result-context-item" data-action="temp-add" role="menuitem">
-          <span>임시 창에 올리기</span></button>` : ''}
+        ${withTempAdd ? tempMenuRowsHtml() : ''}
         <div class="artist-thumb-group-label">${withTempAdd ? '그룹에 등록' : '그룹 창 열기'}</div>
         <div class="artist-thumb-group-list">${rows || '<div class="artist-thumb-group-empty">아직 그룹이 없습니다</div>'}</div>
         <button type="button" class="result-context-item" data-action="group-new" role="menuitem">

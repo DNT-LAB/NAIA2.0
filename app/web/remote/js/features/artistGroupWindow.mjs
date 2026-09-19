@@ -44,9 +44,12 @@ export function createArtistGroupWindow({
     window: win,
     title: titleText(),
     variant: 'agw',
-    // 저장 그룹은 **그룹마다** 자리를 기억한다(같은 그룹은 늘 같은 자리).
-    // 임시 창은 마지막 자리 하나만.
-    storageKey: temp ? 'agroup-temp' : `agroup-${groupId}`,
+    // 창마다 제 자리를 기억한다. ⚠️ 임시 창들이 열쇠 하나를 나눠 쓰던 때는 서로의
+    //    자리와 **접힘 상태까지** 덮어썼다 - 둘째 창을 접으면 첫째가 접힌 채 되살아났다.
+    storageKey: `agroup-${groupId}`,
+    // ⚠️ 임시 그룹의 아이디는 이번 실행에만 산다 - 자리를 localStorage 에 남기면
+    //    다시 못 쓸 열쇠가 영영 쌓인다. 그룹 자체와 **같은 수명**의 저장소를 쓴다.
+    storage: temp && typeof sessionStorage !== 'undefined' ? sessionStorage : undefined,
     width: 300,
     minWidth: 220,
     maxWidth: 720,

@@ -32,7 +32,7 @@
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl10';
 // ⚠️ 모든 곳이 **같은 주소**로 불러야 중개자가 하나다(계약 시험이 대조).
-import {dragBrokerFor} from './dragBroker.mjs?v=20260917-grp1';
+import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
 
 export function createRemoteController({
   document: doc,

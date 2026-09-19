@@ -793,7 +793,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-pewin')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-strip')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -13274,7 +13274,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-panellayer')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-entity-bindings')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

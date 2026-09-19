@@ -29343,91 +29343,90 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   color: var(--text-primary);
 }
 
-/* ══ 창 옆 보조 판 + 믹스 큐 (js/features/mixQueuePanel.mjs) ══════════════
-   확대 보기가 뜨던 자리를 쓴다. 격자 칸 확대는 이 판 **위로** 덮이고(창 기준),
-   믹스 블럭 확대는 이 판 **옆으로** 비킨다(판 기준). */
+/* ══ 창 옆 보조 판 ════════════════════════════════════════════════════════
+   확대 보기가 뜨던 자리. ⚠️ **지금은 비어 있다** - 믹스 큐는 리모컨 창 안의 띠가
+   됐고 PE 는 제 창으로 나갔다(2026-09-19). 판의 뼈대·자동 접힘·요약은 그대로 두어
+   다음에 여기 올 것이 바로 쓸 수 있게 한다(사용자: 다른 인프라가 온다).
+   올리는 쪽은 `mountSide(...nodes)` 로 넣고, 접힘 규칙은 제 클래스로 쓴다. */
 .rctl-side {
   position: fixed; z-index: var(--z-drag-panel-side);
   width: 288px; display: flex; flex-direction: column; min-height: 0; gap: 6px;
 }
-/* 판이 둘이면 줄어드는 쪽은 큐다 - 빠른 수정 칸은 제 높이를 지킨다. */
-.rctl-side > .mixq { flex: 1 1 auto; min-height: 90px; }
+.rctl-side > * { flex: 1 1 auto; min-height: 0; }
 .rctl-side[hidden] { display: none !important; }
 
+/* ══ 믹스 띠 (js/features/mixQueuePanel.mjs) ══════════════════════════════
+   리모컨 창 **안쪽, 격자 바로 위**의 가로 썸네일 띠(사용자 지정 2026-09-19).
+   칸 = 세 상자(썸네일·이름·가중치), 높이는 일반 썸네일의 **2/3**.
+   ⚠️ 창 높이는 그대로 둔다 - 격자가 한 줄 줄지만 "사용자가 알아서 창을 늘린다"(사용자). */
+.rctl-mix-row { padding: 0; }
+/* 믹스 모드가 꺼져 있으면 빈 줄이 gap 만 먹는다. */
+.dragpanel.rctl:not(.is-mix) .rctl-mix-row { display: none !important; }
+.rctl-mix-host { display: flex; min-width: 0; width: 100%; }
+
 .mixq {
-  display: flex; flex-direction: column; min-height: 0; position: relative;
-  background: var(--bg-elevated); border: 1px solid rgba(130, 150, 255, 0.42);
-  border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.55); overflow: hidden;
+  flex: 1 1 auto; min-width: 0; position: relative;
+  border: 1px solid rgba(130, 150, 255, 0.42); border-radius: 9px;
+  background: rgba(130, 150, 255, 0.06);
 }
 .mixq[hidden] { display: none !important; }
-.mixq-head {
-  flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px;
-  padding: 7px 10px 6px; border-bottom: 1px solid rgba(255,255,255,0.06);
-  background: rgba(130, 150, 255, 0.10);
-}
-.mixq-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
-.mixq-hint {
-  font-size: 9px; color: var(--text-dim); margin-left: auto; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* 고정 - 제목줄은 접혀도 남는 유일한 띠라, 두 상태 모두에서 손이 닿는다. */
-.mixq-pin {
-  flex: 0 0 auto; width: 20px; height: 18px; padding: 0; margin-left: 4px;
-  border: 1px solid transparent; border-radius: 5px; cursor: pointer;
-  background: transparent; font-size: 10px; line-height: 1;
-  filter: grayscale(1); opacity: 0.5;
-}
-.mixq-pin:hover { opacity: 0.85; }
-.mixq-pin.is-on {
-  filter: none; opacity: 1;
-  border-color: rgba(255, 224, 122, 0.55); background: rgba(255, 224, 122, 0.16);
-}
 
+/* ⚠️ 한 줄 + 가로 스크롤이라야 `□□|□|□□` 가 읽힌다. 줄바꿈을 허용하면 앵커 막대가
+   줄 끝으로 밀려 어느 칸이 어느 앵커에 속하는지 알 수 없게 된다. */
 .mixq-list {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: row; align-items: stretch; gap: 4px;
+  padding: 5px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
-.mixq-list::-webkit-scrollbar { width: 7px; }
+.mixq-list::-webkit-scrollbar { height: 6px; }
 .mixq-list::-webkit-scrollbar-thumb { background: var(--border-glow); border-radius: 4px; }
 
+/* 칸. 일반 썸네일의 **2/3 높이**(사용자 지정) - 안에서 썸네일이 남는 높이를 먹고
+   이름·가중치가 제 몫을 가져간다. */
 .mixq-block {
-  /* ⚠️ 글자색은 **블럭**이 쥔다. 이름줄(.mixq-name)이 직접 쥐면 그 아래 깔린
+  --mixq-card-height: calc(var(--artist-card-height, 150px) * 2 / 3);
+  /* ⚠️ 글자색은 **칸**이 쥔다. 이름(.mixq-name)이 직접 쥐면 그 아래 깔린
      분류색(.prompt-token-artist 등)을 늘 이겨 색이 영영 안 붙는다. */
   color: var(--text-primary);
-  display: flex; align-items: center; gap: 4px; min-width: 0;
-  padding: 4px 6px; border: 1px solid var(--border-dim); border-radius: 7px;
+  position: relative; flex: 0 0 auto;
+  width: calc(var(--mixq-card-height) * 3 / 4);
+  height: var(--mixq-card-height);
+  display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 2px;
+  padding: 3px; border: 1px solid var(--border-dim); border-radius: 7px;
   background: rgba(255,255,255,0.03); cursor: grab; user-select: none;
+  overflow: hidden;
+}
+/* 그림 상자는 격자에서 빌린다(.artist-thumb-card-image) - 잘라내기·확대 규칙이 거기 있다. */
+.mixq-thumb { min-height: 0; border-radius: 5px; overflow: hidden; }
+.mixq-noimg {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  font-size: 8px; color: var(--text-dim); text-align: center;
+}
+.mixq-weight-box {
+  display: flex; align-items: center; gap: 2px; min-width: 0;
 }
 .mixq-block:hover { border-color: var(--accent); }
-/* ⚠️ 상태 셋이 **서로 다른 종류의 신호**여야 한다. 전에는 선택도 임시도 '테두리가
-   다르다' 라 구분이 안 됐다(제보). 선택 = 왼쪽 레일 · 임시 = 점선+배지 · 비활성 = 반투명. */
-.mixq-block.is-selected {
-  border-color: rgba(255, 224, 122, 0.55);
-  background: rgba(255, 224, 122, 0.16);
-  box-shadow: inset 3px 0 0 0 #ffe07a;
-  padding-left: 9px;                 /* 레일이 먹은 만큼 (6 + 3) */
-}
-/* 비활성 - 반투명하되 **끌 수는 있다**(사용자 지정). 조립에서만 빠진다. */
+/* ⚠️ 상태 둘이 **서로 다른 종류의 신호**여야 한다 - 임시 = 점선+배지, 비활성 = 반투명.
+   (예전의 '선택' 은 아래 단추 셋의 대상 지정이었는데 그 단추들이 없어졌다.) */
 .mixq-block.is-off { opacity: 0.42; }
 .mixq-block.is-temp { border-style: dashed; }
 .mixq-block.is-dragging { opacity: 0.5; cursor: grabbing; }
-.mixq-block.is-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
-.mixq-block.is-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 
-/* 앵커 줄 - 블럭과 **다른 모양**이어야 한다. 같은 목록에 섞여 있어서, 여기서부터
-   다른 자리로 간다는 것이 한눈에 읽혀야 한다(블럭은 상자, 앵커는 띠). */
+/* 앵커 = 칸 사이의 **얇은 세로 막대**(`□□|□|□□`, 사용자 지정). 칸과 다른 모양이라야
+   '여기서부터 다른 자리' 가 한눈에 읽힌다 - 칸은 상자, 앵커는 막대. */
 .mixq-anchor {
-  display: flex; align-items: center; gap: 5px; min-width: 0;
-  padding: 3px 6px; border-radius: 6px; cursor: grab; user-select: none;
+  flex: 0 0 auto; width: 18px; align-self: stretch;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 3px 1px; border-radius: 6px; cursor: grab; user-select: none;
   background: rgba(255, 224, 122, 0.10);
   border: 1px dashed rgba(255, 224, 122, 0.55);
 }
 .mixq-anchor:hover { border-color: #ffe07a; }
-.mixq-anchor.is-selected { box-shadow: inset 3px 0 0 0 #ffe07a; padding-left: 9px; }
 .mixq-anchor-mark {
-  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  /* 세로쓰기 - 18px 막대에 `<anchor:1>` 을 눕혀 넣을 자리가 없다. */
+  writing-mode: vertical-rl; text-orientation: mixed;
+  min-height: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
   color: #ffe07a;
 }
 .mixq-anchor-tag {
@@ -29443,43 +29442,32 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-anchor-tag.is-warn { color: #2a0d0d; background: #ff9c9c; }
 
 .mixq-step {
-  flex: 0 0 auto; width: 20px; height: 22px; padding: 0;
-  border: 1px solid var(--border-dim); border-radius: 5px;
+  flex: 0 0 auto; width: 15px; height: 15px; padding: 0;
+  border: 1px solid var(--border-dim); border-radius: 4px;
   background: rgba(0,0,0,0.22); color: var(--text-muted);
-  font-size: 13px; line-height: 1; cursor: pointer;
+  font-size: 10px; line-height: 1; cursor: pointer;
 }
 .mixq-step:hover { color: var(--text-primary); border-color: var(--accent); }
 .mixq-weight {
-  /* min-width:auto 를 0 으로 눌러야 44px 이 지켜진다 - 입력칸의 고유 너비(size=20,
-     약 150px)가 flex 바닥값이 되어 이름 칸을 밀어낸 적이 있다(실측 147px). */
-  flex: 0 0 44px; width: 44px; min-width: 0;
-  height: 22px; padding: 0 3px; text-align: center;
-  border: 1px solid var(--border-dim); border-radius: 5px; outline: none;
+  /* ⚠️ `min-width: 0` 이 없으면 입력칸의 고유 너비(size=20, 약 150px)가 flex 바닥값이
+     되어 칸을 통째로 부풀린다(실측 147px). */
+  flex: 1 1 auto; width: auto; min-width: 0;
+  height: 15px; padding: 0 2px; text-align: center;
+  border: 1px solid var(--border-dim); border-radius: 4px; outline: none;
   background: rgba(0,0,0,0.22); color: var(--text-primary);
-  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
 }
 .mixq-weight:focus { border-color: var(--accent); }
 .mixq-name {
-  flex: 1 1 auto; min-width: 0; font-size: 11px;
+  min-width: 0; font-size: 9px; line-height: 1.2; text-align: center;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 임시 칸 표시 - 세 상자를 밀어내지 않게 겹쳐 얹는다. */
 .mixq-badge {
-  flex: 0 0 auto; font-size: 8px; font-weight: 700; letter-spacing: .04em;
-  color: #0f1020; background: #ffe9a3; border-radius: 4px; padding: 1px 4px;
+  position: absolute; top: 4px; left: 4px; z-index: 1;
+  font-size: 8px; font-weight: 700; letter-spacing: .04em;
+  color: #0f1020; background: #ffe9a3; border-radius: 4px; padding: 0 3px;
 }
-
-.mixq-foot {
-  flex: 0 0 auto; display: flex; gap: 4px; padding: 6px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
-.mixq-btn {
-  flex: 1 1 0; min-width: 0; padding: 5px 4px;
-  border: 1px solid var(--border-dim); border-radius: 6px;
-  background: rgba(255,255,255,0.04); color: var(--text-muted);
-  font-size: 10px; cursor: pointer;
-}
-.mixq-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--accent); }
-.mixq-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* 우클릭 메뉴 - 블럭이 좁아 단추를 더 못 놓는다(사용자 지정). */
 .mixq-menu {
@@ -29516,22 +29504,20 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    지금 걸린 아티스트를 아주 작은 글씨로 얹는다(사용자 지정 '그림같은 느낌').
    ⚠️ 끝 상태는 **클래스가 전부 쥔다**. 애니메이션이 안 돌아도(throttle 된 창은
       프레임을 안 만든다) 결과는 같아야 한다. */
-.rctl-side .mixq-list,
-.rctl-side .mixq-foot {
+/* 접힘은 **머리줄만 남기는** 규칙이다. 올라온 조각은 제 머리줄을 `.rctl-fold-keep` 로,
+   말아 올릴 몸통을 `.rctl-fold-body` 로 표시한다 - 그래야 판이 무엇을 담든 같이 돈다. */
+.rctl-side .rctl-fold-body {
   transition: max-height .24s ease, opacity .16s ease, padding .24s ease;
   max-height: 70vh;
 }
 .rctl-side.is-folded { gap: 0; }
-/* 접히면 제목줄 높이만 남는다 - min-height 가 남아 있으면 빈 상자가 그림을 가린다. */
-.rctl-side.is-folded > .mixq { flex: 0 0 auto; min-height: 0; }
-.rctl-side.is-folded .mixq-list,
-.rctl-side.is-folded .mixq-foot {
+/* 접히면 머리줄 높이만 남는다 - min-height 가 남아 있으면 빈 상자가 그림을 가린다. */
+.rctl-side.is-folded > * { flex: 0 0 auto; min-height: 0; }
+.rctl-side.is-folded .rctl-fold-body {
   max-height: 0; opacity: 0; overflow: hidden;
   padding-top: 0; padding-bottom: 0; border-top-width: 0;
   pointer-events: none;
 }
-/* 접히면 제목줄만 남는다 - 아래 모서리도 같이 둥글려 작은 알약처럼 보이게. */
-.rctl-side.is-folded .mixq-head { border-bottom-color: transparent; }
 
 .rctl-side-summary {
   display: none; flex-direction: column; gap: 1px;
@@ -29548,8 +29534,7 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rctl-side .mixq-list,
-  .rctl-side .mixq-foot,
+  .rctl-side .rctl-fold-body { transition: none; }
 }
 
 /* 리모컨 머리줄의 [prefix] [postfix](사용자 지정 2026-09-19) - PE 창을 탭처럼 연다.
@@ -29673,14 +29658,6 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .is-drop-hover { outline: 2px dashed #ffe07a; outline-offset: -3px; }
 /* 브라우저의 네이티브 그림 끌기가 유령을 가로채지 않게(가로채면 pointercancel 이 온다). */
 .artist-thumb-card img, .agw-card img, .mixq-block img { -webkit-user-drag: none; user-drag: none; }
-
-/* 믹스 판 머리의 [그룹] */
-.mixq-groups {
-  flex: 0 0 auto; height: 18px; padding: 0 6px; margin-left: 4px;
-  border: 1px solid var(--border-dim); border-radius: 5px; cursor: pointer;
-  background: rgba(255, 255, 255, 0.04); color: var(--text-muted); font-size: 10px;
-}
-.mixq-groups:hover { color: var(--text-primary); border-color: var(--accent); }
 
 /* ══ 아티스트 그룹 창 (js/features/artistGroupWindow.mjs) ══════════════════ */
 .dragpanel.agw .dragpanel-body {

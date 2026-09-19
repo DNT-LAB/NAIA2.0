@@ -14,7 +14,7 @@
  *     이름을 붙인 뒤에도 옛 판정이 남아 단추 이름이 안 바뀐다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl10';
-import {dragBrokerFor} from './dragBroker.mjs?v=20260917-grp1';
+import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
 
 const OPEN = new Set();   // 열린 그룹 창들 - 겹쳐 뜨지 않게 계단식으로 비킨다
 

@@ -130,6 +130,11 @@ export function createArtistThumbController({
   let remoteOnboarded = false;
   // 믹스 모드(리모컨 전용). 켜져 있으면 ARTIST PROMPT 칸의 주인이 **큐**로 넘어간다.
   let mixQueue = null;
+  // 띠가 들어갈 빈 자리. ⚠️ **미리** 만들어 둔다 - 리모컨의 줄 목록은 온보딩 때 한 번
+  //    만들어지고, 믹스 모드는 그 뒤에 켜진다. 부모 없는 노드라 `lift` 가 그냥 지나가고
+  //    (mixBtn 과 같은 방식) 리모컨 창과 함께 사라진다.
+  const mixHostEl = document.createElement('div');
+  mixHostEl.className = 'rctl-mix-host';
   let peQuick = null;
   let peWindow = null;         // PE 빠른 수정이 사는 떠 있는 창
   let peHeadButtons = null;    // 리모컨 머리줄의 [prefix] [postfix]
@@ -2278,6 +2283,8 @@ export function createArtistThumbController({
     const modePair = selectPair(modeEl);
     const filterPair = selectPair(filterEl);
     return [
+      // 믹스 띠 - 격자 **위**(사용자 지정). 믹스 모드가 꺼져 있으면 옷이 숨긴다.
+      {nodes: [mixHostEl], className: 'rctl-mix-row'},
       // 남는 높이를 다 먹는 줄. 관찰이 본론이라 격자가 가장 크다.
       {nodes: [gridEl], fill: true},
       // 페이지 - 앞/뒤 + 몇 쪽인지 + 바로 뛰기.
@@ -2356,7 +2363,7 @@ export function createArtistThumbController({
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
       import('./artistGroupWindow.mjs?v=20260919-srvtemp'),
-      import('./dragBroker.mjs?v=20260917-grp1'),
+      import('./dragBroker.mjs?v=20260919-strip'),
     ]);
     const store = createArtistGroupsStore({fetch});
     groupsApi = {store, createWindow: createArtistGroupWindow, broker: dragBrokerFor(document)};
@@ -2618,7 +2625,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260915-anchor1');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260919-peqhl');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260919-strip');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2629,15 +2636,16 @@ export function createArtistThumbController({
       formatToken: (artist, weight, options) => formatArtistToken(artist, weight, options),
       onChange: applyMixComposition,
       // 블럭에 올린 확대 보기는 **믹스 판 옆**에 뜬다(격자 칸은 창 옆 - 판을 덮는다).
+      // ⚠️ 띠가 창 **안**으로 들어오면서 확대는 창 옆이 맞다(기준점을 안 주면 창이 기본).
+      //    예전에는 보조 판 옆이었다 - 그 판이 없어졌다.
       onHoverBlock: (element, block) => {
         const src = mixThumbUrl(block);
         if (!src) { remote.hideZoom?.(); return; }
-        remote.showZoomBeside?.(element, {src, title: block.artist, note: ''}, remote.sideRect?.());
+        remote.showZoomBeside?.(element, {src, title: block.artist, note: ''});
       },
       onLeaveBlock: () => remote.hideZoom?.(),
       // 큐 안에서 임시 블럭의 가중치가 바뀌면 메인 손잡이도 따라간다(사용자 지정).
       onTempWeight: value => paintWeightControls(value),
-      onPin: on => remote.setSidePinned?.(on),
       // 표식이 prefix/postfix 에 살아 있는가. 글의 주인은 PE 라 여기서 물어 준다.
       hasAnchorIn: id => peTextHasAnchor(id),
       // 추가/복원 = prefix **맨 뒤**에 표식을 넣는다(사용자 지정).
@@ -2646,11 +2654,12 @@ export function createArtistThumbController({
       //    안 띄운다 - 화면만 가린다.
       onAnchorAdd: id => { putAnchorInPrefix(id); void togglePeField('pre_prompt', {openOnly: true}); },
       onAnchorRemove: id => dropAnchorFromText(id),
-      onGroupsMenu: anchor => { void openGroupsLauncher(anchor); },
       onDragStart: () => remote.hideZoom?.(),
     });
     await ensurePeWindow();
-    remote.mountSide?.(mixQueue.el);
+    // ⚠️ 보조 판(`.rctl-side`)에는 더 이상 올리지 않는다 - 그 자리는 비워 둔다
+    //    (사용자: 다른 인프라가 온다). 띠는 리모컨 창 **안**에 산다.
+    mixHostEl.appendChild(mixQueue.el);
     return mixQueue;
   }
 
@@ -2708,6 +2717,7 @@ export function createArtistThumbController({
     if (!peHeadButtons) return;
     const key = (peWindow && peWindow.isOpen()) ? (peQuick?.openKey() || '') : '';
     peHeadButtons.forEach((btn, field) => {
+      if (field === '__groups__') return;      // 그룹은 켜짐 상태가 없다
       btn.classList.toggle('is-on', field === key);
       btn.setAttribute('aria-pressed', field === key ? 'true' : 'false');
     });
@@ -2730,6 +2740,16 @@ export function createArtistThumbController({
     const remote = getRemoteController?.();
     if (!remote?.slot || peHeadButtons) return;
     peHeadButtons = new Map();
+    // ⚠️ [그룹] 도 여기로 왔다. 띠에는 단추를 놓을 자리가 없고, 탭 머리줄의
+    //    [임시 창] 은 리모컨을 켜면 손이 안 닿는다(격자가 창으로 빠져 있다).
+    const groups = document.createElement('button');
+    groups.type = 'button';
+    groups.className = 'rctl-pe-btn';
+    groups.textContent = '그룹';
+    groups.title = '아티스트 그룹 · 임시 창';
+    groups.addEventListener('click', event => { void openGroupsLauncher(event.currentTarget); });
+    remote.slot.appendChild(groups);
+    peHeadButtons.set('__groups__', groups);
     for (const [key, label] of [['pre_prompt', 'prefix'], ['post_prompt', 'postfix']]) {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -2770,7 +2790,6 @@ export function createArtistThumbController({
     // 이 칸이 여러 명을 담게 되니 줄바꿈을 허용한다(옷은 `.is-mix` 가 쥔다).
     mixBtn.closest('.dragpanel')?.classList.toggle('is-mix', mixOn);
     queue?.setOpen(mixOn);
-    remote?.showSide?.(mixOn);
     if (mixOn) {
       peQuick?.sync();
       // ⚠️ 자동 개방은 **앵커를 쓸 때만**(사용자 지정). 앵커가 없으면 prefix/postfix 를
@@ -2787,7 +2806,10 @@ export function createArtistThumbController({
   /** 리모컨에서는 카드가 112px 까지 줄어든다 - 마우스를 올리면 창 옆에 크게 띄운다. */
   function remoteHoverPreview() {
     return {
-      selector: '.artist-thumb-card[data-artist]',
+      // ⚠️ 띠 칸도 **같은 문**으로 확대한다(사용자 지정: 기존 인프라 재사용).
+      //    선택자만 늘리면 리모컨은 한 줄도 안 고친다 - `resolve` 가 `data-artist` 와
+      //    안쪽 `img` 만 읽기 때문이다.
+      selector: '.artist-thumb-card[data-artist], .mixq-block[data-artist]',
       resolve: card => {
         const src = card.querySelector('img')?.getAttribute('src') || '';
         if (!src) return null;   // 'No Image' 칸은 띄울 것이 없다

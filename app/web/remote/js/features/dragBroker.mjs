@@ -104,14 +104,19 @@ function createDragBroker(doc, win) {
     emit('start');
   }
 
-  function finish(dropped) {
+  /** 끝. `dropped` = 받는 쪽이 받았다. `cancelled` = 사용자가 **물렸다**(Esc·취소).
+   *
+   *  ⚠️ 둘을 하나로 두면 안 된다. '아무 데도 안 놓았다' 를 제거로 읽는 받는 쪽이
+   *     있는데(가로 띠), 거기서는 Esc 가 곧 삭제가 된다 - 되돌릴 수 없는 조작이다.
+   */
+  function finish(dropped, {cancelled = false} = {}) {
     if (!active) return;
     active.zoneEl?.classList.remove('is-drop-hover');
     active.ghost?.remove();
     doc.documentElement.classList.remove('is-drag-brokering');
     const opts = active.opts;
     active = null;
-    try { opts.onEnd?.(dropped); } catch (error) { console.error(error); }
+    try { opts.onEnd?.(dropped, {cancelled}); } catch (error) { console.error(error); }
     emit('end');
   }
 
@@ -171,15 +176,16 @@ function createDragBroker(doc, win) {
 
   doc.addEventListener('pointerdown', () => { swallowClick = false; }, true);
 
+  // 브라우저가 끌기를 가져갔다(네이티브 끌기·손가락 이탈 등). 사용자의 뜻이 아니다.
   doc.addEventListener('pointercancel', () => {
     pending = null;
-    finish(false);
+    finish(false, {cancelled: true});
   }, true);
 
   doc.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     if (pending) pending = null;
-    if (active) { event.preventDefault(); finish(false); }
+    if (active) { event.preventDefault(); finish(false, {cancelled: true}); }
   }, true);
 
   doc.addEventListener('click', event => {
@@ -200,7 +206,7 @@ function createDragBroker(doc, win) {
     registerZone,
     isDragging: () => Boolean(active),
     payload: () => active?.payload || null,
-    cancel: () => { pending = null; finish(false); },
+    cancel: () => { pending = null; finish(false, {cancelled: true}); },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
   };
 }

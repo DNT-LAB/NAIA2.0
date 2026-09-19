@@ -1,27 +1,29 @@
-/** 믹스 큐 — 아티스트 여러 명을 순서·가중치와 함께 쌓는 판 (리모컨 전용).
+/** 믹스 큐 — 아티스트 여러 명을 순서·가중치와 함께 쌓는 **가로 썸네일 띠**.
  *
- *  리모컨의 확대 보기가 뜨던 자리에 붙는다. 큐는 위에서 아래로 **삽입 순서**이고,
- *  켜져 있는 블럭만 조립에 들어간다. 조립 결과는 곧바로 ARTIST PROMPT 칸으로 간다
- *  (사용자 지정) - 그 칸이 Generate 와 Generate with Random Prompt 가 쓰는 자리다.
+ *  리모컨 창 **안쪽, 격자 바로 위**에 산다(사용자 지정 2026-09-19). 왼쪽에서
+ *  오른쪽으로 **삽입 순서**이고, 켜져 있는 칸만 조립에 들어간다. 조립 결과는 곧바로
+ *  ARTIST PROMPT 칸으로 간다 - 그 칸이 Generate 와 Generate with Random Prompt 가 쓴다.
  *
- *      ┌ 믹스 모드 ─────────────┐
- *      │ [−] 0.9 [+]  kouji     │ ← 끌어서 순서를 바꾼다
- *      │ [−] 1.0 [+]  dairi *   │ ← `*` = 임시(격자에서 방금 고른 것)
- *      │ [−]-1.0 [+]  collab ▨  │ ← 못 지우는 블럭. 기본 꺼짐
- *      ├────────────────────────┤
- *      │ [삽입] [삭제] [비활성] │
- *      └────────────────────────┘
+ *      ┌ 믹스 띠 ─────────────────────────────┐
+ *      │ ▣kouji ▣dairi │ ▣nasuuni │ ▣collab   │
+ *      │  0.9    1.0   ⟨1⟩  1.15    ⟨2⟩ -1.0   │
+ *      └──────────────────────────────────────┘
+ *        └ 칸 = 썸네일·이름·가중치 세 상자   └ `│` = 앵커
  *
+ *  ⚠️ **자료 모형은 평면 배열 하나**다(칸도 앵커도 같은 목록의 원소). 칸은 **바로 앞**
+ *     앵커에 속해서, 순서를 바꾸는 것이 곧 레이어 이동이 된다 - 앵커별로 묶어 그리면
+ *     그 등식이 깨지고 '묶음 밖으로 끌기' 를 따로 배선해야 한다.
  *  ⚠️ **서식은 여기서 만들지 않는다.** `formatToken` 을 받아 쓴다 - NAI/Anima/SD 표기가
- *     이미 `artistThumbTab` 에 있고, 두 곳에서 만들면 반드시 어긋난다(오늘 한 번 겪었다).
- *  ⚠️ 우클릭 하나에 **세 가지**를 몰아 둔다(`artist:` 토글 · 비활성 · 제거) - 블럭이
- *     좁아 단추를 더 못 놓는다(사용자 지정).
+ *     이미 `artistThumbTab` 에 있고, 두 곳에서 만들면 반드시 어긋난다.
+ *  ⚠️ 칸은 격자 카드를 **재사용하지 않는다**. 격자 카드는 `<button>` 이라 안에 가중치
+ *     `<input>` 을 넣을 수 없고, `.artist-thumb-card` 에 걸린 상태 옷(favorite/active/
+ *     batch-*)이 통째로 따라온다. 그림 상자(`.artist-thumb-card-image`)만 빌린다.
  */
 
 import { anchorToken, nextAnchorId } from './artistAnchors.mjs?v=20260915-anchor1';
 // ⚠️ 중개자는 **모든 곳에서 같은 주소**로 불러야 한다. 주소(쿼리 포함)가 다르면 모듈이
 //    둘로 뜨고, 한쪽에 등록한 받는 쪽을 다른 쪽이 못 본다. 계약 시험이 대조한다.
-import { dragBrokerFor } from './dragBroker.mjs?v=20260917-grp1';
+import { dragBrokerFor } from './dragBroker.mjs?v=20260919-strip';
 
 const COLLAB_ID = '__collab__';
 const HOLD_FIRST_MS = 320;     // 누르고 있을 때 반복이 시작되기까지
@@ -61,16 +63,12 @@ export function createMixQueuePanel({
   // ⚠️ 이 콜백은 **큐가 원인일 때만** 부른다. 메인에서 들어온 값(`setTempWeight`)에
   //    다시 부르면 둘이 서로를 밀어 무한히 돈다.
   onTempWeight = () => {},
-  // 고정 토글(자동 접힘 끄기). 상태는 리모컨이 쥔다 - 여기서는 누른 것만 알린다.
-  onPin = () => {},
   // ── 앵커 ──
   // 표식이 아직 prefix/postfix 에 살아 있는가. 큐는 글을 안 갖고 있어 물어본다.
   hasAnchorIn = () => true,
   // 표식을 글에 넣어 달라 / 빼 달라(넣는 자리는 prefix 맨 뒤 - 사용자 지정).
   onAnchorAdd = () => {},
   onAnchorRemove = () => {},
-  // [그룹] 단추 - 무엇을 보여 줄지는 주인이 정한다(그룹 목록·새 그룹·임시 창).
-  onGroupsMenu = () => {},
   // 큐 블럭을 끌어 내기 시작했다(확대 보기 끄기 등).
   onDragStart = () => {},
   // (태그) => {kind, className}   메인 프롬프트와 **같은** 분류. 없으면 색을 안 칠한다.
@@ -79,40 +77,19 @@ export function createMixQueuePanel({
   const el = doc.createElement('div');
   el.className = 'mixq';
   el.hidden = true;
+  // 머리줄도 아래 단추도 없다 - 띠는 리모컨 창 **안**이라 제 상자를 가질 자리가 없고,
+  // 단추가 하던 일은 끌기(제거)와 우클릭(고정·비활성·제거)이 나눠 가졌다.
   el.innerHTML = `
-    <div class="mixq-head">
-      <span class="mixq-title">믹스 모드</span>
-      <span class="mixq-hint">끌어서 순서 · 우클릭으로 더 보기</span>
-      <button type="button" class="mixq-groups" title="아티스트 그룹 · 임시 창">그룹</button>
-      <button type="button" class="mixq-pin" aria-pressed="false"
-              title="고정 - 가만히 둬도 접히지 않습니다">📌</button>
-    </div>
     <div class="mixq-list" role="list"></div>
-    <div class="mixq-foot">
-      <button type="button" class="mixq-btn" data-mixq-act="commit">현재 태그 삽입</button>
-      <button type="button" class="mixq-btn" data-mixq-act="remove">선택 태그 삭제</button>
-      <button type="button" class="mixq-btn" data-mixq-act="disable">선택 태그 비활성</button>
-    </div>
     <div class="mixq-menu" hidden role="menu"></div>
   `;
   const listEl = el.querySelector('.mixq-list');
   const menuEl = el.querySelector('.mixq-menu');
-  // 제목줄은 접혀도 남는 유일한 띠라, 고정 단추는 두 상태 모두에서 손이 닿는다.
-  const pinEl = el.querySelector('.mixq-pin');
   const broker = dragBrokerFor(doc);
-  el.querySelector('.mixq-groups').addEventListener('click', event => {
-    onGroupsMenu(event.currentTarget);
-  });
-  pinEl.addEventListener('click', () => {
-    const next = pinEl.getAttribute('aria-pressed') !== 'true';
-    pinEl.setAttribute('aria-pressed', next ? 'true' : 'false');
-    pinEl.classList.toggle('is-on', next);
-    onPin(next);
-  });
 
   /** 큐. 마지막의 collab 블럭은 못 지우지만 **움직일 수는 있다**(사용자 지정). */
   let blocks = [collabBlock()];
-  let drag = null;       // {id, node, startY, moved, pointerId}
+  let drag = null;       // {id, node, startX, moved, pointerId}
   let menuFor = '';
   let menuAt = -1;
 
@@ -125,7 +102,6 @@ export function createMixQueuePanel({
       enabled: false,        // 기본 꺼짐
       temp: false,
       locked: true,          // 제거 불가
-      selected: false,
       image: '',
     };
   }
@@ -144,7 +120,7 @@ export function createMixQueuePanel({
       id: nextId(), kind: 'anchor', anchorId: String(anchorId),
       syncWeights: false,   // 앵커 정책: 그룹 첫 태그가 Master, 나머지가 Slave
       broken: false,        // 글에서 표식이 사라졌다
-      selected: false, locked: false, temp: false, enabled: true,
+      locked: false, temp: false, enabled: true,
       artist: '', weight: 1, withPrefix: false, image: '',
     };
   }
@@ -215,12 +191,11 @@ export function createMixQueuePanel({
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────
-  /** 앵커 줄. 블럭과 **다른 모양**이어야 한다 - 같은 목록에 섞여 있으니
-   *  한눈에 '여기서부터 다른 자리' 라고 읽혀야 한다. */
+  /** 앵커 = 칸 사이의 **얇은 세로 막대**(`□□|□|□□`, 사용자 지정). 같은 목록에
+   *  섞여 있으니 한눈에 '여기서부터 다른 자리' 라고 읽혀야 한다. */
   function anchorRowHtml(b) {
     const classes = ['mixq-anchor'];
     if (b.broken) classes.push('is-broken');
-    if (b.selected) classes.push('is-selected');
     if (b.syncWeights) classes.push('is-sync');
     const title = b.broken
       ? `${anchorToken(b.anchorId)} 를 프롬프트에서 찾지 못했습니다 - 우클릭으로 되돌리세요`
@@ -242,39 +217,41 @@ export function createMixQueuePanel({
     return result?.className || '';
   }
 
-  function render() {
-    listEl.innerHTML = blocks.map(b => {
-      if (isAnchor(b)) return anchorRowHtml(b);
-      const classes = ['mixq-block'];
-      if (!b.enabled) classes.push('is-off');
-      if (b.selected) classes.push('is-selected');
-      if (b.temp) classes.push('is-temp');
-      if (b.locked) classes.push('is-locked');
-      const name = b.withPrefix ? `artist:${b.artist}` : b.artist;
-      // 이름줄에 메인 프롬프트와 **같은** 분류색. 색인에 없는 이름은 색이 안 붙어
-      // 그 자리에서 오타가 드러난다(사용자 지정: "실수하지 않게").
-      const nameClass = ['mixq-name', nameTokenClass(b)].filter(Boolean).join(' ');
-      return `<div class="${classes.join(' ')}" role="listitem"
-                   data-mixq-id="${escHtml(b.id)}" title="${escHtml(name)}">
+  /** 칸 하나 = **세 상자**(썸네일 · 이름 · 가중치, 사용자 지정).
+   *
+   *  ⚠️ 그림 상자만 격자에서 빌린다(`.artist-thumb-card-image`) - 잘라내기·확대 규칙이
+   *     거기 있어서, 흉내 내면 같은 작가가 격자와 띠에서 다르게 잘린다.
+   *  ⚠️ 그림이 없어도 칸은 **같은 크기**여야 한다 - 안 그러면 띠의 높이가 들쭉날쭉하다.
+   */
+  function blockHtml(b) {
+    const classes = ['mixq-block'];
+    if (!b.enabled) classes.push('is-off');
+    if (b.temp) classes.push('is-temp');
+    if (b.locked) classes.push('is-locked');
+    const name = b.withPrefix ? `artist:${b.artist}` : b.artist;
+    // 이름에 메인 프롬프트와 **같은** 분류색. 색인에 없는 이름은 색이 안 붙어
+    // 그 자리에서 오타가 드러난다(사용자 지정: "실수하지 않게").
+    const nameClass = ['mixq-name', nameTokenClass(b)].filter(Boolean).join(' ');
+    const image = b.image
+      ? `<img src="${escHtml(b.image)}" alt="" loading="lazy" draggable="false">`
+      : `<span class="mixq-noimg">${b.locked ? 'collab' : 'No Image'}</span>`;
+    return `<div class="${classes.join(' ')}" role="listitem"
+                 data-mixq-id="${escHtml(b.id)}" data-artist="${escHtml(b.artist)}"
+                 title="${escHtml(name)}">
+      <span class="artist-thumb-card-image mixq-thumb">${image}</span>
+      <span class="${nameClass}">${escHtml(name)}</span>
+      <span class="mixq-weight-box">
         <button type="button" class="mixq-step" data-mixq-step="-1" aria-label="가중치 내리기">−</button>
         <input class="mixq-weight" type="text" inputmode="decimal"
                value="${escHtml(weightText(b.weight))}" aria-label="가중치">
         <button type="button" class="mixq-step" data-mixq-step="1" aria-label="가중치 올리기">+</button>
-        <span class="${nameClass}">${escHtml(name)}</span>
-        ${b.temp ? '<span class="mixq-badge">임시</span>' : ''}
-      </div>`;
-    }).join('');
-    paintFoot();
+      </span>
+      ${b.temp ? '<span class="mixq-badge">임시</span>' : ''}
+    </div>`;
   }
 
-  /** 아래 단추는 **대상이 있을 때만** 살아난다 - 단추가 켜지는 것이 곧 '고른 것이
-   *  무엇에 쓰이는지' 의 설명이다(상태가 뜻을 못 전달한다는 제보). */
-  function paintFoot() {
-    const commit = el.querySelector('[data-mixq-act="commit"]');
-    if (commit) commit.disabled = !tempBlock();
-    const picked = blocks.filter(b => b.selected).length;
-    el.querySelectorAll('[data-mixq-act="remove"], [data-mixq-act="disable"]')
-      .forEach(btn => { btn.disabled = picked === 0; });
+  function render() {
+    listEl.innerHTML = blocks.map(b => (isAnchor(b) ? anchorRowHtml(b) : blockHtml(b))).join('');
   }
 
   function refresh() {
@@ -351,11 +328,12 @@ export function createMixQueuePanel({
     `;
     }
     return `
+      ${block.temp ? '<button type="button" data-mixq-menu="pin">이 칸 고정</button>' : ''}
       <button type="button" data-mixq-menu="prefix"${block.locked ? ' disabled' : ''}>${block.withPrefix ? '`artist:` 떼기' : '`artist:` 붙이기'}</button>
       <button type="button" data-mixq-menu="enabled">${block.enabled ? '비활성으로' : '다시 켜기'}</button>
       <button type="button" data-mixq-menu="remove"${block.locked ? ' disabled' : ''}>제거</button>
-      <button type="button" data-mixq-menu="anchor-above">앵커 추가 · 이 위에</button>
-      <button type="button" data-mixq-menu="anchor-below">앵커 추가 · 이 아래에</button>
+      <button type="button" data-mixq-menu="anchor-above">앵커 추가 · 이 왼쪽에</button>
+      <button type="button" data-mixq-menu="anchor-below">앵커 추가 · 이 오른쪽에</button>
     `;
   }
 
@@ -443,13 +421,13 @@ export function createMixQueuePanel({
     applyWeight(block, next);
   });
 
-  /** 포인터 Y -> 몇 번째 앞에 넣을지. 재배치와 **같은 규칙**(이웃의 가운데 기준).
-   *  빈 곳(모든 줄 아래)이면 collab 블럭 앞 - setTempArtist 와 같은 자리다. */
-  function insertionIndexAt(clientY) {
+  /** 포인터 X -> 몇 번째 앞에 넣을지. 재배치와 **같은 규칙**(이웃의 가운데 기준).
+   *  빈 곳(모든 칸 오른쪽)이면 collab 칸 앞 - setTempArtist 와 같은 자리다. */
+  function insertionIndexAt(clientX) {
     const nodes = [...listEl.children];
     for (let i = 0; i < nodes.length; i += 1) {
       const r = nodes[i].getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) return i;
+      if (clientX < r.left + r.width / 2) return i;
     }
     const collab = blocks.findIndex(b => b.id === COLLAB_ID);
     return collab < 0 ? blocks.length : collab;
@@ -457,8 +435,8 @@ export function createMixQueuePanel({
 
   /** 정식 블럭으로 넣는다(임시가 아니다 - 임시는 다음 격자 클릭에 갈린다).
    *  큐는 같은 작가를 두 번 허용한다 - 다른 앵커 밑이면 뜻이 다르다. */
-  function insertArtists(items, clientY = null) {
-    let at = clientY == null ? insertionIndexAt(Infinity) : insertionIndexAt(clientY);
+  function insertArtists(items, clientX = null) {
+    let at = clientX == null ? insertionIndexAt(Infinity) : insertionIndexAt(clientX);
     const added = [];
     for (const raw of items || []) {
       const artist = String(raw?.artist || '').trim();
@@ -467,7 +445,7 @@ export function createMixQueuePanel({
       const block = {
         id: nextId(), artist, weight: roundStep(Number.isFinite(w) ? w : 1),
         withPrefix: raw.withPrefix !== false, enabled: true, temp: false,
-        locked: false, selected: false, image: String(raw.image || ''),
+        locked: false, image: String(raw.image || ''),
       };
       blocks.splice(at, 0, block);
       at += 1;
@@ -477,39 +455,42 @@ export function createMixQueuePanel({
     return added.length;
   }
 
+  /** 띠를 벗어났다가 **다시 띠 위에** 놓았다 - 새로 만들지 말고 그 칸을 옮긴다.
+   *  안 그러면 자리를 고치려던 손이 같은 작가를 둘로 불린다. */
+  function moveBlockTo(id, clientX) {
+    const block = find(id);
+    if (!block) return false;
+    const at = insertionIndexAt(clientX);
+    const from = blocks.indexOf(block);
+    if (from < 0) return false;
+    blocks.splice(from, 1);
+    blocks.splice(at > from ? at - 1 : at, 0, block);
+    refresh();
+    return true;
+  }
+
   broker.registerZone(listEl, {
     kind: 'artist',
-    canAccept: payload => payload?.kind === 'artist' && !payload.sourceQueue,
+    // ⚠️ 제 칸도 받는다(예전에는 `!payload.sourceQueue` 로 거부했다). 띠에서는 밖으로
+    //    나간 것이 **제거**라, 돌아온 칸을 안 받으면 되돌릴 길이 없다.
+    canAccept: payload => payload?.kind === 'artist',
     accept: (payload, point) => {
-      // ⚠️ 큐 자신의 재배치가 진행 중이면 받지 않는다 - 다시 그리면 그 줄이 죽는다.
+      // ⚠️ 띠 자신의 재배치가 진행 중이면 받지 않는다 - 다시 그리면 그 칸이 죽는다.
       if (drag) return false;
-      return insertArtists([payload], point.y) > 0;
+      if (payload.sourceQueue && payload.sourceId) return moveBlockTo(payload.sourceId, point.x);
+      return insertArtists([payload], point.x) > 0;
     },
   });
 
-  /** 블럭을 누르면 고름 = 아래 두 단추의 대상. **하나만** 잡힌다(사용자 결정).
-   *  여럿을 잡게 두면 몇 개가 걸려 있는지 계속 기억해야 하는데, 한 번에 여러 개를
-   *  정리하는 일은 우클릭(블럭별 제거·비활성)이 이미 감당한다.
-   *  다른 블럭을 누르면 선택이 옮겨 가고, 같은 블럭을 다시 누르면 풀린다. */
-  function selectOnly(id) {
-    const wanted = find(id);
-    // 앵커 줄은 고르지 않는다 - 아래 두 단추는 아티스트 태그를 다루는 것이고,
-    // 앵커에 할 일(동기화·복원·제거)은 전부 우클릭에 있다.
-    if (isAnchor(wanted)) return;
-    const turnOff = !wanted || wanted.selected;
-    blocks.forEach(b => { b.selected = !turnOff && b === wanted; });
-    // ⚠️ render() 를 부르면 스크롤이 튄다 - 칠만 다시 한다.
-    listEl.querySelectorAll('[data-mixq-id]').forEach(node => {
-      node.classList.toggle('is-selected', find(node.dataset.mixqId)?.selected === true);
-    });
-    paintFoot();
-  }
-
+  /** 칸을 누르면 켜고 끈다. 예전의 '고르기' 는 아래 단추 셋의 대상 지정이었는데
+   *  그 단추들이 없어졌다 - 우클릭은 누른 칸을 직접 잡으므로 선택 상태가 필요 없다. */
   listEl.addEventListener('click', event => {
     if (swallowClick) { swallowClick = false; return; }
     if (event.target.closest('[data-mixq-step], .mixq-weight')) return;
-    const host = event.target.closest('[data-mixq-id]');
-    if (host) selectOnly(host.dataset.mixqId);
+    const block = find(event.target.closest('[data-mixq-id]')?.dataset.mixqId || '');
+    if (!block || isAnchor(block)) return;
+    block.enabled = !block.enabled;
+    refresh();
   });
 
   listEl.addEventListener('contextmenu', event => {
@@ -563,7 +544,10 @@ export function createMixQueuePanel({
       refresh();
       return;
     }
-    if (action === 'prefix') { if (block.locked) return; block.withPrefix = !block.withPrefix; }
+    // 임시 칸을 정식으로. 예전 [현재 태그 삽입] 이 하던 일이다 - 단추 줄이 없어져
+    // 우클릭으로 왔다(띠 안에서 자리를 옮겨도 고정된다, `endDrag`).
+    if (action === 'pin') { block.temp = false; }
+    else if (action === 'prefix') { if (block.locked) return; block.withPrefix = !block.withPrefix; }
     else if (action === 'enabled') block.enabled = !block.enabled;
     else if (action === 'remove') {
       if (block.locked) { showToast('이 블럭은 지울 수 없습니다.', 'error'); return; }
@@ -593,6 +577,9 @@ export function createMixQueuePanel({
   //     (사용자 지정) - 이웃의 가운데를 지나는 순간 줄을 그 자리로 옮긴다.
   //     유령도 드롭 표시도 없다. 보이는 것이 곧 결과다.
   const DRAG_SLOP = 4;   // 이만큼은 움직여야 끌기다 - 아니면 고르기(클릭)가 죽는다
+  // ⚠️ 세로 이탈은 **제거**다(사용자 지정). 되돌릴 수 없는 조작이라 문턱이 곧
+  //    안전장치다 - 가로로 끌다가 손이 조금 흔들린 것을 삭제로 읽으면 안 된다.
+  const LEAVE_SLOP = 28;
 
   /** 끌기가 끝난 뒤 따라오는 click 한 번을 삼킨다 - 안 그러면 놓자마자 선택이 토글된다. */
   let swallowClick = false;
@@ -605,7 +592,13 @@ export function createMixQueuePanel({
     if (next.length === blocks.length) blocks = next;
   }
 
-  /** 줄을 **원래 자리로 되돌리고** 중개자에게 넘긴다. 복사이므로 큐는 그대로여야 한다. */
+  /** 칸을 **원래 자리로 되돌리고** 중개자에게 넘긴다.
+   *
+   *  놓는 곳이 판정을 정한다: 받는 쪽(그룹 창·띠 자신)에 놓이면 복사·이동,
+   *  **아무 데도 안 놓이면 제거**(사용자 지정: "믹스 모드 레이어에서 드래그 드롭 하면 제거").
+   *  ⚠️ Esc·pointercancel 은 제거가 **아니다**. 중개자가 `cancelled` 로 갈라 준다 -
+   *     안 그러면 끌기를 물린 사용자가 칸을 잃는다(되돌릴 수 없다).
+   */
   function handOffToBroker(event) {
     const block = find(drag.id);
     const node = drag.node;
@@ -613,11 +606,12 @@ export function createMixQueuePanel({
     if (home !== node) listEl.insertBefore(node, home);
     blocksFromDom();
     node.classList.remove('is-dragging');
+    // ⚠️ 포인터 캡처를 **먼저** 푼다. 쥔 채로 넘기면 중개자의 `elementFromPoint` 가
+    //    늘 이 목록을 돌려줘 받는 쪽을 못 찾는다.
     try { listEl.releasePointerCapture(drag.pointerId); } catch { /* 이미 풀림 */ }
     drag = null;
-    // ⚠️ 여기서 swallowClick 을 세우지 않는다. 놓는 곳은 다른 창이라 그 click 은 큐로
-    //    안 온다 - 세워 두면 사용자의 **다음 진짜 클릭**을 삼킨다. 삼키기는 중개자가
-    //    문서 단위로 한 번 한다.
+    // ⚠️ 여기서 swallowClick 을 세우지 않는다. 놓는 곳은 다른 창이라 그 click 은 띠로
+    //    안 온다 - 세워 두면 사용자의 **다음 진짜 클릭**을 삼킨다.
     if (!block || isAnchor(block) || !String(block.artist || '').trim()) return;
     onDragStart();
     broker.takeOver(event, {
@@ -627,17 +621,32 @@ export function createMixQueuePanel({
       image: block.image || '',
       label: block.withPrefix ? `artist:${block.artist}` : block.artist,
       sourceQueue: true,
+      sourceId: block.id,
+    }, {
+      onEnd: (dropped, {cancelled = false} = {}) => {
+        if (dropped || cancelled) return;
+        // 잠긴 칸(collab)은 단추로도 못 지운다 - 끌기로도 못 지운다.
+        if (block.locked) { showToast('이 블럭은 지울 수 없습니다.', 'error'); return; }
+        if (!blocks.includes(block)) return;
+        blocks = blocks.filter(b => b !== block);
+        refresh();
+        showToast(`'${block.artist}' 를 뺐습니다.`, 'info');
+      },
     });
   }
 
   function endDrag() {
     if (!drag) return;
     const moved = drag.moved;
+    const id = drag.id;
     drag.node.classList.remove('is-dragging');
     try { listEl.releasePointerCapture(drag.pointerId); } catch { /* 이미 풀림 */ }
     drag = null;
     if (!moved) return;
     swallowClick = true;
+    // 손으로 자리를 옮긴 칸은 **내 것**이다 - 임시로 두면 다음 격자 클릭에 갈린다.
+    const block = find(id);
+    if (block?.temp) block.temp = false;
     refresh();          // 순서가 바뀌었으니 조립을 다시 낸다
   }
 
@@ -652,7 +661,7 @@ export function createMixQueuePanel({
     if (weightBox && doc.activeElement === weightBox) return;
     const host = event.target.closest('[data-mixq-id]');
     if (!host) return;
-    drag = {id: host.dataset.mixqId, node: host, startY: event.clientY,
+    drag = {id: host.dataset.mixqId, node: host, startX: event.clientX,
             startIndex: [...listEl.children].indexOf(host),
             moved: false, pointerId: event.pointerId};
   });
@@ -660,28 +669,28 @@ export function createMixQueuePanel({
   listEl.addEventListener('pointermove', event => {
     if (!drag) return;
     if (!drag.moved) {
-      if (Math.abs(event.clientY - drag.startY) < DRAG_SLOP) return;
+      if (Math.abs(event.clientX - drag.startX) < DRAG_SLOP) return;
       drag.moved = true;
       drag.node.classList.add('is-dragging');
       onLeaveBlock();                       // 끄는 동안 확대 보기는 방해만 된다
       try { listEl.setPointerCapture(drag.pointerId); } catch { /* 옛 브라우저 */ }
     }
     event.preventDefault();
-    // 가로로 목록을 벗어나면 **복사 끌기**로 바꾼다(다른 창으로 가져가는 중).
-    // 세로 이탈은 넣지 않는다 - 목록 끝에 놓으려다 아래로 조금 넘치는 것이 자연스럽다.
+    // **세로로** 띠를 벗어나면 중개자에게 넘긴다 - 가로는 순서 바꾸기라 못 쓴다.
+    // 가로 이탈은 넣지 않는다: 띠 끝에 놓으려다 옆으로 조금 넘치는 것이 자연스럽다.
     const box = listEl.getBoundingClientRect();
-    if (event.clientX < box.left - 6 || event.clientX > box.right + 6) {
+    if (event.clientY < box.top - LEAVE_SLOP || event.clientY > box.bottom + LEAVE_SLOP) {
       handOffToBroker(event);
       return;
     }
     const over = [...listEl.children].find(node => {
       if (node === drag.node) return false;
       const rect = node.getBoundingClientRect();
-      return event.clientY >= rect.top && event.clientY <= rect.bottom;
+      return event.clientX >= rect.left && event.clientX <= rect.right;
     });
     if (!over) return;
     const rect = over.getBoundingClientRect();
-    const before = event.clientY < rect.top + rect.height / 2;
+    const before = event.clientX < rect.left + rect.width / 2;
     const want = before ? over : over.nextSibling;
     if (want === drag.node) return;
     // ⚠️ 여기서 render() 를 부르면 끌고 있던 노드가 사라져 끌기가 죽는다.
@@ -693,10 +702,13 @@ export function createMixQueuePanel({
   doc.addEventListener('pointerup', endDrag);
   doc.addEventListener('pointercancel', endDrag);
 
-  // 블럭에 마우스를 올리면 확대 보기(3-f). 격자 쪽과 달리 **믹스 판 옆**에 뜬다.
+  // 칸에 마우스를 올리면 확대 보기. 격자와 같은 인프라를 쓰되 **띠 옆**에 뜬다.
   listEl.addEventListener('pointerover', event => {
     if (event.pointerType === 'touch') return;
-    if (drag?.moved) return;        // 끄는 중에는 확대 보기가 방해만 된다
+    // ⚠️ 끄는 중에는 **부모까지 막는다**. 띠 자신의 끌기는 중개자를 안 거쳐서
+    //    리모컨의 `broker.isDragging()` 가드가 안 걸린다 - 안 막으면 지나는 칸마다
+    //    확대가 뜬다.
+    if (drag?.moved) { event.stopPropagation(); onLeaveBlock(); return; }
     const host = event.target.closest('[data-mixq-id]');
     if (!host) { onLeaveBlock(); return; }
     const block = find(host.dataset.mixqId);
@@ -705,27 +717,6 @@ export function createMixQueuePanel({
   listEl.addEventListener('pointerout', event => {
     if (!event.relatedTarget || !listEl.contains(event.relatedTarget)) onLeaveBlock();
     else if (!event.relatedTarget.closest?.('[data-mixq-id]')) onLeaveBlock();
-  });
-
-  el.querySelector('.mixq-foot').addEventListener('click', event => {
-    const action = event.target.closest('[data-mixq-act]')?.dataset.mixqAct;
-    if (!action) return;
-    if (action === 'commit') {
-      const temp = tempBlock();
-      if (!temp) { showToast('격자에서 아티스트를 먼저 고르세요.', 'error'); return; }
-      temp.temp = false;
-      refresh();
-      return;
-    }
-    const picked = blocks.find(b => b.selected) || null;
-    if (!picked) { showToast('블럭을 먼저 고르세요.', 'error'); return; }
-    if (action === 'remove') {
-      if (picked.locked) { showToast('이 블럭은 지울 수 없습니다.', 'error'); return; }
-      blocks = blocks.filter(b => b !== picked);
-    } else if (action === 'disable') {
-      picked.enabled = !picked.enabled;
-    }
-    refresh();
   });
 
   // ── 바깥에서 부르는 것 ────────────────────────────────────────────────
@@ -755,7 +746,7 @@ export function createMixQueuePanel({
         const at = blocks.findIndex(b => b.id === COLLAB_ID);
         const block = {
           id: nextId(), artist: name, weight: 1, withPrefix: true,
-          enabled: true, temp: true, locked: false, selected: false, image,
+          enabled: true, temp: true, locked: false, image,
         };
         if (at < 0) blocks.push(block);
         else blocks.splice(at, 0, block);

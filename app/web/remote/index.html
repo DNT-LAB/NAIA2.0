@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260919-mixwrap">
+<link rel="stylesheet" href="style.css?v=20260919-datasurface">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -861,7 +861,10 @@
     <button class="right-tab-btn" data-right-tab="thumb" onclick="switchRightTab('thumb')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🖼</span><span>Thumb</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="artists" onclick="switchRightTab('artists')" role="tab" aria-selected="false">
+    <!-- ⚠️ 이 탭만 **자기 문**으로 간다(사용자 지정 2026-09-19). 리모컨이 없거나
+         접혀 있으면 첫 누름은 리모컨을 세우고 탭으로 가지 않는다 - 조각이 전부
+         리모컨으로 옮겨 간 뒤로 이 탭은 데이터 관리 화면이다. -->
+    <button class="right-tab-btn" data-right-tab="artists" onclick="requestArtistsTab()" role="tab" aria-selected="false">
       <span class="right-tab-icon">🎨</span><span>Artists</span>
     </button>
     <button class="right-tab-btn" data-right-tab="characters" onclick="switchRightTab('characters')" role="tab" aria-selected="false">
@@ -1149,8 +1152,11 @@
               <div class="artist-thumb-summary" id="artistThumbSummary">Artist dictionary</div>
             </div>
             <div class="artist-thumb-toolbar-controls">
+              <!-- ⚠️ 머리줄의 [Download] 는 뺐다(사용자 지정 2026-09-19). 이 줄은 탭에
+                   남고 격자는 리모컨으로 **옮겨 가서**, 리모컨을 쓰는 동안에는 단추가
+                   보이지도 않았다. 받는 길은 격자의 빈 자리와 갱신 줄 둘뿐이다 -
+                   둘 다 격자를 따라 움직인다. -->
               <select class="artist-thumb-select" id="artistThumbMode" aria-label="Thumbnail mode"></select>
-              <button type="button" class="artist-thumb-download-btn" id="artistThumbDownloadBtn" hidden>Download</button>
               <input class="artist-thumb-search" id="artistThumbSearch" type="search" placeholder="Search artist" autocomplete="off" spellcheck="false">
             </div>
           </header>
@@ -1181,7 +1187,9 @@
           </div>
           <div class="artist-thumb-grid" id="artistThumbGrid"></div>
           <footer class="artist-thumb-pager">
-            <button type="button" class="artist-thumb-page-btn artist-thumb-open-folder" id="artistThumbOpenFolderBtn" title="NAIA 실행 PC의 Artist Thumbnail 데이터 폴더를 엽니다">폴더 열기</button>
+            <!-- ⚠️ [폴더 열기] 는 **모드 고르는 칸의 맨 아래**로 옮겼다(사용자 지정
+                 2026-09-19). 여기 있으면 리모컨에서는 영영 안 보인다 - 그 칸은
+                 리모컨으로 따라가므로 어느 쪽에서 쓰든 같은 자리에 있다. -->
             <button type="button" class="artist-thumb-page-btn" id="artistThumbPrevBtn">Prev</button>
             <span id="artistThumbPageLabel">0 / 0</span>
             <label class="artist-thumb-goto">
@@ -1191,6 +1199,13 @@
             </label>
             <button type="button" class="artist-thumb-page-btn" id="artistThumbNextBtn">Next</button>
           </footer>
+          <!-- 갱신 알림(사용자 지정 2026-09-19). **맨 아랫줄**이라 나머지가 한 줄 밀려
+               올라간다. 막지 않는다 - 옛 팩으로 계속 보면서 받는다(2.5GB 를 다 받을
+               때까지 격자를 비워 두던 시절의 반성이 `loadPage` 주석에 있다). -->
+          <div class="artist-thumb-update-row" id="artistThumbUpdateRow" hidden>
+            <span class="artist-thumb-update-text">업데이트가 있습니다. <em>(업데이트 중 계속 이용가능)</em></span>
+            <button type="button" class="artist-thumb-update-btn" id="artistThumbUpdateBtn">Update</button>
+          </div>
         </section>
       </div>
     </div>
@@ -1432,6 +1447,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260919-mixwrap"></script>
+<script src="app.js?v=20260919-datasurface"></script>
 </body>
 </html>

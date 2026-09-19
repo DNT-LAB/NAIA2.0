@@ -37,10 +37,10 @@ export function createArtistThumbController({
   const summaryEl = document.getElementById('artistThumbSummary');
   const statusEl = document.getElementById('artistThumbStatus');
   const gridEl = document.getElementById('artistThumbGrid');
-  const openFolderBtn = document.getElementById('artistThumbOpenFolderBtn');
   const prevBtn = document.getElementById('artistThumbPrevBtn');
   const nextBtn = document.getElementById('artistThumbNextBtn');
-  const downloadBtn = document.getElementById('artistThumbDownloadBtn');
+  const updateRowEl = document.getElementById('artistThumbUpdateRow');
+  const updateBtn = document.getElementById('artistThumbUpdateBtn');
   const randomBtn = document.getElementById('artistThumbRandomBtn');
   const remoteBtn = document.getElementById('artistThumbRemoteBtn');
   const groupsBtn = document.getElementById('artistThumbGroupsBtn');
@@ -82,6 +82,8 @@ export function createArtistThumbController({
   const FALLBACK_GENERATE_HEIGHT = 1216;
   const GENERATE_LABEL = 'Generate';
   const RANDOM_GENERATE_LABEL = 'Generate with Random Prompt';
+  // 모드 칸의 맨 아래 항목. 모드 키와 절대 겹치지 않는 모양이어야 한다.
+  const OPEN_FOLDER_VALUE = '__artist_thumb_open_folder__';
   const BATCH_LABEL = '일괄생성';
   const BATCH_CANCEL_LABEL = '생성 취소';
   const ACTIVE_RESOLUTION_PARAM_KEYS = [
@@ -128,6 +130,12 @@ export function createArtistThumbController({
   let artistTabActive = document.querySelector('[data-right-pane="artists"]')?.classList.contains('active') || false;
   // 리모컨에 올라가 있는가. 올라가 있으면 탭이 안 떠 있어도 격자는 **보이는 중**이다.
   let remoteOnboarded = false;
+  // 모드 칸 맨 아래의 [폴더 열기] - 값이 아니라 동작이라, 고른 뒤 이 값으로 되돌린다.
+  let lastModeValue = '';
+  // 팩을 **여는 중**인가(모드 전환). 도는 동안 모드 칸을 잠근다 - 쪽 넘김은 아니다.
+  let modeOpening = false;
+  // 폴더 열기가 도는 중 - 칸에는 잠글 단추가 없어 여기서 겹침을 막는다.
+  let openingFolder = false;
   // 믹스 모드(리모컨 전용). 켜져 있으면 ARTIST PROMPT 칸의 주인이 **큐**로 넘어간다.
   let mixQueue = null;
   // 띠가 들어갈 빈 자리. ⚠️ **미리** 만들어 둔다 - 리모컨의 줄 목록은 온보딩 때 한 번
@@ -607,9 +615,13 @@ export function createArtistThumbController({
     // ⚠️ 페이지 이동은 **잠그지 않는다**(사용자 지시 2026-08-30). 큐는 자기 배열
     //    (`artistQueueEntries`)로 돌지 화면을 읽지 않으므로, 넘겨도 아무 영향이 없다.
     //    막아서 얻는 것이 없이 큐가 도는 동안 목록을 훑지 못하게만 했다.
-    [modeEl, filterEl, searchEl, downloadBtn, selectBtn, randomBtn].forEach(control => {
+    [filterEl, searchEl, selectBtn, randomBtn].forEach(control => {
       if (control) control.disabled = locked;
     });
+    // 모드 칸만 더 잠근다(사용자 지정 2026-09-19): **파일을 여는 중**이거나 받는 중.
+    // ⚠️ 쪽 넘김에는 안 건다 - 페이지마다 칸이 깜빡이면 못 쓴다. 파일을 새로 여는
+    //    것은 모드 전환뿐이라 `modeOpening` 은 그 길에서만 선다.
+    if (modeEl) modeEl.disabled = locked || modeOpening || downloadBusyFor(currentMode());
     if (generateBtn) generateBtn.disabled = false;
     if (randomGenerateBtn) randomGenerateBtn.disabled = false;
     updatePager();
@@ -659,27 +671,90 @@ export function createArtistThumbController({
     }
   }
 
-  function updateDownloadUi() {
-    if (!downloadBtn) return;
-    const info = currentModeInfo();
+  const downloadBusyFor = mode => {
     const download = state?.download || {};
+    return Boolean(mode && download.active && download.mode === mode);
+  };
+
+  const downloadPercent = () => Math.max(0, Math.min(100, Number(state?.download?.percent || 0)));
+
+  /** 받는 길은 **둘뿐**이다(사용자 지정 2026-09-19): 파일이 없을 때 격자 자리에 뜨는
+   *  화면과, 갱신이 걸렸을 때의 맨 아랫줄. 둘 다 `state.download` 하나를 본다 -
+   *  받는 단추를 세 곳에 두었다가 어느 것이 진짜인지 모르게 된 적이 있다. */
+  function updateDownloadUi() {
+    updateMissingUi();
+    updateUpdateRow();
+  }
+
+  /** 파일이 아예 없는 모드 - 격자 자리에 **받는 화면**을 띄운다.
+   *
+   *  ⚠️ "No matching artists." 는 **걸러서** 아무것도 안 남았다는 말이다. 파일이 없는
+   *     것과는 전혀 다른 일인데 한 문장으로 뭉뚱그려, 받을 길이 화면에 없었다 -
+   *     머리줄의 [Download] 는 격자가 리모컨으로 올라가면 탭에 홀로 남아 안 보인다.
+   */
+  function renderMissingData(info) {
+    if (!gridEl) return;
+    const label = info?.label || info?.key || '이 모드의';
+    const size = Number(info?.expected_size_mb || info?.size_mb || 0);
+    const note = size > 0
+      ? `${size.toLocaleString()} MB 를 받습니다`
+      : '내려받아야 썸네일을 볼 수 있습니다';
+    gridEl.innerHTML = `
+      <div class="artist-thumb-missing" data-artist-thumb-missing>
+        <div class="artist-thumb-missing-title">${escHtml(label)} 데이터가 없습니다</div>
+        <div class="artist-thumb-missing-note">${escHtml(note)}</div>
+        <button type="button" class="artist-thumb-download-btn artist-thumb-missing-btn"
+                data-artist-thumb-get>Download</button>
+        <div class="artist-thumb-missing-bar" hidden><i></i></div>
+        <div class="artist-thumb-missing-msg"></div>
+      </div>`;
+    updateMissingUi();
+  }
+
+  /** 받는 동안의 진행을 **그 화면 안에서** 비춘다.
+   *  ⚠️ 글자와 너비만 고친다 - 0.9초마다 innerHTML 을 다시 쓰면 누르려던 단추가
+   *     손 밑에서 사라진다(그리고 진행 막대가 매번 0 에서 다시 시작한다). */
+  function updateMissingUi() {
+    const host = gridEl?.querySelector('[data-artist-thumb-missing]');
+    if (!host) return;
     const mode = currentMode();
-    const activeForMode = Boolean(download.active && download.mode === mode);
-    const needsDownload = Boolean(info && (!info.available || info.needs_update));
-    downloadBtn.hidden = !needsDownload && !activeForMode;
-    downloadBtn.disabled = artistQueueRunning || activeForMode || !mode;
-    if (activeForMode) {
-      const percent = Number(download.percent || 0);
-      downloadBtn.textContent = percent > 0 ? `${percent}%` : 'Downloading...';
-    } else {
-      downloadBtn.textContent = info?.needs_update ? 'Update' : 'Download';
+    const download = state?.download || {};
+    const busy = downloadBusyFor(mode);
+    const percent = downloadPercent();
+    const btn = host.querySelector('[data-artist-thumb-get]');
+    const bar = host.querySelector('.artist-thumb-missing-bar');
+    const msg = host.querySelector('.artist-thumb-missing-msg');
+    if (btn) {
+      btn.disabled = busy || artistQueueRunning || !mode;
+      btn.textContent = busy ? (percent > 0 ? `${percent}%` : 'Downloading...') : 'Download';
     }
+    if (bar) {
+      bar.hidden = !busy;
+      const fill = bar.querySelector('i');
+      if (fill) fill.style.width = `${percent}%`;
+    }
+    if (msg) msg.textContent = busy ? (download.message || '') : (download.error || '');
+    host.classList.toggle('is-busy', busy);
+  }
+
+  /** 갱신 줄 - **맨 아랫줄**이라 나머지가 한 줄 밀려 올라간다(사용자 지정 2026-09-19).
+   *  ⚠️ 받는 동안에도 사라지지 않는다 - "업데이트 중 계속 이용가능" 이 이 줄의 요점이라
+   *     진행을 여기서 보여 줘야 한다(막는 화면을 띄우지 않는 대가다). */
+  function updateUpdateRow() {
+    if (!updateRowEl) return;
+    const info = currentModeInfo();
+    const show = Boolean(info?.needs_update);
+    updateRowEl.hidden = !show;
+    if (!show || !updateBtn) return;
+    const mode = currentMode();
+    const busy = downloadBusyFor(mode);
+    const percent = downloadPercent();
+    updateBtn.disabled = busy || artistQueueRunning || !mode;
+    updateBtn.textContent = busy ? (percent > 0 ? `${percent}%` : '받는 중...') : 'Update';
   }
 
   function renderState() {
     if (!state) return;
-    // 폴더 열기는 호스트 PC 의 탐색기를 연다 - 원격(폰·다른 PC)에서는 숨긴다(라우트도 403 으로 막는다).
-    if (openFolderBtn) openFolderBtn.hidden = state.local === false;
     if (modeEl) {
       const previous = modeEl.value || '';
       const modes = state.modes || [];
@@ -695,8 +770,17 @@ export function createArtistThumbController({
               : `${label} · data missing`);
           return `<option value="${escHtml(mode.key)}" title="${escHtml(title)}">${escHtml(label + suffix)}</option>`;
         }),
+        // [폴더 열기] 는 이 칸의 **맨 아래**다(사용자 지정 2026-09-19). 값이 아니라
+        // **동작**이라, 고르면 폴더만 열고 곧바로 보던 모드로 되돌아온다.
+        // ⚠️ 호스트 PC 의 탐색기를 연다 - 원격(폰·다른 PC)에서는 아예 안 넣는다
+        //    (라우트도 403 으로 막는다). 예전 단추가 그랬듯 숨기는 것으로는 모자라다.
+        ...(state.local === false ? [] : [
+          '<option disabled>──────────</option>',
+          `<option value="${OPEN_FOLDER_VALUE}">폴더 열기…</option>`,
+        ]),
       ].join('');
       modeEl.value = modes.some(mode => mode.key === previous) ? previous : '';
+      lastModeValue = modeEl.value;
     }
     if (filterEl) {
       const previous = filterEl.value || 'all';
@@ -864,7 +948,9 @@ export function createArtistThumbController({
       currentPage = 0;
       totalPages = 1;
       clearSelectedArtist();
-      renderGrid([]);
+      // ⚠️ `renderGrid([])` 가 아니다 - 그 길은 "No matching artists." 로 끝나고
+      //    받을 길을 안 준다(사용자 지정 2026-09-19).
+      renderMissingData(info);
       updatePager();
       updateDownloadUi();
       updateRandomUi();
@@ -872,7 +958,7 @@ export function createArtistThumbController({
       if (download.active && download.mode === mode) {
         setStatus(download.message || 'Artist Thumbnail 데이터 다운로드 중...', 'busy');
       } else {
-        setStatus(`${info.label || mode} 데이터가 없습니다. Download 버튼으로 받을 수 있습니다.`, 'error');
+        setStatus(`${info.label || mode} 데이터가 없습니다.`, 'error');
       }
       return;
     }
@@ -2067,6 +2153,8 @@ export function createArtistThumbController({
         await fetchState({force: true});
         const download = state?.download || {};
         updateDownloadUi();
+        // 받는 동안 잠갔던 모드 칸은 여기서 풀린다(끝나면 `active` 가 내려간다).
+        updateArtistActionAvailability();
         if (download.mode === mode) {
           setStatus(download.message || '', download.error ? 'error' : (download.active ? 'busy' : 'ok'));
         }
@@ -2096,11 +2184,11 @@ export function createArtistThumbController({
       return;
     }
     try {
-      downloadBtn.disabled = true;
-      downloadBtn.textContent = 'Starting...';
       const download = await postJson('/api/artist-thumb/download', {mode});
       state = {...(state || {}), download};
       updateDownloadUi();
+      // 받는 동안 모드 칸이 잠긴다(사용자 지정) - 잠그는 곳은 한 군데다.
+      updateArtistActionAvailability();
       setStatus(download.message || '다운로드를 시작했습니다.', 'busy');
       startDownloadPolling(mode);
     } catch (error) {
@@ -2110,9 +2198,34 @@ export function createArtistThumbController({
     }
   }
 
+  /** 모드 칸이 바뀌었다 - **맨 아래 항목은 모드가 아니다**(폴더 열기).
+   *
+   *  ⚠️ 고르고 나면 반드시 보던 모드로 되돌린다. 안 되돌리면 칸에 '폴더 열기…' 가
+   *     적힌 채 남아, 지금 무엇을 보고 있는지가 화면에서 사라진다.
+   *  ⚠️ 팩을 여는 동안 칸을 잠근다(사용자 지정) - 2.5GB 를 여는 중에 또 바꾸면
+   *     두 번째 응답이 첫 번째를 덮어 엉뚱한 모드의 목록이 남는다. */
+  async function onModeChanged() {
+    if (!modeEl) return;
+    if (modeEl.value === OPEN_FOLDER_VALUE) {
+      modeEl.value = lastModeValue;
+      syncRemoteSelectTitles();
+      await openThumbnailFolder();
+      return;
+    }
+    lastModeValue = modeEl.value;
+    modeOpening = true;
+    updateArtistActionAvailability();
+    try {
+      await loadPage(0, {anchor: 'top'});
+    } finally {
+      modeOpening = false;
+      updateArtistActionAvailability();
+    }
+  }
+
   async function openThumbnailFolder() {
-    if (!openFolderBtn || openFolderBtn.disabled) return;
-    openFolderBtn.disabled = true;
+    if (openingFolder) return;
+    openingFolder = true;
     try {
       const response = await fetch('/api/artist-thumb/open-folder', {method: 'POST'});
       const data = await response.json();
@@ -2121,13 +2234,12 @@ export function createArtistThumbController({
     } catch (error) {
       showToast?.(error.message || '폴더를 열지 못했습니다.', 'error');
     } finally {
-      openFolderBtn.disabled = false;
+      openingFolder = false;
     }
   }
 
   function bind() {
-    openFolderBtn?.addEventListener('click', openThumbnailFolder);
-    modeEl?.addEventListener('change', () => loadPage(0, {anchor: 'top'}));
+    modeEl?.addEventListener('change', () => { void onModeChanged(); });
     filterEl?.addEventListener('change', () => loadPage(0, {anchor: 'top'}));
     searchEl?.addEventListener('input', () => {
       if (searchEl._artistTimer) clearTimeout(searchEl._artistTimer);
@@ -2142,7 +2254,14 @@ export function createArtistThumbController({
         gotoPage();
       }
     });
-    downloadBtn?.addEventListener('click', downloadSelectedMode);
+    // 받는 길 둘 - 격자 자리의 [Download] 와 맨 아랫줄의 [Update]. 같은 문으로 간다.
+    // ⚠️ 격자의 단추는 다시 그려지는 자식이라 **위임**으로 받는다(노드에 직접 걸면
+    //    격자를 한 번 다시 그린 순간 배선이 끊긴다).
+    gridEl?.addEventListener('click', event => {
+      if (!event.target.closest('[data-artist-thumb-get]')) return;
+      void downloadSelectedMode();
+    });
+    updateBtn?.addEventListener('click', () => { void downloadSelectedMode(); });
     selectBtn?.addEventListener('click', toggleSelectionMode);
     batchBtn?.addEventListener('click', toggleBatchMenu);
     batchMenu?.addEventListener('click', event => {
@@ -2393,6 +2512,9 @@ export function createArtistThumbController({
       },
       {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
       {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
+      // 갱신 알림은 **맨 아래**(사용자 지정 2026-09-19) - 나머지가 한 줄 밀려 올라간다.
+      // 갱신이 없으면 옷이 통째로 숨겨 아무 자리도 안 먹는다.
+      {nodes: [updateRowEl], className: 'rctl-update-row'},
     ];
   }
 
@@ -3036,6 +3158,37 @@ export function createArtistThumbController({
     });
   }
 
+  /** [Artists] 탭 단추 - **먼저 리모컨**이다(사용자 지정 2026-09-19).
+   *
+   *  탭은 이제 데이터를 관리하는 화면이고, 작가를 보고 고르는 일은 전부 리모컨에서
+   *  한다. 그래서 **첫 누름은 리모컨을 부르거나 펴고 탭으로 가지 않는다** - 보러 온
+   *  사람을 조각이 다 빠져나간 탭으로 보내면 "유명무실한 화면" 을 보게 된다.
+   *  이미 펴져 있을 때 다시 누르면 그때 탭으로 간다(관리하러 온 것이다).
+   *
+   *  @returns {boolean} 탭으로 옮겨 가도 되는가
+   */
+  function requestArtistsTab() {
+    const remote = getRemoteController?.();
+    if (!remoteOnboarded) {
+      setRemote(true);
+      // ⚠️ `setRemote` 가 실패했어도(모듈 미도착) 탭으로 보내지 않는다 - 토스트로
+      //    이미 알렸고, 여기서 탭을 열면 사용자는 그 토스트를 못 본다.
+      return false;
+    }
+    if (remote?.isCollapsed?.()) {
+      remote.expand?.();
+      remote.raise?.();
+      return false;
+    }
+    // 창이 닫혀 있는데 올라가 있다고 적혀 있다면 어긋난 것이다 - 창을 먼저 살린다.
+    if (remote && remote.isOpen?.() === false) {
+      remote.open?.();
+      remote.raise?.();
+      return false;
+    }
+    return true;
+  }
+
   function syncRemoteButton() {
     if (!remoteBtn) return;
     remoteBtn.classList.toggle('is-on', remoteOnboarded);
@@ -3053,11 +3206,13 @@ export function createArtistThumbController({
     if (want) {
       const ghosts = new Map([
         [gridEl, '썸네일이 리모컨에 있습니다. [리모컨] 을 다시 누르면 돌아옵니다.'],
-        // 이 둘은 3열 grid 안이라 표식을 안 남기면 남은 칸이 밀려 머리줄이 뒤틀린다.
+        // ⚠️ 모드·검색은 머리줄 **2열 grid** 안이다(2026-09-19 에 [Download] 가 빠지며
+        //    3열에서 줄었다). 표식을 안 남기면 남은 칸이 밀려 머리줄이 뒤틀린다.
         [modeEl, {text: '', slim: true}],
-        [filterEl, {text: '', slim: true}],
-        // ⚠️ 이 셋은 3열 grid 안이다 - 표식을 안 남기면 남은 칸이 밀려 머리줄이 뒤틀린다.
         [searchEl, {text: '', slim: true}],
+        // 필터는 왼쪽 옆판의 라벨 안이라 칸 밀림은 없지만, 빈 라벨만 남으면 무엇이
+        // 빠졌는지 알 수 없다 - 같은 얇은 표식을 남긴다.
+        [filterEl, {text: '', slim: true}],
       ]);
       const ok = remote.onboard(REMOTE_KEY, {
         title: 'Artist Thumbnail',
@@ -3100,6 +3255,7 @@ export function createArtistThumbController({
     load,
     reload: () => load({force: true}),
     setActive,
+    requestArtistsTab,
     syncPromptFormat,
     /** 백엔드(NAI/WEBUI/COMFYUI)가 바뀌면 '생성한 모델' 필터와 카드 그림이 그 모드
      *  기준으로 다시 갈려야 한다. 예전에는 프롬프트 표기만 고쳐서, WEBUI 로 바꿔도

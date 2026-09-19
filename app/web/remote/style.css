@@ -2300,7 +2300,10 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .artist-thumb-toolbar-controls {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 320px) auto minmax(260px, 1fr);
+  /* [모드][검색] 두 칸(사용자 지정 2026-09-19). 예전에는 가운데에 [Download] 가 있어
+     세 칸이었다 - 자식만 빼고 칸을 안 줄이면 검색칸이 가운데 `auto` 에 앉아 오른쪽
+     칸이 빈 채로 남는다(grid 는 자식 수를 세지 않는다). */
+  grid-template-columns: minmax(260px, 320px) minmax(260px, 1fr);
   justify-content: stretch;
   gap: 8px;
   min-width: 0;
@@ -3987,6 +3990,76 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   font-size: 13px;
   text-align: center;
 }
+
+/* 파일이 없는 모드 — 격자 자리에 뜨는 **받는 화면**(사용자 지정 2026-09-19).
+   ⚠️ `.artist-thumb-empty` 와 같은 `grid-column: 1 / -1` 이 필요하다. 격자는 여러
+      칸짜리 grid 라, 안 주면 이 상자가 첫 칸(썸네일 한 장 너비)에 갇힌다. */
+.artist-thumb-missing {
+  grid-column: 1 / -1;
+  /* ⚠️ 격자는 `grid-auto-rows: 150px` 로 **행 높이가 못 박혀** 있다. 기본
+     `align-self: stretch` 면 이 상자가 딱 150px 로 고정되고, 내용(158px)이 넘치면
+     그 안의 flex 자식 중 **줄어들 수 있는 것**부터 0 으로 눌린다 - 실측에서 4px
+     진행 막대가 통째로 사라졌다(너비는 260px 로 멀쩡해 보여 더 늦게 찾았다).
+     `start` 로 풀어 내용만큼 자라게 하고, 자식은 아래에서 못 줄게 막는다. */
+  align-self: start;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 36px 20px; text-align: center;
+}
+.artist-thumb-missing > * { flex: 0 0 auto; }
+.artist-thumb-missing-title {
+  font-size: 14px; font-weight: 800; color: var(--text-bright, #e8ecff);
+}
+.artist-thumb-missing-note { font-size: 12px; color: var(--text-dim); }
+/* 색·눌림은 `.artist-thumb-download-btn` 에서 물려받는다(같은 일을 하는 단추다).
+   여기서는 **자리와 크기만** 고친다 - 머리줄의 알약이 아니라 빈 화면 한가운데다. */
+.artist-thumb-missing-btn {
+  min-width: 132px; min-height: 32px;
+  border-radius: 8px; font-size: 13px;
+}
+/* 진행 막대. 받는 동안에만 보인다 — 숫자는 단추가, 말은 아래 줄이 맡는다. */
+.artist-thumb-missing-bar {
+  width: min(260px, 80%); height: 4px; border-radius: 999px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+.artist-thumb-missing-bar > i {
+  display: block; height: 100%; width: 0;
+  background: rgba(141, 240, 173, 0.75);
+  transition: width 220ms ease;
+}
+.artist-thumb-missing-msg {
+  font-size: 11px; color: var(--text-dim);
+  max-width: min(380px, 92%); word-break: break-word;
+}
+
+/* 갱신 줄 — **맨 아랫줄**. 옛 팩으로 계속 보면서 받는다(막지 않는다). */
+.artist-thumb-update-row {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-top: 1px solid rgba(255, 224, 122, 0.28);
+  background: rgba(255, 224, 122, 0.08);
+}
+.artist-thumb-update-row[hidden] { display: none !important; }
+.artist-thumb-update-text { font-size: 12px; color: #ffe07a; }
+.artist-thumb-update-text em { font-style: normal; color: var(--text-dim); }
+.artist-thumb-update-btn {
+  min-width: 88px; min-height: 26px; padding: 0 12px;
+  border-radius: 7px; cursor: pointer; font-weight: 800; font-size: 12px;
+  color: #2a220d;
+  background: #ffe07a;
+  border: 1px solid rgba(255, 224, 122, 0.8);
+}
+.artist-thumb-update-btn:hover:not(:disabled) { background: #ffeaa0; }
+.artist-thumb-update-btn:disabled {
+  cursor: default; color: var(--text-dim);
+  background: rgba(255, 224, 122, 0.14);
+}
+/* 리모컨 안에서는 창 너비에 맞춰 눕는다 — 줄이 좁아 글이 먼저 줄어야 한다. */
+.rctl-update-row { padding: 0; }
+.rctl-update-row .artist-thumb-update-row {
+  width: 100%; border-top: 0; border-radius: 8px;
+  border: 1px solid rgba(255, 224, 122, 0.28);
+}
 .artist-thumb-pager {
   position: relative;
   min-height: 46px;
@@ -4003,16 +4076,8 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   min-width: 76px;
   min-height: 30px;
 }
-.artist-thumb-open-folder {
-  position: absolute;
-  left: 10px;
-}
 @container artist-thumb-panel (max-width: 680px) {
   .artist-thumb-pager { flex-wrap: wrap; }
-  .artist-thumb-open-folder {
-    position: static;
-    margin-right: auto;
-  }
 }
 .artist-thumb-goto {
   display: inline-flex;
@@ -4072,7 +4137,7 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
     align-items: stretch;
     gap: 8px;
   }
-  /* 숨긴 Download 단추 때문에 grid 의 auto 열에 검색 칸이 떨어져 180px 로 굳는다 - flex 로 폭을 나눈다. */
+  /* 좁아지면 두 칸이 서로를 눌러 글자가 잘린다 - flex 로 폭을 나누고 넘치면 눈힌다(예전엔 여기 [Download] 가 더 있었다). */
   .artist-thumb-toolbar-controls {
     display: flex;
     flex-wrap: wrap;

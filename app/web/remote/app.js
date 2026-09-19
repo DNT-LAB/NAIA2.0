@@ -793,7 +793,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-mixwrap')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-datasurface')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -6557,6 +6557,19 @@ function detachedWindowFeatures({width, height}, {scrollbars = 'no'} = {}) {
 
 function getDetachedModuleGeometry(moduleId) {
   return DETACHED_MODULE_GEOMETRY[moduleId] || DEFAULT_DETACHED_MODULE_GEOMETRY;
+}
+
+/** [Artists] 탭 단추 전용 문(사용자 지정 2026-09-19).
+ *
+ *  리모컨이 없거나 접혀 있으면 **리모컨부터** 세우고 탭으로는 가지 않는다 - 조각이
+ *  전부 리모컨으로 옮겨 간 뒤로, 탭은 데이터를 관리하는 화면이지 작가를 보는 곳이
+ *  아니다. 판단은 탭 쪽이 한다(리모컨 상태를 아는 쪽이 거기다).
+ */
+function requestArtistsTab() {
+  if (artistThumbControl && typeof artistThumbControl.requestArtistsTab === 'function') {
+    if (!artistThumbControl.requestArtistsTab()) return;
+  }
+  switchRightTab('artists');
 }
 
 function switchRightTab(tabName, options = {}) {

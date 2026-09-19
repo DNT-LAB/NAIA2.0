@@ -29312,8 +29312,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   flex: 0 0 auto; min-width: 74px; text-align: center;
   color: var(--text-primary); font-size: 11px;
 }
+/* ⚠️ 남는 자리는 **이름 검색**이 먹고, 모자라면 그 칸이 **가장 먼저** 줄어든다
+   (사용자 지정 2026-09-19). 쪽 넘김·토글·Go 는 줄어들면 못 쓰게 된다. */
+.dragpanel.rctl .rctl-pager .rctl-find {
+  flex: 1 1 0; min-width: 0; height: 24px; padding: 0 7px;
+  font-size: 11px; border-radius: 6px;
+}
 .dragpanel.rctl .rctl-pager .rctl-goto {
-  flex: 1 1 auto; justify-content: flex-end; gap: 4px; min-height: 0;
+  flex: 0 0 auto; justify-content: flex-end; gap: 4px; min-height: 0;
 }
 /* 'GO TO' 글자는 뺀다 - 좁은 줄에서 칸만 먹고, 옆의 입력칸이 곧 설명이다. */
 .dragpanel.rctl .rctl-pager .rctl-goto > span { display: none; }

@@ -160,6 +160,11 @@ export function createArtistThumbController({
   // 검색이 켜져 있으면 격자의 **출처가 검색**이다(사용자 지정 2026-09-19).
   // ⚠️ 왼쪽에 따로 목록을 그리지 않는다 - 두 목록은 반드시 어긋나 보인다.
   let searchQuery = null;        // {stack, order} | null
+  // 화면을 걸러 놓는 것들(조건 검색·이름 검색)은 **걸기 직전의 쪽**을 기억했다가
+  // 다 풀면 그 자리로 돌려놓는다(사용자 지정 2026-09-19). 안 그러면 95,000명을
+  // 훑던 자리를 잃어버려서, 잠깐 찾아보고 돌아오는 것이 사실상 불가능하다.
+  let unfilteredPage = null;
+  let viewWasFiltered = false;
   let searchPct = null;          // 판이 쓰는 % 서식(한 집에서 빌려 온다)
   // 판이 들어갈 빈 자리. 믹스 띠와 **같은 방식**으로 미리 만들어 둔다 -
   // 리모컨의 줄 목록은 온보딩 때 한 번 만들어지고 검색은 그 뒤에 켜진다.
@@ -2108,7 +2113,7 @@ export function createArtistThumbController({
     filterEl?.addEventListener('change', () => loadPage(0, {anchor: 'top'}));
     searchEl?.addEventListener('input', () => {
       if (searchEl._artistTimer) clearTimeout(searchEl._artistTimer);
-      searchEl._artistTimer = setTimeout(() => loadPage(0, {anchor: 'top'}), 180);
+      searchEl._artistTimer = setTimeout(() => { void reloadForFilterChange(); }, 180);
     });
     prevBtn?.addEventListener('click', () => loadPage(Math.max(0, currentPage - 1), {anchor: 'bottom'}));
     nextBtn?.addEventListener('click', () => loadPage(Math.min(totalPages - 1, currentPage + 1), {anchor: 'top'}));
@@ -2344,6 +2349,9 @@ export function createArtistThumbController({
           // 자리가 없다 - `lift` 가 부모 없는 노드는 그냥 지나가고 창과 함께 사라진다.
           {node: mixBtn, tag: 'mix'},
           {node: searchBtn, tag: 'search'},
+          // 이름 검색(탭 머리줄의 Search artist 그 자체를 옮겨 온다 - 베끼면 상태가
+          // 두 곳이 된다). 자리가 모자라면 **이 칸이 가장 먼저** 줄어든다(사용자 지정).
+          {node: searchEl, tag: 'find'},
           {node: goto, tag: 'goto'},
         ],
       },
@@ -2896,7 +2904,40 @@ export function createArtistThumbController({
     const same = JSON.stringify(next) === JSON.stringify(searchQuery);
     searchQuery = next;
     if (same) return;
-    if (gridVisible()) await loadPage(0, {anchor: 'top'});
+    if (gridVisible()) await reloadForFilterChange();
+  }
+
+  /** 지금 화면이 걸러져 있는가. 조건 검색이든 이름 검색이든 하나면 그렇다. */
+  function queryText() {
+    return String(searchEl?.value || '').trim();
+  }
+
+  function viewFiltered() {
+    return Boolean(searchQuery) || Boolean(queryText());
+  }
+
+  /** 거르기가 바뀌었다 - 새로 걸면 자리를 기억하고, **다 풀면 그 자리로** 돌아간다.
+   *
+   *  ⚠️ 거르는 길이 둘(조건·이름)이라 각자 기억하면 서로를 지운다. 자리는 하나만
+   *     들고, 둘 다 풀렸을 때 돌려놓는다.
+   */
+  async function reloadForFilterChange() {
+    const now = viewFiltered();
+    if (!viewWasFiltered && now) {
+      if (unfilteredPage === null) unfilteredPage = currentPage;
+      viewWasFiltered = true;
+      await loadPage(0, {anchor: 'top'});
+      return;
+    }
+    if (viewWasFiltered && !now) {
+      const back = unfilteredPage ?? 0;
+      unfilteredPage = null;
+      viewWasFiltered = false;
+      await loadPage(back, {anchor: 'top'});
+      return;
+    }
+    viewWasFiltered = now;
+    await loadPage(0, {anchor: 'top'});
   }
 
   /** 검색이 켜져 있을 때의 **목록 출처**. 격자가 제 쪽수만큼 받아 간다.
@@ -2986,6 +3027,8 @@ export function createArtistThumbController({
         // 이 둘은 3열 grid 안이라 표식을 안 남기면 남은 칸이 밀려 머리줄이 뒤틀린다.
         [modeEl, {text: '', slim: true}],
         [filterEl, {text: '', slim: true}],
+        // ⚠️ 이 셋은 3열 grid 안이다 - 표식을 안 남기면 남은 칸이 밀려 머리줄이 뒤틀린다.
+        [searchEl, {text: '', slim: true}],
       ]);
       const ok = remote.onboard(REMOTE_KEY, {
         title: 'Artist Thumbnail',

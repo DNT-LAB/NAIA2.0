@@ -157,6 +157,14 @@ export function createArtistThumbController({
   // (사용자 지정 2026-09-19) - 그 자리는 `.rctl-side` 라 리모컨 없이는 없다.
   let searchPanel = null;
   let searchOn = false;
+  // 검색이 켜져 있으면 격자의 **출처가 검색**이다(사용자 지정 2026-09-19).
+  // ⚠️ 왼쪽에 따로 목록을 그리지 않는다 - 두 목록은 반드시 어긋나 보인다.
+  let searchQuery = null;        // {stack, order} | null
+  let searchPct = null;          // 판이 쓰는 % 서식(한 집에서 빌려 온다)
+  // 판이 들어갈 빈 자리. 믹스 띠와 **같은 방식**으로 미리 만들어 둔다 -
+  // 리모컨의 줄 목록은 온보딩 때 한 번 만들어지고 검색은 그 뒤에 켜진다.
+  const searchHostEl = document.createElement('div');
+  searchHostEl.className = 'rctl-search-host';
   const searchBtn = document.createElement('button');
   searchBtn.type = 'button';
   searchBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
@@ -760,11 +768,19 @@ export function createArtistThumbController({
         : '';
       const memoryHtml = remembered ? '<span class="artist-thumb-memory-mark">RESULT</span>' : '';
       const queueHtml = queued ? '<span class="artist-thumb-queue-mark">IN QUEUE</span>' : '';
+      // 검색 결과일 때만 붙는 배지. 판에서 목록을 걷어내면서 이 수가 갈 곳이 여기다
+      // (사용자가 바로 앞에서 청한 총/매칭/Wilson 이다 - 잃으면 안 된다).
+      const matchHtml = (item.matchRate === undefined || !searchPct) ? '' :
+        `<span class="artist-thumb-match-mark" title="총 ${Number(item.matchTotal || 0).toLocaleString()}`
+        + ` · 매칭 ${Number(item.matchHit || 0).toLocaleString()} (${searchPct(item.matchRate)})`
+        + ` · Wilson ${searchPct(item.matchWilson)}">${searchPct(item.matchRate)}`
+        + `<em>W ${searchPct(item.matchWilson)}</em></span>`;
       return `
         <button type="button" class="artist-thumb-card${active}${favorite}${banned}${remembered}${queued}${selectable}${batchSelected}${batchDim}" data-artist="${escHtml(item.artist)}" data-weight="${escHtml(String(item.weight || 0))}">
           ${checkHtml}
           ${memoryHtml}
           ${queueHtml}
+          ${matchHtml}
           <div class="artist-thumb-card-image">${imageHtml}</div>
           <div class="artist-thumb-card-info">
             <span class="artist-thumb-card-name" title="${escHtml(item.artist)}">${escHtml(item.artist)}</span>
@@ -846,9 +862,9 @@ export function createArtistThumbController({
     setStatus(mode ? 'Loading artist thumbnails...' : '모드를 선택하면 썸네일을 로드합니다.', mode ? 'busy' : '');
     if (gridEl) gridEl.classList.add('loading');
     try {
-      const response = await fetch(listUrl(page, options), {cache: 'no-store'});
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      // 검색이 켜져 있으면 출처가 다르다 - 그 아래는 **한 길**이다(그려 주는 쪽이
+      // 둘로 갈라지면 언젠가 한쪽만 고치게 된다).
+      const data = searchQuery ? await searchPageData(page) : await fetchListData(page, options);
       if (requestId !== listRequestId) return;
       currentPage = Number(data.page || 0);
       totalPages = Math.max(1, Number(data.total_pages || 1));
@@ -871,6 +887,13 @@ export function createArtistThumbController({
     } finally {
       if (requestId === listRequestId && gridEl) gridEl.classList.remove('loading');
     }
+  }
+
+  async function fetchListData(page, options) {
+    const response = await fetch(listUrl(page, options), {cache: 'no-store'});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
   }
 
   async function loadAdjacentPage(direction) {
@@ -2305,6 +2328,9 @@ export function createArtistThumbController({
     return [
       // 믹스 띠 - 격자 **위**(사용자 지정). 믹스 모드가 꺼져 있으면 옷이 숨긴다.
       {nodes: [mixHostEl], className: 'rctl-mix-row'},
+      // 검색 판도 **같은 자리**다(사용자 지정 2026-09-19). 옆에 따로 띄우면 화면을
+      // 두 번 먹고, 무엇보다 그 목록이 아래 격자와 어긋나 보인다.
+      {nodes: [searchHostEl], className: 'rctl-search-row'},
       // 남는 높이를 다 먹는 줄. 관찰이 본론이라 격자가 가장 크다.
       {nodes: [gridEl], fill: true},
       // 페이지 - 앞/뒤 + 몇 쪽인지 + 바로 뛰기.
@@ -2710,7 +2736,7 @@ export function createArtistThumbController({
         requestState: () => requestPeState(),
       });
     }
-    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260919-noloop');
+    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260919-headdrag');
     const width = 320;
     const height = 260;
     const spot = remote.besideSpot?.(width, height) || {x: 24, y: 120};
@@ -2830,18 +2856,14 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-noloop');
-    searchPanel = createArtistSearchPanel({
+    const mod = await import('./artistSearchPanel.mjs?v=20260919-top');
+    searchPct = mod.pctText;
+    searchPanel = mod.createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
-      // 그림은 격자와 **같은 서버 한 곳**에서 받는다 - 두 벌이 되면 언젠가 갈린다.
-      describe: describeArtists,
-      onPick: artist => pickFromGroup(artist),
-      onDragStart: () => remote.hideZoom?.(),
-      // 끌기는 그룹 창과 **같은 중개인**을 쓴다(격자 -> 띠 와 한 길).
-      getBroker: () => ensureGroups().then(({broker}) => broker),
-      // 판이 접히면 머리줄 아래에 지금 조건과 결과 수만 남는다.
-      onUpdate: () => remote.setSideSummary?.(searchPanel.summary()),
+      // 조건이 정해지면 **격자가** 그 목록을 받아 간다.
+      onQuery: query => { void applySearchQuery(query); },
     });
+    searchHostEl.appendChild(searchPanel.el);
     return searchPanel;
   }
 
@@ -2855,17 +2877,63 @@ export function createArtistThumbController({
     searchBtn.classList.toggle('is-on', searchOn);
     searchBtn.setAttribute('aria-pressed', searchOn ? 'true' : 'false');
     searchBtn.title = `검색 ${searchOn ? 'ON' : 'OFF'} — 캐릭터·작품·태그·등급으로 아티스트를 좁힙니다.`;
+    searchBtn.closest('.dragpanel')?.classList.toggle('is-search', searchOn);
     if (searchOn) {
-      remote.mountSide(panel.el);
-      remote.showSide(true);
-      remote.setSideSummary?.(panel.summary());
       // 팩이 없으면 판이 스스로 잠긴다 - 단추는 그대로 두고 이유를 판이 말한다.
       await panel.ensureState();
       panel.focus();
+      // 켤 때 이미 쌓아 둔 조건이 있으면 그대로 격자에 건다.
+      await applySearchQuery(panel.query());
     } else {
-      remote?.showSide(false);
-      remote?.setSideSummary?.([]);
+      // 끄면 격자는 **원래 목록**으로 돌아간다(조건은 판이 그대로 들고 있다).
+      await applySearchQuery(null);
     }
+  }
+
+  /** 검색 조건을 격자에 건다. `null` 이면 원래 목록으로 돌아간다. */
+  async function applySearchQuery(query) {
+    const next = (searchOn && query && query.stack?.length) ? query : null;
+    const same = JSON.stringify(next) === JSON.stringify(searchQuery);
+    searchQuery = next;
+    if (same) return;
+    if (gridVisible()) await loadPage(0, {anchor: 'top'});
+  }
+
+  /** 검색이 켜져 있을 때의 **목록 출처**. 격자가 제 쪽수만큼 받아 간다.
+   *
+   *  ⚠️ 쪽마다 서버에 다시 묻는다(`offset`). 앞에서 200개만 받아 두고 자르면
+   *     201번째부터는 영영 못 본다 - 4,603명짜리 결과가 흔하다.
+   */
+  async function searchPageData(page) {
+    const per = PAGE_SIZE;
+    const found = await postJson('/api/artist-affinity/search', {
+      stack: searchQuery.stack, order: searchQuery.order,
+      limit: per, offset: Math.max(0, Number(page) || 0) * per,
+    });
+    if (found?.state === 'unknown_tag') throw new Error(`색인에 없는 낱말입니다: ${found.tag}`);
+    if (found?.state && found.state !== 'ready') throw new Error(found.reason || found.state);
+    const rows = found.rows || [];
+    // 그림·즐겨찾기·제외는 격자와 **같은 서버 한 곳**에서 받는다.
+    const described = rows.length ? await describeArtists(rows.map(row => row.artist)) : {};
+    const total = Number(found.total || 0);
+    return {
+      page: Number(page) || 0,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / per)),
+      filter_name: '검색 결과',
+      random: false,
+      items: rows.map(row => {
+        const info = described[row.artist] || {};
+        return {
+          ...info,
+          artist: row.artist,
+          weight: info.weight || row.total,
+          // 카드 배지에 쓸 것들. 판에서 목록을 걷어내면서 이 수가 갈 곳이 여기다.
+          matchHit: row.hit, matchTotal: row.total,
+          matchRate: row.hit / Math.max(row.total, 1), matchWilson: row.wilson,
+        };
+      }),
+    };
   }
 
   /** 리모컨에서는 카드가 112px 까지 줄어든다 - 마우스를 올리면 창 옆에 크게 띄운다. */
@@ -2874,7 +2942,7 @@ export function createArtistThumbController({
       // ⚠️ 띠 칸도 **같은 문**으로 확대한다(사용자 지정: 기존 인프라 재사용).
       //    선택자만 늘리면 리모컨은 한 줄도 안 고친다 - `resolve` 가 `data-artist` 와
       //    안쪽 `img` 만 읽기 때문이다.
-      selector: '.artist-thumb-card[data-artist], .mixq-block[data-artist], .asx-card[data-artist]',
+      selector: '.artist-thumb-card[data-artist], .mixq-block[data-artist]',
       resolve: card => {
         const src = card.querySelector('img')?.getAttribute('src') || '';
         if (!src) return null;   // 'No Image' 칸은 띄울 것이 없다
@@ -2944,7 +3012,7 @@ export function createArtistThumbController({
       // 믹스 판·PE 창은 리모컨에 붙어 있다 - 창이 내려가면 같이 내린다.
       //    (여는 단추가 머리줄에 있어서, 남겨 두면 다시 열 길이 없다.)
       if (mixOn) void setMixMode(false);
-      // 검색 판은 보조 판에 얹혀 있다 - 리모컨이 내려가면 그 자리가 통째로 사라진다.
+      // 검색 판은 창 안의 줄에 산다 - 리모컨이 내려가면 그 줄도 함께 사라진다.
       if (searchOn) void setSearchMode(false);
       searchPanel?.destroy();
       searchPanel = null;

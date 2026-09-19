@@ -108,7 +108,10 @@ export function createDraggablePanel({
          role="toolbar" aria-label="${escHtml(title)} 이동">
       <span class="dragpanel-grab" aria-hidden="true"></span>
       <span class="dragpanel-title">${escHtml(title)}</span>
-      <span class="dragpanel-slot" data-nodrag></span>
+      <!-- 칸에는 data-nodrag 를 걸지 않는다. 걸면 단추 사이 빈칸까지 끌기가
+           죽어서 머리줄의 절반이 안 잡힌다(사용자 제보). 안 끌릴 것은
+           NO_DRAG 선택자가 요소 단위로 가린다. -->
+      <span class="dragpanel-slot"></span>
       <span class="dragpanel-tools" data-nodrag>
         ${collapsible ? `<button type="button" class="dragpanel-btn dragpanel-collapse"
             aria-label="접기" title="접기">&#8211;</button>` : ''}
@@ -388,9 +391,17 @@ export function createDraggablePanel({
   // ── 끌기 ────────────────────────────────────────────────────────────
   const DRAG_THRESHOLD = 3;
 
+  /** 머리줄에서 **끌면 안 되는 것**. 누르거나 글을 넣는 것들이다.
+   *
+   *  ⚠️ 칸(`.dragpanel-slot`)을 통째로 막지 않는다 - 거기 단추를 올리면 단추
+   *     사이의 여백까지 죽어서, 머리줄의 절반이 안 잡힌다(사용자 제보 2026-09-19).
+   */
+  const NO_DRAG = '[data-nodrag], button, input, select, textarea, a[href],'
+    + ' [contenteditable=""], [contenteditable="true"]';
+
   function onHeadPointerDown(event) {
     if (event.button != null && event.button !== 0) return;
-    if (event.target.closest('[data-nodrag]')) return;
+    if (event.target.closest(NO_DRAG)) return;
     raise();
     drag = {
       id: event.pointerId,

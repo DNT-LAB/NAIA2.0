@@ -13,7 +13,7 @@
  *  ⚠️ 임시/저장은 **레코드의 표**(`temp`)로 판단한다. 창을 만들 때 한 번 재 두면
  *     이름을 붙인 뒤에도 옛 판정이 남아 단추 이름이 안 바뀐다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-noloop';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-headdrag';
 import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
 
 const OPEN = new Set();   // 열린 그룹 창들 - 겹쳐 뜨지 않게 계단식으로 비킨다

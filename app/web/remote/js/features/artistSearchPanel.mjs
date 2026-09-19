@@ -1,6 +1,10 @@
 /** 아티스트 매칭 검색 — 조건을 쌓아 작가를 좁히는 판(사용자 지정 2026-09-19).
  *
- *  믹스 큐가 비우고 나간 **창 옆 보조 판**(`.rctl-side`)에 산다. 백엔드는
+ *  믹스 띠와 **같은 자리**(창 상단 줄)에 산다 - 처음에는 창 옆 보조 판이었는데
+ *  화면을 두 번 먹고, 무엇보다 **왼쪽 목록과 오른쪽 격자가 어긋나 보였다**
+ *  (사용자 지정 2026-09-19). 지금은 결과를 **격자가 보여 주고** 이 판은 조건만 쌓는다.
+ *
+ *  백엔드는
  *  `core/artist_search.py` 이고 **상태가 없다** - 이 판이 depth 목록을 쥐고
  *  매번 통째로 보낸다. 그래서 뒤로 가기가 그냥 `stack.slice(0, n)` 이다.
  *
@@ -66,7 +70,7 @@ const fmt = n => Number(n || 0).toLocaleString('en-US');
 
 /** 0~1 을 사람이 읽는 비중으로. 작을수록 자릿수를 늘린다 - `0%` 로 뭉개면
  *  "안 그린다" 와 "드물게 그린다" 가 같아 보인다. */
-function pctText(value) {
+export function pctText(value) {
   const v = Math.max(0, Number(value) || 0) * 100;
   if (v <= 0) return '0%';
   if (v < 1) return '<1%';
@@ -79,11 +83,10 @@ export function createArtistSearchPanel({
   showToast,
   getJson,
   postJson,
-  describe = null,
-  onPick = null,
-  onDragStart = null,
-  getBroker = null,
-  // 결과가 바뀔 때마다 한 번. 판이 접혔을 때 보여 줄 요약을 바깥이 다시 심는다.
+  // 조건이 바뀔 때마다 `{stack, order}` 또는 `null`(비었음)을 준다.
+  // ⚠️ 여기서 **목록을 그리지 않는다** - 격자가 그린다(사용자 지정 2026-09-19).
+  onQuery = null,
+  // 결과가 바뀔 때마다 한 번. 바깥이 상태줄을 다시 쓴다.
   onUpdate = null,
 }) {
   const el = doc.createElement('div');
@@ -136,7 +139,6 @@ export function createArtistSearchPanel({
       <div class="asx-seg asx-orders" data-asx-seg="order">
         ${ORDERS.map(([v, label, tip]) => `<button type="button" data-asx-order="${v}" title="${escHtml(tip)}">${escHtml(label)}</button>`).join('')}
       </div>
-      <div class="asx-rows" role="list"></div>
       <div class="asx-note"></div>
     </div>`;
 
@@ -147,7 +149,6 @@ export function createArtistSearchPanel({
   const ratingBoxEl = el.querySelector('.asx-rating');
   const inputEl = el.querySelector('.asx-input');
   const suggEl = el.querySelector('.asx-sugg');
-  const rowsEl = el.querySelector('.asx-rows');
   const noteEl = el.querySelector('.asx-note');
   const addBtn = el.querySelector('[data-asx-act="add"]');
   const refreshBtn = el.querySelector('[data-asx-act="refresh"]');
@@ -170,7 +171,6 @@ export function createArtistSearchPanel({
   let kind = 'copyright';
   let ratingsPick = 'e';
   let ratingMode = 'count';
-  let rows = [];
   let steps = [];
   let total = 0;
   let busy = false;
@@ -178,7 +178,6 @@ export function createArtistSearchPanel({
   let suggSeq = 0;
   let suggTimer = null;
   let suggRows = [];
-  let thumbs = new Map();    // 이름 -> {image_url}
 
   const kindLabel = value => (KINDS.find(([v]) => v === value) || [, value])[1];
   const kindHint = value => (KINDS.find(([v]) => v === value) || [, , ''])[2];
@@ -208,54 +207,7 @@ export function createArtistSearchPanel({
     }).join('<span class="asx-chip-arrow">›</span>');
   }
 
-  /** 이름 옆에 달 **등급 단계**의 자리. 없으면 -1.
-   *
-   *  ⚠️ 그 등급이 **마지막 단계 자체**면 달지 않는다 - 아랫줄의 '매칭' 이 바로
-   *     그 수라서 같은 숫자가 두 번 나온다(읽는 사람이 다른 것인 줄 안다).
-   */
-  function ratingChipAt() {
-    let at = -1;
-    steps.forEach((step, i) => { if (step.kind === 'rating') at = i; });
-    return at >= 0 && at !== steps.length - 1 ? at : -1;
-  }
-
-  function rowHtml(row, chipAt) {
-    const info = thumbs.get(row.artist);
-    const img = info?.image_url
-      ? `<img src="${escHtml(info.image_url)}" alt="" loading="lazy" draggable="false">`
-      : '<span class="asx-noimg">—</span>';
-    let chip = '';
-    if (chipAt >= 0) {
-      // ⚠️ **사용자가 고른 차례**로 적는다. 서버는 `['e','q']` 로 정렬해 돌려주는데
-      //    그걸 쓰면 빵부스러기는 `q+e`, 칩은 `e+q` 가 되어 한 화면에서 갈린다(실측).
-      const set = ((stack[chipAt] || steps[chipAt]).ratings || []).join('+');
-      const count = Number(row.hits?.[chipAt] || 0);
-      chip = `<span class="asx-rate" title="${escHtml(set)} 등급 게시물 ${fmt(count)}장`
-        + ` / 총 ${fmt(row.total)}장">${escHtml(set)} ${fmt(count)} · ${pctText(count / Math.max(row.total, 1))}</span>`;
-    }
-    const last = steps[steps.length - 1];
-    const lastName = last?.kind === 'tag' ? last.tag : `rating:${(last?.ratings || []).join('+')}`;
-    return `<button type="button" class="asx-card" role="listitem" data-artist="${escHtml(row.artist)}">
-      <span class="asx-img">${img}</span>
-      <span class="asx-col">
-        <span class="asx-line">
-          <span class="asx-name">${escHtml(row.artist)}</span>${chip}
-        </span>
-        <span class="asx-nums-row">
-          <span title="이 작가의 총 게시물">총 ${fmt(row.total)}</span>
-          <span title="${escHtml(lastName)} 에 걸린 게시물 ${fmt(row.hit)}장 / 총 ${fmt(row.total)}장">
-            · 매칭 ${fmt(row.hit)} <b>${pctText(row.hit / Math.max(row.total, 1))}</b></span>
-          <span class="asx-w" title="Wilson 하한 - 표본이 얇으면 날 비중(${pctText(row.share)})보다 낮게 잡힌다">W ${pctText(row.wilson)}</span>
-        </span>
-      </span>
-    </button>`;
-  }
-
-  function paintRows() {
-    const chipAt = ratingChipAt();
-    rowsEl.innerHTML = rows.length
-      ? rows.map(row => rowHtml(row, chipAt)).join('')
-      : (stack.length ? '<div class="asx-empty">조건을 만족하는 작가가 없습니다.</div>' : '');
+  function paintCount() {
     headCountEl.textContent = stack.length ? `${fmt(total)}명` : '';
   }
 
@@ -321,8 +273,9 @@ export function createArtistSearchPanel({
   /** `candidate` 를 끝에 붙여 본다. 서버가 받아 주면 그때 `stack` 이 된다. */
   async function run(nextStack, {commit = true, keepNums = false} = {}) {
     if (!nextStack.length) {
-      stack = []; steps = []; rows = []; total = 0; thumbs = new Map();
-      paintStack(); paintRows(); paintForm(); note('');
+      stack = []; steps = []; total = 0;
+      paintStack(); paintCount(); paintForm(); note('');
+      onQuery?.(null);
       onUpdate?.();
       return true;
     }
@@ -331,8 +284,10 @@ export function createArtistSearchPanel({
     paintForm();
     let data = null;
     try {
+      // ⚠️ 여기서는 **셈만 한다**(`limit: 1`). 목록은 격자가 제 쪽수만큼 따로
+      //    받아 간다 - 같은 것을 두 번 그리면 둘이 어긋나 보인다.
       data = await postJson('/api/artist-affinity/search',
-                            {stack: nextStack, order, limit: 200});
+                            {stack: nextStack, order, limit: 1});
     } catch (error) {
       if (mine !== seq) return false;
       busy = false; paintForm();
@@ -353,10 +308,8 @@ export function createArtistSearchPanel({
     }
     if (commit) stack = nextStack;
     steps = data.steps || [];
-    rows = data.rows || [];
     total = Number(data.total || 0);
-    thumbs = new Map();
-    paintStack(); paintRows(); paintForm();
+    paintStack(); paintCount(); paintForm();
     const floored = steps.find(s => s.min_count_floor);
     note(!total ? '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.'
       : floored ? `이 축은 ${floored.min_count_floor}회 이상만 셉니다 `
@@ -365,20 +318,10 @@ export function createArtistSearchPanel({
     // ⚠️ 갱신 뒤에는 칸을 되돌리지 않는다 - 방금 사용자가 넣은 값이 곧 지금
     //    stack 의 값이라, 기본값으로 되돌리면 화면과 조건이 어긋나 보인다.
     if (!keepNums) resetNums();
+    // 조건이 정해졌다 - 목록은 **격자가** 받아 간다(사용자 지정 2026-09-19).
+    onQuery?.({stack: stack.map(step => ({...step})), order});
     onUpdate?.();
-    void loadThumbs(mine);
     return true;
-  }
-
-  /** 그림은 **격자와 같은 서버 한 곳**에서 받는다(`/api/artist-thumb/describe`). */
-  async function loadThumbs(mine) {
-    if (typeof describe !== 'function' || !rows.length) return;
-    const names = rows.map(r => r.artist);
-    let map = null;
-    try { map = await describe(names); } catch (_) { return; }
-    if (mine !== seq || !map) return;
-    thumbs = new Map(Object.entries(map));
-    paintRows();
   }
 
   /** 지금 칸의 값. ⚠️ `min` 속성은 **타자를 막지 않는다** - 여기서 한 번 더 건다.
@@ -525,8 +468,6 @@ export function createArtistSearchPanel({
       return;
     }
 
-    const card = event.target.closest('.asx-card[data-artist]');
-    if (card && typeof onPick === 'function') onPick(card.dataset.artist);
   });
 
   // 자동완성 목록은 **mousedown 에서** 고른다(초점을 잃기 전에).
@@ -573,20 +514,6 @@ export function createArtistSearchPanel({
     });
   });
 
-  // 결과 카드는 끌기 원본이다 - 격자 카드와 **같은 짐**을 싣는다(믹스 띠가 받는다).
-  el.addEventListener('pointerdown', event => {
-    const card = event.target.closest('.asx-card[data-artist]');
-    if (!card || typeof getBroker !== 'function') return;
-    const artist = card.dataset.artist;
-    if (!artist) return;
-    const image = card.querySelector('img')?.getAttribute('src') || '';
-    void Promise.resolve(getBroker()).then(broker => {
-      if (!broker || !(event.buttons & 1)) return;
-      broker.arm(event, {kind: 'artist', artist, weight: 1, image, label: artist},
-                 {onStart: () => onDragStart?.()});
-    });
-  });
-
   // ── 바깥에서 부르는 것 ────────────────────────────────────────────────
 
   async function ensureState() {
@@ -624,6 +551,8 @@ export function createArtistSearchPanel({
     summary: () => (stack.length
       ? [stack.map(stepLabel).join(' › '), `${fmt(total)}명`]
       : []),
+    /** 지금 조건. 격자가 쪽을 넘길 때마다 쓴다. */
+    query: () => (stack.length ? {stack: stack.map(step => ({...step})), order} : null),
     isReady: () => packState?.state === 'ready',
     focus: () => { if (isTagKind(kind) && kindUsable(kind)) inputEl.focus(); },
     reset: () => { void run([]); },

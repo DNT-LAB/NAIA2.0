@@ -3899,6 +3899,21 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   font-weight: 900;
   letter-spacing: 0;
 }
+/* 검색 결과 카드에만 붙는다 - 사용자가 청한 총/매칭/Wilson 이 여기로 왔다
+   (판에서 목록을 걷어내면서 이 수가 갈 곳이 카드다). 자세한 수는 말풍선에. */
+.artist-thumb-match-mark {
+  position: absolute; right: 7px; top: 7px; z-index: 3;
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid rgba(255, 224, 122, 0.45);
+  background: rgba(24, 20, 6, 0.82);
+  color: #ffe07a; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.artist-thumb-match-mark em {
+  font-style: normal; font-weight: 400; font-size: 9px;
+  color: rgba(255, 224, 122, 0.72);
+}
 .artist-thumb-queue-mark {
   left: 7px;
   padding: 0 7px;
@@ -29408,6 +29423,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   border: 1px solid var(--border-dim); background: rgba(12, 14, 22, 0.92);
   backdrop-filter: blur(6px);
 }
+/* ⚠️ 창 **안**의 줄로 들어오면 상자 안의 상자가 된다 - 옷을 벗는다.
+   결과 목록은 이제 아래 격자가 보여 주므로 이 판은 높이를 안 먹는다. */
+.rctl-search-host > .asx {
+  flex: 1 1 auto; min-width: 0;
+  padding: 0; border: 0; border-radius: 0; background: transparent;
+  backdrop-filter: none;
+}
+.rctl-search-host .asx-body { gap: 4px; }
 .asx-head { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
 .asx-title { font-size: 11px; font-weight: 700; color: var(--text-primary); }
 .asx-count { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
@@ -29512,66 +29535,12 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .asx-btn:disabled { opacity: 0.4; cursor: default; }
 .asx-btn:disabled:hover { color: var(--text-muted); border-color: var(--border-dim); }
 
-/* 결과 - 숫자가 본론이라 카드 격자가 아니라 **줄**로 그린다. */
-.asx-rows {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  display: flex; flex-direction: column; gap: 3px; padding: 1px;
-}
-/* ⚠️ `flex: 0 0 auto` 가 **없으면 줄이 납작해진다**. 세로 flex 안의 아이템은
-   기본이 `0 1 auto` 라, 200장이 들어오면 넘치는 대신 **서로 쥐어짜다**(실측 1.33px).
-   `overflow-y: auto` 는 그제야 일을 한다. */
-.asx-card {
-  flex: 0 0 auto;
-  display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0;
-  border: 1px solid var(--border-dim); border-radius: 6px; cursor: grab;
-  background: rgba(0, 0, 0, 0.24); color: var(--text-primary); text-align: left;
-  overflow: hidden; user-select: none;
-}
-.asx-card:hover { border-color: var(--accent); }
-.asx-img {
-  flex: 0 0 auto; width: 33px; aspect-ratio: 3 / 4; display: block;
-  background: rgba(255, 255, 255, 0.04);
-}
-.asx-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.asx-noimg {
-  display: flex; align-items: center; justify-content: center; height: 100%;
-  font-size: 9px; color: var(--text-dim);
-}
-/* ⚠️ `flex: 1 1 auto` 가 **없으면 칸이 카드 너비를 안 채운다**(기본 `0 1 auto`).
-   그러면 등급 칩도 Wilson 도 오른쪽 끝에 안 붙어 **줄마다 자리가 달라지고**,
-   200줄을 눈으로 훑을 수가 없다(실측으로 봤다). */
-.asx-col {
-  flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0;
-  gap: 1px; padding: 3px 5px 3px 0;
-}
-/* 이름줄 - 이름이 늘어나고 등급 칩은 안 줄어든다(고르는 근거가 그 수다). */
-.asx-line { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
-.asx-name {
-  flex: 1 1 auto; min-width: 0;
-  font-size: 10px; font-weight: 700; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-/* 등급 단계를 쌓았을 때만 뜬다 - 그 단계의 게시물 수와 비중. */
-.asx-rate {
-  flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px;
-  color: #9fd4ff; font-variant-numeric: tabular-nums; white-space: nowrap;
-}
-.asx-nums-row {
-  display: flex; align-items: baseline; gap: 4px;
-  font-family: var(--font-mono); font-size: 9px;
-  color: var(--text-muted); font-variant-numeric: tabular-nums;
-}
-/* 비중은 숫자보다 밝게 - 줄에서 제일 먼저 읽히는 것이 이것이다. */
-.asx-nums-row b { color: var(--text-primary); font-weight: 700; }
-.asx-nums-row .asx-w { margin-left: auto; color: #ffe07a; white-space: nowrap; }
-.asx-empty { padding: 14px 8px; text-align: center; font-size: 10px; color: var(--text-dim); }
 .asx-note { flex: 0 0 auto; font-size: 9px; line-height: 1.5; color: var(--text-dim); }
 .asx-note.is-bad { color: #ff9c9c; }
 .asx-note:empty { display: none; }
 /* 팩이 없으면 입력은 잠기고 사유만 남는다 - 고장이 아니다. */
 .asx.is-missing .asx-form,
-.asx.is-missing .asx-orders,
-.asx.is-missing .asx-rows { display: none !important; }
+.asx.is-missing .asx-orders { display: none !important; }
 
 /* ══ 믹스 띠 (js/features/mixQueuePanel.mjs) ══════════════════════════════
    리모컨 창 **안쪽, 격자 바로 위**의 가로 썸네일 띠(사용자 지정 2026-09-19).
@@ -29581,6 +29550,12 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 /* 믹스 모드가 꺼져 있으면 빈 줄이 gap 만 먹는다. */
 .dragpanel.rctl:not(.is-mix) .rctl-mix-row { display: none !important; }
 .rctl-mix-host { display: flex; min-width: 0; width: 100%; }
+
+/* 검색 줄 - 믹스 띠와 **같은 자리·같은 규칙**(사용자 지정 2026-09-19).
+   옆에 판을 따로 띄우면 화면을 두 번 먹고, 그 목록이 아래 격자와 어긋나 보인다. */
+.rctl-search-row { padding: 0; }
+.dragpanel.rctl:not(.is-search) .rctl-search-row { display: none !important; }
+.rctl-search-host { display: flex; min-width: 0; width: 100%; }
 
 .mixq {
   flex: 1 1 auto; min-width: 0; position: relative;

@@ -30,7 +30,7 @@
  *  관리 단위는 **탭**이다. 지금은 Artist Thumbnail 하나뿐이지만 여러 탭이 들어오면
  *  탭마다 한 구획이 쌓인다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-noloop';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-headdrag';
 // ⚠️ 모든 곳이 **같은 주소**로 불러야 중개자가 하나다(계약 시험이 대조).
 import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
 

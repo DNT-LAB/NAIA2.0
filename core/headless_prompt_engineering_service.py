@@ -377,14 +377,21 @@ class HeadlessPromptEngineeringService:
             ok, message = store.create_preset(text_value, main_settings=self._capture_main_settings())
             if not ok:
                 return context._toast(message, level="error")
-        elif key == "preset_apply_recommended":
-            # 값은 고른 모델 키(`NAID5F` / `NAID4.5F`). 예전 클라이언트는 `"true"` 를
-            # 보내는데, 그건 모델 키가 아니라 아래 판정에서 자연히 V4.5 로 떨어진다.
-            ok, message = self.create_and_apply_recommended_preset(model_key=text_value)
+        elif key in ("preset_apply_recommended", "preset_apply_artist_bench"):
+            # ⚠️ 영점은 **제 키로** 온다. 값으로 갈랐다가는 `"artist_bench"` 가 모델
+            #    키 자리에 들어가, 판정에 걸리지 않아 조용히 V4.5 추천이 적용된다.
+            if key == "preset_apply_artist_bench":
+                ok, message = self.create_and_apply_recommended_preset(flavor="artist_bench")
+                label = "V5 영점 프리셋 적용"
+            else:
+                # 값은 고른 모델 키(`NAID5F` / `NAID4.5F`). 예전 클라이언트는 `"true"` 를
+                # 보내는데, 그건 모델 키가 아니라 아래 판정에서 자연히 V4.5 로 떨어진다.
+                ok, message = self.create_and_apply_recommended_preset(model_key=text_value)
+                label = "추천 프리셋 적용"
             if not ok:
                 return context._toast(message, level="error")
             return [
-                context._toast(f"추천 프리셋 적용: {message}", level="success"),
+                context._toast(f"{label}: {message}", level="success"),
                 self.state(),
                 context.generation_param_schema_payload(),
                 {
@@ -513,7 +520,7 @@ class HeadlessPromptEngineeringService:
         return self.state()
 
     def create_and_apply_recommended_preset(
-        self, *, save_current: bool = True, model_key: str = "",
+        self, *, save_current: bool = True, model_key: str = "", flavor: str = "",
     ) -> tuple[bool, str]:
         """추천 프리셋을 만들어 즉시 적용한다.
 
@@ -521,13 +528,28 @@ class HeadlessPromptEngineeringService:
         2026-08-21). V5 와 V4.5 는 같은 프롬프트에 다르게 반응해서 추천 묶음 자체가
         다르다 - 하나로 뭉뚱그리면 어느 쪽에서도 추천이 아니게 된다.
         빈 값이면 지금까지처럼 V4.5 추천을 쓴다(기존 동작 유지).
+
+        `flavor="artist_bench"` 는 **V5 영점 프리셋**이다(사용자 지정 2026-09-19).
+        추천과 목적이 다르다 - 추천은 '예쁘게', 영점은 '작가 말고는 전부 같게' 다.
+        ⚠️ 그래서 모드를 **묻지 않고 NAI 로 못 박는다**. 영점의 근거인 `bench_0914`
+           가 NAID5F 로 뽑은 설정이라, 다른 백엔드에 얹으면 영점이 아니다.
         """
         from core.prompt_engineering_settings import get_prompt_engineering_store
 
         context = self.context
         store = get_prompt_engineering_store(context)
         mode = context.get_api_mode()
-        if mode == "COMFYUI":
+        if str(flavor or "").strip() == "artist_bench":
+            if mode != "NAI":
+                return False, "V5 영점 프리셋은 NAI 모드에서만 적용할 수 있습니다."
+            # 이름은 사용자가 지정했다 - 이미 있으면 숫자가 붙는다(덮어쓰지 않는다).
+            preset_name = self._unique_preset_name(store, "artist_bench_recommend", mode)
+            # 추천과 같은 틀: 지금 설정 위에 **영점만** 얹는다. 통째로 갈면 프리셋이
+            # 담지 않는 다른 모듈 설정이 조용히 사라진다.
+            module_settings = store.collect_settings(mode)
+            module_settings.update(self._artist_bench_recommended_module_settings())
+            main_settings = self._artist_bench_recommended_main_settings()
+        elif mode == "COMFYUI":
             if not self._is_comfyui_anima_mode():
                 return False, "추천 설정 적용은 COMFYUI ANIMA 모드에서만 지원됩니다."
             preset_name = self._unique_preset_name(store, "recommend_anima", mode)
@@ -575,6 +597,10 @@ class HeadlessPromptEngineeringService:
         if not store.set_preset(preset_name, mode):
             return False, f"프리셋을 적용할 수 없습니다: {preset_name}"
         self._apply_main_settings(main_settings)
+        # ⚠️ **프리셋을 적용한 뒤**다. 프리셋 적용이 세션 플래그를 안 건드리므로
+        #    순서는 사실 상관없지만, 나중에 그 계약이 바뀌어도 영점이 이기게 둔다.
+        if str(flavor or "").strip() == "artist_bench":
+            self._zero_session_resolution_flags()
         return True, preset_name
 
     def _is_comfyui_anima_mode(self) -> bool:
@@ -1345,6 +1371,155 @@ class HeadlessPromptEngineeringService:
             "VAR+": False,
             "DECRISP": True,
         }
+    @staticmethod
+    def _artist_bench_recommended_module_settings() -> dict[str, Any]:
+        """V5 영점(zero-point) 프롬프트 묶음 — `bench_0914` 기준.
+
+        사용자 지정 2026-09-19. 작가 썸네일을 뽑을 때 쓴 **기준 설정**이다 -
+        작가를 비교하려면 작가 말고는 전부 같아야 하고, 그 '같음' 의 정의가 이것이다.
+
+        ⚠️ `pre_prompt` 가 `0.75::` 로 **열린 채 끝나고** `post_prompt` 가
+           `countershade ::` 로 **닫는다**. 둘 사이에 ARTIST PROMPT 가 들어와
+           하나의 가중치 구문이 된다 - 한쪽만 고치면 구문이 깨진다.
+
+        ⚠️ 이 블록은 프리셋 파일에서 **생성**했다. 다시 동기화할 때도 손으로
+           옮기지 말 것 - `auto_hide_prompt` 만 1,448자다.
+        """
+        return {
+            "pre_prompt": "-1::artist collaboration ::, 0.75::",
+            "post_prompt": (
+                "countershade ::, year 2024, masterpiece, very aesthetic, high-quality digital art, "
+                "high complexity, -0.25::low complexity, detailed background ::, 0.15::ultra "
+                "complexity ::, no text, depthness"
+            ),
+            "auto_hide_prompt": (
+                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, bad"
+                " id, _logo, bad twitter id, comic, __background__, ~blurry background, ~sky "
+                "background, character doll, stuffed animal, stuffed toy, speech bubble, cyclops, "
+                "pov, 3d, glasses, mole, text focus, thought bubble, watermark, web address, body "
+                "writing, fake screenshot, facing away, |_|, __piercing__, tattoo, _tattoo, _text, "
+                "sound effects, greyscale, multiple views, __pubic hair__, peeing, rabbit, "
+                "__censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, child on "
+                "child, covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, "
+                "multiple boys, __measuring__, multiple views, big belly, curvy, doll joints, "
+                "dark-skinned male, looking at viewer, timestamp, battery indicator, tan, fake phone "
+                "screenshot, stomach bulge, __beach__, __shower__, on table, huge penis, __bug__, "
+                "giant insect, belly, eye mask, circle cut, dark nipples, signature, alternate race, "
+                "alternate species, dark nipples, livestream, slap mark, x-ray, armpit hair, health "
+                "bar, snapchat, facial mark, emoji, command spell, dark areolae, __piercing__, "
+                "__bed__, __pillow__, __sheet__, body markings, obese, __long tongue__, toddlercon, "
+                "__name__, handprint, __pasties__, mini person, __butt plug__, __eyepatch__, oppai "
+                "loli, sex toy, loli, chibi, chibi inset, makeup, mascara, large breasts, runny "
+                "makeup, third eye, anal hair, __halo__, __(style)__, __(cosplay)__, shikishi"
+            ),
+            "preprocessing_options": {
+                "remove_author": True,
+                "remove_work_title": True,
+                "remove_character_name": True,
+                "remove_character_features": True,
+                "remove_clothes": False,
+                "remove_clothing_event": False,
+                "remove_color": True,
+                "remove_location_and_background_color": True,
+                "remove_expression": False,
+                "remove_pose_action": False,
+                "remove_meta_tags": True,
+                "remove_object_tags": False,
+                "remove_noise_tags": False,
+                "closed_eyes_sync": True,
+                "e621_auto_boost": False,
+                "danbooru_auto_weight": False,
+                "tag_implication_compression": False,
+                "category_annotation": True
+            },
+            "e621_settings": {
+                "weight": 1.05,
+                "hidden_tags": [],
+                "mode": "confused"
+            },
+            "danbooru_weight_settings": {
+                "magnitude": 3,
+                "rating_blend": 0.3,
+                "override_on": True,
+                "override_scale": 0.9,
+                "override_min": 0.55,
+                "override_max": 1.25,
+                "rating_override_on": True,
+                "rating_override": "s",
+                "invert_weight": False
+            },
+            "ollama_boost_settings": {
+                "nl_weight": 1.0,
+                "effort": "rich",
+                "include_prefix": False,
+                "include_postfix": False,
+                "include_e621": False,
+                "allow_scent_style": True,
+                "allow_material_style": True,
+                "allow_light_style": False,
+                "emphasize_framing": False
+            },
+        }
+
+    @staticmethod
+    def _artist_bench_recommended_main_settings() -> dict[str, Any]:
+        """V5 영점 생성 파라미터 — `bench_0914` 기준.
+
+        ⚠️ `prompt` 는 **담지 않는다.** 벤치를 돌릴 때 쓴 작가 둘이 박혀 있어,
+           담으면 리모컨에서 고른 작가와 싸운다(V5 추천도 같은 이유로 안 담는다).
+        ⚠️ `random_resolution`/`auto_fit_resolution` 은 **여기 적지 않는다.** 적어도
+           `normalize_preset_main_settings` 가 걷어내서 아무 일도 안 일어난다
+           (프리셋이 세션 플래그를 덮지 않게 하는 계약). 그래서 영점은 그 둘을
+           `_zero_session_resolution_flags()` 로 **따로** 끈다 - 죽은 값을 적어 두면
+           시험은 "꺼진다" 를 지키는데 화면은 켜져 있다(실측에서 그랬다).
+        """
+        return {
+            "DECRISP": False,
+            "DYN": False,
+            "SMEA": False,
+            "VAR+": False,
+            "cfg_rescale": 0.0,
+            "cfg_scale": 6.7,
+            "enable_hr": True,
+            "height": 896,
+            "model": "NAID5F",
+            "nai_resolution_preset": "normal",
+            "nai_resolution_preset_enabled": True,
+            "negative": (
+                "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg"
+                " artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone,"
+                " multiple views, logo, too many watermarks, negative space, blank page, @_@, "
+                "mismatched pupils, glowing eyes, bad anatomy, no human, head out of frame, "
+                "perspective, closed eyes, monochrome, comic"
+            ),
+            "prompt_fixed": False,
+            "resolution": "1152 x 896",
+            "sampler": "k_euler_ancestral",
+            "scheduler": "karras",
+            "seed": "787421061",
+            "seed_fixed": False,
+            "steps": 23,
+            "transparent_background": False,
+            "width": 1152,
+            "wildcard_standalone": False,
+        }
+
+    def _zero_session_resolution_flags(self) -> None:
+        """Rnd Res / Auto Res 를 끈다 - **영점 전용**이다.
+
+        작가를 비교하려면 작가 말고는 전부 같아야 하는데, Rnd Res 가 켜져 있으면
+        1152x896 이 매 생성마다 딴 값으로 덮인다. 프리셋으로는 못 끄므로(위 주석)
+        세션 파라미터를 직접 민다.
+
+        ⚠️ 추천 설정에는 하지 않는다. 그쪽은 '예쁘게' 가 목적이라 사용자가 켜 둔
+           Rnd Res 를 빼앗을 이유가 없다(그 문제는 사용자가 미결정으로 남겨 뒀다).
+        """
+        for key in ("random_resolution", "auto_fit_resolution"):
+            try:
+                self.context.set_param(key, False)
+            except Exception:
+                pass
+
     @staticmethod
     def _nai_recommended_main_settings() -> dict[str, Any]:
         return {

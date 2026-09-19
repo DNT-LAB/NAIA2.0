@@ -793,13 +793,16 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-naid5pack')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-bench')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
       fetch: window.fetch.bind(window),
       escHtml,
       showToast,
+      // [V5 영점 프리셋] 이 쓴다 - 추천 설정 적용과 **같은 함수**를 건넨다.
+      confirmDialog: showConfirmDialog,
+      setModuleParam,
       promptEdit,
       negEdit,
       onPromptEdit: onPromptAuthoredEdit,

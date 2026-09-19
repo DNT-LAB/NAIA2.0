@@ -29849,6 +29849,16 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .rctl-pe-btn.is-on {
   color: #0d1020; background: var(--accent); border-color: var(--accent);
 }
+/* [V5 영점] - 옆의 prefix/postfix 는 **칸을 여는** 토글이고 이것은 **설정을 갈아
+   끼우는** 한 번짜리 일이다. 성격이 다르니 색으로 갈라 둔다(눌림 상태가 없다). */
+.rctl-pe-bench {
+  color: #9fd4ff; border-color: rgba(159, 212, 255, 0.42);
+  background: rgba(159, 212, 255, 0.08);
+}
+.rctl-pe-bench:hover {
+  color: #d6ecff; border-color: rgba(159, 212, 255, 0.75);
+  background: rgba(159, 212, 255, 0.16);
+}
 
 /* PE 빠른 수정이 사는 떠 있는 창. 창이 이미 상자라 안쪽 `.peq` 는 옷을 벗는다 -
    상자 안의 상자가 되면 좁은 창에서 테두리만 두 겹으로 보인다. */

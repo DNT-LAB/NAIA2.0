@@ -3,6 +3,10 @@ export function createArtistThumbController({
   fetch,
   escHtml,
   showToast,
+  // 되돌리기 어려운 일을 하기 전에 한 번 묻는다 · 모듈 파라미터를 서버로 보낸다.
+  // (둘 다 추천 설정 적용이 쓰는 그 함수 - 길을 둘로 만들지 않는다.)
+  confirmDialog = null,
+  setModuleParam = null,
   promptEdit,
   negEdit,
   onPromptEdit,
@@ -2985,6 +2989,35 @@ export function createArtistThumbController({
       remote.slot.appendChild(btn);
       peHeadButtons.set(key, btn);
     }
+    // [V5 영점 프리셋] - postfix 옆(사용자 지정 2026-09-19). 작가를 비교하려면
+    // 작가 말고는 전부 같아야 한다. 그 '같음' 을 한 번에 세워 주는 단추다.
+    const bench = document.createElement('button');
+    bench.type = 'button';
+    bench.className = 'rctl-pe-btn rctl-pe-bench';
+    bench.textContent = 'V5 영점';
+    bench.title = '작가 비교용 기준 설정(bench_0914)을 새 프리셋으로 만들어 적용합니다';
+    bench.addEventListener('click', () => { void applyArtistBenchPreset(); });
+    remote.slot.appendChild(bench);
+    peHeadButtons.set('__bench__', bench);
+  }
+
+  /** V5 영점 프리셋 - 추천 설정과 **같은 길**이다(묻고 → 서버가 만들어 적용).
+   *
+   *  ⚠️ 되돌리기 어려운 일이다(현재 프리셋을 저장하고 새것으로 갈아탄다) - 반드시
+   *     한 번 묻는다. 추천 설정도 같은 이유로 묻는다.
+   *  ⚠️ 보내는 키가 **추천과 다르다**(`preset_apply_artist_bench`). 값으로 갈랐다가는
+   *     그 값이 모델 키 자리에 들어가 조용히 V4.5 추천이 적용된다.
+   */
+  async function applyArtistBenchPreset() {
+    if (typeof setModuleParam !== 'function') {
+      showToast?.('프리셋을 적용할 수 없습니다.', 'error');
+      return;
+    }
+    const ok = await Promise.resolve(confirmDialog?.(
+      '작가 비교용 V5 영점 설정을 새 프리셋(artist_bench_recommend)으로 만들고 즉시 적용할까요?',
+      {title: 'V5 영점 프리셋'}));
+    if (!ok) return;
+    setModuleParam('prompt_engineering', 'preset_apply_artist_bench', 'true');
   }
 
   function unmountPeWindow() {

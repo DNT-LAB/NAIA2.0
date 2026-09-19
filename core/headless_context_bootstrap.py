@@ -51,6 +51,9 @@ def initialize_web_session_context(context: Any) -> None:
     initialize_runtime_state(context)
     apply_remote_ui_state(context)
     ensure_first_run_recommended_preset(context)
+    # Restore bypasses set_param("model"). Reuse its capability-based cleanup
+    # before the first module snapshot; future model support needs no V5 special case.
+    context._remote_state_service()._disable_unsupported_reference_frames("model")
     attach_wildcard_manager_context(context)
 
     if context.api_config_service is None:

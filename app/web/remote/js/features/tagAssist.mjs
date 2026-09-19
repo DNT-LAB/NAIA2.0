@@ -301,9 +301,26 @@ export function createTagAssistController({
     renderAutocomplete();
   }
 
+  /** 떠 있는 팝업을 리모컨 층 위로 올릴지 정한다.
+   *
+   *  ⚠️ 리모컨 창(10150)·보조 판(10193)은 기본 팝업 층(2230)보다 훨씬 위다 - 그 판에
+   *     사는 칸의 팝업을 그대로 두면 **판 뒤에 숨어 아예 안 보인다**(실측).
+   *  ⚠️ 태그 **정보** 툴팁 경로는 `acTarget` 을 비워 둔다 - 그래서 초점도 함께 본다.
+   *     실제로 정보 툴팁만 판 뒤로 숨는 것을 화면에서 봤다.
+   *  메인 프롬프트의 팝업까지 올리지는 않는다(창을 끌 때 유령·제목 툴팁과 순서가 엉킨다). */
+  function syncTooltipLayer() {
+    if (!tagTooltip) return;
+    const host = acTarget || document.activeElement;
+    const on = !!host?.closest?.('.rctl-side, .dragpanel');
+    tagTooltip.classList.toggle('drag-panel-target', on);
+    tagChipInfoTooltip?.classList.toggle('drag-panel-target', on);
+    promptInfoTooltip?.classList.toggle('drag-panel-target', on);
+  }
+
   function syncTooltipSide() {
     if (!tagTooltip) return;
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
+    syncTooltipLayer();
     if (window.innerWidth < 768) return;
     const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
     tagTooltip.classList.toggle('left-side', !!inModule);
@@ -421,6 +438,7 @@ export function createTagAssistController({
   }
 
   function positionTagTooltip() {
+    syncTooltipLayer();
     if (acMode) {
       positionAutocompleteTooltip();
       return;

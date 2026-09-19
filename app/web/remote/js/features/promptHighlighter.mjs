@@ -157,8 +157,16 @@ function matchPresetPromptToken(text, index) {
   return text.substring(index, end);
 }
 
-export function createPromptHighlighter({document, promptEdit, escHtml, getTagFilterState = null}) {
-  const highlight = document.getElementById('promptHighlight');
+export function createPromptHighlighter({
+  document, promptEdit, escHtml, getTagFilterState = null,
+  // 오버레이를 직접 줄 수 있다. 안 주면 예전대로 메인 프롬프트의 것을 찾는다.
+  highlight: highlightEl = null,
+  // ⚠️ 인스턴스를 둘 이상 띄울 때는 **반드시** 달리 준다. `CSS.highlights` 의 이름은
+  //    문서 전역이라, 같은 이름을 쓰면 나중에 칠한 쪽이 앞의 것을 통째로 덮어
+  //    먼저 만든 칸의 색이 조용히 사라진다.
+  namePrefix = 'naia-ph',
+}) {
+  const highlight = highlightEl || document.getElementById('promptHighlight');
   const wrap = highlight ? highlight.parentElement : null;
   const tagClassifier = createPromptTagClassifier();
   let mode = '';
@@ -557,7 +565,7 @@ export function createPromptHighlighter({document, promptEdit, escHtml, getTagFi
     let css = '';
     let ci = 0;
     for (const [color, spans] of colorRanges) {
-      const name = 'naia-phc-' + ci;
+      const name = `${namePrefix}c-${ci}`;
       ci += 1;
       const h = new Highlight();
       for (const [s, e] of spans) h.add(makeRange(s, e));
@@ -568,7 +576,7 @@ export function createPromptHighlighter({document, promptEdit, escHtml, getTagFi
     }
     let bi = 0;
     for (const [bg, rec] of bgRanges) {
-      const name = 'naia-phb-' + bi;
+      const name = `${namePrefix}b-${bi}`;
       bi += 1;
       const h = new Highlight();
       for (const [s, e] of rec.spans) h.add(makeRange(s, e));
@@ -579,7 +587,7 @@ export function createPromptHighlighter({document, promptEdit, escHtml, getTagFi
     }
     let di = 0;
     for (const rec of decoRanges.values()) {
-      const name = 'naia-phd-' + di;
+      const name = `${namePrefix}d-${di}`;
       di += 1;
       const h = new Highlight();
       for (const [s, e] of rec.spans) h.add(makeRange(s, e));
@@ -623,8 +631,19 @@ export function createPromptHighlighter({document, promptEdit, escHtml, getTagFi
     update();
   }
 
+  /** 이 인스턴스가 문서에 남긴 것을 거둔다 - 전역 `CSS.highlights` 와 <style>,
+   *  그리고 몸통 밖에 붙여 둔 계산용 요소. 한 판에 하나씩 띄우는 칸이라 필요하다. */
+  function destroy() {
+    clearCustomHighlights();
+    if (dynamicStyle?.parentNode) dynamicStyle.parentNode.removeChild(dynamicStyle);
+    dynamicStyle = null;
+    if (scratch?.parentNode) scratch.parentNode.removeChild(scratch);
+    scratch = null;
+  }
+
   return {
     setMode,
+    destroy,
     setTagClassificationIndex,
     classifyPromptTag: tagClassifier.classify,
     summarizeTagClasses: tagClassifier.summarize,

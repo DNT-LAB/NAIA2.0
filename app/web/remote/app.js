@@ -207,6 +207,12 @@ let resultUnsavedActionBusy = false;
 let naiConfigured = false;  // api_status.nai_configured — NAI Director 버튼 게이팅
 let grokReady = false;      // progrok proxy 'ready'(로그인 완료) — Grok 컨텍스트 메뉴 게이팅 (Electron 전용)
 let promptHighlighter = null;
+// 메인 프롬프트 말고 다른 칸에 붙인 강조들(리모컨의 PE 빠른 수정). 색인과 모드는
+// 여기 하나가 쥐고 모두에게 나눠 준다 - 두 곳에서 받아 오면 한쪽이 색 없이 남는다.
+let createPromptHighlighterFn = null;
+let promptHighlightIndexData = null;
+let extraPromptHighlightSeq = 0;
+const extraPromptHighlighters = new Set();
 let moduleBadges = null;
 let moduleLauncherControl = null;
 let webUiHiresfixAssistState = {enabled: true, target: 512};
@@ -787,7 +793,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260917-wheel1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-peqhl')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -819,6 +825,11 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260917-whe
       setPeField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),
       getPePreset: () => String(slashPeState().preset || ''),
       requestPeState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },
+      // 믹스 모드의 칸들도 메인 프롬프트와 **같은** 강조·같은 자동완성을 쓴다(사용자 지정).
+      attachPromptHighlight,
+      bindTagAssist,
+      // 큐의 이름줄이 진짜 아티스트 태그인지 - 아니면 색이 안 붙어 오타가 드러난다.
+      classifyPromptTag: tag => (promptHighlighter ? promptHighlighter.classifyPromptTag(tag) : null),
     });
   })
   .catch(error => {
@@ -2002,8 +2013,9 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260913-slash')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260919-multi')
   .then(({createPromptHighlighter}) => {
+    createPromptHighlighterFn = createPromptHighlighter;
     promptHighlighter = createPromptHighlighter({
       document,
       promptEdit,
@@ -4043,7 +4055,9 @@ async function loadPromptHighlightIndex() {
       const response = await fetch('/api/prompt-highlight-index', {cache: 'no-store'});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const index = await response.json();
+      promptHighlightIndexData = index;
       promptHighlighter.setTagClassificationIndex(index);
+      extraPromptHighlighters.forEach(extra => extra.setTagClassificationIndex(index));
       if (index?.stats) console.info('Prompt highlight index loaded', index.stats);
     } catch (error) {
       promptHighlightIndexPromise = null;
@@ -6477,8 +6491,41 @@ function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.
 function setNaiHighlightMode(mode) {
   currentMode = mode;
   if (promptHighlighter) promptHighlighter.setMode(mode);
+  extraPromptHighlighters.forEach(extra => extra.setMode(mode));
   // 캐릭터 프롬프트는 NAID4+ 전용 - 모드가 바뀌면 빠른 패널도 따라 사라진다.
   syncCharacterQuickPanelVisibility();
+}
+
+/** 메인 프롬프트가 아닌 칸에 **같은** 강조를 붙인다(리모컨의 PE 빠른 수정).
+ *
+ *  같은 코드·같은 색이라야 '메인과 동일' 이 시간이 지나도 참으로 남는다(사용자 지정).
+ *  ⚠️ `namePrefix` 를 인스턴스마다 달리 준다 - `CSS.highlights` 의 이름은 문서 전역이라
+ *     겹치면 나중 것이 앞의 색을 통째로 덮는다.
+ *  @returns {Promise<object|null>} 강조 손잡이 + `detach()`
+ */
+async function attachPromptHighlight(textarea, overlay) {
+  await promptHighlighterReady;
+  if (!createPromptHighlighterFn || !textarea || !overlay) return null;
+  extraPromptHighlightSeq += 1;
+  const instance = createPromptHighlighterFn({
+    document,
+    promptEdit: textarea,
+    highlight: overlay,
+    escHtml,
+    namePrefix: `naia-phx${extraPromptHighlightSeq}-`,
+    getTagFilterState: tag => (quickFilter ? quickFilter.findTag(tag) : null),
+  });
+  extraPromptHighlighters.add(instance);
+  instance.setMode(currentMode || modeSelect.value || 'NAI');
+  if (promptHighlightIndexData) instance.setTagClassificationIndex(promptHighlightIndexData);
+  else schedulePromptHighlightIndexLoad();
+  return {
+    ...instance,
+    detach() {
+      extraPromptHighlighters.delete(instance);
+      instance.destroy();
+    },
+  };
 }
 
 // ---- Right panel top-level tabs ----
@@ -13227,7 +13274,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slash-nokeyleak')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-panellayer')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -13255,6 +13302,9 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260913-slash-noke
       isTagInfoSuppressed: () => document.body.classList.contains('interactive-editing'),
     });
     tagAssist.bindDefaultTextareas();
+    // 자동완성 팝업은 body 직속이라 리모컨이 '바깥' 으로 친다 - 후보를 누르는
+    // 순간 판이 접힌다. 짝꿍으로 등록해 둔다(리모컨이 없을 때는 아무 뜻도 없다).
+    tagAssist.getTooltip()?.setAttribute('data-rctl-companion', 'tag-assist');
     pendingTagAssistBinds.splice(0).forEach(([textarea, options]) => {
       tagAssist.bindTagAssist(textarea, options);
     });

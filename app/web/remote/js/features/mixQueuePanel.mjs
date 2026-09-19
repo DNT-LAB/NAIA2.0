@@ -73,6 +73,8 @@ export function createMixQueuePanel({
   onGroupsMenu = () => {},
   // 큐 블럭을 끌어 내기 시작했다(확대 보기 끄기 등).
   onDragStart = () => {},
+  // (태그) => {kind, className}   메인 프롬프트와 **같은** 분류. 없으면 색을 안 칠한다.
+  classifyTag = null,
 } = {}) {
   const el = doc.createElement('div');
   el.className = 'mixq';
@@ -231,6 +233,15 @@ export function createMixQueuePanel({
     </div>`;
   }
 
+  /** 이 블럭의 이름이 무슨 태그인가. 분류는 `artist:` 접두사를 스스로 읽으니
+   *  **붙이기 전 이름**을 준다 - 안 그러면 접두사만 보고 전부 아티스트가 된다. */
+  function nameTokenClass(block) {
+    if (typeof classifyTag !== 'function') return '';
+    let result = null;
+    try { result = classifyTag(String(block.artist || '')); } catch (_) { return ''; }
+    return result?.className || '';
+  }
+
   function render() {
     listEl.innerHTML = blocks.map(b => {
       if (isAnchor(b)) return anchorRowHtml(b);
@@ -240,13 +251,16 @@ export function createMixQueuePanel({
       if (b.temp) classes.push('is-temp');
       if (b.locked) classes.push('is-locked');
       const name = b.withPrefix ? `artist:${b.artist}` : b.artist;
+      // 이름줄에 메인 프롬프트와 **같은** 분류색. 색인에 없는 이름은 색이 안 붙어
+      // 그 자리에서 오타가 드러난다(사용자 지정: "실수하지 않게").
+      const nameClass = ['mixq-name', nameTokenClass(b)].filter(Boolean).join(' ');
       return `<div class="${classes.join(' ')}" role="listitem"
                    data-mixq-id="${escHtml(b.id)}" title="${escHtml(name)}">
         <button type="button" class="mixq-step" data-mixq-step="-1" aria-label="가중치 내리기">−</button>
         <input class="mixq-weight" type="text" inputmode="decimal"
                value="${escHtml(weightText(b.weight))}" aria-label="가중치">
         <button type="button" class="mixq-step" data-mixq-step="1" aria-label="가중치 올리기">+</button>
-        <span class="mixq-name">${escHtml(name)}</span>
+        <span class="${nameClass}">${escHtml(name)}</span>
         ${b.temp ? '<span class="mixq-badge">임시</span>' : ''}
       </div>`;
     }).join('');

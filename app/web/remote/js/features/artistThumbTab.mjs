@@ -24,6 +24,12 @@ export function createArtistThumbController({
   // 리모컨을 켜면 오른쪽 화면을 Result 로 보낸다(사용자 지정) - 조각이 창으로 빠져
   // 나가 이 탭에는 자리 표시만 남기 때문이다.
   showResultTab = () => {},
+  // ── 메인 프롬프트에서 **빌려 오는** 것 셋 ──
+  //  색도 색인도 자동완성도 여기서 만들지 않는다. 흉내 내면 언젠가 두 화면이 갈린다.
+  //  ⚠️ 안 받으면 `typeof ... === 'function'` 이 **조용히 false** 다 - 에러도 안 나고 색만 영영 안 붙는다.
+  attachPromptHighlight = null,   // (textarea, overlay) => Promise<손잡이|null>
+  bindTagAssist = null,           // (textarea, options) => void
+  classifyPromptTag = null,       // (태그) => {kind, className} | null
 }) {
   const modeEl = document.getElementById('artistThumbMode');
   const filterEl = document.getElementById('artistThumbFilter');
@@ -2575,11 +2581,14 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260915-anchor1');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260917-wheel1');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260919-peqhl');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
       showToast,
+      // 이름줄이 **진짜 아티스트 태그인지** - 메인 프롬프트와 같은 분류를 쓴다.
+      // 색이 안 붙으면 그 줄은 색인에 없는 이름이다(오타가 그 자리에서 드러난다).
+      classifyTag: tag => (typeof classifyPromptTag === 'function' ? classifyPromptTag(tag) : null),
       formatToken: (artist, weight, options) => formatArtistToken(artist, weight, options),
       onChange: applyMixComposition,
       // 블럭에 올린 확대 보기는 **믹스 판 옆**에 뜬다(격자 칸은 창 옆 - 판을 덮는다).
@@ -2602,9 +2611,13 @@ export function createArtistThumbController({
     });
     // 믹스 레이아웃 **아래**에 PE 빠른 수정(사용자 지정). 값을 만들 권한은 없다.
     if (!peQuick && typeof getPeField === 'function' && typeof setPeField === 'function') {
-      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20260915-peq1');
+      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20260919-peqhl');
       peQuick = createPeQuickEdit({
         document, escHtml, showToast,
+        // 강조도 자동완성도 **메인 프롬프트의 것을 그대로** 빌린다(사용자 지정).
+        attachHighlight: (textarea, overlay) => (typeof attachPromptHighlight === 'function'
+          ? attachPromptHighlight(textarea, overlay) : null),
+        bindAssist: (textarea, options) => { bindTagAssist?.(textarea, options); },
         getField: key => getPeField(key),
         setField: (key, text, seenPreset) => setPeField(key, text, seenPreset),
         getPreset: () => getPePreset(),

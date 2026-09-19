@@ -116,6 +116,26 @@ class ArtistThumbnailService:
             "sha256": "9997E0FA2509D7EB19AC7EABC0CC11FACEEEC0FFA97D2C4975E5E88418ECF547",
         },
     }
+    # 여러 팩을 **한 목록으로** 이어 붙이는 가상 모드(사용자 지정 2026-09-19).
+    # 팩을 합쳐 담지는 않는다 - 그림 주소에 `mode=` 가 실리므로 목록만 잇고 그림은
+    # 제 팩이 낸다. 받지 않은 팩은 조용히 건너뛴다(사용자 지정).
+    #
+    # ⚠️ 거르는 이름은 **부분 문자열**이다. 사용자는 "NAID5-20000-Q" 라고 적었지만
+    #    실제 키는 `NAID5F-20000-Q`(F 가 있다) - 통째로 비교했으면 한 개도 안 걸러지고
+    #    조용히 네 팩이 붙었을 것이다. 아직 없는 `NAID5-STYLISH*` 도 같은 이유로
+    #    부분 문자열로 막아 둔다.
+    ARTIST_THUMB_VIRTUAL_MODES = {
+        "NAID5-ALL": {
+            "label": "NAID5 ALL",
+            "prefix": "NAID5",
+            "exclude_contains": ("20000-Q",),
+        },
+        "NAID5-CURATED": {
+            "label": "NAID5 Curated",
+            "prefix": "NAID5",
+            "exclude_contains": ("20000-Q", "STYLISH"),
+        },
+    }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
 
     def __init__(
@@ -135,6 +155,10 @@ class ArtistThumbnailService:
         self.legacy_wildcards_root = self.repo_root / "wildcards"
         self._mode_getter = mode_getter or (lambda: "NAI")
         self._data_cache: dict[str, dict] = {}
+        # ⚠️ 팩 하나가 1.3GB(파싱 4.2초)다. 가상 모드는 그 여럿에 걸쳐 있어서 한 칸만
+        #    쥐면 한 페이지를 그리는 동안 팩을 왕복한다 - 활성 가상 모드의 구성원
+        #    수만큼 열어 둔다(최대 3). 평소에는 예전처럼 하나다.
+        self._data_cache_limit = 1
         # 캐시한 팩의 **바이트 크기**. 갱신 중에도 옛 팩을 계속 보여 주되,
         # 다 받아 크기가 바뀌면 그때 새로 읽게 하는 열쇠다(2026-09-03).
         self._data_cache_size: dict[str, int] = {}
@@ -159,6 +183,49 @@ class ArtistThumbnailService:
     def _path(self, relative: str | Path) -> Path:
         path = Path(relative)
         return path if path.is_absolute() else self.repo_root / path
+
+    def is_virtual_mode(self, mode: str) -> bool:
+        return str(mode or "").strip() in self.ARTIST_THUMB_VIRTUAL_MODES
+
+    def virtual_members(self, mode: str, *, existing_only: bool = True) -> list[str]:
+        """가상 모드가 이어 붙일 **실제 팩 키**들. 표에 적힌 차례 그대로다.
+
+        ⚠️ 받지 않은 팩은 건너뛴다(사용자 지정) - 없는 것이 고장은 아니다.
+        """
+        spec = self.ARTIST_THUMB_VIRTUAL_MODES.get(str(mode or "").strip())
+        if not spec:
+            return []
+        prefix = str(spec.get("prefix") or "")
+        drop = tuple(spec.get("exclude_contains") or ())
+        out = []
+        for key, info in self.ARTIST_THUMB_MODES.items():
+            if not key.startswith(prefix):
+                continue
+            if any(piece in key for piece in drop):
+                continue
+            if existing_only and not self._file_state(info)["exists"]:
+                continue
+            out.append(key)
+        return out
+
+    def _virtual_owner_map(self, mode: str) -> dict[str, str]:
+        """작가 -> **그 작가의 그림을 가진 팩**. 앞 팩이 이긴다(표의 차례대로).
+
+        값이 팩 키라 `artist in thumb_data` 와 `thumb_data.keys()` 가 그대로 쓰이고,
+        그림 주소만 주인 팩으로 바뀐다 - 1.3GB 짜리 셋을 합쳐 담을 이유가 없다.
+        """
+        members = self.virtual_members(mode)
+        # 구성원을 다 열어 둘 수 있어야 한 페이지가 팩을 왕복하지 않는다.
+        self._data_cache_limit = max(1, len(members))
+        owner: dict[str, str] = {}
+        for key in members:
+            try:
+                data = self.load_data(key)
+            except Exception:
+                continue
+            for artist in data.keys():
+                owner.setdefault(str(artist), key)
+        return owner
 
     def _mode_info(self, mode: str) -> dict:
         key = str(mode or "").strip()
@@ -638,6 +705,9 @@ class ArtistThumbnailService:
         key = str(mode or "").strip()
         if not key:
             return {}
+        if self.is_virtual_mode(key):
+            # 가상 모드는 **제 팩이 없다**. 작가 -> 주인 팩 표가 그 자리를 대신한다.
+            return self._virtual_owner_map(key)
         with self._lock:
             info = self._mode_info(key)
             file_state = self._file_state(info)
@@ -659,8 +729,13 @@ class ArtistThumbnailService:
             data = json.loads(self._mode_path(key).read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 raise ValueError("Artist thumbnail data is invalid")
-            self._data_cache.clear()
-            self._data_cache_size.clear()
+            # ⚠️ 예전에는 여기서 캐시를 **통째로 비웠다**. 가상 모드는 팩 여럿에
+            #    걸쳐 있어서 그러면 한 페이지를 그리는 동안 1.3GB 를 왕복한다 -
+            #    한도만큼 남기고 가장 오래된 것부터 버린다.
+            while len(self._data_cache) >= max(1, self._data_cache_limit):
+                oldest = next(iter(self._data_cache))
+                self._data_cache.pop(oldest, None)
+                self._data_cache_size.pop(oldest, None)
             self._image_cache.clear()
             self._data_cache[key] = data
             self._data_cache_size[key] = file_state["size"]
@@ -759,6 +834,25 @@ class ArtistThumbnailService:
                 "size_mb": file_state["size_mb"],
                 "expected_size_mb": file_state["expected_size_mb"],
                 "sha256": file_state["sha256"],
+            })
+        for key, spec in self.ARTIST_THUMB_VIRTUAL_MODES.items():
+            members = self.virtual_members(key)
+            modes.append({
+                "key": key,
+                "label": str(spec.get("label") or key),
+                # 받을 것이 없다 - 구성원이 하나라도 있으면 쓸 수 있고, 없으면
+                # 드롭다운에 회색으로 남아 "먼저 팩을 받아라" 를 말한다.
+                "available": bool(members),
+                "needs_update": False,
+                "exists": bool(members),
+                "loaded": any(m in self._data_cache for m in members),
+                "size": 0,
+                "expected_size": 0,
+                "size_mb": 0,
+                "expected_size_mb": 0,
+                "sha256": "",
+                "virtual": True,
+                "members": members,
             })
         return {
             "modes": modes,
@@ -882,7 +976,13 @@ class ArtistThumbnailService:
         }
 
     def _image_url_resolver(self, mode_key: str, filter_key: str, thumb_data: dict):
-        """작가 이름 -> 썸네일 주소. 순서가 규약이다(아래 주석)."""
+        """작가 이름 -> 썸네일 주소. 순서가 규약이다(아래 주석).
+
+        ⚠️ 가상 모드에서는 `thumb_data` 의 값이 **주인 팩 키**다. 그림은 그 팩이 내야
+           하므로 주소의 `mode=` 도 거기로 간다 - 가상 키를 그대로 실으면 이미지
+           라우트가 "모르는 모드" 로 400 을 낸다.
+        """
+        virtual = self.is_virtual_mode(mode_key)
         try:
             favorite_thumb_items = self._load_thumbnail_cache().get("items", {})
         except Exception:
@@ -916,7 +1016,8 @@ class ArtistThumbnailService:
             #    그림을 밀어내지 않는다. 모드를 안 고르면 앞의 둘이 대부분 비어 있어
             #    실질적으로 사용자 썸네일이 먼저 보인다(즐겨찾기 123명 제외).
             if mode_key and artist in thumb_data:
-                return f"/api/artist-thumb/image?mode={quote(mode_key, safe='')}&artist={quote(artist, safe='')}"
+                owner = str(thumb_data[artist]) if virtual else mode_key
+                return f"/api/artist-thumb/image?mode={quote(owner, safe='')}&artist={quote(artist, safe='')}"
             if artist in favorite_thumb_items:
                 return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
             if artist in generated_lookup:

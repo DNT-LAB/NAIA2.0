@@ -149,9 +149,41 @@ def _join_tags(tags: List[str]) -> str:
 def serialize_rule(rule: Rule) -> str:
     """단일 규칙 → DSL 라인.
 
+    **원문이 지금 규칙과 같은 뜻이면 원문을 그대로 낸다**(`Rule.source_text`).
+    그래서 블록 편집기에서 한 규칙만 고쳐도 나머지 줄은 글자 하나 안 바뀌고,
+    손으로 쓴 표기(`!cat`·`rating(g)`·`((x:1.2))`·주석 공백·모양 깨진 식)가 살아남는다.
+    사용자가 그 규칙을 고쳤으면 뜻이 달라지므로 아래 규칙대로 재생성한다.
+
     - enabled=False → `#` prefix 주석화
     - kind="raw" → raw_dsl 원문 그대로 (enabled=False 면 앞에 `#`)
     """
+    if _source_still_matches(rule):
+        return str(rule.source_text)
+    return _serialize_generated(rule)
+
+
+def _source_still_matches(rule: Rule) -> bool:
+    """`rule.source_text` 가 지금 규칙과 같은 뜻인가.
+
+    원문을 **다시 파싱해** 지금 규칙과 같은 모양으로 재생성되는지 본다. 편집 여부를
+    따로 표시하는 깃발을 두지 않는 이유는, 그 깃발을 세워야 하는 자리가 편집 경로마다
+    흩어져 있어 하나만 빠뜨려도 낡은 원문이 되살아나기 때문이다(조용한 데이터 손실).
+    스스로 검산하는 쪽이 안전하다.
+    """
+    source = rule.source_text
+    if not source or not str(source).strip():
+        return False
+    # 순환 임포트를 만들지 않으려고 함수 안에서 가져온다(dsl_parser 는 이 모듈을 쓴다).
+    from core.conditional.dsl_parser import parse_rule
+
+    probe = parse_rule(str(source))
+    if probe.kind != rule.kind or probe.enabled != rule.enabled:
+        return False
+    return _serialize_generated(probe) == _serialize_generated(rule)
+
+
+def _serialize_generated(rule: Rule) -> str:
+    """원문을 보지 않고 **블록에서 다시 만든** DSL 라인."""
     if rule.kind == "raw":
         line = (rule.raw_dsl or "").strip()
         if not line:

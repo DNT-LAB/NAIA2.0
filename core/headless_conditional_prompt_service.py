@@ -47,6 +47,9 @@ class HeadlessConditionalPromptService:
                     "description": info.description,
                     "is_bundled": bool(info.is_bundled),
                     "rule_count": int(info.rule_count),
+                    # 어느 편집기에서 저장했나 - 목록 배지와 교차 편집기 안내용.
+                    # 이 필드가 생기기 전 프리셋은 None(배지 없음).
+                    "source_mode": info.source_mode,
                 })
             return infos
         except Exception as exc:
@@ -467,16 +470,29 @@ class HeadlessConditionalPromptService:
             )
 
         book = None
+        # 문서 전체 원문 - 규칙마다의 `source_text` 가 줄을 지키고, 이것이 줄 사이의
+        # 배치(한 줄에 쉼표로 이어 쓴 형식·빈 줄)를 지킨다. 불러올 때 뜻이 같을 때만 쓴다.
+        source_dsl: str | None = None
+        source_mode: str | None = None
         try:
             if book_data is not None:
                 book = rulebook_from_dict(book_data)
+                source_mode = self._editor_mode(settings)
             elif source_preset:
-                book = storage.load(source_preset)
+                # 복제 - 원본의 원문·출처까지 함께 옮긴다. 안 옮기면 복제본만
+                # 줄 배치가 달라져 "복제했는데 내용이 다르다" 가 된다.
+                book, meta = storage.load_with_meta(source_preset)
+                raw_source = meta.get("source_dsl")
+                source_dsl = str(raw_source) if isinstance(raw_source, str) else None
+                raw_mode = meta.get("source_mode")
+                source_mode = raw_mode if raw_mode in {"legacy", "v2"} else None
             else:
                 # ⚠️ **화면에 보이는 규칙**을 담는다. 예전에는 `rules_v2` 로 못박혀
                 # 있어서, Legacy 편집기를 쓰던 사용자가 저장을 누르면 자기가 보고
                 # 있지도 않은(대개 비어 있는) v2 텍스트가 프리셋이 됐다.
-                book = parse_rulebook(self._active_rules(settings))
+                source_dsl = self._active_rules(settings)
+                source_mode = self._editor_mode(settings)
+                book = parse_rulebook(source_dsl)
                 opts = self._active_engine_options(settings)
                 book.max_passes = opts["max_passes"]
                 book.stop_on_match = opts["stop_on_match"]
@@ -490,7 +506,7 @@ class HeadlessConditionalPromptService:
         if book is None:
             return self._state_with(messages=[self._toast_message("프리셋 저장 실패: 규칙을 해석할 수 없습니다.", "error")])
 
-        storage.save(name, book)
+        storage.save(name, book, source_dsl=source_dsl, source_mode=source_mode)
         # ⚠️ 이름표는 **화면의 규칙이 그 프리셋일 때만** 건다. 복제나 빈 프리셋은
         #    파일만 만들고 화면을 안 건드리므로(아래 activate 참조), 여기서 이름표를
         #    걸면 "이름은 V5 인데 규칙은 옛것" 인 불일치가 남는다.
@@ -521,7 +537,7 @@ class HeadlessConditionalPromptService:
         if not name:
             return self._state_with(messages=[self._toast_message("로드할 프리셋 이름이 비어 있습니다.", "error")])
         try:
-            book = self._storage().load(name)
+            book, meta = self._storage().load_with_meta(name)
         except FileNotFoundError:
             return self._state_with(messages=[
                 self._toast_message(f"조건부 프리셋을 찾을 수 없습니다: {name}", "error"),
@@ -534,7 +550,7 @@ class HeadlessConditionalPromptService:
         # 순간 낯선 블록 편집기로 끌려가고 자기 규칙은 화면에서 사라졌다
         # (`settings["rules"]` 에 남아 있지만 비활성이라 보이지 않는다).
         self._write_active_rules(
-            settings, serialize_rulebook(book), reason=f"프리셋 불러오기: {name}",
+            settings, self._restore_preset_text(book, meta), reason=f"프리셋 불러오기: {name}",
         )
         # 프리셋의 옵션은 **그 프리셋을 부른 모드에만** 실린다.
         self._set_engine_options(settings, {
@@ -543,7 +559,44 @@ class HeadlessConditionalPromptService:
         })
         self._set_active_preset(settings, name)
         store.apply_settings(settings)
-        return self._state_with(messages=[self._toast_message(f"조건부 프리셋 로드: {name}", "success")])
+        messages = [self._toast_message(f"조건부 프리셋 로드: {name}", "success")]
+        # ⚠️ 프리셋은 **두 편집기 공용**이다. 반대쪽에서 저장한 것을 부르면 지금 칸이
+        #    그 내용으로 바뀌는데, 예고가 없으면 "New Editor 기준으로 Legacy 내용이
+        #    바뀌었다" 로 체감된다(사용자 제보). 막지는 않는다 - 되돌리기가 있고,
+        #    불러오기는 자주 쓰는 동작이라 확인까지 세우면 마찰만 커진다(사용자 결정).
+        saved_mode = meta.get("source_mode")
+        if saved_mode in {"legacy", "v2"} and saved_mode != self._editor_mode(settings):
+            other = "New Editor" if saved_mode == "v2" else "Legacy DSL"
+            messages.append(self._toast_message(
+                f"{other} 에서 저장된 프리셋입니다 — 지금 편집기의 규칙이 그 내용으로 바뀌었습니다.",
+                "info",
+            ))
+        return self._state_with(messages=messages)
+
+    @staticmethod
+    def _restore_preset_text(book, meta: dict[str, Any]) -> str:
+        """프리셋을 화면에 되돌릴 텍스트.
+
+        저장해 둔 문서 원문(`source_dsl`)이 **지금 규칙과 같은 뜻이면 그대로** 쓴다.
+        규칙마다의 원문(`Rule.source_text`)이 줄 하나하나를 지키는 데 더해, 이쪽은
+        줄 사이의 배치(한 줄에 쉼표로 이어 쓴 형식·빈 줄)까지 지킨다.
+
+        ⚠️ 뜻을 **다시 재서** 판정한다. 그래서 누군가 이 프리셋을 블록 편집기에서
+        고쳐 저장하며 `source_dsl` 을 갱신하지 않았더라도 낡은 원문이 되살아나지
+        않는다 - "지우는 걸 잊었다" 로 데이터가 어긋나는 길을 아예 막는다.
+        """
+        from core.conditional.dsl_parser import parse_rulebook
+        from core.conditional.dsl_serializer import serialize_rulebook
+
+        generated = serialize_rulebook(book)
+        source = meta.get("source_dsl")
+        if isinstance(source, str) and source.strip():
+            try:
+                if serialize_rulebook(parse_rulebook(source)) == generated:
+                    return source
+            except Exception as exc:   # 원문이 깨졌어도 로드는 살아야 한다
+                print(f"Remote: conditional preset source_dsl check failed: {exc}")
+        return generated
 
     def _handle_preset_delete(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         name = text_value.strip()

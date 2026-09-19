@@ -55,6 +55,8 @@ class PresetInfo:
     description: str
     is_bundled: bool
     rule_count: int
+    # 어느 편집기에서 저장했나(`legacy`/`v2`). 이 필드가 생기기 전 프리셋은 None.
+    source_mode: Optional[str] = None
 
 
 # ============================================================================
@@ -63,9 +65,25 @@ class PresetInfo:
 
 
 def rulebook_to_dict(
-    book: RuleBook, *, name: str = "", description: str = ""
+    book: RuleBook,
+    *,
+    name: str = "",
+    description: str = "",
+    source_dsl: str | None = None,
+    source_mode: str | None = None,
 ) -> dict:
-    return {
+    """RuleBook → 프리셋 dict.
+
+    `source_dsl` 은 이 프리셋이 만들어진 **문서 전체 원문**이다. 규칙마다의 원문
+    (`Rule.source_text`)이 줄 하나하나를 지키는 반면 이쪽은 줄 사이의 배치 - 한 줄에
+    쉼표로 이어 쓴 형식, 빈 줄, 줄 끝 공백 - 를 지킨다. 불러올 때 **뜻이 같을 때만**
+    쓴다(`headless_conditional_prompt_service._restore_preset_text`).
+
+    `source_mode` 는 어느 편집기에서 저장했는지(`legacy`/`v2`). 목록 배지와 교차
+    편집기 안내에만 쓰고, **복원 여부를 가르는 데는 쓰지 않는다** - 뜻이 같으면
+    어느 편집기에서 왔든 원문이 맞다.
+    """
+    payload = {
         "schema_version": SCHEMA_VERSION,
         "name": name,
         "description": description,
@@ -76,6 +94,12 @@ def rulebook_to_dict(
         },
         "rules": [_rule_to_dict(r) for r in book.rules],
     }
+    # ⚠️ 키만 더한다. `schema_version` 을 올리면 구버전 빌드가 프리셋을 아예 못 연다.
+    if source_dsl is not None:
+        payload["source_dsl"] = str(source_dsl)
+    if source_mode in {"legacy", "v2"}:
+        payload["source_mode"] = source_mode
+    return payload
 
 
 def rulebook_from_dict(data: dict) -> RuleBook:
@@ -104,6 +128,10 @@ def _rule_to_dict(r: Rule) -> dict:
         ),
         "action": _action_to_dict(r.action) if r.action is not None else None,
         "raw_dsl": r.raw_dsl,
+        # 원문 한 줄. ⚠️ `schema_version` 은 **올리지 않는다** - 올리면
+        # `rulebook_from_dict` 가 상위 버전을 거부해 구버전 빌드가 프리셋을 못 연다.
+        # 키만 더하면 옛 빌드는 조용히 무시하고 지금까지처럼 동작한다.
+        "source_text": r.source_text,
     }
 
 
@@ -118,6 +146,7 @@ def _rule_from_dict(d: dict) -> Rule:
         condition=_condition_from_dict(cond) if cond else None,
         action=_action_from_dict(act) if act else None,
         raw_dsl=d.get("raw_dsl"),
+        source_text=d.get("source_text"),
     )
     rid = d.get("id")
     if rid:
@@ -219,6 +248,8 @@ class PresetStorage:
         book: RuleBook,
         *,
         description: str = "",
+        source_dsl: str | None = None,
+        source_mode: str | None = None,
     ) -> Path:
         """사용자 프리셋 저장. 번들 디렉터리에는 쓰지 않음."""
         safe = _sanitize_name(name)
@@ -226,7 +257,10 @@ class PresetStorage:
             raise ValueError(f"유효하지 않은 프리셋 이름: {name!r}")
         self.save_dir.mkdir(parents=True, exist_ok=True)
         path = self.save_dir / f"{safe}.json"
-        data = rulebook_to_dict(book, name=name, description=description)
+        data = rulebook_to_dict(
+            book, name=name, description=description,
+            source_dsl=source_dsl, source_mode=source_mode,
+        )
         path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -239,11 +273,17 @@ class PresetStorage:
         - 경로(`.json` 확장자 + 존재)면 그 파일 사용
         - 이름이면 `save_dir` → `bundled_dir` 순서로 탐색 (사용자 우선)
         """
+        return self.load_with_meta(name_or_path)[0]
+
+    def load_with_meta(self, name_or_path: str) -> tuple[RuleBook, dict]:
+        """`load()` + 파일의 원본 dict. `source_dsl`/`source_mode` 를 읽으려면 이쪽."""
         path = self._resolve(name_or_path)
         if path is None:
             raise FileNotFoundError(f"프리셋을 찾을 수 없음: {name_or_path!r}")
         data = json.loads(path.read_text(encoding="utf-8"))
-        return rulebook_from_dict(data)
+        if not isinstance(data, dict):
+            data = {}
+        return rulebook_from_dict(data), data
 
     def delete(self, name: str) -> bool:
         """사용자 프리셋만 삭제 가능. 번들은 보호."""
@@ -343,12 +383,14 @@ def _peek(path: Path, *, is_bundled: bool) -> Optional[PresetInfo]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+    mode = data.get("source_mode")
     return PresetInfo(
         name=data.get("name") or path.stem,
         path=path,
         description=data.get("description", ""),
         is_bundled=is_bundled,
         rule_count=len(data.get("rules") or []),
+        source_mode=mode if mode in {"legacy", "v2"} else None,
     )
 
 

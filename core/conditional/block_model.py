@@ -134,6 +134,17 @@ class Rule:
     # kind == "raw"
     raw_dsl: Optional[str] = None
 
+    # 이 규칙이 만들어진 **원문 한 줄**(있으면). `#` 접두사까지 그대로 담는다.
+    #
+    # 직렬화는 이 원문이 지금 규칙과 **같은 뜻**일 때 원문을 그대로 낸다
+    # (`dsl_serializer.serialize_rule`). 그래서 블록 편집기에서 한 규칙을 고쳐도
+    # 나머지 줄은 글자 하나 안 바뀐다 - 손으로 쓴 표기(`!cat`·`rating(g)`·괄호·공백)가
+    # 살아남는다. 뜻이 달라지면(=사용자가 그 규칙을 고쳤으면) 재생성한다.
+    #
+    # ⚠️ `raw_dsl` 과 다르다. `raw_dsl` 은 **파싱에 실패한** 줄의 보존용 페이로드이고
+    #    이것은 파싱에 성공한 줄까지 포함한 "출처" 다.
+    source_text: Optional[str] = None
+
 
 @dataclass
 class RuleBook:

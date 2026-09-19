@@ -66,10 +66,16 @@ def parse_rulebook(dsl_text: str) -> RuleBook:
 
 
 def parse_rule(rule_line: str) -> Rule:
-    """단일 DSL 라인 → Rule. 실패 시 kind='raw'."""
-    line = rule_line.strip()
+    """단일 DSL 라인 → Rule. 실패 시 kind='raw'.
+
+    파싱에 성공하든 실패하든 **원문 한 줄을 `source_text` 에 그대로 담는다.**
+    직렬화가 "뜻이 그대로면 원문을 그대로" 내기 위해 쓴다 - 그래야 블록 편집기를
+    거쳐도 사용자가 손으로 쓴 표기가 살아남는다(`block_model.Rule.source_text`).
+    """
+    source = rule_line.strip()
+    line = source
     if not line:
-        return Rule(kind="raw", raw_dsl="", enabled=True)
+        return Rule(kind="raw", raw_dsl="", enabled=True, source_text="")
 
     enabled = True
     if line.startswith("#"):
@@ -85,12 +91,14 @@ def parse_rule(rule_line: str) -> Rule:
             enabled=enabled,
             condition=condition,
             action=action,
+            source_text=source,
         )
     except Exception:
         return Rule(
             kind="raw",
             enabled=enabled,
             raw_dsl=line,
+            source_text=source,
         )
 
 

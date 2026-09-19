@@ -17255,6 +17255,21 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   background: rgba(129, 199, 132, 0.22);
   color: #e8f5e9;
 }
+/* 반대쪽 편집기에서 저장한 프리셋임을 알리는 작은 꼬리표
+   (conditionalPromptPanel.mjs `presetOriginBadge`) */
+.cond-preset-origin {
+  margin-left: 6px;
+  border: 1px solid rgba(169, 145, 255, 0.4);
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: rgba(143, 92, 255, 0.16);
+  color: #d5c9ff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  vertical-align: middle;
+}
 /* 덮어쓰기 확인 상자의 본문·경고 줄 */
 .cond-preset-dialog-body {
   color: var(--text-primary);

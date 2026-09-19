@@ -139,6 +139,7 @@ export function createConditionalPromptPanel({
       condition: emptyCondition('tag'),
       action: emptyAction('append_list'),
       raw_dsl: null,
+      source_text: null,   // 새로 만든 규칙은 출처가 없다 — 늘 재생성한다
     };
   }
 
@@ -192,7 +193,7 @@ export function createConditionalPromptPanel({
   function normalizeRule(rule, index) {
     const raw = rule && typeof rule === 'object' ? rule : emptyRule(index);
     const kind = raw.kind === 'raw' ? 'raw' : 'block';
-    return {
+    const normalized = {
       id: safeText(raw.id) || newId(),
       name: safeText(raw.name),
       enabled: raw.enabled !== false,
@@ -201,7 +202,22 @@ export function createConditionalPromptPanel({
       condition: normalizeCondition(raw.condition),
       action: normalizeAction(raw.action),
       raw_dsl: raw.raw_dsl == null ? null : safeText(raw.raw_dsl),
+      // 이 규칙이 만들어진 원문 한 줄(서버가 실어 보낸다).
+      source_text: raw.source_text == null ? null : safeText(raw.source_text),
     };
+    // ⚠️ "아직 안 고쳤나" 의 기준점. **서버에서 갓 온 규칙에만 찍는다.**
+    //    서버는 이 규칙을 `source_text` 를 파싱해 만들었으므로, 그 순간의 "블록에서
+    //    다시 만든 줄" 은 원문과 같은 뜻이다. 나중에 그 값이 달라져 있으면 사용자가
+    //    고쳤다는 뜻이다.
+    //
+    //    ⚠️ 이미 찍혀 있으면 **다시 찍지 않는다.** 블록을 고칠 때마다
+    //    `render(currentState)` 가 돌고 그 안에서 이 함수가 다시 불리는데, 그때 새로
+    //    찍으면 기준점이 편집을 따라가 영영 "안 고침" 으로 남는다 - 실제로 태그를
+    //    더했는데 미리보기가 원문 그대로였다(라이브에서 잡음).
+    normalized._source_generated = raw._source_generated !== undefined
+      ? raw._source_generated
+      : generatedRuleLine(normalized);
+    return normalized;
   }
 
   function fallbackBookFromDsl(text, engineOptions = {}) {
@@ -428,7 +444,8 @@ export function createConditionalPromptPanel({
     return 'main+=';
   }
 
-  function serializeRule(rule) {
+  /** 원문을 보지 않고 **블록에서 다시 만든** DSL 라인 (백엔드 `_serialize_generated`). */
+  function generatedRuleLine(rule) {
     if (!rule) return '';
     if (rule.kind === 'raw') {
       const line = safeText(rule.raw_dsl).trim();
@@ -438,6 +455,20 @@ export function createConditionalPromptPanel({
     }
     const line = `(${serializeCondition(rule.condition, true)}):${serializeAction(rule.action)}`;
     return rule.enabled ? line : `#${line}`;
+  }
+
+  /** 원문이 지금 규칙과 같은 뜻이면 **원문 그대로**, 아니면 재생성.
+   *
+   *  백엔드(`dsl_serializer.serialize_rule`)와 같은 규칙이다. 여기엔 DSL 파서가
+   *  없으므로 원문을 다시 파싱하는 대신, 규칙이 도착한 순간 찍어 둔 생성본
+   *  (`_source_generated`)과 지금 생성본을 견준다 — 같으면 안 고친 것이다.
+   */
+  function serializeRule(rule) {
+    if (!rule) return '';
+    const generated = generatedRuleLine(rule);
+    const source = safeText(rule.source_text);
+    if (source.trim() && rule._source_generated === generated) return source;
+    return generated;
   }
 
   function serializeRulebook(book) {
@@ -533,11 +564,16 @@ export function createConditionalPromptPanel({
       name: book.name || '',
       description: book.description || '',
       engine_options: book.engine_options,
-      rules: book.rules.map(rule => ({
-        ...rule,
-        condition: normalizeCondition(rule.condition),
-        action: normalizeAction(rule.action),
-      })),
+      rules: book.rules.map(rule => {
+        // `_source_generated` 는 **이 화면에서만** 쓰는 표식이다(위 `normalizeRule`).
+        // 서버는 원문을 스스로 다시 파싱해 검산하므로 보낼 필요가 없다.
+        const {_source_generated: _drop, ...rest} = rule;
+        return {
+          ...rest,
+          condition: normalizeCondition(rule.condition),
+          action: normalizeAction(rule.action),
+        };
+      }),
     };
   }
 
@@ -1033,6 +1069,23 @@ export function createConditionalPromptPanel({
       </div>`;
   }
 
+  /** 프리셋이 **어느 편집기에서** 저장됐는지 알리는 배지.
+   *
+   *  프리셋 파일은 두 편집기가 함께 쓴다. 반대쪽에서 저장한 것을 부르면 지금 칸이
+   *  그 내용으로 바뀌는데(그게 사용자 제보의 마지막 단계였다), 목록에 이름과 규칙
+   *  수만 있어 예고가 없었다. 지금 편집기와 **다를 때만** 띄운다 - 같은 쪽 것까지
+   *  표시하면 배지가 늘 붙어 있어 아무 신호도 못 준다.
+   *  이 필드가 생기기 전 프리셋은 `source_mode` 가 없어 표시하지 않는다.
+   */
+  function presetOriginBadge(preset, editorMode) {
+    const mode = preset?.source_mode;
+    if (mode !== 'legacy' && mode !== 'v2') return '';
+    const current = editorMode === 'v2' ? 'v2' : 'legacy';
+    if (mode === current) return '';
+    const label = mode === 'v2' ? 'New Editor' : 'Legacy DSL';
+    return ` <em class="cond-preset-origin" title="${escapeAttr(label)} 에서 저장된 프리셋입니다">${escHtml(label)}</em>`;
+  }
+
   function renderPresetPane(m) {
     const presets = Array.isArray(m.presets) ? m.presets : [];
     const options = [
@@ -1049,7 +1102,7 @@ export function createConditionalPromptPanel({
       const active = name === m.active_preset;
       return `
         <button type="button" class="cond-preset-item${active ? ' active' : ''}" data-cond-action="load-preset" data-preset-name="${escapeAttr(name)}">
-          <span>${escHtml(name)}</span>
+          <span>${escHtml(name)}${presetOriginBadge(preset, m.editor_mode)}</span>
           <small>${preset.rule_count ?? 0}개${preset.is_bundled ? ' · 번들' : ''}</small>
         </button>`;
     }).join('');

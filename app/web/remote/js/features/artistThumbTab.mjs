@@ -43,6 +43,7 @@ export function createArtistThumbController({
   const downloadBtn = document.getElementById('artistThumbDownloadBtn');
   const randomBtn = document.getElementById('artistThumbRandomBtn');
   const remoteBtn = document.getElementById('artistThumbRemoteBtn');
+  const groupsBtn = document.getElementById('artistThumbGroupsBtn');
   const selectBtn = document.getElementById('artistThumbSelectBtn');
   const batchBtn = document.getElementById('artistThumbBatchBtn');
   const batchMenu = document.getElementById('artistThumbBatchMenu');
@@ -2351,8 +2352,8 @@ export function createArtistThumbController({
   async function ensureGroups() {
     if (groupsApi) return groupsApi;
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
-      import('./artistGroupsStore.mjs?v=20260917-grp1'),
-      import('./artistGroupWindow.mjs?v=20260919-tempwin'),
+      import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
+      import('./artistGroupWindow.mjs?v=20260919-srvtemp'),
       import('./dragBroker.mjs?v=20260917-grp1'),
     ]);
     const store = createArtistGroupsStore({fetch});
@@ -2402,10 +2403,9 @@ export function createArtistThumbController({
       onPick: pickFromGroup,
       onSendToQueue: items => { void sendToQueue(items); },
       onDragStart: () => remote?.hideZoom?.(),
-      onClosed: info => {
+      onClosed: () => {
         groupWindows.delete(groupId);
         if (lastTempGroupId === groupId) lastTempGroupId = '';
-        if (info?.reopen) void openGroupWindow(info.reopen);
       },
     });
     groupWindows.set(groupId, win);
@@ -2413,10 +2413,17 @@ export function createArtistThumbController({
     return win;
   }
 
+  /** 이름 없는 그룹 하나 + 그 창. ⚠️ 이름은 **서버가** 붙인다(`임시 창 N`) -
+   *  화면에서 번호를 세면 두 창이 같은 이름을 갖는 경합이 생긴다. */
   async function newTempWindow(items = []) {
     const {store} = await ensureGroups();
-    const group = store.createTemp(items);
-    return openGroupWindow(group.id);
+    try {
+      const group = await store.createTemp(items);
+      return openGroupWindow(group.id);
+    } catch (error) {
+      showToast?.(`임시 창을 열지 못했습니다 — ${error.message}`, 'error');
+      return null;
+    }
   }
 
   /** 우클릭 [임시 창에 올리기]: 메뉴에서 **고른 창**으로. 안 고르면 마지막으로 쓰던
@@ -2470,10 +2477,10 @@ export function createArtistThumbController({
   function tempMenuRowsHtml() {
     const store = groupsApi?.store;
     const temps = store ? store.all().filter(g => store.isTemp(g.id)) : [];
-    const rows = temps.map((g, i) => `
+    const rows = temps.map(g => `
         <button type="button" class="result-context-item artist-thumb-group-item"
                 data-action="temp-add" data-group-id="${escHtml(g.id)}" role="menuitem">
-          <span>임시 창 ${i + 1}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
+          <span>${escHtml(g.name)}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
         </button>`).join('');
     return `
         <div class="artist-thumb-group-label">임시 창에 올리기</div>
@@ -2530,9 +2537,9 @@ export function createArtistThumbController({
     closeContextMenu();
     const {store} = groupsApi;
     const temps = store.all().filter(g => store.isTemp(g.id));
-    const tempRows = temps.map((g, i) => `
+    const tempRows = temps.map(g => `
         <button type="button" class="result-context-item" data-action="group-pick" data-group-id="${escHtml(g.id)}" role="menuitem">
-          <span>임시 창 ${i + 1}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
+          <span>${escHtml(g.name)}</span><span class="artist-thumb-group-count">${(g.items || []).length}</span>
         </button>`).join('');
     const menu = document.createElement('div');
     menu.className = 'result-context-menu artist-thumb-context-menu artist-thumb-groups-launcher open';
@@ -2540,7 +2547,7 @@ export function createArtistThumbController({
     menu.innerHTML = `
       <div class="result-context-group">
         <button type="button" class="result-context-item" data-action="temp-new" role="menuitem">
-          <span>+ 임시 창</span></button>
+          <span>+ 새 임시 창</span></button>
         ${tempRows}
       </div>
       ${groupMenuHtml(false)}`;
@@ -2703,6 +2710,13 @@ export function createArtistThumbController({
         };
       },
     };
+  }
+
+  // 탭 머리줄의 [임시 창] - 리모컨·믹스 모드가 꺼져 있어도 여기서 연다(사용자 지정).
+  if (groupsBtn) {
+    groupsBtn.addEventListener('click', event => {
+      void openGroupsLauncher(event.currentTarget);
+    });
   }
 
   function syncRemoteButton() {

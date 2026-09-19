@@ -36,7 +36,9 @@ def _apply_group_op(store: ArtistGroupStore, payload: dict) -> dict:
     op = str(payload.get("op") or "").strip()
     gid = payload.get("id")
     if op == "create":
-        return store.create(payload.get("name"), payload.get("items"))
+        # temp 는 "이름을 아직 안 붙였다" 는 표다 - 이름은 서버가 붙인다.
+        return store.create(payload.get("name"), payload.get("items"),
+                            temp=bool(payload.get("temp")))
     if op == "rename":
         return store.rename(gid, payload.get("name"))
     if op == "delete":

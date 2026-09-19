@@ -91,6 +91,20 @@ def _clean_item(raw: Any) -> dict | None:
     return item
 
 
+def _auto_temp_name(groups: list[dict]) -> str:
+    """이름 없는 그룹(임시 창)에 붙일 첫 빈 이름.
+
+    ⚠️ 이름을 비워 두면 안 된다 - `_normalize_group` 이 이름 없는 레코드를 버려서,
+       옛 판으로 내려간 사용자의 임시 그룹이 다음 쓰기에 통째로 사라진다.
+    """
+    used = {g["name"].casefold() for g in groups}
+    for index in range(1, MAX_GROUPS + 2):
+        candidate = f"임시 창 {index}"
+        if candidate.casefold() not in used:
+            return candidate
+    raise ArtistGroupError(f"too many groups (max {MAX_GROUPS})")
+
+
 def _dedupe_items(items: list[dict]) -> list[dict]:
     """같은 작가는 **처음 자리**에 한 번만 남는다(대소문자 무시)."""
     seen: set[str] = set()
@@ -159,13 +173,17 @@ class ArtistGroupStore:
             return None
         items = [i for i in (_clean_item(x) for x in (raw.get("items") or [])) if i]
         now = int(time.time())
-        return {
+        group = {
             "id": gid,
             "name": name,
             "items": _dedupe_items(items)[:MAX_ITEMS_PER_GROUP],
             "created": int(raw.get("created") or now),
             "updated": int(raw.get("updated") or now),
         }
+        # 아직 이름을 안 붙인 그룹(임시 창). 참일 때만 싣는다 - 옛 파일에는 없는 키다.
+        if raw.get("temp"):
+            group["temp"] = True
+        return group
 
     # ── 조회 ──────────────────────────────────────────────────────────────
     def list(self) -> list[dict]:
@@ -185,10 +203,11 @@ class ArtistGroupStore:
         return any(g["name"].casefold() == folded and g["id"] != except_id for g in groups)
 
     # ── 바꾸기 ────────────────────────────────────────────────────────────
-    def create(self, name: Any, items: Any = None) -> dict:
+    def create(self, name: Any, items: Any = None, *, temp: bool = False) -> dict:
+        """`temp=True` 면 이름을 받지 않고 `임시 창 N` 을 붙인다(사용자가 나중에 고친다)."""
         with self._lock:
             groups = self._read()
-            clean = _clean_name(name)
+            clean = _auto_temp_name(groups) if temp else _clean_name(name)
             if self._name_taken(groups, clean):
                 raise ArtistGroupError(f"a group named '{clean}' already exists", status=409)
             if len(groups) >= MAX_GROUPS:
@@ -202,6 +221,8 @@ class ArtistGroupStore:
                 "created": now,
                 "updated": now,
             }
+            if temp:
+                group["temp"] = True
             groups.append(group)
             self._write(groups)
             return {"group": group, "groups": groups}
@@ -214,6 +235,9 @@ class ArtistGroupStore:
             if self._name_taken(groups, clean, except_id=group["id"]):
                 raise ArtistGroupError(f"a group named '{clean}' already exists", status=409)
             group["name"] = clean
+            # ⚠️ 이름을 붙이는 것이 곧 **저장**이다(사용자 결정) - 표를 떼어 임시 창
+            #    목록에서 빠지게 한다. 다시 임시로 만드는 길은 없다.
+            group.pop("temp", None)
             group["updated"] = int(time.time())
             self._write(groups)
             return {"group": group, "groups": groups}

@@ -29661,6 +29661,17 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .dragpanel.agw .dragpanel-body {
   display: flex; flex-direction: column; min-height: 0; gap: 6px; padding: 6px;
 }
+/* 머리줄의 이름 고치기(사용자 지정) - 임시 창에 이름을 붙이는 것이 곧 저장이라
+   단추 줄 구석이 아니라 제목 옆에 둔다. 닫기 단추보다는 작게. */
+.agw-rename {
+  flex: 0 0 auto; padding: 1px 5px; margin-left: 2px;
+  border: 1px solid transparent; border-radius: 5px; background: transparent;
+  color: var(--text-muted); font-size: 11px; line-height: 1.2; cursor: pointer;
+}
+.agw-rename:hover {
+  color: var(--text-primary); border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.07);
+}
 .agw-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
 .agw-count { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
 .agw-spacer { flex: 1 1 auto; }

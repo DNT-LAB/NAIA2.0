@@ -9,7 +9,9 @@
  *  ⚠️ 목록은 이 창이 들고 있지 않다. `store` 가 유일한 주인이고 창은 구독만 한다 -
  *     우클릭 메뉴로 등록하면 열린 창도 곧바로 바뀐다.
  *  ⚠️ `window.prompt()` 를 쓰지 않는다. Electron 렌더러는 prompt 를 구현하지 않는다.
- *     이름은 창 안의 인라인 칸으로 받는다.
+ *     이름은 창 안의 인라인 칸으로 받는다 - 머리줄의 ✎ 가 그 칸을 편다.
+ *  ⚠️ 임시/저장은 **레코드의 표**(`temp`)로 판단한다. 창을 만들 때 한 번 재 두면
+ *     이름을 붙인 뒤에도 옛 판정이 남아 단추 이름이 안 바뀐다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260914-rctl10';
 import {dragBrokerFor} from './dragBroker.mjs?v=20260917-grp1';
@@ -34,10 +36,9 @@ export function createArtistGroupWindow({
   onClosed = () => {},
 } = {}) {
   const broker = dragBrokerFor(doc, win);
-  const temp = store.isTemp(groupId);
+  const isTempNow = () => store.isTemp(groupId);
   const imageCache = new Map();    // artist -> image_url ('' = 그림 없음)
   let menuEl = null;
-  let naming = null;               // 'save' | 'rename' | null
 
   const panel = createDraggablePanel({
     document: doc,
@@ -46,10 +47,8 @@ export function createArtistGroupWindow({
     variant: 'agw',
     // 창마다 제 자리를 기억한다. ⚠️ 임시 창들이 열쇠 하나를 나눠 쓰던 때는 서로의
     //    자리와 **접힘 상태까지** 덮어썼다 - 둘째 창을 접으면 첫째가 접힌 채 되살아났다.
+    //    임시 그룹도 이제 서버에 살아남으므로 자리도 같이 오래 기억한다.
     storageKey: `agroup-${groupId}`,
-    // ⚠️ 임시 그룹의 아이디는 이번 실행에만 산다 - 자리를 localStorage 에 남기면
-    //    다시 못 쓸 열쇠가 영영 쌓인다. 그룹 자체와 **같은 수명**의 저장소를 쓴다.
-    storage: temp && typeof sessionStorage !== 'undefined' ? sessionStorage : undefined,
     width: 300,
     minWidth: 220,
     maxWidth: 720,
@@ -62,6 +61,17 @@ export function createArtistGroupWindow({
     onClose: () => teardown(),
   });
   panel.el.setAttribute('data-agw-id', groupId);
+  // 이름 고치기는 **머리줄**에 둔다(사용자 지정) - 임시 창에 이름을 붙이는 것이 곧
+  // 저장이라, 단추 줄 구석이 아니라 제목 옆에 있어야 손이 간다.
+  const renameBtn = doc.createElement('button');
+  renameBtn.type = 'button';
+  renameBtn.className = 'agw-rename';
+  renameBtn.textContent = '✎';
+  panel.slot.appendChild(renameBtn);
+  renameBtn.addEventListener('click', () => {
+    if (nameForm.hidden) showNaming();
+    else hideNaming();
+  });
   // 리모컨의 '바깥 누름' 판정에서 **안쪽**으로 친다 - 여기서 누르자마자 믹스 판이
   // 접히면 놓을 자리가 사라진다.
   panel.el.setAttribute('data-rctl-companion', '');
@@ -71,8 +81,7 @@ export function createArtistGroupWindow({
       <span class="agw-count"></span>
       <span class="agw-spacer"></span>
       <button type="button" class="agw-btn" data-agw-act="queue-all" title="이 그룹을 믹스 큐 끝에 넣습니다">큐에 전부</button>
-      <button type="button" class="agw-btn" data-agw-act="${temp ? 'save' : 'rename'}">${temp ? '이름 붙여 저장' : '이름'}</button>
-      <button type="button" class="agw-btn danger" data-agw-act="delete">${temp ? '비우고 닫기' : '삭제'}</button>
+      <button type="button" class="agw-btn danger" data-agw-act="delete"></button>
     </div>
     <form class="agw-name" hidden>
       <input class="agw-name-input" type="text" maxlength="40" spellcheck="false" placeholder="그룹 이름">
@@ -86,21 +95,17 @@ export function createArtistGroupWindow({
   const emptyEl = panel.body.querySelector('.agw-empty');
   const countEl = panel.body.querySelector('.agw-count');
   const nameForm = panel.body.querySelector('.agw-name');
+  const deleteBtn = panel.body.querySelector('[data-agw-act="delete"]');
   const nameInput = panel.body.querySelector('.agw-name-input');
 
   function group() {
     return store.get(groupId);
   }
 
+  /** 제목 = 그룹 이름. 임시 창의 이름(`임시 창 N`)도 **서버가** 붙인 것이라
+   *  화면에서 번호를 다시 세지 않는다 - 세던 때는 창마다 제목이 갈렸다. */
   function titleText() {
-    const g = store.get(groupId);
-    if (!g) return '그룹';
-    if (store.isTemp(groupId)) {
-      const temps = store.all().filter(x => store.isTemp(x.id));
-      const n = temps.findIndex(x => x.id === groupId) + 1;
-      return `임시 창 ${n || ''}`.trim();
-    }
-    return g.name;
+    return store.get(groupId)?.name || '그룹';
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────
@@ -122,6 +127,12 @@ export function createArtistGroupWindow({
     const g = group();
     if (!g) { panel.close(); return; }
     panel.setTitle(titleText());
+    // ⚠️ 이름을 붙이면 임시가 아니다 - 단추 이름도 그 자리에서 따라와야 한다.
+    //    한 번 그려 두면 '비우고 닫기' 가 저장 그룹에 남아 통째로 지워 버린다.
+    const temp = isTempNow();
+    deleteBtn.textContent = temp ? '비우고 닫기' : '삭제';
+    deleteBtn.dataset.armed = '';
+    renameBtn.title = temp ? '이름을 붙여 저장합니다' : '이름 바꾸기';
     const items = g.items || [];
     countEl.textContent = `${items.length}명`;
     gridEl.innerHTML = items.map(cardHtml).join('');
@@ -291,16 +302,16 @@ export function createArtistGroupWindow({
   doc.addEventListener('pointerdown', closeMenuOutside, true);
 
   // ── 단추 줄 ───────────────────────────────────────────────────────────
-  function showNaming(kind) {
-    naming = kind;
+  function showNaming() {
     nameForm.hidden = false;
-    nameInput.value = kind === 'rename' ? (group()?.name || '') : '';
+    // 임시 창은 서버가 지어 준 이름(`임시 창 N`)이 들어 있다 - 그대로 두면 사용자가
+    //    지우고 쳐야 하니 비워서 연다. 이름이 있는 그룹은 고치라고 넣어 준다.
+    nameInput.value = isTempNow() ? '' : (group()?.name || '');
     nameInput.focus();
     nameInput.select();
   }
 
   function hideNaming() {
-    naming = null;
     nameForm.hidden = true;
   }
 
@@ -312,12 +323,10 @@ export function createArtistGroupWindow({
     if (act === 'queue-all') {
       if (!g.items.length) { showToast('그룹이 비어 있습니다.', 'info'); return; }
       onSendToQueue(g.items.map(i => ({artist: i.artist, weight: i.weight ?? 1, image: imageCache.get(i.artist) || ''})));
-    } else if (act === 'save' || act === 'rename') {
-      showNaming(act);
     } else if (act === 'name-cancel') {
       hideNaming();
     } else if (act === 'delete') {
-      if (temp) {
+      if (isTempNow()) {
         await store.destroy(groupId);       // render 가 창을 닫는다
         return;
       }
@@ -341,21 +350,14 @@ export function createArtistGroupWindow({
     event.preventDefault();
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
+    // ⚠️ 이름을 붙이는 것이 곧 저장이다. 아이디는 그대로라 **창을 다시 띄우지 않는다** -
+    //    전에는 임시본을 지우고 새로 만드느라 창이 닫혔다 열렸고, 그 사이 구독자가
+    //    '그룹이 사라졌다' 고 보는 틈을 막으려 따로 빗장(promoting)이 필요했다.
+    const wasTemp = isTempNow();
     try {
-      if (naming === 'save') {
-        // ⚠️ 승격은 임시 그룹을 지운다 -> 구독자가 '그룹이 사라졌다' 며 창을 먼저 닫아
-        //    버린다. 승격 중에는 그 닫기를 미루고, 끝난 뒤 새 창 아이디를 실어 닫는다.
-        promoting = true;
-        let saved;
-        try { saved = await store.promote(groupId, name); } finally { promoting = false; }
-        hideNaming();
-        showToast(`'${saved.name}' 그룹으로 저장했습니다.`, 'info');
-        // 저장 그룹 창으로 바꿔 띄운다(자리 기억 열쇠가 달라서 새 창이 맞다).
-        teardown({reopen: saved.id});
-        return;
-      }
-      await store.rename(groupId, name);
+      const saved = await store.rename(groupId, name);
       hideNaming();
+      if (wasTemp) showToast(`'${saved.name}' 그룹으로 저장했습니다.`, 'info');
     } catch (error) {
       showToast(error.message, 'error');
       nameInput.focus();
@@ -369,17 +371,13 @@ export function createArtistGroupWindow({
   });
 
   // ── 수명 ──────────────────────────────────────────────────────────────
-  let promoting = false;
   const unsubscribe = store.subscribe(() => {
-    if (!group()) {
-      if (!promoting) panel.close();
-      return;
-    }
+    if (!group()) { panel.close(); return; }
     render();
   });
 
   let alive = true;
-  function teardown({keepPanel = false, reopen = ''} = {}) {
+  function teardown({keepPanel = false} = {}) {
     if (!alive) return;
     alive = false;
     OPEN.delete(api);
@@ -389,11 +387,12 @@ export function createArtistGroupWindow({
     doc.removeEventListener('pointerdown', closeMenuOutside, true);
     // 빈 임시 창은 닫으면 사라진다. 내용이 있으면 남겨 둔다(메뉴에서 다시 연다).
     const g = group();
-    if (temp && g && !(g.items || []).length) void store.destroy(groupId);
+    // 빈 임시 창은 닫으면 사라진다 - 서버에 이름뿐인 빈 그룹이 쌓이지 않게.
+    if (isTempNow() && g && !(g.items || []).length) void store.destroy(groupId);
     if (!keepPanel) {
       try { panel.destroy(); } catch { /* 이미 내려감 */ }
     }
-    onClosed(reopen ? {reopen} : {});
+    onClosed({});
   }
 
   /** 먼저 뜬 창과 겹치면 **옆자리**부터 찾는다. 28px 계단식만 쓰면 새 창이 기존 창을
@@ -430,7 +429,7 @@ export function createArtistGroupWindow({
     panel,
     focus() { panel.open(); panel.raise(); },
     close() { panel.close(); },
-    isTemp: () => temp,
+    isTemp: () => isTempNow(),
   };
   OPEN.add(api);
   panel.open();

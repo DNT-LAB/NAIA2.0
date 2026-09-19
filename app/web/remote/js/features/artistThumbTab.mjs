@@ -2881,7 +2881,11 @@ export function createArtistThumbController({
         return {
           src,
           title: card.dataset.artist || '',
-          note: card.querySelector('.artist-thumb-card-weight')?.textContent || '',
+          // 검색 카드에는 가중치 대신 그 줄의 숫자를 싣는다 - 크게 보면서
+          //    고르는 것이 이 기능의 쓸모라 근거가 같이 보여야 한다.
+          note: (card.querySelector('.artist-thumb-card-weight')
+                 || card.querySelector('.asx-nums-row'))?.textContent
+                 ?.replace(/\s+/g, ' ').trim() || '',
         };
       },
     };

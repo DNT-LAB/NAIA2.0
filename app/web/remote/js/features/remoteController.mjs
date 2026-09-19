@@ -227,6 +227,9 @@ export function createRemoteController({
   let hoverEl = null;
   let hoverTimer = null;
   let hoverTarget = null;
+  // 지금 크게 보고 있는 칸이 **어느 판의 것인가**. 판마다 감시자가 붙는데
+  // `hoverTarget` 은 하나를 나눠 쓰므로, 이것이 없으면 남의 판 감시자가 걷는다.
+  let hoverHost = null;
 
   function hoverBox() {
     if (hoverEl) return hoverEl;
@@ -239,6 +242,7 @@ export function createRemoteController({
 
   function hideZoom() {
     hoverTarget = null;
+    hoverHost = null;
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     if (hoverEl) hoverEl.hidden = true;
   }
@@ -319,6 +323,9 @@ export function createRemoteController({
         || Boolean(event.target.closest?.('[data-rctl-companion]'));
       if (!inside) setFolded(true);
     }, true);
+    // 확대 보기는 **판 옆**에 띄운다 - 창 기준이면 이 판을 그대로 덮어, 크게
+    // 보려던 목록이 사라진다(믹스 판이 여기 살던 시절과 같은 규칙).
+    wireHoverZoom(sideEl, () => sideEl.getBoundingClientRect());
     // 끌기가 시작되면 펴 둔다(놓을 자리가 보여야 한다), 끝나면 다시 5초를 센다.
     broker.subscribe(state => {
       if (state === 'start') { hideZoom(); setFolded(false); }
@@ -413,51 +420,69 @@ export function createRemoteController({
     return sideEl && !sideEl.hidden ? sideEl.getBoundingClientRect() : null;
   }
 
-  function hoverSpecFor(node) {
+  function hoverSpecFor(node, host) {
     for (const entry of boarded.values()) {
       const spec = entry.hoverPreview;
       if (!spec?.selector) continue;
       const target = node?.closest?.(spec.selector);
-      if (target && panel.body.contains(target)) return {spec, target};
+      if (target && host.contains(target)) return {spec, target};
     }
     return null;
   }
 
-  panel.body.addEventListener('pointerover', event => {
-    // 손가락은 hover 가 없다 - 터치로는 띄우지 않는다(눌러야 할 칸을 가린다).
-    if (event.pointerType === 'touch') return;
-    // 끄는 중에는 유령 밑의 카드마다 pointerover 가 온다 - 확대 보기는 방해만 된다.
-    if (broker.isDragging()) return;
-    const found = hoverSpecFor(event.target);
-    if (!found) { hideZoom(); return; }
-    if (found.target === hoverTarget) return;
-    hoverTarget = found.target;
-    if (hoverTimer) clearTimeout(hoverTimer);
-    // 격자를 훑고 지나갈 때마다 번쩍이지 않게 조금 기다린다.
-    hoverTimer = setTimeout(() => {
-      hoverTimer = null;
-      if (hoverTarget !== found.target) return;
-      const info = found.spec.resolve?.(found.target);
-      if (info?.src) showZoom(found.target, info);
-      else if (hoverEl) hoverEl.hidden = true;
-    }, HOVER_DELAY_MS);
-  });
-  panel.body.addEventListener('pointerout', event => {
-    if (!event.relatedTarget || !panel.body.contains(event.relatedTarget)) hideZoom();
-    else if (!hoverSpecFor(event.relatedTarget)) hideZoom();
-  });
-  // ⚠️ **대상이 사라지면 걷는다.** `Get Random Artist`/페이지 넘김은 격자를 통째로 다시
-  //    그리는데, 커서가 그대로면 `pointerout` 이 안 온다 - 없는 카드를 계속 크게 보여
-  //    주고 있었다(실측). 확대창은 '살아 있는 대상' 에 묶여 있어야 한다.
-  if (typeof MutationObserver === 'function') {
-    const gone = new MutationObserver(() => {
-      if (hoverTarget && !panel.body.contains(hoverTarget)) hideZoom();
+  /** 확대 보기를 **한 판에** 건다.
+   *
+   *  ⚠️ 예전에는 이 묶음이 `panel.body` 에 손으로 박혀 있었다. 그래서 창 **밖**의
+   *     보조 판(`.rctl-side`)에 올라온 카드는 선택자에 들어 있어도 영영 안 떴다 -
+   *     믹스 판이 거기 살던 시절에 `showZoomBeside` 를 따로 부르던 이유가 이것이다.
+   *  @param anchorOf 확대창을 **무엇 옆에** 둘지. `null` 이면 창 기준(격자용).
+   */
+  function wireHoverZoom(host, anchorOf = () => null) {
+    host.addEventListener('pointerover', event => {
+      // 손가락은 hover 가 없다 - 터치로는 띄우지 않는다(눌러야 할 칸을 가린다).
+      if (event.pointerType === 'touch') return;
+      // 끄는 중에는 유령 밑의 카드마다 pointerover 가 온다 - 확대 보기는 방해만 된다.
+      if (broker.isDragging()) return;
+      const found = hoverSpecFor(event.target, host);
+      if (!found) { hideZoom(); return; }
+      if (found.target === hoverTarget) return;
+      hoverTarget = found.target;
+      hoverHost = host;
+      if (hoverTimer) clearTimeout(hoverTimer);
+      // 격자를 훑고 지나갈 때마다 번쩍이지 않게 조금 기다린다.
+      hoverTimer = setTimeout(() => {
+        hoverTimer = null;
+        if (hoverTarget !== found.target) return;
+        const info = found.spec.resolve?.(found.target);
+        // ⚠️ 그림이 없으면 **안 띄운다**(사용자 지정) - 이 세션에 썸네일이 있는
+        //    작가만 크게 볼 수 있다. `resolve` 가 `img` 가 없으면 null 을 준다.
+        if (info?.src) showZoom(found.target, info, anchorOf());
+        else if (hoverEl) hoverEl.hidden = true;
+      }, HOVER_DELAY_MS);
     });
-    gone.observe(panel.body, {childList: true, subtree: true});
+    host.addEventListener('pointerout', event => {
+      if (!event.relatedTarget || !host.contains(event.relatedTarget)) hideZoom();
+      else if (!hoverSpecFor(event.relatedTarget, host)) hideZoom();
+    });
+    // ⚠️ **대상이 사라지면 걷는다.** `Get Random Artist`/페이지 넘김은 격자를 통째로
+    //    다시 그리는데, 커서가 그대로면 `pointerout` 이 안 온다 - 없는 카드를 계속
+    //    크게 보여 주고 있었다(실측). 확대창은 '살아 있는 대상' 에 묶여 있어야 한다.
+    //    보조 판도 같다 - 검색을 다시 하면 200줄이 통째로 갈린다.
+    if (typeof MutationObserver === 'function') {
+      const gone = new MutationObserver(() => {
+        // ⚠️ **제 판의 대상만** 본다. `hoverTarget` 은 판들이 나눠 쓰는 하나라,
+        //    이 조건이 없으면 격자 쪽 감시자가 보조 판의 카드를 보고 "내 안에 없다"
+        //    며 걷어 버린다 - 확대가 363ms 만에 사라졌다(실측).
+        if (hoverHost !== host) return;
+        if (hoverTarget && !host.contains(hoverTarget)) hideZoom();
+      });
+      gone.observe(host, {childList: true, subtree: true});
+    }
+    // 스크롤·드래그·창 닫힘에는 바로 걷는다(자리가 어긋난 채 떠 있으면 방해만 된다).
+    host.addEventListener('scroll', hideZoom, true);
   }
 
-  // 스크롤·드래그·창 닫힘에는 바로 걷는다(자리가 어긋난 채 떠 있으면 방해만 된다).
-  panel.body.addEventListener('scroll', hideZoom, true);
+  wireHoverZoom(panel.body);
   // ⚠️ 카드를 **누를 때는 걷지 않는다**(사용자 지정 2026-09-14) - 크게 보면서 고르는
   //    것이 이 기능의 쓸모인데 누르는 순간 닫히면 확인이 안 된다. 창이 움직이는
   //    경우(머리줄·크기 손잡이)에만 걷는다 - 그때는 자리가 어긋나기 때문이다.

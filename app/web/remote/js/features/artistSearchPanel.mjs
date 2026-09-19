@@ -1,15 +1,18 @@
-/** 아티스트 매칭 검색 — depth 를 쌓아 작가를 좁히는 판(사용자 지정 2026-09-19).
+/** 아티스트 매칭 검색 — 조건을 쌓아 작가를 좁히는 판(사용자 지정 2026-09-19).
  *
  *  믹스 큐가 비우고 나간 **창 옆 보조 판**(`.rctl-side`)에 산다. 백엔드는
  *  `core/artist_search.py` 이고 **상태가 없다** - 이 판이 depth 목록을 쥐고
  *  매번 통째로 보낸다. 그래서 뒤로 가기가 그냥 `stack.slice(0, n)` 이다.
  *
+ *      [캐릭터 | 작품 | 태그 | 등급]      <- 갈래 넷(사용자 지정)
  *      ┌ genshin impact ─┐ ┌ rating q+e ─┐
  *      │ count>=10       │ │ 비중>=45%    │
  *      │ post >=200      │ │ post >=100   │
  *      └── 1,159 ────────┘ └── 397 ──────┘
  *
- *  ⚠️ **다음 depth 는 서버가 받아 준 뒤에 쌓는다.** 색인에 없는 낱말은 검색이
+ *  ⚠️ **갈래는 자리를 가리지 않는다.** 등급 → 캐릭터 → 태그 처럼 섞어 쌓는 것이
+ *     본래 쓰임이다(사용자 지정). 상한만 **세 단계**다.
+ *  ⚠️ **다음 depth 는 서버가 받아 준 뒤에 쌓는다.** 색인 밖 낱말은 검색이
  *     안 되는데(사용자 지정), 먼저 쌓아 두면 지우러 돌아가야 한다.
  *  ⚠️ **LIFT 는 정렬이 아니다.** 한 질의 안에서 P(태그)가 상수라 순서가 '날 비중'
  *     과 완전히 같아진다 - Wilson 이 막아 둔 '표본이 얇은 작가 1등' 이 되살아난다.
@@ -17,6 +20,20 @@
  *  ⚠️ 카드는 `data-artist` 를 단다. 그래야 리모컨의 **확대 보기**와 **끌기**가
  *     격자와 같은 문으로 들어온다(선택자만 늘리면 된다).
  */
+
+/** 갈래 넷. 앞의 셋은 **팩의 축 이름 그대로** 다 - 화면이 축을 실어 보내므로
+ *  서버가 추정할 일이 없고, 같은 낱말이 두 축에 있어도 엉뚱한 쪽이 잡히지 않는다.
+ *  ⚠️ 어느 축이 실제로 있는지는 `/state` 가 말해 준다. 여기 적힌 것은 **차례와
+ *     이름표뿐**이고, 없는 축은 스스로 잠긴다(팩마다 담은 축이 다르다). */
+const KINDS = [
+  ['character', '캐릭터', '예: artoria pendragon (fate)'],
+  ['copyright', '작품', '예: genshin impact'],
+  ['general', '태그', '예: small breasts'],
+  ['rating', '등급', ''],
+];
+
+const TAG_KINDS = KINDS.filter(([, , hint]) => hint).map(([value]) => value);
+const isTagKind = value => TAG_KINDS.includes(value);
 
 const ORDERS = [
   ['posts', '총 Post', '이 조건을 만족하는 작가를 게시물 수로 줄 세웁니다.'],
@@ -29,6 +46,9 @@ const RATING_SETS = [
   ['e', 'e'],
   ['q+e', 'q+e'],
 ];
+
+/** 사용자 지정 2026-09-19: **세 단계까지**. 백엔드의 `MAX_DEPTH` 와 같은 값이다. */
+const MAX_DEPTH = 3;
 
 /** 첫 depth 만 문턱이 다르다(사용자 예시: 최소 post 200 -> 그 뒤 100). */
 function tagDefaults(depth) {
@@ -62,24 +82,22 @@ export function createArtistSearchPanel({
     <div class="asx-body rctl-fold-body">
       <div class="asx-stack" role="list"></div>
       <div class="asx-form">
-        <div class="asx-seg" data-asx-seg="kind">
-          <button type="button" data-asx-kind="tag" class="is-on">태그</button>
-          <button type="button" data-asx-kind="rating">등급</button>
+        <div class="asx-seg asx-kinds" data-asx-seg="kind">
+          ${KINDS.map(([value, label]) => `<button type="button" data-asx-kind="${value}">${escHtml(label)}</button>`).join('')}
         </div>
         <div class="asx-main">
           <div class="asx-tag">
             <div class="asx-input-wrap">
-              <input class="asx-input" type="text" spellcheck="false" autocomplete="off"
-                     placeholder="예: genshin impact">
+              <input class="asx-input" type="text" spellcheck="false" autocomplete="off">
               <div class="asx-sugg" hidden></div>
             </div>
           </div>
           <div class="asx-rating" hidden>
             <div class="asx-seg" data-asx-seg="ratings">
-              ${RATING_SETS.map(([v, label], i) => `<button type="button" data-asx-ratings="${v}"${i === 0 ? ' class="is-on"' : ''}>${escHtml(label)}</button>`).join('')}
+              ${RATING_SETS.map(([v, label]) => `<button type="button" data-asx-ratings="${v}">${escHtml(label)}</button>`).join('')}
             </div>
             <div class="asx-seg" data-asx-seg="mode">
-              <button type="button" data-asx-mode="count" class="is-on">개수</button>
+              <button type="button" data-asx-mode="count">개수</button>
               <button type="button" data-asx-mode="ratio">비중</button>
             </div>
           </div>
@@ -97,7 +115,7 @@ export function createArtistSearchPanel({
         </div>
       </div>
       <div class="asx-seg asx-orders" data-asx-seg="order">
-        ${ORDERS.map(([v, label, tip], i) => `<button type="button" data-asx-order="${v}" title="${escHtml(tip)}"${i === 2 ? ' class="is-on"' : ''}>${escHtml(label)}</button>`).join('')}
+        ${ORDERS.map(([v, label, tip]) => `<button type="button" data-asx-order="${v}" title="${escHtml(tip)}">${escHtml(label)}</button>`).join('')}
       </div>
       <div class="asx-rows" role="list"></div>
       <div class="asx-note"></div>
@@ -112,6 +130,7 @@ export function createArtistSearchPanel({
   const suggEl = el.querySelector('.asx-sugg');
   const rowsEl = el.querySelector('.asx-rows');
   const noteEl = el.querySelector('.asx-note');
+  const addBtn = el.querySelector('[data-asx-act="add"]');
   const numEls = {
     count: el.querySelector('[data-asx-num="count"]'),
     ratio: el.querySelector('[data-asx-num="ratio"]'),
@@ -123,12 +142,12 @@ export function createArtistSearchPanel({
   };
 
   let packState = null;      // /state 응답 - `missing` 이면 판이 통째로 잠긴다
+  let axesReady = new Set(); // 이 팩이 실제로 담은 축. 나머지 갈래는 스스로 잠긴다.
   let stack = [];            // 서버가 받아 준 depth 만 쌓인다
   let order = 'wilson';
-  let kind = 'tag';
+  let kind = 'copyright';
   let ratingsPick = 'e';
   let ratingMode = 'count';
-  let axisHint = '';         // 자동완성에서 고른 축 - 서버가 추정하지 않게 실어 준다
   let rows = [];
   let steps = [];
   let total = 0;
@@ -138,6 +157,11 @@ export function createArtistSearchPanel({
   let suggTimer = null;
   let suggRows = [];
   let thumbs = new Map();    // 이름 -> {image_url}
+
+  const kindLabel = value => (KINDS.find(([v]) => v === value) || [, value])[1];
+  const kindHint = value => (KINDS.find(([v]) => v === value) || [, , ''])[2];
+  /** 갈래를 쓸 수 있는가. 등급은 팩만 있으면 늘 된다(축이 아니라 행의 속성이다). */
+  const kindUsable = value => (value === 'rating' ? true : axesReady.has(value));
 
   // ── 화면 그리기 ───────────────────────────────────────────────────────
 
@@ -187,13 +211,14 @@ export function createArtistSearchPanel({
     headCountEl.textContent = stack.length ? `${fmt(total)}명` : '';
   }
 
-  /** 문턱 칸의 기본값 - 단계를 옮길 때마다 사용자 사양의 값으로 되돌린다. */
   function paintForm() {
-    tagBoxEl.hidden = kind !== 'tag';
-    ratingBoxEl.hidden = kind === 'tag';
+    const tagMode = isTagKind(kind);
+    tagBoxEl.hidden = !tagMode;
+    ratingBoxEl.hidden = tagMode;
     const isRatio = kind === 'rating' && ratingMode === 'ratio';
     numWrap.count.hidden = isRatio;
     numWrap.ratio.hidden = !isRatio;
+    inputEl.placeholder = kindHint(kind);
     // 세그먼트 넷 - 각각 제 `data-asx-<이름>` 을 읽어 고른 것에 불을 켠다.
     for (const [seg, attr, on] of [['kind', 'asxKind', kind],
                                    ['ratings', 'asxRatings', ratingsPick],
@@ -203,14 +228,25 @@ export function createArtistSearchPanel({
         btn.classList.toggle('is-on', btn.dataset[attr] === on);
       });
     }
+    // 이 팩에 없는 축은 **잠근다**(고장이 아니다 - 담은 것이 다를 뿐).
+    el.querySelectorAll('[data-asx-kind]').forEach(btn => {
+      const value = btn.dataset.asxKind;
+      const usable = kindUsable(value);
+      btn.classList.toggle('is-off', !usable);
+      btn.title = usable ? `${kindLabel(value)} 로 좁힙니다`
+        : `${kindLabel(value)} 축은 이 색인에 없습니다`;
+    });
+    const full = stack.length >= MAX_DEPTH;
+    addBtn.disabled = full || !kindUsable(kind);
     formEl.classList.toggle('is-busy', busy);
+    formEl.classList.toggle('is-full', full);
   }
 
   function resetNums() {
     const defaults = tagDefaults(stack.length);
     numEls.count.value = String(defaults.minCount);
     numEls.ratio.value = '45';
-    numEls.posts.value = String(kind === 'tag' ? defaults.minPosts : 100);
+    numEls.posts.value = String(isTagKind(kind) ? defaults.minPosts : 100);
   }
 
   function note(text, kindName = '') {
@@ -224,7 +260,7 @@ export function createArtistSearchPanel({
   async function run(nextStack, {commit = true} = {}) {
     if (!nextStack.length) {
       stack = []; steps = []; rows = []; total = 0; thumbs = new Map();
-      paintStack(); paintRows(); note('');
+      paintStack(); paintRows(); paintForm(); note('');
       onUpdate?.();
       return true;
     }
@@ -259,7 +295,9 @@ export function createArtistSearchPanel({
     total = Number(data.total || 0);
     thumbs = new Map();
     paintStack(); paintRows(); paintForm();
-    note(total ? '' : '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.');
+    note(total
+      ? (stack.length >= MAX_DEPTH ? `${MAX_DEPTH}단계까지입니다.` : '')
+      : '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.');
     resetNums();
     onUpdate?.();
     void loadThumbs(mine);
@@ -279,10 +317,12 @@ export function createArtistSearchPanel({
 
   function buildStep() {
     const minPosts = Math.max(Number(numEls.posts.value) || 0, 0);
-    if (kind === 'tag') {
+    if (isTagKind(kind)) {
       const tag = inputEl.value.trim();
-      if (!tag) { note('태그를 적어 주세요.', 'bad'); inputEl.focus(); return null; }
-      return {kind: 'tag', tag, axis: axisHint || undefined,
+      if (!tag) { note(`${kindLabel(kind)} 를 적어 주세요.`, 'bad'); inputEl.focus(); return null; }
+      // ⚠️ 축은 **화면이 정한다**(고른 갈래 그대로). 서버가 추정하게 두면 같은
+      //    낱말이 두 축에 있을 때 사용자가 안 고른 쪽이 잡힌다.
+      return {kind: 'tag', tag, axis: kind,
               min_count: Math.max(Number(numEls.count.value) || 0, 0), min_posts: minPosts};
     }
     const ratings = ratingsPick.split('+');
@@ -296,11 +336,13 @@ export function createArtistSearchPanel({
 
   async function addDepth() {
     if (busy || packState?.state !== 'ready') return;
+    if (stack.length >= MAX_DEPTH) { note(`${MAX_DEPTH}단계까지입니다.`, 'bad'); return; }
+    if (!kindUsable(kind)) { note(`${kindLabel(kind)} 축은 이 색인에 없습니다.`, 'bad'); return; }
     const step = buildStep();
     if (!step) return;
     note('');
     const ok = await run([...stack, step]);
-    if (ok) { inputEl.value = ''; axisHint = ''; closeSugg(); }
+    if (ok) { inputEl.value = ''; closeSugg(); }
   }
 
   // ── 자동완성 ──────────────────────────────────────────────────────────
@@ -319,22 +361,26 @@ export function createArtistSearchPanel({
 
   function paintSugg() {
     if (!suggRows.length) { closeSugg(); return; }
+    // 오른쪽 숫자는 **그 태그가 달린 게시물 수**다(사용자 지정). 축은 고른 갈래라
+    // 여기 다시 적지 않는다 - 좁은 칸에서는 숫자가 훨씬 쓸모 있다.
     suggEl.innerHTML = suggRows.map((row, i) => `
-      <button type="button" data-asx-sugg="${i}">${escHtml(row.tag)}<em>${escHtml(row.axis)}</em></button>`).join('');
+      <button type="button" data-asx-sugg="${i}"><span>${escHtml(row.tag)}</span><em>${fmt(row.posts)}</em></button>`).join('');
     suggEl.hidden = false;
   }
 
   function scheduleSuggest() {
     if (suggTimer) clearTimeout(suggTimer);
     const value = inputEl.value.trim();
-    axisHint = '';
-    if (value.length < 2) { closeSugg(); return; }
+    if (value.length < 2 || !isTagKind(kind)) { closeSugg(); return; }
+    const axis = kind;
     suggTimer = setTimeout(async () => {
       suggTimer = null;
       const mine = ++suggSeq;
       let data = null;
-      try { data = await getJson(`/api/artist-affinity/suggest?q=${encodeURIComponent(value)}`); }
-      catch (_) { return; }
+      try {
+        data = await getJson(`/api/artist-affinity/suggest?q=${encodeURIComponent(value)}`
+                             + `&axis=${encodeURIComponent(axis)}`);
+      } catch (_) { return; }
       if (mine !== suggSeq) return;
       suggRows = data?.rows || [];
       paintSugg();
@@ -352,8 +398,11 @@ export function createArtistSearchPanel({
     if (kindBtn) {
       kind = kindBtn.dataset.asxKind;
       closeSugg();
+      inputEl.value = '';
       paintForm(); resetNums();
-      if (kind === 'tag') inputEl.focus();
+      if (!kindUsable(kind)) { note(`${kindLabel(kind)} 축은 이 색인에 없습니다.`, 'bad'); return; }
+      note('');
+      if (isTagKind(kind)) inputEl.focus();
       return;
     }
     const ratingsBtn = event.target.closest('[data-asx-ratings]');
@@ -393,7 +442,6 @@ export function createArtistSearchPanel({
     const row = suggRows[Number(btn.dataset.asxSugg)];
     if (!row) return;
     inputEl.value = row.tag;
-    axisHint = row.axis || '';
     closeSugg();
     inputEl.focus();
   });
@@ -405,7 +453,6 @@ export function createArtistSearchPanel({
       // 목록이 떠 있고 딱 하나면 그것을 고른 것으로 친다.
       if (!suggEl.hidden && suggRows.length === 1) {
         inputEl.value = suggRows[0].tag;
-        axisHint = suggRows[0].axis || '';
         closeSugg();
       }
       void addDepth();
@@ -449,11 +496,17 @@ export function createArtistSearchPanel({
     el.classList.toggle('is-missing', !ready);
     if (!ready) {
       note('검색 색인(artist_tag_affinity.naiapack)이 없습니다.', 'bad');
-    } else {
-      // 화면이 상수를 중복해 갖지 않게 서버가 말해 준 것을 그대로 쓴다.
-      const axes = Object.keys(packState.axes || {}).join(' · ');
-      inputEl.placeholder = `예: genshin impact  (${axes || 'copyright · character'})`;
+      paintForm();
+      return packState;
     }
+    // ⚠️ 어느 축이 있는지는 **서버가 말한다**. 화면에 박아 두면 팩을 바꿨을 때
+    //    있지도 않은 갈래가 열려 있고, 누르면 그제야 400 이 난다.
+    axesReady = new Set(Object.keys(packState.axes || {}));
+    if (!kindUsable(kind)) {
+      kind = KINDS.map(([v]) => v).find(kindUsable) || 'rating';
+    }
+    paintForm();
+    resetNums();
     return packState;
   }
 
@@ -469,7 +522,7 @@ export function createArtistSearchPanel({
       ? [stack.map(stepLabel).join(' › '), `${fmt(total)}명`]
       : []),
     isReady: () => packState?.state === 'ready',
-    focus: () => { if (kind === 'tag') inputEl.focus(); },
+    focus: () => { if (isTagKind(kind) && kindUsable(kind)) inputEl.focus(); },
     reset: () => { void run([]); },
     destroy: () => { seq += 1; suggSeq += 1; if (suggTimer) clearTimeout(suggTimer); el.remove(); },
   };

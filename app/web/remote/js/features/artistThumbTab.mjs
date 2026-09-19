@@ -149,9 +149,9 @@ export function createArtistThumbController({
   const mixBtn = document.createElement('button');
   mixBtn.type = 'button';
   mixBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
-  mixBtn.textContent = '믹스 모드 OFF';
+  mixBtn.textContent = '믹스';
   mixBtn.setAttribute('aria-pressed', 'false');
-  mixBtn.title = '아티스트 여러 명을 순서·가중치와 함께 쌓습니다. 켜면 창 옆에 큐가 열립니다.';
+  mixBtn.title = '믹스 모드 OFF — 아티스트 여러 명을 순서·가중치와 함께 쌓습니다.';
 
   // 아티스트 매칭 검색(리모컨 전용). 판은 **믹스 큐가 비우고 나간 그 자리**에 산다
   // (사용자 지정 2026-09-19) - 그 자리는 `.rctl-side` 라 리모컨 없이는 없다.
@@ -160,9 +160,9 @@ export function createArtistThumbController({
   const searchBtn = document.createElement('button');
   searchBtn.type = 'button';
   searchBtn.className = 'artist-thumb-page-btn rctl-mix-btn';
-  searchBtn.textContent = '검색 OFF';
+  searchBtn.textContent = '검색';
   searchBtn.setAttribute('aria-pressed', 'false');
-  searchBtn.title = 'character·copyright·general·rating 로 아티스트를 좁힙니다. 켜면 창 옆에 판이 열립니다.';
+  searchBtn.title = '검색 OFF — 캐릭터·작품·태그·등급으로 아티스트를 좁힙니다.';
 
   /** 격자가 사람 눈에 닿아 있는가 - 탭이 떠 있거나, 리모컨에 올라가 있거나.
    *  ⚠️ `artistTabActive` 하나로 판단하면 리모컨에 올려 둔 격자가 조용히 낡는다. */
@@ -2805,9 +2805,10 @@ export function createArtistThumbController({
     const queue = want ? await ensureMixQueue() : mixQueue;
     if (want && !queue) { showToast('믹스 큐를 열지 못했습니다.', 'error'); return; }
     mixOn = want;
-    mixBtn.textContent = `믹스 모드 ${mixOn ? 'ON' : 'OFF'}`;
+    // 이름은 그대로 두고 **색**이 켜짐을 말한다(사용자 지정). 글은 말풍선에 남긴다.
     mixBtn.classList.toggle('is-on', mixOn);
     mixBtn.setAttribute('aria-pressed', mixOn ? 'true' : 'false');
+    mixBtn.title = `믹스 모드 ${mixOn ? 'ON' : 'OFF'} — 아티스트 여러 명을 순서·가중치와 함께 쌓습니다.`;
     // 이 칸이 여러 명을 담게 되니 줄바꿈을 허용한다(옷은 `.is-mix` 가 쥔다).
     mixBtn.closest('.dragpanel')?.classList.toggle('is-mix', mixOn);
     queue?.setOpen(mixOn);
@@ -2829,7 +2830,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-asx');
+    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-asx2');
     searchPanel = createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
       // 그림은 격자와 **같은 서버 한 곳**에서 받는다 - 두 벌이 되면 언젠가 갈린다.
@@ -2851,9 +2852,9 @@ export function createArtistThumbController({
     const panel = want ? await ensureSearchPanel() : searchPanel;
     if (want && !panel) { showToast('검색 판을 열지 못했습니다.', 'error'); return; }
     searchOn = want;
-    searchBtn.textContent = `검색 ${searchOn ? 'ON' : 'OFF'}`;
     searchBtn.classList.toggle('is-on', searchOn);
     searchBtn.setAttribute('aria-pressed', searchOn ? 'true' : 'false');
+    searchBtn.title = `검색 ${searchOn ? 'ON' : 'OFF'} — 캐릭터·작품·태그·등급으로 아티스트를 좁힙니다.`;
     if (searchOn) {
       remote.mountSide(panel.el);
       remote.showSide(true);

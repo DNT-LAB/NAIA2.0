@@ -29468,9 +29468,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   color: var(--text-primary); font-size: 10px; line-height: 1.6;
 }
 .asx-sugg button:hover { background: rgba(255, 255, 255, 0.09); }
+/* 이름이 길면 줄이고, 숫자는 **절대 안 줄인다** - 고르는 근거가 그 숫자다. */
+.asx-sugg button > span {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .asx-sugg em {
-  margin-left: auto; font-style: normal; font-family: var(--font-mono);
-  font-size: 9px; color: var(--text-dim);
+  flex: 0 0 auto; font-style: normal; font-family: var(--font-mono);
+  font-size: 9px; color: var(--accent); font-variant-numeric: tabular-nums;
 }
 
 .asx-nums { display: flex; align-items: center; gap: 4px; }
@@ -29499,6 +29504,13 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .asx-seg button:hover { color: var(--text-primary); }
 .asx-seg button.is-on { background: var(--accent); color: #0d1020; font-weight: 700; }
 .asx-orders { flex: 0 0 auto; }
+/* 갈래 넷([캐릭터|작품|태그|등급])이 288px 안에 들어간다 - 글자를 줄이고 여백을 뺀다. */
+.asx-kinds button { padding: 2px 2px; font-size: 10px; letter-spacing: -0.2px; }
+/* 이 색인에 **없는 축**. 고장이 아니라 담은 것이 다를 뿐이라 지우지 않고 흐린다. */
+.asx-seg button.is-off { opacity: 0.38; }
+.asx-seg button.is-off.is-on { opacity: 0.55; }
+.asx-btn:disabled { opacity: 0.4; cursor: default; }
+.asx-btn:disabled:hover { color: var(--text-muted); border-color: var(--border-dim); }
 
 /* 결과 - 숫자가 본론이라 카드 격자가 아니라 **줄**로 그린다. */
 .asx-rows {
@@ -29680,7 +29692,9 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   /* 글꼴은 이웃(Prev/Next/Go)과 같아야 한다 - 10px 로 줄여 뒀더니 혼자 다르게 보였다.
      ⚠️ 단추는 줄의 font-size 를 **물려받지 않는다**(폼 컨트롤 기본값 13.3px) -
         이웃들처럼 11px 을 직접 줘야 한다. */
-  flex: 0 0 auto; min-width: 104px; padding: 4px 8px; font-size: 11px;
+  /* ⚠️ 켜짐/꺼짐은 **글자가 아니라 색**이 말한다(사용자 지정 2026-09-19). 예전에는
+     "믹스 모드 OFF"/"검색 OFF" 라 두 단추가 줄의 절반을 먹었다. */
+  flex: 0 0 auto; min-width: 0; padding: 4px 9px; font-size: 11px;
 }
 .dragpanel.rctl .rctl-pager .rctl-mix-btn.is-on {
   border-color: rgba(130, 150, 255, 0.75);

@@ -31,7 +31,9 @@ import numpy as np
 
 from core.artist_affinity import ALL_RATINGS, RATING_CODE, wilson_lower_bound
 
-MAX_DEPTH = 6
+# 사용자 지정 2026-09-19: **세 단계까지**. 갈래(태그/등급)는 어느 자리에나 올 수
+# 있다 - 등급 -> 캐릭터 -> 태그 처럼 섞어 쌓는 것이 본래 쓰임이다.
+MAX_DEPTH = 3
 ORDERS = ("wilson", "count", "posts")
 
 

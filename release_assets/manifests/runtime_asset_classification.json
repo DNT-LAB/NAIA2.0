@@ -29,7 +29,8 @@
         "data/artist_thumbnail_naid5f.json",
         "data/artist_thumbnail_naid5_6333_165.json",
         "data/artist_thumbnail_naid5_164_84.json",
-        "data/artist_thumbnail_naid5_83_wip.json"
+        "data/artist_thumbnail_naid5_83_wip.json",
+    "data/artist_thumbnail_naid5_stylish_wip.json"
       ],
       "decision": "runtime_downloaded_optional_bundle",
       "runtime_destination": "ui_assets/artist_thumb",

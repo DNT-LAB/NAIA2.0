@@ -41,6 +41,7 @@ export function createArtistThumbController({
   const nextBtn = document.getElementById('artistThumbNextBtn');
   const updateRowEl = document.getElementById('artistThumbUpdateRow');
   const updateBtn = document.getElementById('artistThumbUpdateBtn');
+  const nextRowEl = document.getElementById('artistThumbUpdateNext');
   const randomBtn = document.getElementById('artistThumbRandomBtn');
   const remoteBtn = document.getElementById('artistThumbRemoteBtn');
   const groupsBtn = document.getElementById('artistThumbGroupsBtn');
@@ -673,7 +674,14 @@ export function createArtistThumbController({
 
   const downloadBusyFor = mode => {
     const download = state?.download || {};
-    return Boolean(mode && download.active && download.mode === mode);
+    if (!mode || !download.active) return false;
+    if (download.mode === mode) return true;
+    // ⚠️ 가상 모드(NAID5 Curated/ALL)는 **제 이름으로 받지 않는다** - 서버가 다음에
+    //    채울 구성원 팩으로 넘기고 그 키를 돌려준다. 이름만 비교하면 받는 내내
+    //    화면이 "안 받는 중" 으로 보인다.
+    const info = (state?.modes || []).find(item => item.key === mode);
+    if (!info?.virtual) return false;
+    return [...(info.members || []), ...(info.pending || [])].includes(download.mode);
   };
 
   const downloadPercent = () => Math.max(0, Math.min(100, Number(state?.download?.percent || 0)));
@@ -696,8 +704,12 @@ export function createArtistThumbController({
     if (!gridEl) return;
     const label = info?.label || info?.key || '이 모드의';
     const size = Number(info?.expected_size_mb || info?.size_mb || 0);
+    // 가상 모드는 **한 번에 하나씩** 채운다(사용자 지정) - 무엇을 받는지 적어 준다.
+    // 안 적으면 "Curated 를 눌렀는데 왜 83-50 을 받지?" 가 된다.
+    const part = info?.virtual && info?.next_label
+      ? ` · 먼저 ${info.next_label} 부터` : '';
     const note = size > 0
-      ? `${size.toLocaleString()} MB 를 받습니다`
+      ? `${size.toLocaleString()} MB 를 받습니다${part}`
       : '내려받아야 썸네일을 볼 수 있습니다';
     gridEl.innerHTML = `
       <div class="artist-thumb-missing" data-artist-thumb-missing>
@@ -751,6 +763,13 @@ export function createArtistThumbController({
     const percent = downloadPercent();
     updateBtn.disabled = busy || artistQueueRunning || !mode;
     updateBtn.textContent = busy ? (percent > 0 ? `${percent}%` : '받는 중...') : 'Update';
+    // 가상 모드는 [Update] 한 번에 **한 팩**이다 - 몇 개 남았고 다음이 무엇인지
+    // 적어야 한 번 누르고 "안 채워졌다" 로 읽지 않는다.
+    if (nextRowEl) {
+      const left = (info.pending || []).length;
+      nextRowEl.textContent = info.virtual && left
+        ? ` · 다음 ${info.next_label} (${left}개 남음)` : '';
+    }
   }
 
   function renderState() {
@@ -763,12 +782,20 @@ export function createArtistThumbController({
         ...modes.map(mode => {
           const label = mode.label || mode.key;
           const suffix = mode.needs_update ? ' (update)' : (mode.available ? '' : ' (download)');
-          const title = mode.needs_update
-            ? `${label} · update required · ${Number(mode.size_mb || 0).toLocaleString()} / ${Number(mode.expected_size_mb || 0).toLocaleString()} MB`
-            : (mode.available
-              ? `${label} · ${Number(mode.size_mb || 0).toLocaleString()} MB`
-              : `${label} · data missing`);
-          return `<option value="${escHtml(mode.key)}" title="${escHtml(title)}">${escHtml(label + suffix)}</option>`;
+          // 가상 모드는 제 파일이 없다 - 크기 대신 **몇 개가 찼는지**를 말해 준다
+          //    (`0 MB` 는 거짓말이다). 채우는 차례도 여기서 읽힌다.
+          const title = mode.virtual
+            ? `${label} · ${(mode.members || []).length}/${(mode.members || []).length + (mode.pending || []).length} 팩`
+              + ((mode.pending || []).length ? ` · 다음 ${mode.next_label}` : '')
+            : (mode.needs_update
+              ? `${label} · update required · ${Number(mode.size_mb || 0).toLocaleString()} / ${Number(mode.expected_size_mb || 0).toLocaleString()} MB`
+              : (mode.available
+                ? `${label} · ${Number(mode.size_mb || 0).toLocaleString()} MB`
+                : `${label} · data missing`));
+          // 권하는 판 하나만 칠한다(사용자 지정). 옷은 껍데기 목록이 입으므로
+          // **data 속성으로 넘긴다** - `<option>` 의 색은 브라우저마다 안 먹는다.
+          const accent = mode.accent ? ' data-accent="1"' : '';
+          return `<option value="${escHtml(mode.key)}" title="${escHtml(title)}"${accent}>${escHtml(label + suffix)}</option>`;
         }),
         // [폴더 열기] 는 이 칸의 **맨 아래**다(사용자 지정 2026-09-19). 값이 아니라
         // **동작**이라, 고르면 폴더만 열고 곧바로 보던 모드로 되돌아온다.
@@ -2190,7 +2217,9 @@ export function createArtistThumbController({
       // 받는 동안 모드 칸이 잠긴다(사용자 지정) - 잠그는 곳은 한 군데다.
       updateArtistActionAvailability();
       setStatus(download.message || '다운로드를 시작했습니다.', 'busy');
-      startDownloadPolling(mode);
+      // ⚠️ 폴링은 **서버가 답한 키**로 돈다. 가상 모드를 눌렀으면 서버가 구성원 팩으로
+      //    넘겼고, 내가 누른 이름으로 기다리면 끝나는 것을 영영 못 본다.
+      startDownloadPolling(String(download.mode || mode));
     } catch (error) {
       updateDownloadUi();
       showToast?.(error.message || 'Download failed', 'error');
@@ -3171,6 +3200,11 @@ export function createArtistThumbController({
     const remote = getRemoteController?.();
     if (!remoteOnboarded) {
       setRemote(true);
+      // ⚠️ **첫 채움은 여기서 한다.** 예전에는 `switchRightTab('artists')` 가
+      //    `load()` 를 불렀는데, 이 문이 탭으로 안 가면서 그 길이 끊겼다 -
+      //    리모컨이 빈 격자·빈 모드 칸으로 떴다(사용자 제보 2026-09-19).
+      //    `load()` 는 이미 채워져 있으면 다시 그리기만 한다(스스로 막는다).
+      void load();
       // ⚠️ `setRemote` 가 실패했어도(모듈 미도착) 탭으로 보내지 않는다 - 토스트로
       //    이미 알렸고, 여기서 탭을 열면 사용자는 그 토스트를 못 본다.
       return false;
@@ -3178,12 +3212,14 @@ export function createArtistThumbController({
     if (remote?.isCollapsed?.()) {
       remote.expand?.();
       remote.raise?.();
+      void load();
       return false;
     }
     // 창이 닫혀 있는데 올라가 있다고 적혀 있다면 어긋난 것이다 - 창을 먼저 살린다.
     if (remote && remote.isOpen?.() === false) {
       remote.open?.();
       remote.raise?.();
+      void load();
       return false;
     }
     return true;

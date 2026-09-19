@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260919-datasurface">
+<link rel="stylesheet" href="style.css?v=20260919-naid5pack">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -1203,7 +1203,8 @@
                올라간다. 막지 않는다 - 옛 팩으로 계속 보면서 받는다(2.5GB 를 다 받을
                때까지 격자를 비워 두던 시절의 반성이 `loadPage` 주석에 있다). -->
           <div class="artist-thumb-update-row" id="artistThumbUpdateRow" hidden>
-            <span class="artist-thumb-update-text">업데이트가 있습니다. <em>(업데이트 중 계속 이용가능)</em></span>
+            <span class="artist-thumb-update-text">업데이트가 있습니다. <em>(업데이트 중 계속 이용가능)</em><em
+                  id="artistThumbUpdateNext" class="artist-thumb-update-next"></em></span>
             <button type="button" class="artist-thumb-update-btn" id="artistThumbUpdateBtn">Update</button>
           </div>
         </section>
@@ -1447,6 +1448,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260919-datasurface"></script>
+<script src="app.js?v=20260919-naid5pack"></script>
 </body>
 </html>

@@ -793,7 +793,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-datasurface')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-naid5pack')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -1141,7 +1141,7 @@ import('./js/features/eventMapPanel.mjs?v=20260913-em38')
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260914-menu-width')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260919-accent')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,

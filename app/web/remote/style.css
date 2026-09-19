@@ -411,6 +411,23 @@ header {
   background: rgba(124,106,239,0.18);
   color: var(--text-primary);
 }
+/* 권하는 항목 하나. 목록을 만든 화면이 `<option data-accent>` 로 표시하고 껍데기가
+   옮겨 단다 - `<option>` 자체의 색은 브라우저마다 안 먹는다.
+   ⚠️ 고른 상태·올린 상태가 **이겨야** 한다(아래 두 규칙이 뒤에 오는 이유). 안 그러면
+      권하는 줄만 언제나 노래서 지금 무엇을 고른 건지 안 보인다. */
+.custom-select-option[data-accent] {
+  color: #ffe9a6;
+  background: rgba(255, 224, 122, 0.10);
+  font-weight: 700;
+}
+.custom-select-option[data-accent].is-selected:not(.is-hovered) {
+  background: rgba(255, 224, 122, 0.22);
+  color: #fff3c8;
+}
+.custom-select-option[data-accent].is-hovered {
+  background: var(--accent);
+  color: #fff;
+}
 .param-select.resolution-preset-active + .custom-select .custom-select-button,
 .quick-select.resolution-preset-active + .custom-select .custom-select-button {
   border-color: rgba(243,211,104,0.62);
@@ -4042,6 +4059,7 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .artist-thumb-update-row[hidden] { display: none !important; }
 .artist-thumb-update-text { font-size: 12px; color: #ffe07a; }
 .artist-thumb-update-text em { font-style: normal; color: var(--text-dim); }
+.artist-thumb-update-next:empty { display: none; }
 .artist-thumb-update-btn {
   min-width: 88px; min-height: 26px; padding: 0 12px;
   border-radius: 7px; cursor: pointer; font-weight: 800; font-size: 12px;

@@ -246,6 +246,9 @@ export function createCustomSelectController({
       item.classList.toggle('is-selected', option.selected);
       // 검색에 실제로 걸린 항목 표시(프리셋 검색이 붙인다). 미리보기를 여기로 짚는다.
       if (option.dataset.searchHit) item.dataset.searchHit = '1';
+      // 권하는 항목 하나를 칠하는 표시. `<option>` 자체의 색은 브라우저마다 안 먹어
+      // 껍데기가 대신 입는다 - 붙이는 쪽(목록을 만든 화면)이 뜻을 정한다.
+      if (option.dataset.accent) item.dataset.accent = '1';
 
       item.addEventListener('mouseenter', () => setHoveredItem(state, item));
       item.addEventListener('focus', () => setHoveredItem(state, item));

@@ -51,22 +51,43 @@ class ArtistThumbnailService:
             "label": "NAID5-6333-165",
             "path": Path("data/artist_thumbnail_naid5_6333_165.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-6333-165",
-            "expected_size": 1532623111,
-            "sha256": "ECB2D2CCD2F03A41C7C2AA569828CBC994A26985193AEDD10D7AD474AD8C4248",
+            # 2026-09-19 갱신. 1,532,623,111 -> 1,553,062,505 (경로가 같으니 (update))
+            "expected_size": 1553062505,
+            "sha256": "9FB76C5A57E005EE0E137B7605D142F22642EA5BBA4EC2FE9C0654675C5D13DB",
         },
         "NAID5-164-84": {
             "label": "NAID5-164-84",
             "path": Path("data/artist_thumbnail_naid5_164_84.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-164-84",
-            "expected_size": 1554305817,
-            "sha256": "88EE78511D48EE651C6E34AAE2392718921E24275E367E6F8B48E44B66354B24",
+            # 2026-09-19 갱신. 1,554,305,817 -> 1,853,907,145
+            "expected_size": 1853907145,
+            "sha256": "97D4F6FE9174D7C1C310632AEF8A44541668CA45720938077FDF4C23982C4406",
         },
-        "NAID5-83-WIP": {
-            "label": "NAID5-83-WIP",
+        # 옛 `NAID5-83-WIP` 자리다(사용자 지정 2026-09-19: "링크를 유지해서 (update)를
+        # 출력, 업데이트 후에는 NAID5-83-50 으로 관리").
+        # ⚠️ **디스크 경로를 옛 이름 그대로 둔다**(`..._83_wip.json`). 파일명을 예쁘게
+        #    고치면 이미 받은 1.4GB 가 다른 파일로 보여 `(update)` 가 아니라 `(download)`
+        #    가 서고, 옛 파일이 디스크에 영영 남는다. 갱신 통보는 **같은 경로 + 다른
+        #    expected_size** 가 전부다.
+        # ⚠️ 키는 새 이름으로 간다 - 저장돼 있던 `NAID5-83-WIP` 선택은 한 번 풀린다
+        #    (드롭다운에 `NAID5-83-50 (update)` 로 바로 보이므로 다시 고르면 된다).
+        "NAID5-83-50": {
+            "label": "NAID5-83-50",
             "path": Path("data/artist_thumbnail_naid5_83_wip.json"),
-            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-83-WIP",
-            "expected_size": 1535887765,
-            "sha256": "03F5E8DD387F7ED0C1FCBAA6BC47EEAC6C274C9D5687DBE69C90402BC56CA7E9",
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-83-50",
+            # 옛 WIP 판: 1,535,887,765 · 03F5E8DD… -> 아래와 달라 `needs_update` 가 선다.
+            "expected_size": 2192792940,
+            "sha256": "C2741D70E463B03841B0F27A59D69CD422D98B34F52E5A8F5713A10DFE227C3A",
+        },
+        # 새 팩(2026-09-19). 새 키 + **새 경로** - 기존 것과 겹치지 않는다.
+        # ⚠️ 이름에 `STYLISH` 가 들어가는 것이 곧 계약이다: Curated 는 이 조각을
+        #    `exclude_contains` 로 걸러 내고 ALL 만 포함한다.
+        "NAID5-STYLISH-WIP": {
+            "label": "NAID5-STYLISH-WIP",
+            "path": Path("data/artist_thumbnail_naid5_stylish_wip.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-STYLISH-WIP",
+            "expected_size": 850611426,
+            "sha256": "1486E2F0F17A2DB3499F680D4F479040850E587F4166959B1E7E302C409149A5",
         },
         "NAID4.5F-31000": {
             "label": "NAID4.5F-31000",
@@ -99,22 +120,6 @@ class ArtistThumbnailService:
             "expected_size": 1882040677,
             "sha256": "C564F0A473F32A81DEA43696FBF1CAA477184C957C7C1A8B5B2B21781334FB7B",
         },
-        "NAID5F-20000-Q": {
-            "label": "NAID5F-20000-Q (old)",
-            # ⚠️ **경로는 옛 판과 같다.** 이것이 갱신 통보의 전부다 - 사용자 기기의 파일
-            #    크기가 아래 `expected_size` 와 달라지는 순간 `needs_update` 가 서고
-            #    드롭다운이 `(update)`, 버튼이 `Update` 로 바뀐다. 새 경로를 주면 항목이
-            #    둘로 늘고 옛 1.3GB 가 디스크에 남는다(ANIMA 계열이 쓰는 방식이 이것이다).
-            "path": Path("data/artist_thumbnail_naid5f.json"),
-            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5F-20000-Q",
-            # 2026-09-03 판(10000-Q 를 대체). 지문은 업로드 원본에서 실측:
-            #   C:\VNR\artist_thumb_tool\data\artist_thumb\nai-diffusion-5-full\json\NAID5F-20000-Q
-            #   2,633,376,969 bytes · 2,511.38 MB
-            # ⚠️ 옛 판(10000-Q · 1,373,203,772 · 54252858…BAF19)은 **여기서 지운다** =
-            #    드롭다운에서 사라진다(사용자 지정: 기존 10000-Q 는 숨긴다).
-            "expected_size": 2633376969,
-            "sha256": "9997E0FA2509D7EB19AC7EABC0CC11FACEEEC0FFA97D2C4975E5E88418ECF547",
-        },
     }
     # 여러 팩을 **한 목록으로** 이어 붙이는 가상 모드(사용자 지정 2026-09-19).
     # 팩을 합쳐 담지는 않는다 - 그림 주소에 `mode=` 가 실리므로 목록만 잇고 그림은
@@ -124,16 +129,22 @@ class ArtistThumbnailService:
     #    실제 키는 `NAID5F-20000-Q`(F 가 있다) - 통째로 비교했으면 한 개도 안 걸러지고
     #    조용히 네 팩이 붙었을 것이다. 아직 없는 `NAID5-STYLISH*` 도 같은 이유로
     #    부분 문자열로 막아 둔다.
+    #
+    # `pin_top`/`accent` 는 **드롭다운에서의 자리와 색**이다(사용자 지정 2026-09-19:
+    # "NAID5 Curated 버튼 위치를 가장 위로 올리고, 연노랑색으로 혼자 강조").
+    # ⚠️ 권하는 것이 하나라서 강조가 뜻을 갖는다 - 둘에 칠하면 둘 다 안 보인다.
     ARTIST_THUMB_VIRTUAL_MODES = {
-        "NAID5-ALL": {
-            "label": "NAID5 ALL",
-            "prefix": "NAID5",
-            "exclude_contains": ("20000-Q",),
-        },
         "NAID5-CURATED": {
             "label": "NAID5 Curated",
             "prefix": "NAID5",
             "exclude_contains": ("20000-Q", "STYLISH"),
+            "pin_top": True,
+            "accent": True,
+        },
+        "NAID5-ALL": {
+            "label": "NAID5 ALL",
+            "prefix": "NAID5",
+            "exclude_contains": ("20000-Q",),
         },
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -192,21 +203,48 @@ class ArtistThumbnailService:
 
         ⚠️ 받지 않은 팩은 건너뛴다(사용자 지정) - 없는 것이 고장은 아니다.
         """
+        out = []
+        for key, info in self._virtual_roster(mode):
+            if existing_only and not self._file_state(info)["exists"]:
+                continue
+            out.append(key)
+        return out
+
+    def _virtual_roster(self, mode: str) -> list[tuple[str, dict]]:
+        """가상 모드의 **정원** - 있든 없든 여기 드는 팩 전부. 표의 차례 그대로."""
         spec = self.ARTIST_THUMB_VIRTUAL_MODES.get(str(mode or "").strip())
         if not spec:
             return []
         prefix = str(spec.get("prefix") or "")
         drop = tuple(spec.get("exclude_contains") or ())
-        out = []
+        roster = []
         for key, info in self.ARTIST_THUMB_MODES.items():
             if not key.startswith(prefix):
                 continue
             if any(piece in key for piece in drop):
                 continue
-            if existing_only and not self._file_state(info)["exists"]:
-                continue
-            out.append(key)
-        return out
+            roster.append((key, info))
+        return roster
+
+    def virtual_pending(self, mode: str) -> list[str]:
+        """아직 **채워야 할** 구성원 - 없거나 낡은 것. 정원의 차례 그대로다.
+
+        사용자 지정 2026-09-19: "하나라도 있으면 먼저 존재하는 파일부터 로드한 뒤,
+        Update 규칙을 따라 사용자가 업데이트 하게 하고 천천히 채워나가도록".
+        그래서 한 번에 다 받지 않는다 - [Update] 한 번에 **한 팩**씩 채운다.
+
+        ⚠️ **없는 것이 먼저**고 낡은 것은 뒤다. 표 차례대로 집으면, 이미 보이는 팩을
+           1.5GB 다시 받는 동안 아직 한 장도 없는 구간이 계속 비어 있다 - 그것은
+           '채워나가는' 것이 아니다.
+        """
+        missing, stale = [], []
+        for key, info in self._virtual_roster(mode):
+            state = self._file_state(info)
+            if not state["exists"]:
+                missing.append(key)
+            elif not state["available"]:
+                stale.append(key)
+        return missing + stale
 
     def _virtual_owner_map(self, mode: str) -> dict[str, str]:
         """작가 -> **그 작가의 그림을 가진 팩**. 앞 팩이 이긴다(표의 차례대로).
@@ -835,25 +873,44 @@ class ArtistThumbnailService:
                 "expected_size_mb": file_state["expected_size_mb"],
                 "sha256": file_state["sha256"],
             })
+        virtual_rows = []
         for key, spec in self.ARTIST_THUMB_VIRTUAL_MODES.items():
             members = self.virtual_members(key)
-            modes.append({
+            pending = self.virtual_pending(key)
+            # 다음에 채울 한 팩. 이것이 [Download]/[Update] 가 실제로 받는 대상이다.
+            nxt = self.ARTIST_THUMB_MODES.get(pending[0]) if pending else None
+            nxt_state = self._file_state(nxt) if nxt else None
+            virtual_rows.append({
                 "key": key,
                 "label": str(spec.get("label") or key),
-                # 받을 것이 없다 - 구성원이 하나라도 있으면 쓸 수 있고, 없으면
-                # 드롭다운에 회색으로 남아 "먼저 팩을 받아라" 를 말한다.
-                "available": bool(members),
-                "needs_update": False,
+                # ⚠️ `exists` 는 "지금 볼 수 있는가" 다 - 하나라도 있으면 참이고,
+                #    그러면 화면은 **받는 화면 대신 목록**을 그린다(사용자 지정:
+                #    "하나라도 있으면 먼저 존재하는 파일부터 로드").
                 "exists": bool(members),
+                # `available` 은 "다 찼는가". 빠진 것이 있으면 거짓이라 갱신 줄이 선다.
+                "available": bool(members) and not pending,
+                # 하나라도 있는데 빠진 것이 있다 = 갱신 줄로 한 팩씩 채운다.
+                # 하나도 없으면 갱신이 아니라 **받기**다(그때는 받는 화면이 뜬다).
+                "needs_update": bool(members) and bool(pending),
                 "loaded": any(m in self._data_cache for m in members),
                 "size": 0,
                 "expected_size": 0,
                 "size_mb": 0,
-                "expected_size_mb": 0,
+                # 받는 화면이 적을 용량 - 다음 한 팩의 것이다(전부의 합이 아니다).
+                "expected_size_mb": (nxt_state or {}).get("expected_size_mb", 0),
                 "sha256": "",
                 "virtual": True,
+                "accent": bool(spec.get("accent")),
                 "members": members,
+                "pending": pending,
+                "next_member": pending[0] if pending else "",
+                "next_label": str((nxt or {}).get("label") or (pending[0] if pending else "")),
             })
+            # 권하는 판은 **맨 위**로(사용자 지정). 나머지 가상 모드는 제자리.
+            if spec.get("pin_top"):
+                modes.insert(0, virtual_rows[-1])
+            else:
+                modes.append(virtual_rows[-1])
         return {
             "modes": modes,
             "filters": [
@@ -1462,6 +1519,17 @@ class ArtistThumbnailService:
 
     def start_download(self, mode: str) -> dict:
         key = str(mode or "").strip()
+        # 가상 모드는 제 파일이 없다 - **다음에 채울 한 팩**으로 넘긴다(사용자 지정
+        # 2026-09-19: "천천히 채워나가도록"). 한 번에 다 받지 않는 것이 요점이라
+        # 여기서 목록을 돌리지 않고 맨 앞 하나만 집는다.
+        if self.is_virtual_mode(key):
+            pending = self.virtual_pending(key)
+            if not pending:
+                return self._set_download_state(
+                    active=False, mode=key, percent=100,
+                    message="이미 다 받았습니다.", error="", done=True,
+                )
+            key = pending[0]
         info = self._mode_info(key)
         path = self._mode_download_path(info)
         url = str(info.get("url") or "")

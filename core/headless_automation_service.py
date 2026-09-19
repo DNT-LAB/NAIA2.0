@@ -375,6 +375,9 @@ class HeadlessAutomationService:
         runtime["delay_until_monotonic"] = None
 
     def _credential_error(self) -> str:
+        from core.generation_access_policy import access_policy
+        if access_policy(self.context).blocked:
+            return access_policy(self.context).reason()
         from core.headless_generation_service import TOKEN_KEYS
 
         api_mode = str(self.context.get_api_mode() or "NAI").upper()

@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260919-updrow">
+<link rel="stylesheet" href="style.css?v=20260919-no-api">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -68,6 +68,8 @@
         <p class="setup-sub">생성 백엔드를 연결합니다 — NovelAI / WebUI / ComfyUI</p>
       </div>
       <div class="setup-header-actions">
+        <button class="setup-no-api" id="setupNoApi" type="button"
+                title="API 연결 없이 NAI 참조 도구를 사용합니다. 이 선택은 재시작하면 해제됩니다.">NO API 모드</button>
         <button class="setup-reprobe" id="setupReprobe" onclick="reprobeApiConnections()"
                 title="저장된 백엔드들의 연결 상태를 다시 확인합니다">연결 다시 확인</button>
         <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="닫기">&times;</button>
@@ -1456,6 +1458,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260919-updrow"></script>
+<script src="app.js?v=20260919-no-api"></script>
 </body>
 </html>

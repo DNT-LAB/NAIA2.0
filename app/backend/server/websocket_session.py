@@ -357,6 +357,7 @@ async def handle_json_command(
             client_host,
             command,
             run_in_thread=run_in_thread,
+            clients=clients,
         )
     elif command_type in NAI_ACCOUNT_COMMAND_TYPES:
         await handle_nai_account_command(

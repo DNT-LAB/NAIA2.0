@@ -508,6 +508,13 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             except Exception as exc:
                 _release_auto_gen_prefetch(context)  # 생성 실패 → 이번 예약 홀더 폐기(stale 방지)
                 await _broadcast_generation_error(context, clients, request, str(exc), exc)
+                from core.generation_access_policy import GenerationBlocked
+                if isinstance(exc, GenerationBlocked):
+                    for accessor in ("_sequence_run_service", "_inpaint_sequence_run_service"):
+                        service = getattr(context, accessor)()
+                        if service.is_running():
+                            await broadcast_json(clients, service.stop())
+                    continue
                 # 실패한 시퀀스 프레임도 라운드 카운트를 진전시켜야 연속 루프가 멈추지 않는다(Codex).
                 # ⚠️ 사용량 판정을 **여기서도** 낸다. 아래 성공 완료 경로만 이 답을 세워 두는데,
                 #    라운드 마지막 프레임이 넘어지면 완료 알림을 안 거치고 곳장 아래

@@ -14,6 +14,7 @@ from urllib.parse import quote
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
 from core.nai_model_contract import resolve_nai_model_for_context
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
+from core.generation_access_policy import access_policy, generation_operation
 
 
 def _as_float(value: Any, default: float) -> float:
@@ -77,6 +78,7 @@ def _post_encode_vibe(token: str, source_bytes: bytes, ie: float, api_model: str
     return base64.b64encode(resp.content).decode("utf-8")
 
 
+@generation_operation
 def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float, *, model_key: str | None = None) -> str:
     """1회성 vibe 인코딩(Storyteller Use Vibe 등): 검증 후 encode-vibe를 호출해 인코딩
     문자열만 돌려준다. Storage/프레임/영속(_persist, _save_encoding_to_storage,
@@ -375,6 +377,8 @@ class HeadlessVibeTransferService:
         the caller MUST then not start a second /ai/encode-vibe call, which would spend
         Anlas twice and let two workers mutate the same frame."""
         context = self.context
+        if access_policy(context).blocked:
+            return {"ok": False, "messages": [context._toast(access_policy(context).reason(), level="error")]}
         self._ensure_loaded()
         index = context._index_from_key(key, "encode_")
         frames = context.vibe_transfer_frames
@@ -441,7 +445,8 @@ class HeadlessVibeTransferService:
                 if not model_spec.supports_vibe:
                     raise RuntimeError(f"{model_spec.key} 모델은 Vibe 인코딩을 지원하지 않습니다.")
                 api_model = model_spec.api_model
-                encoding = _post_encode_vibe(token, source_bytes, ie, api_model)
+                with access_policy(context).operation():
+                    encoding = _post_encode_vibe(token, source_bytes, ie, api_model)
                 if not encoding:
                     toast = context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error")
                 else:

@@ -239,6 +239,9 @@ class HeadlessStorytellerService:
 
     # ------------------------------------------------------------------ start
     def start_cycle(self, value: Any) -> dict[str, Any]:
+        from core.generation_access_policy import access_policy
+        if access_policy(self.context).blocked:
+            return self._error_state(access_policy(self.context).reason())
         count, overrides, ratings, steps = self._parse_cycle_request(value)
         if steps:
             # The authored step sequence IS the cycle: one page per step.

@@ -310,6 +310,14 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "auto_save_state": _json_safe(dict(context.auto_save_state or {})),
         "save_directory_state": _json_safe(dict(context.save_directory_state or {})),
     }
+    # A reference-only NAI visit must not replace the user's last connected mode.
+    from core.generation_access_policy import access_policy
+    previous_mode = access_policy(context).saved_mode
+    if previous_mode in SUPPORTED_API_MODES:
+        state["api_mode"] = previous_mode
+        previous_prompt = prompt_planes.get(previous_mode, {})
+        state["prompt"] = previous_prompt.get("prompt", "")
+        state["negative_prompt"] = previous_prompt.get("negative_prompt", "")
     normalized = _normalize_state(state)
     stored = settings.get(REMOTE_WEB_STATE_KEY)
     previous = _normalize_state(stored) if REMOTE_WEB_STATE_KEY in settings else None

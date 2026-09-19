@@ -1,4 +1,5 @@
 import requests
+from core.generation_access_policy import generation_operation
 import zipfile
 import io, time, re, json
 import base64
@@ -472,6 +473,7 @@ class APIService:
         params.pop("workflow", None)  # 사전 빌드 워크플로우 무효화 → 새 모드로 재빌드
         return descriptor
 
+    @generation_operation
     def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
@@ -830,6 +832,7 @@ class APIService:
         files.update(parts)
         return {"files": files}
 
+    @generation_operation
     def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다.
 
@@ -2956,6 +2959,7 @@ class APIService:
         # 지금 모델이 이미 업스케일러를 가졌으면 그대로 쓰고, 아니면 기본값.
         return current if current in self.NAI_UPSCALE_MODELS else self.NAI_UPSCALE_MODELS[0]
 
+    @generation_operation
     def _post_nai_upscale(self, image_b64: str, width: int, height: int,
                           token: str, model_key: Any = None):
         """신형으로 먼저 보내고, 거절당하면 구형으로 한 번 물러난다.
@@ -2998,6 +3002,7 @@ class APIService:
             break
         return last
 
+    @generation_operation
     def upscale_NAI(self, pixmap: Any, token: str = None, raw_bytes: bytes = None,
                     model_key: Any = None) -> Dict[str, Any]:
         """
@@ -3133,6 +3138,9 @@ class APIService:
 
     def get_anlas(self) -> int:
         """NAI 구독의 Anlas 잔액을 가져옵니다."""
+        from core.generation_access_policy import access_policy
+        if access_policy(self.app_context).blocked:
+            return None
         if self.app_context.current_api_mode != "NAI":
             return None
 
@@ -3174,6 +3182,7 @@ class APIService:
 
         return None
 
+    @generation_operation
     def nai_bg_removal_pil(self, pil_image: Image.Image, save_counter: int, token: str = None) -> Dict[str, Any]:
         """
         NovelAI BG-Removal API를 사용하여 이미지 배경을 제거합니다 (PIL Image 버전).
@@ -3328,6 +3337,7 @@ class APIService:
                 'message': f'배경 제거 중 오류 발생: {str(e)}'
             }
 
+    @generation_operation
     def upscale_NAI_from_inpaint(self, pil_image: Image.Image, target_width: int, target_height: int) -> Dict[str, Any]:
         """
         Inpaint 패널에서 PIL 이미지를 업스케일하고 원본 크기로 리사이징합니다.

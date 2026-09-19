@@ -349,6 +349,9 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
     """Anlas + V5 사용량을 **구독 조회 1회**(+ 추가 계정분)로 만들어 둘 다 돌려준다."""
     anlas_off = _unavailable_payload()
     usage_off = _usage_hidden_payload()
+    from core.generation_access_policy import access_policy
+    if access_policy(context).blocked:
+        return [anlas_off, usage_off]
     mode = str(context.get_api_mode() or "").upper()
     try:
         token = str(context.secure_token_manager.get_token("nai_token") or "").strip()
@@ -634,6 +637,10 @@ def schedule_subscription_refresh(context: Any, clients: set, *, force: bool = F
     (프리셋 하나가 모델 신호를 여러 번 쏴도 요청은 한 번).
     """
     if not clients:
+        return
+    from core.generation_access_policy import access_policy
+    if access_policy(context).blocked:
+        asyncio.create_task(_send_pair(clients, _unavailable_payload(), _usage_hidden_payload()))
         return
 
     # 생성 직후처럼 **값이 방금 변했다고 아는** 경우에는 캐시를 버린다. 안 버리면

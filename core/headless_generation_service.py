@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from core.auto_generation_flags import apply_interactive_generation_gate
+from core.generation_access_policy import access_policy, generation_dispatch, generation_operation
 from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_MARKER_KEY,
     strip_event_stream_vibe_params,
@@ -207,6 +208,7 @@ class HeadlessGenerationService:
     def __init__(self, context: WebSessionContext):
         self.context = context
 
+    @generation_dispatch
     def enqueue_remote_request(
         self,
         command: dict[str, Any] | None = None,
@@ -285,6 +287,7 @@ class HeadlessGenerationService:
                 api_mode=api_mode,
                 blocked_reason=f"캐릭터 프롬프트를 보낼 수 없습니다: {exc}",
             )
+        params["_api_access_revision"] = access_policy(self.context).revision
         request = GenerationRequest(
             params=params,
             source_row=source_row,
@@ -521,6 +524,7 @@ class HeadlessGenerationService:
             if key in params
         }
 
+    @generation_operation
     def execute_request(self, request: GenerationRequest, preview_callback=None, progress_callback=None) -> HeadlessStoredResult:
         """Execute one queued request and store its result in server state.
 
@@ -530,6 +534,8 @@ class HeadlessGenerationService:
         """
 
         params = dict(request.params or {})
+        with access_policy(self.context).operation(params.get("_api_access_revision")):
+            pass
         params["_generation_request"] = request
         # 실행본 기록 키는 이번 실행에서 다시 계산된다 — 리플레이된 params에 남은 직전
         # 실행의 값이 이번 결과 메타데이터로 둔갑하지 않게 항상 비우고 시작한다

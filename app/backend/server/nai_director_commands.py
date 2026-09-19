@@ -14,6 +14,7 @@ defry(강도): Normal=0 … Weakest=5 (값이 클수록 원본 변화가 약함)
 제거: 이 파일 + websocket_session.py 의 NAI_DIRECTOR 임포트/분기 + 프론트 naiDirectorModal 삭제.
 """
 from __future__ import annotations
+from core.generation_access_policy import generation_operation
 
 import base64
 import io
@@ -191,6 +192,7 @@ def _result_token(context) -> str:
         return ""
 
 
+@generation_operation
 def perform_nai_director(context, payload: dict[str, Any] | None):
     """소스 해석 → augment → 표준 결과 파이프라인 주입. (run_in_thread 로 동기 실행)"""
     from app.backend.server.result_display_routes import (

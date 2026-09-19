@@ -68,6 +68,10 @@ class HeadlessRemoteStateService:
 
     def set_api_mode(self, mode: str) -> None:
         normalized = str(mode or "").strip().upper()
+        from core.generation_access_policy import access_policy, GenerationBlocked
+        policy = access_policy(self.context)
+        if policy.blocked and normalized != "NAI":
+            raise GenerationBlocked(policy.reason())
         if normalized not in SUPPORTED_API_MODES:
             return
         if normalized == self.context.current_api_mode:

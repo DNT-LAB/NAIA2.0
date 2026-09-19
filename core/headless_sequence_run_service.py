@@ -53,6 +53,9 @@ class HeadlessSequenceRunService:
     # ----------------------------------------------------------------- guards
     def guard_can_start(self) -> str:
         """빈 문자열=시작 가능, 아니면 거부 사유. 단일 Auto Gen 루프/공유 EventStream 충돌 방지."""
+        from core.generation_access_policy import access_policy
+        if access_policy(self.context).blocked:
+            return access_policy(self.context).reason()
         if self.is_running():
             return "시퀀스 연속 생성이 이미 실행 중입니다. 정지한 뒤 다시 시도하세요."
         # ⚠️ I.Sequence 와 **동시에 못 돌린다.** 둘 다 공용 EventStreamRuntime 을 무장해

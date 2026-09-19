@@ -77,11 +77,19 @@ class HeadlessSessionStateService:
 
     def api_status_payload(self, client_host: str | None = None) -> dict[str, Any]:
         context = self.context
-        return context.api_config_service.status_payload(
+        payload = context.api_config_service.status_payload(
             active_mode=context.get_api_mode(),
             autocomplete=self.autocomplete_status_payload(),
             client_host=client_host,
         )
+        from core.generation_access_policy import access_policy
+        policy = access_policy(context)
+        payload.update(policy.payload())
+        if policy.state == "reference":
+            payload["setup_required"] = False
+        elif policy.state == "setup":
+            payload["setup_required"] = True
+        return payload
 
     def http_status_payload(self) -> dict[str, Any]:
         context = self.context

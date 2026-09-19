@@ -4370,6 +4370,7 @@ const wsMessageHandlers = {
   comfyui_workflow_state: onComfyUiWorkflowState,
   mode_result: onModeResult,
   api_status: updateApiStatus,
+  no_api_result: m => setupController?.onNoApiResult(m),
   verify_result: onVerifyResult,
   clear_api_result: onClearApiResult,
   setup_blocked: onSetupBlocked,
@@ -9056,6 +9057,18 @@ function isModeConnected(mode) {
 
 function updateModeSelectAvailability() {
   if (!modeSelect) return;
+  if (setupController?.isNoApiMode()) {
+    modeSelect.value = 'NAI';
+    API_MODES.forEach(mode => {
+      const option = modeSelect.querySelector(`option[value="${mode}"]`);
+      if (option) { option.disabled = mode !== 'NAI'; option.dataset.connected = '0'; }
+    });
+    modeSelect.disabled = true;
+    modeSelect.title = 'NO API 모드: NAI 참조 전용';
+    modeSelect.classList.remove('mode-unavailable');
+    modeApiCombo?.classList.remove('has-connected-mode', 'mode-unavailable');
+    return;
+  }
   const anyConnected = API_MODES.some(mode => isModeConnected(mode));
   API_MODES.forEach(mode => {
     const opt = modeSelect.querySelector(`option[value="${mode}"]`);
@@ -9085,6 +9098,10 @@ function findConnectedFallbackMode(activeMode = '') {
 
 function reconcileActiveApiMode(reason = '') {
   if (!setupController || !modeSelect) return;
+  if (setupController.isNoApiMode() || setupController.isApiSetupPending()) {
+    setupController.setRuntimeSetupForced(false);
+    return;
+  }
   const apiStatus = setupController.getApiStatus ? setupController.getApiStatus() : null;
   const activeMode = String(apiStatus?.active_mode || currentMode || modeSelect.value || '').toUpperCase();
   if (activeMode && isModeConnected(activeMode)) {

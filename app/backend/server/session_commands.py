@@ -342,6 +342,15 @@ async def _handle_set_mode(
     run_in_thread: AsyncRunner,
 ) -> None:
     requested_mode = str(command.get("mode") or "").strip().upper()
+    from core.generation_access_policy import access_policy
+    policy = access_policy(context)
+    if policy.blocked:
+        await ws.send_text(json.dumps({
+            "type": "mode_result", "success": requested_mode == "NAI",
+            "mode": "NAI", "message": policy.reason(),
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
+        return
     if requested_mode not in {"NAI", "WEBUI", "COMFYUI"}:
         await ws.send_text(json.dumps({
             "type": "mode_result",

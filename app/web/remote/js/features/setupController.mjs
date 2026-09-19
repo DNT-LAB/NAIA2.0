@@ -14,6 +14,7 @@ export function createSetupController({
   const setupDialog = byId('setupDialog');
   const setupCloseBtn = byId('setupClose');
   const setupReprobeBtn = byId('setupReprobe');
+  const setupNoApiBtn = byId('setupNoApi');
   const setupSubTitle = document.querySelector('.setup-sub');
   const setupSubDefault = setupSubTitle ? setupSubTitle.textContent : '';
   const setupNavDots = { NAI: byId('setupDotNai'), WEBUI: byId('setupDotWebui'), COMFYUI: byId('setupDotComfyui') };
@@ -34,6 +35,10 @@ export function createSetupController({
   let runtimeSetupForced = false;
   let runtimeSetupReason = '';
   let apiStatusLast = null;
+  let noApiPending = false;
+  const isNoApiMode = () => !!apiStatusLast?.no_api_mode;
+  const isApiSetupPending = () => !!apiStatusLast?.api_setup_pending;
+  const accessRevision = () => Number(apiStatusLast?.api_access_revision || 0);
   let initialProbeDone = false;
   let probeCompleted = false;
   let pendingForcedClose = false;
@@ -56,6 +61,9 @@ export function createSetupController({
 
   function resetInitialProbe() {
     initialProbeDone = false;
+    noApiPending = false;
+    // Revisions are process-local, and a reconnect can target a restarted backend.
+    apiStatusLast = null;
   }
 
   function isModeConnected(mode) {
@@ -75,7 +83,7 @@ export function createSetupController({
   }
 
   function setRuntimeSetupForced(forced, reason = '') {
-    runtimeSetupForced = !!forced;
+    runtimeSetupForced = !isNoApiMode() && !!forced;
     runtimeSetupReason = reason || '';
     refreshSetupGateDisplay();
   }
@@ -125,6 +133,7 @@ export function createSetupController({
   }
 
   function refreshClearButtons() {
+    if (setupNoApiBtn) setupNoApiBtn.disabled = !setupAllowed || noApiPending;
     Object.keys(setupClearBtns).forEach(mode => {
       const button = setupClearBtns[mode];
       if (!button) return;
@@ -136,7 +145,7 @@ export function createSetupController({
   }
 
   function refreshSetupGateDisplay() {
-    setupForced = serverSetupForced || runtimeSetupForced;
+    setupForced = !isNoApiMode() && (serverSetupForced || runtimeSetupForced);
     setupDialog.classList.toggle('blocked', !setupAllowed);
     if (setupForced) {
       setupCloseBtn.classList.add('hidden');
@@ -172,6 +181,10 @@ export function createSetupController({
   }
 
   function openApiPopup() {
+    if (isNoApiMode()) {
+      if (!setupGateCheck()) return;
+      getWs().send(JSON.stringify({ type: 'open_api_setup' }));
+    }
     setupOverlay.classList.add('open');
     if (apiStatusLast) applySetupGate(apiStatusLast);
     const ws = getWs();
@@ -180,11 +193,11 @@ export function createSetupController({
     }
   }
 
-  function probeApi() {
+  function probeApi(explicit = false) {
     // setup_gate 차단 클라이언트(비로컬/Cloudflared 활성)는 probe_api 가 setup_blocked 로
     // 거절된다. 모든 호출 경로(재연결 초기 프로브·자동 재시도·수동 버튼)를 여기서 일괄 차단해
     // 마지막으로 알려진 연결 상태(probeState)를 파괴하지 않는다.
-    if (!setupAllowed) return;
+    if (!setupAllowed || isNoApiMode()) return;
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     // 게이트가 전송 후 서버측에서 뒤집히는 레이스(예: 프로브 비행 중 Cloudflared 활성화) 대비:
@@ -196,10 +209,11 @@ export function createSetupController({
     probeState.WEBUI = (last.webui_url && last.webui_url.length) ? 'probing' : null;
     probeState.COMFYUI = (last.comfyui_url && last.comfyui_url.length) ? 'probing' : null;
     refreshDotsFromProbe();
-    ws.send(JSON.stringify({ type: 'probe_api' }));
+    ws.send(JSON.stringify({ type: 'probe_api', explicit }));
   }
 
   function onProbeResult(message) {
+    if (isNoApiMode() || Number(message.api_access_revision || 0) < accessRevision()) return;
     probeSnapshot = null;
     probeCompleted = true;
     const results = message.results || {};
@@ -244,8 +258,23 @@ export function createSetupController({
       return;
     }
     if (isProbePending()) return;
-    probeApi();
+    probeApi(true);
   }
+
+  function enterNoApiMode() {
+    if (noApiPending || !setupGateCheck()) return;
+    noApiPending = true;
+    refreshClearButtons();
+    getWs().send(JSON.stringify({ type: 'enter_no_api' }));
+  }
+
+  function onNoApiResult(message) {
+    noApiPending = false;
+    refreshClearButtons();
+    if (!message.success) showToast(message.message || 'NO API 모드를 시작하지 못했습니다.', 'error');
+    else if (message.no_api_mode) showToast('NO API 모드 — NAI 참조 도구를 사용할 수 있습니다.', 'success');
+  }
+  if (setupNoApiBtn) setupNoApiBtn.addEventListener('click', enterNoApiMode);
 
   function closeApiPopup() {
     if (setupForced) {
@@ -401,6 +430,7 @@ export function createSetupController({
   function onVerifyResult(message) {
     const mode = message.mode;
     setSetupLoading(mode, false);
+    if (Number(message.api_access_revision || 0) < accessRevision()) return;
     setSetupResult(mode, message.message, message.message_type);
     if (message.success && setupForced) {
       // 강제 설정 모달에서 인증 성공 → 게이트가 풀리는 순간 자동 닫기
@@ -414,6 +444,8 @@ export function createSetupController({
   }
 
   function onSetupBlocked(message) {
+    noApiPending = false;
+    refreshClearButtons();
     if (message.command === 'probe_api') {
       // 프로브가 게이트에 거절됨(probe_result 없음): 'probing' 을 방치하면 isProbePending 이
       // 영구 true 가 되어 재확인 버튼/모드 셀렉터가 잠긴다. 프로브 직전 스냅샷으로 복원해
@@ -454,7 +486,30 @@ export function createSetupController({
   }
 
   function updateApiStatus(message) {
+    if (Number(message.api_access_revision || 0) < accessRevision()) return;
+    const wasBlocked = isNoApiMode() || isApiSetupPending();
     apiStatusLast = message;
+    if (wasBlocked && !message.no_api_mode && !message.api_setup_pending && message.active_mode in probeState) {
+      // This transition is emitted only after explicit server-side verification.
+      // Other tabs did not receive the initiating tab's verify_result.
+      probeState[message.active_mode] = 'ok';
+      probeCompleted = true;
+    }
+    if (message.no_api_mode || (wasBlocked && !message.api_setup_pending)) {
+      runtimeSetupForced = false;
+      pendingForcedClose = true;
+      if (message.no_api_mode) {
+        probeSnapshot = null;
+        Object.keys(probeState).forEach(mode => { probeState[mode] = null; });
+        probeCompleted = false;
+        setupOverlay.classList.remove('open');
+      }
+    }
+    if (setupLauncherBtn) {
+      setupLauncherBtn.textContent = message.no_api_mode ? 'NO API' : 'API';
+      setupLauncherBtn.title = message.no_api_mode ? 'NO API 참조 모드 — API 설정을 열면 해제됩니다' : 'API 설정';
+    }
+    if (modeApiCombo) modeApiCombo.classList.toggle('reference-only', !!message.no_api_mode);
     const lastVerified = message.last_verified || {};
     const maxSub = 18;
     const trunc = value => (value && value.length > maxSub) ? (value.slice(0, maxSub) + '\u2026') : value;
@@ -517,6 +572,7 @@ export function createSetupController({
     }
 
     applySetupGate(message);
+    updateModeSelectAvailability();
     renderCloudflaredControls(message);
 
     const ws = getWs();
@@ -529,6 +585,9 @@ export function createSetupController({
   updateModeSelectAvailability();
 
   return {
+    isNoApiMode,
+    isApiSetupPending,
+    onNoApiResult,
     getApiStatus,
     resetInitialProbe,
     isModeConnected,

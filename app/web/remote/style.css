@@ -30113,3 +30113,18 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary); font-size: 10px;
 }
+/* Session-only reference access is distinct from a verified API connection. */
+.setup-no-api {
+  background: #2563eb;
+  color: #fff;
+  border: 1px solid #60a5fa;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.setup-no-api:hover { background: #1d4ed8; }
+.setup-no-api:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+.setup-no-api:disabled { opacity: .5; cursor: default; }
+.mode-api-combo.reference-only .setup-launcher { color: #93c5fd; border-color: #3b82f6; }

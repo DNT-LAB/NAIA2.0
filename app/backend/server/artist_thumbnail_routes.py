@@ -8,7 +8,9 @@ from fastapi import FastAPI, Request
 from app.backend.server.install_manager_routes import _is_local_request
 from fastapi.responses import JSONResponse, Response
 
+from core.artist_affinity import default_pack as artist_affinity_pack
 from core.artist_groups import ArtistGroupError, ArtistGroupStore
+from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
 from core.artist_thumbnail_service import ArtistThumbnailService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
@@ -243,6 +245,47 @@ def register_artist_thumbnail_routes(
             )
         except Exception as exc:
             return JSONResponse({"error": f"Artist describe failed: {exc}"}, status_code=500)
+
+    # ── 아티스트 매칭 검색 (사용자 지정 2026-09-19) ─────────────────────
+    #  depth 를 쌓아 작가를 좁힌다. 자료는 `artist_tag_affinity.naiapack` 하나다.
+    #  ⚠️ 팩이 없는 것은 **고장이 아니다** - `state: missing` 을 200 으로 돌려주고
+    #     화면이 단추를 안 살린다(이벤트 맵과 같은 규칙).
+    @app.get("/api/artist-affinity/state")
+    async def api_artist_affinity_state():
+        state = await run_in_thread(artist_affinity_pack().state)
+        return state
+
+    @app.post("/api/artist-affinity/search")
+    async def api_artist_affinity_search(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "json object required"}, status_code=400)
+        try:
+            limit = min(max(int(payload.get("limit") or 300), 1), 1000)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "limit must be an integer"}, status_code=400)
+        try:
+            result = await run_in_thread(
+                artist_search, artist_affinity_pack(), payload.get("stack"),
+                order=str(payload.get("order") or "wilson"),
+                limit=limit,
+                offset=int(payload.get("offset") or 0))
+        except ArtistSearchError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return result
+
+    @app.get("/api/artist-affinity/suggest")
+    async def api_artist_affinity_suggest(req: Request):
+        """검색칸 자동완성. **색인에 있는 낱말만** 고를 수 있다(사용자 지정)."""
+        prefix = str(req.query_params.get("q") or "").strip()
+        axis = str(req.query_params.get("axis") or "").strip() or None
+        if not prefix:
+            return {"state": "ready", "rows": []}
+        return await run_in_thread(artist_suggest, artist_affinity_pack(), prefix,
+                                   axis=axis, limit=20)
 
     @app.get("/api/artist-groups")
     async def api_artist_groups_list():

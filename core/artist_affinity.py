@@ -1,0 +1,346 @@
+"""작가 x 태그 친화도 — "이 태그를 자주 그리는 작가".
+
+`data/artist_tag_affinity.naiapack`(tools/build_artist_affinity_pack.py 산출물)을
+읽어 copyright / character 축의 친화도를 **60~150ms** 에 낸다. 같은 답을 전수 주사로
+내면 태그 하나에 49초(참조 구현) 또는 23초(NAIA 검색)가 든다.
+
+⚠️ `share == 0` 은 **"그 태그를 안 그린다" 가 아니라 "모른다"** 다.
+   이 자료로 "이 태그를 자주 그리는 사람 찾기" 는 되지만 **"안 그리는 사람만 남기기" 는
+   안 된다.** 표에 없는 이유가 (a) 정말 안 그려서인지 (b) 표본이 없어서인지 구분이
+   안 되기 때문이다. 이 프로젝트에서 한 번 뒤집어 구현했다가 되돌린 적이 있다.
+
+⚠️ 문턱을 데이터에 걸지 않았다. 표본이 얇은 작가(`1/1 = 100%`)가 위를 덮는 것은
+   **Wilson 하한**(기본 정렬)이 막는다 - 문턱은 화면 슬라이더로 남긴다. 실측으로
+   `feet` 를 비중순으로 세우면 `xhb 63/63` 이, Wilson 으로 세우면 `wd (1106592840)
+   299/300` 이 1위다. 뒤쪽이 사람들이 기대하는 순서다.
+
+⚠️ general 축은 이 팩에 없다. `event_map` 의 `.naiamap` 이 갖고 있고 그쪽 행 번호는
+   **1-based** 다 - 이 팩의 `rid_artist` 와 이을 때는 반드시 1을 빼라
+   (`meta.rid_note`). 섞으면 건수는 그럴듯한데 작가만 통째로 어긋난다.
+
+팩이 없는 것은 고장이 아니다. `state()` 가 `missing` 을 돌려주고 호출자는 기존 검색
+경로로 내려가면 된다 - 기능만 꺼지고 앱은 산다.
+"""
+from __future__ import annotations
+
+import json
+import math
+import threading
+import zlib
+from pathlib import Path
+from typing import Any, Iterable, Sequence
+
+import numpy as np
+
+from core.event_map.index import decode_postings
+from core.event_map.pack import PackReader
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PACK_NAME = "artist_tag_affinity.naiapack"
+SCHEMA = "naia-artist-affinity-v1"
+RATING_CODE = {"g": 0, "s": 1, "q": 2, "e": 3}
+ALL_RATINGS = frozenset(RATING_CODE)
+# 95% Wilson 하한. 비율만 높고 근거가 얇은 이름이 위로 오는 것을 막는다.
+WILSON_Z = 1.96
+
+
+def _clean_ratings(ratings: Iterable[str] | None) -> frozenset:
+    """모르는 등급 글자는 버리고, 비면 전체로 본다."""
+    wanted = frozenset(r for r in (ratings or ALL_RATINGS) if r in RATING_CODE)
+    return wanted or ALL_RATINGS
+
+
+def wilson_lower_bound(hit: np.ndarray, total: np.ndarray, z: float = WILSON_Z
+                       ) -> np.ndarray:
+    """이항 비율의 Wilson 하한(벡터). total 0 은 0 으로 둔다."""
+    total = np.maximum(total, 1).astype(np.float64)
+    p = hit.astype(np.float64) / total
+    z2 = z * z
+    denom = 1.0 + z2 / total
+    center = (p + z2 / (2.0 * total)) / denom
+    margin = (z / denom) * np.sqrt(p * (1.0 - p) / total + z2 / (4.0 * total * total))
+    return np.clip(center - margin, 0.0, 1.0)
+
+
+class ArtistAffinityPack:
+    """팩 하나의 단일 소유자. 지연 로딩이고 스레드 안전하다."""
+
+    def __init__(self, path: str | Path | None = None,
+                 data_dir: str | Path | None = None):
+        if path is not None:
+            self._candidates = [Path(path)]
+        else:
+            root = Path(data_dir) if data_dir is not None else PROJECT_ROOT / "data"
+            self._candidates = [Path(root) / DEFAULT_PACK_NAME]
+        self._lock = threading.Lock()
+        self._loaded = False
+        self._error: str | None = None
+        self._reader: PackReader | None = None
+        self._meta: dict[str, Any] = {}
+        self._names: dict[str, list[str]] = {}
+        self._lookup: dict[str, dict[str, int]] = {}
+        self._index: dict[str, np.ndarray] = {}
+        self._span: dict[str, int] = {}
+        self._artists: list[str] = []
+        self._rid_artist: np.ndarray | None = None
+        self._rid_rating: np.ndarray | None = None
+        self._denominators: dict[frozenset, np.ndarray] = {}
+
+    # ------------------------------------------------------------- 열기
+    def _path(self) -> Path | None:
+        for candidate in self._candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _load(self) -> bool:
+        if self._loaded:
+            return self._reader is not None
+        with self._lock:
+            if self._loaded:
+                return self._reader is not None
+            self._loaded = True
+            path = self._path()
+            if path is None:
+                self._error = "pack not found"
+                return False
+            try:
+                reader = PackReader(path)
+                meta = reader.json_of("meta")
+                if meta.get("schema") != SCHEMA:
+                    reader.close()
+                    self._error = f"unknown schema: {meta.get('schema')!r}"
+                    return False
+                for axis in meta.get("axes", ()):
+                    names = json.loads(zlib.decompress(reader.bytes_of(f"names_{axis}")))
+                    self._names[axis] = names
+                    # 조회는 소문자로. 코퍼스 태그는 소문자지만 질의는 아무거나 온다.
+                    self._lookup[axis] = {name.lower(): tid
+                                          for tid, name in enumerate(names)}
+                    self._index[axis] = np.frombuffer(
+                        reader.bytes_of(f"post_index_{axis}"), dtype=np.uint64)
+                    # postings 구역의 시작 위치만 들고 있다가 mmap 을 직접 자른다.
+                    # `bytes_of` 를 쓰면 질의마다 구역 **전체**(13~27MB)를 복사한다.
+                    self._span[axis] = reader.span(f"postings_{axis}")[0]
+                self._artists = json.loads(
+                    zlib.decompress(reader.bytes_of("artist_names")))
+                self._rid_artist = np.frombuffer(
+                    zlib.decompress(reader.bytes_of("rid_artist")), dtype=np.uint32)
+                self._rid_rating = np.frombuffer(
+                    zlib.decompress(reader.bytes_of("rid_rating")), dtype=np.uint8)
+            except Exception as exc:  # 망가진 팩이 앱을 죽이면 안 된다
+                self._error = f"{type(exc).__name__}: {exc}"
+                return False
+            rows = int(meta.get("rows", 0))
+            if self._rid_artist.size != rows or self._rid_rating.size != rows:
+                reader.close()
+                self._error = "side arrays do not match meta.rows"
+                self._rid_artist = self._rid_rating = None
+                return False
+            self._reader = reader
+            self._meta = meta
+            return True
+
+    def close(self) -> None:
+        with self._lock:
+            if self._reader is not None:
+                self._reader.close()
+                self._reader = None
+
+    # ------------------------------------------------------------- 상태
+    def state(self) -> dict[str, Any]:
+        """팩이 없는 것은 고장이 아니다 - 찾아본 자리를 같이 돌려준다."""
+        if not self._load():
+            return {"state": "missing", "reason": self._error,
+                    "searched": [str(p) for p in self._candidates]}
+        meta = self._meta
+        return {
+            "state": "ready",
+            "path": str(self._path()),
+            "rows": meta.get("rows"),
+            "artists": meta.get("artists"),
+            "axes": {axis: {"tags": len(self._names[axis])} for axis in self._names},
+            "built_at": meta.get("built_at"),
+            "source_sha256": (meta.get("source") or {}).get("sha256"),
+            "ratings": sorted(RATING_CODE),
+            # 화면이 상수를 중복해 갖지 않도록 여기서 말해 준다.
+            "min_posts": meta.get("min_posts"),
+            "general_axis": meta.get("general_axis"),
+        }
+
+    def available(self) -> bool:
+        return self._load()
+
+    def axes(self) -> list[str]:
+        return list(self._names) if self._load() else []
+
+    # ------------------------------------------------------------- 조회
+    def resolve(self, tag: str, axis: str | None = None) -> tuple[str, int] | None:
+        """태그가 어느 축에 있나. 두 축에 다 있으면 **게시물이 많은 쪽**을 고른다."""
+        if not self._load():
+            return None
+        key = (tag or "").strip().lower().replace("_", " ")
+        if not key:
+            return None
+        found = []
+        for name in ([axis] if axis else list(self._names)):
+            tid = self._lookup.get(name, {}).get(key)
+            if tid is not None:
+                found.append((name, tid))
+        if not found:
+            return None
+        if len(found) == 1:
+            return found[0]
+        return max(found, key=lambda pair: self._posting(*pair).size)
+
+    def _posting(self, axis: str, tid: int) -> np.ndarray:
+        index = self._index[axis]
+        base = self._span[axis]
+        start, end = base + int(index[tid]), base + int(index[tid + 1])
+        # 이 팩의 postings 는 **0-based** 다(meta.rid_base). 자리 옮김이 없다.
+        return decode_postings(zlib.decompress(self._reader.map[start:end]))
+
+    def _denominator(self, ratings: frozenset) -> np.ndarray:
+        """작가별 **분모**를 분자와 같은 필터로 센다.
+
+        이걸 미리 구워 둔 표(`artist_dictionary.py` 등)로 대신하면 안 된다 - 그 표는
+        164명이 공식 수치로 덮여 있어 분모가 최대 12배 부풀어 있고, 등급을 좁히면
+        분자만 줄어 순위가 통째로 거짓이 된다.
+        """
+        cached = self._denominators.get(ratings)
+        if cached is not None:
+            return cached
+        codes = self._rid_artist
+        if ratings == ALL_RATINGS:
+            picked = codes[codes != 0]
+        else:
+            wanted = np.asarray(sorted(RATING_CODE[r] for r in ratings), dtype=np.uint8)
+            mask = np.isin(self._rid_rating, wanted)
+            picked = codes[mask & (codes != 0)]
+        counts = np.bincount(picked, minlength=len(self._artists))
+        self._denominators[ratings] = counts
+        return counts
+
+    # ── 공개 문 ────────────────────────────────────────────────────────
+    #  깊이 검색(`core/artist_search.py`)이 밑단을 직접 만지지 않게 낸 창구다.
+    @property
+    def artist_names(self) -> list[str]:
+        """작가 이름표. 색인 0 은 '작가 없음/합작' 자리다."""
+        self._load()
+        return self._artists
+
+    def denominator(self, ratings: Iterable[str] | None = None) -> np.ndarray | None:
+        """작가별 게시물 수(등급 필터 반영). 없으면 None."""
+        if not self._load():
+            return None
+        return self._denominator(_clean_ratings(ratings))
+
+    def tally(self, tag: str, *, axis: str | None = None,
+              ratings: Iterable[str] | None = None) -> dict[str, Any]:
+        """한 태그의 **작가별 분자**. 순위표를 만들지 않는다.
+
+        ⚠️ 이것이 `affinity()` 와 깊이 검색의 공통 밑단이다. 분자를 내주는 것만으로도
+           깊이마다 행을 91,529개씩 만들고 버리는 일이 사라진다.
+        """
+        if not self._load():
+            return {"state": "missing", "reason": self._error}
+        target = self.resolve(tag, axis)
+        if target is None:
+            return {"state": "unknown_tag", "tag": tag, "axes": list(self._names)}
+        found_axis, tid = target
+        wanted = _clean_ratings(ratings)
+
+        rids = self._posting(found_axis, tid)
+        posts = int(rids.size)
+        if wanted != ALL_RATINGS:
+            keep = np.asarray(sorted(RATING_CODE[r] for r in wanted), dtype=np.uint8)
+            rids = rids[np.isin(self._rid_rating[rids], keep)]
+        picked = self._rid_artist[rids]
+        # ⚠️ 0 은 '작가 없음' 이다. 빼지 않으면 합작·무명 행이 한 작가로 뭉친다.
+        picked = picked[picked != 0]
+        return {
+            "state": "ready",
+            "axis": found_axis,
+            "tag": self._names[found_axis][tid],
+            "ratings": sorted(wanted),
+            "posts": posts,
+            "matched": int(rids.size),
+            "numerator": np.bincount(picked, minlength=len(self._artists)),
+        }
+
+    def affinity(self, tag: str, *, axis: str | None = None,
+                 ratings: Iterable[str] | None = None, min_posts: int = 0,
+                 limit: int | None = 300, order: str = "wilson") -> dict[str, Any]:
+        """한 태그의 작가 친화도.
+
+        `min_posts` 와 `limit` 은 **화면 조건**이다 - 팩에는 문턱이 없으므로 0 으로
+        불러도 비용이 같다(큰 태그에서 응답만 커진다: twintails 문턱 0 이면 139,751명).
+        """
+        counted = self.tally(tag, axis=axis, ratings=ratings)
+        if counted["state"] != "ready":
+            return {**counted, "rows": []}
+        found_axis = counted["axis"]
+        wanted = frozenset(counted["ratings"])
+        posts = counted["posts"]
+        numerator = counted["numerator"]
+        seen = np.flatnonzero(numerator)
+
+        denominator = self._denominator(wanted)
+        eligible = seen[denominator[seen] >= max(int(min_posts), 1)]
+        hit = numerator[eligible]
+        total = denominator[eligible]
+        share = hit / np.maximum(total, 1)
+        wilson = wilson_lower_bound(hit, total)
+        rank = np.argsort(-(wilson if order == "wilson" else share), kind="stable")
+        if limit is not None and limit > 0:
+            rank = rank[:limit]
+
+        rows = [{"artist": self._artists[int(eligible[i])],
+                 "hit": int(hit[i]), "total": int(total[i]),
+                 "share": round(float(share[i]), 4),
+                 "wilson": round(float(wilson[i]), 4)} for i in rank]
+        return {
+            "state": "ready",
+            "tag": counted["tag"],
+            "axis": found_axis,
+            "ratings": sorted(wanted),
+            "posts": posts,                 # 등급 거르기 **전** 게시물 수
+            "matched": counted["matched"],  # 거른 뒤
+            "hits": int(numerator.sum()),   # 그중 단일 작가 행
+            "artists": int(seen.size),
+            "eligible": int(eligible.size),
+            "min_posts": int(min_posts),
+            "order": order,
+            "rows": rows,
+        }
+
+    def suggest(self, prefix: str, axis: str | None = None, limit: int = 20
+                ) -> list[dict[str, str]]:
+        """앞글자로 태그 찾기. 화면이 어느 축인지 모를 때 쓴다."""
+        if not self._load():
+            return []
+        key = (prefix or "").strip().lower().replace("_", " ")
+        if not key:
+            return []
+        out: list[dict[str, str]] = []
+        for name in ([axis] if axis else list(self._names)):
+            for tag, _tid in self._lookup.get(name, {}).items():
+                if tag.startswith(key):
+                    out.append({"tag": tag, "axis": name})
+                    if len(out) >= limit:
+                        return out
+        return out
+
+
+_default: ArtistAffinityPack | None = None
+_default_lock = threading.Lock()
+
+
+def default_pack() -> ArtistAffinityPack:
+    """앱 전체가 공유하는 팩 하나. 열기는 첫 질의까지 미룬다."""
+    global _default
+    if _default is None:
+        with _default_lock:
+            if _default is None:
+                _default = ArtistAffinityPack()
+    return _default

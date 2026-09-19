@@ -793,7 +793,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-bench')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260919-updrow')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -1132,7 +1132,7 @@ import('./js/features/fastSearch.mjs?v=20260913-fs-naiamap-download')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20260913-em38')
+import('./js/features/eventMapPanel.mjs?v=20260919-empin')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1141,6 +1141,9 @@ import('./js/features/eventMapPanel.mjs?v=20260913-em38')
       // [적용+생성]: 적용된 프롬프트가 칸에 들어온 뒤 **Generate 버튼과 같은 길**로 낸다.
       generateNow: () => generateAction(),
       onRandomLinkChange: () => updateGenerateButtonMode(),
+      // [PE설정] = 메인 프롬프트의 `/pe` **그 목록**을 연다. 베껴 그리지 않는다 -
+      // ON/OFF 상태가 두 곳이 되면 반드시 어긋난다.
+      openPeSlash: () => tagAssist?.openSlashCommandByName?.('pe', promptEdit) || false,
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
@@ -13361,7 +13364,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-nsprefix')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-slashapi')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

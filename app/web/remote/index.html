@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260919-bench">
+<link rel="stylesheet" href="style.css?v=20260919-updrow">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -910,6 +910,13 @@
                눌린 상태(aria-pressed)는 js/features/eventMapPanel.mjs 가 관리한다. -->
           <button type="button" class="em-tab" id="eventMapTab" aria-pressed="false" aria-label="이벤트 맵 (Ctrl+E)"
                   data-naia-title="이벤트 맵 · Ctrl+E 로도 열립니다">E</button>
+          <!-- E 아래의 이동 단추 둘(사용자 지정 2026-09-19). 둘은 **같은 자리**에 번갈아 뜬다:
+               ← 는 열려 있고 안 고정일 때, → 는 고정일 때. 닫혀 있으면 둘 다 없다
+               (패널이 없는데 옮길 곳을 묻는 단추만 떠 있으면 무슨 뜻인지 알 수 없다). -->
+          <button type="button" class="em-move" id="eventMapMoveLeft" hidden aria-label="이벤트 맵을 프롬프트 위로"
+                  data-naia-title="프롬프트 위로 · 고정됩니다(자동으로 닫히지 않습니다)">←</button>
+          <button type="button" class="em-move" id="eventMapMoveRight" hidden aria-label="이벤트 맵을 이미지 위로"
+                  data-naia-title="이미지 위로 · 고정이 풀립니다(포커스를 잃으면 닫힙니다)">→</button>
           <!-- Img2Img/Inpaint 재개 dock (Grok I2V pill 방식) — 결과 뷰어 하단 중앙 플로팅. -->
           <div class="img2img-resume-dock" id="img2imgResumeDock" hidden>
             <button class="img2img-resume-btn" id="img2imgResumeBtn" type="button" onclick="resumeImg2ImgSession()">↺ Inpaint</button>
@@ -1186,6 +1193,15 @@
             </div>
           </div>
           <div class="artist-thumb-grid" id="artistThumbGrid"></div>
+          <!-- 갱신 알림(사용자 지정 2026-09-19). **격자 바로 아래 · 페이저 바로 위**다 -
+               맨 아래는 눈이 안 가고 [Generate] 와 붙어 있어 불편했다.
+               막지 않는다 - 옛 팩으로 계속 보면서 받는다(2.5GB 를 다 받을
+               때까지 격자를 비워 두던 시절의 반성이 `loadPage` 주석에 있다). -->
+          <div class="artist-thumb-update-row" id="artistThumbUpdateRow" hidden>
+            <span class="artist-thumb-update-text">업데이트가 있습니다. <em>(업데이트 중 계속 이용가능)</em><em
+                  id="artistThumbUpdateNext" class="artist-thumb-update-next"></em></span>
+            <button type="button" class="artist-thumb-update-btn" id="artistThumbUpdateBtn">Update</button>
+          </div>
           <footer class="artist-thumb-pager">
             <!-- ⚠️ [폴더 열기] 는 **모드 고르는 칸의 맨 아래**로 옮겼다(사용자 지정
                  2026-09-19). 여기 있으면 리모컨에서는 영영 안 보인다 - 그 칸은
@@ -1199,14 +1215,6 @@
             </label>
             <button type="button" class="artist-thumb-page-btn" id="artistThumbNextBtn">Next</button>
           </footer>
-          <!-- 갱신 알림(사용자 지정 2026-09-19). **맨 아랫줄**이라 나머지가 한 줄 밀려
-               올라간다. 막지 않는다 - 옛 팩으로 계속 보면서 받는다(2.5GB 를 다 받을
-               때까지 격자를 비워 두던 시절의 반성이 `loadPage` 주석에 있다). -->
-          <div class="artist-thumb-update-row" id="artistThumbUpdateRow" hidden>
-            <span class="artist-thumb-update-text">업데이트가 있습니다. <em>(업데이트 중 계속 이용가능)</em><em
-                  id="artistThumbUpdateNext" class="artist-thumb-update-next"></em></span>
-            <button type="button" class="artist-thumb-update-btn" id="artistThumbUpdateBtn">Update</button>
-          </div>
         </section>
       </div>
     </div>
@@ -1448,6 +1456,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260919-bench"></script>
+<script src="app.js?v=20260919-updrow"></script>
 </body>
 </html>

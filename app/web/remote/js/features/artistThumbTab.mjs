@@ -121,6 +121,13 @@ export function createArtistThumbController({
   let selected = null;
   let wheelPageLocked = false;
   let downloadTimer = null;
+  // [Update]/[Download] 를 누른 **그 순간**이 보이게 하는 깃발(사용자 지정 2026-09-19).
+  // ⚠️ `/api/artist-thumb/download` 왕복이 끝나야 `state.download` 가 서고 폴링이 돈다 -
+  //    그 사이 수백 ms 동안 단추가 아무 말도 안 해 "눌린 건가?" 가 됐다.
+  // ⚠️ 두 단추(갱신 줄의 [Update]·격자 자리의 [Download])가 **같은 문**으로 가므로
+  //    깃발도 하나다. 칠하는 곳을 둘로 나누면 한쪽만 고치게 된다.
+  let downloadStarting = false;
+  const DOWNLOAD_STARTING_LABEL = '시작하는 중...';
   let pendingResultRequestId = '';
   let pendingResultMeta = null;
   let resultBlobUrl = '';
@@ -691,7 +698,7 @@ export function createArtistThumbController({
   const downloadPercent = () => Math.max(0, Math.min(100, Number(state?.download?.percent || 0)));
 
   /** 받는 길은 **둘뿐**이다(사용자 지정 2026-09-19): 파일이 없을 때 격자 자리에 뜨는
-   *  화면과, 갱신이 걸렸을 때의 맨 아랫줄. 둘 다 `state.download` 하나를 본다 -
+   *  화면과, 갱신이 걸렸을 때 격자 바로 아래에 뜨는 줄. 둘 다 `state.download` 하나를 본다 -
    *  받는 단추를 세 곳에 두었다가 어느 것이 진짜인지 모르게 된 적이 있다. */
   function updateDownloadUi() {
     updateMissingUi();
@@ -741,8 +748,10 @@ export function createArtistThumbController({
     const bar = host.querySelector('.artist-thumb-missing-bar');
     const msg = host.querySelector('.artist-thumb-missing-msg');
     if (btn) {
-      btn.disabled = busy || artistQueueRunning || !mode;
-      btn.textContent = busy ? (percent > 0 ? `${percent}%` : 'Downloading...') : 'Download';
+      btn.disabled = downloadStarting || busy || artistQueueRunning || !mode;
+      btn.textContent = downloadStarting
+        ? DOWNLOAD_STARTING_LABEL
+        : (busy ? (percent > 0 ? `${percent}%` : 'Downloading...') : 'Download');
     }
     if (bar) {
       bar.hidden = !busy;
@@ -750,10 +759,13 @@ export function createArtistThumbController({
       if (fill) fill.style.width = `${percent}%`;
     }
     if (msg) msg.textContent = busy ? (download.message || '') : (download.error || '');
-    host.classList.toggle('is-busy', busy);
+    host.classList.toggle('is-busy', busy || downloadStarting);
   }
 
-  /** 갱신 줄 - **맨 아랫줄**이라 나머지가 한 줄 밀려 올라간다(사용자 지정 2026-09-19).
+  /** 갱신 줄 - **격자 바로 아래 · 페이저 바로 위**다(사용자 지정 2026-09-19).
+   *  ⚠️ 맨 아래에 두었더니 눈이 안 가고 [Generate] 와 붙어 있어 불편했다. 자리를 옮기려면
+   *     `remoteRows()` 의 차례와 `index.html` 의 차례를 **둘 다** 옮겨야 한다 - 한쪽만
+   *     고치면 리모컨을 내렸을 때 탭에서 엉뚱한 자리에 앉는다.
    *  ⚠️ 받는 동안에도 사라지지 않는다 - "업데이트 중 계속 이용가능" 이 이 줄의 요점이라
    *     진행을 여기서 보여 줘야 한다(막는 화면을 띄우지 않는 대가다). */
   function updateUpdateRow() {
@@ -765,8 +777,10 @@ export function createArtistThumbController({
     const mode = currentMode();
     const busy = downloadBusyFor(mode);
     const percent = downloadPercent();
-    updateBtn.disabled = busy || artistQueueRunning || !mode;
-    updateBtn.textContent = busy ? (percent > 0 ? `${percent}%` : '받는 중...') : 'Update';
+    updateBtn.disabled = downloadStarting || busy || artistQueueRunning || !mode;
+    updateBtn.textContent = downloadStarting
+      ? DOWNLOAD_STARTING_LABEL
+      : (busy ? (percent > 0 ? `${percent}%` : '받는 중...') : 'Update');
     // 가상 모드는 [Update] 한 번에 **한 팩**이다 - 몇 개 남았고 다음이 무엇인지
     // 적어야 한 번 누르고 "안 채워졌다" 로 읽지 않는다.
     if (nextRowEl) {
@@ -2214,20 +2228,26 @@ export function createArtistThumbController({
       showToast?.('이미 다운로드된 모드입니다.', 'success');
       return;
     }
+    // 누른 것이 **곧바로** 보인다(사용자 지정 2026-09-19). 아래 `await` 가 끝나야
+    // 진행이 서므로, 그 전까지는 이 깃발이 단추를 잠그고 글자를 바꿔 준다.
+    downloadStarting = true;
+    updateDownloadUi();
     try {
       const download = await postJson('/api/artist-thumb/download', {mode});
       state = {...(state || {}), download};
-      updateDownloadUi();
-      // 받는 동안 모드 칸이 잠긴다(사용자 지정) - 잠그는 곳은 한 군데다.
-      updateArtistActionAvailability();
       setStatus(download.message || '다운로드를 시작했습니다.', 'busy');
       // ⚠️ 폴링은 **서버가 답한 키**로 돈다. 가상 모드를 눌렀으면 서버가 구성원 팩으로
       //    넘겼고, 내가 누른 이름으로 기다리면 끝나는 것을 영영 못 본다.
       startDownloadPolling(String(download.mode || mode));
     } catch (error) {
-      updateDownloadUi();
       showToast?.(error.message || 'Download failed', 'error');
       setStatus(error.message || 'Download failed', 'error');
+    } finally {
+      // ⚠️ 실패해도 단추가 잠긴 채 남으면 안 된다 - 되돌리는 곳은 여기 하나다.
+      downloadStarting = false;
+      updateDownloadUi();
+      // 받는 동안 모드 칸이 잠긴다(사용자 지정) - 잠그는 곳은 한 군데다.
+      updateArtistActionAvailability();
     }
   }
 
@@ -2287,7 +2307,7 @@ export function createArtistThumbController({
         gotoPage();
       }
     });
-    // 받는 길 둘 - 격자 자리의 [Download] 와 맨 아랫줄의 [Update]. 같은 문으로 간다.
+    // 받는 길 둘 - 격자 자리의 [Download] 와 격자 아래 갱신 줄의 [Update]. 같은 문으로 간다.
     // ⚠️ 격자의 단추는 다시 그려지는 자식이라 **위임**으로 받는다(노드에 직접 걸면
     //    격자를 한 번 다시 그린 순간 배선이 끊긴다).
     gridEl?.addEventListener('click', event => {
@@ -2508,6 +2528,12 @@ export function createArtistThumbController({
       {nodes: [searchHostEl], className: 'rctl-search-row'},
       // 남는 높이를 다 먹는 줄. 관찰이 본론이라 격자가 가장 크다.
       {nodes: [gridEl], fill: true},
+      // 갱신 알림 - **격자 바로 아래 · 페이저 바로 위**(사용자 지정 2026-09-19).
+      // ⚠️ 맨 아래(=[Generate] 아래)에 두었더니 눈이 안 갔다. 자리를 또 옮긴다면
+      //    `index.html` 의 차례도 **같이** 옮겨야 한다 - 리모컨을 내리면 조각이
+      //    제자리로 돌아가므로, 한쪽만 고치면 탭에서 엉뚱한 자리에 앉는다.
+      // 갱신이 없으면 옷이 통째로 숨겨 아무 자리도 안 먹는다.
+      {nodes: [updateRowEl], className: 'rctl-update-row'},
       // 페이지 - 앞/뒤 + 몇 쪽인지 + 바로 뛰기.
       {
         className: 'rctl-pager',
@@ -2545,9 +2571,6 @@ export function createArtistThumbController({
       },
       {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
       {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
-      // 갱신 알림은 **맨 아래**(사용자 지정 2026-09-19) - 나머지가 한 줄 밀려 올라간다.
-      // 갱신이 없으면 옷이 통째로 숨겨 아무 자리도 안 먹는다.
-      {nodes: [updateRowEl], className: 'rctl-update-row'},
     ];
   }
 
@@ -2995,7 +3018,7 @@ export function createArtistThumbController({
     bench.type = 'button';
     bench.className = 'rctl-pe-btn rctl-pe-bench';
     bench.textContent = 'V5 영점';
-    bench.title = '작가 비교용 기준 설정(bench_0914)을 새 프리셋으로 만들어 적용합니다';
+    bench.title = '작가 비교용 기준 설정(artist_bench_recommend)을 새 프리셋으로 만들어 적용합니다';
     bench.addEventListener('click', () => { void applyArtistBenchPreset(); });
     remote.slot.appendChild(bench);
     peHeadButtons.set('__bench__', bench);

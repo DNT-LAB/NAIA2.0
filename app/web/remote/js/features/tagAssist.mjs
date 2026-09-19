@@ -3049,7 +3049,10 @@ export function createTagAssistController({
     slashEntry.input.placeholder = stage ? (stage.arg ? (stage.arg.hint || '값') : '고르기') : '명령';
     renderSlashList('');
   }
-  function openSlashEntry(textarea, caret) {
+  /** @param {{command?: string}} [options] `command` 를 주면 그 명령의 **선택지 단계로 바로**
+   *  들어간다(이벤트 맵의 [PE설정] 이 `/pe` 를 이렇게 연다). 목록을 베껴 그리지 않는 것이
+   *  요점이다 - ON/OFF 상태가 두 곳이 되면 반드시 어긋난다. */
+  function openSlashEntry(textarea, caret, options = {}) {
     closeSlashEntry({restoreFocus: false});
     acTarget = textarea;
     const point = getInputCaretPoint(textarea);
@@ -3070,6 +3073,21 @@ export function createTagAssistController({
     input.addEventListener('keydown', onSlashEntryKey);
     input.focus();
     renderSlashList('');
+    const want = String(options.command || '').trim();
+    if (want) {
+      const cmd = allSlashCommands().find(c => String(c?.name || '') === want);
+      if (cmd) { label.textContent = `/${want} ›`; runSlashCommand({_wc_type: 'slash', _cmd: cmd}); }
+    }
+  }
+
+  /** 밖에서 명령 하나를 곧장 여는 길(이벤트 맵 [PE설정]).
+   *  ⚠️ 캐럿 자리는 **엔트리를 띄울 좌표**로만 쓴다 - `/pe` 는 글을 안 넣는다. */
+  function openSlashCommandByName(name, textarea = null) {
+    const host = textarea || promptEdit;
+    if (!host) return false;
+    const caret = Number.isInteger(host.selectionStart) ? host.selectionStart : (host.value || '').length;
+    openSlashEntry(host, caret, {command: name});
+    return true;
   }
   function onSlashEntryKey(e) {
     if (!slashEntry) return;
@@ -3533,6 +3551,7 @@ export function createTagAssistController({
   return {
     bindDefaultTextareas,
     bindTagAssist,
+    openSlashCommandByName,
     bindTagChipInfoHover,
     lookupPromptInfoTag,
     hidePromptInfoTooltip,

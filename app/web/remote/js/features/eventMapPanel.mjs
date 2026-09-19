@@ -70,7 +70,8 @@ const SORT_MODES = [
   { id: 'mix', label: 'mix 순', title: '관측 × ln(lift) - 많이 나오면서 치우친 것(G² 기여분). 둘의 절충' },
 ];
 
-export function initEventMap({ insertTag, showToast, getPromptText, generateNow, onRandomLinkChange } = {}) {
+export function initEventMap({ insertTag, showToast, getPromptText, generateNow, onRandomLinkChange,
+                               openPeSlash = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
   let linkUncertain = false;
   let linkQueue = Promise.resolve(), linkKey = '';
@@ -121,6 +122,14 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let sideEl = null;              // 실제 조합 둘째 패널
   let library = null;
   let open = false, seq = 0, suggestSeq = 0, timer = null;
+  /** 고정(사용자 지정 2026-09-19). 켜면 두 가지가 함께 바뀐다:
+   *   - 창이 **자동으로 안 닫힌다**(밖을 눌러도 남는다)
+   *   - 자리가 이미지 칸 위 -> **메인 프롬프트 칸 위**로, 높이는 그 칸 안에 들어가게
+   *     극단적으로 줄어든다(아래 단추 줄을 가리지 않는다 - 사용자가 노란 선으로 그어 줬다).
+   *  둘을 따로 두지 않는다: 프롬프트를 고치면서 쓰라고 옮기는 것인데 밖을 누를 때마다
+   *  닫히면 그 자리가 쓸모없다. */
+  let pinnedLayout = false;
+  let moveLeftBtn = null, moveRightBtn = null;
   let mapState = null;            // /state 응답. 열 때마다 새로 받는다(색인이 바뀔 수 있다).
   let personLabels = new Map();   // id -> 화면 문구 (서버가 준다)
   let pins = [], excludes = [];
@@ -758,6 +767,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
                  aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
       <button type="button" class="em-reset" data-em-reset
               title="핀 · 제외 · 소분류를 한 번에 비우고 대분류로 돌아간다">초기화</button>
+      <button type="button" class="em-reset em-pe" data-em-pe-settings
+              title="Prompt Engineering — prefix · postfix · autohide · 옵션 (메인 프롬프트의 /pe 와 같은 목록)">PE설정</button>
       <span class="em-actions em-actions-right"><button type="button" data-em-insert disabled
               title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-copy disabled
               title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
@@ -1014,8 +1025,16 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       return;
     }
     if (input.value.trim()) {
-      html += suggestHtml();
       rows = (suggest?.items || []).filter(it => !it.blocked && !pins.includes(it.tag)).map(it => it.tag);
+      // ⭐ 친 글자와 **정확히 같은** 태그가 있으면 그 줄을 미리 짚는다(사용자 제보
+      //    2026-09-19: `pig` 를 치고 Enter 를 누르면 `pigeon-toed` 가 꽂혔다).
+      //    목록은 게시물 수 순이라 정확히 맞는 것이 맨 위에 있으리란 보장이 없다 -
+      //    `pigeon-toed` 10,575 > `pig` 3,286 이었다.
+      // ⚠️ 사용자가 ↑↓ 로 고른 줄이 있으면 건드리지 않는다(그쪽이 더 분명한 뜻이다).
+      // ⚠️ **`suggestHtml()` 보다 먼저** 정해야 한다 - 그 함수가 `active` 를 읽어
+      //    `is-active` 를 박는다. 뒤에 정하면 값은 맞는데 화면에는 안 보인다.
+      if (active < 0) active = exactRowIndex();
+      html += suggestHtml();
     } else if (!pins.length && group) {
       html += browseHtml();
     } else if (!pins.length) {
@@ -1157,6 +1176,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
             title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
             title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span>
         <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
+        <label class="em-random-link em-pin-layout" title="창을 프롬프트 칸 위로 옮기고 고정합니다. 고정하면 밖을 눌러도 닫히지 않습니다(E 아래의 ← → 와 같은 스위치)."><input type="checkbox" data-em-pin-layout>고정</label>
         <label class="em-random-link" title="메인 Random과 Auto Gen이 현재 핀·제외·인원·등급을 사용합니다. 패널을 닫아도 연결됩니다."><input type="checkbox" data-em-random-link>랜덤 버튼 연결</label>
       </div>`;
     busyEl = document.createElement('div');
@@ -1191,6 +1211,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     footEl.querySelector('[data-em-random-link]').addEventListener('change', event => {
       void syncRandomLink(event.target.checked);
     });
+    // [고정] 은 E 아래의 ← → 와 **같은 스위치**다 - 어느 쪽을 만져도 셋이 같이 움직인다.
+    footEl.querySelector('[data-em-pin-layout]').addEventListener('change', event => {
+      setPinned(event.target.checked);
+    });
+    paintPinToggle();
 
     overlay.querySelector('.em-close').addEventListener('click', close);
     input.addEventListener('input', () => { active = -1; scheduleSuggest(); });
@@ -1214,6 +1239,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
+      if (t.closest('[data-em-pe-settings]')) { openPeSettings(); return; }
       if (t.closest('[data-em-reset]')) { resetSelection(); return; }
       if (t.closest('[data-em-insert]')) { void applyPins(t.closest('[data-em-insert]')); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
@@ -1348,6 +1374,21 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     return overlay;
   }
 
+  /** 아무 줄도 안 짚었을 때 Enter 가 고를 자리.
+   *
+   *  ⭐ **친 글자와 정확히 같은 태그가 있으면 그것**이다(사용자 제보 2026-09-19).
+   *     예전에는 무조건 첫 줄이었는데, 목록은 게시물 수 순이라 `pig` 를 치면
+   *     `pigeon-toed`(10,575)가 `pig`(3,286)보다 위에 서서 그것이 꽂혔다.
+   *     이름을 **다 친 사람**의 뜻은 그 이름이지 더 흔한 이웃이 아니다.
+   *  ⚠️ 대소문자·앞뒤 공백만 무시한다. 안쪽 공백은 태그의 일부다(`pig ears`).
+   */
+  function exactRowIndex() {
+    const want = String(input?.value || '').trim().toLowerCase();
+    if (!want) return 0;
+    const at = rows.findIndex(tag => String(tag || '').trim().toLowerCase() === want);
+    return at >= 0 ? at : 0;
+  }
+
   function onKeyDown(event) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       if (!rows.length) return;
@@ -1359,7 +1400,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (event.key === 'Enter') {
       event.preventDefault();
       if (!rows.length) return;
-      pin(rows[active >= 0 ? active : 0]);
+      pin(rows[active >= 0 ? active : exactRowIndex()]);
       return;
     }
     if (event.key === '-' && rows.length && active >= 0) {
@@ -1384,8 +1425,35 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       + Math.max(0, children.length - 1) * (parseFloat(css.columnGap) || 0)
       + (parseFloat(css.paddingLeft) || 0) + (parseFloat(css.paddingRight) || 0) + 4));
   }
+  /** 고정 자리 - 메인 프롬프트 칸 **위**에 얹고 그 칸 안에 가둔다(사용자 지정 2026-09-19).
+   *
+   *  ⚠️ 높이 상한이 **이 자리의 전부**다. 프롬프트 칸을 넘어가면 아래의
+   *     [TOOLS & ASSISTANTS] · [Random]/[Generate] 를 덮어 버린다(사용자가 노란 선으로
+   *     그어 준 경계가 그것이다). 그래서 base 와 hard 를 같은 값으로 묶는다 -
+   *     `fitHeight` 가 내용만큼 자라려 해도 여기서 막힌다.
+   *  @returns {boolean} 고정 자리로 앉혔는가(호스트를 못 찾으면 false - 평소 자리로 떨어진다)
+   */
+  function positionPinned() {
+    const host = document.querySelector('.prompt-highlight-wrap')
+      || document.querySelector('#promptEdit')?.parentElement
+      || document.querySelector('#promptEdit');
+    const r = host ? host.getBoundingClientRect() : null;
+    if (!r || r.width < 200 || r.height < 80) return false;
+    const pad = 6;
+    const width = Math.round(Math.max(panelMinimumWidth(), Math.min(r.width - pad * 2, window.innerWidth - 16)));
+    overlay.style.transform = 'none';
+    overlay.style.left = `${Math.round(Math.max(8, Math.min(r.left + pad, window.innerWidth - width - 8)))}px`;
+    overlay.style.top = `${Math.round(r.top + pad)}px`;
+    overlay.style.width = `${width}px`;
+    const cap = Math.max(160, Math.round(r.height - pad * 2));
+    heightCaps = { base: cap, hard: cap };
+    fitHeight();
+    return true;
+  }
+
   function position() {
     if (!overlay || overlay.hidden) return;
+    if (pinnedLayout && positionPinned()) return;
     // 뷰어(이미지 칸)만 호스트다 - #rightTabResult 로 재면 Generation Info 위까지 내려간다(사용자 제보).
     const host = document.querySelector('#resultViewer') || document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
     const r = host ? host.getBoundingClientRect() : null;
@@ -1427,6 +1495,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     overlay.hidden = false;
     open = true;
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'true');
+    overlay.classList.toggle('is-pinned', pinnedLayout);
+    paintMoveButtons();
     position();
     focusInput();                   // 열자마자 - 바로 칠 수 있게(사용자 지정 2026-09-12 밤)
     setStatus('여는 중…', 'busy');
@@ -1453,11 +1523,53 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (subEl) subEl.hidden = true;
     if (sideEl) { sideEl.hidden = true; sideEl.innerHTML = ''; }
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'false');
+    paintMoveButtons();
     clearTimeout(timer);
     stopDlPoll();                   // 화면 폴링만 멈춘다 - 내려받기는 서버에서 계속 돈다
     seq += 1; suggestSeq += 1;
   }
   function toggle() { if (open) close(); else void show(); }
+
+  /** [PE설정] - 메인 프롬프트의 `/pe` **그 목록**을 연다.
+   *
+   *  ⚠️ 여기서 목록을 다시 그리지 않는다. `/pe` 의 행들은 지금 설정을 읽어 ON/OFF 를
+   *     적는데, 같은 것을 두 곳에서 그리면 한쪽이 반드시 뒤처진다(토글 하나를 고쳐도
+   *     다른 쪽은 옛 값을 보여 준다). 창을 하나만 두면 그 일이 생길 수 없다.
+   *  ⚠️ 엔트리는 메인 프롬프트 칸의 캐럿 자리에 뜬다 - 고정으로 창을 그 위에 올려 둔
+   *     상태라면 창이 가릴 수 있어, 여는 김에 **고정을 푼다**(사용자가 다시 켤 수 있다). */
+  function openPeSettings() {
+    if (typeof openPeSlash !== 'function') { toast('PE 설정을 열 수 없습니다.', 'error'); return; }
+    if (pinnedLayout) setPinned(false);
+    let ok = false;
+    try { ok = Boolean(openPeSlash()); }
+    catch (error) { toast(`PE 설정 실패 — ${error?.message || error}`, 'error'); return; }
+    if (!ok) toast('메인 프롬프트 칸을 찾지 못했습니다.', 'error');
+  }
+
+  /** 고정을 켜고 끈다. 자리·자동닫기·단추 셋이 **한 상태**에서 나온다. */
+  function setPinned(next) {
+    const want = Boolean(next);
+    if (want === pinnedLayout) { paintMoveButtons(); return; }
+    pinnedLayout = want;
+    overlay?.classList.toggle('is-pinned', pinnedLayout);
+    // 고정을 풀면 프롬프트 칸에 맞춰 줄여 둔 높이가 남는다 - 다시 재게 한다.
+    position();
+    paintMoveButtons();
+    paintPinToggle();
+  }
+
+  /** E 아래의 ← / → . 같은 자리에 **번갈아** 뜬다.
+   *  ⚠️ 닫혀 있으면 둘 다 숨긴다 - 패널이 없는데 옮기는 단추만 떠 있으면 뜻을 알 수 없다.
+   *     (사용자 지정: "고정 상태가 아니거나 포커스 없을 때는 나타나지 않습니다".) */
+  function paintMoveButtons() {
+    if (moveLeftBtn) moveLeftBtn.hidden = !open || pinnedLayout;
+    if (moveRightBtn) moveRightBtn.hidden = !open || !pinnedLayout;
+  }
+
+  function paintPinToggle() {
+    const box = overlay?.querySelector('[data-em-pin-layout]');
+    if (box) box.checked = pinnedLayout;
+  }
 
   // 프롬프트 옆의 작은 E 단추(index.html 의 #eventMapTab). 없어도 Ctrl+E 는 된다.
   tabBtn = document.getElementById('eventMapTab');
@@ -1466,6 +1578,20 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     tabBtn.addEventListener('mousedown', event => event.preventDefault());
     tabBtn.addEventListener('click', toggle);
   }
+
+  // E 아래의 이동 단추 둘. 포커스를 가져가면 검색 칸을 빼앗으므로 E 와 같이 막는다.
+  moveLeftBtn = document.getElementById('eventMapMoveLeft');
+  moveRightBtn = document.getElementById('eventMapMoveRight');
+  for (const [btn, want] of [[moveLeftBtn, true], [moveRightBtn, false]]) {
+    if (!btn) continue;
+    btn.addEventListener('mousedown', event => event.preventDefault());
+    btn.addEventListener('click', () => {
+      if (!open) return;
+      setPinned(want);
+      focusInput();
+    });
+  }
+  paintMoveButtons();
 
   // Ctrl+E. 브라우저의 기본 동작(주소창 검색)은 막는다. Esc 는 어디에 포커스가 있든 닫되,
   // 인원 팝업이 열려 있으면 그것만 먼저 닫는다.
@@ -1494,10 +1620,16 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   // 보면서 프롬프트를 고치는 흐름이 있다. 패널·둘째 패널·인원 팝업·툴팁·E 단추 자신은 '안'이다.
   document.addEventListener('pointerdown', event => {
     if (!open) return;
+    // 고정이면 밖을 눌러도 안 닫는다(사용자 지정 2026-09-19) - 프롬프트를 고치면서
+    // 쓰라고 옮긴 자리인데, 그 칸을 누를 때마다 닫히면 옮긴 뜻이 없다.
+    if (pinnedLayout) return;
     const t = event.target;
     if (!(t instanceof Element)) return;
     if (library?.contains(t) || overlay?.contains(t) || subEl?.contains(t) || sideEl?.contains(t) || personPopup?.contains(t) || tipEl?.contains(t)) return;
     if (tabBtn && (t === tabBtn || tabBtn.contains(t))) return;     // toggle 이 처리한다
+    // ⚠️ E 아래의 이동 단추도 '안' 이다. 안 넣으면 누르는 pointerdown 이 여기서 창을
+    //    닫아 버려 `setPinned` 이 이미 닫힌 창을 옮긴다(실측: 눌렀더니 그냥 사라졌다).
+    if (moveLeftBtn?.contains(t) || moveRightBtn?.contains(t)) return;
     if (t.closest('#promptEdit, .prompt-highlight-wrap')) return;    // 메인 프롬프트 칸 - 예외
     close();
   }, true);

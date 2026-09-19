@@ -4048,14 +4048,20 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   max-width: min(380px, 92%); word-break: break-word;
 }
 
-/* 갱신 줄 — **맨 아랫줄**. 옛 팩으로 계속 보면서 받는다(막지 않는다). */
+/* 갱신 줄 — **격자 바로 아래 · 페이저 바로 위**(사용자 지정 2026-09-19).
+   이제 맨 아래가 아니라 중간이라 위아래를 같은 선으로 감싼다 - 위만 그으면 띠가
+   아래로 새어 보인다. 바로 밑 페이저의 제 경계선은 아래에서 지운다(2px 이중선 방지). */
 .artist-thumb-update-row {
   display: flex; align-items: center; justify-content: center; gap: 10px;
   flex-wrap: wrap;
   padding: 7px 10px;
   border-top: 1px solid rgba(255, 224, 122, 0.28);
+  border-bottom: 1px solid rgba(255, 224, 122, 0.28);
   background: rgba(255, 224, 122, 0.08);
 }
+/* ⚠️ 리모컨에서는 둘이 형제가 아니다(각자 `.rctl-row` 안에 산다) - 이 규칙은 탭에서만
+   먹고, 리모컨 쪽은 `.dragpanel.rctl .artist-thumb-pager` 가 이미 경계선을 지운다. */
+.artist-thumb-update-row:not([hidden]) + .artist-thumb-pager { border-top: 0; }
 .artist-thumb-update-row[hidden] { display: none !important; }
 .artist-thumb-update-text { font-size: 12px; color: #ffe07a; }
 .artist-thumb-update-text em { font-style: normal; color: var(--text-dim); }
@@ -29200,6 +29206,33 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* Settings > 화면 > 이벤트 맵 단추 숨기기. `display:inline-flex` 가 [hidden] 을 이기므로 짝 규칙이 필요하다. */
 .em-tab[hidden] { display: none; }
+
+/* E 아래의 이동 단추 둘(사용자 지정 2026-09-19). 반구를 그대로 물려받되 **분홍**이다 -
+   E 는 창을 여닫고 이 둘은 창을 **옮긴다**. 같은 색이면 같은 일로 읽힌다.
+   ⚠️ 둘은 같은 자리에 번갈아 뜬다(← 는 안 고정일 때, → 는 고정일 때). 그래서 `top` 이
+      같아도 겹치지 않는다 - 겹칠 일이 생기면 그것은 상태가 어긋난 것이다. */
+.em-move {
+  position: absolute; left: 0; top: calc(50% + 24px); z-index: 6;
+  width: 20px; height: 26px; padding: 0 3px 0 0; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 0 26px 26px 0;
+  background: rgba(214, 92, 158, 0.82);
+  color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 700; line-height: 1;
+  cursor: pointer; opacity: 0.72;
+  transition: opacity 0.15s, background 0.15s;
+}
+.em-move:hover, .em-move:focus-visible { opacity: 1; background: rgba(233, 110, 178, 0.95); }
+.em-move:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.em-move[hidden] { display: none; }
+
+/* 고정 - 메인 프롬프트 칸 위에 눕는다. 자리·높이는 `positionPinned()` 가 재고, 여기서는
+   **그 좁은 높이에서도 읽히게** 손본다: 몸통이 남는 높이를 다 먹고, 발줄은 한 줄로. */
+.em-overlay.is-pinned { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5); }
+.em-overlay.is-pinned .em-body { min-height: 0; }
+.em-overlay.is-pinned .em-foot { flex-wrap: nowrap; }
+/* 고정 토글 - [랜덤 버튼 연결] 과 같은 옷을 입되 왼쪽에 선다(같은 성격의 스위치다). */
+.em-pin-layout { margin-left: auto; }
+.em-pin-layout + .em-random-link { margin-left: 8px; }
 @media (max-width: 640px) {
   .em-obs { display: none; }
   .em-person-list { grid-template-columns: 1fr; }

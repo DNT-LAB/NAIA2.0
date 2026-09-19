@@ -29537,16 +29537,33 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   display: flex; align-items: center; justify-content: center; height: 100%;
   font-size: 9px; color: var(--text-dim);
 }
-.asx-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; padding: 3px 5px 3px 0; }
+/* ⚠️ `flex: 1 1 auto` 가 **없으면 칸이 카드 너비를 안 채운다**(기본 `0 1 auto`).
+   그러면 등급 칩도 Wilson 도 오른쪽 끝에 안 붙어 **줄마다 자리가 달라지고**,
+   200줄을 눈으로 훑을 수가 없다(실측으로 봤다). */
+.asx-col {
+  flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0;
+  gap: 1px; padding: 3px 5px 3px 0;
+}
+/* 이름줄 - 이름이 늘어나고 등급 칩은 안 줄어든다(고르는 근거가 그 수다). */
+.asx-line { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
 .asx-name {
+  flex: 1 1 auto; min-width: 0;
   font-size: 10px; font-weight: 700; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
+/* 등급 단계를 쌓았을 때만 뜬다 - 그 단계의 게시물 수와 비중. */
+.asx-rate {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px;
+  color: #9fd4ff; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .asx-nums-row {
-  display: flex; gap: 4px; font-family: var(--font-mono); font-size: 9px;
+  display: flex; align-items: baseline; gap: 4px;
+  font-family: var(--font-mono); font-size: 9px;
   color: var(--text-muted); font-variant-numeric: tabular-nums;
 }
-.asx-nums-row .asx-w { margin-left: auto; color: #ffe07a; }
+/* 비중은 숫자보다 밝게 - 줄에서 제일 먼저 읽히는 것이 이것이다. */
+.asx-nums-row b { color: var(--text-primary); font-weight: 700; }
+.asx-nums-row .asx-w { margin-left: auto; color: #ffe07a; white-space: nowrap; }
 .asx-empty { padding: 14px 8px; text-align: center; font-size: 10px; color: var(--text-dim); }
 .asx-note { flex: 0 0 auto; font-size: 9px; line-height: 1.5; color: var(--text-dim); }
 .asx-note.is-bad { color: #ff9c9c; }

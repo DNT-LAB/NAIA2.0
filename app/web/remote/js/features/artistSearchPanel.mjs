@@ -57,6 +57,15 @@ function tagDefaults(depth) {
 
 const fmt = n => Number(n || 0).toLocaleString('en-US');
 
+/** 0~1 을 사람이 읽는 비중으로. 작을수록 자릿수를 늘린다 - `0%` 로 뭉개면
+ *  "안 그린다" 와 "드물게 그린다" 가 같아 보인다. */
+function pctText(value) {
+  const v = Math.max(0, Number(value) || 0) * 100;
+  if (v <= 0) return '0%';
+  if (v < 1) return '<1%';
+  return v < 10 ? `${v.toFixed(1)}%` : `${Math.round(v)}%`;
+}
+
 export function createArtistSearchPanel({
   document: doc,
   escHtml,
@@ -188,27 +197,53 @@ export function createArtistSearchPanel({
     }).join('<span class="asx-chip-arrow">›</span>');
   }
 
-  function rowHtml(row) {
+  /** 이름 옆에 달 **등급 단계**의 자리. 없으면 -1.
+   *
+   *  ⚠️ 그 등급이 **마지막 단계 자체**면 달지 않는다 - 아랫줄의 '매칭' 이 바로
+   *     그 수라서 같은 숫자가 두 번 나온다(읽는 사람이 다른 것인 줄 안다).
+   */
+  function ratingChipAt() {
+    let at = -1;
+    steps.forEach((step, i) => { if (step.kind === 'rating') at = i; });
+    return at >= 0 && at !== steps.length - 1 ? at : -1;
+  }
+
+  function rowHtml(row, chipAt) {
     const info = thumbs.get(row.artist);
     const img = info?.image_url
       ? `<img src="${escHtml(info.image_url)}" alt="" loading="lazy" draggable="false">`
       : '<span class="asx-noimg">—</span>';
+    let chip = '';
+    if (chipAt >= 0) {
+      // ⚠️ **사용자가 고른 차례**로 적는다. 서버는 `['e','q']` 로 정렬해 돌려주는데
+      //    그걸 쓰면 빵부스러기는 `q+e`, 칩은 `e+q` 가 되어 한 화면에서 갈린다(실측).
+      const set = ((stack[chipAt] || steps[chipAt]).ratings || []).join('+');
+      const count = Number(row.hits?.[chipAt] || 0);
+      chip = `<span class="asx-rate" title="${escHtml(set)} 등급 게시물 ${fmt(count)}장`
+        + ` / 총 ${fmt(row.total)}장">${escHtml(set)} ${fmt(count)} · ${pctText(count / Math.max(row.total, 1))}</span>`;
+    }
+    const last = steps[steps.length - 1];
+    const lastName = last?.kind === 'tag' ? last.tag : `rating:${(last?.ratings || []).join('+')}`;
     return `<button type="button" class="asx-card" role="listitem" data-artist="${escHtml(row.artist)}">
       <span class="asx-img">${img}</span>
       <span class="asx-col">
-        <span class="asx-name">${escHtml(row.artist)}</span>
+        <span class="asx-line">
+          <span class="asx-name">${escHtml(row.artist)}</span>${chip}
+        </span>
         <span class="asx-nums-row">
-          <span title="총 게시물">${fmt(row.total)}</span>
-          <span title="마지막 단계 매칭 수">·${fmt(row.hit)}</span>
-          <span class="asx-w" title="Wilson 하한 / 날 비중 ${row.share}">${row.wilson.toFixed(3)}</span>
+          <span title="이 작가의 총 게시물">총 ${fmt(row.total)}</span>
+          <span title="${escHtml(lastName)} 에 걸린 게시물 ${fmt(row.hit)}장 / 총 ${fmt(row.total)}장">
+            · 매칭 ${fmt(row.hit)} <b>${pctText(row.hit / Math.max(row.total, 1))}</b></span>
+          <span class="asx-w" title="Wilson 하한 - 표본이 얇으면 날 비중(${pctText(row.share)})보다 낮게 잡힌다">W ${pctText(row.wilson)}</span>
         </span>
       </span>
     </button>`;
   }
 
   function paintRows() {
+    const chipAt = ratingChipAt();
     rowsEl.innerHTML = rows.length
-      ? rows.map(rowHtml).join('')
+      ? rows.map(row => rowHtml(row, chipAt)).join('')
       : (stack.length ? '<div class="asx-empty">조건을 만족하는 작가가 없습니다.</div>' : '');
     headCountEl.textContent = stack.length ? `${fmt(total)}명` : '';
   }

@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import threading
@@ -37,6 +38,12 @@ from core.event_map.pack import PackReader
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PACK_NAME = "artist_tag_affinity.naiapack"
+# general 축은 **옆 파일**이다(사용자 결정 2026-09-19, 방안 B). 역색인 대신
+# (작가, 횟수) 집계만 담아 약 12MB - postings 로 담으면 +256MB 라 배포판이 배가 된다.
+# 없으면 general 갈래만 잠기고 나머지는 그대로 돈다.
+GENERAL_PACK_NAME = "artist_tag_general.naiapack"
+GENERAL_SCHEMA = "naia-artist-general-v1"
+GENERAL_AXIS = "general"
 SCHEMA = "naia-artist-affinity-v1"
 RATING_CODE = {"g": 0, "s": 1, "q": 2, "e": 3}
 ALL_RATINGS = frozenset(RATING_CODE)
@@ -69,9 +76,12 @@ class ArtistAffinityPack:
                  data_dir: str | Path | None = None):
         if path is not None:
             self._candidates = [Path(path)]
+            # 옆 파일은 **같은 폴더**에서 찾는다 - 짝이므로 따로 다니면 안 된다.
+            self._general_candidates = [Path(path).with_name(GENERAL_PACK_NAME)]
         else:
             root = Path(data_dir) if data_dir is not None else PROJECT_ROOT / "data"
             self._candidates = [Path(root) / DEFAULT_PACK_NAME]
+            self._general_candidates = [Path(root) / GENERAL_PACK_NAME]
         self._lock = threading.Lock()
         self._loaded = False
         self._error: str | None = None
@@ -85,6 +95,9 @@ class ArtistAffinityPack:
         self._rid_artist: np.ndarray | None = None
         self._rid_rating: np.ndarray | None = None
         self._denominators: dict[frozenset, np.ndarray] = {}
+        self._general: dict[str, Any] | None = None
+        self._general_loaded = False
+        self._general_error: str | None = None
 
     # ------------------------------------------------------------- 열기
     def _path(self) -> Path | None:
@@ -142,6 +155,14 @@ class ArtistAffinityPack:
             return True
 
     def close(self) -> None:
+        general = self._general
+        self._general = None
+        self._general_loaded = False
+        if general is not None:
+            try:
+                general["reader"].close()
+            except Exception:
+                pass
         with self._lock:
             if self._reader is not None:
                 self._reader.close()
@@ -159,20 +180,123 @@ class ArtistAffinityPack:
             "path": str(self._path()),
             "rows": meta.get("rows"),
             "artists": meta.get("artists"),
-            "axes": {axis: {"tags": len(self._names[axis])} for axis in self._names},
+            "axes": self._axes_state(),
             "built_at": meta.get("built_at"),
             "source_sha256": (meta.get("source") or {}).get("sha256"),
             "ratings": sorted(RATING_CODE),
             # 화면이 상수를 중복해 갖지 않도록 여기서 말해 준다.
             "min_posts": meta.get("min_posts"),
-            "general_axis": meta.get("general_axis"),
+            "general_axis": (
+                {"state": "ready", "path": str(self._general_path()),
+                 "tags": len(self._general["names"]),
+                 "min_count": self._general["min_count"],
+                 "built_at": self._general["meta"].get("built_at"),
+                 "pairs": (self._general["meta"].get("stats") or {}).get("pairs")}
+                if self._load_general()
+                else {"state": "missing", "reason": self._general_error,
+                      "searched": [str(p) for p in self._general_candidates]}),
         }
+
+    def _axes_state(self) -> dict[str, Any]:
+        """화면이 **갈래를 여닫는 근거**. 여기 없는 축은 화면에서 잠긴다."""
+        out: dict[str, Any] = {axis: {"tags": len(self._names[axis])}
+                               for axis in self._names}
+        if self._load_general():
+            out[GENERAL_AXIS] = {
+                "tags": len(self._general["names"]),
+                # ⚠️ 이 축만 **문턱이 있다**(집계표라서). 화면이 이 값으로 입력을
+                #    잡아 주지 않으면 사용자가 5를 넣고 조용히 10의 답을 본다.
+                "min_count": self._general["min_count"],
+                "aggregate": True,
+            }
+        return out
+
+    def _general_path(self) -> Path | None:
+        for candidate in self._general_candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _load_general(self) -> bool:
+        """옆의 general 집계표. **없는 것은 고장이 아니다** - 그 갈래만 잠긴다.
+
+        ⚠️ 작가 색인은 본 팩의 것을 그대로 쓰는 표다. 다른 코퍼스 빌드로 구운 것이
+           섞이면 **건수는 그럴듯하고 작가만 통째로 틀린다** - 그래서 작가 이름표의
+           지문을 맞대 보고 다르면 아예 안 연다.
+        """
+        if self._general_loaded:
+            return self._general is not None
+        if not self._load():
+            return False
+        with self._lock:
+            if self._general_loaded:
+                return self._general is not None
+            self._general_loaded = True
+            path = self._general_path()
+            if path is None:
+                self._general_error = "general pack not found"
+                return False
+            try:
+                reader = PackReader(path)
+                meta = reader.json_of("meta")
+                if meta.get("schema") != GENERAL_SCHEMA:
+                    reader.close()
+                    self._general_error = f"unknown schema: {meta.get('schema')!r}"
+                    return False
+                mine = hashlib.sha256(
+                    json.dumps(self._artists, ensure_ascii=False).encode("utf-8")
+                ).hexdigest()
+                if str(meta.get("artist_table_sha256") or "") != mine:
+                    reader.close()
+                    self._general_error = (
+                        "artist table does not match the affinity pack "
+                        "(두 파일은 같은 코퍼스로 구운 짝이어야 한다)")
+                    return False
+                names = json.loads(zlib.decompress(reader.bytes_of("names_general")))
+                self._general = {
+                    "reader": reader,
+                    "meta": meta,
+                    "names": names,
+                    "lookup": {name.lower(): tid for tid, name in enumerate(names)},
+                    "posts": np.frombuffer(reader.bytes_of("posts_general"),
+                                           dtype=np.uint32),
+                    "id_index": np.frombuffer(reader.bytes_of("id_index"),
+                                              dtype=np.uint64),
+                    "cnt_index": np.frombuffer(reader.bytes_of("cnt_index"),
+                                               dtype=np.uint64),
+                    "ids_base": reader.span("ids_general")[0],
+                    "cnt_base": reader.span("counts_general")[0],
+                    "min_count": int(meta.get("min_count") or 1),
+                }
+            except Exception as exc:      # 망가진 옆 파일이 앱을 죽이면 안 된다
+                self._general_error = f"{type(exc).__name__}: {exc}"
+                self._general = None
+                return False
+            return True
+
+    def general_min_count(self) -> int:
+        """이 표가 **셀 수 있는 가장 낮은 횟수**. 그 아래는 자료가 없다."""
+        return int(self._general["min_count"]) if self._load_general() else 0
+
+    def _general_pair(self, tid: int) -> tuple[np.ndarray, np.ndarray]:
+        g = self._general
+        reader = g["reader"]
+        a = g["ids_base"] + int(g["id_index"][tid])
+        b = g["ids_base"] + int(g["id_index"][tid + 1])
+        c = g["cnt_base"] + int(g["cnt_index"][tid])
+        d = g["cnt_base"] + int(g["cnt_index"][tid + 1])
+        ids = decode_postings(zlib.decompress(reader.map[a:b]))
+        counts = np.frombuffer(zlib.decompress(reader.map[c:d]), dtype=np.uint32)
+        return ids, counts
 
     def available(self) -> bool:
         return self._load()
 
     def axes(self) -> list[str]:
-        return list(self._names) if self._load() else []
+        out = list(self._names) if self._load() else []
+        if out and self._load_general():
+            out.append(GENERAL_AXIS)
+        return out
 
     # ------------------------------------------------------------- 조회
     def resolve(self, tag: str, axis: str | None = None) -> tuple[str, int] | None:
@@ -187,11 +311,23 @@ class ArtistAffinityPack:
             tid = self._lookup.get(name, {}).get(key)
             if tid is not None:
                 found.append((name, tid))
+        # general 은 옆 파일이라 목록이 따로다. 축을 안 주면 마지막에 본다 -
+        # 어휘가 제일 크고(10만) 흔한 낱말이 많아 먼저 보면 고유명을 가린다.
+        if (axis in (None, GENERAL_AXIS)) and self._load_general():
+            tid = self._general["lookup"].get(key)
+            if tid is not None:
+                found.append((GENERAL_AXIS, tid))
         if not found:
             return None
         if len(found) == 1:
             return found[0]
-        return max(found, key=lambda pair: self._posting(*pair).size)
+        return max(found, key=lambda pair: self._axis_posts(*pair))
+
+    def _axis_posts(self, axis: str, tid: int) -> int:
+        """그 태그의 게시물 수. general 은 굽는 쪽이 적어 둔 값을 그냥 읽는다."""
+        if axis == GENERAL_AXIS:
+            return int(self._general["posts"][tid])
+        return int(self._posting(axis, tid).size)
 
     def _posting(self, axis: str, tid: int) -> np.ndarray:
         index = self._index[axis]
@@ -249,6 +385,30 @@ class ArtistAffinityPack:
             return {"state": "unknown_tag", "tag": tag, "axes": list(self._names)}
         found_axis, tid = target
         wanted = _clean_ratings(ratings)
+
+        if found_axis == GENERAL_AXIS:
+            # ⚠️ 집계표는 **등급을 미리 합쳐** 담는다. 등급으로 좁혀 달라는 요청을
+            #    조용히 무시하면 답이 거짓이 된다 - 못 한다고 말한다.
+            if wanted != ALL_RATINGS:
+                return {"state": "rating_unsupported", "tag": tag,
+                        "axis": GENERAL_AXIS,
+                        "reason": "general 축은 집계표라 등급으로 좁힐 수 없다"}
+            ids, counts = self._general_pair(tid)
+            numerator = np.zeros(len(self._artists), dtype=np.int64)
+            numerator[ids] = counts
+            return {
+                "state": "ready",
+                "axis": GENERAL_AXIS,
+                "tag": self._general["names"][tid],
+                "ratings": sorted(ALL_RATINGS),
+                "posts": int(self._general["posts"][tid]),
+                # ⚠️ 문턱 아래를 안 담았으니 **합이 posts 보다 작다**. 빠진 것이
+                #    아니라 안 센 것이다 - 화면이 이 둘을 같은 줄에 놓으면 안 된다.
+                "matched": int(counts.sum()),
+                "min_count": self._general["min_count"],
+                "aggregate": True,
+                "numerator": numerator,
+            }
 
         rids = self._posting(found_axis, tid)
         posts = int(rids.size)
@@ -342,6 +502,8 @@ class ArtistAffinityPack:
         if not key:
             return []
         want = max(int(limit or 20), 1)
+        if axis == GENERAL_AXIS:
+            return self._suggest_general(key, want)
         axes = [axis] if axis else list(self._names)
         rough: list[tuple[int, str, str, int]] = []
         for name in axes:
@@ -362,6 +524,22 @@ class ArtistAffinityPack:
                         "posts": int(self._posting(name, tid).size)})
         out.sort(key=lambda row: (-row["posts"], row["tag"]))
         return out[:want]
+
+    def _suggest_general(self, key: str, want: int) -> list[dict[str, Any]]:
+        """general 은 **아무것도 안 푼다** - 굽는 쪽이 게시물 수를 적어 두었다."""
+        if not self._load_general():
+            return []
+        g = self._general
+        posts = g["posts"]
+        rough: list[tuple[int, str]] = []
+        for tag, tid in g["lookup"].items():
+            if tag.startswith(key):
+                rough.append((int(posts[tid]), g["names"][tid]))
+                if len(rough) >= self.SUGGEST_SCAN_CAP:
+                    break
+        rough.sort(key=lambda row: (-row[0], row[1]))
+        return [{"tag": name, "axis": GENERAL_AXIS, "posts": count}
+                for count, name in rough[:want]]
 
 
 _default: ArtistAffinityPack | None = None

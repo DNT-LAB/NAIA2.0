@@ -137,10 +137,18 @@ def search(pack, stack: Any, *, order: str = "wilson",
                         "axes": counted.get("axes", []), "steps": report,
                         "rows": [], "total": 0}
             hit = counted["numerator"]
-            keep = (hit >= max(step["min_count"], 1)) & (total_posts >= step["min_posts"])
+            # ⚠️ 집계 축(general)은 **문턱 아래를 담지 않았다**. 더 낮은 값을 달라고
+            #    하면 답은 그대로인데 질문만 달라진다 - 눌러 쓰고 그 사실을 적는다.
+            floor = int(counted.get("min_count") or 1)
+            want = max(step["min_count"], 1)
+            used = max(want, floor)
+            keep = (hit >= used) & (total_posts >= step["min_posts"])
             info = {"kind": "tag", "tag": counted["tag"], "axis": counted["axis"],
-                    "posts": counted["posts"], "min_count": step["min_count"],
+                    "posts": counted["posts"], "min_count": used,
                     "min_posts": step["min_posts"]}
+            if used != want:
+                info["min_count_asked"] = want
+                info["min_count_floor"] = floor
         else:
             wanted = frozenset(step["ratings"])
             hit = pack.denominator(wanted)

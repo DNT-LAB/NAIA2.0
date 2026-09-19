@@ -2830,7 +2830,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-asx2');
+    const {createArtistSearchPanel} = await import('./artistSearchPanel.mjs?v=20260919-gen');
     searchPanel = createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
       // 그림은 격자와 **같은 서버 한 곳**에서 받는다 - 두 벌이 되면 언젠가 갈린다.

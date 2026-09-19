@@ -196,6 +196,11 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # general 축은 여기 없다(이미 event_map .naiamap 이 갖고 있다).
     "data/artist_tag_affinity.naiapack",
     "*/data/artist_tag_affinity.naiapack",
+    # general 축 집계표(tools/build_artist_general_aggregate.py 산출물, 약 12MB).
+    # 역색인 대신 (작가, 횟수) 쌍만 담는다 - postings 로 담으면 +256MB.
+    # 없으면 검색의 [태그] 갈래만 잠긴다(고장이 아니다).
+    "data/artist_tag_general.naiapack",
+    "*/data/artist_tag_general.naiapack",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

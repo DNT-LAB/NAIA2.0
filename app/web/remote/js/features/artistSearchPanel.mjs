@@ -143,6 +143,8 @@ export function createArtistSearchPanel({
 
   let packState = null;      // /state 응답 - `missing` 이면 판이 통째로 잠긴다
   let axesReady = new Set(); // 이 팩이 실제로 담은 축. 나머지 갈래는 스스로 잠긴다.
+  // 축마다의 **셀 수 있는 가장 낮은 횟수**. 집계로 담은 축(general)만 1보다 크다.
+  let axisFloor = new Map();
   let stack = [];            // 서버가 받아 준 depth 만 쌓인다
   let order = 'wilson';
   let kind = 'copyright';
@@ -219,6 +221,11 @@ export function createArtistSearchPanel({
     numWrap.count.hidden = isRatio;
     numWrap.ratio.hidden = !isRatio;
     inputEl.placeholder = kindHint(kind);
+    const floor = isTagKind(kind) ? floorOf(kind) : 1;
+    numWrap.count.querySelector('span').textContent = floor > 1
+      ? `count ≥ ${floor}+` : 'count ≥';
+    numWrap.count.title = floor > 1
+      ? `${kindLabel(kind)} 축은 집계표라 ${floor}회 이상만 셉니다.` : '';
     // 세그먼트 넷 - 각각 제 `data-asx-<이름>` 을 읽어 고른 것에 불을 켠다.
     for (const [seg, attr, on] of [['kind', 'asxKind', kind],
                                    ['ratings', 'asxRatings', ratingsPick],
@@ -242,9 +249,15 @@ export function createArtistSearchPanel({
     formEl.classList.toggle('is-full', full);
   }
 
+  /** 이 갈래가 셀 수 있는 가장 낮은 횟수. 집계표로 담은 축만 1보다 크다. */
+  const floorOf = value => Math.max(1, Number(axisFloor.get(value)) || 1);
+
   function resetNums() {
     const defaults = tagDefaults(stack.length);
-    numEls.count.value = String(defaults.minCount);
+    const floor = isTagKind(kind) ? floorOf(kind) : 1;
+    // ⚠️ 입력칸의 바닥을 안 잡아 주면 사용자가 5를 넣고 **조용히 10의 답**을 본다.
+    numEls.count.min = String(floor);
+    numEls.count.value = String(Math.max(defaults.minCount, floor));
     numEls.ratio.value = '45';
     numEls.posts.value = String(isTagKind(kind) ? defaults.minPosts : 100);
   }
@@ -295,9 +308,11 @@ export function createArtistSearchPanel({
     total = Number(data.total || 0);
     thumbs = new Map();
     paintStack(); paintRows(); paintForm();
-    note(total
-      ? (stack.length >= MAX_DEPTH ? `${MAX_DEPTH}단계까지입니다.` : '')
-      : '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.');
+    const floored = steps.find(s => s.min_count_floor);
+    note(!total ? '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.'
+      : floored ? `이 축은 ${floored.min_count_floor}회 이상만 셉니다 `
+                  + `(${floored.min_count_asked} -> ${floored.min_count}).`
+      : stack.length >= MAX_DEPTH ? `${MAX_DEPTH}단계까지입니다.` : '');
     resetNums();
     onUpdate?.();
     void loadThumbs(mine);
@@ -502,6 +517,8 @@ export function createArtistSearchPanel({
     // ⚠️ 어느 축이 있는지는 **서버가 말한다**. 화면에 박아 두면 팩을 바꿨을 때
     //    있지도 않은 갈래가 열려 있고, 누르면 그제야 400 이 난다.
     axesReady = new Set(Object.keys(packState.axes || {}));
+    axisFloor = new Map(Object.entries(packState.axes || {})
+      .map(([name, info]) => [name, Number(info?.min_count) || 1]));
     if (!kindUsable(kind)) {
       kind = KINDS.map(([v]) => v).find(kindUsable) || 'rating';
     }

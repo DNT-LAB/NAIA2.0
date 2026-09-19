@@ -749,6 +749,12 @@ export function createArtistThumbController({
     return `/api/artist-thumb/list?${params.toString()}`;
   }
 
+  /** 배지의 수. 카드의 `2.6k` 와 달리 **줄이지 않는다** - 고르는 근거라
+   *  213 과 1,780 이 같아 보이면 안 된다. */
+  function count(value) {
+    return Number(value || 0).toLocaleString('en-US');
+  }
+
   function renderGrid(items) {
     if (!gridEl) return;
     if (!items.length) {
@@ -773,20 +779,32 @@ export function createArtistThumbController({
         : '';
       const memoryHtml = remembered ? '<span class="artist-thumb-memory-mark">RESULT</span>' : '';
       const queueHtml = queued ? '<span class="artist-thumb-queue-mark">IN QUEUE</span>' : '';
-      // 검색 결과일 때만 붙는 배지. 판에서 목록을 걷어내면서 이 수가 갈 곳이 여기다
-      // (사용자가 바로 앞에서 청한 총/매칭/Wilson 이다 - 잃으면 안 된다).
+      // 검색 결과일 때만 붙는 배지.
+      // ⚠️ **수를 앞에, %를 뒤에**(사용자 지정 2026-09-19) - 비중만으로는 1/2 도
+      //    50% 라 표본이 얇은지 두꺼운지 알 수가 없다.
+      // ⚠️ Wilson 은 **[Wilson] 으로 줄 세울 때만** 남긴다 - 그 수는 직관적이지
+      //    않아서, 그것으로 고르는 중이 아니면 읽는 사람을 헷갈리게만 한다.
+      const showWilson = searchQuery?.order === 'wilson';
       const matchHtml = (item.matchRate === undefined || !searchPct) ? '' :
-        `<span class="artist-thumb-match-mark" title="총 ${Number(item.matchTotal || 0).toLocaleString()}`
-        + ` · 매칭 ${Number(item.matchHit || 0).toLocaleString()} (${searchPct(item.matchRate)})`
-        + ` · Wilson ${searchPct(item.matchWilson)}">${searchPct(item.matchRate)}`
-        + `<em>W ${searchPct(item.matchWilson)}</em></span>`;
+        `<span class="artist-thumb-match-mark" title="총 ${count(item.matchTotal)}`
+        + ` · 매칭 ${count(item.matchHit)} (${searchPct(item.matchRate)})`
+        + ` · Wilson ${searchPct(item.matchWilson)}">${count(item.matchHit)}`
+        + ` <b>${searchPct(item.matchRate)}</b>`
+        + (showWilson ? `<em>W ${searchPct(item.matchWilson)}</em>` : '')
+        + '</span>';
+      // 등급 단계를 넣었으면 같은 방식으로 좌측 하단에(사용자 지정).
+      const rateHtml = (item.rateLabel === undefined || !searchPct) ? '' :
+        `<span class="artist-thumb-rate-mark" title="${escHtml(item.rateLabel)} 등급 게시물`
+        + ` ${count(item.rateHit)}장 / 총 ${count(item.matchTotal)}장">`
+        + `${escHtml(item.rateLabel)} ${count(item.rateHit)}`
+        + ` <b>${searchPct(item.rateHit / Math.max(item.matchTotal || 0, 1))}</b></span>`;
       return `
         <button type="button" class="artist-thumb-card${active}${favorite}${banned}${remembered}${queued}${selectable}${batchSelected}${batchDim}" data-artist="${escHtml(item.artist)}" data-weight="${escHtml(String(item.weight || 0))}">
           ${checkHtml}
           ${memoryHtml}
           ${queueHtml}
           ${matchHtml}
-          <div class="artist-thumb-card-image">${imageHtml}</div>
+          <div class="artist-thumb-card-image">${imageHtml}${rateHtml}</div>
           <div class="artist-thumb-card-info">
             <span class="artist-thumb-card-name" title="${escHtml(item.artist)}">${escHtml(item.artist)}</span>
             <span class="artist-thumb-card-weight">${escHtml(formatWeight(item.weight))}</span>
@@ -2864,12 +2882,14 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const mod = await import('./artistSearchPanel.mjs?v=20260919-top');
+    const mod = await import('./artistSearchPanel.mjs?v=20260919-onerow');
     searchPct = mod.pctText;
     searchPanel = mod.createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
       // 조건이 정해지면 **격자가** 그 목록을 받아 간다.
       onQuery: query => { void applySearchQuery(query); },
+      // [닫기] 는 토글을 끄는 것과 같다 - 보던 자리로 돌아간다.
+      onClose: () => { void setSearchMode(false); },
     });
     searchHostEl.appendChild(searchPanel.el);
     return searchPanel;
@@ -2954,6 +2974,14 @@ export function createArtistThumbController({
     if (found?.state === 'unknown_tag') throw new Error(`색인에 없는 낱말입니다: ${found.tag}`);
     if (found?.state && found.state !== 'ready') throw new Error(found.reason || found.state);
     const rows = found.rows || [];
+    // ⚠️ 등급 단계는 **마지막이 아닐 때만** 따로 보여 준다 - 마지막이면 위 배지가
+    //    바로 그 수라 같은 숫자가 두 번 나온다(읽는 사람이 다른 것인 줄 안다).
+    const steps = searchQuery.stack || [];
+    let rateAt = -1;
+    steps.forEach((step, i) => { if (step.kind === 'rating') rateAt = i; });
+    if (rateAt === steps.length - 1) rateAt = -1;
+    // 묶음 이름은 **사용자가 고른 차례**로(서버는 정렬해 돌려준다).
+    const rateLabel = rateAt >= 0 ? (steps[rateAt].ratings || []).join('+') : '';
     // 그림·즐겨찾기·제외는 격자와 **같은 서버 한 곳**에서 받는다.
     const described = rows.length ? await describeArtists(rows.map(row => row.artist)) : {};
     const total = Number(found.total || 0);
@@ -2972,6 +3000,7 @@ export function createArtistThumbController({
           // 카드 배지에 쓸 것들. 판에서 목록을 걷어내면서 이 수가 갈 곳이 여기다.
           matchHit: row.hit, matchTotal: row.total,
           matchRate: row.hit / Math.max(row.total, 1), matchWilson: row.wilson,
+          ...(rateAt >= 0 ? {rateLabel, rateHit: Number(row.hits?.[rateAt] || 0)} : {}),
         };
       }),
     };

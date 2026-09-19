@@ -3910,10 +3910,25 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   color: #ffe07a; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
   font-variant-numeric: tabular-nums; pointer-events: none;
 }
+.artist-thumb-match-mark b { font-weight: 700; }
 .artist-thumb-match-mark em {
   font-style: normal; font-weight: 400; font-size: 9px;
   color: rgba(255, 224, 122, 0.72);
 }
+/* 등급 단계를 넣었을 때만. **그림 칸 안**에 산다.
+   ⚠️ 처음에는 카드 기준으로 잡고 이름줄 높이(44px)를 박았는데, 리모컨에서는 그
+      줄이 22px 이라 배지가 그림 한가운데 떴다(실측 29px 위). 그림 칸이
+      `position: relative` 이니 그 안에 두면 카드 크기가 어떻든 제자리다. */
+.artist-thumb-rate-mark {
+  position: absolute; left: 7px; bottom: 7px; z-index: 3;
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid rgba(159, 212, 255, 0.45);
+  background: rgba(6, 16, 26, 0.82);
+  color: #9fd4ff; font-family: var(--font-mono); font-size: 10px;
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.artist-thumb-rate-mark b { font-weight: 700; }
 .artist-thumb-queue-mark {
   left: 7px;
   padding: 0 7px;
@@ -29507,7 +29522,9 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   font-size: 9px; color: var(--accent); font-variant-numeric: tabular-nums;
 }
 
-.asx-nums { display: flex; align-items: center; gap: 4px; }
+/* 문턱 묶음 - 입력칸과 **한 줄**이라, 좁아지면 입력칸이 먼저 줄고 이 묶음은
+   제 너비를 지킨다(숫자가 잘리면 무슨 조건인지 알 수가 없다). */
+.asx-nums { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
 .asx-num { display: flex; align-items: center; gap: 3px; min-width: 0; }
 .asx-num span { font-size: 9px; color: var(--text-muted); white-space: nowrap; }
 .asx-unit { margin-left: -2px; }

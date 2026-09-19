@@ -86,6 +86,8 @@ export function createArtistSearchPanel({
   // 조건이 바뀔 때마다 `{stack, order}` 또는 `null`(비었음)을 준다.
   // ⚠️ 여기서 **목록을 그리지 않는다** - 격자가 그린다(사용자 지정 2026-09-19).
   onQuery = null,
+  // [닫기] - 판을 접고 보던 자리로 돌려놓는다(조건은 안 지운다).
+  onClose = null,
   // 결과가 바뀔 때마다 한 번. 바깥이 상태줄을 다시 쓴다.
   onUpdate = null,
 }) {
@@ -96,6 +98,8 @@ export function createArtistSearchPanel({
       <span class="asx-title">아티스트 검색</span>
       <span class="asx-count"></span>
       <span class="asx-spacer"></span>
+      <button type="button" class="asx-btn" data-asx-act="close"
+              title="검색을 닫고 보던 자리로 돌아갑니다">닫기</button>
       <button type="button" class="asx-btn" data-asx-act="reset" title="단계를 모두 지웁니다">지우기</button>
     </div>
     <div class="asx-body rctl-fold-body">
@@ -120,20 +124,21 @@ export function createArtistSearchPanel({
               <button type="button" data-asx-mode="ratio">비중</button>
             </div>
           </div>
-          <!-- ⚠️ 자동완성 목록 **위**에 있어야 한다. 아래에 두면 목록이 덮어
-               포인터를 먹고, 단추를 영영 못 누른다(실측). [갱신] 도 같은 이유로
-               문턱 칸이 아니라 여기 산다. -->
+          <!-- 문턱과 단추가 **입력칸과 한 줄**이다(사용자 지정 2026-09-19).
+               판이 그만큼 낮아져 아래 격자가 더 보인다. 덤으로 자동완성 목록이
+               덮을 것이 없어진다 - 누르는 것이 전부 목록 **위**에 모이기 때문이다
+               (전에는 [추가]가 목록에 깔려 영영 안 눌렸다). -->
+          <div class="asx-nums">
+            <label class="asx-num" data-asx-for="count"><span>count ≥</span>
+              <input class="asx-n" type="number" min="0" step="1" data-asx-num="count"></label>
+            <label class="asx-num" data-asx-for="ratio" hidden><span>비중 ≥</span>
+              <input class="asx-n" type="number" min="0" max="100" step="1" data-asx-num="ratio"><span class="asx-unit">%</span></label>
+            <label class="asx-num"><span>post ≥</span>
+              <input class="asx-n" type="number" min="0" step="1" data-asx-num="posts"></label>
+          </div>
           <button type="button" class="asx-btn primary" data-asx-act="add">추가</button>
           <button type="button" class="asx-btn" data-asx-act="refresh"
                   title="쌓인 단계 전부에 지금 문턱을 얹고 다시 검색합니다">갱신</button>
-        </div>
-        <div class="asx-nums">
-          <label class="asx-num" data-asx-for="count"><span>count ≥</span>
-            <input class="asx-n" type="number" min="0" step="1" data-asx-num="count"></label>
-          <label class="asx-num" data-asx-for="ratio" hidden><span>비중 ≥</span>
-            <input class="asx-n" type="number" min="0" max="100" step="1" data-asx-num="ratio"><span class="asx-unit">%</span></label>
-          <label class="asx-num"><span>post ≥</span>
-            <input class="asx-n" type="number" min="0" step="1" data-asx-num="posts"></label>
         </div>
       </div>
       <div class="asx-seg asx-orders" data-asx-seg="order">
@@ -429,6 +434,8 @@ export function createArtistSearchPanel({
   el.addEventListener('click', event => {
     const act = event.target.closest('[data-asx-act]')?.dataset.asxAct;
     if (act === 'reset') { void run([]); note(''); return; }
+    // 조건은 그대로 두고 판만 닫는다 - 다시 켜면 그 조건이 그대로 걸린다.
+    if (act === 'close') { onClose?.(); return; }
     if (act === 'add') { void addDepth(); return; }
     if (act === 'refresh') { void refreshStack(); return; }
 

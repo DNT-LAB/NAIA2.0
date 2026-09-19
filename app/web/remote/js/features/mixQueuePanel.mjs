@@ -328,7 +328,7 @@ export function createMixQueuePanel({
     `;
     }
     return `
-      ${block.temp ? '<button type="button" data-mixq-menu="pin">이 칸 고정</button>' : ''}
+      <button type="button" data-mixq-menu="pin"${block.temp ? '' : ' disabled'}>이 자리에 고정</button>
       <button type="button" data-mixq-menu="prefix"${block.locked ? ' disabled' : ''}>${block.withPrefix ? '`artist:` 떼기' : '`artist:` 붙이기'}</button>
       <button type="button" data-mixq-menu="enabled">${block.enabled ? '비활성으로' : '다시 켜기'}</button>
       <button type="button" data-mixq-menu="remove"${block.locked ? ' disabled' : ''}>제거</button>
@@ -376,11 +376,13 @@ export function createMixQueuePanel({
   const WHEEL_NOTCH = 40;
   let wheelAcc = 0;
   let wheelFor = '';
+  // ⚠️ 숫자 칸 위에서만 받다가 **칸 전체**로 넓혔다(사용자 지정 2026-09-19). 썸네일
+  //    위에서 굴려도 아무 일이 없었으니 잃을 것이 없고, 1.01 만 한 과녁을 겨누게 하는
+  //    것이 실제로 안 먹는 것처럼 보였다. 앵커·collab 는 가중치가 없어 그냥 지나간다.
   listEl.addEventListener('wheel', event => {
-    const input = event.target.closest('.mixq-weight');
-    if (!input) return;
-    const id = input.closest('[data-mixq-id]')?.dataset.mixqId || '';
-    if (!id) return;
+    const block = find(event.target.closest('[data-mixq-id]')?.dataset.mixqId || '');
+    if (!block || isAnchor(block) || block.id === COLLAB_ID) return;
+    const id = block.id;
     event.preventDefault();
     // 줄 단위(파이어폭스)·쪽 단위를 픽셀로 맞춘다.
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
@@ -421,22 +423,33 @@ export function createMixQueuePanel({
     applyWeight(block, next);
   });
 
-  /** 포인터 X -> 몇 번째 앞에 넣을지. 재배치와 **같은 규칙**(이웃의 가운데 기준).
-   *  빈 곳(모든 칸 오른쪽)이면 collab 칸 앞 - setTempArtist 와 같은 자리다. */
-  function insertionIndexAt(clientX) {
+  /** 포인터 -> 몇 번째 앞에 넣을지. 재배치와 **같은 규칙**(이웃의 가운데 기준).
+   *  빈 곳(모든 칸 뒤)이면 collab 칸 앞 - setTempArtist 와 같은 자리다.
+   *
+   *  ⚠️ 줄바꿈이 생기면서 X 만으로는 자리를 못 찾는다 - 둘째 줄 맨 왼쪽 칸이 첫 줄 맨
+   *     오른쪽 칸보다 X 가 **작다**. 줄을 먼저 가리고(포인터가 이 칸의 줄보다 위면 그
+   *     앞), 같은 줄 안에서만 가운데로 가른다. point 가 없으면 끝에 붙인다. */
+  function insertionIndexAt(point) {
     const nodes = [...listEl.children];
-    for (let i = 0; i < nodes.length; i += 1) {
-      const r = nodes[i].getBoundingClientRect();
-      if (clientX < r.left + r.width / 2) return i;
+    if (point) {
+      for (let i = 0; i < nodes.length; i += 1) {
+        const r = nodes[i].getBoundingClientRect();
+        if (point.y < r.top) return i;
+        if (point.y <= r.bottom && point.x < r.left + r.width / 2) return i;
+      }
     }
     const collab = blocks.findIndex(b => b.id === COLLAB_ID);
     return collab < 0 ? blocks.length : collab;
   }
 
-  /** 정식 블럭으로 넣는다(임시가 아니다 - 임시는 다음 격자 클릭에 갈린다).
-   *  큐는 같은 작가를 두 번 허용한다 - 다른 앵커 밑이면 뜻이 다르다. */
-  function insertArtists(items, clientX = null) {
-    let at = clientX == null ? insertionIndexAt(Infinity) : insertionIndexAt(clientX);
+  /** 큐에 넣는다. 큐는 같은 작가를 두 번 허용한다 - 다른 앵커 밑이면 뜻이 다르다.
+   *
+   *  `asTemp` 는 **끌어다 놓은 길**만 쓴다(사용자 지정 2026-09-19): 새로 끌어온 칸이
+   *  임시가 되고, 그 전에 임시였던 칸은 그 자리에 굳는다. 끌어올리는 행위 자체가
+   *  '지금 이걸 보는 중' 이라는 뜻이라 - 고정하려고 딴 칸을 끌어오던 일이 없어진다.
+   *  그룹 창의 [큐에 전부] 처럼 한꺼번에 담는 길은 임시를 만들지 않는다. */
+  function insertArtists(items, point = null, {asTemp = false} = {}) {
+    let at = insertionIndexAt(point);
     const added = [];
     for (const raw of items || []) {
       const artist = String(raw?.artist || '').trim();
@@ -451,16 +464,23 @@ export function createMixQueuePanel({
       at += 1;
       added.push(block);
     }
+    if (added.length && asTemp) {
+      // 그 전의 임시는 굳힌다 - 임시는 언제나 하나다(tempBlock 이 그 전제 위에 선다).
+      for (const b of blocks) if (b.temp) b.temp = false;
+      const last = added[added.length - 1];
+      last.temp = true;
+      onTempWeight(last.weight);
+    }
     if (added.length) refresh();
     return added.length;
   }
 
   /** 띠를 벗어났다가 **다시 띠 위에** 놓았다 - 새로 만들지 말고 그 칸을 옮긴다.
    *  안 그러면 자리를 고치려던 손이 같은 작가를 둘로 불린다. */
-  function moveBlockTo(id, clientX) {
+  function moveBlockTo(id, point) {
     const block = find(id);
     if (!block) return false;
-    const at = insertionIndexAt(clientX);
+    const at = insertionIndexAt(point);
     const from = blocks.indexOf(block);
     if (from < 0) return false;
     blocks.splice(from, 1);
@@ -477,8 +497,8 @@ export function createMixQueuePanel({
     accept: (payload, point) => {
       // ⚠️ 띠 자신의 재배치가 진행 중이면 받지 않는다 - 다시 그리면 그 칸이 죽는다.
       if (drag) return false;
-      if (payload.sourceQueue && payload.sourceId) return moveBlockTo(payload.sourceId, point.x);
-      return insertArtists([payload], point.x) > 0;
+      if (payload.sourceQueue && payload.sourceId) return moveBlockTo(payload.sourceId, point);
+      return insertArtists([payload], point, {asTemp: true}) > 0;
     },
   });
 
@@ -661,7 +681,8 @@ export function createMixQueuePanel({
     if (weightBox && doc.activeElement === weightBox) return;
     const host = event.target.closest('[data-mixq-id]');
     if (!host) return;
-    drag = {id: host.dataset.mixqId, node: host, startX: event.clientX,
+    drag = {id: host.dataset.mixqId, node: host,
+            startX: event.clientX, startY: event.clientY,
             startIndex: [...listEl.children].indexOf(host),
             moved: false, pointerId: event.pointerId};
   });
@@ -669,7 +690,10 @@ export function createMixQueuePanel({
   listEl.addEventListener('pointermove', event => {
     if (!drag) return;
     if (!drag.moved) {
-      if (Math.abs(event.clientX - drag.startX) < DRAG_SLOP) return;
+      // ⚠️ 가로 거리만 재다가 **거리**로 바꿨다. 줄바꿈이 생긴 뒤로는 바로 아랫줄로
+      //    내리는 것이 뜻 있는 움직임인데, 가로만 재면 그 손이 영영 안 잡힌다
+      //    (띠 밖으로 곧장 내려 빼는 것도 마찬가지로 안 잡혔다).
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < DRAG_SLOP) return;
       drag.moved = true;
       drag.node.classList.add('is-dragging');
       onLeaveBlock();                       // 끄는 동안 확대 보기는 방해만 된다
@@ -686,7 +710,9 @@ export function createMixQueuePanel({
     const over = [...listEl.children].find(node => {
       if (node === drag.node) return false;
       const rect = node.getBoundingClientRect();
-      return event.clientX >= rect.left && event.clientX <= rect.right;
+      // ⚠️ 줄이 여럿이면 X 만으로는 **다른 줄의 같은 X** 칸이 먼저 걸린다.
+      return event.clientY >= rect.top && event.clientY <= rect.bottom
+          && event.clientX >= rect.left && event.clientX <= rect.right;
     });
     if (!over) return;
     const rect = over.getBoundingClientRect();

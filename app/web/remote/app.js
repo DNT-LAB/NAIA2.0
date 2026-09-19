@@ -13275,7 +13275,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-entity-bindings')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260919-nsprefix')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

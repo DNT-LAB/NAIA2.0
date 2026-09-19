@@ -1571,9 +1571,14 @@ export function createTagAssistController({
       lower.startsWith('vibe:') ||
       lower.startsWith('preset:')
     )) return query;
-    for (const namespace of ['artist', 'character']) {
+    // ⚠️ 막는 것은 **콜론까지 친 빈 namespace** 뿐이다(`artist:` 하나만 덜렁).
+    //    예전에는 `prefix.startsWith(lower)` 로 접두어의 **앞부분**까지 막아서,
+    //    `art`·`arti`·`artist` 는 물론 `charm`·`charcoal` 같은 평범한 낱말도
+    //    검색이 아예 안 나갔다(`artist collaboration` 은 여덟 글자째에야 떴다).
+    //    치는 중에 낱말 후보가 잠깐 보이는 것이 죽은 칸보다 낫다.
+    for (const namespace of ['artist', 'character', 'copyright']) {
       const prefix = namespace + ':';
-      if (prefix.startsWith(lower) && lower.length >= 2) return '';
+      if (lower === prefix) return '';
       if (lower.startsWith(prefix)) {
         const suffix = query.slice(prefix.length).trim();
         return suffix ? query : '';

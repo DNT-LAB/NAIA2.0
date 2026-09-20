@@ -30,15 +30,28 @@ const POLICY_FALLBACK = [
 //     17.3 x 100          = 1730 장      -> NAI 표시 "~1730 images"     (일치)
 // 반올림 자리까지 맞으므로 상수는 17.3 으로 본다.
 //
-// ⚠️ 이 장수는 **무료 기준 생성에서만** 맞다 - NAI 안내문 그대로 "normal
-// resolutions and up to 28 steps"(1MP 이하 · 28스텝 이하). 해상도나 스텝을 올리면
-// 같은 예산을 더 빨리 먹으므로 **상한**으로만 읽어야 한다. 그래서 어디서나 `≈` 를
-// 붙이고 기준을 함께 적는다.
+// ⚠️ **기준은 23스텝이다. 28스텝이 아니다**(2026-09-20 정정).
+// 한동안 이 자리에 `1MP · 28스텝 기준` 이라고 적혀 있었는데, 그건 NAI 안내문의
+// "normal resolutions and up to 28 steps" 를 끌어다 쓴 것이다 - 그 문장은
+// **무료 경계**(`core/nai_free_usage.py`: steps <= 28 && px <= 1MP)이지 이 장수의
+// 기준이 아니다. 두 개념이 한 줄에서 섞여 있었다.
+//
+// 공식 문서(journal.novelai.net/opus-usage-limit-explained)의 기준은 23스텝·표준
+// 해상도이고, 사용자 실측이 그것을 확정한다(`docs/OPUS_USAGE_LIMIT_ANALYSIS_2026_09_20.md`):
+//     18스텝 실측        21.43 장/1%
+//     23스텝 값 환산     17.3 x 23/18 = 21.7 장/1%   -> 1.4% 차이 (일치)
+//     28스텝 값이었다면  17.3 x 28/18 = 26.9 장/1%   -> 실측과 25% 어긋난다
+// 틀린 표기대로 28스텝에 맞춰 생성하면 실제로는 17.3 x 23/28 = 14.2 장/1% 뿐이라
+// 화면이 22% 부풀려 말하고 있었다.
+//
+// ⚠️ 그러므로 이 숫자는 **상한이 아니다** - 23스텝보다 올리면 모자라고 내리면 남는다.
+//    문서가 청한 "스텝·해상도를 함께 잡은 환산" 은 아직 안 붙였다(별건).
 //
 // NAI 가 이 상수를 바꾸면 어긋난다. 그때는 회복률(86400/timeUntilNextPercent)과
 // NAI 표시 장수를 다시 나눠 보면 새 값이 나온다.
 const IMAGES_PER_PERCENT = 17.3;
-const IMAGE_BASIS_NOTE = '1MP · 28스텝 기준';
+// ⚠️ 위 상수와 **한 쌍**이다. 하나만 고치면 화면이 거짓말을 한다(방금 그랬다).
+const IMAGE_BASIS_NOTE = '1MP · 23스텝 기준';
 
 function imageCount(percent) {
   return Math.round(Math.max(0, Number(percent) || 0) * IMAGES_PER_PERCENT);

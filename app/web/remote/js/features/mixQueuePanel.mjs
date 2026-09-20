@@ -419,16 +419,39 @@ export function createMixQueuePanel({
     `;
   }
 
+  /** 메뉴를 누른 자리에 띄우되 **잘리지 않는 곳**에 가둔다.
+   *
+   *  ⚠️ 예전에는 띠(`.mixq`) 안에 가뒀다 - 그런데 메뉴(6줄 168px)가 띠(111px)보다
+   *     **크다**. 그러면 `box.height - menu.height - 4` 가 음수(-61)가 되고
+   *     `Math.min(Math.max(4, ...), -61)` 이 그 음수를 골라 메뉴가 띠 **위로** 솟는다.
+   *     거기는 `.dragpanel-body { overflow: hidden }` 바깥이라 잘린다 - 실측
+   *     2026-09-20: 메뉴 top -11px, 첫 줄 -7~19px 이 통째로 사라지고 둘째 줄은 3px 만
+   *     남았다. 사용자에게는 **[이 자리에 고정] 과 [`artist:`] 두 줄이 아예 없는
+   *     메뉴**로 보였다(같은 제보 두 번 - "여전히 없어요").
+   *  ⚠️ 그래서 둘을 바꾼다: 가두는 상자를 **잘라내는 조상**으로 올리고,
+   *     `Math.max` 를 **맨 마지막에** 걸어 어떤 경우에도 그 위로 못 올라가게 한다.
+   *     (순서가 뒤집히면 바닥 맞춤이 천장 맞춤을 이겨 다시 음수가 나온다.)
+   *  ⚠️ 그 안에도 안 들어갈 만큼 창이 낮으면 높이를 줄여 **스스로 구르게** 한다 -
+   *     잘라 내면 무엇이 없어졌는지 알 길이 없지만, 구르면 보인다.
+   */
   function openMenu(block, x, y) {
     menuFor = block ? block.id : '';
     menuEl.innerHTML = menuHtmlFor(block);
     menuEl.hidden = false;
+    menuEl.style.maxHeight = '';
+    const PAD = 4;
     const box = el.getBoundingClientRect();
+    const clipEl = el.closest('.dragpanel-body') || el.closest('.dragpanel') || doc.body;
+    const clip = clipEl.getBoundingClientRect();
+    const room = clip.height - PAD * 2;
+    if (menuEl.getBoundingClientRect().height > room) {
+      menuEl.style.maxHeight = `${Math.max(60, Math.round(room))}px`;
+    }
     const menu = menuEl.getBoundingClientRect();
-    const left = Math.min(Math.max(4, x - box.left), box.width - menu.width - 4);
-    const top = Math.min(Math.max(4, y - box.top), box.height - menu.height - 4);
-    menuEl.style.left = `${Math.round(left)}px`;
-    menuEl.style.top = `${Math.round(top)}px`;
+    const left = Math.max(clip.left + PAD, Math.min(x, clip.right - PAD - menu.width));
+    const top = Math.max(clip.top + PAD, Math.min(y, clip.bottom - PAD - menu.height));
+    menuEl.style.left = `${Math.round(left - box.left)}px`;
+    menuEl.style.top = `${Math.round(top - box.top)}px`;
   }
 
   function closeMenu() {

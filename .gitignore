@@ -61,6 +61,9 @@ release_package*/
 # Playwright MCP browser-test artifacts (console/page logs, regenerated per run)
 .playwright-mcp/
 
+# Codex 위임이 남기는 중간산물(패치·감사 산출물). 돌릴 때마다 쌓인다 - 저장소에는 넣지 않는다.
+codex_out/
+
 # 단위 테스트 / 커버리지 보고서
 htmlcov/
 .tox/

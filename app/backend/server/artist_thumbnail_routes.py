@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response
 
 from core.artist_affinity import default_pack as artist_affinity_pack
 from core.artist_groups import ArtistGroupError, ArtistGroupStore
+from core.artist_mixes import ArtistMixError, ArtistMixStore
 from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
 from core.artist_thumbnail_service import ArtistThumbnailService
 from core.headless_generation_service import HeadlessGenerationService
@@ -30,8 +31,30 @@ def artist_group_store(context: WebSessionContext) -> ArtistGroupStore:
     return store
 
 
+def artist_mix_store(context: WebSessionContext) -> ArtistMixStore:
+    """저장된 믹스 조합. 그룹과 **같은 폴더, 다른 파일**이다(`artist_mixes.json`)."""
+    store = getattr(context, "artist_mix_store", None)
+    if store is None:
+        store = ArtistMixStore(artist_thumbnail_service(context).state_root)
+        context.artist_mix_store = store
+    return store
+
+
 # 한 라우트가 op 로 갈라 받는다 - 프론트 호출부가 작아지고 검증이 한 곳에 모인다.
 _GROUP_OPS = {"create", "rename", "delete", "add", "remove", "reorder", "weight"}
+_MIX_OPS = {"save", "rename", "delete"}
+
+
+def _apply_mix_op(store: ArtistMixStore, payload: dict) -> dict:
+    op = str(payload.get("op") or "").strip()
+    if op == "save":
+        return store.save(payload.get("name"), payload.get("blocks"),
+                          text=payload.get("text"), mix_id=payload.get("id"))
+    if op == "rename":
+        return store.rename(payload.get("id"), payload.get("name"))
+    if op == "delete":
+        return store.delete(payload.get("id"))
+    raise ArtistMixError(f"unknown op: {op or '(empty)'}")
 
 
 def _apply_group_op(store: ArtistGroupStore, payload: dict) -> dict:
@@ -312,6 +335,32 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
         except Exception as exc:
             return JSONResponse({"error": f"Artist groups update failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-mixes")
+    async def api_artist_mixes_list():
+        try:
+            mixes = await run_in_thread(artist_mix_store(session_context).list)
+            return {"mixes": mixes}
+        except Exception as exc:
+            # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
+            return JSONResponse({"error": f"Artist mixes unreadable: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-mixes")
+    async def api_artist_mixes_mutate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        if str(payload.get("op") or "") not in _MIX_OPS:
+            return JSONResponse({"error": f"op must be one of {sorted(_MIX_OPS)}"}, status_code=400)
+        try:
+            return await run_in_thread(_apply_mix_op, artist_mix_store(session_context), payload)
+        except ArtistMixError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist mixes update failed: {exc}"}, status_code=500)
 
     @app.post("/api/artist-thumb/favorite")
     async def api_artist_thumb_favorite(req: Request):

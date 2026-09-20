@@ -20,7 +20,7 @@
  *     batch-*)이 통째로 따라온다. 그림 상자(`.artist-thumb-card-image`)만 빌린다.
  */
 
-import { anchorToken, nextAnchorId } from './artistAnchors.mjs?v=20260915-anchor1';
+import { anchorToken, nextAnchorId } from './artistAnchors.mjs?v=20260920-front';
 // ⚠️ 중개자는 **모든 곳에서 같은 주소**로 불러야 한다. 주소(쿼리 포함)가 다르면 모듈이
 //    둘로 뜨고, 한쪽에 등록한 받는 쪽을 다른 쪽이 못 본다. 계약 시험이 대조한다.
 import { dragBrokerFor } from './dragBroker.mjs?v=20260919-strip';
@@ -71,6 +71,18 @@ export function createMixQueuePanel({
   // ⚠️ 이 콜백은 **큐가 원인일 때만** 부른다. 메인에서 들어온 값(`setFocusWeight`)에
   //    다시 부르면 둘이 서로를 밀어 무한히 돈다.
   onFocusWeight = () => {},
+  // ── 저장된 조합(1단계) ──
+  //  프리셋에 매달리지 않는다 - 조합은 자기 파일에 산다(`artist_mixes.json`).
+  mixStore = null,            // {list, save, remove} - 없으면 관리 줄을 안 그린다
+  // 이름 -> 그림 주소. **저장하지 않는다** - 주소는 지금 모드에 딸린 값이라,
+  // 담아 두면 팩을 바꾼 뒤 엉뚱한 그림이 뜬다(또는 404 로 빈 칸이 된다).
+  describeArtists = async () => ({}),
+  // 이 앵커의 표식이 지금 **어느 칸**에 있나. 'pre' | 'post'.
+  anchorSlot = () => 'pre',
+  // 복원 전용. 글에 남은 표식을 **전부 지우고** 새 표식을 그 칸 **앞**에 넣는 일을
+  // 칸마다 **한 번의 쓰기**로 끝낸다 - 지우고 다시 읽으면 옛 글이 나온다(아래 주석).
+  //   (rows: [{id, slot}]) => void
+  placeAnchors = () => {},
   // ── 앵커 ──
   // 표식이 아직 prefix/postfix 에 살아 있는가. 큐는 글을 안 갖고 있어 물어본다.
   hasAnchorIn = () => true,
@@ -89,10 +101,21 @@ export function createMixQueuePanel({
   // 단추가 하던 일은 끌기(제거)와 우클릭(고정·비활성·제거)이 나눠 가졌다.
   el.innerHTML = `
     <div class="mixq-list" role="list"></div>
+    <div class="mixq-bar" hidden>
+      <button type="button" class="mixq-bar-btn" data-mixq-bar="save"
+              title="지금 조합을 이름 붙여 저장합니다">저장</button>
+      <button type="button" class="mixq-bar-btn" data-mixq-bar="load"
+              title="저장한 조합을 불러옵니다">불러오기</button>
+      <span class="mixq-bar-name"></span>
+    </div>
     <div class="mixq-menu" hidden role="menu"></div>
   `;
   const listEl = el.querySelector('.mixq-list');
   const menuEl = el.querySelector('.mixq-menu');
+  const barEl = el.querySelector('.mixq-bar');
+  const barNameEl = el.querySelector('.mixq-bar-name');
+  // 마지막으로 저장하거나 불러온 이름. 저장 칸의 기본값이 되고 줄 끝에 적힌다.
+  let mixName = '';
   const broker = dragBrokerFor(doc);
 
   /** 큐. 마지막의 collab 블럭은 못 지우지만 **움직일 수는 있다**(사용자 지정). */
@@ -154,6 +177,9 @@ export function createMixQueuePanel({
   function anchorBlock(anchorId) {
     return {
       id: nextId(), kind: 'anchor', anchorId: String(anchorId),
+      // 표식이 들어간 칸. 만들 때는 늘 prefix 지만 사용자가 postfix 로 오려 붙일 수
+      // 있고(`PE_ANCHOR_FIELDS` 가 둘 다 본다), 저장할 때 **그 자리**를 적는다.
+      slot: 'pre',
       syncWeights: false,   // 앵커 정책: 그룹 첫 태그가 Master, 나머지가 Slave
       broken: false,        // 글에서 표식이 사라졌다
       locked: false, temp: false, enabled: true,
@@ -261,6 +287,98 @@ export function createMixQueuePanel({
     onChange(compose(), composeGroups());
   }
 
+  // ── 조합 저장·복원 (사용자 지정 2026-09-20) ──────────────────────────
+  //  ⚠️ **앵커 아이디는 저장하지 않는다.** `<anchor:3>` 은 지금 그 글에 박힌 주소지
+  //     조합의 속성이 아니다 - 다른 프리셋에서 불러오면 그런 표식은 없다. 남기는 것은
+  //     묶음의 **구조**(몇 묶음 · 어느 칸 · 동기화 여부)이고 표식은 복원할 때 새로 뽑는다.
+  //  ⚠️ 그림 주소도 저장하지 않는다(모드에 딸린 값이다). 이름으로 다시 받아 온다.
+  //  ⚠️ 임시 칸은 임시라는 사실을 안 남긴다 - 그건 고르는 중이라는 표시지 조합이 아니다.
+
+  /** 지금 띠를 저장 모양으로. 납작한 차례 그대로라 "첫 앵커 앞 = Artist Prompt" 가
+   *  저절로 따라온다. */
+  function mixSnapshot() {
+    return blocks.map(b => {
+      if (isAnchor(b)) {
+        return {kind: 'anchor', slot: anchorSlot(b.anchorId) === 'post' ? 'post' : 'pre',
+                sync: !!b.syncWeights};
+      }
+      if (b.id === COLLAB_ID) {
+        return {kind: 'collab', weight: b.weight, enabled: !!b.enabled};
+      }
+      return {kind: 'artist', artist: b.artist, weight: b.weight,
+              with_prefix: b.withPrefix !== false, enabled: b.enabled !== false};
+    });
+  }
+
+  /** 저장 모양 -> 띠. 표식은 **새로 발급**해 각 칸의 **앞**에 넣는다(사용자 지정). */
+  async function restoreMix(saved, name = '') {
+    const rows = Array.isArray(saved) ? saved : [];
+    if (!rows.length) return false;
+    // ⚠️ 표식은 **`placeAnchors` 한 번**으로 끝낸다(실측 2026-09-20).
+    //    예전에는 "지우고 -> 하나씩 넣기" 였는데, `setPeField` 가 서버를 거치는
+    //    비동기라 **쓰고 바로 읽으면 옛 글**이 나온다. 그래서 새 표식이 "이미 있다"
+    //    로 판정돼 옛 자리에 눌러앉고, 지운 것까지 되살아났다.
+    const used = [];
+    const next = [];
+    let hasCollab = false;
+    for (const raw of rows) {
+      if (raw?.kind === 'anchor') {
+        const id = nextAnchorId(used);
+        used.push(id);
+        const row = anchorBlock(id);
+        row.slot = raw.slot === 'post' ? 'post' : 'pre';
+        row.syncWeights = !!raw.sync;
+        row.broken = true;           // 표식을 넣은 뒤 다시 잰다
+        next.push(row);
+        continue;
+      }
+      if (raw?.kind === 'collab') {
+        const row = collabBlock();
+        row.weight = roundStep(Number.parseFloat(raw.weight) || -1);
+        row.enabled = !!raw.enabled;
+        next.push(row);
+        hasCollab = true;
+        continue;
+      }
+      const artist = String(raw?.artist || '').trim();
+      if (!artist) continue;
+      const w = Number.parseFloat(raw?.weight);
+      next.push({
+        id: nextId(), artist, weight: roundStep(Number.isFinite(w) ? w : 1),
+        withPrefix: raw?.with_prefix !== false, enabled: raw?.enabled !== false,
+        temp: false, locked: false, image: '',
+      });
+    }
+    // collab 칸은 **늘 있어야 한다**(`tempBlock`·삽입 자리 계산이 그 전제 위에 선다).
+    if (!hasCollab) next.push(collabBlock());
+    blocks = next;
+    focusId = '';
+    mixName = String(name || '');
+    refresh();
+    paintBar();
+    placeAnchors(next.filter(isAnchor).map(row => ({id: row.anchorId, slot: row.slot})));
+    if (refreshAnchorHealth()) refresh();
+    await fillImages();
+    return true;
+  }
+
+  /** 그림은 이름으로 다시 받아 온다 - 실패해도 조합은 멀쩡하다(빈 칸으로 선다). */
+  async function fillImages() {
+    const names = [...new Set(blocks
+      .filter(b => !isAnchor(b) && b.id !== COLLAB_ID && !b.image && b.artist)
+      .map(b => b.artist))];
+    if (!names.length) return;
+    let described = {};
+    try { described = await describeArtists(names) || {}; } catch (_) { return; }
+    let changed = false;
+    for (const b of blocks) {
+      if (isAnchor(b) || b.image) continue;
+      const url = described[b.artist]?.image_url || '';
+      if (url) { b.image = url; changed = true; }
+    }
+    if (changed) render();
+  }
+
   // ── 그리기 ────────────────────────────────────────────────────────────
   /** 앵커 = 칸 사이의 **얇은 세로 막대**(`□□|□|□□`, 사용자 지정). 같은 목록에
    *  섞여 있으니 한눈에 '여기서부터 다른 자리' 라고 읽혀야 한다. */
@@ -348,6 +466,10 @@ export function createMixQueuePanel({
     const master = members[0];
     if (!master) return;
     for (const slave of members.slice(1)) {
+      // ⚠️ collab 칸은 건너뛴다(실측 2026-09-20). 그 칸의 `-1` 은 "협업 편향을 빼라"
+      //    는 뜻이라, 동기화가 0.7 로 덮으면 **반대 뜻**이 된다. 잠긴 칸은 사용자가
+      //    값을 고르라고 둔 자리가 아니다.
+      if (slave.locked) continue;
       slave.weight = master.weight;
       const input = listEl.querySelector(`[data-mixq-id="${CSS.escape(slave.id)}"] .mixq-weight`);
       if (input) input.value = weightText(slave.weight);
@@ -434,9 +556,79 @@ export function createMixQueuePanel({
    *  ⚠️ 그 안에도 안 들어갈 만큼 창이 낮으면 높이를 줄여 **스스로 구르게** 한다 -
    *     잘라 내면 무엇이 없어졌는지 알 길이 없지만, 구르면 보인다.
    */
+  // ── 관리 줄 (사용자 지정 2026-09-20: 띠를 **아주 약간만** 늘려 작은 단추) ────
+  function paintBar() {
+    if (!barEl) return;
+    barEl.hidden = !mixStore;
+    if (barNameEl) barNameEl.textContent = mixName;
+  }
+
+  /** 이름 칸을 줄 안에 편다. 새 창을 띄우지 않는다 - 그룹 만들기와 같은 수법이다.
+   *  ⚠️ 저장은 **묻지 않고 전부 담는다**(사용자 지정). 여기서 정하는 것은 이름뿐이다. */
+  function revealSaveForm() {
+    if (!barEl || barEl.querySelector('.mixq-bar-input')) return;
+    const input = doc.createElement('input');
+    input.className = 'mixq-bar-input';
+    input.type = 'text';
+    input.value = mixName;
+    input.placeholder = '조합 이름';
+    input.maxLength = 40;
+    const close = () => { input.remove(); paintBar(); };
+    input.addEventListener('keydown', event => {
+      event.stopPropagation();          // Esc 가 메뉴 닫기로 새지 않게
+      if (event.key === 'Escape') { close(); return; }
+      if (event.key !== 'Enter' || event.isComposing) return;
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      close();
+      void saveMix(name);
+    });
+    input.addEventListener('blur', () => setTimeout(close, 120));
+    barEl.appendChild(input);
+    input.focus();
+    input.select();
+  }
+
+  async function saveMix(name) {
+    if (!mixStore?.save) return;
+    try {
+      await mixStore.save(name, mixSnapshot());
+      mixName = name;
+      paintBar();
+      showToast(`조합을 저장했습니다: ${name}`, 'success');
+    } catch (error) {
+      showToast(error?.message || '조합 저장에 실패했습니다.', 'error');
+    }
+  }
+
+  /** 저장된 조합 목록을 **우클릭 메뉴 자리**에 편다 - 자리 계산·바깥 클릭 닫기가
+   *  이미 거기 있어서, 새 떠 있는 판을 하나 더 만들 이유가 없다. */
+  async function openMixList(x, y) {
+    if (!mixStore?.list) return;
+    let rows = [];
+    try { rows = await mixStore.list() || []; }
+    catch (error) { showToast(error?.message || '조합 목록을 읽지 못했습니다.', 'error'); return; }
+    menuFor = '';
+    menuAt = -1;
+    menuEl.innerHTML = rows.length
+      ? rows.map(row => `
+        <div class="mixq-mix-row">
+          <button type="button" data-mixq-mix="${escHtml(row.id)}"
+                  title="${escHtml(row.name)} - 불러오기">${escHtml(row.name)}</button>
+          <button type="button" class="mixq-mix-del" data-mixq-mix-del="${escHtml(row.id)}"
+                  title="지우기" aria-label="지우기">×</button>
+        </div>`).join('')
+      : '<div class="mixq-mix-empty">저장된 조합이 없습니다</div>';
+    placeMenu(x, y);
+  }
+
   function openMenu(block, x, y) {
     menuFor = block ? block.id : '';
     menuEl.innerHTML = menuHtmlFor(block);
+    placeMenu(x, y);
+  }
+
+  function placeMenu(x, y) {
     menuEl.hidden = false;
     menuEl.style.maxHeight = '';
     const PAD = 4;
@@ -453,6 +645,41 @@ export function createMixQueuePanel({
     menuEl.style.left = `${Math.round(left - box.left)}px`;
     menuEl.style.top = `${Math.round(top - box.top)}px`;
   }
+
+  barEl?.addEventListener('click', event => {
+    const act = event.target.closest('[data-mixq-bar]')?.dataset.mixqBar;
+    if (act === 'save') { revealSaveForm(); return; }
+    if (act === 'load') {
+      const r = event.target.getBoundingClientRect();
+      void openMixList(r.left, r.bottom + 2);
+    }
+  });
+
+  menuEl.addEventListener('click', async event => {
+    const del = event.target.closest('[data-mixq-mix-del]');
+    if (del) {
+      event.stopPropagation();
+      const id = del.dataset.mixqMixDel;
+      const r = del.getBoundingClientRect();
+      try { await mixStore.remove(id); } catch (error) {
+        showToast(error?.message || '지우지 못했습니다.', 'error');
+        return;
+      }
+      void openMixList(r.left, r.top);     // 목록을 그 자리에 다시 편다
+      return;
+    }
+    const pick = event.target.closest('[data-mixq-mix]');
+    if (!pick) return;
+    event.stopPropagation();
+    const id = pick.dataset.mixqMix;
+    closeMenu();
+    let rows = [];
+    try { rows = await mixStore.list() || []; } catch (_) { return; }
+    const row = rows.find(r => String(r.id) === String(id));
+    if (!row) { showToast('그 조합을 찾지 못했습니다.', 'error'); return; }
+    await restoreMix(row.blocks, row.name);
+    showToast(`조합을 불러왔습니다: ${row.name}`, 'success');
+  }, true);
 
   function closeMenu() {
     menuFor = '';
@@ -650,7 +877,9 @@ export function createMixQueuePanel({
     blocks.splice(where, 0, row);
     // 표식이 글에 들어가기 전까지는 '깨진' 상태다 - 넣어 준 뒤 다시 잰다.
     row.broken = true;
-    onAnchorAdd(row.anchorId);
+    // 새로 만드는 앵커는 예전 그대로 prefix **맨 뒤**다(사용자 지정). 앞에 넣는 것은
+    // 조합을 **복원**할 때뿐이다 - 손으로 만드는 앵커는 쓰던 글 뒤에 붙는 게 자연스럽다.
+    onAnchorAdd(row.anchorId, {slot: 'pre', front: false});
     refresh();
     return row;
   }
@@ -868,9 +1097,11 @@ export function createMixQueuePanel({
     setOpen(open) {
       el.hidden = !open;
       closeMenu();
-      if (open) refresh();
+      if (open) { refresh(); paintBar(); }
       return !el.hidden;
     },
+    mixSnapshot,
+    restoreMix,
     /** 격자에서 고른 작가 - 임시 블럭 한 자리를 차지하고 다음 선택에 갈린다.
      *
      *  ⚠️ **지금 임시인 그 작가를 또 누르면 고정된다**(사용자 지정 2026-09-20).

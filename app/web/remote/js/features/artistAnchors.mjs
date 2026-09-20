@@ -51,6 +51,18 @@ export function appendAnchor(text, anchorId) {
   return body ? `${body}, ${token}` : token;
 }
 
+/** 표식을 글 **맨 앞**에 붙인다(사용자 지정 2026-09-20: 조합을 복원할 때는 앞).
+ *
+ *  ⚠️ `appendAnchor` 와 **짝**이다 - 둘 다 이미 있으면 그대로 두고, 빈 글이면 표식만
+ *     남긴다. 한쪽만 고치면 복원과 추가가 서로 다른 글을 만든다.
+ */
+export function prependAnchor(text, anchorId) {
+  const body = String(text ?? '').trim().replace(/^\s*,\s*/, '');
+  const token = anchorToken(anchorId);
+  if (hasAnchorId(body, anchorId)) return body;
+  return body ? `${token}, ${body}` : token;
+}
+
 /** 표식 하나만 걷어낸다. 앞뒤로 남는 쉼표도 같이 정리한다. */
 export function removeAnchor(text, anchorId) {
   const token = anchorToken(anchorId);

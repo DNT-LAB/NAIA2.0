@@ -29831,6 +29831,35 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-badge:active { transform: translateY(1px); }
 .mixq-badge:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
+/* 관리 줄 - 조합 저장·불러오기(사용자 지정 2026-09-20).
+   ⚠️ 띠를 **아주 약간만** 늘린다: [임시] 배지(12px)와 그것을 감쌀 여백 정도.
+      여기서 높이를 더 먹으면 아래 격자가 한 줄 줄어든다 - 관찰이 본론인 화면에서
+      관리 단추가 그림을 밀어내면 안 된다. */
+.mixq-bar {
+  display: flex; align-items: center; gap: 3px;
+  padding: 0 5px 4px; min-height: 16px;
+}
+.mixq-bar[hidden] { display: none !important; }
+.mixq-bar-btn {
+  flex: 0 0 auto; padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--border-dim); background: rgba(255,255,255,0.04);
+  color: var(--text-muted); font-family: inherit; font-size: 9px; line-height: 1.4;
+  cursor: pointer;
+}
+.mixq-bar-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* 마지막으로 저장하거나 불러온 이름. 길면 줄인다 - 줄 높이는 이름 때문에 안 는다. */
+.mixq-bar-name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  font-size: 9px; color: var(--accent); text-align: right;
+}
+.mixq-bar-input {
+  flex: 1 1 auto; min-width: 0; height: 16px; padding: 0 5px;
+  border: 1px solid var(--accent); border-radius: 4px; outline: none;
+  background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: inherit; font-size: 9px;
+}
+
 /* 우클릭 메뉴 - 블럭이 좁아 단추를 더 못 놓는다(사용자 지정). */
 .mixq-menu {
   /* ⚠️ `overflow-y: auto` 는 짝이 있다 - 창이 낮으면 `openMenu` 가 `max-height` 를
@@ -29847,6 +29876,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;
 }
 .mixq-menu button:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+/* 저장된 조합 목록 - 우클릭 메뉴와 **같은 자리**를 빌려 쓴다(떠 있는 판을 하나 더
+   만들면 자리 계산·바깥 클릭 닫기를 두 번 쓰게 된다). */
+.mixq-mix-row { display: flex; align-items: center; gap: 1px; }
+.mixq-mix-row > button:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.mixq-mix-del { flex: 0 0 auto; padding: 5px 7px; color: var(--text-dim); }
+.mixq-mix-del:hover { color: #ff9db1; }
+.mixq-mix-empty { padding: 6px 8px; font-size: 10px; color: var(--text-dim); }
 .mixq-menu button:disabled { opacity: 0.4; cursor: default; }
 
 /* 페이지 줄의 믹스 토글(Next 와 Go 사이).

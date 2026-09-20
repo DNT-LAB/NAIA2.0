@@ -2885,11 +2885,58 @@ export function createArtistThumbController({
     return PE_ANCHOR_FIELDS.some(key => anchorsApi?.hasAnchorId(peText(key), id));
   }
 
-  function putAnchorInPrefix(id) {
+  /** 표식을 글에 넣는다.
+   *
+   *  ⚠️ 자리 규칙이 둘이다(사용자 지정 2026-09-20):
+   *     - 손으로 앵커를 **추가**하면 그 칸 **맨 뒤**(예전 그대로 - 쓰던 글 뒤가 자연스럽다).
+   *     - 조합을 **복원**하면 그 칸 **맨 앞**(`front: true`).
+   *  ⚠️ `slot` 은 'pre' | 'post'. 읽는 쪽(`PE_ANCHOR_FIELDS`)은 원래 둘 다 봤고,
+   *     쓰는 쪽만 prefix 전용이었다 - 복원이 그 반쪽을 마저 쓴다.
+   */
+  function putAnchor(id, {slot = 'pre', front = false} = {}) {
     if (!anchorsApi || typeof setPeField !== 'function') return;
-    const next = anchorsApi.appendAnchor(peText('pre_prompt'), id);
-    setPeField('pre_prompt', next, getPePreset?.() ?? '');
+    const key = slot === 'post' ? 'post_prompt' : 'pre_prompt';
+    const put = front ? anchorsApi.prependAnchor : anchorsApi.appendAnchor;
+    setPeField(key, put(peText(key), id), getPePreset?.() ?? '');
     peQuick?.sync();
+  }
+
+  /** 글에 남은 표식을 **전부** 걷어낸다(조합을 복원하기 직전).
+   *
+   *  ⚠️ 띠가 아니라 **글**을 기준으로 센다. 새로고침하면 띠는 비는데 글은 서버에
+   *     남아 있어, 띠 기준으로 지우면 옛 표식이 그대로 살아남는다.
+   *  짝 없는 표식은 어차피 서버가 지우는 쓰레기다 - 복원이 치우고 가는 것이 맞다.
+   */
+  function placeAnchors(rows) {
+    if (!anchorsApi || typeof setPeField !== 'function') return;
+    const wanted = (rows || []).filter(row => row?.id);
+    let opened = '';
+    for (const key of PE_ANCHOR_FIELDS) {
+      let text = peText(key);
+      // 1) 글에 남은 표식을 **전부** 지운다. 띠가 아니라 **글**을 기준으로 센다 -
+      //    새로고침하면 띠는 비는데 글에는 표식이 남아, 띠 기준으로는 아무것도 안 지운다.
+      //    짝 없는 표식은 어차피 서버가 지우는 쓰레기다.
+      for (const id of new Set(anchorsApi.findAnchorIds(text))) {
+        text = anchorsApi.removeAnchor(text, id);
+      }
+      // 2) 이 칸으로 갈 표식을 **앞**에 넣는다(사용자 지정 2026-09-20).
+      //    ⚠️ 뒤에서부터 넣어야 차례가 지켜진다 - 앞으로 밀어 넣는 연산이라 순서가 뒤집힌다.
+      const slot = key === 'post_prompt' ? 'post' : 'pre';
+      const mine = wanted.filter(row => (row.slot === 'post' ? 'post' : 'pre') === slot);
+      for (const row of [...mine].reverse()) text = anchorsApi.prependAnchor(text, row.id);
+      // ⚠️ 칸마다 **한 번만** 쓴다. `setPeField` 는 서버를 거치고 `peText` 는 그
+      //    되돌아온 상태를 읽으므로, 중간에 다시 읽으면 옛 글을 본다(그래서 한 번).
+      setPeField(key, text, getPePreset?.() ?? '');
+      if (mine.length && !opened) opened = key;
+    }
+    peQuick?.sync();
+    if (opened) void togglePeField(opened, {openOnly: true});
+  }
+
+  /** 이 표식이 지금 **어느 칸**에 있나. 조합을 저장할 때 그 자리를 적는다. */
+  function anchorSlotOf(id) {
+    if (!anchorsApi) return 'pre';
+    return anchorsApi.hasAnchorId(peText('post_prompt'), id) ? 'post' : 'pre';
   }
 
   function dropAnchorFromText(id) {
@@ -2908,9 +2955,9 @@ export function createArtistThumbController({
     if (mixQueue) return mixQueue;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260915-anchor1');
+    if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260920-menufit');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260920-mixsave2');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2939,7 +2986,26 @@ export function createArtistThumbController({
       // ⚠️ 표식이 **글**로 들어가므로 그 글을 볼 창이 함께 떠야 한다(사용자 지정:
       //    "이를 위해 prefix, postfix 가 믹스 모드에서 노출되는 것"). 앵커를 안 쓰면
       //    안 띄운다 - 화면만 가린다.
-      onAnchorAdd: id => { putAnchorInPrefix(id); void togglePeField('pre_prompt', {openOnly: true}); },
+      onAnchorAdd: (id, options) => {
+        const slot = options?.slot === 'post' ? 'post_prompt' : 'pre_prompt';
+        putAnchor(id, options);
+        void togglePeField(slot, {openOnly: true});
+      },
+      anchorSlot: anchorSlotOf,
+      placeAnchors: rows => placeAnchors(rows),
+      // 그림은 **이름으로 다시 받는다** - 주소는 지금 모드에 딸린 값이라 저장하지 않는다.
+      describeArtists: names => describeArtists(names),
+      // 조합 저장소. 프리셋이 아니라 자기 파일에 산다(`artist_mixes.json`).
+      mixStore: {
+        list: async () => (await getJson('/api/artist-mixes'))?.mixes || [],
+        save: (name, blocks) => postJson('/api/artist-mixes', {
+          op: 'save', name, blocks,
+          // ⚠️ prefix/postfix 원문은 **담아만 둔다**(2단계에서 자리까지 복원할 때 쓴다).
+          //    나중에 담기 시작하면 그 전에 저장한 조합은 영영 복원할 수 없다.
+          text: {pre: peText('pre_prompt'), post: peText('post_prompt')},
+        }),
+        remove: id => postJson('/api/artist-mixes', {op: 'delete', id}),
+      },
       onAnchorRemove: id => dropAnchorFromText(id),
       onDragStart: () => remote.hideZoom?.(),
     });

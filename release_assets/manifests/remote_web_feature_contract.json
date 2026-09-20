@@ -287,6 +287,7 @@
         "app/backend/server/artist_thumbnail_routes.py",
         "core/artist_thumbnail_service.py",
         "core/artist_groups.py",
+        "core/artist_mixes.py",
         "core/artist_affinity.py",
         "core/artist_search.py",
         "app/web/remote/js/features/artistThumbTab.mjs",

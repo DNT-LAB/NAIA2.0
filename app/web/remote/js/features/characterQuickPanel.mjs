@@ -1114,8 +1114,14 @@ export function createCharacterQuickPanel({
     const rows = MIN_ROWS[element.dataset.cqMin] || 2;
     const line = 1.4 * 11;                       // .cq-input 의 line-height * font-size
     const min = Math.round(rows * line) + 12;    // + 세로 패딩
+    // 측정 중 height:auto 로 줄어들면 그리드의 스크롤 범위도 잠시 줄어든다.
+    // 브라우저의 scroll anchoring 이 적용되지 않는 경우 입력/서버 echo 마다
+    // scrollTop 이 위로 잘리므로, 최종 높이를 적용한 뒤 편집 위치를 복원한다.
+    const grid = element.closest('.cq-grid');
+    const keepScroll = grid?.scrollTop;
     element.style.height = 'auto';
     element.style.height = Math.max(min, element.scrollHeight) + 'px';
+    if (grid) grid.scrollTop = keepScroll;
   }
 
   function onInput(event) {

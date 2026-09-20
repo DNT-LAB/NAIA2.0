@@ -312,6 +312,34 @@ export function createArtistThumbController({
     }
   }
 
+  /** 가중치 하나로 **여럿을 묶는** 서식(사용자 지정 2026-09-20).
+   *
+   *  가중치 동기화된 앵커가 쓴다 - `1.2::a ::, 1.2::b ::` 로 흩지 않고
+   *  `1.2::a, b ::` 한 덩이로 낸다.
+   *
+   *  ⚠️ 몸통은 부르는 쪽이 `formatArtistToken(artist, 1, ...)` 로 만들어 준다 -
+   *     가중치 1 은 껍데기가 없어 그대로 몸통이다. 그래야 `artist:` 를 뗀 칸과
+   *     붙인 칸이 한 묶음에 섞여도 각자 맞게 나온다.
+   *  ⚠️ 껍데기 모양은 **한 칸짜리와 같은 문법**이다 - NAI 는 `w::...  ::`,
+   *     SD/Anima 는 `(...:w)`. 새 문법을 지어내지 않는다.
+   */
+  function formatArtistGroupToken(bodies, weight = 1) {
+    const list = (bodies || []).map(b => String(b || '').trim()).filter(Boolean);
+    if (!list.length) return '';
+    const body = list.join(', ');
+    const raw = Number.parseFloat(weight);
+    const value = Number.isFinite(raw) ? raw : 1;
+    if (value === 1) return body;
+    const formatted = formatArtistWeight(value);
+    if (!formatted) return body;
+    try {
+      if (currentGenerationMode() === 'NAI') return `${formatted}::${body} ::`;
+      return `(${body}:${formatted})`;
+    } catch (_) {
+      return body;
+    }
+  }
+
   function formatArtistPrompt(artist) {
     const name = String(artist || '').trim();
     if (!name) return '';
@@ -1571,8 +1599,9 @@ export function createArtistThumbController({
 
   function setArtistWeight(value) {
     const next = paintWeightControls(value);
-    // 믹스 모드에서는 슬라이더가 **임시 블럭**을 민다(죽은 손잡이를 남기지 않는다).
-    if (mixOn && mixQueue?.setTempWeight(next)) return;
+    // 믹스 모드에서는 슬라이더가 **마지막으로 건드린 칸**을 민다(죽은 손잡이를 남기지
+    // 않는다). 예전에는 임시 칸만이라, 고정하는 순간 손잡이가 아무것도 안 밀었다.
+    if (mixOn && mixQueue?.setFocusWeight(next)) return;
     syncPromptFormat();
   }
 
@@ -2881,7 +2910,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260915-anchor1');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260919-wrap');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260920-pin');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2890,6 +2919,7 @@ export function createArtistThumbController({
       // 색이 안 붙으면 그 줄은 색인에 없는 이름이다(오타가 그 자리에서 드러난다).
       classifyTag: tag => (typeof classifyPromptTag === 'function' ? classifyPromptTag(tag) : null),
       formatToken: (artist, weight, options) => formatArtistToken(artist, weight, options),
+      formatGroupToken: (bodies, weight) => formatArtistGroupToken(bodies, weight),
       onChange: applyMixComposition,
       // 블럭에 올린 확대 보기는 **믹스 판 옆**에 뜬다(격자 칸은 창 옆 - 판을 덮는다).
       // ⚠️ 띠가 창 **안**으로 들어오면서 확대는 창 옆이 맞다(기준점을 안 주면 창이 기본).
@@ -2900,8 +2930,9 @@ export function createArtistThumbController({
         remote.showZoomBeside?.(element, {src, title: block.artist, note: ''});
       },
       onLeaveBlock: () => remote.hideZoom?.(),
-      // 큐 안에서 임시 블럭의 가중치가 바뀌면 메인 손잡이도 따라간다(사용자 지정).
-      onTempWeight: value => paintWeightControls(value),
+      // 큐 안에서 **마지막으로 건드린 칸**의 가중치가 바뀌면 메인 손잡이도 따라간다
+      // (사용자 지정 2026-09-20 - 예전에는 임시 칸만이라 고정하면 손잡이가 죽었다).
+      onFocusWeight: value => paintWeightControls(value),
       // 표식이 prefix/postfix 에 살아 있는가. 글의 주인은 PE 라 여기서 물어 준다.
       hasAnchorIn: id => peTextHasAnchor(id),
       // 추가/복원 = prefix **맨 뒤**에 표식을 넣는다(사용자 지정).

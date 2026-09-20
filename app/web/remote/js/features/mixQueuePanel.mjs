@@ -56,13 +56,21 @@ export function createMixQueuePanel({
   showToast = () => {},
   // (artist, weight, {withPrefix}) => string   ⚠️ 서식의 단일 소유자
   formatToken = (artist, weight) => `${weight}::${artist}`,
+  // (몸통들, weight) => string   가중치 하나로 **여럿을 묶는** 서식.
+  // ⚠️ 몸통은 `formatToken(artist, 1, ...)` 로 만든다 - 가중치 1 은 껍데기가 없어
+  //    그대로 몸통이 된다. 그래야 `withPrefix` 가 칸마다 달라도 각자 맞게 나온다.
+  formatGroupToken = (bodies, weight) => (weight === 1
+    ? bodies.join(', ')
+    : `${weight}::${bodies.join(', ')} ::`),
   onChange = () => {},        // (조립된 문자열) => void
   onHoverBlock = () => {},    // (element, {artist}) => void   확대 보기 요청
   onLeaveBlock = () => {},
-  // 임시 블럭의 가중치가 큐 안에서 바뀌었다 - 메인 슬라이더도 따라와야 한다(사용자 지정).
-  // ⚠️ 이 콜백은 **큐가 원인일 때만** 부른다. 메인에서 들어온 값(`setTempWeight`)에
+  // 초점 칸(= 마지막으로 건드린 칸)의 가중치가 큐 안에서 바뀌었다 - 메인 슬라이더도
+  // 따라와야 한다(사용자 지정). 예전에는 **임시 칸만** 밀었는데, 고정하는 순간 초점이
+  // 사라져 슬라이더가 죽은 손잡이가 됐다(사용자 지적 2026-09-20).
+  // ⚠️ 이 콜백은 **큐가 원인일 때만** 부른다. 메인에서 들어온 값(`setFocusWeight`)에
   //    다시 부르면 둘이 서로를 밀어 무한히 돈다.
-  onTempWeight = () => {},
+  onFocusWeight = () => {},
   // ── 앵커 ──
   // 표식이 아직 prefix/postfix 에 살아 있는가. 큐는 글을 안 갖고 있어 물어본다.
   hasAnchorIn = () => true,
@@ -108,6 +116,34 @@ export function createMixQueuePanel({
 
   const find = id => blocks.find(b => b.id === id) || null;
   const tempBlock = () => blocks.find(b => b.temp && !isAnchor(b)) || null;
+
+  // 메인 슬라이더가 미는 칸 = **마지막으로 사용자가 건드린 칸**(사용자 지정 2026-09-20).
+  //
+  // ⚠️ 임시 칸과 **다른 개념**이다. 임시는 '다음 격자 클릭에 갈릴 자리' 고, 초점은
+  //    '손잡이가 가리키는 자리' 다. 고정하면 임시는 끝나지만 초점은 그대로 남는다 -
+  //    고정 직후 가장 흔한 다음 생각이 "가중치 좀 더" 라서다.
+  let focusId = '';
+  const focusBlock = () => blocks.find(b => b.id === focusId && !isAnchor(b)) || null;
+
+  /** 초점을 옮기고 손잡이에 그 값을 씌운다.
+   *  ⚠️ `syncGroupWeights` 가 Slave 를 건드릴 때는 **부르지 않는다** - 사용자가 만진
+   *     것은 Master 하나뿐인데 초점이 마지막 Slave 로 튄다. */
+  function setFocus(block) {
+    if (!block || isAnchor(block)) return;
+    focusId = block.id;
+    paintFocus();
+    onFocusWeight(block.weight);
+  }
+
+  /** 초점 표시만 옮긴다. **다시 그리지 않는다** - `applyWeight` 가 초점을 옮기는데
+   *  거기서 `render()` 를 부르면 누르고 있던 +/- 단추와 편집 중인 칸이 사라진다
+   *  (`syncGroupWeights` 가 칸만 직접 고치는 것과 같은 이유다).
+   *  ⚠️ 이게 없으면 손잡이는 새 칸을 미는데 테두리는 옛 칸에 남는다(실측으로 잡았다). */
+  function paintFocus() {
+    for (const node of listEl.querySelectorAll('[data-mixq-id]')) {
+      node.classList.toggle('is-focus', node.dataset.mixqId === focusId);
+    }
+  }
 
   // ── 앵커 ──────────────────────────────────────────────────────────────
   //  앵커는 **같은 목록 안의 줄**이다. 블럭은 바로 위 앵커에 속한다 - 그래서 끌어서
@@ -158,12 +194,46 @@ export function createMixQueuePanel({
   }
 
   // ── 조립 ──────────────────────────────────────────────────────────────
-  function tokensOf(list) {
+  function liveOnes(list) {
     return list
       .filter(b => !isAnchor(b))
-      .filter(b => b.enabled && String(b.artist || '').trim())
+      .filter(b => b.enabled && String(b.artist || '').trim());
+  }
+
+  function tokensOf(list) {
+    return liveOnes(list)
       .map(b => formatToken(b.artist, b.weight, {withPrefix: b.withPrefix}))
       .filter(Boolean);
+  }
+
+  /** 가중치 동기화된 앵커의 몸통 - **같은 가중치끼리 묶어서** 낸다(사용자 지정 2026-09-20):
+   *  `1.2::artist:a, artist:b ::` (칸마다 `1.2::a ::, 1.2::b ::` 로 흩지 않는다).
+   *
+   *  ⚠️ 묶는 것은 **이어 붙은** 같은 값끼리다. 값으로만 모으면 순서가 바뀌는데,
+   *     프롬프트에서 순서는 뜻이 있다.
+   *  ⚠️ 그래서 사용자가 일부러 뒤쪽 칸 하나의 가중치를 바꾸면(동기화는 Master 를
+   *     움직일 때만 번진다 - `applyWeight`) 그 칸이 묶음을 가르고 혼자 선다.
+   *     사용자 지정 그대로다: "의도적으로 후행 블럭 가중치를 조절하는 것이 아니라면".
+   *  ⚠️ 꺼 둔 칸은 애초에 빠지므로 묶음을 가르지 않는다(글에 없는 것이다).
+   */
+  function syncedTokensOf(list) {
+    const out = [];
+    let run = [];
+    let runWeight = null;
+    const flush = () => {
+      if (!run.length) return;
+      const bodies = run
+        .map(b => formatToken(b.artist, 1, {withPrefix: b.withPrefix}))
+        .filter(Boolean);
+      if (bodies.length) out.push(formatGroupToken(bodies, runWeight));
+      run = [];
+    };
+    for (const block of liveOnes(list)) {
+      if (runWeight !== block.weight) { flush(); runWeight = block.weight; }
+      run.push(block);
+    }
+    flush();
+    return out.filter(Boolean);
   }
 
   /** 첫 앵커보다 **앞**에 있는 블럭들. 예전처럼 ARTIST PROMPT 칸으로 간다(사용자 지정).
@@ -179,7 +249,8 @@ export function createMixQueuePanel({
     const out = {};
     for (const row of anchorRows()) {
       if (row.broken) continue;
-      const text = tokensOf(membersOf(row)).join(', ');
+      const members = membersOf(row);
+      const text = (row.syncWeights ? syncedTokensOf(members) : tokensOf(members)).join(', ');
       if (text) out[row.anchorId] = out[row.anchorId]
         ? `${out[row.anchorId]}, ${text}` : text;
     }
@@ -227,6 +298,9 @@ export function createMixQueuePanel({
     const classes = ['mixq-block'];
     if (!b.enabled) classes.push('is-off');
     if (b.temp) classes.push('is-temp');
+    // 손잡이가 지금 무엇을 미는지 보이게 한다 - 안 보이면 슬라이더가 보이지 않는
+    // 칸을 조용히 민다(고정하면 [임시] 배지가 사라져 표시가 아예 없어졌다).
+    if (b.id === focusId) classes.push('is-focus');
     if (b.locked) classes.push('is-locked');
     const name = b.withPrefix ? `artist:${b.artist}` : b.artist;
     // 이름에 메인 프롬프트와 **같은** 분류색. 색인에 없는 이름은 색이 안 붙어
@@ -246,7 +320,10 @@ export function createMixQueuePanel({
                value="${escHtml(weightText(b.weight))}" aria-label="가중치">
         <button type="button" class="mixq-step" data-mixq-step="1" aria-label="가중치 올리기">+</button>
       </span>
-      ${b.temp ? '<span class="mixq-badge">임시</span>' : ''}
+      ${b.temp
+        ? '<button type="button" class="mixq-badge" data-mixq-pin'
+          + ' title="눌러서 이 자리에 고정 - 다음 격자 클릭에 안 갈립니다">임시</button>'
+        : ''}
     </div>`;
   }
 
@@ -278,8 +355,13 @@ export function createMixQueuePanel({
   }
 
   function applyWeight(block, value) {
+    const hadFocus = block.id === focusId;
     block.weight = value;
-    if (block.temp) onTempWeight(block.weight);
+    // 가중치를 만진 칸이 곧 '마지막으로 건드린 칸' 이다 - 손잡이가 이리로 온다.
+    // ⚠️ 이미 초점이면 `setFocus` 를 부르지 않는다. 그쪽은 손잡이에 값을 씌우는데,
+    //    지금 그 손잡이를 끌고 있는 중이면 끌던 손을 밀어낸다.
+    if (!hadFocus) setFocus(block);
+    else onFocusWeight(block.weight);
     const owner = ownerAnchor(block);
     // Master 를 움직였을 때만 번진다 - Slave 를 직접 만지는 것은 그 하나로 끝난다.
     if (owner?.syncWeights && membersOf(owner)[0] === block) syncGroupWeights(owner);
@@ -469,7 +551,7 @@ export function createMixQueuePanel({
       for (const b of blocks) if (b.temp) b.temp = false;
       const last = added[added.length - 1];
       last.temp = true;
-      onTempWeight(last.weight);
+      setFocus(last);
     }
     if (added.length) refresh();
     return added.length;
@@ -509,6 +591,15 @@ export function createMixQueuePanel({
     if (event.target.closest('[data-mixq-step], .mixq-weight')) return;
     const block = find(event.target.closest('[data-mixq-id]')?.dataset.mixqId || '');
     if (!block || isAnchor(block)) return;
+    // [임시] 배지 = **고정 단추**(사용자 지정 2026-09-20). 배지가 이미 '이건 임시다'
+    // 라고 말하고 있으니 누르는 것이 곧 '임시 해제' 로 읽힌다 - 새 자리를 안 만든다.
+    // ⚠️ 이 줄이 없으면 아래 켜고 끄기가 먼저 먹어 칸이 꺼진다.
+    if (event.target.closest('[data-mixq-pin]')) {
+      block.temp = false;
+      setFocus(block);
+      refresh();
+      return;
+    }
     block.enabled = !block.enabled;
     refresh();
   });
@@ -572,6 +663,7 @@ export function createMixQueuePanel({
     else if (action === 'remove') {
       if (block.locked) { showToast('이 블럭은 지울 수 없습니다.', 'error'); return; }
       blocks = blocks.filter(b => b.id !== block.id);
+      if (block.id === focusId) focusId = '';
     }
     refresh();
   });
@@ -667,6 +759,7 @@ export function createMixQueuePanel({
     // 손으로 자리를 옮긴 칸은 **내 것**이다 - 임시로 두면 다음 격자 클릭에 갈린다.
     const block = find(id);
     if (block?.temp) block.temp = false;
+    if (block) setFocus(block);
     refresh();          // 순서가 바뀌었으니 조립을 다시 낸다
   }
 
@@ -755,18 +848,36 @@ export function createMixQueuePanel({
       if (open) refresh();
       return !el.hidden;
     },
-    /** 격자에서 고른 작가 - 임시 블럭 한 자리를 차지하고 다음 선택에 갈린다. */
+    /** 격자에서 고른 작가 - 임시 블럭 한 자리를 차지하고 다음 선택에 갈린다.
+     *
+     *  ⚠️ **지금 임시인 그 작가를 또 누르면 고정된다**(사용자 지정 2026-09-20).
+     *     마우스가 이미 그 카드 위에 있어 이동 거리가 0이고, 그 제스처는 지금까지
+     *     비어 있었다(같은 값으로 덮어쓸 뿐이었다).
+     *     ⚠️ 이미 **고정된** 작가를 또 누르는 것은 다른 이야기다 - 그때는 임시가
+     *        없으므로 아래에서 새 칸이 하나 더 생긴다. 그것이 의도한 스펙이다
+     *        (같은 작가를 두 번 쌓는 길).
+     */
     setTempArtist(artist, image = '') {
       const name = String(artist || '').trim();
       const temp = tempBlock();
       if (!name) {
-        if (temp) blocks = blocks.filter(b => !b.temp);
+        if (temp) {
+          if (temp.id === focusId) focusId = '';
+          blocks = blocks.filter(b => !b.temp);
+        }
+        refresh();
+        return;
+      }
+      if (temp && temp.artist === name) {
+        temp.temp = false;
+        setFocus(temp);
         refresh();
         return;
       }
       if (temp) {
         temp.artist = name;
         temp.image = image;
+        setFocus(temp);
       } else {
         // collab 블럭은 늘 마지막이 **기본**이지만 사용자가 옮겼다면 그 자리를 지킨다.
         const at = blocks.findIndex(b => b.id === COLLAB_ID);
@@ -776,17 +887,23 @@ export function createMixQueuePanel({
         };
         if (at < 0) blocks.push(block);
         else blocks.splice(at, 0, block);
+        setFocus(block);
       }
       refresh();
     },
-    /** 임시 블럭의 가중치 - 리모컨의 슬라이더가 이걸 민다. */
-    setTempWeight(value) {
-      const temp = tempBlock();
-      if (!temp) return false;
-      // ⚠️ 메인에서 들어온 값이다 - `onTempWeight` 로 되돌려 부르지 않는다(서로 민다).
-      temp.weight = roundStep(value);
-      const input = listEl.querySelector(`[data-mixq-id="${CSS.escape(temp.id)}"] .mixq-weight`);
-      if (input) input.value = weightText(temp.weight);
+    /** 초점 칸(= 마지막으로 건드린 칸)의 가중치 - 리모컨의 슬라이더가 이걸 민다.
+     *  @returns {boolean} 밀 칸이 있었는가(없으면 부른 쪽이 옛 길로 간다) */
+    setFocusWeight(value) {
+      const block = focusBlock();
+      if (!block) return false;
+      // ⚠️ 메인에서 들어온 값이다 - `onFocusWeight` 로 되돌려 부르지 않는다(서로 민다).
+      block.weight = roundStep(value);
+      const input = listEl.querySelector(`[data-mixq-id="${CSS.escape(block.id)}"] .mixq-weight`);
+      if (input) input.value = weightText(block.weight);
+      // 동기화 그룹의 Master 를 밀었으면 여기서도 번져야 한다 - 손잡이로 민 것과
+      // 칸에서 민 것이 다른 결과를 내면 안 된다.
+      const owner = ownerAnchor(block);
+      if (owner?.syncWeights && membersOf(owner)[0] === block) syncGroupWeights(owner);
       emit();
       return true;
     },

@@ -29759,6 +29759,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-block.is-off { opacity: 0.42; }
 .mixq-block.is-temp { border-style: dashed; }
 .mixq-block.is-dragging { opacity: 0.5; cursor: grabbing; }
+/* 메인 슬라이더가 지금 미는 칸(= 마지막으로 건드린 칸, 사용자 지정 2026-09-20).
+   ⚠️ 표시가 없으면 손잡이가 **보이지 않는 칸**을 조용히 민다 - 고정하는 순간
+      [임시] 배지가 사라져 단서가 아예 없어진다. 임시(점선)·비활성(반투명)과
+      겹쳐도 읽히게 **테두리가 아닌 안쪽 선**으로 말한다. */
+.mixq-block.is-focus { box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* 앵커 = 칸 사이의 **얇은 세로 막대**(`□□|□|□□`, 사용자 지정). 칸과 다른 모양이라야
    '여기서부터 다른 자리' 가 한눈에 읽힌다 - 칸은 상자, 앵커는 막대. */
@@ -29810,12 +29815,21 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   min-width: 0; font-size: 9px; line-height: 1.2; text-align: center;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* 임시 칸 표시 - 세 상자를 밀어내지 않게 겹쳐 얹는다. */
+/* 임시 칸 표시 **겸 고정 단추**(사용자 지정 2026-09-20) - 세 상자를 밀어내지 않게
+   겹쳐 얹는다. 배지가 이미 '이건 임시다' 라고 말하고 있으니 누르는 것이 곧 '임시
+   해제' 로 읽힌다 - 새 단추 자리를 안 만든다.
+   ⚠️ 글자는 8px 이지만 **손이 닿는 넓이는 그보다 커야 한다** - 여백으로 과녁을
+      넓히고(세로 padding + 기울어진 모서리 대신 넉넉한 radius) 커서를 손가락으로
+      바꿔 눌리는 것임을 알린다. */
 .mixq-badge {
-  position: absolute; top: 4px; left: 4px; z-index: 1;
-  font-size: 8px; font-weight: 700; letter-spacing: .04em;
-  color: #0f1020; background: #ffe9a3; border-radius: 4px; padding: 0 3px;
+  position: absolute; top: 3px; left: 3px; z-index: 1;
+  border: 0; padding: 2px 5px; border-radius: 5px;
+  font-family: inherit; font-size: 8px; font-weight: 700; letter-spacing: .04em;
+  line-height: 1; color: #0f1020; background: #ffe9a3; cursor: pointer;
 }
+.mixq-badge:hover { background: #fff4cf; box-shadow: 0 0 0 1px rgba(255,255,255,0.5); }
+.mixq-badge:active { transform: translateY(1px); }
+.mixq-badge:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* 우클릭 메뉴 - 블럭이 좁아 단추를 더 못 놓는다(사용자 지정). */
 .mixq-menu {

@@ -183,6 +183,10 @@ export function createArtistSearchPanel({
   let suggSeq = 0;
   let suggTimer = null;
   let suggRows = [];
+  // 방향키로 고른 줄. -1 = 아무것도 안 골랐다.
+  // ⚠️ **첫 줄을 미리 고르지 않는다.** 그러면 Enter 가 사용자가 안 고른 것을 꽂는다
+  //    (메인 프롬프트에서 `pig` 가 `pigeon-toed` 로 바뀐 그 자리다 - 사용자 제보).
+  let suggActive = -1;
 
   const kindLabel = value => (KINDS.find(([v]) => v === value) || [, value])[1];
   const kindHint = value => (KINDS.find(([v]) => v === value) || [, , ''])[2];
@@ -399,15 +403,38 @@ export function createArtistSearchPanel({
     suggEl.hidden = true;
     suggEl.innerHTML = '';
     suggRows = [];
+    suggActive = -1;
   }
 
   function paintSugg() {
     if (!suggRows.length) { closeSugg(); return; }
+    // 목록이 새로 오면 고른 줄은 푼다 - 단, **정확히 친 것**이 목록에 있으면 그것만
+    // 미리 고른다(그 Enter 는 어차피 그 낱말로 갈 것이라 놀랄 일이 없다).
+    const typed = inputEl.value.trim().toLowerCase();
+    suggActive = suggRows.findIndex(row => String(row.tag).toLowerCase() === typed);
     // 오른쪽 숫자는 **그 태그가 달린 게시물 수**다(사용자 지정). 축은 고른 갈래라
     // 여기 다시 적지 않는다 - 좁은 칸에서는 숫자가 훨씬 쓸모 있다.
     suggEl.innerHTML = suggRows.map((row, i) => `
-      <button type="button" data-asx-sugg="${i}"><span>${escHtml(row.tag)}</span><em>${fmt(row.posts)}</em></button>`).join('');
+      <button type="button" data-asx-sugg="${i}"${i === suggActive ? ' class="is-on"' : ''}><span>${escHtml(row.tag)}</span><em>${fmt(row.posts)}</em></button>`).join('');
     suggEl.hidden = false;
+  }
+
+  /** 고른 줄에만 표시를 옮긴다. innerHTML 을 다시 쓰지 않는다 - 다시 쓰면 스크롤이
+   *  맨 위로 튀어 방금 고른 줄이 화면 밖으로 나간다. */
+  function paintSuggActive() {
+    const nodes = suggEl.querySelectorAll('[data-asx-sugg]');
+    nodes.forEach((node, i) => node.classList.toggle('is-on', i === suggActive));
+    if (suggActive >= 0) nodes[suggActive]?.scrollIntoView({block: 'nearest'});
+  }
+
+  /** 방향키. 끝에서 한 번 더 누르면 **아무것도 안 고른 상태**를 거쳐 반대편으로 간다
+   *  - 친 글자 그대로 보내고 싶을 때 돌아올 자리가 있어야 한다. */
+  function moveSugg(delta) {
+    const n = suggRows.length;
+    if (!n) return;
+    const next = suggActive + delta;
+    suggActive = next < -1 ? n - 1 : next >= n ? -1 : next;
+    paintSuggActive();
   }
 
   function scheduleSuggest() {
@@ -489,15 +516,34 @@ export function createArtistSearchPanel({
     inputEl.focus();
   });
 
+  /** 지금 고른 줄을 칸에 앉힌다. 고른 것이 없으면 아무것도 안 한다.
+   *  @returns {boolean} 앉혔는가 */
+  function takeSugg() {
+    if (suggEl.hidden) return false;
+    // 하나뿐이면 고른 것으로 친다(예전부터 그랬다 - 고를 여지가 없다).
+    const at = suggActive >= 0 ? suggActive : (suggRows.length === 1 ? 0 : -1);
+    const row = suggRows[at];
+    if (!row) return false;
+    inputEl.value = row.tag;
+    closeSugg();
+    return true;
+  }
+
   inputEl.addEventListener('input', scheduleSuggest);
   inputEl.addEventListener('keydown', event => {
+    // ⚠️ 한글 조합 중의 Enter 는 **글자를 확정하는 Enter** 다 - 여기서 가로채면
+    //    조합이 끊긴다. 태그는 영문이지만 칸은 아무 글자나 받는다.
+    if (event.isComposing || event.keyCode === 229) return;
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !suggEl.hidden) {
+      event.preventDefault();
+      moveSugg(event.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
-      // 목록이 떠 있고 딱 하나면 그것을 고른 것으로 친다.
-      if (!suggEl.hidden && suggRows.length === 1) {
-        inputEl.value = suggRows[0].tag;
-        closeSugg();
-      }
+      // 목록에서 고른 것이 있으면 **그것을** 넣고 바로 검색한다(사용자 제보
+      // 2026-09-20: 고를 길이 마우스뿐이라 Enter 로 빨리 못 찾았다).
+      takeSugg();
       void addDepth();
       return;
     }

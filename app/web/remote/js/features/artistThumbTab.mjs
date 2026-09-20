@@ -1334,6 +1334,10 @@ export function createArtistThumbController({
     const favoriteLabel = item.favorite ? '관심 해제' : '관심 추가';
     const banMenuLabel = item.banned ? '제외 해제' : '제외 추가';
     const queued = hasQueuedArtist(item.artist);
+    // ⚠️ **리모컨에는 '고정' 이 없다**(사용자 제보 2026-09-20). 고정 생성은 Artist
+    //    Prompt 칸·[Generate] 로 사용자가 짜 둔 프롬프트를 쓰는데, 리모컨으로 옮겨
+    //    가는 조각은 `randomGenerateBtn` 뿐이다(`remoteRows()`). 그래서 리모컨에서
+    //    고정을 예약하면 **보이지 않는 칸의 값**으로 돌아간다 - 아예 안 내민다.
     const queueGroupHtml = queued
       ? `
         <button type="button" class="result-context-item artist-thumb-queue-cancel" data-action="queue-cancel" role="menuitem">
@@ -1341,9 +1345,10 @@ export function createArtistThumbController({
         </button>
       `
       : `
+        ${remoteOnboarded ? '' : `
         <button type="button" class="result-context-item artist-thumb-queue-fixed" data-action="queue-fixed" role="menuitem">
           <span>생성 예약 (고정)</span>
-        </button>
+        </button>`}
         <button type="button" class="result-context-item artist-thumb-queue-random" data-action="queue-random" role="menuitem">
           <span>생성 예약 (랜덤)</span>
         </button>
@@ -3089,7 +3094,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const mod = await import('./artistSearchPanel.mjs?v=20260919-onerow');
+    const mod = await import('./artistSearchPanel.mjs?v=20260920-keys');
     searchPct = mod.pctText;
     searchPanel = mod.createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,

@@ -29617,9 +29617,16 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 .asx-input:focus { border-color: var(--accent); }
 
-/* 자동완성 - 칸 바로 아래에 떠는 작은 목록. 판 안에서도 위에 서게 한층 올린다. */
+/* 자동완성 - 칸 바로 아래에 떠는 작은 목록. 판 안에서도 위에 서게 한층 올린다.
+   ⚠️ **격자의 배지와 같은 쌓임 맥락**이다(실측 2026-09-20: 둘의 가장 가까운 쌓임
+      맥락이 똑같이 `.dragpanel.rctl` - `position:fixed; z-index:10150`). 그래서
+      z-index 2 로는 카드 위의 배지(`.artist-thumb-*-mark`·`-check` = 3)에게 지고,
+      목록 글자 위로 노란 `1,928 100%` 같은 것이 비쳐 읽을 수가 없었다(사용자 제보).
+      배지가 `pointer-events: none` 이라 `elementFromPoint` 로는 안 잡힌다 -
+      **누가 위에 그려지는가**는 z-index 로 따져야 한다.
+      이 판 안에서 가장 높은 것이 `.artist-thumb-batch-menu`(40)다 - 그 위로 올린다. */
 .asx-sugg {
-  position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 2;
+  position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 45;
   max-height: 168px; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column;
   border: 1px solid var(--accent); border-radius: 6px; background: #12141d;
@@ -29632,6 +29639,12 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   color: var(--text-primary); font-size: 10px; line-height: 1.6;
 }
 .asx-sugg button:hover { background: rgba(255, 255, 255, 0.09); }
+/* 방향키로 고른 줄. 마우스가 얹힌 줄보다 진하다 - Enter 가 무엇을 가져갈지가
+   한눈에 보여야 한다(안 보이면 다시 마우스를 잡게 된다). */
+.asx-sugg button.is-on {
+  background: rgba(157, 139, 255, 0.26);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 /* 이름이 길면 줄이고, 숫자는 **절대 안 줄인다** - 고르는 근거가 그 숫자다. */
 .asx-sugg button > span {
   flex: 1 1 auto; min-width: 0; overflow: hidden;

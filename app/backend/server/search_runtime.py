@@ -190,8 +190,51 @@ def merge_base_frame(context: WebSessionContext):
     return search_base_frame(context)
 
 
-def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
+def pool_provenance(context: WebSessionContext) -> Any:
+    """지금 풀(snapshot)이 어떻게 만들어졌나 - 저장할 때 명함 recipe 의 뿌리가 된다."""
+    return getattr(context, "search_pool_provenance", None)
+
+
+def _set_pool_provenance(context: WebSessionContext, recipe: Any, *, base: bool = False) -> None:
+    """풀을 바꾸는 모든 자리에서 부른다. base=True 면 복원 기준(master_base)의 출처도 같이.
+
+    ⚠️ 풀을 바꾸는 자리(mark_search_pool_replaced 호출처)마다 빠짐없이 걸어야 한다 - 하나라도
+    빠지면 명함이 거짓말을 한다(tests/test_custom_parquet_provenance.py 가 진입점을 전수한다)."""
+    context.search_pool_provenance = recipe
+    if base:
+        context.search_pool_base_provenance = recipe
+
+
+def _search_recipe(context: WebSessionContext, query: str, exclude: str, ratings, bucket_range) -> dict[str, Any]:
+    recipe: dict[str, Any] = {
+        "source": "search",
+        "query": str(query or ""),
+        "exclude": str(exclude or ""),
+        "ratings": sorted(ratings or []),
+    }
+    if bucket_range is not None:
+        s, e = bucket_range
+        recipe["bucket"] = [int(s), int(e)]
+        try:
+            from core.tag_bucket_dates import load_bucket_dates
+
+            buckets = load_bucket_dates(context).get("buckets") or []
+            if 0 <= s < len(buckets) and 0 <= e < len(buckets):
+                recipe["period"] = f"{buckets[s].get('start_ym')}~{buckets[e].get('end_ym')}"
+        except Exception:
+            pass
+    return recipe
+
+
+def _last_search_meta(context: WebSessionContext, frame) -> dict[str, Any]:
+    from core.custom_parquet_library import make_meta
+
+    return make_meta("last_search", pool_provenance(context), len(frame))
+
+
+def install_custom_parquet_frame(context: WebSessionContext, frame, provenance: Any = None) -> None:
     with search_pool_state_guard(context):
+        _set_pool_provenance(context, provenance, base=True)
         context.search_results.set_dataframe(frame)
         context.search_results_snapshot = context.search_results.get_dataframe().copy()
         context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
@@ -216,7 +259,7 @@ def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
         runner_path = None if _should_skip_auto_runner_save(context) else context.runner_parquet_path()
         last_path = context.last_search_parquet_path()
     if pool_frame is not None and not getattr(pool_frame, "empty", True):
-        search_pool_writer(context).submit(last_path, pool_frame, runner_path)
+        search_pool_writer(context).submit(last_path, pool_frame, runner_path, meta=_last_search_meta(context, pool_frame))
 
 
 def filter_source_frame(
@@ -537,10 +580,12 @@ def run_search_command(
     archive_sources = tag_archive_parquet_sources(context)
     if archive_sources:
         # Date-cutoff slider: scan only buckets [start..end] (fewer files = faster).
+        bucket_range = None
         if bucket_start is not None or bucket_end is not None:
             from core.tag_bucket_dates import clamp_bucket_range
             s, e = clamp_bucket_range(bucket_start, bucket_end, len(archive_sources))
             archive_sources = archive_sources[s:e + 1]
+            bucket_range = (s, e)
         searched = search_tag_archive_frame(
             archive_sources,
             query=query,
@@ -555,6 +600,7 @@ def run_search_command(
             context.search_results_master_base_snapshot = searched.copy()
             context.search_results_scope = TAG_ARCHIVE_SCOPE
             mark_search_pool_replaced(context)
+            _set_pool_provenance(context, _search_recipe(context, query, exclude, ratings, bucket_range), base=True)
             _reset_active_tag_filter_assignment(context)
             context.save_search_filter_state(tag_filter_active=False)
             context.remote_active_ratings = set("gsqe")
@@ -568,6 +614,10 @@ def run_search_command(
     with search_pool_state_guard(context):
         context.search_results_snapshot = searched.copy() if searched is not None else None
         mark_search_pool_replaced(context)
+        # 아카이브가 없을 때: 불러온 셋 안에서 검색한 것 - 부모(복원 기준)를 품는다.
+        recipe = _search_recipe(context, query, exclude, ratings, None)
+        recipe["parent"] = getattr(context, "search_pool_base_provenance", None)
+        _set_pool_provenance(context, recipe)
         _reset_active_tag_filter_assignment(context)
         context.save_search_filter_state(tag_filter_active=False)
         context.remote_active_ratings = set("gsqe")
@@ -581,6 +631,7 @@ def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
         with search_pool_state_guard(context):
             context.search_results_snapshot = base.copy()
             mark_search_pool_replaced(context)
+            _set_pool_provenance(context, getattr(context, "search_pool_base_provenance", None))
             _reset_active_tag_filter_assignment(context)
             context.save_search_filter_state(tag_filter_active=False)
             context.search_results.set_dataframe(base.copy())
@@ -1011,16 +1062,20 @@ def load_or_merge_custom_parquet(
 
     # Chunked read + progress broadcast so a large custom parquet load/merge shows
     # the Tag/Tag-Filter lock + '풀 로딩 N%' (the frontend also locks on click).
+    from core.custom_parquet_library import file_recipe, merge_recipe
+
     progress, done = make_search_load_progress(context)
     try:
         frame = read_parquet_chunked(path, progress=progress)
         frame = normalize_custom_parquet_frame(frame)
+        provenance = file_recipe(path)
         if merge:
             current = merge_base_frame(context)
             if current is not None and not current.empty:
                 frame = pd.concat([current, frame], ignore_index=True)
                 frame = normalize_custom_parquet_frame(frame)
-        install_custom_parquet_frame(context, frame)
+                provenance = merge_recipe(pool_provenance(context), provenance)
+        install_custom_parquet_frame(context, frame, provenance=provenance)
     finally:
         done()
     # runner 는 install 이 백그라운드로 복사한다 - 여기서 다시 쓰면 응답 전에 풀 전체를 또 쓴다.
@@ -1030,20 +1085,74 @@ def load_or_merge_custom_parquet(
     return state, {"type": "toast", "message": f"{path.name} {verb} ({len(frame):,})", "level": "success"}
 
 
+def export_condition_frame(context: WebSessionContext):
+    """'조건에 맞는 행 전체' = snapshot × 활성 등급 × 활성 태그필터 (사용자 결정 D2).
+
+    ⚠️ `search_results.get_dataframe()` 이 아니다 - 그건 Random 이 뽑아 쓴 행이 빠진 남은 풀이라
+    저장할 때마다 내용이 줄어든다. 반환: (frame, recipe)."""
+    with search_pool_state_guard(context):
+        source = getattr(context, "search_results_snapshot", None)
+        if source is None or getattr(source, "empty", True):
+            source = search_base_frame(context)
+        ratings = context.get_active_ratings()
+        tag_ids = getattr(context, "active_tag_filter_ids", None)
+        active = getattr(context, "active_tag_filter", None) or {}
+        parent = pool_provenance(context)
+    frame = filter_source_frame(source, ratings=ratings, tag_ids=tag_ids)
+    recipe: dict[str, Any] = {"source": "export", "parent": parent, "ratings": sorted(ratings or [])}
+    tags = [str(t) for t in (active.get("tags") or [])] if tag_ids is not None else []
+    if tags:
+        recipe["tag_filter"] = {
+            "include": [t for t in tags if not t.startswith("-")],
+            "exclude": [t[1:] for t in tags if t.startswith("-")],
+        }
+    return frame, recipe
+
+
+def _library_toast(message: str, level: str = "success") -> dict[str, Any]:
+    return {"type": "toast", "message": message, "level": level}
+
+
+_LIBRARY_ERRORS = {
+    "invalid_source": "잘못된 파일 이름입니다",
+    "invalid_name": "쓸 수 없는 이름입니다",
+    "not_found": "파일을 찾을 수 없습니다",
+    "exists": "같은 이름의 파일이 이미 있습니다",
+}
+
+
 def search_parquet_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    from core import custom_parquet_library as lib
+
+    action = str(command.get("action") or "").strip()
+    directory = context.custom_parquet_dir()
+    if action == "rename":
+        ok, info = lib.rename(directory, str(command.get("filename") or ""), str(command.get("new_name") or ""))
+        if not ok:
+            return context.search_state_payload(), _library_toast(_LIBRARY_ERRORS.get(info, info), "error")
+        return context.search_state_payload(), _library_toast(f"이름을 바꿨습니다 → {info}")
+    if action == "trash":
+        ok, info = lib.trash(directory, str(command.get("filename") or ""))
+        if not ok:
+            return context.search_state_payload(), _library_toast(_LIBRARY_ERRORS.get(info, info), "error")
+        return context.search_state_payload(), _library_toast(f"휴지통으로 옮겼습니다 ({lib.TRASH_DIR}/{info})")
+    if action == "export_results":
+        frame, recipe = export_condition_frame(context)
+        if frame is None or frame.empty:
+            return context.search_state_payload(), _library_toast("저장할 행이 없습니다", "error")
+        requested = str(command.get("filename") or "").strip()
+        path = next_custom_parquet_path(context, requested, fallback_prefix="search_export")
+        # 이름을 직접 적었는데 이미 있으면 덮어쓰지 않는다(예전엔 조용히 덮었다).
+        if requested and path.exists():
+            return context.search_state_payload(), _library_toast(_LIBRARY_ERRORS["exists"], "error")
+        lib.write_parquet(frame, path, lib.make_meta(recipe.get("source", "export"), recipe, len(frame)))
+        return context.search_state_payload(), _library_toast(f"저장했습니다 {path.name} ({len(frame):,}행)")
     frame = context.search_results.get_dataframe() if context.search_results else None
     if frame is None or frame.empty:
         return context.search_state_payload(), {"type": "toast", "message": "No search results to save", "level": "error"}
-    action = str(command.get("action") or "").strip()
-    if action == "export_results":
-        path = next_custom_parquet_path(context, str(command.get("filename") or ""), fallback_prefix="search_export")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(path, index=False)
-        message = f"Exported {path.name} ({len(frame):,})"
-    elif action == "save_runner":
+    if action == "save_runner":
         path = context.runner_parquet_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(path, index=False)
+        search_pool_writer(context).write_now(path, frame, kind="runner")
         message = f"Saved runner parquet ({len(frame):,})"
     else:
         return context.search_state_payload(), {"type": "toast", "message": "Unsupported parquet action", "level": "error"}

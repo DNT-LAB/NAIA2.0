@@ -23,11 +23,12 @@ from typing import Any
 _CREATE_GUARD = threading.Lock()
 
 
-def _atomic_to_parquet(frame: Any, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    frame.to_parquet(tmp, index=False)
-    os.replace(tmp, path)
+def _atomic_to_parquet(frame: Any, path: Path, meta: dict[str, Any] | None = None) -> None:
+    # 명함(core/custom_parquet_library.py)과 함께 원자적으로 쓴다 - last-search 가 제 출처를
+    # 들고 있어야 재시작 뒤에도 "지금 풀이 어디서 왔나" 가 남는다.
+    from core.custom_parquet_library import write_parquet
+
+    write_parquet(frame, Path(path), meta)
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:
@@ -47,10 +48,13 @@ class SearchPoolWriter:
         self.last_error: str | None = None
 
     # ---- 백그라운드 -------------------------------------------------------
-    def submit(self, last_path: Path, frame: Any, runner_path: Path | None = None) -> None:
+    def submit(self, last_path: Path, frame: Any, runner_path: Path | None = None, *, meta: dict | None = None) -> None:
         """last-search 를 쓰고, runner_path 가 있으면 같은 파일을 복사한다."""
         with self._cond:
-            self._job = {"last": (Path(last_path), frame), "runner_copy": Path(runner_path) if runner_path else None}
+            self._job = {
+                "last": (Path(last_path), frame, meta),
+                "runner_copy": Path(runner_path) if runner_path else None,
+            }
             if self._thread is None or not self._thread.is_alive():
                 self._thread = threading.Thread(target=self._run, name="naia-search-pool-writer", daemon=True)
                 self._thread.start()
@@ -67,7 +71,7 @@ class SearchPoolWriter:
                 with self._file_lock:
                     last = job.get("last")
                     if last is not None:
-                        _atomic_to_parquet(last[1], last[0])
+                        _atomic_to_parquet(last[1], last[0], last[2])
                         runner = job.get("runner_copy")
                         if runner is not None:
                             _atomic_copy(last[0], runner)
@@ -86,7 +90,7 @@ class SearchPoolWriter:
             return self._cond.wait_for(lambda: self._job is None and not self._busy, timeout)
 
     # ---- 동기 --------------------------------------------------------------
-    def write_now(self, path: Path, frame: Any, *, kind: str) -> None:
+    def write_now(self, path: Path, frame: Any, *, kind: str, meta: dict | None = None) -> None:
         """동기 기록. kind='last' 면 대기 중인 작업 전체를, 'runner' 면 runner 복사만 취소한다.
 
         last 를 새로 쓰면 대기 중인 runner 복사도 버린다 - 복사 원본(last 파일)이 이미 다른
@@ -98,7 +102,7 @@ class SearchPoolWriter:
                 elif kind == "runner":
                     self._job["runner_copy"] = None
         with self._file_lock:
-            _atomic_to_parquet(frame, Path(path))
+            _atomic_to_parquet(frame, Path(path), meta)
 
 
 def search_pool_writer(context: Any) -> SearchPoolWriter:

@@ -291,7 +291,11 @@ class HeadlessSearchStateService:
             # atomic write(Codex): temp 에 쓰고 os.replace 로 교체 — 대형 프레임/동시 재시작 시
             # 부분쓰기 손상을 막는다. 백그라운드 writer 와 같은 파일 락을 쓰고, 대기 중인 더 오래된
             # 백그라운드 기록을 취소한다(core/search_pool_writer.py).
-            search_pool_writer(context).write_now(path, frame, kind="last")
+            from core.custom_parquet_library import make_meta
+
+            # 명함 = 지금 풀의 출처. 재시작 뒤 restore_last_search 가 되살린다.
+            meta = make_meta("last_search", getattr(context, "search_pool_provenance", None), len(frame))
+            search_pool_writer(context).write_now(path, frame, kind="last", meta=meta)
             return path
         except Exception as exc:
             print(f"Headless Remote: last-search persist failed - {exc}", flush=True)
@@ -332,6 +336,12 @@ class HeadlessSearchStateService:
                 # 수정). 현재 정보용이며 green 검색은 스코프와 무관하게 아카이브를 재스캔한다. 상수는
                 # app.backend 계층이라 core 에서 import 하지 않고 리터럴을 쓴다.
                 context.search_results_scope = "custom_parquet"
+                # 출처를 되살린다 - 없으면(명함 이전 파일) None = "조건 기록 없음".
+                from core.custom_parquet_library import read_meta
+
+                recipe = (read_meta(path) or {}).get("recipe")
+                context.search_pool_provenance = recipe
+                context.search_pool_base_provenance = recipe
                 marker = getattr(context, "mark_search_pool_replaced", None)
                 if callable(marker):
                     marker()
@@ -411,6 +421,15 @@ class HeadlessSearchStateService:
         if not custom_dir.exists():
             return []
         return sorted(path.name for path in custom_dir.glob("*.parquet") if path.is_file())
+
+    def custom_parquet_library(self) -> list[dict[str, Any]]:
+        try:
+            from core.custom_parquet_library import list_library
+
+            return list_library(self.custom_parquet_dir())
+        except Exception as exc:
+            print(f"Headless Remote: parquet library listing failed - {exc}", flush=True)
+            return []
 
     # ---- 저장된 Tag Filter 프리셋 (backend 영속·기기 공유, 태그만: include/exclude) ----
     def filter_presets_path(self) -> Path:
@@ -540,4 +559,8 @@ class HeadlessSearchStateService:
             "filter_preferences": filter_preferences,
             "filter_presets": self.get_filter_presets(),
             "parquets": self.custom_parquet_names(),
+            # 카드 목록: 행 수 + 명함(만든 조건). 파일 꼬리만 읽고 (이름·mtime·크기)로 캐시한다.
+            "parquet_library": self.custom_parquet_library(),
+            # 지금 풀의 출처 - 프론트가 "이 결과 저장" 전에 무엇이 저장될지 보여 준다.
+            "pool_provenance": getattr(self.context, "search_pool_provenance", None),
         }

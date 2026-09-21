@@ -46,6 +46,48 @@ def _normalize_row_id_set(values) -> set:
     return out
 
 
+def _consolidate_arrow_chunks(frame: pd.DataFrame) -> pd.DataFrame:
+    """arrow 기반 열의 청크를 하나로 합친 얕은 사본. 버킷 분할 전에만 쓴다.
+
+    버킷 분할은 버킷마다 `frame.loc[mask]` = 열마다 pyarrow take 다. 청크 불러오기(10만 행
+    배치)·concat 으로 만든 풀은 열마다 청크가 수십 개라 take 가 느렸다(1.3M 행 · 20 버킷 1.6s).
+    청크를 먼저 합치면 0.7s, 결과 동일(실측).
+
+    ⚠️ 합친 복사본은 **시스템 메모리 풀**에 둔다 - 분할이 끝나면 버려지는 임시본인데, 기본
+       풀(mimalloc)은 해제한 메모리를 OS 에 돌려주지 않는다.
+    ⚠️ pandas 내부(`_pa_array`)를 쓴다 - 모양이 다르거나 dtype 이 보존되지 않으면 그 열은
+       건드리지 않는다(느릴 뿐 결과는 같다)."""
+    if frame is None or frame.empty or not frame.columns.is_unique:
+        return frame
+    try:
+        import pyarrow as pa
+    except Exception:
+        return frame
+    replaced = {}
+    for name in frame.columns:
+        try:
+            arr = frame[name].array
+            chunked = getattr(arr, "_pa_array", None)
+            if not isinstance(chunked, pa.ChunkedArray) or chunked.num_chunks <= 1:
+                continue
+            combined = pa.chunked_array([chunked.combine_chunks(memory_pool=pa.system_memory_pool())])
+            try:
+                new_arr = type(arr)(combined, dtype=arr.dtype)
+            except TypeError:
+                new_arr = type(arr)(combined)
+            if new_arr.dtype != arr.dtype or len(new_arr) != len(arr):
+                continue
+            replaced[name] = new_arr
+        except Exception:
+            continue
+    if not replaced:
+        return frame
+    out = frame.copy(deep=False)
+    for name, new_arr in replaced.items():
+        out[name] = pd.Series(new_arr, index=out.index, name=name)
+    return out
+
+
 @dataclass
 class _SearchResultBucket:
     bucket_id: int
@@ -407,6 +449,7 @@ class SearchResultModel:
             yield first_bucket, frame
             return
 
+        frame = _consolidate_arrow_chunks(frame)
         bucket_series = pd.Series(bucket_ids, index=frame.index)
         for bucket_id in pd.unique(bucket_ids):
             chunk = frame.loc[bucket_series == bucket_id].reset_index(drop=True)

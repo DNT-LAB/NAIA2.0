@@ -83,6 +83,7 @@ export function createMixQueuePanel({
   // 칸마다 **한 번의 쓰기**로 끝낸다 - 지우고 다시 읽으면 옛 글이 나온다(아래 주석).
   //   (rows: [{id, slot}]) => void
   placeAnchors = () => {},
+  restoreText = () => {},
   // ── 앵커 ──
   // 표식이 아직 prefix/postfix 에 살아 있는가. 큐는 글을 안 갖고 있어 물어본다.
   hasAnchorIn = () => true,
@@ -310,19 +311,23 @@ export function createMixQueuePanel({
   }
 
   /** 저장 모양 -> 띠. 표식은 **새로 발급**해 각 칸의 **앞**에 넣는다(사용자 지정). */
-  async function restoreMix(saved, name = '') {
+  async function restoreMix(saved, name = '', {text = false} = {}) {
     const rows = Array.isArray(saved) ? saved : (saved?.blocks || []);
     if (!rows.length) return false;
     // ⚠️ 표식은 **`placeAnchors` 한 번**으로 끝낸다(실측 2026-09-20).
     //    예전에는 "지우고 -> 하나씩 넣기" 였는데, `setPeField` 가 서버를 거치는
     //    비동기라 **쓰고 바로 읽으면 옛 글**이 나온다. 그래서 새 표식이 "이미 있다"
     //    로 판정돼 옛 자리에 눌러앉고, 지운 것까지 되살아났다.
+    const reserved = text ? rows.filter(r => r?.kind === 'anchor' && /^[A-Za-z0-9_-]{1,32}$/.test(r.id || ''))
+      .map(r => String(r.id)) : [];
     const used = [];
     const next = [];
     let hasCollab = false;
     for (const raw of rows) {
       if (raw?.kind === 'anchor') {
-        const id = nextAnchorId(used);
+        const savedId = String(raw.id || '');
+        const id = text && reserved.includes(savedId) && !used.includes(savedId)
+          ? savedId : nextAnchorId([...used, ...reserved]);
         used.push(id);
         const row = anchorBlock(id);
         row.slot = raw.slot === 'post' ? 'post' : 'pre';
@@ -355,8 +360,9 @@ export function createMixQueuePanel({
     mixName = String(name || '');
     refresh();
     paintBar();
-    placeAnchors(next.filter(isAnchor).map(row => ({id: row.anchorId, slot: row.slot})));
-    if (refreshAnchorHealth()) refresh();
+    if (text) restoreText(saved?.text || {}, next.filter(isAnchor).map(row => ({id: row.anchorId, slot: row.slot})));
+    else placeAnchors(next.filter(isAnchor).map(row => ({id: row.anchorId, slot: row.slot})));
+    // 글 쓰기는 서버를 거친다. 되돌아온 상태의 recheckAnchors()에서만 건강을 다시 잰다.
     await fillImages(saved);
     return true;
   }

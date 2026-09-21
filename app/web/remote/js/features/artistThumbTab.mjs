@@ -2933,6 +2933,27 @@ export function createArtistThumbController({
     if (opened) void togglePeField(opened, {openOnly: true});
   }
 
+  /** 저장 글을 통째로 복원한다. 표식이 정상이라면 원문의 공백·위치까지 그대로 쓴다. */
+  function restoreText(text, anchorIds) {
+    if (!anchorsApi || typeof setPeField !== 'function') return;
+    const wanted = (anchorIds || []).filter(row => row?.id);
+    const stamp = getPePreset?.() ?? ''; // 상세 화면을 연 때가 아니라 적용하는 순간의 프리셋
+    for (const key of PE_ANCHOR_FIELDS) {
+      const slot = key === 'post_prompt' ? 'post' : 'pre';
+      let value = String(text?.[slot] ?? '');
+      const mine = wanted.filter(row => (row.slot === 'post' ? 'post' : 'pre') === slot);
+      const paired = new Set(mine.map(row => String(row.id)));
+      for (const id of new Set(anchorsApi.findAnchorIds(value))) {
+        if (!paired.has(id)) value = anchorsApi.removeAnchor(value, id);
+      }
+      for (const row of [...mine].reverse()) {
+        if (!anchorsApi.hasAnchorId(value, row.id)) value = anchorsApi.prependAnchor(value, row.id);
+      }
+      setPeField(key, value, stamp);
+    }
+    peQuick?.sync();
+  }
+
   /** 이 표식이 지금 **어느 칸**에 있나. 조합을 저장할 때 그 자리를 적는다. */
   function anchorSlotOf(id) {
     if (!anchorsApi) return 'pre';
@@ -2957,7 +2978,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s1');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s2');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2993,6 +3014,7 @@ export function createArtistThumbController({
       },
       anchorSlot: anchorSlotOf,
       placeAnchors: rows => placeAnchors(rows),
+      restoreText: (text, anchorIds) => restoreText(text, anchorIds),
       // 그림은 **이름으로 다시 받는다** - 주소는 지금 모드에 딸린 값이라 저장하지 않는다.
       describeArtists: names => describeArtists(names),
       // 조합 저장소. 프리셋이 아니라 자기 파일에 산다(`artist_mixes.json`).

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+import os
 import re
 import threading
 import time
@@ -41,6 +43,18 @@ _POOL_LOADING_THRESHOLD = 200_000
 # to one batch of (per-column str + cat + lower) instead of holding the whole
 # pool's columns materialized at once, and yields a progress heartbeat per batch.
 _TAGS_TEXT_BATCH = 100_000
+
+# Tag Filter 색인 빌드·칩 매칭 스레드 수. pyarrow 가 GIL 을 풀어 배치 병렬이 실제로 먹힌다.
+_TAG_FILTER_WORKERS = max(1, min(8, (os.cpu_count() or 2) // 2))
+_TAG_FILTER_POOL: ThreadPoolExecutor | None = None
+_TAG_FILTER_POOL_GUARD = threading.Lock()
+
+# 파이썬 re 의 `\s`(str) 와 같은 문자 집합을 RE2 로 쓴 것 = str.isspace() 가 참인 문자 전부.
+# RE2 의 `\s` 는 [\t\n\f\r ] 뿐이라 NBSP(\xa0)·전각 공백(　) 등을 못 먹는다.
+_RE2_PY_WS = (
+    r"[\t\n\x{0b}\f\r\x{1c}-\x{1f} \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}"
+    r"\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]"
+)
 
 
 def search_pool_state_guard(context: WebSessionContext):
@@ -680,31 +694,90 @@ def _tag_filter_cache(context: WebSessionContext, snapshot) -> dict:
 # methods directly (tag_filter_search gating + build/match heartbeats).
 
 
+def _tag_filter_executor() -> ThreadPoolExecutor:
+    """Tag Filter 색인 빌드·칩 매칭용 공유 스레드 풀(프로세스 하나).
+
+    pyarrow compute 는 GIL 을 풀기 때문에 행 배치를 스레드로 나누면 실제로 병렬이 된다.
+    실측(1.3M 행, 16코어, 8스레드): 빌드 4.77s→1.34s, 칩 12개 매칭 12.67s→1.01s, 결과 동일."""
+    global _TAG_FILTER_POOL
+    if _TAG_FILTER_POOL is None:
+        with _TAG_FILTER_POOL_GUARD:
+            if _TAG_FILTER_POOL is None:
+                _TAG_FILTER_POOL = ThreadPoolExecutor(
+                    max_workers=_TAG_FILTER_WORKERS, thread_name_prefix="naia-tagfilter"
+                )
+    return _TAG_FILTER_POOL
+
+
+def _tag_filter_memory_pool():
+    """Tag Filter 연산 전용 = 시스템 메모리 풀(해제 즉시 OS 반환). 이유는 _build_tags_text 참조."""
+    import pyarrow as pa
+
+    return pa.system_memory_pool()
+
+
 def _build_tags_text(frame, tag_columns: list[str], heartbeat=None):
-    """Build the per-row lowercased tag-text index in row-batches so the transient
-    peak is one batch of (per-column str + str.cat + str.lower) rather than the
-    whole pool's columns materialized at once. Result is identical to the single
-    pass ``parts[0].str.cat(parts[1:], sep=',').str.lower()`` — row order and
-    index labels are preserved (positional masks stay aligned to ``frame``).
-    ``heartbeat(loaded_rows, total_rows)`` is called per batch."""
-    import pandas as pd
+    """행별 소문자 태그 텍스트 색인 - pyarrow ChunkedArray(large_string), 배치(10만 행)당 청크 1개.
+
+    배치를 스레드 풀에서 나눠 만든다. 청크 순서 = 행 순서라 positional 마스크가 ``frame`` 과
+    정렬된다. 내용은 예전 ``str.cat(sep=',').str.lower()`` 와 **같다**(1.3M 실데이터 전 행 동일).
+    ⚠️ pandas 3 의 문자열 열은 이미 arrow 라 예전 경로도 utf8_lower 였다 - 소문자화 의미 불변.
+    ``heartbeat(loaded_rows, total_rows)`` 는 호출 스레드에서 배치가 끝날 때마다 부른다."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
 
     n = len(frame)
     if n == 0:
-        base = frame[tag_columns[0]].fillna("").astype(str)
-        return base.str.lower()
-    chunks = []
-    for start in range(0, n, _TAGS_TEXT_BATCH):
+        return pa.chunked_array([], type=pa.large_string())
+    # 열 Series 는 호출 스레드에서 꺼낸다 - 작업 스레드는 읽기 전용 iloc 슬라이스만 한다.
+    columns = [frame[c] for c in tag_columns]
+    sep = pa.scalar(",", pa.large_string())
+    empty = pa.scalar("", pa.large_string())
+    # ⚠️ 시스템 메모리 풀로 한정한다. 기본 풀(mimalloc)은 병렬 배치의 중간 배열을 해제해도 OS 에
+    #    돌려주지 않아 RSS 가 텍스트 크기의 약 3배(+1.86GB / 1.3M 행)로 남았다. 이 연산에만
+    #    시스템 풀을 쓰면 +0.89GB, 속도는 같다(실측). 프로세스 전역 풀은 건드리지 않는다.
+    mp = _tag_filter_memory_pool()
+
+    def build(start: int):
         sl = slice(start, start + _TAGS_TEXT_BATCH)
-        sub = [frame[c].iloc[sl].fillna("").astype(str) for c in tag_columns]
-        txt = sub[0] if len(sub) == 1 else sub[0].str.cat(sub[1:], sep=",")
-        chunks.append(txt.str.lower())
+        arrs = [
+            pa.array(col.iloc[sl].fillna("").astype(str), type=pa.large_string(), memory_pool=mp)
+            for col in columns
+        ]
+        joined = arrs[0] if len(arrs) == 1 else pc.binary_join_element_wise(*arrs, sep, memory_pool=mp)
+        return pc.utf8_lower(pc.coalesce(joined, empty, memory_pool=mp), memory_pool=mp)
+
+    starts = list(range(0, n, _TAGS_TEXT_BATCH))
+    chunks = []
+    for start, chunk in zip(starts, _tag_filter_executor().map(build, starts)):  # map = 순서 보존
+        chunks.append(chunk)
         if heartbeat is not None:
             try:
                 heartbeat(min(start + _TAGS_TEXT_BATCH, n), n)
             except Exception:
                 pass
-    return chunks[0] if len(chunks) == 1 else pd.concat(chunks)
+    return pa.chunked_array(chunks, type=pa.large_string())
+
+
+def _match_tags_text(tags_text, pattern: str):
+    """RE2 정규식으로 청크별 병렬 매칭 → 행별 numpy bool 마스크.
+
+    부분일치도 ``re.escape(key)`` 리터럴 정규식으로 돈다 - 같은 리터럴이라도 RE2 경로가
+    ``match_substring`` 보다 1.6~3.5배 빠르다(실측). 태그 텍스트가 행당 평균 499바이트라
+    1.3M 행이면 칩 하나가 659MB 를 훑는다 - 병렬이 아니면 칩당 ~1초였다."""
+    import numpy as np
+    import pyarrow.compute as pc
+
+    if tags_text.num_chunks == 0:
+        return np.zeros(0, dtype=bool)
+
+    mp = _tag_filter_memory_pool()
+
+    def match(chunk):
+        hits = pc.match_substring_regex(chunk, pattern, memory_pool=mp)
+        return pc.coalesce(hits, False, memory_pool=mp).to_numpy(zero_copy_only=False)
+
+    return np.concatenate(list(_tag_filter_executor().map(match, tags_text.chunks)))
 
 
 def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
@@ -809,37 +882,16 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
         if cached is not None:
             return cached
         if not exact:
-            return _store_mask(
-                cache_key, tags_text.str.contains(key, na=False, regex=False).to_numpy()
-            )
+            return _store_mask(cache_key, _match_tags_text(tags_text, re.escape(key)))
         # 퍼펙트 매칭: SEARCH(`core/search_engine.py` contains_exact)와 **같은 경계**를 쓴다 -
         # 쉼표뿐. 같은 `*tag` 가 화면마다 다른 뜻이 되는 것이 최악이라 의도적으로 복제한다.
         # ⚠️ 예전엔 경계가 쉼표 **또는 공백**이라 `*sky` 가 `cloudy sky` 에도 걸렸다 -
         #    태그 전체 일치가 아니었다. 양쪽을 같이 고쳤다(사용자 제보 2026-08-25).
-        # 비캡처 그룹이어야 한다 - 캡처 그룹이면 pandas 가 매 호출 경고를 뱉는다.
-        pattern = r"(?:^|,)\s*" + re.escape(key) + r"\s*(?:,|$)"
-        # exact 결과는 부분일치 결과의 **부분집합**이다(정규식이 리터럴 key 를 요구하므로).
-        # 그래서 부분 마스크가 **이미 캐시에 있으면** 그 후보 행만 훑는다.
-        #
-        # ⚠️ 캐시에 없으면 굳이 만들지 않는다. 실측(800k 행): 부분일치가 흔한 태그에서는
-        #    base 를 새로 만들어 후보로 좁히는 것이 전체 regex 1회보다 **느리다**
-        #    (sky 84.5%: 콜드 327ms vs 전체 289ms). base 가 이미 있을 때만 이득이다
-        #    (1girl 34.6%: 웜 110ms vs 320ms).
-        base = cache["tag_hits"].get((False, key))
-        if base is None:
-            return _store_mask(
-                cache_key, tags_text.str.contains(pattern, na=False, regex=True).to_numpy()
-            )
-        out = np.zeros(row_count, dtype=bool)
-        candidates = np.flatnonzero(base)
-        if candidates.size:
-            # ⚠️ positional `.iloc` 이어야 한다. 커스텀 parquet 은 index 가 기본이 아닐 수 있어
-            #    label 색인을 쓰면 엉뚱한 행을 본다.
-            hits = tags_text.iloc[candidates].str.contains(
-                pattern, na=False, regex=True
-            ).to_numpy()
-            out[candidates[hits]] = True
-        return _store_mask(cache_key, out)
+        # ⚠️ 공백 클래스는 `\s` 가 아니라 `_RE2_PY_WS` 다. RE2 의 `\s` 는 ASCII 뿐인데 예전 경로
+        #    (파이썬 re)의 `\s` 는 NBSP·전각 공백까지 먹었다 - 그대로 쓰면 `a,\xa0b` 에서 `*b` 가 빠진다.
+        # (예전의 '부분 마스크 후보만 훑기'는 뺐다 - 병렬 전체 스캔이 칩당 ~0.1초라 이득이 없다.)
+        pattern = r"(?:^|,)" + _RE2_PY_WS + "*" + re.escape(key) + _RE2_PY_WS + r"*(?:,|$)"
+        return _store_mask(cache_key, _match_tags_text(tags_text, pattern))
 
     def _beat():
         # bracket 하트비트: 각 (미캐시 가능) str.contains scan 직전과 최종 materialize 직전에 발행 →

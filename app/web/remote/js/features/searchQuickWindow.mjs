@@ -25,6 +25,10 @@ export function createSearchQuickWindow({
   document: doc,
   window: win,
   searchHost,
+  // Custom Parquets 카드 그리드가 그려지는 요소 - 검색 창 옆 동반 창에 붙인다(사용자 지정 2026-09-21,
+  // Artist Thumbnail 옆 Prompt Engineering 창과 같은 방식).
+  libraryHost = null,
+  onLibraryVisibility = () => {},
   requestSearchState = () => {},
   onVisibilityChange = () => {},
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
@@ -49,7 +53,8 @@ export function createSearchQuickWindow({
     initial: { right: 24, y: 64 },
     escHtml,
     onOpen: () => onVisibilityChange(),
-    onClose: () => onVisibilityChange(),
+    // 동반 창은 함께 닫는다 - 혼자 남으면 무엇의 목록인지 모른다.
+    onClose: () => { if (libPanel && libPanel.isOpen()) libPanel.close(); onVisibilityChange(); },
     onCollapse: () => onVisibilityChange(),
   });
   panel.el.id = 'searchQuickWindow';
@@ -134,6 +139,59 @@ export function createSearchQuickWindow({
     onVisibilityChange();
   }
 
+  // ── Custom Parquets 동반 창 ─────────────────────────────────────────────
+  let libPanel = null;
+
+  /** 창 **바깥** 좌우 중 넓은 쪽(remoteController.besideSpot 과 같은 규칙). 처음 뜰 때만 쓰고,
+   *  그 뒤로는 창이 제 자리를 기억한다(storageKey). */
+  function besideSpot(width, height, anchorRect) {
+    const vw = win?.innerWidth || doc.documentElement.clientWidth;
+    const vh = win?.innerHeight || doc.documentElement.clientHeight;
+    const roomLeft = anchorRect.left;
+    const roomRight = vw - anchorRect.right;
+    const left = (roomLeft >= width + 16 || roomLeft > roomRight)
+      ? anchorRect.left - width - 10
+      : anchorRect.right + 10;
+    return {
+      x: Math.round(Math.max(6, Math.min(left, vw - width - 6))),
+      y: Math.round(Math.max(6, Math.min(anchorRect.top, vh - height - 6))),
+    };
+  }
+
+  function ensureLibraryPanel() {
+    if (libPanel || !libraryHost) return libPanel;
+    const width = 360;
+    const height = 560;
+    const spot = besideSpot(width, height, panel.el.getBoundingClientRect());
+    libPanel = createDraggablePanel({
+      document: doc,
+      window: win,
+      title: 'Custom Parquets',
+      variant: 'pqlw',
+      storageKey: 'search-quick-parquets',
+      width, height, minWidth: 240, maxWidth: 900, minHeight: 160,
+      resizable: true,
+      initial: { x: spot.x, y: spot.y },
+      escHtml,
+      onOpen: () => onLibraryVisibility(true),
+      onClose: () => onLibraryVisibility(false),
+    });
+    libPanel.el.id = 'searchParquetWindow';
+    libPanel.body.appendChild(libraryHost);
+    return libPanel;
+  }
+
+  function toggleLibrary() {
+    const p = ensureLibraryPanel();
+    if (!p) return;
+    if (p.isOpen()) p.close(); else p.open();
+  }
+
+  function showLibrary() {
+    const p = ensureLibraryPanel();
+    if (p) p.open();
+  }
+
   // 창을 연다(닫혀 있었으면 검색 상태를 한 번 받는다 - 예전 openModule('search') 가 하던 일).
   function openAt(target, { toggle = false } = {}) {
     const wasOpen = panel.isOpen();
@@ -155,6 +213,9 @@ export function createSearchQuickWindow({
     showTagFilter: (options = {}) => openAt('tag', options),
     close: () => panel.close(),
     collapse: () => panel.collapse(),
+    toggleLibrary,
+    showLibrary,
+    isLibraryOpen: () => Boolean(libPanel && libPanel.isOpen()),
     isOpen: () => panel.isOpen(),
     isSearchShown: () => panel.isOpen() && !panel.isCollapsed() && layer === 'search',
     isTagFilterShown: () => panel.isOpen() && !panel.isCollapsed() && layer === 'tag',

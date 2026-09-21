@@ -2660,13 +2660,17 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
 // 창의 위층(searchHost)에 그린다 - 요소는 여기서 **동기로** 만들어 두 모듈에 같은 것을 넘긴다.
 const searchHost = document.createElement('div');
 searchHost.className = 'search-host';
+// Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
+const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw2')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw3')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,
       window,
       searchHost,
+      libraryHost: parquetLibraryHost,
+      onLibraryVisibility: open => { if (searchPanelControl) searchPanelControl.syncLibraryButton(open); },
       requestSearchState: () => requestModuleState('search'),
       onVisibilityChange: () => updateModuleBtnState(),
       escHtml,
@@ -2675,13 +2679,17 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260921-sqw3')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260921-sqw5')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
       moduleBody: searchHost,
       searchCountEl,
       isSearchVisible: () => Boolean(searchQuickWindow && searchQuickWindow.isOpen()),
+      libraryHost: parquetLibraryHost,
+      toggleLibrary: () => { if (searchQuickWindow) searchQuickWindow.toggleLibrary(); },
+      showLibrary: () => { if (searchQuickWindow) searchQuickWindow.showLibrary(); },
+      isLibraryOpen: () => Boolean(searchQuickWindow && searchQuickWindow.isLibraryOpen()),
       escHtml,
       getWs: () => ws,
       WebSocket,

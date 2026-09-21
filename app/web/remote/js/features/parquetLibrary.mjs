@@ -123,63 +123,125 @@ export function librarySignature(cards) {
   return JSON.stringify((cards || []).map(c => [c.name, c.mtime, c.rows, c.has_meta]));
 }
 
-// 카드 목록 HTML. openNames = 펼친 카드 이름 Set, moreName = [⋯] 메뉴가 열린 카드, renaming = 이름 바꾸는 중인 카드.
-export function libraryHtml(cards, { escHtml, openNames = new Set(), moreName = null, renaming = null, confirmTrash = null } = {}) {
+// 카드를 펼쳤을 때 보이는 '만든 조건' 을 칸별로 뽑는다(사용자 지정 2026-09-21):
+//   등급(G/S/Q/E) · Search(검색어·제외어·기간) · Tag Filter(포함·제외) · 그 밖의 출처(파일·합치기·심층검색).
+// 저장 = Search 결과 ∩ Tag Filter ∩ 등급(교집합). 사슬을 거슬러 올라가며 가장 가까운 것을 쓴다.
+export function recipeFacts(recipe) {
+  const facts = { ratings: null, search: null, tagFilter: null, origins: [] };
+  let cur = recipe;
+  for (let depth = 0; cur && typeof cur === 'object' && depth < MAX_DEPTH; depth += 1) {
+    if (cur.source === 'export') {
+      if (!facts.ratings && Array.isArray(cur.ratings)) facts.ratings = cur.ratings;
+      if (!facts.tagFilter && cur.tag_filter) facts.tagFilter = cur.tag_filter;
+    } else if (cur.source === 'search') {
+      if (!facts.search) facts.search = cur;
+      if (!facts.ratings && Array.isArray(cur.ratings)) facts.ratings = cur.ratings;
+    } else if (cur.source === 'merge') {
+      const names = (cur.parts || []).map(p => (p && p.name) || recipeLine(p)).filter(Boolean);
+      facts.origins.push(`합치기: ${names.join(' + ')}`);
+      break;   // 조각마다 조건이 다르다 - 하나로 뭉뚱그리지 않는다(단계 병합 레시피는 미정)
+    } else if (cur.source === 'refine' || cur.source === 'file' || cur.source === 'more') {
+      facts.origins.push(recipeLine(cur));
+    }
+    if (cur.truncated) { facts.origins.push('(이전 단계 생략)'); break; }
+    cur = cur.parent || (cur.source === 'file' ? cur.recipe : null);
+  }
+  return facts;
+}
+
+function ratingPills(ratings, esc) {
+  const on = new Set(Array.isArray(ratings) ? ratings : []);
+  return ['g', 's', 'q', 'e'].map(r =>
+    `<span class="pql-pill${on.has(r) ? ' is-on' : ''}">${esc(r.toUpperCase())}</span>`).join('');
+}
+
+function factRow(label, value, esc, cls = '') {
+  if (!value) return '';
+  return `<div class="pql-fact"><span class="pql-fact-k">${esc(label)}</span><span class="pql-fact-v ${cls}">${esc(value)}</span></div>`;
+}
+
+// 그리드 HTML. 기본은 **이름만**(사용자 지정). 누른 칸은 한 줄을 통째로 차지하며 펼쳐진다.
+// openNames = 펼친 칸, renaming = 이름 바꾸는 중, confirmTrash = 휴지통 한 번 누른 칸.
+export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = null, confirmTrash = null } = {}) {
   const esc = escHtml || (s => String(s));
   const list = cards || [];
   const items = list.map(card => {
     const name = String(card.name || '');
-    const summary = recipeSummary(card.recipe);
+    const label = name.replace(/\.parquet$/i, '');
     const open = openNames.has(name);
-    const detail = open && summary
-      ? `<div class="pql-detail">${recipeLines(card.recipe).map(l =>
-          `<div class="pql-line" style="padding-left:${l.depth * 12}px">${l.depth ? '↳ ' : ''}${esc(l.text)}</div>`).join('')}
-         ${card.created_at ? `<div class="pql-line pql-dim">저장 ${esc(String(card.created_at).replace('T', ' '))}</div>` : ''}</div>`
-      : '';
-    const nameCell = renaming === name
-      ? `<input class="pql-rename" data-pql-rename="${esc(name)}" value="${esc(name.replace(/\.parquet$/i, ''))}" spellcheck="false">`
-      : `<span class="pql-name" title="${esc(name)}">${esc(name.replace(/\.parquet$/i, ''))}</span>`;
-    const more = moreName === name
-      ? `<div class="pql-more">
-          <button type="button" data-pql="rename">이름 바꾸기</button>
-          <button type="button" data-pql="trash" class="${confirmTrash === name ? 'pql-danger' : ''}">${confirmTrash === name ? '한 번 더 누르면 휴지통' : '휴지통으로'}</button>
-        </div>`
-      : '';
-    return `<div class="pql-card${open ? ' is-open' : ''}" data-pql-name="${esc(name)}">
-      <div class="pql-row">
-        ${nameCell}
-        <span class="pql-rows">${esc(formatRows(card.rows))}</span>
-        <button type="button" class="pql-btn" data-pql="load" title="현재 풀을 이 파일로 바꿉니다">불러오기</button>
+    if (!open) {
+      return `<button type="button" class="pql-tile" data-pql-name="${esc(name)}" data-pql="expand" title="${esc(label)}">
+        <span class="pql-tile-name">${esc(label)}</span>
+      </button>`;
+    }
+    const f = recipeFacts(card.recipe);
+    const search = f.search;
+    const tf = f.tagFilter || {};
+    const body = card.has_meta === false || !card.recipe
+      ? '<div class="pql-fact pql-dim">조건 기록 없음 (명함 이전에 저장한 파일)</div>'
+      : `<div class="pql-fact"><span class="pql-fact-k">등급</span><span class="pql-fact-v">${f.ratings ? ratingPills(f.ratings, esc) : '<span class="pql-dim">기록 없음</span>'}</span></div>
+        <div class="pql-group">Search</div>
+        ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x') + factRow('기간', search.period, esc)
+                 : '<div class="pql-fact pql-dim">—</div>'}
+        <div class="pql-group">Tag Filter</div>
+        ${(tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)
+          ? factRow('포함', (tf.include || []).join(', '), esc) + factRow('제외', (tf.exclude || []).join(', '), esc, 'is-x')
+          : '<div class="pql-fact pql-dim">—</div>'}
+        ${f.origins.length ? `<div class="pql-group">출처</div>${f.origins.map(o => `<div class="pql-fact pql-origin">${esc(o)}</div>`).join('')}` : ''}`;
+    const title = renaming === name
+      ? `<input class="pql-rename" data-pql-rename="${esc(name)}" value="${esc(label)}" spellcheck="false">`
+      : `<span class="pql-open-name" data-pql="expand" title="접기">${esc(label)}</span>`;
+    const stamp = [formatRows(card.rows), card.created_at ? String(card.created_at).replace('T', ' ').slice(0, 16) : '']
+      .filter(Boolean).join(' · ');
+    return `<div class="pql-tile is-open" data-pql-name="${esc(name)}">
+      <div class="pql-open-head">${title}<span class="pql-stamp">${esc(stamp)}</span></div>
+      <div class="pql-facts">${body}</div>
+      <div class="pql-actions">
+        <button type="button" class="pql-btn is-main" data-pql="load" title="현재 풀을 이 파일로 바꿉니다">불러오기</button>
         <button type="button" class="pql-btn" data-pql="merge" title="현재 풀에 이 파일을 더합니다">합치기</button>
-        <button type="button" class="pql-btn pql-icon" data-pql="more" title="이름 바꾸기 · 휴지통">⋯</button>
+        <span class="pql-spacer"></span>
+        <button type="button" class="pql-btn" data-pql="rename">이름 바꾸기</button>
+        <button type="button" class="pql-btn${confirmTrash === name ? ' pql-danger' : ''}" data-pql="trash">${confirmTrash === name ? '한 번 더 → 휴지통' : '휴지통'}</button>
       </div>
-      <div class="pql-recipe${summary ? '' : ' pql-dim'}" data-pql="expand" title="${summary ? '눌러서 펼치기' : ''}">${esc(summary || '조건 기록 없음')}</div>
-      ${detail}${more}
     </div>`;
   }).join('');
   const empty = list.length ? '' : '<div class="pql-empty">아직 저장한 parquet 이 없습니다. [Load / Save Parquets] ▸ 이 결과 저장…으로 만듭니다.</div>';
-  return `<div class="pql-list">${items}${empty}</div>`;
+  return `<div class="pql-grid">${items}${empty}</div>`;
 }
 
 export const PQL_CSS = `
-.pql-list{display:flex;flex-direction:column;gap:4px;margin-top:4px}
-.pql-card{border:1px solid var(--border,#2c2c36);border-radius:6px;padding:5px 7px;background:var(--bg-elevated,#1d1d24)}
-.pql-card.is-open{border-color:var(--accent-blue,#8d7bd6)}
-.pql-row{display:flex;align-items:center;gap:5px;min-width:0}
-.pql-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600;color:var(--text,#e8e8ee)}
+.pql-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:5px;align-content:start}
+.pql-tile{display:flex;align-items:center;min-width:0;height:34px;padding:0 9px;border-radius:6px;cursor:pointer;text-align:left;
+  border:1px solid var(--border,#2c2c36);background:var(--bg-elevated,#1d1d24);color:var(--text,#e8e8ee)}
+.pql-tile:hover{border-color:var(--accent-blue,#8d7bd6)}
+.pql-tile-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600}
+.pql-tile.is-open{grid-column:1/-1;height:auto;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:7px 9px;
+  cursor:default;border-color:var(--accent-blue,#8d7bd6)}
+.pql-open-head{display:flex;align-items:baseline;gap:8px;min-width:0}
+.pql-open-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;cursor:pointer}
+.pql-stamp{font-family:var(--font-mono,monospace);font-size:10px;color:var(--accent-green,#5a9e6f);white-space:nowrap}
 .pql-rename{flex:1;min-width:0;font-size:11px;padding:1px 4px;background:var(--bg-surface,#15151b);color:var(--text,#e8e8ee);border:1px solid var(--accent-blue,#8d7bd6);border-radius:4px}
-.pql-rows{font-family:var(--font-mono,monospace);font-size:10px;color:var(--accent-green,#5a9e6f);white-space:nowrap}
-.pql-btn{height:20px;padding:0 6px;font-size:10px;border-radius:4px;border:1px solid var(--border,#33333f);background:transparent;color:var(--text-dim,#aaa);cursor:pointer;white-space:nowrap}
-.pql-btn:hover{color:var(--text,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
-.pql-icon{padding:0 5px}
-.pql-recipe{margin-top:2px;font-size:10px;color:var(--text-dim,#aaa);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.pql-facts{display:flex;flex-direction:column;gap:2px}
+.pql-group{margin-top:3px;font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--text-muted,#9a9aa6);text-transform:uppercase}
+.pql-fact{display:flex;gap:6px;font-size:10.5px;line-height:1.45;min-width:0}
+.pql-fact-k{flex:0 0 30px;color:var(--text-dimmer,#6c6c78)}
+.pql-fact-v{flex:1;min-width:0;word-break:break-all;color:var(--text,#d8d8e0);display:flex;flex-wrap:wrap;gap:3px}
+.pql-fact-v.is-x{color:#e39a9a}
+.pql-origin{color:var(--text-dim,#aaa)}
+.pql-pill{display:inline-flex;align-items:center;justify-content:center;width:18px;height:16px;border-radius:3px;font-size:9.5px;font-weight:700;
+  border:1px solid var(--border,#33333f);color:var(--text-dimmer,#6c6c78)}
+.pql-pill.is-on{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
 .pql-dim{color:var(--text-dimmer,#6c6c78);font-style:italic}
-.pql-detail{margin-top:4px;padding-top:4px;border-top:1px dashed var(--border,#2c2c36)}
-.pql-line{font-size:10px;line-height:1.5;color:var(--text,#d8d8e0);word-break:break-all}
-.pql-more{display:flex;gap:5px;margin-top:4px}
-.pql-more button{height:20px;padding:0 8px;font-size:10px;border-radius:4px;border:1px solid var(--border,#33333f);background:transparent;color:var(--text-dim,#aaa);cursor:pointer}
-.pql-more button.pql-danger{border-color:#b85454;color:#f0a0a0}
-.pql-empty{font-size:10px;color:var(--text-dimmer,#6c6c78);padding:4px 2px}
+.pql-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.pql-spacer{flex:1}
+.pql-btn{height:22px;padding:0 8px;font-size:10.5px;border-radius:4px;border:1px solid var(--border,#33333f);background:transparent;color:var(--text-dim,#aaa);cursor:pointer;white-space:nowrap}
+.pql-btn:hover{color:var(--text,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
+.pql-btn.is-main{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.pql-btn.pql-danger{border-color:#b85454;color:#f0a0a0}
+.pql-empty{grid-column:1/-1;font-size:10.5px;color:var(--text-dimmer,#6c6c78);padding:6px 2px}
+.dragpanel.pqlw{border-color:rgba(120,190,150,0.42)}
+.dragpanel.pqlw .dragpanel-head{background:rgba(120,190,150,0.10)}
+.dragpanel.pqlw .dragpanel-body{padding:7px}
 .search-save-form{display:flex;flex-direction:column;gap:4px;margin:4px 0;padding:6px 7px;border:1px solid var(--accent-green,#5a9e6f);border-radius:6px}
 .search-save-form[hidden]{display:none!important}
 .search-save-form .ssf-row{display:flex;gap:5px}

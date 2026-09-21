@@ -60,6 +60,11 @@ export function createSearchPanel({
   // 'search' 모듈이 열려 있을 때. ⚠️ 창으로 옮긴 뒤 currentModuleId 는 다시 'search' 가 안 된다 -
   // 이것 없이 옮기면 창이 영영 빈 채로 뜬다.
   isSearchVisible = null,
+  // Custom Parquets 는 검색 창 옆 동반 창(searchQuickWindow)에 산다. 목록을 그릴 요소와 여닫기를 받는다.
+  libraryHost = null,
+  toggleLibrary = () => {},
+  showLibrary = () => {},
+  isLibraryOpen = () => false,
   bindTagAssist,
   lockTagSurface = () => {},
   unlockTagSurface = () => {},
@@ -105,6 +110,9 @@ export function createSearchPanel({
   // editing again).
   let pendingEcho = { query: null, exclude: null };
   let lastParquetSig = null;
+  // 카드 목록이 그려지는 곳 - 동반 창 본문에 붙는다(없으면 떠도는 요소 = 시험·옛 배선).
+  const libHost = libraryHost || document.createElement('div');
+  libHost.classList.add('search-parquet-host');
   // Custom Parquet 카드 목록(parquetLibrary.mjs) - 다시 그려도 펼침·메뉴·이름 바꾸기 상태를 잇는다.
   let lastLibrary = [];
   let lastProvenance = null;
@@ -113,8 +121,6 @@ export function createSearchPanel({
   let pqlRenaming = null;
   let pqlConfirmTrash = null;
   let pqlConfirmTimer = null;
-  // 상단 [Custom Parquets (N)] 로 여닫는 카드 목록 - 기본은 닫힘(검색 칸이 먼저 보이게).
-  let parquetsShown = false;
   // [검색 기록] - 최근 검색 최대 500개(백엔드 core/search_history.py). 열 때만 받는다.
   let historyItems = [];
   let historyOpen = false;
@@ -354,8 +360,7 @@ export function createSearchPanel({
     const filename = (input && input.value || '').trim();
     if (runParquetAction('export_results', filename ? { filename } : {})) {
       closeSaveForm();
-      parquetsShown = true;   // 방금 저장한 카드가 보이게
-      applyParquetsShown();
+      showLibrary();   // 방금 저장한 카드가 보이게
     }
   }
 
@@ -578,33 +583,32 @@ export function createSearchPanel({
   // 항상 보이고 기본으로 펼친다. 카드 = 이름 · 행 수 · 만든 조건 요약(눌러서 펼침).
   function parquetSectionHtml(message) {
     lastLibrary = libraryFromMessage(message);
-    return `<div class="search-parquet-list">${libraryHtml(lastLibrary, {
+    return `<div class="pql-wrap">${libraryHtml(lastLibrary, {
       escHtml, openNames: pqlOpen, moreName: pqlMore, renaming: pqlRenaming, confirmTrash: pqlConfirmTrash,
     })}</div>`;
   }
 
   function rerenderLibrary() {
-    const host = moduleBody.querySelector('.search-parquet-host');
-    if (!host) return;
+    const host = libHost;
     host.innerHTML = parquetSectionHtml({ parquet_library: lastLibrary });
-    const count = moduleBody.querySelector('.sp-pq-count');
-    if (count) count.textContent = String(lastLibrary.length);
+    updateLibraryCount();
     if (pqlRenaming) {
       const input = host.querySelector('.pql-rename');
       if (input) { input.focus(); input.select(); }
     }
   }
 
-  function applyParquetsShown() {
-    const host = moduleBody.querySelector('.search-parquet-host');
-    if (host) host.hidden = !parquetsShown;
-    const button = moduleBody.querySelector('[data-sp="parquets"]');
-    if (button) {
-      button.classList.toggle('is-on', parquetsShown);
-      button.setAttribute('aria-pressed', parquetsShown ? 'true' : 'false');
-    }
+  function updateLibraryCount() {
     const count = moduleBody.querySelector('.sp-pq-count');
     if (count) count.textContent = String(lastLibrary.length);
+  }
+
+  // 동반 창이 열리고 닫힐 때 창 쪽에서 부른다 - [Custom Parquets] 단추가 상태를 비춘다.
+  function syncLibraryButton(open) {
+    const button = moduleBody.querySelector('[data-sp="parquets"]');
+    if (!button) return;
+    button.classList.toggle('is-on', !!open);
+    button.setAttribute('aria-pressed', open ? 'true' : 'false');
   }
 
   // ---- [검색 기록] ---------------------------------------------------------------
@@ -685,15 +689,16 @@ export function createSearchPanel({
   }
 
   function bindParquetLibrary() {
+    // 검색 층과 동반 창(카드 그리드) 두 곳에 같은 위임 처리기를 건다.
+    for (const root of [moduleBody, libHost]) bindLibraryRoot(root);
+  }
+
+  function bindLibraryRoot(root) {
     // 카드는 다시 그릴 때마다 새 요소라 위임으로 받는다(인라인 onclick·전역 함수 없음).
-    if (moduleBody._pqlBound) return;
-    moduleBody._pqlBound = true;
-    moduleBody.addEventListener('click', event => {
-      if (event.target.closest('[data-sp="parquets"]')) {
-        parquetsShown = !parquetsShown;
-        applyParquetsShown();
-        return;
-      }
+    if (root._pqlBound) return;
+    root._pqlBound = true;
+    root.addEventListener('click', event => {
+      if (event.target.closest('[data-sp="parquets"]')) { toggleLibrary(); return; }
       if (event.target.closest('[data-sp="history"]')) { setHistoryOpen(!historyOpen); return; }
       const del = event.target.closest('[data-sp-hist-del]');
       if (del) {
@@ -714,7 +719,7 @@ export function createSearchPanel({
       if (event.target.closest('[data-ssf="cancel"]')) { closeSaveForm(); return; }
       if (event.target.closest('[data-ssf="open"]')) { openSaveForm(); return; }
       const button = event.target.closest('[data-pql]');
-      const card = event.target.closest('.pql-card');
+      const card = event.target.closest('.pql-tile');
       if (!button || !card) return;
       const name = card.dataset.pqlName;
       const action = button.dataset.pql;
@@ -745,7 +750,7 @@ export function createSearchPanel({
         }
       }
     });
-    moduleBody.addEventListener('keydown', event => {
+    root.addEventListener('keydown', event => {
       const rename = event.target.closest && event.target.closest('.pql-rename');
       if (rename) {
         if (event.key === 'Enter') {
@@ -772,10 +777,10 @@ export function createSearchPanel({
         else if (event.key === 'Escape') closeSaveForm();
       }
     });
-    moduleBody.addEventListener('input', event => {
+    root.addEventListener('input', event => {
       if (event.target.classList && event.target.classList.contains('sp-hist-filter')) renderHistory();
     });
-    moduleBody.addEventListener('focusout', event => {
+    root.addEventListener('focusout', event => {
       if (event.target.classList && event.target.classList.contains('pql-rename') && pqlRenaming) {
         pqlRenaming = null;
         setTimeout(rerenderLibrary, 0);
@@ -835,7 +840,6 @@ export function createSearchPanel({
       <button type="button" class="sp-tbtn" onclick="restoreSnapshot()"
         data-naia-guide="Restore — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋 전체로 되돌립니다.">Restore</button>
     </div>
-    <div class="search-parquet-host" hidden>${parquetSectionHtml(message)}</div>
     <div class="search-save-form" hidden>
       <div class="ssf-row">
         <input type="text" placeholder="파일 이름 (비우면 날짜로)" spellcheck="false">
@@ -887,8 +891,10 @@ export function createSearchPanel({
     bindSearchInputs();
     ensureDateRangeStyle();
     ensureParquetLibraryStyle();
+    libHost.innerHTML = parquetSectionHtml(message);
     bindParquetLibrary();
-    applyParquetsShown();
+    updateLibraryCount();
+    syncLibraryButton(isLibraryOpen());
     historyOpen = false;
     bindDateRangeDrag();
     bindTagIncrementButton();
@@ -1366,5 +1372,7 @@ export function createSearchPanel({
     restoreSnapshot,
     openSaveForm,
     onSearchHistory,
+    syncLibraryButton,
+    getLibraryHost: () => libHost,
   };
 }

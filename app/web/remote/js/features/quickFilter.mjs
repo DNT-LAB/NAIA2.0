@@ -106,6 +106,21 @@ export function createQuickFilterController(deps) {
   let latestAcRequest = {target: '', query: ''};
 
   const getEl = id => doc.getElementById(id);
+  // Tag Filter 가 사는 곳. 리모컨 창(searchQuickWindow)이 주입하면 그걸 묻고, 없으면 예전 고정 팝업.
+  // ⚠️ 창으로 옮긴 뒤엔 #tagFilterPopup 껍데기가 영영 'open' 이 안 된다 - 팝업만 보면 자동완성과
+  //    카운트 갱신이 조용히 죽는다.
+  const surface = () => (typeof deps.tagSurface === 'function' ? deps.tagSurface() : null);
+  function popupOpen() {
+    const s = surface();
+    if (s) return !!s.isOpen();
+    const popup = getEl('tagFilterPopup');
+    return !!popup && popup.classList.contains('open');
+  }
+  function surfaceVisible() {
+    const s = surface();
+    if (s && typeof s.isWindowOpen === 'function') return !!s.isWindowOpen();
+    return popupOpen();
+  }
   const isSocketOpen = () => {
     const socket = deps.getWs();
     return socket && socket.readyState === SocketClass.OPEN;
@@ -209,8 +224,8 @@ export function createQuickFilterController(deps) {
 
   // 외부(검색 패널 등급 토글)에서 호출 — 팝업이 열려 있고 칩이 있으면 매치 카운트를 다시 계산한다.
   function refreshCount() {
-    const popup = getEl('tagFilterPopup');
-    if (!popup || !popup.classList.contains('open')) return;
+    // 창이 열려 있으면 층이 접혀 있어도 센다 - 층 머리줄에 개수가 비친다.
+    if (!surfaceVisible()) return;
     renderMatchedCount(active ? 'assigned' : 'matched');
   }
 
@@ -508,10 +523,14 @@ export function createQuickFilterController(deps) {
   }
 
   function open() {
+    const s = surface();
     const popup = getEl('tagFilterPopup');
-    if (!popup) return;
-    deps.closeAuxiliaryPopups(popup);
-    popup.classList.add('open');
+    if (s) s.open();
+    else {
+      if (!popup) return;
+      deps.closeAuxiliaryPopups(popup);
+      popup.classList.add('open');
+    }
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn) toggleBtn.classList.add('active');
     renderIncludeChips();
@@ -523,6 +542,8 @@ export function createQuickFilterController(deps) {
   }
 
   function close() {
+    const s = surface();
+    if (s) s.close();
     const popup = getEl('tagFilterPopup');
     if (popup) popup.classList.remove('open');
     if (!active) {
@@ -534,9 +555,8 @@ export function createQuickFilterController(deps) {
   }
 
   function toggle() {
-    const popup = getEl('tagFilterPopup');
-    if (!popup) return;
-    if (popup.classList.contains('open')) close();
+    if (!surface() && !getEl('tagFilterPopup')) return;
+    if (popupOpen()) close();
     else open();
   }
 
@@ -907,8 +927,7 @@ export function createQuickFilterController(deps) {
   }
 
   function onAutocompleteResult(message) {
-    const popup = getEl('tagFilterPopup');
-    if (!popup || !popup.classList.contains('open')) return;
+    if (!popupOpen()) return;
     const inputId = acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
     const input = getEl(inputId);
     if (!input || input.value.trim().length < 2) return;

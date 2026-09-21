@@ -690,7 +690,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-snapshot')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260921-sqw1')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -709,6 +709,8 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260831-snapsh
       showToast,
       lockTagSurface,
       unlockTagSurface,
+      // Tag Filter 는 Search | Tag Filter 리모컨 창의 아래층에 산다(searchQuickWindow.mjs).
+      tagSurface: () => (searchQuickWindow ? searchQuickWindow.tagSurface : null),
       // 필터가 바뀌면 프롬프트 하이라이팅을 다시 칠한다. ⚠️ 우클릭 경로에서만
       // 부르면 **Quick Filter 패널에서 바꿨을 때 낡은 채로 남는다** - 상태가 굳는
       // 자리에서 한 번만 울리게 두고 여기서 받는다.
@@ -2654,12 +2656,32 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd6')
+// Search | Tag Filter 리모컨 창. 검색 화면은 이제 공용 모듈 팝업(#modulePopupBody)이 아니라 이
+// 창의 위층(searchHost)에 그린다 - 요소는 여기서 **동기로** 만들어 두 모듈에 같은 것을 넘긴다.
+const searchHost = document.createElement('div');
+searchHost.className = 'search-host';
+let searchQuickWindow = null;
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw1')
+  .then(({createSearchQuickWindow}) => {
+    searchQuickWindow = createSearchQuickWindow({
+      document,
+      window,
+      searchHost,
+      requestSearchState: () => requestModuleState('search'),
+      onVisibilityChange: () => updateModuleBtnState(),
+      escHtml,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize search window module', error);
+  });
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260921-sqw1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
-      moduleBody,
+      moduleBody: searchHost,
       searchCountEl,
+      isSearchVisible: () => Boolean(searchQuickWindow && searchQuickWindow.isOpen()),
       escHtml,
       getWs: () => ws,
       WebSocket,
@@ -10865,6 +10887,14 @@ function toggleTransparentBackground() {
 }
 
 function openModule(moduleId, options = {}) {
+  // 검색은 모듈 팝업이 아니라 리모컨 창이다. Prompt 단추·우클릭·/search 가 전부 여기를 지난다.
+  // 같은 층이 펼쳐져 있으면 닫는다(예전 토글 그대로), forceOpen 이면 펼치기만.
+  if (moduleId === 'search') {
+    searchQuickWindowReady.then(() => {
+      if (searchQuickWindow) searchQuickWindow.showSearch({toggle: !options.forceOpen});
+    });
+    return;
+  }
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
@@ -11009,7 +11039,12 @@ function updateModuleBtnState() {
     btn.classList.toggle('active', isChunkBtn ? isChunkOpen() : btn.dataset.module === currentModuleId);
   });
   const pb = document.querySelector('.module-prompt-btn');
-  if (pb) pb.classList.toggle('active', currentModuleId === 'search');
+  if (pb) pb.classList.toggle('active', Boolean(searchQuickWindow && searchQuickWindow.isSearchShown()));
+  // Quick 단추 = Tag Filter 층이 보이거나 필터가 걸려 있을 때(예전 팝업 규칙과 같다).
+  const quickBtn = document.getElementById('tagFilterToggle');
+  if (quickBtn && searchQuickWindow) {
+    quickBtn.classList.toggle('active', searchQuickWindow.isTagFilterShown() || Boolean(quickFilter && quickFilter.isActive()));
+  }
   if (moduleLauncherControl) moduleLauncherControl.updateState();
   // Reflect the busy overlay whenever the active module changes (the search-side
   // lock only applies while the Search module is the one on screen).
@@ -12962,16 +12997,18 @@ function relayoutFloatingPanels() {
 }
 
 function refineEnterMode() {
-  modulePopup.classList.add('refine-mode');
+  // 검색이 창으로 떠난 뒤로 심층검색은 모듈이 없어도 팝업을 직접 연다.
+  modulePopup.classList.add('open', 'refine-mode');
 }
 
 function refineExitMode() {
   modulePopup.classList.remove('refine-mode');
+  if (!currentModuleId) modulePopup.classList.remove('open');
 }
 
 function openRefine() {
-  // Refine is a tab of the Search surface — only enter from the search module.
-  if (currentModuleId !== 'search') return;
+  // Refine 은 검색 창에서 들어간다(창이 열려 있어야 한다).
+  if (!(searchQuickWindow && searchQuickWindow.isOpen())) return;
   if (refinePanelControl) refinePanelControl.open();
 }
 

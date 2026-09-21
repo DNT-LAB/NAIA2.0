@@ -10,6 +10,10 @@ export function createSearchPanel({
   WebSocket,
   getQuickFilter,
   getCurrentModuleId,
+  // 검색 화면이 지금 그려져야 하나. 리모컨 창이 주입한다(창이 열려 있으면 참). 없으면 예전처럼
+  // 'search' 모듈이 열려 있을 때. ⚠️ 창으로 옮긴 뒤 currentModuleId 는 다시 'search' 가 안 된다 -
+  // 이것 없이 옮기면 창이 영영 빈 채로 뜬다.
+  isSearchVisible = null,
   bindTagAssist,
   lockTagSurface = () => {},
   unlockTagSurface = () => {},
@@ -18,6 +22,9 @@ export function createSearchPanel({
   showToast = () => {},
 }) {
   let searchingActive = false;
+  const searchVisible = () => (typeof isSearchVisible === 'function'
+    ? !!isSearchVisible()
+    : getCurrentModuleId() === 'search');
   let initialFilterRestoreDone = false; // 시작 시 Tag Filter 자동 Search→Assign 1회 가드
   let latestTagFilterRevision = 0;
   // Rating state lives in one store holding BOTH the generation-pool ratings
@@ -463,7 +470,7 @@ export function createSearchPanel({
       // 끼어든 rating/tag_filter broadcast 는 마커가 없어 여기서 걸러진다(A3 false-positive 방지).
       quickFilter.onSearchReleased();
     }
-    if (getCurrentModuleId() === 'search') renderSearch(message);
+    if (searchVisible()) renderSearch(message);
     // app.js 는 이 반환값이 true 일 때만 pool 잠금/Random 게이트를 해제한다. pool 잠금 해제는
     // 실제 pool 작업 완료일 때만이어야 한다: green 검색 진행 중(wasSearching)이면 그 검색의
     // 완료 마커(search_completed=isSearchDone)에만 해제하고, 끼어든 authoritative state
@@ -473,7 +480,7 @@ export function createSearchPanel({
   }
 
   function onSearchProgress(message) {
-    if (getCurrentModuleId() === 'search') {
+    if (searchVisible()) {
       const progress = moduleBody.querySelector('.search-progress');
       if (progress) progress.textContent = `Searching... ${message.completed}/${message.total}`;
     }
@@ -863,7 +870,7 @@ export function createSearchPanel({
     // ⚠️ 슬라이더만 다시 그리면 안 된다. 버킷 표는 **버튼을 그린 뒤에** 도착하는데,
     //    버튼 라벨의 기간이 그 표에서 나온다 - 슬라이더만 갱신하면 라벨이 폴백
     //    ("Download latest tag data")에 굳는다(실측).
-    if (getCurrentModuleId() === 'search') renderDateRangeHost();
+    if (searchVisible()) renderDateRangeHost();
   }
 
   async function refreshIncrementState({ rerender = true } = {}) {
@@ -887,7 +894,7 @@ export function createSearchPanel({
         pushEndAfterBuckets = true;
         requestBucketDates();
       }
-      if (rerender && getCurrentModuleId() === 'search') renderDateRangeHost();
+      if (rerender && searchVisible()) renderDateRangeHost();
     } catch (_) { /* 설치 관리자는 로컬 전용 - 원격에서는 조용히 없다 */ }
   }
 

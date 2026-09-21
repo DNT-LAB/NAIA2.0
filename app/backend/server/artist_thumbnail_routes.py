@@ -45,11 +45,17 @@ _GROUP_OPS = {"create", "rename", "delete", "add", "remove", "reorder", "weight"
 _MIX_OPS = {"save", "rename", "delete"}
 
 
-def _apply_mix_op(store: ArtistMixStore, payload: dict) -> dict:
+def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnailService | None = None) -> dict:
     op = str(payload.get("op") or "").strip()
     if op == "save":
-        return store.save(payload.get("name"), payload.get("blocks"),
-                          text=payload.get("text"), mix_id=payload.get("id"))
+        blocks = payload.get("blocks")
+        names = [str(b.get("artist") or "").strip() for b in (blocks if isinstance(blocks, list) else [])[:400]
+                 if isinstance(b, dict) and b.get("kind", "artist") == "artist"]
+        images, warnings = service.capture_artist_images(payload.get("mode", ""), names) if service else ({}, [])
+        result = store.save(payload.get("name"), blocks, text=payload.get("text"), mix_id=payload.get("id"),
+                            artist_images=images, fallback=payload.get("fallback", "mosaic"))
+        result["warnings"].extend(warnings)
+        return result
     if op == "rename":
         return store.rename(payload.get("id"), payload.get("name"))
     if op == "delete":
@@ -345,6 +351,14 @@ def register_artist_thumbnail_routes(
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
             return JSONResponse({"error": f"Artist mixes unreadable: {exc}"}, status_code=500)
 
+    @app.get("/api/artist-mixes/thumb")
+    async def api_artist_mix_thumb(id: str = "", file: str = ""):
+        try:
+            data = await run_in_thread(artist_mix_store(session_context).thumbnail, id, file)
+            return Response(data, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
+        except ArtistMixError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+
     @app.post("/api/artist-mixes")
     async def api_artist_mixes_mutate(req: Request):
         try:
@@ -356,7 +370,8 @@ def register_artist_thumbnail_routes(
         if str(payload.get("op") or "") not in _MIX_OPS:
             return JSONResponse({"error": f"op must be one of {sorted(_MIX_OPS)}"}, status_code=400)
         try:
-            return await run_in_thread(_apply_mix_op, artist_mix_store(session_context), payload)
+            return await run_in_thread(_apply_mix_op, artist_mix_store(session_context), payload,
+                                       artist_thumbnail_service(session_context))
         except ArtistMixError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
         except Exception as exc:

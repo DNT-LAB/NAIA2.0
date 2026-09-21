@@ -1032,7 +1032,7 @@ class ArtistThumbnailService:
             ],
         }
 
-    def _image_url_resolver(self, mode_key: str, filter_key: str, thumb_data: dict):
+    def _image_source_resolver(self, mode_key: str, filter_key: str, thumb_data: dict):
         """작가 이름 -> 썸네일 주소. 순서가 규약이다(아래 주석).
 
         ⚠️ 가상 모드에서는 `thumb_data` 의 값이 **주인 팩 키**다. 그림은 그 팩이 내야
@@ -1067,21 +1067,57 @@ class ArtistThumbnailService:
                         newest[artist_name] = (stamp, model_name)
             generated_lookup = {a: m for a, (_stamp, m) in newest.items()}
 
-        def item_image_url(artist: str) -> str:
+        def source(artist: str) -> tuple:
             # ⚠️ 순서가 규약이다(사용자 결정 2026-08-26): 모드 팩 -> 즐겨찾기 캐시 ->
             #    사용자가 생성한 것. 사용자 썸네일은 **빈 칸을 메꾸는 용도**지 공식 팩
             #    그림을 밀어내지 않는다. 모드를 안 고르면 앞의 둘이 대부분 비어 있어
             #    실질적으로 사용자 썸네일이 먼저 보인다(즐겨찾기 123명 제외).
             if mode_key and artist in thumb_data:
                 owner = str(thumb_data[artist]) if virtual else mode_key
-                return f"/api/artist-thumb/image?mode={quote(owner, safe='')}&artist={quote(artist, safe='')}"
+                return ("pack", owner)
             if artist in favorite_thumb_items:
-                return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
+                return ("favorite",)
             if artist in generated_lookup:
-                return self._generated_image_url(artist, generated_lookup[artist], api_key)
-            return ""
+                return ("generated", generated_lookup[artist], api_key)
+            return ()
+
+        return source
+
+    def _image_url_resolver(self, mode_key: str, filter_key: str, thumb_data: dict):
+        source = self._image_source_resolver(mode_key, filter_key, thumb_data)
+
+        def item_image_url(artist: str) -> str:
+            selected = source(artist)
+            if not selected:
+                return ""
+            if selected[0] == "pack":
+                return f"/api/artist-thumb/image?mode={quote(selected[1], safe='')}&artist={quote(artist, safe='')}"
+            if selected[0] == "favorite":
+                return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
+            return self._generated_image_url(artist, selected[1], selected[2])
 
         return item_image_url
+
+    def capture_artist_images(self, mode: str, artists: list[str]) -> tuple[dict[str, bytes], list[str]]:
+        """URL과 저장 그림은 같은 출처를 고른다. 가상 팩도 주인 팩으로 해석한다."""
+        mode_key = str(mode or "").strip()
+        source = self._image_source_resolver(mode_key, "all", self.load_data(mode_key) if mode_key else {})
+        images, warnings = {}, []
+        for artist in dict.fromkeys(artists):
+            selected = source(artist)
+            if not selected:
+                continue
+            try:
+                if selected[0] == "pack":
+                    payload = self.image_payload(selected[1], artist)
+                elif selected[0] == "favorite":
+                    payload = self.favorite_image_payload(artist)
+                else:
+                    payload = self.generated_image_payload(artist, selected[1], selected[2])
+                images[artist] = payload[0]
+            except (OSError, ValueError) as exc:
+                warnings.append(f"{artist}: 썸네일을 읽지 못했습니다 ({exc})")
+        return images, warnings
 
     @staticmethod
     def media_type(image_bytes: bytes) -> str:

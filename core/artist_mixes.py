@@ -8,10 +8,9 @@
 ## ⚠️ 프리셋에 매달리지 않는다
 
 사용자는 **다른 프리셋에서도** 이 조합을 불러온다(사용자 지정 2026-09-20). 그래서
-여기에는 프리셋을 가리키는 것이 하나도 없다. 특히 **앵커 아이디를 저장하지 않는다** -
-`<anchor:3>` 은 *지금 그 글에 박힌 주소*지 조합의 속성이 아니다. 저장하는 것은
-**묶음의 구조**(몇 묶음인지 · 각 묶음이 prefix 로 가는지 postfix 로 가는지 ·
-가중치 동기화 여부)이고, 표식은 불러올 때 **새로 발급**한다.
+여기에는 프리셋을 가리키는 것이 하나도 없다. 앵커 아이디는 같은 레코드의
+`text` 안 표식만 가리킨다. 아티스트만 복원하면 새로 발급하고, 글도 복원하면
+그 내부 참조와 위치를 함께 되살린다.
 
 ## 저장 모양
 
@@ -36,7 +35,10 @@
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import json
+import re
 import os
 import threading
 import time
@@ -44,7 +46,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_MIXES = 300
 MAX_BLOCKS = 400
 MAX_NAME_LEN = 40
@@ -54,6 +56,9 @@ WEIGHT_MIN = -5.0
 WEIGHT_MAX = 5.0
 SLOTS = ("pre", "post")
 TEXT_FIELDS = ("pre", "post")
+ANCHOR_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+MIX_ID = re.compile(r"^[a-f0-9]{12}$")
+THUMB_FILE = re.compile(r"^(?:a|main)_[a-f0-9]{24}\.webp$")
 
 
 class ArtistMixError(ValueError):
@@ -103,6 +108,7 @@ def _clean_block(raw: Any) -> dict | None:
             "kind": "anchor",
             "slot": slot if slot in SLOTS else "pre",
             "sync": bool(raw.get("sync")),
+            **({"id": str(raw["id"])} if ANCHOR_ID.fullmatch(str(raw.get("id", ""))) else {}),
         }
     if kind == "collab":
         # 이름도 `with_prefix` 도 화면이 쥐고 있는 고정값이다 - 여기선 상태만 담는다.
@@ -136,15 +142,44 @@ def _clean_blocks(raw: Any) -> list[dict]:
 
 
 def _clean_text(raw: Any) -> dict:
-    """저장 시점의 prefix/postfix 원문. 2단계(자리까지 복원)가 쓸 자리다."""
-    if not isinstance(raw, dict):
-        return {}
-    out = {}
-    for key in TEXT_FIELDS:
-        value = raw.get(key)
-        if isinstance(value, str) and value.strip():
-            out[key] = value[:MAX_TEXT_LEN]
-    return out
+    """빈 칸도 복원 대상이다. 두 키를 반드시 남긴다."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {key: (raw[key][:MAX_TEXT_LEN] if isinstance(raw.get(key), str) else "")
+            for key in TEXT_FIELDS}
+
+
+def _internal_anchors(blocks: list[dict], text: dict) -> None:
+    # 짝 없는/중복 아이디는 떼고 구조는 남긴다. 복원 때 그 칸 앞에 새 표식을 넣는다.
+    seen = set()
+    for block in blocks:
+        if block["kind"] != "anchor" or "id" not in block:
+            continue
+        anchor_id = block["id"]
+        if anchor_id in seen or f"<anchor:{anchor_id}>" not in text[block["slot"]]:
+            block.pop("id")
+        else:
+            seen.add(anchor_id)
+
+
+def _clean_thumbs(raw: Any) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    artists = raw.get("artists") if isinstance(raw.get("artists"), dict) else {}
+    return {
+        "main": str(raw.get("main") or "") if THUMB_FILE.fullmatch(str(raw.get("main") or "")) else "",
+        "fallback": "empty" if raw.get("fallback") == "empty" else "mosaic",
+        "artists": {str(a): f for a, f in artists.items() if isinstance(f, str) and THUMB_FILE.fullmatch(f)},
+    }
+
+
+def _webp(payload: bytes, edge: int) -> bytes:
+    from PIL import Image, ImageOps
+
+    with Image.open(io.BytesIO(payload)) as image:
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, "WEBP", quality=82)
+        return output.getvalue()
 
 
 class ArtistMixStore:
@@ -194,7 +229,7 @@ class ArtistMixStore:
         if not isinstance(raw, dict):
             return None
         mix_id = str(raw.get("id") or "").strip()
-        if not mix_id:
+        if not MIX_ID.fullmatch(mix_id):
             return None
         try:
             name = _clean_name(raw.get("name"))
@@ -210,8 +245,9 @@ class ArtistMixStore:
             "updated": int(raw.get("updated") or now),
         }
         text = _clean_text(raw.get("text"))
-        if text:
-            record["text"] = text
+        record["text"] = text
+        _internal_anchors(blocks, text)
+        record["thumbs"] = _clean_thumbs(raw.get("thumbs"))
         return record
 
     # ── 조회 ──────────────────────────────────────────────────────────────
@@ -227,8 +263,64 @@ class ArtistMixStore:
                 return mix
         raise ArtistMixError(f"mix not found: {key}", status=404)
 
+    def one(self, mix_id: Any) -> dict:
+        with self._lock:
+            return self._find(self._read(), mix_id)
+
+    def _thumb_dir(self, mix_id: str) -> Path:
+        if not MIX_ID.fullmatch(mix_id):
+            raise ArtistMixError("invalid mix id")
+        base = (self.root / "artist_mixes").resolve()
+        folder = base / mix_id
+        # 심볼릭 링크/정션을 따라 조합 폴더 밖을 읽거나 지우지 않는다.
+        if base.parent != self.root.resolve() or folder.resolve().parent != base:
+            raise ArtistMixError("invalid thumbnail directory")
+        return folder
+
+    @staticmethod
+    def _thumb_names(thumbs: dict) -> set[str]:
+        return {name for name in [thumbs.get("main"), *thumbs.get("artists", {}).values()] if name}
+
+    def thumbnail(self, mix_id: Any, filename: Any) -> bytes:
+        with self._lock:
+            record = self._find(self._read(), mix_id)
+            # 문법만 통과해도 안 된다. 이 레코드가 실제로 소유하는 파일만 제공한다.
+            if filename not in self._thumb_names(record["thumbs"]):
+                raise ArtistMixError("thumbnail not found", status=404)
+            folder = self._thumb_dir(record["id"])
+            path = folder / filename
+            if path.resolve().parent != folder.resolve() or not path.is_file():
+                raise ArtistMixError("thumbnail not found", status=404)
+            return path.read_bytes()
+
+    def _put_thumb(self, mix_id: str, prefix: str, payload: bytes, edge: int) -> str:
+        data = _webp(payload, edge)
+        # 내용 해시: JSON 쓰기가 실패해도 기존 그림을 덮지 않고, 브라우저 캐시도 정확하다.
+        filename = f"{prefix}_{hashlib.sha256(data).hexdigest()[:24]}.webp"
+        folder = self._thumb_dir(mix_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / filename
+        if path.resolve().parent != folder.resolve():
+            raise ArtistMixError("invalid thumbnail path")
+        temp = folder / f"{uuid.uuid4().hex}.tmp"
+        temp.write_bytes(data)
+        os.replace(temp, path)
+        return filename
+
+    def _prune_thumbs(self, mix_id: str, keep: set[str]) -> None:
+        folder = self._thumb_dir(mix_id)
+        if not folder.is_dir():
+            return
+        for path in folder.iterdir():
+            if (path.name not in keep and THUMB_FILE.fullmatch(path.name)
+                    and path.resolve().parent == folder.resolve() and path.is_file()):
+                path.unlink()
+        if not any(folder.iterdir()):
+            folder.rmdir()
+
     # ── 변경 ──────────────────────────────────────────────────────────────
-    def save(self, name: Any, blocks: Any, *, text: Any = None, mix_id: Any = None) -> dict:
+    def save(self, name: Any, blocks: Any, *, text: Any = None, mix_id: Any = None,
+             artist_images: dict[str, bytes] | None = None, fallback: str = "mosaic") -> dict:
         """새로 만들거나, `mix_id` 가 있으면 그것을 덮어쓴다.
 
         ⚠️ **같은 이름이 있으면 그 자리를 덮는다.** 이름이 같은 조합이 둘 쌓이면
@@ -238,6 +330,10 @@ class ArtistMixStore:
         clean_name = _clean_name(name)
         clean_blocks = _clean_blocks(blocks)
         clean_text = _clean_text(text)
+        _internal_anchors(clean_blocks, clean_text)
+        warnings = [f"{key}: {MAX_TEXT_LEN}자까지 저장했습니다. 앵커 위치를 확인하세요."
+                    for key in TEXT_FIELDS if isinstance(text, dict)
+                    and isinstance(text.get(key), str) and len(text[key]) > MAX_TEXT_LEN]
         now = int(time.time())
         with self._lock:
             mixes = self._read()
@@ -255,12 +351,17 @@ class ArtistMixStore:
             target["name"] = clean_name
             target["blocks"] = clean_blocks
             target["updated"] = now
-            if clean_text:
-                target["text"] = clean_text
-            else:
-                target.pop("text", None)
+            target["text"] = clean_text
+            thumbs = _clean_thumbs({"fallback": fallback})
+            for artist, payload in (artist_images or {}).items():
+                try:
+                    thumbs["artists"][artist] = self._put_thumb(target["id"], "a", payload, 192)
+                except (OSError, ValueError) as exc:
+                    warnings.append(f"{artist}: 썸네일을 담지 못했습니다 ({exc})")
+            target["thumbs"] = thumbs
             self._write(mixes)
-            return {"mixes": mixes, "id": target["id"]}
+            self._prune_thumbs(target["id"], self._thumb_names(thumbs))
+            return {"mixes": mixes, "id": target["id"], "warnings": warnings}
 
     def rename(self, mix_id: Any, name: Any) -> dict:
         clean_name = _clean_name(name)
@@ -281,4 +382,5 @@ class ArtistMixStore:
             target = self._find(mixes, mix_id)
             mixes = [m for m in mixes if m is not target]
             self._write(mixes)
+            self._prune_thumbs(target["id"], set())
             return {"mixes": mixes, "id": target["id"]}

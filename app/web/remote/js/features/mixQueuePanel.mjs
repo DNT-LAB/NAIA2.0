@@ -289,9 +289,7 @@ export function createMixQueuePanel({
   }
 
   // ── 조합 저장·복원 (사용자 지정 2026-09-20) ──────────────────────────
-  //  ⚠️ **앵커 아이디는 저장하지 않는다.** `<anchor:3>` 은 지금 그 글에 박힌 주소지
-  //     조합의 속성이 아니다 - 다른 프리셋에서 불러오면 그런 표식은 없다. 남기는 것은
-  //     묶음의 **구조**(몇 묶음 · 어느 칸 · 동기화 여부)이고 표식은 복원할 때 새로 뽑는다.
+  // 앵커 아이디는 같은 레코드의 글 내부 참조다. 아티스트만 복원하면 새로 발급한다.
   //  ⚠️ 그림 주소도 저장하지 않는다(모드에 딸린 값이다). 이름으로 다시 받아 온다.
   //  ⚠️ 임시 칸은 임시라는 사실을 안 남긴다 - 그건 고르는 중이라는 표시지 조합이 아니다.
 
@@ -300,7 +298,7 @@ export function createMixQueuePanel({
   function mixSnapshot() {
     return blocks.map(b => {
       if (isAnchor(b)) {
-        return {kind: 'anchor', slot: anchorSlot(b.anchorId) === 'post' ? 'post' : 'pre',
+        return {kind: 'anchor', id: b.anchorId, slot: anchorSlot(b.anchorId) === 'post' ? 'post' : 'pre',
                 sync: !!b.syncWeights};
       }
       if (b.id === COLLAB_ID) {
@@ -313,7 +311,7 @@ export function createMixQueuePanel({
 
   /** 저장 모양 -> 띠. 표식은 **새로 발급**해 각 칸의 **앞**에 넣는다(사용자 지정). */
   async function restoreMix(saved, name = '') {
-    const rows = Array.isArray(saved) ? saved : [];
+    const rows = Array.isArray(saved) ? saved : (saved?.blocks || []);
     if (!rows.length) return false;
     // ⚠️ 표식은 **`placeAnchors` 한 번**으로 끝낸다(실측 2026-09-20).
     //    예전에는 "지우고 -> 하나씩 넣기" 였는데, `setPeField` 가 서버를 거치는
@@ -359,22 +357,24 @@ export function createMixQueuePanel({
     paintBar();
     placeAnchors(next.filter(isAnchor).map(row => ({id: row.anchorId, slot: row.slot})));
     if (refreshAnchorHealth()) refresh();
-    await fillImages();
+    await fillImages(saved);
     return true;
   }
 
   /** 그림은 이름으로 다시 받아 온다 - 실패해도 조합은 멀쩡하다(빈 칸으로 선다). */
-  async function fillImages() {
+  async function fillImages(saved = null) {
     const names = [...new Set(blocks
       .filter(b => !isAnchor(b) && b.id !== COLLAB_ID && !b.image && b.artist)
       .map(b => b.artist))];
     if (!names.length) return;
     let described = {};
-    try { described = await describeArtists(names) || {}; } catch (_) { return; }
+    try { described = await describeArtists(names) || {}; } catch (_) { /* 저장 그림으로 복구한다. */ }
     let changed = false;
     for (const b of blocks) {
       if (isAnchor(b) || b.image) continue;
-      const url = described[b.artist]?.image_url || '';
+      const file = saved?.thumbs?.artists?.[b.artist];
+      const url = described[b.artist]?.image_url || (file
+        ? `/api/artist-mixes/thumb?id=${encodeURIComponent(saved.id)}&file=${encodeURIComponent(file)}` : '');
       if (url) { b.image = url; changed = true; }
     }
     if (changed) render();
@@ -593,7 +593,8 @@ export function createMixQueuePanel({
   async function saveMix(name) {
     if (!mixStore?.save) return;
     try {
-      await mixStore.save(name, mixSnapshot());
+      const result = await mixStore.save(name, mixSnapshot());
+      for (const warning of result?.warnings || []) showToast(warning, 'warning');
       mixName = name;
       paintBar();
       showToast(`조합을 저장했습니다: ${name}`, 'success');
@@ -660,6 +661,12 @@ export function createMixQueuePanel({
     const del = event.target.closest('[data-mixq-mix-del]');
     if (del) {
       event.stopPropagation();
+      if (del.dataset.armed !== '1') {
+        del.dataset.armed = '1';
+        del.textContent = '정말?';
+        setTimeout(() => { del.dataset.armed = ''; del.textContent = '×'; }, 2500);
+        return;
+      }
       const id = del.dataset.mixqMixDel;
       const r = del.getBoundingClientRect();
       try { await mixStore.remove(id); } catch (error) {
@@ -678,7 +685,7 @@ export function createMixQueuePanel({
     try { rows = await mixStore.list() || []; } catch (_) { return; }
     const row = rows.find(r => String(r.id) === String(id));
     if (!row) { showToast('그 조합을 찾지 못했습니다.', 'error'); return; }
-    await restoreMix(row.blocks, row.name);
+    await restoreMix(row, row.name);
     showToast(`조합을 불러왔습니다: ${row.name}`, 'success');
   }, true);
 

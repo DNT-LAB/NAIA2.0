@@ -2957,7 +2957,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-nogridpin');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s1');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -2999,7 +2999,7 @@ export function createArtistThumbController({
       mixStore: {
         list: async () => (await getJson('/api/artist-mixes'))?.mixes || [],
         save: (name, blocks) => postJson('/api/artist-mixes', {
-          op: 'save', name, blocks,
+          op: 'save', name, blocks, mode: currentMode(),
           // ⚠️ prefix/postfix 원문은 **담아만 둔다**(2단계에서 자리까지 복원할 때 쓴다).
           //    나중에 담기 시작하면 그 전에 저장한 조합은 영영 복원할 수 없다.
           text: {pre: peText('pre_prompt'), post: peText('post_prompt')},

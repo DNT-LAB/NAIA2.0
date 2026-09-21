@@ -359,6 +359,10 @@ def register_artist_thumbnail_routes(
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
             return JSONResponse({"error": f"Artist mixes unreadable: {exc}"}, status_code=500)
 
+    @app.get("/api/artist-mixes/name")
+    async def api_artist_mix_name(name: str = ""):
+        return await run_in_thread(artist_mix_store(session_context).matching_name, name)
+
     @app.get("/api/artist-mixes/one")
     async def api_artist_mix_one(id: str = ""):
         try:

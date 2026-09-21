@@ -629,13 +629,31 @@ export function createMixQueuePanel({
     const ticket = ++pageSeq;
     menuFor = ''; menuAt = -1;
     menuEl.innerHTML = `<form class="mixq-page mixq-save-page">
-      <label class="mixq-name-line">이름 <input class="mixq-name-input" aria-label="조합 이름" maxlength="40" value="${escHtml(mixName)}"></label>
+      <label class="mixq-name-line">이름 <input class="mixq-name-input" aria-label="조합 이름" maxlength="40" value="${escHtml(mixName)}"><span class="mixq-overwrite" hidden>덮어씀</span></label>
       <div class="mixq-candidates" aria-label="주 썸네일 후보">불러오는 중…</div>
       <button type="submit" class="mixq-commit" disabled>저장</button></form>`;
     placeMenu(point.x, point.y);
     const input = menuEl.querySelector('input');
     const form = menuEl.querySelector('form');
     input.focus(); input.select();
+    let nameSeq = 0, nameTimer = null;
+    const checkName = async () => {
+      const serial = ++nameSeq;
+      try {
+        const match = await mixStore.matchingName(input.value);
+        if (serial !== nameSeq || ticket !== pageSeq) return;
+        input.classList.toggle('is-overwrite', !!match.id);
+        form.querySelector('.mixq-overwrite').hidden = !match.id;
+      } catch (_) { /* 이름 검사는 보조 표시다. 실제 저장 오류는 저장 응답으로 알린다. */ }
+    };
+    input.addEventListener('input', () => {
+      nameSeq += 1;
+      input.classList.remove('is-overwrite');
+      form.querySelector('.mixq-overwrite').hidden = true;
+      clearTimeout(nameTimer);
+      nameTimer = setTimeout(() => { if (ticket === pageSeq) void checkName(); }, 120);
+    });
+    void checkName();
     form.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopPropagation(); });
     let selected = 'mosaic';
     let busy = true;
@@ -700,6 +718,8 @@ export function createMixQueuePanel({
           <button type="button" data-mixq-mix="${escHtml(row.id)}" title="${escHtml(row.name)} - 아티스트만 불러오기">
             ${thumbHtml(row)}<span>${escHtml(row.name)}</span></button>
           <button type="button" data-mixq-detail="${escHtml(row.id)}" title="상세" aria-label="상세">▸</button>
+          <button type="button" data-mixq-rename="${escHtml(row.id)}" data-mixq-name="${escHtml(row.name)}"
+            title="이름 바꾸기" aria-label="이름 바꾸기">✎</button>
           <button type="button" class="mixq-mix-del" data-mixq-mix-del="${escHtml(row.id)}"
             title="지우기" aria-label="지우기">×</button>
         </div>`).join('') : '<div class="mixq-mix-empty">저장된 조합이 없습니다</div>';
@@ -708,6 +728,38 @@ export function createMixQueuePanel({
       if (ticket === pageSeq) menuEl.innerHTML = '<div class="mixq-mix-empty">목록을 읽지 못했습니다.</div>';
       showToast(error?.message || '조합 목록을 읽지 못했습니다.', 'error');
     }
+  }
+
+  function renameMix(button) {
+    const row = button.closest('.mixq-mix-row');
+    if (row.querySelector('input')) return;
+    const original = row.querySelector('[data-mixq-mix]');
+    const oldName = button.dataset.mixqName;
+    const id = button.dataset.mixqRename;
+    const input = doc.createElement('input');
+    input.className = 'mixq-name-input'; input.maxLength = 40;
+    input.setAttribute('aria-label', '새 조합 이름'); input.value = oldName;
+    original.replaceWith(input);
+    let busy = false;
+    const cancel = () => { if (!busy && input.isConnected) input.replaceWith(original); };
+    input.addEventListener('blur', cancel);
+    input.addEventListener('keydown', async event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') { event.preventDefault(); cancel(); return; }
+      if (event.key !== 'Enter' || event.isComposing || busy) return;
+      event.preventDefault();
+      if (!input.value.trim()) return;
+      busy = true;
+      try {
+        const result = await mixStore.rename(id, input.value);
+        const renamed = result.mixes.find(mix => mix.id === id)?.name || input.value.trim();
+        if (mixName === oldName) { mixName = renamed; paintBar(); }
+        const point = menuPoint();
+        if (input.isConnected && !menuEl.hidden) void openMixList(point.x, point.y);
+      } catch (error) { showToast(error?.message || '이름을 바꾸지 못했습니다.', 'error'); input.focus(); }
+      finally { busy = false; }
+    });
+    input.focus(); input.select();
   }
 
   function textDiffHtml(label, diff) {
@@ -835,6 +887,8 @@ export function createMixQueuePanel({
       void openMixList(r.left, r.top);     // 목록을 그 자리에 다시 편다
       return;
     }
+    const rename = event.target.closest('[data-mixq-rename]');
+    if (rename) { event.stopPropagation(); renameMix(rename); return; }
     const detail = event.target.closest('[data-mixq-detail]');
     if (detail) { event.stopPropagation(); void openMixDetail(detail.dataset.mixqDetail); return; }
     const pick = event.target.closest('[data-mixq-mix]');
@@ -1101,6 +1155,7 @@ export function createMixQueuePanel({
   doc.addEventListener('pointerdown', closeMenuIfOutside, true);
   doc.addEventListener('focusin', closeMenuIfOutside, true);
   doc.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && doc.activeElement?.matches('.mixq-mix-row .mixq-name-input')) return;
     if (event.key === 'Escape' && !menuEl.hidden) closeMenu();
   }, true);
 

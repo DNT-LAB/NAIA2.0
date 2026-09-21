@@ -29883,6 +29883,9 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-name-input { flex: 1; width: 0; min-width: 0; color: var(--text-primary); background: var(--bg-deep); border: 1px solid var(--border-glow); border-radius: 4px; padding: 4px; font-size: 11px; }
 .mixq-candidates { display: flex; gap: 4px; overflow-x: auto; padding: 3px; min-width: 0; font-size: 10px; }
 .mixq-candidates[hidden] { display: none; }
+.mixq-overwrite { font-size: 9px; color: #e6ba73; white-space: nowrap; }
+.mixq-name-input.is-overwrite { border-color: #e6ba73; }
+.mixq-overwrite[hidden] { display: none; }
 .mixq-menu .mixq-choice { flex: 0 0 58px; padding: 3px; text-align: center; border: 1px solid transparent; }
 .mixq-choice small { display: block; font-size: 9px; white-space: nowrap; }
 .mixq-choice[aria-pressed="true"], .mixq-layer[aria-pressed="true"] { background: rgba(130,150,255,.18); border-color: #8296ff; }

@@ -310,6 +310,7 @@
         {"method": "POST", "path": "/api/artist-thumb/random-prompt", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/describe", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/artist-mixes", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/artist-mixes/name", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/artist-mixes/one", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/artist-mixes/thumb", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-mixes/candidates", "smoke": "non_destructive"},

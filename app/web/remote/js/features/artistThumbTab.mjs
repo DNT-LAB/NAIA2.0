@@ -2978,7 +2978,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s3b');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s4b');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -3032,6 +3032,8 @@ export function createArtistThumbController({
         candidates: async artists => (await postJson('/api/artist-mixes/candidates', {artists, limit: 24})).candidates || [],
         setMain: (id, selection) => postJson('/api/artist-mixes', {op: 'set_main', id, ...selection}),
         remove: id => postJson('/api/artist-mixes', {op: 'delete', id}),
+        rename: (id, name) => postJson('/api/artist-mixes', {op: 'rename', id, name}),
+        matchingName: name => getJson(`/api/artist-mixes/name?name=${encodeURIComponent(name)}`),
       },
       onAnchorRemove: id => dropAnchorFromText(id),
       onDragStart: () => remote.hideZoom?.(),

@@ -267,6 +267,13 @@ class ArtistMixStore:
     def _summaries(mixes: list[dict]) -> list[dict]:
         return [{key: mix[key] for key in ("id", "name", "updated", "thumbs")} for mix in mixes]
 
+    def matching_name(self, name: Any) -> dict:
+        # JS 소문자 변환은 casefold와 다르다(ß, ς 등). 저장과 같은 서버 규칙을 쓴다.
+        key = " ".join(str(name or "").split()).casefold()
+        with self._lock:
+            found = next((m for m in self._read() if m["name"].casefold() == key), None)
+            return {"id": found["id"] if found else None}
+
     def summaries(self) -> list[dict]:
         with self._lock:
             return self._summaries(self._read())

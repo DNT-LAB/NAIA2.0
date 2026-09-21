@@ -30007,6 +30007,28 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-saved-settings tr.is-changed td:last-child { color: #e6ba73; }
 .mixq-menu.is-cover .mixq-detail-page > .mixq-commit { flex: 0 0 auto; }
 
+/* 프리셋 다리 (사용자 지정 2026-09-21) - 내보내기 · 프리셋 목록 · 가져오기 상세.
+   내보내기는 저장 쪽과 같은 덮는 판, 가져오기 상세는 불러오기 상세와 같은 판이다. */
+.mixq-export-note { flex: 0 0 auto; padding: 0 2px; font-size: 10px; color: var(--text-muted); }
+.mixq-export-note.is-warn { color: #e6ba73; }
+.mixq-menu .mixq-from-presets {
+  color: var(--text-muted); border-bottom: 1px solid var(--border-glow); border-radius: 5px 5px 0 0;
+}
+.mixq-menu.is-cover .mixq-preset-page { display: flex; flex-direction: column; gap: 6px; }
+.mixq-preset-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--text-dim);
+}
+.mixq-menu .mixq-preset-row { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.mixq-preset-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mixq-preset-row small { flex: 0 0 auto; font-size: 9px; color: var(--text-dim); }
+.mixq-preset-tag {
+  flex: 0 0 auto; font-style: normal; font-size: 9px; padding: 1px 6px; border-radius: 8px;
+  color: var(--text-primary); background: rgba(130, 150, 255, 0.22);
+}
+.mixq-import-notes { display: flex; flex-direction: column; gap: 2px; }
+.mixq-import-notes p { margin: 0; font-size: 10px; line-height: 1.45; color: var(--text-muted); }
+
 .mixq-menu button {
   border: none; background: transparent; color: var(--text-primary);
   font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;

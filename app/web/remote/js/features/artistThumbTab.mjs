@@ -2980,7 +2980,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-detail2');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-preset');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -3037,6 +3037,11 @@ export function createArtistThumbController({
         remove: id => postJson('/api/artist-mixes', {op: 'delete', id}),
         rename: (id, name) => postJson('/api/artist-mixes', {op: 'rename', id, name}),
         matchingName: name => getJson(`/api/artist-mixes/name?name=${encodeURIComponent(name)}`),
+        // ── PE 프리셋 다리(사용자 지정 2026-09-21) ── `mode` 는 작가 사전(팩 이름)을 고르는 데만 쓴다.
+        presets: () => getJson(`/api/artist-mixes/presets?mode=${encodeURIComponent(currentMode())}`),
+        fromPreset: name => getJson(`/api/artist-mixes/from-preset?name=${encodeURIComponent(name)}`
+          + `&mode=${encodeURIComponent(currentMode())}`),
+        exportPreset: body => postJson('/api/artist-mixes/export-preset', body),
         // 저장·diff·적용은 서버 세션의 같은 네거티브와 설정을 본다.
         current: () => getJson('/api/artist-mixes/current'),
         apply: async (id, layers) => {

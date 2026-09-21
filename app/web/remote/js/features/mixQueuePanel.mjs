@@ -107,7 +107,7 @@ export function createMixQueuePanel({
   onFocusWeight = () => {},
   // ── 저장된 조합(1단계) ──
   //  프리셋에 매달리지 않는다 - 조합은 자기 파일에 산다(`artist_mixes.json`).
-  mixStore = null,            // {list, save, remove} - 없으면 관리 줄을 안 그린다
+  mixStore = null,            // {list, save, remove, presets, fromPreset, exportPreset} - 없으면 관리 줄을 안 그린다
   // 이름 -> 그림 주소. **저장하지 않는다** - 주소는 지금 모드에 딸린 값이라,
   // 담아 두면 팩을 바꾼 뒤 엉뚱한 그림이 뜬다(또는 404 로 빈 칸이 된다).
   describeArtists = async () => ({}),
@@ -144,6 +144,8 @@ export function createMixQueuePanel({
               title="지금 조합을 이름 붙여 저장합니다">저장</button>
       <button type="button" class="mixq-bar-btn" data-mixq-bar="load"
               title="저장한 조합을 불러옵니다">불러오기</button>
+      <button type="button" class="mixq-bar-btn" data-mixq-bar="export"
+              title="지금 조합을 프롬프트 엔지니어링 프리셋으로 내보냅니다">프리셋으로</button>
       <span class="mixq-bar-name"></span>
     </div>
     <div class="mixq-menu" hidden role="menu"></div>
@@ -640,8 +642,8 @@ export function createMixQueuePanel({
    *  ⚠️ 보이는 이름은 **그리드**다(사용자 지정 2026-09-21, 옛 이름 모자이크). 내부 값
    *     `mosaic` 과 저장 파일의 `fallback: "mosaic"` 은 그대로다 - 이미 저장된 조합이 쓴다.
    *  `data-mixq-zoom` 은 마우스를 올렸을 때 옆 확대 보기로 띄울 그림이다. */
-  function candidateHtml(rows, mosaic, selected) {
-    const choices = [{id: 'mosaic', label: '그리드', html: mosaic},
+  function candidateHtml(rows, mosaic, selected, {grid = true} = {}) {
+    const choices = [...(grid ? [{id: 'mosaic', label: '그리드', html: mosaic}] : []),
       {id: 'empty', label: '비워 둠', html: '<span class="mixq-mix-thumb is-empty"></span>'},
       ...rows.slice(0, 24).map(row => ({id: row.history_id, label: '', zoom: row.thumb_url,
         html: `<span class="mixq-mix-thumb"><img src="${escHtml(row.thumb_url)}" alt=""></span>`}))];
@@ -769,7 +771,9 @@ export function createMixQueuePanel({
     try {
       const rows = await mixStore.list() || [];
       if (ticket !== pageSeq) return;
-      menuEl.innerHTML = rows.length ? rows.map(row => `
+      // 프리셋에서 가져오는 길은 **저장한 조합이 없어도** 있어야 한다 - 맨 위 한 줄.
+      menuEl.innerHTML = `<button type="button" class="mixq-from-presets" data-mixq-from-presets
+        title="프롬프트 엔지니어링 프리셋의 아티스트 태그를 띠로 가져옵니다">프리셋에서 가져오기 ▸</button>` + (rows.length ? rows.map(row => `
         <div class="mixq-mix-row">
           <button type="button" data-mixq-mix="${escHtml(row.id)}" title="${escHtml(row.name)} - 아티스트만 불러오기">
             ${thumbHtml(row)}<span>${escHtml(row.name)}</span></button>
@@ -778,7 +782,7 @@ export function createMixQueuePanel({
             title="이름 바꾸기" aria-label="이름 바꾸기">✎</button>
           <button type="button" class="mixq-mix-del" data-mixq-mix-del="${escHtml(row.id)}"
             title="지우기" aria-label="지우기">×</button>
-        </div>`).join('') : '<div class="mixq-mix-empty">저장된 조합이 없습니다</div>';
+        </div>`).join('') : '<div class="mixq-mix-empty">저장된 조합이 없습니다</div>');
       placeMenu(x, y);
     } catch (error) {
       if (ticket === pageSeq) menuEl.innerHTML = '<div class="mixq-mix-empty">목록을 읽지 못했습니다.</div>';
@@ -827,7 +831,7 @@ export function createMixQueuePanel({
    *  썸네일 · 가중치 · 앵커 막대(동기화 표시) · 꺼 둔 칸(흐리게). 이름은 툴팁으로만 -
    *  칸이 작아 글자를 얹으면 읽히지 않는다. 그림은 **저장해 둔 썸네일**을 쓴다
    *  (지금 팩에 그 작가가 없어도 보인다). */
-  function stripPreviewHtml(record) {
+  function stripPreviewHtml(record, images = {}) {
     const files = record?.thumbs?.artists || {};
     return (record?.blocks || []).map(block => {
       if (block.kind === 'anchor') {
@@ -836,7 +840,7 @@ export function createMixQueuePanel({
       }
       const collab = block.kind === 'collab';
       const name = collab ? 'artist collaboration' : String(block.artist || '');
-      const url = collab ? '' : thumbUrl(record, files[name]);
+      const url = collab ? '' : (thumbUrl(record, files[name]) || images[name] || '');
       const weight = Number(block.weight);
       return `<span class="mixq-pv-block${block.enabled === false ? ' is-off' : ''}${collab ? ' is-collab' : ''}"
         title="${escHtml(name)}"><span class="mixq-pv-img">${url ? `<img src="${escHtml(url)}" alt="">` : ''}</span>
@@ -997,6 +1001,233 @@ export function createMixQueuePanel({
     }
   }
 
+  // ── 프리셋 다리 (사용자 지정 2026-09-21) ─────────────────────────────────
+  //  규칙의 원본은 `core/artist_mix_preset.py` 머리말이다. 화면은 셋:
+  //  내보내기(덮는 판) · 프리셋 목록 · 가져오기 상세.
+
+  const EXPORT_NOTE = '지금 프리셋은 그대로 둡니다. 앵커는 글자로 풀어 씁니다.';
+
+  /** 지금 띠 -> PE 프리셋. 저장 쪽과 같은 **덮는 판**이다.
+   *  ⚠️ 현재 프리셋은 **바꾸지 않는다**(사용자 결정) - 목록에 뜨기만 한다.
+   *  ⚠️ 지금 쓰는 프리셋 · default 에는 못 쓴다(서버도 막는다). 같은 이름은 "덮어씀" 으로
+   *     알리고 그대로 누르면 덮는다(사용자 결정: 묻고 덮어쓴다 - 표시가 곧 물음이다).
+   *  ⚠️ 그리드 칸은 없다 - 프리셋 썸네일은 그림 파일 하나다. */
+  async function revealExportForm() {
+    if (!mixStore?.exportPreset) return;
+    const draft = {blocks: mixSnapshot(), artist_prompt: compose(), anchor_groups: composeGroups()};
+    if (!liveArtists(draft.blocks).length) { showToast('먼저 아티스트를 넣으세요.', 'warning'); return; }
+    const point = menuPoint();
+    const ticket = ++pageSeq;
+    menuFor = ''; menuAt = -1;
+    menuEl.innerHTML = `<form class="mixq-page mixq-export-page">
+      <div class="mixq-cover-head">
+        <label class="mixq-name-line">프리셋 <input class="mixq-name-input" aria-label="프리셋 이름" maxlength="60" value="${escHtml(mixName)}"><span class="mixq-overwrite" hidden>덮어씀</span></label>
+        <button type="submit" class="mixq-commit" disabled>내보내기</button>
+        <button type="button" class="mixq-cover-close" data-mixq-close aria-label="닫기">✕</button>
+      </div>
+      <div class="mixq-export-note">${EXPORT_NOTE}</div>
+      <div class="mixq-candidates" aria-label="프리셋 썸네일 후보">불러오는 중…</div></form>`;
+    if (!coverMenu()) placeMenu(point.x, point.y);
+    menuEl.querySelector('[data-mixq-close]').addEventListener('click', () => closeMenu());
+    const form = menuEl.querySelector('form');
+    const input = form.querySelector('input');
+    const note = form.querySelector('.mixq-export-note');
+    const submit = form.querySelector('[type=submit]');
+    let presets = null;          // {current, names}
+    let selected = 'empty';
+    let busy = true;
+    const paintName = () => {
+      const name = input.value.trim();
+      const blocked = !presets || !name ? '' : name === presets.current ? 'current' : name === 'default' ? 'default' : '';
+      const exists = !!presets && !blocked && presets.names.has(name);
+      input.classList.toggle('is-overwrite', exists);
+      form.querySelector('.mixq-overwrite').hidden = !exists;
+      note.textContent = blocked === 'current' ? '지금 쓰는 프리셋에는 내보낼 수 없습니다 - 다른 이름을 고르세요.'
+        : blocked === 'default' ? 'default 프리셋에는 내보낼 수 없습니다.'
+          : exists ? `"${name}" 프리셋을 덮어씁니다. 지금 프리셋은 그대로 둡니다.` : EXPORT_NOTE;
+      note.classList.toggle('is-warn', !!blocked || exists);
+      submit.disabled = busy || !name || !!blocked;
+    };
+    input.addEventListener('input', paintName);
+    input.focus(); input.select();
+    form.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopPropagation(); });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const name = input.value.trim();
+      if (busy || !name || submit.disabled) return;
+      busy = true; paintName();
+      try {
+        const result = await mixStore.exportPreset({...draft, name, overwrite: !!presets?.names.has(name),
+          main_history_id: selected === 'empty' ? null : selected});
+        closeMenu();
+        showToast(`프리셋으로 내보냈습니다: ${result.name}${result.overwritten ? ' (덮어씀)' : ''}`, 'success');
+        for (const warning of result.warnings || []) showToast(warning, 'warning');
+      } catch (error) {
+        showToast(error?.message || '프리셋으로 내보내지 못했습니다.', 'error');
+        if (ticket === pageSeq) { busy = false; paintName(); }
+      }
+    });
+    try {
+      const [rows, listed] = await Promise.all([mixStore.candidates(liveArtists(draft.blocks)), mixStore.presets()]);
+      if (ticket !== pageSeq) return;
+      presets = {current: String(listed?.current || ''), names: new Set((listed?.presets || []).map(row => row.name))};
+      selected = rows[0]?.history_id || 'empty';
+      const candidates = form.querySelector('.mixq-candidates');
+      candidates.innerHTML = candidateHtml(rows, '', selected, {grid: false});
+      wireCandidateZoom(candidates);
+      candidates.addEventListener('click', event => {
+        const button = event.target.closest('[data-mixq-choice]');
+        if (!button || busy) return;
+        selected = button.dataset.mixqChoice;
+        for (const choice of candidates.querySelectorAll('button')) choice.setAttribute('aria-pressed', String(choice === button));
+      });
+    } catch (error) {
+      if (ticket !== pageSeq) return;
+      showToast(error?.message || '프리셋 목록을 읽지 못했습니다.', 'error');
+      form.querySelector('.mixq-candidates').textContent = '읽지 못했습니다. 다시 여세요.';
+      return;
+    }
+    busy = false;
+    paintName();
+    if (!coverMenu()) placeMenu(point.x, point.y);
+  }
+
+  function presetThumbHtml(url) {
+    return url ? `<span class="mixq-mix-thumb"><img src="${escHtml(url)}" alt=""></span>`
+      : '<span class="mixq-mix-thumb is-empty"></span>';
+  }
+
+  /** 프리셋 목록(지금 모드). 작가 태그가 없는 프리셋은 눌러도 가져올 것이 없어 잠근다. */
+  async function openPresetList(point = menuPoint()) {
+    if (!mixStore?.presets) return;
+    const ticket = ++pageSeq;
+    menuFor = ''; menuAt = -1;
+    menuEl.innerHTML = `<div class="mixq-page mixq-preset-page">
+      <div class="mixq-cover-head">
+        <button type="button" class="mixq-cover-back" data-mixq-back>◂ 프리셋에서 가져오기</button>
+        <button type="button" class="mixq-cover-close" data-mixq-close aria-label="닫기">✕</button>
+      </div>
+      <div class="mixq-preset-list">불러오는 중…</div></div>`;
+    if (!coverMenu()) placeMenu(point.x, point.y);
+    menuEl.querySelector('[data-mixq-back]').addEventListener('click', () => void openMixList(point.x, point.y));
+    menuEl.querySelector('[data-mixq-close]').addEventListener('click', () => closeMenu());
+    const host = menuEl.querySelector('.mixq-preset-list');
+    try {
+      const listed = await mixStore.presets();
+      if (ticket !== pageSeq) return;
+      const rows = listed?.presets || [];
+      const byName = new Map(rows.map(row => [row.name, row]));
+      host.innerHTML = rows.length ? rows.map(row => `
+        <button type="button" class="mixq-preset-row" data-mixq-preset="${escHtml(row.name)}"${row.artists ? '' : ' disabled'}>
+          ${presetThumbHtml(row.thumbnail_url)}<span class="mixq-preset-name">${escHtml(row.name)}</span>
+          ${row.is_current ? '<em class="mixq-preset-tag">지금</em>' : ''}
+          <small>${row.artists ? `작가 ${row.artists}` : '작가 없음'}</small></button>`).join('')
+        : '<div class="mixq-mix-empty">프리셋이 없습니다</div>';
+      host.addEventListener('click', event => {
+        const button = event.target.closest('[data-mixq-preset]');
+        if (button && !button.disabled) void openPresetImport(byName.get(button.dataset.mixqPreset), point);
+      });
+    } catch (error) {
+      if (ticket !== pageSeq) return;
+      host.textContent = '프리셋 목록을 읽지 못했습니다.';
+      showToast(error?.message || '프리셋 목록을 읽지 못했습니다.', 'error');
+    }
+  }
+
+  /** 프리셋 -> 띠, 불러오기 전에 **무엇이 오는지** 보여 준다(띠 미리보기 · 출처 · 알림).
+   *  ⚠️ 위치는 옮기지 않는다 - 표식은 지금 글 **맨 앞**에 새로 넣는다(기존 복원 규칙).
+   *  ⚠️ **지금 쓰는 프리셋**에서 가져오면 작가가 띠와 글로 **두 번** 나간다 - 이때만
+   *     "글에서 작가 빼기" 층이 뜨고 기본으로 켜진다. 빼는 글은 적용하는 **순간** 서버에서
+   *     다시 받는다(보는 사이 사용자가 글을 고쳤을 수 있다). */
+  async function openPresetImport(row, point = menuPoint()) {
+    const name = String(row?.name || '');
+    if (!name || !mixStore?.fromPreset) return;
+    const ticket = ++pageSeq;
+    menuFor = ''; menuAt = -1;
+    try {
+      const got = await mixStore.fromPreset(name);
+      if (ticket !== pageSeq) return;
+      const blocks = got?.blocks || [];
+      const names = [...new Set(blocks.filter(b => b.kind === 'artist').map(b => b.artist))];
+      let images = {};
+      try {
+        const described = await describeArtists(names) || {};
+        images = Object.fromEntries(Object.entries(described).map(([key, item]) => [key, item?.image_url || '']));
+      } catch (_) { /* 그림은 장식이다 - 빈 칸으로 보인다. */ }
+      if (ticket !== pageSeq) return;
+      const strip = got.strip || null;
+      const removed = strip ? [...strip.pre.removed, ...strip.post.removed] : [];
+      const kept = strip ? [...strip.pre.kept, ...strip.post.kept] : [];
+      let dedupe = removed.length > 0;
+      const notes = [got.source === 'copy' ? '내보낼 때 함께 저장한 띠 구조를 그대로 씁니다.'
+        : got.stale_copy ? '내보낸 뒤 글이 바뀌어 글에서 다시 읽었습니다.' : '프리셋 글에서 아티스트 태그를 읽었습니다.'];
+      if (got.unknown?.length) notes.push(`사전에 없는 이름 ${got.unknown.length}: ${got.unknown.slice(0, 6).join(', ')}`);
+      if (got.overlap?.length) notes.push(`지금 글에도 있는 작가 ${got.overlap.length}: ${got.overlap.slice(0, 6).join(', ')} - 두 번 나갑니다.`);
+      if (kept.length) notes.push(`다른 태그와 한 묶음인 작가는 글에서 빼지 않습니다: ${kept.slice(0, 4).join(', ')}`);
+      const dedupeRow = removed.length ? layerRowHtml('dedupe', '글에서 작가 빼기',
+        `prefix −${strip.pre.removed.length} · postfix −${strip.post.removed.length}`,
+        `<label>빠지는 것</label><pre class="mixq-saved-text">${escHtml(removed.join('\n'))}</pre>`, false) : '';
+      menuEl.innerHTML = `<div class="mixq-page mixq-detail-page mixq-import-page">
+        <div class="mixq-cover-head">
+          <button type="button" class="mixq-cover-back" data-mixq-back>◂ ${escHtml(name)}</button>
+          <button type="button" class="mixq-cover-close" data-mixq-close aria-label="닫기">✕</button>
+        </div>
+        <div class="mixq-detail-body">
+          <div class="mixq-detail-top">
+            <span class="mixq-main-thumb">${presetThumbHtml(row.thumbnail_url)}</span>
+            <div class="mixq-detail-strip" aria-label="조합 띠 미리보기">${blocks.length
+              ? stripPreviewHtml({blocks}, images) : '<span class="mixq-mix-empty">아티스트 태그가 없습니다</span>'}</div>
+          </div>
+          <div class="mixq-import-notes">${notes.map(text => `<p>${escHtml(text)}</p>`).join('')}</div>
+          <div class="mixq-layers">${dedupeRow}</div>
+        </div>
+        <button type="button" class="mixq-commit" data-mixq-apply${blocks.length ? '' : ' disabled'}>불러오기 · 아티스트</button></div>`;
+      menuEl.querySelector('[data-mixq-back]').addEventListener('click', () => void openPresetList(point));
+      menuEl.querySelector('[data-mixq-close]').addEventListener('click', () => closeMenu());
+      const applyButton = menuEl.querySelector('[data-mixq-apply]');
+      const layer = menuEl.querySelector('[data-mixq-layer="dedupe"]');
+      const paint = () => {
+        applyButton.textContent = dedupe ? '불러오기 · 아티스트 + 글에서 빼기' : '불러오기 · 아티스트';
+        if (!layer) return;
+        layer.setAttribute('aria-pressed', String(dedupe));
+        layer.querySelector('.mixq-dot').textContent = dedupe ? '●' : '○';
+      };
+      layer?.addEventListener('click', () => { dedupe = !dedupe; paint(); });
+      for (const more of menuEl.querySelectorAll('[data-mixq-more]')) {
+        more.addEventListener('click', () => {
+          const body = menuEl.querySelector(`[data-mixq-body="${more.dataset.mixqMore}"]`);
+          body.hidden = !body.hidden;
+          more.setAttribute('aria-expanded', String(!body.hidden));
+          more.textContent = body.hidden ? '▾' : '▴';
+        });
+      }
+      paint();
+      applyButton.addEventListener('click', async () => {
+        applyButton.disabled = true;
+        try {
+          if (dedupe) {
+            // 적용하는 순간의 글로 다시 뺀다 - 보여 준 뒤 글이 바뀌었을 수 있다.
+            const fresh = await mixStore.fromPreset(name);
+            if (!fresh?.strip) throw new Error('지금 프리셋이 바뀌었습니다 - 다시 여세요.');
+            // ⚠️ 앵커 번호는 **새로** 발급한다 - 사본의 번호는 그 사본을 만든 글의 주소다.
+            const rows = fresh.blocks.map(block => (block.kind === 'anchor' ? {...block, id: ''} : block));
+            await restoreMix({blocks: rows, text: {pre: fresh.strip.pre.text, post: fresh.strip.post.text}},
+              name, {text: true});
+          } else {
+            await restoreMix({blocks}, name);
+          }
+          closeMenu();
+          showToast(`프리셋에서 조합을 가져왔습니다: ${name}`, 'success');
+        } catch (error) {
+          showToast(error?.message || '프리셋에서 가져오지 못했습니다.', 'error');
+        } finally { applyButton.disabled = false; }
+      });
+      if (!coverMenu()) placeMenu(point.x, point.y);
+    } catch (error) {
+      if (ticket === pageSeq) showToast(error?.message || '프리셋을 읽지 못했습니다.', 'error');
+    }
+  }
+
   /** 판을 **덮을 자리(썸네일 격자)** 에 딱 맞춘다. 자리가 없거나 너무 작으면 false -
    *  부른 쪽이 `placeMenu` 로 작은 판을 띄운다.
    *  ⚠️ 격자의 데이터·쪽 위치는 **건드리지 않는다**. 위에 얹을 뿐이라 닫으면 그대로다
@@ -1079,6 +1310,7 @@ export function createMixQueuePanel({
   barEl?.addEventListener('click', event => {
     const act = event.target.closest('[data-mixq-bar]')?.dataset.mixqBar;
     if (act === 'save') { revealSaveForm(); return; }
+    if (act === 'export') { revealExportForm(); return; }
     if (act === 'load') {
       const r = event.target.getBoundingClientRect();
       void openMixList(r.left, r.bottom + 2);
@@ -1106,6 +1338,7 @@ export function createMixQueuePanel({
     }
     const rename = event.target.closest('[data-mixq-rename]');
     if (rename) { event.stopPropagation(); renameMix(rename); return; }
+    if (event.target.closest('[data-mixq-from-presets]')) { event.stopPropagation(); void openPresetList(); return; }
     const detail = event.target.closest('[data-mixq-detail]');
     if (detail) { event.stopPropagation(); void openMixDetail(detail.dataset.mixqDetail); return; }
     const pick = event.target.closest('[data-mixq-mix]');

@@ -949,6 +949,42 @@ class PromptEngineeringHeadlessStore:
         self.set_preset(name, mode_key)
         return True, name
 
+    def export_preset(
+        self,
+        preset_name: str,
+        mode: str | None,
+        data: dict[str, Any],
+        *,
+        overwrite: bool = False,
+    ) -> tuple[bool, str]:
+        """다른 곳(믹스 조합)에서 만든 프리셋을 **파일로만** 쓴다.
+
+        ⚠️ `create_preset` 을 쓰면 안 된다. 그쪽은 `refresh()` 로 디스크에서 상태를 다시
+           조립해 **아직 파일에 안 쓴 편집을 버리고**, 곧바로 `set_preset` 으로 현재
+           프리셋을 새것으로 **바꾼다**(사용자 결정 2026-09-21: 내보내도 전환하지 않는다).
+           여기서는 파일을 쓰고 이름 목록만 다시 읽는다 - 살아 있는 설정은 그대로다.
+        ⚠️ **지금 쓰는 프리셋에는 쓰지 않는다.** 다음 `persist_active_settings` 가 살아
+           있는(표식이 박힌) 설정으로 곧바로 되돌려 버린다 - 조용한 되돌림이다.
+
+        반환: (성공, 이름 또는 사유). 같은 이름이 있고 `overwrite` 가 아니면 사유는 "exists".
+        """
+        mode_key = self.mode(mode)
+        name = sanitize_preset_name(preset_name)
+        if not name:
+            return False, "프리셋 이름이 비어 있습니다."
+        if name in {"default", "*randomized"} or name.endswith(".hires"):
+            return False, f"이 이름으로는 내보낼 수 없습니다: {name}"
+        state = self.state(mode_key)
+        if name == state.get("current_preset"):
+            return False, "지금 쓰는 프리셋에는 내보낼 수 없습니다 - 다른 이름을 고르세요."
+        if name in self.list_preset_names(mode_key) and not overwrite:
+            return False, "exists"
+        payload = copy.deepcopy(data or {})
+        payload["api_mode"] = mode_key
+        self.write_preset_data(name, mode_key, payload)
+        state["preset_list"] = self.list_preset_names(mode_key)
+        return True, name
+
     def delete_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         name = sanitize_preset_name(preset_name)

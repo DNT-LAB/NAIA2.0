@@ -153,6 +153,155 @@ def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnail
     raise ArtistMixError(f"unknown op: {op or '(empty)'}")
 
 
+# ── 믹스 <-> PE 프리셋 (사용자 지정 2026-09-21) ────────────────────────────
+#  규칙은 `core/artist_mix_preset.py` 머리말. 여기는 세션과 저장소를 잇는 한 곳이다.
+
+class MixPresetExists(ArtistMixError):
+    """같은 이름의 프리셋이 있다 - 프론트가 [덮어쓰기] 를 물을 수 있게 따로 가른다."""
+
+    def __init__(self, name: str):
+        super().__init__(f"같은 이름의 프리셋이 있습니다: {name}", status=409)
+        self.name = name
+
+
+def _mix_known_artists(context, thumb_mode: str = "") -> frozenset:
+    """작가 사전(+ 팩 이름). 사전 파일을 매번 실행하면 느리다 - 세션에 한 번 담아 둔다.
+    SD 글에서 접두 없는 토큰이 작가인지 가르는 유일한 근거다."""
+    cache = getattr(context, "_mix_known_artists_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        context._mix_known_artists_cache = cache
+    key = str(thumb_mode or "")
+    if key not in cache:
+        weights = artist_thumbnail_service(context)._artist_weights(key)
+        cache[key] = frozenset(" ".join(str(name).split()).casefold() for name in weights)
+    return cache[key]
+
+
+def _pe_store(context):
+    from core.prompt_engineering_settings import get_prompt_engineering_store
+    return get_prompt_engineering_store(context)
+
+
+def _preset_source(context, name: str) -> dict:
+    """프리셋의 글. **지금 쓰는 프리셋이면 살아 있는 글**을 읽는다 - 파일은 아직 저장
+    안 된 편집을 모른다. 다른 프리셋은 파일이 곧 원본이다."""
+    store = _pe_store(context)
+    mode_key = store.mode()
+    clean = str(name or "").strip()
+    data = store.read_preset_data(clean, mode_key) if clean else {}
+    if not data:
+        raise ArtistMixError(f"프리셋을 찾을 수 없습니다: {clean}", status=404)
+    is_current = clean == str(store.state(mode_key).get("current_preset") or "")
+    source = store.collect_settings(mode_key) if is_current else (data.get("module_settings") or {})
+    return {"store": store, "mode": mode_key, "name": clean, "data": data, "is_current": is_current,
+            "pre": str(source.get("pre_prompt") or ""), "post": str(source.get("post_prompt") or "")}
+
+
+def _mix_preset_list(context, thumb_mode: str = "") -> dict:
+    from core.artist_mix_preset import parse_pieces
+    from core.prompt_engineering_settings import preset_thumbnail_url_map
+
+    store = _pe_store(context)
+    mode_key = store.mode()
+    names = store.list_preset_names(mode_key)
+    thumbs = preset_thumbnail_url_map(context, names, mode_key)
+    current = str(store.state(mode_key).get("current_preset") or "")
+    known = _mix_known_artists(context, thumb_mode)
+    rows = []
+    for name in names:
+        data = store.read_preset_data(name, mode_key)
+        settings = data.get("module_settings") or {}
+        count = 0
+        for key in ("pre_prompt", "post_prompt"):
+            for piece in parse_pieces(str(settings.get(key) or ""), known=known, allow_bare=mode_key != "NAI"):
+                count += sum(1 for m in (piece.get("members") or [piece]) if m.get("kind") == "artist")
+        rows.append({"name": name, "thumbnail_url": thumbs.get(name, ""), "artists": count,
+                     "is_current": name == current, "has_mix": isinstance(data.get("artist_mix"), dict)})
+    return {"mode": mode_key, "current": current, "presets": rows}
+
+
+def _mix_from_preset(context, name: str, thumb_mode: str = "") -> dict:
+    """프리셋 -> 띠 모양. 지금 쓰는 프리셋이면 **글에서 작가 빼기** 안도 함께 낸다
+    (띠와 글로 두 번 나가지 않게 - 적용은 프론트가 사용자에게 보여 주고 고른다)."""
+    from core.artist_mix_preset import import_blocks, parse_pieces, strip_artists
+
+    src = _preset_source(context, name)
+    allow_bare = src["mode"] != "NAI"
+    known = _mix_known_artists(context, thumb_mode)
+    result = import_blocks(src["data"], src["pre"], src["post"], known_fn=lambda: known, allow_bare=allow_bare)
+    names = {str(b.get("artist") or "") for b in result["blocks"] if b.get("kind") == "artist"}
+    payload = {"name": src["name"], "mode": src["mode"], "is_current": src["is_current"], **result}
+    if src["is_current"]:
+        payload["strip"] = {slot: strip_artists(src[slot], known=known, allow_bare=allow_bare, drop_anchors=True)
+                            for slot in ("pre", "post")}
+        payload["text"] = {"pre": src["pre"], "post": src["post"]}
+    else:
+        # 다른 프리셋에서 가져올 때는 지금 글을 건드리지 않는다 - 겹치는 이름만 알린다.
+        live = _pe_store(context).collect_settings(src["mode"])
+        overlap = []
+        for key in ("pre_prompt", "post_prompt"):
+            for piece in parse_pieces(str(live.get(key) or ""), known=known, allow_bare=allow_bare):
+                for m in (piece.get("members") or [piece]):
+                    if m.get("kind") == "artist" and m["artist"] in names and m["artist"] not in overlap:
+                        overlap.append(m["artist"])
+        payload["overlap"] = overlap
+    return payload
+
+
+def _export_mix_preset(context, payload: dict, mix_store: ArtistMixStore, result_store=None) -> dict:
+    """지금 띠 -> 프리셋 파일. 현재 프리셋은 **바꾸지 않는다**(사용자 결정 2026-09-21).
+
+    ⚠️ 글은 생성 때 나가는 것과 같게 **표식을 펼쳐** 쓴다(`baked_texts`).
+    ⚠️ 메인 프롬프트는 싣지 않는다 - 대개 마지막 랜덤 결과지 조합의 일부가 아니다.
+       (`_apply_main_settings` 는 `prompt` 키가 없으면 메인 프롬프트를 안 건드린다.)
+    ⚠️ 그림은 JSON 을 쓴 **뒤에** 쓴다 - 파일이 안 써졌는데 그림만 남으면 안 된다.
+    """
+    from core.artist_mix_preset import baked_texts, copy_record
+
+    store = _pe_store(context)
+    mode_key = store.mode()
+    name = str(payload.get("name") or "").strip()
+    settings = store.collect_settings(mode_key)
+    try:
+        texts = baked_texts(settings.get("pre_prompt", ""), settings.get("post_prompt", ""),
+                            payload.get("artist_prompt", ""), payload.get("anchor_groups"))
+    except ValueError as exc:
+        raise ArtistMixError(str(exc)) from exc
+    settings["pre_prompt"], settings["post_prompt"] = texts["pre"], texts["post"]
+    main_settings = context._prompt_engineering_service()._capture_main_settings()
+    main_settings.pop("prompt", None)
+    data = {"module_settings": settings, "main_settings": main_settings,
+            "artist_mix": copy_record(payload.get("blocks"), texts["pre"], texts["post"])}
+    existed = name in store.list_preset_names(mode_key)
+    old = store.read_preset_data(name, mode_key) if existed else {}
+    if old.get("description"):
+        data["description"] = old["description"]
+    ok, message = store.export_preset(name, mode_key, data, overwrite=bool(payload.get("overwrite")))
+    if not ok:
+        if message == "exists":
+            raise MixPresetExists(name)
+        raise ArtistMixError(message)
+    image = None
+    if payload.get("main_history_id"):
+        item = result_store.get_item(str(payload["main_history_id"])) if result_store else None
+        image = item.webp_bytes if item is not None else None
+    elif payload.get("mix_id"):
+        record = mix_store.one(payload["mix_id"])
+        main = (record.get("thumbs") or {}).get("main")
+        image = mix_store.thumbnail(record["id"], main) if main else None
+    thumbnail = None
+    warnings = []
+    if image:
+        from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
+        try:
+            thumbnail = save_prompt_engineering_thumbnail_bytes(context, message, mode_key, image)
+        except Exception as exc:     # 그림은 장식이다 - 프리셋은 이미 써졌다
+            warnings.append(f"썸네일을 쓰지 못했습니다: {exc}")
+    return {"ok": True, "name": message, "mode": mode_key, "overwritten": existed,
+            "thumbnail": thumbnail, "warnings": warnings}
+
+
 def _apply_group_op(store: ArtistGroupStore, payload: dict) -> dict:
     op = str(payload.get("op") or "").strip()
     gid = payload.get("id")
@@ -475,6 +624,47 @@ def register_artist_thumbnail_routes(
             return Response(data, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
         except ArtistMixError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
+
+    @app.get("/api/artist-mixes/presets")
+    async def api_artist_mix_presets(mode: str = ""):
+        try:
+            return await run_in_thread(_mix_preset_list, session_context, mode)
+        except Exception as exc:
+            return JSONResponse({"error": f"Preset list failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-mixes/from-preset")
+    async def api_artist_mix_from_preset(name: str = "", mode: str = ""):
+        try:
+            return await run_in_thread(_mix_from_preset, session_context, name, mode)
+        except ArtistMixError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except Exception as exc:
+            return JSONResponse({"error": f"Preset read failed: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-mixes/export-preset")
+    async def api_artist_mix_export_preset(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        try:
+            result = await run_in_thread(_export_mix_preset, session_context, payload,
+                                         artist_mix_store(session_context), session_context.result_store)
+        except MixPresetExists as exc:
+            return JSONResponse({"error": str(exc), "exists": True, "name": exc.name}, status_code=409)
+        except ArtistMixError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except Exception as exc:
+            return JSONResponse({"error": f"Preset export failed: {exc}"}, status_code=500)
+        # Quick Preset 목록·썸네일이 곧바로 따라오게 알린다(현재 프리셋은 그대로다).
+        from app.backend.server.websocket_broadcast import broadcast_json
+        await broadcast_json(clients, session_context.module_state_payload("prompt_engineering"))
+        if result.get("thumbnail"):
+            await broadcast_json(clients, {"type": "prompt_engineering_preset_thumbnail_updated",
+                                           **result["thumbnail"]})
+        return result
 
     @app.post("/api/artist-mixes")
     async def api_artist_mixes_mutate(req: Request):

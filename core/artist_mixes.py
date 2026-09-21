@@ -278,7 +278,12 @@ class ArtistMixStore:
         if isinstance(raw.get("negative"), str):
             record["negative"] = raw["negative"][:MAX_TEXT_LEN]
         if isinstance(raw.get("settings"), dict):
-            record["settings"] = _clean_settings(raw["settings"])
+            # ⚠️ 설정 하나가 이상하다고 레코드를, 하물며 **목록 전체**를 버리지 않는다.
+            #    예전에는 여기서 난 예외가 `_read()` 밖으로 새어 목록이 통째로 500 이었다.
+            try:
+                record["settings"] = _clean_settings(raw["settings"])
+            except ArtistMixError:
+                pass
         return record
 
     # ── 조회 ──────────────────────────────────────────────────────────────

@@ -29889,12 +29889,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-menu .mixq-choice { flex: 0 0 58px; padding: 3px; text-align: center; border: 1px solid transparent; }
 .mixq-choice small { display: block; font-size: 9px; white-space: nowrap; }
 .mixq-choice[aria-pressed="true"], .mixq-layer[aria-pressed="true"] { background: rgba(130,150,255,.18); border-color: #8296ff; }
-.mixq-thumb { display: inline-grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; vertical-align: middle; border-radius: 4px; background: rgba(127,127,127,.08); }
-.mixq-thumb img { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: cover; }
-.mixq-thumb.is-mosaic { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
-.mixq-thumb.is-empty { border: 1px dashed var(--border-glow); box-sizing: border-box; }
+/* ⚠️ `.mixq-thumb` 이 아니다 - 그 이름은 **띠 칸의 그림 상자**다. 한때 여기서 같은 이름을
+   전역으로 써 띠의 모든 그림이 38px 로 쪼그라들었다(2026-09-21). */
+.mixq-mix-thumb { display: inline-grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; vertical-align: middle; border-radius: 4px; background: rgba(127,127,127,.08); }
+.mixq-mix-thumb img { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: cover; }
+.mixq-mix-thumb.is-mosaic { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
+.mixq-mix-thumb.is-empty { border: 1px dashed var(--border-glow); box-sizing: border-box; }
 .mixq-main-thumb { align-self: center; }
-.mixq-main-thumb .mixq-thumb { width: 110px; height: 110px; }
+.mixq-main-thumb .mixq-mix-thumb { width: 110px; height: 110px; }
 .mixq-mix-row > button:first-child { display: flex; align-items: center; gap: 5px; }
 .mixq-mix-row > button:first-child > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .mixq-layer { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }

@@ -608,10 +608,10 @@ export function createMixQueuePanel({
 
   function thumbHtml(record, images = []) {
     const main = thumbUrl(record, record?.thumbs?.main);
-    if (main) return `<span class="mixq-thumb"><img src="${escHtml(main)}" alt=""></span>`;
-    if (record?.thumbs?.fallback === 'empty') return '<span class="mixq-thumb is-empty" aria-label="비워 둠"></span>';
+    if (main) return `<span class="mixq-mix-thumb"><img src="${escHtml(main)}" alt=""></span>`;
+    if (record?.thumbs?.fallback === 'empty') return '<span class="mixq-mix-thumb is-empty" aria-label="비워 둠"></span>';
     const urls = record?.thumbs ? Object.values(record.thumbs.artists || {}).map(file => thumbUrl(record, file)) : images;
-    return `<span class="mixq-thumb is-mosaic">${urls.slice(0, 4).map(url => `<img src="${escHtml(url)}" alt="">`).join('')}</span>`;
+    return `<span class="mixq-mix-thumb is-mosaic">${urls.slice(0, 4).map(url => `<img src="${escHtml(url)}" alt="">`).join('')}</span>`;
   }
 
   function liveArtists(rows) {
@@ -620,10 +620,10 @@ export function createMixQueuePanel({
 
   function candidateHtml(rows, mosaic, selected) {
     const choices = [{id: 'mosaic', label: '모자이크', html: mosaic},
-      {id: 'empty', label: '비워 둠', html: '<span class="mixq-thumb is-empty"></span>'},
+      {id: 'empty', label: '비워 둠', html: '<span class="mixq-mix-thumb is-empty"></span>'},
       ...rows.slice(0, 24).map(row => ({id: row.history_id,
         label: row.exact_weights ? '가중치 일치' : '작가 일치',
-        html: `<span class="mixq-thumb"><img src="${escHtml(row.thumb_url)}" alt=""></span>`}))];
+        html: `<span class="mixq-mix-thumb"><img src="${escHtml(row.thumb_url)}" alt=""></span>`}))];
     return choices.map(choice => `<button type="button" class="mixq-choice" data-mixq-choice="${escHtml(choice.id)}"
       aria-pressed="${choice.id === selected}" title="${escHtml(choice.label)}">${choice.html}<small>${choice.label}</small></button>`).join('');
   }

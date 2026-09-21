@@ -56,27 +56,6 @@ def _mix_current_layers(context) -> dict:
     }}
 
 
-def _sync_mix_main_settings(context, values: dict) -> None:
-    """현재 프리셋에는 실제 적용한 메인 설정만 한 번 병합한다. PE 글은 건드리지 않는다."""
-    from core.prompt_engineering_settings import get_prompt_engineering_store
-
-    store = get_prompt_engineering_store(context)
-    mode = context.get_api_mode()
-    name = str(store.state(mode).get("current_preset") or "")
-    if name in {"", "(프리셋 없음)", "*randomized"}:
-        return
-    data = store.read_preset_data(name, mode)
-    if not data:
-        return
-    main = dict(data.get("main_settings") or {})
-    main.update(values)
-    if "negative" in values and "negative_prompt" in main:
-        main["negative_prompt"] = values["negative"]
-    ok, message = store.save_current_preset(mode, main_settings=main, write_module_settings=False)
-    if not ok:
-        raise RuntimeError(message)
-
-
 def _apply_mix_layers(context, record: dict, payload: dict) -> dict:
     from core.headless_remote_state_service import HeadlessRemoteStateService
 
@@ -129,13 +108,14 @@ def _apply_mix_layers(context, record: dict, payload: dict) -> dict:
         values["negative"] = record["negative"]
         applied.append("negative")
     if applied:
+        # ⚠️ **세션에만** 건다 - 프리셋 파일에 쓰지 않는다(2026-09-21 감사).
+        #    이 앱은 평소 파라미터 변경을 프리셋에 쓰지 않는다(프리셋 전환 코드:
+        #    "generated Main is not a save" - 명시적 [저장] 때만 쓴다). 조합 적용도
+        #    손으로 바꾼 것과 똑같이 동작해야 한다. 한때 여기서 지금 프리셋의
+        #    main_settings 를 고쳐 썼다 - 사용자가 청하지 않은 **영구 변경**이었다.
         context.save_remote_ui_state()
         schema = context.generation_param_schema_payload()
         context.publish("remote_params_changed", schema)
-        try:
-            _sync_mix_main_settings(context, values)
-        except Exception as exc:
-            warnings.append(f"세션에는 적용했지만 프리셋에 저장하지 못했습니다: {exc}")
     return {"applied": applied, "skipped": skipped, "warnings": warnings, "params": schema,
             "negative": context.negative_prompt_text}
 

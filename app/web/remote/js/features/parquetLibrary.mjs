@@ -149,17 +149,15 @@ export function recipeFacts(recipe) {
   return facts;
 }
 
-function ratingLetters(list) {
-  const on = new Set(Array.isArray(list) ? list : []);
-  return ['g', 's', 'q', 'e'].filter(r => on.has(r)).map(r => r.toUpperCase()).join('/');
+function ratingPills(ratings, esc) {
+  const on = new Set(Array.isArray(ratings) ? ratings : []);
+  return ['g', 's', 'q', 'e'].map(r =>
+    `<span class="pql-pill${on.has(r) ? ' is-on' : ''}">${esc(r.toUpperCase())}</span>`).join('');
 }
 
-// 한 줄: 앞말(흐리게) + 값 + '제외 …'(흐리게). 대문자 소제목·배지·키 열 없이 글줄로만 둔다
-// (사용자: 너무 AI 티가 난다 - 옆 창들(아티스트 그룹·PE)과 같은 담백한 모양으로).
-function line(lead, value, excluded, esc) {
-  if (!value && !excluded) return '';
-  return `<div class="pql-line"><span class="pql-lead">${esc(lead)}</span>${value ? `<span>${esc(value)}</span>` : ''}${
-    excluded ? `<span class="pql-lead">제외</span><span>${esc(excluded)}</span>` : ''}</div>`;
+function factRow(label, value, esc, cls = '') {
+  if (!value) return '';
+  return `<div class="pql-fact"><span class="pql-fact-k">${esc(label)}</span><span class="pql-fact-v ${cls}">${esc(value)}</span></div>`;
 }
 
 // 그리드 HTML. 기본은 **이름만**(사용자 지정). 누른 칸은 한 줄을 통째로 차지하며 펼쳐진다.
@@ -170,61 +168,80 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
   const items = list.map(card => {
     const name = String(card.name || '');
     const label = name.replace(/\.parquet$/i, '');
-    if (!openNames.has(name)) {
-      return `<button type="button" class="pql-tile" data-pql-name="${esc(name)}" data-pql="expand" title="${esc(label)}">${esc(label)}</button>`;
+    const open = openNames.has(name);
+    if (!open) {
+      return `<button type="button" class="pql-tile" data-pql-name="${esc(name)}" data-pql="expand" title="${esc(label)}">
+        <span class="pql-tile-name">${esc(label)}</span>
+      </button>`;
     }
     const f = recipeFacts(card.recipe);
+    const search = f.search;
     const tf = f.tagFilter || {};
-    const when = card.created_at ? String(card.created_at).replace('T', ' ').slice(5, 16) : '';
-    const meta = [formatRows(card.rows), when].filter(Boolean).join(' · ');
     const body = card.has_meta === false || !card.recipe
-      ? '<div class="pql-line pql-muted">조건 기록 없음</div>'
-      : [
-          f.search ? line('검색', f.search.query || '(전체)', f.search.exclude, esc) : '',
-          line('Tag Filter', (tf.include || []).join(', '), (tf.exclude || []).join(', '), esc),
-          `<div class="pql-line pql-muted">${esc([f.ratings ? ratingLetters(f.ratings) : '', f.search && f.search.period].filter(Boolean).join(' · '))}</div>`,
-          ...f.origins.map(o => `<div class="pql-line pql-muted">${esc(o)}</div>`),
-        ].join('');
+      ? '<div class="pql-fact pql-dim">조건 기록 없음 (명함 이전에 저장한 파일)</div>'
+      : `<div class="pql-fact"><span class="pql-fact-k">등급</span><span class="pql-fact-v">${f.ratings ? ratingPills(f.ratings, esc) : '<span class="pql-dim">기록 없음</span>'}</span></div>
+        <div class="pql-group">Search</div>
+        ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x') + factRow('기간', search.period, esc)
+                 : '<div class="pql-fact pql-dim">—</div>'}
+        <div class="pql-group">Tag Filter</div>
+        ${(tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)
+          ? factRow('포함', (tf.include || []).join(', '), esc) + factRow('제외', (tf.exclude || []).join(', '), esc, 'is-x')
+          : '<div class="pql-fact pql-dim">—</div>'}
+        ${f.origins.length ? `<div class="pql-group">출처</div>${f.origins.map(o => `<div class="pql-fact pql-origin">${esc(o)}</div>`).join('')}` : ''}`;
     const title = renaming === name
-      ? `<input class="pql-rename agw-name-input" data-pql-rename="${esc(name)}" value="${esc(label)}" spellcheck="false">`
+      ? `<input class="pql-rename" data-pql-rename="${esc(name)}" value="${esc(label)}" spellcheck="false">`
       : `<span class="pql-open-name" data-pql="expand" title="접기">${esc(label)}</span>`;
+    const stamp = [formatRows(card.rows), card.created_at ? String(card.created_at).replace('T', ' ').slice(0, 16) : '']
+      .filter(Boolean).join(' · ');
     return `<div class="pql-tile is-open" data-pql-name="${esc(name)}">
-      <div class="pql-open-head">${title}<span class="pql-meta">${esc(meta)}</span></div>
-      ${body}
+      <div class="pql-open-head">${title}<span class="pql-stamp">${esc(stamp)}</span></div>
+      <div class="pql-facts">${body}</div>
       <div class="pql-actions">
-        <button type="button" class="agw-btn" data-pql="load" title="현재 풀을 이 파일로 바꿉니다">불러오기</button>
-        <button type="button" class="agw-btn" data-pql="merge" title="현재 풀에 이 파일을 더합니다">합치기</button>
+        <button type="button" class="pql-btn is-main" data-pql="load" title="현재 풀을 이 파일로 바꿉니다">불러오기</button>
+        <button type="button" class="pql-btn" data-pql="merge" title="현재 풀에 이 파일을 더합니다">합치기</button>
         <span class="pql-spacer"></span>
-        <button type="button" class="agw-btn" data-pql="rename">이름 바꾸기</button>
-        <button type="button" class="agw-btn danger${confirmTrash === name ? ' is-armed' : ''}" data-pql="trash">${confirmTrash === name ? '한 번 더' : '휴지통'}</button>
+        <button type="button" class="pql-btn" data-pql="rename">이름 바꾸기</button>
+        <button type="button" class="pql-btn${confirmTrash === name ? ' pql-danger' : ''}" data-pql="trash">${confirmTrash === name ? '한 번 더 → 휴지통' : '휴지통'}</button>
       </div>
     </div>`;
   }).join('');
-  const empty = list.length ? '' : '<div class="pql-empty agw-empty">저장한 parquet 이 없습니다</div>';
+  const empty = list.length ? '' : '<div class="pql-empty">아직 저장한 parquet 이 없습니다. [Load / Save Parquets] ▸ 이 결과 저장…으로 만듭니다.</div>';
   return `<div class="pql-grid">${items}${empty}</div>`;
 }
 
 export const PQL_CSS = `
-.pql-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;align-content:start}
-.pql-tile{min-width:0;height:28px;padding:0 8px;border:1px solid var(--border-dim,#2c2c36);border-radius:7px;cursor:pointer;
-  background:rgba(255,255,255,0.03);color:var(--text-secondary,#c8c8d0);font-size:11px;text-align:left;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pql-tile:hover{color:var(--text-primary,#e8e8ee);border-color:var(--accent,#8d7bd6)}
-.pql-tile.is-open{grid-column:1/-1;height:auto;display:flex;flex-direction:column;gap:3px;padding:6px 8px;
-  white-space:normal;cursor:default;border-color:var(--accent,#8d7bd6);background:rgba(255,255,255,0.04)}
-.pql-open-head{display:flex;align-items:baseline;gap:8px;min-width:0;margin-bottom:1px}
-.pql-open-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-size:11.5px;font-weight:600;color:var(--text-primary,#e8e8ee);cursor:pointer}
-.pql-meta{font-size:10px;color:var(--text-muted,#9a9aa6);font-family:var(--font-mono,monospace);white-space:nowrap}
-.pql-line{display:flex;flex-wrap:wrap;column-gap:5px;font-size:10.5px;line-height:1.5;color:var(--text-secondary,#c8c8d0);word-break:break-all}
-.pql-lead{color:var(--text-muted,#9a9aa6)}
-.pql-muted{color:var(--text-muted,#9a9aa6)}
-.pql-actions{display:flex;gap:4px;align-items:center;margin-top:3px}
+.pql-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:5px;align-content:start}
+.pql-tile{display:flex;align-items:center;min-width:0;height:34px;padding:0 9px;border-radius:6px;cursor:pointer;text-align:left;
+  border:1px solid var(--border,#2c2c36);background:var(--bg-elevated,#1d1d24);color:var(--text,#e8e8ee)}
+.pql-tile:hover{border-color:var(--accent-blue,#8d7bd6)}
+.pql-tile-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600}
+.pql-tile.is-open{grid-column:1/-1;height:auto;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:7px 9px;
+  cursor:default;border-color:var(--accent-blue,#8d7bd6)}
+.pql-open-head{display:flex;align-items:baseline;gap:8px;min-width:0}
+.pql-open-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;cursor:pointer}
+.pql-stamp{font-family:var(--font-mono,monospace);font-size:10px;color:var(--accent-green,#5a9e6f);white-space:nowrap}
+.pql-rename{flex:1;min-width:0;font-size:11px;padding:1px 4px;background:var(--bg-surface,#15151b);color:var(--text,#e8e8ee);border:1px solid var(--accent-blue,#8d7bd6);border-radius:4px}
+.pql-facts{display:flex;flex-direction:column;gap:2px}
+.pql-group{margin-top:3px;font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--text-muted,#9a9aa6);text-transform:uppercase}
+.pql-fact{display:flex;gap:6px;font-size:10.5px;line-height:1.45;min-width:0}
+.pql-fact-k{flex:0 0 30px;color:var(--text-dimmer,#6c6c78)}
+.pql-fact-v{flex:1;min-width:0;word-break:break-all;color:var(--text,#d8d8e0);display:flex;flex-wrap:wrap;gap:3px}
+.pql-fact-v.is-x{color:#e39a9a}
+.pql-origin{color:var(--text-dim,#aaa)}
+.pql-pill{display:inline-flex;align-items:center;justify-content:center;width:18px;height:16px;border-radius:3px;font-size:9.5px;font-weight:700;
+  border:1px solid var(--border,#33333f);color:var(--text-dimmer,#6c6c78)}
+.pql-pill.is-on{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.pql-dim{color:var(--text-dimmer,#6c6c78);font-style:italic}
+.pql-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
 .pql-spacer{flex:1}
-.pql-actions .agw-btn.is-armed{color:#ff9c9c;border-color:rgba(255,96,96,0.7)}
-.pql-rename{flex:1}
-.pql-empty{grid-column:1/-1}
-.dragpanel.pqlw .dragpanel-body{padding:6px}
+.pql-btn{height:22px;padding:0 8px;font-size:10.5px;border-radius:4px;border:1px solid var(--border,#33333f);background:transparent;color:var(--text-dim,#aaa);cursor:pointer;white-space:nowrap}
+.pql-btn:hover{color:var(--text,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
+.pql-btn.is-main{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.pql-btn.pql-danger{border-color:#b85454;color:#f0a0a0}
+.pql-empty{grid-column:1/-1;font-size:10.5px;color:var(--text-dimmer,#6c6c78);padding:6px 2px}
+.dragpanel.pqlw{border-color:rgba(120,190,150,0.42)}
+.dragpanel.pqlw .dragpanel-head{background:rgba(120,190,150,0.10)}
+.dragpanel.pqlw .dragpanel-body{padding:7px}
 .search-save-form{display:flex;flex-direction:column;gap:4px;margin:4px 0;padding:6px 7px;border:1px solid var(--accent-green,#5a9e6f);border-radius:6px}
 .search-save-form[hidden]{display:none!important}
 .search-save-form .ssf-row{display:flex;gap:5px}

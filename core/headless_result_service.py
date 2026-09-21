@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import io
+import math
+import re
 from pathlib import Path
 import threading
 import uuid
@@ -310,6 +312,72 @@ class HeadlessResultStore:
             evicted_payloads=evicted_payloads,
             comfyui_metadata_injected=comfyui_metadata_injected,
         )
+
+    @staticmethod
+    def _mix_prompt_artists(prompt: str) -> dict[str, list[float]]:
+        """쉼표 토큰의 NAI/SD 껍데기를 읽는다. NAI 묶음 가중치는 닫힐 때까지 유지한다."""
+        found: dict[str, list[float]] = {}
+        stack: list[float] = []
+        number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
+        for raw in str(prompt or "").split(","):
+            token = raw.strip()
+            while head := re.match(rf"^({number})::\s*", token):
+                stack.append(float(head[1]))
+                token = token[head.end():]
+            weight = math.prod(stack)
+            while token.endswith("::"):
+                token = token[:-2].rstrip()
+                if stack:
+                    stack.pop()
+            sd = re.fullmatch(rf"\((.*):\s*({number})\)", token)
+            if sd:
+                token, weight = sd[1].strip(), float(sd[2]) * weight
+            name = " ".join(token.split()).casefold()
+            if name.startswith("artist:"):
+                name = name[7:].strip()
+            if name:
+                found.setdefault(name, []).append(round(weight, 2))
+        return found
+
+    def mix_candidates(self, artists: Any, limit: Any = 24) -> list[dict]:
+        if not isinstance(artists, list):
+            raise ValueError("artists list is required")
+        wanted: dict[str, list[float]] = {}
+        for row in artists[:400]:
+            if not isinstance(row, dict) or row.get("enabled") is False:
+                continue
+            name = " ".join(str(row.get("artist") or "").split()).casefold()
+            if name.startswith("artist:"):
+                name = name[7:].strip()
+            if not name:
+                continue
+            weight = float(row.get("weight", 1))
+            if not math.isfinite(weight):
+                raise ValueError("artist weight must be finite")
+            wanted.setdefault(name, []).append(round(weight, 2))
+        if not wanted:
+            return []
+        count = max(1, min(24, int(limit)))
+        with self._mutation_lock:
+            items = list(self._items)
+        candidates = []
+        for item in items:
+            found = self._mix_prompt_artists(item.generation_params.get("input", ""))
+            if not all(name in found for name in wanted):
+                continue
+            exact = True
+            for name, weights in wanted.items():
+                available = list(found[name])
+                for weight in weights:
+                    if weight in available:
+                        available.remove(weight)
+                    else:
+                        exact = False
+            candidates.append({"history_id": item.history_id,
+                               "thumb_url": f"/api/history/thumb/{item.history_id}",
+                               "exact_weights": exact, "created_at": item.created_at.isoformat()})
+        candidates.sort(key=lambda row: (row["exact_weights"], row["created_at"]), reverse=True)
+        return candidates[:count]
 
     def get_item(self, history_id: str) -> HeadlessHistoryItem | None:
         history_id = str(history_id or "")

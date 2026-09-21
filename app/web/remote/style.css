@@ -29871,12 +29871,34 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   /* ⚠️ `overflow-y: auto` 는 짝이 있다 - 창이 낮으면 `openMenu` 가 `max-height` 를
      씌운다. 그때 구르지 못하면 아랫줄이 **그냥 사라진다**(윗줄이 잘렸던 그 결함의
      거울상이다). 둘 중 하나만 고치지 마라. */
-  position: absolute; z-index: 50; min-width: 132px; padding: 3px; overflow-y: auto;
+  position: absolute; z-index: 50; min-width: 160px; box-sizing: border-box; padding: 3px; overflow-y: auto;
   border: 1px solid var(--border-glow); border-radius: 8px;
   background: var(--bg-surface); box-shadow: 0 14px 30px rgba(0,0,0,0.5);
   display: flex; flex-direction: column; gap: 1px;
 }
 .mixq-menu[hidden] { display: none !important; }
+
+.mixq-page { width: 250px; max-width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 5px; }
+.mixq-name-line { display: flex; align-items: center; gap: 4px; font-size: 10px; padding: 3px; }
+.mixq-name-input { flex: 1; width: 0; min-width: 0; color: var(--text-primary); background: var(--bg-deep); border: 1px solid var(--border-glow); border-radius: 4px; padding: 4px; font-size: 11px; }
+.mixq-candidates { display: flex; gap: 4px; overflow-x: auto; padding: 3px; min-width: 0; font-size: 10px; }
+.mixq-candidates[hidden] { display: none; }
+.mixq-menu .mixq-choice { flex: 0 0 58px; padding: 3px; text-align: center; border: 1px solid transparent; }
+.mixq-choice small { display: block; font-size: 9px; white-space: nowrap; }
+.mixq-choice[aria-pressed="true"], .mixq-layer[aria-pressed="true"] { background: rgba(130,150,255,.18); border-color: #8296ff; }
+.mixq-thumb { display: inline-grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; vertical-align: middle; border-radius: 4px; background: rgba(127,127,127,.08); }
+.mixq-thumb img { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: cover; }
+.mixq-thumb.is-mosaic { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
+.mixq-thumb.is-empty { border: 1px dashed var(--border-glow); box-sizing: border-box; }
+.mixq-main-thumb { align-self: center; }
+.mixq-main-thumb .mixq-thumb { width: 110px; height: 110px; }
+.mixq-mix-row > button:first-child { display: flex; align-items: center; gap: 5px; }
+.mixq-mix-row > button:first-child > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.mixq-layer { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.mixq-layer small { width: 100%; padding-left: 14px; font-size: 9px; }
+.mixq-added { color: #75dca7; } .mixq-removed { color: #ff9db1; }
+.mixq-menu .mixq-commit { border: 1px solid var(--border-glow); text-align: center; }
+
 .mixq-menu button {
   border: none; background: transparent; color: var(--text-primary);
   font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;

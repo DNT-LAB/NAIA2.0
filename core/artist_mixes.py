@@ -263,6 +263,14 @@ class ArtistMixStore:
                 return mix
         raise ArtistMixError(f"mix not found: {key}", status=404)
 
+    @staticmethod
+    def _summaries(mixes: list[dict]) -> list[dict]:
+        return [{key: mix[key] for key in ("id", "name", "updated", "thumbs")} for mix in mixes]
+
+    def summaries(self) -> list[dict]:
+        with self._lock:
+            return self._summaries(self._read())
+
     def one(self, mix_id: Any) -> dict:
         with self._lock:
             return self._find(self._read(), mix_id)
@@ -320,7 +328,8 @@ class ArtistMixStore:
 
     # ── 변경 ──────────────────────────────────────────────────────────────
     def save(self, name: Any, blocks: Any, *, text: Any = None, mix_id: Any = None,
-             artist_images: dict[str, bytes] | None = None, fallback: str = "mosaic") -> dict:
+             artist_images: dict[str, bytes] | None = None, fallback: str = "mosaic",
+             main_image: bytes | None = None) -> dict:
         """새로 만들거나, `mix_id` 가 있으면 그것을 덮어쓴다.
 
         ⚠️ **같은 이름이 있으면 그 자리를 덮는다.** 이름이 같은 조합이 둘 쌓이면
@@ -358,10 +367,24 @@ class ArtistMixStore:
                     thumbs["artists"][artist] = self._put_thumb(target["id"], "a", payload, 192)
                 except (OSError, ValueError) as exc:
                     warnings.append(f"{artist}: 썸네일을 담지 못했습니다 ({exc})")
+            if main_image:
+                thumbs["main"] = self._put_thumb(target["id"], "main", main_image, 512)
             target["thumbs"] = thumbs
             self._write(mixes)
             self._prune_thumbs(target["id"], self._thumb_names(thumbs))
-            return {"mixes": mixes, "id": target["id"], "warnings": warnings}
+            return {"mixes": self._summaries(mixes), "id": target["id"], "warnings": warnings}
+
+    def set_main(self, mix_id: Any, *, main_image: bytes | None, fallback: str = "mosaic") -> dict:
+        with self._lock:
+            mixes = self._read()
+            target = self._find(mixes, mix_id)
+            thumbs = target["thumbs"]
+            thumbs["main"] = self._put_thumb(target["id"], "main", main_image, 512) if main_image else ""
+            thumbs["fallback"] = "empty" if fallback == "empty" else "mosaic"
+            target["updated"] = int(time.time())
+            self._write(mixes)
+            self._prune_thumbs(target["id"], self._thumb_names(thumbs))
+            return {"mix": target}
 
     def rename(self, mix_id: Any, name: Any) -> dict:
         clean_name = _clean_name(name)
@@ -374,7 +397,7 @@ class ArtistMixStore:
             target["name"] = clean_name
             target["updated"] = int(time.time())
             self._write(mixes)
-            return {"mixes": mixes, "id": target["id"]}
+            return {"mixes": self._summaries(mixes), "id": target["id"]}
 
     def delete(self, mix_id: Any) -> dict:
         with self._lock:
@@ -383,4 +406,4 @@ class ArtistMixStore:
             mixes = [m for m in mixes if m is not target]
             self._write(mixes)
             self._prune_thumbs(target["id"], set())
-            return {"mixes": mixes, "id": target["id"]}
+            return {"mixes": self._summaries(mixes), "id": target["id"]}

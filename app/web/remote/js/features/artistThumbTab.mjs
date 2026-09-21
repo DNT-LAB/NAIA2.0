@@ -2978,7 +2978,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s2');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s3b');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -3015,17 +3015,22 @@ export function createArtistThumbController({
       anchorSlot: anchorSlotOf,
       placeAnchors: rows => placeAnchors(rows),
       restoreText: (text, anchorIds) => restoreText(text, anchorIds),
+      getMixState: () => ({text: {pre: peText('pre_prompt'), post: peText('post_prompt')}}),
       // 그림은 **이름으로 다시 받는다** - 주소는 지금 모드에 딸린 값이라 저장하지 않는다.
       describeArtists: names => describeArtists(names),
       // 조합 저장소. 프리셋이 아니라 자기 파일에 산다(`artist_mixes.json`).
       mixStore: {
         list: async () => (await getJson('/api/artist-mixes'))?.mixes || [],
-        save: (name, blocks) => postJson('/api/artist-mixes', {
+        save: (name, blocks, options = {}) => postJson('/api/artist-mixes', {
           op: 'save', name, blocks, mode: currentMode(),
           // ⚠️ prefix/postfix 원문은 **담아만 둔다**(2단계에서 자리까지 복원할 때 쓴다).
           //    나중에 담기 시작하면 그 전에 저장한 조합은 영영 복원할 수 없다.
           text: {pre: peText('pre_prompt'), post: peText('post_prompt')},
+          ...options,
         }),
+        one: async id => (await getJson(`/api/artist-mixes/one?id=${encodeURIComponent(id)}`)).mix,
+        candidates: async artists => (await postJson('/api/artist-mixes/candidates', {artists, limit: 24})).candidates || [],
+        setMain: (id, selection) => postJson('/api/artist-mixes', {op: 'set_main', id, ...selection}),
         remove: id => postJson('/api/artist-mixes', {op: 'delete', id}),
       },
       onAnchorRemove: id => dropAnchorFromText(id),

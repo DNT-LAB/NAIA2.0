@@ -49,6 +49,16 @@ function weightText(value) {
   return String(roundStep(value));
 }
 
+/** 글 diff는 표식 번호·불필요한 공백을 제외하고 쉼표 단위 집합을 비교한다. */
+export function mixTextDiff(current, saved) {
+  const tags = value => String(value ?? '').replace(/<anchor:[A-Za-z0-9_-]{1,32}>/g, '')
+    .split(',').map(tag => tag.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  const old = tags(current), next = tags(saved);
+  const before = new Set(old), after = new Set(next);
+  return {changed: old.join(', ') !== next.join(', '),
+    added: [...after].filter(tag => !before.has(tag)), removed: [...before].filter(tag => !after.has(tag))};
+}
+
 export function createMixQueuePanel({
   document: doc,
   escHtml = value => String(value ?? '')
@@ -84,6 +94,7 @@ export function createMixQueuePanel({
   //   (rows: [{id, slot}]) => void
   placeAnchors = () => {},
   restoreText = () => {},
+  getMixState = () => ({text: {pre: '', post: ''}}),
   // ── 앵커 ──
   // 표식이 아직 prefix/postfix 에 살아 있는가. 큐는 글을 안 갖고 있어 물어본다.
   hasAnchorIn = () => true,
@@ -117,6 +128,7 @@ export function createMixQueuePanel({
   const barNameEl = el.querySelector('.mixq-bar-name');
   // 마지막으로 저장하거나 불러온 이름. 저장 칸의 기본값이 되고 줄 끝에 적힌다.
   let mixName = '';
+  let pageSeq = 0;
   const broker = dragBrokerFor(doc);
 
   /** 큐. 마지막의 collab 블럭은 못 지우지만 **움직일 수는 있다**(사용자 지정). */
@@ -570,67 +582,205 @@ export function createMixQueuePanel({
     if (barNameEl) barNameEl.textContent = mixName;
   }
 
-  /** 이름 칸을 줄 안에 편다. 새 창을 띄우지 않는다 - 그룹 만들기와 같은 수법이다.
-   *  ⚠️ 저장은 **묻지 않고 전부 담는다**(사용자 지정). 여기서 정하는 것은 이름뿐이다. */
-  function revealSaveForm() {
-    if (!barEl || barEl.querySelector('.mixq-bar-input')) return;
-    const input = doc.createElement('input');
-    input.className = 'mixq-bar-input';
-    input.type = 'text';
-    input.value = mixName;
-    input.placeholder = '조합 이름';
-    input.maxLength = 40;
-    const close = () => { input.remove(); paintBar(); };
-    input.addEventListener('keydown', event => {
-      event.stopPropagation();          // Esc 가 메뉴 닫기로 새지 않게
-      if (event.key === 'Escape') { close(); return; }
-      if (event.key !== 'Enter' || event.isComposing) return;
-      const name = input.value.trim();
-      if (!name) { input.focus(); return; }
-      close();
-      void saveMix(name);
-    });
-    input.addEventListener('blur', () => setTimeout(close, 120));
-    barEl.appendChild(input);
-    input.focus();
-    input.select();
+  /** 저장·목록·상세는 같은 메뉴 안의 쪽이다. 늦은 응답이 닫힌 쪽을 다시 열지 않는다. */
+  function menuPoint() {
+    const r = menuEl.hidden ? barEl.getBoundingClientRect() : menuEl.getBoundingClientRect();
+    return {x: r.left, y: menuEl.hidden ? r.bottom + 2 : r.top};
   }
 
-  async function saveMix(name) {
+  function thumbUrl(record, filename) {
+    return filename ? `/api/artist-mixes/thumb?id=${encodeURIComponent(record.id)}&file=${encodeURIComponent(filename)}` : '';
+  }
+
+  function thumbHtml(record, images = []) {
+    const main = thumbUrl(record, record?.thumbs?.main);
+    if (main) return `<span class="mixq-thumb"><img src="${escHtml(main)}" alt=""></span>`;
+    if (record?.thumbs?.fallback === 'empty') return '<span class="mixq-thumb is-empty" aria-label="비워 둠"></span>';
+    const urls = record?.thumbs ? Object.values(record.thumbs.artists || {}).map(file => thumbUrl(record, file)) : images;
+    return `<span class="mixq-thumb is-mosaic">${urls.slice(0, 4).map(url => `<img src="${escHtml(url)}" alt="">`).join('')}</span>`;
+  }
+
+  function liveArtists(rows) {
+    return (rows || []).filter(row => row.kind === 'artist' && row.enabled !== false);
+  }
+
+  function candidateHtml(rows, mosaic, selected) {
+    const choices = [{id: 'mosaic', label: '모자이크', html: mosaic},
+      {id: 'empty', label: '비워 둠', html: '<span class="mixq-thumb is-empty"></span>'},
+      ...rows.slice(0, 24).map(row => ({id: row.history_id,
+        label: row.exact_weights ? '가중치 일치' : '작가 일치',
+        html: `<span class="mixq-thumb"><img src="${escHtml(row.thumb_url)}" alt=""></span>`}))];
+    return choices.map(choice => `<button type="button" class="mixq-choice" data-mixq-choice="${escHtml(choice.id)}"
+      aria-pressed="${choice.id === selected}" title="${escHtml(choice.label)}">${choice.html}<small>${choice.label}</small></button>`).join('');
+  }
+
+  function selectionPayload(selected) {
+    return {fallback: selected === 'empty' ? 'empty' : 'mosaic',
+      main_history_id: ['empty', 'mosaic'].includes(selected) ? null : selected};
+  }
+
+  async function revealSaveForm() {
     if (!mixStore?.save) return;
+    const draft = {blocks: mixSnapshot(), ...getMixState()};
+    if (!liveArtists(draft.blocks).length && !draft.blocks.some(row => row.kind === 'artist')) {
+      showToast('먼저 아티스트를 넣으세요.', 'warning'); return;
+    }
+    const point = menuPoint();
+    const ticket = ++pageSeq;
+    menuFor = ''; menuAt = -1;
+    menuEl.innerHTML = `<form class="mixq-page mixq-save-page">
+      <label class="mixq-name-line">이름 <input class="mixq-name-input" aria-label="조합 이름" maxlength="40" value="${escHtml(mixName)}"></label>
+      <div class="mixq-candidates" aria-label="주 썸네일 후보">불러오는 중…</div>
+      <button type="submit" class="mixq-commit" disabled>저장</button></form>`;
+    placeMenu(point.x, point.y);
+    const input = menuEl.querySelector('input');
+    const form = menuEl.querySelector('form');
+    input.focus(); input.select();
+    form.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopPropagation(); });
+    let selected = 'mosaic';
+    let busy = true;
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (busy || !input.value.trim()) return;
+      busy = true;
+      form.querySelector('[type=submit]').disabled = true;
+      const ok = await saveMix(input.value, draft, selectionPayload(selected));
+      if (!ok && ticket === pageSeq) { busy = false; form.querySelector('[type=submit]').disabled = false; }
+    });
     try {
-      const result = await mixStore.save(name, mixSnapshot());
-      for (const warning of result?.warnings || []) showToast(warning, 'warning');
-      mixName = name;
+      const rows = await mixStore.candidates(liveArtists(draft.blocks));
+      if (ticket !== pageSeq) return;
+      selected = rows[0]?.history_id || 'mosaic';
+      const images = blocks.filter(b => !isAnchor(b) && b.id !== COLLAB_ID && b.image).map(b => b.image);
+      const candidates = form.querySelector('.mixq-candidates');
+      candidates.innerHTML = candidateHtml(rows, thumbHtml(null, images), selected);
+      candidates.addEventListener('click', event => {
+        const button = event.target.closest('[data-mixq-choice]');
+        if (!button || busy) return;
+        selected = button.dataset.mixqChoice;
+        for (const choice of candidates.querySelectorAll('button')) choice.setAttribute('aria-pressed', String(choice === button));
+      });
+    } catch (error) {
+      if (ticket !== pageSeq) return;
+      showToast(error?.message || '후보를 읽지 못했습니다.', 'error');
+      form.querySelector('.mixq-candidates').textContent = '후보를 읽지 못했습니다. 다시 여세요.';
+      return;
+    }
+    busy = false;
+    form.querySelector('[type=submit]').disabled = false;
+    placeMenu(point.x, point.y);
+  }
+
+  async function saveMix(name, draft, selection) {
+    try {
+      const result = await mixStore.save(name, draft.blocks, {...draft, ...selection});
+      mixName = result?.mixes?.find(row => row.id === result.id)?.name || name.trim();
       paintBar();
-      showToast(`조합을 저장했습니다: ${name}`, 'success');
+      closeMenu();
+      showToast(`조합을 저장했습니다: ${mixName}`, 'success');
+      for (const warning of result?.warnings || []) showToast(warning, 'warning');
+      return true;
     } catch (error) {
       showToast(error?.message || '조합 저장에 실패했습니다.', 'error');
+      return false;
     }
   }
 
-  /** 저장된 조합 목록을 **우클릭 메뉴 자리**에 편다 - 자리 계산·바깥 클릭 닫기가
-   *  이미 거기 있어서, 새 떠 있는 판을 하나 더 만들 이유가 없다. */
   async function openMixList(x, y) {
     if (!mixStore?.list) return;
-    let rows = [];
-    try { rows = await mixStore.list() || []; }
-    catch (error) { showToast(error?.message || '조합 목록을 읽지 못했습니다.', 'error'); return; }
-    menuFor = '';
-    menuAt = -1;
-    menuEl.innerHTML = rows.length
-      ? rows.map(row => `
-        <div class="mixq-mix-row">
-          <button type="button" data-mixq-mix="${escHtml(row.id)}"
-                  title="${escHtml(row.name)} - 불러오기">${escHtml(row.name)}</button>
-          <button type="button" class="mixq-mix-del" data-mixq-mix-del="${escHtml(row.id)}"
-                  title="지우기" aria-label="지우기">×</button>
-        </div>`).join('')
-      : '<div class="mixq-mix-empty">저장된 조합이 없습니다</div>';
+    const ticket = ++pageSeq;
+    menuFor = ''; menuAt = -1;
+    menuEl.innerHTML = '<div class="mixq-mix-empty">불러오는 중…</div>';
     placeMenu(x, y);
+    try {
+      const rows = await mixStore.list() || [];
+      if (ticket !== pageSeq) return;
+      menuEl.innerHTML = rows.length ? rows.map(row => `
+        <div class="mixq-mix-row">
+          <button type="button" data-mixq-mix="${escHtml(row.id)}" title="${escHtml(row.name)} - 아티스트만 불러오기">
+            ${thumbHtml(row)}<span>${escHtml(row.name)}</span></button>
+          <button type="button" data-mixq-detail="${escHtml(row.id)}" title="상세" aria-label="상세">▸</button>
+          <button type="button" class="mixq-mix-del" data-mixq-mix-del="${escHtml(row.id)}"
+            title="지우기" aria-label="지우기">×</button>
+        </div>`).join('') : '<div class="mixq-mix-empty">저장된 조합이 없습니다</div>';
+      placeMenu(x, y);
+    } catch (error) {
+      if (ticket === pageSeq) menuEl.innerHTML = '<div class="mixq-mix-empty">목록을 읽지 못했습니다.</div>';
+      showToast(error?.message || '조합 목록을 읽지 못했습니다.', 'error');
+    }
+  }
+
+  function textDiffHtml(label, diff) {
+    if (!diff.changed) return `${label} 같음`;
+    const tip = [...diff.added.map(tag => `+ ${tag}`), ...diff.removed.map(tag => `− ${tag}`)].slice(0, 8).join('\n');
+    return `<span title="${escHtml(tip)}">${label} <b class="mixq-added">+${diff.added.length}</b>
+      <b class="mixq-removed">−${diff.removed.length}</b>${!diff.added.length && !diff.removed.length ? ' 순서' : ''}</span>`;
+  }
+
+  async function openMixDetail(id, point = menuPoint()) {
+    const ticket = ++pageSeq;
+    menuFor = ''; menuAt = -1;
+    menuEl.innerHTML = '<div class="mixq-mix-empty">불러오는 중…</div>';
+    placeMenu(point.x, point.y);
+    try {
+      const record = await mixStore.one(id);
+      if (ticket !== pageSeq) return;
+      const now = getMixState();
+      const pre = mixTextDiff(now.text?.pre, record.text?.pre);
+      const post = mixTextDiff(now.text?.post, record.text?.post);
+      const choices = {text: false};
+      menuEl.innerHTML = `<div class="mixq-page mixq-detail-page">
+        <button type="button" data-mixq-back>◂ ${escHtml(record.name)}</button>
+        <button type="button" class="mixq-main-thumb" data-mixq-main title="주 썸네일 고르기">${thumbHtml(record)}</button>
+        <div class="mixq-candidates" hidden></div>
+        ${pre.changed || post.changed ? `<button type="button" class="mixq-layer" data-mixq-layer="text" aria-pressed="false">
+          <span class="mixq-dot">○</span> 글 <small>${textDiffHtml('prefix', pre)} · ${textDiffHtml('postfix', post)}</small></button>` : ''}
+        <button type="button" class="mixq-commit" data-mixq-apply>불러오기</button></div>`;
+      menuEl.querySelector('[data-mixq-back]').addEventListener('click', () => void openMixList(point.x, point.y));
+      for (const button of menuEl.querySelectorAll('[data-mixq-layer]')) {
+        button.addEventListener('click', () => {
+          const key = button.dataset.mixqLayer;
+          choices[key] = !choices[key];
+          button.setAttribute('aria-pressed', String(choices[key]));
+          button.querySelector('.mixq-dot').textContent = choices[key] ? '●' : '○';
+        });
+      }
+      menuEl.querySelector('[data-mixq-apply]').addEventListener('click', async event => {
+        event.currentTarget.disabled = true;
+        await restoreMix(record, record.name, choices);
+        closeMenu();
+        showToast(`조합을 불러왔습니다: ${record.name}`, 'success');
+      });
+      menuEl.querySelector('[data-mixq-main]').addEventListener('click', async () => {
+        const host = menuEl.querySelector('.mixq-candidates');
+        if (!host.hidden) { host.hidden = true; return; }
+        host.hidden = false;
+        host.textContent = '불러오는 중…';
+        placeMenu(point.x, point.y);
+        try {
+          const rows = await mixStore.candidates(liveArtists(record.blocks));
+          if (ticket !== pageSeq) return;
+          const fallbackRecord = {...record, thumbs: {...record.thumbs, main: '', fallback: 'mosaic'}};
+          host.innerHTML = candidateHtml(rows, thumbHtml(fallbackRecord), '');
+          host.onclick = async event => {
+            const button = event.target.closest('[data-mixq-choice]');
+            if (!button || host.dataset.busy) return;
+            host.dataset.busy = '1';
+            try {
+              await mixStore.setMain(id, selectionPayload(button.dataset.mixqChoice));
+              if (ticket === pageSeq) void openMixDetail(id, point);
+            } catch (error) { showToast(error?.message || '썸네일을 바꾸지 못했습니다.', 'error'); }
+            finally { delete host.dataset.busy; }
+          };
+          placeMenu(point.x, point.y);
+        } catch (error) { host.textContent = '후보를 읽지 못했습니다. 다시 여세요.'; showToast(error.message, 'error'); }
+      });
+      placeMenu(point.x, point.y);
+    } catch (error) { showToast(error?.message || '조합을 읽지 못했습니다.', 'error'); }
   }
 
   function openMenu(block, x, y) {
+    pageSeq += 1;
     menuFor = block ? block.id : '';
     menuEl.innerHTML = menuHtmlFor(block);
     placeMenu(x, y);
@@ -643,6 +793,9 @@ export function createMixQueuePanel({
     const box = el.getBoundingClientRect();
     const clipEl = el.closest('.dragpanel-body') || el.closest('.dragpanel') || doc.body;
     const clip = clipEl.getBoundingClientRect();
+    const width = Math.max(0, clip.width - PAD * 2);
+    menuEl.style.maxWidth = `${width}px`;
+    menuEl.style.minWidth = `${Math.min(160, width)}px`;
     const room = clip.height - PAD * 2;
     if (menuEl.getBoundingClientRect().height > room) {
       menuEl.style.maxHeight = `${Math.max(60, Math.round(room))}px`;
@@ -682,20 +835,23 @@ export function createMixQueuePanel({
       void openMixList(r.left, r.top);     // 목록을 그 자리에 다시 편다
       return;
     }
+    const detail = event.target.closest('[data-mixq-detail]');
+    if (detail) { event.stopPropagation(); void openMixDetail(detail.dataset.mixqDetail); return; }
     const pick = event.target.closest('[data-mixq-mix]');
     if (!pick) return;
     event.stopPropagation();
     const id = pick.dataset.mixqMix;
     closeMenu();
-    let rows = [];
-    try { rows = await mixStore.list() || []; } catch (_) { return; }
-    const row = rows.find(r => String(r.id) === String(id));
+    let row;
+    try { row = await mixStore.one(id); }
+    catch (error) { showToast(error?.message || '조합을 읽지 못했습니다.', 'error'); return; }
     if (!row) { showToast('그 조합을 찾지 못했습니다.', 'error'); return; }
     await restoreMix(row, row.name);
     showToast(`조합을 불러왔습니다: ${row.name}`, 'success');
   }, true);
 
   function closeMenu() {
+    pageSeq += 1;
     menuFor = '';
     menuEl.hidden = true;
   }
@@ -900,10 +1056,10 @@ export function createMixQueuePanel({
 
   menuEl.addEventListener('click', event => {
     const action = event.target.closest('[data-mixq-menu]')?.dataset.mixqMenu;
+    if (!action) return;
     const at = menuAt;
     const block = find(menuFor);
     closeMenu();
-    if (!action) return;
     if (action === 'anchor-here') { addAnchorAt(at < 0 ? blocks.length : at); return; }
     if (!block) return;
     if (action === 'anchor-above') { addAnchorAt(blocks.indexOf(block)); return; }

@@ -42,18 +42,26 @@ def artist_mix_store(context: WebSessionContext) -> ArtistMixStore:
 
 # 한 라우트가 op 로 갈라 받는다 - 프론트 호출부가 작아지고 검증이 한 곳에 모인다.
 _GROUP_OPS = {"create", "rename", "delete", "add", "remove", "reorder", "weight"}
-_MIX_OPS = {"save", "rename", "delete"}
+_MIX_OPS = {"save", "rename", "delete", "set_main"}
 
 
-def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnailService | None = None) -> dict:
+def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnailService | None = None, result_store=None) -> dict:
     op = str(payload.get("op") or "").strip()
+    main_image = None
+    if op in {"save", "set_main"} and payload.get("main_history_id"):
+        item = result_store.get_item(str(payload["main_history_id"])) if result_store else None
+        if item is None:
+            raise ArtistMixError("히스토리 후보가 사라졌습니다. 다시 선택하세요.", status=404)
+        main_image = item.webp_bytes
+    if op == "set_main":
+        return store.set_main(payload.get("id"), main_image=main_image, fallback=payload.get("fallback", "mosaic"))
     if op == "save":
         blocks = payload.get("blocks")
         names = [str(b.get("artist") or "").strip() for b in (blocks if isinstance(blocks, list) else [])[:400]
                  if isinstance(b, dict) and b.get("kind", "artist") == "artist"]
         images, warnings = service.capture_artist_images(payload.get("mode", ""), names) if service else ({}, [])
         result = store.save(payload.get("name"), blocks, text=payload.get("text"), mix_id=payload.get("id"),
-                            artist_images=images, fallback=payload.get("fallback", "mosaic"))
+                            artist_images=images, fallback=payload.get("fallback", "mosaic"), main_image=main_image)
         result["warnings"].extend(warnings)
         return result
     if op == "rename":
@@ -345,11 +353,30 @@ def register_artist_thumbnail_routes(
     @app.get("/api/artist-mixes")
     async def api_artist_mixes_list():
         try:
-            mixes = await run_in_thread(artist_mix_store(session_context).list)
+            mixes = await run_in_thread(artist_mix_store(session_context).summaries)
             return {"mixes": mixes}
         except Exception as exc:
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
             return JSONResponse({"error": f"Artist mixes unreadable: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-mixes/one")
+    async def api_artist_mix_one(id: str = ""):
+        try:
+            return {"mix": await run_in_thread(artist_mix_store(session_context).one, id)}
+        except ArtistMixError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+
+    @app.post("/api/artist-mixes/candidates")
+    async def api_artist_mix_candidates(req: Request):
+        try:
+            payload = await req.json()
+            if not isinstance(payload, dict):
+                raise ValueError("JSON object body required")
+            rows = await run_in_thread(session_context.result_store.mix_candidates,
+                                       payload.get("artists"), payload.get("limit", 24))
+            return {"candidates": rows}
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.get("/api/artist-mixes/thumb")
     async def api_artist_mix_thumb(id: str = "", file: str = ""):
@@ -371,7 +398,7 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"error": f"op must be one of {sorted(_MIX_OPS)}"}, status_code=400)
         try:
             return await run_in_thread(_apply_mix_op, artist_mix_store(session_context), payload,
-                                       artist_thumbnail_service(session_context))
+                                       artist_thumbnail_service(session_context), session_context.result_store)
         except ArtistMixError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
         except Exception as exc:

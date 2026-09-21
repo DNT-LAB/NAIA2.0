@@ -1,4 +1,5 @@
 import { createRatingStore, RATING_KEYS, filteredCount } from './ratingStore.mjs';
+import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs';
 
 export function createSearchPanel({
   document,
@@ -51,6 +52,14 @@ export function createSearchPanel({
   // editing again).
   let pendingEcho = { query: null, exclude: null };
   let lastParquetSig = null;
+  // Custom Parquet 카드 목록(parquetLibrary.mjs) - 다시 그려도 펼침·메뉴·이름 바꾸기 상태를 잇는다.
+  let lastLibrary = [];
+  let lastProvenance = null;
+  const pqlOpen = new Set();
+  let pqlMore = null;
+  let pqlRenaming = null;
+  let pqlConfirmTrash = null;
+  let pqlConfirmTimer = null;
 
   document.addEventListener('click', event => {
     if (!event.target.closest('.search-parquet-control')) closeParquetMenu();
@@ -213,10 +222,21 @@ export function createSearchPanel({
           // Keep the generic message when the server did not return JSON.
         }
         console.error(message);
+        // 예전엔 콘솔에만 남아 사용자는 실패를 몰랐다.
+        showToast(`불러오기 실패: ${message}`, 'error');
         unlockTagSurface();
+        return;
+      }
+      try {
+        const data = await response.json();
+        const verb = mode === 'merge' ? '합쳤습니다' : '불러왔습니다';
+        showToast(`${file.name} ${verb} (${Number(data.rows || 0).toLocaleString('en-US')}행 → 풀 ${Number(data.total || 0).toLocaleString('en-US')}행)`, 'success');
+      } catch (error) {
+        // 성공 본문을 못 읽어도 풀은 이미 바뀌었다 - 조용히 넘어간다.
       }
     } catch (error) {
       console.error('Parquet upload failed', error);
+      showToast('불러오기 실패: 서버에 닿지 못했습니다', 'error');
       unlockTagSurface();
     }
   }
@@ -238,12 +258,43 @@ export function createSearchPanel({
     if (list) list.classList.remove('collapsed');
   }
 
-  function runParquetAction(action) {
+  function runParquetAction(action, extra = {}) {
     const ws = getWs();
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     closeParquetMenu();
     lockTagSurface();
-    ws.send(JSON.stringify({type: 'search_parquet_action', action}));
+    ws.send(JSON.stringify({type: 'search_parquet_action', action, ...extra}));
+    return true;
+  }
+
+  // ---- '이 결과 저장' 양식 --------------------------------------------------------
+  // 저장 대상 = 지금 조건에 맞는 행 전체(등급·Tag Filter 반영, Random 이 뽑아 쓴 행 포함).
+  // 파일에는 만든 조건(명함)이 함께 새겨진다 - 목록 카드가 그걸 읽는다.
+  function saveFormNote() {
+    const origin = recipeSummary(lastProvenance);
+    return `지금 풀: ${origin || '조건 기록 없음'}\n+ 현재 등급·Tag Filter 조건이 그대로 기록됩니다.`;
+  }
+
+  function openSaveForm() {
+    closeParquetMenu();
+    const form = moduleBody.querySelector('.search-save-form');
+    if (!form) return;
+    form.hidden = false;
+    const note = form.querySelector('.ssf-note');
+    if (note) note.textContent = saveFormNote();
+    const input = form.querySelector('input');
+    if (input) { input.value = ''; input.focus(); }
+  }
+
+  function closeSaveForm() {
+    const form = moduleBody.querySelector('.search-save-form');
+    if (form) form.hidden = true;
+  }
+
+  function submitSaveForm() {
+    const input = moduleBody.querySelector('.search-save-form input');
+    const filename = (input && input.value || '').trim();
+    if (runParquetAction('export_results', filename ? { filename } : {})) closeSaveForm();
   }
 
   function toggleRating(rating) {
@@ -449,23 +500,128 @@ export function createSearchPanel({
     ).join('');
   }
 
-  function parquetSignature(message) {
-    return JSON.stringify(message.parquets || []);
+  function libraryFromMessage(message) {
+    if (Array.isArray(message.parquet_library)) return message.parquet_library;
+    // 옛 백엔드(카드 없음) - 이름만으로라도 그린다.
+    return (message.parquets || []).map(name => ({ name, rows: null, recipe: null, has_meta: false }));
   }
 
+  function parquetSignature(message) {
+    return librarySignature(libraryFromMessage(message));
+  }
+
+  // 예전엔 파일이 없으면 칸 자체가 없고, 있어도 접혀 있어 저장한 파일이 어디 있는지 몰랐다 -
+  // 항상 보이고 기본으로 펼친다. 카드 = 이름 · 행 수 · 만든 조건 요약(눌러서 펼침).
   function parquetSectionHtml(message) {
-    const files = message.parquets || [];
-    if (!files.length) return '';
-    const items = files.map(file =>
-      `<div class="search-parquet-item" onclick="loadParquet(${jsString(file)})">${escHtml(file)}</div>`
-    ).join('');
-    return `<div class="search-parquet-section" data-parquet-mode="${parquetPickMode}">
-      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.parentElement.querySelector('.search-parquet-list')?.classList.toggle('collapsed')">
-        Custom Parquets (${files.length}) <span class="mod-collapse-arrow">▶</span>
+    lastLibrary = libraryFromMessage(message);
+    return `<div class="search-parquet-section">
+      <div class="mod-section-label mod-collapsible open" data-pql-toggle>
+        Custom Parquets (${lastLibrary.length}) <span class="mod-collapse-arrow">▶</span>
       </div>
-      <div class="search-parquet-mode-label"></div>
-      <div class="search-parquet-list collapsed">${items}</div>
+      <div class="search-parquet-list">${libraryHtml(lastLibrary, {
+        escHtml, openNames: pqlOpen, moreName: pqlMore, renaming: pqlRenaming, confirmTrash: pqlConfirmTrash,
+      })}</div>
     </div>`;
+  }
+
+  function rerenderLibrary() {
+    const host = moduleBody.querySelector('.search-parquet-host');
+    if (!host) return;
+    const list = host.querySelector('.search-parquet-list');
+    const collapsed = !!list && list.classList.contains('collapsed');
+    host.innerHTML = parquetSectionHtml({ parquet_library: lastLibrary });
+    if (collapsed) {
+      host.querySelector('.search-parquet-list')?.classList.add('collapsed');
+      host.querySelector('[data-pql-toggle]')?.classList.remove('open');
+    }
+    if (pqlRenaming) {
+      const input = host.querySelector('.pql-rename');
+      if (input) { input.focus(); input.select(); }
+    }
+  }
+
+  function bindParquetLibrary() {
+    // 카드는 다시 그릴 때마다 새 요소라 위임으로 받는다(인라인 onclick·전역 함수 없음).
+    if (moduleBody._pqlBound) return;
+    moduleBody._pqlBound = true;
+    moduleBody.addEventListener('click', event => {
+      const toggle = event.target.closest('[data-pql-toggle]');
+      if (toggle) {
+        toggle.classList.toggle('open');
+        toggle.parentElement.querySelector('.search-parquet-list')?.classList.toggle('collapsed');
+        return;
+      }
+      if (event.target.closest('[data-ssf="save"]')) { submitSaveForm(); return; }
+      if (event.target.closest('[data-ssf="cancel"]')) { closeSaveForm(); return; }
+      if (event.target.closest('[data-ssf="open"]')) { openSaveForm(); return; }
+      const button = event.target.closest('[data-pql]');
+      const card = event.target.closest('.pql-card');
+      if (!button || !card) return;
+      const name = card.dataset.pqlName;
+      const action = button.dataset.pql;
+      if (action === 'load' || action === 'merge') {
+        loadParquet(name, action);
+      } else if (action === 'expand') {
+        if (pqlOpen.has(name)) pqlOpen.delete(name); else pqlOpen.add(name);
+        rerenderLibrary();
+      } else if (action === 'more') {
+        pqlMore = pqlMore === name ? null : name;
+        pqlConfirmTrash = null;
+        rerenderLibrary();
+      } else if (action === 'rename') {
+        pqlRenaming = name;
+        pqlMore = null;
+        rerenderLibrary();
+      } else if (action === 'trash') {
+        // 두 번 눌러야 옮긴다(휴지통이라 되살릴 수 있지만, 한 번 실수로 목록에서 사라지면 놀란다).
+        if (pqlConfirmTrash === name) {
+          pqlConfirmTrash = null;
+          pqlMore = null;
+          runParquetAction('trash', { filename: name });
+        } else {
+          pqlConfirmTrash = name;
+          clearTimeout(pqlConfirmTimer);
+          pqlConfirmTimer = setTimeout(() => { pqlConfirmTrash = null; rerenderLibrary(); }, 3000);
+          rerenderLibrary();
+        }
+      }
+    });
+    moduleBody.addEventListener('keydown', event => {
+      const rename = event.target.closest && event.target.closest('.pql-rename');
+      if (rename) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          const from = rename.dataset.pqlRename;
+          const to = rename.value.trim();
+          pqlRenaming = null;
+          if (to && to !== from.replace(/\.parquet$/i, '')) runParquetAction('rename', { filename: from, new_name: to });
+          else rerenderLibrary();
+        } else if (event.key === 'Escape') {
+          pqlRenaming = null;
+          rerenderLibrary();
+        }
+        return;
+      }
+      const save = event.target.closest && event.target.closest('.search-save-form input');
+      if (save) {
+        if (event.key === 'Enter') { event.preventDefault(); submitSaveForm(); }
+        else if (event.key === 'Escape') closeSaveForm();
+      }
+    });
+    moduleBody.addEventListener('focusout', event => {
+      if (event.target.classList && event.target.classList.contains('pql-rename') && pqlRenaming) {
+        pqlRenaming = null;
+        setTimeout(rerenderLibrary, 0);
+      }
+    });
+  }
+
+  function ensureParquetLibraryStyle() {
+    if (document.getElementById('pql-style')) return;
+    const style = document.createElement('style');
+    style.id = 'pql-style';
+    style.textContent = PQL_CSS;
+    document.head.appendChild(style);
   }
 
   function bindSearchInputs() {
@@ -494,6 +650,7 @@ export function createSearchPanel({
     const searchText = serverSearchTexts(message);
     pendingEcho = { query: null, exclude: null };
     lastParquetSig = parquetSignature(message);
+    if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
     moduleBody.innerHTML = `
     <div class="search-top-row">
       <div>
@@ -504,15 +661,23 @@ export function createSearchPanel({
         <div class="search-parquet-control">
           <button class="mod-action-btn mod-parquet" onclick="toggleSearchParquetMenu(event)" data-naia-guide="검색 결과셋(parquet) 입출력 메뉴. 저장된 결과셋을 불러오거나 현재 결과에 합치고, 현재 결과를 파일로 내보내거나 실행용으로 저장합니다.">Parquet</button>
           <div class="search-parquet-menu">
-            <button type="button" onclick="openSearchParquetUpload('load')" data-naia-guide="불러오기 — 저장해 둔 커스텀 parquet 결과셋을 불러옵니다. 현재 검색 결과를 이 결과셋으로 대체합니다.">불러오기</button>
-            <button type="button" onclick="openSearchParquetUpload('merge')" data-naia-guide="합치기 — 저장된 parquet 결과셋을 현재 결과에 이어붙입니다(union). 두 결과셋을 합쳐 더 넓은 풀을 만들 때 사용합니다.">합치기</button>
-            <button type="button" onclick="searchParquetAction('export_results')" data-naia-guide="내보내기 — 현재 검색 결과셋을 커스텀 parquet 파일로 저장합니다. 나중에 불러오기·합치기로 재사용할 수 있습니다.">내보내기</button>
+            <button type="button" data-ssf="open" data-naia-guide="이 결과 저장 — 지금 조건에 맞는 행 전체(등급·Tag Filter 반영)를 parquet 으로 저장합니다. 만든 조건이 파일에 함께 기록되어 아래 목록에서 무엇이 들었는지 보입니다.">이 결과 저장…</button>
+            <button type="button" onclick="openSearchParquetUpload('load')" data-naia-guide="PC에서 불러오기 — 내 컴퓨터의 parquet 파일로 지금 풀을 바꿉니다. (저장해 둔 파일은 아래 목록에서 바로 불러오세요.)">PC에서 불러오기</button>
+            <button type="button" onclick="openSearchParquetUpload('merge')" data-naia-guide="PC에서 합치기 — 내 컴퓨터의 parquet 파일을 지금 풀에 더합니다(중복 id 는 한 번만).">PC에서 합치기</button>
             <button type="button" onclick="searchParquetAction('save_runner')" data-naia-guide="실행파일 저장 — 현재 결과를 실행용 parquet(naia_temp_rows)로 저장합니다. 재시작·복구 시 이 풀에서 랜덤 프롬프트가 생성됩니다.">실행파일 저장</button>
           </div>
         </div>
         <button class="mod-action-btn mod-refine" onclick="openRefine()" data-naia-guide="심층검색(Refine) — 이미 검색된 결과셋을 아카이브 재스캔 없이 반복적으로 좁히고 합치는 작업대를 엽니다. 결과 위에서 추가 태그·범위로 단계적으로 다듬을 수 있습니다.">심층검색</button>
         <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()" data-naia-guide="복원 — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋(스냅샷) 전체로 되돌립니다.">복원</button>
       </div>
+    </div>
+    <div class="search-save-form" hidden>
+      <div class="ssf-row">
+        <input type="text" placeholder="파일 이름 (비우면 날짜로)" spellcheck="false">
+        <button type="button" class="pql-btn" data-ssf="save">저장</button>
+        <button type="button" class="pql-btn" data-ssf="cancel">취소</button>
+      </div>
+      <div class="ssf-note" style="white-space:pre-line"></div>
     </div>
     <div>
       <div class="dr-label-row">
@@ -544,6 +709,8 @@ export function createSearchPanel({
   `;
     bindSearchInputs();
     ensureDateRangeStyle();
+    ensureParquetLibraryStyle();
+    bindParquetLibrary();
     bindDateRangeDrag();
     bindTagIncrementButton();
     renderDateRange();
@@ -572,31 +739,19 @@ export function createSearchPanel({
     const sig = parquetSignature(message);
     if (sig === lastParquetSig) return;
     lastParquetSig = sig;
-    const host = moduleBody.querySelector('.search-parquet-host');
-    if (!host) return;
-    // Preserve the user's collapse / mode state across the in-place re-render.
-    const prevList = host.querySelector('.search-parquet-list');
-    const wasExpanded = !!prevList && !prevList.classList.contains('collapsed');
-    const prevHeader = host.querySelector('.mod-section-label.mod-collapsible');
-    const wasOpen = !!prevHeader && prevHeader.classList.contains('open');
-    const prevModeLabel = host.querySelector('.search-parquet-mode-label');
-    const prevModeText = prevModeLabel ? prevModeLabel.textContent : '';
-    host.innerHTML = parquetSectionHtml(message);
-    if (wasExpanded) {
-      const list = host.querySelector('.search-parquet-list');
-      if (list) list.classList.remove('collapsed');
-    }
-    if (wasOpen) {
-      const header = host.querySelector('.mod-section-label.mod-collapsible');
-      if (header) header.classList.add('open');
-    }
-    if (prevModeText) {
-      const modeLabel = host.querySelector('.search-parquet-mode-label');
-      if (modeLabel) modeLabel.textContent = prevModeText;
-    }
+    lastLibrary = libraryFromMessage(message);
+    // 사라진 파일의 펼침·메뉴 상태는 버린다(이름 바꾸기·휴지통 뒤).
+    const names = new Set(lastLibrary.map(card => card.name));
+    for (const name of [...pqlOpen]) if (!names.has(name)) pqlOpen.delete(name);
+    if (pqlMore && !names.has(pqlMore)) pqlMore = null;
+    if (pqlRenaming && !names.has(pqlRenaming)) pqlRenaming = null;
+    rerenderLibrary();
   }
 
   function updateSearchPanel(message) {
+    if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
+    const saveNote = moduleBody.querySelector('.search-save-form:not([hidden]) .ssf-note');
+    if (saveNote) saveNote.textContent = saveFormNote();
     const countEl = moduleBody.querySelector('.search-count-display');
     if (countEl) countEl.textContent = message.count || 0;
 
@@ -650,12 +805,14 @@ export function createSearchPanel({
     if (button) button.disabled = true;
   }
 
-  function loadParquet(filename) {
+  function loadParquet(filename, mode = parquetPickMode) {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     lockTagSurface();
+    // 카드마다 [불러오기]·[합치기] 가 따로 있다 - 예전엔 합치기 모드로 바꾸는 호출자가 없어
+    // 목록에서 합치기가 불가능했다.
     ws.send(JSON.stringify({
-      type: parquetPickMode === 'merge' ? 'merge_parquet' : 'load_parquet',
+      type: mode === 'merge' ? 'merge_parquet' : 'load_parquet',
       filename,
     }));
   }
@@ -1026,5 +1183,6 @@ export function createSearchPanel({
     runParquetAction,
     loadParquet,
     restoreSnapshot,
+    openSaveForm,
   };
 }

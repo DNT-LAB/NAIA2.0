@@ -148,6 +148,15 @@ export function createMixQueuePanel({
   let focusId = '';
   const focusBlock = () => blocks.find(b => b.id === focusId && !isAnchor(b)) || null;
 
+  // 방금 격자에서 **눌러 고정한** 작가. 연타를 한 손짓으로 묶는 표다.
+  //
+  // ⚠️ 중복 자체는 막지 않는다(사용자 지정 스펙 - 같은 작가를 두 번 쌓는 것은 쓰임새다).
+  //    막는 것은 **사이에 아무것도 없는 연타**뿐이다. 다른 작가를 고르거나 띠를 한 번
+  //    만지면 풀리고, 그때 다시 누르면 정상적으로 한 칸 더 쌓인다. 끌어다 놓는 길은
+  //    애초에 이 표를 안 본다 - 끌기는 그 자체로 '하나 더' 라는 분명한 뜻이다.
+  let pinnedByPick = '';
+  const clearPickStreak = () => { pinnedByPick = ''; };
+
   /** 초점을 옮기고 손잡이에 그 값을 씌운다.
    *  ⚠️ `syncGroupWeights` 가 Slave 를 건드릴 때는 **부르지 않는다** - 사용자가 만진
    *     것은 Master 하나뿐인데 초점이 마지막 Slave 로 튄다. */
@@ -477,6 +486,8 @@ export function createMixQueuePanel({
   }
 
   function applyWeight(block, value) {
+    // 가중치를 만졌다 = 손짓이 하나 끝났다. 이제 같은 카드를 눌러 한 칸 더 쌓아도 된다.
+    clearPickStreak();
     const hadFocus = block.id === focusId;
     block.weight = value;
     // 가중치를 만진 칸이 곧 '마지막으로 건드린 칸' 이다 - 손잡이가 이리로 온다.
@@ -846,6 +857,7 @@ export function createMixQueuePanel({
     // ⚠️ 이 줄이 없으면 아래 켜고 끄기가 먼저 먹어 칸이 꺼진다.
     if (event.target.closest('[data-mixq-pin]')) {
       block.temp = false;
+      clearPickStreak();
       setFocus(block);
       refresh();
       return;
@@ -1012,6 +1024,7 @@ export function createMixQueuePanel({
     const block = find(id);
     if (block?.temp) block.temp = false;
     if (block) setFocus(block);
+    clearPickStreak();
     refresh();          // 순서가 바뀌었으니 조립을 다시 낸다
   }
 
@@ -1124,10 +1137,16 @@ export function createMixQueuePanel({
       }
       if (temp && temp.artist === name) {
         temp.temp = false;
+        pinnedByPick = name;          // 여기서부터 같은 카드의 연타는 한 손짓이다
         setFocus(temp);
         refresh();
         return;
       }
+      // ⚠️ 방금 눌러 고정한 그 작가를 **바로 또** 누른 것 - 아무 일도 안 한다.
+      //    이 문이 없으면 두 번에 한 칸씩 영원히 쌓인다(사용자 제보 2026-09-21:
+      //    한 카드를 5번 누르니 3칸이 됐다).
+      if (!temp && pinnedByPick === name) return;
+      pinnedByPick = '';
       if (temp) {
         temp.artist = name;
         temp.image = image;

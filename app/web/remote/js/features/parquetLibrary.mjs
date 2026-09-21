@@ -152,7 +152,7 @@ export function recipeFacts(recipe) {
 function ratingPills(ratings, esc) {
   const on = new Set(Array.isArray(ratings) ? ratings : []);
   return ['g', 's', 'q', 'e'].map(r =>
-    `<span class="pql-pill${on.has(r) ? ' is-on' : ''}">${esc(r.toUpperCase())}</span>`).join('');
+    `<span class="pql-pill${on.has(r) ? ' is-on' : ''}" data-r="${r}">${esc(r.toUpperCase())}</span>`).join('');
 }
 
 function factRow(label, value, esc, cls = '') {
@@ -191,10 +191,9 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
     const title = renaming === name
       ? `<input class="pql-rename" data-pql-rename="${esc(name)}" value="${esc(label)}" spellcheck="false">`
       : `<span class="pql-open-name" data-pql="expand" title="접기">${esc(label)}</span>`;
-    const stamp = [formatRows(card.rows), card.created_at ? String(card.created_at).replace('T', ' ').slice(0, 16) : '']
-      .filter(Boolean).join(' · ');
+    const when = card.created_at ? String(card.created_at).replace('T', ' ').slice(0, 16) : '';
     return `<div class="pql-tile is-open" data-pql-name="${esc(name)}">
-      <div class="pql-open-head">${title}<span class="pql-stamp">${esc(stamp)}</span></div>
+      <div class="pql-open-head">${title}<span class="pql-stamp"><span class="pql-rows">${esc(formatRows(card.rows))}</span>${when ? ` · ${esc(when)}` : ''}</span></div>
       <div class="pql-facts">${body}</div>
       <div class="pql-actions">
         <button type="button" class="pql-btn is-main" data-pql="load" title="현재 풀을 이 파일로 바꿉니다">불러오기</button>
@@ -211,15 +210,17 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
 
 export const PQL_CSS = `
 .pql-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:5px;align-content:start}
+/* 칸 안쪽은 창 배경보다 어둡게 - 같은 색이면 칸과 창이 구분되지 않는다(사용자 지정). */
 .pql-tile{display:flex;align-items:center;min-width:0;height:34px;padding:0 9px;border-radius:6px;cursor:pointer;text-align:left;
-  border:1px solid var(--border,#2c2c36);background:var(--bg-elevated,#1d1d24);color:var(--text,#e8e8ee)}
+  border:1px solid var(--border,#2c2c36);background:rgba(0,0,0,0.24);color:var(--text,#e8e8ee)}
 .pql-tile:hover{border-color:var(--accent-blue,#8d7bd6)}
 .pql-tile-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600}
 .pql-tile.is-open{grid-column:1/-1;height:auto;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:7px 9px;
-  cursor:default;border-color:var(--accent-blue,#8d7bd6)}
+  cursor:default;border-color:var(--accent-blue,#8d7bd6);background:rgba(0,0,0,0.32)}
 .pql-open-head{display:flex;align-items:baseline;gap:8px;min-width:0}
 .pql-open-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;cursor:pointer}
-.pql-stamp{font-family:var(--font-mono,monospace);font-size:10px;color:var(--accent-green,#5a9e6f);white-space:nowrap}
+.pql-stamp{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-muted,#9a9aa6);white-space:nowrap}
+.pql-rows{color:#f5dc8a;font-weight:700}
 .pql-rename{flex:1;min-width:0;font-size:11px;padding:1px 4px;background:var(--bg-surface,#15151b);color:var(--text,#e8e8ee);border:1px solid var(--accent-blue,#8d7bd6);border-radius:4px}
 .pql-facts{display:flex;flex-direction:column;gap:2px}
 .pql-group{margin-top:3px;font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--text-muted,#9a9aa6);text-transform:uppercase}
@@ -230,13 +231,18 @@ export const PQL_CSS = `
 .pql-origin{color:var(--text-dim,#aaa)}
 .pql-pill{display:inline-flex;align-items:center;justify-content:center;width:18px;height:16px;border-radius:3px;font-size:9.5px;font-weight:700;
   border:1px solid var(--border,#33333f);color:var(--text-dimmer,#6c6c78)}
-.pql-pill.is-on{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+/* 켜진 등급 = Quick Filter 의 .rating-btn.active 색 그대로(style.css). */
+.pql-pill.is-on[data-r="g"]{background:#2e7d32;color:#fff;border-color:#4CAF50}
+.pql-pill.is-on[data-r="s"]{background:#1565C0;color:#fff;border-color:#2196F3}
+.pql-pill.is-on[data-r="q"]{background:#e65100;color:#fff;border-color:#FF9800}
+.pql-pill.is-on[data-r="e"]{background:#c62828;color:#fff;border-color:#F44336}
 .pql-dim{color:var(--text-dimmer,#6c6c78);font-style:italic}
 .pql-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
 .pql-spacer{flex:1}
 .pql-btn{height:22px;padding:0 8px;font-size:10.5px;border-radius:4px;border:1px solid var(--border,#33333f);background:transparent;color:var(--text-dim,#aaa);cursor:pointer;white-space:nowrap}
 .pql-btn:hover{color:var(--text,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
-.pql-btn.is-main{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.pql-btn.is-main{background:#2e7d32;border-color:#4CAF50;color:#fff;font-weight:600}
+.pql-btn.is-main:hover{background:#388e3c;border-color:#66bb6a;color:#fff}
 .pql-btn.pql-danger{border-color:#b85454;color:#f0a0a0}
 .pql-empty{grid-column:1/-1;font-size:10.5px;color:var(--text-dimmer,#6c6c78);padding:6px 2px}
 .dragpanel.pqlw{border-color:rgba(120,190,150,0.42)}

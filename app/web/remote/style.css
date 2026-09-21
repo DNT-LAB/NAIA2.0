@@ -29904,6 +29904,44 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .mixq-added { color: #75dca7; } .mixq-removed { color: #ff9db1; }
 .mixq-menu .mixq-commit { border: 1px solid var(--border-glow); text-align: center; }
 
+/* 모자이크 - 칸 수를 **그림 수에 맞춘다**(data-n). 늘 2x2 로 두었더니 작가 둘이면 위
+   절반만 그려지고 아래가 까맣게 비어 깨져 보였다(사용자 스크린샷 2026-09-21).
+   셋이면 왼쪽 하나를 길게 세우고 오른쪽에 둘. */
+.mixq-mix-thumb.is-mosaic[data-n="1"] { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.mixq-mix-thumb.is-mosaic[data-n="2"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+.mixq-mix-thumb.is-mosaic[data-n="3"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.mixq-mix-thumb.is-mosaic[data-n="3"] > img:first-child { grid-row: 1 / span 2; }
+
+/* 주 썸네일 고르기 = **격자 자리를 덮는 판**(사용자 지정 2026-09-21).
+   250px 판에 가로 한 줄로 욱여넣었더니 "보이지도 않고", 후보가 늘면 끝없이 옆으로
+   굴려야 했다. 창에서 가장 큰 자리(썸네일 격자) 위에 얹는다 - `coverMenu()`.
+   ⚠️ 칸 크기는 격자 폭에 따라 **스스로** 줄 수를 정한다(auto-fill) - 좁은 리모컨에서도
+      넘치지 않는다. 머리 줄([저장] ✕ / ◂)은 구르지 않는다. */
+.mixq-menu.is-cover { padding: 6px; gap: 6px; overflow: hidden; }
+.mixq-menu.is-cover .mixq-page { width: 100%; height: 100%; min-height: 0; }
+.mixq-cover-head { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.mixq-cover-head .mixq-name-line { flex: 1 1 auto; min-width: 0; padding: 0; }
+.mixq-menu .mixq-cover-head .mixq-commit { flex: 0 0 auto; padding: 5px 14px; }
+.mixq-menu .mixq-cover-close { flex: 0 0 auto; padding: 5px 8px; color: var(--text-muted); }
+.mixq-menu .mixq-cover-back {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-weight: 700;
+}
+.mixq-menu.is-cover .mixq-candidates {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  align-content: start; gap: 6px; padding: 2px;
+}
+.mixq-menu.is-cover .mixq-choice {
+  flex: none; display: flex; flex-direction: column; align-items: stretch;
+  gap: 3px; padding: 3px; border-radius: 7px;
+}
+.mixq-menu.is-cover .mixq-choice .mixq-mix-thumb {
+  width: 100%; height: auto; aspect-ratio: 3 / 4; flex: none; border-radius: 5px;
+}
+.mixq-menu.is-cover .mixq-choice[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #8296ff; }
+.mixq-menu.is-cover .mixq-choice small { font-size: 10px; }
+
 .mixq-menu button {
   border: none; background: transparent; color: var(--text-primary);
   font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;

@@ -101,6 +101,8 @@ export function createMixQueuePanel({
   // 이름 -> 그림 주소. **저장하지 않는다** - 주소는 지금 모드에 딸린 값이라,
   // 담아 두면 팩을 바꾼 뒤 엉뚱한 그림이 뜬다(또는 404 로 빈 칸이 된다).
   describeArtists = async () => ({}),
+  // 주 썸네일 고르기가 **덮을 자리**(보통 썸네일 격자). 없으면 작은 판으로 뜬다.
+  coverTarget = () => null,
   // 이 앵커의 표식이 지금 **어느 칸**에 있나. 'pre' | 'post'.
   anchorSlot = () => 'pre',
   // 복원 전용. 글에 남은 표식을 **전부 지우고** 새 표식을 그 칸 **앞**에 넣는 일을
@@ -611,21 +613,38 @@ export function createMixQueuePanel({
     if (main) return `<span class="mixq-mix-thumb"><img src="${escHtml(main)}" alt=""></span>`;
     if (record?.thumbs?.fallback === 'empty') return '<span class="mixq-mix-thumb is-empty" aria-label="비워 둠"></span>';
     const urls = record?.thumbs ? Object.values(record.thumbs.artists || {}).map(file => thumbUrl(record, file)) : images;
-    return `<span class="mixq-mix-thumb is-mosaic">${urls.slice(0, 4).map(url => `<img src="${escHtml(url)}" alt="">`).join('')}</span>`;
+    // ⚠️ 칸 수를 **그림 수에 맞춘다**(data-n). 늘 2x2 로 두었더니 작가 둘이면 위 절반만
+    //    그려지고 아래가 까맣게 비어 깨져 보였다(사용자 스크린샷 2026-09-21).
+    const shown = urls.slice(0, 4);
+    return `<span class="mixq-mix-thumb is-mosaic" data-n="${shown.length}">${shown.map(url => `<img src="${escHtml(url)}" alt="">`).join('')}</span>`;
   }
 
   function liveArtists(rows) {
     return (rows || []).filter(row => row.kind === 'artist' && row.enabled !== false);
   }
 
+  /** 주 썸네일 후보 칸들.
+   *  ⚠️ 히스토리 칸에는 **글자를 달지 않는다**(사용자 결정 2026-09-21). "가중치 일치" 가
+   *     칸마다 붙어 잡음이었다 - 가중치까지 같은 것이 **앞에 정렬돼** 있는 것으로 충분하다.
+   *     글자가 필요한 것은 그림이 아닌 두 칸(모자이크 · 비워 둠)뿐이다.
+   *  `data-mixq-zoom` 은 마우스를 올렸을 때 옆 확대 보기로 띄울 그림이다. */
   function candidateHtml(rows, mosaic, selected) {
     const choices = [{id: 'mosaic', label: '모자이크', html: mosaic},
       {id: 'empty', label: '비워 둠', html: '<span class="mixq-mix-thumb is-empty"></span>'},
-      ...rows.slice(0, 24).map(row => ({id: row.history_id,
-        label: row.exact_weights ? '가중치 일치' : '작가 일치',
+      ...rows.slice(0, 24).map(row => ({id: row.history_id, label: '', zoom: row.thumb_url,
         html: `<span class="mixq-mix-thumb"><img src="${escHtml(row.thumb_url)}" alt=""></span>`}))];
     return choices.map(choice => `<button type="button" class="mixq-choice" data-mixq-choice="${escHtml(choice.id)}"
-      aria-pressed="${choice.id === selected}" title="${escHtml(choice.label)}">${choice.html}<small>${choice.label}</small></button>`).join('');
+      aria-pressed="${choice.id === selected}"${choice.label ? ` title="${escHtml(choice.label)}"` : ''}${choice.zoom ? ` data-mixq-zoom="${escHtml(choice.zoom)}"` : ''}>${choice.html}${choice.label ? `<small>${choice.label}</small>` : ''}</button>`).join('');
+  }
+
+  /** 후보 칸에 마우스를 올리면 **옆 확대 보기**(띠 칸과 같은 것)를 띄운다 - 덮는 판의
+   *  칸도 격자 카드보다 작아, 고르려면 크게 봐야 한다. */
+  function wireCandidateZoom(host) {
+    host.addEventListener('mouseover', event => {
+      const tile = event.target.closest('[data-mixq-zoom]');
+      if (tile) onHoverBlock(tile, {artist: '', image: tile.dataset.mixqZoom});
+    });
+    host.addEventListener('mouseleave', () => onLeaveBlock());
   }
 
   function selectionPayload(selected) {
@@ -642,11 +661,16 @@ export function createMixQueuePanel({
     const point = menuPoint();
     const ticket = ++pageSeq;
     menuFor = ''; menuAt = -1;
+    // ⚠️ [저장] 과 ✕ 는 **맨 위 줄**이다 - 후보가 많아 구를 때 아래에 두면 안 보인다.
     menuEl.innerHTML = `<form class="mixq-page mixq-save-page">
-      <label class="mixq-name-line">이름 <input class="mixq-name-input" aria-label="조합 이름" maxlength="40" value="${escHtml(mixName)}"><span class="mixq-overwrite" hidden>덮어씀</span></label>
-      <div class="mixq-candidates" aria-label="주 썸네일 후보">불러오는 중…</div>
-      <button type="submit" class="mixq-commit" disabled>저장</button></form>`;
-    placeMenu(point.x, point.y);
+      <div class="mixq-cover-head">
+        <label class="mixq-name-line">이름 <input class="mixq-name-input" aria-label="조합 이름" maxlength="40" value="${escHtml(mixName)}"><span class="mixq-overwrite" hidden>덮어씀</span></label>
+        <button type="submit" class="mixq-commit" disabled>저장</button>
+        <button type="button" class="mixq-cover-close" data-mixq-close aria-label="닫기">✕</button>
+      </div>
+      <div class="mixq-candidates" aria-label="주 썸네일 후보">불러오는 중…</div></form>`;
+    if (!coverMenu()) placeMenu(point.x, point.y);
+    menuEl.querySelector('[data-mixq-close]').addEventListener('click', () => closeMenu());
     const input = menuEl.querySelector('input');
     const form = menuEl.querySelector('form');
     input.focus(); input.select();
@@ -689,6 +713,7 @@ export function createMixQueuePanel({
       const images = blocks.filter(b => !isAnchor(b) && b.id !== COLLAB_ID && b.image).map(b => b.image);
       const candidates = form.querySelector('.mixq-candidates');
       candidates.innerHTML = candidateHtml(rows, thumbHtml(null, images), selected);
+      wireCandidateZoom(candidates);
       candidates.addEventListener('click', event => {
         const button = event.target.closest('[data-mixq-choice]');
         if (!button || busy) return;
@@ -703,7 +728,9 @@ export function createMixQueuePanel({
     }
     busy = false;
     form.querySelector('[type=submit]').disabled = false;
-    placeMenu(point.x, point.y);
+    // ⚠️ 채운 뒤 다시 맞출 때도 **덮기를 유지**한다 - 여기서 `placeMenu` 를 바로 부르면
+    //    덮기가 풀려 작은 판으로 돌아간다(실측으로 잡았다: 열자마자 is-cover 가 꺼졌다).
+    if (!coverMenu()) placeMenu(point.x, point.y);
   }
 
   async function saveMix(name, draft, selection) {
@@ -841,32 +868,78 @@ export function createMixQueuePanel({
         } catch (error) { showToast(error?.message || '조합을 적용하지 못했습니다.', 'error'); }
         finally { button.disabled = false; }
       });
-      menuEl.querySelector('[data-mixq-main]').addEventListener('click', async () => {
-        const host = menuEl.querySelector('.mixq-candidates');
-        if (!host.hidden) { host.hidden = true; return; }
-        host.hidden = false;
-        host.textContent = '불러오는 중…';
-        placeMenu(point.x, point.y);
-        try {
-          const rows = await mixStore.candidates(liveArtists(record.blocks));
-          if (ticket !== pageSeq) return;
-          const fallbackRecord = {...record, thumbs: {...record.thumbs, main: '', fallback: 'mosaic'}};
-          host.innerHTML = candidateHtml(rows, thumbHtml(fallbackRecord), '');
-          host.onclick = async event => {
-            const button = event.target.closest('[data-mixq-choice]');
-            if (!button || host.dataset.busy) return;
-            host.dataset.busy = '1';
-            try {
-              await mixStore.setMain(id, selectionPayload(button.dataset.mixqChoice));
-              if (ticket === pageSeq) void openMixDetail(id, point);
-            } catch (error) { showToast(error?.message || '썸네일을 바꾸지 못했습니다.', 'error'); }
-            finally { delete host.dataset.busy; }
-          };
-          placeMenu(point.x, point.y);
-        } catch (error) { host.textContent = '후보를 읽지 못했습니다. 다시 여세요.'; showToast(error.message, 'error'); }
-      });
+      menuEl.querySelector('[data-mixq-main]').addEventListener('click', () => void openMainPicker(record, point));
       placeMenu(point.x, point.y);
     } catch (error) { showToast(error?.message || '조합을 읽지 못했습니다.', 'error'); }
+  }
+
+  /** 저장된 조합의 주 썸네일을 **나중에** 고르는 쪽(사용자 지정 2026-09-21: 비워 둔 것을
+   *  다시 생성한 뒤 채운다). 저장 쪽과 같은 **덮는 판**이고, ◂ 로 상세에 돌아간다.
+   *  ⚠️ 후보는 **저장된 조합의 작가**로 찾는다(지금 띠가 아니다). */
+  async function openMainPicker(record, point) {
+    const ticket = ++pageSeq;
+    menuEl.innerHTML = `<div class="mixq-page mixq-pick-page">
+      <div class="mixq-cover-head">
+        <button type="button" class="mixq-cover-back" data-mixq-back>◂ ${escHtml(record.name)}</button>
+        <button type="button" class="mixq-cover-close" data-mixq-close aria-label="닫기">✕</button>
+      </div>
+      <div class="mixq-candidates" aria-label="주 썸네일 후보">불러오는 중…</div></div>`;
+    if (!coverMenu()) placeMenu(point.x, point.y);
+    menuEl.querySelector('[data-mixq-back]').addEventListener('click', () => void openMixDetail(record.id, point));
+    menuEl.querySelector('[data-mixq-close]').addEventListener('click', () => closeMenu());
+    const host = menuEl.querySelector('.mixq-candidates');
+    try {
+      const rows = await mixStore.candidates(liveArtists(record.blocks));
+      if (ticket !== pageSeq) return;
+      const fallbackRecord = {...record, thumbs: {...record.thumbs, main: '', fallback: 'mosaic'}};
+      host.innerHTML = candidateHtml(rows, thumbHtml(fallbackRecord), '');
+      wireCandidateZoom(host);
+      host.addEventListener('click', async event => {
+        const button = event.target.closest('[data-mixq-choice]');
+        if (!button || host.dataset.busy) return;
+        host.dataset.busy = '1';
+        try {
+          await mixStore.setMain(record.id, selectionPayload(button.dataset.mixqChoice));
+          onLeaveBlock();
+          if (ticket === pageSeq) void openMixDetail(record.id, point);
+        } catch (error) { showToast(error?.message || '썸네일을 바꾸지 못했습니다.', 'error'); }
+        finally { delete host.dataset.busy; }
+      });
+    } catch (error) {
+      if (ticket !== pageSeq) return;
+      host.textContent = '후보를 읽지 못했습니다. 다시 여세요.';
+      showToast(error?.message || '후보를 읽지 못했습니다.', 'error');
+    }
+  }
+
+  /** 판을 **덮을 자리(썸네일 격자)** 에 딱 맞춘다. 자리가 없거나 너무 작으면 false -
+   *  부른 쪽이 `placeMenu` 로 작은 판을 띄운다.
+   *  ⚠️ 격자의 데이터·쪽 위치는 **건드리지 않는다**. 위에 얹을 뿐이라 닫으면 그대로다
+   *     (격자에 세 번째 모드를 넣는 길은 검색·가상 모드·쪽 복귀와 엉키기 쉬워 버렸다).
+   *  ⚠️ 떠는 층 규칙은 그대로다 - 이 판은 `.mixq-menu`(z 50) 자신이다. */
+  function coverMenu() {
+    const target = coverTarget?.();
+    const g = target?.getBoundingClientRect?.();
+    if (!g) return false;
+    // ⚠️ 격자 rect 를 **잘라내는 조상 안으로 한 번 더 가둔다**(`placeMenu` 와 같은 원칙).
+    //    실측(2026-09-21): 창이 막 짜이던 순간 격자가 제 높이를 못 받아 2,494px 로 쟀고,
+    //    판이 그 높이로 떠서 아래 후보들이 창 밖에 잘려 **스크롤로도 안 닿았다**.
+    const clipEl = el.closest('.dragpanel-body') || el.closest('.dragpanel') || doc.body;
+    const c = clipEl.getBoundingClientRect();
+    const r = {left: Math.max(g.left, c.left), top: Math.max(g.top, c.top),
+               right: Math.min(g.right, c.right), bottom: Math.min(g.bottom, c.bottom)};
+    const width = r.right - r.left;
+    const height = r.bottom - r.top;
+    if (width < 160 || height < 140) return false;
+    const box = el.getBoundingClientRect();
+    menuEl.hidden = false;
+    menuEl.classList.add('is-cover');
+    Object.assign(menuEl.style, {
+      left: `${Math.round(r.left - box.left)}px`, top: `${Math.round(r.top - box.top)}px`,
+      width: `${Math.round(width)}px`, height: `${Math.round(height)}px`,
+      maxWidth: 'none', maxHeight: 'none', minWidth: '0',
+    });
+    return true;
   }
 
   function openMenu(block, x, y) {
@@ -878,6 +951,10 @@ export function createMixQueuePanel({
 
   function placeMenu(x, y) {
     menuEl.hidden = false;
+    // ⚠️ 덮는 판에서 돌아올 때 그 크기를 물려받지 않게 먼저 푼다.
+    menuEl.classList.remove('is-cover');
+    menuEl.style.width = '';
+    menuEl.style.height = '';
     menuEl.style.maxHeight = '';
     const PAD = 4;
     const box = el.getBoundingClientRect();
@@ -946,6 +1023,8 @@ export function createMixQueuePanel({
     pageSeq += 1;
     menuFor = '';
     menuEl.hidden = true;
+    menuEl.classList.remove('is-cover');
+    onLeaveBlock();              // 후보 칸에 띄운 확대 보기가 남지 않게
   }
 
   // ── 배선 ──────────────────────────────────────────────────────────────

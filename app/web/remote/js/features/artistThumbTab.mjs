@@ -2980,7 +2980,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-audit1');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-cover3');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -3015,6 +3015,8 @@ export function createArtistThumbController({
         void togglePeField(slot, {openOnly: true});
       },
       anchorSlot: anchorSlotOf,
+      // 주 썸네일 고르기는 **격자 자리를 덮는다**(사용자 지정 2026-09-21).
+      coverTarget: () => gridEl,
       placeAnchors: rows => placeAnchors(rows),
       restoreText: (text, anchorIds) => restoreText(text, anchorIds),
       getMixState: () => ({text: {pre: peText('pre_prompt'), post: peText('post_prompt')}}),

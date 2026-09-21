@@ -29932,15 +29932,22 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
   align-content: start; gap: 6px; padding: 2px;
 }
+/* ⚠️ 칸은 **정사각형 고정**이다(사용자 지정 2026-09-21). 글자는 칸 **안쪽 아래에
+   얹는다** - 글자 줄을 칸 밖에 두면 글자 없는 후보 칸이 같은 줄 높이로 늘어나며
+   그림 아래에 빈 띠가 생겼다(사용자 스크린샷). */
 .mixq-menu.is-cover .mixq-choice {
-  flex: none; display: flex; flex-direction: column; align-items: stretch;
-  gap: 3px; padding: 3px; border-radius: 7px;
+  position: relative; flex: none; display: block;
+  padding: 3px; border-radius: 7px;
 }
 .mixq-menu.is-cover .mixq-choice .mixq-mix-thumb {
-  width: 100%; height: auto; aspect-ratio: 3 / 4; flex: none; border-radius: 5px;
+  display: grid; width: 100%; height: auto; aspect-ratio: 1 / 1; flex: none; border-radius: 5px;
 }
 .mixq-menu.is-cover .mixq-choice[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #8296ff; }
-.mixq-menu.is-cover .mixq-choice small { font-size: 10px; }
+.mixq-menu.is-cover .mixq-choice small {
+  position: absolute; left: 3px; right: 3px; bottom: 3px;
+  padding: 3px 0; border-radius: 0 0 5px 5px; text-align: center;
+  font-size: 10px; background: rgba(8, 9, 15, 0.62); pointer-events: none;
+}
 
 .mixq-menu button {
   border: none; background: transparent; color: var(--text-primary);

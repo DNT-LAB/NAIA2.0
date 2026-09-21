@@ -2980,7 +2980,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-cover3');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-square');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,

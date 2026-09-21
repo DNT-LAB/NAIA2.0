@@ -626,10 +626,12 @@ export function createMixQueuePanel({
   /** 주 썸네일 후보 칸들.
    *  ⚠️ 히스토리 칸에는 **글자를 달지 않는다**(사용자 결정 2026-09-21). "가중치 일치" 가
    *     칸마다 붙어 잡음이었다 - 가중치까지 같은 것이 **앞에 정렬돼** 있는 것으로 충분하다.
-   *     글자가 필요한 것은 그림이 아닌 두 칸(모자이크 · 비워 둠)뿐이다.
+   *     글자가 필요한 것은 그림이 아닌 두 칸(그리드 · 비워 둠)뿐이다.
+   *  ⚠️ 보이는 이름은 **그리드**다(사용자 지정 2026-09-21, 옛 이름 모자이크). 내부 값
+   *     `mosaic` 과 저장 파일의 `fallback: "mosaic"` 은 그대로다 - 이미 저장된 조합이 쓴다.
    *  `data-mixq-zoom` 은 마우스를 올렸을 때 옆 확대 보기로 띄울 그림이다. */
   function candidateHtml(rows, mosaic, selected) {
-    const choices = [{id: 'mosaic', label: '모자이크', html: mosaic},
+    const choices = [{id: 'mosaic', label: '그리드', html: mosaic},
       {id: 'empty', label: '비워 둠', html: '<span class="mixq-mix-thumb is-empty"></span>'},
       ...rows.slice(0, 24).map(row => ({id: row.history_id, label: '', zoom: row.thumb_url,
         html: `<span class="mixq-mix-thumb"><img src="${escHtml(row.thumb_url)}" alt=""></span>`}))];

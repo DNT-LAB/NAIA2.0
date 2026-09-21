@@ -29949,6 +29949,64 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   font-size: 10px; background: rgba(8, 9, 15, 0.62); pointer-events: none;
 }
 
+/* 불러오기 상세 쪽 - 격자 자리를 덮는 큰 판(사용자 지정 2026-09-21).
+   위: 주 썸네일 + **조합 띠 미리보기**. 아래: 층 줄(늘 보인다) + ▾ 로 저장된 값.
+   [불러오기] 는 판 바닥에 붙어 구르지 않는다. */
+.mixq-menu.is-cover .mixq-detail-page { display: flex; flex-direction: column; gap: 6px; }
+.mixq-detail-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.mixq-detail-top { display: flex; gap: 8px; align-items: flex-start; }
+.mixq-menu.is-cover .mixq-main-thumb { flex: 0 0 auto; padding: 0; }
+.mixq-menu.is-cover .mixq-main-thumb .mixq-mix-thumb { width: 124px; height: 124px; }
+/* 띠 미리보기 - 띠와 같은 테(연보라)를 둘러 "불러오면 띠가 이렇게 된다" 로 읽힌다. */
+.mixq-detail-strip {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px;
+  align-content: flex-start; padding: 5px; border-radius: 7px;
+  border: 1px solid rgba(130, 150, 255, 0.34); background: rgba(130, 150, 255, 0.05);
+}
+.mixq-pv-block { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 44px; }
+.mixq-pv-img {
+  display: block; width: 44px; height: 44px; border-radius: 4px; overflow: hidden;
+  background: rgba(127, 127, 127, 0.12);
+}
+.mixq-pv-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mixq-pv-block b {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700; color: var(--text-muted);
+}
+.mixq-pv-block.is-off { opacity: 0.38; }
+.mixq-pv-block.is-collab .mixq-pv-img { border: 1px dashed var(--border-glow); box-sizing: border-box; }
+/* 앵커 = 띠에서처럼 얇은 세로 막대. 동기화면 강조색. */
+.mixq-pv-anchor {
+  align-self: stretch; width: 3px; margin: 0 2px; border-radius: 2px;
+  background: var(--text-dim);
+}
+.mixq-pv-anchor.is-sync { background: var(--accent); }
+
+.mixq-layers { display: flex; flex-direction: column; gap: 2px; }
+.mixq-layer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.mixq-layer-row .mixq-layer-body { grid-column: 1 / -1; padding: 2px 8px 6px 22px; }
+/* 지금과 같은 층 - 흐리게. 숨기지 않는다(사용자 지정: 불러오기 종류는 늘 보인다). */
+.mixq-layer-row.is-same .mixq-layer small { color: var(--text-dim); }
+.mixq-menu .mixq-layer-more { padding: 5px 9px; color: var(--text-muted); }
+.mixq-layer-body label { display: block; margin: 2px 0; font-size: 9px; color: var(--text-muted); }
+.mixq-saved-text {
+  margin: 0 0 6px; max-height: 120px; overflow: auto; padding: 6px;
+  white-space: pre-wrap; word-break: break-word; border-radius: 5px;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.45;
+  color: var(--text-primary); background: rgba(0, 0, 0, 0.25);
+}
+.mixq-saved-settings { width: 100%; border-collapse: collapse; font-size: 10px; }
+.mixq-saved-settings th {
+  text-align: left; padding: 2px 8px 2px 0; white-space: nowrap;
+  font-weight: 500; color: var(--text-muted);
+}
+.mixq-saved-settings td { padding: 2px 8px 2px 0; font-family: var(--font-mono); }
+.mixq-saved-settings tr:not(.is-changed) td { color: var(--text-dim); }
+.mixq-saved-settings tr.is-changed td:last-child { color: #e6ba73; }
+.mixq-menu.is-cover .mixq-detail-page > .mixq-commit { flex: 0 0 auto; }
+
 .mixq-menu button {
   border: none; background: transparent; color: var(--text-primary);
   font-size: 11px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;

@@ -59,7 +59,10 @@ export function mixTextDiff(current, saved) {
     added: [...after].filter(tag => !before.has(tag)), removed: [...before].filter(tag => !after.has(tag))};
 }
 
-export function mixSettingsDiff(current = {}, saved = {}) {
+/** 저장된 설정 **전부**를 지금 값과 나란히(같은 것 포함) - 상세 쪽의 "저장된 값" 표가 쓴다.
+ *  ⚠️ 같은 것도 돌려준다(사용자 지정 2026-09-21: 저장된 설정 값 보기). 다른 것만 필요하면
+ *     `mixSettingsDiff`. */
+export function mixSettingsRows(current = {}, saved = {}) {
   const keys = ['model', 'sampler', 'scheduler', 'steps', 'scale', 'cfg_rescale'];
   const normalized = (key, value) => {
     if (['steps', 'scale', 'cfg_rescale'].includes(key)) {
@@ -68,9 +71,16 @@ export function mixSettingsDiff(current = {}, saved = {}) {
     }
     return String(value ?? '').trim();
   };
-  return keys.filter(key => Object.hasOwn(saved, key)).map(key => ({key,
-    before: normalized(key, current[key]), after: normalized(key, saved[key])}))
-    .filter(row => row.before !== row.after);
+  return keys.filter(key => Object.hasOwn(saved || {}, key)).map(key => {
+    const before = normalized(key, (current || {})[key]);
+    const after = normalized(key, saved[key]);
+    return {key, before, after, changed: before !== after};
+  });
+}
+
+export function mixSettingsDiff(current = {}, saved = {}) {
+  return mixSettingsRows(current, saved).filter(row => row.changed)
+    .map(({key, before, after}) => ({key, before, after}));
 }
 
 export function createMixQueuePanel({
@@ -813,6 +823,38 @@ export function createMixQueuePanel({
     input.focus(); input.select();
   }
 
+  /** 저장된 조합의 **띠 미리보기**(사용자 지정 2026-09-21). 불러오면 띠가 이렇게 된다.
+   *  썸네일 · 가중치 · 앵커 막대(동기화 표시) · 꺼 둔 칸(흐리게). 이름은 툴팁으로만 -
+   *  칸이 작아 글자를 얹으면 읽히지 않는다. 그림은 **저장해 둔 썸네일**을 쓴다
+   *  (지금 팩에 그 작가가 없어도 보인다). */
+  function stripPreviewHtml(record) {
+    const files = record?.thumbs?.artists || {};
+    return (record?.blocks || []).map(block => {
+      if (block.kind === 'anchor') {
+        const tip = `${block.slot === 'post' ? 'postfix' : 'prefix'} 앵커${block.sync ? ' · 가중치 동기화' : ''}`;
+        return `<span class="mixq-pv-anchor${block.sync ? ' is-sync' : ''}" title="${escHtml(tip)}"></span>`;
+      }
+      const collab = block.kind === 'collab';
+      const name = collab ? 'artist collaboration' : String(block.artist || '');
+      const url = collab ? '' : thumbUrl(record, files[name]);
+      const weight = Number(block.weight);
+      return `<span class="mixq-pv-block${block.enabled === false ? ' is-off' : ''}${collab ? ' is-collab' : ''}"
+        title="${escHtml(name)}"><span class="mixq-pv-img">${url ? `<img src="${escHtml(url)}" alt="">` : ''}</span>
+        <b>${escHtml(Number.isFinite(weight) ? String(Math.round(weight * 100) / 100) : '')}</b></span>`;
+    }).join('');
+  }
+
+  /** 층 한 줄. **누름은 하나씩만** 한다 - 줄을 누르면 켜고 끄기, ▾ 는 저장된 값 펼치기
+   *  (한 누름에 둘을 걸면 켜려던 손이 펼치고, 펼치려던 손이 켠다). */
+  function layerRowHtml(key, label, summary, body, same) {
+    return `<div class="mixq-layer-row${same ? ' is-same' : ''}">
+      <button type="button" class="mixq-layer" data-mixq-layer="${key}" aria-pressed="false">
+        <span class="mixq-dot">○</span> ${label} <small>${summary}</small></button>
+      <button type="button" class="mixq-layer-more" data-mixq-more="${key}" aria-expanded="false"
+        title="저장된 값">▾</button>
+      <div class="mixq-layer-body" data-mixq-body="${key}" hidden>${body}</div></div>`;
+  }
+
   function textDiffHtml(label, diff) {
     if (!diff.changed) return `${label} 같음`;
     const tip = [...diff.added.map(tag => `+ ${tag}`), ...diff.removed.map(tag => `− ${tag}`)].slice(0, 8).join('\n');
@@ -820,6 +862,12 @@ export function createMixQueuePanel({
       <b class="mixq-removed">−${diff.removed.length}</b>${!diff.added.length && !diff.removed.length ? ' 순서' : ''}</span>`;
   }
 
+  /** 불러오기 상세 쪽 - 격자 자리를 덮는 큰 판(사용자 지정 2026-09-21).
+   *
+   *  ⚠️ 층(글 · 네거티브 · 설정)은 **늘 보인다**. 한때 "지금과 다른 층만" 그려서 방금
+   *     저장한 조합은 층이 하나도 없었다(사용자: "굉장히 간소화된 패널"). 같은 층은
+   *     "지금과 같음" 으로 흐리게 두고 켤 수는 있다. ▾ 로 **저장된 값**을 펼친다.
+   *  ⚠️ [불러오기] 글자가 **무엇을 불러오는지** 말한다 - 층을 켤 때마다 바뀐다. */
   async function openMixDetail(id, point = menuPoint()) {
     const ticket = ++pageSeq;
     menuFor = ''; menuAt = -1;
@@ -833,26 +881,61 @@ export function createMixQueuePanel({
       const pre = mixTextDiff(now.text?.pre, record.text?.pre);
       const post = mixTextDiff(now.text?.post, record.text?.post);
       const negative = mixTextDiff(now.negative, record.negative);
-      const settings = mixSettingsDiff(now.settings, record.settings);
+      const settingRows = mixSettingsRows(now.settings, record.settings);
+      const settings = settingRows.filter(row => row.changed);
       const choices = {text: false, negative: false, settings: false};
+      const LABELS = {text: '글', negative: '네거티브', settings: '설정'};
+      const pretty = text => `<pre class="mixq-saved-text">${escHtml(String(text ?? '')) || '<i>(비어 있음)</i>'}</pre>`;
+      const textSame = !pre.changed && !post.changed;
+      const rows = [
+        layerRowHtml('text', '글', textSame ? '지금과 같음'
+          : `${textDiffHtml('prefix', pre)} · ${textDiffHtml('postfix', post)}`,
+          `<label>prefix</label>${pretty(record.text?.pre)}<label>postfix</label>${pretty(record.text?.post)}`, textSame),
+        Object.hasOwn(record, 'negative') ? layerRowHtml('negative', '네거티브',
+          negative.changed ? textDiffHtml('', negative) : '지금과 같음', pretty(record.negative), !negative.changed) : '',
+        settingRows.length ? layerRowHtml('settings', '설정',
+          settings.length ? settings.map(row => `${escHtml(row.key)} ${escHtml(String(row.before))} → ${escHtml(String(row.after))}`).join(' · ')
+            : '지금과 같음',
+          `<table class="mixq-saved-settings">${settingRows.map(row => `<tr class="${row.changed ? 'is-changed' : ''}">
+            <th>${escHtml(row.key)}</th><td>${escHtml(String(row.after))}</td>
+            <td>${row.changed ? `지금 ${escHtml(String(row.before))}` : ''}</td></tr>`).join('')}</table>`,
+          !settings.length) : '',
+      ].join('');
       menuEl.innerHTML = `<div class="mixq-page mixq-detail-page">
-        <button type="button" data-mixq-back>◂ ${escHtml(record.name)}</button>
-        <button type="button" class="mixq-main-thumb" data-mixq-main title="주 썸네일 고르기">${thumbHtml(record)}</button>
-        <div class="mixq-candidates" hidden></div>
-        ${pre.changed || post.changed ? `<button type="button" class="mixq-layer" data-mixq-layer="text" aria-pressed="false">
-          <span class="mixq-dot">○</span> 글 <small>${textDiffHtml('prefix', pre)} · ${textDiffHtml('postfix', post)}</small></button>` : ''}
-        ${Object.hasOwn(record, 'negative') && negative.changed ? `<button type="button" class="mixq-layer" data-mixq-layer="negative" aria-pressed="false">
-          <span class="mixq-dot">○</span> 네거티브 <small>${textDiffHtml('', negative)}</small></button>` : ''}
-        ${settings.length ? `<button type="button" class="mixq-layer" data-mixq-layer="settings" aria-pressed="false">
-          <span class="mixq-dot">○</span> 설정 <small>${settings.map(row => `${escHtml(row.key)} ${escHtml(String(row.before))} → ${escHtml(String(row.after))}`).join('<br>')}</small></button>` : ''}
-        <button type="button" class="mixq-commit" data-mixq-apply>불러오기</button></div>`;
+        <div class="mixq-cover-head">
+          <button type="button" class="mixq-cover-back" data-mixq-back>◂ ${escHtml(record.name)}</button>
+          <button type="button" class="mixq-cover-close" data-mixq-close aria-label="닫기">✕</button>
+        </div>
+        <div class="mixq-detail-body">
+          <div class="mixq-detail-top">
+            <button type="button" class="mixq-main-thumb" data-mixq-main title="주 썸네일 고르기">${thumbHtml(record)}</button>
+            <div class="mixq-detail-strip" aria-label="조합 띠 미리보기">${stripPreviewHtml(record)}</div>
+          </div>
+          <div class="mixq-layers">${rows}</div>
+        </div>
+        <button type="button" class="mixq-commit" data-mixq-apply>불러오기 · 아티스트</button></div>`;
       menuEl.querySelector('[data-mixq-back]').addEventListener('click', () => void openMixList(point.x, point.y));
+      menuEl.querySelector('[data-mixq-close]').addEventListener('click', () => closeMenu());
+      const applyButton = menuEl.querySelector('[data-mixq-apply]');
+      const paintApply = () => {
+        const picked = Object.keys(LABELS).filter(key => choices[key]).map(key => LABELS[key]);
+        applyButton.textContent = ['불러오기 · 아티스트', ...picked].join(' + ');
+      };
       for (const button of menuEl.querySelectorAll('[data-mixq-layer]')) {
         button.addEventListener('click', () => {
           const key = button.dataset.mixqLayer;
           choices[key] = !choices[key];
           button.setAttribute('aria-pressed', String(choices[key]));
           button.querySelector('.mixq-dot').textContent = choices[key] ? '●' : '○';
+          paintApply();
+        });
+      }
+      for (const more of menuEl.querySelectorAll('[data-mixq-more]')) {
+        more.addEventListener('click', () => {
+          const body = menuEl.querySelector(`[data-mixq-body="${more.dataset.mixqMore}"]`);
+          body.hidden = !body.hidden;
+          more.setAttribute('aria-expanded', String(!body.hidden));
+          more.textContent = body.hidden ? '▾' : '▴';
         });
       }
       menuEl.querySelector('[data-mixq-apply]').addEventListener('click', async event => {
@@ -871,7 +954,7 @@ export function createMixQueuePanel({
         finally { button.disabled = false; }
       });
       menuEl.querySelector('[data-mixq-main]').addEventListener('click', () => void openMainPicker(record, point));
-      placeMenu(point.x, point.y);
+      if (!coverMenu()) placeMenu(point.x, point.y);
     } catch (error) { showToast(error?.message || '조합을 읽지 못했습니다.', 'error'); }
   }
 
@@ -941,7 +1024,24 @@ export function createMixQueuePanel({
       width: `${Math.round(width)}px`, height: `${Math.round(height)}px`,
       maxWidth: 'none', maxHeight: 'none', minWidth: '0',
     });
+    watchCover(target, clipEl);
     return true;
+  }
+
+  /** 덮는 판이 **자리 크기 변화를 따라간다**.
+   *  ⚠️ 실측(2026-09-21): 판을 여는 순간 창이 숨겨져 있어 조상까지 부풀었고 판이
+   *     2,494px 로 떴다. 창이 다시 보이자 격자는 295px 로 돌아왔는데 판은 옛 크기에
+   *     머물러 [불러오기] 가 창 밖에 잘렸다. 판을 연 채 리모컨 창 크기를 바꿔도 같다.
+   *  ⚠️ 격자와 **창 몸통 둘 다** 본다 - 창을 줄이면 몸통이 먼저 바뀐다.
+   *  고리 걱정은 없다: 판은 절대 위치라 판 크기를 바꿔도 격자·몸통 크기는 안 바뀐다. */
+  let coverWatch = null;
+  function watchCover(target, clipEl) {
+    if (coverWatch || typeof ResizeObserver !== 'function') return;
+    coverWatch = new ResizeObserver(() => {
+      if (!menuEl.hidden && menuEl.classList.contains('is-cover')) coverMenu();
+    });
+    coverWatch.observe(target);
+    if (clipEl && clipEl !== target) coverWatch.observe(clipEl);
   }
 
   function openMenu(block, x, y) {

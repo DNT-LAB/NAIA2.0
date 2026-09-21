@@ -1,6 +1,52 @@
 import { createRatingStore, RATING_KEYS, filteredCount } from './ratingStore.mjs';
 import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs';
 
+// 검색 층 컴팩트 배치(사용자 지정 2026-09-21): 상단 단추 셋 · 행 수 한 줄 · 등급 한 줄 ·
+// [검색 기록 | 검색]. ⚠️ display 를 주는 요소는 [hidden] 짝 규칙을 같이 둔다(이 저장소가 여러 번 밟았다).
+const SEARCH_COMPACT_CSS = `
+.sp-toolbar{display:flex;gap:4px;align-items:stretch}
+.sp-toolbar .search-parquet-control{position:relative;flex:1 1 0;display:flex}
+.sp-tbtn{flex:1 1 0;min-width:0;height:24px;padding:0 6px;font-size:10.5px;font-weight:600;border-radius:5px;
+  border:1px solid var(--border,#33333f);background:rgba(255,255,255,0.03);color:var(--text-secondary,#c8c8d0);
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-tbtn:hover{color:var(--text-primary,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
+.sp-tbtn.is-on{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.search-parquet-host[hidden]{display:none!important}
+.sp-counts{display:flex;align-items:center;height:26px;border:1px solid var(--border,#2c2c36);border-radius:6px;
+  background:rgba(255,255,255,0.02);font-size:10.5px;color:var(--text-muted,#9a9aa6)}
+.sp-count-cell{flex:1 1 0;display:flex;align-items:baseline;gap:4px;padding:0 9px;min-width:0}
+.sp-count-label{flex:1 1 auto;white-space:nowrap}
+.sp-count-cell b{font-family:var(--font-mono,monospace);font-size:12.5px;color:var(--accent-green,#5a9e6f)}
+.sp-unit{font-size:10px}
+.sp-count-sep{width:1px;align-self:stretch;margin:5px 0;background:var(--border,#33333f)}
+.sp-ratings{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap}
+.sp-ratings .mod-section-label{margin:0}
+.sp-ratings .mod-checkbox-item{display:inline-flex;align-items:center;gap:3px;margin:0}
+.sp-ratings .mod-checkbox-label{font-size:10.5px}
+.sp-search-row{display:flex;gap:4px;align-items:stretch}
+.sp-hist-btn{flex:0 0 auto;height:26px;padding:0 10px;font-size:10.5px;border-radius:5px;cursor:pointer;
+  border:1px solid var(--border,#33333f);background:rgba(255,255,255,0.03);color:var(--text-secondary,#c8c8d0)}
+.sp-hist-btn:hover{color:var(--text-primary,#e8e8ee)}
+.sp-hist-btn.is-on{border-color:var(--accent-blue,#8d7bd6);color:var(--text-primary,#e8e8ee)}
+.sp-search-row .mod-start{flex:1 1 auto;height:26px;min-height:26px;font-size:11.5px}
+.sp-history{display:flex;flex-direction:column;gap:4px;border:1px solid var(--accent-blue,#8d7bd6);border-radius:6px;padding:5px}
+.sp-history[hidden]{display:none!important}
+.sp-hist-filter{height:22px;font-size:11px;padding:1px 6px;background:var(--bg-surface,#15151b);color:var(--text-primary,#e8e8ee);
+  border:1px solid var(--border,#33333f);border-radius:4px}
+.sp-hist-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.sp-hist-item{display:flex;align-items:flex-start;gap:4px;padding:4px 6px;border-radius:4px;cursor:pointer}
+.sp-hist-item:hover{background:rgba(255,255,255,0.05)}
+.sp-hist-text{flex:1;min-width:0}
+.sp-hist-q{font-size:11px;color:var(--text-primary,#e8e8ee);word-break:break-all}
+.sp-hist-x{font-size:10.5px;color:#e39a9a;word-break:break-all}
+.sp-hist-meta{font-size:9.5px;color:var(--text-dimmer,#6c6c78);font-family:var(--font-mono,monospace)}
+.sp-hist-del{flex:0 0 auto;border:none;background:transparent;color:var(--text-dimmer,#6c6c78);cursor:pointer;font-size:13px;line-height:1}
+.sp-hist-del:hover{color:#f0a0a0}
+.sp-hist-empty{font-size:10.5px;color:var(--text-dimmer,#6c6c78);padding:4px}
+.search-progress{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-dim,#888)}
+.search-progress:empty{display:none}
+`;
+
 export function createSearchPanel({
   document,
   moduleBody,
@@ -67,6 +113,11 @@ export function createSearchPanel({
   let pqlRenaming = null;
   let pqlConfirmTrash = null;
   let pqlConfirmTimer = null;
+  // 상단 [Custom Parquets (N)] 로 여닫는 카드 목록 - 기본은 닫힘(검색 칸이 먼저 보이게).
+  let parquetsShown = false;
+  // [검색 기록] - 최근 검색 최대 500개(백엔드 core/search_history.py). 열 때만 받는다.
+  let historyItems = [];
+  let historyOpen = false;
 
   document.addEventListener('click', event => {
     if (!event.target.closest('.search-parquet-control')) closeParquetMenu();
@@ -301,7 +352,11 @@ export function createSearchPanel({
   function submitSaveForm() {
     const input = moduleBody.querySelector('.search-save-form input');
     const filename = (input && input.value || '').trim();
-    if (runParquetAction('export_results', filename ? { filename } : {})) closeSaveForm();
+    if (runParquetAction('export_results', filename ? { filename } : {})) {
+      closeSaveForm();
+      parquetsShown = true;   // 방금 저장한 카드가 보이게
+      applyParquetsShown();
+    }
   }
 
   function toggleRating(rating) {
@@ -471,6 +526,8 @@ export function createSearchPanel({
       quickFilter.onSearchReleased();
     }
     if (searchVisible()) renderSearch(message);
+    // 방금 끝난 검색이 기록 맨 위에 올라갔다 - 기록 창이 열려 있으면 다시 받는다.
+    if (isSearchDone && historyOpen) requestHistory();
     // app.js 는 이 반환값이 true 일 때만 pool 잠금/Random 게이트를 해제한다. pool 잠금 해제는
     // 실제 pool 작업 완료일 때만이어야 한다: green 검색 진행 중(wasSearching)이면 그 검색의
     // 완료 마커(search_completed=isSearchDone)에만 해제하고, 끼어든 authoritative state
@@ -521,30 +578,110 @@ export function createSearchPanel({
   // 항상 보이고 기본으로 펼친다. 카드 = 이름 · 행 수 · 만든 조건 요약(눌러서 펼침).
   function parquetSectionHtml(message) {
     lastLibrary = libraryFromMessage(message);
-    return `<div class="search-parquet-section">
-      <div class="mod-section-label mod-collapsible open" data-pql-toggle>
-        Custom Parquets (${lastLibrary.length}) <span class="mod-collapse-arrow">▶</span>
-      </div>
-      <div class="search-parquet-list">${libraryHtml(lastLibrary, {
-        escHtml, openNames: pqlOpen, moreName: pqlMore, renaming: pqlRenaming, confirmTrash: pqlConfirmTrash,
-      })}</div>
-    </div>`;
+    return `<div class="search-parquet-list">${libraryHtml(lastLibrary, {
+      escHtml, openNames: pqlOpen, moreName: pqlMore, renaming: pqlRenaming, confirmTrash: pqlConfirmTrash,
+    })}</div>`;
   }
 
   function rerenderLibrary() {
     const host = moduleBody.querySelector('.search-parquet-host');
     if (!host) return;
-    const list = host.querySelector('.search-parquet-list');
-    const collapsed = !!list && list.classList.contains('collapsed');
     host.innerHTML = parquetSectionHtml({ parquet_library: lastLibrary });
-    if (collapsed) {
-      host.querySelector('.search-parquet-list')?.classList.add('collapsed');
-      host.querySelector('[data-pql-toggle]')?.classList.remove('open');
-    }
+    const count = moduleBody.querySelector('.sp-pq-count');
+    if (count) count.textContent = String(lastLibrary.length);
     if (pqlRenaming) {
       const input = host.querySelector('.pql-rename');
       if (input) { input.focus(); input.select(); }
     }
+  }
+
+  function applyParquetsShown() {
+    const host = moduleBody.querySelector('.search-parquet-host');
+    if (host) host.hidden = !parquetsShown;
+    const button = moduleBody.querySelector('[data-sp="parquets"]');
+    if (button) {
+      button.classList.toggle('is-on', parquetsShown);
+      button.setAttribute('aria-pressed', parquetsShown ? 'true' : 'false');
+    }
+    const count = moduleBody.querySelector('.sp-pq-count');
+    if (count) count.textContent = String(lastLibrary.length);
+  }
+
+  // ---- [검색 기록] ---------------------------------------------------------------
+  function requestHistory() {
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'get_search_history' }));
+  }
+
+  function setHistoryOpen(open) {
+    historyOpen = !!open;
+    const box = moduleBody.querySelector('.sp-history');
+    if (box) box.hidden = !historyOpen;
+    const button = moduleBody.querySelector('[data-sp="history"]');
+    if (button) {
+      button.classList.toggle('is-on', historyOpen);
+      button.setAttribute('aria-pressed', historyOpen ? 'true' : 'false');
+    }
+    if (historyOpen) {
+      renderHistory();
+      requestHistory();
+      moduleBody.querySelector('.sp-hist-filter')?.focus();
+    }
+  }
+
+  function historyWhen(at) {
+    // 2026-09-21T19:31:20 -> 09-21 19:31
+    const m = /^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(at || ''));
+    return m ? `${m[1]} ${m[2]}` : '';
+  }
+
+  // 찾기 = 검색어·제외어에 들어 있는가(대소문자 무시) - 사용자 지정: 복잡하게 만들지 말 것.
+  function historyMatches(item, needle) {
+    if (!needle) return true;
+    return `${item.query || ''}\n${item.exclude || ''}`.toLowerCase().includes(needle);
+  }
+
+  function renderHistory() {
+    const list = moduleBody.querySelector('.sp-hist-list');
+    if (!list) return;
+    const needle = (moduleBody.querySelector('.sp-hist-filter')?.value || '').trim().toLowerCase();
+    const shown = [];
+    historyItems.forEach((item, index) => { if (historyMatches(item, needle)) shown.push([item, index]); });
+    if (!shown.length) {
+      list.innerHTML = `<div class="sp-hist-empty">${historyItems.length ? '맞는 기록이 없습니다' : '아직 검색 기록이 없습니다'}</div>`;
+      return;
+    }
+    list.innerHTML = shown.map(([item, index]) => {
+      const ratings = Array.isArray(item.ratings) && item.ratings.length && item.ratings.length < 4 ? item.ratings.join('/') : '';
+      const meta = [
+        typeof item.rows === 'number' ? `${item.rows.toLocaleString('en-US')}행` : '',
+        ratings, item.period || '', historyWhen(item.at),
+      ].filter(Boolean).join(' · ');
+      return `<div class="sp-hist-item" data-sp-hist="${index}" title="눌러서 검색 칸에 채우기">
+        <div class="sp-hist-text">
+          <div class="sp-hist-q">${escHtml(item.query || '(전체)')}</div>
+          ${item.exclude ? `<div class="sp-hist-x">− ${escHtml(item.exclude)}</div>` : ''}
+          <div class="sp-hist-meta">${escHtml(meta)}</div>
+        </div>
+        <button type="button" class="sp-hist-del" data-sp-hist-del="${index}" title="기록에서 지우기">×</button>
+      </div>`;
+    }).join('');
+  }
+
+  function onSearchHistory(message) {
+    historyItems = Array.isArray(message.items) ? message.items : [];
+    if (historyOpen) renderHistory();
+  }
+
+  function useHistoryItem(item) {
+    const query = moduleBody.querySelector('#searchQuery');
+    const exclude = moduleBody.querySelector('#searchExclude');
+    if (query) query.value = item.query || '';
+    if (exclude) exclude.value = item.exclude || '';
+    saveFilterState();
+    setHistoryOpen(false);
+    moduleBody.querySelector('.mod-start')?.focus();
   }
 
   function bindParquetLibrary() {
@@ -552,10 +689,25 @@ export function createSearchPanel({
     if (moduleBody._pqlBound) return;
     moduleBody._pqlBound = true;
     moduleBody.addEventListener('click', event => {
-      const toggle = event.target.closest('[data-pql-toggle]');
-      if (toggle) {
-        toggle.classList.toggle('open');
-        toggle.parentElement.querySelector('.search-parquet-list')?.classList.toggle('collapsed');
+      if (event.target.closest('[data-sp="parquets"]')) {
+        parquetsShown = !parquetsShown;
+        applyParquetsShown();
+        return;
+      }
+      if (event.target.closest('[data-sp="history"]')) { setHistoryOpen(!historyOpen); return; }
+      const del = event.target.closest('[data-sp-hist-del]');
+      if (del) {
+        const item = historyItems[Number(del.dataset.spHistDel)];
+        const ws = getWs();
+        if (item && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'delete_search_history', query: item.query || '', exclude: item.exclude || '' }));
+        }
+        return;
+      }
+      const hist = event.target.closest('[data-sp-hist]');
+      if (hist) {
+        const item = historyItems[Number(hist.dataset.spHist)];
+        if (item) useHistoryItem(item);
         return;
       }
       if (event.target.closest('[data-ssf="save"]')) { submitSaveForm(); return; }
@@ -609,11 +761,19 @@ export function createSearchPanel({
         }
         return;
       }
+      const histFilter = event.target.closest && event.target.closest('.sp-hist-filter');
+      if (histFilter) {
+        if (event.key === 'Escape') setHistoryOpen(false);
+        return;
+      }
       const save = event.target.closest && event.target.closest('.search-save-form input');
       if (save) {
         if (event.key === 'Enter') { event.preventDefault(); submitSaveForm(); }
         else if (event.key === 'Escape') closeSaveForm();
       }
+    });
+    moduleBody.addEventListener('input', event => {
+      if (event.target.classList && event.target.classList.contains('sp-hist-filter')) renderHistory();
     });
     moduleBody.addEventListener('focusout', event => {
       if (event.target.classList && event.target.classList.contains('pql-rename') && pqlRenaming) {
@@ -627,7 +787,7 @@ export function createSearchPanel({
     if (document.getElementById('pql-style')) return;
     const style = document.createElement('style');
     style.id = 'pql-style';
-    style.textContent = PQL_CSS;
+    style.textContent = PQL_CSS + SEARCH_COMPACT_CSS;
     document.head.appendChild(style);
   }
 
@@ -659,25 +819,23 @@ export function createSearchPanel({
     lastParquetSig = parquetSignature(message);
     if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
     moduleBody.innerHTML = `
-    <div class="search-top-row">
-      <div>
-        <div class="mod-section-label">Remaining</div>
-        <div class="search-count-display">${message.count || 0}</div>
-      </div>
-      <div class="search-top-actions">
-        <div class="search-parquet-control">
-          <button class="mod-action-btn mod-parquet" onclick="toggleSearchParquetMenu(event)" data-naia-guide="검색 결과셋(parquet) 입출력 메뉴. 저장된 결과셋을 불러오거나 현재 결과에 합치고, 현재 결과를 파일로 내보내거나 실행용으로 저장합니다.">Parquet</button>
-          <div class="search-parquet-menu">
-            <button type="button" data-ssf="open" data-naia-guide="이 결과 저장 — 지금 조건에 맞는 행 전체(등급·Tag Filter 반영)를 parquet 으로 저장합니다. 만든 조건이 파일에 함께 기록되어 아래 목록에서 무엇이 들었는지 보입니다.">이 결과 저장…</button>
-            <button type="button" onclick="openSearchParquetUpload('load')" data-naia-guide="PC에서 불러오기 — 내 컴퓨터의 parquet 파일로 지금 풀을 바꿉니다. (저장해 둔 파일은 아래 목록에서 바로 불러오세요.)">PC에서 불러오기</button>
-            <button type="button" onclick="openSearchParquetUpload('merge')" data-naia-guide="PC에서 합치기 — 내 컴퓨터의 parquet 파일을 지금 풀에 더합니다(중복 id 는 한 번만).">PC에서 합치기</button>
-            <button type="button" onclick="searchParquetAction('save_runner')" data-naia-guide="실행파일 저장 — 현재 결과를 실행용 parquet(naia_temp_rows)로 저장합니다. 재시작·복구 시 이 풀에서 랜덤 프롬프트가 생성됩니다.">실행파일 저장</button>
-          </div>
+    <div class="sp-toolbar">
+      <button type="button" class="sp-tbtn" data-sp="parquets" aria-pressed="false"
+        data-naia-guide="저장해 둔 parquet 목록 - 파일마다 행 수와 만든 조건이 보입니다. 불러오기·합치기·이름 바꾸기·휴지통.">Custom Parquets (<span class="sp-pq-count">0</span>)</button>
+      <div class="search-parquet-control">
+        <button type="button" class="sp-tbtn" onclick="toggleSearchParquetMenu(event)"
+          data-naia-guide="지금 결과를 parquet 으로 저장하거나, PC 의 parquet 을 불러오거나 합칩니다.">Load / Save Parquets</button>
+        <div class="search-parquet-menu">
+          <button type="button" data-ssf="open" data-naia-guide="이 결과 저장 — 지금 조건에 맞는 행 전체(등급·Tag Filter 반영)를 parquet 으로 저장합니다. 만든 조건이 파일에 함께 기록되어 목록에서 무엇이 들었는지 보입니다.">이 결과 저장…</button>
+          <button type="button" onclick="openSearchParquetUpload('load')" data-naia-guide="PC에서 불러오기 — 내 컴퓨터의 parquet 파일로 지금 풀을 바꿉니다. (저장해 둔 파일은 Custom Parquets 목록에서 바로 불러오세요.)">PC에서 불러오기</button>
+          <button type="button" onclick="openSearchParquetUpload('merge')" data-naia-guide="PC에서 합치기 — 내 컴퓨터의 parquet 파일을 지금 풀에 더합니다(중복 id 는 한 번만).">PC에서 합치기</button>
+          <button type="button" onclick="searchParquetAction('save_runner')" data-naia-guide="실행파일 저장 — 현재 결과를 실행용 parquet(naia_temp_rows)로 저장합니다. 재시작·복구 시 이 풀에서 랜덤 프롬프트가 생성됩니다.">실행파일 저장</button>
         </div>
-        <button class="mod-action-btn mod-refine" onclick="openRefine()" data-naia-guide="심층검색(Refine) — 이미 검색된 결과셋을 아카이브 재스캔 없이 반복적으로 좁히고 합치는 작업대를 엽니다. 결과 위에서 추가 태그·범위로 단계적으로 다듬을 수 있습니다.">심층검색</button>
-        <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()" data-naia-guide="복원 — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋(스냅샷) 전체로 되돌립니다.">복원</button>
       </div>
+      <button type="button" class="sp-tbtn" onclick="restoreSnapshot()"
+        data-naia-guide="Restore — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋 전체로 되돌립니다.">Restore</button>
     </div>
+    <div class="search-parquet-host" hidden>${parquetSectionHtml(message)}</div>
     <div class="search-save-form" hidden>
       <div class="ssf-row">
         <input type="text" placeholder="파일 이름 (비우면 날짜로)" spellcheck="false">
@@ -685,6 +843,15 @@ export function createSearchPanel({
         <button type="button" class="pql-btn" data-ssf="cancel">취소</button>
       </div>
       <div class="ssf-note" style="white-space:pre-line"></div>
+    </div>
+    <div class="sp-counts">
+      <span class="sp-count-cell" title="지금 데이터셋(검색 결과) 전체 행 수">
+        <span class="sp-count-label">검색된 행</span><b class="sp-snap-count">${Number(message.snapshot_count || 0).toLocaleString('en-US')}</b><span class="sp-unit">개</span>
+      </span>
+      <span class="sp-count-sep"></span>
+      <span class="sp-count-cell" title="등급·Tag Filter 를 적용하고 Random 이 아직 쓰지 않은 행 수">
+        <span class="sp-count-label">남은 행</span><b class="search-count-display">${Number(message.count || 0).toLocaleString('en-US')}</b><span class="sp-unit">개</span>
+      </span>
     </div>
     <div>
       <div class="dr-label-row">
@@ -696,28 +863,33 @@ export function createSearchPanel({
     <div>
       <div class="dr-label-row">
         <span class="mod-section-label">Exclude Keyword</span>
-        <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n{a|b} — OR 그룹 제외. 그 중 하나라도 든 행을 뿕니다.">ⓘ 가이드</button>
+        <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n{a|b} — OR 그룹 제외. 그 중 하나라도 든 행을 뺍니다.">ⓘ 가이드</button>
       </div>
       <input class="mod-input" id="searchExclude" type="text" value="${escHtml(searchText.exclude)}" placeholder="exclude tags...">
     </div>
-    <div>
-      <div class="dr-label-row">
-        <span class="mod-section-label">Ratings</span>
-        <button type="button" class="header-guide-btn" data-naia-guide="Ratings — 포함할 콘텐츠 등급. 켜진 등급의 결과만 검색합니다.\\n\\nExplicit — 명확한 성적인 행위가 있는 구도.\\n\\nNSFW — 확실한 노출이 있고 일부 성기 노출이 포함될 수 있는 구도, 또는 성적인 행위를 암시하는 구도.\\n\\nSensitive — 수영복이나 속옷 같은 일반적인 노출이 있는 구도.\\n\\nGeneral — 그 외의 일반적인 Safe 구도.">ⓘ 가이드</button>
-      </div>
-      <div class="mod-checkbox-grid">${ratingCheckboxesHtml()}</div>
+    <div class="sp-ratings">
+      <span class="mod-section-label">Ratings</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="Ratings — 포함할 콘텐츠 등급. 켜진 등급의 결과만 검색합니다.\\n\\nExplicit — 명확한 성적인 행위가 있는 구도.\\n\\nNSFW — 확실한 노출이 있고 일부 성기 노출이 포함될 수 있는 구도, 또는 성적인 행위를 암시하는 구도.\\n\\nSensitive — 수영복이나 속옷 같은 일반적인 노출이 있는 구도.\\n\\nGeneral — 그 외의 일반적인 Safe 구도.">ⓘ</button>
+      ${ratingCheckboxesHtml()}
     </div>
     ${dateRangeSliderHtml()}
-    <div style="display:flex;gap:8px;align-items:center">
+    <div class="sp-search-row">
+      <button type="button" class="sp-hist-btn" data-sp="history" aria-pressed="false"
+        data-naia-guide="검색 기록 — 실행했던 검색(검색어·제외어)을 최근 순으로 최대 500개 기억합니다. 눌러서 칸에 채운 뒤 [검색] 하세요.">검색 기록</button>
       <button class="mod-action-btn mod-start" onclick="doSearch()" ${searchingActive ? 'disabled' : ''}>검색</button>
-      <span class="search-progress" style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)"></span>
     </div>
-    <div class="search-parquet-host">${parquetSectionHtml(message)}</div>
+    <div class="sp-history" hidden>
+      <input type="text" class="sp-hist-filter" placeholder="검색어·제외어에서 찾기" spellcheck="false">
+      <div class="sp-hist-list"></div>
+    </div>
+    <span class="search-progress"></span>
   `;
     bindSearchInputs();
     ensureDateRangeStyle();
     ensureParquetLibraryStyle();
     bindParquetLibrary();
+    applyParquetsShown();
+    historyOpen = false;
     bindDateRangeDrag();
     bindTagIncrementButton();
     renderDateRange();
@@ -760,7 +932,9 @@ export function createSearchPanel({
     const saveNote = moduleBody.querySelector('.search-save-form:not([hidden]) .ssf-note');
     if (saveNote) saveNote.textContent = saveFormNote();
     const countEl = moduleBody.querySelector('.search-count-display');
-    if (countEl) countEl.textContent = message.count || 0;
+    if (countEl) countEl.textContent = Number(message.count || 0).toLocaleString('en-US');
+    const snapEl = moduleBody.querySelector('.sp-snap-count');
+    if (snapEl && 'snapshot_count' in message) snapEl.textContent = Number(message.snapshot_count || 0).toLocaleString('en-US');
 
     const server = serverSearchTexts(message);
     // Per-field: clear a field's guard once the server echoes that field's value,
@@ -1191,5 +1365,6 @@ export function createSearchPanel({
     loadParquet,
     restoreSnapshot,
     openSaveForm,
+    onSearchHistory,
   };
 }

@@ -203,9 +203,6 @@ const SQW_CSS = `
 /* ── Search 층 안쪽을 줄인다 ── */
 .sqw-body .search-host{display:flex;flex-direction:column;gap:7px}
 .sqw-body .mod-section-label{font-size:9.5px;margin-bottom:2px}
-.sqw-body .search-top-row{display:flex;align-items:flex-end;justify-content:space-between;gap:6px}
-.sqw-body .search-count-display{font-size:17px;line-height:1.1}
-.sqw-body .search-top-actions{gap:4px}
 .sqw-body .mod-action-btn{height:22px;min-height:22px;padding:0 8px;font-size:10.5px;border-radius:5px}
 .sqw-body .mod-input{height:24px;padding:2px 7px;font-size:11px}
 .sqw-body .mod-checkbox-grid{gap:2px 10px}

@@ -157,7 +157,7 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), moreName = 
       ${detail}${more}
     </div>`;
   }).join('');
-  const empty = list.length ? '' : '<div class="pql-empty">아직 저장한 parquet 이 없습니다. Parquet ▸ [이 결과 저장]으로 만듭니다.</div>';
+  const empty = list.length ? '' : '<div class="pql-empty">아직 저장한 parquet 이 없습니다. [Load / Save Parquets] ▸ 이 결과 저장…으로 만듭니다.</div>';
   return `<div class="pql-list">${items}${empty}</div>`;
 }
 

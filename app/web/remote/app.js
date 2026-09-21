@@ -2661,7 +2661,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
 const searchHost = document.createElement('div');
 searchHost.className = 'search-host';
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw1')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw2')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,
@@ -2675,7 +2675,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260921-sqw1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260921-sqw3')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -4423,6 +4423,7 @@ const wsMessageHandlers = {
   search_progress: onSearchProgress,
   search_loading: onSearchLoading,
   bucket_dates: onBucketDates,
+  search_history: m => { if (searchPanelControl) searchPanelControl.onSearchHistory(m); },
   depth_state: onDepthState,
   depth_sample: onDepthSample,
   tag_search_result: onTagSearchResult,

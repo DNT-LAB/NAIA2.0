@@ -119,6 +119,21 @@ export function formatRows(rows) {
   return `${Number(rows).toLocaleString('en-US')}행`;
 }
 
+export function formatSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+// 행 수(연노랑) · 용량 - 접힌 칸과 펼친 칸이 같은 모양으로 쓴다.
+function sizeMeta(card, esc) {
+  const size = formatSize(card.size);
+  return `<span class="pql-rows">${esc(formatRows(card.rows))}</span>${size ? ` · ${esc(size)}` : ''}`;
+}
+
 export function librarySignature(cards) {
   return JSON.stringify((cards || []).map(c => [c.name, c.mtime, c.rows, c.has_meta]));
 }
@@ -170,8 +185,10 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
     const label = name.replace(/\.parquet$/i, '');
     const open = openNames.has(name);
     if (!open) {
+      // 접힌 칸 = 한 줄을 가득 채운다(사용자 지정): 이름 ··· 행 수 · 용량. 조건은 펼쳐야 보인다.
       return `<button type="button" class="pql-tile" data-pql-name="${esc(name)}" data-pql="expand" title="${esc(label)}">
         <span class="pql-tile-name">${esc(label)}</span>
+        <span class="pql-stamp">${sizeMeta(card, esc)}</span>
       </button>`;
     }
     const f = recipeFacts(card.recipe);
@@ -193,7 +210,7 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
       : `<span class="pql-open-name" data-pql="expand" title="접기">${esc(label)}</span>`;
     const when = card.created_at ? String(card.created_at).replace('T', ' ').slice(0, 16) : '';
     return `<div class="pql-tile is-open" data-pql-name="${esc(name)}">
-      <div class="pql-open-head">${title}<span class="pql-stamp"><span class="pql-rows">${esc(formatRows(card.rows))}</span>${when ? ` · ${esc(when)}` : ''}</span></div>
+      <div class="pql-open-head">${title}<span class="pql-stamp">${sizeMeta(card, esc)}${when ? ` · ${esc(when)}` : ''}</span></div>
       <div class="pql-facts">${body}</div>
       <div class="pql-actions">
         <button type="button" class="pql-btn is-main" data-pql="load" title="현재 풀을 이 파일로 바꿉니다">불러오기</button>
@@ -209,12 +226,18 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
 }
 
 export const PQL_CSS = `
-.pql-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:5px;align-content:start}
+/* 한 칸 = 한 줄(사용자 지정) - 여러 열로 두면 짧은 목록에서 칸이 줄을 못 채우고 빈 자리가 남았다. */
+.pql-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;align-content:start}
 /* 칸 안쪽은 창 배경보다 어둡게 - 같은 색이면 칸과 창이 구분되지 않는다(사용자 지정). */
 .pql-tile{display:flex;align-items:center;min-width:0;height:34px;padding:0 9px;border-radius:6px;cursor:pointer;text-align:left;
   border:1px solid var(--border,#2c2c36);background:rgba(0,0,0,0.24);color:var(--text,#e8e8ee)}
 .pql-tile:hover{border-color:var(--accent-blue,#8d7bd6)}
-.pql-tile-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600}
+.pql-tile-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600}
+.pql-tile > .pql-stamp{margin-left:8px;flex:0 0 auto}
+/* 선택 안 한 칸은 강조 없이 조금 덜 밝은 흰색(사용자 지정) - 연노랑 행 수는 펼친 칸에서만. */
+.pql-tile:not(.is-open){color:rgba(255,255,255,0.80)}
+.pql-tile:not(.is-open) > .pql-stamp{color:rgba(255,255,255,0.58)}
+.pql-tile:not(.is-open) .pql-rows{color:inherit;font-weight:inherit}
 .pql-tile.is-open{grid-column:1/-1;height:auto;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:7px 9px;
   cursor:default;border-color:var(--accent-blue,#8d7bd6);background:rgba(0,0,0,0.32)}
 .pql-open-head{display:flex;align-items:baseline;gap:8px;min-width:0}

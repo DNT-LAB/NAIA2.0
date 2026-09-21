@@ -1,5 +1,5 @@
 import { createRatingStore, RATING_KEYS, filteredCount } from './ratingStore.mjs';
-import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs?v=20260921-pql3';
+import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs?v=20260921-pql4';
 
 // 검색 층 컴팩트 배치(사용자 지정 2026-09-21): 상단 단추 셋 · 행 수 한 줄 · 등급 한 줄 ·
 // [검색 기록 | 검색]. ⚠️ display 를 주는 요소는 [hidden] 짝 규칙을 같이 둔다(이 저장소가 여러 번 밟았다).

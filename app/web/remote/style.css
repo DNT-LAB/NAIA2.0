@@ -29860,12 +29860,18 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   font-family: inherit; font-size: 9px;
 }
 
-/* 우클릭 메뉴 - 블럭이 좁아 단추를 더 못 놓는다(사용자 지정). */
+/* 우클릭 메뉴 - 블럭이 좁아 단추를 더 못 놓는다(사용자 지정).
+   ⚠️ **떠 있는 층은 배지보다 위**여야 한다(사용자 제보 2026-09-21). 이 창 안의
+      z-index 는 두 켜다: 카드에 얹히는 배지(`.artist-thumb-*-mark`·`-check` = 3)와
+      그 위로 떠는 판(45~). 예전에 이 메뉴가 배지와 **같은 3** 이었는데, 같은 값이면
+      **DOM 차례**가 이긴다 - 띠 줄이 격자보다 앞이라 격자의 배지가 나중에 그려져
+      `411 17%` 같은 것이 메뉴 글자 위에 비쳤다.
+      ⚠️ 동점은 "졌다" 로 안 보인다. 대소 비교만 보고 넘기지 마라. */
 .mixq-menu {
   /* ⚠️ `overflow-y: auto` 는 짝이 있다 - 창이 낮으면 `openMenu` 가 `max-height` 를
      씌운다. 그때 구르지 못하면 아랫줄이 **그냥 사라진다**(윗줄이 잘렸던 그 결함의
      거울상이다). 둘 중 하나만 고치지 마라. */
-  position: absolute; z-index: 3; min-width: 132px; padding: 3px; overflow-y: auto;
+  position: absolute; z-index: 50; min-width: 132px; padding: 3px; overflow-y: auto;
   border: 1px solid var(--border-glow); border-radius: 8px;
   background: var(--bg-surface); box-shadow: 0 14px 30px rgba(0,0,0,0.5);
   display: flex; flex-direction: column; gap: 1px;

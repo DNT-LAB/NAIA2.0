@@ -226,6 +226,24 @@ def _search_recipe(context: WebSessionContext, query: str, exclude: str, ratings
     return recipe
 
 
+def _record_search_history(context: WebSessionContext, recipe: dict[str, Any], rows: int) -> None:
+    """[검색 기록] 에 남긴다(core/search_history.py). 기록 실패가 검색을 죽이면 안 된다."""
+    try:
+        from core.search_history import record_search
+
+        record_search(
+            context,
+            query=recipe.get("query", ""),
+            exclude=recipe.get("exclude", ""),
+            ratings=recipe.get("ratings"),
+            rows=int(rows),
+            bucket=recipe.get("bucket"),
+            period=recipe.get("period"),
+        )
+    except Exception as exc:
+        print(f"Headless Remote: search history record failed - {exc}", flush=True)
+
+
 def _last_search_meta(context: WebSessionContext, frame) -> dict[str, Any]:
     from core.custom_parquet_library import make_meta
 
@@ -600,10 +618,12 @@ def run_search_command(
             context.search_results_master_base_snapshot = searched.copy()
             context.search_results_scope = TAG_ARCHIVE_SCOPE
             mark_search_pool_replaced(context)
-            _set_pool_provenance(context, _search_recipe(context, query, exclude, ratings, bucket_range), base=True)
+            recipe = _search_recipe(context, query, exclude, ratings, bucket_range)
+            _set_pool_provenance(context, recipe, base=True)
             _reset_active_tag_filter_assignment(context)
             context.save_search_filter_state(tag_filter_active=False)
             context.remote_active_ratings = set("gsqe")
+        _record_search_history(context, recipe, len(searched))
         context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
         return apply_search_runtime_filters(context)
 
@@ -621,6 +641,7 @@ def run_search_command(
         _reset_active_tag_filter_assignment(context)
         context.save_search_filter_state(tag_filter_active=False)
         context.remote_active_ratings = set("gsqe")
+    _record_search_history(context, recipe, len(searched) if searched is not None else 0)
     context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
     return apply_search_runtime_filters(context)
 

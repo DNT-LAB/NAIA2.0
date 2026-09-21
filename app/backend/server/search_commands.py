@@ -40,6 +40,8 @@ SEARCH_COMMAND_TYPES = {
     "tag_filter_clear",
     "save_filter_preset",
     "delete_filter_preset",
+    "get_search_history",
+    "delete_search_history",
 }
 
 
@@ -364,6 +366,22 @@ async def handle_search_command(
         if name:
             await run_in_thread(context.delete_filter_preset, name)
         await _send_json(ws, context.search_state_payload())
+        return True
+
+    # [검색 기록] - 최대 500개라 search_state 에 매번 싣지 않고 창을 열 때만 받는다.
+    if command_type in {"get_search_history", "delete_search_history"}:
+        from core import search_history
+
+        if command_type == "delete_search_history":
+            items = await run_in_thread(
+                search_history.delete_search,
+                context,
+                query=str(command.get("query") or ""),
+                exclude=str(command.get("exclude") or ""),
+            )
+        else:
+            items = await run_in_thread(search_history.load_history, context)
+        await _send_json(ws, {"type": "search_history", "items": items})
         return True
 
     return False

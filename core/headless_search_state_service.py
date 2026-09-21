@@ -551,6 +551,8 @@ class HeadlessSearchStateService:
             "tag_filter_revision": int(getattr(context, "_tag_filter_revision", 0) or 0),
             "count": int(count or 0),
             "total_count": int(context.search_results.get_count() if context.search_results else 0),
+            # 검색된 행(= 지금 데이터셋 전체). '남은 행'(count)과 한 줄로 나란히 보인다.
+            "snapshot_count": int(len(snapshot)) if snapshot is not None else 0,
             "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],
             "rating_counts": rating_counts,
             "query": filter_preferences.get("query", ""),

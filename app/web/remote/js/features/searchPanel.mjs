@@ -43,6 +43,9 @@ const SEARCH_COMPACT_CSS = `
 .sp-hist-del{flex:0 0 auto;border:none;background:transparent;color:var(--text-dimmer,#6c6c78);cursor:pointer;font-size:13px;line-height:1}
 .sp-hist-del:hover{color:#f0a0a0}
 .sp-hist-empty{font-size:10.5px;color:var(--text-dimmer,#6c6c78);padding:4px}
+/* 기간 슬라이더 트랙: 원래 배경이 var(--bg-elevated) 인데 떠 있는 창의 배경도 같은 색이라
+   트랙이 사라졌다(사용자 제보). 창 배경 위에서도 보이는 반투명 흰색으로. */
+.dr-track{background:rgba(255,255,255,0.13);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05)}
 .search-progress{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-dim,#888)}
 .search-progress:empty{display:none}
 `;

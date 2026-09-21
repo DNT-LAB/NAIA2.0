@@ -244,7 +244,9 @@ function ensureStyle(doc) {
 const SQW_CSS = `
 .dragpanel.sqw{border-color:rgba(120,190,150,0.42)}
 .dragpanel.sqw .dragpanel-head{background:rgba(120,190,150,0.10)}
-.dragpanel.sqw .dragpanel-body{padding:0;gap:0;overflow:hidden;position:relative}
+/* 본문 바탕 = 옛 Search·Tag Filter 팝업의 바탕(--bg-surface). 떠 있는 창의 기본 바탕(--bg-elevated)을
+   쓰면 그 위의 --bg-elevated 요소(Filters·Clear 단추, 칩, 슬라이더 트랙)가 전부 배경에 묻힌다. */
+.dragpanel.sqw .dragpanel-body{padding:0;gap:0;overflow:hidden;position:relative;background:var(--bg-surface)}
 .sqw-sec{display:flex;flex-direction:column;min-height:0;border-bottom:1px solid rgba(255,255,255,0.06)}
 .sqw-sec.is-open{flex:1 1 auto}
 .sqw-head{display:flex;align-items:center;gap:6px;width:100%;height:26px;padding:0 9px;border:none;
@@ -290,14 +292,12 @@ const SQW_CSS = `
 .sqw-body .tag-filter-stop-row{margin:0}
 .sqw-body .tag-filter-stop-toggle .opt-label{font-size:10px}
 .sqw-body .tag-filter-actions{display:flex;gap:4px;justify-content:stretch;padding-top:6px}
-.sqw-body .tag-filter-btn-action{flex:1 1 0;min-width:0;height:24px;padding:0 6px;font-size:10.5px;font-weight:600;border-radius:5px;
-  background:rgba(255,255,255,0.03);border:1px solid var(--border,#33333f);color:var(--text-secondary,#c8c8d0);
+/* 크기만 줄인다. 색·굵기는 기존 팝업 규칙(style.css .tag-filter-btn-action.*)을 그대로 쓴다 -
+   Commit 녹색(--success) · Save Filter/저장 파란 채움 · Filters/Clear 흰 굵은 글씨. 예전에 여기서
+   배경·글자색을 한꺼번에 덮어 파란 단추가 회색이 됐다(사용자 검토: 기존 느낌을 살려라). */
+.sqw-body .tag-filter-btn-action{flex:1 1 0;min-width:0;height:24px;padding:0 6px;font-size:10.5px;border-radius:5px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sqw-body .tag-filter-btn-action:hover{color:var(--text-primary,#e8e8ee);border-color:var(--accent-blue,#8d7bd6);filter:none}
-.sqw-body .tag-filter-btn-action.assign{background:#2e7d32;border-color:#4CAF50;color:#fff}
-.sqw-body .tag-filter-btn-action.assign:hover{background:#388e3c;color:#fff}
 .sqw-body .tag-filter-btn-action:disabled{opacity:.35;pointer-events:none}
-.sqw-body .tag-filter-btn-action.clear:hover{border-color:var(--error,#f44336);color:var(--error,#f44336)}
 .sqw-body .tag-filter-save-row{padding-top:0}
 .sqw-body .tag-filter-save-row .tag-filter-btn-action{flex:0 0 auto;padding:0 12px}
 .sqw-body .tag-filter-presets{max-height:180px;padding:4px;margin:0;gap:3px;background:rgba(0,0,0,0.24);border-radius:6px}

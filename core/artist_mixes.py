@@ -20,7 +20,7 @@
 
     blocks: [
       {"kind": "artist", "artist": "x", "weight": 1.2, "with_prefix": true, "enabled": true},
-      {"kind": "anchor", "slot": "pre", "sync": true},
+      {"kind": "anchor", "id": "a1", "slot": "pre", "sync": true},
       {"kind": "collab", "weight": -1.0, "enabled": false},
     ]
 
@@ -29,15 +29,15 @@
 ⚠️ `temp`(임시 칸)는 담지 않는다. 그건 고르는 중이라는 표시지 조합의 일부가 아니다 -
    불러오면 고정된 칸으로 선다.
 
-`text` 는 저장 시점의 prefix/postfix 원문이다. **지금은 아무도 안 쓴다** - 2단계에서
-"앵커 자리까지 통째로 복원" 을 붙일 때 쓸 자리를 미리 비워 둔 것이다(사용자 지정).
-나중에 담기 시작하면 그 전에 저장한 조합은 영영 복원할 수 없으므로 지금부터 담는다.
+`text` 는 저장 시점의 prefix/postfix 원문이며 빈 칸도 남긴다. 글 층을 선택하면
+앵커 자리와 함께 통째로 복원한다. 네거티브와 생성 설정은 각각 별도 선택 층이다.
 """
 from __future__ import annotations
 
 import hashlib
 import io
 import json
+import math
 import re
 import os
 import threading
@@ -56,6 +56,7 @@ WEIGHT_MIN = -5.0
 WEIGHT_MAX = 5.0
 SLOTS = ("pre", "post")
 TEXT_FIELDS = ("pre", "post")
+MIX_SETTING_KEYS = ("model", "sampler", "scheduler", "steps", "scale", "cfg_rescale")
 ANCHOR_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 MIX_ID = re.compile(r"^[a-f0-9]{12}$")
 THUMB_FILE = re.compile(r"^(?:a|main)_[a-f0-9]{24}\.webp$")
@@ -171,6 +172,32 @@ def _clean_thumbs(raw: Any) -> dict:
     }
 
 
+def _clean_settings(raw: Any) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    result = {}
+    for key in MIX_SETTING_KEYS:
+        if key not in raw:
+            continue
+        if key in {"model", "sampler", "scheduler"}:
+            result[key] = str(raw[key] or "").strip()[:200]
+            continue
+        try:
+            value = float(raw[key])
+        except (TypeError, ValueError):
+            raise ArtistMixError(f"invalid setting: {key}") from None
+        if not math.isfinite(value):
+            raise ArtistMixError(f"invalid setting: {key}")
+        if key == "steps" and (value != int(value) or not 1 <= value <= 1000):
+            raise ArtistMixError("invalid steps")
+        if key == "scale" and not 0 <= value <= 100:
+            raise ArtistMixError("invalid scale")
+        if key == "cfg_rescale" and not 0 <= value <= 1:
+            raise ArtistMixError("invalid cfg_rescale")
+        result[key] = int(value) if key == "steps" else round(value, 2)
+    return result
+
+
 def _webp(payload: bytes, edge: int) -> bytes:
     from PIL import Image, ImageOps
 
@@ -248,6 +275,10 @@ class ArtistMixStore:
         record["text"] = text
         _internal_anchors(blocks, text)
         record["thumbs"] = _clean_thumbs(raw.get("thumbs"))
+        if isinstance(raw.get("negative"), str):
+            record["negative"] = raw["negative"][:MAX_TEXT_LEN]
+        if isinstance(raw.get("settings"), dict):
+            record["settings"] = _clean_settings(raw["settings"])
         return record
 
     # ── 조회 ──────────────────────────────────────────────────────────────
@@ -336,7 +367,7 @@ class ArtistMixStore:
     # ── 변경 ──────────────────────────────────────────────────────────────
     def save(self, name: Any, blocks: Any, *, text: Any = None, mix_id: Any = None,
              artist_images: dict[str, bytes] | None = None, fallback: str = "mosaic",
-             main_image: bytes | None = None) -> dict:
+             main_image: bytes | None = None, negative: Any = None, settings: Any = None) -> dict:
         """새로 만들거나, `mix_id` 가 있으면 그것을 덮어쓴다.
 
         ⚠️ **같은 이름이 있으면 그 자리를 덮는다.** 이름이 같은 조합이 둘 쌓이면
@@ -345,11 +376,14 @@ class ArtistMixStore:
         """
         clean_name = _clean_name(name)
         clean_blocks = _clean_blocks(blocks)
+        clean_settings = _clean_settings(settings)
         clean_text = _clean_text(text)
         _internal_anchors(clean_blocks, clean_text)
         warnings = [f"{key}: {MAX_TEXT_LEN}자까지 저장했습니다. 앵커 위치를 확인하세요."
                     for key in TEXT_FIELDS if isinstance(text, dict)
                     and isinstance(text.get(key), str) and len(text[key]) > MAX_TEXT_LEN]
+        if isinstance(negative, str) and len(negative) > MAX_TEXT_LEN:
+            warnings.append(f"negative: {MAX_TEXT_LEN}자까지 저장했습니다.")
         now = int(time.time())
         with self._lock:
             mixes = self._read()
@@ -368,6 +402,10 @@ class ArtistMixStore:
             target["blocks"] = clean_blocks
             target["updated"] = now
             target["text"] = clean_text
+            if isinstance(negative, str):
+                target["negative"] = negative[:MAX_TEXT_LEN]
+            if settings is not None:
+                target["settings"] = clean_settings
             thumbs = _clean_thumbs({"fallback": fallback})
             for artist, payload in (artist_images or {}).items():
                 try:

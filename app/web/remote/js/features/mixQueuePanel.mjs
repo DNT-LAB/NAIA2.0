@@ -59,6 +59,20 @@ export function mixTextDiff(current, saved) {
     added: [...after].filter(tag => !before.has(tag)), removed: [...before].filter(tag => !after.has(tag))};
 }
 
+export function mixSettingsDiff(current = {}, saved = {}) {
+  const keys = ['model', 'sampler', 'scheduler', 'steps', 'scale', 'cfg_rescale'];
+  const normalized = (key, value) => {
+    if (['steps', 'scale', 'cfg_rescale'].includes(key)) {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.round(number * 100) / 100 : String(value ?? '');
+    }
+    return String(value ?? '').trim();
+  };
+  return keys.filter(key => Object.hasOwn(saved, key)).map(key => ({key,
+    before: normalized(key, current[key]), after: normalized(key, saved[key])}))
+    .filter(row => row.before !== row.after);
+}
+
 export function createMixQueuePanel({
   document: doc,
   escHtml = value => String(value ?? '')
@@ -666,7 +680,10 @@ export function createMixQueuePanel({
       if (!ok && ticket === pageSeq) { busy = false; form.querySelector('[type=submit]').disabled = false; }
     });
     try {
-      const rows = await mixStore.candidates(liveArtists(draft.blocks));
+      const [rows, layers] = await Promise.all([
+        mixStore.candidates(liveArtists(draft.blocks)), mixStore.current(),
+      ]);
+      Object.assign(draft, layers);
       if (ticket !== pageSeq) return;
       selected = rows[0]?.history_id || 'mosaic';
       const images = blocks.filter(b => !isAnchor(b) && b.id !== COLLAB_ID && b.image).map(b => b.image);
@@ -740,8 +757,13 @@ export function createMixQueuePanel({
     input.className = 'mixq-name-input'; input.maxLength = 40;
     input.setAttribute('aria-label', '새 조합 이름'); input.value = oldName;
     original.replaceWith(input);
-    let busy = false;
-    const cancel = () => { if (!busy && input.isConnected) input.replaceWith(original); };
+    let busy = false, cancelled = false;
+    const cancel = () => {
+      if (busy || cancelled || !input.isConnected) return;
+      // replaceWith가 blur를 다시 부르기 전에 취소를 표시한다.
+      cancelled = true;
+      input.replaceWith(original);
+    };
     input.addEventListener('blur', cancel);
     input.addEventListener('keydown', async event => {
       event.stopPropagation();
@@ -777,16 +799,23 @@ export function createMixQueuePanel({
     try {
       const record = await mixStore.one(id);
       if (ticket !== pageSeq) return;
-      const now = getMixState();
+      const now = {...getMixState(), ...await mixStore.current()};
+      if (ticket !== pageSeq) return;
       const pre = mixTextDiff(now.text?.pre, record.text?.pre);
       const post = mixTextDiff(now.text?.post, record.text?.post);
-      const choices = {text: false};
+      const negative = mixTextDiff(now.negative, record.negative);
+      const settings = mixSettingsDiff(now.settings, record.settings);
+      const choices = {text: false, negative: false, settings: false};
       menuEl.innerHTML = `<div class="mixq-page mixq-detail-page">
         <button type="button" data-mixq-back>◂ ${escHtml(record.name)}</button>
         <button type="button" class="mixq-main-thumb" data-mixq-main title="주 썸네일 고르기">${thumbHtml(record)}</button>
         <div class="mixq-candidates" hidden></div>
         ${pre.changed || post.changed ? `<button type="button" class="mixq-layer" data-mixq-layer="text" aria-pressed="false">
           <span class="mixq-dot">○</span> 글 <small>${textDiffHtml('prefix', pre)} · ${textDiffHtml('postfix', post)}</small></button>` : ''}
+        ${Object.hasOwn(record, 'negative') && negative.changed ? `<button type="button" class="mixq-layer" data-mixq-layer="negative" aria-pressed="false">
+          <span class="mixq-dot">○</span> 네거티브 <small>${textDiffHtml('', negative)}</small></button>` : ''}
+        ${settings.length ? `<button type="button" class="mixq-layer" data-mixq-layer="settings" aria-pressed="false">
+          <span class="mixq-dot">○</span> 설정 <small>${settings.map(row => `${escHtml(row.key)} ${escHtml(String(row.before))} → ${escHtml(String(row.after))}`).join('<br>')}</small></button>` : ''}
         <button type="button" class="mixq-commit" data-mixq-apply>불러오기</button></div>`;
       menuEl.querySelector('[data-mixq-back]').addEventListener('click', () => void openMixList(point.x, point.y));
       for (const button of menuEl.querySelectorAll('[data-mixq-layer]')) {
@@ -798,10 +827,19 @@ export function createMixQueuePanel({
         });
       }
       menuEl.querySelector('[data-mixq-apply]').addEventListener('click', async event => {
-        event.currentTarget.disabled = true;
-        await restoreMix(record, record.name, choices);
-        closeMenu();
-        showToast(`조합을 불러왔습니다: ${record.name}`, 'success');
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          if (choices.settings || choices.negative) {
+            const result = await mixStore.apply(record.id, choices);
+            for (const [key, reason] of Object.entries(result.skipped || {})) showToast(`${key}: ${reason}`, 'warning');
+            for (const warning of result.warnings || []) showToast(warning, 'warning');
+          }
+          await restoreMix(record, record.name, choices);
+          closeMenu();
+          showToast(`조합을 불러왔습니다: ${record.name}`, 'success');
+        } catch (error) { showToast(error?.message || '조합을 적용하지 못했습니다.', 'error'); }
+        finally { button.disabled = false; }
       });
       menuEl.querySelector('[data-mixq-main]').addEventListener('click', async () => {
         const host = menuEl.querySelector('.mixq-candidates');

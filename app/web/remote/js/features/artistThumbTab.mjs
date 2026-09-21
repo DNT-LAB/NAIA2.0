@@ -24,6 +24,8 @@ export function createArtistThumbController({
   getPeField = null,
   setPeField = null,
   getPePreset = () => '',
+  beforeMixApply = () => ({}),
+  onMixApplied = () => {},
   requestPeState = () => {},
   // 리모컨을 켜면 오른쪽 화면을 Result 로 보낸다(사용자 지정) - 조각이 창으로 빠져
   // 나가 이 탭에는 자리 표시만 남기 때문이다.
@@ -2978,7 +2980,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s4b');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-mix-s5b');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,
@@ -3023,8 +3025,7 @@ export function createArtistThumbController({
         list: async () => (await getJson('/api/artist-mixes'))?.mixes || [],
         save: (name, blocks, options = {}) => postJson('/api/artist-mixes', {
           op: 'save', name, blocks, mode: currentMode(),
-          // ⚠️ prefix/postfix 원문은 **담아만 둔다**(2단계에서 자리까지 복원할 때 쓴다).
-          //    나중에 담기 시작하면 그 전에 저장한 조합은 영영 복원할 수 없다.
+          // prefix/postfix 원문은 앵커 자리와 함께 저장한다. 글 층 선택 때만 복원한다.
           text: {pre: peText('pre_prompt'), post: peText('post_prompt')},
           ...options,
         }),
@@ -3034,6 +3035,14 @@ export function createArtistThumbController({
         remove: id => postJson('/api/artist-mixes', {op: 'delete', id}),
         rename: (id, name) => postJson('/api/artist-mixes', {op: 'rename', id, name}),
         matchingName: name => getJson(`/api/artist-mixes/name?name=${encodeURIComponent(name)}`),
+        // 저장·diff·적용은 서버 세션의 같은 네거티브와 설정을 본다.
+        current: () => getJson('/api/artist-mixes/current'),
+        apply: async (id, layers) => {
+          const guards = beforeMixApply();
+          const result = await postJson('/api/artist-mixes', {op: 'apply', id, layers, ...guards});
+          onMixApplied(result);
+          return result;
+        },
       },
       onAnchorRemove: id => dropAnchorFromText(id),
       onDragStart: () => remote.hideZoom?.(),

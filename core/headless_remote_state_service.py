@@ -155,7 +155,7 @@ class HeadlessRemoteStateService:
         })
         return options
 
-    def set_param(self, key: str, value: Any) -> None:
+    def set_param(self, key: str, value: Any, *, notify: bool = True) -> None:
         clean_key = str(key or "").strip()
         if not clean_key:
             return
@@ -166,8 +166,10 @@ class HeadlessRemoteStateService:
         self._sync_cached_selection(clean_key, self.context.remote_params[clean_key])
         self._sync_resolution_dimensions(clean_key, self.context.remote_params[clean_key])
         self._disable_unsupported_reference_frames(clean_key)
-        self.context.save_remote_ui_state()
-        self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
+        # 믹스 일괄 적용도 같은 정규화/모델 부수효과를 거치고 저장·알림만 마지막에 합친다.
+        if notify:
+            self.context.save_remote_ui_state()
+            self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
 
     def _disable_unsupported_reference_frames(self, key: str) -> list[str]:
         """새 모델이 못 쓰는 Character Reference / Vibe Transfer 를 꺼 둔다.

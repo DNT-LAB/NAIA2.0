@@ -793,7 +793,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260921-mix-s4b')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260921-mix-s5b')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -827,6 +827,19 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260921-mix
       getPeField: key => String(slashPeState()[key] || ''),
       setPeField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),
       getPePreset: () => String(slashPeState().preset || ''),
+      beforeMixApply: () => {
+        if (syncingParams) throw new Error('설정을 동기화하고 있습니다. 잠시 뒤 다시 누르세요.');
+        return {blocked_keys: virtualCharacterSession() ? ['model'] : []};
+      },
+      onMixApplied: result => {
+        // 모델 서식은 조합을 조립하기 전에 갱신한다. WS 에코의 도착 차례에 기대지 않는다.
+        if (result.params) updateParams(result.params);
+        if (result.applied?.includes('negative') && !virtualCharacterSession()) {
+          negEdit.value = result.negative;
+          _negativeUserDirty = false;
+          updateNegativeTokenEstimate();
+        }
+      },
       requestPeState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },
       // 믹스 모드의 칸들도 메인 프롬프트와 **같은** 강조·같은 자동완성을 쓴다(사용자 지정).
       attachPromptHighlight,

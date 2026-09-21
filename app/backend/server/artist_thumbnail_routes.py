@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 
 from core.artist_affinity import default_pack as artist_affinity_pack
 from core.artist_groups import ArtistGroupError, ArtistGroupStore
-from core.artist_mixes import ArtistMixError, ArtistMixStore
+from core.artist_mixes import ArtistMixError, ArtistMixStore, MIX_SETTING_KEYS
 from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
 from core.artist_thumbnail_service import ArtistThumbnailService
 from core.headless_generation_service import HeadlessGenerationService
@@ -42,11 +42,108 @@ def artist_mix_store(context: WebSessionContext) -> ArtistMixStore:
 
 # 한 라우트가 op 로 갈라 받는다 - 프론트 호출부가 작아지고 검증이 한 곳에 모인다.
 _GROUP_OPS = {"create", "rename", "delete", "add", "remove", "reorder", "weight"}
-_MIX_OPS = {"save", "rename", "delete", "set_main"}
+_MIX_OPS = {"save", "rename", "delete", "set_main", "apply"}
 
 
-def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnailService | None = None, result_store=None) -> dict:
+def _mix_current_layers(context) -> dict:
+    schema = context.generation_param_schema_payload()
+    # 네거티브의 주인은 메인 편집칸과 같은 세션 값이다. PE 프리셋 파일은 동기화 대상이다.
+    rescale_key = "rescale_cfg" if context.get_api_mode() == "COMFYUI" else "cfg_rescale"
+    return {"negative": str(context.negative_prompt_text or ""), "settings": {
+        "model": schema.get("model", ""), "sampler": schema.get("sampler", ""),
+        "scheduler": schema.get("scheduler", ""), "steps": schema.get("steps", 28),
+        "scale": schema.get("cfg_scale", 5), "cfg_rescale": schema.get(rescale_key, 0),
+    }}
+
+
+def _sync_mix_main_settings(context, values: dict) -> None:
+    """현재 프리셋에는 실제 적용한 메인 설정만 한 번 병합한다. PE 글은 건드리지 않는다."""
+    from core.prompt_engineering_settings import get_prompt_engineering_store
+
+    store = get_prompt_engineering_store(context)
+    mode = context.get_api_mode()
+    name = str(store.state(mode).get("current_preset") or "")
+    if name in {"", "(프리셋 없음)", "*randomized"}:
+        return
+    data = store.read_preset_data(name, mode)
+    if not data:
+        return
+    main = dict(data.get("main_settings") or {})
+    main.update(values)
+    if "negative" in values and "negative_prompt" in main:
+        main["negative_prompt"] = values["negative"]
+    ok, message = store.save_current_preset(mode, main_settings=main, write_module_settings=False)
+    if not ok:
+        raise RuntimeError(message)
+
+
+def _apply_mix_layers(context, record: dict, payload: dict) -> dict:
+    from core.headless_remote_state_service import HeadlessRemoteStateService
+
+    selected = payload.get("layers")
+    if not isinstance(selected, dict):
+        raise ArtistMixError("layers object is required")
+    mode = context.get_api_mode()
+    service = HeadlessRemoteStateService(context)
+    schema = context.generation_param_schema_payload()
+    applied, skipped, values, warnings = [], {}, {}, []
+    blocked_keys = payload.get("blocked_keys", [])
+    if not isinstance(blocked_keys, list) or any(not isinstance(key, str) for key in blocked_keys):
+        raise ArtistMixError("blocked_keys must be a list of setting names")
+    blocked = set(blocked_keys)
+    session = getattr(context, "img2img_session", {}) or {}
+    if session.get("active") and session.get("canvas_supported"):
+        blocked.add("model")
+    if mode == "COMFYUI" and str(context.remote_params.get("comfyui_workflow_type", "")).lower() in {"free", "bypass"}:
+        blocked.update({"model", "sampler", "scheduler", "steps", "scale", "cfg_rescale"})
+    if selected.get("settings") is True:
+        # 모델부터 적용하고 옵션을 다시 읽는다. 해상도와 시드는 허용 목록에 없다.
+        for key in MIX_SETTING_KEYS:
+            if key not in record.get("settings", {}):
+                continue
+            value = record["settings"][key]
+            if key in blocked:
+                skipped[key] = "현재 세션에서 잠긴 설정"
+                continue
+            if key in {"model", "sampler", "scheduler"}:
+                options = schema.get(f"options_{key}") or []
+                if value not in options:
+                    skipped[key] = "현재 모델/모드의 선택지에 없음"
+                    continue
+            if key == "steps":
+                low, high = schema.get("steps_range", [1, 150])
+                if not low <= value <= high:
+                    skipped[key] = f"허용 범위 {low}–{high} 밖"
+                    continue
+            if key == "cfg_rescale" and mode == "WEBUI":
+                skipped[key] = "WEBUI에서 지원하지 않는 설정"
+                continue
+            param_key = {"scale": "cfg_scale", "cfg_rescale": "rescale_cfg" if mode == "COMFYUI" else "cfg_rescale"}.get(key, key)
+            service.set_param(param_key, value, notify=False)
+            values[param_key] = context.remote_params[param_key]
+            applied.append(key)
+            if key == "model":
+                schema = context.generation_param_schema_payload()
+    if selected.get("negative") is True and "negative" in record:
+        context.negative_prompt_text = record["negative"]
+        values["negative"] = record["negative"]
+        applied.append("negative")
+    if applied:
+        context.save_remote_ui_state()
+        schema = context.generation_param_schema_payload()
+        context.publish("remote_params_changed", schema)
+        try:
+            _sync_mix_main_settings(context, values)
+        except Exception as exc:
+            warnings.append(f"세션에는 적용했지만 프리셋에 저장하지 못했습니다: {exc}")
+    return {"applied": applied, "skipped": skipped, "warnings": warnings, "params": schema,
+            "negative": context.negative_prompt_text}
+
+
+def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnailService | None = None, result_store=None, context=None) -> dict:
     op = str(payload.get("op") or "").strip()
+    if op == "apply":
+        return _apply_mix_layers(context, store.one(payload.get("id")), payload)
     main_image = None
     if op in {"save", "set_main"} and payload.get("main_history_id"):
         item = result_store.get_item(str(payload["main_history_id"])) if result_store else None
@@ -60,8 +157,13 @@ def _apply_mix_op(store: ArtistMixStore, payload: dict, service: ArtistThumbnail
         names = [str(b.get("artist") or "").strip() for b in (blocks if isinstance(blocks, list) else [])[:400]
                  if isinstance(b, dict) and b.get("kind", "artist") == "artist"]
         images, warnings = service.capture_artist_images(payload.get("mode", ""), names) if service else ({}, [])
+        layers = _mix_current_layers(context) if context else {}
+        if isinstance(payload.get("settings"), dict):
+            layers["settings"] = {**layers.get("settings", {}), **payload["settings"]}
+        if isinstance(payload.get("negative"), str):
+            layers["negative"] = payload["negative"]
         result = store.save(payload.get("name"), blocks, text=payload.get("text"), mix_id=payload.get("id"),
-                            artist_images=images, fallback=payload.get("fallback", "mosaic"), main_image=main_image)
+                            artist_images=images, fallback=payload.get("fallback", "mosaic"), main_image=main_image, **layers)
         result["warnings"].extend(warnings)
         return result
     if op == "rename":
@@ -359,6 +461,10 @@ def register_artist_thumbnail_routes(
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
             return JSONResponse({"error": f"Artist mixes unreadable: {exc}"}, status_code=500)
 
+    @app.get("/api/artist-mixes/current")
+    async def api_artist_mix_current():
+        return await run_in_thread(_mix_current_layers, session_context)
+
     @app.get("/api/artist-mixes/name")
     async def api_artist_mix_name(name: str = ""):
         return await run_in_thread(artist_mix_store(session_context).matching_name, name)
@@ -401,8 +507,15 @@ def register_artist_thumbnail_routes(
         if str(payload.get("op") or "") not in _MIX_OPS:
             return JSONResponse({"error": f"op must be one of {sorted(_MIX_OPS)}"}, status_code=400)
         try:
-            return await run_in_thread(_apply_mix_op, artist_mix_store(session_context), payload,
-                                       artist_thumbnail_service(session_context), session_context.result_store)
+            result = await run_in_thread(_apply_mix_op, artist_mix_store(session_context), payload,
+                                         artist_thumbnail_service(session_context), session_context.result_store, session_context)
+            if payload.get("op") == "apply" and result["applied"]:
+                from app.backend.server.websocket_broadcast import broadcast_json
+                await broadcast_json(clients, result["params"])
+                if "negative" in result["applied"]:
+                    await broadcast_json(clients, {"type": "prompt_sync", "prompt": session_context.prompt_text,
+                                                  "negative": result["negative"], "negative_prompt": result["negative"]})
+            return result
         except ArtistMixError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
         except Exception as exc:

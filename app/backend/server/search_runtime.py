@@ -161,6 +161,20 @@ def reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
     _reset_active_tag_filter_assignment(context)
 
 
+def merge_base_frame(context: WebSessionContext):
+    """합치기의 기준 = 현재 데이터셋 전체(snapshot).
+
+    ⚠️ `search_results.get_dataframe()` 은 **남은 풀**이다 - 등급·태그필터가 걸려 있고 Random 이
+    뽑아 쓴 행도 빠져 있다. 거기에 합치면 필터 중 합치기가 행을 조용히 잃고(1.3M 풀 + 5만 행 합치기
+    → 67만 행), 뽑아 쓴 행이 데이터셋에서 영영 사라진다.
+    ⚠️ master_base 도 아니다 - 심층검색으로 좁힌 셋(snapshot ⊂ master_base)이 합치기에서 풀린다.
+    snapshot 은 Tag Filter 가 훑는 풀·last-search 가 쓰는 풀과 같은 것이다."""
+    snapshot = getattr(context, "search_results_snapshot", None)
+    if snapshot is not None and not getattr(snapshot, "empty", True):
+        return snapshot
+    return search_base_frame(context)
+
+
 def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
     with search_pool_state_guard(context):
         context.search_results.set_dataframe(frame)
@@ -941,7 +955,7 @@ def load_or_merge_custom_parquet(
         frame = read_parquet_chunked(path, progress=progress)
         frame = normalize_custom_parquet_frame(frame)
         if merge:
-            current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+            current = merge_base_frame(context)
             if current is not None and not current.empty:
                 frame = pd.concat([current, frame], ignore_index=True)
                 frame = normalize_custom_parquet_frame(frame)

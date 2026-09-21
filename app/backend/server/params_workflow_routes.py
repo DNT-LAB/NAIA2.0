@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.backend.server.search_runtime import (
     install_custom_parquet_frame,
+    merge_base_frame,
     normalize_custom_parquet_frame,
     save_runner_parquet,
 )
@@ -261,7 +262,8 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
         uploaded = normalize_custom_parquet_frame(read_parquet_chunked(content, progress=progress))
         frame = uploaded
         if action == "merge":
-            current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+            # 진입점 둘(목록 합치기 · 업로드 합치기)이 같은 기준을 써야 한다 - merge_base_frame 참조.
+            current = merge_base_frame(context)
             if current is not None and not current.empty:
                 frame = normalize_custom_parquet_frame(pd.concat([current, uploaded], ignore_index=True))
         install_custom_parquet_frame(context, frame)

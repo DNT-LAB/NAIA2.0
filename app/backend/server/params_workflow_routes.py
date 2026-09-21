@@ -13,7 +13,6 @@ from app.backend.server.search_runtime import (
     install_custom_parquet_frame,
     merge_base_frame,
     normalize_custom_parquet_frame,
-    save_runner_parquet,
 )
 from core.web_session_context import WebSessionContext
 
@@ -269,7 +268,7 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
         install_custom_parquet_frame(context, frame)
     finally:
         done()
-    save_runner_parquet(context)
+    # runner 는 install_custom_parquet_frame 이 백그라운드로 복사한다(core/search_pool_writer.py).
     return {
         "ok": True,
         "action": action,

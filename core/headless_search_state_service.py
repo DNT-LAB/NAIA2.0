@@ -285,15 +285,13 @@ class HeadlessSearchStateService:
         if frame is None or getattr(frame, "empty", True):
             return None
         try:
-            import os
+            from core.search_pool_writer import search_pool_writer
 
             path = self.last_search_parquet_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
             # atomic write(Codex): temp 에 쓰고 os.replace 로 교체 — 대형 프레임/동시 재시작 시
-            # 부분쓰기 손상을 막는다.
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            frame.to_parquet(tmp, index=False)
-            os.replace(tmp, path)
+            # 부분쓰기 손상을 막는다. 백그라운드 writer 와 같은 파일 락을 쓰고, 대기 중인 더 오래된
+            # 백그라운드 기록을 취소한다(core/search_pool_writer.py).
+            search_pool_writer(context).write_now(path, frame, kind="last")
             return path
         except Exception as exc:
             print(f"Headless Remote: last-search persist failed - {exc}", flush=True)

@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from core.search_pool_writer import search_pool_writer
 from core.web_session_context import WebSessionContext
 
 
@@ -192,8 +193,16 @@ def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
             search_ratings=["g", "s", "q", "e"],
             tag_filter_active=False,
         )
-    # 작업 데이터셋이 바뀌었으니 마지막-검색 영속도 갱신 (Part 3 — 재시작/가져오기 복원용).
-    context.persist_last_search()
+        # 작업 데이터셋이 바뀌었으니 마지막-검색 영속도 갱신 (Part 3 — 재시작/가져오기 복원용).
+        # 응답을 막지 않게 백그라운드로, 한 번만 쓴다(core/search_pool_writer.py).
+        # 프레임은 **락 안에서** 캡처한 snapshot 참조 - 백그라운드에서 get_dataframe() 을 부르면
+        # Random pop 과 경쟁한다. 설치 직후엔 남은 풀(runner 대상) == snapshot 이므로(등급 전부 ON,
+        # 태그필터 해제, pop 없음) runner 는 last-search 파일을 복사한다.
+        pool_frame = context.search_results_snapshot
+        runner_path = None if _should_skip_auto_runner_save(context) else context.runner_parquet_path()
+        last_path = context.last_search_parquet_path()
+    if pool_frame is not None and not getattr(pool_frame, "empty", True):
+        search_pool_writer(context).submit(last_path, pool_frame, runner_path)
 
 
 def filter_source_frame(
@@ -365,8 +374,8 @@ def save_runner_parquet(context: WebSessionContext) -> Path | None:
     if frame is None or getattr(frame, "empty", True):
         return None
     path = context.runner_parquet_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    frame.to_parquet(path, index=False)
+    # 백그라운드 writer 와 같은 파일 락 + 대기 중인 runner 복사 취소(더 오래된 풀이 덮지 않게).
+    search_pool_writer(context).write_now(path, frame, kind="runner")
     return path
 
 
@@ -962,7 +971,8 @@ def load_or_merge_custom_parquet(
         install_custom_parquet_frame(context, frame)
     finally:
         done()
-    state = search_state_with_runner_save(context)
+    # runner 는 install 이 백그라운드로 복사한다 - 여기서 다시 쓰면 응답 전에 풀 전체를 또 쓴다.
+    state = context.search_state_payload()
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"
     return state, {"type": "toast", "message": f"{path.name} {verb} ({len(frame):,})", "level": "success"}

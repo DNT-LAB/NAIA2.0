@@ -10,6 +10,7 @@ from app.backend.server.autocomplete_commands import ensure_tag_search_index
 from app.backend.server.generation_commands import random_service
 from app.backend.server.interactive_assets_routes import interactive_assets_service
 from app.backend.server.search_runtime import save_runner_parquet
+from core.search_pool_writer import search_pool_writer
 from core.extension_runtime import load_extensions
 from core.web_session_context import WebSessionContext
 
@@ -57,6 +58,12 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
                 await run_in_thread(context.persist_prompt_engineering_settings)
             except Exception as exc:
                 print(f"Headless Remote: prompt engineering shutdown save failed - {exc}", flush=True)
+            try:
+                # 응답 뒤로 미룬 풀 기록(core/search_pool_writer.py)을 먼저 끝낸다 - 안 그러면 종료가
+                # 쓰는 중인 last-search 를 끊는다. 끝나지 않으면 기다림을 접고 진행(best-effort).
+                await run_in_thread(search_pool_writer(context).flush, 60.0)
+            except Exception as exc:
+                print(f"Headless Remote: search pool write flush failed - {exc}", flush=True)
             try:
                 await run_in_thread(save_runner_parquet, context)
             except Exception as exc:

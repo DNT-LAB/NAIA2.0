@@ -275,10 +275,35 @@ const SQW_CSS = `
 .sqw-body .dr-track{margin:16px 7px 6px}
 .sqw-body .mod-start{height:26px;font-size:11.5px}
 
-/* ── Tag Filter 층: 옛 팝업 몸통을 그대로 품는다 ── */
-.sqw-body .tag-filter-body{padding:0;gap:6px}
-.sqw-body .tag-filter-input{height:24px;font-size:11px}
-.sqw-body .tag-filter-btn-action{height:22px;font-size:10.5px}
+/* ── Tag Filter 층: 옛 팝업 몸통을 그대로 품고 Search 층과 같은 톤으로 줄인다 ── */
+/* ⚠️ 저장 줄·저장 내역은 display:flex 라 [hidden] 을 이겨 **항상 보였다**(사용자 제보: Filters 를
+   눌러야 펼쳐질 목록이 늘 떠 있다). 창 밖 옛 팝업에서도 같았다 - 범위를 좁히지 않고 짝 규칙을 둔다. */
+.tag-filter-presets[hidden],.tag-filter-save-row[hidden]{display:none!important}
+.sqw-body .tag-filter-body{padding:0;gap:6px;overflow:visible}
+.sqw-body .tag-filter-rating-row{gap:6px;padding:0 0 6px}
+.sqw-body .tag-filter-section-label{font-size:9.5px;letter-spacing:.06em}
+.sqw-body .tag-filter-count{font-size:10px;padding:1px 7px}
+.sqw-body .tag-filter-rating-row .rating-btn{padding:2px 7px;font-size:10px}
+.sqw-body .tag-filter-input{height:24px;padding:2px 7px;font-size:11px;border-radius:5px}
+.sqw-body .tag-filter-chips:empty{display:none}
+.sqw-body .tag-filter-chip{padding:1px 6px;font-size:10.5px;gap:3px}
+.sqw-body .tag-filter-stop-row{margin:0}
+.sqw-body .tag-filter-stop-toggle .opt-label{font-size:10px}
+.sqw-body .tag-filter-actions{display:flex;gap:4px;justify-content:stretch;padding-top:6px}
+.sqw-body .tag-filter-btn-action{flex:1 1 0;min-width:0;height:24px;padding:0 6px;font-size:10.5px;font-weight:600;border-radius:5px;
+  background:rgba(255,255,255,0.03);border:1px solid var(--border,#33333f);color:var(--text-secondary,#c8c8d0);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sqw-body .tag-filter-btn-action:hover{color:var(--text-primary,#e8e8ee);border-color:var(--accent-blue,#8d7bd6);filter:none}
+.sqw-body .tag-filter-btn-action.assign{background:#2e7d32;border-color:#4CAF50;color:#fff}
+.sqw-body .tag-filter-btn-action.assign:hover{background:#388e3c;color:#fff}
+.sqw-body .tag-filter-btn-action:disabled{opacity:.35;pointer-events:none}
+.sqw-body .tag-filter-btn-action.clear:hover{border-color:var(--error,#f44336);color:var(--error,#f44336)}
+.sqw-body .tag-filter-save-row{padding-top:0}
+.sqw-body .tag-filter-save-row .tag-filter-btn-action{flex:0 0 auto;padding:0 12px}
+.sqw-body .tag-filter-presets{max-height:180px;padding:4px;margin:0;gap:3px;background:rgba(0,0,0,0.24);border-radius:6px}
+.sqw-body .tf-preset{padding:3px 8px;border-radius:5px}
+.sqw-body .tf-preset-name{font-size:11px}
+.sqw-body .tf-preset-empty{font-size:10.5px;padding:6px}
 /* 해제됨 오버레이는 이 층만 덮는다(층이 기준 상자). */
 .sqw-body .tag-filter-released{position:absolute;inset:0}
 /* 잠금은 본문 전체(두 층)를 덮고 머리줄은 남긴다. */

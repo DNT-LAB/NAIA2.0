@@ -2663,7 +2663,7 @@ searchHost.className = 'search-host';
 // Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
 const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw3')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw5')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,

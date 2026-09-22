@@ -96,7 +96,7 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
     성공 시 result.prompt · context.prompt_text · ctx.final_prompt 셋을 함께 갱신한다 — 화면 표시와
     실제 전송, 네거티브 조건부 바인딩(final_prompt 비교)이 모두 같은 문자열을 보게 하려는 것.
     """
-    from core.boost_v2 import build_instruction, compose_addition, enabled_sections, parse_output
+    from core.boost_v2 import build_instruction, enabled_sections, format_output
 
     try:
         prompt = str(getattr(result, "prompt", "") or "")
@@ -111,11 +111,10 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
         if not resp.get("ok"):
             _record(result, {"ok": False, "error": resp.get("error"), "elapsed": resp.get("elapsed")})
             return False
-        sections = parse_output(resp.get("text", ""), settings)
         is_nai = str(getattr(context, "current_api_mode", "") or "").upper() == "NAI"
-        addition = compose_addition(sections, is_nai=is_nai)
+        addition = format_output(resp.get("text", ""), is_nai=is_nai)
         if not addition:
-            _record(result, {"ok": False, "error": "섹션을 읽지 못했습니다", "raw": resp.get("text", "")})
+            _record(result, {"ok": False, "error": "빈 응답"})
             return False
         from app.backend.server.generation_commands import _inject_boost_at_main
 
@@ -133,7 +132,7 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
         _record(result, {
             "ok": True,
             "input": tags,
-            "sections": sections,
+            "text": resp.get("text", ""),
             "elapsed": resp.get("elapsed"),
             "load_seconds": resp.get("load_seconds"),
             "usage": resp.get("usage"),

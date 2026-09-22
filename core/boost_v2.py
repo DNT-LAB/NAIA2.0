@@ -51,8 +51,6 @@ SECTIONS: tuple[tuple[str, str, str, str], ...] = (
     ),
 )
 SECTION_KEYS: tuple[str, ...] = tuple(s[0] for s in SECTIONS)
-_LABEL_TO_KEY = {s[1].lower(): s[0] for s in SECTIONS}
-_KEY_TO_LABEL = {s[0]: s[1] for s in SECTIONS}
 
 BACKENDS = ("ollama", "llamacpp")
 PREFERENCE_MAX_CHARS = 400
@@ -146,60 +144,19 @@ def build_instruction(tags: str, settings: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-_SECTION_LINE = re.compile(r"^\s*,?\s*\(\s*([^()]+?)\s*\)\s*:\s*(.*)$")
-_MARKDOWN = re.compile(r"\*\*|__|`")
+def format_output(text: str, *, is_nai: bool) -> str:
+    """모델 출력을 거의 그대로 쓴다 — 파싱·필터 없음(no-think 에서 템플릿을 온전히 지킨다, 사용자 결정).
 
-
-def parse_output(text: str, settings: dict[str, Any]) -> dict[str, str]:
-    """모델 출력에서 켠 섹션의 본문만 뽑는다. 모르는 라벨·끈 섹션·빈 본문은 버린다.
-
-    라벨 없이 이어지는 줄은 직전 섹션에 붙인다(모델이 한 섹션을 여러 줄로 쓸 때).
+    하는 일은 둘뿐: ① 줄바꿈 → 공백(템플릿 각 줄이 ", (" 로 시작하므로 이으면 그대로 콤마 목록이 된다.
+    전송 직전 정리도 어차피 개행을 지운다) ② WEBUI/ComfyUI 는 ``()`` 가 가중치 문법이라 리터럴 괄호를
+    이스케이프 — 파이프라인 밖에서 끼우므로 ``_escape_main_tags_parens`` 를 거치지 않는다.
     """
-    enabled = set(enabled_sections(settings))
-    out: dict[str, str] = {}
-    current: str | None = None
-    for raw_line in str(text or "").splitlines():
-        line = _MARKDOWN.sub("", raw_line).strip()
-        if not line:
-            continue
-        match = _SECTION_LINE.match(line)
-        if match:
-            key = _LABEL_TO_KEY.get(match.group(1).strip().lower())
-            current = key if key in enabled and key not in out else None
-            if current:
-                out[current] = match.group(2).strip()
-            continue
-        if current:
-            out[current] = (out[current] + " " + line.lstrip(", ")).strip()
-    cleaned: dict[str, str] = {}
-    for key in SECTION_KEYS:
-        # 끝 마침표는 뗀다 — 섹션을 ", " 로 이으면 "solo., (Composition" 이 된다(실측).
-        body = " ".join(out.get(key, "").split()).strip(" ,").rstrip(" .,")
-        if body:
-            cleaned[key] = body
-    return cleaned
-
-
-def compose_addition(sections: dict[str, str], *, is_nai: bool) -> str:
-    """파싱한 섹션을 한 줄 삽입 문자열로. 라벨은 사용자 템플릿대로 유지한다.
-
-    최종 전송 전 정리(api_service)가 개행을 지우므로 처음부터 ", " 로 잇는다. WEBUI/ComfyUI 는
-    ``()`` 가 가중치 문법이라 라벨과 본문의 리터럴 괄호를 이스케이프한다 — 파이프라인 밖에서
-    끼우므로 ``_escape_main_tags_parens`` 를 거치지 않는다(기존 Auto Boost 와 같은 이유).
-    """
-    parts = []
-    for key in SECTION_KEYS:
-        body = str(sections.get(key) or "").strip()
-        if not body:
-            continue
-        parts.append(f"({_KEY_TO_LABEL[key]}): {body}")
-    if not parts:
-        return ""
-    if not is_nai:
+    out = re.sub(r"\s*\n\s*", " ", str(text or "")).replace(" ,", ",").strip().strip(",").strip()
+    if out and not is_nai:
         from core.prompt_processor import _escape_parens_in_content
 
-        parts = [_escape_parens_in_content(p) for p in parts]
-    return ", ".join(parts)
+        out = _escape_parens_in_content(out)
+    return out
 
 
 # ── 설정 파일(전역·모드 무관 디스크 SSOT) ────────────────────────────────────

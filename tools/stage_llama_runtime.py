@@ -1,8 +1,12 @@
-"""Stage the bundled llama.cpp CPU engine (Boost v2) into a NAIA Electron release.
+"""Stage the bundled llama.cpp engine (Boost v2, official Vulkan build) into a NAIA Electron release.
+
+The Vulkan build carries the CPU backends too: it runs on any GPU/iGPU with a Vulkan driver and falls
+back to CPU by itself when there is none (measured 2026-09-23). On i9-285H/Arc 140T a call takes the
+same ~6.8 s as the CPU build, but stays 6.7 s under CPU load where the CPU build degrades to 25 s.
 
 The engine is NOT committed. At release time it is taken from, in order:
   1. ``--source-dir`` / env ``NAIA_LLAMA_ENGINE_SRC`` pointing at a directory that already holds
-     the official CPU build (``llama-server.exe`` + DLLs), or at the official zip;
+     the official Vulkan build (``llama-server.exe`` + DLLs), or at the official zip;
   2. otherwise the pinned official zip is downloaded (``ENGINE_URL``) into the cache dir.
 A zip is accepted only when its SHA-256 matches ``ENGINE_SHA256``.
 
@@ -36,14 +40,14 @@ except ModuleNotFoundError:  # pragma: no cover - used when executed as a script
     from write_release_metadata import write_release_metadata
 
 ENGINE_VERSION = "b10830"
-ENGINE_ASSET = f"llama-{ENGINE_VERSION}-bin-win-cpu-x64.zip"
+ENGINE_ASSET = f"llama-{ENGINE_VERSION}-bin-win-vulkan-x64.zip"
 ENGINE_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{ENGINE_VERSION}/{ENGINE_ASSET}"
-ENGINE_SHA256 = "2bdf856e95d4070ccb9052322f8598b9deb08fe2b4a6870740231fb375388039"
+ENGINE_SHA256 = "732aa8999056d1694af2ec3ff61f1a60e2e56b2a5310eb765185909623e0f56f"
 ENGINE_TARGET = Path("resources") / "naia-backend" / "runtime" / "llama" / "engine"
 # 실측(llama_test, 2026-09-22): 이 파일들이 실제로 로드됐다. ggml-cpu-*.dll 은 CPU 에 따라 하나가 골라진다.
 REQUIRED_FILES = (
     "llama-server.exe", "llama-server-impl.dll", "llama-common.dll", "llama.dll",
-    "ggml.dll", "ggml-base.dll", "ggml-rpc.dll", "mtmd.dll", "libomp.dll",
+    "ggml.dll", "ggml-base.dll", "ggml-rpc.dll", "ggml-vulkan.dll", "mtmd.dll", "libomp.dll",
 )
 DROP_SUFFIXES = (".md", ".log")
 
@@ -139,7 +143,7 @@ def stage_llama_runtime(
             count += 1
             size += item.stat().st_size
         (target / "SOURCE.txt").write_text(
-            f"llama.cpp {ENGINE_VERSION} Windows CPU x64 (official build, MIT)\n"
+            f"llama.cpp {ENGINE_VERSION} Windows Vulkan x64 (official build, MIT; GPU if available, else CPU)\n"
             f"origin: {origin}\n"
             "Used by NAIA Boost v2. Model is downloaded separately on first use.\n",
             encoding="utf-8",
@@ -153,7 +157,7 @@ def stage_llama_runtime(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Stage the llama.cpp CPU engine into a NAIA release.")
+    parser = argparse.ArgumentParser(description="Stage the llama.cpp engine (Vulkan build) into a NAIA release.")
     parser.add_argument("release_root")
     parser.add_argument("--source", help="Engine directory or official zip (default: env NAIA_LLAMA_ENGINE_SRC, then download)")
     parser.add_argument("--cache-dir", help="Where to keep the downloaded zip")

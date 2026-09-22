@@ -1,7 +1,12 @@
 """앱이 소유하는 llama.cpp ``llama-server`` 자식 프로세스 하나를 관리한다(Boost v2 용).
 
-실행 계약은 ``C:\\VNR\\DEV\\llama_test`` 실험에서 확인한 값을 따른다: CPU(-ngl 0) · 최대 8 스레드 ·
-context 4096 · ``--jinja`` + ``enable_thinking=false`` · loopback 무작위 포트 · 단일 슬롯.
+실행 계약은 ``C:\\VNR\\DEV\\llama_test`` 실험에서 확인한 값을 따른다: 최대 8 스레드 · context 4096 ·
+``--jinja`` + ``enable_thinking=false`` · loopback 무작위 포트 · 단일 슬롯.
+
+GPU(기본): ``-ngl 99 -fa on`` — 동봉 엔진은 공식 Vulkan 판이라 GPU(내장 그래픽 포함)가 있으면 거기서,
+없거나 드라이버가 없으면 **자동으로 CPU** 로 돈다(실측 2026-09-23, 장치를 숨겨도 6/6 정상). 285H/Arc 140T
+실측: 평소 호출 6.75초로 CPU(6.86초)와 같지만, CPU 가 바쁠 때 CPU 판은 25초로 느려지고 GPU 는 6.7초
+그대로다. ``use_gpu=False`` 면 ``-ngl 0`` 으로 CPU 를 강제한다.
 
 - 내가 띄운 프로세스만 다룬다(다른 앱의 llama-server/Ollama 는 절대 건드리지 않는다).
 - 요청은 한 번에 하나. 뒤따르는 요청은 남은 제한시간 안에서 기다린다(Auto Gen 은 어차피 직렬).
@@ -124,7 +129,9 @@ class LlamaServerRuntime:
         ctx_size: int = 4096,
         idle_seconds: float = DEFAULT_IDLE_SECONDS,
         log_path: str | Path | None = None,
+        use_gpu: bool = True,
     ) -> None:
+        self.use_gpu = bool(use_gpu)
         self.engine_path = Path(engine_path) if engine_path else None
         self.model_path = Path(model_path) if model_path else None
         self.threads = int(threads or min(8, os.cpu_count() or 4))
@@ -143,14 +150,28 @@ class LlamaServerRuntime:
 
     # ── 구성·상태 ──────────────────────────────────────────────────────────
 
-    def configure(self, engine_path: str | Path | None, model_path: str | Path | None) -> None:
-        """경로가 바뀌면 돌던 프로세스를 내린다(다음 요청이 새 경로로 올린다)."""
+    def configure(
+        self, engine_path: str | Path | None, model_path: str | Path | None, *, use_gpu: bool | None = None,
+    ) -> None:
+        """경로나 GPU 사용이 바뀌면 돌던 프로세스를 내린다(다음 요청이 새 설정으로 올린다)."""
         engine = Path(engine_path) if engine_path else None
         model = Path(model_path) if model_path else None
+        gpu = self.use_gpu if use_gpu is None else bool(use_gpu)
         with self._proc_lock:
-            if engine != self.engine_path or model != self.model_path:
+            if engine != self.engine_path or model != self.model_path or gpu != self.use_gpu:
                 self.stop()
-                self.engine_path, self.model_path = engine, model
+                self.engine_path, self.model_path, self.use_gpu = engine, model, gpu
+
+    def server_args(self, port: int) -> list[str]:
+        args = [
+            str(self.engine_path), "-m", str(self.model_path),
+            "--host", "127.0.0.1", "--port", str(port),
+            "-c", str(self.ctx_size), "-t", str(self.threads),
+            "--parallel", "1", "--jinja", "--reasoning-format", "deepseek",
+            "--alias", MODEL_ALIAS,
+        ]
+        args += ["-ngl", "99", "-fa", "on"] if self.use_gpu else ["-ngl", "0"]
+        return args
 
     def is_running(self) -> bool:
         with self._proc_lock:
@@ -234,13 +255,7 @@ class LlamaServerRuntime:
             if not self.model_path or not self.model_path.is_file():
                 raise LlamaRuntimeError(f"모델 파일이 없습니다: {self.model_path or '(경로 미지정)'}")
             port = _free_port()
-            args = [
-                str(self.engine_path), "-m", str(self.model_path),
-                "--host", "127.0.0.1", "--port", str(port),
-                "-c", str(self.ctx_size), "-ngl", "0", "-t", str(self.threads),
-                "--parallel", "1", "--jinja", "--reasoning-format", "deepseek",
-                "--alias", MODEL_ALIAS,
-            ]
+            args = self.server_args(port)
             if self.log_path is not None:
                 self.log_path.parent.mkdir(parents=True, exist_ok=True)
                 self._log_file = self.log_path.open("ab")
@@ -361,6 +376,44 @@ class LlamaServerRuntime:
             self._slot.release()
             if self.is_running():
                 self._arm_idle_timer()
+
+
+# ── 장치 감지 ──────────────────────────────────────────────────────────────
+
+_DEVICE_CACHE: dict[tuple[str, float], list[str]] = {}
+
+
+def list_devices(engine_path: str | Path | None) -> list[str]:
+    """``llama-server --list-devices`` 로 엔진이 쓸 수 있는 GPU 이름(예: 'Intel(R) Arc(TM) 140T GPU (32GB)').
+    비면 GPU 없음(CPU 로 돈다). 엔진 파일(경로·수정시각)마다 한 번만 잰다 — 약 1초 걸린다."""
+    path = Path(engine_path) if engine_path else None
+    if path is None or not path.is_file():
+        return []
+    key = (str(path), path.stat().st_mtime)
+    if key in _DEVICE_CACHE:
+        return list(_DEVICE_CACHE[key])
+    devices: list[str] = []
+    try:
+        out = subprocess.run(
+            [str(path), "--list-devices"], cwd=str(path.parent), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        seen = False
+        for line in (out.stdout or "").splitlines() + (out.stderr or "").splitlines():
+            if line.strip().startswith("Available devices"):
+                seen = True
+                continue
+            if seen and ":" in line and "(none)" not in line:
+                # "  Vulkan0: Intel(R) Arc(TM) 140T GPU (32GB) (37024 MiB, 47802 MiB free)"
+                name = line.split(":", 1)[1].strip()
+                import re
+
+                devices.append(re.sub(r"\s*\(\d+ MiB[^)]*\)\s*$", "", name))
+    except Exception:
+        devices = []
+    _DEVICE_CACHE[key] = devices
+    return list(devices)
 
 
 # ── 경로 해석 ──────────────────────────────────────────────────────────────

@@ -54,11 +54,11 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
         if runtime is None:
             # 유휴 내림 없음(idle_seconds=0) — Auto Boost 가 켜진 동안 계속 올려 둔다(llama_test 와 같다).
             # 매번 다시 올리면 호출마다 로드 ~2.6초가 붙는다(사용자 실측 "3초 느리다"). 끄기·백엔드 전환 때 내린다.
-            runtime = LlamaServerRuntime(engine, model, idle_seconds=0,
+            runtime = LlamaServerRuntime(engine, model, idle_seconds=0, use_gpu=bool(s.get("use_gpu", True)),
                                          log_path=save_root / "logs" / "boost_llama_server.log")
             context.boost_llama_runtime = runtime
         else:
-            runtime.configure(engine, model)
+            runtime.configure(engine, model, use_gpu=bool(s.get("use_gpu", True)))
         return runtime
 
 
@@ -79,7 +79,7 @@ def get_model_downloader(context: Any) -> Any:
 def boost_v2_status(context: Any) -> dict[str, Any]:
     """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 실행 여부 · 다운로드 진행."""
     from core.llama_model_download import MODEL_SHA256, MODEL_SIZE, MODEL_URL
-    from core.llama_runtime import default_model_path, resolve_paths
+    from core.llama_runtime import default_model_path, list_devices, resolve_paths
 
     settings = boost_v2_settings(context)
     save_root = _save_root(context)
@@ -91,6 +91,9 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "settings": settings,
         "engine_path": str(engine),
         "engine_ready": engine.is_file(),
+        # 엔진이 쓸 수 있는 GPU(비면 CPU 로 돈다) · 설정상 GPU 사용 여부.
+        "gpu_devices": list_devices(engine),
+        "use_gpu": bool(settings.get("use_gpu", True)),
         "model_path": str(model),
         "model_ready": model.is_file(),
         "model_is_default": model == default_model_path(save_root),

@@ -186,6 +186,20 @@ def load_boost_v2_settings(*, save_root: str | Path | None = None) -> dict[str, 
     return normalize_boost_v2_settings(data if isinstance(data, dict) else {})
 
 
+def save_root_for(context: Any) -> Path:
+    """앱 레이어와 같은 저장 루트 해석: runtime save_dir, 없으면 repo_root/save."""
+    save_dir = getattr(getattr(context, "runtime_paths", None), "save_dir", None)
+    return Path(save_dir) if save_dir else Path(getattr(context, "repo_root", ".")) / "save"
+
+
+def llamacpp_selected(context: Any) -> bool:
+    """Boost 백엔드로 llama.cpp 가 골라졌는가 — core 쪽(api_service 등)이 app 을 import 하지 않고 묻는 길."""
+    try:
+        return load_boost_v2_settings(save_root=save_root_for(context)).get("backend") == "llamacpp"
+    except Exception:
+        return False
+
+
 def save_boost_v2_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> dict[str, Any]:
     from core.prompt_engineering_settings import _coerce_save_root
 

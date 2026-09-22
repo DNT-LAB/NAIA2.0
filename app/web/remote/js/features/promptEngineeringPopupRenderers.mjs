@@ -14,6 +14,8 @@ export function createPromptEngineeringPopupRenderers({
   saveCategoryFilter,
   bindTagHoverInfo,
   panels,
+  renderBoostV2 = null,
+  setBoostBackend = null,
 }) {
   const CATEGORY_EDITOR_INPUT_CLASS = 'mod-debug-cat-input';
   const CATEGORY_SEARCH_CLASS = 'mod-debug-cat-search';
@@ -827,9 +829,39 @@ export function createPromptEngineeringPopupRenderers({
     bindDanbooruFeedback(danbooru);
   }
 
+  // Auto Boost 백엔드 선택 — llama.cpp(Boost v2, 앱 내장 E2B) / Ollama(기존 Scene Boost).
+  function boostBackendHtml(backend) {
+    const opt = (value, label) => `
+        <label class="mod-checkbox-item">
+          <input type="radio" name="modBoostBackend" value="${value}"${backend === value ? ' checked' : ''}>
+          <span class="mod-checkbox-label">${escHtml(label)}</span>
+        </label>`;
+    return `
+    <div class="mod-boost-block">
+      <div class="mod-boost-head"><span class="mod-boost-name">백엔드</span></div>
+      <div class="mod-checkbox-grid">${opt('llamacpp', 'llama.cpp · Gemma E2B (내장)')}${opt('ollama', 'Ollama')}</div>
+      <div class="mod-boost-caption">llama.cpp: NAIA 가 직접 띄우는 CPU 모델로 5개 섹션을 붙입니다. Ollama: 기존 Scene Boost.</div>
+    </div>`;
+  }
+
+  function bindBoostBackend(body) {
+    body.querySelectorAll('input[name="modBoostBackend"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        if (radio.checked && typeof setBoostBackend === 'function') setBoostBackend(radio.value);
+      });
+    });
+  }
+
   function renderOllamaBoost(m) {
     const body = getBody(panels.ollamaBoost);
     if (!body) return;
+    const backend = (m.boost_v2_settings && m.boost_v2_settings.backend) === 'llamacpp' ? 'llamacpp' : 'ollama';
+    if (backend === 'llamacpp' && typeof renderBoostV2 === 'function') {
+      body.innerHTML = `${boostBackendHtml(backend)}<div data-boost-v2-host></div>`;
+      bindBoostBackend(body);
+      renderBoostV2(body.querySelector('[data-boost-v2-host]'), m);
+      return;
+    }
     const boost = m.ollama_boost_settings || {};
     const nlWeight = Number.isFinite(Number(boost.nl_weight)) ? Number(boost.nl_weight) : 1.0;
     const effort = ['concise', 'standard', 'rich'].includes(boost.effort) ? boost.effort : 'rich';
@@ -845,7 +877,7 @@ export function createPromptEngineeringPopupRenderers({
         <input type="radio" name="modOllamaBoostEffort" value="${escHtml(value)}"${effort === value ? ' checked' : ''}>
         <span class="mod-checkbox-label">${escHtml(label)}</span>
       </label>`).join('');
-    body.innerHTML = `
+    body.innerHTML = `${boostBackendHtml(backend)}
     <div class="mod-boost-block">
       <div class="mod-boost-head">
         <span class="mod-boost-name">자연어 가중치</span>
@@ -909,6 +941,7 @@ export function createPromptEngineeringPopupRenderers({
       <button class="mod-btn-secondary" onclick="savePromptEngineeringOllamaBoostSettings()">Save Ollama Boost Settings</button>
     </div>
   `;
+    bindBoostBackend(body);
   }
 
   // ===== 카테고리 편집기 엔진 (editorState 단일 소스) ===== //

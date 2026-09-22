@@ -8510,7 +8510,9 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   // free the button mid-boost and let the user spam it. Extend the safety timeout
   // to 15s only while the boost is on; normal random keeps the existing 2s behavior.
   const boostArmed = !!(lastPromptEngineeringState && lastPromptEngineeringState.ollama_auto_boost);
-  const randomSafetyTimeoutMs = window.eventMap?.isRandomLinked?.() ? 30000 : (boostArmed ? 15000 : 2000);
+  // Boost v2(llama.cpp)는 CPU 에서 모델 로드 포함 첫 회 ~25초, 엔진 제한시간 60초 — 그 안에서 풀어 주지 않는다.
+  const boostV2 = boostArmed && lastPromptEngineeringState?.boost_v2_settings?.backend === 'llamacpp';
+  const randomSafetyTimeoutMs = window.eventMap?.isRandomLinked?.() ? 30000 : (boostV2 ? 65000 : (boostArmed ? 15000 : 2000));
   // Ollama 모드: Random 버튼에 boost 재작성 경과시간을 실시간 표시(Generate 버튼처럼).
   if (boostArmed) startRndTimer();
   window._randomTimeout = setTimeout(() => {
@@ -10299,7 +10301,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260905-fastsearch')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260923-boostv2')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -10315,7 +10317,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260831-cathide1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260923-boostv2')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -11022,9 +11024,20 @@ const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260905-uq2')
+// Boost v2(llama.cpp) 설정 영역 — Auto Boost Settings 팝업에서 백엔드가 llama.cpp 일 때 그린다.
+let boostV2Panel = null;
+const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260923-boostv2')
+  .then(({createBoostV2Panel}) => {
+    boostV2Panel = createBoostV2Panel({document, escHtml, setModuleParam, showToast});
+  })
+  .catch(error => {
+    console.error('Failed to initialize Boost v2 panel module', error);
+  });
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260923-boostv2')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
+      renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
+      setBoostBackend: (backend) => setModuleParam('prompt_engineering', 'boost_v2_settings', JSON.stringify({backend})),
       document,
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,

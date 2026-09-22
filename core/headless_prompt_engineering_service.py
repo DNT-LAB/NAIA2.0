@@ -156,6 +156,21 @@ class HeadlessPromptEngineeringService:
                 ' 개별 제외 태그 ] 에서 수정합니다.', level='info'),
             self.state(),
         ]
+    def _boost_v2_save_root(self) -> Any:
+        # boost_v2_service._save_root 와 같은 해석: runtime save_dir, 없으면 repo_root/save.
+        from pathlib import Path
+
+        save_dir = getattr(getattr(self.context, "runtime_paths", None), "save_dir", None)
+        return save_dir if save_dir else Path(getattr(self.context, "repo_root", ".")) / "save"
+
+    def _boost_v2_settings(self) -> dict[str, Any]:
+        from core.boost_v2 import load_boost_v2_settings, normalize_boost_v2_settings
+
+        try:
+            return load_boost_v2_settings(save_root=self._boost_v2_save_root())
+        except Exception:
+            return normalize_boost_v2_settings(None)
+
     def debug_snapshot(self) -> dict[str, Any]:
         current_context = getattr(self.context, "current_prompt_context", None)
         current_metadata = getattr(current_context, "metadata", None)
@@ -275,6 +290,7 @@ class HeadlessPromptEngineeringService:
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
             "ollama_boost_settings": ollama_boost,
+            "boost_v2_settings": self._boost_v2_settings(),
             "category_filters": category_filters,
             "debug_snapshot": self.debug_snapshot(),
             "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
@@ -450,6 +466,30 @@ class HeadlessPromptEngineeringService:
             normalized = normalize_ollama_boost_settings(settings)
             store.save_ollama_boost_settings(normalized)
             store.apply_settings({"ollama_boost_settings": normalized})
+        elif key == "boost_v2_settings":
+            # Boost v2(llama.cpp) 전역 설정 — 디스크 SSOT(boost_v2_user.json)만. PE 프리셋/모드 캐시에 안 싣는다.
+            from core.boost_v2 import save_boost_v2_settings
+
+            settings = json.loads(text_value or "{}")
+            if not isinstance(settings, dict):
+                return context._toast("Invalid Boost v2 settings", level="error")
+            current = self._boost_v2_settings()
+            saved = save_boost_v2_settings({**current, **settings}, save_root=self._boost_v2_save_root())
+            # 백엔드를 바꾸면 쓰지 않게 된 쪽 모델을 내린다(켜져 있으면 다음 Random 이 새 쪽을 올린다).
+            if saved.get("backend") != current.get("backend"):
+                try:
+                    if saved.get("backend") == "llamacpp":
+                        existing = getattr(context, "ollama_tag_assist_service", None)
+                        if existing is not None:
+                            existing.set_resident(False)
+                    else:
+                        runtime = getattr(context, "boost_llama_runtime", None)
+                        if runtime is not None:
+                            runtime.stop()
+                        context.publish("ollama_auto_boost_changed",
+                                        {"enabled": bool(getattr(context, "ollama_auto_boost", False))})
+                except Exception:
+                    pass
         elif key == "category_filters":
             # 단일 카테고리 부분 업데이트:
             #   {"category": <option_key>, "exclude": [...], "include": [...], "hide": [...]}

@@ -59,6 +59,45 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
         return runtime
 
 
+def get_model_downloader(context: Any) -> Any:
+    """모델 다운로더 싱글턴. 대상은 설정/환경변수와 무관하게 **기본 모델 위치**다 —
+    사용자가 다른 경로를 지정했다면 그 파일은 사용자가 관리한다."""
+    from core.llama_model_download import LlamaModelDownloadService
+    from core.llama_runtime import default_model_path
+
+    with _RUNTIME_LOCK:
+        svc = getattr(context, "boost_model_downloader", None)
+        if svc is None:
+            svc = LlamaModelDownloadService(default_model_path(_save_root(context)))
+            context.boost_model_downloader = svc
+        return svc
+
+
+def boost_v2_status(context: Any) -> dict[str, Any]:
+    """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 실행 여부 · 다운로드 진행."""
+    from core.llama_model_download import MODEL_SHA256, MODEL_SIZE, MODEL_URL
+    from core.llama_runtime import default_model_path, resolve_paths
+
+    settings = boost_v2_settings(context)
+    save_root = _save_root(context)
+    engine, model = resolve_paths(settings, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
+    runtime = getattr(context, "boost_llama_runtime", None)
+    running = bool(runtime is not None and runtime.is_running())
+    return {
+        "ok": True,
+        "settings": settings,
+        "engine_path": str(engine),
+        "engine_ready": engine.is_file(),
+        "model_path": str(model),
+        "model_ready": model.is_file(),
+        "model_is_default": model == default_model_path(save_root),
+        "running": running,
+        "last_load_seconds": getattr(runtime, "last_load_seconds", None) if runtime is not None else None,
+        "download": get_model_downloader(context).snapshot(),
+        "model_source": {"url": MODEL_URL, "sha256": MODEL_SHA256, "size": MODEL_SIZE, "license": "Apache-2.0"},
+    }
+
+
 def stop_boost_runtime(context: Any) -> None:
     runtime = getattr(context, "boost_llama_runtime", None)
     if runtime is not None:

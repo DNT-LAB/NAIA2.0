@@ -6,6 +6,7 @@
   "route_sources": [
     "core/web_session_app.py",
     "app/backend/server/artist_thumbnail_routes.py",
+    "app/backend/server/boost_v2_routes.py",
     "app/backend/server/character_asset_routes.py",
     "app/backend/server/character_instant_routes.py",
     "app/backend/server/character_viewer_routes.py",
@@ -717,6 +718,24 @@
         {"method": "GET", "path": "/api/ollama/chat/progress", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ollama/assist", "smoke": "external_live"},
         {"method": "POST", "path": "/api/ollama/chat", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "boost_v2_llamacpp",
+      "name": "Boost v2 - app-owned llama.cpp (Gemma 4 E2B) single-template random prompt boost, model download",
+      "source_files": [
+        "app/backend/server/boost_v2_routes.py",
+        "app/backend/server/boost_v2_service.py",
+        "core/boost_v2.py",
+        "core/llama_runtime.py",
+        "core/llama_model_download.py"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/boost-v2/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/boost-v2/model/download", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/boost-v2/model/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/boost-v2/unload", "smoke": "state_mutation"}
       ]
     },
     {

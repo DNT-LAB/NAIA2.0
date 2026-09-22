@@ -34,6 +34,7 @@ from app.backend.server.nai_model_routes import register_nai_model_routes
 from app.backend.server.character_instant_routes import register_character_instant_routes
 from app.backend.server.nai_preview_routes import register_nai_preview_routes
 from app.backend.server.ollama_routes import register_ollama_routes
+from app.backend.server.boost_v2_routes import register_boost_v2_routes
 from app.backend.server.tagger_routes import register_tagger_routes
 from app.backend.server.translation_history_routes import register_translation_history_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
@@ -190,6 +191,7 @@ def register_headless_routes(
     register_install_manager_routes(app, context, run_in_thread=run_in_thread)
     register_extension_install_routes(app, context, run_in_thread=run_in_thread)
     register_ollama_routes(app, context, run_in_thread=run_in_thread)
+    register_boost_v2_routes(app, context, run_in_thread=run_in_thread)
     register_translation_history_routes(app, context, run_in_thread=run_in_thread)
     register_tagger_routes(app, context, run_in_thread=run_in_thread)
     register_params_workflow_routes(

@@ -518,10 +518,34 @@ async def handle_random_command(
     *,
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
+    # 수동 Random 이 도는 동안 Auto Gen continuation 은 새로 뽑지 않고 양보한다(generation_runner) —
+    # 둘이 같은 풀·같은 llama 슬롯을 두고 겹치면 "화면은 B, 생성은 A" 같은 꼬임이 난다.
     command = command if isinstance(command, dict) else {}
+    context.manual_random_inflight = str(command.get("random_request_id") or command.get("requestId") or "manual")
+    try:
+        await _handle_random_command(
+            ws, context, clients, command, start_generation_runner=start_generation_runner,
+        )
+    finally:
+        context.manual_random_inflight = ""
+
+
+async def _handle_random_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    command: dict[str, Any],
+    *,
+    start_generation_runner: GenerationRunnerStarter,
+) -> None:
     overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
     request_id = str(command.get("random_request_id") or command.get("requestId") or "")
     active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
+    # Auto Gen 이 미리 만들어 둔 다음 컷(Boost v2, 조건부까지 반영·부스트 완료)이 있으면 그것을 곧바로
+    # 보여 준다 — 사용자에겐 아직 못 본 새 랜덤이고, 기다림이 거의 0이다. 없으면 기존 경로.
+    from app.backend.server.generation_runner import take_prefetched_cut_for_manual_random
+
+    prefetched = await take_prefetched_cut_for_manual_random(context, active_ratings, request_id)
     # 수동 random은 풀을 advance하므로 Auto Gen 프리페치 예약행을 무효화(폐기).
     invalidate_auto_gen_prefetch(context)
     # 영속된 활성 태그필터가 아직 in-memory 로 재조립되지 않았으면(재시작/가져오기 직후) 백엔드가
@@ -529,14 +553,17 @@ async def handle_random_command(
     # 안 걸리고, 표시 카운트(필터 기준)와 실제 풀(전체)이 어긋난다(사용자 리포트). no-op if already assigned.
     from app.backend.server.search_runtime import reconstruct_active_tag_filter
     from core.event_map.random_link import link_state
-    if not link_state(context)["enabled"]:
-        await asyncio.to_thread(reconstruct_active_tag_filter, context)
-    result = await asyncio.to_thread(
-        random_service(context).generate,
-        active_ratings=active_ratings,
-        overrides=overrides,
-        random_request_id=request_id,
-    )
+    if prefetched is not None:
+        result = prefetched
+    else:
+        if not link_state(context)["enabled"]:
+            await asyncio.to_thread(reconstruct_active_tag_filter, context)
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=active_ratings,
+            overrides=overrides,
+            random_request_id=request_id,
+        )
     # Fail-safe: 풀이 비어 보이지만(등급/Quick Filter 과제한) 실제 행이 남아 있으면 gsqe 로 강제
     # 초기화하고 1회 재시도 — 사용자가 '처리할 프롬프트가 더 이상 없습니다'로 막히지 않게 자동
     # 회복한다. (등급 desync = 검색이 풀을 gsqe 로 열어도 프론트가 gsq 로 되돌려 explicit 결과를
@@ -549,8 +576,9 @@ async def handle_random_command(
         request_id=request_id,
     )
     # 수동 1회 random: 그 시점에 동기 부스트(프런트가 Random 버튼을 응답까지 disable).
-    # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
-    await apply_ollama_auto_boost(context, result)
+    # 미리 만든 컷은 이미 부스트돼 있다.
+    if prefetched is None:
+        await apply_ollama_auto_boost(context, result)
     await persist_prompt_engineering_settings(context)
     from core.event_map.random_link import reject_stale_result
     reject_stale_result(context, result)
@@ -572,6 +600,15 @@ async def handle_random_command(
         request_id=request_id,
         queue_source="Random",
     )
+    # 이 Random 이 끝날 때 Auto Gen 이 꺼져 있어 큐에 안 넣었으면 기억해 둔다 — Boost 를 기다리는 동안
+    # 사용자가 켠 Auto Gen 은 WS 가 이 명령 뒤에야 읽으므로, 그 set_option 이 이 결과로 첫 장을 낸다.
+    context._last_random_dispatch = {
+        "request_id": request_id,
+        "result": result,
+        "command": command,
+        "overrides": overrides,
+        "enqueued": dispatch is not None,
+    }
     if dispatch is not None:
         await _send_json(ws, dispatch.websocket_payload())
         if not dispatch.ok:

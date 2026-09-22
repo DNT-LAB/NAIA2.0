@@ -9004,7 +9004,13 @@ function setOption(key, value) {
   }
   if (!applyOptionState(key, next, {clearPending: false})) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'set_option', key, value: next}));
+    const payload = {type: 'set_option', key, value: next};
+    // Random 이 Boost 를 기다리는 중에 켠 Auto Gen — 서버는 이 명령을 Random 이 끝난 뒤에 읽는다.
+    // 그 Random 의 id 를 실어 보내면 서버가 그 결과로 첫 장을 낸다(안 실으면 켜졌는데 아무것도 안 돈다).
+    if (key === 'auto_generate' && next && awaitingMyRandom && pendingRandomRequestId) {
+      payload.random_request_id = pendingRandomRequestId;
+    }
+    ws.send(JSON.stringify(payload));
     markOptionPending(key, false);
   } else {
     markOptionPending(key, false);

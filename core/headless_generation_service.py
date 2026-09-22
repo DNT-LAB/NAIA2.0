@@ -560,7 +560,12 @@ class HeadlessGenerationService:
         # 프롬프트 입력창에 직접 친 와일드카드를 생성 시점에 전개한다(desktop
         # generation_controller 패리티). request.params 원본은 건드리지 않으므로
         # prompt_fixed Auto Gen 반복마다 여기서 새로 전개 = 매 생성 재롤.
-        self._expand_input_wildcards(params)
+        # 다음 컷을 미리 만드는 파이프라인(Auto Gen 프리페치)이 current_prompt_context 를 잠깐 바꿔 두는
+        # 구간과 겹치지 않게 잠근다 — 아래 추적 수집도 같다.
+        from core.headless_random_prompt_service import pipeline_swap_lock
+
+        with pipeline_swap_lock(self.context):
+            self._expand_input_wildcards(params)
         request.mark_processing()
         api_service = self._api_service()
         api_result = api_service.call_generation_api(
@@ -582,7 +587,8 @@ class HeadlessGenerationService:
         api_result["source_row"] = request.source_row
         # 읽기 전용 생성 추적(파이프라인 단계 델타 + 적용된 와일드카드)을 이 이미지에 붙인다.
         # current_prompt_context 는 process()와 _expand_input_wildcards를 거친 직후라 권위본.
-        trace_payload = self._build_generation_trace(request)
+        with pipeline_swap_lock(self.context):
+            trace_payload = self._build_generation_trace(request)
         if trace_payload:
             api_result["naia_generation_trace"] = trace_payload
         stored = self.context.result_store.add_api_result(api_result, request)

@@ -105,6 +105,21 @@ def ensure_filter_data_manager(context):
         pass
     return getattr(context, "filter_data_manager", None)
 
+def pipeline_swap_lock(context: Any) -> Any:
+    """공용 current_prompt_context/current_source_row 를 잠깐 바꿔 두는 부작용 없는 파이프라인 실행과,
+    그 값을 읽는 생성 조립(execute_request)이 함께 쓰는 잠금(컨텍스트당 하나)."""
+    lock = getattr(context, "_pipeline_swap_lock", None)
+    if lock is None:
+        import threading
+
+        lock = threading.RLock()
+        try:
+            context._pipeline_swap_lock = lock
+        except Exception:
+            pass
+    return lock
+
+
 class HeadlessRandomPromptService:
     """Generate Remote Web random prompts without RemoteBridge or Qt widgets."""
 
@@ -336,6 +351,29 @@ class HeadlessRandomPromptService:
         random_request_id: str = "",
         source: str = "result_reroll",
         update_context: bool = True,
+    ) -> HeadlessRandomPromptResult:
+        if update_context:
+            return self._generate_from_source_row(
+                source_row, active_ratings=active_ratings, overrides=overrides,
+                random_request_id=random_request_id, source=source, update_context=True,
+            )
+        # 부작용 없는 실행(Auto Gen 다음 컷 미리 만들기)은 파이프라인 동안 공용 current_* 를 잠깐
+        # 바꿔 둔다. 그 사이 현재 컷의 전송 조립(execute_request)이 그 값을 읽지 않도록 잠근다.
+        with pipeline_swap_lock(self.context):
+            return self._generate_from_source_row(
+                source_row, active_ratings=active_ratings, overrides=overrides,
+                random_request_id=random_request_id, source=source, update_context=False,
+            )
+
+    def _generate_from_source_row(
+        self,
+        source_row: Any,
+        *,
+        active_ratings: set[str] | None,
+        overrides: dict[str, Any] | None,
+        random_request_id: str,
+        source: str,
+        update_context: bool,
     ) -> HeadlessRandomPromptResult:
         settings = self._random_settings(overrides)
         ratings = self._normalize_ratings(active_ratings)

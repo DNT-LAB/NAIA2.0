@@ -83,6 +83,53 @@ async def send_sync_messages(
         await ws.send_text(json.dumps(message, ensure_ascii=False))
 
 
+async def _start_auto_generation_from_last_random(
+    ws: WebSocket,
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    command: dict[str, Any],
+) -> None:
+    """Random 이 Boost 를 기다리는 사이 켠 Auto Gen — 그 Random 의 결과로 첫 장을 낸다.
+
+    WS 는 명령을 차례로 읽으므로 Boost(수 초) 중에 누른 Auto Gen 은 Random 이 끝난 **뒤에** 도착한다.
+    그때 Random 은 이미 "Auto Gen 꺼짐" 으로 판정해 큐에 넣지 않았다 → 켜졌는데 아무것도 안 돈다(재현됨).
+    프론트가 그 Random 의 요청 id 를 실어 보낸 경우에만 잇는다 — 나중에 켠 무관한 토글이 유료 생성을
+    내지 않게.
+    """
+    request_id = str(command.get("random_request_id") or "")
+    last = getattr(context, "_last_random_dispatch", None)
+    if not request_id or not isinstance(last, dict) or last.get("request_id") != request_id:
+        return
+    if last.get("enqueued"):
+        return
+    last["enqueued"] = True
+    from app.backend.server.generation_commands import (
+        _maybe_enqueue_random_auto_generation,
+        _send_generation_queued_state,
+    )
+
+    dispatch = await _maybe_enqueue_random_auto_generation(
+        context,
+        result=last.get("result"),
+        command=last.get("command") or {},
+        overrides=last.get("overrides"),
+        request_id=request_id,
+        queue_source="Random",
+    )
+    if dispatch is None:
+        return
+    await ws.send_text(json.dumps(dispatch.websocket_payload(), ensure_ascii=False))
+    if not dispatch.ok:
+        await ws.send_text(json.dumps({"type": "toast", "level": "error", "message": dispatch.blocked_reason},
+                                      ensure_ascii=False))
+        return
+    await _send_generation_queued_state(ws, context)
+    if getattr(context, "headless_generation_execute_enabled", False):
+        from app.backend.server.generation_runner import ensure_generation_runner
+
+        ensure_generation_runner(context, clients)
+
+
 async def _maybe_autostart_automation(
     context: WebSessionContext,
     clients: set[WebSocket],
@@ -211,6 +258,7 @@ async def handle_session_command(
         # 지속 자동화: Auto Gen을 켜면(+persist) 자동화를 자동 시작(Auto Gen이 트리거).
         if option_key == "auto_generate" and context._coerce_bool(command.get("value")):
             await _maybe_autostart_automation(context, clients, broadcast_json=broadcast_json)
+            await _start_auto_generation_from_last_random(ws, context, clients, command)
         return True
     if command_type == "set_mode":
         await _handle_set_mode(

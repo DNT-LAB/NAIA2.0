@@ -174,11 +174,15 @@ def _record(context: Any, result: Any, payload: dict[str, Any]) -> None:
                 pass
 
 
-async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) -> bool:
+async def apply_boost_v2(
+    context: Any, result: Any, settings: dict[str, Any], *, update_context: bool = True,
+) -> bool:
     """랜덤 결과 프롬프트의 main 끝에 Boost v2 섹션을 붙인다. 실패하면 원문 그대로(raise 없음).
 
     성공 시 result.prompt · context.prompt_text · ctx.final_prompt 셋을 함께 갱신한다 — 화면 표시와
     실제 전송, 네거티브 조건부 바인딩(final_prompt 비교)이 모두 같은 문자열을 보게 하려는 것.
+    ``update_context=False`` 면 context.prompt_text 는 건드리지 않는다(Auto Gen 다음 컷 미리 만들기 —
+    소비할 때 설치한다).
     """
     from core.boost_v2 import build_instruction, enabled_sections, format_output
 
@@ -208,7 +212,8 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
         if new_prompt == prompt:
             return False
         result.prompt = new_prompt
-        context.prompt_text = new_prompt
+        if update_context:
+            context.prompt_text = new_prompt
         ctx = getattr(result, "context", None)
         if ctx is not None:
             try:

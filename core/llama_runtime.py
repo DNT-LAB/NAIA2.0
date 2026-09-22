@@ -8,6 +8,9 @@ GPU(기본): ``-ngl 99 -fa on`` — 동봉 엔진은 공식 Vulkan 판이라 GPU
 실측: 평소 호출 6.75초로 CPU(6.86초)와 같지만, CPU 가 바쁠 때 CPU 판은 25초로 느려지고 GPU 는 6.7초
 그대로다. ``use_gpu=False`` 면 ``-ngl 0`` 으로 CPU 를 강제한다.
 
+GPU 가 여럿이면 ``--device`` 로 하나를 고른다(기본 '자동' = 외장 우선). 실측 RTX 5090 Laptop: 호출 1.07초
+(생성 177 tok/s) — Arc 140T 6.34초, CPU 6.86초. 첫 실행은 장치별 셰이더 준비로 한 번 느리다(5090 26초).
+
 - 내가 띄운 프로세스만 다룬다(다른 앱의 llama-server/Ollama 는 절대 건드리지 않는다).
 - 요청은 한 번에 하나. 뒤따르는 요청은 남은 제한시간 안에서 기다린다(Auto Gen 은 어차피 직렬).
 - 제한시간을 넘기면 프로세스를 내린다 — llama-server 에 요청 단위 취소가 없어 이것이 유일한
@@ -130,8 +133,10 @@ class LlamaServerRuntime:
         idle_seconds: float = DEFAULT_IDLE_SECONDS,
         log_path: str | Path | None = None,
         use_gpu: bool = True,
+        device: str | None = None,
     ) -> None:
         self.use_gpu = bool(use_gpu)
+        self.device = device or None
         self.engine_path = Path(engine_path) if engine_path else None
         self.model_path = Path(model_path) if model_path else None
         self.threads = int(threads or min(8, os.cpu_count() or 4))
@@ -150,17 +155,21 @@ class LlamaServerRuntime:
 
     # ── 구성·상태 ──────────────────────────────────────────────────────────
 
+    _KEEP = object()
+
     def configure(
-        self, engine_path: str | Path | None, model_path: str | Path | None, *, use_gpu: bool | None = None,
+        self, engine_path: str | Path | None, model_path: str | Path | None, *,
+        use_gpu: bool | None = None, device: Any = _KEEP,
     ) -> None:
-        """경로나 GPU 사용이 바뀌면 돌던 프로세스를 내린다(다음 요청이 새 설정으로 올린다)."""
+        """경로·GPU 사용·장치가 바뀌면 돌던 프로세스를 내린다(다음 요청이 새 설정으로 올린다)."""
         engine = Path(engine_path) if engine_path else None
         model = Path(model_path) if model_path else None
         gpu = self.use_gpu if use_gpu is None else bool(use_gpu)
+        dev = self.device if device is LlamaServerRuntime._KEEP else (device or None)
         with self._proc_lock:
-            if engine != self.engine_path or model != self.model_path or gpu != self.use_gpu:
+            if (engine, model, gpu, dev) != (self.engine_path, self.model_path, self.use_gpu, self.device):
                 self.stop()
-                self.engine_path, self.model_path, self.use_gpu = engine, model, gpu
+                self.engine_path, self.model_path, self.use_gpu, self.device = engine, model, gpu, dev
 
     def server_args(self, port: int) -> list[str]:
         args = [
@@ -170,7 +179,12 @@ class LlamaServerRuntime:
             "--parallel", "1", "--jinja", "--reasoning-format", "deepseek",
             "--alias", MODEL_ALIAS,
         ]
-        args += ["-ngl", "99", "-fa", "on"] if self.use_gpu else ["-ngl", "0"]
+        if self.use_gpu:
+            args += ["-ngl", "99", "-fa", "on"]
+            if self.device:
+                args += ["--device", self.device]
+        else:
+            args += ["-ngl", "0"]
         return args
 
     def is_running(self) -> bool:
@@ -190,6 +204,8 @@ class LlamaServerRuntime:
                 "port": self._port if running else None,
                 "busy": self._slot.locked(),
                 "last_load_seconds": self.last_load_seconds,
+                "use_gpu": self.use_gpu,
+                "device": self.device,
             }
 
     # ── 수명 ─────────────────────────────────────────────────────────────
@@ -380,19 +396,39 @@ class LlamaServerRuntime:
 
 # ── 장치 감지 ──────────────────────────────────────────────────────────────
 
-_DEVICE_CACHE: dict[tuple[str, float], list[str]] = {}
+_DEVICE_CACHE: dict[tuple[str, float], list[dict[str, str]]] = {}
+_DISCRETE_HINTS = ("nvidia", "geforce", "rtx", "quadro", "radeon rx", "arc(tm) a", "arc(tm) b")
 
 
 def list_devices(engine_path: str | Path | None) -> list[str]:
-    """``llama-server --list-devices`` 로 엔진이 쓸 수 있는 GPU 이름(예: 'Intel(R) Arc(TM) 140T GPU (32GB)').
-    비면 GPU 없음(CPU 로 돈다). 엔진 파일(경로·수정시각)마다 한 번만 잰다 — 약 1초 걸린다."""
+    """엔진이 쓸 수 있는 GPU 이름들(예: 'Intel(R) Arc(TM) 140T GPU (32GB)'). 비면 GPU 없음(CPU 로 돈다)."""
+    return [entry["name"] for entry in list_device_entries(engine_path)]
+
+
+def choose_device(entries: list[dict[str, str]], preference: str | None) -> str | None:
+    """설정의 장치 선호로 ``--device`` 값을 고른다. 'auto' = 외장 GPU(NVIDIA·Radeon RX·Arc A/B) 우선,
+    없으면 첫 GPU. 지정한 장치가 사라졌으면 자동으로 되돌아간다. GPU 가 없으면 None(엔진이 CPU 로 돈다)."""
+    if not entries:
+        return None
+    wanted = str(preference or "auto")
+    if wanted != "auto" and any(entry["id"] == wanted for entry in entries):
+        return wanted
+    for entry in entries:
+        if any(hint in entry["name"].lower() for hint in _DISCRETE_HINTS):
+            return entry["id"]
+    return entries[0]["id"]
+
+
+def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
+    """``llama-server --list-devices`` 결과를 [{id:'Vulkan1', name:'NVIDIA GeForce RTX 5090 Laptop GPU'}] 로.
+    엔진 파일(경로·수정시각)마다 한 번만 잰다 — 약 1초 걸린다."""
     path = Path(engine_path) if engine_path else None
     if path is None or not path.is_file():
         return []
     key = (str(path), path.stat().st_mtime)
     if key in _DEVICE_CACHE:
-        return list(_DEVICE_CACHE[key])
-    devices: list[str] = []
+        return [dict(entry) for entry in _DEVICE_CACHE[key]]
+    devices: list[dict[str, str]] = []
     try:
         out = subprocess.run(
             [str(path), "--list-devices"], cwd=str(path.parent), capture_output=True, text=True,
@@ -406,14 +442,14 @@ def list_devices(engine_path: str | Path | None) -> list[str]:
                 continue
             if seen and ":" in line and "(none)" not in line:
                 # "  Vulkan0: Intel(R) Arc(TM) 140T GPU (32GB) (37024 MiB, 47802 MiB free)"
-                name = line.split(":", 1)[1].strip()
+                device_id, name = (part.strip() for part in line.split(":", 1))
                 import re
 
-                devices.append(re.sub(r"\s*\(\d+ MiB[^)]*\)\s*$", "", name))
+                devices.append({"id": device_id, "name": re.sub(r"\s*\(\d+ MiB[^)]*\)\s*$", "", name)})
     except Exception:
         devices = []
     _DEVICE_CACHE[key] = devices
-    return list(devices)
+    return [dict(entry) for entry in devices]
 
 
 # ── 경로 해석 ──────────────────────────────────────────────────────────────

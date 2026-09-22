@@ -64,6 +64,8 @@ BOOST_V2_DEFAULTS: dict[str, Any] = {
     "preferences": {key: "" for key in SECTION_KEYS},
     # GPU(내장 그래픽 포함)가 있으면 거기서 돌린다 — 없으면 엔진이 알아서 CPU 로 돈다. 끄면 CPU 강제.
     "use_gpu": True,
+    # GPU 가 여럿일 때 어느 것에 올릴지 — 'auto'(외장 우선) 또는 'Vulkan0' 같은 장치 id.
+    "gpu_device": "auto",
     # 비우면 기본 위치(엔진=앱 동봉, 모델=user-data/models/llm)를 쓴다.
     "engine_path": "",
     "model_path": "",
@@ -87,9 +89,15 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
         "sections": sections,
         "preferences": preferences,
         "use_gpu": bool(source.get("use_gpu", True)),
+        "gpu_device": _normalize_device(source.get("gpu_device")),
         "engine_path": str(source.get("engine_path") or "").strip(),
         "model_path": str(source.get("model_path") or "").strip(),
     }
+
+
+def _normalize_device(value: Any) -> str:
+    text = str(value or "auto").strip()
+    return text if re.fullmatch(r"[A-Za-z]+\d+", text) else "auto"
 
 
 def enabled_sections(settings: dict[str, Any]) -> list[str]:

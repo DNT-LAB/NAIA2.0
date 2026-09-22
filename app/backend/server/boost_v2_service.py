@@ -44,21 +44,23 @@ def boost_v2_selected(context: Any, settings: dict[str, Any] | None = None) -> b
 
 def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> Any:
     """세션 컨텍스트에 붙은 런타임 하나. 설정 경로가 바뀌면 다음 요청에서 새로 올린다."""
-    from core.llama_runtime import LlamaServerRuntime, resolve_paths
+    from core.llama_runtime import LlamaServerRuntime, choose_device, list_device_entries, resolve_paths
 
     s = settings if settings is not None else boost_v2_settings(context)
     save_root = _save_root(context)
     engine, model = resolve_paths(s, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
+    use_gpu = bool(s.get("use_gpu", True))
+    device = choose_device(list_device_entries(engine), s.get("gpu_device")) if use_gpu else None
     with _RUNTIME_LOCK:
         runtime = getattr(context, "boost_llama_runtime", None)
         if runtime is None:
             # 유휴 내림 없음(idle_seconds=0) — Auto Boost 가 켜진 동안 계속 올려 둔다(llama_test 와 같다).
             # 매번 다시 올리면 호출마다 로드 ~2.6초가 붙는다(사용자 실측 "3초 느리다"). 끄기·백엔드 전환 때 내린다.
-            runtime = LlamaServerRuntime(engine, model, idle_seconds=0, use_gpu=bool(s.get("use_gpu", True)),
+            runtime = LlamaServerRuntime(engine, model, idle_seconds=0, use_gpu=use_gpu, device=device,
                                          log_path=save_root / "logs" / "boost_llama_server.log")
             context.boost_llama_runtime = runtime
         else:
-            runtime.configure(engine, model, use_gpu=bool(s.get("use_gpu", True)))
+            runtime.configure(engine, model, use_gpu=use_gpu, device=device)
         return runtime
 
 
@@ -79,20 +81,25 @@ def get_model_downloader(context: Any) -> Any:
 def boost_v2_status(context: Any) -> dict[str, Any]:
     """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 실행 여부 · 다운로드 진행."""
     from core.llama_model_download import MODEL_SHA256, MODEL_SIZE, MODEL_URL
-    from core.llama_runtime import default_model_path, list_devices, resolve_paths
+    from core.llama_runtime import choose_device, default_model_path, list_device_entries, resolve_paths
 
     settings = boost_v2_settings(context)
     save_root = _save_root(context)
     engine, model = resolve_paths(settings, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
     runtime = getattr(context, "boost_llama_runtime", None)
     running = bool(runtime is not None and runtime.is_running())
+    entries = list_device_entries(engine)
+    chosen = choose_device(entries, settings.get("gpu_device")) if settings.get("use_gpu", True) else None
     return {
         "ok": True,
         "settings": settings,
         "engine_path": str(engine),
         "engine_ready": engine.is_file(),
-        # 엔진이 쓸 수 있는 GPU(비면 CPU 로 돈다) · 설정상 GPU 사용 여부.
-        "gpu_devices": list_devices(engine),
+        # 엔진이 쓸 수 있는 GPU(비면 CPU 로 돈다) · 설정상 GPU 사용 여부 · 실제로 고른 장치.
+        "gpu_devices": [entry["name"] for entry in entries],
+        "gpu_device_entries": entries,
+        "gpu_device_chosen": chosen,
+        "gpu_device_chosen_name": next((e["name"] for e in entries if e["id"] == chosen), ""),
         "use_gpu": bool(settings.get("use_gpu", True)),
         "model_path": str(model),
         "model_ready": model.is_file(),

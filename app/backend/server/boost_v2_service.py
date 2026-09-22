@@ -68,9 +68,28 @@ def stop_boost_runtime(context: Any) -> None:
             pass
 
 
-def _grounding_tags(result: Any) -> str:
-    """조건부까지 반영된 main 스냅샷(boost_v2_main_tags). 없으면 main_tags. 가중치는 벗긴다.
-    캐릭터 프롬프트·prefix/postfix 는 넣지 않는다(사양: 초기엔 랜덤 프롬프트만)."""
+def _color_list(context: Any) -> list[str]:
+    """PE "색상" 라운드와 같은 사전(color.txt). 매니저를 못 얻으면 파일을 직접 읽는다."""
+    try:
+        from core.headless_random_prompt_service import ensure_filter_data_manager
+
+        manager = ensure_filter_data_manager(context)
+        colors = list(getattr(manager, "color_list", None) or [])
+        if colors:
+            return colors
+    except Exception:
+        pass
+    try:
+        path = Path(getattr(context, "repo_root", Path(__file__).resolve().parents[3])) / "data" / "color.txt"
+        return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
+def _grounding_tags(context: Any, result: Any) -> str:
+    """조건부까지 반영된 main 스냅샷(boost_v2_main_tags). 없으면 main_tags. 가중치는 벗기고
+    색상 태그는 설정과 무관하게 뺀다. 캐릭터 프롬프트·prefix/postfix 는 넣지 않는다."""
+    from core.boost_v2 import drop_color_tags
     from core.scene_boost import strip_weight_syntax
 
     ctx = getattr(result, "context", None)
@@ -80,14 +99,24 @@ def _grounding_tags(result: Any) -> str:
     tags = meta.get("boost_v2_main_tags")
     if not (isinstance(tags, list) and any(str(t).strip() for t in tags)):
         tags = list(getattr(ctx, "main_tags", None) or [])
-    return strip_weight_syntax(", ".join(str(t) for t in tags))
+    bare = [t for t in strip_weight_syntax(", ".join(str(t) for t in tags)).split(", ") if t]
+    return ", ".join(drop_color_tags(bare, _color_list(context)))
 
 
-def _record(result: Any, payload: dict[str, Any]) -> None:
+def _record(context: Any, result: Any, payload: dict[str, Any]) -> None:
+    """이미지 메타데이터(ctx.metadata)와 프롬프트 실행 기록(derived) 둘 다에 남긴다.
+    실행 기록은 파이프라인 끝에 이미 저장돼 Boost 를 모르므로 derived 로 덧붙인다."""
     ctx = getattr(result, "context", None)
     meta = getattr(ctx, "metadata", None) if ctx is not None else None
     if isinstance(meta, dict):
         meta["boost_v2"] = payload
+        run_id = str(meta.get("prompt_run_id") or "")
+        recorder = getattr(context, "record_prompt_run_derived", None)
+        if run_id and callable(recorder):
+            try:
+                recorder(run_id, {"boost_v2": payload})
+            except Exception:
+                pass
 
 
 async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) -> bool:
@@ -102,19 +131,19 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
         prompt = str(getattr(result, "prompt", "") or "")
         if not prompt.strip() or not enabled_sections(settings):
             return False
-        tags = _grounding_tags(result)
+        tags = _grounding_tags(context, result)
         if not tags:
             return False
         instruction = build_instruction(tags, settings)
         runtime = get_boost_runtime(context, settings)
         resp = await asyncio.to_thread(runtime.chat, instruction)
         if not resp.get("ok"):
-            _record(result, {"ok": False, "error": resp.get("error"), "elapsed": resp.get("elapsed")})
+            _record(context, result, {"ok": False, "error": resp.get("error"), "elapsed": resp.get("elapsed")})
             return False
         is_nai = str(getattr(context, "current_api_mode", "") or "").upper() == "NAI"
         addition = format_output(resp.get("text", ""), is_nai=is_nai)
         if not addition:
-            _record(result, {"ok": False, "error": "빈 응답"})
+            _record(context, result, {"ok": False, "error": "빈 응답"})
             return False
         from app.backend.server.generation_commands import _inject_boost_at_main
 
@@ -129,7 +158,7 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
                 ctx.final_prompt = new_prompt
             except Exception:
                 pass
-        _record(result, {
+        _record(context, result, {
             "ok": True,
             "input": tags,
             "text": resp.get("text", ""),

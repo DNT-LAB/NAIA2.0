@@ -144,6 +144,19 @@ def build_instruction(tags: str, settings: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def drop_color_tags(tags: list[str], colors: list[str]) -> list[str]:
+    """모델 입력에서 색상 태그를 항상 뺀다 — 사용자의 remove_color 설정과 무관(사용자 결정 2026-09-23).
+
+    E2B 는 색을 여러 인물·사물에 섞어 붙인다(실측: 두 인물의 머리색·눈색 합성). 판정은 PE "색상"
+    라운드와 같은 규칙(color.txt 단어 부분일치 + ``_is_color_exception``)이되 오버라이드는 안 받는다.
+    프롬프트 자체의 태그는 그대로다 — 여기서 빼는 건 모델에게 보내는 입력뿐이다.
+    """
+    from core.tag_filter_helpers import _is_color_exception
+
+    lowered = [str(c).lower() for c in colors if str(c).strip()]
+    return [t for t in tags if _is_color_exception(t) or not any(c in t.lower() for c in lowered)]
+
+
 def format_output(text: str, *, is_nai: bool) -> str:
     """모델 출력을 거의 그대로 쓴다 — 파싱·필터 없음(no-think 에서 템플릿을 온전히 지킨다, 사용자 결정).
 

@@ -21,6 +21,7 @@ try:
     from tools.measure_release_artifact import measure_release_artifact
     from tools.stage_electron_release import stage_electron_release
     from tools.stage_grok_runtime import stage_grok_runtime
+    from tools.stage_llama_runtime import stage_llama_runtime
     from tools.stage_python_runtime import stage_python_runtime
     from tools.write_release_evidence_report import write_release_evidence_report
 except ModuleNotFoundError:  # pragma: no cover - used when executed as a script.
@@ -32,6 +33,7 @@ except ModuleNotFoundError:  # pragma: no cover - used when executed as a script
     from measure_release_artifact import measure_release_artifact
     from stage_electron_release import stage_electron_release
     from stage_grok_runtime import stage_grok_runtime
+    from stage_llama_runtime import stage_llama_runtime
     from stage_python_runtime import stage_python_runtime
     from write_release_evidence_report import write_release_evidence_report
 
@@ -344,6 +346,26 @@ def run_release_workspace(
         sections["stage_grok_runtime"] = {
             "ok": True,
             "status": "not_present",
+            "violations": [],
+        }
+
+    # Bundled llama.cpp CPU engine (Boost v2) — staged into resources/naia-backend/runtime/llama/engine.
+    # Opt-in by env so test runs never hit the network: NAIA_LLAMA_ENGINE_SRC (dir or official zip) or
+    # NAIA_LLAMA_ENGINE_DOWNLOAD=1 (pinned official zip, SHA-256 checked). The portable release sets one.
+    if os.environ.get("NAIA_LLAMA_ENGINE_SRC") or os.environ.get("NAIA_LLAMA_ENGINE_DOWNLOAD") == "1":
+        try:
+            llama_result = stage_llama_runtime(release_root, cache_dir=workspace / "llama-engine-cache")
+            sections["stage_llama_runtime"] = {**llama_result.__dict__, "ok": True, "violations": []}
+        except Exception as exc:
+            sections["stage_llama_runtime"] = {
+                "ok": False,
+                "violations": [{"path": "resources/naia-backend/runtime/llama/engine", "reason": str(exc)}],
+            }
+    else:
+        sections["stage_llama_runtime"] = {
+            "ok": True,
+            "status": "not_requested",
+            "warnings": ["llama.cpp engine not bundled (set NAIA_LLAMA_ENGINE_DOWNLOAD=1 or NAIA_LLAMA_ENGINE_SRC)"],
             "violations": [],
         }
 

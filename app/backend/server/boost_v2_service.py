@@ -52,7 +52,10 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
     with _RUNTIME_LOCK:
         runtime = getattr(context, "boost_llama_runtime", None)
         if runtime is None:
-            runtime = LlamaServerRuntime(engine, model, log_path=save_root / "logs" / "boost_llama_server.log")
+            # 유휴 내림 없음(idle_seconds=0) — Auto Boost 가 켜진 동안 계속 올려 둔다(llama_test 와 같다).
+            # 매번 다시 올리면 호출마다 로드 ~2.6초가 붙는다(사용자 실측 "3초 느리다"). 끄기·백엔드 전환 때 내린다.
+            runtime = LlamaServerRuntime(engine, model, idle_seconds=0,
+                                         log_path=save_root / "logs" / "boost_llama_server.log")
             context.boost_llama_runtime = runtime
         else:
             runtime.configure(engine, model)
@@ -96,6 +99,19 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "download": get_model_downloader(context).snapshot(),
         "model_source": {"url": MODEL_URL, "sha256": MODEL_SHA256, "size": MODEL_SIZE, "license": "Apache-2.0"},
     }
+
+
+def warm_boost_runtime(context: Any) -> None:
+    """Auto Boost 를 켤 때 엔진을 미리 올린다(백그라운드) — 첫 Random 이 로드를 기다리지 않게."""
+    def _warm() -> None:
+        try:
+            runtime = get_boost_runtime(context)
+            if runtime.status().get("engine_exists") and runtime.status().get("model_exists"):
+                runtime.warm()
+        except Exception:
+            pass
+
+    threading.Thread(target=_warm, daemon=True, name="boost-v2-warm").start()
 
 
 def stop_boost_runtime(context: Any) -> None:
@@ -184,9 +200,11 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
         if not addition:
             _record(context, result, {"ok": False, "error": "빈 응답"})
             return False
-        from app.backend.server.generation_commands import _inject_boost_at_main
+        from core.boost_v2 import inject_block, prune_used_tags
 
-        new_prompt = _inject_boost_at_main(prompt, addition)
+        # 응답이 이미 쓴 입력 태그는 main 에서 걷어내고(인원수 태그 제외), 안 쓴 태그만 앞에 남긴다.
+        pruned, removed = prune_used_tags(prompt, tags.split(", "), resp.get("text", ""))
+        new_prompt = inject_block(pruned, addition)
         if new_prompt == prompt:
             return False
         result.prompt = new_prompt
@@ -200,6 +218,7 @@ async def apply_boost_v2(context: Any, result: Any, settings: dict[str, Any]) ->
         _record(context, result, {
             "ok": True,
             "input": tags,
+            "removed_from_main": removed,
             "text": resp.get("text", ""),
             "elapsed": resp.get("elapsed"),
             "load_seconds": resp.get("load_seconds"),

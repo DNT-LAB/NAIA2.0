@@ -475,19 +475,16 @@ class HeadlessPromptEngineeringService:
                 return context._toast("Invalid Boost v2 settings", level="error")
             current = self._boost_v2_settings()
             saved = save_boost_v2_settings({**current, **settings}, save_root=self._boost_v2_save_root())
-            # 백엔드를 바꾸면 쓰지 않게 된 쪽 모델을 내린다(켜져 있으면 다음 Random 이 새 쪽을 올린다).
+            # 백엔드를 바꾸면 안 쓰게 된 쪽 모델을 내리고, 토글 구독자(ollama_routes)에게 다시 판단시킨다 —
+            # llama.cpp 로 왔고 켜져 있으면 엔진을 미리 올리고 Ollama 상주를 풀며, Ollama 로 왔으면 그쪽을 올린다.
             if saved.get("backend") != current.get("backend"):
                 try:
-                    if saved.get("backend") == "llamacpp":
-                        existing = getattr(context, "ollama_tag_assist_service", None)
-                        if existing is not None:
-                            existing.set_resident(False)
-                    else:
+                    if saved.get("backend") != "llamacpp":
                         runtime = getattr(context, "boost_llama_runtime", None)
                         if runtime is not None:
                             runtime.stop()
-                        context.publish("ollama_auto_boost_changed",
-                                        {"enabled": bool(getattr(context, "ollama_auto_boost", False))})
+                    context.publish("ollama_auto_boost_changed",
+                                    {"enabled": bool(getattr(context, "ollama_auto_boost", False))})
                 except Exception:
                     pass
         elif key == "category_filters":

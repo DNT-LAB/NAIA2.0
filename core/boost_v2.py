@@ -160,16 +160,65 @@ def drop_color_tags(tags: list[str], colors: list[str]) -> list[str]:
 def format_output(text: str, *, is_nai: bool) -> str:
     """모델 출력을 거의 그대로 쓴다 — 파싱·필터 없음(no-think 에서 템플릿을 온전히 지킨다, 사용자 결정).
 
-    하는 일은 둘뿐: ① 줄바꿈 → 공백(템플릿 각 줄이 ", (" 로 시작하므로 이으면 그대로 콤마 목록이 된다.
-    전송 직전 정리도 어차피 개행을 지운다) ② WEBUI/ComfyUI 는 ``()`` 가 가중치 문법이라 리터럴 괄호를
-    이스케이프 — 파이프라인 밖에서 끼우므로 ``_escape_main_tags_parens`` 를 거치지 않는다.
+    하는 일은 둘뿐: ① 줄마다 앞의 ", " 를 떼고 ``",\\n\\n"`` 로 잇는다 — 섹션 하나가 한 문단이다(사용자 지정
+    2026-09-23, 보기 좋게). 전송 직전 정리(api_service)가 개행을 지우므로 모델에는 ", " 목록으로 간다.
+    ② WEBUI/ComfyUI 는 ``()`` 가 가중치 문법이라 리터럴 괄호를 이스케이프 — 파이프라인 밖에서 끼우므로
+    ``_escape_main_tags_parens`` 를 거치지 않는다.
     """
-    out = re.sub(r"\s*\n\s*", " ", str(text or "")).replace(" ,", ",").strip().strip(",").strip()
+    lines = [line.strip().lstrip(",").strip() for line in str(text or "").splitlines()]
+    out = ",\n\n".join(line for line in lines if line)
     if out and not is_nai:
         from core.prompt_processor import _escape_parens_in_content
 
         out = _escape_parens_in_content(out)
     return out
+
+
+def _norm_tag(tag: str) -> str:
+    from core.scene_boost import strip_weight_syntax
+
+    return " ".join(strip_weight_syntax(str(tag or "")).replace("_", " ").lower().split())
+
+
+def prune_used_tags(prompt: str, input_tags: list[str], response: str) -> tuple[str, list[str]]:
+    """main 에서 **모델 응답이 이미 쓴 입력 태그**를 걷어내고, 안 쓴 태그만 앞에 남긴다(사용자 지정 2026-09-23).
+
+    - 대상은 모델에 보낸 입력 태그뿐이다 — 입력에 없던 태그(색상 등)는 응답에 뭐가 있든 남는다.
+    - 인원수 태그(1girl~6+others)는 늘 남긴다.
+    - 응답 대조는 소문자 · 밑줄=공백 · 앞뒤가 영숫자가 아닌 **구절 일치**다("breasts" 가 "breastsx" 에 안 걸린다).
+    - main 은 ``prefix \\n\\n main \\n\\n postfix`` 의 가운데다. 경계가 없으면 손대지 않는다(prefix 를 지울 수 있다).
+    반환: (새 프롬프트, 걷어낸 태그들)
+    """
+    from core.prompt_processor import ALL_PERSON_TAGS
+
+    end = prompt.rfind("\n\n")
+    start = prompt.rfind("\n\n", 0, end) if end > 0 else -1
+    if start < 0:
+        return prompt, []
+    head, middle, tail = prompt[: start + 2], prompt[start + 2 : end], prompt[end:]
+    inputs = {_norm_tag(t) for t in input_tags if _norm_tag(t)}
+    said = str(response or "").lower().replace("_", " ")
+    kept: list[str] = []
+    removed: list[str] = []
+    for token in middle.split(","):
+        bare = _norm_tag(token)
+        if (bare and bare in inputs and bare not in ALL_PERSON_TAGS
+                and re.search(r"(?<![a-z0-9])" + re.escape(bare) + r"(?![a-z0-9])", said)):
+            removed.append(bare)
+            continue
+        kept.append(token)
+    return head + ",".join(kept) + tail, removed
+
+
+def inject_block(prompt: str, block: str) -> str:
+    """Boost 문단을 main 끝(postfix 앞)에 빈 줄 하나 띄워 붙인다. 경계가 없으면 끝에 붙인다."""
+    block = str(block or "").strip().strip(",").strip()
+    if not block:
+        return prompt
+    end = prompt.rfind("\n\n")
+    if end == -1:
+        return prompt.rstrip(" ,") + ",\n\n" + block
+    return prompt[:end].rstrip(" ,\n") + ",\n\n" + block + prompt[end:]
 
 
 # ── 설정 파일(전역·모드 무관 디스크 SSOT) ────────────────────────────────────

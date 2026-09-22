@@ -273,6 +273,20 @@ class LlamaServerRuntime:
                 pass
             time.sleep(0.1)
 
+    def warm(self, timeout: float = DEFAULT_TIMEOUT) -> bool:
+        """요청 없이 엔진만 올린다. 이미 요청이 도는 중이면(그 요청이 올린다) 아무것도 안 한다."""
+        if not self._slot.acquire(blocking=False):
+            return False
+        try:
+            self._ensure(time.monotonic() + float(timeout))
+            return True
+        except Exception:
+            return False
+        finally:
+            self._slot.release()
+            if self.is_running():
+                self._arm_idle_timer()
+
     # ── 요청 ─────────────────────────────────────────────────────────────
 
     def chat(

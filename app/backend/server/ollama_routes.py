@@ -1372,6 +1372,20 @@ def register_ollama_routes(
         enabled = bool(getattr(context, "ollama_auto_boost", False))
         if args and isinstance(args[0], dict) and "enabled" in args[0]:
             enabled = bool(args[0]["enabled"])
+        # Boost v2(llama.cpp)가 골라져 있으면 Ollama 모델을 올리지 않는다. 끌 때는 llama-server 를
+        # 바로 내려 RAM 을 돌려준다(켤 때는 첫 Random 이 올린다 — 로드 약 3초).
+        try:
+            from app.backend.server.boost_v2_service import boost_v2_selected, stop_boost_runtime
+
+            if boost_v2_selected(context):
+                if not enabled:
+                    stop_boost_runtime(context)
+                existing = getattr(context, "ollama_tag_assist_service", None)
+                if existing is not None:
+                    existing.set_resident(False)
+                return
+        except Exception:
+            pass
         try:
             get_assist_service(context).set_resident(enabled)
         except Exception:

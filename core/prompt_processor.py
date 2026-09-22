@@ -443,6 +443,15 @@ class PromptProcessor:
         context = self._run_hooks('final_hookpoint', context)
         tracer.record('final_hookpoint', context)
 
+        # Boost v2 접지 스냅샷: 모든 훅(조건부 after_wildcard 포함) 이후, 최종 포맷(인물수→prefix 이동)
+        # 전의 main. 위 boost_main_tags(와일드카드 직후)는 조건부 *이전*이라 조건부가 지운 태그를
+        # 부스트가 되살린다 — v2 는 이 값만 쓴다.
+        try:
+            if isinstance(getattr(context, "metadata", None), dict):
+                context.metadata["boost_v2_main_tags"] = list(context.main_tags or [])
+        except Exception:
+            pass
+
         context.final_prompt = self._step_final_format(context)
         tracer.record_note_only('final_format', context, note=_trace_final_note(context))
 

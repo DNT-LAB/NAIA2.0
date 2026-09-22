@@ -339,6 +339,12 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
         prompt = str(getattr(result, "prompt", "") or "")
         if not prompt.strip():
             return False
+        # Boost v2(llama.cpp) 가 골라져 있으면 그쪽으로 — Ollama 경로·설정은 전혀 안 탄다.
+        from app.backend.server.boost_v2_service import apply_boost_v2, boost_v2_selected, boost_v2_settings
+
+        v2_settings = boost_v2_settings(context)
+        if boost_v2_selected(context, v2_settings):
+            return await apply_boost_v2(context, result, v2_settings)
         from app.backend.server.ollama_routes import ollama_boost_settings, scene_boost_prompt
 
         settings = ollama_boost_settings(context)

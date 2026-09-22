@@ -237,7 +237,17 @@ def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
         str(getattr(context, "current_api_mode", "") or ""),
         bool(getattr(context, "ollama_auto_boost", False)),
         _ollama_boost_settings_token(context),
+        _boost_v2_selected_safe(context),  # 백엔드를 v2 로 바꾸면 Ollama 로 만든 예약분은 버린다.
     )
+
+
+def _boost_v2_selected_safe(context: WebSessionContext) -> bool:
+    try:
+        from app.backend.server.boost_v2_service import boost_v2_selected
+
+        return boost_v2_selected(context)
+    except Exception:
+        return False
 
 
 def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
@@ -248,6 +258,15 @@ def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
         return False
     if not getattr(context, "ollama_auto_boost", False):
         return False
+    # Boost v2(llama.cpp)는 프리페치를 쓰지 않는다 — 예약 행의 raw general 로 미리 돌리면 조건부
+    # 이전 태그를 접지해 조건부가 지운 것을 되살린다. v2 는 매 컷 동기 경로(조건부 이후 스냅샷).
+    try:
+        from app.backend.server.boost_v2_service import boost_v2_selected
+
+        if boost_v2_selected(context):
+            return False
+    except Exception:
+        pass
     # include_*(prefix/postfix/e621) 중 하나라도 ON이면 prefetch 비활성 → 동기 폴백. 오버랩
     # 선행 단계는 raw store 값(와일드카드 미전개)·파이프라인 전이라, sync 경로(processed
     # context: 전개된 prefix/postfix + 산출된 e621)와 입력이 달라진다. 정확성 우선(Codex

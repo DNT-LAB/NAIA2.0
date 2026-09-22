@@ -44,13 +44,12 @@ def boost_v2_selected(context: Any, settings: dict[str, Any] | None = None) -> b
 
 def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> Any:
     """세션 컨텍스트에 붙은 런타임 하나. 설정 경로가 바뀌면 다음 요청에서 새로 올린다."""
-    from core.llama_runtime import LlamaServerRuntime, choose_device, list_device_entries, resolve_paths
+    from core.llama_runtime import LlamaServerRuntime, resolve_paths
 
     s = settings if settings is not None else boost_v2_settings(context)
     save_root = _save_root(context)
     engine, model = resolve_paths(s, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
-    use_gpu = bool(s.get("use_gpu", True))
-    device = choose_device(list_device_entries(engine), s.get("gpu_device")) if use_gpu else None
+    use_gpu, device = _allocation(engine, s)
     with _RUNTIME_LOCK:
         runtime = getattr(context, "boost_llama_runtime", None)
         if runtime is None:
@@ -62,6 +61,17 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
         else:
             runtime.configure(engine, model, use_gpu=use_gpu, device=device)
         return runtime
+
+
+def _allocation(engine: Any, settings: dict[str, Any]) -> tuple[bool, str | None]:
+    """설정의 할당 장치를 엔진 인자로: ('cpu' | GPU 없음) -> CPU, 그 밖엔 고른 GPU id."""
+    from core.llama_runtime import choose_device, list_device_entries
+
+    pref = str(settings.get("device") or "auto")
+    entries = list_device_entries(engine) if pref != "cpu" else []
+    if not entries:
+        return False, None
+    return True, choose_device(entries, pref)
 
 
 def get_model_downloader(context: Any) -> Any:
@@ -81,26 +91,35 @@ def get_model_downloader(context: Any) -> Any:
 def boost_v2_status(context: Any) -> dict[str, Any]:
     """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 실행 여부 · 다운로드 진행."""
     from core.llama_model_download import MODEL_SHA256, MODEL_SIZE, MODEL_URL
-    from core.llama_runtime import choose_device, default_model_path, list_device_entries, resolve_paths
+    from core.llama_runtime import default_model_path, hardware_summary, resolve_paths
 
     settings = boost_v2_settings(context)
     save_root = _save_root(context)
     engine, model = resolve_paths(settings, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
     runtime = getattr(context, "boost_llama_runtime", None)
     running = bool(runtime is not None and runtime.is_running())
-    entries = list_device_entries(engine)
-    chosen = choose_device(entries, settings.get("gpu_device")) if settings.get("use_gpu", True) else None
+    hardware = hardware_summary(engine)
+    entries = hardware["gpus"]
+    use_gpu, chosen = _allocation(engine, settings)
+    rt = runtime.status() if runtime is not None else {}
+    fallback = rt.get("gpu_failed") if rt.get("use_gpu") and rt.get("device") == chosen else None
     return {
         "ok": True,
         "settings": settings,
         "engine_path": str(engine),
         "engine_ready": engine.is_file(),
-        # 엔진이 쓸 수 있는 GPU(비면 CPU 로 돈다) · 설정상 GPU 사용 여부 · 실제로 고른 장치.
+        # 이 PC 의 할당 가능한 자원 · 설정의 할당 장치 · 실제로 고른 장치 · GPU 실패로 CPU 로 내려왔는지.
+        "hardware": hardware,
+        "device_pref": settings.get("device", "auto"),
         "gpu_devices": [entry["name"] for entry in entries],
         "gpu_device_entries": entries,
         "gpu_device_chosen": chosen,
+        # '자동' 을 골랐다면 쓰게 될 장치(선택 목록의 설명용 — 지금 선택과 무관).
+        "gpu_device_auto": _allocation(engine, {"device": "auto"})[1],
         "gpu_device_chosen_name": next((e["name"] for e in entries if e["id"] == chosen), ""),
-        "use_gpu": bool(settings.get("use_gpu", True)),
+        "use_gpu": use_gpu,
+        "gpu_fallback": fallback,
+        "swapping": bool(rt.get("stale")),
         "model_path": str(model),
         "model_ready": model.is_file(),
         "model_is_default": model == default_model_path(save_root),

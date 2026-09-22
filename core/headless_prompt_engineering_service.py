@@ -475,6 +475,12 @@ class HeadlessPromptEngineeringService:
                 return context._toast("Invalid Boost v2 settings", level="error")
             current = self._boost_v2_settings()
             saved = save_boost_v2_settings({**current, **settings}, save_root=self._boost_v2_save_root())
+            # 할당 장치가 바뀌면 곧바로 새 장치로 옮긴다(도는 요청은 끝낸 뒤) — ollama_routes/boost_v2_routes 가 구독.
+            if saved.get("device") != current.get("device") and saved.get("backend") == "llamacpp":
+                try:
+                    context.publish("boost_v2_device_changed", {"device": saved.get("device")})
+                except Exception:
+                    pass
             # 백엔드를 바꾸면 안 쓰게 된 쪽 모델을 내리고, 토글 구독자(ollama_routes)에게 다시 판단시킨다 —
             # llama.cpp 로 왔고 켜져 있으면 엔진을 미리 올리고 Ollama 상주를 풀며, Ollama 로 왔으면 그쪽을 올린다.
             if saved.get("backend") != current.get("backend"):

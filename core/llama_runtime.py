@@ -42,6 +42,10 @@ class LlamaRuntimeError(RuntimeError):
     pass
 
 
+class LlamaStartError(LlamaRuntimeError):
+    """엔진이 떴다가 죽었거나 준비되지 못했다 — GPU 로 시작했다면 CPU 로 다시 해 볼 만한 실패."""
+
+
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -135,8 +139,11 @@ class LlamaServerRuntime:
         use_gpu: bool = True,
         device: str | None = None,
     ) -> None:
+        # 요구 설정(use_gpu/device) — 실제로 GPU 를 쓰는지는 effective_gpu(실패하면 CPU 로 내려온다).
         self.use_gpu = bool(use_gpu)
         self.device = device or None
+        self.gpu_failed: str | None = None     # GPU 로 못 띄웠거나 GPU 에서 죽은 이유 — 장치 선택을 바꾸면 지운다
+        self._running_key: tuple | None = None  # 지금 떠 있는 엔진이 어떤 설정으로 떴는가
         self.engine_path = Path(engine_path) if engine_path else None
         self.model_path = Path(model_path) if model_path else None
         self.threads = int(threads or min(8, os.cpu_count() or 4))
@@ -161,15 +168,42 @@ class LlamaServerRuntime:
         self, engine_path: str | Path | None, model_path: str | Path | None, *,
         use_gpu: bool | None = None, device: Any = _KEEP,
     ) -> None:
-        """경로·GPU 사용·장치가 바뀌면 돌던 프로세스를 내린다(다음 요청이 새 설정으로 올린다)."""
+        """요구 설정을 바꾼다. 떠 있는 엔진이 새 설정과 다르면 **도는 요청이 없을 때만** 곧바로 내린다 —
+        요청이 돌고 있으면 그 요청은 끝까지 가고, 끝난 뒤 백그라운드로 새 설정의 엔진을 띄운다(chat).
+        장치 선택이 바뀌면 지난 GPU 실패 기록을 지운다(다시 GPU 를 시도한다)."""
         engine = Path(engine_path) if engine_path else None
         model = Path(model_path) if model_path else None
         gpu = self.use_gpu if use_gpu is None else bool(use_gpu)
         dev = self.device if device is LlamaServerRuntime._KEEP else (device or None)
         with self._proc_lock:
-            if (engine, model, gpu, dev) != (self.engine_path, self.model_path, self.use_gpu, self.device):
+            if (gpu, dev) != (self.use_gpu, self.device):
+                self.gpu_failed = None
+            self.engine_path, self.model_path, self.use_gpu, self.device = engine, model, gpu, dev
+        self._stop_if_stale()
+
+    @property
+    def effective_gpu(self) -> bool:
+        return self.use_gpu and not self.gpu_failed
+
+    def _desired_key(self) -> tuple:
+        gpu = self.effective_gpu
+        return (str(self.engine_path), str(self.model_path), gpu, self.device if gpu else None)
+
+    def is_stale(self) -> bool:
+        """떠 있는 엔진이 지금 요구 설정과 다른가."""
+        with self._proc_lock:
+            return self._proc is not None and self._proc.poll() is None and self._running_key != self._desired_key()
+
+    def _stop_if_stale(self) -> bool:
+        if not self._slot.acquire(blocking=False):
+            return False  # 요청이 도는 중 — 끝나고 바꾼다
+        try:
+            if self.is_stale():
                 self.stop()
-                self.engine_path, self.model_path, self.use_gpu, self.device = engine, model, gpu, dev
+                return True
+            return False
+        finally:
+            self._slot.release()
 
     def server_args(self, port: int) -> list[str]:
         args = [
@@ -179,7 +213,7 @@ class LlamaServerRuntime:
             "--parallel", "1", "--jinja", "--reasoning-format", "deepseek",
             "--alias", MODEL_ALIAS,
         ]
-        if self.use_gpu:
+        if self.effective_gpu:
             args += ["-ngl", "99", "-fa", "on"]
             if self.device:
                 args += ["--device", self.device]
@@ -206,6 +240,9 @@ class LlamaServerRuntime:
                 "last_load_seconds": self.last_load_seconds,
                 "use_gpu": self.use_gpu,
                 "device": self.device,
+                "effective_gpu": self.effective_gpu,
+                "gpu_failed": self.gpu_failed,
+                "stale": running and self._running_key != self._desired_key(),
             }
 
     # ── 수명 ─────────────────────────────────────────────────────────────
@@ -227,6 +264,7 @@ class LlamaServerRuntime:
             _close_job(self._job)
             self._job = None
             self._port = None
+            self._running_key = None
             if self._log_file is not None:
                 try:
                     self._log_file.close()
@@ -262,8 +300,20 @@ class LlamaServerRuntime:
             self._slot.release()
 
     def _ensure(self, deadline: float) -> int:
+        """엔진을 요구 설정대로 띄워 둔다. GPU 로 시작하지 못하면 이유를 남기고 **CPU 로 한 번 더** 띄운다."""
+        try:
+            return self._launch(deadline)
+        except LlamaStartError as exc:
+            if not self.effective_gpu:
+                raise
+            self.gpu_failed = f"{self.device or 'GPU'} 로 시작하지 못함 — {exc}"
+            # CPU 재시도에는 최소한의 시간을 준다(GPU 시도가 제한시간을 거의 다 썼어도).
+            return self._launch(max(deadline, time.monotonic() + 30.0))
+
+    def _launch(self, deadline: float) -> int:
         with self._proc_lock:
-            if self._proc is not None and self._proc.poll() is None and self._port:
+            if (self._proc is not None and self._proc.poll() is None and self._port
+                    and self._running_key == self._desired_key()):
                 return self._port
             self.stop()
             if not self.engine_path or not self.engine_path.is_file():
@@ -285,16 +335,17 @@ class LlamaServerRuntime:
             )
             self._job = _attach_kill_on_close_job(self._proc)
             self._port = port
+            self._running_key = self._desired_key()
             self._generation += 1
             proc = self._proc
         # 준비 대기는 락 밖에서(stop 이 끼어들 수 있게). /health 200 전엔 요청을 보내지 않는다.
         while True:
             if proc.poll() is not None:
                 self.stop()
-                raise LlamaRuntimeError("llama-server 가 시작 중 종료되었습니다(엔진 로그 확인).")
+                raise LlamaStartError("엔진이 시작 중 종료됨(엔진 로그 확인)")
             if time.monotonic() >= deadline:
                 self.stop()
-                raise LlamaRuntimeError("llama-server 준비 시간 초과")
+                raise LlamaStartError("엔진 준비 시간 초과")
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as resp:
                     if resp.status == 200:
@@ -330,68 +381,83 @@ class LlamaServerRuntime:
     ) -> dict[str, Any]:
         """user 메시지 하나를 보내고 완결된 응답만 성공으로 돌려준다. 절대 raise 하지 않는다.
 
-        반환: {ok, text, finish_reason, usage, elapsed, queue_wait, load_seconds, error}
+        GPU 로 돌다가 엔진이 죽으면(연결 끊김) 이유를 남기고 CPU 로 **한 번 더** 보낸다 — 사용자는 느려질 뿐
+        Boost 가 끊기지 않는다. 반환: {ok, text, finish_reason, usage, elapsed, queue_wait, load_seconds, error}
         """
         started = time.monotonic()
         deadline = started + float(timeout)
         if not self._slot.acquire(timeout=max(0.0, float(timeout))):
             return {"ok": False, "error": "다른 Boost 요청이 끝나지 않았습니다.", "elapsed": round(time.monotonic() - started, 2)}
         queue_wait = round(time.monotonic() - started, 2)
-        loaded_now = False
         try:
             self._cancel_idle_timer()
-            was_running = self.is_running()
-            port = self._ensure(deadline)
-            loaded_now = not was_running
-            body = {
-                "model": MODEL_ALIAS,
-                "messages": [{"role": "user", "content": str(prompt)}],
-                "stream": False,
-                "max_tokens": int(max_tokens),
-                "temperature": float(temperature),
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/v1/chat/completions",
-                data=json.dumps(body).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-            )
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError
-            with urllib.request.urlopen(req, timeout=remaining) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            choice = (data.get("choices") or [{}])[0]
-            message = choice.get("message") or {}
-            if message.get("reasoning_content"):
-                raise LlamaRuntimeError("no-think 계약 위반: reasoning_content 가 반환되었습니다.")
-            finish = choice.get("finish_reason")
-            if finish != "stop":
-                raise LlamaRuntimeError(f"응답이 정상 종료되지 않았습니다(finish_reason={finish}).")
-            return {
-                "ok": True,
-                "text": str(message.get("content") or ""),
-                "finish_reason": finish,
-                "usage": data.get("usage") or {},
-                "elapsed": round(time.monotonic() - started, 2),
-                "queue_wait": queue_wait,
-                "load_seconds": self.last_load_seconds if loaded_now else 0.0,
-            }
+            for attempt in range(2):
+                was_running = self.is_running() and not self.is_stale()
+                try:
+                    port = self._ensure(deadline)
+                    data = self._post(port, prompt, max_tokens, temperature, deadline)
+                except urllib.error.URLError as exc:
+                    if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
+                        raise TimeoutError from exc
+                    crashed_on_gpu = self.effective_gpu
+                    self.stop()
+                    if crashed_on_gpu and attempt == 0:
+                        self.gpu_failed = f"{self.device or 'GPU'} 에서 엔진이 멈춤 — {exc}"
+                        deadline = max(deadline, time.monotonic() + 30.0)
+                        continue  # CPU 로 한 번 더
+                    return {"ok": False, "error": f"llama-server 통신 실패: {exc}",
+                            "elapsed": round(time.monotonic() - started, 2)}
+                choice = (data.get("choices") or [{}])[0]
+                message = choice.get("message") or {}
+                if message.get("reasoning_content"):
+                    raise LlamaRuntimeError("no-think 계약 위반: reasoning_content 가 반환되었습니다.")
+                finish = choice.get("finish_reason")
+                if finish != "stop":
+                    raise LlamaRuntimeError(f"응답이 정상 종료되지 않았습니다(finish_reason={finish}).")
+                return {
+                    "ok": True,
+                    "text": str(message.get("content") or ""),
+                    "finish_reason": finish,
+                    "usage": data.get("usage") or {},
+                    "elapsed": round(time.monotonic() - started, 2),
+                    "queue_wait": queue_wait,
+                    "load_seconds": 0.0 if was_running else self.last_load_seconds,
+                    "gpu": self.effective_gpu,
+                    "gpu_failed": self.gpu_failed,
+                }
+            return {"ok": False, "error": "llama-server 통신 실패", "elapsed": round(time.monotonic() - started, 2)}
         except (TimeoutError, socket.timeout):
             self.stop()  # 요청 단위 취소가 없다 — 내려야 다음 요청이 막히지 않는다.
             return {"ok": False, "error": f"{timeout:.0f}초 제한시간 초과", "elapsed": round(time.monotonic() - started, 2)}
-        except urllib.error.URLError as exc:
-            if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
-                self.stop()
-                return {"ok": False, "error": f"{timeout:.0f}초 제한시간 초과", "elapsed": round(time.monotonic() - started, 2)}
-            self.stop()
-            return {"ok": False, "error": f"llama-server 통신 실패: {exc}", "elapsed": round(time.monotonic() - started, 2)}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "elapsed": round(time.monotonic() - started, 2)}
         finally:
             self._slot.release()
-            if self.is_running():
+            if self.is_stale():
+                # 요청 도중 장치가 바뀌었다 — 이제 비었으니 새 설정의 엔진을 뒤에서 띄운다(다음 요청이 기다리지 않게).
+                threading.Thread(target=self.warm, daemon=True, name="llama-swap").start()
+            elif self.is_running():
                 self._arm_idle_timer()
+
+    def _post(self, port: int, prompt: str, max_tokens: int, temperature: float, deadline: float) -> dict[str, Any]:
+        body = {
+            "model": MODEL_ALIAS,
+            "messages": [{"role": "user", "content": str(prompt)}],
+            "stream": False,
+            "max_tokens": int(max_tokens),
+            "temperature": float(temperature),
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError
+        with urllib.request.urlopen(req, timeout=remaining) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
 
 # ── 장치 감지 ──────────────────────────────────────────────────────────────
@@ -428,7 +494,9 @@ def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
     key = (str(path), path.stat().st_mtime)
     if key in _DEVICE_CACHE:
         return [dict(entry) for entry in _DEVICE_CACHE[key]]
-    devices: list[dict[str, str]] = []
+    import re
+
+    devices: list[dict[str, Any]] = []
     try:
         out = subprocess.run(
             [str(path), "--list-devices"], cwd=str(path.parent), capture_output=True, text=True,
@@ -443,13 +511,60 @@ def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
             if seen and ":" in line and "(none)" not in line:
                 # "  Vulkan0: Intel(R) Arc(TM) 140T GPU (32GB) (37024 MiB, 47802 MiB free)"
                 device_id, name = (part.strip() for part in line.split(":", 1))
-                import re
-
-                devices.append({"id": device_id, "name": re.sub(r"\s*\(\d+ MiB[^)]*\)\s*$", "", name)})
+                mem = re.search(r"\((\d+) MiB, (\d+) MiB free\)\s*$", name)
+                clean = re.sub(r"\s*\(\d+ MiB[^)]*\)\s*$", "", name)
+                devices.append({
+                    "id": device_id,
+                    "name": clean,
+                    "vram_mib": int(mem.group(1)) if mem else 0,
+                    "kind": "discrete" if any(h in clean.lower() for h in _DISCRETE_HINTS) else "integrated",
+                })
     except Exception:
         devices = []
     _DEVICE_CACHE[key] = devices
     return [dict(entry) for entry in devices]
+
+
+def _cpu_name() -> str:
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+            return " ".join(str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).split())
+    except Exception:
+        import platform
+
+        return platform.processor() or "CPU"
+
+
+def _ram_gib() -> float:
+    try:
+        import ctypes
+
+        class _Mem(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        mem = _Mem()
+        mem.dwLength = ctypes.sizeof(_Mem)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem)):
+            return round(mem.ullTotalPhys / (1024 ** 3), 1)
+    except Exception:
+        pass
+    return 0.0
+
+
+def hardware_summary(engine_path: str | Path | None) -> dict[str, Any]:
+    """이 PC 의 할당 가능한 자원: CPU(이름·스레드) · RAM · 엔진이 볼 수 있는 GPU(VRAM · 외장/내장)."""
+    return {
+        "cpu": _cpu_name(),
+        "threads": os.cpu_count() or 0,
+        "ram_gib": _ram_gib(),
+        "gpus": list_device_entries(engine_path),
+    }
 
 
 # ── 경로 해석 ──────────────────────────────────────────────────────────────

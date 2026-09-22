@@ -30,9 +30,27 @@ def register_boost_v2_routes(
 ) -> None:
     from app.backend.server.boost_v2_service import (
         boost_v2_status,
+        get_boost_runtime,
         get_model_downloader,
         stop_boost_runtime,
+        warm_boost_runtime,
     )
+
+    def _on_device_changed(*_args: Any) -> None:
+        """할당 장치를 바꿨다 — Auto Boost 가 켜져 있으면 새 장치로 곧바로 다시 띄운다(도는 요청은 끝까지 간 뒤).
+        꺼져 있으면 떠 있던 옛 엔진만 정리한다(다음에 켤 때 새 장치로 뜬다)."""
+        try:
+            if getattr(context, "ollama_auto_boost", False):
+                warm_boost_runtime(context)
+            elif getattr(context, "boost_llama_runtime", None) is not None:
+                get_boost_runtime(context)  # configure -> 옛 설정의 엔진이 놀고 있으면 내린다
+        except Exception:
+            pass
+
+    try:
+        context.subscribe("boost_v2_device_changed", _on_device_changed)
+    except Exception:
+        pass
 
     @app.get("/api/boost-v2/status")
     async def boost_v2_status_route():

@@ -62,10 +62,9 @@ BOOST_V2_DEFAULTS: dict[str, Any] = {
     "backend": "ollama",
     "sections": {key: True for key in SECTION_KEYS},
     "preferences": {key: "" for key in SECTION_KEYS},
-    # GPU(내장 그래픽 포함)가 있으면 거기서 돌린다 — 없으면 엔진이 알아서 CPU 로 돈다. 끄면 CPU 강제.
-    "use_gpu": True,
-    # GPU 가 여럿일 때 어느 것에 올릴지 — 'auto'(외장 우선) 또는 'Vulkan0' 같은 장치 id.
-    "gpu_device": "auto",
+    # 할당 장치 — 'auto'(외장 GPU > 내장 그래픽 > CPU) · 'cpu' · 'Vulkan0' 같은 GPU id.
+    # 지정한 GPU 가 없어지면 auto 로, GPU 로 못 띄우면 엔진이 CPU 로 내려온다(llama_runtime).
+    "device": "auto",
     # 비우면 기본 위치(엔진=앱 동봉, 모델=user-data/models/llm)를 쓴다.
     "engine_path": "",
     "model_path": "",
@@ -80,6 +79,12 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
     raw_sections = source.get("sections") if isinstance(source.get("sections"), dict) else {}
     sections = {key: bool(raw_sections.get(key, True)) for key in SECTION_KEYS}
     raw_prefs = source.get("preferences") if isinstance(source.get("preferences"), dict) else {}
+    if "device" in source:
+        device = _normalize_device(source.get("device"), allow_cpu=True)
+    elif source.get("use_gpu") is False:
+        device = "cpu"  # 옛 저장본: GPU 사용 끔
+    else:
+        device = _normalize_device(source.get("gpu_device"))
     preferences = {}
     for key in SECTION_KEYS:
         text = " ".join(str(raw_prefs.get(key) or "").split())
@@ -88,15 +93,19 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
         "backend": backend,
         "sections": sections,
         "preferences": preferences,
-        "use_gpu": bool(source.get("use_gpu", True)),
-        "gpu_device": _normalize_device(source.get("gpu_device")),
+        "device": device,
+        # 옛 필드(읽기 전용 파생값 — 예전 화면·시험 호환). 저장의 기준은 device 다.
+        "use_gpu": device != "cpu",
+        "gpu_device": device if device not in ("auto", "cpu") else "auto",
         "engine_path": str(source.get("engine_path") or "").strip(),
         "model_path": str(source.get("model_path") or "").strip(),
     }
 
 
-def _normalize_device(value: Any) -> str:
+def _normalize_device(value: Any, *, allow_cpu: bool = False) -> str:
     text = str(value or "auto").strip()
+    if allow_cpu and text.lower() == "cpu":
+        return "cpu"
     return text if re.fullmatch(r"[A-Za-z]+\d+", text) else "auto"
 
 

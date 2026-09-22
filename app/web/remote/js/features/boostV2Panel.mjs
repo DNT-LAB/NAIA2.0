@@ -29,7 +29,7 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       sections[key] = !s.sections || s.sections[key] !== false;
       preferences[key] = String((s.preferences && s.preferences[key]) || '');
     }
-    return { sections, preferences, use_gpu: s.use_gpu !== false, gpu_device: String(s.gpu_device || 'auto') };
+    return { sections, preferences, device: String(s.device || 'auto') };
   }
 
   function render(body, m) {
@@ -49,16 +49,14 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       <div class="mod-boost-block" data-boost-v2-root="1">
         <div class="mod-boost-head"><span class="mod-boost-name">엔진 · 모델</span></div>
         <div data-boost-status style="font-size:12px;line-height:1.6">확인 중…</div>
-        <label class="mod-checkbox-item" style="margin-top:4px" title="GPU 가 없거나 드라이버가 없으면 엔진이 알아서 CPU 로 돕니다">
-          <input type="checkbox" data-boost-gpu${view.use_gpu ? ' checked' : ''}>
-          <span class="mod-checkbox-label">GPU 사용 (내장 그래픽 포함 · 없으면 CPU)</span>
-        </label>
-        <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:2px 0 0 24px">
-          <span>장치</span>
-          <select class="mod-select" data-boost-device data-current="${escHtml(view.gpu_device)}" style="flex:1">
-            <option value="auto"${view.gpu_device === 'auto' ? ' selected' : ''}>자동 (외장 GPU 우선)</option>
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:6px"
+          title="자동 = 외장 GPU > 내장 그래픽 > CPU. GPU 로 띄우지 못하면 엔진이 CPU 로 자동 전환합니다. 바꾸면 곧바로 옮겨 갑니다.">
+          <span style="white-space:nowrap">할당 장치</span>
+          <select class="mod-select" data-boost-device data-current="${escHtml(view.device)}" style="flex:1">
+            <option value="auto"${view.device === 'auto' ? ' selected' : ''}>자동</option>
           </select>
         </label>
+        <div data-boost-hw style="font-size:11px;color:var(--text-dim);margin-top:2px"></div>
         <div class="mod-inline-row" data-boost-actions style="margin-top:4px"></div>
         <div class="mod-boost-caption">Ollama 불필요. GPU 는 CPU 가 바쁠 때도 느려지지 않습니다. 모델은 처음 한 번 3.1GB 를 받습니다. 모델 입력에서 색상 태그는 항상 뺍니다.</div>
       </div>
@@ -92,14 +90,13 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       sections[key] = !!(box && box.checked);
       preferences[key] = pref ? pref.value : '';
     }
-    const gpu = root.querySelector('[data-boost-gpu]');
     const device = root.querySelector('[data-boost-device]');
-    return { sections, preferences, use_gpu: !!(gpu && gpu.checked), gpu_device: device ? device.value : 'auto' };
+    return { sections, preferences, device: device ? device.value : 'auto' };
   }
 
   function onInput(event) {
     const target = event.target;
-    if (!target || !(target.matches('[data-boost-sec]') || target.matches('[data-boost-pref]') || target.matches('[data-boost-gpu]') || target.matches('[data-boost-device]'))) return;
+    if (!target || !(target.matches('[data-boost-sec]') || target.matches('[data-boost-pref]') || target.matches('[data-boost-device]'))) return;
     const body = event.currentTarget;
     draft = readForm(body);
     const mark = body.querySelector('[data-boost-dirty]');
@@ -150,7 +147,7 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
     const ok = (flag) => (flag ? '<span style="color:var(--success,#4caf50)">✓</span>' : '<span style="color:var(--danger,#e57373)">✗</span>');
     const lines = [
       `${ok(st.engine_ready)} 엔진 llama-server${st.engine_ready ? '' : ' — 없음 (배포본에 포함, 개발 환경은 NAIA_LLAMA_SERVER)'}`,
-      st.engine_ready ? `　장치: ${st.use_gpu && st.gpu_device_chosen_name ? escHtml(st.gpu_device_chosen_name) : (st.use_gpu ? 'CPU (쓸 수 있는 GPU 없음)' : 'CPU (GPU 사용 꺼짐)')}` : '',
+      st.engine_ready ? `　사용 장치: ${deviceLabel(st)}${st.swapping ? ' · <span style="color:var(--accent,#4ea1ff)">전환 중…</span>' : ''}` : '',
       `${ok(st.model_ready)} 모델 Gemma 4 E2B Q4_0 (3.1GB)${st.model_ready ? '' : ' — 아직 없음'}`,
       st.running ? `● 실행 중${st.last_load_seconds ? ` · 로드 ${st.last_load_seconds}s` : ''}` : '○ 대기 (첫 Random 때 올라옵니다)',
     ];
@@ -161,16 +158,23 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       lines.push(`<span style="color:var(--danger,#e57373)">${escHtml(dl.error)}</span>`);
     }
     statusEl.innerHTML = lines.filter(Boolean).join('<br>');
-    // 장치 목록은 서버가 엔진에 물어 안다 — 한 번 채우고, 사용자가 고른 값(초안 포함)은 지킨다.
+    // 할당 장치 목록은 서버가 이 PC 를 읽어 안다(CPU·RAM·GPU) — 한 번 채우고, 사용자가 고른 값(초안 포함)은 지킨다.
+    const hw = st.hardware || {};
+    const gpus = hw.gpus || [];
     const select = mountedRoot.querySelector('[data-boost-device]');
-    const entries = st.gpu_device_entries || [];
-    if (select && select.options.length !== entries.length + 1) {
-      const current = (draft && draft.gpu_device) || select.getAttribute('data-current') || 'auto';
-      select.innerHTML = '<option value="auto">자동 (외장 GPU 우선)</option>' + entries.map((e) =>
-        `<option value="${escHtml(e.id)}">${escHtml(e.id)} · ${escHtml(e.name)}</option>`).join('');
+    if (select && select.options.length !== gpus.length + 2) {
+      const current = (draft && draft.device) || select.getAttribute('data-current') || 'auto';
+      const autoPick = gpus.find((g) => g.id === st.gpu_device_auto);
+      const gb = (mib) => (mib ? ` · ${Math.round(mib / 1024)} GB` : '');
+      select.innerHTML = `<option value="auto">자동 (지금: ${escHtml(autoPick ? autoPick.name : 'CPU')})</option>`
+        + gpus.map((g) => `<option value="${escHtml(g.id)}">${escHtml(g.name)}${g.kind === 'discrete' ? `${gb(g.vram_mib)} · 외장` : ' · 내장 (시스템 메모리 공유)'}</option>`).join('')
+        + `<option value="cpu">CPU · ${escHtml(hw.cpu || '')} · ${hw.threads || '?'}스레드</option>`;
       select.value = [...select.options].some((o) => o.value === current) ? current : 'auto';
     }
-    if (select) select.disabled = !st.use_gpu;
+    const hwEl = mountedRoot.querySelector('[data-boost-hw]');
+    if (hwEl) {
+      hwEl.textContent = `이 PC: ${hw.cpu || 'CPU'} · ${hw.threads || '?'}스레드 · RAM ${hw.ram_gib ? Math.round(hw.ram_gib) + ' GB' : '?'} · GPU ${gpus.length}개`;
+    }
     const buttons = [];
     if (!st.model_ready && st.model_is_default) {
       if (dl.active) buttons.push('<button class="mod-btn-secondary" data-boost-act="cancel">다운로드 취소</button>');
@@ -178,6 +182,14 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
     }
     if (st.running) buttons.push('<button class="mod-btn-secondary" data-boost-act="unload">엔진 내리기</button>');
     actionsEl.innerHTML = buttons.join('');
+  }
+
+  function deviceLabel(st) {
+    if (st.gpu_fallback) {
+      return `CPU <span style="color:var(--warning,#e0a040)" title="${escHtml(st.gpu_fallback)}">(GPU 로 못 띄워 자동 전환)</span>`;
+    }
+    if (st.use_gpu && st.gpu_device_chosen_name) return escHtml(st.gpu_device_chosen_name);
+    return st.device_pref === 'cpu' ? 'CPU (직접 선택)' : 'CPU (쓸 수 있는 GPU 없음)';
   }
 
   function schedulePoll(delay) {

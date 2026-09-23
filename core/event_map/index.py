@@ -643,6 +643,54 @@ class EventMapIndex:
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return out
 
+    def drill(self, candidates, *, exclude=None, ratings=None, persons=None, min_posts=20) -> dict:
+        """후보를 **주어진 순서대로** 하나씩 핀으로 꽂는다(Assist v2 가 쓴다).
+
+        꽂으면 풀이 ``min_posts`` 밑으로 떨어지는 후보는 건너뛰고 다음 후보로 간다 - 멈추지 않는다.
+        순서(무엇을 먼저 꽂을지)는 호출자가 정한다. 인원 태그는 핀이 아니라 분면 필터라 건너뛴다.
+
+        교집합을 이어서 좁힌다. 핀마다 처음부터 다시 풀면(sample 반복) 흔한 태그(smile 330만)가 낀
+        요청이 7초까지 걸렸다(실측 2026-09-23).
+        """
+        started = time.perf_counter()
+        parts = self._partition_filter(ratings, persons)
+        excluded, unknown_ex = self._resolve_many(exclude)
+        pins: list[str] = []
+        left: list[str] = []
+        trail: list[int] = []
+        acc = None
+        for raw in candidates or ():
+            tid = self.resolve(raw)
+            if tid is None:
+                left.append(normalize(raw))
+                continue
+            name = self.by_id[tid]
+            if tid in excluded or name in pins or self.role.get(tid) == "population":
+                continue
+            if acc is None:
+                cand = self.posting(tid)
+                if parts is not None:
+                    cand, owner = self._partition_of(cand)
+                    cand = cand[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
+            else:
+                cand = _intersect_sorted(acc, self.posting(tid))
+            n = int(self._without(cand, excluded).size) if excluded else int(cand.size)
+            if n >= max(1, int(min_posts)):
+                acc = cand
+                pins.append(name)
+                trail.append(n)
+            else:
+                left.append(name)
+        if acc is None:
+            posts = int(self._without(self._live_posts(parts), excluded).size)
+        else:
+            posts = trail[-1]
+        return {"pins": pins, "left": left, "trail": trail, "posts": posts,
+                "exclude": [self.by_id[t] for t in excluded], "unknown_exclude": unknown_ex,
+                "ratings": sorted(ratings or []), "persons": sorted(persons or []),
+                "min_posts": max(1, int(min_posts)),
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
+
     def sample(self, pins, *, exclude=None, ratings=None, persons=None, n=5,
                include_color=False, seed=None) -> dict:
         """핀 전부를 포함하는 **실제 게시물**을 무작위로 골라 그 게시물의 태그 전체를 준다.

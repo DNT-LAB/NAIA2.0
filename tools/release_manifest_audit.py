@@ -201,6 +201,10 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # 없으면 검색의 [태그] 갈래만 잠긴다(고장이 아니다).
     "data/artist_tag_general.naiapack",
     "*/data/artist_tag_general.naiapack",
+    # Assist v2 한국어 규칙표(관용구·동사·사람 명사, 수 KB). 없으면 한국어 층이 규칙을 못 읽어
+    # 비유(개같이 -> dog)·관용구(all fours)·인원 세기가 꺼진다 — 모델만으로 돈다.
+    "data/assist/*",
+    "*/data/assist/*",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

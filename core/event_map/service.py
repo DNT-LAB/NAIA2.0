@@ -643,6 +643,18 @@ class EventMapService:
         result["ok"] = True
         return result
 
+    def drill(self, *, candidates: Any, exclude: Any = None, ratings: Any = None,
+              persons: Any = None, min_posts: Any = 20) -> dict[str, Any]:
+        """후보를 순서대로 꽂아 풀을 좁힌다(풀이 ``min_posts`` 밑이면 그 후보는 건너뜀). Assist v2 용."""
+        idx = self.index()
+        wanted = self._tags(candidates, cap=MAX_EXCLUDE, what="후보", code="too_many_candidates")
+        excluded = self._tags(exclude, cap=MAX_EXCLUDE, what="제외 태그", code="too_many_exclude")
+        want_r, want_p = self._filters(idx, ratings, persons)
+        result = idx.drill(wanted, exclude=excluded, ratings=want_r, persons=want_p,
+                           min_posts=self._count(min_posts, 20, 100000))
+        result["ok"] = True
+        return result
+
     def describe(self, tag: str) -> dict[str, Any]:
         idx = self.index()
         name = str(tag or "").strip()

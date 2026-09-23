@@ -54,7 +54,8 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
         runtime = getattr(context, "boost_llama_runtime", None)
         if runtime is None:
             # 유휴 내림 없음(idle_seconds=0) — Auto Boost 가 켜진 동안 계속 올려 둔다(llama_test 와 같다).
-            # 매번 다시 올리면 호출마다 로드 ~2.6초가 붙는다(사용자 실측 "3초 느리다"). 끄기·백엔드 전환 때 내린다.
+            # 매번 다시 올리면 호출마다 로드 ~2.6초가 붙는다(사용자 실측 "3초 느리다"). 끄기·백엔드 전환 때
+            # Boost 의 임대를 놓는다 — 아무도 안 쥐면 그 자리에서 내리고, Assist 가 쥐고 있으면 그 임대가 끝날 때.
             runtime = LlamaServerRuntime(engine, model, idle_seconds=0, use_gpu=use_gpu, device=device,
                                          log_path=save_root / "logs" / "boost_llama_server.log")
             context.boost_llama_runtime = runtime
@@ -131,10 +132,12 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
 
 
 def warm_boost_runtime(context: Any) -> None:
-    """Auto Boost 를 켤 때 엔진을 미리 올린다(백그라운드) — 첫 Random 이 로드를 기다리지 않게."""
+    """Auto Boost 를 켤 때 엔진을 미리 올린다(백그라운드) — 첫 Random 이 로드를 기다리지 않게.
+    켜져 있는 동안은 임대를 쥔다(Assist 가 엔진을 같이 쓴다 — 누가 쓰는지는 임대로 센다)."""
     def _warm() -> None:
         try:
             runtime = get_boost_runtime(context)
+            runtime.hold("boost")
             if runtime.status().get("engine_exists") and runtime.status().get("model_exists"):
                 runtime.warm()
         except Exception:
@@ -143,7 +146,18 @@ def warm_boost_runtime(context: Any) -> None:
     threading.Thread(target=_warm, daemon=True, name="boost-v2-warm").start()
 
 
+def release_boost_runtime(context: Any) -> None:
+    """Auto Boost 를 끄거나 백엔드를 바꿨다 — Boost 의 임대만 놓는다. Assist 가 방금 썼다면 그 임대가 끝날 때 내린다."""
+    runtime = getattr(context, "boost_llama_runtime", None)
+    if runtime is not None:
+        try:
+            runtime.release("boost")
+        except Exception:
+            pass
+
+
 def stop_boost_runtime(context: Any) -> None:
+    """[엔진 내리기] — 누가 쥐고 있든 지금 내린다(다음 요청이 다시 올린다)."""
     runtime = getattr(context, "boost_llama_runtime", None)
     if runtime is not None:
         try:

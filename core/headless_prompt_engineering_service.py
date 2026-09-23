@@ -488,7 +488,7 @@ class HeadlessPromptEngineeringService:
                     if saved.get("backend") != "llamacpp":
                         runtime = getattr(context, "boost_llama_runtime", None)
                         if runtime is not None:
-                            runtime.stop()
+                            runtime.release("boost")   # Assist(llama.cpp 공유)가 쓰는 중이면 엔진은 남는다
                     context.publish("ollama_auto_boost_changed",
                                     {"enabled": bool(getattr(context, "ollama_auto_boost", False))})
                 except Exception:

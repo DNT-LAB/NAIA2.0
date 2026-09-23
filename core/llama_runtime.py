@@ -1,4 +1,5 @@
-"""앱이 소유하는 llama.cpp ``llama-server`` 자식 프로세스 하나를 관리한다(Boost v2 용).
+"""앱이 소유하는 llama.cpp ``llama-server`` 자식 프로세스 하나를 관리한다(Boost v2 · Assist v2 가 함께 쓴다 —
+누가 쓰는지는 임대 ``hold/release`` 로 센다).
 
 실행 계약은 ``C:\\VNR\\DEV\\llama_test`` 실험에서 확인한 값을 따른다: 최대 8 스레드 · context 4096 ·
 ``--jinja`` + ``enable_thinking=false`` · loopback 무작위 포트 · 단일 슬롯.
@@ -22,6 +23,7 @@ GPU 가 여럿이면 ``--device`` 로 하나를 고른다(기본 '자동' = 외�
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 import subprocess
@@ -159,6 +161,10 @@ class LlamaServerRuntime:
         self._generation = 0                   # 올릴 때마다 +1 (늦은 유휴 타이머가 새 프로세스를 못 내리게)
         self._idle_timer: threading.Timer | None = None
         self.last_load_seconds: float | None = None
+        # 임대: 엔진을 쓰는 쪽(boost·assist) -> 만료 시각(monotonic). inf = 놓을 때까지. 모두 놓으면 내린다.
+        self._leases: dict[str, float] = {}
+        self._lease_timer: threading.Timer | None = None
+        self.lease_retry_seconds = 5.0         # 요청이 도는 중이라 못 내렸을 때 다시 볼 때까지
 
     # ── 구성·상태 ──────────────────────────────────────────────────────────
 
@@ -243,6 +249,9 @@ class LlamaServerRuntime:
                 "effective_gpu": self.effective_gpu,
                 "gpu_failed": self.gpu_failed,
                 "stale": running and self._running_key != self._desired_key(),
+                # 누가 붙잡고 있나(남은 초, None = 놓을 때까지)
+                "leases": {owner: (None if expiry == math.inf else round(max(0.0, expiry - time.monotonic()), 1))
+                           for owner, expiry in self._leases.items()},
             }
 
     # ── 수명 ─────────────────────────────────────────────────────────────
@@ -355,6 +364,66 @@ class LlamaServerRuntime:
                 pass
             time.sleep(0.1)
 
+    # ── 임대(여럿이 한 엔진을 쓴다: Auto Boost · Assist) ────────────────────
+
+    def hold(self, owner: str, seconds: float | None = None) -> None:
+        """owner 가 엔진을 쓰는 동안 내리지 않는다. seconds 가 없으면 release 까지, 있으면 그만큼 뒤 만료."""
+        with self._proc_lock:
+            self._leases[owner] = math.inf if seconds is None else time.monotonic() + max(0.0, float(seconds))
+        self._arm_lease_timer()
+
+    def release(self, owner: str) -> bool:
+        """owner 의 임대를 끝낸다. 남은 임대가 없고 도는 요청도 없으면 곧바로 내린다(내렸으면 True).
+        Auto Boost 를 꺼도 Assist 가 방금 썼다면 엔진은 남는다 — 그 임대가 끝나면 타이머가 내린다."""
+        with self._proc_lock:
+            self._leases.pop(owner, None)
+        return self._stop_if_unleased()
+
+    def leased(self) -> bool:
+        now = time.monotonic()
+        with self._proc_lock:
+            return any(expiry > now for expiry in self._leases.values())
+
+    def _stop_if_unleased(self) -> bool:
+        if self.leased():
+            self._arm_lease_timer()
+            return False
+        if not self._slot.acquire(blocking=False):
+            self._arm_lease_timer(retry=self.lease_retry_seconds)   # 요청이 도는 중 — 끝난 뒤 다시 본다
+            return False
+        try:
+            if self.leased() or not self.is_running():
+                return False
+            self.stop()
+            return True
+        finally:
+            self._slot.release()
+
+    def _arm_lease_timer(self, retry: float | None = None) -> None:
+        with self._proc_lock:
+            if self._lease_timer is not None:
+                self._lease_timer.cancel()
+                self._lease_timer = None
+            if retry is None:
+                expiries = list(self._leases.values())
+                if not expiries or math.inf in expiries:
+                    return          # 임대가 없거나(내릴 사람은 release) 무기한 임대가 있다
+                delay = max(0.05, max(expiries) - time.monotonic())
+            else:
+                delay = retry
+            timer = threading.Timer(delay, self._on_lease_timer)
+            timer.daemon = True
+            self._lease_timer = timer
+            timer.start()
+
+    def _on_lease_timer(self) -> None:
+        now = time.monotonic()
+        with self._proc_lock:
+            self._lease_timer = None
+            for owner in [o for o, expiry in self._leases.items() if expiry <= now]:
+                self._leases.pop(owner, None)
+        self._stop_if_unleased()
+
     def warm(self, timeout: float = DEFAULT_TIMEOUT) -> bool:
         """요청 없이 엔진만 올린다. 이미 요청이 도는 중이면(그 요청이 올린다) 아무것도 안 한다."""
         if not self._slot.acquire(blocking=False):
@@ -378,16 +447,25 @@ class LlamaServerRuntime:
         max_tokens: int = 512,
         temperature: float = 0.2,
         timeout: float = DEFAULT_TIMEOUT,
+        system: str | None = None,
+        grammar: str | None = None,
     ) -> dict[str, Any]:
-        """user 메시지 하나를 보내고 완결된 응답만 성공으로 돌려준다. 절대 raise 하지 않는다.
+        """user 메시지 하나(+선택 system)를 보내고 완결된 응답만 성공으로 돌려준다. 절대 raise 하지 않는다.
 
+        ``grammar``(GBNF)를 주면 출력 모양을 강제한다(Assist v2 — 공백 없는 JSON).
         GPU 로 돌다가 엔진이 죽으면(연결 끊김) 이유를 남기고 CPU 로 **한 번 더** 보낸다 — 사용자는 느려질 뿐
         Boost 가 끊기지 않는다. 반환: {ok, text, finish_reason, usage, elapsed, queue_wait, load_seconds, error}
         """
         started = time.monotonic()
         deadline = started + float(timeout)
+        extra: dict[str, Any] = {}
+        if system:
+            extra["system"] = system
+        if grammar:
+            extra["grammar"] = grammar
         if not self._slot.acquire(timeout=max(0.0, float(timeout))):
-            return {"ok": False, "error": "다른 Boost 요청이 끝나지 않았습니다.", "elapsed": round(time.monotonic() - started, 2)}
+            return {"ok": False, "error": "엔진이 다른 요청(Boost·Assist)을 처리하느라 끝나지 않았습니다.",
+                    "elapsed": round(time.monotonic() - started, 2)}
         queue_wait = round(time.monotonic() - started, 2)
         try:
             self._cancel_idle_timer()
@@ -395,7 +473,7 @@ class LlamaServerRuntime:
                 was_running = self.is_running() and not self.is_stale()
                 try:
                     port = self._ensure(deadline)
-                    data = self._post(port, prompt, max_tokens, temperature, deadline)
+                    data = self._post(port, prompt, max_tokens, temperature, deadline, **extra)
                 except urllib.error.URLError as exc:
                     if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
                         raise TimeoutError from exc
@@ -439,15 +517,20 @@ class LlamaServerRuntime:
             elif self.is_running():
                 self._arm_idle_timer()
 
-    def _post(self, port: int, prompt: str, max_tokens: int, temperature: float, deadline: float) -> dict[str, Any]:
-        body = {
+    def _post(self, port: int, prompt: str, max_tokens: int, temperature: float, deadline: float,
+              system: str | None = None, grammar: str | None = None) -> dict[str, Any]:
+        messages = [{"role": "system", "content": str(system)}] if system else []
+        messages.append({"role": "user", "content": str(prompt)})
+        body: dict[str, Any] = {
             "model": MODEL_ALIAS,
-            "messages": [{"role": "user", "content": str(prompt)}],
+            "messages": messages,
             "stream": False,
             "max_tokens": int(max_tokens),
             "temperature": float(temperature),
             "chat_template_kwargs": {"enable_thinking": False},
         }
+        if grammar:
+            body["grammar"] = grammar     # llama-server 는 chat 끝점에서도 GBNF 를 받는다(실측 b10830)
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions",
             data=json.dumps(body).encode("utf-8"),

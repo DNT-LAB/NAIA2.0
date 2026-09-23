@@ -21,6 +21,8 @@ jsonschema-specifications==2025.4.1
 # that backend explicitly — the headless requirements contract forbids its name
 # as a substring (see tests/test_requirements_split.py).
 keyring==25.6.0
+# Assist v2 한국어 층(형태소 분석). 모델 데이터(kiwipiepy_model, 약 88MB)가 함께 설치된다.
+kiwipiepy==0.23.2
 MarkupSafe>=3.0.2
 more-itertools==10.7.0
 narwhals==1.43.0

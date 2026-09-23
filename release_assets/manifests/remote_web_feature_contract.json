@@ -6,6 +6,7 @@
   "route_sources": [
     "core/web_session_app.py",
     "app/backend/server/artist_thumbnail_routes.py",
+    "app/backend/server/assist_v2_routes.py",
     "app/backend/server/boost_v2_routes.py",
     "app/backend/server/character_asset_routes.py",
     "app/backend/server/character_instant_routes.py",
@@ -736,6 +737,22 @@
         {"method": "POST", "path": "/api/boost-v2/model/download", "smoke": "external_live"},
         {"method": "POST", "path": "/api/boost-v2/model/download/cancel", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/boost-v2/unload", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "assist_v2_oneshot",
+      "name": "Assist v2 - one-shot Korean assistant (Kiwi Korean layer + shared llama.cpp E2B + Event Map pool)",
+      "source_files": [
+        "app/backend/server/assist_v2_routes.py",
+        "app/backend/server/assist_v2_service.py",
+        "core/assist_korean.py",
+        "core/assist_v2.py",
+        "data/assist/korean_rules.json"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "POST", "path": "/api/assist", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/assist/warm", "smoke": "state_mutation"}
       ]
     },
     {

@@ -54,6 +54,7 @@
       "data/e621_data",
       "data/artist_tag_affinity.naiapack",
       "data/artist_tag_general.naiapack",
+      "data/assist/**",
       "artist_dictionary.py",
       "danbooru_character.py",
       "result_dict_copyright.py"

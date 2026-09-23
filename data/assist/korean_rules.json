@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "assist_korean_rules",
+  "note": "Assist v2 한국어 결정론 층의 규칙표. 모델(E2B)이 못 하는 비유·관용구·동음이의·인원 세기를 맡는다. 긴 꼬리라 계속 키운다 — 규칙을 더할 때는 docs/ASSIST_V2_DESIGN_2026_09_23.md 의 회귀 세트로 확인할 것.",
+  "simile_particles": ["같이", "처럼", "마냥", "듯이"],
+  "idioms": [
+    {"vehicles": ["개", "강아지", "멍멍이", "짐승", "동물"], "verbs": ["엎드리", "기", "기어가", "기어다니", "기어오"],
+     "tags": ["all fours"], "covers": ["on stomach"]},
+    {"vehicles": ["고양이", "냥이"], "verbs": ["웅크리", "말"], "tags": ["fetal position"], "covers": []},
+    {"vehicles": ["개", "강아지"], "verbs": ["헥헥거리", "헥헥대", "헐떡이"], "tags": ["tongue out", "heavy breathing"], "covers": []}
+  ],
+  "verbs": {
+    "기": "crawling", "기어가": "crawling", "기어다니": "crawling", "기어오": "crawling",
+    "자": "sleeping", "잠들": "sleeping", "서": "standing", "눕": "lying", "앉": "sitting",
+    "뛰": "running", "뛰어다니": "running", "달리": "running", "걷": "walking", "걸어가": "walking",
+    "울": "crying", "웃": "smile", "먹": "eating", "쪼그리": "squatting", "엎드리": "on stomach",
+    "꿇": "kneeling", "헐떡이": "heavy breathing", "헥헥거리": "heavy breathing", "헥헥대": "heavy breathing"
+  },
+  "stem_prefixes": [["묶", "bound"], ["째려보", "glaring"], ["노려보", "glaring"], ["울먹이", "tears"]],
+  "nouns": {"목줄": ["leash", "collar"], "팔짱": ["crossed arms"]},
+  "people": {
+    "female": ["소녀", "여자", "여성", "여자애", "여고생", "여학생", "아가씨", "누나", "언니", "여동생", "엄마", "어머니", "할머니",
+               "아줌마", "메이드", "수녀", "마녀", "여기사", "공주", "여왕", "여신", "무녀", "딸", "손녀", "미소녀", "여주인"],
+    "male": ["소년", "남자", "남성", "남자애", "남고생", "남학생", "오빠", "형", "남동생", "아빠", "아버지", "할아버지", "아저씨",
+             "왕자", "왕", "아들", "손자", "집사", "주인", "주인님", "미소년", "남주인"],
+    "neutral": ["사람", "아이", "학생", "친구", "선생님", "선생", "인물", "누군가"]
+  },
+  "groups": {"자매": [2, 0], "쌍둥이": [2, 0], "형제": [0, 2], "남매": [1, 1], "커플": [1, 1], "연인": [1, 1], "부부": [1, 1],
+             "모녀": [2, 0], "부녀": [1, 1], "부자": [0, 2]},
+  "numerals": {"한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "하나": 1, "둘": 2, "셋": 3, "넷": 4, "여러": 3, "몇": 3},
+  "solo_words": ["혼자", "홀로"],
+  "not_names": ["소녀", "소년", "여자", "남자", "여자애", "남자애", "아이", "사람", "메이드", "흡혈귀", "기사", "여기사", "학생",
+                "장면", "모습", "구도", "그림", "이미지"],
+  "filler_stems": ["하", "있", "되", "주", "보", "오", "찾", "만들", "그리", "어떻", "해야"],
+  "generic_tags": ["smile", "standing", "sitting", "lying", "looking at viewer", "blush", "open mouth", "closed mouth",
+                   "holding", "looking at another", "hand up", "arm up", "arms up", "arm at side", "arms at sides"],
+  "poses": ["standing", "sitting", "lying", "squatting", "kneeling", "on stomach", "on back", "on side", "seiza",
+            "all fours", "crouching", "walking", "running", "jumping", "floating", "sleeping"],
+  "passive_suffixes": ["히", "리", "기", "이"],
+  "passive_exceptions": ["하", "있", "보이", "기", "이"]
+}

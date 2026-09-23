@@ -325,6 +325,14 @@ class ArtistAffinityPack:
             return found[0]
         return max(found, key=lambda pair: self._axis_posts(*pair))
 
+    def posts(self, tag: str, axis: str | None = None) -> int:
+        """태그의 게시물 수(팩에 없으면 0). Assist 가 캐릭터 후보를 줄 세울 때 쓴다(카나데 -> yoisaki 2,940 …)."""
+        try:
+            hit = self.resolve(tag, axis)
+            return int(self._axis_posts(*hit)) if hit else 0
+        except Exception:
+            return 0
+
     def _axis_posts(self, axis: str, tid: int) -> int:
         """그 태그의 게시물 수. general 은 굽는 쪽이 적어 둔 값을 그냥 읽는다."""
         if axis == GENERAL_AXIS:

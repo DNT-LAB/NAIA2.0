@@ -207,14 +207,17 @@ def _mix_preset_list(context, thumb_mode: str = "") -> dict:
     names = store.list_preset_names(mode_key)
     thumbs = preset_thumbnail_url_map(context, names, mode_key)
     current = str(store.state(mode_key).get("current_preset") or "")
-    known = _mix_known_artists(context, thumb_mode)
+    # NAI 글의 작가는 늘 `artist:` 를 단다 - 세는 데 사전이 필요 없다. 사전은 접두 없는
+    # 이름을 가려야 하는 SD 계열에서만 싣는다(첫 적재가 무겁다).
+    allow_bare = mode_key != "NAI"
+    known = _mix_known_artists(context, thumb_mode) if allow_bare else frozenset()
     rows = []
     for name in names:
         data = store.read_preset_data(name, mode_key)
         settings = data.get("module_settings") or {}
         count = 0
         for key in ("pre_prompt", "post_prompt"):
-            for piece in parse_pieces(str(settings.get(key) or ""), known=known, allow_bare=mode_key != "NAI"):
+            for piece in parse_pieces(str(settings.get(key) or ""), known=known, allow_bare=allow_bare):
                 count += sum(1 for m in (piece.get("members") or [piece]) if m.get("kind") == "artist")
         rows.append({"name": name, "thumbnail_url": thumbs.get(name, ""), "artists": count,
                      "is_current": name == current, "has_mix": isinstance(data.get("artist_mix"), dict)})

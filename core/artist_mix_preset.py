@@ -65,6 +65,18 @@ def _unescape(name: str) -> str:
     return re.sub(r"\\([()\[\]{}])", r"\1", name)
 
 
+def known_set(known: Iterable[str]) -> frozenset:
+    """사전 -> 대조용 집합(소문자). **한 번만** 만든다.
+
+    ⚠️ 이미 집합이면 그대로 쓴다 - 호출마다 8만 4천 개를 casefold 해 새로 만들었더니
+       프리셋 83개 목록 한 번에 5초가 걸렸다(사용자 제보 2026-09-23 "불러오기 지연").
+       집합으로 넘기는 쪽은 **이미 소문자**여야 한다(`_mix_known_artists` 가 그렇게 만든다).
+    """
+    if isinstance(known, frozenset):
+        return known
+    return frozenset(str(k).casefold() for k in known)
+
+
 def _dict_key(name: str) -> str:
     return " ".join(_unescape(name).replace("_", " ").split()).casefold()
 
@@ -110,7 +122,7 @@ def parse_pieces(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fal
     `allow_bare=False`(NAI)면 접두 없는 이름은 사전에 있어도 작가가 아니다 -
     NAI 글에서 작가는 늘 `artist:` 를 단다.
     """
-    known_set = {str(k).casefold() for k in known}
+    known_keys = known_set(known)
     out: list[dict] = []
     stack: list[tuple[int, float]] = []   # (group id, weight)
     next_group = 0
@@ -126,9 +138,9 @@ def parse_pieces(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fal
             if len(members) > 1:
                 next_group += 1
                 piece.update({"kind": "group", "group": next_group, "depth": 1, "weight": weight,
-                              "members": [{**_classify(m, known_set, allow_bare), "raw": m} for m in members]})
+                              "members": [{**_classify(m, known_keys, allow_bare), "raw": m} for m in members]})
             else:
-                info = _classify(members[0] if members else "", known_set, allow_bare)
+                info = _classify(members[0] if members else "", known_keys, allow_bare)
                 piece.update(info, weight=weight, group=None, depth=0)
             out.append(piece)
             continue
@@ -144,7 +156,7 @@ def parse_pieces(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fal
             closes += 1
         token, emphasis = _unwrap_emphasis(token)
         weight = math.prod(w for _gid, w in stack) * emphasis
-        info = _classify(token, known_set, allow_bare)
+        info = _classify(token, known_keys, allow_bare)
         # 여기서 열고 여기서 닫힌 묶음은 조각 하나짜리 가중치다(`1.2::artist:a ::`).
         single = bool(stack) and opened >= 1 and closes >= 1 and len(stack) == opened
         piece.update(info, weight=round(weight, 4),
@@ -203,7 +215,7 @@ def blocks_from_text(pre: str, post: str, *, known: Iterable[str] = (), allow_ba
     - 작가 아닌 태그가 섞인 묶음 -> 작가만 **각자** 그 가중치로
     - postfix 쪽은 앵커(slot=post) 아래로 - postfix 에 있던 작가가 앞으로 튀지 않게
     """
-    known_list = list(known)
+    known_list = known_set(known)
     lead: list[dict] = []
     tail: list[dict] = []
     collab: dict | None = None
@@ -274,7 +286,7 @@ def strip_artists(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fa
     `drop_anchors`: 표식 조각(`<anchor:N>`)도 뺀다. 가져오기는 표식을 **새로** 넣는데,
     옛 표식이 남아 있으면 새 번호와 겹쳐 옛 자리에 눌러앉는다.
     """
-    pieces = parse_pieces(text, known=list(known), allow_bare=allow_bare)
+    pieces = parse_pieces(text, known=known_set(known), allow_bare=allow_bare)
     groups = _groups(pieces)
     kept_raw: list[str] = []
     removed: list[str] = []

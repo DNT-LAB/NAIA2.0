@@ -208,7 +208,10 @@ def assist_names(context: Any, payload: Any) -> dict[str, Any]:
         _warm_korean_async(context)
     if layer is None:
         return {"ok": True, "ready": False, "names": [], "spans": []}
-    return {"ok": True, "ready": layer.ready(), **layer.name_spans(text, use_kiwi=layer.ready())}
+    out = {"ok": True, "ready": layer.ready(), **layer.name_spans(text, use_kiwi=layer.ready())}
+    if not out["ready"] and layer.error:
+        out["error"] = layer.error          # Kiwi 가 없다(설치 전) — 화면이 다시 묻지 않는다
+    return out
 
 
 def assist_status(context: Any) -> dict[str, Any]:
@@ -359,7 +362,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 후보 전체를 싣는다 — 모델이 찾은 이름(호두)도 화면에서 고를 수 있게
-        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": c.ko in choices,
+        # chosen = 사용자의 선택이 **받아들여졌나**(목록 밖·게시물 없는 태그는 무시된다 — 화면이 그 선택을 푼다)
+        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": choices.get(c.ko) == c.tag,
                    "candidates": layer.candidate_list(c.ko)} for c in merged.characters],
         "relations": [{"source": s, "action": a, "target": d} for s, a, d in merged.relations],
         "model": model,

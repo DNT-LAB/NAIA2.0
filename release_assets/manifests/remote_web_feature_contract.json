@@ -745,6 +745,7 @@
       "source_files": [
         "app/backend/server/assist_v2_routes.py",
         "app/backend/server/assist_v2_service.py",
+        "app/web/remote/js/features/assistPanel.mjs",
         "core/assist_kiwi.py",
         "core/assist_korean.py",
         "core/assist_v2.py",

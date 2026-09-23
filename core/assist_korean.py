@@ -82,14 +82,29 @@ class KoreanVocab:
     def scene_tags(self, span: str) -> list[str]:
         return [t for t, _c in self.lookup(span) if self.tag_exists(t)]
 
+    def name_strength(self, word: str) -> str:
+        """이 낱말이 이름으로 쓰이는 정도 — 한국어 키워드에서 **가장 많이 쓰이는 항목**으로 가른다(작가 항목은 뺀다).
+
+        'general'   캐릭터가 아닌 태그가 가장 많다(교복·트윈테일·원신·공주·고양이·사쿠라=벚꽃)
+        'character' 캐릭터 태그가 가장 많다(푸리나 10,774 > inner ego 55 · 호두 · 렘 · 루피)
+        'piece'     키워드엔 없고 이름 조각에만 있다(카나데 — 키워드는 **작가** kanade 뿐이었다)
+        'none'      모른다.
+        예전엔 캐릭터 아닌 항목이 **하나라도** 있으면 일반 낱말로 봐서 카나데(작가 이름과 겹침)·푸리나를 놓쳤다(실측 09-23).
+        """
+        rows = [r for r in self.keywords.get(compact(word), []) if r[2] != "artist"]
+        if len({r[0] for r in rows}) > MAX_KEYWORD_TAGS:
+            return "general"      # 묶음 이름 — '캐릭터' 는 1,371명을 가리키는 분류다(실측: 입력칸에서 이름으로 칠해졌다)
+        if rows:
+            return "character" if max(rows, key=lambda r: r[1])[2] == "character" else "general"
+        return "piece" if self.name_pieces.get(compact(word)) else "none"
+
     def is_general_word(self, word: str) -> bool:
-        return any(r[2] != "character" for r in self.keywords.get(compact(word), []))
+        return self.name_strength(word) == "general"
 
     def character_candidates(self, name: str, limit: int = 5) -> list[tuple[str, int]]:
-        """전체 이름 정확 일치 -> 이름 조각 일치. Artist 팩 게시물 수로 줄 세운다(카나데 -> yoisaki 2,940 …)."""
-        tags = {t for t, _c in self.lookup(name, character=True)}
-        if not tags:
-            tags = set(self.name_pieces.get(compact(name), ()))
+        """전체 이름 정확 일치 + 이름 조각 일치를 **합쳐** Artist 팩 게시물 수로 줄 세운다(카나데 -> yoisaki 2,940 …).
+        예전엔 정확 일치가 하나라도 있으면 조각을 안 봐서 루피 = rupee (nikke) 뿐이었다(monkey d. luffy 6,828 이 가려짐)."""
+        tags = {t for t, _c in self.lookup(name, character=True)} | set(self.name_pieces.get(compact(name), ()))
         ranked = sorted(((t, int(self.character_rank(t) or 0)) for t in tags), key=lambda x: (-x[1], x[0]))
         return ranked[:limit]
 
@@ -331,6 +346,15 @@ class KoreanLayer:
                 out.verb_tags.append(tag)
                 out.notes.append(f"동사:{stem}->{tag}")
         out.names = self._names(toks)
+        # {호두} 처럼 감싼 것은 일반 낱말이어도 이름으로 찾는다 — 인물 칸 차례는 글에 나온 차례
+        for form, _start, _end in braced_names(text):
+            if all(h.form != form for h in out.names):
+                hit = self.name_hit(form)
+                if hit and hit.candidates:
+                    out.names.append(hit)
+                    out.notes.append(f"이름(중괄호):{form}")
+        cleaned = clean_text(text)
+        out.names.sort(key=lambda h: (cleaned.find(h.form) if h.form in cleaned else len(cleaned)))
         out.roles = self._roles(toks, {n.form for n in out.names})
         return out
 
@@ -339,14 +363,20 @@ class KoreanLayer:
         일반 낱말이기도 한 이름(호두)은 모델이 인물로 적었을 때만 받는다(``name_hit``)."""
         hits: list[NameHit] = []
         for form, tag in toks:
-            if tag != "NNP" or form in self._not_names or any(h.form == form for h in hits):
-                continue
-            if self.vocab.is_general_word(form):
+            if not self._name_like(form, tag) or any(h.form == form for h in hits):
                 continue
             cands = self.vocab.character_candidates(form)
             if cands:
                 hits.append(NameHit(form, cands, self.vocab.genders.get(cands[0][0])))
         return hits
+
+    def _name_like(self, form: str, tag: str) -> bool:
+        """이 낱말을 이름으로 볼까. 고유명사(NNP)면 캐릭터·이름 조각, 일반 명사(NNG)면 캐릭터가 가장 많이 쓰일 때만
+        (Kiwi 는 같은 이름을 문맥 따라 NNP·NNG 로 붙인다 — 푸리나의 = NNG, 원신 푸리나 = NNP, 실측)."""
+        if form in self._not_names:
+            return False
+        strength = self.vocab.name_strength(form)
+        return (tag == "NNP" and strength in ("character", "piece")) or (tag == "NNG" and strength == "character")
 
     def roles_for(self, analysis: KoreanAnalysis, names: Iterable[str]) -> tuple[str, str] | None:
         """최종 인물 목록(모델이 적은 이름 포함)으로 방향을 다시 잰다 — Kiwi 가 이름으로 안 본 인물도 들어온다."""
@@ -358,6 +388,79 @@ class KoreanLayer:
             return None
         cands = self.vocab.character_candidates(form)
         return NameHit(form, cands, self.vocab.genders.get(cands[0][0])) if cands else None
+
+    # -- 이름 고르기(사용자) ---------------------------------------------------
+    PICK_LIMIT = 8
+
+    def candidate_list(self, form: str) -> list[dict[str, Any]]:
+        """이름 하나의 후보(게시물 많은 순) — 화면의 고르기 목록."""
+        return [{"tag": t, "posts": n, "gender": self.vocab.genders.get(t)}
+                for t, n in self.vocab.character_candidates(clean_text(form).strip(), limit=self.PICK_LIMIT)]
+
+    def choose(self, hit: NameHit | None, choices: dict[str, str] | None) -> NameHit | None:
+        """사용자가 목록에서 고른 캐릭터를 맨 앞으로 — 게시물 수 순위보다 사용자의 선택(모델에 묻지 않는다).
+        목록에 없는 태그는 무시한다(낡은 선택·조작)."""
+        if hit is None or not choices or hit.form not in choices:
+            return hit
+        want = choices[hit.form]
+        cands = list(hit.candidates)
+        if want not in [t for t, _n in cands]:
+            cands = self.vocab.character_candidates(hit.form, limit=self.PICK_LIMIT)
+            if want not in [t for t, _n in cands]:
+                posts = int(self.vocab.character_rank(want) or 0)
+                if posts <= 0:
+                    return hit                # 게시물이 없는 태그 = 있는 캐릭터가 아니다
+                cands = [(want, posts)] + cands   # 목록 밖에서 찾아 고른 캐릭터(원피스 루피)
+        picked = [c for c in cands if c[0] == want] + [c for c in cands if c[0] != want]
+        return NameHit(hit.form, picked, self.vocab.genders.get(want))
+
+    def name_spans(self, text: str, *, use_kiwi: bool = True) -> dict[str, Any]:
+        """입력하는 동안 칠할 이름(모델 없이). 위치는 **원문** 기준(중괄호 포함).
+
+        - Kiwi 고유명사 중 캐릭터 이름 — ``_names`` 와 같은 규칙(일반 낱말·작품명 제외). ``use_kiwi=False`` 거나
+          Kiwi 가 아직 없으면 건너뛴다(입력마다 수 초짜리 준비를 기다리지 않는다).
+        - {…} 로 감싼 것은 일반 낱말이어도 이름으로 찾는다 — Kiwi 없이도 된다. 못 찾으면 found=False(점선).
+        반환: {names: [{form, found, source, tag, candidates[]}], spans: [{start, end, form}]}
+        """
+        raw = str(text or "")
+        names: dict[str, dict[str, Any]] = {}
+        spans: list[dict[str, Any]] = []
+        taken: list[tuple[int, int]] = []
+
+        def add(form: str, start: int, end: int, source: str) -> None:
+            if form not in names:
+                cands = self.candidate_list(form)
+                names[form] = {"form": form, "found": bool(cands), "source": source,
+                               "tag": cands[0]["tag"] if cands else "", "candidates": cands}
+            spans.append({"start": start, "end": end, "form": form})
+            taken.append((start, end))
+
+        for form, start, end in braced_names(raw):
+            if form not in self._not_names:
+                add(form, start, end, "brace")
+        if use_kiwi and self._kiwi is not None:
+            cleaned, index = _clean_with_index(raw)
+            with self._tok_lock:
+                toks = list(self._kiwi.tokenize(cleaned))
+            for tok in toks:
+                form = tok.form
+                if not self._name_like(form, tok.tag):
+                    continue
+                if tok.start + tok.len > len(index):
+                    continue
+                start, end = index[tok.start], index[tok.start + tok.len - 1] + 1
+                if raw[start:end] != form:            # 위치가 어긋나면(드문 글자) 그 자리 근처에서 다시 찾는다
+                    found = raw.find(form, max(0, start - 2))
+                    if found < 0:
+                        continue
+                    start, end = found, found + len(form)
+                if any(a <= start < b for a, b in taken):
+                    continue                          # 중괄호로 이미 잡은 자리
+                if self.vocab.character_candidates(form, limit=1):
+                    add(form, start, end, "auto")
+        spans.sort(key=lambda s: s["start"])
+        order = list(dict.fromkeys(s["form"] for s in spans))
+        return {"names": [names[f] for f in order], "spans": spans}
 
     def _roles(self, toks: list[tuple[str, str]], names: set[str]) -> tuple[str, str] | None:
         """이름 사이의 방향. 주어(이/가/은/는) -> 목적어(을/를)·소유(의)·에게. 수동형(안겨서·꼬집히는)이면 뒤집는다."""
@@ -388,8 +491,13 @@ class KoreanLayer:
         return (subj, target) if subj and target and subj != target else None
 
     # -- 인원 -------------------------------------------------------------
-    def count_persons(self, analysis: KoreanAnalysis, extra_names: Iterable[str] = ()) -> PersonCount:
-        """요청에 나온 사람을 센다. 성별 모르는 사람(사람·친구)이 있거나 아무도 없으면 confirm."""
+    def count_persons(self, analysis: KoreanAnalysis, extra_names: Iterable[str] = (),
+                      choices: dict[str, str] | None = None, not_names: Iterable[str] = ()) -> PersonCount:
+        """요청에 나온 사람을 센다. 성별 모르는 사람(사람·친구)이 있거나 아무도 없으면 confirm.
+        ``choices`` = 사용자가 목록에서 고른 캐릭터(이름 -> 태그) — 그 캐릭터의 성별로 센다.
+        ``not_names`` = 사용자가 '이름 아님' 으로 고른 낱말(호두를 먹는) — 사람으로 세지 않는다."""
+        choices = choices or {}
+        rejected = set(not_names)
         pc = PersonCount()
         toks = analysis.tokens
         if not toks:
@@ -427,10 +535,9 @@ class KoreanLayer:
                 gender = "boy"
             elif form in self._neutral:
                 gender = "unknown"
-            elif (tag == "NNP" or form in extra) and form not in self._not_names:
-                if form not in extra and self.vocab.is_general_word(form):
-                    continue                  # 트윈테일(일반 낱말이자 별칭 조각)을 사람으로 세지 않는다
-                hit = self.name_hit(form)
+            elif form not in rejected and form not in self._not_names and (form in extra or self._name_like(form, tag)):
+                # 트윈테일(일반 낱말이자 별칭 조각)은 모델이 인물로 적지 않는 한 사람으로 세지 않는다
+                hit = self.choose(self.name_hit(form), choices)
                 gender = (hit.gender if hit else None) or ("unknown" if form in extra else None)
             if gender is None:
                 continue
@@ -474,6 +581,32 @@ class KoreanLayer:
 def clean_text(text: Any) -> str:
     """사용자가 이름을 {카나데} 처럼 감싸도 같게 읽는다."""
     return re.sub(r"[{}]", "", str(text or ""))
+
+
+_BRACED = re.compile(r"\{([^{}]{1,40})\}")
+
+
+def braced_names(text: Any) -> list[tuple[str, int, int]]:
+    """사용자가 {호두} 처럼 감싼 것 = '이건 이름이다'. (이름, 원문 시작, 원문 끝) — 괄호 안쪽 위치."""
+    out: list[tuple[str, int, int]] = []
+    for m in _BRACED.finditer(str(text or "")):
+        inner = m.group(1)
+        name = inner.strip()
+        if name:
+            start = m.start(1) + (len(inner) - len(inner.lstrip()))
+            out.append((name, start, start + len(name)))
+    return out
+
+
+def _clean_with_index(text: str) -> tuple[str, list[int]]:
+    """``clean_text`` 와 같은 글 + 그 글의 각 글자가 원문 몇 번째였는지(입력칸에 칠할 위치를 되돌린다)."""
+    chars: list[str] = []
+    index: list[int] = []
+    for i, ch in enumerate(text):
+        if ch not in "{}":
+            chars.append(ch)
+            index.append(i)
+    return "".join(chars), index
 
 
 def partition_of(girls: int, boys: int, solo: bool) -> str:

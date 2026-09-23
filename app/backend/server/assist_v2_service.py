@@ -20,8 +20,10 @@ ASSIST_LEASE_SECONDS = 600.0
 MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 2026-09-23) — 1건 풀은 매번 같은 것을 뽑는다
 MODEL_TIMEOUT = 60.0
 MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
+MAX_NAME_CHOICES = 8
 _LOCK = threading.Lock()
 _INSTALLER_LOCK = threading.Lock()
+_WARM_LOCK = threading.Lock()
 _GRAMMAR: str | None = None
 _GENDERS: dict[str, str] | None = None
 
@@ -175,6 +177,40 @@ def warm_assist(context: Any) -> None:
     threading.Thread(target=_warm, daemon=True, name="assist-v2-warm").start()
 
 
+def _warm_korean_async(context: Any) -> None:
+    """한국어 층만 뒤에서 데운다(입력하는 동안 불린다 — 겹쳐 띄우지 않는다)."""
+    with _WARM_LOCK:
+        if getattr(context, "assist_korean_warming", False):
+            return
+        context.assist_korean_warming = True
+
+    def _run() -> None:
+        try:
+            korean_layer(context).warm()
+        except Exception:
+            pass
+        finally:
+            context.assist_korean_warming = False
+
+    threading.Thread(target=_run, daemon=True, name="assist-korean-warm").start()
+
+
+def assist_names(context: Any, payload: Any) -> dict[str, Any]:
+    """입력하는 동안 칠할 캐릭터 이름(모델 없이, 1ms 안팎). 후보가 여럿이면 화면이 사용자에게 목록을 보인다.
+
+    준비(사전 수 초 · Kiwi 수 초)를 기다리지 않는다 — 안 됐으면 뒤에서 데우고 ready=false. 중괄호 이름은
+    사전만 있으면 Kiwi 없이도 찾는다."""
+    from core.assist_v2 import MAX_TEXT
+
+    text = str((payload or {}).get("text") or "")[:MAX_TEXT] if isinstance(payload, dict) else ""
+    layer = getattr(context, "assist_korean_layer", None)
+    if layer is None or not layer.ready():
+        _warm_korean_async(context)
+    if layer is None:
+        return {"ok": True, "ready": False, "names": [], "spans": []}
+    return {"ok": True, "ready": layer.ready(), **layer.name_spans(text, use_kiwi=layer.ready())}
+
+
 def assist_status(context: Any) -> dict[str, Any]:
     from app.backend.server.boost_v2_service import get_boost_runtime
 
@@ -233,13 +269,29 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
     previous = payload.get("previous")
     if previous is not None and not isinstance(previous, dict):
         previous = None
+    # 사용자가 이름 후보 목록에서 고른 것(이름 -> 캐릭터 태그). 화면이 요청마다 다시 보낸다(기억이 짧다).
+    raw_names = payload.get("names") or {}
+    if not isinstance(raw_names, dict) or len(raw_names) > MAX_NAME_CHOICES or not all(
+            isinstance(k, str) and isinstance(v, str) and 0 < len(k.strip()) <= 40 and 0 < len(v.strip()) <= 120
+            for k, v in raw_names.items()):
+        raise AssistError("이름 선택이 잘못됐습니다.")
+    from core.assist_korean import clean_text
+
+    choices = {clean_text(k).strip(): v.strip() for k, v in raw_names.items()}
+    # 사용자가 '이름 아님' 으로 고른 낱말(호두를 먹는 -> 호두는 캐릭터가 아니다)
+    raw_not = payload.get("not_names") or []
+    if not isinstance(raw_not, list) or len(raw_not) > MAX_NAME_CHOICES or not all(
+            isinstance(x, str) and 0 < len(x.strip()) <= 40 for x in raw_not):
+        raise AssistError("이름 선택이 잘못됐습니다.")
+    not_names = sorted({clean_text(x).strip() for x in raw_not})
     api_mode = str(payload.get("api_mode") or "")
     if not api_mode:
         try:
             api_mode = str(context.get_api_mode())
         except Exception:
             api_mode = str(getattr(context, "current_api_mode", "NAI") or "NAI")
-    return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode}
+    return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
+            "choices": choices, "not_names": not_names}
 
 
 def _call_model(context: Any, text: str, previous: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
@@ -290,6 +342,9 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     t = time.perf_counter()
     layer.warm()
     ka = layer.analyze(req["text"])
+    choices = req["choices"]
+    ka.names = [layer.choose(h, choices) for h in ka.names      # 사용자가 고른 캐릭터가 게시물 수 순위를 이긴다
+                if h.form not in req["not_names"]]              # '이름 아님' 은 인물에서 뺀다
     korean_ms = round((time.perf_counter() - t) * 1000, 1)
     route, model = _call_model(context, req["text"], req["previous"])
     if route is None:
@@ -297,12 +352,15 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     vocab = _tag_vocab(context, layer)
     rules = layer.rules
     merged = merge(route, ka, vocab, text=req["text"], generic=rules["generic_tags"],
-                   simile_particles=rules["simile_particles"], name_lookup=layer.name_hit,
-                   not_names=rules["not_names"], poses=rules["poses"],
+                   simile_particles=rules["simile_particles"],
+                   name_lookup=lambda form: layer.choose(layer.name_hit(form), choices),
+                   not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
                    roles_for=lambda names: layer.roles_for(ka, names))
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
-        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender} for c in merged.characters],
+        # 후보 전체를 싣는다 — 모델이 찾은 이름(호두)도 화면에서 고를 수 있게
+        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": c.ko in choices,
+                   "candidates": layer.candidate_list(c.ko)} for c in merged.characters],
         "relations": [{"source": s, "action": a, "target": d} for s, a, d in merged.relations],
         "model": model,
         "trace": {"korean": ka.notes, "merge": merged.log,
@@ -334,7 +392,8 @@ def _persons(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> dict[str,
         pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, g + b == 1))
         return {"mode": "manual", "partition": pc.partition, "girls": g, "boys": b, "unknown": 0,
                 "confirm": False, "notes": [], "param": pc.persons_param()}
-    pc = layer.count_persons(ka, extra_names=[c.ko for c in merged.characters])
+    pc = layer.count_persons(ka, extra_names=[c.ko for c in merged.characters], choices=req["choices"],
+                             not_names=req["not_names"])
     return {"mode": "auto", "partition": pc.partition, "girls": pc.girls, "boys": pc.boys, "unknown": pc.unknown,
             "confirm": pc.confirm, "notes": pc.notes, "param": pc.persons_param()}
 

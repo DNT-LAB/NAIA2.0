@@ -21,7 +21,13 @@ def register_assist_v2_routes(
     *,
     run_in_thread: Callable[..., Awaitable[Any]],
 ) -> None:
-    from app.backend.server.assist_v2_service import assist_status, get_kiwi_installer, run_assist, warm_assist
+    from app.backend.server.assist_v2_service import (
+        assist_names,
+        assist_status,
+        get_kiwi_installer,
+        run_assist,
+        warm_assist,
+    )
 
     @app.post("/api/assist")
     async def assist_route(request: Request):
@@ -37,6 +43,15 @@ def register_assist_v2_routes(
         """창을 열 때: Kiwi·엔진을 뒤에서 올리고 지금 상태를 돌려준다(기다리지 않는다)."""
         warm_assist(context)
         return await run_in_thread(assist_status, context)
+
+    @app.post("/api/assist/names")
+    async def assist_names_route(request: Request):
+        """입력하는 동안 칠할 캐릭터 이름과 후보(모델 없이). 후보가 여럿이면 화면이 사용자에게 고르게 한다."""
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "JSON 요청이 아닙니다."}, status_code=400)
+        return await run_in_thread(assist_names, context, payload)
 
     @app.get("/api/assist/status")
     async def assist_status_route():

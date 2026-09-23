@@ -21,6 +21,7 @@ MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 202
 MODEL_TIMEOUT = 60.0
 MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
 _LOCK = threading.Lock()
+_INSTALLER_LOCK = threading.Lock()
 _GRAMMAR: str | None = None
 _GENDERS: dict[str, str] | None = None
 
@@ -71,6 +72,21 @@ def korean_layer(context: Any) -> Any:
         layer = KoreanLayer(vocab)
         context.assist_korean_layer = layer
         return layer
+
+
+def get_kiwi_installer(context: Any) -> Any:
+    """한국어 분석기(Kiwi)를 처음 쓸 때 설치하는 것 — 세션에 하나(core.assist_kiwi, 사용자 결정 2026-09-23).
+    설치가 끝나면 한국어 층을 바로 데워 첫 질문이 준비를 기다리지 않게 한다."""
+    with _INSTALLER_LOCK:
+        installer = getattr(context, "assist_kiwi_installer", None)
+        if installer is None:
+            from app.backend.server.boost_v2_service import _save_root
+            from core.assist_kiwi import KiwiInstaller
+
+            installer = KiwiInstaller(log_path=_save_root(context) / "logs" / "assist_kiwi_install.log",
+                                      on_installed=lambda: korean_layer(context).warm())
+            context.assist_kiwi_installer = installer
+        return installer
 
 
 def _event_map(context: Any) -> Any:
@@ -167,6 +183,10 @@ def assist_status(context: Any) -> dict[str, Any]:
         status = get_boost_runtime(context).status()
     except Exception as exc:
         status = {"error": str(exc)}
+    try:
+        kiwi = get_kiwi_installer(context).snapshot()
+    except Exception as exc:
+        kiwi = {"installed": False, "error": str(exc)}
     return {
         "ok": True,
         "engine_ready": bool(status.get("engine_exists")),
@@ -174,6 +194,7 @@ def assist_status(context: Any) -> dict[str, Any]:
         "running": bool(status.get("running")),
         "korean_ready": bool(layer is not None and layer.ready()),
         "korean_error": getattr(layer, "error", None) if layer is not None else None,
+        "kiwi": kiwi,              # 설치 전이면 화면이 [설치(약 90MB)]를 보인다 — 없어도 Assist 는 모델만으로 돈다
         "leases": status.get("leases"),
     }
 

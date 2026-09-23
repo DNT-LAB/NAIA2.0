@@ -745,6 +745,7 @@
       "source_files": [
         "app/backend/server/assist_v2_routes.py",
         "app/backend/server/assist_v2_service.py",
+        "core/assist_kiwi.py",
         "core/assist_korean.py",
         "core/assist_v2.py",
         "data/assist/korean_rules.json"
@@ -752,7 +753,9 @@
       "legacy_dependency": "none",
       "routes": [
         {"method": "POST", "path": "/api/assist", "smoke": "external_live"},
-        {"method": "POST", "path": "/api/assist/warm", "smoke": "state_mutation"}
+        {"method": "POST", "path": "/api/assist/warm", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/assist/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/assist/kiwi/install", "smoke": "external_live"}
       ]
     },
     {

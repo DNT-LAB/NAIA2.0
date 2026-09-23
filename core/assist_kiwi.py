@@ -50,6 +50,9 @@ def explain_failure(lines: list[str]) -> str:
         return "인터넷에 연결할 수 없습니다 — 연결을 확인하고 다시 눌러 주세요."
     if "no space left" in low or "errno 28" in low:
         return "디스크 공간이 부족합니다(설치에 약 200MB 가 필요합니다)."
+    if "no module named pip" in low:
+        # 포터블의 **기본** 파이썬(resources/python)엔 pip 가 없다 — 백엔드는 runtime-env 로 떠서 보통은 안 걸린다
+        return f"이 파이썬에는 pip 가 없습니다 — 직접 설치해 주세요: {MANUAL_COMMAND}"
     if "externally-managed-environment" in low:
         return f"이 파이썬은 pip 설치를 막아 둔 환경입니다 — 직접 설치해 주세요: {MANUAL_COMMAND}"
     if "permission denied" in low or "access is denied" in low or "winerror 5" in low:

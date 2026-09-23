@@ -153,6 +153,15 @@ def parse_pieces(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fal
         out.append(piece)
         for _ in range(min(closes, len(stack))):
             stack.pop()
+    # ⚠️ 이 글 안에서 **닫히지 않은** 묶음. prefix 와 postfix 는 따로 읽히는데, 묶음은
+    #    그 경계를 넘을 수 있다(V5 영점 프리셋: prefix 끝 `0.75::` 가 postfix 의
+    #    `countershade ::` 에서 닫힌다 - 실측 2026-09-23). 반쪽만 보고 빼거나 되살리면
+    #    다른 칸의 가중치가 깨진다.
+    open_ids = {gid for gid, _w in stack}
+    if open_ids:
+        for piece in out:
+            if piece.get("group") in open_ids:
+                piece["unclosed"] = True
     return out
 
 
@@ -175,7 +184,8 @@ def _group_members(piece_or_members: list[dict]) -> list[dict]:
 def _eligible(members: list[dict]) -> bool:
     """동기화 앵커로 되살릴 묶음인가: **작가만** 둘 이상, 중첩 없음."""
     live = _group_members(members)
-    return len(live) >= 2 and all(_is_artist(m) for m in live) and all(m.get("depth", 1) == 1 for m in live)
+    return (len(live) >= 2 and all(_is_artist(m) for m in live) and all(m.get("depth", 1) == 1 for m in live)
+            and not any(m.get("unclosed") for m in members))
 
 
 # ── 가져오기 ────────────────────────────────────────────────────────────────
@@ -246,6 +256,14 @@ def blocks_from_text(pre: str, post: str, *, known: Iterable[str] = (), allow_ba
     return {"blocks": blocks, "unknown": unknown}
 
 
+def _removable(members: list[dict]) -> bool:
+    """통째로 빼도 되는 묶음인가: 작가(또는 collab)가 **있고**, 그 밖엔 빈 조각뿐이며,
+    **이 글 안에서 닫힌다**. 빈 조각뿐인 `0.75::` 는 다른 칸에서 닫히는 여는 조각이다."""
+    return (any(_is_artist(m) or m.get("kind") == "collab" for m in members)
+            and all(_is_artist(m) or m.get("kind") in {"collab", "empty"} for m in members)
+            and not any(m.get("unclosed") for m in members))
+
+
 def strip_artists(text: str, *, known: Iterable[str] = (), allow_bare: bool = False,
                   drop_anchors: bool = False) -> dict:
     """글에서 작가 토큰을 뺀다(같은 프리셋에서 가져올 때 두 번 나가지 않게).
@@ -269,7 +287,7 @@ def strip_artists(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fa
             removed_gid = None
         if kind == "group":
             members = piece["members"]
-            if all(_is_artist(m) or m.get("kind") in {"collab", "empty"} for m in members):
+            if _removable(members):
                 removed.append(piece["raw"].strip())
                 continue
             if any(_is_artist(m) for m in members):
@@ -278,7 +296,7 @@ def strip_artists(text: str, *, known: Iterable[str] = (), allow_bare: bool = Fa
             continue
         if gid is not None:
             members = groups.get(gid, [])
-            if all(_is_artist(m) or m.get("kind") in {"collab", "empty"} for m in members):
+            if _removable(members):
                 # 한 묶음은 **한 줄**로 알린다 - 조각마다 적으면 `1.2::artist:a` 와
                 # `artist:b ::` 가 따로 보여 무엇이 빠지는지 읽히지 않는다(실측 2026-09-21).
                 if removed_gid == gid and removed:

@@ -5,6 +5,13 @@
 let ws, blobUrl = null, latestResultBlob = null, generating = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let genTimer = null, genStartTime = 0;
+// 큐에 **기다리는** 요청 수(지금 도는 것 제외) - 마지막 queue_state 의 items 수.
+// 사람이 생성 중에 Generate 를 더 누를 수 있게 되면서(사용자 지정 2026-09-23) "바쁘다" 는
+// `generating` 만으로 말할 수 없다: 한 장이 끝나고 다음 장이 시작하기 전 수 ms 동안
+// `generating` 은 false 인데 큐는 차 있다. 그 틈에 스스로 발사하는 루프(Interactive
+// Auto Gen · 반응형 · Studio · 프리셋 Auto Gen)는 이 값도 본다 - `busyForLoops()`.
+let queuePending = 0;
+let lastHumanGenerateAt = 0;
 const genDurations = [];  // last 5 generation durations (ms)
 // Ollama Auto Boost(=Ollama 모드) ON일 때 Random 버튼에 boost 재작성 경과시간을 실시간 표시.
 let rndTimer = null, rndStartTime = 0;
@@ -1113,7 +1120,9 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
       localStorage,
       WebSocket,
       getWs: () => ws,
-      getGenerating: () => generating,
+      // Studio 는 이 값이 false 인 순간 다음 프레임을 쏜다 - 큐에 사람 장이 남았으면
+      // 기다린다(안 그러면 뒤에 선 사람 그림이 Studio 프레임 결과로 붙는다).
+      getGenerating: () => busyForLoops(),
       promptEdit,
       negEdit,
       getResolutionOptions: () => Array.from(paramEls.resolution?.options || [])
@@ -1730,7 +1739,8 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // PE 패널을 연 적이 없어도 최신 값을 읽는다.
       getPromptEngineering: () => moduleStateCache.get('prompt_engineering') || null,
       // 반응형 생성. 생성 중이면 패널이 변화를 모았다가 끝난 뒤 한 번만 낸다.
-      isGenerating: () => generating,
+      // 큐에 기다리는 장이 있어도 모은다 - 큐가 빈 뒤 한 번 낸다.
+      isGenerating: () => busyForLoops(),
       // **정식 경로로 보낸다.** `requestGenerate()` 를 직접 부르면 빈 페이로드가 나가
       // 프롬프트도 Interactive 캐릭터 오버라이드도 실리지 않는다(실측: 요청은 가는데
       // 아무 일도 안 일어났다). `send('generate')` 가 프롬프트·네거티브·오버라이드·
@@ -4348,7 +4358,15 @@ const wsMessageHandlers = {
   // 인증 오류·크레딧 부족 같은 실패에서 같은 요청을 딜레이마다 무한 재시도한다
   // (Codex 리뷰 2026-08-08).
   status: m => {
-    if (!m.is_generating) lastGenerationOk = (String(m.message || '') === 'completed');
+    // ⚠️ **생성 중에 온 `queued`·`blocked` 는 완료가 아니다.** 서버는 요청을 넣자마자
+    //    보낸 창에만 `{is_generating:false, message:'queued'}` 를 돌려준다(막혔으면
+    //    'blocked'). 생성 중에 더 넣으면 이것이 도는 장의 상태를 꺼 버려 타이머·진행바가
+    //    멈추고, "끝났다" 를 기다리는 루프(Interactive Auto Gen 등)가 다음 장을 예약한다.
+    //    러너가 먼저 다음 장의 true 를 보내고 이 false 가 뒤따라오는 순서 역전도 있다
+    //    (Fable 검토 2026-09-23). 쉬는 중에 온 queued 는 그대로 통과한다.
+    const msg = String(m.message || '');
+    if (!m.is_generating && generating && (msg === 'queued' || msg === 'blocked')) return;
+    if (!m.is_generating) lastGenerationOk = (msg === 'completed');
     // 프리뷰가 실패로 끝나면 `nai_preview_result` 가 영영 안 온다 - 여기서 푼다.
     // 단, 시작을 본 뒤의 종료만 종료다(큐 직후의 false 는 시작이 아니다).
     if (preview45Busy) {
@@ -4397,7 +4415,12 @@ const wsMessageHandlers = {
     pendingResultEnhanceConfig = m;
     if (resultEnhance) resultEnhance.setConfig(m);
   },
-  queue_state: m => { if (queuePanel) queuePanel.handleState(m); },
+  queue_state: m => {
+    queuePending = Array.isArray(m?.items) ? m.items.length : 0;
+    if (queuePanel) queuePanel.handleState(m);
+    // 대기 수는 Generate 단추에 보인다. 생성 중에는 타이머가 100ms 마다 다시 그린다.
+    if (!generating) updateGenerateButtonMode();
+  },
   character_asset_generation_error: m => {
     if (characterAssetControl) characterAssetControl.handleGenerationError(m);
   },
@@ -8312,7 +8335,7 @@ async function generateSceneImmediate(body) {
   });
 }
 
-async function generateWithInteractiveSnapshot(payload, resolved = null) {
+async function generateWithInteractiveSnapshot(payload, resolved = null, {queue = false} = {}) {
   // `resolved` 가 오면 **이 요청은 이미 확정돼 있다**(씬 카드의 즉시 생성).
   // 아래 세 가지가 전부 '지금 작업판'을 읽으므로, 그대로 두면 고른 씬이 아니라
   // 작업판이 나가고 기록도 작업판으로 남는다(Codex 8차 · 실측: 구도 랜덤을 켜면
@@ -8320,7 +8343,8 @@ async function generateWithInteractiveSnapshot(payload, resolved = null) {
   // 생성 중이거나 연결이 끊겼으면 기록도 하지 않는다. requestGenerate 가 어차피
   // 거부하는데 먼저 기록하면, 생성되지 않은 조합이 Assets 에 남는다
   // ("생성할 때만 기록" 계약 위반). 단축키는 버튼 비활성화를 우회하므로 실제로 닿는다.
-  if (generating) return false;
+  // 사람이 누른 것(`queue`)이고 쌓을 수 있는 자리면 생성 중이어도 통과한다 - 큐에 선다.
+  if (generating && !(queue && canQueueGenerate())) return false;
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   // 축 프리셋의 랜덤은 **여기서** 굴린다. renderPrompt 안에서 뽑으면 화면을 다시
   // 그릴 때마다 값이 바뀌어 무엇이 나갈지 알 수 없다 — 계약은 "생성 시 적용"이다.
@@ -8419,14 +8443,15 @@ async function generateWithInteractiveSnapshot(payload, resolved = null) {
   }
   // 가드(생성 중 / WS 닫힘)는 requestGenerate 가 다시 본다 — await 사이에 상태가
   // 바뀌었어도 여기서 통과시키지 않는다.
-  return requestGenerate(payload);
+  return requestGenerate(payload, {queue});
 }
 
 let _inpaintGenerateToastAt = 0;
 
-function requestGenerate(payload = {}) {
+function requestGenerate(payload = {}, {queue = false} = {}) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  if (generating) return false;
+  const queuing = generating && queue && canQueueGenerate();
+  if (generating && !queuing) return false;
   // ⚠️ **여기가 목이다.** 예전에는 `send()` 에만 게이트를 걸었는데, Studio 탭과
   //    V5 Scene 은 `send()` 를 안 거치고 이 함수를 직접 부른다(deps 로 넘겨 받는다).
   //    세션이 살아 있는데 저기서 누르면 인페인트가 아니라 **일반 t2i** 가 나가
@@ -8446,6 +8471,8 @@ function requestGenerate(payload = {}) {
   _localPromptDirty = false;
   const message = {type: 'generate', ...(payload && typeof payload === 'object' ? payload : {})};
   ws.send(JSON.stringify(message));
+  // 쌓았으면 큐 패널을 잠깐 연다 - 거기서 [빼기]로 되돌릴 수 있다.
+  if (queuing) queuePanel?.wake?.();
   return true;
 }
 
@@ -8609,6 +8636,10 @@ function collapsePromptDrawerForMobile() {
 
 function generateAction() {
   collapsePromptDrawerForMobile();
+  // 더블클릭·단축키 두 번이 두 장이 되지 않게(생성 중에도 쌓을 수 있게 된 뒤로는 돈이다).
+  const now = performance.now();
+  if (now - lastHumanGenerateAt < 300) return;
+  lastHumanGenerateAt = now;
   if (virtualCharacterSession()) {
     // ⚠️ 도크의 [인페인트 생성] 과 **같은 함수**를 부른다. 예전에는 여기서 가드만
     //    빌려 쓰고 생성은 직접 불렀는데, 그러다 `flushTransforms()` 를 빠뜨려
@@ -8616,10 +8647,12 @@ function generateAction() {
     inpaintCanvasControl?.generate?.();
     return;
   }
-  send('generate');
+  // **사람이 눌렀다** 는 표 - 이 표가 있을 때만 생성 중에도 큐에 쌓는다. 자동 반복
+  // (Interactive Auto Gen · 반응형 · V5 Scene · Studio)은 표 없이 오므로 예전처럼 한 장씩.
+  send('generate', {queue: true});
 }
 
-function send(cmd) {
+function send(cmd, options = {}) {
   // Random 은 출처를 가리지 않고 막는다 - 세션 중에 프롬프트를 새로 굴릴 이유가 없다.
   if (cmd === 'random' && virtualCharacterSession()) {
     showToast('인페인트 세션 중에는 Random 을 쓸 수 없습니다 (세션 닫기 후 사용)', 'error');
@@ -8661,7 +8694,7 @@ function send(cmd) {
       prompt,
       negative_prompt: negative,
       overrides: buildWebGenerationOverrides(prompt, negative),
-    });
+    }, null, {queue: !!options.queue});
     return;
   }
   if (cmd === 'random') {
@@ -8695,7 +8728,7 @@ function setGen(v) {
   const next = Boolean(v);
   if (generating === next) {
     if (next) {
-      btnGen.disabled = true;
+      btnGen.disabled = !canQueueGenerate();
       btnGen.classList.add('generating');
       if (!genTimer && genStartTime > 0) startGenTimer();
     } else {
@@ -8714,12 +8747,15 @@ function setGen(v) {
   if (next) lastGenerationOk = false;
   // 반응형 생성: 생성 중에 쌓인 변화를 **여기서 한 번만** 낸다(큐잉 아님).
   // 반응형이 냈으면 Auto Gen 반복은 건너뛴다 — 둘 다 내면 두 장이 나간다.
-  if (wasGenerating && !next && interactivePanel?.notifyGenerationDone) {
+  // ⚠️ **큐가 빌 때만** 잇는다 - 사람이 쌓아 둔 장이 남았는데 한 장 끝날 때마다 잇면
+  //    그 사이로 시키지 않은 장이 끼어든다(서버 Auto Gen 과 같은 규칙: 큐 먼저).
+  //    마지막 장이 끝날 때 queuePending 이 0 이 되어 그때 한 번 잇는다.
+  if (wasGenerating && !next && queuePending === 0 && interactivePanel?.notifyGenerationDone) {
     setTimeout(() => {
       const fired = interactivePanel.notifyGenerationDone();
       if (!fired) scheduleInteractiveAutoGen();
     }, 0);
-  } else if (wasGenerating && !next) {
+  } else if (wasGenerating && !next && queuePending === 0) {
     setTimeout(scheduleInteractiveAutoGen, 0);
   }
   // V5 Scene 연속 생성: 한 장이 **성공으로** 끝나면 다음 컷을 불러오고 또 낸다.
@@ -8731,7 +8767,7 @@ function setGen(v) {
   if (v5SceneControl?.setGeneratingStatus) v5SceneControl.setGeneratingStatus(next);
   if (studioTabControl) studioTabControl.handleGenerationStatus(next);
   if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(next);
-  btnGen.disabled = next;
+  btnGen.disabled = next && !canQueueGenerate();
   if (next) {
     genStartTime = Date.now();
     btnGen.classList.add('generating');
@@ -8770,6 +8806,9 @@ function updateGenerateButtonMode() {
       ? (promptFixed || !!presetGenerationPending || !eventPresetPanel?.canGenerate?.())
       : false;
     btnGen.innerHTML = genButtonHtml('Generate');
+  } else {
+    // 생성 중에 탭을 옮기면 쌓을 수 있는 자리인지가 바뀐다(프리셋·시퀀스 탭은 못 쌓는다).
+    btnGen.disabled = !canQueueGenerate();
   }
   // ⚠️ 위에서 innerHTML 을 통째로 다시 쓰고 Random 도 다시 켠다 - 인페인트 세션의
   //    잠금이 여기서 말없이 벗겨졌다(탭을 옮기기만 해도 라벨이 `Generate` 로 되돌아감).
@@ -8799,7 +8838,7 @@ function presetAutoGenConditionsHold(token = null, {requireIdle = false} = {}) {
   if (!getOptionChecked('auto_generate')) return false;
   if (getOptionChecked('prompt_fixed')) return false;
   if (!eventPresetPanel?.canRandomize?.()) return false;
-  if (requireIdle && (!!presetGenerationPending || generating)) return false;
+  if (requireIdle && (!!presetGenerationPending || busyForLoops())) return false;
   return true;
 }
 
@@ -9972,10 +10011,28 @@ function naiGenerationCostsAnlas() {
 function genButtonHtml(label) {
   const cost = naiEffectiveAnlasCost();
   const show = naiGenerationCostsAnlas() && cost > 0;
+  // 대기가 있으면 `+N` 을 붙이고, 유료면 금액도 **대기만큼** 곱해 보인다 - 서버의 무료
+  // 사용량 차단은 Auto Gen 루프에만 걸리고 사람이 쌓은 장은 그대로 유료로 나간다.
+  // 화면이 유일한 경고다(Fable 검토 2026-09-23).
+  const waiting = queuePending > 0 ? ` +${queuePending}` : '';
+  const times = queuePending > 0 ? ` ×${queuePending}` : '';   // 도는 장은 이미 나갔다 - 남은 것만
   const chip = show
-    ? `<span class="gen-cost-chip">${escHtml(cost.toLocaleString())} Anlas</span>`
+    ? `<span class="gen-cost-chip">${escHtml(cost.toLocaleString())} Anlas${escHtml(times)}</span>`
     : '';
-  return `<span class="shortcut-hint">CTRL + ENTER</span>${escHtml(label)}${chip}`;
+  return `<span class="shortcut-hint">CTRL + ENTER</span>${escHtml(label)}${escHtml(waiting)}${chip}`;
+}
+
+/** 사람이 누른 Generate 를 **생성 중에도** 큐에 쌓아도 되는 자리인가(사용자 지정 2026-09-23).
+ *  일반 프롬프트 탭만이다 - 프리셋·시퀀스·I.Sequence 탭은 자기 흐름이 있고, 인페인트
+ *  세션은 도크의 [인페인트 생성] 으로 간다(그쪽 잠금을 그대로 둔다). */
+function canQueueGenerate() {
+  if (['preset', 'sequence', 'isequence'].includes(activePromptTab)) return false;
+  return !virtualCharacterSession();
+}
+
+/** 스스로 발사하는 루프가 볼 "바쁨" - 생성 중이거나 **큐에 기다리는 장이 있다**. */
+function busyForLoops() {
+  return generating || queuePending > 0;
 }
 
 /** 값만 바뀐 경우 - 라벨은 건드리지 않고 칩만 갈아 끼운다.
@@ -11996,7 +12053,7 @@ function scheduleInteractiveAutoGen() {
   cancelInteractiveAutoGen();
   if (!interactivePanel?.isActive?.()) return;
   if (!getOptionChecked('auto_generate')) return;
-  if (generating) return;
+  if (busyForLoops()) return;
   // **성공한 생성 뒤에만 잇는다.** 실패·큐잉도 `is_generating:false` 로 오므로,
   // 가르지 않으면 실패한 요청을 딜레이마다 영원히 다시 보낸다(Codex 리뷰).
   if (!lastGenerationOk) return;
@@ -12017,7 +12074,7 @@ function scheduleInteractiveAutoGen() {
     // 사용자가 멈추라고 한 뒤에 한 장 더 나가면 그게 제일 놀랍다.
     if (!interactivePanel?.isActive?.()) return;
     if (!getOptionChecked('auto_generate')) return;
-    if (generating) return;
+    if (busyForLoops()) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     // 수동 Generate 와 **같은 방식**으로 조립한다(app.js 의 cmd === 'generate' 분기).
     // rollComposition() 이 프롬프트를 다시 쓰면 그 안에서 overrides 를 다시 만든다.
@@ -13566,6 +13623,8 @@ document.addEventListener('keydown', async e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
     e.preventDefault();
+    // 누르고 있으면 keydown 이 반복된다 - 생성 중에도 쌓이게 된 뒤로는 반복 한 번이 한 장이다.
+    if (e.repeat) return;
     // 버튼의 단축키다 - 버튼과 **같은 입구**를 쓴다(라벨이 Inpaint 면 그렇게 돈다).
     generateAction();
   } else if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.shiftKey) {

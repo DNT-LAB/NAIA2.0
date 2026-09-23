@@ -1390,7 +1390,11 @@ async def _maybe_continue_auto_generation(
             _release_auto_gen_prefetch(context)  # Automation 종료/카운트 소진 → 예약 홀더 폐기
             return False
         delay_seconds = float(policy.get("delay_seconds") or 0.0)
-        if delay_seconds > 0:
+        # ⚠️ **큐에 기다리는 장이 있으면 쉬지 않는다.** 사람이 생성 중에 Generate 를 더 쌓을 수
+        #    있게 되면서(사용자 지정 2026-09-23) 이 딜레이가 사람 장 사이마다 러너를 재웠다 -
+        #    연속은 어차피 아래 `_should_continue_auto_generation` 이 큐가 빌 때까지 미룬다.
+        #    쉬는 것도 그때(마지막 장이 끝날 때) 한 번이면 된다(Fable 검토).
+        if delay_seconds > 0 and context.generation_queue_manager.is_empty():
             context._automation_service().begin_delay(automation_run_id, delay_seconds)
             await _broadcast_automation_state(context, clients)
             if not await _wait_for_automation_delay(context, automation_run_id, delay_seconds):

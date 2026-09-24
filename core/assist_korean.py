@@ -30,11 +30,41 @@ FUNCTIONAL_PREFIXES = ("VV", "VA", "VX", "EC", "EF", "ETM", "ETN", "JKS", "JKO",
                        "XSA", "EP")
 ROLE_OF_PARTICLE = {"JKS": "S", "JKO": "O", "JKB": "D", "JKG": "G", "JX": "S", "JC": "C"}
 DATIVE_FORMS = frozenset({"에게", "한테", "께", "에게서", "한테서"})
+# 이름 뒤에 붙어 나오는 조사(긴 것부터) — Kiwi 가 모르는 성 뒤에서 '카나데가' 처럼 묶어 낼 때 떼어 낸다
+GLUED_PARTICLES = (("에게서", "JKB"), ("한테서", "JKB"), ("에게", "JKB"), ("한테", "JKB"), ("께서", "JKS"),
+                   ("이랑", "JC"), ("하고", "JC"), ("랑", "JC"), ("와", "JC"), ("과", "JC"), ("께", "JKB"),
+                   ("이", "JKS"), ("가", "JKS"), ("은", "JX"), ("는", "JX"), ("을", "JKO"), ("를", "JKO"),
+                   ("의", "JKG"), ("도", "JX"))
 MAX_KEYWORD_TAGS = 12       # 한 키워드가 이보다 많은 태그를 가리키면 '<자세>' 같은 묶음 이름이다 — 힌트로 쓰지 않는다
 
 
 def compact(text: Any) -> str:
     return re.sub(r"\s+", "", str(text or "")).lower()
+
+
+def base_name(tag: str) -> str:
+    """태그의 밑이름 — 괄호(변형판·작품)를 뗀다: hatsune miku (append) -> hatsune miku, yuuka (track) (blue archive) -> yuuka."""
+    return re.sub(r"\s*\(.*$", "", str(tag or "")).strip() or str(tag or "")
+
+
+def _one_character_family(rows: list[tuple[str, int, str]]) -> bool:
+    """12개 넘는 묶음이 **한 캐릭터와 그 변형판**인가(하츠네미쿠 -> hatsune miku · hatsune miku (append) … 32개).
+    1위 캐릭터와 밑이름이 같은 태그가 절반 이상이고 게시물의 80% 이상이면 그렇다.
+    실측 09-24(캐릭터가 1위인 묶음 69개): 변형판 묶음 5개(하츠네미쿠·키아나카스라나·라이덴메이·브로냐자이칙·마휘핑)는
+    게시물 비중 0.977~1.0, 분류 64개(캐릭터·원신캐릭터·보컬로이드캐릭터 …)는 0.657 이하이고 가족 태그가 1~3개다."""
+    best: dict[str, tuple[int, str]] = {}
+    for tag, count, cat in rows:
+        n = max(0, int(count or 0))
+        if tag not in best or n > best[tag][0]:
+            best[tag] = (n, cat)
+    if not best:
+        return False
+    top = max(best, key=lambda t: best[t][0])
+    if best[top][1] != "character":
+        return False
+    family = [t for t in best if base_name(t) == base_name(top)]
+    total = sum(n for n, _c in best.values())
+    return len(family) * 2 >= len(best) and total > 0 and sum(best[t][0] for t in family) >= 0.8 * total
 
 
 def load_rules(path: Path | None = None) -> dict[str, Any]:
@@ -93,7 +123,9 @@ class KoreanVocab:
         """
         rows = [r for r in self.keywords.get(compact(word), []) if r[2] != "artist"]
         if len({r[0] for r in rows}) > MAX_KEYWORD_TAGS:
-            return "general"      # 묶음 이름 — '캐릭터' 는 1,371명을 가리키는 분류다(실측: 입력칸에서 이름으로 칠해졌다)
+            # 묶음 이름 — '캐릭터' 는 1,371명을 가리키는 분류다(실측: 입력칸에서 이름으로 칠해졌다).
+            # 단 한 캐릭터의 변형판 묶음은 그 캐릭터 이름이다 — 안 그러면 '하츠네 미쿠' 를 한 이름으로 붙인 순간 놓친다.
+            return "character" if _one_character_family(rows) else "general"
         if rows:
             return "character" if max(rows, key=lambda r: r[1])[2] == "character" else "general"
         return "piece" if self.name_pieces.get(compact(word)) else "none"
@@ -200,6 +232,15 @@ class KoreanAnalysis:
         return {f for f, t in self.tokens if t in NOUN_TAGS or t.startswith(VERB_PREFIXES)} | set(self.stems)
 
 
+@dataclass
+class _Tok:
+    """위치가 있는 토큰(clean_text 기준 [start, end)). 여러 토막 이름은 합쳐져 form 에 띄어 쓴 그대로 담긴다."""
+    form: str
+    tag: str
+    start: int
+    end: int
+
+
 # ── 층 ─────────────────────────────────────────────────────────────────────
 
 
@@ -266,6 +307,9 @@ class KoreanLayer:
                 return False          # Kiwi 가 이미 아는 말
             return not all(t.tag.startswith(FUNCTIONAL_PREFIXES) for t in toks)   # 하고 = 하/VV + 고/EC
 
+        # ⚠️ 키워드의 앞 조각(성)은 넣지 않는다 — 성만이 아니라 '메이드가·고용한·검은·같은' 같은 문장 조각이 섞여 있어
+        #    고유명사로 넣으면 '메이드가' 가 한 덩어리가 되는 식으로 문장이 부서진다(실측 09-24, 1,700개 중 수백 개).
+        #    성 뒤에서 조사가 붙어 나오는 것(카나데가)은 _unglue 가, 성이 쪼개지는 것은 _merge_names 가 맡는다.
         names = [w for w in self.vocab.name_pieces if unknown_name(w)]
         people = [w for w in (self._female | self._male | self._neutral | set(self._groups))
                   if re.fullmatch(r"[가-힣]{2,}", w)]
@@ -279,13 +323,68 @@ class KoreanLayer:
         return kiwi
 
     def tokenize(self, text: str) -> list[tuple[str, str]]:
+        return [(t.form, t.tag) for t in self._tokens(text)]
+
+    def _tokens(self, text: str) -> list["_Tok"]:
+        """clean_text 한 글의 토큰(위치 포함). 붙은 조사를 떼고(_unglue) 이름 토막을 붙인다(_merge_names) —
+        여러 토막 이름(나토리 사나)이 **토큰 하나**가 되어 방향·인원 세기·칠하기가 한 사람으로 본다."""
+        cleaned = clean_text(text)
         if not self.warm():
             return []
         # Kiwi 는 네이티브 확장이고, 여러 파이썬 스레드가 한 인스턴스를 동시에 불러도 된다는 보장이 없다
         # (문서는 num_workers 내부 병렬만 말한다). 라우트는 스레드 풀에서 도니 요청 둘이 겹칠 수 있다 —
         # 네이티브 경합은 백엔드를 통째로 죽인다. 문장당 0.3ms 라 줄 세워도 비용이 없다.
         with self._tok_lock:
-            return [(t.form, t.tag) for t in self._kiwi.tokenize(clean_text(text))]
+            raw = [(t.form, t.tag, t.start, t.start + t.len) for t in self._kiwi.tokenize(cleaned)]
+        toks: list[_Tok] = []
+        for form, tag, start, end in raw:
+            toks.extend(self._unglue(_Tok(form, tag, start, end)))
+        return self._merge_names(toks, cleaned)
+
+    def _unglue(self, tok: "_Tok") -> list["_Tok"]:
+        """'카나데가'/NNP → 카나데 + 가. Kiwi 가 모르는 성 뒤의 이름을 조사까지 묶어 낸다(실측 09-24:
+        오토노세 카나데가 · 하츠네 미쿠가). **통째로는 이름이 아니고, 앞부분이 이름일 때만** 가른다."""
+        if tok.tag not in ("NNP", "NNG") or tok.end - tok.start != len(tok.form):
+            return [tok]
+        if self.vocab.character_candidates(tok.form, limit=1):
+            return [tok]
+        for particle, ptag in GLUED_PARTICLES:
+            stem = tok.form[:-len(particle)]
+            if tok.form.endswith(particle) and len(stem) >= 2 and stem not in self._not_names \
+                    and self.vocab.character_candidates(stem, limit=1) and not self.vocab.is_general_word(stem):
+                cut = tok.start + len(stem)
+                return [_Tok(stem, "NNP", tok.start, cut), _Tok(particle, ptag, cut, tok.end)]
+        return [tok]
+
+    def _merge_names(self, toks: list["_Tok"], cleaned: str) -> list["_Tok"]:
+        """이름 토막을 붙여 전체 이름 하나로(나토리 + 사나 -> '나토리 사나' -> natori sana, 오토노세 + 카나데).
+        긴 것부터. ⚠️ 붙인 꼴이 **전체 이름으로 사전에 있을 때만** — 안 그러면 '나토리' 가 따로 칸코레의
+        natori 로 잡혀 인물이 셋이 됐다(사용자 제보 09-24). 교복 소녀 같은 이웃 명사는 안 붙는다.
+        양 끝만 명사면 가운데는 무엇이든 된다 — Kiwi 가 이름 끝 글자를 조사로 뗀다(키아나 카스라나 -> 키아 + 나/JC + 카스라나,
+        실측). 붙인 **글자 그대로**가 전체 이름일 때만이라 '유우카와 유즈' 같은 이웃은 붙지 않는다."""
+        out: list[_Tok] = []
+        i = 0
+        while i < len(toks):
+            merged, size = None, 1
+            for size in (4, 3, 2):
+                window = toks[i:i + size]
+                if len(window) < size or window[0].tag not in ("NNP", "NNG") or window[-1].tag not in ("NNP", "NNG"):
+                    continue
+                surface = cleaned[window[0].start:window[-1].end]
+                joined = compact(surface)
+                # 일반 낱말로 더 많이 쓰이는 꼴은 안 붙인다 — '고양이 귀' 는 한 캐릭터의 별칭이기도 하지만 cat ears 다(실측)
+                if joined in self._not_names or self.vocab.is_general_word(joined) \
+                        or not self.vocab.character_candidates(joined, limit=1):
+                    continue
+                merged = _Tok(surface, "NNP", window[0].start, window[-1].end)
+                break
+            if merged is not None:
+                out.append(merged)
+                i += size
+            else:
+                out.append(toks[i])
+                i += 1
+        return out
 
     # -- 분석 -------------------------------------------------------------
     def analyze(self, text: str) -> KoreanAnalysis:
@@ -439,16 +538,14 @@ class KoreanLayer:
             if form not in self._not_names:
                 add(form, start, end, "brace")
         if use_kiwi and self._kiwi is not None:
-            cleaned, index = _clean_with_index(raw)
-            with self._tok_lock:
-                toks = list(self._kiwi.tokenize(cleaned))
-            for tok in toks:
+            _cleaned, index = _clean_with_index(raw)
+            for tok in self._tokens(raw):             # 붙은 조사를 떼고 이름 토막을 붙인 토큰(나토리 사나 = 하나)
                 form = tok.form
                 if not self._name_like(form, tok.tag):
                     continue
-                if tok.start + tok.len > len(index):
+                if tok.end > len(index) or tok.end <= tok.start:
                     continue
-                start, end = index[tok.start], index[tok.start + tok.len - 1] + 1
+                start, end = index[tok.start], index[tok.end - 1] + 1
                 if raw[start:end] != form:            # 위치가 어긋나면(드문 글자) 그 자리 근처에서 다시 찾는다
                     found = raw.find(form, max(0, start - 2))
                     if found < 0:

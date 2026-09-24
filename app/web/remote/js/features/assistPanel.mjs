@@ -342,9 +342,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     addModelSpans(text);
   }
 
-  /** 모델이 찾은 이름(입력칸 인식이 놓친 것)도 글에서 찾아 칠한다. */
+  /** 모델이 찾은 이름(입력칸 인식이 놓친 것)도 글에서 찾아 칠한다. 긴 이름이 짧은 조각을 품으면
+   *  (나토리 사나 ⊃ 나토리 — 사용자 제보 09-24) 조각을 걷고 긴 것을 칠한다. 칠이 안 남은 자동 이름은 칩에서도 뺀다. */
   function addModelSpans(text) {
-    const taken = spans.map(s => [s.start, s.end]);
     for (const n of names.values()) {
       if (n.source !== 'model' || !n.form) continue;
       let from = 0;
@@ -352,12 +352,17 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
         const at = text.indexOf(n.form, from);
         if (at < 0) break;
         const end = at + n.form.length;
-        if (!taken.some(([a, b]) => at < b && end > a)) {
+        const overlapping = spans.filter(s => at < s.end && end > s.start);
+        if (overlapping.every(s => s.start >= at && s.end <= end && s.end - s.start < n.form.length)) {
+          spans = spans.filter(s => !overlapping.includes(s));
           spans.push({ start: at, end, form: n.form });
-          taken.push([at, end]);
         }
         from = end;
       }
+    }
+    const painted = new Set(spans.map(s => s.form));
+    for (const [form, n] of [...names]) {
+      if (n.source === 'auto' && !painted.has(form)) names.delete(form);
     }
   }
 

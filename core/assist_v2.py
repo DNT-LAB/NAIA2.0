@@ -381,6 +381,12 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     for hit in ka.names:
         if hit.form not in order:
             order.append(hit.form)
+    # 전체 이름과 그 조각이 함께 있으면(나토리 사나 · 나토리) 조각은 같은 사람이다 — 인물을 둘로 세지 않는다
+    # (사용자 제보 09-24: 캐릭터 3 이 생겼다). 한국어 층이 토막을 합치지만, 모델이 적은 이름과 어긋날 때의 그물.
+    packed = {form: compact(form) for form in order}
+    order = [form for form in order
+             if not any(other != form and len(packed[other]) > len(packed[form]) and packed[form] in packed[other]
+                        for other in order)]
     by_form = {h.form: h for h in ka.names}
     for form in order:
         hit = by_form.get(form) or (name_lookup(form) if name_lookup else None)

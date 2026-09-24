@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
+from core.assist_candidates import Ask
 from core.assist_korean import KoreanAnalysis, NameHit, clean_text, compact
 
 TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
@@ -231,6 +232,15 @@ def en_variants(term: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def exact_english(term: str, vocab: TagVocab) -> str | None:
+    """영문 추측이 (변형 포함) 태그 이름 그대로인가 — 쪼개지 않은 정확 일치만."""
+    for v in en_variants(term):
+        name = vocab.canonical(v)
+        if name and not _junk_tag(name):
+            return name
+    return None
+
+
 def resolve_english(term: str, vocab: TagVocab) -> list[str]:
     for v in en_variants(term):
         name = vocab.canonical(v)
@@ -299,7 +309,10 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
           generic_roles: Iterable[str] = (),
           name_lookup: Callable[[str], NameHit | None] | None = None,
           not_names: Iterable[str] = (), poses: Iterable[str] = (),
-          roles_for: Callable[[set[str]], tuple[str, str] | None] | None = None) -> Merged:
+          roles_for: Callable[[set[str]], tuple[str, str] | None] | None = None,
+          chooser: Callable[[list[Ask]], list[str]] | None = None) -> Merged:
+    """chooser: 정확히 안 풀린 포함 항목(Ask)을 받아 한국어 사전 후보에서 모델에게 고르게 하고(ask.keep · ask.picks 를
+    채운다), 모델이 안 낸 요청 명사에서 고른 장면 태그를 돌려준다. None 이면 예전처럼(쪼갠 조각 · 퍼지 · 못 찾음)."""
     generic = set(generic)
     poses = set(poses)
     generic_roles = {compact(role) for role in generic_roles if role}
@@ -308,6 +321,7 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     req_lemmas = ka.lemmas()
     req_compact = compact(clean_text(text))
     log: list[str] = []
+    asks: list[Ask] = []
     t1: list[str] = [t for t in ka.specific if t not in blocked and not _junk_tag(t)]
     t2: list[str] = []
     t3: list[str] = []
@@ -381,6 +395,14 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if m and kind != "exclude":
             return []                                               # 'no towel' 은 제외 칸의 일이다
         found = resolve_english(en, vocab)
+        if chooser is not None and kind == "include" and not exact_english(en, vocab):
+            # 영문이 태그 이름 그대로가 아니면(쪼개지거나 못 찾음) 한국어 정확 키워드가 아닌 한 모아 두었다가 고르게 한다
+            # — 쪼갠 조각(chin · resting · back)과 못 찾음(observing)이 여기서 났다(설계 19절)
+            hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)] if len(ko_c) >= 2 else []
+            if hit:
+                return hit[:1]
+            asks.append(Ask(ko=ko, en=en, who=int(item.get("who") or 0), fallback=list(found)))
+            return []
         if found and len(found) == 1:
             return found
         if len(ko_c) >= 2:
@@ -445,6 +467,22 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             if owner is not None and tag not in owner.attrs:
                 owner.attrs.append(tag)
             place(tag)
+    if chooser is not None:
+        # 모델이 안 낸 요청 명사(소파)도 같이 고른다 — 고를 것이 없으면 모델을 부르지 않는다
+        extra = chooser(asks) or []
+        for ask in asks:
+            chosen = ask.chosen()
+            owner = next((ch for ch in characters if model_index.get(ch.ko) == ask.who), None) if ask.who else None
+            for tag in chosen:
+                if _junk_tag(tag):
+                    continue
+                if owner is not None and tag not in owner.attrs:
+                    owner.attrs.append(tag)
+                place(tag)
+            log.append(f"ask:{ask.en}|{ask.ko}->{','.join(chosen) or '없음'}" + ("(예전 결과)" if ask.picks is None else ""))
+        for tag in extra:
+            place(tag)
+            log.append(f"extra:{tag}")
     exclude: list[str] = []
     for item in route.get("exclude") or []:
         for tag in item_tags(item, "exclude"):

@@ -170,11 +170,22 @@ def warm_assist(context: Any) -> None:
 
     실측: 퍼지 검색의 첫 호출이 색인을 만드느라 약 6초, 지시문(약 1,100토큰) 첫 처리가 5090 에서 3.2초였다.
     """
+    def _warm_choose() -> None:
+        # 고르기 준비물 — 사전 키워드 원형 색인(약 3초) · 후보 도구(영문 낱말 색인 0.5초). 엔진 데우기와 나란히 간다
+        # (고르기는 모델의 첫 답 뒤에 쓰인다 — 늦으면 색인 잠금에서 기다린다)
+        try:
+            layer = korean_layer(context)
+            _lemma_index(context, layer).build()
+            _compose_tools(context, layer, _tag_vocab(context, layer))
+        except Exception:
+            pass
+
     def _warm() -> None:
         try:
             korean_layer(context).warm()
         except Exception:
             pass
+        threading.Thread(target=_warm_choose, daemon=True, name="assist-v2-warm-choose").start()
         try:
             from app.backend.server.autocomplete_commands import search_kr_tags
 
@@ -419,6 +430,94 @@ def _with_rating_note(out: dict[str, Any], rating: str, dropped: dict[str, float
         out["message"] = " ".join(m for m in (_rating_note(rating, dropped), out.get("message")) if m)
 
 
+def _lemma_index(context: Any, layer: Any) -> Any:
+    """NAIA 한국어 키워드 원형 색인 — 세션에 하나(창을 열 때 뒤에서 만든다, 늦으면 첫 고르기가 약 3초 기다린다)."""
+    from core.assist_candidates import KeywordLemmaIndex
+
+    with _LOCK:
+        index = getattr(context, "assist_lemma_index", None)
+        if index is None:
+            index = KeywordLemmaIndex(layer.vocab.keywords, layer.raw_tokens)
+            context.assist_lemma_index = index
+    return index
+
+
+def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route: dict[str, Any],
+                  vocab: Any) -> tuple[Any, dict[str, Any]]:
+    """정확히 안 풀린 모델 항목 + 모델이 안 낸 요청 명사 -> 한국어 사전 후보(+영문 묶음·순위) -> E2B 가 고른다.
+    사용자 결정(09-25): '태그 검색을 해서 모델한테 정답을 한번 고르게' · 한 조각씩 번호로 단답(0 = 없음).
+    고를 것이 없으면 모델을 부르지 않는다."""
+    from core import assist_candidates as cand
+    from core import assist_compose as ac
+    from core.assist_v2 import _junk_tag
+
+    rules = layer.rules
+    state: dict[str, Any] = {"sent": [], "kept": [], "model": {}, "prep_ms": 0.0}
+
+    def chooser(asks: list[Any]) -> list[str]:
+        try:
+            return _choose(asks)
+        except Exception as exc:                      # 후보 찾기가 깨져도 Assist 는 산다 — 모두 예전 결과로
+            state["error"] = f"{type(exc).__name__}: {exc}"
+            for ask in asks:
+                ask.keep, ask.picks = [], None
+            return []
+
+    def canonical(term: str) -> str | None:
+        name = vocab.canonical(term)
+        return name if name and not _junk_tag(name) else None
+
+    def _choose(asks: list[Any]) -> list[str]:
+        started = time.perf_counter()
+        tools = _compose_tools(context, layer, vocab)
+        finder = ac.TagFinder(tools)
+        share = _rating_share(context, req["rating"])
+
+        def keep(tag: str) -> bool:
+            if not share:
+                return True
+            s = share(tag)
+            return s is None or s >= RATING_GATE[req["rating"]]
+
+        route_kos = [str(i.get("ko") or "") for key in ("include", "actions") for i in route.get(key) or []]
+        stop = set(rules["not_names"]) | {w for g in rules["people"].values() for w in g} | set(rules["groups"])
+        # 한국어 층이 이미 태그로 만든 원형 — 동사 규칙(앉 -> sitting) · 시청자 규칙(나를 쳐다보는 -> looking at viewer)
+        layer_lemmas = {f"{s}/V" for s in ka.stems if s in rules["verbs"]
+                        or any(s.startswith(p) for p, _t in rules["stem_prefixes"])}
+        for r in (rules.get("viewer") or {}).get("rules") or []:
+            if set(r.get("tags") or []) & set(ka.viewer or []):
+                layer_lemmas |= {f"{v}/V" for v in r.get("verbs") or []}      # 첫 규칙에 '보' 가 있다(쳐다보 = 보)
+        sent = cand.build_asks(asks, ka=ka, route_kos=route_kos, index=_lemma_index(context, layer),
+                               tokenize=layer.tokenize, lookup=layer.vocab.lookup, keyword_tags=tools.keyword_tags,
+                               rank=lambda ko, en: [(c.tag, c.en_strong, c.ko_strong) for c in finder.rank(ko, en)],
+                               canonical=canonical, usable=finder.usable, keep=keep, stop=stop,
+                               layer_lemmas=layer_lemmas,
+                               literal=lambda t, word: ac.compact(word) in ac.own_names(
+                                   tools.info(t) or {}, tools.name_claims, tools.label_uses),
+                               describe=lambda t: ac._short((tools.info(t) or {}).get("description") or ""))
+        state["prep_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        state["kept"] = [{"ko": a.ko, "en": a.en, "keep": list(a.keep)} for a in asks if a.keep]
+        # 한 조각씩 번호로(0 = 없음), 앞에서 고른 것을 넘기며 차례로 — 사용자 제안(09-25). 모델이 실패하면 그 조각부터는
+        # 고르기 없음(예전 결과)
+        done = [t for a in asks for t in a.keep]
+        elapsed = 0.0
+        for ask in sent:
+            names = [t for t, _d in ask.candidates]
+            reply, info = _chat(context, cand.CHOOSE_SYSTEM, cand.choose_message(req["text"], ask, done),
+                                cand.choose_grammar(len(names)), max_tokens=4)
+            elapsed += float(info.get("elapsed") or 0)
+            state["model"] = dict(info, elapsed=round(elapsed, 2), calls=len(state["sent"]) + 1)
+            if reply is None:
+                break
+            ask.picks = cand.parse_choice(reply, names)
+            done += ask.picks or []
+            state["sent"].append({"ko": ask.ko, "en": ask.en, "source": ask.source, "keep": list(ask.keep),
+                                  "candidates": names, "picks": ask.picks})
+        return [t for a in sent if a.source == "extra" for t in (a.picks or [])]
+
+    return chooser, state
+
+
 def _fallback_route(ka: Any) -> dict[str, Any]:
     """모델 없이: 한국어 층이 찾은 것만으로 장면 검색."""
     return {"task": "scene" if (ka.specific or ka.verb_tags) else "other", "goal": "find", "characters": [],
@@ -447,9 +546,12 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                 if h.form not in req["not_names"]]              # '이름 아님' 은 인물에서 뺀다
     korean_ms = round((time.perf_counter() - t) * 1000, 1)
     route, model = _call_model(context, req["text"], req["previous"])
+    chooser, choose_state = None, None
+    vocab = _tag_vocab(context, layer)
     if route is None:
         route = _fallback_route(ka)
-    vocab = _tag_vocab(context, layer)
+    else:
+        chooser, choose_state = _make_chooser(context, layer, ka, req, route, vocab)
     rules = layer.rules
     merged = merge(route, ka, vocab, text=req["text"], generic=rules["generic_tags"],
                    simile_particles=rules["simile_particles"],
@@ -457,7 +559,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                        layer.name_hit(form, explicit=form in choices, analysis=ka), choices),
                    not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
                    generic_roles={w for group in rules.get("people", {}).values() for w in group},
-                   roles_for=lambda names: layer.roles_for(ka, names))
+                   roles_for=lambda names: layer.roles_for(ka, names), chooser=chooser)
     share = _rating_share(context, req["rating"])
     dropped = off_rating(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
                          + [r[1] for r in merged.relations], share, RATING_GATE[req["rating"]]) if share else {}
@@ -471,7 +573,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         "relations": [{"source": s, "action": a, "target": d} for s, a, d in merged.relations],
         "model": model,
         "trace": {"korean": ka.notes, "merge": merged.log,
-                  "route": {k: v for k, v in route.items() if v not in ("", [], None)}},
+                  "route": {k: v for k, v in route.items() if v not in ("", [], None)},
+                  "choose": choose_state},
     }
     t = time.perf_counter()
     if merged.task == "scene":
@@ -483,6 +586,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     else:
         out["guide"] = GUIDE
     out["timing"] = {"korean_ms": korean_ms, "model_s": model.get("elapsed"),
+                     "choose_s": ((choose_state or {}).get("model") or {}).get("elapsed"),
+                     "choose_prep_ms": (choose_state or {}).get("prep_ms"),
                      "search_ms": round((time.perf_counter() - t) * 1000, 1),
                      "total_s": round(time.perf_counter() - started, 3)}
     if merged.task in ("scene", "tag"):

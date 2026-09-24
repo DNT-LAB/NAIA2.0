@@ -399,6 +399,14 @@ class KoreanLayer:
     def tokenize(self, text: str) -> list[tuple[str, str]]:
         return [(t.form, t.tag) for t in self._tokens(text)]
 
+    def raw_tokens(self, text: str) -> list[tuple[str, str]]:
+        """Kiwi 날것(조사 떼기·이름 붙이기 없음) — 사전 키워드 원형 색인용.
+        이름 붙이기까지 하면 일반 키워드 5만 개에 52초, 날것은 2.4초였다(실측 09-25)."""
+        if not self.warm():
+            return []
+        with self._tok_lock:
+            return [(t.form, t.tag) for t in self._kiwi.tokenize(clean_text(text))]
+
     def _tokens(self, text: str) -> list["_Tok"]:
         """clean_text 한 글의 토큰(위치 포함). 붙은 조사를 떼고(_unglue) 이름 토막을 붙인다(_merge_names) —
         여러 토막 이름(나토리 사나)이 **토큰 하나**가 되어 방향·인원 세기·칠하기가 한 사람으로 본다."""

@@ -232,6 +232,26 @@ def _companion_map(context: WebSessionContext) -> dict[str, list[str]]:
     return table
 
 
+def tag_rating_counts(*names: Any) -> list[int] | None:
+    """태그의 [g, s, q, e] 등장 횟수 - `data/danbooru_tag_counts_by_rating.json`(태그 아카이브에서 구운 표).
+
+    Danbooru Auto-Weight·Assist 가 이미 읽는 표를 **같은 캐시로** 쓴다(따로 읽으면 메모리에 두 벌).
+    키는 소문자·공백 표기다. 없으면 None - '0 번' 과 '모름' 을 뭉개지 않는다.
+    """
+    from core.ollama_tag_assist_service import _load_rating_dist
+
+    table = _load_rating_dist()
+    for name in names:
+        key = str(name or "").strip().lower()
+        if not key:
+            continue
+        value = table.get(key) or table.get(key.replace("_", " "))
+        if isinstance(value, list) and len(value) >= 4:
+            counts = [int(v or 0) for v in value[:4]]
+            return counts if sum(counts) > 0 else None
+    return None
+
+
 def _recommendable(context, raw_tags):
     """사전 칩으로 **권할 값이 있는 태그인가**를 판정하는 술어를 만든다.
 
@@ -316,6 +336,10 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
         "subgroup": info.get("subgroup", ""),
         "cat": info.get("_cat", ""),
     }
+    rating_counts = tag_rating_counts(tag_lower, info.get("_tag"))
+    if rating_counts:
+        # 툴팁이 등급별(G/S/Q/E) 등장 횟수를 먼저 보여 준다(사용자 지정 2026-09-24).
+        result["rating_counts"] = rating_counts
     keep = _recommendable(context, raw_tags)
     relations = info.get("relations", {}) if isinstance(info.get("relations"), dict) else {}
     parents = relations.get("parent", [])

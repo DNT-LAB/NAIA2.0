@@ -13449,7 +13449,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260924-sqkw')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260924-sq-tagrating')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

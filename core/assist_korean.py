@@ -81,7 +81,7 @@ EMPTY_RULES: dict[str, Any] = {
     "idioms": [], "verbs": {}, "stem_prefixes": [], "nouns": {}, "people": {"female": [], "male": [], "neutral": []},
     "groups": {}, "numerals": {}, "solo_words": [], "not_names": [], "filler_stems": [], "generic_tags": [],
     "poses": [], "passive_suffixes": ["히", "리", "기", "이"], "passive_exceptions": ["하", "있", "보이"],
-    "companions": [],
+    "companions": [], "parts": [], "viewer": {}, "keyword_block": [],
 }
 
 
@@ -97,9 +97,12 @@ class KoreanVocab:
     genders: dict[str, str] = field(default_factory=dict)  # 캐릭터 태그 -> girl/boy
     character_rank: Callable[[str], int] = lambda _tag: 0  # 캐릭터 태그 -> 게시물 수(Artist 팩)
     tag_exists: Callable[[str], bool] = lambda _tag: True  # 이벤트 맵 어휘에 있나
+    blocked_keys: set[str] = field(default_factory=set)    # 묻지 않을 키워드(규칙표 keyword_block — 쳐다보기)
 
     def lookup(self, span: str, *, character: bool = False) -> list[tuple[str, int]]:
-        """정확 일치 키워드 -> 태그(게시물 많은 순). 묶음 이름(12개 초과)은 버린다."""
+        """정확 일치 키워드 -> 태그(게시물 많은 순). 묶음 이름(12개 초과)·막은 키워드는 버린다."""
+        if compact(span) in self.blocked_keys:
+            return []
         rows = [r for r in self.keywords.get(compact(span), []) if (r[2] == "character") == character]
         if len({r[0] for r in rows}) > MAX_KEYWORD_TAGS:
             return []
@@ -221,6 +224,7 @@ class KoreanAnalysis:
     covers: set[str] = field(default_factory=set)          # 관용구가 덮는 태그(on stomach)
     idiom_verbs: set[str] = field(default_factory=set)     # 관용구가 가져간 동사 줄기 — 모델 항목이 이것이면 버린다
     specific: list[str] = field(default_factory=list)      # 1순위: 관용구·사전 구·명사 규칙
+    viewer: list[str] = field(default_factory=list)        # 그중 1순위 시청자 규칙(나를 째려보는 -> looking at viewer) — 구성은 덧붙인다
     verb_tags: list[str] = field(default_factory=list)     # 동사 사전·줄기 규칙(흔한 것은 뒤로)
     phrases: dict[str, str] = field(default_factory=dict)  # 붙여 쓴 구 -> 태그(모델 항목 교체용)
     verb_phrases: list[str] = field(default_factory=list)  # 그중 동사에서 나온 구의 태그(인물 사이 동작 후보)
@@ -274,6 +278,8 @@ class KoreanLayer:
         self._simile = set(r["simile_particles"])
         self._filler = set(r["filler_stems"])
         self._not_names = set(r["not_names"])
+        # 사전 1순위가 일상어 뜻과 어긋나는 키워드 — 사전 구·구성 후보·모델 항목 교체가 모두 이 lookup 을 거친다
+        vocab.blocked_keys |= {compact(k) for k in r.get("keyword_block") or ()}
 
     # -- Kiwi 준비 --------------------------------------------------------
     def ready(self) -> bool:
@@ -426,17 +432,38 @@ class KoreanLayer:
                 for tag in tags:
                     if tag not in out.specific and self.vocab.tag_exists(tag):
                         out.specific.append(tag)
+        # 몸 부위 + 묶는 동사(손목이 … 묶여 -> bound wrists) — 사용자 요청 09-24 에서 tied up · tying 만 나왔다
+        for rule in self.rules.get("parts") or ():
+            hit = _part_hit(toks, rule)
+            if hit:
+                for tag in rule.get("tags") or ():
+                    if tag not in out.specific and self.vocab.tag_exists(tag):
+                        out.specific.append(tag)
+                out.covers.update(rule.get("covers") or ())
+                out.notes.append(f"부위:{hit}->{rule.get('tags')}")
+        # 나를·저에게 + 보는 동사 -> looking at viewer — 1인칭은 그림을 보는 사람이다(나를 째려보는)
+        for tag in _viewer_tags(toks, self.rules.get("viewer") or {}):
+            if tag not in out.specific and self.vocab.tag_exists(tag):
+                out.specific.append(tag)
+                out.viewer.append(tag)
+                out.notes.append(f"시청자:{tag}")
         consumed: set[str] = set()          # 사전 구가 가져간 동사 줄기 — 동사 사전으로 한 번 더 넣지 않는다
-        for span, kind, stem in _phrase_spans(toks, self._filler, self.rules["passive_suffixes"],
-                                              self.rules["passive_exceptions"]):
+        spans = _phrase_spans(toks, self._filler, self.rules["passive_suffixes"], self.rules["passive_exceptions"])
+        # 제 꼴(수동 꼴) 그대로 사전에 있는 동사는 능동 꼴을 묻지 않는다 — 묶여 -> 묶이기(tied up) 인데 묶기(tying)가
+        # 따라 들어왔다(사용자 요청 09-24). 실측: 두 꼴이 다 키워드인 쌍 15개 모두 제 꼴이 맞다(먹이기 feeding / 먹기 eating
+        # food · 흔들리기 swinging / 흔들기 shaking). 제 꼴의 태그가 규칙에 덮여도(bound wrists) 능동 꼴로 새지 않는다.
+        own_hit = {stem for span, kind, stem in spans if kind == "verb" and self.vocab.scene_tags(span)}
+        for span, kind, stem in spans:
             if stem and stem in out.idiom_verbs:
                 continue                    # 관용구가 가져간 동사(개같이 엎드리기 -> all fours, on stomach 아님)
+            if kind == "active" and stem in own_hit:
+                continue
             tags = self.vocab.scene_tags(span)
             if not tags or tags[0] in out.blocked or tags[0] in out.covers:
                 continue                    # 1순위가 막혔으면 2순위(face in pillow)로 새지 않는다
             if compact(span) not in out.phrases:
                 out.phrases[compact(span)] = tags[0]
-                if kind == "verb":
+                if kind != "noun":
                     consumed.add(stem)
                     if tags[0] not in out.verb_phrases:
                         out.verb_phrases.append(tags[0])
@@ -788,6 +815,74 @@ def partition_of(girls: int, boys: int, solo: bool) -> str:
     return "1boy_solo" if solo else "1boy"
 
 
+def _verb_word(toks: list[tuple[str, str]], j: int) -> str | None:
+    """j 번째가 동사면 그 줄기(명사+하 는 붙여서: 응시/NNG + 하/XSV -> 응시하). 아니면 None."""
+    form, tag = toks[j]
+    if tag == "XSV" and j > 0 and toks[j - 1][1] == "NNG":
+        return toks[j - 1][0] + form
+    return form if tag.startswith(VERB_PREFIXES) else None
+
+
+def _negated(toks: list[tuple[str, str]], j: int) -> bool:
+    """j 번째 동사가 부정인가 — 안/못 + 동사 · 동사 + 지(+도) + 않/못하/말(나를 보지 않고)."""
+    start = j - 1 if toks[j][1] == "XSV" else j
+    if start > 0 and toks[start - 1][1] == "MAG" and toks[start - 1][0] in ("안", "못"):
+        return True
+    after = [f for f, _t in toks[j + 1:j + 4]]
+    return after[:1] == ["지"] and any(f in ("않", "못하", "말") for f in after[1:])
+
+
+def _part_hit(toks: list[tuple[str, str]], rule: dict[str, Any]) -> str | None:
+    """규칙표 parts — 몸 부위가 **주어·목적어**(이/가·은/는·을/를, 또는 조사 없이 바로 동사)이고 같은 절에서 묶는
+    동사가 오면 '부위+동사'. ⚠️ '손으로 끈을 묶는' 의 손(으로)은 묶는 쪽이고 '손목에 리본을 묶은' 은 장식이다 —
+    부위 뒤 조사를 본다. 다음 절(-고·-며)로는 넘어가지 않는다(손을 들고 리본을 묶는)."""
+    nouns, verbs = set(rule.get("nouns") or ()), set(rule.get("verbs") or ())
+    for i, (form, tag) in enumerate(toks):
+        if tag not in ("NNG", "NNP") or form not in nouns or i + 1 >= len(toks):
+            continue
+        nxt = toks[i + 1][1]
+        if nxt in ("JKS", "JX", "JKO"):
+            start = i + 2
+        elif nxt.startswith(VERB_PREFIXES):
+            start = i + 1                   # 조사 없이(손목 묶인 채로)
+        else:
+            continue
+        for j in range(start, min(len(toks), i + 9)):
+            if toks[j][1] == "EC" and toks[j][0] in CLAUSE_ENDINGS:
+                break
+            word = _verb_word(toks, j)
+            if word is not None and word in verbs and not _negated(toks, j):
+                return f"{form}+{word}"
+    return None
+
+
+def _viewer_tags(toks: list[tuple[str, str]], viewer: dict[str, Any]) -> list[str]:
+    """규칙표 viewer — 1인칭(나·저)이 **를·에게** 로 받고 같은 절의 첫 동사가 보는·가리키는·뻗는 것이면 그 태그.
+    '나는 창밖을 보는' 의 나는 장면 속 인물(주어)이라 보는 사람이 아니다. '향하'(나를 향해)는 지나간다.
+    부정(나를 보지 않고 · 안 보는)은 태그를 내지 않는다."""
+    pronouns = set(viewer.get("pronouns") or ())
+    through = set(viewer.get("through") or ())
+    out: list[str] = []
+    for i, (form, tag) in enumerate(toks):
+        if tag != "NP" or form not in pronouns:
+            continue
+        nxt = toks[i + 1] if i + 1 < len(toks) else ("", "")
+        if not (nxt[1] == "JKO" or (nxt[1] == "JKB" and nxt[0] in DATIVE_FORMS)):
+            continue
+        for j in range(i + 2, min(len(toks), i + 8)):
+            if toks[j][1] == "EC" and toks[j][0] in CLAUSE_ENDINGS:
+                break
+            word = _verb_word(toks, j)
+            if word is None or word in through:
+                continue
+            if not _negated(toks, j):
+                for rule in viewer.get("rules") or ():
+                    if word in (rule.get("verbs") or ()):
+                        out.extend(t for t in rule.get("tags") or () if t not in out)
+            break
+    return out
+
+
 def _stems(toks: list[tuple[str, str]]) -> list[str]:
     """동사 줄기. 의성어+거리/대(헥/IC 헥/IC 거리/XSV)는 한 줄기로 붙인다."""
     out: list[str] = []
@@ -811,8 +906,8 @@ def _stems(toks: list[tuple[str, str]]) -> list[str]:
 
 def _phrase_spans(toks: list[tuple[str, str]], filler: set[str], passive_suffixes: list[str],
                   passive_exceptions: list[str]) -> list[tuple[str, str, str]]:
-    """사전에 물어볼 구 (구, 'noun'|'verb', 동사 줄기). 명사 두세 개 묶음(띄어 쓴 꼴) · 목적어(+조사 없는 명사)+동사
-    명사형 · 두 음절 넘는 동사 명사형 · 수동형의 능동 명사형(안겨서 -> 안기 -> carrying).
+    """사전에 물어볼 구 (구, 'noun'|'verb'|'active', 동사 줄기). 명사 두세 개 묶음(띄어 쓴 꼴) · 목적어(+조사 없는 명사)+동사
+    명사형 · 두 음절 넘는 동사 명사형 · 수동형의 능동 명사형('active': 안겨서 -> 안기 -> carrying).
 
     ⚠️ 명사 하나·한 음절 동사 명사형은 묻지 않는다 — 비·눈·폰·기기(기계)·차기(발차기)·자기(도자기) 동음이의.
     """
@@ -840,10 +935,11 @@ def _phrase_spans(toks: list[tuple[str, str]], filler: set[str], passive_suffixe
             stems = [form, form[:-1]] if passive else [form]      # 수동 -> 능동(꼬집히 -> 꼬집)
             obj = seq[-1][1] if seq and seq[-1][0] == "N" and seq[-1][2] in ("O", "") else None
             for stem in stems:
+                kind = "verb" if stem == form else "active"
                 if obj:
-                    spans.append((f"{obj} {stem}기", "verb", form))
+                    spans.append((f"{obj} {stem}기", kind, form))
                 if len(stem) >= 2 or (passive and stem != form):
-                    spans.append((f"{stem}기", "verb", form))     # 수동형의 능동 명사형은 한 음절이어도(안기)
+                    spans.append((f"{stem}기", kind, form))       # 수동형의 능동 명사형은 한 음절이어도(안기)
             seq.append(("V", form, ""))
         i += 1
     # 긴 구부터(머리 쓰다듬기 > 쓰다듬기) — 모델 항목 교체에서 긴 것이 이긴다

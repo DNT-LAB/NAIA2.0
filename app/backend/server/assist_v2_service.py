@@ -821,10 +821,14 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         picks = ac.parse_choice(text, cands) if text is not None else [None] * len(cands)
         for d, pick in zip(asking, picks):
             ac.apply_choice(d, pick)
+    viewed: set[tuple[int, str]] = set()
     for d in subs:
         if d.via == "ask":
             ac.apply_choice(d, None)                      # 모델이 없다 — 지어내지 않는다(설명의 '못 찾음' 에 남는다)
         ac.add_companions(d, rules.get("companions") or ())
+        if (d.owner, d.ko) not in viewed:                 # 절마다 한 번(같은 절의 다른 영문 추측에는 안 붙인다)
+            viewed.add((d.owner, d.ko))
+            ac.add_viewer(d, layer.analyze(d.ko).viewer)
     ac.dedupe(subs, relation, chars, tools.info)
 
     persons = _compose_persons(req, chars)

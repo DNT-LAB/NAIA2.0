@@ -319,8 +319,10 @@ class TagFinder:
         if ka is not None:
             for key, tag in (getattr(ka, "phrases", {}) or {}).items():
                 add(tag, 6, f"phrase:{key}", ko_key=key if len(key) >= 4 else None)
+            viewer = getattr(ka, "viewer", []) or []
             for tag in getattr(ka, "specific", []) or []:
-                if tag not in (getattr(ka, "phrases", {}) or {}).values():
+                # 시청자 규칙(나를 째려봄 -> looking at viewer)은 절의 뜻(glaring)과 자리를 다투지 않는다 — add_viewer 가 덧붙인다
+                if tag not in (getattr(ka, "phrases", {}) or {}).values() and tag not in viewer:
                     add(tag, 5, "rule", ko_key="rule")
             for tag in getattr(ka, "verb_tags", []) or []:
                 add(tag, 4, "verb")
@@ -490,6 +492,16 @@ def add_companions(detail: Detail, companions: Iterable[dict[str, Any]]) -> Deta
         if tag in detail.tags and add and add not in detail.tags \
                 and any(w in detail.ko for w in rule.get("when") or ()):
             detail.tags.append(add)
+    return detail
+
+
+def add_viewer(detail: Detail, tags: Iterable[str]) -> Detail:
+    """1인칭 목적어(나를 째려봄)는 그림을 보는 사람 쪽 태그(looking at viewer)를 **덧붙인다** — 한 절 한 태그 자리를 두고
+    절의 뜻(glaring)과 다투면 표정이 밀려났다(09-24 실측). 절마다 한 번만 부른다(같은 절의 다른 영문 추측에는 안 붙인다)."""
+    tags = [t for t in tags or () if t and t not in detail.tags]
+    if tags and not detail.tags:
+        detail.via = "korean"
+    detail.tags.extend(tags)
     return detail
 
 

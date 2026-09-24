@@ -14,6 +14,32 @@
     {"tag": "single shoe", "when": ["바닥", "떨어", "벗겨", "벗어"], "add": "unworn shoes"},
     {"tag": "single sock", "when": ["바닥", "떨어", "벗겨", "벗어"], "add": "unworn socks"}
   ],
+  "parts_note": "몸 부위가 주어·목적어(이/가·은/는·을/를, 또는 조사 없이 바로 동사)이고 같은 절에 묶는 동사가 오면 부위 태그. '손으로 끈을 묶는'(으로)·'손목에 리본을 묶은'(에)은 아니다. covers 는 뭉뚱그린 사전 구(묶이기 -> tied up)를 막는다. 발(발이 묶이다 = 오도 가도 못하다)은 뺐다.",
+  "parts": [
+    {"nouns": ["손목", "손", "양손", "손발"], "tags": ["bound wrists"], "covers": ["tied up (nonsexual)"],
+     "verbs": ["묶", "묶이", "결박하", "결박되", "결박당하", "포박하", "포박되", "포박당하"]},
+    {"nouns": ["발목", "손발"], "tags": ["bound ankles"], "covers": ["tied up (nonsexual)"],
+     "verbs": ["묶", "묶이", "결박하", "결박되", "결박당하", "포박하", "포박되", "포박당하"]},
+    {"nouns": ["팔", "양팔"], "tags": ["bound arms"], "covers": ["tied up (nonsexual)"],
+     "verbs": ["묶", "묶이", "결박하", "결박되", "결박당하", "포박하", "포박되", "포박당하"]},
+    {"nouns": ["다리", "양다리"], "tags": ["bound legs"], "covers": ["tied up (nonsexual)"],
+     "verbs": ["묶", "묶이", "결박하", "결박되", "결박당하", "포박하", "포박되", "포박당하"]}
+  ],
+  "viewer_note": "1인칭(나·저, 날 = 나+ㄹ)이 를·에게 로 받고 같은 절의 첫 동사가 아래 것이면 그림을 보는 사람(viewer) 태그. '나는 …' (주어)은 장면 속 인물이다. 향하(나를 향해)는 지나가고, 부정(보지 않고)은 내지 않는다.",
+  "viewer": {
+    "pronouns": ["나", "저"],
+    "through": ["향하"],
+    "rules": [
+      {"verbs": ["보", "째려보", "노려보", "쏘아보", "쳐다보", "바라보", "흘겨보", "훔쳐보", "지켜보", "응시하", "주시하"],
+       "tags": ["looking at viewer"]},
+      {"verbs": ["올려다보"], "tags": ["looking at viewer", "looking up"]},
+      {"verbs": ["내려다보"], "tags": ["looking at viewer", "looking down"]},
+      {"verbs": ["가리키"], "tags": ["pointing at viewer"]},
+      {"verbs": ["뻗", "내밀"], "tags": ["reaching towards viewer"]}
+    ]
+  },
+  "keyword_block_note": "NAIA 한국어 사전에서 1순위 태그가 일상어 뜻과 어긋나 성적인 태그로 가는 키워드 — 사전 구·구성 후보·모델 항목 교체 어디서도 묻지 않는다(모델 영문 추측과 다른 규칙이 맡는다). 실측 09-24: 동사 명사형 키워드 중 1순위가 성적인 237개를 훑어, 성적인 말 없이 일상 문장에서 나올 것만 골랐다.",
+  "keyword_block": ["쳐다보기", "얼굴묻기", "길이재기", "자대기", "더듬기"],
   "verbs": {
     "기": "crawling", "기어가": "crawling", "기어다니": "crawling", "기어오": "crawling",
     "자": "sleeping", "잠들": "sleeping", "서": "standing", "눕": "lying", "앉": "sitting",
@@ -21,7 +47,8 @@
     "울": "crying", "웃": "smile", "먹": "eating", "쪼그리": "squatting", "엎드리": "on stomach",
     "꿇": "kneeling", "헐떡이": "heavy breathing", "헥헥거리": "heavy breathing", "헥헥대": "heavy breathing"
   },
-  "stem_prefixes": [["묶", "bound"], ["째려보", "glaring"], ["노려보", "glaring"], ["울먹이", "tears"]],
+  "stem_prefixes_note": "줄기가 이것으로 시작하면 그 태그. 묶은 수동(묶이 = 묶인·묶여)만 — '리본을 묶은 소녀' 가 bound 로 갔다(09-24).",
+  "stem_prefixes": [["묶이", "bound"], ["째려보", "glaring"], ["노려보", "glaring"], ["울먹이", "tears"]],
   "nouns": {"목줄": ["leash", "collar"], "팔짱": ["crossed arms"]},
   "people": {
     "female": ["소녀", "여자", "여성", "여자애", "여고생", "여학생", "아가씨", "누나", "언니", "여동생", "엄마", "어머니", "할머니",

@@ -1073,7 +1073,8 @@ def _phrase_spans(toks: list[tuple[str, str]], filler: set[str], passive_suffixe
                 and seq[-2][2] in ("O", "D", "") else None
             if obj:
                 spans.append((f"{obj} {word}기", "verb_object", word))
-            spans.append((f"{word}기", "verb_arg" if obj else "verb", word))
+            # 맨 동사를 안 묻는 것은 목적어(을/를 · 조사 없음)가 있을 때만 — 장소(에서·에)는 뜻을 바꾸지 않는다
+            spans.append((f"{word}기", "verb_arg" if obj and seq[-2][2] in ("O", "") else "verb", word))
             seq.append(("V", word, ""))
             i += 1
             continue
@@ -1090,8 +1091,10 @@ def _phrase_spans(toks: list[tuple[str, str]], filler: set[str], passive_suffixe
                 if obj:
                     spans.append((f"{obj} {stem}기", "verb_object" if kind == "verb" else kind, form))
                 if len(stem) >= 2 or (passive and stem != form):
+                    # 목적어(을/를 · 조사 없음)가 붙은 맨 동사만 안 묻는다(손을 흔들며 -> 흔들기 = shaking).
+                    # 장소(길에서 뒤돌아보는 · D)는 뜻을 바꾸지 않는다 — 뒤돌아보기(looking back)를 잃었다(재생 09-24).
                     bare_kind = "verb" if passive and kind == "verb" else \
-                        ("verb_arg" if obj and kind == "verb" else kind)
+                        ("verb_arg" if obj and object_role in ("O", "") and kind == "verb" else kind)
                     spans.append((f"{stem}기", bare_kind, form))  # 수동형의 능동 명사형은 한 음절이어도(안기)
             seq.append(("V", form, ""))
         i += 1

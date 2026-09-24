@@ -330,11 +330,6 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     def grounded(ko: str) -> bool:
         if not ko or not ka.available:
             return True
-        # 진짜 Kiwi 분석이면 원형(형태소)으로 잰다 — 누워 있기 · 부끄러워하는 처럼 활용·보조 용언만 다른 것을 살리고,
-        # 요청에 없는 낱말(침 흘리기의 침)은 버린다. 손으로 만든 분석(시험)은 아래의 글자 비교로.
-        api = getattr(ka, "grounded", None)
-        if callable(api) and getattr(ka, "tokenizer", None) is not None:
-            return bool(api(ko))
         k = compact(ko)
         if k in req_compact:
             return True
@@ -344,7 +339,12 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         # 낱말마다(눈물 고이기 = 눈물 + 고이) — 붙여 비교하면 '눈물고이' 가 요청의 '눈물고인'(고인 = 고이+ㄴ 한 글자)에
         # 없어 tears 가 떨어졌다(09-24). 낱말이 전부 요청에 있어야 한다(침 흘리기 의 침은 없다 -> 버림).
         words = str(ko).split()
-        return len(words) > 1 and all(grounded(w) for w in words)
+        if len(words) > 1 and all(grounded(w) for w in words):
+            return True
+        # 글자 비교가 놓친 활용·보조 용언(누워 있기 · 부끄러워하는)은 Kiwi 원형으로 한 번 더 — 원래 받던 것은 그대로 받는다
+        # (원형 비교만 쓰면 모델의 '반가워하다' 를 Kiwi 가 요청과 다르게 쪼개 happy 가 떨어졌다, 재생 09-24).
+        api = getattr(ka, "grounded", None)
+        return bool(callable(api) and getattr(ka, "tokenizer", None) is not None and api(ko))
 
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
         return [t for t in _item_tags(item, kind) if not _junk_tag(t)]

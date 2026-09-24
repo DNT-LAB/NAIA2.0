@@ -2117,6 +2117,20 @@ function attachZoomKeyboard(targetWindow) {
   });
 }
 
+// Ctrl+Shift+R = 캐시를 무시하고 새로고침(사용자 요청 2026-09-24). 메뉴를 숨기면(포터블 · 소스
+// 런처의 NAIA_ELECTRON_HIDE_MENU) Electron 기본 메뉴의 Force Reload 단축키도 함께 사라져, 프론트를
+// 고친 뒤 창을 새로 불러올 길이 없었다. 메뉴가 보일 때는 preventDefault 가 메뉴 쪽을 막아 두 번
+// 불리지 않는다. 한글 입력 중에는 key 가 'R' 이 아니라서 물리 키(code)로도 본다.
+function attachReloadKeyboard(targetWindow) {
+  targetWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || input.isAutoRepeat) return;
+    if (!(input.control || input.meta) || !input.shift || input.alt) return;
+    if (input.code !== "KeyR" && String(input.key || "").toLowerCase() !== "r") return;
+    event.preventDefault();
+    targetWindow.webContents.reloadIgnoringCache();
+  });
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: STARTUP_WINDOW_BOUNDS.width,
@@ -2177,6 +2191,7 @@ function createMainWindow() {
   // (v2.0.18 regression). Deferring lets the first frame paint + show before we zoom.
   mainWindow.webContents.on("did-finish-load", () => setTimeout(() => applyMainWindowZoom(), 0));
   attachZoomKeyboard(mainWindow);
+  attachReloadKeyboard(mainWindow);
   preventBackNavigation(mainWindow);
 
   loadMaintenance("loading", "Starting NAIA backend...");

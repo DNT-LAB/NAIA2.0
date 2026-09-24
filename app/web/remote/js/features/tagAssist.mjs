@@ -73,17 +73,20 @@ export function firstDefaultAutocompleteIndexForRows(rows = []) {
 const RATING_KEYS = ['g', 's', 'q', 'e'];
 
 /** 태그 정보 툴팁의 등급별 등장 횟수 줄(사용자 지정 2026-09-24). counts = [g, s, q, e].
- *  비율 막대 한 줄 + 등급별 수. 수가 없으면(표에 없는 태그) 줄을 그리지 않는다 - 0 과 '모름' 은 다르다. */
+ *  카드 **맨 아래**(RELATED 다음) 칸: 'rating' 라벨 · 비율 막대 · 등급 칩(Quick Filter 등급 단추 색) + 수.
+ *  칩에 마우스를 올리면 정확한 수와 비율. 수가 없으면(표에 없는 태그) 칸을 그리지 않는다 - 0 과 '모름' 은 다르다. */
 export function ratingCountsHtml(counts, fmtCount = n => String(n)) {
   if (!Array.isArray(counts) || counts.length < 4) return '';
   const values = counts.slice(0, 4).map(n => Math.max(0, Number(n) || 0));
   const total = values.reduce((sum, n) => sum + n, 0);
   if (!total) return '';
+  const pct = n => `${(n / total * 100).toFixed(1)}%`;
   const bar = RATING_KEYS.map((key, i) => values[i] > 0
     ? `<span class="ttr-seg" data-r="${key}" style="width:${(values[i] / total * 100).toFixed(2)}%"></span>` : '').join('');
   const cells = RATING_KEYS.map((key, i) =>
-    `<span class="ttr-cell${values[i] ? '' : ' is-zero'}" data-r="${key}"><b>${key.toUpperCase()}</b>${fmtCount(values[i])}</span>`).join('');
-  return `<div class="tag-tooltip-ratings" title="등급별 등장 횟수 (태그 아카이브)">` +
+    `<span class="ttr-cell${values[i] ? '' : ' is-zero'}" data-r="${key}" title="${key.toUpperCase()} ${values[i].toLocaleString('en-US')} (${pct(values[i])})">` +
+    `<b>${key.toUpperCase()}</b>${fmtCount(values[i])}</span>`).join('');
+  return '<div class="tag-tooltip-ratings"><span class="tag-tooltip-extra-label">rating</span>' +
     `<span class="ttr-bar">${bar}</span><span class="ttr-cells">${cells}</span></div>`;
 }
 
@@ -1481,7 +1484,6 @@ export function createTagAssistController({
       (groupText ? ` <span class="tag-tooltip-group">${escHtml(groupText)}</span>` : '') +
       (m.desc ? `<span class="tag-tooltip-desc">${escHtml(m.desc)}</span>` : '') +
       '</div>';
-    html += ratingCountsHtml(m.rating_counts, fmtCount);
     if (m.implications && m.implications.length) {
       html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">implies</span>' +
         m.implications.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
@@ -1490,6 +1492,8 @@ export function createTagAssistController({
       html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">related</span>' +
         m.related.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
     }
+    // 등급별 등장 횟수 - 관계 칸들 다음(사용자 지정: RELATED 아래), 캐릭터 상세보다 앞.
+    html += ratingCountsHtml(m.rating_counts, fmtCount);
     if (tagLookupReadOnly) {
       const copyText = lastPromptInfoRawTag || m.tag;
       html += '<div class="tag-tooltip-copy-row">' +

@@ -36,7 +36,8 @@ MAX_KEY_LEN = 24             # 붙여 쓴 키워드 길이 — 설명 문장 같
 CHOOSE_SYSTEM = ("다음 중 이 문장 내에서 가장 맞을 확률이 높은 단어를 고르십시오. 답은 1, 2, 3, 4와 같이 단답하고, "
                  "사유는 설명하지 마십시오. 맞는 것이 없으면 0.")
 _EN_STOP = frozenset({"a", "an", "the", "of", "on", "in", "at", "to", "for", "with", "and", "by", "from", "her", "his",
-                      "their", "own", "is", "are", "day", "into", "onto", "over", "under", "out", "up", "down", "while"})
+                      "their", "own", "is", "are", "day", "into", "onto", "over", "under", "out", "up", "down",
+                      "while"})
 # 묻지 않는 틀 명사 — 장면의 틀이지 그림의 것이 아니다(표정 -> expressionless · 사이 -> saiga-12 · 아래 -> under shot 을
 # 골랐다, 09-25). 모델이 안 낸 요청 명사와 모델 항목의 남은 뜻 둘 다. 한 음절(위·앞·옆)은 이미 묻지 않는다.
 GENERIC_NOUNS = frozenset({"표정", "사이", "모습", "장면", "구도", "느낌", "분위기", "상태", "자세", "동작", "포즈", "얼굴",
@@ -92,7 +93,8 @@ class KeywordLemmaIndex:
     ``tokenize`` 는 Kiwi 날것(이름 붙이기 없는 것)이어야 한다 — 이름 붙이기까지 하면 5만 개에 52초가 들었다(실측 09-25).
     """
 
-    def __init__(self, keywords: dict[str, list[tuple[str, int, str]]], tokenize: Callable[[str], list[tuple[str, str]]]):
+    def __init__(self, keywords: dict[str, list[tuple[str, int, str]]],
+                 tokenize: Callable[[str], list[tuple[str, str]]]):
         self.keywords = keywords
         self.tokenize = tokenize
         self.by_lemma: dict[str, set[str]] = {}
@@ -339,6 +341,19 @@ def choose_grammar(n: int) -> str:
     return "root ::= " + " | ".join(f'"{i}"' for i in range(n + 1))
 
 
+def settle_order(forward: list[str] | None, backward: list[str] | None, names: list[str]) -> list[str] | None:
+    """정순 답과 역순 답을 합친다 — 같으면 그 답, 둘 다 고른 것이 다르면 도구 순위가 앞선 것(목록 앞), 한쪽만 '없음' 이면
+    없음(자신 없음). 역순 답을 못 읽었으면 정순 답. E2B 는 후보가 둘이면 내용과 상관없이 2번을 고르는 때가 있다
+    (창밖을 쳐다보기 · 새벽: 순서를 바꾸자 답이 바뀌었다, 09-25) — 순서를 바꿔도 같은 답만 모델의 뜻으로 본다."""
+    if forward is None or backward is None:
+        return forward
+    if forward == backward:
+        return forward
+    if forward and backward:
+        return [t for t in names if t in forward + backward][:1]
+    return []
+
+
 def parse_choice(reply: str | None, names: list[str]) -> list[str] | None:
     """'2' -> [둘째 후보] · '0' -> [] · 못 읽으면 None(고르기 없음 = 예전 결과로)."""
     try:
@@ -355,6 +370,12 @@ def agrees(tag: str, en: str) -> bool:
     tw = {w[:4] for w in en_words(tag) if len(w) >= 3 and w not in _EN_STOP}
     ew = {w[:4] for w in en_words(en) if len(w) >= 3 and w not in _EN_STOP}
     return bool(tw & ew)
+
+
+def order_candidates(scored: dict[str, float], en: str) -> list[str]:
+    """점수순 — 동점은 모델 영문과 맞는 것 먼저, 그다음 이름순. 집합 순서로 두면 실행마다 순서가 바뀌어 모델의 답이
+    바뀌었다(창밖을 쳐다보기: [looking outside, staring] / [staring, looking outside] 에서 둘 다 2번을 골랐다, 09-25)."""
+    return [t for t, _s in sorted(scored.items(), key=lambda kv: (-round(kv[1], 6), not agrees(kv[0], en), kv[0]))]
 
 
 def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: KeywordLemmaIndex,
@@ -408,7 +429,7 @@ def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: Key
     def settle(ask: Ask, scored: dict[str, float]) -> None:
         # 'X and Y' 는 두 사람·두 가지의 구도 태그다 — 학생(student)에 teacher and student 를 골랐다(holdout2 09-25)
         pair = " and " in f" {ask.en} "
-        names = [t for t, _s in sorted(scored.items(), key=lambda kv: -kv[1])
+        names = [t for t in order_candidates(scored, ask.en)
                  if t not in ask.keep and ok(t) and (pair or " and " not in t)]
         ask.candidates = [(t, describe(t)) for t in names[:MAX_CANDIDATES]]
 

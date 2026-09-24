@@ -497,22 +497,30 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
                                describe=lambda t: ac._short((tools.info(t) or {}).get("description") or ""))
         state["prep_ms"] = round((time.perf_counter() - started) * 1000, 1)
         state["kept"] = [{"ko": a.ko, "en": a.en, "keep": list(a.keep)} for a in asks if a.keep]
-        # 한 조각씩 번호로(0 = 없음), 앞에서 고른 것을 넘기며 차례로 — 사용자 제안(09-25). 모델이 실패하면 그 조각부터는
-        # 고르기 없음(예전 결과)
+        # 한 조각씩 번호로(0 = 없음), 앞에서 고른 것을 넘기며 차례로 — 사용자 제안(09-25). 후보가 둘 이상이면 역순으로 한 번
+        # 더 묻는다(위치 치우침 — settle_order). 모델이 실패하면 그 조각부터는 고르기 없음(예전 결과)
         done = [t for a in asks for t in a.keep]
-        elapsed = 0.0
+        elapsed, calls = 0.0, 0
         for ask in sent:
             names = [t for t, _d in ask.candidates]
-            reply, info = _chat(context, cand.CHOOSE_SYSTEM, cand.choose_message(req["text"], ask, done),
-                                cand.choose_grammar(len(names)), max_tokens=4)
-            elapsed += float(info.get("elapsed") or 0)
-            state["model"] = dict(info, elapsed=round(elapsed, 2), calls=len(state["sent"]) + 1)
-            if reply is None:
+            answers: list[Any] = []
+            for order in ([ask] if len(names) < 2 else
+                          [ask, cand.Ask(ko=ask.ko, en=ask.en, candidates=list(reversed(ask.candidates)))]):
+                listed = [t for t, _d in order.candidates]
+                reply, info = _chat(context, cand.CHOOSE_SYSTEM, cand.choose_message(req["text"], order, done),
+                                    cand.choose_grammar(len(listed)), max_tokens=4)
+                elapsed += float(info.get("elapsed") or 0)
+                calls += 1
+                state["model"] = dict(info, elapsed=round(elapsed, 2), calls=calls)
+                if reply is None:
+                    break
+                answers.append(cand.parse_choice(reply, listed))
+            if not answers:
                 break
-            ask.picks = cand.parse_choice(reply, names)
+            ask.picks = cand.settle_order(answers[0], answers[1] if len(answers) > 1 else answers[0], names)
             done += ask.picks or []
             state["sent"].append({"ko": ask.ko, "en": ask.en, "source": ask.source, "keep": list(ask.keep),
-                                  "candidates": names, "picks": ask.picks})
+                                  "candidates": names, "picks": ask.picks, "answers": answers})
         return [t for a in sent if a.source == "extra" for t in (a.picks or [])]
 
     return chooser, state

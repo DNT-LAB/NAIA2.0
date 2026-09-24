@@ -1202,8 +1202,12 @@ export function createCharacterPanel({
   function renderHistoryItem(character, index, groups, inGroup) {
     const uuid = String(character.slot_uuid || '');
     const open = openHistory.has(uuid);
+    // **이번 세션에 내려온 것**은 옅은 녹색(사용자 지정 2026-09-24). `used_at` = 마지막으로 활성에서
+    // 내려온 시각(서버가 모든 내려보내는 길에서 찍는다) · `session_started_at` = 이 서버가 켜진 시각.
+    const fresh = slotState(character) !== 'active'
+      && Number(character.used_at || 0) >= Number(lastState?.session_started_at || Infinity);
     return `
-    <div class="cw-li${open ? ' is-open' : ''}${groupOf(character) ? ' has-hue' : ''}"
+    <div class="cw-li${open ? ' is-open' : ''}${groupOf(character) ? ' has-hue' : ''}${fresh ? ' is-fresh' : ''}"
       data-cw-li="${index}"${hueStyle(groupOf(character))}>
       <!-- ⚠️ 툴팁은 **프롬프트 전문**이다(사용자 지정 2026-09-02). 조작 설명을 띄우면
            정작 궁금한 것(잘린 뒷부분)을 볼 길이 없다. -->

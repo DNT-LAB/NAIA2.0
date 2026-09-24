@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from typing import Any
+
+# 이 서버가 켜진 시각 - "이번 세션에 히스토리로 내려온 것" 의 잣대(사용자 지정 2026-09-24).
+# 화면은 슬롯의 `used_at`(마지막으로 활성에서 내려온 시각)이 이보다 뒤면 옅은 녹색으로 칠한다.
+SESSION_STARTED_AT = time.time()
 
 
 # ⚠️ "활성 슬롯은 최소 하나" 는 **UI 규칙**이다(마지막 활성 슬롯의 ▼ 를 숨긴다).
@@ -44,6 +49,49 @@ def _state_of(frame: Any) -> str:
     if not isinstance(frame, dict):
         return ""
     return str(frame.get("slot_state") or "").strip().lower()
+
+
+def _has_content(frame: dict) -> bool:
+    return bool(str(frame.get("prompt") or "").strip() or str(frame.get("uc") or "").strip())
+
+
+def _is_plain_history(frame: Any) -> bool:
+    """그냥 히스토리 - 내려와 쌓였을 뿐 사용자가 표시하지 않은 것. 즐겨찾기 · 그룹(Cold Storage
+    포함 - 정규화가 옛 cold 를 그 그룹으로 읽어 준다)은 **사용자가 남긴 것**이라 아니다."""
+    return (_state_of(frame) == "inactive" and not frame.get("favorite")
+            and not str(frame.get("group") or "").strip())
+
+
+def _drop_duplicate_history(frames: Any) -> int:
+    """같은 캐릭터가 히스토리에 여러 번 쌓이면 **하나만** 남긴다(사용자 지정 2026-09-24).
+
+    잣대는 `_content_fingerprint`(프롬프트 · UC · 이름 · 좌표) - 보관함 사본 소멸과 같은 자다.
+    - 지우는 것은 **그냥 히스토리**뿐이다. 즐겨찾기 · 그룹 · Cold 는 사용자가 남긴 것이라
+      둘이 같아도 건드리지 않는다.
+    - 같은 것이 활성 슬롯이나 보관함에 있으면 그냥 히스토리 쪽은 전부 지운다(되부를 이유가 없다).
+    - 그냥 히스토리끼리면 **가장 최근에 내려온 것** 하나를 남긴다(히스토리는 최근 순이다).
+    - 빈 칸(프롬프트·UC 둘 다 없음)은 세지 않는다 - 자리표시자다.
+    """
+    if not isinstance(frames, list):
+        return 0
+    protected = {
+        _content_fingerprint(frame) for frame in frames
+        if isinstance(frame, dict) and _has_content(frame) and not _is_plain_history(frame)
+    }
+    plain = [frame for frame in frames
+             if isinstance(frame, dict) and _has_content(frame) and _is_plain_history(frame)]
+    plain.sort(key=lambda frame: float(frame.get("used_at") or 0), reverse=True)
+    taken: set = set()
+    drop: set[int] = set()
+    for frame in plain:
+        mark = _content_fingerprint(frame)
+        if mark in protected or mark in taken:
+            drop.add(id(frame))
+        else:
+            taken.add(mark)
+    if drop:
+        frames[:] = [frame for frame in frames if id(frame) not in drop]
+    return len(drop)
 
 
 def _seed_missing_positions(settings: dict) -> None:
@@ -182,7 +230,55 @@ class HeadlessCharacterService:
                 mode,
                 path=self.context._existing_save_path(f"CharacterModule_{str(mode or 'NAI').upper()}.json"),
             )
+        # 고치기 **전** 의 슬롯 상태를 한 번 적어 둔다 - 저장 때 "활성에서 내려온 것" 을 가르는 기준.
+        states = self._slot_states()
+        states.setdefault(str(mode or "NAI").upper(), self._state_map(cache[mode]))
         return cache[mode]
+
+    def _slot_states(self) -> dict[str, dict[str, str]]:
+        states = getattr(self.context, "_character_slot_states", None)
+        if not isinstance(states, dict):
+            states = {}
+            self.context._character_slot_states = states
+        return states
+
+    @staticmethod
+    def _state_map(settings: Any) -> dict[str, str]:
+        from core.character_settings import _frame_uuid
+
+        frames = settings.get("character_frames") if isinstance(settings, dict) else None
+        return {str(_frame_uuid(frame) or ""): _state_of(frame)
+                for frame in (frames or []) if isinstance(frame, dict) and _frame_uuid(frame)}
+
+    def _settle_history(self, mode_key: str, normalized: dict[str, Any]) -> None:
+        """저장 직전: 활성에서 내려온 슬롯에 시각을 찍고, 그때만 히스토리 중복을 걷는다.
+
+        ⚠️ **시각은 여기서 찍는다.** 내려보내는 길이 여럿이다(슬롯 상태 · 일괄 적용 · 에셋 적용 ·
+           옛 활성 체크) - 그중 한 곳만 `used_at` 을 찍고 있어서, 일괄 적용(Assist · 메타데이터)으로
+           내려온 것은 최근 순에서도 밀리고 '이번 세션' 표시도 못 받았다.
+        ⚠️ **중복 정리는 내려온 게 있을 때만** 한다. 목록에서 줄이 빠지면 뒤 슬롯 번호가 당겨지는데,
+           글자를 치는 중(밀린 편집이 옛 번호로 날아가는 중)에 그러면 엉뚱한 슬롯에 쓴다. 내려보내는
+           일은 원래 번호를 다시 짜는 일이라 화면이 새 번호로 다시 그린다.
+        """
+        from core.character_settings import _frame_uuid
+
+        before = self._slot_states().get(mode_key)
+        frames = normalized.get("character_frames") or []
+        demoted = 0
+        if isinstance(before, dict):
+            now = time.time()
+            for frame in frames:
+                if not isinstance(frame, dict):
+                    continue
+                if before.get(str(_frame_uuid(frame) or "")) == "active" and _state_of(frame) != "active":
+                    if float(frame.get("used_at") or 0) < now - 5:   # 그 길이 이미 찍었으면 둔다
+                        frame["used_at"] = now
+                    demoted += 1
+        if demoted:
+            dropped = _drop_duplicate_history(frames)
+            if dropped:
+                print(f"[Character] history duplicates removed: {dropped}", flush=True)
+        self._slot_states()[mode_key] = self._state_map(normalized)
 
     def save_settings(self, mode: str, settings: dict[str, Any]) -> None:
         from core.character_settings import normalize_character_settings
@@ -195,6 +291,7 @@ class HeadlessCharacterService:
         # 정렬이 끝난 뒤여야 씨앗이 최종 순서를 보고 놓인다.
         if normalized.get("use_custom_positions"):
             _seed_missing_positions(normalized)
+        self._settle_history(mode_key, normalized)
         self.settings_by_mode()[mode_key] = normalized
         path = self.context._save_path(f"CharacterModule_{mode_key}.json")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,6 +372,8 @@ class HeadlessCharacterService:
         mode = self.context.get_api_mode()
         settings = self.settings_cache()
         state = character_state_from_settings(settings, app_context=self.context, mode=mode)
+        # 히스토리의 '이번 세션에 내려온 것' 표시 기준(`used_at` 이 이보다 뒤).
+        state["session_started_at"] = SESSION_STARTED_AT
         state["available"] = True
         state["runtime"] = "web"
         return state

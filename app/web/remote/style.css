@@ -14205,6 +14205,10 @@ body.detached-metadata .metadata-layout {
 .cw-li.has-hue.is-open { background: hsl(var(--cw-grp-hue) 32% 8%); border-color: hsl(var(--cw-grp-hue) 34% 22%); }
 .cw-grp.has-hue .cw-grp-open { background: hsl(var(--cw-grp-hue) 30% 8%); border-color: hsl(var(--cw-grp-hue) 26% 18%); }
 .cw-grp.has-hue .cw-grp-open:hover { background: hsl(var(--cw-grp-hue) 32% 11%); }
+/* 이번 세션에 히스토리로 내려온 것 - **약간** 녹색(사용자 지정 2026-09-24). 방금 밀려난 것을
+   찾기 쉽게 할 뿐이라 글자를 읽는 데 방해가 안 될 만큼만. */
+.cw-li.is-fresh { background: rgba(92, 196, 128, 0.07); border-color: rgba(92, 196, 128, 0.30); }
+.cw-li.is-fresh .cw-li-row:hover { background: rgba(92, 196, 128, 0.10); }
 .cw-li.is-open { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.07); }
 .cw-li-row {
   display: flex; align-items: center; gap: 8px; padding: 4px 6px;

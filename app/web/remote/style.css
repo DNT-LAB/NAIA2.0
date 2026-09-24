@@ -16141,7 +16141,9 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .ttr-cells { display: flex; gap: 5px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10px;
   color: var(--text-secondary, #c8c8d0); font-variant-numeric: tabular-nums; }
 .ttr-cell { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 1px; border-radius: 4px;
-  background: rgba(255,255,255,0.03); border: 1px solid var(--border-dim); cursor: default; }
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border-dim); cursor: default;
+  /* 카드(.tag-tooltip)는 기본이 pointer-events:none - 칩만 살려야 마우스를 올려 정확한 수를 본다. */
+  pointer-events: auto; }
 .ttr-cell b { display: inline-block; min-width: 15px; padding: 0 3px; border-radius: 3px; border: 1px solid;
   color: #fff; font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; }
 .ttr-cell[data-r="g"] b { background: #2e7d32; border-color: #4CAF50; }

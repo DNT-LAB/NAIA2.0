@@ -50,6 +50,7 @@ export function recipeLine(recipe) {
       return join([
         `검색 ${quoted(recipe.query) || '(전체)'}`,
         recipe.exclude ? `제외 ${quoted(recipe.exclude)}` : '',
+        recipe.exclude_permanent ? `영구 제외 ${quoted(recipe.exclude_permanent)}` : '',
         ratingText(recipe.ratings),
         recipe.period || '',
       ]);
@@ -198,7 +199,8 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
       ? '<div class="pql-fact pql-dim">조건 기록 없음 (명함 이전에 저장한 파일)</div>'
       : `<div class="pql-fact"><span class="pql-fact-k">등급</span><span class="pql-fact-v">${f.ratings ? ratingPills(f.ratings, esc) : '<span class="pql-dim">기록 없음</span>'}</span></div>
         <div class="pql-group">Search</div>
-        ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x') + factRow('기간', search.period, esc)
+        ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x')
+                   + factRow('영구 제외', search.exclude_permanent, esc, 'is-x') + factRow('기간', search.period, esc)
                  : '<div class="pql-fact pql-dim">—</div>'}
         <div class="pql-group">Tag Filter</div>
         ${(tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)

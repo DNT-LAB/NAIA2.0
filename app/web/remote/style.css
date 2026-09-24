@@ -13493,7 +13493,7 @@ body.detached-metadata .metadata-layout {
 /* .mod-input 을 쓰지만 실제로는 사용자가 한글/태그를 직접 치는 자유 텍스트 칸.
    클래스 전체를 바꿀 수 없으므로(숫자 17곳과 공유) 여기만 명시적으로 승격한다.
    새 자유 텍스트 입력을 .mod-input 으로 만들면 이 목록에 추가할 것. */
-#searchQuery, #searchExclude, #e621SearchInput,
+#searchQuery, #searchExclude, #searchExcludePermanent, #e621SearchInput,
 #iwcKey, #modPresetNewName, #saveDirBasePath {
   font-family: var(--font-editor);
 }

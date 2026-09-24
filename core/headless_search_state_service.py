@@ -70,6 +70,8 @@ class HeadlessSearchStateService:
             "version": 1,
             "query": "",
             "exclude": "",
+            # 영구 제외(사용자 지정 2026-09-24) - Search 창의 붉은 줄. 모든 [검색]에 제외어로 덧붙는다.
+            "exclude_permanent": "",
             "ratings": list(DEFAULT_ACTIVE_RATINGS),
             "search_ratings": list(DEFAULT_ACTIVE_RATINGS),
             "tag_filter": [],
@@ -140,6 +142,7 @@ class HeadlessSearchStateService:
         if isinstance(raw, dict):
             state["query"] = str(raw.get("query", state["query"]) or "")
             state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
+            state["exclude_permanent"] = str(raw.get("exclude_permanent", state["exclude_permanent"]) or "")
             state["ratings"] = self.normalize_rating_list(raw.get("ratings", state["ratings"]))
             state["search_ratings"] = self.normalize_rating_list(
                 raw.get("search_ratings", raw.get("ratings", state["search_ratings"]))
@@ -190,7 +193,7 @@ class HeadlessSearchStateService:
             getattr(context, "search_filter_state", None)
             or self.default_search_filter_state()
         )
-        for key in ("query", "exclude"):
+        for key in ("query", "exclude", "exclude_permanent"):
             if key in updates and updates[key] is not None:
                 state[key] = str(updates[key] or "")
         if "ratings" in updates and updates["ratings"] is not None:
@@ -243,6 +246,7 @@ class HeadlessSearchStateService:
         return self.save_search_filter_state(
             query=payload.get("query") if "query" in payload else None,
             exclude=payload.get("exclude") if "exclude" in payload else None,
+            exclude_permanent=payload.get("exclude_permanent") if "exclude_permanent" in payload else None,
             ratings=payload.get("ratings") if "ratings" in payload else None,
             search_ratings=payload.get("search_ratings") if "search_ratings" in payload else None,
             tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
@@ -557,6 +561,7 @@ class HeadlessSearchStateService:
             "rating_counts": rating_counts,
             "query": filter_preferences.get("query", ""),
             "exclude": filter_preferences.get("exclude", ""),
+            "exclude_permanent": filter_preferences.get("exclude_permanent", ""),
             "ratings": {rating: rating in search_ratings for rating in SUPPORTED_RATINGS},
             "filter_preferences": filter_preferences,
             "filter_presets": self.get_filter_presets(),

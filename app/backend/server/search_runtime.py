@@ -205,13 +205,24 @@ def _set_pool_provenance(context: WebSessionContext, recipe: Any, *, base: bool 
         context.search_pool_base_provenance = recipe
 
 
-def _search_recipe(context: WebSessionContext, query: str, exclude: str, ratings, bucket_range) -> dict[str, Any]:
+def join_exclude_terms(exclude: Any, permanent: Any) -> str:
+    """제외어 + 영구 제외 = 실제로 거는 제외어. 둘 다 같은 문법(쉼표 목록)이라 쉼표로 잇는다."""
+    parts = [str(part or "").strip().strip(",").strip() for part in (exclude, permanent)]
+    return ", ".join(part for part in parts if part)
+
+
+def _search_recipe(
+    context: WebSessionContext, query: str, exclude: str, ratings, bucket_range, permanent: str = "",
+) -> dict[str, Any]:
     recipe: dict[str, Any] = {
         "source": "search",
         "query": str(query or ""),
         "exclude": str(exclude or ""),
         "ratings": sorted(ratings or []),
     }
+    if str(permanent or "").strip():
+        # 명함에 따로 적는다 - 파일에 무엇이 빠졌는지 보여야 한다(제외어 칸과 섞지 않는다).
+        recipe["exclude_permanent"] = str(permanent).strip()
     if bucket_range is not None:
         s, e = bucket_range
         recipe["bucket"] = [int(s), int(e)]
@@ -570,6 +581,14 @@ def run_search_command(
     } or set("gsqe")
     query = str(command.get("query") or "")
     exclude = str(command.get("exclude") or "")
+    # 영구 제외(사용자 지정 2026-09-24): 창이 보내면 그 값을 저장하고, 안 보내면(다른 진입점·옛 화면)
+    # 저장된 값을 쓴다 - '영구' 라서 어느 길로 검색해도 빠져야 한다.
+    if "exclude_permanent" in command:
+        permanent = str(command.get("exclude_permanent") or "")
+    else:
+        permanent = str(context.normalize_search_filter_state(
+            getattr(context, "search_filter_state", None)).get("exclude_permanent") or "")
+    effective_exclude = join_exclude_terms(exclude, permanent)
     bucket_start = command.get("bucket_start")
     bucket_end = command.get("bucket_end")
     context.search_query_ratings = ratings
@@ -581,7 +600,7 @@ def run_search_command(
     # result set is not filtered a second time.
     # None values are ignored by the saver -> they keep the persisted range.
     context.save_search_filter_state(
-        query=query, exclude=exclude,
+        query=query, exclude=exclude, exclude_permanent=permanent,
         search_ratings=ratings,
         bucket_start=bucket_start, bucket_end=bucket_end,
     )
@@ -607,7 +626,7 @@ def run_search_command(
         searched = search_tag_archive_frame(
             archive_sources,
             query=query,
-            exclude=exclude,
+            exclude=effective_exclude,
             ratings=ratings,
             progress_callback=progress_callback,
         )
@@ -618,7 +637,7 @@ def run_search_command(
             context.search_results_master_base_snapshot = searched.copy()
             context.search_results_scope = TAG_ARCHIVE_SCOPE
             mark_search_pool_replaced(context)
-            recipe = _search_recipe(context, query, exclude, ratings, bucket_range)
+            recipe = _search_recipe(context, query, exclude, ratings, bucket_range, permanent)
             _set_pool_provenance(context, recipe, base=True)
             _reset_active_tag_filter_assignment(context)
             context.save_search_filter_state(tag_filter_active=False)
@@ -630,12 +649,12 @@ def run_search_command(
     base = search_base_frame(context)
     if base is None:
         return context.search_state_payload()
-    searched = _dedup_by_id(filter_source_frame(base, query=query, exclude=exclude, ratings=ratings))
+    searched = _dedup_by_id(filter_source_frame(base, query=query, exclude=effective_exclude, ratings=ratings))
     with search_pool_state_guard(context):
         context.search_results_snapshot = searched.copy() if searched is not None else None
         mark_search_pool_replaced(context)
         # 아카이브가 없을 때: 불러온 셋 안에서 검색한 것 - 부모(복원 기준)를 품는다.
-        recipe = _search_recipe(context, query, exclude, ratings, None)
+        recipe = _search_recipe(context, query, exclude, ratings, None, permanent)
         recipe["parent"] = getattr(context, "search_pool_base_provenance", None)
         _set_pool_provenance(context, recipe)
         _reset_active_tag_filter_assignment(context)

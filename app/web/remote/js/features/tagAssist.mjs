@@ -101,6 +101,9 @@ export function createTagAssistController({
   isTagInfoSuppressed = () => false,
 }) {
   const tagTooltip = tooltip;
+  // 떠 있는 팝업의 원래 자리. 칸이 inlineHost 를 가지면 그 안으로 옮겨 붙이고(창 안 빈 곳에
+  // 그린다), 다른 칸으로 넘어가면 여기로 되돌린다.
+  const tooltipHome = tagTooltip ? tagTooltip.parentNode : null;
 
   /** 태그 정보 툴팁 억제 여부. 훅이 던져도 툴팁 로직이 죽지 않게 감싼다. */
   function suppressedTagInfo() {
@@ -309,6 +312,26 @@ export function createTagAssistController({
    *  ⚠️ 태그 **정보** 툴팁 경로는 `acTarget` 을 비워 둔다 - 그래서 초점도 함께 본다.
    *     실제로 정보 툴팁만 판 뒤로 숨는 것을 화면에서 봤다.
    *  메인 프롬프트의 팝업까지 올리지는 않는다(창을 끌 때 유령·제목 툴팁과 순서가 엉킨다). */
+  /** 칸이 **창 안에 붙여 그리기**를 원하면 팝업을 그 자리로 옮긴다(사용자 지정 2026-09-24, Search 창:
+   *  "팝업 툴팁형 말고 하단의 비어 있는 공간에"). 자동완성 목록과 태그 정보 카드가 같은 요소라 둘 다 따라간다.
+   *
+   *  ⚠️ 판단 기준은 **요소가 지금 어디 붙어 있나**다(플래그가 아니다). 창이 innerHTML 로 다시 그려지면
+   *     자리째 사라져 팝업이 문서에서 떨어져 나가는데, 그때도 다음 호출에서 원래 자리로 돌아온다.
+   *  돌려주는 값 = 붙여 그리는 자리(없으면 null = 예전처럼 떠 있는 팝업). */
+  function syncTooltipHost() {
+    if (!tagTooltip) return null;
+    const target = acTarget || document.activeElement;
+    const host = target?._tagAssistInlineHost;
+    if (host && host.isConnected) {
+      if (tagTooltip.parentNode !== host) host.appendChild(tagTooltip);
+      tagTooltip.classList.add('inline-host');
+      return host;
+    }
+    tagTooltip.classList.remove('inline-host');
+    if (tooltipHome && tagTooltip.parentNode !== tooltipHome) tooltipHome.appendChild(tagTooltip);
+    return null;
+  }
+
   function syncTooltipLayer() {
     if (!tagTooltip) return;
     const host = acTarget || document.activeElement;
@@ -320,6 +343,7 @@ export function createTagAssistController({
 
   function syncTooltipSide() {
     if (!tagTooltip) return;
+    if (acTarget?._tagAssistInlineHost) { tagTooltip.classList.remove('left-side'); return; }
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     syncTooltipLayer();
     if (window.innerWidth < 768) return;
@@ -439,6 +463,15 @@ export function createTagAssistController({
   }
 
   function positionTagTooltip() {
+    if (syncTooltipHost()) {
+      // 창 안 자리에서는 흐름대로 놓인다 - 떠 있는 팝업의 좌표·상한을 전부 걷는다.
+      clearAutocompletePositionStyles();
+      for (const name of ['--tag-tooltip-top', '--tag-tooltip-left', '--tag-tooltip-max-width', '--tag-tooltip-max-height']) {
+        tagTooltip.style.removeProperty(name);
+      }
+      tagTooltip.classList.remove('left-side', 'drag-panel-target');
+      return;
+    }
     syncTooltipLayer();
     if (acMode) {
       positionAutocompleteTooltip();
@@ -3315,6 +3348,8 @@ export function createTagAssistController({
   function bindTagAssist(textarea, options = {}) {
     if (!textarea) return;
     textarea._excludeE621Autocomplete = !!options.excludeE621;
+    // 자동완성·태그 정보를 떠 있는 팝업 대신 이 요소 안에 그린다(syncTooltipHost).
+    textarea._tagAssistInlineHost = options.inlineHost || null;
     // 카테고리 통째로 빼기. Interactive 의 글로벌 태그 칸이 캐릭터·아티스트를
     // 뺀다 — 그 자리는 그림 전체에 걸리는 태그용이고, 인물과 작가는 캐릭터
     // 슬롯이 맡는다. 값은 백엔드의 `_cat`(artist/character/copyright/e621…).

@@ -1,5 +1,5 @@
 import { createRatingStore, RATING_KEYS, filteredCount } from './ratingStore.mjs';
-import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs?v=20260921-pql4';
+import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs?v=20260924-sqkw';
 
 // 검색 층 컴팩트 배치(사용자 지정 2026-09-21): 상단 단추 셋 · 행 수 한 줄 · 등급 한 줄 ·
 // [검색 기록 | 검색]. ⚠️ display 를 주는 요소는 [hidden] 짝 규칙을 같이 둔다(이 저장소가 여러 번 밟았다).
@@ -48,7 +48,65 @@ const SEARCH_COMPACT_CSS = `
 .dr-track{background:rgba(255,255,255,0.13);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05)}
 .search-progress{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-dim,#888)}
 .search-progress:empty{display:none}
+/* 검색·제외 칸 = 줄이 자동으로 늘어나는 textarea(사용자 지정 2026-09-24). 높이는 JS(autoGrow)가 준다. */
+.sp-kw{display:block;width:100%;resize:none;overflow:hidden;min-height:24px;line-height:1.45;
+  white-space:pre-wrap;word-break:break-word}
+/* [▼ 영구 제외] - 붉은 줄. 저장되고 모든 검색에 붙는다. */
+.sp-perm-btn{height:17px;padding:0 7px;font-size:9.5px;font-weight:600;border-radius:4px;cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(226,86,96,0.50);background:rgba(160,32,40,0.14);color:#f2b4b8}
+.sp-perm-btn:hover{background:rgba(160,32,40,0.28);color:#fff}
+.sp-perm-btn.is-on{background:rgba(160,32,40,0.38);color:#fff}
+.sp-kw.sp-perm{margin-top:4px;background:rgba(150,26,34,0.34);border-color:rgba(226,86,96,0.62);color:#ffe4e4}
+.sp-kw.sp-perm:focus{border-color:#ff7b85}
+.sp-kw.sp-perm::placeholder{color:rgba(255,196,196,0.55)}
+.sp-kw.sp-perm[hidden]{display:none!important}
+/* 자동완성·태그 정보가 그려지는 자리 = 창 아래 빈 공간을 채운다(사용자 지정 2026-09-24: 팝업 대신).
+   목록은 이 칸 안에서 스크롤한다(absolute 라 목록 길이가 창을 밀어내지 않는다). */
+.sqw-body .search-host{flex:1 0 auto}
+.sp-ac-host{position:relative;flex:1 1 auto;min-height:120px}
+.sp-ac-host>.tag-tooltip.inline-host{position:absolute!important;inset:0!important;width:auto!important;
+  max-width:none!important;max-height:none!important;z-index:auto!important;margin:0;box-shadow:none;
+  border-radius:6px;font-size:11px}
+.sp-ac-host>.tag-tooltip.inline-host.open{display:flex;flex-direction:column;overflow-y:auto}
+/* 이 창 전용 우클릭 메뉴 - 메인 프롬프트 메뉴(chunkPanel)와 분리. 창 더미(10150~) 위에 뜬다. */
+.sp-ctx{position:fixed;z-index:calc(var(--z-drag-panel-assist,10197) + 1);min-width:132px;padding:4px;
+  display:flex;flex-direction:column;gap:1px;background:var(--bg-elevated,#1e1e26);
+  border:1px solid var(--border,#33333f);border-radius:7px;box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+.sp-ctx[hidden]{display:none!important}
+.sp-ctx button{display:block;width:100%;text-align:left;padding:5px 10px;border:none;border-radius:4px;
+  background:transparent;color:var(--text-primary,#e8e8ee);font-size:11px;cursor:pointer}
+.sp-ctx button:hover:not(:disabled){background:rgba(255,255,255,0.07)}
+.sp-ctx button:disabled{color:var(--text-dimmer,#6c6c78);cursor:default}
+.sp-ctx-sep{height:1px;margin:3px 4px;background:var(--border,#33333f)}
 `;
+
+// 칸 id -> 서버 필드. 영구 제외는 따로 저장되고(search_filter_state.exclude_permanent) 모든 검색에 붙는다.
+const KEYWORD_FIELDS = { searchQuery: 'query', searchExclude: 'exclude', searchExcludePermanent: 'exclude_permanent' };
+const PERM_OPEN_KEY = 'naia.search.permExcludeOpen';
+
+/** 쉼표로 가른 조각 수(중괄호 안의 쉼표는 세지 않는다) - 접힌 [영구 제외] 단추에 보인다. */
+export function countKeywordTerms(text) {
+  let depth = 0;
+  let count = 0;
+  let current = '';
+  for (const ch of String(text || '')) {
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      if (current.trim()) count += 1;
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) count += 1;
+  return count;
+}
+
+/** 줄바꿈을 쉼표로 - 검색 문법은 한 줄이다(붙여 넣은 여러 줄 = 태그 여러 개). */
+export function flattenKeywordLines(text) {
+  return String(text || '').replace(/\s*[\r\n]+\s*/g, ', ');
+}
 
 export function createSearchPanel({
   document,
@@ -111,8 +169,13 @@ export function createSearchPanel({
   // skipped) until its own echo arrives — so a normalized/diverging sibling field
   // can't freeze it — and re-focusing the field drops its guard (the user is
   // editing again).
-  let pendingEcho = { query: null, exclude: null };
+  let pendingEcho = { query: null, exclude: null, exclude_permanent: null };
   let lastParquetSig = null;
+  // [▼ 영구 제외] 줄을 펼쳐 두었나 - 보는 사람의 편의라 이 브라우저에만 기억한다(내용은 서버에 저장).
+  let permOpen = (() => { try { return localStorage.getItem(PERM_OPEN_KEY) === '1'; } catch { return false; } })();
+  let ctxMenu = null;
+  let ctxTarget = null;
+  let growWidth = -1;
   // 카드 목록이 그려지는 곳 - 동반 창 본문에 붙는다(없으면 떠도는 요소 = 시험·옛 배선).
   const libHost = libraryHost || document.createElement('div');
   libHost.classList.add('search-parquet-host');
@@ -194,6 +257,7 @@ export function createSearchPanel({
     return {
       query: (document.getElementById('searchQuery') || {}).value || '',
       exclude: (document.getElementById('searchExclude') || {}).value || '',
+      exclude_permanent: (document.getElementById('searchExcludePermanent') || {}).value || '',
       ratings: getActiveRatings(),
     };
   }
@@ -215,6 +279,7 @@ export function createSearchPanel({
     return {
       query: serverSearchText(message, 'query'),
       exclude: serverSearchText(message, 'exclude'),
+      exclude_permanent: serverSearchText(message, 'exclude_permanent'),
     };
   }
 
@@ -227,7 +292,11 @@ export function createSearchPanel({
       ...extra,
     };
     // Hold each field authoritative until the backend echoes it (see pendingEcho).
-    pendingEcho = { query: String(state.query || ''), exclude: String(state.exclude || '') };
+    pendingEcho = {
+      query: String(state.query || ''),
+      exclude: String(state.exclude || ''),
+      exclude_permanent: String(state.exclude_permanent || ''),
+    };
     ws.send(JSON.stringify(state));
   }
 
@@ -686,6 +755,7 @@ export function createSearchPanel({
     const exclude = moduleBody.querySelector('#searchExclude');
     if (query) query.value = item.query || '';
     if (exclude) exclude.value = item.exclude || '';
+    growKeywordFields();
     saveFilterState();
     setHistoryOpen(false);
     moduleBody.querySelector('.mod-start')?.focus();
@@ -703,6 +773,7 @@ export function createSearchPanel({
     root.addEventListener('click', event => {
       if (event.target.closest('[data-sp="parquets"]')) { toggleLibrary(); return; }
       if (event.target.closest('[data-sp="history"]')) { setHistoryOpen(!historyOpen); return; }
+      if (event.target.closest('[data-sp="perm"]')) { setPermOpen(!permOpen, { focus: true }); return; }
       const del = event.target.closest('[data-sp-hist-del]');
       if (del) {
         const item = historyItems[Number(del.dataset.spHistDel)];
@@ -799,19 +870,190 @@ export function createSearchPanel({
     document.head.appendChild(style);
   }
 
+  function keywordFields() {
+    return Object.keys(KEYWORD_FIELDS).map(id => moduleBody.querySelector(`#${id}`)).filter(Boolean);
+  }
+
+  /** 글이 늘면 칸도 늘어난다(사용자 지정 2026-09-24). 숨은 칸은 잴 수 없어(scrollHeight 0) 건너뛰고,
+   *  보이게 될 때(층 펼침 · 영구 제외 펼침 · 창 폭 변경) 다시 잰다. */
+  function autoGrow(element) {
+    if (!element || !element.isConnected || !element.getClientRects().length) return;
+    element.style.height = 'auto';
+    const style = document.defaultView.getComputedStyle(element);
+    const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+    element.style.height = `${Math.ceil(element.scrollHeight + border)}px`;
+  }
+
+  function growKeywordFields() {
+    keywordFields().forEach(autoGrow);
+  }
+
+  function watchKeywordWidth() {
+    // 창 폭이 바뀌면 줄바꿈 자리가 바뀐다. 높이 변화로도 불리므로(칸이 자라면 몸통이 자란다) 폭만 본다.
+    if (moduleBody._spGrowObserved || typeof ResizeObserver !== 'function') return;
+    moduleBody._spGrowObserved = true;
+    new ResizeObserver(() => {
+      const width = moduleBody.clientWidth;
+      if (width === growWidth) return;
+      growWidth = width;
+      growKeywordFields();
+    }).observe(moduleBody);
+  }
+
+  function syncPermButton() {
+    const button = moduleBody.querySelector('[data-sp="perm"]');
+    const field = moduleBody.querySelector('#searchExcludePermanent');
+    if (!button || !field) return;
+    const count = countKeywordTerms(field.value);
+    // 접혀 있어도 걸려 있다는 것은 보여야 한다 - 모든 검색에 붙는다.
+    button.textContent = `${permOpen ? '▲' : '▼'} 영구 제외${!permOpen && count ? ` · ${count}` : ''}`;
+    button.classList.toggle('is-on', permOpen || count > 0);
+    button.setAttribute('aria-pressed', permOpen ? 'true' : 'false');
+  }
+
+  function setPermOpen(open, { focus = false } = {}) {
+    permOpen = !!open;
+    try { localStorage.setItem(PERM_OPEN_KEY, permOpen ? '1' : '0'); } catch { /* 기억 못 해도 동작은 한다 */ }
+    const field = moduleBody.querySelector('#searchExcludePermanent');
+    if (field) {
+      field.hidden = !permOpen;
+      if (permOpen) {
+        autoGrow(field);
+        if (focus) field.focus();
+      }
+    }
+    syncPermButton();
+  }
+
+  // ── 이 창 전용 우클릭 메뉴 ──────────────────────────────────────────────
+  // ⚠️ 예전엔 메인 프롬프트의 선택 메뉴(chunkPanel)가 떴고, 그 메뉴는 창 더미(10150~)보다 아래 층이라
+  //    **창 뒤에** 깔렸다(사용자 제보). 검색 칸은 chunk 다리를 끊고(disableChunkBridge) 이 메뉴를 쓴다.
+  function ensureCtxMenu() {
+    if (ctxMenu) return ctxMenu;
+    ctxMenu = document.createElement('div');
+    ctxMenu.className = 'sp-ctx';
+    ctxMenu.hidden = true;
+    ctxMenu.innerHTML = `
+      <button type="button" data-ctx="cut">잘라내기</button>
+      <button type="button" data-ctx="copy">복사</button>
+      <button type="button" data-ctx="paste">붙여넣기</button>
+      <div class="sp-ctx-sep"></div>
+      <button type="button" data-ctx="all">모두 선택</button>`;
+    document.body.appendChild(ctxMenu);
+    // 누르는 순간 칸의 선택·초점을 뺏기지 않는다.
+    ctxMenu.addEventListener('mousedown', event => event.preventDefault());
+    ctxMenu.addEventListener('click', event => {
+      const button = event.target.closest('[data-ctx]');
+      if (!button || button.disabled) return;
+      const target = ctxTarget;
+      hideCtxMenu();
+      if (target && target.isConnected) runCtxAction(button.dataset.ctx, target);
+    });
+    document.addEventListener('mousedown', event => {
+      if (!ctxMenu.hidden && !ctxMenu.contains(event.target)) hideCtxMenu();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !ctxMenu.hidden) { event.preventDefault(); hideCtxMenu(); }
+    }, true);
+    const view = document.defaultView;
+    view?.addEventListener('blur', hideCtxMenu);
+    view?.addEventListener('resize', hideCtxMenu);
+    return ctxMenu;
+  }
+
+  function hideCtxMenu() {
+    if (ctxMenu) ctxMenu.hidden = true;
+    ctxTarget = null;
+  }
+
+  function openCtxMenu(target, x, y) {
+    const menu = ensureCtxMenu();
+    ctxTarget = target;
+    const hasSelection = target.selectionStart !== target.selectionEnd;
+    menu.querySelector('[data-ctx="cut"]').disabled = !hasSelection;
+    menu.querySelector('[data-ctx="copy"]').disabled = !hasSelection;
+    menu.hidden = false;
+    const view = document.defaultView;
+    const rect = menu.getBoundingClientRect();
+    const left = Math.max(4, Math.min(x, (view?.innerWidth || 0) - rect.width - 4));
+    const top = Math.max(4, Math.min(y, (view?.innerHeight || 0) - rect.height - 4));
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  }
+
+  function insertIntoField(target, text) {
+    target.focus();
+    // insertText 는 되돌리기(Ctrl+Z)에 남는다. 안 되면 직접 넣고 input 을 쏜다.
+    if (!document.execCommand('insertText', false, text)) {
+      target.setRangeText(text, target.selectionStart, target.selectionEnd, 'end');
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  function runCtxAction(action, target) {
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    const selected = target.value.slice(start, end);
+    const clipboard = document.defaultView?.navigator?.clipboard;
+    if (action === 'all') {
+      target.focus();
+      target.select();
+    } else if (action === 'copy' || action === 'cut') {
+      if (!selected) return;
+      target.focus();
+      if (document.execCommand(action)) return;
+      clipboard?.writeText?.(selected).catch(() => {});
+      if (action === 'cut') insertIntoField(target, '');
+    } else if (action === 'paste') {
+      if (!clipboard?.readText) {
+        showToast('클립보드를 읽을 수 없습니다 — Ctrl+V 로 붙여 넣어 주세요.', 'warning');
+        return;
+      }
+      clipboard.readText()
+        .then(text => { if (text) insertIntoField(target, text); })
+        .catch(() => showToast('클립보드를 읽을 수 없습니다 — Ctrl+V 로 붙여 넣어 주세요.', 'warning'));
+    }
+  }
+
   function bindSearchInputs() {
-    const fieldByInputId = { searchQuery: 'query', searchExclude: 'exclude' };
-    ['searchQuery', 'searchExclude'].forEach(id => {
+    const acHost = moduleBody.querySelector('.sp-ac-host');
+    Object.entries(KEYWORD_FIELDS).forEach(([id, field]) => {
       const element = moduleBody.querySelector(`#${id}`);
       if (!element) return;
-      bindTagAssist(element, { excludeE621: true });
+      // 자동완성·태그 정보는 창 아래 빈 자리에 그린다(inlineHost). 우클릭은 이 창 메뉴(disableChunkBridge).
+      bindTagAssist(element, { excludeE621: true, inlineHost: acHost, disableChunkBridge: true });
       // Re-focusing a field means the user is editing it again — drop its pending
       // echo guard so server values can flow back once they move on (and a fresh
       // guard is set on the next blur/change via saveFilterState).
-      element.addEventListener('focus', () => { pendingEcho[fieldByInputId[id]] = null; });
+      element.addEventListener('focus', () => { pendingEcho[field] = null; });
       element.addEventListener('change', () => saveFilterState());
       element.addEventListener('blur', () => saveFilterState());
+      element.addEventListener('input', () => {
+        if (/[\r\n]/.test(element.value)) {
+          // 캐럿 앞뒤를 따로 펴서 캐럿 자리를 지킨다.
+          const at = element.selectionStart;
+          const before = flattenKeywordLines(element.value.slice(0, at));
+          element.value = before + flattenKeywordLines(element.value.slice(at));
+          element.setSelectionRange(before.length, before.length);
+        }
+        autoGrow(element);
+        if (field === 'exclude_permanent') syncPermButton();
+      });
+      element.addEventListener('keydown', event => {
+        // 한 줄 문법이라 Enter 로 줄을 만들지 않는다. 자동완성이 Enter 를 받았으면(defaultPrevented) 그대로.
+        if (event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+        if (event.ctrlKey || event.metaKey) return;   // Ctrl+Enter = 전역 생성
+        event.preventDefault();
+      });
+      element.addEventListener('contextmenu', event => {
+        // 터치(롱프레스)는 기기 기본 메뉴로 둔다.
+        if (event.pointerType && event.pointerType !== 'mouse') return;
+        if (document.defaultView?.matchMedia?.('(pointer: coarse)')?.matches) return;
+        event.preventDefault();
+        openCtxMenu(element, event.clientX, event.clientY);
+      });
     });
+    watchKeywordWidth();
     for (const key of ['e', 'q', 's', 'g']) {
       const checkbox = moduleBody.querySelector(`#sr_${key}`);
       if (!checkbox) continue;
@@ -823,7 +1065,6 @@ export function createSearchPanel({
 
   function buildSearchPanel(message) {
     const searchText = serverSearchTexts(message);
-    pendingEcho = { query: null, exclude: null };
     lastParquetSig = parquetSignature(message);
     if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
     moduleBody.innerHTML = `
@@ -865,14 +1106,18 @@ export function createSearchPanel({
         <span class="mod-section-label">Search Keyword</span>
         <button type="button" class="header-guide-btn" data-naia-guide="Search Keyword — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다. 그룹 안에서도 *를 쓸 수 있습니다 — 예: {*dog|*cat} 은 태그가 정확히 dog 또는 cat 인 행만 남깁니다.\\n\\n*tag — 태그 전체 일치. 태그가 정확히 그것인 행만 매칭합니다. 예: *girl 은 girl 만 — 1girl·cowgirl 은 물론 girl (character) 처럼 뒤에 말이 더 붙은 태그도 제외됩니다. *dog 은 dog ears·hot dog 을 끌어오지 않습니다.\\n\\n~tag — 포함 칸에 써도 됩니다. 그 태그를 정확히 가진 행을 뺍니다(제외 칸의 ~tag 와 같음).">ⓘ 가이드</button>
       </div>
-      <input class="mod-input" id="searchQuery" type="text" value="${escHtml(searchText.query)}" placeholder="tags, keywords...">
+      <textarea class="mod-input sp-kw" id="searchQuery" rows="1" spellcheck="false" placeholder="tags, keywords...">${escHtml(searchText.query)}</textarea>
     </div>
     <div>
       <div class="dr-label-row">
         <span class="mod-section-label">Exclude Keyword</span>
         <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n{a|b} — OR 그룹 제외. 그 중 하나라도 든 행을 뺍니다.">ⓘ 가이드</button>
+        <button type="button" class="sp-perm-btn" data-sp="perm" aria-pressed="false"
+          data-naia-guide="영구 제외 — 붉은 줄에 적은 태그는 저장되고, 접어 두어도 모든 검색에서 빠집니다. 문법은 Exclude Keyword 와 같습니다. 접혀 있을 때 단추 옆 숫자 = 걸려 있는 조각 수.">▼ 영구 제외</button>
       </div>
-      <input class="mod-input" id="searchExclude" type="text" value="${escHtml(searchText.exclude)}" placeholder="exclude tags...">
+      <textarea class="mod-input sp-kw" id="searchExclude" rows="1" spellcheck="false" placeholder="exclude tags...">${escHtml(searchText.exclude)}</textarea>
+      <textarea class="mod-input sp-kw sp-perm" id="searchExcludePermanent" rows="1" spellcheck="false" hidden
+        placeholder="항상 제외할 태그 — 모든 검색에 적용">${escHtml(searchText.exclude_permanent)}</textarea>
     </div>
     <div class="sp-ratings">
       <span class="mod-section-label">Ratings</span>
@@ -890,8 +1135,12 @@ export function createSearchPanel({
       <div class="sp-hist-list"></div>
     </div>
     <span class="search-progress"></span>
+    <div class="sp-ac-host"></div>
   `;
+    pendingEcho = { query: null, exclude: null, exclude_permanent: null };
     bindSearchInputs();
+    setPermOpen(permOpen);
+    growKeywordFields();
     ensureDateRangeStyle();
     ensureParquetLibraryStyle();
     libHost.innerHTML = parquetSectionHtml(message);
@@ -950,9 +1199,16 @@ export function createSearchPanel({
     // so a sibling field that diverges (or never echoes exactly) can't keep it stuck.
     if (pendingEcho.query !== null && server.query === pendingEcho.query) pendingEcho.query = null;
     if (pendingEcho.exclude !== null && server.exclude === pendingEcho.exclude) pendingEcho.exclude = null;
+    if (pendingEcho.exclude_permanent !== null && server.exclude_permanent === pendingEcho.exclude_permanent) {
+      pendingEcho.exclude_permanent = null;
+    }
     const focusedEl = document.activeElement;
     applyInputValue(moduleBody.querySelector('#searchQuery'), server.query, pendingEcho.query !== null, focusedEl);
     applyInputValue(moduleBody.querySelector('#searchExclude'), server.exclude, pendingEcho.exclude !== null, focusedEl);
+    applyInputValue(moduleBody.querySelector('#searchExcludePermanent'), server.exclude_permanent,
+      pendingEcho.exclude_permanent !== null, focusedEl);
+    growKeywordFields();
+    syncPermButton();
 
     for (const key of ['e', 'q', 's', 'g']) {
       const checkbox = moduleBody.querySelector(`#sr_${key}`);
@@ -974,6 +1230,8 @@ export function createSearchPanel({
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const query = (document.getElementById('searchQuery') || {}).value || '';
     const exclude = (document.getElementById('searchExclude') || {}).value || '';
+    // 영구 제외는 따로 보낸다 - 서버가 제외어에 덧붙여 찾고, 기록·제외 칸에는 섞지 않는다.
+    const excludePermanent = (document.getElementById('searchExcludePermanent') || {}).value || '';
     for (const key of ['e','q','s','g']) {
       const element = document.getElementById('sr_' + key);
       if (element) searchRatingState[key] = element.checked;
@@ -984,11 +1242,11 @@ export function createSearchPanel({
     }
     searchingActive = true;
     lockTagSurface();   // heavy archive scan → released by onSearchState (search_progress keeps it alive)
-    saveFilterState({query, exclude});
+    saveFilterState({query, exclude, exclude_permanent: excludePermanent});
     const bucketRange = bucketState.loaded
       ? { bucket_start: bucketState.start, bucket_end: bucketState.end }
       : {};
-    ws.send(JSON.stringify({ type: 'search', query, exclude, ...ratings, ...bucketRange }));
+    ws.send(JSON.stringify({ type: 'search', query, exclude, exclude_permanent: excludePermanent, ...ratings, ...bucketRange }));
     const progress = moduleBody.querySelector('.search-progress');
     if (progress) progress.textContent = 'Starting...';
     const button = moduleBody.querySelector('.mod-start');

@@ -16128,6 +16128,20 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   -webkit-backdrop-filter: blur(6px);
 }
 .tag-tooltip.open { display: flex; flex-direction: column; gap: 3px; max-height: 50vh; overflow-y: auto; }
+/* 태그 정보 툴팁 - 등급별(G/S/Q/E) 등장 횟수(사용자 지정 2026-09-24). 색은 등급 단추(.rating-btn)와 같다. */
+.tag-tooltip-ratings { display: flex; flex-direction: column; gap: 3px; margin: 1px 0 2px; }
+.ttr-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,0.06); }
+.ttr-seg { display: block; height: 100%; }
+.ttr-seg[data-r="g"], .ttr-cell[data-r="g"] b { background-color: #4CAF50; }
+.ttr-seg[data-r="s"], .ttr-cell[data-r="s"] b { background-color: #2196F3; }
+.ttr-seg[data-r="q"], .ttr-cell[data-r="q"] b { background-color: #FF9800; }
+.ttr-seg[data-r="e"], .ttr-cell[data-r="e"] b { background-color: #F44336; }
+.ttr-cells { display: flex; gap: 10px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-secondary, #c8c8d0); font-variant-numeric: tabular-nums; }
+.ttr-cell { display: inline-flex; align-items: center; gap: 4px; }
+.ttr-cell b { display: inline-block; min-width: 13px; padding: 0 2px; border-radius: 3px; color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; }
+.ttr-cell.is-zero { opacity: 0.4; }
 .result-info-tag-popup {
   display: none;
   position: fixed;

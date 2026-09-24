@@ -85,6 +85,7 @@ def build(
     include_current_missing: bool,
     dry_run: bool,
     max_files: int | None,
+    archive_label: str | None = None,
 ) -> dict[str, Any]:
     _ensure_repo_import(repo_root)
     current_counts, current_display = _load_current_payload(out_path)
@@ -125,10 +126,10 @@ def build(
         "partition_order": list(RATING_ORDER),
         "total_posts": _rating_totals(archive_summary.get("post_rating_counts", {})),
         "num_tags": len(output_records),
-        "source": f"{archive_root}\\tags_00~{archive_summary.get('file_count', 0) - 1:02d}.parquet",
+        "source": f"{archive_label or archive_root}\\tags_00~{archive_summary.get('file_count', 0) - 1:02d}.parquet",
         "scope": scope,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "archive_tags_root": str(archive_root.resolve()),
+        "archive_tags_root": archive_label or str(archive_root.resolve()),
         "archive_file_count": archive_summary.get("file_count", 0),
         "archive_total_rows": archive_summary.get("total_rows", 0),
         "archive_unique_tags": archive_summary.get("unique_tags_total", 0),
@@ -190,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="Compute counts and print summary without writing.")
     parser.add_argument("--max-files", type=int, default=None, help="Limit archive parquet files for validation runs.")
+    # 배포 파일(_meta)에 사용자 PC 경로(계정 이름이 든 %APPDATA%)를 적지 않으려고 쓴다.
+    parser.add_argument("--archive-label", default=None,
+                        help="Label written to _meta instead of the absolute archive path.")
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).resolve()
@@ -206,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         include_current_missing=not args.drop_current_missing,
         dry_run=args.dry_run,
         max_files=args.max_files,
+        archive_label=args.archive_label,
     )
     json.dump(summary, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")

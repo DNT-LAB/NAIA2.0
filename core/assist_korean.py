@@ -268,6 +268,7 @@ class KoreanLayer:
         self._kiwi: Any = None
         self._lock = threading.Lock()
         self._tok_lock = threading.Lock()   # 분석 줄 세우기(tokenize 주석 참조)
+        self._noun_cache: dict[str, bool] = {}
         self.user_words = 0
         r = self.rules
         self._female = set(r["people"]["female"])
@@ -458,6 +459,8 @@ class KoreanLayer:
                 continue                    # 관용구가 가져간 동사(개같이 엎드리기 -> all fours, on stomach 아님)
             if kind == "active" and stem in own_hit:
                 continue
+            if kind == "active" and self._lexical_noun(span.split()[-1]):
+                continue                    # 능동 꼴이 따로 있는 명사다 — 눈물 고인 -> 고이 -> 고기 = meat(사용자 제보 09-24)
             tags = self.vocab.scene_tags(span)
             if not tags or tags[0] in out.blocked or tags[0] in out.covers:
                 continue                    # 1순위가 막혔으면 2순위(face in pillow)로 새지 않는다
@@ -494,6 +497,16 @@ class KoreanLayer:
         out.names.sort(key=lambda h: (cleaned.find(h.form) if h.form in cleaned else len(cleaned)))
         out.roles = self._roles(toks, {n.form for n in out.names})
         return out
+
+    def _lexical_noun(self, word: str) -> bool:
+        """Kiwi 가 낱말을 통째로 명사 하나로 읽나(고기 · 모기 · 감기 · 열기) — 동사 명사형(안기 = 안/VV + 기/ETN)이 아니다.
+        수동형(고이·모이)에서 이/히/리/기 를 떼어 만든 능동 꼴이 이런 명사와 겹친다."""
+        if word not in self._noun_cache:
+            with self._tok_lock:
+                toks = self._kiwi.tokenize(word) if self._kiwi is not None else []
+            self._noun_cache[word] = (len(toks) == 1 and toks[0].tag in ("NNG", "NNP")
+                                      and toks[0].form == word)
+        return self._noun_cache[word]
 
     def _names(self, toks: list[tuple[str, str]]) -> list[NameHit]:
         """Kiwi 가 고유명사로 본 것 중 캐릭터 이름. 일반 낱말(트윈테일)·작품명(원신)은 뺀다 — 별칭 조각과 겹친다(실측).

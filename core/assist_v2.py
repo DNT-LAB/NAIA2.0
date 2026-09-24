@@ -322,7 +322,12 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if k in req_compact:
             return True
         stems = {k[:-1]} if k.endswith("기") and len(k) >= 2 else {re.sub(r"다$", "", k)}
-        return bool(stems & req_lemmas) or any(len(s) >= 2 and s in req_compact for s in stems)
+        if stems & req_lemmas or any(len(s) >= 2 and s in req_compact for s in stems):
+            return True
+        # 낱말마다(눈물 고이기 = 눈물 + 고이) — 붙여 비교하면 '눈물고이' 가 요청의 '눈물고인'(고인 = 고이+ㄴ 한 글자)에
+        # 없어 tears 가 떨어졌다(09-24). 낱말이 전부 요청에 있어야 한다(침 흘리기 의 침은 없다 -> 버림).
+        words = str(ko).split()
+        return len(words) > 1 and all(grounded(w) for w in words)
 
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
         en = str(item.get("en") or "").strip().lower()
@@ -361,10 +366,12 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
                 return hit[:1]
         if found:
             return found
+        # 퍼지 후보는 영문 추측이 **다 설명하는** 태그만 — 낱말 하나만 겹쳐도 받았더니 'looking at me' 가
+        # looking at penis(키워드 쳐다보기)를 데려왔다(사용자 제보 09-24). 후보의 내용어가 전부 영문 추측에 있어야 한다.
         en_words = {w[:4] for w in re.findall(r"[a-z]+", en) if len(w) >= 3}
         for cand in vocab.fuzzy(ko) if ko else []:
             words = {w[:4] for w in re.findall(r"[a-z]+", cand.lower()) if len(w) >= 3}
-            if en_words & words and vocab.canonical(cand):
+            if words and words <= en_words and vocab.canonical(cand):
                 return [vocab.canonical(cand)]
         log.append(f"unresolved:{en}|{ko}")
         return []
@@ -448,6 +455,27 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     return Merged(task=route.get("task", "other"), goal=route.get("goal", "find"), tiers=(t1, t2, t3),
                   exclude=exclude, characters=characters, relations=relations, has_action=has_action,
                   name=route.get("name", ""), name_ko=route.get("name_ko", ""), log=log)
+
+
+def off_rating(tags: Iterable[str], share: Callable[[str], float | None], min_share: float) -> dict[str, float]:
+    """고른 등급에서 거의 안 쓰이는 태그 -> 그 등급의 게시물 비중. 비중을 모르는 태그(맵에 없음·게시물이 적음)는 둔다.
+    사전·퍼지·모델 어느 길로 들어온 태그든 마지막에 여기서 거른다 — 길마다 막으면 새 길이 샌다(09-24)."""
+    out: dict[str, float] = {}
+    for tag in dict.fromkeys(t for t in tags if t):
+        s = share(tag)
+        if s is not None and s < min_share:
+            out[tag] = s
+    return out
+
+
+def drop_tags(merged: Merged, tags: Iterable[str]) -> None:
+    """모든 칸(층 · 인물 속성 · 관계 동작)에서 뺀다."""
+    drop = set(tags)
+    for tier in merged.tiers:
+        tier[:] = [t for t in tier if t not in drop]
+    for c in merged.characters:
+        c.attrs[:] = [t for t in c.attrs if t not in drop]
+    merged.relations[:] = [r for r in merged.relations if r[1] not in drop]
 
 
 # ── 조립 ───────────────────────────────────────────────────────────────────

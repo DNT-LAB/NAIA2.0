@@ -18,6 +18,10 @@ from typing import Any
 
 ASSIST_LEASE_SECONDS = 600.0
 MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 2026-09-23) — 1건 풀은 매번 같은 것을 뽑는다
+# 등급 게이트: 고른 등급(G·S)의 게시물 비중이 이보다 낮은 태그는 뺀다(0.2% = 500건에 1건 미만). 실측 09-24 G 비중:
+# looking at penis 0.07% · groping 0.08% · nipples 0.13% · nude 0.19% / bound wrists 4.6% · cleavage 2.7% · meat 63%
+RATING_GATE = {"g": 0.002, "s": 0.002}
+RATING_GATE_MIN_POSTS = 50    # 이보다 적게 달린 태그는 비중을 믿지 않는다(두고 본다)
 MODEL_TIMEOUT = 60.0
 MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
 MAX_NAME_CHOICES = 8
@@ -382,6 +386,39 @@ def _call_model(context: Any, text: str, previous: dict[str, Any] | None) -> tup
         return None, info
 
 
+def _rating_share(context: Any, rating: str) -> Any:
+    """등급 게이트 — 태그가 달린 게시물 중 고른 등급(G·S)의 비중. Q·E 이거나 이벤트 맵이 없으면 None(게이트 없음).
+    사용자 제보 09-24: G 로 고른 '나를 쳐다보는 나히다' 에 looking at penis 가 들어갔다(퍼지 검색 길) — 어느 길로
+    들어오든 마지막에 여기서 걸러진다."""
+    if rating not in RATING_GATE:
+        return None
+    try:
+        service = _event_map(context)
+    except Exception:
+        return None
+
+    def share(tag: str) -> float | None:
+        try:
+            counts = service.rating_counts(tag) or {}
+        except Exception:
+            return None
+        total = sum(counts.values())
+        return counts.get(rating, 0) / total if total >= RATING_GATE_MIN_POSTS else None
+    return share
+
+
+def _rating_note(rating: str, dropped: dict[str, float]) -> str:
+    r = rating.upper()
+    items = ", ".join(f"{tag} ({r} {s * 100:.2f}%)" for tag, s in dropped.items())
+    return f"고른 등급({r}) 게시물에 거의 없는 태그라 뺐습니다: {items}."
+
+
+def _with_rating_note(out: dict[str, Any], rating: str, dropped: dict[str, float]) -> None:
+    if dropped:
+        out["dropped"] = [{"tag": tag, "share": round(s, 5)} for tag, s in dropped.items()]
+        out["message"] = " ".join(m for m in (_rating_note(rating, dropped), out.get("message")) if m)
+
+
 def _fallback_route(ka: Any) -> dict[str, Any]:
     """모델 없이: 한국어 층이 찾은 것만으로 장면 검색."""
     return {"task": "scene" if (ka.specific or ka.verb_tags) else "other", "goal": "find", "characters": [],
@@ -389,7 +426,7 @@ def _fallback_route(ka: Any) -> dict[str, Any]:
 
 
 def run_assist(context: Any, payload: Any) -> dict[str, Any]:
-    from core.assist_v2 import GUIDE, make_recap, merge
+    from core.assist_v2 import GUIDE, drop_tags, make_recap, merge, off_rating
 
     started = time.perf_counter()
     try:
@@ -419,6 +456,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                    name_lookup=lambda form: layer.choose(layer.name_hit(form), choices),
                    not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
                    roles_for=lambda names: layer.roles_for(ka, names))
+    share = _rating_share(context, req["rating"])
+    dropped = off_rating(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
+                         + [r[1] for r in merged.relations], share, RATING_GATE[req["rating"]]) if share else {}
+    drop_tags(merged, dropped)
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 후보 전체를 싣는다 — 모델이 찾은 이름(호두)도 화면에서 고를 수 있게
@@ -445,6 +486,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     if merged.task in ("scene", "tag"):
         partition = (out.get("persons") or {}).get("partition", "unknown")
         out["recap"] = make_recap(merged, partition=partition, rating=req["rating"])
+    _with_rating_note(out, req["rating"], dropped)
     return out
 
 
@@ -756,7 +798,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     """여러 줄 요청 -> 메인·캐릭터 프롬프트 + 설명. 모델이 없으면 한국어 근거만으로(못 찾은 절은 설명에 남긴다)."""
     from core import assist_compose as ac
     from core.assist_korean import compact
-    from core.assist_v2 import PERSON_TAGS
+    from core.assist_v2 import PERSON_TAGS, off_rating
 
     layer = korean_layer(context)
     t0 = time.perf_counter()
@@ -830,6 +872,13 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
             viewed.add((d.owner, d.ko))
             ac.add_viewer(d, layer.analyze(d.ko).viewer)
     ac.dedupe(subs, relation, chars, tools.info)
+    share = _rating_share(context, req["rating"])
+    dropped = off_rating([t for d in subs for t in d.tags] + ([relation.action] if relation is not None else []),
+                         share, RATING_GATE[req["rating"]]) if share else {}
+    for d in subs:
+        d.tags = [t for t in d.tags if t not in dropped]
+    if relation is not None and relation.action in dropped:
+        relation = None
 
     persons = _compose_persons(req, chars)
     prompt = ac.assemble(people=PERSON_TAGS.get(persons["partition"], []), characters=chars, relation=relation,
@@ -856,4 +905,5 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
                      "total_s": round(time.perf_counter() - started, 3)}
     if not pool.get("pins"):
         out["message"] = "고른 등급·인원에서 이 조합의 실제 게시물이 20건이 안 됩니다 — 프롬프트는 그대로 쓸 수 있습니다."
+    _with_rating_note(out, req["rating"], dropped)
     return out

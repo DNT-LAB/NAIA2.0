@@ -665,6 +665,10 @@ class EventMapService:
             return {"ok": True, "status": "unknown_tag", "tag": name}
         return {"ok": True, "status": "matched", **info}
 
+    def rating_counts(self, tag: str) -> dict[str, int] | None:
+        """태그의 등급별 게시물 수({"g": n, "s": n, ...}). 맵에 없는 태그는 None."""
+        return self.index().rating_counts(str(tag or "").strip())
+
     def resolve_many(self, tags: Any) -> dict[str, Any]:
         """프롬프트에 든 태그 여러 개를 한 번에 맵 어휘로 푼다(Ctrl+E 패널의 씨앗 칩).
 

@@ -346,6 +346,22 @@ class EventMapIndex:
                 "color_only": self.color[tid],
                 "map_eligible": self.eligible[tid] and not self.color[tid]}
 
+    def rating_counts(self, tag: str) -> dict | None:
+        """태그가 달린 게시물 수를 등급(g/s/q/e)별로 센다 - 분면 바이트만 보므로 정확하다(Assist 등급 게이트).
+        맵에 없는 태그는 None."""
+        tid = self.resolve(tag)
+        return None if tid is None else dict(self._rating_counts(tid))
+
+    @lru_cache(maxsize=4096)
+    def _rating_counts(self, tid: int) -> tuple:
+        _, owner = self._partition_of(self.posting(tid))
+        per_part = np.bincount(owner, minlength=len(self.partitions))
+        out: dict[str, int] = {}
+        for pid in np.flatnonzero(per_part):
+            rating = self.partitions[int(pid)].partition("_")[0]
+            out[rating] = out.get(rating, 0) + int(per_part[pid])
+        return tuple(sorted(out.items()))
+
     @lru_cache(maxsize=512)
     def posting(self, tid: int) -> np.ndarray:
         """태그의 게시물 목록(오름차순). 태그마다 한 번만 풀고 캐시에 남는다."""

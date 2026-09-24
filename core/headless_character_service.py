@@ -470,6 +470,7 @@ class HeadlessCharacterService:
         #   - "activated" / "reroll_on_generate" toggles do NOT touch the snapshot.
         invalidate_snapshot = False
         refresh_snapshot = False
+        refresh_slot = ""
         if key == "activated":
             settings["is_active"] = context._coerce_bool(value)
         elif key == "reroll_on_generate":
@@ -568,6 +569,9 @@ class HeadlessCharacterService:
                 invalidate_snapshot = True
         elif key == "preview_refresh":
             refresh_snapshot = True
+        elif key == "preview_refresh_slot":
+            # 퀵 패널 [Refresh] - 이 슬롯(과 그 Connect 자식)만 다시 굴린다(사용자 지정 2026-09-24).
+            refresh_slot = str(value or "").strip()
         elif key.startswith("remove_character_"):
             index = context._index_from_key(key, "remove_character_")
             # ⚠️ `len(frames) > 1` 은 **슬롯 칸을 비우지 않으려는** 규칙인데, 히스토리의
@@ -835,7 +839,11 @@ class HeadlessCharacterService:
             metadata.pop("conditional_character_skips", None)
         self.save_settings(mode, settings)
         # SSOT snapshot maintenance (after save so the roll sees the latest frames).
-        if refresh_snapshot:
+        if refresh_slot:
+            from core.character_settings import roll_character_slot
+
+            roll_character_slot(context, refresh_slot, mode=mode, settings=settings)
+        elif refresh_snapshot:
             from core.character_settings import roll_character_params
 
             roll_character_params(

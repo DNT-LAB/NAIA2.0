@@ -25153,6 +25153,31 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 /* C1 은 지울 수 없다 - 눌리지 않는다는 것이 보여야 한다. */
 .cq-slot-btn:disabled { opacity: 0.28; cursor: default; }
 .cq-slot-btn:disabled:hover { border-color: rgba(255,255,255,0.14); color: var(--text-dim); background: rgba(255,255,255,0.05); }
+/* [Refresh] - 이 슬롯의 와일드카드를 지금 다시 굴린다(사용자 지정 2026-09-24).
+   다른 머리줄 단추는 17px 정사각형이지만 이건 글자라 폭을 푼다. */
+.cq-slot-btn.cq-refresh { width: auto; padding: 0 5px; font-size: 9px; letter-spacing: .02em; }
+/* 굴린 결과 툴팁 - 반투명, 약 2초. 그림 위에 뜨고 누름을 막지 않는다.
+   ⚠️ body 에 붙는다(패널은 overflow 로 잘린다) - 그래서 z-index 가 결과 위 층이어야 한다. */
+.cq-refresh-tip {
+  position: fixed; z-index: 10240; pointer-events: none;
+  padding: 7px 10px; border-radius: 7px; max-width: 360px;
+  background: rgba(14, 14, 22, 0.72); border: 1px solid rgba(124,106,239,0.45);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.35); backdrop-filter: blur(3px);
+  opacity: 0; transform: translateY(-3px); transition: opacity .18s, transform .18s;
+}
+.cq-refresh-tip.is-on { opacity: 1; transform: none; }
+.cq-refresh-tip b { display: block; margin-bottom: 2px; font-weight: 700; color: rgb(190, 180, 255); }
+.cq-refresh-tip i { color: var(--text-dim); font-style: normal; }
+.cq-refresh-tip .cq-tip-key { color: var(--text-dim); }
+@media (prefers-reduced-motion: reduce) { .cq-refresh-tip { transition: none; } }
+/* 아래 줄 밑 '생성 버튼이 눌릴 때 와일드카드를 갱신합니다' - 캐릭터 모듈 창의 같은 체크(reroll_on_generate). */
+.cq-reroll {
+  display: flex; align-items: center; gap: 6px; padding: 5px 4px 1px; cursor: pointer;
+  font-size: 10.5px; color: var(--text-dim); user-select: none;
+}
+.cq-reroll input { margin: 0; accent-color: rgb(124,106,239); cursor: pointer; }
+.cq-reroll:hover { color: var(--text-primary); }
 /* Add 와 Manage 가 아래 줄을 나눠 쓴다. Add 가 주(主)라 더 넓게. */
 .cq-foot { display: flex; gap: 3px; }
 .cq-manage {

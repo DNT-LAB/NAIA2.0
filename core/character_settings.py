@@ -1462,6 +1462,7 @@ def character_params_from_settings(
     reuse_current_context: bool = True,
     save_root: Path | str | None = None,
     prefer_snapshot: bool = False,
+    pinned: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Resolve the character params for this call, with the SSOT precedence:
 
@@ -1474,6 +1475,10 @@ def character_params_from_settings(
          verbatim (NO re-roll). This is how Generate (reroll OFF / Ollama) and the
          random prompt grounding stay identical to what was rolled.
       4. Otherwise perform ONE fresh wildcard expansion and return it.
+
+    ``pinned`` = {slot uuid: {"prompt", "uc", "share"}}: step 4 does NOT re-expand these
+    slots - it reuses the given result (and hands ``share`` down to Connect children).
+    Used by ``roll_character_slot`` so one slot's [Refresh] leaves the others alone.
 
     This function does NOT persist the snapshot — storage is explicit at the
     authoritative roll sites (Random / Generate / Refresh) via
@@ -1544,6 +1549,18 @@ def character_params_from_settings(
             rolls = getattr(context, "wildcard_rolls", None)
             if isinstance(rolls, list):
                 _append_frozen_character_roll(rolls, slot, prompt, slot_index)
+        elif pinned and slot in pinned:
+            # [Refresh] 가 건드리지 않는 슬롯 - 지난 결과를 그대로 쓴다. 아래로 물려줄 몫도
+            # 지난 것이다(Connect 자식이 이 슬롯의 **같은** 값을 이어받게).
+            pin = pinned[slot]
+            prompt = str(pin.get("prompt") or "")
+            uc = str(pin.get("uc") or "")
+            expanded_by_uuid[slot] = (str(pin.get("share") or prompt), uc)
+            if prompt:
+                characters.append(prompt)
+                ucs.append(uc)
+                character_ids.append(slot)
+            continue
         else:
             # 물려받은 것이 앞, 이 슬롯이 직접 쓴 것이 뒤 (사용자 지정: 연결 중에는
             # 두 칸이 "추가할" 칸이 된다). 고정된 원본을 물려받으면 그 고정값이 온다 —
@@ -1731,6 +1748,85 @@ def roll_character_params(
     return params
 
 
+def roll_character_slot(
+    app_context,
+    slot: Any,
+    mode: str = "NAI",
+    settings: dict | None = None,
+    *,
+    save_root: Path | str | None = None,
+) -> dict:
+    """슬롯 **하나만** 다시 굴린다 - 캐릭터 퀵 패널의 [Refresh](사용자 지정 2026-09-24).
+
+    [Refresh Preview] 는 전부를 새로 굴린다. 여기서는 그 슬롯과, 그 슬롯을 **물려받는**
+    아래쪽 슬롯(Connect)만 다시 펼치고 나머지는 지난 스냅샷을 그대로 둔다.
+
+    ⚠️ Connect 자식도 함께 굴린다 - 자식의 글에는 부모의 **뽑힌 값**이 들어 있어서,
+       부모만 바꾸면 자식은 옛 값을 든 채 남는다.
+    ⚠️ 스냅샷이 아직 없으면(한 번도 안 굴렸다) 전체를 한 번 굴린다 - 고정할 지난 결과가 없다.
+    ⚠️ 📌(결과창의 캐릭터 고정)이 걸린 슬롯은 그 값이 이긴다 - 여기서도 안 바뀐다.
+    """
+    slot_key = str(slot or "").strip()
+    if save_root is None:
+        save_root = _save_root_from_context(app_context)
+    snapshot = read_character_roll_snapshot(app_context, mode)
+    if not slot_key or snapshot is None:
+        return roll_character_params(app_context, mode=mode, settings=settings, save_root=save_root)
+    normalized = (
+        normalize_character_settings(settings)
+        if settings is not None
+        else load_character_settings(mode, save_root=save_root)
+    )
+    frames = active_character_frames(normalized)
+    ids = _active_frame_slot_ids(frames)
+    targets = {slot_key}
+    grown = True
+    while grown:          # 링크는 늘 앞을 가리키지만, 순서를 믿지 않고 닫힐 때까지 넓힌다
+        grown = False
+        for index, frame in enumerate(frames):
+            child = ids[index]
+            if child not in targets and str(frame.get("connect_to") or "") in targets:
+                targets.add(child)
+                grown = True
+    prior = _snapshot_result(snapshot, ids)
+    shares = prior.get("shares") or {}
+    pinned = {
+        sid: {"prompt": prompt, "uc": uc, "share": shares.get(sid, prompt)}
+        for sid, prompt, uc in zip(prior["character_ids"], prior["characters"], prior["uc"])
+        if sid not in targets
+    }
+    params = character_params_from_settings(
+        app_context, mode=mode, settings=settings, reuse_current_context=False,
+        save_root=save_root, pinned=pinned,
+    )
+    if params.get("characters"):
+        # 굴림 기록도 슬롯 단위로 갈아 끼운다 - 고정한 슬롯은 새 기록이 없으니 옛 것을 남긴다.
+        kept = [roll for roll in prior.get("wildcard_rolls") or []
+                if str(roll.get("slot") or "") not in targets]
+        params["wildcard_rolls"] = kept + list(params.get("wildcard_rolls") or [])
+        store_character_roll_snapshot(app_context, params, mode)
+    return params
+
+
+def character_slot_rolls(app_context, mode: str = "NAI") -> dict[str, dict[str, Any]]:
+    """슬롯별 **지금 스냅샷**의 결과 - {uuid: {"prompt", "rolls": [{"key", "value"}]}}.
+    퀵 패널 [Refresh] 의 툴팁이 "무엇이 뽑혔나" 를 보여 주는 데 쓴다. 굴리지 않는다."""
+    snapshot = read_character_roll_snapshot(app_context, mode) if app_context is not None else None
+    if snapshot is None:
+        return {}
+    ids = [str(value) for value in snapshot.get("character_ids") or []]
+    out: dict[str, dict[str, Any]] = {}
+    for sid, prompt in zip(ids, snapshot.get("characters") or []):
+        out[sid] = {"prompt": str(prompt), "rolls": []}
+    for roll in snapshot.get("wildcard_rolls") or []:
+        if not isinstance(roll, dict):
+            continue
+        sid = str(roll.get("slot") or "")
+        if sid in out:
+            out[sid]["rolls"].append({"key": str(roll.get("key") or ""), "value": str(roll.get("value") or "")})
+    return out
+
+
 def read_reroll_on_generate(app_context, mode: str = "NAI") -> bool:
     """Read the "Process wildcards on Generate" flag from the HEADLESS character
     settings (settings cache → disk fallback). Not the desktop module helper.
@@ -1851,4 +1947,7 @@ def character_state_from_settings(
         "processed_ucs": processed_ucs,
         "character_token_count": 0,
         "processed_preview_text": _format_processed_preview(processed_characters, processed_ucs),
+        # 슬롯별 결과와 뽑힌 와일드카드 - 퀵 패널 [Refresh] 툴팁이 읽는다(사용자 지정 2026-09-24).
+        "processed_slots": (character_slot_rolls(app_context, mode)
+                            if processed_characters else {}),
     }

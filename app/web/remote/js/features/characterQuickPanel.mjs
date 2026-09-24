@@ -74,6 +74,11 @@ export function createCharacterQuickPanel({
   let pendingAddOpen = null;         // + Add 직전의 활성 슬롯 수(에코를 기다린다)
   let lastState = null;
   let lastSignature = '';
+  // [Refresh] 를 누르고 결과를 기다리는 슬롯 - {uuid, index, before, at}. 응답(module_state)이
+  // 오면 그 슬롯에 뽑힌 값을 툴팁으로 잠깐 보인다(사용자 지정 2026-09-24).
+  let pendingRefresh = null;
+  let refreshTip = null;
+  let refreshTipTimer = null;
   let visible = false;
   let anchorWatcher = null;      // 결과 패널이 늦게 생기면 다시 붙는다
   let stage = null;              // POS 편집 무대(원이 놓이는 판)
@@ -930,6 +935,12 @@ export function createCharacterQuickPanel({
       + `${escHtml(slotLabel(character, ordinal, sourceOrdinalOf(character, slots || [])))}</span></button>`
       + connectSourceBadge(character, slots || [])
       + connectControl(character, index, ordinal, slots || [])
+      // [Refresh] = 이 슬롯의 와일드카드를 **지금** 다시 굴린다(사용자 지정 2026-09-24).
+      // 가상(인페인트 세션) 캐릭터에는 굴림 스냅샷이 없어 내지 않는다.
+      + (lastState && lastState.virtual
+          ? ''
+          : `<button type="button" class="cq-slot-btn cq-refresh" data-cq-refresh="${index}"`
+            + ` aria-label="이 슬롯의 와일드카드를 다시 굴린다">Refresh</button>`)
       + (canDeactivate
           ? `<button type="button" class="cq-slot-btn" data-cq-down="${index}"`
             + ` aria-label="비활성으로 내림">&#9660;</button>`
@@ -996,7 +1007,9 @@ export function createCharacterQuickPanel({
     //    자물쇠가 안 붙고, (b) 해상도가 바뀌어도 무대 비율이 옛 값에 굳어 그리드가
     //    그림과 어긋난 채 남는다(사용자 지정: "POS 그리드 및 패널 동기화").
     const res = resolutionNow();
+    // ⚠️ `reroll_on_generate` 도 넣는다 - 모듈 창에서 바꾸면 이쪽 체크도 따라와야 한다.
     return `${open ? 1 : 0}${state && state.activated ? 1 : 0}${state && state.virtual ? 1 : 0}`
+      + `${state && state.reroll_on_generate ? 1 : 0}`
       + `${posModeOf(state)}${posEditing ? 1 : 0}${posBlockedByRandom() ? 'R' : '-'}`
       + `${res ? `${res.w}x${res.h}` : '-'}#${slots}`;
   }
@@ -1144,6 +1157,14 @@ export function createCharacterQuickPanel({
   function onClick(event) {
     // 활성화 토글은 label/input 이라 클릭이 여기로도 올라온다 - 바깥 토글보다 먼저 본다.
     if (event.target.closest('[data-cq-enable]') || event.target.closest('.cq-enable')) return;
+    // '생성 때 갱신' - label 을 누르면 click 이 label 과 input 에 두 번 온다. input 것만 본다.
+    if (event.target.closest('.cq-reroll')) {
+      const box = event.target.closest('[data-cq-reroll]');
+      if (box) setModuleParam('character', 'reroll_on_generate', String(box.checked));
+      return;
+    }
+    const refresh = event.target.closest('[data-cq-refresh]');
+    if (refresh) { requestRefresh(Number(refresh.dataset.cqRefresh)); return; }
     // TODO(POS): 캐릭터 좌표 편집. 규약은 확정됨(좌상단 원점 · 0~1 · 소수 3자리)
     //   이고 백엔드도 준비됐다(use_coords). 앵커 UI 만 남았다.
     if (event.target.closest('[data-cq-pos]')) return;
@@ -1232,6 +1253,76 @@ export function createCharacterQuickPanel({
   }
 
   /** Interactive 가 켜져 있거나 NAI 모드가 아니면 자리를 비운다. */
+  /** [Refresh] - 이 슬롯만 다시 굴려 달라고 한다. 밀린 입력은 `setModuleParam` 이 먼저
+   *  내보낸다(방금 친 글로 굴린다). 결과는 module_state 로 와서 `render` 가 툴팁을 띄운다. */
+  function requestRefresh(index) {
+    const character = ((lastState && lastState.characters) || [])[index];
+    const uuid = String((character && character.slot_uuid) || '');
+    if (!uuid) return;
+    const slots = (lastState && lastState.processed_slots) || {};
+    const at = Date.now();
+    pendingRefresh = {uuid, index, before: JSON.stringify(slots[uuid] || null), at};
+    setModuleParam('character', 'preview_refresh_slot', uuid);
+    // 같은 값이 다시 뽑히면 '바뀐' 응답이 없다 - 잠시 뒤 최신 상태로 한 번 띄운다.
+    setTimeout(() => { if (pendingRefresh && pendingRefresh.at === at) settleRefresh(lastState, true); }, 900);
+  }
+
+  /** 뽑힌 값 툴팁 - 반투명, 약 2초(사용자 지정 2026-09-24). 패널 **오른쪽 바깥**(그림 위)에
+   *  그 슬롯 머리줄 높이로 띄운다. 오른쪽에 자리가 없으면 머리줄 아래로. 누름을 막지 않는다. */
+  function showRefreshTip(index, entry) {
+    const head = mount && mount.querySelector(`[data-cq-refresh="${index}"]`)?.closest('.cq-slot-headrow');
+    const box = mount && mount.querySelector('.cq-box');
+    if (!head || !box) return;
+    if (!refreshTip) {
+      refreshTip = document.createElement('div');
+      refreshTip.className = 'cq-refresh-tip';
+      refreshTip.setAttribute('role', 'status');
+      document.body.appendChild(refreshTip);
+    }
+    const rolls = (entry && Array.isArray(entry.rolls)) ? entry.rolls : [];
+    const frozen = rolls.some(roll => roll.key === '(frozen)');
+    const picked = rolls.filter(roll => roll.key && roll.key !== '(frozen)');
+    const label = escHtml(String(head.querySelector('.cq-slot-title')?.textContent || '').trim());
+    const clip = text => (text.length > 70 ? `${text.slice(0, 69)}…` : text);
+    const lines = frozen
+      ? ['<i>📌 고정된 슬롯이라 바뀌지 않았습니다 - 결과 창에서 풀 수 있습니다</i>']
+      : picked.length
+        ? picked.map(roll => `<span class="cq-tip-key">${escHtml(roll.key)}</span>`
+          + ` → ${escHtml(clip(String(roll.value || '')))}`)
+        : ['<i>와일드카드가 없어 그대로입니다</i>'];
+    refreshTip.innerHTML = `<b>${label} · 새로 굴렸습니다</b>${lines.map(line => `<div>${line}</div>`).join('')}`;
+    const h = head.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const room = (window.innerWidth || 0) - b.right - 16;
+    refreshTip.style.maxWidth = `${Math.max(180, Math.min(360, room > 180 ? room : b.width))}px`;
+    if (room > 180) {
+      refreshTip.style.left = `${Math.round(b.right + 8)}px`;
+      refreshTip.style.top = `${Math.round(h.top)}px`;
+    } else {
+      refreshTip.style.left = `${Math.round(b.left)}px`;
+      refreshTip.style.top = `${Math.round(h.bottom + 4)}px`;
+    }
+    refreshTip.classList.remove('is-on');
+    void refreshTip.offsetWidth;            // 연달아 눌러도 다시 떠오르게
+    refreshTip.classList.add('is-on');
+    clearTimeout(refreshTipTimer);
+    refreshTipTimer = setTimeout(() => refreshTip && refreshTip.classList.remove('is-on'), 2000);
+  }
+
+  /** 응답이 왔나. 값이 바뀌었거나(굴린 결과) 조금 지났으면(같은 값이 다시 뽑혔을 수 있다) 띄운다.
+   *  ⚠️ 밀린 입력을 내보낸 **에코가 먼저** 올 수 있다 - 그건 결과가 아니라 곧바로 띄우지 않는다. */
+  function settleRefresh(state, force = false) {
+    if (!pendingRefresh) return;
+    const age = Date.now() - pendingRefresh.at;
+    if (age > 5000) { pendingRefresh = null; return; }
+    const entry = ((state && state.processed_slots) || {})[pendingRefresh.uuid] || null;
+    if (!entry) return;
+    if (!force && JSON.stringify(entry) === pendingRefresh.before && age < 600) return;
+    const {index} = pendingRefresh;
+    pendingRefresh = null;
+    requestAnimationFrame(() => showRefreshTip(index, entry));
+  }
+
   function setVisible(next) {
     visible = !!next;
     // 보이기로 했으면 **다시 그린다.**
@@ -1251,6 +1342,7 @@ export function createCharacterQuickPanel({
 
   function render(state, force) {
     if (state) lastState = state;
+    if (state) settleRefresh(state);
     if (!visible) return;
     const current = lastState;
     if (!current) return;
@@ -1298,7 +1390,16 @@ export function createCharacterQuickPanel({
         + (isNarrowViewport()
           ? ''
           : `<button type="button" class="cq-manage" data-cq-manage="1">Manage</button>`)
-        + `</div></div>`
+        + `</div>`
+        // 캐릭터 모듈 창의 "Generate 버튼을 누를 때 캐릭터 와일드카드 재굴림" 과 **같은 값**
+        // (`reroll_on_generate`)이다 - 끄면 Random 이 굴린 값을 Generate 가 그대로 쓰고,
+        // 바꾸고 싶을 때 [Refresh] 를 누른다.
+        + (current.virtual
+          ? ''
+          : `<label class="cq-reroll"><input type="checkbox" data-cq-reroll="1"`
+            + `${current.reroll_on_generate ? ' checked' : ''}>`
+            + `<span>생성 버튼이 눌릴 때 와일드카드를 갱신합니다</span></label>`)
+        + `</div>`
       : '';
     // 머리는 **버튼 하나가 아니라 줄**이다. 활성화 토글과 POS 를 나란히 두어야
     // 하는데, <button> 안에 <input> 이나 <button> 을 넣으면 마크업이 깨지고

@@ -16124,19 +16124,26 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   -webkit-backdrop-filter: blur(6px);
 }
 .tag-tooltip.open { display: flex; flex-direction: column; gap: 3px; max-height: 50vh; overflow-y: auto; }
-/* 태그 정보 툴팁 - 등급별(G/S/Q/E) 등장 횟수(사용자 지정 2026-09-24). 색은 등급 단추(.rating-btn)와 같다. */
-.tag-tooltip-ratings { display: flex; flex-direction: column; gap: 3px; margin: 1px 0 2px; }
+/* 태그 정보 툴팁 - 등급별(G/S/Q/E) 등장 횟수(사용자 지정 2026-09-24). 카드 맨 아래 칸(RELATED 와 같은 구분선).
+   칩 = Quick Filter 등급 단추(.rating-btn.active)의 채움·테두리 색 그대로, 막대 = 그 테두리(밝은) 색. */
+.tag-tooltip-ratings { display: flex; flex-direction: column; gap: 4px; padding-top: 3px;
+  border-top: 1px solid rgba(255,255,255,0.06); }
 .ttr-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,0.06); }
 .ttr-seg { display: block; height: 100%; }
-.ttr-seg[data-r="g"], .ttr-cell[data-r="g"] b { background-color: #4CAF50; }
-.ttr-seg[data-r="s"], .ttr-cell[data-r="s"] b { background-color: #2196F3; }
-.ttr-seg[data-r="q"], .ttr-cell[data-r="q"] b { background-color: #FF9800; }
-.ttr-seg[data-r="e"], .ttr-cell[data-r="e"] b { background-color: #F44336; }
-.ttr-cells { display: flex; gap: 10px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10px;
+.ttr-seg[data-r="g"] { background: #4CAF50; }
+.ttr-seg[data-r="s"] { background: #2196F3; }
+.ttr-seg[data-r="q"] { background: #FF9800; }
+.ttr-seg[data-r="e"] { background: #F44336; }
+.ttr-cells { display: flex; gap: 5px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10px;
   color: var(--text-secondary, #c8c8d0); font-variant-numeric: tabular-nums; }
-.ttr-cell { display: inline-flex; align-items: center; gap: 4px; }
-.ttr-cell b { display: inline-block; min-width: 13px; padding: 0 2px; border-radius: 3px; color: #fff;
-  font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; }
+.ttr-cell { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 1px; border-radius: 4px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border-dim); cursor: default; }
+.ttr-cell b { display: inline-block; min-width: 15px; padding: 0 3px; border-radius: 3px; border: 1px solid;
+  color: #fff; font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; }
+.ttr-cell[data-r="g"] b { background: #2e7d32; border-color: #4CAF50; }
+.ttr-cell[data-r="s"] b { background: #1565C0; border-color: #2196F3; }
+.ttr-cell[data-r="q"] b { background: #e65100; border-color: #FF9800; }
+.ttr-cell[data-r="e"] b { background: #c62828; border-color: #F44336; }
 .ttr-cell.is-zero { opacity: 0.4; }
 .result-info-tag-popup {
   display: none;

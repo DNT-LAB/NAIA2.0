@@ -273,7 +273,7 @@ class TagFinder:
         self._n_tags = n
 
     def usable(self, tag: str) -> bool:
-        if not tag or len(tag) <= 2 or _EMOTICON.match(tag) or _META.search(tag) or _PEOPLE.match(tag):
+        if not tag or len(tag) <= 2 or not re.search(r"[a-z]{2}", tag) or _EMOTICON.match(tag) or _META.search(tag) or _PEOPLE.match(tag):
             return False
         info = self.tools.info(tag) or {}
         if str(info.get("_named_entity_category") or info.get("_cat") or "") in ("artist", "character",

@@ -112,6 +112,16 @@ _NEGATION = re.compile(r"^(?:no|without|non)\s+(.+)$|^(.+?)\s+(?:removed|off)$")
 _EN_STOP = frozenset({"on", "in", "at", "the", "a", "an", "of", "with", "down", "up", "like", "while", "day", "girl",
                       "woman", "and", "to", "for"})
 _SYNONYMS = {"photo": "picture", "photos": "pictures"}
+_EMOTICON_EN = re.compile(r"[^a-z]*|[^a-z]{1,2}\s?[a-z]?")
+_META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\)$")
+
+
+def _junk_tag(tag: str | None) -> bool:
+    """프롬프트에 싣지 않을 태그 — 이모티콘(>o< · ^_^) · 메타 갈래((animated) · (cosplay)) · 인원 낱말 · 두 글자 이하.
+    구성 경로의 TagFinder.usable 과 같은 기준이다(09-24: 한 줄 경로에서 '놀란 표정' 이 >o< 로 샜다)."""
+    value = str(tag or "").strip().lower()
+    return (len(value) <= 2 or not re.search(r"[a-z]{2}", value) or bool(_EMOTICON_EN.fullmatch(value))
+            or bool(_META_EN.search(value)) or bool(_PEOPLE_EN.match(value)))
 
 
 # ── 문법 ───────────────────────────────────────────────────────────────────
@@ -224,7 +234,7 @@ def en_variants(term: str) -> list[str]:
 def resolve_english(term: str, vocab: TagVocab) -> list[str]:
     for v in en_variants(term):
         name = vocab.canonical(v)
-        if name:
+        if name and not _junk_tag(name):
             return [name]
     words = [w for w in str(term or "").lower().split() if w]
     if len(words) < 2:
@@ -236,7 +246,7 @@ def resolve_english(term: str, vocab: TagVocab) -> list[str]:
             piece = " ".join(words[i:j])
             if j - i == 1 and piece in _EN_STOP:
                 continue
-            name = next((n for n in (vocab.canonical(v) for v in en_variants(piece)) if n), None)
+            name = next((n for n in (vocab.canonical(v) for v in en_variants(piece)) if n and not _junk_tag(n)), None)
             if name:
                 parts.append(name)
                 i = j
@@ -286,22 +296,24 @@ class Merged:
 
 def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: str,
           generic: Iterable[str] = (), simile_particles: Iterable[str] = ("같이", "처럼", "마냥", "듯이"),
+          generic_roles: Iterable[str] = (),
           name_lookup: Callable[[str], NameHit | None] | None = None,
           not_names: Iterable[str] = (), poses: Iterable[str] = (),
           roles_for: Callable[[set[str]], tuple[str, str] | None] | None = None) -> Merged:
     generic = set(generic)
     poses = set(poses)
+    generic_roles = {compact(role) for role in generic_roles if role}
     similes = tuple(simile_particles)
     blocked, covers = set(ka.blocked), set(ka.covers)
     req_lemmas = ka.lemmas()
     req_compact = compact(clean_text(text))
     log: list[str] = []
-    t1: list[str] = [t for t in ka.specific if t not in blocked]
+    t1: list[str] = [t for t in ka.specific if t not in blocked and not _junk_tag(t)]
     t2: list[str] = []
     t3: list[str] = []
 
     def place(tag: str, *, first: bool = False) -> None:
-        if not tag or tag in blocked or tag in covers or vocab.role(tag) == "population":
+        if not tag or _junk_tag(tag) or tag in blocked or tag in covers or vocab.role(tag) == "population":
             return
         if tag in t1 or tag in t2 or tag in t3:
             return
@@ -318,6 +330,11 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     def grounded(ko: str) -> bool:
         if not ko or not ka.available:
             return True
+        # 진짜 Kiwi 분석이면 원형(형태소)으로 잰다 — 누워 있기 · 부끄러워하는 처럼 활용·보조 용언만 다른 것을 살리고,
+        # 요청에 없는 낱말(침 흘리기의 침)은 버린다. 손으로 만든 분석(시험)은 아래의 글자 비교로.
+        api = getattr(ka, "grounded", None)
+        if callable(api) and getattr(ka, "tokenizer", None) is not None:
+            return bool(api(ko))
         k = compact(ko)
         if k in req_compact:
             return True
@@ -330,6 +347,9 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         return len(words) > 1 and all(grounded(w) for w in words)
 
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
+        return [t for t in _item_tags(item, kind) if not _junk_tag(t)]
+
+    def _item_tags(item: dict[str, Any], kind: str) -> list[str]:
         en = str(item.get("en") or "").strip().lower()
         ko = str(item.get("ko") or "").strip()
         if _PEOPLE_EN.match(en):
@@ -346,7 +366,10 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if not grounded(ko):
             log.append(f"drop:{en}(요청에 없음)")
             return []
-        phrase = next((tag for key, tag in ka.phrases.items() if ko_c and (ko_c in key or key in ko_c)), None)
+        # 모델 항목이 사전 구를 **품을 때만** 바꾼다(긴 구부터). 반대 방향(항목 ⊂ 구)은 명사를 삼켰다 —
+        # 리본 -> 리본 묶기(tying) · 우산 -> 우산 쓰기(09-24 Codex 감사).
+        phrase = next((tag for key, tag in sorted(ka.phrases.items(), key=lambda kv: -len(kv[0]))
+                       if ko_c and key and key in ko_c), None)
         if phrase:
             if phrase != en:
                 log.append(f"{en}->{phrase}(사전 구)")
@@ -361,7 +384,7 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if found and len(found) == 1:
             return found
         if len(ko_c) >= 2:
-            hit = vocab.keyword(ko)
+            hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)]
             if hit:
                 return hit[:1]
         if found:
@@ -400,6 +423,15 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if hit and hit.candidates:
             names.append(hit)
     characters = [Character(h.form, h.tag, [t for t, _n in h.candidates[1:3]], h.gender) for h in names]
+    # 왕자·공주 같은 역할 낱말은 모델이 인물로 적어도 캐릭터 이름이 아니다 — 이름이 안 됐으면 사전의 장면 태그로(prince)
+    named_forms = {compact(ch.ko) for ch in characters}
+    role_forms = [clean_text(c.get("ko") or "").strip() for c in model_chars
+                  if clean_text(c.get("ko") or "").strip() in clean_text(text)
+                  and compact(clean_text(c.get("ko") or "").strip()) in generic_roles]
+    for form in dict.fromkeys(order + role_forms):
+        if compact(form) in generic_roles and compact(form) not in named_forms:
+            for tag in vocab.keyword(form):
+                place(tag)
     model_index = {clean_text(c.get("ko") or "").strip(): i + 1 for i, c in enumerate(model_chars)}
 
     for item in route.get("actions") or []:

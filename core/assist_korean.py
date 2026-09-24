@@ -80,7 +80,8 @@ EMPTY_RULES: dict[str, Any] = {
     "schema_version": 1, "kind": "assist_korean_rules", "simile_particles": ["같이", "처럼", "마냥", "듯이"],
     "idioms": [], "verbs": {}, "stem_prefixes": [], "nouns": {}, "people": {"female": [], "male": [], "neutral": []},
     "groups": {}, "numerals": {}, "solo_words": [], "not_names": [], "filler_stems": [], "generic_tags": [],
-    "poses": [], "passive_suffixes": ["히", "리", "기", "이"], "passive_exceptions": ["하", "있", "보이"],
+    "poses": [], "spatial_words": [], "passive_suffixes": ["히", "리", "기", "이"],
+    "passive_exceptions": ["하", "있", "보이"],
     "companions": [], "parts": [], "viewer": {}, "keyword_block": [],
 }
 
@@ -230,12 +231,76 @@ class KoreanAnalysis:
     verb_phrases: list[str] = field(default_factory=list)  # 그중 동사에서 나온 구의 태그(인물 사이 동작 후보)
     phrase_stems: set[str] = field(default_factory=set)    # 사전 구가 가져간 동사 줄기(안) — 모델의 '안기기' 를 버린다
     names: list[NameHit] = field(default_factory=list)
+    explicit_names: set[str] = field(default_factory=set)  # {이름} — 자동 이름 정책과 별개로 사용자가 고정
     roles: tuple[str, str] | None = None                   # (하는 쪽, 당하는 쪽) — 이름 기준
     notes: list[str] = field(default_factory=list)
     available: bool = True                                 # Kiwi 로 분석했나
+    tokenizer: Callable[[str], list[tuple[str, str]]] | None = field(default=None, repr=False, compare=False)
+    source_text: str = field(default="", repr=False, compare=False)
 
     def lemmas(self) -> set[str]:
         return {f for f, t in self.tokens if t in NOUN_TAGS or t.startswith(VERB_PREFIXES)} | set(self.stems)
+
+    def grounded(self, ko: str) -> bool:
+        """모델의 한국어 조각이 요청의 내용 형태소에 근거하는가.
+
+        완성된 활용형의 문자열 포함 여부 대신 Kiwi 의 명사·동사·형용사·파생 동사 줄기를 비교한다.
+        VX(있다·싶다 등)는 후보 안에서 이미 근거가 확인된 어휘 동사·형용사에 붙은 경우만 허용한다.
+        ``tokenizer`` 없는 시험/구형 호출은 저장된 형태소로 보수적인 호환 판단을 한다.
+        """
+        if not ko or not self.available:
+            return True
+        if self.source_text and compact(ko) in compact(self.source_text):
+            return True                    # 원문에 똑같이 적힌 span 은 다른 형태소 분해보다 우선한다
+        request_compact = compact("".join(form for form, _tag in self.tokens))
+        if self.tokenizer is None:
+            request_compact = compact(self.source_text) or request_compact
+
+            def fallback(word: str) -> bool:
+                k = compact(word)
+                if k in request_compact:
+                    return True
+                stem = k[:-1] if k.endswith("기") and len(k) >= 2 else re.sub(r"다$", "", k)
+                forms = {form for form, tag in self.tokens if tag in NOUN_TAGS or tag.startswith(VERB_PREFIXES)}
+                if stem in forms or (len(stem) >= 2 and stem in request_compact):
+                    return True
+                words = str(word).split()
+                return len(words) > 1 and all(fallback(part) for part in words)
+
+            return fallback(ko)
+
+        candidate = self.tokenizer(ko)
+        request = self.tokens
+        if not candidate:
+            return False
+
+        content = lambda tag: tag in NOUN_TAGS or tag.startswith(VERB_PREFIXES) or tag.startswith(("XSV", "XSA"))
+        available = {(form, tag[:2]) for form, tag in request if content(tag)}
+        available_forms = {form for form, tag in request if content(tag)}
+        candidate_content = [(form, tag) for form, tag in candidate if content(tag)]
+        if not candidate_content:
+            return compact(ko) in request_compact
+
+        matched_lexical_verb = False
+        for form, tag in candidate:
+            if tag.startswith("VX"):
+                # 보조 용언은 앞선 어휘 동사/형용사가 요청과 맞을 때만 추가 문법으로 인정한다.
+                if not matched_lexical_verb:
+                    return False
+                continue
+            if not content(tag):
+                continue
+            matches = (form, tag[:2]) in available or form in available_forms
+            # 한 음절 동사 명사형은 Kiwi 가 NNG 로 분석할 수 있다(젖어 떨고 -> 모델 ko '떨기').
+            # 실제 요청에 같은 동사 줄기가 있을 때만 어미 '-기'를 떼어 근거로 인정한다.
+            if not matches and tag in ("NNG", "NNP") and form.endswith("기"):
+                stem = form[:-1]
+                matches = any(src == stem and src_tag.startswith(VERB_PREFIXES) for src, src_tag in request)
+            if not matches:
+                return False
+            if tag.startswith(VERB_PREFIXES) or tag.startswith(("XSV", "XSA")):
+                matched_lexical_verb = True
+        return True
 
 
 @dataclass
@@ -410,6 +475,8 @@ class KoreanLayer:
         if not toks:
             return KoreanAnalysis(available=False, notes=[f"kiwi 없음: {self.error}"] if self.error else [])
         out = KoreanAnalysis(tokens=toks, stems=_stems(toks))
+        out.tokenizer = self.tokenize
+        out.source_text = clean_text(text)
         forms = [f for f, _t in toks]
         # 비유: 명사 + 같이/처럼/마냥
         for i, (form, tag) in enumerate(toks):
@@ -453,15 +520,18 @@ class KoreanLayer:
         # 제 꼴(수동 꼴) 그대로 사전에 있는 동사는 능동 꼴을 묻지 않는다 — 묶여 -> 묶이기(tied up) 인데 묶기(tying)가
         # 따라 들어왔다(사용자 요청 09-24). 실측: 두 꼴이 다 키워드인 쌍 15개 모두 제 꼴이 맞다(먹이기 feeding / 먹기 eating
         # food · 흔들리기 swinging / 흔들기 shaking). 제 꼴의 태그가 규칙에 덮여도(bound wrists) 능동 꼴로 새지 않는다.
-        own_hit = {stem for span, kind, stem in spans if kind == "verb" and self.vocab.scene_tags(span)}
-        for span, kind, stem in spans:
+        span_rows = [(span, kind, stem, self.vocab.scene_tags(span)) for span, kind, stem in spans]
+        own_hit = {stem for _span, kind, stem, tags in span_rows
+                   if kind in ("verb", "verb_object", "verb_arg") and tags}
+        for span, kind, stem, tags in span_rows:
             if stem and stem in out.idiom_verbs:
                 continue                    # 관용구가 가져간 동사(개같이 엎드리기 -> all fours, on stomach 아님)
             if kind == "active" and stem in own_hit:
                 continue
+            if kind == "verb_arg":
+                continue                    # 논항이 있는 절의 맨 동사는 모호하므로 모델 근거로만 남긴다
             if kind == "active" and self._lexical_noun(span.split()[-1]):
                 continue                    # 능동 꼴이 따로 있는 명사다 — 눈물 고인 -> 고이 -> 고기 = meat(사용자 제보 09-24)
-            tags = self.vocab.scene_tags(span)
             if not tags or tags[0] in out.blocked or tags[0] in out.covers:
                 continue                    # 1순위가 막혔으면 2순위(face in pillow)로 새지 않는다
             if compact(span) not in out.phrases:
@@ -488,8 +558,9 @@ class KoreanLayer:
         out.names = self._names(toks)
         # {호두} 처럼 감싼 것은 일반 낱말이어도 이름으로 찾는다 — 인물 칸 차례는 글에 나온 차례
         for form, _start, _end in braced_names(text):
+            out.explicit_names.add(form)
             if all(h.form != form for h in out.names):
-                hit = self.name_hit(form)
+                hit = self.name_hit(form, explicit=True)
                 if hit and hit.candidates:
                     out.names.append(hit)
                     out.notes.append(f"이름(중괄호):{form}")
@@ -512,8 +583,8 @@ class KoreanLayer:
         """Kiwi 가 고유명사로 본 것 중 캐릭터 이름. 일반 낱말(트윈테일)·작품명(원신)은 뺀다 — 별칭 조각과 겹친다(실측).
         일반 낱말이기도 한 이름(호두)은 모델이 인물로 적었을 때만 받는다(``name_hit``)."""
         hits: list[NameHit] = []
-        for form, tag in toks:
-            if not self._name_like(form, tag) or any(h.form == form for h in hits):
+        for i, (form, tag) in enumerate(toks):
+            if not self._auto_name_like(toks, i) or any(h.form == form for h in hits):
                 continue
             cands = self.vocab.character_candidates(form)
             if cands:
@@ -525,8 +596,32 @@ class KoreanLayer:
         (Kiwi 는 같은 이름을 문맥 따라 NNP·NNG 로 붙인다 — 푸리나의 = NNG, 원신 푸리나 = NNP, 실측)."""
         if form in self._not_names:
             return False
+        if len(compact(form)) < 2:
+            return False
         strength = self.vocab.name_strength(form)
         return (tag == "NNP" and strength in ("character", "piece")) or (tag == "NNG" and strength == "character")
+
+    def _auto_name_like(self, toks: list[tuple[str, str]], index: int) -> bool:
+        form, tag = toks[index]
+        return self._name_like(form, tag) and self._name_context_allowed(toks, index)
+
+    def _name_context_allowed(self, toks: list[tuple[str, str]], index: int) -> bool:
+        form, tag = toks[index]
+        # 공간 관계 명사 + 처소격 조사는 문장 성분으로 읽는다(책상 위에 놓인 … -> 위 이름 오검출).
+        # 같은 어휘의 중괄호 표기는 name_hit(explicit=True) 경로에서 보존한다.
+        if form in set(self.rules.get("spatial_words") or ()) and tag != "NNP":
+            prev = toks[index - 1] if index else ("", "")
+            nxt = toks[index + 1] if index + 1 < len(toks) else ("", "")
+            if nxt[1] == "JKB" or prev[1] in NOUN_TAGS:
+                return False
+        # 사람 역할 낱말은 조사가 붙어 장면 속 보통명사로 쓰일 때 후보에서 뺀다.
+        # 단독 검색 '선생'은 실제 캐릭터 키워드일 수 있어 일반 이름처럼 허용한다.
+        if tag == "NNG" and form in self._female | self._male | self._neutral:
+            # 역할/사람 일반명사는 단독 검색일 때만 동음 캐릭터 이름으로 허용한다.
+            # 조사 인접 여부만 검사하면 "웃는 선생", "선생 모습" 같은 장면 문맥이 새어 나간다.
+            if len(toks) != 1 or index != 0:
+                return False
+        return True
 
     def roles_for(self, analysis: KoreanAnalysis, names: Iterable[str]) -> tuple[str, str] | None:
         """최종 인물 목록(모델이 적은 이름 포함)으로 방향을 다시 잰다 — Kiwi 가 이름으로 안 본 인물도 들어온다."""
@@ -578,10 +673,18 @@ class KoreanLayer:
                 return True
         return hits >= 2
 
-    def name_hit(self, form: str) -> NameHit | None:
+    def name_hit(self, form: str, *, explicit: bool = False,
+                 analysis: KoreanAnalysis | None = None) -> NameHit | None:
         form = clean_text(form).strip()
         if not form or form in self._not_names:
             return None
+        if not explicit and len(compact(form)) < 2:
+            return None
+        if not explicit and analysis is not None:
+            token_forms = analysis.tokens
+            occurrences = [i for i, (surface, _tag) in enumerate(token_forms) if compact(surface) == compact(form)]
+            if occurrences and not any(self._name_context_allowed(token_forms, i) for i in occurrences):
+                return None
         cands = self.vocab.character_candidates(form)
         return NameHit(form, cands, self.vocab.genders.get(cands[0][0])) if cands else None
 
@@ -636,9 +739,11 @@ class KoreanLayer:
                 add(form, start, end, "brace")
         if use_kiwi and self._kiwi is not None:
             _cleaned, index = _clean_with_index(raw)
-            for tok in self._tokens(raw):             # 붙은 조사를 떼고 이름 토막을 붙인 토큰(나토리 사나 = 하나)
+            tokens = self._tokens(raw)
+            token_forms = [(tok.form, tok.tag) for tok in tokens]
+            for i, tok in enumerate(tokens):           # 붙은 조사를 떼고 이름 토막을 붙인 토큰(나토리 사나 = 하나)
                 form = tok.form
-                if not self._name_like(form, tok.tag):
+                if not self._auto_name_like(token_forms, i):
                     continue
                 if tok.end > len(index) or tok.end <= tok.start:
                     continue
@@ -728,10 +833,23 @@ class KoreanLayer:
             elif form in self._male:
                 gender = "boy"
             elif form in self._neutral:
-                gender = "unknown"
-            elif form not in rejected and form not in self._not_names and (form in extra or self._name_like(form, tag)):
+                explicit = form in choices or (form in analysis.explicit_names
+                                               and any(h.form == form and h.candidates for h in analysis.names))
+                if explicit or (self.vocab.name_strength(form) == "character"
+                                and self._name_context_allowed(toks, i)):
+                    hit = self.choose(self.name_hit(form, explicit=explicit, analysis=analysis), choices)
+                    gender = (hit.gender if hit else None) or "unknown"
+                else:
+                    gender = "unknown"
+            elif form not in rejected and form not in self._not_names and (
+                    form in choices or form in analysis.explicit_names
+                    or (form in extra and self._name_context_allowed(toks, i))
+                    or self._auto_name_like(toks, i)):
                 # 트윈테일(일반 낱말이자 별칭 조각)은 모델이 인물로 적지 않는 한 사람으로 세지 않는다
-                hit = self.choose(self.name_hit(form), choices)
+                explicit = form in analysis.explicit_names or form in choices
+                if len(compact(form)) < 2 and not explicit:
+                    continue
+                hit = self.choose(self.name_hit(form, explicit=explicit, analysis=analysis), choices)
                 gender = (hit.gender if hit else None) or ("unknown" if form in extra else None)
             if gender is None:
                 continue
@@ -897,7 +1015,7 @@ def _viewer_tags(toks: list[tuple[str, str]], viewer: dict[str, Any]) -> list[st
 
 
 def _stems(toks: list[tuple[str, str]]) -> list[str]:
-    """동사 줄기. 의성어+거리/대(헥/IC 헥/IC 거리/XSV)는 한 줄기로 붙인다."""
+    """동사 줄기. 명사+하다(관찰/NNG + 하/XSV)와 의성어+거리/대도 붙인다."""
     out: list[str] = []
     i = 0
     while i < len(toks):
@@ -911,6 +1029,8 @@ def _stems(toks: list[tuple[str, str]]) -> list[str]:
                 out.append(word + toks[j][0])
                 i = j + 1
                 continue
+        if tag == "XSV" and i > 0 and toks[i - 1][1] in NOUN_TAGS:
+            out.append(toks[i - 1][0] + form)
         if tag.startswith(VERB_PREFIXES):
             out.append(form)
         i += 1
@@ -940,19 +1060,39 @@ def _phrase_spans(toks: list[tuple[str, str]], filler: set[str], passive_suffixe
                 for b in range(a + 2, min(len(run), a + 3) + 1):
                     spans.append((" ".join(run[a:b]), "noun", ""))
             nxt = toks[j][1] if j < len(toks) else ""
-            seq.append(("N", " ".join(run), ROLE_OF_PARTICLE.get(nxt, "")))
+            phrase = " ".join(run)
+            if nxt == "JKB" and j < len(toks):
+                phrase += " " + toks[j][0]       # 소파 에 기대기 -> '소파에기대기' 키워드도 묻는다
+            seq.append(("N", phrase, ROLE_OF_PARTICLE.get(nxt, "")))
             i = j
             continue
+        if tag == "XSV" and i > 0 and toks[i - 1][1] in NOUN_TAGS:
+            # 관찰하는 = 관찰/NNG + 하/XSV. Kiwi 가 단일 동사 줄기로 내지 않으므로 구 사전도 못 물었다.
+            word = toks[i - 1][0] + form
+            obj = seq[-2][1] if len(seq) > 1 and seq[-1][0] == "N" and seq[-2][0] == "N" \
+                and seq[-2][2] in ("O", "D", "") else None
+            if obj:
+                spans.append((f"{obj} {word}기", "verb_object", word))
+            spans.append((f"{word}기", "verb_arg" if obj else "verb", word))
+            seq.append(("V", word, ""))
+            i += 1
+            continue
         if tag.startswith(VERB_PREFIXES) and form not in filler:
-            passive = len(form) > 1 and form.endswith(suffixes) and form not in exceptions
+            obj = seq[-1][1] if seq and seq[-1][0] == "N" and seq[-1][2] in ("O", "D", "") else None
+            # 목적격 논항과 리 어간은 능동 타동사(흘리다)일 가능성이 높다.
+            # 반면 히 수동형(볼을 꼬집히다)은 몸 부위 목적격을 동반할 수 있어 이 가드 대상이 아니다.
+            object_role = seq[-1][2] if seq and seq[-1][0] == "N" else ""
+            passive = len(form) > 1 and form.endswith(suffixes) and form not in exceptions \
+                and not (object_role == "O" and form.endswith("리"))
             stems = [form, form[:-1]] if passive else [form]      # 수동 -> 능동(꼬집히 -> 꼬집)
-            obj = seq[-1][1] if seq and seq[-1][0] == "N" and seq[-1][2] in ("O", "") else None
             for stem in stems:
                 kind = "verb" if stem == form else "active"
                 if obj:
-                    spans.append((f"{obj} {stem}기", kind, form))
+                    spans.append((f"{obj} {stem}기", "verb_object" if kind == "verb" else kind, form))
                 if len(stem) >= 2 or (passive and stem != form):
-                    spans.append((f"{stem}기", kind, form))       # 수동형의 능동 명사형은 한 음절이어도(안기)
+                    bare_kind = "verb" if passive and kind == "verb" else \
+                        ("verb_arg" if obj and kind == "verb" else kind)
+                    spans.append((f"{stem}기", bare_kind, form))  # 수동형의 능동 명사형은 한 음절이어도(안기)
             seq.append(("V", form, ""))
         i += 1
     # 긴 구부터(머리 쓰다듬기 > 쓰다듬기) — 모델 항목 교체에서 긴 것이 이긴다

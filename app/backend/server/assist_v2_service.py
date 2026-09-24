@@ -453,8 +453,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     rules = layer.rules
     merged = merge(route, ka, vocab, text=req["text"], generic=rules["generic_tags"],
                    simile_particles=rules["simile_particles"],
-                   name_lookup=lambda form: layer.choose(layer.name_hit(form), choices),
+                   name_lookup=lambda form: layer.choose(
+                       layer.name_hit(form, explicit=form in choices, analysis=ka), choices),
                    not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
+                   generic_roles={w for group in rules.get("people", {}).values() for w in group},
                    roles_for=lambda names: layer.roles_for(ka, names))
     share = _rating_share(context, req["rating"])
     dropped = off_rating(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
@@ -598,7 +600,7 @@ def _lane(context: Any, layer: Any, merged: Any, route: dict[str, Any], req: dic
             continue
         tried.append(q)
         if task == "character":
-            hit = layer.name_hit(q)
+            hit = layer.name_hit(q, explicit=True)
             if hit and hit.candidates:
                 return {"query": q, "items": [{"value": t, "title": t, "subtitle": f"{n:,}", "gender": layer.vocab.genders.get(t)}
                                               for t, n in hit.candidates]}
@@ -812,7 +814,8 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     chars: list[Any] = []
     for seg in segs[1:]:
         name = seg.name or _first_name(layer, seg.body)
-        hit = layer.choose(layer.name_hit(name), choices) if name and name not in not_names else None
+        hit = layer.choose(layer.name_hit(name, explicit=bool(seg.name) or name in choices), choices) \
+            if name and name not in not_names else None
         tag = hit.tag if hit else ""
         work, entry = _character_profile(context, tag) if tag else (None, None)
         chars.append(ac.ComposeCharacter(
@@ -846,8 +849,19 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
             for en in found or [""]:
                 subs.append(ac.Detail(owner=d.owner, ko=d.ko, en=en))
     taken: dict[tuple[int, str], set[str]] = {}
+    # 고른 등급에 안 맞는 후보는 **고르기 전에** 뺀다 — 고른 뒤 게이트가 빼면 그 절이 통째로 빈다(대안이 있었는데)
+    pre_share = _rating_share(context, req["rating"])
+    pre_dropped: dict[str, float] = {}
+    top_dropped: dict[str, float] = {}       # 그 절의 1순위가 빠진 것만 사용자에게 알린다(곁다리 후보까지 늘어놓지 않게)
     for d in subs:
         d.candidates = finder.rank(d.ko, d.en)
+        if pre_share:
+            off = off_rating([c.tag for c in d.candidates], pre_share, RATING_GATE[req["rating"]])
+            if off:
+                pre_dropped.update(off)
+                if d.candidates[0].tag in off:
+                    top_dropped[d.candidates[0].tag] = off[d.candidates[0].tag]
+                d.candidates = [c for c in d.candidates if c.tag not in off]
         mine = taken.setdefault((d.owner, d.ko), set())
         ac.decide(d, taken=mine)
         mine.update(d.tags)
@@ -879,6 +893,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         d.tags = [t for t in d.tags if t not in dropped]
     if relation is not None and relation.action in dropped:
         relation = None
+    dropped = {**top_dropped, **dropped}
 
     persons = _compose_persons(req, chars)
     prompt = ac.assemble(people=PERSON_TAGS.get(persons["partition"], []), characters=chars, relation=relation,
@@ -897,7 +912,8 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         "persons": persons, "prompt": prompt, "explain": explain, "pool": pool, "samples": samples,
         "model": model,
         "trace": {"details": [{"who": d.owner, "ko": d.ko, "en": d.en, "tags": d.tags, "via": d.via,
-                               "top": [(c.tag, round(c.score, 2)) for c in d.candidates[:3]]} for d in subs]},
+                               "top": [(c.tag, round(c.score, 2)) for c in d.candidates[:3]]} for d in subs],
+                  "rating_pre_dropped": pre_dropped},
     }
     model_s = sum(float((model.get(k) or {}).get("elapsed") or 0) for k in ("guess", "choose"))
     out["timing"] = {"korean_ms": korean_ms, "model_s": round(model_s, 2),

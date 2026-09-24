@@ -30613,3 +30613,30 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 }
 .as-pick-foot button:hover { border-color: var(--text-dim); color: var(--text-primary); }
 .as-pick-foot .as-pick-off:hover { border-color: rgba(255,140,140,0.6); color: #ffb4b4; }
+/* Assist 구성(main / c1 / c2 …) 설명 — 서버가 도구의 사실(게시물 수·뜻·공출현)을 틀에 끼운 것. 모델이 쓴 글이 아니다. */
+.as-explain {
+  margin-top: 8px; padding: 6px 8px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(15,15,23,0.35);
+}
+.as-explain > summary { cursor: pointer; color: var(--text-muted); font-size: 10.5px; }
+.as-ex-note { margin: 4px 0 0; color: var(--text-secondary); font-size: 10.5px; line-height: 1.5; }
+.as-ex-table { margin-top: 6px; overflow-x: auto; }
+.as-ex-table table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.as-ex-table th {
+  padding: 3px 6px; border-bottom: 1px solid var(--border-dim); color: var(--text-dim);
+  font-weight: 500; text-align: left; white-space: nowrap;
+}
+.as-ex-table td {
+  padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-secondary); vertical-align: top;
+}
+.as-ex-table td.as-ex-tag { color: #ebe9ff; font-family: var(--font-mono); white-space: nowrap; }
+.as-ex-table td.as-ex-num { color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.as-ex-alt, .as-ex-miss {
+  margin: 5px 0 0; padding-left: 8px; border-left: 2px solid rgba(255,196,0,0.5);
+  color: var(--text-secondary); font-size: 10.5px; line-height: 1.45;
+}
+.as-ex-miss { border-left-color: rgba(255,140,140,0.6); }
+.as-ex-tip { margin-top: 6px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.5; }
+.as-ex-tip > b { display: block; color: var(--text-muted); font-size: 10px; }
+.as-ex-tip > div { font-family: var(--font-mono); font-size: 10px; }
+.as-ex-syntax { margin-top: 6px; color: var(--text-dim); font-size: 9.5px; line-height: 1.45; }

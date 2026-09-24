@@ -116,7 +116,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
         <span class="as-icon" aria-hidden="true">✦</span>
         <div class="as-edit">
           <div class="as-mirror" aria-hidden="true"></div>
-          <textarea class="as-input" rows="1" maxlength="300" spellcheck="false" autocomplete="off"
+          <textarea class="as-input" rows="1" maxlength="800" spellcheck="false" autocomplete="off"
                     aria-label="Assist 요청"
                     placeholder="말로 적어 주세요 — 예: 카나데가 나히다를 공주안기 하고 뛰어다니는 장면"></textarea>
         </div>
@@ -134,7 +134,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
       </div>
       <div class="as-banner" data-as-banner hidden></div>
       <div class="as-body" data-as-body></div>
-      <div class="as-foot"><b>Enter</b> 찾기 · Esc 닫기 · <b>{이름}</b> 으로 감싸면 이름으로 찾습니다 — [생성] 은 메인·캐릭터 칸을 건드리지 않습니다</div>`;
+      <div class="as-foot"><b>Enter</b> 찾기 · <b>Shift+Enter</b> 줄바꿈 — <b>main: …</b> / <b>c1 이름 - 설명</b> 으로 적으면
+        프롬프트를 짜 드립니다 · <b>{이름}</b> 은 이름으로 찾기 · [생성] 은 메인·캐릭터 칸을 건드리지 않습니다</div>`;
     document.body.append(overlay);
     input = overlay.querySelector('.as-input');
     mirror = overlay.querySelector('.as-mirror');
@@ -577,6 +578,30 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     return part === 'unknown' ? '인원 모름' : part.replace(/_/g, ' ');
   }
 
+  /** 구성 요청(main / c1 / c2 …)의 설명 — 서버가 도구의 사실(게시물 수·뜻·공출현)을 틀에 끼워 보낸다. 모델이 쓴 글이 아니다. */
+  function explainHtml(ex) {
+    if (!ex) return '';
+    const notes = (ex.notes || []).map(n => `<div class="as-ex-note">${esc(n)}</div>`).join('');
+    const withCol = (ex.rows || []).some(r => r.with != null);
+    const rows = (ex.rows || []).map(r => `<tr><td>${esc(r.slot)}</td><td>${esc(r.ko)}</td>
+      <td class="as-ex-tag" title="${esc(r.desc || '')}">${esc(r.tag)}</td><td class="as-ex-num">${fmt(r.posts)}</td>
+      ${withCol ? `<td class="as-ex-num">${r.with == null ? '' : fmt(r.with)}</td>` : ''}</tr>`).join('');
+    const ev = ex.evidence;
+    const table = rows ? `<div class="as-ex-table"><table><thead><tr><th>칸</th><th>요청</th><th>태그</th><th>게시물</th>
+      ${withCol ? `<th title="이벤트 맵에서 ${esc(ev?.anchor || '동작')} 과 함께 달린 게시물">함께</th>` : ''}</tr></thead>
+      <tbody>${rows}</tbody></table></div>` : '';
+    const alts = (ex.alts || []).map(a => `<div class="as-ex-alt">비슷한 <b>${esc(a.tag)}</b> 는 ‘${esc(a.desc)}’ —
+      그래서 <b>${esc(a.chosen)}</b> 를 골랐습니다.</div>`).join('');
+    const missed = (ex.missed || []).map(m => `<div class="as-ex-miss">‘${esc(m.ko)}’(${esc(m.who)}) 는 맞는 태그를
+      못 찾았습니다${m.guess ? ` — 추측 ${esc(m.guess)}` : ''}.</div>`).join('');
+    const evidence = ev ? `<div class="as-ex-note">이벤트 맵: ${esc(ev.anchor)} 게시물 ${fmt(ev.posts)}건 중
+      ${(ev.with || []).map(w => `${esc(w.tag)} ${fmt(w.posts)}건`).join(' · ') || '함께 달린 태그 없음'}.</div>` : '';
+    const tips = (ex.tips || []).length
+      ? `<div class="as-ex-tip"><b>안 나올 때</b>${ex.tips.map(t => `<div>${esc(t)}</div>`).join('')}</div>` : '';
+    return `<details class="as-explain" open><summary>설명</summary>${notes}${table}${alts}${missed}${evidence}${tips}
+      ${ex.syntax ? `<div class="as-ex-syntax">${esc(ex.syntax)}</div>` : ''}</details>`;
+  }
+
   function sceneHtml(r) {
     const p = r.prompt || {};
     const chars = Array.isArray(p.characters) ? p.characters : [];
@@ -584,7 +609,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     const lines = [
       `<div class="as-line"><span class="as-k">메인</span><span class="as-v">${esc(p.main || '(비어 있음)')}</span></div>`,
       ...chars.map((c, i) =>
-        `<div class="as-line"><span class="as-k">캐릭터 ${i + 1}</span><span class="as-v">${esc(c.prompt)}</span></div>`),
+        `<div class="as-line"><span class="as-k" title="${esc(c.ko || '')}">캐릭터 ${i + 1}</span><span class="as-v">${esc(c.prompt)}</span></div>`),
     ];
     const meta = [];
     if (pool.posts) meta.push(`풀 ${fmt(pool.posts)}건`);
@@ -602,6 +627,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
           `<div class="as-sample">${esc((s.tags || []).join(', '))}</div>`).join('')}</details>` : '';
     const can = p.main ? '' : 'disabled';
     return `<div class="as-res">${lines.join('')}<div class="as-meta">${meta.join(' · ')}</div>${notes.join('')}
+      ${explainHtml(r.explain)}
       <div class="as-actions">
         <button type="button" class="as-act as-act-main" data-as-generate ${can}
                 title="메인 프롬프트·캐릭터 칸은 그대로 두고, 이 결과(가상 프롬프트)로 한 장 생성합니다">생성</button>

@@ -36,6 +36,7 @@ GLUED_PARTICLES = (("에게서", "JKB"), ("한테서", "JKB"), ("에게", "JKB")
                    ("이", "JKS"), ("가", "JKS"), ("은", "JX"), ("는", "JX"), ("을", "JKO"), ("를", "JKO"),
                    ("의", "JKG"), ("도", "JX"))
 MAX_KEYWORD_TAGS = 12       # 한 키워드가 이보다 많은 태그를 가리키면 '<자세>' 같은 묶음 이름이다 — 힌트로 쓰지 않는다
+CLAUSE_ENDINGS = ("고", "며", "면서", "으며", "으면서")    # 구성: 여기서 절을 자른다(뒤가 보조 용언이면 안 자른다)
 
 
 def compact(text: Any) -> str:
@@ -80,6 +81,7 @@ EMPTY_RULES: dict[str, Any] = {
     "idioms": [], "verbs": {}, "stem_prefixes": [], "nouns": {}, "people": {"female": [], "male": [], "neutral": []},
     "groups": {}, "numerals": {}, "solo_words": [], "not_names": [], "filler_stems": [], "generic_tags": [],
     "poses": [], "passive_suffixes": ["히", "리", "기", "이"], "passive_exceptions": ["하", "있", "보이"],
+    "companions": [],
 }
 
 
@@ -356,6 +358,13 @@ class KoreanLayer:
                 return [_Tok(stem, "NNP", tok.start, cut), _Tok(particle, ptag, cut, tok.end)]
         return [tok]
 
+    def _split_last_syllable(self, window: list["_Tok"]) -> bool:
+        """창의 끝이 조사인데 사실 이름 끝 글자인가 — Kiwi 가 '사나' 를 사/NNG + 나/JC 로 뗐다(여러 줄 글, 실측 09-24).
+        조사 앞 토막이 **제 이름이 아닐 때만**(사) 붙인다 — 시로 + 이(주격) 처럼 앞 토막이 이름이면 조사다(시로이 아님)."""
+        last, before = window[-1], window[-2]
+        return (last.tag.startswith("J") and len(last.form) == 1
+                and before.tag in ("NNP", "NNG") and not self.vocab.character_candidates(before.form, limit=1))
+
     def _merge_names(self, toks: list["_Tok"], cleaned: str) -> list["_Tok"]:
         """이름 토막을 붙여 전체 이름 하나로(나토리 + 사나 -> '나토리 사나' -> natori sana, 오토노세 + 카나데).
         긴 것부터. ⚠️ 붙인 꼴이 **전체 이름으로 사전에 있을 때만** — 안 그러면 '나토리' 가 따로 칸코레의
@@ -368,7 +377,9 @@ class KoreanLayer:
             merged, size = None, 1
             for size in (4, 3, 2):
                 window = toks[i:i + size]
-                if len(window) < size or window[0].tag not in ("NNP", "NNG") or window[-1].tag not in ("NNP", "NNG"):
+                if len(window) < size or window[0].tag not in ("NNP", "NNG"):
+                    continue
+                if window[-1].tag not in ("NNP", "NNG") and not self._split_last_syllable(window):
                     continue
                 surface = cleaned[window[0].start:window[-1].end]
                 joined = compact(surface)
@@ -480,6 +491,52 @@ class KoreanLayer:
     def roles_for(self, analysis: KoreanAnalysis, names: Iterable[str]) -> tuple[str, str] | None:
         """최종 인물 목록(모델이 적은 이름 포함)으로 방향을 다시 잰다 — Kiwi 가 이름으로 안 본 인물도 들어온다."""
         return self._roles(analysis.tokens, {clean_text(n).strip() for n in names if n})
+
+    # -- 구성(여러 줄 요청): 절 가르기 -----------------------------------------
+    def clauses(self, text: str) -> list[str]:
+        """설명 한 줄을 시각 요소 하나씩의 절로 — 쉼표·마침표 + 연결 어미(-고·-며·-면서) + '채로' + 장소 '에서'.
+
+        ⚠️ 연결 어미 뒤가 보조 용언이면 자르지 않는다('보고 있음' 은 한 동작이다). Kiwi 가 없으면 구두점으로만.
+        """
+        out: list[str] = []
+        for piece in re.split(r"[,.·;\n]+", clean_text(text)):
+            piece = piece.strip()
+            if not piece:
+                continue
+            toks = self._tokens(piece) if self.warm() else []
+            cut = 0
+            for i, tok in enumerate(toks):
+                nxt = toks[i + 1] if i + 1 < len(toks) else None
+                ending = tok.tag == "EC" and tok.form in CLAUSE_ENDINGS and nxt is not None \
+                    and not nxt.tag.startswith("VX")
+                while_state = tok.tag == "JKB" and tok.form == "로" and i > 0 and toks[i - 1].form == "채"
+                # 장소 조사 '에서' 뒤(무대 위에서 | 노래하는) — 장소와 동작은 다른 요소다. '에' 는 자르지 않는다(머리 위에 올림)
+                place = tok.tag == "JKB" and tok.form == "에서" and nxt is not None and not nxt.tag.startswith("VX")
+                if (ending or while_state or place) and piece[cut:tok.end].strip():
+                    out.append(piece[cut:tok.end].strip())
+                    cut = tok.end
+            if piece[cut:].strip():
+                out.append(piece[cut:].strip())
+        return out
+
+    def is_relation_clause(self, clause: str, names: Iterable[str]) -> bool:
+        """인물 사이의 절인가 — 이름이 둘 이상이거나, 이름 뒤가 을/를·의·와·에게(목적·소유·접속·여격).
+        그런 절(나토리 사나를 공주안기 한 채로 · 카나데에게 안긴채로)은 방향과 동작을 한국어 층이 맡는다.
+        '하츠네 미쿠가 무대에서 노래하는' 처럼 이름이 주어일 뿐이면 인물 사이가 아니다."""
+        packed = {compact(n) for n in names if n}
+        if not packed or not self.warm():
+            return False
+        toks = self._tokens(clause)
+        hits = 0
+        for i, tok in enumerate(toks):
+            if compact(tok.form) not in packed:
+                continue
+            hits += 1
+            nxt = toks[i + 1] if i + 1 < len(toks) else None
+            if nxt is not None and (nxt.tag in ("JKO", "JKG", "JC")
+                                    or (nxt.tag == "JKB" and nxt.form in DATIVE_FORMS)):
+                return True
+        return hits >= 2
 
     def name_hit(self, form: str) -> NameHit | None:
         form = clean_text(form).strip()

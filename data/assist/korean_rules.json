@@ -9,6 +9,11 @@
     {"vehicles": ["고양이", "냥이"], "verbs": ["웅크리", "말"], "tags": ["fetal position"], "covers": []},
     {"vehicles": ["개", "강아지"], "verbs": ["헥헥거리", "헥헥대", "헐떡이"], "tags": ["tongue out", "heavy breathing"], "covers": []}
   ],
+  "companions_note": "구성(여러 줄 요청): 고른 태그 + 절 속 말 -> 짝 태그. 짝이 몸에 걸치지 않은 물건(unworn …)이면 메인(장면)에 간다.",
+  "companions": [
+    {"tag": "single shoe", "when": ["바닥", "떨어", "벗겨", "벗어"], "add": "unworn shoes"},
+    {"tag": "single sock", "when": ["바닥", "떨어", "벗겨", "벗어"], "add": "unworn socks"}
+  ],
   "verbs": {
     "기": "crawling", "기어가": "crawling", "기어다니": "crawling", "기어오": "crawling",
     "자": "sleeping", "잠들": "sleeping", "서": "standing", "눕": "lying", "앉": "sitting",

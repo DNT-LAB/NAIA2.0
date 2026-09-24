@@ -27,6 +27,7 @@ _INSTALLER_LOCK = threading.Lock()
 _WARM_LOCK = threading.Lock()
 _GRAMMAR: str | None = None
 _GENDERS: dict[str, str] | None = None
+_PROFILES: dict[str, tuple[str, dict[str, Any]]] | None = None
 
 
 def _grammar() -> str:
@@ -38,23 +39,38 @@ def _grammar() -> str:
     return _GRAMMAR
 
 
+def _load_character_analysis(context: Any) -> None:
+    """`data/character_analysis.json`(13,497명)을 한 번만 읽고 작은 표 둘만 쥔다 — 성별 · (작품, 외모 칸)."""
+    global _GENDERS, _PROFILES
+    if _GENDERS is not None and _PROFILES is not None:
+        return
+    genders: dict[str, str] = {}
+    profiles: dict[str, tuple[str, dict[str, Any]]] = {}
+    try:
+        path = Path(getattr(context, "repo_root", ".")) / "data" / "character_analysis.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for work, chars in data.items():
+            for name, info in (chars or {}).items():
+                if not isinstance(info, dict):
+                    continue
+                if info.get("gender") in ("girl", "boy"):
+                    genders[str(name)] = info["gender"]
+                profiles[str(name)] = (str(work), {k: info.get(k) for k in ("personal_color", "characteristics")})
+    except Exception:
+        pass
+    _GENDERS, _PROFILES = genders, profiles
+
+
 def _genders(context: Any) -> dict[str, str]:
-    """캐릭터 태그 -> girl/boy(`data/character_analysis.json`, 13,497명). 큰 파일이라 한 번만 읽고 작은 표만 쥔다."""
-    global _GENDERS
-    if _GENDERS is None:
-        out: dict[str, str] = {}
-        try:
-            path = Path(getattr(context, "repo_root", ".")) / "data" / "character_analysis.json"
-            data = json.loads(path.read_text(encoding="utf-8"))
-            for chars in data.values():
-                for name, info in (chars or {}).items():
-                    gender = (info or {}).get("gender")
-                    if gender in ("girl", "boy"):
-                        out[str(name)] = gender
-        except Exception:
-            pass
-        _GENDERS = out
-    return _GENDERS
+    """캐릭터 태그 -> girl/boy."""
+    _load_character_analysis(context)
+    return _GENDERS or {}
+
+
+def _character_profile(context: Any, tag: str) -> tuple[str | None, dict[str, Any] | None]:
+    """캐릭터 태그 -> (작품 이름, 외모 칸(personal_color · characteristics)). 없으면 (None, None)."""
+    _load_character_analysis(context)
+    return (_PROFILES or {}).get(tag, (None, None))
 
 
 def korean_layer(context: Any) -> Any:
@@ -380,6 +396,11 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         req = _parse_payload(context, payload)
     except AssistError as exc:
         return {"ok": False, "error": str(exc)}
+    from core.assist_compose import parse_segments
+
+    segs = parse_segments(req["text"])
+    if segs:                                     # main / c1 이름 - 설명 … — 프롬프트 제안 + 설명(구성)
+        return _compose(context, req, segs, started)
     layer = korean_layer(context)
     t = time.perf_counter()
     layer.warm()
@@ -547,3 +568,288 @@ def _lane(context: Any, layer: Any, merged: Any, route: dict[str, Any], req: dic
         if items:
             return {"query": q, "items": items}
     return {"items": [], "tried": tried, "message": "찾지 못했습니다."}
+
+
+# ── 구성(여러 줄 요청 — main / c1 이름 - 설명) ────────────────────────────────
+# 사용자 지정(2026-09-24): "Claude 같은 답을 E2B 로 — Tool Calling 으로 최대한 제한". 흐름·실측은 core/assist_compose.py ·
+# 설계 문서 15절. E2B 는 두 번(영문 추측 · 엇갈린 절만 고르기), 나머지는 도구다.
+
+
+def _chat(context: Any, system: str, user: str, grammar: str, max_tokens: int) -> tuple[str | None, dict[str, Any]]:
+    """E2B 한 번(문법 강제). (본문 | None, 기록). 엔진·모델이 없거나 실패하면 None — 도구만으로 간다."""
+    from app.backend.server.boost_v2_service import get_boost_runtime
+
+    info: dict[str, Any] = {}
+    try:
+        runtime = get_boost_runtime(context)
+        runtime.hold("assist", ASSIST_LEASE_SECONDS)
+        status = runtime.status()
+        if not status.get("engine_exists"):
+            info.update(error="llama.cpp 엔진이 없습니다.", code="engine_missing")
+            return None, info
+        if not status.get("model_exists"):
+            info.update(error="E2B 모델이 없습니다 — Auto Boost 설정에서 [모델 받기]를 눌러 주세요.", code="model_missing")
+            return None, info
+        # 온도 0 — 같은 요청에 같은 추측(0.1 에서는 실행마다 glasses on head / glasses on top of head 로 흔들려
+        # 고른 태그가 바뀌었다, 실측 09-24)
+        resp = runtime.chat(user, system=system, grammar=grammar, max_tokens=max_tokens, temperature=0.0,
+                            timeout=MODEL_TIMEOUT)
+        info.update({k: resp.get(k) for k in ("elapsed", "usage", "load_seconds", "queue_wait", "gpu") if k in resp})
+        if not resp.get("ok"):
+            info["error"] = str(resp.get("error") or "모델 호출 실패")
+            return None, info
+        return str(resp.get("text") or ""), info
+    except Exception as exc:
+        info["error"] = f"{type(exc).__name__}: {exc}"
+        return None, info
+
+
+def _compose_tools(context: Any, layer: Any, vocab: Any) -> Any:
+    """후보 찾기 도구 — NAIA 한국어 태그 사전 · 이벤트 맵 어휘(영문 낱말 색인, 세션에 한 번) · 한국어 층."""
+    from app.backend.server.autocomplete_commands import _ensure_kr_raw, search_kr_tags
+    from core.assist_compose import TagTools, angle_label, build_word_index, declared_names
+
+    raw = _ensure_kr_raw(context) or {}
+    counted = getattr(context, "assist_name_claims", None)
+    if counted is None:     # 말 -> (제 이름으로 밝힌 태그 수, <라벨> 로 쓰는 태그 수) — <라벨> 이 제 이름인지 분류인지 가른다
+        claims: dict[str, int] = {}
+        labels: dict[str, int] = {}
+        for info in raw.values():
+            if not isinstance(info, dict):
+                continue
+            for name in declared_names(info):
+                claims[name] = claims.get(name, 0) + 1
+            label = angle_label(info)
+            if label:
+                labels[label] = labels.get(label, 0) + 1
+        counted = (claims, labels)
+        context.assist_name_claims = counted
+    claims, labels = counted
+    try:
+        idx = _event_map(context).index()
+        key, names = id(idx), list(idx.by_id.values())      # ⚠️ by_id 는 {id: 이름} — list() 는 id 만 준다
+    except Exception:
+        key, names = "kr", [t for t, i in raw.items() if isinstance(i, dict)
+                            and not (i.get("_named_entity_category") or i.get("_cat"))]
+    cached = getattr(context, "assist_word_index", None)
+    if not cached or cached[0] != key:
+        cached = (key, build_word_index(names))
+        context.assist_word_index = cached
+
+    def keyword_tags(key: str) -> list[str]:
+        return [t for t, _n in layer.vocab.lookup(key)]
+
+    def fuzzy(ko: str) -> list[str]:
+        try:
+            return [str(r.get("tag")) for r in search_kr_tags(context, ko, limit=6) if r.get("tag")]
+        except Exception:
+            return []
+
+    def nouns(ko: str) -> list[str]:
+        return [f for f, t in layer.tokenize(ko) if t in ("NNG", "NNP") and len(f) >= 2]
+
+    return TagTools(canonical=vocab.canonical, count=vocab.count, info=lambda t: raw.get(t) or {},
+                    keyword_tags=keyword_tags, analyze=layer.analyze, word_index=cached[1], fuzzy=fuzzy,
+                    nouns=nouns, role=vocab.role, name_claims=lambda word: claims.get(word, 0),
+                    label_uses=lambda word: labels.get(word, 0))
+
+
+def _work_tag(tools: Any, work: str | None) -> str | None:
+    """작품 이름이 NAIA 사전의 작품(copyright) 태그일 때만 캐릭터 칸에 싣는다(hololive · sana channel)."""
+    if not work:
+        return None
+    info = tools.info(work) or {}
+    return work if str(info.get("_named_entity_category") or info.get("_cat") or "") == "copyright" else None
+
+
+def _index_of(form: str, names: list[str]) -> int:
+    from core.assist_korean import compact
+
+    packed = compact(form)
+    return next((i for i, n in enumerate(names, 1) if compact(n) == packed), 0)
+
+
+def _compose_relation(layer: Any, vocab: Any, rules: dict[str, Any], segs: list[Any], names: list[str]) -> Any:
+    """인물 사이 방향·동작 — 장면 줄 먼저, 없으면 캐릭터 줄(주인을 주어로 세워서: 나토리 사나가 …에게 안긴채로).
+    ⚠️ 글 전체를 한 번에 재지 않는다 — 장면 줄의 주어(카나데)와 c2 줄의 '카나데에게' 가 섞여 방향이 뒤집혔다."""
+    from core.assist_compose import Relation, interaction_tag, subject_prefix
+
+    texts = [segs[0].body] if segs and segs[0].body else []
+    texts += [subject_prefix(names[seg.index - 1]) + seg.body for seg in segs[1:] if 0 < seg.index <= len(names)]
+    for text in texts:
+        ka = layer.analyze(text)
+        roles = layer.roles_for(ka, names)
+        act = interaction_tag(ka, vocab.role, rules.get("generic_tags") or (), rules.get("poses") or ())
+        if not roles or not act:
+            continue
+        src, dst = _index_of(roles[0], names), _index_of(roles[1], names)
+        if src and dst and src != dst:
+            ko = next((k for k, v in ka.phrases.items() if v == act), "")
+            return Relation(src, dst, act, ko)
+    return None
+
+
+def _compose_persons(req: dict[str, Any], chars: list[Any]) -> dict[str, Any]:
+    """구성 요청의 인원 = 캐릭터 줄의 사람들(성별은 캐릭터 분석). 수동이면 그대로."""
+    from core.assist_korean import PersonCount, partition_of
+
+    if req["persons"]["mode"] == "manual":
+        g, b = req["persons"]["girls"], req["persons"]["boys"]
+        pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, g + b == 1))
+        return {"mode": "manual", "partition": pc.partition, "girls": g, "boys": b, "unknown": 0,
+                "confirm": False, "notes": [], "param": pc.persons_param()}
+    girls = sum(1 for c in chars if c.gender == "girl")
+    boys = sum(1 for c in chars if c.gender == "boy")
+    unknown = len(chars) - girls - boys
+    pc = PersonCount(girls=girls, boys=boys, unknown=unknown, partition=partition_of(girls, boys, len(chars) == 1))
+    return {"mode": "auto", "partition": pc.partition, "girls": girls, "boys": boys, "unknown": unknown,
+            "confirm": bool(unknown) or pc.partition == "unknown", "notes": [], "param": pc.persons_param()}
+
+
+def _compose_evidence(context: Any, relation: Any, details: list[Any], req: dict[str, Any],
+                      persons: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """이벤트 맵 — (1) 동작과 각 태그가 **함께 달린** 게시물 수(근거) (2) Random 에 연결할 풀 (3) 실제 게시물 표본."""
+    tags = list(dict.fromkeys(t for d in details for t in d.tags))
+    evidence: dict[str, Any] = {"anchor_posts": 0, "with": {}}
+    try:
+        service = _event_map(context)
+    except Exception:
+        return evidence, {}, []
+    try:
+        if relation is not None:
+            for tag in tags:
+                d = service.drill(candidates=[relation.action, tag], exclude=[], ratings=req["rating"],
+                                  persons=persons["param"], min_posts=1)
+                trail, pins = list(d.get("trail") or []), list(d.get("pins") or [])
+                if trail and pins[:1] == [relation.action]:
+                    evidence["anchor_posts"] = int(trail[0])
+                evidence["with"][tag] = int(trail[1]) if len(pins) > 1 and len(trail) > 1 else 0
+        candidates = ([relation.action] if relation is not None else []) + tags
+        drill = service.drill(candidates=candidates, exclude=[], ratings=req["rating"], persons=persons["param"],
+                              min_posts=MIN_POOL)
+    except Exception:
+        return evidence, {}, []
+    pins = list(drill.get("pins") or [])
+    pool = {"pins": ",".join(pins), "exclude": "", "ratings": req["rating"], "persons": persons["param"],
+            "posts": int(drill.get("posts") or 0), "trail": drill.get("trail")}
+    samples: list[dict[str, Any]] = []
+    if pins:
+        try:
+            rows = (service.sample(pins=pins, exclude=[], ratings=req["rating"], persons=persons["param"], n=3)
+                    .get("samples") or [])
+            samples = [{"tags": r.get("tags") or [], "prompt": r.get("prompt") or ""} for r in rows[:3]]
+        except Exception:
+            pass
+    return evidence, pool, samples
+
+
+def _first_name(layer: Any, text: str) -> str:
+    """이름 칸이 비었을 때(c1 카나데가 웃는) 줄에서 처음 나온 캐릭터 이름."""
+    try:
+        names = layer.name_spans(text, use_kiwi=layer.ready()).get("names") or []
+    except Exception:
+        names = []
+    return str(names[0].get("form") or "") if names else ""
+
+
+def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float) -> dict[str, Any]:
+    """여러 줄 요청 -> 메인·캐릭터 프롬프트 + 설명. 모델이 없으면 한국어 근거만으로(못 찾은 절은 설명에 남긴다)."""
+    from core import assist_compose as ac
+    from core.assist_korean import compact
+    from core.assist_v2 import PERSON_TAGS
+
+    layer = korean_layer(context)
+    t0 = time.perf_counter()
+    layer.warm()
+    vocab = _tag_vocab(context, layer)
+    tools = _compose_tools(context, layer, vocab)
+    finder = ac.TagFinder(tools)
+    rules = layer.rules
+    choices, not_names = req["choices"], set(req["not_names"])
+
+    chars: list[Any] = []
+    for seg in segs[1:]:
+        name = seg.name or _first_name(layer, seg.body)
+        hit = layer.choose(layer.name_hit(name), choices) if name and name not in not_names else None
+        tag = hit.tag if hit else ""
+        work, entry = _character_profile(context, tag) if tag else (None, None)
+        chars.append(ac.ComposeCharacter(
+            ko=name or f"캐릭터 {seg.index}", tag=tag, gender=hit.gender if hit else None,
+            alts=[t for t, _n in hit.candidates[1:3]] if hit else [], work=_work_tag(tools, work),
+            appearance=ac.appearance_tags(entry)))
+    names = [c.ko for c in chars]
+    relation = _compose_relation(layer, vocab, rules, segs, names)
+
+    details: list[Any] = []
+    for seg in segs:
+        for clause in layer.clauses(seg.body):
+            if layer.is_relation_clause(clause, names):
+                continue                                  # 방향·동작은 한국어 층이 맡았다(relation)
+            clause = ac.strip_subject(clause, names)
+            if len(compact(clause)) >= 2:
+                details.append(ac.Detail(owner=seg.index, ko=clause, en=""))
+    details = details[:ac.MAX_CLAUSES]
+    korean_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+    model: dict[str, Any] = {}
+    subs: list[Any] = []
+    if details:
+        text, info = _chat(context, ac.GUESS_SYSTEM, ac.guess_message([d.ko for d in details]),
+                           ac.guess_grammar(len(details)), max_tokens=60 + 30 * len(details))
+        model["guess"] = info
+        if text is None and info.get("error"):
+            model.update(error=info["error"], code=info.get("code"))
+        guesses = ac.parse_guesses(text, len(details)) if text is not None else [[] for _ in details]
+        for d, found in zip(details, guesses):
+            for en in found or [""]:
+                subs.append(ac.Detail(owner=d.owner, ko=d.ko, en=en))
+    taken: dict[tuple[int, str], set[str]] = {}
+    for d in subs:
+        d.candidates = finder.rank(d.ko, d.en)
+        mine = taken.setdefault((d.owner, d.ko), set())
+        ac.decide(d, taken=mine)
+        mine.update(d.tags)
+    asking = [d for d in subs if d.via == "ask" and d.ask]
+    if asking and not model.get("error"):
+        cands = [[c.tag for c in d.ask] for d in asking]
+        items = [(f"{d.ko} ({d.en})" if d.en else d.ko,
+                  [(c.tag, ac._short((tools.info(c.tag) or {}).get("description") or "")) for c in d.ask])
+                 for d in asking]
+        text, info = _chat(context, ac.CHOOSE_SYSTEM, ac.choose_message(items), ac.choose_grammar(cands),
+                           max_tokens=30 + 12 * len(cands))
+        model["choose"] = info
+        picks = ac.parse_choice(text, cands) if text is not None else [None] * len(cands)
+        for d, pick in zip(asking, picks):
+            ac.apply_choice(d, pick)
+    for d in subs:
+        if d.via == "ask":
+            ac.apply_choice(d, None)                      # 모델이 없다 — 지어내지 않는다(설명의 '못 찾음' 에 남는다)
+        ac.add_companions(d, rules.get("companions") or ())
+    ac.dedupe(subs, relation, chars, tools.info)
+
+    persons = _compose_persons(req, chars)
+    prompt = ac.assemble(people=PERSON_TAGS.get(persons["partition"], []), characters=chars, relation=relation,
+                         details=subs, info=tools.info)
+    t1 = time.perf_counter()
+    evidence, pool, samples = _compose_evidence(context, relation, subs, req, persons)
+    explain = ac.explain(characters=chars, relation=relation, details=subs, count=tools.count, info=tools.info,
+                         cooccur=evidence.get("with"), anchor_posts=int(evidence.get("anchor_posts") or 0),
+                         keyword_tags=tools.keyword_tags)
+    out: dict[str, Any] = {
+        "ok": True, "task": "scene", "goal": "how", "mode": "compose", "rating": req["rating"],
+        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": choices.get(c.ko) == c.tag,
+                   "candidates": layer.candidate_list(c.ko)} for c in chars if c.tag],
+        "relations": ([{"source": chars[relation.source - 1].tag, "action": relation.action,
+                        "target": chars[relation.target - 1].tag}] if relation is not None else []),
+        "persons": persons, "prompt": prompt, "explain": explain, "pool": pool, "samples": samples,
+        "model": model,
+        "trace": {"details": [{"who": d.owner, "ko": d.ko, "en": d.en, "tags": d.tags, "via": d.via,
+                               "top": [(c.tag, round(c.score, 2)) for c in d.candidates[:3]]} for d in subs]},
+    }
+    model_s = sum(float((model.get(k) or {}).get("elapsed") or 0) for k in ("guess", "choose"))
+    out["timing"] = {"korean_ms": korean_ms, "model_s": round(model_s, 2),
+                     "search_ms": round((time.perf_counter() - t1) * 1000, 1),
+                     "total_s": round(time.perf_counter() - started, 3)}
+    if not pool.get("pins"):
+        out["message"] = "고른 등급·인원에서 이 조합의 실제 게시물이 20건이 안 됩니다 — 프롬프트는 그대로 쓸 수 있습니다."
+    return out

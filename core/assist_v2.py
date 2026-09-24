@@ -21,7 +21,7 @@ from core.assist_korean import KoreanAnalysis, NameHit, clean_text, compact
 TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
 GOALS = ("find", "how", "generate")
 RATINGS = ("g", "s", "q", "e")
-MAX_TEXT = 300
+MAX_TEXT = 800             # 여러 줄 구성 요청(main / c1 / c2 …)이 들어온다 — 300 이면 캐릭터 둘에서 끊겼다
 MAX_INCLUDE = 10
 
 _ITEM = {"type": "object", "additionalProperties": False,

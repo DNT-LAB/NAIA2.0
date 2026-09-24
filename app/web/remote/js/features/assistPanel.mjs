@@ -6,9 +6,11 @@
  * - 입력하는 동안 알아본 캐릭터 이름을 칠한다(`/api/assist/names`, 모델 없이). 후보가 여럿이면 **모델이 아니라
  *   사용자가** 목록에서 고른다(사용자 사양 2026-09-23). `{이름}` 으로 감싸면 일반 낱말이어도 이름으로 찾는다.
  *   고른 것·'이름 아님' 은 창을 쓰는 동안 기억해 **요청마다 보낸다** — 서버는 기억이 짧다.
- * - ⚠️ 프롬프트는 **[프롬프트에 넣기] 를 눌러야** 들어간다. 메인 = 이벤트 맵 [적용] 과 같은 Random 파이프라인
+ * - ⚠️ [생성] 은 **가상 프롬프트**로 한 장 뽑는다 — 메인 칸·캐릭터 칸은 그대로다(사용자 지정 2026-09-24: "사용자의
+ *   캐릭터 프롬프트를 간섭하면 곤란"). 서버(`/api/assist/generate`)가 메인은 이벤트 맵 [생성] 과 같은 바이패스로,
+ *   캐릭터는 이 요청에만 싣는다. '생성해 줘' 는 [바로 생성] 을 켰을 때만 이 길로 뽑는다(기본 꺼짐 — 사용자 결정 2026-09-23).
+ * - 칸에 넣는 것은 **[프롬프트에 넣기] 를 눌렀을 때만**이다. 메인 = 이벤트 맵 [적용] 과 같은 Random 파이프라인
  *   (PE 앞뒤·자동 숨김·와일드카드), 캐릭터 칸(NAI) = 기존 칸은 **비활성으로** 보내고 새로 덧붙인다(아무것도 잃지 않는다).
- *   '생성해 줘' 는 [바로 생성] 을 켰을 때만 넣고 생성한다(기본 꺼짐 — 사용자 결정 2026-09-23).
  * - 칠하기는 promptHighlighter 와 같은 방식이다: 입력칸 뒤에 같은 글을 담은 거울을 깔고 CSS Custom Highlight API
  *   로 범위만 칠한다(범위는 배치를 안 바꾼다 — 캐럿이 글자와 어긋나지 않는다). API 가 없으면 <mark> 로 칠한다.
  * - 크기·자리 규약은 Fast Search 와 같다(결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반).
@@ -45,7 +47,7 @@ function clampCount(value, fallback) {
   return Number.isInteger(n) && n >= 0 && n <= 9 ? n : fallback;
 }
 
-export function initAssist({ showToast, getPromptText, getApiMode, applyCharacters, generateNow, onRandomLink } = {}) {
+export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLink } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
   let autoBox = null, banner = null, body = null, sendBtn = null, picker = null;
   let open = false;
@@ -71,7 +73,6 @@ export function initAssist({ showToast, getPromptText, getApiMode, applyCharacte
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const fmt = n => (Number.isFinite(Number(n)) ? Number(n).toLocaleString() : '');
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const genderMark = g => (g === 'girl' ? ' ♀' : g === 'boy' ? ' ♂' : '');
 
   function toast(message, kind) {
@@ -127,13 +128,13 @@ export function initAssist({ showToast, getPromptText, getApiMode, applyCharacte
         <span class="as-persons" data-as-persons role="group" aria-label="인원"></span>
         <span class="fs-rating-bar as-rating" data-as-rating role="group" aria-label="등급(추론 방향)">${RATINGS.map(r =>
           `<button type="button" class="fs-rating-btn" data-r="${r.id}" title="${r.title}">${r.label}</button>`).join('')}</span>
-        <label class="as-auto" title="요청이 '생성해 줘' 로 끝나면 칸에 넣고 바로 생성합니다(기본 꺼짐)">
+        <label class="as-auto" title="요청이 '생성해 줘' 로 끝나면 이 결과로 바로 한 장 생성합니다 — 칸은 그대로(기본 꺼짐)">
           <input type="checkbox" data-as-auto> 생성해 줘 → 바로 생성</label>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
       <div class="as-banner" data-as-banner hidden></div>
       <div class="as-body" data-as-body></div>
-      <div class="as-foot"><b>Enter</b> 찾기 · Esc 닫기 · <b>{이름}</b> 으로 감싸면 이름으로 찾습니다 — 프롬프트는 버튼을 눌러야 들어갑니다</div>`;
+      <div class="as-foot"><b>Enter</b> 찾기 · Esc 닫기 · <b>{이름}</b> 으로 감싸면 이름으로 찾습니다 — [생성] 은 메인·캐릭터 칸을 건드리지 않습니다</div>`;
     document.body.append(overlay);
     input = overlay.querySelector('.as-input');
     mirror = overlay.querySelector('.as-mirror');
@@ -555,7 +556,7 @@ export function initAssist({ showToast, getPromptText, getApiMode, applyCharacte
     render();
     paintBusy();
     if (autoGenerate && data.goal === 'generate' && data.task === 'scene' && data.prompt?.main) {
-      void applyPrompt(true);
+      void generateVirtual();                  // 칸은 그대로 - 가상 프롬프트로 한 장
     }
   }
 
@@ -597,9 +598,10 @@ export function initAssist({ showToast, getPromptText, getApiMode, applyCharacte
     const can = p.main ? '' : 'disabled';
     return `<div class="as-res">${lines.join('')}<div class="as-meta">${meta.join(' · ')}</div>${notes.join('')}
       <div class="as-actions">
-        <button type="button" class="as-act as-act-main" data-as-apply ${can}
+        <button type="button" class="as-act as-act-main" data-as-generate ${can}
+                title="메인 프롬프트·캐릭터 칸은 그대로 두고, 이 결과(가상 프롬프트)로 한 장 생성합니다">생성</button>
+        <button type="button" class="as-act" data-as-apply ${can}
                 title="메인 = Random 과 같은 파이프라인(PE 앞뒤·자동 숨김) · 캐릭터 칸 = 기존은 비활성으로 보내고 덧붙입니다">프롬프트에 넣기</button>
-        <button type="button" class="as-act" data-as-apply-gen ${can} title="넣은 뒤 Generate 를 누릅니다">넣고 생성</button>
         <button type="button" class="as-act" data-as-link ${pool.pins ? '' : 'disabled'}
                 title="Random·Auto Gen 이 이 조건(핀·인원·등급)의 실제 게시물에서 뽑습니다">Random 에 연결</button>
         <button type="button" class="as-act" data-as-copy ${can} title="클립보드로 복사">복사</button>
@@ -646,8 +648,8 @@ export function initAssist({ showToast, getPromptText, getApiMode, applyCharacte
 
   function onBodyClick(event) {
     const t = event.target;
-    if (t.closest('[data-as-apply]')) { void applyPrompt(false); return; }
-    if (t.closest('[data-as-apply-gen]')) { void applyPrompt(true); return; }
+    if (t.closest('[data-as-generate]')) { void generateVirtual(); return; }
+    if (t.closest('[data-as-apply]')) { void applyPrompt(); return; }
     if (t.closest('[data-as-link]')) { void linkRandom(); return; }
     if (t.closest('[data-as-copy]')) { void copyPrompt(); return; }
     const example = t.closest('[data-as-example]');
@@ -663,36 +665,53 @@ export function initAssist({ showToast, getPromptText, getApiMode, applyCharacte
 
   // ── 넣기 · 연결 · 복사 ──────────────────────────────────────────────────
 
-  async function applyPrompt(andGenerate) {
+  function characterPrompts() {
+    return (result?.prompt?.characters || []).map(c => String(c.prompt || '').trim()).filter(Boolean);
+  }
+
+  function lockActions(on) {
+    body.querySelectorAll('.as-act').forEach(b => { b.disabled = !!on; });
+    if (!on && !result?.pool?.pins) body.querySelector('[data-as-link]')?.setAttribute('disabled', '');
+  }
+
+  /** [생성] — 이 결과를 **가상 프롬프트**로 한 장 뽑는다. 메인 칸·캐릭터 칸은 그대로다
+   *  (사용자 지정 2026-09-24: "사용자의 캐릭터 프롬프트를 간섭하면 곤란"). 서버가 메인은 이벤트 맵 [생성] 과 같은
+   *  바이패스로, 캐릭터는 이 요청에만 싣는다. 결과는 평소 생성처럼 Result·히스토리로 온다. */
+  async function generateVirtual() {
     const p = result?.prompt;
     if (!p?.main) return;
-    const buttons = [...body.querySelectorAll('.as-act')];
-    buttons.forEach(b => { b.disabled = true; });
+    lockActions(true);
     try {
-      const chars = (p.characters || []).map(c => String(c.prompt || '').trim()).filter(Boolean);
+      const data = await postJson('/api/assist/generate', {
+        main: p.main, characters: characterPrompts(), rating: result.rating || rating,
+      });
+      const n = (data.characters || []).length;
+      toast(`생성을 요청했습니다 — 메인·캐릭터 칸은 그대로${n ? ` (가상 캐릭터 ${n}명)` : ''}`, 'success');
+    } catch (error) {
+      toast(`생성하지 못했습니다 — ${error.message}`, 'error');
+    } finally {
+      lockActions(false);
+    }
+  }
+
+  /** [프롬프트에 넣기] — 사용자가 **원할 때만** 칸에 넣는다. 메인은 Random 파이프라인, 캐릭터 칸은 기존을 비활성으로. */
+  async function applyPrompt() {
+    const p = result?.prompt;
+    if (!p?.main) return;
+    lockActions(true);
+    try {
+      const chars = characterPrompts();
       if (chars.length) {
         const sent = typeof applyCharacters === 'function' ? applyCharacters(chars) : false;
         if (!sent) throw new Error('캐릭터 칸에 넣지 못했습니다');
       }
       const tags = String(p.main).split(',').map(t => t.trim()).filter(Boolean);
-      const applied = await postJson('/api/event-map/apply', { tags, rating: result.rating || rating });
-      const how = chars.length ? ` · 캐릭터 ${chars.length}명(기존 칸은 비활성으로)` : '';
-      if (andGenerate) {
-        // 적용 -> prompt_generated 가 WS 로 와서 칸을 채운 뒤(최대 2초) -> Generate 버튼과 같은 길(이벤트 맵과 같다)
-        const want = String(applied.prompt || '').trim();
-        const read = () => String((typeof getPromptText === 'function' && getPromptText()) || '').trim();
-        for (let n = 0; n < 20 && want && read() !== want; n++) await sleep(100);
-        if (typeof generateNow !== 'function') throw new Error('생성 단추가 연결되지 않았습니다');
-        generateNow();
-        toast(`프롬프트에 넣고 생성을 눌렀습니다${how}`, 'success');
-      } else {
-        toast(`프롬프트에 넣었습니다${how}`, 'success');
-      }
+      await postJson('/api/event-map/apply', { tags, rating: result.rating || rating });
+      toast(`프롬프트에 넣었습니다${chars.length ? ` · 캐릭터 ${chars.length}명(기존 칸은 비활성으로)` : ''}`, 'success');
     } catch (error) {
       toast(`넣지 못했습니다 — ${error.message}`, 'error');
     } finally {
-      buttons.forEach(b => { b.disabled = false; });
-      if (!result?.pool?.pins) body.querySelector('[data-as-link]')?.setAttribute('disabled', '');
+      lockActions(false);
     }
   }
 

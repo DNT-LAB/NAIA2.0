@@ -1169,14 +1169,14 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
-// Ctrl+O Assist - 말로 찾는 한국어 어시스트(docs/ASSIST_V2_DESIGN_2026_09_23.md). **넣기는 사용자가 누를 때만** -
+// Ctrl+O Assist - 말로 찾는 한국어 어시스트(docs/ASSIST_V2_DESIGN_2026_09_23.md). [생성] 은 가상 프롬프트로 뽑아
+// 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260923-assist2')
+import('./js/features/assistPanel.mjs?v=20260924-assist3')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
-      getPromptText: () => (promptEdit ? promptEdit.value : ''),
       getApiMode: () => currentMode || modeSelect.value,
       applyCharacters: characters => {
         if (!canApplyCharactersNow()) return false;
@@ -1184,7 +1184,6 @@ import('./js/features/assistPanel.mjs?v=20260923-assist2')
           characters, characters_uc: [], existing: 'inactive',
         }));
       },
-      generateNow: () => generateAction(),
       // Random 연결은 이벤트 맵과 **같은 서버 상태**다 - 그 창의 체크박스·Random 단추 모양도 따라오게 넘긴다.
       onRandomLink: state => { window.eventMap?.receiveRandomLink?.(state); updateGenerateButtonMode(); },
     });

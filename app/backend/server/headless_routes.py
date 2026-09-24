@@ -193,7 +193,8 @@ def register_headless_routes(
     register_extension_install_routes(app, context, run_in_thread=run_in_thread)
     register_ollama_routes(app, context, run_in_thread=run_in_thread)
     register_boost_v2_routes(app, context, run_in_thread=run_in_thread)
-    register_assist_v2_routes(app, context, run_in_thread=run_in_thread)
+    register_assist_v2_routes(app, context, run_in_thread=run_in_thread,
+                              clients=clients, start_generation_runner=ensure_generation_runner)
     register_translation_history_routes(app, context, run_in_thread=run_in_thread)
     register_tagger_routes(app, context, run_in_thread=run_in_thread)
     register_params_workflow_routes(

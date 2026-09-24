@@ -21,6 +21,7 @@ MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 202
 MODEL_TIMEOUT = 60.0
 MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
 MAX_NAME_CHOICES = 8
+MAX_VIRTUAL_CHARACTERS = 6
 _LOCK = threading.Lock()
 _INSTALLER_LOCK = threading.Lock()
 _WARM_LOCK = threading.Lock()
@@ -295,6 +296,44 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
             api_mode = str(getattr(context, "current_api_mode", "NAI") or "NAI")
     return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
             "choices": choices, "not_names": not_names}
+
+
+def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """[생성] — Assist 결과를 **가상 프롬프트**로 한 장 뽑을 때 쓸 (source_row, 생성 요청 overrides).
+
+    사용자 지정 2026-09-24: "사용자의 캐릭터 프롬프트를 간섭하면 곤란하다 — 생성할 때 가상 캐릭터 프롬프트로".
+    - 메인: source_row 로 이벤트 맵 [생성] 과 같은 파이프라인(PE 앞뒤·자동 숨김)에 태운다 — 메인 칸은 그대로.
+    - 캐릭터(NAI): 이 요청에만 싣는다(캐릭터 즉시 생성과 같은 길). ⚠️ late binding 을 **반드시** 막는다 — 안 막으면
+      캐릭터 모듈이 사용자의 슬롯으로 덮어쓴다. Assist 가 인물을 못 찾았어도 막는다(보여 준 그대로 나가야 한다).
+      좌표는 안 싣는다 — use_coords=False 로 NAI 가 배치한다(0.5/0.5 겹침 없음, api_service).
+    - 한 장으로 끝난다(auto_generate=False) — Auto Gen 연쇄를 이어받지 않는다.
+    """
+    if not isinstance(payload, dict):
+        raise AssistError("요청 형식이 잘못됐습니다.")
+    tags = [t.strip() for t in str(payload.get("main") or "").split(",") if t.strip()]
+    if not tags:
+        raise AssistError("생성할 프롬프트가 없습니다.")
+    if len(tags) > 200:
+        raise AssistError("프롬프트는 200태그까지입니다.")
+    rating = str(payload.get("rating") or "g").strip().lower()[:1]
+    if rating not in ("g", "s", "q", "e"):
+        rating = "g"
+    raw_chars = payload.get("characters") or []
+    if not isinstance(raw_chars, list) or len(raw_chars) > MAX_VIRTUAL_CHARACTERS or not all(
+            isinstance(c, str) and len(c) <= 600 for c in raw_chars):
+        raise AssistError("캐릭터 프롬프트가 잘못됐습니다.")
+    characters = [c.strip() for c in raw_chars if c.strip()]
+    source_row = {"general": ", ".join(tags), "rating": rating,
+                  "character": None, "copyright": None, "artist": None, "meta": None, "assist_combo": True}
+    overrides: dict[str, Any] = {"auto_generate": False}
+    if str(context.get_api_mode() or "").upper() == "NAI":
+        overrides.update({
+            "characters": characters,
+            "uc": [""] * len(characters),               # ⚠️ characters 와 길이가 같아야 NAICharacterData 가 받는다
+            "_skip_character_late_binding": True,
+            "_skip_character_reference_late_binding": True,   # 레퍼런스는 사용자 슬롯의 캐릭터 것이다
+        })
+    return source_row, overrides
 
 
 def _call_model(context: Any, text: str, previous: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any]]:

@@ -756,6 +756,7 @@
         {"method": "POST", "path": "/api/assist", "smoke": "external_live"},
         {"method": "POST", "path": "/api/assist/warm", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/assist/names", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/assist/generate", "smoke": "external_live"},
         {"method": "GET", "path": "/api/assist/status", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/assist/kiwi/install", "smoke": "external_live"}
       ]

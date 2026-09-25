@@ -11846,7 +11846,14 @@ function flushMainPromptAndParams() {
       prompt: sentPrompt,
       negative_prompt: negEdit.value,
       ...(negativeWasEdited ? {origin: 'edit'} : {}),
-      ...(promptWasEdited ? {prompt_origin: 'edit', prompt_preset: _promptDirtyPreset} : {}),
+      // ⚠️ 이 길목(프리셋 전환 · 저장 · 만들기 - 모두 **지금 프리셋을 떠나거나 저장하는** 자리)에서는 칸에 보이는
+      //    마지막 메인 프롬프트를 **누가 썼든** 지금 프리셋에 남긴다. 사람이 친 글만 남기던 때는 Random 결과가
+      //    빠져, 돌아오면 Random 이전 값이 실렸다(사용자 제보 2026-09-25: "마지막 메인 프롬프트 값을 기억해야").
+      //    디바운스 경로는 그대로 '사람이 친 글만' 이다 - 치는 도중 도착한 Random 이 프리셋에 새지 않게.
+      //    표식(prompt_preset)은 친 글이면 **치기 시작한** 프리셋, 아니면 지금 화면이 믿는 프리셋 - 스왑 뒤 늦게
+      //    도착한 글은 백엔드가 여전히 버린다.
+      prompt_origin: 'edit',
+      prompt_preset: promptWasEdited ? _promptDirtyPreset : _currentPresetStamp(),
     }));
     // 기록은 **실제로 보낸 값**으로. 표시값을 적어 두면 Interactive 에서 둘이 달라
     // 정정 판정이 어긋난다(Codex 리뷰 2026-08-27).

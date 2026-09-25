@@ -175,12 +175,15 @@ def compact_grammar(schema: dict[str, Any] | None = None) -> str:
     return "\n".join([f"root ::= {root}"] + [f"{name} ::= {body}" for name, body in rules.items()])
 
 
-def user_message(text: str, recap: dict[str, Any] | None = None) -> str:
-    """모델 입력. 기억은 직전 검색 하나(서버가 만든 recap)뿐 — 초기 원문은 다시 넣지 않는다(지운 것이 되살아난다)."""
+def user_message(text: str, recap: dict[str, Any] | None = None, literal: str | None = None) -> str:
+    """모델 입력. 기억은 직전 검색 하나(서버가 만든 recap)뿐 — 초기 원문은 다시 넣지 않는다(지운 것이 되살아난다).
+    literal = 직역 도구의 영문(core/assist_translate) — en 을 그 낱말에서 고르게 한 줄 덧붙인다(시스템 프롬프트는 그대로)."""
     lines = []
     if recap:
         lines.append("Current search: " + json.dumps(_recap_for_model(recap), ensure_ascii=False))
     lines.append(f"Request: {clean_text(text).strip()}")
+    if literal:
+        lines.append(f"Literal English (take en words from it, ko from the request): {literal}")
     return "\n".join(lines)
 
 

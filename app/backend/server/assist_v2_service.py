@@ -325,8 +325,10 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
             api_mode = str(context.get_api_mode())
         except Exception:
             api_mode = str(getattr(context, "current_api_mode", "NAI") or "NAI")
+    # 직역 도구(사용자 제안 09-25) — 켜면 요청을 과장 없이 영어로 한 번 옮겨 경로 호출에 넘긴다. 벤치로 견주는 동안 기본은 끔
+    literal = bool(payload.get("literal", False))
     return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
-            "choices": choices, "not_names": not_names}
+            "choices": choices, "not_names": not_names, "literal": literal}
 
 
 def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -367,7 +369,30 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
     return source_row, overrides
 
 
-def _call_model(context: Any, text: str, previous: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+def _literal(context: Any, text: str) -> tuple[str | None, dict[str, Any]]:
+    """직역 도구(core/assist_translate) — E2B 1회 · 문법 잠금 · 온도 0. 같은 글은 다시 묻지 않는다(창을 연 동안 되묻기).
+    실패하면 None — 부르는 쪽은 직역 없이 간다."""
+    from core import assist_translate as at
+    from core.assist_korean import clean_text
+
+    key = clean_text(text).strip()
+    cache = getattr(context, "assist_literal_cache", None)
+    if cache is None:
+        cache = context.assist_literal_cache = {}
+    if key in cache:
+        return cache[key], {"cached": True}
+    reply, info = _chat(context, at.LITERAL_SYSTEM, at.literal_message(text), at.literal_grammar(text),
+                        max_tokens=20 + at.literal_limit(text) // 2)
+    en = at.parse_literal(reply) if reply is not None else None
+    if en:
+        if len(cache) >= 64:
+            cache.pop(next(iter(cache)))
+        cache[key] = en
+    return en, info
+
+
+def _call_model(context: Any, text: str, previous: dict[str, Any] | None,
+                literal: str | None = None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """E2B 1회. (route | None, 기록). 엔진·모델이 없거나 실패하면 route=None — 한국어 층만으로 간다."""
     from app.backend.server.boost_v2_service import get_boost_runtime
     from core.assist_v2 import SYSTEM_PROMPT, parse_route, user_message
@@ -385,7 +410,7 @@ def _call_model(context: Any, text: str, previous: dict[str, Any] | None) -> tup
             info["error"] = "E2B 모델이 없습니다 — Auto Boost 설정에서 [모델 받기]를 눌러 주세요."
             info["code"] = "model_missing"
             return None, info
-        resp = runtime.chat(user_message(text, previous), system=SYSTEM_PROMPT, grammar=_grammar(),
+        resp = runtime.chat(user_message(text, previous, literal), system=SYSTEM_PROMPT, grammar=_grammar(),
                             max_tokens=MODEL_MAX_TOKENS, temperature=0.2, timeout=MODEL_TIMEOUT)
         info.update({k: resp.get(k) for k in ("elapsed", "usage", "load_seconds", "queue_wait", "gpu") if k in resp})
         if not resp.get("ok"):
@@ -648,7 +673,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     ka.names = [h for h in ka.names if h.form not in req["not_names"]]
     approved, refused = _approved_names(layer, req)
     korean_ms = round((time.perf_counter() - t) * 1000, 1)
-    route, model = _call_model(context, req["text"], req["previous"])
+    literal, literal_info = _literal(context, req["text"]) if req["literal"] else (None, {})
+    route, model = _call_model(context, req["text"], req["previous"], literal=literal)
     chooser, choose_state = None, None
     vocab = _tag_vocab(context, layer)
     if route is None:
@@ -677,6 +703,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         "suggested_names": _suggested(ka.names, merged.characters),
         "relations": [{"source": s, "action": a, "target": d} for s, a, d in merged.relations],
         "model": model,
+        "literal": literal,
         "trace": {"korean": ka.notes, "merge": merged.log,
                   "route": {k: v for k, v in route.items() if v not in ("", [], None)},
                   "choose": choose_state},
@@ -690,7 +717,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         out.update(_lane(context, layer, merged, route, req, ka.names))
     else:
         out["guide"] = GUIDE
-    out["timing"] = {"korean_ms": korean_ms, "model_s": model.get("elapsed"),
+    out["timing"] = {"korean_ms": korean_ms, "literal_s": literal_info.get("elapsed"), "model_s": model.get("elapsed"),
                      "choose_s": ((choose_state or {}).get("model") or {}).get("elapsed"),
                      "choose_prep_ms": (choose_state or {}).get("prep_ms"), "sense_ms": sense_ms,
                      "search_ms": round((time.perf_counter() - t) * 1000, 1),

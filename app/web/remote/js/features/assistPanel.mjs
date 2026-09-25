@@ -49,13 +49,14 @@ function clampCount(value, fallback) {
 
 export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLink } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
-  let autoBox = null, banner = null, body = null, sendBtn = null, picker = null;
+  let autoBox = null, literalBox = null, banner = null, body = null, sendBtn = null, picker = null;
   let open = false;
   let heightCap = 0;
 
   const prefs = loadPrefs();
   let rating = RATINGS.some(r => r.id === prefs.rating) ? prefs.rating : 'g';
   let autoGenerate = !!prefs.autoGenerate;
+  let literalFirst = !!prefs.literalFirst;      // 직역 도구(사용자 제안 09-25) - 견주는 동안 기본 꺼짐
   let personsMode = prefs.personsMode === 'manual' ? 'manual' : 'auto';
   let girls = clampCount(prefs.girls, 1);
   let boys = clampCount(prefs.boys, 0);
@@ -80,7 +81,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
   }
 
   function persistPrefs() {
-    savePrefs({ rating, autoGenerate, personsMode, girls, boys });
+    savePrefs({ rating, autoGenerate, literalFirst, personsMode, girls, boys });
   }
 
   async function postJson(path, payload, { allowError = false } = {}) {
@@ -130,6 +131,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
           `<button type="button" class="fs-rating-btn" data-r="${r.id}" title="${r.title}">${r.label}</button>`).join('')}</span>
         <label class="as-auto" title="요청이 '생성해 줘' 로 끝나면 이 결과로 바로 한 장 생성합니다 — 칸은 그대로(기본 꺼짐)">
           <input type="checkbox" data-as-auto> 생성해 줘 → 바로 생성</label>
+        <label class="as-auto" title="요청을 먼저 과장 없이 영어로 한 번 옮기고(E2B 직역 도구) 그 영문으로 태그를 찾습니다 - 시험 중(기본 꺼짐)">
+          <input type="checkbox" data-as-literal> 직역 먼저</label>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
       <div class="as-banner" data-as-banner hidden></div>
@@ -143,12 +146,19 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     personsEl = overlay.querySelector('[data-as-persons]');
     ratingBar = overlay.querySelector('[data-as-rating]');
     autoBox = overlay.querySelector('[data-as-auto]');
+    literalBox = overlay.querySelector('[data-as-literal]');
     banner = overlay.querySelector('[data-as-banner]');
     body = overlay.querySelector('[data-as-body]');
     sendBtn = overlay.querySelector('[data-as-send]');
 
     autoBox.checked = autoGenerate;
     autoBox.addEventListener('change', () => { autoGenerate = autoBox.checked; persistPrefs(); });
+    literalBox.checked = literalFirst;
+    literalBox.addEventListener('change', () => {
+      literalFirst = literalBox.checked;
+      persistPrefs();
+      if (result && !busy) void ask();
+    });
     overlay.querySelector('[data-as-close]').addEventListener('click', close);
     overlay.querySelector('[data-as-reset]').addEventListener('click', reset);
     sendBtn.addEventListener('click', () => { void ask(); });
@@ -543,7 +553,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     paintBusy();
     const payload = {
       text, rating, persons: personsPayload(), previous: recap,
-      names: Object.fromEntries(choices), not_names: [...notNames],
+      names: Object.fromEntries(choices), not_names: [...notNames], literal: literalFirst,
     };
     const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
     if (mode) payload.api_mode = mode;
@@ -614,6 +624,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
       `<div class="as-line"><span class="as-k">메인</span><span class="as-v">${esc(p.main || '(비어 있음)')}</span></div>`,
       ...chars.map((c, i) =>
         `<div class="as-line"><span class="as-k" title="${esc(c.ko || '')}">캐릭터 ${i + 1}</span><span class="as-v">${esc(c.prompt)}</span></div>`),
+      ...(r.literal ? [`<div class="as-line" title="E2B 직역 - 태그가 아니라 태그를 찾는 데 쓴 영문"><span class="as-k">직역</span><span class="as-v">${esc(r.literal)}</span></div>`] : []),
     ];
     const meta = [];
     if (pool.posts) meta.push(`풀 ${fmt(pool.posts)}건`);

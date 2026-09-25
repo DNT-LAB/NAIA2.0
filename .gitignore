@@ -276,3 +276,6 @@ build_tags_increment/
 # Event Map classification audit/intermediate data; compact subcategories are bundled.
 /data/event_map_category_mapping.json
 
+
+# Danbooru 태그 스냅숏 (hlibr/danbooru-tag-metadata-snapshot, 2026-04-08) - 63MB, 로컬 참조 데이터. 배포 여부는 미정
+data/danbooru_tag_snapshot/

@@ -58,7 +58,12 @@ export function createSearchQuickWindow({
     escHtml,
     onOpen: () => onVisibilityChange(),
     // 동반 창은 함께 닫는다 - 혼자 남으면 무엇의 목록인지 모른다.
-    onClose: () => { if (libPanel && libPanel.isOpen()) libPanel.close(); onWindowClose(); onVisibilityChange(); },
+    onClose: () => {
+      if (libPanel && libPanel.isOpen()) libPanel.close();
+      closeRefineSide();
+      onWindowClose();
+      onVisibilityChange();
+    },
     onCollapse: () => onVisibilityChange(),
   });
   panel.el.id = 'searchQuickWindow';
@@ -101,6 +106,7 @@ export function createSearchQuickWindow({
   mirrorMeta();
 
   panel.body.addEventListener('click', event => {
+    if (event.target.closest('[data-sqw="refine-side"]')) { toggleRefineSide(); return; }
     const head = event.target.closest('[data-sqw-head]');
     if (!head) return;
     setLayer(normalizeLayer(head.dataset.sqwHead));
@@ -157,7 +163,81 @@ export function createSearchQuickWindow({
       if (input) input.focus();
     }
     if (panel.isOpen()) onLayerShown(layer);
+    syncRefineSide();
     onVisibilityChange();
+  }
+
+  // ── 심층 검색 도구 동반 창(사용자 지정 2026-09-25: 2단) ─────────────────────
+  // 심층 검색 층의 오른쪽 칸(샘플 미리보기 · 스테이징 · 병합&내보내기)을 창 **오른쪽**에 붙인다.
+  // 한 층에 다 쌓으니 너무 길어 조화가 없었다. 칸 요소는 refinePanel 이 그린 그대로 옮긴다.
+  let refineSide = null;
+  let refineSideDismissed = false;       // 사용자가 × 로 닫았으면 층을 오가도 다시 띄우지 않는다
+
+  function rightOfSpot(width, height, anchorRect) {
+    const vw = win?.innerWidth || doc.documentElement.clientWidth;
+    const vh = win?.innerHeight || doc.documentElement.clientHeight;
+    const roomRight = vw - anchorRect.right;
+    const left = roomRight >= width + 16 ? anchorRect.right + 10 : anchorRect.left - width - 10;
+    return {
+      x: Math.round(Math.max(6, Math.min(left, vw - width - 6))),
+      y: Math.round(Math.max(6, Math.min(anchorRect.top, vh - height - 6))),
+    };
+  }
+
+  function ensureRefineSide() {
+    if (refineSide) return refineSide;
+    const width = 320;
+    const height = 600;
+    const spot = rightOfSpot(width, height, panel.el.getBoundingClientRect());
+    refineSide = createDraggablePanel({
+      document: doc,
+      window: win,
+      title: '심층 검색 도구',
+      variant: 'rfsw',
+      storageKey: 'search-quick-refine-side',
+      width, height, minWidth: 260, maxWidth: 700, minHeight: 200,
+      resizable: true,
+      initial: { x: spot.x, y: spot.y },
+      escHtml,
+      onClose: () => { refineSideDismissed = true; },
+    });
+    refineSide.el.id = 'searchRefineSideWindow';
+    return refineSide;
+  }
+
+  function attachRefineRight() {
+    // refinePanel 이 층 안에 그린 오른쪽 칸을 동반 창으로 옮긴다(이미 옮겼으면 그대로).
+    const side = ensureRefineSide();
+    const right = doc.querySelector('#refineView .refine-right') || side.body.querySelector('.refine-right');
+    if (right && right.parentNode !== side.body) side.body.appendChild(right);
+    return Boolean(right);
+  }
+
+  function openRefineSide() {
+    if (!attachRefineRight()) return;
+    refineSideDismissed = false;
+    if (!refineSide.isOpen()) refineSide.open();
+  }
+
+  function closeRefineSide() {
+    if (refineSide && refineSide.isOpen()) {
+      refineSide.close();
+      refineSideDismissed = false;       // 창이 닫은 것 - 사용자가 닫은 것이 아니다
+    }
+  }
+
+  function toggleRefineSide() {
+    if (refineSide && refineSide.isOpen()) { refineSide.close(); return; }
+    openRefineSide();
+  }
+
+  /** 심층 검색 층이 보이면 함께 띄우고, 다른 층으로 가면 닫는다. */
+  function syncRefineSide() {
+    if (panel.isOpen() && layer === 'refine') {
+      if (!refineSideDismissed) openRefineSide();
+    } else {
+      closeRefineSide();
+    }
   }
 
   // ── Custom Parquets 동반 창 ─────────────────────────────────────────────
@@ -226,6 +306,7 @@ export function createSearchQuickWindow({
     else {
       if (target === 'tag') doc.getElementById('tagFilterInput')?.focus();
       onLayerShown(layer);
+      syncRefineSide();
     }
     if (!wasOpen) requestSearchState();
     onVisibilityChange();
@@ -237,6 +318,7 @@ export function createSearchQuickWindow({
     showTagFilter: (options = {}) => openAt('tag', options),
     showRefine: (options = {}) => openAt('refine', options),
     isRefineShown: () => panel.isOpen() && !panel.isCollapsed() && layer === 'refine',
+    isRefineSideOpen: () => Boolean(refineSide && refineSide.isOpen()),
     close: () => panel.close(),
     collapse: () => panel.collapse(),
     toggleLibrary,
@@ -337,6 +419,20 @@ const SQW_CSS = `
 .sqw-body #refineView .refine-header{border-bottom:none;padding-bottom:0;justify-content:flex-end}
 /* 층 머리줄이 제목·되돌아가기를 맡는다 - 옛 [← SEARCH] 와 제목은 숨긴다. */
 .sqw-body #refineView .refine-back,.sqw-body #refineView .refine-title{display:none}
+.sqw-body #refineView .refine-header{justify-content:space-between}
+.sqw-body #refineView .rf-side-toggle{display:inline-flex;align-items:center;height:20px;padding:0 9px;border-radius:4px;
+  font-size:10px;font-weight:700;cursor:pointer;border:1px solid rgba(120,190,150,0.5);background:rgba(120,190,150,0.12);
+  color:#bfe8cf;margin-right:auto}
+.sqw-body #refineView .rf-side-toggle:hover{background:rgba(120,190,150,0.26);color:#fff}
+/* 동반 창 '심층 검색 도구' - 옮겨 온 오른쪽 칸(샘플 · 스테이징 · 병합&내보내기) */
+.dragpanel.rfsw{border-color:rgba(120,190,150,0.42)}
+.dragpanel.rfsw .dragpanel-head{background:rgba(120,190,150,0.10)}
+.dragpanel.rfsw .dragpanel-body{padding:8px;background:var(--bg-surface);overflow:auto}
+.dragpanel.rfsw .refine-right{display:flex;flex-direction:column;gap:8px;width:100%}
+.dragpanel.rfsw .refine-preview,.dragpanel.rfsw .refine-stageboard,.dragpanel.rfsw .refine-staging{padding:8px;border-radius:8px}
+.dragpanel.rfsw .rf-prev-body{min-height:80px}
+.dragpanel.rfsw .mod-action-btn{height:26px;min-height:26px;font-size:11px;padding:0 8px}
+.dragpanel.rfsw .rf-sample-btn,.dragpanel.rfsw .rf-gen-btn{height:24px;font-size:10.5px}
 .sqw-body #refineView .refine-2col{flex-direction:column;gap:8px}
 .sqw-body #refineView .refine-left,.sqw-body #refineView .refine-right{flex:1 1 auto;width:100%;gap:7px}
 .sqw-body #refineView .mod-input{height:24px;padding:2px 7px;font-size:11px}

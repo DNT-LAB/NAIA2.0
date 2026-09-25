@@ -2610,7 +2610,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clea
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rl')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rs')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -2663,7 +2663,7 @@ searchHost.className = 'search-host';
 // Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
 const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-rl2')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-rs')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,

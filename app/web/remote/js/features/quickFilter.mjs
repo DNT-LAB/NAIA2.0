@@ -14,7 +14,21 @@ const TFB_CSS = `
   border:1px solid rgba(141,123,214,0.6);background:rgba(141,123,214,0.16);color:#d9d0ff}
 .tfb-stage:hover:not(:disabled){background:rgba(141,123,214,0.30);color:#fff}
 .tfb-stage:disabled{opacity:.4;cursor:default}
-.tfb .tfb-commit{flex:0 0 auto;width:auto;height:22px;padding:0 12px;font-size:10.5px}
+.tfb-btns{display:flex;gap:4px}
+.tfb-btns>button{flex:1 1 0;min-width:0;height:24px;font-size:10.5px;white-space:nowrap}
+.tfb-undo{border-radius:5px;font-weight:700;cursor:pointer;border:1px solid var(--border-dim,#33333f);
+  background:var(--bg-elevated,#1e1e26);color:var(--text-secondary,#c8c8d0)}
+.tfb-undo:hover:not(:disabled){color:#fff;border-color:rgba(255,255,255,0.3)}
+.tfb-undo:disabled,.tfb-act:disabled{opacity:.35;cursor:default}
+.tfb-row.is-pick{cursor:pointer}
+.tfb-row.is-sel{background:rgba(141,123,214,0.16);box-shadow:inset 0 0 0 1px rgba(141,123,214,0.55)}
+.tfb-row.is-temp .tfb-text{color:#f5dc8a}
+.tfb-temp{flex:0 0 auto;font-size:9px;font-weight:700;padding:0 5px;border-radius:3px;color:#1a1a1a;background:#f5dc8a}
+.tfb-acts{display:flex;gap:4px;padding-top:4px;border-top:1px dashed rgba(141,123,214,0.3)}
+.tfb-act{flex:1 1 0;height:22px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;
+  border:1px solid rgba(245,220,138,0.55);background:rgba(245,220,138,0.12);color:#f5dc8a}
+.tfb-act.revert{border-color:var(--border-dim,#33333f);background:var(--bg-elevated,#1e1e26);color:var(--text-secondary,#c8c8d0)}
+.tfb-act:hover:not(:disabled){filter:brightness(1.25)}
 .tfb-hint{flex:1 1 auto;min-width:0;font-size:9.5px;color:var(--text-dimmer,#6c6c78);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tfb-list{display:flex;flex-direction:column;gap:2px}
 .tfb-row{display:flex;align-items:center;gap:6px;min-height:22px;padding:2px 4px;border-radius:4px;font-size:10.5px}
@@ -109,11 +123,15 @@ export function normalizePreferences(raw) {
   const include = normalizeTags(raw.tag_filter || raw.include || raw.include_tags);
   const exclude = normalizeTags(raw.tag_filter_exclude || raw.exclude || raw.exclude_tags);
   const branches = normalizeBranches(raw.tag_filter_branches);
+  // 지금 풀에 걸린 조합(백엔드 commit 이 쓴다). 칩(tag_filter)은 초안이라 다를 수 있다.
+  const applied = (Array.isArray(raw.tag_filter_applied_branches) ? raw.tag_filter_applied_branches : [])
+    .map(item => normalizeTokens(Array.isArray(item) ? item : (item && item.tags))).filter(tags => tags.length);
   return {
     ratings: normalizeRatings(raw.ratings),
     tag_filter: include,
     tag_filter_exclude: exclude,
     tag_filter_branches: branches,
+    tag_filter_applied_branches: applied,
     tag_filter_active: !!raw.tag_filter_active
       && (include.length > 0 || exclude.length > 0 || branches.some(branch => branch.enabled)),
   };
@@ -178,6 +196,19 @@ export function createQuickFilterController(deps) {
   let stagedBranches = [];            // [{tags:[칩 토큰], enabled}]
   let lastSentBranches = [];          // 마지막 검색에 보낸 분기(결과의 분기별 수와 순서가 같다)
   const branchCounts = new Map();     // 분기 서명 -> 등급별 수(마지막 결과)
+  // 커밋 모델(사용자 지정 2026-09-25): 칩·스테이징은 **미리보기**다. 풀을 바꾸는 것은 [커밋 (적용)] ·
+  // [커밋 취소] · [임시 적용] · [적용 취소] 와 바깥의 명시 적용(프롬프트 우클릭 · 풀 교체 재적용)뿐이다.
+  let appliedBranches = [];           // 지금 풀에 걸린 조합(분기 목록). [] = 필터 없음
+  let lastApplied = [];               // 마지막으로 걸었던 조합 - 라이브 검색·풀 교체가 풀어도 다시 건다
+  let committedBranches = [];         // 마지막 커밋 조합 - [적용 취소] 가 돌아갈 곳
+  const commitHistory = [];           // 커밋 직전의 조합들 - [커밋 취소](최근 20)
+  let tempSig = '';                   // 임시 적용 중인 담은 것의 서명('' = 아님)
+  let selectedSig = '';               // 스테이징에서 고른 줄의 서명
+  let applyRequestId = '';            // 적용 요청(검색 -> assign)
+  let applyInFlight = null;           // {branches, mode} - 결과·assign 을 기다리는 적용
+  let previewRequestId = '';
+  let previewQueued = false;
+  let previewCounts = null;           // 미리보기(커밋하면 걸릴 합집합)의 등급별 수
 
   const getEl = id => doc.getElementById(id);
   // Tag Filter 가 사는 곳. 리모컨 창(searchQuickWindow)이 주입하면 그걸 묻고, 없으면 예전 고정 팝업.
@@ -222,15 +253,15 @@ export function createQuickFilterController(deps) {
   const isStaged = (tags, list = stagedBranches) => list.some(branch => branchSig(branch.tags) === branchSig(tags));
   /** 지금 칩이 켜진 담은 것과 **다른** 검색인가 - 같으면 두 번 세지 않는다(담아도 칩은 남는다). */
   const liveIsNew = () => hasChips() && !isStaged(payload(), enabledBranches());
-  /** 검색에 보낼 분기. 켜진 담은 것이 없으면 [] = 예전처럼 칩 한 벌. 지금 칩이 새 검색이면 한 분기로
-   *  더한다(담기 전의 검색도 결과에 보인다 - 보이는 것이 풀이다). */
+  /** [커밋 (적용)] 이 걸 조합 = 켜진 담은 것들 + 지금 칩(담은 것과 다른 검색이면). 미리보기도 이것을 센다. */
   function branchesPayload() {
     const on = enabledBranches().map(branch => [...branch.tags]);
-    if (!on.length) return [];
     if (liveIsNew()) on.push(payload());
     return on;
   }
   const hasFilter = () => includeTags.length > 0 || excludeTags.length > 0 || enabledBranches().length > 0;
+  const hasApplied = () => appliedBranches.length > 0;
+  const cloneBranches = list => (Array.isArray(list) ? list : []).map(tags => [...tags]);
   const nextSearchRequestId = () => {
     searchSeq += 1;
     latestSearchRequestId = `tf-${Date.now()}-${searchSeq}`;
@@ -297,7 +328,8 @@ export function createQuickFilterController(deps) {
     renderBranches();
     const countEl = getEl('tagFilterCount');
     if (!countEl) return;
-    const hasTags = hasFilter();
+    // 머리줄 수 = **지금 풀에 걸린** 것(커밋 모델). 초안의 수는 스테이징 머리줄이 보인다.
+    const hasTags = active;
     if (!hasTags) {
       countEl.textContent = '';
       countEl.classList.remove('has-result');
@@ -319,7 +351,7 @@ export function createQuickFilterController(deps) {
   function refreshCount() {
     // 창이 열려 있으면 층이 접혀 있어도 센다 - 층 머리줄에 개수가 비친다.
     if (!surfaceVisible()) return;
-    renderMatchedCount(active ? 'assigned' : 'matched');
+    renderMatchedCount('assigned');
   }
 
   function save() {
@@ -341,7 +373,9 @@ export function createQuickFilterController(deps) {
     //    사용자가 칩을 넣거나 빼기 전까지 **재검색할 길이 아예 없었다**
     //    (사용자 제보 2026-08-31 - 치명적이라고 짚은 그 파생 버그).
     //    같은 칩으로 다시 거는 것은 정당한 동작이다 - 걸 것이 있으면 누를 수 있다.
-    button.disabled = !(hasPendingText || hasFilter());
+    button.disabled = !(hasPendingText || hasFilter() || hasApplied());
+    const undo = getEl('tagFilterUndoBtn');
+    if (undo) undo.disabled = !commitHistory.length;
     // 칸마다의 Clear - 그 칸에 칩이나 글자가 있을 때만.
     for (const [list, inputId] of [['include', 'tagFilterInput'], ['exclude', 'tagFilterExcludeInput']]) {
       const clear = doc.querySelector(`[data-tf-clear="${list}"]`);
@@ -448,7 +482,7 @@ export function createQuickFilterController(deps) {
     deps.showTagInfo(baseTag(tag), host);
   }
 
-  function setChipExact(list, index, exact) {
+  function setChipExact(list, index, exact, commitNow = false) {
     const arr = String(list) === 'exclude' ? excludeTags : includeTags;
     const idx = Number(index);
     const current = arr[idx];
@@ -463,7 +497,9 @@ export function createQuickFilterController(deps) {
     else arr[idx] = next;
     renderChips();
     updateCommitButton();
-    apply();
+    // 칩 메뉴에서는 초안(미리보기), 프롬프트 우클릭에서는 곧장 적용.
+    if (commitNow) apply();
+    else schedulePreview();
   }
 
   /** [+ 담기]: 지금 검색(칩 한 벌)을 스테이징에 담는다. **칩은 남긴다**(사용자 지정 2026-09-25 - 비우면
@@ -488,7 +524,7 @@ export function createQuickFilterController(deps) {
     renderChips();
     renderBranches();
     updateCommitButton();
-    apply();
+    schedulePreview();
     getEl('tagFilterInput')?.focus();
   }
 
@@ -497,15 +533,22 @@ export function createQuickFilterController(deps) {
     if (!branch) return;
     branch.enabled = !!enabled;
     renderBranches();
-    if (!hasFilter()) { clearFilter({keepBranches: true}); return; }
-    apply();
+    schedulePreview();
   }
 
   function removeBranch(index) {
-    stagedBranches.splice(Number(index), 1);
+    const [removed] = stagedBranches.splice(Number(index), 1);
+    if (removed && branchSig(removed.tags) === selectedSig) selectedSig = '';
     renderBranches();
-    if (!hasFilter()) { clearFilter({keepBranches: true}); return; }
-    apply();
+    schedulePreview();
+  }
+
+  function selectRow(index) {
+    const branch = stagedBranches[Number(index)];
+    if (!branch) return;
+    const sig = branchSig(branch.tags);
+    selectedSig = selectedSig === sig ? '' : sig;
+    renderBranches();
   }
 
   /** 칸 오른쪽 끝의 Clear: 그 칸(include 또는 exclude)의 칩과 글자만 비운다. 스테이징은 그대로. */
@@ -519,8 +562,7 @@ export function createQuickFilterController(deps) {
     else includeTags = [];
     renderChips();
     renderBranches();
-    if (!hasFilter()) { clearFilter({keepBranches: true}); return; }
-    apply();
+    schedulePreview();
   }
 
   function ensureBranchStyle() {
@@ -532,7 +574,6 @@ export function createQuickFilterController(deps) {
   }
 
   function ensureBranchHost() {
-    ensureBranchStyle();
     let host = getEl('tagFilterBranches');
     if (!host) {
       // 자리는 index.html 이 둔다(Save Filter·Filters 줄 아래). 없으면(옛 마크업) 저장 내역 뒤에 만든다.
@@ -543,18 +584,25 @@ export function createQuickFilterController(deps) {
       host.className = 'tfb';
       anchor.parentNode.insertBefore(host, anchor.nextSibling);
     }
+    // ⚠️ 스타일은 자리를 찾은 **뒤에** - 자리 없는 문서(시험의 가짜 문서)에서 createElement 를 부르면 죽는다.
+    ensureBranchStyle();
     if (host._tfbBound) return host;
     host._tfbBound = true;
     // 다시 그려도 그대로인 뿌리에 위임으로 받는다.
     host.addEventListener('click', event => {
       const target = event.target.closest('[data-tfb]');
-      if (!target || target.disabled) return;
-      const index = Number(target.closest('[data-tfb-i]')?.dataset.tfbI);
-      const action = target.dataset.tfb;
+      if (target && target.disabled) return;
+      const row = event.target.closest('[data-tfb-i]');
+      const index = Number(row?.dataset.tfbI);
+      const action = target?.dataset.tfb;
       if (action === 'stage') stageBranch();
-      else if (action === 'commit') commitPendingInputs();
+      else if (action === 'commit') commit({takeText: true});
+      else if (action === 'undo') undoCommit();
+      else if (action === 'temp') tempApplySelected();
+      else if (action === 'revert') revertTemp();
       else if (action === 'toggle') setBranchEnabled(index, !stagedBranches[index]?.enabled);
       else if (action === 'remove') removeBranch(index);
+      else if (row) selectRow(index);          // 줄의 빈 곳 = 고르기 -> 아래에 [임시 적용][적용 취소]
     });
     return host;
   }
@@ -579,13 +627,19 @@ export function createQuickFilterController(deps) {
     if (!host) return;
     const canStage = hasChips() && !isStaged(payload());
     const live = enabledBranches().length > 0 && liveIsNew();
-    const rows = stagedBranches.map((branch, i) => `
-      <div class="tfb-row${branch.enabled ? '' : ' is-off'}" data-tfb-i="${i}">
-        <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? '끄기' : '켜기'}"></button>
+    const rows = stagedBranches.map((branch, i) => {
+      const sig = branchSig(branch.tags);
+      const temp = !!tempSig && sig === tempSig;
+      return `
+      <div class="tfb-row is-pick${branch.enabled ? '' : ' is-off'}${sig === selectedSig ? ' is-sel' : ''}${temp ? ' is-temp' : ''}" data-tfb-i="${i}"
+        title="눌러서 고르면 아래에서 이 조합만 임시로 적용해 볼 수 있습니다">
+        <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? '커밋에서 빼기' : '커밋에 넣기'}"></button>
         <span class="tfb-text">${branchLabelHtml(branch.tags)}</span>
-        <span class="tfb-n">${branch.enabled ? branchCountText(branch.tags) : '꺼짐'}</span>
-        <button type="button" class="tfb-del" data-tfb="remove" title="빼기">×</button>
-      </div>`).join('');
+        ${temp ? '<span class="tfb-temp">임시 적용 중</span>' : ''}
+        <span class="tfb-n">${branch.enabled || temp ? branchCountText(branch.tags) : '꺼짐'}</span>
+        <button type="button" class="tfb-del" data-tfb="remove" title="스테이징에서 빼기">×</button>
+      </div>`;
+    }).join('');
     const liveRow = live ? `
       <div class="tfb-row is-live">
         <span class="tfb-on is-live" aria-hidden="true"></span>
@@ -593,18 +647,32 @@ export function createQuickFilterController(deps) {
         <span class="tfb-n">${branchCountText(payload())}</span>
         <span class="tfb-del" aria-hidden="true"></span>
       </div>` : '';
-    const hint = stagedBranches.length ? `${stagedBranches.length}개 · 결과 = 합친 것`
-      : '검색해 보고 마음에 들면 담기';
+    const draft = branchesPayload();
+    const draftText = !draft.length ? '' : previewCounts
+      ? `커밋하면 ${(filteredCount(previewCounts, deps.getRatingState()) || 0).toLocaleString()}행` : '커밋하면 …';
+    const hint = draftText || (stagedBranches.length ? `${stagedBranches.length}개 담김` : '검색해 보고 마음에 들면 담기');
+    const selected = stagedBranches.some(branch => branchSig(branch.tags) === selectedSig);
+    const acts = selected || tempSig ? `
+      <div class="tfb-acts">
+        <button type="button" class="tfb-act" data-tfb="temp" ${selected && selectedSig !== tempSig ? '' : 'disabled'}
+          data-naia-guide="고른 조합 하나만 지금 풀에 걸어 봅니다(커밋은 그대로). 담은 것을 오가며 태그를 빠르게 바꿔 볼 때.">임시 적용</button>
+        <button type="button" class="tfb-act revert" data-tfb="revert" ${tempSig ? '' : 'disabled'}
+          data-naia-guide="임시 적용을 거두고 마지막 커밋 상태로 돌아갑니다.">적용 취소</button>
+      </div>` : '';
     host.innerHTML = `
       <div class="tfb-head">
         <span class="tfb-title">스테이징</span>
         <span class="tfb-hint">${hint}</span>
-        <button type="button" class="tfb-stage" data-tfb="stage" ${canStage ? '' : 'disabled'}
-          data-naia-guide="지금 검색(칩)을 스테이징에 담습니다. 칩은 그대로 남으니 몇 개만 고쳐 다음 검색을 이어 가세요.&#10;&#10;결과 = 켜진 담은 것들과 지금 검색을 합친 것(중복 행은 한 번).">+ 담기</button>
-        <button type="button" class="tag-filter-btn-action assign tfb-commit" id="tagFilterCommitBtn" data-tfb="commit"
-          data-naia-guide="입력칸에 친 글자를 칩으로 넣고, 지금 조건으로 다시 적용합니다(풀을 다 쓴 뒤 같은 조건으로 다시 걸 때도).">Commit</button>
       </div>
-      ${stagedBranches.length ? `<div class="tfb-list">${rows}${liveRow}</div>` : ''}`;
+      <div class="tfb-btns">
+        <button type="button" class="tfb-stage" data-tfb="stage" ${canStage ? '' : 'disabled'}
+          data-naia-guide="지금 검색(칩)을 스테이징에 담습니다. 칩은 그대로 남으니 몇 개만 고쳐 다음 검색을 이어 가세요.">+ 담기</button>
+        <button type="button" class="tag-filter-btn-action assign tfb-commit" id="tagFilterCommitBtn" data-tfb="commit"
+          data-naia-guide="켜진 담은 것들과 지금 검색을 합쳐 풀에 겁니다. 이 단추를 누르기 전까지 풀은 그대로입니다(칩·스테이징은 미리보기). 같은 조건으로 다시 걸 때도 누르세요.">커밋 (적용)</button>
+        <button type="button" class="tfb-undo" id="tagFilterUndoBtn" data-tfb="undo" ${commitHistory.length ? '' : 'disabled'}
+          data-naia-guide="마지막 커밋을 거두고, 그 커밋 직전의 풀로 돌아갑니다.">커밋 취소</button>
+      </div>
+      ${stagedBranches.length ? `<div class="tfb-list">${rows}${liveRow}</div>` : ''}${acts}`;
     updateCommitButton();
   }
 
@@ -622,21 +690,114 @@ export function createQuickFilterController(deps) {
     }
   }
 
-  function sendSearchNow() {
+  /** 미리보기: 초안(칩·스테이징)의 행 수만 센다 - 풀은 그대로(assign 하지 않는다).
+   *  ⚠️ 적용이 도는 중이면 끝난 뒤로 미룬다. 서버는 더 새 검색이 시작되면 옛 검색의 결과를 **말없이
+   *     버린다**(seq 가드) - 미리보기가 끼어들면 적용 결과가 사라져 풀이 안 바뀐다. */
+  function sendPreviewNow() {
     cancelPendingSearch();
-    if (!hasFilter()) return false;
+    if (applyInFlight) { previewQueued = true; return false; }
+    const branches = branchesPayload();
+    if (!branches.length) {
+      previewCounts = null;
+      previewRequestId = '';
+      renderBranches();
+      return false;
+    }
     if (!isSocketOpen()) return false;
-    lockTagSurface('tagfilter');   // background tag-filter search → released by onTagFilterResult/Assigned
-    lastSentBranches = branchesPayload();
-    send({type: 'tag_filter_search', tags: payload(), branches: lastSentBranches, request_id: nextSearchRequestId()});
+    lastSentBranches = branches;
+    previewRequestId = nextSearchRequestId();
+    send({type: 'tag_filter_search', tags: payload(), branches, request_id: previewRequestId});
     return true;
   }
 
-  function scheduleSearch() {
-    if (!hasFilter()) return;
-    invalidateSearchRequest();
+  function schedulePreview(options = {}) {
     cancelPendingSearch();
-    searchDebounceTimer = setTimeout(sendSearchNow, SEARCH_DEBOUNCE_MS);
+    if (options.save !== false) save();          // 초안은 저장한다(풀과 무관)
+    previewCounts = null;
+    renderBranches();
+    searchDebounceTimer = setTimeout(sendPreviewNow, SEARCH_DEBOUNCE_MS);
+  }
+
+  /** 조합을 풀에 건다(검색 -> assign). 빈 조합이면 필터를 뗀다. mode = commit|undo|temp|revert|reapply.
+   *  ⚠️ 검색 `tags` 에는 **초안 칩**을 싣는다 - 백엔드 commit 이 그것을 칩(tag_filter)으로 저장하므로,
+   *     걸린 조합을 실으면 임시 적용 한 번에 초안이 덮인다. 걸리는 것은 `branches` 다(있으면 tags 는 무시). */
+  function applyConfig(branches, mode) {
+    cancelPendingSearch();
+    const target = cloneBranches(branches).filter(tags => tags.length);
+    if (!target.length) { unassign(); return true; }
+    if (!isSocketOpen()) return false;
+    lockTagSurface('tagfilter');   // background tag-filter search → released by onTagFilterResult/Assigned
+    applyInFlight = {branches: target, mode};
+    applyRequestId = nextSearchRequestId();
+    send({type: 'tag_filter_search', tags: payload(), branches: target, request_id: applyRequestId});
+    return true;
+  }
+
+  /** 풀에서 필터만 뗀다 - 초안(칩·스테이징)은 남긴다(keep_draft). */
+  function unassign() {
+    applyInFlight = null;
+    applyRequestId = '';
+    appliedBranches = [];
+    active = false;
+    ratingCounts = null;
+    // ⚠️ 초안을 **먼저** 저장하고 뗀다. 떼기의 응답(search_state)이 서버의 초안을 싣고 돌아와 화면 칩을
+    //    덮는다 - 거꾸로면 방금 되돌린 칩(우클릭 [되돌리기])이 옛 초안으로 다시 덮였다(라이브 실측).
+    save();
+    send({type: 'tag_filter_clear', keep_draft: true});
+    const countEl = getEl('tagFilterCount');
+    if (countEl) {
+      countEl.textContent = '';
+      countEl.classList.remove('has-result');
+    }
+    const toggleBtn = getEl('tagFilterToggle');
+    if (toggleBtn) toggleBtn.classList.remove('active', 'assigned');
+    const restored = deps.computeLocalFilteredCount();
+    if (restored !== null && restored !== undefined) deps.updateSearchCount(restored);
+    renderBranches();
+    notifyFilterChanged();
+    flushAssignedOnce();
+    if (previewQueued) { previewQueued = false; sendPreviewNow(); }
+  }
+
+  /** [커밋 (적용)] - 초안(켜진 담은 것들 + 지금 칩)을 풀에 건다. 직전 풀은 [커밋 취소] 로 돌아갈 수 있게 쌓는다.
+   *  초안이 비었으면 필터를 뗀다. 같은 조건으로 다시 거는 것도 커밋이다(풀을 다 쓴 뒤 - 사용자 제보 2026-08-31). */
+  function commit(options = {}) {
+    if (options.takeText) commitPendingInputs({preview: false});
+    const target = branchesPayload();
+    commitHistory.push(cloneBranches(appliedBranches));
+    if (commitHistory.length > 20) commitHistory.shift();
+    committedBranches = cloneBranches(target);
+    tempSig = '';
+    save();
+    applyConfig(target, 'commit');
+    renderBranches();
+  }
+
+  /** [커밋 취소] - 마지막 커밋을 거두고 그 직전의 풀로(병합 전 상태). 초안은 건드리지 않는다. */
+  function undoCommit() {
+    if (!commitHistory.length) return;
+    const previous = commitHistory.pop();
+    committedBranches = cloneBranches(previous);
+    tempSig = '';
+    applyConfig(previous, 'undo');
+    renderBranches();
+  }
+
+  /** [임시 적용] - 고른 담은 것 하나만 풀에 건다(커밋은 그대로). */
+  function tempApplySelected() {
+    const branch = stagedBranches.find(item => branchSig(item.tags) === selectedSig);
+    if (!branch) return;
+    tempSig = selectedSig;
+    applyConfig([branch.tags], 'temp');
+    renderBranches();
+  }
+
+  /** [적용 취소] - 임시 적용을 거두고 마지막 커밋 조합으로. */
+  function revertTemp() {
+    if (!tempSig) return;
+    tempSig = '';
+    applyConfig(committedBranches, 'revert');
+    renderBranches();
   }
 
   function renderAutocomplete() {
@@ -699,21 +860,17 @@ export function createQuickFilterController(deps) {
     if (input) input.value = '';
     clearAutocomplete();
     updateCommitButton();
-    if (changed) apply();   // U1 live: chip add schedules one search, then onResult auto-applies.
+    if (changed) schedulePreview();   // 커밋 모델: 칩은 미리보기 - 풀은 [커밋 (적용)] 이 바꾼다
   }
 
-  function commitPendingInputs() {
+  /** 입력칸에 친 글자를 칩으로. 풀은 건드리지 않는다(커밋 모델) - 다시 거는 것은 [커밋 (적용)] 이 한다
+   *  (빈 입력에서도 같은 조건으로 다시 건다 - 랜덤 풀이 소진된 뒤 빠져나갈 길, 사용자 제보 2026-08-31). */
+  function commitPendingInputs(options = {}) {
     const includeInput = getEl('tagFilterInput');
     const excludeInput = getEl('tagFilterExcludeInput');
     const includeText = includeInput ? includeInput.value.trim() : '';
     const excludeText = excludeInput ? excludeInput.value.trim() : '';
-    if (!includeText && !excludeText) {
-      // ⚠️ 여기서 그냥 돌아가던 것이 **버튼을 켜도 아무 일이 없던** 나머지 절반이다.
-      //    입력칸이 비어도 걸린 칩이 있으면 **같은 조건으로 다시 건다** - 랜덤 풀이
-      //    소진돼 "No matches" 가 된 뒤 빠져나갈 유일한 길이었다(사용자 제보).
-      if (hasFilter()) apply();
-      return;
-    }
+    if (!includeText && !excludeText) return false;
     let changed = false;
     if (includeText) changed = commitTags('include', includeText) || changed;
     if (excludeText) changed = commitTags('exclude', excludeText) || changed;
@@ -721,7 +878,8 @@ export function createQuickFilterController(deps) {
     if (excludeInput) excludeInput.value = '';
     clearAutocomplete();
     updateCommitButton();
-    if (changed) apply();
+    if (changed && options.preview !== false) schedulePreview();
+    return changed;
   }
 
   function bindAutocompleteInput(inputId, target) {
@@ -829,7 +987,16 @@ export function createQuickFilterController(deps) {
     if (!options.keepBranches) {
       stagedBranches = [];
       branchCounts.clear();
+      commitHistory.length = 0;
+      selectedSig = '';
     }
+    appliedBranches = [];
+    lastApplied = [];
+    committedBranches = [];
+    tempSig = '';
+    applyInFlight = null;
+    applyRequestId = '';
+    previewCounts = null;
     active = false;
     filterWasApplied = false;
     ratingCounts = null;
@@ -875,6 +1042,8 @@ export function createQuickFilterController(deps) {
   function invalidateAssignedState() {
     active = false;
     ratingCounts = null;
+    appliedBranches = [];
+    applyInFlight = null;
     invalidateSearchRequest();
     cancelPendingSearch();
     const assignBtn = getEl('tagFilterAssignBtn');
@@ -894,11 +1063,7 @@ export function createQuickFilterController(deps) {
     excludeTags.splice(index, 1);
     renderExcludeChips();
     updateCommitButton();
-    if (!hasFilter()) {
-      clearFilter({keepBranches: true});
-      return;
-    }
-    apply();   // U1: 남은 칩으로 즉시 재검색 → 자동 적용 (캐시 재조합, 스캔 0)
+    schedulePreview();
   }
 
   function removeIncludeTag(index) {
@@ -906,18 +1071,12 @@ export function createQuickFilterController(deps) {
     includeTags.splice(index, 1);
     renderIncludeChips();
     updateCommitButton();
-    if (!hasFilter()) {
-      clearFilter({keepBranches: true});
-      return;
-    }
-    apply();   // U1: 남은 칩으로 즉시 재검색 → 자동 적용 (캐시 재조합, 스캔 0)
+    schedulePreview();
   }
 
+  /** 바깥의 명시 적용(프롬프트 우클릭 · applyTagFilter) = 커밋. 패널 안의 편집은 미리보기다. */
   function apply() {
-    if (!hasFilter()) return;
-    save();
-    if (!isSocketOpen()) return;
-    scheduleSearch();
+    commit({takeText: false});
   }
 
   // ── 프롬프트 우클릭에서 들어오는 입구 (사용자 요청 2026-08-31) ────────────
@@ -926,21 +1085,26 @@ export function createQuickFilterController(deps) {
   //    두 곳이 만지면 화면(칩)과 실제(적용된 필터)가 갈린다.
 
   function snapshotTags() {
-    return {include: [...includeTags], exclude: [...excludeTags], active};
+    return {include: [...includeTags], exclude: [...excludeTags], active, history: commitHistory.length};
   }
 
-  /** 스냅샷으로 되돌리고 **다시 적용까지** 한다. 비어 있었으면 필터를 끈다. */
+  /** 스냅샷으로 되돌리고 **풀도** 그때로 돌린다. 스냅샷 뒤에 커밋이 있었으면 그 커밋들을 거둔다
+   *  (= 커밋 취소 - 병합 전 풀). 초안 칩도 그때로. */
   function restoreTags(snapshot) {
-    const include = normalizeTags(snapshot && snapshot.include);
-    const exclude = normalizeTags(snapshot && snapshot.exclude);
-    if (!include.length && !exclude.length) {
-      clearFilter();
-      return;
-    }
-    includeTags = include;
-    excludeTags = exclude;
+    includeTags = normalizeTags(snapshot && snapshot.include);
+    excludeTags = normalizeTags(snapshot && snapshot.exclude);
     renderChips();
     updateHighlight();
+    // 초안이 바뀌었다 - 적용(또는 떼기)이 끝나면 미리보기 수를 다시 센다.
+    previewCounts = null;
+    previewQueued = true;
+    const mark = snapshot && Number.isInteger(snapshot.history) ? snapshot.history : null;
+    if (mark !== null && commitHistory.length > mark) {
+      commitHistory.length = mark + 1;
+      undoCommit();
+      return;
+    }
+    if (snapshot && snapshot.active === false) { unassign(); return; }
     apply();
   }
 
@@ -961,9 +1125,11 @@ export function createQuickFilterController(deps) {
     return null;
   }
 
+  /** 프롬프트 우클릭 '제거' - 칩을 빼고 곧장 적용(명시 적용 = 커밋). */
   function removeTagAt(list, index) {
     if (String(list) === 'exclude') removeExcludeTag(index);
     else removeIncludeTag(index);
+    apply();
   }
 
   /** 목록에 태그를 더한다. 이미 있으면 false(부를 쪽이 안내한다). */
@@ -1010,21 +1176,25 @@ export function createQuickFilterController(deps) {
   function onPoolSwap() {
     ratingCounts = null;
     branchCounts.clear();
-    const hasTags = hasFilter();
+    previewCounts = null;
+    // 걸려 있던 조합을 새 풀에 다시 건다(초안이 아니다 - 커밋 모델).
+    const target = hasApplied() ? appliedBranches : lastApplied;
     // Clear the stale label explicitly — renderMatchedCount() no-ops while
     // ratingCounts is null, so it would otherwise leave the old '982,029 matched'.
     const countEl = getEl('tagFilterCount');
     if (countEl) {
-      countEl.textContent = hasTags ? '재적용 중…' : '';
+      countEl.textContent = target.length ? '재적용 중…' : '';
       countEl.classList.remove('has-result');
     }
-    if (hasTags) {
+    if (target.length) {
       // Pool-swap search_state releases the 'pool' lock immediately after this
       // callback. Raise the independent tag-filter lock synchronously, without
       // the normal 280 ms typing debounce, so Random never sees the unfiltered
       // replacement pool in that gap.
       save();
-      sendSearchNow();
+      applyConfig(target, 'reapply');
+    } else if (hasFilter()) {
+      schedulePreview({save: false});
     }
   }
 
@@ -1038,11 +1208,13 @@ export function createQuickFilterController(deps) {
   // (블러 오버레이 + [재적용]/[초기화])로 두어 사용자가 명시적으로 선택하게 한다(설계 사양).
   // stale 'N matched'(이전 풀 기준)도 함께 무효화한다.
   function onSearchReleased() {
-    const hasTags = hasFilter();
+    const hasTags = hasApplied() || lastApplied.length > 0;
     // 진짜 적용됐던 필터 + 칩이 있을 때만 '해제됨' 오버레이. 미적용 draft 칩엔 안 띄운다(MED).
     if (!filterWasApplied || !hasTags) { setReleasedOverlay(false); return false; }
     active = false;
     ratingCounts = null;
+    appliedBranches = [];
+    applyInFlight = null;
     // green 검색이 in-flight 태그필터 왕복 중 발생했다면 그 요청을 폐기 → 늦게 온 stale 응답이
     // request_id 불일치로 잠금을 ~90초 남기던 누수(Codex A1-2)를 막기 위해 'tagfilter' 잠금을
     // 명시적으로 해제한다(해제됨 상태는 잠금 스캔이 아니므로 안전; Set 이라 idempotent).
@@ -1064,14 +1236,13 @@ export function createQuickFilterController(deps) {
   }
 
   function reapplyReleased() {
-    // [재적용]: 현재 칩을 새 풀에 재적용. sendSearchNow 가 'tagfilter' 잠금을 걸고,
+    // [재적용]: 걸려 있던 조합(lastApplied)을 새 풀에 재적용. applyConfig 가 'tagfilter' 잠금을 걸고,
     // onResult→assign→assigned 가 active=true 로 재적용/재영속한다(스캔 전체 잠금은
     // 백엔드 announce + Fix 1 이 result~assigned 창까지 유지).
-    const hasTags = hasFilter();
-    if (!hasTags) { setReleasedOverlay(false); return; }
+    if (!lastApplied.length) { setReleasedOverlay(false); return; }
     save();
     // 소켓이 끊겨 실제 전송이 안 되면 오버레이를 유지한다 — "재적용됨"으로 거짓 표시 방지(LOW).
-    if (sendSearchNow()) setReleasedOverlay(false);
+    if (applyConfig(lastApplied, 'reapply')) setReleasedOverlay(false);
   }
 
   function resetReleased() {
@@ -1081,50 +1252,37 @@ export function createQuickFilterController(deps) {
   }
 
   function assign() {
-    send({type: 'tag_filter_assign', request_id: latestSearchRequestId});
+    send({type: 'tag_filter_assign', request_id: applyRequestId});
   }
 
+  /** 검색 결과. 적용 요청이면 assign 으로 넘기고(잠금 유지 = false), 미리보기면 수만 그린다. */
   function onResult(message) {
-    if (message.request_id && message.request_id !== latestSearchRequestId) {
-      return false;
-    }
-    const assignBtn = getEl('tagFilterAssignBtn');
-    ratingCounts = message.rating_counts || null;
+    const id = message.request_id || '';
     const perBranch = Array.isArray(message.branch_rating_counts) ? message.branch_rating_counts : [];
-    lastSentBranches.forEach((tags, i) => { if (perBranch[i]) branchCounts.set(branchSig(tags), perBranch[i]); });
-    const hasTags = !!(message.tags && message.tags.length) || !!(message.branches && message.branches.length);
-    if (hasTags && ratingCounts && Object.keys(ratingCounts).length) {
-      // 등급 인식 매치 수(활성 G/S/Q/E 합). 등급 토글에 라이브로 반응한다.
-      renderMatchedCount('matched');
-    } else {
-      const countEl = getEl('tagFilterCount');
-      if (countEl) {
-        if (message.count > 0) {
-          countEl.textContent = `${message.count.toLocaleString()} matched`;
-          countEl.classList.add('has-result');
-        } else {
-          countEl.textContent = hasTags ? 'No matches' : '';
-          countEl.classList.remove('has-result');
-        }
-      }
-    }
-    if (assignBtn) assignBtn.disabled = true;
-    pendingAssignOnRestore = false;
-    // U1 완전 라이브: 칩이 있으면 결과를 항상 즉시 적용(0매치 포함) → 활성 필터 == 현재 칩(일관성).
-    // 0매치 시 빈 필터가 적용되어 풀이 비지만, 칩을 고치면 즉시 복원된다. 칩이 없으면 미적용
-    // (빈칩 경로는 clearFilter가 처리).
-    // GAP A 수정: assign 을 쏘면 false 를 반환해 tagfilter 잠금을 유지한다 →
-    // result~assigned 커밋 왕복 동안 풀이 미필터/미잠금으로 노출되던 창을 닫는다
-    // (onStale 의 `!sendSearchNow()` 와 동일 계약; 잠금 해제는 onAssigned/onStale 이 소유).
-    if (hasTags) {
+    if (id && id === applyRequestId && applyInFlight) {
+      applyInFlight.branches.forEach((tags, i) => { if (perBranch[i]) branchCounts.set(branchSig(tags), perBranch[i]); });
       assign();
       return false;
     }
+    if (id && id === previewRequestId) {
+      previewCounts = message.rating_counts || null;
+      lastSentBranches.forEach((tags, i) => { if (perBranch[i]) branchCounts.set(branchSig(tags), perBranch[i]); });
+      renderBranches();
+      return true;
+    }
+    return legacyResult(message);
+  }
+
+  // 요청 번호가 없는 결과(tag_filter_clear 의 응답) - 풀도 수도 바꾸지 않는다(unassign 이 이미 비웠다).
+  // 번호가 있는데 모르는 것(늦게 온 옛 요청)은 false - 도는 적용의 잠금을 남긴다.
+  function legacyResult(message) {
+    if (message.request_id) return false;
+    pendingAssignOnRestore = false;
     return true;
   }
 
   function onAssigned(message) {
-    if (message.request_id && message.request_id !== latestSearchRequestId) {
+    if (message.request_id && message.request_id !== applyRequestId) {
       return false;
     }
     // A different tab can commit a newer assignment while this request's
@@ -1133,6 +1291,11 @@ export function createQuickFilterController(deps) {
     if (!noteAuthoritativeRevision(message.tag_filter_revision)) return true;
     active = true;
     filterWasApplied = true;
+    if (applyInFlight) {
+      appliedBranches = cloneBranches(applyInFlight.branches);
+      lastApplied = cloneBranches(appliedBranches);
+    }
+    applyInFlight = null;
     if (message.rating_counts) ratingCounts = message.rating_counts;
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn) {
@@ -1156,11 +1319,13 @@ export function createQuickFilterController(deps) {
       deps.updateSearchCount(filteredCount(ratingCounts, deps.getRatingState()));
     }
     // (토스트 제거 — 라이브 자동 적용이라 매번 토스트는 소음. 행수는 RATING 옆 카운트 라벨로 표시.)
+    renderBranches();
+    if (previewQueued) { previewQueued = false; sendPreviewNow(); }
     return true;
   }
 
   function onStale(message) {
-    if (message.request_id && message.request_id !== latestSearchRequestId) {
+    if (message.request_id && message.request_id !== applyRequestId) {
       return false;
     }
     const countEl = getEl('tagFilterCount');
@@ -1171,7 +1336,8 @@ export function createQuickFilterController(deps) {
     // Pool replacement or another tab may have superseded the single pending
     // assignment. Re-run against the now-current pool. Returning false keeps
     // the existing lock source alive while the replacement request is in flight.
-    return !sendSearchNow();
+    if (!applyInFlight) return true;
+    return !applyConfig(applyInFlight.branches, applyInFlight.mode);
   }
 
   function onUpdate(message) {
@@ -1222,7 +1388,8 @@ export function createQuickFilterController(deps) {
     // (이게 "27,301 matched"가 잠깐 떴다 사라지던 원인: 매 search_state 마다 라벨을 비웠음.)
     const sameTags = JSON.stringify([...includeTags].sort()) === JSON.stringify([...pref.tag_filter].sort())
       && JSON.stringify([...excludeTags].sort()) === JSON.stringify([...pref.tag_filter_exclude].sort())
-      && JSON.stringify(stagedBranches) === JSON.stringify(pref.tag_filter_branches);
+      && JSON.stringify(stagedBranches) === JSON.stringify(pref.tag_filter_branches)
+      && JSON.stringify(appliedBranches) === JSON.stringify(pref.tag_filter_active ? pref.tag_filter_applied_branches : []);
 
     setActiveRatings(pref.ratings);
     // ⚠️ 칩 배열이 통째로 바뀌면 열린 메뉴는 닫는다. 메뉴는 **인덱스**로 칩을 가리키는데,
@@ -1234,6 +1401,14 @@ export function createQuickFilterController(deps) {
     excludeTags = [...pref.tag_filter_exclude];
     stagedBranches = pref.tag_filter_branches.map(branch => ({tags: [...branch.tags], enabled: branch.enabled}));
     active = pref.tag_filter_active;
+    // 지금 풀에 걸린 조합. 옛 저장값(적용 조합 없이 칩만 활성)은 칩 한 벌이 걸린 것이다.
+    if (!applyInFlight) {
+      const legacy = pref.tag_filter.length || pref.tag_filter_exclude.length
+        ? [[...pref.tag_filter, ...pref.tag_filter_exclude.map(tag => '-' + tag)]] : [];
+      appliedBranches = active ? cloneBranches(pref.tag_filter_applied_branches.length ? pref.tag_filter_applied_branches : legacy) : [];
+      if (appliedBranches.length) lastApplied = cloneBranches(appliedBranches);
+      if (!tempSig) committedBranches = cloneBranches(appliedBranches);
+    }
     if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효
     renderIncludeChips();
     renderExcludeChips();
@@ -1269,10 +1444,11 @@ export function createQuickFilterController(deps) {
 
     if (options.send !== false && isSocketOpen()) {
       send({type: 'set_active_ratings', ratings: pref.ratings});
-      if (hasFilter()) {
-        pendingAssignOnRestore = active;
-        scheduleSearch();
-      }
+      // 복원: 걸려 있던 **조합**을 다시 건다(초안이 아니다). 초안은 미리보기만.
+      if (active && hasApplied()) applyConfig(appliedBranches, 'reapply');
+      else if (hasFilter()) schedulePreview({save: false});
+    } else if (!sameTags && hasFilter()) {
+      schedulePreview({save: false});
     }
     if (options.persistLocal) savePreferences(pref, storage);
     restoreFocusedInputState(focusedInputState);
@@ -1408,8 +1584,7 @@ export function createQuickFilterController(deps) {
     hidePresetTip();
     const el = getEl('tagFilterPresets');
     if (el) el.setAttribute('hidden', '');
-    if (!includeTags.length && !excludeTags.length) { clearFilter(); return; }
-    apply();   // 라이브 자동 적용 (등급은 건드리지 않음 — 프리셋은 태그만)
+    schedulePreview();   // 초안으로 불러온다 - 풀은 [커밋 (적용)] 이 바꾼다(등급은 안 건드림 — 프리셋은 태그만)
   }
 
   function deletePresetAt(i) {
@@ -1437,6 +1612,12 @@ export function createQuickFilterController(deps) {
     setChipExact,
     stageBranch,
     clearList,
+    commit,
+    undoCommit,
+    tempApplySelected,
+    revertTemp,
+    selectRow,
+    getAppliedBranches: () => cloneBranches(appliedBranches),
     branchesPayload,
     closeChipMenu,
     apply,

@@ -690,7 +690,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-qstage2')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-qcommit')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -9674,8 +9674,9 @@ async function runPromptTagFilterAction(action, tag) {
     {
       const on = action === 'exact-on';
       title = `[${label}] 퍼펙트 매칭 ${on ? '적용' : '취소'}`;
-      // ⚠️ `setChipExact` 는 자기가 적용까지 한다 - 여기서 또 부르면 두 번 돈다.
-      quickFilter.setChipExact(found.list, found.index, on);
+      // ⚠️ `setChipExact` 는 넷째 인자가 true 면 자기가 적용까지 한다 - 여기서 또 부르면 두 번 돈다.
+      //    (패널의 칩 메뉴는 초안 = 미리보기, 여기 프롬프트 우클릭은 곧장 적용 - 커밋 모델 2026-09-25)
+      quickFilter.setChipExact(found.list, found.index, on, true);
     }
   }
 

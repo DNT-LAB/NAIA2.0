@@ -148,16 +148,24 @@ export function createArtistGroupWindow({
     void fillImages(items);
   }
 
+  // 서버의 describe 는 한 번에 2,000명까지만 답한다 - 넘는 목록(관심 작가 3천 명 등)은
+  // 뒤쪽이 답 없이 '그림 없음' 으로 굳었다. 나눠서 묻는다.
+  const DESCRIBE_CHUNK = 1000;
+
   async function fillImages(items) {
     const missing = items.map(i => i.artist).filter(a => !imageCache.has(a));
     if (!missing.length) return;
-    let described = {};
-    try { described = await describe(missing) || {}; } catch { described = {}; }
     let changed = false;
-    for (const artist of missing) {
-      const url = described[artist]?.image_url || '';
-      imageCache.set(artist, url);
-      if (url) changed = true;
+    for (let start = 0; start < missing.length; start += DESCRIBE_CHUNK) {
+      const chunk = missing.slice(start, start + DESCRIBE_CHUNK);
+      let described;
+      // ⚠️ 실패한 조각은 기억하지 않는다 - '그림 없음' 으로 굳히면 다시 묻지 않는다.
+      try { described = await describe(chunk) || {}; } catch { continue; }
+      for (const artist of chunk) {
+        const url = described[artist]?.image_url || '';
+        imageCache.set(artist, url);
+        if (url) changed = true;
+      }
     }
     // ⚠️ 끄는 중에 다시 그려도 끌기는 산다(중개자가 값으로 들고 있다). 그래도 손 밑의
     //    카드가 바뀌면 어지러우니 끄는 중이면 한 박자 미룬다.

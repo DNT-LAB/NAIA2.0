@@ -2676,7 +2676,7 @@ export function createArtistThumbController({
     if (groupsApi) return groupsApi;
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-favgroup'),
+      import('./artistGroupWindow.mjs?v=20260926-agwscroll'),
       import('./dragBroker.mjs?v=20260919-strip'),
     ]);
     const store = createArtistGroupsStore({fetch});

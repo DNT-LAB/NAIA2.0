@@ -904,9 +904,8 @@ def normalize_tag_filter_branches(value: Any) -> list[list[str]]:
 
 # 분기 스테이징 상한(사용자 칩 조작이 만드는 목록 - 넉넉히, 폭주만 막는다).
 # ⚠️ UI 가 보낼 수 있는 것보다 **넉넉해야** 한다 - 담기 16 + 지금 검색 1 = 17 분기를 16 에서 잘라
-#    마지막 조건이 말없이 빠졌다(병합 전 리뷰 #7). 칩 수도 UI 에 상한이 없다.
-TAG_FILTER_MAX_BRANCHES = 32
-TAG_FILTER_MAX_BRANCH_TAGS = 512
+#    마지막 조건이 말없이 빠졌다(병합 전 리뷰 #7). 상한은 영속과 **같은 값**이어야 한다(재리뷰 F1) - 거기서 가져온다.
+from core.headless_search_state_service import TAG_FILTER_MAX_BRANCHES, TAG_FILTER_MAX_BRANCH_TAGS  # noqa: E402
 
 
 def tag_filter_search(context: WebSessionContext, tags: list[Any], branches: Any = None, *,

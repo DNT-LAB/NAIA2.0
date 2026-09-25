@@ -33,6 +33,13 @@ def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
     return 10**9, path.name
 
 
+# Tag Filter 분기(스테이징·걸린 조합) 상한 - **한 곳**에서만 정한다. 검색(search_runtime)도 이 값을 쓴다.
+# ⚠️ 검색만 넓히고 영속을 16/64 로 두어, 17 번째 분기 · 65 번째 칩이 처음엔 걸리고 재시작·풀 교체 뒤
+#    말없이 사라졌다(병합 전 재리뷰 F1). UI 가 보낼 수 있는 것(담기 16 + 지금 검색 1)보다 넉넉해야 한다.
+TAG_FILTER_MAX_BRANCHES = 32
+TAG_FILTER_MAX_BRANCH_TAGS = 512
+
+
 class HeadlessSearchStateService:
     def __init__(self, context: Any):
         self.context = context
@@ -143,7 +150,7 @@ class HeadlessSearchStateService:
         return normalized
 
     @staticmethod
-    def normalize_token_list(value: Any, limit: int = 64) -> list[str]:
+    def normalize_token_list(value: Any, limit: int = TAG_FILTER_MAX_BRANCH_TAGS) -> list[str]:
         """칩 토큰(`-제외`·`*정확` 표기 그대로) 목록 - 순서 유지, 중복·빈 것 제거."""
         if not isinstance(value, (list, tuple)):
             return []
@@ -155,7 +162,7 @@ class HeadlessSearchStateService:
         return out
 
     @classmethod
-    def normalize_branch_list(cls, value: Any, limit: int = 16) -> list[dict[str, Any]]:
+    def normalize_branch_list(cls, value: Any, limit: int = TAG_FILTER_MAX_BRANCHES) -> list[dict[str, Any]]:
         """분기 목록 [{tags, enabled}] - 칩 목록만 온 것도 받는다(enabled=True). 빈 분기는 버린다."""
         if not isinstance(value, (list, tuple)):
             return []

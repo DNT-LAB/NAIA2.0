@@ -569,6 +569,14 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
             "request_id": "",
             "rating_counts": dict(result.get("rating_counts") or {}),
         }
+        # 적용 순간의 불변 집합 - commit 과 같은 모양(저장이 뽑아 쓴 행을 포함하고, 소진 뒤 같은 조건으로 되채운다).
+        context.active_tag_filter_snapshot = {
+            "ids": set(ids),
+            "tags": [str(tag) for tag in result.get("tags", [])],
+            "count": int(result.get("count") or 0),
+            "rating_counts": dict(result.get("rating_counts") or {}),
+            "request_id": "",
+        }
         mark_tag_filter_changed(context)
         apply_search_runtime_filters(context)
     return True
@@ -895,17 +903,26 @@ def normalize_tag_filter_branches(value: Any) -> list[list[str]]:
 
 
 # 분기 스테이징 상한(사용자 칩 조작이 만드는 목록 - 넉넉히, 폭주만 막는다).
-TAG_FILTER_MAX_BRANCHES = 16
-TAG_FILTER_MAX_BRANCH_TAGS = 64
+# ⚠️ UI 가 보낼 수 있는 것보다 **넉넉해야** 한다 - 담기 16 + 지금 검색 1 = 17 분기를 16 에서 잘라
+#    마지막 조건이 말없이 빠졌다(병합 전 리뷰 #7). 칩 수도 UI 에 상한이 없다.
+TAG_FILTER_MAX_BRANCHES = 32
+TAG_FILTER_MAX_BRANCH_TAGS = 512
 
 
-def tag_filter_search(context: WebSessionContext, tags: list[Any], branches: Any = None) -> dict[str, Any]:
+def tag_filter_search(context: WebSessionContext, tags: list[Any], branches: Any = None, *,
+                      announce: bool = True) -> dict[str, Any]:
     """칩 검색. ``branches`` 가 있으면 **분기 스테이징**(계획서 P3): 결과 = 분기마다
-    (포함 AND · 제외 OR 빼기)를 구한 뒤 분기끼리 **OR**. 없으면 예전 그대로 ``tags`` 한 벌."""
-    return _tag_filter_search_impl(context, tags, normalize_tag_filter_branches(branches))
+    (포함 AND · 제외 OR 빼기)를 구한 뒤 분기끼리 **OR**. 없으면 예전 그대로 ``tags`` 한 벌.
+
+    ``announce=False`` = 미리보기(Tag Filter 커밋 모델 - 수만 세고 assign 하지 않는다). 큰 풀의
+    '필터 단계' 를 알리지 않는다 - 알리면 프론트가 단계가 끝난 뒤 search_state 를 기다리며 검색창·
+    Random 을 잠그는데, 미리보기는 assign 이 없어 그 search_state 가 오지 않는다(90·180초 안전
+    타이머까지 잠겼다 - 병합 전 리뷰 #1)."""
+    return _tag_filter_search_impl(context, tags, normalize_tag_filter_branches(branches), announce=announce)
 
 
-def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any], branches: list[list[str]] | None = None) -> dict[str, Any]:
+def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any], branches: list[list[str]] | None = None,
+                            *, announce: bool = True) -> dict[str, Any]:
     # Capture snapshot identity and its monotonic generation under the same lock.
     # The expensive scan runs lock-free, but result/assign must prove both values
     # are still current before publishing or committing the matched frame.
@@ -943,7 +960,7 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any], branche
         heavy = len(snapshot) >= _POOL_LOADING_THRESHOLD
     except Exception:
         heavy = False
-    if not heavy:
+    if not heavy or not announce:
         result = _run_tag_filter(context, snapshot, tags, heartbeat=None, branches=branches)
         result["_source_snapshot"] = snapshot
         result["_pool_generation"] = source_generation
@@ -1205,6 +1222,12 @@ def export_condition_frame(context: WebSessionContext):
             source = search_base_frame(context)
         ratings = context.get_active_ratings()
         tag_ids = getattr(context, "active_tag_filter_ids", None)
+        # ⚠️ active_tag_filter_ids 는 Random 이 뽑을 때마다 **줄어든다**(_consume_active_tag_filter_row).
+        #    그것으로 거르면 뽑아 쓴 행이 저장에서 빠지고, 다 쓰면 저장할 행이 없다(병합 전 리뷰 #2 - 팝업의
+        #    "뽑아 쓴 행도 포함" 과 달랐다). 적용 순간의 불변 집합(스냅샷)을 쓴다.
+        applied = getattr(context, "active_tag_filter_snapshot", None)
+        if tag_ids is not None and isinstance(applied, dict) and applied.get("ids"):
+            tag_ids = set(applied["ids"])
         active = getattr(context, "active_tag_filter", None) or {}
         parent = pool_provenance(context)
     frame = filter_source_frame(source, ratings=ratings, tag_ids=tag_ids)

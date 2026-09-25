@@ -254,6 +254,12 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
         state["current"] = apply_depth_filters(state.get("original"), command)
     elif action == "assign":
         current = state.get("current")
+        # ⚠️ 0행은 할당하지 않는다 - 빈 풀은 '풀 없음' 으로 읽혀 합치기·저장·Tag Filter 가 원본(master_base)으로
+        #    되돌아갔다(병합 전 리뷰 #8). 화면이 먼저 막고, 여기는 뒷문.
+        if current is not None and getattr(current, "empty", True):
+            payload = depth_payload(context)
+            payload["notice"] = "empty_assign"
+            return payload, None
         if current is not None:
             with search_pool_state_guard(context):
                 reset_active_tag_filter_assignment(context)

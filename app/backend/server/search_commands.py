@@ -225,7 +225,9 @@ async def handle_search_command(
         branches = command.get("branches") if isinstance(command.get("branches"), list) else None
         request_id = str(command.get("request_id") or "")
         client_key = str(command.get("_tag_filter_client_key") or "")
-        result = await run_in_thread(tag_filter_search, context, tags, branches)
+        # 미리보기(Tag Filter 커밋 모델)는 큰 풀의 '필터 단계' 를 알리지 않는다 - assign 이 없어 잠금이 안 풀린다.
+        result = await run_in_thread(tag_filter_search, context, tags, branches,
+                                     announce=not bool(command.get("preview")))
         # B4: 검색이 백그라운드 태스크(websocket_session)라 완료 시점에 더 새로운 검색이 시작됐을 수
         # 있다(to_thread 는 취소로 안 멈춤). superseded(seq 불일치) 면 pending 미기록·미전송으로 폐기
         # — 최신 seq 만 통과해 stale 결과가 pending 을 덮어쓰는 reorder 해저드를 막는다.

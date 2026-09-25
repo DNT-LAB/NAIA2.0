@@ -8,6 +8,7 @@
 // (each staged item labelled by its 검색|제외 pair, Dev0714 model) and a
 // merge/export island.
 export function createRefinePanel({
+  showToast,
   document,
   container,
   escHtml,
@@ -127,6 +128,10 @@ export function createRefinePanel({
     }
 
     maybeInvalidateSample(message.count || 0);
+    lastCount = Number(message.count) || 0;
+    if (message.notice === 'empty_assign' && typeof showToast === 'function') {
+      showToast('결과가 0행이라 메인에 할당하지 않았습니다', 'warning');
+    }
 
     // Build the controls once; afterwards counts + staging are patched in place.
     if (container.querySelector('#depthQuery')) {
@@ -334,7 +339,14 @@ export function createRefinePanel({
     send({ type: 'depth_action', action: 'filter', query, exclude, ratings, filters });
   }
 
+  let lastCount = null;           // 마지막 depth_state 의 결과 행 수
+
   function depthAction(action) {
+    // 0행은 메인에 할당하지 않는다 - 빈 풀은 '풀 없음' 으로 읽혀 합치기·저장이 원본으로 되돌아갔다(병합 전 리뷰 #8).
+    if (action === 'assign' && lastCount === 0) {
+      if (typeof showToast === 'function') showToast('결과가 0행이라 메인에 할당하지 않았습니다', 'warning');
+      return;
+    }
     send({ type: 'depth_action', action });
   }
 

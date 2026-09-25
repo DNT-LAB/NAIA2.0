@@ -690,7 +690,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-presetbak')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-rvfix')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -2614,7 +2614,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clea
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rs')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rvfix')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -2625,6 +2625,7 @@ const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rs')
       enterMode: refineEnterMode,
       exitMode: refineExitMode,
       bindTagAssist,
+      showToast,
     });
   })
   .catch(error => {

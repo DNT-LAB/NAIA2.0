@@ -136,8 +136,10 @@ export function normalizePreferences(raw) {
     tag_filter_exclude: exclude,
     tag_filter_branches: branches,
     tag_filter_applied_branches: applied,
+    // ⚠️ 커밋 모델: 초안(칩)을 비워도 풀은 걸린 채다 - 걸린 조합도 활성의 근거다. 초안만 보면 칩 Clear 뒤
+    //    화면이 '해제' 로 보이고 active=false 까지 저장했다(병합 전 리뷰 #3).
     tag_filter_active: !!raw.tag_filter_active
-      && (include.length > 0 || exclude.length > 0 || branches.some(branch => branch.enabled)),
+      && (include.length > 0 || exclude.length > 0 || branches.some(branch => branch.enabled) || applied.length > 0),
   };
 }
 
@@ -710,7 +712,7 @@ export function createQuickFilterController(deps) {
     if (!isSocketOpen()) return false;
     lastSentBranches = branches;
     previewRequestId = nextSearchRequestId();
-    send({type: 'tag_filter_search', tags: payload(), branches, request_id: previewRequestId});
+    send({type: 'tag_filter_search', tags: payload(), branches, request_id: previewRequestId, preview: true});
     return true;
   }
 
@@ -742,6 +744,9 @@ export function createQuickFilterController(deps) {
     applyInFlight = null;
     applyRequestId = '';
     appliedBranches = [];
+    // ⚠️ 사용자가 **뗀** 것이다(커밋 취소 · 빈 커밋 · 되돌리기) - 풀 교체·라이브 검색이 풀어 버린 것과 다르다.
+    //    남겨 두면 다음 parquet 불러오기·합치기에서 onPoolSwap 이 거둔 조합을 되살렸다(병합 전 리뷰 #4).
+    lastApplied = [];
     active = false;
     ratingCounts = null;
     // ⚠️ 초안을 **먼저** 저장하고 뗀다. 떼기의 응답(search_state)이 서버의 초안을 싣고 돌아와 화면 칩을
@@ -1292,7 +1297,16 @@ export function createQuickFilterController(deps) {
     // A different tab can commit a newer assignment while this request's
     // websocket send is delayed. Unlock this completed local request, but never
     // repaint the shared UI with its older authoritative state.
-    if (!noteAuthoritativeRevision(message.tag_filter_revision)) return true;
+    if (!noteAuthoritativeRevision(message.tag_filter_revision)) {
+      // 화면은 고치지 않지만(더 새 상태가 이미 왔다) **내 적용 요청은 끝났다** - 안 치우면 applyInFlight 가
+      // 남아 미리보기가 영영 미뤄졌다(병합 전 리뷰 #6). 요청 번호는 남긴다 - 같은 요청의 더 새 revision 응답은
+      // 받아야 한다(계약 검사 tests/_quick_filter_contract_check.mjs).
+      if (message.request_id && message.request_id === applyRequestId) {
+        applyInFlight = null;
+        if (previewQueued) { previewQueued = false; sendPreviewNow(); }
+      }
+      return true;
+    }
     active = true;
     filterWasApplied = true;
     if (applyInFlight) {

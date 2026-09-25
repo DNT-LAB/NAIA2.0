@@ -314,6 +314,7 @@ class Merged:
     name: str
     name_ko: str
     log: list[str]
+    sentence: str = ""              # 다듬기 도구의 장면 문장(core/assist_refine) — 메인 끝에 붙는다
 
     def ordered(self, count: Callable[[str], int]) -> list[str]:
         """이벤트 맵에 꽂을 순서: 층 순서 -> 각 층 안에서 게시물 많은 순(깊이 확보, 사용자 지정)."""
@@ -607,9 +608,14 @@ PERSON_TAGS = {
 }
 
 
+def _with_sentence(main: str, sentence: str) -> str:
+    """메인 = 태그들, 문장 — Boost 처럼 태그 뒤에 자연어(사용자 제안 09-25). 문장이 없으면 태그만."""
+    return f"{main}, {sentence}" if main and sentence else (main or sentence)
+
+
 def compose(merged: Merged, *, pins: list[str], leftovers: list[str], actions: list[str], partition: str,
             api_mode: str) -> dict[str, Any]:
-    """최종 프롬프트. NAI 는 메인 + 캐릭터 칸(이름·그 인물 속성·source#/target#), 그 밖은 한 줄."""
+    """최종 프롬프트. NAI 는 메인 + 캐릭터 칸(이름·그 인물 속성·source#/target#), 그 밖은 한 줄. 다듬기 문장은 메인 끝."""
     people = PERSON_TAGS.get(partition, [])
     char_attrs = {a for c in merged.characters for a in c.attrs}
     scene = [t for t in dict.fromkeys(pins + actions + leftovers) if t not in char_attrs]
@@ -623,12 +629,12 @@ def compose(merged: Merged, *, pins: list[str], leftovers: list[str], actions: l
                 if c.tag == dst:
                     parts.append(f"target#{act}")
             chars.append({"prompt": ", ".join(dict.fromkeys(parts)), "ko": c.ko, "alts": c.alts})
-        return {"main": ", ".join(people + scene), "characters": chars}
+        return {"main": _with_sentence(", ".join(people + scene), merged.sentence), "characters": chars}
     names = [c.tag for c in merged.characters]
     attrs = [a for c in merged.characters for a in c.attrs]
     rel = [act for _s, act, _d in merged.relations]
     line = list(dict.fromkeys(people + names + scene + attrs + rel))
-    return {"main": ", ".join(line), "characters": []}
+    return {"main": _with_sentence(", ".join(line), merged.sentence), "characters": []}
 
 
 def make_recap(merged: Merged, *, partition: str, rating: str) -> dict[str, Any]:

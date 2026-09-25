@@ -49,7 +49,7 @@ function clampCount(value, fallback) {
 
 export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLink } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
-  let autoBox = null, literalBox = null, banner = null, body = null, sendBtn = null, picker = null;
+  let autoBox = null, literalBox = null, refineBox = null, banner = null, body = null, sendBtn = null, picker = null;
   let open = false;
   let heightCap = 0;
 
@@ -57,6 +57,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
   let rating = RATINGS.some(r => r.id === prefs.rating) ? prefs.rating : 'g';
   let autoGenerate = !!prefs.autoGenerate;
   let literalFirst = !!prefs.literalFirst;      // 직역 도구(사용자 제안 09-25) - 견주는 동안 기본 꺼짐
+  let refineOn = prefs.refine !== false;        // 다듬기 도구(사용자 제안 09-25) - 태그 고치기 + 장면 문장, 기본 켬
   let personsMode = prefs.personsMode === 'manual' ? 'manual' : 'auto';
   let girls = clampCount(prefs.girls, 1);
   let boys = clampCount(prefs.boys, 0);
@@ -81,7 +82,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
   }
 
   function persistPrefs() {
-    savePrefs({ rating, autoGenerate, literalFirst, personsMode, girls, boys });
+    savePrefs({ rating, autoGenerate, literalFirst, refine: refineOn, personsMode, girls, boys });
   }
 
   async function postJson(path, payload, { allowError = false } = {}) {
@@ -133,6 +134,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
           <input type="checkbox" data-as-auto> 생성해 줘 → 바로 생성</label>
         <label class="as-auto" title="요청을 먼저 과장 없이 영어로 한 번 옮기고(E2B 직역 도구) 그 영문으로 태그를 찾습니다 - 시험 중(기본 꺼짐)">
           <input type="checkbox" data-as-literal> 직역 먼저</label>
+        <label class="as-auto" title="원문과 태그를 함께 E2B 에 보여 틀린 태그는 빼고 빠진 것은 더하고, 장면 문장 하나를 메인 끝에 붙입니다(기본 켬)">
+          <input type="checkbox" data-as-refine> 다듬기</label>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
       <div class="as-banner" data-as-banner hidden></div>
@@ -147,12 +150,19 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     ratingBar = overlay.querySelector('[data-as-rating]');
     autoBox = overlay.querySelector('[data-as-auto]');
     literalBox = overlay.querySelector('[data-as-literal]');
+    refineBox = overlay.querySelector('[data-as-refine]');
     banner = overlay.querySelector('[data-as-banner]');
     body = overlay.querySelector('[data-as-body]');
     sendBtn = overlay.querySelector('[data-as-send]');
 
     autoBox.checked = autoGenerate;
     autoBox.addEventListener('change', () => { autoGenerate = autoBox.checked; persistPrefs(); });
+    refineBox.checked = refineOn;
+    refineBox.addEventListener('change', () => {
+      refineOn = refineBox.checked;
+      persistPrefs();
+      if (result && !busy) void ask();
+    });
     literalBox.checked = literalFirst;
     literalBox.addEventListener('change', () => {
       literalFirst = literalBox.checked;
@@ -553,7 +563,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     paintBusy();
     const payload = {
       text, rating, persons: personsPayload(), previous: recap,
-      names: Object.fromEntries(choices), not_names: [...notNames], literal: literalFirst,
+      names: Object.fromEntries(choices), not_names: [...notNames], literal: literalFirst, refine: refineOn,
     };
     const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
     if (mode) payload.api_mode = mode;
@@ -632,6 +642,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     if (pool.pins) meta.push(`핀 ${esc(String(pool.pins).split(',').join(', '))}`);
     if (r.leftovers?.length) meta.push(`못 꽂은 태그 ${esc(r.leftovers.join(', '))}`);
     if (r.actions?.length) meta.push(`랜덤 행동 ${esc(r.actions.join(', '))}`);
+    if (r.refine && (r.refine.removed?.length || r.refine.added?.length)) {
+      meta.push(`다듬기 ${[...(r.refine.removed || []).map(t => `−${esc(t)}`), ...(r.refine.added || []).map(t => `+${esc(t)}`)].join(' ')}`);
+    }
     const notes = [];
     if (r.suggested_names?.length) {
       notes.push(`<div class="as-note">캐릭터로 넣지 않은 이름: ${r.suggested_names.map(s => `<b>${esc(s.ko)}</b>`).join(', ')}

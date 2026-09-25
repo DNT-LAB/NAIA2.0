@@ -750,6 +750,7 @@
         "core/assist_compose.py",
         "core/assist_kiwi.py",
         "core/assist_korean.py",
+        "core/assist_refine.py",
         "core/assist_senses.py",
         "core/assist_translate.py",
         "core/assist_v2.py",

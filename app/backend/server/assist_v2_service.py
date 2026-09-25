@@ -327,8 +327,10 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
             api_mode = str(getattr(context, "current_api_mode", "NAI") or "NAI")
     # 직역 도구(사용자 제안 09-25) — 켜면 요청을 과장 없이 영어로 한 번 옮겨 경로 호출에 넘긴다. 벤치로 견주는 동안 기본은 끔
     literal = bool(payload.get("literal", False))
+    # 다듬기 도구(사용자 제안 09-25) — 원문 + 태그로 고치고 보강하고 장면 문장 하나(메인 = 태그들, 문장). 기본 켬
+    refine = bool(payload.get("refine", True))
     return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
-            "choices": choices, "not_names": not_names, "literal": literal}
+            "choices": choices, "not_names": not_names, "literal": literal, "refine": refine}
 
 
 def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -389,6 +391,65 @@ def _literal(context: Any, text: str) -> tuple[str | None, dict[str, Any]]:
             cache.pop(next(iter(cache)))
         cache[key] = en
     return en, info
+
+
+def _grounded_tags(context: Any, layer: Any, text: str) -> set[str]:
+    """이 요청의 낱말과 한국어 사전(키워드 원형 색인)이 이어 주는 태그 — 고르기 후보와 같은 규칙(korean_matches).
+    다듬기의 빼기 보호 · 더하기 허용 판정에 쓴다."""
+    from core import assist_candidates as cand
+    from core.assist_korean import clean_text
+
+    toks = layer.raw_tokens(clean_text(text))
+    nouns = [f for f, t in toks if t in ("NNG", "NNP")]
+    return {tag for tag, *_ in cand.korean_matches(_lemma_index(context, layer), cand.lemmas_of(toks),
+                                                   layer.vocab.lookup, strict=False, nouns=nouns,
+                                                   near=cand.neighbours(toks))}
+
+
+def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: Any, literal: str | None,
+            layer: Any, ka: Any) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """다듬기 도구(core/assist_refine) — 원문 + 지금 태그를 E2B 에 한 번(문법 잠금 · 온도 0). 모델의 답은 제안이다.
+    한국어 사전으로 확인한다(진짜 E2B 가 브이 문장에서 맞는 v 를 빼고 finger heart 를 더했다, 09-25):
+    - 빼기: 지금 태그 안에서만, 사전이 요청과 이어 주는 태그 · 한국어 층 규칙 태그는 빼지 않는다.
+    - 더하기: 태그 이름 그대로이고 사전이 요청과 이어 주는 것만(잡동사니 · 인원 · 제외 칸 · 등급 게이트도 지나야).
+    - 문장은 메인 끝에(compose) — 분위기는 문장이 맡는다. 실패하면 다듬지 않고 간다."""
+    from core import assist_refine as ar
+    from core.assist_v2 import _junk_tag, drop_tags, exact_english
+
+    tags = merged.all_tags()
+    if not tags:
+        return None, {}
+    reply, info = _chat(context, ar.REFINE_SYSTEM, ar.refine_message(req["text"], tags, literal), ar.refine_grammar(),
+                        max_tokens=160)
+    got = ar.parse_refine(reply) if reply is not None else None
+    if got is None:
+        return None, info
+    grounded = _grounded_tags(context, layer, req["text"])
+    protected = grounded | set(ka.specific) | set(ka.verb_tags)
+    # 자기 일관성: 모델이 제 문장에서 말한 태그는 빼지 않는다(밤바다 -> night 를 빼며 'at night')
+    removed = [t for t in got.remove if t in tags and t not in protected and not ar.mentions(t, got.sentence)]
+    kept = [t for t in got.remove if t in tags and t not in removed]
+    drop_tags(merged, {t: 0.0 for t in removed})
+    gate = RATING_GATE.get(req["rating"])              # Q · E 는 게이트가 없다
+    added: list[str] = []
+    refused: list[str] = []
+    for tag in got.add:
+        name = exact_english(tag, vocab)
+        if (not name or _junk_tag(name) or vocab.role(name) == "population" or name in merged.all_tags()
+                or name in merged.exclude or name in added or name in removed):
+            continue
+        if name not in grounded or not ar.mentions(name, got.sentence):
+            refused.append(name)            # 사전이 요청과 안 이어 주거나(finger heart) 제 문장에 없는 것(close-up)
+            continue
+        s = share(name) if share and gate is not None else None
+        if s is not None and s < gate:
+            continue
+        added.append(name)
+    merged.tiers[1].extend(added)
+    merged.sentence = got.sentence
+    merged.log.append(f"refine:-{','.join(removed) or '없음'}+{','.join(added) or '없음'}"
+                      + (f" 안뺌:{','.join(kept)}" if kept else "") + (f" 안더함:{','.join(refused)}" if refused else ""))
+    return {"removed": removed, "added": added, "sentence": got.sentence}, info
 
 
 def _call_model(context: Any, text: str, previous: dict[str, Any] | None,
@@ -695,6 +756,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     dropped = off_rating(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
                          + [r[1] for r in merged.relations], share, RATING_GATE[req["rating"]]) if share else {}
     drop_tags(merged, dropped)
+    refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka)
+                           if req["refine"] and merged.task == "scene" else (None, {}))
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 인물 = 고른 캐릭터(후보 전체 — 화면이 목록을 그린다) + 받지 못한 선택(chosen=false — 화면이 그 선택을 푼다)
@@ -704,6 +767,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         "relations": [{"source": s, "action": a, "target": d} for s, a, d in merged.relations],
         "model": model,
         "literal": literal,
+        "refine": refine,
         "trace": {"korean": ka.notes, "merge": merged.log,
                   "route": {k: v for k, v in route.items() if v not in ("", [], None)},
                   "choose": choose_state},
@@ -717,7 +781,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         out.update(_lane(context, layer, merged, route, req, ka.names))
     else:
         out["guide"] = GUIDE
-    out["timing"] = {"korean_ms": korean_ms, "literal_s": literal_info.get("elapsed"), "model_s": model.get("elapsed"),
+    out["timing"] = {"korean_ms": korean_ms, "literal_s": literal_info.get("elapsed"),
+                     "refine_s": refine_info.get("elapsed"), "model_s": model.get("elapsed"),
                      "choose_s": ((choose_state or {}).get("model") or {}).get("elapsed"),
                      "choose_prep_ms": (choose_state or {}).get("prep_ms"), "sense_ms": sense_ms,
                      "search_ms": round((time.perf_counter() - t) * 1000, 1),

@@ -1624,7 +1624,8 @@ export function createArtistThumbController({
     });
     renderState();
     applyFavoriteState(item, favorite);
-    showToast?.(favorite ? '관심 작가로 등록했습니다.' : '관심 작가에서 해제했습니다.', 'success');
+    // 관심 작가는 `favorite_artist` 와일드카드다(1.5 부터). 부르는 법을 모르면 쓸 길이 없다.
+    showToast?.(favorite ? '관심 작가로 등록했습니다. 프롬프트에서 __favorite_artist__ 로 부를 수 있습니다.' : '관심 작가에서 해제했습니다.', 'success');
   }
 
   async function toggleFavorite() {

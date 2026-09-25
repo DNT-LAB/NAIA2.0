@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -327,6 +328,22 @@ def _apply_group_op(store: ArtistGroupStore, payload: dict) -> dict:
     raise ArtistGroupError(f"unknown op: {op or '(empty)'}")
 
 
+def _refresh_favorite_wildcard(context: WebSessionContext, path: Path) -> None:
+    """관심 작가 파일을 고친 뒤 돌고 있는 와일드카드 관리자에 그 한 개만 다시 읽힌다.
+
+    관리자의 폴더 밖이면(설정이 갈린 경우) 아무것도 안 한다 - 거기 쓴 파일은 원래
+    `__favorite_artist__` 로 불리지 않는다.
+    """
+    manager = getattr(context, "wildcard_manager", None)
+    if manager is None or not hasattr(manager, "reload_one"):
+        return
+    try:
+        rel = Path(path).resolve().relative_to(Path(manager.wildcards_dir).resolve())
+    except ValueError:
+        return
+    manager.reload_one(rel.as_posix())
+
+
 def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailService:
     service = getattr(context, "artist_thumbnail_service", None)
     if service is None:
@@ -340,6 +357,7 @@ def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServi
             mode_data_root=mode_data_root,
             state_root=mode_data_root,
             wildcards_root=runtime_paths.wildcards_dir if runtime_paths is not None else None,
+            on_favorites_written=lambda path: _refresh_favorite_wildcard(context, path),
         )
         context.artist_thumbnail_service = service
     return service

@@ -102,6 +102,45 @@ class WildcardManager:
                 except UnicodeEncodeError:
                     print(f"[ERROR] 와일드카드 리로드 콜백 실행 중 오류: {e}")
 
+    def reload_one(self, name):
+        """와일드카드 **한 개**만 디스크에서 다시 읽는다.
+
+        전체 재적재(`reload_wildcards`)는 파일 300개에 100ms 쯤 든다. 관심 작가 단추처럼
+        파일 하나를 고치는 클릭마다 그걸 치를 이유가 없다(2026-09-25).
+
+        ⚠️ 사전을 **바꿔 끼운다**(copy-on-write). 생성 스레드가 `_find_wildcard_key` 에서
+           키를 도는 중에 새 키를 넣으면 'dictionary changed size during iteration' 이 난다.
+        파일이 없거나 비었으면 키를 뺀다 - `activate_wildcards` 가 빈 파일을 싣지 않는 것과 같다.
+        """
+        key = Path(str(name or '')).with_suffix('').as_posix().strip('/')
+        if not key:
+            return False
+        root = Path(self.wildcards_dir).resolve()
+        file_path = (root / f'{key}.txt').resolve()
+        if root not in file_path.parents:
+            return False
+        entries = []
+        if file_path.exists():
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    match = _WEIGHT_PATTERN.match(stripped)
+                    if match:
+                        text = match.group(2).strip()
+                        if text:
+                            entries.append((int(match.group(1)), text))
+                    else:
+                        entries.append((_DEFAULT_WEIGHT, stripped))
+        tree = dict(self.wildcard_dict_tree)
+        if entries:
+            tree[key] = entries
+        else:
+            tree.pop(key, None)
+        self.wildcard_dict_tree = tree
+        return True
+
     def reload_wildcards(self):
         """
         와일드카드를 다시 로드합니다. 파일 변경사항을 반영하기 위해 사용합니다.

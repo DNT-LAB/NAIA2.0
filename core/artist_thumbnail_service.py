@@ -157,8 +157,13 @@ class ArtistThumbnailService:
         mode_data_root: str | Path | None = None,
         state_root: str | Path | None = None,
         wildcards_root: str | Path | None = None,
+        on_favorites_written: Callable[[Path], None] | None = None,
     ):
         self.repo_root = Path(repo_root)
+        # 관심 작가 목록은 `favorite_artist.txt` 와일드카드로도 쓰인다(1.5 부터의 약속 -
+        # `__favorite_artist__`). 파일만 고치면 돌고 있는 와일드카드 관리자는 서버를 다시
+        # 켤 때까지 옛 목록을 본다 - 그래서 쓴 뒤 이 콜백으로 알린다(2026-09-25 사용자 제보).
+        self._on_favorites_written = on_favorites_written
         self.mode_data_root = Path(mode_data_root) if mode_data_root is not None else self.repo_root / "data"
         self.state_root = Path(state_root) if state_root is not None else self.repo_root / "artist_thumb"
         self.wildcards_root = Path(wildcards_root) if wildcards_root is not None else self.repo_root / "wildcards"
@@ -354,7 +359,8 @@ class ArtistThumbnailService:
             )
             return []
 
-    def _write_lines(self, path: Path, values: list[str]) -> None:
+    def _write_lines(self, path: Path, values: list[str]) -> bool:
+        """썼으면 True. 내용이 같아 건너뛰면 False."""
         path.parent.mkdir(parents=True, exist_ok=True)
         seen = set()
         cleaned = []
@@ -365,8 +371,9 @@ class ArtistThumbnailService:
             seen.add(text)
             cleaned.append(text)
         if path.exists() and self._read_lines(path) == cleaned:
-            return
+            return False
         path.write_text("".join(f"{value}\n" for value in cleaned), encoding="utf-8")
+        return True
 
     def _state_path(self) -> Path:
         return self.state_root / "artist_state.json"
@@ -520,8 +527,16 @@ class ArtistThumbnailService:
 
     def _sync_state_mirrors(self, state: dict) -> None:
         normalized = self._normalize_state(state)
-        self._write_lines(self._favorite_path(), normalized["favorites"])
+        favorites_written = self._write_lines(self._favorite_path(), normalized["favorites"])
         self._write_lines(self._banned_path(), normalized["banned"])
+        if favorites_written and self._on_favorites_written is not None:
+            try:
+                self._on_favorites_written(self._favorite_path())
+            except Exception as exc:  # 알림이 실패해도 관심 등록 자체는 성공이다
+                _safe_log(
+                    f"🌐 Headless Artist Thumb: favorite wildcard refresh failed — {exc}",
+                    f"[WARN] Headless Artist Thumb: favorite wildcard refresh failed - {exc}",
+                )
 
     def _write_state(self, state: dict) -> dict:
         normalized = self._normalize_state(state)

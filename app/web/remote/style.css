@@ -19614,6 +19614,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   flex: 0 0 auto;
 }
 .tf-preset-x:hover { color: var(--error); }
+/* 자동 백업 슬롯 '↶ 이전 설정값' - 목록 맨 위, 저장된 필터와 선으로 가른다(2026-09-25). */
+.tf-preset.is-backup { border-bottom: 1px dashed rgba(245, 220, 138, 0.35); margin-bottom: 2px; }
+.tf-preset.is-backup .tf-preset-name { color: #f5dc8a; }
+.tf-preset.is-backup.is-empty .tf-preset-name { color: var(--text-dim); cursor: default; }
 .tf-preset-empty {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
   text-align: center; padding: 10px;

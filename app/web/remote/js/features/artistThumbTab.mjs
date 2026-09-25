@@ -1615,6 +1615,30 @@ export function createArtistThumbController({
     }, 500);
   }
 
+  /** 관심 작가 그룹에서 바뀐 목록 -> 격자 카드·선택 칸·상태. 같으면 아무것도 안 한다
+   *  (반대 방향 새로고침이 다시 이리 와도 돌지 않는다). */
+  async function syncFavoritesFromGroup(names) {
+    if (!state) return;
+    const before = new Set(state.favorites || []);
+    const after = new Set(names);
+    if (before.size === after.size && [...after].every(a => before.has(a))) return;
+    try { await fetchState({force: true}); } catch { return; }
+    gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+      card.classList.toggle('favorite', after.has(card.dataset.artist));
+    });
+    if (selected && before.has(selected.artist) !== after.has(selected.artist)) {
+      selected.favorite = after.has(selected.artist);
+      renderSelectedMeta(selected);
+      if (favoriteBtn) favoriteBtn.textContent = selected.favorite ? '관심 작가 해제' : '관심 작가 등록';
+    }
+    if (currentFilter() === 'favorites') void loadPage(currentPage);
+  }
+
+  /** 카드·우클릭·제외로 관심이 바뀌면 열린 '관심 작가' 그룹 창도 따라오게. */
+  function refreshGroupsQuietly() {
+    groupsApi?.store.load().catch(() => {});
+  }
+
   async function setFavoriteForItem(item, favorite) {
     if (!item) return;
     state = await postJson('/api/artist-thumb/favorite', {
@@ -1624,6 +1648,7 @@ export function createArtistThumbController({
     });
     renderState();
     applyFavoriteState(item, favorite);
+    refreshGroupsQuietly();
     // 관심 작가는 `favorite_artist` 와일드카드다(1.5 부터). 부르는 법을 모르면 쓸 길이 없다.
     showToast?.(favorite ? '관심 작가로 등록했습니다. 프롬프트에서 __favorite_artist__ 로 부를 수 있습니다.' : '관심 작가에서 해제했습니다.', 'success');
   }
@@ -1645,6 +1670,7 @@ export function createArtistThumbController({
     if (!item) return;
     const banned = !item.banned;
     state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned});
+    if (banned) refreshGroupsQuietly();       // 제외하면 관심에서도 빠진다
     const artist = item.artist;
     const inBannedFilter = currentFilter() === 'banned';
     const shouldRemoveFromGrid = banned ? !inBannedFilter : inBannedFilter;
@@ -2650,11 +2676,16 @@ export function createArtistThumbController({
     if (groupsApi) return groupsApi;
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260925-grpthumb2'),
+      import('./artistGroupWindow.mjs?v=20260926-favgroup'),
       import('./dragBroker.mjs?v=20260919-strip'),
     ]);
     const store = createArtistGroupsStore({fetch});
     groupsApi = {store, createWindow: createArtistGroupWindow, broker: dragBrokerFor(document)};
+    // 관심 작가 그룹(`favorites`)에서 넣고 빼면 격자의 관심 표시도 따라와야 한다.
+    store.subscribe(snapshot => {
+      const fav = (snapshot || []).find(g => g.id === 'favorites');
+      if (fav) void syncFavoritesFromGroup((fav.items || []).map(i => i.artist));
+    });
     try { await store.load(); } catch (error) {
       showToast?.(`그룹 목록을 읽지 못했습니다 — ${error.message}`, 'error');
     }

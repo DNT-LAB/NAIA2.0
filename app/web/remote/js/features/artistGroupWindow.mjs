@@ -132,6 +132,10 @@ export function createArtistGroupWindow({
     // ⚠️ 이름을 붙이면 임시가 아니다 - 단추 이름도 그 자리에서 따라와야 한다.
     //    한 번 그려 두면 '비우고 닫기' 가 저장 그룹에 남아 통째로 지워 버린다.
     const temp = isTempNow();
+    // 관심 작가 그룹(`fixed`)은 관심 목록 그 자체라 이름을 바꾸거나 지울 수 없다.
+    const fixed = Boolean(g.fixed);
+    renameBtn.hidden = fixed;
+    deleteBtn.hidden = fixed;
     deleteBtn.textContent = temp ? '비우고 닫기' : '삭제';
     deleteBtn.dataset.armed = '';
     renameBtn.title = temp ? '이름을 붙여 저장합니다' : '이름 바꾸기';

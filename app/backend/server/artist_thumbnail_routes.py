@@ -43,6 +43,11 @@ def artist_mix_store(context: WebSessionContext) -> ArtistMixStore:
 
 # 한 라우트가 op 로 갈라 받는다 - 프론트 호출부가 작아지고 검증이 한 곳에 모인다.
 _GROUP_OPS = {"create", "rename", "delete", "add", "remove", "reorder", "weight"}
+# 관심 작가 = 목록 맨 앞의 **고정 그룹**(사용자 지정 2026-09-26 - 일괄 벤치를 위해).
+# 저장은 관심 목록 하나다(`artist_state.json`) - 그룹 파일에는 없다. 진짜 그룹의 아이디는
+# 서버가 `g_...` 로 만들어 이 이름과 겹치지 않는다.
+FAVORITES_GROUP_ID = "favorites"
+FAVORITES_GROUP_NAME = "관심 작가"
 _MIX_OPS = {"save", "rename", "delete", "set_main", "apply"}
 
 
@@ -344,6 +349,40 @@ def _refresh_favorite_wildcard(context: WebSessionContext, path: Path) -> None:
     manager.reload_one(rel.as_posix())
 
 
+def _favorites_group(context: WebSessionContext) -> dict:
+    names = artist_thumbnail_service(context).favorite_artists()
+    return {"id": FAVORITES_GROUP_ID, "name": FAVORITES_GROUP_NAME, "temp": False, "fixed": True,
+            "items": [{"artist": name} for name in names]}
+
+
+def _with_favorites(context: WebSessionContext, groups: list) -> list:
+    """관심 목록을 못 읽어도 그룹 목록은 살린다 - 한쪽 고장이 다른 쪽을 가리지 않게."""
+    try:
+        return [_favorites_group(context), *groups]
+    except Exception:
+        return list(groups)
+
+
+def _apply_favorites_op(context: WebSessionContext, payload: dict) -> dict:
+    op = str(payload.get("op") or "").strip()
+    service = artist_thumbnail_service(context)
+    counts: dict = {}
+    if op == "add":
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        names = [item.get("artist") if isinstance(item, dict) else item for item in items]
+        counts = service.add_favorites(names, str(payload.get("mode") or ""))
+    elif op == "remove":
+        counts = service.remove_favorites(payload.get("artists") if isinstance(payload.get("artists"), list) else [])
+    elif op == "reorder":
+        counts = service.reorder_favorites(payload.get("artists") if isinstance(payload.get("artists"), list) else [])
+    elif op == "weight":
+        raise ArtistGroupError("관심 작가에는 가중치를 둘 수 없습니다")
+    else:
+        raise ArtistGroupError("관심 작가 그룹은 이름을 바꾸거나 지울 수 없습니다")
+    return {"group": _favorites_group(context),
+            "groups": _with_favorites(context, artist_group_store(context).list()), **counts}
+
+
 def _sync_group_thumbnails(context: WebSessionContext) -> None:
     """그룹에 든 작가 전부의 썸네일 사본을 맞춘다(없는 것은 채우고, 빠진 작가는 지운다).
 
@@ -614,7 +653,7 @@ def register_artist_thumbnail_routes(
     async def api_artist_groups_list():
         try:
             groups = await run_in_thread(artist_group_store(session_context).list)
-            return {"groups": groups}
+            return {"groups": await run_in_thread(_with_favorites, session_context, groups)}
         except Exception as exc:
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
             return JSONResponse({"error": f"Artist groups unreadable: {exc}"}, status_code=500)
@@ -630,8 +669,14 @@ def register_artist_thumbnail_routes(
         if str(payload.get("op") or "") not in _GROUP_OPS:
             return JSONResponse({"error": f"op must be one of {sorted(_GROUP_OPS)}"}, status_code=400)
         try:
+            if str(payload.get("id") or "") == FAVORITES_GROUP_ID:
+                if payload.get("op") == "create":
+                    raise ArtistGroupError("관심 작가 그룹은 새로 만들 수 없습니다")
+                return await run_in_thread(_apply_favorites_op, session_context, payload)
             result = await run_in_thread(_apply_group_op, artist_group_store(session_context), payload)
             await run_in_thread(_sync_group_thumbnails, session_context)
+            if isinstance(result.get("groups"), list):
+                result["groups"] = await run_in_thread(_with_favorites, session_context, result["groups"])
             return result
         except ArtistGroupError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)

@@ -569,6 +569,61 @@ class ArtistThumbnailService:
     def _favorites(self) -> list[str]:
         return list(self._state().get("favorites", []))
 
+    def favorite_artists(self) -> list[str]:
+        """관심 작가 목록(등록 순서). '관심 작가' 그룹 창이 이것을 그대로 보여 준다."""
+        return self._favorites()
+
+    # ── 관심 작가 = 하나의 그룹 (사용자 지정 2026-09-26) ─────────────────────
+    #  그룹 창에서 넣고·빼고·순서를 바꾸면 여기로 온다. 저장은 **관심 목록 하나**다 -
+    #  그룹 파일에 사본을 두면 두 곳이 갈린다. `favorite_artist.txt` 와일드카드도
+    #  `_write_state` 한 길로 따라간다.
+    @staticmethod
+    def _clean_favorite_name(value: Any) -> str:
+        name = " ".join(str(value or "").split())
+        if name.lower().startswith("artist:"):
+            name = name[len("artist:"):].strip()
+        return name if 0 < len(name) <= 200 else ""
+
+    def add_favorites(self, artists: Any, mode: str = "") -> dict:
+        names = [n for n in (self._clean_favorite_name(v) for v in (artists or [])) if n]
+        with self._lock:
+            state = self._state()
+            favorites = list(state.get("favorites", []))
+            fresh = [n for n in dict.fromkeys(names) if n not in favorites]
+            if fresh:
+                state["favorites"] = favorites + fresh
+                self._write_state(state)
+                for artist in fresh:
+                    self._cache_favorite_from_loaded_mode(artist, mode)
+        return {"added": len(fresh), "skipped": len(names) - len(fresh)}
+
+    def remove_favorites(self, artists: Any) -> dict:
+        names = {n for n in (self._clean_favorite_name(v) for v in (artists or [])) if n}
+        with self._lock:
+            state = self._state()
+            favorites = list(state.get("favorites", []))
+            kept = [a for a in favorites if a not in names]
+            removed = [a for a in favorites if a in names]
+            if removed:
+                state["favorites"] = kept
+                self._write_state(state)
+                for artist in removed:
+                    self._remove_favorite_thumbnail_cache(artist)
+        return {"removed": len(removed)}
+
+    def reorder_favorites(self, artists: Any) -> dict:
+        """보낸 순서대로 앞에 세우고, 보내지 않은 것은 원래 순서로 뒤에 붙인다(그룹과 같은 규칙)."""
+        wanted = [n for n in (self._clean_favorite_name(v) for v in (artists or [])) if n]
+        with self._lock:
+            state = self._state()
+            favorites = list(state.get("favorites", []))
+            front = [a for a in dict.fromkeys(wanted) if a in favorites]
+            ordered = front + [a for a in favorites if a not in front]
+            if ordered != favorites:
+                state["favorites"] = ordered
+                self._write_state(state)
+        return {}
+
     def _banned(self) -> list[str]:
         return list(self._state().get("banned", []))
 
@@ -720,10 +775,13 @@ class ArtistThumbnailService:
     def _cache_favorite_from_loaded_mode(self, artist: str, mode: str) -> bool:
         artist_name = str(artist or "").strip()
         mode_key = str(mode or "").strip()
-        if not artist_name or not mode_key:
+        if not artist_name:
             return False
         with self._lock:
-            entry = self._cache_entry_from_data(artist_name, mode_key, self._data_cache.get(mode_key) or {})
+            # ⚠️ 모드를 모를 때(그룹 창에서 끌어 넣기)나 **가상 모드**(제 팩이 없어
+            #    `_data_cache` 에 없다)에도 올라온 팩에서 찾는다 - 전에는 둘 다 사본 없이 끝났다.
+            entry = (self._cache_entry_from_data(artist_name, mode_key, self._data_cache.get(mode_key) or {})
+                     if mode_key else None) or self._loaded_thumbnail_entry(artist_name)
             if not entry:
                 return False
             try:

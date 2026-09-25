@@ -56,6 +56,11 @@ function normalizeTagParts(value) {
 // 저장 스키마(localStorage · 상태 파일 · 프리셋 · WS)를 하나도 안 바꾼다.
 // ⚠️ 예약 문자다 - 태그 사전 150개 parquet 전수에 `*` 를 포함한 실제 태그는 0개다.
 const isExactTag = (tag) => String(tag || '').startsWith('*');
+// 입력칸은 쉼표로 여러 태그를 받는다 - 자동완성은 **마지막 쉼표 뒤 조각**만 본다(사용자 제보 2026-09-25).
+// ⚠️ 칸 전체를 보내면 '1girl,' 이 태그 접두사로는 안 맞고 사전 설명글의 낱말 '1girl,' 에만 맞아
+//    'gender request'(설명: "성별(1boy, 1girl, 1other 등)에 대한 요청") 한 줄이 떴다.
+export const lastSegment = value => String(value || '').split(',').pop().trim();
+export const leadingSegments = value => String(value || '').split(',').slice(0, -1).map(s => s.trim()).filter(Boolean);
 const baseTag = (tag) => String(tag || '').replace(/^\*+/, '');
 const withExact = (tag, exact) => (exact ? '*' : '') + baseTag(tag);
 
@@ -214,12 +219,15 @@ export function createQuickFilterController(deps) {
   const branchSig = tags => JSON.stringify(tags);
   const hasChips = () => payload().length > 0;
   const enabledBranches = () => stagedBranches.filter(branch => branch.enabled);
-  /** 검색에 보낼 분기. 켜진 담은 것이 없으면 [] = 예전처럼 칩 한 벌. 지금 칩이 있으면 한 분기로 더한다
-   *  (담기 전의 검색도 결과에 보인다 - 보이는 것이 풀이다). */
+  const isStaged = (tags, list = stagedBranches) => list.some(branch => branchSig(branch.tags) === branchSig(tags));
+  /** 지금 칩이 켜진 담은 것과 **다른** 검색인가 - 같으면 두 번 세지 않는다(담아도 칩은 남는다). */
+  const liveIsNew = () => hasChips() && !isStaged(payload(), enabledBranches());
+  /** 검색에 보낼 분기. 켜진 담은 것이 없으면 [] = 예전처럼 칩 한 벌. 지금 칩이 새 검색이면 한 분기로
+   *  더한다(담기 전의 검색도 결과에 보인다 - 보이는 것이 풀이다). */
   function branchesPayload() {
     const on = enabledBranches().map(branch => [...branch.tags]);
     if (!on.length) return [];
-    if (hasChips()) on.push(payload());
+    if (liveIsNew()) on.push(payload());
     return on;
   }
   const hasFilter = () => includeTags.length > 0 || excludeTags.length > 0 || enabledBranches().length > 0;
@@ -458,8 +466,8 @@ export function createQuickFilterController(deps) {
     apply();
   }
 
-  /** [+ 담기]: 지금 검색(칩 한 벌)을 스테이징에 담고 칩을 비운다 - 바로 다음 검색을 친다.
-   *  결과 = 켜진 담은 것들 ∪ 지금 칩. */
+  /** [+ 담기]: 지금 검색(칩 한 벌)을 스테이징에 담는다. **칩은 남긴다**(사용자 지정 2026-09-25 - 비우면
+   *  검색어가 날아간다) - 칩 몇 개만 고쳐 다음 검색을 이어 간다. 결과 = 켜진 담은 것들 ∪ 지금 칩. */
   function stageBranch() {
     commitPendingInputs();
     if (!hasChips()) {
@@ -467,7 +475,7 @@ export function createQuickFilterController(deps) {
       return;
     }
     const tags = payload();
-    if (stagedBranches.some(branch => branchSig(branch.tags) === branchSig(tags))) {
+    if (isStaged(tags)) {
       deps.showToast('같은 검색이 이미 담겨 있습니다', 'warning');
       return;
     }
@@ -477,8 +485,6 @@ export function createQuickFilterController(deps) {
     }
     stagedBranches.push({tags, enabled: true});
     closeChipMenu();
-    includeTags = [];
-    excludeTags = [];
     renderChips();
     renderBranches();
     updateCommitButton();
@@ -571,8 +577,8 @@ export function createQuickFilterController(deps) {
   function renderBranches() {
     const host = ensureBranchHost();
     if (!host) return;
-    const canStage = hasChips();
-    const live = enabledBranches().length > 0 && canStage;
+    const canStage = hasChips() && !isStaged(payload());
+    const live = enabledBranches().length > 0 && liveIsNew();
     const rows = stagedBranches.map((branch, i) => `
       <div class="tfb-row${branch.enabled ? '' : ' is-off'}" data-tfb-i="${i}">
         <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? '끄기' : '켜기'}"></button>
@@ -594,7 +600,7 @@ export function createQuickFilterController(deps) {
         <span class="tfb-title">스테이징</span>
         <span class="tfb-hint">${hint}</span>
         <button type="button" class="tfb-stage" data-tfb="stage" ${canStage ? '' : 'disabled'}
-          data-naia-guide="지금 검색(칩)을 스테이징에 담고 칩을 비웁니다. 바로 다음 검색을 치세요.&#10;&#10;결과 = 켜진 담은 것들과 지금 검색을 합친 것(중복 행은 한 번).">+ 담기</button>
+          data-naia-guide="지금 검색(칩)을 스테이징에 담습니다. 칩은 그대로 남으니 몇 개만 고쳐 다음 검색을 이어 가세요.&#10;&#10;결과 = 켜진 담은 것들과 지금 검색을 합친 것(중복 행은 한 번).">+ 담기</button>
         <button type="button" class="tag-filter-btn-action assign tfb-commit" id="tagFilterCommitBtn" data-tfb="commit"
           data-naia-guide="입력칸에 친 글자를 칩으로 넣고, 지금 조건으로 다시 적용합니다(풀을 다 쓴 뒤 같은 조건으로 다시 걸 때도).">Commit</button>
       </div>
@@ -655,7 +661,7 @@ export function createQuickFilterController(deps) {
     el.querySelectorAll('.tag-ac-item').forEach(item => {
       item.addEventListener('mousedown', event => {
         event.preventDefault();
-        selectAutocomplete(acResults[+item.dataset.idx].tag);
+        pickAutocomplete(acResults[+item.dataset.idx].tag);
       });
     });
   }
@@ -678,6 +684,12 @@ export function createQuickFilterController(deps) {
       else renderIncludeChips();
     }
     return changed;
+  }
+
+  /** 목록에서 고른 태그 + 칸에 먼저 쳐 둔 앞 조각들을 칩으로(앞 조각이 사라지지 않게). */
+  function pickAutocomplete(tag) {
+    const input = getEl(acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput');
+    selectAutocomplete([...leadingSegments(input ? input.value : ''), tag].join(','));
   }
 
   function selectAutocomplete(tag) {
@@ -723,7 +735,7 @@ export function createQuickFilterController(deps) {
     input.addEventListener('input', function() {
       acTarget = target;
       updateCommitButton();
-      const query = this.value.trim();
+      const query = lastSegment(this.value);
       if (query.length < 2) {
         clearAutocomplete();
         return;
@@ -750,7 +762,7 @@ export function createQuickFilterController(deps) {
       } else if (event.key === 'Enter') {
         event.preventDefault();
         if (acSelection >= 0 && acResults[acSelection]) {
-          selectAutocomplete(acResults[acSelection].tag);
+          pickAutocomplete(acResults[acSelection].tag);
         } else if (this.value.trim()) {
           selectAutocomplete(this.value.trim());
         }
@@ -1186,10 +1198,11 @@ export function createQuickFilterController(deps) {
     if (!popupOpen()) return;
     const inputId = acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
     const input = getEl(inputId);
-    if (!input || input.value.trim().length < 2) return;
+    const currentQuery = lastSegment(input ? input.value : '');
+    if (!input || currentQuery.length < 2) return;
+    // 서버는 표식(*)을 뺀 질의를 되돌려 준다 - 같은 자로 견준다.
     const query = String(message.query || '').trim();
-    const currentQuery = input.value.trim();
-    if (query && query !== currentQuery) return;
+    if (query && baseTag(query) !== baseTag(currentQuery)) return;
     if (latestAcRequest.query && latestAcRequest.query !== currentQuery) return;
     if (latestAcRequest.target && latestAcRequest.target !== acTarget) return;
     acResults = message.results || [];

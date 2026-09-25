@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+import os
 import re
 import threading
 import time
@@ -10,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from core.search_pool_writer import search_pool_writer
 from core.web_session_context import WebSessionContext
 
 
@@ -40,6 +43,18 @@ _POOL_LOADING_THRESHOLD = 200_000
 # to one batch of (per-column str + cat + lower) instead of holding the whole
 # pool's columns materialized at once, and yields a progress heartbeat per batch.
 _TAGS_TEXT_BATCH = 100_000
+
+# Tag Filter 색인 빌드·칩 매칭 스레드 수. pyarrow 가 GIL 을 풀어 배치 병렬이 실제로 먹힌다.
+_TAG_FILTER_WORKERS = max(1, min(8, (os.cpu_count() or 2) // 2))
+_TAG_FILTER_POOL: ThreadPoolExecutor | None = None
+_TAG_FILTER_POOL_GUARD = threading.Lock()
+
+# 파이썬 re 의 `\s`(str) 와 같은 문자 집합을 RE2 로 쓴 것 = str.isspace() 가 참인 문자 전부.
+# RE2 의 `\s` 는 [\t\n\f\r ] 뿐이라 NBSP(\xa0)·전각 공백(　) 등을 못 먹는다.
+_RE2_PY_WS = (
+    r"[\t\n\x{0b}\f\r\x{1c}-\x{1f} \x{85}\x{a0}\x{1680}\x{2000}-\x{200a}"
+    r"\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]"
+)
 
 
 def search_pool_state_guard(context: WebSessionContext):
@@ -161,8 +176,94 @@ def reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
     _reset_active_tag_filter_assignment(context)
 
 
-def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
+def merge_base_frame(context: WebSessionContext):
+    """합치기의 기준 = 현재 데이터셋 전체(snapshot).
+
+    ⚠️ `search_results.get_dataframe()` 은 **남은 풀**이다 - 등급·태그필터가 걸려 있고 Random 이
+    뽑아 쓴 행도 빠져 있다. 거기에 합치면 필터 중 합치기가 행을 조용히 잃고(1.3M 풀 + 5만 행 합치기
+    → 67만 행), 뽑아 쓴 행이 데이터셋에서 영영 사라진다.
+    ⚠️ master_base 도 아니다 - 심층검색으로 좁힌 셋(snapshot ⊂ master_base)이 합치기에서 풀린다.
+    snapshot 은 Tag Filter 가 훑는 풀·last-search 가 쓰는 풀과 같은 것이다."""
+    snapshot = getattr(context, "search_results_snapshot", None)
+    if snapshot is not None and not getattr(snapshot, "empty", True):
+        return snapshot
+    return search_base_frame(context)
+
+
+def pool_provenance(context: WebSessionContext) -> Any:
+    """지금 풀(snapshot)이 어떻게 만들어졌나 - 저장할 때 명함 recipe 의 뿌리가 된다."""
+    return getattr(context, "search_pool_provenance", None)
+
+
+def _set_pool_provenance(context: WebSessionContext, recipe: Any, *, base: bool = False) -> None:
+    """풀을 바꾸는 모든 자리에서 부른다. base=True 면 복원 기준(master_base)의 출처도 같이.
+
+    ⚠️ 풀을 바꾸는 자리(mark_search_pool_replaced 호출처)마다 빠짐없이 걸어야 한다 - 하나라도
+    빠지면 명함이 거짓말을 한다(tests/test_custom_parquet_provenance.py 가 진입점을 전수한다)."""
+    context.search_pool_provenance = recipe
+    if base:
+        context.search_pool_base_provenance = recipe
+
+
+def join_exclude_terms(exclude: Any, permanent: Any) -> str:
+    """제외어 + 영구 제외 = 실제로 거는 제외어. 둘 다 같은 문법(쉼표 목록)이라 쉼표로 잇는다."""
+    parts = [str(part or "").strip().strip(",").strip() for part in (exclude, permanent)]
+    return ", ".join(part for part in parts if part)
+
+
+def _search_recipe(
+    context: WebSessionContext, query: str, exclude: str, ratings, bucket_range, permanent: str = "",
+) -> dict[str, Any]:
+    recipe: dict[str, Any] = {
+        "source": "search",
+        "query": str(query or ""),
+        "exclude": str(exclude or ""),
+        "ratings": sorted(ratings or []),
+    }
+    if str(permanent or "").strip():
+        # 명함에 따로 적는다 - 파일에 무엇이 빠졌는지 보여야 한다(제외어 칸과 섞지 않는다).
+        recipe["exclude_permanent"] = str(permanent).strip()
+    if bucket_range is not None:
+        s, e = bucket_range
+        recipe["bucket"] = [int(s), int(e)]
+        try:
+            from core.tag_bucket_dates import load_bucket_dates
+
+            buckets = load_bucket_dates(context).get("buckets") or []
+            if 0 <= s < len(buckets) and 0 <= e < len(buckets):
+                recipe["period"] = f"{buckets[s].get('start_ym')}~{buckets[e].get('end_ym')}"
+        except Exception:
+            pass
+    return recipe
+
+
+def _record_search_history(context: WebSessionContext, recipe: dict[str, Any], rows: int) -> None:
+    """[검색 기록] 에 남긴다(core/search_history.py). 기록 실패가 검색을 죽이면 안 된다."""
+    try:
+        from core.search_history import record_search
+
+        record_search(
+            context,
+            query=recipe.get("query", ""),
+            exclude=recipe.get("exclude", ""),
+            ratings=recipe.get("ratings"),
+            rows=int(rows),
+            bucket=recipe.get("bucket"),
+            period=recipe.get("period"),
+        )
+    except Exception as exc:
+        print(f"Headless Remote: search history record failed - {exc}", flush=True)
+
+
+def _last_search_meta(context: WebSessionContext, frame) -> dict[str, Any]:
+    from core.custom_parquet_library import make_meta
+
+    return make_meta("last_search", pool_provenance(context), len(frame))
+
+
+def install_custom_parquet_frame(context: WebSessionContext, frame, provenance: Any = None) -> None:
     with search_pool_state_guard(context):
+        _set_pool_provenance(context, provenance, base=True)
         context.search_results.set_dataframe(frame)
         context.search_results_snapshot = context.search_results.get_dataframe().copy()
         context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
@@ -178,8 +279,16 @@ def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
             search_ratings=["g", "s", "q", "e"],
             tag_filter_active=False,
         )
-    # 작업 데이터셋이 바뀌었으니 마지막-검색 영속도 갱신 (Part 3 — 재시작/가져오기 복원용).
-    context.persist_last_search()
+        # 작업 데이터셋이 바뀌었으니 마지막-검색 영속도 갱신 (Part 3 — 재시작/가져오기 복원용).
+        # 응답을 막지 않게 백그라운드로, 한 번만 쓴다(core/search_pool_writer.py).
+        # 프레임은 **락 안에서** 캡처한 snapshot 참조 - 백그라운드에서 get_dataframe() 을 부르면
+        # Random pop 과 경쟁한다. 설치 직후엔 남은 풀(runner 대상) == snapshot 이므로(등급 전부 ON,
+        # 태그필터 해제, pop 없음) runner 는 last-search 파일을 복사한다.
+        pool_frame = context.search_results_snapshot
+        runner_path = None if _should_skip_auto_runner_save(context) else context.runner_parquet_path()
+        last_path = context.last_search_parquet_path()
+    if pool_frame is not None and not getattr(pool_frame, "empty", True):
+        search_pool_writer(context).submit(last_path, pool_frame, runner_path, meta=_last_search_meta(context, pool_frame))
 
 
 def filter_source_frame(
@@ -351,8 +460,8 @@ def save_runner_parquet(context: WebSessionContext) -> Path | None:
     if frame is None or getattr(frame, "empty", True):
         return None
     path = context.runner_parquet_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    frame.to_parquet(path, index=False)
+    # 백그라운드 writer 와 같은 파일 락 + 대기 중인 runner 복사 취소(더 오래된 풀이 덮지 않게).
+    search_pool_writer(context).write_now(path, frame, kind="runner")
     return path
 
 
@@ -385,6 +494,9 @@ def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True
             context.save_search_filter_state(
                 tag_filter=[],
                 tag_filter_exclude=[],
+                tag_filter_branches=[],
+                tag_filter_pinned=[],
+                tag_filter_applied_branches=[],
                 tag_filter_active=False,
             )
         else:
@@ -426,13 +538,14 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
         return False
     include = [str(tag) for tag in (state.get("tag_filter") or []) if str(tag).strip()]
     exclude = [str(tag) for tag in (state.get("tag_filter_exclude") or []) if str(tag).strip()]
-    if not include and not exclude:
+    applied_branches = normalize_tag_filter_branches(state.get("tag_filter_applied_branches"))
+    if not include and not exclude and not applied_branches:
         return False
     snapshot = getattr(context, "search_results_snapshot", None)
     if snapshot is None or getattr(snapshot, "empty", True):
         return False
     tags = [*include, *[f"-{tag}" for tag in exclude]]
-    result = tag_filter_search(context, tags)
+    result = tag_filter_search(context, tags, applied_branches or None)
     ids = result.get("_ids", set())
     source_snapshot = result.get("_source_snapshot")
     source_generation = int(result.get("_pool_generation") or 0)
@@ -450,10 +563,19 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
         context.active_tag_filter_ids = set(ids)
         context.active_tag_filter = {
             "tags": [str(tag) for tag in result.get("tags", [])],
+            "branches": [list(b) for b in (result.get("branches") or [])],
             "ids": set(ids),
             "count": int(result.get("count") or 0),
             "request_id": "",
             "rating_counts": dict(result.get("rating_counts") or {}),
+        }
+        # 적용 순간의 불변 집합 - commit 과 같은 모양(저장이 뽑아 쓴 행을 포함하고, 소진 뒤 같은 조건으로 되채운다).
+        context.active_tag_filter_snapshot = {
+            "ids": set(ids),
+            "tags": [str(tag) for tag in result.get("tags", [])],
+            "count": int(result.get("count") or 0),
+            "rating_counts": dict(result.get("rating_counts") or {}),
+            "request_id": "",
         }
         mark_tag_filter_changed(context)
         apply_search_runtime_filters(context)
@@ -472,6 +594,14 @@ def run_search_command(
     } or set("gsqe")
     query = str(command.get("query") or "")
     exclude = str(command.get("exclude") or "")
+    # 영구 제외(사용자 지정 2026-09-24): 창이 보내면 그 값을 저장하고, 안 보내면(다른 진입점·옛 화면)
+    # 저장된 값을 쓴다 - '영구' 라서 어느 길로 검색해도 빠져야 한다.
+    if "exclude_permanent" in command:
+        permanent = str(command.get("exclude_permanent") or "")
+    else:
+        permanent = str(context.normalize_search_filter_state(
+            getattr(context, "search_filter_state", None)).get("exclude_permanent") or "")
+    effective_exclude = join_exclude_terms(exclude, permanent)
     bucket_start = command.get("bucket_start")
     bucket_end = command.get("bucket_end")
     context.search_query_ratings = ratings
@@ -483,7 +613,7 @@ def run_search_command(
     # result set is not filtered a second time.
     # None values are ignored by the saver -> they keep the persisted range.
     context.save_search_filter_state(
-        query=query, exclude=exclude,
+        query=query, exclude=exclude, exclude_permanent=permanent,
         search_ratings=ratings,
         bucket_start=bucket_start, bucket_end=bucket_end,
     )
@@ -500,14 +630,16 @@ def run_search_command(
     archive_sources = tag_archive_parquet_sources(context)
     if archive_sources:
         # Date-cutoff slider: scan only buckets [start..end] (fewer files = faster).
+        bucket_range = None
         if bucket_start is not None or bucket_end is not None:
             from core.tag_bucket_dates import clamp_bucket_range
             s, e = clamp_bucket_range(bucket_start, bucket_end, len(archive_sources))
             archive_sources = archive_sources[s:e + 1]
+            bucket_range = (s, e)
         searched = search_tag_archive_frame(
             archive_sources,
             query=query,
-            exclude=exclude,
+            exclude=effective_exclude,
             ratings=ratings,
             progress_callback=progress_callback,
         )
@@ -518,22 +650,30 @@ def run_search_command(
             context.search_results_master_base_snapshot = searched.copy()
             context.search_results_scope = TAG_ARCHIVE_SCOPE
             mark_search_pool_replaced(context)
+            recipe = _search_recipe(context, query, exclude, ratings, bucket_range, permanent)
+            _set_pool_provenance(context, recipe, base=True)
             _reset_active_tag_filter_assignment(context)
             context.save_search_filter_state(tag_filter_active=False)
             context.remote_active_ratings = set("gsqe")
+        _record_search_history(context, recipe, len(searched))
         context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
         return apply_search_runtime_filters(context)
 
     base = search_base_frame(context)
     if base is None:
         return context.search_state_payload()
-    searched = _dedup_by_id(filter_source_frame(base, query=query, exclude=exclude, ratings=ratings))
+    searched = _dedup_by_id(filter_source_frame(base, query=query, exclude=effective_exclude, ratings=ratings))
     with search_pool_state_guard(context):
         context.search_results_snapshot = searched.copy() if searched is not None else None
         mark_search_pool_replaced(context)
+        # 아카이브가 없을 때: 불러온 셋 안에서 검색한 것 - 부모(복원 기준)를 품는다.
+        recipe = _search_recipe(context, query, exclude, ratings, None, permanent)
+        recipe["parent"] = getattr(context, "search_pool_base_provenance", None)
+        _set_pool_provenance(context, recipe)
         _reset_active_tag_filter_assignment(context)
         context.save_search_filter_state(tag_filter_active=False)
         context.remote_active_ratings = set("gsqe")
+    _record_search_history(context, recipe, len(searched) if searched is not None else 0)
     context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
     return apply_search_runtime_filters(context)
 
@@ -544,6 +684,7 @@ def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
         with search_pool_state_guard(context):
             context.search_results_snapshot = base.copy()
             mark_search_pool_replaced(context)
+            _set_pool_provenance(context, getattr(context, "search_pool_base_provenance", None))
             _reset_active_tag_filter_assignment(context)
             context.save_search_filter_state(tag_filter_active=False)
             context.search_results.set_dataframe(base.copy())
@@ -590,8 +731,10 @@ def commit_pending_tag_filter_assignment(
         context.active_tag_filter_frame_for = context.active_tag_filter_ids
         context.active_tag_filter_frame_snapshot = pending.get("source_snapshot")
         tags = [str(tag) for tag in pending.get("tags", [])]
+        branches = [list(b) for b in (pending.get("branches") or [])]
         context.active_tag_filter = {
             "tags": tags,
+            "branches": branches,
             "ids": set(context.active_tag_filter_ids),
             "count": int(pending.get("count") or 0),
             "request_id": request_id,
@@ -613,6 +756,7 @@ def commit_pending_tag_filter_assignment(
         context.save_search_filter_state(
             tag_filter=[tag for tag in tags if not tag.startswith("-")],
             tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
+            tag_filter_applied_branches=branches,
             tag_filter_active=True,
         )
         if client_key and isinstance(pending_by_client, dict):
@@ -657,38 +801,127 @@ def _tag_filter_cache(context: WebSessionContext, snapshot) -> dict:
 # methods directly (tag_filter_search gating + build/match heartbeats).
 
 
+def _tag_filter_executor() -> ThreadPoolExecutor:
+    """Tag Filter 색인 빌드·칩 매칭용 공유 스레드 풀(프로세스 하나).
+
+    pyarrow compute 는 GIL 을 풀기 때문에 행 배치를 스레드로 나누면 실제로 병렬이 된다.
+    실측(1.3M 행, 16코어, 8스레드): 빌드 4.77s→1.34s, 칩 12개 매칭 12.67s→1.01s, 결과 동일."""
+    global _TAG_FILTER_POOL
+    if _TAG_FILTER_POOL is None:
+        with _TAG_FILTER_POOL_GUARD:
+            if _TAG_FILTER_POOL is None:
+                _TAG_FILTER_POOL = ThreadPoolExecutor(
+                    max_workers=_TAG_FILTER_WORKERS, thread_name_prefix="naia-tagfilter"
+                )
+    return _TAG_FILTER_POOL
+
+
+def _tag_filter_memory_pool():
+    """Tag Filter 연산 전용 = 시스템 메모리 풀(해제 즉시 OS 반환). 이유는 _build_tags_text 참조."""
+    import pyarrow as pa
+
+    return pa.system_memory_pool()
+
+
 def _build_tags_text(frame, tag_columns: list[str], heartbeat=None):
-    """Build the per-row lowercased tag-text index in row-batches so the transient
-    peak is one batch of (per-column str + str.cat + str.lower) rather than the
-    whole pool's columns materialized at once. Result is identical to the single
-    pass ``parts[0].str.cat(parts[1:], sep=',').str.lower()`` — row order and
-    index labels are preserved (positional masks stay aligned to ``frame``).
-    ``heartbeat(loaded_rows, total_rows)`` is called per batch."""
-    import pandas as pd
+    """행별 소문자 태그 텍스트 색인 - pyarrow ChunkedArray(large_string), 배치(10만 행)당 청크 1개.
+
+    배치를 스레드 풀에서 나눠 만든다. 청크 순서 = 행 순서라 positional 마스크가 ``frame`` 과
+    정렬된다. 내용은 예전 ``str.cat(sep=',').str.lower()`` 와 **같다**(1.3M 실데이터 전 행 동일).
+    ⚠️ pandas 3 의 문자열 열은 이미 arrow 라 예전 경로도 utf8_lower 였다 - 소문자화 의미 불변.
+    ``heartbeat(loaded_rows, total_rows)`` 는 호출 스레드에서 배치가 끝날 때마다 부른다."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
 
     n = len(frame)
     if n == 0:
-        base = frame[tag_columns[0]].fillna("").astype(str)
-        return base.str.lower()
-    chunks = []
-    for start in range(0, n, _TAGS_TEXT_BATCH):
+        return pa.chunked_array([], type=pa.large_string())
+    # 열 Series 는 호출 스레드에서 꺼낸다 - 작업 스레드는 읽기 전용 iloc 슬라이스만 한다.
+    columns = [frame[c] for c in tag_columns]
+    sep = pa.scalar(",", pa.large_string())
+    empty = pa.scalar("", pa.large_string())
+    # ⚠️ 시스템 메모리 풀로 한정한다. 기본 풀(mimalloc)은 병렬 배치의 중간 배열을 해제해도 OS 에
+    #    돌려주지 않아 RSS 가 텍스트 크기의 약 3배(+1.86GB / 1.3M 행)로 남았다. 이 연산에만
+    #    시스템 풀을 쓰면 +0.89GB, 속도는 같다(실측). 프로세스 전역 풀은 건드리지 않는다.
+    mp = _tag_filter_memory_pool()
+
+    def build(start: int):
         sl = slice(start, start + _TAGS_TEXT_BATCH)
-        sub = [frame[c].iloc[sl].fillna("").astype(str) for c in tag_columns]
-        txt = sub[0] if len(sub) == 1 else sub[0].str.cat(sub[1:], sep=",")
-        chunks.append(txt.str.lower())
+        arrs = [
+            pa.array(col.iloc[sl].fillna("").astype(str), type=pa.large_string(), memory_pool=mp)
+            for col in columns
+        ]
+        joined = arrs[0] if len(arrs) == 1 else pc.binary_join_element_wise(*arrs, sep, memory_pool=mp)
+        return pc.utf8_lower(pc.coalesce(joined, empty, memory_pool=mp), memory_pool=mp)
+
+    starts = list(range(0, n, _TAGS_TEXT_BATCH))
+    chunks = []
+    for start, chunk in zip(starts, _tag_filter_executor().map(build, starts)):  # map = 순서 보존
+        chunks.append(chunk)
         if heartbeat is not None:
             try:
                 heartbeat(min(start + _TAGS_TEXT_BATCH, n), n)
             except Exception:
                 pass
-    return chunks[0] if len(chunks) == 1 else pd.concat(chunks)
+    return pa.chunked_array(chunks, type=pa.large_string())
 
 
-def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
-    return _tag_filter_search_impl(context, tags)
+def _match_tags_text(tags_text, pattern: str):
+    """RE2 정규식으로 청크별 병렬 매칭 → 행별 numpy bool 마스크.
+
+    부분일치도 ``re.escape(key)`` 리터럴 정규식으로 돈다 - 같은 리터럴이라도 RE2 경로가
+    ``match_substring`` 보다 1.6~3.5배 빠르다(실측). 태그 텍스트가 행당 평균 499바이트라
+    1.3M 행이면 칩 하나가 659MB 를 훑는다 - 병렬이 아니면 칩당 ~1초였다."""
+    import numpy as np
+    import pyarrow.compute as pc
+
+    if tags_text.num_chunks == 0:
+        return np.zeros(0, dtype=bool)
+
+    mp = _tag_filter_memory_pool()
+
+    def match(chunk):
+        hits = pc.match_substring_regex(chunk, pattern, memory_pool=mp)
+        return pc.coalesce(hits, False, memory_pool=mp).to_numpy(zero_copy_only=False)
+
+    return np.concatenate(list(_tag_filter_executor().map(match, tags_text.chunks)))
 
 
-def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
+def normalize_tag_filter_branches(value: Any) -> list[list[str]]:
+    """분기 목록(분기 = 칩 토큰 목록, 칩 문법 그대로 `-제외`·`*정확`) 정규화. 빈 분기는 버린다."""
+    out: list[list[str]] = []
+    if not isinstance(value, (list, tuple)):
+        return out
+    for branch in list(value)[:TAG_FILTER_MAX_BRANCHES]:
+        tokens = branch.get("tags") if isinstance(branch, dict) else branch
+        if not isinstance(tokens, (list, tuple)):
+            continue
+        clean = [str(t).strip() for t in list(tokens)[:TAG_FILTER_MAX_BRANCH_TAGS] if str(t or "").strip()]
+        if clean:
+            out.append(clean)
+    return out
+
+
+# 분기 스테이징 상한(사용자 칩 조작이 만드는 목록 - 넉넉히, 폭주만 막는다).
+# ⚠️ UI 가 보낼 수 있는 것보다 **넉넉해야** 한다 - 담기 16 + 지금 검색 1 = 17 분기를 16 에서 잘라
+#    마지막 조건이 말없이 빠졌다(병합 전 리뷰 #7). 상한은 영속과 **같은 값**이어야 한다(재리뷰 F1) - 거기서 가져온다.
+from core.headless_search_state_service import TAG_FILTER_MAX_BRANCHES, TAG_FILTER_MAX_BRANCH_TAGS  # noqa: E402
+
+
+def tag_filter_search(context: WebSessionContext, tags: list[Any], branches: Any = None, *,
+                      announce: bool = True) -> dict[str, Any]:
+    """칩 검색. ``branches`` 가 있으면 **분기 스테이징**(계획서 P3): 결과 = 분기마다
+    (포함 AND · 제외 OR 빼기)를 구한 뒤 분기끼리 **OR**. 없으면 예전 그대로 ``tags`` 한 벌.
+
+    ``announce=False`` = 미리보기(Tag Filter 커밋 모델 - 수만 세고 assign 하지 않는다). 큰 풀의
+    '필터 단계' 를 알리지 않는다 - 알리면 프론트가 단계가 끝난 뒤 search_state 를 기다리며 검색창·
+    Random 을 잠그는데, 미리보기는 assign 이 없어 그 search_state 가 오지 않는다(90·180초 안전
+    타이머까지 잠겼다 - 병합 전 리뷰 #1)."""
+    return _tag_filter_search_impl(context, tags, normalize_tag_filter_branches(branches), announce=announce)
+
+
+def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any], branches: list[list[str]] | None = None,
+                            *, announce: bool = True) -> dict[str, Any]:
     # Capture snapshot identity and its monotonic generation under the same lock.
     # The expensive scan runs lock-free, but result/assign must prove both values
     # are still current before publishing or committing the matched frame.
@@ -706,6 +939,7 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
             "type": "tag_filter_result",
             "count": 0,
             "tags": normalized,
+            "branches": [list(b) for b in (branches or [])],
             "rating_counts": rating_counts_from_frame(None),
             "_ids": set(),
             "_source_snapshot": snapshot,
@@ -725,8 +959,8 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
         heavy = len(snapshot) >= _POOL_LOADING_THRESHOLD
     except Exception:
         heavy = False
-    if not heavy:
-        result = _run_tag_filter(context, snapshot, tags, heartbeat=None)
+    if not heavy or not announce:
+        result = _run_tag_filter(context, snapshot, tags, heartbeat=None, branches=branches)
         result["_source_snapshot"] = snapshot
         result["_pool_generation"] = source_generation
         return result
@@ -735,7 +969,7 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
         def heartbeat(loaded: int, total: int) -> None:
             context.pool_loading_progress("filter", loaded, total)
 
-        result = _run_tag_filter(context, snapshot, tags, heartbeat=heartbeat)
+        result = _run_tag_filter(context, snapshot, tags, heartbeat=heartbeat, branches=branches)
         result["_source_snapshot"] = snapshot
         result["_pool_generation"] = source_generation
         return result
@@ -743,7 +977,9 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
         context.pool_loading_end()
 
 
-def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, heartbeat=None) -> dict[str, Any]:
+def _run_tag_filter(
+    context: WebSessionContext, snapshot, tags: list[Any], *, heartbeat=None, branches: list[list[str]] | None = None,
+) -> dict[str, Any]:
     cache = _tag_filter_cache(context, snapshot)
     if cache["tags_text"] is None:
         # Double-checked build under a lock so a concurrent search reuses the
@@ -786,37 +1022,16 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
         if cached is not None:
             return cached
         if not exact:
-            return _store_mask(
-                cache_key, tags_text.str.contains(key, na=False, regex=False).to_numpy()
-            )
+            return _store_mask(cache_key, _match_tags_text(tags_text, re.escape(key)))
         # 퍼펙트 매칭: SEARCH(`core/search_engine.py` contains_exact)와 **같은 경계**를 쓴다 -
         # 쉼표뿐. 같은 `*tag` 가 화면마다 다른 뜻이 되는 것이 최악이라 의도적으로 복제한다.
         # ⚠️ 예전엔 경계가 쉼표 **또는 공백**이라 `*sky` 가 `cloudy sky` 에도 걸렸다 -
         #    태그 전체 일치가 아니었다. 양쪽을 같이 고쳤다(사용자 제보 2026-08-25).
-        # 비캡처 그룹이어야 한다 - 캡처 그룹이면 pandas 가 매 호출 경고를 뱉는다.
-        pattern = r"(?:^|,)\s*" + re.escape(key) + r"\s*(?:,|$)"
-        # exact 결과는 부분일치 결과의 **부분집합**이다(정규식이 리터럴 key 를 요구하므로).
-        # 그래서 부분 마스크가 **이미 캐시에 있으면** 그 후보 행만 훑는다.
-        #
-        # ⚠️ 캐시에 없으면 굳이 만들지 않는다. 실측(800k 행): 부분일치가 흔한 태그에서는
-        #    base 를 새로 만들어 후보로 좁히는 것이 전체 regex 1회보다 **느리다**
-        #    (sky 84.5%: 콜드 327ms vs 전체 289ms). base 가 이미 있을 때만 이득이다
-        #    (1girl 34.6%: 웜 110ms vs 320ms).
-        base = cache["tag_hits"].get((False, key))
-        if base is None:
-            return _store_mask(
-                cache_key, tags_text.str.contains(pattern, na=False, regex=True).to_numpy()
-            )
-        out = np.zeros(row_count, dtype=bool)
-        candidates = np.flatnonzero(base)
-        if candidates.size:
-            # ⚠️ positional `.iloc` 이어야 한다. 커스텀 parquet 은 index 가 기본이 아닐 수 있어
-            #    label 색인을 쓰면 엉뚱한 행을 본다.
-            hits = tags_text.iloc[candidates].str.contains(
-                pattern, na=False, regex=True
-            ).to_numpy()
-            out[candidates[hits]] = True
-        return _store_mask(cache_key, out)
+        # ⚠️ 공백 클래스는 `\s` 가 아니라 `_RE2_PY_WS` 다. RE2 의 `\s` 는 ASCII 뿐인데 예전 경로
+        #    (파이썬 re)의 `\s` 는 NBSP·전각 공백까지 먹었다 - 그대로 쓰면 `a,\xa0b` 에서 `*b` 가 빠진다.
+        # (예전의 '부분 마스크 후보만 훑기'는 뺐다 - 병렬 전체 스캔이 칩당 ~0.1초라 이득이 없다.)
+        pattern = r"(?:^|,)" + _RE2_PY_WS + "*" + re.escape(key) + _RE2_PY_WS + r"*(?:,|$)"
+        return _store_mask(cache_key, _match_tags_text(tags_text, pattern))
 
     def _beat():
         # bracket 하트비트: 각 (미캐시 가능) str.contains scan 직전과 최종 materialize 직전에 발행 →
@@ -828,6 +1043,71 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
         except Exception:
             pass
 
+    parsed, clean_tags = _parse_filter_chips(tags)
+
+    def _chips_mask(chips: list[tuple[str, bool, bool]]):
+        include_mask = None                              # None = 아직 제한 없음(전체 행)
+        exclude_mask = np.zeros(row_count, dtype=bool)
+        for clean, negate, exact in chips:
+            _beat()                                      # 이 칩의 scan 직전
+            m = _hit_mask(clean.lower(), exact)
+            if negate:
+                exclude_mask |= m
+            elif include_mask is None:
+                include_mask = m.copy()                  # copy → 이후 &= 가 캐시 마스크를 변형하지 않음
+            else:
+                include_mask &= m
+        if include_mask is None:
+            include_mask = np.ones(row_count, dtype=bool)
+        return include_mask & ~exclude_mask if exclude_mask.any() else include_mask
+
+    branch_clean: list[list[str]] = []
+    branch_rating_counts: list[dict[str, int]] = []
+    if branches:
+        # 분기 스테이징(계획서 P3): 분기마다 칩 마스크(재스캔 없음 - 칩 캐시 재사용) → 분기끼리 OR.
+        frame_ratings = None
+        if "rating" in cache["frame"].columns:
+            if cache.get("rating_values") is None:
+                cache["rating_values"] = cache["frame"]["rating"].astype(str).to_numpy()
+            frame_ratings = cache["rating_values"]
+        final_mask = np.zeros(row_count, dtype=bool)
+        for branch in branches:
+            branch_parsed, branch_tokens = _parse_filter_chips(branch)
+            if not branch_parsed:
+                continue
+            mask = _chips_mask(branch_parsed)
+            final_mask |= mask
+            branch_clean.append(branch_tokens)
+            if frame_ratings is not None:
+                branch_rating_counts.append({r: int((mask & (frame_ratings == r)).sum()) for r in "gsqe"})
+            else:
+                branch_rating_counts.append({r: 0 for r in "gsqe"})
+        _beat()
+    else:
+        final_mask = _chips_mask(parsed)
+        _beat()                                          # 마지막 scan tail + 최종 materialize 직전
+
+    frame = cache["frame"]
+    matched = frame[final_mask]                           # positional boolean index (set(range())/sorted() 제거)
+    ids = set(matched["id"].tolist()) if cache["has_id"] else set(matched.index.tolist())
+    result = {
+        "type": "tag_filter_result",
+        "count": int(len(matched)),
+        "tags": clean_tags,
+        "rating_counts": rating_counts_from_frame(matched),
+        "_ids": ids,
+        # B3: 이미 슬라이스된 매칭 프레임(등급-무관)을 동봉 → assign 이 active 로 이관해
+        # apply_search_runtime_filters 가 전체 스냅샷 isin 재스캔을 건너뛴다(가드는 호출부).
+        "_frame": matched,
+    }
+    if branches:
+        result["branches"] = branch_clean
+        result["branch_rating_counts"] = branch_rating_counts
+    return result
+
+
+def _parse_filter_chips(tags: list[Any]) -> tuple[list[tuple[str, bool, bool]], list[str]]:
+    """칩 목록 → [(clean, negate, exact)] + 영속용 토큰. 분기 하나도 같은 문법이다."""
     # 먼저 모든 칩을 (clean, negate)로 분해 — 프론트가 "1girl, armpits" 한 칩을 통째로 보내도 두
     # 태그로 매칭/표기(예약 버그). negate('-')는 분리 후 서브토큰별 판정('1girl, -armpits' →
     # include 1girl + exclude armpits).
@@ -858,36 +1138,7 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
             #    재시작 시 exact 가 조용히 부분일치로 강등된다(Codex 지적).
             clean_tags.append(("-" if negate else "") + ("*" if exact else "") + clean)
             parsed.append((clean, negate, exact))
-
-    include_mask = None                                  # None = 아직 제한 없음(전체 행)
-    exclude_mask = np.zeros(row_count, dtype=bool)
-    for clean, negate, exact in parsed:
-        _beat()                                          # 이 칩의 str.contains scan 직전
-        m = _hit_mask(clean.lower(), exact)
-        if negate:
-            exclude_mask |= m
-        elif include_mask is None:
-            include_mask = m.copy()                      # copy → 이후 &= 가 캐시 마스크를 변형하지 않음
-        else:
-            include_mask &= m
-    if include_mask is None:
-        include_mask = np.ones(row_count, dtype=bool)
-    _beat()                                              # 마지막 scan tail + 최종 materialize 직전
-    final_mask = include_mask & ~exclude_mask if exclude_mask.any() else include_mask
-
-    frame = cache["frame"]
-    matched = frame[final_mask]                           # positional boolean index (set(range())/sorted() 제거)
-    ids = set(matched["id"].tolist()) if cache["has_id"] else set(matched.index.tolist())
-    return {
-        "type": "tag_filter_result",
-        "count": int(len(matched)),
-        "tags": clean_tags,
-        "rating_counts": rating_counts_from_frame(matched),
-        "_ids": ids,
-        # B3: 이미 슬라이스된 매칭 프레임(등급-무관)을 동봉 → assign 이 active 로 이관해
-        # apply_search_runtime_filters 가 전체 스냅샷 isin 재스캔을 건너뛴다(가드는 호출부).
-        "_frame": matched,
-    }
+    return parsed, clean_tags
 
 
 def normalize_custom_parquet_filename(filename: str, *, fallback_prefix: str = "search_export") -> str:
@@ -936,38 +1187,127 @@ def load_or_merge_custom_parquet(
 
     # Chunked read + progress broadcast so a large custom parquet load/merge shows
     # the Tag/Tag-Filter lock + '풀 로딩 N%' (the frontend also locks on click).
+    from core.custom_parquet_library import file_recipe, merge_recipe
+
     progress, done = make_search_load_progress(context)
     try:
         frame = read_parquet_chunked(path, progress=progress)
         frame = normalize_custom_parquet_frame(frame)
+        provenance = file_recipe(path)
         if merge:
-            current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+            current = merge_base_frame(context)
             if current is not None and not current.empty:
                 frame = pd.concat([current, frame], ignore_index=True)
                 frame = normalize_custom_parquet_frame(frame)
-        install_custom_parquet_frame(context, frame)
+                provenance = merge_recipe(pool_provenance(context), provenance)
+        install_custom_parquet_frame(context, frame, provenance=provenance)
     finally:
         done()
-    state = search_state_with_runner_save(context)
+    # runner 는 install 이 백그라운드로 복사한다 - 여기서 다시 쓰면 응답 전에 풀 전체를 또 쓴다.
+    state = context.search_state_payload()
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"
     return state, {"type": "toast", "message": f"{path.name} {verb} ({len(frame):,})", "level": "success"}
 
 
+def export_condition_frame(context: WebSessionContext):
+    """'조건에 맞는 행 전체' = snapshot × 활성 등급 × 활성 태그필터 (사용자 결정 D2).
+
+    ⚠️ `search_results.get_dataframe()` 이 아니다 - 그건 Random 이 뽑아 쓴 행이 빠진 남은 풀이라
+    저장할 때마다 내용이 줄어든다. 반환: (frame, recipe)."""
+    with search_pool_state_guard(context):
+        source = getattr(context, "search_results_snapshot", None)
+        if source is None or getattr(source, "empty", True):
+            source = search_base_frame(context)
+        ratings = context.get_active_ratings()
+        tag_ids = getattr(context, "active_tag_filter_ids", None)
+        # ⚠️ active_tag_filter_ids 는 Random 이 뽑을 때마다 **줄어든다**(_consume_active_tag_filter_row).
+        #    그것으로 거르면 뽑아 쓴 행이 저장에서 빠지고, 다 쓰면 저장할 행이 없다(병합 전 리뷰 #2 - 팝업의
+        #    "뽑아 쓴 행도 포함" 과 달랐다). 적용 순간의 불변 집합(스냅샷)을 쓴다.
+        applied = getattr(context, "active_tag_filter_snapshot", None)
+        if tag_ids is not None and isinstance(applied, dict) and applied.get("ids"):
+            tag_ids = set(applied["ids"])
+        active = getattr(context, "active_tag_filter", None) or {}
+        parent = pool_provenance(context)
+    frame = filter_source_frame(source, ratings=ratings, tag_ids=tag_ids)
+    recipe: dict[str, Any] = {"source": "export", "parent": parent, "ratings": sorted(ratings or [])}
+    tags = [str(t) for t in (active.get("tags") or [])] if tag_ids is not None else []
+    branches = [list(b) for b in (active.get("branches") or [])] if tag_ids is not None else []
+    if tags or branches:
+        recipe["tag_filter"] = {
+            "include": [t for t in tags if not t.startswith("-")],
+            "exclude": [t[1:] for t in tags if t.startswith("-")],
+        }
+        if branches:
+            # 분기 스테이징이면 결과 = 분기들의 합집합 - 위 include/exclude(작업 중 칩)가 아니라 이것이 조건이다.
+            recipe["tag_filter"]["branches"] = [
+                {"include": [t for t in b if not t.startswith("-")], "exclude": [t[1:] for t in b if t.startswith("-")]}
+                for b in branches
+            ]
+    return frame, recipe
+
+
+def export_condition_preview(context: WebSessionContext) -> dict[str, Any]:
+    """[이 결과 저장] 팝업의 미리보기 - **저장과 같은 함수**(export_condition_frame)로 센다. 따로 세면
+    팝업의 수와 실제로 써지는 파일이 어긋난다. 행 수 · 등급별 구성 · 만든 조건(명함 recipe)."""
+    from core.custom_parquet_library import make_meta
+
+    frame, recipe = export_condition_frame(context)
+    rows = 0 if frame is None else int(len(frame))
+    return {
+        "type": "search_export_preview",
+        "rows": rows,
+        "rating_counts": rating_counts_from_frame(frame),
+        "active_ratings": sorted(context.get_active_ratings() or []),
+        # 파일에 새기는 것과 같은 모양(깊이 제한 포함)으로 보낸다.
+        "recipe": make_meta("export", recipe, rows)["recipe"],
+    }
+
+
+def _library_toast(message: str, level: str = "success") -> dict[str, Any]:
+    return {"type": "toast", "message": message, "level": level}
+
+
+_LIBRARY_ERRORS = {
+    "invalid_source": "잘못된 파일 이름입니다",
+    "invalid_name": "쓸 수 없는 이름입니다",
+    "not_found": "파일을 찾을 수 없습니다",
+    "exists": "같은 이름의 파일이 이미 있습니다",
+}
+
+
 def search_parquet_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    from core import custom_parquet_library as lib
+
+    action = str(command.get("action") or "").strip()
+    directory = context.custom_parquet_dir()
+    if action == "rename":
+        ok, info = lib.rename(directory, str(command.get("filename") or ""), str(command.get("new_name") or ""))
+        if not ok:
+            return context.search_state_payload(), _library_toast(_LIBRARY_ERRORS.get(info, info), "error")
+        return context.search_state_payload(), _library_toast(f"이름을 바꿨습니다 → {info}")
+    if action == "trash":
+        ok, info = lib.trash(directory, str(command.get("filename") or ""))
+        if not ok:
+            return context.search_state_payload(), _library_toast(_LIBRARY_ERRORS.get(info, info), "error")
+        return context.search_state_payload(), _library_toast(f"휴지통으로 옮겼습니다 ({lib.TRASH_DIR}/{info})")
+    if action == "export_results":
+        frame, recipe = export_condition_frame(context)
+        if frame is None or frame.empty:
+            return context.search_state_payload(), _library_toast("저장할 행이 없습니다", "error")
+        requested = str(command.get("filename") or "").strip()
+        path = next_custom_parquet_path(context, requested, fallback_prefix="search_export")
+        # 이름을 직접 적었는데 이미 있으면 덮어쓰지 않는다(예전엔 조용히 덮었다).
+        if requested and path.exists():
+            return context.search_state_payload(), _library_toast(_LIBRARY_ERRORS["exists"], "error")
+        lib.write_parquet(frame, path, lib.make_meta(recipe.get("source", "export"), recipe, len(frame)))
+        return context.search_state_payload(), _library_toast(f"저장했습니다 {path.name} ({len(frame):,}행)")
     frame = context.search_results.get_dataframe() if context.search_results else None
     if frame is None or frame.empty:
         return context.search_state_payload(), {"type": "toast", "message": "No search results to save", "level": "error"}
-    action = str(command.get("action") or "").strip()
-    if action == "export_results":
-        path = next_custom_parquet_path(context, str(command.get("filename") or ""), fallback_prefix="search_export")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(path, index=False)
-        message = f"Exported {path.name} ({len(frame):,})"
-    elif action == "save_runner":
+    if action == "save_runner":
         path = context.runner_parquet_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(path, index=False)
+        search_pool_writer(context).write_now(path, frame, kind="runner")
         message = f"Saved runner parquet ({len(frame):,})"
     else:
         return context.search_state_payload(), {"type": "toast", "message": "Unsupported parquet action", "level": "error"}

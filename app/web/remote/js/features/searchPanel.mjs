@@ -1,4 +1,154 @@
 import { createRatingStore, RATING_KEYS, filteredCount } from './ratingStore.mjs';
+import { libraryHtml, librarySignature, recipeFactsHtml, PQL_CSS } from './parquetLibrary.mjs?v=20260925-save';
+
+// 검색 층 컴팩트 배치(사용자 지정 2026-09-21): 상단 단추 셋 · 행 수 한 줄 · 등급 한 줄 ·
+// [검색 기록 | 검색]. ⚠️ display 를 주는 요소는 [hidden] 짝 규칙을 같이 둔다(이 저장소가 여러 번 밟았다).
+const SEARCH_COMPACT_CSS = `
+.sp-toolbar{display:flex;gap:4px;align-items:stretch}
+.sp-toolbar .search-parquet-control{position:relative;flex:1 1 0;display:flex}
+.sp-tbtn{flex:1 1 0;min-width:0;height:24px;padding:0 6px;font-size:10.5px;font-weight:600;border-radius:5px;
+  border:1px solid var(--border,#33333f);background:rgba(255,255,255,0.03);color:var(--text-secondary,#c8c8d0);
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-tbtn:hover{color:var(--text-primary,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
+.sp-tbtn.is-on{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.search-parquet-host[hidden]{display:none!important}
+.sp-counts{display:flex;align-items:center;height:26px;border:1px solid var(--border,#2c2c36);border-radius:6px;
+  background:rgba(255,255,255,0.02);font-size:10.5px;color:var(--text-muted,#9a9aa6)}
+.sp-count-cell{flex:1 1 0;display:flex;align-items:baseline;gap:4px;padding:0 9px;min-width:0}
+.sp-count-label{flex:1 1 auto;white-space:nowrap}
+.sp-count-cell b{font-family:var(--font-mono,monospace);font-size:12.5px;color:var(--accent-green,#5a9e6f)}
+.sp-unit{font-size:10px}
+.sp-count-sep{width:1px;align-self:stretch;margin:5px 0;background:var(--border,#33333f)}
+/* 한 줄 유지(사용자 지정 2026-09-25: 줄넘김은 공간 낭비). 창이 이 줄보다 좁아지지 않게
+   syncWindowMinWidth 가 창 최소 너비를 이 줄의 실제 폭으로 막는다 - 예전엔 437px 창에서 General 이
+   밖으로 나가 가로 스크롤이 생겼다(글꼴 설정마다 폭이 달라 숫자로 박지 않는다). */
+.sp-ratings{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap}
+.sp-ratings .mod-section-label{margin:0}
+.sp-ratings .mod-checkbox-item{display:inline-flex;align-items:center;gap:3px;margin:0;white-space:nowrap}
+.sp-ratings .mod-checkbox-label{font-size:10.5px}
+.sp-search-row{display:flex;gap:4px;align-items:stretch}
+.sp-hist-btn{flex:0 0 auto;height:26px;padding:0 10px;font-size:10.5px;border-radius:5px;cursor:pointer;
+  border:1px solid var(--border,#33333f);background:rgba(255,255,255,0.03);color:var(--text-secondary,#c8c8d0)}
+.sp-hist-btn:hover{color:var(--text-primary,#e8e8ee)}
+.sp-hist-btn.is-on{border-color:var(--accent-blue,#8d7bd6);color:var(--text-primary,#e8e8ee)}
+.sp-search-row .mod-start{flex:1 1 auto;height:26px;min-height:26px;font-size:11.5px}
+.sp-history{display:flex;flex-direction:column;gap:4px;border:1px solid var(--accent-blue,#8d7bd6);border-radius:6px;padding:5px}
+.sp-history[hidden]{display:none!important}
+.sp-hist-filter{height:22px;font-size:11px;padding:1px 6px;background:var(--bg-surface,#15151b);color:var(--text-primary,#e8e8ee);
+  border:1px solid var(--border,#33333f);border-radius:4px}
+.sp-hist-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.sp-hist-item{display:flex;align-items:flex-start;gap:4px;padding:4px 6px;border-radius:4px;cursor:pointer}
+.sp-hist-item:hover{background:rgba(255,255,255,0.05)}
+.sp-hist-text{flex:1;min-width:0}
+.sp-hist-q{font-size:11px;color:var(--text-primary,#e8e8ee);word-break:break-all}
+.sp-hist-x{font-size:10.5px;color:#e39a9a;word-break:break-all}
+.sp-hist-meta{font-size:9.5px;color:var(--text-dimmer,#6c6c78);font-family:var(--font-mono,monospace)}
+.sp-hist-del{flex:0 0 auto;border:none;background:transparent;color:var(--text-dimmer,#6c6c78);cursor:pointer;font-size:13px;line-height:1}
+.sp-hist-del:hover{color:#f0a0a0}
+.sp-hist-empty{font-size:10.5px;color:var(--text-dimmer,#6c6c78);padding:4px}
+/* 기간 슬라이더 트랙: 원래 배경이 var(--bg-elevated) 인데 떠 있는 창의 배경도 같은 색이라
+   트랙이 사라졌다(사용자 제보). 창 배경 위에서도 보이는 반투명 흰색으로. */
+.dr-track{background:rgba(255,255,255,0.13);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05)}
+.search-progress{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-dim,#888)}
+.search-progress:empty{display:none}
+/* 검색·제외 칸 = 줄이 자동으로 늘어나는 textarea(사용자 지정 2026-09-24). 높이는 JS(autoGrow)가 준다. */
+.sp-kw{display:block;width:100%;resize:none;overflow:hidden;min-height:24px;line-height:1.45;
+  white-space:pre-wrap;word-break:break-word}
+/* [▼ 영구 제외] - 붉은 줄. 저장되고 모든 검색에 붙는다. */
+.sp-perm-btn{height:17px;padding:0 7px;font-size:9.5px;font-weight:600;border-radius:4px;cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(226,86,96,0.50);background:rgba(160,32,40,0.14);color:#f2b4b8}
+.sp-perm-btn:hover{background:rgba(160,32,40,0.28);color:#fff}
+.sp-perm-btn.is-on{background:rgba(160,32,40,0.38);color:#fff}
+.sp-kw.sp-perm{margin-top:4px;background:rgba(150,26,34,0.34);border-color:rgba(226,86,96,0.62);color:#ffe4e4}
+.sp-kw.sp-perm:focus{border-color:#ff7b85}
+.sp-kw.sp-perm::placeholder{color:rgba(255,196,196,0.55)}
+.sp-kw.sp-perm[hidden]{display:none!important}
+/* 자동완성·태그 정보가 그려지는 자리 = 창 아래 빈 공간을 채운다(사용자 지정 2026-09-24: 팝업 대신).
+   목록은 이 칸 안에서 스크롤한다(absolute 라 목록 길이가 창을 밀어내지 않는다). */
+.sqw-body .search-host{flex:1 0 auto}
+.sp-ac-host{position:relative;flex:1 1 auto;min-height:120px}
+.sp-ac-host>.tag-tooltip.inline-host{position:absolute!important;inset:0!important;width:auto!important;
+  max-width:none!important;max-height:none!important;z-index:auto!important;margin:0;box-shadow:none;
+  border-radius:6px;font-size:11px}
+.sp-ac-host>.tag-tooltip.inline-host.open{display:flex;flex-direction:column;overflow-y:auto}
+/* 이 창 전용 우클릭 메뉴 - 메인 프롬프트 메뉴(chunkPanel)와 분리. 창 더미(10150~) 위에 뜬다. */
+.sp-ctx{position:fixed;z-index:calc(var(--z-drag-panel-assist,10197) + 1);min-width:132px;padding:4px;
+  display:flex;flex-direction:column;gap:1px;background:var(--bg-elevated,#1e1e26);
+  border:1px solid var(--border,#33333f);border-radius:7px;box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+.sp-ctx[hidden]{display:none!important}
+.sp-ctx button{display:block;width:100%;text-align:left;padding:5px 10px;border:none;border-radius:4px;
+  background:transparent;color:var(--text-primary,#e8e8ee);font-size:11px;cursor:pointer}
+.sp-ctx button:hover:not(:disabled){background:rgba(255,255,255,0.07)}
+.sp-ctx button:disabled{color:var(--text-dimmer,#6c6c78);cursor:default}
+.sp-ctx-sep{height:1px;margin:3px 4px;background:var(--border,#33333f)}
+/* [이 결과 저장] 팝업(사용자 지정 2026-09-25): 무엇이 저장되나 - 행 수 · 등급별 구성 · 만든 조건 · 이름. */
+.search-save-form{display:flex;flex-direction:column;gap:7px;margin:4px 0;padding:8px 9px;border-radius:8px;
+  border:1px solid rgba(120,190,150,0.5);background:rgba(0,0,0,0.22)}
+.search-save-form[hidden]{display:none!important}
+.ssf-head{display:flex;align-items:center;gap:8px}
+.ssf-title{font-size:11px;font-weight:700;color:var(--text-primary,#e8e8ee)}
+.ssf-rows{margin-left:auto;font-size:10.5px;color:var(--text-muted,#9a9aa6)}
+.ssf-rows b{font-family:var(--font-mono,monospace);font-size:13px;color:#f5dc8a;margin-right:2px}
+.ssf-x{border:none;background:transparent;color:var(--text-dimmer,#6c6c78);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.ssf-x:hover{color:#f0a0a0}
+.ssf-section{display:flex;flex-direction:column;gap:4px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06)}
+.ssf-label{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim,#888)}
+.ssf-ratings .ttr-cell.is-off{opacity:.35}
+.ssf-ratings .ttr-cell.is-off b{background:transparent!important;color:var(--text-dim,#888)}
+.ssf-facts{display:flex;flex-direction:column;gap:2px}
+.ssf-foot{font-size:9.5px;color:var(--text-dimmer,#6c6c78)}
+.ssf-loading{font-size:10.5px;color:var(--text-dim,#888);padding:4px 0}
+.search-save-form .ssf-row{display:flex;gap:5px;align-items:center}
+.search-save-form .ssf-row input{flex:1 1 auto;min-width:0;height:24px;padding:2px 7px;font-size:11px;border-radius:5px;
+  border:1px solid var(--border,#33333f);background:var(--bg-deep,#0e0e12);color:var(--text-primary,#e8e8ee)}
+.ssf-save{flex:0 0 auto;height:24px;padding:0 14px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;
+  border:1px solid transparent;background:var(--accent-green,#5a9e6f);color:#fff}
+.ssf-save:disabled{opacity:.4;cursor:default}
+/* [Tag Filter 및 심층 검색] - 옛 판에서 검색 창 안에 있던 두 기능으로 가는 길(사용자 지정 2026-09-25).
+   Search Keyword 줄의 빈 오른쪽 끝, 분홍. */
+.search-host .dr-label-row{white-space:nowrap}
+.sp-legacy-wrap{position:relative;margin-left:auto;display:inline-flex}
+.sp-legacy-btn{height:18px;padding:0 9px;font-size:9.5px;font-weight:700;border-radius:4px;cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(236,122,182,0.62);background:rgba(214,88,154,0.22);color:#ffc6e2}
+.sp-legacy-btn:hover,.sp-legacy-btn[aria-expanded="true"]{background:rgba(214,88,154,0.40);color:#fff}
+.sp-legacy-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:6;min-width:250px;padding:4px;display:flex;
+  flex-direction:column;gap:2px;background:var(--bg-elevated,#1e1e26);border:1px solid rgba(236,122,182,0.45);
+  border-radius:7px;box-shadow:0 8px 24px rgba(0,0,0,0.5);white-space:normal}
+.sp-legacy-menu[hidden]{display:none!important}
+.sp-legacy-menu button{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;padding:5px 9px;border:none;
+  border-radius:5px;background:transparent;color:var(--text-primary,#e8e8ee);cursor:pointer}
+.sp-legacy-menu button:hover{background:rgba(214,88,154,0.18)}
+.sp-legacy-menu b{font-size:11px;color:#ffc6e2}
+.sp-legacy-menu span{font-size:10px;color:var(--text-muted,#9a9aa6);word-break:keep-all}
+`;
+
+// 칸 id -> 서버 필드. 영구 제외는 따로 저장되고(search_filter_state.exclude_permanent) 모든 검색에 붙는다.
+const KEYWORD_FIELDS = { searchQuery: 'query', searchExclude: 'exclude', searchExcludePermanent: 'exclude_permanent' };
+const PERM_OPEN_KEY = 'naia.search.permExcludeOpen';
+
+/** 쉼표로 가른 조각 수(중괄호 안의 쉼표는 세지 않는다) - 접힌 [영구 제외] 단추에 보인다. */
+export function countKeywordTerms(text) {
+  let depth = 0;
+  let count = 0;
+  let current = '';
+  for (const ch of String(text || '')) {
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      if (current.trim()) count += 1;
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) count += 1;
+  return count;
+}
+
+/** 줄바꿈을 쉼표로 - 검색 문법은 한 줄이다(붙여 넣은 여러 줄 = 태그 여러 개). */
+export function flattenKeywordLines(text) {
+  return String(text || '').replace(/\s*[\r\n]+\s*/g, ', ');
+}
 
 export function createSearchPanel({
   document,
@@ -9,6 +159,15 @@ export function createSearchPanel({
   WebSocket,
   getQuickFilter,
   getCurrentModuleId,
+  // 검색 화면이 지금 그려져야 하나. 리모컨 창이 주입한다(창이 열려 있으면 참). 없으면 예전처럼
+  // 'search' 모듈이 열려 있을 때. ⚠️ 창으로 옮긴 뒤 currentModuleId 는 다시 'search' 가 안 된다 -
+  // 이것 없이 옮기면 창이 영영 빈 채로 뜬다.
+  isSearchVisible = null,
+  // Custom Parquets 는 검색 창 옆 동반 창(searchQuickWindow)에 산다. 목록을 그릴 요소와 여닫기를 받는다.
+  libraryHost = null,
+  toggleLibrary = () => {},
+  showLibrary = () => {},
+  isLibraryOpen = () => false,
   bindTagAssist,
   lockTagSurface = () => {},
   unlockTagSurface = () => {},
@@ -17,6 +176,9 @@ export function createSearchPanel({
   showToast = () => {},
 }) {
   let searchingActive = false;
+  const searchVisible = () => (typeof isSearchVisible === 'function'
+    ? !!isSearchVisible()
+    : getCurrentModuleId() === 'search');
   let initialFilterRestoreDone = false; // 시작 시 Tag Filter 자동 Search→Assign 1회 가드
   let latestTagFilterRevision = 0;
   // Rating state lives in one store holding BOTH the generation-pool ratings
@@ -49,8 +211,29 @@ export function createSearchPanel({
   // skipped) until its own echo arrives — so a normalized/diverging sibling field
   // can't freeze it — and re-focusing the field drops its guard (the user is
   // editing again).
-  let pendingEcho = { query: null, exclude: null };
+  let pendingEcho = { query: null, exclude: null, exclude_permanent: null };
   let lastParquetSig = null;
+  let exportPreview = null;         // [이 결과 저장] 미리보기(서버 search_export_preview)
+  let exportPreviewTimer = null;
+  // [▼ 영구 제외] 줄을 펼쳐 두었나 - 보는 사람의 편의라 이 브라우저에만 기억한다(내용은 서버에 저장).
+  let permOpen = (() => { try { return localStorage.getItem(PERM_OPEN_KEY) === '1'; } catch { return false; } })();
+  let ctxMenu = null;
+  let ctxTarget = null;
+  let growWidth = -1;
+  // 카드 목록이 그려지는 곳 - 동반 창 본문에 붙는다(없으면 떠도는 요소 = 시험·옛 배선).
+  const libHost = libraryHost || document.createElement('div');
+  libHost.classList.add('search-parquet-host');
+  // Custom Parquet 카드 목록(parquetLibrary.mjs) - 다시 그려도 펼침·메뉴·이름 바꾸기 상태를 잇는다.
+  let lastLibrary = [];
+  let lastProvenance = null;
+  const pqlOpen = new Set();
+  let pqlMore = null;
+  let pqlRenaming = null;
+  let pqlConfirmTrash = null;
+  let pqlConfirmTimer = null;
+  // [검색 기록] - 최근 검색 최대 500개(백엔드 core/search_history.py). 열 때만 받는다.
+  let historyItems = [];
+  let historyOpen = false;
 
   document.addEventListener('click', event => {
     if (!event.target.closest('.search-parquet-control')) closeParquetMenu();
@@ -118,6 +301,7 @@ export function createSearchPanel({
     return {
       query: (document.getElementById('searchQuery') || {}).value || '',
       exclude: (document.getElementById('searchExclude') || {}).value || '',
+      exclude_permanent: (document.getElementById('searchExcludePermanent') || {}).value || '',
       ratings: getActiveRatings(),
     };
   }
@@ -139,6 +323,7 @@ export function createSearchPanel({
     return {
       query: serverSearchText(message, 'query'),
       exclude: serverSearchText(message, 'exclude'),
+      exclude_permanent: serverSearchText(message, 'exclude_permanent'),
     };
   }
 
@@ -151,7 +336,11 @@ export function createSearchPanel({
       ...extra,
     };
     // Hold each field authoritative until the backend echoes it (see pendingEcho).
-    pendingEcho = { query: String(state.query || ''), exclude: String(state.exclude || '') };
+    pendingEcho = {
+      query: String(state.query || ''),
+      exclude: String(state.exclude || ''),
+      exclude_permanent: String(state.exclude_permanent || ''),
+    };
     ws.send(JSON.stringify(state));
   }
 
@@ -213,10 +402,21 @@ export function createSearchPanel({
           // Keep the generic message when the server did not return JSON.
         }
         console.error(message);
+        // 예전엔 콘솔에만 남아 사용자는 실패를 몰랐다.
+        showToast(`불러오기 실패: ${message}`, 'error');
         unlockTagSurface();
+        return;
+      }
+      try {
+        const data = await response.json();
+        const verb = mode === 'merge' ? '합쳤습니다' : '불러왔습니다';
+        showToast(`${file.name} ${verb} (${Number(data.rows || 0).toLocaleString('en-US')}행 → 풀 ${Number(data.total || 0).toLocaleString('en-US')}행)`, 'success');
+      } catch (error) {
+        // 성공 본문을 못 읽어도 풀은 이미 바뀌었다 - 조용히 넘어간다.
       }
     } catch (error) {
       console.error('Parquet upload failed', error);
+      showToast('불러오기 실패: 서버에 닿지 못했습니다', 'error');
       unlockTagSurface();
     }
   }
@@ -238,12 +438,104 @@ export function createSearchPanel({
     if (list) list.classList.remove('collapsed');
   }
 
-  function runParquetAction(action) {
+  function runParquetAction(action, extra = {}) {
     const ws = getWs();
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     closeParquetMenu();
     lockTagSurface();
-    ws.send(JSON.stringify({type: 'search_parquet_action', action}));
+    ws.send(JSON.stringify({type: 'search_parquet_action', action, ...extra}));
+    return true;
+  }
+
+  // ---- '이 결과 저장' 팝업 --------------------------------------------------------
+  // 저장 대상 = 지금 조건에 맞는 행 전체(등급·Tag Filter 반영, Random 이 뽑아 쓴 행 포함).
+  // 파일에는 만든 조건(명함)이 함께 새겨진다 - 목록 카드가 그걸 읽는다.
+  // 팝업은 **무엇이 저장되나**를 먼저 보인다(사용자 지정 2026-09-25): 행 수 · 등급별 구성 · 만든 조건.
+  // 수는 서버가 **저장과 같은 함수**로 센다(search_export_preview) - 따로 세면 팝업과 파일이 어긋난다.
+  const RATING_ORDER = ['g', 's', 'q', 'e'];
+
+  function saveFormOpen() {
+    const form = moduleBody.querySelector('.search-save-form');
+    return Boolean(form && !form.hidden);
+  }
+
+  function requestExportPreview() {
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({type: 'search_export_preview'}));
+  }
+
+  function openSaveForm() {
+    closeParquetMenu();
+    const form = moduleBody.querySelector('.search-save-form');
+    if (!form) return;
+    form.hidden = false;
+    exportPreview = null;
+    renderSavePreview();
+    requestExportPreview();
+    const input = form.querySelector('.ssf-row input');
+    if (input) { input.value = ''; input.focus(); }
+  }
+
+  function onExportPreview(message) {
+    exportPreview = message || null;
+    renderSavePreview();
+  }
+
+  function ratingBreakdownHtml(counts, active) {
+    const values = RATING_ORDER.map(r => Math.max(0, Number(counts?.[r]) || 0));
+    const total = values.reduce((a, b) => a + b, 0);
+    const bar = RATING_ORDER.map((r, i) => values[i] > 0
+      ? `<span class="ttr-seg" data-r="${r}" style="width:${(values[i] / (total || 1) * 100).toFixed(2)}%"></span>` : '').join('');
+    const cells = RATING_ORDER.map((r, i) => {
+      const on = active.includes(r);
+      const pct = total ? ` (${(values[i] / total * 100).toFixed(1)}%)` : '';
+      return `<span class="ttr-cell${on ? (values[i] ? '' : ' is-zero') : ' is-off'}" data-r="${r}" title="${on ? `${r.toUpperCase()} ${values[i].toLocaleString('en-US')}${pct}` : '등급이 꺼져 있어 저장하지 않습니다'}">`
+        + `<b>${r.toUpperCase()}</b>${on ? values[i].toLocaleString('en-US') : '제외'}</span>`;
+    }).join('');
+    return `<span class="ttr-bar">${bar}</span><span class="ttr-cells">${cells}</span>`;
+  }
+
+  function renderSavePreview() {
+    const form = moduleBody.querySelector('.search-save-form');
+    if (!form || form.hidden) return;
+    const body = form.querySelector('.ssf-body');
+    const rowsEl = form.querySelector('.ssf-rows');
+    const save = form.querySelector('.ssf-save');
+    if (!exportPreview) {
+      if (body) body.innerHTML = '<div class="ssf-loading">저장될 행을 세는 중…</div>';
+      if (rowsEl) rowsEl.textContent = '';
+      if (save) save.disabled = true;
+      return;
+    }
+    const rows = Number(exportPreview.rows) || 0;
+    const active = Array.isArray(exportPreview.active_ratings) ? exportPreview.active_ratings : RATING_ORDER;
+    if (rowsEl) rowsEl.innerHTML = `<b>${rows.toLocaleString('en-US')}</b>행`;
+    if (save) save.disabled = rows <= 0;
+    if (body) body.innerHTML = `
+      <div class="ssf-section">
+        <span class="ssf-label">등급별 구성</span>
+        <div class="tag-tooltip-ratings ssf-ratings">${ratingBreakdownHtml(exportPreview.rating_counts, active)}</div>
+      </div>
+      <div class="ssf-section">
+        <span class="ssf-label">만든 조건 (파일에 함께 새겨집니다)</span>
+        <div class="ssf-facts pql-facts">${recipeFactsHtml(exportPreview.recipe, escHtml)}</div>
+      </div>
+      <div class="ssf-foot">${rows ? 'Random 이 이미 뽑아 쓴 행도 포함해 조건에 맞는 행 전체를 저장합니다.' : '저장할 행이 없습니다 — 등급이나 Tag Filter 를 확인하세요.'}</div>`;
+  }
+
+  function closeSaveForm() {
+    const form = moduleBody.querySelector('.search-save-form');
+    if (form) form.hidden = true;
+  }
+
+  function submitSaveForm() {
+    const input = moduleBody.querySelector('.search-save-form input');
+    const filename = (input && input.value || '').trim();
+    if (runParquetAction('export_results', filename ? { filename } : {})) {
+      closeSaveForm();
+      showLibrary();   // 방금 저장한 카드가 보이게
+    }
   }
 
   function toggleRating(rating) {
@@ -412,7 +704,9 @@ export function createSearchPanel({
       // 끼어든 rating/tag_filter broadcast 는 마커가 없어 여기서 걸러진다(A3 false-positive 방지).
       quickFilter.onSearchReleased();
     }
-    if (getCurrentModuleId() === 'search') renderSearch(message);
+    if (searchVisible()) renderSearch(message);
+    // 방금 끝난 검색이 기록 맨 위에 올라갔다 - 기록 창이 열려 있으면 다시 받는다.
+    if (isSearchDone && historyOpen) requestHistory();
     // app.js 는 이 반환값이 true 일 때만 pool 잠금/Random 게이트를 해제한다. pool 잠금 해제는
     // 실제 pool 작업 완료일 때만이어야 한다: green 검색 진행 중(wasSearching)이면 그 검색의
     // 완료 마커(search_completed=isSearchDone)에만 해제하고, 끼어든 authoritative state
@@ -422,7 +716,7 @@ export function createSearchPanel({
   }
 
   function onSearchProgress(message) {
-    if (getCurrentModuleId() === 'search') {
+    if (searchVisible()) {
       const progress = moduleBody.querySelector('.search-progress');
       if (progress) progress.textContent = `Searching... ${message.completed}/${message.total}`;
     }
@@ -449,38 +743,470 @@ export function createSearchPanel({
     ).join('');
   }
 
-  function parquetSignature(message) {
-    return JSON.stringify(message.parquets || []);
+  function libraryFromMessage(message) {
+    if (Array.isArray(message.parquet_library)) return message.parquet_library;
+    // 옛 백엔드(카드 없음) - 이름만으로라도 그린다.
+    return (message.parquets || []).map(name => ({ name, rows: null, recipe: null, has_meta: false }));
   }
 
+  function parquetSignature(message) {
+    return librarySignature(libraryFromMessage(message));
+  }
+
+  // 예전엔 파일이 없으면 칸 자체가 없고, 있어도 접혀 있어 저장한 파일이 어디 있는지 몰랐다 -
+  // 항상 보이고 기본으로 펼친다. 카드 = 이름 · 행 수 · 만든 조건 요약(눌러서 펼침).
   function parquetSectionHtml(message) {
-    const files = message.parquets || [];
-    if (!files.length) return '';
-    const items = files.map(file =>
-      `<div class="search-parquet-item" onclick="loadParquet(${jsString(file)})">${escHtml(file)}</div>`
-    ).join('');
-    return `<div class="search-parquet-section" data-parquet-mode="${parquetPickMode}">
-      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.parentElement.querySelector('.search-parquet-list')?.classList.toggle('collapsed')">
-        Custom Parquets (${files.length}) <span class="mod-collapse-arrow">▶</span>
-      </div>
-      <div class="search-parquet-mode-label"></div>
-      <div class="search-parquet-list collapsed">${items}</div>
-    </div>`;
+    lastLibrary = libraryFromMessage(message);
+    return `<div class="pql-wrap">${libraryHtml(lastLibrary, {
+      escHtml, openNames: pqlOpen, moreName: pqlMore, renaming: pqlRenaming, confirmTrash: pqlConfirmTrash,
+    })}</div>`;
+  }
+
+  function rerenderLibrary() {
+    const host = libHost;
+    host.innerHTML = parquetSectionHtml({ parquet_library: lastLibrary });
+    updateLibraryCount();
+    if (pqlRenaming) {
+      const input = host.querySelector('.pql-rename');
+      if (input) { input.focus(); input.select(); }
+    }
+  }
+
+  function updateLibraryCount() {
+    const count = moduleBody.querySelector('.sp-pq-count');
+    if (count) count.textContent = String(lastLibrary.length);
+  }
+
+  // 동반 창이 열리고 닫힐 때 창 쪽에서 부른다 - [Custom Parquets] 단추가 상태를 비춘다.
+  function syncLibraryButton(open) {
+    const button = moduleBody.querySelector('[data-sp="parquets"]');
+    if (!button) return;
+    button.classList.toggle('is-on', !!open);
+    button.setAttribute('aria-pressed', open ? 'true' : 'false');
+  }
+
+  // ---- [검색 기록] ---------------------------------------------------------------
+  function requestHistory() {
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'get_search_history' }));
+  }
+
+  function setHistoryOpen(open) {
+    historyOpen = !!open;
+    const box = moduleBody.querySelector('.sp-history');
+    if (box) box.hidden = !historyOpen;
+    const button = moduleBody.querySelector('[data-sp="history"]');
+    if (button) {
+      button.classList.toggle('is-on', historyOpen);
+      button.setAttribute('aria-pressed', historyOpen ? 'true' : 'false');
+    }
+    if (historyOpen) {
+      renderHistory();
+      requestHistory();
+      moduleBody.querySelector('.sp-hist-filter')?.focus();
+    }
+  }
+
+  function historyWhen(at) {
+    // 2026-09-21T19:31:20 -> 09-21 19:31
+    const m = /^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(at || ''));
+    return m ? `${m[1]} ${m[2]}` : '';
+  }
+
+  // 찾기 = 검색어·제외어에 들어 있는가(대소문자 무시) - 사용자 지정: 복잡하게 만들지 말 것.
+  function historyMatches(item, needle) {
+    if (!needle) return true;
+    return `${item.query || ''}\n${item.exclude || ''}`.toLowerCase().includes(needle);
+  }
+
+  function renderHistory() {
+    const list = moduleBody.querySelector('.sp-hist-list');
+    if (!list) return;
+    const needle = (moduleBody.querySelector('.sp-hist-filter')?.value || '').trim().toLowerCase();
+    const shown = [];
+    historyItems.forEach((item, index) => { if (historyMatches(item, needle)) shown.push([item, index]); });
+    if (!shown.length) {
+      list.innerHTML = `<div class="sp-hist-empty">${historyItems.length ? '맞는 기록이 없습니다' : '아직 검색 기록이 없습니다'}</div>`;
+      return;
+    }
+    list.innerHTML = shown.map(([item, index]) => {
+      const ratings = Array.isArray(item.ratings) && item.ratings.length && item.ratings.length < 4 ? item.ratings.join('/') : '';
+      const meta = [
+        typeof item.rows === 'number' ? `${item.rows.toLocaleString('en-US')}행` : '',
+        ratings, item.period || '', historyWhen(item.at),
+      ].filter(Boolean).join(' · ');
+      return `<div class="sp-hist-item" data-sp-hist="${index}" title="눌러서 검색 칸에 채우기">
+        <div class="sp-hist-text">
+          <div class="sp-hist-q">${escHtml(item.query || '(전체)')}</div>
+          ${item.exclude ? `<div class="sp-hist-x">− ${escHtml(item.exclude)}</div>` : ''}
+          <div class="sp-hist-meta">${escHtml(meta)}</div>
+        </div>
+        <button type="button" class="sp-hist-del" data-sp-hist-del="${index}" title="기록에서 지우기">×</button>
+      </div>`;
+    }).join('');
+  }
+
+  function onSearchHistory(message) {
+    historyItems = Array.isArray(message.items) ? message.items : [];
+    if (historyOpen) renderHistory();
+  }
+
+  function useHistoryItem(item) {
+    const query = moduleBody.querySelector('#searchQuery');
+    const exclude = moduleBody.querySelector('#searchExclude');
+    if (query) query.value = item.query || '';
+    if (exclude) exclude.value = item.exclude || '';
+    growKeywordFields();
+    saveFilterState();
+    setHistoryOpen(false);
+    moduleBody.querySelector('.mod-start')?.focus();
+  }
+
+  function bindParquetLibrary() {
+    // 검색 층과 동반 창(카드 그리드) 두 곳에 같은 위임 처리기를 건다.
+    for (const root of [moduleBody, libHost]) bindLibraryRoot(root);
+  }
+
+  function bindLibraryRoot(root) {
+    // 카드는 다시 그릴 때마다 새 요소라 위임으로 받는다(인라인 onclick·전역 함수 없음).
+    if (root._pqlBound) return;
+    root._pqlBound = true;
+    root.addEventListener('click', event => {
+      if (event.target.closest('[data-sp="parquets"]')) { toggleLibrary(); return; }
+      if (event.target.closest('[data-sp="history"]')) { setHistoryOpen(!historyOpen); return; }
+      if (event.target.closest('[data-sp="perm"]')) { setPermOpen(!permOpen, { focus: true }); return; }
+      if (event.target.closest('[data-sp="legacy"]')) { setLegacyMenuOpen(!legacyMenuOpen()); return; }
+      const legacyPick = event.target.closest('[data-sp-legacy]');
+      if (legacyPick) {
+        setLegacyMenuOpen(false);
+        // 옛 진입로 그대로(app.js 전역): Tag Filter = 이 창 아래층으로 · 심층 검색 = Refine 작업대.
+        const view = document.defaultView;
+        if (legacyPick.dataset.spLegacy === 'tag') view?.openTagFilter?.();
+        else view?.openRefine?.();
+        return;
+      }
+      const del = event.target.closest('[data-sp-hist-del]');
+      if (del) {
+        const item = historyItems[Number(del.dataset.spHistDel)];
+        const ws = getWs();
+        if (item && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'delete_search_history', query: item.query || '', exclude: item.exclude || '' }));
+        }
+        return;
+      }
+      const hist = event.target.closest('[data-sp-hist]');
+      if (hist) {
+        const item = historyItems[Number(hist.dataset.spHist)];
+        if (item) useHistoryItem(item);
+        return;
+      }
+      if (event.target.closest('[data-ssf="save"]')) { submitSaveForm(); return; }
+      if (event.target.closest('[data-ssf="cancel"]')) { closeSaveForm(); return; }
+      if (event.target.closest('[data-ssf="open"]')) { openSaveForm(); return; }
+      const button = event.target.closest('[data-pql]');
+      const card = event.target.closest('.pql-tile');
+      if (!button || !card) return;
+      const name = card.dataset.pqlName;
+      const action = button.dataset.pql;
+      if (action === 'load' || action === 'merge') {
+        loadParquet(name, action);
+      } else if (action === 'expand') {
+        if (pqlOpen.has(name)) pqlOpen.delete(name); else pqlOpen.add(name);
+        rerenderLibrary();
+      } else if (action === 'more') {
+        pqlMore = pqlMore === name ? null : name;
+        pqlConfirmTrash = null;
+        rerenderLibrary();
+      } else if (action === 'rename') {
+        pqlRenaming = name;
+        pqlMore = null;
+        rerenderLibrary();
+      } else if (action === 'trash') {
+        // 두 번 눌러야 옮긴다(휴지통이라 되살릴 수 있지만, 한 번 실수로 목록에서 사라지면 놀란다).
+        if (pqlConfirmTrash === name) {
+          pqlConfirmTrash = null;
+          pqlMore = null;
+          runParquetAction('trash', { filename: name });
+        } else {
+          pqlConfirmTrash = name;
+          clearTimeout(pqlConfirmTimer);
+          pqlConfirmTimer = setTimeout(() => { pqlConfirmTrash = null; rerenderLibrary(); }, 3000);
+          rerenderLibrary();
+        }
+      }
+    });
+    root.addEventListener('keydown', event => {
+      const rename = event.target.closest && event.target.closest('.pql-rename');
+      if (rename) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          const from = rename.dataset.pqlRename;
+          const to = rename.value.trim();
+          pqlRenaming = null;
+          if (to && to !== from.replace(/\.parquet$/i, '')) runParquetAction('rename', { filename: from, new_name: to });
+          else rerenderLibrary();
+        } else if (event.key === 'Escape') {
+          pqlRenaming = null;
+          rerenderLibrary();
+        }
+        return;
+      }
+      const histFilter = event.target.closest && event.target.closest('.sp-hist-filter');
+      if (histFilter) {
+        if (event.key === 'Escape') setHistoryOpen(false);
+        return;
+      }
+      const save = event.target.closest && event.target.closest('.search-save-form input');
+      if (save) {
+        if (event.key === 'Enter') { event.preventDefault(); submitSaveForm(); }
+        else if (event.key === 'Escape') closeSaveForm();
+      }
+    });
+    root.addEventListener('input', event => {
+      if (event.target.classList && event.target.classList.contains('sp-hist-filter')) renderHistory();
+    });
+    root.addEventListener('focusout', event => {
+      if (event.target.classList && event.target.classList.contains('pql-rename') && pqlRenaming) {
+        pqlRenaming = null;
+        setTimeout(rerenderLibrary, 0);
+      }
+    });
+  }
+
+  function ensureParquetLibraryStyle() {
+    if (document.getElementById('pql-style')) return;
+    const style = document.createElement('style');
+    style.id = 'pql-style';
+    style.textContent = PQL_CSS + SEARCH_COMPACT_CSS;
+    document.head.appendChild(style);
+  }
+
+  function keywordFields() {
+    return Object.keys(KEYWORD_FIELDS).map(id => moduleBody.querySelector(`#${id}`)).filter(Boolean);
+  }
+
+  /** 글이 늘면 칸도 늘어난다(사용자 지정 2026-09-24). 숨은 칸은 잴 수 없어(scrollHeight 0) 건너뛰고,
+   *  보이게 될 때(층 펼침 · 영구 제외 펼침 · 창 폭 변경) 다시 잰다. */
+  function autoGrow(element) {
+    if (!element || !element.isConnected || !element.getClientRects().length) return;
+    element.style.height = 'auto';
+    const style = document.defaultView.getComputedStyle(element);
+    const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+    element.style.height = `${Math.ceil(element.scrollHeight + border)}px`;
+  }
+
+  function growKeywordFields() {
+    keywordFields().forEach(autoGrow);
+  }
+
+  function watchKeywordWidth() {
+    // 창 폭이 바뀌면 줄바꿈 자리가 바뀐다. 높이 변화로도 불리므로(칸이 자라면 몸통이 자란다) 폭만 본다.
+    if (moduleBody._spGrowObserved || typeof ResizeObserver !== 'function') return;
+    moduleBody._spGrowObserved = true;
+    new ResizeObserver(() => {
+      const width = moduleBody.clientWidth;
+      if (width === growWidth) return;
+      growWidth = width;
+      growKeywordFields();
+      syncWindowMinWidth();
+    }).observe(moduleBody);
+    document.fonts?.ready?.then(() => syncWindowMinWidth());
+  }
+
+  function legacyMenuOpen() {
+    const menu = moduleBody.querySelector('.sp-legacy-menu');
+    return Boolean(menu && !menu.hidden);
+  }
+
+  function setLegacyMenuOpen(open) {
+    const menu = moduleBody.querySelector('.sp-legacy-menu');
+    const button = moduleBody.querySelector('[data-sp="legacy"]');
+    if (!menu || !button) return;
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && !moduleBody._spLegacyOutside) {
+      // 바깥을 누르면 닫는다(한 번만 건다 - 검색 층은 다시 그려져도 moduleBody 는 그대로다).
+      moduleBody._spLegacyOutside = true;
+      document.addEventListener('mousedown', event => {
+        if (legacyMenuOpen() && !event.target.closest?.('.sp-legacy-wrap')) setLegacyMenuOpen(false);
+      }, true);
+    }
+  }
+
+  /** 창이 한 줄로 두는 줄들(Ratings · 칸 이름 줄)보다 좁아지지 않게 창 최소 너비를 막는다(사용자 지정
+   *  2026-09-25: 줄넘김 대신). 폭은 **그 자리의 실제 글꼴로 잰다** - 사용자 창은 437px 에서 넘쳤고
+   *  기본 글꼴 창은 330px 에서 넘쳤다. 숨은 층(접힘)에서는 잴 수 없어 건너뛰고 보일 때 다시 잰다. */
+  function syncWindowMinWidth() {
+    const panel = moduleBody.closest('.dragpanel');
+    const rows = [...moduleBody.querySelectorAll('.sp-ratings, .dr-label-row')].filter(row => row.getClientRects().length);
+    if (!panel || !rows.length) return;
+    let natural = 0;
+    for (const row of rows) {
+      const before = row.style.width;
+      row.style.width = 'max-content';
+      natural = Math.max(natural, row.getBoundingClientRect().width);
+      row.style.width = before;
+    }
+    // 창 테두리·본문 안쪽 여백 = 창 폭 - 검색 층 안쪽 폭.
+    const chrome = panel.getBoundingClientRect().width - moduleBody.clientWidth;
+    panel.style.minWidth = `${Math.ceil(natural + chrome)}px`;
+  }
+
+  function syncPermButton() {
+    const button = moduleBody.querySelector('[data-sp="perm"]');
+    const field = moduleBody.querySelector('#searchExcludePermanent');
+    if (!button || !field) return;
+    const count = countKeywordTerms(field.value);
+    // 접혀 있어도 걸려 있다는 것은 보여야 한다 - 모든 검색에 붙는다.
+    button.textContent = `${permOpen ? '▲' : '▼'} 영구 제외${!permOpen && count ? ` · ${count}` : ''}`;
+    button.classList.toggle('is-on', permOpen || count > 0);
+    button.setAttribute('aria-pressed', permOpen ? 'true' : 'false');
+  }
+
+  function setPermOpen(open, { focus = false } = {}) {
+    permOpen = !!open;
+    try { localStorage.setItem(PERM_OPEN_KEY, permOpen ? '1' : '0'); } catch { /* 기억 못 해도 동작은 한다 */ }
+    const field = moduleBody.querySelector('#searchExcludePermanent');
+    if (field) {
+      field.hidden = !permOpen;
+      if (permOpen) {
+        autoGrow(field);
+        if (focus) field.focus();
+      }
+    }
+    syncPermButton();
+  }
+
+  // ── 이 창 전용 우클릭 메뉴 ──────────────────────────────────────────────
+  // ⚠️ 예전엔 메인 프롬프트의 선택 메뉴(chunkPanel)가 떴고, 그 메뉴는 창 더미(10150~)보다 아래 층이라
+  //    **창 뒤에** 깔렸다(사용자 제보). 검색 칸은 chunk 다리를 끊고(disableChunkBridge) 이 메뉴를 쓴다.
+  function ensureCtxMenu() {
+    if (ctxMenu) return ctxMenu;
+    ctxMenu = document.createElement('div');
+    ctxMenu.className = 'sp-ctx';
+    ctxMenu.hidden = true;
+    ctxMenu.innerHTML = `
+      <button type="button" data-ctx="cut">잘라내기</button>
+      <button type="button" data-ctx="copy">복사</button>
+      <button type="button" data-ctx="paste">붙여넣기</button>
+      <div class="sp-ctx-sep"></div>
+      <button type="button" data-ctx="all">모두 선택</button>`;
+    document.body.appendChild(ctxMenu);
+    // 누르는 순간 칸의 선택·초점을 뺏기지 않는다.
+    ctxMenu.addEventListener('mousedown', event => event.preventDefault());
+    ctxMenu.addEventListener('click', event => {
+      const button = event.target.closest('[data-ctx]');
+      if (!button || button.disabled) return;
+      const target = ctxTarget;
+      hideCtxMenu();
+      if (target && target.isConnected) runCtxAction(button.dataset.ctx, target);
+    });
+    document.addEventListener('mousedown', event => {
+      if (!ctxMenu.hidden && !ctxMenu.contains(event.target)) hideCtxMenu();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !ctxMenu.hidden) { event.preventDefault(); hideCtxMenu(); }
+    }, true);
+    const view = document.defaultView;
+    view?.addEventListener('blur', hideCtxMenu);
+    view?.addEventListener('resize', hideCtxMenu);
+    return ctxMenu;
+  }
+
+  function hideCtxMenu() {
+    if (ctxMenu) ctxMenu.hidden = true;
+    ctxTarget = null;
+  }
+
+  function openCtxMenu(target, x, y) {
+    const menu = ensureCtxMenu();
+    ctxTarget = target;
+    const hasSelection = target.selectionStart !== target.selectionEnd;
+    menu.querySelector('[data-ctx="cut"]').disabled = !hasSelection;
+    menu.querySelector('[data-ctx="copy"]').disabled = !hasSelection;
+    menu.hidden = false;
+    const view = document.defaultView;
+    const rect = menu.getBoundingClientRect();
+    const left = Math.max(4, Math.min(x, (view?.innerWidth || 0) - rect.width - 4));
+    const top = Math.max(4, Math.min(y, (view?.innerHeight || 0) - rect.height - 4));
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  }
+
+  function insertIntoField(target, text) {
+    target.focus();
+    // insertText 는 되돌리기(Ctrl+Z)에 남는다. 안 되면 직접 넣고 input 을 쏜다.
+    if (!document.execCommand('insertText', false, text)) {
+      target.setRangeText(text, target.selectionStart, target.selectionEnd, 'end');
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  function runCtxAction(action, target) {
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    const selected = target.value.slice(start, end);
+    const clipboard = document.defaultView?.navigator?.clipboard;
+    if (action === 'all') {
+      target.focus();
+      target.select();
+    } else if (action === 'copy' || action === 'cut') {
+      if (!selected) return;
+      target.focus();
+      if (document.execCommand(action)) return;
+      clipboard?.writeText?.(selected).catch(() => {});
+      if (action === 'cut') insertIntoField(target, '');
+    } else if (action === 'paste') {
+      if (!clipboard?.readText) {
+        showToast('클립보드를 읽을 수 없습니다 — Ctrl+V 로 붙여 넣어 주세요.', 'warning');
+        return;
+      }
+      clipboard.readText()
+        .then(text => { if (text) insertIntoField(target, text); })
+        .catch(() => showToast('클립보드를 읽을 수 없습니다 — Ctrl+V 로 붙여 넣어 주세요.', 'warning'));
+    }
   }
 
   function bindSearchInputs() {
-    const fieldByInputId = { searchQuery: 'query', searchExclude: 'exclude' };
-    ['searchQuery', 'searchExclude'].forEach(id => {
+    const acHost = moduleBody.querySelector('.sp-ac-host');
+    Object.entries(KEYWORD_FIELDS).forEach(([id, field]) => {
       const element = moduleBody.querySelector(`#${id}`);
       if (!element) return;
-      bindTagAssist(element, { excludeE621: true });
+      // 자동완성·태그 정보는 창 아래 빈 자리에 그린다(inlineHost). 우클릭은 이 창 메뉴(disableChunkBridge).
+      bindTagAssist(element, { excludeE621: true, inlineHost: acHost, disableChunkBridge: true });
       // Re-focusing a field means the user is editing it again — drop its pending
       // echo guard so server values can flow back once they move on (and a fresh
       // guard is set on the next blur/change via saveFilterState).
-      element.addEventListener('focus', () => { pendingEcho[fieldByInputId[id]] = null; });
+      element.addEventListener('focus', () => { pendingEcho[field] = null; });
       element.addEventListener('change', () => saveFilterState());
       element.addEventListener('blur', () => saveFilterState());
+      element.addEventListener('input', () => {
+        if (/[\r\n]/.test(element.value)) {
+          // 캐럿 앞뒤를 따로 펴서 캐럿 자리를 지킨다.
+          const at = element.selectionStart;
+          const before = flattenKeywordLines(element.value.slice(0, at));
+          element.value = before + flattenKeywordLines(element.value.slice(at));
+          element.setSelectionRange(before.length, before.length);
+        }
+        autoGrow(element);
+        if (field === 'exclude_permanent') syncPermButton();
+      });
+      element.addEventListener('keydown', event => {
+        // 한 줄 문법이라 Enter 로 줄을 만들지 않는다. 자동완성이 Enter 를 받았으면(defaultPrevented) 그대로.
+        if (event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+        if (event.ctrlKey || event.metaKey) return;   // Ctrl+Enter = 전역 생성
+        event.preventDefault();
+      });
+      element.addEventListener('contextmenu', event => {
+        // 터치(롱프레스)는 기기 기본 메뉴로 둔다.
+        if (event.pointerType && event.pointerType !== 'mouse') return;
+        if (document.defaultView?.matchMedia?.('(pointer: coarse)')?.matches) return;
+        event.preventDefault();
+        openCtxMenu(element, event.clientX, event.clientY);
+      });
     });
+    watchKeywordWidth();
     for (const key of ['e', 'q', 's', 'g']) {
       const checkbox = moduleBody.querySelector(`#sr_${key}`);
       if (!checkbox) continue;
@@ -492,58 +1218,102 @@ export function createSearchPanel({
 
   function buildSearchPanel(message) {
     const searchText = serverSearchTexts(message);
-    pendingEcho = { query: null, exclude: null };
     lastParquetSig = parquetSignature(message);
+    if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
     moduleBody.innerHTML = `
-    <div class="search-top-row">
-      <div>
-        <div class="mod-section-label">Remaining</div>
-        <div class="search-count-display">${message.count || 0}</div>
-      </div>
-      <div class="search-top-actions">
-        <div class="search-parquet-control">
-          <button class="mod-action-btn mod-parquet" onclick="toggleSearchParquetMenu(event)" data-naia-guide="검색 결과셋(parquet) 입출력 메뉴. 저장된 결과셋을 불러오거나 현재 결과에 합치고, 현재 결과를 파일로 내보내거나 실행용으로 저장합니다.">Parquet</button>
-          <div class="search-parquet-menu">
-            <button type="button" onclick="openSearchParquetUpload('load')" data-naia-guide="불러오기 — 저장해 둔 커스텀 parquet 결과셋을 불러옵니다. 현재 검색 결과를 이 결과셋으로 대체합니다.">불러오기</button>
-            <button type="button" onclick="openSearchParquetUpload('merge')" data-naia-guide="합치기 — 저장된 parquet 결과셋을 현재 결과에 이어붙입니다(union). 두 결과셋을 합쳐 더 넓은 풀을 만들 때 사용합니다.">합치기</button>
-            <button type="button" onclick="searchParquetAction('export_results')" data-naia-guide="내보내기 — 현재 검색 결과셋을 커스텀 parquet 파일로 저장합니다. 나중에 불러오기·합치기로 재사용할 수 있습니다.">내보내기</button>
-            <button type="button" onclick="searchParquetAction('save_runner')" data-naia-guide="실행파일 저장 — 현재 결과를 실행용 parquet(naia_temp_rows)로 저장합니다. 재시작·복구 시 이 풀에서 랜덤 프롬프트가 생성됩니다.">실행파일 저장</button>
-          </div>
+    <div class="sp-toolbar">
+      <button type="button" class="sp-tbtn" data-sp="parquets" aria-pressed="false"
+        data-naia-guide="저장해 둔 parquet 목록 - 파일마다 행 수와 만든 조건이 보입니다. 불러오기·합치기·이름 바꾸기·휴지통.">Custom Parquets (<span class="sp-pq-count">0</span>)</button>
+      <div class="search-parquet-control">
+        <button type="button" class="sp-tbtn" onclick="toggleSearchParquetMenu(event)"
+          data-naia-guide="지금 결과를 parquet 으로 저장하거나, PC 의 parquet 을 불러오거나 합칩니다.">Load / Save Parquets</button>
+        <div class="search-parquet-menu">
+          <button type="button" data-ssf="open" data-naia-guide="이 결과 저장 — 지금 조건에 맞는 행 전체(등급·Tag Filter 반영)를 parquet 으로 저장합니다. 만든 조건이 파일에 함께 기록되어 목록에서 무엇이 들었는지 보입니다.">이 결과 저장…</button>
+          <button type="button" onclick="openSearchParquetUpload('load')" data-naia-guide="PC에서 불러오기 — 내 컴퓨터의 parquet 파일로 지금 풀을 바꿉니다. (저장해 둔 파일은 Custom Parquets 목록에서 바로 불러오세요.)">PC에서 불러오기</button>
+          <button type="button" onclick="openSearchParquetUpload('merge')" data-naia-guide="PC에서 합치기 — 내 컴퓨터의 parquet 파일을 지금 풀에 더합니다(중복 id 는 한 번만).">PC에서 합치기</button>
+          <button type="button" onclick="searchParquetAction('save_runner')" data-naia-guide="실행파일 저장 — 현재 결과를 실행용 parquet(naia_temp_rows)로 저장합니다. 재시작·복구 시 이 풀에서 랜덤 프롬프트가 생성됩니다.">실행파일 저장</button>
         </div>
-        <button class="mod-action-btn mod-refine" onclick="openRefine()" data-naia-guide="심층검색(Refine) — 이미 검색된 결과셋을 아카이브 재스캔 없이 반복적으로 좁히고 합치는 작업대를 엽니다. 결과 위에서 추가 태그·범위로 단계적으로 다듬을 수 있습니다.">심층검색</button>
-        <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()" data-naia-guide="복원 — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋(스냅샷) 전체로 되돌립니다.">복원</button>
       </div>
+      <button type="button" class="sp-tbtn" onclick="restoreSnapshot()"
+        data-naia-guide="Restore — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋 전체로 되돌립니다.">Restore</button>
+    </div>
+    <div class="search-save-form" hidden>
+      <div class="ssf-head">
+        <span class="ssf-title">이 결과 저장</span>
+        <span class="ssf-rows"></span>
+        <button type="button" class="ssf-x" data-ssf="cancel" title="닫기">×</button>
+      </div>
+      <div class="ssf-body"><div class="ssf-loading">저장될 행을 세는 중…</div></div>
+      <div class="ssf-row">
+        <input type="text" placeholder="파일 이름 (비우면 날짜로)" spellcheck="false">
+        <button type="button" class="ssf-save" data-ssf="save">저장</button>
+      </div>
+    </div>
+    <div class="sp-counts">
+      <span class="sp-count-cell" title="지금 데이터셋(검색 결과) 전체 행 수">
+        <span class="sp-count-label">검색된 행</span><b class="sp-snap-count">${Number(message.snapshot_count || 0).toLocaleString('en-US')}</b><span class="sp-unit">개</span>
+      </span>
+      <span class="sp-count-sep"></span>
+      <span class="sp-count-cell" title="등급·Tag Filter 를 적용하고 Random 이 아직 쓰지 않은 행 수">
+        <span class="sp-count-label">남은 행</span><b class="search-count-display">${Number(message.count || 0).toLocaleString('en-US')}</b><span class="sp-unit">개</span>
+      </span>
     </div>
     <div>
       <div class="dr-label-row">
         <span class="mod-section-label">Search Keyword</span>
         <button type="button" class="header-guide-btn" data-naia-guide="Search Keyword — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다. 그룹 안에서도 *를 쓸 수 있습니다 — 예: {*dog|*cat} 은 태그가 정확히 dog 또는 cat 인 행만 남깁니다.\\n\\n*tag — 태그 전체 일치. 태그가 정확히 그것인 행만 매칭합니다. 예: *girl 은 girl 만 — 1girl·cowgirl 은 물론 girl (character) 처럼 뒤에 말이 더 붙은 태그도 제외됩니다. *dog 은 dog ears·hot dog 을 끌어오지 않습니다.\\n\\n~tag — 포함 칸에 써도 됩니다. 그 태그를 정확히 가진 행을 뺍니다(제외 칸의 ~tag 와 같음).">ⓘ 가이드</button>
+        <span class="sp-legacy-wrap">
+          <button type="button" class="sp-legacy-btn" data-sp="legacy" aria-haspopup="menu" aria-expanded="false"
+            data-naia-guide="Tag Filter 와 심층 검색은 이 창의 두 번째 · 세 번째 층에 있습니다(층 머리줄을 눌러도 됩니다).">Tag Filter 및 심층 검색</button>
+          <div class="sp-legacy-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-sp-legacy="tag"><b>Tag Filter</b><span>두 번째 층 — 결과를 태그로 바로 좁힙니다</span></button>
+            <button type="button" role="menuitem" data-sp-legacy="refine"><b>심층 검색</b><span>세 번째 층 — 숫자 필터 · 단계적으로 좁히기 · 스테이징</span></button>
+          </div>
+        </span>
       </div>
-      <input class="mod-input" id="searchQuery" type="text" value="${escHtml(searchText.query)}" placeholder="tags, keywords...">
+      <textarea class="mod-input sp-kw" id="searchQuery" rows="1" spellcheck="false" placeholder="tags, keywords...">${escHtml(searchText.query)}</textarea>
     </div>
     <div>
       <div class="dr-label-row">
         <span class="mod-section-label">Exclude Keyword</span>
-        <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n{a|b} — OR 그룹 제외. 그 중 하나라도 든 행을 뿕니다.">ⓘ 가이드</button>
+        <button type="button" class="header-guide-btn" data-naia-guide="Exclude Keyword — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n*tag — 정확 태그 제외. ~tag 와 같습니다(둘 다 받습니다).\\n\\n{a|b} — OR 그룹 제외. 그 중 하나라도 든 행을 뺍니다.">ⓘ 가이드</button>
+        <button type="button" class="sp-perm-btn" data-sp="perm" aria-pressed="false"
+          data-naia-guide="영구 제외 — 붉은 줄에 적은 태그는 저장되고, 접어 두어도 모든 검색에서 빠집니다. 문법은 Exclude Keyword 와 같습니다. 접혀 있을 때 단추 옆 숫자 = 걸려 있는 조각 수.">▼ 영구 제외</button>
       </div>
-      <input class="mod-input" id="searchExclude" type="text" value="${escHtml(searchText.exclude)}" placeholder="exclude tags...">
+      <textarea class="mod-input sp-kw" id="searchExclude" rows="1" spellcheck="false" placeholder="exclude tags...">${escHtml(searchText.exclude)}</textarea>
+      <textarea class="mod-input sp-kw sp-perm" id="searchExcludePermanent" rows="1" spellcheck="false" hidden
+        placeholder="항상 제외할 태그 — 모든 검색에 적용">${escHtml(searchText.exclude_permanent)}</textarea>
     </div>
-    <div>
-      <div class="dr-label-row">
-        <span class="mod-section-label">Ratings</span>
-        <button type="button" class="header-guide-btn" data-naia-guide="Ratings — 포함할 콘텐츠 등급. 켜진 등급의 결과만 검색합니다.\\n\\nExplicit — 명확한 성적인 행위가 있는 구도.\\n\\nNSFW — 확실한 노출이 있고 일부 성기 노출이 포함될 수 있는 구도, 또는 성적인 행위를 암시하는 구도.\\n\\nSensitive — 수영복이나 속옷 같은 일반적인 노출이 있는 구도.\\n\\nGeneral — 그 외의 일반적인 Safe 구도.">ⓘ 가이드</button>
-      </div>
-      <div class="mod-checkbox-grid">${ratingCheckboxesHtml()}</div>
+    <div class="sp-ratings">
+      <span class="mod-section-label">Ratings</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="Ratings — 포함할 콘텐츠 등급. 켜진 등급의 결과만 검색합니다.\\n\\nExplicit — 명확한 성적인 행위가 있는 구도.\\n\\nNSFW — 확실한 노출이 있고 일부 성기 노출이 포함될 수 있는 구도, 또는 성적인 행위를 암시하는 구도.\\n\\nSensitive — 수영복이나 속옷 같은 일반적인 노출이 있는 구도.\\n\\nGeneral — 그 외의 일반적인 Safe 구도.">ⓘ</button>
+      ${ratingCheckboxesHtml()}
     </div>
     ${dateRangeSliderHtml()}
-    <div style="display:flex;gap:8px;align-items:center">
+    <div class="sp-search-row">
+      <button type="button" class="sp-hist-btn" data-sp="history" aria-pressed="false"
+        data-naia-guide="검색 기록 — 실행했던 검색(검색어·제외어)을 최근 순으로 최대 500개 기억합니다. 눌러서 칸에 채운 뒤 [검색] 하세요.">검색 기록</button>
       <button class="mod-action-btn mod-start" onclick="doSearch()" ${searchingActive ? 'disabled' : ''}>검색</button>
-      <span class="search-progress" style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)"></span>
     </div>
-    <div class="search-parquet-host">${parquetSectionHtml(message)}</div>
+    <div class="sp-history" hidden>
+      <input type="text" class="sp-hist-filter" placeholder="검색어·제외어에서 찾기" spellcheck="false">
+      <div class="sp-hist-list"></div>
+    </div>
+    <span class="search-progress"></span>
+    <div class="sp-ac-host"></div>
   `;
+    pendingEcho = { query: null, exclude: null, exclude_permanent: null };
     bindSearchInputs();
+    setPermOpen(permOpen);
+    growKeywordFields();
+    syncWindowMinWidth();
     ensureDateRangeStyle();
+    ensureParquetLibraryStyle();
+    libHost.innerHTML = parquetSectionHtml(message);
+    bindParquetLibrary();
+    updateLibraryCount();
+    syncLibraryButton(isLibraryOpen());
+    historyOpen = false;
     bindDateRangeDrag();
     bindTagIncrementButton();
     renderDateRange();
@@ -572,42 +1342,42 @@ export function createSearchPanel({
     const sig = parquetSignature(message);
     if (sig === lastParquetSig) return;
     lastParquetSig = sig;
-    const host = moduleBody.querySelector('.search-parquet-host');
-    if (!host) return;
-    // Preserve the user's collapse / mode state across the in-place re-render.
-    const prevList = host.querySelector('.search-parquet-list');
-    const wasExpanded = !!prevList && !prevList.classList.contains('collapsed');
-    const prevHeader = host.querySelector('.mod-section-label.mod-collapsible');
-    const wasOpen = !!prevHeader && prevHeader.classList.contains('open');
-    const prevModeLabel = host.querySelector('.search-parquet-mode-label');
-    const prevModeText = prevModeLabel ? prevModeLabel.textContent : '';
-    host.innerHTML = parquetSectionHtml(message);
-    if (wasExpanded) {
-      const list = host.querySelector('.search-parquet-list');
-      if (list) list.classList.remove('collapsed');
-    }
-    if (wasOpen) {
-      const header = host.querySelector('.mod-section-label.mod-collapsible');
-      if (header) header.classList.add('open');
-    }
-    if (prevModeText) {
-      const modeLabel = host.querySelector('.search-parquet-mode-label');
-      if (modeLabel) modeLabel.textContent = prevModeText;
-    }
+    lastLibrary = libraryFromMessage(message);
+    // 사라진 파일의 펼침·메뉴 상태는 버린다(이름 바꾸기·휴지통 뒤).
+    const names = new Set(lastLibrary.map(card => card.name));
+    for (const name of [...pqlOpen]) if (!names.has(name)) pqlOpen.delete(name);
+    if (pqlMore && !names.has(pqlMore)) pqlMore = null;
+    if (pqlRenaming && !names.has(pqlRenaming)) pqlRenaming = null;
+    rerenderLibrary();
   }
 
   function updateSearchPanel(message) {
+    if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
+    // 팝업이 열려 있으면 등급·Tag Filter·풀이 바뀔 때마다 다시 센다(몰아서 한 번).
+    if (saveFormOpen()) {
+      clearTimeout(exportPreviewTimer);
+      exportPreviewTimer = setTimeout(requestExportPreview, 350);
+    }
     const countEl = moduleBody.querySelector('.search-count-display');
-    if (countEl) countEl.textContent = message.count || 0;
+    if (countEl) countEl.textContent = Number(message.count || 0).toLocaleString('en-US');
+    const snapEl = moduleBody.querySelector('.sp-snap-count');
+    if (snapEl && 'snapshot_count' in message) snapEl.textContent = Number(message.snapshot_count || 0).toLocaleString('en-US');
 
     const server = serverSearchTexts(message);
     // Per-field: clear a field's guard once the server echoes that field's value,
     // so a sibling field that diverges (or never echoes exactly) can't keep it stuck.
     if (pendingEcho.query !== null && server.query === pendingEcho.query) pendingEcho.query = null;
     if (pendingEcho.exclude !== null && server.exclude === pendingEcho.exclude) pendingEcho.exclude = null;
+    if (pendingEcho.exclude_permanent !== null && server.exclude_permanent === pendingEcho.exclude_permanent) {
+      pendingEcho.exclude_permanent = null;
+    }
     const focusedEl = document.activeElement;
     applyInputValue(moduleBody.querySelector('#searchQuery'), server.query, pendingEcho.query !== null, focusedEl);
     applyInputValue(moduleBody.querySelector('#searchExclude'), server.exclude, pendingEcho.exclude !== null, focusedEl);
+    applyInputValue(moduleBody.querySelector('#searchExcludePermanent'), server.exclude_permanent,
+      pendingEcho.exclude_permanent !== null, focusedEl);
+    growKeywordFields();
+    syncPermButton();
 
     for (const key of ['e', 'q', 's', 'g']) {
       const checkbox = moduleBody.querySelector(`#sr_${key}`);
@@ -629,6 +1399,8 @@ export function createSearchPanel({
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const query = (document.getElementById('searchQuery') || {}).value || '';
     const exclude = (document.getElementById('searchExclude') || {}).value || '';
+    // 영구 제외는 따로 보낸다 - 서버가 제외어에 덧붙여 찾고, 기록·제외 칸에는 섞지 않는다.
+    const excludePermanent = (document.getElementById('searchExcludePermanent') || {}).value || '';
     for (const key of ['e','q','s','g']) {
       const element = document.getElementById('sr_' + key);
       if (element) searchRatingState[key] = element.checked;
@@ -639,23 +1411,25 @@ export function createSearchPanel({
     }
     searchingActive = true;
     lockTagSurface();   // heavy archive scan → released by onSearchState (search_progress keeps it alive)
-    saveFilterState({query, exclude});
+    saveFilterState({query, exclude, exclude_permanent: excludePermanent});
     const bucketRange = bucketState.loaded
       ? { bucket_start: bucketState.start, bucket_end: bucketState.end }
       : {};
-    ws.send(JSON.stringify({ type: 'search', query, exclude, ...ratings, ...bucketRange }));
+    ws.send(JSON.stringify({ type: 'search', query, exclude, exclude_permanent: excludePermanent, ...ratings, ...bucketRange }));
     const progress = moduleBody.querySelector('.search-progress');
     if (progress) progress.textContent = 'Starting...';
     const button = moduleBody.querySelector('.mod-start');
     if (button) button.disabled = true;
   }
 
-  function loadParquet(filename) {
+  function loadParquet(filename, mode = parquetPickMode) {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     lockTagSurface();
+    // 카드마다 [불러오기]·[합치기] 가 따로 있다 - 예전엔 합치기 모드로 바꾸는 호출자가 없어
+    // 목록에서 합치기가 불가능했다.
     ws.send(JSON.stringify({
-      type: parquetPickMode === 'merge' ? 'merge_parquet' : 'load_parquet',
+      type: mode === 'merge' ? 'merge_parquet' : 'load_parquet',
       filename,
     }));
   }
@@ -706,7 +1480,7 @@ export function createSearchPanel({
     // ⚠️ 슬라이더만 다시 그리면 안 된다. 버킷 표는 **버튼을 그린 뒤에** 도착하는데,
     //    버튼 라벨의 기간이 그 표에서 나온다 - 슬라이더만 갱신하면 라벨이 폴백
     //    ("Download latest tag data")에 굳는다(실측).
-    if (getCurrentModuleId() === 'search') renderDateRangeHost();
+    if (searchVisible()) renderDateRangeHost();
   }
 
   async function refreshIncrementState({ rerender = true } = {}) {
@@ -730,7 +1504,7 @@ export function createSearchPanel({
         pushEndAfterBuckets = true;
         requestBucketDates();
       }
-      if (rerender && getCurrentModuleId() === 'search') renderDateRangeHost();
+      if (rerender && searchVisible()) renderDateRangeHost();
     } catch (_) { /* 설치 관리자는 로컬 전용 - 원격에서는 조용히 없다 */ }
   }
 
@@ -992,6 +1766,10 @@ export function createSearchPanel({
 .dr-handle[data-edge="end"]{border-color:var(--accent-green,#5a9e6f)}
 .dr-tip{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);padding:2px 6px;border-radius:4px;background:#15151b;border:1px solid #33333f;color:var(--text,#e8e8ee);font-family:var(--font-mono,monospace);font-size:10px;white-space:nowrap;opacity:0;transition:opacity .12s;pointer-events:none}
 .dr-handle:hover .dr-tip,.dr-handle.dragging .dr-tip{opacity:1}
+/* 안 보일 때도(opacity 0) 자리는 차지한다 - 가운데 정렬이면 끝 손잡이의 말풍선이 창 오른쪽 밖으로 1px
+   나가 가로 스크롤을 만든다. 양 끝 손잡이는 안쪽으로 펼친다. */
+.dr-handle[data-edge="end"] .dr-tip{left:auto;right:-5px;transform:none}
+.dr-handle[data-edge="start"] .dr-tip{left:-5px;transform:none}
 .dr-meta{display:flex;justify-content:space-between;align-items:center;font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-dim,#888)}
 .dr-count{color:var(--accent-green,#5a9e6f)}`;
     const style = document.createElement('style');
@@ -1026,5 +1804,10 @@ export function createSearchPanel({
     runParquetAction,
     loadParquet,
     restoreSnapshot,
+    openSaveForm,
+    onSearchHistory,
+    onExportPreview,
+    syncLibraryButton,
+    getLibraryHost: () => libHost,
   };
 }

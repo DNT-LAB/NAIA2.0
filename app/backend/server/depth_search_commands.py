@@ -6,10 +6,10 @@ from typing import Any, Awaitable, Callable
 from fastapi import WebSocket
 
 from app.backend.server.search_runtime import (
-    clear_active_tag_filter,
     filter_source_frame,
     mark_search_pool_replaced,
     next_custom_parquet_path,
+    pool_provenance,
     reset_active_tag_filter_assignment,
     search_base_frame,
     search_pool_state_guard,
@@ -174,12 +174,40 @@ def apply_depth_filters(frame: Any, command: dict[str, Any]):
     return filtered.copy()
 
 
+_REFINE_HISTORY_CAP = 20
+
+
+def _refine_recipe(state: dict[str, Any]) -> dict[str, Any]:
+    """심층검색 현재 뷰의 명함 recipe(core/custom_parquet_library.py). 부모 = 열 때의 풀 출처.
+
+    현재 뷰는 '원본에 마지막 필터' 로만 설명되지 않는다(승격·스테이징 병합이 원본을 바꾼다) -
+    그래서 그 단계들을 history 로 남긴다."""
+    ratings = state.get("ratings") if isinstance(state.get("ratings"), dict) else {}
+    return {
+        "source": "refine",
+        "parent": state.get("parent"),
+        "query": str(state.get("query", "") or ""),
+        "exclude": str(state.get("exclude", "") or ""),
+        "ratings": sorted(k for k, v in ratings.items() if v),
+        "filters": state.get("filters") if isinstance(state.get("filters"), dict) else {},
+        "history": list(state.get("history") or []),
+    }
+
+
+def _note_history(state: dict[str, Any], entry: dict[str, Any]) -> None:
+    history = state.setdefault("history", [])
+    history.append(entry)
+    del history[:-_REFINE_HISTORY_CAP]
+
+
 def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
     action = str(command.get("action") or "").strip()
     if action == "open":
+        # ⚠️ 예전엔 여기서 활성 Tag Filter 를 **칩까지 지웠다**(clear_active_tag_filter 기본 = 초기화).
+        #    심층 검색은 자기 사본(original/current)에서만 일하고 풀은 [메인에 할당] 때만 바꾼다 - 여는 것만으로
+        #    Tag Filter 를 풀 이유가 없다. 같은 창의 층이 된 뒤로(2026-09-25) 층을 누르기만 해도 필터가
+        #    사라지는 꼴이었다. 풀을 바꾸는 할당 쪽에서 정리한다.
         search_state = None
-        if getattr(context, "active_tag_filter_ids", None) is not None or getattr(context, "active_tag_filter", None):
-            search_state = clear_active_tag_filter(context)
         base = getattr(context, "search_results_snapshot", None)
         if base is None or getattr(base, "empty", True):
             base = search_base_frame(context)
@@ -193,6 +221,8 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
             "ratings": {rating: True for rating in "eqsg"},
             "filters": {},
             "staging": [],
+            "parent": pool_provenance(context),
+            "history": [],
         }
         return depth_payload(context), search_state
     if action == "refresh_from_main":
@@ -207,6 +237,8 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
             "ratings": {rating: True for rating in "eqsg"},
             "filters": {},
             "staging": [],
+            "parent": pool_provenance(context),
+            "history": [],
         }
         return depth_payload(context), None
     if not isinstance(getattr(context, "depth_state", None), dict):
@@ -222,18 +254,31 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
         state["current"] = apply_depth_filters(state.get("original"), command)
     elif action == "assign":
         current = state.get("current")
+        # ⚠️ 0행은 할당하지 않는다 - 빈 풀은 '풀 없음' 으로 읽혀 합치기·저장·Tag Filter 가 원본(master_base)으로
+        #    되돌아갔다(병합 전 리뷰 #8). 화면이 먼저 막고, 여기는 뒷문.
+        if current is not None and getattr(current, "empty", True):
+            payload = depth_payload(context)
+            payload["notice"] = "empty_assign"
+            return payload, None
         if current is not None:
             with search_pool_state_guard(context):
                 reset_active_tag_filter_assignment(context)
-                context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
+                # 풀이 통째로 바뀐다 - Tag Filter 는 칩·분기·고정까지 비운다(옛 풀 기준 조건이다).
+                context.save_search_filter_state(
+                    tag_filter=[], tag_filter_exclude=[], tag_filter_branches=[], tag_filter_pinned=[],
+                    tag_filter_applied_branches=[], tag_filter_active=False,
+                )
                 context.search_results.set_dataframe(current.copy())
                 context.search_results_snapshot = current.copy()
                 mark_search_pool_replaced(context)
+                # 복원 기준(master_base)은 그대로 두므로 base 출처도 그대로다.
+                context.search_pool_provenance = _refine_recipe(state)
         return depth_payload(context), context.search_state_payload()
     elif action == "promote":
         current = state.get("current")
         if current is not None:
             state["original"] = current.copy()
+            _note_history(state, {"step": "promote", "query": state.get("query", ""), "exclude": state.get("exclude", "")})
     elif action == "restore":
         original = state.get("original")
         if original is not None:
@@ -258,6 +303,10 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
         ]
         if frames:
             state["current"] = pd.concat(frames, ignore_index=True).drop_duplicates()
+            _note_history(state, {"step": "merge_staging", "parts": [
+                {"query": str(item.get("query", "") or ""), "exclude": str(item.get("exclude", "") or "")}
+                for item in state.get("staging", []) if isinstance(item, dict)
+            ]})
     elif action == "clear_staging":
         state["staging"] = []
     elif action == "sample":
@@ -274,9 +323,10 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
     elif action == "export":
         current = state.get("current")
         if current is not None and not getattr(current, "empty", True):
+            from core.custom_parquet_library import make_meta, write_parquet
+
             path = next_custom_parquet_path(context, "", fallback_prefix="refine")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            current.to_parquet(path, index=False)
+            write_parquet(current, path, make_meta("refine", _refine_recipe(state), len(current)))
         return depth_payload(context), context.search_state_payload()
     return depth_payload(context), None
 

@@ -33,6 +33,13 @@ def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
     return 10**9, path.name
 
 
+# Tag Filter 분기(스테이징·걸린 조합) 상한 - **한 곳**에서만 정한다. 검색(search_runtime)도 이 값을 쓴다.
+# ⚠️ 검색만 넓히고 영속을 16/64 로 두어, 17 번째 분기 · 65 번째 칩이 처음엔 걸리고 재시작·풀 교체 뒤
+#    말없이 사라졌다(병합 전 재리뷰 F1). UI 가 보낼 수 있는 것(담기 16 + 지금 검색 1)보다 넉넉해야 한다.
+TAG_FILTER_MAX_BRANCHES = 32
+TAG_FILTER_MAX_BRANCH_TAGS = 512
+
+
 class HeadlessSearchStateService:
     def __init__(self, context: Any):
         self.context = context
@@ -70,10 +77,17 @@ class HeadlessSearchStateService:
             "version": 1,
             "query": "",
             "exclude": "",
+            # 영구 제외(사용자 지정 2026-09-24) - Search 창의 붉은 줄. 모든 [검색]에 제외어로 덧붙는다.
+            "exclude_permanent": "",
             "ratings": list(DEFAULT_ACTIVE_RATINGS),
             "search_ratings": list(DEFAULT_ACTIVE_RATINGS),
             "tag_filter": [],
             "tag_filter_exclude": [],
+            # 분기 스테이징(계획서 P3): 담아 둔 분기 [{tags:[칩 토큰], enabled}] · 기준 고정 칩 ·
+            # 마지막으로 적용한 분기 목록(재시작 재조립용 - 켜진 분기 + 작업 중 칩).
+            "tag_filter_branches": [],
+            "tag_filter_pinned": [],
+            "tag_filter_applied_branches": [],
             "tag_filter_active": False,
             "bucket_start": None,
             "bucket_end": None,
@@ -135,11 +149,40 @@ class HeadlessSearchStateService:
             normalized.append(text)
         return normalized
 
+    @staticmethod
+    def normalize_token_list(value: Any, limit: int = TAG_FILTER_MAX_BRANCH_TAGS) -> list[str]:
+        """칩 토큰(`-제외`·`*정확` 표기 그대로) 목록 - 순서 유지, 중복·빈 것 제거."""
+        if not isinstance(value, (list, tuple)):
+            return []
+        out: list[str] = []
+        for item in list(value)[:limit]:
+            token = str(item or "").strip()
+            if token and token not in out:
+                out.append(token)
+        return out
+
+    @classmethod
+    def normalize_branch_list(cls, value: Any, limit: int = TAG_FILTER_MAX_BRANCHES) -> list[dict[str, Any]]:
+        """분기 목록 [{tags, enabled}] - 칩 목록만 온 것도 받는다(enabled=True). 빈 분기는 버린다."""
+        if not isinstance(value, (list, tuple)):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in list(value)[:limit]:
+            if isinstance(item, dict):
+                tags, enabled = item.get("tags"), item.get("enabled", True)
+            else:
+                tags, enabled = item, True
+            tokens = cls.normalize_token_list(tags)
+            if tokens:
+                out.append({"tags": tokens, "enabled": bool(enabled)})
+        return out
+
     def normalize_search_filter_state(self, raw: Any) -> dict[str, Any]:
         state = self.default_search_filter_state()
         if isinstance(raw, dict):
             state["query"] = str(raw.get("query", state["query"]) or "")
             state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
+            state["exclude_permanent"] = str(raw.get("exclude_permanent", state["exclude_permanent"]) or "")
             state["ratings"] = self.normalize_rating_list(raw.get("ratings", state["ratings"]))
             state["search_ratings"] = self.normalize_rating_list(
                 raw.get("search_ratings", raw.get("ratings", state["search_ratings"]))
@@ -154,8 +197,14 @@ class HeadlessSearchStateService:
                     raw.get("tag_filter_exclude") or raw.get("exclude_tags")
                 )
             ]
+            state["tag_filter_branches"] = self.normalize_branch_list(raw.get("tag_filter_branches"))
+            state["tag_filter_pinned"] = self.normalize_token_list(raw.get("tag_filter_pinned"))
+            state["tag_filter_applied_branches"] = [
+                b["tags"] for b in self.normalize_branch_list(raw.get("tag_filter_applied_branches"))
+            ]
             state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
                 bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
+                or bool(state["tag_filter_applied_branches"])
             )
             state["bucket_start"] = self._coerce_bucket_index(raw.get("bucket_start", state["bucket_start"]))
             state["bucket_end"] = self._coerce_bucket_index(raw.get("bucket_end", state["bucket_end"]))
@@ -190,7 +239,7 @@ class HeadlessSearchStateService:
             getattr(context, "search_filter_state", None)
             or self.default_search_filter_state()
         )
-        for key in ("query", "exclude"):
+        for key in ("query", "exclude", "exclude_permanent"):
             if key in updates and updates[key] is not None:
                 state[key] = str(updates[key] or "")
         if "ratings" in updates and updates["ratings"] is not None:
@@ -205,6 +254,9 @@ class HeadlessSearchStateService:
             state["tag_filter_exclude"] = [
                 tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter_exclude"])
             ]
+        for key in ("tag_filter_branches", "tag_filter_pinned", "tag_filter_applied_branches"):
+            if key in updates and updates[key] is not None:
+                state[key] = updates[key]              # normalize_search_filter_state 가 모양을 잡는다
         if "tag_filter_active" in updates and updates["tag_filter_active"] is not None:
             state["tag_filter_active"] = bool(updates["tag_filter_active"])
         for bkey in ("bucket_start", "bucket_end"):
@@ -243,11 +295,14 @@ class HeadlessSearchStateService:
         return self.save_search_filter_state(
             query=payload.get("query") if "query" in payload else None,
             exclude=payload.get("exclude") if "exclude" in payload else None,
+            exclude_permanent=payload.get("exclude_permanent") if "exclude_permanent" in payload else None,
             ratings=payload.get("ratings") if "ratings" in payload else None,
             search_ratings=payload.get("search_ratings") if "search_ratings" in payload else None,
             tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
             tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
             tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
+            tag_filter_branches=payload.get("tag_filter_branches") if "tag_filter_branches" in payload else None,
+            tag_filter_pinned=payload.get("tag_filter_pinned") if "tag_filter_pinned" in payload else None,
             bucket_start=payload.get("bucket_start") if "bucket_start" in payload else None,
             bucket_end=payload.get("bucket_end") if "bucket_end" in payload else None,
         )
@@ -285,15 +340,17 @@ class HeadlessSearchStateService:
         if frame is None or getattr(frame, "empty", True):
             return None
         try:
-            import os
+            from core.search_pool_writer import search_pool_writer
 
             path = self.last_search_parquet_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
             # atomic write(Codex): temp 에 쓰고 os.replace 로 교체 — 대형 프레임/동시 재시작 시
-            # 부분쓰기 손상을 막는다.
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            frame.to_parquet(tmp, index=False)
-            os.replace(tmp, path)
+            # 부분쓰기 손상을 막는다. 백그라운드 writer 와 같은 파일 락을 쓰고, 대기 중인 더 오래된
+            # 백그라운드 기록을 취소한다(core/search_pool_writer.py).
+            from core.custom_parquet_library import make_meta
+
+            # 명함 = 지금 풀의 출처. 재시작 뒤 restore_last_search 가 되살린다.
+            meta = make_meta("last_search", getattr(context, "search_pool_provenance", None), len(frame))
+            search_pool_writer(context).write_now(path, frame, kind="last", meta=meta)
             return path
         except Exception as exc:
             print(f"Headless Remote: last-search persist failed - {exc}", flush=True)
@@ -334,6 +391,12 @@ class HeadlessSearchStateService:
                 # 수정). 현재 정보용이며 green 검색은 스코프와 무관하게 아카이브를 재스캔한다. 상수는
                 # app.backend 계층이라 core 에서 import 하지 않고 리터럴을 쓴다.
                 context.search_results_scope = "custom_parquet"
+                # 출처를 되살린다 - 없으면(명함 이전 파일) None = "조건 기록 없음".
+                from core.custom_parquet_library import read_meta
+
+                recipe = (read_meta(path) or {}).get("recipe")
+                context.search_pool_provenance = recipe
+                context.search_pool_base_provenance = recipe
                 marker = getattr(context, "mark_search_pool_replaced", None)
                 if callable(marker):
                     marker()
@@ -413,6 +476,15 @@ class HeadlessSearchStateService:
         if not custom_dir.exists():
             return []
         return sorted(path.name for path in custom_dir.glob("*.parquet") if path.is_file())
+
+    def custom_parquet_library(self) -> list[dict[str, Any]]:
+        try:
+            from core.custom_parquet_library import list_library
+
+            return list_library(self.custom_parquet_dir())
+        except Exception as exc:
+            print(f"Headless Remote: parquet library listing failed - {exc}", flush=True)
+            return []
 
     # ---- 저장된 Tag Filter 프리셋 (backend 영속·기기 공유, 태그만: include/exclude) ----
     def filter_presets_path(self) -> Path:
@@ -534,12 +606,19 @@ class HeadlessSearchStateService:
             "tag_filter_revision": int(getattr(context, "_tag_filter_revision", 0) or 0),
             "count": int(count or 0),
             "total_count": int(context.search_results.get_count() if context.search_results else 0),
+            # 검색된 행(= 지금 데이터셋 전체). '남은 행'(count)과 한 줄로 나란히 보인다.
+            "snapshot_count": int(len(snapshot)) if snapshot is not None else 0,
             "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],
             "rating_counts": rating_counts,
             "query": filter_preferences.get("query", ""),
             "exclude": filter_preferences.get("exclude", ""),
+            "exclude_permanent": filter_preferences.get("exclude_permanent", ""),
             "ratings": {rating: rating in search_ratings for rating in SUPPORTED_RATINGS},
             "filter_preferences": filter_preferences,
             "filter_presets": self.get_filter_presets(),
             "parquets": self.custom_parquet_names(),
+            # 카드 목록: 행 수 + 명함(만든 조건). 파일 꼬리만 읽고 (이름·mtime·크기)로 캐시한다.
+            "parquet_library": self.custom_parquet_library(),
+            # 지금 풀의 출처 - 프론트가 "이 결과 저장" 전에 무엇이 저장될지 보여 준다.
+            "pool_provenance": getattr(self.context, "search_pool_provenance", None),
         }

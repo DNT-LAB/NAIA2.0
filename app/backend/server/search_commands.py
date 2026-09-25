@@ -34,12 +34,15 @@ SEARCH_COMMAND_TYPES = {
     "load_parquet",
     "merge_parquet",
     "search_parquet_action",
+    "search_export_preview",
     "restore_snapshot",
     "tag_filter_search",
     "tag_filter_assign",
     "tag_filter_clear",
     "save_filter_preset",
     "delete_filter_preset",
+    "get_search_history",
+    "delete_search_history",
 }
 
 
@@ -219,9 +222,12 @@ async def handle_search_command(
 
     if command_type == "tag_filter_search":
         tags = command.get("tags") if isinstance(command.get("tags"), list) else []
+        branches = command.get("branches") if isinstance(command.get("branches"), list) else None
         request_id = str(command.get("request_id") or "")
         client_key = str(command.get("_tag_filter_client_key") or "")
-        result = await run_in_thread(tag_filter_search, context, tags)
+        # 미리보기(Tag Filter 커밋 모델)는 큰 풀의 '필터 단계' 를 알리지 않는다 - assign 이 없어 잠금이 안 풀린다.
+        result = await run_in_thread(tag_filter_search, context, tags, branches,
+                                     announce=not bool(command.get("preview")))
         # B4: 검색이 백그라운드 태스크(websocket_session)라 완료 시점에 더 새로운 검색이 시작됐을 수
         # 있다(to_thread 는 취소로 안 멈춤). superseded(seq 불일치) 면 pending 미기록·미전송으로 폐기
         # — 최신 seq 만 통과해 stale 결과가 pending 을 덮어쓰는 reorder 해저드를 막는다.
@@ -249,6 +255,7 @@ async def handle_search_command(
             if not pool_changed:
                 pending = {
                     "tags": result.get("tags", []),
+                    "branches": result.get("branches", []),
                     "ids": ids,
                     "frame": matched_frame,
                     "source_snapshot": source_snapshot,
@@ -364,6 +371,29 @@ async def handle_search_command(
         if name:
             await run_in_thread(context.delete_filter_preset, name)
         await _send_json(ws, context.search_state_payload())
+        return True
+
+    # [이 결과 저장] 팝업 미리보기 - 저장과 같은 함수로 센 행 수 · 등급별 구성 · 만든 조건.
+    if command_type == "search_export_preview":
+        from app.backend.server.search_runtime import export_condition_preview
+
+        await _send_json(ws, await run_in_thread(export_condition_preview, context))
+        return True
+
+    # [검색 기록] - 최대 500개라 search_state 에 매번 싣지 않고 창을 열 때만 받는다.
+    if command_type in {"get_search_history", "delete_search_history"}:
+        from core import search_history
+
+        if command_type == "delete_search_history":
+            items = await run_in_thread(
+                search_history.delete_search,
+                context,
+                query=str(command.get("query") or ""),
+                exclude=str(command.get("exclude") or ""),
+            )
+        else:
+            items = await run_in_thread(search_history.load_history, context)
+        await _send_json(ws, {"type": "search_history", "items": items})
         return True
 
     return False

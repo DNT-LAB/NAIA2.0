@@ -697,7 +697,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-presetbak')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-merge')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -718,10 +718,14 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-preset
       confirmDialog: options => showAppDialog('', options),
       lockTagSurface,
       unlockTagSurface,
+      // Tag Filter 는 Search | Tag Filter 리모컨 창의 아래층에 산다(searchQuickWindow.mjs).
+      tagSurface: () => (searchQuickWindow ? searchQuickWindow.tagSurface : null),
       // 필터가 바뀌면 프롬프트 하이라이팅을 다시 칠한다. ⚠️ 우클릭 경로에서만
       // 부르면 **Quick Filter 패널에서 바꿨을 때 낡은 채로 남는다** - 상태가 굳는
       // 자리에서 한 번만 울리게 두고 여기서 받는다.
       onFilterChanged: () => updatePromptHighlight(),
+      // 칩을 누르면 그 태그의 정보 카드를 층 아래 빈 자리(host)에 그린다.
+      showTagInfo: (tag, host) => { if (tagAssist) tagAssist.lookupPromptInfoTag(tag, {host, rawTag: tag}); },
     });
     quickFilter.bindInputs();
   })
@@ -2640,7 +2644,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clea
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine-tab6')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rvfix')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -2651,6 +2655,7 @@ const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine
       enterMode: refineEnterMode,
       exitMode: refineExitMode,
       bindTagAssist,
+      showToast,
     });
   })
   .catch(error => {
@@ -2686,12 +2691,43 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260823-tagupd6')
+// Search | Tag Filter 리모컨 창. 검색 화면은 이제 공용 모듈 팝업(#modulePopupBody)이 아니라 이
+// 창의 위층(searchHost)에 그린다 - 요소는 여기서 **동기로** 만들어 두 모듈에 같은 것을 넘긴다.
+const searchHost = document.createElement('div');
+searchHost.className = 'search-host';
+// Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
+const parquetLibraryHost = document.createElement('div');
+let searchQuickWindow = null;
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-rs')
+  .then(({createSearchQuickWindow}) => {
+    searchQuickWindow = createSearchQuickWindow({
+      document,
+      window,
+      searchHost,
+      libraryHost: parquetLibraryHost,
+      onLibraryVisibility: open => { if (searchPanelControl) searchPanelControl.syncLibraryButton(open); },
+      requestSearchState: () => requestModuleState('search'),
+      onVisibilityChange: () => updateModuleBtnState(),
+      // 심층 검색 = 이 창의 세 번째 층(사용자 결정 2026-09-25). 층이 보이면 준비하고, 창이 닫히면 함께 닫는다.
+      onLayerShown: layer => { if (layer === 'refine' && refinePanelControl) refinePanelControl.ensureOpen(); },
+      onWindowClose: () => { if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close(); },
+      escHtml,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize search window module', error);
+  });
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-save')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
-      moduleBody,
+      moduleBody: searchHost,
       searchCountEl,
+      isSearchVisible: () => Boolean(searchQuickWindow && searchQuickWindow.isOpen()),
+      libraryHost: parquetLibraryHost,
+      toggleLibrary: () => { if (searchQuickWindow) searchQuickWindow.toggleLibrary(); },
+      showLibrary: () => { if (searchQuickWindow) searchQuickWindow.showLibrary(); },
+      isLibraryOpen: () => Boolean(searchQuickWindow && searchQuickWindow.isLibraryOpen()),
       escHtml,
       getWs: () => ws,
       WebSocket,
@@ -4446,6 +4482,8 @@ const wsMessageHandlers = {
   search_progress: onSearchProgress,
   search_loading: onSearchLoading,
   bucket_dates: onBucketDates,
+  search_history: m => { if (searchPanelControl) searchPanelControl.onSearchHistory(m); },
+  search_export_preview: m => { if (searchPanelControl) searchPanelControl.onExportPreview(m); },
   depth_state: onDepthState,
   depth_sample: onDepthSample,
   tag_search_result: onTagSearchResult,
@@ -9706,8 +9744,9 @@ async function runPromptTagFilterAction(action, tag) {
     {
       const on = action === 'exact-on';
       title = `[${label}] 퍼펙트 매칭 ${on ? '적용' : '취소'}`;
-      // ⚠️ `setChipExact` 는 자기가 적용까지 한다 - 여기서 또 부르면 두 번 돈다.
-      quickFilter.setChipExact(found.list, found.index, on);
+      // ⚠️ `setChipExact` 는 넷째 인자가 true 면 자기가 적용까지 한다 - 여기서 또 부르면 두 번 돈다.
+      //    (패널의 칩 메뉴는 초안 = 미리보기, 여기 프롬프트 우클릭은 곧장 적용 - 커밋 모델 2026-09-25)
+      quickFilter.setChipExact(found.list, found.index, on, true);
     }
   }
 
@@ -10952,6 +10991,14 @@ function toggleTransparentBackground() {
 }
 
 function openModule(moduleId, options = {}) {
+  // 검색은 모듈 팝업이 아니라 리모컨 창이다. Prompt 단추·우클릭·/search 가 전부 여기를 지난다.
+  // 같은 층이 펼쳐져 있으면 닫는다(예전 토글 그대로), forceOpen 이면 펼치기만.
+  if (moduleId === 'search') {
+    searchQuickWindowReady.then(() => {
+      if (searchQuickWindow) searchQuickWindow.showSearch({toggle: !options.forceOpen});
+    });
+    return;
+  }
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
@@ -10980,8 +11027,8 @@ function openModule(moduleId, options = {}) {
   if (imageModulePanels && moduleId !== 'vibe_transfer') {
     imageModulePanels.closeAllVibeClusterPanels();
   }
-  // Leaving (or re-clicking) any module exits refine-mode first.
-  if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close();
+  // Leaving (or re-clicking) any module exits refine-mode first. 창 층의 심층 검색은 모듈과 무관하다.
+  if (refinePanelControl && refinePanelControl.isOpen() && !refineInWindow()) refinePanelControl.close();
   // Toggle: same module clicked again → close
   if (currentModuleId === moduleId && modulePopup.classList.contains('open')) {
     if (options.forceOpen) {
@@ -11055,7 +11102,7 @@ function closeModule(options = {}) {
     if (window.opener) window.close();
     return;
   }
-  if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close();
+  if (refinePanelControl && refinePanelControl.isOpen() && !refineInWindow()) refinePanelControl.close();
   if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
   if (currentModuleId === 'vibe_transfer' && imageModulePanels && !options.keepVibeCluster) {
     imageModulePanels.closeAllVibeClusterPanels();
@@ -11096,7 +11143,12 @@ function updateModuleBtnState() {
     btn.classList.toggle('active', isChunkBtn ? isChunkOpen() : btn.dataset.module === currentModuleId);
   });
   const pb = document.querySelector('.module-prompt-btn');
-  if (pb) pb.classList.toggle('active', currentModuleId === 'search');
+  if (pb) pb.classList.toggle('active', Boolean(searchQuickWindow && searchQuickWindow.isSearchShown()));
+  // Quick 단추 = Tag Filter 층이 보이거나 필터가 걸려 있을 때(예전 팝업 규칙과 같다).
+  const quickBtn = document.getElementById('tagFilterToggle');
+  if (quickBtn && searchQuickWindow) {
+    quickBtn.classList.toggle('active', searchQuickWindow.isTagFilterShown() || Boolean(quickFilter && quickFilter.isActive()));
+  }
   if (moduleLauncherControl) moduleLauncherControl.updateState();
   // Reflect the busy overlay whenever the active module changes (the search-side
   // lock only applies while the Search module is the one on screen).
@@ -13059,17 +13111,27 @@ function relayoutFloatingPanels() {
   if (imageModulePanels) imageModulePanels.relayoutVibeClusterPanel();
 }
 
+// 심층 검색 화면이 Search 창의 층으로 옮겨졌나(창 모듈이 #refineView 를 가져간다). 옮겨졌으면 모듈
+// 팝업을 건드리지 않는다 - 예전 refine-mode(팝업을 통째로 심층검색으로 바꾸던 방식)는 창이 없을 때만.
+function refineInWindow() {
+  return Boolean(refineView && refineView.closest('.dragpanel'));
+}
+
 function refineEnterMode() {
-  modulePopup.classList.add('refine-mode');
+  if (refineInWindow()) return;
+  // 검색이 창으로 떠난 뒤로 심층검색은 모듈이 없어도 팝업을 직접 연다.
+  modulePopup.classList.add('open', 'refine-mode');
 }
 
 function refineExitMode() {
+  if (refineInWindow()) return;
   modulePopup.classList.remove('refine-mode');
+  if (!currentModuleId) modulePopup.classList.remove('open');
 }
 
 function openRefine() {
-  // Refine is a tab of the Search surface — only enter from the search module.
-  if (currentModuleId !== 'search') return;
+  // 심층 검색 = Search 창의 세 번째 층. 창을 그 층으로 연다(층이 보이면 onLayerShown 이 준비한다).
+  if (searchQuickWindow) { searchQuickWindow.showRefine(); return; }
   if (refinePanelControl) refinePanelControl.open();
 }
 
@@ -13078,6 +13140,7 @@ function closeRefine() {
 }
 
 function refineBack() {
+  if (refineInWindow() && searchQuickWindow) { searchQuickWindow.showSearch(); return; }
   closeRefine();
 }
 
@@ -13501,7 +13564,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260925-chiptip')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260925-merge')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -13652,6 +13715,7 @@ function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag
 // 이 파일의 다른 칩 핸들러와 같은 전역 브리지 방식을 쓴다.
 function toggleTagFilterChipMenu(list, idx) { if (quickFilter) quickFilter.toggleChipMenu(list, idx); }
 function setTagFilterChipExact(list, idx, exact) { if (quickFilter) quickFilter.setChipExact(list, idx, exact); }
+function clearTagFilterList(list) { if (quickFilter) quickFilter.clearList(list); }
 function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function commitPendingTagFilterText() { if (quickFilter) quickFilter.commitPendingInputs(); }

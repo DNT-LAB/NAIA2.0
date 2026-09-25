@@ -8,6 +8,7 @@
 // (each staged item labelled by its 검색|제외 pair, Dev0714 model) and a
 // merge/export island.
 export function createRefinePanel({
+  showToast,
   document,
   container,
   escHtml,
@@ -21,6 +22,12 @@ export function createRefinePanel({
   let lastSample = null;
   let lastViewCount = null;
 
+  // 오른쪽 칸(.refine-right)은 Search 창에서 **동반 창으로 옮겨진다**(2026-09-25) - 컨테이너 안에서만
+  // 찾으면 옮긴 뒤로 샘플·스테이징이 조용히 안 그려진다. 안에 없으면 문서 전체의 그 칸에서 찾는다.
+  function side(selector) {
+    return container.querySelector(selector) || document.querySelector(`.refine-right ${selector}`);
+  }
+
   function send(payload) {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -30,6 +37,18 @@ export function createRefinePanel({
 
   function openPanel() {
     if (open) { close(); return; }
+    open = true;
+    if (typeof enterMode === 'function') enterMode();
+    ensureRefineStyle();
+    renderShell();
+    send({ type: 'get_depth_state' });
+    send({ type: 'depth_action', action: 'open' });
+  }
+
+  // 창의 심층 검색 층이 보이게 될 때(app.js). 이미 열려 있으면 **아무것도 안 한다** - 층을 오갈
+  // 때마다 'open' 을 다시 보내면 서버 작업 상태(원본·스테이징)가 매번 초기화된다.
+  function ensureOpen() {
+    if (open) return;
     open = true;
     if (typeof enterMode === 'function') enterMode();
     ensureRefineStyle();
@@ -58,6 +77,8 @@ export function createRefinePanel({
     <div class="refine-header">
       <button type="button" class="refine-back" onclick="refineBack()">← SEARCH</button>
       <span class="refine-title">심층검색</span>
+      <button type="button" class="rf-side-toggle" data-sqw="refine-side"
+        data-naia-guide="샘플 미리보기 · 스테이징 · 병합과 내보내기는 창 오른쪽 '심층 검색 도구' 에 있습니다. 닫았으면 이 단추로 다시 엽니다.">샘플 · 스테이징 ▸</button>
       <button type="button" class="header-guide-btn rf-header-guide" data-naia-guide="심층검색(Refine) — 이미 검색된 결과셋을 아카이브 재스캔 없이 반복적으로 좁히고 합치는 작업대입니다.\\n\\n좌측 컨트롤로 결과 내 재검색(태그·등급·토큰/ID/Score 범위)하고, 스테이징에 서로 다른 검색을 쌓아 병합(union+중복 제거)할 수 있습니다.\\n\\n우측에서 무작위 샘플을 들여다보거나 생성하고, 현재 결과를 메인에 할당하거나 .parquet으로 내보냅니다.\\n\\n표시된 행 = 현재 작업 중인 결과, 원본 행 = 좁히기 이전의 기준 결과입니다.">ⓘ 가이드</button>
     </div>
     <div class="refine-2col">
@@ -107,6 +128,10 @@ export function createRefinePanel({
     }
 
     maybeInvalidateSample(message.count || 0);
+    lastCount = Number(message.count) || 0;
+    if (message.notice === 'empty_assign' && typeof showToast === 'function') {
+      showToast('결과가 0행이라 메인에 할당하지 않았습니다', 'warning');
+    }
 
     // Build the controls once; afterwards counts + staging are patched in place.
     if (container.querySelector('#depthQuery')) {
@@ -197,7 +222,7 @@ export function createRefinePanel({
   // Staging board: each staged item shown as its 검색 | 제외 keyword pair + row count.
   function renderStagingBoard(items, totalCount) {
     setStagingCount(totalCount);
-    const listEl = container.querySelector('.rf-stage-list');
+    const listEl = side('.rf-stage-list');
     if (!listEl) return;
     const list = Array.isArray(items) ? items : [];
     if (!list.length) {
@@ -228,7 +253,7 @@ export function createRefinePanel({
   }
 
   function setStagingCount(count) {
-    const el = container.querySelector('.depth-staging-count');
+    const el = side('.depth-staging-count');
     if (el) el.textContent = count;
   }
 
@@ -239,7 +264,7 @@ export function createRefinePanel({
   function maybeInvalidateSample(count) {
     if (lastViewCount !== null && count !== lastViewCount && lastSample) {
       lastSample = null;
-      const body = container.querySelector('.rf-prev-body');
+      const body = side('.rf-prev-body');
       if (body) {
         body.classList.add('rf-prev-empty');
         body.innerHTML = '표시된 행이 바뀌었습니다 — 무작위 샘플을 다시 뽑아보세요.';
@@ -251,7 +276,7 @@ export function createRefinePanel({
   // Preview slot: one sampled row, replaced on each [무작위 샘플] press.
   function onDepthSample(message) {
     if (!open) return;
-    const body = container.querySelector('.rf-prev-body');
+    const body = side('.rf-prev-body');
     if (!body) return;
     if (!message || message.ok === false) {
       lastSample = null;
@@ -314,7 +339,14 @@ export function createRefinePanel({
     send({ type: 'depth_action', action: 'filter', query, exclude, ratings, filters });
   }
 
+  let lastCount = null;           // 마지막 depth_state 의 결과 행 수
+
   function depthAction(action) {
+    // 0행은 메인에 할당하지 않는다 - 빈 풀은 '풀 없음' 으로 읽혀 합치기·저장이 원본으로 되돌아갔다(병합 전 리뷰 #8).
+    if (action === 'assign' && lastCount === 0) {
+      if (typeof showToast === 'function') showToast('결과가 0행이라 메인에 할당하지 않았습니다', 'warning');
+      return;
+    }
     send({ type: 'depth_action', action });
   }
 
@@ -332,6 +364,7 @@ export function createRefinePanel({
 .refine-back:hover{border-color:var(--accent-blue,#8d7bd6);color:var(--accent-blue,#8d7bd6)}
 .refine-title{font-size:14px;font-weight:700;color:var(--text,#e8e8ee)}
 .refine-header .header-guide-btn{flex:0 0 auto;margin-left:2px}
+.rf-side-toggle{display:none}
 .refine-left .dr-label-row{display:flex;align-items:center;gap:8px;margin-bottom:2px}
 .refine-left .dr-label-row .mod-section-label{margin:0}
 .refine-2col{display:flex;gap:14px;align-items:flex-start}
@@ -401,6 +434,7 @@ export function createRefinePanel({
 
   return {
     open: openPanel,
+    ensureOpen,
     close,
     isOpen,
     onDepthState,

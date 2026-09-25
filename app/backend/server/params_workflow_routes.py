@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.backend.server.search_runtime import (
     install_custom_parquet_frame,
+    merge_base_frame,
     normalize_custom_parquet_frame,
-    save_runner_parquet,
+    pool_provenance,
 )
+from core.custom_parquet_library import merge_recipe
 from core.web_session_context import WebSessionContext
 
 
@@ -242,6 +244,24 @@ def _clear_comfyui_workflow(context: WebSessionContext) -> dict[str, Any]:
     }
 
 
+def _uploaded_recipe(content: bytes, filename: str) -> dict[str, Any]:
+    """업로드한 파일의 출처 - 그 파일이 명함을 품고 있으면 그대로 이어받는다."""
+    recipe = None
+    try:
+        import json
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from core.custom_parquet_library import NAIA_META_KEY
+
+        raw = (pq.read_schema(pa.BufferReader(content)).metadata or {}).get(NAIA_META_KEY)
+        if raw:
+            recipe = (json.loads(raw.decode("utf-8")) or {}).get("recipe")
+    except Exception:
+        recipe = None
+    return {"source": "file", "name": filename, "recipe": recipe, "uploaded": True}
+
+
 def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, action: str, filename: str) -> dict[str, Any]:
     if action not in {"load", "merge"}:
         raise ValueError("action must be load or merge")
@@ -260,14 +280,17 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
     try:
         uploaded = normalize_custom_parquet_frame(read_parquet_chunked(content, progress=progress))
         frame = uploaded
+        provenance = _uploaded_recipe(content, safe_filename)
         if action == "merge":
-            current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+            # 진입점 둘(목록 합치기 · 업로드 합치기)이 같은 기준을 써야 한다 - merge_base_frame 참조.
+            current = merge_base_frame(context)
             if current is not None and not current.empty:
                 frame = normalize_custom_parquet_frame(pd.concat([current, uploaded], ignore_index=True))
-        install_custom_parquet_frame(context, frame)
+                provenance = merge_recipe(pool_provenance(context), provenance)
+        install_custom_parquet_frame(context, frame, provenance=provenance)
     finally:
         done()
-    save_runner_parquet(context)
+    # runner 는 install_custom_parquet_frame 이 백그라운드로 복사한다(core/search_pool_writer.py).
     return {
         "ok": True,
         "action": action,

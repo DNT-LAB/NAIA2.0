@@ -2679,7 +2679,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-sqmin')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-p3')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,

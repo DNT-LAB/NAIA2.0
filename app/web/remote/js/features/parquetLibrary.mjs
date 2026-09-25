@@ -70,7 +70,12 @@ export function recipeLine(recipe) {
     }
     case 'export': {
       const tf = recipe.tag_filter || {};
-      return join([
+      const branches = Array.isArray(tf.branches) ? tf.branches : [];
+      // 분기 스테이징(P3)이면 결과 = 분기들의 합집합 - 작업 중 칩(include/exclude)이 아니라 분기가 조건이다.
+      return join(branches.length ? [
+        `Tag Filter 분기 ${branches.length}개 합집합`,
+        ratingText(recipe.ratings),
+      ] : [
         tf.include && tf.include.length ? `Tag Filter ${tagList(tf.include)}` : '',
         tf.exclude && tf.exclude.length ? `제외 ${tagList(tf.exclude)}` : '',
         ratingText(recipe.ratings),
@@ -202,10 +207,13 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
         ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x')
                    + factRow('영구 제외', search.exclude_permanent, esc, 'is-x') + factRow('기간', search.period, esc)
                  : '<div class="pql-fact pql-dim">—</div>'}
-        <div class="pql-group">Tag Filter</div>
-        ${(tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)
-          ? factRow('포함', (tf.include || []).join(', '), esc) + factRow('제외', (tf.exclude || []).join(', '), esc, 'is-x')
-          : '<div class="pql-fact pql-dim">—</div>'}
+        <div class="pql-group">Tag Filter${Array.isArray(tf.branches) && tf.branches.length ? ` · 분기 ${tf.branches.length}개 합집합` : ''}</div>
+        ${Array.isArray(tf.branches) && tf.branches.length
+          ? tf.branches.map((b, i) => factRow(`분기 ${i + 1}`, [(b.include || []).join(', '),
+              (b.exclude || []).length ? `− ${(b.exclude || []).join(', ')}` : ''].filter(Boolean).join(' '), esc)).join('')
+          : (tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)
+            ? factRow('포함', (tf.include || []).join(', '), esc) + factRow('제외', (tf.exclude || []).join(', '), esc, 'is-x')
+            : '<div class="pql-fact pql-dim">—</div>'}
         ${f.origins.length ? `<div class="pql-group">출처</div>${f.origins.map(o => `<div class="pql-fact pql-origin">${esc(o)}</div>`).join('')}` : ''}`;
     const title = renaming === name
       ? `<input class="pql-rename" data-pql-rename="${esc(name)}" value="${esc(label)}" spellcheck="false">`

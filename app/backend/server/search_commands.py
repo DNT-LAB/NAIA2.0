@@ -34,6 +34,7 @@ SEARCH_COMMAND_TYPES = {
     "load_parquet",
     "merge_parquet",
     "search_parquet_action",
+    "search_export_preview",
     "restore_snapshot",
     "tag_filter_search",
     "tag_filter_assign",
@@ -368,6 +369,13 @@ async def handle_search_command(
         if name:
             await run_in_thread(context.delete_filter_preset, name)
         await _send_json(ws, context.search_state_payload())
+        return True
+
+    # [이 결과 저장] 팝업 미리보기 - 저장과 같은 함수로 센 행 수 · 등급별 구성 · 만든 조건.
+    if command_type == "search_export_preview":
+        from app.backend.server.search_runtime import export_condition_preview
+
+        await _send_json(ws, await run_in_thread(export_condition_preview, context))
         return True
 
     # [검색 기록] - 최대 500개라 search_state 에 매번 싣지 않고 창을 열 때만 받는다.

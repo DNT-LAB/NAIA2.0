@@ -181,6 +181,28 @@ function factRow(label, value, esc, cls = '') {
   return `<div class="pql-fact"><span class="pql-fact-k">${esc(label)}</span><span class="pql-fact-v ${cls}">${esc(value)}</span></div>`;
 }
 
+/** 만든 조건 칸들(등급 · Search · Tag Filter · 출처) - 카드 펼침과 [이 결과 저장] 팝업이 **같이 쓴다**.
+ *  같은 말로 보여야 저장 전(팝업)과 저장 후(카드)가 이어진다(사용자 지정 2026-09-25). */
+export function recipeFactsHtml(recipe, escHtml) {
+  const esc = escHtml || (s => String(s));
+  const f = recipeFacts(recipe);
+  const search = f.search;
+  const tf = f.tagFilter || {};
+  return `<div class="pql-fact"><span class="pql-fact-k">등급</span><span class="pql-fact-v">${f.ratings ? ratingPills(f.ratings, esc) : '<span class="pql-dim">기록 없음</span>'}</span></div>
+        <div class="pql-group">Search</div>
+        ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x')
+                   + factRow('영구 제외', search.exclude_permanent, esc, 'is-x') + factRow('기간', search.period, esc)
+                 : '<div class="pql-fact pql-dim">—</div>'}
+        <div class="pql-group">Tag Filter${Array.isArray(tf.branches) && tf.branches.length ? ` · 분기 ${tf.branches.length}개 합집합` : ''}</div>
+        ${Array.isArray(tf.branches) && tf.branches.length
+          ? tf.branches.map((b, i) => factRow(`분기 ${i + 1}`, [(b.include || []).join(', '),
+              (b.exclude || []).length ? `− ${(b.exclude || []).join(', ')}` : ''].filter(Boolean).join(' '), esc)).join('')
+          : (tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)
+            ? factRow('포함', (tf.include || []).join(', '), esc) + factRow('제외', (tf.exclude || []).join(', '), esc, 'is-x')
+            : '<div class="pql-fact pql-dim">—</div>'}
+        ${f.origins.length ? `<div class="pql-group">출처</div>${f.origins.map(o => `<div class="pql-fact pql-origin">${esc(o)}</div>`).join('')}` : ''}`;
+}
+
 // 그리드 HTML. 기본은 **이름만**(사용자 지정). 누른 칸은 한 줄을 통째로 차지하며 펼쳐진다.
 // openNames = 펼친 칸, renaming = 이름 바꾸는 중, confirmTrash = 휴지통 한 번 누른 칸.
 export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = null, confirmTrash = null } = {}) {
@@ -197,24 +219,9 @@ export function libraryHtml(cards, { escHtml, openNames = new Set(), renaming = 
         <span class="pql-stamp">${sizeMeta(card, esc)}</span>
       </button>`;
     }
-    const f = recipeFacts(card.recipe);
-    const search = f.search;
-    const tf = f.tagFilter || {};
     const body = card.has_meta === false || !card.recipe
       ? '<div class="pql-fact pql-dim">조건 기록 없음 (명함 이전에 저장한 파일)</div>'
-      : `<div class="pql-fact"><span class="pql-fact-k">등급</span><span class="pql-fact-v">${f.ratings ? ratingPills(f.ratings, esc) : '<span class="pql-dim">기록 없음</span>'}</span></div>
-        <div class="pql-group">Search</div>
-        ${search ? factRow('검색', search.query || '(전체)', esc) + factRow('제외', search.exclude, esc, 'is-x')
-                   + factRow('영구 제외', search.exclude_permanent, esc, 'is-x') + factRow('기간', search.period, esc)
-                 : '<div class="pql-fact pql-dim">—</div>'}
-        <div class="pql-group">Tag Filter${Array.isArray(tf.branches) && tf.branches.length ? ` · 분기 ${tf.branches.length}개 합집합` : ''}</div>
-        ${Array.isArray(tf.branches) && tf.branches.length
-          ? tf.branches.map((b, i) => factRow(`분기 ${i + 1}`, [(b.include || []).join(', '),
-              (b.exclude || []).length ? `− ${(b.exclude || []).join(', ')}` : ''].filter(Boolean).join(' '), esc)).join('')
-          : (tf.include && tf.include.length) || (tf.exclude && tf.exclude.length)
-            ? factRow('포함', (tf.include || []).join(', '), esc) + factRow('제외', (tf.exclude || []).join(', '), esc, 'is-x')
-            : '<div class="pql-fact pql-dim">—</div>'}
-        ${f.origins.length ? `<div class="pql-group">출처</div>${f.origins.map(o => `<div class="pql-fact pql-origin">${esc(o)}</div>`).join('')}` : ''}`;
+      : recipeFactsHtml(card.recipe, esc);
     const title = renaming === name
       ? `<input class="pql-rename" data-pql-rename="${esc(name)}" value="${esc(label)}" spellcheck="false">`
       : `<span class="pql-open-name" data-pql="expand" title="접기">${esc(label)}</span>`;
@@ -258,7 +265,7 @@ export const PQL_CSS = `
 .pql-facts{display:flex;flex-direction:column;gap:2px}
 .pql-group{margin-top:3px;font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--text-muted,#9a9aa6);text-transform:uppercase}
 .pql-fact{display:flex;gap:6px;font-size:10.5px;line-height:1.45;min-width:0}
-.pql-fact-k{flex:0 0 30px;color:var(--text-dimmer,#6c6c78)}
+.pql-fact-k{flex:0 0 auto;min-width:30px;white-space:nowrap;color:var(--text-dimmer,#6c6c78)}
 .pql-fact-v{flex:1;min-width:0;word-break:break-all;color:var(--text,#d8d8e0);display:flex;flex-wrap:wrap;gap:3px}
 .pql-fact-v.is-x{color:#e39a9a}
 .pql-origin{color:var(--text-dim,#aaa)}
@@ -281,9 +288,4 @@ export const PQL_CSS = `
 .dragpanel.pqlw{border-color:rgba(120,190,150,0.42)}
 .dragpanel.pqlw .dragpanel-head{background:rgba(120,190,150,0.10)}
 .dragpanel.pqlw .dragpanel-body{padding:7px}
-.search-save-form{display:flex;flex-direction:column;gap:4px;margin:4px 0;padding:6px 7px;border:1px solid var(--accent-green,#5a9e6f);border-radius:6px}
-.search-save-form[hidden]{display:none!important}
-.search-save-form .ssf-row{display:flex;gap:5px}
-.search-save-form input{flex:1;min-width:0;font-size:11px;padding:2px 5px;background:var(--bg-surface,#15151b);color:var(--text,#e8e8ee);border:1px solid var(--border,#33333f);border-radius:4px}
-.search-save-form .ssf-note{font-size:10px;color:var(--text-dim,#aaa);word-break:break-all}
 `;

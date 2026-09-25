@@ -1,5 +1,5 @@
 import { createRatingStore, RATING_KEYS, filteredCount } from './ratingStore.mjs';
-import { libraryHtml, librarySignature, recipeSummary, PQL_CSS } from './parquetLibrary.mjs?v=20260925-p3';
+import { libraryHtml, librarySignature, recipeFactsHtml, PQL_CSS } from './parquetLibrary.mjs?v=20260925-save';
 
 // 검색 층 컴팩트 배치(사용자 지정 2026-09-21): 상단 단추 셋 · 행 수 한 줄 · 등급 한 줄 ·
 // [검색 기록 | 검색]. ⚠️ display 를 주는 요소는 [hidden] 짝 규칙을 같이 둔다(이 저장소가 여러 번 밟았다).
@@ -81,6 +81,29 @@ const SEARCH_COMPACT_CSS = `
 .sp-ctx button:hover:not(:disabled){background:rgba(255,255,255,0.07)}
 .sp-ctx button:disabled{color:var(--text-dimmer,#6c6c78);cursor:default}
 .sp-ctx-sep{height:1px;margin:3px 4px;background:var(--border,#33333f)}
+/* [이 결과 저장] 팝업(사용자 지정 2026-09-25): 무엇이 저장되나 - 행 수 · 등급별 구성 · 만든 조건 · 이름. */
+.search-save-form{display:flex;flex-direction:column;gap:7px;margin:4px 0;padding:8px 9px;border-radius:8px;
+  border:1px solid rgba(120,190,150,0.5);background:rgba(0,0,0,0.22)}
+.search-save-form[hidden]{display:none!important}
+.ssf-head{display:flex;align-items:center;gap:8px}
+.ssf-title{font-size:11px;font-weight:700;color:var(--text-primary,#e8e8ee)}
+.ssf-rows{margin-left:auto;font-size:10.5px;color:var(--text-muted,#9a9aa6)}
+.ssf-rows b{font-family:var(--font-mono,monospace);font-size:13px;color:#f5dc8a;margin-right:2px}
+.ssf-x{border:none;background:transparent;color:var(--text-dimmer,#6c6c78);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.ssf-x:hover{color:#f0a0a0}
+.ssf-section{display:flex;flex-direction:column;gap:4px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06)}
+.ssf-label{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim,#888)}
+.ssf-ratings .ttr-cell.is-off{opacity:.35}
+.ssf-ratings .ttr-cell.is-off b{background:transparent!important;color:var(--text-dim,#888)}
+.ssf-facts{display:flex;flex-direction:column;gap:2px}
+.ssf-foot{font-size:9.5px;color:var(--text-dimmer,#6c6c78)}
+.ssf-loading{font-size:10.5px;color:var(--text-dim,#888);padding:4px 0}
+.search-save-form .ssf-row{display:flex;gap:5px;align-items:center}
+.search-save-form .ssf-row input{flex:1 1 auto;min-width:0;height:24px;padding:2px 7px;font-size:11px;border-radius:5px;
+  border:1px solid var(--border,#33333f);background:var(--bg-deep,#0e0e12);color:var(--text-primary,#e8e8ee)}
+.ssf-save{flex:0 0 auto;height:24px;padding:0 14px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;
+  border:1px solid transparent;background:var(--accent-green,#5a9e6f);color:#fff}
+.ssf-save:disabled{opacity:.4;cursor:default}
 /* [Tag Filter 및 심층 검색] - 옛 판에서 검색 창 안에 있던 두 기능으로 가는 길(사용자 지정 2026-09-25).
    Search Keyword 줄의 빈 오른쪽 끝, 분홍. */
 .search-host .dr-label-row{white-space:nowrap}
@@ -190,6 +213,8 @@ export function createSearchPanel({
   // editing again).
   let pendingEcho = { query: null, exclude: null, exclude_permanent: null };
   let lastParquetSig = null;
+  let exportPreview = null;         // [이 결과 저장] 미리보기(서버 search_export_preview)
+  let exportPreviewTimer = null;
   // [▼ 영구 제외] 줄을 펼쳐 두었나 - 보는 사람의 편의라 이 브라우저에만 기억한다(내용은 서버에 저장).
   let permOpen = (() => { try { return localStorage.getItem(PERM_OPEN_KEY) === '1'; } catch { return false; } })();
   let ctxMenu = null;
@@ -422,12 +447,22 @@ export function createSearchPanel({
     return true;
   }
 
-  // ---- '이 결과 저장' 양식 --------------------------------------------------------
+  // ---- '이 결과 저장' 팝업 --------------------------------------------------------
   // 저장 대상 = 지금 조건에 맞는 행 전체(등급·Tag Filter 반영, Random 이 뽑아 쓴 행 포함).
   // 파일에는 만든 조건(명함)이 함께 새겨진다 - 목록 카드가 그걸 읽는다.
-  function saveFormNote() {
-    const origin = recipeSummary(lastProvenance);
-    return `지금 풀: ${origin || '조건 기록 없음'}\n+ 현재 등급·Tag Filter 조건이 그대로 기록됩니다.`;
+  // 팝업은 **무엇이 저장되나**를 먼저 보인다(사용자 지정 2026-09-25): 행 수 · 등급별 구성 · 만든 조건.
+  // 수는 서버가 **저장과 같은 함수**로 센다(search_export_preview) - 따로 세면 팝업과 파일이 어긋난다.
+  const RATING_ORDER = ['g', 's', 'q', 'e'];
+
+  function saveFormOpen() {
+    const form = moduleBody.querySelector('.search-save-form');
+    return Boolean(form && !form.hidden);
+  }
+
+  function requestExportPreview() {
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({type: 'search_export_preview'}));
   }
 
   function openSaveForm() {
@@ -435,10 +470,58 @@ export function createSearchPanel({
     const form = moduleBody.querySelector('.search-save-form');
     if (!form) return;
     form.hidden = false;
-    const note = form.querySelector('.ssf-note');
-    if (note) note.textContent = saveFormNote();
-    const input = form.querySelector('input');
+    exportPreview = null;
+    renderSavePreview();
+    requestExportPreview();
+    const input = form.querySelector('.ssf-row input');
     if (input) { input.value = ''; input.focus(); }
+  }
+
+  function onExportPreview(message) {
+    exportPreview = message || null;
+    renderSavePreview();
+  }
+
+  function ratingBreakdownHtml(counts, active) {
+    const values = RATING_ORDER.map(r => Math.max(0, Number(counts?.[r]) || 0));
+    const total = values.reduce((a, b) => a + b, 0);
+    const bar = RATING_ORDER.map((r, i) => values[i] > 0
+      ? `<span class="ttr-seg" data-r="${r}" style="width:${(values[i] / (total || 1) * 100).toFixed(2)}%"></span>` : '').join('');
+    const cells = RATING_ORDER.map((r, i) => {
+      const on = active.includes(r);
+      const pct = total ? ` (${(values[i] / total * 100).toFixed(1)}%)` : '';
+      return `<span class="ttr-cell${on ? (values[i] ? '' : ' is-zero') : ' is-off'}" data-r="${r}" title="${on ? `${r.toUpperCase()} ${values[i].toLocaleString('en-US')}${pct}` : '등급이 꺼져 있어 저장하지 않습니다'}">`
+        + `<b>${r.toUpperCase()}</b>${on ? values[i].toLocaleString('en-US') : '제외'}</span>`;
+    }).join('');
+    return `<span class="ttr-bar">${bar}</span><span class="ttr-cells">${cells}</span>`;
+  }
+
+  function renderSavePreview() {
+    const form = moduleBody.querySelector('.search-save-form');
+    if (!form || form.hidden) return;
+    const body = form.querySelector('.ssf-body');
+    const rowsEl = form.querySelector('.ssf-rows');
+    const save = form.querySelector('.ssf-save');
+    if (!exportPreview) {
+      if (body) body.innerHTML = '<div class="ssf-loading">저장될 행을 세는 중…</div>';
+      if (rowsEl) rowsEl.textContent = '';
+      if (save) save.disabled = true;
+      return;
+    }
+    const rows = Number(exportPreview.rows) || 0;
+    const active = Array.isArray(exportPreview.active_ratings) ? exportPreview.active_ratings : RATING_ORDER;
+    if (rowsEl) rowsEl.innerHTML = `<b>${rows.toLocaleString('en-US')}</b>행`;
+    if (save) save.disabled = rows <= 0;
+    if (body) body.innerHTML = `
+      <div class="ssf-section">
+        <span class="ssf-label">등급별 구성</span>
+        <div class="tag-tooltip-ratings ssf-ratings">${ratingBreakdownHtml(exportPreview.rating_counts, active)}</div>
+      </div>
+      <div class="ssf-section">
+        <span class="ssf-label">만든 조건 (파일에 함께 새겨집니다)</span>
+        <div class="ssf-facts pql-facts">${recipeFactsHtml(exportPreview.recipe, escHtml)}</div>
+      </div>
+      <div class="ssf-foot">${rows ? 'Random 이 이미 뽑아 쓴 행도 포함해 조건에 맞는 행 전체를 저장합니다.' : '저장할 행이 없습니다 — 등급이나 Tag Filter 를 확인하세요.'}</div>`;
   }
 
   function closeSaveForm() {
@@ -1155,12 +1238,16 @@ export function createSearchPanel({
         data-naia-guide="Restore — 태그 필터와 범위 좁히기를 모두 해제하고, 마지막 검색 결과셋 전체로 되돌립니다.">Restore</button>
     </div>
     <div class="search-save-form" hidden>
+      <div class="ssf-head">
+        <span class="ssf-title">이 결과 저장</span>
+        <span class="ssf-rows"></span>
+        <button type="button" class="ssf-x" data-ssf="cancel" title="닫기">×</button>
+      </div>
+      <div class="ssf-body"><div class="ssf-loading">저장될 행을 세는 중…</div></div>
       <div class="ssf-row">
         <input type="text" placeholder="파일 이름 (비우면 날짜로)" spellcheck="false">
-        <button type="button" class="pql-btn" data-ssf="save">저장</button>
-        <button type="button" class="pql-btn" data-ssf="cancel">취소</button>
+        <button type="button" class="ssf-save" data-ssf="save">저장</button>
       </div>
-      <div class="ssf-note" style="white-space:pre-line"></div>
     </div>
     <div class="sp-counts">
       <span class="sp-count-cell" title="지금 데이터셋(검색 결과) 전체 행 수">
@@ -1266,8 +1353,11 @@ export function createSearchPanel({
 
   function updateSearchPanel(message) {
     if ('pool_provenance' in message) lastProvenance = message.pool_provenance;
-    const saveNote = moduleBody.querySelector('.search-save-form:not([hidden]) .ssf-note');
-    if (saveNote) saveNote.textContent = saveFormNote();
+    // 팝업이 열려 있으면 등급·Tag Filter·풀이 바뀔 때마다 다시 센다(몰아서 한 번).
+    if (saveFormOpen()) {
+      clearTimeout(exportPreviewTimer);
+      exportPreviewTimer = setTimeout(requestExportPreview, 350);
+    }
     const countEl = moduleBody.querySelector('.search-count-display');
     if (countEl) countEl.textContent = Number(message.count || 0).toLocaleString('en-US');
     const snapEl = moduleBody.querySelector('.sp-snap-count');
@@ -1716,6 +1806,7 @@ export function createSearchPanel({
     restoreSnapshot,
     openSaveForm,
     onSearchHistory,
+    onExportPreview,
     syncLibraryButton,
     getLibraryHost: () => libHost,
   };

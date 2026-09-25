@@ -2682,7 +2682,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-rl')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-save')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -4435,6 +4435,7 @@ const wsMessageHandlers = {
   search_loading: onSearchLoading,
   bucket_dates: onBucketDates,
   search_history: m => { if (searchPanelControl) searchPanelControl.onSearchHistory(m); },
+  search_export_preview: m => { if (searchPanelControl) searchPanelControl.onExportPreview(m); },
   depth_state: onDepthState,
   depth_sample: onDepthSample,
   tag_search_result: onTagSearchResult,

@@ -1225,6 +1225,23 @@ def export_condition_frame(context: WebSessionContext):
     return frame, recipe
 
 
+def export_condition_preview(context: WebSessionContext) -> dict[str, Any]:
+    """[이 결과 저장] 팝업의 미리보기 - **저장과 같은 함수**(export_condition_frame)로 센다. 따로 세면
+    팝업의 수와 실제로 써지는 파일이 어긋난다. 행 수 · 등급별 구성 · 만든 조건(명함 recipe)."""
+    from core.custom_parquet_library import make_meta
+
+    frame, recipe = export_condition_frame(context)
+    rows = 0 if frame is None else int(len(frame))
+    return {
+        "type": "search_export_preview",
+        "rows": rows,
+        "rating_counts": rating_counts_from_frame(frame),
+        "active_ratings": sorted(context.get_active_ratings() or []),
+        # 파일에 새기는 것과 같은 모양(깊이 제한 포함)으로 보낸다.
+        "recipe": make_meta("export", recipe, rows)["recipe"],
+    }
+
+
 def _library_toast(message: str, level: str = "success") -> dict[str, Any]:
     return {"type": "toast", "message": message, "level": level}
 

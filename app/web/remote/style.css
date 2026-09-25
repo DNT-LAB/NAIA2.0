@@ -30324,7 +30324,10 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 }
 .agw-grid {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px;
+  /* 창을 넓히면 **장수가 늘고** 카드는 그대로다(사용자 제보 2026-09-25: 3칸 고정이라
+     넓힌 창에서 한 장이 310px 까지 부풀었다). 기본 300px 창에서는 예전처럼 3장.
+     ⚠️ 리모컨 격자(`.rctl`)는 반대로 '넓히면 더 크게' 가 사용자 지정이다 - 따라 바꾸지 마라. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 5px;
   align-content: start; padding: 1px;
 }
 .agw-empty {

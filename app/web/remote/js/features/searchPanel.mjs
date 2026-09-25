@@ -19,9 +19,10 @@ const SEARCH_COMPACT_CSS = `
 .sp-count-cell b{font-family:var(--font-mono,monospace);font-size:12.5px;color:var(--accent-green,#5a9e6f)}
 .sp-unit{font-size:10px}
 .sp-count-sep{width:1px;align-self:stretch;margin:5px 0;background:var(--border,#33333f)}
-/* 창이 좁으면 다음 줄로 - nowrap 이던 때 창을 437px 로 줄이자 General 이 밖으로 나가 가로 스크롤이 생겼다
-   (사용자 제보 2026-09-25). 등급 하나(체크+글자)는 한 덩어리로 둔다. */
-.sp-ratings{display:flex;align-items:center;gap:3px 8px;flex-wrap:wrap}
+/* 한 줄 유지(사용자 지정 2026-09-25: 줄넘김은 공간 낭비). 창이 이 줄보다 좁아지지 않게
+   syncWindowMinWidth 가 창 최소 너비를 이 줄의 실제 폭으로 막는다 - 예전엔 437px 창에서 General 이
+   밖으로 나가 가로 스크롤이 생겼다(글꼴 설정마다 폭이 달라 숫자로 박지 않는다). */
+.sp-ratings{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap}
 .sp-ratings .mod-section-label{margin:0}
 .sp-ratings .mod-checkbox-item{display:inline-flex;align-items:center;gap:3px;margin:0;white-space:nowrap}
 .sp-ratings .mod-checkbox-label{font-size:10.5px}
@@ -80,6 +81,22 @@ const SEARCH_COMPACT_CSS = `
 .sp-ctx button:hover:not(:disabled){background:rgba(255,255,255,0.07)}
 .sp-ctx button:disabled{color:var(--text-dimmer,#6c6c78);cursor:default}
 .sp-ctx-sep{height:1px;margin:3px 4px;background:var(--border,#33333f)}
+/* [Tag Filter 및 심층 검색] - 옛 판에서 검색 창 안에 있던 두 기능으로 가는 길(사용자 지정 2026-09-25).
+   Search Keyword 줄의 빈 오른쪽 끝, 분홍. */
+.search-host .dr-label-row{white-space:nowrap}
+.sp-legacy-wrap{position:relative;margin-left:auto;display:inline-flex}
+.sp-legacy-btn{height:18px;padding:0 9px;font-size:9.5px;font-weight:700;border-radius:4px;cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(236,122,182,0.62);background:rgba(214,88,154,0.22);color:#ffc6e2}
+.sp-legacy-btn:hover,.sp-legacy-btn[aria-expanded="true"]{background:rgba(214,88,154,0.40);color:#fff}
+.sp-legacy-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:6;min-width:250px;padding:4px;display:flex;
+  flex-direction:column;gap:2px;background:var(--bg-elevated,#1e1e26);border:1px solid rgba(236,122,182,0.45);
+  border-radius:7px;box-shadow:0 8px 24px rgba(0,0,0,0.5);white-space:normal}
+.sp-legacy-menu[hidden]{display:none!important}
+.sp-legacy-menu button{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;padding:5px 9px;border:none;
+  border-radius:5px;background:transparent;color:var(--text-primary,#e8e8ee);cursor:pointer}
+.sp-legacy-menu button:hover{background:rgba(214,88,154,0.18)}
+.sp-legacy-menu b{font-size:11px;color:#ffc6e2}
+.sp-legacy-menu span{font-size:10px;color:var(--text-muted,#9a9aa6);word-break:keep-all}
 `;
 
 // 칸 id -> 서버 필드. 영구 제외는 따로 저장되고(search_filter_state.exclude_permanent) 모든 검색에 붙는다.
@@ -776,6 +793,16 @@ export function createSearchPanel({
       if (event.target.closest('[data-sp="parquets"]')) { toggleLibrary(); return; }
       if (event.target.closest('[data-sp="history"]')) { setHistoryOpen(!historyOpen); return; }
       if (event.target.closest('[data-sp="perm"]')) { setPermOpen(!permOpen, { focus: true }); return; }
+      if (event.target.closest('[data-sp="legacy"]')) { setLegacyMenuOpen(!legacyMenuOpen()); return; }
+      const legacyPick = event.target.closest('[data-sp-legacy]');
+      if (legacyPick) {
+        setLegacyMenuOpen(false);
+        // 옛 진입로 그대로(app.js 전역): Tag Filter = 이 창 아래층으로 · 심층 검색 = Refine 작업대.
+        const view = document.defaultView;
+        if (legacyPick.dataset.spLegacy === 'tag') view?.openTagFilter?.();
+        else view?.openRefine?.();
+        return;
+      }
       const del = event.target.closest('[data-sp-hist-del]');
       if (del) {
         const item = historyItems[Number(del.dataset.spHistDel)];
@@ -899,7 +926,48 @@ export function createSearchPanel({
       if (width === growWidth) return;
       growWidth = width;
       growKeywordFields();
+      syncWindowMinWidth();
     }).observe(moduleBody);
+    document.fonts?.ready?.then(() => syncWindowMinWidth());
+  }
+
+  function legacyMenuOpen() {
+    const menu = moduleBody.querySelector('.sp-legacy-menu');
+    return Boolean(menu && !menu.hidden);
+  }
+
+  function setLegacyMenuOpen(open) {
+    const menu = moduleBody.querySelector('.sp-legacy-menu');
+    const button = moduleBody.querySelector('[data-sp="legacy"]');
+    if (!menu || !button) return;
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && !moduleBody._spLegacyOutside) {
+      // 바깥을 누르면 닫는다(한 번만 건다 - 검색 층은 다시 그려져도 moduleBody 는 그대로다).
+      moduleBody._spLegacyOutside = true;
+      document.addEventListener('mousedown', event => {
+        if (legacyMenuOpen() && !event.target.closest?.('.sp-legacy-wrap')) setLegacyMenuOpen(false);
+      }, true);
+    }
+  }
+
+  /** 창이 한 줄로 두는 줄들(Ratings · 칸 이름 줄)보다 좁아지지 않게 창 최소 너비를 막는다(사용자 지정
+   *  2026-09-25: 줄넘김 대신). 폭은 **그 자리의 실제 글꼴로 잰다** - 사용자 창은 437px 에서 넘쳤고
+   *  기본 글꼴 창은 330px 에서 넘쳤다. 숨은 층(접힘)에서는 잴 수 없어 건너뛰고 보일 때 다시 잰다. */
+  function syncWindowMinWidth() {
+    const panel = moduleBody.closest('.dragpanel');
+    const rows = [...moduleBody.querySelectorAll('.sp-ratings, .dr-label-row')].filter(row => row.getClientRects().length);
+    if (!panel || !rows.length) return;
+    let natural = 0;
+    for (const row of rows) {
+      const before = row.style.width;
+      row.style.width = 'max-content';
+      natural = Math.max(natural, row.getBoundingClientRect().width);
+      row.style.width = before;
+    }
+    // 창 테두리·본문 안쪽 여백 = 창 폭 - 검색 층 안쪽 폭.
+    const chrome = panel.getBoundingClientRect().width - moduleBody.clientWidth;
+    panel.style.minWidth = `${Math.ceil(natural + chrome)}px`;
   }
 
   function syncPermButton() {
@@ -1107,6 +1175,14 @@ export function createSearchPanel({
       <div class="dr-label-row">
         <span class="mod-section-label">Search Keyword</span>
         <button type="button" class="header-guide-btn" data-naia-guide="Search Keyword — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다. 그룹 안에서도 *를 쓸 수 있습니다 — 예: {*dog|*cat} 은 태그가 정확히 dog 또는 cat 인 행만 남깁니다.\\n\\n*tag — 태그 전체 일치. 태그가 정확히 그것인 행만 매칭합니다. 예: *girl 은 girl 만 — 1girl·cowgirl 은 물론 girl (character) 처럼 뒤에 말이 더 붙은 태그도 제외됩니다. *dog 은 dog ears·hot dog 을 끌어오지 않습니다.\\n\\n~tag — 포함 칸에 써도 됩니다. 그 태그를 정확히 가진 행을 뺍니다(제외 칸의 ~tag 와 같음).">ⓘ 가이드</button>
+        <span class="sp-legacy-wrap">
+          <button type="button" class="sp-legacy-btn" data-sp="legacy" aria-haspopup="menu" aria-expanded="false"
+            data-naia-guide="Tag Filter 와 심층 검색은 이 창 안에 있습니다 — Tag Filter 는 아래층, 심층 검색은 따로 뜨는 작업대입니다.">Tag Filter 및 심층 검색</button>
+          <div class="sp-legacy-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-sp-legacy="tag"><b>Tag Filter</b><span>이 창 아래층 — 결과를 태그로 바로 좁힙니다</span></button>
+            <button type="button" role="menuitem" data-sp-legacy="refine"><b>심층 검색</b><span>결과 위에서 단계적으로 좁히고 합치는 작업대</span></button>
+          </div>
+        </span>
       </div>
       <textarea class="mod-input sp-kw" id="searchQuery" rows="1" spellcheck="false" placeholder="tags, keywords...">${escHtml(searchText.query)}</textarea>
     </div>
@@ -1143,6 +1219,7 @@ export function createSearchPanel({
     bindSearchInputs();
     setPermOpen(permOpen);
     growKeywordFields();
+    syncWindowMinWidth();
     ensureDateRangeStyle();
     ensureParquetLibraryStyle();
     libHost.innerHTML = parquetSectionHtml(message);

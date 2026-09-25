@@ -498,9 +498,10 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
         state["prep_ms"] = round((time.perf_counter() - started) * 1000, 1)
         state["kept"] = [{"ko": a.ko, "en": a.en, "keep": list(a.keep)} for a in asks if a.keep]
         # 한 조각씩 번호로(0 = 없음), 앞에서 고른 것을 넘기며 차례로 — 사용자 제안(09-25). 후보가 둘 이상이면 역순으로 한 번
-        # 더 묻는다(위치 치우침 — settle_order). 모델이 실패하면 그 조각부터는 고르기 없음(예전 결과)
+        # 더 묻는다(위치 치우침 — settle_order). 호출이 실패하면 거기서 멈춘다: 정순이 실패하면 그 조각부터, 역순만 실패하면
+        # 그 조각은 정순 답으로 두고 뒤 조각부터 예전 결과(엔진이 죽었으면 호출마다 제한 시간을 다 기다린다 — Codex 검토 09-25)
         done = [t for a in asks for t in a.keep]
-        elapsed, calls = 0.0, 0
+        elapsed, calls, failed = 0.0, 0, False
         for ask in sent:
             names = [t for t, _d in ask.candidates]
             answers: list[Any] = []
@@ -513,6 +514,7 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
                 calls += 1
                 state["model"] = dict(info, elapsed=round(elapsed, 2), calls=calls)
                 if reply is None:
+                    failed = True
                     break
                 answers.append(cand.parse_choice(reply, listed))
             if not answers:
@@ -521,6 +523,8 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
             done += ask.picks or []
             state["sent"].append({"ko": ask.ko, "en": ask.en, "source": ask.source, "keep": list(ask.keep),
                                   "candidates": names, "picks": ask.picks, "answers": answers})
+            if failed:
+                break
         return [t for a in sent if a.source == "extra" for t in (a.picks or [])]
 
     return chooser, state

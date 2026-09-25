@@ -47,6 +47,13 @@ GENERIC_NOUNS = frozenset({"표정", "사이", "모습", "장면", "구도", "�
 
 
 _FUNCTION = ("J", "E", "VX")        # 조사·어미·보조 용언 — 키워드의 나머지가 이것뿐이면 '깨끗' 하다
+# 공간 관계 — 태그 앞 전치사와 한국어 공간 명사가 어긋나면 그 태그는 확정도 후보도 아니다. '침대 아래에 누워 있기'
+# (lying on bed)가 명사(침대 = bed)만 맞아 on bed 로 확정됐다(Codex 검토 09-25). 한국어에 공간 명사가 없으면 묻지 않는다.
+_TAG_RELATION = {"on": "위", "onto": "위", "above": "위", "over": "위", "atop": "위", "under": "아래", "below": "아래",
+                 "beneath": "아래", "underneath": "아래", "beside": "옆", "next": "옆", "behind": "뒤", "in": "안",
+                 "inside": "안", "into": "안", "within": "안", "outside": "밖", "out": "밖", "between": "사이"}
+_KO_RELATION = {"위": "위", "아래": "아래", "밑": "아래", "옆": "옆", "곁": "옆", "앞": "앞", "뒤": "뒤", "안": "안",
+                "속": "안", "밖": "밖", "바깥": "밖", "사이": "사이"}
 # 같은 뜻의 보는 동사 — 사전은 '창밖 보기'(looking outside), 요청은 '창밖을 쳐다보는' 이었다(09-25). 원형을 바꾸지 않고
 # '보' 를 덧붙인다(빤히 쳐다보기 -> staring 도 그대로 걸리게). 올려다보·내려다보·돌아보는 방향이 뜻이라 넣지 않는다.
 _SEE = frozenset({"쳐다보", "바라보", "지켜보"})
@@ -365,6 +372,22 @@ def parse_choice(reply: str | None, names: list[str]) -> list[str] | None:
     return [names[n - 1]] if 0 < n <= len(names) else None
 
 
+def tag_relation(tag: str) -> str | None:
+    """태그 앞 전치사의 공간 관계(on bed -> 위 · in front of -> 앞) — 없으면 None."""
+    words = en_words(tag)
+    if not words:
+        return None
+    if words[:2] == ["in", "front"]:
+        return "앞"
+    return _TAG_RELATION.get(words[0])
+
+
+def relation_conflicts(tag: str, relations: set[str]) -> bool:
+    """한국어 조각의 공간 명사(relations)가 있는데 태그의 전치사 관계가 그중 어느 것도 아니면 어긋난다."""
+    rel = tag_relation(tag)
+    return bool(relations) and rel is not None and rel not in relations
+
+
 def agrees(tag: str, en: str) -> bool:
     """태그 이름과 모델 영문이 낱말(앞 네 글자)을 나누나 — rain ~ rainy · hand on own chin ~ chin resting on hand."""
     tw = {w[:4] for w in en_words(tag) if len(w) >= 3 and w not in _EN_STOP}
@@ -426,11 +449,14 @@ def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: Key
             scored[tag] = max(scored.get(tag, 0.0), score + 1.0)
         return scored
 
-    def settle(ask: Ask, scored: dict[str, float]) -> None:
+    def relations_of(ko: str) -> set[str]:
+        return {_KO_RELATION[f] for f, t in tokenize(ko) if t.startswith("NN") and f in _KO_RELATION}
+
+    def settle(ask: Ask, scored: dict[str, float], relations: frozenset[str] = frozenset()) -> None:
         # 'X and Y' 는 두 사람·두 가지의 구도 태그다 — 학생(student)에 teacher and student 를 골랐다(holdout2 09-25)
         pair = " and " in f" {ask.en} "
         names = [t for t in order_candidates(scored, ask.en)
-                 if t not in ask.keep and ok(t) and (pair or " and " not in t)]
+                 if t not in ask.keep and ok(t) and (pair or " and " not in t) and not relation_conflicts(t, relations)]
         ask.candidates = [(t, describe(t)) for t in names[:MAX_CANDIDATES]]
 
     out: list[Ask] = []
@@ -444,8 +470,12 @@ def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: Key
         confirm = korean_tags(ask.ko, want=want, keyword_tags=keyword_tags, index=index, lookup=lookup,
                               canonical=canonical)
 
+        relations = frozenset(relations_of(ask.ko))
+
         def confirmed(tag: str) -> set[str] | None:
-            # 확인된 태그 그 자체이거나, 불용어만 더 붙은 꼴(on bed = bed)
+            # 확인된 태그 그 자체이거나, 불용어만 더 붙은 꼴(on bed = bed) — 단 공간 관계가 한국어와 맞아야 한다
+            if relation_conflicts(tag, relations):
+                return None
             if tag in confirm:
                 return confirm[tag]
             words = {w for w in en_words(tag) if w not in _EN_STOP}
@@ -484,7 +514,7 @@ def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: Key
                   if en_ok or (ko_ok and not ask.keep and agrees(tag, ask.en))]
         for i, tag in enumerate(strong[:MAX_CANDIDATES]):
             scored[tag] = max(scored.get(tag, 0.0), 2.5 - 0.2 * i)
-        settle(ask, scored)
+        settle(ask, scored, relations)
         if ask.candidates:
             out.append(ask)
         elif ask.keep:

@@ -232,6 +232,16 @@ def en_variants(term: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def _same_word(a: str, b: str) -> bool:
+    """영문 두 낱말이 같은 말인가 — 앞부분이 짧은 쪽 전체이거나 5글자 이상 같다(look = looking, stars ≠ staring)."""
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n >= min(5, len(a), len(b))
+
+
 def exact_english(term: str, vocab: TagVocab) -> str | None:
     """영문 추측이 (변형 포함) 태그 이름 그대로인가 — 쪼개지 않은 정확 일치만."""
     for v in en_variants(term):
@@ -363,6 +373,18 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
         return [t for t in _item_tags(item, kind) if not _junk_tag(t)]
 
+    def fuzzy_pick(ko: str, en: str) -> list[str]:
+        # 퍼지 후보는 영문 추측이 **다 설명하는** 태그만 — 낱말 하나만 겹쳐도 받았더니 'looking at me' 가
+        # looking at penis(키워드 쳐다보기)를 데려왔다(사용자 제보 09-24). 후보의 내용어가 전부 영문 추측에 있어야 한다.
+        # 같은 말 = 앞부분이 짧은 쪽 전체이거나 5글자 이상 같을 때 — 앞 4글자로 비교했더니 looking at stars 가
+        # staring('star' 까지 같음)이 됐다(검증3, 09-25). look = looking · eye = eyes · close = closed 는 그대로 같다.
+        en_words = [w for w in re.findall(r"[a-z]+", en) if len(w) >= 3]
+        for cand in vocab.fuzzy(ko) if ko else []:
+            words = [w for w in re.findall(r"[a-z]+", cand.lower()) if len(w) >= 3]
+            if words and all(any(_same_word(w, e) for e in en_words) for w in words) and vocab.canonical(cand):
+                return [vocab.canonical(cand)]
+        return []
+
     def _item_tags(item: dict[str, Any], kind: str) -> list[str]:
         en = str(item.get("en") or "").strip().lower()
         ko = str(item.get("ko") or "").strip()
@@ -401,6 +423,12 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)] if len(ko_c) >= 2 else []
             if hit:
                 return hit[:1]
+            if not found:
+                # 예전 길의 마지막 그물(영문이 다 설명하는 퍼지 후보)은 묻기 전에 — 고르기가 답을 못 하면 이것까지
+                # 사라졌다(eyes closed -> closed eyes, Codex 검토 09-25). 이제 fallback = 예전 길의 결과 그대로.
+                fuzzy = fuzzy_pick(ko, en)
+                if fuzzy:
+                    return fuzzy
             asks.append(Ask(ko=ko, en=en, who=int(item.get("who") or 0), fallback=list(found)))
             return []
         if found and len(found) == 1:
@@ -411,13 +439,9 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
                 return hit[:1]
         if found:
             return found
-        # 퍼지 후보는 영문 추측이 **다 설명하는** 태그만 — 낱말 하나만 겹쳐도 받았더니 'looking at me' 가
-        # looking at penis(키워드 쳐다보기)를 데려왔다(사용자 제보 09-24). 후보의 내용어가 전부 영문 추측에 있어야 한다.
-        en_words = {w[:4] for w in re.findall(r"[a-z]+", en) if len(w) >= 3}
-        for cand in vocab.fuzzy(ko) if ko else []:
-            words = {w[:4] for w in re.findall(r"[a-z]+", cand.lower()) if len(w) >= 3}
-            if words and words <= en_words and vocab.canonical(cand):
-                return [vocab.canonical(cand)]
+        fuzzy = fuzzy_pick(ko, en)
+        if fuzzy:
+            return fuzzy
         log.append(f"unresolved:{en}|{ko}")
         return []
 

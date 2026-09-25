@@ -430,6 +430,41 @@ def _with_rating_note(out: dict[str, Any], rating: str, dropped: dict[str, float
         out["message"] = " ".join(m for m in (_rating_note(rating, dropped), out.get("message")) if m)
 
 
+def _senses_of(layer: Any, vocab: Any, word: str) -> list[str]:
+    """사전의 그 말이 가리키는 일반 태그(게시물 많은 순, 맵 이름) — lookup 은 12개 넘게 가리키는 말(눈)을 통째로 버린다."""
+    out: list[str] = []
+    for name, _count, cat in sorted(layer.vocab.keywords.get(word, []), key=lambda r: -r[1]):
+        tag = vocab.canonical(name) if not cat else None
+        if tag and tag not in out and vocab.role(tag) != "population":
+            out.append(tag)
+    return out[:12]
+
+
+def _sense_check(context: Any, layer: Any, ka: Any, merged: Any, vocab: Any) -> list[tuple[str, str, str]]:
+    """동음이의어 뜻 검사(core/assist_senses) — 병합 직후, 등급 게이트 전(바꾼 태그도 게이트를 지난다).
+    이벤트 맵이 없거나 깨지면 건너뛴다 — Assist 는 그대로 간다."""
+    from core.assist_v2 import replace_tag
+
+    try:
+        from core.assist_senses import Cooccur, homonym_swaps
+
+        index = _event_map(context).index()
+        cooc = getattr(context, "assist_cooccur", None)
+        if cooc is None or cooc.index is not index:
+            cooc = Cooccur(index)
+            context.assist_cooccur = cooc
+        names = {n.form for n in ka.names}
+        nouns = [f for f, t in ka.tokens if t in ("NNG", "NNP") and f not in names]
+        tags = merged.all_tags() + [a for c in merged.characters for a in c.attrs]
+        swaps = homonym_swaps(nouns, tags, lambda w: _senses_of(layer, vocab, w), cooc)
+    except Exception:
+        return []
+    for word, old, new in swaps:
+        replace_tag(merged, old, new)
+        merged.log.append(f"sense:{word}:{old}->{new}")
+    return swaps
+
+
 def _lemma_index(context: Any, layer: Any) -> Any:
     """NAIA 한국어 키워드 원형 색인 — 세션에 하나(창을 열 때 뒤에서 만든다, 늦으면 첫 고르기가 약 3초 기다린다)."""
     from core.assist_candidates import KeywordLemmaIndex
@@ -572,6 +607,9 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                    not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
                    generic_roles={w for group in rules.get("people", {}).values() for w in group},
                    roles_for=lambda names: layer.roles_for(ka, names), chooser=chooser)
+    t_sense = time.perf_counter()
+    _sense_check(context, layer, ka, merged, vocab)
+    sense_ms = round((time.perf_counter() - t_sense) * 1000, 1)
     share = _rating_share(context, req["rating"])
     dropped = off_rating(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
                          + [r[1] for r in merged.relations], share, RATING_GATE[req["rating"]]) if share else {}
@@ -599,7 +637,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         out["guide"] = GUIDE
     out["timing"] = {"korean_ms": korean_ms, "model_s": model.get("elapsed"),
                      "choose_s": ((choose_state or {}).get("model") or {}).get("elapsed"),
-                     "choose_prep_ms": (choose_state or {}).get("prep_ms"),
+                     "choose_prep_ms": (choose_state or {}).get("prep_ms"), "sense_ms": sense_ms,
                      "search_ms": round((time.perf_counter() - t) * 1000, 1),
                      "total_s": round(time.perf_counter() - started, 3)}
     if merged.task in ("scene", "tag"):

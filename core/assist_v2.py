@@ -572,6 +572,17 @@ def drop_tags(merged: Merged, tags: Iterable[str]) -> None:
     merged.relations[:] = [r for r in merged.relations if r[1] not in drop]
 
 
+def replace_tag(merged: Merged, old: str, new: str) -> None:
+    """태그 하나를 다른 태그로 — 같은 자리에서(층 · 인물 속성). 새 태그가 이미 있으면 옛것만 뺀다(동음이의어 뜻 검사)."""
+    for bag in [*merged.tiers, *(c.attrs for c in merged.characters)]:
+        if old not in bag:
+            continue
+        if new in bag:
+            bag[:] = [t for t in bag if t != old]
+        else:
+            bag[:] = [new if t == old else t for t in bag]
+
+
 # ── 조립 ───────────────────────────────────────────────────────────────────
 
 PERSON_TAGS = {

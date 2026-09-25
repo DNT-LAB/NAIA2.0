@@ -494,6 +494,9 @@ def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True
             context.save_search_filter_state(
                 tag_filter=[],
                 tag_filter_exclude=[],
+                tag_filter_branches=[],
+                tag_filter_pinned=[],
+                tag_filter_applied_branches=[],
                 tag_filter_active=False,
             )
         else:
@@ -535,13 +538,14 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
         return False
     include = [str(tag) for tag in (state.get("tag_filter") or []) if str(tag).strip()]
     exclude = [str(tag) for tag in (state.get("tag_filter_exclude") or []) if str(tag).strip()]
-    if not include and not exclude:
+    applied_branches = normalize_tag_filter_branches(state.get("tag_filter_applied_branches"))
+    if not include and not exclude and not applied_branches:
         return False
     snapshot = getattr(context, "search_results_snapshot", None)
     if snapshot is None or getattr(snapshot, "empty", True):
         return False
     tags = [*include, *[f"-{tag}" for tag in exclude]]
-    result = tag_filter_search(context, tags)
+    result = tag_filter_search(context, tags, applied_branches or None)
     ids = result.get("_ids", set())
     source_snapshot = result.get("_source_snapshot")
     source_generation = int(result.get("_pool_generation") or 0)
@@ -559,6 +563,7 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
         context.active_tag_filter_ids = set(ids)
         context.active_tag_filter = {
             "tags": [str(tag) for tag in result.get("tags", [])],
+            "branches": [list(b) for b in (result.get("branches") or [])],
             "ids": set(ids),
             "count": int(result.get("count") or 0),
             "request_id": "",
@@ -718,8 +723,10 @@ def commit_pending_tag_filter_assignment(
         context.active_tag_filter_frame_for = context.active_tag_filter_ids
         context.active_tag_filter_frame_snapshot = pending.get("source_snapshot")
         tags = [str(tag) for tag in pending.get("tags", [])]
+        branches = [list(b) for b in (pending.get("branches") or [])]
         context.active_tag_filter = {
             "tags": tags,
+            "branches": branches,
             "ids": set(context.active_tag_filter_ids),
             "count": int(pending.get("count") or 0),
             "request_id": request_id,
@@ -741,6 +748,7 @@ def commit_pending_tag_filter_assignment(
         context.save_search_filter_state(
             tag_filter=[tag for tag in tags if not tag.startswith("-")],
             tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
+            tag_filter_applied_branches=branches,
             tag_filter_active=True,
         )
         if client_key and isinstance(pending_by_client, dict):
@@ -871,11 +879,33 @@ def _match_tags_text(tags_text, pattern: str):
     return np.concatenate(list(_tag_filter_executor().map(match, tags_text.chunks)))
 
 
-def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
-    return _tag_filter_search_impl(context, tags)
+def normalize_tag_filter_branches(value: Any) -> list[list[str]]:
+    """분기 목록(분기 = 칩 토큰 목록, 칩 문법 그대로 `-제외`·`*정확`) 정규화. 빈 분기는 버린다."""
+    out: list[list[str]] = []
+    if not isinstance(value, (list, tuple)):
+        return out
+    for branch in list(value)[:TAG_FILTER_MAX_BRANCHES]:
+        tokens = branch.get("tags") if isinstance(branch, dict) else branch
+        if not isinstance(tokens, (list, tuple)):
+            continue
+        clean = [str(t).strip() for t in list(tokens)[:TAG_FILTER_MAX_BRANCH_TAGS] if str(t or "").strip()]
+        if clean:
+            out.append(clean)
+    return out
 
 
-def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
+# 분기 스테이징 상한(사용자 칩 조작이 만드는 목록 - 넉넉히, 폭주만 막는다).
+TAG_FILTER_MAX_BRANCHES = 16
+TAG_FILTER_MAX_BRANCH_TAGS = 64
+
+
+def tag_filter_search(context: WebSessionContext, tags: list[Any], branches: Any = None) -> dict[str, Any]:
+    """칩 검색. ``branches`` 가 있으면 **분기 스테이징**(계획서 P3): 결과 = 분기마다
+    (포함 AND · 제외 OR 빼기)를 구한 뒤 분기끼리 **OR**. 없으면 예전 그대로 ``tags`` 한 벌."""
+    return _tag_filter_search_impl(context, tags, normalize_tag_filter_branches(branches))
+
+
+def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any], branches: list[list[str]] | None = None) -> dict[str, Any]:
     # Capture snapshot identity and its monotonic generation under the same lock.
     # The expensive scan runs lock-free, but result/assign must prove both values
     # are still current before publishing or committing the matched frame.
@@ -893,6 +923,7 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
             "type": "tag_filter_result",
             "count": 0,
             "tags": normalized,
+            "branches": [list(b) for b in (branches or [])],
             "rating_counts": rating_counts_from_frame(None),
             "_ids": set(),
             "_source_snapshot": snapshot,
@@ -913,7 +944,7 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
     except Exception:
         heavy = False
     if not heavy:
-        result = _run_tag_filter(context, snapshot, tags, heartbeat=None)
+        result = _run_tag_filter(context, snapshot, tags, heartbeat=None, branches=branches)
         result["_source_snapshot"] = snapshot
         result["_pool_generation"] = source_generation
         return result
@@ -922,7 +953,7 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
         def heartbeat(loaded: int, total: int) -> None:
             context.pool_loading_progress("filter", loaded, total)
 
-        result = _run_tag_filter(context, snapshot, tags, heartbeat=heartbeat)
+        result = _run_tag_filter(context, snapshot, tags, heartbeat=heartbeat, branches=branches)
         result["_source_snapshot"] = snapshot
         result["_pool_generation"] = source_generation
         return result
@@ -930,7 +961,9 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
         context.pool_loading_end()
 
 
-def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, heartbeat=None) -> dict[str, Any]:
+def _run_tag_filter(
+    context: WebSessionContext, snapshot, tags: list[Any], *, heartbeat=None, branches: list[list[str]] | None = None,
+) -> dict[str, Any]:
     cache = _tag_filter_cache(context, snapshot)
     if cache["tags_text"] is None:
         # Double-checked build under a lock so a concurrent search reuses the
@@ -994,6 +1027,71 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
         except Exception:
             pass
 
+    parsed, clean_tags = _parse_filter_chips(tags)
+
+    def _chips_mask(chips: list[tuple[str, bool, bool]]):
+        include_mask = None                              # None = 아직 제한 없음(전체 행)
+        exclude_mask = np.zeros(row_count, dtype=bool)
+        for clean, negate, exact in chips:
+            _beat()                                      # 이 칩의 scan 직전
+            m = _hit_mask(clean.lower(), exact)
+            if negate:
+                exclude_mask |= m
+            elif include_mask is None:
+                include_mask = m.copy()                  # copy → 이후 &= 가 캐시 마스크를 변형하지 않음
+            else:
+                include_mask &= m
+        if include_mask is None:
+            include_mask = np.ones(row_count, dtype=bool)
+        return include_mask & ~exclude_mask if exclude_mask.any() else include_mask
+
+    branch_clean: list[list[str]] = []
+    branch_rating_counts: list[dict[str, int]] = []
+    if branches:
+        # 분기 스테이징(계획서 P3): 분기마다 칩 마스크(재스캔 없음 - 칩 캐시 재사용) → 분기끼리 OR.
+        frame_ratings = None
+        if "rating" in cache["frame"].columns:
+            if cache.get("rating_values") is None:
+                cache["rating_values"] = cache["frame"]["rating"].astype(str).to_numpy()
+            frame_ratings = cache["rating_values"]
+        final_mask = np.zeros(row_count, dtype=bool)
+        for branch in branches:
+            branch_parsed, branch_tokens = _parse_filter_chips(branch)
+            if not branch_parsed:
+                continue
+            mask = _chips_mask(branch_parsed)
+            final_mask |= mask
+            branch_clean.append(branch_tokens)
+            if frame_ratings is not None:
+                branch_rating_counts.append({r: int((mask & (frame_ratings == r)).sum()) for r in "gsqe"})
+            else:
+                branch_rating_counts.append({r: 0 for r in "gsqe"})
+        _beat()
+    else:
+        final_mask = _chips_mask(parsed)
+        _beat()                                          # 마지막 scan tail + 최종 materialize 직전
+
+    frame = cache["frame"]
+    matched = frame[final_mask]                           # positional boolean index (set(range())/sorted() 제거)
+    ids = set(matched["id"].tolist()) if cache["has_id"] else set(matched.index.tolist())
+    result = {
+        "type": "tag_filter_result",
+        "count": int(len(matched)),
+        "tags": clean_tags,
+        "rating_counts": rating_counts_from_frame(matched),
+        "_ids": ids,
+        # B3: 이미 슬라이스된 매칭 프레임(등급-무관)을 동봉 → assign 이 active 로 이관해
+        # apply_search_runtime_filters 가 전체 스냅샷 isin 재스캔을 건너뛴다(가드는 호출부).
+        "_frame": matched,
+    }
+    if branches:
+        result["branches"] = branch_clean
+        result["branch_rating_counts"] = branch_rating_counts
+    return result
+
+
+def _parse_filter_chips(tags: list[Any]) -> tuple[list[tuple[str, bool, bool]], list[str]]:
+    """칩 목록 → [(clean, negate, exact)] + 영속용 토큰. 분기 하나도 같은 문법이다."""
     # 먼저 모든 칩을 (clean, negate)로 분해 — 프론트가 "1girl, armpits" 한 칩을 통째로 보내도 두
     # 태그로 매칭/표기(예약 버그). negate('-')는 분리 후 서브토큰별 판정('1girl, -armpits' →
     # include 1girl + exclude armpits).
@@ -1024,36 +1122,7 @@ def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, he
             #    재시작 시 exact 가 조용히 부분일치로 강등된다(Codex 지적).
             clean_tags.append(("-" if negate else "") + ("*" if exact else "") + clean)
             parsed.append((clean, negate, exact))
-
-    include_mask = None                                  # None = 아직 제한 없음(전체 행)
-    exclude_mask = np.zeros(row_count, dtype=bool)
-    for clean, negate, exact in parsed:
-        _beat()                                          # 이 칩의 str.contains scan 직전
-        m = _hit_mask(clean.lower(), exact)
-        if negate:
-            exclude_mask |= m
-        elif include_mask is None:
-            include_mask = m.copy()                      # copy → 이후 &= 가 캐시 마스크를 변형하지 않음
-        else:
-            include_mask &= m
-    if include_mask is None:
-        include_mask = np.ones(row_count, dtype=bool)
-    _beat()                                              # 마지막 scan tail + 최종 materialize 직전
-    final_mask = include_mask & ~exclude_mask if exclude_mask.any() else include_mask
-
-    frame = cache["frame"]
-    matched = frame[final_mask]                           # positional boolean index (set(range())/sorted() 제거)
-    ids = set(matched["id"].tolist()) if cache["has_id"] else set(matched.index.tolist())
-    return {
-        "type": "tag_filter_result",
-        "count": int(len(matched)),
-        "tags": clean_tags,
-        "rating_counts": rating_counts_from_frame(matched),
-        "_ids": ids,
-        # B3: 이미 슬라이스된 매칭 프레임(등급-무관)을 동봉 → assign 이 active 로 이관해
-        # apply_search_runtime_filters 가 전체 스냅샷 isin 재스캔을 건너뛴다(가드는 호출부).
-        "_frame": matched,
-    }
+    return parsed, clean_tags
 
 
 def normalize_custom_parquet_filename(filename: str, *, fallback_prefix: str = "search_export") -> str:
@@ -1141,11 +1210,18 @@ def export_condition_frame(context: WebSessionContext):
     frame = filter_source_frame(source, ratings=ratings, tag_ids=tag_ids)
     recipe: dict[str, Any] = {"source": "export", "parent": parent, "ratings": sorted(ratings or [])}
     tags = [str(t) for t in (active.get("tags") or [])] if tag_ids is not None else []
-    if tags:
+    branches = [list(b) for b in (active.get("branches") or [])] if tag_ids is not None else []
+    if tags or branches:
         recipe["tag_filter"] = {
             "include": [t for t in tags if not t.startswith("-")],
             "exclude": [t[1:] for t in tags if t.startswith("-")],
         }
+        if branches:
+            # 분기 스테이징이면 결과 = 분기들의 합집합 - 위 include/exclude(작업 중 칩)가 아니라 이것이 조건이다.
+            recipe["tag_filter"]["branches"] = [
+                {"include": [t for t in b if not t.startswith("-")], "exclude": [t[1:] for t in b if t.startswith("-")]}
+                for b in branches
+            ]
     return frame, recipe
 
 

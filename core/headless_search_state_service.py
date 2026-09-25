@@ -76,6 +76,11 @@ class HeadlessSearchStateService:
             "search_ratings": list(DEFAULT_ACTIVE_RATINGS),
             "tag_filter": [],
             "tag_filter_exclude": [],
+            # 분기 스테이징(계획서 P3): 담아 둔 분기 [{tags:[칩 토큰], enabled}] · 기준 고정 칩 ·
+            # 마지막으로 적용한 분기 목록(재시작 재조립용 - 켜진 분기 + 작업 중 칩).
+            "tag_filter_branches": [],
+            "tag_filter_pinned": [],
+            "tag_filter_applied_branches": [],
             "tag_filter_active": False,
             "bucket_start": None,
             "bucket_end": None,
@@ -137,6 +142,34 @@ class HeadlessSearchStateService:
             normalized.append(text)
         return normalized
 
+    @staticmethod
+    def normalize_token_list(value: Any, limit: int = 64) -> list[str]:
+        """칩 토큰(`-제외`·`*정확` 표기 그대로) 목록 - 순서 유지, 중복·빈 것 제거."""
+        if not isinstance(value, (list, tuple)):
+            return []
+        out: list[str] = []
+        for item in list(value)[:limit]:
+            token = str(item or "").strip()
+            if token and token not in out:
+                out.append(token)
+        return out
+
+    @classmethod
+    def normalize_branch_list(cls, value: Any, limit: int = 16) -> list[dict[str, Any]]:
+        """분기 목록 [{tags, enabled}] - 칩 목록만 온 것도 받는다(enabled=True). 빈 분기는 버린다."""
+        if not isinstance(value, (list, tuple)):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in list(value)[:limit]:
+            if isinstance(item, dict):
+                tags, enabled = item.get("tags"), item.get("enabled", True)
+            else:
+                tags, enabled = item, True
+            tokens = cls.normalize_token_list(tags)
+            if tokens:
+                out.append({"tags": tokens, "enabled": bool(enabled)})
+        return out
+
     def normalize_search_filter_state(self, raw: Any) -> dict[str, Any]:
         state = self.default_search_filter_state()
         if isinstance(raw, dict):
@@ -157,8 +190,14 @@ class HeadlessSearchStateService:
                     raw.get("tag_filter_exclude") or raw.get("exclude_tags")
                 )
             ]
+            state["tag_filter_branches"] = self.normalize_branch_list(raw.get("tag_filter_branches"))
+            state["tag_filter_pinned"] = self.normalize_token_list(raw.get("tag_filter_pinned"))
+            state["tag_filter_applied_branches"] = [
+                b["tags"] for b in self.normalize_branch_list(raw.get("tag_filter_applied_branches"))
+            ]
             state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
                 bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
+                or bool(state["tag_filter_applied_branches"])
             )
             state["bucket_start"] = self._coerce_bucket_index(raw.get("bucket_start", state["bucket_start"]))
             state["bucket_end"] = self._coerce_bucket_index(raw.get("bucket_end", state["bucket_end"]))
@@ -208,6 +247,9 @@ class HeadlessSearchStateService:
             state["tag_filter_exclude"] = [
                 tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter_exclude"])
             ]
+        for key in ("tag_filter_branches", "tag_filter_pinned", "tag_filter_applied_branches"):
+            if key in updates and updates[key] is not None:
+                state[key] = updates[key]              # normalize_search_filter_state 가 모양을 잡는다
         if "tag_filter_active" in updates and updates["tag_filter_active"] is not None:
             state["tag_filter_active"] = bool(updates["tag_filter_active"])
         for bkey in ("bucket_start", "bucket_end"):
@@ -252,6 +294,8 @@ class HeadlessSearchStateService:
             tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
             tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
             tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
+            tag_filter_branches=payload.get("tag_filter_branches") if "tag_filter_branches" in payload else None,
+            tag_filter_pinned=payload.get("tag_filter_pinned") if "tag_filter_pinned" in payload else None,
             bucket_start=payload.get("bucket_start") if "bucket_start" in payload else None,
             bucket_end=payload.get("bucket_end") if "bucket_end" in payload else None,
         )

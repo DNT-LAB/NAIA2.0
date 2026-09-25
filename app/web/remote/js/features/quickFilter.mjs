@@ -1489,6 +1489,15 @@ export function createQuickFilterController(deps) {
   function setPresets(list) {
     presets = Array.isArray(list) ? list.filter(p => p && p.name) : [];
     renderPresets();
+    renderPresetCount();
+  }
+
+  /** [Filters] 단추에 저장된 필터 개수 - 백업 슬롯은 세지 않는다(사용자가 저장한 것만). */
+  function renderPresetCount() {
+    const button = getEl('tagFilterPresetsBtn');
+    if (!button) return;
+    const count = presets.filter(p => p.name !== PRESET_BACKUP_NAME).length;
+    button.textContent = `Filters (${count})`;
   }
 
   function renderPresets() {

@@ -450,7 +450,7 @@
     <div class="tag-filter-chips" id="tagFilterExcludeChips"></div>
     <div class="tag-filter-actions tag-filter-preset-actions">
       <button class="tag-filter-btn-action save" onclick="toggleSaveTagFilterRow()">Save Filter</button>
-      <button class="tag-filter-btn-action filters" onclick="toggleTagFilterPresets()">Filters</button>
+      <button class="tag-filter-btn-action filters" id="tagFilterPresetsBtn" onclick="toggleTagFilterPresets()">Filters</button>
     </div>
     <div class="tag-filter-save-row" id="tagFilterSaveRow" hidden>
       <input class="tag-filter-input" id="tagFilterPresetName" placeholder="filter 이름..." autocomplete="off"
@@ -1462,6 +1462,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260925-presetprompt"></script>
+<script src="app.js?v=20260925-filtercount"></script>
 </body>
 </html>

@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from core.assist_candidates import Ask
+from core.assist_candidates import GENERIC_NOUNS, Ask
 from core.assist_korean import KoreanAnalysis, NameHit, clean_text, compact
 
 TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
@@ -112,7 +112,9 @@ _PEOPLE_EN = re.compile(r"^(?:\d+\s*)?(?:a |an |the |one |two |three |several )?
 _NEGATION = re.compile(r"^(?:no|without|non)\s+(.+)$|^(.+?)\s+(?:removed|off)$")
 _EN_STOP = frozenset({"on", "in", "at", "the", "a", "an", "of", "with", "down", "up", "like", "while", "day", "girl",
                       "woman", "and", "to", "for"})
-_SYNONYMS = {"photo": "picture", "photos": "pictures"}
+# 모델 영문 -> 단보루 낱말. V 사인은 태그가 v 다 — v sign 을 쪼개면 sign(표지판)이 실렸다(사용자 제보 09-25)
+_SYNONYMS = {"photo": "picture", "photos": "pictures",
+             "v sign": "v", "v-sign": "v", "peace sign": "v", "v pose": "v"}
 _EMOTICON_EN = re.compile(r"[^a-z]*|[^a-z]{1,2}\s?[a-z]?")
 _META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\)$")
 
@@ -431,11 +433,14 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             return []                                               # 'no towel' 은 제외 칸의 일이다
         # 모델은 동사를 '~기' 로 적는다 — 명사 조각(손가락)의 영문(finger)엔 '+ing' 을 붙이지 않는다(fingering, 09-25)
         verb = not ko_c or ko_c.endswith(("기", "다"))
+        # 틀 명사(손가락 · 표정)는 사전 키워드로 바로 싣지 않는다 — 고르기가 묻지 않는 그 목록을 바로 싣기도 따른다
+        # (손가락 -> middle finger: 사전에서 손가락은 그 태그의 분류 라벨 <손가락> 이다, 사용자 제보 09-25)
+        direct = len(ko_c) >= 2 and ko_c not in GENERIC_NOUNS
         found = resolve_english(en, vocab, verb=verb)
         if chooser is not None and kind == "include" and not exact_english(en, vocab, verb=verb):
             # 영문이 태그 이름 그대로가 아니면(쪼개지거나 못 찾음) 한국어 정확 키워드가 아닌 한 모아 두었다가 고르게 한다
             # — 쪼갠 조각(chin · resting · back)과 못 찾음(observing)이 여기서 났다(설계 19절)
-            hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)] if len(ko_c) >= 2 else []
+            hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)] if direct else []
             if hit:
                 return hit[:1]
             if not found:
@@ -448,7 +453,7 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             return []
         if found and len(found) == 1:
             return found
-        if len(ko_c) >= 2:
+        if direct:
             hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)]
             if hit:
                 return hit[:1]

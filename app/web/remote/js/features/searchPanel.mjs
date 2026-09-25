@@ -19,9 +19,11 @@ const SEARCH_COMPACT_CSS = `
 .sp-count-cell b{font-family:var(--font-mono,monospace);font-size:12.5px;color:var(--accent-green,#5a9e6f)}
 .sp-unit{font-size:10px}
 .sp-count-sep{width:1px;align-self:stretch;margin:5px 0;background:var(--border,#33333f)}
-.sp-ratings{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap}
+/* 창이 좁으면 다음 줄로 - nowrap 이던 때 창을 437px 로 줄이자 General 이 밖으로 나가 가로 스크롤이 생겼다
+   (사용자 제보 2026-09-25). 등급 하나(체크+글자)는 한 덩어리로 둔다. */
+.sp-ratings{display:flex;align-items:center;gap:3px 8px;flex-wrap:wrap}
 .sp-ratings .mod-section-label{margin:0}
-.sp-ratings .mod-checkbox-item{display:inline-flex;align-items:center;gap:3px;margin:0}
+.sp-ratings .mod-checkbox-item{display:inline-flex;align-items:center;gap:3px;margin:0;white-space:nowrap}
 .sp-ratings .mod-checkbox-label{font-size:10.5px}
 .sp-search-row{display:flex;gap:4px;align-items:stretch}
 .sp-hist-btn{flex:0 0 auto;height:26px;padding:0 10px;font-size:10.5px;border-radius:5px;cursor:pointer;
@@ -1597,6 +1599,10 @@ export function createSearchPanel({
 .dr-handle[data-edge="end"]{border-color:var(--accent-green,#5a9e6f)}
 .dr-tip{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);padding:2px 6px;border-radius:4px;background:#15151b;border:1px solid #33333f;color:var(--text,#e8e8ee);font-family:var(--font-mono,monospace);font-size:10px;white-space:nowrap;opacity:0;transition:opacity .12s;pointer-events:none}
 .dr-handle:hover .dr-tip,.dr-handle.dragging .dr-tip{opacity:1}
+/* 안 보일 때도(opacity 0) 자리는 차지한다 - 가운데 정렬이면 끝 손잡이의 말풍선이 창 오른쪽 밖으로 1px
+   나가 가로 스크롤을 만든다. 양 끝 손잡이는 안쪽으로 펼친다. */
+.dr-handle[data-edge="end"] .dr-tip{left:auto;right:-5px;transform:none}
+.dr-handle[data-edge="start"] .dr-tip{left:-5px;transform:none}
 .dr-meta{display:flex;justify-content:space-between;align-items:center;font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-dim,#888)}
 .dr-count{color:var(--accent-green,#5a9e6f)}`;
     const style = document.createElement('style');

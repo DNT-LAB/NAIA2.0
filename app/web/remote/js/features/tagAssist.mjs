@@ -489,7 +489,11 @@ export function createTagAssistController({
       for (const name of ['--tag-tooltip-top', '--tag-tooltip-left', '--tag-tooltip-max-width', '--tag-tooltip-max-height']) {
         tagTooltip.style.removeProperty(name);
       }
-      tagTooltip.classList.remove('left-side', 'drag-panel-target');
+      tagTooltip.classList.remove('left-side');
+      // ⚠️ 층 맞추기는 **건너뛰지 않는다.** 카드 자체는 창 안이라 층이 필요 없지만, 카드 칩에 올리면
+      //    뜨는 칩 설명 말풍선·읽기 전용 카드는 여전히 떠 있는 요소다 - 여기서 돌아가 버리면 그것들이
+      //    기본 층(2230)에 남아 창(10150~) **뒤에** 깔린다(사용자 제보 2026-09-25).
+      syncTooltipLayer();
       return;
     }
     syncTooltipLayer();
@@ -1347,6 +1351,12 @@ export function createTagAssistController({
     const title = anchor.dataset.tooltipTitle || anchor.dataset.insert || '';
     const chipTooltip = ensureTagChipInfoTooltip();
     chipTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
+    // 층은 **올린 칩이 어디 사는가**로 정한다. 말풍선은 처음 올릴 때 만들어져서, 카드를 그릴 때 돈
+    // syncTooltipLayer 는 그것을 못 봤다 - 창(리모컨·Search 창) 안 카드의 칩 설명이 기본 층(2230)에 떠
+    // 창 **뒤에** 깔렸다(사용자 제보 2026-09-25). 떠 있는 카드의 칩이면 초점 칸이 창 안인지 본다.
+    const inPanel = '.rctl-side, .dragpanel';
+    chipTooltip.classList.toggle('drag-panel-target', !!anchor.closest?.(inPanel)
+      || !!(acTarget || document.activeElement)?.closest?.(inPanel));
     chipTooltip.innerHTML =
       `<div class="tag-chip-info-title">${escHtml(title)}</div>` +
       (meta ? `<div class="tag-chip-info-meta">${escHtml(meta)}</div>` : '') +

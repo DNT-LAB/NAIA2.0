@@ -2679,7 +2679,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260924-sqkw')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-sqhs')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -13449,7 +13449,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260924-sq-tagrating2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260925-sqhs')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

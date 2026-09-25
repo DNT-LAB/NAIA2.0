@@ -332,8 +332,11 @@ export function createTagAssistController({
    *  ⚠️ 태그 **정보** 툴팁 경로는 `acTarget` 을 비워 둔다 - 그래서 초점도 함께 본다.
    *     실제로 정보 툴팁만 판 뒤로 숨는 것을 화면에서 봤다.
    *  메인 프롬프트의 팝업까지 올리지는 않는다(창을 끌 때 유령·제목 툴팁과 순서가 엉킨다). */
-  /** 칸이 **창 안에 붙여 그리기**를 원하면 팝업을 그 자리로 옮긴다(사용자 지정 2026-09-24, Search 창:
-   *  "팝업 툴팁형 말고 하단의 비어 있는 공간에"). 자동완성 목록과 태그 정보 카드가 같은 요소라 둘 다 따라간다.
+  /** 칸이 **창 안에 붙여 그리기**를 원하면 **태그 정보 카드**를 그 자리로 옮긴다(Search 창: 하단의 비어 있는 공간).
+   *
+   *  ⚠️ 자동완성 목록(acMode)은 옮기지 않는다 - 예전처럼 입력칸 아래 떠 있는 드롭다운이다(사용자 정정
+   *     2026-09-25: "Autocomplete 메뉴 자체는 기존 사양. 하단 UI 는 이미 선택된 태그에 대해"). 목록과 카드가
+   *     같은 요소라, 모드가 바뀔 때마다 여기서 자리를 다시 정한다.
    *
    *  ⚠️ 판단 기준은 **요소가 지금 어디 붙어 있나**다(플래그가 아니다). 창이 innerHTML 로 다시 그려지면
    *     자리째 사라져 팝업이 문서에서 떨어져 나가는데, 그때도 다음 호출에서 원래 자리로 돌아온다.
@@ -341,7 +344,7 @@ export function createTagAssistController({
   function syncTooltipHost() {
     if (!tagTooltip) return null;
     const target = acTarget || document.activeElement;
-    const host = target?._tagAssistInlineHost;
+    const host = acMode ? null : target?._tagAssistInlineHost;
     if (host && host.isConnected) {
       if (tagTooltip.parentNode !== host) host.appendChild(tagTooltip);
       tagTooltip.classList.add('inline-host');
@@ -363,7 +366,7 @@ export function createTagAssistController({
 
   function syncTooltipSide() {
     if (!tagTooltip) return;
-    if (acTarget?._tagAssistInlineHost) { tagTooltip.classList.remove('left-side'); return; }
+    if (!acMode && acTarget?._tagAssistInlineHost) { tagTooltip.classList.remove('left-side'); return; }
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     syncTooltipLayer();
     if (window.innerWidth < 768) return;

@@ -2610,7 +2610,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clea
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine-tab6')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rl')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -2663,7 +2663,7 @@ searchHost.className = 'search-host';
 // Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
 const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260921-sqw7')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-rl2')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,
@@ -2673,13 +2673,16 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
       onLibraryVisibility: open => { if (searchPanelControl) searchPanelControl.syncLibraryButton(open); },
       requestSearchState: () => requestModuleState('search'),
       onVisibilityChange: () => updateModuleBtnState(),
+      // 심층 검색 = 이 창의 세 번째 층(사용자 결정 2026-09-25). 층이 보이면 준비하고, 창이 닫히면 함께 닫는다.
+      onLayerShown: layer => { if (layer === 'refine' && refinePanelControl) refinePanelControl.ensureOpen(); },
+      onWindowClose: () => { if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close(); },
       escHtml,
     });
   })
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-p3')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-rl')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -10932,8 +10935,8 @@ function openModule(moduleId, options = {}) {
   if (imageModulePanels && moduleId !== 'vibe_transfer') {
     imageModulePanels.closeAllVibeClusterPanels();
   }
-  // Leaving (or re-clicking) any module exits refine-mode first.
-  if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close();
+  // Leaving (or re-clicking) any module exits refine-mode first. 창 층의 심층 검색은 모듈과 무관하다.
+  if (refinePanelControl && refinePanelControl.isOpen() && !refineInWindow()) refinePanelControl.close();
   // Toggle: same module clicked again → close
   if (currentModuleId === moduleId && modulePopup.classList.contains('open')) {
     if (options.forceOpen) {
@@ -11007,7 +11010,7 @@ function closeModule(options = {}) {
     if (window.opener) window.close();
     return;
   }
-  if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close();
+  if (refinePanelControl && refinePanelControl.isOpen() && !refineInWindow()) refinePanelControl.close();
   if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
   if (currentModuleId === 'vibe_transfer' && imageModulePanels && !options.keepVibeCluster) {
     imageModulePanels.closeAllVibeClusterPanels();
@@ -13005,19 +13008,27 @@ function relayoutFloatingPanels() {
   if (imageModulePanels) imageModulePanels.relayoutVibeClusterPanel();
 }
 
+// 심층 검색 화면이 Search 창의 층으로 옮겨졌나(창 모듈이 #refineView 를 가져간다). 옮겨졌으면 모듈
+// 팝업을 건드리지 않는다 - 예전 refine-mode(팝업을 통째로 심층검색으로 바꾸던 방식)는 창이 없을 때만.
+function refineInWindow() {
+  return Boolean(refineView && refineView.closest('.dragpanel'));
+}
+
 function refineEnterMode() {
+  if (refineInWindow()) return;
   // 검색이 창으로 떠난 뒤로 심층검색은 모듈이 없어도 팝업을 직접 연다.
   modulePopup.classList.add('open', 'refine-mode');
 }
 
 function refineExitMode() {
+  if (refineInWindow()) return;
   modulePopup.classList.remove('refine-mode');
   if (!currentModuleId) modulePopup.classList.remove('open');
 }
 
 function openRefine() {
-  // Refine 은 검색 창에서 들어간다(창이 열려 있어야 한다).
-  if (!(searchQuickWindow && searchQuickWindow.isOpen())) return;
+  // 심층 검색 = Search 창의 세 번째 층. 창을 그 층으로 연다(층이 보이면 onLayerShown 이 준비한다).
+  if (searchQuickWindow) { searchQuickWindow.showRefine(); return; }
   if (refinePanelControl) refinePanelControl.open();
 }
 
@@ -13026,6 +13037,7 @@ function closeRefine() {
 }
 
 function refineBack() {
+  if (refineInWindow() && searchQuickWindow) { searchQuickWindow.showSearch(); return; }
   closeRefine();
 }
 

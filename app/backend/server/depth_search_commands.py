@@ -6,7 +6,6 @@ from typing import Any, Awaitable, Callable
 from fastapi import WebSocket
 
 from app.backend.server.search_runtime import (
-    clear_active_tag_filter,
     filter_source_frame,
     mark_search_pool_replaced,
     next_custom_parquet_path,
@@ -204,9 +203,11 @@ def _note_history(state: dict[str, Any], entry: dict[str, Any]) -> None:
 def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
     action = str(command.get("action") or "").strip()
     if action == "open":
+        # ⚠️ 예전엔 여기서 활성 Tag Filter 를 **칩까지 지웠다**(clear_active_tag_filter 기본 = 초기화).
+        #    심층 검색은 자기 사본(original/current)에서만 일하고 풀은 [메인에 할당] 때만 바꾼다 - 여는 것만으로
+        #    Tag Filter 를 풀 이유가 없다. 같은 창의 층이 된 뒤로(2026-09-25) 층을 누르기만 해도 필터가
+        #    사라지는 꼴이었다. 풀을 바꾸는 할당 쪽에서 정리한다.
         search_state = None
-        if getattr(context, "active_tag_filter_ids", None) is not None or getattr(context, "active_tag_filter", None):
-            search_state = clear_active_tag_filter(context)
         base = getattr(context, "search_results_snapshot", None)
         if base is None or getattr(base, "empty", True):
             base = search_base_frame(context)
@@ -256,7 +257,11 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
         if current is not None:
             with search_pool_state_guard(context):
                 reset_active_tag_filter_assignment(context)
-                context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
+                # 풀이 통째로 바뀐다 - Tag Filter 는 칩·분기·고정까지 비운다(옛 풀 기준 조건이다).
+                context.save_search_filter_state(
+                    tag_filter=[], tag_filter_exclude=[], tag_filter_branches=[], tag_filter_pinned=[],
+                    tag_filter_applied_branches=[], tag_filter_active=False,
+                )
                 context.search_results.set_dataframe(current.copy())
                 context.search_results_snapshot = current.copy()
                 mark_search_pool_replaced(context)

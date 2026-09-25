@@ -1177,10 +1177,10 @@ export function createSearchPanel({
         <button type="button" class="header-guide-btn" data-naia-guide="Search Keyword — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다. 그룹 안에서도 *를 쓸 수 있습니다 — 예: {*dog|*cat} 은 태그가 정확히 dog 또는 cat 인 행만 남깁니다.\\n\\n*tag — 태그 전체 일치. 태그가 정확히 그것인 행만 매칭합니다. 예: *girl 은 girl 만 — 1girl·cowgirl 은 물론 girl (character) 처럼 뒤에 말이 더 붙은 태그도 제외됩니다. *dog 은 dog ears·hot dog 을 끌어오지 않습니다.\\n\\n~tag — 포함 칸에 써도 됩니다. 그 태그를 정확히 가진 행을 뺍니다(제외 칸의 ~tag 와 같음).">ⓘ 가이드</button>
         <span class="sp-legacy-wrap">
           <button type="button" class="sp-legacy-btn" data-sp="legacy" aria-haspopup="menu" aria-expanded="false"
-            data-naia-guide="Tag Filter 와 심층 검색은 이 창 안에 있습니다 — Tag Filter 는 아래층, 심층 검색은 따로 뜨는 작업대입니다.">Tag Filter 및 심층 검색</button>
+            data-naia-guide="Tag Filter 와 심층 검색은 이 창의 두 번째 · 세 번째 층에 있습니다(층 머리줄을 눌러도 됩니다).">Tag Filter 및 심층 검색</button>
           <div class="sp-legacy-menu" role="menu" hidden>
-            <button type="button" role="menuitem" data-sp-legacy="tag"><b>Tag Filter</b><span>이 창 아래층 — 결과를 태그로 바로 좁힙니다</span></button>
-            <button type="button" role="menuitem" data-sp-legacy="refine"><b>심층 검색</b><span>결과 위에서 단계적으로 좁히고 합치는 작업대</span></button>
+            <button type="button" role="menuitem" data-sp-legacy="tag"><b>Tag Filter</b><span>두 번째 층 — 결과를 태그로 바로 좁힙니다</span></button>
+            <button type="button" role="menuitem" data-sp-legacy="refine"><b>심층 검색</b><span>세 번째 층 — 숫자 필터 · 단계적으로 좁히기 · 스테이징</span></button>
           </div>
         </span>
       </div>

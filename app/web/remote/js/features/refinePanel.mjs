@@ -38,6 +38,18 @@ export function createRefinePanel({
     send({ type: 'depth_action', action: 'open' });
   }
 
+  // 창의 심층 검색 층이 보이게 될 때(app.js). 이미 열려 있으면 **아무것도 안 한다** - 층을 오갈
+  // 때마다 'open' 을 다시 보내면 서버 작업 상태(원본·스테이징)가 매번 초기화된다.
+  function ensureOpen() {
+    if (open) return;
+    open = true;
+    if (typeof enterMode === 'function') enterMode();
+    ensureRefineStyle();
+    renderShell();
+    send({ type: 'get_depth_state' });
+    send({ type: 'depth_action', action: 'open' });
+  }
+
   // [← SEARCH] — leave refine-mode, back to the Search panel.
   function close() {
     if (!open) return;
@@ -401,6 +413,7 @@ export function createRefinePanel({
 
   return {
     open: openPanel,
+    ensureOpen,
     close,
     isOpen,
     onDepthState,

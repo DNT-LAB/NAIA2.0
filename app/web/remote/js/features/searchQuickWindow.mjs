@@ -1,5 +1,5 @@
-// Search | Tag Filter 리모컨 창 - 떠 있는 창 하나에 두 층(위 Search / 아래 Tag Filter).
-// 한 층을 펼치면 다른 층은 접힌다(사용자 지정 2026-09-21).
+// Search | Tag Filter | 심층 검색 리모컨 창 - 떠 있는 창 하나에 세 층. 한 층을 펼치면 나머지는 접힌다
+// (사용자 지정 2026-09-21 두 층 · 2026-09-25 심층 검색을 세 번째 층으로 - 메뉴 안에 숨어 기능이 유실된 것처럼 보였다).
 //
 // 창 기반 = draggablePanel(Artist Thumbnail 리모컨과 같은 것: 끌기·크기·접기·z 레지스트리·자리 기억).
 // ⚠️ 같은 URL(?v=)로 불러와야 z 레지스트리를 나눠 쓴다 - 다르면 모듈이 둘이 되어 창끼리 겹침 순서가 깨진다.
@@ -31,6 +31,10 @@ export function createSearchQuickWindow({
   onLibraryVisibility = () => {},
   requestSearchState = () => {},
   onVisibilityChange = () => {},
+  // 층이 **보이게 된** 순간(펼침 · 창 열림). 심층 검색 층은 이때 처음 준비된다(app.js).
+  onLayerShown = () => {},
+  // 창이 닫힐 때 - 심층 검색이 창 없이 혼자 남지 않게 app.js 가 함께 닫는다.
+  onWindowClose = () => {},
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
   escHtml,
 }) {
@@ -54,7 +58,7 @@ export function createSearchQuickWindow({
     escHtml,
     onOpen: () => onVisibilityChange(),
     // 동반 창은 함께 닫는다 - 혼자 남으면 무엇의 목록인지 모른다.
-    onClose: () => { if (libPanel && libPanel.isOpen()) libPanel.close(); onVisibilityChange(); },
+    onClose: () => { if (libPanel && libPanel.isOpen()) libPanel.close(); onWindowClose(); onVisibilityChange(); },
     onCollapse: () => onVisibilityChange(),
   });
   panel.el.id = 'searchQuickWindow';
@@ -75,19 +79,31 @@ export function createSearchQuickWindow({
         <span class="sqw-meta" data-sqw-meta="tag"></span>
       </button>
       <div class="sqw-body" data-sqw-body="tag"></div>
+    </section>
+    <section class="sqw-sec" data-sqw-sec="refine">
+      <button type="button" class="sqw-head" data-sqw-head="refine">
+        <span class="sqw-caret" aria-hidden="true"></span>
+        <span class="sqw-name">심층 검색</span>
+        <span class="sqw-meta" data-sqw-meta="refine"></span>
+      </button>
+      <div class="sqw-body" data-sqw-body="refine"></div>
     </section>`;
 
   const searchBody = panel.body.querySelector('[data-sqw-body="search"]');
   const tagBody = panel.body.querySelector('[data-sqw-body="tag"]');
+  const refineBody = panel.body.querySelector('[data-sqw-body="refine"]');
   searchBody.appendChild(searchHost);
   liftTagFilter();
+  // 심층 검색 화면(#refineView)도 **옮긴다**(베끼지 않는다) - 모듈 팝업 안에 있던 그 요소 그대로.
+  const refineView = doc.getElementById('refineView');
+  if (refineView) refineBody.appendChild(refineView);
   applyLayer();
   mirrorMeta();
 
   panel.body.addEventListener('click', event => {
     const head = event.target.closest('[data-sqw-head]');
     if (!head) return;
-    setLayer(head.dataset.sqwHead === 'tag' ? 'tag' : 'search');
+    setLayer(normalizeLayer(head.dataset.sqwHead));
   });
 
   function liftTagFilter() {
@@ -116,8 +132,12 @@ export function createSearchQuickWindow({
     }
   }
 
+  function normalizeLayer(value) {
+    return value === 'tag' || value === 'refine' ? value : 'search';
+  }
+
   function readLayer() {
-    try { return storage && storage.getItem(LAYER_KEY) === 'tag' ? 'tag' : 'search'; } catch { return 'search'; }
+    try { return normalizeLayer(storage && storage.getItem(LAYER_KEY)); } catch { return 'search'; }
   }
 
   function applyLayer() {
@@ -136,6 +156,7 @@ export function createSearchQuickWindow({
       const input = doc.getElementById('tagFilterInput');
       if (input) input.focus();
     }
+    if (panel.isOpen()) onLayerShown(layer);
     onVisibilityChange();
   }
 
@@ -202,7 +223,10 @@ export function createSearchQuickWindow({
     panel.open();
     if (panel.isCollapsed()) panel.expand();
     if (layer !== target) setLayer(target);
-    else if (target === 'tag') doc.getElementById('tagFilterInput')?.focus();
+    else {
+      if (target === 'tag') doc.getElementById('tagFilterInput')?.focus();
+      onLayerShown(layer);
+    }
     if (!wasOpen) requestSearchState();
     onVisibilityChange();
   }
@@ -211,6 +235,8 @@ export function createSearchQuickWindow({
     el: panel.el,
     showSearch: (options = {}) => openAt('search', options),
     showTagFilter: (options = {}) => openAt('tag', options),
+    showRefine: (options = {}) => openAt('refine', options),
+    isRefineShown: () => panel.isOpen() && !panel.isCollapsed() && layer === 'refine',
     close: () => panel.close(),
     collapse: () => panel.collapse(),
     toggleLibrary,
@@ -306,6 +332,29 @@ const SQW_CSS = `
 .sqw-body .tf-preset-empty{font-size:10.5px;padding:6px}
 /* 해제됨 오버레이는 이 층만 덮는다(층이 기준 상자). */
 .sqw-body .tag-filter-released{position:absolute;inset:0}
-/* 잠금은 본문 전체(두 층)를 덮고 머리줄은 남긴다. */
+/* ── 심층 검색 층: 옮겨 온 #refineView(모듈 팝업용 2칸 배치)를 창 폭에 맞춰 한 줄로 쌓는다 ── */
+.sqw-body > #refineView{display:flex;padding:0;gap:8px}
+.sqw-body #refineView .refine-header{border-bottom:none;padding-bottom:0;justify-content:flex-end}
+/* 층 머리줄이 제목·되돌아가기를 맡는다 - 옛 [← SEARCH] 와 제목은 숨긴다. */
+.sqw-body #refineView .refine-back,.sqw-body #refineView .refine-title{display:none}
+.sqw-body #refineView .refine-2col{flex-direction:column;gap:8px}
+.sqw-body #refineView .refine-left,.sqw-body #refineView .refine-right{flex:1 1 auto;width:100%;gap:7px}
+.sqw-body #refineView .mod-input{height:24px;padding:2px 7px;font-size:11px}
+.sqw-body #refineView .depth-filter-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center}
+.sqw-body #refineView .refine-actions-island,.sqw-body #refineView .refine-stageboard,
+.sqw-body #refineView .refine-staging,.sqw-body #refineView .refine-preview{padding:8px;border-radius:8px}
+.sqw-body #refineView .rf-prev-body{min-height:60px}
+/* 컴팩트(다른 층과 같은 톤): 행 수는 작게 · 등급은 한 줄 · 숫자 필터는 두 쌍씩 */
+.sqw-body #refineView .rf-counts{display:flex;gap:12px;align-items:flex-end}
+.sqw-body #refineView .rf-counts > div{flex:1 1 0;min-width:0}
+.sqw-body #refineView .search-count-display{font-size:17px;line-height:1.2}
+.sqw-body #refineView .mod-checkbox-grid{display:flex;flex-wrap:wrap;gap:2px 12px}
+.sqw-body #refineView .mod-checkbox-item{display:inline-flex;align-items:center;gap:4px;margin:0}
+.sqw-body #refineView .mod-checkbox-label{font-size:10.5px}
+.sqw-body #refineView .depth-filter-grid{grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr);gap:3px 8px}
+.sqw-body #refineView .mod-input-sm{height:22px;padding:1px 6px;font-size:10.5px}
+.sqw-body #refineView .mod-action-btn{height:26px;min-height:26px;font-size:11px;padding:0 8px}
+.sqw-body #refineView .rf-sample-btn,.sqw-body #refineView .rf-gen-btn{height:24px;font-size:10.5px}
+/* 잠금은 본문 전체(모든 층)를 덮고 머리줄은 남긴다. */
 .dragpanel.sqw > .dragpanel-body > #tagFilterLock{position:absolute;inset:0;z-index:5}
 `;

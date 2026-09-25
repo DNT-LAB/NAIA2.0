@@ -697,7 +697,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-qfcomma')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-presetbak')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -714,6 +714,8 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-qfcomm
       catStyle,
       fmtCount,
       showToast,
+      // 저장된 필터를 불러오기 전에 묻는 NAIA 팝업(지금 칩이 덮인다 - 사용자 제보 2026-09-25).
+      confirmDialog: options => showAppDialog('', options),
       lockTagSurface,
       unlockTagSurface,
       // 필터가 바뀌면 프롬프트 하이라이팅을 다시 칠한다. ⚠️ 우클릭 경로에서만

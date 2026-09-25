@@ -23,6 +23,10 @@ export const leadingSegments = value => String(value || '').split(',').slice(0, 
 const baseTag = (tag) => String(tag || '').replace(/^\*+/, '');
 const withExact = (tag, exact) => (exact ? '*' : '') + baseTag(tag);
 
+// 자동 백업 슬롯(사용자 지정 2026-09-25): 저장된 필터를 불러오기 직전의 칩. 목록 맨 위에 늘 있고 × 가 없다.
+// 저장은 보통의 필터 저장(save_filter_preset)을 그대로 쓴다 - 서버에 남고 기기끼리 공유된다.
+export const PRESET_BACKUP_NAME = '↶ 이전 설정값';
+
 export function normalizeRatings(value) {
   if (!Array.isArray(value)) return [...DEFAULT_RATING_KEYS];
   const picked = RATING_KEYS.filter(key => value.includes(key));
@@ -1022,17 +1026,19 @@ export function createQuickFilterController(deps) {
   function renderPresets() {
     const el = getEl('tagFilterPresets');
     if (!el) return;
-    if (!presets.length) {
-      el.innerHTML = '<div class="tf-preset-empty">저장된 필터 없음</div>';
-      return;
-    }
-    el.innerHTML = presets.map((p, i) => {
-      const incArr = p.include || [];
-      const excArr = p.exclude || [];
-      return `<div class="tf-preset" data-idx="${i}"><span class="tf-preset-name" onclick="loadTagFilterPreset(${i})">`
-        + `${deps.escHtml(p.name)}<span class="tf-preset-meta">+${incArr.length} −${excArr.length}</span></span>`
-        + `<span class="tf-preset-x" onclick="deleteTagFilterPreset(${i})" title="삭제">&times;</span></div>`;
-    }).join('');
+    const meta = p => `<span class="tf-preset-meta">+${(p.include || []).length} −${(p.exclude || []).length}</span>`;
+    // 맨 위 = 자동 백업 슬롯(늘 있다). 아직 없으면 자리만 보인다.
+    const backupIndex = presets.findIndex(p => p.name === PRESET_BACKUP_NAME);
+    const backupRow = backupIndex >= 0
+      ? `<div class="tf-preset is-backup" data-idx="${backupIndex}" title="저장된 필터를 불러오기 직전의 값이 자동으로 보관됩니다">`
+        + `<span class="tf-preset-name" onclick="loadTagFilterPreset(${backupIndex})">${deps.escHtml(PRESET_BACKUP_NAME)}${meta(presets[backupIndex])}</span></div>`
+      : `<div class="tf-preset is-backup is-empty" title="저장된 필터를 불러오면 그 직전의 값이 여기에 보관됩니다">`
+        + `<span class="tf-preset-name">${deps.escHtml(PRESET_BACKUP_NAME)}<span class="tf-preset-meta">없음</span></span></div>`;
+    const rows = presets.map((p, i) => (i === backupIndex ? '' :
+      `<div class="tf-preset" data-idx="${i}"><span class="tf-preset-name" onclick="loadTagFilterPreset(${i})">`
+        + `${deps.escHtml(p.name)}${meta(p)}</span>`
+        + `<span class="tf-preset-x" onclick="deleteTagFilterPreset(${i})" title="삭제">&times;</span></div>`)).join('');
+    el.innerHTML = backupRow + (rows || '<div class="tf-preset-empty">저장된 필터 없음</div>');
   }
 
   // 커스텀 hover 툴팁 — Include/Exclude 라벨을 색으로 구분(native title은 색 불가).
@@ -1119,24 +1125,66 @@ export function createQuickFilterController(deps) {
     deps.showToast(`필터 저장: ${name}`, 'success');
   }
 
-  function loadPresetAt(i) {
+  /** 저장된 필터 불러오기 = 지금 칩을 **덮는다**. 잘못 눌러 칩이 날아가던 것(사용자 제보 2026-09-25):
+   *  지금 값이 있고 불러올 값과 다르면 NAIA 팝업으로 묻고, 덮기 전에 지금 값을 '↶ 이전 설정값' 에 보관한다.
+   *  백업 슬롯 자체를 불러오면 지금 값과 맞바꾼다(값을 먼저 떠 두므로 덮어써도 잃지 않는다). */
+  async function loadPresetAt(i) {
     const p = presets[i];
     if (!p) return;
-    includeTags = normalizeTags(p.include);
-    excludeTags = normalizeTags(p.exclude);
+    hidePresetTip();
+    const next = {include: normalizeTags(p.include), exclude: normalizeTags(p.exclude)};
+    const current = {include: [...includeTags], exclude: [...excludeTags]};
+    const hasCurrent = current.include.length > 0 || current.exclude.length > 0;
+    const same = JSON.stringify(current) === JSON.stringify(next);
+    const backup = hasCurrent && !same;
+    if (backup) {
+      if (typeof deps.confirmDialog === 'function') {
+        const choice = await deps.confirmDialog({
+          title: '저장된 필터 불러오기',
+          messageHtml: presetCompareHtml(p.name, next, current),
+          choices: [{key: 'load', label: '불러오기'}],
+          cancelText: '취소',
+        });
+        if (choice !== 'load') return;
+      }
+      if (!isSocketOpen()) {
+        deps.showToast('연결이 끊겨 지금 값을 보관할 수 없어 불러오지 않았습니다', 'error');
+        return;
+      }
+    }
+    includeTags = next.include;
+    excludeTags = next.exclude;
     renderIncludeChips();
     renderExcludeChips();
     updateCommitButton();
-    hidePresetTip();
     const el = getEl('tagFilterPresets');
     if (el) el.setAttribute('hidden', '');
-    if (!includeTags.length && !excludeTags.length) { clearFilter(); return; }
-    apply();   // 라이브 자동 적용 (등급은 건드리지 않음 — 프리셋은 태그만)
+    if (backup) deps.showToast(`불러옴: ${p.name} · 지금까지의 값은 '${PRESET_BACKUP_NAME}' 에 보관했습니다`, 'success');
+    if (!includeTags.length && !excludeTags.length) clearFilter();
+    else apply();   // 라이브 자동 적용 (등급은 건드리지 않음 — 프리셋은 태그만)
+    // ⚠️ 백업은 새 칩을 저장한 **뒤에** 보낸다. save_filter_preset 의 응답은 search_state 전체라, 먼저 보내면
+    //    서버의 옛 칩을 싣고 돌아와 방금 불러온 칩을 덮는다(라이브 실측: 불러와도 칩이 그대로였다).
+    if (backup) send({type: 'save_filter_preset', name: PRESET_BACKUP_NAME, include: current.include, exclude: current.exclude});
+  }
+
+  function presetCompareHtml(name, next, current) {
+    const esc = deps.escHtml;
+    const line = (label, tags) => `${label} : ${tags.length ? esc(tags.join(', ')) : '<i>없음</i>'}`;
+    return [
+      `<b>불러올 필터</b> : ${esc(name)}`,
+      line('Include', next.include),
+      line('Exclude', next.exclude),
+      '',
+      `<b>지금 값</b> → '${esc(PRESET_BACKUP_NAME)}' 에 자동 보관`,
+      line('Include', current.include),
+      line('Exclude', current.exclude),
+    ].join('<br>');
   }
 
   function deletePresetAt(i) {
     const p = presets[i];
     if (!p || !isSocketOpen()) return;
+    if (p.name === PRESET_BACKUP_NAME) return;   // 백업 슬롯은 지우지 않는다(× 도 없다)
     send({ type: 'delete_filter_preset', name: p.name });
   }
 

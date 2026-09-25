@@ -4,6 +4,37 @@ const STORAGE_KEY = 'naia_quick_filter_options';
 const DEFAULT_RATING_KEYS = ['g', 's', 'q'];
 const SEARCH_DEBOUNCE_MS = 280;
 
+// 분기 스테이징 목록(계획서 P3) - Tag Filter 층의 칩 아래. 크기는 창의 컴팩트 톤에 맞춘다.
+const TFB_CSS = `
+.tfb{display:flex;flex-direction:column;gap:4px}
+.tfb-head{display:flex;align-items:center;gap:6px;min-width:0}
+.tfb-stage{flex:0 0 auto;height:22px;padding:0 9px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;
+  border:1px solid rgba(141,123,214,0.6);background:rgba(141,123,214,0.16);color:#d9d0ff}
+.tfb-stage:hover:not(:disabled){background:rgba(141,123,214,0.30);color:#fff}
+.tfb-stage:disabled{opacity:.4;cursor:default}
+.tfb-hint{flex:1 1 auto;min-width:0;font-size:9.5px;color:var(--text-dimmer,#6c6c78);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tfb-list{display:flex;flex-direction:column;gap:2px;padding:4px;border-radius:6px;background:rgba(0,0,0,0.22);
+  border:1px solid rgba(141,123,214,0.25)}
+.tfb-row{display:flex;align-items:center;gap:6px;min-height:22px;padding:2px 4px;border-radius:4px;font-size:10.5px}
+.tfb-row:hover{background:rgba(255,255,255,0.04)}
+.tfb-row.is-off .tfb-text{opacity:.4;text-decoration:line-through}
+.tfb-row.is-live{border-top:1px dashed rgba(141,123,214,0.3);border-radius:0 0 4px 4px}
+.tfb-on{flex:0 0 auto;width:12px;height:12px;padding:0;border-radius:50%;cursor:pointer;
+  border:1px solid rgba(141,123,214,0.8);background:rgba(141,123,214,0.85)}
+.tfb-on[aria-pressed="false"]{background:transparent}
+.tfb-on.is-live{cursor:default;background:transparent;border-style:dashed}
+.tfb-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary,#c8c8d0)}
+.tfb-text em{font-style:normal;font-size:9.5px;color:#b9aef0}
+.tfb-base{color:var(--text-dimmer,#6c6c78)}
+.tfb-own{color:var(--text-primary,#e8e8ee)}
+.tfb-x,.tfb-x .tfb-own{color:#e39a9a}
+.tfb-n{flex:0 0 auto;font-family:var(--font-mono,monospace);font-size:10px;color:#f5dc8a;font-variant-numeric:tabular-nums}
+.tfb-del{flex:0 0 14px;border:none;background:transparent;color:var(--text-dimmer,#6c6c78);cursor:pointer;font-size:13px;line-height:1;padding:0}
+.tfb-del:hover{color:#f0a0a0}
+.tag-filter-chip.is-pinned::before{content:'📌';font-size:9px;margin-right:2px}
+.tag-filter-chip.is-pinned{border-color:rgba(245,220,138,0.65)}
+`;
+
 function normalizeTagParts(value) {
   const text = String(value || '');
   return text.split(/[,\n]/)
@@ -38,15 +69,39 @@ export function normalizeTags(value) {
   return out;
 }
 
+// 칩 토큰 = 칩 문법 그대로(`-제외` · `*정확` · 밑줄) - 분기와 고정 목록이 쓴다.
+export function normalizeTokens(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  value.forEach(item => {
+    const token = String(item || '').trim();
+    if (token && !out.includes(token)) out.push(token);
+  });
+  return out;
+}
+
+// 분기 스테이징(계획서 P3): [{tags:[칩 토큰], enabled}]. 빈 분기는 버린다.
+export function normalizeBranches(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => {
+    const tags = normalizeTokens(item && typeof item === 'object' && !Array.isArray(item) ? item.tags : item);
+    return {tags, enabled: !(item && item.enabled === false)};
+  }).filter(branch => branch.tags.length).slice(0, 16);
+}
+
 export function normalizePreferences(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const include = normalizeTags(raw.tag_filter || raw.include || raw.include_tags);
   const exclude = normalizeTags(raw.tag_filter_exclude || raw.exclude || raw.exclude_tags);
+  const branches = normalizeBranches(raw.tag_filter_branches);
   return {
     ratings: normalizeRatings(raw.ratings),
     tag_filter: include,
     tag_filter_exclude: exclude,
-    tag_filter_active: !!raw.tag_filter_active && (include.length > 0 || exclude.length > 0),
+    tag_filter_branches: branches,
+    tag_filter_pinned: normalizeTokens(raw.tag_filter_pinned),
+    tag_filter_active: !!raw.tag_filter_active
+      && (include.length > 0 || exclude.length > 0 || branches.some(branch => branch.enabled)),
   };
 }
 
@@ -58,6 +113,7 @@ export function hasCustomPreferences(pref) {
   return !defaultRatings
     || (pref.tag_filter && pref.tag_filter.length > 0)
     || (pref.tag_filter_exclude && pref.tag_filter_exclude.length > 0)
+    || (pref.tag_filter_branches && pref.tag_filter_branches.length > 0)
     || !!pref.tag_filter_active;
 }
 
@@ -104,6 +160,11 @@ export function createQuickFilterController(deps) {
   let latestTagFilterRevision = 0;
   let searchDebounceTimer = null;
   let latestAcRequest = {target: '', query: ''};
+  // 분기 스테이징(계획서 P3). 결과 = 켜진 분기들 ∪ (작업 중 칩 - 고정 아닌 칩이 있을 때).
+  let stagedBranches = [];            // [{tags:[칩 토큰], enabled}]
+  let pinnedTokens = [];              // 기준으로 고정한 칩 토큰 - [분기로 담기] 가 비우지 않는다
+  let lastSentBranches = [];          // 마지막 검색에 보낸 분기(결과의 분기별 수와 순서가 같다)
+  const branchCounts = new Map();     // 분기 서명 -> 등급별 수(마지막 결과)
 
   const getEl = id => doc.getElementById(id);
   // Tag Filter 가 사는 곳. 리모컨 창(searchQuickWindow)이 주입하면 그걸 묻고, 없으면 예전 고정 팝업.
@@ -141,6 +202,20 @@ export function createQuickFilterController(deps) {
     deps.setActiveRatings(normalizeRatings(ratings));
   };
   const payload = () => [...includeTags, ...excludeTags.map(tag => '-' + tag)];
+  const tokenOf = (list, tag) => (list === 'exclude' ? '-' : '') + tag;
+  const branchSig = tags => JSON.stringify(tags);
+  const hasUnpinnedChips = () => payload().some(token => !pinnedTokens.includes(token));
+  const enabledBranches = () => stagedBranches.filter(branch => branch.enabled);
+  /** 검색에 보낼 분기. 켜진 분기가 없으면 [] = 예전처럼 칩 한 벌. 작업 중 칩은 고정 아닌 칩이
+   *  있을 때만 한 분기로 더한다 - 고정 칩만 남은 상태(분기를 담은 직후)를 분기로 넣으면 그것이
+   *  모든 분기를 품는 상위 집합이라 합집합이 기준 전체가 된다. */
+  function branchesPayload() {
+    const on = enabledBranches().map(branch => [...branch.tags]);
+    if (!on.length) return [];
+    if (hasUnpinnedChips()) on.push(payload());
+    return on;
+  }
+  const hasFilter = () => includeTags.length > 0 || excludeTags.length > 0 || enabledBranches().length > 0;
   const nextSearchRequestId = () => {
     searchSeq += 1;
     latestSearchRequestId = `tf-${Date.now()}-${searchSeq}`;
@@ -154,6 +229,8 @@ export function createQuickFilterController(deps) {
     ratings: getActiveRatings(),
     tag_filter: [...includeTags],
     tag_filter_exclude: [...excludeTags],
+    tag_filter_branches: stagedBranches.map(branch => ({tags: [...branch.tags], enabled: branch.enabled})),
+    tag_filter_pinned: [...pinnedTokens],
     tag_filter_active: active,
   });
   const tagInputIds = ['tagFilterInput', 'tagFilterExcludeInput'];
@@ -202,9 +279,10 @@ export function createQuickFilterController(deps) {
   // RATING 옆 매치 카운트 라벨. 캐시된 per-rating counts + 현재 활성 등급으로 즉시 재계산하므로
   // G/S/Q/E 토글에 라이브로 반응하고, search_state reconcile 때도 사라지지 않는다(칩이 있는 한 유지).
   function renderMatchedCount(label = 'matched') {
+    renderBranches();
     const countEl = getEl('tagFilterCount');
     if (!countEl) return;
-    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    const hasTags = hasFilter();
     if (!hasTags) {
       countEl.textContent = '';
       countEl.classList.remove('has-result');
@@ -248,7 +326,7 @@ export function createQuickFilterController(deps) {
     //    사용자가 칩을 넣거나 빼기 전까지 **재검색할 길이 아예 없었다**
     //    (사용자 제보 2026-08-31 - 치명적이라고 짚은 그 파생 버그).
     //    같은 칩으로 다시 거는 것은 정당한 동작이다 - 걸 것이 있으면 누를 수 있다.
-    const hasChips = includeTags.length > 0 || excludeTags.length > 0;
+    const hasChips = hasFilter();
     button.disabled = !(hasPendingText || hasChips);
   }
 
@@ -262,11 +340,12 @@ export function createQuickFilterController(deps) {
 
   function chipHtml(tag, index, list) {
     const exact = isExactTag(tag);
+    const pinned = pinnedTokens.includes(tokenOf(list, tag));
     const open = !!chipMenu && chipMenu.list === list && chipMenu.index === index;
     const remover = list === 'exclude' ? 'removeTagFilterExcludeTag' : 'removeTagFilterTag';
     // ⚠️ × 는 칩 **안**에 있어 클릭이 칩으로 올라간다 - 멈추지 않으면 지우면서 메뉴가 열린다.
     return `<span class="tag-filter-chip${list === 'exclude' ? ' exclude' : ''}`
-      + `${exact ? ' is-exact' : ''}${open ? ' menu-open' : ''}"`
+      + `${exact ? ' is-exact' : ''}${pinned ? ' is-pinned' : ''}${open ? ' menu-open' : ''}"`
       + ` role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}"`
       + ` onclick="toggleTagFilterChipMenu('${list}',${index})"`
       // ⚠️ `event.target===this` 가 필수다. 메뉴 <button> 이 칩 **안**에 있어서 거기서
@@ -280,7 +359,11 @@ export function createQuickFilterController(deps) {
           ? `<span class="chip-menu" onclick="event.stopPropagation()">`
             + `<button type="button" class="chip-menu-btn"`
             + ` onclick="setTagFilterChipExact('${list}',${index},${exact ? 'false' : 'true'})">`
-            + `${exact ? '퍼펙트 매칭 해제' : '퍼펙트 매칭 적용'}</button></span>`
+            + `${exact ? '퍼펙트 매칭 해제' : '퍼펙트 매칭 적용'}</button>`
+            // 기준 고정(계획서 P3): [분기로 담기] 가 이 칩은 남긴다.
+            + `<button type="button" class="chip-menu-btn"`
+            + ` onclick="setTagFilterChipPinned('${list}',${index},${pinned ? 'false' : 'true'})">`
+            + `${pinned ? '📌 기준 고정 해제' : '📌 기준으로 고정'}</button></span>`
           : '')
       + `</span>`;
   }
@@ -350,11 +433,153 @@ export function createQuickFilterController(deps) {
     // 같은 칩이 이미 있으면 **합친다**. `sky` 와 `*sky` 가 나란히 있으면 AND 라 결과는
     // `*sky` 와 같지만 화면이 헷갈린다.
     const duplicate = arr.some((tag, i) => i !== idx && tag === next);
+    const listName = String(list) === 'exclude' ? 'exclude' : 'include';
+    const wasPinned = pinnedTokens.includes(tokenOf(listName, current));
+    unpin(tokenOf(listName, current));
     if (duplicate) arr.splice(idx, 1);
     else arr[idx] = next;
+    if (wasPinned) pinnedTokens.push(tokenOf(listName, next));
     renderChips();
     updateCommitButton();
     apply();
+  }
+
+  function unpin(token) {
+    pinnedTokens = pinnedTokens.filter(t => t !== token);
+  }
+
+  function setChipPinned(list, index, pinned) {
+    const listName = String(list) === 'exclude' ? 'exclude' : 'include';
+    const tag = (listName === 'exclude' ? excludeTags : includeTags)[Number(index)];
+    closeChipMenu();
+    if (tag === undefined) return;
+    const token = tokenOf(listName, tag);
+    unpin(token);
+    if (pinned) pinnedTokens.push(token);
+    renderChips();
+    renderBranches();
+    save();
+    // 고정만 바꾸면 결과가 바뀌는 것은 '작업 중 분기' 가 더해지거나 빠질 때다.
+    if (enabledBranches().length) apply();
+  }
+
+  /** [분기로 담기]: 지금 칩을 분기 하나로 담고, 고정 아닌 칩만 비운다(기준을 다시 치지 않게). */
+  function stageBranch() {
+    commitPendingInputs();
+    if (!hasUnpinnedChips()) {
+      deps.showToast('분기로 담을 칩이 없습니다 — 기준(📌) 말고 이 분기만의 칩을 넣으세요', 'warning');
+      return;
+    }
+    const tags = payload();
+    if (stagedBranches.some(branch => branchSig(branch.tags) === branchSig(tags))) {
+      deps.showToast('같은 분기가 이미 담겨 있습니다', 'warning');
+      return;
+    }
+    if (stagedBranches.length >= 16) {
+      deps.showToast('분기는 16개까지 담을 수 있습니다', 'warning');
+      return;
+    }
+    stagedBranches.push({tags, enabled: true});
+    closeChipMenu();
+    includeTags = includeTags.filter(tag => pinnedTokens.includes(tokenOf('include', tag)));
+    excludeTags = excludeTags.filter(tag => pinnedTokens.includes(tokenOf('exclude', tag)));
+    renderChips();
+    renderBranches();
+    updateCommitButton();
+    apply();
+    getEl('tagFilterInput')?.focus();
+  }
+
+  function setBranchEnabled(index, enabled) {
+    const branch = stagedBranches[Number(index)];
+    if (!branch) return;
+    branch.enabled = !!enabled;
+    renderBranches();
+    if (!hasFilter()) { clearFilter(); return; }
+    apply();
+  }
+
+  function removeBranch(index) {
+    stagedBranches.splice(Number(index), 1);
+    renderBranches();
+    if (!hasFilter()) { clearFilter(); return; }
+    apply();
+  }
+
+  function ensureBranchStyle() {
+    if (doc.getElementById('tfb-style')) return;
+    const style = doc.createElement('style');
+    style.id = 'tfb-style';
+    style.textContent = TFB_CSS;
+    doc.head.appendChild(style);
+  }
+
+  function ensureBranchHost() {
+    let host = getEl('tagFilterBranches');
+    if (host) return host;
+    const anchor = getEl('tagFilterExcludeChips');
+    if (!anchor || !anchor.parentNode) return null;
+    ensureBranchStyle();
+    host = doc.createElement('div');
+    host.id = 'tagFilterBranches';
+    host.className = 'tfb';
+    anchor.parentNode.insertBefore(host, anchor.nextSibling);
+    // 다시 그려도 그대로인 뿌리에 위임으로 받는다.
+    host.addEventListener('click', event => {
+      const target = event.target.closest('[data-tfb]');
+      if (!target) return;
+      const index = Number(target.closest('[data-tfb-i]')?.dataset.tfbI);
+      const action = target.dataset.tfb;
+      if (action === 'stage') stageBranch();
+      else if (action === 'toggle') setBranchEnabled(index, !stagedBranches[index]?.enabled);
+      else if (action === 'remove') removeBranch(index);
+    });
+    return host;
+  }
+
+  function branchCountText(tags) {
+    const counts = branchCounts.get(branchSig(tags));
+    if (!counts) return '…';
+    return (filteredCount(counts, deps.getRatingState()) || 0).toLocaleString();
+  }
+
+  function branchLabelHtml(tags) {
+    const esc = deps.escHtml;
+    const show = token => esc(baseTag(token.replace(/^-/, '')).replace(/_/g, ' ')) + (isExactTag(token.replace(/^-/, '')) ? '<sup>*</sup>' : '');
+    const piece = token => `<span class="${pinnedTokens.includes(token) ? 'tfb-base' : 'tfb-own'}">${show(token)}</span>`;
+    const inc = tags.filter(t => !t.startsWith('-')).map(piece).join(', ');
+    const exc = tags.filter(t => t.startsWith('-')).map(piece).join(', ');
+    return `${inc || '<span class="tfb-base">(전체)</span>'}${exc ? ` <span class="tfb-x">− ${exc}</span>` : ''}`;
+  }
+
+  function renderBranches() {
+    const host = ensureBranchHost();
+    if (!host) return;
+    const canStage = hasUnpinnedChips();
+    const live = enabledBranches().length > 0 && canStage;
+    const rows = stagedBranches.map((branch, i) => `
+      <div class="tfb-row${branch.enabled ? '' : ' is-off'}" data-tfb-i="${i}">
+        <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? '끄기' : '켜기'}"></button>
+        <span class="tfb-text">${branchLabelHtml(branch.tags)}</span>
+        <span class="tfb-n">${branch.enabled ? branchCountText(branch.tags) : '꺼짐'}</span>
+        <button type="button" class="tfb-del" data-tfb="remove" title="분기 지우기">×</button>
+      </div>`).join('');
+    const liveRow = live ? `
+      <div class="tfb-row is-live">
+        <span class="tfb-on is-live" aria-hidden="true"></span>
+        <span class="tfb-text"><em>작업 중</em> ${branchLabelHtml(payload())}</span>
+        <span class="tfb-n">${branchCountText(payload())}</span>
+        <span class="tfb-del" aria-hidden="true"></span>
+      </div>` : '';
+    const hint = stagedBranches.length ? `분기 ${stagedBranches.length}개 · 결과 = 켜진 분기들의 합집합`
+      : '기준 칩을 📌 고정하고 [분기로 담기] — 분기마다 다른 조건을 붙여 합칩니다';
+    host.innerHTML = `
+      <div class="tfb-head">
+        <button type="button" class="tfb-stage" data-tfb="stage" ${canStage ? '' : 'disabled'}
+          data-naia-guide="지금 칩을 분기 하나로 담고, 📌 고정 칩만 남깁니다. 다음 분기 조건을 바로 이어서 넣으세요. 결과 = 켜진 분기들의 합집합(중복 행은 한 번).">+ 분기로 담기</button>
+        <span class="tfb-hint">${hint}</span>
+      </div>
+      ${stagedBranches.length ? `<div class="tfb-list">${rows}${liveRow}</div>` : ''}`;
   }
 
   function clearAutocomplete() {
@@ -373,15 +598,16 @@ export function createQuickFilterController(deps) {
 
   function sendSearchNow() {
     cancelPendingSearch();
-    if (!includeTags.length && !excludeTags.length) return false;
+    if (!hasFilter()) return false;
     if (!isSocketOpen()) return false;
     lockTagSurface('tagfilter');   // background tag-filter search → released by onTagFilterResult/Assigned
-    send({type: 'tag_filter_search', tags: payload(), request_id: nextSearchRequestId()});
+    lastSentBranches = branchesPayload();
+    send({type: 'tag_filter_search', tags: payload(), branches: lastSentBranches, request_id: nextSearchRequestId()});
     return true;
   }
 
   function scheduleSearch() {
-    if (!includeTags.length && !excludeTags.length) return;
+    if (!hasFilter()) return;
     invalidateSearchRequest();
     cancelPendingSearch();
     searchDebounceTimer = setTimeout(sendSearchNow, SEARCH_DEBOUNCE_MS);
@@ -453,7 +679,7 @@ export function createQuickFilterController(deps) {
       // ⚠️ 여기서 그냥 돌아가던 것이 **버튼을 켜도 아무 일이 없던** 나머지 절반이다.
       //    입력칸이 비어도 걸린 칩이 있으면 **같은 조건으로 다시 건다** - 랜덤 풀이
       //    소진돼 "No matches" 가 된 뒤 빠져나갈 유일한 길이었다(사용자 제보).
-      if (includeTags.length || excludeTags.length) apply();
+      if (hasFilter()) apply();
       return;
     }
     let changed = false;
@@ -516,6 +742,7 @@ export function createQuickFilterController(deps) {
   }
 
   function bindInputs() {
+    renderBranches();
     bindAutocompleteInput('tagFilterInput', 'include');
     bindAutocompleteInput('tagFilterExcludeInput', 'exclude');
     bindPresetTooltip();
@@ -566,6 +793,9 @@ export function createQuickFilterController(deps) {
 
     includeTags = [];
     excludeTags = [];
+    stagedBranches = [];
+    pinnedTokens = [];
+    branchCounts.clear();
     active = false;
     filterWasApplied = false;
     ratingCounts = null;
@@ -574,6 +804,7 @@ export function createQuickFilterController(deps) {
     cancelPendingSearch();
     renderIncludeChips();
     renderExcludeChips();
+    renderBranches();
     updateCommitButton();
 
     const countEl = getEl('tagFilterCount');
@@ -626,10 +857,11 @@ export function createQuickFilterController(deps) {
   function removeExcludeTag(index) {
     // ⚠️ 인덱스가 밀리므로 열린 메뉴는 닫는다 - 안 닫으면 엉뚱한 칩에 메뉴가 붙는다.
     closeChipMenu();
-    excludeTags.splice(index, 1);
+    const [removedExclude] = excludeTags.splice(index, 1);
+    unpin(tokenOf('exclude', removedExclude));
     renderExcludeChips();
     updateCommitButton();
-    if (!includeTags.length && !excludeTags.length) {
+    if (!hasFilter()) {
       clearFilter();
       return;
     }
@@ -638,10 +870,11 @@ export function createQuickFilterController(deps) {
 
   function removeIncludeTag(index) {
     closeChipMenu();
-    includeTags.splice(index, 1);
+    const [removedInclude] = includeTags.splice(index, 1);
+    unpin(tokenOf('include', removedInclude));
     renderIncludeChips();
     updateCommitButton();
-    if (!includeTags.length && !excludeTags.length) {
+    if (!hasFilter()) {
       clearFilter();
       return;
     }
@@ -649,7 +882,7 @@ export function createQuickFilterController(deps) {
   }
 
   function apply() {
-    if (!includeTags.length && !excludeTags.length) return;
+    if (!hasFilter()) return;
     save();
     if (!isSocketOpen()) return;
     scheduleSearch();
@@ -744,7 +977,8 @@ export function createQuickFilterController(deps) {
   // result lands.
   function onPoolSwap() {
     ratingCounts = null;
-    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    branchCounts.clear();
+    const hasTags = hasFilter();
     // Clear the stale label explicitly — renderMatchedCount() no-ops while
     // ratingCounts is null, so it would otherwise leave the old '982,029 matched'.
     const countEl = getEl('tagFilterCount');
@@ -772,7 +1006,7 @@ export function createQuickFilterController(deps) {
   // (블러 오버레이 + [재적용]/[초기화])로 두어 사용자가 명시적으로 선택하게 한다(설계 사양).
   // stale 'N matched'(이전 풀 기준)도 함께 무효화한다.
   function onSearchReleased() {
-    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    const hasTags = hasFilter();
     // 진짜 적용됐던 필터 + 칩이 있을 때만 '해제됨' 오버레이. 미적용 draft 칩엔 안 띄운다(MED).
     if (!filterWasApplied || !hasTags) { setReleasedOverlay(false); return false; }
     active = false;
@@ -801,7 +1035,7 @@ export function createQuickFilterController(deps) {
     // [재적용]: 현재 칩을 새 풀에 재적용. sendSearchNow 가 'tagfilter' 잠금을 걸고,
     // onResult→assign→assigned 가 active=true 로 재적용/재영속한다(스캔 전체 잠금은
     // 백엔드 announce + Fix 1 이 result~assigned 창까지 유지).
-    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    const hasTags = hasFilter();
     if (!hasTags) { setReleasedOverlay(false); return; }
     save();
     // 소켓이 끊겨 실제 전송이 안 되면 오버레이를 유지한다 — "재적용됨"으로 거짓 표시 방지(LOW).
@@ -824,7 +1058,9 @@ export function createQuickFilterController(deps) {
     }
     const assignBtn = getEl('tagFilterAssignBtn');
     ratingCounts = message.rating_counts || null;
-    const hasTags = !!(message.tags && message.tags.length);
+    const perBranch = Array.isArray(message.branch_rating_counts) ? message.branch_rating_counts : [];
+    lastSentBranches.forEach((tags, i) => { if (perBranch[i]) branchCounts.set(branchSig(tags), perBranch[i]); });
+    const hasTags = !!(message.tags && message.tags.length) || !!(message.branches && message.branches.length);
     if (hasTags && ratingCounts && Object.keys(ratingCounts).length) {
       // 등급 인식 매치 수(활성 G/S/Q/E 합). 등급 토글에 라이브로 반응한다.
       renderMatchedCount('matched');
@@ -952,7 +1188,8 @@ export function createQuickFilterController(deps) {
     // search_state reconcile(같은 칩)인지 판별 — 같다면 캐시된 ratingCounts/매치 라벨을 보존한다.
     // (이게 "27,301 matched"가 잠깐 떴다 사라지던 원인: 매 search_state 마다 라벨을 비웠음.)
     const sameTags = JSON.stringify([...includeTags].sort()) === JSON.stringify([...pref.tag_filter].sort())
-      && JSON.stringify([...excludeTags].sort()) === JSON.stringify([...pref.tag_filter_exclude].sort());
+      && JSON.stringify([...excludeTags].sort()) === JSON.stringify([...pref.tag_filter_exclude].sort())
+      && JSON.stringify(stagedBranches) === JSON.stringify(pref.tag_filter_branches);
 
     setActiveRatings(pref.ratings);
     // ⚠️ 칩 배열이 통째로 바뀌면 열린 메뉴는 닫는다. 메뉴는 **인덱스**로 칩을 가리키는데,
@@ -962,10 +1199,13 @@ export function createQuickFilterController(deps) {
     if (!sameTags) closeChipMenu();
     includeTags = [...pref.tag_filter];
     excludeTags = [...pref.tag_filter_exclude];
+    stagedBranches = pref.tag_filter_branches.map(branch => ({tags: [...branch.tags], enabled: branch.enabled}));
+    pinnedTokens = [...pref.tag_filter_pinned];
     active = pref.tag_filter_active;
     if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효
     renderIncludeChips();
     renderExcludeChips();
+    renderBranches();
     updateCommitButton();
     deps.syncRatingButtons();
 
@@ -997,8 +1237,7 @@ export function createQuickFilterController(deps) {
 
     if (options.send !== false && isSocketOpen()) {
       send({type: 'set_active_ratings', ratings: pref.ratings});
-      const tags = payload();
-      if (tags.length) {
+      if (hasFilter()) {
         pendingAssignOnRestore = active;
         scheduleSearch();
       }
@@ -1164,6 +1403,9 @@ export function createQuickFilterController(deps) {
     removeIncludeTag,
     toggleChipMenu,
     setChipExact,
+    setChipPinned,
+    stageBranch,
+    branchesPayload,
     closeChipMenu,
     apply,
     onPoolSwap,

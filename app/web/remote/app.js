@@ -690,7 +690,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260921-sqw1')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-p3')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -13598,6 +13598,7 @@ function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag
 // 이 파일의 다른 칩 핸들러와 같은 전역 브리지 방식을 쓴다.
 function toggleTagFilterChipMenu(list, idx) { if (quickFilter) quickFilter.toggleChipMenu(list, idx); }
 function setTagFilterChipExact(list, idx, exact) { if (quickFilter) quickFilter.setChipExact(list, idx, exact); }
+function setTagFilterChipPinned(list, idx, pinned) { if (quickFilter) quickFilter.setChipPinned(list, idx, pinned); }
 function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function commitPendingTagFilterText() { if (quickFilter) quickFilter.commitPendingInputs(); }

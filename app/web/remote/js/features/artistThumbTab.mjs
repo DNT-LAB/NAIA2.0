@@ -2650,7 +2650,7 @@ export function createArtistThumbController({
     if (groupsApi) return groupsApi;
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260919-noloop'),
+      import('./artistGroupWindow.mjs?v=20260925-grpthumb2'),
       import('./dragBroker.mjs?v=20260919-strip'),
     ]);
     const store = createArtistGroupsStore({fetch});
@@ -2700,6 +2700,11 @@ export function createArtistThumbController({
       onPick: pickFromGroup,
       onSendToQueue: items => { void sendToQueue(items); },
       onDragStart: () => remote?.hideZoom?.(),
+      // 크게 보기 = 리모컨의 그것(자리 규칙이 한 곳). 그룹 창 **옆**에 띄운다.
+      // 리모컨은 창을 연 **뒤에** 뜰 수도 있어 누를 때마다 다시 묻는다.
+      onHoverCard: (element, info) => getRemoteController?.()?.showZoomBeside?.(
+        element, {src: info.src, title: info.title, note: ''}, info.anchor),
+      onLeaveCard: () => getRemoteController?.()?.hideZoom?.(),
       onClosed: () => {
         groupWindows.delete(groupId);
         if (lastTempGroupId === groupId) lastTempGroupId = '';

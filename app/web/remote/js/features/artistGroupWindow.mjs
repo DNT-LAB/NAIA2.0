@@ -33,6 +33,8 @@ export function createArtistGroupWindow({
   onPick = () => {},               // (artist) => void
   onSendToQueue = () => {},        // (items[]) => void
   onDragStart = () => {},          // 확대 보기 끄기 등
+  onHoverCard = () => {},          // (card, {src, title, anchor}) => void   크게 보기
+  onLeaveCard = () => {},
   onClosed = () => {},
 } = {}) {
   const broker = dragBrokerFor(doc, win);
@@ -136,6 +138,8 @@ export function createArtistGroupWindow({
     const items = g.items || [];
     countEl.textContent = `${items.length}명`;
     gridEl.innerHTML = items.map(cardHtml).join('');
+    // 다시 그리면 올려 둔 카드가 사라진다 - 없는 카드를 크게 보여 주지 않는다.
+    if (hoverCard && !hoverCard.isConnected) leaveHover();
     emptyEl.hidden = items.length > 0;
     void fillImages(items);
   }
@@ -183,7 +187,7 @@ export function createArtistGroupWindow({
       image: imageCache.get(artist) || '',
       label: artist,
       sourceGroup: groupId,
-    }, {onStart: onDragStart});
+    }, {onStart: () => { leaveHover(); onDragStart(); }});
   });
 
   // ── 끌기: 받는 쪽 ─────────────────────────────────────────────────────
@@ -231,7 +235,9 @@ export function createArtistGroupWindow({
       try { await store.reorder(groupId, names); } catch (error) { showToast(`순서 저장 실패 — ${error.message}`, 'error'); }
       return;
     }
-    if (payload.image && !imageCache.has(payload.artist)) imageCache.set(payload.artist, payload.image);
+    // ⚠️ `has` 가 아니라 **값**을 본다. 한 번 '그림 없음'('') 으로 기억한 작가는 끌어 온
+    //    그림을 받아 주지 않았다 - 모드가 달라 describe 가 못 찾은 작가가 영영 No Image 였다.
+    if (payload.image && !imageCache.get(payload.artist)) imageCache.set(payload.artist, payload.image);
     try {
       const at = dropIndex(point);
       const result = await store.add(groupId, [{artist: payload.artist, weight: payload.weight}]);
@@ -252,6 +258,44 @@ export function createArtistGroupWindow({
       showToast(`그룹에 넣지 못했습니다 — ${error.message}`, 'error');
     }
   }
+
+  // ── 크게 보기 ─────────────────────────────────────────────────────────
+  //  리모컨 격자·믹스 띠와 같은 확대 보기(사용자 지정 2026-09-25). 이 창 **옆**에 뜬다.
+  //  ⚠️ 누를 때는 걷지 않는다(리모컨과 같은 규칙) - 크게 보면서 고르는 것이 쓸모다.
+  const HOVER_DELAY_MS = 140;
+  let hoverTimer = null;
+  let hoverCard = null;
+
+  function leaveHover() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    if (!hoverCard) return;
+    hoverCard = null;
+    onLeaveCard();
+  }
+
+  function onPointer(event) {
+    // 손가락은 hover 가 없다 · 끄는 중에는 지나는 카드마다 뜨면 방해만 된다.
+    if (event.pointerType === 'touch' || broker.isDragging()) return;
+    const card = event.target.closest('.agw-card');
+    if (!card) { leaveHover(); return; }
+    if (card === hoverCard) return;
+    hoverCard = card;
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null;
+      if (hoverCard !== card || !card.isConnected) return;
+      const src = card.querySelector('img')?.getAttribute('src') || '';
+      // 그림이 없으면 띄우지 않는다(리모컨과 같은 규칙).
+      if (src) onHoverCard(card, {src, title: card.dataset.artist || '', anchor: panel.el.getBoundingClientRect()});
+      else onLeaveCard();
+    }, HOVER_DELAY_MS);
+  }
+  gridEl.addEventListener('pointerover', onPointer);
+  gridEl.addEventListener('pointerout', event => {
+    const next = event.relatedTarget;
+    if (!next || !gridEl.contains(next) || !next.closest?.('.agw-card')) leaveHover();
+  });
+  gridEl.addEventListener('scroll', leaveHover);
 
   // ── 누르기 ────────────────────────────────────────────────────────────
   gridEl.addEventListener('click', event => {
@@ -380,6 +424,7 @@ export function createArtistGroupWindow({
   function teardown({keepPanel = false} = {}) {
     if (!alive) return;
     alive = false;
+    leaveHover();
     OPEN.delete(api);
     unsubscribe();
     unzone();

@@ -754,6 +754,82 @@ class ArtistThumbnailService:
             self._write_thumbnail_cache({"version": 1, "items": items})
             return True
 
+    # ── 그룹 썸네일 사본 ───────────────────────────────────────────────
+    #  그룹 창은 그림을 **지금 고른 모드의 팩**에서 찾는다. 다른 팩에서 끌어 온 작가는
+    #  모드를 바꾸거나 새로고침하면 "No Image" 가 됐다(사용자 제보 2026-09-25: "복제해 올 때
+    #  썸네일을 카피해 오지 않는다"). 관심 작가 캐시와 같은 방식으로 **그림 자체를** 복사해
+    #  둔다 - 주소를 저장하면 팩을 바꾼 뒤 엉뚱한 그림이나 404 가 된다(믹스 띠와 같은 원칙).
+    #  ⚠️ 복사는 **이미 메모리에 올라온 팩**에서만 한다. 팩 하나가 1.3GB(파싱 4초)라
+    #     그림 한 장 때문에 새로 열지 않는다 - 사용자가 방금 본 그림의 팩은 올라와 있다.
+    def _group_thumbnail_cache_path(self) -> Path:
+        return self.state_root / "group_thumbnail_cache.json"
+
+    def _load_group_thumbnail_cache(self) -> dict:
+        path = self._group_thumbnail_cache_path()
+        if not path.exists():
+            return {"version": 1, "items": {}}
+        try:
+            return self._normalize_thumbnail_cache(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            # 파생 사본이다(원본은 팩) - 못 읽으면 빈 것으로 보고 다시 채운다.
+            return {"version": 1, "items": {}}
+
+    def _loaded_thumbnail_entry(self, artist: str) -> dict | None:
+        for mode_key, data in list(self._data_cache.items()):
+            entry = self._cache_entry_from_data(artist, mode_key, data)
+            if entry:
+                return entry
+        return None
+
+    def sync_group_thumbnail_cache(self, artists: Any) -> dict:
+        """그룹에 든 작가 = 사본을 둔다. 어느 그룹에도 없게 된 작가의 사본은 지운다."""
+        wanted = self._normalize_values(artists if isinstance(artists, (list, tuple, set)) else [])
+        wanted_set = set(wanted)
+        with self._lock:
+            items = dict(self._load_group_thumbnail_cache().get("items") or {})
+            added = removed = 0
+            for artist in list(items.keys()):
+                if artist not in wanted_set:
+                    items.pop(artist, None)
+                    self._image_cache.pop(("__group_cache__", artist), None)
+                    removed += 1
+            for artist in wanted:
+                if items.get(artist, {}).get("thumbnail"):
+                    continue
+                entry = self._loaded_thumbnail_entry(artist)
+                if entry:
+                    items[artist] = entry
+                    added += 1
+            if added or removed:
+                path = self._group_thumbnail_cache_path()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = path.with_name(f"{path.name}.tmp")
+                temp_path.write_text(json.dumps({"version": 1, "items": items}, ensure_ascii=False) + "\n",
+                                     encoding="utf-8")
+                temp_path.replace(path)
+            missing = sum(1 for artist in wanted if not items.get(artist, {}).get("thumbnail"))
+            return {"count": len(items), "added": added, "removed": removed, "missing": missing}
+
+    def group_image_payload(self, artist: str) -> tuple[bytes, str]:
+        artist_name = str(artist or "").strip()
+        if not artist_name:
+            raise ValueError("artist is required")
+        cache_key = ("__group_cache__", artist_name)
+        with self._lock:
+            cached = self._image_cache.get(cache_key)
+            if cached:
+                return cached
+            entry = (self._load_group_thumbnail_cache().get("items") or {}).get(artist_name) or {}
+            encoded = entry.get("thumbnail")
+        if not encoded:
+            raise FileNotFoundError(f"Group artist thumbnail not found: {artist_name}")
+        image_bytes, media_type = self._image_payload_from_encoded(encoded)
+        with self._lock:
+            if len(self._image_cache) > 512:
+                self._image_cache.pop(next(iter(self._image_cache)), None)
+            self._image_cache[cache_key] = (image_bytes, media_type)
+        return image_bytes, media_type
+
     def load_data(self, mode: str) -> dict:
         key = str(mode or "").strip()
         if not key:
@@ -1059,6 +1135,7 @@ class ArtistThumbnailService:
             favorite_thumb_items = self._load_thumbnail_cache().get("items", {})
         except Exception:
             favorite_thumb_items = {}
+        group_thumb_items = self._load_group_thumbnail_cache().get("items", {})
 
         # ⚠️ **지금 모드의 것만 본다.** 백엔드가 다르면 그림의 결이 전혀 다르다.
         api_key = self._generated_api_key()
@@ -1092,6 +1169,9 @@ class ArtistThumbnailService:
                 return ("pack", owner)
             if artist in favorite_thumb_items:
                 return ("favorite",)
+            # 그룹 사본은 관심 캐시와 같은 층이다 - 팩 그림의 복사본이라 사용자 썸네일보다 앞.
+            if artist in group_thumb_items:
+                return ("group",)
             if artist in generated_lookup:
                 return ("generated", generated_lookup[artist], api_key)
             return ()
@@ -1109,6 +1189,8 @@ class ArtistThumbnailService:
                 return f"/api/artist-thumb/image?mode={quote(selected[1], safe='')}&artist={quote(artist, safe='')}"
             if selected[0] == "favorite":
                 return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
+            if selected[0] == "group":
+                return f"/api/artist-thumb/group-image?artist={quote(artist, safe='')}"
             return self._generated_image_url(artist, selected[1], selected[2])
 
         return item_image_url
@@ -1127,6 +1209,8 @@ class ArtistThumbnailService:
                     payload = self.image_payload(selected[1], artist)
                 elif selected[0] == "favorite":
                     payload = self.favorite_image_payload(artist)
+                elif selected[0] == "group":
+                    payload = self.group_image_payload(artist)
                 else:
                     payload = self.generated_image_payload(artist, selected[1], selected[2])
                 images[artist] = payload[0]

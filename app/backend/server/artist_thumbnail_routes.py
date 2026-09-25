@@ -344,6 +344,20 @@ def _refresh_favorite_wildcard(context: WebSessionContext, path: Path) -> None:
     manager.reload_one(rel.as_posix())
 
 
+def _sync_group_thumbnails(context: WebSessionContext) -> None:
+    """그룹에 든 작가 전부의 썸네일 사본을 맞춘다(없는 것은 채우고, 빠진 작가는 지운다).
+
+    그룹이 바뀐 뒤와 그룹 창이 그림을 물을 때(describe) 부른다. 실패해도 본 요청은 성공이다 -
+    사본은 보기 좋으라고 두는 것이지 그룹의 일부가 아니다.
+    """
+    try:
+        groups = artist_group_store(context).list()
+        artists = [item.get("artist") for g in groups for item in (g.get("items") or [])]
+        artist_thumbnail_service(context).sync_group_thumbnail_cache(artists)
+    except Exception:
+        pass
+
+
 def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailService:
     service = getattr(context, "artist_thumbnail_service", None)
     if service is None:
@@ -475,6 +489,25 @@ def register_artist_thumbnail_routes(
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    @app.get("/api/artist-thumb/group-image")
+    async def api_artist_thumb_group_image(artist: str = ""):
+        try:
+            image_bytes, media_type = await run_in_thread(
+                artist_thumbnail_service(session_context).group_image_payload,
+                artist,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except (FileNotFoundError, KeyError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb group image failed: {exc}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "no-cache"},
+        )
+
     @app.get("/api/artist-thumb/favorite-image")
     async def api_artist_thumb_favorite_image(artist: str = ""):
         try:
@@ -527,6 +560,7 @@ def register_artist_thumbnail_routes(
         if not isinstance(payload, dict) or not isinstance(payload.get("artists"), list):
             return JSONResponse({"error": "artists list required"}, status_code=400)
         try:
+            await run_in_thread(_sync_group_thumbnails, session_context)
             return await run_in_thread(
                 artist_thumbnail_service(session_context).describe_artists,
                 payload.get("mode", ""),
@@ -596,7 +630,9 @@ def register_artist_thumbnail_routes(
         if str(payload.get("op") or "") not in _GROUP_OPS:
             return JSONResponse({"error": f"op must be one of {sorted(_GROUP_OPS)}"}, status_code=400)
         try:
-            return await run_in_thread(_apply_group_op, artist_group_store(session_context), payload)
+            result = await run_in_thread(_apply_group_op, artist_group_store(session_context), payload)
+            await run_in_thread(_sync_group_thumbnails, session_context)
+            return result
         except ArtistGroupError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
         except Exception as exc:

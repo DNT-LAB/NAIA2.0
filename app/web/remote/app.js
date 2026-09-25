@@ -690,7 +690,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-p3')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-qstage')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -715,6 +715,8 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-p3')
       // 부르면 **Quick Filter 패널에서 바꿨을 때 낡은 채로 남는다** - 상태가 굳는
       // 자리에서 한 번만 울리게 두고 여기서 받는다.
       onFilterChanged: () => updatePromptHighlight(),
+      // 칩을 누르면 그 태그의 정보 카드를 층 아래 빈 자리(host)에 그린다.
+      showTagInfo: (tag, host) => { if (tagAssist) tagAssist.lookupPromptInfoTag(tag, {host, rawTag: tag}); },
     });
     quickFilter.bindInputs();
   })
@@ -13462,7 +13464,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260925-acfix')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260925-qstage')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -13611,7 +13613,7 @@ function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag
 // 이 파일의 다른 칩 핸들러와 같은 전역 브리지 방식을 쓴다.
 function toggleTagFilterChipMenu(list, idx) { if (quickFilter) quickFilter.toggleChipMenu(list, idx); }
 function setTagFilterChipExact(list, idx, exact) { if (quickFilter) quickFilter.setChipExact(list, idx, exact); }
-function setTagFilterChipPinned(list, idx, pinned) { if (quickFilter) quickFilter.setChipPinned(list, idx, pinned); }
+function clearTagFilterList(list) { if (quickFilter) quickFilter.clearList(list); }
 function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function commitPendingTagFilterText() { if (quickFilter) quickFilter.commitPendingInputs(); }

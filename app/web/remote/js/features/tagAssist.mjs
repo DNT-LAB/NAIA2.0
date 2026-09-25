@@ -621,6 +621,20 @@ export function createTagAssistController({
     if (promptInfoTooltip) promptInfoTooltip.classList.remove('open');
   }
 
+  /** 읽기 전용 정보 카드를 창 안 자리(host)에 붙여 그리거나(Tag Filter 층의 아래 빈 자리 - 칩을 누를 때),
+   *  host 가 없으면 예전처럼 문서에 떠 있게 되돌린다. */
+  function placePromptInfoTooltip(host) {
+    const popup = ensurePromptInfoTooltip();
+    if (host && host.isConnected) {
+      if (popup.parentNode !== host) host.appendChild(popup);
+      popup.classList.add('inline-host');
+      for (const name of ['left', 'top', 'maxWidth', 'maxHeight']) popup.style[name] = '';
+      return;
+    }
+    popup.classList.remove('inline-host');
+    if (popup.parentNode !== document.body) document.body.appendChild(popup);
+  }
+
   function copyTextFallback(text) {
     if (typeof document.execCommand !== 'function') return false;
     const textarea = document.createElement('textarea');
@@ -661,6 +675,7 @@ export function createTagAssistController({
 
   function positionPromptInfoTooltip() {
     if (!promptInfoTooltip || !promptInfoTooltip.classList.contains('open')) return;
+    if (promptInfoTooltip.classList.contains('inline-host')) return;   // 창 안 자리 - 흐름대로 놓인다
     const panel = document.getElementById('resultInfoPanel');
     const header = panel?.querySelector('.result-info-header');
     const label = header?.querySelector('span');
@@ -813,6 +828,7 @@ export function createTagAssistController({
     window.clearTimeout(tagLookupTimer);
     tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     const promptPopup = ensurePromptInfoTooltip();
+    placePromptInfoTooltip(lookupOptions?.host || null);
     promptPopup.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">loading...</span></div>';
     promptPopup.classList.add('open');
     positionPromptInfoTooltip();

@@ -15,6 +15,11 @@ function normalizeTagParts(value) {
 // 저장 스키마(localStorage · 상태 파일 · 프리셋 · WS)를 하나도 안 바꾼다.
 // ⚠️ 예약 문자다 - 태그 사전 150개 parquet 전수에 `*` 를 포함한 실제 태그는 0개다.
 const isExactTag = (tag) => String(tag || '').startsWith('*');
+// 입력칸은 쉼표로 여러 태그를 받는다 - 자동완성은 **마지막 쉼표 뒤 조각**만 본다(사용자 제보 2026-09-25).
+// ⚠️ 칸 전체를 보내면 '1girl,' 이 태그 접두사로는 안 맞고 사전 설명글의 낱말 '1girl,' 에만 맞아
+//    'gender request'(설명: "성별(1boy, 1girl, 1other 등)에 대한 요청") 한 줄이 떴다.
+export const lastSegment = value => String(value || '').split(',').pop().trim();
+export const leadingSegments = value => String(value || '').split(',').slice(0, -1).map(s => s.trim()).filter(Boolean);
 const baseTag = (tag) => String(tag || '').replace(/^\*+/, '');
 const withExact = (tag, exact) => (exact ? '*' : '') + baseTag(tag);
 
@@ -394,7 +399,7 @@ export function createQuickFilterController(deps) {
     el.querySelectorAll('.tag-ac-item').forEach(item => {
       item.addEventListener('mousedown', event => {
         event.preventDefault();
-        selectAutocomplete(acResults[+item.dataset.idx].tag);
+        pickAutocomplete(acResults[+item.dataset.idx].tag);
       });
     });
   }
@@ -417,6 +422,12 @@ export function createQuickFilterController(deps) {
       else renderIncludeChips();
     }
     return changed;
+  }
+
+  /** 목록에서 고른 태그 + 칸에 먼저 쳐 둔 앞 조각들을 칩으로(앞 조각이 사라지지 않게). */
+  function pickAutocomplete(tag) {
+    const input = getEl(acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput');
+    selectAutocomplete([...leadingSegments(input ? input.value : ''), tag].join(','));
   }
 
   function selectAutocomplete(tag) {
@@ -462,7 +473,7 @@ export function createQuickFilterController(deps) {
     input.addEventListener('input', function() {
       acTarget = target;
       updateCommitButton();
-      const query = this.value.trim();
+      const query = lastSegment(this.value);
       if (query.length < 2) {
         clearAutocomplete();
         return;
@@ -489,7 +500,7 @@ export function createQuickFilterController(deps) {
       } else if (event.key === 'Enter') {
         event.preventDefault();
         if (acSelection >= 0 && acResults[acSelection]) {
-          selectAutocomplete(acResults[acSelection].tag);
+          pickAutocomplete(acResults[acSelection].tag);
         } else if (this.value.trim()) {
           selectAutocomplete(this.value.trim());
         }
@@ -911,10 +922,11 @@ export function createQuickFilterController(deps) {
     if (!popup || !popup.classList.contains('open')) return;
     const inputId = acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
     const input = getEl(inputId);
-    if (!input || input.value.trim().length < 2) return;
+    const currentQuery = lastSegment(input ? input.value : '');
+    if (!input || currentQuery.length < 2) return;
+    // 서버는 표식(*)을 뺀 질의를 되돌려 준다 - 같은 자로 견준다.
     const query = String(message.query || '').trim();
-    const currentQuery = input.value.trim();
-    if (query && query !== currentQuery) return;
+    if (query && baseTag(query) !== baseTag(currentQuery)) return;
     if (latestAcRequest.query && latestAcRequest.query !== currentQuery) return;
     if (latestAcRequest.target && latestAcRequest.target !== acTarget) return;
     acResults = message.results || [];

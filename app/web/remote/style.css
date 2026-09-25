@@ -30453,13 +30453,14 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 }
 .as-input::-webkit-scrollbar { display: none; }
 .as-input::placeholder { color: var(--text-dim); }
-/* 칠 - 보라 = 알아본 이름, 초록 = 사용자가 고른 캐릭터, 붉은 점선 = {감쌌는데} 못 찾음, 줄 그음 = 이름 아님 */
-::highlight(naia-as-found) { background-color: rgba(139,118,255,0.38); }
+/* 칠 - 옅은 보라 점선 = 이름 후보(고르기 전 - 캐릭터로 넣지 않는다), 초록 = 고른 캐릭터(이것만 캐릭터),
+   붉은 점선 = {감쌌는데} 못 찾음, 줄 그음 = 이름 아님 (사용자 결정 09-25) */
+::highlight(naia-as-found) { background-color: rgba(139,118,255,0.14); text-decoration: underline dashed rgba(170,150,255,0.9); }
 ::highlight(naia-as-chosen) { background-color: rgba(76,175,80,0.40); }
 ::highlight(naia-as-miss) { background-color: rgba(255,107,107,0.16); text-decoration: underline dotted rgba(255,140,140,0.95); }
 ::highlight(naia-as-off) { background-color: rgba(255,255,255,0.07); text-decoration: line-through rgba(200,200,210,0.7); }
 .as-hl { color: transparent; border-radius: 3px; }
-.as-hl-found { background: rgba(139,118,255,0.38); }
+.as-hl-found { background: rgba(139,118,255,0.14); text-decoration: underline dashed rgba(170,150,255,0.9); }
 .as-hl-chosen { background: rgba(76,175,80,0.40); }
 .as-hl-miss { background: rgba(255,107,107,0.16); text-decoration: underline dotted rgba(255,140,140,0.95); }
 .as-hl-off { background: rgba(255,255,255,0.07); text-decoration: line-through rgba(200,200,210,0.7); }
@@ -30474,7 +30475,7 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   background: transparent; color: var(--text-muted); cursor: pointer; font-size: 15px;
 }
 .as-close:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
-/* 이름 칩 [이름 → 태그 ▾ n] - 눌러서 후보를 고른다. 색은 칠과 같은 뜻. */
+/* 이름 칩 [이름 → 태그 ▾ n] - 눌러서 후보를 고른다. 색은 칠과 같은 뜻 - 고른 칩(초록)만 캐릭터로 넣는다. */
 .as-names { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-dim); }
 .as-names[hidden] { display: none; }
 .as-name {
@@ -30488,6 +30489,8 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .as-name-tag { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .as-name .as-more { color: var(--text-dim); font-size: 9px; }
 .as-name:hover { border-color: rgba(139,118,255,0.8); }
+.as-name-found { border-style: dashed; background: transparent; }
+.as-name-found .as-name-tag { color: var(--text-muted); }
 .as-name-chosen { border-color: rgba(76,175,80,0.65); background: rgba(46,125,50,0.22); }
 .as-name-miss { border-style: dashed; border-color: rgba(255,140,140,0.6); background: rgba(255,107,107,0.08); }
 .as-name-off { border-color: var(--border-dim); background: transparent; color: var(--text-dim); }

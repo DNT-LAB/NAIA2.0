@@ -308,9 +308,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
       const kind = spanKind(n.form);
       const tag = choices.get(n.form) || n.tag;
       const count = (n.candidates || []).length;
-      const label = kind === 'off' ? '이름 아님' : kind === 'miss' ? '못 찾음' : tag;
+      // 고른 것만 캐릭터로 넣는다(사용자 결정 09-25) - 자동으로 찾은 이름은 '태그?' 제안
+      const label = kind === 'off' ? '이름 아님' : kind === 'miss' ? '못 찾음' : kind === 'found' ? `${tag}?` : tag;
+      const title = kind === 'chosen' ? '고른 캐릭터 - 이것만 캐릭터로 넣습니다(눌러서 바꾸기)'
+        : kind === 'found' ? '이름 후보 - 눌러서 캐릭터를 골라야 캐릭터로 넣습니다'
+          : kind === 'miss' ? '사전에서 못 찾았습니다 - 눌러서 캐릭터를 찾아 고르세요' : '이름 아님 - 원래 뜻으로 씁니다';
       return `<button type="button" class="as-name as-name-${kind}" data-as-name="${esc(n.form)}"
-                      title="${kind === 'chosen' ? '직접 고른 캐릭터' : '눌러서 후보 고르기'}">
+                      title="${title}">
         <b>${esc(n.form)}</b><span class="as-arrow">→</span><span class="as-name-tag">${esc(label)}</span>
         <span class="as-more">▾${count > 1 ? ` ${count}` : ''}</span></button>`;
     }).join('');
@@ -322,7 +326,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     paintChips();
   }
 
-  /** 응답의 인물(모델이 찾은 이름 포함)을 이름 표에 합친다. 서버가 받지 않은 선택은 푼다. */
+  /** 응답의 인물(고른 캐릭터 + 받지 못한 선택)을 이름 표에 합친다. 서버가 받지 않은 선택은 푼다. */
   function absorbNames(list, text) {
     for (const n of list || []) {
       const form = String(n.ko || '');
@@ -330,7 +334,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
       const known = names.get(form);
       const candidates = Array.isArray(n.candidates) && n.candidates.length ? n.candidates : (known?.candidates || []);
       names.set(form, {
-        form, found: true, source: known ? known.source : 'model',
+        form, found: true, source: known ? known.source : 'answer',
         // tag = **자동(게시물 순 1위)**. 사용자가 고른 것은 choices 가 따로 쥔다 - 여기에 섞으면 [자동] 이 옛 선택을 보인다.
         tag: candidates[0]?.tag || n.tag,
         candidates,
@@ -340,14 +344,14 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
         toast(`'${form}' 의 선택을 쓸 수 없어 되돌렸습니다`, 'error');
       }
     }
-    addModelSpans(text);
+    addAnswerSpans(text);
   }
 
-  /** 모델이 찾은 이름(입력칸 인식이 놓친 것)도 글에서 찾아 칠한다. 긴 이름이 짧은 조각을 품으면
+  /** 응답의 인물 중 입력칸 인식이 놓친 것(글이 바뀌어도 고른 캐릭터)도 글에서 찾아 칠한다. 긴 이름이 짧은 조각을 품으면
    *  (나토리 사나 ⊃ 나토리 — 사용자 제보 09-24) 조각을 걷고 긴 것을 칠한다. 칠이 안 남은 자동 이름은 칩에서도 뺀다. */
-  function addModelSpans(text) {
+  function addAnswerSpans(text) {
     for (const n of names.values()) {
-      if (n.source !== 'model' || !n.form) continue;
+      if (n.source !== 'answer' || !n.form) continue;
       let from = 0;
       for (;;) {
         const at = text.indexOf(n.form, from);
@@ -383,11 +387,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     const next = new Map();
     for (const n of data.names || []) next.set(n.form, n);
     for (const [form, n] of names) {
-      if (n.source === 'model' && !next.has(form) && text.includes(form)) next.set(form, n);
+      if (n.source === 'answer' && !next.has(form) && text.includes(form)) next.set(form, n);
     }
     names = next;
     spans = (data.spans || []).map(s => ({ start: s.start, end: s.end, form: s.form }));
-    addModelSpans(text);
+    addAnswerSpans(text);
     paintNames();
     // 한국어 층이 데워지는 중이면 다시 묻는다. Kiwi 가 없어 못 데운 것(error)이면 묻지 않는다 - 설치가 끝나면 다시 부른다.
     if (!data.ready && !data.error) scheduleNames(NAMES_RETRY_MS);
@@ -426,17 +430,17 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     if (!n) return;
     ensurePicker();
     pickerForm = form;
-    const current = notNames.has(form) ? '' : (choices.get(form) || n.tag);
+    const current = notNames.has(form) ? '' : (choices.get(form) || '');      // 고르기 전에는 아무것도 켜지 않는다
     const rows = (n.candidates || []).map(c => `
       <button type="button" class="as-pick-row${c.tag === current ? ' is-on' : ''}" data-as-pick="${esc(c.tag)}">
         <span class="as-pick-tag">${esc(c.tag)}</span><span class="as-pick-meta">${fmt(c.posts)}${genderMark(c.gender)}</span></button>`).join('');
     picker.innerHTML = `
-      <div class="as-pick-head"><b>${esc(form)}</b><span>${n.candidates?.length ? `후보 ${n.candidates.length} · 게시물 순` : '후보 없음'}</span></div>
+      <div class="as-pick-head"><b>${esc(form)}</b><span>${n.candidates?.length ? `후보 ${n.candidates.length} · 게시물 순` : '후보 없음'} · 골라야 캐릭터</span></div>
       <div class="as-pick-list">${rows || '<div class="as-pick-empty">사전에서 찾지 못했습니다 — 아래에서 찾아 고르세요</div>'}</div>
       <div class="as-pick-search"><input type="search" data-as-pick-q placeholder="다른 캐릭터 찾기 (영문·한글)" autocomplete="off" spellcheck="false"></div>
       <div class="as-pick-list" data-as-pick-found></div>
       <div class="as-pick-foot">
-        <button type="button" data-as-pick-auto title="게시물 순 1위로(선택 지우기)">자동</button>
+        <button type="button" data-as-pick-auto title="캐릭터로 넣지 않기 - 이름 후보로 돌립니다">선택 해제</button>
         <button type="button" class="as-pick-off" data-as-pick-off title="캐릭터가 아니라 원래 뜻(호두를 먹는)">이름 아님</button>
       </div>`;
     picker.hidden = false;
@@ -618,6 +622,10 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     if (r.leftovers?.length) meta.push(`못 꽂은 태그 ${esc(r.leftovers.join(', '))}`);
     if (r.actions?.length) meta.push(`랜덤 행동 ${esc(r.actions.join(', '))}`);
     const notes = [];
+    if (r.suggested_names?.length) {
+      notes.push(`<div class="as-note">캐릭터로 넣지 않은 이름: ${r.suggested_names.map(s => `<b>${esc(s.ko)}</b>`).join(', ')}
+        - 위의 이름 칩을 눌러 캐릭터를 고르면 넣습니다.</div>`);
+    }
     if (r.message) notes.push(`<div class="as-note">${esc(r.message)}</div>`);
     if (r.persons?.confirm && personsMode === 'auto') {
       notes.push('<div class="as-note">인원을 확실히 못 셌습니다 — 위의 [여 · 남]으로 정해 주세요.</div>');

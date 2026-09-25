@@ -565,6 +565,61 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
     return chooser, state
 
 
+def _approved_names(layer: Any, req: dict[str, Any]) -> tuple[list[Any], list[str]]:
+    """인물 = 사용자가 칩에서 고른 캐릭터(이름 -> 태그)뿐이다(사용자 결정 09-25 — 자동으로 찾은 이름은 제안일 뿐).
+    글에 없는 선택(창이 열린 동안 화면이 기억해 다시 보내는 옛 선택)은 건너뛴다.
+    (받은 것 — 글에 나온 순서, 받지 못한 이름 — 게시물이 없는 태그: 응답 chosen=false 로 화면이 선택을 푼다)"""
+    from core.assist_korean import clean_text, compact
+
+    text = compact(clean_text(req["text"]))
+    kept: list[Any] = []
+    refused: list[str] = []
+    for form, tag in req["choices"].items():
+        key = compact(form)
+        if not key or form in req["not_names"] or key not in text:
+            continue
+        hit = layer.approved(form, tag)
+        if hit is None:
+            refused.append(form)
+        else:
+            kept.append(hit)
+    kept.sort(key=lambda h: text.find(compact(h.form)))
+    return kept, refused
+
+
+def _approved_for(form: str, approved: list[Any]) -> Any:
+    """구성의 캐릭터 줄 이름(카나데)에 맞는 고른 캐릭터 — 성을 빼거나 붙여 적어도 같은 사람(요이사키 카나데)."""
+    from core.assist_korean import compact
+
+    key = compact(form)
+    return next((h for h in approved if key and (compact(h.form) == key or key in compact(h.form)
+                                                or compact(h.form) in key)), None)
+
+
+def _names_out(layer: Any, chars: list[Any], refused: list[str]) -> list[dict[str, Any]]:
+    """응답의 인물 — 고른 캐릭터마다 후보 전체(화면이 목록을 그린다) + 받지 못한 선택(chosen=false -> 화면이 푼다)."""
+    out = [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": True,
+            "candidates": layer.candidate_list(c.ko)} for c in chars]
+    for form in refused:
+        cands = layer.candidate_list(form)
+        out.append({"ko": form, "tag": cands[0]["tag"] if cands else "", "alts": [], "gender": None, "chosen": False,
+                     "candidates": cands})
+    return out
+
+
+def _suggested(hits: list[Any], chars: list[Any]) -> list[dict[str, Any]]:
+    """고르지 않은 이름 제안(칩) — 캐릭터로 쓰지 않았다고 알린다. 고른 캐릭터와 겹치는 조각(카나데 ⊂ 요이사키 카나데)은 뺀다."""
+    from core.assist_korean import compact
+
+    taken = [compact(c.ko) for c in chars]
+    out: list[dict[str, Any]] = []
+    for h in hits:
+        key = compact(h.form)
+        if key and not any(key in t or t in key for t in taken) and h.form not in [s["ko"] for s in out]:
+            out.append({"ko": h.form, "tag": h.tag})
+    return out
+
+
 def _fallback_route(ka: Any) -> dict[str, Any]:
     """모델 없이: 한국어 층이 찾은 것만으로 장면 검색."""
     return {"task": "scene" if (ka.specific or ka.verb_tags) else "other", "goal": "find", "characters": [],
@@ -588,9 +643,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     t = time.perf_counter()
     layer.warm()
     ka = layer.analyze(req["text"])
-    choices = req["choices"]
-    ka.names = [layer.choose(h, choices) for h in ka.names      # 사용자가 고른 캐릭터가 게시물 수 순위를 이긴다
-                if h.form not in req["not_names"]]              # '이름 아님' 은 인물에서 뺀다
+    # 자동으로 찾은 이름 = 칩 제안 — 인물을 만들지 않고 문장 구조에만 쓴다(이름 낱말을 태그로 찾거나 고르기에 묻지 않는다).
+    # 인물은 사용자가 고른 캐릭터뿐이다(사용자 결정 09-25). '이름 아님' 은 제안에서도 뺀다(원래 뜻으로 — 호두를 먹는).
+    ka.names = [h for h in ka.names if h.form not in req["not_names"]]
+    approved, refused = _approved_names(layer, req)
     korean_ms = round((time.perf_counter() - t) * 1000, 1)
     route, model = _call_model(context, req["text"], req["previous"])
     chooser, choose_state = None, None
@@ -602,8 +658,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     rules = layer.rules
     merged = merge(route, ka, vocab, text=req["text"], generic=rules["generic_tags"],
                    simile_particles=rules["simile_particles"],
-                   name_lookup=lambda form: layer.choose(
-                       layer.name_hit(form, explicit=form in choices, analysis=ka), choices),
+                   approved=approved,
                    not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
                    generic_roles={w for group in rules.get("people", {}).values() for w in group},
                    roles_for=lambda names: layer.roles_for(ka, names), chooser=chooser)
@@ -616,10 +671,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     drop_tags(merged, dropped)
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
-        # 후보 전체를 싣는다 — 모델이 찾은 이름(호두)도 화면에서 고를 수 있게
-        # chosen = 사용자의 선택이 **받아들여졌나**(목록 밖·게시물 없는 태그는 무시된다 — 화면이 그 선택을 푼다)
-        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": choices.get(c.ko) == c.tag,
-                   "candidates": layer.candidate_list(c.ko)} for c in merged.characters],
+        # 인물 = 고른 캐릭터(후보 전체 — 화면이 목록을 그린다) + 받지 못한 선택(chosen=false — 화면이 그 선택을 푼다)
+        "names": _names_out(layer, merged.characters, refused),
+        # 고르지 않은 이름 제안 — 캐릭터로 쓰지 않았다(화면: '이름을 눌러 고르면 캐릭터로 넣습니다')
+        "suggested_names": _suggested(ka.names, merged.characters),
         "relations": [{"source": s, "action": a, "target": d} for s, a, d in merged.relations],
         "model": model,
         "trace": {"korean": ka.notes, "merge": merged.log,
@@ -632,7 +687,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     elif merged.task == "tag":
         out.update(_tags(context, merged, route))
     elif merged.task in ("character", "artist", "wildcard", "preset"):
-        out.update(_lane(context, layer, merged, route, req))
+        out.update(_lane(context, layer, merged, route, req, ka.names))
     else:
         out["guide"] = GUIDE
     out["timing"] = {"korean_ms": korean_ms, "model_s": model.get("elapsed"),
@@ -655,8 +710,7 @@ def _persons(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> dict[str,
         pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, g + b == 1))
         return {"mode": "manual", "partition": pc.partition, "girls": g, "boys": b, "unknown": 0,
                 "confirm": False, "notes": [], "param": pc.persons_param()}
-    pc = layer.count_persons(ka, extra_names=[c.ko for c in merged.characters], choices=req["choices"],
-                             not_names=req["not_names"])
+    pc = layer.count_persons(ka, approved={c.ko: c.gender for c in merged.characters}, not_names=req["not_names"])
     return {"mode": "auto", "partition": pc.partition, "girls": pc.girls, "boys": pc.boys, "unknown": pc.unknown,
             "confirm": pc.confirm, "notes": pc.notes, "param": pc.persons_param()}
 
@@ -735,16 +789,21 @@ def _tags(context: Any, merged: Any, route: dict[str, Any]) -> dict[str, Any]:
     return {"tags": rows} if rows else {"tags": [], "message": "맞는 태그를 찾지 못했습니다."}
 
 
-def _lane(context: Any, layer: Any, merged: Any, route: dict[str, Any], req: dict[str, Any]) -> dict[str, Any]:
-    """캐릭터·작가·와일드카드·프리셋: Fast Search 같은 갈래. 캐릭터는 한-영 색인·이름 조각·팩 순위가 먼저."""
+def _lane(context: Any, layer: Any, merged: Any, route: dict[str, Any], req: dict[str, Any],
+          suggested: list[Any] = ()) -> dict[str, Any]:
+    """캐릭터·작가·와일드카드·프리셋: Fast Search 같은 갈래. 캐릭터는 한-영 색인·이름 조각·팩 순위가 먼저.
+    캐릭터 찾기의 답은 사용자가 고르는 목록이라 자동 제안(suggested)도 싣는다 — 프롬프트에 들어가는 인물이 아니다."""
     import re
 
     from app.backend.server.fast_search_routes import SEARCHERS
 
     task = merged.task
-    if task == "character" and merged.characters:
-        return {"items": [{"value": c.tag, "title": c.tag, "subtitle": c.ko, "alts": c.alts, "gender": c.gender}
-                          for c in merged.characters]}
+    if task == "character" and (merged.characters or suggested):
+        items = [{"value": c.tag, "title": c.tag, "subtitle": c.ko, "alts": c.alts, "gender": c.gender}
+                 for c in merged.characters]
+        items += [{"value": h.tag, "title": h.tag, "subtitle": h.form, "alts": [t for t, _n in h.candidates[1:3]],
+                   "gender": h.gender} for h in suggested if h.candidates and h.tag not in [i["value"] for i in items]]
+        return {"items": items}
     queries = [route.get("name_ko"), route.get("name"), re.sub(r"\s*\(.*?\)\s*$", "", route.get("name") or "")]
     for item in route.get("include") or []:
         queries += [item.get("ko"), item.get("en")]
@@ -964,13 +1023,19 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     tools = _compose_tools(context, layer, vocab)
     finder = ac.TagFinder(tools)
     rules = layer.rules
-    choices, not_names = req["choices"], set(req["not_names"])
+    not_names = set(req["not_names"])
+    approved, refused = _approved_names(layer, req)
 
     chars: list[Any] = []
+    suggestions: list[Any] = []
     for seg in segs[1:]:
         name = seg.name or _first_name(layer, seg.body)
-        hit = layer.choose(layer.name_hit(name, explicit=bool(seg.name) or name in choices), choices) \
-            if name and name not in not_names else None
+        # 캐릭터 줄의 이름도 사용자가 고른 것만 캐릭터다(09-25) — 고르지 않았으면 사람만(성별 모름 -> 인원 확인)
+        hit = _approved_for(name, approved) if name and name not in not_names else None
+        if hit is None and name and name not in not_names:
+            guess = layer.name_hit(name, explicit=bool(seg.name))
+            if guess is not None and guess.candidates:
+                suggestions.append(guess)
         tag = hit.tag if hit else ""
         work, entry = _character_profile(context, tag) if tag else (None, None)
         chars.append(ac.ComposeCharacter(
@@ -1060,10 +1125,13 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
                          keyword_tags=tools.keyword_tags)
     out: dict[str, Any] = {
         "ok": True, "task": "scene", "goal": "how", "mode": "compose", "rating": req["rating"],
-        "names": [{"ko": c.ko, "tag": c.tag, "alts": c.alts, "gender": c.gender, "chosen": choices.get(c.ko) == c.tag,
-                   "candidates": layer.candidate_list(c.ko)} for c in chars if c.tag],
+        "names": _names_out(layer, [c for c in chars if c.tag], refused),
+        "suggested_names": _suggested(suggestions, [c for c in chars if c.tag]),
+        # 관계는 두 쪽 다 고른 캐릭터일 때만 알린다 — 고르기 전의 줄은 태그가 없다(동작 태그는 메인에 남는다)
         "relations": ([{"source": chars[relation.source - 1].tag, "action": relation.action,
-                        "target": chars[relation.target - 1].tag}] if relation is not None else []),
+                        "target": chars[relation.target - 1].tag}]
+                      if relation is not None and chars[relation.source - 1].tag and chars[relation.target - 1].tag
+                      else []),
         "persons": persons, "prompt": prompt, "explain": explain, "pool": pool, "samples": samples,
         "model": model,
         "trace": {"details": [{"who": d.owner, "ko": d.ko, "en": d.en, "tags": d.tags, "via": d.via,

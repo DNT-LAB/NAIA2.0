@@ -317,12 +317,13 @@ class Merged:
 def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: str,
           generic: Iterable[str] = (), simile_particles: Iterable[str] = ("같이", "처럼", "마냥", "듯이"),
           generic_roles: Iterable[str] = (),
-          name_lookup: Callable[[str], NameHit | None] | None = None,
+          approved: Iterable[NameHit] = (),
           not_names: Iterable[str] = (), poses: Iterable[str] = (),
           roles_for: Callable[[set[str]], tuple[str, str] | None] | None = None,
           chooser: Callable[[list[Ask]], list[str]] | None = None) -> Merged:
     """chooser: 정확히 안 풀린 포함 항목(Ask)을 받아 한국어 사전 후보에서 모델에게 고르게 하고(ask.keep · ask.picks 를
-    채운다), 모델이 안 낸 요청 명사에서 고른 장면 태그를 돌려준다. None 이면 예전처럼(쪼갠 조각 · 퍼지 · 못 찾음)."""
+    채운다), 모델이 안 낸 요청 명사에서 고른 장면 태그를 돌려준다. None 이면 예전처럼(쪼갠 조각 · 퍼지 · 못 찾음).
+    approved: 사용자가 칩에서 고른 캐릭터 — 인물은 이것뿐이다(ka.names 는 자동 제안이라 인물을 만들지 않는다)."""
     generic = set(generic)
     poses = set(poses)
     generic_roles = {compact(role) for role in generic_roles if role}
@@ -445,40 +446,33 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         log.append(f"unresolved:{en}|{ko}")
         return []
 
-    # 인물: 모델이 적은 이름(요청에 있고 일반 명사 아님) + Kiwi 고유명사
+    # 인물 = **사용자가 고른 캐릭터뿐**(사용자 결정 09-25). 자동으로 찾은 이름(한국어 층의 칩 제안 · 모델의 인물 칸)은
+    # 캐릭터가 아니다 — 모델이 인물로 적은 일반 낱말(신부 -> nero claudius (bride))도, 한국어 층의 오검출(여행자 ->
+    # lumine)도 사용자가 고르지 않으면 태그가 되지 않는다. 모델의 인물 칸은 고른 캐릭터를 순서 · who 번호로 잇는 데만 쓴다.
     not_names = set(not_names)
-    names: list[NameHit] = []
     model_chars = route.get("characters") or []
-    order: list[str] = []
-    for c in model_chars:
-        ko = clean_text(c.get("ko") or "").strip()
-        if ko and ko not in not_names and ko in clean_text(text) and ko not in order:
-            order.append(ko)
-    for hit in ka.names:
-        if hit.form not in order:
-            order.append(hit.form)
-    # 전체 이름과 그 조각이 함께 있으면(나토리 사나 · 나토리) 조각은 같은 사람이다 — 인물을 둘로 세지 않는다
-    # (사용자 제보 09-24: 캐릭터 3 이 생겼다). 한국어 층이 토막을 합치지만, 모델이 적은 이름과 어긋날 때의 그물.
-    packed = {form: compact(form) for form in order}
-    order = [form for form in order
-             if not any(other != form and len(packed[other]) > len(packed[form]) and packed[form] in packed[other]
-                        for other in order)]
-    by_form = {h.form: h for h in ka.names}
-    for form in order:
-        hit = by_form.get(form) or (name_lookup(form) if name_lookup else None)
-        if hit and hit.candidates:
-            names.append(hit)
-    characters = [Character(h.form, h.tag, [t for t, _n in h.candidates[1:3]], h.gender) for h in names]
-    # 왕자·공주 같은 역할 낱말은 모델이 인물로 적어도 캐릭터 이름이 아니다 — 이름이 안 됐으면 사전의 장면 태그로(prince)
+    model_kos = [compact(clean_text(c.get("ko") or "")) for c in model_chars]
+    chosen = [h for h in approved if h.candidates and h.form not in not_names]
+    # 전체 이름과 그 조각을 둘 다 골랐으면(나토리 사나 · 나토리) 조각은 같은 사람이다 — 인물을 둘로 세지 않는다(09-24 제보)
+    packed = {h.form: compact(h.form) for h in chosen}
+    chosen = [h for h in chosen if not any(other != h.form and len(p) > len(packed[h.form]) and packed[h.form] in p
+                                           for other, p in packed.items())]
+
+    def slot(form: str) -> int:
+        """고른 캐릭터가 모델 인물 칸의 몇 번인가(0 = 없음) — 모델은 성을 빼거나 붙여 적는다(카나데 · 요이사키 카나데)."""
+        key = compact(form)
+        return next((i for i, m in enumerate(model_kos, 1) if m and (m == key or m in key or key in m)), 0)
+
+    chosen.sort(key=lambda h: (slot(h.form) or len(model_kos) + 1, req_compact.find(compact(h.form))))
+    characters = [Character(h.form, h.tag, [t for t, _n in h.candidates[1:3]], h.gender) for h in chosen]
+    owners = {slot(ch.ko): ch for ch in characters if slot(ch.ko)}
+    # 왕자·공주 같은 역할 낱말은 인물로 적히거나 이름으로 칠해져도 캐릭터가 아니다 — 고르지 않았으면 사전의 장면 태그로(prince)
     named_forms = {compact(ch.ko) for ch in characters}
-    role_forms = [clean_text(c.get("ko") or "").strip() for c in model_chars
-                  if clean_text(c.get("ko") or "").strip() in clean_text(text)
-                  and compact(clean_text(c.get("ko") or "").strip()) in generic_roles]
-    for form in dict.fromkeys(order + role_forms):
+    role_forms = [clean_text(f).strip() for f in [c.get("ko") or "" for c in model_chars] + [h.form for h in ka.names]]
+    for form in dict.fromkeys(f for f in role_forms if f and compact(f) in req_compact):
         if compact(form) in generic_roles and compact(form) not in named_forms:
             for tag in vocab.keyword(form):
                 place(tag)
-    model_index = {clean_text(c.get("ko") or "").strip(): i + 1 for i, c in enumerate(model_chars)}
 
     for item in route.get("actions") or []:
         for tag in item_tags(item, "action"):
@@ -486,7 +480,7 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     for item in route.get("include") or []:
         tags = item_tags(item, "include")
         who = int(item.get("who") or 0)
-        owner = next((ch for ch in characters if model_index.get(ch.ko) == who), None) if who else None
+        owner = owners.get(who) if who else None
         for tag in tags:
             if owner is not None and tag not in owner.attrs:
                 owner.attrs.append(tag)
@@ -496,7 +490,7 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         extra = chooser(asks) or []
         for ask in asks:
             chosen = ask.chosen()
-            owner = next((ch for ch in characters if model_index.get(ch.ko) == ask.who), None) if ask.who else None
+            owner = owners.get(ask.who) if ask.who else None
             for tag in chosen:
                 if _junk_tag(tag):
                     continue

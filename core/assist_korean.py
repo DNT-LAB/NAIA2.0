@@ -704,22 +704,22 @@ class KoreanLayer:
         return [{"tag": t, "posts": n, "gender": self.vocab.genders.get(t)}
                 for t, n in self.vocab.character_candidates(clean_text(form).strip(), limit=self.PICK_LIMIT)]
 
-    def choose(self, hit: NameHit | None, choices: dict[str, str] | None) -> NameHit | None:
-        """사용자가 목록에서 고른 캐릭터를 맨 앞으로 — 게시물 수 순위보다 사용자의 선택(모델에 묻지 않는다).
-        목록에 없는 태그는 무시한다(낡은 선택·조작)."""
-        if hit is None or not choices or hit.form not in choices:
-            return hit
-        want = choices[hit.form]
-        cands = list(hit.candidates)
-        if want not in [t for t, _n in cands]:
-            cands = self.vocab.character_candidates(hit.form, limit=self.PICK_LIMIT)
-            if want not in [t for t, _n in cands]:
-                posts = int(self.vocab.character_rank(want) or 0)
-                if posts <= 0:
-                    return hit                # 게시물이 없는 태그 = 있는 캐릭터가 아니다
-                cands = [(want, posts)] + cands   # 목록 밖에서 찾아 고른 캐릭터(원피스 루피)
-        picked = [c for c in cands if c[0] == want] + [c for c in cands if c[0] != want]
-        return NameHit(hit.form, picked, self.vocab.genders.get(want))
+    def approved(self, form: str, tag: str) -> NameHit | None:
+        """사용자가 칩에서 고른 캐릭터(이름 -> 태그) — 인물은 이것뿐이다(사용자 결정 09-25: 자동으로 찾은 이름은 제안일 뿐).
+        고른 것이 맨 앞(게시물 수 순위보다 사용자의 선택), 나머지 후보는 뒤(화면의 목록). 게시물이 있는 캐릭터 태그만
+        받는다(낡은 선택·조작은 None). 목록 밖에서 찾아 고른 캐릭터(원피스 루피)와 사전에 없는 이름({도라에몽})도 받는다 —
+        옛 choose() 는 사전 후보가 없는 이름에 고른 것을 버렸다."""
+        form, tag = clean_text(form).strip(), str(tag or "").strip()
+        if not form or not tag:
+            return None
+        cands = list(self.vocab.character_candidates(form, limit=self.PICK_LIMIT))
+        if tag not in [t for t, _n in cands]:
+            posts = int(self.vocab.character_rank(tag) or 0)
+            if posts <= 0:
+                return None
+            cands = [(tag, posts)] + cands
+        picked = [c for c in cands if c[0] == tag] + [c for c in cands if c[0] != tag]
+        return NameHit(form, picked, self.vocab.genders.get(tag))
 
     def name_spans(self, text: str, *, use_kiwi: bool = True) -> dict[str, Any]:
         """입력하는 동안 칠할 이름(모델 없이). 위치는 **원문** 기준(중괄호 포함).
@@ -798,30 +798,45 @@ class KoreanLayer:
         return (subj, target) if subj and target and subj != target else None
 
     # -- 인원 -------------------------------------------------------------
-    def count_persons(self, analysis: KoreanAnalysis, extra_names: Iterable[str] = (),
-                      choices: dict[str, str] | None = None, not_names: Iterable[str] = ()) -> PersonCount:
-        """요청에 나온 사람을 센다. 성별 모르는 사람(사람·친구)이 있거나 아무도 없으면 confirm.
-        ``choices`` = 사용자가 목록에서 고른 캐릭터(이름 -> 태그) — 그 캐릭터의 성별로 센다.
-        ``not_names`` = 사용자가 '이름 아님' 으로 고른 낱말(호두를 먹는) — 사람으로 세지 않는다."""
-        choices = choices or {}
+    def count_persons(self, analysis: KoreanAnalysis, approved: dict[str, str | None] | None = None,
+                      not_names: Iterable[str] = ()) -> PersonCount:
+        """요청에 나온 사람을 센다 — 사람 낱말(소녀 · 남자 · 친구 · 쌍둥이)과 **사용자가 고른 캐릭터**만.
+        자동으로 찾은 이름(칩 제안)은 사람으로 세지 않는다 — 고르기 전의 이름은 낱말일 뿐이다(사용자 결정 09-25).
+        ``approved`` = 고른 캐릭터(이름 -> 성별) — 글에 나오면 그 성별로 한 사람(두 토막 이름도 한 사람).
+        ``not_names`` = 사용자가 '이름 아님' 으로 고른 낱말 — 고른 것이 남아 있어도 세지 않는다.
+        성별 모르는 사람(사람·친구)이 있거나 아무도 없으면 confirm."""
         rejected = set(not_names)
         pc = PersonCount()
         toks = analysis.tokens
         if not toks:
             pc.confirm = True
             return pc
-        extra = {clean_text(n).strip() for n in extra_names if n}
+        # 고른 캐릭터는 글자로 맞춘다 — Kiwi 는 '시로가네' 를 시로+가+너+의 로 바꿔 써서 토막으로는 못 맞춘다
+        text = compact(analysis.source_text or "".join(f for f, _t in toks))
+        named = [(compact(clean_text(form)), gender) for form, gender in (approved or {}).items()
+                 if clean_text(form).strip() and clean_text(form).strip() not in rejected]
+        named = [(form, gender) for form, gender in named if form and form in text]
         phrase_nouns: set[str] = set()
         for span in analysis.phrases:          # '공주 안기' 의 공주는 사람이 아니다
             for form, tag in toks:
                 if tag in NOUN_TAGS and form in span and span != compact(form):
                     phrase_nouns.add(form)
         pc.solo = any(f in self.rules["solo_words"] for f, _t in toks)
+        for form, gender in named:
+            if gender == "girl":
+                pc.girls += 1
+            elif gender == "boy":
+                pc.boys += 1
+            else:
+                pc.unknown += 1
+            pc.notes.append(f"{form}x1:{gender or 'unknown'}")
         seen: set[str] = set()
         last_group = -9
         for i, (form, tag) in enumerate(toks):
             if tag not in NOUN_TAGS or form in seen or form in phrase_nouns:
                 continue
+            if any(compact(form) in name for name, _g in named):
+                continue                               # 고른 캐릭터 이름의 토막(하츠네 미쿠의 미쿠)
             nxt = toks[i + 1] if i + 1 < len(toks) else ("", "")
             if nxt[0] in self._simile:
                 continue
@@ -841,26 +856,9 @@ class KoreanLayer:
             elif form in self._male:
                 gender = "boy"
             elif form in self._neutral:
-                explicit = form in choices or (form in analysis.explicit_names
-                                               and any(h.form == form and h.candidates for h in analysis.names))
-                if explicit or (self.vocab.name_strength(form) == "character"
-                                and self._name_context_allowed(toks, i)):
-                    hit = self.choose(self.name_hit(form, explicit=explicit, analysis=analysis), choices)
-                    gender = (hit.gender if hit else None) or "unknown"
-                else:
-                    gender = "unknown"
-            elif form not in rejected and form not in self._not_names and (
-                    form in choices or form in analysis.explicit_names
-                    or (form in extra and self._name_context_allowed(toks, i))
-                    or self._auto_name_like(toks, i)):
-                # 트윈테일(일반 낱말이자 별칭 조각)은 모델이 인물로 적지 않는 한 사람으로 세지 않는다
-                explicit = form in analysis.explicit_names or form in choices
-                if len(compact(form)) < 2 and not explicit:
-                    continue
-                hit = self.choose(self.name_hit(form, explicit=explicit, analysis=analysis), choices)
-                gender = (hit.gender if hit else None) or ("unknown" if form in extra else None)
+                gender = "unknown"                     # 사람 · 친구 — 캐릭터 이름이기도 하면 사용자가 고른다(위)
             if gender is None:
-                continue
+                continue                               # 자동으로 찾은 이름은 사람이 아니다(고르기 전)
             seen.add(form)
             n = self._count_near(toks, i) or 1
             if gender == "girl":

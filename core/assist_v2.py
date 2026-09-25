@@ -117,10 +117,17 @@ _EMOTICON_EN = re.compile(r"[^a-z]*|[^a-z]{1,2}\s?[a-z]?")
 _META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\)$")
 
 
+# 두 글자 이하지만 이모티콘이 아닌 손동작 태그 — V 사인(19만 건) · W 사인(2.5만 건). 두 글자 이하를 통째로 막았더니
+# '손가락으로 브이 표시' 에서 사전의 브이 -> v 가 후보에도 못 올랐다(사용자 제보 09-25). 구성의 TagFinder.usable 도 같다.
+SHORT_TAGS = frozenset({"v", "w"})
+
+
 def _junk_tag(tag: str | None) -> bool:
-    """프롬프트에 싣지 않을 태그 — 이모티콘(>o< · ^_^) · 메타 갈래((animated) · (cosplay)) · 인원 낱말 · 두 글자 이하.
-    구성 경로의 TagFinder.usable 과 같은 기준이다(09-24: 한 줄 경로에서 '놀란 표정' 이 >o< 로 샜다)."""
+    """프롬프트에 싣지 않을 태그 — 이모티콘(>o< · ^_^) · 메타 갈래((animated) · (cosplay)) · 인원 낱말 · 두 글자 이하
+    (손동작 태그 SHORT_TAGS 는 뺀다). 구성 경로의 TagFinder.usable 과 같은 기준이다(09-24: '놀란 표정' 이 >o< 로 샜다)."""
     value = str(tag or "").strip().lower()
+    if value in SHORT_TAGS:
+        return False
     return (len(value) <= 2 or not re.search(r"[a-z]{2}", value) or bool(_EMOTICON_EN.fullmatch(value))
             or bool(_META_EN.search(value)) or bool(_PEOPLE_EN.match(value)))
 
@@ -207,8 +214,9 @@ class TagVocab:
     fuzzy: Callable[[str], list[str]] = lambda _k: []        # 한국어 퍼지 검색(Fast Search 태그 갈래) -> 태그
 
 
-def en_variants(term: str) -> list[str]:
-    """모델 영문의 흔한 어긋남: 복수·붙여쓰기·-ing·-y·wearing·photo. 순서가 우선순위다."""
+def en_variants(term: str, *, verb: bool = True) -> list[str]:
+    """모델 영문의 흔한 어긋남: 복수·붙여쓰기·-ing·-y·wearing·photo. 순서가 우선순위다.
+    verb=False(한국어 조각이 명사)면 '+ing' 을 붙이지 않는다 — 손가락(finger)이 fingering 이 됐다(사용자 제보 09-25)."""
     t = " ".join(str(term or "").lower().replace("_", " ").split())
     if not t:
         return []
@@ -225,8 +233,8 @@ def en_variants(term: str) -> list[str]:
     if words[0].endswith("ing") and len(words[0]) > 5:               # blushing -> blush
         base = words[0][:-3]
         out += [" ".join([base] + words[1:]), " ".join([base + "e"] + words[1:])]
-    elif len(words) == 1 and not t.endswith("ing"):
-        out.append(t + "ing")                                        # laugh -> laughing
+    elif len(words) == 1 and not t.endswith("ing") and verb:
+        out.append(t + "ing")                                        # laugh -> laughing(동사만)
     if len(words) == 1 and t.endswith("y") and len(t) > 4:
         out.append(t[:-1])                                           # rainy -> rain
     return list(dict.fromkeys(out))
@@ -242,17 +250,17 @@ def _same_word(a: str, b: str) -> bool:
     return n >= min(5, len(a), len(b))
 
 
-def exact_english(term: str, vocab: TagVocab) -> str | None:
+def exact_english(term: str, vocab: TagVocab, *, verb: bool = True) -> str | None:
     """영문 추측이 (변형 포함) 태그 이름 그대로인가 — 쪼개지 않은 정확 일치만."""
-    for v in en_variants(term):
+    for v in en_variants(term, verb=verb):
         name = vocab.canonical(v)
         if name and not _junk_tag(name):
             return name
     return None
 
 
-def resolve_english(term: str, vocab: TagVocab) -> list[str]:
-    for v in en_variants(term):
+def resolve_english(term: str, vocab: TagVocab, *, verb: bool = True) -> list[str]:
+    for v in en_variants(term, verb=verb):
         name = vocab.canonical(v)
         if name and not _junk_tag(name):
             return [name]
@@ -266,7 +274,8 @@ def resolve_english(term: str, vocab: TagVocab) -> list[str]:
             piece = " ".join(words[i:j])
             if j - i == 1 and piece in _EN_STOP:
                 continue
-            name = next((n for n in (vocab.canonical(v) for v in en_variants(piece)) if n and not _junk_tag(n)), None)
+            name = next((n for n in (vocab.canonical(v) for v in en_variants(piece, verb=verb)) if n and not _junk_tag(n)),
+                        None)
             if name:
                 parts.append(name)
                 i = j
@@ -417,8 +426,10 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         m = _NEGATION.match(en)
         if m and kind != "exclude":
             return []                                               # 'no towel' 은 제외 칸의 일이다
-        found = resolve_english(en, vocab)
-        if chooser is not None and kind == "include" and not exact_english(en, vocab):
+        # 모델은 동사를 '~기' 로 적는다 — 명사 조각(손가락)의 영문(finger)엔 '+ing' 을 붙이지 않는다(fingering, 09-25)
+        verb = not ko_c or ko_c.endswith(("기", "다"))
+        found = resolve_english(en, vocab, verb=verb)
+        if chooser is not None and kind == "include" and not exact_english(en, vocab, verb=verb):
             # 영문이 태그 이름 그대로가 아니면(쪼개지거나 못 찾음) 한국어 정확 키워드가 아닌 한 모아 두었다가 고르게 한다
             # — 쪼갠 조각(chin · resting · back)과 못 찾음(observing)이 여기서 났다(설계 19절)
             hit = [t for t in vocab.keyword(ko) if not _junk_tag(t)] if len(ko_c) >= 2 else []

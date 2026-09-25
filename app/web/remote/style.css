@@ -1024,6 +1024,9 @@ header {
   gap: 10px;
   margin-top: 4px;
 }
+/* 선택지가 셋 이상이면(저장된 필터 불러오기 - Include만 · Exclude만) 글자가 단추 안에서 꺾였다 - 단추째 다음 줄로 (2026-09-25). */
+.app-confirm-actions { flex-wrap: wrap; }
+.app-confirm-btn { white-space: nowrap; padding-left: 14px; padding-right: 14px; }
 .app-confirm-btn {
   min-width: 92px;
   height: 38px;

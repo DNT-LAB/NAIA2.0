@@ -35,6 +35,8 @@ export function createSearchQuickWindow({
   onLayerShown = () => {},
   // 창이 닫힐 때 - 심층 검색이 창 없이 혼자 남지 않게 app.js 가 함께 닫는다.
   onWindowClose = () => {},
+  // 저장된 필터 창이 열리고 닫힐 때([Filters] 단추의 눌림 표시).
+  onPresetsVisibility = () => {},
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
   escHtml,
 }) {
@@ -60,6 +62,7 @@ export function createSearchQuickWindow({
     // 동반 창은 함께 닫는다 - 혼자 남으면 무엇의 목록인지 모른다.
     onClose: () => {
       if (libPanel && libPanel.isOpen()) libPanel.close();
+      if (presetsPanel && presetsPanel.isOpen()) presetsPanel.close();
       closeRefineSide();
       onWindowClose();
       onVisibilityChange();
@@ -240,6 +243,48 @@ export function createSearchQuickWindow({
     }
   }
 
+  // ── 저장된 필터 동반 창(사용자 지정 2026-09-25) ──────────────────────────────
+  // Tag Filter 층 안의 목록은 180px 에서 스크롤 속 스크롤이 됐다(5줄쯤). 목록 요소(#tagFilterPresets)를
+  // **옮겨** 창에 붙인다 - quickFilter 는 id 로 찾으므로 그대로 그린다. 백업 슬롯은 맨 위에 고정(sticky).
+  let presetsPanel = null;
+
+  function ensurePresetsPanel() {
+    if (presetsPanel) return presetsPanel;
+    const list = doc.getElementById('tagFilterPresets');
+    if (!list) return null;
+    const width = 300;
+    const height = 440;
+    const spot = rightOfSpot(width, height, panel.el.getBoundingClientRect());
+    presetsPanel = createDraggablePanel({
+      document: doc,
+      window: win,
+      title: '저장된 필터',
+      variant: 'tfpw',
+      storageKey: 'search-quick-filter-presets',
+      width, height, minWidth: 220, maxWidth: 700, minHeight: 180,
+      resizable: true,
+      initial: { x: spot.x, y: spot.y },
+      escHtml,
+      onOpen: () => onPresetsVisibility(true),
+      onClose: () => onPresetsVisibility(false),
+    });
+    presetsPanel.el.id = 'searchFilterPresetsWindow';
+    presetsPanel.body.innerHTML = `
+      <div class="tfpw-search"><input type="text" id="tagFilterPresetSearch" placeholder="이름으로 찾기…" spellcheck="false" autocomplete="off"></div>`;
+    list.removeAttribute('hidden');
+    presetsPanel.body.appendChild(list);
+    return presetsPanel;
+  }
+
+  /** [Filters] - 창을 열고 닫는다. 창을 못 만들면 false(옛 접이식 목록으로 떨어진다). */
+  function togglePresets() {
+    const p = ensurePresetsPanel();
+    if (!p) return false;
+    if (p.isOpen()) p.close();
+    else p.open();
+    return true;
+  }
+
   // ── Custom Parquets 동반 창 ─────────────────────────────────────────────
   let libPanel = null;
 
@@ -323,6 +368,8 @@ export function createSearchQuickWindow({
     collapse: () => panel.collapse(),
     toggleLibrary,
     showLibrary,
+    togglePresets,
+    isPresetsOpen: () => Boolean(presetsPanel && presetsPanel.isOpen()),
     isLibraryOpen: () => Boolean(libPanel && libPanel.isOpen()),
     isOpen: () => panel.isOpen(),
     isSearchShown: () => panel.isOpen() && !panel.isCollapsed() && layer === 'search',
@@ -406,6 +453,7 @@ const SQW_CSS = `
 .sqw-body .tag-filter-btn-action{flex:1 1 0;min-width:0;height:24px;padding:0 6px;font-size:10.5px;border-radius:5px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sqw-body .tag-filter-btn-action:disabled{opacity:.35;pointer-events:none}
+.sqw-body .tag-filter-btn-action.filters.is-open{box-shadow:inset 0 0 0 1px rgba(245,220,138,0.7);color:#f5dc8a}
 .sqw-body .tag-filter-save-row{padding-top:0}
 .sqw-body .tag-filter-save-row .tag-filter-btn-action{flex:0 0 auto;padding:0 12px}
 .sqw-body .tag-filter-presets{max-height:180px;padding:4px;margin:0;gap:3px;background:rgba(0,0,0,0.24);border-radius:6px}
@@ -425,6 +473,17 @@ const SQW_CSS = `
   color:#bfe8cf;margin-right:auto}
 .sqw-body #refineView .rf-side-toggle:hover{background:rgba(120,190,150,0.26);color:#fff}
 /* 동반 창 '심층 검색 도구' - 옮겨 온 오른쪽 칸(샘플 · 스테이징 · 병합&내보내기) */
+/* 저장된 필터 동반 창 - 옮겨 온 #tagFilterPresets 가 창 높이를 채우고, 백업 슬롯은 맨 위에 붙어 있다. */
+.dragpanel.tfpw{border-color:rgba(245,220,138,0.35)}
+.dragpanel.tfpw .dragpanel-head{background:rgba(245,220,138,0.07)}
+.dragpanel.tfpw .dragpanel-body{display:flex;flex-direction:column;gap:6px;padding:7px;background:var(--bg-surface);overflow:hidden}
+.dragpanel.tfpw .tfpw-search input{width:100%;box-sizing:border-box;height:24px;padding:2px 8px;font-size:11px;border-radius:5px;
+  border:1px solid var(--border-dim,#33333f);background:var(--bg-deep,#0e0e12);color:var(--text-primary,#e8e8ee)}
+.dragpanel.tfpw #tagFilterPresets{flex:1 1 auto;min-height:0;max-height:none;margin:0;padding:0 4px 4px;gap:3px;overflow-y:auto;
+  background:rgba(0,0,0,0.24);border-radius:6px}
+.dragpanel.tfpw #tagFilterPresets .tf-preset.is-backup{position:sticky;top:0;z-index:1;margin:0 -4px 2px;padding-left:14px;
+  background:var(--bg-deep,#0e0e12);border-radius:6px 6px 0 0}
+.dragpanel.tfpw .tf-preset-name{font-size:11px}
 .dragpanel.rfsw{border-color:rgba(120,190,150,0.42)}
 .dragpanel.rfsw .dragpanel-head{background:rgba(120,190,150,0.10)}
 .dragpanel.rfsw .dragpanel-body{padding:8px;background:var(--bg-surface);overflow:auto}

@@ -945,6 +945,13 @@ export function createQuickFilterController(deps) {
     bindAutocompleteInput('tagFilterInput', 'include');
     bindAutocompleteInput('tagFilterExcludeInput', 'exclude');
     bindPresetTooltip();
+    // 저장된 필터 창의 이름 찾기 - 창은 처음 열 때 만들어지므로 문서에 위임으로 받는다.
+    doc.addEventListener('input', event => {
+      if (!event.target || event.target.id !== 'tagFilterPresetSearch') return;
+      presetQuery = String(event.target.value || '').trim().toLowerCase();
+      hidePresetTip();
+      renderPresets();
+    });
     updateCommitButton();
   }
 
@@ -1500,6 +1507,11 @@ export function createQuickFilterController(deps) {
     button.textContent = `Filters (${count})`;
   }
 
+  // 저장된 필터 창의 이름 찾기(소문자). 창 밖(옛 접이식 목록)에서는 칸이 없어 늘 ''.
+  let presetQuery = '';
+  // 목록이 저장된 필터 **창**으로 옮겨졌나 - 그러면 불러오기·저장 줄이 목록을 숨기지 않는다(창이 따로 있다).
+  const presetsInWindow = () => Boolean(getEl('tagFilterPresets')?.closest?.('.dragpanel'));
+
   function renderPresets() {
     const el = getEl('tagFilterPresets');
     if (!el) return;
@@ -1511,11 +1523,14 @@ export function createQuickFilterController(deps) {
         + `<span class="tf-preset-name" onclick="loadTagFilterPreset(${backupIndex})">${deps.escHtml(PRESET_BACKUP_NAME)}${meta(presets[backupIndex])}</span></div>`
       : `<div class="tf-preset is-backup is-empty" title="저장된 필터를 불러오면 그 직전의 값이 여기에 보관됩니다">`
         + `<span class="tf-preset-name">${deps.escHtml(PRESET_BACKUP_NAME)}<span class="tf-preset-meta">없음</span></span></div>`;
-    const rows = presets.map((p, i) => (i === backupIndex ? '' :
+    // 이름 찾기(저장된 필터 창) - 백업 슬롯은 늘 보인다.
+    const matches = p => !presetQuery || String(p.name).toLowerCase().includes(presetQuery);
+    const rows = presets.map((p, i) => (i === backupIndex || !matches(p) ? '' :
       `<div class="tf-preset" data-idx="${i}"><span class="tf-preset-name" onclick="loadTagFilterPreset(${i})">`
         + `${deps.escHtml(p.name)}${meta(p)}</span>`
         + `<span class="tf-preset-x" onclick="deleteTagFilterPreset(${i})" title="삭제">&times;</span></div>`)).join('');
-    el.innerHTML = backupRow + (rows || '<div class="tf-preset-empty">저장된 필터 없음</div>');
+    const empty = presetQuery ? `'${deps.escHtml(presetQuery)}' 와 맞는 필터 없음` : '저장된 필터 없음';
+    el.innerHTML = backupRow + (rows || `<div class="tf-preset-empty">${empty}</div>`);
   }
 
   // 커스텀 hover 툴팁 — Include/Exclude 라벨을 색으로 구분(native title은 색 불가).
@@ -1563,6 +1578,12 @@ export function createQuickFilterController(deps) {
   }
 
   function togglePresets() {
+    // 저장된 필터 = Search 창 옆 동반 창(사용자 지정 2026-09-25). 창이 없으면 옛 접이식 목록.
+    if (typeof deps.togglePresetsWindow === 'function' && deps.togglePresetsWindow()) {
+      hidePresetTip();
+      renderPresets();
+      return;
+    }
     const el = getEl('tagFilterPresets');
     if (!el) return;
     if (!el.hasAttribute('hidden')) { hidePresetTip(); el.setAttribute('hidden', ''); return; }
@@ -1581,7 +1602,7 @@ export function createQuickFilterController(deps) {
       return;
     }
     const presetsEl = getEl('tagFilterPresets');
-    if (presetsEl) presetsEl.setAttribute('hidden', '');
+    if (presetsEl && !presetsInWindow()) presetsEl.setAttribute('hidden', '');
     row.removeAttribute('hidden');
     const input = getEl('tagFilterPresetName');
     if (input) { input.value = ''; input.focus(); }
@@ -1609,21 +1630,34 @@ export function createQuickFilterController(deps) {
     const p = presets[i];
     if (!p) return;
     hidePresetTip();
-    const next = {include: normalizeTags(p.include), exclude: normalizeTags(p.exclude)};
+    const saved = {include: normalizeTags(p.include), exclude: normalizeTags(p.exclude)};
     const current = {include: [...includeTags], exclude: [...excludeTags]};
     const hasCurrent = current.include.length > 0 || current.exclude.length > 0;
-    const same = JSON.stringify(current) === JSON.stringify(next);
-    const backup = hasCurrent && !same;
+    if (JSON.stringify(current) === JSON.stringify(saved)) return;   // 이미 그 값이다
+    // 무엇을 불러올지 묻는다(사용자 지정 2026-09-25): 전부 · Include 만 · Exclude 만. 부분 불러오기는
+    // 지금 칩이 비어 있어도 쓸모가 있어 늘 묻는다. 팝업이 없으면(옛 호스트) 전부.
+    let choice = 'load';
+    if (typeof deps.confirmDialog === 'function') {
+      choice = await deps.confirmDialog({
+        title: '저장된 필터 불러오기',
+        messageHtml: presetCompareHtml(p.name, saved, current, hasCurrent),
+        choices: [
+          {key: 'load', label: '불러오기'},
+          {key: 'include', label: 'Include만 불러오기'},
+          {key: 'exclude', label: 'Exclude만 불러오기'},
+        ],
+        cancelText: '취소',
+      });
+    }
+    if (choice !== 'load' && choice !== 'include' && choice !== 'exclude') return;
+    // Include 만 = 제외 칩은 지금 것 그대로 · Exclude 만 = 포함 칩은 지금 것 그대로.
+    const next = {
+      include: choice === 'exclude' ? current.include : saved.include,
+      exclude: choice === 'include' ? current.exclude : saved.exclude,
+    };
+    if (JSON.stringify(current) === JSON.stringify(next)) return;   // 고른 쪽이 이미 같다 - 바뀌는 것이 없다
+    const backup = hasCurrent;
     if (backup) {
-      if (typeof deps.confirmDialog === 'function') {
-        const choice = await deps.confirmDialog({
-          title: '저장된 필터 불러오기',
-          messageHtml: presetCompareHtml(p.name, next, current),
-          choices: [{key: 'load', label: '불러오기'}],
-          cancelText: '취소',
-        });
-        if (choice !== 'load') return;
-      }
       if (!isSocketOpen()) {
         deps.showToast('연결이 끊겨 지금 값을 보관할 수 없어 불러오지 않았습니다', 'error');
         return;
@@ -1635,15 +1669,16 @@ export function createQuickFilterController(deps) {
     renderExcludeChips();
     updateCommitButton();
     const el = getEl('tagFilterPresets');
-    if (el) el.setAttribute('hidden', '');
-    if (backup) deps.showToast(`불러옴: ${p.name} · 지금까지의 값은 '${PRESET_BACKUP_NAME}' 에 보관했습니다`, 'success');
+    if (el && !presetsInWindow()) el.setAttribute('hidden', '');   // 창이면 그대로 둔다 - 다른 필터로 바로 옮겨 볼 수 있게
+    const part = choice === 'include' ? ' (Include만)' : choice === 'exclude' ? ' (Exclude만)' : '';
+    if (backup) deps.showToast(`불러옴: ${p.name}${part} · 지금까지의 값은 '${PRESET_BACKUP_NAME}' 에 보관했습니다`, 'success');
     schedulePreview();   // 초안으로 불러온다 - 풀은 [커밋 (적용)] 이 바꾼다(등급은 안 건드림 — 프리셋은 태그만)
     // ⚠️ 백업은 새 칩을 저장한 **뒤에** 보낸다. save_filter_preset 의 응답은 search_state 전체라, 먼저 보내면
     //    서버의 옛 칩을 싣고 돌아와 방금 불러온 칩을 덮는다(라이브 실측).
     if (backup) send({type: 'save_filter_preset', name: PRESET_BACKUP_NAME, include: current.include, exclude: current.exclude});
   }
 
-  function presetCompareHtml(name, next, current) {
+  function presetCompareHtml(name, next, current, hasCurrent = true) {
     const esc = deps.escHtml;
     const line = (label, tags) => `${label} : ${tags.length ? esc(tags.join(', ')) : '<i>없음</i>'}`;
     return [
@@ -1651,9 +1686,11 @@ export function createQuickFilterController(deps) {
       line('Include', next.include),
       line('Exclude', next.exclude),
       '',
-      `<b>지금 값</b> → '${esc(PRESET_BACKUP_NAME)}' 에 자동 보관`,
+      hasCurrent ? `<b>지금 값</b> → '${esc(PRESET_BACKUP_NAME)}' 에 자동 보관` : '<b>지금 값</b>',
       line('Include', current.include),
       line('Exclude', current.exclude),
+      '',
+      '<i>Include만 · Exclude만 = 그 칸만 바꾸고 다른 칸은 지금 값을 둡니다.</i>',
     ].join('<br>');
   }
 

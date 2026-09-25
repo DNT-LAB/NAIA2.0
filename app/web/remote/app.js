@@ -697,7 +697,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-filtercount')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-partialload')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -726,6 +726,8 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260925-filter
       onFilterChanged: () => updatePromptHighlight(),
       // 칩을 누르면 그 태그의 정보 카드를 층 아래 빈 자리(host)에 그린다.
       showTagInfo: (tag, host) => { if (tagAssist) tagAssist.lookupPromptInfoTag(tag, {host, rawTag: tag}); },
+      // [Filters] = Search 창 옆 '저장된 필터' 창. 창이 없으면 false - 옛 접이식 목록.
+      togglePresetsWindow: () => Boolean(searchQuickWindow && searchQuickWindow.togglePresets()),
     });
     quickFilter.bindInputs();
   })
@@ -2698,7 +2700,7 @@ searchHost.className = 'search-host';
 // Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
 const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-rs')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-presetwin')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,
@@ -2711,6 +2713,11 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
       // 심층 검색 = 이 창의 세 번째 층(사용자 결정 2026-09-25). 층이 보이면 준비하고, 창이 닫히면 함께 닫는다.
       onLayerShown: layer => { if (layer === 'refine' && refinePanelControl) refinePanelControl.ensureOpen(); },
       onWindowClose: () => { if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close(); },
+      // [Filters (N)] 단추의 눌림 표시 = 저장된 필터 창이 열려 있다.
+      onPresetsVisibility: open => {
+        const button = document.getElementById('tagFilterPresetsBtn');
+        if (button) { button.classList.toggle('is-open', open); button.setAttribute('aria-pressed', open ? 'true' : 'false'); }
+      },
       escHtml,
     });
   })

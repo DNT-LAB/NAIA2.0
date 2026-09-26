@@ -99,6 +99,17 @@ class KoreanVocab:
     character_rank: Callable[[str], int] = lambda _tag: 0  # 캐릭터 태그 -> 게시물 수(Artist 팩)
     tag_exists: Callable[[str], bool] = lambda _tag: True  # 이벤트 맵 어휘에 있나
     blocked_keys: set[str] = field(default_factory=set)    # 묻지 않을 키워드(규칙표 keyword_block — 쳐다보기)
+    # 소리 열쇠 -> 캐릭터 태그 — 한국어 키워드가 없는 캐릭터(34,869개 · lacrimosa (nte))를 한글 표기로 찾는다(09-26)
+    sounds: dict[str, set[str]] = field(default_factory=dict)
+
+    def sound_candidates(self, word: str) -> set[str]:
+        """사전이 모르는 한글 낱말(두 음절 이상)의 소리가 한국어 이름 없는 캐릭터 이름과 같으면 그 태그들
+        (라크리모사 -> lacrimosa (nte) · 우라라카 -> uraraka ochako). 사전이 아는 낱말(카메라 · 리본)은 부르는 쪽이 거른다."""
+        key = compact(word)
+        if not re.fullmatch(r"[가-힣]{2,}", key):
+            return set()
+        sound = sound_key_ko(key)
+        return set(self.sounds.get(sound, ())) if len(sound) >= 4 else set()
 
     def lookup(self, span: str, *, character: bool = False) -> list[tuple[str, int]]:
         """정확 일치 키워드 -> 태그(게시물 많은 순). 묶음 이름(12개 초과)·막은 키워드는 버린다."""
@@ -134,7 +145,7 @@ class KoreanVocab:
             return "character" if _one_character_family(rows) else "general"
         if rows:
             return "character" if max(rows, key=lambda r: r[1])[2] == "character" else "general"
-        return "piece" if self.name_pieces.get(compact(word)) else "none"
+        return "piece" if self.name_pieces.get(compact(word)) or self.sound_candidates(word) else "none"
 
     def is_general_word(self, word: str) -> bool:
         return self.name_strength(word) == "general"
@@ -143,12 +154,61 @@ class KoreanVocab:
         """전체 이름 정확 일치 + 이름 조각 일치를 **합쳐** Artist 팩 게시물 수로 줄 세운다(카나데 -> yoisaki 2,940 …).
         예전엔 정확 일치가 하나라도 있으면 조각을 안 봐서 루피 = rupee (nikke) 뿐이었다(monkey d. luffy 6,828 이 가려짐)."""
         tags = {t for t, _c in self.lookup(name, character=True)} | set(self.name_pieces.get(compact(name), ()))
+        if not tags and not self.keywords.get(compact(name)):
+            tags = self.sound_candidates(name)          # 사전이 모르는 낱말만 — 소리로 한국어 이름 없는 캐릭터를
         ranked = sorted(((t, int(self.character_rank(t) or 0)) for t in tags), key=lambda x: (-x[1], x[0]))
         return ranked[:limit]
 
 
 # 캐릭터 키워드 끝의 괄호 꼬리 — 작품 · 성별 · 의상(클레 (원신) · 여행자(남) · 아쿠아 (수영복))
 _NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+
+# ── 소리 열쇠(한글 표기 <-> 영문 이름, 대충의 발음) ─────────────────────────────────────────
+# 한국어 키워드가 없는 캐릭터가 34,869개(72%)다(lacrimosa (nte) · uraraka ochako · toujou nozomi). 한글 표기와 영문 이름을
+# 같은 거친 소리로 바꿔 맞춘다: ㄱㅋ=k · ㄷㅌ=t · ㅂㅍ=p · ㅈㅊ=c · ㄹ=l(r·l) · 모음 다섯 · 외래어의 '으'(크) 는 없다.
+# 일본어 이름(로마자)은 잘 맞고, 영어식 이름(byleth -> 벨레스)은 잘 안 맞는다 — 틀리면 후보가 없을 뿐이다.
+_CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+_JUNG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+_JONG = ("", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ",
+         "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ")
+_SOUND_CHO = {"ㄱ": "k", "ㄲ": "k", "ㅋ": "k", "ㄷ": "t", "ㄸ": "t", "ㅌ": "t", "ㅂ": "p", "ㅃ": "p", "ㅍ": "p",
+              "ㅅ": "s", "ㅆ": "s", "ㅈ": "c", "ㅉ": "c", "ㅊ": "c", "ㄹ": "l", "ㅁ": "m", "ㄴ": "n", "ㅎ": "h", "ㅇ": ""}
+_SOUND_JUNG = {"ㅏ": "a", "ㅐ": "e", "ㅑ": "a", "ㅒ": "e", "ㅓ": "o", "ㅔ": "e", "ㅕ": "o", "ㅖ": "e", "ㅗ": "o",
+               "ㅘ": "a", "ㅙ": "e", "ㅚ": "e", "ㅛ": "o", "ㅜ": "u", "ㅝ": "o", "ㅞ": "e", "ㅟ": "i", "ㅠ": "u",
+               "ㅡ": "", "ㅢ": "i", "ㅣ": "i"}
+_SOUND_JONG = {"ㄱ": "k", "ㄴ": "n", "ㄷ": "t", "ㄹ": "l", "ㅁ": "m", "ㅂ": "p", "ㅅ": "s", "ㅇ": "n", "ㅈ": "c",
+               "ㅊ": "c", "ㅋ": "k", "ㅌ": "t", "ㅍ": "p"}
+# 영문 두 글자 소리 — 바꾼 결과를 대문자로 두었다가 마지막에 내린다(다시 바뀌지 않게: ch -> C, 그 뒤 c -> k 를 피한다)
+_SOUND_EN_PAIRS = (("tch", "C"), ("sch", "S"), ("ch", "C"), ("sh", "S"), ("ts", "C"), ("th", "T"), ("ph", "P"),
+                   ("ck", "K"), ("qu", "K"), ("gh", ""), ("ou", "o"), ("oo", "o"), ("uu", "u"), ("aa", "a"),
+                   ("ii", "i"), ("ee", "i"), ("ei", "e"), ("ey", "e"), ("ay", "e"))
+_SOUND_EN = str.maketrans({"c": "k", "g": "k", "q": "k", "d": "t", "b": "p", "f": "p", "v": "p", "z": "c", "j": "c",
+                           "r": "l", "w": "", "y": "i", "x": "ks"})
+
+
+def _squash(key: str) -> str:
+    return re.sub(r"(.)\1+", r"\1", key)
+
+
+def sound_key_ko(word: str) -> str:
+    """한글 표기 -> 거친 소리(라크리모사 -> laklimosa · 노조미 -> nocomi). 한글 아닌 글자는 버린다."""
+    out: list[str] = []
+    for ch in word:
+        code = ord(ch) - 0xAC00
+        if not 0 <= code < 11172:
+            continue
+        out.append(_SOUND_CHO[_CHO[code // 588]] + _SOUND_JUNG[_JUNG[(code % 588) // 28]]
+                   + _SOUND_JONG.get(_JONG[code % 28], ""))
+    return _squash("".join(out))
+
+
+def sound_key_en(word: str) -> str:
+    """영문 이름 -> 거친 소리(lacrimosa -> laklimosa · nozomi -> nocomi · toujou -> toco · ochako -> ocako)."""
+    w = re.sub(r"[^a-z]", "", str(word or "").lower())
+    for a, b in _SOUND_EN_PAIRS:
+        w = w.replace(a, b)
+    w = re.sub(r"c(?=[eiy])", "s", w).translate(_SOUND_EN)
+    return _squash(w.lower())
 
 
 def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None,
@@ -165,6 +225,7 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
     """
     keywords: dict[str, list[tuple[str, int, str]]] = {}
     pieces: dict[str, set[str]] = {}
+    sounds: dict[str, set[str]] = {}
 
     def put(key: str, row: tuple[str, int, str]) -> None:
         rows = keywords.setdefault(key, [])
@@ -180,6 +241,13 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
         except (TypeError, ValueError):
             count = 0
         cat = str(info.get("_named_entity_category") or info.get("_cat") or "")
+        if cat == "character" and not re.search("[가-힣]", str(info.get("keywords_kr") or "")):
+            # 한국어 이름이 없는 캐릭터 — 영문 이름(괄호 꼬리 뺀)의 낱말 · 붙여 쓴 전체를 소리 열쇠로(4글자 이상)
+            words = [w for w in re.split(r"[\s_\-.]+", re.sub(r"\s*\([^()]*\)", "", tag)) if w]
+            for word in dict.fromkeys(words + ["".join(words)]):
+                sound = sound_key_en(word)
+                if len(sound) >= 4:
+                    sounds.setdefault(sound, set()).add(tag)
         for kw in str(info.get("keywords_kr") or "").split(","):
             kw = kw.strip().strip("<>[] ")
             if not kw or not re.search("[가-힣]", kw):
@@ -197,7 +265,8 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
                     if len(piece) >= 2:
                         pieces.setdefault(piece, set()).add(tag)
     return KoreanVocab(keywords=keywords, name_pieces=pieces, genders=dict(genders or {}),
-                       character_rank=character_rank or (lambda _t: 0), tag_exists=tag_exists or (lambda _t: True))
+                       character_rank=character_rank or (lambda _t: 0), tag_exists=tag_exists or (lambda _t: True),
+                       sounds=sounds)
 
 
 # ── 분석 결과 ────────────────────────────────────────────────────────────────

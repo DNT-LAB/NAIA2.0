@@ -216,6 +216,41 @@ def summarize_release_workspace(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _stage_llama_section(release_root: Path, cache_dir: Path, *, require_llama_engine: bool) -> dict[str, Any]:
+    """Bundled llama.cpp engine (Assist · Boost) — staged into resources/naia-backend/runtime/llama/engine.
+
+    Opt-in by env so test runs never hit the network: NAIA_LLAMA_ENGINE_SRC (dir or official zip) or
+    NAIA_LLAMA_ENGINE_DOWNLOAD=1 (pinned official zip, SHA-256 checked). The portable release sets one.
+    실제 빌드(run_electron_portable_workspace, dry_run 아님)는 require_llama_engine — 엔진 없이 나가지 않는다.
+    Assist · Boost 가 모두 이 엔진을 쓰고 Ollama 파이프라인은 회수했다(2026-09-26). 계획 실행 · 시험은 그대로 경고만.
+    """
+    if os.environ.get("NAIA_LLAMA_ENGINE_SRC") or os.environ.get("NAIA_LLAMA_ENGINE_DOWNLOAD") == "1":
+        try:
+            llama_result = stage_llama_runtime(release_root, cache_dir=cache_dir)
+            return {**llama_result.__dict__, "ok": True, "violations": []}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "violations": [{"path": "resources/naia-backend/runtime/llama/engine", "reason": str(exc)}],
+            }
+    if require_llama_engine:
+        return {
+            "ok": False,
+            "status": "not_requested",
+            "violations": [{
+                "path": "resources/naia-backend/runtime/llama/engine",
+                "reason": "llama.cpp engine is required for a release build "
+                          "(set NAIA_LLAMA_ENGINE_DOWNLOAD=1 or NAIA_LLAMA_ENGINE_SRC)",
+            }],
+        }
+    return {
+        "ok": True,
+        "status": "not_requested",
+        "warnings": ["llama.cpp engine not bundled (set NAIA_LLAMA_ENGINE_DOWNLOAD=1 or NAIA_LLAMA_ENGINE_SRC)"],
+        "violations": [],
+    }
+
+
 def run_release_workspace(
     *,
     source_root: str | Path = ".",
@@ -228,6 +263,7 @@ def run_release_workspace(
     python_runtime_version: str | None = None,
     require_bundled_python: bool = False,
     include_final_evidence: bool = False,
+    require_llama_engine: bool = False,
 ) -> dict[str, Any]:
     source = Path(source_root).resolve()
     if workspace_root is None:
@@ -349,25 +385,9 @@ def run_release_workspace(
             "violations": [],
         }
 
-    # Bundled llama.cpp CPU engine (Boost v2) — staged into resources/naia-backend/runtime/llama/engine.
-    # Opt-in by env so test runs never hit the network: NAIA_LLAMA_ENGINE_SRC (dir or official zip) or
-    # NAIA_LLAMA_ENGINE_DOWNLOAD=1 (pinned official zip, SHA-256 checked). The portable release sets one.
-    if os.environ.get("NAIA_LLAMA_ENGINE_SRC") or os.environ.get("NAIA_LLAMA_ENGINE_DOWNLOAD") == "1":
-        try:
-            llama_result = stage_llama_runtime(release_root, cache_dir=workspace / "llama-engine-cache")
-            sections["stage_llama_runtime"] = {**llama_result.__dict__, "ok": True, "violations": []}
-        except Exception as exc:
-            sections["stage_llama_runtime"] = {
-                "ok": False,
-                "violations": [{"path": "resources/naia-backend/runtime/llama/engine", "reason": str(exc)}],
-            }
-    else:
-        sections["stage_llama_runtime"] = {
-            "ok": True,
-            "status": "not_requested",
-            "warnings": ["llama.cpp engine not bundled (set NAIA_LLAMA_ENGINE_DOWNLOAD=1 or NAIA_LLAMA_ENGINE_SRC)"],
-            "violations": [],
-        }
+    sections["stage_llama_runtime"] = _stage_llama_section(
+        release_root, workspace / "llama-engine-cache", require_llama_engine=require_llama_engine,
+    )
 
     sections["preflight"] = check_release_preflight(release_root, require_bundled_python=require_bundled_python)
     sections["smoke_backend"] = _run_json_command(

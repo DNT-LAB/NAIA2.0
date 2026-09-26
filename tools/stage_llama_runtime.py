@@ -14,7 +14,7 @@ Target: ``resources/naia-backend/runtime/llama/engine`` — the default engine p
 resolves (``core.llama_runtime.default_engine_path``). ``*.md`` is dropped (release audit forbids
 it); license files are kept and ``SOURCE.txt`` records where the files came from.
 
-The model (3.1 GiB GGUF) is NOT bundled — the app downloads it on first use.
+The model (3~14 GB GGUF, chosen in API 설정 > AI 모델) is NOT bundled — the app downloads it on first use.
 
 Removable: delete this tool, its call site in ``run_release_workspace`` and ``runtime/llama``.
 """
@@ -39,17 +39,19 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - used when executed as a script.
     from write_release_metadata import write_release_metadata
 
-ENGINE_VERSION = "b10830"
-ENGINE_ASSET = f"llama-{ENGINE_VERSION}-bin-win-vulkan-x64.zip"
-ENGINE_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{ENGINE_VERSION}/{ENGINE_ASSET}"
-ENGINE_SHA256 = "732aa8999056d1694af2ec3ff61f1a60e2e56b2a5310eb765185909623e0f56f"
-ENGINE_TARGET = Path("resources") / "naia-backend" / "runtime" / "llama" / "engine"
-# 실측(llama_test, 2026-09-22): 이 파일들이 실제로 로드됐다. ggml-cpu-*.dll 은 CPU 에 따라 하나가 골라진다.
-REQUIRED_FILES = (
-    "llama-server.exe", "llama-server-impl.dll", "llama-common.dll", "llama.dll",
-    "ggml.dll", "ggml-base.dll", "ggml-rpc.dll", "ggml-vulkan.dll", "mtmd.dll", "libomp.dll",
+if str(Path(__file__).resolve().parents[1]) not in sys.path:  # 스크립트로 실행해도 core 를 읽게
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# 엔진 판 · 주소 · 해시 · 필수 파일은 앱 안 엔진 받기(core/llama_engine_install)와 한 곳이다.
+from core.llama_engine_install import (  # noqa: E402
+    DROP_SUFFIXES,
+    ENGINE_ASSET,
+    ENGINE_SHA256,
+    ENGINE_URL,
+    ENGINE_VERSION,
+    REQUIRED_FILES,
 )
-DROP_SUFFIXES = (".md", ".log")
+
+ENGINE_TARGET = Path("resources") / "naia-backend" / "runtime" / "llama" / "engine"
 
 
 @dataclass(frozen=True)

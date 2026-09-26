@@ -282,6 +282,7 @@ def run_electron_portable_workspace(
         python_runtime_version=python_runtime_version,
         require_bundled_python=require_bundled_python,
         include_final_evidence=False,
+        require_llama_engine=not dry_run,   # 실제 빌드는 llama.cpp 엔진을 반드시 싣는다(Assist · Boost)
     )
     release_root = release_workspace / "NAIA-Web"
     output_dir = workspace / "_build" / "electron-dist"

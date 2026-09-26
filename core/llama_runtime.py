@@ -26,8 +26,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -551,7 +553,41 @@ class LlamaServerRuntime:
 # ── 장치 감지 ──────────────────────────────────────────────────────────────
 
 _DEVICE_CACHE: dict[tuple[str, float], list[dict[str, str]]] = {}
-_DISCRETE_HINTS = ("nvidia", "geforce", "rtx", "quadro", "radeon rx", "arc(tm) a", "arc(tm) b")
+
+# 드라이버에게 못 물었을 때만 쓰는 이름 규칙. 외장: NVIDIA 전부 · 'Graphics' 가 안 붙은 Radeon(RX · PRO · VII —
+# APU 내장은 'Radeon(TM) Graphics' · 'Radeon 780M Graphics' 처럼 붙는다) · Intel Arc A · B5xx 이상 · Arc Pro.
+# 내장: Intel Arc 140T/140V · 'Arc(TM) Graphics'(Meteor Lake) · Arc B3xx(Panther Lake) · UHD · Iris.
+_DISCRETE_NAME = re.compile(r"nvidia|geforce|quadro|tesla|\brtx\b|radeon(?!.*graphics)|arc\(tm\) (?:pro |a\d|b[5-9]\d)")
+_SOFTWARE_NAME = re.compile(r"llvmpipe|lavapipe|swiftshader|basic render")   # CPU 로 흉내 내는 가짜 GPU
+_VK_DEVICE_TYPES = {1: "integrated", 2: "discrete", 4: "cpu"}   # VkPhysicalDeviceType
+# 별도 프로세스에서 돌리는 조회 — vkGetPhysicalDeviceProperties 의 deviceType(오프셋 16) · deviceName(20, 256바이트).
+_VK_PROBE = r'''
+import ctypes, json, os, sys
+class Info(ctypes.Structure):
+    _fields_ = [("sType", ctypes.c_uint32), ("pNext", ctypes.c_void_p), ("flags", ctypes.c_uint32),
+                ("pApplicationInfo", ctypes.c_void_p), ("enabledLayerCount", ctypes.c_uint32),
+                ("ppEnabledLayerNames", ctypes.c_void_p), ("enabledExtensionCount", ctypes.c_uint32),
+                ("ppEnabledExtensionNames", ctypes.c_void_p)]
+if os.name == "nt":
+    vk = ctypes.WinDLL(os.path.join(os.environ.get("SystemRoot") or "C:\\Windows", "System32", "vulkan-1.dll"))
+else:
+    vk = ctypes.CDLL("libvulkan.so.1")
+inst = ctypes.c_void_p()
+if vk.vkCreateInstance(ctypes.byref(Info(sType=1)), None, ctypes.byref(inst)) != 0:
+    sys.exit(1)
+count = ctypes.c_uint32(0)
+vk.vkEnumeratePhysicalDevices(inst, ctypes.byref(count), None)
+handles = (ctypes.c_void_p * count.value)()
+vk.vkEnumeratePhysicalDevices(inst, ctypes.byref(count), handles)
+out = []
+for handle in handles[:count.value]:
+    props = ctypes.create_string_buffer(4096)
+    vk.vkGetPhysicalDeviceProperties(ctypes.c_void_p(handle), props)
+    raw = props.raw
+    out.append([raw[20:276].split(b"\0", 1)[0].decode("utf-8", "replace"), int.from_bytes(raw[16:20], "little")])
+vk.vkDestroyInstance(inst, None)
+print(json.dumps(out))
+'''
 
 
 def list_devices(engine_path: str | Path | None) -> list[str]:
@@ -559,31 +595,63 @@ def list_devices(engine_path: str | Path | None) -> list[str]:
     return [entry["name"] for entry in list_device_entries(engine_path)]
 
 
+def _kind_from_name(name: str) -> str:
+    """이름으로 가린 GPU 종류('discrete' | 'integrated' | 'cpu') — 드라이버에게 못 물었을 때만 쓴다."""
+    low = str(name or "").lower()
+    if _SOFTWARE_NAME.search(low):
+        return "cpu"
+    return "discrete" if _DISCRETE_NAME.search(low) else "integrated"
+
+
+def _vulkan_device_types() -> dict[str, str]:
+    """Vulkan 드라이버가 스스로 밝히는 GPU 종류 — {이름: 'integrated' | 'discrete' | 'cpu'}. llama.cpp 가 내장(UMA)을
+    가르는 것과 같은 값이고, 이름은 ``--list-devices`` 와 글자까지 같다. 별도 프로세스에서 묻는다 — 드라이버를
+    앱 프로세스에 올리지 않고, 드라이버가 죽어도 앱은 산다. 못 물으면 빈 dict(이름으로 가린다)."""
+    if not sys.executable:
+        return {}
+    try:
+        out = subprocess.run(
+            [sys.executable, "-c", _VK_PROBE], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        types: dict[str, str] = {}
+        for name, code in json.loads((out.stdout or "").strip().splitlines()[-1]):
+            if code in _VK_DEVICE_TYPES:
+                types.setdefault(str(name), _VK_DEVICE_TYPES[code])
+        return types
+    except Exception:
+        return {}
+
+
 def choose_device(entries: list[dict[str, str]], preference: str | None) -> str | None:
-    """설정의 장치 선호로 ``--device`` 값을 고른다. 'auto' = 외장 GPU(NVIDIA·Radeon RX·Arc A/B) 우선,
-    없으면 첫 GPU. 지정한 장치가 사라졌으면 자동으로 되돌아간다. GPU 가 없으면 None(엔진이 CPU 로 돈다)."""
+    """설정의 장치 선호로 ``--device`` 값을 고른다. 'auto' = 외장 GPU 우선, 없으면 첫 GPU.
+    지정한 장치가 사라졌으면 자동으로 되돌아간다. GPU 가 없으면 None(엔진이 CPU 로 돈다)."""
     if not entries:
         return None
     wanted = str(preference or "auto")
     if wanted != "auto" and any(entry["id"] == wanted for entry in entries):
         return wanted
     for entry in entries:
-        if any(hint in entry["name"].lower() for hint in _DISCRETE_HINTS):
+        if (entry.get("kind") or _kind_from_name(entry.get("name", ""))) == "discrete":
             return entry["id"]
     return entries[0]["id"]
 
 
 def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
-    """``llama-server --list-devices`` 결과를 [{id:'Vulkan1', name:'NVIDIA GeForce RTX 5090 Laptop GPU'}] 로.
-    엔진 파일(경로·수정시각)마다 한 번만 잰다 — 약 1초 걸린다."""
+    """``llama-server --list-devices`` 결과를 [{id:'Vulkan1', name:'NVIDIA GeForce RTX 5090 Laptop GPU',
+    vram_mib, kind:'discrete'|'integrated'}] 로. 종류는 드라이버에게 묻고(못 물으면 이름으로), CPU 로 흉내 내는
+    가짜 GPU 는 뺀다. 엔진 파일(경로·수정시각)마다 한 번만 잰다 — 둘을 함께 재서 약 1~3초."""
     path = Path(engine_path) if engine_path else None
     if path is None or not path.is_file():
         return []
     key = (str(path), path.stat().st_mtime)
     if key in _DEVICE_CACHE:
         return [dict(entry) for entry in _DEVICE_CACHE[key]]
-    import re
 
+    driver_types: dict[str, str] = {}
+    asker = threading.Thread(target=lambda: driver_types.update(_vulkan_device_types()), daemon=True)
+    asker.start()
     devices: list[dict[str, Any]] = []
     try:
         out = subprocess.run(
@@ -601,14 +669,14 @@ def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
                 device_id, name = (part.strip() for part in line.split(":", 1))
                 mem = re.search(r"\((\d+) MiB, (\d+) MiB free\)\s*$", name)
                 clean = re.sub(r"\s*\(\d+ MiB[^)]*\)\s*$", "", name)
-                devices.append({
-                    "id": device_id,
-                    "name": clean,
-                    "vram_mib": int(mem.group(1)) if mem else 0,
-                    "kind": "discrete" if any(h in clean.lower() for h in _DISCRETE_HINTS) else "integrated",
-                })
+                devices.append({"id": device_id, "name": clean, "vram_mib": int(mem.group(1)) if mem else 0})
     except Exception:
         devices = []
+    if devices:
+        asker.join(timeout=25)
+    for entry in devices:
+        entry["kind"] = driver_types.get(entry["name"]) or _kind_from_name(entry["name"])
+    devices = [entry for entry in devices if entry["kind"] != "cpu"]
     _DEVICE_CACHE[key] = devices
     return [dict(entry) for entry in devices]
 

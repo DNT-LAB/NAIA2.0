@@ -208,7 +208,7 @@ def warm_assist(context: Any) -> None:
             if status.get("engine_exists") and status.get("model_exists") and runtime.warm():
                 # 지시문을 한 번 태워 캐시에 올린다(단일 슬롯 — Boost 가 끼면 다시 비워질 수 있다)
                 runtime.chat(user_message("안녕"), system=SYSTEM_PROMPT, grammar=_grammar(), max_tokens=80,
-                             temperature=0.2, timeout=MODEL_TIMEOUT)
+                             timeout=MODEL_TIMEOUT)
         except Exception:
             pass
 
@@ -378,7 +378,7 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
 
 
 def _literal(context: Any, text: str) -> tuple[str | None, dict[str, Any]]:
-    """직역 도구(core/assist_translate) — E2B 1회 · 문법 잠금 · 온도 0. 같은 글은 다시 묻지 않는다(창을 연 동안 되묻기).
+    """직역 도구(core/assist_translate) — E2B 1회 · 문법 잠금 · 권장 샘플링. 같은 글은 다시 묻지 않는다(창을 연 동안 되묻기).
     실패하면 None — 부르는 쪽은 직역 없이 간다."""
     from core import assist_translate as at
     from core.assist_korean import clean_text
@@ -414,7 +414,7 @@ def _grounded_tags(context: Any, layer: Any, text: str) -> set[str]:
 
 def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: Any, literal: str | None,
             layer: Any, ka: Any) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """다듬기 도구(core/assist_refine) — 원문 + 지금 태그를 E2B 에 한 번(문법 잠금 · 온도 0). 모델의 답은 제안이다.
+    """다듬기 도구(core/assist_refine) — 원문 + 지금 태그를 E2B 에 한 번(문법 잠금 · 권장 샘플링). 모델의 답은 제안이다.
     한국어 사전으로 확인한다(진짜 E2B 가 브이 문장에서 맞는 v 를 빼고 finger heart 를 더했다, 09-25):
     - 빼기: 지금 태그 안에서만, 사전이 요청과 이어 주는 태그 · 한국어 층 규칙 태그는 빼지 않는다.
     - 더하기: 태그 이름 그대로이고 사전이 요청과 이어 주는 것만(잡동사니 · 인원 · 제외 칸 · 등급 게이트도 지나야).
@@ -480,7 +480,7 @@ def _call_model(context: Any, text: str, previous: dict[str, Any] | None,
             info["code"] = "model_missing"
             return None, info
         resp = runtime.chat(user_message(text, previous, literal), system=SYSTEM_PROMPT, grammar=_grammar(),
-                            max_tokens=MODEL_MAX_TOKENS, temperature=0.2, timeout=MODEL_TIMEOUT)
+                            max_tokens=MODEL_MAX_TOKENS, timeout=MODEL_TIMEOUT)
         info.update({k: resp.get(k) for k in ("elapsed", "usage", "load_seconds", "queue_wait", "gpu") if k in resp})
         if not resp.get("ok"):
             info["error"] = str(resp.get("error") or "모델 호출 실패")
@@ -979,10 +979,9 @@ def _chat(context: Any, system: str, user: str, grammar: str, max_tokens: int) -
         if not status.get("model_exists"):
             info.update(error="E2B 모델이 없습니다 — Auto Boost 설정에서 [모델 받기]를 눌러 주세요.", code="model_missing")
             return None, info
-        # 온도 0 — 같은 요청에 같은 추측(0.1 에서는 실행마다 glasses on head / glasses on top of head 로 흔들려
-        # 고른 태그가 바뀌었다, 실측 09-24)
-        resp = runtime.chat(user, system=system, grammar=grammar, max_tokens=max_tokens, temperature=0.0,
-                            timeout=MODEL_TIMEOUT)
+        # 샘플링은 Gemma 4 권장값(core/llama_runtime.SAMPLING, 사용자 지정 09-26) — 예전엔 온도 0 으로 같은 요청에 같은
+        # 추측을 샀지만 권장 밖이었다. 이제 실행마다 답이 흔들릴 수 있다 — 안정은 문법 잠금 · 사전 확인이 맡는다
+        resp = runtime.chat(user, system=system, grammar=grammar, max_tokens=max_tokens, timeout=MODEL_TIMEOUT)
         info.update({k: resp.get(k) for k in ("elapsed", "usage", "load_seconds", "queue_wait", "gpu") if k in resp})
         if not resp.get("ok"):
             info["error"] = str(resp.get("error") or "모델 호출 실패")

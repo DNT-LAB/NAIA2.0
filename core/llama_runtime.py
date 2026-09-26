@@ -2,7 +2,7 @@
 누가 쓰는지는 임대 ``hold/release`` 로 센다).
 
 실행 계약은 ``C:\\VNR\\DEV\\llama_test`` 실험에서 확인한 값을 따른다: 최대 8 스레드 · context 4096 ·
-``--jinja`` + ``enable_thinking=false`` · loopback 무작위 포트 · 단일 슬롯.
+``--jinja`` + ``enable_thinking=false`` · loopback 무작위 포트 · 단일 슬롯. 샘플링은 Gemma 4 권장값(``SAMPLING``) 그대로.
 
 GPU(기본): ``-ngl 99 -fa on`` — 동봉 엔진은 공식 Vulkan 판이라 GPU(내장 그래픽 포함)가 있으면 거기서,
 없거나 드라이버가 없으면 **자동으로 CPU** 로 돈다(실측 2026-09-23, 장치를 숨겨도 6/6 정상). 285H/Arc 140T
@@ -38,6 +38,10 @@ DEFAULT_MODEL_FILE = "gemma-4-E2B-it-qat-q4_0.gguf"
 MODEL_ALIAS = "naia-boost"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_IDLE_SECONDS = 180.0
+# Gemma 4 E2B 권장 샘플링 — Google 모델 카드 · generation_config.json · HauhauCS · Unsloth 가 모두 같다(모든 용도 공통).
+# 이 값을 벗어나지 않는다(사용자 지정 2026-09-26): 모든 요청(Boost · Assist)에 여기서만 싣고, 부르는 쪽은 넘기지 못한다.
+# min_p 는 권장에 없다(= 끔) — llama.cpp 기본 0.05 가 끼어들지 않게 0 을 적는다.
+SAMPLING: dict[str, float] = {"temperature": 1.0, "top_p": 0.95, "top_k": 64, "min_p": 0.0}
 
 
 class LlamaRuntimeError(RuntimeError):
@@ -445,13 +449,13 @@ class LlamaServerRuntime:
         prompt: str,
         *,
         max_tokens: int = 512,
-        temperature: float = 0.2,
         timeout: float = DEFAULT_TIMEOUT,
         system: str | None = None,
         grammar: str | None = None,
     ) -> dict[str, Any]:
         """user 메시지 하나(+선택 system)를 보내고 완결된 응답만 성공으로 돌려준다. 절대 raise 하지 않는다.
 
+        샘플링은 늘 ``SAMPLING``(Gemma 4 권장값) — 온도를 받지 않는다(예전 0.2 · 0.0 덮어쓰기는 권장 밖이었다, 09-26).
         ``grammar``(GBNF)를 주면 출력 모양을 강제한다(Assist v2 — 공백 없는 JSON).
         GPU 로 돌다가 엔진이 죽으면(연결 끊김) 이유를 남기고 CPU 로 **한 번 더** 보낸다 — 사용자는 느려질 뿐
         Boost 가 끊기지 않는다. 반환: {ok, text, finish_reason, usage, elapsed, queue_wait, load_seconds, error}
@@ -473,7 +477,7 @@ class LlamaServerRuntime:
                 was_running = self.is_running() and not self.is_stale()
                 try:
                     port = self._ensure(deadline)
-                    data = self._post(port, prompt, max_tokens, temperature, deadline, **extra)
+                    data = self._post(port, prompt, max_tokens, deadline, **extra)
                 except urllib.error.URLError as exc:
                     if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
                         raise TimeoutError from exc
@@ -517,7 +521,7 @@ class LlamaServerRuntime:
             elif self.is_running():
                 self._arm_idle_timer()
 
-    def _post(self, port: int, prompt: str, max_tokens: int, temperature: float, deadline: float,
+    def _post(self, port: int, prompt: str, max_tokens: int, deadline: float,
               system: str | None = None, grammar: str | None = None) -> dict[str, Any]:
         messages = [{"role": "system", "content": str(system)}] if system else []
         messages.append({"role": "user", "content": str(prompt)})
@@ -526,7 +530,7 @@ class LlamaServerRuntime:
             "messages": messages,
             "stream": False,
             "max_tokens": int(max_tokens),
-            "temperature": float(temperature),
+            **SAMPLING,                   # 요청이 나가는 마지막 자리 — 여기만 고치면 모든 호출이 따른다
             "chat_template_kwargs": {"enable_thinking": False},
         }
         if grammar:

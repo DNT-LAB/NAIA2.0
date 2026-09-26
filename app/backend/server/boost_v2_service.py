@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 _RUNTIME_LOCK = threading.Lock()
+# 처음 쓰는 모델 · 장치는 첫 요청에 셰이더 준비가 붙는다(5090 실측 2026-09-26: E2B 34초 · 26B 로드 23초 + 42초, 두 번째
+# 실행부터 1~2초 — 드라이버가 디스크에 캐시한다). 요청의 제한시간(60초)에 걸리지 않게 받은 직후 · 바꾼 직후 뒤에서 태운다.
+PRIME_TIMEOUT = 240.0
+PRIME_LEASE_SECONDS = 600.0
 
 
 def _save_root(context: Any) -> Path:
@@ -75,24 +79,81 @@ def _allocation(engine: Any, settings: dict[str, Any]) -> tuple[bool, str | None
     return True, choose_device(entries, pref)
 
 
-def get_model_downloader(context: Any) -> Any:
-    """모델 다운로더 싱글턴. 대상은 설정/환경변수와 무관하게 **기본 모델 위치**다 —
+def get_model_downloader(context: Any, model_id: Any = None) -> Any:
+    """모델마다 다운로더 하나(없으면 설정에서 고른 모델). 대상은 설정/환경변수와 무관하게 **기본 모델 위치**다 —
     사용자가 다른 경로를 지정했다면 그 파일은 사용자가 관리한다."""
     from core.llama_model_download import LlamaModelDownloadService
-    from core.llama_runtime import default_model_path
+    from core.llama_models import model_by_id
 
+    model = model_by_id(model_id if model_id else boost_v2_settings(context).get("model"))
     with _RUNTIME_LOCK:
-        svc = getattr(context, "boost_model_downloader", None)
+        downloaders = getattr(context, "llama_model_downloaders", None)
+        if downloaders is None:
+            downloaders = context.llama_model_downloaders = {}
+        svc = downloaders.get(model.id)
         if svc is None:
-            svc = LlamaModelDownloadService(default_model_path(_save_root(context)))
-            context.boost_model_downloader = svc
+            def _installed(model_id: str = model.id) -> None:
+                # [받기] 를 눌렀다 = 그 모델을 쓰겠다 — 다 받으면 그 모델로 바꾸고(경로를 직접 지정했으면 그대로) 곧바로
+                # 준비한다(첫 요청이 셰이더 준비를 기다리지 않게). 바꾸는 알림은 장치 변경과 같은 길(boost_v2_routes)이 받는다.
+                from core.boost_v2 import save_boost_v2_settings
+
+                current = boost_v2_settings(context)
+                if current.get("model") != model_id and not current.get("model_path"):
+                    save_boost_v2_settings({**current, "model": model_id}, save_root=_save_root(context))
+                    try:
+                        context.publish("boost_v2_device_changed", {"model": model_id})
+                        return
+                    except Exception:
+                        pass
+                prime_runtime(context)
+
+            svc = downloaders[model.id] = LlamaModelDownloadService.for_model(model, _save_root(context),
+                                                                             on_complete=_installed)
         return svc
 
 
+def get_engine_installer(context: Any) -> Any:
+    """엔진 받기(소스 체크아웃처럼 엔진이 동봉되지 않은 설치용). 대상은 기본 엔진 위치 — 경로를 직접 지정했으면
+    그 엔진은 사용자가 관리한다."""
+    from core.llama_engine_install import LlamaEngineInstallService
+    from core.llama_runtime import default_engine_path
+
+    with _RUNTIME_LOCK:
+        svc = getattr(context, "llama_engine_installer", None)
+        if svc is None:
+            target = default_engine_path(getattr(context, "repo_root", ".")).parent
+            svc = context.llama_engine_installer = LlamaEngineInstallService(
+                target, on_complete=lambda: prime_runtime(context))
+        return svc
+
+
+def active_model_download(context: Any) -> Any:
+    """지금 받는 중(또는 검증 중)인 다운로더 — 한 번에 하나만 받는다."""
+    for svc in list((getattr(context, "llama_model_downloaders", None) or {}).values()):
+        snap = svc.snapshot()
+        if snap.get("active"):
+            return svc
+    return None
+
+
+def start_model_download(context: Any, model_id: Any = None) -> dict[str, Any]:
+    """모델 받기. 다른 모델을 받는 중이면 거절한다(3~14GB 를 둘씩 받지 않는다)."""
+    svc = get_model_downloader(context, model_id)
+    busy = active_model_download(context)
+    if busy is not None and busy is not svc:
+        return {**busy.snapshot(), "ok": False, "error": "다른 모델을 받는 중입니다 — 끝나거나 취소한 뒤에 받으세요."}
+    return {**svc.start(), "ok": True}
+
+
+def cancel_model_download(context: Any) -> dict[str, Any]:
+    busy = active_model_download(context)
+    return busy.cancel() if busy is not None else get_model_downloader(context).snapshot()
+
+
 def boost_v2_status(context: Any) -> dict[str, Any]:
-    """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 실행 여부 · 다운로드 진행."""
-    from core.llama_model_download import MODEL_SHA256, MODEL_SIZE, MODEL_URL
-    from core.llama_runtime import default_model_path, hardware_summary, resolve_paths
+    """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 모델 목록(설치 · 권장) · 실행 여부 · 다운로드 진행."""
+    from core.llama_models import catalog, model_by_id
+    from core.llama_runtime import default_engine_path, default_model_path, hardware_summary, resolve_paths
 
     settings = boost_v2_settings(context)
     save_root = _save_root(context)
@@ -104,6 +165,8 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
     use_gpu, chosen = _allocation(engine, settings)
     rt = runtime.status() if runtime is not None else {}
     fallback = rt.get("gpu_failed") if rt.get("use_gpu") and rt.get("device") == chosen else None
+    selected = model_by_id(settings.get("model"))
+    active = active_model_download(context)
     return {
         "ok": True,
         "settings": settings,
@@ -118,16 +181,28 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         # '자동' 을 골랐다면 쓰게 될 장치(선택 목록의 설명용 — 지금 선택과 무관).
         "gpu_device_auto": _allocation(engine, {"device": "auto"})[1],
         "gpu_device_chosen_name": next((e["name"] for e in entries if e["id"] == chosen), ""),
+        "engine_is_default": engine == default_engine_path(getattr(context, "repo_root", ".")),
+        "engine_install": get_engine_installer(context).snapshot(),
         "use_gpu": use_gpu,
         "gpu_fallback": fallback,
         "swapping": bool(rt.get("stale")),
         "model_path": str(model),
         "model_ready": model.is_file(),
-        "model_is_default": model == default_model_path(save_root),
+        "model_is_default": model == default_model_path(save_root, selected.id),
+        # 고른 모델 · 목록(설치 여부 · 이 PC 에 맞는지). 경로를 직접 지정했으면 model_is_default=False — 그 파일이 쓰인다.
+        "model_id": selected.id,
+        "model_label": selected.label,
+        # [CPU 모드 | GPU 모드] — 설정의 device 가 'cpu' 면 CPU, 아니면(자동 · GPU id) GPU. GPU 가 없으면 CPU 뿐.
+        "mode": "gpu" if use_gpu else "cpu",
+        "gpu_available": bool(entries),
+        "models": catalog(save_root, hardware, chosen),
         "running": running,
+        "priming": bool(getattr(context, "llama_priming", False)),
         "last_load_seconds": getattr(runtime, "last_load_seconds", None) if runtime is not None else None,
-        "download": get_model_downloader(context).snapshot(),
-        "model_source": {"url": MODEL_URL, "sha256": MODEL_SHA256, "size": MODEL_SIZE, "license": "Apache-2.0"},
+        # 받는 중이면 그 모델, 아니면 고른 모델의 다운로드 상태.
+        "download": (active or get_model_downloader(context, selected.id)).snapshot(),
+        "model_source": {"url": selected.url, "sha256": selected.sha256, "size": selected.size,
+                         "license": selected.license, "ollama": selected.ollama_name},
     }
 
 
@@ -144,6 +219,35 @@ def warm_boost_runtime(context: Any) -> None:
             pass
 
     threading.Thread(target=_warm, daemon=True, name="boost-v2-warm").start()
+
+
+def prime_runtime(context: Any) -> bool:
+    """고른 모델을 뒤에서 올리고 Assist 지시문을 한 번 태운다(처음 쓰는 모델 · 장치의 셰이더 준비 — ``PRIME_TIMEOUT``).
+    이미 준비 중이거나 엔진 · 모델이 없으면 아무것도 안 한다. 준비하는 동안 ``context.llama_priming`` 이 참이다."""
+    with _RUNTIME_LOCK:
+        if getattr(context, "llama_priming", False):
+            return False
+        context.llama_priming = True
+
+    def _run() -> None:
+        try:
+            runtime = get_boost_runtime(context)
+            status = runtime.status()
+            if not (status.get("engine_exists") and status.get("model_exists")):
+                return
+            runtime.hold("setup", PRIME_LEASE_SECONDS)   # 받자마자 쓸 공산이 크다 — 잠시 올려 둔다
+            if runtime.warm(timeout=PRIME_TIMEOUT):
+                from core.assist_v2 import SYSTEM_PROMPT, compact_grammar, user_message
+
+                runtime.chat(user_message("안녕"), system=SYSTEM_PROMPT, grammar=compact_grammar(), max_tokens=80,
+                             timeout=PRIME_TIMEOUT)
+        except Exception:
+            pass
+        finally:
+            context.llama_priming = False
+
+    threading.Thread(target=_run, daemon=True, name="llama-prime").start()
+    return True
 
 
 def release_boost_runtime(context: Any) -> None:

@@ -44,6 +44,9 @@ app/electron/node_modules/
 # vendored tarball + lockfile, then staged into resources/progrok-runtime. The
 # node_modules is a build product (like the python runtime) — not committed.
 app/electron/grok-runtime/node_modules/
+# llama.cpp 엔진(Assist · Boost): 릴리즈는 tools/stage_llama_runtime.py 가 동봉하고, 소스 체크아웃은
+# 앱 안 [엔진 받기](core/llama_engine_install.py)가 여기에 푼다 — 빌드 산출물이라 커밋하지 않는다.
+runtime/llama/
 release_package/
 release_package*/
 

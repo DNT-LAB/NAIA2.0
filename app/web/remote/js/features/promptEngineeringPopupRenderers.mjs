@@ -839,8 +839,8 @@ export function createPromptEngineeringPopupRenderers({
     return `
     <div class="mod-boost-block">
       <div class="mod-boost-head"><span class="mod-boost-name">백엔드</span></div>
-      <div class="mod-checkbox-grid">${opt('llamacpp', 'llama.cpp · Gemma E2B (내장)')}${opt('ollama', 'Ollama')}</div>
-      <div class="mod-boost-caption">llama.cpp: NAIA 가 직접 띄우는 CPU 모델로 5개 섹션을 붙입니다. Ollama: 기존 Scene Boost.</div>
+      <div class="mod-checkbox-grid">${opt('llamacpp', 'llama.cpp (내장 AI 모델)')}${opt('ollama', 'Ollama')}</div>
+      <div class="mod-boost-caption">llama.cpp: 앱 내장 AI 모델(API 설정 › AI 모델)로 5개 섹션을 붙입니다. Ollama: 옛 Scene Boost.</div>
     </div>`;
   }
 

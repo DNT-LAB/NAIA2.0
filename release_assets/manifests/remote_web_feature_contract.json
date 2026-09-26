@@ -737,11 +737,15 @@
     },
     {
       "id": "boost_v2_llamacpp",
-      "name": "Boost v2 - app-owned llama.cpp (Gemma 4 E2B) single-template random prompt boost, model download",
+      "name": "Boost v2 + app-owned llama.cpp shared with Assist (HauhauCS Gemma 4 E2B/E4B/26B, CPU/GPU mode), model and engine download, API setup AI model section",
       "source_files": [
         "app/backend/server/boost_v2_routes.py",
         "app/backend/server/boost_v2_service.py",
+        "app/web/remote/js/features/boostV2Panel.mjs",
+        "app/web/remote/js/features/llmSetupPanel.mjs",
         "core/boost_v2.py",
+        "core/llama_engine_install.py",
+        "core/llama_models.py",
         "core/llama_runtime.py",
         "core/llama_model_download.py"
       ],
@@ -750,6 +754,7 @@
         {"method": "GET", "path": "/api/boost-v2/status", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/boost-v2/model/download", "smoke": "external_live"},
         {"method": "POST", "path": "/api/boost-v2/model/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/boost-v2/engine/download", "smoke": "external_live"},
         {"method": "POST", "path": "/api/boost-v2/unload", "smoke": "state_mutation"}
       ]
     },

@@ -1,7 +1,8 @@
-// Boost v2(llama.cpp · Gemma 4 E2B) 설정 영역 — Auto Boost Settings 팝업 안에서 백엔드가
-// llama.cpp 일 때 그려진다. 설정 저장은 PE 모듈(set_module_param 'boost_v2_settings'),
-// 상태·모델 다운로드는 /api/boost-v2/* 폴링. style.css 는 건드리지 않는다(기존 PE 팝업 클래스 +
-// 인라인) — HEAD 의 CRLF 혼재 함정 때문.
+// Boost v2(llama.cpp) 설정 영역 — Auto Boost Settings 팝업 안에서 백엔드가 llama.cpp 일 때 그려진다.
+// 여기엔 섹션 · 선호 문구만 둔다. 엔진 · 모델 · [CPU 모드 | GPU 모드] 는 Assist 와 함께 쓰는 것이라
+// API 설정 > AI 모델 한 곳에서 고른다(09-26) — 여기선 한 줄 요약과 그 칸을 여는 단추만.
+// 설정 저장은 PE 모듈(set_module_param 'boost_v2_settings', 부분 저장 — 모델 · 장치를 싣지 않는다),
+// 상태는 /api/boost-v2/status 폴링. style.css 는 건드리지 않는다(기존 PE 팝업 클래스 + 인라인) — HEAD 의 CRLF 혼재 함정 때문.
 const SECTIONS = [
   ['subject', 'Subject & Action', '인물·의상·표정·행동을 태그+문장으로'],
   ['composition', 'Composition & Angle', '샷·앵글·시야'],
@@ -12,7 +13,8 @@ const SECTIONS = [
 const POLL_ACTIVE_MS = 1000;
 const POLL_IDLE_MS = 5000;
 
-export function createBoostV2Panel({ document, escHtml, setModuleParam, showToast = () => {}, fetchImpl }) {
+export function createBoostV2Panel({ document, escHtml, setModuleParam, showToast = () => {}, fetchImpl,
+  openLlmSetup = () => {} }) {
   const doFetch = fetchImpl || ((...args) => window.fetch(...args));
   // 저장 전 편집 — PE 상태가 다시 밀려와 재렌더돼도 입력을 잃지 않게 붙들어 둔다.
   let draft = null;
@@ -29,7 +31,7 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       sections[key] = !s.sections || s.sections[key] !== false;
       preferences[key] = String((s.preferences && s.preferences[key]) || '');
     }
-    return { sections, preferences, device: String(s.device || 'auto') };
+    return { sections, preferences };
   }
 
   function render(body, m) {
@@ -49,16 +51,10 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       <div class="mod-boost-block" data-boost-v2-root="1">
         <div class="mod-boost-head"><span class="mod-boost-name">엔진 · 모델</span></div>
         <div data-boost-status style="font-size:12px;line-height:1.6">확인 중…</div>
-        <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:6px"
-          title="자동 = 외장 GPU > 내장 그래픽 > CPU. GPU 로 띄우지 못하면 엔진이 CPU 로 자동 전환합니다. 바꾸면 곧바로 옮겨 갑니다.">
-          <span style="white-space:nowrap">할당 장치</span>
-          <select class="mod-select" data-boost-device data-current="${escHtml(view.device)}" style="flex:1">
-            <option value="auto"${view.device === 'auto' ? ' selected' : ''}>자동</option>
-          </select>
-        </label>
-        <div data-boost-hw style="font-size:11px;color:var(--text-dim);margin-top:2px"></div>
-        <div class="mod-inline-row" data-boost-actions style="margin-top:4px"></div>
-        <div class="mod-boost-caption">Ollama 불필요. GPU 는 CPU 가 바쁠 때도 느려지지 않습니다. 모델은 처음 한 번 3.1GB 를 받습니다. 모델 입력에서 색상 태그는 항상 뺍니다.</div>
+        <div class="mod-inline-row" data-boost-actions style="margin-top:4px">
+          <button class="mod-btn-secondary" data-boost-act="setup">AI 모델 설정</button>
+        </div>
+        <div class="mod-boost-caption">모델 · CPU/GPU 모드는 Assist 와 함께 쓰며 API 설정 › AI 모델에서 고릅니다. 모델 입력에서 색상 태그는 항상 뺍니다.</div>
       </div>
       <div>
         <div class="mod-section-label">섹션 · 선호 문구</div>
@@ -90,13 +86,12 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       sections[key] = !!(box && box.checked);
       preferences[key] = pref ? pref.value : '';
     }
-    const device = root.querySelector('[data-boost-device]');
-    return { sections, preferences, device: device ? device.value : 'auto' };
+    return { sections, preferences };
   }
 
   function onInput(event) {
     const target = event.target;
-    if (!target || !(target.matches('[data-boost-sec]') || target.matches('[data-boost-pref]') || target.matches('[data-boost-device]'))) return;
+    if (!target || !(target.matches('[data-boost-sec]') || target.matches('[data-boost-pref]'))) return;
     const body = event.currentTarget;
     draft = readForm(body);
     const mark = body.querySelector('[data-boost-dirty]');
@@ -107,6 +102,10 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
     const btn = event.target && event.target.closest('[data-boost-act]');
     if (!btn) return;
     const act = btn.getAttribute('data-boost-act');
+    if (act === 'setup') {
+      openLlmSetup();
+      return;
+    }
     if (act === 'save') {
       const form = readForm(event.currentTarget);
       const sent = setModuleParam('prompt_engineering', 'boost_v2_settings', JSON.stringify(form));
@@ -118,11 +117,7 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       showToast('Boost 설정 저장됨', 'success');
       return;
     }
-    const routes = {
-      download: '/api/boost-v2/model/download',
-      cancel: '/api/boost-v2/model/download/cancel',
-      unload: '/api/boost-v2/unload',
-    };
+    const routes = { unload: '/api/boost-v2/unload' };
     if (!routes[act]) return;
     btn.disabled = true;
     try {
@@ -146,40 +141,12 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
     const dl = st.download || {};
     const ok = (flag) => (flag ? '<span style="color:var(--success,#4caf50)">✓</span>' : '<span style="color:var(--danger,#e57373)">✗</span>');
     const lines = [
-      `${ok(st.engine_ready)} 엔진 llama-server${st.engine_ready ? '' : ' — 없음 (배포본에 포함, 개발 환경은 NAIA_LLAMA_SERVER)'}`,
-      st.engine_ready ? `　사용 장치: ${deviceLabel(st)}${st.swapping ? ' · <span style="color:var(--accent,#4ea1ff)">전환 중…</span>' : ''}` : '',
-      `${ok(st.model_ready)} 모델 Gemma 4 E2B Q4_0 (3.1GB)${st.model_ready ? '' : ' — 아직 없음'}`,
-      st.running ? `● 실행 중${st.last_load_seconds ? ` · 로드 ${st.last_load_seconds}s` : ''}` : '○ 대기 (첫 Random 때 올라옵니다)',
+      `${ok(st.engine_ready)} 엔진 llama-server${st.engine_ready ? ` · ${deviceLabel(st)}` : ' — 없음'}`,
+      `${ok(st.model_ready)} 모델 ${escHtml(st.model_label || '')}${st.model_ready ? '' : (dl.active ? ` — 받는 중 ${dl.percent || 0}%` : ' — 아직 없음')}`,
+      st.priming ? '● 준비 중 (처음 쓰는 모델)' : (st.running ? `● 실행 중${st.last_load_seconds ? ` · 로드 ${st.last_load_seconds}s` : ''}` : '○ 대기 (첫 Random 때 올라옵니다)'),
     ];
-    if (dl.active || dl.phase === 'verify') {
-      lines.push(`<div style="height:6px;background:var(--bg-3,#333);border-radius:3px;overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.max(0, Math.min(100, Number(dl.percent) || 0))}%;background:var(--accent,#4ea1ff)"></div></div>`);
-      lines.push(escHtml(dl.message || ''));
-    } else if (dl.error) {
-      lines.push(`<span style="color:var(--danger,#e57373)">${escHtml(dl.error)}</span>`);
-    }
     statusEl.innerHTML = lines.filter(Boolean).join('<br>');
-    // 할당 장치 목록은 서버가 이 PC 를 읽어 안다(CPU·RAM·GPU) — 한 번 채우고, 사용자가 고른 값(초안 포함)은 지킨다.
-    const hw = st.hardware || {};
-    const gpus = hw.gpus || [];
-    const select = mountedRoot.querySelector('[data-boost-device]');
-    if (select && select.options.length !== gpus.length + 2) {
-      const current = (draft && draft.device) || select.getAttribute('data-current') || 'auto';
-      const autoPick = gpus.find((g) => g.id === st.gpu_device_auto);
-      const gb = (mib) => (mib ? ` · ${Math.round(mib / 1024)} GB` : '');
-      select.innerHTML = `<option value="auto">자동 (지금: ${escHtml(autoPick ? autoPick.name : 'CPU')})</option>`
-        + gpus.map((g) => `<option value="${escHtml(g.id)}">${escHtml(g.name)}${g.kind === 'discrete' ? `${gb(g.vram_mib)} · 외장` : ' · 내장 (시스템 메모리 공유)'}</option>`).join('')
-        + `<option value="cpu">CPU · ${escHtml(hw.cpu || '')} · ${hw.threads || '?'}스레드</option>`;
-      select.value = [...select.options].some((o) => o.value === current) ? current : 'auto';
-    }
-    const hwEl = mountedRoot.querySelector('[data-boost-hw]');
-    if (hwEl) {
-      hwEl.textContent = `이 PC: ${hw.cpu || 'CPU'} · ${hw.threads || '?'}스레드 · RAM ${hw.ram_gib ? Math.round(hw.ram_gib) + ' GB' : '?'} · GPU ${gpus.length}개`;
-    }
-    const buttons = [];
-    if (!st.model_ready && st.model_is_default) {
-      if (dl.active) buttons.push('<button class="mod-btn-secondary" data-boost-act="cancel">다운로드 취소</button>');
-      else buttons.push(`<button class="mod-btn-secondary" data-boost-act="download">${dl.partial_mb ? `이어받기 (${dl.partial_mb}MB 받음)` : '모델 받기 (3.1GB)'}</button>`);
-    }
+    const buttons = ['<button class="mod-btn-secondary" data-boost-act="setup">AI 모델 설정</button>'];
     if (st.running) buttons.push('<button class="mod-btn-secondary" data-boost-act="unload">엔진 내리기</button>');
     actionsEl.innerHTML = buttons.join('');
   }
@@ -188,8 +155,8 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
     if (st.gpu_fallback) {
       return `CPU <span style="color:var(--warning,#e0a040)" title="${escHtml(st.gpu_fallback)}">(GPU 로 못 띄워 자동 전환)</span>`;
     }
-    if (st.use_gpu && st.gpu_device_chosen_name) return escHtml(st.gpu_device_chosen_name);
-    return st.device_pref === 'cpu' ? 'CPU (직접 선택)' : 'CPU (쓸 수 있는 GPU 없음)';
+    if (st.use_gpu && st.gpu_device_chosen_name) return `GPU 모드 · ${escHtml(st.gpu_device_chosen_name)}`;
+    return st.device_pref === 'cpu' ? 'CPU 모드' : 'CPU 모드 (쓸 수 있는 GPU 없음)';
   }
 
   function schedulePoll(delay) {

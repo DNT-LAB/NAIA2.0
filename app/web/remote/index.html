@@ -234,6 +234,15 @@
           </div>
           <div class="setup-result" data-bootstrap-result></div>
         </div>
+        <!-- Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · 모드(사용자 지정 2026-09-26: 받는 곳을 하나로).
+             내용은 js/features/llmSetupPanel.mjs 가 그린다. -->
+        <div class="setup-cloudflared" id="setupLlmSection">
+          <div class="setup-cloudflared-head">
+            <span class="setup-cloudflared-title">AI 모델 (Assist · Boost)</span>
+            <span class="setup-cloudflared-status" data-llm-status>확인 중…</span>
+          </div>
+          <div data-llm-body style="display:flex;flex-direction:column;gap:10px"></div>
+        </div>
         <div class="setup-update hidden" id="setupUpdateSection">
           <div class="setup-cloudflared-head">
             <span class="setup-cloudflared-title">앱 업데이트</span>
@@ -773,13 +782,12 @@
                       data-naia-guide="Interactive 모드. 프롬프트를 캐릭터/의상/액션/표정/구도/배경 슬롯으로 나눠 편집합니다. 켜져 있는 동안 Prompt Fixed와 WC Solo는 사용할 수 없습니다(블록에서 프롬프트를 직접 조립하므로 충돌합니다).">
                 <span>Interactive</span>
               </button>
-              <!-- Assist / Chat 두 칸이던 것을 한 칸으로 합쳤다(사용자 지정) - 자주
-                   쓰이지 않는 기능이 상단 바를 두 칸이나 먹고 있었다. 누르면 무엇을
-                   열지 고른다. 래퍼(.assistants-ollama-segment)는 그대로 둔다 -
+              <!-- [Ollama](옛 Ollama Assist · Chat)를 [Assist](Ctrl+O, 앱 내장 모델)로 바꿨다 — Ollama 파이프라인
+                   회수(사용자 지정 2026-09-26). 래퍼(.assistants-ollama-segment)는 옷 때문에 그대로 둔다 -
                    `:last-child` 규칙이 있어 한 칸이어도 테두리가 맞는다. -->
-              <div class="assistants-ollama-segment" role="group" aria-label="Ollama tools">
-                <button type="button" class="assistants-ollama-btn" id="ollamaBtn" aria-label="Ollama"
-                        data-naia-guide="Ollama 도구. 누르면 Assist(태그 추천·프롬프트 보강)와 Chat(자유 대화) 중에 고릅니다. 이미 열려 있는 Ollama 창이 있으면 그 창을 닫습니다.">Ollama</button>
+              <div class="assistants-ollama-segment" role="group" aria-label="Assist">
+                <button type="button" class="assistants-ollama-btn" id="assistBtn" aria-label="Assist"
+                        data-naia-guide="Assist(Ctrl+O). 원하는 그림을 한국어로 적으면 프롬프트를 찾아 줍니다. 앱 안의 AI 모델을 씁니다 — 모델은 API 설정 › AI 모델에서 받습니다. 열려 있으면 닫습니다.">Assist</button>
               </div>
               <!-- 태그 이름 **부분 매칭** 검색. 자동완성은 속도 때문에 접두사만 봐서
                    `utsusumi kio` 를 `kio` 로 못 찾는다 — 그 구멍을 메운다. -->
@@ -1462,6 +1470,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260926-codexfix"></script>
+<script src="app.js?v=20260926-llm"></script>
 </body>
 </html>

@@ -1183,7 +1183,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260926-edit')
+import('./js/features/assistPanel.mjs?v=20260926-llm')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
@@ -2323,6 +2323,21 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
   .catch(error => {
     console.error('Failed to initialize data bootstrap panel module', error);
   });
+// API 설정 > AI 모델 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
+// 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 칸을 연다.
+let llmSetupPanel = null;
+import('./js/features/llmSetupPanel.mjs?v=20260926-llm')
+  .then(({createLlmSetupPanel}) => {
+    llmSetupPanel = createLlmSetupPanel({document, showToast, setModuleParam});
+    llmSetupPanel.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize AI model setup panel', error);
+  });
+window.openAiModelSetup = () => {
+  openApiPopup();
+  setTimeout(() => llmSetupPanel?.reveal(), 60);   // 창이 보인 뒤에 굴려야 자리를 잰다
+};
 let updateBanner = null;
 const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260607-srcupd2')
   .then(({createUpdateBanner}) => {
@@ -4007,8 +4022,10 @@ const resultUnsavedActions = $('resultUnsavedActions');
 const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
 const naiDirectorBtn = $('naiDirectorBtn');
-// [Ollama Assist][Chat] 두 칸을 한 칸으로 합쳤다(사용자 지정) — 누르면 고른다.
+// [Ollama] 단추는 [Assist] 로 바뀌었다(Ollama 파이프라인 회수, 09-26) — 아래 Ollama 메뉴 코드는 단추가 없어 돌지 않는다.
 const ollamaBtn = $('ollamaBtn');
+// [Assist] — Ctrl+O 와 같은 창(앱 내장 모델). 누르면 열고, 열려 있으면 닫는다.
+const assistBtn = $('assistBtn');
 const tagSearchBtn = $('tagSearchBtn');
 const memoBtn = $('memoBtn');
 const optBoxes = {
@@ -7409,6 +7426,9 @@ async function openOllamaChat() {
   }
   ollamaChatPopup.open();
 }
+if (assistBtn) {
+  assistBtn.addEventListener('click', () => window.assistPanel?.toggle?.());
+}
 if (ollamaBtn) {
   // [Ollama] 한 칸으로 합쳤다(사용자 지정). 예전에는 [Ollama Assist][Chat] 두 칸이
   // 상단 바를 먹고 있었다 - 자주 쓰이지 않는 기능이라 자리를 돌려준다.
@@ -9664,6 +9684,7 @@ function openApiPopup() {
   // Refresh the tag-data section every time the modal opens so the user sees
   // a current download state rather than the snapshot from app load.
   if (dataBootstrapPanel) dataBootstrapPanel.refresh();
+  if (llmSetupPanel) llmSetupPanel.refresh();
 }
 
 function openDataMigration() {
@@ -10534,7 +10555,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260926-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260923-boostv2')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260926-llm')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -11293,14 +11314,16 @@ const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
 // Boost v2(llama.cpp) 설정 영역 — Auto Boost Settings 팝업에서 백엔드가 llama.cpp 일 때 그린다.
 let boostV2Panel = null;
-const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260923-boostv2alloc3')
+const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260926-llm')
   .then(({createBoostV2Panel}) => {
-    boostV2Panel = createBoostV2Panel({document, escHtml, setModuleParam, showToast});
+    boostV2Panel = createBoostV2Panel({
+      document, escHtml, setModuleParam, showToast, openLlmSetup: () => window.openAiModelSetup(),
+    });
   })
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260923-boostv2')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260926-llm')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },

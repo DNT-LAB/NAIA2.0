@@ -30,6 +30,7 @@ const NAMES_DEBOUNCE_MS = 300;
 const NAMES_RETRY_MS = 1200;       // 한국어 층이 데워지는 동안(ready=false) 다시 묻는 간격
 const PICK_SEARCH_MS = 250;
 const INSTALL_POLL_MS = 1000;
+const MODEL_POLL_MS = 3000;          // AI 모델이 없는 동안(다른 창에서 받는 중일 수 있다) 다시 묻는 간격
 const MAX_LINES = 6;
 const PREF_KEY = 'naia_assist_prefs_v1';
 const HL_KINDS = ['found', 'chosen', 'miss', 'off'];
@@ -248,6 +249,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     });
     banner.addEventListener('click', event => {
       if (event.target.closest('[data-as-kiwi-install]')) void installKiwi();
+      else if (event.target.closest('[data-as-llm-setup]')) window.openAiModelSetup?.();   // API 설정 › AI 모델
     });
     body.addEventListener('click', onBodyClick);
     document.addEventListener('pointerdown', event => {
@@ -918,7 +920,10 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       }
     }
     if (status && status.model_ready === false) {
-      parts.push('<div class="as-banner-row as-banner-dim">E2B 모델이 없어 한국어 층만으로 찾습니다 — Auto Boost 설정의 [모델 받기].</div>');
+      // 받는 곳은 API 설정 › AI 모델 한 곳(09-26). 여기서 받는 동안에도 창이 열려 있으면 다 받은 걸 알아채게 묻는다.
+      parts.push(`<div class="as-banner-row as-banner-dim"><span>AI 모델이 없어 한국어 층만으로 찾습니다.</span>
+        <button type="button" data-as-llm-setup title="API 설정 › AI 모델">AI 모델 받기</button></div>`);
+      schedulePoll();
     }
     banner.innerHTML = parts.join('');
     banner.hidden = !parts.length;
@@ -942,13 +947,15 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       pollTimer = null;
       if (!open) return;                      // 창을 닫아도 설치는 계속된다 - 다시 열면 이어서 보여 준다
       const wasActive = !!status?.kiwi?.active;
+      const hadNoModel = status?.model_ready === false;
       try { status = await getJson('/api/assist/status'); } catch { /* 다음에 다시 */ }
       paintBanner();
       if (wasActive && status?.kiwi?.installed) {
         toast('한국어 분석기를 설치했습니다', 'success');
         scheduleNames(0);
       }
-    }, INSTALL_POLL_MS);
+      if (hadNoModel && status?.model_ready) toast('AI 모델이 준비되었습니다', 'success');
+    }, status?.kiwi?.active ? INSTALL_POLL_MS : MODEL_POLL_MS);
   }
 
   // ── 자리 · 열기 · 닫기 ──────────────────────────────────────────────────

@@ -153,7 +153,7 @@ export function createPromptEngineeringPanel({
     }
     if (hint) {
       hint.style.display = ollamaReady ? 'none' : '';
-      hint.textContent = boostBackend === 'llamacpp' ? '(엔진·모델 준비 시 활성화 — Settings 에서 모델 받기)' : '(Ollama 실행·모델 준비 시 활성화)';
+      hint.textContent = boostBackend === 'llamacpp' ? '(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)' : '(Ollama 실행·모델 준비 시 활성화)';
     }
   }
 
@@ -519,7 +519,7 @@ export function createPromptEngineeringPanel({
     const ollamaBoostHtml = `
     <label class="mod-checkbox-item pe-tone-teal${ollamaReady ? '' : ' mod-checkbox-disabled'}"${boostItemStyle} data-naia-guide="${escHtml(PE_OLLAMA_BOOST_GUIDE)}">
       <input type="checkbox" id="peOllamaBoostCheckbox" ${boostChecked ? 'checked' : ''}${boostDisabled}${boostInputStyle} oninput="setPromptEngineeringOllamaAutoBoost(this.checked)">
-      <span class="mod-checkbox-label">Auto Boost <span style="color:var(--text-dim)">· ${boostBackend === 'llamacpp' ? 'llama.cpp' : 'Ollama'}</span> <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">${boostBackend === 'llamacpp' ? '(엔진·모델 준비 시 활성화 — Settings 에서 모델 받기)' : '(Ollama 실행·모델 준비 시 활성화)'}</span></span>
+      <span class="mod-checkbox-label">Auto Boost <span style="color:var(--text-dim)">· ${boostBackend === 'llamacpp' ? 'llama.cpp' : 'Ollama'}</span> <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">${boostBackend === 'llamacpp' ? '(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)' : '(Ollama 실행·모델 준비 시 활성화)'}</span></span>
     </label>`;
 
     // 갈래 필터 바는 **NAI 모드에서만** 뜬다 — 백엔드가 그때만 목록을 준다.

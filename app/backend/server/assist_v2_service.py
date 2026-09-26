@@ -509,7 +509,7 @@ def _call_model(context: Any, text: str, previous: dict[str, Any] | None,
             info["code"] = "engine_missing"
             return None, info
         if not status.get("model_exists"):
-            info["error"] = "E2B 모델이 없습니다 — Auto Boost 설정에서 [모델 받기]를 눌러 주세요."
+            info["error"] = "AI 모델이 없습니다 — API 설정의 [AI 모델]에서 받아 주세요."
             info["code"] = "model_missing"
             return None, info
         resp = runtime.chat(user_message(text, previous, literal), system=SYSTEM_PROMPT, grammar=_grammar(),
@@ -1280,7 +1280,7 @@ def _chat(context: Any, system: str, user: str, grammar: str, max_tokens: int) -
             info.update(error="llama.cpp 엔진이 없습니다.", code="engine_missing")
             return None, info
         if not status.get("model_exists"):
-            info.update(error="E2B 모델이 없습니다 — Auto Boost 설정에서 [모델 받기]를 눌러 주세요.", code="model_missing")
+            info.update(error="AI 모델이 없습니다 — API 설정의 [AI 모델]에서 받아 주세요.", code="model_missing")
             return None, info
         # 샘플링은 Gemma 4 권장값(core/llama_runtime.SAMPLING, 사용자 지정 09-26) — 예전엔 온도 0 으로 같은 요청에 같은
         # 추측을 샀지만 권장 밖이었다. 이제 실행마다 답이 흔들릴 수 있다 — 안정은 문법 잠금 · 사전 확인이 맡는다

@@ -1,4 +1,4 @@
-"""Boost v2 모델(Gemma 4 E2B QAT Q4_0 GGUF, 3.1 GiB)을 첫 사용 시 내려받는다.
+"""앱 llama-server 모델(core/llama_models 의 목록 — HauhauCS Gemma 4 E2B · E4B · 26B GGUF)을 첫 사용 시 내려받는다.
 
 - revision 을 고정한다(재현성). 받은 뒤 SHA-256 이 맞을 때만 최종 이름으로 옮긴다 —
   부분 파일·잘못된 파일을 정상 모델로 승격하지 않는다.
@@ -18,13 +18,12 @@ from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Any, Callable
 
-MODEL_REPO = "google/gemma-4-E2B-it-qat-q4_0-gguf"
-MODEL_REVISION = "675cff42a74c774d6cb76f76d8eacb49b48c9b93"
-MODEL_REMOTE_FILE = "gemma-4-E2B_q4_0-it.gguf"
-MODEL_URL = f"https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REVISION}/{MODEL_REMOTE_FILE}"
-MODEL_SHA256 = "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634"
-MODEL_SIZE = 3_349_516_256
-MODEL_LICENSE = "Apache-2.0"
+from core.llama_models import DEFAULT_MODEL_ID, LlamaModel, model_by_id, model_path
+
+_DEFAULT = model_by_id(DEFAULT_MODEL_ID)
+MODEL_URL = _DEFAULT.url
+MODEL_SHA256 = _DEFAULT.sha256
+MODEL_SIZE = _DEFAULT.size
 
 try:
     import certifi
@@ -58,7 +57,11 @@ class LlamaModelDownloadService:
         sha256: str = MODEL_SHA256,
         expected_size: int = MODEL_SIZE,
         opener: Callable[..., Any] | None = None,
+        model_id: str = "",
+        on_complete: Callable[[], Any] | None = None,
     ) -> None:
+        self.model_id = model_id
+        self.on_complete = on_complete   # 설치를 마친 뒤(해시 확인 · 이름 바꾸기 다음) 한 번 — 예외는 삼킨다
         self.target_path = Path(target_path)
         self.url = url
         self.sha256 = sha256.lower()
@@ -77,9 +80,16 @@ class LlamaModelDownloadService:
     def part_path(self) -> Path:
         return self.target_path.with_name(self.target_path.name + ".part")
 
+    @classmethod
+    def for_model(cls, model: LlamaModel, save_root: Path | str, **kwargs: Any) -> "LlamaModelDownloadService":
+        """목록의 모델 하나를 기본 위치(save/models/llm/<HF 파일 이름>)로 받는 다운로더."""
+        return cls(model_path(save_root, model.id), url=model.url, sha256=model.sha256, expected_size=model.size,
+                   model_id=model.id, **kwargs)
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             state = dict(self._state)
+        state["model"] = self.model_id
         state["installed"] = self.target_path.is_file()
         state["partial_mb"] = round(self.part_path.stat().st_size / 1048576, 1) if self.part_path.is_file() else 0.0
         return state
@@ -94,7 +104,7 @@ class LlamaModelDownloadService:
             self._cancel.clear()
             self._state.update({"active": True, "phase": "download", "percent": 0, "message": "연결 중...",
                                 "error": "", "done": False})
-            self._thread = Thread(target=self._run, daemon=True, name="boost-model-download")
+            self._thread = Thread(target=self._run, daemon=True, name=f"llama-model-download-{self.model_id}")
             self._thread.start()
             return dict(self._state)
 
@@ -123,6 +133,11 @@ class LlamaModelDownloadService:
             self.part_path.replace(self.target_path)
             self._set_state(active=False, phase="complete", percent=100, done=True, error="",
                             downloaded_mb=round(self.expected_size / 1048576, 1), message="설치 완료")
+            if self.on_complete is not None:
+                try:
+                    self.on_complete()
+                except Exception:
+                    pass
         except InterruptedError as exc:
             self._set_state(active=False, phase="cancelled", message=str(exc), error="", done=False)
         except urllib.error.HTTPError as exc:
@@ -142,7 +157,7 @@ class LlamaModelDownloadService:
             have = 0
         if have == self.expected_size:
             return  # 다 받아 둔 .part — 검증만 한다
-        headers = {"User-Agent": "NAIA/2.0 BoostModel"}
+        headers = {"User-Agent": "NAIA/2.0 LlamaModel"}
         if have:
             headers["Range"] = f"bytes={have}-"
         response = self._open(urllib.request.Request(self.url, headers=headers), 30)

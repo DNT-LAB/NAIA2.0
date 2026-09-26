@@ -58,10 +58,13 @@ SETTINGS_FILE = "boost_v2_user.json"
 
 BOOST_V2_DEFAULTS: dict[str, Any] = {
     # 켜기/끄기 토글은 기존 세션 토글(context.ollama_auto_boost)을 그대로 쓰고, 여기선 어느
-    # 백엔드로 돌릴지만 고른다. 기본은 기존 Ollama — 사용자가 고를 때까지 동작이 안 바뀐다.
-    "backend": "ollama",
+    # 백엔드로 돌릴지만 고른다. 기본은 앱 내장 llama.cpp — Ollama 파이프라인은 회수한다(사용자 지정 2026-09-26).
+    # 저장본에 적힌 선택(옛 기본값 'ollama' 포함)은 그대로 따른다.
+    "backend": "llamacpp",
     "sections": {key: True for key in SECTION_KEYS},
     "preferences": {key: "" for key in SECTION_KEYS},
+    # 모델 — core/llama_models 목록의 id(e2b · e4b · 26b). Boost · Assist 가 같은 엔진 · 같은 모델을 쓴다.
+    "model": "e2b",
     # 할당 장치 — 'auto'(외장 GPU > 내장 그래픽 > CPU) · 'cpu' · 'Vulkan0' 같은 GPU id.
     # 지정한 GPU 가 없어지면 auto 로, GPU 로 못 띄우면 엔진이 CPU 로 내려온다(llama_runtime).
     "device": "auto",
@@ -89,10 +92,13 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
     for key in SECTION_KEYS:
         text = " ".join(str(raw_prefs.get(key) or "").split())
         preferences[key] = text[:PREFERENCE_MAX_CHARS]
+    from core.llama_models import normalize_model_id
+
     return {
         "backend": backend,
         "sections": sections,
         "preferences": preferences,
+        "model": normalize_model_id(source.get("model")),
         "device": device,
         # 옛 필드(읽기 전용 파생값 — 예전 화면·시험 호환). 저장의 기준은 device 다.
         "use_gpu": device != "cpu",

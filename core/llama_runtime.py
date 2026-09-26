@@ -1,7 +1,8 @@
 """앱이 소유하는 llama.cpp ``llama-server`` 자식 프로세스 하나를 관리한다(Boost v2 · Assist v2 가 함께 쓴다 —
 누가 쓰는지는 임대 ``hold/release`` 로 센다).
 
-실행 계약은 ``C:\\VNR\\DEV\\llama_test`` 실험에서 확인한 값을 따른다: 최대 8 스레드 · context 4096 ·
+실행 계약은 ``C:\\VNR\\DEV\\llama_test`` 실험에서 확인한 값을 따른다: 최대 8 스레드 · context 8192(HauhauCS 권장 ·
+옛 Ollama 파이프라인의 num_ctx 와 같다) ·
 ``--jinja`` + ``enable_thinking=false`` · loopback 무작위 포트 · 단일 슬롯. 샘플링은 Gemma 4 권장값(``SAMPLING``) 그대로.
 
 GPU(기본): ``-ngl 99 -fa on`` — 동봉 엔진은 공식 Vulkan 판이라 GPU(내장 그래픽 포함)가 있으면 거기서,
@@ -34,11 +35,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MODEL_FILE = "gemma-4-E2B-it-qat-q4_0.gguf"
 MODEL_ALIAS = "naia-boost"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_IDLE_SECONDS = 180.0
-# Gemma 4 E2B 권장 샘플링 — Google 모델 카드 · generation_config.json · HauhauCS · Unsloth 가 모두 같다(모든 용도 공통).
+# Gemma 4 권장 샘플링 — Google 모델 카드 · generation_config.json · HauhauCS 모델 카드(E2B · E4B · 26B 셋 다) · Unsloth 가
+# 모두 같다(모든 용도 공통). 모델은 core/llama_models 의 목록에서 고른다 — 셋 다 이 값 그대로다.
 # 이 값을 벗어나지 않는다(사용자 지정 2026-09-26): 모든 요청(Boost · Assist)에 여기서만 싣고, 부르는 쪽은 넘기지 못한다.
 # min_p 는 권장에 없다(= 끔) — llama.cpp 기본 0.05 가 끼어들지 않게 0 을 적는다.
 SAMPLING: dict[str, float] = {"temperature": 1.0, "top_p": 0.95, "top_k": 64, "min_p": 0.0}
@@ -139,7 +140,7 @@ class LlamaServerRuntime:
         model_path: str | Path | None = None,
         *,
         threads: int | None = None,
-        ctx_size: int = 4096,
+        ctx_size: int = 8192,
         idle_seconds: float = DEFAULT_IDLE_SECONDS,
         log_path: str | Path | None = None,
         use_gpu: bool = True,
@@ -663,16 +664,18 @@ def default_engine_path(repo_root: str | Path) -> Path:
     return Path(repo_root) / "runtime" / "llama" / "engine" / exe
 
 
-def default_model_path(save_root: str | Path) -> Path:
-    """첫 사용 시 내려받는 위치 — 사용자 데이터 쪽(업데이트로 지워지지 않게)."""
-    return Path(save_root) / "models" / "llm" / DEFAULT_MODEL_FILE
+def default_model_path(save_root: str | Path, model_id: Any = None) -> Path:
+    """고른 모델(core/llama_models)을 내려받는 위치 — 사용자 데이터 쪽(업데이트로 지워지지 않게)."""
+    from core.llama_models import model_path
+
+    return model_path(save_root, model_id)
 
 
 def resolve_paths(settings: dict[str, Any], *, repo_root: str | Path, save_root: str | Path) -> tuple[Path, Path]:
-    """설정 > 환경변수(NAIA_LLAMA_SERVER / NAIA_LLAMA_MODEL) > 기본 위치."""
+    """설정 > 환경변수(NAIA_LLAMA_SERVER / NAIA_LLAMA_MODEL) > 기본 위치(모델은 설정의 ``model`` 로 고른 것)."""
     engine = (settings or {}).get("engine_path") or os.environ.get("NAIA_LLAMA_SERVER") or ""
     model = (settings or {}).get("model_path") or os.environ.get("NAIA_LLAMA_MODEL") or ""
     return (
         Path(engine) if engine else default_engine_path(repo_root),
-        Path(model) if model else default_model_path(save_root),
+        Path(model) if model else default_model_path(save_root, (settings or {}).get("model")),
     )

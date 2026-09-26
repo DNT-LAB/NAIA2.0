@@ -24,6 +24,7 @@ const TFB_CSS = `
 .tfb-row.is-sel{background:rgba(141,123,214,0.16);box-shadow:inset 0 0 0 1px rgba(141,123,214,0.55)}
 .tfb-row.is-temp .tfb-text{color:#f5dc8a}
 .tfb-temp{flex:0 0 auto;font-size:9px;font-weight:700;padding:0 5px;border-radius:3px;color:#1a1a1a;background:#f5dc8a}
+.tfb-merged{flex:0 0 auto;font-size:9px;font-weight:700;padding:0 5px;border-radius:3px;color:#d9d0ff;background:rgba(141,123,214,0.38)}
 .tfb-acts{display:flex;gap:4px;padding-top:4px;border-top:1px dashed rgba(141,123,214,0.3)}
 .tfb-act{flex:1 1 0;height:22px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;
   border:1px solid rgba(245,220,138,0.55);background:rgba(245,220,138,0.12);color:#f5dc8a}
@@ -136,7 +137,7 @@ export function normalizePreferences(raw) {
     tag_filter_exclude: exclude,
     tag_filter_branches: branches,
     tag_filter_applied_branches: applied,
-    // ⚠️ 커밋 모델: 초안(칩)을 비워도 풀은 걸린 채다 - 걸린 조합도 활성의 근거다. 초안만 보면 칩 Clear 뒤
+    // ⚠️ 칩을 비워도 합쳐 둔 담은 것이 걸려 있을 수 있다 - 걸린 조합도 활성의 근거다. 칩만 보면 Clear 뒤
     //    화면이 '해제' 로 보이고 active=false 까지 저장했다(병합 전 리뷰 #3).
     tag_filter_active: !!raw.tag_filter_active
       && (include.length > 0 || exclude.length > 0 || branches.some(branch => branch.enabled) || applied.length > 0),
@@ -202,12 +203,14 @@ export function createQuickFilterController(deps) {
   let stagedBranches = [];            // [{tags:[칩 토큰], enabled}]
   let lastSentBranches = [];          // 마지막 검색에 보낸 분기(결과의 분기별 수와 순서가 같다)
   const branchCounts = new Map();     // 분기 서명 -> 등급별 수(마지막 결과)
-  // 커밋 모델(사용자 지정 2026-09-25): 칩·스테이징은 **미리보기**다. 풀을 바꾸는 것은 [커밋 (적용)] ·
-  // [커밋 취소] · [임시 적용] · [적용 취소] 와 바깥의 명시 적용(프롬프트 우클릭 · 풀 교체 재적용)뿐이다.
+  // 자동 반영 + 스테이징 커밋(사용자 지정 2026-09-26). **칩은 고치는 대로 풀에 걸린다**(09-25 의
+  // '커밋할 때만 적용' 은 칩까지 묶어 버렸다 - 사용자 제보: 칩의 자동 반영이 사라졌다).
+  //   풀에 걸리는 조건 = **합쳐 둔 담은 것들 ∪ 지금 칩**.
+  //   [커밋 (적용)] 은 **스테이징만의 일**이다 - 켜진 담은 것들을 그 합집합에 넣는다(칩은 이미 걸려 있다).
   let appliedBranches = [];           // 지금 풀에 걸린 조합(분기 목록). [] = 필터 없음
   let lastApplied = [];               // 마지막으로 걸었던 조합 - 라이브 검색·풀 교체가 풀어도 다시 건다
-  let committedBranches = [];         // 마지막 커밋 조합 - [적용 취소] 가 돌아갈 곳
-  const commitHistory = [];           // 커밋 직전의 조합들 - [커밋 취소](최근 20)
+  let mergedBranches = [];            // 커밋으로 합쳐 둔 담은 것들 - 칩과 함께 늘 걸린다
+  const commitHistory = [];           // 커밋 직전의 '합쳐 둔 것' - [커밋 취소](최근 20)
   let tempSig = '';                   // 임시 적용 중인 담은 것의 서명('' = 아님)
   let selectedSig = '';               // 스테이징에서 고른 줄의 서명
   let applyRequestId = '';            // 적용 요청(검색 -> assign)
@@ -259,11 +262,24 @@ export function createQuickFilterController(deps) {
   const isStaged = (tags, list = stagedBranches) => list.some(branch => branchSig(branch.tags) === branchSig(tags));
   /** 지금 칩이 켜진 담은 것과 **다른** 검색인가 - 같으면 두 번 세지 않는다(담아도 칩은 남는다). */
   const liveIsNew = () => hasChips() && !isStaged(payload(), enabledBranches());
-  /** [커밋 (적용)] 이 걸 조합 = 켜진 담은 것들 + 지금 칩(담은 것과 다른 검색이면). 미리보기도 이것을 센다. */
+  /** [커밋 (적용)] 이 합칠 조합 = 켜진 담은 것들 + 지금 칩(담은 것과 다른 검색이면). 미리보기도 이것을 센다. */
   function branchesPayload() {
     const on = enabledBranches().map(branch => [...branch.tags]);
     if (liveIsNew()) on.push(payload());
     return on;
+  }
+  /** **지금 풀에 걸 조건** = 합쳐 둔 담은 것들 ∪ 지금 칩. 칩을 고치면 이것이 자동으로 다시 걸린다. */
+  function liveTarget() {
+    const on = cloneBranches(mergedBranches).filter(tags => tags.length);
+    if (hasChips() && !on.some(tags => branchSig(tags) === branchSig(payload()))) on.push(payload());
+    return on;
+  }
+  /** '커밋하면 몇 행' 을 따로 세야 하나 - 커밋이 걸 조건이 지금 걸 조건과 **다를 때만**.
+   *  (담은 것이 없거나 이미 다 합쳐졌으면 커밋해도 같은 조건이라 검색을 한 번 더 돌릴 이유가 없다.) */
+  function previewNeeded() {
+    const target = branchesPayload();
+    if (!target.length) return false;
+    return JSON.stringify(target) !== JSON.stringify(liveTarget());
   }
   const hasFilter = () => includeTags.length > 0 || excludeTags.length > 0 || enabledBranches().length > 0;
   const hasApplied = () => appliedBranches.length > 0;
@@ -334,7 +350,7 @@ export function createQuickFilterController(deps) {
     renderBranches();
     const countEl = getEl('tagFilterCount');
     if (!countEl) return;
-    // 머리줄 수 = **지금 풀에 걸린** 것(커밋 모델). 초안의 수는 스테이징 머리줄이 보인다.
+    // 머리줄 수 = **지금 풀에 걸린** 것. 커밋하면 달라지는 수는 스테이징 머리줄이 보인다.
     const hasTags = active;
     if (!hasTags) {
       countEl.textContent = '';
@@ -503,9 +519,9 @@ export function createQuickFilterController(deps) {
     else arr[idx] = next;
     renderChips();
     updateCommitButton();
-    // 칩 메뉴에서는 초안(미리보기), 프롬프트 우클릭에서는 곧장 적용.
+    // 프롬프트 우클릭에서는 곧장, 칩 메뉴에서는 잠깐 기다렸다가 - 어느 쪽이든 자동으로 걸린다.
     if (commitNow) apply();
-    else schedulePreview();
+    else scheduleApply();
   }
 
   /** [+ 담기]: 지금 검색(칩 한 벌)을 스테이징에 담는다. **칩은 남긴다**(사용자 지정 2026-09-25 - 비우면
@@ -568,7 +584,7 @@ export function createQuickFilterController(deps) {
     else includeTags = [];
     renderChips();
     renderBranches();
-    schedulePreview();
+    scheduleApply();
   }
 
   function ensureBranchStyle() {
@@ -636,11 +652,13 @@ export function createQuickFilterController(deps) {
     const rows = stagedBranches.map((branch, i) => {
       const sig = branchSig(branch.tags);
       const temp = !!tempSig && sig === tempSig;
+      const merged = mergedBranches.some(tags => branchSig(tags) === sig);
       return `
       <div class="tfb-row is-pick${branch.enabled ? '' : ' is-off'}${sig === selectedSig ? ' is-sel' : ''}${temp ? ' is-temp' : ''}" data-tfb-i="${i}"
         title="눌러서 고르면 아래에서 이 조합만 임시로 적용해 볼 수 있습니다">
         <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? '커밋에서 빼기' : '커밋에 넣기'}"></button>
         <span class="tfb-text">${branchLabelHtml(branch.tags)}</span>
+        ${merged && !temp ? '<span class="tfb-merged">합쳐짐</span>' : ''}
         ${temp ? '<span class="tfb-temp">임시 적용 중</span>' : ''}
         <span class="tfb-n">${branch.enabled || temp ? branchCountText(branch.tags) : '꺼짐'}</span>
         <button type="button" class="tfb-del" data-tfb="remove" title="스테이징에서 빼기">×</button>
@@ -653,17 +671,19 @@ export function createQuickFilterController(deps) {
         <span class="tfb-n">${branchCountText(payload())}</span>
         <span class="tfb-del" aria-hidden="true"></span>
       </div>` : '';
-    const draft = branchesPayload();
-    const draftText = !draft.length ? '' : previewCounts
+    // 칩은 이미 걸려 있다 - 머리줄은 **커밋하면 달라지는 경우**에만 그 수를 말한다.
+    const draftText = !previewNeeded() ? '' : previewCounts
       ? `커밋하면 ${(filteredCount(previewCounts, deps.getRatingState()) || 0).toLocaleString()}행` : '커밋하면 …';
-    const hint = draftText || (stagedBranches.length ? `${stagedBranches.length}개 담김` : '검색해 보고 마음에 들면 담기');
+    const hint = draftText
+      || (mergedBranches.length ? `합쳐 걸림 · 담은 것 ${stagedBranches.length}개`
+        : stagedBranches.length ? `${stagedBranches.length}개 담김` : '검색해 보고 마음에 들면 담기');
     const selected = stagedBranches.some(branch => branchSig(branch.tags) === selectedSig);
     const acts = selected || tempSig ? `
       <div class="tfb-acts">
         <button type="button" class="tfb-act" data-tfb="temp" ${selected && selectedSig !== tempSig ? '' : 'disabled'}
-          data-naia-guide="고른 조합 하나만 지금 풀에 걸어 봅니다(커밋은 그대로). 담은 것을 오가며 태그를 빠르게 바꿔 볼 때.">임시 적용</button>
+          data-naia-guide="고른 조합 하나만 지금 풀에 걸어 봅니다(칩과 합쳐 둔 것은 그대로). 담은 것을 오가며 태그를 빠르게 바꿔 볼 때.">임시 적용</button>
         <button type="button" class="tfb-act revert" data-tfb="revert" ${tempSig ? '' : 'disabled'}
-          data-naia-guide="임시 적용을 거두고 마지막 커밋 상태로 돌아갑니다.">적용 취소</button>
+          data-naia-guide="임시 적용을 거두고 원래 조건(합쳐 둔 것과 지금 칩)으로 돌아갑니다.">적용 취소</button>
       </div>` : '';
     host.innerHTML = `
       <div class="tfb-head">
@@ -674,9 +694,9 @@ export function createQuickFilterController(deps) {
         <button type="button" class="tfb-stage" data-tfb="stage" ${canStage ? '' : 'disabled'}
           data-naia-guide="지금 검색(칩)을 스테이징에 담습니다. 칩은 그대로 남으니 몇 개만 고쳐 다음 검색을 이어 가세요.">+ 담기</button>
         <button type="button" class="tag-filter-btn-action assign tfb-commit" id="tagFilterCommitBtn" data-tfb="commit"
-          data-naia-guide="켜진 담은 것들과 지금 검색을 합쳐 풀에 겁니다. 이 단추를 누르기 전까지 풀은 그대로입니다(칩·스테이징은 미리보기). 같은 조건으로 다시 걸 때도 누르세요.">커밋 (적용)</button>
+          data-naia-guide="켜진 담은 것들을 지금 검색에 합쳐 풀에 겁니다. 칩은 고치는 대로 저절로 걸리고, 담은 것은 이 단추를 눌러야 합쳐집니다. 같은 조건으로 다시 걸 때도 누르세요.">커밋 (적용)</button>
         <button type="button" class="tfb-undo" id="tagFilterUndoBtn" data-tfb="undo" ${commitHistory.length ? '' : 'disabled'}
-          data-naia-guide="마지막 커밋을 거두고, 그 커밋 직전의 풀로 돌아갑니다.">커밋 취소</button>
+          data-naia-guide="마지막 합치기를 무릅니다 - 합쳤던 담은 것이 풀에서 빠지고 지금 칩만 걸립니다.">커밋 취소</button>
       </div>
       ${stagedBranches.length ? `<div class="tfb-list">${rows}${liveRow}</div>` : ''}${acts}`;
     updateCommitButton();
@@ -696,14 +716,14 @@ export function createQuickFilterController(deps) {
     }
   }
 
-  /** 미리보기: 초안(칩·스테이징)의 행 수만 센다 - 풀은 그대로(assign 하지 않는다).
+  /** 미리보기: **커밋하면 걸릴** 조합의 행 수만 센다 - 풀은 그대로(assign 하지 않는다).
    *  ⚠️ 적용이 도는 중이면 끝난 뒤로 미룬다. 서버는 더 새 검색이 시작되면 옛 검색의 결과를 **말없이
    *     버린다**(seq 가드) - 미리보기가 끼어들면 적용 결과가 사라져 풀이 안 바뀐다. */
   function sendPreviewNow() {
     cancelPendingSearch();
     if (applyInFlight) { previewQueued = true; return false; }
     const branches = branchesPayload();
-    if (!branches.length) {
+    if (!previewNeeded()) {
       previewCounts = null;
       previewRequestId = '';
       renderBranches();
@@ -716,12 +736,31 @@ export function createQuickFilterController(deps) {
     return true;
   }
 
+  /** 스테이징만 바뀌었다 - 풀은 그대로 두고 '커밋하면 N행' 만 다시 센다. */
   function schedulePreview(options = {}) {
     cancelPendingSearch();
     if (options.save !== false) save();          // 초안은 저장한다(풀과 무관)
     previewCounts = null;
     renderBranches();
     searchDebounceTimer = setTimeout(sendPreviewNow, SEARCH_DEBOUNCE_MS);
+  }
+
+  /** 칩이 바뀌었다 - 잠깐 기다렸다가 **자동으로 다시 건다**(사용자 지정 2026-09-26).
+   *  걸리는 것은 liveTarget() = 합쳐 둔 담은 것들 ∪ 지금 칩. */
+  function scheduleApply(options = {}) {
+    cancelPendingSearch();
+    if (options.save !== false) save();
+    previewCounts = null;
+    renderBranches();
+    searchDebounceTimer = setTimeout(() => applyLive(), SEARCH_DEBOUNCE_MS);
+  }
+
+  /** 지금 조건을 **곧장** 건다(기다리지 않는다). 걸 것이 없으면 필터를 뗀다. */
+  function applyLive(mode = 'live') {
+    cancelPendingSearch();
+    const target = liveTarget();
+    if (!target.length) { unassign(); return true; }
+    return applyConfig(target, mode);
   }
 
   /** 조합을 풀에 건다(검색 -> assign). 빈 조합이면 필터를 뗀다. mode = commit|undo|temp|revert|reapply.
@@ -732,10 +771,14 @@ export function createQuickFilterController(deps) {
     const target = cloneBranches(branches).filter(tags => tags.length);
     if (!target.length) { unassign(); return true; }
     if (!isSocketOpen()) return false;
+    if (mode !== 'temp') tempSig = '';           // 새 조건이 걸린다 - 임시 적용은 끝났다
+    setReleasedOverlay(false);                   // 다시 거는 것이 '해제됨' 을 대신한다
     lockTagSurface('tagfilter');   // background tag-filter search → released by onTagFilterResult/Assigned
     applyInFlight = {branches: target, mode};
     applyRequestId = nextSearchRequestId();
-    send({type: 'tag_filter_search', tags: payload(), branches: target, request_id: applyRequestId});
+    // ⚠️ 칩 한 벌뿐이면 `branches` 를 보내지 않는다 - 보내면 명함(레시피)에 '분기 1개 합집합' 으로 남는다.
+    const wire = target.length === 1 && branchSig(target[0]) === branchSig(payload()) ? [] : target;
+    send({type: 'tag_filter_search', tags: payload(), branches: wire, request_id: applyRequestId});
     return true;
   }
 
@@ -765,34 +808,38 @@ export function createQuickFilterController(deps) {
     renderBranches();
     notifyFilterChanged();
     flushAssignedOnce();
-    if (previewQueued) { previewQueued = false; sendPreviewNow(); }
+    // 떼고 나서도 담은 것이 남아 있으면 '커밋하면 N행' 은 다시 세야 한다(안 세면 '…' 로 굳는다).
+    if (previewQueued || previewNeeded()) { previewQueued = false; sendPreviewNow(); }
   }
 
-  /** [커밋 (적용)] - 초안(켜진 담은 것들 + 지금 칩)을 풀에 건다. 직전 풀은 [커밋 취소] 로 돌아갈 수 있게 쌓는다.
-   *  초안이 비었으면 필터를 뗀다. 같은 조건으로 다시 거는 것도 커밋이다(풀을 다 쓴 뒤 - 사용자 제보 2026-08-31). */
+  /** [커밋 (적용)] - 켜진 담은 것들을 풀에 **합친다**. 칩은 이미 자동으로 걸려 있으므로 이 단추는
+   *  스테이징만의 일이다. 합쳐 둔 것은 [커밋 취소] 를 누를 때까지 칩과 함께 걸린다.
+   *  담은 것이 없으면 = 지금 조건으로 **다시 걸기**(풀을 다 쓴 뒤 빠져나갈 길 - 사용자 제보 2026-08-31). */
   function commit(options = {}) {
-    if (options.takeText) commitPendingInputs({preview: false});
-    const target = branchesPayload();
-    commitHistory.push(cloneBranches(appliedBranches));
-    if (commitHistory.length > 20) commitHistory.shift();
-    committedBranches = cloneBranches(target);
+    if (options.takeText) commitPendingInputs({apply: false});
+    const next = enabledBranches().map(branch => [...branch.tags]);
+    if (JSON.stringify(next) !== JSON.stringify(mergedBranches)) {
+      commitHistory.push(cloneBranches(mergedBranches));
+      if (commitHistory.length > 20) commitHistory.shift();
+    }
+    mergedBranches = next;
     tempSig = '';
     save();
-    applyConfig(target, 'commit');
+    applyLive('commit');
     renderBranches();
   }
 
-  /** [커밋 취소] - 마지막 커밋을 거두고 그 직전의 풀로(병합 전 상태). 초안은 건드리지 않는다. */
+  /** [커밋 취소] - 마지막 합치기를 무른다(그 전에 합쳐 두었던 것 ∪ 지금 칩). 칩은 건드리지 않는다. */
   function undoCommit() {
     if (!commitHistory.length) return;
-    const previous = commitHistory.pop();
-    committedBranches = cloneBranches(previous);
+    mergedBranches = cloneBranches(commitHistory.pop());
     tempSig = '';
-    applyConfig(previous, 'undo');
+    save();
+    applyLive('undo');
     renderBranches();
   }
 
-  /** [임시 적용] - 고른 담은 것 하나만 풀에 건다(커밋은 그대로). */
+  /** [임시 적용] - 고른 담은 것 하나만 풀에 건다(합쳐 둔 것과 칩은 그대로 남는다). */
   function tempApplySelected() {
     const branch = stagedBranches.find(item => branchSig(item.tags) === selectedSig);
     if (!branch) return;
@@ -801,11 +848,11 @@ export function createQuickFilterController(deps) {
     renderBranches();
   }
 
-  /** [적용 취소] - 임시 적용을 거두고 마지막 커밋 조합으로. */
+  /** [적용 취소] - 임시 적용을 거두고 원래 조건(합쳐 둔 것 ∪ 지금 칩)으로. */
   function revertTemp() {
     if (!tempSig) return;
     tempSig = '';
-    applyConfig(committedBranches, 'revert');
+    applyLive('revert');
     renderBranches();
   }
 
@@ -869,11 +916,12 @@ export function createQuickFilterController(deps) {
     if (input) input.value = '';
     clearAutocomplete();
     updateCommitButton();
-    if (changed) schedulePreview();   // 커밋 모델: 칩은 미리보기 - 풀은 [커밋 (적용)] 이 바꾼다
+    if (changed) scheduleApply();     // 칩은 자동 반영 - 잠깐 기다렸다가 다시 건다
   }
 
-  /** 입력칸에 친 글자를 칩으로. 풀은 건드리지 않는다(커밋 모델) - 다시 거는 것은 [커밋 (적용)] 이 한다
-   *  (빈 입력에서도 같은 조건으로 다시 건다 - 랜덤 풀이 소진된 뒤 빠져나갈 길, 사용자 제보 2026-08-31). */
+  /** 입력칸에 친 글자를 칩으로. 칩이 바뀌었으면 자동 반영을 예약한다({apply: false} 면 부른 쪽이 건다).
+   *  ⚠️ 글자가 없어도 [커밋 (적용)] 은 지금 조건을 **다시** 건다 - 랜덤 풀이 소진된 뒤 빠져나갈 길
+   *     (사용자 제보 2026-08-31). 그 일은 commit() 이 맡는다. */
   function commitPendingInputs(options = {}) {
     const includeInput = getEl('tagFilterInput');
     const excludeInput = getEl('tagFilterExcludeInput');
@@ -887,7 +935,7 @@ export function createQuickFilterController(deps) {
     if (excludeInput) excludeInput.value = '';
     clearAutocomplete();
     updateCommitButton();
-    if (changed && options.preview !== false) schedulePreview();
+    if (changed && options.apply !== false) scheduleApply();
     return changed;
   }
 
@@ -1008,7 +1056,7 @@ export function createQuickFilterController(deps) {
     }
     appliedBranches = [];
     lastApplied = [];
-    committedBranches = [];
+    mergedBranches = [];
     tempSig = '';
     applyInFlight = null;
     applyRequestId = '';
@@ -1079,7 +1127,7 @@ export function createQuickFilterController(deps) {
     excludeTags.splice(index, 1);
     renderExcludeChips();
     updateCommitButton();
-    schedulePreview();
+    scheduleApply();
   }
 
   function removeIncludeTag(index) {
@@ -1087,12 +1135,14 @@ export function createQuickFilterController(deps) {
     includeTags.splice(index, 1);
     renderIncludeChips();
     updateCommitButton();
-    schedulePreview();
+    scheduleApply();
   }
 
-  /** 바깥의 명시 적용(프롬프트 우클릭 · applyTagFilter) = 커밋. 패널 안의 편집은 미리보기다. */
+  /** 바깥의 명시 적용(프롬프트 우클릭 · applyTagFilter) = 기다리지 않고 곧장 건다.
+   *  합쳐 둔 담은 것은 그대로 - 바뀐 것은 칩뿐이다. */
   function apply() {
-    commit({takeText: false});
+    save();
+    applyLive();
   }
 
   // ── 프롬프트 우클릭에서 들어오는 입구 (사용자 요청 2026-08-31) ────────────
@@ -1114,11 +1164,11 @@ export function createQuickFilterController(deps) {
     // 초안이 바뀌었다 - 적용(또는 떼기)이 끝나면 미리보기 수를 다시 센다.
     previewCounts = null;
     previewQueued = true;
+    // 스냅샷 뒤에 합치기(커밋)가 있었으면 그것들도 무른다 - 합쳐 둔 것을 그때 값으로 되돌린다.
     const mark = snapshot && Number.isInteger(snapshot.history) ? snapshot.history : null;
     if (mark !== null && commitHistory.length > mark) {
-      commitHistory.length = mark + 1;
-      undoCommit();
-      return;
+      mergedBranches = cloneBranches(commitHistory[mark]);
+      commitHistory.length = mark;
     }
     if (snapshot && snapshot.active === false) { unassign(); return; }
     apply();
@@ -1345,7 +1395,8 @@ export function createQuickFilterController(deps) {
     }
     // (토스트 제거 — 라이브 자동 적용이라 매번 토스트는 소음. 행수는 RATING 옆 카운트 라벨로 표시.)
     renderBranches();
-    if (previewQueued) { previewQueued = false; sendPreviewNow(); }
+    // 담은 것이 남아 있으면 '커밋하면 N행' 은 방금 건 조건과 다르다 - 그때만 한 번 더 센다.
+    if (previewQueued || previewNeeded()) { previewQueued = false; sendPreviewNow(); }
     return true;
   }
 
@@ -1432,7 +1483,8 @@ export function createQuickFilterController(deps) {
         ? [[...pref.tag_filter, ...pref.tag_filter_exclude.map(tag => '-' + tag)]] : [];
       appliedBranches = active ? cloneBranches(pref.tag_filter_applied_branches.length ? pref.tag_filter_applied_branches : legacy) : [];
       if (appliedBranches.length) lastApplied = cloneBranches(appliedBranches);
-      if (!tempSig) committedBranches = cloneBranches(appliedBranches);
+      // 합쳐 둔 담은 것 = 걸린 조합에서 '지금 칩' 한 벌을 뺀 나머지(창을 다시 열어도 합친 상태가 남는다).
+      if (!tempSig) mergedBranches = cloneBranches(appliedBranches).filter(tags => branchSig(tags) !== branchSig(payload()));
     }
     if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효
     renderIncludeChips();
@@ -1672,7 +1724,7 @@ export function createQuickFilterController(deps) {
     if (el && !presetsInWindow()) el.setAttribute('hidden', '');   // 창이면 그대로 둔다 - 다른 필터로 바로 옮겨 볼 수 있게
     const part = choice === 'include' ? ' (Include만)' : choice === 'exclude' ? ' (Exclude만)' : '';
     if (backup) deps.showToast(`불러옴: ${p.name}${part} · 지금까지의 값은 '${PRESET_BACKUP_NAME}' 에 보관했습니다`, 'success');
-    schedulePreview();   // 초안으로 불러온다 - 풀은 [커밋 (적용)] 이 바꾼다(등급은 안 건드림 — 프리셋은 태그만)
+    scheduleApply();     // 불러온 칩도 자동으로 걸린다(등급은 안 건드림 — 프리셋은 태그만)
     // ⚠️ 백업은 새 칩을 저장한 **뒤에** 보낸다. save_filter_preset 의 응답은 search_state 전체라, 먼저 보내면
     //    서버의 옛 칩을 싣고 돌아와 방금 불러온 칩을 덮는다(라이브 실측).
     if (backup) send({type: 'save_filter_preset', name: PRESET_BACKUP_NAME, include: current.include, exclude: current.exclude});

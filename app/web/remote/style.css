@@ -30326,8 +30326,13 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   /* 창을 넓히면 **장수가 늘고** 카드는 그대로다(사용자 제보 2026-09-25: 3칸 고정이라
      넓힌 창에서 한 장이 310px 까지 부풀었다). 기본 300px 창에서는 예전처럼 3장.
+     ⚠️ 칸은 **고정 폭**이다. `minmax(84px, 1fr)` 는 남는 폭을 칸에 나눠 줘서, 새 칸이 들어갈 만큼
+        넓어지기 전까지 카드가 84 -> 160px 로 부풀었다 줄었다 했다(사용자 제보 2026-09-26: 490px 창 150px,
+        530px 창 115px). 남는 폭은 오른쪽에 둔다. 스크롤 막대 자리도 늘 비워 둔다 - 막대가 생기는 순간
+        4px 이 줄어 칸 수가 하나 빠지지 않게.
      ⚠️ 리모컨 격자(`.rctl`)는 반대로 '넓히면 더 크게' 가 사용자 지정이다 - 따라 바꾸지 마라. */
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 5px;
+  display: grid; grid-template-columns: repeat(auto-fill, 90px); gap: 5px;
+  justify-content: start; scrollbar-gutter: stable;
   /* ⚠️ 줄 높이를 **내용**으로 못 박는다. 높이가 정해진 격자에서 `auto` 줄의 최소치는 카드의
      최소 높이인데, 카드가 `overflow: hidden` 이라 그것이 0 이 된다 - 줄이 넘치면 스크롤 대신
      서로 쥐어짜여 카드가 1.6px 로 눌렸다(실측 2026-09-26, 기본 창에서 7명부터). `.cw-list` 의

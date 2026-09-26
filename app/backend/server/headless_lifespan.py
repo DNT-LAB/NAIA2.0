@@ -103,3 +103,12 @@ async def _run_tag_index_warmup(context: WebSessionContext, run_in_thread: RunIn
     except Exception as exc:
         context.headless_tag_index_warmup_error = str(exc)
         print(f"Headless Remote: tag autocomplete index warmup failed - {exc}", flush=True)
+        return
+    # Assist 한국어 층(이름 칩 · Kiwi)을 뒤에서 미리 — 창을 열 때 시작하면 켜자마자 친 이름의 첫 칩까지 20초였다(09-26).
+    # 태그 사전을 이미 읽은 뒤라 그 몫은 기다리지 않는다. Kiwi 가 없으면(처음 쓸 때 설치) 조용히 넘어간다.
+    try:
+        from app.backend.server.assist_v2_service import _warm_korean_async
+
+        _warm_korean_async(context)
+    except Exception as exc:
+        print(f"Headless Remote: assist korean warmup failed - {exc}", flush=True)

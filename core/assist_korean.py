@@ -190,6 +190,17 @@ def _squash(key: str) -> str:
     return re.sub(r"(.)\1+", r"\1", key)
 
 
+def hash_lines(lines: Iterable[str]) -> str:
+    """줄 목록의 지문(저장해 둔 계산이 같은 입력으로 한 것인가) — 순서가 같아야 같다."""
+    import hashlib
+
+    digest = hashlib.sha1()
+    for line in lines:
+        digest.update(line.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def sound_key_ko(word: str) -> str:
     """한글 표기 -> 거친 소리(라크리모사 -> laklimosa · 노조미 -> nocomi). 한글 아닌 글자는 버린다."""
     out: list[str] = []
@@ -405,8 +416,9 @@ class KoreanLayer:
     """Kiwi 하나를 쥔다. 사용자 사전(캐릭터 이름·사람 명사)을 넣은 모델은 준비에 수 초 — ``warm()`` 을 먼저 부른다."""
 
     def __init__(self, vocab: KoreanVocab, rules: dict[str, Any] | None = None,
-                 kiwi_factory: Callable[[], Any] | None = None) -> None:
+                 kiwi_factory: Callable[[], Any] | None = None, cache_path: Path | None = None) -> None:
         self.vocab = vocab
+        self._cache_path = Path(cache_path) if cache_path else None    # Kiwi 가 모르는 이름 목록(_build_kiwi)
         self.error: str | None = None
         self.rules_error: str | None = None
         if rules is None:
@@ -453,24 +465,33 @@ class KoreanLayer:
         return True
 
     def _build_kiwi(self) -> Any:
+        import kiwipiepy
         from kiwipiepy import Kiwi
-
-        # ⚠️ 사용자 낱말을 넣은 뒤 첫 분석에서 Kiwi 가 모델을 다시 만든다 — '확인 -> 추가' 를 번갈아 하면
-        #    낱말마다 재구성이 일어나 몇 시간이 걸린다(실측: 멈춤). 확인은 따로 끝내고 추가는 몰아서 한다.
-        checker = Kiwi()
-
-        def unknown_name(word: str) -> bool:
-            if not re.fullmatch(r"[가-힣]{2,}", word) or self.vocab.is_general_word(word):
-                return False          # 공주·벚꽃 같은 일반 낱말을 고유명사로 넣으면 문장이 부서진다
-            toks = checker.tokenize(word)
-            if len(toks) == 1 and toks[0].form == word:
-                return False          # Kiwi 가 이미 아는 말
-            return not all(t.tag.startswith(FUNCTIONAL_PREFIXES) for t in toks)   # 하고 = 하/VV + 고/EC
 
         # ⚠️ 키워드의 앞 조각(성)은 넣지 않는다 — 성만이 아니라 '메이드가·고용한·검은·같은' 같은 문장 조각이 섞여 있어
         #    고유명사로 넣으면 '메이드가' 가 한 덩어리가 되는 식으로 문장이 부서진다(실측 09-24, 1,700개 중 수백 개).
         #    성 뒤에서 조사가 붙어 나오는 것(카나데가)은 _unglue 가, 성이 쪼개지는 것은 _merge_names 가 맡는다.
-        names = [w for w in self.vocab.name_pieces if unknown_name(w)]
+        # 공주·벚꽃 같은 일반 낱말을 고유명사로 넣으면 문장이 부서진다
+        pending = sorted(w for w in self.vocab.name_pieces
+                         if re.fullmatch(r"[가-힣]{2,}", w) and not self.vocab.is_general_word(w))
+        # Kiwi 가 모르는 이름 고르기(조각 1.8만 개 · 확인용 Kiwi 하나 — 5초, 실측 09-26)는 사전 · Kiwi 판이 같으면 답도 같다 —
+        # 저장해 두고 다시 쓴다(NAIA 를 켜고 첫 이름 칩까지 20초 — 사용자 제보)
+        signature = f"{getattr(kiwipiepy, '__version__', '')}:{len(pending)}:{hash_lines(pending)}"
+        names = self._cached_names(signature)
+        if names is None:
+            # ⚠️ 사용자 낱말을 넣은 뒤 첫 분석에서 Kiwi 가 모델을 다시 만든다 — '확인 -> 추가' 를 번갈아 하면
+            #    낱말마다 재구성이 일어나 몇 시간이 걸린다(실측: 멈춤). 확인은 따로 끝내고 추가는 몰아서 한다.
+            checker = Kiwi()
+
+            def unknown_name(word: str) -> bool:
+                toks = checker.tokenize(word)
+                if len(toks) == 1 and toks[0].form == word:
+                    return False          # Kiwi 가 이미 아는 말
+                return not all(t.tag.startswith(FUNCTIONAL_PREFIXES) for t in toks)   # 하고 = 하/VV + 고/EC
+
+            names = [w for w in pending if unknown_name(w)]
+            del checker
+            self._save_names(signature, names)
         people = [w for w in (self._female | self._male | self._neutral | set(self._groups))
                   if re.fullmatch(r"[가-힣]{2,}", w)]
         kiwi = Kiwi()
@@ -481,6 +502,27 @@ class KoreanLayer:
         kiwi.tokenize("준비")     # 모델 구성을 여기서 한 번
         self.user_words = len(names) + len(people)
         return kiwi
+
+    def _cached_names(self, signature: str) -> list[str] | None:
+        if not self._cache_path:
+            return None
+        try:
+            data = json.loads(self._cache_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        names = data.get("names") if isinstance(data, dict) and data.get("signature") == signature else None
+        return [str(w) for w in names] if isinstance(names, list) else None
+
+    def _save_names(self, signature: str, names: list[str]) -> None:
+        if not self._cache_path:
+            return
+        try:
+            self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._cache_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"signature": signature, "names": names}, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self._cache_path)
+        except OSError:
+            pass                      # 못 쓰면 다음에 다시 고른다 — 동작은 같다
 
     def tokenize(self, text: str) -> list[tuple[str, str]]:
         return [(t.form, t.tag) for t in self._tokens(text)]

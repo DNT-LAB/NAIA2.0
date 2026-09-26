@@ -98,7 +98,13 @@ def korean_layer(context: Any) -> Any:
         exists = _tag_exists_fn(context, raw)
         vocab = build_vocab(raw, genders=_genders(context), character_rank=lambda tag: pack.posts(tag, "character"),
                             tag_exists=exists)
-        layer = KoreanLayer(vocab)
+        try:
+            from app.backend.server.boost_v2_service import _save_root
+
+            names_cache = _save_root(context) / "cache" / "assist_kiwi_names.json"
+        except Exception:
+            names_cache = None
+        layer = KoreanLayer(vocab, cache_path=names_cache)          # Kiwi 가 모르는 이름 목록을 저장해 두고 다시 쓴다
         context.assist_korean_layer = layer
         return layer
 

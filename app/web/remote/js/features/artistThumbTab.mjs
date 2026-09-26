@@ -2706,10 +2706,10 @@ export function createArtistThumbController({
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor},
       {createArtistBenchViewsStore}, {createArtistBenchViewWindow}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-newview'),
+      import('./artistGroupWindow.mjs?v=20260926-newcomp'),
       import('./dragBroker.mjs?v=20260919-strip'),
       import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
-      import('./artistBenchViewWindow.mjs?v=20260926-benchone'),
+      import('./artistBenchViewWindow.mjs?v=20260926-newcomp'),
     ]);
     const store = createArtistGroupsStore({fetch});
     // 보기(벤치) - 공용 저장소 하나 + 설정 창 하나(사용자 지정 2026-09-26).

@@ -4,7 +4,7 @@
  *  글 칸(prefix/postfix/negative · 캐릭터)은 넓게. 캐릭터는 [메인 캐릭터 프롬프트 | 독립 캐릭터 프롬프트]
  *  토글 - 메인이면 생성 순간 메인 화면의 캐릭터, 독립이면 보기의 캐릭터(+ 캐릭터 는 독립일 때만).
  *  prefix · postfix · 캐릭터 칸은 메인 프롬프트와 같은 자동완성을 쓴다(`bindTagAssist`).
- *  새 보기는 바로 만들어 연다 - 글은 지금 PE 프리셋에서, 이름은 `새 보기`, `새 보기 2` ….
+ *  새 구도는 바로 만들어 연다 - 글은 지금 PE 프리셋에서, 이름은 `새 구도`, `새 구도 2` ….
  *
  *  ⚠️ 작업본(저장 전 입력)은 조용히 사라지면 안 된다(Codex 감사 2026-09-26: 이미 고른 [편집] 탭을 다시
  *     누르면 입력이 초기화됐다). 고치는 중에는 다른 곳의 변경으로 다시 그리지 않고, 다른 보기로 넘어가면
@@ -71,14 +71,14 @@ export function createArtistBenchViewWindow({
     render();
   }
 
-  /** 겹치지 않는 자동 이름 - `새 보기`, `새 보기 2`, … (서버는 같은 이름을 409 로 거절한다). */
+  /** 겹치지 않는 자동 이름 - `새 구도`, `새 구도 2`, … (서버는 같은 이름을 409 로 거절한다). */
   function freshName() {
     const taken = new Set(store.views().map(v => String(v.name).toLocaleLowerCase()));
     for (let i = 1; i < 1000; i += 1) {
-      const name = i === 1 ? '새 보기' : `새 보기 ${i}`;
+      const name = i === 1 ? '새 구도' : `새 구도 ${i}`;
       if (!taken.has(name.toLocaleLowerCase())) return name;
     }
-    return `새 보기 ${Date.now()}`;
+    return `새 구도 ${Date.now()}`;
   }
 
   /** 바로 만들고 [편집] 탭으로 연다. 그룹에서 불렀으면 그 그룹이 곧바로 고른다. */

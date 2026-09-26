@@ -45,7 +45,7 @@ export function createArtistGroupWindow({
   onClosed = () => {},
   views = null,                    // 보기(벤치) 저장소 - 없으면 보기 줄을 안 그린다
   onEditView = () => {},           // (viewId) => void    보기 설정 창
-  onNewView = () => {},            // (groupId) => void   지금 설정으로 새 보기
+  onNewView = () => {},            // (groupId) => void   지금 설정으로 새 구도
   onGenerateView = async () => false,   // ({viewId, artists}) => 넣었으면 true
   onStopQueue = () => {},          // 일괄 생성 중지(지금 한 장은 마저 끝난다)
 } = {}) {
@@ -415,7 +415,7 @@ export function createArtistGroupWindow({
     viewSelect.innerHTML = [
       `<option value="">기본 썸네일</option>`,
       ...list.map(v => `<option value="${escHtml(v.id)}"${v.id === view ? ' selected' : ''}>${escHtml(v.name)}</option>`),
-      `<option value="__new__">+ 새 보기</option>`,
+      `<option value="__new__">+ 새 구도</option>`,
     ].join('');
     viewSelect.value = view;
     viewBtn('view-edit').hidden = !view;

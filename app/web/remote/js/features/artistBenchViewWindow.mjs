@@ -4,7 +4,10 @@
  *   - [요약] 조건을 한눈에 · [지금 설정으로 갱신](메인 화면에서 맞춘 뒤 누른다) · 이름 · 삭제
  *   - [편집] 전용 편집기: prefix/postfix/네거티브 · 캐릭터 프롬프트 · 해상도 · 모델/샘플러/
  *            스케줄러 · 스텝/CFG/리스케일 · 시드
- *  새 보기도 여기서 만든다 - 이름을 받고, 떠 올 **지금 설정**을 미리 보여 준 뒤 [만들기].
+ *  새 보기는 **바로 만들고 [편집] 탭으로 연다**(사용자 지정 2026-09-26 - '지금 설정으로…' 를 미리
+ *  요구할 필요가 없다. 보기를 먼저 만들고 보기에서 직접 설정한다). 이름은 `새 보기`, `새 보기 2` … 로
+ *  붙이고 편집 탭 맨 위 칸에서 고친다. 처음 값: 글·캐릭터는 **비우고**, 생성 설정(해상도·모델·샘플러·
+ *  스텝·CFG)만 지금 값 - 빈칸이면 생성할 수 없어서다. PE 글까지 떠 오려면 [요약] 의 [지금 설정으로 갱신].
  *
  *  ⚠️ `window.prompt()` 를 쓰지 않는다(Electron 렌더러에 없다) - 이름은 창 안의 칸으로 받는다.
  *  ⚠️ 삭제는 두 번 눌러야 한다(그룹 창과 같은 규칙). 뽑아 둔 그림 파일은 서버가 지우지 않는다.
@@ -22,8 +25,7 @@ export function createArtistBenchViewWindow({
   confirmDialog = null,
 } = {}) {
   let panel = null;
-  let viewId = '';            // '' = 새 보기 만들기
-  let forGroup = '';          // 새 보기를 만들면 이 그룹이 곧바로 고른다
+  let viewId = '';
   let tab = 'summary';
   let draft = null;           // 편집 탭의 작업본(저장 전)
   let unsub = null;
@@ -34,7 +36,7 @@ export function createArtistBenchViewWindow({
       document: doc, window: win, title: '보기 설정', variant: 'abv', storageKey: 'bench-view',
       width: 380, minWidth: 300, maxWidth: 720, height: 560, resizable: true,
       initial: {x: 340, y: 90}, escHtml,
-      onClose: () => { viewId = ''; forGroup = ''; draft = null; },
+      onClose: () => { viewId = ''; draft = null; },
     });
     panel.el.setAttribute('data-rctl-companion', '');   // 리모컨의 '바깥 누름' 에서 안쪽
     panel.body.addEventListener('click', onClick);
@@ -50,26 +52,38 @@ export function createArtistBenchViewWindow({
   }
 
   // ── 열기 ──────────────────────────────────────────────────────────────
-  async function open(id) {
+  async function open(id, {tab: startTab = 'summary'} = {}) {
     ensurePanel();
     viewId = id;
-    forGroup = '';
-    tab = 'summary';
+    tab = startTab;
     draft = null;
     panel.open(); panel.raise();
     render();
   }
 
+  /** 겹치지 않는 자동 이름 - `새 보기`, `새 보기 2`, … (서버는 같은 이름을 409 로 거절한다). */
+  function freshName() {
+    const taken = new Set(store.views().map(v => String(v.name).toLocaleLowerCase()));
+    for (let i = 1; i < 1000; i += 1) {
+      const name = i === 1 ? '새 보기' : `새 보기 ${i}`;
+      if (!taken.has(name.toLocaleLowerCase())) return name;
+    }
+    return `새 보기 ${Date.now()}`;
+  }
+
+  /** 바로 만들고 [편집] 탭으로 연다. 그룹에서 불렀으면 그 그룹이 곧바로 고른다. */
   async function openNew(groupId = '') {
-    ensurePanel();
-    viewId = '';
-    forGroup = groupId;
-    tab = 'summary';
-    draft = null;
-    panel.open(); panel.raise();
-    panel.body.innerHTML = '<div class="abv-empty">지금 설정을 읽는 중…</div>';
-    try { await store.refreshCurrent(); } catch (error) { showToast(error.message, 'error'); }
-    render();
+    try {
+      const current = await store.refreshCurrent();
+      if (!current) throw new Error('지금 설정을 읽지 못했습니다');
+      const spec = {...current, prefix: '', postfix: '', negative: '', characters: [], source_preset: ''};
+      delete spec.stripped;
+      const created = await store.create(freshName(), spec);
+      if (groupId) await store.select(groupId, created.id);
+      await open(created.id, {tab: 'edit'});
+    } catch (error) {
+      showToast(error.message || '보기를 만들지 못했습니다.', 'error');
+    }
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────
@@ -99,7 +113,6 @@ export function createArtistBenchViewWindow({
 
   function render() {
     if (!panel) return;
-    if (!viewId) { renderNew(); return; }
     const v = view();
     if (!v) { panel.close(); return; }
     panel.setTitle(`보기 · ${v.name}`);
@@ -133,23 +146,6 @@ export function createArtistBenchViewWindow({
       </div>`;
   }
 
-  function renderNew() {
-    panel.setTitle('새 보기');
-    const current = store.current();
-    panel.body.innerHTML = `
-      <form class="abv-create">
-        <label class="abv-field"><span>이름</span>
-          <input type="text" name="name" maxlength="40" spellcheck="false" placeholder="예: 앞모습" autofocus></label>
-        <button type="submit" class="abv-btn primary">만들기</button>
-      </form>
-      <div class="abv-note">아래 <b>지금 설정</b>을 떠서 만듭니다. PE 글의 작가 태그와 믹스 표식은 뺐습니다.
-        만든 뒤 [편집] 탭에서 고칠 수 있습니다.</div>
-      ${current?.stripped?.length ? `<div class="abv-text abv-stripped"><span>뺀 것 (작가로 보인 것)</span>
-        <div>${escHtml(current.stripped.join('\n'))}</div></div>` : ''}
-      <div class="abv-scroll">${current ? summaryHtml(current) : '<div class="abv-empty">지금 설정을 읽지 못했습니다.</div>'}</div>`;
-    panel.body.querySelector('input[name="name"]')?.focus();
-  }
-
   function selectHtml(field, value, choices) {
     const list = [...new Set([...(choices || []), value].filter(v => v !== undefined && v !== null && v !== ''))];
     return `<select data-abv-field="${field}">${list.map(c =>
@@ -171,6 +167,8 @@ export function createArtistBenchViewWindow({
       </div>`).join('');
     const random = Number(d.seed) < 0;
     return `
+      <label class="abv-field"><span>이름</span>
+        <input type="text" data-abv-field="name" maxlength="40" spellcheck="false" value="${escHtml(d.name || '')}"></label>
       ${area('prefix', 'prefix')}${area('postfix', 'postfix')}${area('negative', 'negative', 2)}
       <div class="abv-group"><div class="abv-group-head"><span>캐릭터 프롬프트</span>
         <button type="button" class="abv-btn" data-abv-act="char-add"${(d.characters || []).length >= MAX_CHARACTERS ? ' disabled' : ''}>+ 캐릭터</button></div>
@@ -267,6 +265,8 @@ export function createArtistBenchViewWindow({
         showToast(`'${v.name}' 보기를 지웠습니다.`, 'info');
         panel.close();
       } else if (act === 'save' && v && draft) {
+        const name = String(draft.name || '').trim();
+        if (name && name !== v.name) await store.rename(v.id, name);
         await store.update(v.id, specFrom(draft));
         draft = null;
         tab = 'summary';
@@ -286,22 +286,6 @@ export function createArtistBenchViewWindow({
       showToast(error.message || '보기를 바꾸지 못했습니다.', 'error');
     }
   }
-
-  // 새 보기: 이름을 받아 **지금 설정**으로 만든다.
-  doc.addEventListener('submit', async event => {
-    if (!panel || !event.target.closest?.('.abv-create') || !panel.body.contains(event.target)) return;
-    event.preventDefault();
-    const name = event.target.querySelector('input[name="name"]')?.value.trim();
-    if (!name) return;
-    try {
-      const created = await store.create(name, store.current() || undefined);
-      if (forGroup) await store.select(forGroup, created.id);
-      showToast(`'${created.name}' 보기를 만들었습니다.`, 'success');
-      await open(created.id);
-    } catch (error) {
-      showToast(error.message || '보기를 만들지 못했습니다.', 'error');
-    }
-  }, true);
 
   return {
     open,

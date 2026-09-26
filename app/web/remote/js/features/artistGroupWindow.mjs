@@ -415,7 +415,7 @@ export function createArtistGroupWindow({
     viewSelect.innerHTML = [
       `<option value="">기본 썸네일</option>`,
       ...list.map(v => `<option value="${escHtml(v.id)}"${v.id === view ? ' selected' : ''}>${escHtml(v.name)}</option>`),
-      `<option value="__new__">+ 지금 설정으로 새 보기…</option>`,
+      `<option value="__new__">+ 새 보기</option>`,
     ].join('');
     viewSelect.value = view;
     viewBtn('view-edit').hidden = !view;

@@ -30471,6 +30471,27 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .abv-note { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
 .abv-empty { padding: 14px 6px; text-align: center; font-size: 11px; color: var(--text-dim); }
 .abv-empty.small { padding: 6px; font-size: 10px; text-align: left; }
+/* ══ 보기 드롭다운 - 공용 custom-select 에 입히는 옷(사용자 제보 2026-09-26: 기본 옷이 크고 투박했다) ══
+   공용 장치는 <select> 의 클래스를 `custom-<클래스>` 로 옮겨 입는다(`agw-view` -> `custom-agw-view`).
+   결은 옛 Artist Thumbnail 드롭다운(`custom-artist-thumb-select`)과 같게 - 11px 굵게 · 어두운 칸 · 좁은 줄. */
+.custom-select.custom-agw-view { flex: 0 1 150px; min-width: 84px; height: 22px; }
+.custom-select.custom-abv-select { height: 24px; }
+.custom-select.custom-agw-view .custom-select-button,
+.custom-select.custom-abv-select .custom-select-button {
+  height: 100%; padding: 0 8px; gap: 6px; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: rgba(0, 0, 0, 0.26);
+  color: var(--text-primary); font-size: 11px; font-weight: 700; letter-spacing: 0.2px;
+}
+.custom-select.custom-agw-view .custom-select-button:hover,
+.custom-select.custom-abv-select .custom-select-button:hover { border-color: rgba(232, 232, 240, 0.44); }
+.custom-select.custom-agw-view.is-open .custom-select-button,
+.custom-select.custom-abv-select.is-open .custom-select-button { border-color: var(--accent); }
+.custom-select.custom-agw-view .custom-select-label,
+.custom-select.custom-abv-select .custom-select-label { line-height: 1; }
+.custom-select-menu.custom-agw-view,
+.custom-select-menu.custom-abv-select { border-color: rgba(232, 232, 240, 0.28); }
+.custom-select-menu.custom-agw-view .custom-select-option,
+.custom-select-menu.custom-abv-select .custom-select-option { padding: 6px 9px; font-size: 11px; font-weight: 700; }
 
 /* ══ 우클릭 메뉴의 그룹 줄 (artistThumbTab.groupMenuHtml) ═══════════════════ */
 /* ⚠️ 아티스트 메뉴는 떠 있는 창(10150대) **위**여야 한다. 기본 결과 메뉴 층(2400)에

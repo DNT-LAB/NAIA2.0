@@ -148,7 +148,8 @@ export function createArtistBenchViewWindow({
 
   function selectHtml(field, value, choices) {
     const list = [...new Set([...(choices || []), value].filter(v => v !== undefined && v !== null && v !== ''))];
-    return `<select data-abv-field="${field}">${list.map(c =>
+    // `abv-select` - 공용 드롭다운(customSelects)이 `custom-abv-select` 로 옮겨 입는 옷 이름.
+    return `<select class="abv-select" data-abv-field="${field}">${list.map(c =>
       `<option value="${escHtml(c)}"${c === value ? ' selected' : ''}>${escHtml(c)}</option>`).join('')}</select>`;
   }
 

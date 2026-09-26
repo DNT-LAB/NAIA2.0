@@ -45,21 +45,55 @@ def artist_bench_view_store(context: WebSessionContext) -> ArtistBenchViewStore:
 _VIEW_OPS = {"create", "update", "rename", "delete", "select"}
 
 
+def _bench_current_characters(context: WebSessionContext, mode: str) -> list[dict]:
+    """지금 굴려 둔 캐릭터(스냅숏 우선 - 새로 굴리지 않는다). 못 읽으면 없는 것으로."""
+    try:
+        from core.character_settings import character_params_from_settings
+
+        params = character_params_from_settings(context, mode=mode, prefer_snapshot=True) or {}
+    except Exception:
+        return []
+    prompts = list(params.get("characters") or [])
+    ucs = list(params.get("uc") or [])
+    return [{"prompt": str(p or ""), "uc": str(ucs[i] if i < len(ucs) else "")}
+            for i, p in enumerate(prompts) if str(p or "").strip()]
+
+
 def _bench_current_spec(context: WebSessionContext) -> dict:
-    """'지금 설정' 한 벌 - 새 보기의 기본값. 글은 Artist Thumbnail 칸의 prefix/postfix 를,
-    생성 설정은 믹스 조합과 같은 여섯 키를 뜬다."""
-    service = artist_thumbnail_service(context)
+    """'지금 설정' 한 벌 - 새 보기의 기본값(사용자 지정 2026-09-26).
+
+    글은 **지금 PE 프리셋의 prefix/postfix** 에서 뜬다(리모컨 머리줄의 그 글 - 벤치에 쓰는
+    artist_bench_recommend · V5 영점이 여기 산다). ⚠️ 작가 태그와 믹스 앵커 표식은 걷는다 -
+    남겨 두면 모든 벤치가 그 작가와의 **혼합**이 된다(`artist:sasamashin` 실측). 가중치 묶음은
+    통째로만 걷는다(`strip_artists` 규칙 - 반쪽을 빼면 가중치가 다른 태그에 붙는다).
+    생성 설정은 믹스 조합과 같은 여섯 키, 캐릭터는 지금 굴려 둔 스냅숏.
+    """
+    from core.artist_mix_preset import strip_artists
+
     mode = str(context.get_api_mode() or "NAI").upper()
-    options = service.load_options(mode)
     layers = _mix_current_layers(context)
+    pre = post = preset = ""
+    try:
+        store = _pe_store(context)
+        mode_key = store.mode()
+        live = store.collect_settings(mode_key)
+        preset = str(store.state(mode_key).get("current_preset") or "")
+        allow_bare = mode_key != "NAI"
+        known = _mix_known_artists(context) if allow_bare else frozenset()
+        pre = strip_artists(str(live.get("pre_prompt") or ""), known=known, allow_bare=allow_bare,
+                            drop_anchors=True)["text"]
+        post = strip_artists(str(live.get("post_prompt") or ""), known=known, allow_bare=allow_bare,
+                             drop_anchors=True)["text"]
+    except Exception:
+        pre = post = preset = ""
     width = height = 0
     try:
         width, height = (int(v) for v in str(context.remote_params.get("resolution") or "").lower().split("x"))
     except Exception:
         width, height = 832, 1216
-    return {"api_mode": mode, "prefix": options.get("prefix", ""), "postfix": options.get("postfix", ""),
-            "negative": layers["negative"], "width": width, "height": height,
-            "settings": layers["settings"], "seed": -1}
+    return {"api_mode": mode, "prefix": pre, "postfix": post, "negative": layers["negative"],
+            "characters": _bench_current_characters(context, mode), "source_preset": preset,
+            "width": width, "height": height, "settings": layers["settings"], "seed": -1}
 
 
 def _apply_view_op(context: WebSessionContext, payload: dict) -> dict:

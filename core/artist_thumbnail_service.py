@@ -990,6 +990,15 @@ class ArtistThumbnailService:
             overrides[param] = value
         seed = int(view.get("seed", -1))
         overrides["seed"] = seed
+        # 캐릭터는 **보기의 것만**. 보기에 없으면 메인 화면의 캐릭터가 늦게 끼어들지 못하게
+        # 막는다(Late binding) - 안 막으면 켜 둔 캐릭터가 모든 벤치에 섞인다.
+        characters = [c for c in (view.get("characters") or []) if str(c.get("prompt") or "").strip()]
+        if characters:
+            overrides["characters"] = [str(c["prompt"]) for c in characters]
+            overrides["uc"] = [str(c.get("uc") or "") for c in characters]
+            overrides["character_positions"] = []
+        else:
+            overrides["_skip_character_late_binding"] = True
         return overrides
 
     def load_data(self, mode: str) -> dict:

@@ -4,8 +4,10 @@
 사용자 결정(2026-09-26):
 - 보기는 **공용**이다. '앞모습' · '옆모습' · 'nsfw' 를 한 번 만들어 두면 어느 그룹에서든 고른다.
   그룹(관심 작가 그룹 포함)은 **마지막으로 고른 보기만** 기억한다(`group_views`).
-- 보기는 비교가 되도록 **조건 전부**를 쥔다 - prefix/postfix/네거티브 · 해상도 · 생성 설정
-  (믹스 조합과 같은 여섯 키) · 시드(-1 = 매번 랜덤). 만들 때 지금 설정을 복사해 온다.
+- 보기는 비교가 되도록 **조건 전부**를 쥔다 - prefix/postfix/네거티브 · 캐릭터 프롬프트 ·
+  해상도 · 생성 설정(믹스 조합과 같은 여섯 키) · 시드(-1 = 매번 랜덤). 보기마다 제 글을 가진다.
+- 만들 때 **지금 설정**을 복사해 온다: 글은 지금 PE 프리셋의 prefix/postfix(작가·앵커는 걷고),
+  캐릭터는 지금 굴려 둔 스냅숏. 고치는 길은 둘(사용자 지정) - '지금 설정으로 갱신' 과 전용 편집기.
 - 그 보기로 뽑은 그림은 작가마다 한 장, `bench_views/<보기>/` 에 산다(서비스가 맡는다).
 
 ⚠️ 그룹 파일(`artist_groups.json`)에 넣지 않는다. 그 파일의 `_normalize_group` 은 모르는 키를
@@ -30,6 +32,7 @@ SCHEMA_VERSION = 1
 MAX_VIEWS = 50
 MAX_NAME_LEN = 40
 MAX_TEXT_LEN = 8000
+MAX_CHARACTERS = 6
 API_MODES = ("NAI", "WEBUI", "COMFYUI")
 
 
@@ -79,6 +82,25 @@ def _clean_seed(value: Any) -> int:
     return number
 
 
+def _clean_characters(raw: Any) -> list[dict]:
+    """캐릭터 프롬프트 슬롯들. 빈 슬롯은 버린다(나가지 않을 칸을 들고 있을 이유가 없다)."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ArtistBenchViewError("characters must be a list")
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ArtistBenchViewError("each character must be an object")
+        prompt = _clean_text(item.get("prompt")).strip()
+        if not prompt:
+            continue
+        out.append({"prompt": prompt, "uc": _clean_text(item.get("uc")).strip()})
+    if len(out) > MAX_CHARACTERS:
+        raise ArtistBenchViewError(f"too many characters (max {MAX_CHARACTERS})")
+    return out
+
+
 def clean_spec(raw: Any) -> dict:
     """보기의 **조건** 부분(이름 제외). 만들기·고치기 모두 이것 하나로 거른다."""
     if not isinstance(raw, dict):
@@ -95,6 +117,9 @@ def clean_spec(raw: Any) -> dict:
         "prefix": _clean_text(raw.get("prefix")),
         "postfix": _clean_text(raw.get("postfix")),
         "negative": _clean_text(raw.get("negative")),
+        "characters": _clean_characters(raw.get("characters")),
+        # 어느 PE 프리셋에서 떴는지(보여 주기용 - 조건이 아니다).
+        "source_preset": str(raw.get("source_preset") or "").strip()[:200],
         "width": _clean_size(raw.get("width"), "width"),
         "height": _clean_size(raw.get("height"), "height"),
         "settings": settings,

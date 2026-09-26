@@ -222,6 +222,8 @@ export function createModuleLauncher({
   setModuleParam,
   naiReferenceBlocked = () => false,
   naiToolUnsupported = () => false,
+  // 모듈 팝업이 아니라 떠 있는 창으로 사는 모듈(조건부 프롬프트)이 열려 있나.
+  isWindowModuleOpen = () => false,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -586,6 +588,7 @@ export function createModuleLauncher({
   function moduleIsActive(moduleId) {
     if (moduleId === 'chunk') return isChunkOpen();
     if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
+    if (isWindowModuleOpen(moduleId)) return true;
     return isModulePopupOpen() && getCurrentModuleId() === moduleId;
   }
 

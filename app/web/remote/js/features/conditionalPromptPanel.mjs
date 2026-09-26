@@ -8,8 +8,17 @@ export function createConditionalPromptPanel({
   //    아예 안 뜬다(v5ScenePanel 주석과 같은 함정). 앱 대화상자를 받아 쓰고,
   //    없으면 그때만 네이티브로 내려간다.
   confirmDialog = null,
+  // 떠 있는 창(conditionalPromptWindow.mjs, 사용자 지정 2026-09-26)이 넘기는 전용 요소.
+  // 예전엔 모든 좌측 모듈이 함께 쓰는 #modulePopupBody 에 그렸다 - 안 넘기면 그대로 그리로 간다.
+  moduleBody: hostElement = null,
+  // 프리셋 동반 창의 본문. 있으면 프리셋 판을 **거기에** 그린다(창 안 팝오버 대신).
+  presetHost = null,
+  togglePresets = null,
+  isPresetsOpen = () => false,
 }) {
-  const moduleBody = document.getElementById('modulePopupBody');
+  const moduleBody = hostElement || document.getElementById('modulePopupBody');
+  // 떠 있는 창 안이면 컴팩트 배치로 그린다(칸 이름표를 줄이고 한 줄로 모은다).
+  const windowed = Boolean(hostElement);
   const sendModuleParam = setModuleParam || ((moduleId, key, value) => {
     if (typeof globalThis.setModuleParam === 'function') {
       globalThis.setModuleParam(moduleId, key, value);
@@ -40,6 +49,11 @@ export function createConditionalPromptPanel({
   let lastRenderedStructureSignature = '';
   let deferredFocusedRenderState = null;
   let deferredFocusTarget = null;
+  // 실행 기록은 접어 둔다(컴팩트 창) - 펼침은 다시 그려도 유지되게 여기 쥔다.
+  let logOpen = false;
+  let lastPresetHostSignature = '';
+  let lastRenderedRuleId = null;
+  let lastSelectedIndex = -1;
 
   function safeText(value) {
     return value == null ? '' : String(value);
@@ -750,6 +764,10 @@ export function createConditionalPromptPanel({
       selectedDsl.value = currentState.simulation
         ? formatSimulationText(currentState.simulation)
         : (selected ? serializeRule(selected) : '');
+      // 편집하면 시뮬레이션 결과가 지워진다 - 제목·높이도 미리보기로 되돌린다.
+      selectedDsl.closest('.cond-dsl-viewer')?.classList.toggle('has-sim', Boolean(currentState.simulation));
+      const dslTitle = document.getElementById('condSelectedDslTitle');
+      if (dslTitle) dslTitle.textContent = currentState.simulation ? '시뮬레이션 결과' : 'DSL 미리보기 (선택한 규칙)';
     }
     const summary = document.getElementById('condSelectedSummary');
     if (summary) summary.textContent = selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.';
@@ -771,10 +789,11 @@ export function createConditionalPromptPanel({
     //    시절의 이야기다. 지금은 **저장·로드가 화면에 보이는 칸을 쓰고 모드를 안
     //    바꾼다** — Legacy 사용자에게도 프리셋이 정상 동작하므로 감출 이유가 없다
     //    (사용자 제보: "Legacy DSL 모드에 여전히 프리셋 없음").
-    const presetControl = m.can_manage_presets
-      ? `<button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
-          ${presetLabel}`
-      : '';
+    // 동반 창이 있으면 단추 하나가 이름까지 보여 준다(따로 띄우던 이름 칩은 뺀다 - 컴팩트).
+    const presetControl = !m.can_manage_presets ? '' : (presetHost
+      ? `<button type="button" class="cond-preset-toggle${isPresetsOpen() ? ' is-open' : ''}" data-cond-action="toggle-preset-popover" title="프리셋 창을 열고 닫습니다">${escHtml(presetButtonLabel)}</button>`
+      : `<button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
+          ${presetLabel}`);
     // 프리셋을 부르면 이 편집기의 규칙이 통째로 갈린다. 갈리기 전 값을 서버가 한
     // 세대 쥐고 있으므로, 있을 때만 되돌릴 자리를 내어 준다(본문은 서버에 있다).
     const undo = m.rules_undo && m.rules_undo.available ? m.rules_undo : null;
@@ -786,9 +805,9 @@ export function createConditionalPromptPanel({
       : '';
     return `
       <div class="cond-topbar">
-        <label class="mod-checkbox-item cond-enable-row">
+        <label class="mod-checkbox-item cond-enable-row" title="조건부 프롬프트 활성화">
           <input type="checkbox" ${m.enabled ? 'checked' : ''} data-cond-global="enabled">
-          <span class="mod-checkbox-label">조건부 프롬프트 활성화</span>
+          <span class="mod-checkbox-label">${windowed ? '활성화' : '조건부 프롬프트 활성화'}</span>
         </label>
         <div class="cond-mode-row">
           <button type="button" class="cond-mode-btn ${m.editor_mode !== 'v2' ? 'active' : ''}" data-cond-mode="legacy">Legacy DSL</button>
@@ -834,11 +853,16 @@ export function createConditionalPromptPanel({
     //    ⚠️ 다만 **바이트 단위 원문 보존은 아니다**(정정, 실측): 왕복하면
     //    `(!hair)`->`(*hair)`, 앞뒤 공백 제거, `a|b&c`->`a|(b&c)` 로 정규화된다.
     //    보존되는 것은 **의미**다.
+    // 동반 창이 있으면 판은 거기에 그린다(창 안 팝오버를 쓰지 않는다).
+    const inlinePresetPane = !presetHost && m.can_manage_presets && presetPopoverOpen;
+    const testButton = m.can_test_rules
+      ? `<button class="mod-action-btn mod-start" data-cond-action="test-rules">Test Rules</button>`
+      : '';
     moduleBody.innerHTML = `
-      <div class="cond-root${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
+      <div class="cond-root${presetPopoverOpen && !presetHost ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
-        ${m.can_manage_presets && presetPopoverOpen ? renderPresetPane(m) : ''}
+        ${inlinePresetPane ? renderPresetPane(m) : ''}
         ${renderEmptyRulesNotice(m)}
         <div class="cond-rules-section">
           <div class="cond-rules-head">
@@ -850,16 +874,54 @@ export function createConditionalPromptPanel({
           </div>
         </div>
         ${renderLint(m)}
-        ${renderSyntaxGuide()}
-        ${m.can_test_rules ? `<div>
-          <button class="mod-action-btn mod-start" data-cond-action="test-rules">Test Rules</button>
-        </div>` : ''}
-        <div>
-          <div class="mod-section-label">Execution Log</div>
-          <div class="mod-log-viewer" id="condLogViewer">${formatLog(m.log)}</div>
-        </div>
+        ${windowed
+          ? `<div class="cond-foot-row">${renderSyntaxGuide()}${testButton}</div>`
+          : `${renderSyntaxGuide()}${testButton ? `<div>${testButton}</div>` : ''}`}
+        ${renderLog(m)}
         ${renderPresetDialog()}
       </div>`;
+    renderPresetHost(m);
+  }
+
+  /** 실행 기록. 창 안에서는 한 줄로 접어 두고 마지막 줄만 비춘다(누르면 펼친다). */
+  function renderLog(m) {
+    if (!windowed) {
+      return `<div>
+          <div class="mod-section-label">Execution Log</div>
+          <div class="mod-log-viewer" id="condLogViewer">${formatLog(m.log)}</div>
+        </div>`;
+    }
+    const lines = safeText(m.log).split('\n').map(line => line.trim()).filter(Boolean);
+    const last = lines.length ? lines[lines.length - 1] : '';
+    return `
+      <section class="cond-log-fold${logOpen ? ' is-open' : ''}">
+        <button type="button" class="cond-log-head" data-cond-action="toggle-log" aria-expanded="${logOpen ? 'true' : 'false'}">
+          <span class="cond-log-caret" aria-hidden="true"></span>
+          <span class="cond-log-name">실행 기록</span>
+          <span class="cond-log-meta">${escHtml(last)}</span>
+        </button>
+        <div class="mod-log-viewer" id="condLogViewer"${logOpen ? '' : ' hidden'}>${formatLog(m.log)}</div>
+      </section>`;
+  }
+
+  /** 프리셋 동반 창의 본문. 핸들러가 `.cond-root` 안만 받으므로 같은 뿌리 이름으로 감싼다. */
+  function renderPresetHost(m) {
+    if (!presetHost) return;
+    // 목록에 보이는 것이 그대로면 다시 그리지 않는다 - 이름 칸에 치는 중에 에코가 와서
+    // 칸을 갈아 끼우면 글자와 포커스가 날아간다(본 창은 규칙 편집마다 다시 그린다).
+    const signature = JSON.stringify([
+      Boolean(m && m.can_manage_presets), safeText(m && m.active_preset),
+      safeText(m && m.editor_mode), Array.isArray(m && m.presets) ? m.presets : [],
+    ]);
+    if (signature === lastPresetHostSignature && presetHost.firstElementChild) return;
+    lastPresetHostSignature = signature;
+    const list = presetHost.querySelector('.cond-preset-list');
+    const top = list ? list.scrollTop : 0;
+    presetHost.innerHTML = m && m.can_manage_presets
+      ? `<div class="cond-root cond-preset-root">${renderPresetPane(m)}</div>`
+      : '<div class="cond-root cond-preset-root"><div class="cond-empty">이 모드에서는 프리셋을 쓸 수 없습니다.</div></div>';
+    const nextList = presetHost.querySelector('.cond-preset-list');
+    if (nextList) nextList.scrollTop = top;
   }
 
   // 백엔드 lint 결과를 배지로 그린다. 규칙을 막지는 않는다 — 이미 그런 규칙을 돌리고 있는
@@ -946,35 +1008,50 @@ export function createConditionalPromptPanel({
 
   function renderV2(m) {
     const book = rulebook();
-    if (selectedRuleId && !book.rules.some(rule => rule.id === selectedRuleId)) selectedRuleId = null;
+    // ⚠️ 서버는 규칙 책을 파싱할 때마다 id 를 새로 매긴다(block_model 의 uuid4) - 에코가 오면 고른 규칙의
+    //    id 가 사라진다. 예전엔 그때마다 1번 규칙으로 튀었다(켜기 칸 하나만 눌러도). 같은 **순번**을 유지한다.
+    if (selectedRuleId && !book.rules.some(rule => rule.id === selectedRuleId)) {
+      selectedRuleId = lastSelectedIndex >= 0 && book.rules.length
+        ? book.rules[Math.min(lastSelectedIndex, book.rules.length - 1)].id
+        : null;
+    }
     if (!selectedRuleId && book.rules.length) selectedRuleId = book.rules[0].id;
     const selected = selectedRule();
+    lastSelectedIndex = selectedRuleIndex();
+    // 창 안에서는 칸이 작아 스크롤이 잦다 - 태그 하나 더할 때마다 맨 위로 튀지 않게 되살린다.
+    // 조건·동작 칸은 **같은 규칙을 다시 그릴 때만**(다른 규칙을 고르면 위에서 시작한다).
+    const keepScroll = !windowed ? [] : ['.cond-rule-list', '.cond-condition-scroll', '.cond-action-pane']
+      .filter(sel => sel === '.cond-rule-list' || (selected && selected.id === lastRenderedRuleId))
+      .map(sel => [sel, moduleBody.querySelector(sel)?.scrollTop || 0]);
+    lastRenderedRuleId = selected ? selected.id : null;
     moduleBody.innerHTML = `
-      <div class="cond-root cond-v2-editor${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
+      <div class="cond-root cond-v2-editor${presetPopoverOpen && !presetHost ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
         ${renderEmptyRulesNotice(m)}
         <div class="cond-summary-box" id="condSelectedSummary">${escHtml(selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.')}</div>
         ${renderLint(m)}
         <div class="cond-v2-grid">
-          ${m.can_manage_presets ? renderPresetPane(m) : ''}
+          ${m.can_manage_presets && !presetHost ? renderPresetPane(m) : ''}
           ${renderRuleListPane(book)}
           ${renderConditionPane(selected)}
           ${renderActionPane(selected)}
         </div>
         <div class="cond-bottom-actions">
-          <button type="button" class="mod-action-btn" data-cond-action="reload-state">현재 DSL 다시 불러오기</button>
+          <button type="button" class="mod-action-btn" data-cond-action="reload-state" title="서버에 적용된 규칙을 다시 불러옵니다(적용 안 한 편집은 버려집니다)">${windowed ? '다시 불러오기' : '현재 DSL 다시 불러오기'}</button>
           ${m.can_test_rules ? '<button type="button" class="mod-action-btn" data-cond-action="test-rules">시뮬레이션</button>' : ''}
-          ${m.can_edit_rulebook ? `<button type="button" class="mod-action-btn mod-start" data-cond-action="apply-book" ${dirty ? '' : 'disabled'}>✔ 모듈에 적용</button>` : ''}
+          ${m.can_edit_rulebook ? `<button type="button" class="mod-action-btn mod-start" data-cond-action="apply-book" ${dirty ? '' : 'disabled'}>✔ ${windowed ? '적용' : '모듈에 적용'}</button>` : ''}
         </div>
-        <div>
-          <div class="mod-section-label">Execution Log</div>
-          <div class="mod-log-viewer" id="condLogViewer">${formatLog(m.log)}</div>
-        </div>
+        ${renderLog(m)}
         ${renderPresetDialog()}
       </div>`;
+    keepScroll.forEach(([sel, top]) => {
+      const element = moduleBody.querySelector(sel);
+      if (element) element.scrollTop = top;
+    });
     updateDynamicText();
     bindV2Autocomplete();
+    renderPresetHost(m);
   }
 
   // New Editor(v2)의 태그 입력칸에 태그 자동완성을 부착한다. tagAssist는 전역 위임 바인더가
@@ -1087,6 +1164,7 @@ export function createConditionalPromptPanel({
   }
 
   function renderPresetPane(m) {
+    if (presetHost) return renderPresetWindowPane(m);
     const presets = Array.isArray(m.presets) ? m.presets : [];
     const options = [
       `<option value="">프리셋 선택...</option>`,
@@ -1124,6 +1202,36 @@ export function createConditionalPromptPanel({
       </section>`;
   }
 
+  /** 프리셋 동반 창 판(컴팩트). 줄을 누르면 불러오고, 줄 끝 × 로 지운다(번들은 못 지운다).
+   *  예전 판의 선택 상자 + [불러오기]·[삭제] 는 목록과 같은 일을 두 번 하던 것이라 뺐다. */
+  function renderPresetWindowPane(m) {
+    const presets = Array.isArray(m.presets) ? m.presets : [];
+    const rows = presets.map(preset => {
+      const name = safeText(preset.name);
+      const active = name === m.active_preset;
+      const del = preset.is_bundled
+        ? ''
+        : `<button type="button" class="cond-preset-del" data-cond-action="delete-preset" data-preset-name="${escapeAttr(name)}" title="프리셋 지우기" aria-label="${escapeAttr(name)} 지우기">×</button>`;
+      return `
+        <div class="cond-preset-row${active ? ' active' : ''}">
+          <button type="button" class="cond-preset-item${active ? ' active' : ''}" data-cond-action="load-preset" data-preset-name="${escapeAttr(name)}" title="불러오기 - 지금 편집기의 규칙이 이 프리셋으로 바뀝니다">
+            <span>${escHtml(name)}${presetOriginBadge(preset, m.editor_mode)}</span>
+            <small>${preset.rule_count ?? 0}개${preset.is_bundled ? ' · 번들' : ''}</small>
+          </button>
+          ${del}
+        </div>`;
+    }).join('');
+    return `
+      <section class="cond-pane cond-preset-pane">
+        <div class="cond-preset-list">${rows || '<div class="cond-empty">저장된 프리셋 없음</div>'}</div>
+        <div class="cond-preset-save-row">
+          <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(m.active_preset)}" autocomplete="off" spellcheck="false">
+          <button type="button" data-cond-action="save-preset" title="지금 편집기의 규칙을 이 이름으로 저장합니다">저장</button>
+        </div>
+        <button type="button" class="cond-preset-new" data-cond-action="new-preset">+ 새 프리셋</button>
+      </section>`;
+  }
+
   function renderRuleListPane(book) {
     const selectedId = selectedRule()?.id || '';
     const rows = book.rules.map((rule, index) => `
@@ -1134,6 +1242,23 @@ export function createConditionalPromptPanel({
         <strong>${escHtml(rule.kind === 'raw' ? (rule.raw_dsl || '직접 DSL 편집') : describeAction(rule.action))}</strong>
         <small>#${index + 1}</small>
       </button>`).join('');
+    const canUp = selectedRuleIndex() > 0;
+    const canDown = selectedRuleIndex() >= 0 && selectedRuleIndex() < book.rules.length - 1;
+    if (windowed) {
+      // 컴팩트: 도구는 한 줄(+ 규칙 · 켜기/끄기 · ↑ · ↓ · 삭제). 뜻은 title 로.
+      return `
+      <section class="cond-pane cond-rule-pane">
+        <div class="cond-pane-title">규칙 <small class="cond-pane-count">${book.rules.length}</small></div>
+        <div class="cond-rule-list">${rows || '<div class="cond-empty">규칙 없음</div>'}</div>
+        <div class="cond-rule-tools">
+          <button type="button" class="cond-tool-add" data-cond-action="add-rule" title="새 규칙을 맨 아래에 더합니다">+ 규칙</button>
+          <button type="button" data-cond-action="toggle-rule" title="선택한 규칙 켜기/끄기" ${selectedId ? '' : 'disabled'}>켜기/끄기</button>
+          <button type="button" data-cond-action="move-rule-up" title="위로" aria-label="위로" ${canUp ? '' : 'disabled'}>↑</button>
+          <button type="button" data-cond-action="move-rule-down" title="아래로" aria-label="아래로" ${canDown ? '' : 'disabled'}>↓</button>
+          <button type="button" data-cond-action="delete-rule" title="선택한 규칙 지우기" ${selectedId ? '' : 'disabled'}>삭제</button>
+        </div>
+      </section>`;
+    }
     return `
       <section class="cond-pane cond-rule-pane">
         <div class="cond-pane-title">규칙 목록</div>
@@ -1177,6 +1302,7 @@ export function createConditionalPromptPanel({
     const pathAttr = escapeAttr(path);
     const removable = path !== '';
     const depth = path ? path.split('.').length : 0;
+    if (windowed) return renderConditionNodeCompact(cond, path, pathAttr, removable, depth);
     if (cond.kind === 'group') {
       const children = cond.children.map((child, index) => renderConditionNode(child, path ? `${path}.${index}` : String(index))).join('');
       return `
@@ -1225,6 +1351,96 @@ export function createConditionalPromptPanel({
         </div>
         ${renderLeafFields(cond, pathAttr)}
       </div>`;
+  }
+
+  /** 창(컴팩트) 배치의 조건 한 칸. 이름표 줄(조건 형태:/판단 기준:/찾을 태그:)을 없애고
+   *  **한 줄**에 모은다 - 뜻은 title·placeholder 로 남긴다. data-* 는 옛 배치와 같아서
+   *  입력 처리(updateConditionField)는 그대로다. */
+  function renderConditionNodeCompact(cond, path, pathAttr, removable, depth) {
+    const kindSelect = `
+      <select class="mod-select cond-sel-kind" data-cond-node-field="kind" data-cond-node-path="${pathAttr}" title="조건 형태 - 묶음은 여러 조건을 '모두' 또는 '하나라도' 로 묶습니다">
+        ${option('leaf', '단일', cond.kind)}
+        ${option('group', '묶음', cond.kind)}
+      </select>`;
+    const removeBtn = removable
+      ? `<button type="button" class="cond-delete-node-btn" data-cond-action="delete-condition" data-cond-node-path="${pathAttr}" title="이 조건 지우기" aria-label="이 조건 제거">×</button>`
+      : '';
+    if (cond.kind === 'group') {
+      const children = cond.children.map((child, index) => renderConditionNode(child, path ? `${path}.${index}` : String(index))).join('');
+      return `
+        <div class="cond-condition-card group depth-${depth % 5}" data-cond-node-path="${pathAttr}">
+          <div class="cond-node-row cond-group-head">
+            ${kindSelect}
+            <select class="mod-select cond-sel-logical" data-cond-node-field="logical" data-cond-node-path="${pathAttr}" title="묶음 방식">
+              ${option('AND', '모두 만족 (AND)', cond.logical)}
+              ${option('OR', '하나라도 (OR)', cond.logical)}
+            </select>
+            <span class="cond-grow"></span>
+            <button type="button" class="cond-add-btn" data-cond-action="add-condition-leaf" data-cond-node-path="${pathAttr}" title="이 묶음에 조건 하나를 더합니다">+ 조건</button>
+            <button type="button" class="cond-add-btn" data-cond-action="add-condition-group" data-cond-node-path="${pathAttr}" title="이 묶음 안에 묶음을 더합니다">+ 묶음</button>
+            ${removeBtn}
+          </div>
+          <div class="cond-children">${children || '<div class="cond-empty compact">비어 있는 묶음 - [+ 조건] 으로 채우세요</div>'}</div>
+        </div>`;
+    }
+    const leafKind = cond.leaf_kind || 'tag';
+    return `
+      <div class="cond-condition-card leaf depth-${depth % 5}" data-cond-node-path="${pathAttr}">
+        <div class="cond-node-row cond-leaf-row">
+          ${kindSelect}
+          <select class="mod-select cond-sel-leaf" data-cond-node-field="leaf_kind" data-cond-node-path="${pathAttr}" title="판단 기준">
+            ${option('tag', '태그', leafKind)}
+            ${option('rating', '등급', leafKind)}
+            ${option('char_in', '캐릭터 안 태그', leafKind)}
+            ${option('char_on', '캐릭터 켜짐', leafKind)}
+          </select>
+          ${renderLeafFieldsCompact(cond, pathAttr)}
+          ${removeBtn}
+        </div>
+      </div>`;
+  }
+
+  function renderLeafFieldsCompact(cond, pathAttr) {
+    const not = `
+      <label class="mod-checkbox-item cond-inline-check" title="결과를 뒤집습니다">
+        <input type="checkbox" data-cond-node-field="negated" data-cond-node-path="${pathAttr}"${cond.negated ? ' checked' : ''}>
+        <span class="mod-checkbox-label">NOT</span>
+      </label>`;
+    const charIndex = `<input class="mod-input cond-in-num" type="number" min="1" max="99" value="${escapeAttr(cond.char_index || 1)}" data-cond-node-field="char_index" data-cond-node-path="${pathAttr}" title="캐릭터 번호">`;
+    const modifier = field => `
+      <select class="mod-select cond-sel-mod" data-cond-node-field="${field}" data-cond-node-path="${pathAttr}" title="찾는 방식">
+        ${option('contains', '포함', cond[field])}
+        ${option('exact', '정확히', cond[field])}
+        ${option('not_contains', '포함 안 함', cond[field])}
+        ${option('not_exact', '정확히 아님', cond[field])}
+      </select>`;
+    if (cond.leaf_kind === 'rating') {
+      return `
+        <select class="mod-select cond-sel-rating" data-cond-node-field="rating_value" data-cond-node-path="${pathAttr}" title="등급">
+          ${option('e', 'E', cond.rating_value)}
+          ${option('q', 'Q', cond.rating_value)}
+          ${option('s', 'S', cond.rating_value)}
+          ${option('g', 'G', cond.rating_value)}
+        </select>
+        <select class="mod-select cond-sel-source" data-cond-node-field="rating_source" data-cond-node-path="${pathAttr}" title="등급을 어디서 읽나">
+          ${option('auto', '자동 판단', cond.rating_source)}
+          ${option('row', '원본 행 값', cond.rating_source)}
+          ${option('override', '강제 지정', cond.rating_source)}
+          ${option('bayes', 'Bayes 결과', cond.rating_source)}
+        </select>
+        ${not}`;
+    }
+    if (cond.leaf_kind === 'char_in') {
+      return `
+        ${charIndex}
+        <input class="mod-input cond-in-tag" placeholder="찾을 태그 (예: blue_hair)" value="${escapeAttr(cond.char_tag_value)}" data-cond-node-field="char_tag_value" data-cond-node-path="${pathAttr}">
+        ${modifier('char_tag_modifier')}
+        ${not}`;
+    }
+    if (cond.leaf_kind === 'char_on') return `${charIndex}${not}`;
+    return `
+      <input class="mod-input cond-in-tag" placeholder="찾을 태그 (예: blue_hair)" value="${escapeAttr(cond.tag_value)}" data-cond-node-field="tag_value" data-cond-node-path="${pathAttr}">
+      ${modifier('tag_modifier')}`;
   }
 
   function renderLeafFields(cond, pathAttr) {
@@ -1305,8 +1521,8 @@ export function createConditionalPromptPanel({
       <section class="cond-pane cond-action-pane">
         <div class="cond-pane-title">이렇게 바꾸기</div>
         ${rule ? (rule.kind === 'raw' ? renderRawActionHelp() : renderActionEditor(rule.action)) : '<div class="cond-empty">규칙을 선택하세요.</div>'}
-        <div class="cond-dsl-viewer">
-          <div class="cond-pane-title small">${escHtml(previewTitle)}</div>
+        <div class="cond-dsl-viewer${simulation ? ' has-sim' : ''}">
+          <div class="cond-pane-title small" id="condSelectedDslTitle">${escHtml(previewTitle)}</div>
           <textarea id="condSelectedDsl" readonly spellcheck="false">${escHtml(previewText)}</textarea>
         </div>
       </section>`;
@@ -1345,6 +1561,7 @@ export function createConditionalPromptPanel({
 
   function renderActionEditor(action) {
     const act = normalizeAction(action);
+    if (windowed) return renderActionEditorCompact(act);
     return `
       <div class="cond-action-card">
         <div class="cond-node-row">
@@ -1359,6 +1576,69 @@ export function createConditionalPromptPanel({
           </select>
         </div>
         ${renderActionFields(act)}
+      </div>`;
+  }
+
+  /** 창(컴팩트) 배치의 동작 칸. 첫 줄 = 변경 방식 + 그 방식의 짧은 값들, 태그 목록은 그 아래.
+   *  data-* 는 옛 배치와 같다(updateActionField 그대로). */
+  function renderActionEditorCompact(act) {
+    const charIndex = `<span class="cond-mini">캐릭터</span><input class="mod-input cond-in-num" type="number" min="1" max="99" value="${escapeAttr(act.char_index || 1)}" data-cond-action-field="char_index" title="캐릭터 번호">`;
+    let head = '';
+    let rest = '';
+    if (act.kind === 'append_list' || act.kind === 'append') {
+      const target = parseTarget(act.target);
+      const showSlot = target.kind === 'char' || target.kind === 'uc';
+      head = `
+        <select class="mod-select cond-sel-target" data-cond-action-field="target_kind" title="적용 위치">
+          ${option('prefix', '선행고정 뒤', target.kind)}
+          ${option('main', '메인 프롬프트', target.kind)}
+          ${option('postfix', '후행고정 뒤', target.kind)}
+          ${option('neg', '네거티브', target.kind)}
+          ${option('char', '캐릭터 프롬프트', target.kind)}
+          ${option('uc', '캐릭터 UC', target.kind)}
+        </select>
+        ${showSlot ? `
+          <span class="cond-mini">슬롯</span><input class="mod-input cond-in-num" type="number" min="1" max="99" value="${escapeAttr(target.index)}" data-cond-action-field="target_index" title="대상 슬롯">
+          <label class="mod-checkbox-item cond-inline-check" title="켜져 있는 캐릭터 슬롯 전부에 적용합니다">
+            <input type="checkbox" data-cond-action-field="target_wildcard"${target.wildcard ? ' checked' : ''}>
+            <span class="mod-checkbox-label">모든 활성 슬롯</span>
+          </label>` : ''}`;
+      rest = renderTagEditor('tags', act.tags, '추가할 태그', '태그 추가 (Enter)');
+    } else if (act.kind === 'replace') {
+      head = `<input class="mod-input cond-in-tag" value="${escapeAttr(act.old_tag)}" placeholder="찾을 태그 (예: __bad_tag__)" data-cond-action-field="old_tag" title="이 태그를 찾아서">`;
+      rest = renderTagEditor('new_tags', act.new_tags, '바꿀 태그', '교체 후 태그 추가');
+    } else if (act.kind === 'char_set') {
+      head = `${charIndex}
+        <select class="mod-select" data-cond-action-field="char_state" title="상태">
+          ${option('enabled', '사용', act.char_state)}
+          ${option('disabled', '사용 안 함', act.char_state)}
+        </select>`;
+    } else if (act.kind === 'char_replace') {
+      head = charIndex;
+      rest = `
+        <div class="cond-node-row cond-pair-row">
+          <input class="mod-input cond-in-tag" value="${escapeAttr(act.char_old_tag)}" placeholder="기존 태그" data-cond-action-field="char_old_tag" title="기존 태그">
+          <span class="cond-mini">→</span>
+          <input class="mod-input cond-in-tag" value="${escapeAttr(act.char_new_tag)}" placeholder="새 태그" data-cond-action-field="char_new_tag" title="새 태그">
+        </div>`;
+    } else {
+      head = charIndex;
+      rest = renderTagEditor('tags', act.tags, '추가할 태그', '태그 추가 (Enter)');
+    }
+    return `
+      <div class="cond-action-card">
+        <div class="cond-node-row cond-action-head">
+          <select class="mod-select cond-sel-action" data-cond-action-field="kind" title="변경 방식">
+            ${option('append_list', '태그 추가', act.kind)}
+            ${option('append', '문장 끝에 붙이기', act.kind)}
+            ${option('replace', '태그 교체', act.kind)}
+            ${option('char_set', '캐릭터 사용 여부', act.kind)}
+            ${option('char_append', '캐릭터 태그 추가', act.kind)}
+            ${option('char_replace', '캐릭터 태그 교체', act.kind)}
+          </select>
+          ${head}
+        </div>
+        ${rest}
       </div>`;
   }
 
@@ -1583,6 +1863,8 @@ export function createConditionalPromptPanel({
     action[field] = tags;
     markDirty();
     render(currentState);
+    // 다시 그리면 입력칸이 새로 생겨 포커스가 빠진다 - 태그를 연달아 칠 수 있게 되돌린다.
+    moduleBody.querySelector(`[data-tag-input="${field}"]`)?.focus();
   }
 
   function removeTag(field, index) {
@@ -1598,7 +1880,7 @@ export function createConditionalPromptPanel({
 
   function handleClick(event) {
     const root = event.target.closest('.cond-root');
-    if (!root || !moduleBody.contains(root)) return;
+    if (!root || !(moduleBody.contains(root) || (presetHost && presetHost.contains(root)))) return;
     const modeButton = event.target.closest('[data-cond-mode]');
     if (modeButton) {
       const mode = normalizeMode(modeButton.dataset.condMode);
@@ -1617,8 +1899,22 @@ export function createConditionalPromptPanel({
     } else if (action === 'toggle-syntax') {
       actionEl.classList.toggle('open');
       actionEl.nextElementSibling?.classList.toggle('collapsed');
+    } else if (action === 'toggle-log') {
+      logOpen = !logOpen;
+      const fold = actionEl.closest('.cond-log-fold');
+      fold?.classList.toggle('is-open', logOpen);
+      actionEl.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
+      const viewer = fold?.querySelector('#condLogViewer');
+      if (viewer) {
+        viewer.hidden = !logOpen;
+        if (logOpen) viewer.scrollTop = viewer.scrollHeight;
+      }
     } else if (action === 'toggle-preset-popover') {
       if (currentState?.can_manage_presets === false) return;
+      if (presetHost && typeof togglePresets === 'function') {
+        togglePresets();
+        return;
+      }
       presetPopoverOpen = !presetPopoverOpen;
       renderWithScrollRestore(['.cond-rule-list', '.cond-condition-scroll']);
     } else if (action === 'select-rule') {
@@ -1686,6 +1982,8 @@ export function createConditionalPromptPanel({
       if (currentState?.editor_mode === 'v2') {
         sendModuleParam('conditional_prompt', 'simulate_v2', JSON.stringify({book: currentBookPayload()}));
       } else {
+        // 결과는 실행 기록으로 온다 - 접혀 있으면 펼쳐 둔다(돌아올 렌더가 이 값을 읽는다).
+        logOpen = true;
         sendModuleParam('conditional_prompt', 'test', '1');
       }
     } else if (action === 'save-preset') {
@@ -1718,8 +2016,9 @@ export function createConditionalPromptPanel({
       sendModuleParam('conditional_prompt', 'rules_undo', '1');
     } else if (action === 'delete-preset') {
       if (currentState?.can_manage_presets === false) return;
+      // 창 판은 줄마다 × 가 이름을 들고 있다. 옛 판은 선택 상자에서 읽는다.
       const select = document.getElementById('condPresetSelect');
-      const name = safeText(select?.value).trim();
+      const name = safeText(actionEl.dataset.presetName || select?.value).trim();
       // 삭제도 한 번 묻는다 - 프리셋 파일에는 백업이 없다.
       if (name) askDeletePreset(name);
     } else if (action === 'load-selected-preset') {
@@ -1862,6 +2161,18 @@ export function createConditionalPromptPanel({
     moduleBody.addEventListener('input', handleInput);
     moduleBody.addEventListener('change', handleChange);
     moduleBody.addEventListener('keydown', handleKeydown);
+    if (presetHost) {
+      presetHost.addEventListener('click', handleClick);
+      presetHost.addEventListener('keydown', handlePresetHostKeydown);
+    }
+  }
+
+  // 프리셋 창의 이름 칸에서 Enter = [저장].
+  function handlePresetHostKeydown(event) {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    if (event.target?.id !== 'condPresetNameInput') return;
+    event.preventDefault();
+    savePreset();
   }
 
   function focusedCondTextarea() {
@@ -1992,6 +2303,11 @@ export function createConditionalPromptPanel({
     return state;
   }
 
+  /** 프리셋 창이 열리고 닫힐 때 머리줄의 [프리셋] 단추 눌림 표시만 바꾼다(다시 그리지 않는다). */
+  function syncPresetsToggle(open) {
+    moduleBody?.querySelectorAll('.cond-preset-toggle').forEach(btn => btn.classList.toggle('is-open', Boolean(open)));
+  }
+
   return {
     formatLog,
     formatRules,
@@ -1999,5 +2315,6 @@ export function createConditionalPromptPanel({
     syncScroll,
     render,
     collectState,
+    syncPresetsToggle,
   };
 }

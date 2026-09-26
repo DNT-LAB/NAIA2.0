@@ -472,6 +472,8 @@ let characterPanel = null;
 let characterQuickPanel = null;
 let characterAssetControl = null;
 let conditionalPromptPanel = null;
+// 조건부 프롬프트는 모듈 팝업이 아니라 떠 있는 창이다(conditionalPromptWindow.mjs).
+let conditionalPromptWindow = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
 let latestWildcardFreezeState = {locations: [], legacy: [], characters: []};
@@ -2469,7 +2471,29 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260905-uq2')
+// 조건부 프롬프트 창(사용자 지정 2026-09-26: 새 플로팅 스타일 + 컴팩트). Search 창과 같은 방식으로
+// 두 모듈에 **같은 요소**를 넘긴다 - 창은 품고, 패널은 그 안에 그린다. 프리셋은 동반 창 요소.
+const conditionalHost = document.createElement('div');
+const conditionalPresetHost = document.createElement('div');
+const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-condwin8')
+  .then(({createConditionalPromptWindow}) => {
+    conditionalPromptWindow = createConditionalPromptWindow({
+      document,
+      window,
+      host: conditionalHost,
+      presetHost: conditionalPresetHost,
+      escHtml,
+      onShow: () => requestModuleState('conditional_prompt'),
+      // 닫을 때 0.5초 대기 중인 Legacy 편집을 보낸다(예전 closeModule 이 하던 일).
+      onHide: () => flushPendingModuleEdit('conditional_prompt'),
+      onVisibilityChange: () => updateModuleBtnState(),
+      onPresetsVisibility: open => conditionalPromptPanel?.syncPresetsToggle?.(open),
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize conditional prompt window', error);
+  });
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260926-condwin8')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -2478,6 +2502,10 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
       setModuleParam,
       bindTagAssist,
       confirmDialog: showConfirmDialog,
+      moduleBody: conditionalHost,
+      presetHost: conditionalPresetHost,
+      togglePresets: () => Boolean(conditionalPromptWindow && conditionalPromptWindow.togglePresets()),
+      isPresetsOpen: () => Boolean(conditionalPromptWindow && conditionalPromptWindow.isPresetsOpen()),
     });
   })
   .catch(error => {
@@ -10390,13 +10418,14 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260903-mobile1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260926-condwin')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
       getMode: () => currentMode || modeSelect.value || 'NAI',
       getCurrentModuleId: () => currentModuleId,
       isModulePopupOpen: () => modulePopup.classList.contains('open'),
+      isWindowModuleOpen,
       isChunkOpen,
       openModule,
       openChunkPanel,
@@ -11006,6 +11035,18 @@ function openModule(moduleId, options = {}) {
     });
     return;
   }
+  // 조건부 프롬프트도 떠 있는 창이다(사용자 지정 2026-09-26). 모듈 팝업을 거치지 않으므로
+  // 다른 모듈과 함께 열어 둘 수 있다. 상태는 창이 열릴 때 받는다(onShow).
+  if (moduleId === 'conditional_prompt') {
+    conditionalPromptWindowReady.then(() => {
+      if (!conditionalPromptWindow) return;
+      const wasOpen = conditionalPromptWindow.isOpen();
+      conditionalPromptWindow.show({toggle: !options.forceOpen});
+      // 이미 열려 있던 창을 다시 불렀으면(forceOpen) 최신 상태를 한 번 더 받는다 - 닫혀 있었으면 onShow 가 받는다.
+      if (wasOpen && options.forceOpen && !options.skipStateRequest) requestModuleState('conditional_prompt');
+    });
+    return;
+  }
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
@@ -11132,8 +11173,16 @@ function closeModule(options = {}) {
   if (chunkPanelControl) chunkPanelControl.relayout();
 }
 
+/** 모듈 팝업이 아니라 떠 있는 창으로 사는 모듈이 지금 열려 있나(단추 눌림 표시용). */
+function isWindowModuleOpen(moduleId) {
+  return moduleId === 'conditional_prompt' && Boolean(conditionalPromptWindow && conditionalPromptWindow.isOpen());
+}
+
 function closeOpenModulesForModeSwitch() {
   if (isDetachedModule) return;
+  // 조건부 설정은 API 모드마다 따로다 - 창에 옛 모드의 규칙이 남아 있지 않게 닫는다
+  // (예전에는 모듈 팝업이라 아래 closeModule 로 함께 닫혔다). 닫기가 대기 중인 편집을 보낸다.
+  if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) conditionalPromptWindow.close();
   const hasPrimaryModule = Boolean(currentModuleId) || modulePopup.classList.contains('open');
   if (hasPrimaryModule) {
     closeModule({ keepChunk: false });
@@ -11147,7 +11196,8 @@ function closeOpenModulesForModeSwitch() {
 function updateModuleBtnState() {
   document.querySelectorAll('.module-btn[data-module]').forEach(btn => {
     const isChunkBtn = btn.dataset.module === 'chunk';
-    btn.classList.toggle('active', isChunkBtn ? isChunkOpen() : btn.dataset.module === currentModuleId);
+    btn.classList.toggle('active', isChunkBtn ? isChunkOpen() : (btn.dataset.module === currentModuleId
+      || isWindowModuleOpen(btn.dataset.module)));
   });
   const pb = document.querySelector('.module-prompt-btn');
   if (pb) pb.classList.toggle('active', Boolean(searchQuickWindow && searchQuickWindow.isSearchShown()));
@@ -11605,6 +11655,13 @@ function onModuleState(m) {
     wildcardChunkPopup.onState(m);
   }
 
+  // 조건부 프롬프트도 모듈 팝업이 아니다(떠 있는 창). 아래 관문은 '지금 열린 모듈' 만 통과시키므로
+  // 여기서 넘긴다. 창이 닫혀 있어도 흘려 넣는다(Search 창과 같은 원칙 - 다음에 열 때 이미 최신).
+  if (m.module_id === 'conditional_prompt') {
+    renderConditionalPrompt(m);
+    return;
+  }
+
   if (m.module_id !== currentModuleId) return;
   renderModuleState(m);
 }
@@ -11997,6 +12054,11 @@ function setModuleParam(moduleId, key, value, options = {}) {
 // 500ms 디바운스라 **프리셋을 바꾼 뒤에 도착할 수 있고**, 그러면 앞 프리셋의 글이
 // 새 프리셋에 얹힌다 — 백엔드가 표식을 보고 그런 글을 버린다(사용자 제보 2026-08-25).
 function onModTextEdit(moduleId, key, value, stamp) {
+  // 대기 자리는 하나다. 조건부 창(떠 있는 창)과 모듈 팝업은 함께 열려 있을 수 있어서, 한쪽에서 치고
+  // 0.5초 안에 다른 칸을 치면 앞 칸의 대기분이 **덮여 사라진다** - 다른 칸의 것은 먼저 보낸다.
+  if (pendingModuleEdit && (pendingModuleEdit.moduleId !== moduleId || pendingModuleEdit.key !== key)) {
+    flushPendingModuleEdit();
+  }
   if (moduleSendTimer) clearTimeout(moduleSendTimer);
   pendingModuleEdit = {moduleId, key, value: stampedEdit(value, stamp)};
   moduleSendTimer = setTimeout(() => {
@@ -13788,6 +13850,7 @@ Promise.all([
   automationPanelReady,
   characterPanelReady,
   conditionalPromptPanelReady,
+  conditionalPromptWindowReady,
   eventStreamPanelReady,
   wildcardPanelReady,
   extensionsPanelReady,

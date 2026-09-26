@@ -2263,10 +2263,10 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
   .catch(error => {
     console.error('Failed to initialize data bootstrap panel module', error);
   });
-// API 설정 > AI 모델 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
-// 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 칸을 연다.
+// API 설정 > 04 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
+// 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 탭을 연다.
 let llmSetupPanel = null;
-import('./js/features/llmSetupPanel.mjs?v=20260926-llm')
+import('./js/features/llmSetupPanel.mjs?v=20260926-aitab')
   .then(({createLlmSetupPanel}) => {
     llmSetupPanel = createLlmSetupPanel({document, showToast, setModuleParam});
     llmSetupPanel.init();
@@ -2276,7 +2276,7 @@ import('./js/features/llmSetupPanel.mjs?v=20260926-llm')
   });
 window.openAiModelSetup = () => {
   openApiPopup();
-  setTimeout(() => llmSetupPanel?.reveal(), 60);   // 창이 보인 뒤에 굴려야 자리를 잰다
+  switchSetupTab('ai');   // API 설정 > 04 AI ASSIST 탭
 };
 let updateBanner = null;
 const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260607-srcupd2')
@@ -9539,6 +9539,7 @@ function onSetupBackdrop(event) {
 
 function switchSetupTab(tab) {
   if (setupController) setupController.switchSetupTab(tab);
+  if (tab === 'ai' && llmSetupPanel) llmSetupPanel.refresh();   // 탭이 보일 때만 폴링한다 — 들어오면 곧바로 새로 읽는다
 }
 
 function toggleSetupReveal(id, btn) {

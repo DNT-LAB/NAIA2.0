@@ -1,5 +1,5 @@
-// API 설정 > "AI 모델" 칸 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · 모드를 한 곳에서(사용자 지정
-// 2026-09-26: 받는 곳을 하나로). 상태는 /api/boost-v2/status 폴링, 모델 · 모드 저장은 PE 모듈의 boost_v2_settings
+// API 설정 > "04 AI ASSIST" 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · 모드를 한 곳에서(사용자 지정
+// 2026-09-26: 받는 곳을 하나로 · NovelAI 탭 아래 공통 영역에서 제 탭으로). 탭 이름 밑 글자 · 점도 여기서 채운다. 상태는 /api/boost-v2/status 폴링, 모델 · 모드 저장은 PE 모듈의 boost_v2_settings
 // (부분 저장 — 서버가 디스크 값에 합친다), 받기는 /api/boost-v2/model/download {model} · 엔진은 /api/boost-v2/engine/download.
 //
 // 모델 = [E2B | E4B | 26B] · 모드 = [CPU 모드 | GPU 모드](GPU 모드 = 설정 device 'auto' 또는 GPU id, CPU 모드 = 'cpu').
@@ -39,7 +39,7 @@ const STYLE = `
 export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bind(window), showToast = () => {},
   setModuleParam }) {
   const section = document.getElementById('setupLlmSection');
-  if (!section) return { init() {}, refresh() {}, reveal() {} };
+  if (!section) return { init() {}, refresh() {} };
   const elStatus = section.querySelector('[data-llm-status]');
   const elBody = section.querySelector('[data-llm-body]');
 
@@ -104,6 +104,22 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     return '모델 없음';
   }
 
+  // 탭 이름 밑 글자 · 점(다른 탭과 같은 옷: ok · warn · err)
+  function paintNav() {
+    const sub = document.getElementById('setupNavSubAi');
+    const dot = document.getElementById('setupDotAi');
+    const dl = st.download || {};
+    const eng = st.engine_install || {};
+    let text = '모델 없음';
+    let state = 'warn';
+    if (!st.engine_ready) { text = eng.active ? `엔진 ${eng.percent || 0}%` : '엔진 없음'; state = 'err'; }
+    else if (dl.active || dl.phase === 'verify') text = `받는 중 ${dl.percent || 0}%`;
+    else if (st.priming) text = '준비 중';
+    else if (st.model_ready) { text = String(st.model_label || '').replace('Gemma 4 ', ''); state = 'ok'; }
+    if (sub) sub.textContent = text;
+    if (dot) dot.className = `setup-nav-dot ${state}`;
+  }
+
   function progressHtml(state) {
     const pct = Math.max(0, Math.min(100, Number(state.percent) || 0));
     return `<div class="setup-update-progress"><div class="setup-update-progress-bar">
@@ -114,6 +130,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
   function render() {
     if (!st || !elBody) return;
     if (elStatus) elStatus.textContent = headline();
+    paintNav();
     const hw = st.hardware || {};
     const models = st.models || [];
     const mode = st.mode === 'gpu' ? 'gpu' : 'cpu';
@@ -267,19 +284,8 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     ensureStyle();
     section.addEventListener('click', onClick);
     section.addEventListener('change', onChange);
+    refresh();   // 탭 이름 밑 상태를 처음부터 채운다(탭이 안 보이면 폴링은 이어 가지 않는다)
   }
 
-  // 다른 곳(Assist 띠 · Boost 설정)의 [AI 모델] 단추 — 설정 창을 연 쪽이 부른다: 이 칸을 보이게 하고 새로 읽는다.
-  function reveal() {
-    // 부드러운 스크롤은 창이 열리는 애니메이션(크기 · 위치가 변하는 중)과 겹치면 멈춘다 — 즉시 굴리고, 그려진 뒤 한 번 더.
-    const scroll = () => section.scrollIntoView({ block: 'start' });
-    scroll();
-    requestAnimationFrame(() => requestAnimationFrame(scroll));
-    setTimeout(scroll, 350);
-    section.animate?.([{ outline: '2px solid rgba(124,106,239,0.8)' }, { outline: '2px solid transparent' }],
-      { duration: 1400 });
-    refresh();
-  }
-
-  return { init, refresh, reveal };
+  return { init, refresh };
 }

@@ -95,9 +95,17 @@
           <span class="setup-nav-sub" id="setupNavSubComfyui">미설정</span>
           <span class="setup-nav-dot" id="setupDotComfyui"></span>
         </button>
+        <!-- Assist · Auto Boost 가 함께 쓰는 앱 내장 AI 모델(엔진 · 모델 · CPU/GPU 모드) — 사용자 지정 2026-09-26.
+             이름 밑 글자 · 점은 js/features/llmSetupPanel.mjs 가 채운다. -->
+        <button class="setup-nav-item" data-tab="ai" onclick="switchSetupTab('ai')" role="tab">
+          <span class="setup-nav-num">04</span>
+          <span class="setup-nav-name">AI ASSIST</span>
+          <span class="setup-nav-sub" id="setupNavSubAi">확인 중</span>
+          <span class="setup-nav-dot" id="setupDotAi"></span>
+        </button>
         <!-- GROK 연동 (제거 가능): 이미지 우클릭 I2I 전용 보조 백엔드 -->
         <button class="setup-nav-item" data-tab="grok" onclick="switchSetupTab('grok')" role="tab">
-          <span class="setup-nav-num">04</span>
+          <span class="setup-nav-num">05</span>
           <span class="setup-nav-name">GROK</span>
           <span class="setup-nav-sub" id="setupNavSubGrok">미설정</span>
           <span class="setup-nav-dot" id="setupDotGrok"></span>
@@ -158,6 +166,14 @@
           </div>
           <div class="setup-result" id="setupResultComfyui"></div>
           <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
+        </div>
+        <!-- AI ASSIST — 앱 내장 llama-server 의 엔진 · 모델 · 모드(받는 곳은 여기 하나). 내용은 llmSetupPanel.mjs 가 그린다. -->
+        <div class="setup-tab-pane" data-pane="ai">
+          <div id="setupLlmSection" style="display:flex;flex-direction:column;gap:10px">
+            <div class="setup-meta-line"><span>쓰는 곳</span><span class="setup-meta-val">Assist(Ctrl+O) · Auto Boost</span></div>
+            <div class="setup-meta-line"><span>상태</span><span class="setup-meta-val" data-llm-status>확인 중…</span></div>
+            <div data-llm-body style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+          </div>
         </div>
         <!-- GROK 연동 (제거 가능): 이미지 우클릭 → I2I/I2V 전용. 단독 생성/자동화 아님. 번들 progrok OAuth. -->
         <div class="setup-tab-pane" data-pane="grok">
@@ -233,15 +249,6 @@
             <span class="setup-update-progress-text" data-bootstrap-progress-text></span>
           </div>
           <div class="setup-result" data-bootstrap-result></div>
-        </div>
-        <!-- Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · 모드(사용자 지정 2026-09-26: 받는 곳을 하나로).
-             내용은 js/features/llmSetupPanel.mjs 가 그린다. -->
-        <div class="setup-cloudflared" id="setupLlmSection">
-          <div class="setup-cloudflared-head">
-            <span class="setup-cloudflared-title">AI 모델 (Assist · Boost)</span>
-            <span class="setup-cloudflared-status" data-llm-status>확인 중…</span>
-          </div>
-          <div data-llm-body style="display:flex;flex-direction:column;gap:10px"></div>
         </div>
         <div class="setup-update hidden" id="setupUpdateSection">
           <div class="setup-cloudflared-head">
@@ -1470,6 +1477,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260926-noollama"></script>
+<script src="app.js?v=20260926-aitab"></script>
 </body>
 </html>

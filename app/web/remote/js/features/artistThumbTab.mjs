@@ -2709,7 +2709,7 @@ export function createArtistThumbController({
       import('./artistGroupWindow.mjs?v=20260926-newview'),
       import('./dragBroker.mjs?v=20260919-strip'),
       import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
-      import('./artistBenchViewWindow.mjs?v=20260926-newview'),
+      import('./artistBenchViewWindow.mjs?v=20260926-benchone'),
     ]);
     const store = createArtistGroupsStore({fetch});
     // 보기(벤치) - 공용 저장소 하나 + 설정 창 하나(사용자 지정 2026-09-26).
@@ -2718,6 +2718,8 @@ export function createArtistThumbController({
       document, store: views, escHtml,
       showToast: (msg, kind) => showToast?.(msg, kind),
       confirmDialog,
+      // prefix · postfix · 캐릭터 칸 - 메인 프롬프트와 **같은** 자동완성(사용자 지정 2026-09-26).
+      bindTagAssist: (textarea, options) => bindTagAssist?.(textarea, options),
     });
     groupsApi = {store, views, viewWindow, createWindow: createArtistGroupWindow, broker: dragBrokerFor(document)};
     // 보기를 못 읽어도 그룹은 쓴다 - 보기 줄만 비어 있다.

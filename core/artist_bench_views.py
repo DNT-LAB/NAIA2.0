@@ -33,6 +33,11 @@ MAX_VIEWS = 50
 MAX_NAME_LEN = 40
 MAX_TEXT_LEN = 8000
 MAX_CHARACTERS = 6
+# 캐릭터 프롬프트를 어디서 가져오나(사용자 지정 2026-09-26):
+#   main = 생성 순간 **메인 화면의 캐릭터**(보기의 캐릭터 목록은 쓰지 않는다)
+#   own  = 보기가 가진 캐릭터만(비어 있으면 캐릭터 없음 - 메인 화면의 캐릭터가 끼어들지 못한다)
+# 이 칸이 없던 옛 보기는 own - 그때의 동작 그대로다.
+CHARACTER_MODES = ("main", "own")
 API_MODES = ("NAI", "WEBUI", "COMFYUI")
 
 
@@ -118,6 +123,8 @@ def clean_spec(raw: Any) -> dict:
         "postfix": _clean_text(raw.get("postfix")),
         "negative": _clean_text(raw.get("negative")),
         "characters": _clean_characters(raw.get("characters")),
+        "character_mode": (str(raw.get("character_mode") or "own").strip().lower()
+                           if str(raw.get("character_mode") or "own").strip().lower() in CHARACTER_MODES else "own"),
         # 어느 PE 프리셋에서 떴는지(보여 주기용 - 조건이 아니다).
         "source_preset": str(raw.get("source_preset") or "").strip()[:200],
         "width": _clean_size(raw.get("width"), "width"),

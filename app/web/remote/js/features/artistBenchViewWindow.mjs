@@ -1,13 +1,16 @@
 /** 보기(벤치) 설정 창 — 보기 하나를 보고 고친다. 창은 **하나**를 돌려 쓴다.
  *
- *  탭 둘(사용자 지정 2026-09-26 - '1 + 2 를 탭으로'):
- *   - [요약] 조건을 한눈에 · [지금 설정으로 갱신](메인 화면에서 맞춘 뒤 누른다) · 이름 · 삭제
- *   - [편집] 전용 편집기: prefix/postfix/네거티브 · 캐릭터 프롬프트 · 해상도 · 모델/샘플러/
- *            스케줄러 · 스텝/CFG/리스케일 · 시드
- *  새 보기는 **바로 만들고 [편집] 탭으로 연다**(사용자 지정 2026-09-26 - '지금 설정으로…' 를 미리
- *  요구할 필요가 없다. 보기를 먼저 만들고 보기에서 직접 설정한다). 이름은 `새 보기`, `새 보기 2` … 로
- *  붙이고 편집 탭 맨 위 칸에서 고친다. 처음 값: 글·캐릭터는 **비우고**, 생성 설정(해상도·모델·샘플러·
- *  스텝·CFG)만 지금 값 - 빈칸이면 생성할 수 없어서다. PE 글까지 떠 오려면 [요약] 의 [지금 설정으로 갱신].
+ *  **한 화면**이다(사용자 지정 2026-09-26 - 요약과 편집이 공존할 필요가 없다. 바로 고치고 [저장]).
+ *  글 칸(prefix/postfix/negative · 캐릭터)은 넓게. 캐릭터는 [메인 캐릭터 프롬프트 | 독립 캐릭터 프롬프트]
+ *  토글 - 메인이면 생성 순간 메인 화면의 캐릭터, 독립이면 보기의 캐릭터(+ 캐릭터 는 독립일 때만).
+ *  prefix · postfix · 캐릭터 칸은 메인 프롬프트와 같은 자동완성을 쓴다(`bindTagAssist`).
+ *  새 보기는 바로 만들어 연다 - 글은 지금 PE 프리셋에서, 이름은 `새 보기`, `새 보기 2` ….
+ *
+ *  ⚠️ 작업본(저장 전 입력)은 조용히 사라지면 안 된다(Codex 감사 2026-09-26: 이미 고른 [편집] 탭을 다시
+ *     누르면 입력이 초기화됐다). 고치는 중에는 다른 곳의 변경으로 다시 그리지 않고, 다른 보기로 넘어가면
+ *     먼저 묻는다. 다시 그릴 때(캐릭터 넣고 빼기)는 스크롤 자리를 지킨다.
+ *  ⚠️ 자동완성 목록은 캐럿 자리에 `fixed` 로 뜬다 - 이 창이 안에서 스크롤되면 목록만 허공에 남는다.
+ *     목록이 떠 있는 채로 스크롤되면 칸의 초점을 풀어 목록을 닫는다.
  *
  *  ⚠️ `window.prompt()` 를 쓰지 않는다(Electron 렌더러에 없다) - 이름은 창 안의 칸으로 받는다.
  *  ⚠️ 삭제는 두 번 눌러야 한다(그룹 창과 같은 규칙). 뽑아 둔 그림 파일은 서버가 지우지 않는다.
@@ -23,20 +26,21 @@ export function createArtistBenchViewWindow({
   escHtml = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   showToast = () => {},
   confirmDialog = null,
+  bindTagAssist = null,       // (textarea, options) => void  메인 프롬프트와 같은 자동완성
 } = {}) {
   let panel = null;
   let viewId = '';
-  let tab = 'summary';
-  let draft = null;           // 편집 탭의 작업본(저장 전)
+  let draft = null;           // 작업본(저장 전)
+  let dirty = false;          // 작업본을 사용자가 고쳤는가 - 고쳤으면 다시 그려 덮지 않는다
   let unsub = null;
 
   function ensurePanel() {
     if (panel) return panel;
     panel = createDraggablePanel({
       document: doc, window: win, title: '보기 설정', variant: 'abv', storageKey: 'bench-view',
-      width: 380, minWidth: 300, maxWidth: 720, height: 560, resizable: true,
+      width: 440, minWidth: 320, maxWidth: 820, height: 700, resizable: true,
       initial: {x: 340, y: 90}, escHtml,
-      onClose: () => { viewId = ''; draft = null; },
+      onClose: () => { viewId = ''; draft = null; dirty = false; },
     });
     panel.el.setAttribute('data-rctl-companion', '');   // 리모컨의 '바깥 누름' 에서 안쪽
     panel.body.addEventListener('click', onClick);
@@ -46,17 +50,23 @@ export function createArtistBenchViewWindow({
     unsub = store.subscribe((_data, reason) => {
       if (!panel.isOpen()) return;
       if (viewId && !store.get(viewId)) { panel.close(); return; }          // 다른 곳에서 지워졌다
-      if (reason !== 'update' || tab !== 'edit') render();                   // 쓰는 중인 편집칸은 덮지 않는다
+      if (!dirty) { draft = null; render(); }                                // 고치는 중이면 덮지 않는다
     });
     return panel;
   }
 
   // ── 열기 ──────────────────────────────────────────────────────────────
-  async function open(id, {tab: startTab = 'summary'} = {}) {
+  async function open(id, {parentPanel = null} = {}) {
     ensurePanel();
+    // 저장하지 않은 입력이 있는데 **다른** 보기로 넘어간다 - 먼저 묻는다(조용히 버리지 않는다).
+    if (dirty && viewId && viewId !== id && panel.isOpen()) {
+      const ok = await Promise.resolve(confirmDialog ? confirmDialog(
+        `'${view()?.name || '이 보기'}' 에 저장하지 않은 변경이 있습니다. 버리고 넘어갈까요?`,
+        {title: '저장하지 않은 변경'}) : true);
+      if (!ok) { panel.raise(); return; }
+    }
+    if (viewId !== id) { draft = null; dirty = false; }
     viewId = id;
-    tab = startTab;
-    draft = null;
     panel.open(); panel.raise();
     render();
   }
@@ -72,17 +82,17 @@ export function createArtistBenchViewWindow({
   }
 
   /** 바로 만들고 [편집] 탭으로 연다. 그룹에서 불렀으면 그 그룹이 곧바로 고른다. */
-  async function openNew(groupId = '') {
+  async function openNew(groupId = '', {parentPanel = null} = {}) {
     try {
       const current = await store.refreshCurrent();
       if (!current) throw new Error('지금 설정을 읽지 못했습니다');
       // 글(prefix/postfix/negative)은 **지금 보고 있는 PE 프리셋**에서(사용자 지정 2026-09-26 - 비워 두니
       // 휑해서 오히려 어렵다). 작가 태그·믹스 표식은 서버가 이미 걷어 냈다. 캐릭터는 비운다.
-      const spec = {...current, characters: []};
+      const spec = {...current, characters: [], character_mode: 'main'};
       delete spec.stripped;
       const created = await store.create(freshName(), spec);
       if (groupId) await store.select(groupId, created.id);
-      await open(created.id, {tab: 'edit'});
+      await open(created.id, {parentPanel});
     } catch (error) {
       showToast(error.message || '보기를 만들지 못했습니다.', 'error');
     }
@@ -91,61 +101,35 @@ export function createArtistBenchViewWindow({
   // ── 그리기 ────────────────────────────────────────────────────────────
   const view = () => (viewId ? store.get(viewId) : null);
 
-  function seedText(seed) { return Number(seed) < 0 ? '랜덤' : String(seed); }
-
-  function summaryHtml(spec) {
-    const s = spec.settings || {};
-    const rows = [
-      ['백엔드', spec.api_mode],
-      ['PE 프리셋', spec.source_preset || '—'],
-      ['모델', s.model || '—'],
-      ['샘플러', [s.sampler, s.scheduler].filter(Boolean).join(' · ') || '—'],
-      ['스텝 · CFG', `${s.steps ?? '—'} · ${s.scale ?? '—'}${s.cfg_rescale ? ` · rescale ${s.cfg_rescale}` : ''}`],
-      ['해상도', `${spec.width} x ${spec.height}`],
-      ['시드', seedText(spec.seed)],
-      ['캐릭터', (spec.characters || []).length ? `${spec.characters.length}명` : '없음'],
-    ];
-    const text = (label, value) => `
-      <div class="abv-text"><span>${label}</span><div>${value ? escHtml(value) : '<i>비어 있음</i>'}</div></div>`;
-    return `
-      <dl class="abv-facts">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escHtml(String(v))}</dd>`).join('')}</dl>
-      ${text('prefix', spec.prefix)}${text('postfix', spec.postfix)}${text('negative', spec.negative)}
-      ${(spec.characters || []).map((c, i) => text(`캐릭터 ${i + 1}`, c.prompt + (c.uc ? `  ⊘ ${c.uc}` : ''))).join('')}`;
-  }
-
   function render() {
     if (!panel) return;
     const v = view();
     if (!v) { panel.close(); return; }
     panel.setTitle(`보기 · ${v.name}`);
-    const tabs = `
-      <div class="abv-tabs" role="tablist">
-        <button type="button" data-abv-tab="summary" class="${tab === 'summary' ? 'is-on' : ''}">요약</button>
-        <button type="button" data-abv-tab="edit" class="${tab === 'edit' ? 'is-on' : ''}">편집</button>
-      </div>`;
-    if (tab === 'summary') {
-      panel.body.innerHTML = `${tabs}
-        <div class="abv-scroll">${summaryHtml(v)}</div>
-        <form class="abv-rename" hidden>
-          <input type="text" maxlength="40" spellcheck="false" value="${escHtml(v.name)}">
-          <button type="submit" class="abv-btn">확인</button>
-          <button type="button" class="abv-btn" data-abv-act="rename-cancel">취소</button>
-        </form>
-        <div class="abv-actions">
-          <button type="button" class="abv-btn primary" data-abv-act="refresh"
-                  title="메인 화면의 지금 설정(PE 글 · 캐릭터 · 해상도 · 생성 설정)으로 이 보기를 덮습니다">지금 설정으로 갱신</button>
-          <button type="button" class="abv-btn" data-abv-act="rename">이름 바꾸기</button>
-          <span class="abv-spacer"></span>
-          <button type="button" class="abv-btn danger" data-abv-act="delete">삭제</button>
-        </div>`;
-      return;
-    }
     if (!draft) draft = draftFrom(v);
-    panel.body.innerHTML = `${tabs}<div class="abv-scroll">${editorHtml(draft)}</div>
+    // 다시 그려도(캐릭터 넣고 빼기) 보던 자리에 머문다.
+    const keepTop = panel.body.querySelector('.abv-scroll')?.scrollTop || 0;
+    panel.body.innerHTML = `<div class="abv-scroll">${editorHtml(draft)}</div>
       <div class="abv-actions">
         <button type="button" class="abv-btn primary" data-abv-act="save">저장</button>
-        <button type="button" class="abv-btn" data-abv-act="revert">되돌리기</button>
+        <button type="button" class="abv-btn" data-abv-act="revert" title="저장하지 않은 변경을 버립니다">되돌리기</button>
+        <button type="button" class="abv-btn" data-abv-act="refresh"
+                title="메인 화면의 지금 설정(PE 글 · 해상도 · 생성 설정)으로 이 보기를 덮습니다">지금 설정으로 갱신</button>
+        <span class="abv-spacer"></span>
+        <button type="button" class="abv-btn danger" data-abv-act="delete">삭제</button>
       </div>`;
+    const scroll = panel.body.querySelector('.abv-scroll');
+    scroll.scrollTop = keepTop;
+    // 자동완성 - prefix · postfix · 캐릭터 칸(사용자 지정). 다시 그리면 칸이 새것이라 다시 붙인다.
+    if (typeof bindTagAssist === 'function') {
+      panel.body.querySelectorAll('[data-abv-field="prefix"], [data-abv-field="postfix"], [data-abv-char-field="prompt"]')
+        .forEach(el => bindTagAssist(el));
+    }
+    // 목록이 떠 있는 채로 스크롤되면 닫는다 - 목록은 캐럿 자리에 fixed 라 칸을 따라오지 않는다.
+    scroll.addEventListener('scroll', () => {
+      const active = doc.activeElement;
+      if (active && panel.body.contains(active) && doc.getElementById('tagTooltip')?.classList.contains('open')) active.blur();
+    }, {passive: true});
   }
 
   function selectHtml(field, value, choices) {
@@ -161,21 +145,30 @@ export function createArtistBenchViewWindow({
     const area = (field, label, rows = 3, note = '') => `
       <label class="abv-field"><span>${label}${note ? `<em class="abv-hint">${note}</em>` : ''}</span>
         <textarea data-abv-field="${field}" rows="${rows}" spellcheck="false">${escHtml(d[field] || '')}</textarea></label>`;
+    const own = d.character_mode !== 'main';
     const chars = (d.characters || []).map((c, i) => `
       <div class="abv-char" data-abv-char="${i}">
         <div class="abv-char-head"><span>캐릭터 ${i + 1}</span>
           <button type="button" class="abv-x" data-abv-act="char-remove" data-index="${i}" title="이 캐릭터 빼기">×</button></div>
-        <textarea data-abv-char-field="prompt" rows="2" spellcheck="false" placeholder="캐릭터 프롬프트">${escHtml(c.prompt)}</textarea>
+        <textarea data-abv-char-field="prompt" rows="3" spellcheck="false" placeholder="캐릭터 프롬프트">${escHtml(c.prompt)}</textarea>
         <input type="text" data-abv-char-field="uc" spellcheck="false" placeholder="캐릭터 네거티브(선택)" value="${escHtml(c.uc || '')}">
       </div>`).join('');
     const fixed = Boolean(d.seedFixed);
     return `
-      <label class="abv-field"><span>이름</span>
+      <label class="abv-field"><span>이름<em class="abv-hint">${escHtml(String(d.api_mode || ''))}${d.source_preset ? ` · ${escHtml(String(d.source_preset))} 에서` : ''}</em></span>
         <input type="text" data-abv-field="name" maxlength="40" spellcheck="false" value="${escHtml(d.name || '')}"></label>
-      ${area('prefix', 'prefix', 3, '작가 태그는 맨 앞에 붙습니다')}${area('postfix', 'postfix')}${area('negative', 'negative', 2)}
-      <div class="abv-group"><div class="abv-group-head"><span>캐릭터 프롬프트</span>
-        <button type="button" class="abv-btn" data-abv-act="char-add"${(d.characters || []).length >= MAX_CHARACTERS ? ' disabled' : ''}>+ 캐릭터</button></div>
-        ${chars || '<div class="abv-empty small">캐릭터 없음 - 메인 화면의 캐릭터는 섞이지 않습니다.</div>'}</div>
+      ${area('prefix', 'prefix', 5, '작가 태그는 맨 앞에 붙습니다')}${area('postfix', 'postfix', 5)}${area('negative', 'negative', 4)}
+      <div class="abv-group"><div class="abv-group-head">
+        <div class="abv-toggle" role="group" aria-label="캐릭터 프롬프트">
+          <button type="button" class="${own ? '' : 'is-on'}" data-abv-act="char-mode" data-mode="main"
+                  aria-pressed="${!own}" title="생성 순간 메인 화면의 캐릭터 프롬프트를 씁니다">메인 캐릭터 프롬프트</button>
+          <button type="button" class="${own ? 'is-on' : ''}" data-abv-act="char-mode" data-mode="own"
+                  aria-pressed="${own}" title="이 보기만의 캐릭터 프롬프트를 씁니다">독립 캐릭터 프롬프트</button>
+        </div>
+        <button type="button" class="abv-btn" data-abv-act="char-add"${!own || (d.characters || []).length >= MAX_CHARACTERS ? ' disabled' : ''}>+ 캐릭터</button></div>
+        ${own
+          ? (chars || '<div class="abv-empty small">캐릭터 없음 - 메인 화면의 캐릭터는 섞이지 않습니다.</div>')
+          : '<div class="abv-empty small">생성할 때 메인 화면의 캐릭터 프롬프트를 그대로 씁니다.</div>'}</div>
       <div class="abv-grid">
         <label class="abv-field"><span>너비</span><input type="number" step="64" min="64" max="4096" data-abv-field="width" value="${d.width}"></label>
         <label class="abv-field"><span>높이</span><input type="number" step="64" min="64" max="4096" data-abv-field="height" value="${d.height}"></label>
@@ -199,6 +192,7 @@ export function createArtistBenchViewWindow({
   function onInput(event) {
     if (!draft) return;
     const el = event.target;
+    if (el.dataset?.abvField || el.dataset?.abvCharField) dirty = true;
     const field = el.dataset?.abvField;
     const charField = el.dataset?.abvCharField;
     if (charField) {
@@ -245,6 +239,7 @@ export function createArtistBenchViewWindow({
     return {
       api_mode: d.api_mode, prefix: d.prefix, postfix: d.postfix, negative: d.negative,
       characters: (d.characters || []).filter(c => String(c.prompt || '').trim()),
+      character_mode: d.character_mode === 'main' ? 'main' : 'own',
       source_preset: d.source_preset, width: d.width, height: d.height, settings: d.settings,
       seed: d.seedFixed && d.seedValue !== '' ? Number(d.seedValue) : -1,
     };
@@ -252,8 +247,6 @@ export function createArtistBenchViewWindow({
 
   // ── 단추 ──────────────────────────────────────────────────────────────
   async function onClick(event) {
-    const tabBtn = event.target.closest('[data-abv-tab]');
-    if (tabBtn) { tab = tabBtn.dataset.abvTab; if (tab === 'edit') draft = null; render(); return; }
     const act = event.target.closest('[data-abv-act]')?.dataset.abvAct;
     if (!act) return;
     const v = view();
@@ -265,23 +258,14 @@ export function createArtistBenchViewWindow({
           return;
         }
         const ok = await Promise.resolve(confirmDialog ? confirmDialog(
-          `'${v.name}' 보기를 지금 설정으로 덮습니다. 이미 뽑은 그림은 그대로 남습니다(옛 조건의 그림).`,
+          `'${v.name}' 보기를 지금 설정으로 덮습니다${dirty ? '(저장하지 않은 변경도 버립니다)' : ''}. 이미 뽑은 그림은 그대로 남습니다(옛 조건의 그림).`,
           {title: '지금 설정으로 갱신'}) : true);
         if (!ok) return;
-        await store.update(v.id, current);
+        dirty = false;
+        draft = null;
+        // 캐릭터를 어디서 가져오는지는 사용자의 선택이다 - 갱신이 뒤집지 않는다.
+        await store.update(v.id, {...current, character_mode: v.character_mode || 'own'});
         showToast(`'${v.name}' 을(를) 지금 설정으로 갱신했습니다.`, 'success');
-      } else if (act === 'rename') {
-        const form = panel.body.querySelector('.abv-rename');
-        form.hidden = false;
-        form.querySelector('input').select();
-        form.onsubmit = async submit => {
-          submit.preventDefault();
-          const name = form.querySelector('input').value.trim();
-          if (!name) return;
-          try { await store.rename(v.id, name); } catch (error) { showToast(error.message, 'error'); }
-        };
-      } else if (act === 'rename-cancel') {
-        panel.body.querySelector('.abv-rename').hidden = true;
       } else if (act === 'delete' && v) {
         const btn = event.target.closest('[data-abv-act]');
         if (btn.dataset.armed !== '1') {
@@ -296,28 +280,38 @@ export function createArtistBenchViewWindow({
       } else if (act === 'save' && v && draft) {
         const name = String(draft.name || '').trim();
         if (name && name !== v.name) await store.rename(v.id, name);
-        await store.update(v.id, specFrom(draft));
+        const spec = specFrom(draft);
+        dirty = false;          // 먼저 내린다 - 저장이 알리는 갱신에서 새 판으로 다시 그려지게
         draft = null;
-        tab = 'summary';
+        await store.update(v.id, spec);
         render();
         showToast('보기를 저장했습니다.', 'success');
       } else if (act === 'revert') {
         draft = null;
+        dirty = false;
         render();
+      } else if (act === 'char-mode' && draft) {
+        const mode = event.target.closest('[data-abv-act]').dataset.mode === 'main' ? 'main' : 'own';
+        if (draft.character_mode !== mode) { draft.character_mode = mode; dirty = true; render(); }
       } else if (act === 'seed-roll' && draft) {
         // NAI 시드 범위(0 ~ 2^32-1). 굴렸다는 것은 그 시드로 보겠다는 뜻이라 고정도 켠다.
         draft.seedValue = Math.floor(Math.random() * 4294967295);
         draft.seedFixed = true;
+        dirty = true;
         paintSeed();
       } else if (act === 'seed-fix' && draft) {
         draft.seedFixed = !draft.seedFixed;
         if (draft.seedFixed && draft.seedValue === '') draft.seedValue = Math.floor(Math.random() * 4294967295);
+        dirty = true;
         paintSeed();
       } else if (act === 'char-add' && draft) {
+        if (draft.character_mode === 'main') return;
         draft.characters = [...(draft.characters || []), {prompt: '', uc: ''}].slice(0, MAX_CHARACTERS);
+        dirty = true;
         render();
       } else if (act === 'char-remove' && draft) {
         draft.characters.splice(Number(event.target.closest('[data-abv-act]').dataset.index), 1);
+        dirty = true;
         render();
       }
     } catch (error) {

@@ -102,7 +102,10 @@ def _bench_current_spec(context: WebSessionContext) -> dict:
     except Exception:
         width, height = 832, 1216
     return {"api_mode": mode, "prefix": pre, "postfix": post, "negative": layers["negative"],
-            "characters": _bench_current_characters(context, mode), "source_preset": preset,
+            # 캐릭터는 지금 굴려 둔 것을 **사본으로** 들고, 쓰는 것은 메인(생성 순간의 메인 캐릭터).
+            # [독립] 으로 바꾸면 이 사본에서 시작한다.
+            "characters": _bench_current_characters(context, mode), "character_mode": "main",
+            "source_preset": preset,
             "width": width, "height": height, "settings": layers["settings"], "seed": -1,
             # 조건이 아니라 **알림**이다(저장소가 버린다) - 새 보기 화면이 '뺀 것' 으로 보여 준다.
             "stripped": stripped}

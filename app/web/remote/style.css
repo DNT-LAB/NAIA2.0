@@ -30498,6 +30498,15 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .abv-seed input { flex: 1 1 auto; min-width: 0; }
 .abv-seed.is-loose input { opacity: 0.45; }
 .abv-btn.is-on { color: var(--text-primary); border-color: var(--accent); background: rgba(124, 92, 255, 0.28); }
+/* 보기 편집기 한 화면 - 캐릭터 [메인 | 독립] 토글(두 칸짜리 단추) · 글 칸 넉넉히 */
+.abv-toggle { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; }
+.abv-toggle button { height: 24px; padding: 0 10px; border: 0; background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.abv-toggle button + button { border-left: 1px solid var(--border-dim); }
+.abv-toggle button.is-on { color: var(--text-primary); background: rgba(124, 92, 255, 0.28); }
+.abv-toggle button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.abv-group-head { gap: 6px; flex-wrap: wrap; }
+.dragpanel.abv .abv-field textarea { min-height: 64px; }
 
 /* ══ 우클릭 메뉴의 그룹 줄 (artistThumbTab.groupMenuHtml) ═══════════════════ */
 /* ⚠️ 아티스트 메뉴는 떠 있는 창(10150대) **위**여야 한다. 기본 결과 메뉴 층(2400)에

@@ -11,6 +11,8 @@
  *   캐릭터는 이 요청에만 싣는다.
  * - 최대한 쉽게(사용자 지정 2026-09-26): [생성해 줘 → 바로 생성] · [직역 먼저] 는 애매해서, 아래 안내 줄 · [Random 에 연결] ·
  *   '실제 게시물' 은 유명무실해서 뺐다. 다듬기는 늘 켠다(서버 기본값 — 요청에 literal · refine 을 싣지 않는다).
+ * - [고급 설정](09-26): 등급마다 User Preference(영어) — 고른 등급의 것만 요청에 실어 다듬기가 따른다. [생성] 은 고른
+ *   등급의 태그를 메인 끝에 붙인다(서버: G safe, rating:general · S rating:sensitive · Q/E nsfw, rating:…).
  * - 칸에 넣는 것은 **[프롬프트에 넣기] 를 눌렀을 때만**이다. 메인 = 이벤트 맵 [적용] 과 같은 Random 파이프라인
  *   (PE 앞뒤·자동 숨김·와일드카드), 캐릭터 칸(NAI) = 기존 칸은 **비활성으로** 보내고 새로 덧붙인다(아무것도 잃지 않는다).
  * - 칠하기는 promptHighlighter 와 같은 방식이다: 입력칸 뒤에 같은 글을 담은 거울을 깔고 CSS Custom Highlight API
@@ -31,6 +33,38 @@ const INSTALL_POLL_MS = 1000;
 const MAX_LINES = 6;
 const PREF_KEY = 'naia_assist_prefs_v1';
 const HL_KINDS = ['found', 'chosen', 'miss', 'off'];
+// [고급 설정] — User Preference(사용자 지정 2026-09-26): 다듬기가 고른 등급의 문장을 따라 프롬프트를 고친다(영어로).
+// E 는 사용자가 직접 적는다(비워 두면 쓰지 않는다). 앞으로 이 창에 입력 칸이 더 붙는다.
+const DEFAULT_PREFERENCE = {
+  g: 'A wholesome image with a calm, peaceful, still atmosphere.',
+  s: 'A slightly risqué image that focuses on details of the body, outfit, and actions.',
+  q: 'An image that focuses on the body, such as the breasts and buttocks, with a somewhat sexual atmosphere and details.',
+  e: '',
+};
+const MAX_PREFERENCE = 400;
+const ADV_STYLE_ID = 'assist-adv-style';
+// 창 모듈이 제 CSS 를 싣는다(refinePanel 과 같은 방식). 주의: 이 템플릿 안에는 백틱을 쓰지 않는다
+const ADV_CSS = `
+.as-adv { padding: 6px 10px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-muted); font-size: 10px; }
+.as-adv-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.as-adv-head b { color: var(--text-primary); font-size: 10.5px; }
+.as-adv-head span { flex: 1; min-width: 0; }
+.as-adv-reset {
+  height: 20px; padding: 0 8px; border: 1px solid var(--border-dim); border-radius: 5px;
+  background: transparent; color: var(--text-muted); font-size: 10px; cursor: pointer;
+}
+.as-adv-reset:hover { border-color: var(--text-dim); color: var(--text-primary); }
+.as-adv-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; }
+.as-adv-k { width: 14px; padding-top: 5px; text-align: center; font-family: var(--font-mono); color: var(--text-dim); }
+.as-adv-row.is-on .as-adv-k { color: var(--text-primary); font-weight: 700; }
+.as-adv-row textarea {
+  flex: 1; min-width: 0; min-height: 34px; resize: vertical; padding: 4px 6px;
+  border: 1px solid var(--border-dim); border-radius: 5px; background: rgba(255,255,255,0.03);
+  color: var(--text-secondary); font: inherit; font-size: 10.5px; line-height: 1.4;
+}
+.as-adv-row.is-on textarea { border-color: rgba(230,168,74,0.55); }
+.as-adv-row textarea:focus { outline: none; border-color: var(--text-dim); }
+`;
 const HIGHLIGHT_API = typeof Highlight !== 'undefined' && typeof CSS !== 'undefined' && !!CSS.highlights;
 
 function loadPrefs() {
@@ -51,7 +85,7 @@ function clampCount(value, fallback) {
 
 export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
-  let banner = null, body = null, sendBtn = null, picker = null;
+  let banner = null, body = null, sendBtn = null, picker = null, advPanel = null, advBtn = null;
   let open = false;
   let heightCap = 0;
 
@@ -59,6 +93,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
   const prefs = loadPrefs();
   let rating = RATINGS.some(r => r.id === prefs.rating) ? prefs.rating : 'g';
   let personsMode = prefs.personsMode === 'manual' ? 'manual' : 'auto';
+  const savedPreference = prefs.preference && typeof prefs.preference === 'object' ? prefs.preference : {};
+  const preference = Object.fromEntries(RATINGS.map(r => [r.id,
+    typeof savedPreference[r.id] === 'string' ? savedPreference[r.id] : DEFAULT_PREFERENCE[r.id]]));
   let girls = clampCount(prefs.girls, 1);
   let boys = clampCount(prefs.boys, 0);
 
@@ -82,7 +119,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
   }
 
   function persistPrefs() {
-    savePrefs({ rating, personsMode, girls, boys });
+    savePrefs({ rating, personsMode, girls, boys, preference });
   }
 
   async function postJson(path, payload, { allowError = false } = {}) {
@@ -130,7 +167,17 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
         <span class="as-persons" data-as-persons role="group" aria-label="인원"></span>
         <span class="fs-rating-bar as-rating" data-as-rating role="group" aria-label="등급(추론 방향)">${RATINGS.map(r =>
           `<button type="button" class="fs-rating-btn" data-r="${r.id}" title="${r.title}">${r.label}</button>`).join('')}</span>
+        <button type="button" class="as-seg" data-as-adv aria-expanded="false"
+                title="다듬기가 따를 User Preference(등급마다)">고급 설정</button>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
+      </div>
+      <div class="as-adv" data-as-adv-panel hidden>
+        <div class="as-adv-head"><b>User Preference</b>
+          <span>다듬기가 고른 등급의 문장을 따라 프롬프트를 고칩니다 · 영어로 · 비워 두면 쓰지 않습니다</span>
+          <button type="button" class="as-adv-reset" data-as-adv-reset title="G · S · Q · E 를 처음 문장으로">기본값</button></div>
+        ${RATINGS.map(r => `<label class="as-adv-row" data-as-adv-row="${r.id}"><span class="as-adv-k">${r.label}</span>
+          <textarea rows="2" spellcheck="false" maxlength="${MAX_PREFERENCE}" data-as-pref="${r.id}"
+                    aria-label="${r.title} 일 때"></textarea></label>`).join('')}
       </div>
       <div class="as-banner" data-as-banner hidden></div>
       <div class="as-body" data-as-body></div>`;
@@ -143,6 +190,32 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
     banner = overlay.querySelector('[data-as-banner]');
     body = overlay.querySelector('[data-as-body]');
     sendBtn = overlay.querySelector('[data-as-send]');
+    advPanel = overlay.querySelector('[data-as-adv-panel]');
+    advBtn = overlay.querySelector('[data-as-adv]');
+    if (!document.getElementById(ADV_STYLE_ID)) {
+      const style = document.createElement('style');
+      style.id = ADV_STYLE_ID;
+      style.textContent = ADV_CSS;
+      document.head.appendChild(style);
+    }
+    fillPreference();
+    advBtn.addEventListener('click', () => {
+      advPanel.hidden = !advPanel.hidden;
+      advBtn.classList.toggle('is-on', !advPanel.hidden);
+      advBtn.setAttribute('aria-expanded', String(!advPanel.hidden));
+      fit();
+    });
+    advPanel.addEventListener('input', event => {
+      const box = event.target.closest('[data-as-pref]');
+      if (!box) return;
+      preference[box.dataset.asPref] = box.value;
+      persistPrefs();
+    });
+    overlay.querySelector('[data-as-adv-reset]').addEventListener('click', () => {
+      Object.assign(preference, DEFAULT_PREFERENCE);
+      fillPreference();
+      persistPrefs();
+    });
 
     overlay.querySelector('[data-as-close]').addEventListener('click', close);
     overlay.querySelector('[data-as-reset]').addEventListener('click', reset);
@@ -192,6 +265,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
       pill.classList.toggle('active', on);
       pill.setAttribute('aria-pressed', String(on));
     });
+    advPanel?.querySelectorAll('[data-as-adv-row]').forEach(row => {
+      row.classList.toggle('is-on', row.dataset.asAdvRow === rating);      // 지금 쓰이는 등급의 문장
+    });
+  }
+
+  function fillPreference() {
+    advPanel?.querySelectorAll('[data-as-pref]').forEach(box => { box.value = preference[box.dataset.asPref] || ''; });
   }
 
   // ── 인원: [자동 | 여 n 남 m] ─────────────────────────────────────────────
@@ -542,6 +622,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
     };
     const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
     if (mode) payload.api_mode = mode;
+    const wish = String(preference[rating] || '').trim();
+    if (wish) payload.preference = wish.slice(0, MAX_PREFERENCE);     // 고른 등급의 User Preference 만
     let data;
     try { data = await postJson('/api/assist', payload, { allowError: true }); } catch (error) { data = { ok: false, error: error.message }; }
     if (mine !== askSeq) return;

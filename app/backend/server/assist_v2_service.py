@@ -22,6 +22,10 @@ MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 202
 # looking at penis 0.07% · groping 0.08% · nipples 0.13% · nude 0.19% / bound wrists 4.6% · cleavage 2.7% · meat 63%
 RATING_GATE = {"g": 0.002, "s": 0.002}
 RATING_GATE_MIN_POSTS = 50    # 이보다 적게 달린 태그는 비중을 믿지 않는다(두고 본다)
+# [생성](가상 프롬프트 한 장)에 붙이는 등급 태그 — 고른 등급대로 메인 끝에(사용자 지정 2026-09-26)
+GENERATE_RATING_TAGS = {"g": ("safe", "rating:general"), "s": ("rating:sensitive",),
+                        "q": ("nsfw", "rating:questionable"), "e": ("nsfw", "rating:explicit")}
+MAX_PREFERENCE = 400          # 고급 설정의 User Preference(등급마다 영어 한두 문장) 글자 수 상한
 MODEL_TIMEOUT = 60.0
 MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
 MAX_NAME_CHOICES = 8
@@ -343,8 +347,11 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
     refine = bool(payload.get("refine", True))
     # 미번역 낱말 되살리기(09-26 첫 마일스톤, core/assist_recover) — 거구 · 주인 · 교배 처럼 어떤 태그도 설명 못 한 말. 기본 켬
     recover = bool(payload.get("recover", True))
+    # 고급 설정의 User Preference(사용자 지정 09-26) — 화면이 고른 등급의 것만 보낸다. 다듬기가 이 방향으로 고친다
+    preference = " ".join(str(payload.get("preference") or "").split())[:MAX_PREFERENCE]
     return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
-            "choices": choices, "not_names": not_names, "literal": literal, "refine": refine, "recover": recover}
+            "choices": choices, "not_names": not_names, "literal": literal, "refine": refine, "recover": recover,
+            "preference": preference}
 
 
 def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -372,6 +379,9 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
             isinstance(c, str) and len(c) <= 600 for c in raw_chars):
         raise AssistError("캐릭터 프롬프트가 잘못됐습니다.")
     characters = [c.strip() for c in raw_chars if c.strip()]
+    # 등급 태그를 뒤에(사용자 지정 09-26) — 이미 적힌 것은 다시 붙이지 않는다(영문으로 nsfw 를 적었을 때)
+    have = {t.lower() for t in tags}
+    tags += [t for t in GENERATE_RATING_TAGS[rating] if t not in have]
     source_row = {"general": ", ".join(tags), "rating": rating,
                   "character": None, "copyright": None, "artist": None, "meta": None, "assist_combo": True}
     overrides: dict[str, Any] = {"auto_generate": False}
@@ -426,6 +436,7 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     한국어 사전으로 확인한다(진짜 E2B 가 브이 문장에서 맞는 v 를 빼고 finger heart 를 더했다, 09-25):
     - 빼기: 지금 태그 안에서만, 사전이 요청과 이어 주는 태그 · 한국어 층 규칙 태그는 빼지 않는다.
     - 더하기: 태그 이름 그대로이고 사전이 요청과 이어 주는 것만(잡동사니 · 인원 · 제외 칸 · 등급 게이트도 지나야).
+      고급 설정의 User Preference 가 있으면 그 방향의 더하기는 사전 확인 없이 받는다 — 제 문장에서 말한 것만(자기 일관성).
     - 문장은 메인 끝에(compose) — 분위기는 문장이 맡는다. 실패하면 다듬지 않고 간다."""
     from core import assist_refine as ar
     from core.assist_english import en_key
@@ -434,8 +445,9 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     tags = merged.all_tags()
     if not tags:
         return None, {}
-    reply, info = _chat(context, ar.REFINE_SYSTEM, ar.refine_message(req["text"], tags, literal), ar.refine_grammar(),
-                        max_tokens=160)
+    preference = req.get("preference") or ""
+    reply, info = _chat(context, ar.REFINE_SYSTEM, ar.refine_message(req["text"], tags, literal, preference),
+                        ar.refine_grammar(), max_tokens=160)
     got = ar.parse_refine(reply) if reply is not None else None
     if got is None:
         return None, info
@@ -455,7 +467,10 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
         if (not name or _junk_tag(name) or vocab.role(name) == "population" or name in merged.all_tags()
                 or name in merged.exclude or name in added or name in removed or en_key(name) in typed):
             continue
-        if name not in grounded or not ar.mentions(name, got.sentence):
+        # User Preference 가 있으면 그 글이 말한 것도 받는다(Q 의 'breasts and buttocks' -> breasts · breast focus 가
+        # 제 문장에 없어서 막혔다, 09-26)
+        said = ar.mentions(name, got.sentence) or bool(preference and ar.mentions(name, preference))
+        if (name not in grounded and not preference) or not said:
             refused.append(name)            # 사전이 요청과 안 이어 주거나(finger heart) 제 문장에 없는 것(close-up)
             continue
         s = share(name) if share and gate is not None else None

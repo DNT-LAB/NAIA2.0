@@ -21,6 +21,7 @@ REFINE_SYSTEM = """You check the Danbooru tags made for a Korean image request.
 - remove: tags that do not fit the request (a wrong meaning, or something the request does not ask for).
 - add: up to 4 Danbooru tags for what the request clearly says but the tags miss (pose, expression, place, framing).
 - sentence: one English sentence that describes the picture - what the request says, with a light touch of mood. No names.
+- If a User preference is given, lean the additions and the sentence toward it, without changing what the request says.
 Never add people counts (1girl, solo), quality or rating tags. Answer JSON only.
 
 Example:
@@ -40,11 +41,14 @@ class Refine:
     sentence: str = ""
 
 
-def refine_message(text: str, tags: list[str], literal: str | None = None) -> str:
+def refine_message(text: str, tags: list[str], literal: str | None = None, preference: str = "") -> str:
+    """preference = 고급 설정의 User Preference(고른 등급의 것, 사용자 지정 09-26) — 있으면 맨 끝 줄에."""
     lines = [f"Request: {clean_text(text).strip()}"]
     if literal:
         lines.append(f"Literal English: {literal}")
     lines.append(f"Tags: {', '.join(tags)}")
+    if preference:
+        lines.append(f"User preference: {preference}")
     return "\n".join(lines)
 
 

@@ -66,11 +66,10 @@ const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide', 'modPre
 // 그중 태그 자동완성을 붙일 칸(검색창은 제외).
 const PE_TAG_ASSIST_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 
-// Ollama Auto Boost — readiness gating. 대상 모델은 백엔드(연결 설정)가 SSOT —
-// status 쿼리에 model을 보내지 않아 커스텀 엔드포인트/모델에서도 구성된 모델 기준으로
-// 판정된다. "ready" = installed && running && model_installed.
+// Auto Boost — readiness gating. "ready" = 앱 내장 엔진과 고른 모델이 있다(/api/boost-v2/status).
+// Ollama 백엔드는 회수했다(사용자 지정 2026-09-26). 변수 이름의 ollama 는 옛 토글 이름을 따른 것이다.
 const PE_OLLAMA_POLL_MS = 5000;
-const PE_OLLAMA_BOOST_GUIDE = 'Random 때마다 프롬프트를 자연어로 보강 · 백엔드(llama.cpp 내장 / Ollama)가 준비됐을 때만 켤 수 있음 · 저장/프리셋에 기록되지 않음(항상 OFF로 시작)';
+const PE_OLLAMA_BOOST_GUIDE = 'Random 때마다 프롬프트를 자연어로 보강 · 앱 내장 AI 모델(API 설정 › AI 모델)이 준비됐을 때만 켤 수 있음 · 저장/프리셋에 기록되지 않음(항상 OFF로 시작)';
 
 // 섹션 헤더 우측 [ⓘ 가이드] 버튼 문구. \n\n 은 단락 구분 (툴팁 엔진이 변환).
 const PE_PREFIX_GUIDE = [
@@ -119,14 +118,12 @@ export function createPromptEngineeringPanel({
   bindTagAssist,
   setOllamaAutoBoost = () => {},
 }) {
-  // Ollama readiness gating state for the "Ollama Auto Boost" checkbox. We poll
-  // /api/ollama/status while the PE panel is mounted and reflect ready/not-ready
-  // onto the checkbox (enabled vs disabled) in-place, without a full re-render.
+  // Readiness gating state for the "Auto Boost" checkbox. We poll /api/boost-v2/status
+  // while the PE panel is mounted and reflect ready/not-ready onto the checkbox
+  // (enabled vs disabled) in-place, without a full re-render.
   let ollamaReady = false;
   let ollamaBoostOn = false;          // last-known desired state from module_state
-  // Auto Boost 백엔드 — 'llamacpp'(Boost v2, 앱 내장 엔진)면 Ollama 대신 엔진·모델 존재로 게이트한다.
-  let boostBackend = 'ollama';
-  let backendJustSwitched = false;    // 바뀐 직후 첫 판정에서 준비 안 됐으면 켜진 토글을 끈다
+  let firstCheck = true;              // 첫 판정에서 준비 안 됐으면 켜진 토글을 끈다
   let ollamaPollTimer = null;
   let ollamaStatusInFlight = false;
 
@@ -153,7 +150,7 @@ export function createPromptEngineeringPanel({
     }
     if (hint) {
       hint.style.display = ollamaReady ? 'none' : '';
-      hint.textContent = boostBackend === 'llamacpp' ? '(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)' : '(Ollama 실행·모델 준비 시 활성화)';
+      hint.textContent = '(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)';
     }
   }
 
@@ -167,15 +164,9 @@ export function createPromptEngineeringPanel({
     ollamaStatusInFlight = true;
     let ready = false;
     try {
-      if (boostBackend === 'llamacpp') {
-        const response = await fetch('/api/boost-v2/status');
-        const data = await response.json().catch(() => null);
-        ready = !!(data && data.engine_ready === true && data.model_ready === true);
-      } else {
-        const response = await fetch('/api/ollama/status');
-        const data = await response.json().catch(() => null);
-        ready = !!(data && data.installed === true && data.running === true && data.model_installed === true);
-      }
+      const response = await fetch('/api/boost-v2/status');
+      const data = await response.json().catch(() => null);
+      ready = !!(data && data.engine_ready === true && data.model_ready === true);
     } catch (error) {
       // Treat any fetch/parse failure as "not ready" — never crash the panel.
       ready = false;
@@ -185,9 +176,9 @@ export function createPromptEngineeringPanel({
     const wasReady = ollamaReady;
     ollamaReady = ready;
     // If it just dropped out of ready while armed, clear the backend session flag
-    // once so the boost can't stay armed while Ollama is down.
-    const recheck = backendJustSwitched;
-    backendJustSwitched = false;
+    // once so the boost can't stay armed while the engine/model is missing.
+    const recheck = firstCheck;
+    firstCheck = false;
     if ((wasReady || recheck) && !ready && ollamaBoostOn) {
       ollamaBoostOn = false;
       try { setOllamaAutoBoost(false); } catch (e) {}
@@ -503,15 +494,8 @@ export function createPromptEngineeringPanel({
     // Ollama Auto Boost — a SESSION-ONLY toggle rendered separately from the
     // preprocessing grid (it is NOT a preprocessing option). Backend resets it to
     // false on load, so reflect m.ollama_auto_boost as the desired state but only
-    // allow it ON when Ollama is ready (gated by the polling status check below).
+    // allow it ON when the engine/model is ready (gated by the polling status check below).
     ollamaBoostOn = !!m.ollama_auto_boost;
-    const nextBackend = (m.boost_v2_settings && m.boost_v2_settings.backend) === 'llamacpp' ? 'llamacpp' : 'ollama';
-    if (nextBackend !== boostBackend) {
-      // 백엔드가 바뀌면 이전 백엔드의 준비 판정은 무효 — 다음 폴링까지 꺼 둔다.
-      boostBackend = nextBackend;
-      ollamaReady = false;
-      backendJustSwitched = true;
-    }
     const boostChecked = ollamaReady && ollamaBoostOn;
     const boostDisabled = ollamaReady ? '' : ' disabled';
     const boostItemStyle = ollamaReady ? '' : ' style="opacity:0.4;cursor:not-allowed"';
@@ -519,7 +503,7 @@ export function createPromptEngineeringPanel({
     const ollamaBoostHtml = `
     <label class="mod-checkbox-item pe-tone-teal${ollamaReady ? '' : ' mod-checkbox-disabled'}"${boostItemStyle} data-naia-guide="${escHtml(PE_OLLAMA_BOOST_GUIDE)}">
       <input type="checkbox" id="peOllamaBoostCheckbox" ${boostChecked ? 'checked' : ''}${boostDisabled}${boostInputStyle} oninput="setPromptEngineeringOllamaAutoBoost(this.checked)">
-      <span class="mod-checkbox-label">Auto Boost <span style="color:var(--text-dim)">· ${boostBackend === 'llamacpp' ? 'llama.cpp' : 'Ollama'}</span> <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">${boostBackend === 'llamacpp' ? '(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)' : '(Ollama 실행·모델 준비 시 활성화)'}</span></span>
+      <span class="mod-checkbox-label">Auto Boost <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)</span></span>
     </label>`;
 
     // 갈래 필터 바는 **NAI 모드에서만** 뜬다 — 백엔드가 그때만 목록을 준다.
@@ -574,7 +558,7 @@ export function createPromptEngineeringPanel({
     </div>
     <div>
       <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Setting &amp; Preview</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
-      <!-- Ollama Auto Boost를 그리드 마지막 셀로 — Tag Implication(좌) 우측 칸을 채워 균일하게. -->
+      <!-- Auto Boost 를 그리드 마지막 셀로 — Tag Implication(좌) 우측 칸을 채워 균일하게. -->
       <div class="mod-checkbox-grid">${preprocessingHtml}${ollamaBoostHtml}</div>
     </div>
     ${advancedHtml}

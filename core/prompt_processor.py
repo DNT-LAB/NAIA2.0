@@ -593,25 +593,18 @@ class PromptProcessor:
 
     def _step_3_expand_wildcards(self, context: PromptContext) -> PromptContext:
         """와일드카드를 실제 태그로 치환하는 단계"""
-        # Ollama Boost([기능3])용: prefix/postfix의 *와일드카드 출력만* 캡처한다(고정 아티스트/
-        # 퀄리티 태그 제외). 실제 전개와 동일 draw를 써야 하므로 여기서 sink로 수집한다.
-        prefix_wc_sink: list[str] = []
-        postfix_wc_sink: list[str] = []
         context.prefix_tags = self.wildcard_processor.expand_tags(
-            context.prefix_tags, context, wildcard_sink=prefix_wc_sink, location='prefix')
+            context.prefix_tags, context, location='prefix')
         context.prefix_tags = self._expand_preset_tokens(context.prefix_tags, context)
         context.main_tags = self._expand_preset_tokens(context.main_tags, context)
         context.postfix_tags = self.wildcard_processor.expand_tags(
-            context.postfix_tags, context, wildcard_sink=postfix_wc_sink, location='postfix')
+            context.postfix_tags, context, location='postfix')
         context.postfix_tags = self._expand_preset_tokens(context.postfix_tags, context)
         try:
             if isinstance(getattr(context, "metadata", None), dict):
-                context.metadata["prefix_wildcard_tags"] = list(prefix_wc_sink)
-                context.metadata["postfix_wildcard_tags"] = list(postfix_wc_sink)
-                # Ollama Boost 접지용: 후처리(remove_color/object/features 등) + 와일드카드 전개 후,
-                # 최종 포맷(인물수→prefix 이동) 전의 main 스냅샷. raw source_row['general'] 대신 이걸
-                # 근거로 써서, 사용자가 전처리로 제거한 색/객체/특징을 부스트가 prose로 재주입해
-                # remove_* 설정을 무력화하던 버그를 막는다(사용자 지정: prefix+main+postfix 처리 단계).
+                # 후처리(remove_color/object/features 등) + 와일드카드 전개 후, 최종 포맷(인물수→prefix 이동)
+                # 전의 main 스냅샷 — V5 Scene 이 인물 수를 읽는다(core/headless_v5_scene_service). 이름은 옛 Ollama
+                # Boost 접지용이던 시절 것이다(Ollama 회수 2026-09-26).
                 context.metadata["boost_main_tags"] = list(context.main_tags or [])
         except Exception:
             pass

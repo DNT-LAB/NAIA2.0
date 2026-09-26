@@ -30,7 +30,7 @@ from scipy import sparse
 from core.tag_combo.noise import ARTIFACT_TAGS, is_color_tag
 from tools.build_fast_search_event_catalog import is_population, normalize_atom
 from tools.thumb_age_guard import danger_age_hits
-from core.event_preset.fast_search_catalog import PERSON_IDS
+from core.event_preset.engines import PERSON_PARTITION_ORDER as PERSON_IDS
 
 GROUPS = frozenset({'Food_Object', 'Expression_Action', 'Clothing_Wear',
                     'Location_Background', 'Creatures', 'Composition_Meta', 'Culture_Misc'})

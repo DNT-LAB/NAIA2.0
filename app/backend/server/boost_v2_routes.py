@@ -2,7 +2,7 @@
 
 설정 저장(모델 · 할당 장치 포함)은 PE 모듈 경로(``set_module_param('prompt_engineering', 'boost_v2_settings', …)``)가
 맡고, 여기는 폴링이 필요한 것(상태·다운로드 진행)만 둔다. 모델 다운로드(3~14 GB)와 엔진 내리기는
-NAIA 가 도는 PC 에서만 — Ollama pull 과 같은 루프백 가드.
+NAIA 가 도는 PC 에서만 — install-manager 와 같은 루프백 가드.
 """
 
 from __future__ import annotations
@@ -43,10 +43,31 @@ def register_boost_v2_routes(
         get_boost_runtime,
         get_engine_installer,
         prime_runtime,
+        release_boost_runtime,
         start_model_download,
         stop_boost_runtime,
         warm_boost_runtime,
     )
+
+    def _on_auto_boost_changed(*args: Any) -> None:
+        """Auto Boost 토글(PE 서비스가 publish) — 켤 때 엔진을 미리 올리고(첫 Random 이 로드를 안 기다리게), 끌 때
+        Boost 의 임대를 놓는다(아무도 안 쥐면 바로 내린다 — Assist 가 방금 썼으면 그 임대가 끝날 때).
+        옛 ollama_routes 에 있던 구독의 v2 몫이다(Ollama 상주 관리는 회수, 2026-09-26)."""
+        enabled = bool(getattr(context, "ollama_auto_boost", False))
+        if args and isinstance(args[0], dict) and "enabled" in args[0]:
+            enabled = bool(args[0]["enabled"])
+        try:
+            if enabled:
+                warm_boost_runtime(context)
+            else:
+                release_boost_runtime(context)
+        except Exception:
+            pass
+
+    try:
+        context.subscribe("ollama_auto_boost_changed", _on_auto_boost_changed)
+    except Exception:
+        pass
 
     def _on_device_changed(*_args: Any) -> None:
         """할당 장치나 모델을 바꿨다 — Auto Boost 가 켜져 있으면 새 설정으로 곧바로 다시 띄운다(도는 요청은 끝까지 간 뒤).

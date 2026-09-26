@@ -1,8 +1,7 @@
 """Boost v2 앱 레이어 — 설정 로드, llama-server 런타임 싱글턴, 랜덤 결과에 끼우기.
 
-Ollama Chat(Assist)과 아무것도 공유하지 않는다: 서비스·모델 선택·큐·상주 관리가 전부 따로다.
-켜기/끄기는 기존 세션 토글(``context.ollama_auto_boost``)을 쓰고, 설정의 ``backend`` 가
-``"llamacpp"`` 일 때만 이 경로가 돈다.
+Auto Boost 는 이것 하나다(Ollama 파이프라인은 2026-09-26 회수). 켜기/끄기는 세션 토글(``context.ollama_auto_boost``
+— 이름만 옛것)을 쓴다. 엔진은 Assist v2 와 함께 쓴다(누가 쓰는지는 임대로 센다 — core/llama_runtime).
 """
 
 from __future__ import annotations
@@ -28,22 +27,13 @@ def _save_root(context: Any) -> Path:
 
 
 def boost_v2_settings(context: Any) -> dict[str, Any]:
-    """매 호출 디스크에서 읽는다(모드별 PE 캐시 staleness 회피 — ollama_boost_settings 와 같은 이유)."""
+    """매 호출 디스크에서 읽는다(모드별 PE 캐시 staleness 회피 — 전역 설정이라 모드 캐시에 싣지 않는다)."""
     from core.boost_v2 import load_boost_v2_settings, normalize_boost_v2_settings
 
     try:
         return load_boost_v2_settings(save_root=_save_root(context))
     except Exception:
         return normalize_boost_v2_settings(None)
-
-
-def boost_v2_selected(context: Any, settings: dict[str, Any] | None = None) -> bool:
-    """백엔드로 llama.cpp 가 골라졌는가(토글 ON 여부와 별개)."""
-    try:
-        s = settings if settings is not None else boost_v2_settings(context)
-        return s.get("backend") == "llamacpp"
-    except Exception:
-        return False
 
 
 def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> Any:
@@ -291,8 +281,7 @@ def _color_list(context: Any) -> list[str]:
 def _grounding_tags(context: Any, result: Any) -> str:
     """조건부까지 반영된 main 스냅샷(boost_v2_main_tags). 없으면 main_tags. 가중치는 벗기고
     색상 태그는 설정과 무관하게 뺀다. 캐릭터 프롬프트·prefix/postfix 는 넣지 않는다."""
-    from core.boost_v2 import drop_color_tags
-    from core.scene_boost import strip_weight_syntax
+    from core.boost_v2 import drop_color_tags, strip_weight_syntax
 
     ctx = getattr(result, "context", None)
     if ctx is None:

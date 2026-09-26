@@ -51,8 +51,8 @@ class WebSessionContext:
     # (e.g. a NAI random prompt leaking into COMFYUI). prompt_text/negative_prompt_text
     # always reflect the ACTIVE mode's plane; set_api_mode stashes/activates here.
     prompt_planes: dict[str, dict[str, str]] = field(default_factory=dict)
-    # Ollama Auto Boost — 세션 전용 토글(비영속). 항상 OFF로 시작하고 save/preset에 절대
-    # 기록하지 않는다. 사용자가 직접 켜야만 ON이며 Ollama가 준비됐을 때만 enable 가능.
+    # Auto Boost — 세션 전용 토글(비영속, 이름만 Ollama 시절 것). 항상 OFF로 시작하고 save/preset에 절대
+    # 기록하지 않는다. 사용자가 직접 켜야만 ON이며 앱 내장 엔진 · 모델이 준비됐을 때만 enable 가능.
     ollama_auto_boost: bool = False
     remote_options: dict[str, bool] = field(default_factory=lambda: dict(REMOTE_OPTION_DEFAULTS))
     remote_params: dict[str, Any] = field(default_factory=dict)

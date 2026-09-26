@@ -116,58 +116,6 @@ def default_preprocessing_options() -> dict[str, bool]:
     return options
 
 
-# Ollama Boost — 자연어 보강 프롬프트 설정(영속). e621_settings 와 동일한 저장/로드/병합
-# 패턴을 따른다. nl_weight 는 [0.75, 3.0] 으로 clamp, effort 는 concise/standard/rich 중
-# 하나로 강제(기본 rich), include/style 플래그는 bool 로 강제.
-OLLAMA_BOOST_EFFORTS = ("concise", "standard", "rich")
-OLLAMA_BOOST_NL_WEIGHT_MIN = 0.75
-OLLAMA_BOOST_NL_WEIGHT_MAX = 3.0
-OLLAMA_BOOST_DEFAULTS: dict[str, Any] = {
-    "nl_weight": 1.0,
-    "effort": "rich",
-    "include_prefix": False,
-    "include_postfix": False,
-    "include_e621": False,
-    "allow_scent_style": True,
-    "allow_material_style": True,
-    "allow_light_style": True,
-    # close-up 강화(옵트인) — ON이면 자연어 본문이 카메라 샷/앵글(close-up·low angle)을
-    # 명명하도록 허용해 기존 사양에 가까운 프레이밍-중심 보강을 낸다(기본 OFF=다양성 우선).
-    "emphasize_framing": False,
-}
-
-
-def normalize_ollama_boost_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
-    """Coerce raw Ollama Boost settings to the canonical schema/defaults.
-
-    nl_weight → float clamped to [0.75, 3.0]; effort → one of concise/standard/rich
-    (fallback rich); include_prefix/postfix/e621 and style options → bool. Unknown keys are dropped."""
-    source = settings if isinstance(settings, dict) else {}
-    try:
-        nl_weight = float(source.get("nl_weight", OLLAMA_BOOST_DEFAULTS["nl_weight"]))
-    except (TypeError, ValueError):
-        nl_weight = OLLAMA_BOOST_DEFAULTS["nl_weight"]
-    if nl_weight != nl_weight:  # NaN guard
-        nl_weight = OLLAMA_BOOST_DEFAULTS["nl_weight"]
-    nl_weight = max(OLLAMA_BOOST_NL_WEIGHT_MIN, min(OLLAMA_BOOST_NL_WEIGHT_MAX, nl_weight))
-    effort = str(source.get("effort", OLLAMA_BOOST_DEFAULTS["effort"]) or "").strip().lower()
-    if effort not in OLLAMA_BOOST_EFFORTS:
-        effort = OLLAMA_BOOST_DEFAULTS["effort"]
-    return {
-        "nl_weight": round(nl_weight, 4),
-        "effort": effort,
-        "include_prefix": bool(source.get("include_prefix", False)),
-        "include_postfix": bool(source.get("include_postfix", False)),
-        "include_e621": bool(source.get("include_e621", False)),
-        "allow_scent_style": bool(source.get("allow_scent_style", OLLAMA_BOOST_DEFAULTS["allow_scent_style"])),
-        "allow_material_style": bool(
-            source.get("allow_material_style", OLLAMA_BOOST_DEFAULTS["allow_material_style"])
-        ),
-        "allow_light_style": bool(source.get("allow_light_style", OLLAMA_BOOST_DEFAULTS["allow_light_style"])),
-        "emphasize_framing": bool(source.get("emphasize_framing", OLLAMA_BOOST_DEFAULTS["emphasize_framing"])),
-    }
-
-
 def default_prompt_engineering_settings(save_root: str | Path | None = None) -> dict[str, Any]:
     return {
         "pre_prompt": "",
@@ -176,7 +124,6 @@ def default_prompt_engineering_settings(save_root: str | Path | None = None) -> 
         "preprocessing_options": default_preprocessing_options(),
         "e621_settings": load_e621_settings(save_root=save_root),
         "danbooru_weight_settings": load_danbooru_weight_settings(save_root=save_root),
-        "ollama_boost_settings": load_ollama_boost_settings(save_root=save_root),
     }
 
 
@@ -266,24 +213,6 @@ def save_danbooru_weight_settings(settings: dict[str, Any], *, save_root: str | 
     path.write_text(json.dumps(dict(settings or {}), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_ollama_boost_settings(*, save_root: str | Path | None = None) -> dict[str, Any]:
-    path = _existing_save_file("ollama_boost_user.json", save_root)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return dict(OLLAMA_BOOST_DEFAULTS)
-    return normalize_ollama_boost_settings(data if isinstance(data, dict) else {})
-
-
-def save_ollama_boost_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
-    path = _coerce_save_root(save_root) / "ollama_boost_user.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(normalize_ollama_boost_settings(settings), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
 # 카테고리별 랜덤 프롬프트 전처리 필터 커스터마이즈 — 전역(모드 무관) 디스크 SSOT.
 # 각 전처리 카테고리(remove_* 체크박스)마다 exclude(자동 제거에서 보호할 태그)/
 # include(해당 카테고리 ON일 때 함께 제거할 추가 태그)를 사용자가 지정한다.
@@ -365,53 +294,6 @@ def save_category_filter_overrides(overrides: dict[str, Any], *, save_root: str 
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema_version": 1, "categories": normalize_category_filter_overrides(overrides)}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-# 고급 연결 설정 — 셀프호스팅(cloudflared 등) 사용자가 NAIA 백엔드가 프록시할 Ollama
-# 엔드포인트/모델을 직접 지정하기 위한 전역(모드 무관) 설정. 빈 endpoint/model은
-# "기본값 사용"을 뜻한다(env NAIA_OLLAMA_URL → 코드 기본 localhost / 코드 기본 모델).
-OLLAMA_CONNECTION_DEFAULTS: dict[str, str] = {"endpoint": "", "model": ""}
-
-
-def normalize_ollama_connection_settings(settings: dict[str, Any] | None) -> dict[str, str]:
-    """{endpoint, model} 위생화. endpoint는 http/https만 허용하고 trailing slash와
-    실수로 붙인 OpenAI 호환 접미사(``/v1``)를 제거한다(네이티브 API는 ``/api/...``를
-    직접 붙이므로 ``/v1``이 들어오면 깨진다). 스킴이 없으면 ``http://``를 보충하고,
-    여전히 유효하지 않으면 빈 문자열(=기본값 사용)로 떨어뜨린다 — 호출부(라우트)가
-    '입력은 있었지만 무효'를 구분해 거부할 수 있도록 빈 입력과 무효 입력 모두 ''가 된다."""
-    data = settings if isinstance(settings, dict) else {}
-    endpoint = str(data.get("endpoint") or "").strip()
-    if endpoint:
-        if "://" not in endpoint:
-            endpoint = "http://" + endpoint
-        endpoint = endpoint.rstrip("/")
-        if endpoint.lower().endswith("/v1"):
-            endpoint = endpoint[:-3].rstrip("/")
-        from urllib.parse import urlparse
-
-        parsed = urlparse(endpoint)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            endpoint = ""
-    model = str(data.get("model") or "").strip()
-    return {"endpoint": endpoint, "model": model}
-
-
-def load_ollama_connection_settings(*, save_root: str | Path | None = None) -> dict[str, str]:
-    path = _existing_save_file("ollama_connection_user.json", save_root)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return dict(OLLAMA_CONNECTION_DEFAULTS)
-    return normalize_ollama_connection_settings(data if isinstance(data, dict) else {})
-
-
-def save_ollama_connection_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
-    path = _coerce_save_root(save_root) / "ollama_connection_user.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(normalize_ollama_connection_settings(settings), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def last_used_preset_file(*, save_root: str | Path | None = None) -> Path:
@@ -728,9 +610,7 @@ def merge_settings(base: dict[str, Any], updates: dict[str, Any] | None) -> dict
             current_options[key] = bool(value)
         merged["preprocessing_options"] = current_options
     for key, value in incoming.items():
-        if key == "ollama_boost_settings" and isinstance(value, dict):
-            merged[key] = normalize_ollama_boost_settings(value)
-        elif key in {"e621_settings", "danbooru_weight_settings"} and isinstance(value, dict):
+        if key in {"e621_settings", "danbooru_weight_settings"} and isinstance(value, dict):
             merged[key] = dict(value)
         elif key in {"pre_prompt", "post_prompt", "auto_hide_prompt"}:
             merged[key] = str(value or "")
@@ -818,9 +698,6 @@ class PromptEngineeringHeadlessStore:
 
     def save_danbooru_weight_settings(self, settings: dict[str, Any]) -> None:
         save_danbooru_weight_settings(settings, save_root=self._save_root)
-
-    def save_ollama_boost_settings(self, settings: dict[str, Any]) -> None:
-        save_ollama_boost_settings(settings, save_root=self._save_root)
 
     def state(self, mode: str | None = None) -> dict[str, Any]:
         mode_key = self.mode(mode)

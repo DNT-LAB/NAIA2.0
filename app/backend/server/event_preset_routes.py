@@ -116,10 +116,6 @@ def _generate_event_preset_prompt(
         saved_context = getattr(context, "current_prompt_context", None)
         saved_prompt = str(getattr(context, "prompt_text", "") or "")
         saved_negative = str(getattr(context, "negative_prompt_text", "") or "")
-        saved_ollama_character_params = _snapshot_optional_attr(
-            context,
-            "_ollama_frozen_character_params",
-        )
         saved_character_roll_snapshot = _snapshot_optional_attr(
             context,
             "_character_roll_snapshot",
@@ -148,11 +144,6 @@ def _generate_event_preset_prompt(
                 update_context=False,
             )
         finally:
-            _restore_optional_attr(
-                context,
-                "_ollama_frozen_character_params",
-                saved_ollama_character_params,
-            )
             _restore_optional_attr(
                 context,
                 "_character_roll_snapshot",

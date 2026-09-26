@@ -180,7 +180,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       if (action) parts.push(`<div class="llm-row">${action}</div>`);
       if (dl.error && dl.model === view.id) parts.push(`<div class="setup-result error">${esc(dl.error)}</div>`);
     }
-    parts.push(`<div class="llm-note">Hugging Face HauhauCS 저장소(옛 Ollama 와 같은 파일)에서 한 번 받아 이 PC 에 둡니다.
+    parts.push(`<div class="llm-note">Hugging Face HauhauCS 저장소에서 한 번 받아 이 PC 에 둡니다.
       Assist(Ctrl+O)와 Auto Boost 가 같은 모델을 씁니다.</div>`);
     elBody.innerHTML = parts.join('');
   }

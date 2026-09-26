@@ -13,7 +13,7 @@ let genTimer = null, genStartTime = 0;
 let queuePending = 0;
 let lastHumanGenerateAt = 0;
 const genDurations = [];  // last 5 generation durations (ms)
-// Ollama Auto Boost(=Ollama 모드) ON일 때 Random 버튼에 boost 재작성 경과시간을 실시간 표시.
+// Auto Boost ON 일 때 Random 버튼에 boost 재작성 경과시간을 실시간 표시.
 let rndTimer = null, rndStartTime = 0;
 const _RND_BTN_LABEL = '<span class="shortcut-hint">ALT + ENTER</span>Random';
 let activePromptTab = 'prompt';
@@ -2208,61 +2208,6 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize nai director modal module', error);
   });
-// --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
-let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260913-eject')
-  .then(({createOllamaAssistantPopup}) => {
-    ollamaAssistantPopup = createOllamaAssistantPopup({
-      document,
-      showToast,
-      escHtml,
-      // Electron 셸에서 설치 페이지(ollama.com)를 내부 팝업 대신 시스템 브라우저로.
-      openUrlInSystemBrowser,
-      // 어시스트 결과 태그를 메인 프롬프트 끝에 덧붙인다.
-      onInsertTags: text => {
-        const tags = String(text || '').trim();
-        if (!tags || !promptEdit) return;
-        const current = promptEdit.value.replace(/[,\s]+$/, '');
-        promptEdit.value = current ? `${current}, ${tags}` : tags;
-        onPromptAuthoredEdit();
-        showToast('프롬프트에 추가했습니다.', 'success');
-      },
-    });
-  })
-  .catch(error => {
-    console.error('Failed to initialize ollama assistant popup module', error);
-  });
-let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260913-prompt-out')
-  .then(({createOllamaChatPopup}) => {
-    ollamaChatPopup = createOllamaChatPopup({
-      document, window, showToast, escHtml,
-      getContext: () => ({
-        prompt: promptEdit?.value || '',
-        tags: Array.from(new Set([
-          ...Array.from(resultInfoContent?.querySelectorAll?.('.generation-info-tag[data-tag]') || [])
-            .map(el => el?.dataset?.tag || ''),
-          ...String(promptEdit?.value || '').split(','),
-        ].map(tag => String(tag || '').trim()).filter(Boolean))).slice(0, 200),
-        negative: negEdit?.value || '',
-        resultInfo: resultInfoContent?.innerText || '',
-      }),
-      lookupTagInfo: lookupPromptInfoTag,
-      hideTagInfo: () => tagAssist?.hidePromptInfoTooltip?.(),
-      // 채팅의 완성 프롬프트(태그 + 자연어)를 메인 프롬프트 끝에 덧붙인다(어시스트와 같은 길).
-      onInsertTags: text => {
-        const tags = String(text || '').trim();
-        if (!tags || !promptEdit) return;
-        const current = promptEdit.value.replace(/[,\s]+$/, '');
-        promptEdit.value = current ? `${current}, ${tags}` : tags;
-        onPromptAuthoredEdit();
-        showToast('프롬프트에 추가했습니다.', 'success');
-      },
-    });
-  })
-  .catch(error => {
-    console.error('Failed to initialize ollama chat popup module', error);
-  });
 // --- Remote 컨트롤러(사용자 지정 2026-09-14): 탭의 조각을 잠시 빌려 오는 떠 있는 조작판.
 //     Web-Remote(폰으로 여는 원격 화면)와는 다른 것 - 같은 화면 안에서 쓰는 리모컨이다.
 //     ⚠️ **여는 길은 온보딩뿐이다**(사용자 지정) - 올라온 모듈이 하나라도 있으면 뜨고
@@ -2276,11 +2221,6 @@ const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize remote controller module', error);
   });
-// --- Translation History: Ollama 팝업이 소유하는 우측 도킹 2단 패널(translationHistoryPanel).
-// 팝업의 작은 [🕘 기록] 버튼이 토글하며, 첫 클릭 때 지연 로드된다(ollamaAssistantPopup.mjs).
-// app.js는 더 이상 직접 인스턴스화하지 않는다. ---
-let translationHistoryPanel = null;
-const translationHistoryPanelReady = Promise.resolve();
 // --- Grok 로그인 상태 추적 (제거 가능): progrok proxy 가 'ready'(OAuth 로그인 완료)일 때만 결과
 // 우클릭의 'Grok 변형/영상' 항목을 노출한다. Electron 전용(naiaShell 없으면 false=숨김 → 순수 브라우저도 숨김). ---
 (function trackGrokReady() {
@@ -4022,8 +3962,6 @@ const resultUnsavedActions = $('resultUnsavedActions');
 const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
 const naiDirectorBtn = $('naiDirectorBtn');
-// [Ollama] 단추는 [Assist] 로 바뀌었다(Ollama 파이프라인 회수, 09-26) — 아래 Ollama 메뉴 코드는 단추가 없어 돌지 않는다.
-const ollamaBtn = $('ollamaBtn');
 // [Assist] — Ctrl+O 와 같은 창(앱 내장 모델). 누르면 열고, 열려 있으면 닫는다.
 const assistBtn = $('assistBtn');
 const tagSearchBtn = $('tagSearchBtn');
@@ -4732,7 +4670,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
         pendingRandomRequestId = '';
         if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
         if (typeof btnRnd !== 'undefined' && btnRnd) btnRnd.disabled = false;
-        if (typeof stopRndTimer === 'function') stopRndTimer();  // Ollama boost 경과시간 라벨 복원(Codex INFO)
+        if (typeof stopRndTimer === 'function') stopRndTimer();  // Auto Boost 경과시간 라벨 복원(Codex INFO)
       },
     });
   })
@@ -7410,123 +7348,8 @@ async function openNaiDirector(presetContext = null) {
   });
 }
 
-async function openOllamaAssistant() {
-  await ollamaAssistantPopupReady;
-  if (!ollamaAssistantPopup) {
-    showToast('Ollama 모듈을 불러오지 못했습니다.', 'error');
-    return;
-  }
-  ollamaAssistantPopup.open();
-}
-async function openOllamaChat() {
-  await ollamaChatPopupReady;
-  if (!ollamaChatPopup) {
-    showToast('Ollama Chat 모듈을 불러오지 못했습니다.', 'error');
-    return;
-  }
-  ollamaChatPopup.open();
-}
 if (assistBtn) {
   assistBtn.addEventListener('click', () => window.assistPanel?.toggle?.());
-}
-if (ollamaBtn) {
-  // [Ollama] 한 칸으로 합쳤다(사용자 지정). 예전에는 [Ollama Assist][Chat] 두 칸이
-  // 상단 바를 먹고 있었다 - 자주 쓰이지 않는 기능이라 자리를 돌려준다.
-  //
-  // 재클릭 = 토글이라는 **기존 동작은 지킨다**: 둘 중 하나가 열려 있으면 그것을 닫고,
-  // 아무것도 안 열려 있을 때만 무엇을 열지 묻는다. 열려 있는데도 대화상자를 띄우면
-  // 닫으려고 누른 사용자가 한 번 더 골라야 한다.
-  ollamaBtn.addEventListener('click', async () => {
-    await Promise.all([ollamaAssistantPopupReady, ollamaChatPopupReady]);
-    const assistOpen = Boolean(ollamaAssistantPopup?.isOpen?.());
-    const chatOpen = Boolean(ollamaChatPopup?.isOpen?.());
-    if (assistOpen || chatOpen) {
-      if (assistOpen) ollamaAssistantPopup.close();
-      if (chatOpen) ollamaChatPopup.close();
-      return;
-    }
-    // 모달이 아니라 **버튼에 붙는 드롭다운**이다(사용자 지정: Quick Filter 칩 메뉴처럼).
-    // 런처를 여는 데 화면을 덮는 모달은 과했다.
-    if (ollamaMenuEl) closeOllamaMenu();
-    else openOllamaMenu();
-  });
-}
-
-let ollamaMenuEl = null;
-let ollamaMenuDismiss = null;
-
-function closeOllamaMenu() {
-  if (ollamaMenuDismiss) {
-    document.removeEventListener('mousedown', ollamaMenuDismiss, true);
-    document.removeEventListener('keydown', ollamaMenuDismiss, true);
-    window.removeEventListener('resize', ollamaMenuDismiss, true);
-    window.removeEventListener('scroll', ollamaMenuDismiss, true);
-    ollamaMenuDismiss = null;
-  }
-  ollamaMenuEl?.remove();
-  ollamaMenuEl = null;
-  ollamaBtn?.classList.remove('is-menu-open');
-}
-
-/** [Ollama] 아래(자리가 없으면 위)에 붙는 두 줄짜리 드롭다운.
- *
- *  ⚠️ **body 에 붙이고 fixed 로 놓는다.** 감싸는
- *  `.assistants-ollama-segment` 가 `overflow: hidden` 이라(두 칸이던 시절의 테두리
- *  처리) 그 안에 그리면 메뉴가 잘린다.
- */
-function openOllamaMenu() {
-  if (!ollamaBtn) return;
-  ollamaMenuEl = document.createElement('div');
-  ollamaMenuEl.className = 'ollama-menu';
-  ollamaMenuEl.setAttribute('role', 'menu');
-  ollamaMenuEl.innerHTML = `
-    <button type="button" class="ollama-menu-btn" role="menuitem" data-ollama-pick="assist">
-      <b>Assist</b><span>프롬프트를 읽어 태그 추천·보강</span>
-    </button>
-    <button type="button" class="ollama-menu-btn" role="menuitem" data-ollama-pick="chat">
-      <b>Chat</b><span>모델과 자유롭게 대화</span>
-    </button>`;
-  document.body.appendChild(ollamaMenuEl);
-  ollamaBtn.classList.add('is-menu-open');
-
-  const rect = ollamaBtn.getBoundingClientRect();
-  const mw = ollamaMenuEl.offsetWidth;
-  const mh = ollamaMenuEl.offsetHeight;
-  const margin = 6;
-  let left = Math.max(margin, Math.min(rect.left, window.innerWidth - mw - margin));
-  // 아래에 자리가 없으면 버튼 위로 뒤집는다 — 이 줄은 화면 아래쪽에 있다.
-  let top = rect.bottom + 4;
-  if (top + mh > window.innerHeight - margin) top = Math.max(margin, rect.top - mh - 4);
-  ollamaMenuEl.style.left = `${Math.round(left)}px`;
-  ollamaMenuEl.style.top = `${Math.round(top)}px`;
-
-  ollamaMenuEl.addEventListener('click', async event => {
-    const btn = event.target.closest('[data-ollama-pick]');
-    if (!btn) return;
-    const pick = btn.dataset.ollamaPick;
-    closeOllamaMenu();
-    if (pick === 'assist') openOllamaAssistant();
-    else if (pick === 'chat') openOllamaChat();
-  });
-
-  ollamaMenuDismiss = event => {
-    if (event.type === 'keydown') {
-      if (event.key === 'Escape') { closeOllamaMenu(); ollamaBtn?.focus(); }
-      return;
-    }
-    if (event.type === 'mousedown') {
-      // 버튼 자신은 그 클릭이 토글을 처리한다 — 여기서 닫으면 곧바로 다시 열린다.
-      if (ollamaMenuEl?.contains(event.target) || ollamaBtn?.contains(event.target)) return;
-    }
-    closeOllamaMenu();
-  };
-  // ⚠️ 캡처 단계로 듣는다. 아래 어딘가가 `stopPropagation()` 을 하면 버블로는 못 듣고
-  //    메뉴가 열린 채로 남는다.
-  document.addEventListener('mousedown', ollamaMenuDismiss, true);
-  document.addEventListener('keydown', ollamaMenuDismiss, true);
-  window.addEventListener('resize', ollamaMenuDismiss, true);
-  window.addEventListener('scroll', ollamaMenuDismiss, true);
-  ollamaMenuEl.querySelector('.ollama-menu-btn')?.focus();
 }
 tagSearchPopupReady = import('./js/features/tagSearchPopup.mjs?v=20260919-search-more')
   .then(({createTagSearchPopup}) => {
@@ -7552,7 +7375,7 @@ async function openTagSearchAll(query) {
   tagSearchPopup.open({query: text});
 }
 if (tagSearchBtn) {
-  // 재클릭 = 토글(Ollama·Interactive 와 같은 규약).
+  // 재클릭 = 토글(Assist·Interactive 와 같은 규약).
   tagSearchBtn.addEventListener('click', async () => {
     await tagSearchPopupReady;
     if (!tagSearchPopup) {
@@ -8720,15 +8543,12 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   awaitingMyRandom = true;
   pendingRandomRequestId = createRandomRequestId();
   if (window._randomTimeout) clearTimeout(window._randomTimeout);
-  // When Ollama Auto Boost is armed the backend spends ~1-3s rewriting the prompt
-  // before broadcasting prompt_generated, so the normal 2s safety re-enable would
-  // free the button mid-boost and let the user spam it. Extend the safety timeout
-  // to 15s only while the boost is on; normal random keeps the existing 2s behavior.
+  // Auto Boost 가 켜져 있으면 백엔드가 prompt_generated 를 보내기 전에 앱 내장 모델로 다시 쓴다 — 모델 로드 포함 첫 회는
+  // 수십 초, 엔진 제한시간 60초. 그 안에서 버튼을 풀어 주지 않는다(평소 Random 은 2초). 토글 이름(ollama_auto_boost)은
+  // Ollama 시절 것 그대로다(세션 전용 키 — 바꾸면 서버 · 화면을 함께 바꿔야 한다).
   const boostArmed = !!(lastPromptEngineeringState && lastPromptEngineeringState.ollama_auto_boost);
-  // Boost v2(llama.cpp)는 CPU 에서 모델 로드 포함 첫 회 ~25초, 엔진 제한시간 60초 — 그 안에서 풀어 주지 않는다.
-  const boostV2 = boostArmed && lastPromptEngineeringState?.boost_v2_settings?.backend === 'llamacpp';
-  const randomSafetyTimeoutMs = window.eventMap?.isRandomLinked?.() ? 30000 : (boostV2 ? 65000 : (boostArmed ? 15000 : 2000));
-  // Ollama 모드: Random 버튼에 boost 재작성 경과시간을 실시간 표시(Generate 버튼처럼).
+  const randomSafetyTimeoutMs = window.eventMap?.isRandomLinked?.() ? 30000 : (boostArmed ? 65000 : 2000);
+  // Random 버튼에 boost 재작성 경과시간을 실시간 표시(Generate 버튼처럼).
   if (boostArmed) startRndTimer();
   window._randomTimeout = setTimeout(() => {
     if (awaitingMyRandom) {
@@ -9090,7 +8910,7 @@ function stopGenTimer() {
   if (genTimer) { clearInterval(genTimer); genTimer = null; }
 }
 
-// Ollama 모드(Auto Boost ON) Random 버튼 경과시간 — Generate 버튼과 동일 패턴.
+// Auto Boost ON 일 때 Random 버튼 경과시간 — Generate 버튼과 동일 패턴.
 function startRndTimer() {
   stopRndTimer();
   rndStartTime = Date.now();
@@ -10555,7 +10375,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260926-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260926-llm')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260926-noollama')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -10571,7 +10391,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260923-boostv2')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260926-noollama')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -11323,11 +11143,10 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260926-llm'
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260926-llm')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260926-noollama')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
-      setBoostBackend: (backend) => setModuleParam('prompt_engineering', 'boost_v2_settings', JSON.stringify({backend})),
       document,
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,
@@ -12077,10 +11896,6 @@ function savePromptEngineeringE621Settings() {
 
 function savePromptEngineeringDanbooruSettings() {
   if (promptEngineeringActions) promptEngineeringActions.saveDanbooruSettings();
-}
-
-function savePromptEngineeringOllamaBoostSettings() {
-  if (promptEngineeringActions) promptEngineeringActions.saveOllamaBoostSettings();
 }
 
 function refreshPromptEngineeringDebug() {
@@ -13624,13 +13439,13 @@ function slashPeEditor(key, _elementId, title) {
 function slashPeChoices() {
   const m = slashPeState();
   const tools = () => {
-    const ollamaOn = !!slashPeState().ollama_auto_boost;
+    const boostOn = !!slashPeState().ollama_auto_boost;
     return [
       {label: 'preview', desc: 'Setting & Preview 열기', run: () => openPeDebugPanel()},
       slashPeOptionChoice('e621_auto_boost', 'e621'),
       slashPeOptionChoice('danbooru_auto_weight', 'autoweight'),
-      {label: 'ollama', desc: '', current: ollamaOn, toggle: true,
-        run: () => { setPromptEngineeringOllamaAutoBoost(!ollamaOn); return {stay: true}; }},
+      {label: 'boost', desc: 'Auto Boost', current: boostOn, toggle: true,
+        run: () => { setPromptEngineeringOllamaAutoBoost(!boostOn); return {stay: true}; }},
     ];
   };
   return [
@@ -13638,7 +13453,7 @@ function slashPeChoices() {
     {label: 'prefix ▸', desc: `Prefix 프롬프트 (${m.preset || '-'})`, run: slashPeEditor('pre_prompt', 'modPrePrompt', 'Prefix Prompt')},
     {label: 'postfix ▸', desc: 'Postfix 프롬프트', run: slashPeEditor('post_prompt', 'modPostPrompt', 'Postfix Prompt')},
     {label: 'autohide ▸', desc: 'Auto-Hide (Filter)', run: slashPeEditor('auto_hide', 'modAutoHide', 'Auto-Hide (Filter)')},
-    {label: 'tools ▸', desc: 'preview · e621 · autoweight · ollama', run: () => ({next: tools(), refresh: tools})},
+    {label: 'tools ▸', desc: 'preview · e621 · autoweight · boost', run: () => ({next: tools(), refresh: tools})},
     ...SLASH_PE_OPTIONS.map(([key, title]) => slashPeOptionChoice(key, title)),
   ];
 }
@@ -13978,9 +13793,6 @@ Promise.all([
   wildcardManagerPanelReady,
   instantWildcardPanelReady,
   e621EventPanelReady,
-  ollamaAssistantPopupReady,
-  ollamaChatPopupReady,
-  translationHistoryPanelReady,
   imageModulePanelsReady,
   img2imgPanelReady,
   refinePanelReady,

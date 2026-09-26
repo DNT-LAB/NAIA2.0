@@ -235,12 +235,12 @@ def _companion_map(context: WebSessionContext) -> dict[str, list[str]]:
 def tag_rating_counts(*names: Any) -> list[int] | None:
     """태그의 [g, s, q, e] 등장 횟수 - `data/danbooru_tag_counts_by_rating.json`(태그 아카이브에서 구운 표).
 
-    Danbooru Auto-Weight·Assist 가 이미 읽는 표를 **같은 캐시로** 쓴다(따로 읽으면 메모리에 두 벌).
+    프로세스에 한 번 읽어 둔 표(core/tag_rating_dist)를 쓴다.
     키는 소문자·공백 표기다. 없으면 None - '0 번' 과 '모름' 을 뭉개지 않는다.
     """
-    from core.ollama_tag_assist_service import _load_rating_dist
+    from core.tag_rating_dist import load_rating_dist
 
-    table = _load_rating_dist()
+    table = load_rating_dist()
     for name in names:
         key = str(name or "").strip().lower()
         if not key:

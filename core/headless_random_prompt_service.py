@@ -720,7 +720,7 @@ class HeadlessRandomPromptService:
         #   - True: RANDOM does NOT touch the character wildcards (snapshot stays);
         #     Generate re-rolls once and updates the snapshot.
         # Either way we ALWAYS publish the (just-rolled or reused) snapshot into
-        # settings["characters"]/["uc"] so the random prompt + Ollama boost ground
+        # settings["characters"]/["uc"] so the random prompt grounds
         # on exactly the same characters Generate will use. The override-first and
         # active-frame checks live inside character_params_from_settings/roll_*, so a
         # disabled module / active conditional override is honored here too:
@@ -732,8 +732,6 @@ class HeadlessRandomPromptService:
         # frames, not the previous run's conditional result. Drop the stale conditional
         # override first so a rule like `char:1+=__wc__` does not re-append every run.
         self._clear_conditional_character_override()
-        # Drop legacy Ollama freeze field — superseded by the SSOT snapshot.
-        self.context._ollama_frozen_character_params = None
 
         mode = self.context.get_api_mode()
         reroll_on_generate = read_reroll_on_generate(self.context, mode)

@@ -91,15 +91,10 @@ class WildcardProcessor:
             pass
 
     def expand_tags(self, tag_list: List[str], context: PromptContext,
-                    wildcard_sink: "list | None" = None,
                     location: "str | None" = None, slot=None, slot_label=None) -> List[str]:
         """
         태그 리스트를 받아 리스트 내의 모든 와일드카드를 확장합니다.
         이것이 다른 모듈에서 호출할 기본 진입점(entry-point)이 됩니다.
-
-        ``wildcard_sink``가 주어지면 *와일드카드(__name__/<name>/$instant)에서 나온* 출력
-        태그만 따로 수집한다(고정 태그는 제외). Ollama Boost가 prefix/postfix의 **와일드카드
-        출력만** 캡처하는 용도(설정 [기능3]) — 고정 아티스트/퀄리티 태그 오염 방지.
 
         ``location``(prefix/postfix/main/character)과 ``slot``(캐릭터 슬롯 식별자)은 이 호출에서
         나오는 롤의 발생 위치를 context 마커에 세팅해 _record_roll이 wildcard_rolls에 기록하게 한다.
@@ -113,7 +108,6 @@ class WildcardProcessor:
             pass
         expanded_list = []
         for tag in tag_list:
-            is_wildcard = ('__' in tag) or ('<' in tag) or tag.strip().startswith('$')
             produced: List[str] = []
             # $ 로 시작하는 인스턴트 와일드카드 처리
             if tag.startswith('$'):
@@ -182,13 +176,6 @@ class WildcardProcessor:
                 # 일반 와일드카드 처리(고정 태그는 그대로 통과)
                 produced = self._expand_recursive(tag, context)
             expanded_list.extend(produced)
-            # 실제로 전개된 경우만 sink에 수집한다(Codex). LoRA(<lora:..>)·미해결 토큰
-            # (<missing>/__missing__/$missing)은 _expand_recursive/인스턴트 분기가 원본을 그대로
-            # 반환(produced == [tag])하므로 "와일드카드 출력"이 아니다 → 제외.
-            # 주의: <wc>(구식 각괄호)의 2번째+ 태그는 global_append_tags로 빠져 in-place sink엔
-            # 안 잡힌다. 사용자 권장 문법은 __name__(in-place 콤마결합)이라 실사용엔 무영향.
-            if wildcard_sink is not None and is_wildcard and produced != [tag]:
-                wildcard_sink.extend(produced)
         return expanded_list
 
     def _expand_recursive(self, tag: str, context: PromptContext, depth=0) -> List[str]:

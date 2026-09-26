@@ -188,18 +188,13 @@ class HeadlessPromptEngineeringService:
         from core.prompt_engineering_settings import (
             get_prompt_engineering_store,
             load_category_filter_overrides,
-            load_ollama_boost_settings,
         )
 
         context = self.context
         store = get_prompt_engineering_store(context)
         self.ensure_first_run_recommended_preset()
         settings = store.collect_settings()
-        # Ollama Boost 설정은 *전역*(디스크 SSOT)이라 모드별 캐시(settings)가 아니라
-        # 디스크에서 fresh 읽는다 — 모드 전환 시 stale 값 표시 → 재저장 시 데이터 손실
-        # (다른 모드에서 바꾼 nl_weight를 덮어씀) 방지. boost-time 읽기와 동일 SSOT.
         _runtime_paths = getattr(context, "runtime_paths", None)
-        ollama_boost = load_ollama_boost_settings(save_root=getattr(_runtime_paths, "save_dir", None))
         # 카테고리 필터 오버라이드도 전역 디스크 SSOT — 모드 캐시가 아니라 fresh 읽는다.
         category_filters = load_category_filter_overrides(save_root=getattr(_runtime_paths, "save_dir", None))
         state = store.state()
@@ -289,7 +284,6 @@ class HeadlessPromptEngineeringService:
             "ollama_auto_boost": bool(getattr(context, "ollama_auto_boost", False)),
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
-            "ollama_boost_settings": ollama_boost,
             "boost_v2_settings": self._boost_v2_settings(),
             "category_filters": category_filters,
             "debug_snapshot": self.debug_snapshot(),
@@ -455,17 +449,6 @@ class HeadlessPromptEngineeringService:
                 return context._toast("Invalid Danbooru settings", level="error")
             store.save_danbooru_weight_settings(settings)
             store.apply_settings({"danbooru_weight_settings": settings})
-        elif key == "ollama_boost_settings":
-            # 영속 설정(세션 전용 ollama_auto_boost 토글과는 별개). merge+clamp+coerce 는
-            # store/normalize_ollama_boost_settings 가 담당한다(e621_settings 패턴 동일).
-            from core.prompt_engineering_settings import normalize_ollama_boost_settings
-
-            settings = json.loads(text_value or "{}")
-            if not isinstance(settings, dict):
-                return context._toast("Invalid Ollama Boost settings", level="error")
-            normalized = normalize_ollama_boost_settings(settings)
-            store.save_ollama_boost_settings(normalized)
-            store.apply_settings({"ollama_boost_settings": normalized})
         elif key == "boost_v2_settings":
             # Boost v2(llama.cpp) 전역 설정 — 디스크 SSOT(boost_v2_user.json)만. PE 프리셋/모드 캐시에 안 싣는다.
             from core.boost_v2 import save_boost_v2_settings
@@ -475,23 +458,11 @@ class HeadlessPromptEngineeringService:
                 return context._toast("Invalid Boost v2 settings", level="error")
             current = self._boost_v2_settings()
             saved = save_boost_v2_settings({**current, **settings}, save_root=self._boost_v2_save_root())
-            # 할당 장치나 모델이 바뀌면 곧바로 옮긴다(도는 요청은 끝낸 뒤) — ollama_routes/boost_v2_routes 가 구독.
+            # 할당 장치나 모델이 바뀌면 곧바로 옮긴다(도는 요청은 끝낸 뒤) — boost_v2_routes 가 구독.
             # 엔진은 Assist 도 쓰므로 Boost 백엔드와 무관하게 알린다(엔진이 놀고 있으면 내리고, Auto Boost 가 켜져 있으면 다시 올린다).
             if saved.get("model") != current.get("model") or saved.get("device") != current.get("device"):
                 try:
                     context.publish("boost_v2_device_changed", {"device": saved.get("device"), "model": saved.get("model")})
-                except Exception:
-                    pass
-            # 백엔드를 바꾸면 안 쓰게 된 쪽 모델을 내리고, 토글 구독자(ollama_routes)에게 다시 판단시킨다 —
-            # llama.cpp 로 왔고 켜져 있으면 엔진을 미리 올리고 Ollama 상주를 풀며, Ollama 로 왔으면 그쪽을 올린다.
-            if saved.get("backend") != current.get("backend"):
-                try:
-                    if saved.get("backend") != "llamacpp":
-                        runtime = getattr(context, "boost_llama_runtime", None)
-                        if runtime is not None:
-                            runtime.release("boost")   # Assist(llama.cpp 공유)가 쓰는 중이면 엔진은 남는다
-                    context.publish("ollama_auto_boost_changed",
-                                    {"enabled": bool(getattr(context, "ollama_auto_boost", False))})
                 except Exception:
                     pass
         elif key == "category_filters":
@@ -547,8 +518,8 @@ class HeadlessPromptEngineeringService:
             # 항상 OFF로 시작하고 사용자가 직접 켜야만 ON. (pp_* 영속 경로와 분리)
             enabled = context._coerce_bool(value)
             context.ollama_auto_boost = enabled
-            # 모델 상주 관리: ON이면 미리 warm-up(상주), OFF면 언로드. 구독자가 데몬
-            # 스레드로 처리(이벤트 루프/응답 비차단). ollama_routes에서 구독.
+            # 엔진 관리: ON이면 앱 내장 엔진을 미리 올리고, OFF면 Boost 의 임대를 놓는다(boost_v2_routes 가 구독 —
+            # 뒤에서 처리해 이벤트 루프/응답을 막지 않는다).
             try:
                 context.publish("ollama_auto_boost_changed", {"enabled": enabled})
             except Exception:

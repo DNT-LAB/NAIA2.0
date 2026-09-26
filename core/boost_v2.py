@@ -1,7 +1,7 @@
 """Boost v2 — 랜덤 프롬프트 태그를 로컬 LLM(llama.cpp) 단일 호출로 하이브리드 텍스트로 강화한다.
 
-기존 Ollama Scene Boost(``core/scene_boost.py``)의 증거 버킷·후필터 대신, 검증된 템플릿 하나로
-5개 섹션을 받는다. 이 모듈은 순수 로직(설정 정규화·지시문 조립·출력 파싱·삽입 문자열 조립)과
+옛 Ollama Scene Boost 의 증거 버킷·후필터 대신, 검증된 템플릿 하나로 5개 섹션을 받는다(Ollama 파이프라인은
+2026-09-26 회수 — Auto Boost 는 이것 하나다). 이 모듈은 순수 로직(설정 정규화·지시문 조립·출력 파싱·삽입 문자열 조립)과
 설정 파일 입출력만 가진다 — 프로세스/HTTP 는 ``core/llama_runtime.py``, 프롬프트에 끼우는 일은
 ``app/backend/server/generation_commands.apply_boost_v2`` 가 맡는다.
 
@@ -52,14 +52,13 @@ SECTIONS: tuple[tuple[str, str, str, str], ...] = (
 )
 SECTION_KEYS: tuple[str, ...] = tuple(s[0] for s in SECTIONS)
 
-BACKENDS = ("ollama", "llamacpp")
+# 백엔드는 앱 내장 llama.cpp 하나 — 옛 저장본의 "ollama" 도 이것으로 읽는다(Ollama 회수, 2026-09-26).
+BACKENDS = ("llamacpp",)
 PREFERENCE_MAX_CHARS = 400
 SETTINGS_FILE = "boost_v2_user.json"
 
 BOOST_V2_DEFAULTS: dict[str, Any] = {
-    # 켜기/끄기 토글은 기존 세션 토글(context.ollama_auto_boost)을 그대로 쓰고, 여기선 어느
-    # 백엔드로 돌릴지만 고른다. 기본은 앱 내장 llama.cpp — Ollama 파이프라인은 회수한다(사용자 지정 2026-09-26).
-    # 저장본에 적힌 선택(옛 기본값 'ollama' 포함)은 그대로 따른다.
+    # 켜기/끄기 토글은 기존 세션 토글(context.ollama_auto_boost — 이름만 옛것)을 그대로 쓴다. 백엔드는 하나뿐이다.
     "backend": "llamacpp",
     "sections": {key: True for key in SECTION_KEYS},
     "preferences": {key: "" for key in SECTION_KEYS},
@@ -200,9 +199,44 @@ def format_output(text: str, *, is_nai: bool) -> str:
     return out
 
 
-def _norm_tag(tag: str) -> str:
-    from core.scene_boost import strip_weight_syntax
+_WEIGHT_PREFIX_RE = re.compile(r"^\s*\d*\.?\d+\s*::")        # "1.2::"
+_WEIGHT_SUFFIX_RE = re.compile(r"::\s*$")                     # 끝의 "::"
+_A1111_WEIGHT_RE = re.compile(r":\s*-?\d*\.?\d+\s*$")        # "tag:1.2"
 
+
+def _bare_tag(token: str) -> str:
+    """NAI/A1111 가중치·강조 래퍼를 벗겨 순수 태그를 만든다."""
+    t = str(token or "").strip()
+    if not t:
+        return ""
+    t = _WEIGHT_PREFIX_RE.sub("", t)
+    t = _WEIGHT_SUFFIX_RE.sub("", t)
+    # 둘러싼 강조 괄호/중괄호/대괄호를 반복 제거.
+    for _ in range(6):
+        s = t.strip()
+        if len(s) >= 2 and ((s[0] == "(" and s[-1] == ")") or (s[0] == "{" and s[-1] == "}") or (s[0] == "[" and s[-1] == "]")):
+            t = s[1:-1]
+        else:
+            break
+    t = _A1111_WEIGHT_RE.sub("", t).strip()  # "tag:1.2" → "tag"
+    return t.lower().replace("_", " ").strip()
+
+
+def strip_weight_syntax(prompt: str) -> str:
+    """가중치 구문({n}::, ::, (text:n))을 제거해 순수 태그 나열로(모델 입력 · 접지용). 옛 core/scene_boost 에서 옮겼다.
+    주석(#)·개행·빈 토큰 제거. 각 토큰을 _bare_tag로 벗긴다."""
+    out: list[str] = []
+    for raw in str(prompt or "").replace("\n", ",").split(","):
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        bare = _bare_tag(raw)
+        if bare:
+            out.append(bare)
+    return ", ".join(out)
+
+
+def _norm_tag(tag: str) -> str:
     return " ".join(strip_weight_syntax(str(tag or "")).replace("_", " ").lower().split())
 
 
@@ -265,14 +299,6 @@ def save_root_for(context: Any) -> Path:
     """앱 레이어와 같은 저장 루트 해석: runtime save_dir, 없으면 repo_root/save."""
     save_dir = getattr(getattr(context, "runtime_paths", None), "save_dir", None)
     return Path(save_dir) if save_dir else Path(getattr(context, "repo_root", ".")) / "save"
-
-
-def llamacpp_selected(context: Any) -> bool:
-    """Boost 백엔드로 llama.cpp 가 골라졌는가 — core 쪽(api_service 등)이 app 을 import 하지 않고 묻는 길."""
-    try:
-        return load_boost_v2_settings(save_root=save_root_for(context)).get("backend") == "llamacpp"
-    except Exception:
-        return False
 
 
 def save_boost_v2_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> dict[str, Any]:

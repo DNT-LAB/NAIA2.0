@@ -380,7 +380,7 @@
   <div class="module-popup-header">
     <span class="module-popup-titlewrap">
       <span class="module-popup-title">Auto Boost Settings</span>
-      <button type="button" class="header-guide-btn" data-naia-guide="Ollama Boost — 로컬 Ollama로 프롬프트를 자연어 배경/구도/분위기로 보강합니다.\n\n자연어 가중치 — 보강된 자연어 프롬프트에 부여할 가중치입니다. NAI는 {v}::..:: , 로컬(WEBUI/COMFYUI)은 (..:v) 구문으로 적용됩니다.\n\nEffort — 보강 자연어의 길이·창의성입니다. 간결(concise) / 표준(standard) / 풍부(rich).\n\nInput 구성 — Ollama에 보낼 입력에 PE Prefix / PE Postfix / e621 Auto-Boost 태그를 포함할지 선택합니다. (포함되는 태그의 가중치 구문은 자동으로 제거됩니다.)">ⓘ 가이드</button>
+      <button type="button" class="header-guide-btn" data-naia-guide="Auto Boost — 앱 내장 AI 모델(API 설정 › AI 모델)로 Random 결과 끝에 장면 묘사(인물·구도·디테일·조명·분위기) 섹션을 붙입니다.\n\n끈 섹션은 출력에서 빠지고, 선호 문구는 장면에 어울릴 때만 반영됩니다. 모델 입력에서 색상 태그는 항상 뺍니다.">ⓘ 가이드</button>
     </span>
     <button class="history-close" onclick="closePeOllamaBoostPanel()">&times;</button>
   </div>
@@ -776,7 +776,7 @@
           <div class="assistants-label">
             <span class="assistants-title">Tools &amp; Assistants <span class="assistants-info">i</span></span>
             <!-- 오른쪽 도구 묶음. `.assistants-label` 이 space-between 이라 이 둘을 형제로
-                 두면 사이가 벌어진다 — 한 번 더 감싸서 Ollama 버튼에 붙인다. -->
+                 두면 사이가 벌어진다 — 한 번 더 감싸서 Assist 버튼에 붙인다. -->
             <div class="assistants-actions">
               <button type="button" class="ia-mode-toggle" id="iaModeToggle" aria-pressed="false"
                       data-naia-guide="Interactive 모드. 프롬프트를 캐릭터/의상/액션/표정/구도/배경 슬롯으로 나눠 편집합니다. 켜져 있는 동안 Prompt Fixed와 WC Solo는 사용할 수 없습니다(블록에서 프롬프트를 직접 조립하므로 충돌합니다).">
@@ -1470,6 +1470,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260926-llm"></script>
+<script src="app.js?v=20260926-noollama"></script>
 </body>
 </html>

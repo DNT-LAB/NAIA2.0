@@ -184,25 +184,6 @@ export function createPromptEngineeringActions({
     setModuleParam('prompt_engineering', 'danbooru_settings', JSON.stringify(payload));
   }
 
-  function saveOllamaBoostSettings() {
-    const nlWeightRaw = parseFloat(document.getElementById('modOllamaBoostWeight')?.value ?? '');
-    const nlWeight = Number.isFinite(nlWeightRaw) ? nlWeightRaw : 1.0;
-    const effortChecked = document.querySelector('input[name="modOllamaBoostEffort"]:checked');
-    const effort = effortChecked ? effortChecked.value : 'rich';
-    const payload = {
-      nl_weight: nlWeight,
-      effort,
-      include_prefix: !!document.getElementById('modOllamaBoostIncludePrefix')?.checked,
-      include_postfix: !!document.getElementById('modOllamaBoostIncludePostfix')?.checked,
-      include_e621: !!document.getElementById('modOllamaBoostIncludeE621')?.checked,
-      allow_scent_style: !!document.getElementById('modOllamaBoostAllowScent')?.checked,
-      allow_material_style: !!document.getElementById('modOllamaBoostAllowMaterial')?.checked,
-      allow_light_style: !!document.getElementById('modOllamaBoostAllowLight')?.checked,
-      emphasize_framing: !!document.getElementById('modOllamaBoostEmphasizeFraming')?.checked,
-    };
-    setModuleParam('prompt_engineering', 'ollama_boost_settings', JSON.stringify(payload));
-  }
-
   function refreshDebug() {
     setModuleParam('prompt_engineering', 'debug_refresh', 'true');
   }
@@ -240,22 +221,12 @@ export function createPromptEngineeringActions({
   // Session-only flag (never persisted; backend resets it to false on load). Unlike
   // setOption() this uses the bare `ollama_auto_boost` key (NOT the `pp_` prefix) and
   // lives at the top level of the module state, not inside `preprocessing`.
+  // 이름은 Ollama 시절 것 그대로다 — 지금은 앱 내장 모델(Boost v2)의 Auto Boost 토글이다. v2 는 캐릭터 프롬프트를
+  // 접지하지 않으므로 사용자의 재굴림 선택을 건드리지 않는다(Ollama 때의 reroll 강제 해제는 없앴다, 09-26).
   function setOllamaAutoBoost(checked) {
     const lastState = getLastPromptEngineeringState();
     if (lastState) lastState.ollama_auto_boost = !!checked;
     setModuleParam('prompt_engineering', 'ollama_auto_boost', checked ? 'true' : 'false');
-    // Ollama 모드에서는 캐릭터 프롬프트 와일드카드가 Random 시점에 1회 전개·고정되어야
-    // 부스트가 접지한 캐릭터 = 실제 생성 캐릭터가 된다. "Process wildcards on Generate"
-    // (생성 시 전개)를 강제 해제하고 동작을 토스트로 안내한다(백엔드는 Ollama ON이면
-    // reroll 체크와 무관하게 스냅샷을 고정하지만, UI 표시·기대치를 맞춘다).
-    // Boost v2(llama.cpp)는 캐릭터 프롬프트를 접지하지 않는다 — 사용자의 재굴림 선택을 건드리지 않는다.
-    const v2 = !!(lastState && lastState.boost_v2_settings && lastState.boost_v2_settings.backend === 'llamacpp');
-    if (checked && !v2) {
-      setModuleParam('character', 'reroll_on_generate', 'false');
-      if (typeof showToast === 'function') {
-        showToast('Ollama 모드: 랜덤 시 캐릭터 프롬프트 와일드카드가 먼저 전개·고정됩니다 (생성 시 전개 해제).', 'info');
-      }
-    }
   }
 
   return {
@@ -272,7 +243,6 @@ export function createPromptEngineeringActions({
     setRandomizedWildcard,
     saveE621Settings,
     saveDanbooruSettings,
-    saveOllamaBoostSettings,
     refreshDebug,
     saveCategoryFilter,
     setOption,

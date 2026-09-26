@@ -216,177 +216,21 @@ def invalidate_auto_gen_prefetch(context: WebSessionContext) -> None:
     context._auto_gen_prefetch = None
 
 
-def _inject_boost_at_main(prompt: str, addition: str) -> str:
-    """boost 추가분을 메인 섹션 끝(=postfix 앞)에 끼워 넣는다 — e621 Auto-Boost와 같은 위치.
-    final_prompt는 `prefix \\n\\n main \\n\\n postfix` 구조라 마지막 "\\n\\n"(main/postfix
-    경계) 앞에 삽입한다. 경계가 없으면(단일 섹션) 끝에 덧붙인다(폴백)."""
-    addition = str(addition or "").strip().strip(",").strip()
-    if not addition:
-        return prompt
-    idx = prompt.rfind("\n\n")
-    if idx == -1:
-        return prompt.rstrip(" ,") + ", " + addition
-    head, tail = prompt[:idx], prompt[idx:]
-    return head.rstrip(" ,") + ", " + addition + tail
-
-
-def _e621_meta_tags(ctx: Any) -> list:
-    """context.metadata['e621_boost_tags']에서 태그명만 추출. 실제 shape은 dict 리스트
-    ({'tag': ...}); 문자열 리스트도 방어적으로 허용(Codex Must-fix 2)."""
-    meta = getattr(ctx, "metadata", None) or {}
-    out = []
-    for it in (meta.get("e621_boost_tags") or []):
-        if isinstance(it, dict):
-            t = it.get("tag")
-        else:
-            t = it
-        if t:
-            out.append(str(t))
-    return out
-
-
-def _build_boost_input(result: Any, settings: dict) -> "str | None":
-    """[기능3] Ollama 입력 구성. base = 원시 장면 태그(source_row['general']) — 인물수/주체
-    (1girl 등; 포매터가 main_tags→prefix_tags로 옮겨 main만으론 사라짐, Codex Must-fix 1)를
-    포함하고 e621 boost 미포함(파이프라인이 main_tags에 append하기 전). 기본(모두 OFF)=장면만.
-    선택 시 prefix/postfix는 **와일드카드 출력만**(고정 아티스트/퀄리티 태그 제외 — 사용자
-    요청), e621은 metadata(dict→tag)를 가중치 제거 후 추가."""
-    from core.scene_boost import strip_weight_syntax
-
-    ctx = getattr(result, "context", None)
-    if ctx is None:
-        return None
-    meta = getattr(ctx, "metadata", None) or {}
-
-    # 후처리(remove_color/object/features 등) + 와일드카드 전개를 반영한 main 스냅샷을 우선
-    # 근거로 쓴다. raw source_row['general']은 전처리 *전*이라, 사용자가 remove_color 등으로
-    # 제거한 색/객체/특징을 부스트가 prose로 되살려 그 설정을 무력화했다(_step_3 캡처본 사용).
-    # 스냅샷 없으면 후처리 main_tags, 그것도 없으면 raw general 폴백.
-    base = ""
-    boost_main = meta.get("boost_main_tags")
-    if isinstance(boost_main, list) and any(str(t).strip() for t in boost_main):
-        base = ", ".join(str(t) for t in boost_main)
-    if not base.strip():
-        base = ", ".join(str(t) for t in (getattr(ctx, "main_tags", None) or []))
-    if not base.strip():
-        src = getattr(ctx, "source_row", None)
-        if src is not None:
-            try:
-                base = str(src.get("general") or "")
-            except Exception:
-                base = ""
-
-    parts = [strip_weight_syntax(base)]
-    if settings.get("include_prefix"):
-        # 고정 태그(아티스트/퀄리티)는 제외하고 prefix의 와일드카드 출력만(_step_3에서 캡처).
-        pre_wc = meta.get("prefix_wildcard_tags") or []
-        parts.append(strip_weight_syntax(", ".join(str(t) for t in pre_wc)))
-    if settings.get("include_postfix"):
-        post_wc = meta.get("postfix_wildcard_tags") or []
-        parts.append(strip_weight_syntax(", ".join(str(t) for t in post_wc)))
-    if settings.get("include_e621"):
-        e_tags = _e621_meta_tags(ctx)
-        if e_tags:
-            parts.append(strip_weight_syntax(", ".join(e_tags)))
-    # NAI v4/v4.5 캐릭터 프롬프트(이번 run의 전개본)도 접지에 포함 — 부스트가 캐릭터 의상/행위/
-    # 소품을 참조할 수 있고, 환각 가드가 캐릭터 태그를 미입력으로 오판해 드롭하지 않는다.
-    # (Phase3 freeze가 random-time 롤을 생성까지 고정하므로 부스트 접지 = 실제 생성 캐릭터.)
-    char_prompts = (getattr(ctx, "settings", None) or {}).get("characters") or []
-    for cp in char_prompts:
-        cs = strip_weight_syntax(str(cp or ""))
-        if cs:
-            parts.append(cs)
-    inp = ", ".join(p for p in parts if p)
-    return inp or None
-
-
-def _compose_addition(add: dict, settings: dict, context: WebSessionContext) -> str:
-    """삽입 문자열 조립: 구도태그(무가중) + 자연어([기능1] nl_weight 래핑). 메인 섹션에 삽입.
-
-    WEBUI/ComfyUI에서는 ``()`` 가 가중치 문법이므로, LLM 자연어 묘사에 들어 있는
-    **리터럴 괄호**를 ``\\(`` ``\\)`` 로 이스케이프한다. Auto Boost는 파이프라인 *이후*에
-    삽입돼 ``prompt_processor._escape_main_tags_parens`` 를 우회하므로, 여기서 직접
-    처리하지 않으면 'soft glow (warm tone)' 같은 구절의 괄호가 A1111/ComfyUI 가중치
-    파서에 오인식돼 강조가 깨진다(nl_weight>1로 ``(...:w)`` 래핑 시엔 중첩까지 발생).
-    NAI는 파이프라인과 동일하게 이스케이프하지 않는다(가중치 wrap 괄호는 보존)."""
-    from core.scene_boost import format_nl_weight
-
-    is_nai = str(getattr(context, "current_api_mode", "") or "").upper() == "NAI"
-    comp_parts = [str(c) for c in (add.get("composition_tags") or []) if str(c).strip()]
-    desc_parts = [str(d) for d in (add.get("descriptions") or []) if str(d).strip()]
-    if not is_nai:
-        from core.prompt_processor import _escape_parens_in_content
-
-        comp_parts = [_escape_parens_in_content(c) for c in comp_parts]
-        desc_parts = [_escape_parens_in_content(d) for d in desc_parts]
-    comp_str = ", ".join(comp_parts)
-    desc_str = ", ".join(desc_parts)
-    if desc_str:
-        desc_str = format_nl_weight(desc_str, settings.get("nl_weight", 1.0), is_nai)
-    return ", ".join(p for p in [comp_str, desc_str] if p)
-
-
 async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bool:
-    """Ollama Auto Boost — random 결과 프롬프트를 Scene Boost로 강화(스레드, best-effort).
+    """Auto Boost — random 결과 프롬프트를 앱 내장 모델(Boost v2)로 강화(best-effort). 이름은 옛 토글 이름을 따른다
+    (Ollama 경로는 2026-09-26 회수).
 
-    토글 OFF/Ollama 미준비/빈 프롬프트면 no-op. 성공 시 result.prompt·context.prompt_text·
-    result.context(final_prompt+metadata)를 부스트본으로 갱신하고 True를 반환한다. 어떤
-    실패에서도 raise하지 않으며 원문을 유지한다(생성 루프 불변). Auto Gen(파트4)에서도 재사용.
+    토글 OFF/빈 프롬프트면 no-op. 성공 시 result.prompt·context.prompt_text·ctx.final_prompt 를 부스트본으로
+    갱신하고 True. 어떤 실패에서도 raise 하지 않으며 원문을 유지한다(생성 루프 불변). Auto Gen 에서도 재사용.
     """
     try:
         if not getattr(result, "success", False) or not getattr(context, "ollama_auto_boost", False):
             return False
-        prompt = str(getattr(result, "prompt", "") or "")
-        if not prompt.strip():
+        if not str(getattr(result, "prompt", "") or "").strip():
             return False
-        # Boost v2(llama.cpp) 가 골라져 있으면 그쪽으로 — Ollama 경로·설정은 전혀 안 탄다.
-        from app.backend.server.boost_v2_service import apply_boost_v2, boost_v2_selected, boost_v2_settings
+        from app.backend.server.boost_v2_service import apply_boost_v2, boost_v2_settings
 
-        v2_settings = boost_v2_settings(context)
-        if boost_v2_selected(context, v2_settings):
-            return await apply_boost_v2(context, result, v2_settings)
-        from app.backend.server.ollama_routes import ollama_boost_settings, scene_boost_prompt
-
-        settings = ollama_boost_settings(context)
-        # [기능3] Ollama 입력 = 메인 장면 태그 + 선택된 prefix/postfix/e621(가중치 제거). 폴백=전체.
-        boost_input = _build_boost_input(result, settings) or prompt
-        # 설정을 이 호출에 freeze해 입력 구성과 boost stage 옵션이 서로 갈라지지 않게 한다.
-        boosted = await asyncio.to_thread(
-            scene_boost_prompt,
-            context,
-            boost_input,
-            level=settings.get("effort"),
-            allow_scent_style=settings.get("allow_scent_style"),
-            allow_material_style=settings.get("allow_material_style"),
-            allow_light_style=settings.get("allow_light_style"),
-            emphasize_framing=settings.get("emphasize_framing"),
-        )
-        if not isinstance(boosted, dict) or not boosted.get("ok"):
-            return False
-        # 구도태그(무가중) + 자연어([기능1] nl_weight 래핑)를 메인 섹션 끝(e621 위치)에 삽입.
-        add = boosted.get("additions") or {}
-        addition = _compose_addition(add, settings, context)
-        if not addition:
-            return False
-        new_prompt = _inject_boost_at_main(prompt, addition)
-        if new_prompt == prompt:
-            return False
-        result.prompt = new_prompt
-        context.prompt_text = new_prompt
-        ctx = getattr(result, "context", None)
-        if ctx is not None:
-            try:
-                ctx.final_prompt = new_prompt
-                if isinstance(getattr(ctx, "metadata", None), dict):
-                    ctx.metadata["ollama_auto_boost"] = {
-                        "rating": boosted.get("rating"),
-                        "level": boosted.get("level"),
-                        "additions": add,
-                        "settings": settings,
-                    }
-            except Exception:
-                pass
-        return True
+        return await apply_boost_v2(context, result, boost_v2_settings(context))
     except Exception:
         return False
 
@@ -721,7 +565,7 @@ async def run_random_fallback_for_empty_prompt(
             overrides=None,
             random_request_id="",
         )
-        # 단발 random과 동일하게 그 시점 동기 부스트 적용(Ollama Auto Boost ON일 때).
+        # 단발 random과 동일하게 그 시점 동기 부스트 적용(Auto Boost ON일 때).
         await apply_ollama_auto_boost(context, result)
         await persist_prompt_engineering_settings(context)
         if getattr(result, "success", False):
@@ -1159,7 +1003,7 @@ def register_generation_rest_routes(
             overrides=overrides,
             random_request_id=request_id,
         )
-        # WebSocket Random과 동일하게 Ollama Auto Boost 적용(토글 OFF면 no-op) — Codex round2 관찰.
+        # WebSocket Random과 동일하게 Auto Boost 적용(토글 OFF면 no-op) — Codex round2 관찰.
         await apply_ollama_auto_boost(context, result)
         await persist_prompt_engineering_settings(context)
         # Use Vibe 인코딩(2 Anlas) 발생 시 잔액 차감 즉시 반영(REST random 경로).

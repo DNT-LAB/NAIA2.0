@@ -24,14 +24,12 @@
     "app/backend/server/module_storage_routes.py",
     "app/backend/server/nai_model_routes.py",
     "app/backend/server/nai_preview_routes.py",
-    "app/backend/server/ollama_routes.py",
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_engineering_filter_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/result_display_routes.py",
     "app/backend/server/state_routes.py",
     "app/backend/server/style_thumbnail_routes.py",
-    "app/backend/server/translation_history_routes.py",
     "app/backend/server/websocket_session.py",
     "app/backend/server/web_shell_routes.py"
   ],
@@ -161,6 +159,7 @@
       "source_files": [
         "core/web_session_app.py",
         "app/backend/server/prompt_tools_routes.py",
+        "core/tag_rating_dist.py",
         "core/web_session_context.py",
         "app/web/remote/js/features/promptEngineeringPanel.mjs",
         "app/web/remote/js/features/promptHighlighter.mjs"
@@ -183,7 +182,8 @@
       "source_files": [
         "app/backend/server/fast_search_routes.py",
         "app/backend/server/autocomplete_commands.py",
-        "app/backend/server/ollama_chat_tools.py",
+        "app/backend/server/character_search.py",
+        "core/named_entity_aliases.py",
         "core/event_map/quick_search.py",
         "core/event_map/service.py",
         "app/web/remote/js/features/fastSearch.mjs"
@@ -677,65 +677,6 @@
       ]
     },
     {
-      "id": "translation_history",
-      "name": "Translation history (Ollama assist KR->EN log)",
-      "source_files": [
-        "app/backend/server/translation_history_routes.py",
-        "core/translation_history.py",
-        "app/web/remote/js/features/ollamaAssistantPopup.mjs"
-      ],
-      "legacy_dependency": "none",
-      "routes": [
-        {"method": "GET", "path": "/api/translation-history", "smoke": "non_destructive"},
-        {"method": "DELETE", "path": "/api/translation-history/{record_id}", "smoke": "state_mutation"},
-        {"method": "POST", "path": "/api/translation-history/{record_id}/pin", "smoke": "state_mutation"}
-      ]
-    },
-    {
-      "id": "ollama_chat",
-      "name": "Ollama intent plans, scoped search evidence, sentence output and curated runtime preparation",
-      "source_files": [
-        "app/backend/server/ollama_routes.py",
-        "core/ollama_assistant_service.py",
-        "core/ai_backend.py",
-        "core/ollama_model_spec.py",
-        "core/ollama_chat_agent.py",
-        "core/ollama_chat_plan.py",
-        "core/ollama_chat_selection.py",
-        "core/ollama_chat_execution.py",
-        "core/ollama_chat_semantics.py",
-        "core/english_tag_keywords.py",
-        "core/named_entity_aliases.py",
-        "core/llm_search_index.py",
-        "core/ollama_chat_pipeline.py",
-        "core/event_preset/fast_search_catalog.py",
-        "core/event_preset/fast_search_catalog.json",
-        "core/event_preset/fast_search_catalog_deep.json",
-        "app/backend/server/ollama_chat_tools.py",
-        "core/semantic_tag_discovery.py",
-        "app/web/remote/js/features/ollamaChatPopup.mjs",
-        "app/web/remote/js/features/ollamaAssistantPopup.mjs"
-      ],
-      "legacy_dependency": "none",
-      "routes": [
-        {"method": "GET", "path": "/api/ai/status", "smoke": "non_destructive"},
-        {"method": "GET", "path": "/api/ollama/status", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/ollama/server/start", "smoke": "state_mutation"},
-        {"method": "POST", "path": "/api/ollama/pull", "smoke": "external_live"},
-        {"method": "GET", "path": "/api/ollama/pull/status", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/ollama/pull/cancel", "smoke": "state_mutation"},
-        {"method": "POST", "path": "/api/ollama/unload", "smoke": "state_mutation"},
-        {"method": "GET", "path": "/api/ollama/dataset", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/ollama/dataset", "smoke": "external_live"},
-        {"method": "GET", "path": "/api/ollama/connection", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/ollama/connection", "smoke": "state_mutation"},
-        {"method": "GET", "path": "/api/ollama/assist/progress", "smoke": "non_destructive"},
-        {"method": "GET", "path": "/api/ollama/chat/progress", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/ollama/assist", "smoke": "external_live"},
-        {"method": "POST", "path": "/api/ollama/chat", "smoke": "external_live"}
-      ]
-    },
-    {
       "id": "boost_v2_llamacpp",
       "name": "Boost v2 + app-owned llama.cpp shared with Assist (HauhauCS Gemma 4 E2B/E4B/26B, CPU/GPU mode), model and engine download, API setup AI model section",
       "source_files": [
@@ -911,42 +852,11 @@
   ],
   "data_dependencies": [
     {
-      "feature": "fast_search",
-      "description": "Lazy read-only observed event combinations across ratings and person groups; independent of the optional Event Preset archive download.",
-      "paths": ["core/event_preset/fast_search_catalog.json", "core/event_preset/fast_search_catalog_deep.json"],
-      "provisioning": "bundled"
-    },
-    {
       "feature": "event_map",
       "description": "Optional event map index (single 879MB .naiamap file, not a zip) downloaded on demand by the install manager into the user data root; also buildable with tools/build_event_map_index.py. Absent by default: GET /api/event-map/state reports state=missing plus an install block describing the download, state=downloading while it runs, and the query routes answer 503 unavailable. NAIA_EVENT_MAP_INDEX overrides the path for development.",
       "paths": ["<user-data>/data/event_map/event_map.naiamap"],
       "provisioning": "downloader",
       "provisioned_by": "POST /api/install-manager/event-map/download"
-    },
-    {
-      "feature": "ollama_chat",
-      "description": "Bilingual tag and named-character grounding for read-only Chat tools.",
-      "paths": [
-        "data/KR_tags.parquet",
-        "data/e621_KR_tags.parquet",
-        "data/character_analysis.json"
-      ],
-      "provisioning": "bundled"
-    },
-    {
-      "feature": "ollama_chat",
-      "description": "Shared deterministic event lookup; basic and opt-in deep observed combinations load independently without an Event Preset download.",
-      "paths": ["core/event_preset/fast_search_catalog.json", "core/event_preset/fast_search_catalog_deep.json"],
-      "provisioning": "bundled"
-    },
-    {
-      "feature": "ollama_chat",
-      "description": "Optional legacy Ollama Assist event data; native Chat search does not use this archive.",
-      "paths": [
-        "data/event_preset/**"
-      ],
-      "provisioning": "downloader",
-      "provisioned_by": "POST /api/event-preset/download"
     },
     {
       "feature": "character_asset",

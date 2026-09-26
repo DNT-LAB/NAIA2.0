@@ -1472,7 +1472,7 @@ def character_params_from_settings(
          characters. A stale snapshot is NOT consumed while inactive (it may still
          persist so re-enabling restores the roll).
       3. ``prefer_snapshot`` and a stored (mode-keyed) snapshot exists → reuse it
-         verbatim (NO re-roll). This is how Generate (reroll OFF / Ollama) and the
+         verbatim (NO re-roll). This is how Generate (reroll OFF) and the
          random prompt grounding stay identical to what was rolled.
       4. Otherwise perform ONE fresh wildcard expansion and return it.
 
@@ -1607,7 +1607,7 @@ def character_params_from_settings(
 #
 # The character-prompt wildcard roll has exactly ONE source of truth at runtime:
 # ``app_context._character_roll_snapshot`` = {MODE: {"characters": [...], "uc": [...]}}.
-# It is the only roll — preview, Random box, Ollama boost grounding, and the NAI
+# It is the only roll — preview, Random box, and the NAI
 # Generate payload all read the SAME snapshot. It is RUNTIME ONLY and must never
 # be written to CharacterModule_*.json.
 #

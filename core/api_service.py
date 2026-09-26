@@ -1231,23 +1231,16 @@ class APIService:
                         # override wins, a disabled module / no active frames yields NO
                         # characters (a stale snapshot is NOT consumed while inactive), and
                         # only then does the reroll_on_generate gate apply:
-                        #   - reroll OFF (default) / Ollama → prefer_snapshot=True: reuse the
+                        #   - reroll OFF (default) → prefer_snapshot=True: reuse the
                         #     roll Random/Refresh produced so preview == random == generate.
                         #   - reroll ON (or no snapshot yet) → prefer_snapshot=False: FRESH
                         #     expansion, then stored below so the preview reflects what was
-                        #     generated. ollama_auto_boost is OR'd in for robustness, but
-                        #     reroll_on_generate is the primary gate.
+                        #     generated. (Auto Boost 는 캐릭터 프롬프트를 접지하지 않아 롤을 고정하지 않는다 —
+                        #     옛 Ollama Boost 의 고정은 2026-09-26 회수.)
                         if not characters:
                             _char_mode = params.get("api_mode", "NAI")
                             _reroll_on_generate = read_reroll_on_generate(self.app_context, _char_mode)
-                            # Boost v2(llama.cpp)는 캐릭터 프롬프트를 접지하지 않으므로 고정할 이유가 없다 —
-                            # 사용자의 reroll_on_generate 선택을 그대로 따른다.
-                            _boost_pins_roll = bool(getattr(self.app_context, "ollama_auto_boost", False))
-                            if _boost_pins_roll:
-                                from core.boost_v2 import llamacpp_selected
-
-                                _boost_pins_roll = not llamacpp_selected(self.app_context)
-                            _prefer_snapshot = (not _reroll_on_generate) or _boost_pins_roll
+                            _prefer_snapshot = not _reroll_on_generate
                             # Capture whether a reusable snapshot existed BEFORE resolving,
                             # so we know if the result is a reuse (don't re-store) or a fresh
                             # expansion (store, unless it's a per-run conditional override).

@@ -7,7 +7,7 @@
 갈래별 검색 소유권:
 
     tag/artist  autocomplete_commands.search_kr_tags   (`@`/`artist:` 접두어로 갈래)
-    character   ollama_chat_tools.search_characters    (도감 - 작품·수록 수를 안다)
+    character   character_search.search_characters     (도감 - 작품·수록 수를 안다)
     wildcard    autocomplete_commands.search_wildcards
     preset      prompt_engineering_settings            (파일 목록 + 저장된 내용)
     event       event_map.quick_search                  (현재 naiamap 관측 조합)
@@ -82,7 +82,7 @@ def _search_artist(context, query: str, limit: int, _opts) -> tuple[list[dict], 
 
 
 def _search_character(context, query: str, limit: int, _opts) -> tuple[list[dict], str]:
-    from app.backend.server.ollama_chat_tools import search_characters
+    from app.backend.server.character_search import search_characters
     from app.backend.server.autocomplete_commands import _ensure_kr_raw
 
     _ensure_kr_raw(context)

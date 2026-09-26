@@ -199,31 +199,13 @@ async def _run_automation_timer_watcher(context: WebSessionContext, clients: set
         context.automation_timer_watcher_task = None
 
 
-# ── Ollama Auto Boost 오버랩(프리페치) ───────────────────────────────────────
+# ── Auto Boost 오버랩(프리페치) ─────────────────────────────────────────────
 # 일반 Auto Gen/Automation에서 boost(느린 LLM)를 이미지 생성 대기와 겹쳐 "공짜"로 만든다.
-#   생산자: 현재 이미지 enqueue 직전, 다음 랜덤 행을 예약(pop)하고 그 행의 raw 태그로 boost를
-#           백그라운드 계산해 1슬롯 홀더에 채운다(부작용 0 — full generate는 안 함).
-#   소비자: continuation에서 홀더가 유효하면 예약 행을 generate(source_row_override)로 소비하고
-#           미리 만든 boost를 concat. 무효/미준비/실패면 동기 폴백(Phase 1).
+#   생산자: 현재 이미지 enqueue 직전, 다음 랜덤 행을 예약(pop)하고 그 행으로 **파이프라인 전체(조건부 포함)** 를
+#           돌려 부스트까지 끝낸 다음 컷을 1슬롯 홀더에 채운다(_prefetch_v2_cut — 화면·세션은 안 건드린다).
+#   소비자: continuation에서 홀더가 유효하면 그 컷을 설치한다. 무효/실패면 동기 폴백.
 # Story/Preset/특수요청·prompt_fixed·활성 태그필터는 제외(Codex 정제안). depth=1.
-_PREFETCH_BOOST_GRACE = 3.0  # 소비 시 boost가 아직이면 이만큼만 기다리고, 안 되면 이번 컷 boost 생략.
-
-
-def _ollama_boost_settings_token(context: WebSessionContext) -> tuple:
-    """prefetch 유효성용 설정 토큰(해시 가능). 설정(가중치·effort·include) 변경 시 stale
-    감지 — 옛 effort/입력으로 만든 boost를 새 설정으로 삽입하는 걸 막는다(Codex Must-fix 3)."""
-    try:
-        from app.backend.server.ollama_routes import ollama_boost_settings
-
-        s = ollama_boost_settings(context)
-        return (
-            round(float(s.get("nl_weight", 1.0)), 3), str(s.get("effort") or "rich"),
-            bool(s.get("include_prefix")), bool(s.get("include_postfix")), bool(s.get("include_e621")),
-            bool(s.get("allow_scent_style", True)), bool(s.get("allow_material_style", True)),
-            bool(s.get("allow_light_style", True)),
-        )
-    except Exception:
-        return ()
+# (옛 Ollama 프리페치 — raw general 로 boost 만 먼저 계산하던 것 — 은 2026-09-26 회수.)
 
 
 def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
@@ -236,8 +218,6 @@ def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
         tuple(sorted(ratings or [])),
         str(getattr(context, "current_api_mode", "") or ""),
         bool(getattr(context, "ollama_auto_boost", False)),
-        _ollama_boost_settings_token(context),
-        _boost_v2_selected_safe(context),  # 백엔드를 v2 로 바꾸면 Ollama 로 만든 예약분은 버린다.
         _boost_v2_prefetch_token(context),
     )
 
@@ -245,8 +225,6 @@ def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
 def _boost_v2_prefetch_token(context: WebSessionContext) -> tuple:
     """v2 로 미리 만든 컷의 유효성 — v2 설정 · PE 프리셋/설정(prefix/postfix 가 구워진다) · 주요 옵션이
     바뀌면 그 컷은 버리고 새로 만든다(바뀐 설정이 한 컷 늦게 반영되지 않게)."""
-    if not _boost_v2_selected_safe(context):
-        return ()
     try:
         import hashlib
         import json
@@ -267,15 +245,6 @@ def _boost_v2_prefetch_token(context: WebSessionContext) -> tuple:
         return ("unavailable",)
 
 
-def _boost_v2_selected_safe(context: WebSessionContext) -> bool:
-    try:
-        from app.backend.server.boost_v2_service import boost_v2_selected
-
-        return boost_v2_selected(context)
-    except Exception:
-        return False
-
-
 def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     """프리페치 자격: 토글 ON·일반 Auto Gen(또는 Automation)·Story/Preset/특수 아님·
     prompt_fixed 아님·활성 태그필터 없음."""
@@ -287,31 +256,17 @@ def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
         return False
     if not getattr(context, "ollama_auto_boost", False):
         return False
-    # Boost v2(llama.cpp)는 다음 컷을 **파이프라인 전체(조건부 포함)** 로 미리 만들고 부스트까지 끝낸다
-    # (_prefetch_v2_cut) — raw general 접지가 아니라서 조건부가 지운 태그를 되살리지 않는다.
-    # '*randomized' 프리셋은 Random 때 프리셋을 다시 굴리는 이벤트에 기대므로 미리 만들 수 없다.
-    v2 = _boost_v2_selected_safe(context)
-    if v2:
-        try:
-            from core.prompt_engineering_settings import get_prompt_engineering_store
-
-            state = get_prompt_engineering_store(context).state(context.get_api_mode())
-            if str(state.get("current_preset") or "") == "*randomized":
-                return False
-        except Exception:
-            return False
-    # include_*(prefix/postfix/e621) 중 하나라도 ON이면 prefetch 비활성 → 동기 폴백. 오버랩
-    # 선행 단계는 raw store 값(와일드카드 미전개)·파이프라인 전이라, sync 경로(processed
-    # context: 전개된 prefix/postfix + 산출된 e621)와 입력이 달라진다. 정확성 우선(Codex
-    # Must-fix 4 + round2 minor). 기본(모두 OFF)은 prefetch 유지 — 입력=장면 태그만이라 양 경로 동일.
+    # 다음 컷을 **파이프라인 전체(조건부 포함)** 로 미리 만들고 부스트까지 끝낸다(_prefetch_v2_cut) — raw general
+    # 접지가 아니라서 조건부가 지운 태그를 되살리지 않는다. '*randomized' 프리셋은 Random 때 프리셋을 다시 굴리는
+    # 이벤트에 기대므로 미리 만들 수 없다.
     try:
-        from app.backend.server.ollama_routes import ollama_boost_settings
+        from core.prompt_engineering_settings import get_prompt_engineering_store
 
-        _obs = ollama_boost_settings(context)
-        if not v2 and (_obs.get("include_e621") or _obs.get("include_prefix") or _obs.get("include_postfix")):
+        state = get_prompt_engineering_store(context).state(context.get_api_mode())
+        if str(state.get("current_preset") or "") == "*randomized":
             return False
     except Exception:
-        pass
+        return False
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
@@ -367,130 +322,28 @@ def _kickoff_auto_gen_prefetch(context: WebSessionContext, request) -> None:
         reserved = random_service(context).reserve_next_random_row(ratings)
         if reserved is None:
             return
-        if _boost_v2_selected_safe(context):
-            prefetch_overrides = _auto_generation_overrides(getattr(request, "params", {}) or {})
-            prefetch_overrides["auto_generate"] = True
-            task = asyncio.create_task(_prefetch_v2_cut(context, reserved, prefetch_overrides, ratings))
-            context._auto_gen_prefetch = {
-                "kind": "v2",
-                "state_key": _auto_gen_prefetch_state_key(context, ratings),
-                "source_row": reserved,
-                "task": task,
-                "overrides": prefetch_overrides,
-                "ratings": sorted(ratings or []),
-            }
-            return
-        try:
-            general = str(reserved.get("general") or "")
-        except Exception:
-            general = ""
-        from app.backend.server.ollama_routes import ollama_boost_settings, scene_boost_prompt
-        from core.scene_boost import strip_weight_syntax
-
-        # prefetch는 모든 include OFF일 때만 동작(eligible 가드) → 입력 = 장면 태그(general)만,
-        # 가중치 제거. (prefix/postfix/e621 포함 시엔 prefetch 끄고 동기 폴백이 정확히 처리.)
-        boost_settings = ollama_boost_settings(context)
-        boost_input = strip_weight_syntax(general) or general
-        # Effort([기능2]) 명시 전달 + 설정을 holder에 freeze — 소비 시 kickoff 시점 설정으로
-        # 조립해, 생성 중 설정을 바꿔도 옛 boost를 새 설정으로 삽입하지 않는다(Codex Must-fix 3).
-        task = asyncio.create_task(
-            asyncio.to_thread(
-                scene_boost_prompt,
-                context,
-                boost_input,
-                level=boost_settings.get("effort"),
-                allow_scent_style=boost_settings.get("allow_scent_style"),
-                allow_material_style=boost_settings.get("allow_material_style"),
-                allow_light_style=boost_settings.get("allow_light_style"),
-                emphasize_framing=boost_settings.get("emphasize_framing"),
-            )
-        )
+        prefetch_overrides = _auto_generation_overrides(getattr(request, "params", {}) or {})
+        prefetch_overrides["auto_generate"] = True
+        task = asyncio.create_task(_prefetch_v2_cut(context, reserved, prefetch_overrides, ratings))
         context._auto_gen_prefetch = {
+            "kind": "v2",
             "state_key": _auto_gen_prefetch_state_key(context, ratings),
             "source_row": reserved,
             "task": task,
-            "settings": boost_settings,
+            "overrides": prefetch_overrides,
+            "ratings": sorted(ratings or []),
         }
     except Exception:
         context._auto_gen_prefetch = None  # 프리페치 실패는 무해 — 소비 시 동기 폴백.
 
 
-def _apply_prefetched_boost(context: WebSessionContext, result, boost, settings=None) -> None:
-    """미리 계산한 boost(구도태그+자연어)를 generate 결과 프롬프트에 concat.
-    settings는 kickoff 시 freeze된 것을 받는다(없으면 현재값 — Codex Must-fix 3)."""
-    try:
-        if not isinstance(boost, dict) or not boost.get("ok"):
-            return
-        add = boost.get("additions") or {}
-        # 구도태그(무가중) + 자연어([기능1] nl_weight 래핑)로 조립 — freeze된 설정 사용.
-        from app.backend.server.generation_commands import _compose_addition, _inject_boost_at_main
-        if settings is None:
-            from app.backend.server.ollama_routes import ollama_boost_settings
-
-            settings = ollama_boost_settings(context)
-        text = _compose_addition(add, settings, context)
-        if not text:
-            return
-        prompt = str(getattr(result, "prompt", "") or "")
-        # 메인 섹션 끝(e621 위치)에 삽입 — 끝(postfix 뒤)이 아니라 장면 태그 바로 뒤.
-        new_prompt = _inject_boost_at_main(prompt, text) if prompt.strip() else text
-        result.prompt = new_prompt
-        context.prompt_text = new_prompt
-        ctx = getattr(result, "context", None)
-        if ctx is not None:
-            ctx.final_prompt = new_prompt
-            if isinstance(getattr(ctx, "metadata", None), dict):
-                ctx.metadata["ollama_auto_boost"] = {
-                    "rating": boost.get("rating"), "level": boost.get("level"),
-                    "additions": add, "prefetched": True, "settings": settings,
-                }
-    except Exception:
-        pass
-
-
 async def _consume_auto_gen_prefetch(context: WebSessionContext, overrides, request_id):
-    """홀더가 유효하면 예약 행을 generate(override)로 소비 + boost concat. 아니면 None(폴백)."""
+    """홀더가 유효하면 미리 만든 컷을 설치해 돌려준다. 아니면 None(폴백)."""
     holder = getattr(context, "_auto_gen_prefetch", None)
     if not holder:
         return None
     context._auto_gen_prefetch = None  # 원샷 소비
-    if holder.get("kind") == "v2":
-        return await _consume_v2_cut(context, holder)
-    source_row = holder.get("source_row")
-    task = holder.get("task")
-    try:
-        ratings = context.get_active_ratings()
-        if holder.get("state_key") != _auto_gen_prefetch_state_key(context, ratings):
-            if task is not None and not task.done():
-                task.cancel()
-            return None  # stale(재검색/등급/모드/토글 변경) → 다른 행 필요 → 동기 폴백
-        # 예약 행으로 full generate(override → pop 없음, random_prompt_triggered 등 정상).
-        # boost와 무관하게 항상 이 예약 행을 쓴다(동기 재생성 폴백으로 빠지지 않음).
-        result = await asyncio.to_thread(
-            random_service(context).generate,
-            active_ratings=ratings,
-            overrides=overrides,
-            random_request_id=request_id,
-            source_row_override=source_row,
-        )
-        if holder.get("state_key") != _auto_gen_prefetch_state_key(context, ratings):
-            if task is not None and not task.done():
-                task.cancel()
-            return None
-        if getattr(result, "success", False):
-            # boost는 이미지 생성과 겹쳐 대부분 이미 완료. 아직이면 짧게만 기다리고, 그래도
-            # 안 되면 이번 컷은 boost 생략한다 — **2차 Ollama 호출은 절대 하지 않는다**(중복/지연 방지).
-            try:
-                boost = await asyncio.wait_for(asyncio.shield(task), timeout=_PREFETCH_BOOST_GRACE)
-                if holder.get("state_key") != _auto_gen_prefetch_state_key(context, ratings):
-                    return None
-                _apply_prefetched_boost(context, result, boost, holder.get("settings"))
-            except Exception:
-                if task is not None and not task.done():
-                    task.cancel()
-        return result
-    except Exception:
-        return None
+    return await _consume_v2_cut(context, holder)
 
 
 _V2_PREFETCH_WAIT = 90.0  # 미리 만드는 컷(파이프라인+llama 60초 상한)을 끝까지 기다린다 — 새로 만드는 게 더 느리다.
@@ -629,7 +482,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             await broadcast_json(clients, context.queue_state_payload())
             if img2img_started:
                 await _broadcast_img2img_generation_state(context, clients)
-            # Ollama Auto Boost 오버랩 생산자 — 다음 랜덤 행 예약 + boost를 백그라운드 선행해
+            # Auto Boost 오버랩 생산자 — 다음 랜덤 행 예약 + 다음 컷(부스트 포함)을 백그라운드 선행해
             # 현재 이미지 생성(아래 execute_request 대기)과 겹친다. 자격 미달이면 no-op.
             _kickoff_auto_gen_prefetch(context, request)
             # Sequence Use Vibe: 라운드 첫 이미지가 인코딩돼 있으면 이후 프레임 실행 직전에
@@ -1564,7 +1417,7 @@ async def _maybe_continue_auto_generation(
             # 켜져 있으면 스스로 큐에 넣는다. 여기서 또 뽑으면 한 번에 두 장이 나가거나 화면과 생성이 어긋난다.
             return False
         result = None
-        # Ollama Auto Boost 오버랩 소비 — 유효한 예약행+boost가 있으면 그대로 사용(이미지
+        # Auto Boost 오버랩 소비 — 미리 만든 다음 컷(부스트 포함)이 유효하면 그대로 사용(이미지
         # 생성과 겹쳐 이미 계산됨 → 지연 0). 일반 Auto Gen/Automation만. Story(고정 정체성)는
         # 시도 안 하고, Preset/특수는 위 _should_continue_auto_generation이 이미 차단.
         if not story_run_id and not is_special_request(params, context._coerce_bool):
@@ -1674,7 +1527,7 @@ async def _maybe_continue_auto_generation(
             overrides["wildcard_standalone"] = False
 
     # ⚠️ **여기서 한 번 더 본다.** 위쪽 `_should_continue_auto_generation` 검사와 이
-    #    줄 사이에 프롬프트 생성(`to_thread`)·Ollama boost·broadcast 가 여럿 끼어
+    #    줄 사이에 프롬프트 생성(`to_thread`)·Auto Boost·broadcast 가 여럿 끼어
     #    있어서, 그 사이에 인페인트 세션이 열리거나 사용자가 Auto Gen 을 꺼도 이
     #    한 장은 그대로 유료로 나갔다(Codex HIGH 2026-08-28).
     #    판정은 순수 읽기라 두 번 불러도 부작용이 없다 - 값이 나가는 **마지막 한 줄**

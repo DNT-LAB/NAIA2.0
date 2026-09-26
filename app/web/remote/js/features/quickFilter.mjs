@@ -1495,15 +1495,14 @@ export function createQuickFilterController(deps) {
         ? [[...pref.tag_filter, ...pref.tag_filter_exclude.map(tag => '-' + tag)]] : [];
       appliedBranches = active ? cloneBranches(pref.tag_filter_applied_branches.length ? pref.tag_filter_applied_branches : legacy) : [];
       if (appliedBranches.length) lastApplied = cloneBranches(appliedBranches);
-      // 합쳐 둔 담은 것 = 걸린 조합에서 '지금 칩' 한 벌을 뺀 나머지(창을 다시 열어도 합친 상태가 남는다).
+      // 합쳐 둔 담은 것 = 걸린 조합 중 **담은 목록에 있는 것**(창을 다시 열어도 합친 상태가 남는다).
+      // ⚠️ 여기서 담은 목록을 **늘리지 마라.** '지금 칩과 다른 조합' 을 전부 합쳐진 것으로 보고 목록에
+      //    되살렸더니, 칩을 고칠 때마다 서버 메아리(search_state)가 싣고 온 **직전 칩 조합**이 담은 것으로
+      //    쌓여 사용자가 담지 않아도 줄이 계속 늘었다(제보 2026-09-26). 합쳐진 것은 커밋이 만든다 -
+      //    커밋은 담은 줄에서만 오므로 걸린 조합 ∩ 담은 목록이면 충분하다.
       if (!tempSig) {
-        mergedBranches = cloneBranches(appliedBranches).filter(tags => branchSig(tags) !== branchSig(payload()));
-        // 합쳐져 있는데 목록에 없는 조합(옛 저장값 등)은 담은 목록에 되살린다 - 풀을 거르는 것은 늘 보여야 한다.
-        mergedBranches.forEach(tags => {
-          if (!stagedBranches.some(branch => branchSig(branch.tags) === branchSig(tags))) {
-            stagedBranches.push({tags: [...tags], enabled: true});
-          }
-        });
+        mergedBranches = cloneBranches(appliedBranches)
+          .filter(tags => stagedBranches.some(branch => branchSig(branch.tags) === branchSig(tags)));
       }
     }
     if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효

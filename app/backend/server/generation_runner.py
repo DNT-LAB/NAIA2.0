@@ -2135,6 +2135,26 @@ async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dic
     image = getattr(getattr(stored, "item", None), "image", None)
     if not artist or image is None:
         return
+    # 그룹 보기(벤치)의 결과는 **그 보기 칸**에만 남긴다 - 기본 썸네일(사용자 생성)을 덮으면
+    # '보기를 끄면 원래 그림' 이 깨진다. 표식도 따로 둔다: `artist_thumb_url` 을 채우면 탭이
+    # 격자 카드의 그림을 벤치 결과로 바꿔 버린다.
+    view_id = str(params.get("artist_thumb_view") or "").strip()
+    if view_id:
+        saved_view = None
+        try:
+            saved_view = await asyncio.to_thread(
+                artist_thumbnail_service(context).save_view_thumbnail, image, artist, view_id,
+            )
+        except Exception as exc:   # noqa: BLE001
+            print(f"[artist-thumb] view thumbnail save failed: {exc}", flush=True)
+        meta = stored.image_meta if isinstance(stored.image_meta, dict) else {}
+        meta.update({
+            "artist_thumb_saved": False,
+            "artist_thumb_url": "",
+            "artist_thumb_view": view_id,
+            "artist_thumb_view_url": str(saved_view.get("url") or "") if isinstance(saved_view, dict) else "",
+        })
+        return
     # ⚠️ **모델(폴더) 단위로 저장한다**(사용자 지정). 프레임에 baking 된 모델을 먼저
     #    본다 - 생성이 끝난 뒤 사용자가 모델을 바꿨어도 이 그림은 그때 그 모델의 것이다.
     model = str(params.get("model") or "").strip()

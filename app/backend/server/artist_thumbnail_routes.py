@@ -10,6 +10,7 @@ from app.backend.server.install_manager_routes import _is_local_request
 from fastapi.responses import JSONResponse, Response
 
 from core.artist_affinity import default_pack as artist_affinity_pack
+from core.artist_bench_views import ArtistBenchViewError, ArtistBenchViewStore
 from core.artist_groups import ArtistGroupError, ArtistGroupStore
 from core.artist_mixes import ArtistMixError, ArtistMixStore, MIX_SETTING_KEYS
 from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
@@ -30,6 +31,52 @@ def artist_group_store(context: WebSessionContext) -> ArtistGroupStore:
         store = ArtistGroupStore(artist_thumbnail_service(context).state_root)
         context.artist_group_store = store
     return store
+
+
+def artist_bench_view_store(context: WebSessionContext) -> ArtistBenchViewStore:
+    """보기(벤치 설정) 저장소. 그룹과 **같은 폴더, 다른 파일**이다(`artist_bench_views.json`)."""
+    store = getattr(context, "artist_bench_view_store", None)
+    if store is None:
+        store = ArtistBenchViewStore(artist_thumbnail_service(context).state_root)
+        context.artist_bench_view_store = store
+    return store
+
+
+_VIEW_OPS = {"create", "update", "rename", "delete", "select"}
+
+
+def _bench_current_spec(context: WebSessionContext) -> dict:
+    """'지금 설정' 한 벌 - 새 보기의 기본값. 글은 Artist Thumbnail 칸의 prefix/postfix 를,
+    생성 설정은 믹스 조합과 같은 여섯 키를 뜬다."""
+    service = artist_thumbnail_service(context)
+    mode = str(context.get_api_mode() or "NAI").upper()
+    options = service.load_options(mode)
+    layers = _mix_current_layers(context)
+    width = height = 0
+    try:
+        width, height = (int(v) for v in str(context.remote_params.get("resolution") or "").lower().split("x"))
+    except Exception:
+        width, height = 832, 1216
+    return {"api_mode": mode, "prefix": options.get("prefix", ""), "postfix": options.get("postfix", ""),
+            "negative": layers["negative"], "width": width, "height": height,
+            "settings": layers["settings"], "seed": -1}
+
+
+def _apply_view_op(context: WebSessionContext, payload: dict) -> dict:
+    store = artist_bench_view_store(context)
+    op = str(payload.get("op") or "").strip()
+    if op == "create":
+        spec = payload.get("spec") if isinstance(payload.get("spec"), dict) else _bench_current_spec(context)
+        return store.create(payload.get("name"), spec)
+    if op == "update":
+        return store.update(payload.get("id"), payload.get("spec"))
+    if op == "rename":
+        return store.rename(payload.get("id"), payload.get("name"))
+    if op == "delete":
+        return store.delete(payload.get("id"))
+    if op == "select":
+        return store.set_group_view(payload.get("group"), payload.get("id"))
+    raise ArtistBenchViewError(f"unknown op: {op or '(empty)'}")
 
 
 def artist_mix_store(context: WebSessionContext) -> ArtistMixStore:
@@ -528,6 +575,49 @@ def register_artist_thumbnail_routes(
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    @app.get("/api/artist-bench-views")
+    async def api_artist_bench_views_list():
+        try:
+            data = await run_in_thread(artist_bench_view_store(session_context).snapshot)
+            current = await run_in_thread(_bench_current_spec, session_context)
+            return {**data, "current": current}
+        except Exception as exc:
+            # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
+            return JSONResponse({"error": f"Bench views unreadable: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-bench-views")
+    async def api_artist_bench_views_mutate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        if str(payload.get("op") or "") not in _VIEW_OPS:
+            return JSONResponse({"error": f"op must be one of {sorted(_VIEW_OPS)}"}, status_code=400)
+        try:
+            return await run_in_thread(_apply_view_op, session_context, payload)
+        except ArtistBenchViewError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except Exception as exc:
+            return JSONResponse({"error": f"Bench views update failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/view-image")
+    async def api_artist_thumb_view_image(view: str = "", artist: str = ""):
+        try:
+            image_bytes, media_type = await run_in_thread(
+                artist_thumbnail_service(session_context).view_image_payload, view, artist,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb view image failed: {exc}"}, status_code=500)
+        # 주소의 `t=` 가 파일 시각이라 다시 뽑으면 주소가 바뀐다 - 길게 캐시해도 된다.
+        return Response(content=image_bytes, media_type=media_type,
+                        headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/api/artist-thumb/group-image")
     async def api_artist_thumb_group_image(artist: str = ""):
         try:
@@ -604,6 +694,7 @@ def register_artist_thumbnail_routes(
                 artist_thumbnail_service(session_context).describe_artists,
                 payload.get("mode", ""),
                 payload.get("artists"),
+                str(payload.get("view") or ""),
             )
         except Exception as exc:
             return JSONResponse({"error": f"Artist describe failed: {exc}"}, status_code=500)
@@ -941,11 +1032,27 @@ def register_artist_thumbnail_routes(
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
+        view_id = str(payload.get("bench_view") or "").strip()
         try:
-            overrides = await run_in_thread(
-                artist_thumbnail_service(session_context).generation_overrides,
-                payload,
-            )
+            if view_id:
+                view = await run_in_thread(artist_bench_view_store(session_context).get, view_id)
+                current_mode = str(session_context.get_api_mode() or "NAI").upper()
+                # ⚠️ 다른 백엔드의 보기로 뽑으면 모델 이름부터 뜻이 달라진다 - 거절한다.
+                if view["api_mode"] != current_mode:
+                    return JSONResponse({"error": f"'{view['name']}' 보기는 {view['api_mode']} 용입니다 "
+                                                  f"(지금 {current_mode})"}, status_code=409)
+                schema = await run_in_thread(session_context.generation_param_schema_payload)
+                overrides = await run_in_thread(
+                    artist_thumbnail_service(session_context).view_generation_overrides,
+                    payload, view, schema,
+                )
+            else:
+                overrides = await run_in_thread(
+                    artist_thumbnail_service(session_context).generation_overrides,
+                    payload,
+                )
+        except ArtistBenchViewError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         dispatch = await run_in_thread(

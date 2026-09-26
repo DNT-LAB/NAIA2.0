@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import random
 import re
 import threading
@@ -888,6 +889,109 @@ class ArtistThumbnailService:
             self._image_cache[cache_key] = (image_bytes, media_type)
         return image_bytes, media_type
 
+    # ── 보기(벤치) 출력 ─────────────────────────────────────────────────
+    #  보기 하나 = 벤치 조건 한 벌(`core/artist_bench_views.py`). 그 조건으로 뽑은 그림은
+    #  작가마다 한 장, `bench_views/<보기>/<작가>.webp`. **사용자 생성 썸네일과 섞지 않는다** -
+    #  기본 썸네일 자리를 벤치 그림이 덮으면 '보기를 끄면 원래 그림' 이 성립하지 않는다.
+    def _view_dir(self, view_id: str) -> Path:
+        return self.state_root / "bench_views" / self._safe_component(view_id, "view")
+
+    def _view_file(self, view_id: str, artist: str) -> Path:
+        return self._view_dir(view_id) / (self._safe_component(artist, "artist") + ".webp")
+
+    @staticmethod
+    def view_image_url(view_id: str, artist: str, stamp: int = 0) -> str:
+        # `t=` 는 다시 뽑았을 때 브라우저가 옛 그림을 쓰지 않게 하는 표(파일 시각).
+        return (f"/api/artist-thumb/view-image?view={quote(str(view_id), safe='')}"
+                f"&artist={quote(str(artist), safe='')}&t={int(stamp)}")
+
+    def view_images(self, view_id: str, artists: Any) -> dict[str, str]:
+        """작가 -> 그 보기의 그림 주소(있는 것만). 폴더를 **한 번** 훑는다(3천 명도 한 번)."""
+        vid = str(view_id or "").strip()
+        folder = self._view_dir(vid) if vid else None
+        if folder is None or not folder.is_dir():
+            return {}
+        stamps: dict[str, int] = {}
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name.endswith(".webp") and entry.is_file():
+                    stamps[entry.name] = int(entry.stat().st_mtime)
+        out = {}
+        for artist in artists if isinstance(artists, (list, tuple)) else []:
+            name = str(artist or "").strip()
+            stamp = stamps.get(self._safe_component(name, "artist") + ".webp")
+            if name and stamp is not None:
+                out[name] = self.view_image_url(vid, name, stamp)
+        return out
+
+    def save_view_thumbnail(self, pil_image: Any, artist: str, view_id: str) -> dict[str, Any] | None:
+        """벤치 결과를 그 보기 칸에 남긴다. 같은 작가를 다시 뽑으면 덮어쓴다(사용자 생성과 같은 규칙)."""
+        artist_name = str(artist or "").strip()
+        vid = str(view_id or "").strip()
+        if not artist_name or not vid or pil_image is None:
+            return None
+        from PIL import Image
+
+        target = self._view_file(vid, artist_name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        thumb = pil_image.copy()
+        if thumb.mode not in ("RGB", "RGBA"):
+            thumb = thumb.convert("RGB")
+        thumb.thumbnail(self.GENERATED_THUMB_MAX_SIZE, Image.Resampling.LANCZOS)
+        tmp_path = target.with_name(target.name + ".tmp")
+        thumb.save(tmp_path, "WEBP", quality=82)
+        tmp_path.replace(target)
+        return {"artist": artist_name, "view": vid,
+                "url": self.view_image_url(vid, artist_name, int(target.stat().st_mtime))}
+
+    def view_image_payload(self, view_id: str, artist: str) -> tuple[bytes, str]:
+        artist_name = str(artist or "").strip()
+        vid = str(view_id or "").strip()
+        if not artist_name or not vid:
+            raise ValueError("view and artist are required")
+        try:
+            return self._view_file(vid, artist_name).read_bytes(), "image/webp"
+        except OSError as exc:
+            raise FileNotFoundError(f"View thumbnail not found: {vid} / {artist_name}") from exc
+
+    def view_generation_overrides(self, payload: dict, view: dict, schema: dict | None = None) -> dict:
+        """보기의 조건으로 생성한다. 글(prefix/postfix/네거티브) · 해상도 · 설정 · 시드는 **보기의 것**,
+        작가 표기(`positive`)만 화면이 보낸다 - 표기 규칙(NAI `artist:` · Anima `@` · 괄호 이스케이프)은
+        화면의 한 곳이 주인이다.
+
+        ⚠️ 해상도는 **그대로** 쓴다(썸네일 해상도로 보정하지 않는다) - 비교 조건이다.
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        api_mode = str(view.get("api_mode") or "NAI").upper()
+        merged = {
+            **payload,
+            "prefix": view.get("prefix", ""),
+            "postfix": view.get("postfix", ""),
+            "negative_prompt": view.get("negative", ""),
+            "width": view.get("width"),
+            "height": view.get("height"),
+            "artist_thumb_use_active_resolution": True,
+        }
+        overrides = self.generation_overrides(merged)
+        overrides["random_resolution"] = False
+        overrides["auto_fit_resolution"] = False
+        overrides["artist_thumb_view"] = str(view.get("id") or "")
+        settings = view.get("settings") if isinstance(view.get("settings"), dict) else {}
+        options = schema if isinstance(schema, dict) else {}
+        for key, value in settings.items():
+            if key in {"model", "sampler", "scheduler"}:
+                allowed = options.get(f"options_{key}")
+                if isinstance(allowed, list) and allowed and value not in allowed:
+                    raise ValueError(f"'{value}' 은(는) 지금 {key} 선택지에 없습니다 - 보기를 고치거나 모드를 맞추세요")
+            if key == "cfg_rescale" and api_mode == "WEBUI":
+                continue
+            param = {"scale": "cfg_scale",
+                     "cfg_rescale": "rescale_cfg" if api_mode == "COMFYUI" else "cfg_rescale"}.get(key, key)
+            overrides[param] = value
+        seed = int(view.get("seed", -1))
+        overrides["seed"] = seed
+        return overrides
+
     def load_data(self, mode: str) -> dict:
         key = str(mode or "").strip()
         if not key:
@@ -1145,7 +1249,7 @@ class ArtistThumbnailService:
             ],
         }
 
-    def describe_artists(self, mode: str = "", artists: Any = None) -> dict:
+    def describe_artists(self, mode: str = "", artists: Any = None, view: str = "") -> dict:
         """이름 목록 -> 격자 카드와 **같은 모양**의 항목들. 그룹 창이 쓴다.
 
         ⚠️ 그림 주소 규칙은 `_image_url_resolver` 하나다 - 격자와 그룹 창이 서로 다른
@@ -1165,8 +1269,10 @@ class ArtistThumbnailService:
         favorite_set = set(self._favorites())
         banned_set = set(self._banned())
         item_image_url = self._image_url_resolver(mode_key, "all", thumb_data)
+        view_urls = self.view_images(view, names) if view else {}
         return {
             "mode": mode_key,
+            "view": str(view or ""),
             "items": [
                 {
                     "artist": artist,
@@ -1176,6 +1282,8 @@ class ArtistThumbnailService:
                     "banned": artist in banned_set,
                     "has_image": bool(item_image_url(artist)),
                     "image_url": item_image_url(artist),
+                    # 보기를 물었을 때만. 없으면 빈 값 - 화면이 '미생성' 막을 덮는다.
+                    **({"view_image_url": view_urls.get(artist, "")} if view else {}),
                 }
                 for artist in names
             ],

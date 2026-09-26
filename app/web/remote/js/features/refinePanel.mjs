@@ -21,6 +21,9 @@ export function createRefinePanel({
   let open = false;
   let lastSample = null;
   let lastViewCount = null;
+  let lastState = null;
+  let temporaryMode = false;
+  let awaitingResume = false;
 
   // 오른쪽 칸(.refine-right)은 Search 창에서 **동반 창으로 옮겨진다**(2026-09-25) - 컨테이너 안에서만
   // 찾으면 옮긴 뒤로 샘플·스테이징이 조용히 안 그려진다. 안에 없으면 문서 전체의 그 칸에서 찾는다.
@@ -37,12 +40,7 @@ export function createRefinePanel({
 
   function openPanel() {
     if (open) { close(); return; }
-    open = true;
-    if (typeof enterMode === 'function') enterMode();
-    ensureRefineStyle();
-    renderShell();
-    send({ type: 'get_depth_state' });
-    send({ type: 'depth_action', action: 'open' });
+    ensureOpen();
   }
 
   // 창의 심층 검색 층이 보이게 될 때(app.js). 이미 열려 있으면 **아무것도 안 한다** - 층을 오갈
@@ -53,8 +51,9 @@ export function createRefinePanel({
     if (typeof enterMode === 'function') enterMode();
     ensureRefineStyle();
     renderShell();
+    awaitingResume = temporaryMode;
     send({ type: 'get_depth_state' });
-    send({ type: 'depth_action', action: 'open' });
+    if (!temporaryMode) send({ type: 'depth_action', action: 'open' });
   }
 
   // [← SEARCH] — leave refine-mode, back to the Search panel.
@@ -115,6 +114,11 @@ export function createRefinePanel({
   }
 
   function onDepthState(message) {
+    if (awaitingResume) {
+      awaitingResume = false;
+      if (!message.open) send({type: 'depth_action', action: 'open'});
+    }
+    lastState = message;
     if (!open) return;
     renderShell();
     if (!message.open) {
@@ -433,6 +437,48 @@ export function createRefinePanel({
   }
 
   return {
+    setTemporaryMode: value => { temporaryMode = !!value; awaitingResume = false; },
+    snapshotWorkspace: () => JSON.parse(JSON.stringify({open, lastSample, lastViewCount, lastState, lastCount,
+      hadShell: !!container.querySelector('.refine-header')})),
+    restoreWorkspace: snapshot => {
+      const s = JSON.parse(JSON.stringify(snapshot));
+      open = s.open; lastSample = s.lastSample; lastViewCount = s.lastViewCount;
+      lastState = s.lastState; lastCount = s.lastCount;
+      if (!s.hadShell) {
+        side('.refine-right')?.remove();
+        document.querySelector('#searchRefineSideWindow .refine-right')?.remove();
+        container.replaceChildren();
+        return;
+      }
+      const left = container.querySelector('.refine-left');
+      if (left) left.replaceChildren();
+      const wasOpen = open; open = true;
+      if (lastState) onDepthState(lastState);
+      if (lastSample) onDepthSample(lastSample);
+      else {
+        const body = side('.rf-prev-body');
+        if (body) { body.classList.add('rf-prev-empty'); body.textContent = '무작위 샘플을 뽑아 결과셋을 들여다보세요.'; }
+      }
+      open = wasOpen;
+    },
+    // 아직 열지 않은 심층검색도 서버의 depth_action(open) 없이 미리보기 폼만 만든다.
+    previewSurface: () => {
+      const host = document.createElement('div');
+      const scopedDocument = {
+        createElement: (...args) => document.createElement(...args),
+        head: document.head,
+        getElementById: id => host.querySelector(`[id="${id}"]`) || (id === 'refine-tab-style' ? document.getElementById(id) : null),
+        querySelector: selector => host.querySelector(selector),
+      };
+      const preview = createRefinePanel({document: scopedDocument, container: host, escHtml,
+        getWs: () => null, WebSocket, showToast: () => {}, bindTagAssist: () => {},
+        enterMode: () => {}, exitMode: () => {}});
+      preview.ensureOpen();
+      preview.onDepthState(lastState?.open ? lastState : {open: true, query: '', exclude: '',
+        count: 0, original: 0, ratings: {g: true, s: true, q: true, e: true}, filters: {}, staging: []});
+      if (lastSample) preview.onDepthSample(lastSample);
+      return host;
+    },
     open: openPanel,
     ensureOpen,
     close,

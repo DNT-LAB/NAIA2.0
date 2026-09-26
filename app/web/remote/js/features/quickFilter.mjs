@@ -218,6 +218,7 @@ export function createQuickFilterController(deps) {
   let previewRequestId = '';
   let previewQueued = false;
   let previewCounts = null;           // 미리보기(커밋하면 걸릴 합집합)의 등급별 수
+  let temporaryMode = false;
 
   const getEl = id => doc.getElementById(id);
   // Tag Filter 가 사는 곳. 리모컨 창(searchQuickWindow)이 주입하면 그걸 묻고, 없으면 예전 고정 팝업.
@@ -378,7 +379,7 @@ export function createQuickFilterController(deps) {
 
   function save() {
     const preferences = collectPreferences();
-    savePreferences(preferences, storage);
+    if (!temporaryMode) savePreferences(preferences, storage);
     updateHighlight();
     send({type: 'save_search_filter_state', ...preferences});
   }
@@ -1546,7 +1547,7 @@ export function createQuickFilterController(deps) {
     } else if (!sameTags && hasFilter()) {
       schedulePreview({save: false});
     }
-    if (options.persistLocal) savePreferences(pref, storage);
+    if (options.persistLocal && !temporaryMode) savePreferences(pref, storage);
     restoreFocusedInputState(focusedInputState);
     updateCommitButton();
     return true;
@@ -1773,6 +1774,40 @@ export function createQuickFilterController(deps) {
   }
 
   return {
+    setTemporaryMode: value => { temporaryMode = !!value; },
+    awaitWorkspaceIdle: async () => {
+      const deadline = Date.now() + 90000;
+      // Let an already-started Search -> Assign round trip finish before asking
+      // the server to freeze. A server-only drain cannot see the next client hop.
+      while (searchDebounceTimer || applyInFlight) {
+        if (!isSocketOpen() || Date.now() > deadline) return false;
+        await new Promise(resolve => setTimeout(resolve, 40));
+      }
+      return true;
+    },
+    pauseWorkspace: () => { cancelPendingSearch(); clearAutocomplete(); closeChipMenu(); },
+    restoreWorkspace: snapshot => {
+      const s = JSON.parse(JSON.stringify(snapshot));
+      cancelPendingSearch(); clearAutocomplete(); invalidateSearchRequest();
+      includeTags = s.include; excludeTags = s.exclude; active = s.active;
+      filterWasApplied = s.filterWasApplied;
+      stagedBranches = s.stagedBranches; appliedBranches = s.appliedBranches;
+      lastApplied = s.lastApplied; mergedBranches = s.mergedBranches;
+      commitHistory.splice(0, commitHistory.length, ...s.commitHistory);
+      tempSig = s.tempSig; selectedSig = s.selectedSig;
+      ratingCounts = s.ratingCounts; previewCounts = s.previewCounts;
+      lastSentBranches = s.lastSentBranches || [];
+      branchCounts.clear(); for (const [key, counts] of s.branchCounts || []) branchCounts.set(key, counts);
+      applyInFlight = null; applyRequestId = ''; previewRequestId = ''; previewQueued = false;
+      pendingAssignOnRestore = false;
+      assignedOnce = [];
+      renderChips(); renderBranches(); updateCommitButton();
+      renderMatchedCount(active ? 'assigned' : 'matched');
+      setReleasedOverlay(s.released);
+      updateHighlight();
+      getEl('tagFilterToggle')?.classList.toggle('assigned', active);
+      unlockTagSurface('tagfilter');
+    },
     bindInputs,
     toggle,
     open,
@@ -1825,6 +1860,13 @@ export function createQuickFilterController(deps) {
     isActive: () => active,
     getRatingCounts: () => ratingCounts,
     snapshotTags,
+    // UI 미리보기의 독립 초안. 요청/타이머와 서버 결과 모델은 복제하지 않는다.
+    snapshotTemporaryDraft: () => JSON.parse(JSON.stringify({
+      include: includeTags, exclude: excludeTags, active, filterWasApplied,
+      stagedBranches, appliedBranches, lastApplied, mergedBranches, commitHistory,
+      tempSig, selectedSig, ratingCounts, previewCounts, presets,
+      lastSentBranches, branchCounts: [...branchCounts], released: !getEl('tagFilterReleased')?.hidden,
+    })),
     restoreTags,
     addTag,
     findTag,

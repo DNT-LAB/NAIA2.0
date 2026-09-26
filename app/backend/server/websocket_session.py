@@ -83,6 +83,12 @@ from app.backend.server.session_commands import (
     send_sync_messages,
 )
 from core.web_session_context import WebSessionContext
+from core.temporary_search import temporary_search
+from app.backend.server.temporary_search_commands import (
+    TEMPORARY_SEARCH_COMMAND_TYPES, command_workspace, finish_thread_call,
+    handle_temporary_search_command, recover_disconnected_owner,
+    register_search_workspace_http_boundary, send_state as send_temporary_search_state,
+)
 
 
 RunInThread = Callable[..., Awaitable[Any]]
@@ -144,11 +150,13 @@ def register_websocket_session(
     broadcast_json: BroadcastJson,
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
+    register_search_workspace_http_boundary(app, context)
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
         await ws.accept()
         clients.add(ws)
         session_id = uuid.uuid4().hex[:8]
+        ws._search_session_id = session_id
         client_host = client_host_from_websocket(ws)
         # B4: 동일 연결의 동시 send 를 직렬화한다 — 백그라운드 라이브-필터 태스크와 인라인 핸들러가
         # 동시에 보내도 프레임이 섞이지 않게(asyncio 단일 스레드라 Lock 1개로 충분). send_text/
@@ -158,6 +166,10 @@ def register_websocket_session(
         _send_lock = asyncio.Lock()
 
         async def _locked_send(message, *args, **kwargs):
+            if message.get("text", "").startswith("{"):
+                payload = json.loads(message["text"])
+                payload["_search_workspace"] = command_workspace.get() or temporary_search(context).workspace_id
+                message = {**message, "text": json.dumps(payload, ensure_ascii=False)}
             async with _send_lock:
                 return await _raw_send(message, *args, **kwargs)
 
@@ -272,6 +284,8 @@ def register_websocket_session(
             clients.discard(ws)
             return
         finally:
+            recover_disconnected_owner(context, clients, session_id,
+                                       run_in_thread=run_in_thread, broadcast_json=broadcast_json)
             # 연결 종료 시 백그라운드 라이브-필터 태스크 정리(누수/끊긴 소켓 send 방지).
             for _task in list(live_tasks):
                 _task.cancel()
@@ -308,6 +322,7 @@ async def send_startup_messages(
     session_id: str,
     client_host: str,
 ) -> None:
+    await send_temporary_search_state(ws, temporary_search(context))
     await refresh_active_api_options_if_configured(context, run_in_thread=run_in_thread)
     for message in context.initial_websocket_messages(
         session_id=session_id,
@@ -318,6 +333,41 @@ async def send_startup_messages(
 
 
 async def handle_json_command(
+    ws, context, clients, client_host, command, *, run_in_thread, broadcast_json, start_generation_runner,
+) -> None:
+    kind = str(command.get("type") or "").strip()
+    if kind in TEMPORARY_SEARCH_COMMAND_TYPES:
+        await handle_temporary_search_command(ws, context, clients, command,
+            run_in_thread=run_in_thread, broadcast_json=broadcast_json)
+        return
+    scoped = (kind in SEARCH_COMMAND_TYPES | DEPTH_SEARCH_COMMAND_TYPES | GENERATION_COMMAND_TYPES
+              or (kind == "set_option" and command.get("key") == "stop_autogen_on_tag_exhaust"))
+    manager = temporary_search(context)
+    if scoped and not manager.permits(getattr(ws, "_search_session_id", ""), command.get("_search_workspace")):
+        await ws.send_text(json.dumps({"type": "toast", "level": "warning",
+            "message": "임시 검색을 전환 중이거나 다른 창에서 사용 중입니다."}, ensure_ascii=False))
+        return
+    # Non-search commands can enqueue generation via modules/queue controls too.
+    # Do not let one start while the search aggregate is being copied/restored.
+    stopping = kind == "set_option" and command.get("key") == "auto_generate" and not context._coerce_bool(command.get("value"))
+    if manager.transition and not scoped and not stopping and not kind.startswith("get_") and kind not in AUTOCOMPLETE_COMMAND_TYPES:
+        await ws.send_text(json.dumps({"type": "toast", "level": "warning",
+            "message": "검색 전환을 마친 뒤 다시 시도해주세요."}, ensure_ascii=False))
+        return
+    manager.operations += 1
+    token = command_workspace.set(manager.workspace_id)
+    try:
+        async def guarded_runner(*args, **kwargs):
+            return await finish_thread_call(run_in_thread, *args, **kwargs)
+        await finish_thread_call(_dispatch_json_command, ws, context, clients, client_host, command,
+            run_in_thread=guarded_runner if scoped else run_in_thread,
+            broadcast_json=broadcast_json, start_generation_runner=start_generation_runner)
+    finally:
+        command_workspace.reset(token)
+        manager.operations -= 1
+
+
+async def _dispatch_json_command(
     ws: WebSocket,
     context: WebSessionContext,
     clients: set[WebSocket],
@@ -509,6 +559,9 @@ async def handle_text_command(
         await send_sync_messages(ws, context, client_host, run_in_thread=run_in_thread)
         return
     if data == "random":
+        if not temporary_search(context).permits("", None):
+            await send_temporary_search_state(ws, temporary_search(context))
+            return
         await handle_random_command(
             ws,
             context,
@@ -517,6 +570,9 @@ async def handle_text_command(
         )
         return
     if data == "generate":
+        if not temporary_search(context).permits("", None):
+            await send_temporary_search_state(ws, temporary_search(context))
+            return
         await handle_generate_command(
             ws,
             context,

@@ -130,6 +130,13 @@ class HeadlessRandomPromptService:
 
     def warmup(self) -> bool:
         """Preload the expensive headless prompt runtime without generating."""
+        self.context._search_warmup_active = True
+        try:
+            return self._warmup_search_runtime()
+        finally:
+            self.context._search_warmup_active = False
+
+    def _warmup_search_runtime(self) -> bool:
 
         self._ensure_headless_runtime()
         # announce=True: stream chunk progress so a large startup pool shows the
@@ -856,6 +863,10 @@ class HeadlessRandomPromptService:
             self.context.search_results = SearchResultModel(snapshot.copy())
             safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
             return True
+
+        from core.temporary_search import is_temporary_search
+        if is_temporary_search(self.context):
+            return False  # An empty temporary search must not load the normal disk pool.
 
         # Disk restore — serialized. ``announce`` streams chunk progress to the
         # Remote Web clients (Tag/Tag-Filter lock + '풀 로딩 N%') so a large temp

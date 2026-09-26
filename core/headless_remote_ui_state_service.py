@@ -296,7 +296,11 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "api_mode": mode,
         "prompt": str(context.prompt_text or ""),
         "negative_prompt": str(context.negative_prompt_text or ""),
-        "remote_options": dict(context.get_options()),
+        "remote_options": {
+            **context.get_options(),
+            **({"stop_autogen_on_tag_exhaust": context._temporary_search.normal_stop_on_exhaust}
+               if getattr(context, "_temporary_search", None) and context._temporary_search.active else {}),
+        },
         "remote_param_planes": _json_safe({
             plane_mode: dict(values or {})
             for plane_mode, values in planes.items()

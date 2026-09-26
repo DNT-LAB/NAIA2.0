@@ -35,6 +35,7 @@ export function createSearchQuickWindow({
   onLayerShown = () => {},
   // 창이 닫힐 때 - 심층 검색이 창 없이 혼자 남지 않게 app.js 가 함께 닫는다.
   onWindowClose = () => {},
+  onTemporarySearch = () => {},
   // 저장된 필터 창이 열리고 닫힐 때([Filters] 단추의 눌림 표시).
   onPresetsVisibility = () => {},
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
@@ -42,8 +43,10 @@ export function createSearchQuickWindow({
 }) {
   ensureStyle(doc);
   let layer = readLayer();
+  let normalWindowState = null;
+  let switchingWindow = false;
 
-  const panel = createDraggablePanel({
+  let panel = createDraggablePanel({
     document: doc,
     window: win,
     title: 'Search',
@@ -69,7 +72,15 @@ export function createSearchQuickWindow({
     },
     onCollapse: () => onVisibilityChange(),
   });
+  const normalPanel = panel;
   panel.el.id = 'searchQuickWindow';
+  const temporaryButton = doc.createElement('button');
+  temporaryButton.type = 'button';
+  temporaryButton.className = 'sqw-temporary-toggle';
+  temporaryButton.textContent = '임시 검색 활성화';
+  temporaryButton.setAttribute('aria-pressed', 'false');
+  temporaryButton.addEventListener('click', () => onTemporarySearch());
+  panel.slot.appendChild(temporaryButton);
 
   panel.body.innerHTML = `
     <section class="sqw-sec" data-sqw-sec="search">
@@ -108,12 +119,13 @@ export function createSearchQuickWindow({
   applyLayer();
   mirrorMeta();
 
-  panel.body.addEventListener('click', event => {
+  const onBodyClick = event => {
     if (event.target.closest('[data-sqw="refine-side"]')) { toggleRefineSide(); return; }
     const head = event.target.closest('[data-sqw-head]');
     if (!head) return;
     setLayer(normalizeLayer(head.dataset.sqwHead));
-  });
+  };
+  panel.body.addEventListener('click', onBodyClick);
 
   function liftTagFilter() {
     const shell = doc.getElementById('tagFilterPopup');
@@ -159,7 +171,7 @@ export function createSearchQuickWindow({
   function setLayer(next) {
     if (next === layer) return;
     layer = next;
-    try { storage && storage.setItem(LAYER_KEY, layer); } catch { /* 기억 못 해도 동작은 한다 */ }
+    try { if (!normalWindowState) storage && storage.setItem(LAYER_KEY, layer); } catch { /* 기억 못 해도 동작은 한다 */ }
     applyLayer();
     if (layer === 'tag') {
       const input = doc.getElementById('tagFilterInput');
@@ -194,8 +206,9 @@ export function createSearchQuickWindow({
     const spot = rightOfSpot(width, height, panel.el.getBoundingClientRect());
     refineSide = createDraggablePanel({
       document: doc,
+      parentPanel: panel,
       window: win,
-      title: '심층 검색 도구',
+      title: normalWindowState ? '임시 심층 검색 도구' : '심층 검색 도구',
       variant: 'rfsw',
       storageKey: 'search-quick-refine-side',
       width, height, minWidth: 260, maxWidth: 700, minHeight: 200,
@@ -257,6 +270,7 @@ export function createSearchQuickWindow({
     const spot = rightOfSpot(width, height, panel.el.getBoundingClientRect());
     presetsPanel = createDraggablePanel({
       document: doc,
+      parentPanel: panel,
       window: win,
       title: '저장된 필터',
       variant: 'tfpw',
@@ -311,6 +325,7 @@ export function createSearchQuickWindow({
     const spot = besideSpot(width, height, panel.el.getBoundingClientRect());
     libPanel = createDraggablePanel({
       document: doc,
+      parentPanel: panel,
       window: win,
       title: 'Custom Parquets',
       variant: 'pqlw',
@@ -358,7 +373,94 @@ export function createSearchQuickWindow({
   }
 
   const api = {
-    el: panel.el,
+    get el() { return panel.el; },
+    get panel() { return panel; },
+    // ⚠️ 껍데기가 **둘**이다(정상·임시). 지금 쓰는 쪽에만 '전환 중' 을 걸고 다른 쪽은 늘 되돌린다 -
+    //    전환이 끝나면 `panel` 이 바뀌어 버려서, 걸어 두었던 쪽이 '진행 중…' 에 꺼진 채로 굳었다.
+    setTemporaryBusy: (busy, label = '') => {
+      for (const shell of new Set([normalPanel, panel])) {
+        const current = shell === panel;
+        const on = current && !!busy;
+        shell.body.inert = on;
+        const button = shell.slot.querySelector('.sqw-temporary-toggle');
+        if (!button) continue;
+        button.disabled = on;
+        button.textContent = current
+          ? (label || (normalWindowState ? '임시 검색 해제' : '임시 검색 활성화'))
+          : '임시 검색 활성화';
+      }
+      for (const p of [libPanel, presetsPanel, refineSide]) if (p) p.body.inert = !!busy;
+    },
+    enterTemporary: () => {
+      if (normalWindowState) return;
+      const rect = panel.el.getBoundingClientRect();
+      normalWindowState = {layer, refineSideDismissed, children: [libPanel, presetsPanel, refineSide].filter(p => p?.isOpen()),
+        positions: new Map([libPanel, presetsPanel, refineSide].filter(Boolean).map(p => [p, {
+          x: Number.parseFloat(p.el.style.left) || 0, y: Number.parseFloat(p.el.style.top) || 0,
+        }]))};
+      for (const p of normalWindowState.children) p.close();
+      refineSideDismissed = normalWindowState.refineSideDismissed;
+      normalPanel.el.hidden = true;
+      panel = createDraggablePanel({document: doc, window: win, title: '임시 Search', variant: 'sqw temporary-search-active',
+        storageKey: 'temporary-search-live', width: rect.width, height: rect.height,
+        minWidth: 320, maxWidth: 760, minHeight: 220, resizable: true,
+        initial: {x: rect.left, y: rect.top}, escHtml,
+        onClose: () => {
+          if (switchingWindow) return;
+          panel.open(); // Keep the workspace visible until the server confirms recovery.
+          onTemporarySearch();
+        },
+        onCollapse: () => onVisibilityChange(),
+      });
+      panel.el.id = 'temporarySearchWindow';
+      panel.body.append(...normalPanel.body.childNodes);
+      panel.body.addEventListener('click', onBodyClick);
+      panel.slot.innerHTML = '<button type="button" class="sqw-temporary-toggle" aria-pressed="true">임시 검색 해제</button>';
+      panel.slot.querySelector('button').addEventListener('click', () => onTemporarySearch());
+      const note = doc.createElement('div');
+      note.className = 'temporary-search-notice';
+      note.textContent = '닫으면 원래 검색으로 복귀 · Custom Parquets, 영구 제외, Filters는 공유';
+      panel.body.prepend(note);
+      panel.el.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !event.defaultPrevented) {
+          event.preventDefault(); event.stopPropagation(); onTemporarySearch();
+        }
+      });
+      applyLayer();
+      panel.open();
+      panel.moveTo(rect.left, rect.top);
+      for (const p of [libPanel, presetsPanel, refineSide]) p?.setParentPanel?.(panel);
+      refineSide?.setTitle('임시 심층 검색 도구');
+      for (const p of normalWindowState.children) p.open();
+      onVisibilityChange();
+    },
+    leaveTemporary: () => {
+      if (!normalWindowState) return;
+      const temp = panel;
+      const saved = normalWindowState;
+      for (const p of [libPanel, presetsPanel, refineSide]) if (p?.isOpen()) p.close();
+      temp.body.querySelector('.temporary-search-notice')?.remove();
+      normalPanel.body.append(...temp.body.childNodes);
+      panel = normalPanel;
+      layer = saved.layer;
+      refineSideDismissed = saved.refineSideDismissed;
+      normalWindowState = null;
+      switchingWindow = true;
+      temp.destroy();
+      switchingWindow = false;
+      for (const p of [libPanel, presetsPanel, refineSide]) {
+        if (!p) continue;
+        const position = saved.positions.get(p);
+        if (position) p.moveTo(position.x, position.y, {persist: false});
+        p.setParentPanel?.(panel);
+      }
+      refineSide?.setTitle('심층 검색 도구');
+      panel.body.inert = false;
+      applyLayer();
+      panel.open();
+      onVisibilityChange();
+      return () => { for (const p of saved.children) p.open(); };
+    },
     showSearch: (options = {}) => openAt('search', options),
     showTagFilter: (options = {}) => openAt('tag', options),
     showRefine: (options = {}) => openAt('refine', options),
@@ -399,6 +501,12 @@ function ensureStyle(doc) {
 const SQW_CSS = `
 .dragpanel.sqw{border-color:rgba(120,190,150,0.42)}
 .dragpanel.sqw .dragpanel-head{background:rgba(120,190,150,0.10)}
+.sqw-temporary-toggle{padding:3px 9px;min-height:24px;border:1px solid #6789c8;border-radius:5px;
+  background:#304b76;color:#ecf3ff;font-size:10.5px;font-weight:700;white-space:nowrap;cursor:pointer}
+.sqw-temporary-toggle:hover{background:#3e6093}
+.sqw-temporary-toggle[aria-pressed="true"]{background:#5c4877;border-color:#a48ac7}
+.dragpanel.temporary-search-active{border-color:#a48ac7}
+.dragpanel.temporary-search-active .dragpanel-head{background:#393247}
 /* 본문 바탕 = 옛 Search·Tag Filter 팝업의 바탕(--bg-surface). 떠 있는 창의 기본 바탕(--bg-elevated)을
    쓰면 그 위의 --bg-elevated 요소(Filters·Clear 단추, 칩, 슬라이더 트랙)가 전부 배경에 묻힌다. */
 .dragpanel.sqw .dragpanel-body{padding:0;gap:0;overflow:hidden;position:relative;background:var(--bg-surface)}

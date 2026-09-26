@@ -699,7 +699,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260926-qlive3')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260926-temp-live2')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -2679,7 +2679,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clea
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260925-rvfix')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260926-temp-live2')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -2733,7 +2733,34 @@ searchHost.className = 'search-host';
 // Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
 const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260925-presetwin')
+let temporarySearchPreview = null;
+let temporarySearchLoading = false;
+let temporarySearchWorkspace = 'normal';
+let temporarySearchState = null;
+async function openTemporarySearchPreview() {
+  if (temporarySearchLoading) return;
+  temporarySearchLoading = true;
+  try {
+    await Promise.all([searchPanelReady, quickFilterReady, refinePanelReady]);
+    if (!temporarySearchPreview) {
+      const {createTemporarySearchPreview} = await import('./js/features/temporarySearchPreview.mjs?v=20260926-temp-live2');
+      temporarySearchPreview = createTemporarySearchPreview({
+        document, showToast, getWs: () => ws,
+        getSource: () => searchQuickWindow,
+        getSearch: () => searchPanelControl,
+        getQuickFilter: () => quickFilter,
+        getRefine: () => refinePanelControl,
+      });
+      if (temporarySearchState) temporarySearchPreview.onState(temporarySearchState);
+    }
+    await temporarySearchPreview.toggle();
+  } catch (error) {
+    console.error('Failed to open temporary search preview', error);
+    temporarySearchPreview?.disconnected();
+    showToast('임시 검색 창을 열지 못했습니다.', 'error');
+  } finally { temporarySearchLoading = false; }
+}
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260926-temp-live2')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,
@@ -2746,6 +2773,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
       // 심층 검색 = 이 창의 세 번째 층(사용자 결정 2026-09-25). 층이 보이면 준비하고, 창이 닫히면 함께 닫는다.
       onLayerShown: layer => { if (layer === 'refine' && refinePanelControl) refinePanelControl.ensureOpen(); },
       onWindowClose: () => { if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close(); },
+      onTemporarySearch: () => { void openTemporarySearchPreview(); },
       // [Filters (N)] 단추의 눌림 표시 = 저장된 필터 창이 열려 있다.
       onPresetsVisibility: open => {
         const button = document.getElementById('tagFilterPresetsBtn');
@@ -2757,7 +2785,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260925-save')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260926-temp-live2')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -4526,6 +4554,18 @@ const wsMessageHandlers = {
   search_loading: onSearchLoading,
   bucket_dates: onBucketDates,
   search_history: m => { if (searchPanelControl) searchPanelControl.onSearchHistory(m); },
+  temporary_search_state: m => {
+    temporarySearchState = m;
+    temporarySearchWorkspace = m.workspace_id || 'normal';
+    if (ws) {
+      ws._searchWorkspace = temporarySearchWorkspace;
+      ws._searchUploadToken = m.upload_token || '';
+    }
+    quickFilter?.setTemporaryMode(!!m.active);
+    if (temporarySearchPreview) temporarySearchPreview.onState(m);
+    else if (m.active || m.pending) searchQuickWindow?.setTemporaryBusy(true, '다른 창에서 임시 검색 중');
+    else searchQuickWindow?.setTemporaryBusy(false);
+  },
   search_export_preview: m => { if (searchPanelControl) searchPanelControl.onExportPreview(m); },
   depth_state: onDepthState,
   depth_sample: onDepthSample,
@@ -4604,11 +4644,33 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
       location,
       WebSocket,
       BlobClass: Blob,
-      handlers: wsMessageHandlers,
+      handlers: new Proxy(wsMessageHandlers, {get: (target, type) => {
+        const handler = target[type];
+        if (!handler) return handler;
+        return message => {
+          const scoped = /^(search_|tag_filter_|depth_|bucket_dates$|filter_reset$|rating_update$)/.test(String(type));
+          if (scoped && message._search_workspace && message._search_workspace !== temporarySearchWorkspace) return;
+          handler(message);
+        };
+      }}),
       onBlob: handleWsBlob,
       afterJson: afterWsJsonMessage,
       onMessageError: onWsMessageError,
-      onSocketChange: socket => { ws = socket; },
+      onSocketChange: socket => {
+        ws = socket;
+        if (!socket) return;
+        socket._searchWorkspace = temporarySearchWorkspace;
+        const send = socket.send.bind(socket);
+        socket.send = data => {
+          if (typeof data === 'string' && data.startsWith('{')) {
+            const payload = JSON.parse(data);
+            if (temporarySearchPreview?.isRestoring()) return;
+            payload._search_workspace = temporarySearchWorkspace;
+            data = JSON.stringify(payload);
+          }
+          return send(data);
+        };
+      },
       onOpen: socket => {
         void window.eventMap?.refreshRandomLink?.();
         _initDone = false;
@@ -4622,6 +4684,9 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
         // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
       },
       onClose: () => {
+        temporarySearchPreview?.disconnected();
+        temporarySearchWorkspace = 'normal';
+        temporarySearchState = null;
         if (initialStateRefreshTimer) {
           clearTimeout(initialStateRefreshTimer);
           initialStateRefreshTimer = null;
@@ -13032,10 +13097,12 @@ function noticeTagDatasetUpdateOnce() {
 }
 
 function onSearchState(m) {
+  if (m.workspace_changed && temporarySearchPreview?.hasPendingRestore()) m.preserve_local_workspace = true;
   // stale/superseded search_state(revision 가드 거부)는 pool 준비 완료가 아니므로 pool 잠금/
   // Random 게이트를 조기 해제하지 않는다 — newer 작업이 아직 진행 중(Codex NEW 선재 결함).
   const authoritative = searchPanelControl ? searchPanelControl.onSearchState(m) : true;
   if (authoritative === false) return;
+  temporarySearchPreview?.afterSearchState(m);
   tagSurfaceLock.end('pool');   // completion of search / parquet load-merge / rating recompute / restore
   poolLoad.stop();              // authoritative 'pool ready' — clears load/reconstruct/filter gate + toast
   noticeTagDatasetUpdateOnce();

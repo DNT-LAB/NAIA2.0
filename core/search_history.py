@@ -52,6 +52,10 @@ def _normalize(raw: Any) -> dict[str, Any] | None:
 
 
 def load_history(context: Any) -> list[dict[str, Any]]:
+    manager = getattr(context, "_temporary_search", None)
+    if manager and manager.active:
+        from copy import deepcopy
+        return deepcopy(manager.history)
     try:
         path = history_path(context)
         if path.exists():
@@ -64,6 +68,10 @@ def load_history(context: Any) -> list[dict[str, Any]]:
 
 
 def _write(context: Any, items: list[dict[str, Any]]) -> None:
+    manager = getattr(context, "_temporary_search", None)
+    if manager and manager.active:
+        manager.history = items
+        return
     path = history_path(context)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")

@@ -277,12 +277,24 @@ class HeadlessSearchStateService:
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         context.search_filter_state = state
         context.remote_active_ratings = set(state["ratings"])
+        persist_state = state
+        workspace = getattr(context, "_temporary_search", None)
+        if workspace and workspace.active:
+            # Only the permanent exclusion field crosses the workspace boundary.
+            if updates.get("exclude_permanent") is None:
+                return state
+            normal = dict(workspace.original["search_filter_state"])
+            if normal.get("exclude_permanent", "") == state["exclude_permanent"]:
+                return state
+            normal.update(exclude_permanent=state["exclude_permanent"], updated_at=state["updated_at"])
+            workspace.original["search_filter_state"] = normal
+            persist_state = normal
         try:
             path = self.search_filter_state_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = path.with_suffix(path.suffix + ".tmp")
             with tmp_path.open("w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
+                json.dump(persist_state, f, ensure_ascii=False, indent=2)
                 f.write("\n")
             tmp_path.replace(path)
         except Exception as exc:
@@ -334,6 +346,9 @@ class HeadlessSearchStateService:
         로드에선 둘이 같지만, 로드된 셋 *안에서* 재검색한 경우 snapshot=부분집합(사용자가 마지막에
         본 것)이라 그게 더 충실한 '마지막 검색'이다."""
         context = self.context
+        from core.temporary_search import is_temporary_search
+        if is_temporary_search(context):
+            return None
         frame = getattr(context, "search_results_snapshot", None)
         if frame is None or getattr(frame, "empty", True):
             frame = getattr(context, "search_results_master_base_snapshot", None)

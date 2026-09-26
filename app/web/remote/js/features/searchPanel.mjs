@@ -11,6 +11,8 @@ const SEARCH_COMPACT_CSS = `
   cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sp-tbtn:hover{color:var(--text-primary,#e8e8ee);border-color:var(--accent-blue,#8d7bd6)}
 .sp-tbtn.is-on{border-color:var(--accent-green,#5a9e6f);color:var(--accent-green,#5a9e6f)}
+.sp-tbtn[data-sp="parquets"]{background:#355c96;border-color:#527fbd;color:#eef5ff}
+.sp-tbtn[data-sp="parquets"]:hover,.sp-tbtn[data-sp="parquets"].is-on{background:#416fac;border-color:#88b4f0;color:#fff}
 .search-parquet-host[hidden]{display:none!important}
 .sp-counts{display:flex;align-items:center;height:26px;border:1px solid var(--border,#2c2c36);border-radius:6px;
   background:rgba(255,255,255,0.02);font-size:10.5px;color:var(--text-muted,#9a9aa6)}
@@ -390,7 +392,9 @@ export function createSearchPanel({
     try {
       const response = await fetch(`/api/search/parquet/upload?${params}`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/octet-stream'},
+        headers: {'Content-Type': 'application/octet-stream',
+          'X-NAIA-Search-Workspace': getWs()?._searchWorkspace || 'normal',
+          'X-NAIA-Search-Owner': getWs()?._searchUploadToken || ''},
         body: file,
       });
       if (!response.ok) {
@@ -637,7 +641,10 @@ export function createSearchPanel({
     if (message.tag_filter_settled) initialFilterRestoreDone = true;
     if (quickFilter && quickFilter.setPresets) quickFilter.setPresets(message.filter_presets || []);
     const serverPreferences = message.filter_preferences;
-    if (serverPreferences && quickFilter) {
+    if (message.workspace_changed && message.preserve_local_workspace) {
+      initialFilterRestoreDone = true;
+      syncRatingButtons(); // The workspace controller restores the complete local draft.
+    } else if (serverPreferences && quickFilter) {
       // 시작 후 첫 search_state 에서 영속된 Tag Filter 칩이 있으면 자동 Search→Assign 1회.
       // (그 이후 search_state 는 기존대로 {send:false} — 카운트 갱신마다 재검색/재할당 방지)
       // ⚠️ '칩 존재' 기준(과거엔 tag_filter_active 도 요구): Parquet 로드가 필터를 비활성으로
@@ -1779,6 +1786,36 @@ export function createSearchPanel({
   }
 
   return {
+    flushWorkspace: () => saveFilterState(),
+    pauseWorkspace: () => {
+      clearTimeout(ratingSendTimer); ratingSendTimer = null;
+      clearTimeout(exportPreviewTimer); exportPreviewTimer = null;
+      closeParquetMenu(); closeSaveForm();
+    },
+    snapshotWorkspace: () => JSON.parse(JSON.stringify({
+      historyItems, historyOpen, bucketState, bucketRequested, pendingEcho,
+      cachedRatingCounts, ratingState, searchRatingState, lastProvenance,
+    })),
+    restoreWorkspace: snapshot => {
+      const s = JSON.parse(JSON.stringify(snapshot));
+      historyItems = s.historyItems; historyOpen = s.historyOpen;
+      bucketState = s.bucketState; bucketRequested = s.bucketRequested; pendingEcho = s.pendingEcho;
+      pendingEcho.exclude_permanent = null; // Shared field has no frozen echo guard.
+      cachedRatingCounts = s.cachedRatingCounts; lastProvenance = s.lastProvenance;
+      Object.assign(ratingState, s.ratingState); Object.assign(searchRatingState, s.searchRatingState);
+      searchingActive = false; initialFilterRestoreDone = true;
+      const box = moduleBody.querySelector('.sp-history'); if (box) box.hidden = !historyOpen;
+      const button = moduleBody.querySelector('[data-sp="history"]');
+      if (button) { button.classList.toggle('is-on', historyOpen); button.setAttribute('aria-pressed', String(historyOpen)); }
+      renderHistory(); renderDateRange(); syncRatingButtons();
+    },
+    getHistorySnapshot: () => JSON.parse(JSON.stringify(historyItems)),
+    setSharedPermanentExclude: value => {
+      const input = moduleBody.querySelector('#searchExcludePermanent');
+      if (input) input.value = String(value || '');
+      saveFilterState({exclude_permanent: String(value || '')});
+      setPermOpen(permOpen);
+    },
     getRatingState,
     getRatingStore: () => ratingStore,
     getActiveRatings,

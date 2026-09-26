@@ -279,6 +279,9 @@ def _boost_v2_selected_safe(context: WebSessionContext) -> bool:
 def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     """프리페치 자격: 토글 ON·일반 Auto Gen(또는 Automation)·Story/Preset/특수 아님·
     prompt_fixed 아님·활성 태그필터 없음."""
+    from core.temporary_search import search_transition_pending
+    if search_transition_pending(context):
+        return False
     from core.event_map.random_link import link_state
     if link_state(context)["enabled"]:
         return False
@@ -1329,6 +1332,9 @@ async def _maybe_continue_auto_generation(
     clients: set[WebSocket],
     request,
 ) -> bool:
+    from core.temporary_search import search_transition_pending
+    if search_transition_pending(context):
+        return False
     params = getattr(request, "params", {}) or {}
 
     # Sequence 연속 생성(Auto Gen): 시퀀스 프레임이면 _advance_sequence_run 이 라운드 카운트를
@@ -1737,6 +1743,9 @@ def _automation_should_bind(context: WebSessionContext, request) -> bool:
 
 
 def _should_continue_auto_generation(context: WebSessionContext, request) -> bool:
+    from core.temporary_search import search_transition_pending
+    if search_transition_pending(context):
+        return False
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False

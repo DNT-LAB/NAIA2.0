@@ -75,7 +75,10 @@
         "app/web/remote/index.html",
         "app/web/remote/style.css",
         "app/web/remote/app.js",
-        "app/web/remote/js/features/studioTab.mjs"
+        "app/web/remote/js/features/studioTab.mjs",
+        "app/web/remote/js/features/temporarySearchPreview.mjs",
+        "core/temporary_search.py",
+        "app/backend/server/temporary_search_commands.py"
       ],
       "legacy_dependency": "none",
       "routes": [
@@ -84,7 +87,8 @@
         {"method": "GET", "path": "/style.css", "smoke": "static"},
         {"method": "GET", "path": "/app.js", "smoke": "static"},
         {"method": "GET", "path": "/js/{asset_path:path}", "smoke": "static"}
-      ]
+      ],
+      "temporary_search": "Search opens one app-wide temporary workspace owned by its websocket. The original Search is hidden and its exact remaining pool, filters, depth staging, inputs and history restore on close/disconnect without re-searching. Temporary searches, filter/depth assignment and Random consume only the cloned workspace. History and automatic search persistence remain isolated; Custom Parquets, permanent exclusions and saved Filters remain shared. Transitions drain in-flight workers and generation before switching; stale workspace messages and other browser sessions cannot mutate the active search. Existing REST/ComfyUI generation bridges use the active pool and finish before transitions; browser parquet uploads require the owning session token."
     },
     {
       "id": "core_status_queue",
@@ -621,7 +625,9 @@
         "core/event_corpus_index.py",
         "core/event_corpus_search_service.py",
         "app/web/remote/js/core/remoteWsClient.mjs",
-        "app/web/remote/js/core/wsDispatcher.mjs"
+        "app/web/remote/js/core/wsDispatcher.mjs",
+        "app/backend/server/temporary_search_commands.py",
+        "core/temporary_search.py"
       ],
       "legacy_dependency": "none",
       "routes": [
@@ -649,7 +655,10 @@
         "set_result_enhance_config",
         "queue_action",
         "event_corpus_status",
-        "event_corpus_query"
+        "event_corpus_query",
+        "begin_temporary_search",
+        "end_temporary_search",
+        "get_temporary_search_state"
       ]
     },
     {

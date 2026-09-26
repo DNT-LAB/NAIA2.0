@@ -287,7 +287,8 @@ def install_custom_parquet_frame(context: WebSessionContext, frame, provenance: 
         pool_frame = context.search_results_snapshot
         runner_path = None if _should_skip_auto_runner_save(context) else context.runner_parquet_path()
         last_path = context.last_search_parquet_path()
-    if pool_frame is not None and not getattr(pool_frame, "empty", True):
+    from core.temporary_search import is_temporary_search
+    if not is_temporary_search(context) and pool_frame is not None and not getattr(pool_frame, "empty", True):
         search_pool_writer(context).submit(last_path, pool_frame, runner_path, meta=_last_search_meta(context, pool_frame))
 
 
@@ -466,6 +467,9 @@ def save_runner_parquet(context: WebSessionContext) -> Path | None:
 
 
 def _should_skip_auto_runner_save(context: WebSessionContext) -> bool:
+    from core.temporary_search import is_temporary_search
+    if is_temporary_search(context):
+        return True
     state = context.normalize_search_filter_state(getattr(context, "search_filter_state", None))
     if state.get("query") or state.get("exclude") or state.get("tag_filter_active"):
         return True

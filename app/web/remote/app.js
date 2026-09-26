@@ -13735,7 +13735,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260925-merge')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260926-linebreak')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

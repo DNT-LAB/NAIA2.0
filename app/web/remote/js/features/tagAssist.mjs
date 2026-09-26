@@ -1401,9 +1401,15 @@ export function createTagAssistController({
       ? Number(source.pos)
       : (textarea.selectionStart != null ? textarea.selectionStart : -1);
     if (pos < 0 || text.length === 0) return null;
-    let start = text.lastIndexOf(',', pos - 1) + 1;
-    let end = text.indexOf(',', pos);
-    if (end === -1) end = text.length;
+    // 경계는 쉼표 **와 줄바꿈**이다(하이라이터의 `[,\n]` 과 같은 규칙). 쉼표만 보면
+    // 줄 끝에서 친 `klee (g` 가 다음 줄의 주석(`#포즈/동작:`)까지 삼켜, 한글 질의로
+    // 포즈 태그와 번역 힌트가 나오고 후보를 고르면 주석 줄이 지워졌다(제보 2026-09-26).
+    let start = Math.max(text.lastIndexOf(',', pos - 1), text.lastIndexOf('\n', pos - 1)) + 1;
+    let end = text.length;
+    for (const mark of [',', '\n']) {
+      const at = text.indexOf(mark, pos);
+      if (at !== -1 && at < end) end = at;
+    }
     while (start < end && /\s/.test(text[start])) start++;
     let rawEnd = end;
     while (rawEnd > start && /\s/.test(text[rawEnd - 1])) rawEnd--;

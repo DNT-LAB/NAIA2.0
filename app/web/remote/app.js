@@ -699,7 +699,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260926-qlive')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260926-qlive2')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,

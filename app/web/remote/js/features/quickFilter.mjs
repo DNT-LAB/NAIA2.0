@@ -550,19 +550,31 @@ export function createQuickFilterController(deps) {
     getEl('tagFilterInput')?.focus();
   }
 
+  /** 합쳐 둔 것에서 뺀다. **빼기는 곧장, 넣기는 커밋** - 화면에서 사라진 조건이 풀을 계속
+   *  거르는 일이 없게 한다(끄기·빼기는 놀랄 일이 없고, 합치는 것만 명시적이다). */
+  function unmerge(tags) {
+    const sig = branchSig(tags);
+    if (!mergedBranches.some(item => branchSig(item) === sig)) return false;
+    mergedBranches = mergedBranches.filter(item => branchSig(item) !== sig);
+    return true;
+  }
+
   function setBranchEnabled(index, enabled) {
     const branch = stagedBranches[Number(index)];
     if (!branch) return;
     branch.enabled = !!enabled;
+    // 끄면 합쳐 둔 것에서도 빠진다(켜는 것은 [커밋 (적용)] 이 한다).
+    const dropped = !branch.enabled && unmerge(branch.tags);
     renderBranches();
-    schedulePreview();
+    if (dropped) { save(); scheduleApply(); } else schedulePreview();
   }
 
   function removeBranch(index) {
     const [removed] = stagedBranches.splice(Number(index), 1);
     if (removed && branchSig(removed.tags) === selectedSig) selectedSig = '';
+    const dropped = removed && unmerge(removed.tags);
     renderBranches();
-    schedulePreview();
+    if (dropped) { save(); scheduleApply(); } else schedulePreview();
   }
 
   function selectRow(index) {
@@ -656,7 +668,7 @@ export function createQuickFilterController(deps) {
       return `
       <div class="tfb-row is-pick${branch.enabled ? '' : ' is-off'}${sig === selectedSig ? ' is-sel' : ''}${temp ? ' is-temp' : ''}" data-tfb-i="${i}"
         title="눌러서 고르면 아래에서 이 조합만 임시로 적용해 볼 수 있습니다">
-        <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? '커밋에서 빼기' : '커밋에 넣기'}"></button>
+        <button type="button" class="tfb-on" data-tfb="toggle" aria-pressed="${branch.enabled}" title="${branch.enabled ? (merged ? '풀에서 빼기' : '커밋에서 빼기') : '커밋에 넣기'}"></button>
         <span class="tfb-text">${branchLabelHtml(branch.tags)}</span>
         ${merged && !temp ? '<span class="tfb-merged">합쳐짐</span>' : ''}
         ${temp ? '<span class="tfb-temp">임시 적용 중</span>' : ''}
@@ -1484,7 +1496,15 @@ export function createQuickFilterController(deps) {
       appliedBranches = active ? cloneBranches(pref.tag_filter_applied_branches.length ? pref.tag_filter_applied_branches : legacy) : [];
       if (appliedBranches.length) lastApplied = cloneBranches(appliedBranches);
       // 합쳐 둔 담은 것 = 걸린 조합에서 '지금 칩' 한 벌을 뺀 나머지(창을 다시 열어도 합친 상태가 남는다).
-      if (!tempSig) mergedBranches = cloneBranches(appliedBranches).filter(tags => branchSig(tags) !== branchSig(payload()));
+      if (!tempSig) {
+        mergedBranches = cloneBranches(appliedBranches).filter(tags => branchSig(tags) !== branchSig(payload()));
+        // 합쳐져 있는데 목록에 없는 조합(옛 저장값 등)은 담은 목록에 되살린다 - 풀을 거르는 것은 늘 보여야 한다.
+        mergedBranches.forEach(tags => {
+          if (!stagedBranches.some(branch => branchSig(branch.tags) === branchSig(tags))) {
+            stagedBranches.push({tags: [...tags], enabled: true});
+          }
+        });
+      }
     }
     if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효
     renderIncludeChips();
@@ -1771,6 +1791,8 @@ export function createQuickFilterController(deps) {
     toggleChipMenu,
     setChipExact,
     stageBranch,
+    setBranchEnabled,
+    removeBranch,
     clearList,
     commit,
     undoCommit,

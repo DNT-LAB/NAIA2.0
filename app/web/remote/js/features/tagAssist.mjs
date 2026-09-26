@@ -1917,9 +1917,13 @@ export function createTagAssistController({
       checkTagHint();
       return true;
     }
+    // 번역 응답은 **같은 질의의 두 번째 답**이다(600ms 뒤). 그 사이 ↑↓ 로 고른 줄을
+    // 첫 줄로 되돌리면 Enter 가 엉뚱한 태그를 넣는다 - 고른 태그가 남아 있으면 그 자리를 지킨다.
+    const keepTag = isTranslatedResponse && acMode ? String(acResults[acSel]?.tag || '') : '';
+    const keptIndex = keepTag ? results.findIndex(row => row.tag === keepTag) : -1;
     acResults = results;
     visibleTranslatedAutocompleteQuery = isTranslatedResponse ? (m.query || '') : '';
-    acSel = firstDefaultAutocompleteIndex(results);
+    acSel = keptIndex >= 0 ? keptIndex : firstDefaultAutocompleteIndex(results);
     acMode = true;
     renderAutocomplete();
     return true;

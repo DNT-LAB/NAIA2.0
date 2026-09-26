@@ -502,11 +502,37 @@ def _translation_hint_row(translated: str) -> dict[str, Any]:
     }
 
 
+def _translated_match_row(row: dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    item["_translated"] = True
+    item.setdefault("candidateType", "tag_translated")
+    item.setdefault("source", "translation_search")
+    item.setdefault("confidence", 0.75)
+    item.setdefault("insertPolicy", "default")
+    candidate = dict(item.get("candidate") or {})
+    candidate.setdefault("type", item["candidateType"])
+    candidate.setdefault("source", item["source"])
+    candidate.setdefault("confidence", item["confidence"])
+    candidate.setdefault("insertPolicy", item["insertPolicy"])
+    item["candidate"] = candidate
+    return item
+
+
 def search_kr_tags_with_translation(
     context: WebSessionContext,
     query: str,
     limit: int = 20,
 ) -> tuple[list[dict[str, Any]], str]:
+    """한글 질의의 **두 번째 응답**(600ms 뒤). 번역은 보태기만 하고 한글 결과를 밀어내지 않는다.
+
+    ⚠️ 예전에는 번역어의 후보를 **맨 앞**에 두고 한글 결과를 뒤로 밀어 상한에서 잘랐다.
+       번역기는 고유명을 음차하므로(`클레`->`cle`) 잠깐 보이던 `klee (genshin impact)` 가
+       `cleffa` · `cleavage` 로 통째로 바뀌었다(제보 2026-09-26). 번역기가 08-29 까지
+       죽어 있어 그 전엔 드러나지 않았다.
+    실측(한글 30낱말): 번역어가 실제 태그인 24건 중 23건은 이미 한글 결과에 있었고,
+    태그가 아닌 5건은 접두 잡음만 보탰다. 그래서 번역은 **정확히 그 태그**만 보탠다.
+    한글이 아무것도 못 찾았을 때만 번역어의 후보 전체를 쓴다(번역이 유일한 길이다).
+    """
     from core.tag_search_index import normalize_search_query
 
     translated = _translate_autocomplete_query(context, query)
@@ -514,43 +540,28 @@ def search_kr_tags_with_translation(
     if not translated:
         return base_rows, ""
 
-    merged: dict[str, dict[str, Any]] = {}
-    rows: list[dict[str, Any]] = []
-
-    def add_row(row: dict[str, Any], *, translated_match: bool = False) -> None:
-        tag = str(row.get("tag") or "")
-        key = normalize_search_query(tag)
-        if not key or key in merged:
-            return
-        item = dict(row)
-        if translated_match:
-            item["_translated"] = True
-            item.setdefault("candidateType", "tag_translated")
-            item.setdefault("source", "translation_search")
-            item.setdefault("confidence", 0.75)
-            item.setdefault("insertPolicy", "default")
-            candidate = dict(item.get("candidate") or {})
-            candidate.setdefault("type", item["candidateType"])
-            candidate.setdefault("source", item["source"])
-            candidate.setdefault("confidence", item["confidence"])
-            candidate.setdefault("insertPolicy", item["insertPolicy"])
-            item["candidate"] = candidate
-        merged[key] = item
-        rows.append(item)
-
-    for row in search_kr_tags(context, translated, limit):
-        add_row(row, translated_match=True)
-    for row in base_rows:
-        add_row(row)
-
+    rows = [dict(row) for row in base_rows[:limit]]
+    seen = {normalize_search_query(str(row.get("tag") or "")) for row in rows}
     translated_key = normalize_search_query(translated)
-    if translated_key and translated_key not in merged:
-        hint_row = _translation_hint_row(translated)
-        if len(rows) >= limit:
-            rows = rows[:max(0, limit - 1)] + [hint_row]
-        else:
-            add_row(hint_row)
-    return rows[:limit], translated
+    translated_rows = search_kr_tags(context, translated, limit)
+    if rows:
+        translated_rows = [
+            row for row in translated_rows
+            if normalize_search_query(str(row.get("tag") or "")) == translated_key
+        ]
+    for row in translated_rows:
+        key = normalize_search_query(str(row.get("tag") or ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if len(rows) < limit:
+            rows.append(_translated_match_row(row))
+        elif key == translated_key:
+            # 진짜 태그라면 가장 약한 꼬리 자리를 받는다(한글 뜻 대체 검색이 거기 있다).
+            rows[-1] = _translated_match_row(row)
+    if translated_key and translated_key not in seen and len(rows) < limit:
+        rows.append(_translation_hint_row(translated))
+    return rows, translated
 
 
 # 와일드카드 본문 캐시: 경로 -> (mtime, 줄 목록). 파일이 바뀐 것만 다시 읽는다.

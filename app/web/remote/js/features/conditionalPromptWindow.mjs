@@ -119,6 +119,8 @@ export function createConditionalPromptWindow({
       panel.close();
       return;
     }
+    // 아직 한 번도 그려진 적이 없으면 빈 창 대신 '불러오는 중' 을 보인다(빈 창은 고장으로 보인다).
+    if (!host.firstElementChild) host.innerHTML = '<div class="cond-empty cond-loading">조건부 설정을 불러오는 중…</div>';
     panel.open();
     if (panel.isCollapsed()) panel.expand();
     if (!wasOpen) onShow();

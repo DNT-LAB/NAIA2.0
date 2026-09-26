@@ -2475,7 +2475,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
 // 두 모듈에 **같은 요소**를 넘긴다 - 창은 품고, 패널은 그 안에 그린다. 프리셋은 동반 창 요소.
 const conditionalHost = document.createElement('div');
 const conditionalPresetHost = document.createElement('div');
-const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-condwin8')
+const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-condload')
   .then(({createConditionalPromptWindow}) => {
     conditionalPromptWindow = createConditionalPromptWindow({
       document,
@@ -2483,7 +2483,7 @@ const conditionalPromptWindowReady = import('./js/features/conditionalPromptWind
       host: conditionalHost,
       presetHost: conditionalPresetHost,
       escHtml,
-      onShow: () => requestModuleState('conditional_prompt'),
+      onShow: () => requestConditionalWindowState(),
       // 닫을 때 0.5초 대기 중인 Legacy 편집을 보낸다(예전 closeModule 이 하던 일).
       onHide: () => flushPendingModuleEdit('conditional_prompt'),
       onVisibilityChange: () => updateModuleBtnState(),
@@ -4220,6 +4220,9 @@ function onInitComplete() {
   if (currentModuleId && !isModuleStateGuarded(currentModuleId)) {
     requestModuleState(currentModuleId);
   }
+  // 떠 있는 창(조건부)은 currentModuleId 가 아니다 - 열려 있으면 따로 다시 받는다.
+  // 없으면 연결 전·재연결 중에 연 창이 영영 빈 채로 남는다.
+  if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) requestModuleState('conditional_prompt');
   // 재시작/재연결 시 NAI 전용 도구(character/charref/vibe) 배지·Activated 요약 하이드레이션:
   // 모듈을 열지 않아도 복원된 활성 상태가 배지에 즉시 반영되도록 접속 직후 module_state 요청.
   for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
@@ -12317,7 +12320,29 @@ function syncCondScroll(el) {
 }
 
 function renderConditionalPrompt(m) {
-  if (conditionalPromptPanel) conditionalPromptPanel.render(m);
+  if (!conditionalPromptPanel) return;
+  // 떠 있는 창은 그리다 죽으면 **빈 창**으로 남는다(사용자 제보 2026-09-26 - 원인을 볼 길이 없었다).
+  // 오류를 창 안에 보여 준다 - 다음에 같은 일이 나면 그 글 한 줄로 원인을 잡는다.
+  try {
+    conditionalPromptPanel.render(m);
+  } catch (error) {
+    console.error('conditional prompt render failed', error);
+    conditionalHost.innerHTML = `<div class="cond-empty cond-load-error">조건부 화면을 그리지 못했습니다: ${escHtml(String(error && error.message || error))}</div>`;
+  }
+}
+
+// 창을 열었는데 상태가 안 오면(연결 전·재연결 중에 열었거나 응답을 놓쳤으면) 한 번 더 받는다.
+let conditionalStateRetryTimer = null;
+function requestConditionalWindowState() {
+  requestModuleState('conditional_prompt');
+  clearTimeout(conditionalStateRetryTimer);
+  conditionalStateRetryTimer = setTimeout(() => {
+    if (!conditionalPromptWindow || !conditionalPromptWindow.isOpen()) return;
+    if (!conditionalHost.querySelector('.cond-loading')) return;
+    if (!requestModuleState('conditional_prompt')) {
+      conditionalHost.innerHTML = '<div class="cond-empty cond-loading">서버 연결을 기다리는 중… 연결되면 자동으로 불러옵니다.</div>';
+    }
+  }, 3000);
 }
 
 // ---- Event Stream module ----

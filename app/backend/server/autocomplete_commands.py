@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from functools import partial
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -983,6 +984,8 @@ async def handle_autocomplete_command(
         await _send_json(ws, payload)
         return True
 
-    info = await run_in_thread(tag_lookup_info, context, str(command.get("tag") or ""))
+    # recommend = 메인 입력칸이 보낸 조회(유형별 추천 줄은 거기서만 그린다).
+    lookup = partial(tag_lookup_info, recommend=bool(command.get("recommend")))
+    info = await run_in_thread(lookup, context, str(command.get("tag") or ""))
     await _send_json(ws, {"type": "tag_lookup_result", **info})
     return True

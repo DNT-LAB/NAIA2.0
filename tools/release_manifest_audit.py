@@ -143,6 +143,10 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # 태그 코퍼스에서 미리 뽑아 둔 요약이다 — 코퍼스 자체(1.4GB)는 런타임 다운로드고
     # 이 408KB 만 실린다. 안 실으면 토글이 **조용히 0건**이 된다.
     "data/character_debut.json",
+    # 메인 프롬프트 추천 카드의 유형별 줄(2026-09-26). Codex 관계 지도(개발 머신에만 있다)에서
+    # tools/build_tag_relation_pack.py 가 구운 2MB 요약만 싣는다. 안 실으면 추천 줄이 **조용히**
+    # 사라지고 카드는 옛 related 줄로 돌아간다.
+    "data/tag_relation_pack.json",
     # v2.0.34 검토: Interactive 확장이 런타임에 읽는 정적 표 5개(합 3.8MB).
     # include 패턴에는 이미 있었는데 이 예외 목록에서 빠져 게이트가 막았다.
     # 공개 미러에 올린 것이 아니라 페이로드로 실어야 한다 — 안 실으면 배포판에서
@@ -176,6 +180,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/character_presets.json",
     "*/data/character_preview_thumbs.json",
     "*/data/character_debut.json",
+    "*/data/tag_relation_pack.json",
     # v2.0.34 Interactive 확장분(위 bare 패턴과 짝) — 스테이징 경로는
     # `resources/naia-backend/data/...` 라 `*/data/...` 형태가 따로 필요하다.
     "*/data/interactive_axis_tags.json",

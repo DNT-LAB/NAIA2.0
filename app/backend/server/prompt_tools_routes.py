@@ -303,7 +303,7 @@ def _recommendable(context, raw_tags):
     return ok
 
 
-def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
+def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = False) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
         from core.kr_tag_loader import load_kr_tag_records
@@ -380,9 +380,24 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
         companions = [x for x in companions if keep(x)]
     if companions:
         result["companions"] = list(companions)[:8]
+    # ── 추천(메인 프롬프트 전용) ─────────────────────────────────────────────
+    # 메인 입력칸이 보낸 조회에만 싣는다(recommend=True) - 다른 칸의 카드는 그대로다.
+    # 관계 팩이 태그를 유형별로 미리 펼쳐 두었다: Siblings·Variations 는 바꾸기,
+    # Attributes·State·Action·Parts·Context 는 더하기(tools/build_tag_relation_pack.py).
+    recommended: list[str] = []
+    if recommend:
+        from core.tag_relation_pack import load_pack, recommendations
+
+        pack = load_pack(_tag_data_roots(context))
+        groups = recommendations(pack, tag_lower, keep=keep)
+        if not groups and info.get("_tag"):
+            groups = recommendations(pack, str(info.get("_tag")), keep=keep)
+        if groups:
+            result["recommend"] = {"groups": groups}
+            recommended = [item["tag"] for group in groups for item in group["items"]]
     extra_info = {}
     for extra_tag in (list(result.get("implications", [])) + list(result.get("related", []))
-                      + list(result.get("companions", []))):
+                      + list(result.get("companions", [])) + recommended):
         extra = raw_tags.get(str(extra_tag).strip().lower())
         if not extra:
             continue

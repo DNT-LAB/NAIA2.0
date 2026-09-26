@@ -1,4 +1,5 @@
 import { PALETTES, SLIDERS } from './interactiveAxes.mjs';
+import { applyRecommendation, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260926-reco';
 
 // 캐릭터 정보 카드의 칩 가지치기.
 //
@@ -718,7 +719,7 @@ export function createTagAssistController({
     return infoMap[key] || infoMap[key.toLowerCase()] || null;
   }
 
-  function renderTooltipExtraTag(tag, infoMap, extraClass = '') {
+  function renderTooltipExtraTag(tag, infoMap, extraClass = '', extraAttrs = '') {
     const tagText = String(tag || '');
     const info = extraTagInfoFor(infoMap, tagText);
     const desc = info?.desc || '';
@@ -732,6 +733,7 @@ export function createTagAssistController({
       `class="${classes.join(' ')}"`,
       `data-insert="${escHtml(tagText)}"`,
     ];
+    if (extraAttrs) attrs.push(extraAttrs);
     if (desc) {
       attrs.push(`data-tooltip-title="${escHtml(info.tag || tagText)}"`);
       attrs.push(`data-tooltip-desc="${escHtml(desc)}"`);
@@ -1511,7 +1513,8 @@ export function createTagAssistController({
         void lookupPresetEventTokenInfo(tag, {readOnly: false});
         return;
       }
-      sendWs({type: 'tag_lookup', tag});
+      // 유형별 추천 줄은 메인 입력칸에서만 그린다 - 그 조회에만 recommend 를 싣는다.
+      sendWs({type: 'tag_lookup', tag, recommend: target === promptEdit});
     }, 200);
   }
 
@@ -1556,7 +1559,19 @@ export function createTagAssistController({
       html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">implies</span>' +
         m.implications.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
     }
-    if (m.related && m.related.length) {
+    // 메인 입력칸이면 관계 팩의 유형별 추천 줄(Siblings·Variations·State…)이 옛 related 줄을 대신한다.
+    // 팩에 없는 태그거나 권할 칩이 모두 이미 프롬프트에 있으면 옛 줄로 돌아간다.
+    const recoTarget = acTarget || promptEdit;
+    const recoHtml = (!tagLookupReadOnly && recoTarget === promptEdit && Array.isArray(m.recommend?.groups))
+      ? recommendRowsHtml(m.recommend.groups, {
+        present: promptTagSet(recoTarget.value),
+        current: m.tag,
+        renderChip: (t, cls, attrs) => renderTooltipExtraTag(t, extraTagInfo, cls, attrs),
+      })
+      : '';
+    if (recoHtml) {
+      html += recoHtml;
+    } else if (m.related && m.related.length) {
       html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">related</span>' +
         m.related.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
     }
@@ -1617,10 +1632,11 @@ export function createTagAssistController({
         const target = acTarget || promptEdit;
         const info = getActiveTokenInfo(target);
         if (!info) return;
-        const text = target.value;
         const _st = target.scrollTop, _sl = target.scrollLeft; // value 재대입 scrollTop 리셋 → 복원
-        target.value = text.substring(0, info.end) + ', ' + tag + text.substring(info.end);
-        const newPos = info.end + 2 + tag.length;
+        // 추천 칩의 data-op="replace"(Siblings·Variations·no X) 는 지금 태그를 갈아 끼운다. 나머지는 뒤에 더한다.
+        const next = applyRecommendation(target.value, info, tag, el.dataset.op === 'replace' ? 'replace' : 'add');
+        target.value = next.text;
+        const newPos = next.caret;
         target.selectionStart = target.selectionEnd = newPos;
         target.focus({ preventScroll: true }); // 복원 전 focus(미포커스 시 재스크롤 방지, Codex)
         target.scrollTop = _st; target.scrollLeft = _sl; // 긴 프롬프트 스크롤 점프 방지
@@ -1628,6 +1644,16 @@ export function createTagAssistController({
         else fireModuleOninput(target);
         lastLookupTag = '';
         checkTagHint();
+      });
+    });
+    // [+N] = 그 추천 줄의 나머지 칩을 편다. 포커스는 입력칸에 남긴다(mousedown 기본 동작을 막는다).
+    tooltipRoot.querySelectorAll('[data-reco-more]').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        el.closest('.tag-reco-row')?.classList.add('is-expanded');
+        el.remove();
+        if (!tagLookupReadOnly) positionTagTooltip();
       });
     });
     const tagCopyBtn = tooltipRoot.querySelector('.tag-tooltip-copy-btn');
@@ -2878,7 +2904,7 @@ export function createTagAssistController({
     swapToken(target, info, newTag);
     hideAutocomplete();
     lastLookupTag = newTag;
-    sendWs({type: 'tag_lookup', tag: r.tag});
+    sendWs({type: 'tag_lookup', tag: r.tag, recommend: target === promptEdit});
   }
 
   function selectPresetObservedCombo(idx) {

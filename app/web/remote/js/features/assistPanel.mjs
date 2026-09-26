@@ -8,7 +8,9 @@
  *   고른 것·'이름 아님' 은 창을 쓰는 동안 기억해 **요청마다 보낸다** — 서버는 기억이 짧다.
  * - ⚠️ [생성] 은 **가상 프롬프트**로 한 장 뽑는다 — 메인 칸·캐릭터 칸은 그대로다(사용자 지정 2026-09-24: "사용자의
  *   캐릭터 프롬프트를 간섭하면 곤란"). 서버(`/api/assist/generate`)가 메인은 이벤트 맵 [생성] 과 같은 바이패스로,
- *   캐릭터는 이 요청에만 싣는다. '생성해 줘' 는 [바로 생성] 을 켰을 때만 이 길로 뽑는다(기본 꺼짐 — 사용자 결정 2026-09-23).
+ *   캐릭터는 이 요청에만 싣는다.
+ * - 최대한 쉽게(사용자 지정 2026-09-26): [생성해 줘 → 바로 생성] · [직역 먼저] 는 애매해서, 아래 안내 줄 · [Random 에 연결] ·
+ *   '실제 게시물' 은 유명무실해서 뺐다. 다듬기는 늘 켠다(서버 기본값 — 요청에 literal · refine 을 싣지 않는다).
  * - 칸에 넣는 것은 **[프롬프트에 넣기] 를 눌렀을 때만**이다. 메인 = 이벤트 맵 [적용] 과 같은 Random 파이프라인
  *   (PE 앞뒤·자동 숨김·와일드카드), 캐릭터 칸(NAI) = 기존 칸은 **비활성으로** 보내고 새로 덧붙인다(아무것도 잃지 않는다).
  * - 칠하기는 promptHighlighter 와 같은 방식이다: 입력칸 뒤에 같은 글을 담은 거울을 깔고 CSS Custom Highlight API
@@ -47,17 +49,15 @@ function clampCount(value, fallback) {
   return Number.isInteger(n) && n >= 0 && n <= 9 ? n : fallback;
 }
 
-export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLink } = {}) {
+export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
-  let autoBox = null, literalBox = null, refineBox = null, banner = null, body = null, sendBtn = null, picker = null;
+  let banner = null, body = null, sendBtn = null, picker = null;
   let open = false;
   let heightCap = 0;
 
+  // 옛 저장본의 autoGenerate · literalFirst · refine(끔)은 읽지 않는다 — 그 선택지는 없어졌다(09-26)
   const prefs = loadPrefs();
   let rating = RATINGS.some(r => r.id === prefs.rating) ? prefs.rating : 'g';
-  let autoGenerate = !!prefs.autoGenerate;
-  let literalFirst = !!prefs.literalFirst;      // 직역 도구(사용자 제안 09-25) - 견주는 동안 기본 꺼짐
-  let refineOn = prefs.refine !== false;        // 다듬기 도구(사용자 제안 09-25) - 태그 고치기 + 장면 문장, 기본 켬
   let personsMode = prefs.personsMode === 'manual' ? 'manual' : 'auto';
   let girls = clampCount(prefs.girls, 1);
   let boys = clampCount(prefs.boys, 0);
@@ -82,7 +82,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
   }
 
   function persistPrefs() {
-    savePrefs({ rating, autoGenerate, literalFirst, refine: refineOn, personsMode, girls, boys });
+    savePrefs({ rating, personsMode, girls, boys });
   }
 
   async function postJson(path, payload, { allowError = false } = {}) {
@@ -130,45 +130,20 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
         <span class="as-persons" data-as-persons role="group" aria-label="인원"></span>
         <span class="fs-rating-bar as-rating" data-as-rating role="group" aria-label="등급(추론 방향)">${RATINGS.map(r =>
           `<button type="button" class="fs-rating-btn" data-r="${r.id}" title="${r.title}">${r.label}</button>`).join('')}</span>
-        <label class="as-auto" title="요청이 '생성해 줘' 로 끝나면 이 결과로 바로 한 장 생성합니다 — 칸은 그대로(기본 꺼짐)">
-          <input type="checkbox" data-as-auto> 생성해 줘 → 바로 생성</label>
-        <label class="as-auto" title="요청을 먼저 과장 없이 영어로 한 번 옮기고(E2B 직역 도구) 그 영문으로 태그를 찾습니다 - 시험 중(기본 꺼짐)">
-          <input type="checkbox" data-as-literal> 직역 먼저</label>
-        <label class="as-auto" title="원문과 태그를 함께 E2B 에 보여 틀린 태그는 빼고 빠진 것은 더하고, 장면 문장 하나를 메인 끝에 붙입니다(기본 켬)">
-          <input type="checkbox" data-as-refine> 다듬기</label>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
       <div class="as-banner" data-as-banner hidden></div>
-      <div class="as-body" data-as-body></div>
-      <div class="as-foot"><b>Enter</b> 찾기 · <b>Shift+Enter</b> 줄바꿈 — <b>main: …</b> / <b>c1 이름 - 설명</b> 으로 적으면
-        프롬프트를 짜 드립니다 · <b>{이름}</b> 은 이름으로 찾기 · [생성] 은 메인·캐릭터 칸을 건드리지 않습니다</div>`;
+      <div class="as-body" data-as-body></div>`;
     document.body.append(overlay);
     input = overlay.querySelector('.as-input');
     mirror = overlay.querySelector('.as-mirror');
     namesRow = overlay.querySelector('[data-as-names]');
     personsEl = overlay.querySelector('[data-as-persons]');
     ratingBar = overlay.querySelector('[data-as-rating]');
-    autoBox = overlay.querySelector('[data-as-auto]');
-    literalBox = overlay.querySelector('[data-as-literal]');
-    refineBox = overlay.querySelector('[data-as-refine]');
     banner = overlay.querySelector('[data-as-banner]');
     body = overlay.querySelector('[data-as-body]');
     sendBtn = overlay.querySelector('[data-as-send]');
 
-    autoBox.checked = autoGenerate;
-    autoBox.addEventListener('change', () => { autoGenerate = autoBox.checked; persistPrefs(); });
-    refineBox.checked = refineOn;
-    refineBox.addEventListener('change', () => {
-      refineOn = refineBox.checked;
-      persistPrefs();
-      if (result && !busy) void ask();
-    });
-    literalBox.checked = literalFirst;
-    literalBox.addEventListener('change', () => {
-      literalFirst = literalBox.checked;
-      persistPrefs();
-      if (result && !busy) void ask();
-    });
     overlay.querySelector('[data-as-close]').addEventListener('click', close);
     overlay.querySelector('[data-as-reset]').addEventListener('click', reset);
     sendBtn.addEventListener('click', () => { void ask(); });
@@ -561,9 +536,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     const mine = ++askSeq;
     busy = true;
     paintBusy();
-    const payload = {
+    const payload = {       // 직역(끔) · 다듬기(켬) · 되살리기(켬)는 서버 기본값 그대로
       text, rating, persons: personsPayload(), previous: recap,
-      names: Object.fromEntries(choices), not_names: [...notNames], literal: literalFirst, refine: refineOn,
+      names: Object.fromEntries(choices), not_names: [...notNames],
     };
     const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
     if (mode) payload.api_mode = mode;
@@ -585,9 +560,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     paintNames();
     render();
     paintBusy();
-    if (autoGenerate && data.goal === 'generate' && data.task === 'scene' && data.prompt?.main) {
-      void generateVirtual();                  // 칸은 그대로 - 가상 프롬프트로 한 장
-    }
   }
 
   function paintBusy() {
@@ -634,7 +606,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
       `<div class="as-line"><span class="as-k">메인</span><span class="as-v">${esc(p.main || '(비어 있음)')}</span></div>`,
       ...chars.map((c, i) =>
         `<div class="as-line"><span class="as-k" title="${esc(c.ko || '')}">캐릭터 ${i + 1}</span><span class="as-v">${esc(c.prompt)}</span></div>`),
-      ...(r.literal ? [`<div class="as-line" title="E2B 직역 - 태그가 아니라 태그를 찾는 데 쓴 영문"><span class="as-k">직역</span><span class="as-v">${esc(r.literal)}</span></div>`] : []),
     ];
     const meta = [];
     if (pool.posts) meta.push(`풀 ${fmt(pool.posts)}건`);
@@ -654,9 +625,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     if (r.persons?.confirm && personsMode === 'auto') {
       notes.push('<div class="as-note">인원을 확실히 못 셌습니다 — 위의 [여 · 남]으로 정해 주세요.</div>');
     }
-    const samples = Array.isArray(r.samples) && r.samples.length
-      ? `<details class="as-samples"><summary>실제 게시물 ${r.samples.length}</summary>${r.samples.map(s =>
-          `<div class="as-sample">${esc((s.tags || []).join(', '))}</div>`).join('')}</details>` : '';
     const can = p.main ? '' : 'disabled';
     return `<div class="as-res">${lines.join('')}<div class="as-meta">${meta.join(' · ')}</div>${notes.join('')}
       ${explainHtml(r.explain)}
@@ -665,10 +633,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
                 title="메인 프롬프트·캐릭터 칸은 그대로 두고, 이 결과(가상 프롬프트)로 한 장 생성합니다">생성</button>
         <button type="button" class="as-act" data-as-apply ${can}
                 title="메인 = Random 과 같은 파이프라인(PE 앞뒤·자동 숨김) · 캐릭터 칸 = 기존은 비활성으로 보내고 덧붙입니다">프롬프트에 넣기</button>
-        <button type="button" class="as-act" data-as-link ${pool.pins ? '' : 'disabled'}
-                title="Random·Auto Gen 이 이 조건(핀·인원·등급)의 실제 게시물에서 뽑습니다">Random 에 연결</button>
         <button type="button" class="as-act" data-as-copy ${can} title="클립보드로 복사">복사</button>
-      </div>${samples}</div>`;
+      </div></div>`;
   }
 
   function rowsHtml(items, caption) {
@@ -713,7 +679,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
     const t = event.target;
     if (t.closest('[data-as-generate]')) { void generateVirtual(); return; }
     if (t.closest('[data-as-apply]')) { void applyPrompt(); return; }
-    if (t.closest('[data-as-link]')) { void linkRandom(); return; }
     if (t.closest('[data-as-copy]')) { void copyPrompt(); return; }
     const example = t.closest('[data-as-example]');
     if (example) {
@@ -734,7 +699,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
 
   function lockActions(on) {
     body.querySelectorAll('.as-act').forEach(b => { b.disabled = !!on; });
-    if (!on && !result?.pool?.pins) body.querySelector('[data-as-link]')?.setAttribute('disabled', '');
   }
 
   /** [생성] — 이 결과를 **가상 프롬프트**로 한 장 뽑는다. 메인 칸·캐릭터 칸은 그대로다
@@ -775,21 +739,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, onRandomLin
       toast(`넣지 못했습니다 — ${error.message}`, 'error');
     } finally {
       lockActions(false);
-    }
-  }
-
-  async function linkRandom() {
-    const pool = result?.pool;
-    if (!pool?.pins) return;
-    try {
-      const state = await postJson('/api/event-map/random-link', {
-        enabled: true, pins: pool.pins, exclude: pool.exclude || '',
-        ratings: pool.ratings || rating, persons: pool.persons || '',
-      });
-      if (typeof onRandomLink === 'function') onRandomLink(state);
-      toast('Random·Auto Gen 이 이 조건에서 뽑습니다 (끄기: 이벤트 맵의 [랜덤 버튼 연결])', 'success');
-    } catch (error) {
-      toast(`Random 연결 실패 — ${error.message}`, 'error');
     }
   }
 

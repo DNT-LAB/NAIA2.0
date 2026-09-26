@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from core.assist_korean import clean_text
@@ -20,7 +22,8 @@ from core.assist_korean import clean_text
 REFINE_SYSTEM = """You check the Danbooru tags made for a Korean image request.
 - remove: tags that do not fit the request (a wrong meaning, or something the request does not ask for).
 - add: up to 4 Danbooru tags for what the request clearly says but the tags miss (pose, expression, place, framing).
-- sentence: one English sentence that describes the picture - what the request says, with a light touch of mood. No names.
+- sentence: one English sentence that describes the picture - what the request says, with a light touch of mood.
+  Call a character by the English name in Names. Never make up a name.
 - If a User preference is given, lean the additions and the sentence toward it, without changing what the request says.
 Never add people counts (1girl, solo), quality or rating tags. Answer JSON only.
 
@@ -32,6 +35,7 @@ Tags: sitting, window, rain, hand on own chin, staring
 MAX_ADD = 4
 MAX_REMOVE = 3
 MAX_SENTENCE = 240
+_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
 
 
 @dataclass
@@ -41,9 +45,26 @@ class Refine:
     sentence: str = ""
 
 
-def refine_message(text: str, tags: list[str], literal: str | None = None, preference: str = "") -> str:
-    """preference = 고급 설정의 User Preference(고른 등급의 것, 사용자 지정 09-26) — 있으면 맨 끝 줄에."""
+def display_name(tag: str) -> str:
+    """캐릭터 태그 -> 문장에 쓸 영어 이름: 괄호 꼬리를 떼고(lacrimosa (nte) -> Lacrimosa) 문장 문법의 글자만 남긴다
+    (WebUI 는 괄호를 가중치로 읽는다 — 문법이 문장에 괄호를 막는다). 남는 글자가 없으면 ""."""
+    base = " ".join(str(tag or "").replace("_", " ").split())
+    while _QUALIFIER.search(base):
+        base = _QUALIFIER.sub("", base)
+    base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
+    return " ".join(w[:1].upper() + w[1:] for w in re.sub(r"[^A-Za-z0-9 .'-]", " ", base).split())
+
+
+def refine_message(text: str, tags: list[str], literal: str | None = None, preference: str = "",
+                   names: Iterable[tuple[str, str, str | None]] = ()) -> str:
+    """preference = 고급 설정의 User Preference(고른 등급의 것, 사용자 지정 09-26) — 있으면 맨 끝 줄에.
+    names = 고른 캐릭터(원문의 이름, 태그, 성별) — 모델이 모르는 이름을 지어냈다(라크리모사 -> Lacy lingerie ·
+    A Lace Merrier, 사용자 제보 09-26). 문장이 그 캐릭터를 영어 이름으로 부르게 한 줄로 준다."""
     lines = [f"Request: {clean_text(text).strip()}"]
+    known = [f"{clean_text(ko).strip()} = {en}" + (f" ({gender})" if gender in ("girl", "boy") else "")
+             for ko, tag, gender in names if (en := display_name(tag))]
+    if known:
+        lines.append(f"Names: {'; '.join(known)}")
     if literal:
         lines.append(f"Literal English: {literal}")
     lines.append(f"Tags: {', '.join(tags)}")

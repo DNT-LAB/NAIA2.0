@@ -453,7 +453,9 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     if not tags:
         return None, {}
     preference = req.get("preference") or ""
-    reply, info = _chat(context, ar.REFINE_SYSTEM, ar.refine_message(req["text"], tags, literal, preference),
+    # 고른 캐릭터는 이름을 알려 준다 — 모르면 문장이 이름을 지어낸다(라크리모사 -> Lacy lingerie, 09-26)
+    names = [(c.ko, c.tag, c.gender) for c in merged.characters]
+    reply, info = _chat(context, ar.REFINE_SYSTEM, ar.refine_message(req["text"], tags, literal, preference, names),
                         ar.refine_grammar(), max_tokens=160)
     got = ar.parse_refine(reply) if reply is not None else None
     if got is None:

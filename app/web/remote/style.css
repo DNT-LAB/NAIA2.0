@@ -30410,6 +30410,14 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   pointer-events: none;
 }
 .agw-card.is-picked .agw-check { background: var(--accent); border-color: var(--accent); }
+/* 일괄 생성 진행 줄 - 도는 동안만 보인다. [중지] 는 남은 대기열을 비운다. */
+.agw-progress { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px;
+  background: rgba(124, 92, 255, 0.14); border: 1px solid rgba(124, 92, 255, 0.4); font-size: 10px; color: var(--text-primary); }
+.agw-progress[hidden] { display: none !important; }
+.agw-prog-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agw-card.is-busy { border-color: var(--accent); animation: agw-busy 1.2s ease-in-out infinite; }
+@keyframes agw-busy { 50% { box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.55); } }
+@media (prefers-reduced-motion: reduce) { .agw-card.is-busy { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
 
 /* ══ 보기 설정 창 (artistBenchViewWindow) ═════════════════════════════════════ */
 .dragpanel.abv .dragpanel-body { display: flex; flex-direction: column; min-height: 0; gap: 6px; padding: 6px 8px; }

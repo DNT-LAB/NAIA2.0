@@ -167,6 +167,9 @@ export function createArtistThumbController({
   // 아티스트 그룹(저장 + 임시). 스토어가 유일한 주인이고 창·메뉴는 구독만 한다.
   let groupsApi = null;        // {store, createWindow, broker}
   const groupWindows = new Map();   // groupId -> window api
+  // 일괄 생성 진행 - 그룹 창의 진행 줄이 본다(사용자 지정 2026-09-26). ⚠️ 리모컨에는 탭의
+  // [일괄 생성] 취소 단추가 없다 - 그룹에서 유료로 수백 명을 걸면 멈출 길이 없었다.
+  let queueProgress = null;         // {done, total, artist, cancelling} | null
   let lastTempGroupId = '';
   const mixBtn = document.createElement('button');
   mixBtn.type = 'button';
@@ -2076,6 +2079,11 @@ export function createArtistThumbController({
     return removed;
   }
 
+  function publishQueueProgress(next) {
+    queueProgress = next;
+    for (const open of groupWindows.values()) open.setQueueProgress?.(queueProgress);
+  }
+
   function enqueueArtistBatch(items, mode, options = {}) {
     const queueMode = normalizeQueueMode(mode);
     let count = 0;
@@ -2089,6 +2097,8 @@ export function createArtistThumbController({
         startArtistQueueRunner();
       } else {
         updateWaitingQueueStatus();
+        // 도는 중에 더 넣었다 - 분모를 늘린다.
+        if (queueProgress) publishQueueProgress({...queueProgress, total: queueProgress.done + 1 + artistQueueEntries.length});
       }
     }
     return count;
@@ -2119,6 +2129,7 @@ export function createArtistThumbController({
   function cancelArtistQueue() {
     if (!artistQueueRunning && !artistQueueEntries.length) return;
     artistQueueCancelRequested = true;
+    if (queueProgress) publishQueueProgress({...queueProgress, cancelling: true});
     artistQueueEntries.length = 0;
     updateQueuedCards();
     if (batchBtn) batchBtn.textContent = '취소 대기...';
@@ -2161,6 +2172,7 @@ export function createArtistThumbController({
         artistQueueMode = normalizeQueueMode(entry?.mode);
         updateQueuedCards();
         const total = completed + 1 + artistQueueEntries.length;
+        publishQueueProgress({done: completed, total, artist: entry?.item?.artist || '', cancelling: false});
         await runQueuedArtistGeneration(entry, completed, total);
         completed += 1;
         activeArtistQueueEntry = null;
@@ -2181,6 +2193,7 @@ export function createArtistThumbController({
     } finally {
       artistQueueRunning = false;
       artistQueueCancelRequested = false;
+      publishQueueProgress(null);
       artistQueueMode = '';
       activeArtistQueueEntry = null;
       rejectAllArtistResultWaiters(new Error('Artist queue stopped'));
@@ -2693,7 +2706,7 @@ export function createArtistThumbController({
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor},
       {createArtistBenchViewsStore}, {createArtistBenchViewWindow}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-groupwc'),
+      import('./artistGroupWindow.mjs?v=20260926-groupstop'),
       import('./dragBroker.mjs?v=20260919-strip'),
       import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
       import('./artistBenchViewWindow.mjs?v=20260926-benchview'),
@@ -2798,12 +2811,14 @@ export function createArtistThumbController({
       onEditView: viewId => groupsApi.viewWindow.open(viewId),
       onNewView: gid => groupsApi.viewWindow.openNew(gid),
       onGenerateView: request => generateGroupView(request),
+      onStopQueue: () => cancelArtistQueue(),
       onClosed: () => {
         groupWindows.delete(groupId);
         if (lastTempGroupId === groupId) lastTempGroupId = '';
       },
     });
     groupWindows.set(groupId, win);
+    win.setQueueProgress?.(queueProgress);     // 도는 중에 연 창도 진행 줄을 본다
     if (store.isTemp(groupId)) lastTempGroupId = groupId;
     return win;
   }

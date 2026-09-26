@@ -47,6 +47,7 @@ export function createArtistGroupWindow({
   onEditView = () => {},           // (viewId) => void    보기 설정 창
   onNewView = () => {},            // (groupId) => void   지금 설정으로 새 보기
   onGenerateView = async () => false,   // ({viewId, artists}) => 넣었으면 true
+  onStopQueue = () => {},          // 일괄 생성 중지(지금 한 장은 마저 끝난다)
 } = {}) {
   const broker = dragBrokerFor(doc, win);
   const isTempNow = () => store.isTemp(groupId);
@@ -118,6 +119,11 @@ export function createArtistGroupWindow({
       <button type="button" class="agw-btn" data-agw-act="select-missing" title="이 보기의 그림이 없는 작가만 고릅니다">미생성</button>
       <button type="button" class="agw-btn primary" data-agw-act="generate" title="고른 작가를 이 보기의 조건으로 뽑습니다">생성</button>
     </div>
+    <div class="agw-progress" hidden>
+      <span class="agw-prog-text"></span>
+      <button type="button" class="agw-btn danger" data-agw-act="queue-stop"
+              title="남은 대기열을 비웁니다. 지금 생성 중인 한 장은 마저 끝납니다">중지</button>
+    </div>
     <form class="agw-name" hidden>
       <input class="agw-name-input" type="text" maxlength="40" spellcheck="false" placeholder="그룹 이름">
       <button type="submit" class="agw-btn">확인</button>
@@ -133,6 +139,9 @@ export function createArtistGroupWindow({
   const deleteBtn = panel.body.querySelector('[data-agw-act="delete"]');
   const nameInput = panel.body.querySelector('.agw-name-input');
   const viewSelect = panel.body.querySelector('.agw-view');
+  const progressEl = panel.body.querySelector('.agw-progress');
+  const progressText = panel.body.querySelector('.agw-prog-text');
+  let progress = null;
   const viewBtn = sel => panel.body.querySelector(`[data-agw-act="${sel}"]`);
 
   function group() {
@@ -217,6 +226,7 @@ export function createArtistGroupWindow({
     gridEl.innerHTML = items.map(cardHtml).join('');
     // 다시 그리면 올려 둔 카드가 사라진다 - 없는 카드를 크게 보여 주지 않는다.
     if (hoverCard && !hoverCard.isConnected) leaveHover();
+    if (progress) setQueueProgress(progress);   // 다시 그리면 '지금 뽑는 카드' 표시가 사라진다
     emptyEl.hidden = items.length > 0;
     void fillImages(items);
   }
@@ -457,6 +467,22 @@ export function createArtistGroupWindow({
 
   const unsubViews = views ? views.subscribe(() => render()) : () => {};
 
+  /** 일괄 생성 진행(탭이 부른다). null = 쉬는 중. 지금 뽑는 작가의 카드에 표시를 단다. */
+  function setQueueProgress(next) {
+    progress = next || null;
+    progressEl.hidden = !progress;
+    gridEl.querySelectorAll('.agw-card.is-busy').forEach(c => c.classList.remove('is-busy'));
+    if (!progress) return;
+    const stopBtn = progressEl.querySelector('[data-agw-act="queue-stop"]');
+    progressText.textContent = progress.cancelling
+      ? `중지하는 중 - ${progress.artist} 까지 끝냅니다`
+      : `생성 중 ${Math.min(progress.done + 1, progress.total)}/${progress.total} · ${progress.artist}`;
+    stopBtn.disabled = Boolean(progress.cancelling);
+    if (progress.artist) {
+      gridEl.querySelector(`.agw-card[data-artist="${CSS.escape(progress.artist)}"]`)?.classList.add('is-busy');
+    }
+  }
+
   /** 탭이 결과를 받으면 부른다 - 그 보기의 그 작가 카드만 새 그림으로. */
   function viewResult(viewId, artist, url) {
     if (!viewId || !artist) return;
@@ -533,6 +559,7 @@ export function createArtistGroupWindow({
     if (!act) return;
     const g = group();
     if (!g) return;
+    if (act === 'queue-stop') { onStopQueue(); return; }
     if (act === 'select-mode') { setSelecting(!selecting); return; }
     if (act === 'select-all') { pickWhere(() => true); return; }
     if (act === 'select-missing') {
@@ -662,6 +689,7 @@ export function createArtistGroupWindow({
     close() { panel.close(); },
     isTemp: () => isTempNow(),
     viewResult,
+    setQueueProgress,
   };
   OPEN.add(api);
   panel.open();

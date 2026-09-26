@@ -86,6 +86,14 @@ export function createArtistGroupWindow({
   renameBtn.className = 'agw-rename';
   renameBtn.textContent = '✎';
   panel.slot.appendChild(renameBtn);
+  // 와일드카드 복사(사용자 지정 2026-09-26) - `__artist_group/이름__`, 관심 작가는 `__favorite_artist__`.
+  // 파일에는 작가 이름만 있다 - 가중치·`artist:` 는 부르는 쪽이 감싼다.
+  const copyWcBtn = doc.createElement('button');
+  copyWcBtn.type = 'button';
+  copyWcBtn.className = 'agw-rename agw-copywc';
+  copyWcBtn.textContent = '⧉';
+  panel.slot.appendChild(copyWcBtn);
+  copyWcBtn.addEventListener('click', () => { void copyWildcard(); });
   renameBtn.addEventListener('click', () => {
     if (nameForm.hidden) showNaming();
     else hideNaming();
@@ -131,6 +139,30 @@ export function createArtistGroupWindow({
     return store.get(groupId);
   }
 
+  function wildcardToken() {
+    const name = group()?.wildcard;
+    return name ? `__${name}__` : '';
+  }
+
+  async function copyWildcard() {
+    const token = wildcardToken();
+    if (!token) return;
+    if (!(group()?.items || []).length) {
+      showToast('빈 그룹은 와일드카드 파일이 없습니다 - 작가를 넣은 뒤 복사하세요.', 'info');
+    }
+    try {
+      await win.navigator.clipboard.writeText(token);
+    } catch {
+      // 클립보드 권한이 없는 창(오래된 Electron 등) - 숨긴 칸으로 복사한다.
+      const area = doc.createElement('textarea');
+      area.value = token;
+      area.style.position = 'fixed'; area.style.opacity = '0';
+      doc.body.appendChild(area); area.select();
+      try { doc.execCommand('copy'); } finally { area.remove(); }
+    }
+    showToast(`복사했습니다: ${token}`, 'success');
+  }
+
   /** 제목 = 그룹 이름. 임시 창의 이름(`임시 창 N`)도 **서버가** 붙인 것이라
    *  화면에서 번호를 다시 세지 않는다 - 세던 때는 창마다 제목이 갈렸다. */
   function titleText() {
@@ -174,6 +206,8 @@ export function createArtistGroupWindow({
     deleteBtn.textContent = temp ? '비우고 닫기' : '삭제';
     deleteBtn.dataset.armed = '';
     renameBtn.title = temp ? '이름을 붙여 저장합니다' : '이름 바꾸기';
+    copyWcBtn.hidden = !g.wildcard;
+    copyWcBtn.title = g.wildcard ? `와일드카드 복사: __${g.wildcard}__ (작가 이름만 - artist: 는 감싸서 쓰세요)` : '';
     const items = g.items || [];
     countEl.textContent = `${items.length}명`;
     // 그룹에서 빠진 작가는 고름에서도 뺀다(남기면 [생성 N] 의 N 이 거짓말이 된다).

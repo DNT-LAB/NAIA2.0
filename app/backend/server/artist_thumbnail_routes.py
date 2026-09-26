@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -443,11 +445,84 @@ def _refresh_favorite_wildcard(context: WebSessionContext, path: Path) -> None:
 def _favorites_group(context: WebSessionContext) -> dict:
     names = artist_thumbnail_service(context).favorite_artists()
     return {"id": FAVORITES_GROUP_ID, "name": FAVORITES_GROUP_NAME, "temp": False, "fixed": True,
+            "wildcard": "favorite_artist",
             "items": [{"artist": name} for name in names]}
 
 
+# ── 그룹 = 와일드카드 (사용자 지정 2026-09-26) ────────────────────────────────
+#  그룹마다 `wildcards/artist_group/<그룹 이름>.txt` - **작가 이름만** 한 줄에 하나(가중치·`artist:` 없음,
+#  관심 작가 `favorite_artist.txt` 와 같은 약속). 부르는 쪽이 `artist:__artist_group/이름__` 처럼 감싼다.
+#  ⚠️ 이 폴더에 사용자가 손으로 둔 파일은 건드리지 않는다 - 내가 만든 파일 이름을 목록(`.naia_artist_groups.json`)
+#     에 적어 두고 **그 안에서만** 지운다(그룹을 지우거나 이름을 바꿀 때).
+GROUP_WILDCARD_DIR = "artist_group"
+GROUP_WILDCARD_MANIFEST = ".naia_artist_groups.json"
+
+
+def _group_wildcard_files(groups: list) -> dict[str, str]:
+    """그룹 id -> 파일 이름(확장자 없이). 파일에 못 쓰는 글자는 `_` 로 - 겹치면 뒤 그룹에 id 꼬리를 단다."""
+    out: dict[str, str] = {}
+    used: set[str] = set()
+    for group in groups:
+        base = re.sub(r'[<>:"/\\|?*]', "_", str(group.get("name") or "").strip()).strip(". ") or "group"
+        name = base
+        if name.casefold() in used:
+            name = f"{base} ({str(group.get('id') or '')[-4:]})"
+        used.add(name.casefold())
+        out[str(group.get("id") or "")] = name
+    return out
+
+
+def _sync_group_wildcards(context: WebSessionContext) -> None:
+    """그룹 목록 -> `artist_group/*.txt`. 바뀐 파일만 쓰고, 돌고 있는 와일드카드 관리자에 그것만 다시 읽힌다.
+    빈 그룹은 파일을 두지 않는다(빈 와일드카드는 원래 싣지 않는다). 실패해도 본 요청은 성공이다."""
+    try:
+        groups = artist_group_store(context).list()
+        root = Path(artist_thumbnail_service(context).wildcards_root) / GROUP_WILDCARD_DIR
+        manifest = root / GROUP_WILDCARD_MANIFEST
+        try:
+            previous = set(json.loads(manifest.read_text(encoding="utf-8")).get("files") or [])
+        except Exception:
+            previous = set()
+        names = _group_wildcard_files(groups)
+        wanted: dict[str, str] = {}
+        for group in groups:
+            artists = [str(i.get("artist") or "").strip() for i in (group.get("items") or [])]
+            text = "".join(f"{a}\n" for a in artists if a)
+            if text:
+                wanted[names[str(group.get("id") or "")] + ".txt"] = text
+        changed: list[Path] = []
+        if wanted or previous:
+            root.mkdir(parents=True, exist_ok=True)
+        for filename, text in wanted.items():
+            path = root / filename
+            try:
+                if path.read_text(encoding="utf-8") == text:
+                    continue
+            except OSError:
+                pass
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(path)
+            changed.append(path)
+        for filename in previous - set(wanted):
+            path = root / filename
+            if path.is_file():
+                path.unlink()
+                changed.append(path)
+        if set(wanted) != previous:
+            manifest.write_text(json.dumps({"files": sorted(wanted)}, ensure_ascii=False, indent=1) + "\n",
+                                encoding="utf-8")
+        for path in changed:
+            _refresh_favorite_wildcard(context, path)       # 한 파일만 다시 읽힌다(이름과 달리 어느 파일이든)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[artist-groups] wildcard sync failed: {exc}", flush=True)
+
+
 def _with_favorites(context: WebSessionContext, groups: list) -> list:
-    """관심 목록을 못 읽어도 그룹 목록은 살린다 - 한쪽 고장이 다른 쪽을 가리지 않게."""
+    """관심 목록을 못 읽어도 그룹 목록은 살린다 - 한쪽 고장이 다른 쪽을 가리지 않게.
+    각 그룹에 와일드카드 이름(`wildcard`)을 싣는다 - 머리줄 복사 단추가 **이 값**을 쓴다(겹침 꼬리 포함)."""
+    names = _group_wildcard_files(groups)
+    groups = [{**g, "wildcard": f"{GROUP_WILDCARD_DIR}/{names[str(g.get('id') or '')]}"} for g in groups]
     try:
         return [_favorites_group(context), *groups]
     except Exception:
@@ -791,6 +866,7 @@ def register_artist_thumbnail_routes(
     async def api_artist_groups_list():
         try:
             groups = await run_in_thread(artist_group_store(session_context).list)
+            await run_in_thread(_sync_group_wildcards, session_context)
             return {"groups": await run_in_thread(_with_favorites, session_context, groups)}
         except Exception as exc:
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
@@ -813,6 +889,7 @@ def register_artist_thumbnail_routes(
                 return await run_in_thread(_apply_favorites_op, session_context, payload)
             result = await run_in_thread(_apply_group_op, artist_group_store(session_context), payload)
             await run_in_thread(_sync_group_thumbnails, session_context)
+            await run_in_thread(_sync_group_wildcards, session_context)
             if isinstance(result.get("groups"), list):
                 result["groups"] = await run_in_thread(_with_favorites, session_context, result["groups"])
             return result

@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 """메인 프롬프트 추천 카드용 태그 관계 팩을 굽는다 (`data/tag_relation_pack.json`).
 
-원천은 Codex 의 관계 지도(`codex_out/search-quick-redesign/parallel-v1/`, 개발 머신에만 있다)다.
-Event Map 태그 29,412개를 위키 원문으로 판독·독립 검토한 관계를 태그마다 **유형별 추천 목록**으로
-미리 펼쳐 둔다. 런타임은 이 작은 파일만 읽는다 - 107MB 카탈로그와 458MB 공출현은 싣지 않는다.
+원천은 Codex 의 관계 지도(`codex_out/search-quick-redesign/parallel-v1/`, 개발 머신에만 있다) 위의
+**제품 조회 계약**(`product_contract/QUERY_CONTRACT.json`, 2026-09-26 4단계)이다. 관계 행마다 검토된
+`display_type`(표시 유형)과 `edit_policy`(누르면 할 일)가 들어 있고, 빌더는 그것을 **그대로 옮긴다** -
+칸(section)이나 단부루 함의로 유형을 다시 추정하지 않는다(계약 CONSUMER.ko.md).
 
-유형과 누르면 하는 일(op: 1 = 바꾸기, 0 = 더하기). 한 줄은 한 가지 일만 한다:
+    display_type -> 카드 줄             edit_policy  -> op
+    sibling      -> Siblings            replace_seed -> 1  커서 태그 하나를 바꾼다
+    subtype      -> Variations          add          -> 0  뒤에 더한다
+    companion    -> Companions          none         -> 싣지 않는다(탐색 전용 · held · redirect)
+    modifier     -> Attributes
+    state · action · part · context -> State · Action · Parts · Context
+    navigation   -> 싣지 않는다
 
-    siblings    같은 층의 대안(카탈로그 `related`)                 바꾸기 - 함께 두면 open mouth + closed mouth 처럼 모순
-    variations  씨앗을 **함의**하는 더 구체적인 것(white shirt,     바꾸기 - 씨앗의 뜻을 품으니 잃는 것이 없다
-                dress shirt, very long hair)
-    attributes  종류·모양·속성 칸의 나머지(frills, sleeveless)      더하기 - 바꿔 넣으면 옷이 사라진다
-    state · action · parts · context                               더하기. 단 씨앗의 부정(no X · unworn X)은 바꾸기
+applicability 가 inapplicable(씨앗의 고정 사실과 어긋남)인 행도 싣지 않는다. conditional(조건 미확인)은 권하되
+사실로 취급하지 않는다 - 누르는 것은 사용자다. 같은 태그가 여러 도메인·칸에 있으면 **검토된 바꾸기**를 먼저,
+그다음 줄 순서로 하나만 고른다(한 도메인의 none 이 다른 도메인의 승인을 가리지 않는다).
 
-씨앗이 함의하는 상위형(dress shirt -> collared shirt)은 어느 줄에도 넣지 않는다 - 카드의 implies 줄이 이미 보인다.
-
-순서: siblings 는 게시물 수, 나머지는 LIFT 점수 P(대상|씨앗) x min(log2 lift, 3) (교집합 >= --min-support).
-서로 대신 쓰는 태그는 함께 안 나와 lift 가 1 미만인 게 정상이라(standing/sitting 0.37) siblings 에는 LIFT 를 쓰지 않는다.
-더하기 후보 중 lift 가 1 미만으로 **측정된** 것은 뺀다 - 같이 안 쓰이는 것을 더하라고 권하는 꼴이다(long hair 에 short hair).
-
-유형 판정은 지금 데이터의 칸(section) + 단부루 함의로 한 **임시 규칙**이다. Codex 가 관계 유형·축·배타 여부를
-채우면(누락 목록 2026-09-26) `classify()` 한 곳만 고치고 다시 굽는다.
+순서: Siblings 는 축의 order(검토된 비교 순서), 없으면 게시물 수. 나머지는 P(대상|씨앗) x min(log2 lift, 3)
+(교집합 >= --min-support), 그다음 게시물 수. 음의 lift 는 뒤로 민다 - 검토된 후보를 통계로 지우지 않는다.
+형제의 낮은 공출현은 정상이라(standing/sitting 0.37) 형제 줄에는 LIFT 를 쓰지 않는다.
 
     python tools/build_tag_relation_pack.py
     python tools/build_tag_relation_pack.py --catalog-dir <parallel-v1> --out data/tag_relation_pack.json
@@ -41,17 +41,24 @@ from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG_DIR = REPO / "codex_out" / "search-quick-redesign" / "parallel-v1"
-DEFAULT_IMPLICATIONS = REPO / "data" / "danbooru_tag_snapshot" / "tag_implications.parquet"
 DEFAULT_OUT = REPO / "data" / "tag_relation_pack.json"
 
 SCHEMA = "naia.tag-relation-pack.v1"
-BUILDER_VERSION = "2026-09-26.3"
-TYPES = ("siblings", "variations", "attributes", "state", "action", "parts", "context")
-# 같은 대상이 여러 칸에 걸리면 앞선 유형 하나만 남긴다(한 카드에 같은 칩이 두 번 나오지 않게).
-TYPE_PRIORITY = {t: i for i, t in enumerate(
-    ("variations", "siblings", "attributes", "state", "action", "parts", "context"))}
-VARIATION_SECTIONS = {"types", "designs", "attributes", "named_styles"}
-SECTION_TYPE = {"states": "state", "events": "action", "parts": "parts", "contexts": "context"}
+BUILDER_VERSION = "2026-09-27.1"
+# 카드에 그리는 순서. Companions(같이 쓰는 별개 개념: smile -> blush)는 적고 값이 커서 앞쪽에 둔다.
+TYPES = ("siblings", "variations", "companions", "attributes", "state", "action", "parts", "context")
+DISPLAY_TO_TYPE = {
+    "sibling": "siblings", "subtype": "variations", "companion": "companions", "modifier": "attributes",
+    "state": "state", "action": "action", "part": "parts", "context": "context",
+}
+EDIT_TO_OP = {"replace_seed": 1, "add": 0}
+REQUIRED_FIELDS = ("display_type", "edit_policy", "applicability")
+# 같은 대상이 여러 도메인·칸에 걸리면: 검토된 바꾸기가 먼저, 그다음 이 순서.
+TYPE_PRIORITY = {t: i for i, t in enumerate(TYPES)}
+
+
+class ContractError(ValueError):
+    """카탈로그가 제품 조회 계약 이전 것이다(관계 행에 display_type · edit_policy 가 없다)."""
 
 
 def sha256_file(path: Path) -> str:
@@ -62,84 +69,22 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-class Implications:
-    """단부루 함의(active)의 전이 판정. 이름은 공백 표기로 맞춘다."""
-
-    def __init__(self, pairs: list[tuple[str, str]]):
-        self.edges: dict[str, set[str]] = defaultdict(set)
-        for a, b in pairs:
-            self.edges[a].add(b)
-        self._memo: dict[tuple[str, str], bool] = {}
-
-    @classmethod
-    def from_parquet(cls, path: Path) -> "Implications":
-        import pyarrow.parquet as pq
-
-        table = pq.read_table(path, columns=["antecedent_name", "consequent_name", "status"])
-        rows = table.to_pylist()
-        return cls([(norm(r["antecedent_name"]), norm(r["consequent_name"]))
-                    for r in rows if str(r.get("status") or "") == "active"])
-
-    def implies(self, a: str, b: str, depth: int = 6) -> bool:
-        key = (a, b)
-        hit = self._memo.get(key)
-        if hit is not None:
-            return hit
-        seen, frontier, found = {a}, {a}, False
-        for _ in range(depth):
-            nxt = set()
-            for x in frontier:
-                for y in self.edges.get(x, ()):
-                    if y == b:
-                        found = True
-                        break
-                    if y not in seen:
-                        seen.add(y)
-                        nxt.add(y)
-                if found:
-                    break
-            if found or not nxt:
-                break
-            frontier = nxt
-        self._memo[key] = found
-        return found
-
-
-def norm(name: str) -> str:
-    return " ".join(str(name or "").replace("_", " ").split()).lower()
-
-
-def negation_of(target: str, seed: str) -> bool:
-    """씨앗을 부정하는 태그인가(no shirt · unworn shirt · shirt removed). 단수·복수 둘 다 본다."""
-    forms = {seed}
-    if seed.endswith("s"):
-        forms.add(seed[:-1])
-    else:
-        forms.add(seed + "s")
-    return any(target in (f"no {f}", f"unworn {f}", f"{f} removed") for f in forms)
-
-
-def classify(section: str, own: bool, seed: str, target: str, imp: Implications) -> tuple[str, int] | None:
-    """(유형, op) 또는 None(추천하지 않음). Codex 가 관계 유형을 채우면 여기만 바꾼다."""
-    if imp.implies(seed, target):
-        return None                           # 상위형(grin -> smile, dress shirt -> collared shirt) - implies 줄이 보인다
-    if section == "related":
-        if not own:
-            return None                       # 부모의 '비슷한 것' 은 씨앗의 형제가 아니다
-        if imp.implies(target, seed):
-            return "variations", 1            # related 로 적혀 있지만 실제로는 구체형(breasts -> large breasts)
-        return "siblings", 1
-    if section in VARIATION_SECTIONS:
-        # 부모에게서 물려받은 줄이라도 씨앗을 함의하면 구체형이다(long hair -> very long hair).
-        return ("variations", 1) if imp.implies(target, seed) else ("attributes", 0)
-    kind = SECTION_TYPE.get(section)
-    if kind is None:
+def classify(row: dict) -> tuple[str, int] | None:
+    """계약 필드 그대로 (카드 줄, op). 싣지 않을 행은 None."""
+    missing = [k for k in REQUIRED_FIELDS if k not in row]
+    if missing:
+        raise ContractError(f"relation row lacks {missing} - rebuild from a product-contract catalog")
+    if (row.get("applicability") or {}).get("status") == "inapplicable":
         return None
-    return kind, 1 if negation_of(target, seed) else 0
+    kind = DISPLAY_TO_TYPE.get(row["display_type"])
+    op = EDIT_TO_OP.get(row["edit_policy"])
+    if kind is None or op is None:
+        return None                         # navigation · edit_policy none = 탐색 전용, 삽입 금지
+    return kind, op
 
 
 def lift_score(stat: tuple[int, float, float] | None, min_support: int) -> float | None:
-    """P(대상|씨앗) x min(log2 lift, 3). 교집합이 모자라면 None(순위는 빈도로)."""
+    """P(대상|씨앗) x min(log2 lift, 3). 교집합이 모자라면 None(순위는 빈도로), 음의 lift 는 -1."""
     if not stat:
         return None
     inter, p, lift = stat
@@ -150,7 +95,7 @@ def lift_score(stat: tuple[int, float, float] | None, min_support: int) -> float
 
 def load_catalog(catalog_dir: Path):
     sys.path.insert(0, str(catalog_dir))
-    import query  # noqa: WPS433 - Codex 도구를 그대로 써서 상속·적용 판정을 한 곳에 둔다
+    import query  # noqa: WPS433 - Codex 조회 모듈을 그대로 써서 계약·상속·적용 판정을 한 곳에 둔다
 
     return query, query.load("sqlite")
 
@@ -165,41 +110,45 @@ def approved_domains(model, tag: str) -> list[str]:
     return out
 
 
-def collect_candidates(query, model, imp: Implications, keep) -> dict[str, dict[str, tuple[str, int]]]:
-    """씨앗 -> {대상: (유형, op)}. 여러 범위의 결과를 유형 우선순위로 합친다."""
-    out: dict[str, dict[str, tuple[str, int]]] = {}
+def _better(new: tuple, old: tuple | None) -> bool:
+    """(kind, op, rank) 둘 중 남길 것 - 검토된 바꾸기가 먼저, 그다음 줄 순서."""
+    if old is None:
+        return True
+    return (-new[1], TYPE_PRIORITY[new[0]]) < (-old[1], TYPE_PRIORITY[old[0]])
+
+
+def collect_candidates(query, model, keep) -> dict[str, dict[str, tuple[str, int, int | None]]]:
+    """씨앗 -> {대상: (줄, op, 축 순서)}. 축 순서는 형제 줄에만 쓴다(검토된 order 안의 자리)."""
+    out: dict[str, dict[str, tuple[str, int, int | None]]] = {}
     for seed in sorted(model["nodes"]):
         doms = approved_domains(model, seed)
         if not doms:
             continue
-        picked: dict[str, tuple[str, int]] = {}
+        picked: dict[str, tuple[str, int, int | None]] = {}
         for d in doms:
             r = query.domain_lookup(model, d, seed)
-            for section, rows in r.get("sections", {}).items():
+            axes = r.get("axes") or {}
+            for rows in r.get("sections", {}).values():
                 for row in rows:
                     target = row["tag"]
                     if (target == seed or not row.get("insertable") or row.get("review_status") != "independent_pass"
                             or not keep(target)):
                         continue
-                    # 씨앗의 고정 사실과 어긋나는 줄(american flag panties -> white panties)은 빼고,
-                    # 조건 미확인(conditional)·조건 없음(candidate_only)만 권한다(Codex 검토 2026-09-26).
-                    if (row.get("applicability") or {}).get("status") == "inapplicable":
-                        continue
-                    got = classify(section, row.get("inherited_from") is None, seed, target, imp)
+                    got = classify(row)
                     if got is None:
                         continue
-                    prev = picked.get(target)
-                    if prev is None or TYPE_PRIORITY[got[0]] < TYPE_PRIORITY[prev[0]]:
-                        picked[target] = got
-                    elif prev[0] == got[0] and got[1] > prev[1]:
-                        picked[target] = got
+                    order = (axes.get(row.get("axis_id") or "") or {}).get("order") or []
+                    rank = order.index(target) if target in order else None
+                    cand = (got[0], got[1], rank)
+                    if _better(cand, picked.get(target)):
+                        picked[target] = cand
         if picked:
             out[seed] = picked
     return out
 
 
 def read_pair_stats(pairs_path: Path, wanted: dict[str, set[str]]) -> dict[tuple[str, str], tuple[int, float, float]]:
-    """Codex 가 잰 Full 모집단 공출현에서 필요한 (씨앗, 대상) 쌍만 뽑는다."""
+    """Codex 가 잰 Full 모집단 공출현에서 필요한 (씨앗, 대상) 쌍만 뽑는다. 쌍은 문자열 정렬 순서다."""
     stats: dict[tuple[str, str], tuple[int, float, float]] = {}
     with open(pairs_path, "r", encoding="utf-8") as fh:
         for line in fh:
@@ -220,38 +169,42 @@ def read_pair_stats(pairs_path: Path, wanted: dict[str, set[str]]) -> dict[tuple
     return stats
 
 
-def order_seed(seed: str, picked: dict[str, tuple[str, int]], stats, freq, per_type: int, min_support: int,
-               dropped: dict[str, int]) -> dict[str, list[list]]:
-    by_type: dict[str, list[tuple[str, int]]] = defaultdict(list)
-    for target, (kind, op) in picked.items():
-        by_type[kind].append((target, op))
+def order_seed(seed: str, picked: dict[str, tuple[str, int, int | None]], stats, freq, per_type: int,
+               min_support: int, counts: dict[str, int]) -> dict[str, list[list]]:
+    by_type: dict[str, list[tuple[str, int, int | None]]] = defaultdict(list)
+    for target, (kind, op, rank) in picked.items():
+        by_type[kind].append((target, op, rank))
     out: dict[str, list[list]] = {}
     for kind in TYPES:
         items = by_type.get(kind)
         if not items:
             continue
         if kind == "siblings":
-            ranked = sorted(items, key=lambda x: (-freq(x[0]), x[0]))
+            far = 1 << 30
+            ranked = [(t, op) for t, op, rank in sorted(
+                items, key=lambda x: (x[2] if x[2] is not None else far, -freq(x[0]), x[0]))]
         else:
             scored, rest = [], []
-            for target, op in items:
+            for target, op, _rank in items:
                 s = lift_score(stats.get((seed, target)), min_support)
-                if s is not None and s < 0 and op == 0:
-                    dropped["negative_lift"] += 1
-                    continue
-                (scored if s is not None and s >= 0 else rest).append((s or 0.0, target, op))
+                if s is not None and s >= 0:
+                    scored.append((s, target, op))
+                else:
+                    if s is not None:
+                        counts["negative_lift_demoted"] += 1
+                    rest.append((0.0, target, op))
             scored.sort(key=lambda x: (-x[0], -freq(x[1]), x[1]))
             rest.sort(key=lambda x: (-freq(x[1]), x[1]))
             ranked = [(t, op) for _, t, op in scored + rest]
         if not ranked:
             continue
         if len(ranked) > per_type:
-            dropped["truncated"] += len(ranked) - per_type
+            counts["truncated"] += len(ranked) - per_type
         out[kind] = [[t, op] for t, op in ranked[:per_type]]
     return out
 
 
-def build(catalog_dir: Path, implications_path: Path, per_type: int, min_support: int) -> dict:
+def build(catalog_dir: Path, per_type: int, min_support: int) -> dict:
     sys.path.insert(0, str(REPO))
     from core.kr_tag_loader import load_kr_tag_records
     from app.backend.server.prompt_tools_routes import _recommendable
@@ -264,24 +217,24 @@ def build(catalog_dir: Path, implications_path: Path, per_type: int, min_support
         return int((raw.get(tag) or {}).get("freq", 0) or 0)
 
     query, model = load_catalog(catalog_dir)
-    imp = Implications.from_parquet(implications_path)
-    candidates = collect_candidates(query, model, imp, keep)
-    wanted = {seed: {t for t, (kind, _) in picked.items() if kind != "siblings"} for seed, picked in candidates.items()}
+    candidates = collect_candidates(query, model, keep)
+    wanted = {seed: {t for t, (kind, _, _) in picked.items() if kind != "siblings"}
+              for seed, picked in candidates.items()}
     pairs_path = catalog_dir / "evidence" / "pairs.jsonl"
     stats = read_pair_stats(pairs_path, wanted)
-    dropped: dict[str, int] = defaultdict(int)
+    counts: dict[str, int] = defaultdict(int)
     seeds = {}
     for seed in sorted(candidates):
-        rows = order_seed(seed, candidates[seed], stats, freq, per_type, min_support, dropped)
+        rows = order_seed(seed, candidates[seed], stats, freq, per_type, min_support, counts)
         if rows:
             seeds[seed] = rows
-    counts = defaultdict(int)
+    by_type = defaultdict(int)
     replace = 0
     for rows in seeds.values():
         for kind, items in rows.items():
-            counts[kind] += len(items)
+            by_type[kind] += len(items)
             replace += sum(op for _, op in items)
-    catalog_sqlite = catalog_dir / "data" / "catalog.sqlite"
+    contract = catalog_dir / "product_contract" / "QUERY_CONTRACT.json"
     return {
         "schema": SCHEMA,
         "builder_version": BUILDER_VERSION,
@@ -290,23 +243,24 @@ def build(catalog_dir: Path, implications_path: Path, per_type: int, min_support
         "rules": {
             "per_type": per_type,
             "min_support": min_support,
-            "order": "siblings by post count; others by P(t|s) * min(log2 lift, 3), then post count",
-            "negative_lift_add_dropped": True,
-            "typing": "interim: catalog section + active Danbooru implication (Codex gap list 2026-09-26)",
-            "applicability": "inapplicable rows (conflict with the seed's known facts) are dropped",
+            "typing": "Codex product query contract: display_type -> row, edit_policy -> op; none/navigation dropped",
+            "applicability": "inapplicable rows dropped; conditional kept as a suggestion (the user clicks)",
+            "merge": "same target across domains: reviewed replace first, then row order",
+            "order": "siblings by reviewed axis order then post count; others by P(t|s) * min(log2 lift, 3), then post count",
+            "negative_lift": "demoted, not dropped",
         },
         "source": {
-            "catalog_sqlite_sha256": sha256_file(catalog_sqlite),
+            "catalog_sqlite_sha256": sha256_file(catalog_dir / "data" / "catalog.sqlite"),
             "pairs_jsonl_sha256": sha256_file(pairs_path),
-            "implications_sha256": sha256_file(implications_path),
+            "query_contract_sha256": sha256_file(contract),
         },
         "stats": {
             "seeds": len(seeds),
-            "items": sum(counts.values()),
-            "by_type": {k: counts[k] for k in TYPES},
+            "items": sum(by_type.values()),
+            "by_type": {k: by_type[k] for k in TYPES},
             "replace_items": replace,
             "pair_stats_used": len(stats),
-            "dropped": dict(sorted(dropped.items())),
+            "counts": dict(sorted(counts.items())),
         },
         "seeds": seeds,
     }
@@ -315,19 +269,18 @@ def build(catalog_dir: Path, implications_path: Path, per_type: int, min_support
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--catalog-dir", type=Path, default=DEFAULT_CATALOG_DIR)
-    ap.add_argument("--implications", type=Path, default=DEFAULT_IMPLICATIONS)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--per-type", type=int, default=16)
     ap.add_argument("--min-support", type=int, default=30)
     args = ap.parse_args(argv)
-    pack = build(args.catalog_dir, args.implications, args.per_type, args.min_support)
+    pack = build(args.catalog_dir, args.per_type, args.min_support)
     text = json.dumps(pack, ensure_ascii=False, separators=(",", ":"), sort_keys=False) + "\n"
     tmp = args.out.with_suffix(args.out.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8", newline="\n")
     os.replace(tmp, args.out)
     s = pack["stats"]
     print(f"wrote {args.out} ({len(text.encode('utf-8')) / 1e6:.2f} MB) seeds={s['seeds']} items={s['items']} "
-          f"by_type={s['by_type']} replace={s['replace_items']} dropped={s['dropped']}")
+          f"by_type={s['by_type']} replace={s['replace_items']} counts={s['counts']}")
     return 0
 
 

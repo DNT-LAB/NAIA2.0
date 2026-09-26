@@ -3,17 +3,18 @@
 //
 // 데이터는 백엔드가 관계 팩(tools/build_tag_relation_pack.py)에서 꺼내 `tag_lookup_result.recommend`
 // 로 싣는다. 메인 입력칸이 보낸 조회에만 온다 - 다른 칸(Search 창 등)의 카드는 그대로다.
-// 한 줄은 한 가지 일만 한다: Siblings·Variations 는 바꾸기(⇄), 나머지는 더하기(+).
-// 예외는 씨앗의 부정(no shirt · unworn hat)으로, 더하기 줄 안에서도 바꾸기다 - 칩마다 op 를 따른다.
+// 줄은 Codex 제품 계약의 display_type, 누르면 할 일은 칩마다의 edit_policy 다(2026-09-27):
+// ⇄ 칩 = 커서 태그를 바꾼다(검토된 같은 축 대안 · 부재 · 뜻을 품는 구체화), 나머지는 뒤에 더한다.
 
 export const RECOMMEND_TYPES = [
-  {key: 'siblings', label: 'Siblings', hint: '같은 층의 대안 - 누르면 바꿉니다'},
-  {key: 'variations', label: 'Variations', hint: '더 구체적인 것 - 누르면 바꿉니다'},
-  {key: 'attributes', label: 'Attributes', hint: '모양·색·무늬·특징 - 누르면 더합니다'},
-  {key: 'state', label: 'State', hint: '상태 - 누르면 더합니다'},
+  {key: 'siblings', label: 'Siblings', hint: '같은 축의 대안 - 누르면 지금 태그를 바꿉니다'},
+  {key: 'variations', label: 'Variations', hint: '더 구체적인 종류 - ⇄ 는 바꾸고 나머지는 더합니다'},
+  {key: 'companions', label: 'Companions', hint: '같이 쓰는 것 - 누르면 더합니다'},
+  {key: 'attributes', label: 'Attributes', hint: '모양·색·무늬·특징 - ⇄ 는 바꾸고 나머지는 더합니다'},
+  {key: 'state', label: 'State', hint: '상태 - ⇄ 는 바꾸고 나머지는 더합니다'},
   {key: 'action', label: 'Action', hint: '동작 - 누르면 더합니다'},
   {key: 'parts', label: 'Parts', hint: '부위 - 누르면 더합니다'},
-  {key: 'context', label: 'Context', hint: '맥락 - 누르면 더합니다'},
+  {key: 'context', label: 'Context', hint: '맥락 - ⇄ 는 바꾸고 나머지는 더합니다'},
 ];
 
 // 줄마다 처음 보이는 칩 수. 나머지는 [+N] 을 누르면 펼친다(카드가 화면을 덮지 않게).
@@ -65,8 +66,12 @@ export function recommendRowsHtml(groups, {present = new Set(), current = '', re
     if (group && typeof group.type === 'string' && Array.isArray(group.items)) byType.set(group.type, group.items);
   }
   const self = normalizePromptTag(current);
+  // 모르는 유형(팩이 새 줄을 더했다)도 버리지 않는다 - 아는 줄 뒤에 이름 그대로 그린다.
+  const known = new Set(RECOMMEND_TYPES.map(t => t.key));
+  const extra = [...byType.keys()].filter(key => !known.has(key) && /^[a-z_]+$/.test(key))
+    .map(key => ({key, label: key.charAt(0).toUpperCase() + key.slice(1), hint: ''}));
   let html = '';
-  for (const type of RECOMMEND_TYPES) {
+  for (const type of [...RECOMMEND_TYPES, ...extra]) {
     const items = (byType.get(type.key) || []).filter(item => {
       const key = normalizePromptTag(item?.tag);
       return key && key !== self && !present.has(key);

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
 from core.assist_candidates import GENERIC_NOUNS, Ask
+from core.assist_english import English, en_key, english_parts, put_english
 from core.assist_korean import KoreanAnalysis, NameHit, clean_text, compact
 
 TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
@@ -217,6 +218,8 @@ class TagVocab:
     role: Callable[[str], str | None] = lambda _t: None      # event_core / actor_state / population …
     keyword: Callable[[str], list[str]] = lambda _k: []      # 한국어 정확 키워드 -> 태그(게시물 순, 어휘에 있는 것)
     fuzzy: Callable[[str], list[str]] = lambda _k: []        # 한국어 퍼지 검색(Fast Search 태그 갈래) -> 태그
+    # 한국어 낱말 -> 사전이 가리키는 일반 태그 **전부**(묶음 이름도 — 고르기가 아니라 '이 말이 그 태그인가' 확인용)
+    senses: Callable[[str], list[str]] = lambda _k: []
 
 
 def en_variants(term: str, *, verb: bool = True) -> list[str]:
@@ -315,6 +318,7 @@ class Merged:
     name_ko: str
     log: list[str]
     sentence: str = ""              # 다듬기 도구의 장면 문장(core/assist_refine) — 메인 끝에 붙는다
+    english: English = field(default_factory=English)   # 요청에 섞어 쓴 영문 — 적힌 그대로 싣는다(core/assist_english)
 
     def ordered(self, count: Callable[[str], int]) -> list[str]:
         """이벤트 맵에 꽂을 순서: 층 순서 -> 각 층 안에서 게시물 많은 순(깊이 확보, 사용자 지정)."""
@@ -346,6 +350,8 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     blocked, covers = set(ka.blocked), set(ka.covers)
     req_lemmas = ka.lemmas()
     req_compact = compact(clean_text(text))
+    english = english_parts(text)               # 사용자가 섞어 쓴 영문 — 적힌 그대로 싣는다(compose, 09-26)
+    typed_keys = {en_key(p) for p in english.keep + english.exclude}
     log: list[str] = []
     asks: list[Ask] = []
     t1: list[str] = [t for t in ka.specific if t not in blocked and not _junk_tag(t)]
@@ -381,6 +387,11 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         words = str(ko).split()
         if len(words) > 1 and all(grounded(w) for w in words):
             return True
+        # 사용자가 영문으로 적은 말을 모델이 한국어로 옮겨 적은 낱말 — 사전이 그 낱말을 적은 영문 태그로 이어 주면 요청에
+        # 있는 것으로 본다('빨간 dress' 의 모델 항목 '빨간 드레스' -> red dress 가 '요청에 없음' 으로 빠졌다, 09-26).
+        # keyword 는 12개 넘게 가리키는 말(드레스)을 묶음 이름으로 버린다 — 확인에는 전부(senses)를 본다
+        if typed_keys and any(en_key(t) in typed_keys for t in vocab.senses(ko)):
+            return True
         # 글자 비교가 놓친 활용·보조 용언(누워 있기 · 부끄러워하는)은 Kiwi 원형으로 한 번 더 — 원래 받던 것은 그대로 받는다
         # (원형 비교만 쓰면 모델의 '반가워하다' 를 Kiwi 가 요청과 다르게 쪼개 happy 가 떨어졌다, 재생 09-24).
         api = getattr(ka, "grounded", None)
@@ -406,6 +417,13 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         ko = str(item.get("ko") or "").strip()
         if _PEOPLE_EN.match(en):
             return []
+        if english.typed(en):
+            # 사용자가 영문으로 적은 말 — 모델은 ko 를 한국어로 옮겨 적어(crying -> 울기) 아래 '요청에 없음' 에 걸렸다(09-26).
+            # 한국어 검사를 거치지 않는다: 태그 이름 그대로면 싣고(인물 번호 · 제외 칸은 모델이 가른 대로), 아니면 적힌
+            # 그대로(compose)가 맡는다
+            name = exact_english(en, vocab, verb=False)
+            log.append(f"bypass:{en}" + (f"->{name}" if name and name != en else "" if name else "(그대로)"))
+            return [name] if name else []
         if any(p in ko for p in similes) or re.search(r"\blike\b", en):
             log.append(f"drop:{en}(비유)")
             return []
@@ -532,6 +550,14 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             for tag in resolve_english(m.group(1) or m.group(2), vocab):
                 if tag not in exclude:
                     exclude.append(tag)
+    # 영문 제외(hat 빼고) — 모델이 제외 칸에 안 적었거나 ko 를 옮겨 적어 버려졌어도 뺀다(맵 이름이 있으면 그 이름으로)
+    for part in english.exclude:
+        tag = exact_english(en_key(part), vocab, verb=False) or part
+        if tag not in exclude:
+            exclude.append(tag)
+    # 싣겠다고 적은 영문은 제외에서 푼다 — 모델이 제외 칸에 잘못 옮겨 적은 것(빼라는 말은 없었다)
+    wanted = {en_key(p) for p in english.keep}
+    exclude[:] = [t for t in exclude if en_key(t) not in wanted]
     for tier in (t1, t2, t3):
         tier[:] = [t for t in tier if t not in exclude]
 
@@ -558,11 +584,13 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
                     break
         if src and dst and act:
             relations.append((src.tag, act, dst.tag))
-    # 요청에 동사가 있으면(서서 밖을 보는) 행동이 있는 것 — 랜덤 행동을 덧붙이지 않는다
-    has_action = any(vocab.role(t) == "event_core" for t in t1 + t2) or bool(relations) or bool(ka.verb_tags)
+    # 요청에 동사가 있으면(서서 밖을 보는) 행동이 있는 것 — 랜덤 행동을 덧붙이지 않는다. 영문으로 적은 동작(running)도
+    typed = [exact_english(en_key(p), vocab, verb=False) for p in english.keep]
+    has_action = (any(vocab.role(t) == "event_core" for t in t1 + t2) or bool(relations) or bool(ka.verb_tags)
+                  or any(t and vocab.role(t) == "event_core" for t in typed))
     return Merged(task=route.get("task", "other"), goal=route.get("goal", "find"), tiers=(t1, t2, t3),
                   exclude=exclude, characters=characters, relations=relations, has_action=has_action,
-                  name=route.get("name", ""), name_ko=route.get("name_ko", ""), log=log)
+                  name=route.get("name", ""), name_ko=route.get("name_ko", ""), log=log, english=english)
 
 
 def off_rating(tags: Iterable[str], share: Callable[[str], float | None], min_share: float) -> dict[str, float]:
@@ -615,25 +643,32 @@ def _with_sentence(main: str, sentence: str) -> str:
 
 def compose(merged: Merged, *, pins: list[str], leftovers: list[str], actions: list[str], partition: str,
             api_mode: str) -> dict[str, Any]:
-    """최종 프롬프트. NAI 는 메인 + 캐릭터 칸(이름·그 인물 속성·source#/target#), 그 밖은 한 줄. 다듬기 문장은 메인 끝."""
+    """최종 프롬프트. NAI 는 메인 + 캐릭터 칸(이름·그 인물 속성·source#/target#), 그 밖은 한 줄. 다듬기 문장은 메인 끝.
+    사용자가 섞어 쓴 영문은 적힌 그대로(09-26) — 같은 태그가 이미 있으면 그 자리를 사용자 표기로, 없으면 인원·이름 뒤에."""
     people = PERSON_TAGS.get(partition, [])
     char_attrs = {a for c in merged.characters for a in c.attrs}
     scene = [t for t in dict.fromkeys(pins + actions + leftovers) if t not in char_attrs]
+    taken = people + [c.tag for c in merged.characters] + [c.ko for c in merged.characters]
     if str(api_mode or "").upper() == "NAI" and merged.characters:
-        chars = []
+        bags = []
         for c in merged.characters:
-            parts = [c.tag] + c.attrs
+            parts = [c.tag] + list(c.attrs)
             for src, act, dst in merged.relations:
                 if c.tag == src:
                     parts.append(f"source#{act}")
                 if c.tag == dst:
                     parts.append(f"target#{act}")
-            chars.append({"prompt": ", ".join(dict.fromkeys(parts)), "ko": c.ko, "alts": c.alts})
-        return {"main": _with_sentence(", ".join(people + scene), merged.sentence), "characters": chars}
+            bags.append(parts)
+        typed = put_english(merged.english.keep, [scene, *bags], taken=taken)
+        chars = [{"prompt": ", ".join(dict.fromkeys(parts)), "ko": c.ko, "alts": c.alts}
+                 for c, parts in zip(merged.characters, bags)]
+        return {"main": _with_sentence(", ".join(dict.fromkeys(people + typed + scene)), merged.sentence),
+                "characters": chars}
     names = [c.tag for c in merged.characters]
     attrs = [a for c in merged.characters for a in c.attrs]
     rel = [act for _s, act, _d in merged.relations]
-    line = list(dict.fromkeys(people + names + scene + attrs + rel))
+    typed = put_english(merged.english.keep, [scene, attrs, rel], taken=taken)
+    line = list(dict.fromkeys(people + names + typed + scene + attrs + rel))
     return {"main": _with_sentence(", ".join(line), merged.sentence), "characters": []}
 
 

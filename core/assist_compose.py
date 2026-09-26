@@ -600,17 +600,23 @@ class Relation:
 
 
 def assemble(*, people: list[str], characters: list[ComposeCharacter], relation: Relation | None,
-             details: list[Detail], info: Callable[[str], dict[str, Any]] = lambda _t: {}) -> dict[str, Any]:
-    """메인 = 인원 + 동작 + 장면 것(바닥의 신발 포함). 캐릭터 = girl/boy · 이름 · 작품 · 외모 · source#/target# · 그 사람 것."""
-    main: list[str] = list(people)
+             details: list[Detail], info: Callable[[str], dict[str, Any]] = lambda _t: {},
+             extra: dict[int, list[str]] | None = None) -> dict[str, Any]:
+    """메인 = 인원 + 동작 + 장면 것(바닥의 신발 포함). 캐릭터 = girl/boy · 이름 · 작품 · 외모 · source#/target# · 그 사람 것.
+    extra = 줄마다 사용자가 적은 영문(0 = 장면 줄, core/assist_english) — 적힌 그대로 싣는다(09-26): 같은 태그가 그 줄의
+    칸(캐릭터 줄은 메인까지)에 이미 있으면 그 자리를 사용자 표기로, 없으면 그 줄의 칸 머리(인원 · 이름 뒤)에."""
+    from core.assist_english import put_english
+
+    head: list[str] = list(people)
     if relation is not None:
-        main.append(relation.action)
+        head.append(relation.action)
+    main: list[str] = []
     per: dict[int, list[str]] = {k: [] for k in range(1, len(characters) + 1)}
     for d in details:
         for tag in d.tags:
             where = place_of(tag, d.owner, info(tag))
             (main if where == 0 or where not in per else per[where]).append(tag)
-    out_chars = []
+    heads: dict[int, list[str]] = {}
     for k, ch in enumerate(characters, 1):
         parts = [p for p in ([ch.gender] if ch.gender in ("girl", "boy") else []) + [ch.tag] if p]
         if ch.work:
@@ -621,10 +627,19 @@ def assemble(*, people: list[str], characters: list[ComposeCharacter], relation:
                 parts.append(f"source#{relation.action}")
             if relation.target == k:
                 parts.append(f"target#{relation.action}")
-        parts += per.get(k, [])
+        heads[k] = parts
+    typed: dict[int, list[str]] = {k: [] for k in [0, *per]}
+    names = [p for ch in characters for p in (ch.tag, ch.ko) if p]      # 영문으로 적은 캐릭터 이름은 캐릭터 칸이 말한다
+    for k, parts in sorted((extra or {}).items()):
+        k = k if k in per else 0
+        bags = [per[k], main] if k else [main, *per.values()]
+        typed[k] += put_english(parts, bags, taken=head + names + (heads[k] if k else []))
+    out_chars = []
+    for k, ch in enumerate(characters, 1):
+        parts = heads[k] + typed[k] + per[k]
         out_chars.append({"prompt": ", ".join(dict.fromkeys(p for p in parts if p)), "ko": ch.ko,
                           "alts": list(ch.alts)})
-    return {"main": ", ".join(dict.fromkeys(t for t in main if t)), "characters": out_chars}
+    return {"main": ", ".join(dict.fromkeys(t for t in head + typed[0] + main if t)), "characters": out_chars}
 
 
 # ── 설명(틀) ─────────────────────────────────────────────────────────────

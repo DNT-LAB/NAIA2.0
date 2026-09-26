@@ -129,6 +129,7 @@ def _tag_exists_fn(context: Any, raw: dict[str, Any]):
 
 def _tag_vocab(context: Any, layer: Any) -> Any:
     from app.backend.server.autocomplete_commands import _ensure_kr_raw, search_kr_tags
+    from core.assist_korean import compact
     from core.assist_v2 import TagVocab
 
     def fuzzy(ko: str) -> list[str]:
@@ -136,6 +137,10 @@ def _tag_vocab(context: Any, layer: Any) -> Any:
             return [str(r.get("tag")) for r in search_kr_tags(context, ko, limit=5) if r.get("tag")]
         except Exception:
             return []
+
+    def senses(ko: str) -> list[str]:
+        # 사전의 그 말이 가리키는 일반 태그 전부 — 영문으로 적은 말의 한국어 옮김인가 확인용(core/assist_v2.merge)
+        return [name for name, _n, cat in layer.vocab.keywords.get(compact(ko), []) if not cat]
 
     try:
         idx = _event_map(context).index()
@@ -148,7 +153,7 @@ def _tag_vocab(context: Any, layer: Any) -> Any:
             except (TypeError, ValueError):
                 return 0
         return TagVocab(canonical=lambda t: t if t in raw else None, count=freq, keyword=layer.vocab.scene_tags,
-                        fuzzy=fuzzy)
+                        fuzzy=fuzzy, senses=senses)
 
     def canonical(tag: str) -> str | None:
         tid = idx.resolve(tag)
@@ -162,7 +167,8 @@ def _tag_vocab(context: Any, layer: Any) -> Any:
         tid = idx.resolve(tag)
         return idx.role.get(tid) if tid is not None else None
 
-    return TagVocab(canonical=canonical, count=count, role=role, keyword=layer.vocab.scene_tags, fuzzy=fuzzy)
+    return TagVocab(canonical=canonical, count=count, role=role, keyword=layer.vocab.scene_tags, fuzzy=fuzzy,
+                    senses=senses)
 
 
 def warm_assist(context: Any) -> None:
@@ -414,6 +420,7 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     - 더하기: 태그 이름 그대로이고 사전이 요청과 이어 주는 것만(잡동사니 · 인원 · 제외 칸 · 등급 게이트도 지나야).
     - 문장은 메인 끝에(compose) — 분위기는 문장이 맡는다. 실패하면 다듬지 않고 간다."""
     from core import assist_refine as ar
+    from core.assist_english import en_key
     from core.assist_v2 import _junk_tag, drop_tags, exact_english
 
     tags = merged.all_tags()
@@ -425,7 +432,8 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     if got is None:
         return None, info
     grounded = _grounded_tags(context, layer, req["text"])
-    protected = grounded | set(ka.specific) | set(ka.verb_tags)
+    typed = merged.english.keys()                    # 사용자가 영문으로 적은 것 — 빼지 않고, 이미 실리니 더하지 않는다
+    protected = grounded | set(ka.specific) | set(ka.verb_tags) | {t for t in tags if en_key(t) in typed}
     # 자기 일관성: 모델이 제 문장에서 말한 태그는 빼지 않는다(밤바다 -> night 를 빼며 'at night')
     removed = [t for t in got.remove if t in tags and t not in protected and not ar.mentions(t, got.sentence)]
     kept = [t for t in got.remove if t in tags and t not in removed]
@@ -436,7 +444,7 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     for tag in got.add:
         name = exact_english(tag, vocab)
         if (not name or _junk_tag(name) or vocab.role(name) == "population" or name in merged.all_tags()
-                or name in merged.exclude or name in added or name in removed):
+                or name in merged.exclude or name in added or name in removed or en_key(name) in typed):
             continue
         if name not in grounded or not ar.mentions(name, got.sentence):
             refused.append(name)            # 사전이 요청과 안 이어 주거나(finger heart) 제 문장에 없는 것(close-up)
@@ -713,6 +721,7 @@ def _fallback_route(ka: Any) -> dict[str, Any]:
 
 
 def run_assist(context: Any, payload: Any) -> dict[str, Any]:
+    from core.assist_english import en_key
     from core.assist_v2 import GUIDE, drop_tags, make_recap, merge, off_rating
 
     started = time.perf_counter()
@@ -749,12 +758,17 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                    not_names=list(rules["not_names"]) + req["not_names"], poses=rules["poses"],
                    generic_roles={w for group in rules.get("people", {}).values() for w in group},
                    roles_for=lambda names: layer.roles_for(ka, names), chooser=chooser)
+    if merged.task == "other" and merged.english.keep:
+        merged.task = "scene"                    # 영문 태그만 적은 요청(1girl, crying, prison cell) — 장면으로 싣는다(09-26)
+        merged.log.append("task:scene(영문)")
     t_sense = time.perf_counter()
     _sense_check(context, layer, ka, merged, vocab)
     sense_ms = round((time.perf_counter() - t_sense) * 1000, 1)
     share = _rating_share(context, req["rating"])
-    dropped = off_rating(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
-                         + [r[1] for r in merged.relations], share, RATING_GATE[req["rating"]]) if share else {}
+    typed = merged.english.keys()                # 사용자가 영문으로 적은 것은 적힌 그대로 — 등급 게이트도 거치지 않는다
+    gated = [t for t in merged.all_tags() + [a for c in merged.characters for a in c.attrs]
+             + [r[1] for r in merged.relations] if en_key(t) not in typed]
+    dropped = off_rating(gated, share, RATING_GATE[req["rating"]]) if share else {}
     drop_tags(merged, dropped)
     refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka)
                            if req["refine"] and merged.task == "scene" else (None, {}))
@@ -768,6 +782,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         "model": model,
         "literal": literal,
         "refine": refine,
+        # 요청에 섞어 쓴 영문 — 적힌 그대로 실었다(keep) · 뺐다(exclude) · 인원으로 셌다(people)
+        "english": {"keep": merged.english.keep, "exclude": merged.english.exclude, "people": merged.english.people},
         "trace": {"korean": ka.notes, "merge": merged.log,
                   "route": {k: v for k, v in route.items() if v not in ("", [], None)},
                   "choose": choose_state},
@@ -794,6 +810,21 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     return out
 
 
+def _english_people(pc: Any, people: list[str]) -> None:
+    """영문 인원 태그(2girls · 1boy · solo)를 적었으면 그 수를 받는다 — 성별마다 큰 쪽(소녀와 1boy -> 1girl, 1boy).
+    인원 태그는 적힌 그대로 싣지 않는다 — 인원 칸이 구획으로 싣는다(1girl, solo 가 두 번 나오지 않게)."""
+    from core.assist_english import people_count
+    from core.assist_korean import partition_of
+
+    if not people:
+        return
+    g, b, solo = people_count(people)
+    pc.girls, pc.boys, pc.solo = max(pc.girls, g), max(pc.boys, b), pc.solo or solo
+    pc.partition = partition_of(pc.girls, pc.boys, pc.solo or pc.girls + pc.boys + pc.unknown == 1)
+    pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
+    pc.notes.append("영문:" + ",".join(people))
+
+
 def _persons(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> dict[str, Any]:
     from core.assist_korean import PersonCount, partition_of
 
@@ -803,16 +834,24 @@ def _persons(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> dict[str,
         return {"mode": "manual", "partition": pc.partition, "girls": g, "boys": b, "unknown": 0,
                 "confirm": False, "notes": [], "param": pc.persons_param()}
     pc = layer.count_persons(ka, approved={c.ko: c.gender for c in merged.characters}, not_names=req["not_names"])
+    _english_people(pc, merged.english.people)
     return {"mode": "auto", "partition": pc.partition, "girls": pc.girls, "boys": pc.boys, "unknown": pc.unknown,
             "confirm": pc.confirm, "notes": pc.notes, "param": pc.persons_param()}
 
 
 def _scene(context: Any, layer: Any, ka: Any, merged: Any, req: dict[str, Any], vocab: Any) -> dict[str, Any]:
-    from core.assist_v2 import compose
+    from core.assist_english import en_key
+    from core.assist_v2 import compose, exact_english
 
     persons = _persons(layer, ka, merged, req)
     out: dict[str, Any] = {"persons": persons}
     candidates = merged.ordered(vocab.count)
+    # 영문으로 적은 태그(full body)도 풀에 꽂아 본다 — 한국어 쪽 뒤에(장면의 뼈대는 한국어 요청이다, 09-26).
+    # 못 꽂혀도 프롬프트에는 적힌 그대로 실린다(compose)
+    for part in merged.english.keep:
+        tag = exact_english(en_key(part), vocab, verb=False)
+        if tag and tag not in candidates and tag not in merged.exclude:
+            candidates.append(tag)
     if not candidates:
         out["message"] = "요청에서 장면 태그를 찾지 못했습니다. 조금 더 구체적으로 적어 주세요."
         out["prompt"] = compose(merged, pins=[], leftovers=[], actions=[], partition=persons["partition"],
@@ -835,7 +874,7 @@ def _scene(context: Any, layer: Any, ka: Any, merged: Any, req: dict[str, Any], 
             rows = s.get("samples") or []
             samples = [{"tags": r.get("tags") or [], "prompt": r.get("prompt") or ""} for r in rows[:3]]
             if not merged.has_action:
-                actions = _sample_actions(service, rows, set(merged.all_tags()), layer.rules)
+                actions = _sample_actions(service, rows, set(merged.all_tags()) | set(candidates), layer.rules)
         except Exception:
             pass
     out.update({
@@ -1039,8 +1078,8 @@ def _compose_relation(layer: Any, vocab: Any, rules: dict[str, Any], segs: list[
     return None
 
 
-def _compose_persons(req: dict[str, Any], chars: list[Any]) -> dict[str, Any]:
-    """구성 요청의 인원 = 캐릭터 줄의 사람들(성별은 캐릭터 분석). 수동이면 그대로."""
+def _compose_persons(req: dict[str, Any], chars: list[Any], people: list[str] = ()) -> dict[str, Any]:
+    """구성 요청의 인원 = 캐릭터 줄의 사람들(성별은 캐릭터 분석). 수동이면 그대로. people = 줄에 적은 영문 인원 태그."""
     from core.assist_korean import PersonCount, partition_of
 
     if req["persons"]["mode"] == "manual":
@@ -1052,8 +1091,9 @@ def _compose_persons(req: dict[str, Any], chars: list[Any]) -> dict[str, Any]:
     boys = sum(1 for c in chars if c.gender == "boy")
     unknown = len(chars) - girls - boys
     pc = PersonCount(girls=girls, boys=boys, unknown=unknown, partition=partition_of(girls, boys, len(chars) == 1))
-    return {"mode": "auto", "partition": pc.partition, "girls": girls, "boys": boys, "unknown": unknown,
-            "confirm": bool(unknown) or pc.partition == "unknown", "notes": [], "param": pc.persons_param()}
+    _english_people(pc, list(people))
+    return {"mode": "auto", "partition": pc.partition, "girls": pc.girls, "boys": pc.boys, "unknown": unknown,
+            "confirm": bool(unknown) or pc.partition == "unknown", "notes": pc.notes, "param": pc.persons_param()}
 
 
 def _compose_evidence(context: Any, relation: Any, details: list[Any], req: dict[str, Any],
@@ -1103,8 +1143,10 @@ def _first_name(layer: Any, text: str) -> str:
 
 
 def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float) -> dict[str, Any]:
-    """여러 줄 요청 -> 메인·캐릭터 프롬프트 + 설명. 모델이 없으면 한국어 근거만으로(못 찾은 절은 설명에 남긴다)."""
+    """여러 줄 요청 -> 메인·캐릭터 프롬프트 + 설명. 모델이 없으면 한국어 근거만으로(못 찾은 절은 설명에 남긴다).
+    줄에 섞어 쓴 영문은 그 줄의 칸에 적힌 그대로 싣는다(core/assist_english, 09-26)."""
     from core import assist_compose as ac
+    from core.assist_english import en_key, english_only, english_parts
     from core.assist_korean import compact
     from core.assist_v2 import PERSON_TAGS, off_rating
 
@@ -1146,6 +1188,10 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
             if len(compact(clause)) >= 2:
                 details.append(ac.Detail(owner=seg.index, ko=clause, en=""))
     details = details[:ac.MAX_CLAUSES]
+    # 줄마다 적은 영문 — 인원 태그는 인원으로, 빼라고 적은 것은 태그에서 빼고, 나머지는 그 줄의 칸에 적힌 그대로
+    english = {seg.index: english_parts(seg.body) for seg in segs}
+    typed = {k for e in english.values() for k in e.keys()}
+    unwanted = {en_key(p) for e in english.values() for p in e.exclude}
     korean_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     model: dict[str, Any] = {}
@@ -1168,7 +1214,8 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     for d in subs:
         d.candidates = finder.rank(d.ko, d.en)
         if pre_share:
-            off = off_rating([c.tag for c in d.candidates], pre_share, RATING_GATE[req["rating"]])
+            off = off_rating([c.tag for c in d.candidates if en_key(c.tag) not in typed], pre_share,
+                             RATING_GATE[req["rating"]])            # 영문으로 적은 것은 등급 게이트를 거치지 않는다
             if off:
                 pre_dropped.update(off)
                 if d.candidates[0].tag in off:
@@ -1199,22 +1246,25 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
             ac.add_viewer(d, layer.analyze(d.ko).viewer)
     ac.dedupe(subs, relation, chars, tools.info)
     share = _rating_share(context, req["rating"])
-    dropped = off_rating([t for d in subs for t in d.tags] + ([relation.action] if relation is not None else []),
-                         share, RATING_GATE[req["rating"]]) if share else {}
+    gated = [t for d in subs for t in d.tags] + ([relation.action] if relation is not None else [])
+    dropped = (off_rating([t for t in gated if en_key(t) not in typed], share, RATING_GATE[req["rating"]])
+               if share else {})
     for d in subs:
-        d.tags = [t for t in d.tags if t not in dropped]
+        d.tags = [t for t in d.tags if t not in dropped and en_key(t) not in unwanted]
     if relation is not None and relation.action in dropped:
         relation = None
     dropped = {**top_dropped, **dropped}
 
-    persons = _compose_persons(req, chars)
+    persons = _compose_persons(req, chars, [p for e in english.values() for p in e.people])
     prompt = ac.assemble(people=PERSON_TAGS.get(persons["partition"], []), characters=chars, relation=relation,
-                         details=subs, info=tools.info)
+                         details=subs, info=tools.info, extra={k: e.keep for k, e in english.items() if e.keep})
     t1 = time.perf_counter()
     evidence, pool, samples = _compose_evidence(context, relation, subs, req, persons)
     explain = ac.explain(characters=chars, relation=relation, details=subs, count=tools.count, info=tools.info,
                          cooccur=evidence.get("with"), anchor_posts=int(evidence.get("anchor_posts") or 0),
                          keyword_tags=tools.keyword_tags)
+    # 영문만 적은 절(masterpiece)은 적힌 그대로 실렸다 — '못 찾음' 으로 알리지 않는다
+    explain["missed"] = [m for m in explain.get("missed") or [] if not english_only(m.get("ko"))]
     out: dict[str, Any] = {
         "ok": True, "task": "scene", "goal": "how", "mode": "compose", "rating": req["rating"],
         "names": _names_out(layer, [c for c in chars if c.tag], refused),
@@ -1226,6 +1276,8 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
                       else []),
         "persons": persons, "prompt": prompt, "explain": explain, "pool": pool, "samples": samples,
         "model": model,
+        "english": {key: list(dict.fromkeys(p for e in english.values() for p in getattr(e, key)))
+                    for key in ("keep", "exclude", "people")},
         "trace": {"details": [{"who": d.owner, "ko": d.ko, "en": d.en, "tags": d.tags, "via": d.via,
                                "top": [(c.tag, round(c.score, 2)) for c in d.candidates[:3]]} for d in subs],
                   "rating_pre_dropped": pre_dropped},

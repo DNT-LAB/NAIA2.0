@@ -831,7 +831,7 @@ class KoreanLayer:
         phrase_nouns: set[str] = set()
         for span in analysis.phrases:          # '공주 안기' 의 공주는 사람이 아니다
             for form, tag in toks:
-                if tag in NOUN_TAGS and form in span and span != compact(form):
+                if tag in NOUN_TAGS and form in span and span != compact(form) and not self._heads_phrase(span, form):
                     phrase_nouns.add(form)
         pc.solo = any(f in self.rules["solo_words"] for f, _t in toks)
         for form, gender in named:
@@ -843,9 +843,10 @@ class KoreanLayer:
                 pc.unknown += 1
             pc.notes.append(f"{form}x1:{gender or 'unknown'}")
         seen: set[str] = set()
+        merged: set[int] = set()
         last_group = -9
         for i, (form, tag) in enumerate(toks):
-            if tag not in NOUN_TAGS or form in seen or form in phrase_nouns:
+            if tag not in NOUN_TAGS or form in seen or form in phrase_nouns or i in merged:
                 continue
             if any(compact(form) in name for name, _g in named):
                 continue                               # 고른 캐릭터 이름의 토막(하츠네 미쿠의 미쿠)
@@ -862,28 +863,71 @@ class KoreanLayer:
                 last_group = i
                 pc.notes.append(f"{form}={gg}g{bb}b")
                 continue
-            gender = None
-            if form in self._female:
-                gender = "girl"
-            elif form in self._male:
-                gender = "boy"
-            elif form in self._neutral:
-                gender = "unknown"                     # 사람 · 친구 — 캐릭터 이름이기도 하면 사용자가 고른다(위)
+            gender = self._person_gender(form)         # 사람 · 친구(unknown) — 캐릭터 이름이기도 하면 사용자가 고른다(위)
             if gender is None:
                 continue                               # 자동으로 찾은 이름은 사람이 아니다(고르기 전)
             seen.add(form)
-            n = self._count_near(toks, i) or 1
+            head = i
+            nxt_form, nxt_tag = toks[i + 1] if i + 1 < len(toks) else ("", "")
+            other = self._person_gender(nxt_form) if nxt_tag in NOUN_TAGS and nxt_form not in phrase_nouns else None
+            if other is not None and (other == gender or "unknown" in (other, gender)):
+                # 바로 붙은 사람 낱말 둘은 한 사람(메이드 소녀 · 남자 아이 · 여자 친구) — 성별이 다르면(소년 소녀) 둘
+                gender = gender if other == "unknown" else other
+                head = i + 1
+                merged.add(head)
+                seen.add(nxt_form)
+            n = self._count_near(toks, head) or self._count_near(toks, i) or 1
             if gender == "girl":
                 pc.girls += n
             elif gender == "boy":
                 pc.boys += n
             else:
                 pc.unknown += n
-            pc.notes.append(f"{form}x{n}:{gender}")
+            pc.notes.append(f"{form}{'+' + nxt_form if head != i else ''}x{n}:{gender}")
         total = pc.girls + pc.boys + pc.unknown
         pc.partition = partition_of(pc.girls, pc.boys, pc.solo or total == 1)
         pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
         return pc
+
+    # 사람 낱말 뒤에 붙어 나오는 조사 — Kiwi 가 '마법소녀와' 를 명사 하나로 낸다(09-26)
+    _PERSON_PARTICLES = ("이랑", "하고", "에게", "한테", "와", "과", "랑", "의", "가", "이", "는", "은", "를", "을", "도",
+                         "만", "께")
+    # 사람 낱말로 끝나도 사람이 아니거나 성별이 없는 말
+    _NOT_PERSON_COMPOUNDS = frozenset({"청소년"})
+
+    def _person_gender(self, form: str) -> str | None:
+        """사람 낱말 -> girl | boy | unknown, 아니면 None. 규칙표 낱말 그대로 + 사람 낱말로 **끝나는** 합성어(마법소녀 ·
+        고양이소녀 · 여자아이 — Kiwi 가 한 토큰으로 낸다). 끝이 성별 없는 낱말(아이 · 친구)이면 앞의 성별 낱말로(여자아이),
+        그것도 없으면 사람으로 보지 않는다(레드아이). 앞에만 붙은 것(여성복 · 소년만화)은 사람이 아니다.
+        붙은 조사(마법소녀와)는 떼고 본다. 한 글자 낱말(형 · 왕 · 딸)은 합성어 끝으로 보지 않는다(모형 · 구형)."""
+        stripped = [form[:-len(p)] for p in self._PERSON_PARTICLES if form.endswith(p) and len(form) > len(p) + 1]
+        for base in (form, *stripped):
+            if base in self._female:
+                return "girl"
+            if base in self._male:
+                return "boy"
+            if base in self._neutral:
+                return "unknown"
+            if base in self._NOT_PERSON_COMPOUNDS:
+                return None
+            for words, gender in ((self._female, "girl"), (self._male, "boy")):
+                if any(len(w) >= 2 and len(base) > len(w) and base.endswith(w) for w in words):
+                    return gender
+            if any(len(w) >= 2 and len(base) > len(w) and base.endswith(w) for w in self._neutral):
+                for words, gender in ((self._female, "girl"), (self._male, "boy")):
+                    if any(len(w) >= 2 and base.startswith(w) for w in words):
+                        return gender
+        return None
+
+    def _heads_phrase(self, span: str, form: str) -> bool:
+        """사전 구의 머리(끝)가 이 사람 낱말인가 — 마법소녀 · 고양이소녀 의 소녀는 사람이다(공주안기 의 공주는 아니다).
+        뒤에 수만 붙은 것(여자둘 -> 2girls)도 사람이다."""
+        key = compact(form)
+        if not key or self._person_gender(form) is None or key not in span:
+            return False
+        rest = span[span.rfind(key) + len(key):]
+        return not rest or rest in self._numerals or re.fullmatch(r"\d*명|\d+", rest) is not None \
+            or (rest.endswith("명") and rest[:-1] in self._numerals)
 
     def _count_near(self, toks: list[tuple[str, str]], i: int) -> int | None:
         """앞쪽(두 소녀·세 명의 소녀·2명의 소녀) 또는 뒤쪽(소녀 둘·소녀 두 명·소녀들) 수."""

@@ -32,8 +32,8 @@ const STYLE = `
 #setupLlmSection .llm-badge.no { background: rgba(240,64,64,0.16); color: #f07070; }
 #setupLlmSection .llm-detail { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
 #setupLlmSection .llm-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
-#setupLlmSection select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-dim);
-  border-radius: 6px; padding: 5px 8px; font-size: 12px; max-width: 100%; }
+/* GPU 고르기 = 설정 창 입력칸과 같은 콤보박스(select.setup-input -> customSelects 의 custom-setup-input). 줄을 다 먹지 않게. */
+#setupLlmSection .llm-row .custom-select { flex: 1 1 260px; max-width: 440px; }
 `;
 
 export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bind(window), showToast = () => {},
@@ -48,6 +48,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
   let userPicked = false;  // 사람이 눌러 고른 것인가 — 아니면 모드가 바뀔 때 그 모드의 권장을 따라간다
   let pollTimer = 0;
   let busy = false;        // 요청 보내는 중(버튼 연타 막기)
+  let drawn = '';          // 마지막으로 그린 입력(상태 + 고른 모델) — 같으면 다시 그리지 않는다
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -131,6 +132,10 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     if (!st || !elBody) return;
     if (elStatus) elStatus.textContent = headline();
     paintNav();
+    // 4초마다 오는 같은 상태로 칸을 갈아엎지 않는다 — 열어 둔 콤보박스 메뉴가 닫히고 커스텀 콤보박스가 다시 만들어졌다.
+    const key = JSON.stringify([st, picked]);
+    if (key === drawn && elBody.childElementCount) return;
+    drawn = key;
     const hw = st.hardware || {};
     const models = st.models || [];
     const mode = st.mode === 'gpu' ? 'gpu' : 'cpu';
@@ -149,18 +154,24 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       if (eng.error) parts.push(`<div class="setup-result error">${esc(eng.error)}</div>`);
     }
 
-    // [CPU 모드 | GPU 모드] — GPU 가 없으면 GPU 모드는 못 고른다. GPU 가 여럿이면 GPU 모드에서 어느 것인지 고른다.
+    // [CPU 모드 | GPU 모드] — GPU 가 없으면 GPU 모드는 못 고른다. GPU 가 여럿이면 GPU 모드에서 어느 것인지 제 줄에서 고른다
+    // (NAIA 표준 콤보박스 — select.setup-input 을 customSelects 가 custom-setup-input 으로 바꿔 그린다).
     const gpus = hw.gpus || [];
+    const gpuLabel = g => `${g.name}${g.kind === 'discrete' ? ` · ${gb(g.vram_mib)}` : ' · 내장'}`;
+    const autoGpu = gpus.find(g => g.id === st.gpu_device_auto);
     parts.push(`<div class="llm-row"><span class="llm-label">모드</span><span class="llm-seg">
       <button type="button" data-llm-mode="cpu" class="${mode === 'cpu' ? 'is-on' : ''}">CPU 모드</button>
       <button type="button" data-llm-mode="gpu" class="${mode === 'gpu' ? 'is-on' : ''}"
         ${st.gpu_available ? '' : 'disabled title="엔진이 쓸 수 있는 GPU 가 없습니다"'}>GPU 모드</button></span>
-      ${mode === 'gpu' && gpus.length > 1 ? `<select data-llm-gpu>
-        <option value="auto"${st.device_pref === 'auto' ? ' selected' : ''}>자동 (외장 우선)</option>
-        ${gpus.map(g => `<option value="${esc(g.id)}"${st.device_pref === g.id ? ' selected' : ''}>${esc(g.name)}${
-          g.kind === 'discrete' ? ` ${gb(g.vram_mib)}` : '(내장)'}</option>`).join('')}</select>` : ''}
       ${st.gpu_fallback ? '<span class="llm-badge no" title="' + esc(st.gpu_fallback) + '">GPU 로 못 띄워 CPU 로 도는 중</span>' : ''}
     </div>`);
+    if (mode === 'gpu' && gpus.length > 1) {
+      parts.push(`<div class="llm-row"><span class="llm-label">GPU</span>
+        <select class="setup-input" data-llm-gpu aria-label="GPU 모드에서 쓸 GPU">
+          <option value="auto"${st.device_pref === 'auto' ? ' selected' : ''}>자동 — ${esc(autoGpu ? gpuLabel(autoGpu) : '외장 우선')}</option>
+          ${gpus.map(g => `<option value="${esc(g.id)}"${st.device_pref === g.id ? ' selected' : ''}>${esc(gpuLabel(g))}</option>`).join('')}
+        </select></div>`);
+    }
 
     // 모델 [E2B | E4B | 26B]
     parts.push(`<div class="llm-row"><span class="llm-label">모델</span><span class="llm-seg llm-models">${models.map(m => {
@@ -271,6 +282,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       showToast(error.status === 403 ? 'AI 모델은 NAIA 를 켠 PC 에서만 받을 수 있습니다' : error.message, 'error');
     } finally {
       busy = false;
+      drawn = '';        // 상태가 그대로여도(거절 등) 눌러서 꺼 둔 단추를 되살리게 한 번은 다시 그린다
       refresh();
     }
   }

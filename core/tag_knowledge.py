@@ -81,6 +81,32 @@ def _refresh_lookup_fields(record: MutableMapping[str, Any]) -> None:
     record["_kw_lower"] = keywords.replace("<", "").replace(">", "").lower() if keywords else ""
 
 
+@dataclass
+class SupplementIndex:
+    """한국어 보강(별칭 · 키워드) 둘이 함께 쓰는 색인 — 정규 태그 -> 레코드들 · 붙여 쓴 한국어 키워드 -> 가진 태그들.
+
+    보강마다 19만 태그의 키워드를 다시 정규화해 색인을 만들었다(두 번 · normalize 187만 번 · NAIA 를 켜고 첫 이름 칩까지
+    20초 제보에서 실측 09-26). 한 번 만들고, 보강이 실제로 붙인 별칭만 더해 다음 보강이 그대로 쓴다 — 다시 만든 것과 같다."""
+
+    records: dict[str, list]
+    owners: dict[str, set]
+
+
+def build_supplement_index(raw) -> SupplementIndex:
+    from collections import defaultdict
+
+    records, owners = defaultdict(list), defaultdict(set)
+    for key, record in raw.items():
+        tag = normalize_tag_key(record.get("_tag") or key)
+        records[tag].append(record)
+        for field_name in ("keywords_kr", "keywords"):
+            for part in str(record.get(field_name) or "").split(","):
+                keyword = normalize_tag_key(part.replace("<", "").replace(">", ""))
+                if has_hangul(keyword):
+                    owners[keyword.replace(" ", "")].add(tag)
+    return SupplementIndex(records, owners)
+
+
 def _apply_korean_supplement(
     raw,
     path: str | Path,
@@ -88,6 +114,7 @@ def _apply_korean_supplement(
     expected_kind: str,
     source_name: str,
     evidence_field: str,
+    index: SupplementIndex | None = None,
 ) -> dict[str, Any]:
     """Apply a bounded, additive Korean keyword supplement.
 
@@ -127,24 +154,20 @@ def _apply_korean_supplement(
     except Exception as exc:
         stats["errors"].append(f"{path}: {exc}")
         return stats
-    records, owners = defaultdict(list), defaultdict(set)
-    for key, record in raw.items():
-        tag = normalize_tag_key(record.get("_tag") or key)
-        records[tag].append(record)
-        for field_name in ("keywords_kr", "keywords"):
-            for part in str(record.get(field_name) or "").split(","):
-                keyword = normalize_tag_key(part.replace("<", "").replace(">", ""))
-                if has_hangul(keyword):
-                    owners[keyword.replace(" ", "")].add(tag)
+    index = index or build_supplement_index(raw)
+    records, owners = index.records, index.owners
+    # 이번 보강이 내놓은 별칭 — 충돌 판정에만 쓴다(색인에는 실제로 붙인 것만 남겨 다음 보강이 다시 만든 색인과 같게)
+    proposed = defaultdict(set)
     for tag, alias, _ in proposals:
         if tag in records:
-            owners[alias.replace(" ", "")].add(tag)
+            proposed[alias.replace(" ", "")].add(tag)
     changed = set()
     for tag, alias, basis in proposals:
         if tag not in records:
             stats["missing_tags"] += 1
             continue
-        if owners[alias.replace(" ", "")] - {tag}:
+        alias_key = alias.replace(" ", "")
+        if (owners.get(alias_key, set()) | proposed.get(alias_key, set())) - {tag}:
             stats["collisions"] += 1
             continue
         record = records[tag][0]
@@ -158,13 +181,15 @@ def _apply_korean_supplement(
         record.setdefault(evidence_field, {})[alias] = {
             "source": source_name, "version": payload.get("version"), "basis": basis}
         _refresh_lookup_fields(record)
+        owners[alias_key].add(tag)            # 이제 keywords_kr 에 있다 — 다시 만든 색인과 같게
         changed.add(tag)
         stats["aliases"] += 1
     stats["tags"] = len(changed)
     return stats
 
 
-def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
+def apply_korean_alias_supplement(raw, path: str | Path, *,
+                                  index: SupplementIndex | None = None) -> dict[str, Any]:
     """Append reviewed lexical aliases without replacing metadata."""
     return _apply_korean_supplement(
         raw,
@@ -172,10 +197,12 @@ def apply_korean_alias_supplement(raw, path: str | Path) -> dict[str, Any]:
         expected_kind="korean_lexical_alias_supplement",
         source_name="korean_lexical_supplement",
         evidence_field="_korean_alias_sources",
+        index=index,
     )
 
 
-def apply_korean_keyword_supplement(raw, path: str | Path) -> dict[str, Any]:
+def apply_korean_keyword_supplement(raw, path: str | Path, *,
+                                    index: SupplementIndex | None = None) -> dict[str, Any]:
     """Append bounded aliases extracted from classified tag keywords."""
     return _apply_korean_supplement(
         raw,
@@ -183,6 +210,7 @@ def apply_korean_keyword_supplement(raw, path: str | Path) -> dict[str, Any]:
         expected_kind="korean_keyword_supplement",
         source_name="danbooru_keyword_supplement",
         evidence_field="_korean_keyword_sources",
+        index=index,
     )
 
 
@@ -261,7 +289,8 @@ def merge_parquet_tag_records(
             stats.errors.append(f"{path}: {exc}")
             continue
 
-        for _, row in df.iterrows():
+        # iterrows 는 줄마다 Series 를 만들어 3.9만 줄에 1초가 넘었다 — 값은 아래에서 전부 str/int 로 바꿔 쓰므로 dict 로 읽는다
+        for row in df.to_dict("records"):
             tag_raw = normalize_display_tag(row["tag"])
             tag_lower = normalize_tag_key(tag_raw)
             keywords = str(row.get("keywords", "") or "")

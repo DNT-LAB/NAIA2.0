@@ -11,6 +11,7 @@ from typing import Any, Callable
 from core.tag_knowledge import (
     apply_korean_alias_supplement,
     apply_korean_keyword_supplement,
+    build_supplement_index,
     apply_translation_overrides,
     merge_parquet_tag_records,
     merge_rating_count_records,
@@ -243,10 +244,14 @@ def load_kr_tag_records(
     for error in rating_count_stats.errors:
         _warn(warnings, f"tag count merge warning - {error}", warn)
 
+    # 두 보강이 한 색인을 쓴다(보강마다 19만 태그를 다시 정규화했다 - 첫 이름 칩 20초 제보, 09-26)
+    supplement_index = (build_supplement_index(raw)
+                        if include_korean_supplement or include_korean_keyword_supplement else None)
     supplement_stats = None
     if include_korean_supplement:
         supplement_stats = apply_korean_alias_supplement(
-            raw, _first_existing(resolved_data_roots, Path("tag_index") / "korean_alias_supplement.json"))
+            raw, _first_existing(resolved_data_roots, Path("tag_index") / "korean_alias_supplement.json"),
+            index=supplement_index)
         for error in supplement_stats["errors"]:
             _warn(warnings, f"Korean alias supplement warning - {error}", warn)
 
@@ -258,6 +263,7 @@ def load_kr_tag_records(
                 resolved_data_roots,
                 Path("tag_index") / "korean_keyword_supplement.json",
             ),
+            index=supplement_index,
         )
         for error in keyword_supplement_stats["errors"]:
             _warn(warnings, f"Korean keyword supplement warning - {error}", warn)

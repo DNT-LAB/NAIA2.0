@@ -39,7 +39,7 @@ const DEFAULT_PREFERENCE = {
   g: 'A wholesome image with a calm, peaceful, still atmosphere.',
   s: 'A slightly risqué image that focuses on details of the body, outfit, and actions.',
   q: 'An image that focuses on the body, such as the breasts and buttocks, with a somewhat sexual atmosphere and details.',
-  e: '',
+  e: 'An image that focuses on the body, sexual activities, genitals and anatomy, fluids with violent and dynamic composition.',
 };
 const MAX_PREFERENCE = 400;
 const ADV_STYLE_ID = 'assist-adv-style';

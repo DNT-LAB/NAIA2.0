@@ -64,6 +64,12 @@ const ADV_CSS = `
 }
 .as-adv-row.is-on textarea { border-color: rgba(230,168,74,0.55); }
 .as-adv-row textarea:focus { outline: none; border-color: var(--text-dim); }
+.as-line textarea.as-edit {
+  display: block; width: 100%; box-sizing: border-box; margin: -3px 0; padding: 2px 5px; resize: none; overflow: hidden;
+  border: 1px solid transparent; border-radius: 4px; background: transparent;
+}
+.as-line textarea.as-edit:hover { border-color: var(--border-dim); }
+.as-line textarea.as-edit:focus { outline: none; border-color: var(--text-dim); background: rgba(255,255,255,0.03); }
 `;
 const HIGHLIGHT_API = typeof Highlight !== 'undefined' && typeof CSS !== 'undefined' && !!CSS.highlights;
 
@@ -83,7 +89,7 @@ function clampCount(value, fallback) {
   return Number.isInteger(n) && n >= 0 && n <= 9 ? n : fallback;
 }
 
-export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
+export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssist } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
   let banner = null, body = null, sendBtn = null, picker = null, advPanel = null, advBtn = null;
   let open = false;
@@ -248,11 +254,16 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
       if (!open) return;
       const t = event.target;
       if (overlay.contains(t) || (picker && !picker.hidden && picker.contains(t))) return;
+      // 결과 칸의 자동완성 · 태그 정보 팝업은 창 밖(body)에 뜬다 — 거기를 눌러도 창을 닫지 않는다
+      if (t.closest?.('#tagTooltip, .tag-chip-info-tooltip, .result-info-tag-popup')) return;
       close();
     }, true);
     window.addEventListener('resize', () => {
       position();
-      if (open) autoGrow();          // 폭이 바뀌면 줄바꿈이 바뀐다
+      if (open) {
+        autoGrow();                  // 폭이 바뀌면 줄바꿈이 바뀐다
+        body.querySelectorAll('[data-as-edit]').forEach(autoSize);
+      }
     });
     paintRating();
     paintPersons();
@@ -684,10 +695,14 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
     const p = r.prompt || {};
     const chars = Array.isArray(p.characters) ? p.characters : [];
     const pool = r.pool || {};
+    // 메인 · 캐릭터 프롬프트는 받은 뒤 고칠 수 있다(사용자 지정 09-26) — 메인 칸과 같은 자동완성. 고친 글이 [생성] ·
+    // [프롬프트에 넣기] · [복사] 로 간다
+    const editor = (key, text, label) => `<textarea class="as-v as-edit" rows="1" spellcheck="false" data-as-edit="${key}"
+      aria-label="${esc(label)}">${esc(text || '')}</textarea>`;
     const lines = [
-      `<div class="as-line"><span class="as-k">메인</span><span class="as-v">${esc(p.main || '(비어 있음)')}</span></div>`,
+      `<div class="as-line"><span class="as-k">메인</span>${editor('main', p.main, '메인 프롬프트')}</div>`,
       ...chars.map((c, i) =>
-        `<div class="as-line"><span class="as-k" title="${esc(c.ko || '')}">캐릭터 ${i + 1}</span><span class="as-v">${esc(c.prompt)}</span></div>`),
+        `<div class="as-line"><span class="as-k" title="${esc(c.ko || '')}">캐릭터 ${i + 1}</span>${editor(`c${i}`, c.prompt, `캐릭터 ${i + 1} 프롬프트`)}</div>`),
     ];
     const meta = [];
     if (pool.posts) meta.push(`풀 ${fmt(pool.posts)}건`);
@@ -754,7 +769,40 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
       html += `<div class="as-note as-note-warn">${esc(why)}</div>`;
     }
     body.innerHTML = html;
+    wirePromptEditors();
     fit();
+  }
+
+  /** 결과의 메인 · 캐릭터 칸 — 고친 글을 result 에 되쓰고(단추들이 그것을 쓴다) 글 높이만큼 늘린다. 자동완성은 메인 칸과
+   *  같은 것(app.js bindTagAssist). ⚠️ 높이를 다시 잴 때 결과 칸의 스크롤을 지킨다(auto -> scrollHeight 사이에 튄다). */
+  function wirePromptEditors() {
+    body.querySelectorAll('[data-as-edit]').forEach(box => {
+      autoSize(box);
+      box.addEventListener('input', () => {
+        const p = result?.prompt;
+        if (!p) return;
+        const key = box.dataset.asEdit;
+        if (key === 'main') p.main = box.value;
+        else if (p.characters?.[Number(key.slice(1))]) p.characters[Number(key.slice(1))].prompt = box.value;
+        autoSize(box);
+        const empty = !oneLine(p.main);
+        body.querySelectorAll('[data-as-generate], [data-as-apply], [data-as-copy]').forEach(b => { b.disabled = empty; });
+      });
+      if (typeof bindTagAssist === 'function') bindTagAssist(box);
+    });
+  }
+
+  function autoSize(box) {
+    if (!box.offsetWidth) return;              // 숨은 창(폭 0)에서 재면 글자마다 줄이 바뀌어 수천 px 가 된다
+    const keep = body.scrollTop;
+    box.style.height = 'auto';
+    box.style.height = `${box.scrollHeight + 2}px`;
+    body.scrollTop = keep;
+  }
+
+  /** 칸에서 줄을 바꿨어도 프롬프트는 한 줄 — 줄바꿈은 쉼표로 */
+  function oneLine(text) {
+    return String(text || '').split(/\s*\n+\s*/).filter(Boolean).join(', ').trim();
   }
 
   function onBodyClick(event) {
@@ -776,7 +824,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
   // ── 넣기 · 연결 · 복사 ──────────────────────────────────────────────────
 
   function characterPrompts() {
-    return (result?.prompt?.characters || []).map(c => String(c.prompt || '').trim()).filter(Boolean);
+    return (result?.prompt?.characters || []).map(c => oneLine(c.prompt)).filter(Boolean);
+  }
+
+  function mainPrompt() {
+    return oneLine(result?.prompt?.main);
   }
 
   function lockActions(on) {
@@ -787,12 +839,12 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
    *  (사용자 지정 2026-09-24: "사용자의 캐릭터 프롬프트를 간섭하면 곤란"). 서버가 메인은 이벤트 맵 [생성] 과 같은
    *  바이패스로, 캐릭터는 이 요청에만 싣는다. 결과는 평소 생성처럼 Result·히스토리로 온다. */
   async function generateVirtual() {
-    const p = result?.prompt;
-    if (!p?.main) return;
+    const main = mainPrompt();
+    if (!main) return;
     lockActions(true);
     try {
       const data = await postJson('/api/assist/generate', {
-        main: p.main, characters: characterPrompts(), rating: result.rating || rating,
+        main, characters: characterPrompts(), rating: result.rating || rating,
       });
       const n = (data.characters || []).length;
       toast(`생성을 요청했습니다 — 메인·캐릭터 칸은 그대로${n ? ` (가상 캐릭터 ${n}명)` : ''}`, 'success');
@@ -805,8 +857,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
 
   /** [프롬프트에 넣기] — 사용자가 **원할 때만** 칸에 넣는다. 메인은 Random 파이프라인, 캐릭터 칸은 기존을 비활성으로. */
   async function applyPrompt() {
-    const p = result?.prompt;
-    if (!p?.main) return;
+    const main = mainPrompt();
+    if (!main) return;
     lockActions(true);
     try {
       const chars = characterPrompts();
@@ -814,7 +866,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
         const sent = typeof applyCharacters === 'function' ? applyCharacters(chars) : false;
         if (!sent) throw new Error('캐릭터 칸에 넣지 못했습니다');
       }
-      const tags = String(p.main).split(',').map(t => t.trim()).filter(Boolean);
+      const tags = main.split(',').map(t => t.trim()).filter(Boolean);
       await postJson('/api/event-map/apply', { tags, rating: result.rating || rating });
       toast(`프롬프트에 넣었습니다${chars.length ? ` · 캐릭터 ${chars.length}명(기존 칸은 비활성으로)` : ''}`, 'success');
     } catch (error) {
@@ -834,9 +886,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
   }
 
   function copyPrompt() {
-    const p = result?.prompt;
-    if (!p?.main) return;
-    const lines = [p.main, ...(p.characters || []).map((c, i) => `캐릭터 ${i + 1}: ${c.prompt}`)];
+    const main = mainPrompt();
+    if (!main) return;
+    const lines = [main, ...characterPrompts().map((c, i) => `캐릭터 ${i + 1}: ${c}`)];
     return copyText(lines.join('\n'));
   }
 
@@ -950,6 +1002,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters } = {}) {
     overlay.hidden = false;
     position();
     autoGrow();
+    body.querySelectorAll('[data-as-edit]').forEach(autoSize);   // 숨은 동안 잰 높이는 틀린다(폭 0)
     paintNames();
     input.focus();
     input.select();

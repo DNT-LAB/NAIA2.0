@@ -581,6 +581,77 @@ def appearance_tags(entry: dict[str, Any] | None, *, color_min: float = 60.0, fe
     return list(dict.fromkeys(out))
 
 
+# 캐릭터 특징(사용자 지정 2026-09-26): 캐릭터를 고르면 캐릭터 프롬프트 뒤에 눈 · 머리 · 피부 색 · 핵심 특징(오드아이 · 브릿지) ·
+# 가슴 크기를 싣는다 — close-up 같은 태그가 붙으면 특징 없는 캐릭터는 특정 부위만 강하게 그려졌다.
+# ⚠️ 아동 체형 태그(loli · shota · child …)는 **자동으로 싣지 않는다** — Assist 에는 Q · E(nsfw) 모드가 있다. 그 체형으로
+#    분류된 캐릭터(해당 태그 10% 이상)에는 가슴 크기도 싣지 않는다.
+CHILD_BODY_TAGS = frozenset({"loli", "shota", "child", "toddler", "aged down", "young"})
+HAIR_PATTERN_TAGS = frozenset({"multicolored hair", "streaked hair", "gradient hair", "two-tone hair",
+                               "colored inner hair", "split-color hair"})
+SKIN_TAGS = frozenset({"dark skin", "dark-skinned female", "dark-skinned male", "tan", "pale skin", "colored skin",
+                       "blue skin", "grey skin", "green skin", "purple skin", "red skin", "pink skin", "white skin"})
+BREAST_TAGS = ("flat chest", "small breasts", "medium breasts", "large breasts", "huge breasts", "gigantic breasts")
+
+
+def _feature_group(tag: str) -> str | None:
+    """겹치면 안 되는 갈래 — 요청이 이미 머리색을 말했으면(빨간 머리) 캐릭터의 머리색은 싣지 않는다."""
+    if tag in HAIR_PATTERN_TAGS:
+        return "hair pattern"
+    if tag == "heterochromia" or tag.endswith(" eyes"):
+        return "eyes"
+    if tag.endswith(" hair") and tag.split()[0] in _HAIR_COLORS:
+        return "hair color"
+    if tag in SKIN_TAGS:
+        return "skin"
+    if tag in BREAST_TAGS:
+        return "breasts"
+    return None
+
+
+_HAIR_COLORS = frozenset({"black", "brown", "blonde", "red", "orange", "yellow", "green", "blue", "aqua", "purple",
+                          "pink", "white", "grey", "silver", "light", "dark"})
+
+
+def character_features(entry: dict[str, Any] | None, have: Iterable[str] = ()) -> list[str]:
+    """character_analysis 항목 -> 캐릭터 특징 태그. 머리색 둘(40%+) · 머리 무늬(multicolored · streaked … 40%+) · 눈색 하나
+    (30%+) · 오드아이(35%+) · 피부(40%+) · 핵심 특징 셋(50%+, 아동 체형 태그 제외) · 가슴 크기(그 크기가 가슴 태그의 40%
+    이상일 때, 여성만). have = 이미 있는 태그 — 같은 갈래(머리색 · 눈 · 피부 · 가슴)가 있으면 그 갈래는 싣지 않는다."""
+    if not isinstance(entry, dict):
+        return []
+    have = {str(t).strip().lower() for t in have}
+    blocked = {g for g in (_feature_group(t) for t in have) if g}
+    if "hair color" in blocked:
+        blocked.add("hair pattern")             # 빨간 머리라고 했으면 원래의 브릿지 · 그라데이션도 싣지 않는다
+    colors = [r for r in entry.get("personal_color") or [] if isinstance(r, dict) and r.get("tag")]
+    traits = [r for r in entry.get("characteristics") or [] if isinstance(r, dict) and r.get("tag")]
+    pct = lambda r: float(r.get("pct") or 0)                                         # noqa: E731
+    out: list[str] = []
+
+    def add(tags: Iterable[str]) -> None:
+        for t in tags:
+            if t not in have and t not in out and t not in CHILD_BODY_TAGS and _feature_group(t) not in blocked:
+                out.append(t)
+
+    hair = [r for r in colors if _feature_group(r["tag"]) == "hair color"]
+    # 두 색으로 갈린 머리(카나데: grey 40% · white 38%)는 40% 를 못 넘는다 — 그러면 가장 많은 색 하나(30%+)
+    add(([r["tag"] for r in hair if pct(r) >= 40] or [r["tag"] for r in hair[:1] if pct(r) >= 30])[:2])
+    add([r["tag"] for r in colors if r["tag"] in HAIR_PATTERN_TAGS and pct(r) >= 40][:2])
+    add([r["tag"] for r in colors if r["tag"].endswith(" eyes") and pct(r) >= 30][:1])
+    add([r["tag"] for r in colors if r["tag"] == "heterochromia" and pct(r) >= 35])
+    add([r["tag"] for r in colors + traits if r["tag"] in SKIN_TAGS and pct(r) >= 40][:2])
+    add([r["tag"] for r in traits if pct(r) >= 50 and _feature_group(r["tag"]) is None
+         and r["tag"] not in CHILD_BODY_TAGS][:3])
+    childlike = any(r["tag"] in CHILD_BODY_TAGS and pct(r) >= 10 for r in traits)
+    breasts = entry.get("breast_size") or {}
+    rows = [r for r in breasts.get("distribution") or [] if isinstance(r, dict) and r.get("tag") in BREAST_TAGS]
+    counted = sum(int(r.get("count") or 0) for r in rows)
+    if entry.get("gender") == "girl" and not childlike and rows and counted >= 20:
+        top = max(rows, key=lambda r: int(r.get("count") or 0))
+        if int(top.get("count") or 0) / counted >= 0.4:
+            add([top["tag"]])
+    return out
+
+
 # ── 조립 ─────────────────────────────────────────────────────────────────
 
 

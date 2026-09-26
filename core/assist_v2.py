@@ -310,6 +310,8 @@ class Character:
     alts: list[str]
     gender: str | None
     attrs: list[str] = field(default_factory=list)
+    # 캐릭터 특징(눈 · 머리 · 피부 색 · 오드아이 · 가슴 크기 …) — 서비스가 character_analysis 로 채운다. 캐릭터 칸 끝에(09-26)
+    features: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -665,14 +667,14 @@ def compose(merged: Merged, *, pins: list[str], leftovers: list[str], actions: l
                     parts.append(f"source#{act}")
                 if c.tag == dst:
                     parts.append(f"target#{act}")
-            bags.append(parts)
+            bags.append(parts + list(c.features))           # 캐릭터 특징은 칸 끝에(사용자 지정 09-26)
         typed = put_english(merged.english.keep, [scene, *bags], taken=taken)
         chars = [{"prompt": ", ".join(dict.fromkeys(parts)), "ko": c.ko, "alts": c.alts}
                  for c, parts in zip(merged.characters, bags)]
         return {"main": _with_sentence(", ".join(dict.fromkeys(people + typed + scene)), merged.sentence),
                 "characters": chars}
     names = [c.tag for c in merged.characters]
-    attrs = [a for c in merged.characters for a in c.attrs]
+    attrs = [a for c in merged.characters for a in c.attrs] + [f for c in merged.characters for f in c.features]
     rel = [act for _s, act, _d in merged.relations]
     typed = put_english(merged.english.keep, [scene, attrs, rel], taken=taken)
     line = list(dict.fromkeys(people + names + typed + scene + attrs + rel))

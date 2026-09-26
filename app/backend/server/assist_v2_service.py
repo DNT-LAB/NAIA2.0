@@ -64,7 +64,8 @@ def _load_character_analysis(context: Any) -> None:
                     continue
                 if info.get("gender") in ("girl", "boy"):
                     genders[str(name)] = info["gender"]
-                profiles[str(name)] = (str(work), {k: info.get(k) for k in ("personal_color", "characteristics")})
+                profiles[str(name)] = (str(work), {k: info.get(k) for k in ("personal_color", "characteristics",
+                                                                          "breast_size", "gender")})
     except Exception:
         pass
     _GENDERS, _PROFILES = genders, profiles
@@ -77,7 +78,7 @@ def _genders(context: Any) -> dict[str, str]:
 
 
 def _character_profile(context: Any, tag: str) -> tuple[str | None, dict[str, Any] | None]:
-    """캐릭터 태그 -> (작품 이름, 외모 칸(personal_color · characteristics)). 없으면 (None, None)."""
+    """캐릭터 태그 -> (작품 이름, 외모 칸(personal_color · characteristics · breast_size · gender)). 없으면 (None, None)."""
     _load_character_analysis(context)
     return (_PROFILES or {}).get(tag, (None, None))
 
@@ -806,6 +807,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka,
                                    keep=(recover or {}).get("added") or ())
                            if req["refine"] and merged.task == "scene" else (None, {}))
+    _add_character_features(context, merged)
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 인물 = 고른 캐릭터(후보 전체 — 화면이 목록을 그린다) + 받지 못한 선택(chosen=false — 화면이 그 선택을 푼다)
@@ -845,6 +847,19 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         out["recap"] = make_recap(merged, partition=partition, rating=req["rating"])
     _with_rating_note(out, req["rating"], dropped)
     return out
+
+
+def _add_character_features(context: Any, merged: Any) -> None:
+    """고른 캐릭터마다 특징(character_analysis — 눈 · 머리 · 피부 색 · 오드아이 · 가슴 크기 …)을 캐릭터 칸 끝에
+    (사용자 지정 09-26). 요청이 이미 말한 갈래(빨간 머리 · 제외한 가슴 크기)는 싣지 않는다 — core/assist_compose."""
+    from core import assist_compose as ac
+
+    have = set(merged.all_tags()) | set(merged.english.keep) | set(merged.exclude)
+    for c in merged.characters:
+        _work, entry = _character_profile(context, c.tag)
+        c.features = ac.character_features(entry, have=have | set(c.attrs))
+        if c.features:
+            merged.log.append(f"features:{c.tag}->{','.join(c.features)}")
 
 
 # ── 미번역 낱말 되살리기(S9d, 09-26 첫 마일스톤 — core/assist_recover) ─────────────────────────────
@@ -1454,7 +1469,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         chars.append(ac.ComposeCharacter(
             ko=name or f"캐릭터 {seg.index}", tag=tag, gender=hit.gender if hit else None,
             alts=[t for t, _n in hit.candidates[1:3]] if hit else [], work=_work_tag(tools, work),
-            appearance=ac.appearance_tags(entry)))
+            appearance=ac.character_features(entry)))       # 한 줄 경로와 같은 캐릭터 특징(09-26)
     names = [c.ko for c in chars]
     relation = _compose_relation(layer, vocab, rules, segs, names)
 

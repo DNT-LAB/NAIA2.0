@@ -22,6 +22,8 @@ export function createConditionalPromptWindow({
   window: win,
   host,
   presetHost = null,
+  // 'Test Rules / Simulation' 동반 창 본문(사용자 지정 2026-09-26 - 본 창엔 결과를 둘 공간이 모자라다).
+  simHost = null,
   // 닫혀 있다가 열렸을 때 - 서버 상태를 한 번 받는다(예전 openModule 이 하던 일).
   onShow = () => {},
   // 창이 닫힐 때 - 0.5초 대기 중인 Legacy 편집을 보내야 한다(안 그러면 사라진다).
@@ -56,6 +58,7 @@ export function createConditionalPromptWindow({
     onOpen: () => onVisibilityChange(),
     onClose: () => {
       if (presetsPanel && presetsPanel.isOpen()) presetsPanel.close();
+      if (simPanel && simPanel.isOpen()) simPanel.close();
       onHide();
       onVisibilityChange();
     },
@@ -112,6 +115,41 @@ export function createConditionalPromptWindow({
     return true;
   }
 
+  // ── Test Rules / Simulation 동반 창 ────────────────────────────────────
+  // 결과 카드(규칙마다 바꾼 것 · 샘플 · 네거티브 · 최종 프롬프트)는 본 창에 둘 자리가 없다 - 옆에 띄운다.
+  let simPanel = null;
+
+  function ensureSimPanel() {
+    if (simPanel || !simHost) return simPanel;
+    const width = 400;
+    const height = 520;
+    const spot = besideSpot(width, height, panel.el.getBoundingClientRect());
+    simPanel = createDraggablePanel({
+      document: doc,
+      parentPanel: panel,
+      window: win,
+      title: 'Test Rules / Simulation',
+      variant: 'cpsw',
+      storageKey: 'conditional-prompt-sim',
+      width, height, minWidth: 260, maxWidth: 900, minHeight: 160,
+      resizable: true,
+      initial: { x: spot.x, y: spot.y },
+      escHtml,
+    });
+    simPanel.el.id = 'conditionalSimulationWindow';
+    simHost.classList.add('cond-sim-host');
+    simPanel.body.appendChild(simHost);
+    return simPanel;
+  }
+
+  function showSimulation() {
+    const p = ensureSimPanel();
+    if (!p) return false;
+    p.open();
+    if (p.isCollapsed()) p.expand();
+    return true;
+  }
+
   /** 창을 연다. 같은 창이 펼쳐져 있고 toggle 이면 닫는다(모듈 단추를 다시 누른 것). */
   function show({ toggle = false } = {}) {
     const wasOpen = panel.isOpen();
@@ -135,6 +173,8 @@ export function createConditionalPromptWindow({
     isShown: () => panel.isOpen() && !panel.isCollapsed(),
     togglePresets,
     isPresetsOpen: () => Boolean(presetsPanel && presetsPanel.isOpen()),
+    showSimulation,
+    isSimulationOpen: () => Boolean(simPanel && simPanel.isOpen()),
   };
 }
 
@@ -320,4 +360,53 @@ const CPW_CSS = `
   font-family:var(--font-display);font-size:10.5px;font-weight:700;cursor:pointer}
 .dragpanel.cppw .cond-preset-save-row button:hover,.dragpanel.cppw .cond-preset-new:hover{border-color:var(--accent-blue)}
 .dragpanel.cppw .cond-empty{padding:8px;font-size:10.5px}
+
+/* ── Test Rules / Simulation 동반 창 ── */
+.dragpanel.cpsw{border-color:rgba(120,190,150,0.42)}
+.dragpanel.cpsw .dragpanel-head{background:rgba(120,190,150,0.09)}
+.dragpanel.cpsw .dragpanel-body{padding:0;gap:0;overflow:auto;background:var(--bg-surface)}
+.dragpanel.cpsw .cond-sim-host{padding:8px 9px 10px}
+.dragpanel.cpsw .cond-sim-root{display:flex;flex-direction:column;gap:8px}
+.dragpanel.cpsw .csim-head{display:flex;align-items:center;gap:7px}
+.dragpanel.cpsw .csim-status{font-size:12px;font-weight:800;color:var(--text-primary)}
+.dragpanel.cpsw .csim-status.ok{color:#9ddfa8}
+.dragpanel.cpsw .csim-status.none{color:var(--text-muted)}
+.dragpanel.cpsw .csim-status.fail{color:#ff9a8a}
+.dragpanel.cpsw .csim-info{color:var(--text-muted);font-size:11px;cursor:help}
+.dragpanel.cpsw .csim-rerun{margin-left:auto;height:22px;padding:0 10px;border:1px solid var(--border-dim);border-radius:5px;
+  background:var(--bg-elevated);color:var(--text-primary);font-size:10.5px;font-weight:700;cursor:pointer}
+.dragpanel.cpsw .csim-rerun:hover{border-color:var(--accent-blue)}
+.dragpanel.cpsw .csim-flag{padding:4px 8px;border-radius:5px;font-size:10.5px;color:var(--text-muted);background:rgba(255,255,255,0.04)}
+.dragpanel.cpsw .csim-flag.stale{color:#ffcc80;background:rgba(255,183,77,0.10);border:1px solid rgba(255,183,77,0.35)}
+.dragpanel.cpsw .csim-error{padding:6px 8px;border-radius:5px;font-size:11px;color:#ffb4a8;background:rgba(240,64,64,0.10)}
+.dragpanel.cpsw .csim-empty{padding:10px;border:1px dashed var(--border-dim);border-radius:6px;color:var(--text-muted);font-size:11px;line-height:1.5}
+.dragpanel.cpsw .csim-sec{display:flex;flex-direction:column;gap:4px}
+.dragpanel.cpsw .csim-label{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.06em;color:var(--text-dim)}
+.dragpanel.cpsw .csim-row{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.dragpanel.cpsw .csim-sample{padding:1px 7px;border-radius:999px;font-size:10.5px;color:#b2dfdb;
+  border:1px solid rgba(178,223,219,0.28);background:rgba(178,223,219,0.08)}
+.dragpanel.cpsw .csim-step{display:flex;flex-direction:column;gap:3px;padding:5px 7px;border-radius:6px;
+  border:1px solid rgba(120,128,170,0.22);background:rgba(14,14,22,0.7)}
+.dragpanel.cpsw .csim-step-head{display:flex;align-items:center;gap:6px;min-width:0}
+.dragpanel.cpsw .csim-idx{flex:0 0 auto;min-width:16px;height:16px;border-radius:4px;background:rgba(92,150,255,0.18);
+  color:#9ecbff;font-size:9.5px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+.dragpanel.cpsw .csim-pass{font-size:9.5px;color:var(--text-muted)}
+.dragpanel.cpsw .csim-cond{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-primary)}
+.dragpanel.cpsw code.csim-cond{font-family:var(--font-mono);font-size:10.5px;padding:0 5px;border-radius:4px;background:rgba(0,0,0,0.3)}
+.dragpanel.cpsw .csim-cond.is-always{color:var(--text-muted);font-style:italic}
+.dragpanel.cpsw .csim-arrow{color:var(--text-dim)}
+.dragpanel.cpsw .csim-step-body{display:flex;flex-direction:column;gap:3px;padding-left:22px}
+.dragpanel.cpsw .csim-change{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.dragpanel.cpsw .csim-where{font-size:10px;font-weight:700;color:var(--text-muted);margin-right:2px}
+.dragpanel.cpsw .csim-chip{padding:1px 6px;border-radius:4px;font-size:10.5px;color:var(--text-primary)}
+.dragpanel.cpsw .csim-chip.add{border:1px solid rgba(76,175,80,0.35);background:rgba(76,175,80,0.18)}
+.dragpanel.cpsw .csim-chip.same{border:1px dashed rgba(255,255,255,0.18);color:var(--text-muted)}
+.dragpanel.cpsw .csim-chip.del{border:1px solid rgba(240,64,64,0.35);background:rgba(240,64,64,0.14);text-decoration:line-through}
+.dragpanel.cpsw .csim-note{font-size:10.5px;color:var(--text-muted)}
+.dragpanel.cpsw .csim-toggle{align-self:flex-start;border:none;background:transparent;padding:0;color:var(--text-muted);
+  font-size:10.5px;font-weight:700;cursor:pointer}
+.dragpanel.cpsw .csim-toggle:hover{color:var(--text-primary)}
+.dragpanel.cpsw .csim-full{padding:6px 8px;border-radius:5px;background:rgba(7,7,12,0.96);font-family:var(--font-editor);
+  font-size:11px;line-height:1.5;color:var(--text-muted);word-break:break-word;user-select:text}
+.dragpanel.cpsw .csim-full mark{background:rgba(76,175,80,0.28);color:var(--text-primary);border-radius:3px;padding:0 2px}
 `;

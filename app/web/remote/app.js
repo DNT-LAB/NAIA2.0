@@ -2475,13 +2475,16 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
 // 두 모듈에 **같은 요소**를 넘긴다 - 창은 품고, 패널은 그 안에 그린다. 프리셋은 동반 창 요소.
 const conditionalHost = document.createElement('div');
 const conditionalPresetHost = document.createElement('div');
-const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-condload')
+// Test Rules / Simulation 결과 창의 본문(창 옆 동반 창).
+const conditionalSimHost = document.createElement('div');
+const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-simwin2')
   .then(({createConditionalPromptWindow}) => {
     conditionalPromptWindow = createConditionalPromptWindow({
       document,
       window,
       host: conditionalHost,
       presetHost: conditionalPresetHost,
+      simHost: conditionalSimHost,
       escHtml,
       onShow: () => requestConditionalWindowState(),
       // 닫을 때 0.5초 대기 중인 Legacy 편집을 보낸다(예전 closeModule 이 하던 일).
@@ -2493,7 +2496,7 @@ const conditionalPromptWindowReady = import('./js/features/conditionalPromptWind
   .catch(error => {
     console.error('Failed to initialize conditional prompt window', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260926-condwin8')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260926-simwin4')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -2504,6 +2507,8 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
       confirmDialog: showConfirmDialog,
       moduleBody: conditionalHost,
       presetHost: conditionalPresetHost,
+      simHost: conditionalSimHost,
+      showSimulation: () => Boolean(conditionalPromptWindow && conditionalPromptWindow.showSimulation()),
       togglePresets: () => Boolean(conditionalPromptWindow && conditionalPromptWindow.togglePresets()),
       isPresetsOpen: () => Boolean(conditionalPromptWindow && conditionalPromptWindow.isPresetsOpen()),
     });

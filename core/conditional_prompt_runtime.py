@@ -869,6 +869,61 @@ class HeadlessConditionalRuleEngine:
             )
         return prefix_tags, main_tags, postfix_tags
 
+    # ── Test Rules / Simulation: 규칙 하나가 바꾼 것 ─────────────────────────────
+    def _simulation_snapshot(self, context, prefix_tags, main_tags, postfix_tags) -> dict[str, Any]:
+        metadata = getattr(context, "metadata", None) or {}
+        try:
+            slots = self._character_slots(context)   # 읽기만 한다(캐시가 없으면 새로 셈)
+        except Exception:
+            slots = []
+        return {
+            "prefix": list(prefix_tags),
+            "main": list(main_tags),
+            "postfix": list(postfix_tags),
+            "neg_ops": [dict(op) for op in (metadata.get("conditional_negative_ops") or []) if isinstance(op, dict)],
+            "slots": [dict(slot) for slot in slots],
+        }
+
+    @staticmethod
+    def _ordered_delta(before: list[str], after: list[str]) -> tuple[list[str], list[str]]:
+        """순서를 지킨 다중집합 차이 - (더해진 것, 빠진 것)."""
+        from collections import Counter
+
+        def _minus(left: list[str], right: list[str]) -> list[str]:
+            remaining = Counter(right)
+            out = []
+            for tag in left:
+                if remaining[tag] > 0:
+                    remaining[tag] -= 1
+                else:
+                    out.append(tag)
+            return out
+
+        return _minus(after, before), _minus(before, after)
+
+    @classmethod
+    def _simulation_changes(cls, before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+        changes: list[dict[str, Any]] = []
+        for where in ("prefix", "main", "postfix"):
+            added, removed = cls._ordered_delta(before[where], after[where])
+            if added or removed:
+                changes.append({"where": where, "added": added, "removed": removed})
+        for op in after["neg_ops"][len(before["neg_ops"]):]:
+            changes.append({"where": "neg", "op": str(op.get("op") or "append"),
+                            "added": list(op.get("tags") or []), "removed": []})
+        for index in range(max(len(before["slots"]), len(after["slots"]))):
+            old = before["slots"][index] if index < len(before["slots"]) else {}
+            new = after["slots"][index] if index < len(after["slots"]) else {}
+            for field, where in (("prompt", f"char:{index + 1}"), ("uc", f"uc:{index + 1}")):
+                added, removed = cls._ordered_delta(split_tags_bracket_aware(str(old.get(field) or "")),
+                                                    split_tags_bracket_aware(str(new.get(field) or "")))
+                if added or removed:
+                    changes.append({"where": where, "added": added, "removed": removed})
+            if bool(old.get("active")) != bool(new.get("active")):
+                changes.append({"where": f"char:{index + 1}", "active": bool(new.get("active")),
+                                "added": [], "removed": []})
+        return changes
+
     def apply(
         self,
         context,
@@ -898,6 +953,11 @@ class HeadlessConditionalRuleEngine:
                     recorder = getattr(self.app_context, "session_cond_simulate", None)
                     if isinstance(recorder, list):
                         recorder.append(str(rule.get("original") or ""))
+                    # Test Rules / Simulation 창이 '규칙마다 무엇을 바꿨나' 를 그린다 - **테스트 때만** 기록한다
+                    # (실제 생성 경로는 이 목록이 없어 스냅숏을 뜨지 않는다).
+                    steps = getattr(self.app_context, "session_cond_simulate_steps", None)
+                    before = (self._simulation_snapshot(scope_context, prefix_tags, main_tags, postfix_tags)
+                              if isinstance(steps, list) else None)
                     action = rule["action"]
                     is_negative = action.get("type") == "set_negative" or (
                         action.get("type") == "append_to_list" and action.get("target") == "neg"
@@ -906,6 +966,14 @@ class HeadlessConditionalRuleEngine:
                         prefix_tags, main_tags, postfix_tags = self._execute_action(
                             scope_context, action, prefix_tags, main_tags, postfix_tags,
                         )
+                    if before is not None:
+                        after = self._simulation_snapshot(scope_context, prefix_tags, main_tags, postfix_tags)
+                        steps.append({
+                            "pass": _pass_index + 1,
+                            "rule": str(rule.get("original") or ""),
+                            "condition": str(rule.get("condition") or ""),
+                            "changes": self._simulation_changes(before, after),
+                        })
                     matched = True
                     if stop_on_match:
                         break

@@ -687,7 +687,9 @@ class HeadlessConditionalPromptService:
         #    DSL 로 파싱됐다. 헬퍼 한 곳으로 모은다.
         result = self._run_simulation(self._active_rules(settings), self._active_engine_options(settings))
         self._last_log = self._format_sim_log(result)
-        return self.state()
+        # 구조화된 결과도 함께(창이 그린다). ⚠️ `simulation=` 인자로 넘기면 local_dirty 가 서서
+        # Legacy 화면이 '미적용 변경' 으로 보인다 - 한 번만 실리는 extra 로 싣는다.
+        return self._state_with(extra={"simulation": result})
 
     @staticmethod
     def _format_sim_log(result: dict[str, Any]) -> str:
@@ -762,10 +764,14 @@ class HeadlessConditionalPromptService:
 
         saved_override = getattr(context, "session_cond_override", None)
         saved_recorder = getattr(context, "session_cond_simulate", None)
+        saved_steps = getattr(context, "session_cond_simulate_steps", None)
         recorder: list[str] = []
+        # 규칙마다 바꾼 것(엔진이 테스트 때만 채운다) - Test Rules / Simulation 창이 그린다.
+        steps: list[dict[str, Any]] = []
         try:
             context.session_cond_override = {"enabled": True, "rules": text, "engine_options": options}
             context.session_cond_simulate = recorder
+            context.session_cond_simulate_steps = steps
             generated = service.generate_instant_source_result_silent(sample_row, settings)
             if generated.error or generated.context is None:
                 raise RuntimeError(generated.error or "시뮬레이션 결과가 없습니다.")
@@ -777,11 +783,13 @@ class HeadlessConditionalPromptService:
             matched = [r for r in recorder if r]
             result["matched_rule_texts"] = matched
             result["matched_count"] = len(set(matched))
+            result["steps"] = steps
         except Exception as exc:
             result["error"] = f"시뮬레이션 실행 실패: {exc}"
         finally:
             context.session_cond_override = saved_override
             context.session_cond_simulate = saved_recorder
+            context.session_cond_simulate_steps = saved_steps
         return result
 
     def _sample_row(self):

@@ -15,6 +15,9 @@ export function createConditionalPromptPanel({
   presetHost = null,
   togglePresets = null,
   isPresetsOpen = () => false,
+  // 'Test Rules / Simulation' 동반 창의 본문과 여는 함수(사용자 지정 2026-09-26: 본 창엔 공간이 모자라다).
+  simHost = null,
+  showSimulation = null,
 }) {
   const moduleBody = hostElement || document.getElementById('modulePopupBody');
   // 떠 있는 창 안이면 컴팩트 배치로 그린다(칸 이름표를 줄이고 한 줄로 모은다).
@@ -54,6 +57,13 @@ export function createConditionalPromptPanel({
   let lastPresetHostSignature = '';
   let lastRenderedRuleId = null;
   let lastSelectedIndex = -1;
+  // 서버가 마지막으로 보낸 v2 규칙 글 - 에코가 '규칙은 그대로' 인지 가르는 기준(편집 보존).
+  let lastServerRulesV2 = null;
+  // Test Rules / Simulation 창의 상태. 결과는 서버가 **그 응답에만** 싣는다 - 여기 옮겨 쥔다.
+  let lastSimulation = null;
+  let simRunning = false;
+  let simStale = false;
+  let simShowFull = false;
 
   function safeText(value) {
     return value == null ? '' : String(value);
@@ -397,6 +407,10 @@ export function createConditionalPromptPanel({
     syncScroll(element);
     const key = element.dataset.condRuleKey || 'rules';
     onModTextEdit('conditional_prompt', key, element.value);
+    if (lastSimulation && !simStale) {
+      simStale = true;
+      renderSimHost();
+    }
   }
 
   function syncScroll(element) {
@@ -567,6 +581,11 @@ export function createConditionalPromptPanel({
   function markDirty() {
     dirty = true;
     if (currentState) currentState.simulation = null;
+    // 옆 창의 결과는 지우지 않고 '규칙이 바뀌었다' 고만 알린다(다시 실행은 사용자가).
+    if (lastSimulation && !simStale) {
+      simStale = true;
+      renderSimHost();
+    }
     updateDynamicText();
   }
 
@@ -760,14 +779,15 @@ export function createConditionalPromptPanel({
 
     const selected = selectedRule();
     const selectedDsl = document.getElementById('condSelectedDsl');
+    const inlineSimulation = simHost ? null : currentState.simulation;
     if (selectedDsl) {
-      selectedDsl.value = currentState.simulation
-        ? formatSimulationText(currentState.simulation)
+      selectedDsl.value = inlineSimulation
+        ? formatSimulationText(inlineSimulation)
         : (selected ? serializeRule(selected) : '');
       // 편집하면 시뮬레이션 결과가 지워진다 - 제목·높이도 미리보기로 되돌린다.
-      selectedDsl.closest('.cond-dsl-viewer')?.classList.toggle('has-sim', Boolean(currentState.simulation));
+      selectedDsl.closest('.cond-dsl-viewer')?.classList.toggle('has-sim', Boolean(inlineSimulation));
       const dslTitle = document.getElementById('condSelectedDslTitle');
-      if (dslTitle) dslTitle.textContent = currentState.simulation ? '시뮬레이션 결과' : 'DSL 미리보기 (선택한 규칙)';
+      if (dslTitle) dslTitle.textContent = inlineSimulation ? '시뮬레이션 결과' : 'DSL 미리보기 (선택한 규칙)';
     }
     const summary = document.getElementById('condSelectedSummary');
     if (summary) summary.textContent = selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.';
@@ -856,7 +876,7 @@ export function createConditionalPromptPanel({
     // 동반 창이 있으면 판은 거기에 그린다(창 안 팝오버를 쓰지 않는다).
     const inlinePresetPane = !presetHost && m.can_manage_presets && presetPopoverOpen;
     const testButton = m.can_test_rules
-      ? `<button class="mod-action-btn mod-start" data-cond-action="test-rules">Test Rules</button>`
+      ? `<button class="mod-action-btn mod-start" data-cond-action="test-rules"${simHost ? ' title="검색 샘플 한 줄로 규칙을 돌려 보고, 옆 창에 결과를 띄웁니다"' : ''}>${simHost ? 'Test Rules / Simulation' : 'Test Rules'}</button>`
       : '';
     moduleBody.innerHTML = `
       <div class="cond-root${presetPopoverOpen && !presetHost ? ' cond-preset-popover-open' : ''}">
@@ -892,7 +912,9 @@ export function createConditionalPromptPanel({
         </div>`;
     }
     const lines = safeText(m.log).split('\n').map(line => line.trim()).filter(Boolean);
-    const last = lines.length ? lines[lines.length - 1] : '';
+    // 머리줄엔 요약(`=== … ===`)을 비춘다 - 마지막 줄은 대개 네거티브 문장이라 아무 정보가 없었다(사용자 캡처).
+    const summaryLine = lines.find(line => line.startsWith('==='));
+    const last = summaryLine ? summaryLine.replace(/^=+\s*|\s*=+$/g, '') : (lines.length ? lines[lines.length - 1] : '');
     return `
       <section class="cond-log-fold${logOpen ? ' is-open' : ''}">
         <button type="button" class="cond-log-head" data-cond-action="toggle-log" aria-expanded="${logOpen ? 'true' : 'false'}">
@@ -902,6 +924,133 @@ export function createConditionalPromptPanel({
         </button>
         <div class="mod-log-viewer" id="condLogViewer"${logOpen ? '' : ' hidden'}>${formatLog(m.log)}</div>
       </section>`;
+  }
+
+  // ── Test Rules / Simulation 창(사용자 지정 2026-09-26) ─────────────────────────
+  // 예전엔 서버가 만든 글 덩어리(DSL 원문 · `^` 구분자 · 수백 자 최종 프롬프트)를 그대로 보여 줘
+  // 사람이 읽기 어려웠다. 규칙마다 **무엇을 바꿨는지**(서버가 테스트 때만 기록하는 steps)를 칩으로 그린다.
+  const SIM_WHERE = {prefix: '선행', main: '메인', postfix: '후행', neg: '네거티브'};
+
+  function simWhereLabel(where) {
+    if (SIM_WHERE[where]) return SIM_WHERE[where];
+    const match = /^(char|uc):(\d+)$/.exec(safeText(where));
+    if (match) return match[1] === 'uc' ? `캐릭터 ${match[2]} UC` : `캐릭터 ${match[2]}`;
+    return safeText(where);
+  }
+
+  function simConditionLabel(condition) {
+    const text = safeText(condition).trim();
+    if (!text) return '<span class="csim-cond is-always">항상</span>';
+    if (RATING_VALUES.has(text.toLowerCase())) return `<span class="csim-cond">등급 ${escHtml(text.toUpperCase())}</span>`;
+    return `<code class="csim-cond">${escHtml(text)}</code>`;
+  }
+
+  function simChips(tags, kind, already = null) {
+    return (tags || []).map(tag => (already && already.has(tag)
+      ? `<span class="csim-chip same" title="이미 있어서 바뀌지 않았습니다">= ${escHtml(tag)}</span>`
+      : `<span class="csim-chip ${kind}">${kind === 'add' ? '+' : '−'} ${escHtml(tag)}</span>`)).join('');
+  }
+
+  // negBefore: 네거티브 칸에 **이미 있던** 태그 - 규칙이 더해도 합칠 때 겹쳐 빠지므로 '이미 있음' 으로 보인다.
+  function simChangeRow(change, negBefore = null) {
+    const where = `<span class="csim-where">${escHtml(simWhereLabel(change.where))}</span>`;
+    if (change.active !== undefined) {
+      return `<div class="csim-change">${where}<span class="csim-chip ${change.active ? 'add' : 'del'}">${change.active ? '켬' : '끔'}</span></div>`;
+    }
+    const setNote = change.where === 'neg' && change.op === 'set' ? '<span class="csim-note">통째로 교체</span>' : '';
+    const already = change.where === 'neg' && change.op !== 'set' ? negBefore : null;
+    return `<div class="csim-change">${where}${setNote}${simChips(change.added, 'add', already)}${simChips(change.removed, 'del')}</div>`;
+  }
+
+  function splitPromptTags(text) {
+    return safeText(text).split(',').map(tag => tag.trim()).filter(Boolean);
+  }
+
+  function renderSimulationCard(sim) {
+    const notes = '검색 샘플 한 줄로 규칙을 돌려 본 결과입니다(조건부를 켠 것으로 가정). '
+      + '수동 Generate 는 지금 입력에서 네거티브 규칙만 평가하므로 실제 결과와 다를 수 있습니다.';
+    const rerun = `<button type="button" class="csim-rerun" data-cond-action="sim-rerun">다시 실행</button>`;
+    if (simRunning && !sim) {
+      return `<div class="csim-head"><span class="csim-status">실행 중…</span>${rerun}</div>`;
+    }
+    if (!sim) {
+      return `<div class="csim-empty">[Test Rules / Simulation] 을 누르면 검색 샘플 한 줄로 규칙을 돌려 보고 여기에 결과를 보입니다.</div>`;
+    }
+    const sample = sim.sample || {};
+    const sampleChips = [
+      sample.rating ? `<span class="csim-sample">등급 ${escHtml(String(sample.rating).toUpperCase())}</span>` : '',
+      sample.character ? `<span class="csim-sample">${escHtml(sample.character)}</span>` : '',
+      sample.artist ? `<span class="csim-sample">${escHtml(sample.artist)}</span>` : '',
+    ].join('');
+    const flags = [
+      simRunning ? '<div class="csim-flag">다시 실행 중…</div>' : '',
+      simStale ? '<div class="csim-flag stale">규칙이 바뀌었습니다 - [다시 실행] 으로 새 결과를 보세요.</div>' : '',
+    ].join('');
+    if (!sim.ok) {
+      return `<div class="csim-head"><span class="csim-status fail">✗ 실행 실패</span><span class="csim-info" title="${escapeAttr(notes)}">ⓘ</span>${rerun}</div>
+        ${flags}<div class="csim-error">${escHtml(sim.error || '알 수 없는 오류')}</div>`;
+    }
+    const steps = Array.isArray(sim.steps) ? sim.steps : null;
+    const negBefore = splitPromptTags(sim.negative_before);
+    const negBeforeSet = new Set(negBefore);
+    const multiPass = Boolean(steps && steps.some(step => Number(step.pass) > 1));
+    const fired = steps ? steps.length : Number(sim.matched_count || 0);
+    let stepRows = '';
+    if (steps) {
+      stepRows = steps.map((step, index) => {
+        const changes = Array.isArray(step.changes) && step.changes.length
+          ? step.changes.map(change => simChangeRow(change, negBeforeSet)).join('')
+          : '<div class="csim-change"><span class="csim-note">바뀐 것 없음 (이미 있거나 대상이 없음)</span></div>';
+        const pass = multiPass ? `<span class="csim-pass">${Number(step.pass) || 1}회차</span>` : '';
+        return `<div class="csim-step" title="${escapeAttr(step.rule)}">
+            <div class="csim-step-head"><span class="csim-idx">${index + 1}</span>${pass}${simConditionLabel(step.condition)}<span class="csim-arrow">→</span></div>
+            <div class="csim-step-body">${changes}</div>
+          </div>`;
+      }).join('');
+    } else {
+      // 옛 서버(steps 없음) - DSL 원문만 있다.
+      stepRows = (sim.matched_rule_texts || []).map((rule, index) =>
+        `<div class="csim-step"><div class="csim-step-head"><span class="csim-idx">${index + 1}</span><code class="csim-cond">${escHtml(rule)}</code></div></div>`).join('');
+    }
+    // 프롬프트에 더해진·빠진 태그 모두(선행·메인·후행).
+    const added = [];
+    const removed = [];
+    (steps || []).forEach(step => (step.changes || []).forEach(change => {
+      if (['prefix', 'main', 'postfix'].includes(change.where)) {
+        added.push(...(change.added || []));
+        removed.push(...(change.removed || []));
+      }
+    }));
+    const negAfter = splitPromptTags(sim.negative_after);
+    const negOps = Array.isArray(sim.conditional_negative_ops) ? sim.conditional_negative_ops.length : 0;
+    const negAdded = negAfter.filter(tag => !negBefore.includes(tag));
+    const negRemoved = negBefore.filter(tag => !negAfter.includes(tag));
+    const addedSet = new Set(added);
+    const fullPrompt = splitPromptTags(sim.final_prompt)
+      .map(tag => (addedSet.has(tag) ? `<mark>${escHtml(tag)}</mark>` : escHtml(tag))).join(', ');
+    return `
+      <div class="csim-head">
+        <span class="csim-status ${fired ? 'ok' : 'none'}">${fired ? `✓ ${fired}개 발동` : '발동한 규칙 없음'}</span>
+        <span class="csim-info" title="${escapeAttr(notes)}">ⓘ</span>
+        ${rerun}
+      </div>
+      ${flags}
+      <section class="csim-sec"><div class="csim-label">샘플</div><div class="csim-row">${sampleChips || '<span class="csim-note">정보 없음</span>'}</div></section>
+      <section class="csim-sec"><div class="csim-label">발동한 규칙</div>${stepRows || '<div class="csim-note">조건이 맞은 규칙이 없습니다.</div>'}</section>
+      <section class="csim-sec"><div class="csim-label">프롬프트에서 바뀐 것</div>
+        <div class="csim-row">${added.length || removed.length ? `${simChips(added, 'add')}${simChips(removed, 'del')}` : '<span class="csim-note">변화 없음</span>'}</div></section>
+      <section class="csim-sec"><div class="csim-label">네거티브</div>
+        <div class="csim-row">${negAdded.length || negRemoved.length ? `${simChips(negAdded, 'add')}${simChips(negRemoved, 'del')}`
+          : `<span class="csim-note">${negOps ? '변화 없음 (규칙이 더한 태그가 이미 있었음)' : '변화 없음'}</span>`}</div></section>
+      <section class="csim-sec">
+        <button type="button" class="csim-toggle" data-cond-action="sim-toggle-full" aria-expanded="${simShowFull ? 'true' : 'false'}">${simShowFull ? '▾' : '▸'} 최종 프롬프트</button>
+        ${simShowFull ? `<div class="csim-full">${fullPrompt || '<span class="csim-note">(비어 있음)</span>'}</div>` : ''}
+      </section>`;
+  }
+
+  function renderSimHost() {
+    if (!simHost) return;
+    simHost.innerHTML = `<div class="cond-root cond-sim-root">${renderSimulationCard(lastSimulation)}</div>`;
   }
 
   /** 프리셋 동반 창의 본문. 핸들러가 `.cond-root` 안만 받으므로 같은 뿌리 이름으로 감싼다. */
@@ -1039,7 +1188,7 @@ export function createConditionalPromptPanel({
         </div>
         <div class="cond-bottom-actions">
           <button type="button" class="mod-action-btn" data-cond-action="reload-state" title="서버에 적용된 규칙을 다시 불러옵니다(적용 안 한 편집은 버려집니다)">${windowed ? '다시 불러오기' : '현재 DSL 다시 불러오기'}</button>
-          ${m.can_test_rules ? '<button type="button" class="mod-action-btn" data-cond-action="test-rules">시뮬레이션</button>' : ''}
+          ${m.can_test_rules ? `<button type="button" class="mod-action-btn" data-cond-action="test-rules"${simHost ? ' title="검색 샘플 한 줄로 지금 편집 중인 규칙을 돌려 보고, 옆 창에 결과를 띄웁니다"' : ''}>${simHost ? 'Test Rules / Simulation' : '시뮬레이션'}</button>` : ''}
           ${m.can_edit_rulebook ? `<button type="button" class="mod-action-btn mod-start" data-cond-action="apply-book" ${dirty ? '' : 'disabled'}>✔ ${windowed ? '적용' : '모듈에 적용'}</button>` : ''}
         </div>
         ${renderLog(m)}
@@ -1514,7 +1663,8 @@ export function createConditionalPromptPanel({
 
   function renderActionPane(rule) {
     const dsl = rule ? serializeRule(rule) : '';
-    const simulation = currentState?.simulation;
+    // 옆 창(Test Rules / Simulation)이 있으면 결과는 거기에 - 이 칸은 DSL 미리보기로만 쓴다.
+    const simulation = simHost ? null : currentState?.simulation;
     const previewText = simulation ? formatSimulationText(simulation) : dsl;
     const previewTitle = simulation ? '시뮬레이션 결과' : 'DSL 미리보기 (선택한 규칙)';
     return `
@@ -1880,7 +2030,8 @@ export function createConditionalPromptPanel({
 
   function handleClick(event) {
     const root = event.target.closest('.cond-root');
-    if (!root || !(moduleBody.contains(root) || (presetHost && presetHost.contains(root)))) return;
+    if (!root || !(moduleBody.contains(root) || (presetHost && presetHost.contains(root))
+      || (simHost && simHost.contains(root)))) return;
     const modeButton = event.target.closest('[data-cond-mode]');
     if (modeButton) {
       const mode = normalizeMode(modeButton.dataset.condMode);
@@ -1977,15 +2128,24 @@ export function createConditionalPromptPanel({
       if (typeof globalThis.requestModuleState === 'function') {
         globalThis.requestModuleState('conditional_prompt');
       }
-    } else if (action === 'test-rules') {
+    } else if (action === 'test-rules' || action === 'sim-rerun') {
       if (currentState?.can_test_rules === false) return;
+      if (simHost) {
+        // 결과는 옆 창(Test Rules / Simulation)에 그린다 - 창부터 열고 '실행 중' 을 보인다.
+        if (typeof showSimulation === 'function') showSimulation();
+        simRunning = true;
+        renderSimHost();
+      }
       if (currentState?.editor_mode === 'v2') {
         sendModuleParam('conditional_prompt', 'simulate_v2', JSON.stringify({book: currentBookPayload()}));
       } else {
-        // 결과는 실행 기록으로 온다 - 접혀 있으면 펼쳐 둔다(돌아올 렌더가 이 값을 읽는다).
-        logOpen = true;
+        // 옛 배치(창 없음)에선 결과가 실행 기록으로만 온다 - 접혀 있으면 펼쳐 둔다.
+        if (!simHost) logOpen = true;
         sendModuleParam('conditional_prompt', 'test', '1');
       }
+    } else if (action === 'sim-toggle-full') {
+      simShowFull = !simShowFull;
+      renderSimHost();
     } else if (action === 'save-preset') {
       savePreset();
     } else if (action === 'new-preset') {
@@ -2161,6 +2321,7 @@ export function createConditionalPromptPanel({
     moduleBody.addEventListener('input', handleInput);
     moduleBody.addEventListener('change', handleChange);
     moduleBody.addEventListener('keydown', handleKeydown);
+    if (simHost) simHost.addEventListener('click', handleClick);
     if (presetHost) {
       presetHost.addEventListener('click', handleClick);
       presetHost.addEventListener('keydown', handlePresetHostKeydown);
@@ -2251,6 +2412,13 @@ export function createConditionalPromptPanel({
     if (state && state.preset_overwrite_prompt) {
       overwritePrompt = state.preset_overwrite_prompt;
     }
+    // 시뮬레이션 결과도 그 응답에만 실린다 - 아래 가드에 걸려 렌더가 미뤄져도 옆 창은 바로 그린다.
+    if (simHost && state && state.simulation) {
+      lastSimulation = state.simulation;
+      simRunning = false;
+      simStale = false;
+      renderSimHost();
+    }
     // Skip the destructive innerHTML rebuild when the Legacy DSL rules editor (or raw
     // DSL editor) is focused and only the rules text changed — replacing the textarea
     // drops focus mid-typing (same regression as Character/Img2Img: 38d3898 / c9edf4b).
@@ -2263,11 +2431,33 @@ export function createConditionalPromptPanel({
     clearDeferredCondRender();
     lastRenderedStructureSignature = structureSignature;
     const preserveDirty = state === currentState;
+    // ⚠️ New Editor 의 편집은 [적용] 전까지 **이 화면에만** 있다. 예전엔 서버 에코가 올 때마다(시뮬레이션 응답,
+    //    활성화 체크 등) 서버의 규칙 책으로 통째로 갈아 끼워 **적용 안 한 편집이 사라졌다**(09-26 라이브:
+    //    규칙 하나 더하고 Test Rules / Simulation 을 누르자 규칙이 0개가 됐다). 서버 쪽 규칙이 **그대로**인
+    //    에코면 편집 중인 책을 지킨다. 서버 규칙이 실제로 바뀐 경우(프리셋 불러오기·되돌리기)는 서버 것을 쓴다.
+    const incomingRulesV2 = state ? safeText(state.rules_v2) : '';
+    const keepLocalBook = !preserveDirty && dirty && currentState
+      && currentState.editor_mode === 'v2' && normalizeMode(state?.editor_mode || state?.mode) === 'v2'
+      && lastServerRulesV2 !== null && incomingRulesV2 === lastServerRulesV2;
+    const localBook = keepLocalBook ? rulebook() : null;
+    if (!preserveDirty) lastServerRulesV2 = incomingRulesV2;
     currentState = normalizeState(state);
+    if (localBook) {
+      currentState.rules_v2_book = localBook;
+      currentState.rules_v2 = serializeRulebook(localBook);
+      currentState.rules = currentState.rules_v2;
+      currentState.active_rules = currentState.rules_v2;
+    }
     // 위에서 우리 쪽(`overwritePrompt`)으로 옮겼다. 상태에 남겨 두면 확인·취소 뒤
     // `render(currentState)` 가 그걸 다시 주워 상자가 영영 안 닫힌다.
     delete currentState.preset_overwrite_prompt;
-    if (!preserveDirty) dirty = Boolean(currentState.local_dirty);
+    // 시뮬레이션 응답은 서버가 local_dirty 를 세워 보낸다(편집을 지키려던 옛 방식). 편집 보존은 위에서 하므로
+    // 그 응답으로 '미적용 변경' 을 켜지 않는다 - 테스트만 눌렀는데 적용 안 한 것처럼 보였다.
+    if (!preserveDirty) {
+      dirty = state && state.simulation
+        ? (dirty || Boolean(localBook))
+        : (Boolean(currentState.local_dirty) || Boolean(localBook));
+    }
     if (currentState.editor_mode === 'v2') renderV2(currentState);
     else renderLegacy(currentState);
   }

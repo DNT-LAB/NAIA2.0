@@ -407,6 +407,18 @@ class KoreanLayer:
         with self._tok_lock:
             return [(t.form, t.tag) for t in self._kiwi.tokenize(clean_text(text))]
 
+    def raw_tokens_many(self, texts: list[str]) -> list[list[tuple[str, str]]]:
+        """raw_tokens 를 여러 글에 한 번에 — 사전 설명 · 키워드 원형 색인(core/assist_recover, 약 2만 글)용.
+        Kiwi 는 목록을 받으면 한꺼번에 처리한다(하나씩 부르는 것보다 훨씬 빠르다)."""
+        if not self.warm():
+            return [[] for _ in texts]
+        with self._tok_lock:
+            return [[(t.form, t.tag) for t in toks] for toks in self._kiwi.tokenize([clean_text(t) for t in texts])]
+
+    def spans(self, text: str) -> list[tuple[str, str, int, int]]:
+        """분석과 같은 토큰(조사 떼기 · 이름 붙이기)에 clean_text 기준 위치 — 미번역 낱말 덩어리를 어절로 묶을 때 쓴다."""
+        return [(t.form, t.tag, t.start, t.end) for t in self._tokens(text)]
+
     def _tokens(self, text: str) -> list["_Tok"]:
         """clean_text 한 글의 토큰(위치 포함). 붙은 조사를 떼고(_unglue) 이름 토막을 붙인다(_merge_names) —
         여러 토막 이름(나토리 사나)이 **토큰 하나**가 되어 방향·인원 세기·칠하기가 한 사람으로 본다."""

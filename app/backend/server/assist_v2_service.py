@@ -14,7 +14,7 @@ import json
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 ASSIST_LEASE_SECONDS = 600.0
 MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 2026-09-23) — 1건 풀은 매번 같은 것을 뽑는다
@@ -29,6 +29,7 @@ MAX_VIRTUAL_CHARACTERS = 6
 _LOCK = threading.Lock()
 _INSTALLER_LOCK = threading.Lock()
 _WARM_LOCK = threading.Lock()
+_RECOVER_LOCK = threading.Lock()   # 미번역 되살리기의 사전 원형 색인(세션에 한 번, 수 초) — _LOCK 을 오래 쥐지 않게 따로
 _GRAMMAR: str | None = None
 _GENDERS: dict[str, str] | None = None
 _PROFILES: dict[str, tuple[str, dict[str, Any]]] | None = None
@@ -182,7 +183,9 @@ def warm_assist(context: Any) -> None:
         try:
             layer = korean_layer(context)
             _lemma_index(context, layer).build()
-            _compose_tools(context, layer, _tag_vocab(context, layer))
+            vocab = _tag_vocab(context, layer)
+            _compose_tools(context, layer, vocab)
+            _ko_dict_index(context, layer, vocab)        # 미번역 되살리기 — 사전 설명 · 키워드 원형 색인(수 초)
         except Exception:
             pass
 
@@ -335,8 +338,10 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
     literal = bool(payload.get("literal", False))
     # 다듬기 도구(사용자 제안 09-25) — 원문 + 태그로 고치고 보강하고 장면 문장 하나(메인 = 태그들, 문장). 기본 켬
     refine = bool(payload.get("refine", True))
+    # 미번역 낱말 되살리기(09-26 첫 마일스톤, core/assist_recover) — 거구 · 주인 · 교배 처럼 어떤 태그도 설명 못 한 말. 기본 켬
+    recover = bool(payload.get("recover", True))
     return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
-            "choices": choices, "not_names": not_names, "literal": literal, "refine": refine}
+            "choices": choices, "not_names": not_names, "literal": literal, "refine": refine, "recover": recover}
 
 
 def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -413,7 +418,7 @@ def _grounded_tags(context: Any, layer: Any, text: str) -> set[str]:
 
 
 def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: Any, literal: str | None,
-            layer: Any, ka: Any) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+            layer: Any, ka: Any, keep: Iterable[str] = ()) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """다듬기 도구(core/assist_refine) — 원문 + 지금 태그를 E2B 에 한 번(문법 잠금 · 권장 샘플링). 모델의 답은 제안이다.
     한국어 사전으로 확인한다(진짜 E2B 가 브이 문장에서 맞는 v 를 빼고 finger heart 를 더했다, 09-25):
     - 빼기: 지금 태그 안에서만, 사전이 요청과 이어 주는 태그 · 한국어 층 규칙 태그는 빼지 않는다.
@@ -433,7 +438,8 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
         return None, info
     grounded = _grounded_tags(context, layer, req["text"])
     typed = merged.english.keys()                    # 사용자가 영문으로 적은 것 — 빼지 않고, 이미 실리니 더하지 않는다
-    protected = grounded | set(ka.specific) | set(ka.verb_tags) | {t for t in tags if en_key(t) in typed}
+    # keep = 미번역 되살리기가 사전 · 이벤트 맵 근거로 고른 것 — 다듬기가 도로 빼지 않는다
+    protected = grounded | set(ka.specific) | set(ka.verb_tags) | {t for t in tags if en_key(t) in typed} | set(keep)
     # 자기 일관성: 모델이 제 문장에서 말한 태그는 빼지 않는다(밤바다 -> night 를 빼며 'at night')
     removed = [t for t in got.remove if t in tags and t not in protected and not ar.mentions(t, got.sentence)]
     kept = [t for t in got.remove if t in tags and t not in removed]
@@ -764,13 +770,23 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     t_sense = time.perf_counter()
     _sense_check(context, layer, ka, merged, vocab)
     sense_ms = round((time.perf_counter() - t_sense) * 1000, 1)
+    # 미번역 낱말 되살리기(09-26 첫 마일스톤) — 뜻 검사 뒤 · 등급 게이트 앞. 모델이 없으면 건너뛴다(고를 수 없다 — 지어내지 않는다)
+    recover: dict[str, Any] | None = None
+    t_recover = time.perf_counter()
+    if req["recover"] and merged.task == "scene" and not model.get("error"):
+        try:
+            recover = _recover(context, req, layer, ka, merged, vocab, _persons_total(layer, ka, merged, req))
+        except Exception as exc:                 # 되살리기가 깨져도 Assist 는 산다
+            recover = {"units": [], "added": [], "error": f"{type(exc).__name__}: {exc}"}
+    recover_s = round(time.perf_counter() - t_recover, 3)
     share = _rating_share(context, req["rating"])
     typed = merged.english.keys()                # 사용자가 영문으로 적은 것은 적힌 그대로 — 등급 게이트도 거치지 않는다
     gated = [t for t in merged.all_tags() + [a for c in merged.characters for a in c.attrs]
              + [r[1] for r in merged.relations] if en_key(t) not in typed]
     dropped = off_rating(gated, share, RATING_GATE[req["rating"]]) if share else {}
     drop_tags(merged, dropped)
-    refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka)
+    refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka,
+                                   keep=(recover or {}).get("added") or ())
                            if req["refine"] and merged.task == "scene" else (None, {}))
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
@@ -782,6 +798,8 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         "model": model,
         "literal": literal,
         "refine": refine,
+        # 미번역 낱말 되살리기 — 덩어리마다 후보 · 답 · 고른 것(added 는 2순위 층에 실었다). 없으면 None
+        "recover": recover,
         # 요청에 섞어 쓴 영문 — 적힌 그대로 실었다(keep) · 뺐다(exclude) · 인원으로 셌다(people)
         "english": {"keep": merged.english.keep, "exclude": merged.english.exclude, "people": merged.english.people},
         "trace": {"korean": ka.notes, "merge": merged.log,
@@ -801,6 +819,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                      "refine_s": refine_info.get("elapsed"), "model_s": model.get("elapsed"),
                      "choose_s": ((choose_state or {}).get("model") or {}).get("elapsed"),
                      "choose_prep_ms": (choose_state or {}).get("prep_ms"), "sense_ms": sense_ms,
+                     "recover_s": recover_s,
                      "search_ms": round((time.perf_counter() - t) * 1000, 1),
                      "total_s": round(time.perf_counter() - started, 3)}
     if merged.task in ("scene", "tag"):
@@ -808,6 +827,249 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         out["recap"] = make_recap(merged, partition=partition, rating=req["rating"])
     _with_rating_note(out, req["rating"], dropped)
     return out
+
+
+# ── 미번역 낱말 되살리기(S9d, 09-26 첫 마일스톤 — core/assist_recover) ─────────────────────────────
+
+
+def _recover_entries(context: Any, layer: Any, vocab: Any) -> list[tuple[str, str, str]]:
+    """사전 원형 색인에 넣을 태그 — 쓸 수 있는 것(TagFinder.usable: 설명 있음 · 작가/캐릭터/작품 아님 · 50건 이상)을
+    이벤트 맵 이름으로. (태그, keywords_kr, description)."""
+    from app.backend.server.autocomplete_commands import _ensure_kr_raw
+    from core import assist_compose as ac
+
+    raw = _ensure_kr_raw(context) or {}
+    finder = ac.TagFinder(_compose_tools(context, layer, vocab))
+    out: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for tag, info in raw.items():
+        if not isinstance(info, dict) or not finder.usable(tag):
+            continue
+        name = vocab.canonical(tag)
+        if name and name not in seen:
+            seen.add(name)
+            out.append((name, str(info.get("keywords_kr") or ""), str(info.get("description") or "")))
+    return out
+
+
+def _ko_dict_index(context: Any, layer: Any, vocab: Any) -> Any:
+    """사전 설명 · 키워드 원형 색인 — 세션에 하나(창을 열 때 뒤에서 만든다, 약 2만 태그 · 수 초)."""
+    from core.assist_recover import KoDictIndex
+
+    with _RECOVER_LOCK:
+        index = getattr(context, "assist_ko_dict_index", None)
+        if index is None:
+            if not layer.warm():                      # Kiwi 가 없으면 빈 색인을 세션 내내 쥐게 된다 — 만들지 않는다
+                raise RuntimeError(f"한국어 분석기(Kiwi)가 없습니다: {layer.error}")
+            started = time.perf_counter()
+            index = KoDictIndex(_recover_entries(context, layer, vocab), layer.raw_tokens_many, layer.raw_tokens)
+            index.seconds = round(time.perf_counter() - started, 1)
+            context.assist_ko_dict_index = index
+    return index
+
+
+def _exact_word_index(context: Any) -> dict[str, set[str]]:
+    """이벤트 맵 태그 이름의 낱말(그대로) -> 태그 — 뜻 키워드로 이름을 맞출 때. 맵이 바뀌면 다시 만든다."""
+    from core.assist_recover import word_index
+
+    try:
+        idx = _event_map(context).index()
+    except Exception:
+        return {}
+    cached = getattr(context, "assist_exact_word_index", None)
+    if not cached or cached[0] is not idx:
+        cached = (idx, word_index(idx.by_id.values()))      # ⚠️ by_id 는 {id: 이름}
+        context.assist_exact_word_index = cached
+    return cached[1]
+
+
+def _recover_rank(context: Any, names: Iterable[str], pins: list[str], rating: str, count: Any,
+                  scores: dict[str, float] | None = None, limit: int = 6) -> list[str]:
+    """후보 줄 세우기 — 이벤트 맵 공출현 순(지금 태그 앞쪽을 핀으로 explore + 고른 등급 분면 browse, 인원 분면은 걸지 않는다:
+    1girl_solo 풀에 hug from behind 가 0건이라 막혔다). scores(사전 맞춤)가 있으면 문턱에 빠진 나머지를 점수 순으로 뒤에 —
+    사전의 드문 정확 일치(거구 -> giant male, 메이드 풀 0건)가 통째로 사라지지 않게. 맵이 없으면 점수 · 게시물 순."""
+    import numpy as np
+
+    names = list(dict.fromkeys(n for n in names if n))
+    if not names:
+        return []
+    out: list[str] = []
+    mapped = True
+    try:
+        idx = _event_map(context).index()
+        mask = np.zeros(idx.n_tags, dtype=bool)
+        for n in names:
+            tid = idx.resolve(n)
+            if tid is not None:
+                mask[tid] = True
+        if mask.any():
+            if pins:
+                ex = idx.explore(pins[:2], ratings=[rating], allowed=mask, sort="posts", limit=limit, min_posts=3)
+                out += [c["tag"] for c in ex.get("candidates") or []]
+            part = idx.browse(ratings=[rating], allowed=mask, limit=limit, min_posts=20)
+            out += [c["tag"] for c in part.get("candidates") or [] if c["tag"] not in out]
+    except Exception:
+        out, mapped = [], False
+    # 뜻 키워드 후보(scores 없음)는 맵이 있으면 공출현한 것만 — 평가(S2 · S9d)와 같다. 맵이 없을 때만 게시물 순으로 대신
+    if scores is not None or not mapped:
+        rest = sorted((n for n in names if n not in out),
+                      key=lambda n: (-(scores or {}).get(n, 0.0), -int(count(n) or 0), n))
+        out += rest
+    return out[:limit]
+
+
+def _explained_lemmas(layer: Any, ka: Any, index: Any, tags: Iterable[str], info: Any) -> set[str]:
+    """요청의 어느 말을 이미 설명했나(원형 열쇠) — 지금 태그의 한국어 키워드 · 한국어 층의 사전 구 · 규칙(동사 · 관용구 ·
+    몸 부위 · 시청자). 설명문은 쓰지 않는다(maid 설명의 '주인' 이 주인을 설명한 것으로 치면 되살릴 수 없다)."""
+    from core.assist_recover import clean_keywords
+
+    out: set[str] = set()
+    for tag in tags:
+        lem = index.keyword_lemmas(tag)
+        if not lem:                                   # 색인 밖 태그(설명 없음 · 드묾)는 그 자리에서 키워드를 가른다
+            lem = set(index.query(clean_keywords((info(tag) or {}).get("keywords_kr"))))
+        out |= set(lem)
+    for span in ka.phrases:
+        out |= set(index.query(span))
+    rules = layer.rules
+    prefixes = [p for p, _t in rules.get("stem_prefixes") or ()]
+    verbs = rules.get("verbs") or {}
+    for s in ka.stems:
+        if s in verbs or any(s.startswith(p) for p in prefixes):
+            out.add(f"{s}/P")
+    out |= {f"{s}/P" for s in set(ka.idiom_verbs) | set(ka.phrase_stems)} | {f"{v}/N" for v in ka.vehicles}
+    for note in ka.notes:
+        if note.startswith("부위:"):                    # 부위:손+묶이->['bound wrists']
+            for form in note[3:].split("->", 1)[0].split("+"):
+                out |= {f"{form}/N", f"{form}/P"}
+    if ka.viewer:                                     # 나를 쳐다보는 -> looking at viewer
+        out |= {f"{s}/P" for s in ka.stems if "보" in s}
+    return out
+
+
+def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any, vocab: Any,
+             persons: int) -> dict[str, Any] | None:
+    """미번역 낱말 되살리기(S9d) — 결과 태그가 설명하지 못한 요청의 말을 찾아(find_units) 사전 · 뜻 키워드 · 이벤트 맵으로
+    후보를 모으고 제품의 번호 고르기(정순 · 역순)로 골라 2순위 층에 싣는다. 고를 것이 없으면 모델을 부르지 않는다.
+    평가 · 규칙의 근거: core/assist_recover 머리말 · docs/assist_vocab_handoff/untranslated/."""
+    from core import assist_candidates as cand
+    from core import assist_compose as ac
+    from core import assist_recover as ar
+    from core.assist_candidates import GENERIC_NOUNS
+    from core.assist_english import en_key
+    from core.assist_korean import clean_text
+    from core.assist_v2 import _junk_tag
+
+    if not getattr(ka, "available", True):
+        return None
+    started = time.perf_counter()
+    index = _ko_dict_index(context, layer, vocab)
+    tools = _compose_tools(context, layer, vocab)
+    finder = ac.TagFinder(tools)
+    rules = layer.rules
+    tags_now = list(dict.fromkeys(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
+                                  + [r[1] for r in merged.relations]))
+    # 영문으로 적은 것(적힌 그대로 실린다, core/assist_english)도 이미 있는 것 — 그 뜻을 다시 찾거나 겹쳐 싣지 않는다
+    typed = [t for t in (vocab.canonical(en_key(p)) for p in merged.english.keep + merged.english.exclude) if t]
+    explained = _explained_lemmas(layer, ka, index, tags_now + typed, tools.info)
+    names = {h.form for h in ka.names} | {c.ko for c in merged.characters}
+    skip = set(GENERIC_NOUNS) | set(ar.BASIC_PEOPLE) | set(rules.get("spatial_words") or ()) | names \
+        | {piece for n in names for piece in n.split()}
+    text = clean_text(req["text"])
+    units = ar.find_units(layer.spans(req["text"]), text, explained=explained, skip=skip,
+                          people=ar.person_words(rules), stop_verbs=rules.get("filler_stems") or ())
+    if not units:
+        return None
+    share = _rating_share(context, req["rating"])
+    gate = RATING_GATE.get(req["rating"])
+    present = set(tags_now) | set(merged.exclude) | set(typed)
+
+    def ok(tag: str) -> bool:
+        if not tag or tag in present or _junk_tag(tag) or not finder.usable(tag) or vocab.role(tag) == "population":
+            return False
+        if not ar.pair_ok(tag, persons):               # 엄마 한 사람에 mother and child
+            return False
+        s = share(tag) if share and gate is not None else None
+        return s is None or s >= gate
+
+    # 핀 = 지금 태그의 앞쪽 둘(층 순 · 게시물 순) — 인원 태그는 분면이지 핀이 아니다
+    pins = [t for t in merged.ordered(vocab.count) if vocab.canonical(t) and vocab.role(t) != "population"][:2]
+    plans = []
+    for unit in units:
+        matched = index.match(unit.text, keywords_only=unit.person)     # 사람 낱말은 키워드에서만(설명문 -> slave)
+        dict_names = _recover_rank(context, [n for n in matched if ok(n)], pins, req["rating"], vocab.count,
+                                   scores=matched, limit=ar.MAX_CANDIDATES)
+        need_kw = not dict_names or index.completeness(unit.text, matched, keywords_only=unit.person) < 1.0
+        plans.append((unit, dict_names, need_kw))
+    calls = 0
+    failed = None                                     # 모델 호출이 실패하면 그 뒤는 부르지 않는다(죽은 엔진은 매번 제한 시간)
+    keywords: dict[str, list[str]] = {}
+    kw_units = [u.text for u, _d, need in plans if need]
+    if kw_units:                                      # 뜻 키워드 두 번(합집합) — 실행마다 흔들려서
+        message = ar.kw_message(text, tags_now, kw_units)
+        for _ in range(2):
+            reply, info = _chat(context, ar.KW_SYSTEM, message, ar.kw_grammar(kw_units),
+                                max_tokens=max(120, 50 * len(kw_units)))
+            calls += 1
+            if reply is None:
+                failed = info.get("error") or "모델 호출 실패"
+                break
+            for unit_text, words in ar.parse_keywords(reply, kw_units).items():
+                keywords[unit_text] = list(dict.fromkeys(keywords.get(unit_text, []) + words))
+    windex = _exact_word_index(context) if keywords else {}
+    done = list(tags_now)
+    added: list[str] = []
+    out_units: list[dict[str, Any]] = []
+    for unit, dict_names, need_kw in plans:
+        words = keywords.get(unit.text, [])
+        kw_names: list[str] = []
+        if need_kw and words:
+            pool: set[str] = set()
+            for word in words:
+                for form in ar.keyword_forms(word):
+                    pool |= windex.get(form, set())
+            kw_names = _recover_rank(context, [n for n in pool if ok(n)], pins, req["rating"], vocab.count,
+                                     limit=ar.MAX_CANDIDATES)
+        listed = list(dict.fromkeys(dict_names + kw_names))[:ar.MAX_CANDIDATES]
+        source = ("both" if dict_names and kw_names else "dictionary" if dict_names
+                  else "keywords" if kw_names else "none")
+        answers: list[Any] = []
+        picks: list[str] = []
+        if listed and failed is None:
+            ask = cand.Ask(ko=unit.text, en=", ".join(words),
+                           candidates=[(t, ac._short(str((tools.info(t) or {}).get("description") or ""))) for t in listed])
+            orders = [ask] if len(listed) < 2 else [ask, cand.Ask(ko=ask.ko, en=ask.en,
+                                                                  candidates=list(reversed(ask.candidates)))]
+            for order in orders:
+                names_in_order = [t for t, _d in order.candidates]
+                reply, info = _chat(context, cand.CHOOSE_SYSTEM, cand.choose_message(req["text"], order, done),
+                                    cand.choose_grammar(len(names_in_order)), max_tokens=4)
+                calls += 1
+                if reply is None:                     # 엔진이 없거나 죽었다 — 싣지 않는다(지어내지 않는다)
+                    failed = info.get("error") or "모델 호출 실패"
+                    answers = []
+                    break
+                answers.append(cand.parse_choice(reply, names_in_order))
+            if answers:
+                picks = cand.settle_order(answers[0], answers[1] if len(answers) > 1 else answers[0], listed) or []
+        for tag in picks:
+            if tag not in present:
+                merged.tiers[1].append(tag)
+                present.add(tag)
+                added.append(tag)
+                done.append(tag)
+        merged.log.append(f"recover:{unit.text}->{','.join(picks) or '없음'}")
+        out_units.append({"text": unit.text, "lemmas": unit.lemmas, "kind": unit.kind, "person": unit.person,
+                          "source": source, "keywords": words, "candidates": listed, "answers": answers,
+                          "picks": picks})
+    return {"units": out_units, "added": added, "calls": calls, "error": failed,
+            "elapsed": round(time.perf_counter() - started, 3), "index_seconds": getattr(index, "seconds", None)}
+
+
+def _persons_total(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> int:
+    """되살리기의 두 사람 태그 문턱 — 지금 인원(수동이면 그 수, 자동이면 사람 낱말 · 고른 캐릭터 · 영문 인원 태그)."""
+    p = _persons(layer, ka, merged, req)
+    return int(p.get("girls") or 0) + int(p.get("boys") or 0) + int(p.get("unknown") or 0)
 
 
 def _english_people(pc: Any, people: list[str]) -> None:

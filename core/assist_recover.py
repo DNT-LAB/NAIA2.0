@@ -1,0 +1,320 @@
+"""Assist v2 — 미번역 낱말 되살리기(S9d, 사용자 지정 2026-09-26 · 첫 마일스톤).
+
+'거구의 주인에게 강제로 교배당하는 메이드' 가 `1girl, 1boy, maid, forced` 로 끝났다 — 거구 · 주인 · 교배 를 설명하는 태그가
+없었다. 요청의 내용 형태소 중 **결과 태그가 설명하지 못한 것**을 찾아(find_units) 태그를 되찾는다:
+
+1. 한국어 사전(NAIA keywords_kr + 설명, Kiwi 원형 일치 · IDF 맞춤 0.5+)에서 후보 — 거구 -> giant male('거구 남성').
+   사람 낱말(주인 · 엄마 …)은 **키워드에서만**(설명문의 "주인에게 소유되는" -> slave 를 막는다).
+2. 사전이 비었거나 맞춤이 **불완전**하면(낱말의 내용 형태소를 다 덮는 태그가 없음) E2B 뜻 키워드(두 번 합집합)가 이름에
+   든 이벤트 맵 태그를 뒤에 붙인다 — 잠들듯 말듯 -> sleepy.
+3. 후보는 이벤트 맵 공출현 순(부르는 쪽) · 두 사람 태그(mother and child)는 요청에 사람이 둘 이상일 때만.
+4. 고르기는 제품의 번호 고르기 그대로(정순 · 역순 · settle_order) — 부르는 쪽.
+
+평가: docs/assist_vocab_handoff/untranslated/ — 세트 v2(요청 26 · 낱말 44) 8회 적중 S9d 61.9% · S8 56.9% · S2 40.9%.
+사전 색인 · 맞춤 규칙은 거기서 잰 그대로 옮겼다(run_untranslated.py 의 KoIndex · ko_match_kw_only · ko_completeness).
+"""
+from __future__ import annotations
+
+import json
+import math
+import re
+from dataclasses import dataclass, field
+from typing import Callable, Iterable
+
+# 내용 형태소 = 명사 · 어근 · 외국어(N), 동사 · 형용사 줄기(P — Kiwi 가 싸다(동/형)를 오가서 한 갈래), 부사(M, 둥둥 같은 흉내말)
+KO_CONTENT = ("NNG", "NNP", "XR", "SL", "SH", "VV", "VA", "MAG")
+KO_STOP = frozenset({"말/P", "하/P", "되/P", "있/P", "없/P", "주/P", "지/P", "않/P", "이/P"})
+KO_MIN_SCORE = 0.5            # 맞춤 점수 문턱 — 희귀한 원형이 맞아야 통과(몸 · 눈 같은 흔한 원형 하나로는 못 들어온다)
+MAX_UNITS = 4                 # 한 요청에서 되살릴 덩어리 수(덩어리마다 고르기 E2B 두 번)
+MAX_CANDIDATES = 6
+MAX_UNIT_WORDS = 5            # 서술 덩어리의 어절 수 상한
+
+# 인원이 이미 말하는 사람 낱말 — 되살리지 않는다(소녀 -> 1girl 로 끝). 역할 · 친족 · 직업 낱말(주인 · 엄마 · 여고생)은 되살린다
+BASIC_PEOPLE = frozenset({"소녀", "여자", "여성", "여자애", "미소녀", "소년", "남자", "남성", "남자애", "미소년", "사람",
+                          "아이", "인물", "누군가", "친구"})
+# 규칙표(people · groups)에 없는 친족 · 호칭 · 직업 — 평가 러너의 PERSON_EXTRA 그대로
+PERSON_EXTRA = frozenset({"누님", "형님", "오라버니", "남편", "아내", "부인", "신랑", "신부", "새댁", "이모", "삼촌", "동생",
+                          "선배", "후배", "손님", "승객", "서퍼", "점원", "경찰", "의사", "간호사", "군인", "기사", "주인공"})
+
+
+def ko_key(form: str, tag: str, *, stop: bool = True) -> str | None:
+    """형태소 -> 원형 열쇠('거구/N' · '잠들/P' · '둥둥/M'). stop 이면 가벼운 용언(하 · 되 · 있 …)은 None."""
+    if not tag.startswith(KO_CONTENT):
+        return None
+    kind = "P" if tag.startswith(("VV", "VA")) else "M" if tag == "MAG" else "N"
+    key = f"{form.lower()}/{kind}"
+    return None if stop and key in KO_STOP else key
+
+
+def clean_keywords(text: object) -> str:
+    return re.sub(r"<primary>:?|[<>\[\]]", " ", str(text or ""))
+
+
+def _whole(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or ""))
+
+
+# ── 한국어 사전 원형 색인 ─────────────────────────────────────────────────────────
+
+
+class KoDictIndex:
+    """쓸 수 있는 태그의 한국어 키워드 + 설명 -> Kiwi 원형 역색인. 세션에 한 번(약 2만 태그, 수 초).
+
+    entries        (태그, keywords_kr, description) — 태그는 이벤트 맵 이름
+    tokenize_many  글 목록 -> [(꼴, 품사)] 목록(Kiwi 날것, 한꺼번에)
+    tokenize       글 하나 -> [(꼴, 품사)] — 물음 낱말용
+    """
+
+    def __init__(self, entries: Iterable[tuple[str, str, str]],
+                 tokenize_many: Callable[[list[str]], list[list[tuple[str, str]]]],
+                 tokenize: Callable[[str], list[tuple[str, str]]]) -> None:
+        self.tokenize = tokenize
+        names: list[str] = []
+        kw_texts: list[str] = []
+        desc_texts: list[str] = []
+        self.kw_tokens: dict[str, frozenset[str]] = {}
+        self.by_kw_token: dict[str, set[str]] = {}
+        for tag, keywords, description in entries:
+            kw = clean_keywords(keywords)
+            toks = frozenset(t for t in re.split(r"[,\s]+", kw) if t)
+            self.kw_tokens[tag] = toks
+            for t in toks:
+                self.by_kw_token.setdefault(t, set()).add(tag)
+            names.append(tag)
+            kw_texts.append(kw)
+            desc_texts.append(str(description or ""))
+        self.lemmas: dict[str, frozenset[str]] = {}
+        self.kw_lemmas: dict[str, frozenset[str]] = {}
+        self.by_lemma: dict[str, set[str]] = {}
+        self.kw_by_lemma: dict[str, set[str]] = {}
+        for name, kw_toks, desc_toks in zip(names, tokenize_many(kw_texts), tokenize_many(desc_texts)):
+            kw_lem = frozenset(k for k in (ko_key(f, t) for f, t in kw_toks) if k)
+            lem = kw_lem | frozenset(k for k in (ko_key(f, t) for f, t in desc_toks) if k)
+            self.kw_lemmas[name], self.lemmas[name] = kw_lem, lem
+            for k in lem:
+                self.by_lemma.setdefault(k, set()).add(name)
+            for k in kw_lem:
+                self.kw_by_lemma.setdefault(k, set()).add(name)
+        self.n = len(names)
+        self._cache: dict[tuple[str, bool], dict[str, float]] = {}
+
+    def query(self, text: str) -> list[str]:
+        return list(dict.fromkeys(k for k in (ko_key(f, t) for f, t in self.tokenize(text)) if k))
+
+    def match(self, text: str, *, keywords_only: bool = False) -> dict[str, float]:
+        """낱말에 맞는 태그 -> 맞춤 점수(0.5~1). 키워드 토막이 낱말(공백 뺀 것, 2글자 이상) 그대로면 1 — 앞부분 일치는
+        '주인공' 이 '주인' 에 걸려서 쓰지 않는다. keywords_only = 설명문은 보지 않는다(사람 낱말)."""
+        cache_key = (text, keywords_only)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        by_lemma = self.kw_by_lemma if keywords_only else self.by_lemma
+        idf = {k: math.log(self.n / len(by_lemma[k])) for k in self.query(text) if by_lemma.get(k)}
+        total = sum(idf.values())
+        scores: dict[str, float] = {}
+        for k, w in idf.items():
+            for name in by_lemma[k]:
+                scores[name] = scores.get(name, 0.0) + w
+        out = {n: round(s / total, 3) for n, s in scores.items() if total > 0 and s / total >= KO_MIN_SCORE}
+        whole = _whole(text)
+        if len(whole) >= 2:
+            for name in self.by_kw_token.get(whole, ()):
+                out[name] = 1.0
+        self._cache[cache_key] = out
+        return out
+
+    def completeness(self, text: str, matched: Iterable[str], *, keywords_only: bool = False) -> float:
+        """맞춤의 완전도 — 맞춘 태그 하나가 낱말의 내용 형태소를 덮는 가장 큰 비율(가벼운 용언 · 사전에 없는 원형도 센다 —
+        잠들듯 말듯 의 '말' 이 빠지면 1.0 이 나와 못 잡았다). 키워드 토막이 낱말 그대로면 1."""
+        whole = _whole(text)
+        content = {k for k in (ko_key(f, t, stop=False) for f, t in self.tokenize(text)) if k}
+        if not content:
+            return 1.0
+        lemmas = self.kw_lemmas if keywords_only else self.lemmas
+        best = 0.0
+        for name in matched:
+            if len(whole) >= 2 and whole in self.kw_tokens.get(name, ()):
+                return 1.0
+            best = max(best, len(content & lemmas.get(name, frozenset())) / len(content))
+        return round(best, 3)
+
+    def keyword_lemmas(self, tag: str) -> frozenset[str]:
+        """그 태그의 한국어 키워드 원형 — 요청의 어느 말을 이미 설명했나(find_units 의 explained)."""
+        return self.kw_lemmas.get(tag, frozenset())
+
+
+# ── 미번역 덩어리 찾기 ─────────────────────────────────────────────────────────
+
+
+@dataclass
+class Unit:
+    text: str                                   # 요청에서 뗀 글(거구 · 둥둥 떠 있는 · 눈을 동그랗게 뜬)
+    lemmas: list[str] = field(default_factory=list)
+    kind: str = "noun"                          # noun | predicate
+    start: int = 0
+    end: int = 0
+    person: bool = False
+
+
+_NOUN = ("NNG", "NNP")
+_PRED = ("VV", "VA", "XR")
+# 덩어리로 세우지 않는 명사 — 틀 · 정도 · 때(차림 · 반쯤). 공간 낱말(앞 · 위)은 규칙표 spatial_words 를 부르는 쪽이 넣는다
+FRAME_NOUNS = frozenset({"차림", "반쯤", "절반", "정도", "쪽", "때", "중", "후", "전", "채", "뿐", "만큼"})
+# 덩어리로 세우지 않는 가벼운 용언 — 입다 · 짓다(표정을 짓는) · 쓰다 · 당하다 … 요청 동사(그려 · 만들어 · 찾아)는 규칙표
+# filler_stems 를 부르는 쪽이 넣는다
+LIGHT_VERBS = frozenset({"입", "짓", "쓰", "신", "걸치", "당하", "두", "놓", "보이", "가지"})
+
+
+def person_words(rules: dict) -> frozenset[str]:
+    """사람 낱말 — 규칙표 people(female · male · neutral) + groups 이름 + PERSON_EXTRA. 사전 검색을 키워드에서만 한다."""
+    people = rules.get("people") or {}
+    words = {w for key in ("female", "male", "neutral") for w in people.get(key) or []}
+    return frozenset(words | set(rules.get("groups") or {}) | PERSON_EXTRA)
+
+
+def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: set[str],
+               skip: set[str], people: Iterable[str] = (), stop_verbs: Iterable[str] = (),
+               max_units: int = MAX_UNITS) -> list[Unit]:
+    """요청(clean_text 한 글)의 토큰(spans, 위치 포함)에서 **아직 아무 태그도 설명하지 않은** 덩어리를 찾는다.
+
+    - 명사 덩어리: 어절 안에서 이어진 미번역 명사(거구 · 여고생) — 바로 붙은 영문 · 숫자도 함께(V사인). 사람 낱말이면 person.
+      한 음절 명사만으로 된 것은 세우지 않는다(날 · 밤 · 눈 — 뜻이 여럿).
+    - 서술 덩어리: 미번역 동사 · 형용사 · 어근(흉내말 + 하다: 발그레해진 · 아슬아슬하게)이 든 어절 + 뒤의 보조 어절(있는 ·
+      말듯한) + 앞의 흉내말 어절(둥둥 · 쫙) + 바로 앞 미번역 명사 어절 하나(눈을 · 몸에 — 목적어 · 부사어; 먹은 명사는 따로
+      덩어리가 되지 않는다). 서술어가 이어지면 앞 어절이 '-게' 로 끝날 때만 하나로(아슬아슬하게 가린) — 물고 달려가는 은 둘.
+      '-게' 로 끝난 채 멈춘 덩어리(꾸미는 서술어가 이미 설명됐다: 동그랗게 + 뜬)는 세우지 않는다.
+    explained = 이미 설명된 원형(ko_key) · skip = 낱말로 보지 않을 꼴(이름 · 틀 명사 · 공간 낱말 · 그냥 사람 낱말) ·
+    stop_verbs = 덩어리로 세우지 않을 용언 줄기(가벼운 용언 · 요청 동사)."""
+    people = set(people)
+    stop_keys = {f"{v}/P" for v in set(stop_verbs) | LIGHT_VERBS}
+    skip = set(skip) | FRAME_NOUNS
+    words = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+    per: list[list[tuple[str, str, int, int]]] = [[] for _ in words]
+    for form, tag, s, e in spans:
+        for i, (ws, we) in enumerate(words):
+            if ws <= s < we:
+                per[i].append((form, tag, s, e))
+                break
+
+    def open_key(form: str, tag: str) -> str | None:
+        key = ko_key(form, tag)
+        return key if key and key not in explained and key not in stop_keys and form not in skip else None
+
+    def ends_with_ge(i: int) -> bool:
+        return bool(per[i]) and per[i][-1][0] == "게" and per[i][-1][1].startswith("EC")
+
+    nouns: dict[int, list[tuple[int, int, list[str]]]] = {}
+    preds: set[int] = set()
+    for i, toks in enumerate(per):
+        runs: list[tuple[int, int, list[str]]] = []
+        for j, (form, tag, s, e) in enumerate(toks):
+            key = open_key(form, tag)
+            nxt = toks[j + 1][1] if j + 1 < len(toks) else ""
+            if key and tag in _NOUN:
+                prev = toks[j - 1] if j else None
+                if runs and runs[-1][1] == s:                     # 붙어 있는 명사는 하나(여고 + 생)
+                    runs[-1] = (runs[-1][0], e, runs[-1][2] + [key])
+                elif prev and prev[1] in ("SL", "SN", "SH") and prev[3] == s:
+                    runs.append((prev[2], e, [key]))              # V사인 — 붙은 영문 · 숫자까지
+                else:
+                    runs.append((s, e, [key]))
+            elif key and (tag.startswith(_PRED) or (tag == "MAG" and nxt.startswith(("XSA", "XSV")))):
+                preds.add(i)                                      # 발그레 + 하 — 흉내말 용언
+        if runs:
+            nouns[i] = runs
+
+    def contentless(i: int) -> bool:
+        return all(ko_key(f, t) is None or ko_key(f, t) in stop_keys for f, t, _s, _e in per[i])
+
+    def adverb_only(i: int) -> bool:
+        keys = [ko_key(f, t) for f, t, _s, _e in per[i]]
+        return bool(keys) and any(k for k in keys) and all(k is None or k.endswith("/M") for k in keys) \
+            and i not in preds
+
+    units: list[Unit] = []
+    absorbed: set[int] = set()
+    taken: set[int] = set()
+    for i in sorted(preds):
+        if i in taken:
+            continue
+        lo = hi = i
+        while hi + 1 < len(per) and hi - lo + 1 < MAX_UNIT_WORDS:
+            if hi + 1 in preds and ends_with_ge(hi):             # 아슬아슬하게 가린 · 동그랗게 뜬
+                hi += 1
+            elif contentless(hi + 1) and hi + 1 not in nouns:    # 있는 · 말듯한 — 보조 어절
+                hi += 1
+            else:
+                break
+        while lo - 1 >= 0 and lo - 1 not in taken and hi - lo + 1 < MAX_UNIT_WORDS and adverb_only(lo - 1):
+            lo -= 1
+        prev = lo - 1
+        if (prev >= 0 and prev not in taken and prev in nouns and len(nouns[prev]) == 1 and per[prev]
+                and per[prev][-1][1].startswith("J") and hi - lo + 1 < MAX_UNIT_WORDS):
+            lo = prev                                             # 눈을 · 몸에 — 서술어의 목적어 · 부사어
+            absorbed.add(prev)
+        taken |= set(range(lo, hi + 1))
+        if ends_with_ge(hi) and hi + 1 < len(per):
+            continue            # '-게' 로 끝난 채 멈췄다 = 꾸미는 서술어(뜬)는 이미 태그가 설명했다 — 동그랗게만 따로 찾으면
+            #                     눈을 크게 뜬(unusually open eyes) 옆에 solid circle pupils 가 붙었다(라이브 09-26)
+        lemmas = [k for j in range(lo, hi + 1) for k in (open_key(f, t) for f, t, _s, _e in per[j]) if k]
+        units.append(Unit(text[words[lo][0]:words[hi][1]].strip(), lemmas, "predicate", words[lo][0], words[hi][1]))
+    for i, runs in nouns.items():
+        if i in absorbed or i in taken:
+            continue
+        for s, e, keys in runs:
+            if all(len(k.split("/")[0]) < 2 for k in keys):
+                continue        # 한 음절 명사만 — 뜻이 여럿이다(비 오는 날 -> 칼날 -> scabbard, 라이브 09-26). 고르기의
+                #                 요청 명사(uncovered_units)와 같은 규칙
+            surface = text[s:e]
+            units.append(Unit(surface, keys, "noun", s, e, person=_whole(surface) in people))
+    units.sort(key=lambda u: u.start)
+    return units[:max_units]
+
+
+def pair_ok(tag: str, persons: int) -> bool:
+    """'X and Y' 는 두 사람 · 두 가지의 태그다 — 요청에 사람이 둘 이상일 때만(엄마 한 사람 -> mother and child 를 막는다)."""
+    return " and " not in f" {tag} " or persons >= 2
+
+
+# ── E2B 뜻 키워드(사전이 비었거나 불완전할 때) ──────────────────────────────────────────
+
+# 예시 낱말은 평가 세트의 답과 겹치면 안 된다(겹치는 예시로 잰 수치가 부풀었다, 09-26)
+KW_SYSTEM = """You explain words that an anime image app could not turn into Danbooru tags.
+For each untranslated word, infer what the user means by it in this request - read the whole request and the tags
+already found - and write 3 to 6 English keywords for that meaning: single lowercase words of the kind used in
+Danbooru tag names (for example: umbrella, kneeling, cloudy, braid). Answer only the listed lines, in order."""
+
+
+def kw_message(text: str, found: Iterable[str], units: list[str]) -> str:
+    """사용자 제안 형식(09-26) — USER INPUT · 식별된 TAGS · 미번역. 식별된 TAGS 는 요청에서 나온 것만(표본 채움을 넣으면
+    거구가 giant 로 끌려갔다 — 닻 효과)."""
+    return f"USER INPUT : {text}\n식별된 TAGS : {', '.join(found)}\n미번역 : {', '.join(units)}"
+
+
+def kw_grammar(units: list[str]) -> str:
+    heads = " ".join(json.dumps(("" if i == 0 else "\n") + f"{u} : ", ensure_ascii=False) + " kws"
+                     for i, u in enumerate(units))
+    return "\n".join([f"root ::= {heads}", 'kws ::= kw (", " kw){2,5}', "kw ::= [a-z] [a-z]{0,14}"])
+
+
+def parse_keywords(reply: str | None, units: list[str]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for line in str(reply or "").splitlines():
+        head, _, rest = line.partition(" : ")
+        if head in units:
+            out[head] = [w.strip() for w in rest.split(",") if w.strip()]
+    return out
+
+
+def keyword_forms(word: str) -> set[str]:
+    """이름 맞추기는 낱말 그대로 + 복수형만 — 어간을 자르면 mating -> mat -> on mat · staring -> star 가 났다."""
+    w = word.lower()
+    return {w, w + "s", w[:-1] if len(w) > 3 and w.endswith("s") else w}
+
+
+def word_index(names: Iterable[str]) -> dict[str, set[str]]:
+    """이벤트 맵 태그 이름의 낱말(그대로) -> 태그들."""
+    index: dict[str, set[str]] = {}
+    for name in names:
+        for w in str(name).replace("(", " ").replace(")", " ").replace("-", " ").split():
+            index.setdefault(w.lower(), set()).add(str(name))
+    return index

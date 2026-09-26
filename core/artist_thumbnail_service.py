@@ -957,7 +957,8 @@ class ArtistThumbnailService:
     def view_generation_overrides(self, payload: dict, view: dict, schema: dict | None = None) -> dict:
         """보기의 조건으로 생성한다. 글(prefix/postfix/네거티브) · 해상도 · 설정 · 시드는 **보기의 것**,
         작가 표기(`positive`)만 화면이 보낸다 - 표기 규칙(NAI `artist:` · Anima `@` · 괄호 이스케이프)은
-        화면의 한 곳이 주인이다.
+        화면의 한 곳이 주인이다. 작가 태그는 **맨 앞**이다(작가 -> prefix -> postfix, 사용자 지정 2026-09-26 -
+        NAIA 의 랜덤 생성이 작가를 PE prefix 앞에 붙이는 것과 같은 자리).
 
         ⚠️ 해상도는 **그대로** 쓴다(썸네일 해상도로 보정하지 않는다) - 비교 조건이다.
         """
@@ -965,7 +966,9 @@ class ArtistThumbnailService:
         api_mode = str(view.get("api_mode") or "NAI").upper()
         merged = {
             **payload,
-            "prefix": view.get("prefix", ""),
+            # final_prompt 는 prefix, positive, postfix 차례로 잇는다 - 작가를 맨 앞에 두려고 자리를 바꿔 싣는다.
+            "prefix": str(payload.get("positive") or ""),
+            "positive": view.get("prefix", ""),
             "postfix": view.get("postfix", ""),
             "negative_prompt": view.get("negative", ""),
             "width": view.get("width"),

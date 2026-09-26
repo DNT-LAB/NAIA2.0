@@ -30492,6 +30492,12 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .custom-select-menu.custom-abv-select { border-color: rgba(232, 232, 240, 0.28); }
 .custom-select-menu.custom-agw-view .custom-select-option,
 .custom-select-menu.custom-abv-select .custom-select-option { padding: 6px 9px; font-size: 11px; font-weight: 700; }
+/* 보기 편집기 - 라벨 옆 작은 안내 · 시드 줄([🎲 랜덤][시드 고정], 고정을 끄면 숫자칸을 흐리게) */
+.abv-hint { margin-left: 6px; font-style: normal; font-size: 10px; color: var(--text-dim); }
+.abv-seed { display: flex; align-items: center; gap: 4px; }
+.abv-seed input { flex: 1 1 auto; min-width: 0; }
+.abv-seed.is-loose input { opacity: 0.45; }
+.abv-btn.is-on { color: var(--text-primary); border-color: var(--accent); background: rgba(124, 92, 255, 0.28); }
 
 /* ══ 우클릭 메뉴의 그룹 줄 (artistThumbTab.groupMenuHtml) ═══════════════════ */
 /* ⚠️ 아티스트 메뉴는 떠 있는 창(10150대) **위**여야 한다. 기본 결과 메뉴 층(2400)에

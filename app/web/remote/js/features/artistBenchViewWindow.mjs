@@ -76,7 +76,9 @@ export function createArtistBenchViewWindow({
     try {
       const current = await store.refreshCurrent();
       if (!current) throw new Error('지금 설정을 읽지 못했습니다');
-      const spec = {...current, prefix: '', postfix: '', negative: '', characters: [], source_preset: ''};
+      // 글(prefix/postfix/negative)은 **지금 보고 있는 PE 프리셋**에서(사용자 지정 2026-09-26 - 비워 두니
+      // 휑해서 오히려 어렵다). 작가 태그·믹스 표식은 서버가 이미 걷어 냈다. 캐릭터는 비운다.
+      const spec = {...current, characters: []};
       delete spec.stripped;
       const created = await store.create(freshName(), spec);
       if (groupId) await store.select(groupId, created.id);
@@ -138,7 +140,7 @@ export function createArtistBenchViewWindow({
         </div>`;
       return;
     }
-    if (!draft) draft = structuredClone(v);
+    if (!draft) draft = draftFrom(v);
     panel.body.innerHTML = `${tabs}<div class="abv-scroll">${editorHtml(draft)}</div>
       <div class="abv-actions">
         <button type="button" class="abv-btn primary" data-abv-act="save">저장</button>
@@ -156,8 +158,8 @@ export function createArtistBenchViewWindow({
   function editorHtml(d) {
     const s = d.settings || {};
     const o = store.options() || {};
-    const area = (field, label, rows = 3) => `
-      <label class="abv-field"><span>${label}</span>
+    const area = (field, label, rows = 3, note = '') => `
+      <label class="abv-field"><span>${label}${note ? `<em class="abv-hint">${note}</em>` : ''}</span>
         <textarea data-abv-field="${field}" rows="${rows}" spellcheck="false">${escHtml(d[field] || '')}</textarea></label>`;
     const chars = (d.characters || []).map((c, i) => `
       <div class="abv-char" data-abv-char="${i}">
@@ -166,11 +168,11 @@ export function createArtistBenchViewWindow({
         <textarea data-abv-char-field="prompt" rows="2" spellcheck="false" placeholder="캐릭터 프롬프트">${escHtml(c.prompt)}</textarea>
         <input type="text" data-abv-char-field="uc" spellcheck="false" placeholder="캐릭터 네거티브(선택)" value="${escHtml(c.uc || '')}">
       </div>`).join('');
-    const random = Number(d.seed) < 0;
+    const fixed = Boolean(d.seedFixed);
     return `
       <label class="abv-field"><span>이름</span>
         <input type="text" data-abv-field="name" maxlength="40" spellcheck="false" value="${escHtml(d.name || '')}"></label>
-      ${area('prefix', 'prefix')}${area('postfix', 'postfix')}${area('negative', 'negative', 2)}
+      ${area('prefix', 'prefix', 3, '작가 태그는 맨 앞에 붙습니다')}${area('postfix', 'postfix')}${area('negative', 'negative', 2)}
       <div class="abv-group"><div class="abv-group-head"><span>캐릭터 프롬프트</span>
         <button type="button" class="abv-btn" data-abv-act="char-add"${(d.characters || []).length >= MAX_CHARACTERS ? ' disabled' : ''}>+ 캐릭터</button></div>
         ${chars || '<div class="abv-empty small">캐릭터 없음 - 메인 화면의 캐릭터는 섞이지 않습니다.</div>'}</div>
@@ -183,8 +185,13 @@ export function createArtistBenchViewWindow({
         <label class="abv-field"><span>스텝</span><input type="number" min="1" max="1000" data-abv-field="settings.steps" value="${s.steps ?? ''}"></label>
         <label class="abv-field"><span>CFG</span><input type="number" step="0.1" min="0" max="100" data-abv-field="settings.scale" value="${s.scale ?? ''}"></label>
         <label class="abv-field"><span>리스케일</span><input type="number" step="0.05" min="0" max="1" data-abv-field="settings.cfg_rescale" value="${s.cfg_rescale ?? ''}"></label>
-        <label class="abv-field"><span>시드</span><input type="number" min="0" data-abv-field="seed" value="${random ? '' : d.seed}"${random ? ' disabled' : ''}></label>
-        <label class="abv-check"><input type="checkbox" data-abv-field="seed-random"${random ? ' checked' : ''}> 매번 랜덤</label>
+        <div class="abv-field wide"><span>시드<em class="abv-hint">고정을 끄면 매번 랜덤</em></span>
+          <div class="abv-seed${fixed ? '' : ' is-loose'}">
+            <input type="number" min="0" max="4294967295" data-abv-field="seed" value="${escHtml(String(d.seedValue ?? ''))}" placeholder="숫자">
+            <button type="button" class="abv-btn" data-abv-act="seed-roll" title="무작위 시드를 넣고 고정합니다">🎲 랜덤</button>
+            <button type="button" class="abv-btn${fixed ? ' is-on' : ''}" data-abv-act="seed-fix"
+                    aria-pressed="${fixed}" title="켜면 이 시드로 고정, 끄면 매번 랜덤">시드 고정</button>
+          </div></div>
       </div>`;
   }
 
@@ -200,9 +207,9 @@ export function createArtistBenchViewWindow({
       return;
     }
     if (!field) return;
-    if (field === 'seed-random') {
-      draft.seed = el.checked ? -1 : Math.max(0, Number(panel.body.querySelector('[data-abv-field="seed"]')?.value) || 0);
-      if (event.type === 'change') render();
+    if (field === 'seed') {
+      draft.seedValue = el.value === '' ? '' : Math.max(0, Math.trunc(Number(el.value) || 0));
+      if (el.value !== '' && !draft.seedFixed) { draft.seedFixed = true; paintSeed(); }
       return;
     }
     if (field.startsWith('settings.')) {
@@ -211,14 +218,35 @@ export function createArtistBenchViewWindow({
       draft.settings = {...(draft.settings || {}), [key]: numeric ? Number(el.value) : el.value};
       return;
     }
-    draft[field] = ['width', 'height', 'seed'].includes(field) ? Number(el.value) : el.value;
+    draft[field] = ['width', 'height'].includes(field) ? Number(el.value) : el.value;
+  }
+
+  /** 시드 줄만 다시 칠한다 - 쓰던 칸을 다시 그리면 커서가 날아간다. */
+  function paintSeed() {
+    const row = panel.body.querySelector('.abv-seed');
+    if (!row || !draft) return;
+    row.classList.toggle('is-loose', !draft.seedFixed);
+    const fix = row.querySelector('[data-abv-act="seed-fix"]');
+    fix.classList.toggle('is-on', Boolean(draft.seedFixed));
+    fix.setAttribute('aria-pressed', String(Boolean(draft.seedFixed)));
+    const input = row.querySelector('[data-abv-field="seed"]');
+    if (String(input.value) !== String(draft.seedValue ?? '')) input.value = draft.seedValue ?? '';
+  }
+
+  /** 보기 -> 편집 작업본. 시드는 '값' 과 '고정 여부' 로 나눠 든다 - 고정을 꺼도 적어 둔 숫자는 남는다. */
+  function draftFrom(v) {
+    const d = structuredClone(v);
+    d.seedFixed = Number(v.seed) >= 0;
+    d.seedValue = Number(v.seed) >= 0 ? Number(v.seed) : '';
+    return d;
   }
 
   function specFrom(d) {
     return {
       api_mode: d.api_mode, prefix: d.prefix, postfix: d.postfix, negative: d.negative,
       characters: (d.characters || []).filter(c => String(c.prompt || '').trim()),
-      source_preset: d.source_preset, width: d.width, height: d.height, settings: d.settings, seed: d.seed,
+      source_preset: d.source_preset, width: d.width, height: d.height, settings: d.settings,
+      seed: d.seedFixed && d.seedValue !== '' ? Number(d.seedValue) : -1,
     };
   }
 
@@ -276,6 +304,15 @@ export function createArtistBenchViewWindow({
       } else if (act === 'revert') {
         draft = null;
         render();
+      } else if (act === 'seed-roll' && draft) {
+        // NAI 시드 범위(0 ~ 2^32-1). 굴렸다는 것은 그 시드로 보겠다는 뜻이라 고정도 켠다.
+        draft.seedValue = Math.floor(Math.random() * 4294967295);
+        draft.seedFixed = true;
+        paintSeed();
+      } else if (act === 'seed-fix' && draft) {
+        draft.seedFixed = !draft.seedFixed;
+        if (draft.seedFixed && draft.seedValue === '') draft.seedValue = Math.floor(Math.random() * 4294967295);
+        paintSeed();
       } else if (act === 'char-add' && draft) {
         draft.characters = [...(draft.characters || []), {prompt: '', uc: ''}].slice(0, MAX_CHARACTERS);
         render();

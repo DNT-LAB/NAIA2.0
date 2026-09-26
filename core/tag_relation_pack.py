@@ -1,8 +1,9 @@
 """메인 프롬프트 추천 카드의 태그 관계 팩(`data/tag_relation_pack.json`) 읽기.
 
 팩은 `tools/build_tag_relation_pack.py` 가 Codex 의 관계 지도에서 미리 구운 것이다. 태그마다
-유형별(siblings · variations · attributes · state · action · parts · context) 추천 목록과
-누르면 할 일(op: 바꾸기/더하기)이 순서대로 들어 있다. 여기서는 **읽기만** 한다 - 판정과 순서는
+유형별(siblings · variations · companions · attributes · state · action · parts · context) 추천 목록과
+누르면 할 일(op: 바꾸기/더하기)이 순서대로 들어 있고, `ko` 에는 카드에 보일 한국어 설명의 검토판
+(Codex 대표 문장 - 지금 사전 설명과 다른 것만)이 있다. 여기서는 **읽기만** 한다 - 판정과 순서는
 빌더 한 곳이 정한다.
 
 파일이 없거나 형식이 다르면 빈 팩으로 떨어진다. 추천 줄만 안 보이고 태그 카드는 산다.
@@ -53,6 +54,24 @@ def load_pack(data_roots: Iterable[Path | str]) -> dict[str, Any]:
         _cache["key"] = key
         _cache["pack"] = pack
         return pack
+
+
+def _key(tag: Any) -> str:
+    return " ".join(str(tag or "").split()).lower()
+
+
+def korean_description(pack: dict[str, Any], tag: Any) -> str | None:
+    """카드에 보일 한국어 설명의 검토판. 없으면 None - 호출자는 사전 설명을 그대로 쓴다.
+
+    **표시 전용**이다. 검색 색인은 원래 설명을 읽는다(새 문장의 '~는 제외한다' 가 검색에 걸리는
+    부작용 - 2026-09-26 실측, 결정 전까지 바꾸지 않는다).
+    """
+    ko = pack.get("ko") if isinstance(pack, dict) else None
+    if not isinstance(ko, dict) or not tag:
+        return None
+    key = _key(tag)
+    text = ko.get(key) or ko.get(key.replace("_", " "))
+    return text if isinstance(text, str) and text.strip() else None
 
 
 def recommendations(pack: dict[str, Any], tag: str, *, keep=None, limit: int = 16) -> list[dict[str, Any]]:

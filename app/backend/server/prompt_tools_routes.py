@@ -328,10 +328,16 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
     info = raw_tags.get(tag_lower)
     if not info:
         return {}
+    # 관계 팩(tools/build_tag_relation_pack.py): 추천 줄 + **카드에 보이는 한국어 설명**의 검토판
+    # (Codex 대표 문장, 사용자 지정 2026-09-27). 표시만 바꾼다 - 검색 색인은 원래 설명을 그대로 읽는다.
+    from core.tag_relation_pack import korean_description, load_pack, recommendations
+
+    pack = load_pack(_tag_data_roots(context))
     result = {
         "tag": info.get("_tag", tag),
         "count": info.get("freq", 0),
-        "desc": info.get("description", ""),
+        "desc": (korean_description(pack, tag_lower) or korean_description(pack, info.get("_tag"))
+                 or info.get("description", "")),
         "group": info.get("group", ""),
         "subgroup": info.get("subgroup", ""),
         "cat": info.get("_cat", ""),
@@ -386,9 +392,6 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
     # Attributes·State·Action·Parts·Context 는 더하기(tools/build_tag_relation_pack.py).
     recommended: list[str] = []
     if recommend:
-        from core.tag_relation_pack import load_pack, recommendations
-
-        pack = load_pack(_tag_data_roots(context))
         groups = recommendations(pack, tag_lower, keep=keep)
         if not groups and info.get("_tag"):
             groups = recommendations(pack, str(info.get("_tag")), keep=keep)
@@ -404,7 +407,7 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
         extra_info[str(extra_tag)] = {
             "tag": extra.get("_tag", str(extra_tag)),
             "count": extra.get("freq", 0),
-            "desc": extra.get("description", ""),
+            "desc": korean_description(pack, str(extra_tag)) or extra.get("description", ""),
             "group": extra.get("group", ""),
             "subgroup": extra.get("subgroup", ""),
             "cat": extra.get("_cat", ""),

@@ -18,6 +18,9 @@ applicability 가 inapplicable(씨앗의 고정 사실과 어긋남)인 행도 �
 사실로 취급하지 않는다 - 누르는 것은 사용자다. 같은 태그가 여러 도메인·칸에 있으면 **검토된 바꾸기**를 먼저,
 그다음 줄 순서로 하나만 고른다(한 도메인의 none 이 다른 도메인의 승인을 가리지 않는다).
 
+`ko` = 카드에 보일 한국어 설명의 검토판(Codex `description_ko_canonical`, 사용자 지정 2026-09-27) 중 지금 사전
+설명과 **다른 것만**. 표시 전용이다 - 검색 색인은 원래 설명을 그대로 읽는다.
+
 순서: Siblings 는 축의 order(검토된 비교 순서), 없으면 게시물 수. 나머지는 P(대상|씨앗) x min(log2 lift, 3)
 (교집합 >= --min-support), 그다음 게시물 수. 음의 lift 는 뒤로 민다 - 검토된 후보를 통계로 지우지 않는다.
 형제의 낮은 공출현은 정상이라(standing/sitting 0.37) 형제 줄에는 LIFT 를 쓰지 않는다.
@@ -44,7 +47,7 @@ DEFAULT_CATALOG_DIR = REPO / "codex_out" / "search-quick-redesign" / "parallel-v
 DEFAULT_OUT = REPO / "data" / "tag_relation_pack.json"
 
 SCHEMA = "naia.tag-relation-pack.v1"
-BUILDER_VERSION = "2026-09-27.1"
+BUILDER_VERSION = "2026-09-27.2"
 # 카드에 그리는 순서. Companions(같이 쓰는 별개 개념: smile -> blush)는 적고 값이 커서 앞쪽에 둔다.
 TYPES = ("siblings", "variations", "companions", "attributes", "state", "action", "parts", "context")
 DISPLAY_TO_TYPE = {
@@ -204,6 +207,19 @@ def order_seed(seed: str, picked: dict[str, tuple[str, int, int | None]], stats,
     return out
 
 
+def korean_overrides(model, raw) -> dict[str, str]:
+    """카드에 보일 대표 한국어 - 사전(raw)에 있는 태그 중 지금 설명과 다른 것만(같으면 실을 까닭이 없다)."""
+    out: dict[str, str] = {}
+    for tag in sorted(model["nodes"]):
+        text = " ".join(str(model["nodes"][tag].get("description_ko_canonical") or "").split())
+        info = raw.get(tag)
+        if not text or not isinstance(info, dict):
+            continue
+        if text != " ".join(str(info.get("description") or "").split()):
+            out[tag] = text
+    return out
+
+
 def build(catalog_dir: Path, per_type: int, min_support: int) -> dict:
     sys.path.insert(0, str(REPO))
     from core.kr_tag_loader import load_kr_tag_records
@@ -228,6 +244,7 @@ def build(catalog_dir: Path, per_type: int, min_support: int) -> dict:
         rows = order_seed(seed, candidates[seed], stats, freq, per_type, min_support, counts)
         if rows:
             seeds[seed] = rows
+    ko = korean_overrides(model, raw)
     by_type = defaultdict(int)
     replace = 0
     for rows in seeds.values():
@@ -248,6 +265,7 @@ def build(catalog_dir: Path, per_type: int, min_support: int) -> dict:
             "merge": "same target across domains: reviewed replace first, then row order",
             "order": "siblings by reviewed axis order then post count; others by P(t|s) * min(log2 lift, 3), then post count",
             "negative_lift": "demoted, not dropped",
+            "ko": "reviewed canonical Korean (Codex description_ko_canonical) where it differs from the dictionary; display only",
         },
         "source": {
             "catalog_sqlite_sha256": sha256_file(catalog_dir / "data" / "catalog.sqlite"),
@@ -260,9 +278,11 @@ def build(catalog_dir: Path, per_type: int, min_support: int) -> dict:
             "by_type": {k: by_type[k] for k in TYPES},
             "replace_items": replace,
             "pair_stats_used": len(stats),
+            "ko_overrides": len(ko),
             "counts": dict(sorted(counts.items())),
         },
         "seeds": seeds,
+        "ko": ko,
     }
 
 

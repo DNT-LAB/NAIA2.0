@@ -147,6 +147,10 @@ class KoreanVocab:
         return ranked[:limit]
 
 
+# 캐릭터 키워드 끝의 괄호 꼬리 — 작품 · 성별 · 의상(클레 (원신) · 여행자(남) · 아쿠아 (수영복))
+_NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+
+
 def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None,
                 character_rank: Callable[[str], int] | None = None,
                 tag_exists: Callable[[str], bool] | None = None) -> KoreanVocab:
@@ -155,9 +159,18 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
     - 키워드는 괄호(<…> […])를 떼고 붙여 쓴 꼴로 찾는다. '님' 을 뗀 꼴도 넣는다(공주님 안기 = 공주 안기).
     - 캐릭터 이름 조각은 **한 덩어리 이름과 마지막 조각(이름)** 만 넣는다(요이사키 카나데 -> 카나데).
       가운데 조각(성·수식어)은 일반 낱말과 겹쳐 캐릭터를 잘못 부른다(교복·모습 -> 엉뚱한 캐릭터, 실측).
+    - 캐릭터 키워드 끝의 괄호 꼬리(클레 (원신) · 스즈야 (칸코레) · 여행자(남))는 뗀 이름도 넣고, 이름 조각은 뗀 이름으로
+      만든다 — 꼬리째만 넣었더니 '클레' 로 klee (genshin impact) 를 못 찾았고 이름 조각이 '(원신)' 이 됐다. 그 자리를
+      코스프레 태그(klee (genshin impact) (cosplay), 분류 없음)가 차지해 클레가 일반 낱말로 판정됐다(사용자 제보 09-26, 665개).
     """
     keywords: dict[str, list[tuple[str, int, str]]] = {}
     pieces: dict[str, set[str]] = {}
+
+    def put(key: str, row: tuple[str, int, str]) -> None:
+        rows = keywords.setdefault(key, [])
+        if row not in rows:
+            rows.append(row)
+
     for key, info in (kr_raw or {}).items():
         if not isinstance(info, dict):
             continue
@@ -171,11 +184,15 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
             kw = kw.strip().strip("<>[] ")
             if not kw or not re.search("[가-힣]", kw):
                 continue
-            keywords.setdefault(compact(kw), []).append((tag, count, cat))
-            if "님" in kw:
-                keywords.setdefault(compact(kw.replace("님", "")), []).append((tag, count, cat))
+            base = _NAME_QUALIFIER.sub("", kw).strip() if cat == "character" else kw
+            if not re.search("[가-힣]", base) or len(compact(base)) < 2:
+                base = kw
+            for form in dict.fromkeys((kw, base)):
+                put(compact(form), (tag, count, cat))
+                if "님" in form:
+                    put(compact(form.replace("님", "")), (tag, count, cat))
             if cat == "character":
-                parts = kw.split()
+                parts = base.split()
                 for piece in {parts[-1], "".join(parts)}:
                     if len(piece) >= 2:
                         pieces.setdefault(piece, set()).add(tag)

@@ -156,7 +156,8 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
       return `CPU <span style="color:var(--warning,#e0a040)" title="${escHtml(st.gpu_fallback)}">(GPU 로 못 띄워 자동 전환)</span>`;
     }
     if (st.use_gpu && st.gpu_device_chosen_name) return `GPU 모드 · ${escHtml(st.gpu_device_chosen_name)}`;
-    return st.device_pref === 'cpu' ? 'CPU 모드' : 'CPU 모드 (쓸 수 있는 GPU 없음)';
+    if (st.device_pref === 'cpu') return 'CPU 모드';
+    return st.gpu_available ? 'CPU 모드 (외장 GPU 없음)' : 'CPU 모드 (쓸 수 있는 GPU 없음)';
   }
 
   function schedulePoll(delay) {

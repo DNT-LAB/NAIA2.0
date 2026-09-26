@@ -59,11 +59,15 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
 
 
 def _allocation(engine: Any, settings: dict[str, Any]) -> tuple[bool, str | None]:
-    """설정의 할당 장치를 엔진 인자로: ('cpu' | GPU 없음) -> CPU, 그 밖엔 고른 GPU id."""
-    from core.llama_runtime import choose_device, list_device_entries
+    """설정의 할당 장치를 엔진 인자로: ('cpu' | GPU 없음) -> CPU, 그 밖엔 고른 GPU id.
+    'auto'(처음 값)는 외장 GPU 가 없으면 CPU — 내장 그래픽만 있는 PC 는 CPU 로 시작한다(사용자 지정 2026-09-27).
+    [GPU 모드]를 누르면 'gpu' 로 저장돼 내장도 쓴다."""
+    from core.llama_runtime import choose_device, is_discrete, list_device_entries
 
     pref = str(settings.get("device") or "auto")
     entries = list_device_entries(engine) if pref != "cpu" else []
+    if pref == "auto" and not any(is_discrete(entry) for entry in entries):
+        entries = []
     if not entries:
         return False, None
     return True, choose_device(entries, pref)
@@ -168,8 +172,8 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "gpu_devices": [entry["name"] for entry in entries],
         "gpu_device_entries": entries,
         "gpu_device_chosen": chosen,
-        # '자동' 을 골랐다면 쓰게 될 장치(선택 목록의 설명용 — 지금 선택과 무관).
-        "gpu_device_auto": _allocation(engine, {"device": "auto"})[1],
+        # GPU 모드에서 '자동' 을 골랐다면 쓰게 될 장치(선택 목록의 설명용 — 지금 선택과 무관).
+        "gpu_device_auto": _allocation(engine, {"device": "gpu"})[1],
         "gpu_device_chosen_name": next((e["name"] for e in entries if e["id"] == chosen), ""),
         "engine_is_default": engine == default_engine_path(getattr(context, "repo_root", ".")),
         "engine_install": get_engine_installer(context).snapshot(),
@@ -182,7 +186,8 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         # 고른 모델 · 목록(설치 여부 · 이 PC 에 맞는지). 경로를 직접 지정했으면 model_is_default=False — 그 파일이 쓰인다.
         "model_id": selected.id,
         "model_label": selected.label,
-        # [CPU 모드 | GPU 모드] — 설정의 device 가 'cpu' 면 CPU, 아니면(자동 · GPU id) GPU. GPU 가 없으면 CPU 뿐.
+        # [CPU 모드 | GPU 모드] — 설정의 device 가 'cpu' 면 CPU, 'gpu' · GPU id 면 GPU, 'auto'(처음 값)면 외장 GPU 가
+        # 있을 때만 GPU. GPU 가 없으면 CPU 뿐.
         "mode": "gpu" if use_gpu else "cpu",
         "gpu_available": bool(entries),
         "models": catalog(save_root, hardware, chosen),

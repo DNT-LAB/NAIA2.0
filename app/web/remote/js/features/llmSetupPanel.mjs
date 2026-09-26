@@ -2,7 +2,8 @@
 // 2026-09-26: 받는 곳을 하나로 · NovelAI 탭 아래 공통 영역에서 제 탭으로). 탭 이름 밑 글자 · 점도 여기서 채운다. 상태는 /api/boost-v2/status 폴링, 모델 · 모드 저장은 PE 모듈의 boost_v2_settings
 // (부분 저장 — 서버가 디스크 값에 합친다), 받기는 /api/boost-v2/model/download {model} · 엔진은 /api/boost-v2/engine/download.
 //
-// 모델 = [E2B | E4B | 26B] · 모드 = [CPU 모드 | GPU 모드](GPU 모드 = 설정 device 'auto' 또는 GPU id, CPU 모드 = 'cpu').
+// 모델 = [E2B | E4B | 26B] · 모드 = [CPU 모드 | GPU 모드](GPU 모드 = 설정 device 'gpu' 또는 GPU id, CPU 모드 = 'cpu').
+// 처음 값 'auto' 는 서버가 가린다 — 외장 GPU 가 있으면 GPU 모드, 없으면 CPU 모드로 시작한다(사용자 지정 2026-09-27).
 // 칸에는 메모리 사실(VRAM · RAM)과 [권장]만 싣는다 — 예상 속도는 PC 마다 달라 싣지 않는다(사용자 지정).
 // 모델을 눌러 고르는 것은 **보기만** 바꾼다: 받아 둔 모델이면 [이 모델 쓰기], 아니면 [받기] — 다 받으면 서버가
 // 그 모델로 바꾸고 뒤에서 준비(첫 실행의 셰이더 준비)까지 한다. style.css 는 건드리지 않는다(아래 STYLE).
@@ -164,11 +165,14 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       <button type="button" data-llm-mode="gpu" class="${mode === 'gpu' ? 'is-on' : ''}"
         ${st.gpu_available ? '' : 'disabled title="엔진이 쓸 수 있는 GPU 가 없습니다"'}>GPU 모드</button></span>
       ${st.gpu_fallback ? '<span class="llm-badge no" title="' + esc(st.gpu_fallback) + '">GPU 로 못 띄워 CPU 로 도는 중</span>' : ''}
+      ${st.device_pref === 'auto' && mode === 'cpu' && st.gpu_available
+        ? '<span class="llm-note">외장 GPU 가 없어 CPU 로 시작했습니다 — 내장 그래픽은 GPU 모드에서</span>' : ''}
     </div>`);
     if (mode === 'gpu' && gpus.length > 1) {
+      const autoPicked = st.device_pref === 'auto' || st.device_pref === 'gpu';
       parts.push(`<div class="llm-row"><span class="llm-label">GPU</span>
         <select class="setup-input" data-llm-gpu aria-label="GPU 모드에서 쓸 GPU">
-          <option value="auto"${st.device_pref === 'auto' ? ' selected' : ''}>자동 — ${esc(autoGpu ? gpuLabel(autoGpu) : '외장 우선')}</option>
+          <option value="gpu"${autoPicked ? ' selected' : ''}>자동 — ${esc(autoGpu ? gpuLabel(autoGpu) : '외장 우선')}</option>
           ${gpus.map(g => `<option value="${esc(g.id)}"${st.device_pref === g.id ? ' selected' : ''}>${esc(gpuLabel(g))}</option>`).join('')}
         </select></div>`);
     }
@@ -248,8 +252,8 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     if (modeBtn && !modeBtn.disabled) {
       const next = modeBtn.getAttribute('data-llm-mode');
       if ((next === 'gpu') === (st.mode === 'gpu')) return;
-      // GPU 모드 = 자동(외장 우선). 여럿이면 옆 목록에서 고른다.
-      saveSettings({ device: next === 'cpu' ? 'cpu' : 'auto' });
+      // GPU 모드 = 'gpu'(외장 우선, 내장뿐이면 내장 — 처음 값 'auto' 와 달리 내장도 쓴다). 여럿이면 아래 줄에서 고른다.
+      saveSettings({ device: next === 'cpu' ? 'cpu' : 'gpu' });
       return;
     }
     if (modelBtn) {

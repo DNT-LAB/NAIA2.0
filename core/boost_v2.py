@@ -64,8 +64,9 @@ BOOST_V2_DEFAULTS: dict[str, Any] = {
     "preferences": {key: "" for key in SECTION_KEYS},
     # 모델 — core/llama_models 목록의 id(e2b · e4b · 26b). Boost · Assist 가 같은 엔진 · 같은 모델을 쓴다.
     "model": "e2b",
-    # 할당 장치 — 'auto'(외장 GPU > 내장 그래픽 > CPU) · 'cpu' · 'Vulkan0' 같은 GPU id.
-    # 지정한 GPU 가 없어지면 auto 로, GPU 로 못 띄우면 엔진이 CPU 로 내려온다(llama_runtime).
+    # 할당 장치 — 'auto'(처음 값: 외장 GPU 가 있으면 그것, 없으면 CPU — 내장 그래픽만 있는 PC 는 CPU 로 시작한다,
+    # 사용자 지정 2026-09-27) · 'gpu'([GPU 모드]를 눌렀다: 외장 우선, 내장뿐이면 내장) · 'cpu' · 'Vulkan0' 같은 GPU id.
+    # 지정한 GPU 가 없어지면 외장 우선으로, GPU 로 못 띄우면 엔진이 CPU 로 내려온다(llama_runtime).
     "device": "auto",
     # 비우면 기본 위치(엔진=앱 동봉, 모델=user-data/models/llm)를 쓴다.
     "engine_path": "",
@@ -101,7 +102,7 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
         "device": device,
         # 옛 필드(읽기 전용 파생값 — 예전 화면·시험 호환). 저장의 기준은 device 다.
         "use_gpu": device != "cpu",
-        "gpu_device": device if device not in ("auto", "cpu") else "auto",
+        "gpu_device": device if device not in ("auto", "gpu", "cpu") else "auto",
         "engine_path": str(source.get("engine_path") or "").strip(),
         "model_path": str(source.get("model_path") or "").strip(),
     }
@@ -111,6 +112,8 @@ def _normalize_device(value: Any, *, allow_cpu: bool = False) -> str:
     text = str(value or "auto").strip()
     if allow_cpu and text.lower() == "cpu":
         return "cpu"
+    if text.lower() == "gpu":
+        return "gpu"
     return text if re.fullmatch(r"[A-Za-z]+\d+", text) else "auto"
 
 

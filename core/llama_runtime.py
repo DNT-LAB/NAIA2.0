@@ -624,16 +624,21 @@ def _vulkan_device_types() -> dict[str, str]:
         return {}
 
 
+def is_discrete(entry: dict[str, Any]) -> bool:
+    """외장 GPU 인가 — list_device_entries 가 단 종류(드라이버 답), 없으면 이름으로."""
+    return (entry.get("kind") or _kind_from_name(entry.get("name", ""))) == "discrete"
+
+
 def choose_device(entries: list[dict[str, str]], preference: str | None) -> str | None:
-    """설정의 장치 선호로 ``--device`` 값을 고른다. 'auto' = 외장 GPU 우선, 없으면 첫 GPU.
+    """설정의 장치 선호로 ``--device`` 값을 고른다. 'auto' · 'gpu' = 외장 GPU 우선, 없으면 첫 GPU.
     지정한 장치가 사라졌으면 자동으로 되돌아간다. GPU 가 없으면 None(엔진이 CPU 로 돈다)."""
     if not entries:
         return None
     wanted = str(preference or "auto")
-    if wanted != "auto" and any(entry["id"] == wanted for entry in entries):
+    if wanted not in ("auto", "gpu") and any(entry["id"] == wanted for entry in entries):
         return wanted
     for entry in entries:
-        if (entry.get("kind") or _kind_from_name(entry.get("name", ""))) == "discrete":
+        if is_discrete(entry):
             return entry["id"]
     return entries[0]["id"]
 

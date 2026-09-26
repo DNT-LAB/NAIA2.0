@@ -12,6 +12,13 @@
  *     이름은 창 안의 인라인 칸으로 받는다 - 머리줄의 ✎ 가 그 칸을 편다.
  *  ⚠️ 임시/저장은 **레코드의 표**(`temp`)로 판단한다. 창을 만들 때 한 번 재 두면
  *     이름을 붙인 뒤에도 옛 판정이 남아 단추 이름이 안 바뀐다.
+ *
+ *  보기(벤치) 줄(사용자 지정 2026-09-26): [보기 ▾][⚙] … [선택][전체][미생성][생성 N].
+ *   - 보기는 **공용**이고 그룹은 고른 것만 기억한다(`views.viewOf(groupId)`).
+ *   - 보기를 고르면 카드가 그 보기의 그림이 된다. 없으면 기본 썸네일 위에 **반투명 검은 막 +
+ *     미생성**(사용자 지정 - 흐리게가 아니라 막).
+ *   - 선택 모드에서 카드를 누르면 고르기다(작가 고르기·끌기는 쉰다). [생성] 은 고른 작가를
+ *     **격자 차례대로** 탭에 넘긴다 - 확인 팝업과 큐는 탭이 맡는다(돈이 드는 일은 한 곳에서).
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-headdrag';
 import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
@@ -36,10 +43,19 @@ export function createArtistGroupWindow({
   onHoverCard = () => {},          // (card, {src, title, anchor}) => void   크게 보기
   onLeaveCard = () => {},
   onClosed = () => {},
+  views = null,                    // 보기(벤치) 저장소 - 없으면 보기 줄을 안 그린다
+  onEditView = () => {},           // (viewId) => void    보기 설정 창
+  onNewView = () => {},            // (groupId) => void   지금 설정으로 새 보기
+  onGenerateView = async () => false,   // ({viewId, artists}) => 넣었으면 true
 } = {}) {
   const broker = dragBrokerFor(doc, win);
   const isTempNow = () => store.isTemp(groupId);
   const imageCache = new Map();    // artist -> image_url ('' = 그림 없음)
+  const viewImages = new Map();    // `${view}\u0001${artist}` -> 그 보기의 그림 주소 ('' = 미생성)
+  const viewKey = (view, artist) => `${view}\u0001${artist}`;
+  const currentView = () => (views ? views.viewOf(groupId) : '');
+  let selecting = false;           // 선택 모드
+  const picked = new Set();        // 고른 작가들
   let menuEl = null;
 
   const panel = createDraggablePanel({
@@ -85,6 +101,15 @@ export function createArtistGroupWindow({
       <button type="button" class="agw-btn" data-agw-act="queue-all" title="이 그룹을 믹스 큐 끝에 넣습니다">큐에 전부</button>
       <button type="button" class="agw-btn danger" data-agw-act="delete"></button>
     </div>
+    <div class="agw-viewbar"${views ? '' : ' hidden'}>
+      <select class="agw-view" title="보기 - 고른 벤치 조건으로 뽑은 그림을 봅니다"></select>
+      <button type="button" class="agw-btn" data-agw-act="view-edit" title="보기 설정">⚙</button>
+      <span class="agw-spacer"></span>
+      <button type="button" class="agw-btn" data-agw-act="select-mode" title="카드를 눌러 고릅니다">선택</button>
+      <button type="button" class="agw-btn" data-agw-act="select-all" title="모두 고르기 / 모두 풀기">전체</button>
+      <button type="button" class="agw-btn" data-agw-act="select-missing" title="이 보기의 그림이 없는 작가만 고릅니다">미생성</button>
+      <button type="button" class="agw-btn primary" data-agw-act="generate" title="고른 작가를 이 보기의 조건으로 뽑습니다">생성</button>
+    </div>
     <form class="agw-name" hidden>
       <input class="agw-name-input" type="text" maxlength="40" spellcheck="false" placeholder="그룹 이름">
       <button type="submit" class="agw-btn">확인</button>
@@ -99,6 +124,8 @@ export function createArtistGroupWindow({
   const nameForm = panel.body.querySelector('.agw-name');
   const deleteBtn = panel.body.querySelector('[data-agw-act="delete"]');
   const nameInput = panel.body.querySelector('.agw-name-input');
+  const viewSelect = panel.body.querySelector('.agw-view');
+  const viewBtn = sel => panel.body.querySelector(`[data-agw-act="${sel}"]`);
 
   function group() {
     return store.get(groupId);
@@ -112,15 +139,23 @@ export function createArtistGroupWindow({
 
   // ── 그리기 ────────────────────────────────────────────────────────────
   function cardHtml(item) {
-    const url = imageCache.get(item.artist) || '';
+    const view = currentView();
+    const viewUrl = view ? (viewImages.get(viewKey(view, item.artist)) || '') : '';
+    const url = viewUrl || imageCache.get(item.artist) || '';
     const img = url
       ? `<img src="${escHtml(url)}" alt="" loading="lazy" draggable="false">`
       : '<span class="agw-noimg">No Image</span>';
+    // 보기를 골랐는데 그 보기의 그림이 아직 없다 - 기본 그림 위에 막(누군지는 알아보게).
+    // 답을 받기 전('미확인')에는 막을 안 덮는다 - 깜빡이며 덮였다 걷히면 어지럽다.
+    const known = view ? viewImages.has(viewKey(view, item.artist)) : false;
+    const veil = view && known && !viewUrl ? '<span class="agw-veil">미생성</span>' : '';
     const weight = Number.isFinite(item.weight) && item.weight !== 1
       ? `<span class="agw-weight">${escHtml(String(item.weight))}</span>` : '';
-    return `<button type="button" class="agw-card" role="listitem" data-artist="${escHtml(item.artist)}"
-                    title="${escHtml(item.artist)}">
-      <span class="agw-img">${img}</span>
+    const isPicked = selecting && picked.has(item.artist);
+    const check = selecting ? `<span class="agw-check" aria-hidden="true">${isPicked ? '✓' : ''}</span>` : '';
+    return `<button type="button" class="agw-card${isPicked ? ' is-picked' : ''}${selecting ? ' is-selecting' : ''}"
+                    role="listitem" data-artist="${escHtml(item.artist)}" title="${escHtml(item.artist)}">
+      <span class="agw-img">${img}${veil}${check}</span>
       <span class="agw-label"><span class="agw-name-text">${escHtml(item.artist)}</span>${weight}</span>
     </button>`;
   }
@@ -141,6 +176,10 @@ export function createArtistGroupWindow({
     renameBtn.title = temp ? '이름을 붙여 저장합니다' : '이름 바꾸기';
     const items = g.items || [];
     countEl.textContent = `${items.length}명`;
+    // 그룹에서 빠진 작가는 고름에서도 뺀다(남기면 [생성 N] 의 N 이 거짓말이 된다).
+    const present = new Set(items.map(i => i.artist));
+    for (const artist of [...picked]) if (!present.has(artist)) picked.delete(artist);
+    renderViewbar();
     gridEl.innerHTML = items.map(cardHtml).join('');
     // 다시 그리면 올려 둔 카드가 사라진다 - 없는 카드를 크게 보여 주지 않는다.
     if (hoverCard && !hoverCard.isConnected) leaveHover();
@@ -153,18 +192,26 @@ export function createArtistGroupWindow({
   const DESCRIBE_CHUNK = 1000;
 
   async function fillImages(items) {
-    const missing = items.map(i => i.artist).filter(a => !imageCache.has(a));
+    const view = currentView();
+    const missing = items.map(i => i.artist)
+      .filter(a => !imageCache.has(a) || (view && !viewImages.has(viewKey(view, a))));
     if (!missing.length) return;
     let changed = false;
     for (let start = 0; start < missing.length; start += DESCRIBE_CHUNK) {
       const chunk = missing.slice(start, start + DESCRIBE_CHUNK);
       let described;
       // ⚠️ 실패한 조각은 기억하지 않는다 - '그림 없음' 으로 굳히면 다시 묻지 않는다.
-      try { described = await describe(chunk) || {}; } catch { continue; }
+      try { described = await describe(chunk, view) || {}; } catch { continue; }
       for (const artist of chunk) {
         const url = described[artist]?.image_url || '';
-        imageCache.set(artist, url);
-        if (url) changed = true;
+        if (!imageCache.has(artist)) {
+          imageCache.set(artist, url);
+          if (url) changed = true;
+        }
+        if (view) {
+          viewImages.set(viewKey(view, artist), described[artist]?.view_image_url || '');
+          changed = true;          // 막을 덮을지 말지가 이제 정해졌다
+        }
       }
     }
     // ⚠️ 끄는 중에 다시 그려도 끌기는 산다(중개자가 값으로 들고 있다). 그래도 손 밑의
@@ -189,7 +236,7 @@ export function createArtistGroupWindow({
   // ── 끌기: 원본 ────────────────────────────────────────────────────────
   gridEl.addEventListener('pointerdown', event => {
     const card = event.target.closest('.agw-card');
-    if (!card) return;
+    if (!card || selecting) return;       // 고르는 중에는 끌지 않는다(누름이 곧 고르기)
     const artist = card.dataset.artist;
     const item = (group()?.items || []).find(i => i.artist === artist);
     broker.arm(event, {
@@ -312,8 +359,84 @@ export function createArtistGroupWindow({
   // ── 누르기 ────────────────────────────────────────────────────────────
   gridEl.addEventListener('click', event => {
     const card = event.target.closest('.agw-card');
-    if (card) onPick(card.dataset.artist);
+    if (!card) return;
+    if (selecting) { togglePick(card); return; }
+    onPick(card.dataset.artist);
   });
+
+  // ── 보기 · 고르기 ─────────────────────────────────────────────────────
+  function renderViewbar() {
+    if (!views || !viewSelect) return;
+    const view = currentView();
+    const list = views.views();
+    viewSelect.innerHTML = [
+      `<option value="">기본 썸네일</option>`,
+      ...list.map(v => `<option value="${escHtml(v.id)}"${v.id === view ? ' selected' : ''}>${escHtml(v.name)}</option>`),
+      `<option value="__new__">+ 지금 설정으로 새 보기…</option>`,
+    ].join('');
+    viewSelect.value = view;
+    viewBtn('view-edit').hidden = !view;
+    viewBtn('select-mode').classList.toggle('is-on', selecting);
+    viewBtn('select-missing').hidden = !view;
+    const gen = viewBtn('generate');
+    gen.hidden = !view;
+    gen.disabled = !picked.size;
+    gen.textContent = picked.size ? `생성 ${picked.size}` : '생성';
+  }
+
+  function setSelecting(next) {
+    selecting = Boolean(next);
+    if (!selecting) picked.clear();
+    leaveHover();
+    render();
+  }
+
+  function togglePick(card) {
+    const artist = card.dataset.artist;
+    if (picked.has(artist)) picked.delete(artist); else picked.add(artist);
+    // 카드 하나만 고친다 - 3천 장을 다시 그리면 누를 때마다 0.1초가 든다.
+    card.classList.toggle('is-picked', picked.has(artist));
+    const mark = card.querySelector('.agw-check');
+    if (mark) mark.textContent = picked.has(artist) ? '✓' : '';
+    renderViewbar();
+  }
+
+  function pickWhere(test) {
+    const items = group()?.items || [];
+    const want = items.map(i => i.artist).filter(test);
+    // 이미 전부 골라져 있으면 푼다(한 단추로 켜고 끄기).
+    const all = want.length && want.every(a => picked.has(a));
+    selecting = true;
+    if (all) want.forEach(a => picked.delete(a)); else want.forEach(a => picked.add(a));
+    render();
+  }
+
+  viewSelect?.addEventListener('change', async () => {
+    const value = viewSelect.value;
+    if (value === '__new__') {
+      viewSelect.value = currentView();
+      onNewView(groupId);
+      return;
+    }
+    try { await views.select(groupId, value); } catch (error) { showToast(error.message, 'error'); }
+  });
+
+  const unsubViews = views ? views.subscribe(() => render()) : () => {};
+
+  /** 탭이 결과를 받으면 부른다 - 그 보기의 그 작가 카드만 새 그림으로. */
+  function viewResult(viewId, artist, url) {
+    if (!viewId || !artist) return;
+    viewImages.set(viewKey(viewId, artist), url || '');
+    if (viewId !== currentView()) return;
+    const card = gridEl.querySelector(`.agw-card[data-artist="${CSS.escape(artist)}"]`);
+    if (!card) return;
+    const host = card.querySelector('.agw-img');
+    host.querySelector('.agw-veil')?.remove();
+    host.querySelector('.agw-noimg')?.remove();
+    let img = host.querySelector('img');
+    if (!img) { img = doc.createElement('img'); img.alt = ''; img.draggable = false; host.prepend(img); }
+    img.src = url;
+  }
 
   gridEl.addEventListener('contextmenu', event => {
     const card = event.target.closest('.agw-card');
@@ -376,6 +499,22 @@ export function createArtistGroupWindow({
     if (!act) return;
     const g = group();
     if (!g) return;
+    if (act === 'select-mode') { setSelecting(!selecting); return; }
+    if (act === 'select-all') { pickWhere(() => true); return; }
+    if (act === 'select-missing') {
+      const view = currentView();
+      pickWhere(a => view && viewImages.has(viewKey(view, a)) && !viewImages.get(viewKey(view, a)));
+      return;
+    }
+    if (act === 'view-edit') { if (currentView()) onEditView(currentView()); return; }
+    if (act === 'generate') {
+      const view = currentView();
+      if (!view || !picked.size) return;
+      const artists = (g.items || []).map(i => i.artist).filter(a => picked.has(a));
+      const queued = await onGenerateView({viewId: view, artists});
+      if (queued) setSelecting(false);
+      return;
+    }
     if (act === 'queue-all') {
       if (!g.items.length) { showToast('그룹이 비어 있습니다.', 'info'); return; }
       onSendToQueue(g.items.map(i => ({artist: i.artist, weight: i.weight ?? 1, image: imageCache.get(i.artist) || ''})));
@@ -437,6 +576,7 @@ export function createArtistGroupWindow({
     if (!alive) return;
     alive = false;
     leaveHover();
+    unsubViews();
     OPEN.delete(api);
     unsubscribe();
     unzone();
@@ -487,6 +627,7 @@ export function createArtistGroupWindow({
     focus() { panel.open(); panel.raise(); },
     close() { panel.close(); },
     isTemp: () => isTempNow(),
+    viewResult,
   };
   OPEN.add(api);
   panel.open();

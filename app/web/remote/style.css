@@ -30381,6 +30381,89 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 }
 .agw-menu button:hover { background: rgba(255, 255, 255, 0.08); }
 
+/* ══ 그룹 보기(벤치) 줄 · 선택 · 미생성 막 (사용자 지정 2026-09-26) ══════════════════ */
+.agw-viewbar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.agw-viewbar[hidden] { display: none !important; }
+.agw-view {
+  flex: 0 1 132px; min-width: 70px; height: 22px; padding: 0 4px;
+  border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(0, 0, 0, 0.26); color: var(--text-primary); font-size: 10px;
+}
+.agw-btn.is-on { color: var(--text-primary); border-color: var(--accent); background: rgba(124, 92, 255, 0.18); }
+.agw-btn.primary { color: var(--text-primary); border-color: var(--accent); }
+.agw-btn:disabled { opacity: 0.45; cursor: default; }
+.agw-btn[hidden] { display: none !important; }
+/* 막·체크가 그림 위에 앉는 자리 */
+.agw-img { position: relative; }
+/* 보기의 그림이 아직 없다 - 누군지는 알아보게 기본 그림 위에 **반투명 검은 막**(흐림 아님) */
+.agw-veil {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.62); color: rgba(255, 255, 255, 0.86);
+  font-size: 10px; letter-spacing: 0.04em; pointer-events: none;
+}
+.agw-card.is-selecting { cursor: pointer; }
+.agw-card.is-picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.agw-check {
+  position: absolute; top: 4px; left: 4px; width: 16px; height: 16px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(0, 0, 0, 0.45); color: #fff;
+  pointer-events: none;
+}
+.agw-card.is-picked .agw-check { background: var(--accent); border-color: var(--accent); }
+
+/* ══ 보기 설정 창 (artistBenchViewWindow) ═════════════════════════════════════ */
+.dragpanel.abv .dragpanel-body { display: flex; flex-direction: column; min-height: 0; gap: 6px; padding: 6px 8px; }
+.abv-tabs { flex: 0 0 auto; display: flex; gap: 4px; }
+.abv-tabs button {
+  flex: 0 0 auto; height: 22px; padding: 0 10px; border-radius: 5px; cursor: pointer; font-size: 11px;
+  border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.04); color: var(--text-muted);
+}
+.abv-tabs button.is-on { color: var(--text-primary); border-color: var(--accent); background: rgba(124, 92, 255, 0.18); }
+.abv-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; }
+.abv-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; font-size: 11px; }
+.abv-facts dt { color: var(--text-muted); }
+.abv-facts dd { margin: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.abv-text { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.abv-text > span { color: var(--text-muted); font-size: 10px; }
+.abv-text > div {
+  padding: 4px 6px; border-radius: 5px; background: rgba(0, 0, 0, 0.22); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10px; white-space: pre-wrap; word-break: break-word;
+  max-height: 64px; overflow-y: auto;
+}
+.abv-text i { color: var(--text-dim); font-style: normal; }
+.abv-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.abv-spacer { flex: 1 1 auto; }
+.abv-btn {
+  flex: 0 0 auto; height: 24px; padding: 0 9px; border-radius: 5px; cursor: pointer; font-size: 11px; white-space: nowrap;
+  border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.04); color: var(--text-muted);
+}
+.abv-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.abv-btn.primary { color: var(--text-primary); border-color: var(--accent); background: rgba(124, 92, 255, 0.18); }
+.abv-btn.danger:hover { color: #ff9c9c; border-color: rgba(255, 96, 96, 0.7); }
+.abv-btn:disabled { opacity: 0.45; cursor: default; }
+.abv-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 10px; color: var(--text-muted); }
+.abv-field textarea, .abv-field input, .abv-field select, .abv-char textarea, .abv-char input, .abv-create input, .abv-rename input {
+  width: 100%; min-width: 0; box-sizing: border-box; padding: 3px 6px; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: rgba(0, 0, 0, 0.26); color: var(--text-primary);
+  font-size: 11px; font-family: inherit;
+}
+.abv-field textarea, .abv-char textarea { font-family: var(--font-mono); font-size: 10px; resize: vertical; }
+.abv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.abv-grid .wide { grid-column: 1 / -1; }
+.abv-check { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); align-self: end; padding-bottom: 4px; }
+.abv-group { display: flex; flex-direction: column; gap: 4px; }
+.abv-group-head { display: flex; align-items: center; justify-content: space-between; font-size: 10px; color: var(--text-muted); }
+.abv-char { display: flex; flex-direction: column; gap: 3px; padding: 5px; border-radius: 6px; border: 1px solid var(--border-dim); }
+.abv-char-head { display: flex; align-items: center; justify-content: space-between; font-size: 10px; color: var(--text-muted); }
+.abv-x { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 3px; }
+.abv-x:hover { color: #ff9c9c; }
+.abv-create, .abv-rename { flex: 0 0 auto; display: flex; gap: 4px; align-items: flex-end; }
+.abv-create .abv-field { flex: 1 1 auto; }
+.abv-rename[hidden] { display: none !important; }
+.abv-note { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
+.abv-empty { padding: 14px 6px; text-align: center; font-size: 11px; color: var(--text-dim); }
+.abv-empty.small { padding: 6px; font-size: 10px; text-align: left; }
+
 /* ══ 우클릭 메뉴의 그룹 줄 (artistThumbTab.groupMenuHtml) ═══════════════════ */
 /* ⚠️ 아티스트 메뉴는 떠 있는 창(10150대) **위**여야 한다. 기본 결과 메뉴 층(2400)에
    두었더니 리모컨 안의 카드를 우클릭하면 메뉴가 창 **뒤**에 떠 보이지도 눌리지도 않았다

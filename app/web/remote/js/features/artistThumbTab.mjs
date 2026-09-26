@@ -1956,7 +1956,17 @@ export function createArtistThumbController({
     }
   }
 
-  async function buildQueuedPayload(item, requestId, mode) {
+  async function buildQueuedPayload(item, requestId, mode, entry = null) {
+    if (mode === 'view') {
+      // 조건(글·해상도·설정·시드·캐릭터)은 서버가 보기에서 채운다. 여기서는 작가 표기만 -
+      // 가중치 없이(벤치는 같은 힘으로 비교한다).
+      return {
+        request_id: requestId,
+        artist: item.artist,
+        positive: formatArtistToken(item.artist, 1, {withPrefix: true}),
+        bench_view: entry?.viewId || '',
+      };
+    }
     if (mode !== 'random') {
       return generationPayloadForItem(item, requestId, {
         positive: formatArtistPrompt(item.artist),
@@ -1984,11 +1994,12 @@ export function createArtistThumbController({
   }
 
   function normalizeQueueMode(mode) {
-    return mode === 'random' ? 'random' : 'fixed';
+    return mode === 'random' || mode === 'view' ? mode : 'fixed';
   }
 
   function queueModeLabel(mode) {
-    return normalizeQueueMode(mode) === 'random' ? '랜덤' : '고정';
+    const normalized = normalizeQueueMode(mode);
+    return normalized === 'random' ? '랜덤' : (normalized === 'view' ? '보기' : '고정');
   }
 
   function artistGenerationActive() {
@@ -2025,6 +2036,7 @@ export function createArtistThumbController({
       id: `artist-queue-${++artistQueueSerial}`,
       item: {...item},
       mode: queueMode,
+      viewId: queueMode === 'view' ? String(options.viewId || '') : '',
     };
     artistQueueEntries.push(entry);
     updateQueuedCards();
@@ -2064,11 +2076,11 @@ export function createArtistThumbController({
     return removed;
   }
 
-  function enqueueArtistBatch(items, mode) {
+  function enqueueArtistBatch(items, mode, options = {}) {
     const queueMode = normalizeQueueMode(mode);
     let count = 0;
     items.forEach(item => {
-      if (enqueueArtistGeneration(item, queueMode, {silent: true, start: false})) count += 1;
+      if (enqueueArtistGeneration(item, queueMode, {silent: true, start: false, viewId: options.viewId})) count += 1;
     });
     updateQueuedCards();
     if (count > 0) {
@@ -2090,7 +2102,7 @@ export function createArtistThumbController({
     setStatus(`Artist queue ${index + 1} / ${total} · ${item.artist} (${queueModeLabel(mode)})`, 'busy');
     let resultPromise = null;
     try {
-      const payload = await buildQueuedPayload(item, requestId, mode);
+      const payload = await buildQueuedPayload(item, requestId, mode, entry);
       resultPromise = waitForArtistResult(requestId, item.artist);
       await requestArtistGeneration(payload, {keepPreview: true});
       return await resultPromise;
@@ -2201,6 +2213,10 @@ export function createArtistThumbController({
     const requestId = String(meta.artist_thumb_request_id || pendingResultRequestId || '');
     const artist = String(meta.artist_thumb_artist || selected?.artist || '').trim();
     const rememberedEntry = rememberArtistResult(artist, blob, meta);
+    // 보기(벤치) 결과 - 격자 카드는 그대로 두고, 열린 그룹 창의 그 카드만 새 그림으로.
+    if (meta.artist_thumb_view && meta.artist_thumb_view_url) {
+      for (const open of groupWindows.values()) open.viewResult?.(meta.artist_thumb_view, artist, meta.artist_thumb_view_url);
+    }
     // 서버가 썸네일로 저장했으면 카드에 바로 반영한다(재시작 후에도 남는 그림).
     if (meta.artist_thumb_saved && meta.artist_thumb_url) {
       applySavedThumbnail(artist, meta.artist_thumb_url);
@@ -2674,13 +2690,25 @@ export function createArtistThumbController({
   //     서로 안 보인다). 계약 시험이 주소를 대조한다.
   async function ensureGroups() {
     if (groupsApi) return groupsApi;
-    const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor}] = await Promise.all([
+    const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor},
+      {createArtistBenchViewsStore}, {createArtistBenchViewWindow}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-agwscroll'),
+      import('./artistGroupWindow.mjs?v=20260926-benchview'),
       import('./dragBroker.mjs?v=20260919-strip'),
+      import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
+      import('./artistBenchViewWindow.mjs?v=20260926-benchview'),
     ]);
     const store = createArtistGroupsStore({fetch});
-    groupsApi = {store, createWindow: createArtistGroupWindow, broker: dragBrokerFor(document)};
+    // 보기(벤치) - 공용 저장소 하나 + 설정 창 하나(사용자 지정 2026-09-26).
+    const views = createArtistBenchViewsStore({fetch});
+    const viewWindow = createArtistBenchViewWindow({
+      document, store: views, escHtml,
+      showToast: (msg, kind) => showToast?.(msg, kind),
+      confirmDialog,
+    });
+    groupsApi = {store, views, viewWindow, createWindow: createArtistGroupWindow, broker: dragBrokerFor(document)};
+    // 보기를 못 읽어도 그룹은 쓴다 - 보기 줄만 비어 있다.
+    views.load().catch(error => showToast?.(`보기 목록을 읽지 못했습니다 — ${error.message}`, 'error'));
     // 관심 작가 그룹(`favorites`)에서 넣고 빼면 격자의 관심 표시도 따라와야 한다.
     store.subscribe(snapshot => {
       const fav = (snapshot || []).find(g => g.id === 'favorites');
@@ -2693,8 +2721,8 @@ export function createArtistThumbController({
   }
 
   /** 이름 목록 -> {이름: {image_url, known}}. 격자와 **같은 그림 규칙**(서버 한 곳). */
-  async function describeArtists(names) {
-    const data = await postJson('/api/artist-thumb/describe', {mode: currentMode(), artists: names});
+  async function describeArtists(names, view = '') {
+    const data = await postJson('/api/artist-thumb/describe', {mode: currentMode(), artists: names, view: view || ''});
     const out = {};
     for (const item of data?.items || []) out[item.artist] = item;
     return out;
@@ -2713,6 +2741,36 @@ export function createArtistThumbController({
     if (!mixQueue) { showToast?.('믹스 큐를 열지 못했습니다.', 'error'); return; }
     const n = mixQueue.insertArtists(items);
     if (n) showToast?.(`${n}명을 큐에 넣었습니다.`, 'info');
+  }
+
+  /** 그룹 창 [생성 N] - 고른 작가들을 **그 보기의 조건**으로 차례로 뽑는다.
+   *
+   *  ⚠️ 돈이 드는 일이라 먼저 묻는다. 무료 조건(스텝 28 이하 · 1024x1024 이하)을 벗어나면 그렇다고
+   *     적는다 - 판정은 NAI 기준이다(다른 백엔드는 과금이 없다).
+   *  결과 표기(`artist:이름` 등)는 이 탭의 규칙 하나를 쓰고, 나머지 조건은 서버가 보기에서 채운다.
+   */
+  async function generateGroupView({viewId, artists}) {
+    const {views} = await ensureGroups();
+    const view = views.get(viewId);
+    if (!view || !artists?.length) return false;
+    const mode = String(currentGenerationMode() || 'NAI').toUpperCase();
+    if (view.api_mode !== mode) {
+      showToast?.(`'${view.name}' 보기는 ${view.api_mode} 용입니다(지금 ${mode}).`, 'error');
+      return false;
+    }
+    const steps = Number(view.settings?.steps || 0);
+    const pixels = Number(view.width) * Number(view.height);
+    // 기준은 백엔드 `core/nai_free_usage.py` 와 같다(스텝 <= 28 · 넓이 <= 1024x1024 - **이하**).
+    const free = mode !== 'NAI' || (steps <= 28 && pixels <= 1024 * 1024);
+    const cost = mode !== 'NAI' ? '' : (free
+      ? '무료 조건 안(스텝 28 이하 · 1024x1024 이하)'
+      : `⚠️ 무료 조건 밖 - Anlas 가 듭니다(스텝 ${steps} · ${view.width}x${view.height})`);
+    const ok = await Promise.resolve(confirmDialog ? confirmDialog(
+      `${artists.length}명을 '${view.name}' 보기로 생성합니다. ${cost}`.trim(),
+      {title: '선택 일괄 생성'}) : true);
+    if (!ok) return false;
+    const count = enqueueArtistBatch(artists.map(artist => ({artist})), 'view', {viewId});
+    return count > 0;
   }
 
   async function openGroupWindow(groupId) {
@@ -2736,6 +2794,10 @@ export function createArtistThumbController({
       onHoverCard: (element, info) => getRemoteController?.()?.showZoomBeside?.(
         element, {src: info.src, title: info.title, note: ''}, info.anchor),
       onLeaveCard: () => getRemoteController?.()?.hideZoom?.(),
+      views: groupsApi.views,
+      onEditView: viewId => groupsApi.viewWindow.open(viewId),
+      onNewView: gid => groupsApi.viewWindow.openNew(gid),
+      onGenerateView: request => generateGroupView(request),
       onClosed: () => {
         groupWindows.delete(groupId);
         if (lastTempGroupId === groupId) lastTempGroupId = '';

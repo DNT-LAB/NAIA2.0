@@ -73,19 +73,27 @@ def _bench_current_spec(context: WebSessionContext) -> dict:
     mode = str(context.get_api_mode() or "NAI").upper()
     layers = _mix_current_layers(context)
     pre = post = preset = ""
+    stripped: list[str] = []
     try:
         store = _pe_store(context)
         mode_key = store.mode()
         live = store.collect_settings(mode_key)
         preset = str(store.state(mode_key).get("current_preset") or "")
-        allow_bare = mode_key != "NAI"
-        known = _mix_known_artists(context) if allow_bare else frozenset()
-        pre = strip_artists(str(live.get("pre_prompt") or ""), known=known, allow_bare=allow_bare,
-                            drop_anchors=True)["text"]
-        post = strip_artists(str(live.get("post_prompt") or ""), known=known, allow_bare=allow_bare,
-                             drop_anchors=True)["text"]
+        # ⚠️ NAI 에서도 **접두 없는 이름**을 사전으로 가린다. 기본 `recommend` 프리셋이
+        #    `0.4::tianliang duohe fangdongye, ixy ::` 처럼 `artist:` 없이 작가를 적어 둔다 -
+        #    NAI 규칙(`artist:` 만 작가)으로만 거르면 그대로 남아 모든 벤치가 혼합이 됐다(실측).
+        #    일반 태그가 우연히 작가 이름과 같으면 같이 빠질 수 있다 - 그래서 뺀 것을 알린다.
+        known = _mix_known_artists(context)
+        for key, slot in (("pre_prompt", "pre"), ("post_prompt", "post")):
+            result = strip_artists(str(live.get(key) or ""), known=known, allow_bare=True, drop_anchors=True)
+            stripped.extend(result["removed"])
+            if slot == "pre":
+                pre = result["text"]
+            else:
+                post = result["text"]
     except Exception:
         pre = post = preset = ""
+        stripped = []
     width = height = 0
     try:
         width, height = (int(v) for v in str(context.remote_params.get("resolution") or "").lower().split("x"))
@@ -93,7 +101,9 @@ def _bench_current_spec(context: WebSessionContext) -> dict:
         width, height = 832, 1216
     return {"api_mode": mode, "prefix": pre, "postfix": post, "negative": layers["negative"],
             "characters": _bench_current_characters(context, mode), "source_preset": preset,
-            "width": width, "height": height, "settings": layers["settings"], "seed": -1}
+            "width": width, "height": height, "settings": layers["settings"], "seed": -1,
+            # 조건이 아니라 **알림**이다(저장소가 버린다) - 새 보기 화면이 '뺀 것' 으로 보여 준다.
+            "stripped": stripped}
 
 
 def _apply_view_op(context: WebSessionContext, payload: dict) -> dict:
@@ -614,7 +624,10 @@ def register_artist_thumbnail_routes(
         try:
             data = await run_in_thread(artist_bench_view_store(session_context).snapshot)
             current = await run_in_thread(_bench_current_spec, session_context)
-            return {**data, "current": current}
+            # 편집기의 모델·샘플러·스케줄러 칸이 고를 수 있는 값(지금 모드의 선택지).
+            schema = await run_in_thread(session_context.generation_param_schema_payload)
+            options = {key: list(schema.get(f"options_{key}") or []) for key in ("model", "sampler", "scheduler")}
+            return {**data, "current": current, "options": options}
         except Exception as exc:
             # 읽을 수 없는 파일은 **덮어쓰지 않는다** - 원본은 그대로 두고 알린다.
             return JSONResponse({"error": f"Bench views unreadable: {exc}"}, status_code=500)

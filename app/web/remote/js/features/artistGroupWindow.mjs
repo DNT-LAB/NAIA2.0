@@ -107,7 +107,6 @@ export function createArtistGroupWindow({
     <div class="agw-bar">
       <span class="agw-count"></span>
       <span class="agw-spacer"></span>
-      <button type="button" class="agw-btn" data-agw-act="queue-all" title="이 그룹을 믹스 큐 끝에 넣습니다">큐에 전부</button>
       <button type="button" class="agw-btn danger" data-agw-act="delete"></button>
     </div>
     <div class="agw-viewbar"${views ? '' : ' hidden'}>
@@ -576,10 +575,9 @@ export function createArtistGroupWindow({
       if (queued) setSelecting(false);
       return;
     }
-    if (act === 'queue-all') {
-      if (!g.items.length) { showToast('그룹이 비어 있습니다.', 'info'); return; }
-      onSendToQueue(g.items.map(i => ({artist: i.artist, weight: i.weight ?? 1, image: imageCache.get(i.artist) || ''})));
-    } else if (act === 'name-cancel') {
+    // [큐에 전부] 는 없앴다(사용자 지정 2026-09-26) - 160명 그룹에서 무심코 눌러 믹스 큐가
+    // 160칸이 됐다. 한 명씩은 카드 우클릭 [큐에 넣기] 로 넣는다(믹스 큐는 20칸까지).
+    if (act === 'name-cancel') {
       hideNaming();
     } else if (act === 'delete') {
       if (isTempNow()) {

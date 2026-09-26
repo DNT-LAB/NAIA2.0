@@ -26,6 +26,9 @@ import { anchorToken, nextAnchorId } from './artistAnchors.mjs?v=20260920-front'
 import { dragBrokerFor } from './dragBroker.mjs?v=20260919-strip';
 
 const COLLAB_ID = '__collab__';
+// 믹스 큐의 **작가 칸** 상한(사용자 지정 2026-09-26). 앵커 줄과 collab 칸은 세지 않는다.
+// 그룹 창의 [큐에 전부] 로 160칸이 된 뒤 정한 값이다 - 작가를 그만큼 섞으면 어느 쪽도 안 보인다.
+export const MIX_MAX_ARTISTS = 20;
 const HOLD_FIRST_MS = 320;     // 누르고 있을 때 반복이 시작되기까지
 // 그 뒤 0.5초마다 (사용자 지정). ⚠️ 0.1초마다로 두었더니 1초만 쥐어도 0.6 이
 // 움직여 조절이 안 됐다 - 쥐는 것은 '성큼' 이지 '순식간' 이 아니다.
@@ -179,6 +182,10 @@ export function createMixQueuePanel({
   }
 
   const find = id => blocks.find(b => b.id === id) || null;
+  const artistCount = () => blocks.filter(b => !isAnchor(b) && b.id !== COLLAB_ID).length;
+  function capToast(skipped) {
+    showToast(`믹스 큐는 작가 ${MIX_MAX_ARTISTS}명까지입니다${skipped ? ` - ${skipped}명은 넣지 않았습니다` : ''}.`, 'warning');
+  }
   const tempBlock = () => blocks.find(b => b.temp && !isAnchor(b)) || null;
 
   // 메인 슬라이더가 미는 칸 = **마지막으로 사용자가 건드린 칸**(사용자 지정 2026-09-20).
@@ -362,6 +369,7 @@ export function createMixQueuePanel({
       .map(r => String(r.id)) : [];
     const used = [];
     const next = [];
+    let dropped = 0;
     let hasCollab = false;
     for (const raw of rows) {
       if (raw?.kind === 'anchor') {
@@ -386,6 +394,8 @@ export function createMixQueuePanel({
       }
       const artist = String(raw?.artist || '').trim();
       if (!artist) continue;
+      // 상한 전에 저장한 조합은 20명을 넘을 수 있다 - 앞의 20명만 싣고 알린다.
+      if (next.filter(b => !isAnchor(b) && b.id !== COLLAB_ID).length >= MIX_MAX_ARTISTS) { dropped += 1; continue; }
       const w = Number.parseFloat(raw?.weight);
       next.push({
         id: nextId(), artist, weight: roundStep(Number.isFinite(w) ? w : 1),
@@ -395,6 +405,7 @@ export function createMixQueuePanel({
     }
     // collab 칸은 **늘 있어야 한다**(`tempBlock`·삽입 자리 계산이 그 전제 위에 선다).
     if (!hasCollab) next.push(collabBlock());
+    if (dropped) capToast(dropped);
     blocks = next;
     focusId = '';
     mixName = String(name || '');
@@ -1455,13 +1466,15 @@ export function createMixQueuePanel({
    *  `asTemp` 는 **끌어다 놓은 길**만 쓴다(사용자 지정 2026-09-19): 새로 끌어온 칸이
    *  임시가 되고, 그 전에 임시였던 칸은 그 자리에 굳는다. 끌어올리는 행위 자체가
    *  '지금 이걸 보는 중' 이라는 뜻이라 - 고정하려고 딴 칸을 끌어오던 일이 없어진다.
-   *  그룹 창의 [큐에 전부] 처럼 한꺼번에 담는 길은 임시를 만들지 않는다. */
+   *  그룹 카드의 [큐에 넣기] 처럼 메뉴로 담는 길은 임시를 만들지 않는다. 작가 칸은 20까지. */
   function insertArtists(items, point = null, {asTemp = false} = {}) {
     let at = insertionIndexAt(point);
     const added = [];
+    let skipped = 0;
     for (const raw of items || []) {
       const artist = String(raw?.artist || '').trim();
       if (!artist) continue;
+      if (artistCount() >= MIX_MAX_ARTISTS) { skipped += 1; continue; }
       const w = Number.parseFloat(raw.weight);
       const block = {
         id: nextId(), artist, weight: roundStep(Number.isFinite(w) ? w : 1),
@@ -1480,6 +1493,7 @@ export function createMixQueuePanel({
       setFocus(last);
     }
     if (added.length) refresh();
+    if (skipped) capToast(skipped);
     return added.length;
   }
 
@@ -1806,6 +1820,7 @@ export function createMixQueuePanel({
         temp.image = image;
         setFocus(temp);
       } else {
+        if (artistCount() >= MIX_MAX_ARTISTS) { capToast(0); return; }
         // collab 블럭은 늘 마지막이 **기본**이지만 사용자가 옮겼다면 그 자리를 지킨다.
         const at = blocks.findIndex(b => b.id === COLLAB_ID);
         const block = {
@@ -1836,7 +1851,7 @@ export function createMixQueuePanel({
     },
     compose,
     composeGroups,
-    /** 그룹 창의 [큐에 넣기] · [큐에 전부] 가 쓴다. 끝(collab 앞)에 넣는다. */
+    /** 그룹 창의 [큐에 넣기] 가 쓴다. 끝(collab 앞)에 넣는다. 작가 칸은 20까지. */
     insertArtists: items => insertArtists(items, null),
     /** 글이 바뀌었다 - 표식이 살아 있는지 다시 재고, 달라졌으면 다시 그린다.
      *  ⚠️ 표식을 옮기는 동안의 **일시 소실과 회복**이 이 길로 들어온다. */

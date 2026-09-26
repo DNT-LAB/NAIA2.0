@@ -2706,7 +2706,7 @@ export function createArtistThumbController({
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor},
       {createArtistBenchViewsStore}, {createArtistBenchViewWindow}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-groupstop'),
+      import('./artistGroupWindow.mjs?v=20260926-mixcap'),
       import('./dragBroker.mjs?v=20260919-strip'),
       import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
       import('./artistBenchViewWindow.mjs?v=20260926-benchview'),
@@ -3094,7 +3094,7 @@ export function createArtistThumbController({
     if (!remote) return null;
     if (!anchorsApi) anchorsApi = await import('./artistAnchors.mjs?v=20260920-front');
     await ensureGroups();
-    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260921-preset');
+    const {createMixQueuePanel} = await import('./mixQueuePanel.mjs?v=20260926-mixcap');
     mixQueue = createMixQueuePanel({
       document,
       escHtml,

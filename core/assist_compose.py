@@ -195,6 +195,7 @@ _PEOPLE = re.compile(r"^(?:\d+\+?(?:girl|boy|other)s?|solo(?: focus)?|multiple (
                      r"(?:male|female) focus|everyone|group)$")
 _EMOTICON = re.compile(r"^[^a-z]*$|^[^a-z]{1,2}\s?[a-z]?$")
 _SHORT_TAGS = frozenset({"v", "w"})     # 손동작 태그(V · W 사인) — assist_v2.SHORT_TAGS 와 같다(두 글자 이하인데 이모티콘이 아니다)
+_SYMBOL_TAGS = frozenset({"?", "!", "!?", "..."})   # 기호 태그(물음표 · 느낌표 …) — assist_v2.SYMBOL_TAGS 와 같다(09-26)
 
 
 def en_stems(word: str) -> set[str]:
@@ -274,7 +275,9 @@ class TagFinder:
         self._n_tags = n
 
     def usable(self, tag: str) -> bool:
-        if not tag or (tag not in _SHORT_TAGS and (len(tag) <= 2 or not re.search(r"[a-z]{2}", tag))) \
+        if tag in _SYMBOL_TAGS:
+            pass                                          # 기호 태그 — 글자가 없어도 이모티콘이 아니다
+        elif not tag or (tag not in _SHORT_TAGS and (len(tag) <= 2 or not re.search(r"[a-z]{2}", tag))) \
                 or _EMOTICON.match(tag) or _META.search(tag) or _PEOPLE.match(tag):
             return False
         info = self.tools.info(tag) or {}

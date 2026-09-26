@@ -957,6 +957,36 @@ def clean_text(text: Any) -> str:
     return re.sub(r"[{}]", "", str(text or ""))
 
 
+# 기호를 사전이 아는 한국어 낱말로(사용자 제보 09-26: '? 마크를 띄우고' -> star (symbol) · 마크 = minecraft). 사전: ? = <물음표> ·
+# ! = <느낌표> · !? = 물음느낌표 · heart = 하트 · musical note = <음표> · ... = <말줄임표>
+_SYMBOL_WORDS = (("!?", "물음느낌표"), ("?!", "물음느낌표"), ("...", "말줄임표"), ("…", "말줄임표"), ("?", "물음표"),
+                 ("!", "느낌표"), ("♥", "하트"), ("♡", "하트"), ("❤", "하트"), ("♪", "음표"), ("♫", "음표"), ("♬", "음표"))
+_SYMBOL = "|".join(re.escape(s) for s, _w in _SYMBOL_WORDS)
+_QUOTES = "\"'“”‘’「」『』"
+# "?" · '?' — 따옴표로 감싼 기호 / ? 마크 · ?표시 · ? 기호 · ? 모양 — 기호를 가리키는 말(뒤 낱말은 뺀다) / ? 말풍선(둔다) /
+# ? 를 · ? 가 — 바로 조사가 붙은 기호. 문장 끝의 ? 는 물음이라 그대로 둔다
+_SYMBOL_QUOTED = re.compile(rf"[{_QUOTES}]\s*({_SYMBOL})\s*[{_QUOTES}]")
+_SYMBOL_NAMED = re.compile(rf"(?<![^\s{_QUOTES}])({_SYMBOL})\s*(?:마크|표시|기호|모양)")
+_SYMBOL_BUBBLE = re.compile(rf"(?<![^\s{_QUOTES}])({_SYMBOL})\s*(?=말풍선)")
+_SYMBOL_PARTICLE = re.compile(rf"(?<=\s)({_SYMBOL})\s*(?=(?:를|을|가|이|는|은|와|과|랑|도)(?:\s|$))")
+
+
+def symbols_as_words(text: Any) -> str:
+    """요청에 적은 기호를 사전 낱말로 — '? 마크를 띄우고' -> '물음표를 띄우고' · '"?" 마크' -> '물음표' · '♥ 말풍선' ->
+    '하트 말풍선'. 기호를 가리킨 것만(따옴표 · 마크/표시/기호/모양 · 말풍선 · 바로 뒤 조사) — '그려 줄래?' 의 ? 는 그대로."""
+    words = dict(_SYMBOL_WORDS)
+    out = str(text or "")
+    out = _SYMBOL_QUOTED.sub(lambda m: words[m.group(1)], out)
+    out = _SYMBOL_NAMED.sub(lambda m: words[m.group(1)], out)
+    out = _SYMBOL_BUBBLE.sub(lambda m: words[m.group(1)] + " ", out)
+    out = _SYMBOL_PARTICLE.sub(lambda m: words[m.group(1)], out)
+    out = re.sub(r"(물음느낌표|말줄임표|물음표|느낌표|하트|음표)\s+(마크|표시|기호|모양)", r"\1", out)
+    # 낱말이 모두 모음으로 끝난다 — '모양을' 을 떼고 남은 받침 조사를 고친다(음표을 -> 음표를)
+    vowel = {"을": "를", "이": "가", "은": "는", "과": "와"}
+    return re.sub(r"(물음느낌표|말줄임표|물음표|느낌표|하트|음표)(을|이|은|과)(?=\s|$)",
+                  lambda m: m.group(1) + vowel[m.group(2)], out)
+
+
 _BRACED = re.compile(r"\{([^{}]{1,40})\}")
 
 

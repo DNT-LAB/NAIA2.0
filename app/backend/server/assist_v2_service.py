@@ -296,6 +296,9 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
         raise AssistError("무엇을 찾을지 적어 주세요.")
     if len(text) > MAX_TEXT:
         raise AssistError(f"요청은 {MAX_TEXT}자까지입니다.")
+    from core.assist_korean import symbols_as_words
+
+    text = symbols_as_words(text)            # '? 마크를' -> '물음표를' — 한국어 층 · 모델 · 사전이 같은 낱말을 본다(09-26)
     rating = str(payload.get("rating") or "g").strip().lower()
     if rating not in RATINGS:
         raise AssistError("등급은 G/S/Q/E 중 하나입니다.")

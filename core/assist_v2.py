@@ -115,7 +115,10 @@ _EN_STOP = frozenset({"on", "in", "at", "the", "a", "an", "of", "with", "down", 
                       "woman", "and", "to", "for"})
 # 모델 영문 -> 단보루 낱말. V 사인은 태그가 v 다 — v sign 을 쪼개면 sign(표지판)이 실렸다(사용자 제보 09-25)
 _SYNONYMS = {"photo": "picture", "photos": "pictures",
-             "v sign": "v", "v-sign": "v", "peace sign": "v", "v pose": "v"}
+             "v sign": "v", "v-sign": "v", "peace sign": "v", "v pose": "v",
+             # 기호 태그는 이름이 기호다(? 8.6만 · ! 4.5만) — 모델은 영문 이름으로 적는다(사용자 제보 09-26)
+             "question mark": "?", "question mark sign": "?", "exclamation mark": "!", "exclamation point": "!",
+             "interrobang": "!?", "ellipsis": "..."}
 _EMOTICON_EN = re.compile(r"[^a-z]*|[^a-z]{1,2}\s?[a-z]?")
 _META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\)$")
 
@@ -123,13 +126,17 @@ _META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\
 # 두 글자 이하지만 이모티콘이 아닌 손동작 태그 — V 사인(19만 건) · W 사인(2.5만 건). 두 글자 이하를 통째로 막았더니
 # '손가락으로 브이 표시' 에서 사전의 브이 -> v 가 후보에도 못 올랐다(사용자 제보 09-25). 구성의 TagFinder.usable 도 같다.
 SHORT_TAGS = frozenset({"v", "w"})
+# 이모티콘이 아닌 기호 태그 — 물음표(? 8.6만) · 느낌표(! 4.5만) · !?(3만) · 말줄임표(... 6.3만). 글자가 없다고 이모티콘으로
+# 막았더니 '? 마크를 띄운' 이 star (symbol) · ? block 으로 샜다(사용자 제보 09-26). 구성의 TagFinder.usable 도 같다.
+SYMBOL_TAGS = frozenset({"?", "!", "!?", "..."})
 
 
 def _junk_tag(tag: str | None) -> bool:
     """프롬프트에 싣지 않을 태그 — 이모티콘(>o< · ^_^) · 메타 갈래((animated) · (cosplay)) · 인원 낱말 · 두 글자 이하
-    (손동작 태그 SHORT_TAGS 는 뺀다). 구성 경로의 TagFinder.usable 과 같은 기준이다(09-24: '놀란 표정' 이 >o< 로 샜다)."""
+    (손동작 태그 SHORT_TAGS · 기호 태그 SYMBOL_TAGS 는 뺀다). 구성 경로의 TagFinder.usable 과 같은 기준이다(09-24: '놀란 표정' 이
+    >o< 로 샜다)."""
     value = str(tag or "").strip().lower()
-    if value in SHORT_TAGS:
+    if value in SHORT_TAGS or value in SYMBOL_TAGS:
         return False
     return (len(value) <= 2 or not re.search(r"[a-z]{2}", value) or bool(_EMOTICON_EN.fullmatch(value))
             or bool(_META_EN.search(value)) or bool(_PEOPLE_EN.match(value)))

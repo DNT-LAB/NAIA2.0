@@ -150,11 +150,11 @@ class KoreanVocab:
     def is_general_word(self, word: str) -> bool:
         return self.name_strength(word) == "general"
 
-    def character_candidates(self, name: str, limit: int = 5) -> list[tuple[str, int]]:
+    def character_candidates(self, name: str, limit: int = 5, *, sound: bool = True) -> list[tuple[str, int]]:
         """전체 이름 정확 일치 + 이름 조각 일치를 **합쳐** Artist 팩 게시물 수로 줄 세운다(카나데 -> yoisaki 2,940 …).
         예전엔 정확 일치가 하나라도 있으면 조각을 안 봐서 루피 = rupee (nikke) 뿐이었다(monkey d. luffy 6,828 이 가려짐)."""
         tags = {t for t, _c in self.lookup(name, character=True)} | set(self.name_pieces.get(compact(name), ()))
-        if not tags and not self.keywords.get(compact(name)):
+        if sound and not tags and not self.keywords.get(compact(name)):
             tags = self.sound_candidates(name)          # 사전이 모르는 낱말만 — 소리로 한국어 이름 없는 캐릭터를
         ranked = sorted(((t, int(self.character_rank(t) or 0)) for t in tags), key=lambda x: (-x[1], x[0]))
         return ranked[:limit]
@@ -562,8 +562,10 @@ class KoreanLayer:
                 surface = cleaned[window[0].start:window[-1].end]
                 joined = compact(surface)
                 # 일반 낱말로 더 많이 쓰이는 꼴은 안 붙인다 — '고양이 귀' 는 한 캐릭터의 별칭이기도 하지만 cat ears 다(실측)
+                # ⚠️ 사전 이름만 — 소리로 찾게 하면 명사 + 조사(벽 + 에 · 다리 + 를)가 캐릭터 소리(poke · daryl)에 걸려
+                #    조사째 한 고유명사가 됐다(09-26, 분석 토큰이 부서진다)
                 if joined in self._not_names or self.vocab.is_general_word(joined) \
-                        or not self.vocab.character_candidates(joined, limit=1):
+                        or not self.vocab.character_candidates(joined, limit=1, sound=False):
                     continue
                 merged = _Tok(surface, "NNP", window[0].start, window[-1].end)
                 break
@@ -705,7 +707,15 @@ class KoreanLayer:
         if len(compact(form)) < 2:
             return False
         strength = self.vocab.name_strength(form)
-        return (tag == "NNP" and strength in ("character", "piece")) or (tag == "NNG" and strength == "character")
+        return (tag == "NNP" and strength in ("character", "piece")) or (tag == "NNG" and strength == "character") \
+            or (tag == "NNG" and strength == "piece" and self._sound_only_name(form))
+
+    def _sound_only_name(self, form: str) -> bool:
+        """사전이 전혀 모르는 세 음절 이상 낱말이 소리로만 캐릭터를 찾았다 — Kiwi 가 문장 끝의 이름을 일반 명사로 붙여도
+        (… 마시고있는 라크리모사. = NNG, 라크리모사가 = NNP, 사용자 제보 09-26) 이름으로 본다. 두 음절은 흔한 말과 겹친다."""
+        key = compact(form)
+        return (len(key) >= 3 and not self.vocab.keywords.get(key) and not self.vocab.name_pieces.get(key)
+                and bool(self.vocab.sound_candidates(form)))
 
     def _auto_name_like(self, toks: list[tuple[str, str]], index: int) -> bool:
         form, tag = toks[index]

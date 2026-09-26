@@ -251,7 +251,10 @@ export function createArtistGroupWindow({
           imageCache.set(artist, url);
           if (url) changed = true;
         }
-        if (view) {
+        // ⚠️ 묻는 동안 결과(viewResult)가 먼저 왔으면 그것이 새것이다 - 늦게 온 답(물을 때는 없던 그림)으로
+        //    덮으면 방금 뽑은 그림이 '미생성' 막으로 되돌아갔다(Codex 리뷰 2026-09-26 #9). 물은 것은 전부
+        //    그때 없던 열쇠라, 지금 있으면 그 사이에 누가 채운 것이다.
+        if (view && !viewImages.has(viewKey(view, artist))) {
           viewImages.set(viewKey(view, artist), described[artist]?.view_image_url || '');
           changed = true;          // 막을 덮을지 말지가 이제 정해졌다
         }

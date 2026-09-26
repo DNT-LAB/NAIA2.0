@@ -1968,6 +1968,9 @@ export function createArtistThumbController({
         artist: item.artist,
         positive: formatArtistToken(item.artist, 1, {withPrefix: true}),
         bench_view: entry?.viewId || '',
+        // 확인할 때의 보기 조건 지문 - 그 뒤에 보기를 고쳤으면 서버가 409 로 거절하고 러너가 남은 예약을 멈춘다
+        // (Codex 리뷰 2026-09-26 #2: 무료로 확인한 예약이 재확인 없이 유료 조건으로 나갔다).
+        bench_view_rev: entry?.viewRev || '',
       };
     }
     if (mode !== 'random') {
@@ -2040,6 +2043,7 @@ export function createArtistThumbController({
       item: {...item},
       mode: queueMode,
       viewId: queueMode === 'view' ? String(options.viewId || '') : '',
+      viewRev: queueMode === 'view' ? String(options.viewRev || '') : '',
     };
     artistQueueEntries.push(entry);
     updateQueuedCards();
@@ -2088,7 +2092,8 @@ export function createArtistThumbController({
     const queueMode = normalizeQueueMode(mode);
     let count = 0;
     items.forEach(item => {
-      if (enqueueArtistGeneration(item, queueMode, {silent: true, start: false, viewId: options.viewId})) count += 1;
+      if (enqueueArtistGeneration(item, queueMode,
+        {silent: true, start: false, viewId: options.viewId, viewRev: options.viewRev})) count += 1;
     });
     updateQueuedCards();
     if (count > 0) {
@@ -2706,10 +2711,10 @@ export function createArtistThumbController({
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor},
       {createArtistBenchViewsStore}, {createArtistBenchViewWindow}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-newcomp'),
+      import('./artistGroupWindow.mjs?v=20260926-codexfix'),
       import('./dragBroker.mjs?v=20260919-strip'),
       import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
-      import('./artistBenchViewWindow.mjs?v=20260926-newcomp'),
+      import('./artistBenchViewWindow.mjs?v=20260926-codexfix'),
     ]);
     const store = createArtistGroupsStore({fetch});
     // 보기(벤치) - 공용 저장소 하나 + 설정 창 하나(사용자 지정 2026-09-26).
@@ -2784,7 +2789,7 @@ export function createArtistThumbController({
       `${artists.length}명을 '${view.name}' 보기로 생성합니다. ${cost}`.trim(),
       {title: '선택 일괄 생성'}) : true);
     if (!ok) return false;
-    const count = enqueueArtistBatch(artists.map(artist => ({artist})), 'view', {viewId});
+    const count = enqueueArtistBatch(artists.map(artist => ({artist})), 'view', {viewId, viewRev: view.rev || ''});
     return count > 0;
   }
 

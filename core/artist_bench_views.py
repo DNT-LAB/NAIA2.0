@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -134,6 +135,30 @@ def clean_spec(raw: Any) -> dict:
     }
 
 
+# 조건을 이루는 칸(이름 · 날짜 제외). 개정(`rev`)은 이것만으로 잰다 - 이름을 바꿔도 확인은 그대로 유효하다.
+SPEC_KEYS = ("api_mode", "prefix", "postfix", "negative", "characters", "character_mode", "source_preset",
+             "width", "height", "settings", "seed")
+
+
+def spec_rev(view: dict) -> str:
+    """보기 조건의 지문. 일괄 생성은 **확인할 때의 지문**을 들고 가고, 서버가 지금 것과 대 본다(Codex 리뷰
+    2026-09-26 #2: 무료로 확인해 예약한 뒤 보기를 50스텝 · 2048x2048 로 고치면 남은 예약이 재확인 없이 유료로
+    나갔다). `updated` 는 초 단위라 같은 초의 두 번 고침을 못 가린다 - 내용으로 잰다."""
+    body = json.dumps({k: view.get(k) for k in SPEC_KEYS}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(body.encode("utf-8")).hexdigest()[:12]
+
+
+def check_writable(spec: dict) -> dict:
+    """새로 쓰는 조건에만 거는 검사(읽을 때는 걸지 않는다 - 옛 보기가 통째로 사라지면 안 된다).
+    NAI 는 해상도를 64 의 배수로 **반올림해서** 보낸다 - 840x1248 이 832x1280 이 되어 무료 넓이를 넘었다
+    (Codex 리뷰 #3). 저장하는 값이 곧 보내는 값이어야 무료 판정이 맞는다."""
+    if spec.get("api_mode") == "NAI":
+        for field in ("width", "height"):
+            if int(spec[field]) % 64:
+                raise ArtistBenchViewError(f"NAI 해상도는 64 의 배수여야 합니다({field} {spec[field]})")
+    return spec
+
+
 class ArtistBenchViewStore:
     """Thread-safe owner of ``artist_bench_views.json``."""
 
@@ -162,8 +187,10 @@ class ArtistBenchViewStore:
                 vid = str(raw.get("id") or "").strip()
                 if not vid:
                     continue
-                views.append({"id": vid, "name": _clean_name(raw.get("name")), **clean_spec(raw),
-                              "created": int(raw.get("created") or 0), "updated": int(raw.get("updated") or 0)})
+                view = {"id": vid, "name": _clean_name(raw.get("name")), **clean_spec(raw),
+                        "created": int(raw.get("created") or 0), "updated": int(raw.get("updated") or 0)}
+                view["rev"] = spec_rev(view)
+                views.append(view)
             except (ArtistBenchViewError, AttributeError):
                 continue      # 한 줄이 상해도 나머지는 산다
         ids = {v["id"] for v in views}
@@ -174,7 +201,9 @@ class ArtistBenchViewStore:
     def _write(self, data: dict) -> None:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps({"version": SCHEMA_VERSION, **data}, ensure_ascii=False, indent=2) + "\n"
+        # `rev` 는 읽을 때마다 다시 잰다 - 파일에는 두지 않는다.
+        views = [{k: v for k, v in view.items() if k != "rev"} for view in data.get("views", [])]
+        payload = json.dumps({"version": SCHEMA_VERSION, **data, "views": views}, ensure_ascii=False, indent=2) + "\n"
         temp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         temp_path.write_text(payload, encoding="utf-8")
         try:
@@ -221,8 +250,9 @@ class ArtistBenchViewStore:
             if len(data["views"]) >= MAX_VIEWS:
                 raise ArtistBenchViewError(f"too many views (max {MAX_VIEWS})")
             now = int(time.time())
-            view = {"id": f"v_{uuid.uuid4().hex[:12]}", "name": clean, **clean_spec(spec),
+            view = {"id": f"v_{uuid.uuid4().hex[:12]}", "name": clean, **check_writable(clean_spec(spec)),
                     "created": now, "updated": now}
+            view["rev"] = spec_rev(view)
             data["views"].append(view)
             self._write(data)
             return {"view": view, **data}
@@ -233,8 +263,9 @@ class ArtistBenchViewStore:
         with self._lock:
             data = self._read()
             view = self._find(data, view_id)
-            view.update(clean_spec(spec))
+            view.update(check_writable(clean_spec(spec)))
             view["updated"] = int(time.time())
+            view["rev"] = spec_rev(view)
             self._write(data)
             return {"view": view, **data}
 

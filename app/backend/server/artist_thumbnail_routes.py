@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -461,18 +462,52 @@ GROUP_WILDCARD_DIR = "artist_group"
 GROUP_WILDCARD_MANIFEST = ".naia_artist_groups.json"
 
 
-def _group_wildcard_files(groups: list) -> dict[str, str]:
-    """그룹 id -> 파일 이름(확장자 없이). 파일에 못 쓰는 글자는 `_` 로 - 겹치면 뒤 그룹에 id 꼬리를 단다."""
+def _group_wildcard_files(groups: list, foreign: set[str] | None = None) -> dict[str, str]:
+    """그룹 id -> 파일 이름(확장자 없이). 파일에 못 쓰는 글자는 `_` 로 - 겹치면 뒤 그룹에 id 꼬리를 단다.
+    `foreign` = 그 폴더에 **사용자가 둔** 파일 이름(소문자, 확장자 없이) - 그 이름도 겹침으로 친다(Codex 리뷰
+    2026-09-26 #1: 사용자의 `artist_group/mine.txt` 가 있는데 `mine` 그룹을 만들면 덮어쓰고, 그룹을 지우면 지웠다)."""
     out: dict[str, str] = {}
-    used: set[str] = set()
+    used: set[str] = set(foreign or ())
     for group in groups:
         base = re.sub(r'[<>:"/\\|?*]', "_", str(group.get("name") or "").strip()).strip(". ") or "group"
         name = base
         if name.casefold() in used:
             name = f"{base} ({str(group.get('id') or '')[-4:]})"
+        n = 2
+        while name.casefold() in used:          # 꼬리를 달아도 겹치면(사용자 파일 · 같은 꼬리) 번호를 더한다
+            name = f"{base} ({str(group.get('id') or '')[-4:]}-{n})"
+            n += 1
         used.add(name.casefold())
         out[str(group.get("id") or "")] = name
     return out
+
+
+def _owned_group_wildcards(root: Path) -> set[str]:
+    """내가 만든 파일 이름들(목록 파일). ⚠️ 목록을 그대로 믿지 않는다 - 이 폴더 바로 아래의 `*.txt` 이름만
+    받는다(Codex 리뷰 #4: 목록에 `../../victim.txt` 가 있으면 wildcards 밖의 파일을 지웠다)."""
+    try:
+        listed = json.loads((root / GROUP_WILDCARD_MANIFEST).read_text(encoding="utf-8")).get("files") or []
+    except Exception:
+        return set()
+    owned = set()
+    for name in listed:
+        name = str(name)
+        if (name.endswith(".txt") and Path(name).name == name and name not in {".", ".."}
+                and "/" not in name and "\\" not in name and ":" not in name):
+            owned.add(name)
+    return owned
+
+
+def _foreign_group_wildcards(root: Path, owned: set[str]) -> set[str]:
+    """그 폴더에 있지만 내가 만들지 않은 `*.txt` - 그 이름은 그룹이 쓰지 않는다."""
+    try:
+        return {p.stem.casefold() for p in root.glob("*.txt") if p.is_file() and p.name not in owned}
+    except OSError:
+        return set()
+
+
+def _group_wildcard_root(context: WebSessionContext) -> Path:
+    return Path(artist_thumbnail_service(context).wildcards_root) / GROUP_WILDCARD_DIR
 
 
 def _sync_group_wildcards(context: WebSessionContext) -> None:
@@ -480,13 +515,10 @@ def _sync_group_wildcards(context: WebSessionContext) -> None:
     빈 그룹은 파일을 두지 않는다(빈 와일드카드는 원래 싣지 않는다). 실패해도 본 요청은 성공이다."""
     try:
         groups = artist_group_store(context).list()
-        root = Path(artist_thumbnail_service(context).wildcards_root) / GROUP_WILDCARD_DIR
+        root = _group_wildcard_root(context)
         manifest = root / GROUP_WILDCARD_MANIFEST
-        try:
-            previous = set(json.loads(manifest.read_text(encoding="utf-8")).get("files") or [])
-        except Exception:
-            previous = set()
-        names = _group_wildcard_files(groups)
+        previous = _owned_group_wildcards(root)
+        names = _group_wildcard_files(groups, _foreign_group_wildcards(root, previous))
         wanted: dict[str, str] = {}
         for group in groups:
             artists = [str(i.get("artist") or "").strip() for i in (group.get("items") or [])]
@@ -509,6 +541,8 @@ def _sync_group_wildcards(context: WebSessionContext) -> None:
             changed.append(path)
         for filename in previous - set(wanted):
             path = root / filename
+            if path.parent.resolve() != root.resolve():       # 한 번 더 - 이 폴더 밖이면 손대지 않는다
+                continue
             if path.is_file():
                 path.unlink()
                 changed.append(path)
@@ -524,7 +558,13 @@ def _sync_group_wildcards(context: WebSessionContext) -> None:
 def _with_favorites(context: WebSessionContext, groups: list) -> list:
     """관심 목록을 못 읽어도 그룹 목록은 살린다 - 한쪽 고장이 다른 쪽을 가리지 않게.
     각 그룹에 와일드카드 이름(`wildcard`)을 싣는다 - 머리줄 복사 단추가 **이 값**을 쓴다(겹침 꼬리 포함)."""
-    names = _group_wildcard_files(groups)
+    # ⚠️ 동기화와 **같은 이름**이어야 한다(사용자 파일을 비켜 간 꼬리 포함) - 복사 단추가 이 값을 쓴다.
+    try:
+        root = _group_wildcard_root(context)
+        foreign = _foreign_group_wildcards(root, _owned_group_wildcards(root))
+    except Exception:  # noqa: BLE001
+        foreign = set()
+    names = _group_wildcard_files(groups, foreign)
     groups = [{**g, "wildcard": f"{GROUP_WILDCARD_DIR}/{names[str(g.get('id') or '')]}"} for g in groups]
     try:
         return [_favorites_group(context), *groups]
@@ -1168,10 +1208,19 @@ def register_artist_thumbnail_routes(
                 if view["api_mode"] != current_mode:
                     return JSONResponse({"error": f"'{view['name']}' 보기는 {view['api_mode']} 용입니다 "
                                                   f"(지금 {current_mode})"}, status_code=409)
+                # 확인할 때의 조건과 같은가 - 예약 뒤에 보기를 고쳤으면(무료 -> 유료 포함) 남은 예약은 멈춘다(Codex #2).
+                if str(payload.get("bench_view_rev") or "") != view["rev"]:
+                    return JSONResponse({"error": f"'{view['name']}' 보기가 확인한 뒤에 바뀌었습니다 - "
+                                                  "남은 예약을 멈췄습니다. 다시 [생성] 하세요"}, status_code=409)
+                # 이 검사 전에 저장된 옛 보기 - NAI 가 64 배수로 반올림하면 무료 넓이를 넘을 수 있다(Codex #3).
+                if view["api_mode"] == "NAI" and (int(view["width"]) % 64 or int(view["height"]) % 64):
+                    return JSONResponse({"error": f"'{view['name']}' 보기의 해상도({view['width']}x{view['height']})를 "
+                                                  "64 의 배수로 고쳐 저장하세요"}, status_code=400)
                 schema = await run_in_thread(session_context.generation_param_schema_payload)
                 overrides = await run_in_thread(
-                    artist_thumbnail_service(session_context).view_generation_overrides,
-                    payload, view, schema,
+                    partial(artist_thumbnail_service(session_context).view_generation_overrides,
+                            payload, view, schema,
+                            current_model=str((getattr(session_context, "remote_params", None) or {}).get("model") or "")),
                 )
             else:
                 overrides = await run_in_thread(

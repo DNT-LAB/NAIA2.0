@@ -279,11 +279,14 @@ export function createArtistBenchViewWindow({
         panel.close();
       } else if (act === 'save' && v && draft) {
         const name = String(draft.name || '').trim();
-        if (name && name !== v.name) await store.rename(v.id, name);
         const spec = specFrom(draft);
-        dirty = false;          // 먼저 내린다 - 저장이 알리는 갱신에서 새 판으로 다시 그려지게
-        draft = null;
+        // ⚠️ 작업본은 **성공한 뒤에** 내린다(Codex 리뷰 2026-09-26 #8: 먼저 내렸더니 서버가 거절한 저장 -
+        //    예: NAI 해상도 833 - 에서 작업본을 잃고, 고쳐서 다시 [저장] 해도 draft 가 없어 아무 일도 없었다).
+        //    고치는 중(dirty)이라 저장이 알리는 갱신은 다시 그리지 않는다 - 성공하면 아래에서 새 판으로 그린다.
+        if (name && name !== v.name) await store.rename(v.id, name);
         await store.update(v.id, spec);
+        dirty = false;
+        draft = null;
         render();
         showToast('보기를 저장했습니다.', 'success');
       } else if (act === 'revert') {

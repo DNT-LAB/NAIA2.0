@@ -954,13 +954,16 @@ class ArtistThumbnailService:
         except OSError as exc:
             raise FileNotFoundError(f"View thumbnail not found: {vid} / {artist_name}") from exc
 
-    def view_generation_overrides(self, payload: dict, view: dict, schema: dict | None = None) -> dict:
+    def view_generation_overrides(self, payload: dict, view: dict, schema: dict | None = None, *,
+                                  current_model: str | None = None) -> dict:
         """보기의 조건으로 생성한다. 글(prefix/postfix/네거티브) · 해상도 · 설정 · 시드는 **보기의 것**,
         작가 표기(`positive`)만 화면이 보낸다 - 표기 규칙(NAI `artist:` · Anima `@` · 괄호 이스케이프)은
         화면의 한 곳이 주인이다. 작가 태그는 **맨 앞**이다(작가 -> prefix -> postfix, 사용자 지정 2026-09-26 -
         NAIA 의 랜덤 생성이 작가를 PE prefix 앞에 붙이는 것과 같은 자리).
 
         ⚠️ 해상도는 **그대로** 쓴다(썸네일 해상도로 보정하지 않는다) - 비교 조건이다.
+        ⚠️ 실행 모드 · 시드 고정 여부도 **보기가** 정한다(Codex 리뷰 2026-09-26 #6 · #7).
+        `current_model` = 지금 백엔드에 올라 있는 모델(WEBUI 는 요청마다 모델을 바꾸지 않는다 - #5).
         """
         payload = payload if isinstance(payload, dict) else {}
         api_mode = str(view.get("api_mode") or "NAI").upper()
@@ -986,6 +989,10 @@ class ArtistThumbnailService:
                 allowed = options.get(f"options_{key}")
                 if isinstance(allowed, list) and allowed and value not in allowed:
                     raise ValueError(f"'{value}' 은(는) 지금 {key} 선택지에 없습니다 - 보기를 고치거나 모드를 맞추세요")
+            if key == "model" and api_mode == "WEBUI" and current_model and value and value != current_model:
+                # WEBUI 요청에는 모델 칸이 없다(모델은 WebUI 전역 설정) - 실으면 조용히 버려져 다른 모델로 뽑힌다.
+                raise ValueError(f"이 보기의 모델({value})이 지금 WEBUI 모델({current_model})과 다릅니다 - "
+                                 "WEBUI 는 요청마다 모델을 바꾸지 못합니다. 모델을 맞추거나 보기를 고치세요")
             if key == "cfg_rescale" and api_mode == "WEBUI":
                 continue
             param = {"scale": "cfg_scale",
@@ -993,12 +1000,19 @@ class ArtistThumbnailService:
             overrides[param] = value
         seed = int(view.get("seed", -1))
         overrides["seed"] = seed
+        # 안 실으면 메인 화면의 `seed_fixed=True` 가 남아 -1 이 0 으로 굳는다(매번 랜덤이 아니게 된다 - #7).
+        overrides["seed_fixed"] = seed >= 0
+        # 요청 본문의 `api_mode` 로 보기 검사를 비켜 가지 못하게 - 라우트가 이 값을 실행 모드로 쓴다(#6).
+        overrides["api_mode"] = api_mode
         # 캐릭터: `main` = 메인 화면의 캐릭터(아무것도 싣지 않으면 생성이 늘 하던 대로 메인에서 가져온다).
         #         `own`  = **보기의 것만**. 보기에 없으면 메인 화면의 캐릭터가 늦게 끼어들지 못하게 막는다
         #                  (Late binding) - 안 막으면 켜 둔 캐릭터가 모든 벤치에 섞인다.
         if str(view.get("character_mode") or "own") == "main":
             return overrides
         characters = [c for c in (view.get("characters") or []) if str(c.get("prompt") or "").strip()]
+        if characters and api_mode != "NAI":
+            # 캐릭터 프롬프트는 NAI 요청에만 실린다 - 다른 백엔드에서는 조용히 사라진다(#5).
+            raise ValueError("독립 캐릭터 프롬프트는 NAI 보기에서만 쓸 수 있습니다 - [메인] 으로 바꾸거나 캐릭터를 비우세요")
         if characters:
             overrides["characters"] = [str(c["prompt"]) for c in characters]
             overrides["uc"] = [str(c.get("uc") or "") for c in characters]

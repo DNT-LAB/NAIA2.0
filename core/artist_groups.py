@@ -29,6 +29,11 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 MAX_GROUPS = 200
+# 임시 창(이름 없는 그룹)은 따로 5개까지(사용자 지정 2026-09-26). 화면 메뉴가 임시 창을 전부 줄로
+# 늘어놓아 쌓이면 메뉴가 화면을 넘고, 위의 전체 상한을 임시 창이 먹어 저장 그룹을 못 만든다.
+# 화면(`artistThumbTab.mjs` TEMP_WINDOW_MAX)도 같은 수로 먼저 막는다 - 여기는 창이 둘일 때의 뒷문.
+# 이미 넘게 가진 사용자의 창은 그대로 둔다(새로 만드는 것만 막는다). 오래된 창을 알아서 지우지 않는다.
+MAX_TEMP_GROUPS = 5
 MAX_ITEMS_PER_GROUP = 2000
 MAX_NAME_LEN = 40
 MAX_ARTIST_LEN = 200
@@ -207,6 +212,9 @@ class ArtistGroupStore:
         """`temp=True` 면 이름을 받지 않고 `임시 창 N` 을 붙인다(사용자가 나중에 고친다)."""
         with self._lock:
             groups = self._read()
+            if temp and sum(1 for g in groups if g.get("temp")) >= MAX_TEMP_GROUPS:
+                raise ArtistGroupError(
+                    f"임시 창은 {MAX_TEMP_GROUPS}개까지입니다. 안 쓰는 창을 비우거나 이름을 붙여 저장하세요.")
             clean = _auto_temp_name(groups) if temp else _clean_name(name)
             if self._name_taken(groups, clean):
                 raise ArtistGroupError(f"a group named '{clean}' already exists", status=409)

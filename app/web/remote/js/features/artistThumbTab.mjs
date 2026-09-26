@@ -2825,10 +2825,22 @@ export function createArtistThumbController({
     return win;
   }
 
+  // 임시 창은 5개까지(사용자 지정 2026-09-26) - 메뉴가 임시 창을 전부 줄로 늘어놓아 쌓이면 화면을 넘고,
+  // 그룹 전체 상한(200)을 임시 창이 먹는다. 서버(`core/artist_groups.py` MAX_TEMP_GROUPS)도 같은 수로 막는다.
+  // 오래된 창을 알아서 지우지 않는다 - 작가가 든 창이 말없이 사라지면 안 된다.
+  const TEMP_WINDOW_MAX = 5;
+  const TEMP_FULL_MESSAGE = `임시 창은 ${TEMP_WINDOW_MAX}개까지입니다. 안 쓰는 창을 비우거나 ✎ 로 이름을 붙여 저장하세요.`;
+  const tempCount = store => store.all().filter(g => store.isTemp(g.id)).length;
+
   /** 이름 없는 그룹 하나 + 그 창. ⚠️ 이름은 **서버가** 붙인다(`임시 창 N`) -
    *  화면에서 번호를 세면 두 창이 같은 이름을 갖는 경합이 생긴다. */
   async function newTempWindow(items = []) {
     const {store} = await ensureGroups();
+    // 입구가 셋(우클릭 [+ 새 임시 창] · [그룹] 메뉴 · 고른 창이 없을 때의 [임시 창에 올리기])이라 여기서 막는다.
+    if (tempCount(store) >= TEMP_WINDOW_MAX) {
+      showToast?.(TEMP_FULL_MESSAGE, 'info');
+      return null;
+    }
     try {
       const group = await store.createTemp(items);
       return openGroupWindow(group.id);
@@ -2897,8 +2909,17 @@ export function createArtistThumbController({
     return `
         <div class="artist-thumb-group-label">임시 창에 올리기</div>
         ${rows}
-        <button type="button" class="result-context-item" data-action="temp-new" role="menuitem">
-          <span>+ 새 임시 창</span></button>`;
+        ${tempNewButtonHtml(temps.length)}`;
+  }
+
+  /** [+ 새 임시 창] - 다 찼으면 흐리게 + 오른쪽에 `최대 5`.
+   *  ⚠️ `disabled` 로 막지 않는다 - 마우스가 닿지 않아 툴팁도 안 뜨고 눌러도 말이 없었다(실측).
+   *     누르면 newTempWindow 가 까닭을 토스트로 말한다. */
+  function tempNewButtonHtml(count) {
+    const full = count >= TEMP_WINDOW_MAX;
+    return `<button type="button" class="result-context-item${full ? ' is-full' : ''}" data-action="temp-new" role="menuitem"${
+      full ? ` aria-disabled="true" title="${escHtml(TEMP_FULL_MESSAGE)}"` : ''}>
+          <span>+ 새 임시 창</span>${full ? `<span class="artist-thumb-group-count">최대 ${TEMP_WINDOW_MAX}</span>` : ''}</button>`;
   }
 
   function groupMenuHtml(withTempAdd) {
@@ -2958,8 +2979,7 @@ export function createArtistThumbController({
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `
       <div class="result-context-group">
-        <button type="button" class="result-context-item" data-action="temp-new" role="menuitem">
-          <span>+ 새 임시 창</span></button>
+        ${tempNewButtonHtml(temps.length)}
         ${tempRows}
       </div>
       ${groupMenuHtml(false)}`;

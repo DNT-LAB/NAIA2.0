@@ -30520,6 +30520,8 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .artist-thumb-group-list { max-height: 220px; overflow-y: auto; }
 .artist-thumb-group-empty { padding: 4px 10px 6px; font-size: 10px; color: var(--text-dim); }
 .artist-thumb-group-item { justify-content: space-between; }
+/* 임시 창이 다 찼을 때의 [+ 새 임시 창] - 누를 수는 있다(까닭을 토스트로). 흐리게만. */
+.result-context-item.is-full { opacity: 0.5; color: var(--text-muted); }
 .artist-thumb-group-count {
   margin-left: auto; padding-left: 10px;
   font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);

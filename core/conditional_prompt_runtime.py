@@ -42,6 +42,24 @@ def _strip_weight_format(text: str) -> str:
     return value
 
 
+_WEIGHT_GROUP_HEAD_RE = re.compile(r"^\s*[+-]?\d+(?:\.\d+)?::")
+_WEIGHT_GROUP_TAIL_RE = re.compile(r"\s*::\s*$")
+
+
+def _strip_group_fragment_weight(text: str) -> str:
+    """가중치 묶음 `1.5::a, b::` 을 쉼표로 쪼갠 조각의 앞 `1.5::` · 뒤 `::` 를 뗀다(비교용).
+
+    사용자 제보 2026-09-25: `1.5::from behind, butt crack::` 에서 조건이 `from behind` 를 못 찾았다.
+    묶음은 쉼표로 쪼개지면 `1.5::from behind` / `butt crack::` 가 된다 - 온전한 `N::…::` 가 아니라서
+    `_strip_weight_format` 이 둘 다 못 벗겼고, **정확히**(`*`·`!`·`~!`) 조건이 묶음 안 태그를 하나도 못 찾았다.
+    프롬프트 글은 건드리지 않는다 - 조건이 볼 후보만 늘린다.
+    """
+    value = str(text or "").strip()
+    value = _WEIGHT_GROUP_HEAD_RE.sub("", value, count=1)
+    value = _WEIGHT_GROUP_TAIL_RE.sub("", value)
+    return value.strip()
+
+
 def _remove_outer_quotes(text: str) -> str:
     value = str(text or "").strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
@@ -75,6 +93,8 @@ class HeadlessConditionalRuleEngine:
                 _append_unique(variants, raw)
                 if raw.startswith("(") and raw.endswith(")"):
                     _append_unique(variants, raw[1:-1])
+                # 가중치 묶음의 맨 앞·맨 뒤 조각(`1.5::a` / `b::`)도 태그 이름으로 본다.
+                _append_unique(variants, _strip_group_fragment_weight(base))
 
         if value is None:
             return variants

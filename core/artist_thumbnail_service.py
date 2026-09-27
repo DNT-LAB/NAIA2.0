@@ -80,6 +80,17 @@ class ArtistThumbnailService:
             "expected_size": 2192792940,
             "sha256": "C2741D70E463B03841B0F27A59D69CD422D98B34F52E5A8F5713A10DFE227C3A",
         },
+        # 새 팩(2026-09-27, 사용자 지시). 83-50 다음 구간(게시물 49~, 아직 채우는 중). 방안 A - 새 키 + **새 경로**.
+        # 지문 = 업로드 원본 실측이고, HF 쪽 X-Linked-Size · X-Linked-ETag(= sha256)와 같음을 확인했다.
+        # ⚠️ 나중에 채워 갈아끼울 때는 83 처럼 **경로를 그대로** 두고 키 · 라벨 · URL · 지문만 바꾼다.
+        # 이름이 `NAID5` 로 시작하고 `STYLISH` 가 아니라 Curated · ALL 모두에 자동으로 든다.
+        "NAID5-49-WIP": {
+            "label": "NAID5-49-WIP",
+            "path": Path("data/artist_thumbnail_naid5_49_wip.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-49-WIP",
+            "expected_size": 1042944875,
+            "sha256": "6255A2FD4EE81F1AE4BEB5ADB7CED0AD7D8BD2649134DAB313549364A008EFC2",
+        },
         # 새 팩(2026-09-19). 새 키 + **새 경로** - 기존 것과 겹치지 않는다.
         # ⚠️ 이름에 `STYLISH` 가 들어가는 것이 곧 계약이다: Curated 는 이 조각을
         #    `exclude_contains` 로 걸러 내고 ALL 만 포함한다.
@@ -174,7 +185,7 @@ class ArtistThumbnailService:
         self._data_cache: dict[str, dict] = {}
         # ⚠️ 팩 하나가 1.3GB(파싱 4.2초)다. 가상 모드는 그 여럿에 걸쳐 있어서 한 칸만
         #    쥐면 한 페이지를 그리는 동안 팩을 왕복한다 - 활성 가상 모드의 구성원
-        #    수만큼 열어 둔다(최대 3). 평소에는 예전처럼 하나다.
+        #    수만큼 열어 둔다(Curated 4 · ALL 5, 2026-09-27 NAID5-49-WIP 부터). 평소에는 예전처럼 하나다.
         self._data_cache_limit = 1
         # 캐시한 팩의 **바이트 크기**. 갱신 중에도 옛 팩을 계속 보여 주되,
         # 다 받아 크기가 바뀌면 그때 새로 읽게 하는 열쇠다(2026-09-03).

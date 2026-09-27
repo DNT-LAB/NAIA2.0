@@ -100,11 +100,12 @@ def lift_score(stat: tuple[int, float, float] | None, min_support: int) -> float
     return p * min(math.log2(lift), 3.0) if lift > 1 else -1.0
 
 
-# 보이는 순서의 묶음(사용자 지정 2026-09-27). 색은 Codex 칸이 무늬·소재와 같아서(attributes) 낱말로 가른다.
-COLOR_WORDS = frozenset((
-    "white", "black", "grey", "gray", "red", "blue", "green", "yellow", "pink", "purple", "orange", "brown",
-    "aqua", "blonde", "silver", "gold", "beige", "multicolored", "two-tone", "gradient", "rainbow", "streaked",
-))
+# 보이는 순서의 묶음(사용자 지정 2026-09-27). 색은 Codex 칸이 무늬·소재와 같아서(attributes) 낱말로 가른다 -
+# 색 낱말은 런타임(추천 프롬프트의 색 거르기)과 한 벌이다.
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+from core.tag_relation_pack import COLOR_WORDS  # noqa: E402
+
 # Codex 칸 -> 묶음: attributes = 무늬·소재, designs · types = 모양. 그 밖(상태·동작·부분·연출 칸)은 한 묶음.
 FACET_BY_SECTION = {"attributes": 2, "designs": 3, "types": 3}
 FACET_REPLACE, FACET_COLOR, FACET_OTHER = 0, 1, 4

@@ -1,5 +1,5 @@
 import { PALETTES, SLIDERS } from './interactiveAxes.mjs';
-import { applyRecommendation, promptTagList, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-fill';
+import { applyRecommendation, promptTagList, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-review';
 
 // 캐릭터 정보 카드의 칩 가지치기.
 //
@@ -143,6 +143,9 @@ export function createTagAssistController({
     }
   }
   let lastLookupTag = '';
+  // 조회를 보낸 입력칸 - 같은 태그라도 칸이 바뀌면 다시 조회한다(Codex 리뷰 F1: Negative 의 shirt 다음 메인의
+  // shirt 로 옮기면 조회를 건너뛰어 카드가 안 떴다. 메인만 추천 줄을 그리니 칸이 다르면 카드도 다르다).
+  let lastLookupTarget = null;
   let tagLookupTimer = null;
   let tagLookupReadOnly = false;
   let tagChipInfoTooltip = null;
@@ -1504,8 +1507,9 @@ export function createTagAssistController({
     if (suppressedTagInfo()) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
     const target = acTarget || promptEdit;
     const tag = getTagAtCursor(target);
-    if (tag === lastLookupTag) return;
+    if (tag === lastLookupTag && target === lastLookupTarget) return;
     lastLookupTag = tag;
+    lastLookupTarget = target;
     tagLookupReadOnly = false;
     hidePromptInfoTooltip();
     if (!tag) {
@@ -2920,6 +2924,7 @@ export function createTagAssistController({
     swapToken(target, info, newTag);
     hideAutocomplete();
     lastLookupTag = newTag;
+    lastLookupTarget = target;
     sendWs(tagLookupRequest(r.tag, target));
   }
 

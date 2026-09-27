@@ -78,6 +78,11 @@ def korean_description(pack: dict[str, Any], tag: Any) -> str | None:
 # 추천 프롬프트(사용자 지정 2026-09-27): 고른 태그 하나에서 **함께 1 · 상태 1** 을 더하기만. 색·무늬·모양(스타일)은
 # 취향이라 뺀다. 장면을 뒤집는 상태(벗음·부재·찢김·한쪽만)도 뺀다 - 시제품에서 hat + unworn hat 같은 모순이 나왔다.
 # 프롬프트를 고치지 않는다(Codex 계약: 사용자가 고른다) - 칩으로 보여 줄 뿐이다.
+# 색 낱말 - 빌더의 보이는 순서(색 묶음)와 추천 프롬프트(색 선택은 사용자 몫)가 이 한 벌을 같이 쓴다.
+COLOR_WORDS = frozenset((
+    "white", "black", "grey", "gray", "red", "blue", "green", "yellow", "pink", "purple", "orange", "brown",
+    "aqua", "blonde", "silver", "gold", "beige", "multicolored", "two-tone", "gradient", "rainbow", "streaked",
+))
 FILL_KINDS = ("companions", "state")
 FLIP_STATE_WORDS = ("unworn", "no ", "torn", "removed", "removing", "undressing", "detached", "single ")
 PROMPT_TAG_LIMIT = 150
@@ -95,6 +100,16 @@ def people_count(tags: Iterable[str]) -> int:
         elif tag in _CROWD_TAGS:
             total += 2
     return total
+
+
+def color_words(tag: str) -> set[str]:
+    """태그에 든 색 낱말(white · two-tone · blue-framed 의 blue …)."""
+    out: set[str] = set()
+    for word in str(tag).replace("_", " ").split():
+        if word in COLOR_WORDS:
+            out.add(word)
+        out |= {part for part in word.split("-") if part in COLOR_WORDS}
+    return out
 
 
 def _rivals(rows: Any) -> set[str]:
@@ -123,6 +138,7 @@ def fill_recommendation(pack: dict[str, Any], tag: str, prompt_tags: Iterable[st
     for name in present:
         blocked |= _rivals(seeds.get(name))
     crowd = people_count(present) >= 2
+    seed_colors = color_words(key)
     out: list[dict[str, Any]] = []
     for kind in FILL_KINDS:
         for entry in rows.get(kind, []):
@@ -137,6 +153,8 @@ def fill_recommendation(pack: dict[str, Any], tag: str, prompt_tags: Iterable[st
                 continue
             if _PEOPLE.match(name) or name in _CROWD_TAGS:
                 continue                    # 사람을 더하면 장면이 바뀐다(1girl 의 함께 = solo, 1boy)
+            if color_words(name) - seed_colors:
+                continue                    # 씨앗에 없는 색이 새로 붙는다 = 색 선택(사용자 몫). red panda 의 red 는 통과
             if keep is not None and not keep(name):
                 continue
             if _rivals(seeds.get(name)) & present:

@@ -58,14 +58,51 @@ export function normalizePromptTag(token) {
 // 보고, 자연어 문장(낱말 6개 · 64자 넘게) · 와일드카드 · 변수 · 대안 문법 · 음의 가중치(빼 달라는 태그)는 뺀다.
 // 서버가 이것을 다시 사전과 맞춰 본다. Prefix/Postfix 는 다른 칸이라 애초에 안 읽는다.
 export const PROMPT_TAG_LIMIT = 150;
-const NEGATIVE_WEIGHT = /^\s*-\s*(?:\d+(?:\.\d*)?|\.\d+)\s*::/;
+const NAI_GROUP_OPEN = /^([+-]?)\s*(?:\d+(?:\.\d*)?|\.\d+)\s*::/;
+
+/** 쉼표·줄바꿈으로 나눈 조각. NAI 가중치 그룹(`1.2::a, b ::` · `-1::a, b::`)을 따라가 음의 그룹 안인지 함께 준다. */
+function promptParts(text) {
+  const parts = [];
+  let group = 0;                                      // 1 = 양의 그룹 안, -1 = 음의 그룹 안, 0 = 밖
+  for (const raw of String(text ?? '').split(/[,\n]/)) {
+    let part = raw.trim();
+    if (!part) continue;
+    const open = NAI_GROUP_OPEN.exec(part);
+    if (open) {
+      group = open[1] === '-' ? -1 : 1;
+      part = part.slice(open[0].length).trim();
+    }
+    const negative = group === -1;
+    if (/::\s*$/.test(part)) {                        // 이 조각에서 그룹이 닫힌다
+      part = part.replace(/\s*::\s*$/, '');
+      group = 0;
+    }
+    parts.push({part, raw, negative});
+  }
+  return parts;
+}
+
+// 괄호 하나가 쉼표를 넘어 여러 태그를 감싸면(`{1boy, smile}` · `(1boy, smile:1.2)`) 조각마다 짝 없는 괄호가 남는다
+// (Codex 리뷰 F2 - 그래서 1boy 를 못 세고 solo 를 권했다). 짝 없는 것만 걷는다 - 이스케이프 괄호(`\(weapon\)`)와
+// 짝이 맞는 괄호는 그대로 둔다.
+const occurrences = (s, sub) => s.split(sub).length - 1;
+const unescaped = (s, ch) => occurrences(s, ch) - occurrences(s, '\\' + ch);
+function stripLooseBrackets(part) {
+  let t = part.trim();
+  for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+    while (t.startsWith(open) && unescaped(t, open) > unescaped(t, close)) t = t.slice(1).trimStart();
+    // 이모티콘 태그(:)  ;)  :])의 닫는 괄호와 이스케이프 괄호는 짝이 없어도 태그의 일부다.
+    while (t.endsWith(close) && !/[:;\\]$/.test(t.slice(0, -1)) && unescaped(t, close) > unescaped(t, open)) t = t.slice(0, -1).trimEnd();
+  }
+  return t;
+}
 
 export function promptTagList(text, limit = PROMPT_TAG_LIMIT) {
   const out = [];
   const seen = new Set();
-  for (const part of String(text ?? '').split(/[,\n]/)) {
-    if (NEGATIVE_WEIGHT.test(part) || part.includes('__')) continue;      // 와일드카드는 밑줄을 걷기 **전에** 본다
-    const tag = normalizePromptTag(part);
+  for (const {part, raw, negative} of promptParts(text)) {
+    if (negative || raw.includes('__')) continue;   // 음의 그룹 = 빼 달라는 태그 · 와일드카드는 밑줄을 걷기 **전에** 본다
+    const tag = normalizePromptTag(stripLooseBrackets(part));
     if (!tag || tag.length > 64 || tag.split(' ').length > 6 || /__|[$|{}]/.test(tag) || seen.has(tag)) continue;
     seen.add(tag);
     out.push(tag);
@@ -76,11 +113,11 @@ export function promptTagList(text, limit = PROMPT_TAG_LIMIT) {
 
 const escapeAttr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** 프롬프트에 이미 있는 태그들 - 추천에서 뺀다(같은 칩을 또 권하지 않는다). */
+/** 프롬프트에 이미 있는 태그들 - 추천에서 뺀다(같은 칩을 또 권하지 않는다). 음의 가중치 태그도 '있는 것' 이다. */
 export function promptTagSet(text) {
   const out = new Set();
-  for (const part of String(text ?? '').split(/[,\n]/)) {
-    const tag = normalizePromptTag(part);
+  for (const {part} of promptParts(text)) {
+    const tag = normalizePromptTag(stripLooseBrackets(part));
     if (tag) out.add(tag);
   }
   return out;

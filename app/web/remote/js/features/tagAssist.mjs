@@ -1,5 +1,5 @@
 import { PALETTES, SLIDERS } from './interactiveAxes.mjs';
-import { applyRecommendation, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-contract';
+import { applyRecommendation, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-league';
 
 // 캐릭터 정보 카드의 칩 가지치기.
 //
@@ -1533,6 +1533,15 @@ export function createTagAssistController({
     return true;
   }
 
+  // 추천 줄 [더보기] 를 편 채로 둘지 - 이 브라우저에만 기억한다. 저장소를 못 쓰면 늘 접힌 채로 연다.
+  const RECO_EXPANDED_KEY = 'naia_tag_reco_expanded';
+  function recoExpanded() {
+    try { return window.localStorage.getItem(RECO_EXPANDED_KEY) === '1'; } catch { return false; }
+  }
+  function rememberRecoExpanded(on) {
+    try { window.localStorage.setItem(RECO_EXPANDED_KEY, on ? '1' : '0'); } catch { /* 이번 카드에만 */ }
+  }
+
   function onTagLookupResult(m) {
     if (acMode) return;
     // 조회를 보낸 뒤 억제 상태가 됐거나 응답이 늦게 도착한 경우에도 띄우지 않는다.
@@ -1567,6 +1576,7 @@ export function createTagAssistController({
         present: promptTagSet(recoTarget.value),
         current: m.tag,
         renderChip: (t, cls, attrs) => renderTooltipExtraTag(t, extraTagInfo, cls, attrs),
+        expanded: recoExpanded(),
       })
       : '';
     if (recoHtml) {
@@ -1646,13 +1656,15 @@ export function createTagAssistController({
         checkTagHint();
       });
     });
-    // [+N] = 그 추천 줄의 나머지 칩을 편다. 포커스는 입력칸에 남긴다(mousedown 기본 동작을 막는다).
-    tooltipRoot.querySelectorAll('[data-reco-more]').forEach(el => {
+    // [더보기] = 대표 줄 밖의 칩(더보기 칸)을 펴고 접는다(다음 카드도 그대로 연다). 포커스는 입력칸에 남긴다
+    // (mousedown 기본 동작을 막는다).
+    tooltipRoot.querySelectorAll('[data-reco-toggle]').forEach(el => {
       el.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        el.closest('.tag-reco-row')?.classList.add('is-expanded');
-        el.remove();
+        const box = el.closest('.tag-reco');
+        if (!box) return;
+        rememberRecoExpanded(box.classList.toggle('is-expanded'));
         if (!tagLookupReadOnly) positionTagTooltip();
       });
     });

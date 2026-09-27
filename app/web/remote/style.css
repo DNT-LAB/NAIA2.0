@@ -29839,17 +29839,17 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   color: var(--text-primary); font-size: 10px;
 }
 /* Session-only reference access is distinct from a verified API connection. */
+/* 크기는 옆의 [연결 다시 확인](.setup-reprobe)과 같다 - 파란 테두리·글자로만 구분한다. */
 .setup-no-api {
-  background: #2563eb;
-  color: #fff;
-  border: 1px solid #60a5fa;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
+  height: 28px; padding: 0 12px;
+  background: transparent; border: 1px solid #3b82f6; border-radius: 6px;
+  color: #93c5fd; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.3px;
+  line-height: 1; white-space: nowrap;
+  transition: all 160ms;
+  flex-shrink: 0;
 }
-.setup-no-api:hover { background: #1d4ed8; }
+.setup-no-api:hover:not(:disabled) { color: #fff; background: rgba(37, 99, 235, 0.25); }
 .setup-no-api:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
 .setup-no-api:disabled { opacity: .5; cursor: default; }
 .mode-api-combo.reference-only .setup-launcher { color: #93c5fd; border-color: #3b82f6; }

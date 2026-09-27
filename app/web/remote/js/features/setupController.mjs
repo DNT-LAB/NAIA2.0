@@ -132,8 +132,16 @@ export function createSetupController({
     return false;
   }
 
+  // 연결된 백엔드가 있으면 NO API 모드를 고를 까닭이 없다 - 단추를 숨긴다. 확인(probe) 중에도 숨겨
+  // 켜자마자 잠깐 보였다 사라지지 않게 한다. 연결이 하나도 없다고 나오면 다시 보인다.
+  function refreshNoApiButton() {
+    if (!setupNoApiBtn) return;
+    setupNoApiBtn.disabled = !setupAllowed || noApiPending;
+    setupNoApiBtn.classList.toggle('hidden', !isNoApiMode() && (hasConnectedMode() || isProbePending()));
+  }
+
   function refreshClearButtons() {
-    if (setupNoApiBtn) setupNoApiBtn.disabled = !setupAllowed || noApiPending;
+    refreshNoApiButton();
     Object.keys(setupClearBtns).forEach(mode => {
       const button = setupClearBtns[mode];
       if (!button) return;
@@ -243,6 +251,7 @@ export function createSetupController({
       element.className = className;
     });
     if (setupReprobeBtn) setupReprobeBtn.disabled = isProbePending();
+    refreshNoApiButton();
     updateModeSelectAvailability();
   }
 

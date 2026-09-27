@@ -47,6 +47,27 @@ function restack(doc) {
   });
 }
 
+// ── 실행마다 첫 자리 ─────────────────────────────────────────────────────
+// 기억해 둔 자리는 다른 크기의 화면·다른 배치에서 정한 것이라 엉뚱한 곳에 뜨곤 했다(사용자 제보
+// 2026-09-27). 그래서 **이번 실행에서 처음 여는 창**은 기억을 쓰지 않고 왼쪽 패널과 오른쪽 탭 사이
+// (FN | Result 경계), 탭 줄 바로 아래에 연다. 여럿이면 조금씩 비껴 놓는다. 그 뒤로는 이번 실행의
+// 자리를 따른다. '이번 실행에 이미 열었다' 는 sessionStorage 에 적는다 - 크기 기억과 같은 수명
+// (앱을 다시 켜면 비고, F5 에는 남는다). 오른쪽 영역이 안 보이면(0 크기) 예전처럼 기억을 쓴다.
+const SESSION_SEAM = '.viewer-wrapper';
+const SESSION_TAB_BAR = '.right-tab-bar';
+const SESSION_STEP = 28;
+let sessionCascade = 0;
+
+function sessionStartAnchor(doc) {
+  const seam = doc.querySelector?.(SESSION_SEAM)?.getBoundingClientRect?.();
+  if (!seam || !(seam.width > 0) || !(seam.height > 0)) return null;
+  const bar = doc.querySelector?.(SESSION_TAB_BAR)?.getBoundingClientRect?.();
+  const top = bar && bar.height > 0 ? bar.bottom : seam.top;
+  const step = SESSION_STEP * (sessionCascade % 6);
+  sessionCascade += 1;
+  return {x: seam.left + 12 + step, y: top + 12 + step};
+}
+
 function clamp(value, low, high) {
   if (high < low) return low;
   return value < low ? low : (value > high ? high : value);
@@ -159,6 +180,7 @@ export function createDraggablePanel({
   // ── 기억 ────────────────────────────────────────────────────────────
   const memoryKey = storageKey ? `naia.dragpanel.${storageKey}` : '';
   const sizeKey = storageKey ? `naia.dragpanel.size.${storageKey}` : '';
+  const seenKey = storageKey ? `naia.dragpanel.seen.${storageKey}` : '';
 
   function readSlot(key, box) {
     if (!key || !box) return null;
@@ -239,6 +261,18 @@ export function createDraggablePanel({
     //    손잡이째 - 화면 밖에 놓인다(실측: 저장 x=1086, 화면 502, 490 창이 x=430).
     if (w <= vw - 12 && x + w > vw - 8) nx = Math.max(8, vw - w - 8);
     return {x: nx, y: ny};
+  }
+
+  /** 이번 실행에서 처음 여는 창이면 FN | Result 경계에 놓고 true. (맨 위 '실행마다 첫 자리' 참고) */
+  function placeAtSessionStart() {
+    if (!seenKey || !sizeStorage) return false;
+    try { if (sizeStorage.getItem(seenKey)) return false; } catch { return false; }
+    const anchor = sessionStartAnchor(doc);
+    if (!anchor) return false;
+    try { sizeStorage.setItem(seenKey, '1'); } catch { /* 표를 못 남기면 다음 열기에도 여기 뜰 뿐이다 */ }
+    const fit = fitWholePanel(anchor.x, anchor.y);
+    moveTo(fit.x, fit.y, {persist: false});
+    return true;
   }
 
   /** 가로 하한. 보통은 `minWidth` 지만 화면이 그보다 좁으면 화면이 이긴다 -
@@ -331,6 +365,7 @@ export function createDraggablePanel({
         heldHeight = el.style.height;
       }
       if (saved.collapsed && collapsible) setCollapsed(true, {persist: false});
+      if (placeAtSessionStart()) return;
       if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
         // 더 큰 화면에서 정한 자리일 수 있다 - 들어갈 수 있으면 들여놓는다.
         const fit = fitWholePanel(saved.x, saved.y);
@@ -338,6 +373,7 @@ export function createDraggablePanel({
         return;
       }
     }
+    if (placeAtSessionStart()) return;
     const rect = el.getBoundingClientRect();
     const w = rect.width || width;
     const h = rect.height || minHeight;

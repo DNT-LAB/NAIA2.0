@@ -67,11 +67,25 @@ export function createSetupController({
   }
 
   function isModeConnected(mode) {
+    // 원격 기기(setup_gate 밖 - LAN · 터널)는 연결 확인(probe)을 보낼 수 없다. 그 기기에서는 서버의 모드 전환 검사
+    // (`_handle_set_mode`: 저장된 연결 정보 · 관리형 ANIMA 준비)와 같은 기준으로 본다 - 안 그러면 원격에서는
+    // 모드 셀렉트가 통째로 잠긴다(09-27 실측, 사용자 지정: 원격 전환 허용).
+    if (!canProbe()) return isRemoteSwitchable(mode);
     return probeState && probeState[mode] === 'ok';
   }
 
+  function canProbe() {
+    return setupAllowed && !isNoApiMode();
+  }
+
+  function isRemoteSwitchable(mode) {
+    if (isNoApiMode()) return false;
+    if (mode === 'COMFYUI' && isComfyManaged()) return (apiStatusLast || {}).anima_ready === true;
+    return isModeConfigured(mode);
+  }
+
   function hasConnectedMode() {
-    return Object.values(probeState).some(state => state === 'ok');
+    return ['NAI', 'WEBUI', 'COMFYUI'].some(isModeConnected);
   }
 
   function isProbePending() {
@@ -93,7 +107,7 @@ export function createSetupController({
   }
 
   function hasConfiguredMode() {
-    return ['NAI', 'WEBUI', 'COMFYUI'].some(isModeConfigured);
+    return ['NAI', 'WEBUI', 'COMFYUI'].some(isProbeTarget);
   }
 
   function scheduleForcedReprobe() {
@@ -130,6 +144,28 @@ export function createSetupController({
     if (mode === 'WEBUI') return !!(last.webui_url && last.webui_url.length);
     if (mode === 'COMFYUI') return !!(last.comfyui_url && last.comfyui_url.length);
     return false;
+  }
+
+  // 관리형 ANIMA 엔진을 고르면 COMFYUI 자리는 외부 URL 없이도 잴 대상이다 - 백엔드 probe 가 URL 대신
+  // 설치 준비를 본다(계약 §9.5). URL 만 보면 ANIMA 만 설치한 PC 에서 COMFYUI 연결이 매번 지워진다.
+  // 지우기 단추(isModeConfigured)는 그대로 저장된 URL 기준이다.
+  function isComfyManaged() {
+    return (apiStatusLast || {}).comfyui_engine === 'managed';
+  }
+
+  function isProbeTarget(mode) {
+    return (mode === 'COMFYUI' && isComfyManaged()) || isModeConfigured(mode);
+  }
+
+  // 엔진을 바꾼 직후(관리형 ANIMA <-> 외부 ComfyUI) - 서버의 api_status 는 다음 메시지에야 온다.
+  // 이 탭이 아는 엔진을 바로 고치고 COMFYUI 자리의 연결을 새 엔진 기준으로 둔다: 관리형은 서버가 준비를
+  // 확인하고 받아 줬으니(/select 가 409 가 아니면) 연결됨, 외부는 부르는 쪽이 다시 잰다(probe).
+  function noteComfyEngine(engine, { animaReady } = {}) {
+    if (!apiStatusLast) return;
+    apiStatusLast = { ...apiStatusLast, comfyui_engine: engine === 'managed' ? 'managed' : 'external' };
+    if (animaReady !== undefined) apiStatusLast.anima_ready = !!animaReady;
+    if (engine === 'managed') probeState.COMFYUI = apiStatusLast.anima_ready ? 'ok' : 'err';
+    refreshDotsFromProbe();
   }
 
   // 연결된 백엔드가 있으면 NO API 모드를 고를 까닭이 없다 - 단추를 숨긴다. 확인(probe) 중에도 숨겨
@@ -215,7 +251,7 @@ export function createSetupController({
     const last = apiStatusLast || {};
     probeState.NAI = last.nai_configured ? 'probing' : null;
     probeState.WEBUI = (last.webui_url && last.webui_url.length) ? 'probing' : null;
-    probeState.COMFYUI = (last.comfyui_url && last.comfyui_url.length) ? 'probing' : null;
+    probeState.COMFYUI = isProbeTarget('COMFYUI') ? 'probing' : null;
     refreshDotsFromProbe();
     ws.send(JSON.stringify({ type: 'probe_api', explicit }));
   }
@@ -243,7 +279,9 @@ export function createSetupController({
     Object.keys(setupNavDots).forEach(mode => {
       const element = setupNavDots[mode];
       if (!element) return;
-      const state = probeState[mode];
+      // 03 COMFYUI 점은 외부 서버의 것이다 - 관리형을 쓰는 동안 COMFYUI 결과는 관리형 엔진을 잰 것이라
+      // 여기 칠하지 않는다(04 ANIMA 의 점은 animaSetupPanel 이 칠한다).
+      const state = mode === 'COMFYUI' && isComfyManaged() ? null : probeState[mode];
       let className = 'setup-nav-dot';
       if (state === 'ok') className += ' ok';
       else if (state === 'err') className += ' err';
@@ -544,7 +582,7 @@ export function createSetupController({
       probeState.WEBUI = null;
       refreshDotsFromProbe();
     }
-    if (!hasComfy && probeState.COMFYUI !== null) {
+    if (!isProbeTarget('COMFYUI') && probeState.COMFYUI !== null) {
       probeState.COMFYUI = null;
       refreshDotsFromProbe();
     }
@@ -598,8 +636,10 @@ export function createSetupController({
     isApiSetupPending,
     onNoApiResult,
     getApiStatus,
+    noteComfyEngine,
     resetInitialProbe,
     isModeConnected,
+    canProbe,
     hasConnectedMode,
     isProbePending,
     hasProbeCompleted,

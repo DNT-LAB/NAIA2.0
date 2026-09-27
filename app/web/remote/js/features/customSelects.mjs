@@ -976,11 +976,14 @@ export function createCustomSelectController({
     if (!option || option.disabled) return;
 
     const oldValue = state.select.value;
+    const oldIndex = state.select.selectedIndex;
     state.select.selectedIndex = index;
     syncState(state);
     closeOpen();
 
-    if (state.select.value !== oldValue) {
+    // 값이 같아도 **다른 칸**을 골랐으면 알린다 - 네이티브 <select> 도 값이 아니라 선택이 바뀌면
+    // change 를 쏜다. 메인 모드의 COMFYUI · ANIMA 는 둘 다 value 가 COMFYUI 다(ANIMA = 관리형 엔진).
+    if (state.select.value !== oldValue || state.select.selectedIndex !== oldIndex) {
       state.select.dispatchEvent(new Event('input', { bubbles: true }));
       state.select.dispatchEvent(new Event('change', { bubbles: true }));
     }

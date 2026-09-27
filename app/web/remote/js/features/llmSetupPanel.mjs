@@ -1,4 +1,4 @@
-// API 설정 > "04 AI ASSIST" 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · 모드를 한 곳에서(사용자 지정
+// API 설정 > "05 AI ASSIST" 탭(09-27 ANIMA 가 04 로 들어오며 밀림) — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · 모드를 한 곳에서(사용자 지정
 // 2026-09-26: 받는 곳을 하나로 · NovelAI 탭 아래 공통 영역에서 제 탭으로). 탭 이름 밑 글자 · 점도 여기서 채운다. 상태는 /api/boost-v2/status 폴링, 모델 · 모드 저장은 PE 모듈의 boost_v2_settings
 // (부분 저장 — 서버가 디스크 값에 합친다), 받기는 /api/boost-v2/model/download {model} · 엔진은 /api/boost-v2/engine/download.
 //

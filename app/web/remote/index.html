@@ -46,10 +46,13 @@
   </div>
   <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
   <div class="mode-api-combo" id="modeApiCombo">
-    <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
+    <select class="mode-select" id="modeSelect" onchange="onModeSelectChange(this)">
       <option value="NAI">NAI</option>
       <option value="WEBUI">WEBUI</option>
       <option value="COMFYUI">COMFYUI</option>
+      <!-- ANIMA = COMFYUI 모드를 NAIA 관리형 엔진으로 돌리는 것(api_mode 는 COMFYUI 그대로 - 계약 FR-S1).
+           value 가 같아 modeSelect.value 를 읽는 곳은 COMFYUI 를 본다. 칸 고르기 · 잠금은 app.js paintComfyEngineOptions. -->
+      <option value="COMFYUI" data-engine="managed">ANIMA</option>
     </select>
     <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
   </div>
@@ -95,17 +98,25 @@
           <span class="setup-nav-sub" id="setupNavSubComfyui">미설정</span>
           <span class="setup-nav-dot" id="setupDotComfyui"></span>
         </button>
+        <!-- ANIMA — NAIA 가 설치 · 관리하는 전용 ComfyUI(사용자 지정 2026-09-27: 03 COMFYUI 다음 04 자리).
+             이름 밑 글자 · 점은 js/features/animaSetupPanel.mjs 가 채운다. -->
+        <button class="setup-nav-item" data-tab="anima" onclick="switchSetupTab('anima')" role="tab">
+          <span class="setup-nav-num">04</span>
+          <span class="setup-nav-name">ANIMA</span>
+          <span class="setup-nav-sub" id="setupNavSubAnima">확인 중</span>
+          <span class="setup-nav-dot" id="setupDotAnima"></span>
+        </button>
         <!-- Assist · Auto Boost 가 함께 쓰는 앱 내장 AI 모델(엔진 · 모델 · CPU/GPU 모드) — 사용자 지정 2026-09-26.
              이름 밑 글자 · 점은 js/features/llmSetupPanel.mjs 가 채운다. -->
         <button class="setup-nav-item" data-tab="ai" onclick="switchSetupTab('ai')" role="tab">
-          <span class="setup-nav-num">04</span>
+          <span class="setup-nav-num">05</span>
           <span class="setup-nav-name">AI ASSIST</span>
           <span class="setup-nav-sub" id="setupNavSubAi">확인 중</span>
           <span class="setup-nav-dot" id="setupDotAi"></span>
         </button>
         <!-- GROK 연동 (제거 가능): 이미지 우클릭 I2I 전용 보조 백엔드 -->
         <button class="setup-nav-item" data-tab="grok" onclick="switchSetupTab('grok')" role="tab">
-          <span class="setup-nav-num">05</span>
+          <span class="setup-nav-num">06</span>
           <span class="setup-nav-name">GROK</span>
           <span class="setup-nav-sub" id="setupNavSubGrok">미설정</span>
           <span class="setup-nav-dot" id="setupDotGrok"></span>
@@ -166,6 +177,14 @@
           </div>
           <div class="setup-result" id="setupResultComfyui"></div>
           <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
+        </div>
+        <!-- ANIMA — 관리형 엔진 설치 · 동의 · 상태. 내용은 animaSetupPanel.mjs 가 그린다(백엔드 /api/anima-engine/*). -->
+        <div class="setup-tab-pane" data-pane="anima">
+          <div id="setupAnimaSection" style="display:flex;flex-direction:column;gap:10px">
+            <div class="setup-meta-line"><span>엔진</span><span class="setup-meta-val">NAIA 관리형 ComfyUI · Spectrum SPD 고정 그래프</span></div>
+            <div class="setup-meta-line"><span>상태</span><span class="setup-meta-val" data-anima-status>확인 중…</span></div>
+            <div data-anima-body style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+          </div>
         </div>
         <!-- AI ASSIST — 앱 내장 llama-server 의 엔진 · 모델 · 모드(받는 곳은 여기 하나). 내용은 llmSetupPanel.mjs 가 그린다. -->
         <div class="setup-tab-pane" data-pane="ai">
@@ -1477,6 +1496,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260927-review"></script>
+<script src="app.js?v=20260927-anima6"></script>
 </body>
 </html>

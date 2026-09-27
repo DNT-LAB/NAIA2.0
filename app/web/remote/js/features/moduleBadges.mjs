@@ -9,6 +9,7 @@ export function createModuleBadges({
   openParamsTab,
   setAnimaWeight,
   openComfyUiTools,
+  getComfyEngine = () => 'external',
 }) {
   const activatedSummary = document.getElementById('activatedSummary');
   const activatedFooter = document.getElementById('promptTokenFooter');
@@ -192,14 +193,16 @@ export function createModuleBadges({
     return part;
   }
 
-  function createWorkflowPart() {
+  function createWorkflowPart(managed = false) {
     const hasCustom = comfyUiStatus.workflowHasCustom;
     const isFree = ['bypass', 'free'].includes(String(comfyUiStatus.workflowType || '').trim().toLowerCase());
     const part = document.createElement('button');
     part.type = 'button';
-    part.className = `activated-summary-part ${hasCustom ? 'comfyui-workflow-custom' : 'comfyui-workflow-basic'}`;
-    part.textContent = isFree ? 'Bypass Workflow' : (comfyUiStatus.workflowLabel || (hasCustom ? 'Custom Workflow' : 'Basic Workflow'));
-    part.title = 'COMFYUI 전용 도구';
+    part.className = `activated-summary-part ${hasCustom && !managed ? 'comfyui-workflow-custom' : 'comfyui-workflow-basic'}`;
+    // 관리형 ANIMA 엔진은 NAIA 가 고정 그래프를 쓴다 - 외부 ComfyUI 의 워크플로(기본 · 커스텀 · 바이패스)는 쓰지 않는다
+    part.textContent = managed ? 'ANIMA 엔진'
+      : (isFree ? 'Bypass Workflow' : (comfyUiStatus.workflowLabel || (hasCustom ? 'Custom Workflow' : 'Basic Workflow')));
+    part.title = managed ? 'ANIMA 전용 도구' : 'COMFYUI 전용 도구';
     part.addEventListener('click', event => {
       event.stopPropagation();
       if (typeof openComfyUiTools === 'function') openComfyUiTools();
@@ -222,13 +225,15 @@ export function createModuleBadges({
     if (activatedFooter) activatedFooter.classList.add('has-activated');
     if (activatedWrap) activatedWrap.classList.add('has-activated-summary');
 
-    const isFreeWorkflow = ['bypass', 'free'].includes(String(comfyUiStatus.workflowType || '').trim().toLowerCase());
-    const mode = normalizeSamplingMode(comfyUiStatus.samplingMode);
+    // 관리형 ANIMA 엔진 = ANIMA 고정(사용자 지정 09-27: EPS · V-Pred 미지원) - 서버에 남은 플래그 값과 무관하다
+    const managed = getComfyEngine() === 'managed';
+    const isFreeWorkflow = !managed && ['bypass', 'free'].includes(String(comfyUiStatus.workflowType || '').trim().toLowerCase());
+    const mode = managed ? 'anima' : normalizeSamplingMode(comfyUiStatus.samplingMode);
     activatedSummary.append(createParamsPart('comfyui-mode', `Mode : ${isFreeWorkflow ? 'Bypass' : displaySamplingMode(mode)}`));
     appendBullet();
     activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
     appendBullet();
-    activatedSummary.append(createWorkflowPart());
+    activatedSummary.append(createWorkflowPart(managed));
   }
 
   function renderWebUiSummary() {

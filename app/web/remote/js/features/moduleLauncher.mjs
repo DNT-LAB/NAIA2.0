@@ -155,6 +155,28 @@ const MODULE_REGISTRY = {
     modes: ['COMFYUI'],
     className: 'module-comfyui-tool',
   },
+  // ANIMA 관리형 엔진 전용(사용자 지정 2026-09-27) — `anima: true` 는 관리형일 때만 보이고, 그때는
+  // COMFYUI 전용 도구가 숨는다(고정 그래프라 워크플로 교체 · 웹 열기가 뜻이 없다). 해상도 프리셋은
+  // COMFYUI 것과 같은 키(presetMode COMFYUI)를 쓴다 — app.js 가 같은 속성의 행을 전부 채운다.
+  anima_resolution_preset: {
+    label: '해상도 프리셋',
+    title: 'ANIMA 해상도 프리셋',
+    category: 'anima_tools',
+    action: 'resolution_preset',
+    modes: ['COMFYUI'],
+    presetMode: 'COMFYUI',
+    anima: true,
+  },
+  anima_lora: {
+    label: 'LoRA',
+    title: 'ANIMA LoRA — 직렬 LoRA 체인(순서 · 강도 · 켜기)',
+    category: 'anima_tools',
+    action: 'anima_lora',
+    modes: ['COMFYUI'],
+    anima: true,
+    badgeId: 'badgeAnimaLora',
+    categoryBadgeLabel: 'L',
+  },
   automation: {
     label: 'Automation',
     title: 'Automation',
@@ -198,6 +220,13 @@ const CATEGORY_REGISTRY = [
     moduleIds: ['comfyui_resolution_preset', 'comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_workflow_free_upload', 'comfyui_open_web'],
   },
   {
+    id: 'anima_tools',
+    label: 'ANIMA 전용 도구',
+    title: 'ANIMA 전용 도구 (관리형 엔진)',
+    moduleIds: ['anima_resolution_preset', 'anima_lora'],
+    splitBadges: true,
+  },
+  {
     id: 'assistant_tools',
     label: '자동화 / 고급 기능',
     title: '자동화 / 고급 기능',
@@ -224,6 +253,10 @@ export function createModuleLauncher({
   naiToolUnsupported = () => false,
   // 모듈 팝업이 아니라 떠 있는 창으로 사는 모듈(조건부 프롬프트)이 열려 있나.
   isWindowModuleOpen = () => false,
+  // ANIMA 관리형 엔진인가 · LoRA 창 열기 · 열려 있나(09-27).
+  isAnimaManaged = () => false,
+  openAnimaLora = null,
+  isAnimaLoraOpen = () => false,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -340,8 +373,11 @@ export function createModuleLauncher({
   function isVisibleInMode(moduleId) {
     const config = MODULE_REGISTRY[moduleId];
     if (!config) return false;
-    if (!Array.isArray(config.modes) || !config.modes.length) return true;
-    return config.modes.includes(getMode());
+    if (Array.isArray(config.modes) && config.modes.length && !config.modes.includes(getMode())) return false;
+    // ANIMA 관리형이면 ANIMA 전용 도구만, 아니면 COMFYUI 전용 도구만 — 같은 자리를 나눠 쓴다.
+    if (config.anima) return Boolean(isAnimaManaged());
+    if (config.category === 'comfyui_tools' && isAnimaManaged()) return false;
+    return true;
   }
 
   function visibleCategoryModules(category) {
@@ -501,6 +537,8 @@ export function createModuleLauncher({
       uploadComfyUiFreeWorkflow?.();
     } else if (config.action === 'comfyui_open_web') {
       openComfyUiWeb?.();
+    } else if (config.action === 'anima_lora') {
+      openAnimaLora?.();
     } else {
       openModule(moduleId);
     }
@@ -588,6 +626,7 @@ export function createModuleLauncher({
   function moduleIsActive(moduleId) {
     if (moduleId === 'chunk') return isChunkOpen();
     if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
+    if (MODULE_REGISTRY[moduleId]?.action === 'anima_lora') return Boolean(isAnimaLoraOpen());
     if (isWindowModuleOpen(moduleId)) return true;
     return isModulePopupOpen() && getCurrentModuleId() === moduleId;
   }

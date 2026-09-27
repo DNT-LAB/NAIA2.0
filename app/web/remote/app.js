@@ -228,6 +228,11 @@ let comfyuiWorkflowState = {
   workflow_label: 'Basic Workflow',
   workflow_type: '',
 };
+// 관리형 ANIMA 엔진 동안 화면의 COMFYUI 플래그는 ANIMA 로 덮는다(사용자 지정 09-27: EPS · V-Pred 미지원).
+// 서버가 들고 있는 값은 외부 ComfyUI 로 돌아갈 때 되돌리려고 기억만 한다.
+let comfySamplingModeStored = '';
+let animaFlagsLocked = false;
+let lastAnimaView = false;
 let comfyuiWorkflowFileInput = null;
 let comfyuiFreeWorkflowFileInput = null;
 let cloudflaredControls = null;
@@ -1199,7 +1204,7 @@ import('./js/features/assistPanel.mjs?v=20260926-llm')
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260919-accent')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260927-sameval')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -2102,7 +2107,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260903-main
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260823-slotmute1')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260927-anima')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -2115,6 +2120,7 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260823-slot
       openParamsTab: () => switchTab('params'),
       setAnimaWeight: setAnimaWeightFromBadge,
       openComfyUiTools,
+      getComfyEngine: () => (isAnimaManagedMode() ? 'managed' : 'external'),
     });
   })
   .catch(error => {
@@ -2135,7 +2141,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs?v=20260927-noapi-btn')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260927-anima3')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,
@@ -2263,7 +2269,37 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
   .catch(error => {
     console.error('Failed to initialize data bootstrap panel module', error);
   });
-// API 설정 > 04 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
+// API 설정 > 04 ANIMA 탭 — NAIA 가 설치 · 관리하는 전용 ComfyUI(설치 · 라이선스 동의 · 엔진 상태, 09-27).
+// 백엔드는 /api/anima-engine/*(docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8). 엔진을 고르거나 설치가 끝나면
+// 기존 연결 확인(probe_api)을 다시 태운다 — 새 연결 경로를 만들지 않는다.
+let animaSetupPanel = null;
+import('./js/features/animaSetupPanel.mjs?v=20260927-anima2')
+  .then(({createAnimaSetupPanel}) => {
+    // 엔진을 골랐거나 설치가 끝났다 — 메인 모드 표시(ANIMA) · 연결 · 옵션을 새 엔진으로(onComfyEngineChanged)
+    animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine)});
+    animaSetupPanel.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize ANIMA setup panel', error);
+  });
+// ANIMA 전용 도구 > LoRA 창(09-27, 사용자 지정: COMFYUI 전용 도구 자리에 [해상도 프리셋 · LoRA]).
+// 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
+// 모드는 params 적용부가 setMode 로 알려 준다.
+let animaLoraPanel = null;
+import('./js/features/animaLoraPanel.mjs?v=20260927-lora2')
+  .then(({createAnimaLoraPanel}) => {
+    animaLoraPanel = createAnimaLoraPanel({
+      document, window,
+      onOpenSetup: () => { openApiPopup(); switchSetupTab('anima'); },
+      onStateChange: () => moduleLauncherControl?.updateState(),
+    });
+    animaLoraPanel.init();
+    animaLoraPanel.setMode(currentMode || modeSelect?.value || '');
+  })
+  .catch(error => {
+    console.error('Failed to initialize ANIMA LoRA panel', error);
+  });
+// API 설정 > 05 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
 // 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 탭을 연다.
 let llmSetupPanel = null;
 import('./js/features/llmSetupPanel.mjs?v=20260927-cpustart')
@@ -2276,7 +2312,7 @@ import('./js/features/llmSetupPanel.mjs?v=20260927-cpustart')
   });
 window.openAiModelSetup = () => {
   openApiPopup();
-  switchSetupTab('ai');   // API 설정 > 04 AI ASSIST 탭
+  switchSetupTab('ai');   // API 설정 > 05 AI ASSIST 탭
 };
 let updateBanner = null;
 const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260607-srcupd2')
@@ -3031,7 +3067,12 @@ function _collectCurrentParams() {
   //    주장하지 말고 미고정과 같은 값을 보낸다. 한 장 나오면 그 시드를 잡아
   //    (`captureSeedLockDispatch`) 다음 장부터 실제로 물린다.
   const seedBoxValue = seedFixed ? parseNumber(paramEls.seed.value) : null;
-  if (seedFixed && seedBoxValue !== null && seedBoxValue >= 0) {
+  const seedBoxText = String(paramEls.seed.value ?? '').trim();
+  if (seedFixed && isUnsafeSeedText(seedBoxText)) {
+    // 2^53 을 넘는 시드는 **글자 그대로** 보낸다 — Number 는 끝자리를 바꾼다(ComfyUI 시드는 0~2^64-1).
+    // 관리형 ANIMA 는 이 문자열을 정확히 받는다(계약 §14.2). 다른 모드는 백엔드가 예전처럼 숫자로 바꾼다.
+    p.seed = seedBoxText;
+  } else if (seedFixed && seedBoxValue !== null && seedBoxValue >= 0) {
     p.seed = Math.trunc(seedBoxValue);
   } else {
     p.seed = mode === 'NAI' ? Math.floor(Math.random() * 10000000000) : -1;
@@ -3807,6 +3848,7 @@ function _applyHiresOverlayResponse(payload) {
 }
 
 function currentComfyUiSamplingMode() {
+  if (isAnimaManagedMode()) return 'anima';
   return $('flagAnima')?.classList.contains('on')
     ? 'anima'
     : ($('flagVpred')?.classList.contains('on') ? 'v_prediction' : 'eps');
@@ -4287,6 +4329,9 @@ function onGenerationDispatched(m) {
   applyDispatchedResolutionDisplay(m);
   const seed = Number(m.params?.seed);
   if (!Number.isFinite(seed) || seed < 0) return;
+  // 2^53 을 넘는 시드는 JSON 에서 이미 끝자리가 바뀌어 왔다 — 되돌려 쓰면 사용자가 친 시드를 망친다.
+  // 이 경우 시드 박스(사용자가 친 그대로)를 믿고 아무것도 덮지 않는다.
+  if (!Number.isSafeInteger(Math.trunc(seed))) return;
   // **Interactive 캡처를 먼저 한다.** 아래 두 가드는 '시드 박스를 건드리지
   // 않는다' 는 뜻이지 '이 생성을 없던 일로 한다' 는 뜻이 아니다. 뒤에 두었더니
   // 시드 입력란에 포커스를 둔 채 Ctrl+Enter 로 생성하면 잠금이 그 생성을 놓쳤다
@@ -5374,6 +5419,7 @@ function isComfyUiBypassWorkflowType(value) {
 
 function isComfyUiFreeWorkflowActive(mode = currentMode || modeSelect?.value || '') {
   return String(mode || '').toUpperCase() === 'COMFYUI'
+    && !isAnimaManagedMode()
     && isComfyUiBypassWorkflowType(comfyuiWorkflowState?.workflow_type);
 }
 
@@ -5391,13 +5437,16 @@ function setSelectToBypass(el) {
 
 function applyComfyUiFreeParamLock(mode = currentMode || modeSelect?.value || '') {
   const locked = isComfyUiFreeWorkflowActive(mode);
+  // 관리형 ANIMA 엔진은 모델 · 샘플러 · 스케줄러가 ANIMA 스펙 고정이다(서버가 고정값 하나씩만 준다) — 잠가서 보인다
+  const specFixed = isAnimaManagedMode();
   [paramEls.model, paramEls.sampler, paramEls.scheduler].forEach(el => {
     if (!el) return;
     if (locked) setSelectToBypass(el);
-    el.disabled = locked;
+    el.disabled = locked || specFixed;
     el.classList.toggle('param-bypass-lock', locked);
     el.dataset.customSelectLabel = locked ? COMFYUI_FREE_BYPASS_TEXT : '';
-    el.dataset.customSelectTitle = locked ? 'Controlled by the Bypass custom workflow' : '';
+    el.dataset.customSelectTitle = locked ? 'Controlled by the Bypass custom workflow'
+      : (specFixed ? '관리형 ANIMA 엔진 — ANIMA 스펙 고정' : '');
   });
 
   [paramEls.steps, paramEls.cfg_scale, paramEls.seed].forEach(el => {
@@ -5428,6 +5477,7 @@ function applyComfyUiFreeParamLock(mode = currentMode || modeSelect?.value || ''
   if (samplingBypass) {
     samplingBypass.style.display = locked ? '' : 'none';
   }
+  syncAnimaEngineFlags();   // 관리형이면 ANIMA 하나로 · 막 외부로 돌아왔으면 서버 값으로(아래 Rescale 줄이 그 결과를 읽는다)
 
   const rescaleRow = $('comfyuiRescaleRow');
   const rescaleInput = $('pRescaleCfg');
@@ -5545,6 +5595,7 @@ function updateParams(m) {
   if (mode) applyRightTabAvailability({charAssets: mode === 'NAI'});
   $('webuiParams').style.display = mode === 'WEBUI' ? '' : 'none';
   $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
+  if (animaLoraPanel) animaLoraPanel.setMode(mode);   // 관리형 ANIMA 인지 확인 — 런처가 ANIMA 전용 도구를 보일지 정한다
   if (
     (mode === 'WEBUI' || mode === 'COMFYUI')
     && ('resolution_preset_enabled' in m || 'resolution_preset' in m)
@@ -5684,15 +5735,7 @@ function updateParams(m) {
   }
 
   // ComfyUI sampling mode — 서버가 명시적으로 보낸 경우에만 적용 (EPS 기본값 리셋 방지)
-  if (mode === 'COMFYUI' && 'sampling_mode' in m) {
-    const sm = m.sampling_mode;
-    $('flagEps').classList.toggle('on', sm === 'eps');
-    $('flagVpred').classList.toggle('on', sm === 'v_prediction');
-    $('flagAnima').classList.toggle('on', sm === 'anima');
-    $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
-    if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
-    if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
-  }
+  if (mode === 'COMFYUI' && 'sampling_mode' in m) applyComfySamplingParams(m);
   updateRandomPromptWeightRow(mode, mode === 'COMFYUI' && 'sampling_mode' in m ? m.sampling_mode : null);
   if (artistThumbControl && typeof artistThumbControl.syncPromptFormat === 'function') {
     artistThumbControl.syncPromptFormat();
@@ -6000,8 +6043,15 @@ function seedResLockEffective() {
 
 /** 지금 화면의 시드. 생성이 끝나면 시드 박스에 실제 디스패치 값이 들어온다. */
 function seedLockPillSeed() {
-  const n = Number(String(paramEls?.seed?.value ?? '').trim());
+  const text = String(paramEls?.seed?.value ?? '').trim();
+  if (isUnsafeSeedText(text)) return text;   // 2^53 을 넘는 시드는 글자 그대로 보인다
+  const n = Number(text);
   return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
+}
+
+/** 0 이상 정수를 적은 글자인데 Number 로 바꾸면 끝자리가 바뀌는가(2^53 초과) — 그런 시드는 문자열로 다룬다. */
+function isUnsafeSeedText(text) {
+  return /^\d{1,20}$/.test(text) && !Number.isSafeInteger(Number(text));
 }
 
 function renderSeedLockPill() {
@@ -6123,8 +6173,60 @@ function toggleQuickFlag(el, key) {
   if (key === 'random_resolution' || key === 'auto_fit_resolution') renderSeedLockPill();
 }
 
+// 서버가 보낸 COMFYUI 플래그를 화면에 싣는다. 관리형 ANIMA 엔진이면 화면은 ANIMA 로 고정하고(EPS · V-Pred 미지원)
+// 서버 값은 외부 ComfyUI 로 돌아갈 때를 위해 기억만 한다. Rescale CFG 는 ANIMA 면 열린다(비우면 ANIMA 스펙 0.5).
+function applyComfySamplingParams(m) {
+  comfySamplingModeStored = String(m.sampling_mode || '');
+  const sm = isAnimaManagedMode() ? 'anima' : m.sampling_mode;
+  $('flagEps').classList.toggle('on', sm === 'eps');
+  $('flagVpred').classList.toggle('on', sm === 'v_prediction');
+  $('flagAnima').classList.toggle('on', sm === 'anima');
+  $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
+  if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
+  if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
+  syncAnimaEngineFlags();
+}
+
+// 관리형 ANIMA 엔진은 ANIMA 전용이다 — 플래그 줄은 ANIMA 하나(눌러도 안 바뀐다)로 고정한다.
+// 외부 ComfyUI 로 돌아오면 서버가 들고 있는 플래그로 되돌린다(보이기 · 숨기기는 applyComfyUiFreeParamLock 이 정한다).
+function syncAnimaEngineFlags() {
+  const eps = $('flagEps');
+  const vpred = $('flagVpred');
+  const anima = $('flagAnima');
+  if (!eps || !vpred || !anima) return;
+  const bypassText = $('comfyuiSamplingBypass');
+  if (isAnimaManagedMode()) {
+    eps.style.display = 'none';
+    vpred.style.display = 'none';
+    anima.style.display = '';
+    if (bypassText) bypassText.style.display = 'none';
+    eps.classList.remove('on');
+    vpred.classList.remove('on');
+    anima.classList.remove('disabled', 'param-bypass-lock');
+    anima.classList.add('on');
+    anima.style.cursor = 'default';
+    anima.title = '관리형 ANIMA 엔진 — ANIMA 스펙 고정(EPS · V-Pred 없음)';
+    animaFlagsLocked = true;
+    return;
+  }
+  if (!animaFlagsLocked) return;
+  animaFlagsLocked = false;
+  anima.style.cursor = '';
+  anima.title = '';
+  const stored = comfySamplingModeStored || 'eps';
+  eps.classList.toggle('on', stored === 'eps');
+  vpred.classList.toggle('on', stored === 'v_prediction');
+  anima.classList.toggle('on', stored === 'anima');
+  // 어느 길로 불렸든 보이기는 바이패스 기준으로 맞춘다(applyComfyUiFreeParamLock 과 같은 규칙)
+  const bypass = isComfyUiFreeWorkflowActive();
+  [eps, vpred, anima].forEach(el => { el.style.display = bypass ? 'none' : ''; });
+  if (bypassText) bypassText.style.display = bypass ? '' : 'none';
+}
+
 function setSamplingMode(mode) {
   if (isComfyUiFreeWorkflowActive()) return;
+  if (isAnimaManagedMode()) return;   // 관리형 ANIMA 엔진은 ANIMA 고정(EPS · V-Pred 미지원)
+  comfySamplingModeStored = mode;
   $('flagEps').classList.toggle('on', mode === 'eps');
   $('flagVpred').classList.toggle('on', mode === 'v_prediction');
   $('flagAnima').classList.toggle('on', mode === 'anima');
@@ -6406,7 +6508,8 @@ function openComfyUiWeb() {
 
 function openComfyUiTools() {
   if (moduleLauncherControl && typeof moduleLauncherControl.openCategory === 'function') {
-    moduleLauncherControl.openCategory('comfyui_tools');
+    // 런처와 같은 기준 — ANIMA 전용 도구가 보이는 동안(관리형)은 그쪽을 연다
+    moduleLauncherControl.openCategory(animaLoraPanel?.isManaged?.() ? 'anima_tools' : 'comfyui_tools');
   }
 }
 
@@ -9128,9 +9231,57 @@ function flashTaskbarAttention() {
 let autoModeFallbackInFlight = false;
 let autoModeFallbackTarget = '';
 const API_MODES = ['NAI', 'WEBUI', 'COMFYUI'];
+// ANIMA = COMFYUI 모드의 관리형 엔진(09-27, 사용자 지정: 메인 모드 표시 NAI → WEBUI → COMFYUI → ANIMA).
+// api_mode 는 COMFYUI 그대로 두고 엔진(comfyui_engine)만 고른다(계약 FR-S1). 셀렉트의 ANIMA 칸도 value 가
+// COMFYUI 라 modeSelect.value 를 읽는 곳은 그대로 COMFYUI 를 본다 — 어느 칸을 보이고 잠글지만 따로 정한다.
+let comfyEngineSwitching = false;
+let comfyEngineAfterProbe = false;   // 외부 ComfyUI 로 바꾼 뒤 연결 확인이 끝나면 COMFYUI 로 들어간다
 
 function isModeConnected(mode) {
   return setupController ? setupController.isModeConnected(mode) : false;
+}
+
+function comfyEngine() {
+  return setupController?.getApiStatus?.()?.comfyui_engine === 'managed' ? 'managed' : 'external';
+}
+
+// 화면이 ANIMA 모드인가 = COMFYUI 모드 + 관리형 엔진(설치가 깨졌어도 엔진은 ANIMA 다 — 연결 여부는 따로 본다)
+function isAnimaManagedMode() {
+  return (currentMode || modeSelect?.value || '') === 'COMFYUI' && comfyEngine() === 'managed';
+}
+
+// 셀렉트의 COMFYUI · ANIMA 두 칸. 아래 반복문은 value 로 찾아 COMFYUI 칸에만 연결을 매긴다 —
+// 그 결과는 **지금 엔진**의 것이라 엔진의 칸으로 옮기고, 다른 칸은 "엔진 바꾸기" 로 연다.
+function paintComfyEngineOptions(noApi = false) {
+  const comfy = modeSelect.querySelector('option[value="COMFYUI"]:not([data-engine])');
+  const anima = modeSelect.querySelector('option[data-engine="managed"]');
+  if (!comfy || !anima) return;
+  if (noApi) {
+    anima.disabled = true;
+    anima.dataset.connected = '0';
+    return;
+  }
+  const status = setupController?.getApiStatus?.() || {};
+  const managed = comfyEngine() === 'managed';
+  const inUse = {disabled: comfy.disabled, connected: comfy.dataset.connected};
+  const active = managed ? anima : comfy;
+  const other = managed ? comfy : anima;
+  active.disabled = inUse.disabled;
+  active.dataset.connected = inUse.connected;
+  // 다른 엔진으로 바꾸기 — 바꿀 곳이 있을 때만(외부 URL · ANIMA 설치). 원격 기기도 된다(사용자 지정 09-27).
+  other.disabled = comfyEngineSwitching
+    || !(managed ? String(status.comfyui_url || '').trim() : status.anima_ready === true);
+  other.dataset.connected = '0';
+  // COMFYUI 모드면 지금 엔진의 칸을 보인다. 바꾸는 중에는 사용자가 고른 칸을 그대로 둔다.
+  if (currentMode === 'COMFYUI' && !comfyEngineSwitching) active.selected = true;
+  // 관리형 ↔ 외부가 바뀌었다(이 탭 · 다른 기기 · 설치 완료 어느 길이든 여기를 지난다) — 플래그 줄 · 배지를 다시 그린다
+  const animaView = isAnimaManagedMode();
+  if (animaView !== lastAnimaView) {
+    lastAnimaView = animaView;
+    applyComfyUiFreeParamLock();
+    if (moduleBadges) moduleBadges.updateModeState();
+  }
+  return !other.disabled;   // 엔진을 바꿔 들어갈 칸이 열려 있다 — 연결된 모드가 없어도 셀렉트를 열어 둔다
 }
 
 function updateModeSelectAvailability() {
@@ -9141,6 +9292,7 @@ function updateModeSelectAvailability() {
       const option = modeSelect.querySelector(`option[value="${mode}"]`);
       if (option) { option.disabled = mode !== 'NAI'; option.dataset.connected = '0'; }
     });
+    paintComfyEngineOptions(true);
     modeSelect.disabled = true;
     modeSelect.title = 'NO API 모드: NAI 참조 전용';
     modeSelect.classList.remove('mode-unavailable');
@@ -9156,8 +9308,10 @@ function updateModeSelectAvailability() {
     opt.disabled = !(connected || displayFallback);
     opt.dataset.connected = connected ? '1' : '0';
   });
+  const otherEngineOpen = paintComfyEngineOptions();
 
-  modeSelect.disabled = modeSwitching || !anyConnected;
+  // 고를 칸이 하나라도 있으면 연다 — ANIMA 만 설치하고 엔진은 외부인 PC · 원격 기기가 ANIMA 로 들어가는 길
+  modeSelect.disabled = modeSwitching || comfyEngineSwitching || !(anyConnected || otherEngineOpen);
 
   const currentConnected = isModeConnected(modeSelect.value);
   modeSelect.classList.toggle('mode-unavailable', !currentConnected);
@@ -9270,7 +9424,13 @@ function syncMode(mode) {
   if (inpaintSequenceControl?.onModeChange) inpaintSequenceControl.onModeChange(mode);
 }
 
-function setMode(mode) {
+// 메인 셀렉트에서 고른 칸(index.html onchange). ANIMA 칸도 value 가 COMFYUI 라 엔진은 칸이 알려 준다.
+function onModeSelectChange(select) {
+  const option = select.options[select.selectedIndex];
+  setMode(select.value, select.value === 'COMFYUI' ? (option?.dataset.engine || 'external') : '');
+}
+
+function setMode(mode, engine = '') {
   if (syncingMode) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   // ⚠️ 셀렉트를 `disabled` 로 두는 것만으로는 부족하다 - 단축키·다른 탭·프로그램 호출이
@@ -9288,6 +9448,11 @@ function setMode(mode) {
     showToast('Interactive 모드는 현재 NAI에서만 지원됩니다.', 'error');
     return;
   }
+  // COMFYUI ↔ ANIMA 는 모드가 아니라 엔진을 바꾼다 — 연결 확인은 바꾼 뒤의 엔진으로 한다.
+  if (mode === 'COMFYUI' && engine && engine !== comfyEngine()) {
+    switchComfyEngine(engine);
+    return;
+  }
   if (!isModeConnected(mode)) {
     syncMode(prevMode);
     showToast(`${mode} API is not connected`, 'error', true);
@@ -9302,6 +9467,77 @@ function setMode(mode) {
   ws.send(JSON.stringify({type: 'set_mode', mode}));
 }
 
+// 엔진을 바꾼다(메인 셀렉트의 COMFYUI ↔ ANIMA). 저장된 설정을 고치는 일이라 로컬에서만 된다(계약 §8.3).
+async function switchComfyEngine(engine) {
+  if (comfyEngineSwitching) return;
+  comfyEngineSwitching = true;
+  updateModeSelectAvailability();
+  let failure = null;
+  try {
+    const response = await fetch('/api/anima-engine/select', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({engine}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      failure = {status: response.status, code: data.code || '', message: data.error || ''};
+    }
+  } catch (error) {
+    failure = {status: 0, code: '', message: error?.message || ''};
+  }
+  comfyEngineSwitching = false;
+  if (failure) {
+    const back = currentMode || prevMode;
+    if (back) syncMode(back);          // 고른 칸을 되돌린다 — api_mode 는 그대로다
+    else updateModeSelectAvailability();
+    showToast(comfyEngineFailureText(failure, engine), 'error');
+    if (failure.code === 'ENGINE_NOT_READY') { openApiPopup(); switchSetupTab('anima'); }
+    return;
+  }
+  onComfyEngineChanged(engine, {enter: true});
+  if (animaSetupPanel) animaSetupPanel.refresh();
+}
+
+function comfyEngineFailureText(failure, engine) {
+  if (failure.status === 403) return '이 NAIA 는 아직 원격 기기의 COMFYUI ↔ ANIMA 전환을 막고 있습니다 — NAIA 를 켠 PC 에서 바꿔 주세요.';
+  if (failure.status === 404) return '이 버전에는 ANIMA 엔진이 없습니다.';
+  if (failure.code === 'ENGINE_NOT_READY') return 'ANIMA 설치를 먼저 끝내 주세요 — API 설정 › 04 ANIMA';
+  return failure.message || `${engine === 'managed' ? 'ANIMA' : 'COMFYUI'} 로 바꾸지 못했습니다.`;
+}
+
+// 엔진이 바뀐 뒤 — 메인 셀렉트 · API 설정 04 ANIMA 의 선택 · 설치 완료가 모두 여기로 온다.
+function onComfyEngineChanged(engine, {enter = false} = {}) {
+  const changed = comfyEngine() !== engine;
+  setupController?.noteComfyEngine?.(engine, {animaReady: true});
+  if (animaLoraPanel) animaLoraPanel.refresh();   // ANIMA 전용 도구(해상도 프리셋 · LoRA)를 보일지 다시 판단
+  // COMFYUI 도구 ↔ ANIMA 도구가 갈린다 — 떠 있는 모듈은 모드를 바꿀 때처럼 닫는다
+  if (changed && currentMode === 'COMFYUI') closeOpenModulesForModeSwitch();
+  const wantComfy = enter || currentMode === 'COMFYUI';
+  // 원격 기기는 연결 확인(probe)을 못 보낸다 — 서버의 모드 전환 검사(저장된 연결 정보)를 믿고 바로 들어간다
+  const canProbe = setupController?.canProbe?.() !== false;
+  if ((engine === 'managed' && !setupController?.isApiSetupPending?.()) || !canProbe) {
+    // 관리형은 서버가 준비를 확인하고 받아 줬다 — 다시 잴 것 없이 들어간다. 이미 COMFYUI 여도 다시 들어간다:
+    // 옵션(모델 · 샘플러)과 api_status 를 새 엔진으로 받는 길이 이것이다(set_mode).
+    if (wantComfy || !isModeConnected(currentMode)) setMode('COMFYUI');
+    else updateModeSelectAvailability();
+    return;
+  }
+  // 외부 서버(또는 첫 설정 중)는 먼저 잰다 — 끝나면 들어간다(finishComfyEngineProbe)
+  comfyEngineAfterProbe = wantComfy;
+  reprobeApiConnections();
+  if (!setupController?.isProbePending?.()) comfyEngineAfterProbe = false;   // 재지 못했다(끊김 · 차단)
+}
+
+// 외부 ComfyUI 로 바꾼 뒤 연결 확인이 끝났다 — 붙으면 들어가고(옵션 · api_status 를 새로 받는다), 안 붙으면 알린다.
+function finishComfyEngineProbe() {
+  if (!comfyEngineAfterProbe || setupController?.isProbePending?.()) return;
+  comfyEngineAfterProbe = false;
+  if (isModeConnected('COMFYUI')) setMode('COMFYUI');
+  else showToast('외부 ComfyUI 에 연결하지 못했습니다 — API 설정 › 03 COMFYUI', 'error', true);
+}
+
 function onModeResult(m) {
   const wasAutoFallback = autoModeFallbackInFlight;
   uiLock.classList.remove('active');
@@ -9311,7 +9547,9 @@ function onModeResult(m) {
     autoModeFallbackTarget = '';
     prevMode = m.mode;
     syncMode(m.mode);
-    showToast(m.message || `${m.mode} mode active`, 'success');
+    // 서버는 COMFYUI 라고만 안다 — 관리형 엔진이면 화면 이름은 ANIMA(계약 FR-S1)
+    const shownMode = m.mode === 'COMFYUI' && comfyEngine() === 'managed' ? 'ANIMA' : '';
+    showToast(shownMode ? `${shownMode} mode active` : (m.message || `${m.mode} mode active`), 'success');
   } else {
     syncMode(prevMode);
     showToast(m.message || 'Mode change failed', 'error', true);
@@ -9506,6 +9744,7 @@ function openApiPopup() {
   // a current download state rather than the snapshot from app load.
   if (dataBootstrapPanel) dataBootstrapPanel.refresh();
   if (llmSetupPanel) llmSetupPanel.refresh();
+  if (animaSetupPanel) animaSetupPanel.refresh();
 }
 
 function openDataMigration() {
@@ -9528,6 +9767,7 @@ function reprobeApiConnections() {
 function onProbeResult(m) {
   if (setupController) setupController.onProbeResult(m);
   reconcileActiveApiMode('probe_result');
+  finishComfyEngineProbe();
 }
 
 function closeApiPopup() {
@@ -9541,6 +9781,7 @@ function onSetupBackdrop(event) {
 function switchSetupTab(tab) {
   if (setupController) setupController.switchSetupTab(tab);
   if (tab === 'ai' && llmSetupPanel) llmSetupPanel.refresh();   // 탭이 보일 때만 폴링한다 — 들어오면 곧바로 새로 읽는다
+  if (tab === 'anima' && animaSetupPanel) animaSetupPanel.refresh();
 }
 
 function toggleSetupReveal(id, btn) {
@@ -9597,6 +9838,7 @@ function onVerifyResult(m) {
 
 function onSetupBlocked(m) {
   if (setupController) setupController.onSetupBlocked(m);
+  if (m?.command === 'probe_api') comfyEngineAfterProbe = false;   // 잴 수 없게 됐다 — 기다리던 전환을 버린다
 }
 
 function renderCloudflaredControls(m) {
@@ -10334,7 +10576,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260926-condwin')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260927-anima')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -10354,6 +10596,10 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260926-
       setModuleParam,
       naiReferenceBlocked: () => naiModelBlocksReference(),
       naiToolUnsupported: moduleId => naiModelToolUnsupported(moduleId),
+      // ANIMA 관리형 엔진이면 COMFYUI 전용 도구 대신 ANIMA 전용 도구[해상도 프리셋 · LoRA](09-27)
+      isAnimaManaged: () => Boolean(animaLoraPanel?.isManaged()),
+      openAnimaLora: () => animaLoraPanel?.toggle(),
+      isAnimaLoraOpen: () => Boolean(animaLoraPanel?.isOpen()),
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();
@@ -10447,7 +10693,7 @@ function updateModuleHeaderAction(moduleId) {
 
 function isComfyUiAnimaMode() {
   return (currentMode || modeSelect.value) === 'COMFYUI'
-    && Boolean($('flagAnima')?.classList.contains('on'));
+    && (isAnimaManagedMode() || Boolean($('flagAnima')?.classList.contains('on')));
 }
 
 function currentWebUiModelName() {
@@ -13577,7 +13823,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260927-review')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260927-nohint')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

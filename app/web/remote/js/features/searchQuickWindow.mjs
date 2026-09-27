@@ -38,6 +38,8 @@ export function createSearchQuickWindow({
   onTemporarySearch = () => {},
   // 저장된 필터 창이 열리고 닫힐 때([Filters] 단추의 눌림 표시).
   onPresetsVisibility = () => {},
+  // 임시 검색 창을 [해제] 없이 닫으려 할 때 묻는다(app.js 의 showConfirmDialog). 없으면 묻지 않고 해제한다.
+  confirmDialog = null,
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
   escHtml,
 }) {
@@ -45,6 +47,26 @@ export function createSearchQuickWindow({
   let layer = readLayer();
   let normalWindowState = null;
   let switchingWindow = false;
+  let leaveAsking = false;
+
+  // 임시 창의 닫기(X · Esc)는 창만 닫는 게 아니라 **임시 검색 해제**다 - 여기서 불러온 풀과
+  // 필터 할당이 원본으로 되돌아간다. 모르고 닫아 불러온 Parquet 이 사라졌다는 제보(2026-09-27)라
+  // 한 번 묻는다. [임시 검색 해제] 단추는 뜻이 분명하니 묻지 않는다.
+  async function confirmLeaveTemporary() {
+    if (leaveAsking || !normalWindowState) return;
+    leaveAsking = true;
+    try {
+      const ok = typeof confirmDialog === 'function'
+        ? await Promise.resolve(confirmDialog(
+          '임시 검색이 아직 해제되지 않았습니다.\n창을 닫으면 임시 검색이 해제되고, 여기서 불러온 검색 결과와'
+          + ' Tag Filter 할당은 버려진 채 원래 검색으로 돌아갑니다.\n(Custom Parquets 파일은 그대로 남습니다)',
+          {title: '임시 검색 해제', okText: '해제하고 닫기', cancelText: '계속 사용'}))
+        : true;
+      if (ok && normalWindowState) onTemporarySearch();
+    } finally {
+      leaveAsking = false;
+    }
+  }
 
   let panel = createDraggablePanel({
     document: doc,
@@ -408,7 +430,7 @@ export function createSearchQuickWindow({
         onClose: () => {
           if (switchingWindow) return;
           panel.open(); // Keep the workspace visible until the server confirms recovery.
-          onTemporarySearch();
+          void confirmLeaveTemporary();
         },
         onCollapse: () => onVisibilityChange(),
       });
@@ -423,7 +445,7 @@ export function createSearchQuickWindow({
       panel.body.prepend(note);
       panel.el.addEventListener('keydown', event => {
         if (event.key === 'Escape' && !event.defaultPrevented) {
-          event.preventDefault(); event.stopPropagation(); onTemporarySearch();
+          event.preventDefault(); event.stopPropagation(); void confirmLeaveTemporary();
         }
       });
       applyLayer();

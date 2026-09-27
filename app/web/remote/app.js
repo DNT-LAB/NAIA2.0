@@ -2729,6 +2729,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
       onLayerShown: layer => { if (layer === 'refine' && refinePanelControl) refinePanelControl.ensureOpen(); },
       onWindowClose: () => { if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close(); },
       onTemporarySearch: () => { void openTemporarySearchPreview(); },
+      confirmDialog: showConfirmDialog,
       // [Filters (N)] 단추의 눌림 표시 = 저장된 필터 창이 열려 있다.
       onPresetsVisibility: open => {
         const button = document.getElementById('tagFilterPresetsBtn');

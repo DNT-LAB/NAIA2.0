@@ -16,6 +16,21 @@ HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
 _STAMPED_TEXT_KEYS = frozenset({"pre_prompt", "post_prompt", "auto_hide"})
 
 
+# ANIMA 기본 추천(사용자 지정 2026-09-27) — COMFYUI(외부 ComfyUI · 관리형 ANIMA 엔진 공통)와 WEBUI 가 같이 쓴다.
+# Prefix 는 모드마다 그대로 두고 Postfix · Negative · Steps 27 · CFG 4.8 만 맞춘다(관리형 엔진 기본값과 같다).
+ANIMA_RECOMMENDED_POST_PROMPT = (
+    "(sketch, thin jaggy lines:0.42), (3d background, depth of field, blurry background, detailed background, "
+    "film grain, specular highlights, hyper-detailed skin textures, cinematic atmospheric depth, "
+    "shimmering highlights on the wet skin, rim lighting, moody chiaroscuro:0.53)"
+)
+ANIMA_RECOMMENDED_NEGATIVE = (
+    "worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, "
+    "chromatic aberration, muted color, shadow, thick outlines"
+)
+ANIMA_RECOMMENDED_STEPS = 27
+ANIMA_RECOMMENDED_CFG = 4.8
+
+
 class HeadlessPromptEngineeringService:
     def __init__(self, context: Any):
         self.context = context
@@ -1038,13 +1053,7 @@ class HeadlessPromptEngineeringService:
         cls = HeadlessPromptEngineeringService
         return {
             "pre_prompt": "(@myowa), newest, year2024, (best quality), highres, absurdres",
-            "post_prompt": (
-                "(3d background, blurry background:1.5), (musk, oekaki, crosshatching, sketch, "
-                "watercolor \\(medium\\), airbrush \\(medium\\), cel rendering:0.4), "
-                "(delicate colored lineart, highly aesthetic Pixiv style illustration, clean composition, "
-                "high-quality digital art, very thin lineart, low contrast shading, cinematic lighting, "
-                "very beautiful and detailed scene:0.8)"
-            ),
+            "post_prompt": ANIMA_RECOMMENDED_POST_PROMPT,
             # Parity with the NAI/WEBUI recommended presets. COMFYUI ANIMA used to
             # ship an empty auto-hide list and no preprocessing options, so its
             # recommended preset silently skipped closed-eyes sync, auto-hide, and
@@ -1060,24 +1069,14 @@ class HeadlessPromptEngineeringService:
     @staticmethod
     def _comfyui_anima_recommended_main_settings() -> dict[str, Any]:
         return {
-            "negative": (
-                "ai-generated, face in shadow, (worst quality), low quality, cropped, (score_1), "
-                "score_2, score_3, artist logo, unfinished, work-in-progress, blank, letterboxed, "
-                "blurry, jpeg artifacts, sepia, mutated, mutated digits, missing fingers, extra digit, "
-                "fewer digits, artistic error, bad anatomy, watermark, patreon username, web address, "
-                "patreon logo, weibo username, watermark, mature female, adult female, adolescent, "
-                "wide hips, narrow waist, long body, (multiple views:1.3), monochrome, greyscale, "
-                "retro artstyle, (outline, thick outlines:1.15), bold lines, thick borders, messy shading, "
-                "(western comics \\(style\\):1.5), furry, english text, spot color, doodle on background, "
-                "gif artifacts, muted color, high contrast, oversaturated colors, glossy highlights"
-            ),
+            "negative": ANIMA_RECOMMENDED_NEGATIVE,
             "sampling_mode": "anima",
             "comfyui_sampling_mode": "anima",
             "workflow_type": "unet",
             "sampler": "er_sde",
             "scheduler": "simple",
-            "steps": 30,
-            "cfg_scale": 5.1,
+            "steps": ANIMA_RECOMMENDED_STEPS,
+            "cfg_scale": ANIMA_RECOMMENDED_CFG,
             "rescale_cfg": 0.5,
             "anima_weight": "1",
         }
@@ -1086,13 +1085,7 @@ class HeadlessPromptEngineeringService:
     def _webui_recommended_module_settings() -> dict[str, Any]:
         return {
             "pre_prompt": "newest, year 2024, (best quality), score_8, highres, absurdres",
-            "post_prompt": (
-                "(perspective, foreshortening, dutch angle:0.75), "
-                "(dynamic facial expressions), exaggerated and dark environment, "
-                "violent composition, (low-contrast, muted color, watercolor \\(medium\\), "
-                "highly aesthetic Pixiv style illustration, clean composition, view focus "
-                "concentrated on the character with blurry background, high-quality digital art.:0.75)"
-            ),
+            "post_prompt": ANIMA_RECOMMENDED_POST_PROMPT,
             "auto_hide_prompt": (
                 "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, "
                 "bad id, _logo, bad twitter id, comic, __background__, ~blurry background, "
@@ -1147,22 +1140,9 @@ class HeadlessPromptEngineeringService:
                 "SGM Uniform",
             ),
             "resolution": "1024 x 1024",
-            "steps": 32,
-            "cfg_scale": 5.0,
-            "negative": (
-                "ai-generated, 3d, (worst quality), low quality, (score_1), score_2, score_3, "
-                "realistic, furry, furry female, anthro, unfinished, work-in-progress, "
-                "absurdly detailed composition, blank, blank background, letterboxed, blurry, "
-                "jpeg artifacts, mutated, mutated digits, missing fingers, extra digit, fewer digits, "
-                "artistic error, unusual anatomy, watermark, patreon username, web address, patreon logo, "
-                "weibo username, (artist logo, twitter username, signature), watermark, (multiple views), "
-                "distorted anatomy, english text, anatomically incorrect, doodle on background, "
-                "bad perspective, high contrast, cool colored, glitch, distortion, colorful, neon palette, "
-                "detailed background, (vignetting, shiny skin, shaded face, face in shadow, underexposed face, "
-                "underexposed body, dark body, body in shadow, low-key lighting, cast shadow, diagonal shadow, "
-                "shadow across face, shadow across torso, harsh shadow, dramatic lighting, spotlight, rim light, "
-                "split lighting, chiaroscuro:0.85)"
-            ),
+            "steps": ANIMA_RECOMMENDED_STEPS,
+            "cfg_scale": ANIMA_RECOMMENDED_CFG,
+            "negative": ANIMA_RECOMMENDED_NEGATIVE,
             "seed": "-1",
             "seed_fixed": False,
             "enable_hr": False,

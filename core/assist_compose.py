@@ -196,6 +196,18 @@ _PEOPLE = re.compile(r"^(?:\d+\+?(?:girl|boy|other)s?|solo(?: focus)?|multiple (
 _EMOTICON = re.compile(r"^[^a-z]*$|^[^a-z]{1,2}\s?[a-z]?$")
 _SHORT_TAGS = frozenset({"v", "w"})     # 손동작 태그(V · W 사인) — assist_v2.SHORT_TAGS 와 같다(두 글자 이하인데 이모티콘이 아니다)
 _SYMBOL_TAGS = frozenset({"?", "!", "!?", "..."})   # 기호 태그(물음표 · 느낌표 …) — assist_v2.SYMBOL_TAGS 와 같다(09-26)
+# 사전 분류가 Composition_Meta/metatags 인 태그(502개)는 그림 바깥의 정보다 — 테두리 · 표지 · 아이디 · 로고 · 크로스오버 ·
+# 소속 · 변신 형태. 문장의 명사를 이리로 옮기면 뜻이 바뀐다(선수 -> player 2 '게임 캐릭터 색 교체', 09-25 실측 · 사용자 지정
+# 09-27 "메타태그 갖다버려요"). 장면에 실제로 그려지는 것만 남긴다: '(object)' 로 끝나는 것(poster (object) · manga (object))
+# + 아래 넷. chart · height chart · diagram 은 그림 형식(도표 그림)이라 뺀다.
+_METATAG_GROUP = ("composition_meta", "metatags")
+_DEPICTED_METATAGS = frozenset({"picture frame", "empty picture frame", "latte art", "corpse"})
+
+
+def is_metatag(tag: str, info: dict[str, Any]) -> bool:
+    """고를 후보로 쓰지 않는 메타 태그인가(사전 분류 group · subgroup)."""
+    group = (str(info.get("group") or "").lower(), str(info.get("subgroup") or "").lower())
+    return group == _METATAG_GROUP and not tag.endswith("(object)") and tag not in _DEPICTED_METATAGS
 
 
 def en_stems(word: str) -> set[str]:
@@ -283,6 +295,8 @@ class TagFinder:
         info = self.tools.info(tag) or {}
         if str(info.get("_named_entity_category") or info.get("_cat") or "") in ("artist", "character",
                                                                                  "copyright", "e621"):
+            return False
+        if is_metatag(tag, info):
             return False
         if self.tools.role(tag) == "population" or int(self.tools.count(tag) or 0) < 50:
             return False

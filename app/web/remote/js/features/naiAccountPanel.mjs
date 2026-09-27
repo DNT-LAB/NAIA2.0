@@ -5,6 +5,8 @@
 //   2) API 설정 대화상자의 NAI 탭에 붙는 계정 관리 목록
 //      계정 추가/삭제 · 토큰 입력 · 켬/끔  (Dev0714 PyQt 창에 있던 것)
 //
+// 구독이 끝난 계정은 두 화면 모두 어두운 빨강 + [연동 해제] 다(사용자 요청 2026-09-27).
+//
 // 두 화면이 같은 상태를 본다. 배지 쪽에서 정책을 바꿔도 설정 쪽 목록이 같이 갱신되고,
 // 그 반대도 마찬가지다 — 서버가 변경 때마다 `nai_accounts` 스냅샷을 다시 보내기 때문.
 //
@@ -122,6 +124,13 @@ export function createNaiAccountPanel({
   // 핀. 켜면 바깥을 눌러도 안 닫힌다 - 생성하는 동안 어느 계정이 도는지 계속
   // 보려고 둔 것이다(테스트용, 사용자 요청 2026-08-21). 세션 안에서만 기억한다.
   let pinned = false;
+  // 연동 해제를 보낸 계정. 서버의 새 사용량은 계정 조회라 수 초 뒤에 오는데, 그동안 옛 줄이
+  // 남으면 한 번 더 누르게 된다 - **먼저 감추고**, 실패가 돌아오면 되살린다(onAccountResult).
+  const ejectedIds = new Set();
+  let pendingEject = null;      // {id, command, name} - 결과 토스트와 실패 복구용
+  // 확인 대화상자가 떠 있는 동안에는 바깥 클릭으로 팝오버를 닫지 않는다 - 대화상자를
+  // 누르는 것도 팝오버의 '바깥' 이라, 취소하고 나면 팝오버가 사라져 있었다.
+  let confirming = false;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -177,6 +186,18 @@ export function createNaiAccountPanel({
 
   function onAccountResult(message) {
     if (!message) return;
+    // 연동 해제의 결과. 실패하면(원격 기기라 막힘 · 계정 없음) 감춰 둔 줄을 되살린다.
+    if (pendingEject && message.command === pendingEject.command) {
+      const done = pendingEject;
+      pendingEject = null;
+      if (!message.ok) {
+        ejectedIds.delete(done.id);
+        renderPopover();
+        syncSetupEnded();
+      } else if (!message.message) {
+        showToast(`${done.name} 연동을 해제했습니다.`, 'info');
+      }
+    }
     // 성공이어도 경고할 게 있을 수 있다(계정은 지웠는데 토큰이 남은 경우).
     // 서버가 `level` 을 주면 그걸 따른다.
     if (message.message) {
@@ -190,9 +211,11 @@ export function createNaiAccountPanel({
     if (!message || !message.available) {
       usageRows = [];
       totalPercent = null;
+      ejectedIds.clear();
       // 배지가 사라지면 팝오버도 같이 닫는다 - 앵커 없이 떠 있으면 유령이다.
       closePopover();
       renderPopover();
+      syncSetupEnded();
       return;
     }
     totalPercent = Number.isFinite(message.percent) ? message.percent : null;
@@ -229,7 +252,12 @@ export function createNaiAccountPanel({
     if (typeof message.balancing_effective === 'boolean') {
       state.balancingEffective = message.balancing_effective;
     }
+    // 새 목록에서 빠진 계정은 서버가 연동 해제를 마친 것이다 - 더 감출 까닭이 없다.
+    for (const id of [...ejectedIds]) {
+      if (!usageRows.some(row => row.id === id)) ejectedIds.delete(id);
+    }
     renderPopover();
+    syncSetupEnded();
   }
 
   // ---- 배지 팝오버 -----------------------------------------------------
@@ -302,10 +330,12 @@ export function createNaiAccountPanel({
   function accountUsageRows() {
     // 사용량이 왔으면 그걸 쓰고, 아직이면 명부의 활성 계정을 '—' 로 미리 그린다
     // (계정을 막 켠 직후 다음 조회까지의 공백을 빈 화면으로 두지 않는다).
-    return usageRows.length
+    const rows = usageRows.length
       ? usageRows
       : state.accounts.filter(a => a.enabled && a.has_token)
           .map(a => ({ ...a, available: false, percent: 0 }));
+    // 연동 해제를 보낸 계정은 새 목록이 올 때까지 감춘다(위 `ejectedIds` 참조).
+    return ejectedIds.size ? rows.filter(row => !ejectedIds.has(row.id)) : rows;
   }
 
   /**
@@ -354,10 +384,17 @@ export function createNaiAccountPanel({
       const showBlock = !session.onV5 && row.is_next && rotation.target > 1;
       // ⚠️ 계정이 하나뿐이면 고를 것이 없다 - 눌러도 아무 일이 없는 자리를 만들지
       //    않는다. 둘 이상일 때만 누를 수 있게 하고, 고른 줄은 표시가 남는다.
-      const pickable = rows.length > 1;
-      const forced = pickable && row.id === state.forcedAccount;
+      //
+      // ⚠️ **구독이 끝난 계정**(사용자 요청 2026-09-27)은 고를 수 없다 - 무료 풀이 없어
+      //    지목하면 생성이 Anlas 를 문다. 게다가 줄 안에 [연동 해제] 단추가 들어가야 해서
+      //    줄 자체가 <button> 일 수 없다(단추 안의 단추는 HTML 이 허락하지 않는다).
+      const ended = !!row.subscription_ended;
+      const pickable = rows.length > 1 && !ended;
+      // 지목 표시는 고를 수 없는 줄에도 남긴다 - 끝난 계정이 지목돼 있으면 정책 라디오가
+      // 전부 꺼진 까닭을 그 줄이 말해야 한다.
+      const forced = rows.length > 1 && row.id === state.forcedAccount;
       const cls = `nai-acct-row${row.is_next ? ' is-next' : ''}`
-        + `${pickable ? ' is-pick' : ''}${forced ? ' is-forced' : ''}`;
+        + `${pickable ? ' is-pick' : ''}${forced ? ' is-forced' : ''}${ended ? ' is-ended' : ''}`;
       const open = pickable
         ? `<button type="button" class="${cls}" data-pick-account="${esc(row.id)}"`
           + ` aria-pressed="${forced ? 'true' : 'false'}"`
@@ -400,6 +437,11 @@ export function createNaiAccountPanel({
           : '')
         + '</div>'
         + (forced ? '<span class="nai-acct-only">이 계정만 사용</span>' : '')
+        + (ended
+          ? '<div class="nai-acct-ended"><span class="nai-acct-ended-tag">구독 종료</span>'
+            + `<button type="button" class="nai-acct-eject" data-eject-account="${esc(row.id)}">`
+            + '연동 해제</button></div>'
+          : '')
         + (pickable ? '</button>' : '</div>');
     }).join('');
   }
@@ -534,6 +576,13 @@ export function createNaiAccountPanel({
       send({ type: 'nai_account_set_stop_on_exhausted', enabled: state.stopOnExhausted });
       return;
     }
+    // 구독이 끝난 계정의 [연동 해제]. 그 줄은 <button> 이 아니라 아래 지목과 겹치지 않지만
+    // 먼저 본다.
+    const eject = event.target.closest('[data-eject-account]');
+    if (eject) {
+      ejectAccount(eject.getAttribute('data-eject-account'));
+      return;
+    }
     // 계정 줄을 누르면 그 계정만 쓴다. 이미 고른 줄을 다시 누르면 해제된다 -
     // 되돌리는 길이 정책 라디오 하나뿐이면 "어떻게 푸는지" 를 알 수 없다.
     // ⚠️ `data-pick-account` 다. `data-account` 는 설정 페이지의 계정 목록이 쓰는
@@ -567,13 +616,79 @@ export function createNaiAccountPanel({
   // 바깥을 누르면 닫힌다. 배지 자신은 토글이므로 제외해야 **열자마자 닫히지 않는다.**
   // 핀이 켜져 있으면 바깥 클릭으로는 안 닫는다(배지를 다시 누르면 닫힌다).
   function onDocumentPointerDown(event) {
-    if (!popOpen || pinned) return;
+    if (!popOpen || pinned || confirming) return;
     const el = popEl();
     const pill = byId('naiUsagePill');
     if (!el) return;
     if (el.contains(event.target)) return;
     if (pill && pill.contains(event.target)) return;
     closePopover();
+  }
+
+  // ---- 구독이 끝난 계정 - 연동 해제 --------------------------------------
+  //
+  // 사용자 요청(2026-09-27): 구독이 끝난 계정은 줄을 어두운 빨강으로 칠하고 [연동 해제] 로
+  // 바로 뺀다. 팝오버와 설정 목록이 같은 함수를 쓴다.
+  //   추가 계정 -> 계정 삭제(저장된 토큰도 지운다 - 설정 목록의 ✕ 와 같은 커맨드)
+  //   메인 계정 -> 회전에서만 뺀다. 메인 토큰은 API 설정의 '영구 토큰' 칸 몫이고, 그걸
+  //               지우면 NAI 연결 자체가 끊긴다 - 여기서는 건드리지 않는다.
+  // 판정은 서버가 한다(`subscription_ended` = NAI 가 active=false 라고 답한 계정).
+
+  /** 구독이 끝났다고 서버가 확인한 계정 id(연동 해제를 보내 감춘 것은 뺀다). */
+  function endedIdSet() {
+    return new Set(usageRows
+      .filter(row => row && row.subscription_ended && !ejectedIds.has(row.id))
+      .map(row => row.id));
+  }
+
+  async function ejectAccount(accountId) {
+    if (!accountId) return;
+    const account = state.accounts.find(a => a.id === accountId);
+    if (!account) {
+      // 명부가 아직 없으면 메인인지 모른다 - 틀린 커맨드를 보내느니 다시 받아 온다.
+      showToast('계정 목록을 불러오는 중입니다. 잠시 뒤 다시 눌러 주세요.', 'error');
+      requestAccounts();
+      return;
+    }
+    const usage = usageRows.find(row => row.id === accountId) || {};
+    const name = String(usage.token_preview || account.token_preview || account.label || accountId)
+      .toUpperCase();
+    const message = account.is_main
+      ? `${name} 의 구독이 끝났습니다. 메인 계정이라 토큰은 그대로 두고 회전에서만 뺍니다`
+        + ' (토큰은 API 설정의 영구 토큰 칸에서 바꿉니다).'
+      : `${name} 의 구독이 끝났습니다. 연동을 해제하면 계정 목록에서 빠지고 저장된 토큰도 지워집니다.`;
+    confirming = true;
+    let ok = false;
+    try {
+      ok = await Promise.resolve(confirmDialog(message,
+        { title: '연동 해제', okText: '연동 해제', cancelText: '취소' }));
+    } finally {
+      confirming = false;
+    }
+    if (!ok) return;
+    const command = account.is_main ? 'nai_account_set_enabled' : 'nai_account_delete';
+    const payload = account.is_main
+      ? { type: command, account_id: accountId, enabled: false }
+      : { type: command, account_id: accountId };
+    if (!send(payload)) {
+      showToast('서버와 연결이 끊겨 연동을 해제하지 못했습니다.', 'error');
+      return;
+    }
+    pendingEject = { id: accountId, command, name };
+    ejectedIds.add(accountId);
+    renderPopover();
+    syncSetupEnded();
+  }
+
+  /** 설정 목록의 '구독 종료' 표식만 바꾼다. **목록을 다시 그리지 않는다** - 사용량은
+   *  5분마다 · 생성마다 오는데, 그때마다 다시 그리면 계정 칸에 치던 토큰이 날아간다. */
+  function syncSetupEnded() {
+    const list = byId('setupAccountsList');
+    if (!list || typeof list.querySelectorAll !== 'function') return;
+    const ended = endedIdSet();
+    list.querySelectorAll('.setup-account[data-account]').forEach(el => {
+      el.classList.toggle('is-ended', ended.has(el.getAttribute('data-account')));
+    });
   }
 
   // ---- 설정 대화상자의 계정 관리 ----------------------------------------
@@ -590,6 +705,7 @@ export function createNaiAccountPanel({
       list.innerHTML = '<div class="setup-account-empty">계정 정보를 불러오는 중…</div>';
       return;
     }
+    const ended = endedIdSet();
     list.innerHTML = state.accounts.map(account => {
       const idAttr = esc(account.id);
       const preview = account.has_token ? `${esc(account.token_preview)}…` : '미설정';
@@ -597,7 +713,8 @@ export function createNaiAccountPanel({
       // 토큰을 관리하므로, 여기에도 두면 같은 값을 넣는 입력이 화면에 둘이 된다.
       // 메인 행이 여기 있는 이유는 오직 "회전에 넣을까 뺄까" 하나다. 삭제도 없다.
       const own = !account.is_main;
-      return `<div class="setup-account" data-account="${idAttr}">`
+      return `<div class="setup-account${ended.has(account.id) ? ' is-ended' : ''}"`
+        + ` data-account="${idAttr}">`
         + '<div class="setup-account-top">'
         + '<label class="setup-account-toggle">'
         + `<input type="checkbox" data-act="toggle" ${account.enabled ? 'checked' : ''}`
@@ -608,7 +725,11 @@ export function createNaiAccountPanel({
         + (account.duplicate_of
           ? `<span class="setup-account-dupe" data-naia-title="${esc(account.duplicate_of)}와(과) 같은 토큰입니다 - 사용량 한도는 늘지 않습니다">중복</span>`
           : '')
+        // 구독이 끝난 계정. 표식과 단추는 **늘 그려 두고** CSS 가 `.is-ended` 일 때만 보인다 -
+        // 사용량이 나중에 와도 목록을 다시 그리지 않고 표식만 바꾼다(syncSetupEnded).
+        + '<span class="setup-account-ended">구독 종료</span>'
         + `<span class="setup-account-preview">${preview}</span>`
+        + '<button type="button" class="setup-account-eject" data-act="eject">연동 해제</button>'
         + (own ? '<button type="button" class="setup-account-del" data-act="delete"'
           + ' title="계정 삭제">✕</button>' : '')
         + '</div>'
@@ -641,6 +762,10 @@ export function createNaiAccountPanel({
     if (act === 'toggle') {
       send({ type: 'nai_account_set_enabled', account_id: accountId,
              enabled: !!action.checked });
+      return;
+    }
+    if (act === 'eject') {
+      ejectAccount(accountId);
       return;
     }
     if (act === 'token-save') {

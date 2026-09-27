@@ -182,12 +182,18 @@ def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
                 print(f"[warn] account usage fetch failed for {account_id}: {exc}", flush=True)
                 summary = {}
             usage = summary.get("usage")
-            if usage:
+            # ⚠️ 구독이 끝난 계정은 사용량이 안 와도 싣는다(사용자 요청 2026-09-27). 안 실으면
+            #    '모름' 이 되어 화면이 그 계정을 못 칠하고, 동적 할당은 모르는 계정을 100% 로
+            #    본다(위 주석). 끝난 구독의 무료 풀은 0 이다.
+            ended = summary.get("subscription_active") is False
+            if usage or ended:
+                usage = usage or {}
                 out[account_id] = {
                     "percent": int(usage.get("percent", 0)),
                     "is_negative": bool(usage.get("is_negative", False)),
                     "anlas": summary.get("anlas"),
                     "expires_at": summary.get("expires_at"),
+                    "subscription_active": summary.get("subscription_active"),
                 }
     return out
 
@@ -257,6 +263,10 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any],
             # 재결제까지 남은 **일수**(사용자 요청 2026-09-03). 시간 단위로 남았으면 0 -
             # 정확한 시각은 일부러 안 보여 준다. 모르면 None(화면은 칸을 비운다).
             "renews_in_days": renews_in_days(usage.get("expires_at") if known else None),
+            # 구독이 끝난 계정(사용자 요청 2026-09-27) - 화면이 줄을 어두운 빨강으로 칠하고
+            # [연동 해제] 를 붙인다. NAI 가 **명시적으로** active=false 라고 할 때만이다 -
+            # 응답에 없거나 조회를 못 했으면(모름) 끝났다고 하지 않는다.
+            "subscription_ended": known and usage.get("subscription_active") is False,
             # 이번 라운드에 생성할 계정. 화면이 여기를 강조한다.
             "is_next": row["id"] == next_account_id,
             # 이번 세션에 이 계정으로 나간 장수(사용자 요청 2026-08-21: "총 ****장").
@@ -305,6 +315,7 @@ def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> d
                 "is_negative": bool(main_usage.get("is_negative", False)),
                 "anlas": main_summary.get("anlas"),
                 "expires_at": main_summary.get("expires_at"),
+                "subscription_active": main_summary.get("subscription_active"),
             }
         extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
         usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))

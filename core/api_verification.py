@@ -254,10 +254,11 @@ def fetch_nai_subscription_summary(token: str) -> dict:
     나서(실측: 10초 타임아웃 만료) **둘 중 하나만 실패하는 일이 잦았다** —
     Anlas 는 떴는데 사용량 배지만 안 뜨는 식이다. 한 번만 부르면 그 비대칭이 없다.
 
-    반환: `{"anlas": int|None, "usage": dict|None}` (실패한 쪽은 None).
+    반환: `{"anlas": int|None, "usage": dict|None, "expires_at": int|None,
+           "subscription_active": bool|None}` (실패한 쪽 · 모르는 쪽은 None).
     타임아웃은 5초가 아니라 8초 — 5초는 이 엔드포인트에 빠듯하다(실측).
     """
-    out: dict = {"anlas": None, "usage": None, "expires_at": None}
+    out: dict = {"anlas": None, "usage": None, "expires_at": None, "subscription_active": None}
     token = (token or "").strip()
     if not token:
         return out
@@ -311,6 +312,13 @@ def fetch_nai_subscription_summary(token: str) -> dict:
     expires = data.get("expiresAt")
     if isinstance(expires, (int, float)) and not isinstance(expires, bool) and expires > 0:
         out["expires_at"] = int(expires)
+    # 구독이 **지금** 살아 있는가. 공식 명세(SubscriptionResponse.active): "Is subscription
+    # active as of the moment of the request". 계정 패널이 끝난 구독을 어두운 빨강으로 칠하고
+    # [연동 해제] 를 붙인다(사용자 요청 2026-09-27). ⚠️ bool 일 때만 싣는다 - 모르는 것을
+    # '끝났다' 로 읽으면 멀쩡한 계정을 내쫓게 된다.
+    active = data.get("active")
+    if isinstance(active, bool):
+        out["subscription_active"] = active
     return out
 
 

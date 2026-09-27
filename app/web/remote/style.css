@@ -20478,6 +20478,23 @@ select.setup-input { cursor: pointer; }
   content: '▸'; margin-right: 3px; color: #f2e08a;
 }
 .nai-acct-row.is-next .nai-acct-bar { box-shadow: 0 0 0 1px rgba(242,224,138,0.35); }
+/* 구독이 끝난 계정(사용자 요청 2026-09-27) - 어두운 빨강으로 칠하고 [연동 해제] 를 붙인다.
+   ⚠️ `.is-forced`(파랑)·`.is-next`(연노랑 이름)보다 **뒤**에 둔다 - 같은 특이도라 파일
+      순서로 이긴다. 끝난 계정이 지목돼 있어도 빨강이 보여야 한다. */
+.nai-acct-row.is-ended {
+  padding: 5px 6px; border-radius: 8px;
+  background: #3d141c; border: 1px solid rgba(255,96,96,0.42);
+}
+.nai-acct-row.is-ended .nai-acct-name { color: #ffb3b3; }
+.nai-acct-ended { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.nai-acct-ended-tag { font-size: 9.5px; font-weight: 700; color: #ff8f8f; letter-spacing: 0.02em; }
+.nai-acct-eject {
+  margin-left: auto; padding: 2px 10px; border-radius: 6px;
+  background: rgba(255,96,96,0.16); border: 1px solid rgba(255,96,96,0.55);
+  color: #ffd6d6; font-family: inherit; font-size: 10px; cursor: pointer;
+}
+.nai-acct-eject:hover { background: rgba(255,96,96,0.32); color: #fff; }
+.nai-acct-eject:focus-visible { outline: 2px solid #ff8f8f; outline-offset: 1px; }
 .nai-acct-bar {
   flex: 1 1 auto; height: 8px; border-radius: 4px;
   background: rgba(255,255,255,0.08); overflow: hidden;
@@ -20586,6 +20603,20 @@ select.setup-input { cursor: pointer; }
   color: #b06060; cursor: pointer; line-height: 1;
 }
 .setup-account-del:hover { background: rgba(255,96,96,0.14); color: #ff8080; }
+/* 구독이 끝난 계정(사용자 요청 2026-09-27). 표식과 단추는 늘 그려 두고 `.is-ended` 일 때만
+   보인다 - 사용량이 나중에 와도 목록을 다시 그리지 않고 표식만 바꾼다. */
+.setup-account.is-ended { background: #3d141c; border-color: rgba(255,96,96,0.42); }
+.setup-account-ended, .setup-account-eject { display: none; }
+.setup-account.is-ended .setup-account-ended {
+  display: inline-block; flex: 0 0 auto; padding: 1px 6px; border-radius: 5px;
+  background: rgba(255,96,96,0.16); color: #ff9a9a; font-size: 9.5px; font-weight: 700;
+}
+.setup-account.is-ended .setup-account-eject {
+  display: inline-block; flex: 0 0 auto; padding: 3px 10px; border-radius: 6px;
+  background: rgba(255,96,96,0.16); border: 1px solid rgba(255,96,96,0.55);
+  color: #ffd6d6; font-family: inherit; font-size: 11px; cursor: pointer;
+}
+.setup-account.is-ended .setup-account-eject:hover { background: rgba(255,96,96,0.32); color: #fff; }
 .setup-account-row { display: flex; gap: 6px; }
 .setup-account-row .setup-input { flex: 1 1 auto; min-width: 0; }
 .setup-account-save { flex: 0 0 auto; white-space: nowrap; }

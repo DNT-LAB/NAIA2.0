@@ -76,6 +76,16 @@ AUTO_GENERATE_DROPPED_PARAM_KEYS = {
 #    여기 예외 목록은 그 뒤에 **쓰인 값**을 지키는 용도로만 남는다.
 AUTO_GEN_PARAM_PIN_EXEMPT = {"seed", "seed_fixed", "resolution", "width", "height", "random_resolution"}
 
+# 같은 PARAMS 값이 요청에는 **다른 이름으로도** 실려 온다. 프론트는 '프롬프트 가중치'(remote_params 의
+# anima_weight)를 random_prompt_weight 로도 보내고, 프롬프트 처리기는 그 별칭을 **먼저** 읽는다
+# (`_get_random_prompt_weight_raw`). 라이브 키만 놓고 별칭을 남기면 별칭이 첫 요청 값으로 박제돼
+# ANIMA Auto Gen 도중 가중치를 바꿔도 끊었다 다시 켤 때까지 안 먹었다(09-27 제보).
+PROMPT_WEIGHT_PARAM_KEYS = ("anima_weight", "random_prompt_weight")
+LIVE_PARAM_ALIASES = {
+    "anima_weight": ("random_prompt_weight",),
+    "random_prompt_weight": ("anima_weight",),
+}
+
 
 def _drop_live_param_overrides(overrides: dict[str, Any], remote_params: Any) -> None:
     """Auto Gen continuation: PARAMS 패널 값(steps/cfg/sampler/scheduler/model + ComfyUI
@@ -88,8 +98,17 @@ def _drop_live_param_overrides(overrides: dict[str, Any], remote_params: Any) ->
         for key in list(remote_params or {}):
             if key not in AUTO_GEN_PARAM_PIN_EXEMPT:
                 overrides.pop(key, None)
+                for alias in LIVE_PARAM_ALIASES.get(key, ()):
+                    overrides.pop(alias, None)
     except Exception:
         pass
+
+
+def _drop_live_prompt_weight(overrides: dict[str, Any], remote_params: Any) -> None:
+    """미리 만드는 다음 컷(프리페치)도 프롬프트 가중치는 라이브 remote_params 에서 읽게 한다 —
+    `_drop_live_param_overrides` 의 가중치 몫만. 나머지 PARAMS 는 이미지 생성 때 다시 얹힌다."""
+    live = {key: 1 for key in PROMPT_WEIGHT_PARAM_KEYS if key in (remote_params or {})}
+    _drop_live_param_overrides(overrides, live)
 
 
 async def _broadcast_automation_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
@@ -234,7 +253,10 @@ def _boost_v2_prefetch_token(context: WebSessionContext) -> tuple:
 
         store = get_prompt_engineering_store(context)
         options = context.get_options()
+        remote_params = getattr(context, "remote_params", None) or {}
         blob = json.dumps({
+            # 프롬프트 가중치는 미리 만든 프롬프트에 구워진다 — 바꾸면 그 컷은 버린다.
+            "weight": {key: remote_params.get(key) for key in PROMPT_WEIGHT_PARAM_KEYS},
             "v2": boost_v2_settings(context),
             "preset": store.state(context.get_api_mode()).get("current_preset"),
             "pe": store.collect_settings(),
@@ -323,6 +345,7 @@ def _kickoff_auto_gen_prefetch(context: WebSessionContext, request) -> None:
         if reserved is None:
             return
         prefetch_overrides = _auto_generation_overrides(getattr(request, "params", {}) or {})
+        _drop_live_prompt_weight(prefetch_overrides, getattr(context, "remote_params", {}))
         prefetch_overrides["auto_generate"] = True
         task = asyncio.create_task(_prefetch_v2_cut(context, reserved, prefetch_overrides, ratings))
         context._auto_gen_prefetch = {

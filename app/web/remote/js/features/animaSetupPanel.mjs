@@ -455,13 +455,9 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   function viewReady() {
     const eng = st.engine || {};
     const rc = st.receipt || {};
-    const managed = st.comfyui_engine === 'managed';
+    // [생성 엔진: 외부 ComfyUI | ANIMA] 줄은 없앴다(사용자 지정 09-27) — 메인 모드 선택의 COMFYUI ↔ ANIMA 와 같은
+    // 스위치라 혼란스러웠다. 엔진은 메인 모드 선택에서만 바꾼다(app.js onComfyEngineChanged).
     const parts = [];
-    parts.push(`<div class="anima-row"><span class="anima-label">생성 엔진</span><span class="anima-seg">
-        <button type="button" data-anima-engine="external" class="${managed ? '' : 'is-on'}"${remote ? ' disabled' : ''}>외부 ComfyUI</button>
-        <button type="button" data-anima-engine="managed" class="${managed ? 'is-on' : ''}"${remote ? ' disabled' : ''}>ANIMA</button>
-      </span></div>
-      <div class="anima-note">COMFYUI 모드가 어느 엔진으로 생성할지 고릅니다. 외부 ComfyUI 주소는 03 탭에 그대로 남습니다.</div>`);
     const engText = {
       running: `실행 중${eng.port ? ` · 127.0.0.1:${eng.port}` : ''}`, starting: '시작 중…', stopping: '끄는 중…',
       crashed: '비정상 종료', stopped: '꺼짐',
@@ -648,17 +644,6 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       return;
     }
     if (!st) return;
-    const engineBtn = event.target.closest('[data-anima-engine]');
-    if (engineBtn && !engineBtn.disabled) {
-      const engine = engineBtn.getAttribute('data-anima-engine');
-      if ((engine === 'managed') === (st.comfyui_engine === 'managed')) return;
-      run(engineBtn, async () => {
-        await call('POST', '/select', { engine });
-        onEngineChanged(engine);
-        showToast(engine === 'managed' ? 'ANIMA 로 생성합니다 (메인 모드 표시: ANIMA)' : '외부 ComfyUI 로 되돌렸습니다', 'success');
-      });
-      return;
-    }
     const idleBtn = event.target.closest('[data-anima-idle]');
     if (idleBtn) {
       run(idleBtn, () => saveSettings({ idle_minutes: Number(idleBtn.getAttribute('data-anima-idle')) }));

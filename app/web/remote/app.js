@@ -704,7 +704,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260926-temp-live2')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260927-acpending')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -4572,7 +4572,8 @@ const wsMessageHandlers = {
   depth_sample: onDepthSample,
   tag_search_result: onTagSearchResult,
   // 사전 카드(tagAssist)와 Interactive 칩 툴팁이 같은 응답을 나눠 쓴다.
-  tag_lookup_result: m => { onTagLookupResult(m); interactivePanel?.onTagInfo?.(m); },
+  // pending = 태그 사전을 아직 읽는 중이라는 답(첫 기동) - 카드는 tagAssist 가 다시 묻는다, 다른 소비자에겐 안 준다.
+  tag_lookup_result: m => { onTagLookupResult(m); if (!m.pending) interactivePanel?.onTagInfo?.(m); },
   autocomplete_result: onAutocompleteResult,
   translation_result: onTranslationResult,
   tag_filter_result: onTagFilterResult,
@@ -13231,6 +13232,14 @@ function noticeTagDatasetUpdateOnce() {
   }, 1500);
 }
 
+// 첫 설치의 첫 풀에 Tag Filter "1girl, solo" 가 걸렸다(백엔드 core/first_run_state) - 그 창을 한 번 연다
+// (사용자 지정 2026-09-27). 풀을 다 읽은 뒤의 get_search_state 답에만 실려 온다.
+function openFirstRunTagFilter() {
+  searchQuickWindowReady.then(() => {
+    if (searchQuickWindow) searchQuickWindow.showTagFilter({toggle: false});
+  });
+}
+
 function onSearchState(m) {
   if (m.workspace_changed && temporarySearchPreview?.hasPendingRestore()) m.preserve_local_workspace = true;
   // stale/superseded search_state(revision 가드 거부)는 pool 준비 완료가 아니므로 pool 잠금/
@@ -13241,6 +13250,7 @@ function onSearchState(m) {
   tagSurfaceLock.end('pool');   // completion of search / parquet load-merge / rating recompute / restore
   poolLoad.stop();              // authoritative 'pool ready' — clears load/reconstruct/filter gate + toast
   noticeTagDatasetUpdateOnce();
+  if (m.first_run_tag_filter) openFirstRunTagFilter();
 }
 
 function onSearchProgress(m) {
@@ -13872,7 +13882,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260927-nohint2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260927-acpending')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

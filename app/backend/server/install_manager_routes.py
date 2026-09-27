@@ -12,6 +12,7 @@ preview is allowed to surface state but not act on it.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -80,6 +81,51 @@ def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
     return sanitized
 
 
+def refresh_after_tag_data(context: WebSessionContext) -> None:
+    """태그 데이터가 들어왔다 - 설치 완료 훅과 데이터 가져오기(data_migration_routes)가 **같이** 쓴다.
+
+    자동완성 색인을 비우고 **뒤에서 다시 만든다**(lazy 로딩, 09-27). 전에는 두 입구 모두 비우기만 해서, 그 직후
+    처음 친 자동완성이 색인 재생성(8초+)을 떠안고 그동안 그 창의 명령이 전부 멈췄다(사용자 제보: "1g 가 안
+    되다가 약 15초 뒤 작동"). 풀이 비어 있으면(첫 설치) 태그 파일을 뒤에서 채운다 - 첫 실행 Tag Filter(1girl,
+    solo)도 이어서 걸린다. 가져온 것에 마지막 검색이 있으면 그 풀이 복원되고 첫 실행 필터는 걸리지 않는다.
+    """
+    from app.backend.server.autocomplete_commands import reset_tag_index
+
+    reset_tag_index(context)
+    _load_pool_after_install(context)
+
+
+def _load_pool_after_install(context: WebSessionContext) -> None:
+    """태그 데이터를 방금 받았는데 검색 풀이 비어 있으면(첫 설치) 뒤에서 채운다.
+
+    풀 로딩 알림(`pool_loading_begin/end`)으로 감싼다 - 태그 마지막 조각은 작아서 '조용한 로딩' 이라
+    알림이 안 나가는데, 그러면 화면이 풀이 채워진 것을 모른다. 끝(`search_loading` false)을 받으면 화면이
+    `get_search_state` 로 다시 묻고, 첫 실행 Tag Filter 표시도 그 답에 실린다(core/first_run_state).
+    """
+    results = getattr(context, "search_results", None)
+    if results is not None and not results.is_empty():
+        return
+
+    def _run() -> None:
+        begin = getattr(context, "pool_loading_begin", None)
+        end = getattr(context, "pool_loading_end", None)
+        started = False
+        try:
+            if callable(begin):
+                begin("load")
+                started = True
+            from app.backend.server.generation_commands import random_service
+
+            random_service(context).warmup()
+        except Exception as exc:  # noqa: BLE001 - 설치는 이미 끝났다, 풀은 다음 Random 이 채운다
+            print(f"Headless Remote: pool load after tag install failed - {ascii(str(exc))}", flush=True)
+        finally:
+            if started and callable(end):
+                end()
+
+    threading.Thread(target=_run, daemon=True, name="naia-pool-after-install").start()
+
+
 def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager:
     service = getattr(context, "runtime_install_manager", None)
     if service is None:
@@ -88,9 +134,7 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
             raise RuntimeError("Runtime paths are not available")
 
         def refresh_tag_state() -> None:
-            context.tag_search_index = None
-            context.kr_tags_raw = {}
-            context.autocomplete_state.kr_tags_loaded = False
+            refresh_after_tag_data(context)
 
         def refresh_corpus_state() -> None:
             # 새로 설치된 코퍼스를 즉시 쓰려면 경로/메타데이터/파티션 캐시를 모두 버려야 한다.

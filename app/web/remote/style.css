@@ -16441,6 +16441,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   text-align: right;
   white-space: nowrap;
 }
+/* 자동완성 색인 준비 중(첫 기동 · 태그 데이터 설치 직후, 09-27) - 고를 수 없는 안내 한 줄. */
+.tag-ac-item.tag-ac-pending { cursor: default; }
+.tag-ac-item.tag-ac-pending:hover { background: transparent; }
+.tag-ac-item.tag-ac-pending .tag-ac-tag { color: var(--text-muted); font-style: italic; font-weight: 400; }
 .tag-tooltip.preset-event-mode {
   width: min(430px, calc(100vw - 24px));
   max-width: min(430px, calc(100vw - 24px));

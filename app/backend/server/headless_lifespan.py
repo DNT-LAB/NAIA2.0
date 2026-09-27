@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI
 
-from app.backend.server.autocomplete_commands import ensure_tag_search_index
+from app.backend.server.autocomplete_commands import build_tag_index
 from app.backend.server.generation_commands import random_service
 from app.backend.server.interactive_assets_routes import interactive_assets_service
 from app.backend.server.search_runtime import save_runner_parquet
@@ -51,6 +51,14 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
                 )
         except Exception as exc:
             print(f"Headless Remote: interactive sweep skipped - {exc}", flush=True)
+        # 첫 설치인가(태그 아카이브 없이 켜졌다) - 풀이 처음 채워질 때 Tag Filter "1girl, solo" 를 건다
+        # (core/first_run_state). 아래 워밍업이 풀을 채우기 **전에** 정해 둬야 한다.
+        try:
+            from core.first_run_state import note_startup
+
+            note_startup(context)
+        except Exception as exc:
+            print(f"Headless Remote: first-run note skipped - {ascii(str(exc))}", flush=True)
         task = getattr(context, "headless_random_warmup_task", None)
         if task is None or task.done():
             context.headless_random_warmup_task = asyncio.create_task(_run_random_warmup(context, run_in_thread))
@@ -106,7 +114,9 @@ async def _run_random_warmup(context: WebSessionContext, run_in_thread: RunInThr
 
 async def _run_tag_index_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:
     try:
-        await run_in_thread(ensure_tag_search_index, context)
+        # 만드는 동안 들어온 자동완성은 '준비 중' 으로 곧바로 답을 받는다(autocomplete_commands._pending_reply) -
+        # 잠금을 기다리며 그 창의 명령 흐름을 붙잡지 않는다.
+        await run_in_thread(build_tag_index, context)
         print(
             f"Headless Remote: tag autocomplete index ready ({len(getattr(context, 'kr_tags_raw', {}) or {}):,} tags)",
             flush=True,

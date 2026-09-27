@@ -189,6 +189,9 @@ export function createQuickFilterController(deps) {
   // 안 띄우기 위한 별도 플래그(Codex MED). onAssigned 에서 set, clear/reset 에서 unset.
   let filterWasApplied = false;
   let acResults = [];
+  // 자동완성 색인 '준비 중' 답(첫 기동 · 태그 데이터 설치 직후, 09-27)이면 같은 질의를 잠시 뒤 다시 묻는다.
+  let acRetryTimer = null;
+  let acRetryTries = 0;
   let acSelection = -1;
   let acTimer = null;
   let pendingAssignOnRestore = false;
@@ -1449,6 +1452,27 @@ export function createQuickFilterController(deps) {
     return true;
   }
 
+  function renderAutocompletePending() {
+    const el = getEl('tagFilterAc');
+    if (el) {
+      el.innerHTML = '<div class="tag-ac-list"><div class="tag-ac-item tag-ac-pending">'
+        + '<span class="tag-ac-tag">자동완성 준비 중…</span></div></div>';
+    }
+  }
+
+  function scheduleAcRetry(query) {
+    clearTimeout(acRetryTimer);
+    if (acRetryTries >= 60) return;          // 42초 - 색인은 그 안에 끝난다(tagAssist 와 같은 한도)
+    acRetryTries += 1;
+    acRetryTimer = setTimeout(() => {
+      acRetryTimer = null;
+      const input = getEl(acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput');
+      if (!input || lastSegment(input.value) !== query) return;   // 그 사이 다른 것을 쳤다
+      latestAcRequest = {target: acTarget, query};
+      send({type: 'tag_filter_ac', query: baseTag(query)});
+    }, 700);
+  }
+
   function onAutocompleteResult(message) {
     if (!popupOpen()) return;
     const inputId = acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
@@ -1460,6 +1484,14 @@ export function createQuickFilterController(deps) {
     if (query && baseTag(query) !== baseTag(currentQuery)) return;
     if (latestAcRequest.query && latestAcRequest.query !== currentQuery) return;
     if (latestAcRequest.target && latestAcRequest.target !== acTarget) return;
+    if (message.pending) {
+      acResults = [];
+      acSelection = -1;
+      renderAutocompletePending();
+      scheduleAcRetry(currentQuery);
+      return;
+    }
+    acRetryTries = 0;
     acResults = message.results || [];
     acSelection = -1;
     renderAutocomplete();

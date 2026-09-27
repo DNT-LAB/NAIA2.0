@@ -101,6 +101,12 @@ def register_data_migration_routes(
                 conflict=conflict,
                 include=include,
             )
+            # 무엇이든 가져왔으면(태그 · 사전 · 마지막 검색) 설치 완료와 같은 뒷정리 - 서비스는 캐시를 비우기만 한다.
+            # 비운 채로 두면 가져온 직후 처음 친 자동완성이 색인 재생성을 떠안는다(09-27 클린 설치 제보의 길).
+            if result.get("ok") and int(result.get("total_files") or 0) > 0:
+                from app.backend.server.install_manager_routes import refresh_after_tag_data
+
+                refresh_after_tag_data(session_context)
             status = 200 if result.get("ok") else 400
             return JSONResponse({"runtime": "web", **result}, status_code=status)
         except Exception as exc:

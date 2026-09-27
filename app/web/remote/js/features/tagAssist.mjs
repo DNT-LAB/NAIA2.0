@@ -163,6 +163,12 @@ export function createTagAssistController({
   let lastTranslationRequestQuery = '';
   let lastTranslationRequestId = '';
   let autocompleteTranslationRequestSeq = 0;
+  // 자동완성 색인이 '준비 중' 이라는 답(첫 기동 · 태그 데이터 설치 직후, 09-27)을 받았을 때 같은 질의 ·
+  // 같은 태그를 잠시 뒤 다시 묻는 타이머. 백엔드는 색인을 뒤에서 만들며 기다리지 않고 곧바로 답한다.
+  let acPendingTimer = null;
+  let acPendingTries = 0;
+  let tagLookupRetryTimer = null;
+  let tagLookupRetryTries = 0;
   let acTarget = null;
   let presetAutocompleteMeta = null;
   let presetEventContext = {ratingId: 's', personId: '1girl_solo'};
@@ -1547,6 +1553,12 @@ export function createTagAssistController({
 
   function onTagLookupResult(m) {
     if (acMode) return;
+    if (m.pending) {
+      scheduleTagLookupRetry(m.tag);
+      return;
+    }
+    window.clearTimeout(tagLookupRetryTimer);
+    tagLookupRetryTries = 0;
     // 조회를 보낸 뒤 억제 상태가 됐거나 응답이 늦게 도착한 경우에도 띄우지 않는다.
     if (suppressedTagInfo() && !tagLookupReadOnly) { closeTagInfoTooltips(); return; }
     hideTagChipInfoTooltip();
@@ -1777,6 +1789,51 @@ export function createTagAssistController({
     clearAutocompletePositionStyles();
   }
 
+  const AC_PENDING_RETRY_MS = 700;
+  // 42초까지. 색인은 느린 PC 에서도 그 안에 끝난다(09-27 실측: 개발 PC 8초 · 클린 PC 약 15초).
+  const AC_PENDING_RETRY_MAX = 60;
+
+  function stopAutocompletePendingRetry() {
+    window.clearTimeout(acPendingTimer);
+    acPendingTimer = null;
+    acPendingTries = 0;
+  }
+
+  // '자동완성 준비 중…' 한 줄을 보이고 같은 질의를 잠시 뒤 다시 묻는다. 목록이 아니라 안내라 acMode 는 끈다 -
+  // 빈 목록을 ↑↓ · Enter 가 고르지 않게(결과가 오면 applyAutocompleteResult 가 다시 켠다).
+  function showAutocompletePending(query) {
+    acMode = false;
+    acResults = [];
+    acSel = -1;
+    hideTagChipInfoTooltip();
+    tagTooltip.innerHTML = '<div class="tag-ac-list"><div class="tag-ac-item tag-ac-pending">'
+      + '<span class="tag-ac-tag">자동완성 준비 중…</span></div></div>';
+    tagTooltip.classList.add('open', 'ac-mode');
+    tagTooltip.classList.remove('chunk-ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
+    syncTooltipSide();
+    positionTagTooltip();
+    window.clearTimeout(acPendingTimer);
+    if (acPendingTries >= AC_PENDING_RETRY_MAX) return;
+    acPendingTries += 1;
+    acPendingTimer = window.setTimeout(() => {
+      acPendingTimer = null;
+      if (lastAcQuery !== query) return;        // 그 사이 다른 것을 쳤거나 닫았다 - 새 질의가 알아서 묻는다
+      sendWs({type: 'autocomplete', query});
+    }, AC_PENDING_RETRY_MS);
+  }
+
+  // 태그 카드도 같은 사정(사전을 아직 읽는 중) - 카드를 비워 두고 같은 태그를 잠시 뒤 다시 묻는다.
+  function scheduleTagLookupRetry(tag) {
+    window.clearTimeout(tagLookupRetryTimer);
+    if (!tag || tagLookupRetryTries >= AC_PENDING_RETRY_MAX) return;
+    tagLookupRetryTries += 1;
+    tagLookupRetryTimer = window.setTimeout(() => {
+      tagLookupRetryTimer = null;
+      if (acMode || String(lastLookupTag).toLowerCase() !== String(tag).toLowerCase()) return;
+      sendWs(tagLookupRequest(lastLookupTag, lastLookupTarget || promptEdit));
+    }, AC_PENDING_RETRY_MS);
+  }
+
   function scheduleAutocompleteTranslation(query, allowTriggers) {
     clearAutocompleteTranslationTimer();
     if (!query || !hangulRe.test(query) || isAutocompleteControlQuery(query, allowTriggers)) return;
@@ -1903,6 +1960,11 @@ export function createTagAssistController({
     const matchesVibeCluster = q && q.toLowerCase().startsWith('vibe:') && m.query === q.slice(5).trim();
     const matchesPreset = q && q.toLowerCase().startsWith('preset:') && m.query === q;
     if (!matchesWc && !matchesChunk && !matchesVibeCluster && !matchesPreset && m.query !== q) return false;
+    if (m.pending) {
+      showAutocompletePending(m.query || q);
+      return true;
+    }
+    stopAutocompletePendingRetry();
     const target = acTarget || promptEdit;
     const dropRow = r => {
       if (!target) return false;
@@ -2996,6 +3058,7 @@ export function createTagAssistController({
     presetInlineSearchRequestId += 1;
     window.clearTimeout(acTimer);
     window.clearTimeout(presetInlineSearchTimer);
+    stopAutocompletePendingRetry();
     clearAutocompleteTranslationTimer();
     hideTagChipInfoTooltip();
     tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');

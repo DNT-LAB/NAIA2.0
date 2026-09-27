@@ -899,6 +899,8 @@ class HeadlessRandomPromptService:
             try:
                 if self.context.restore_last_search(progress=progress):
                     safe_print(f"🌐 Headless Remote: search_results restored from last-search cache ({self.context.search_results.get_count()} rows)")
+                    # 옛 설치에서 가져온 마지막 검색이 먼저 채워졌다 - 사용자의 것이라 첫 실행 필터를 걸지 않고 끝낸다.
+                    self._consume_first_run(apply=False)
                     return True
             finally:
                 if done is not None:
@@ -929,6 +931,9 @@ class HeadlessRandomPromptService:
                         if callable(marker):
                             marker()
                     safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
+                    # 첫 설치의 첫 풀(태그 아카이브의 마지막 조각)이면 Tag Filter "1girl, solo" 를 건다 - **풀을 다
+                    # 읽은 뒤**다(빈 풀에 칩만 걸면 아무 일도 없다). 거는 것은 get_search_state 의 재조립이 한다.
+                    self._consume_first_run(apply="tag archive" in label)
                     return True
                 except Exception as exc:
                     safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")
@@ -936,6 +941,16 @@ class HeadlessRandomPromptService:
                     if done is not None:
                         done()
             return False
+
+    def _consume_first_run(self, *, apply: bool) -> None:
+        """첫 설치 표식을 소비한다(core/first_run_state). 실패해도 풀은 산다."""
+        try:
+            from core.first_run_state import consume
+
+            if consume(self.context, apply=apply):
+                safe_print("🌐 Headless Remote: first-run Tag Filter set (1girl, solo)")
+        except Exception as exc:  # noqa: BLE001
+            safe_print(f"🌐 Headless Remote: first-run Tag Filter skipped - {exc}")
 
     def _should_skip_fallback_source(self, label: str, frame: Any | None) -> bool:
         if label not in {

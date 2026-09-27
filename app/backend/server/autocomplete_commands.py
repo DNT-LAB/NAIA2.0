@@ -106,6 +106,119 @@ def _load_kr_raw_once(context: WebSessionContext) -> dict[str, Any]:
     return result.raw if isinstance(result.raw, dict) else {}
 
 
+# ---- 색인을 뒤에서 만든다(lazy 로딩) ------------------------------------------------
+#
+# 자동완성 색인은 만드는 데 8초가 넘는다(09-27 실측, 개발 PC: 사전 2.9 + 검색 색인 5.3 + 이름 0.2). 그동안 들어온
+# 자동완성이 그 잠금을 기다리면 웹소켓 수신 루프가 통째로 멈춘다 - 그 창의 **다른 명령까지** 색인이 끝날 때까지
+# 안 읽힌다(기동 직후 '1g' 와 그 뒤의 가벼운 명령이 둘 다 9.6초). 그래서 만드는 중이면 기다리지 않고 '준비 중'
+# 으로 곧바로 답한다(`_pending_reply`). 태그 데이터 설치가 끝나면 비우기만 하던 것도 뒤에서 다시 만든다
+# (`reset_tag_index`) - 설치 직후 처음 친 자동완성이 재생성을 떠안던 것(사용자 제보: "약 15초 뒤 작동").
+
+_WARM_STATE_LOCK = threading.Lock()
+
+
+def _warming_count(context: WebSessionContext) -> int:
+    return int(getattr(context, "_tag_index_warming", 0) or 0)
+
+
+def _warming_step(context: WebSessionContext, delta: int) -> None:
+    with _WARM_STATE_LOCK:
+        context._tag_index_warming = max(0, _warming_count(context) + delta)
+
+
+def tag_index_warming(context: WebSessionContext) -> bool:
+    """색인을 뒤에서 만드는 **중**이고 아직 없는가. 만드는 사람이 없으면 False - 예전처럼 그 자리에서 만든다."""
+    if getattr(context, "tag_search_index", None) is not None:
+        return False
+    return _warming_count(context) > 0
+
+
+def build_tag_index(context: WebSessionContext) -> None:
+    """(블로킹) 자동완성 색인 + 이름 색인을 만든다. 도는 동안 '만드는 중' 표시를 켠다(기동 워밍업 · 뒤 스레드)."""
+    _warming_step(context, +1)
+    try:
+        ensure_tag_search_index(context)
+        from core.named_entity_aliases import ensure_named_entity_index
+
+        ensure_named_entity_index(context)
+    finally:
+        _warming_step(context, -1)
+
+
+def warm_tag_index_in_background(context: WebSessionContext) -> bool:
+    """색인을 뒤 스레드에서 만든다. 이미 있거나 만드는 스레드가 돌고 있으면 아무것도 안 한다."""
+    if getattr(context, "tag_search_index", None) is not None:
+        return False
+    with _WARM_STATE_LOCK:
+        thread = getattr(context, "_tag_index_warm_thread", None)
+        if thread is not None and thread.is_alive():
+            return False
+        thread = threading.Thread(target=_warm_quietly, args=(context,), daemon=True,
+                                  name="naia-tag-index-warm")
+        context._tag_index_warm_thread = thread
+        # 스레드가 뜨기 전에 들어온 질의도 '준비 중' 을 받게 - 표시는 여기서 켜고 스레드가 끈다.
+        context._tag_index_warming = _warming_count(context) + 1
+    thread.start()
+    return True
+
+
+def _warm_quietly(context: WebSessionContext) -> None:
+    try:
+        build_tag_index(context)
+    except Exception as exc:  # noqa: BLE001 - 뒤에서 도는 준비가 앱을 죽이면 안 된다
+        print(f"Headless Remote: tag index warm failed - {ascii(str(exc))}", flush=True)
+    finally:
+        _warming_step(context, -1)          # warm_tag_index_in_background 가 켠 몫
+
+
+def reset_tag_index(context: WebSessionContext) -> None:
+    """태그 데이터가 바뀌었다(설치 완료) - 색인을 비우고 **뒤에서 다시 만든다**.
+
+    ⚠️ 잠금 안에서 비운다 - 만들던 것이 끝난 뒤에 비워야 옛 색인이 새로 비운 자리를 덮지 않는다.
+    """
+    with _tag_index_lock(context):
+        context.tag_search_index = None
+        context.kr_tags_raw = {}
+        state = getattr(context, "autocomplete_state", None)
+        if state is not None:
+            state.kr_tags_loaded = False
+    warm_tag_index_in_background(context)
+
+
+_INDEX_REPLY_TYPES = {
+    "autocomplete": "autocomplete_result",
+    "autocomplete_translate": "autocomplete_result",
+    "tag_filter_ac": "tag_filter_ac_result",
+}
+
+
+def _pending_reply(context: WebSessionContext, command_type: str, command: dict[str, Any],
+                   query: str) -> dict[str, Any] | None:
+    """색인을 뒤에서 만드는 중이면 곧바로 보낼 '준비 중' 답. 아니면 None(예전 길 그대로).
+
+    응답 타입은 원래 것 그대로다 - 새 타입을 만들면 웹 스모크 계약(타입을 차례로 센다)이 밀린다.
+    """
+    if command_type in _INDEX_REPLY_TYPES:
+        if not tag_index_warming(context):
+            return None
+        payload: dict[str, Any] = {"type": _INDEX_REPLY_TYPES[command_type], "query": query,
+                                   "results": [], "pending": True}
+        if command_type == "autocomplete_translate":
+            payload["translated_query"] = ""          # 화면이 번역 응답으로 알아보고 대기 표시를 푼다
+            request_id = str(command.get("requestId") or command.get("request_id") or "")
+            if request_id:
+                payload["requestId"] = request_id
+        return payload
+    if command_type == "tag_lookup":
+        # 태그 카드는 사전(raw)만 있으면 된다 - 검색 색인까지 기다리지 않는다. 사전이 아직이면 tag_lookup_info 가
+        # 잠금 없이 사전 전체를 **따로 한 번 더** 읽는다(워밍업과 같은 일을 두 번).
+        raw = getattr(context, "kr_tags_raw", None)
+        if (isinstance(raw, dict) and raw) or _warming_count(context) <= 0:
+            return None
+        return {"type": "tag_lookup_result", "tag": str(command.get("tag") or ""), "pending": True}
+    return None
+
+
 def ensure_tag_search_index(context: WebSessionContext):
     index = getattr(context, "tag_search_index", None)
     if index is not None:
@@ -834,6 +947,10 @@ async def handle_autocomplete_command(
         return False
 
     query = str(command.get("query") or "")
+    pending = _pending_reply(context, command_type, command, query)
+    if pending is not None:
+        await _send_json(ws, pending)
+        return True
     if command_type == "tag_search":
         # ⚠️ 이 커맨드는 **소비자가 없는 채로 남아 있었다** — `#tagSearchBar` 가
         #    `display:none` 하드 숨김이고(주석: reserved for future) JS 참조도 0이었다.

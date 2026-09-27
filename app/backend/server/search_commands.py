@@ -121,7 +121,14 @@ async def handle_search_command(
         # 영속된 활성 태그필터를 백엔드가 직접 재조립(권위) — 프론트 warmup 재적용 타이밍과 무관하게
         # 표시 카운트와 실제 랜덤 풀이 일치하도록(재시작/가져오기 후 'random 이 필터 무시/꼬임' 수정).
         await run_in_thread(reconstruct_active_tag_filter, context)
-        await _send_json(ws, context.search_state_payload())
+        payload = context.search_state_payload()
+        # 첫 설치의 첫 풀에 Tag Filter "1girl, solo" 를 걸었으면 화면이 그 창을 한 번 연다(core/first_run_state).
+        # 브로드캐스트가 아니라 **이 답**에만 싣는다 - 풀이 채워진 뒤 화면이 스스로 묻는 자리다.
+        from core.first_run_state import take_notice
+
+        if take_notice(context):
+            payload["first_run_tag_filter"] = True
+        await _send_json(ws, payload)
         return True
 
     if command_type == "get_bucket_dates":

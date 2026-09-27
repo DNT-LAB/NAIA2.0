@@ -65,7 +65,10 @@ class AnimaEngineRuntime:
                  "--listen", "127.0.0.1", "--port", str(port), "--disable-auto-launch",
                  "--extra-model-paths-config", str(state / "extra_model_paths.yaml"),
                  "--output-directory", str(state / "comfy_output"), "--temp-directory", str(state / "comfy_temp"),
-                 "--user-directory", str(state / "comfy_user"), "--reserve-vram", str(self.reserve_vram_gb)],
+                 "--user-directory", str(state / "comfy_user"), "--reserve-vram", str(self.reserve_vram_gb),
+                 # 추가 패키지 없는 내장 가속(torch 2.7+). 같은 그래프 실측 11.57 -> 11.05초/장(09-27, 사용자 결정).
+                 # 00132 기준선의 comfylaunch.bat 도 이 플래그로 돌았다. sage attention 은 넣지 않는다.
+                 "--fast", "fp16_accumulation"],
                 rt, clean_environment())
 
     def _set(self, state, code=None, message=""):

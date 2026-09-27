@@ -919,7 +919,17 @@ export function createSearchPanel({
       if (action === 'load' || action === 'merge') {
         loadParquet(name, action);
       } else if (action === 'expand') {
-        if (pqlOpen.has(name)) pqlOpen.delete(name); else pqlOpen.add(name);
+        // 한 번에 한 장만 펼친다(사용자 지정 2026-09-27) - 다른 카드를 누르면 펼쳐 둔 카드는 접힌다.
+        // 접히는 카드에 걸려 있던 메뉴 · 이름 바꾸기 · 휴지통 확인도 함께 거둔다(안 보이는 채로 남지 않게).
+        if (pqlOpen.has(name)) {
+          pqlOpen.delete(name);
+        } else {
+          pqlOpen.clear();
+          pqlOpen.add(name);
+        }
+        if (pqlMore !== name) pqlMore = null;
+        if (pqlRenaming !== name) pqlRenaming = null;
+        if (pqlConfirmTrash !== name) pqlConfirmTrash = null;
         rerenderLibrary();
       } else if (action === 'more') {
         pqlMore = pqlMore === name ? null : name;

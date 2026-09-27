@@ -5,24 +5,25 @@
 // 로 싣는다. 메인 입력칸이 보낸 조회에만 온다 - 다른 칸(Search 창 등)의 카드는 그대로다.
 // 줄은 Codex 제품 계약의 display_type, 누르면 할 일은 칩마다의 edit_policy 다(2026-09-27):
 // ⇄ 칩 = 커서 태그를 바꾼다(검토된 같은 축 대안 · 부재 · 뜻을 품는 구체화), 나머지는 뒤에 더한다.
-// 대표 리그와 더보기 리그(2026-09-27, 사용자 지정): 줄마다 칩 6개씩 전부 펼치니 카드가 너무 넓었다. 앞의 대표 줄
-// 3개 · 칩 4개만 보이고, 나머지 칩은 [더보기] 아래 따로 모아 한 번에 편다(편 채로 둘지는 tagAssist 가 브라우저에
-// 기억한다). 대표 줄은 펴도 그대로다 - 단추가 제자리라 두 번 눌러도 칩을 누르지 않는다.
+// 대표 줄과 유형 단추(2026-09-27, 사용자 지정): 앞의 대표 줄 3개 · 칩 4개만 보이고, 나머지는 아래 유형 단추
+// [종류 5] [상태 12] … 로 **한 유형씩** 편다 - 한꺼번에 펴니 정보가 너무 많았다. 칩은 관련도 순 앞에서 고르고,
+// 보일 때는 빌더가 정한 자리(key: ⇄ -> 색 -> 무늬·소재 -> 모양 -> ABC, 대안은 축 순서)로 선다.
 
-// 줄 순서가 곧 대표 줄을 고르는 차례다 - 앞에서부터 칩이 있는 줄 3개. 지금 태그를 다듬는 Siblings · Variations ·
-// State 가 먼저다.
+// 줄 순서가 곧 대표 줄을 고르는 차례다 - 앞에서부터 칩이 있는 줄 3개. 지금 태그를 다듬는 대안 · 종류 · 상태가
+// 먼저다. 이름은 사용자가 고른 한국어 짧은 이름(2026-09-27), 설명은 이름표·단추에 마우스를 올리면 뜬다.
+const OP_HINT = ' - ⇄ 는 지금 태그를 바꾸고, 나머지는 뒤에 더합니다';
 export const RECOMMEND_TYPES = [
-  {key: 'siblings', label: 'Siblings', hint: '같은 축의 대안 - 누르면 지금 태그를 바꿉니다'},
-  {key: 'variations', label: 'Variations', hint: '더 구체적인 종류 - ⇄ 는 바꾸고 나머지는 더합니다'},
-  {key: 'state', label: 'State', hint: '상태 - ⇄ 는 바꾸고 나머지는 더합니다'},
-  {key: 'companions', label: 'Companions', hint: '같이 쓰는 것 - 누르면 더합니다'},
-  {key: 'attributes', label: 'Attributes', hint: '모양·색·무늬·특징 - ⇄ 는 바꾸고 나머지는 더합니다'},
-  {key: 'action', label: 'Action', hint: '동작 - 누르면 더합니다'},
-  {key: 'parts', label: 'Parts', hint: '부위 - 누르면 더합니다'},
-  {key: 'context', label: 'Context', hint: '맥락 - ⇄ 는 바꾸고 나머지는 더합니다'},
+  {key: 'siblings', label: '대안', hint: '같은 자리의 다른 선택 (short hair ↔ long hair)' + OP_HINT},
+  {key: 'variations', label: '종류', hint: '더 구체적인 것 (chair → armchair)' + OP_HINT},
+  {key: 'state', label: '상태', hint: '상태 (open shirt · wet shirt)' + OP_HINT},
+  {key: 'companions', label: '함께', hint: '같이 잘 쓰는 것 (smile → blush)' + OP_HINT},
+  {key: 'attributes', label: '스타일', hint: '색 · 무늬 · 모양 (white shirt · sleeveless)' + OP_HINT},
+  {key: 'action', label: '동작', hint: '동작 (shirt tug · holding shirt)' + OP_HINT},
+  {key: 'parts', label: '부분', hint: '부분 (pocket · hood · ahoge)' + OP_HINT},
+  {key: 'context', label: '연출', hint: '연출 (naked shirt · on chair · hair over shoulder)' + OP_HINT},
 ];
 
-// 대표 줄 수와 그 줄에 처음 보이는 칩 수. 나머지 줄·칩은 [더보기] 뒤에 둔다(카드가 화면을 덮지 않게).
+// 대표 줄 수와 그 줄에 보이는 칩 수. 나머지는 유형 단추 뒤에 둔다(카드가 화면을 덮지 않게).
 export const RECOMMEND_LEAD_ROWS = 3;
 export const RECOMMEND_LEAD_CHIPS = 4;
 
@@ -60,17 +61,24 @@ export function promptTagSet(text) {
   return out;
 }
 
+/** 보일 차례로 세운다 - key(빌더가 정한 자리)가 있으면 그 순서, 없으면(옛 팩) 받은 순서 그대로. */
+export function displayOrder(items) {
+  return items.map((item, i) => [item, Number.isInteger(item?.key) ? item.key : i, i])
+    .sort((a, b) => a[1] - b[1] || a[2] - b[2])
+    .map(([item]) => item);
+}
+
 /**
- * 유형별 줄의 HTML. groups = 백엔드의 [{type, items: [{tag, op}]}].
+ * 유형별 줄의 HTML. groups = 백엔드의 [{type, items: [{tag, op, key}]}] - items 는 관련도 순이다.
  * renderChip(tag, extraClass, extraAttrs) 는 호출자의 칩 그리개(설명 호버·data-insert 를 붙인다).
- * 앞의 leadRows 줄이 대표 줄(칩 leadChips 개까지). 그 줄의 남은 칩과 나머지 줄은 [더보기](data-reco-toggle) 뒤의
- * `.tag-reco-more` 에 같은 유형 이름으로 다시 줄을 세운다 - 단추가 감싼 `.tag-reco` 에 is-expanded 를 붙여 편다.
- * expanded = 처음부터 편 채로. 숨길 것이 없으면 [더보기] 도, 더보기 칸도 없다.
+ * 앞의 leadRows 줄이 대표 줄(관련도 앞의 칩 leadChips 개). 그 줄의 남은 칩과 나머지 줄은 유형 단추
+ * (data-reco-tab)와 그 아래 칸(data-reco-panel)으로 그려 두고, tagAssist 가 누른 유형의 칸만 연다.
+ * 칩은 어디서나 key 순으로 선다. 숨길 것이 없으면 단추도 칸도 없다.
  * 그릴 칩이 하나도 없으면 '' - 호출자는 옛 related 줄로 돌아간다.
  */
 export function recommendRowsHtml(groups, {
   present = new Set(), current = '', renderChip,
-  leadRows = RECOMMEND_LEAD_ROWS, leadChips = RECOMMEND_LEAD_CHIPS, expanded = false,
+  leadRows = RECOMMEND_LEAD_ROWS, leadChips = RECOMMEND_LEAD_CHIPS,
 } = {}) {
   if (!Array.isArray(groups) || typeof renderChip !== 'function') return '';
   const byType = new Map();
@@ -91,31 +99,31 @@ export function recommendRowsHtml(groups, {
     if (items.length) rows.push({type, items});
   }
   if (!rows.length) return '';
-  const rowHtml = (type, items) => `<div class="tag-tooltip-extra tag-reco-row" data-reco-type="${type.key}">`
-    + `<span class="tag-tooltip-extra-label" data-naia-title="${type.hint}">${type.label}</span>`
-    + items.map(item => {
-      const replace = item.op === 'replace';
-      return renderChip(String(item.tag), replace ? 'is-replace' : 'is-add', `data-op="${replace ? 'replace' : 'add'}"`);
-    }).join('') + '</div>';
+  const chipsHtml = items => displayOrder(items).map(item => {
+    const replace = item.op === 'replace';
+    return renderChip(String(item.tag), replace ? 'is-replace' : 'is-add', `data-op="${replace ? 'replace' : 'add'}"`);
+  }).join('');
   let lead = '';
-  let more = '';
-  let hidden = 0;
-  const hiddenLabels = [];
+  let tabs = '';
+  let panels = '';
   rows.forEach(({type, items}, r) => {
     const shown = r < leadRows ? items.slice(0, leadChips) : [];
     const rest = items.slice(shown.length);
-    if (shown.length) lead += rowHtml(type, shown);
+    if (shown.length) {
+      lead += `<div class="tag-tooltip-extra tag-reco-row" data-reco-type="${type.key}">`
+        + `<span class="tag-tooltip-extra-label" data-naia-title="${type.hint}">${type.label}</span>`
+        + chipsHtml(shown) + '</div>';
+    }
     if (rest.length) {
-      more += rowHtml(type, rest);
-      hidden += rest.length;
-      hiddenLabels.push(type.label);
+      // 단추는 칩이 아니다(data-insert 없음) - 누르면 그 유형의 칸을 펴고 접을 뿐이다.
+      tabs += `<button type="button" class="tag-reco-tab" data-reco-tab="${type.key}" data-naia-title="${type.hint}">`
+        + `${type.label}<b>${rest.length}</b></button>`;
+      panels += `<div class="tag-tooltip-extra tag-reco-panel" data-reco-panel="${type.key}">${chipsHtml(rest)}</div>`;
     }
   });
-  if (!hidden) return `<div class="tag-reco">${lead}</div>`;
-  // 단추는 칩이 아니다(data-insert 없음) - 누르면 펴고 접을 뿐이다. 마우스를 올리면 숨은 줄 이름이 뜬다.
-  const toggle = `<button type="button" class="tag-reco-toggle" data-reco-toggle="1" data-naia-title="${hiddenLabels.join(' · ')}">`
-    + `<span class="reco-toggle-more">더보기 +${hidden}</span><span class="reco-toggle-less">접기</span></button>`;
-  return `<div class="tag-reco${expanded ? ' is-expanded' : ''}">${lead}${toggle}<div class="tag-reco-more">${more}</div></div>`;
+  // 칸은 단추 줄 **아래** - 펴도 단추가 제자리라 같은 자리를 다시 누르면 다시 그 단추다(칩이 아니다).
+  const more = tabs ? `<div class="tag-reco-tabs">${tabs}</div>${panels}` : '';
+  return `<div class="tag-reco">${lead}${more}</div>`;
 }
 
 /**

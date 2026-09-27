@@ -75,7 +75,10 @@ def korean_description(pack: dict[str, Any], tag: Any) -> str | None:
 
 
 def recommendations(pack: dict[str, Any], tag: str, *, keep=None, limit: int = 16) -> list[dict[str, Any]]:
-    """태그의 유형별 추천. [{"type": "state", "items": [{"tag": "open shirt", "op": "add"}, ...]}, ...]
+    """태그의 유형별 추천. [{"type": "state", "items": [{"tag": "open shirt", "op": "add", "key": 3}, ...]}, ...]
+
+    items 는 관련도 순이다(대표 칩은 앞에서 고른다). key = 카드에 **보이는** 자리(비슷한 것끼리 + ABC,
+    2026-09-27) - 옛 팩(항목이 [태그, op] 두 칸)에는 없다.
 
     팩의 키는 소문자·공백 표기다. 사용자가 밑줄로 친 태그(`open_shirt`)도 찾는다.
     keep 은 호출자의 '권할 값이 있는가' 술어 - 팩을 구운 뒤 사전이 바뀌어도 같은 규칙으로 거른다.
@@ -95,14 +98,17 @@ def recommendations(pack: dict[str, Any], tag: str, *, keep=None, limit: int = 1
             continue
         picked = []
         for entry in items:
-            if not isinstance(entry, list) or len(entry) != 2:
+            if not isinstance(entry, list) or len(entry) not in (2, 3):
                 continue
-            name, op = entry
+            name, op = entry[0], entry[1]
             if not isinstance(name, str) or op not in OPS or name == key:
                 continue
             if keep is not None and not keep(name):
                 continue
-            picked.append({"tag": name, "op": OPS[op]})
+            item = {"tag": name, "op": OPS[op]}
+            if len(entry) == 3 and isinstance(entry[2], int) and not isinstance(entry[2], bool):
+                item["key"] = entry[2]
+            picked.append(item)
             if len(picked) >= limit:
                 break
         if picked:

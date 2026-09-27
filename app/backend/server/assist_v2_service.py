@@ -1165,7 +1165,10 @@ def _scene(context: Any, layer: Any, ka: Any, merged: Any, req: dict[str, Any], 
         drill = service.drill(candidates=candidates, exclude=merged.exclude, ratings=req["rating"],
                               persons=persons["param"], min_posts=MIN_POOL)
     except Exception as exc:
-        out["message"] = f"이벤트 맵을 쓸 수 없습니다: {exc}"
+        # 이벤트 맵은 선택 자산이다 — 색인을 안 받은 PC(state=missing)는 고장이 아니라 알리지 않는다(뜻 검사 · 등급 게이트 ·
+        # 구성도 조용히 건너뛴다). 파일은 있는데 못 여는 것(받다 끊김 등)만 알린다(09-27 제보: 클린 사용자에게 결과마다 떴다)
+        if (getattr(exc, "extra", None) or {}).get("state") != "missing":
+            out["message"] = f"이벤트 맵 파일을 열지 못해 장면 태그만 실었습니다({exc})."
         out["prompt"] = compose(merged, pins=[], leftovers=candidates, actions=[], partition=persons["partition"],
                                 api_mode=req["api_mode"])
         return out
@@ -1588,7 +1591,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     out["timing"] = {"korean_ms": korean_ms, "model_s": round(model_s, 2),
                      "search_ms": round((time.perf_counter() - t1) * 1000, 1),
                      "total_s": round(time.perf_counter() - started, 3)}
-    if not pool.get("pins"):
+    if pool and not pool.get("pins"):             # 풀이 아예 없으면(이벤트 맵 없음) 게시물 수를 말할 수 없다
         out["message"] = "고른 등급·인원에서 이 조합의 실제 게시물이 20건이 안 됩니다 — 프롬프트는 그대로 쓸 수 있습니다."
     _with_rating_note(out, req["rating"], dropped)
     return out

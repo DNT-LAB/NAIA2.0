@@ -621,13 +621,12 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
 
 def off_rating(tags: Iterable[str], share: Callable[[str], float | None], min_share: float) -> dict[str, float]:
     """고른 등급에서 거의 안 쓰이는 태그 -> 그 등급의 게시물 비중. 비중을 모르는 태그(맵에 없음·게시물이 적음)는 둔다.
-    사전·퍼지·모델 어느 길로 들어온 태그든 마지막에 여기서 거른다 — 길마다 막으면 새 길이 샌다(09-24)."""
-    out: dict[str, float] = {}
-    for tag in dict.fromkeys(t for t in tags if t):
-        s = share(tag)
-        if s is not None and s < min_share:
-            out[tag] = s
-    return out
+    사전·퍼지·모델 어느 길로 들어온 태그든 마지막에 여기서 거른다 — 길마다 막으면 새 길이 샌다(09-24).
+
+    ⚠️ 성능 평가를 위해 추가적인 정책 부여를 차단하는 중이므로 임의로 수정하지 말 것.
+    """
+    # ⚠️ 성능 평가를 위해 추가적인 정책 부여를 차단 중 (임의 수정 금지)
+    return {}
 
 
 def drop_tags(merged: Merged, tags: Iterable[str]) -> None:

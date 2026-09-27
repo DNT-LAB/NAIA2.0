@@ -116,9 +116,25 @@ def ensure_tag_search_index(context: WebSessionContext):
         index = getattr(context, "tag_search_index", None)
         if index is None:
             raw = _ensure_kr_raw(context)
-            index = TagSearchIndex.from_raw_tag_records(raw)
+            index = TagSearchIndex.from_raw_tag_records(raw, description_overrides=_reviewed_descriptions(context))
             context.tag_search_index = index
         return index
+
+
+def _reviewed_descriptions(context: WebSessionContext) -> dict[str, str] | None:
+    """태그 카드와 같은 대표 한국어 설명(관계 팩의 `ko`, Codex 검토판)을 검색 색인에도 쓴다(사용자 지정 2026-09-27).
+
+    실측(2026-09-27): 자동완성은 기존 한국어 키워드 top6 298/300 그대로, 설명만으로 끼는 결과도 늘지 않았다.
+    Fast Search 는 빈도순이라 설명에 스친 흔한 태그가 앞을 채웠다 - 그건 `search_substring` 이 설명에만 걸린
+    태그를 뒤로 미는 것으로 막는다. 팩이 없으면 None(사전 설명 그대로).
+    """
+    try:
+        from core.tag_relation_pack import load_pack
+
+        ko = load_pack(_tag_data_roots(context)).get("ko")
+    except Exception:
+        return None
+    return ko if isinstance(ko, dict) and ko else None
 
 
 def _autocomplete_row(result: Any) -> dict[str, Any]:

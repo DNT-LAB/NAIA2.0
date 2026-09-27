@@ -202,6 +202,21 @@ def _compact_hangul(value: Any) -> str:
     return "".join(text.split())
 
 
+def _name_or_keyword_hit(query: str, result: "TagSearchResult") -> bool:
+    """질의가 태그 이름이나 한국어 키워드에 걸렸는가(설명·분류에만 걸린 것과 가른다)."""
+    q = _norm(normalize_search_query(query))
+    if not q:
+        return True
+    if q in _norm(result.tag):
+        return True
+    compact_q = _compact_hangul(q)
+    for keyword in getattr(result.entry, "keywords", None) or ():
+        k = _norm(keyword)
+        if q in k or (compact_q and compact_q in _compact_hangul(k)):
+            return True
+    return False
+
+
 def _split_keywords(value: Any) -> list[str]:
     text = str(value or "").replace("<", "").replace(">", "")
     return [part.strip() for part in text.split(",") if part.strip()]
@@ -674,6 +689,8 @@ class TagSearchIndex:
     def from_raw_tag_records(
         cls,
         records: Mapping[str, Mapping[str, Any]],
+        *,
+        description_overrides: Mapping[str, str] | None = None,
     ) -> "TagSearchIndex":
         """Build an index from Remote/Web tag records.
 
@@ -681,9 +698,13 @@ class TagSearchIndex:
         e621, and artist/character dictionaries into `_kr_tags_raw`. This helper
         lets Web Remote use the same search scorer as Event Preset without
         requiring Event Preset assets.
+
+        `description_overrides` = 태그 -> 대표 한국어 설명(관계 팩의 `ko`, Codex 검토판). 태그 카드와 같은
+        문장으로 찾고 보이게 한다(사용자 지정 2026-09-27). 없으면 사전 설명 그대로.
         """
         registry = TagAxisRegistry()
         entries: list[TagSearchEntry] = []
+        overrides = description_overrides or {}
 
         for raw_info in records.values():
             tag = normalize_tag(str(raw_info.get("_tag", "") or raw_info.get("tag", "")))
@@ -693,7 +714,8 @@ class TagSearchIndex:
             group = str(raw_info.get("group", "") or "")
             subgroup = str(raw_info.get("subgroup", "") or "")
             cat = str(raw_info.get("_cat", "") or "")
-            desc = str(raw_info.get("description", "") or raw_info.get("desc", "") or "")
+            reviewed = overrides.get(tag) if overrides else None
+            desc = str(reviewed or raw_info.get("description", "") or raw_info.get("desc", "") or "")
             keywords = tuple(
                 _split_keywords(raw_info.get("keywords_kr", ""))
                 + _split_keywords(raw_info.get("keywords", ""))
@@ -884,7 +906,10 @@ class TagSearchIndex:
             except (TypeError, ValueError):
                 return 0
 
-        results.sort(key=lambda r: (-freq_of(r), r.tag))
+        # 이름·한국어 키워드에 걸린 태그가 먼저, **설명에만** 걸린 태그는 그 뒤(각각 빈도순).
+        # 빈도순이라 설명에 그 말이 스친 흔한 태그가 앞을 채웠다 - '꼬리' 에 holding('입·발·꼬리로
+        # 잡는 경우는 제외'), '치마' 에 dress · nude(2026-09-27 실측, 대표 문장을 색인에 넣을 때 커졌다).
+        results.sort(key=lambda r: (not _name_or_keyword_hit(query, r), -freq_of(r), r.tag))
         return results[:limit] if limit else results
 
     def search_semantic(

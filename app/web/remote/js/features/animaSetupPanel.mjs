@@ -40,9 +40,19 @@ const STYLE = `
 #setupAnimaSection .anima-x { background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 4px; }
 #setupAnimaSection .anima-x:hover { color: #f07070; }
 #setupAnimaSection details.anima-arts summary { cursor: pointer; font-size: 11px; color: var(--text-muted); }
-#setupAnimaSection details.anima-arts li { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
-#setupAnimaSection details.anima-arts small { display: block; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
-  word-break: break-all; }
+#setupAnimaSection .anima-arts-sum { margin-left: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+#setupAnimaSection ul.anima-arts-list { list-style: none; margin: 6px 0 0; padding: 2px 10px; border: 1px solid var(--border-dim);
+  border-radius: 7px; background: var(--bg-card); }
+#setupAnimaSection .anima-arts-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 10px;
+  align-items: baseline; padding: 5px 0; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-dim); }
+#setupAnimaSection .anima-arts-list li:first-child { border-top: 0; }
+#setupAnimaSection .anima-arts-list li.is-have .anima-art-name { color: var(--text-dim); }
+#setupAnimaSection .anima-art-name em { font-style: normal; font-size: 10px; color: var(--text-dim); margin-left: 6px; }
+#setupAnimaSection .anima-art-have { grid-column: 2; font-size: 10px; color: var(--success); }
+#setupAnimaSection .anima-art-size { grid-column: 3; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  text-align: right; }
+#setupAnimaSection .anima-arts-list small { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 9px;
+  color: var(--text-dim); word-break: break-all; }
 #setupAnimaSection .anima-lic li { border: 1px solid var(--border-dim); border-radius: 7px; padding: 6px 9px; background: var(--bg-card); }
 #setupAnimaSection .anima-lic-head { display: flex; align-items: baseline; gap: 8px; }
 #setupAnimaSection .anima-lic-head b { font-size: 12px; color: var(--text-primary); font-weight: 600; }
@@ -234,14 +244,45 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const gpuText = gpu.name ? `${gpu.name}${vram}${gpu.driver ? ` · 드라이버 ${gpu.driver}` : ''}` : 'NVIDIA GPU 를 찾지 못했습니다';
     const checks = (plan.checks || []).filter(c => !c.ok || c.message)
       .map(c => `<li class="${c.ok ? '' : 'bad'}">${c.ok ? '✓' : '✕'} ${esc(c.message || c.code || c.id)}</li>`).join('');
-    const arts = (plan.artifacts || []).map(a => `<li>${esc(ARTIFACT_LABEL[a.id] || a.id)} · ${fmtBytes(a.size)} · ${
-      esc(ACTION_LABEL[a.action] || a.action)}${a.action === 'reuse' && a.path ? `<small>${esc(a.path)}</small>` : ''}</li>`).join('');
     return `<div class="anima-row"><span class="anima-label">GPU</span><span class="anima-val">${esc(gpuText)}</span></div>
       ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}
       <div class="anima-row"><span class="anima-label">용량</span><span class="anima-detail">받을 용량 ${fmtBytes(plan.download_bytes)}
         · 필요한 공간 ${fmtBytes(plan.required_bytes)} · 남은 공간 ${fmtBytes(plan.free_bytes)}</span></div>
-      ${arts ? `<details class="anima-arts"${artsOpen ? ' open' : ''}><summary>받을 것</summary><ul class="anima-list">${arts}</ul></details>` : ''}
+      ${viewArtifacts()}
       <div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="inspect">다시 검사</button></div>`;
+  }
+
+  // 받을 것 — 서버는 Spectrum 을 파일마다(spectrum:nodes.py …) 보낸다. 한 줄로 묶고 큰 것부터 놓는다. 제목이 이미
+  // '받을 것' 이라 줄마다 '받기' 를 되풀이하지 않고, 이미 있는 것만 표시한다(사용자 지적 09-27: 16줄 나열이 난잡했다).
+  function artifactRows(list) {
+    const rows = [];
+    const spectrum = [];
+    for (const a of list) {
+      if (String(a.id).startsWith('spectrum:')) spectrum.push(a);
+      else rows.push({ label: ARTIFACT_LABEL[a.id] || a.id, size: Number(a.size) || 0, action: a.action, path: a.path });
+    }
+    if (spectrum.length) {
+      rows.push({ label: ARTIFACT_LABEL.spectrum, note: `파일 ${spectrum.length}개`,
+        size: spectrum.reduce((sum, a) => sum + (Number(a.size) || 0), 0),
+        action: spectrum.some(a => a.action === 'download') ? 'download' : spectrum[0].action });
+    }
+    return rows.sort((a, b) => b.size - a.size);
+  }
+
+  function viewArtifacts() {
+    const rows = artifactRows(plan.artifacts || []);
+    if (!rows.length) return '';
+    const toGet = rows.filter(r => r.action === 'download').length;
+    const have = rows.length - toGet;
+    const sum = [toGet ? `${toGet}개 · ${fmtBytes(plan.download_bytes)}` : '없음 · 모두 있음', have && toGet ? `있는 것 ${have}개` : '']
+      .filter(Boolean).join(' · ');
+    const items = rows.map(r => `<li${r.action === 'download' ? '' : ' class="is-have"'}>
+        <span class="anima-art-name">${esc(r.label)}${r.note ? `<em>${esc(r.note)}</em>` : ''}</span>${
+        r.action === 'download' ? '' : `<span class="anima-art-have">${esc(ACTION_LABEL[r.action] || r.action)}</span>`}
+        <span class="anima-art-size">${fmtBytes(r.size)}</span>${
+        r.action === 'reuse' && r.path ? `<small>${esc(r.path)}</small>` : ''}</li>`).join('');
+    return `<details class="anima-arts"${artsOpen ? ' open' : ''}><summary>받을 것<span class="anima-arts-sum">${esc(sum)}</span></summary>
+      <ul class="anima-arts-list">${items}</ul></details>`;
   }
 
   function viewRoot() {

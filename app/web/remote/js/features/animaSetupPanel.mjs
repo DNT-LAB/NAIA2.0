@@ -5,6 +5,7 @@
 // 예상 시간 · 속도는 싣지 않는다(사용자 지정) — 크기와 단계만.
 // 설치 · 동의 · 엔진 제어는 NAIA 를 켠 PC 에서만(서버가 403) — 원격이면 안내만 하고 단추를 감춘다.
 // 동의(I Agree)는 화면에서 받고 서버가 묶음 해시로 다시 검사한다(버튼을 우회해도 막힌다).
+// 설치 화면은 짧게(사용자 지정 09-27 원격 시험): [설치] 맨 위 · 검사 · 받을 것은 오른쪽 칸 · 라이선스는 한 줄 동의 + [상세보기].
 
 const POLL_BUSY_MS = 1000;
 const POLL_IDLE_MS = 4000;
@@ -69,6 +70,29 @@ const STYLE = `
 #setupAnimaSection .anima-notice p { margin: 0 0 4px; }
 #setupAnimaSection .anima-notice p:last-child { margin-bottom: 0; }
 #setupAnimaSection .setup-actions { margin-top: 4px; align-items: center; }
+#setupAnimaSection [data-anima-body] > .setup-result { margin-top: 0; }
+#setupAnimaSection .anima-install { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+#setupAnimaSection .anima-main { flex: 999 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+#setupAnimaSection .anima-side { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border: 1px solid var(--border-dim); border-radius: 8px; background: var(--bg-card); }
+#setupAnimaSection .anima-main .setup-actions { margin-top: 0; }
+#setupAnimaSection .anima-main .setup-field-label { margin: 0 0 6px; }
+#setupAnimaSection .anima-main .setup-result { margin-top: 6px; }
+#setupAnimaSection .anima-side .setup-result { margin-top: 0; }
+#setupAnimaSection .anima-kv { display: flex; gap: 8px; align-items: baseline; }
+#setupAnimaSection .anima-side .anima-label { min-width: 34px; }
+#setupAnimaSection .anima-consent { display: flex; flex-direction: column; gap: 3px; }
+#setupAnimaSection .anima-consent-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+#setupAnimaSection .anima-consent-top .setup-field-label { margin: 0; }
+#setupAnimaSection .anima-consent-base { font-size: 11px; color: var(--text-primary); }
+#setupAnimaSection .anima-consent-base span { margin-left: 6px; font-size: 10px; color: var(--text-dim); }
+#setupAnimaSection .anima-consent-names { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+#setupAnimaSection .anima-consent-names span { white-space: nowrap; }
+#setupAnimaSection .anima-agree { display: flex; align-items: center; gap: 8px; margin-top: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--text-primary); }
+#setupAnimaSection .anima-agree input { margin: 0; cursor: pointer; }
+#setupAnimaSection .anima-agreed { margin-top: 6px; font-size: 11px; color: var(--success); }
+#setupAnimaSection .anima-lic-more { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 `;
 
 // 설치 단계를 사람이 읽을 몇 칸으로 묶는다(계약서 §5.2 의 phase 10개 -> 6칸).
@@ -90,6 +114,13 @@ const ARTIFACT_LABEL = {
   unet: 'naiANIMA2d_v03 모델', text_encoder: 'Qwen 텍스트 인코더', vae: 'Qwen VAE',
 };
 const ACTION_LABEL = { present: '받아 둠', reuse: '있는 파일 사용', download: '받기' };
+// 라이선스 동의 한 줄(사용자 지정 09-27): 바탕 = NVIDIA Cosmos(NVIDIA Open Model License), 나머지는 짧은 이름으로.
+const LIC_BASE = 'nvidia_open_model';
+const LIC_SHORT = {
+  gpl3_naia: 'NAIA', gpl3_comfyui: 'ComfyUI', portable_components: 'PyTorch', mit_spectrum: 'MIT (Spectrum)',
+  circlestone_nc: 'CircleStone ANIMA', apache2_qwen: 'Apache 2.0 (Qwen)', lgpl_7zip: '7-Zip LGPL 2.1',
+  nvidia_open_model: 'NVIDIA Open Model License',
+};
 const IDLE_OPTIONS = [
   { v: 0, t: '안 끔' }, { v: 10, t: '10분' }, { v: 30, t: '30분' }, { v: 60, t: '1시간' }, { v: 120, t: '2시간' },
 ];
@@ -114,8 +145,8 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   const licText = {};        // id -> 원문
   let agreed = false;        // 이번 화면에서 I Agree 를 체크했는가
   let rootDraft = null;      // 사람이 고친 설치 위치(null = 설정 · 제안값)
-  let dirDraft = '';         // 폴더 입력칸
-  let loraDraft = '';
+  let loraDraft = '';        // LoRA 폴더 입력칸
+  let licMore = false;       // 라이선스 [상세보기] 펼침
   let artsOpen = false;      // "받을 것" 펼침
   let busy = false;          // 요청 보내는 중(연타 막기)
   let pollTimer = 0;
@@ -232,28 +263,34 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
 
   // ---- 설치 전(미설치 · 실패 · 취소 · 차단) ----
 
-  function viewPlan() {
-    if (inspecting) return '<div class="anima-row"><span class="anima-label">PC</span><span class="anima-note">검사 중…</span></div>';
-    if (planError) {
-      return `<div class="setup-result error">${esc(planError.message)}${planError.code
-        ? `<span class="anima-code">${esc(planError.code)}</span>` : ''}</div>
-        <div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="inspect">다시 검사</button></div>`;
-    }
-    if (!plan) {
-      return `<div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="inspect">PC 검사</button>
-        <span class="anima-note">RTX 20 시리즈 이상 NVIDIA GPU 가 필요합니다</span></div>`;
-    }
+  function errorHtml(e) {
+    return `<div class="setup-result error">${esc(e.message)}${e.code ? `<span class="anima-code">${esc(e.code)}</span>` : ''}</div>`;
+  }
+
+  // 설치 위치가 거절됐다(PATH_*) — 오류는 입력칸 밑에 둔다(오른쪽 칸에 두면 고칠 자리와 떨어진다)
+  const pathError = () => Boolean(planError) && /^PATH_/.test(planError.code || '');
+
+  // 오른쪽 칸 — PC 검사 결과 · 받을 것 · 다시 검사(사용자 지정 09-27). 받을 용량은 [설치] 단추와 '받을 것' 이 이미 말한다.
+  // 검사가 실패했으면 옛 결과를 보이지 않는다(다른 설치 위치를 잰 숫자다).
+  function viewCheck() {
+    if (inspecting) return '<div class="anima-note">PC 검사 중…</div>';
+    const again = `<div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="inspect">${
+      plan || planError ? '다시 검사' : 'PC 검사'}</button></div>`;
+    if (planError && !pathError()) return errorHtml(planError) + again;
+    if (planError) return `<div class="anima-note">설치 위치를 고치면 다시 검사합니다</div>${again}`;
+    if (!plan) return `<div class="anima-note">RTX 20 시리즈 이상 NVIDIA GPU 가 필요합니다</div>${again}`;
     const gpu = plan.gpu || {};
     const vram = Number(gpu.vram_mb) ? ` · ${Math.round(Number(gpu.vram_mb) / 1024)}GB` : '';
-    const gpuText = gpu.name ? `${gpu.name}${vram}${gpu.driver ? ` · 드라이버 ${gpu.driver}` : ''}` : 'NVIDIA GPU 를 찾지 못했습니다';
+    const gpuText = gpu.name ? `${gpu.name}${vram}` : 'NVIDIA GPU 를 찾지 못했습니다';
     const checks = (plan.checks || []).filter(c => !c.ok || c.message)
       .map(c => `<li class="${c.ok ? '' : 'bad'}">${c.ok ? '✓' : '✕'} ${esc(c.message || c.code || c.id)}</li>`).join('');
-    return `<div class="anima-row"><span class="anima-label">GPU</span><span class="anima-val">${esc(gpuText)}</span></div>
+    return `<div class="anima-kv"><span class="anima-label">GPU</span><span class="anima-val"${
+        gpu.driver ? ` title="드라이버 ${esc(gpu.driver)}"` : ''}>${esc(gpuText)}</span></div>
       ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}
-      <div class="anima-row"><span class="anima-label">용량</span><span class="anima-detail">받을 용량 ${fmtBytes(plan.download_bytes)}
-        · 필요한 공간 ${fmtBytes(plan.required_bytes)} · 남은 공간 ${fmtBytes(plan.free_bytes)}</span></div>
+      <div class="anima-kv"><span class="anima-label">용량</span><span class="anima-detail">필요 ${fmtBytes(plan.required_bytes)}
+        · 남은 ${fmtBytes(plan.free_bytes)}</span></div>
       ${viewArtifacts()}
-      <div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="inspect">다시 검사</button></div>`;
+      ${again}`;
   }
 
   // 받을 것 — 서버는 Spectrum 을 파일마다(spectrum:nodes.py …) 보낸다. 한 줄로 묶고 큰 것부터 놓는다. 제목이 이미
@@ -290,10 +327,11 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   }
 
   function viewRoot() {
-    return `<label class="setup-field-label" for="setupAnimaRoot">설치 위치</label>
+    return `<div><label class="setup-field-label" for="setupAnimaRoot">설치 위치</label>
       <input class="setup-input setup-input-mono" id="setupAnimaRoot" data-anima-input="root" type="text"
-             value="${esc(currentRoot())}" spellcheck="false" autocomplete="off">
-      <div class="anima-note">NAIA 폴더 밖에 둡니다 — NAIA 를 새 버전으로 바꿔도 다시 받지 않습니다.</div>`;
+             value="${esc(currentRoot())}" spellcheck="false" autocomplete="off"
+             title="NAIA 폴더 밖에 둡니다 — NAIA 를 새 버전으로 바꿔도 다시 받지 않습니다">
+      ${pathError() ? errorHtml(planError) : ''}</div>`;
   }
 
   function dirsHtml(dirs, attr) {
@@ -302,19 +340,35 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     return rows ? `<ul class="anima-list anima-dirs">${rows}</ul>` : '';
   }
 
-  function viewModelDirs() {
-    return `<div class="setup-field-label">이미 받은 모델 폴더<span class="anima-opt">선택</span></div>
-      ${dirsHtml(settings().model_dirs || [], 'anima-rmdir')}
-      <div class="setup-input-row">
-        <input class="setup-input setup-input-mono" data-anima-input="dir" type="text" value="${esc(dirDraft)}"
-               placeholder="예: D:\\ComfyUI\\models" spellcheck="false" autocomplete="off">
-        <button type="button" class="setup-btn-ghost" data-anima-act="adddir">추가</button>
-      </div>
-      <div class="anima-note">같은 파일이 있으면 받지 않고 그 자리를 그대로 씁니다.</div>`;
-  }
-
+  // 라이선스 — Cosmos 고지를 바탕 줄로, 나머지는 이름만 한 줄로 모아 한 번에 동의받는다(사용자 지정 09-27: 실제 ComfyUI
+  // 설치도 이렇게 긴 동의서를 요구하지 않는다). 카드 · 원문 · 고지문 전체는 [상세보기]. 동의 대상은 언제나 서버 목록
+  // 전체다(묶음 해시) — 짧은 이름이 없는 항목은 제목 그대로 싣는다.
   function viewLicenses() {
     if (!lic) return '<div class="anima-note">라이선스를 불러오는 중…</div>';
+    const items = lic.items || [];
+    const base = items.find(item => item.id === LIC_BASE);
+    const notice = (lic.notices || {})[LIC_BASE];
+    const short = item => LIC_SHORT[item.id] || item.title;
+    // 이름은 통째로만 줄을 바꾼다('CircleStone / ANIMA' 처럼 끊기지 않게)
+    const names = items.filter(item => item !== base).map(item => `<span>${esc(short(item))}</span>`).join(' · ');
+    const baseLine = base
+      ? `<div class="anima-consent-base">${esc(notice || short(base))}${notice ? `<span>${esc(short(base))}</span>` : ''}</div>` : '';
+    const agree = consentStored()
+      ? '<div class="anima-agreed">✓ 모두 동의했습니다</div>'
+      : `<label class="anima-agree" for="setupAnimaAgree">
+           <input type="checkbox" id="setupAnimaAgree" data-anima-agree${agreed ? ' checked' : ''}>
+           <span>모두 동의합니다 (I Agree)</span></label>`;
+    return `<div class="anima-consent">
+        <div class="anima-consent-top"><span class="setup-field-label">라이선스</span>
+          <button type="button" class="anima-link" data-anima-licmore>${licMore ? '접기' : '상세보기'}</button></div>
+        ${baseLine}
+        <div class="anima-consent-names">${names}</div>
+        ${agree}
+        ${licMore ? viewLicenseDetails(base) : ''}
+      </div>`;
+  }
+
+  function viewLicenseDetails(base) {
     const items = (lic.items || []).map(item => {
       const open = licOpen.has(item.id);
       return `<li><div class="anima-lic-head"><b>${esc(item.title)}</b><span class="anima-lic-name">${esc(item.license || '')}</span>
@@ -322,27 +376,25 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
         ${item.applies_to ? `<div class="anima-lic-for">${esc(item.applies_to)}</div>` : ''}
         ${open ? `<pre class="anima-lic-text">${esc(licText[item.id] == null ? '불러오는 중…' : licText[item.id])}</pre>` : ''}</li>`;
     }).join('');
-    const notices = Object.values(lic.notices || {}).filter(Boolean).map(n => `<p>${esc(n)}</p>`).join('');
-    const consent = consentStored()
-      ? '<div class="anima-note">이미 동의했습니다.</div>'
-      : `<label class="setup-toggle-row" for="setupAnimaAgree">
-           <input type="checkbox" id="setupAnimaAgree" data-anima-agree${agreed ? ' checked' : ''}>
-           <span class="setup-toggle-text"><b>위 라이선스에 모두 동의합니다 (I Agree)</b></span></label>`;
-    return `<div class="setup-field-label">라이선스</div>
-      <ul class="anima-list anima-lic">${items}</ul>
-      ${notices ? `<div class="anima-notice">${notices}</div>` : ''}
-      ${consent}`;
+    // 바탕 줄에 이미 보인 Cosmos 고지는 되풀이하지 않는다
+    const notices = Object.entries(lic.notices || {}).filter(([id, n]) => n && !(base && id === LIC_BASE))
+      .map(([, n]) => `<p>${esc(n)}</p>`).join('');
+    return `<div class="anima-lic-more"><ul class="anima-list anima-lic">${items}</ul>
+      ${notices ? `<div class="anima-notice">${notices}</div>` : ''}</div>`;
   }
 
   function viewInstallActions() {
     const ins = install();
     const blockers = plan ? (plan.checks || []).filter(c => !c.ok) : [];
     const consentOk = agreed || consentStored();
-    const ready = Boolean(plan) && !blockers.length && consentOk && Boolean(lic) && Boolean(currentRoot());
-    const why = !plan ? 'PC 검사를 먼저 합니다'
-      : blockers.length ? '검사를 통과하지 못했습니다'
-        : !currentRoot() ? '설치 위치를 적어 주세요'
-          : !consentOk ? '라이선스에 동의해야 설치할 수 있습니다' : '';
+    // 검사 중이거나 실패한 채면 잠근다 — 옛 검사 결과(plan)가 남아 있어도 지금 칸의 위치는 아직 · 이미 거절됐다
+    const why = inspecting ? 'PC 검사 중입니다'
+      : planError ? (pathError() ? '설치 위치를 확인해 주세요' : 'PC 검사를 다시 해 주세요')
+      : !plan ? 'PC 검사를 먼저 합니다'
+        : blockers.length ? '검사를 통과하지 못했습니다'
+          : !currentRoot() ? '설치 위치를 적어 주세요'
+            : !consentOk ? '라이선스에 동의해야 설치할 수 있습니다' : '';
+    const ready = !why && Boolean(lic);
     const label = ins.state === 'failed' || ins.state === 'canceled' ? '다시 시작' : '설치';
     return `<div class="setup-actions">
       <button type="button" class="setup-btn-primary" data-anima-act="prepare"${ready && !busy ? '' : ' disabled'}>${
@@ -350,13 +402,13 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       ${why ? `<span class="anima-note">${esc(why)}</span>` : ''}</div>`;
   }
 
+  // 사용자 지정 09-27(원격 시험): [설치] 를 맨 위로, PC 검사 · 받을 것 · 다시 검사는 오른쪽 칸(좁으면 아래로 접힌다).
+  // 설명 문단 · 이미 받은 모델 폴더 칸은 뺐다.
   function viewInstaller() {
     const ins = install();
-    const parts = ['<div class="anima-detail">NAIA 가 공식 ComfyUI · Spectrum 노드 · 모델을 받아 이 PC 전용 엔진을 만듭니다. '
-      + '설치하면 서버 주소 없이 생성합니다.</div>'];
+    const parts = [];
     if (ins.state === 'failed' || ins.state === 'blocked') {
-      parts.push(`<div class="setup-result error">${esc(ins.message || '설치하지 못했습니다')}${ins.code
-        ? `<span class="anima-code">${esc(ins.code)}</span>` : ''}</div>`);
+      parts.push(errorHtml({ message: ins.message || '설치하지 못했습니다', code: ins.code }));
     } else if (ins.state === 'canceled') {
       parts.push('<div class="anima-note">설치를 취소했습니다. 다시 시작하면 받은 만큼 이어서 받습니다.</div>');
     }
@@ -364,7 +416,10 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       parts.push(`<div class="anima-note">${REMOTE_NOTE}</div>`);
       return parts.join('');
     }
-    parts.push(viewPlan(), viewRoot(), viewModelDirs(), viewLicenses(), viewInstallActions());
+    parts.push(`<div class="anima-install">
+        <div class="anima-main">${viewInstallActions()}${viewRoot()}${viewLicenses()}</div>
+        <div class="anima-side">${viewCheck()}</div>
+      </div>`);
     return parts.join('');
   }
 
@@ -450,7 +505,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     if (elStatus) elStatus.textContent = headline();
     paintNav();
     const key = JSON.stringify([missing, remote, st, plan, planError, inspecting, lic && lic.bundle_sha256,
-      [...licOpen], Object.keys(licText), agreed, busy, artsOpen]);
+      [...licOpen], Object.keys(licText), agreed, busy, artsOpen, licMore]);
     if (key === drawn && elBody.childElementCount) return;
     drawn = key;
     // 입력 중인 칸을 지킨다(폴링이 칸을 다시 그려도 글자 · 커서가 남게)
@@ -541,20 +596,18 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     await refresh();
   }
 
-  function addDir(kind) {
-    const value = (kind === 'lora' ? loraDraft : dirDraft).trim();
+  function addLoraDir() {
+    const value = loraDraft.trim();
     if (!value) return null;
-    const key = kind === 'lora' ? 'lora_dirs' : 'model_dirs';
-    const dirs = [...(settings()[key] || [])];
+    const dirs = [...(settings().lora_dirs || [])];
     if (!dirs.includes(value)) dirs.push(value);
-    return { [key]: dirs };
+    return { lora_dirs: dirs };
   }
 
-  function removeDir(kind, index) {
-    const key = kind === 'lora' ? 'lora_dirs' : 'model_dirs';
-    const dirs = [...(settings()[key] || [])];
+  function removeLoraDir(index) {
+    const dirs = [...(settings().lora_dirs || [])];
     dirs.splice(index, 1);
-    return { [key]: dirs };
+    return { lora_dirs: dirs };
   }
 
   async function run(button, task) {
@@ -589,6 +642,11 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       render();
       return;
     }
+    if (event.target.closest('[data-anima-licmore]')) {
+      licMore = !licMore;
+      render();
+      return;
+    }
     if (!st) return;
     const engineBtn = event.target.closest('[data-anima-engine]');
     if (engineBtn && !engineBtn.disabled) {
@@ -606,15 +664,10 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       run(idleBtn, () => saveSettings({ idle_minutes: Number(idleBtn.getAttribute('data-anima-idle')) }));
       return;
     }
-    const rmDir = event.target.closest('[data-anima-rmdir]');
     const rmLora = event.target.closest('[data-anima-rmlora]');
-    if (rmDir || rmLora) {
-      const kind = rmLora ? 'lora' : 'model';
-      const index = Number((rmLora || rmDir).getAttribute(rmLora ? 'data-anima-rmlora' : 'data-anima-rmdir'));
-      run(rmLora || rmDir, async () => {
-        await saveSettings(removeDir(kind, index));
-        if (kind === 'model') await inspect();
-      });
+    if (rmLora) {
+      const index = Number(rmLora.getAttribute('data-anima-rmlora'));
+      run(rmLora, () => saveSettings(removeLoraDir(index)));
       return;
     }
     const actBtn = event.target.closest('[data-anima-act]');
@@ -636,13 +689,11 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
         await call('POST', '/engine/start', {});
       } else if (act === 'stop') {
         await call('POST', '/engine/stop', {});
-      } else if (act === 'adddir' || act === 'addlora') {
-        const kind = act === 'addlora' ? 'lora' : 'model';
-        const patch = addDir(kind);
+      } else if (act === 'addlora') {
+        const patch = addLoraDir();
         if (!patch) return;
         await saveSettings(patch);
-        if (kind === 'lora') loraDraft = ''; else dirDraft = '';
-        if (kind === 'model') await inspect();
+        loraDraft = '';
       }
     });
   }
@@ -652,7 +703,6 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     if (!input) return;
     const kind = input.getAttribute('data-anima-input');
     if (kind === 'root') rootDraft = input.value;
-    else if (kind === 'dir') dirDraft = input.value;
     else if (kind === 'lora') loraDraft = input.value;
   }
 
@@ -672,7 +722,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const input = event.target.closest('[data-anima-input]');
     if (!input) return;
     const kind = input.getAttribute('data-anima-input');
-    const act = kind === 'dir' ? 'adddir' : kind === 'lora' ? 'addlora' : null;
+    const act = kind === 'lora' ? 'addlora' : null;
     if (!act) return;
     event.preventDefault();
     elBody.querySelector(`[data-anima-act="${act}"]`)?.click();

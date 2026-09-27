@@ -16259,6 +16259,9 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-reco-tab.is-active { color: var(--text-primary); border-color: rgba(100,140,255,0.5); background: rgba(100,140,255,0.18); }
 .tag-reco-tab.is-active b { color: var(--text-primary); }
 .tag-reco-panel:not(.is-open) { display: none; }
+/* 추천 프롬프트 줄(고른 태그에서 함께 1 · 상태 1, 2026-09-27) - 이름표만 강조하고, [모두 넣기]는 점선 칩. */
+.tag-reco-fill .tag-tooltip-extra-label { color: var(--accent-light); }
+.tag-tooltip-extra-tag.reco-fill-all { color: var(--text-dim); border-style: dashed; }
 .tag-chip-info-tooltip {
   display: none;
   position: fixed;

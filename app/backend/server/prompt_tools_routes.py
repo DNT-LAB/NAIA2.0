@@ -303,7 +303,8 @@ def _recommendable(context, raw_tags):
     return ok
 
 
-def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = False) -> dict[str, Any]:
+def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = False,
+                    prompt_tags: list[str] | None = None) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
         from core.kr_tag_loader import load_kr_tag_records
@@ -330,7 +331,9 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
         return {}
     # 관계 팩(tools/build_tag_relation_pack.py): 추천 줄 + **카드에 보이는 한국어 설명**의 검토판
     # (Codex 대표 문장, 사용자 지정 2026-09-27). 표시만 바꾼다 - 검색 색인은 원래 설명을 그대로 읽는다.
-    from core.tag_relation_pack import korean_description, load_pack, recommendations
+    from core.tag_relation_pack import (
+        PROMPT_TAG_LIMIT, fill_recommendation, korean_description, load_pack, recommendations,
+    )
 
     pack = load_pack(_tag_data_roots(context))
     result = {
@@ -395,8 +398,18 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
         groups = recommendations(pack, tag_lower, keep=keep)
         if not groups and info.get("_tag"):
             groups = recommendations(pack, str(info.get("_tag")), keep=keep)
+        # 추천 프롬프트(함께 1 · 상태 1) - 메인 칸이 맥락(prompt_tags)을 보냈을 때만, 고른 태그에서 **그때** 계산한다.
+        # 맥락은 사전에 있는 **명확한 태그**만 쓴다(자연어 조각은 여기서 떨어진다). Prefix/Postfix 는 칸이 달라 오지 않는다.
+        fill: list[dict[str, Any]] = []
+        if groups and isinstance(prompt_tags, list):
+            clear = [t for t in prompt_tags[:PROMPT_TAG_LIMIT] if isinstance(t, str) and t in raw_tags]
+            fill = fill_recommendation(pack, tag_lower, clear, keep=keep)
+            if not fill and info.get("_tag"):
+                fill = fill_recommendation(pack, str(info.get("_tag")), clear, keep=keep)
         if groups:
             result["recommend"] = {"groups": groups}
+            if fill:
+                result["recommend"]["fill"] = fill
             recommended = [item["tag"] for group in groups for item in group["items"]]
     extra_info = {}
     for extra_tag in (list(result.get("implications", [])) + list(result.get("related", []))

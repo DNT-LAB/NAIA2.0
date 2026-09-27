@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any, Iterable
@@ -72,6 +73,79 @@ def korean_description(pack: dict[str, Any], tag: Any) -> str | None:
     key = _key(tag)
     text = ko.get(key) or ko.get(key.replace("_", " "))
     return text if isinstance(text, str) and text.strip() else None
+
+
+# 추천 프롬프트(사용자 지정 2026-09-27): 고른 태그 하나에서 **함께 1 · 상태 1** 을 더하기만. 색·무늬·모양(스타일)은
+# 취향이라 뺀다. 장면을 뒤집는 상태(벗음·부재·찢김·한쪽만)도 뺀다 - 시제품에서 hat + unworn hat 같은 모순이 나왔다.
+# 프롬프트를 고치지 않는다(Codex 계약: 사용자가 고른다) - 칩으로 보여 줄 뿐이다.
+FILL_KINDS = ("companions", "state")
+FLIP_STATE_WORDS = ("unworn", "no ", "torn", "removed", "removing", "undressing", "detached", "single ")
+PROMPT_TAG_LIMIT = 150
+_PEOPLE = re.compile(r"^(\d+)\+?(girl|boy|other)s?$")
+_CROWD_TAGS = {"multiple girls", "multiple boys", "multiple others"}
+
+
+def people_count(tags: Iterable[str]) -> int:
+    """프롬프트의 인원(1girl=1, 2boys=2, 6+girls=6, multiple girls=2 …). solo 를 권해도 되는지 가른다."""
+    total = 0
+    for tag in tags:
+        hit = _PEOPLE.match(tag)
+        if hit:
+            total += int(hit.group(1))
+        elif tag in _CROWD_TAGS:
+            total += 2
+    return total
+
+
+def _rivals(rows: Any) -> set[str]:
+    """배타 축의 대안(⇄ 형제) - 같이 있으면 모순이다(short hair · long hair)."""
+    if not isinstance(rows, dict):
+        return set()
+    return {e[0] for e in rows.get("siblings", []) if isinstance(e, list) and len(e) >= 2 and e[1] == 1}
+
+
+def fill_recommendation(pack: dict[str, Any], tag: str, prompt_tags: Iterable[str], *, keep=None) -> list[dict[str, Any]]:
+    """고른 태그의 추천 프롬프트 [{"tag", "type"}] - 함께 1 · 상태 1, 관련도 앞에서부터 거르며 고른다.
+
+    prompt_tags = 메인 칸의 **명확한 태그**(호출자가 사전에 있는 것만 넘긴다 - 자연어 문장은 이미 빠졌다).
+    이미 있는 것 · 이미 있는 태그와 배타 축으로 부딪히는 것 · 인원이 둘 이상인데 solo · 인원 태그 자체는 뺀다.
+    """
+    seeds = pack.get("seeds") if isinstance(pack, dict) else None
+    if not seeds:
+        return []
+    key = _key(tag)
+    rows = seeds.get(key) or seeds.get(key.replace("_", " "))
+    if not isinstance(rows, dict):
+        return []
+    present = {_key(t).replace("_", " ") for t in prompt_tags if isinstance(t, str) and t.strip()}
+    present.add(key)
+    blocked: set[str] = set()
+    for name in present:
+        blocked |= _rivals(seeds.get(name))
+    crowd = people_count(present) >= 2
+    out: list[dict[str, Any]] = []
+    for kind in FILL_KINDS:
+        for entry in rows.get(kind, []):
+            if not (isinstance(entry, list) and len(entry) >= 2 and isinstance(entry[0], str)):
+                continue
+            name, op = entry[0], entry[1]
+            if op != 0 or name in present or name in blocked:
+                continue
+            if kind == "state" and any(word in name + " " for word in FLIP_STATE_WORDS):
+                continue
+            if name == "solo" and crowd:
+                continue
+            if _PEOPLE.match(name) or name in _CROWD_TAGS:
+                continue                    # 사람을 더하면 장면이 바뀐다(1girl 의 함께 = solo, 1boy)
+            if keep is not None and not keep(name):
+                continue
+            if _rivals(seeds.get(name)) & present:
+                continue
+            out.append({"tag": name, "type": kind})
+            present.add(name)
+            blocked |= _rivals(seeds.get(name))
+            break
+    return out
 
 
 def recommendations(pack: dict[str, Any], tag: str, *, keep=None, limit: int = 16) -> list[dict[str, Any]]:

@@ -23,6 +23,9 @@ export const RECOMMEND_TYPES = [
   {key: 'context', label: '연출', hint: '연출 (naked shirt · on chair · hair over shoulder)' + OP_HINT},
 ];
 
+// 추천 프롬프트 줄(사용자 지정 2026-09-27) - 서버가 고른 태그에서 함께 1 · 상태 1 을 골라 온다(recommend.fill).
+const FILL_HINT = '이 태그에 어울리는 것 - 함께 1 · 상태 1 (색 · 스타일은 직접 고르세요). 누르면 뒤에 더합니다';
+
 // 대표 줄 수와 그 줄에 보이는 칩 수. 나머지는 유형 단추 뒤에 둔다(카드가 화면을 덮지 않게).
 export const RECOMMEND_LEAD_ROWS = 3;
 export const RECOMMEND_LEAD_CHIPS = 4;
@@ -51,6 +54,28 @@ export function normalizePromptTag(token) {
   return t.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+// 추천 프롬프트의 맥락 = 메인 칸의 **명확한 단부루 태그**(사용자 지정 2026-09-27). 쉼표·줄바꿈·가중치로 나뉜 토큰만
+// 보고, 자연어 문장(낱말 6개 · 64자 넘게) · 와일드카드 · 변수 · 대안 문법 · 음의 가중치(빼 달라는 태그)는 뺀다.
+// 서버가 이것을 다시 사전과 맞춰 본다. Prefix/Postfix 는 다른 칸이라 애초에 안 읽는다.
+export const PROMPT_TAG_LIMIT = 150;
+const NEGATIVE_WEIGHT = /^\s*-\s*(?:\d+(?:\.\d*)?|\.\d+)\s*::/;
+
+export function promptTagList(text, limit = PROMPT_TAG_LIMIT) {
+  const out = [];
+  const seen = new Set();
+  for (const part of String(text ?? '').split(/[,\n]/)) {
+    if (NEGATIVE_WEIGHT.test(part) || part.includes('__')) continue;      // 와일드카드는 밑줄을 걷기 **전에** 본다
+    const tag = normalizePromptTag(part);
+    if (!tag || tag.length > 64 || tag.split(' ').length > 6 || /__|[$|{}]/.test(tag) || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+const escapeAttr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /** 프롬프트에 이미 있는 태그들 - 추천에서 뺀다(같은 칩을 또 권하지 않는다). */
 export function promptTagSet(text) {
   const out = new Set();
@@ -74,10 +99,11 @@ export function displayOrder(items) {
  * 앞의 leadRows 줄이 대표 줄(관련도 앞의 칩 leadChips 개). 그 줄의 남은 칩과 나머지 줄은 유형 단추
  * (data-reco-tab)와 그 아래 칸(data-reco-panel)으로 그려 두고, tagAssist 가 누른 유형의 칸만 연다.
  * 칩은 어디서나 key 순으로 선다. 숨길 것이 없으면 단추도 칸도 없다.
+ * fill = 서버의 추천 프롬프트(함께 1 · 상태 1) - 맨 위 '추천' 줄. 둘 이상이면 [모두 넣기](한 칩처럼 한 번에 더한다).
  * 그릴 칩이 하나도 없으면 '' - 호출자는 옛 related 줄로 돌아간다.
  */
 export function recommendRowsHtml(groups, {
-  present = new Set(), current = '', renderChip,
+  present = new Set(), current = '', renderChip, fill = [],
   leadRows = RECOMMEND_LEAD_ROWS, leadChips = RECOMMEND_LEAD_CHIPS,
 } = {}) {
   if (!Array.isArray(groups) || typeof renderChip !== 'function') return '';
@@ -98,7 +124,20 @@ export function recommendRowsHtml(groups, {
     });
     if (items.length) rows.push({type, items});
   }
-  if (!rows.length) return '';
+  // 서버가 준 뒤에 프롬프트가 바뀌었을 수 있다 - 지금 칸에 있는 것은 여기서도 뺀다.
+  const fillItems = (Array.isArray(fill) ? fill : []).filter(item => {
+    const key = normalizePromptTag(item?.tag);
+    return key && key !== self && !present.has(key);
+  });
+  if (!rows.length && !fillItems.length) return '';
+  const fillAll = fillItems.length > 1
+    ? `<span class="tag-tooltip-extra-tag reco-fill-all" data-insert="${escapeAttr(fillItems.map(item => item.tag).join(', '))}" data-op="add">모두 넣기</span>`
+    : '';
+  const head = fillItems.length
+    ? `<div class="tag-tooltip-extra tag-reco-row tag-reco-fill" data-reco-type="fill">`
+      + `<span class="tag-tooltip-extra-label" data-naia-title="${FILL_HINT}">추천</span>`
+      + fillItems.map(item => renderChip(String(item.tag), 'is-add', 'data-op="add"')).join('') + fillAll + '</div>'
+    : '';
   const chipsHtml = items => displayOrder(items).map(item => {
     const replace = item.op === 'replace';
     return renderChip(String(item.tag), replace ? 'is-replace' : 'is-add', `data-op="${replace ? 'replace' : 'add'}"`);
@@ -123,7 +162,7 @@ export function recommendRowsHtml(groups, {
   });
   // 칸은 단추 줄 **아래** - 펴도 단추가 제자리라 같은 자리를 다시 누르면 다시 그 단추다(칩이 아니다).
   const more = tabs ? `<div class="tag-reco-tabs">${tabs}</div>${panels}` : '';
-  return `<div class="tag-reco">${lead}${more}</div>`;
+  return `<div class="tag-reco">${head}${lead}${more}</div>`;
 }
 
 /**

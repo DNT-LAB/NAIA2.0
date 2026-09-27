@@ -1000,8 +1000,10 @@ async def handle_autocomplete_command(
         await _send_json(ws, payload)
         return True
 
-    # recommend = 메인 입력칸이 보낸 조회(유형별 추천 줄은 거기서만 그린다).
-    lookup = partial(tag_lookup_info, recommend=bool(command.get("recommend")))
+    # recommend = 메인 입력칸이 보낸 조회(유형별 추천 줄은 거기서만 그린다). prompt_tags = 그 칸의 태그(추천 프롬프트의 맥락).
+    prompt_tags = command.get("prompt_tags")
+    lookup = partial(tag_lookup_info, recommend=bool(command.get("recommend")),
+                     prompt_tags=prompt_tags if isinstance(prompt_tags, list) else None)
     info = await run_in_thread(lookup, context, str(command.get("tag") or ""))
     await _send_json(ws, {"type": "tag_lookup_result", **info})
     return True

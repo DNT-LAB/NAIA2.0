@@ -1,5 +1,5 @@
 import { PALETTES, SLIDERS } from './interactiveAxes.mjs';
-import { applyRecommendation, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-tabs';
+import { applyRecommendation, promptTagList, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-fill';
 
 // 캐릭터 정보 카드의 칩 가지치기.
 //
@@ -1490,6 +1490,14 @@ export function createTagAssistController({
     return info ? info.stripped : '';
   }
 
+  // 메인 입력칸 조회 = 추천 줄 + 추천 프롬프트. 추천 프롬프트의 맥락으로 그 칸의 **명확한 태그**를 싣는다
+  // (promptTagList - 자연어 문장 · 와일드카드는 뺀다). 다른 칸(Prefix/Postfix 등)은 추천도 맥락도 없다.
+  function tagLookupRequest(tag, target) {
+    return target === promptEdit
+      ? {type: 'tag_lookup', tag, recommend: true, prompt_tags: promptTagList(target.value)}
+      : {type: 'tag_lookup', tag, recommend: false};
+  }
+
   function checkTagHint() {
     if (acMode) return;
     // 호스트가 억제 중이면 조회 자체를 하지 않는다(WS 왕복도 아낀다).
@@ -1514,7 +1522,7 @@ export function createTagAssistController({
         return;
       }
       // 유형별 추천 줄은 메인 입력칸에서만 그린다 - 그 조회에만 recommend 를 싣는다.
-      sendWs({type: 'tag_lookup', tag, recommend: target === promptEdit});
+      sendWs(tagLookupRequest(tag, target));
     }, 200);
   }
 
@@ -1567,6 +1575,7 @@ export function createTagAssistController({
         present: promptTagSet(recoTarget.value),
         current: m.tag,
         renderChip: (t, cls, attrs) => renderTooltipExtraTag(t, extraTagInfo, cls, attrs),
+        fill: m.recommend?.fill,
       })
       : '';
     if (recoHtml) {
@@ -2911,7 +2920,7 @@ export function createTagAssistController({
     swapToken(target, info, newTag);
     hideAutocomplete();
     lastLookupTag = newTag;
-    sendWs({type: 'tag_lookup', tag: r.tag, recommend: target === promptEdit});
+    sendWs(tagLookupRequest(r.tag, target));
   }
 
   function selectPresetObservedCombo(idx) {

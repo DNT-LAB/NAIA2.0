@@ -2273,7 +2273,7 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
 // 백엔드는 /api/anima-engine/*(docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8). 엔진을 고르거나 설치가 끝나면
 // 기존 연결 확인(probe_api)을 다시 태운다 — 새 연결 경로를 만들지 않는다.
 let animaSetupPanel = null;
-import('./js/features/animaSetupPanel.mjs?v=20260927-arts')
+import('./js/features/animaSetupPanel.mjs?v=20260927-codeonce')
   .then(({createAnimaSetupPanel}) => {
     // 엔진을 골랐거나 설치가 끝났다 — 메인 모드 표시(ANIMA) · 연결 · 옵션을 새 엔진으로(onComfyEngineChanged)
     animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine)});
@@ -2323,7 +2323,7 @@ const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize update banner module', error);
   });
-const generationProgressReady = import('./js/features/generationProgress.mjs?v=20260617-gpufix')
+const generationProgressReady = import('./js/features/generationProgress.mjs?v=20260927-hold')
   .then(({createGenerationProgress}) => {
     generationProgress = createGenerationProgress({
       document,
@@ -8859,13 +8859,17 @@ function setGen(v) {
   if (studioTabControl) studioTabControl.handleGenerationStatus(next);
   if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(next);
   btnGen.disabled = next && !canQueueGenerate();
+  // 관리형 ANIMA 엔진이 켜지는 사이에 끝난 장(실패 · 취소)은 생성 시간이 아니다 — 진행 막대 예상치에 넣지 않는다
+  const engineWait = animaEngineStarting;
+  stopAnimaEngineWatch();
   if (next) {
     genStartTime = Date.now();
     btnGen.classList.add('generating');
     startGenTimer();
     startProgress();
+    if (isAnimaManagedMode()) watchAnimaEngineStart(animaEngineWatchSeq);
   } else {
-    if (genStartTime > 0) {
+    if (genStartTime > 0 && !engineWait) {
       const dur = Date.now() - genStartTime;
       if (dur > 500) { // ignore sub-500ms (errors/cancels)
         genDurations.push(dur);
@@ -9006,12 +9010,53 @@ function startGenTimer() {
   stopGenTimer();
   genTimer = setInterval(() => {
     const elapsed = ((Date.now() - genStartTime) / 1000).toFixed(1);
-    btnGen.innerHTML = genButtonHtml(`${elapsed}s`);
+    btnGen.innerHTML = genButtonHtml(animaEngineStarting ? `엔진 켜는 중 · ${elapsed}s` : `${elapsed}s`);
   }, 100);
 }
 
 function stopGenTimer() {
   if (genTimer) { clearInterval(genTimer); genTimer = null; }
+}
+
+// ---- 관리형 ANIMA: 꺼진 엔진은 생성이 켠다 ----
+// 기동에 수십 초가 걸리는데 버튼에 경과 시간만 돌아 멈춘 것처럼 보였다(통합 시험 2026-09-27 — 자동 끄기가
+// 기본 30분이라 자주 겪는다). 생성이 시작되면 엔진 상태를 읽어, 켜지는 동안은 버튼에 "엔진 켜는 중" 을 붙이고
+// 진행 막대를 세운다. 켜지면 그때부터 생성 시간을 다시 잰다 — 기동 시간이 genDurations 에 섞이면 다음 장들의
+// 막대가 늦게 찬다. 남은 시간은 쓰지 않는다(화면에 예상 시간 금지).
+const ANIMA_ENGINE_POLL_MS = 1000;
+let animaEngineStarting = false;
+let animaEngineWatchSeq = 0;
+let animaEngineWatchTimer = null;
+
+function stopAnimaEngineWatch() {
+  animaEngineWatchSeq += 1;
+  clearTimeout(animaEngineWatchTimer);
+  animaEngineWatchTimer = null;
+  animaEngineStarting = false;
+}
+
+async function watchAnimaEngineStart(seq) {
+  let state = '';
+  try {
+    const response = await fetch('/api/anima-engine/status', {cache: 'no-store'});
+    if (response.ok) state = String((await response.json())?.engine?.state || '');
+  } catch (_) {}   // 못 읽었으면 다음 차례에 다시 읽는다
+  if (seq !== animaEngineWatchSeq || !generating) return;   // 그 사이 생성이 끝났거나 다음 장이 시작됐다
+  if (state === 'running') {
+    if (animaEngineStarting) {
+      animaEngineStarting = false;
+      genStartTime = Date.now();
+      startProgress();
+    }
+    return;
+  }
+  // stopped · starting · stopping(자동 끄기와 겹침) · crashed(한 번 다시 켠다) — 어느 쪽이든 이 장이 엔진을 켠다
+  if (state && !animaEngineStarting) {
+    animaEngineStarting = true;
+    holdProgress();
+    showToast('ANIMA 엔진을 켜는 중입니다 — 켜지면 이어서 생성합니다', 'info');
+  }
+  animaEngineWatchTimer = setTimeout(() => watchAnimaEngineStart(seq), ANIMA_ENGINE_POLL_MS);
 }
 
 // Auto Boost ON 일 때 Random 버튼 경과시간 — Generate 버튼과 동일 패턴.
@@ -9050,6 +9095,10 @@ function startProgress() {
 
 function finishProgress() {
   if (generationProgress) generationProgress.finish();
+}
+
+function holdProgress() {
+  if (generationProgress?.hold) generationProgress.hold();
 }
 
 // ---- Options sync ----

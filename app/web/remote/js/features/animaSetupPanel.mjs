@@ -168,9 +168,13 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const data = await res.json().catch(() => ({}));
     if (res.status === 403) remote = true;
     if (!res.ok || data.ok === false) {
-      const error = new Error(data.error || `요청 실패 (${res.status})`);
+      // 백엔드 문구는 '[코드] 설명'(core/anima_engine/runtime.py)인데 이 창은 코드를 따로 붙인다(anima-code) —
+      // 앞의 [코드] 를 떼야 한 번만 보인다(통합 시험 09-27: "[PATH_INVALID] … PATH_INVALID"). 알림은 run() 이 붙인다.
+      const code = data.code || '';
+      const text = String(data.error || `요청 실패 (${res.status})`);
+      const error = new Error(code && text.startsWith(`[${code}] `) ? text.slice(code.length + 3) : text);
       error.status = res.status;
-      error.code = data.code || '';
+      error.code = code;
       throw error;
     }
     return data;
@@ -560,7 +564,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     try {
       await task();
     } catch (error) {
-      showToast(error.status === 403 ? REMOTE_NOTE : error.message, 'error');
+      showToast(error.status === 403 ? REMOTE_NOTE : `${error.code ? `[${error.code}] ` : ''}${error.message}`, 'error');
     } finally {
       busy = false;
       drawn = '';          // 상태가 그대로여도(거절 등) 꺼 둔 단추를 되살리게 한 번은 다시 그린다

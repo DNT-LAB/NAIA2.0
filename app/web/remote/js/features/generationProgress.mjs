@@ -52,6 +52,19 @@ export function createGenerationProgress({
     }, 33);
   }
 
+  // 기다리는 동안(관리형 ANIMA 엔진이 켜지는 중) 막대를 비운 채 세운다 — 다시 start() 하면 0 부터 찬다.
+  // 시간으로 채우면 기동 수십 초 동안 가득 찼다가 생성이 시작될 때 0 으로 떨어진다.
+  function hold() {
+    clearProgressTimer();
+    clearFinishTimeout();
+    const bar = document.getElementById('genProgressBar');
+    const bar2 = document.getElementById('genProgressBar2');
+    bar.style.transition = 'none';
+    bar.style.width = '0%';
+    bar2.style.transition = 'none';
+    bar2.style.width = '0%';
+  }
+
   function finish() {
     clearProgressTimer();
     clearFinishTimeout();
@@ -71,6 +84,7 @@ export function createGenerationProgress({
 
   return {
     start,
+    hold,
     finish,
   };
 }

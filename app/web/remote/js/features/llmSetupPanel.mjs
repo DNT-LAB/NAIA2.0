@@ -53,6 +53,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const currentInstalled = () => (st.models || []).some(m => m.id === st.model_id && m.installed);
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -185,9 +186,14 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
         m.recommended && m.recommended[mode] ? '<span class="llm-badge rec">권장</span>' : '',
         fit.fit === 'no' ? '<span class="llm-badge no">메모리 부족</span>' : '',
       ].join('');
+      // 받는 중이면 '받다 멈춤'(partial_mb 만 보면 그렇게 나온다)이 아니라 진행을 적는다
+      const busyHere = (dl.active || dl.phase === 'verify') && dl.model === m.id;
+      const state = m.installed ? '받음'
+        : busyHere ? (dl.phase === 'verify' ? '검증 중' : `받는 중 ${Number(dl.percent) || 0}%`)
+          : m.partial_mb ? '받다 멈춤' : '안 받음';
       return `<button type="button" data-llm-model="${esc(m.id)}" class="${m.id === view.id ? 'is-on' : ''}">
         <b>${esc(m.label.replace('Gemma 4 ', ''))}${badges}</b>
-        <small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${m.installed ? '받음' : m.partial_mb ? '받다 멈춤' : '안 받음'}</small></button>`;
+        <small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${state}</small></button>`;
     }).join('')}</span></div>`);
 
     if (view) {
@@ -221,12 +227,20 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     try {
       const res = await fetchFn('/api/boost-v2/status', { cache: 'no-store' });
       st = await res.json();
-      if (picked && picked === st.model_id && userPicked) { picked = null; userPicked = false; }
-      if (!userPicked && !(st.models || []).some(m => m.id === st.model_id && m.installed)) {
-        // 아직 아무것도 안 쓴다 — 이 모드의 권장을 먼저 보인다(모드를 바꾸면 따라간다)
-        const mode = st.mode === 'gpu' ? 'gpu' : 'cpu';
-        const rec = (st.models || []).find(m => m.recommended && m.recommended[mode]);
-        picked = rec && rec.id !== st.model_id ? rec.id : null;
+      // 고른 모델을 받아 지금 쓰는 모델이 됐다 — '고름' 을 푼다(받기 전에 풀면 아래 권장이 가로챈다).
+      if (picked && picked === st.model_id && userPicked && currentInstalled()) { picked = null; userPicked = false; }
+      if (!userPicked) {
+        const dl = st.download || {};
+        const downloading = (dl.active || dl.phase === 'verify') && dl.model ? dl.model : null;
+        if (downloading) {
+          // 받는 중인 모델을 보인다 — 창을 새로 열어도 진행 막대가 그 칸에 있게(09-27 클린 시험: 권장 26B 칸만 보였다)
+          picked = downloading === st.model_id ? null : downloading;
+        } else if (!currentInstalled()) {
+          // 아직 아무것도 안 쓴다 — 이 모드의 권장을 먼저 보인다(모드를 바꾸면 따라간다)
+          const mode = st.mode === 'gpu' ? 'gpu' : 'cpu';
+          const rec = (st.models || []).find(m => m.recommended && m.recommended[mode]);
+          picked = rec && rec.id !== st.model_id ? rec.id : null;
+        }
       }
       render();
     } catch (error) {
@@ -258,7 +272,9 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     }
     if (modelBtn) {
       const id = modelBtn.getAttribute('data-llm-model');
-      picked = id === st.model_id ? null : id;
+      // 지금 쓰는(받아 둔) 모델을 누를 때만 '고름' 을 푼다. 아직 안 받은 기본 모델(e2b)을 누른 것은 고른 것이다 —
+      // 풀면 다음 폴링이 권장(GPU 면 26B)으로 되돌려, E2B 를 받는데 화면은 26B 칸이었다(09-27 클린 시험).
+      picked = id === st.model_id && currentInstalled() ? null : id;
       userPicked = picked !== null;
       render();
       return;

@@ -2302,7 +2302,7 @@ import('./js/features/animaLoraPanel.mjs?v=20260927-lora2')
 // API 설정 > 05 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
 // 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 탭을 연다.
 let llmSetupPanel = null;
-import('./js/features/llmSetupPanel.mjs?v=20260927-cpustart')
+import('./js/features/llmSetupPanel.mjs?v=20260927-llmview')
   .then(({createLlmSetupPanel}) => {
     llmSetupPanel = createLlmSetupPanel({document, showToast, setModuleParam});
     llmSetupPanel.init();

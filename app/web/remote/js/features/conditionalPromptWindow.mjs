@@ -13,7 +13,7 @@
 //   창 폭과 무관하게 늘 같은 자리에 뜬다.
 // - 창 폭에 따른 배치는 **컨테이너 질의**로 한다(화면 폭이 아니라 창 폭을 봐야 한다).
 
-import { createDraggablePanel } from './draggablePanel.mjs?v=20260919-headdrag';
+import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
 const STYLE_ID = 'cpw-style';
 
@@ -90,6 +90,7 @@ export function createConditionalPromptWindow({
     const spot = besideSpot(width, height, panel.el.getBoundingClientRect());
     presetsPanel = createDraggablePanel({
       document: doc,
+      parentPanel: panel,
       window: win,
       title: '조건부 프리셋',
       variant: 'cppw',

@@ -15,7 +15,7 @@
  *  ⚠️ `window.prompt()` 를 쓰지 않는다(Electron 렌더러에 없다) - 이름은 창 안의 칸으로 받는다.
  *  ⚠️ 삭제는 두 번 눌러야 한다(그룹 창과 같은 규칙). 뽑아 둔 그림 파일은 서버가 지우지 않는다.
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-headdrag';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 
 const MAX_CHARACTERS = 6;
 
@@ -65,6 +65,7 @@ export function createArtistBenchViewWindow({
         {title: '저장하지 않은 변경'}) : true);
       if (!ok) { panel.raise(); return; }
     }
+    panel.setParentPanel(parentPanel, {align: true});
     if (viewId !== id) { draft = null; dirty = false; }
     viewId = id;
     panel.open(); panel.raise();

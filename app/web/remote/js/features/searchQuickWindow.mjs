@@ -16,7 +16,7 @@
 // 접힌 층도 **계속 갱신**한다(렌더를 미루지 않는다) - searchPanel 은 한 번 그리고 제자리 패치라 비용이 없고,
 // '마지막 메시지 재생' 을 넣으면 같은 상태가 두 곳에 산다.
 
-import { createDraggablePanel } from './draggablePanel.mjs?v=20260919-headdrag';
+import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
 const LAYER_KEY = 'naia.sqw.layer';
 const STYLE_ID = 'sqw-style';

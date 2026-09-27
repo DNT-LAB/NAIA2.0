@@ -29,6 +29,8 @@
 
 // 떠 있는 창들의 앞뒤 순서. 마지막이 맨 앞.
 const REGISTRY = [];
+// DOM 컨테이너(parent)와 별개인 창의 부모. 순환 연결을 막는다.
+const PARENTS = new WeakMap();
 let zBase = 0;
 
 function zIndexBase(doc) {
@@ -81,6 +83,7 @@ export function createDraggablePanel({
   // 뿌리 요소에 함께 붙는 클래스. 기능별 옷은 여기로 입힌다(`.rctl` 처럼).
   variant = '',
   parent = null,
+  parentPanel = null,
   // 위치를 기억할 열쇠. 비우면 기억하지 않는다.
   storageKey = '',
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
@@ -134,6 +137,13 @@ export function createDraggablePanel({
            NO_DRAG 선택자가 요소 단위로 가린다. -->
       <span class="dragpanel-slot"></span>
       <span class="dragpanel-tools" data-nodrag>
+        <button type="button" class="dragpanel-btn dragpanel-pin" hidden
+            aria-label="부모 창에 고정" aria-pressed="true" title="고정: 부모 창을 따라갑니다">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 3h6l-1 6 4 4v2H6v-2l4-4-1-6Z M12 15v6"/>
+          </svg>
+        </button>
         ${collapsible ? `<button type="button" class="dragpanel-btn dragpanel-collapse"
             aria-label="접기" title="접기">&#8211;</button>` : ''}
         ${closable ? `<button type="button" class="dragpanel-btn dragpanel-x"
@@ -151,6 +161,7 @@ export function createDraggablePanel({
   const grip = el.querySelector('.dragpanel-grip');
   const collapseBtn = el.querySelector('.dragpanel-collapse');
   const closeBtn = el.querySelector('.dragpanel-x');
+  const pinBtn = el.querySelector('.dragpanel-pin');
 
   (parent || doc.body).appendChild(el);
 
@@ -158,6 +169,7 @@ export function createDraggablePanel({
     el, body, head, slot,
     open, close, toggle, isOpen, setTitle, moveTo, sizeTo, resetGeometry,
     collapse, expand, isCollapsed, raise, refit, destroy,
+    setParentPanel, setPinned, isPinned,
   };
   const entry = {el, api};
 
@@ -181,6 +193,11 @@ export function createDraggablePanel({
   const memoryKey = storageKey ? `naia.dragpanel.${storageKey}` : '';
   const sizeKey = storageKey ? `naia.dragpanel.size.${storageKey}` : '';
   const seenKey = storageKey ? `naia.dragpanel.seen.${storageKey}` : '';
+  let pinned = readSlot(memoryKey, storage)?.pinned !== false;
+  let parentEl = null;
+  let parentOffset = null;
+  let alignOnOpen = false;
+  let destroyed = false;
 
   function readSlot(key, box) {
     if (!key || !box) return null;
@@ -204,6 +221,7 @@ export function createDraggablePanel({
         storage.setItem(memoryKey, JSON.stringify({
           x: Math.round(pos.x), y: Math.round(pos.y),
           collapsed,
+          pinned,
         }));
       } catch { /* 사파리 프라이빗 모드 등 - 위치를 못 외우는 것뿐이다 */ }
     }
@@ -220,6 +238,88 @@ export function createDraggablePanel({
         }));
       } catch { /* noop */ }
     }
+    // 프레임마다 저장하지 않고 부모의 이동이 끝날 때 자식 자리도 함께 기억한다.
+    el.dispatchEvent(new view.CustomEvent('dragpanel-move-end'));
+  }
+
+  function parentPosition() {
+    const width = parentEl.getBoundingClientRect().width
+      || Number.parseFloat(parentEl.style.width) || 0;
+    return {x: Number.parseFloat(parentEl.style.left) || 0,
+            y: Number.parseFloat(parentEl.style.top) || 0, w: width};
+  }
+
+  // 부모 **오른쪽**에 붙은 자식은 부모의 오른쪽 모서리에 매단다. 왼쪽 모서리에 매달면 부모를
+  // 넓힐 때 간격이 줄다 못해 겹친다(Codex UI 감사 2026-09-26: 8px -> -122px).
+  function rememberParentOffset() {
+    if (!parentEl || !placed) return;
+    const anchor = parentPosition();
+    const side = pos.x >= anchor.x + anchor.w - 1 ? 'right' : 'left';
+    const baseX = side === 'right' ? anchor.x + anchor.w : anchor.x;
+    parentOffset = {side, x: pos.x - baseX, y: pos.y - anchor.y};
+  }
+
+  function followParent() {
+    if (!pinned || !parentEl || !parentOffset || !isOpen()) return;
+    const anchor = parentPosition();
+    const baseX = parentOffset.side === 'right' ? anchor.x + anchor.w : anchor.x;
+    // 경계에 걸려도 원래 간격을 기억해, 부모가 돌아오면 간격도 복구한다.
+    moveTo(baseX + parentOffset.x, anchor.y + parentOffset.y,
+      {persist: false, fromParent: true});
+  }
+
+  /** 가로 크기가 바뀌었다 - 오른쪽에 매달린 자식들이 따라온다. */
+  function announceResize() {
+    el.dispatchEvent(new view.CustomEvent('dragpanel-resize'));
+  }
+
+  function persistFollowing() {
+    if (pinned && isOpen()) writeMemory();
+  }
+
+  function paintPin() {
+    pinBtn.hidden = !parentEl;
+    pinBtn.setAttribute('aria-pressed', String(pinned));
+    pinBtn.title = pinned ? '고정: 부모 창을 따라갑니다 (클릭하여 해제)'
+      : '고정 해제: 독립적으로 이동합니다 (클릭하여 고정)';
+  }
+
+  function setPinned(next, {persist = true} = {}) {
+    pinned = !!next;
+    rememberParentOffset();
+    paintPin();
+    if (persist) writeMemory();
+  }
+
+  function isPinned() { return pinned; }
+  function detachParent() { setParentPanel(null); }
+
+  function setParentPanel(next, {align = false} = {}) {
+    const nextEl = next?.el || null;
+    for (let ancestor = nextEl; ancestor; ancestor = PARENTS.get(ancestor)) {
+      if (ancestor === el) throw new Error('draggablePanel: 부모 창을 순환 연결할 수 없습니다');
+    }
+    if (nextEl === parentEl) return;
+    if (parentEl) {
+      parentEl.removeEventListener('dragpanel-move', followParent);
+      parentEl.removeEventListener('dragpanel-resize', followParent);
+      parentEl.removeEventListener('dragpanel-move-end', persistFollowing);
+      parentEl.removeEventListener('dragpanel-destroy', detachParent);
+    }
+    parentEl = nextEl;
+    parentOffset = null;
+    alignOnOpen = !!parentEl && align;
+    PARENTS.delete(el);
+    if (parentEl) {
+      PARENTS.set(el, parentEl);
+      parentEl.addEventListener('dragpanel-move', followParent);
+      parentEl.addEventListener('dragpanel-resize', followParent);
+      parentEl.addEventListener('dragpanel-move-end', persistFollowing);
+      parentEl.addEventListener('dragpanel-destroy', detachParent);
+      rememberParentOffset();
+    }
+    paintPin();
+    if (alignOnOpen && isOpen() && placeBesideParent()) alignOnOpen = false;
   }
 
   // ── 자리 ────────────────────────────────────────────────────────────
@@ -263,6 +363,73 @@ export function createDraggablePanel({
     return {x: nx, y: ny};
   }
 
+  /** A child's first position follows its current parent, never stale absolute memory. */
+  function placeBesideParent() {
+    if (!parentEl || parentEl.hidden) return false;
+    const {w: vw, h: vh} = viewport();
+    if (vw <= 0 || vh <= 0) return false;
+    const anchor = parentEl.getBoundingClientRect();
+    if (!anchor.width) return false;
+    const rect = el.getBoundingClientRect();
+    const w = rect.width || width;
+    const h = rect.height || minHeight;
+    const gap = 8;
+    const right = anchor.right + gap;
+    const left = anchor.left - w - gap;
+    // 같은 부모의 **열린 형제 창**은 피한다 - 안 피하면 새 창이 형제를 머리줄째 덮어
+    // 형제를 다시 잡을 길이 없다(Codex UI 감사 2026-09-26: 필터 창 위의 Parquet 창).
+    const siblings = REGISTRY
+      .filter(other => other.el !== el && !other.el.hidden && PARENTS.get(other.el) === parentEl)
+      .map(other => other.el.getBoundingClientRect())
+      .filter(r => r.width > 0);
+    const hits = (x, y, r) => x < r.right && x + w > r.left && y < r.bottom && y + h > r.top;
+    const fits = x => x >= gap && x + w <= vw - gap;
+    // 부모 오른쪽 > 왼쪽 > 형제 오른쪽 > 형제 왼쪽. 머리줄 높이는 그대로 맞춘다.
+    const candidates = [right, left,
+      ...siblings.map(r => r.right + gap), ...siblings.map(r => r.left - w - gap)];
+    let x = candidates.find(cx => fits(cx) && !hits(cx, anchor.top, anchor)
+      && !siblings.some(r => hits(cx, anchor.top, r)));
+    let y = anchor.top;
+    if (x === undefined) {
+      // 빈 옆자리가 없다(좁은 화면) - 예전처럼 한쪽에 붙이되, 형제의 머리줄을 덮지 않을
+      // 만큼 아래로 내린다. 머리줄이 보이면 눌러서 앞으로 부를 수 있다.
+      const side = right + w <= vw - gap ? right : left >= gap ? left
+        : (vw - anchor.right >= anchor.left ? right : left);
+      x = clamp(side, gap, Math.max(gap, vw - w - gap));
+      const headH = head.getBoundingClientRect().height || 34;
+      const step = headH + 4;
+      const band = r => ({left: r.left, right: r.right, top: r.top, bottom: r.top + headH});
+      const covers = yy => siblings.some(r => hits(x, yy, band(r)));
+      if (covers(y)) {
+        // 1) 아래로: 새 창이 형제의 몸은 덮어도 머리줄은 남긴다.
+        let found = null;
+        for (let yy = y + step; yy <= vh - headH - gap; yy += step) if (!covers(yy)) { found = yy; break; }
+        // 2) 아래에 자리가 없으면(부모가 화면 아래쪽 - Codex 리뷰 2026-09-26 #10: 두 머리줄이 한 점에 겹쳤다)
+        //    위로: 새 창 **전체가** 형제 머리줄 위에서 끝나야 한다(몸이 걸쳐도 머리줄을 덮는다).
+        if (found === null) for (let yy = y - step; yy >= 0; yy -= step) if (!covers(yy)) { found = yy; break; }
+        // 3) 그래도 없으면 늘일 수 있는 창은 형제 머리줄 위의 자리에 맞게 줄여서 올린다.
+        if (found === null && resizable && !collapsed) {
+          const over = siblings.filter(r => x < r.right && x + w > r.left);
+          const room = Math.min(...over.map(r => r.top)) - gap - 4 - gap;
+          if (room >= minHeight) {
+            el.style.height = `${Math.floor(room)}px`;
+            heldHeight = el.style.height;
+            found = gap;
+          }
+        }
+        if (found !== null) y = found;
+      }
+    }
+    // Keep both headers level. Fit a tall child below that line instead of moving it up.
+    const availableHeight = vh - y - gap;
+    if (resizable && !collapsed && rect.height > availableHeight && availableHeight >= minHeight) {
+      el.style.height = `${Math.floor(availableHeight)}px`;
+      heldHeight = el.style.height;
+    }
+    moveTo(x, y, {persist: false});
+    return true;
+  }
+
   /** 이번 실행에서 처음 여는 창이면 FN | Result 경계에 놓고 true. (맨 위 '실행마다 첫 자리' 참고) */
   function placeAtSessionStart() {
     if (!seenKey || !sizeStorage) return false;
@@ -282,9 +449,15 @@ export function createDraggablePanel({
     return vw > 0 ? Math.min(minWidth, Math.max(120, vw - 8)) : minWidth;
   }
 
-  function applyPos() {
+  function applyPos({fromParent = false} = {}) {
+    const oldX = el.style.left;
+    const oldY = el.style.top;
     el.style.left = `${Math.round(pos.x)}px`;
     el.style.top = `${Math.round(pos.y)}px`;
+    if (!fromParent) rememberParentOffset();
+    if (oldX !== el.style.left || oldY !== el.style.top) {
+      el.dispatchEvent(new view.CustomEvent('dragpanel-move'));
+    }
   }
 
   function schedule() {
@@ -299,10 +472,10 @@ export function createDraggablePanel({
     });
   }
 
-  function moveTo(x, y, {persist = true} = {}) {
+  function moveTo(x, y, {persist = true, fromParent = false} = {}) {
     pos = clampPos(x, y);
     placed = true;
-    applyPos();
+    applyPos({fromParent});
     if (persist) writeMemory();
     if (typeof onMove === 'function') onMove({x: pos.x, y: pos.y});
     return {...pos};
@@ -318,6 +491,7 @@ export function createDraggablePanel({
       el.style.height = `${Math.round(clamp(h, minHeight, vh - 8))}px`;
     }
     refit();
+    announceResize();
   }
 
   /** 첫 자리 — 기억 > initial > 오른쪽 아래에서 살짝 띄운 기본값. */
@@ -365,15 +539,15 @@ export function createDraggablePanel({
         heldHeight = el.style.height;
       }
       if (saved.collapsed && collapsible) setCollapsed(true, {persist: false});
-      if (placeAtSessionStart()) return;
-      if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-        // 더 큰 화면에서 정한 자리일 수 있다 - 들어갈 수 있으면 들여놓는다.
-        const fit = fitWholePanel(saved.x, saved.y);
-        moveTo(fit.x, fit.y, {persist: false});
-        return;
-      }
     }
+    if (placeBesideParent()) return;
     if (placeAtSessionStart()) return;
+    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) {
+      // 더 큰 화면에서 정한 자리일 수 있다 - 들어갈 수 있으면 들여놓는다.
+      const fit = fitWholePanel(saved.x, saved.y);
+      moveTo(fit.x, fit.y, {persist: false});
+      return;
+    }
     const rect = el.getBoundingClientRect();
     const w = rect.width || width;
     const h = rect.height || minHeight;
@@ -393,7 +567,10 @@ export function createDraggablePanel({
     const {w: vw, h: vh} = viewport();
     if (vw > 0 && vh > 0) {
       const rect = el.getBoundingClientRect();
-      if (rect.width > vw - 8) el.style.width = `${Math.max(widthFloor(), vw - 8)}px`;
+      if (rect.width > vw - 8) {
+        el.style.width = `${Math.max(widthFloor(), vw - 8)}px`;
+        announceResize();
+      }
       if (resizable && rect.height > vh - 8) el.style.height = `${Math.max(minHeight, vh - 8)}px`;
     }
     const next = clampPos(pos.x, pos.y);
@@ -410,6 +587,7 @@ export function createDraggablePanel({
     el.style.height = '';
     heldHeight = '';
     userSized = false;
+    setPinned(true, {persist: false});
     setCollapsed(false, {persist: false});
     placed = false;
     place();
@@ -480,6 +658,7 @@ export function createDraggablePanel({
       heldHeight = el.style.height;
       userSized = true;
       refit();
+      announceResize();
       return;
     }
     pending = {x: drag.originX + dx, y: drag.originY + dy};
@@ -516,6 +695,7 @@ export function createDraggablePanel({
 
   /** 머리줄에 초점이 있으면 화살표로 1px(Shift 10px) 씩 — 미세 조정과 키보드 접근성. */
   function onHeadKeyDown(event) {
+    if (event.target !== head) return;
     const step = event.shiftKey ? 10 : 1;
     let dx = 0;
     let dy = 0;
@@ -564,7 +744,12 @@ export function createDraggablePanel({
   function open() {
     if (isOpen()) { raise(); return; }
     el.hidden = false;
-    if (!placed) place(); else refit();
+    if (!placed) place();
+    else {
+      if (alignOnOpen) placeBesideParent(); else followParent();
+      refit();
+    }
+    alignOnOpen = false;
     raise();
     if (typeof onOpen === 'function') onOpen();
   }
@@ -600,6 +785,8 @@ export function createDraggablePanel({
   el.addEventListener('pointerdown', () => { if (isOpen()) raise(); }, true);
   if (collapseBtn) collapseBtn.addEventListener('click', () => setCollapsed(!collapsed));
   if (closeBtn) closeBtn.addEventListener('click', () => close());
+  pinBtn.addEventListener('click', () => setPinned(!pinned));
+  setParentPanel(parentPanel);
   const onViewportChange = () => refit();
   view?.addEventListener?.('resize', onViewportChange);
   view?.addEventListener?.('orientationchange', onViewportChange);
@@ -613,7 +800,13 @@ export function createDraggablePanel({
   }
 
   function destroy() {
+    if (destroyed) return;
+    destroyed = true;
     close();
+    detachParent();
+    el.dispatchEvent(new view.CustomEvent('dragpanel-destroy'));
+    if (rafId) (view?.cancelAnimationFrame || clearTimeout).call(view, rafId);
+    pending = null;
     head.removeEventListener('pointerdown', onHeadPointerDown);
     head.removeEventListener('keydown', onHeadKeyDown);
     doc.removeEventListener('pointermove', onPointerMove);

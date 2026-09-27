@@ -20,7 +20,7 @@
  *   - 선택 모드에서 카드를 누르면 고르기다(작가 고르기·끌기는 쉰다). [생성] 은 고른 작가를
  *     **격자 차례대로** 탭에 넘긴다 - 확인 팝업과 큐는 탭이 맡는다(돈이 드는 일은 한 곳에서).
  */
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260919-headdrag';
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {dragBrokerFor} from './dragBroker.mjs?v=20260919-strip';
 
 const OPEN = new Set();   // 열린 그룹 창들 - 겹쳐 뜨지 않게 계단식으로 비킨다
@@ -61,6 +61,7 @@ export function createArtistGroupWindow({
 
   const panel = createDraggablePanel({
     document: doc,
+    // Groups are independent windows. Only their view settings follow them.
     window: win,
     title: titleText(),
     variant: 'agw',

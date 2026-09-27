@@ -28692,6 +28692,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   font-size: 15px; line-height: 1; cursor: pointer; padding: 3px 5px; border-radius: 6px;
 }
 .dragpanel-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.07); }
+.dragpanel-pin { display: inline-flex; align-items: center; justify-content: center; }
+.dragpanel-pin[hidden] { display: none !important; }
+.dragpanel-pin[aria-pressed="true"] { color: var(--accent); background: rgba(130,150,255,0.16); }
+.dragpanel-pin[aria-pressed="false"] svg { transform: rotate(40deg); }
+.dragpanel-pin:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 .dragpanel-body {
   flex: 1 1 auto; min-height: 0; overflow: auto;

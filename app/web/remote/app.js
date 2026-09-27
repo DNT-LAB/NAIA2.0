@@ -815,7 +815,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260926-codexfix')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260926-childalign')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -2220,7 +2220,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
 //        마지막 하나가 빠지면 닫힌다. 표시/숨김 설정을 따로 두지 않는다(규칙이 둘이면
 //        어긋난다). 지금 온보딩하는 곳은 Artists 탭 하나뿐이다. ---
 let remoteController = null;
-const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260919-headdrag')
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260926-childalign')
   .then(({createRemoteController}) => {
     remoteController = createRemoteController({document, window, showToast, escHtml});
   })
@@ -2468,7 +2468,7 @@ const conditionalHost = document.createElement('div');
 const conditionalPresetHost = document.createElement('div');
 // Test Rules / Simulation 결과 창의 본문(창 옆 동반 창).
 const conditionalSimHost = document.createElement('div');
-const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-simwin2')
+const conditionalPromptWindowReady = import('./js/features/conditionalPromptWindow.mjs?v=20260926-childalign')
   .then(({createConditionalPromptWindow}) => {
     conditionalPromptWindow = createConditionalPromptWindow({
       document,
@@ -2751,7 +2751,7 @@ async function openTemporarySearchPreview() {
     showToast('임시 검색 창을 열지 못했습니다.', 'error');
   } finally { temporarySearchLoading = false; }
 }
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260926-temp-live2')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260926-childalign')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,

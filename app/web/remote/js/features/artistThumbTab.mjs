@@ -2711,10 +2711,10 @@ export function createArtistThumbController({
     const [{createArtistGroupsStore}, {createArtistGroupWindow}, {dragBrokerFor},
       {createArtistBenchViewsStore}, {createArtistBenchViewWindow}] = await Promise.all([
       import('./artistGroupsStore.mjs?v=20260919-srvtemp'),
-      import('./artistGroupWindow.mjs?v=20260926-codexfix'),
+      import('./artistGroupWindow.mjs?v=20260926-childalign'),
       import('./dragBroker.mjs?v=20260919-strip'),
       import('./artistBenchViewsStore.mjs?v=20260926-benchview'),
-      import('./artistBenchViewWindow.mjs?v=20260926-codexfix'),
+      import('./artistBenchViewWindow.mjs?v=20260926-childalign'),
     ]);
     const store = createArtistGroupsStore({fetch});
     // 보기(벤치) - 공용 저장소 하나 + 설정 창 하나(사용자 지정 2026-09-26).
@@ -2815,8 +2815,8 @@ export function createArtistThumbController({
         element, {src: info.src, title: info.title, note: ''}, info.anchor),
       onLeaveCard: () => getRemoteController?.()?.hideZoom?.(),
       views: groupsApi.views,
-      onEditView: viewId => groupsApi.viewWindow.open(viewId),
-      onNewView: gid => groupsApi.viewWindow.openNew(gid),
+      onEditView: viewId => groupsApi.viewWindow.open(viewId, {parentPanel: win.panel}),
+      onNewView: gid => groupsApi.viewWindow.openNew(gid, {parentPanel: win.panel}),
       onGenerateView: request => generateGroupView(request),
       onStopQueue: () => cancelArtistQueue(),
       onClosed: () => {
@@ -3228,12 +3228,13 @@ export function createArtistThumbController({
         requestState: () => requestPeState(),
       });
     }
-    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260919-headdrag');
+    const {createDraggablePanel} = await import('./draggablePanel.mjs?v=20260926-childalign');
     const width = 320;
     const height = 260;
     const spot = remote.besideSpot?.(width, height) || {x: 24, y: 120};
     peWindow = createDraggablePanel({
       document, window,
+      parentPanel: remote,
       variant: 'pewin',
       title: 'Prompt Engineering',
       storageKey: 'pe-quick',

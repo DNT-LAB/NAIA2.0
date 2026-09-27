@@ -16247,17 +16247,33 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
    펴도 단추가 제자리다. */
 .tag-reco { display: flex; flex-direction: column; gap: 3px; }
 .tag-reco-row { align-items: baseline; }
+/* 유형 색(2026-09-27, 사용자 "단추 색이 너무 심심하다") - 앱의 축 색(Interactive) 톤. 칩 배경엔 안 쓰고(칩마다 다른
+   배경은 소음이 크다) 이름표 글자 · 단추의 점과 수 · 열린 칸의 왼쪽 띠에만 쓴다. 이름은 글자로도 있다(색만으로 뜻을 전하지 않는다). */
+.tag-reco { --reco-c: var(--text-dim); }
+.tag-reco [data-reco-type="siblings"], .tag-reco [data-reco-tab="siblings"], .tag-reco [data-reco-panel="siblings"] { --reco-c: #4aa3df; }
+.tag-reco [data-reco-type="variations"], .tag-reco [data-reco-tab="variations"], .tag-reco [data-reco-panel="variations"] { --reco-c: #56b6c2; }
+.tag-reco [data-reco-type="state"], .tag-reco [data-reco-tab="state"], .tag-reco [data-reco-panel="state"] { --reco-c: #c9a227; }
+.tag-reco [data-reco-type="companions"], .tag-reco [data-reco-tab="companions"], .tag-reco [data-reco-panel="companions"] { --reco-c: #c77dba; }
+.tag-reco [data-reco-type="attributes"], .tag-reco [data-reco-tab="attributes"], .tag-reco [data-reco-panel="attributes"] { --reco-c: #3fa66a; }
+.tag-reco [data-reco-type="action"], .tag-reco [data-reco-tab="action"], .tag-reco [data-reco-panel="action"] { --reco-c: #d2803a; }
+.tag-reco [data-reco-type="parts"], .tag-reco [data-reco-tab="parts"], .tag-reco [data-reco-panel="parts"] { --reco-c: #8f9bb3; }
+.tag-reco [data-reco-type="context"], .tag-reco [data-reco-tab="context"], .tag-reco [data-reco-panel="context"] { --reco-c: #7c6aef; }
+.tag-reco [data-reco-type="fill"] { --reco-c: var(--accent-light); }
 .tag-reco-row .tag-tooltip-extra-label { width: auto; min-width: 40px; font-family: inherit; font-size: 10px;
-  letter-spacing: 0; text-transform: none; pointer-events: auto; cursor: help; }
+  letter-spacing: 0; text-transform: none; color: var(--reco-c); pointer-events: auto; cursor: help; }
 .tag-tooltip-extra-tag.is-replace::before { content: "\21C4\00A0"; color: var(--text-dim); }
 .tag-reco-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); }
 .tag-reco-tab { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 8px; border-radius: 10px;
   border: 1px solid rgba(255,255,255,0.12); background: transparent; color: var(--text-muted);
   font-family: inherit; font-size: 10px; line-height: 1.4; cursor: pointer; pointer-events: auto; }
-.tag-reco-tab b { font-family: var(--font-mono); font-size: 9px; font-weight: 500; color: var(--text-dim); }
-.tag-reco-tab:hover { color: var(--text-primary); border-color: rgba(100,140,255,0.3); background: rgba(100,140,255,0.1); }
-.tag-reco-tab.is-active { color: var(--text-primary); border-color: rgba(100,140,255,0.5); background: rgba(100,140,255,0.18); }
+.tag-reco-tab::before { content: ""; align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--reco-c); }
+.tag-reco-tab b { font-family: var(--font-mono); font-size: 9px; font-weight: 500; color: var(--reco-c); }
+.tag-reco-tab:hover { color: var(--text-primary); border-color: color-mix(in srgb, var(--reco-c) 60%, transparent);
+  background: color-mix(in srgb, var(--reco-c) 10%, transparent); }
+.tag-reco-tab.is-active { color: var(--text-primary); border-color: var(--reco-c);
+  background: color-mix(in srgb, var(--reco-c) 20%, transparent); }
 .tag-reco-tab.is-active b { color: var(--text-primary); }
+.tag-reco-panel { border-left: 2px solid var(--reco-c); padding-left: 6px; }
 .tag-reco-panel:not(.is-open) { display: none; }
 /* 추천 프롬프트 줄(고른 태그에서 함께 1 · 상태 1, 2026-09-27) - 이름표만 강조하고, [모두 넣기]는 점선 칩. */
 .tag-reco-fill .tag-tooltip-extra-label { color: var(--accent-light); }

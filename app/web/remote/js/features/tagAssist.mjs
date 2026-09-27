@@ -1,5 +1,5 @@
 import { PALETTES, SLIDERS } from './interactiveAxes.mjs';
-import { applyRecommendation, promptTagList, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-review';
+import { applyRecommendation, promptTagList, promptTagSet, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-nohint2';
 
 // 캐릭터 정보 카드의 칩 가지치기.
 //

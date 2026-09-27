@@ -10,7 +10,8 @@
 // 보일 때는 빌더가 정한 자리(key: ⇄ -> 색 -> 무늬·소재 -> 모양 -> ABC, 대안은 축 순서)로 선다.
 
 // 줄 순서가 곧 대표 줄을 고르는 차례다 - 앞에서부터 칩이 있는 줄 3개. 지금 태그를 다듬는 대안 · 종류 · 상태가
-// 먼저다. 이름은 사용자가 고른 한국어 짧은 이름(2026-09-27), 설명은 이름표·단추에 마우스를 올리면 뜬다.
+// 먼저다. 이름은 사용자가 고른 한국어 짧은 이름(2026-09-27). 설명(hint)은 **임시로 띄우지 않는다**(사용자 2026-09-27:
+// 단추 밑 말풍선이 열린 칸의 칩을 가렸다) - 되살릴 때를 위해 문구만 남긴다.
 const OP_HINT = ' - ⇄ 는 지금 태그를 바꾸고, 나머지는 뒤에 더합니다';
 export const RECOMMEND_TYPES = [
   {key: 'siblings', label: '대안', hint: '같은 자리의 다른 선택 (short hair ↔ long hair)' + OP_HINT},
@@ -172,7 +173,7 @@ export function recommendRowsHtml(groups, {
     : '';
   const head = fillItems.length
     ? `<div class="tag-tooltip-extra tag-reco-row tag-reco-fill" data-reco-type="fill">`
-      + `<span class="tag-tooltip-extra-label" data-naia-title="${FILL_HINT}">추천</span>`
+      + '<span class="tag-tooltip-extra-label">추천</span>'
       + fillItems.map(item => renderChip(String(item.tag), 'is-add', 'data-op="add"')).join('') + fillAll + '</div>'
     : '';
   const chipsHtml = items => displayOrder(items).map(item => {
@@ -187,12 +188,12 @@ export function recommendRowsHtml(groups, {
     const rest = items.slice(shown.length);
     if (shown.length) {
       lead += `<div class="tag-tooltip-extra tag-reco-row" data-reco-type="${type.key}">`
-        + `<span class="tag-tooltip-extra-label" data-naia-title="${type.hint}">${type.label}</span>`
+        + `<span class="tag-tooltip-extra-label">${type.label}</span>`
         + chipsHtml(shown) + '</div>';
     }
     if (rest.length) {
       // 단추는 칩이 아니다(data-insert 없음) - 누르면 그 유형의 칸을 펴고 접을 뿐이다.
-      tabs += `<button type="button" class="tag-reco-tab" data-reco-tab="${type.key}" data-naia-title="${type.hint}">`
+      tabs += `<button type="button" class="tag-reco-tab" data-reco-tab="${type.key}">`
         + `${type.label}<b>${rest.length}</b></button>`;
       panels += `<div class="tag-tooltip-extra tag-reco-panel" data-reco-panel="${type.key}">${chipsHtml(rest)}</div>`;
     }

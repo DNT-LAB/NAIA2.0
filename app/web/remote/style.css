@@ -16260,7 +16260,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-reco [data-reco-type="context"], .tag-reco [data-reco-tab="context"], .tag-reco [data-reco-panel="context"] { --reco-c: #7c6aef; }
 .tag-reco [data-reco-type="fill"] { --reco-c: var(--accent-light); }
 .tag-reco-row .tag-tooltip-extra-label { width: auto; min-width: 40px; font-family: inherit; font-size: 10px;
-  letter-spacing: 0; text-transform: none; color: var(--reco-c); pointer-events: auto; cursor: help; }
+  letter-spacing: 0; text-transform: none; color: var(--reco-c); }
 .tag-tooltip-extra-tag.is-replace::before { content: "\21C4\00A0"; color: var(--text-dim); }
 .tag-reco-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); }
 .tag-reco-tab { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 8px; border-radius: 10px;

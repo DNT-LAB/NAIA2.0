@@ -121,6 +121,8 @@ _SYNONYMS = {"photo": "picture", "photos": "pictures",
              "interrobang": "!?", "ellipsis": "..."}
 _EMOTICON_EN = re.compile(r"[^a-z]*|[^a-z]{1,2}\s?[a-z]?")
 _META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\)$")
+# 뜻을 싣는 품사(Kiwi) — 명사 · 동사 · 형용사 · 보조 용언 · 관형사 · 부사 · 어근 · 외국어 · 숫자. 어미 · 조사 · 접사 · 부호는 뺀다
+_CONTENT_POS = ("NN", "NP", "NR", "VV", "VA", "VX", "VC", "MM", "MA", "XR", "SL", "SH", "SN")
 
 
 # 두 글자 이하지만 이모티콘이 아닌 손동작 태그 — V 사인(19만 건) · W 사인(2.5만 건). 두 글자 이하를 통째로 막았더니
@@ -406,6 +408,17 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         api = getattr(ka, "grounded", None)
         return bool(callable(api) and getattr(ka, "tokenizer", None) is not None and api(ko))
 
+    rule_stems = set(getattr(ka, "rule_stems", None) or ())
+
+    def rule_verbs_only(ko: str) -> bool:
+        """모델 항목이 동사 규칙이 이미 태그로 만든 동사뿐인가(쪼그려 앉기 = 쪼그리 + 앉 -> squatting). 명사 · 부사 · 다른
+        동사가 있으면(바닥에 앉기 · 누워 있기) 모델 쪽이 더 구체적일 수 있어 둔다."""
+        tokenizer = getattr(ka, "tokenizer", None)
+        if not rule_stems or tokenizer is None or not ko:
+            return False
+        content = [(f, t) for f, t in tokenizer(ko) if t.startswith(_CONTENT_POS)]
+        return bool(content) and all(t.startswith("VV") and f in rule_stems for f, t in content)
+
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
         return [t for t in _item_tags(item, kind) if not _junk_tag(t)]
 
@@ -455,6 +468,10 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             return [phrase]
         if any(stem in (s, s + "기") for s in ka.phrase_stems):
             log.append(f"drop:{en}(사전 구가 덮음)")      # 공주안기 -> princess carry 인데 모델이 '안기기 -> hold' 를 따로 냈다
+            return []
+        if rule_verbs_only(ko):
+            # 쪼그려 앉기 -> kneeling · sitting · crouching(실행마다 다르다)이 동사 규칙의 squatting 과 겹쳤다(09-25 · 09-27 실측)
+            log.append(f"drop:{en}(동사 규칙이 덮음)")
             return []
         m = _NEGATION.match(en)
         if m and kind != "exclude":

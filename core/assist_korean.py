@@ -327,6 +327,8 @@ class KoreanAnalysis:
     phrases: dict[str, str] = field(default_factory=dict)  # 붙여 쓴 구 -> 태그(모델 항목 교체용)
     verb_phrases: list[str] = field(default_factory=list)  # 그중 동사에서 나온 구의 태그(인물 사이 동작 후보)
     phrase_stems: set[str] = field(default_factory=set)    # 사전 구가 가져간 동사 줄기(안) — 모델의 '안기기' 를 버린다
+    rule_stems: set[str] = field(default_factory=set)      # 동사 규칙이 태그로 만든 줄기 + 거기 딸린 줄기(쪼그려 앉 의 앉)
+                                                           # — 모델 항목이 이 동사뿐이면 모델 영문을 버린다(assist_v2.merge)
     names: list[NameHit] = field(default_factory=list)
     explicit_names: set[str] = field(default_factory=set)  # {이름} — 자동 이름 정책과 별개로 사용자가 고정
     roles: tuple[str, str] | None = None                   # (하는 쪽, 당하는 쪽) — 이름 기준
@@ -694,6 +696,8 @@ class KoreanLayer:
         for tag in out.phrases.values():
             if tag not in out.specific:
                 out.specific.append(tag)
+        # 한 동작으로 이어진 동사(쪼그려 앉아 = 쪼그리 + 어 + 앉)의 뒤 동사는 앞 동사의 태그가 맡는다(규칙표 verb_absorbs)
+        absorbed = _absorbed_stems(toks, self.rules.get("verb_absorbs") or {})
         for stem in out.stems:
             for prefix, tag in self.rules["stem_prefixes"]:
                 if stem.startswith(prefix) and tag not in out.verb_tags and self.vocab.tag_exists(tag):
@@ -701,10 +705,15 @@ class KoreanLayer:
             if stem in consumed:
                 continue
             tag = self.rules["verbs"].get(stem)
-            if tag and tag not in out.covers and tag not in out.verb_tags and tag not in out.specific \
-                    and self.vocab.tag_exists(tag):
-                out.verb_tags.append(tag)
-                out.notes.append(f"동사:{stem}->{tag}")
+            if stem in absorbed:
+                out.notes.append(f"딸린 동사:{stem}")
+                continue
+            if tag and tag not in out.covers and self.vocab.tag_exists(tag):
+                out.rule_stems.add(stem)
+                out.rule_stems.update(s for s in absorbed if s in (self.rules.get("verb_absorbs") or {}).get(stem, ()))
+                if tag not in out.verb_tags and tag not in out.specific:
+                    out.verb_tags.append(tag)
+                    out.notes.append(f"동사:{stem}->{tag}")
         out.names = self._names(toks)
         # {호두} 처럼 감싼 것은 일반 낱말이어도 이름으로 찾는다 — 인물 칸 차례는 글에 나온 차례
         for form, _start, _end in braced_names(text):
@@ -1242,6 +1251,23 @@ def _viewer_tags(toks: list[tuple[str, str]], viewer: dict[str, Any]) -> list[st
                         out.extend(t for t in rule.get("tags") or () if t not in out)
             break
     return out
+
+
+def _absorbed_stems(toks: list[tuple[str, str]], absorbs: dict[str, Any]) -> set[str]:
+    """앞 동사가 연결 어미로 바로 잇는 뒤 동사(쪼그리/VV + 어·고/EC + 앉/VV) — 글에 나온 그 동사가 **모두** 이렇게 딸렸을
+    때만 돌려준다. '소녀는 쪼그려 있고 소년은 의자에 앉아' 의 앉은 따로 앉은 사람이라 sitting 이 남는다."""
+    if not absorbs:
+        return set()
+    seen: dict[str, int] = {}
+    tied: dict[str, int] = {}
+    for i, (form, tag) in enumerate(toks):
+        if not tag.startswith("VV"):
+            continue
+        seen[form] = seen.get(form, 0) + 1
+        if i >= 2 and toks[i - 1][1] == "EC" and toks[i - 2][1].startswith("VV") \
+                and form in (absorbs.get(toks[i - 2][0]) or ()):
+            tied[form] = tied.get(form, 0) + 1
+    return {form for form, n in tied.items() if n == seen.get(form)}
 
 
 def _stems(toks: list[tuple[str, str]]) -> list[str]:

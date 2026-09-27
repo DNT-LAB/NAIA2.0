@@ -47,6 +47,8 @@
     "울": "crying", "웃": "smile", "먹": "eating", "쪼그리": "squatting", "엎드리": "on stomach",
     "꿇": "kneeling", "헐떡이": "heavy breathing", "헥헥거리": "heavy breathing", "헥헥대": "heavy breathing"
   },
+  "verb_absorbs_note": "앞 동사가 연결 어미(-어 · -고)로 바로 잇는 뒤 동사는 한 동작이다 — 뒤 동사는 따로 태그를 달지 않는다. 쪼그려 앉아 = squatting 하나(sitting 아님). 09-25 실측: squatting + sitting (+ 모델의 kneeling)이 겹쳤다. 따로 앉은 사람(쪼그려 있고 … 의자에 앉아)은 그대로 sitting.",
+  "verb_absorbs": {"쪼그리": ["앉"]},
   "stem_prefixes_note": "줄기가 이것으로 시작하면 그 태그. 묶은 수동(묶이 = 묶인·묶여)만 — '리본을 묶은 소녀' 가 bound 로 갔다(09-24).",
   "stem_prefixes": [["묶이", "bound"], ["째려보", "glaring"], ["노려보", "glaring"], ["울먹이", "tears"]],
   "nouns": {"목줄": ["leash", "collar"], "팔짱": ["crossed arms"]},

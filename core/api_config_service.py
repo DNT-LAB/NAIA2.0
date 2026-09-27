@@ -162,6 +162,7 @@ class ApiConfigService:
         verify_comfyui_url: Callable[[str], api_verification.VerifyResult] = api_verification.verify_comfyui_url,
         bind_host: str = "0.0.0.0",
         lan_ip_provider: Callable[[], list[str]] = private_lan_ips,
+        managed_ready: Callable[[], bool] | None = None,
     ):
         self.token_manager = token_manager
         self.timestamp_path = Path(timestamp_path)
@@ -172,6 +173,7 @@ class ApiConfigService:
         # 서버 바인드 호스트 — 루프백 바인드(127.0.0.1 등)면 LAN 링크를 숨긴다.
         self.bind_host = str(bind_host or "0.0.0.0").strip()
         self._lan_ip_provider = lan_ip_provider
+        self._managed_ready = managed_ready or (lambda: False)
 
     def lan_access_urls(self) -> list[str]:
         """같은 네트워크(Wi-Fi/유선)에서 접속 가능한 Remote Web 주소 목록.
@@ -209,6 +211,8 @@ class ApiConfigService:
             pass
 
     def setup_required(self) -> bool:
+        if self._managed_ready():
+            return False
         return not any((
             (self.token_manager.get_token("nai_token") or "").strip(),
             (self.token_manager.get_token("webui_url") or "").strip(),
@@ -231,6 +235,8 @@ class ApiConfigService:
             "nai_token_preview": nai_token[:7] if len(nai_token) >= 7 else nai_token,
             "webui_url": self.token_manager.get_token("webui_url") or "",
             "comfyui_url": self.token_manager.get_token("comfyui_url") or "",
+            "comfyui_engine": self.token_manager.get_token("comfyui_engine") or "external",
+            "anima_ready": self._managed_ready(),
             "comfyui_default_model": self.token_manager.get_token("comfyui_default_model") or "",
             "comfyui_sampling_mode": self.token_manager.get_token("comfyui_sampling_mode") or "",
             "active_mode": active_mode or "",
@@ -290,6 +296,10 @@ class ApiConfigService:
         )
         results: dict[str, bool | None] = {}
         for mode, token_key, verifier in checks:
+            from core.anima_engine import integration
+            if mode == "COMFYUI" and integration.managed_selected(self.token_manager):
+                results[mode] = bool(self._managed_ready())
+                continue
             value = (self.token_manager.get_token(token_key) or "").strip()
             if not value:
                 results[mode] = None
@@ -345,7 +355,7 @@ class ApiConfigService:
         key_map = {
             "NAI": ("nai_token",),
             "WEBUI": ("webui_url",),
-            "COMFYUI": ("comfyui_url", "comfyui_default_model", "comfyui_sampling_mode"),
+            "COMFYUI": ("comfyui_url", "comfyui_default_model", "comfyui_sampling_mode", "comfyui_engine"),
         }
         keys = key_map.get(normalized_mode)
         if not keys:

@@ -622,6 +622,9 @@ class HeadlessPromptEngineeringService:
         context = self.context
         if context.get_api_mode() != "COMFYUI":
             return False
+        from core.anima_engine.integration import managed_anima
+        if managed_anima(context):
+            return True
         sampling_mode = str(context.remote_params.get("sampling_mode") or "").strip().lower()
         comfyui_sampling_mode = str(context.remote_params.get("comfyui_sampling_mode") or "").strip().lower()
         workflow_type = str(

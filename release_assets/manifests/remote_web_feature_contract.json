@@ -5,6 +5,7 @@
   "route_source": "core/web_session_app.py",
   "route_sources": [
     "core/web_session_app.py",
+    "app/backend/server/anima_engine_routes.py",
     "app/backend/server/artist_thumbnail_routes.py",
     "app/backend/server/assist_v2_routes.py",
     "app/backend/server/boost_v2_routes.py",
@@ -59,6 +60,36 @@
     }
   ],
   "feature_groups": [
+    {
+      "id": "anima_managed_engine",
+      "name": "ANIMA managed ComfyUI engine (install, runtime, fixed SPD profile, serial LoRA)",
+      "legacy_dependency": "none",
+      "source_files": [
+        "core/anima_engine/__init__.py", "core/anima_engine/manifest.py", "core/anima_engine/profile.py",
+        "core/anima_engine/settings.py", "core/anima_engine/install.py", "core/anima_engine/runtime.py",
+        "core/anima_engine/integration.py", "app/backend/server/anima_engine_service.py",
+        "app/backend/server/anima_engine_routes.py",
+        "app/web/remote/js/features/animaSetupPanel.mjs", "app/web/remote/js/features/animaLoraPanel.mjs"
+      ],
+      "routes": [
+        {"method": "GET", "path": "/api/anima-engine/status", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/anima-engine/licenses", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/anima-engine/licenses/{id}", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/anima-engine/inspect", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/anima-engine/prepare", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/anima-engine/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/select", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/engine/start", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/engine/stop", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/anima-engine/loras", "smoke": "non_destructive"},
+        {"method": "PUT", "path": "/api/anima-engine/loras", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/anima-engine/loras/thumb", "smoke": "non_destructive"},
+        {"method": "PUT", "path": "/api/anima-engine/loras/thumb", "smoke": "state_mutation"},
+        {"method": "DELETE", "path": "/api/anima-engine/loras/thumb", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/loras/open-folder", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/settings", "smoke": "state_mutation"}
+      ]
+    },
     {
       "id": "web_shell",
       "name": "Remote Web shell",
@@ -851,6 +882,19 @@
     }
   ],
   "data_dependencies": [
+    {
+      "feature": "anima_managed_engine",
+      "description": "Optional pinned 7.6 GB engine/model download outside the app; status is not_installed without a verified receipt. Registered model folders are read-only.",
+      "paths": ["<engine-root>/runtime", "<engine-root>/models", "<engine-root>/receipt.json"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/anima-engine/prepare"
+    },
+    {
+      "feature": "anima_managed_engine",
+      "description": "Offline license texts and notices pinned by the ANIMA manifest.",
+      "paths": ["core/anima_engine/licenses/**"],
+      "provisioning": "bundled"
+    },
     {
       "feature": "event_map",
       "description": "Optional event map index (single 879MB .naiamap file, not a zip) downloaded on demand by the install manager into the user data root; also buildable with tools/build_event_map_index.py. Absent by default: GET /api/event-map/state reports state=missing plus an install block describing the download, state=downloading while it runs, and the query routes answer 503 unavailable. NAIA_EVENT_MAP_INDEX overrides the path for development.",

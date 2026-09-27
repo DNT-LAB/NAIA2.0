@@ -1,0 +1,11 @@
+ComfyUI Windows Portable v0.22.0 NVIDIA components
+
+Each bundled component remains governed by its own license files inside the installed runtime.
+Representative paths beneath ComfyUI_windows_portable:
+Python (PSF): python_embeded/LICENSE.txt
+PyTorch (BSD and third-party notices): python_embeded/Lib/site-packages/torch-*.dist-info/licenses/
+NVIDIA CUDA/cuDNN runtime and other pip packages: python_embeded/Lib/site-packages/*dist-info/ (LICENSE, licenses, NOTICE)
+ComfyUI (GPL-3.0): ComfyUI/LICENSE
+
+The exact expanded distribution inventory is pending O-2; these are representative paths, not a verified exhaustive list.
+Component licenses remain in the original portable distribution; this notice does not replace them.

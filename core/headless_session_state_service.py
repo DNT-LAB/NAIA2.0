@@ -359,6 +359,8 @@ class HeadlessSessionStateService:
             payload["options_model_meta"] = registry.option_metadata(
                 include_keys=[selected_model] if selected_model else None
             )
+        from core.anima_engine.integration import apply_managed_schema
+        apply_managed_schema(context, payload)
         return payload
 
     def initial_websocket_messages(

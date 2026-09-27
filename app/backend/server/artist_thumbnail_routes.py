@@ -1217,10 +1217,12 @@ def register_artist_thumbnail_routes(
                     return JSONResponse({"error": f"'{view['name']}' 보기의 해상도({view['width']}x{view['height']})를 "
                                                   "64 의 배수로 고쳐 저장하세요"}, status_code=400)
                 schema = await run_in_thread(session_context.generation_param_schema_payload)
+                from core.anima_engine.integration import managed_anima
                 overrides = await run_in_thread(
                     partial(artist_thumbnail_service(session_context).view_generation_overrides,
                             payload, view, schema,
-                            current_model=str((getattr(session_context, "remote_params", None) or {}).get("model") or "")),
+                            current_model=str((getattr(session_context, "remote_params", None) or {}).get("model") or ""),
+                            managed_anima=current_mode == "COMFYUI" and managed_anima(session_context)),
                 )
             else:
                 overrides = await run_in_thread(

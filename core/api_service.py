@@ -626,8 +626,10 @@ class APIService:
         # ComfyUI 자동 모드 스왑 자격: basic(내장) eps/anima 워크플로우만(스펙: EPS↔ANIMA).
         # custom/bypass/free 워크플로우·artist thumbnail·사전 빌드 workflow dict·v_prediction은 제외.
         # 2회 실패 시 마지막(3회차) 시도에서 EPS↔ANIMA 전환해 모드/모델 불일치를 복구한다.
+        from core.anima_engine import integration
         comfyui_swap_eligible = (
             api_mode == "COMFYUI"
+            and not integration.is_managed_credential(parameters.get("credential"))
             and not parameters.get("comfyui_workflow_has_custom")
             and not parameters.get("artist_thumb_request")
             and not isinstance(parameters.get("workflow"), dict)
@@ -2153,6 +2155,9 @@ class APIService:
         try:
             # 1. ComfyUI 서버 URL 가져오기
             comfyui_url = params.get('credential')
+            from core.anima_engine import integration
+            if integration.is_managed_credential(comfyui_url):
+                comfyui_url = integration.prepare_managed_request(self.app_context, params)
             if not comfyui_url:
                 raise ValueError("ComfyUI 서버 URL이 제공되지 않았습니다.")
 
@@ -2226,6 +2231,8 @@ class APIService:
                 workflow,
                 params.get('_comfyui_workflow_ui'),
             )
+            if params.get("_anima_meta"):
+                extra_pnginfo["naia_profile"] = params["_anima_meta"]
             result = self.comfyui_service.generate_image(
                 workflow,
                 _comfyui_progress,

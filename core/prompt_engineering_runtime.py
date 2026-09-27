@@ -356,7 +356,8 @@ class PromptEngineeringHeadlessPostHook:
         if not skip_preprocessing:
             api_mode = context.settings.get("api_mode")
             sampling_mode = context.settings.get("comfyui_sampling_mode")
-            is_anima_mode = api_mode == "COMFYUI" and sampling_mode == "anima"
+            from core.anima_engine.integration import managed_anima
+            is_anima_mode = api_mode == "COMFYUI" and (managed_anima(self.app_context) or sampling_mode == "anima")
 
             if not checkbox_options.get("remove_work_title"):
                 copyright = source_row.get("copyright")

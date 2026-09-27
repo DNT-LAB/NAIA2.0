@@ -24,8 +24,9 @@ class HeadlessApiOptionService:
             url = self._token("webui_url")
             options = self._fetch_webui_options(url)
         elif normalized_mode == "COMFYUI":
+            from core.anima_engine import integration
             url = self._token("comfyui_url")
-            options = self._fetch_comfyui_options(url)
+            options = integration.fixed_api_options() if integration.managed_selected(self.context) else self._fetch_comfyui_options(url)
         else:
             return {"type": "api_options", "mode": normalized_mode, "success": False, "options": {}}
 

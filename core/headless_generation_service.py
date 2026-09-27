@@ -849,6 +849,9 @@ class HeadlessGenerationService:
         return normalized if normalized in TOKEN_KEYS else "NAI"
 
     def _credential_for_mode(self, api_mode: str) -> str:
+        from core.anima_engine import integration
+        if api_mode == "COMFYUI" and integration.managed_selected(self.context):
+            return integration.MANAGED_CREDENTIAL
         token_key = TOKEN_KEYS.get(api_mode, "nai_token")
         return str(self.context.secure_token_manager.get_token(token_key) or "")
 
@@ -912,16 +915,23 @@ class HeadlessGenerationService:
 
         params["api_mode"] = api_mode
         params["credential"] = credential
+        from core.anima_engine import integration
+        managed = integration.is_managed_credential(credential)
         params["_remote_web_session_params"] = True
         params["_remote_queue_source"] = str(params.get("_remote_queue_source") or "Web")
 
         self._normalize_booleans(params)
-        self._normalize_resolution(params)
-        self._normalize_numbers(params, api_mode)
+        # Managed slots use strict parsing at the end; float/int fallback here
+        # would round uint64 seeds and hide malformed user input.
+        if not managed:
+            self._normalize_resolution(params)
+            self._normalize_numbers(params, api_mode)
         self._normalize_comfyui_workflow_type(params, api_mode)
         apply_image_modules = getattr(self.context, "apply_headless_image_module_params", None)
         if callable(apply_image_modules):
             apply_image_modules(params, api_mode)
+        if managed:
+            integration.snapshot_request(self.context, params)
         return params
 
     @staticmethod

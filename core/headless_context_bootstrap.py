@@ -108,6 +108,7 @@ def attach_wildcard_manager_context(context: Any) -> None:
 
 
 def create_api_config_service(context: Any) -> ApiConfigService:
+    from core.anima_engine import integration
     cloudflared_bin_dir = (
         context.runtime_paths.downloads_dir / "cloudflared"
         if context.runtime_paths is not None else None
@@ -127,6 +128,7 @@ def create_api_config_service(context: Any) -> ApiConfigService:
     )
     return ApiConfigService(
         context.secure_token_manager,
+        managed_ready=lambda: integration.managed_ready(context),
         cloudflared=cloudflared,
         # 진입점(NAIA_web_headless)이 기록한 실제 바인드 호스트. 키가 없으면
         # 패키지/포터블 기본(0.0.0.0)으로 간주해 LAN 링크를 노출한다.

@@ -8,6 +8,7 @@ from fastapi import WebSocket
 
 from app.backend.server.anlas_poller import schedule_subscription_refresh
 from core.web_session_context import WebSessionContext
+from core.anima_engine import integration as anima_integration
 
 
 BroadcastJson = Callable[[set[WebSocket], dict[str, Any]], Awaitable[None]]
@@ -54,7 +55,7 @@ async def refresh_active_api_options_if_configured(
     token_key = API_OPTION_TOKEN_KEYS.get(mode)
     if not token_key:
         return None
-    if not str(context.secure_token_manager.get_token(token_key) or "").strip():
+    if not str(context.secure_token_manager.get_token(token_key) or "").strip() and not anima_integration.managed_configured(context, mode):
         return None
     try:
         return await run_in_thread(context.refresh_api_options, mode)
@@ -412,7 +413,7 @@ async def _handle_set_mode(
         "WEBUI": "webui_url",
         "COMFYUI": "comfyui_url",
     }[requested_mode]
-    if not str(context.secure_token_manager.get_token(token_key) or ""):
+    if not str(context.secure_token_manager.get_token(token_key) or "") and not anima_integration.managed_configured(context, requested_mode):
         await ws.send_text(json.dumps({
             "type": "mode_result",
             "success": False,

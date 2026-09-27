@@ -358,6 +358,9 @@ def register_params_workflow_routes(
 
     @app.get("/api/comfyui/web")
     async def api_comfyui_web():
+        from core.anima_engine import integration
+        if integration.managed_selected(session_context):
+            return JSONResponse({"ok": False, "code": "MANAGED_NO_WEB_UI", "error": "관리형 ANIMA 엔진은 ComfyUI 웹 화면을 열지 않습니다."}, status_code=404)
         url = str(session_context.secure_token_manager.get_token("comfyui_url") or "").strip()
         if not url:
             return JSONResponse({"ok": False, "error": "ComfyUI URL is not configured"}, status_code=404)

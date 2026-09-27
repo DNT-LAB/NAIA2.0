@@ -955,7 +955,7 @@ class ArtistThumbnailService:
             raise FileNotFoundError(f"View thumbnail not found: {vid} / {artist_name}") from exc
 
     def view_generation_overrides(self, payload: dict, view: dict, schema: dict | None = None, *,
-                                  current_model: str | None = None) -> dict:
+                                  current_model: str | None = None, managed_anima: bool = False) -> dict:
         """보기의 조건으로 생성한다. 글(prefix/postfix/네거티브) · 해상도 · 설정 · 시드는 **보기의 것**,
         작가 표기(`positive`)만 화면이 보낸다 - 표기 규칙(NAI `artist:` · Anima `@` · 괄호 이스케이프)은
         화면의 한 곳이 주인이다. 작가 태그는 **맨 앞**이다(작가 -> prefix -> postfix, 사용자 지정 2026-09-26 -
@@ -985,6 +985,10 @@ class ArtistThumbnailService:
         settings = view.get("settings") if isinstance(view.get("settings"), dict) else {}
         options = schema if isinstance(schema, dict) else {}
         for key, value in settings.items():
+            # Only group-view requests reach this method. Keep their editable
+            # settings (including rescale); ordinary requests inherit the session.
+            if managed_anima and api_mode == "COMFYUI" and key in {"model", "sampler", "scheduler"}:
+                continue
             if key in {"model", "sampler", "scheduler"}:
                 allowed = options.get(f"options_{key}")
                 if isinstance(allowed, list) and allowed and value not in allowed:

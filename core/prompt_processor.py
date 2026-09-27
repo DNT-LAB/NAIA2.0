@@ -287,6 +287,10 @@ def _is_comfyui_anima_mode(app_context, settings: Dict[str, Any]) -> bool:
     if api_mode != 'COMFYUI':
         return False
 
+    from core.anima_engine.integration import managed_anima
+    if managed_anima(app_context):
+        return True
+
     sampling_mode = str(
         settings.get('comfyui_sampling_mode')
         or settings.get('sampling_mode')

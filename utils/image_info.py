@@ -552,7 +552,7 @@ class ImageMetadataExtractor:
     def _find_primary_comfyui_sampler(nodes_by_id: Dict[str, Dict[str, Any]]) -> Optional[str]:
         """Find the sampler that feeds the main decode/output chain."""
         output_types = {'PreviewImage', 'SaveImage'}
-        sampler_types = {'KSampler', 'SamplerCustom'}
+        sampler_types = {'KSampler', 'SamplerCustom', 'SpectrumSPDKSampler'}
 
         for output_type in output_types:
             for node in nodes_by_id.values():

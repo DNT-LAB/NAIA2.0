@@ -379,6 +379,9 @@ export function createSearchQuickWindow({
   function openAt(target, { toggle = false } = {}) {
     const wasOpen = panel.isOpen();
     if (wasOpen && toggle && layer === target && !panel.isCollapsed()) {
+      // 임시 검색 중에는 닫지 않는다 - 이 창을 닫는 것은 곧 임시 검색 해제다. Prompt 의 Search ·
+      // Quick 단추로 다시 부르면 떠 있는 임시 창을 앞으로 부른다(사용자 지정 2026-09-27).
+      if (normalWindowState) { panel.open(); return; }
       panel.close();
       return;
     }
@@ -504,7 +507,11 @@ export function createSearchQuickWindow({
       // 층이 접혀 있어도 창이 열려 있으면 카운트는 갱신한다(층 머리줄에 비친다).
       isWindowOpen: () => panel.isOpen(),
       open: () => openAt('tag'),
-      close: () => { if (panel.isOpen() && layer === 'tag') panel.close(); },
+      // Quick 단추의 토글이 여기로 닫는다 - 임시 검색 중이면 닫는 대신 앞으로 부른다(위 openAt 과 같은 이유).
+      close: () => {
+        if (!panel.isOpen() || layer !== 'tag') return;
+        if (normalWindowState) panel.open(); else panel.close();
+      },
     },
   };
   return api;

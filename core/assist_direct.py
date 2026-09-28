@@ -87,8 +87,9 @@ def situation_grammar() -> str:
 
 
 def parse_situation(reply: str | None) -> str:
-    """상황 답 -> 한 줄(번호 '1.' 을 떼고 공백 정리). 못 읽으면 ""."""
-    text = " ".join(re.sub(r"\b\d+\.\s*", "", str(reply or "")).split())
+    """상황 답 -> 한 줄(목록 번호 '1. ' 을 떼고 공백 정리). 못 읽으면 "".
+    번호는 맨 앞이나 문장 끝 뒤에서 공백이 따르는 것만 — 문장 안 숫자(1.5 liter · number 1.)를 망가뜨렸다(Codex 9차 N2)."""
+    text = " ".join(re.sub(r"(?:^|(?<=[.!?]\s))\d+\.\s+", "", " ".join(str(reply or "").split())).split())
     return text if re.search(r"[A-Za-z]{2}", text) else ""
 
 

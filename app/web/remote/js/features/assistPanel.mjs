@@ -782,8 +782,10 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     const mine = ++askSeq;
     busy = true;
     paintBusy();
-    // 답을 기다리는 동안 결과 칸을 잠근다 — 그 사이 고친 글을 도착한 답이 덮었다(Codex 리뷰 09-28 F1). 답이 오면 다시 그린다
+    // 답을 기다리는 동안 결과 칸을 잠근다 — 그 사이 고친 글을 도착한 답이 덮었다(Codex 리뷰 09-28 F1). 답이 오면 다시 그린다.
+    // 잠금은 타자만 막는다(태그 정보 창의 삽입은 readOnly 를 안 본다 — 9차 F1) — 보낸 때의 글을 쥐어 두고 답이 오면 견준다
     lockEditors(true);
+    const sentEdits = editsOf(prev);
     const payload = {
       text, rating: prev.rating || rating,
       followup: {
@@ -807,6 +809,12 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       lockEditors(false);
       paintBusy();
       toast((data && data.error) || '고치지 못했습니다', 'error');
+      return;
+    }
+    if (editsOf(prev) !== sentEdits) {       // 기다리는 동안 결과 칸이 바뀌었다 — 사용자의 글이 이긴다
+      lockEditors(false);
+      paintBusy();
+      toast('고치는 동안 결과 칸이 바뀌어 이 답은 버렸습니다 — 다시 [고치기] 를 눌러 주세요', 'info');
       return;
     }
     // 새 결과 = 이전 결과(이름 · 인원 · 관계) + 고친 프롬프트 · 풀. 다듬기 · 되살리기 줄은 이전 검색의 것이라 지운다(서버가 null)
@@ -1069,6 +1077,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       });
       if (typeof bindTagAssist === 'function') bindTagAssist(box);
     });
+  }
+
+  /** 결과 칸(메인 · 캐릭터)의 지금 글 — 이어 고치기가 보낸 때와 답이 온 때를 견준다 */
+  function editsOf(r) {
+    return JSON.stringify([r?.prompt?.main || '', ...(r?.prompt?.characters || []).map(c => c?.prompt || '')]);
   }
 
   /** 결과 칸(메인 · 캐릭터) 잠금 — 이어 고치기가 답을 기다리는 동안 */

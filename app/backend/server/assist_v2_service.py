@@ -34,6 +34,9 @@ MAX_VIRTUAL_CHARACTERS = 6
 MAX_FOLLOWUP_MAIN = 4000      # 이어 고치기가 받는 메인 프롬프트 글자 수 상한
 # 직접 모드(_direct)가 모델 태그에서 가려내는 것 — 인원 태그(인원 칸이 정한다) · 품질 · 등급 태그(싣지 않는다)
 _PEOPLE_TAG = re.compile(r"\d+\+?(?:girl|boy|other)s?|multiple (?:girls|boys|others)|solo|no humans")
+# 이어 고치기: 캐릭터 이름 바로 뒤가 이것이면 그 칸은 고칠 대상이 아니다(공백을 뺀 글에서 — '나히다는 그대로 두고')
+_SPARE_TAILS = ("는그대로", "은그대로", "그대로", "말고", "는말고", "은말고", "빼고", "는빼고", "은빼고", "는두고", "은두고",
+                "제외", "는제외", "은제외")
 # 괄호가 든 사전 이름 꼴(nahida (genshin impact)) — 이어 고치기가 뺄 수 있는 괄호 조각은 이것뿐(가중치 (x) · (x:1.2) 는 아니다)
 _QUALIFIED_TAG = re.compile(r"[^(){}\[\]:]+ \([^(){}\[\]:]+\)")
 _QUALITY_TAGS = frozenset({"masterpiece", "best quality", "high quality", "amazing quality", "very aesthetic",
@@ -918,11 +921,28 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     removed = [t for t in got.remove if pointed(t)]
     kept_back = [t for t in got.remove if t not in removed]
     gone = {af.tag_key(t) for t in removed}
-    # 고칠 점이 캐릭터 이름을 말하면 그 칸만(카나데만 머리를 짧게 — 두 칸 다 long hair 였는데 둘 다 뺐다, Codex 8차 F5)
+    # 고칠 점이 캐릭터 이름을 말하면 그 칸만(카나데만 머리를 짧게 — 두 칸 다 long hair 였는데 둘 다 뺐다, Codex 8차 F5).
+    # 이름 뒤가 '만' 이면 그 칸만, '는 그대로 · 말고 · 빼고 · 두고' 면 그 칸은 아니다('나히다는 그대로 두고 카나데만' — 9차 F5)
     said = compact(clean_text(wish))
-    target = {i for i, c in enumerate(fu["characters"])
-              if bags[i] and (key := compact(clean_text(str(c.get("ko") or "")))) and key in said}
-    present = {af.tag_key(t) for t in tags + [x for b in bags for x in b]} - gone
+    named: set[int] = set()
+    only: set[int] = set()
+    spared: set[int] = set()
+    for i, c in enumerate(fu["characters"]):
+        key = compact(clean_text(str(c.get("ko") or "")))
+        if not bags[i] or not key or key not in said:
+            continue
+        named.add(i)
+        for m in re.finditer(re.escape(key), said):
+            tail = said[m.end():]
+            if tail.startswith("만"):
+                only.add(i)
+            if tail.startswith(_SPARE_TAILS):
+                spared.add(i)
+    target = only or (named - spared)
+    # 이미 있는 태그는 고칠 곳 안에서만 본다 — 나히다의 short hair 때문에 카나데에게 short hair 를 못 더했다(9차 N1).
+    # 대상 칸이 있으면 메인만 보고, 칸마다의 겹침은 칸에 넣을 때 따로 거른다
+    scope = tags if target else tags + [x for b in bags for x in b]
+    present = {af.tag_key(t) for t in scope} - gone
     share = _rating_share(context, req["rating"])
     gate = RATING_GATE.get(req["rating"])
     added: list[str] = []

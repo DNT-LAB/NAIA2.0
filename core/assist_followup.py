@@ -49,6 +49,11 @@ def split_main(main: str, sentence: str = "", is_tag: Callable[[str], bool] | No
         head = text[: -len(known)].rstrip().rstrip(",")
         return [p.strip() for p in head.split(",") if p.strip()], known
     parts = [p.strip() for p in text.split(",") if p.strip()]
+    # 받은 문장의 뒤쪽만 고쳤으면(마침표를 지웠다) 그 문장의 첫 조각이 그대로 남아 있다 — 거기서 가른다(Codex 9차 F4)
+    first = known.split(",")[0].strip() if known else ""
+    if first and len(first.split()) >= 2 and first in parts:
+        i = len(parts) - 1 - parts[::-1].index(first)
+        return parts[:i], ", ".join(parts[i:])
 
     def starts(i: int, min_words: int) -> bool:
         part = parts[i]

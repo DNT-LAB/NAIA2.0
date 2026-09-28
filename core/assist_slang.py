@@ -91,8 +91,9 @@ _PASSIVE = ("히", "이", "리", "기")
 
 def _stem_at(stem: str, toks: list[tuple[str, str]]) -> bool:
     """손 풀이 용언 줄기('들고 박')가 **그 자리에서** 동사인가 — 마지막 낱말이 동사 토막(박 · 박히)이고, 줄기가 여러 어절이면
-    바로 앞 토막이 앞 어절의 어미(들고 의 고 · 들어서 의 어서)여야 한다. '들고 박자를' 의 박자는 명사, '들고 박스를 옮기고
-    못을 박는다' 의 박은 앞이 을(조사)이라 아니다(Codex 11차 R3)."""
+    바로 앞 토막들이 앞 어절을 그대로 이룬다(들 + 고 = 들고 · 들 + 어서 = 들어서). '들고 박자를' 의 박자는 명사, '들고 박스를
+    옮기고 못을 박는다' 의 박은 앞이 을(조사) · '들고 박자를 맞추고 박는다' 의 박은 앞이 맞추 + 고 라 아니다(Codex 11차 R3 ·
+    12차 F3: 앞 토막이 '고' 로 끝나기만 보니 맞추고 의 고가 들고 로 통했다)."""
     parts = stem.split()
     last, before = parts[-1], "".join(parts[:-1])
     for j, (form, tag) in enumerate(toks):
@@ -100,8 +101,12 @@ def _stem_at(stem: str, toks: list[tuple[str, str]]) -> bool:
             continue
         if not before:
             return True
-        prev_form, prev_tag = toks[j - 1] if j else ("", "")
-        if prev_form and prev_tag.startswith("E") and before.endswith(prev_form):
+        acc = ""
+        for prev_form, _prev_tag in reversed(toks[:j]):
+            acc = prev_form + acc
+            if acc == before or len(acc) >= len(before):
+                break
+        if acc == before and toks[j - 1][1].startswith("E"):
             return True
     return False
 

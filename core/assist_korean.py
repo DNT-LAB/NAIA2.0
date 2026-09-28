@@ -1112,7 +1112,7 @@ class KoreanLayer:
         # 조사를 떼고 본다. 두 글자(남녀 · 자녀 · 강남)는 보지 않는다 · 이미 사람으로 센 토막이 든 어절(미소녀 의 소녀)은 건너뛴다
         names_c = {compact(clean_text(form)) for form, _g in named}
         counted = seen | names_c
-        words = re.findall(r"[가-힣0-9]+", analysis.source_text or "")
+        words = re.findall(r"[가-힣A-Za-z0-9]+", analysis.source_text or "")      # 영문 · 숫자 이름(2B)도 어절로(Codex 12차 F2)
         for w_i, word in enumerate(words):
             base = next((word[:-len(p)] for p in self._PERSON_PARTICLES
                          if word.endswith(p) and len(word) - len(p) >= 3), word)
@@ -1188,7 +1188,7 @@ class KoreanLayer:
         """어절 j 부터가 고른 캐릭터 이름인가 — 여러 어절(하츠네 미쿠가)은 붙여서, 끝 조사는 떼고 본다."""
         joined = ""
         for word in words[j:j + 4]:
-            joined += word
+            joined = compact(joined + word)                  # 이름 쪽(names_c)과 같게 — 공백 없이 · 소문자(2B -> 2b)
             if joined in names_c or any(joined.endswith(p) and joined[:-len(p)] in names_c for p in self._PERSON_PARTICLES):
                 return True
         return False

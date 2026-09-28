@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterable
 
 from core.assist_candidates import GENERIC_NOUNS, Ask
 from core.assist_english import English, en_key, english_parts, put_english
-from core.assist_korean import KoreanAnalysis, NameHit, absorbed_stems, clean_text, compact
+from core.assist_korean import KoreanAnalysis, NameHit, absorbed_stems, base_name, clean_text, compact
 
 TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
 GOALS = ("find", "how", "generate")
@@ -707,10 +707,12 @@ def rating_name(tag: str, rating: str) -> str:
 
 
 def rating_sources(tag: str, rating: str) -> list[str]:
-    """이 이름과, Q · E 에서 이 이름으로 바뀌는 옛 이름들 — 옛 이름의 한국어 키워드(포박 · 묶이기)로도 가리키게(Codex 11차 R7)."""
+    """이 이름과, Q · E 에서 이 이름으로 바뀌는 옛 이름들 — 옛 이름의 한국어 키워드(포박 · 묶이기)로도 가리키게(Codex 11차 R7).
+    옛 이름의 꼬리 없는 꼴(tied up)도 — 영어 근거(문장 · 영문 요청)가 nonsexual 까지 말하지는 않는다(12차 F6)."""
     if rating not in ("q", "e"):
         return [tag]
-    return [tag] + [old for old, new in NSFW_SWAPS.items() if new == tag]
+    olds = [old for old, new in NSFW_SWAPS.items() if new == tag]
+    return list(dict.fromkeys([tag, *olds, *(base_name(old) for old in olds)]))
 
 
 def swap_for_rating(merged: Merged, rating: str) -> None:
@@ -718,10 +720,18 @@ def swap_for_rating(merged: Merged, rating: str) -> None:
     (관계가 옛 이름이면 source# · target# 과 recap 에 남았다 — Codex 11차 R6)."""
     if rating not in ("q", "e"):
         return
+    # 제외 칸은 이벤트 맵 검색에 통째로 쓰인다 — 바꾼 이름이 제외와 겹치면 안 된다(Codex 12차 F4). 사용자가 새 이름(restrained)을
+    # 뺐으면 옛 이름(같은 뜻)은 바꿔 싣지 않고 뺀다 · 옛 이름을 뺐는데 새 이름이 실려 있으면 제외는 옛 이름 그대로 둔다
+    excluded = set(merged.exclude)
     for old, new in NSFW_SWAPS.items():
-        replace_tag(merged, old, new)
-    merged.relations[:] = [(s, rating_name(a, rating), d) for s, a, d in merged.relations]
-    merged.exclude[:] = list(dict.fromkeys(rating_name(t, rating) for t in merged.exclude))
+        if new in excluded:
+            drop_tags(merged, [old])
+        else:
+            replace_tag(merged, old, new)
+            merged.relations[:] = [(s, new if a == old else a, d) for s, a, d in merged.relations]
+    shown = set(merged.all_tags()) | {a for c in merged.characters for a in c.attrs} | {r[1] for r in merged.relations}
+    merged.exclude[:] = list(dict.fromkeys(t if rating_name(t, rating) in shown else rating_name(t, rating)
+                                           for t in merged.exclude))
 
 
 # ── 조립 ───────────────────────────────────────────────────────────────────

@@ -455,7 +455,12 @@ class LlamaServerRuntime:
         if not self._unload_pending:
             return
         if not self._slot.acquire(blocking=False):
-            self._unload_later()               # 누가 슬롯을 쥐고 있다 — 다시 잰다(chat · warm 이면 그 finally 도 다시 잰다)
+            # 누가 슬롯을 쥐고 있다. 부름(chat · warm)이면 세대가 이미 올랐다 — 그 finally 가 다시 잰다(여기서 또 재면 그 타이머가
+            # 부름이 슬롯을 놓은 틈에 세대를 맞춰 유예 없이 내렸다, Codex 12차 F1). 부름이 아닌 것(내림 · 교체)이면 다시 잰다
+            with self._proc_lock:
+                current = gen == self._unload_gen
+            if current:
+                self._unload_later()
             return
         try:
             with self._proc_lock:
@@ -505,11 +510,13 @@ class LlamaServerRuntime:
         except Exception:
             return False
         finally:
-            self._slot.release()
             if self._unload_pending:
-                self._unload_later()           # 올리는 동안 [VRAM 회수] 를 눌렀다
-            elif self.is_running():
-                self._arm_idle_timer()
+                self._unload_later()           # 올리는 동안 [VRAM 회수] 를 눌렀다 — 슬롯을 놓기 **전에** 잰다(chat 과 같다)
+                self._slot.release()
+            else:
+                self._slot.release()
+                if self.is_running():
+                    self._arm_idle_timer()
 
     # ── 요청 ─────────────────────────────────────────────────────────────
 
@@ -584,14 +591,18 @@ class LlamaServerRuntime:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "elapsed": round(time.monotonic() - started, 2)}
         finally:
-            self._slot.release()
             if self._unload_pending:
-                self._unload_later()           # 도는 동안 [VRAM 회수] 를 눌렀다 — 요청이 끝나면 내린다(새 설정으로 띄우지도 않는다)
-            elif self.is_stale():
-                # 요청 도중 장치가 바뀌었다 — 이제 비었으니 새 설정의 엔진을 뒤에서 띄운다(다음 요청이 기다리지 않게).
-                threading.Thread(target=self.warm, daemon=True, name="llama-swap").start()
-            elif self.is_running():
-                self._arm_idle_timer()
+                # 도는 동안 [VRAM 회수] 를 눌렀다 — 요청이 끝나면 내린다(새 설정으로 띄우지도 않는다). 슬롯을 놓기 **전에** 잰다:
+                # 놓은 틈에 앞서 잰 타이머가 세대를 맞춰 유예 없이 내렸다(Codex 12차 F1)
+                self._unload_later()
+                self._slot.release()
+            else:
+                self._slot.release()
+                if self.is_stale():
+                    # 요청 도중 장치가 바뀌었다 — 이제 비었으니 새 설정의 엔진을 뒤에서 띄운다(다음 요청이 기다리지 않게).
+                    threading.Thread(target=self.warm, daemon=True, name="llama-swap").start()
+                elif self.is_running():
+                    self._arm_idle_timer()
 
     def _post(self, port: int, prompt: str, max_tokens: int, deadline: float,
               system: str | None = None, grammar: str | None = None) -> dict[str, Any]:

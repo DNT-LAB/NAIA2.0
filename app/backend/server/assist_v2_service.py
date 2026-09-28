@@ -1889,6 +1889,15 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         if (d.owner, d.ko) not in viewed:                 # 절마다 한 번(같은 절의 다른 영문 추측에는 안 붙인다)
             viewed.add((d.owner, d.ko))
             ac.add_viewer(d, layer.analyze(d.ko).viewer)
+    # Q · E 의 tied up (nonsexual) -> restrained — 한 줄 경로와 같은 규칙(Codex 11차 R5). 겹침 정리(dedupe) · 제외(unwanted)
+    # **전에** 바꾼다 — 뒤에서 바꾸니 관계 동작과 캐릭터 칸에 같은 태그가 두 번 실리고, 뺀 태그가 되살아났다(12차 F4 · F5).
+    # Q · E 엔 등급 게이트가 없어 아래 dropped 와 이름이 엇갈리지 않는다
+    for d in subs:
+        d.tags = list(dict.fromkeys(rating_name(t, req["rating"]) for t in d.tags))
+        for c in d.candidates:
+            c.tag = rating_name(c.tag, req["rating"])
+    if relation is not None:
+        relation.action = rating_name(relation.action, req["rating"])
     ac.dedupe(subs, relation, chars, tools.info)
     share = _rating_share(context, req["rating"])
     gated = [t for d in subs for t in d.tags] + ([relation.action] if relation is not None else [])
@@ -1899,11 +1908,6 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     if relation is not None and relation.action in dropped:
         relation = None
     dropped = {**top_dropped, **dropped}
-    # Q · E 의 tied up (nonsexual) -> restrained — 한 줄 경로와 같은 규칙(구성 경로가 먼저 돌아가 빠졌다, Codex 11차 R5)
-    for d in subs:
-        d.tags = list(dict.fromkeys(rating_name(t, req["rating"]) for t in d.tags))
-    if relation is not None:
-        relation.action = rating_name(relation.action, req["rating"])
 
     persons = _compose_persons(req, chars, [p for e in english.values() for p in e.people],
                                solo=layer.says_solo(req["text"]))

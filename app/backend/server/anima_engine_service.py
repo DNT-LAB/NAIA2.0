@@ -72,7 +72,9 @@ class AnimaEngineService:
                 "install": install, "engine": rt.status() if rt else {"state": "stopped", "port": None, "pid": None, "started_at": None, "code": None, "message": ""},
                 "receipt": {k: receipt.get(k) for k in ("gpu", "system_stats", "created_at")} if receipt else None,
                 "consent": {"agreed": consent_agreed(self.save_root), "bundle_sha256": license_bundle()},
-                "models": {"available": [x["name"] for x in models["available"]], "skipped": models["skipped"]},
+                # default_dir = [초기화] 로 돌아가는 지정 위치(엔진의 모델 폴더) — 화면이 경로 칸에 보인다
+                "models": {"available": [x["name"] for x in models["available"]], "skipped": models["skipped"],
+                           "default_dir": str(Path(settings.engine_root) / "models" / "diffusion_models") if settings.engine_root else ""},
                 "settings": {k: settings.data[k] for k in ("engine_root", "model_dirs", "lora_dirs", "unet_dirs", "idle_minutes",
                                                            "reserve_vram_gb")}}
 

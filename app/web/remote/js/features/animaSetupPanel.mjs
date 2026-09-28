@@ -93,6 +93,10 @@ const STYLE = `
 #setupAnimaSection .anima-agree input { margin: 0; cursor: pointer; }
 #setupAnimaSection .anima-agreed { margin-top: 6px; font-size: 11px; color: var(--success); }
 #setupAnimaSection .anima-lic-more { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+#setupAnimaSection .anima-path-row { display: flex; align-items: center; gap: 8px; }
+#setupAnimaSection .anima-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-primary); word-break: break-all; }
+#setupAnimaSection .anima-path-row em { flex: none; font-style: normal; font-size: 10px; color: var(--text-dim); }
 `;
 
 // 설치 단계를 사람이 읽을 몇 칸으로 묶는다(계약서 §5.2 의 phase 10개 -> 6칸).
@@ -146,7 +150,6 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   let agreed = false;        // 이번 화면에서 I Agree 를 체크했는가
   let rootDraft = null;      // 사람이 고친 설치 위치(null = 설정 · 제안값)
   let loraDraft = '';        // LoRA 폴더 입력칸
-  let unetDraft = '';        // ANIMA 모델 폴더 입력칸
   let licMore = false;       // 라이선스 [상세보기] 펼침
   let artsOpen = false;      // "받을 것" 펼침
   let busy = false;          // 요청 보내는 중(연타 막기)
@@ -482,21 +485,21 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     parts.push(`<div class="anima-row"><span class="anima-label">자동 끄기</span><span class="anima-seg">${IDLE_OPTIONS.map(o =>
       `<button type="button" data-anima-idle="${o.v}" class="${o.v === idle ? 'is-on' : ''}">${o.t}</button>`).join('')}</span></div>
       <div class="anima-note">생성이 없으면 이 시간 뒤 엔진을 내려 그래픽 메모리를 돌려줍니다. 다음 생성 때 다시 켭니다.</div>`);
-    // ANIMA 모델 폴더(사용자 지정 09-28: 폴더에서 고르기) — 여기 든 ANIMA 모델을 메인 화면 Model 칸에서 고른다.
-    // 엔진의 models/diffusion_models 는 늘 들어간다. ANIMA 가 아닌 파일 · 앞 폴더와 이름이 같은 파일은 서버가 뺀다.
+    // ANIMA 모델 경로(사용자 지정 09-28) — 경로 하나 · [변경](폴더 고르기 창) · [초기화](지정 위치 = 엔진의 모델 폴더).
+    // 기본 모델은 경로를 바꿔도 목록 맨 앞에 남는다(대비책). ANIMA 인지는 가리지 않는다 — 개인 병합 모델일 수 있고,
+    // 안 맞는 파일이면 생성 단계에서 엔진이 오류로 끝낸다. 앞 폴더와 이름이 같은 파일만 서버가 뺀다.
     const models = st.models || {};
+    const chosen = (settings().unet_dirs || [])[0] || '';
     const skipped = models.skipped || [];
-    const why = { not_anima: 'ANIMA 모델이 아님', invalid: '파일을 읽지 못함', shadowed: '같은 이름이 앞 폴더에 있음' };
-    const skipTitle = skipped.map(x => `${x.name} — ${why[x.reason] || x.reason}`).join('\n');
-    parts.push(`<div class="setup-field-label">ANIMA 모델 폴더<span class="anima-opt">선택</span></div>
-      ${dirsHtml(settings().unet_dirs || [], 'anima-rmunet')}
-      <div class="setup-input-row">
-        <input class="setup-input setup-input-mono" data-anima-input="unet" type="text" value="${esc(unetDraft)}"
-               placeholder="예: D:\\ComfyUI\\models\\diffusion_models" spellcheck="false" autocomplete="off">
-        <button type="button" class="setup-btn-ghost" data-anima-act="addunet">추가</button>
+    const skipTitle = skipped.map(x => `${x.name} — ${x.reason === 'shadowed' ? '같은 이름이 앞 폴더에 있음' : x.reason}`).join('\n');
+    parts.push(`<div class="setup-field-label">ANIMA 모델 경로</div>
+      <div class="anima-path-row">
+        <span class="anima-path" data-anima-unet-path>${esc(chosen || models.default_dir || '')}</span>${chosen ? '' : '<em>기본</em>'}
+        <button type="button" class="setup-btn-ghost" data-anima-act="pickunet">변경</button>
+        <button type="button" class="setup-btn-ghost" data-anima-act="resetunet"${chosen ? '' : ' disabled'}>초기화</button>
       </div>
       <div class="anima-note" data-anima-models>메인 화면 Model 칸에서 고릅니다 · 모델 ${(models.available || []).length}개${skipped.length
-        ? ` · <span title="${esc(skipTitle)}">목록에서 뺀 파일 ${skipped.length}개</span>` : ''}</div>`);
+        ? ` · <span title="${esc(skipTitle)}">이름이 겹쳐 뺀 파일 ${skipped.length}개</span>` : ''}</div>`);
     parts.push(`<div class="setup-field-label">LoRA 폴더<span class="anima-opt">선택</span></div>
       ${dirsHtml(settings().lora_dirs || [], 'anima-rmlora')}
       <div class="setup-input-row">
@@ -608,6 +611,24 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     await refresh();
   }
 
+  // [변경] — 앱(Electron)이면 폴더 고르기 창(제목 · 지금 경로에서 연다), 브라우저면 경로를 적는다(데이터 이전 화면과 같은 방식)
+  async function pickModelFolder() {
+    const current = (settings().unet_dirs || [])[0] || (st.models || {}).default_dir || '';
+    const shell = globalThis.naiaShell;
+    if (shell && typeof shell.pickDirectory === 'function') {
+      try {
+        return await shell.pickDirectory({ title: 'ANIMA 모델 폴더 선택', defaultPath: current });
+      } catch (_) {
+        return null;
+      }
+    }
+    const entered = globalThis.prompt?.('ANIMA 모델 폴더의 전체 경로를 입력하세요', current);
+    return entered ? String(entered).trim() : null;
+  }
+
+  const sameFolder = (a, b) => Boolean(a && b)
+    && String(a).replace(/[\\/]+$/, '').toLowerCase() === String(b).replace(/[\\/]+$/, '').toLowerCase();
+
   // 폴더 목록 칸(lora_dirs · unet_dirs) — 서버가 폴더를 바꾸면 엔진을 내렸다가 다음 생성 때 새 경로로 켠다
   function addDirPatch(key, draft) {
     const value = draft.trim();
@@ -672,15 +693,6 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       run(rmLora, () => saveSettings(removeDirPatch('lora_dirs', index)));
       return;
     }
-    const rmUnet = event.target.closest('[data-anima-rmunet]');
-    if (rmUnet) {
-      const index = Number(rmUnet.getAttribute('data-anima-rmunet'));
-      run(rmUnet, async () => {
-        await saveSettings(removeDirPatch('unet_dirs', index));
-        onModelsChanged();     // 메인 Model 칸 목록을 새로 받는다
-      });
-      return;
-    }
     const actBtn = event.target.closest('[data-anima-act]');
     if (!actBtn || actBtn.disabled) return;
     const act = actBtn.getAttribute('data-anima-act');
@@ -705,12 +717,15 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
         if (!patch) return;
         await saveSettings(patch);
         loraDraft = '';
-      } else if (act === 'addunet') {
-        const patch = addDirPatch('unet_dirs', unetDraft);
-        if (!patch) return;
-        await saveSettings(patch);
-        unetDraft = '';
+      } else if (act === 'pickunet') {
+        const folder = await pickModelFolder();
+        if (!folder) return;
+        // 지정 위치를 골랐으면 초기화와 같다(같은 폴더를 두 번 넣지 않는다)
+        await saveSettings({ unet_dirs: sameFolder(folder, (st.models || {}).default_dir) ? [] : [folder] });
         onModelsChanged();     // 메인 Model 칸 목록을 새로 받는다
+      } else if (act === 'resetunet') {
+        await saveSettings({ unet_dirs: [] });
+        onModelsChanged();
       }
     });
   }
@@ -721,7 +736,6 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const kind = input.getAttribute('data-anima-input');
     if (kind === 'root') rootDraft = input.value;
     else if (kind === 'lora') loraDraft = input.value;
-    else if (kind === 'unet') unetDraft = input.value;
   }
 
   function onChange(event) {
@@ -740,7 +754,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const input = event.target.closest('[data-anima-input]');
     if (!input) return;
     const kind = input.getAttribute('data-anima-input');
-    const act = kind === 'lora' ? 'addlora' : kind === 'unet' ? 'addunet' : null;
+    const act = kind === 'lora' ? 'addlora' : null;
     if (!act) return;
     event.preventDefault();
     elBody.querySelector(`[data-anima-act="${act}"]`)?.click();

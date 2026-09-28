@@ -2849,9 +2849,15 @@ ipcMain.handle("naia:fit-width", (_event, cssWidth) => {
   return { ok: cur.css >= need, need, cssWidth: cur.css, zoom: cur.zoom, resized, zoomed,
            before: before.css };
 });
-ipcMain.handle("naia:pick-directory", async () => {
+ipcMain.handle("naia:pick-directory", async (_event, request) => {
   const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
-  const options = { properties: ["openDirectory"], title: "이전 NAIA2.0 데이터 폴더 선택" };
+  // 부르는 화면이 제목 · 처음 열 위치를 줄 수 있다(ANIMA 모델 경로 09-28). 안 주면 예전 그대로(데이터 이전).
+  const title = request && typeof request.title === "string" && request.title.trim()
+    ? request.title.trim().slice(0, 80) : "이전 NAIA2.0 데이터 폴더 선택";
+  const options = { properties: ["openDirectory"], title };
+  if (request && typeof request.defaultPath === "string" && request.defaultPath.trim()) {
+    options.defaultPath = request.defaultPath.trim();
+  }
   const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
   if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
     return null;

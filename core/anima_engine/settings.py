@@ -29,7 +29,6 @@ _TRIGGER_CACHE = {}
 _CATALOG_CACHE = {}
 _THUMB_CACHE = {}
 _UNET_CACHE = {}
-_ANIMA_CHECK_CACHE = {}
 _COMMON_TAGS = {"1girl", "1boy", "solo", "2girls", "2boys", "multiple girls", "multiple boys",
                 "male focus", "female focus", "looking at viewer", "rating safe", "rating questionable",
                 "rating explicit", "masterpiece", "best quality", "high quality"}
@@ -230,48 +229,8 @@ def _scan_lora_catalog(settings):
 # ---- ANIMA 모델(UNet) — 관리형 엔진이 고를 수 있는 모델 ----
 # ComfyUI 는 모델 이름을 목록 문자열과 **정확히** 대조한다(execution.py value_not_in_list). 그 목록은
 # folder_paths.recursive_search 의 os.path.relpath 라 Windows 에서는 하위 폴더가 역슬래시다 — 같은 표기로 만든다.
-ANIMA_KEY_PREFIXES = ("model.diffusion_model.", "diffusion_model.", "net.", "")
-
-
-def _safetensors_header(path):
-    """Bounded header read (never tensor data). Raises ValueError on a malformed file."""
-    path = Path(path)
-    with path.open("rb") as handle:
-        size = struct.unpack("<Q", handle.read(8))[0]
-        if not 2 <= size <= min(16 * 1024 * 1024, path.stat().st_size - 8):
-            raise ValueError("header size")
-        header = json.loads(handle.read(size))
-    if not isinstance(header, dict):
-        raise ValueError("header")
-    return header
-
-
-def is_anima_unet(path):
-    """ANIMA DiT 인가 — Cosmos-Predict2 블록 + LLM 어댑터(ANIMA 에만 있다). SDXL · Flux · 순수 Cosmos 는 아니다."""
-    names = [key for key in _safetensors_header(path) if key != "__metadata__"]
-    for prefix in ANIMA_KEY_PREFIXES:
-        keys = {key[len(prefix):] for key in names if key.startswith(prefix)}
-        if ("blocks.0.adaln_modulation_cross_attn.1.weight" in keys
-                and any(key.startswith("llm_adapter.") for key in keys)
-                and any(key.startswith("x_embedder.") for key in keys)):
-            return True
-    return False
-
-
-def _anima_check(path):
-    key = (str(path), _file_stamp(path))
-    with LOCK:
-        if key in _ANIMA_CHECK_CACHE:
-            return _ANIMA_CHECK_CACHE[key]
-    try:
-        verdict = "ok" if is_anima_unet(path) else "not_anima"
-    except (OSError, ValueError, TypeError, AttributeError, struct.error):
-        verdict = "invalid"
-    with LOCK:
-        if len(_ANIMA_CHECK_CACHE) >= 512:
-            _ANIMA_CHECK_CACHE.clear()
-        _ANIMA_CHECK_CACHE[key] = verdict
-    return verdict
+# ANIMA 인지는 가리지 않는다(사용자 지정 09-28) — 개인 병합 모델일 수 있고, 안 맞는 파일이면 생성 단계에서 엔진이
+# 오류로 끝낸다. 같은 이름이 앞 폴더에 있는 파일만 뺀다(ComfyUI 는 앞 폴더의 것을 연다).
 
 
 def _receipt_unet(settings):
@@ -308,7 +267,7 @@ def unet_roots(settings, receipt_unet=None):
 def unet_catalog(settings):
     """{'available': [{name, size, source, path}], 'skipped': [{name, source, reason}]} — 기본 모델이 맨 앞.
 
-    reason: not_anima(ANIMA 가 아님) · invalid(safetensors 머리가 깨짐) · shadowed(앞 폴더에 같은 이름).
+    reason: shadowed(앞 폴더에 같은 이름 — ComfyUI 는 앞 폴더의 파일을 연다).
     """
     receipt_unet = _receipt_unet(settings)
     roots = unet_roots(settings, receipt_unet)
@@ -317,8 +276,7 @@ def unet_catalog(settings):
         cached = _UNET_CACHE.get(key)
         if cached and time.monotonic() - cached[0] < 2:
             return copy.deepcopy(cached[1])
-    trusted = _folder_identity(receipt_unet) if receipt_unet is not None else None
-    result = _scan_unet_catalog(roots, trusted)
+    result = _scan_unet_catalog(roots)
     with LOCK:
         if len(_UNET_CACHE) >= 64:
             _UNET_CACHE.clear()
@@ -326,7 +284,7 @@ def unet_catalog(settings):
     return copy.deepcopy(result)
 
 
-def _scan_unet_catalog(roots, trusted):
+def _scan_unet_catalog(roots):
     available, skipped, names, files = [], [], set(), set()
     for root, source in roots:
         for path in sorted(walk_files(root), key=lambda p: str(p).casefold()):
@@ -341,11 +299,6 @@ def _scan_unet_catalog(roots, trusted):
                 skipped.append({"name": name, "source": source, "reason": "shadowed"})
                 continue
             names.add(name.casefold())
-            # 설치 영수증이 해시로 고정한 기본 모델은 머리를 다시 읽지 않는다
-            verdict = "ok" if identity == trusted else _anima_check(path)
-            if verdict != "ok":
-                skipped.append({"name": name, "source": source, "reason": verdict})
-                continue
             try:
                 size = path.stat().st_size
             except OSError:

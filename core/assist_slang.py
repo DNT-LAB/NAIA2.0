@@ -65,6 +65,21 @@ def _sense_text(senses: Iterable[dict[str, Any]], sexual_ok: bool) -> str:
     return "; ".join(out[:MAX_SENSES]) if marked else ""
 
 
+# 용언 줄기 바로 뒤에 오는 어미 · 피동 접사의 첫 글자(따먹히는 · 떡치다가) — '하' 는 없다(느끼하다 · 갈구하다 는 다른 낱말)
+_ENDING_HEADS = frozenset("고는다며서아어여지게던면기았었겠네요니나냐자라려은을히혀리")
+
+
+def _verb_in_text(stem: str, source: str) -> bool:
+    """두 음절 동사 줄기가 글자로 나오고 바로 뒤가 어미인가(떡치다가 · 따먹는). 뒤가 비었어도 맞다(요청 끝)."""
+    start = source.find(stem)
+    while start >= 0:
+        tail = source[start + len(stem):start + len(stem) + 1]
+        if not tail or tail in _ENDING_HEADS or not ("가" <= tail <= "힣"):
+            return True
+        start = source.find(stem, start + 1)
+    return False
+
+
 def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens: Iterable[tuple[str, str]] | None = None,
           entries: dict[str, Any] | None = None) -> list[tuple[str, str]]:
     """요청에 든 속어 풀이 [(낱말, 영어 풀이)] — 손으로 쓴 것이 먼저(같은 낱말이면 그것만), 합쳐 MAX_HINTS 까지.
@@ -83,10 +98,13 @@ def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens:
         if word in taken or not key:
             continue
         verb = entry.get("kind") == "verb"
-        # 세 음절 이상 · 두 음절 동사 줄기(떡치 · 따먹 — Kiwi 는 이런 속어 동사를 떡+치 로 쪼갠다)는 글자 그대로,
-        # 나머지(한 음절 · 두 음절 명사 — 보지 는 '보지 않는' 에도 있다)는 토막의 꼴 · 품사로만
-        if len(key) >= 3 or (verb and len(key) == 2):
+        # 세 음절 이상은 글자 그대로. 두 음절 동사 줄기(떡치 · 따먹 — Kiwi 는 이런 속어 동사를 떡+치 로 쪼갠다)는 토막으로
+        # 맞거나, 글자로 맞되 Kiwi 가 그것을 명사로 내지 않았고 바로 뒤가 어미일 때만 — 기차다 가 '기차를' 에, 느끼다 가
+        # '느끼하다' 에 걸렸다(검토 09-28). 나머지(한 음절 · 두 음절 명사 — '보지 않는')는 토막의 꼴 · 품사로만
+        if len(key) >= 3:
             hit = key in source
+        elif verb and len(key) == 2:
+            hit = key in verbs or (key not in nouns and _verb_in_text(key, source))
         else:
             hit = key in (verbs if verb else nouns)
         if not hit:

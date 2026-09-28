@@ -33,6 +33,10 @@ const INSTALL_POLL_MS = 1000;
 const MODEL_POLL_MS = 3000;          // AI 모델이 없는 동안(다른 창에서 받는 중일 수 있다) 다시 묻는 간격
 const MAX_LINES = 6;
 const PREF_KEY = 'naia_assist_prefs_v1';
+// [기록](사용자 지정 2026-09-28) — 이번 세션의 결과를 모아 두고 눌러 그때로 되돌아간다. sessionStorage: 새로고침엔 남고
+// 창(앱)을 닫으면 사라진다. 결과 칸을 고친 것도 그 기록에 남는다(같은 result 객체).
+const HISTORY_KEY = 'naia_assist_history_v1';
+const HISTORY_MAX = 30;
 const HL_KINDS = ['found', 'chosen', 'miss', 'off'];
 // [고급 설정] — User Preference(사용자 지정 2026-09-26): 다듬기가 고른 등급의 문장을 따라 프롬프트를 고친다(영어로).
 // E 는 사용자가 직접 적는다(비워 두면 쓰지 않는다). 앞으로 이 창에 입력 칸이 더 붙는다.
@@ -71,6 +75,21 @@ const ADV_CSS = `
 }
 .as-line textarea.as-edit:hover { border-color: var(--border-dim); }
 .as-line textarea.as-edit:focus { outline: none; border-color: var(--text-dim); background: rgba(255,255,255,0.03); }
+.as-hist { padding: 6px 10px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-muted); font-size: 10px; }
+.as-hist-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.as-hist-head b { color: var(--text-primary); font-size: 10.5px; }
+.as-hist-head span { flex: 1; min-width: 0; }
+.as-hist-list { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.as-hist-row {
+  display: grid; grid-template-columns: 36px 12px minmax(0, 1fr); column-gap: 6px; align-items: baseline; width: 100%;
+  padding: 3px 6px; border: 1px solid transparent; border-radius: 5px; background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: 10.5px; text-align: left; cursor: pointer;
+}
+.as-hist-row:hover { border-color: var(--border-dim); background: rgba(255,255,255,0.03); }
+.as-hist-row.is-on { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.12); color: var(--text-primary); }
+.as-hist-time, .as-hist-r { font-family: var(--font-mono); color: var(--text-dim); }
+.as-hist-text, .as-hist-tags { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-hist-tags { grid-column: 3; color: var(--text-dim); font-size: 10px; }
 `;
 const HIGHLIGHT_API = typeof Highlight !== 'undefined' && typeof CSS !== 'undefined' && !!CSS.highlights;
 
@@ -83,6 +102,22 @@ function loadPrefs() {
 
 function savePrefs(prefs) {
   try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* 저장 못 해도 동작한다 */ }
+}
+
+function loadHistory() {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(raw)
+      ? raw.filter(e => e && typeof e === 'object' && e.id && e.result && typeof e.text === 'string').slice(0, HISTORY_MAX)
+      : [];
+  } catch { return []; }
+}
+
+function saveHistory(list) {
+  // 넘치면(저장 한도) 오래된 것부터 반씩 덜어 다시 — 그래도 못 쓰면 이 창이 들고 있는 것만으로 동작한다
+  for (let keep = list.length; ; keep = Math.floor(keep / 2)) {
+    try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, keep))); return; } catch { if (!keep) return; }
+  }
 }
 
 function clampCount(value, fallback) {
@@ -112,6 +147,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   const notNames = new Set();     // 사용자가 '이름 아님' 으로 고른 낱말
   let recap = null;               // 직전 검색(기억 1개)
   let result = null;              // 마지막 응답
+  // 이번 세션의 결과 기록(새 것이 앞) · 지금 보이는 기록 · 칸 · 단추 — [기록](사용자 지정 2026-09-28)
+  let history = loadHistory();
+  let historyAt = null, histPanel = null, histBtn = null, histTimer = null;
   let busy = false, askSeq = 0, namesSeq = 0, namesTimer = null, pollTimer = null;
   let status = null;
   let pickerForm = null, pickSeq = 0, pickTimer = null;
@@ -176,8 +214,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
           `<button type="button" class="fs-rating-btn" data-r="${r.id}" title="${r.title}">${r.label}</button>`).join('')}</span>
         <button type="button" class="as-seg" data-as-adv aria-expanded="false"
                 title="다듬기가 따를 User Preference(등급마다)">고급 설정</button>
+        <button type="button" class="as-seg" data-as-hist aria-expanded="false" hidden
+                title="이번 세션의 결과 — 눌러 그때로 되돌아갑니다">기록</button>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
+      <div class="as-hist" data-as-hist-panel hidden></div>
       <div class="as-adv" data-as-adv-panel hidden>
         <div class="as-adv-head"><b>User Preference</b>
           <span>다듬기가 고른 등급의 문장을 따라 프롬프트를 고칩니다 · 영어로 · 비워 두면 쓰지 않습니다</span>
@@ -199,6 +240,26 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     sendBtn = overlay.querySelector('[data-as-send]');
     advPanel = overlay.querySelector('[data-as-adv-panel]');
     advBtn = overlay.querySelector('[data-as-adv]');
+    histPanel = overlay.querySelector('[data-as-hist-panel]');
+    histBtn = overlay.querySelector('[data-as-hist]');
+    histBtn.addEventListener('click', () => {
+      histPanel.hidden = !histPanel.hidden;
+      paintHistory();
+      fit();
+    });
+    histPanel.addEventListener('click', event => {
+      if (event.target.closest('[data-as-hist-clear]')) {
+        history = [];
+        historyAt = null;
+        saveHistory(history);
+        paintHistory();
+        fit();
+        return;
+      }
+      const row = event.target.closest('[data-as-hist-id]');
+      if (row) restore(row.dataset.asHistId);
+    });
+    paintHistory();
     if (!document.getElementById(ADV_STYLE_ID)) {
       const style = document.createElement('style');
       style.id = ADV_STYLE_ID;
@@ -658,6 +719,82 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     render();
     paintBusy();
     linkEvents();
+    remember(text);
+  }
+
+  // ── [기록] — 이번 세션의 결과(사용자 지정 2026-09-28). 새 결과를 앞에 쌓고, 누르면 그때의 요청 · 등급 · 인원 · 이름 선택 ·
+  // 기억 · 결과로 되돌아간다(붙인 이벤트 검색도 그 핀 · 인원 · 등급으로). 기억(recap)도 돌려 두니 이어 묻기도 그때부터다.
+
+  function remember(text) {
+    const entry = {
+      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), text, rating,
+      personsMode, girls, boys, choices: [...choices], notNames: [...notNames], recap, result,
+    };
+    history = [entry, ...history].slice(0, HISTORY_MAX);
+    historyAt = entry.id;
+    saveHistory(history);
+    paintHistory();
+  }
+
+  function restore(id) {
+    const entry = history.find(e => e.id === id);
+    if (!entry) return;
+    if (busy) { askSeq += 1; busy = false; paintBusy(); }      // 도는 요청의 답은 버린다 — 고른 기록이 이긴다
+    closePicker();
+    input.value = entry.text;
+    rating = RATINGS.some(r => r.id === entry.rating) ? entry.rating : rating;
+    personsMode = entry.personsMode === 'manual' ? 'manual' : 'auto';
+    girls = clampCount(entry.girls, girls);
+    boys = clampCount(entry.boys, boys);
+    persistPrefs();
+    choices.clear();
+    for (const [form, tag] of entry.choices || []) choices.set(form, tag);
+    notNames.clear();
+    for (const form of entry.notNames || []) notNames.add(form);
+    recap = entry.recap || null;
+    result = entry.result;
+    historyAt = entry.id;
+    names = new Map();
+    spans = [];
+    absorbNames(result.names, entry.text);
+    paintRating();
+    paintPersons();
+    onInput();                  // 입력칸 높이 · 이름 칠하기를 되돌린 글에 맞춘다
+    paintNames();
+    render();
+    histPanel.hidden = true;    // 되돌아간 결과를 보인다
+    paintHistory();
+    linkEvents();
+    fit();
+  }
+
+  /** 기록 줄의 둘째 줄 — 결과의 앞부분(장면 = 메인 · 태그 = 태그 이름 · 갈래 = 항목 이름) */
+  function historySummary(r) {
+    if (!r) return '';
+    if (r.task === 'scene') return String(r.prompt?.main || '');
+    if (r.task === 'tag') return (r.tags || []).map(t => t.tag).join(', ');
+    return (r.items || []).map(i => i.title || i.value).join(', ');
+  }
+
+  function paintHistory() {
+    if (!histBtn) return;
+    histBtn.hidden = !history.length;
+    histBtn.textContent = `기록 ${history.length}`;
+    if (!history.length) histPanel.hidden = true;
+    histBtn.classList.toggle('is-on', !histPanel.hidden);
+    histBtn.setAttribute('aria-expanded', String(!histPanel.hidden));
+    if (histPanel.hidden) return;
+    const clock = at => {
+      const d = new Date(at);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+    histPanel.innerHTML = `<div class="as-hist-head"><b>기록</b>
+        <span>이번 세션의 결과 — 누르면 그때로 되돌아갑니다 · 창을 닫으면 사라집니다</span>
+        <button type="button" class="as-adv-reset" data-as-hist-clear>비우기</button></div>
+      <div class="as-hist-list">${history.map(e => `<button type="button" class="as-hist-row${e.id === historyAt ? ' is-on' : ''}"
+          data-as-hist-id="${esc(e.id)}"><span class="as-hist-time">${clock(e.at)}</span><span class="as-hist-r">${
+          esc(String(e.rating || '').toUpperCase())}</span><span class="as-hist-text">${esc(e.text)}</span>
+          <span class="as-hist-tags">${esc(historySummary(e.result))}</span></button>`).join('')}</div>`;
   }
 
   // 결과의 핀(이벤트 맵 풀)으로 Fast Search 의 '이벤트' 를 이 창 바로 아래에 붙여 연다(사용자 지정 2026-09-28 — 결과 아래
@@ -805,6 +942,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         autoSize(box);
         const empty = !oneLine(p.main);
         body.querySelectorAll('[data-as-generate], [data-as-apply], [data-as-copy]').forEach(b => { b.disabled = empty; });
+        // 고친 글은 같은 result 를 쥔 기록에도 들어 있다 — 새로고침에도 남게 조금 뒤에 저장한다
+        clearTimeout(histTimer);
+        histTimer = setTimeout(() => saveHistory(history), 400);
       });
       if (typeof bindTagAssist === 'function') bindTagAssist(box);
     });
@@ -1013,6 +1153,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function reset() {
     recap = null;
     result = null;
+    historyAt = null;                      // 기록은 그대로 — 지금 보이는 기록만 없다
+    paintHistory();
     choices.clear();
     notNames.clear();
     names = new Map();

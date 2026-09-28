@@ -18,8 +18,9 @@
  * - 칠하기는 promptHighlighter 와 같은 방식이다: 입력칸 뒤에 같은 글을 담은 거울을 깔고 CSS Custom Highlight API
  *   로 범위만 칠한다(범위는 배치를 안 바꾼다 — 캐럿이 글자와 어긋나지 않는다). API 가 없으면 <mark> 로 칠한다.
  * - 크기·자리 규약은 Fast Search 와 같다(결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반).
- * - [이어 고치기](사용자 지정 2026-09-28 — 기본은 새 검색): 켜면 다음 요청이 받은 결과(고친 메인 · 캐릭터 칸 그대로)에 고칠
- *   점만 더한다(서버 _followup — 빼기는 요청이 가리킨 것만). 이벤트 검색은 새 태그로 다시 붙인다. [새로] 가 끈다.
+ * - 단추는 [제출 | 이어서 질문] 둘뿐(사용자 지정 2026-09-28). 제출(Enter) = 늘 새로 찾기 — 직전 검색 기억을 보내지 않는다.
+ *   [이어서 질문] = 누를 때만 받은 결과(고친 메인 · 캐릭터 칸 그대로)에 적은 만큼 고친다(서버 _followup — 빼기는 요청이
+ *   가리킨 것만). 이벤트 검색은 새 태그로 다시 붙인다. [×] · [이어 고치기] 스위치 · [새로] 는 없앴다(쓸모없다 — 사용자).
  * - [ ] NAIA 추론 파이프라인 미사용(09-28): 켜면 AI 모델이 바로 태그 + 문장을 쓴다(서버 _direct — 한국어 층 · 이벤트 맵 ·
  *   되살리기 · 다듬기 없음). 이 기계에 남는다(prefs).
  */
@@ -140,7 +141,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   let rating = RATINGS.some(r => r.id === prefs.rating) ? prefs.rating : 'g';
   let personsMode = prefs.personsMode === 'manual' ? 'manual' : 'auto';
   let direct = prefs.direct === true;      // [ ] NAIA 추론 파이프라인 미사용
-  let followOn = false;                    // [이어 고치기] — 기본은 꺼짐(새 검색)
+  let resultMode = 'search';              // 보이는 결과를 만든 길(search · direct · followup)
+  let busyMode = 'search';                // 도는 요청(search · followup) — 단추 글
   let followBtn = null, directBox = null;
   const savedPreference = prefs.preference && typeof prefs.preference === 'object' ? prefs.preference : {};
   const preference = Object.fromEntries(RATINGS.map(r => [r.id,
@@ -152,7 +154,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   let spans = [];                 // [{start, end, form}] — 원문 위치
   const choices = new Map();      // form -> 사용자가 고른 태그
   const notNames = new Set();     // 사용자가 '이름 아님' 으로 고른 낱말
-  let recap = null;               // 직전 검색(기억 1개)
   let result = null;              // 마지막 응답
   // 이번 세션의 결과 기록(새 것이 앞) · 지금 보이는 기록 · 칸 · 단추 — [기록](사용자 지정 2026-09-28)
   let history = loadHistory();
@@ -211,8 +212,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
                     aria-label="Assist 요청"
                     placeholder="말로 적어 주세요 — 예: 카나데가 나히다를 공주안기 하고 뛰어다니는 장면"></textarea>
         </div>
-        <button type="button" class="as-send" data-as-send title="찾기 (Enter)">찾기</button>
-        <button type="button" class="as-close" data-as-close aria-label="닫기">×</button>
+        <button type="button" class="as-send" data-as-send title="새로 찾기 (Enter)">제출</button>
+        <button type="button" class="as-send" data-as-follow disabled
+                title="받은 결과를 두고 적은 만큼 고칩니다">이어서 질문</button>
       </div>
       <div class="as-names" data-as-names hidden></div>
       <div class="as-opts">
@@ -225,9 +227,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
                 title="이번 세션의 결과 — 눌러 그때로 되돌아갑니다">기록</button>
         <label class="as-auto" title="한국어 분석 · 이벤트 맵 · 되살리기 · 다듬기 없이 AI 모델이 바로 태그 + 문장을 씁니다">
           <input type="checkbox" data-as-direct> NAIA 추론 파이프라인 미사용</label>
-        <button type="button" class="as-seg as-follow" data-as-follow aria-pressed="false" hidden
-                title="켜면 다음 요청은 받은 결과를 두고 고칠 점만 반영합니다 · 끄면 새로 찾기">이어 고치기</button>
-        <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
       <div class="as-hist" data-as-hist-panel hidden></div>
       <div class="as-adv" data-as-adv-panel hidden>
@@ -256,11 +255,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     followBtn = overlay.querySelector('[data-as-follow]');
     directBox = overlay.querySelector('[data-as-direct]');
     directBox.checked = direct;
-    followBtn.addEventListener('click', () => {
-      followOn = !followOn;
-      paintFollow();
-      input.focus();
-    });
+    followBtn.addEventListener('click', () => { void followup(); });
     directBox.addEventListener('change', () => {
       direct = directBox.checked;
       persistPrefs();
@@ -308,8 +303,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       persistPrefs();
     });
 
-    overlay.querySelector('[data-as-close]').addEventListener('click', close);
-    overlay.querySelector('[data-as-reset]').addEventListener('click', reset);
     sendBtn.addEventListener('click', () => { void ask(); });
     input.addEventListener('input', onInput);
     input.addEventListener('keydown', onKeyDown);
@@ -708,38 +701,35 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     return personsMode === 'manual' ? { mode: 'manual', girls, boys } : { mode: 'auto' };
   }
 
-  /** 조건(등급 · 인원 · 이름)이 바뀌면 같은 요청으로 다시 찾는다 — 이어 고치기 중엔 같은 고칠 점을 또 얹지 않는다 */
+  /** 조건(등급 · 인원 · 이름)이 바뀌면 같은 요청으로 다시 찾는다 — 이어서 질문으로 받은 결과면 입력칸이 고칠 점뿐이라
+   *  (새로 찾으면 고칠 점만 찾는다) 다시 찾지 않는다 */
   function reask() {
-    if (result && !busy && !followOn) void ask();
+    if (result && !busy && resultMode !== 'followup') void ask();
   }
 
   function canFollow() {
     return !!(result && result.task === 'scene' && oneLine(result.prompt?.main));
   }
 
-  /** [이어 고치기] 단추 · 보내기 단추 글 · 입력칸 안내 — 결과(장면)가 있을 때만 켤 수 있다 */
+  /** [제출 | 이어서 질문] — 이어서 질문은 받은 결과(장면)가 있을 때만 누를 수 있다. 도는 동안 둘 다 잠근다 */
   function paintFollow() {
     if (!followBtn) return;
-    const can = canFollow();
-    if (!can) followOn = false;
-    followBtn.hidden = !can;
-    followBtn.classList.toggle('is-on', followOn);
-    followBtn.setAttribute('aria-pressed', String(followOn));
-    if (sendBtn) sendBtn.textContent = busy ? (followOn ? '고치는 중…' : '찾는 중…') : (followOn ? '고치기' : '찾기');
-    input.placeholder = followOn ? '고칠 점을 적어 주세요 — 예: 배경을 밤의 옥상으로, 머리는 짧게'
-      : '말로 적어 주세요 — 예: 카나데가 나히다를 공주안기 하고 뛰어다니는 장면';
+    followBtn.disabled = busy || !canFollow();
+    followBtn.textContent = busy && busyMode === 'followup' ? '고치는 중…' : '이어서 질문';
+    if (sendBtn) sendBtn.textContent = busy && busyMode === 'search' ? '찾는 중…' : '제출';
   }
 
+  /** [제출](Enter) — 늘 새로 찾기. 직전 검색 기억(previous)을 보내지 않는다(사용자 지정 09-28: 이어서 질문은 그 단추로만) */
   async function ask() {
-    if (followOn && canFollow()) return followup();
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     closePicker();
     const mine = ++askSeq;
     busy = true;
+    busyMode = 'search';
     paintBusy();
     const payload = {       // 직역(끔) · 다듬기(켬) · 되살리기(켬)는 서버 기본값 그대로
-      text, rating, persons: personsPayload(), previous: recap,
+      text, rating, persons: personsPayload(),
       names: Object.fromEntries(choices), not_names: [...notNames],
     };
     // 기록에는 이 요청을 보낸 때의 값을 싣는다 — 답을 기다리는 동안 등급 · 인원을 바꿔도 기록은 결과와 맞는다(Codex 리뷰 09-28)
@@ -762,7 +752,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       return;
     }
     result = data;
-    if (data.recap) recap = data.recap;
+    resultMode = asked.mode || 'search';
     absorbNames(data.names, input.value);
     paintPersons();
     paintNames();
@@ -775,12 +765,14 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   /** [이어 고치기] — 받은 결과(고친 메인 · 캐릭터 칸 그대로) + 고칠 점. 실패하면 받은 결과를 그대로 두고 알린다.
    *  인원 · 이름 · 등급은 그 결과의 것을 이어 쓴다(서버에 인원 · 등급 정보를 주지 않는다 — 풀만 그 값으로 다시 판다). */
   async function followup() {
+    if (busy || !canFollow()) return;
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     const prev = result;
     closePicker();
     const mine = ++askSeq;
     busy = true;
+    busyMode = 'followup';
     paintBusy();
     // 답을 기다리는 동안 결과 칸을 잠근다 — 그 사이 고친 글을 도착한 답이 덮었다(Codex 리뷰 09-28 F1). 답이 오면 다시 그린다.
     // 잠금은 타자만 막는다(태그 정보 창의 삽입은 readOnly 를 안 본다 — 9차 F1) — 보낸 때의 글을 쥐어 두고 답이 오면 견준다
@@ -814,13 +806,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (editsOf(prev) !== sentEdits) {       // 기다리는 동안 결과 칸이 바뀌었다 — 사용자의 글이 이긴다
       lockEditors(false);
       paintBusy();
-      toast('고치는 동안 결과 칸이 바뀌어 이 답은 버렸습니다 — 다시 [고치기] 를 눌러 주세요', 'info');
+      toast('고치는 동안 결과 칸이 바뀌어 이 답은 버렸습니다 — 다시 [이어서 질문] 을 눌러 주세요', 'info');
       return;
     }
     // 새 결과 = 이전 결과(이름 · 인원 · 관계) + 고친 프롬프트 · 풀. 다듬기 · 되살리기 줄은 이전 검색의 것이라 지운다(서버가 null)
     result = { ...prev, ...data, names: prev.names, suggested_names: prev.suggested_names, persons: prev.persons,
       relations: prev.relations, direct: prev.direct };
-    if (recap && data.followup?.tags) recap = { ...recap, include: data.followup.tags };
+    resultMode = 'followup';
     render();
     paintBusy();
     linkEvents();
@@ -828,7 +820,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   // ── [기록] — 이번 세션의 결과(사용자 지정 2026-09-28). 새 결과를 앞에 쌓고, 누르면 그때의 요청 · 등급 · 인원 · 이름 선택 ·
-  // 기억 · 결과로 되돌아간다(붙인 이벤트 검색도 그 핀 · 인원 · 등급으로). 기억(recap)도 돌려 두니 이어 묻기도 그때부터다.
+  // 결과로 되돌아간다(붙인 이벤트 검색도 그 핀 · 인원 · 등급으로). [이어서 질문] 은 그 결과부터 고친다.
 
   function remember(text, asked, data) {
     // 서버가 받지 않은 이름 선택은 뺀다(되돌아갈 때 '선택을 쓸 수 없어 되돌렸습니다' 가 또 뜨지 않게)
@@ -836,7 +828,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     const entry = {
       id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), text,
       rating: asked.rating, personsMode: asked.personsMode, girls: asked.girls, boys: asked.boys,
-      choices: asked.choices.filter(([form]) => !refused.has(form)), notNames: asked.notNames, recap, result,
+      choices: asked.choices.filter(([form]) => !refused.has(form)), notNames: asked.notNames, result,
       mode: asked.mode || 'search',
     };
     history = [entry, ...history].slice(0, HISTORY_MAX);
@@ -860,16 +852,15 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     for (const [form, tag] of entry.choices || []) choices.set(form, tag);
     notNames.clear();
     for (const form of entry.notNames || []) notNames.add(form);
-    recap = entry.recap || null;
     result = entry.result;
     historyAt = entry.id;
-    // 그 결과를 만든 방식으로 — 고친 결과면 이어 고치기를 켜 두고, 직접 · 검색이면 [파이프라인 미사용] 을 그대로
+    // 그 결과를 만든 방식으로 — 직접 · 검색이면 [파이프라인 미사용] 을 그대로(고친 결과는 그 결과의 것을 둔다)
     if (entry.mode === 'direct' || entry.mode === 'search') {
       direct = entry.mode === 'direct';
       if (directBox) directBox.checked = direct;
       persistPrefs();
     }
-    followOn = entry.mode === 'followup';
+    resultMode = entry.mode || 'search';
     names = new Map();
     spans = [];
     absorbNames(result.names, entry.text);
@@ -910,7 +901,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       <div class="as-hist-list">${history.map(e => `<button type="button" class="as-hist-row${e.id === historyAt ? ' is-on' : ''}"
           data-as-hist-id="${esc(e.id)}"><span class="as-hist-time">${clock(e.at)}</span><span class="as-hist-r">${
           esc(String(e.rating || '').toUpperCase())}</span><span class="as-hist-text">${
-          e.mode === 'followup' ? '고치기 · ' : e.mode === 'direct' ? '직접 · ' : ''}${esc(e.text)}</span>
+          e.mode === 'followup' ? '이어서 · ' : e.mode === 'direct' ? '직접 · ' : ''}${esc(e.text)}</span>
           <span class="as-hist-tags">${esc(historySummary(e.result))}</span></button>`).join('')}</div>`;
   }
 
@@ -931,7 +922,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (!overlay) return;
     overlay.classList.toggle('is-busy', busy);
     if (sendBtn) sendBtn.disabled = busy;
-    paintFollow();                          // 보내기 단추 글(찾기 · 고치기 · 찾는 중…)
+    paintFollow();                          // 단추 글(제출 · 이어서 질문 · 찾는 중… · 고치는 중…) · 이어서 질문 잠금
     if (busy && !result) body.innerHTML = '<div class="as-note">찾는 중…</div>';
   }
 
@@ -1027,7 +1018,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function render() {
     if (!body) return;
     const r = result;
-    // 결과가 없어도 단추를 다시 칠한다 — [새로] 뒤에 '고치기' 가 남았다(Codex 리뷰 09-28 F7)
+    // 결과가 없어도 단추를 다시 칠한다 — 결과 없이 [이어서 질문] 이 눌리면 안 된다(Codex 리뷰 09-28 F7)
     if (!r) { body.innerHTML = ''; paintFollow(); fit(); return; }
     let html;
     if (r.task === 'scene') {
@@ -1287,25 +1278,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function fit() {
     if (!overlay || overlay.hidden || !heightCap) return;
     overlay.style.maxHeight = `${heightCap}px`;
-  }
-
-  function reset() {
-    recap = null;
-    result = null;
-    followOn = false;                      // 새로 = 이어 고치기도 끈다(render 가 단추를 감춘다)
-    historyAt = null;                      // 기록은 그대로 — 지금 보이는 기록만 없다
-    paintHistory();
-    choices.clear();
-    notNames.clear();
-    names = new Map();
-    spans = [];
-    closePicker();
-    render();
-    linkEvents();                          // 결과가 없으니 붙여 둔 이벤트 검색도 뗀다
-    paintPersons();
-    scheduleNames(0);
-    input.focus();
-    toast('기억과 이름 선택을 지웠습니다', 'info');
   }
 
   function show() {

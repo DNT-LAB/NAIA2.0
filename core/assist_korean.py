@@ -101,6 +101,8 @@ class KoreanVocab:
     blocked_keys: set[str] = field(default_factory=set)    # 묻지 않을 키워드(규칙표 keyword_block — 쳐다보기)
     # 소리 열쇠 -> 캐릭터 태그 — 한국어 키워드가 없는 캐릭터(34,869개 · lacrimosa (nte))를 한글 표기로 찾는다(09-26)
     sounds: dict[str, set[str]] = field(default_factory=dict)
+    # 붙여 쓴 말 -> 그 말을 **제 이름**으로 가진 태그들(build_vocab) — 별명과 이름을 가른다(name_strength)
+    owners: dict[str, set[str]] = field(default_factory=dict)
 
     def sound_candidates(self, word: str) -> set[str]:
         """사전이 모르는 한글 낱말(두 음절 이상)의 소리가 한국어 이름 없는 캐릭터 이름과 같으면 그 태그들
@@ -132,7 +134,8 @@ class KoreanVocab:
     def name_strength(self, word: str) -> str:
         """이 낱말이 이름으로 쓰이는 정도 — 한국어 키워드에서 **가장 많이 쓰이는 항목**으로 가른다(작가 항목은 뺀다).
 
-        'general'   캐릭터가 아닌 태그가 가장 많다(교복·트윈테일·원신·공주·고양이·사쿠라=벚꽃)
+        'general'   캐릭터가 아닌 태그가 가장 많다(교복·트윈테일·원신·공주·고양이·사쿠라=벚꽃) — 또는 가장 많은 캐릭터의
+                    **별명**인데 일반 낱말의 제 이름이다(쓰레기통 = miyu 의 별명 · trash can 의 이름, _nickname)
         'character' 캐릭터 태그가 가장 많다(푸리나 10,774 > inner ego 55 · 호두 · 렘 · 루피)
         'piece'     키워드엔 없고 이름 조각에만 있다(카나데 — 키워드는 **작가** kanade 뿐이었다)
         'none'      모른다.
@@ -144,8 +147,23 @@ class KoreanVocab:
             # 단 한 캐릭터의 변형판 묶음은 그 캐릭터 이름이다 — 안 그러면 '하츠네 미쿠' 를 한 이름으로 붙인 순간 놓친다.
             return "character" if _one_character_family(rows) else "general"
         if rows:
-            return "character" if max(rows, key=lambda r: r[1])[2] == "character" else "general"
+            best = max(rows, key=lambda r: r[1])
+            if best[2] != "character" or self._nickname(compact(word), best, rows):
+                return "general"
+            return "character"
         return "piece" if self.name_pieces.get(compact(word)) or self.sound_candidates(word) else "none"
+
+    def _nickname(self, key: str, best: tuple[str, int, str], rows: list[tuple[str, int, str]]) -> bool:
+        """가장 많이 쓰인 캐릭터가 이 말을 제 이름으로 갖지 않고(별명 — 첫 이름도 띄어 쓴 성 이름도 아니다), 괄호 꼬리 없는
+        일반 태그가 제 이름으로 가지며 그 캐릭터 게시물의 NICKNAME_SHARE 이상이면 일반 낱말이다. '쓰레기통' 이 miyu (blue
+        archive) 4,494 > trash can 2,667 이라 이름 칩이 떴다(사용자 제보 09-28). 사전 전체에서 51 낱말이 바뀐다(뱀 · 냉장고 ·
+        문어 · 구미호 …). 괄호 꼬리 태그는 작품의 것(crisis management form (machimazo) — 샤미코는 캐릭터다) · 몫이 작으면
+        그 말로 캐릭터를 부른다(squid girl 85 vs 오징어소녀 2,178)."""
+        own = self.owners.get(key)
+        if not own or best[0] in own:
+            return False
+        return any(r[2] != "character" and r[0] in own and not _NAME_QUALIFIER.search(r[0])
+                   and r[1] >= NICKNAME_SHARE * best[1] for r in rows)
 
     def is_general_word(self, word: str) -> bool:
         return self.name_strength(word) == "general"
@@ -162,6 +180,27 @@ class KoreanVocab:
 
 # 캐릭터 키워드 끝의 괄호 꼬리 — 작품 · 성별 · 의상(클레 (원신) · 여행자(남) · 아쿠아 (수영복))
 _NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+_PRIMARY_NAME = re.compile(r"<primary>\s*:\s*(.+)$")
+NICKNAME_SHARE = 0.1        # 별명을 이기는 일반 태그의 몫(그 캐릭터 게시물 대비) — KoreanVocab._nickname
+
+
+def _name_parts(keywords_kr: Any) -> tuple[set[str], str, set[str]]:
+    """keywords_kr -> (밝힌 이름, <라벨>, 띄어 쓴 일반 키워드) — 모두 붙여 쓴 꼴. 밝힌 이름 = 첫 일반 키워드(괄호 꼬리 뗀 꼴도) ·
+    [이름] · <primary>:이름 (assist_compose.declared_names 와 같다). 캐릭터의 띄어 쓴 키워드는 성 이름이다(스즈미야 하루히)."""
+    items = [x.strip() for x in str(keywords_kr or "").split(",") if x.strip()]
+    declared: set[str] = set()
+    for x in items:
+        m = _PRIMARY_NAME.match(x)
+        if m:
+            declared.add(compact(m.group(1)))
+        elif x.startswith("[") and x.endswith("]"):
+            declared.add(compact(x.strip("[]")))
+    plain = [x for x in items if not x.startswith(("<", "[")) and ":" not in x]
+    if plain:
+        declared |= {compact(plain[0]), compact(_NAME_QUALIFIER.sub("", plain[0]))}
+    angle = next((x for x in items if x.startswith("<") and x.endswith(">")), "")
+    spaced = {compact(_NAME_QUALIFIER.sub("", x)) for x in plain if " " in _NAME_QUALIFIER.sub("", x).strip()}
+    return {d for d in declared if d}, compact(angle.strip("<>")), {w for w in spaced if w}
 
 # ── 소리 열쇠(한글 표기 <-> 영문 이름, 대충의 발음) ─────────────────────────────────────────
 # 한국어 키워드가 없는 캐릭터가 34,869개(72%)다(lacrimosa (nte) · uraraka ochako · toujou nozomi). 한글 표기와 영문 이름을
@@ -237,6 +276,9 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
     keywords: dict[str, list[tuple[str, int, str]]] = {}
     pieces: dict[str, set[str]] = {}
     sounds: dict[str, set[str]] = {}
+    declared_of: dict[str, set[str]] = {}       # 태그 -> 밝힌 이름
+    label_of: dict[str, str] = {}               # 일반 태그 -> <라벨>
+    spaced_of: dict[str, set[str]] = {}         # 캐릭터 -> 띄어 쓴 이름(성 이름)
 
     def put(key: str, row: tuple[str, int, str]) -> None:
         rows = keywords.setdefault(key, [])
@@ -252,6 +294,12 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
         except (TypeError, ValueError):
             count = 0
         cat = str(info.get("_named_entity_category") or info.get("_cat") or "")
+        declared, label, spaced = _name_parts(info.get("keywords_kr"))
+        declared_of[tag] = declared
+        if cat == "character":
+            spaced_of[tag] = spaced
+        elif label:
+            label_of[tag] = label
         if cat == "character" and not re.search("[가-힣]", str(info.get("keywords_kr") or "")):
             # 한국어 이름이 없는 캐릭터 — 영문 이름(괄호 꼬리 뺀)의 낱말 · 붙여 쓴 전체를 소리 열쇠로(4글자 이상)
             words = [w for w in re.split(r"[\s_\-.]+", re.sub(r"\s*\([^()]*\)", "", tag)) if w]
@@ -275,9 +323,25 @@ def build_vocab(kr_raw: dict[str, Any], *, genders: dict[str, str] | None = None
                 for piece in {parts[-1], "".join(parts)}:
                     if len(piece) >= 2:
                         pieces.setdefault(piece, set()).add(tag)
+    # 제 이름 — 밝힌 이름 + 캐릭터의 성 이름 + 일반 태그의 <라벨>(그 라벨을 쓰는 태그가 하나뿐이고 아무도 그 말을 이름으로
+    # 밝히지 않았을 때 — assist_compose.own_names 와 같다: <신발> 은 분류, <쓰레기통> 은 trash can 의 이름)
+    claims: dict[str, int] = {}
+    for names in declared_of.values():
+        for name in names:
+            claims[name] = claims.get(name, 0) + 1
+    label_uses: dict[str, int] = {}
+    for label in label_of.values():
+        label_uses[label] = label_uses.get(label, 0) + 1
+    owners: dict[str, set[str]] = {}
+    for tag, names in declared_of.items():
+        for name in names | spaced_of.get(tag, set()):
+            owners.setdefault(name, set()).add(tag)
+    for tag, label in label_of.items():
+        if not claims.get(label) and label_uses.get(label, 0) <= 1:
+            owners.setdefault(label, set()).add(tag)
     return KoreanVocab(keywords=keywords, name_pieces=pieces, genders=dict(genders or {}),
                        character_rank=character_rank or (lambda _t: 0), tag_exists=tag_exists or (lambda _t: True),
-                       sounds=sounds)
+                       sounds=sounds, owners=owners)
 
 
 # ── 분석 결과 ────────────────────────────────────────────────────────────────

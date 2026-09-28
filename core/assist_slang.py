@@ -85,7 +85,15 @@ def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens:
     """요청에 든 속어 풀이 [(낱말, 영어 풀이)] — 손으로 쓴 것이 먼저(같은 낱말이면 그것만), 합쳐 MAX_HINTS 까지.
     tokens = Kiwi 토막(꼴, 품사) — 짧은 표제어는 토막으로만 맞춘다."""
     source = clean_text(text)
-    out: list[tuple[str, str]] = [(ko, str(en)) for ko, en in (hand or {}).items() if ko and en and ko in source]
+    # 손 풀이는 글자 그대로 — 끝이 '-' 면 용언 줄기라 바로 뒤가 어미 · 피동 접사일 때만('들어서 박-' 이 '들어서 박물관' ·
+    # '들고 박-' 이 '들고 박스' 에 걸렸다, 09-28)
+    out: list[tuple[str, str]] = []
+    for ko, en in (hand or {}).items():
+        if not ko or not en:
+            continue
+        stem = ko[:-1] if ko.endswith("-") else ""
+        if (stem and _verb_in_text(stem, source)) or (not stem and ko in source):
+            out.append((stem or ko, str(en)))
     taken = {ko for ko, _en in out}
     sexual_ok = rating in ("q", "e")
     toks = list(tokens or [])

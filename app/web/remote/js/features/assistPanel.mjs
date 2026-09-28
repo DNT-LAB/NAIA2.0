@@ -256,8 +256,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       if (!open) return;
       const t = event.target;
       if (overlay.contains(t) || (picker && !picker.hidden && picker.contains(t))) return;
-      // 결과 칸의 자동완성 · 태그 정보 팝업은 창 밖(body)에 뜬다 — 거기를 눌러도 창을 닫지 않는다
-      if (t.closest?.('#tagTooltip, .tag-chip-info-tooltip, .result-info-tag-popup')) return;
+      // 결과 칸의 자동완성 · 태그 정보 팝업은 창 밖(body)에 뜬다 — 거기를 눌러도 창을 닫지 않는다.
+      // 아래에 붙여 연 이벤트 검색 · A 탭(누르면 토글이 닫는다 — 여기서 먼저 닫으면 곧바로 다시 열린다)도 창의 일부다
+      if (t.closest?.('#tagTooltip, .tag-chip-info-tooltip, .result-info-tag-popup, .fs-overlay.is-docked, #assistTab')) return;
       close();
     }, true);
     window.addEventListener('resize', () => {
@@ -646,6 +647,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       body.innerHTML = `<div class="as-note as-note-warn">${esc((data && data.error) || '찾지 못했습니다')}</div>`;
       paintBusy();
       fit();
+      linkEvents();
       return;
     }
     result = data;
@@ -655,6 +657,17 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     paintNames();
     render();
     paintBusy();
+    linkEvents();
+  }
+
+  // 결과의 핀(이벤트 맵 풀)으로 Fast Search 의 '이벤트' 를 이 창 바로 아래에 붙여 연다(사용자 지정 2026-09-28 — 결과 아래
+  // 칸이 비어 있다). 핀이 없으면(이벤트 맵 없음 · 장면이 아닌 요청 · 실패) 붙여 둔 것을 닫는다.
+  function linkEvents() {
+    const fs = window.fastSearch;
+    if (!fs?.showDocked) return;
+    const pins = String(result?.pool?.pins || '').split(',').map(t => t.trim()).filter(Boolean);
+    if (open && pins.length) fs.showDocked(pins.join(', '), overlay);
+    else fs.closeDocked?.();
   }
 
   function paintBusy() {
@@ -1003,6 +1016,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     spans = [];
     closePicker();
     render();
+    linkEvents();                          // 결과가 없으니 붙여 둔 이벤트 검색도 뗀다
     paintPersons();
     scheduleNames(0);
     input.focus();
@@ -1013,19 +1027,28 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     build();
     open = true;
     overlay.hidden = false;
+    paintTab();
     position();
     autoGrow();
     body.querySelectorAll('[data-as-edit]').forEach(autoSize);   // 숨은 동안 잰 높이는 틀린다(폭 0)
     paintNames();
     input.focus();
     input.select();
+    if (result) linkEvents();              // 다시 열면 지난 결과의 이벤트도 다시 붙인다
     void warm();
+  }
+
+  // 결과 칸 왼쪽 가장자리의 A 탭(E 아래, 사용자 지정 2026-09-28) — 열려 있으면 눌린 모양
+  function paintTab() {
+    document.getElementById('assistTab')?.setAttribute('aria-pressed', String(open));
   }
 
   function close() {
     if (!overlay) return;
     open = false;
     overlay.hidden = true;                 // .as-overlay[hidden] 규칙이 실제로 감춘다
+    paintTab();
+    window.fastSearch?.closeDocked?.();
     closePicker();
     clearTimeout(namesTimer);
     clearTimeout(pollTimer);

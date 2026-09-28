@@ -115,6 +115,9 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
   // 인라인으로 펼친 이웃 조합. 한 행만 펼친다.
   // {key, anchor, tags, payload, loading, seq, target, more:Set}
   let inline = null, inlineSeq = 0, inlineRows = [];
+  // Assist 결과 바로 아래에 붙여 연 이벤트 검색(사용자 지정 2026-09-28) - {anchor: Assist 창, saved: 평소 칩}.
+  // 붙어 있는 동안은 '이벤트' 만 켜고, 닫히면 평소 칩으로 되돌린다. 여닫기는 Assist 가 맡는다(바깥 클릭으로 안 닫힌다).
+  let docked = null, dockObserver = null;
   const requests = new Map(SOURCES.map(s => [s.id, {busy: false, wanted: null}]));
 
   const esc = value => String(value == null ? '' : value)
@@ -303,7 +306,7 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
     body.addEventListener('scroll', () => { closePersonPopup(); updateCurrentAnchor(); maybeLoadMoreEvents(); }, {passive: true});
     // 바깥을 누르면 닫는다. 창·인원 팝업 안의 클릭은 각자 처리한다.
     document.addEventListener('pointerdown', event => {
-      if (!open) return;
+      if (!open || docked) return;          // 붙여 연 창은 Assist 가 닫을 때 같이 닫힌다
       const t = event.target;
       if (overlay.contains(t)) return;
       if (personPopup && !personPopup.hidden && personPopup.contains(t)) return;
@@ -522,6 +525,20 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
     if (!overlay || overlay.hidden) return;
     const host = document.querySelector('#rightTabResult') || document.querySelector('.app-layout');
     const r = host ? host.getBoundingClientRect() : null;
+    if (docked && !docked.anchor.hidden) {
+      // Assist 창 바로 아래, 같은 폭 - 높이는 결과 칸 바닥까지(그 칸이 비어 있다)
+      const a = docked.anchor.getBoundingClientRect();
+      const top = Math.round(a.bottom + 8);
+      const bottom = r && r.height >= 160 ? r.bottom - 14 : window.innerHeight - 14;
+      const maxH = Math.max(160, Math.round(bottom - top));
+      overlay.style.transform = 'none';
+      overlay.style.left = `${Math.round(a.left)}px`;
+      overlay.style.top = `${top}px`;
+      overlay.style.width = `${Math.round(a.width)}px`;
+      heightCaps = {base: maxH, hard: maxH};
+      fitHeight();
+      return;
+    }
     if (!r || r.width < 240 || r.height < 160) {
       overlay.style.left = '50%';
       overlay.style.transform = 'translateX(-50%)';
@@ -1040,6 +1057,7 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
 
   function show() {
     build();
+    undock();                             // 붙여 연 창에서 Ctrl+F 를 누르면 평소 창(칩 · 자리)으로 돌아간다
     open = true;
     overlay.hidden = false;
     position();
@@ -1048,8 +1066,51 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
     schedule(0);
   }
 
+  function paintChips() {
+    chipRow?.querySelectorAll('[data-fs-source]').forEach(chip => {
+      const on = enabled.has(chip.dataset.fsSource);
+      chip.classList.toggle('is-on', on);
+      chip.setAttribute('aria-pressed', String(on));
+    });
+  }
+
+  /** Assist 가 결과의 핀(query)으로 '이벤트' 만 켜서 그 창(anchor) 바로 아래에 붙여 연다. 포커스는 Assist 에 둔다. */
+  function showDocked(query, anchor) {
+    if (!anchor) return;
+    build();
+    if (!docked) docked = {anchor, saved: new Set(enabled)};
+    docked.anchor = anchor;
+    enabled = new Set(['event']);
+    paintChips();
+    overlay.classList.add('is-docked');
+    if (typeof ResizeObserver === 'function') {
+      dockObserver = dockObserver || new ResizeObserver(() => position());   // Assist 창이 자라면 따라 내려간다
+      dockObserver.disconnect();
+      dockObserver.observe(anchor);
+    }
+    open = true;
+    overlay.hidden = false;
+    input.value = String(query || '');
+    position();
+    schedule(0);
+  }
+
+  function undock() {
+    if (!docked) return;
+    enabled = docked.saved;
+    docked = null;
+    dockObserver?.disconnect();
+    overlay?.classList.remove('is-docked');
+    paintChips();
+  }
+
+  function closeDocked() {
+    if (docked) close();
+  }
+
   function close() {
     if (!overlay) return;
+    undock();
     open = false;
     overlay.hidden = true;                // CSS 의 .fs-overlay[hidden] 이 실제로 감춘다
     closePersonPopup();
@@ -1082,9 +1143,9 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
       && String(event.key || '').toLowerCase() === 'f';
     if (!hit) return;
     event.preventDefault();
-    if (open) { input.select(); input.focus(); return; }
+    if (open && !docked) { input.select(); input.focus(); return; }
     show();
   }, true);
 
-  return { show, close, isOpen: () => open };
+  return { show, close, showDocked, closeDocked, isOpen: () => open };
 }

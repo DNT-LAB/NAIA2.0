@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260927-firstrun">
+<link rel="stylesheet" href="style.css?v=20260928-atab">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -802,19 +802,13 @@
           <div class="assistants-label">
             <span class="assistants-title">Tools &amp; Assistants <span class="assistants-info">i</span></span>
             <!-- 오른쪽 도구 묶음. `.assistants-label` 이 space-between 이라 이 둘을 형제로
-                 두면 사이가 벌어진다 — 한 번 더 감싸서 Assist 버튼에 붙인다. -->
+                 두면 사이가 벌어진다 — 한 번 더 감싸서 도구 단추끼리 붙인다. -->
             <div class="assistants-actions">
               <button type="button" class="ia-mode-toggle" id="iaModeToggle" aria-pressed="false"
                       data-naia-guide="Interactive 모드. 프롬프트를 캐릭터/의상/액션/표정/구도/배경 슬롯으로 나눠 편집합니다. 켜져 있는 동안 Prompt Fixed와 WC Solo는 사용할 수 없습니다(블록에서 프롬프트를 직접 조립하므로 충돌합니다).">
                 <span>Interactive</span>
               </button>
-              <!-- [Ollama](옛 Ollama Assist · Chat)를 [Assist](Ctrl+O, 앱 내장 모델)로 바꿨다 — Ollama 파이프라인
-                   회수(사용자 지정 2026-09-26). 래퍼(.assistants-ollama-segment)는 옷 때문에 그대로 둔다 -
-                   `:last-child` 규칙이 있어 한 칸이어도 테두리가 맞는다. -->
-              <div class="assistants-ollama-segment" role="group" aria-label="Assist">
-                <button type="button" class="assistants-ollama-btn" id="assistBtn" aria-label="Assist"
-                        data-naia-guide="Assist(Ctrl+O). 원하는 그림을 한국어로 적으면 프롬프트를 찾아 줍니다. 앱 안의 AI 모델을 씁니다 — 모델은 API 설정 › AI 모델에서 받습니다. 열려 있으면 닫습니다.">Assist</button>
-              </div>
+              <!-- [Assist] 는 결과 칸 왼쪽 가장자리의 A 탭(E 아래)으로 옮겼다(사용자 지정 2026-09-28). -->
               <!-- 태그 이름 **부분 매칭** 검색. 자동완성은 속도 때문에 접두사만 봐서
                    `utsusumi kio` 를 `kio` 로 못 찾는다 — 그 구멍을 메운다. -->
               <button type="button" class="ia-mode-toggle" id="tagSearchBtn" aria-pressed="false"
@@ -950,6 +944,10 @@
                눌린 상태(aria-pressed)는 js/features/eventMapPanel.mjs 가 관리한다. -->
           <button type="button" class="em-tab" id="eventMapTab" aria-pressed="false" aria-label="이벤트 맵 (Ctrl+E)"
                   data-naia-title="이벤트 맵 · Ctrl+E 로도 열립니다">E</button>
+          <!-- Assist(Ctrl+O) — E 바로 아래의 같은 반구(사용자 지정 2026-09-28: 도구 줄의 [Assist] 를 거두고 여기로).
+               눌린 상태(aria-pressed)는 js/features/assistPanel.mjs 가 관리한다. -->
+          <button type="button" class="em-tab" id="assistTab" aria-pressed="false" aria-label="Assist (Ctrl+O)"
+                  data-naia-title="Assist · 원하는 그림을 한국어로 적으면 프롬프트를 찾아 줍니다 · Ctrl+O 로도 열립니다">A</button>
           <!-- E 아래의 이동 단추 둘(사용자 지정 2026-09-19). 둘은 **같은 자리**에 번갈아 뜬다:
                ← 는 열려 있고 안 고정일 때, → 는 고정일 때. 닫혀 있으면 둘 다 없다
                (패널이 없는데 옮길 곳을 묻는 단추만 떠 있으면 무슨 뜻인지 알 수 없다). -->
@@ -1496,6 +1494,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260928-kiwi"></script>
+<script src="app.js?v=20260928-atab"></script>
 </body>
 </html>

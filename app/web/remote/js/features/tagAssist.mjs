@@ -380,8 +380,7 @@ export function createTagAssistController({
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     syncTooltipLayer();
     if (window.innerWidth < 768) return;
-    // Assist 창(.as-overlay)은 결과 뷰어 왼쪽 위 — 말풍선의 기본 자리 — 에 떠서 창 머리를 덮었다(사용자 지정 09-28: 왼쪽으로)
-    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup, .as-overlay');
+    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
     tagTooltip.classList.toggle('left-side', !!inModule);
   }
 
@@ -580,6 +579,30 @@ export function createTagAssistController({
         tagTooltip.style.setProperty('--tag-tooltip-max-height', Math.round(maxHeight) + 'px');
         tagTooltip.style.setProperty('--tag-tooltip-left', Math.round(left) + 'px');
         tagTooltip.style.setProperty('--tag-tooltip-max-width', Math.round(wCeil) + 'px');
+        return;
+      }
+    }
+
+    // **Assist 창 안 편집칸이면 그 창 바로 왼쪽, 편집칸 높이에 붙인다**(사용자 지정 2026-09-28). 기본 자리(뷰어 왼쪽 위)는
+    // Assist 창이 떠 있는 곳이라 창 머리를 덮었고, 왼쪽 프롬프트 영역(left-side)에 두니 메인 프롬프트에 붙은 것처럼 보였다.
+    // 창 왼쪽에 280px 가 안 남으면 기본 자리로.
+    const assistBox = acTarget?.closest?.('.as-overlay');
+    if (assistBox) {
+      const box = assistBox.getBoundingClientRect();
+      const room = box.left - 8 - safeGap;
+      if (room >= 280) {
+        const wCeil = Math.min(560, room);
+        const bottom = viewportTop + viewportHeight - safeGap;
+        tagTooltip.style.setProperty('--tag-tooltip-max-width', `${Math.round(wCeil)}px`);
+        tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(bottom - (viewportTop + safeGap))}px`);
+        const measured = tagTooltip.getBoundingClientRect();
+        const w = Math.min(measured.width || wCeil, wCeil);
+        const h = Math.min(measured.height || 220, bottom - (viewportTop + safeGap));
+        const anchorTop = acTarget.getBoundingClientRect().top;
+        const tipTop = Math.max(viewportTop + safeGap, Math.min(anchorTop, bottom - h));
+        tagTooltip.style.setProperty('--tag-tooltip-top', `${Math.round(tipTop)}px`);
+        tagTooltip.style.setProperty('--tag-tooltip-left', `${Math.round(box.left - 8 - w)}px`);
+        tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(bottom - tipTop)}px`);
         return;
       }
     }

@@ -13890,7 +13890,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260928-asleft')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260928-asanchor')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -624,16 +624,18 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         # 장면 전체와 **두 사람**을 가리킨 제외는 늘 막는다. 제3자의 제외는 모델이 그 동작을 **이 두 사람 사이**
         # (source · target 번호)로 적었을 때만 넘긴다 — 한국어 층의 동작 후보(verb_phrases)는 누구의 절인지 · 부정인지
         # 모른다: 합쳐 막으면 '카나데가 나히다를 공주안기 하고 미쿠는 하지 않는' 의 관계가 지워지고(Codex 4차 N2), 당사자
-        # 것만 막으면 '카나데가 나히다를 바라보고 미쿠는 공주안기를 하지 않는' 에 없던 공주안기 관계가 붙었다(5차 N3)
+        # 것만 막으면 '카나데가 나히다를 바라보고 미쿠는 공주안기를 하지 않는' 에 없던 공주안기 관계가 붙었다(5차 N3).
+        # 쌍은 방향 없이 본다 — 방향은 Kiwi(roles)가 정한다. 모델이 source · target 만 뒤집어 적어도 관계는 산다(6차 N4)
         src_who = slot_of.get(id(src), 0) if src is not None else 0
         dst_who = slot_of.get(id(dst), 0) if dst is not None else 0
         blocked = set(excluded_for.get(0, set()))
         for who in (src_who, dst_who):
             if who:
                 blocked |= excluded_for.get(who, set())
+        pair = {src_who, dst_who}
         paired = {t for item, tags in acted
-                  if src_who and dst_who and int(item.get("source") or 0) == src_who
-                  and int(item.get("target") or 0) == dst_who for t in tags}
+                  if src_who and dst_who and {int(item.get("source") or 0), int(item.get("target") or 0)} == pair
+                  for t in tags}
         blocked |= {t for t in live if t not in paired}           # 제3자의 제외 — 이 쌍의 모델 동작이 아니면 막는다
         blocked &= live
 

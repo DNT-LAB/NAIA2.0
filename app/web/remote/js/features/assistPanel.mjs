@@ -95,6 +95,40 @@ const ADV_CSS = `
 .as-hist-time, .as-hist-r { font-family: var(--font-mono); color: var(--text-dim); }
 .as-hist-text, .as-hist-tags { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .as-hist-tags { grid-column: 3; color: var(--text-dim); font-size: 10px; }
+.as-model {
+  margin-left: auto; height: 26px; padding: 0 10px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.as-model:hover, .as-model.is-open { border-color: rgba(139,118,255,0.6); color: var(--text-primary); }
+.as-model-line { display: flex; justify-content: flex-end; padding: 6px 10px 0; }
+.as-llm-menu {
+  position: fixed; z-index: calc(var(--z-floating-module-aux) + 1); min-width: 300px; max-width: 380px; padding: 6px;
+  background: var(--bg-surface); border: 1px solid var(--border-glow); border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); color: var(--text-muted); font-size: 10.5px;
+}
+.as-llm-menu[hidden] { display: none; }
+.as-llm-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px 6px; }
+.as-llm-head b { color: var(--text-primary); font-size: 11px; }
+.as-llm-row { display: flex; align-items: center; gap: 6px; }
+.as-llm-pick {
+  flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 5px 7px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.as-llm-pick b { color: var(--text-primary); font-size: 11.5px; }
+.as-llm-pick small { flex-basis: 100%; color: var(--text-dim); font-size: 10px; }
+.as-llm-pick i { font-style: normal; font-size: 9px; padding: 0 5px; border-radius: 3px; }
+.as-llm-pick i.rec { background: rgba(92,184,122,0.2); color: var(--success); }
+.as-llm-pick i.no { background: rgba(240,64,64,0.16); color: #f07070; }
+.as-llm-pick:hover:not(:disabled) { border-color: var(--border-dim); background: rgba(255,255,255,0.04); }
+.as-llm-pick:disabled { cursor: default; }
+.as-llm-row.is-on .as-llm-pick { border-color: rgba(124,106,239,0.55); background: rgba(124,106,239,0.14); }
+.as-llm-act {
+  height: 24px; padding: 0 9px; border: 1px solid rgba(139,118,255,0.55); border-radius: 5px;
+  background: rgba(88,76,170,0.3); color: var(--text-primary); font-size: 10.5px; cursor: pointer; white-space: nowrap;
+}
+.as-llm-act:disabled { opacity: 0.45; cursor: default; }
+.as-llm-foot { display: flex; justify-content: flex-end; padding: 6px 4px 2px; }
 `;
 const HIGHLIGHT_API = typeof Highlight !== 'undefined' && typeof CSS !== 'undefined' && !!CSS.highlights;
 
@@ -130,7 +164,7 @@ function clampCount(value, fallback) {
   return Number.isInteger(n) && n >= 0 && n <= 9 ? n : fallback;
 }
 
-export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssist } = {}) {
+export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssist, saveLlmSettings } = {}) {
   let overlay = null, input = null, mirror = null, namesRow = null, personsEl = null, ratingBar = null;
   let banner = null, body = null, sendBtn = null, picker = null, advPanel = null, advBtn = null;
   let open = false;
@@ -161,6 +195,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   let busy = false, askSeq = 0, namesSeq = 0, namesTimer = null, pollTimer = null;
   let status = null;
   let pickerForm = null, pickSeq = 0, pickTimer = null;
+  // [현재 모델 : E2B] 단추(사용자 지정 09-28) — 누르면 고르기 · 받기. 상태는 설정 창(API 설정 › AI 모델)과 같은 곳
+  let llm = null, llmMenu = null, llmTimer = 0, llmBusy = false, llmDrawn = '';
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -332,7 +368,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     document.addEventListener('pointerdown', event => {
       if (!open) return;
       const t = event.target;
-      if (overlay.contains(t) || (picker && !picker.hidden && picker.contains(t))) return;
+      if (llmMenu && !llmMenu.hidden && !llmMenu.contains(t) && !t.closest?.('[data-as-model]')) closeLlmMenu();
+      if (overlay.contains(t) || (picker && !picker.hidden && picker.contains(t))
+          || (llmMenu && llmMenu.contains(t))) return;
       // 결과 칸의 자동완성 · 태그 정보 팝업은 창 밖(body)에 뜬다 — 거기를 눌러도 창을 닫지 않는다.
       // 아래에 붙여 연 이벤트 검색 · A 탭(누르면 토글이 닫는다 — 여기서 먼저 닫으면 곧바로 다시 열린다)도 창의 일부다
       // 붙인 검색의 인원 팝업(.fs-person-popup)은 body 에 따로 뜬다 — 그것도 안쪽이다(Codex 리뷰 09-28: 누르면 둘 다 닫혔다)
@@ -745,7 +783,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     busy = false;
     if (!data || !data.ok) {
       result = null;
-      body.innerHTML = `<div class="as-note as-note-warn">${esc((data && data.error) || '찾지 못했습니다')}</div>`;
+      body.innerHTML = `<div class="as-note as-note-warn">${esc((data && data.error) || '찾지 못했습니다')}</div>${modelLineHtml()}`;
       paintBusy();
       fit();
       linkEvents();
@@ -1004,6 +1042,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         <button type="button" class="as-act" data-as-apply ${can}
                 title="메인 = Random 과 같은 파이프라인(PE 앞뒤·자동 숨김) · 캐릭터 칸 = 기존은 비활성으로 보내고 덧붙입니다">프롬프트에 넣기</button>
         <button type="button" class="as-act" data-as-copy ${can} title="클립보드로 복사">복사</button>
+        ${modelButtonHtml()}
       </div></div>`;
   }
 
@@ -1019,7 +1058,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (!body) return;
     const r = result;
     // 결과가 없어도 단추를 다시 칠한다 — 결과 없이 [이어서 질문] 이 눌리면 안 된다(Codex 리뷰 09-28 F7)
-    if (!r) { body.innerHTML = ''; paintFollow(); fit(); return; }
+    if (!r) { body.innerHTML = modelLineHtml(); paintFollow(); fit(); return; }
     let html;
     if (r.task === 'scene') {
       html = sceneHtml(r);
@@ -1042,6 +1081,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         ? `${model.error} — 한국어 층만으로 찾았습니다.` : `모델을 부르지 못해 한국어 층만으로 찾았습니다 (${model.error}).`;
       html += `<div class="as-note as-note-warn">${esc(why)}</div>`;
     }
+    if (r.task !== 'scene') html += modelLineHtml();      // 장면이면 결과 줄 오른쪽 끝에 있다
     body.innerHTML = html;
     wirePromptEditors();
     paintFollow();
@@ -1095,6 +1135,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
 
   function onBodyClick(event) {
     const t = event.target;
+    if (t.closest('[data-as-model]')) { toggleLlmMenu(); return; }
     if (t.closest('[data-as-generate]')) { void generateVirtual(); return; }
     if (t.closest('[data-as-apply]')) { void applyPrompt(); return; }
     if (t.closest('[data-as-copy]')) { void copyPrompt(); return; }
@@ -1280,6 +1321,157 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     overlay.style.maxHeight = `${heightCap}px`;
   }
 
+  // ── [현재 모델 : …] — 고르기 · 받기(사용자 지정 09-28). 바꾸기는 설정 창과 같은 길(boost_v2_settings {model}) — 서버가
+  // 쓰던 엔진을 내린 뒤(요청이 돌면 끝난 뒤) 새 모델을 올린다: 두 모델이 VRAM 에 같이 뜨지 않는다(core/llama_runtime).
+  // 안 받은 모델은 [받기] — 다 받으면 서버가 그 모델로 바꾼다(boost_v2_service._installed). 상태는 열 때 · 목록이 열린 동안만 읽는다.
+
+  const llmLabel = m => String(m?.label || '').replace('Gemma 4 ', '');
+
+  function modelText() {
+    if (!llm) return '현재 모델 : …';
+    const dl = llm.download || {};
+    if (dl.active || dl.phase === 'verify') {
+      const m = (llm.models || []).find(x => x.id === dl.model);
+      return `${llmLabel(m) || '모델'} 받는 중 ${dl.phase === 'verify' ? '(검증)' : `${Number(dl.percent) || 0}%`}`;
+    }
+    if (!llm.engine_ready) return '현재 모델 : 엔진 없음';
+    if (!llm.model_ready) return '현재 모델 : 없음';
+    return `현재 모델 : ${llm.model_is_default ? llmLabel({label: llm.model_label}) : '직접 지정'}${
+      llm.priming || llm.swapping ? ' · 준비 중' : ''}`;
+  }
+
+  function modelButtonHtml() {
+    return `<button type="button" class="as-model${llmMenu && !llmMenu.hidden ? ' is-open' : ''}" data-as-model
+      aria-haspopup="true" title="Assist 가 쓰는 AI 모델 — 눌러서 바꾸거나 받습니다">${esc(modelText())} ▾</button>`;
+  }
+
+  function modelLineHtml() {
+    return `<div class="as-model-line">${modelButtonHtml()}</div>`;
+  }
+
+  function llmMenuHtml() {
+    if (!llm) return '<div class="as-note">모델 상태를 읽는 중…</div>';
+    const mode = llm.mode === 'gpu' ? 'gpu' : 'cpu';
+    const dl = llm.download || {};
+    const getting = dl.active || dl.phase === 'verify' ? dl.model : null;
+    const own = llm.model_is_default !== false;          // 파일을 직접 지정했으면 그 파일이 쓰인다 — 여기서 못 바꾼다
+    const rows = (llm.models || []).map(m => {
+      const on = m.id === llm.model_id && m.installed && own;
+      const here = getting === m.id;
+      const state = on ? '사용 중' : m.installed ? '받음'
+        : here ? (dl.phase === 'verify' ? '검증 중' : `받는 중 ${Number(dl.percent) || 0}%`) : m.partial_mb ? '받다 멈춤' : '안 받음';
+      const fit = m[mode] || {};
+      const badges = (m.recommended && m.recommended[mode] ? '<i class="rec">권장</i>' : '')
+        + (fit.fit === 'no' ? '<i class="no">메모리 부족</i>' : '');
+      const act = here ? '<button type="button" class="as-llm-act" data-as-llm-cancel>취소</button>'
+        : m.installed ? '' : `<button type="button" class="as-llm-act" data-as-llm-get="${esc(m.id)}"${
+          getting || !own || llmBusy ? ' disabled' : ''}>${m.partial_mb ? '이어받기' : '받기'} ${esc(m.size_gb)}GB</button>`;
+      return `<div class="as-llm-row${on ? ' is-on' : ''}"><button type="button" class="as-llm-pick"
+          data-as-llm-use="${esc(m.id)}"${m.installed && !on && own && !llmBusy ? '' : ' disabled'}>
+          <b>${esc(llmLabel(m))}</b>${badges}<small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${state}</small></button>${act}</div>`;
+    }).join('');
+    const notes = [];
+    if (!llm.engine_ready) notes.push('llama.cpp 엔진이 없습니다 — AI 모델 설정에서 받아 주세요.');
+    if (!own) notes.push(`모델 파일을 직접 지정해 쓰는 중입니다: ${llm.model_path}`);
+    if (dl.error) notes.push(dl.error);
+    return `<div class="as-llm-head"><b>AI 모델</b><span>${mode === 'gpu' ? 'GPU 모드' : 'CPU 모드'}</span></div>${rows}
+      ${notes.map(n => `<div class="as-note">${esc(n)}</div>`).join('')}
+      <div class="as-llm-foot"><button type="button" class="as-adv-reset" data-as-llm-setup>AI 모델 설정</button></div>`;
+  }
+
+  function paintModel() {
+    body?.querySelectorAll('[data-as-model]').forEach(btn => {
+      btn.textContent = `${modelText()} ▾`;
+      btn.classList.toggle('is-open', !!(llmMenu && !llmMenu.hidden));
+    });
+    if (!llmMenu || llmMenu.hidden) return;
+    const html = llmMenuHtml();
+    if (html !== llmDrawn) {                  // 같은 상태로 목록을 갈아엎지 않는다(누르는 중인 단추가 사라진다)
+      llmDrawn = html;
+      llmMenu.innerHTML = html;
+    }
+    placeLlmMenu();
+  }
+
+  function placeLlmMenu() {
+    const btn = body?.querySelector('[data-as-model]');
+    if (!btn || !llmMenu || llmMenu.hidden) return;
+    const r = btn.getBoundingClientRect();
+    const h = llmMenu.offsetHeight;
+    const w = llmMenu.offsetWidth;
+    const top = r.top - h - 6 >= 8 ? r.top - h - 6 : Math.min(window.innerHeight - h - 8, r.bottom + 6);
+    llmMenu.style.top = `${Math.round(Math.max(8, top))}px`;
+    llmMenu.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)))}px`;
+  }
+
+  async function refreshLlm() {
+    clearTimeout(llmTimer);
+    try {
+      llm = await getJson('/api/boost-v2/status');
+    } catch { /* 못 읽으면 지난 상태 그대로 — 다음에 다시 */ }
+    paintModel();
+    if (!open) return;
+    const dl = llm?.download || {};
+    const moving = dl.active || dl.phase === 'verify' || llm?.priming || llm?.swapping || llm?.kiwi?.active;
+    const menuOpen = !!(llmMenu && !llmMenu.hidden);
+    if (moving || menuOpen) llmTimer = setTimeout(() => { void refreshLlm(); }, moving ? 1000 : 4000);
+  }
+
+  function toggleLlmMenu() {
+    if (llmMenu && !llmMenu.hidden) { closeLlmMenu(); return; }
+    if (!llmMenu) {
+      llmMenu = document.createElement('div');
+      llmMenu.className = 'as-llm-menu';
+      llmMenu.hidden = true;
+      llmMenu.addEventListener('click', event => { void onLlmMenuClick(event); });
+      document.body.append(llmMenu);
+    }
+    closePicker();
+    llmMenu.hidden = false;
+    llmDrawn = '';
+    paintModel();
+    void refreshLlm();
+  }
+
+  function closeLlmMenu() {
+    if (!llmMenu || llmMenu.hidden) return;
+    llmMenu.hidden = true;
+    paintModel();
+  }
+
+  async function onLlmMenuClick(event) {
+    const t = event.target;
+    if (t.closest('[data-as-llm-setup]')) { closeLlmMenu(); window.openAiModelSetup?.(); return; }
+    const use = t.closest('[data-as-llm-use]');
+    const get = t.closest('[data-as-llm-get]');
+    const cancel = t.closest('[data-as-llm-cancel]');
+    if (llmBusy || !(use || get || cancel) || (use || get || cancel).disabled) return;
+    llmBusy = true;
+    try {
+      if (use) {
+        const id = use.dataset.asLlmUse;
+        const m = (llm?.models || []).find(x => x.id === id);
+        if (typeof saveLlmSettings !== 'function' || saveLlmSettings({ model: id }) === false) {
+          toast('연결이 끊겨 바꾸지 못했습니다 — 다시 해 주세요', 'error');
+        } else {
+          toast(`${llmLabel(m)} 로 바꿉니다 — 쓰던 모델을 내리고 새 모델을 올립니다`, 'success');
+        }
+      } else if (get) {
+        const m = (llm?.models || []).find(x => x.id === get.dataset.asLlmGet);
+        await postJson('/api/boost-v2/model/download', { model: get.dataset.asLlmGet });
+        toast(`${llmLabel(m)} 받기를 시작했습니다 — 다 받으면 이 모델로 바뀝니다`, 'info');
+      } else {
+        await postJson('/api/boost-v2/model/download/cancel', {});
+      }
+    } catch (error) {
+      toast(error.status === 403 ? 'AI 모델은 NAIA 를 켠 PC 에서만 받을 수 있습니다' : error.message, 'error');
+    } finally {
+      llmBusy = false;
+      llmDrawn = '';
+      setTimeout(() => { void refreshLlm(); }, 400);
+    }
+  }
+
   function show() {
     build();
     open = true;
@@ -1292,7 +1484,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     input.focus();
     input.select();
     if (result) linkEvents();              // 다시 열면 지난 결과의 이벤트도 다시 붙인다
+    else if (!busy) render();              // 결과가 없어도 [현재 모델] 단추는 보인다(처음 열면 결과 칸이 비어 있다)
     void warm();
+    void refreshLlm();
   }
 
   // 결과 칸 왼쪽 가장자리의 A 탭(E 아래, 사용자 지정 2026-09-28) — 열려 있으면 눌린 모양
@@ -1312,6 +1506,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     pollTimer = null;
     namesSeq += 1;
     clearHighlights();
+    closeLlmMenu();
   }
 
   // Ctrl+O. 브라우저의 '파일 열기' 를 대신 가져온다(preventDefault). 한글 자판에서도 잡히게 code 도 본다.
@@ -1323,6 +1518,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       if (window.fastSearch?.consumesEsc?.()) return;
       event.preventDefault();
       event.stopPropagation();
+      if (llmMenu && !llmMenu.hidden) { closeLlmMenu(); return; }
       if (picker && !picker.hidden) { closePicker(); return; }
       close();
       return;

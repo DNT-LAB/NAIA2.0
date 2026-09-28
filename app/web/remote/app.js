@@ -1188,7 +1188,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260928-submit')
+import('./js/features/assistPanel.mjs?v=20260928-model')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
@@ -1201,6 +1201,8 @@ import('./js/features/assistPanel.mjs?v=20260928-submit')
       },
       // 결과의 메인 · 캐릭터 칸(고칠 수 있다)에 메인 프롬프트와 같은 자동완성(09-26)
       bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
+      // [현재 모델 : …] 으로 모델 바꾸기 — 설정 창(API 설정 › AI 모델)과 같은 저장 길(부분 저장 — 서버가 디스크 값에 합친다)
+      saveLlmSettings: patch => setModuleParam('prompt_engineering', 'boost_v2_settings', JSON.stringify(patch)),
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));

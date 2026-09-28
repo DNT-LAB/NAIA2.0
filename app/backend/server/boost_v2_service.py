@@ -210,6 +210,9 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "gpu_available": bool(entries),
         "models": catalog(save_root, hardware, chosen),
         "running": running,
+        # [VRAM 회수] 말풍선 — 누가 쥐고 있나(남은 초, None = 놓을 때까지 = Auto Boost) · 도는 요청 뒤 내림 대기
+        "leases": rt.get("leases") or {},
+        "unload_pending": bool(rt.get("unload_pending")),
         "priming": bool(getattr(context, "llama_priming", False)),
         "last_load_seconds": getattr(runtime, "last_load_seconds", None) if runtime is not None else None,
         # 받는 중이면 그 모델, 아니면 고른 모델의 다운로드 상태.
@@ -273,14 +276,17 @@ def release_boost_runtime(context: Any) -> None:
             pass
 
 
-def stop_boost_runtime(context: Any) -> None:
-    """[엔진 내리기] — 누가 쥐고 있든 지금 내린다(다음 요청이 다시 올린다)."""
+def stop_boost_runtime(context: Any) -> dict[str, Any]:
+    """[엔진 내리기] · [VRAM 회수] — 누가 쥐고 있든 내린다(다음 요청이 다시 올린다). 도는 요청은 끊지 않고 끝난 뒤
+    (core/llama_runtime.unload — 곧바로 stop() 하던 때는 도는 요청이 CPU 로 다시 떴다)."""
     runtime = getattr(context, "boost_llama_runtime", None)
-    if runtime is not None:
-        try:
-            runtime.stop()
-        except Exception:
-            pass
+    if runtime is None:
+        return {"unloaded": False, "pending": False}
+    try:
+        unloaded = bool(runtime.unload())
+        return {"unloaded": unloaded, "pending": bool(runtime.status().get("unload_pending"))}
+    except Exception:
+        return {"unloaded": False, "pending": False}
 
 
 def _color_list(context: Any) -> list[str]:

@@ -116,5 +116,5 @@ def register_boost_v2_routes(
     async def boost_v2_unload(request: Request):
         if not _is_local_request(request):
             return _loopback_only()
-        await run_in_thread(stop_boost_runtime, context)
-        return {"ok": True}
+        result = await run_in_thread(stop_boost_runtime, context)
+        return {"ok": True, **(result or {})}

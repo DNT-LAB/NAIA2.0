@@ -100,7 +100,13 @@ const ADV_CSS = `
   background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; white-space: nowrap;
 }
 .as-model:hover, .as-model.is-open { border-color: rgba(139,118,255,0.6); color: var(--text-primary); }
-.as-model-line { display: flex; justify-content: flex-end; padding: 6px 10px 0; }
+.as-model-line { display: flex; justify-content: flex-end; gap: 6px; padding: 6px 10px 0; }
+.as-vram {
+  height: 26px; padding: 0 10px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.as-vram:hover:not(:disabled) { border-color: rgba(230,168,74,0.6); color: var(--text-primary); }
+.as-vram:disabled { opacity: 0.45; cursor: default; }
 .as-llm-menu {
   position: fixed; z-index: calc(var(--z-floating-module-aux) + 1); min-width: 300px; max-width: 380px; padding: 6px;
   background: var(--bg-surface); border: 1px solid var(--border-glow); border-radius: 10px;
@@ -198,6 +204,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   let pickerForm = null, pickSeq = 0, pickTimer = null;
   // [현재 모델 : E2B] 단추(사용자 지정 09-28) — 누르면 고르기 · 받기. 상태는 설정 창(API 설정 › AI 모델)과 같은 곳
   let llm = null, llmMenu = null, llmTimer = 0, llmBusy = false, llmDrawn = '';
+  let llmAt = 0;                            // 상태를 받은 때(Date.now) — [VRAM 회수] 말풍선이 남은 시간을 거기서 센다
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -366,6 +373,10 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       else if (event.target.closest('[data-as-llm-setup]')) window.openAiModelSetup?.();   // API 설정 › AI 모델
     });
     body.addEventListener('click', onBodyClick);
+    body.addEventListener('mouseover', event => {        // [VRAM 회수] 말풍선의 남은 시간을 올릴 때마다 새로
+      const btn = event.target.closest?.('[data-as-vram]');
+      if (btn) setTip(btn, vramTitle());
+    });
     document.addEventListener('pointerdown', event => {
       if (!open) return;
       const t = event.target;
@@ -960,6 +971,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function paintBusy() {
     if (!overlay) return;
     overlay.classList.toggle('is-busy', busy);
+    // 요청이 끝났다 — 엔진을 올렸거나(첫 요청) 임대가 늘었다: [현재 모델] · [VRAM 회수] 를 지금 상태로(열 때만 읽었더니
+    // 검색이 모델을 올렸는데도 '올라간 AI 모델이 없습니다' 로 잠겨 있었다, 09-28)
+    if (!busy && open) void refreshLlm();
     if (sendBtn) sendBtn.disabled = busy;
     paintFollow();                          // 단추 글(제출 · 이어서 질문 · 찾는 중… · 고치는 중…) · 이어서 질문 잠금
     if (busy && !result) body.innerHTML = '<div class="as-note">찾는 중…</div>';
@@ -1043,7 +1057,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         <button type="button" class="as-act" data-as-apply ${can}
                 title="메인 = Random 과 같은 파이프라인(PE 앞뒤·자동 숨김) · 캐릭터 칸 = 기존은 비활성으로 보내고 덧붙입니다">프롬프트에 넣기</button>
         <button type="button" class="as-act" data-as-copy ${can} title="클립보드로 복사">복사</button>
-        ${modelButtonHtml()}
+        ${modelButtonHtml()}${vramButtonHtml()}
       </div></div>`;
   }
 
@@ -1137,6 +1151,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function onBodyClick(event) {
     const t = event.target;
     if (t.closest('[data-as-model]')) { toggleLlmMenu(); return; }
+    if (t.closest('[data-as-vram]')) { void unloadVram(); return; }
     if (t.closest('[data-as-generate]')) { void generateVirtual(); return; }
     if (t.closest('[data-as-apply]')) { void applyPrompt(); return; }
     if (t.closest('[data-as-copy]')) { void copyPrompt(); return; }
@@ -1355,7 +1370,51 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   function modelLineHtml() {
-    return `<div class="as-model-line">${modelButtonHtml()}</div>`;
+    return `<div class="as-model-line">${modelButtonHtml()}${vramButtonHtml()}</div>`;
+  }
+
+  /** [VRAM 회수] 말풍선 — 누르지 않으면 언제 자동으로 내리나(엔진의 임대: Assist · 첫 준비는 기한이 있고, Auto Boost 는
+   *  켜져 있는 동안 무기한). 남은 시간은 받은 때부터 여기서 센다 — 올릴 때마다 다시 적는다(mouseover). */
+  function vramTitle() {
+    if (!llm) return 'VRAM 회수 — 올라간 AI 모델을 지금 내립니다';
+    if (llm.unload_pending) return '도는 요청이 끝나면 내립니다';
+    if (!llm.running) return '올라간 AI 모델이 없습니다';
+    const leases = Object.values(llm.leases || {});
+    if (leases.some(v => v == null)) {
+      return 'Auto Boost 가 켜져 있어 자동으로 내리지 않습니다 — 누르면 지금 내립니다(다음 Boost 가 다시 올립니다)';
+    }
+    const left = Math.max(0, ...leases.map(v => Number(v) || 0)) - (Date.now() - llmAt) / 1000;
+    if (!leases.length) return '자동으로 내리지 않습니다 — 누르면 지금 내립니다';
+    if (left <= 1) return '곧 자동으로 내립니다';
+    const m = Math.floor(left / 60);
+    const s = Math.floor(left % 60);
+    return `누르지 않으면 ${m ? `${m}분 ` : ''}${s}초 뒤 자동으로 내립니다`;
+  }
+
+  /** 말풍선 글 — 이 앱은 title 을 data-naia-title 로 걷어간다(app.js adoptTitle · 비동기). mouseover 중에 title 을 적으면
+   *  같은 이벤트의 말풍선이 옛 글을 읽는다 — 직접 적는다(interactivePanel 과 같다) */
+  function setTip(el, text) {
+    el.removeAttribute('title');
+    el.dataset.naiaTitle = text;
+    el.setAttribute('aria-label', text);
+  }
+
+  function vramButtonHtml() {
+    const off = !llm || !llm.running || llm.unload_pending;
+    return `<button type="button" class="as-vram" data-as-vram${off ? ' disabled' : ''}
+      title="${esc(vramTitle())}">VRAM 회수</button>`;
+  }
+
+  async function unloadVram() {
+    try {
+      const data = await postJson('/api/boost-v2/unload', {});
+      toast(data.pending ? '도는 요청이 끝나면 AI 모델을 내립니다' : 'VRAM 을 회수했습니다 — 다음 요청이 다시 올립니다',
+        'info');
+    } catch (error) {
+      toast(error.status === 403 ? 'AI 모델 내리기는 NAIA 를 켠 PC 에서만 할 수 있습니다' : error.message, 'error');
+    } finally {
+      setTimeout(() => { void refreshLlm(); }, 300);
+    }
   }
 
   function llmMenuHtml() {
@@ -1393,6 +1452,10 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       btn.textContent = `${modelText()} ▾`;
       btn.classList.toggle('is-open', !!(llmMenu && !llmMenu.hidden));
     });
+    body?.querySelectorAll('[data-as-vram]').forEach(btn => {
+      btn.disabled = !llm || !llm.running || !!llm.unload_pending;
+      setTip(btn, vramTitle());
+    });
     if (!llmMenu || llmMenu.hidden) return;
     const html = llmMenuHtml();
     if (html !== llmDrawn) {                  // 같은 상태로 목록을 갈아엎지 않는다(누르는 중인 단추가 사라진다)
@@ -1417,11 +1480,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     clearTimeout(llmTimer);
     try {
       llm = await getJson('/api/boost-v2/status');
+      llmAt = Date.now();
     } catch { /* 못 읽으면 지난 상태 그대로 — 다음에 다시 */ }
     paintModel();
     if (!open) return;
     const dl = llm?.download || {};
-    const moving = dl.active || dl.phase === 'verify' || llm?.priming || llm?.swapping || llm?.kiwi?.active;
+    const moving = dl.active || dl.phase === 'verify' || llm?.priming || llm?.swapping || llm?.kiwi?.active
+      || llm?.unload_pending;              // 요청 뒤 내림을 기다린다 — 내리면 [VRAM 회수] 를 다시 칠한다
     const menuOpen = !!(llmMenu && !llmMenu.hidden);
     if (moving || menuOpen) llmTimer = setTimeout(() => { void refreshLlm(); }, moving ? 1000 : 4000);
   }

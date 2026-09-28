@@ -172,6 +172,10 @@ class LlamaServerRuntime:
         self._leases: dict[str, float] = {}
         self._lease_timer: threading.Timer | None = None
         self.lease_retry_seconds = 5.0         # 요청이 도는 중이라 못 내렸을 때 다시 볼 때까지
+        self._unload_pending = False           # [VRAM 회수] 를 요청이 도는 중에 눌렀다 — 그 요청이 끝나면 내린다(unload)
+        self._unload_timer: threading.Timer | None = None
+        # 요청 하나가 모델을 여러 번 부른다(Assist 4~8번 — 사이에 한국어 층 · 이벤트 맵) — 마지막 부름 뒤 이만큼 조용하면 내린다
+        self.unload_grace_seconds = 3.0
 
     # ── 구성·상태 ──────────────────────────────────────────────────────────
 
@@ -259,6 +263,7 @@ class LlamaServerRuntime:
                 # 누가 붙잡고 있나(남은 초, None = 놓을 때까지)
                 "leases": {owner: (None if expiry == math.inf else round(max(0.0, expiry - time.monotonic()), 1))
                            for owner, expiry in self._leases.items()},
+                "unload_pending": self._unload_pending,
             }
 
     # ── 수명 ─────────────────────────────────────────────────────────────
@@ -406,6 +411,42 @@ class LlamaServerRuntime:
         finally:
             self._slot.release()
 
+    def unload(self) -> bool:
+        """[VRAM 회수](사용자 지정 2026-09-28) — 지금 내린다(내렸으면 True). 도는 요청(Assist · Boost · 첫 준비)은 끊지 않고
+        그 요청이 끝난 뒤 내린다(chat · warm 의 finally): 곧바로 stop() 하면 도는 chat 이 연결 끊김을 'GPU 에서 멈춤' 으로 읽어
+        gpu_failed 를 적고 CPU 로 다시 띄웠다(옛 [엔진 내리기] · 09-28 VRAM 시험에서 본 것). 기한 있는 임대(Assist · 준비)는
+        놓는다 — 그 타이머가 남은 시간을 셀 까닭이 없다. 무기한(Auto Boost)은 그대로: 다음 Boost 가 다시 올린다."""
+        with self._proc_lock:
+            for owner in [o for o, expiry in self._leases.items() if expiry != math.inf]:
+                self._leases.pop(owner, None)
+            self._unload_pending = True
+        if not self._slot.acquire(blocking=False):
+            return False
+        try:
+            self._unload_pending = False
+            was = self.is_running()
+            self.stop()
+            return was
+        finally:
+            self._slot.release()
+
+    def _unload_later(self) -> None:
+        """부름 하나가 끝났다 — 같은 요청의 다음 부름이 곧 오지 않으면 내린다. 첫 부름 끝에 곧바로 내렸더니 다음 부름이 다시
+        올려 요청이 끝나고도 떠 있었다(09-28 라이브). 그 사이 새 부름이 돌면 unload 는 기다리고, 그 부름의 끝이 다시 잰다."""
+        with self._proc_lock:
+            if self._unload_timer is not None:
+                self._unload_timer.cancel()
+            timer = threading.Timer(self.unload_grace_seconds, self._unload_if_quiet)
+            timer.daemon = True
+            self._unload_timer = timer
+            timer.start()
+
+    def _unload_if_quiet(self) -> None:
+        with self._proc_lock:
+            self._unload_timer = None
+        if self._unload_pending:
+            self.unload()
+
     def _arm_lease_timer(self, retry: float | None = None) -> None:
         with self._proc_lock:
             if self._lease_timer is not None:
@@ -442,7 +483,9 @@ class LlamaServerRuntime:
             return False
         finally:
             self._slot.release()
-            if self.is_running():
+            if self._unload_pending:
+                self._unload_later()           # 올리는 동안 [VRAM 회수] 를 눌렀다
+            elif self.is_running():
                 self._arm_idle_timer()
 
     # ── 요청 ─────────────────────────────────────────────────────────────
@@ -518,7 +561,9 @@ class LlamaServerRuntime:
             return {"ok": False, "error": str(exc), "elapsed": round(time.monotonic() - started, 2)}
         finally:
             self._slot.release()
-            if self.is_stale():
+            if self._unload_pending:
+                self._unload_later()           # 도는 동안 [VRAM 회수] 를 눌렀다 — 요청이 끝나면 내린다(새 설정으로 띄우지도 않는다)
+            elif self.is_stale():
                 # 요청 도중 장치가 바뀌었다 — 이제 비었으니 새 설정의 엔진을 뒤에서 띄운다(다음 요청이 기다리지 않게).
                 threading.Thread(target=self.warm, daemon=True, name="llama-swap").start()
             elif self.is_running():

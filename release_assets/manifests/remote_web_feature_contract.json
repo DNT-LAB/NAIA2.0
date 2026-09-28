@@ -747,6 +747,7 @@
         "core/assist_recover.py",
         "core/assist_refine.py",
         "core/assist_senses.py",
+        "core/assist_slang.py",
         "core/assist_translate.py",
         "core/assist_v2.py",
         "data/assist/korean_rules.json"

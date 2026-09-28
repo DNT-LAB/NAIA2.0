@@ -812,8 +812,12 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
         g, b = req["persons"]["girls"], req["persons"]["boys"]
         people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
     names = [(c.ko, display_name(c.tag)) for c in chars]
-    # ① 상황 — 요청을 쉬운 영어 문장으로(사용자 실험 09-28 · core/assist_direct 머리말). 실패하면 요청만으로 간다
-    words = ad.glossary_hints(req["text"], layer.rules.get("slang_glossary") or {})
+    # ① 상황 — 요청을 쉬운 영어 문장으로(사용자 실험 09-28 · core/assist_direct 머리말). 실패하면 요청만으로 간다.
+    # 속어 풀이 = 손으로 쓴 것(규칙표) + 위키낱말사전에서 고른 것(core/assist_slang — 성적 뜻은 Q · E 만, 짧은 낱말은 Kiwi 토막으로)
+    from core import assist_slang
+
+    words = assist_slang.hints(req["text"], req["rating"], hand=layer.rules.get("slang_glossary") or {},
+                               tokens=layer.raw_tokens(req["text"]))
     sit_reply, sit_info = _chat(context, ad.SITUATION_SYSTEM,
                                 ad.situation_message(req["text"], req["rating"], names, words),
                                 ad.situation_grammar(), max_tokens=120)

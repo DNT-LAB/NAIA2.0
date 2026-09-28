@@ -1,0 +1,22 @@
+slang_glossary_wiktionary.json — license notice
+
+This file contains Korean words and short English glosses taken from the English Wiktionary
+(https://en.wiktionary.org), as extracted by wiktextract (Tatu Ylonen, https://kaikki.org).
+
+Source:      English Wiktionary via kaikki.org raw wiktextract dump (the date is written in the file's "source" field)
+Authors:     Wiktionary contributors (see the history of each entry on https://en.wiktionary.org)
+License:     Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+             https://creativecommons.org/licenses/by-sa/4.0/
+Changes:     NAIA selected only Korean entries that have a sense tagged vulgar, slang, derogatory, offensive,
+             euphemistic or Internet, or a sense on a sexual topic; kept at most four senses per word in their
+             original order; shortened glosses; added a "sexual" flag per sense. Built by tools/build_slang_glossary.py.
+
+This data file, and any file derived from it, is distributed under CC BY-SA 4.0. The license applies to this
+data file only; it does not extend to the NAIA program code, which reads the file at run time.
+
+---
+
+이 파일(slang_glossary_wiktionary.json)의 한국어 낱말과 영어 풀이는 영어 위키낱말사전(English Wiktionary)에서
+wiktextract(kaikki.org)로 뽑은 것이며, CC BY-SA 4.0 으로 배포합니다. NAIA 는 속된 뜻(vulgar · slang · derogatory ·
+offensive · euphemistic · Internet)이나 성(性) 주제의 뜻이 있는 한국어 표제어만 골랐고, 풀이를 줄였으며, 뜻마다 성적인
+뜻인지 표시를 더했습니다. 이 라이선스는 이 데이터 파일에만 해당하고 NAIA 프로그램 코드에는 미치지 않습니다.

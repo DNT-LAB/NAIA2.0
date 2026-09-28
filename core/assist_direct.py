@@ -61,12 +61,6 @@ MAX_SITUATION = 300
 NSFW_FLAGS = {"q": "*user flagged nsfw (rating:questionable)", "e": "*user flagged nsfw (rating:explicit)"}
 
 
-def glossary_hints(text: str, glossary: dict[str, str]) -> list[tuple[str, str]]:
-    """요청에 글자 그대로 든 속어 · 드문 낱말의 풀이(규칙표 slang_glossary) — 형태소 분석 없이(파이프라인 미사용)."""
-    source = clean_text(text)
-    return [(ko, str(en)) for ko, en in (glossary or {}).items() if ko and ko in source and en]
-
-
 def situation_message(text: str, rating: str, names: Iterable[tuple[str, str]] = (),
                       words: Iterable[tuple[str, str]] = ()) -> str:
     lines = [f'Split this korean prompt to set of situations: "{clean_text(text).strip()}" '

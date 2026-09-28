@@ -1,0 +1,98 @@
+"""Assist — 속어 · 비속어 풀이(영어). [NAIA 추론 파이프라인 미사용] 의 상황 단계가 요청에 그 낱말이 있을 때만 'Words:' 줄로
+모델에 준다(core/assist_direct). E2B 는 '모가지를 비틀다' 를 머리카락 · 병을 비트는 것으로, '교배' 를 약혼으로 읽었다(09-28).
+
+풀이는 두 갈래다:
+- 손으로 쓴 것: ``data/assist/korean_rules.json`` 의 ``slang_glossary`` — 글자 그대로 맞춘다(짧게 고른 것이라).
+- 위키낱말사전(English Wiktionary)에서 고른 것: ``data/assist/slang_glossary_wiktionary.json`` — ``tools/build_slang_glossary.py``
+  가 kaikki.org 원본에서 한국어 표제어 중 속된 뜻(vulgar · slang · derogatory · offensive · Internet · 성 주제)이 있는 것만
+  고른다. **CC BY-SA 4.0**(옆의 ``.LICENSE.txt``) — 손으로 쓴 것과 한 파일로 합치지 않는다.
+
+위키낱말사전 풀이는 조심해서 쓴다:
+- 낱말의 뜻을 차례대로 함께 준다(속된 뜻엔 표시) — 따먹다의 첫 뜻은 '따서 먹다' 다. 속된 뜻만 주면 '사과를 따먹는' 이 틀어진다.
+- 성적인 뜻은 Q · E 에서만 — G · S 에선 그 뜻을 빼고(남는 뜻이 없으면 낱말째) 준다. 등급이 사용자의 뜻이다.
+- 맞추기: 세 음절 이상 · 두 음절 동사 줄기는 글자 그대로, 나머지는 Kiwi 토막이 그 꼴 · 품사(명사 · 용언)와 같을 때만 —
+  '씹'(명사) 이 '껌을 씹는'(동사) 에, '보지' 가 '보지 않는' 에 걸리지 않게. 토막이 없으면(Kiwi 없음) 그런 낱말은 쓰지 않는다.
+"""
+from __future__ import annotations
+
+import json
+import threading
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+from core.assist_korean import clean_text
+
+GLOSSARY_PATH = Path(__file__).resolve().parents[1] / "data" / "assist" / "slang_glossary_wiktionary.json"
+MAX_HINTS = 8                 # 한 요청에 줄 풀이 수 상한 — 입력이 길어지면 E2B 가 흐려진다
+MAX_SENSES = 3
+_NOUN_TAGS = ("NNG", "NNP", "NNB", "XR")
+_VERB_TAGS = ("VV", "VA")
+_LOCK = threading.Lock()
+_CACHE: dict[str, Any] = {}
+
+
+def load_glossary(path: Path | None = None) -> dict[str, Any]:
+    """위키낱말사전 풀이 파일 -> entries(낱말 -> {key, kind, senses}). 없거나 깨졌으면 빈 dict(손으로 쓴 것만 쓴다)."""
+    target = Path(path or GLOSSARY_PATH)
+    with _LOCK:
+        key = str(target)
+        if key not in _CACHE:
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+                ok = data.get("kind") == "assist_slang_glossary" and data.get("schema_version") == 1
+                _CACHE[key] = (data.get("entries") or {}) if ok else {}
+            except (OSError, ValueError):
+                _CACHE[key] = {}
+        return _CACHE[key]
+
+
+def _sense_text(senses: Iterable[dict[str, Any]], sexual_ok: bool) -> str:
+    """보일 뜻을 차례대로(속된 뜻엔 표시). 보일 뜻에 속된 뜻 · 성적 뜻이 하나도 없으면 "" — G · S 에서 성적 뜻을 빼고 나면
+    평범한 뜻만 남는 낱말(자다 = to sleep)은 풀이가 소음이다."""
+    out = []
+    marked = False
+    for sense in senses:
+        if sense.get("sexual") and not sexual_ok:
+            continue
+        en = str(sense.get("en") or "").strip()
+        if not en:
+            continue
+        tags = sense.get("tags") or ()
+        mark = "vulgar" if "vulgar" in tags else "slang" if tags else ""
+        marked = marked or bool(tags) or bool(sense.get("sexual"))
+        out.append(f"({mark}) {en}" if mark else en)
+    return "; ".join(out[:MAX_SENSES]) if marked else ""
+
+
+def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens: Iterable[tuple[str, str]] | None = None,
+          entries: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    """요청에 든 속어 풀이 [(낱말, 영어 풀이)] — 손으로 쓴 것이 먼저(같은 낱말이면 그것만), 합쳐 MAX_HINTS 까지.
+    tokens = Kiwi 토막(꼴, 품사) — 짧은 표제어는 토막으로만 맞춘다."""
+    source = clean_text(text)
+    out: list[tuple[str, str]] = [(ko, str(en)) for ko, en in (hand or {}).items() if ko and en and ko in source]
+    taken = {ko for ko, _en in out}
+    sexual_ok = rating in ("q", "e")
+    toks = list(tokens or [])
+    nouns = {form for form, tag in toks if tag.startswith(_NOUN_TAGS)}
+    verbs = {form for form, tag in toks if tag.startswith(_VERB_TAGS)}
+    for word, entry in (load_glossary() if entries is None else entries).items():
+        if len(out) >= MAX_HINTS:
+            break
+        key = str(entry.get("key") or word)
+        if word in taken or not key:
+            continue
+        verb = entry.get("kind") == "verb"
+        # 세 음절 이상 · 두 음절 동사 줄기(떡치 · 따먹 — Kiwi 는 이런 속어 동사를 떡+치 로 쪼갠다)는 글자 그대로,
+        # 나머지(한 음절 · 두 음절 명사 — 보지 는 '보지 않는' 에도 있다)는 토막의 꼴 · 품사로만
+        if len(key) >= 3 or (verb and len(key) == 2):
+            hit = key in source
+        else:
+            hit = key in (verbs if verb else nouns)
+        if not hit:
+            continue
+        gloss = _sense_text(entry.get("senses") or (), sexual_ok)
+        if gloss:
+            out.append((word, gloss))
+            taken.add(word)
+    return out[:MAX_HINTS]

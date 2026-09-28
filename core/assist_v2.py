@@ -549,8 +549,11 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             for tag in vocab.keyword(form):
                 place(tag)
 
+    acted: list[tuple[dict[str, Any], list[str]]] = []          # 모델 동작 항목과 그 태그 — 관계 조립이 다시 쓴다
     for item in route.get("actions") or []:
-        for tag in item_tags(item, "action"):
+        tags = item_tags(item, "action")
+        acted.append((item, tags))
+        for tag in tags:
             place(tag)
     for item in route.get("include") or []:
         tags = item_tags(item, "include")
@@ -618,13 +621,20 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         # 동사에서 나온 구만(공주 안기·볼 꼬집기·안기) — 명사 복합어(비치볼)는 동작이 아니다.
         # 자세·흔한 것(sleeping·smile)은 한 사람의 상태라 관계로 쓰지 않는다(안겨서 자는 -> sleeping 관계, 실측).
         # 뺀 동작은 관계로도 싣지 않는다 — 층에서 지워도 관계가 다시 골라 source# · target# 으로 붙었다(Codex 3차 R1 잔존).
-        # 단 장면 전체의 제외와 **두 사람**을 가리킨 제외만 — 제3자(미쿠는 공주안기 하지 않는)의 제외가 카나데 -> 나히다
-        # 관계까지 지웠다(Codex 4차 N2)
+        # 장면 전체와 **두 사람**을 가리킨 제외는 늘 막는다. 제3자의 제외는 모델이 그 동작을 **이 두 사람 사이**
+        # (source · target 번호)로 적었을 때만 넘긴다 — 한국어 층의 동작 후보(verb_phrases)는 누구의 절인지 · 부정인지
+        # 모른다: 합쳐 막으면 '카나데가 나히다를 공주안기 하고 미쿠는 하지 않는' 의 관계가 지워지고(Codex 4차 N2), 당사자
+        # 것만 막으면 '카나데가 나히다를 바라보고 미쿠는 공주안기를 하지 않는' 에 없던 공주안기 관계가 붙었다(5차 N3)
+        src_who = slot_of.get(id(src), 0) if src is not None else 0
+        dst_who = slot_of.get(id(dst), 0) if dst is not None else 0
         blocked = set(excluded_for.get(0, set()))
-        for ch in (src, dst):
-            who = slot_of.get(id(ch), 0) if ch is not None else 0
+        for who in (src_who, dst_who):
             if who:
                 blocked |= excluded_for.get(who, set())
+        paired = {t for item, tags in acted
+                  if src_who and dst_who and int(item.get("source") or 0) == src_who
+                  and int(item.get("target") or 0) == dst_who for t in tags}
+        blocked |= {t for t in live if t not in paired}           # 제3자의 제외 — 이 쌍의 모델 동작이 아니면 막는다
         blocked &= live
 
         def interaction(tags: Iterable[str]) -> str | None:
@@ -636,8 +646,8 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             act = next((t for t in ka.verb_tags if t not in generic and t not in poses and t not in blocked
                         and vocab.role(t) == "event_core"), None)
         if act is None:
-            for item in route.get("actions") or []:
-                act = interaction(item_tags(item, "action"))
+            for _item, tags in acted:
+                act = interaction(tags)
                 if act:
                     break
         if src and dst and act:

@@ -26,6 +26,7 @@ const STYLE = `
 #setupLlmSection .llm-models button { text-align: left; min-width: 104px; }
 #setupLlmSection .llm-models b { display: block; font-size: 12px; }
 #setupLlmSection .llm-models small { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+#setupLlmSection .llm-models .llm-stat { color: var(--text-secondary); font-family: var(--font-mono); }
 #setupLlmSection .llm-badge { display: inline-block; font-size: 9px; padding: 0 5px; border-radius: 3px; margin-left: 4px;
   vertical-align: 1px; letter-spacing: 0.3px; }
 #setupLlmSection .llm-badge.rec { background: rgba(92,184,122,0.2); color: var(--success); }
@@ -191,8 +192,12 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       const state = m.installed ? '받음'
         : busyHere ? (dl.phase === 'verify' ? '검증 중' : `받는 중 ${Number(dl.percent) || 0}%`)
           : m.partial_mb ? '받다 멈춤' : '안 받음';
+      // 'E2B | Hit rate 52.2% | VRAM 1.5GB'(사용자 지정 09-28) — 카탈로그 값(core/llama_models 머리말: 평가 세트 · 개발 PC 실측)
+      const stat = [Number(m.hit_rate) > 0 ? `Hit rate ${Number(m.hit_rate).toFixed(1)}%` : '',
+        Number(m.vram_gb) > 0 ? `VRAM ${Number(m.vram_gb).toFixed(1)}GB` : ''].filter(Boolean).join(' | ');
       return `<button type="button" data-llm-model="${esc(m.id)}" class="${m.id === view.id ? 'is-on' : ''}">
         <b>${esc(m.label.replace('Gemma 4 ', ''))}${badges}</b>
+        ${stat ? `<small class="llm-stat" title="Hit rate = Assist 평가 세트(요청 30개)에서 기대 태그를 맞힌 비율 · VRAM = GPU 에 올렸을 때 쓰는 양">${stat}</small>` : ''}
         <small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${state}</small></button>`;
     }).join('')}</span></div>`);
 

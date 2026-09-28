@@ -116,6 +116,7 @@ const ADV_CSS = `
   font: inherit; text-align: left; cursor: pointer;
 }
 .as-llm-pick b { color: var(--text-primary); font-size: 11.5px; }
+.as-llm-pick .as-llm-stat { color: var(--text-secondary); font-family: var(--font-mono); font-size: 10.5px; }
 .as-llm-pick small { flex-basis: 100%; color: var(--text-dim); font-size: 10px; }
 .as-llm-pick i { font-style: normal; font-size: 9px; padding: 0 5px; border-radius: 3px; }
 .as-llm-pick i.rec { background: rgba(92,184,122,0.2); color: var(--success); }
@@ -1340,6 +1341,14 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       llm.priming || llm.swapping ? ' · 준비 중' : ''}`;
   }
 
+  /** 'E2B | Hit rate 52.2% | VRAM 1.5GB'(사용자 지정 09-28) — 카탈로그 값(core/llama_models 머리말: 평가 세트 · 개발 PC 실측) */
+  function statHtml(m) {
+    const parts = [];
+    if (Number(m.hit_rate) > 0) parts.push(`Hit rate ${Number(m.hit_rate).toFixed(1)}%`);
+    if (Number(m.vram_gb) > 0) parts.push(`VRAM ${Number(m.vram_gb).toFixed(1)}GB`);
+    return parts.length ? `<span class="as-llm-stat" title="Hit rate = Assist 평가 세트(요청 30개)에서 기대 태그를 맞힌 비율 · VRAM = GPU 에 올렸을 때 쓰는 양">| ${parts.join(' | ')}</span>` : '';
+  }
+
   function modelButtonHtml() {
     return `<button type="button" class="as-model${llmMenu && !llmMenu.hidden ? ' is-open' : ''}" data-as-model
       aria-haspopup="true" title="Assist 가 쓰는 AI 모델 — 눌러서 바꾸거나 받습니다">${esc(modelText())} ▾</button>`;
@@ -1368,7 +1377,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
           getting || !own || llmBusy ? ' disabled' : ''}>${m.partial_mb ? '이어받기' : '받기'} ${esc(m.size_gb)}GB</button>`;
       return `<div class="as-llm-row${on ? ' is-on' : ''}"><button type="button" class="as-llm-pick"
           data-as-llm-use="${esc(m.id)}"${m.installed && !on && own && !llmBusy ? '' : ' disabled'}>
-          <b>${esc(llmLabel(m))}</b>${badges}<small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${state}</small></button>${act}</div>`;
+          <b>${esc(llmLabel(m))}</b>${statHtml(m)}${badges}<small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${state}</small></button>${act}</div>`;
     }).join('');
     const notes = [];
     if (!llm.engine_ready) notes.push('llama.cpp 엔진이 없습니다 — AI 모델 설정에서 받아 주세요.');

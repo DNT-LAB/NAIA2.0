@@ -14,6 +14,11 @@ Hugging Face HauhauCS 저장소의 같은 양자화 GGUF(해시가 Ollama 저장
     RTX 5090   E2B 1.4 · 1.3초   E4B 1.3 · 1.9초   26B 1.8 · 2.2초(로드 19초)
     CPU        E2B 12 · 12초     E4B 18 · 20초     26B 22 · 21초(MoE 라 E4B 와 비슷하다)
 
+모델 고르기 화면의 ``Hit rate`` · ``VRAM``(사용자 지정 2026-09-28 — 'E2B | Hit rate 52.2% | VRAM'): Assist 평가 세트
+(되살리기 세트 26 + 어려운 사례 4, 요청마다 2회, 기본 파이프라인)에서 기대 태그를 맞힌 비율과 GPU 에 올렸을 때 쓰는 VRAM
+(컨텍스트 8192) — 같은 날 개발 PC(RTX 5090) 실측. 속도는 싣지 않는다. 세트는 E2B 로 파이프라인을 다듬을 때 쓴 것이라
+모델끼리 견주는 값으로 본다(scratchpad compare_models.py 결과: 파이프라인 미사용은 33.7 · 37.0 · 52.2%).
+
 처음 쓰는 모델 · 장치는 셰이더 준비로 첫 요청에 수십 초가 붙는다(5090: E2B 34초 · 26B 42초) — 받은 직후 뒤에서
 태운다(``boost_v2_service.prime_runtime``). 자세한 수치는 ``docs/BOOST_V2_LLAMACPP_2026_09_23.md``.
 """
@@ -37,6 +42,8 @@ class LlamaModel:
     quant: str
     license: str
     note: str
+    hit_rate: float = 0.0          # Assist 평가 세트 적중률(%, 기본 파이프라인) — 머리말
+    vram_gb: float = 0.0           # GPU 에 올렸을 때 쓰는 VRAM(GB, 컨텍스트 8192) — 머리말
 
     @property
     def url(self) -> str:
@@ -58,21 +65,21 @@ MODELS: tuple[LlamaModel, ...] = (
         revision="da8593c3e407afcd3e7da94ff2d69d77e2a28a48",
         file="Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf", size=3_134_964_672,
         sha256="0796d58372742ef8ddc76dd64cd2fde217b7ef32e3dc58e10873253e569cad6b", quant="IQ3_M",
-        license="Gemma", note="가장 가볍다",
+        license="Gemma", note="가장 가볍다", hit_rate=52.2, vram_gb=1.5,
     ),
     LlamaModel(
         id="e4b", label="Gemma 4 E4B", repo="HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
         revision="45b6a334b4bcd1d7f37179df58b3b1d66a184e5d",
         file="Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf", size=5_335_285_728,
         sha256="d0027dd3a9128d9323e9f282c8bf010a8526c46477584535991dc1a869b56e96", quant="Q4_K_M",
-        license="Gemma", note="E2B 보다 똑똑하다",
+        license="Gemma", note="E2B 보다 똑똑하다", hit_rate=57.6, vram_gb=3.3,
     ),
     LlamaModel(
         id="26b", label="Gemma 4 26B-A4B", repo="HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced",
         revision="96c11c22b1128c3c8c655b21557b409f307c557f",
         file="Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf", size=13_917_726_048,
         sha256="61b277f4dde555fc6c04c9024a9580ef8c83f2f19504f3989a15f95684257426", quant="IQ4_XS",
-        license="Apache-2.0", note="가장 똑똑하다",
+        license="Apache-2.0", note="가장 똑똑하다", hit_rate=73.9, vram_gb=14.0,
     ),
 )
 DEFAULT_MODEL_ID = "e2b"
@@ -171,6 +178,8 @@ def catalog(save_root: str | Path, hardware: dict[str, Any] | None = None, gpu_i
             "size": model.size,
             "size_gb": model.size_gb,
             "note": model.note,
+            "hit_rate": model.hit_rate,
+            "vram_gb": model.vram_gb,
             "license": model.license,
             "source": model.url,
             "installed": path.is_file(),

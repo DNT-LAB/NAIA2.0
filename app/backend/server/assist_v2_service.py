@@ -777,7 +777,8 @@ def _suggested(hits: list[Any], chars: list[Any]) -> list[dict[str, Any]]:
 
 
 def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]:
-    """[NAIA 추론 파이프라인 미사용](사용자 지정 09-28) — 요청을 E2B 에 한 번(core/assist_direct): 태그 + 영어 문장.
+    """[NAIA 추론 파이프라인 미사용](사용자 지정 09-28) — E2B 두 번(core/assist_direct): ① 요청을 쉬운 영어 상황 문장으로
+    (Q/E 등급 표시 · 규칙표 속어 풀이) ② 요청 + 그 상황으로 태그 + 영어 문장.
     한국어 층 · 경로 · 고르기 · 되살리기 · 이벤트 맵 · 다듬기를 거치지 않는다. 쓰는 것은 셋뿐:
     - 사전 이름 맞추기(smiling -> smile) — 사전에 없는 것은 적힌 그대로 싣고 알린다(unknown). 버리면 E2B 가 쓴 구
       (listening to sounds · peeking from doorway)가 다 빠져 메인이 비었다(시도 09-28). 잡동사니(품질 · 등급)만 뺀다.
@@ -799,9 +800,15 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     if manual:
         g, b = req["persons"]["girls"], req["persons"]["boys"]
         people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
+    names = [(c.ko, display_name(c.tag)) for c in chars]
+    # ① 상황 — 요청을 쉬운 영어 문장으로(사용자 실험 09-28 · core/assist_direct 머리말). 실패하면 요청만으로 간다
+    words = ad.glossary_hints(req["text"], layer.rules.get("slang_glossary") or {})
+    sit_reply, sit_info = _chat(context, ad.SITUATION_SYSTEM,
+                                ad.situation_message(req["text"], req["rating"], names, words),
+                                ad.situation_grammar(), max_tokens=120)
+    situation = ad.parse_situation(sit_reply)
     reply, info = _chat(context, ad.DIRECT_SYSTEM,
-                        ad.direct_message(req["text"], req["rating"], [(c.ko, display_name(c.tag)) for c in chars],
-                                          ", ".join(people)),
+                        ad.direct_message(req["text"], req["rating"], names, ", ".join(people), situation),
                         ad.direct_grammar(), max_tokens=320)
     got = ad.parse_direct(reply) if reply is not None else None
     out: dict[str, Any] = {"ok": True, "task": "scene", "goal": "generate", "rating": req["rating"], "direct": True,
@@ -833,12 +840,14 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
         char_tags = [c.tag for c in chars]
         line = list(dict.fromkeys(people + char_tags + [t for t in kept if t not in people and t not in char_tags]))
         out["prompt"] = {"main": _with_sentence(", ".join(line), got.sentence), "characters": []}
-        out["direct_info"] = {"tags": kept, "unknown": unknown, "dropped": dropped, "sentence": got.sentence}
+        out["direct_info"] = {"tags": kept, "unknown": unknown, "dropped": dropped, "sentence": got.sentence,
+                              "situation": situation, "words": [ko for ko, _en in words]}
     g, b, _said = people_count(people)
     partition = partition_of(g, b, "solo" in people)
     out["persons"] = {"mode": "manual" if manual else "auto", "partition": partition, "girls": g, "boys": b,
                       "unknown": 0, "confirm": False, "notes": [], "param": ""}
-    out["timing"] = {"model_s": info.get("elapsed"), "total_s": round(time.perf_counter() - started, 3)}
+    out["timing"] = {"situation_s": sit_info.get("elapsed"), "model_s": info.get("elapsed"),
+                     "total_s": round(time.perf_counter() - started, 3)}
     return out
 
 

@@ -319,7 +319,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       if (overlay.contains(t) || (picker && !picker.hidden && picker.contains(t))) return;
       // 결과 칸의 자동완성 · 태그 정보 팝업은 창 밖(body)에 뜬다 — 거기를 눌러도 창을 닫지 않는다.
       // 아래에 붙여 연 이벤트 검색 · A 탭(누르면 토글이 닫는다 — 여기서 먼저 닫으면 곧바로 다시 열린다)도 창의 일부다
-      if (t.closest?.('#tagTooltip, .tag-chip-info-tooltip, .result-info-tag-popup, .fs-overlay.is-docked, #assistTab')) return;
+      // 붙인 검색의 인원 팝업(.fs-person-popup)은 body 에 따로 뜬다 — 그것도 안쪽이다(Codex 리뷰 09-28: 누르면 둘 다 닫혔다)
+      if (t.closest?.('#tagTooltip, .tag-chip-info-tooltip, .result-info-tag-popup, .fs-overlay.is-docked, .fs-person-popup, #assistTab')) return;
       close();
     }, true);
     window.addEventListener('resize', () => {
@@ -695,6 +696,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       text, rating, persons: personsPayload(), previous: recap,
       names: Object.fromEntries(choices), not_names: [...notNames],
     };
+    // 기록에는 이 요청을 보낸 때의 값을 싣는다 — 답을 기다리는 동안 등급 · 인원을 바꿔도 기록은 결과와 맞는다(Codex 리뷰 09-28)
+    const asked = { rating, personsMode, girls, boys, choices: [...choices], notNames: [...notNames] };
     const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
     if (mode) payload.api_mode = mode;
     const wish = String(preference[rating] || '').trim();
@@ -719,16 +722,19 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     render();
     paintBusy();
     linkEvents();
-    remember(text);
+    remember(text, asked, data);
   }
 
   // ── [기록] — 이번 세션의 결과(사용자 지정 2026-09-28). 새 결과를 앞에 쌓고, 누르면 그때의 요청 · 등급 · 인원 · 이름 선택 ·
   // 기억 · 결과로 되돌아간다(붙인 이벤트 검색도 그 핀 · 인원 · 등급으로). 기억(recap)도 돌려 두니 이어 묻기도 그때부터다.
 
-  function remember(text) {
+  function remember(text, asked, data) {
+    // 서버가 받지 않은 이름 선택은 뺀다(되돌아갈 때 '선택을 쓸 수 없어 되돌렸습니다' 가 또 뜨지 않게)
+    const refused = new Set((data?.names || []).filter(n => n && n.ko && !n.chosen).map(n => String(n.ko)));   // absorbNames 와 같은 판정
     const entry = {
-      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), text, rating,
-      personsMode, girls, boys, choices: [...choices], notNames: [...notNames], recap, result,
+      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), text,
+      rating: asked.rating, personsMode: asked.personsMode, girls: asked.girls, boys: asked.boys,
+      choices: asked.choices.filter(([form]) => !refused.has(form)), notNames: asked.notNames, recap, result,
     };
     history = [entry, ...history].slice(0, HISTORY_MAX);
     historyAt = entry.id;
@@ -1206,6 +1212,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   // Esc 는 창 안 어디에 포커스가 있든 닫는다 - 후보 팝업이 열려 있으면 그것만 먼저 닫는다.
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && open) {
+      // 붙인 검색의 인원 팝업이 열려 있으면 그것만 — Fast Search 가 닫는다(두 리스너가 같은 document capture 라
+      // stopPropagation 으로 서로를 못 막는다: 인원 팝업 Esc 에 Assist 까지 닫혔다 — Codex 리뷰 09-28)
+      if (window.fastSearch?.popupOpen?.()) return;
       event.preventDefault();
       event.stopPropagation();
       if (picker && !picker.hidden) { closePicker(); return; }

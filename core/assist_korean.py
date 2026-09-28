@@ -327,8 +327,9 @@ class KoreanAnalysis:
     phrases: dict[str, str] = field(default_factory=dict)  # 붙여 쓴 구 -> 태그(모델 항목 교체용)
     verb_phrases: list[str] = field(default_factory=list)  # 그중 동사에서 나온 구의 태그(인물 사이 동작 후보)
     phrase_stems: set[str] = field(default_factory=set)    # 사전 구가 가져간 동사 줄기(안) — 모델의 '안기기' 를 버린다
-    rule_stems: set[str] = field(default_factory=set)      # 동사 규칙이 태그로 만든 줄기 + 거기 딸린 줄기(쪼그려 앉 의 앉)
-                                                           # — 모델 항목이 이 동사뿐이면 모델 영문을 버린다(assist_v2.merge)
+    rule_tags: dict[str, str] = field(default_factory=dict)  # 동사 규칙이 태그로 만든 줄기 -> 태그(딸린 줄기는 앞 동사의
+                                                             # 태그: 쪼그려 앉 의 앉 -> squatting) — 모델 항목이 이 동사뿐이면
+                                                             # 모델 영문 대신 이것을 그 항목의 칸에 싣는다(assist_v2.merge)
     names: list[NameHit] = field(default_factory=list)
     explicit_names: set[str] = field(default_factory=set)  # {이름} — 자동 이름 정책과 별개로 사용자가 고정
     roles: tuple[str, str] | None = None                   # (하는 쪽, 당하는 쪽) — 이름 기준
@@ -709,8 +710,10 @@ class KoreanLayer:
                 out.notes.append(f"딸린 동사:{stem}")
                 continue
             if tag and tag not in out.covers and self.vocab.tag_exists(tag):
-                out.rule_stems.add(stem)
-                out.rule_stems.update(s for s in absorbed if s in (self.rules.get("verb_absorbs") or {}).get(stem, ()))
+                out.rule_tags[stem] = tag
+                for s in absorbed:
+                    if s in ((self.rules.get("verb_absorbs") or {}).get(stem) or ()):
+                        out.rule_tags[s] = tag
                 if tag not in out.verb_tags and tag not in out.specific:
                     out.verb_tags.append(tag)
                     out.notes.append(f"동사:{stem}->{tag}")

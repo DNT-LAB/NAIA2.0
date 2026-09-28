@@ -79,6 +79,7 @@ const PERSON_IDS = PERSON_GROUPS.flatMap(group => group.ids);
 // 기본값: 여성이 들어간 구성 전부(사용자 지정). 남성만·기타는 꺼짐.
 const DEFAULT_PERSONS = [...PERSON_GROUPS[0].ids, ...PERSON_GROUPS[1].ids];
 const NEIGHBOR_LIMIT = 20;
+const MIN_DOCKED_H = 120;       // Assist 아래에 붙인 창의 최소 높이 — 이보다 좁으면 숨겨 둔다(칩 · 머리 · 줄 둘)
 const REST_KEY = '__rest__';
 
 export function initFastSearch({searchEventMap, openTagSearch} = {}) {
@@ -530,7 +531,11 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
       const a = docked.anchor.getBoundingClientRect();
       const top = Math.round(a.bottom + 8);
       const bottom = r && r.height >= 160 ? r.bottom - 14 : window.innerHeight - 14;
-      const maxH = Math.max(160, Math.round(bottom - top));
+      const room = Math.round(Math.min(bottom, window.innerHeight - 8) - top);
+      // 낮은 화면에서 Assist 가 칸을 거의 다 쓰면 아래로 벗어났다(Codex 리뷰 09-28) — 자리가 모자라면 숨겨 두고, 자리가
+      // 나면(창을 키우거나 Assist 가 줄면 — ResizeObserver · resize) 다시 보인다
+      overlay.style.visibility = room < MIN_DOCKED_H ? 'hidden' : '';
+      const maxH = Math.max(MIN_DOCKED_H, room);
       overlay.style.transform = 'none';
       overlay.style.left = `${Math.round(a.left)}px`;
       overlay.style.top = `${top}px`;
@@ -539,6 +544,7 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
       fitHeight();
       return;
     }
+    overlay.style.visibility = '';            // 붙여 열 때 숨겨 두었던 것 — 평소 자리에서는 늘 보인다
     if (!r || r.width < 240 || r.height < 160) {
       overlay.style.left = '50%';
       overlay.style.transform = 'translateX(-50%)';
@@ -1156,9 +1162,17 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
   // 있으면 그것만 먼저 닫는다(전파를 끊어 입력 칸의 Esc 핸들러가 창까지 닫지 않게).
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && open) {
+      if (personPopup && !personPopup.hidden) {
+        event.preventDefault();
+        event.stopImmediatePropagation();      // 같은 document 의 Assist Esc 까지 막는다(인원 팝업만 닫는다)
+        closePersonPopup();
+        return;
+      }
+      // 붙여 연 창의 Esc 는 Assist 가 맡는다 — 이름 팝업이면 그것만, 아니면 Assist 를 닫고 이 창도 같이 닫힌다
+      // (여기서 먼저 닫으면 Assist 이름 팝업 Esc 에 이 창만 사라졌다 — Codex 리뷰 09-28)
+      if (docked) return;
       event.preventDefault();
       event.stopPropagation();
-      if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
       close();
       return;
     }
@@ -1170,5 +1184,6 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
     show();
   }, true);
 
-  return { show, close, showDocked, closeDocked, isOpen: () => open };
+  return { show, close, showDocked, closeDocked, isOpen: () => open,
+    popupOpen: () => !!(open && personPopup && !personPopup.hidden) };
 }

@@ -408,16 +408,20 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         api = getattr(ka, "grounded", None)
         return bool(callable(api) and getattr(ka, "tokenizer", None) is not None and api(ko))
 
-    rule_stems = set(getattr(ka, "rule_stems", None) or ())
+    rule_tags = dict(getattr(ka, "rule_tags", None) or {})
 
-    def rule_verbs_only(ko: str) -> bool:
-        """모델 항목이 동사 규칙이 이미 태그로 만든 동사뿐인가(쪼그려 앉기 = 쪼그리 + 앉 -> squatting). 명사 · 부사 · 다른
-        동사가 있으면(바닥에 앉기 · 누워 있기) 모델 쪽이 더 구체적일 수 있어 둔다."""
+    def rule_verb_tags(ko: str) -> list[str] | None:
+        """모델 항목이 동사 규칙이 이미 태그로 만든 동사뿐이면 그 규칙 태그(쪼그려 앉기 = 쪼그리 + 앉 -> [squatting]).
+        모델 영문 대신 이것을 **그 항목의 칸**에 싣는다 — 제외 칸 · 인물 번호는 항목 그대로(버리면 '뛰지 않는' 의 제외와
+        인물 칸의 자세가 사라졌다 — Codex 리뷰 09-28). 명사 · 부사 · 다른 동사가 있으면(바닥에 앉기 · 누워 있기) None —
+        모델 쪽이 더 구체적일 수 있다."""
         tokenizer = getattr(ka, "tokenizer", None)
-        if not rule_stems or tokenizer is None or not ko:
-            return False
+        if not rule_tags or tokenizer is None or not ko:
+            return None
         content = [(f, t) for f, t in tokenizer(ko) if t.startswith(_CONTENT_POS)]
-        return bool(content) and all(t.startswith("VV") and f in rule_stems for f, t in content)
+        if not content or not all(t.startswith("VV") and f in rule_tags for f, t in content):
+            return None
+        return list(dict.fromkeys(rule_tags[f] for f, _t in content))
 
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
         return [t for t in _item_tags(item, kind) if not _junk_tag(t)]
@@ -469,10 +473,11 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if any(stem in (s, s + "기") for s in ka.phrase_stems):
             log.append(f"drop:{en}(사전 구가 덮음)")      # 공주안기 -> princess carry 인데 모델이 '안기기 -> hold' 를 따로 냈다
             return []
-        if rule_verbs_only(ko):
+        covered = rule_verb_tags(ko)
+        if covered is not None:
             # 쪼그려 앉기 -> kneeling · sitting · crouching(실행마다 다르다)이 동사 규칙의 squatting 과 겹쳤다(09-25 · 09-27 실측)
-            log.append(f"drop:{en}(동사 규칙이 덮음)")
-            return []
+            log.append(f"{en}->{','.join(covered)}(동사 규칙)")
+            return covered
         m = _NEGATION.match(en)
         if m and kind != "exclude":
             return []                                               # 'no towel' 은 제외 칸의 일이다

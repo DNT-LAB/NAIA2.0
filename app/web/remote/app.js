@@ -1159,7 +1159,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260825-dialogue2'
     console.error('Failed to initialize Studio tab module', error);
   });
 // Ctrl+F 한 칸 검색. 복사하거나 이벤트 맵으로 검색 조건을 전달한다. 프롬프트에 자동 삽입하지 않는다.
-import('./js/features/fastSearch.mjs?v=20260928-sync')
+import('./js/features/fastSearch.mjs?v=20260928-review')
   .then(({initFastSearch}) => { window.fastSearch = initFastSearch({openTagSearch: openTagSearchAll, searchEventMap: async item => {
     try {
       if (!window.eventMap) throw new Error("이벤트 맵을 아직 불러오지 못했습니다.");
@@ -1188,7 +1188,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260928-hist')
+import('./js/features/assistPanel.mjs?v=20260928-review')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,

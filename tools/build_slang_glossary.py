@@ -201,7 +201,7 @@ def load_curation(path: Path | None) -> dict:
         return {}
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     return {"drop": dict(data.get("drop") or {}), "sexual": dict(data.get("sexual") or {}),
-            "keep_as_slang": list(data.get("keep_as_slang") or [])}
+            "keep_as_slang": list(data.get("keep_as_slang") or []), "replace": dict(data.get("replace") or {})}
 
 
 def curate(data: dict, curation: dict) -> dict:
@@ -209,6 +209,11 @@ def curate(data: dict, curation: dict) -> dict:
     drop = curation.get("drop") or {}
     sexual = curation.get("sexual") or {}
     entries = {w: e for w, e in data["entries"].items() if w not in drop}
+    # replace: 뜻을 통째로 바꾼다(위키 풀이가 틀리거나 한국어 쓰임이 다른 것 — 벽치기 = kabedon / 선 채 벽 성관계, 09-28)
+    for word, senses in (curation.get("replace") or {}).items():
+        if word in entries:
+            entries[word] = {**entries[word], "senses": [
+                {"en": str(r["en"]), "tags": list(r.get("tags") or []), "sexual": bool(r.get("sexual"))} for r in senses]}
     for word, flag in sexual.items():
         if word not in entries:
             continue
@@ -230,9 +235,10 @@ def curate(data: dict, curation: dict) -> dict:
     counts.update({"curated_dropped": len(data["entries"]) - len(entries), "words": len(entries),
                    "sexual_words": sum(1 for e in entries.values() if any(r["sexual"] for r in e["senses"]))})
     out["counts"] = counts
-    if drop or sexual or curation.get("keep_as_slang"):
+    if drop or sexual or curation.get("keep_as_slang") or curation.get("replace"):
         out["attribution"] = (str(data.get("attribution") or "").split(" Entries were then curated")[0]
-                              + " Entries were then curated by hand for relevance to image prompts.")
+                              + " Entries were then curated by hand for relevance to image prompts"
+                              + (" (some glosses rewritten)." if curation.get("replace") else "."))
     return out
 
 

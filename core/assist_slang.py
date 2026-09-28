@@ -91,6 +91,10 @@ def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens:
     toks = list(tokens or [])
     nouns = {form for form, tag in toks if tag.startswith(_NOUN_TAGS)}
     verbs = {form for form, tag in toks if tag.startswith(_VERB_TAGS)}
+    # Kiwi 가 모르는 두 음절 속어 명사는 명사 둘로 쪼갠다(눈뽕 -> 눈 + 뽕, 09-28) — 붙은 명사 토막 둘도 그 꼴로 본다.
+    # '보지 않는' 은 보(동사) + 지(어미)라 아니다
+    pairs = {a + b for (a, ta), (b, tb) in zip(toks, toks[1:])
+             if ta.startswith(_NOUN_TAGS) and tb.startswith(_NOUN_TAGS)}
     for word, entry in (load_glossary() if entries is None else entries).items():
         if len(out) >= MAX_HINTS:
             break
@@ -106,7 +110,7 @@ def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens:
         elif verb and len(key) == 2:
             hit = key in verbs or (key not in nouns and _verb_in_text(key, source))
         else:
-            hit = key in (verbs if verb else nouns)
+            hit = key in (verbs if verb else nouns) or (not verb and len(key) == 2 and key in pairs and key in source)
         if not hit:
             continue
         gloss = _sense_text(entry.get("senses") or (), sexual_ok)

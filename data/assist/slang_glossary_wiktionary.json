@@ -1,0 +1,7131 @@
+{
+ "schema_version": 1,
+ "kind": "assist_slang_glossary",
+ "source": "English Wiktionary via kaikki.org wiktextract raw dump (2026-09-25)",
+ "license": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)",
+ "attribution": "Glosses from Wiktionary contributors (https://en.wiktionary.org), extracted by wiktextract (Tatu Ylonen, kaikki.org). Changes by NAIA: only Korean words whose first sense (or, for words of three or more syllables, any sense) is tagged vulgar/slang/derogatory/offensive/Internet or is on a sexual topic were selected; glosses were shortened. Entries were then curated by hand for relevance to image prompts (some glosses rewritten).",
+ "built": "2026-09-28",
+ "counts": {
+  "korean_entries": 63773,
+  "words": 453,
+  "common_words_dropped": 178,
+  "sexual_words": 165,
+  "curated_dropped": 439
+ },
+ "entries": {
+  "11호 차 타다": {
+   "key": "11호 차 타다",
+   "kind": "phrase",
+   "pos": "phrase",
+   "senses": [
+    {
+     "en": "to walk",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "가슴주머니": {
+   "key": "가슴주머니",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "breast pocket",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "an anime style in which a female character's clothing clings unnaturally to her breasts…",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "가시버시": {
+   "key": "가시버시",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "husband and wife",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "가오": {
+   "key": "가오",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "face (as in to save face); reputation; dignity",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "a pretentious act; an act done solely to gain the approval of others",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "가즈아": {
+   "key": "가즈아",
+   "kind": "noun",
+   "pos": "intj",
+   "senses": [
+    {
+     "en": "expression of excitement, encouragement, or positive expectation; \"let's go!\" or “let's…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "간나": {
+   "key": "간나",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "girl, chick",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "간음": {
+   "key": "간음",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "adultery; fornication",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "간지": {
+   "key": "간지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fashionable taste, zest",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "The sexagenary cycle used in East Asian astrology",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "간지나다": {
+   "key": "간지나",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to be cool, fashionable",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "갈보": {
+   "key": "갈보",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitute",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "갑분싸": {
+   "key": "갑분싸",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "awkward calm (as with a failed joke, etc.)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "갑툭튀": {
+   "key": "갑툭튀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sudden, unexpected appearance; a jumpscare",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "protrusion",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "강간": {
+   "key": "강간",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "rape",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "강간하다": {
+   "key": "강간하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to rape",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "강냉이": {
+   "key": "강냉이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "maize; corn (US)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "tooth",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개같다": {
+   "key": "개같",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "annoying, shitty, crappy",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개고기": {
+   "key": "개고기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dog meat",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "ill-bred person; pest; plague",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개년": {
+   "key": "개년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bitch",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개놈": {
+   "key": "개놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bastard, son of a bitch",
+     "tags": [
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개돼지": {
+   "key": "개돼지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "ignoramus; ignorant person; (especially) the ignorant masses",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "Used other than figuratively or idiomatically: see 개 (gae), 돼지 (dwaeji): dogs and pigs",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "개새끼": {
+   "key": "개새끼",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "son of a bitch, piece of shit, bastard",
+     "tags": [
+      "vulgar",
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "dog, regardless of age",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "puppy; an actual young dog",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "개소리": {
+   "key": "개소리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bullshit, nonsense",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개자식": {
+   "key": "개자식",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bastard; son of a bitch",
+     "tags": [
+      "vulgar",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개저씨": {
+   "key": "개저씨",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "older bastard; elder son of a bitch; old creep",
+     "tags": [
+      "vulgar",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개지랄": {
+   "key": "개지랄",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "stupidity; foolishness",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개지랄하다": {
+   "key": "개지랄하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to act like an idiot, or shamelessly",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "개판": {
+   "key": "개판",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "disorder; mess",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "거머리": {
+   "key": "거머리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "leech",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "nuisance",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "A disrespectful person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "거시기": {
+   "key": "거시기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dissatisfactory",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "thingamajig, whatchamacallit",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "penis",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "see 걷다 (geotda)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "거유": {
+   "key": "거유",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "large breasts (of a woman)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "a busty woman",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "an esteemed Confucian literatus",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "거지발싸개": {
+   "key": "거지발싸개",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "scum, bastard",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "겁꾸러기": {
+   "key": "겁꾸러기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "coward",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "겁대가리": {
+   "key": "겁대가리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fear; cowardice",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "겁쟁이": {
+   "key": "겁쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "coward (someone easily scared)",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "겁탈하다": {
+   "key": "겁탈하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to rob",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to rape, to violate",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "겉바속촉": {
+   "key": "겉바속촉",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "(chiefly of food) being crispy on the outside and moist on the inside",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "겉치레": {
+   "key": "겉치레",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "decoration, adornment",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "affectation, ostentation",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "게으름뱅이": {
+   "key": "게으름뱅이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "idler; layabout",
+     "tags": [
+      "offensive"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "sloth (animal)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "계집년": {
+   "key": "계집년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "woman; bitch",
+     "tags": [
+      "vulgar",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "고무신": {
+   "key": "고무신",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "rubber slippers",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a woman whose boyfriend has been conscripted into the army",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "고자": {
+   "key": "고자",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "eunuch; a man with no or incomplete reproductive organs",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "a person who is bad at something",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "고환": {
+   "key": "고환",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "testicle",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "곤조": {
+   "key": "곤조",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bad temper",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "골댕이": {
+   "key": "골댕이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "Golden Retriever (dog breed)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "골로 가다": {
+   "key": "골로 가다",
+   "kind": "phrase",
+   "pos": "phrase",
+   "senses": [
+    {
+     "en": "to croak, to die",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "to be in trouble, to be doomed",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "골초": {
+   "key": "골초",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "chain smoker, cigarette addict",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "low-quality tobacco",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "곰보": {
+   "key": "곰보",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a pockmarked person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "곱세크": {
+   "key": "곱세크",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "miser, cheapskate",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "공갈치다": {
+   "key": "공갈치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to threaten",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "공부벌레": {
+   "key": "공부벌레",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "wonk, nerd, an overly studious person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "공비": {
+   "key": "공비",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "communist bandit; partisan",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "공알": {
+   "key": "공알",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "clitoris",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "공주병": {
+   "key": "공주병",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "princess sickness (tendency of a young woman to act like a spoilt, narcissistic princess)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "공창가": {
+   "key": "공창가",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a red-light district",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "관심종자": {
+   "key": "관심종자",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "attention whore",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "교미": {
+   "key": "교미",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mating; copulation",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "교미하다": {
+   "key": "교미하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to mate; to copulate",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "교차위": {
+   "key": "교차위",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a sex position in which both partners' legs are interlocked",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "구라": {
+   "key": "구라",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bullshit; lie",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "story; tale; anecdote",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "구렁이": {
+   "key": "구렁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A rat snake, particularly the Amur rat snake (Elaphe schrenckii), a large non-venomous…",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "sly, conniving person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "군것질": {
+   "key": "군것질",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "habitual eating between meals",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "snacks",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "군바리": {
+   "key": "군바리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A soldier",
+     "tags": [
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "굽신거리다": {
+   "key": "굽신거리",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to bow repeatedly",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to fawn, to grovel, to brown-nose",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "굿즈": {
+   "key": "굿즈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "goods; related products; derivative products in the fields of comics, animation, games…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "귀두": {
+   "key": "귀두",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "glans penis",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "귀두망울": {
+   "key": "귀두망울",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bulbus glandis",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "귀때기": {
+   "key": "귀때기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "ear",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "귀요미": {
+   "key": "귀요미",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cutie",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "귀접": {
+   "key": "귀접",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual intercourse with a ghost",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "그년": {
+   "key": "그년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "that girl; that bitch",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "그놈": {
+   "key": "그놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "that guy; that bastard; that thing",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "극혐": {
+   "key": "극혐",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "extreme hatred",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "extreme disgust",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "근친상간": {
+   "key": "근친상간",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "incest",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "금딸": {
+   "key": "금딸",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "abstinence from masturbation",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "금사빠": {
+   "key": "금사빠",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "someone who tends to fall in love at first sight (or otherwise very quickly)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "급발진": {
+   "key": "급발진",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sudden unintended acceleration",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "sudden anger",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "기둥서방": {
+   "key": "기둥서방",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pimp, hustler (procurer of prostitutes)",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "unemployed man whose wife is the breadwinner",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "기똥차다": {
+   "key": "기똥차",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "To be stunning, astounding",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "기럭지": {
+   "key": "기럭지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "length",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "height (of humans or animals)",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "기모찌": {
+   "key": "기모찌",
+   "kind": "noun",
+   "pos": "intj",
+   "senses": [
+    {
+     "en": "A \"memey\" interjection expressing something feeling nice",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "길막": {
+   "key": "길막",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "the act of blocking someone's way",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "까리하다": {
+   "key": "까리하",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "to be wonderful, to be cool",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "깐부": {
+   "key": "깐부",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pal, friend; teammate (in children's games)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "깜놀": {
+   "key": "깜놀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a sudden surprise",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "깜빵": {
+   "key": "깜빵",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prison, jail",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "깝치다": {
+   "key": "깝치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to fidget; to brag; to behave frivolously; to fool around",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "깽판": {
+   "key": "깽판",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "rampage; messing up; disturbance",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼬라지": {
+   "key": "꼬라지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "appearance, behaviour",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼬락서니": {
+   "key": "꼬락서니",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "appearance, behaviour",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼬리 치다": {
+   "key": "꼬리 치다",
+   "kind": "phrase",
+   "pos": "phrase",
+   "senses": [
+    {
+     "en": "to wag the tail (for an animal)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to flirt, typically inappropriately and for ulterior purposes (usually a girl/woman…",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼬맹이": {
+   "key": "꼬맹이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "rascal, small fry, brat",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼬무룩": {
+   "key": "꼬무룩",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "losing an erection",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "꼰대": {
+   "key": "꼰대",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a stuck-up and condescending person, especially an older one; a curmudgeon",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼴값": {
+   "key": "꼴값",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "behaviour befitting one's appearance or position",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "inappropriate conduct",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "꼴리다": {
+   "key": "꼴리",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to get an erection",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "to get horny; to get sexually aroused",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "to be sexy; to sexually arouse",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "꼴불견": {
+   "key": "꼴불견",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a disgusting, repulsive, or indecent person or thing; an ugly scene, eyesore",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꼴통": {
+   "key": "꼴통",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fool, dumbhead",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "stubborn person, headstrong person",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "꿀맛": {
+   "key": "꿀맛",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "being delicious",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "the bee's knees",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "sugariness, i.e. honeyed, sugary taste",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "꿀잠": {
+   "key": "꿀잠",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a good sleep",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "끄나풀": {
+   "key": "끄나풀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a short string",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "informant; agent; stooge; cat's paw",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "나대다": {
+   "key": "나대",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to act in an unruly manner; to behave outside accepted norms",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to be full of oneself; to show off; to act boastfully; to act ostentatiously, especially…",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "나와바리": {
+   "key": "나와바리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "territory of a person or group, area of influence; (by extension) home ground, place one…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "나잇값": {
+   "key": "나잇값",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "acting one's age; behaviour fitting one's age",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "난쟁이": {
+   "key": "난쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dwarf, midget",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "남근": {
+   "key": "남근",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis, cock",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "남친짤": {
+   "key": "남친짤",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A photo that looks like it was taken by a boyfriend",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "낮져밤이": {
+   "key": "낮져밤이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "freak in the sheets; someone (usually a man) who is normally kind but dominant during sex",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "낯짝": {
+   "key": "낯짝",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "face, mug",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "냥아치": {
+   "key": "냥아치",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "badly behaved cat",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "냥이": {
+   "key": "냥이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cute word for \"cat\"",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "네토라레": {
+   "key": "네토라레",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cuckolding fetish",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "녀석": {
+   "key": "녀석",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dude, fellow",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "endearing term for usually young boys, similar to squirt or scamp",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "노가다": {
+   "key": "노가다",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "manual labourer",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "노모": {
+   "key": "노모",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "uncensored",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "old mother",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "노인네": {
+   "key": "노인네",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "old person, old folk",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "노콘": {
+   "key": "노콘",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bareback sex, sex without a condom",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "논다니": {
+   "key": "논다니",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitute, courtesan (a person having sex for profit)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "뇌까리다": {
+   "key": "뇌까리",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to chat; to chatter; to jabber",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "눈뽕": {
+   "key": "눈뽕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a blinding flash of light in the eyes, dazzling glare",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "느좋": {
+   "key": "느좋",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "something nice, especially in a stylish or trendy way",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "늙다리": {
+   "key": "늙다리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "old beast (old animal)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "aged person, dotard",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "다구리": {
+   "key": "다구리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "gang beating; mob beating",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "닥치다": {
+   "key": "닥치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to draw near, to approach",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to shut up",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "닭둘기": {
+   "key": "닭둘기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "urban pigeon, especially in reference its size or chicken-like mannerisms",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "대가리": {
+   "key": "대가리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "head of an animal",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "head of a person",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "boss",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "A vulgarizing, pejorative suffix",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "대구재": {
+   "key": "대구재",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "the head",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "대구재이": {
+   "key": "대구재이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "the head",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "대딸": {
+   "key": "대딸",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "handjob",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "덕후": {
+   "key": "덕후",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fan, -holic",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "덮치다": {
+   "key": "덮치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to pounce, to attack suddenly, to raid",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to swoop, to pounce from above",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to hit, to strike",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to try to rape",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "도라이바": {
+   "key": "도라이바",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "screwdriver",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "돌머리": {
+   "key": "돌머리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "the top of a stone",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "idiot, knucklehead",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "돌싱": {
+   "key": "돌싱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "divorcee",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "돌팔이": {
+   "key": "돌팔이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a wandering salesman",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a charlatan",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a medical student drafted as an army physician, who is inexperienced and generally lacks…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "된장녀": {
+   "key": "된장녀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "females who scrimp on essentials so they can over-spend on conspicuous luxuries; females…",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뒤지다": {
+   "key": "뒤지",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to rummage, to rifle",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to fall behind; to lag behind",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "nonstandard form of 뒈지다 (dwejida, “to die”)",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "들박": {
+   "key": "들박",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "suspended congress; ekiben (sex position which consists of one participant carrying the…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "딜도": {
+   "key": "딜도",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dildo",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "딥 스로팅": {
+   "key": "딥 스로팅",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "deep throating",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "따귀": {
+   "key": "따귀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cheek",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "slap",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "따먹다": {
+   "key": "따먹",
+   "kind": "verb",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "to pick and eat",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to take an opponent's pieces or money",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to have intercourse",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "딸감": {
+   "key": "딸감",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fap/wank material",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "딸년": {
+   "key": "딸년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "one's daughter",
+     "tags": [
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "딸딸이": {
+   "key": "딸딸이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "masturbation; jerking off",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "a rattle (bell)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "flip-flops",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a small vehicle (such as a bicycle or pedicab)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "딸배": {
+   "key": "딸배",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "someone who delivers food on a motorcycle, especially said of those who do not abide by…",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "땡중": {
+   "key": "땡중",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "corrupt or fraudulent Buddhist monk",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "땡추": {
+   "key": "땡추",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "unqualified Buddhist monk",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "떡치다": {
+   "key": "떡치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to fuck, to shag, to hump",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "to fuck up, to screw",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "to be sufficient",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "to pound rice to make rice cake",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "떼거리": {
+   "key": "떼거리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "crowd, group",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "또라이": {
+   "key": "또라이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "maniac; lunatic; freak",
+     "tags": [
+      "slang",
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "똥구멍": {
+   "key": "똥구멍",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "anus",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "똥까시": {
+   "key": "똥까시",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "rim job (a vulgar word for anilingus)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "똥꼬": {
+   "key": "똥꼬",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "anus",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "똥차": {
+   "key": "똥차",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a slow-footed player",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "똥퍼": {
+   "key": "똥퍼",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a person who scoops droppings of people",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뚝배기": {
+   "key": "뚝배기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a pot or a large bowl made of clay which is used to cook various Korean food",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "head, helmet, hard hat",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뚱뚱보": {
+   "key": "뚱뚱보",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fat person; fatso",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뚱뚱이": {
+   "key": "뚱뚱이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fat person; fatso",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뚱보": {
+   "key": "뚱보",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fat person; fatso",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "sullen, sulking person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "로친네": {
+   "key": "로친네",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "old woman",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "wife (of an elderly couple)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "룸살롱": {
+   "key": "룸살롱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a form of nightclub providing private suites with female attendants, sometimes providing…",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "리비도": {
+   "key": "리비도",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "libido (drives or mental energies related or based on sexual instincts but not…",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "마루타": {
+   "key": "마루타",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "human test subject of Unit 731",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "human test subject, guinea pig",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "마스터베이션": {
+   "key": "마스터베이션",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "masturbation",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "막되다": {
+   "key": "막되",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "to be ill-mannered, to be crude",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "말라깽이": {
+   "key": "말라깽이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a skinny person, a living skeleton",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "맘마통": {
+   "key": "맘마통",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "large breasts (of a woman)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "망나니": {
+   "key": "망나니",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "yahoo, thug, ruffian",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "headsman, executioner",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "맞짱": {
+   "key": "맞짱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fight",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "매음": {
+   "key": "매음",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitution",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "매음굴": {
+   "key": "매음굴",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "brothel (house of prostitution)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "매음하다": {
+   "key": "매음하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to engage in prostitution, to prostitute oneself",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "매춘": {
+   "key": "매춘",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitution",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "매춘부": {
+   "key": "매춘부",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitute, hooker, call girl",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "매춘하다": {
+   "key": "매춘하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to engage in prostitution, to prostitute oneself",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "맹추": {
+   "key": "맹추",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fool, idiot",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "머리빡": {
+   "key": "머리빡",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "head",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "hair",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "머저리": {
+   "key": "머저리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "half-wit, dimwit, sluggard",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "먹방러": {
+   "key": "먹방러",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mukbanger",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "메스가키": {
+   "key": "메스가키",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mesugaki",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "멘붕": {
+   "key": "멘붕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mental breakdown",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "모가지": {
+   "key": "모가지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "neck, head",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "dismissal, discharge (from employment)",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "모에": {
+   "key": "모에",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "moe (affection towards fictional characters from Japanese or similar media)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "몸짱": {
+   "key": "몸짱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "ideal body, killer figure",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "무데뽀": {
+   "key": "무데뽀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "recklessness, rashness",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "무유": {
+   "key": "무유",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "very flat chest, very undeveloped breasts; (metonymically) a woman who is such",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "Dialectal form of 무 (mu, “radish”)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "뭣같다": {
+   "key": "뭣같",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "annoying, shitty, crappy, lousy",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "미꾸라지": {
+   "key": "미꾸라지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "The Chinese muddy loach, Misgurnus mizolepis, a common fish in Korean lakes and rivers",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a cunning, slippery person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "미주알": {
+   "key": "미주알",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sphincter muscles of the anus; the anus",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "미치광이": {
+   "key": "미치광이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "lunatic; nutcase",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "미친놈": {
+   "key": "미친놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "asshole",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "바보": {
+   "key": "바보",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fool, moron, idiot",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "The Fool (Tarot card)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "바텀": {
+   "key": "바텀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bottom",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "발기": {
+   "key": "발기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "erection",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "suggestion; incitement",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "밤일하다": {
+   "key": "밤일하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to work the night shift; to work during the night",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to engage in sex work, prostitution; to have sex",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "밥자루": {
+   "key": "밥자루",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bag of rice (a sack worn by beggars for carrying rice they obtained)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "good-for-nothing (a term used to describe someone who leeches off others but contributes…",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "배알": {
+   "key": "배알",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bowel, gut, intestine",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뱦뺴": {
+   "key": "뱦뺴",
+   "kind": "noun",
+   "pos": "name",
+   "senses": [
+    {
+     "en": "Touhou Project (東方Project)",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "버러지": {
+   "key": "버러지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bug, insect, pest",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "insect (contemptible, repulsive person)",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "벌갱이": {
+   "key": "벌갱이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bug, insect (any small arthropod such as insects, spiders, etc.)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "worm (a repulsive person)",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "someone who is obsessed with something",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "Communist filth, commie worm, vile leftist",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "벌거지": {
+   "key": "벌거지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bug, insect (any small arthropod such as insects, spiders, etc.)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "worm (a repulsive person)",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "someone who is obsessed with something",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "벗방": {
+   "key": "벗방",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "an online broadcast without wearing some or all clothes",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "베드신": {
+   "key": "베드신",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex scene",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "벽치기": {
+   "key": "벽치기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "kabedon (pinning someone against a wall with one hand)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "standing sex against a wall",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "보지": {
+   "key": "보지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pussy, vulva, vagina",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "preservation, holding, retention",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "notice, announcement",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "본디지": {
+   "key": "본디지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bondage",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "부끄부끄": {
+   "key": "부끄부끄",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "in an adorably shy manner",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "불상놈": {
+   "key": "불상놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mean, lowly bastard",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "불쏘시개": {
+   "key": "불쏘시개",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "kindling (twigs used to start a fire)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "spark, trigger, catalyst",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "pot boiler book, low-quality book",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "불알": {
+   "key": "불알",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "balls; testicles",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "붕가붕가": {
+   "key": "붕가붕가",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "behavior in heat (humping)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "sex; sexual intercourse",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "비역": {
+   "key": "비역",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "homosexual activity among men",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "빈유": {
+   "key": "빈유",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "small breasts",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "a flat-chested woman",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "빠가": {
+   "key": "빠가",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "moron, retard",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "빠개다": {
+   "key": "빠개",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to split, to cleave, to cut",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to laugh",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "빠구리": {
+   "key": "빠구리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a fuck, a fucking (highly vulgar word for sexual intercourse)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "빠따": {
+   "key": "빠따",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "baseball bat",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "baseball batter",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "baseball",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "physical abuse involving hitting someone with a bat or club (in the military, gangs, etc.)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "빡치다": {
+   "key": "빡치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to fly off the handle; to get angry, to get pissed",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뻐큐": {
+   "key": "뻐큐",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "the middle finger as an obscene gesture",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뼈다귀": {
+   "key": "뼈다귀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bone piece",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "bone",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "뽕쟁이": {
+   "key": "뽕쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "druggie",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "사까시": {
+   "key": "사까시",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "blowjob (general vulgar word for fellatio)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "사이비": {
+   "key": "사이비",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pseudo",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "religious cult",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "삼엽충": {
+   "key": "삼엽충",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "trilobite (extinct arthropod)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a Samsung fanboy/fangirl",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "삽신": {
+   "key": "삽신",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual penetration (of a woman by a man)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "상간": {
+   "key": "상간",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fornication",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "상놈": {
+   "key": "상놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "boor, i.e. low-class man",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "boorish, mean man",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "새가슴": {
+   "key": "새가슴",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "timid person",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "choker; player who performs badly at important games",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "pectus carinatum; pigeon chest",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "새내기": {
+   "key": "새내기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "freshman",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "newb, newbie",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "새대가리": {
+   "key": "새대가리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "birdbrain",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "색마": {
+   "key": "색마",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex pest, lecher",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "색욕": {
+   "key": "색욕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "lust, sexual desire",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "색쟁이": {
+   "key": "색쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "lecherous man, debauched man",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "색정": {
+   "key": "색정",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual urge, sexual desire, lust, carnal desire",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "생식기": {
+   "key": "생식기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "genitals; reproductive organs",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성감": {
+   "key": "성감",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual feeling",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성감대": {
+   "key": "성감대",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "erogenous zone",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성관계": {
+   "key": "성관계",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual relations; sexual intercourse",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성교": {
+   "key": "성교",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual intercourse, coitus, sex",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성교 체위": {
+   "key": "성교 체위",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex position",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성교하다": {
+   "key": "성교하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to have sex, to make love, to copulate",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성기": {
+   "key": "성기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "genitalia, sex organs",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성노예": {
+   "key": "성노예",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex slave",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성매매": {
+   "key": "성매매",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitution",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성범죄자": {
+   "key": "성범죄자",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex offender; sex criminal",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성생활": {
+   "key": "성생활",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex life, sexual life",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성욕": {
+   "key": "성욕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual desire",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "appetence",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "appetency",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "eroticism",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "성폭행": {
+   "key": "성폭행",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "rape",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성폭행하다": {
+   "key": "성폭행하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to rape",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "성행위": {
+   "key": "성행위",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex, a sex act",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "세계에서 가장 오래된 직업": {
+   "key": "세계에서 가장 오래된 직업",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "the world's oldest profession",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "세젤귀": {
+   "key": "세젤귀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cutest in the world",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "섹스": {
+   "key": "섹스",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex (act of sexual intercourse)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "섹스하다": {
+   "key": "섹스하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to have sex",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "센빠이": {
+   "key": "센빠이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "senpai (upperclassman or elder student, in the context of Japan)",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "소대가리": {
+   "key": "소대가리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "head of a cow, especially boiled as food",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "miser, stingy person",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "idiot, buffoon, fool",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "absurdly stubborn person",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "속궁합": {
+   "key": "속궁합",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sexual compatibility, sexual chemistry",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "수간": {
+   "key": "수간",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bestiality (sexual activity)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "수음": {
+   "key": "수음",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "masturbation, onanism",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "수음하다": {
+   "key": "수음하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to masturbate",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "수전노": {
+   "key": "수전노",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "miser; pinchpenny",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "수치플": {
+   "key": "수치플",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "humiliation play (sexual roleplay involving deliberate humiliation)",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "any act causing humiliation or embarrassment",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "스리섬": {
+   "key": "스리섬",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "threesome",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "슴": {
+   "key": "슴",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "boob; woman's breast",
+     "tags": [
+      "vulgar",
+      "Internet"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "A prefix attached to some nouns to make additional semantic relation with woman's breast.…",
+     "tags": [
+      "vulgar",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "슴가": {
+   "key": "슴가",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "boob; woman's breast",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "슴골": {
+   "key": "슴골",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "breast cleavage",
+     "tags": [
+      "vulgar",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "시골뜨기": {
+   "key": "시골뜨기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "country bumpkin, hick",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "식충이": {
+   "key": "식충이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "person who lives off others without contributing; freeloader",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "싱글벙글": {
+   "key": "싱글벙글",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "continuously grinningly",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "stupid (mainly used in DC Inside)",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "싸가지": {
+   "key": "싸가지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "manner, politeness (chiefly used in negative senses)",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "쌩까다": {
+   "key": "쌩까",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to purposely ignore (someone's words or opinions; someone by pretending to be a stranger…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "쌩얼": {
+   "key": "쌩얼",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "(a woman's) face without makeup",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "썸": {
+   "key": "썸",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "period of flirting before officially beginning a romantic relationship",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "썸남": {
+   "key": "썸남",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A man with whom one shares a possible mutual romantic interest",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "썸녀": {
+   "key": "썸녀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A woman with whom one shares a possible mutual romantic interest",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "씨불이다": {
+   "key": "씨불이",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to talk carelessly; to babble",
+     "tags": [
+      "vulgar",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "씨팔놈": {
+   "key": "씨팔놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a motherfucker, a bastard, a contemptible person",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "씹": {
+   "key": "씹",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cunt (highly offensive term for a woman's vulva)",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "coitus, copulation, fuck, sexual intercourse",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "씹거웃": {
+   "key": "씹거웃",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "woman's pubes, pubic hair",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "씹덕": {
+   "key": "씹덕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fucking otaku, fucking weeaboo (social outcast fascinated with Japanese animation)",
+     "tags": [
+      "vulgar",
+      "derogatory",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "씹두덩": {
+   "key": "씹두덩",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mons pubis, mons veneris, Venus mound",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "씹새": {
+   "key": "씹새",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A term of abuse",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "씹새끼": {
+   "key": "씹새끼",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "motherfucker; fucker",
+     "tags": [
+      "vulgar",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "씹하다": {
+   "key": "씹하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to fuck, to copulate",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "아가리": {
+   "key": "아가리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "slang form of 입 (ip, “mouth”): trap, gob, piehole",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "opening of a container",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "entrance; outlet, vent",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "Gyeongsang and Chungcheong form of 아가미 (agami, “gill”)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "아녀자": {
+   "key": "아녀자",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "woman",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "아다": {
+   "key": "아다",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "virgin (someone who has never had sex; also attributive)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "아들놈": {
+   "key": "아들놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "one's son",
+     "tags": [
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "안경잡이": {
+   "key": "안경잡이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bespectacled person, glasses-wearer, four-eyes",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "안경쟁이": {
+   "key": "안경쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bespectacled person, glasses-wearer, four-eyes",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "앞잡이": {
+   "key": "앞잡이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "guide; cicerone",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "informant; agent; stooge; cat's paw",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "애액": {
+   "key": "애액",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "vaginal fluids",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "야구 동영상": {
+   "key": "야구 동영상",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "euphemistic form of 야한 동영상 (yahan dong'yeongsang, “porn, pornographic video”)",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "Used other than figuratively or idiomatically: see 야구 (yagu), 동영상 (dong'yeongsang):…",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "야벅지": {
+   "key": "야벅지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "thigh",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "야부리": {
+   "key": "야부리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "gibberish, nonsense, lie; talking shit",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "talk; conversation",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "야설": {
+   "key": "야설",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "erotic fiction, pornographic story",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "snowfall at night, night snow",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "popular speculation or hearsay without official corroboration",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "야스": {
+   "key": "야스",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sex",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "야짤": {
+   "key": "야짤",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "erotic image",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "야추": {
+   "key": "야추",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "양아치": {
+   "key": "양아치",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "thug, punk, bully, or anyone of poor morality",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "beggar, tramp",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "얼짱": {
+   "key": "얼짱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a good-looking person; a person that follows specific style of fashion",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "에겐": {
+   "key": "에겐",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "submissive; soft, shy, emotional 'feminine' vibe (estrogen type)",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "에로": {
+   "key": "에로",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "erotic; sexual",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "에키벤": {
+   "key": "에키벤",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "ekiben (bento sold at railroad stations)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "ekiben; suspended congress (sex position which consists of one participant carrying the…",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "여친짤": {
+   "key": "여친짤",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "A photo that looks like it was taken by a girlfriend",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "여캠": {
+   "key": "여캠",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "female streamer",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "여편네": {
+   "key": "여편네",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "wife, married woman",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "연놈": {
+   "key": "연놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bastards (regardless of gender)",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "열없쟁이": {
+   "key": "열없쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a shy person, a timid person, coward",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "영포티": {
+   "key": "영포티",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "person in their forties who maintains their youth",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "(since the 2020s) middle-aged person who tries too hard to appear young",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "오르가슴": {
+   "key": "오르가슴",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "orgasm",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "왕자병": {
+   "key": "왕자병",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "male version of princess sickness (tendency of a young man to act like a spoilt…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "욕지거리": {
+   "key": "욕지거리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "swear word, profanity",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "웃프다": {
+   "key": "웃프",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "to be funny but sad",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "원조교제": {
+   "key": "원조교제",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dating with compensation (payments, financial support, etc.); schoolgirl prostitution",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "웬이": {
+   "key": "웬이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "idiot",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "유교걸": {
+   "key": "유교걸",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a young woman who is unusually prudish or traditional for her age (e.g. for avoiding…",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "유륜": {
+   "key": "유륜",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "areola (circle around the nipple)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "유즙": {
+   "key": "유즙",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "milk, breast milk",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "유축기": {
+   "key": "유축기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "breast pump",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "육구": {
+   "key": "육구",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "sixty-nine (sex position)",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "pad (cushion-like thickening of the skin on the underside of the toes of animals)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "육구하다": {
+   "key": "육구하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to sixty-nine",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "육봉": {
+   "key": "육봉",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis",
+     "tags": [
+      "slang"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "hump of a camel",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "being landlocked (spending their entire lives in freshwater, without the typical…",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "윤간": {
+   "key": "윤간",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "gang rape",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "음경": {
+   "key": "음경",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "음낭": {
+   "key": "음낭",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "scrotum",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "음목": {
+   "key": "음목",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "vagina",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "음문": {
+   "key": "음문",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "vulva, vagina",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "음욕": {
+   "key": "음욕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "lust; sexual desire",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "음핵": {
+   "key": "음핵",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "clitoris",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "이년": {
+   "key": "이년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "this girl; this bitch",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "이놈": {
+   "key": "이놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "this guy; this bastard; this thing",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "이마떼기": {
+   "key": "이마떼기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "forehead",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "인간 말종": {
+   "key": "인간 말종",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "scum of the earth, worst of humanity, human filth",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "인싸": {
+   "key": "인싸",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "social butterfly, well-connected person, person at the center of social life",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "normie, someone outside the subculture",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "입위": {
+   "key": "입위",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "ekiben; suspended congress (sex position which consists of one participant carrying the…",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "입툭튀": {
+   "key": "입툭튀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "face characterized by an advanced mouth; bimaxillary protrusion",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "잉여인간": {
+   "key": "잉여인간",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "surplus human being; a derogatory term for people who are useless to the society",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "자라자지": {
+   "key": "자라자지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "withered penis",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "grower (penis which appears unusually small when flaccid)",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "자뻑": {
+   "key": "자뻑",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "being snobby, narcissistic, overly proud of oneself",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "자위": {
+   "key": "자위",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "masturbation",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "consoling oneself (often with a pathetic nuance)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "self-defense",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "자위하다": {
+   "key": "자위하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to masturbate",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "to comfort oneself",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to defend oneself or one's own",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "자지": {
+   "key": "자지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis, dick",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "purple gromwell (Lithospermum erythrorhizon)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "잘생쁨": {
+   "key": "잘생쁨",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "handsome and beautiful",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "잠자리": {
+   "key": "잠자리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dragonfly",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "any surface for sleeping (such as beds, blankets, etc.)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "sexual intercourse",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "잡년": {
+   "key": "잡년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a loose woman, slut, whore, slattern",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "잡치다": {
+   "key": "잡치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to spoil, to ruin, to screw up",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "장님": {
+   "key": "장님",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "blind person",
+     "tags": [
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "잼민이": {
+   "key": "잼민이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a young person, especially an elementary schooler",
+     "tags": [
+      "derogatory",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "잼순이": {
+   "key": "잼순이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a young girl, especially an elementary schooler",
+     "tags": [
+      "derogatory",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "저년": {
+   "key": "저년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "that girl; that bitch",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "저놈": {
+   "key": "저놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "that guy; that bastard; that thing",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "전립선": {
+   "key": "전립선",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostate",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "절대영역": {
+   "key": "절대영역",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "exposed skin of the thigh between the hem of a miniskirt and thigh-high socks",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "정력": {
+   "key": "정력",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "virility; male sexual prowess",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "energy; vigor",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "strength of an adult man",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "a certain strength",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "정액": {
+   "key": "정액",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "semen; sperm (a bodily fluid)",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "extract; essence",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "fixed amount (of money); flat rate",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "정욕": {
+   "key": "정욕",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "lust; sexual desire",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "정조대": {
+   "key": "정조대",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "chastity belt",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "젖꼭지": {
+   "key": "젖꼭지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "nipple (projection of mammary gland)",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "pacifier, dummy",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "젖통": {
+   "key": "젖통",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "breast; udder",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "조루": {
+   "key": "조루",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "premature ejaculation",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "족치다": {
+   "key": "족치",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to torture; to attack; to hit",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "존맛": {
+   "key": "존맛",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "delicious, exquisite taste as fuck (positively)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "존맛탱": {
+   "key": "존맛탱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "delicious taste",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "졸개": {
+   "key": "졸개",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "henchman; subordinate; low-rank soldier",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "졸귀": {
+   "key": "졸귀",
+   "kind": "noun",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "very cute",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "종년": {
+   "key": "종년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "one's maidservant",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "종놈": {
+   "key": "종놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "one's servant",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "좆": {
+   "key": "좆",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis, dick, cock",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "좆같다": {
+   "key": "좆같",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "to be shitty, to suck, to be miserable",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "좆까": {
+   "key": "좆까",
+   "kind": "noun",
+   "pos": "intj",
+   "senses": [
+    {
+     "en": "eat a dick, fuck off",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "좆나": {
+   "key": "좆나",
+   "kind": "noun",
+   "pos": "adv",
+   "senses": [
+    {
+     "en": "as fuck, fucking (vulgar intensifying adverb)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "좆대가리": {
+   "key": "좆대가리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis, dick, cock; dickhead",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "좆되다": {
+   "key": "좆되",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to be fucked (in trouble)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "좆린이": {
+   "key": "좆린이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "child boy",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "좆물": {
+   "key": "좆물",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "semen, cum",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "좆밥": {
+   "key": "좆밥",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penile smegma",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "a good-for-nothing",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "주둥아리": {
+   "key": "주둥아리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "piehole",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "주둥이": {
+   "key": "주둥이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "muzzle, snout, mouth (of animals or of a jar)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "piehole (usually of humans)",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "주전부리": {
+   "key": "주전부리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "habitual eating between meals",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "snacks",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "죽빵": {
+   "key": "죽빵",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "punch to the face",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "죽이다": {
+   "key": "죽이",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to kill, to cause to die",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to extinguish (especially of fire)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to lower, to keep down (of one's sound, voice, temper, etc.)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to fascinate; to knock dead",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "중매쟁이": {
+   "key": "중매쟁이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "matchmaker",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "지껄이다": {
+   "key": "지껄이",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to chat, to chatter, to jabber",
+     "tags": [
+      "derogatory",
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "지랄": {
+   "key": "지랄",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "commotion, hubbub, ruckus, misbehavior, uncouth activity",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "bullshit, nonsense",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "epilepsy",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "지랄하다": {
+   "key": "지랄하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to act in a libertine way, to go crazy, to engage in a commotion",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "지옥철": {
+   "key": "지옥철",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a very crowded subway line or rolling stock",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "짓거리": {
+   "key": "짓거리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "ridiculous act",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "짝짓기": {
+   "key": "짝짓기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "mating (of animals), copulation",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "짭새": {
+   "key": "짭새",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "police",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "쪼개다": {
+   "key": "쪼개",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to split, to cut, to cleave (into at least two parts)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to laugh",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "찌르다": {
+   "key": "찌르",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to prick; to stab",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to tell on; to tattletale",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "찌질하다": {
+   "key": "찌질하",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "to be cowardly, to be narrow-minded, to be freaky",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "찌찌": {
+   "key": "찌찌",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "breast, milk",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "찐따": {
+   "key": "찐따",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cripple, someone who has the polio disease",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "misfit, loser, withdrawn, freak",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "찰떡궁합": {
+   "key": "찰떡궁합",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a perfect match",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "best friends",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "참교육": {
+   "key": "참교육",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "proper education",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "harsh but deserved discipline or punishment",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "창녀": {
+   "key": "창녀",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "prostitute, hooker (a person having sex for profit)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "처먹다": {
+   "key": "처먹",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "vulgar form of 먹다 (meokda, “all definitions”)",
+     "tags": [
+      "vulgar"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "to eat ravenously",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "체외사정": {
+   "key": "체외사정",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "coitus interruptus",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "촌년": {
+   "key": "촌년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "country girl, hillbilly",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "촌놈": {
+   "key": "촌놈",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a hick, a country bumpkin",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "촌뜨기": {
+   "key": "촌뜨기",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "country bumpkin, hick, hillbilly",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "총질": {
+   "key": "총질",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "use of a gun; shooting",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "축생": {
+   "key": "축생",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "brute (of a person)",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "춘화": {
+   "key": "춘화",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "erotica, pornography, erotic art",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "치한": {
+   "key": "치한",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pervert, sexual harasser, molester, groper, masher",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "콜라주": {
+   "key": "콜라주",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "collage (picture made by sticking other pictures onto a surface)",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "photoshopped composite image",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "콩밥 먹다": {
+   "key": "콩밥 먹다",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "to go to prison; to be in prison",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "클리토리스": {
+   "key": "클리토리스",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "clitoris",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "키다리": {
+   "key": "키다리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "tall lanky person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "킹받다": {
+   "key": "킹받",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to be infuriating",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "탱탱볼": {
+   "key": "탱탱볼",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bouncy ball",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "meatball",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "털바퀴": {
+   "key": "털바퀴",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "stray cat",
+     "tags": [
+      "derogatory",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "테토": {
+   "key": "테토",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "dominant; bold, confident 'masculine' vibe (testosterone type)",
+     "tags": [
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "틀딱": {
+   "key": "틀딱",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "old person viewed as out of touch or annoying",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "by extension, person who behaves in a rigid or reactionary manner regardless of age",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "틀딱충": {
+   "key": "틀딱충",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "boomer, out-of-touch old person",
+     "tags": [
+      "slang",
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "파이즈리": {
+   "key": "파이즈리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "tit fuck",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "판치라": {
+   "key": "판치라",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "an unexpected (intentional or accidental) exposure of a woman's panties",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "팔불용": {
+   "key": "팔불용",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a useless person; good-for-nothing person",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "패거리": {
+   "key": "패거리",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "gang, clique",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "페니스": {
+   "key": "페니스",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "penis",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "펠라티오": {
+   "key": "펠라티오",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "fellatio",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "포르노그래피": {
+   "key": "포르노그래피",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pornography",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "풀발": {
+   "key": "풀발",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "full erection, hard-on",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "being very excited, angry, or agitated (not necessarily sexually)",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "풋잡": {
+   "key": "풋잡",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "foot job",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "플": {
+   "key": "플",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "play (BDSM, sexual roleplay)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "플레이": {
+   "key": "플레이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "play in sports; gameplay",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "play (BDSM, sexual roleplay)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "핫바지": {
+   "key": "핫바지",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "cotton-padded trousers",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "country bumpkin, hick, idiot, imbecile",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "핫하다": {
+   "key": "핫하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to be trending",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "항문": {
+   "key": "항문",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "anus",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "항문 괄약근": {
+   "key": "항문 괄약근",
+   "kind": "phrase",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "anal sphincter",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "항문성교": {
+   "key": "항문성교",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "anal sex",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "핸드잡": {
+   "key": "핸드잡",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "hand job",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "향락업소": {
+   "key": "향락업소",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "an adult entertainment business (i.e., sex shop)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "허버허버": {
+   "key": "허버허버",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "while gobbling ravenously",
+     "tags": [
+      "derogatory",
+      "Internet"
+     ],
+     "sexual": false
+    },
+    {
+     "en": "quickly, urgently",
+     "tags": [
+      "derogatory",
+      "Internet"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "헌팅": {
+   "key": "헌팅",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "pickup, flirting with a stranger",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "헤프다": {
+   "key": "헤프",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "weak; (to be) unable to resist wear; (to be) not durable",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "wasteful; (to be) prodigal",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "(to be) imprudent; (to be) easy",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "헨타이": {
+   "key": "헨타이",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "hentai (pornographic anime or manga)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "헬창": {
+   "key": "헬창",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "musclehead, jock; a male obsessed with bodybuilding or do sport to show off",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "현자타임": {
+   "key": "현자타임",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "post-nut clarity",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    },
+    {
+     "en": "a moment when one realizes that what one is doing is actually pointless",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "호색한": {
+   "key": "호색한",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a lascivious man, sensualist, lecher, Don Juan, satyr",
+     "tags": [
+      "derogatory"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "혼밥": {
+   "key": "혼밥",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "eating by oneself; eating alone; eating without friends",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "혼술": {
+   "key": "혼술",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "drinking alcohol by oneself; getting drunk alone",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "화냥년": {
+   "key": "화냥년",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "a promiscuous woman",
+     "tags": [
+      "vulgar",
+      "derogatory"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "화대": {
+   "key": "화대",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "money paid for prostitution with kisaeng",
+     "tags": [],
+     "sexual": true
+    },
+    {
+     "en": "Hwadae (a county of North Hamgyong Province, North Korea)",
+     "tags": [],
+     "sexual": false
+    }
+   ]
+  },
+  "후다": {
+   "key": "후다",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "someone who has had sex; non-virgin",
+     "tags": [
+      "vulgar",
+      "slang"
+     ],
+     "sexual": true
+    }
+   ]
+  },
+  "후레자식": {
+   "key": "후레자식",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "bastard, motherfucker",
+     "tags": [
+      "offensive"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "훈훈하다": {
+   "key": "훈훈하",
+   "kind": "verb",
+   "pos": "adj",
+   "senses": [
+    {
+     "en": "to be comfortably warm",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to be heartwarming",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to be hot; to be handsome",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "흑기사": {
+   "key": "흑기사",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "black knight",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "one (especially a man) who volunteers to take a drink for another person (especially a…",
+     "tags": [
+      "slang"
+     ],
+     "sexual": false
+    }
+   ]
+  },
+  "흘레": {
+   "key": "흘레",
+   "kind": "noun",
+   "pos": "noun",
+   "senses": [
+    {
+     "en": "breeding, copulation (of animals)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "흥분하다": {
+   "key": "흥분하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to be aroused; to be excited; to be agitated",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  },
+  "희롱하다": {
+   "key": "희롱하",
+   "kind": "verb",
+   "pos": "verb",
+   "senses": [
+    {
+     "en": "to taunt, to ridicule, to jest",
+     "tags": [],
+     "sexual": false
+    },
+    {
+     "en": "to harass (sexually)",
+     "tags": [],
+     "sexual": true
+    }
+   ]
+  }
+ }
+}

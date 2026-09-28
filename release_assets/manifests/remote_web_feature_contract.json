@@ -750,7 +750,8 @@
         "core/assist_slang.py",
         "core/assist_translate.py",
         "core/assist_v2.py",
-        "data/assist/korean_rules.json"
+        "data/assist/korean_rules.json",
+        "data/assist/slang_glossary_wiktionary.json"
       ],
       "legacy_dependency": "none",
       "routes": [

@@ -1188,7 +1188,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260926-llm')
+import('./js/features/assistPanel.mjs?v=20260928-kiwi')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
@@ -2302,7 +2302,7 @@ import('./js/features/animaLoraPanel.mjs?v=20260927-lora2')
 // API 설정 > 05 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
 // 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 탭을 연다.
 let llmSetupPanel = null;
-import('./js/features/llmSetupPanel.mjs?v=20260927-llmview')
+import('./js/features/llmSetupPanel.mjs?v=20260928-kiwi')
   .then(({createLlmSetupPanel}) => {
     llmSetupPanel = createLlmSetupPanel({document, showToast, setModuleParam});
     llmSetupPanel.init();

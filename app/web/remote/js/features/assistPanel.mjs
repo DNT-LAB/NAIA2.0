@@ -905,24 +905,30 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function paintBanner() {
     if (!banner) return;
     const kiwi = status?.kiwi || {};
+    const noModel = !!status && status.model_ready === false;
+    const noKiwi = kiwi.installed === false && !kiwi.active;
     const parts = [];
     if (kiwi.active) {
       const pct = Math.max(0, Math.min(100, Number(kiwi.percent || 0)));
       parts.push(`<div class="as-banner-row"><span>한국어 분석기 설치 중 — ${esc(kiwi.message || '')}</span></div>
         <div class="as-bar-track"><i style="width:${pct}%"></i></div>`);
       schedulePoll();
-    } else if (kiwi.installed === false) {
+    } else if (noKiwi && !noModel) {
+      // 모델은 있는데 Kiwi 만 없다(모델을 먼저 받은 사용자 · 설치 실패) — 여기서 바로 설치한다
       parts.push(`<div class="as-banner-row"><span>한국어 분석기(Kiwi)가 없어 이름·동작을 덜 알아봅니다.</span>
         <button type="button" data-as-kiwi-install title="NAIA 를 켠 PC 에서만 설치할 수 있습니다">설치 (약 ${esc(kiwi.approx_mb || 90)}MB)</button></div>`);
-      if (kiwi.error) {
-        parts.push(`<div class="as-banner-err">${esc(kiwi.error)}${kiwi.manual_command
-          ? ` · 직접 설치: <code>${esc(kiwi.manual_command)}</code>` : ''}</div>`);
-      }
     }
-    if (status && status.model_ready === false) {
-      // 받는 곳은 API 설정 › AI 모델 한 곳(09-26). 여기서 받는 동안에도 창이 열려 있으면 다 받은 걸 알아채게 묻는다.
-      parts.push(`<div class="as-banner-row as-banner-dim"><span>AI 모델이 없어 한국어 층만으로 찾습니다.</span>
-        <button type="button" data-as-llm-setup title="API 설정 › AI 모델">AI 모델 받기</button></div>`);
+    if (noKiwi && kiwi.error) {
+      parts.push(`<div class="as-banner-err">${esc(kiwi.error)}${kiwi.manual_command
+        ? ` · 직접 설치: <code>${esc(kiwi.manual_command)}</code>` : ''}</div>`);
+    }
+    if (noModel) {
+      // 받는 곳은 API 설정 › AI ASSIST 한 곳(09-26) — 모델을 받으면 한국어 분석기(Kiwi)도 함께 설치한다(사용자 지정 09-28).
+      // 여기서 받는 동안에도 창이 열려 있으면 다 받은 걸 알아채게 묻는다.
+      parts.push(`<div class="as-banner-row${noKiwi ? '' : ' as-banner-dim'}"><span>${noKiwi
+        ? 'AI 모델과 한국어 분석기가 없습니다 — 모델을 받으면 함께 설치합니다.'
+        : 'AI 모델이 없어 한국어 층만으로 찾습니다.'}</span>
+        <button type="button" data-as-llm-setup title="API 설정 › AI ASSIST">AI 모델 받기</button></div>`);
       schedulePoll();
     }
     banner.innerHTML = parts.join('');

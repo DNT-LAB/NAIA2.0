@@ -136,7 +136,23 @@ def start_model_download(context: Any, model_id: Any = None) -> dict[str, Any]:
     busy = active_model_download(context)
     if busy is not None and busy is not svc:
         return {**busy.snapshot(), "ok": False, "error": "다른 모델을 받는 중입니다 — 끝나거나 취소한 뒤에 받으세요."}
-    return {**svc.start(), "ok": True}
+    state = {**svc.start(), "ok": True}
+    kiwi_installer(context, start=True)
+    return state
+
+
+def kiwi_installer(context: Any, *, start: bool = False) -> dict[str, Any] | None:
+    """한국어 분석기(Kiwi) 상태 — start=True 면 설치도 시작한다. 모델을 받으면 Kiwi 도 함께 설치한다(사용자 지정
+    2026-09-28): Assist 는 둘 다 있어야 제대로 돌고, 모델 [받기] 가 사용자가 받기를 고른 때다. 요구 목록에 넣지 않는
+    이유는 core/assist_kiwi(업데이트마다 모두 받고, 실패하면 앱이 안 뜬다). 이미 있으면 설치는 아무것도 안 한다 ·
+    실패해도 모델 받기와 앱은 그대로(Assist 창이 [설치] 를 다시 보인다)."""
+    try:
+        from app.backend.server.assist_v2_service import get_kiwi_installer
+
+        installer = get_kiwi_installer(context)
+        return installer.start() if start else installer.snapshot()
+    except Exception:
+        return None
 
 
 def cancel_model_download(context: Any) -> dict[str, Any]:
@@ -177,6 +193,8 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "gpu_device_chosen_name": next((e["name"] for e in entries if e["id"] == chosen), ""),
         "engine_is_default": engine == default_engine_path(getattr(context, "repo_root", ".")),
         "engine_install": get_engine_installer(context).snapshot(),
+        # 한국어 분석기(Kiwi) — 모델을 받으면 함께 설치한다(start_model_download). 화면은 설치 중 · 실패 · 받기 전 안내만
+        "kiwi": kiwi_installer(context),
         "use_gpu": use_gpu,
         "gpu_fallback": fallback,
         "swapping": bool(rt.get("stale")),

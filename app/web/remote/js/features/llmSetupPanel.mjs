@@ -217,6 +217,15 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       }
       if (action) parts.push(`<div class="llm-row">${action}</div>`);
       if (dl.error && dl.model === view.id) parts.push(`<div class="setup-result error">${esc(dl.error)}</div>`);
+      // 한국어 분석기(Kiwi) — 모델을 받으면 서버가 함께 설치한다(사용자 지정 09-28). 설치 중 · 실패 · 받기 전 안내만 한 줄
+      const kiwi = st.kiwi || {};
+      if (kiwi.active) {
+        parts.push(`<div class="llm-note">한국어 분석기(Kiwi)도 함께 설치하는 중 — ${esc(kiwi.message || '')}</div>`);
+      } else if (kiwi.installed === false && kiwi.error) {
+        parts.push(`<div class="setup-result error">한국어 분석기(Kiwi) 설치 실패 — ${esc(kiwi.error)}</div>`);
+      } else if (kiwi.installed === false && !view.installed && !downloadingThis) {
+        parts.push(`<div class="llm-note">받으면 한국어 분석기(Kiwi, 약 ${esc(kiwi.approx_mb || 90)}MB)도 함께 설치합니다.</div>`);
+      }
     }
     parts.push(`<div class="llm-note">Hugging Face HauhauCS 저장소에서 한 번 받아 이 PC 에 둡니다.
       Assist(Ctrl+O)와 Auto Boost 가 같은 모델을 씁니다.</div>`);
@@ -254,7 +263,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     if (section.offsetParent === null) return;          // 창이 닫혔다 — 다시 열 때 refresh() 가 잇는다
     const dl = (st && st.download) || {};
     const eng = (st && st.engine_install) || {};
-    const active = dl.active || dl.phase === 'verify' || eng.active || (st && st.priming);
+    const active = dl.active || dl.phase === 'verify' || eng.active || (st && st.priming) || (st && st.kiwi && st.kiwi.active);
     pollTimer = setTimeout(refresh, active ? POLL_BUSY_MS : POLL_IDLE_MS);
   }
 

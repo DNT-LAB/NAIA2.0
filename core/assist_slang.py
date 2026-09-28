@@ -48,8 +48,13 @@ def load_glossary(path: Path | None = None) -> dict[str, Any]:
 
 
 def _sense_text(senses: Iterable[dict[str, Any]], sexual_ok: bool) -> str:
-    """보일 뜻을 차례대로(속된 뜻엔 표시). 보일 뜻에 속된 뜻 · 성적 뜻이 하나도 없으면 "" — G · S 에서 성적 뜻을 빼고 나면
-    평범한 뜻만 남는 낱말(자다 = to sleep)은 풀이가 소음이다."""
+    """보일 뜻 — 속된 뜻(표시)이 먼저, 평범한 뜻은 뒤에. 원래 차례대로 줬더니 '개같이 따먹히는 메이드'(E) 의 상황이
+    'The maid is picked.' 가 됐다(따먹다 = 따서 먹다 · … · 성관계 — E2B 가 첫 뜻을 골랐다, 09-28 견주기). 풀이는 E2B 가 모르는
+    속된 뜻을 알리려는 것이다. 보일 뜻에 속된 뜻 · 성적 뜻이 하나도 없으면 "" — G · S 에서 성적 뜻을 빼고 나면 평범한 뜻만
+    남는 낱말(자다 = to sleep)은 풀이가 소음이다."""
+    senses = list(senses)
+    senses = ([s for s in senses if s.get("tags") or s.get("sexual")]
+              + [s for s in senses if not (s.get("tags") or s.get("sexual"))])
     out = []
     marked = False
     for sense in senses:

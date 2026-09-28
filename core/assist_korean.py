@@ -539,6 +539,10 @@ class KoreanLayer:
         with self._tok_lock:
             return [(t.form, t.tag) for t in self._kiwi.tokenize(clean_text(text))]
 
+    def says_solo(self, text: str) -> bool:
+        """'혼자' · '홀로' 를 낱말로 적었나(says_solo) — 수동 인원 · 구성 요청도 solo 를 이 말로만 싣는다."""
+        return says_solo(text, self.raw_tokens(text), self.rules["solo_words"])
+
     def raw_tokens_many(self, texts: list[str]) -> list[list[tuple[str, str]]]:
         """raw_tokens 를 여러 글에 한 번에 — 사전 설명 · 키워드 원형 색인(core/assist_recover, 약 2만 글)용.
         Kiwi 는 목록을 받으면 한꺼번에 처리한다(하나씩 부르는 것보다 훨씬 빠르다)."""
@@ -985,7 +989,7 @@ class KoreanLayer:
             for form, tag in toks:
                 if tag in NOUN_TAGS and form in span and span != compact(form) and not self._heads_phrase(span, form):
                     phrase_nouns.add(form)
-        pc.solo = any(f in self.rules["solo_words"] for f, _t in toks)
+        pc.solo = says_solo(analysis.source_text or "".join(f for f, _t in toks), toks, self.rules["solo_words"])
         for form, gender in named:
             if gender == "girl":
                 pc.girls += 1
@@ -1036,8 +1040,9 @@ class KoreanLayer:
             else:
                 pc.unknown += n
             pc.notes.append(f"{form}{'+' + nxt_form if head != i else ''}x{n}:{gender}")
-        total = pc.girls + pc.boys + pc.unknown
-        pc.partition = partition_of(pc.girls, pc.boys, pc.solo or total == 1)
+        # 한 사람이라고 solo 가 아니다 — '혼자' · '홀로' 를 적었을 때만(사용자 지정 09-28: 다른 남녀를 엿듣는 여성이
+        # 1girl, solo, hetero, sex 가 됐다). 이벤트 맵 풀은 그대로 둘 다 본다(persons_param)
+        pc.partition = partition_of(pc.girls, pc.boys, pc.solo)
         pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
         return pc
 
@@ -1188,6 +1193,20 @@ def partition_of(girls: int, boys: int, solo: bool) -> str:
     if girls == 1:
         return "1girl_solo" if solo else "1girl"
     return "1boy_solo" if solo else "1boy"
+
+
+def says_solo(text: str, toks: Iterable[tuple[str, str]], words: Iterable[str]) -> bool:
+    """원문이 '혼자' · '홀로' 를 **낱말로** 적었나 — solo 는 이때만 싣는다(사용자 지정 09-28).
+    Kiwi 는 홀로라이브 · 홀로그램을 홀로(MAG) + 라이브 · 그램 으로 쪼갠다 — 토막만 보면 홀로라이브가 '홀로' 가 된다.
+    낱말 = 원문에서 뒤에 한글이 안 붙었거나(홀로 서 있는) 바로 뒤 토막이 조사 · 어미 · 서술격 조사다(혼자서 · 혼자만의 ·
+    혼자라서)."""
+    words = [w for w in words if w]
+    source = clean_text(text)
+    if any(re.search(re.escape(w) + r"(?![가-힣])", source) for w in words):
+        return True
+    toks = list(toks)
+    return any(form in words and i + 1 < len(toks) and toks[i + 1][1].startswith(("J", "E", "VCP"))
+               for i, (form, _tag) in enumerate(toks))
 
 
 def _verb_word(toks: list[tuple[str, str]], j: int) -> str | None:

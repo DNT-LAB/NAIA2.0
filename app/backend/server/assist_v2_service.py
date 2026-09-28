@@ -1123,7 +1123,7 @@ def _english_people(pc: Any, people: list[str]) -> None:
         return
     g, b, solo = people_count(people)
     pc.girls, pc.boys, pc.solo = max(pc.girls, g), max(pc.boys, b), pc.solo or solo
-    pc.partition = partition_of(pc.girls, pc.boys, pc.solo or pc.girls + pc.boys + pc.unknown == 1)
+    pc.partition = partition_of(pc.girls, pc.boys, pc.solo)           # solo 는 적었을 때만(says_solo · 영문 solo)
     pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
     pc.notes.append("영문:" + ",".join(people))
 
@@ -1132,8 +1132,10 @@ def _persons(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> dict[str,
     from core.assist_korean import PersonCount, partition_of
 
     if req["persons"]["mode"] == "manual":
+        # 여 1 로 정해도 solo 는 '혼자' · '홀로' (영문 solo)를 적었을 때만(사용자 지정 09-28)
         g, b = req["persons"]["girls"], req["persons"]["boys"]
-        pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, g + b == 1))
+        solo = g + b == 1 and (layer.says_solo(req["text"]) or "solo" in merged.english.people)
+        pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, solo))
         return {"mode": "manual", "partition": pc.partition, "girls": g, "boys": b, "unknown": 0,
                 "confirm": False, "notes": [], "param": pc.persons_param()}
     pc = layer.count_persons(ka, approved={c.ko: c.gender for c in merged.characters}, not_names=req["not_names"])
@@ -1383,19 +1385,21 @@ def _compose_relation(layer: Any, vocab: Any, rules: dict[str, Any], segs: list[
     return None
 
 
-def _compose_persons(req: dict[str, Any], chars: list[Any], people: list[str] = ()) -> dict[str, Any]:
-    """구성 요청의 인원 = 캐릭터 줄의 사람들(성별은 캐릭터 분석). 수동이면 그대로. people = 줄에 적은 영문 인원 태그."""
+def _compose_persons(req: dict[str, Any], chars: list[Any], people: list[str] = (), solo: bool = False) -> dict[str, Any]:
+    """구성 요청의 인원 = 캐릭터 줄의 사람들(성별은 캐릭터 분석). 수동이면 그대로. people = 줄에 적은 영문 인원 태그.
+    solo = 요청이 '혼자' · '홀로' 를 적었나 — 한 사람이라고 solo 가 아니다(사용자 지정 09-28)."""
     from core.assist_korean import PersonCount, partition_of
 
     if req["persons"]["mode"] == "manual":
         g, b = req["persons"]["girls"], req["persons"]["boys"]
-        pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, g + b == 1))
+        pc = PersonCount(girls=g, boys=b, partition=partition_of(g, b, g + b == 1 and (solo or "solo" in people)))
         return {"mode": "manual", "partition": pc.partition, "girls": g, "boys": b, "unknown": 0,
                 "confirm": False, "notes": [], "param": pc.persons_param()}
     girls = sum(1 for c in chars if c.gender == "girl")
     boys = sum(1 for c in chars if c.gender == "boy")
     unknown = len(chars) - girls - boys
-    pc = PersonCount(girls=girls, boys=boys, unknown=unknown, partition=partition_of(girls, boys, len(chars) == 1))
+    pc = PersonCount(girls=girls, boys=boys, unknown=unknown, partition=partition_of(girls, boys, solo),
+                     solo=solo)
     _english_people(pc, list(people))
     return {"mode": "auto", "partition": pc.partition, "girls": pc.girls, "boys": pc.boys, "unknown": unknown,
             "confirm": bool(unknown) or pc.partition == "unknown", "notes": pc.notes, "param": pc.persons_param()}
@@ -1560,7 +1564,8 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         relation = None
     dropped = {**top_dropped, **dropped}
 
-    persons = _compose_persons(req, chars, [p for e in english.values() for p in e.people])
+    persons = _compose_persons(req, chars, [p for e in english.values() for p in e.people],
+                               solo=layer.says_solo(req["text"]))
     prompt = ac.assemble(people=PERSON_TAGS.get(persons["partition"], []), characters=chars, relation=relation,
                          details=subs, info=tools.info, extra={k: e.keep for k, e in english.items() if e.keep})
     t1 = time.perf_counter()

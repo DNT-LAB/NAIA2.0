@@ -1903,13 +1903,17 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     gated = [t for d in subs for t in d.tags] + ([relation.action] if relation is not None else [])
     dropped = (off_rating([t for t in gated if en_key(t) not in typed], share, RATING_GATE[req["rating"]])
                if share else {})
-    def unwanted_tag(tag: str) -> bool:
-        """영문으로 뺀 태그인가 — Q · E 에서 바꿔 단 이름은 옛 이름으로 뺀 것도(tied up (nonsexual) 빼고, Codex 13차 R2)."""
-        return any(en_key(n) in unwanted for n in rating_sources(tag, req["rating"]))
+    def unwanted_tag(tag: str, lines: Iterable[int] | None = None) -> bool:
+        """영문으로 뺀 태그인가 — Q · E 에서 바꿔 단 이름은 옛 이름으로 뺀 것도(tied up (nonsexual) 빼고, Codex 13차 R2).
+        lines = 그 줄들의 제외만(없으면 모든 줄)."""
+        keys = unwanted if lines is None else {en_key(p) for k in lines if k in english for p in english[k].exclude}
+        return any(en_key(n) in keys for n in rating_sources(tag, req["rating"]))
     for d in subs:
         d.tags = [t for t in d.tags if t not in dropped and not unwanted_tag(t)]
-    # 관계 동작도 영문으로 뺀 것이면 뺀다 — 메인과 source# · target# 에 남았다(13차 R3)
-    if relation is not None and (relation.action in dropped or unwanted_tag(relation.action)):
+    # 관계 동작도 영문으로 뺀 것이면 뺀다 — 메인과 source# · target# 에 남았다(13차 R3). 메인 줄과 당사자 두 줄의 제외만 —
+    # 제3자 줄(c3 미쿠 - princess carry 빼고)이 카나데 -> 나히다 관계까지 지웠다(14차 F1)
+    if relation is not None and (relation.action in dropped
+                                 or unwanted_tag(relation.action, (0, relation.source, relation.target))):
         relation = None
     dropped = {**top_dropped, **dropped}
 

@@ -617,14 +617,23 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         dst = next((c for c in characters if c.ko == roles[1]), None)
         # 동사에서 나온 구만(공주 안기·볼 꼬집기·안기) — 명사 복합어(비치볼)는 동작이 아니다.
         # 자세·흔한 것(sleeping·smile)은 한 사람의 상태라 관계로 쓰지 않는다(안겨서 자는 -> sleeping 관계, 실측).
-        # 뺀 동작은 관계로도 싣지 않는다 — 층에서 지워도 관계가 다시 골라 source# · target# 으로 붙었다(Codex 3차 R1 잔존)
+        # 뺀 동작은 관계로도 싣지 않는다 — 층에서 지워도 관계가 다시 골라 source# · target# 으로 붙었다(Codex 3차 R1 잔존).
+        # 단 장면 전체의 제외와 **두 사람**을 가리킨 제외만 — 제3자(미쿠는 공주안기 하지 않는)의 제외가 카나데 -> 나히다
+        # 관계까지 지웠다(Codex 4차 N2)
+        blocked = set(excluded_for.get(0, set()))
+        for ch in (src, dst):
+            who = slot_of.get(id(ch), 0) if ch is not None else 0
+            if who:
+                blocked |= excluded_for.get(who, set())
+        blocked &= live
+
         def interaction(tags: Iterable[str]) -> str | None:
-            tags = [t for t in tags if t not in generic and t not in poses and t not in live]
+            tags = [t for t in tags if t not in generic and t not in poses and t not in blocked]
             return next((t for t in tags if vocab.role(t) == "event_core"), None) or next(iter(tags), None)
 
         act = interaction(ka.verb_phrases)
         if act is None:
-            act = next((t for t in ka.verb_tags if t not in generic and t not in poses and t not in live
+            act = next((t for t in ka.verb_tags if t not in generic and t not in poses and t not in blocked
                         and vocab.role(t) == "event_core"), None)
         if act is None:
             for item in route.get("actions") or []:

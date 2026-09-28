@@ -85,6 +85,27 @@ def _verb_in_text(stem: str, source: str) -> bool:
     return False
 
 
+# 줄기 뒤에 붙는 피동 접사 — Kiwi 는 박히는 을 박히/VV 한 토막으로 낸다
+_PASSIVE = ("히", "이", "리", "기")
+
+
+def _stem_at(stem: str, toks: list[tuple[str, str]]) -> bool:
+    """손 풀이 용언 줄기('들고 박')가 **그 자리에서** 동사인가 — 마지막 낱말이 동사 토막(박 · 박히)이고, 줄기가 여러 어절이면
+    바로 앞 토막이 앞 어절의 어미(들고 의 고 · 들어서 의 어서)여야 한다. '들고 박자를' 의 박자는 명사, '들고 박스를 옮기고
+    못을 박는다' 의 박은 앞이 을(조사)이라 아니다(Codex 11차 R3)."""
+    parts = stem.split()
+    last, before = parts[-1], "".join(parts[:-1])
+    for j, (form, tag) in enumerate(toks):
+        if not tag.startswith(_VERB_TAGS) or not (form == last or form in {last + p for p in _PASSIVE}):
+            continue
+        if not before:
+            return True
+        prev_form, prev_tag = toks[j - 1] if j else ("", "")
+        if prev_form and prev_tag.startswith("E") and before.endswith(prev_form):
+            return True
+    return False
+
+
 def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens: Iterable[tuple[str, str]] | None = None,
           entries: dict[str, Any] | None = None) -> list[tuple[str, str]]:
     """요청에 든 속어 풀이 [(낱말, 영어 풀이)] — 손으로 쓴 것이 먼저(같은 낱말이면 그것만), 합쳐 MAX_HINTS 까지.
@@ -100,11 +121,12 @@ def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens:
         if not ko or not en:
             continue
         stem = ko[:-1] if ko.endswith("-") else ""
-        # 용언 줄기는 Kiwi 가 그 줄기를 동사로 냈을 때만 — '들고 박자를' 의 박자(명사)에 '들고 박-' 이 걸렸다(Codex 10차 F6).
-        # 토막이 없으면(Kiwi 없음) 글자 규칙만
-        if stem and _verb_in_text(stem, source) and (not toks or stem.split()[-1] in verbs):
-            out.append((stem, str(en)))
-        elif not stem and ko in source:
+        # 용언 줄기는 Kiwi 토막으로, 그 자리에서 동사일 때만 — '들고 박자를' 의 박자(명사)에 '들고 박-' 이 걸렸다(Codex 10차 F6).
+        # 토막이 없으면(Kiwi 없음) 쓰지 않는다 — 글자로는 박자 · 박스를 가릴 수 없고 G 에도 나간다(11차 R3)
+        if stem:
+            if toks and _verb_in_text(stem, source) and _stem_at(stem, toks):
+                out.append((stem, str(en)))
+        elif ko in source:
             out.append((ko, str(en)))
     taken = {ko for ko, _en in out}
     sexual_ok = rating in ("q", "e")

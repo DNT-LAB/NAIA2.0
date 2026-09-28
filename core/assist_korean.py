@@ -1120,10 +1120,9 @@ class KoreanLayer:
                 continue
             if any(c and c in base for c in counted):
                 continue
-            # 바로 뒤가 고른 캐릭터 이름이면 그 이름을 꾸미는 말이다 — 이미 이름으로 셌다(테토녀 강지가 · Codex 10차 F3)
-            nxt = words[w_i + 1] if w_i + 1 < len(words) else ""
-            nxt = next((nxt[:-len(p)] for p in self._PERSON_PARTICLES if nxt.endswith(p) and len(nxt) > len(p)), nxt)
-            if nxt and nxt in names_c:
+            # 바로 뒤가 고른 캐릭터 이름이면 그 이름을 꾸미는 말이다 — 이미 이름으로 셌다(테토녀 강지가 · Codex 10차 F3).
+            # 꾸밈은 조사 없이 붙어 올 때만(안경녀와 강지가 = 두 사람) · 이름은 여러 어절일 수 있다(테토녀 하츠네 미쿠가 — 11차 R2)
+            if base == word and self._name_follows(words, w_i + 1, names_c):
                 continue
             # 꼬리가 명사로 끝날 때만 사람이다 — 동사의 명사형(피어남 = 피어나/VV + ᆷ/EF · 문장부호가 붙으면 ETN)은 아니다
             # (Codex 10차 F5). 테토녀 · 초식+남 · 안경+녀 는 NNG 로 끝난다. Kiwi 가 없으면(토막 없음) 그대로
@@ -1184,6 +1183,15 @@ class KoreanLayer:
         rest = span[span.rfind(key) + len(key):]
         return not rest or rest in self._numerals or re.fullmatch(r"\d*명|\d+", rest) is not None \
             or (rest.endswith("명") and rest[:-1] in self._numerals)
+
+    def _name_follows(self, words: list[str], j: int, names_c: set[str]) -> bool:
+        """어절 j 부터가 고른 캐릭터 이름인가 — 여러 어절(하츠네 미쿠가)은 붙여서, 끝 조사는 떼고 본다."""
+        joined = ""
+        for word in words[j:j + 4]:
+            joined += word
+            if joined in names_c or any(joined.endswith(p) and joined[:-len(p)] in names_c for p in self._PERSON_PARTICLES):
+                return True
+        return False
 
     _COUNT_WORD = re.compile(r"(\d+)(?:명|사람)?(?:의|이|가)?")
 

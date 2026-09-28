@@ -443,15 +443,31 @@ class LlamaServerRuntime:
             self._unload_timer = timer
             timer.start()
 
-    def _unload_if_quiet(self, gen: int) -> None:
-        """cancel() 은 이미 불리기 시작한 타이머를 못 멈춘다 — 그 콜백이 락을 기다리는 사이 다음 부름이 끝나 새로 쟀으면
-        낡은 쪽은 아무것도 안 한다(Codex 10차 F1: 마지막 부름 뒤 3초가 지나기 전에 내렸다)."""
+    def _new_call(self) -> None:
+        """부름이 슬롯을 쥐었다 — 그 전에 잰 내림 타이머는 낡았다(끝나면 finally 의 _unload_later 가 다시 잰다)."""
         with self._proc_lock:
-            if gen != self._unload_gen:
-                return
-            self._unload_timer = None
-        if self._unload_pending:
-            self.unload()
+            self._unload_gen += 1
+
+    def _unload_if_quiet(self, gen: int) -> None:
+        """마지막 부름 뒤 조용했다 — 내린다. 세대 확인부터 내리기까지 **슬롯을 쥐고** 한다. cancel() 은 이미 불리기 시작한
+        타이머를 못 멈추고(Codex 10차 F1), 락만 쥐고 세대를 본 뒤 놓으면 그 사이 새 부름이 돌고 끝나도 낡은 콜백이 내렸다
+        (11차 R1). 부름은 슬롯을 쥐면 세대를 올린다(_new_call) — 슬롯을 쥔 채 본 세대가 같으면 이 타이머 뒤로 부름이 없었다."""
+        if not self._unload_pending:
+            return
+        if not self._slot.acquire(blocking=False):
+            self._unload_later()               # 누가 슬롯을 쥐고 있다 — 다시 잰다(chat · warm 이면 그 finally 도 다시 잰다)
+            return
+        try:
+            with self._proc_lock:
+                if gen != self._unload_gen or not self._unload_pending:
+                    return
+                self._unload_timer = None
+                for owner in [o for o, expiry in self._leases.items() if expiry != math.inf]:
+                    self._leases.pop(owner, None)
+                self._unload_pending = False
+            self.stop()
+        finally:
+            self._slot.release()
 
     def _arm_lease_timer(self, retry: float | None = None) -> None:
         with self._proc_lock:
@@ -483,6 +499,7 @@ class LlamaServerRuntime:
         if not self._slot.acquire(blocking=False):
             return False
         try:
+            self._new_call()
             self._ensure(time.monotonic() + float(timeout))
             return True
         except Exception:
@@ -524,6 +541,7 @@ class LlamaServerRuntime:
                     "elapsed": round(time.monotonic() - started, 2)}
         queue_wait = round(time.monotonic() - started, 2)
         try:
+            self._new_call()
             self._cancel_idle_timer()
             for attempt in range(2):
                 was_running = self.is_running() and not self.is_stale()

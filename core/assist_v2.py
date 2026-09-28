@@ -706,12 +706,22 @@ def rating_name(tag: str, rating: str) -> str:
     return NSFW_SWAPS.get(tag, tag) if rating in ("q", "e") else tag
 
 
+def rating_sources(tag: str, rating: str) -> list[str]:
+    """이 이름과, Q · E 에서 이 이름으로 바뀌는 옛 이름들 — 옛 이름의 한국어 키워드(포박 · 묶이기)로도 가리키게(Codex 11차 R7)."""
+    if rating not in ("q", "e"):
+        return [tag]
+    return [tag] + [old for old, new in NSFW_SWAPS.items() if new == tag]
+
+
 def swap_for_rating(merged: Merged, rating: str) -> None:
-    """모든 칸(층 · 인물 속성)의 NSFW_SWAPS 를 고른 등급에 맞게 — 같은 자리에서(replace_tag)."""
+    """모든 칸(층 · 인물 속성)의 NSFW_SWAPS 를 고른 등급에 맞게 — 같은 자리에서(replace_tag). 관계 동작 · 제외도
+    (관계가 옛 이름이면 source# · target# 과 recap 에 남았다 — Codex 11차 R6)."""
     if rating not in ("q", "e"):
         return
     for old, new in NSFW_SWAPS.items():
         replace_tag(merged, old, new)
+    merged.relations[:] = [(s, rating_name(a, rating), d) for s, a, d in merged.relations]
+    merged.exclude[:] = list(dict.fromkeys(rating_name(t, rating) for t in merged.exclude))
 
 
 # ── 조립 ───────────────────────────────────────────────────────────────────

@@ -538,6 +538,31 @@ export function createTagAssistController({
     let top = Math.max(viewportTop + safeGap, safeTop);
     let maxHeight = Math.max(180, viewportHeight - (top - viewportTop) - safeGap);
 
+    // **Assist 창 안 편집칸이면 그 창 바로 왼쪽, 편집칸 높이에 붙인다**(사용자 지정 2026-09-28). 기본 자리(뷰어 왼쪽 위)는
+    // Assist 창이 떠 있는 곳이라 창 머리를 덮었고, 왼쪽 프롬프트 영역(left-side)에 두니 메인 프롬프트에 붙은 것처럼 보였다.
+    // 창 왼쪽에 280px 가 안 남으면 기본 자리로. Interactive 의 씬 태그 판 자리보다 먼저 본다 — 뒤에 두니 Interactive 에서는
+    // 판 위에 붙었다(Codex 11차 R9).
+    const assistBox = acTarget?.closest?.('.as-overlay');
+    if (assistBox) {
+      const box = assistBox.getBoundingClientRect();
+      const room = box.left - 8 - safeGap;
+      if (room >= 280) {
+        const wCeil = Math.min(560, room);
+        const bottom = viewportTop + viewportHeight - safeGap;
+        tagTooltip.style.setProperty('--tag-tooltip-max-width', `${Math.round(wCeil)}px`);
+        tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(bottom - (viewportTop + safeGap))}px`);
+        const measured = tagTooltip.getBoundingClientRect();
+        const w = Math.min(measured.width || wCeil, wCeil);
+        const h = Math.min(measured.height || 220, bottom - (viewportTop + safeGap));
+        const anchorTop = acTarget.getBoundingClientRect().top;
+        const tipTop = Math.max(viewportTop + safeGap, Math.min(anchorTop, bottom - h));
+        tagTooltip.style.setProperty('--tag-tooltip-top', `${Math.round(tipTop)}px`);
+        tagTooltip.style.setProperty('--tag-tooltip-left', `${Math.round(box.left - 8 - w)}px`);
+        tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(bottom - tipTop)}px`);
+        return;
+      }
+    }
+
     // **Interactive 에서는 씬 태그 판 바로 위에 붙인다**(사용자 지정 2026-08-11).
     // 기본 자리는 화면 맨 위인데, Interactive 는 태그를 다루는 손이 아래쪽 씬 태그
     // 판에 있다 - 아래에서 만지는데 설명은 위에서 뜨니 눈이 화면을 세로로 왕복했다.
@@ -579,30 +604,6 @@ export function createTagAssistController({
         tagTooltip.style.setProperty('--tag-tooltip-max-height', Math.round(maxHeight) + 'px');
         tagTooltip.style.setProperty('--tag-tooltip-left', Math.round(left) + 'px');
         tagTooltip.style.setProperty('--tag-tooltip-max-width', Math.round(wCeil) + 'px');
-        return;
-      }
-    }
-
-    // **Assist 창 안 편집칸이면 그 창 바로 왼쪽, 편집칸 높이에 붙인다**(사용자 지정 2026-09-28). 기본 자리(뷰어 왼쪽 위)는
-    // Assist 창이 떠 있는 곳이라 창 머리를 덮었고, 왼쪽 프롬프트 영역(left-side)에 두니 메인 프롬프트에 붙은 것처럼 보였다.
-    // 창 왼쪽에 280px 가 안 남으면 기본 자리로.
-    const assistBox = acTarget?.closest?.('.as-overlay');
-    if (assistBox) {
-      const box = assistBox.getBoundingClientRect();
-      const room = box.left - 8 - safeGap;
-      if (room >= 280) {
-        const wCeil = Math.min(560, room);
-        const bottom = viewportTop + viewportHeight - safeGap;
-        tagTooltip.style.setProperty('--tag-tooltip-max-width', `${Math.round(wCeil)}px`);
-        tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(bottom - (viewportTop + safeGap))}px`);
-        const measured = tagTooltip.getBoundingClientRect();
-        const w = Math.min(measured.width || wCeil, wCeil);
-        const h = Math.min(measured.height || 220, bottom - (viewportTop + safeGap));
-        const anchorTop = acTarget.getBoundingClientRect().top;
-        const tipTop = Math.max(viewportTop + safeGap, Math.min(anchorTop, bottom - h));
-        tagTooltip.style.setProperty('--tag-tooltip-top', `${Math.round(tipTop)}px`);
-        tagTooltip.style.setProperty('--tag-tooltip-left', `${Math.round(box.left - 8 - w)}px`);
-        tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(bottom - tipTop)}px`);
         return;
       }
     }
@@ -3791,6 +3792,21 @@ export function createTagAssistController({
   }, true);
   window.addEventListener('resize', positionPromptInfoTooltip);
   window.addEventListener('scroll', positionPromptInfoTooltip, true);
+  // Assist 창 안 편집칸의 말풍선은 그 창을 따라간다 — 결과 칸을 굴려도, 창 크기가 바뀌어도 옛 좌표에 남았다(Codex 11차 R10).
+  // Assist 창은 제 resize 처리에서 자리를 잡는다(이 앱의 앞선 resize 처리가 말풍선을 먼저 놓는다) — 처리가 다 끝난 뒤에 잰다.
+  // requestAnimationFrame 은 가려지거나 느려진 창에서 멈춘다 — setTimeout 으로
+  let assistFollowTimer = 0;
+  function followAssistWindow(event) {
+    if (!tagTooltip?.classList.contains('open') || !acTarget?.closest?.('.as-overlay')) return;
+    if (event?.type === 'scroll' && !event.target?.closest?.('.as-overlay')) return;
+    if (assistFollowTimer) return;
+    assistFollowTimer = window.setTimeout(() => {
+      assistFollowTimer = 0;
+      positionTagTooltip();
+    }, 0);
+  }
+  window.addEventListener('resize', followAssistWindow);
+  window.addEventListener('scroll', followAssistWindow, true);
 
   return {
     bindDefaultTextareas,

@@ -827,7 +827,8 @@ def _direct_dictionary(context: Any, layer: Any, vocab: Any, ka: Any, rating: st
                 return None
             if share is not None:
                 s = share(name)
-                if s is not None and s < RATING_GATE[rating]:
+                # G · S 에서 비중을 못 재면(등급 수를 못 읽음 · 색인 없음) 뺀다 — 섹스 = sex 가 G 로 갔다(Codex 11차 R4)
+                if s is None or s < RATING_GATE[rating]:
                     return None
             return rating_name(name, rating)
 
@@ -944,7 +945,7 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     from core import assist_followup as af
     from core.assist_korean import clean_text, compact
     from core.assist_refine import mentions
-    from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english, rating_name
+    from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english, rating_name, rating_sources
 
     fu = req["followup"]
     wish = req["text"]
@@ -987,7 +988,10 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
         cat 을 못 더하고 long hair 를 못 뺐다(시도 09-28)."""
         key = af.tag_key(tag)
         name = vocab.canonical(key) or key
-        return mentions(key, wish) or (index is not None and index.grounded(name, wish, wish_lemmas))
+        # Q · E 에서 바꿔 단 이름(restrained)은 옛 이름(tied up (nonsexual))의 키워드로도 가리킨다 — '포박을 빼줘'(Codex 11차 R7)
+        names = rating_sources(name, req["rating"])
+        return (mentions(key, wish) or any(mentions(n, wish) for n in names[1:])
+                or (index is not None and any(index.grounded(n, wish, wish_lemmas) for n in names)))
     removed = [t for t in got.remove if pointed(t)]
     kept_back = [t for t in got.remove if t not in removed]
     gone = {af.tag_key(t) for t in removed}
@@ -1023,15 +1027,17 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
         if not name or _junk_tag(name) or vocab.role(name) == "population":
             unknown.append(tag)
             continue
+        name = rating_name(name, req["rating"])      # 고른 등급의 이름으로 먼저 — 있는지 · 더했는지도 그 이름으로(Codex 11차 R8)
         if af.tag_key(name) in present or name in added:
             continue
         s = share(name) if share and gate is not None else None
         # 더하기는 요청이 가리키거나 모델이 다시 쓴 제 문장에서 말한 것(자기 일관성 — '웃는 표정' 의 smile 은 사전 키워드가
         # '웃음' 이라 원형이 어긋난다). 빼기보다 느슨하다 — 넘치는 쪽은 빼기였다(시도 8회 중 4회)
-        if not (pointed(name) or mentions(name, got.sentence)) or (s is not None and s < gate):
+        if not (pointed(name) or any(mentions(n, got.sentence) for n in rating_sources(name, req["rating"]))) \
+                or (s is not None and s < gate):
             refused.append(name)
             continue
-        added.append(rating_name(name, req["rating"]))
+        added.append(name)
     if target:
         new_tags = list(tags)
         new_bags = [([b[0]] + [t for t in b[1:] if af.tag_key(t) not in gone]
@@ -1787,7 +1793,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     from core import assist_compose as ac
     from core.assist_english import en_key, english_only, english_parts
     from core.assist_korean import compact
-    from core.assist_v2 import PERSON_TAGS, off_rating
+    from core.assist_v2 import PERSON_TAGS, off_rating, rating_name
 
     layer = korean_layer(context)
     t0 = time.perf_counter()
@@ -1893,6 +1899,11 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     if relation is not None and relation.action in dropped:
         relation = None
     dropped = {**top_dropped, **dropped}
+    # Q · E 의 tied up (nonsexual) -> restrained — 한 줄 경로와 같은 규칙(구성 경로가 먼저 돌아가 빠졌다, Codex 11차 R5)
+    for d in subs:
+        d.tags = list(dict.fromkeys(rating_name(t, req["rating"]) for t in d.tags))
+    if relation is not None:
+        relation.action = rating_name(relation.action, req["rating"])
 
     persons = _compose_persons(req, chars, [p for e in english.values() for p in e.people],
                                solo=layer.says_solo(req["text"]))

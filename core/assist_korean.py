@@ -441,6 +441,9 @@ class KoreanLayer:
         self._female = set(r["people"]["female"])
         self._male = set(r["people"]["male"])
         self._neutral = set(r["people"]["neutral"])
+        # 한 글자 성별 꼬리(테토녀 · 김치녀 · 초식남 — '~녀/~남' 사람) · 그 꼴이지만 사람이 아닌 것(베트남)
+        self._gender_suffixes = dict(r.get("person_suffixes") or {})
+        self._suffix_exceptions = set(r.get("person_suffix_exceptions") or ())
         self._groups = {k: tuple(v) for k, v in r["groups"].items()}
         self._numerals = dict(r["numerals"])
         self._simile = set(r["simile_particles"])
@@ -1040,6 +1043,29 @@ class KoreanLayer:
             else:
                 pc.unknown += n
             pc.notes.append(f"{form}{'+' + nxt_form if head != i else ''}x{n}:{gender}")
+        # 한 글자 성별 꼬리(~녀 · ~남)의 합성어 — 세 글자 이상만(테토녀 · 에겐녀 · 거유녀 · 초식남, 09-28 사용자 예시가 인원
+        # 1girl 1boy 로 셌다). Kiwi 가 통째로 내기도(에겐녀) 쪼개기도(안경+녀 · 테+토+녀 · 거+유녀) 해서 토막 말고 원문 어절에서
+        # 조사를 떼고 본다. 두 글자(남녀 · 자녀 · 강남)는 보지 않는다 · 이미 사람으로 센 토막이 든 어절(미소녀 의 소녀)은 건너뛴다
+        counted = seen | {compact(clean_text(form)) for form, _g in named}
+        words = re.findall(r"[가-힣0-9]+", analysis.source_text or "")
+        for w_i, word in enumerate(words):
+            base = next((word[:-len(p)] for p in self._PERSON_PARTICLES
+                         if word.endswith(p) and len(word) - len(p) >= 3), word)
+            if len(base) < 3 or base[-1] not in self._gender_suffixes or base in self._suffix_exceptions:
+                continue
+            if any(c and c in base for c in counted):
+                continue
+            gender = self._gender_suffixes[base[-1]]
+            # 바로 뒤 어절의 수(테토녀 둘이 · 안경녀 세 명) — 토막 길의 _count_near 와 같은 몫
+            nxt = words[w_i + 1] if w_i + 1 < len(words) else ""
+            nxt = next((nxt[:-len(p)] for p in self._PERSON_PARTICLES if nxt.endswith(p) and len(nxt) > len(p)), nxt)
+            n = self._numerals.get(nxt) or (int(nxt) if nxt.isdigit() else 1)
+            if gender == "girl":
+                pc.girls += n
+            else:
+                pc.boys += n
+            counted.add(base)
+            pc.notes.append(f"{base}x{n}:{gender}(꼬리)")
         # 한 사람이라고 solo 가 아니다 — '혼자' · '홀로' 를 적었을 때만(사용자 지정 09-28: 다른 남녀를 엿듣는 여성이
         # 1girl, solo, hetero, sex 가 됐다). 이벤트 맵 풀은 그대로 둘 다 본다(persons_param)
         pc.partition = partition_of(pc.girls, pc.boys, pc.solo)

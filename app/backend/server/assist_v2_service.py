@@ -793,7 +793,9 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     한국어 층 · 경로 · 고르기 · 되살리기 · 이벤트 맵 · 다듬기를 거치지 않는다. 쓰는 것은 셋뿐:
     - 사전 이름 맞추기(smiling -> smile) — 사전에 없는 것은 적힌 그대로 싣고 알린다(unknown). 버리면 E2B 가 쓴 구
       (listening to sounds · peeking from doorway)가 다 빠져 메인이 비었다(시도 09-28). 잡동사니(품질 · 등급)만 뺀다.
-    - 인원: 수동이면 그 수(모델에는 정해졌다고만), 자동이면 모델이 쓴 인원 태그. solo 는 '혼자' · '홀로' 를 적었을 때만.
+    - 인원: 수동이면 그 수, 자동이면 NAIA 한국어 인원 세기(사람 낱말 · 고른 캐릭터 · ~녀/~남) — 셌으면 모델에는 정해졌다고만
+      준다(모델은 테토녀 · 에겐녀 둘을 1girl, 1boy 로 셌다, 09-28). 못 셌을 때(성별 모름 · 사람 낱말 없음)만 모델이 쓴 인원 태그.
+      solo 는 '혼자' · '홀로' 를 적었을 때만.
     - 고른 캐릭터(이름 칩): 인원 뒤에 그 태그 · 문장은 영어 이름으로. 캐릭터 칸은 쓰지 않는다(메인 한 줄)."""
     from core import assist_direct as ad
     from core.assist_english import people_count
@@ -808,9 +810,17 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     solo = layer.says_solo(req["text"]) or bool(re.search(r"\bsolo\b", req["text"], re.IGNORECASE))
     manual = req["persons"]["mode"] == "manual"
     people: list[str] = []
+    counted = None
     if manual:
         g, b = req["persons"]["girls"], req["persons"]["boys"]
         people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
+    else:
+        # 자동: NAIA 한국어 인원 세기 — 성별 모르는 사람이 섞이면(사람 · 친구) 믿지 않고 모델 인원 태그로
+        counted = layer.count_persons(layer.analyze(req["text"]), approved={c.ko: c.gender for c in chars},
+                                      not_names=req["not_names"])
+        if counted.partition != "unknown" and not counted.unknown:
+            people = PERSON_TAGS.get(partition_of(counted.girls, counted.boys,
+                                                  counted.girls + counted.boys == 1 and solo), [])
     names = [(c.ko, display_name(c.tag)) for c in chars]
     # ① 상황 — 요청을 쉬운 영어 문장으로(사용자 실험 09-28 · core/assist_direct 머리말). 실패하면 요청만으로 간다.
     # 속어 풀이 = 손으로 쓴 것(규칙표) + 위키낱말사전에서 고른 것(core/assist_slang — 성적 뜻은 Q · E 만, 짧은 낱말은 Kiwi 토막으로)
@@ -849,7 +859,7 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
             if not name and tag not in {c.tag for c in chars}:
                 unknown.append(tag)                       # 사전에 없는 구 — 적힌 그대로 싣는다
             kept.append(name or tag)
-        if not manual:
+        if not people:                                    # 수동도 아니고 한국어 층도 못 셌다 — 모델이 쓴 인원 태그
             g, b, _said = people_count(model_people)      # 모델의 solo 는 쓰지 않는다 — 요청이 말했을 때만
             people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
         char_tags = [c.tag for c in chars]
@@ -860,7 +870,7 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     g, b, _said = people_count(people)
     partition = partition_of(g, b, "solo" in people)
     out["persons"] = {"mode": "manual" if manual else "auto", "partition": partition, "girls": g, "boys": b,
-                      "unknown": 0, "confirm": False, "notes": [], "param": ""}
+                      "unknown": 0, "confirm": False, "notes": list(counted.notes) if counted else [], "param": ""}
     out["timing"] = {"situation_s": sit_info.get("elapsed"), "model_s": info.get("elapsed"),
                      "total_s": round(time.perf_counter() - started, 3)}
     return out

@@ -35,6 +35,10 @@ BASIC_PEOPLE = frozenset({"소녀", "여자", "여성", "여자애", "미소녀"
 # 규칙표(people · groups)에 없는 친족 · 호칭 · 직업 — 평가 러너의 PERSON_EXTRA 그대로
 PERSON_EXTRA = frozenset({"누님", "형님", "오라버니", "남편", "아내", "부인", "신랑", "신부", "새댁", "이모", "삼촌", "동생",
                           "선배", "후배", "손님", "승객", "서퍼", "점원", "경찰", "의사", "간호사", "군인", "기사", "주인공"})
+# 키워드 구절의 가벼운 머리 — 요청에 없어도 그 구절의 뜻을 바꾸지 않는다('거구 남성' 의 남성 · '엿보는 행위' 의 행위).
+# 이것 말고 구절에 딸린 명사(유두비틀기의 유두)가 요청에 없으면 그 구절은 근거가 아니다(KoDictIndex.grounded)
+LIGHT_HEADS = BASIC_PEOPLE | frozenset({"행위", "행동", "동작", "모습", "상태", "자세", "표정", "장면", "캐릭터", "상황",
+                                        "경우", "느낌", "분위기", "포즈"})
 
 
 def ko_key(form: str, tag: str, *, stop: bool = True) -> str | None:
@@ -85,12 +89,14 @@ class KoDictIndex:
             desc_texts.append(str(description or ""))
         self.lemmas: dict[str, frozenset[str]] = {}
         self.kw_lemmas: dict[str, frozenset[str]] = {}
+        self.kw_phrases: dict[str, tuple[frozenset[str], ...]] = {}      # 쉼표로 가른 키워드 구절마다의 원형
         self.by_lemma: dict[str, set[str]] = {}
         self.kw_by_lemma: dict[str, set[str]] = {}
         for name, kw_toks, desc_toks in zip(names, tokenize_many(kw_texts), tokenize_many(desc_texts)):
             kw_lem = frozenset(k for k in (ko_key(f, t) for f, t in kw_toks) if k)
             lem = kw_lem | frozenset(k for k in (ko_key(f, t) for f, t in desc_toks) if k)
             self.kw_lemmas[name], self.lemmas[name] = kw_lem, lem
+            self.kw_phrases[name] = _phrases(kw_toks)
             for k in lem:
                 self.by_lemma.setdefault(k, set()).add(name)
             for k in kw_lem:
@@ -140,6 +146,44 @@ class KoDictIndex:
     def keyword_lemmas(self, tag: str) -> frozenset[str]:
         """그 태그의 한국어 키워드 원형 — 요청의 어느 말을 이미 설명했나(find_units 의 explained)."""
         return self.kw_lemmas.get(tag, frozenset())
+
+    def grounded(self, tag: str, text: str, request: Iterable[str]) -> bool:
+        """맞춘 태그가 이 요청에 **정말** 이어지나 — 낱말의 원형 하나가 맞았다고 그 태그의 뜻이 되지 않는다(09-28 제보).
+        - 키워드 구절(쉼표로 가른 것) 중 낱말의 원형을 품은 것이 있으면: 그 구절의 다른 **명사**가 전부 요청에 있거나
+          가벼운 머리(LIGHT_HEADS)여야 한다 — '닭의 목을 비틀고' 의 비틀이 유두비틀기 -> nipple tweak · 허리 비틀기 ->
+          twisted torso 를 데려왔다(젖꼭지 · 허리 는 요청에 없다). '거구 남성' 의 남성은 가벼운 머리라 거구 -> giant male 은 산다.
+        - 설명문으로만 맞았으면: 낱말의 내용 원형이 **둘 이상이고 다** 덮여야 — '건너편에서 들으며' 가 설명의 '호수
+          건너편' 으로 misty lake(동방 호수)가 됐고, 원형 하나(비틀)는 설명문 어디에나 있어 nipple tweak through clothes
+          (설명 '옷 위로 유두를 비트는')가 됐다.
+        request = 요청 전체의 원형(query) · 키워드 토막이 낱말 그대로면 언제나 이어진다."""
+        whole = _whole(text)
+        if len(whole) >= 2 and whole in self.kw_tokens.get(tag, ()):
+            return True
+        unit = set(self.query(text))
+        have = set(request) | unit
+        hits = [p for p in self.kw_phrases.get(tag, ()) if p & unit]
+        if hits:
+            return any(not {k for k in p - have if k.endswith("/N") and k[:-2] not in LIGHT_HEADS} for p in hits)
+        return len(unit) >= 2 and unit <= self.lemmas.get(tag, frozenset())
+
+
+def _phrases(toks: list[tuple[str, str]]) -> tuple[frozenset[str], ...]:
+    """키워드 토막 -> 쉼표(Kiwi SP)로 가른 구절마다의 원형 묶음(빈 구절은 뺀다). 접속 조사(와 · 과 — JC)에서도 가른다:
+    '주인과 하인' 은 한쪽(주인)만으로도 그 관계의 뜻이다 — 하인이 요청에 없다고 master and servant 를 버렸다(시험)."""
+    out: list[frozenset[str]] = []
+    cur: set[str] = set()
+    for form, tag in toks:
+        if tag in ("SP", "JC") or form == ",":
+            if cur:
+                out.append(frozenset(cur))
+            cur = set()
+            continue
+        key = ko_key(form, tag)
+        if key:
+            cur.add(key)
+    if cur:
+        out.append(frozenset(cur))
+    return tuple(out)
 
 
 # ── 미번역 덩어리 찾기 ─────────────────────────────────────────────────────────

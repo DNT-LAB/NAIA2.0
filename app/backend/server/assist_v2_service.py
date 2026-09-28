@@ -1035,9 +1035,12 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
 
     # 핀 = 지금 태그의 앞쪽 둘(층 순 · 게시물 순) — 인원 태그는 분면이지 핀이 아니다
     pins = [t for t in merged.ordered(vocab.count) if vocab.canonical(t) and vocab.role(t) != "population"][:2]
+    request = set(index.query(text))
     plans = []
     for unit in units:
         matched = index.match(unit.text, keywords_only=unit.person)     # 사람 낱말은 키워드에서만(설명문 -> slave)
+        # 원형 하나만 맞은 태그는 뺀다 — 비틀 -> nipple tweak(유두비틀기) · 건너편 -> misty lake(설명의 호수 건너편), 09-28
+        matched = {n: s for n, s in matched.items() if index.grounded(n, unit.text, request)}
         dict_names = _recover_rank(context, [n for n in matched if ok(n)], pins, req["rating"], vocab.count,
                                    scores=matched, limit=ar.MAX_CANDIDATES)
         need_kw = not dict_names or index.completeness(unit.text, matched, keywords_only=unit.person) < 1.0

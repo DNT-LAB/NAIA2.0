@@ -1793,7 +1793,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     from core import assist_compose as ac
     from core.assist_english import en_key, english_only, english_parts
     from core.assist_korean import compact
-    from core.assist_v2 import PERSON_TAGS, off_rating, rating_name
+    from core.assist_v2 import PERSON_TAGS, off_rating, rating_name, rating_sources
 
     layer = korean_layer(context)
     t0 = time.perf_counter()
@@ -1903,9 +1903,13 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     gated = [t for d in subs for t in d.tags] + ([relation.action] if relation is not None else [])
     dropped = (off_rating([t for t in gated if en_key(t) not in typed], share, RATING_GATE[req["rating"]])
                if share else {})
+    def unwanted_tag(tag: str) -> bool:
+        """영문으로 뺀 태그인가 — Q · E 에서 바꿔 단 이름은 옛 이름으로 뺀 것도(tied up (nonsexual) 빼고, Codex 13차 R2)."""
+        return any(en_key(n) in unwanted for n in rating_sources(tag, req["rating"]))
     for d in subs:
-        d.tags = [t for t in d.tags if t not in dropped and en_key(t) not in unwanted]
-    if relation is not None and relation.action in dropped:
+        d.tags = [t for t in d.tags if t not in dropped and not unwanted_tag(t)]
+    # 관계 동작도 영문으로 뺀 것이면 뺀다 — 메인과 source# · target# 에 남았다(13차 R3)
+    if relation is not None and (relation.action in dropped or unwanted_tag(relation.action)):
         relation = None
     dropped = {**top_dropped, **dropped}
 

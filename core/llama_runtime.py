@@ -515,7 +515,9 @@ class LlamaServerRuntime:
                 self._slot.release()
             else:
                 self._slot.release()
-                if self.is_running():
+                if self._unload_pending:
+                    self._unload_later()       # 놓는 사이 눌렸다(chat 과 같다)
+                elif self.is_running():
                     self._arm_idle_timer()
 
     # ── 요청 ─────────────────────────────────────────────────────────────
@@ -598,7 +600,11 @@ class LlamaServerRuntime:
                 self._slot.release()
             else:
                 self._slot.release()
-                if self.is_stale():
+                if self._unload_pending:
+                    # 끝을 본 뒤 · 놓기 전에 [VRAM 회수] 가 눌렸다 — 그 unload() 는 슬롯을 못 쥐어 기다리는 중이다. 놓은 뒤 다시
+                    # 보지 않으면 아무도 재지 않아 떠 있었다(Codex 13차 R1). 놓은 뒤 눌렸으면 unload() 가 스스로 내린다
+                    self._unload_later()
+                elif self.is_stale():
                     # 요청 도중 장치가 바뀌었다 — 이제 비었으니 새 설정의 엔진을 뒤에서 띄운다(다음 요청이 기다리지 않게).
                     threading.Thread(target=self.warm, daemon=True, name="llama-swap").start()
                 elif self.is_running():

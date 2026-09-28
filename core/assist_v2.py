@@ -720,16 +720,18 @@ def swap_for_rating(merged: Merged, rating: str) -> None:
     (관계가 옛 이름이면 source# · target# 과 recap 에 남았다 — Codex 11차 R6)."""
     if rating not in ("q", "e"):
         return
-    # 제외 칸은 이벤트 맵 검색에 통째로 쓰인다 — 바꾼 이름이 제외와 겹치면 안 된다(Codex 12차 F4). 사용자가 새 이름(restrained)을
-    # 뺐으면 옛 이름(같은 뜻)은 바꿔 싣지 않고 뺀다 · 옛 이름을 뺐는데 새 이름이 실려 있으면 제외는 옛 이름 그대로 둔다
+    # 제외 칸은 이벤트 맵 검색에 통째로 쓰인다 — 바꾼 이름이 제외와 겹치면 안 된다(Codex 12차 F4). 겹치면 **바꾸지 않는다**(옛 이름
+    # 그대로 = 치환 전 동작): 새 이름(restrained)이 제외에 있으면 옛 이름을 그대로 두고, 옛 이름을 뺐는데 새 이름이 실려 있으면
+    # 제외는 옛 이름 그대로. 옛 이름을 빼 버리면 인물마다의 제외 범위(merge 의 excluded_for)를 넘어 다른 인물의 태그까지
+    # 지웠다(13차 R5). 실림에는 영문으로 적은 태그(english.keep)도 든다(13차 R4)
     excluded = set(merged.exclude)
     for old, new in NSFW_SWAPS.items():
         if new in excluded:
-            drop_tags(merged, [old])
-        else:
-            replace_tag(merged, old, new)
-            merged.relations[:] = [(s, new if a == old else a, d) for s, a, d in merged.relations]
-    shown = set(merged.all_tags()) | {a for c in merged.characters for a in c.attrs} | {r[1] for r in merged.relations}
+            continue
+        replace_tag(merged, old, new)
+        merged.relations[:] = [(s, new if a == old else a, d) for s, a, d in merged.relations]
+    shown = (set(merged.all_tags()) | {a for c in merged.characters for a in c.attrs} | {r[1] for r in merged.relations}
+             | {en_key(p) for p in merged.english.keep})
     merged.exclude[:] = list(dict.fromkeys(t if rating_name(t, rating) in shown else rating_name(t, rating)
                                            for t in merged.exclude))
 

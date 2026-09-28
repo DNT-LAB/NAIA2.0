@@ -330,6 +330,7 @@ class KoreanAnalysis:
     rule_tags: dict[str, str] = field(default_factory=dict)  # 동사 규칙이 태그로 만든 줄기 -> 태그(딸린 줄기는 앞 동사의
                                                              # 태그: 쪼그려 앉 의 앉 -> squatting) — 모델 항목이 이 동사뿐이면
                                                              # 모델 영문 대신 이것을 그 항목의 칸에 싣는다(assist_v2.merge)
+    verb_absorbs: dict[str, list[str]] = field(default_factory=dict)  # 규칙표 verb_absorbs — 병합이 모델 조각 안에서 다시 가린다
     names: list[NameHit] = field(default_factory=list)
     explicit_names: set[str] = field(default_factory=set)  # {이름} — 자동 이름 정책과 별개로 사용자가 고정
     roles: tuple[str, str] | None = None                   # (하는 쪽, 당하는 쪽) — 이름 기준
@@ -698,7 +699,8 @@ class KoreanLayer:
             if tag not in out.specific:
                 out.specific.append(tag)
         # 한 동작으로 이어진 동사(쪼그려 앉아 = 쪼그리 + 어 + 앉)의 뒤 동사는 앞 동사의 태그가 맡는다(규칙표 verb_absorbs)
-        absorbed = _absorbed_stems(toks, self.rules.get("verb_absorbs") or {})
+        out.verb_absorbs = dict(self.rules.get("verb_absorbs") or {})
+        absorbed = absorbed_stems(toks, out.verb_absorbs)
         for stem in out.stems:
             for prefix, tag in self.rules["stem_prefixes"]:
                 if stem.startswith(prefix) and tag not in out.verb_tags and self.vocab.tag_exists(tag):
@@ -712,7 +714,7 @@ class KoreanLayer:
             if tag and tag not in out.covers and self.vocab.tag_exists(tag):
                 out.rule_tags[stem] = tag
                 for s in absorbed:
-                    if s in ((self.rules.get("verb_absorbs") or {}).get(stem) or ()):
+                    if s in (out.verb_absorbs.get(stem) or ()):
                         out.rule_tags[s] = tag
                 if tag not in out.verb_tags and tag not in out.specific:
                     out.verb_tags.append(tag)
@@ -1256,7 +1258,7 @@ def _viewer_tags(toks: list[tuple[str, str]], viewer: dict[str, Any]) -> list[st
     return out
 
 
-def _absorbed_stems(toks: list[tuple[str, str]], absorbs: dict[str, Any]) -> set[str]:
+def absorbed_stems(toks: list[tuple[str, str]], absorbs: dict[str, Any]) -> set[str]:
     """앞 동사가 연결 어미로 바로 잇는 뒤 동사(쪼그리/VV + 어·고/EC + 앉/VV) — 글에 나온 그 동사가 **모두** 이렇게 딸렸을
     때만 돌려준다. '소녀는 쪼그려 있고 소년은 의자에 앉아' 의 앉은 따로 앉은 사람이라 sitting 이 남는다."""
     if not absorbs:

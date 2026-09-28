@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterable
 
 from core.assist_candidates import GENERIC_NOUNS, Ask
 from core.assist_english import English, en_key, english_parts, put_english
-from core.assist_korean import KoreanAnalysis, NameHit, clean_text, compact
+from core.assist_korean import KoreanAnalysis, NameHit, absorbed_stems, clean_text, compact
 
 TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
 GOALS = ("find", "how", "generate")
@@ -418,10 +418,14 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         tokenizer = getattr(ka, "tokenizer", None)
         if not rule_tags or tokenizer is None or not ko:
             return None
-        content = [(f, t) for f, t in tokenizer(ko) if t.startswith(_CONTENT_POS)]
+        toks = tokenizer(ko)
+        content = [(f, t) for f, t in toks if t.startswith(_CONTENT_POS)]
         if not content or not all(t.startswith("VV") and f in rule_tags for f, t in content):
             return None
-        return list(dict.fromkeys(rule_tags[f] for f, _t in content))
+        # 이 조각 안에서 딸린 동사(쪼그려 앉기 의 앉)는 앞 동사의 태그가 맡는다 — 문장 전체로는 따로 앉은 사람이 있어
+        # 앉 -> sitting 이어도(카나데는 쪼그려 앉고 나히다는 의자에 앉아) 이 조각의 앉은 그 sitting 이 아니다(Codex 재리뷰 R2)
+        tied = absorbed_stems(toks, getattr(ka, "verb_absorbs", None) or {})
+        return list(dict.fromkeys(rule_tags[f] for f, _t in content if f not in tied))
 
     def item_tags(item: dict[str, Any], kind: str) -> list[str]:
         return [t for t in _item_tags(item, kind) if not _junk_tag(t)]
@@ -473,14 +477,16 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         if any(stem in (s, s + "기") for s in ka.phrase_stems):
             log.append(f"drop:{en}(사전 구가 덮음)")      # 공주안기 -> princess carry 인데 모델이 '안기기 -> hold' 를 따로 냈다
             return []
+        m = _NEGATION.match(en)
+        if m and kind != "exclude":
+            return []                                               # 'no towel' 은 제외 칸의 일이다
+        # ⚠️ 부정 검사 뒤에 — 앞에 두었더니 포함 칸의 'no running'(뛰기) 이 running 으로 바뀌어 인물 칸에 긍정으로
+        # 실렸다(Codex 재리뷰 09-28 R1)
         covered = rule_verb_tags(ko)
         if covered is not None:
             # 쪼그려 앉기 -> kneeling · sitting · crouching(실행마다 다르다)이 동사 규칙의 squatting 과 겹쳤다(09-25 · 09-27 실측)
             log.append(f"{en}->{','.join(covered)}(동사 규칙)")
             return covered
-        m = _NEGATION.match(en)
-        if m and kind != "exclude":
-            return []                                               # 'no towel' 은 제외 칸의 일이다
         # 모델은 동사를 '~기' 로 적는다 — 명사 조각(손가락)의 영문(finger)엔 '+ing' 을 붙이지 않는다(fingering, 09-25)
         verb = not ko_c or ko_c.endswith(("기", "다"))
         # 틀 명사(손가락 · 표정)는 사전 키워드로 바로 싣지 않는다 — 고르기가 묻지 않는 그 목록을 바로 싣기도 따른다
@@ -591,6 +597,8 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
     exclude[:] = [t for t in exclude if en_key(t) not in wanted]
     for tier in (t1, t2, t3):
         tier[:] = [t for t in tier if t not in exclude]
+    for ch in characters:                                           # 인물 칸에도 — 뺀 것이 캐릭터 프롬프트로 새지 않게(R1)
+        ch.attrs[:] = [t for t in ch.attrs if t not in exclude]
 
     # 인물 사이 동작: 둘 이상 + Kiwi 가 방향을 잡았을 때. 동작은 사전 구 > 모델 동작.
     relations: list[tuple[str, str, str]] = []

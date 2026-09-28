@@ -534,7 +534,9 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
       const room = Math.round(Math.min(bottom, window.innerHeight - 8) - top);
       // 낮은 화면에서 Assist 가 칸을 거의 다 쓰면 아래로 벗어났다(Codex 리뷰 09-28) — 자리가 모자라면 숨겨 두고, 자리가
       // 나면(창을 키우거나 Assist 가 줄면 — ResizeObserver · resize) 다시 보인다
-      overlay.style.visibility = room < MIN_DOCKED_H ? 'hidden' : '';
+      const squeezed = room < MIN_DOCKED_H;
+      overlay.style.visibility = squeezed ? 'hidden' : '';
+      if (squeezed) closePersonPopup();       // body 에 따로 뜬 인원 팝업은 같이 안 숨는다(Codex 재리뷰 09-28 R3)
       const maxH = Math.max(MIN_DOCKED_H, room);
       overlay.style.transform = 'none';
       overlay.style.left = `${Math.round(a.left)}px`;
@@ -1162,9 +1164,11 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
   // 있으면 그것만 먼저 닫는다(전파를 끊어 입력 칸의 Esc 핸들러가 창까지 닫지 않게).
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && open) {
+      // Esc 는 한 번에 한 겹만 닫는다. Assist 의 Esc 도 같은 document capture 라 stopPropagation 으로는 못 막는다 —
+      // 이 창이 맡는 Esc 면 stopImmediatePropagation 으로 끊고, Assist 는 consumesEsc() 면 비켜선다(등록 순서와 무관)
       if (personPopup && !personPopup.hidden) {
         event.preventDefault();
-        event.stopImmediatePropagation();      // 같은 document 의 Assist Esc 까지 막는다(인원 팝업만 닫는다)
+        event.stopImmediatePropagation();      // 인원 팝업만 닫는다
         closePersonPopup();
         return;
       }
@@ -1172,7 +1176,7 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
       // (여기서 먼저 닫으면 Assist 이름 팝업 Esc 에 이 창만 사라졌다 — Codex 리뷰 09-28)
       if (docked) return;
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();        // 위에 뜬 이 창만 — 아래 Assist 는 다음 Esc 에(Codex 재리뷰 R4)
       close();
       return;
     }
@@ -1184,6 +1188,7 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
     show();
   }, true);
 
+  // consumesEsc: 지금 Esc 를 이 창이 맡는가 — 인원 팝업이 열렸거나, 붙여 열지 않은 평소 창이 떠 있다(Assist 가 비켜선다)
   return { show, close, showDocked, closeDocked, isOpen: () => open,
-    popupOpen: () => !!(open && personPopup && !personPopup.hidden) };
+    consumesEsc: () => !!(open && ((personPopup && !personPopup.hidden) || !docked)) };
 }

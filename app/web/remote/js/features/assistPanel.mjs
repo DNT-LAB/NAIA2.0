@@ -1212,9 +1212,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   // Esc 는 창 안 어디에 포커스가 있든 닫는다 - 후보 팝업이 열려 있으면 그것만 먼저 닫는다.
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && open) {
-      // 붙인 검색의 인원 팝업이 열려 있으면 그것만 — Fast Search 가 닫는다(두 리스너가 같은 document capture 라
-      // stopPropagation 으로 서로를 못 막는다: 인원 팝업 Esc 에 Assist 까지 닫혔다 — Codex 리뷰 09-28)
-      if (window.fastSearch?.popupOpen?.()) return;
+      // Fast Search 가 맡는 Esc(붙인 검색의 인원 팝업 · 위에 뜬 평소 Ctrl+F 창)는 비켜선다 — 두 리스너가 같은 document
+      // capture 라 stopPropagation 으로 서로를 못 막는다(인원 팝업 Esc 에 Assist 까지 닫혔다 — Codex 리뷰 09-28 F4 · R4)
+      if (window.fastSearch?.consumesEsc?.()) return;
       event.preventDefault();
       event.stopPropagation();
       if (picker && !picker.hidden) { closePicker(); return; }

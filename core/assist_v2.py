@@ -694,6 +694,26 @@ def replace_tag(merged: Merged, old: str, new: str) -> None:
             bag[:] = [new if t == old else t for t in bag]
 
 
+# Q · E 에서 '(nonsexual)' 태그의 성적 대응 — 사전의 '묶이기'(결박 · 포박)가 tied up (nonsexual) 이라 E 의 '손과 발이 묶여있는
+# 채로 체육실에 갇혀 방치당하는 소녀' 가 비성적 결박이 됐다(사용자 제보 09-28 — 26B 로 바꿔도 같았다: 모델이 아니라 사전 길).
+# G · S 에선 그대로가 맞다. 사전의 (nonsexual) 태그는 이것 하나다. 등급 게이트(off_rating)와는 다른 것이다 — 그 함수는 다른
+# 세션이 평가 중이라 건드리지 않는다
+NSFW_SWAPS = {"tied up (nonsexual)": "restrained"}
+
+
+def rating_name(tag: str, rating: str) -> str:
+    """고른 등급에 맞는 이름 — Q · E 면 NSFW_SWAPS, 아니면 그대로."""
+    return NSFW_SWAPS.get(tag, tag) if rating in ("q", "e") else tag
+
+
+def swap_for_rating(merged: Merged, rating: str) -> None:
+    """모든 칸(층 · 인물 속성)의 NSFW_SWAPS 를 고른 등급에 맞게 — 같은 자리에서(replace_tag)."""
+    if rating not in ("q", "e"):
+        return
+    for old, new in NSFW_SWAPS.items():
+        replace_tag(merged, old, new)
+
+
 # ── 조립 ───────────────────────────────────────────────────────────────────
 
 PERSON_TAGS = {

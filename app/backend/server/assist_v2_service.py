@@ -793,7 +793,7 @@ def _direct_dictionary(context: Any, layer: Any, vocab: Any, ka: Any, rating: st
     from app.backend.server.autocomplete_commands import _ensure_kr_raw
     from core import assist_direct as ad
     from core.assist_compose import angle_label, is_metatag
-    from core.assist_v2 import _junk_tag
+    from core.assist_v2 import _junk_tag, rating_name
 
     try:
         tokens = getattr(ka, "tokens", None) or []
@@ -829,7 +829,7 @@ def _direct_dictionary(context: Any, layer: Any, vocab: Any, ka: Any, rating: st
                 s = share(name)
                 if s is not None and s < RATING_GATE[rating]:
                     return None
-            return name
+            return rating_name(name, rating)
 
         return ad.dictionary_names(tokens, index, lookup, name_of=name_of,
                                    label_of=lambda tag: angle_label(raw.get(tag) or {}), posts=posts)
@@ -853,7 +853,7 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     from core.assist_english import people_count
     from core.assist_korean import partition_of
     from core.assist_refine import display_name
-    from core.assist_v2 import PERSON_TAGS, Character, _junk_tag, _with_sentence, exact_english
+    from core.assist_v2 import PERSON_TAGS, Character, _junk_tag, _with_sentence, exact_english, rating_name
 
     layer = korean_layer(context)
     vocab = _tag_vocab(context, layer)
@@ -913,7 +913,7 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
                 continue
             if not name and tag not in {c.tag for c in chars}:
                 unknown.append(tag)                       # 사전에 없는 구 — 적힌 그대로 싣는다
-            kept.append(name or tag)
+            kept.append(rating_name(name or tag, req["rating"]))
         if not people:                                    # 수동도 아니고 한국어 층도 못 셌다 — 모델이 쓴 인원 태그
             g, b, _said = people_count(model_people)      # 모델의 solo 는 쓰지 않는다 — 요청이 말했을 때만
             people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
@@ -944,7 +944,7 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     from core import assist_followup as af
     from core.assist_korean import clean_text, compact
     from core.assist_refine import mentions
-    from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english
+    from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english, rating_name
 
     fu = req["followup"]
     wish = req["text"]
@@ -1031,7 +1031,7 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
         if not (pointed(name) or mentions(name, got.sentence)) or (s is not None and s < gate):
             refused.append(name)
             continue
-        added.append(name)
+        added.append(rating_name(name, req["rating"]))
     if target:
         new_tags = list(tags)
         new_bags = [([b[0]] + [t for t in b[1:] if af.tag_key(t) not in gone]
@@ -1077,7 +1077,7 @@ def _fallback_route(ka: Any) -> dict[str, Any]:
 
 def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     from core.assist_english import en_key
-    from core.assist_v2 import GUIDE, drop_tags, make_recap, merge, off_rating
+    from core.assist_v2 import GUIDE, drop_tags, make_recap, merge, off_rating, swap_for_rating
 
     started = time.perf_counter()
     try:
@@ -1142,6 +1142,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                                    keep=(recover or {}).get("added") or ())
                            if req["refine"] and merged.task == "scene" else (None, {}))
     _add_character_features(context, merged)
+    swap_for_rating(merged, req["rating"])      # Q · E 의 tied up (nonsexual) -> restrained(사용자 제보 09-28)
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 인물 = 고른 캐릭터(후보 전체 — 화면이 목록을 그린다) + 받지 못한 선택(chosen=false — 화면이 그 선택을 푼다)

@@ -787,6 +787,53 @@ def _suggested(hits: list[Any], chars: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _direct_dictionary(context: Any, layer: Any, vocab: Any, ka: Any, rating: str) -> list[tuple[str, str]]:
+    """직접 모드 ②에 곁들일 사전 이름(core/assist_direct.dictionary_names) — 이벤트 맵 이름 · 설명 있는 태그 · 이름/메타 아님 ·
+    게시물 MIN_DICTIONARY_POSTS 이상 · 등급 게이트(G · S 에서 성인 태그를 알려 주지 않는다). 깨지면 줄 없이 간다."""
+    from app.backend.server.autocomplete_commands import _ensure_kr_raw
+    from core import assist_direct as ad
+    from core.assist_compose import angle_label, is_metatag
+    from core.assist_v2 import _junk_tag
+
+    try:
+        tokens = getattr(ka, "tokens", None) or []
+        if not tokens:
+            return []
+        lookup = layer.vocab.lookup
+        index = _lemma_index(context, layer)
+        raw = _ensure_kr_raw(context) or {}
+        share = _rating_share(context, rating)
+
+        def posts(tag: str) -> int:
+            try:
+                return int((raw.get(tag) or {}).get("freq") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        def name_of(tag: str) -> str | None:
+            info = raw.get(tag)
+            if not isinstance(info, dict) or not str(info.get("description") or "").strip():
+                return None
+            if str(info.get("_named_entity_category") or info.get("_cat") or "") in ("artist", "character",
+                                                                                   "copyright", "e621"):
+                return None
+            if is_metatag(tag, info) or posts(tag) < ad.MIN_DICTIONARY_POSTS:
+                return None
+            name = vocab.canonical(tag)
+            if not name or _junk_tag(name) or _PEOPLE_TAG.fullmatch(name):
+                return None
+            if share is not None:
+                s = share(name)
+                if s is not None and s < RATING_GATE[rating]:
+                    return None
+            return name
+
+        return ad.dictionary_names(tokens, index, lookup, name_of=name_of,
+                                   label_of=lambda tag: angle_label(raw.get(tag) or {}), posts=posts)
+    except Exception:
+        return []
+
+
 def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]:
     """[NAIA 추론 파이프라인 미사용](사용자 지정 09-28) — E2B 두 번(core/assist_direct): ① 요청을 쉬운 영어 상황 문장으로
     (Q/E 등급 표시 · 규칙표 속어 풀이) ② 요청 + 그 상황으로 태그 + 영어 문장.
@@ -796,7 +843,9 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     - 인원: 수동이면 그 수, 자동이면 NAIA 한국어 인원 세기(사람 낱말 · 고른 캐릭터 · ~녀/~남) — 셌으면 모델에는 정해졌다고만
       준다(모델은 테토녀 · 에겐녀 둘을 1girl, 1boy 로 셌다, 09-28). 못 셌을 때(성별 모름 · 사람 낱말 없음)만 모델이 쓴 인원 태그.
       solo 는 '혼자' · '홀로' 를 적었을 때만.
-    - 고른 캐릭터(이름 칩): 인원 뒤에 그 태그 · 문장은 영어 이름으로. 캐릭터 칸은 쓰지 않는다(메인 한 줄)."""
+    - 고른 캐릭터(이름 칩): 인원 뒤에 그 태그 · 문장은 영어 이름으로. 캐릭터 칸은 쓰지 않는다(메인 한 줄).
+    - 사전 이름 줄(09-28): ②에 요청 낱말의 사전 태그 이름을 곁들인다(온천 = onsen) — 걸러서(_direct_dictionary). 태그 검색이
+      아니라 이름 알려 주기다: 고르는 것은 모델이다."""
     from core import assist_direct as ad
     from core.assist_english import people_count
     from core.assist_korean import partition_of
@@ -811,12 +860,13 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     manual = req["persons"]["mode"] == "manual"
     people: list[str] = []
     counted = None
+    ka = layer.analyze(req["text"])
     if manual:
         g, b = req["persons"]["girls"], req["persons"]["boys"]
         people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
     else:
         # 자동: NAIA 한국어 인원 세기 — 성별 모르는 사람이 섞이면(사람 · 친구) 믿지 않고 모델 인원 태그로
-        counted = layer.count_persons(layer.analyze(req["text"]), approved={c.ko: c.gender for c in chars},
+        counted = layer.count_persons(ka, approved={c.ko: c.gender for c in chars},
                                       not_names=req["not_names"])
         if counted.partition != "unknown" and not counted.unknown:
             people = PERSON_TAGS.get(partition_of(counted.girls, counted.boys,
@@ -832,8 +882,10 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
                                 ad.situation_message(req["text"], req["rating"], names, words),
                                 ad.situation_grammar(), max_tokens=120)
     situation = ad.parse_situation(sit_reply)
+    dictionary = _direct_dictionary(context, layer, vocab, ka, req["rating"])
     reply, info = _chat(context, ad.DIRECT_SYSTEM,
-                        ad.direct_message(req["text"], req["rating"], names, ", ".join(people), situation),
+                        ad.direct_message(req["text"], req["rating"], names, ", ".join(people), situation,
+                                          dictionary),
                         ad.direct_grammar(), max_tokens=320)
     got = ad.parse_direct(reply) if reply is not None else None
     out: dict[str, Any] = {"ok": True, "task": "scene", "goal": "generate", "rating": req["rating"], "direct": True,
@@ -866,7 +918,8 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
         line = list(dict.fromkeys(people + char_tags + [t for t in kept if t not in people and t not in char_tags]))
         out["prompt"] = {"main": _with_sentence(", ".join(line), got.sentence), "characters": []}
         out["direct_info"] = {"tags": kept, "unknown": unknown, "dropped": dropped, "sentence": got.sentence,
-                              "situation": situation, "words": [ko for ko, _en in words]}
+                              "situation": situation, "words": [ko for ko, _en in words],
+                              "dictionary": [tag for _ko, tag in dictionary]}
     g, b, _said = people_count(people)
     partition = partition_of(g, b, "solo" in people)
     out["persons"] = {"mode": "manual" if manual else "auto", "partition": partition, "girls": g, "boys": b,

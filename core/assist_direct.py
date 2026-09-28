@@ -11,15 +11,21 @@
   가중치로 읽는다).
 - 모델의 태그는 사전 이름으로만 맞춘다(smiling -> smile) — 사전에 없는 것은 그대로 싣고 알린다. 인원(수동) · 고른 캐릭터는
   부르는 쪽이 앞에 붙인다.
+- 사전 이름 줄(09-28): ②에 요청 낱말의 NAIA 사전 태그 이름을 곁들인다(온천 = onsen · 아저씨 = mature male). E2B 는 뜻은
+  맞게 읽고 이름을 몰랐다(soaking in a hot spring · stuck on butt — 놓친 것의 80%). 같은 세트(요청 30 × 2회)에서 적중
+  22.8% -> 34.8%, 금지 태그는 그대로(6), 어려운 사례 75%. 사전 후보를 거르지 않고 주면 적중은 41% 까지 오르지만 사전의
+  엉뚱한 뜻을 베꼈다(비틀 -> pinching · 여성 -> pussy · 빨래 -> cleaning, 금지 12) — 이 모드를 둔 까닭이 그 오독이라
+  거른다(dictionary_names). 모델이 쓴 구를 뒤에서 사전 이름으로 바꾸는 것은 줄이 있으면 보탬이 없었다(+2 · 금지 +1).
 """
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
-from core.assist_korean import clean_text
+from core import assist_candidates as cand
+from core.assist_korean import clean_text, compact
 
 DIRECT_SYSTEM = """You write an image prompt from a Korean request: Danbooru tags and one English sentence.
 - tags: the Danbooru tags the picture needs - people counts first (1girl, 1boy, 2girls) when people are in the picture,
@@ -88,9 +94,9 @@ def parse_situation(reply: str | None) -> str:
 
 
 def direct_message(text: str, rating: str, names: Iterable[tuple[str, str]] = (), people: str = "",
-                   situation: str = "") -> str:
+                   situation: str = "", dictionary: Iterable[tuple[str, str]] = ()) -> str:
     """names = 고른 캐릭터(원문의 이름, 문장에 쓸 영어 이름) · people = 수동 인원(정해졌으면 모델은 인원 태그를 안 쓴다) ·
-    situation = ① 상황 단계가 옮긴 영어(없으면 요청만)."""
+    situation = ① 상황 단계가 옮긴 영어(없으면 요청만) · dictionary = 요청 낱말의 사전 태그(dictionary_names)."""
     lines = [f"Request: {clean_text(text).strip()}"]
     known = [f"{clean_text(ko).strip()} = {en}" for ko, en in names if en]
     if known:
@@ -100,7 +106,69 @@ def direct_message(text: str, rating: str, names: Iterable[tuple[str, str]] = ()
     if situation:
         lines.append(f"Situation: {situation}")
     lines.append(f"Rating: {RATING_WORDS.get(rating, 'general')}")
+    pairs = [f"{ko} = {tag}" for ko, tag in list(dictionary)[:MAX_DICTIONARY] if ko and tag]
+    if pairs:
+        lines.append(DICTIONARY_LINE + "; ".join(pairs))       # 시도한 자리 그대로(맨 끝)
     return "\n".join(lines)
+
+
+# 사전 이름 줄 — 모양을 바꿔 봤다: 낱말마다 후보를 묶어 '하나만 · 상황이 말하는 것만' 이라 하니 적중만 줄고(34.8% vs 40.2%)
+# 베끼기는 그대로였다. 베끼기는 줄의 말투가 아니라 후보를 걸러서 막는다(dictionary_names)
+DICTIONARY_LINE = ("Tag names (NAIA dictionary, for words in the request - use a name when it means what the request "
+                   "means, skip the rest): ")
+MAX_DICTIONARY = 24
+MIN_DICTIONARY_POSTS = 300      # 드문 태그(adapted uniform 505 · enmaided)는 대개 키워드가 느슨하다 — 부르는 쪽이 건다
+
+
+def dictionary_names(tokens: Iterable[tuple[str, str]], index: cand.KeywordLemmaIndex,
+                     lookup: Callable[[str], list[tuple[str, int]]], *, name_of: Callable[[str], str | None],
+                     label_of: Callable[[str], str], posts: Callable[[str], int],
+                     limit: int = MAX_DICTIONARY) -> list[tuple[str, str]]:
+    """요청의 NAIA 한국어 키워드 -> [(한국어 원형, 태그 이름)] — 고르기 경로의 원형 색인(assist_candidates)으로, 키워드
+    원형이 **전부** 요청에 있는 것만(strict). 걸러 주지 않았더니 E2B 가 사전의 엉뚱한 뜻을 그대로 베꼈다(09-28 시도):
+    - 원형 하나뿐인 동사 · 형용사는 뺀다 — 뜻이 여럿이다(비틀고 -> 비틀기 -> pinching, 닭의 목을 비트는데). 흔한 동사는
+      모델이 이름까지 안다(waking up · surprised).
+    - 한 음절 원형 하나(밤 -> night · 개 -> domestic dog)와 틀 명사(표정 · 모습)는 뺀다.
+    - 더 긴 키워드에 든 짧은 키워드는 뺀다 — 마법소녀의 마법 -> magic · 여성 자위의 여성 -> pussy(여성기).
+    - 같은 원형 묶음(메이드 · 메이드복 …)마다 태그 하나: 그 말을 <라벨> 로 가진 태그 먼저(빨래 -> laundry, cleaning 은 키워드에
+      빨래를 넣은 청소하기), 단 라벨 없는 태그가 열 배 넘게 쓰이면 그것(후드티 -> hoodie, blue hoodie 아님).
+    name_of(태그) = 실을 이름(쓸 수 없으면 None — 부르는 쪽의 사전 · 등급 게이트) · label_of(태그) = <라벨>(붙여 쓴 꼴) ·
+    posts(태그) = 게시물 수."""
+    tokens = list(tokens)
+    want = cand.lemmas_of(tokens)
+    if not want:
+        return []
+    keys: dict[str, frozenset[str]] = {}
+    for key, _precision, _recall in index.find(want):
+        lem = index.lemmas[key]
+        if index.odd.get(key) or lem - want:
+            continue
+        forms = [cand.lemma_form(h) for h in lem]
+        if len(lem) == 1 and (len(forms[0]) == 1 or next(iter(lem)).endswith(("/V", "/A"))):
+            continue
+        if all(f in cand.GENERIC_NOUNS for f in forms):
+            continue
+        keys[key] = lem
+    longest = [k for k, lem in keys.items() if not any(lem < other for other in keys.values())]
+    groups: dict[frozenset[str], dict[str, tuple[bool, int]]] = {}
+    for key in longest:
+        for tag, _n in lookup(key):
+            name = name_of(tag)
+            if not name:
+                continue
+            group = groups.setdefault(keys[key], {})
+            own, n = group.get(name, (False, 0))
+            group[name] = (own or label_of(tag) == compact(key), max(n, int(posts(tag) or 0)))
+    out: list[tuple[str, str, int, int]] = []
+    for lem, names in groups.items():
+        best = max(names, key=lambda t: names[t][1])
+        owned = [t for t, (own, _n) in names.items() if own]
+        mine = max(owned, key=lambda t: names[t][1]) if owned else None
+        tag = mine if mine and names[best][1] < 10 * names[mine][1] else best
+        if tag not in (t for _k, t, _l, _n in out):
+            out.append((" ".join(sorted(cand.lemma_form(h) for h in lem)), tag, len(lem), names[tag][1]))
+    out.sort(key=lambda r: (-r[2], -r[3]))
+    return [(ko, tag) for ko, tag, _l, _n in out[:limit]]
 
 
 def direct_grammar() -> str:

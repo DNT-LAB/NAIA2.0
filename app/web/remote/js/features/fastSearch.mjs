@@ -1074,14 +1074,33 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
     });
   }
 
-  /** Assist 가 결과의 핀(query)으로 '이벤트' 만 켜서 그 창(anchor) 바로 아래에 붙여 연다. 포커스는 Assist 에 둔다. */
-  function showDocked(query, anchor) {
+  function paintRatingPills() {
+    overlay?.querySelectorAll('.fs-rating-btn[data-r]').forEach(pill => {
+      const on = eventRatings.has(pill.dataset.r);
+      pill.classList.toggle('active', on);
+      pill.setAttribute('aria-pressed', String(on));
+    });
+  }
+
+  /** Assist 가 결과의 핀(query)으로 '이벤트' 만 켜서 그 창(anchor) 바로 아래에 붙여 연다. 포커스는 Assist 에 둔다.
+   *  인원 · 등급도 Assist 가 풀을 만든 값(persons · ratings)으로 맞춘다(사용자 지정 09-28 - 1girl solo · Q 로 찾았는데
+   *  8/13 · 전체 등급으로 떴다). 비었으면(인원 모름) 평소 값. 닫으면 셋 다 평소 값으로 되돌린다. */
+  function showDocked(query, anchor, {persons = [], ratings = []} = {}) {
     if (!anchor) return;
     build();
-    if (!docked) docked = {anchor, saved: new Set(enabled)};
+    if (!docked) {
+      docked = {anchor, saved: {sources: new Set(enabled), persons: new Set(eventPersons), ratings: new Set(eventRatings)}};
+    }
     docked.anchor = anchor;
     enabled = new Set(['event']);
+    const wantPersons = persons.filter(id => PERSON_IDS.includes(id));
+    eventPersons = new Set(wantPersons.length ? wantPersons : docked.saved.persons);
+    const wantRatings = ratings.filter(id => RATING_OPTIONS.some(r => r.id === id));
+    eventRatings = new Set(wantRatings.length ? wantRatings : docked.saved.ratings);
     paintChips();
+    paintPersonButton();
+    paintRatingPills();
+    closePersonPopup();
     overlay.classList.add('is-docked');
     if (typeof ResizeObserver === 'function') {
       dockObserver = dockObserver || new ResizeObserver(() => position());   // Assist 창이 자라면 따라 내려간다
@@ -1097,11 +1116,15 @@ export function initFastSearch({searchEventMap, openTagSearch} = {}) {
 
   function undock() {
     if (!docked) return;
-    enabled = docked.saved;
+    enabled = docked.saved.sources;
+    eventPersons = docked.saved.persons;
+    eventRatings = docked.saved.ratings;
     docked = null;
     dockObserver?.disconnect();
     overlay?.classList.remove('is-docked');
     paintChips();
+    paintPersonButton();
+    paintRatingPills();
   }
 
   function closeDocked() {

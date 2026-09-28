@@ -665,8 +665,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function linkEvents() {
     const fs = window.fastSearch;
     if (!fs?.showDocked) return;
-    const pins = String(result?.pool?.pins || '').split(',').map(t => t.trim()).filter(Boolean);
-    if (open && pins.length) fs.showDocked(pins.join(', '), overlay);
+    const pool = result?.pool || {};
+    const list = value => String(value || '').split(',').map(t => t.trim()).filter(Boolean);
+    const pins = list(pool.pins);
+    // 인원 · 등급도 이 풀을 만든 값으로(1girl solo · Q) — 비었으면(인원 모름) 검색 창의 평소 값
+    if (open && pins.length) fs.showDocked(pins.join(', '), overlay, {persons: list(pool.persons), ratings: list(pool.ratings)});
     else fs.closeDocked?.();
   }
 

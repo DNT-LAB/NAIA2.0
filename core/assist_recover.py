@@ -206,7 +206,13 @@ FRAME_NOUNS = frozenset({"차림", "반쯤", "절반", "정도", "쪽", "때", "
 # 덩어리로 세우지 않는 가벼운 용언 — 입다 · 짓다(표정을 짓는) · 쓰다 · 당하다 … 요청 동사(그려 · 만들어 · 찾아)는 규칙표
 # filler_stems 를 부르는 쪽이 넣는다
 LIGHT_VERBS = frozenset({"입", "짓", "쓰", "신", "걸치", "당하", "두", "놓", "보이", "가지",
-                         "띄우"})       # 물음표를 · 미소를 띄우다 — 뜻은 목적어가 맡는다(띄우고 -> fruit on liquid, 09-26)
+                         "띄우",        # 물음표를 · 미소를 띄우다 — 뜻은 목적어가 맡는다(띄우고 -> fruit on liquid, 09-26)
+                         "나"})         # 냄새가 · 소리가 · 발정이 나다 — 뜻은 앞 명사가 맡는다('냄새가 나는듯' 의 나는듯이
+#                                         따로 덩어리가 돼 cat girl 을 골랐다, 사용자 제보 09-28)
+# 뜻 키워드에서 버리는 사람 낱말 — 사람 수는 인원 칸이 맡는다. 'girl' 이 이름에 든 태그(fox girl · demon girl · cat girl …)를
+# 통째로 후보로 끌어와 '나는듯..' 에 cat girl 을 골랐다(사용자 제보 09-28)
+KW_PEOPLE = frozenset({"girl", "girls", "boy", "boys", "woman", "women", "man", "men", "person", "people", "female",
+                       "male", "human", "humans", "lady", "guy", "kid", "kids", "child", "children"})
 
 
 def person_words(rules: dict) -> frozenset[str]:
@@ -346,7 +352,7 @@ def parse_keywords(reply: str | None, units: list[str]) -> dict[str, list[str]]:
     for line in str(reply or "").splitlines():
         head, _, rest = line.partition(" : ")
         if head in units:
-            out[head] = [w.strip() for w in rest.split(",") if w.strip()]
+            out[head] = [w.strip() for w in rest.split(",") if w.strip() and w.strip() not in KW_PEOPLE]
     return out
 
 

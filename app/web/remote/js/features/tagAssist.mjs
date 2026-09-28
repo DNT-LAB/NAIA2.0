@@ -380,7 +380,8 @@ export function createTagAssistController({
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     syncTooltipLayer();
     if (window.innerWidth < 768) return;
-    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
+    // Assist 창(.as-overlay)은 결과 뷰어 왼쪽 위 — 말풍선의 기본 자리 — 에 떠서 창 머리를 덮었다(사용자 지정 09-28: 왼쪽으로)
+    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup, .as-overlay');
     tagTooltip.classList.toggle('left-side', !!inModule);
   }
 

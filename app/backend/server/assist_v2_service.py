@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import collections
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -30,6 +31,12 @@ MODEL_TIMEOUT = 60.0
 MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
 MAX_NAME_CHOICES = 8
 MAX_VIRTUAL_CHARACTERS = 6
+MAX_FOLLOWUP_MAIN = 4000      # 이어 고치기가 받는 메인 프롬프트 글자 수 상한
+# 직접 모드(_direct)가 모델 태그에서 가려내는 것 — 인원 태그(인원 칸이 정한다) · 품질 · 등급 태그(싣지 않는다)
+_PEOPLE_TAG = re.compile(r"\d+\+?(?:girl|boy|other)s?|multiple (?:girls|boys|others)|solo|no humans")
+_QUALITY_TAGS = frozenset({"masterpiece", "best quality", "high quality", "amazing quality", "very aesthetic",
+                           "absurdres", "highres", "nsfw", "sfw", "safe", "explicit", "questionable", "sensitive",
+                           "general", "rating:general", "rating:sensitive", "rating:questionable", "rating:explicit"})
 _LOCK = threading.Lock()
 _INSTALLER_LOCK = threading.Lock()
 _WARM_LOCK = threading.Lock()
@@ -356,9 +363,31 @@ def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
     recover = bool(payload.get("recover", True))
     # 고급 설정의 User Preference(사용자 지정 09-26) — 화면이 고른 등급의 것만 보낸다. 다듬기가 이 방향으로 고친다
     preference = " ".join(str(payload.get("preference") or "").split())[:MAX_PREFERENCE]
+    # [NAIA 추론 파이프라인 미사용](사용자 지정 09-28) — 요청을 E2B 에 한 번 주어 태그 + 문장만(_direct)
+    direct = bool(payload.get("direct", False))
     return {"text": text, "rating": rating, "persons": persons, "previous": previous, "api_mode": api_mode,
             "choices": choices, "not_names": not_names, "literal": literal, "refine": refine, "recover": recover,
-            "preference": preference}
+            "preference": preference, "direct": direct, "followup": _parse_followup(payload.get("followup"))}
+
+
+def _parse_followup(raw: Any) -> dict[str, Any] | None:
+    """[이어 고치기](사용자 지정 09-28) — 받은 결과: 메인(고친 글 그대로) · 캐릭터 칸 · 이전 풀의 제외 · 인원 인자."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise AssistError("이어 고치기 요청이 잘못됐습니다.")
+    main = str(raw.get("main") or "").strip()
+    if not main:
+        raise AssistError("고칠 결과가 없습니다 — 먼저 찾아 주세요.")
+    if len(main) > MAX_FOLLOWUP_MAIN:
+        raise AssistError(f"메인 프롬프트는 {MAX_FOLLOWUP_MAIN}자까지 고칠 수 있습니다.")
+    chars = raw.get("characters") or []
+    if not isinstance(chars, list) or len(chars) > MAX_VIRTUAL_CHARACTERS or not all(
+            isinstance(c, dict) and isinstance(c.get("prompt", ""), str) and len(c.get("prompt") or "") <= 600
+            for c in chars):
+        raise AssistError("캐릭터 프롬프트가 잘못됐습니다.")
+    return {"main": main, "characters": [dict(c) for c in chars],
+            "exclude": str(raw.get("exclude") or "")[:1000], "persons": str(raw.get("persons") or "")[:200]}
 
 
 def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -747,6 +776,172 @@ def _suggested(hits: list[Any], chars: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]:
+    """[NAIA 추론 파이프라인 미사용](사용자 지정 09-28) — 요청을 E2B 에 한 번(core/assist_direct): 태그 + 영어 문장.
+    한국어 층 · 경로 · 고르기 · 되살리기 · 이벤트 맵 · 다듬기를 거치지 않는다. 쓰는 것은 셋뿐:
+    - 사전 이름 맞추기(smiling -> smile) — 사전에 없는 것은 적힌 그대로 싣고 알린다(unknown). 버리면 E2B 가 쓴 구
+      (listening to sounds · peeking from doorway)가 다 빠져 메인이 비었다(시도 09-28). 잡동사니(품질 · 등급)만 뺀다.
+    - 인원: 수동이면 그 수(모델에는 정해졌다고만), 자동이면 모델이 쓴 인원 태그. solo 는 '혼자' · '홀로' 를 적었을 때만.
+    - 고른 캐릭터(이름 칩): 인원 뒤에 그 태그 · 문장은 영어 이름으로. 캐릭터 칸은 쓰지 않는다(메인 한 줄)."""
+    from core import assist_direct as ad
+    from core.assist_english import people_count
+    from core.assist_korean import partition_of
+    from core.assist_refine import display_name
+    from core.assist_v2 import PERSON_TAGS, Character, _junk_tag, _with_sentence, exact_english
+
+    layer = korean_layer(context)
+    vocab = _tag_vocab(context, layer)
+    approved, refused = _approved_names(layer, req)
+    chars = [Character(h.form, h.tag, [], h.gender) for h in approved]
+    solo = layer.says_solo(req["text"]) or bool(re.search(r"\bsolo\b", req["text"], re.IGNORECASE))
+    manual = req["persons"]["mode"] == "manual"
+    people: list[str] = []
+    if manual:
+        g, b = req["persons"]["girls"], req["persons"]["boys"]
+        people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
+    reply, info = _chat(context, ad.DIRECT_SYSTEM,
+                        ad.direct_message(req["text"], req["rating"], [(c.ko, display_name(c.tag)) for c in chars],
+                                          ", ".join(people)),
+                        ad.direct_grammar(), max_tokens=320)
+    got = ad.parse_direct(reply) if reply is not None else None
+    out: dict[str, Any] = {"ok": True, "task": "scene", "goal": "generate", "rating": req["rating"], "direct": True,
+                           "names": _names_out(layer, chars, refused), "suggested_names": [], "relations": [],
+                           "model": info, "leftovers": [], "actions": [], "samples": []}
+    if got is None or not got.tags:
+        out["message"] = ("AI 모델이 답하지 않아 만들지 못했습니다." if reply is None
+                          else "AI 모델의 답을 읽지 못했습니다 — 다시 시도해 주세요.")
+        out["prompt"] = {"main": "", "characters": []}
+    else:
+        kept: list[str] = []
+        unknown: list[str] = []
+        dropped: list[str] = []
+        model_people: list[str] = []
+        for tag in got.tags:
+            if _PEOPLE_TAG.fullmatch(tag):
+                model_people.append(tag)                  # 인원 태그(1girl · solo) — 아래에서 인원 칸이 정한다
+                continue
+            name = exact_english(tag, vocab)
+            if _junk_tag(name or tag) or tag in _QUALITY_TAGS:
+                dropped.append(tag)
+                continue
+            if not name and tag not in {c.tag for c in chars}:
+                unknown.append(tag)                       # 사전에 없는 구 — 적힌 그대로 싣는다
+            kept.append(name or tag)
+        if not manual:
+            g, b, _said = people_count(model_people)      # 모델의 solo 는 쓰지 않는다 — 요청이 말했을 때만
+            people = PERSON_TAGS.get(partition_of(g, b, g + b == 1 and solo), [])
+        char_tags = [c.tag for c in chars]
+        line = list(dict.fromkeys(people + char_tags + [t for t in kept if t not in people and t not in char_tags]))
+        out["prompt"] = {"main": _with_sentence(", ".join(line), got.sentence), "characters": []}
+        out["direct_info"] = {"tags": kept, "unknown": unknown, "dropped": dropped, "sentence": got.sentence}
+    g, b, _said = people_count(people)
+    partition = partition_of(g, b, "solo" in people)
+    out["persons"] = {"mode": "manual" if manual else "auto", "partition": partition, "girls": g, "boys": b,
+                      "unknown": 0, "confirm": False, "notes": [], "param": ""}
+    out["timing"] = {"model_s": info.get("elapsed"), "total_s": round(time.perf_counter() - started, 3)}
+    return out
+
+
+def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]:
+    """[이어 고치기](사용자 지정 09-28 — 기본은 새 검색, 이어 고치기는 따로 켠다) — 받은 결과 + 한국어 한 가지를 E2B 에 한 번
+    (core/assist_followup): 뺄 태그 · 더할 태그 · 다시 쓴 문장. 인원 · 등급 정보는 주지 않는다. 모델의 답은 제안이다:
+    - 빼기: 이전 태그 안에서만(문법) · 요청 낱말이 가리키는 태그만(사전 — 다듬기와 같은 _grounded_tags, 영문으로 적었으면
+      그 이름). 시도에서 모델이 '비는 그치고 노을로' 에 우산 · 신호등까지 뺐다.
+    - 더하기: 사전 이름 그대로 · 요청 낱말이 가리키는 것만 · 잡동사니 · 인원 아님 · 등급 게이트(G · S).
+    - 인원 태그 · 캐릭터 이름 · source#/target# · 가중치 문법은 건드리지 않는다. 더한 것은 메인에(캐릭터 칸은 빼기만).
+    - 이벤트 검색은 새 태그로 다시 판다 — 인원 · 등급 · 제외는 이전 풀 그대로."""
+    from core import assist_followup as af
+    from core.assist_refine import mentions
+    from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english
+
+    fu = req["followup"]
+    wish = req["text"]
+    layer = korean_layer(context)
+    vocab = _tag_vocab(context, layer)
+    tags, sentence = af.split_main(fu["main"])
+    bags = [[t.strip() for t in re.split(r"[,\n]", str(c.get("prompt") or "")) if t.strip()] for c in fu["characters"]]
+    people = {af.tag_key(t) for group in PERSON_TAGS.values() for t in group}
+    names = {af.tag_key(b[0]) for b in bags if b}
+
+    def editable(tag: str) -> bool:
+        key = af.tag_key(tag)
+        return bool(key) and key not in people and key not in names and "#" not in tag and "::" not in tag \
+            and not tag.startswith(("{", "[")) and not re.match(r"^\(.*:\s*[\d.]+\)$", tag)
+    removable = list(dict.fromkeys([t for t in tags if editable(t)] + [t for b in bags for t in b[1:] if editable(t)]))
+    reply, info = _chat(context, af.FOLLOWUP_SYSTEM,
+                        af.followup_message(tags, sentence, wish, [(b[0], b[1:]) for b in bags if b]),
+                        af.followup_grammar(removable), max_tokens=320)
+    got = af.parse_followup(reply, removable) if reply is not None else None
+    if got is None:
+        return {"ok": False, "model": info,
+                "error": ("AI 모델이 답하지 않아 고치지 못했습니다." if reply is None
+                          else "AI 모델의 답을 읽지 못했습니다 — 다시 시도해 주세요.")}
+    try:
+        index = _ko_dict_index(context, layer, vocab)
+        wish_lemmas = set(index.query(wish))
+    except Exception:                               # Kiwi 가 없으면 영문으로 적은 것만 가리킨다
+        index, wish_lemmas = None, set()
+
+    def pointed(tag: str) -> bool:
+        """요청 낱말이 가리키나 — 사전 키워드 구절(되살리기와 같은 KoDictIndex.grounded: '머리' -> 긴 머리 · 짧은 머리,
+        '비' -> rain) · 영문으로 적었나. 다듬기의 _grounded_tags 는 흔한 낱말(고양이 -> 열 개 넘는 태그)을 일부러 버려
+        cat 을 못 더하고 long hair 를 못 뺐다(시도 09-28)."""
+        key = af.tag_key(tag)
+        name = vocab.canonical(key) or key
+        return mentions(key, wish) or (index is not None and index.grounded(name, wish, wish_lemmas))
+    removed = [t for t in got.remove if pointed(t)]
+    kept_back = [t for t in got.remove if t not in removed]
+    gone = {af.tag_key(t) for t in removed}
+    present = {af.tag_key(t) for t in tags + [x for b in bags for x in b]} - gone
+    share = _rating_share(context, req["rating"])
+    gate = RATING_GATE.get(req["rating"])
+    added: list[str] = []
+    refused: list[str] = []
+    unknown: list[str] = []
+    for tag in got.add:
+        name = exact_english(tag, vocab)
+        if not name or _junk_tag(name) or vocab.role(name) == "population":
+            unknown.append(tag)
+            continue
+        if af.tag_key(name) in present or name in added:
+            continue
+        s = share(name) if share and gate is not None else None
+        # 더하기는 요청이 가리키거나 모델이 다시 쓴 제 문장에서 말한 것(자기 일관성 — '웃는 표정' 의 smile 은 사전 키워드가
+        # '웃음' 이라 원형이 어긋난다). 빼기보다 느슨하다 — 넘치는 쪽은 빼기였다(시도 8회 중 4회)
+        if not (pointed(name) or mentions(name, got.sentence)) or (s is not None and s < gate):
+            refused.append(name)
+            continue
+        added.append(name)
+    new_tags = [t for t in tags if af.tag_key(t) not in gone] + added
+    new_bags = [[b[0]] + [t for t in b[1:] if af.tag_key(t) not in gone] if b else [] for b in bags]
+    chars = [{**c, "prompt": ", ".join(b)} for c, b in zip(fu["characters"], new_bags)]
+    out: dict[str, Any] = {
+        "ok": True, "task": "scene", "rating": req["rating"], "model": info,
+        "prompt": {"main": _with_sentence(", ".join(new_tags), got.sentence or sentence), "characters": chars},
+        "followup": {"removed": removed, "added": added, "kept": kept_back, "refused": refused, "unknown": unknown,
+                     "sentence": got.sentence, "tags": [t for t in new_tags if af.tag_key(t) not in people]},
+        "leftovers": [], "actions": [], "samples": [], "refine": None, "recover": None, "explain": None,
+        "message": None, "pool": None,             # 풀이 없으면 None — 화면이 이전 결과의 핀을 이어 쓰지 않게
+    }
+    # 이벤트 검색을 새 태그로 다시 판다(인원 · 등급 · 제외는 이전 풀 그대로) — 맵이 없으면 조용히 건너뛴다
+    cands = [n for n in dict.fromkeys(vocab.canonical(af.tag_key(t)) for t in new_tags)
+             if n and vocab.role(n) != "population" and af.tag_key(n) not in names]
+    if cands:
+        exclude = [t.strip() for t in fu["exclude"].split(",") if t.strip()]
+        try:
+            drill = _event_map(context).drill(candidates=cands, exclude=exclude, ratings=req["rating"],
+                                              persons=fu["persons"], min_posts=MIN_POOL)
+            pins = list(drill.get("pins") or [])
+            out["pool"] = {"pins": ",".join(pins), "exclude": ",".join(drill.get("exclude") or []),
+                           "ratings": req["rating"], "persons": fu["persons"], "posts": int(drill.get("posts") or 0),
+                           "trail": drill.get("trail")}
+            out["leftovers"] = list(drill.get("left") or [])
+        except Exception:
+            out["pool"] = None
+    out["timing"] = {"model_s": info.get("elapsed"), "total_s": round(time.perf_counter() - started, 3)}
+    return out
+
+
 def _fallback_route(ka: Any) -> dict[str, Any]:
     """모델 없이: 한국어 층이 찾은 것만으로 장면 검색."""
     return {"task": "scene" if (ka.specific or ka.verb_tags) else "other", "goal": "find", "characters": [],
@@ -762,6 +957,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         req = _parse_payload(context, payload)
     except AssistError as exc:
         return {"ok": False, "error": str(exc)}
+    if req["followup"] is not None:
+        return _followup(context, req, started)
+    if req["direct"]:
+        return _direct(context, req, started)
     from core.assist_compose import parse_segments
 
     segs = parse_segments(req["text"])

@@ -18,6 +18,10 @@
  * - 칠하기는 promptHighlighter 와 같은 방식이다: 입력칸 뒤에 같은 글을 담은 거울을 깔고 CSS Custom Highlight API
  *   로 범위만 칠한다(범위는 배치를 안 바꾼다 — 캐럿이 글자와 어긋나지 않는다). API 가 없으면 <mark> 로 칠한다.
  * - 크기·자리 규약은 Fast Search 와 같다(결과 칸 가운데, 폭 ≤ 720, 높이 ≤ 결과 칸의 절반).
+ * - [이어 고치기](사용자 지정 2026-09-28 — 기본은 새 검색): 켜면 다음 요청이 받은 결과(고친 메인 · 캐릭터 칸 그대로)에 고칠
+ *   점만 더한다(서버 _followup — 빼기는 요청이 가리킨 것만). 이벤트 검색은 새 태그로 다시 붙인다. [새로] 가 끈다.
+ * - [ ] NAIA 추론 파이프라인 미사용(09-28): 켜면 AI 모델이 바로 태그 + 문장을 쓴다(서버 _direct — 한국어 층 · 이벤트 맵 ·
+ *   되살리기 · 다듬기 없음). 이 기계에 남는다(prefs).
  */
 
 const RATINGS = [
@@ -135,6 +139,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   const prefs = loadPrefs();
   let rating = RATINGS.some(r => r.id === prefs.rating) ? prefs.rating : 'g';
   let personsMode = prefs.personsMode === 'manual' ? 'manual' : 'auto';
+  let direct = prefs.direct === true;      // [ ] NAIA 추론 파이프라인 미사용
+  let followOn = false;                    // [이어 고치기] — 기본은 꺼짐(새 검색)
+  let followBtn = null, directBox = null;
   const savedPreference = prefs.preference && typeof prefs.preference === 'object' ? prefs.preference : {};
   const preference = Object.fromEntries(RATINGS.map(r => [r.id,
     typeof savedPreference[r.id] === 'string' ? savedPreference[r.id] : DEFAULT_PREFERENCE[r.id]]));
@@ -164,7 +171,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   function persistPrefs() {
-    savePrefs({ rating, personsMode, girls, boys, preference });
+    savePrefs({ rating, personsMode, girls, boys, preference, direct });
   }
 
   async function postJson(path, payload, { allowError = false } = {}) {
@@ -216,6 +223,10 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
                 title="다듬기가 따를 User Preference(등급마다)">고급 설정</button>
         <button type="button" class="as-seg" data-as-hist aria-expanded="false" hidden
                 title="이번 세션의 결과 — 눌러 그때로 되돌아갑니다">기록</button>
+        <label class="as-auto" title="한국어 분석 · 이벤트 맵 · 되살리기 · 다듬기 없이 AI 모델이 바로 태그 + 문장을 씁니다">
+          <input type="checkbox" data-as-direct> NAIA 추론 파이프라인 미사용</label>
+        <button type="button" class="as-seg as-follow" data-as-follow aria-pressed="false" hidden
+                title="켜면 다음 요청은 받은 결과를 두고 고칠 점만 반영합니다 · 끄면 새로 찾기">이어 고치기</button>
         <button type="button" class="as-reset" data-as-reset title="기억(직전 검색)과 이름 선택을 지우고 새로 시작">새로</button>
       </div>
       <div class="as-hist" data-as-hist-panel hidden></div>
@@ -242,6 +253,18 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     advBtn = overlay.querySelector('[data-as-adv]');
     histPanel = overlay.querySelector('[data-as-hist-panel]');
     histBtn = overlay.querySelector('[data-as-hist]');
+    followBtn = overlay.querySelector('[data-as-follow]');
+    directBox = overlay.querySelector('[data-as-direct]');
+    directBox.checked = direct;
+    followBtn.addEventListener('click', () => {
+      followOn = !followOn;
+      paintFollow();
+      input.focus();
+    });
+    directBox.addEventListener('change', () => {
+      direct = directBox.checked;
+      persistPrefs();
+    });
     histBtn.addEventListener('click', () => {
       histPanel.hidden = !histPanel.hidden;
       paintHistory();
@@ -297,7 +320,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       rating = pill.dataset.r;
       persistPrefs();
       paintRating();
-      if (result && !busy) void ask();
+      reask();
     });
     personsEl.addEventListener('click', onPersonsClick);
     namesRow.addEventListener('mousedown', event => event.preventDefault());   // 포커스는 입력칸에
@@ -398,7 +421,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     }
     persistPrefs();
     paintPersons();
-    if (result && !busy) void ask();
+    reask();
   }
 
   // ── 이름: 칠하기 · 칩 · 고르기 ───────────────────────────────────────────
@@ -634,7 +657,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     notNames.delete(form);
     closePicker();
     paintNames();
-    if (result && !busy) void ask();
+    reask();
   }
 
   function rejectName(form) {
@@ -643,7 +666,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     choices.delete(form);
     closePicker();
     paintNames();
-    if (result && !busy) void ask();
+    reask();
   }
 
   // ── 묻기 · 그리기 ────────────────────────────────────────────────────────
@@ -685,7 +708,30 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     return personsMode === 'manual' ? { mode: 'manual', girls, boys } : { mode: 'auto' };
   }
 
+  /** 조건(등급 · 인원 · 이름)이 바뀌면 같은 요청으로 다시 찾는다 — 이어 고치기 중엔 같은 고칠 점을 또 얹지 않는다 */
+  function reask() {
+    if (result && !busy && !followOn) void ask();
+  }
+
+  function canFollow() {
+    return !!(result && result.task === 'scene' && oneLine(result.prompt?.main));
+  }
+
+  /** [이어 고치기] 단추 · 보내기 단추 글 · 입력칸 안내 — 결과(장면)가 있을 때만 켤 수 있다 */
+  function paintFollow() {
+    if (!followBtn) return;
+    const can = canFollow();
+    if (!can) followOn = false;
+    followBtn.hidden = !can;
+    followBtn.classList.toggle('is-on', followOn);
+    followBtn.setAttribute('aria-pressed', String(followOn));
+    if (sendBtn) sendBtn.textContent = busy ? (followOn ? '고치는 중…' : '찾는 중…') : (followOn ? '고치기' : '찾기');
+    input.placeholder = followOn ? '고칠 점을 적어 주세요 — 예: 배경을 밤의 옥상으로, 머리는 짧게'
+      : '말로 적어 주세요 — 예: 카나데가 나히다를 공주안기 하고 뛰어다니는 장면';
+  }
+
   async function ask() {
+    if (followOn && canFollow()) return followup();
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     closePicker();
@@ -702,6 +748,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (mode) payload.api_mode = mode;
     const wish = String(preference[rating] || '').trim();
     if (wish) payload.preference = wish.slice(0, MAX_PREFERENCE);     // 고른 등급의 User Preference 만
+    if (direct) { payload.direct = true; asked.mode = 'direct'; }
     let data;
     try { data = await postJson('/api/assist', payload, { allowError: true }); } catch (error) { data = { ok: false, error: error.message }; }
     if (mine !== askSeq) return;
@@ -725,6 +772,47 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     remember(text, asked, data);
   }
 
+  /** [이어 고치기] — 받은 결과(고친 메인 · 캐릭터 칸 그대로) + 고칠 점. 실패하면 받은 결과를 그대로 두고 알린다.
+   *  인원 · 이름 · 등급은 그 결과의 것을 이어 쓴다(서버에 인원 · 등급 정보를 주지 않는다 — 풀만 그 값으로 다시 판다). */
+  async function followup() {
+    const text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    const prev = result;
+    closePicker();
+    const mine = ++askSeq;
+    busy = true;
+    paintBusy();
+    const payload = {
+      text, rating: prev.rating || rating,
+      followup: {
+        main: mainPrompt(),
+        characters: (prev.prompt?.characters || []).map(c => ({ ...c, prompt: oneLine(c.prompt) })),
+        exclude: prev.pool?.exclude || '', persons: prev.pool?.persons || '',
+      },
+    };
+    const asked = { rating: payload.rating, personsMode, girls, boys, choices: [...choices], notNames: [...notNames],
+      mode: 'followup' };
+    const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
+    if (mode) payload.api_mode = mode;
+    let data;
+    try { data = await postJson('/api/assist', payload, { allowError: true }); } catch (error) { data = { ok: false, error: error.message }; }
+    if (mine !== askSeq) return;
+    busy = false;
+    if (!data || !data.ok) {
+      paintBusy();
+      toast((data && data.error) || '고치지 못했습니다', 'error');
+      return;
+    }
+    // 새 결과 = 이전 결과(이름 · 인원 · 관계) + 고친 프롬프트 · 풀. 다듬기 · 되살리기 줄은 이전 검색의 것이라 지운다(서버가 null)
+    result = { ...prev, ...data, names: prev.names, suggested_names: prev.suggested_names, persons: prev.persons,
+      relations: prev.relations, direct: prev.direct };
+    if (recap && data.followup?.tags) recap = { ...recap, include: data.followup.tags };
+    render();
+    paintBusy();
+    linkEvents();
+    remember(text, asked, result);
+  }
+
   // ── [기록] — 이번 세션의 결과(사용자 지정 2026-09-28). 새 결과를 앞에 쌓고, 누르면 그때의 요청 · 등급 · 인원 · 이름 선택 ·
   // 기억 · 결과로 되돌아간다(붙인 이벤트 검색도 그 핀 · 인원 · 등급으로). 기억(recap)도 돌려 두니 이어 묻기도 그때부터다.
 
@@ -735,6 +823,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), text,
       rating: asked.rating, personsMode: asked.personsMode, girls: asked.girls, boys: asked.boys,
       choices: asked.choices.filter(([form]) => !refused.has(form)), notNames: asked.notNames, recap, result,
+      mode: asked.mode || 'search',
     };
     history = [entry, ...history].slice(0, HISTORY_MAX);
     historyAt = entry.id;
@@ -760,6 +849,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     recap = entry.recap || null;
     result = entry.result;
     historyAt = entry.id;
+    // 그 결과를 만든 방식으로 — 고친 결과면 이어 고치기를 켜 두고, 직접 · 검색이면 [파이프라인 미사용] 을 그대로
+    if (entry.mode === 'direct' || entry.mode === 'search') {
+      direct = entry.mode === 'direct';
+      if (directBox) directBox.checked = direct;
+      persistPrefs();
+    }
+    followOn = entry.mode === 'followup';
     names = new Map();
     spans = [];
     absorbNames(result.names, entry.text);
@@ -799,7 +895,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         <button type="button" class="as-adv-reset" data-as-hist-clear>비우기</button></div>
       <div class="as-hist-list">${history.map(e => `<button type="button" class="as-hist-row${e.id === historyAt ? ' is-on' : ''}"
           data-as-hist-id="${esc(e.id)}"><span class="as-hist-time">${clock(e.at)}</span><span class="as-hist-r">${
-          esc(String(e.rating || '').toUpperCase())}</span><span class="as-hist-text">${esc(e.text)}</span>
+          esc(String(e.rating || '').toUpperCase())}</span><span class="as-hist-text">${
+          e.mode === 'followup' ? '고치기 · ' : e.mode === 'direct' ? '직접 · ' : ''}${esc(e.text)}</span>
           <span class="as-hist-tags">${esc(historySummary(e.result))}</span></button>`).join('')}</div>`;
   }
 
@@ -819,7 +916,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function paintBusy() {
     if (!overlay) return;
     overlay.classList.toggle('is-busy', busy);
-    if (sendBtn) { sendBtn.disabled = busy; sendBtn.textContent = busy ? '찾는 중…' : '찾기'; }
+    if (sendBtn) sendBtn.disabled = busy;
+    paintFollow();                          // 보내기 단추 글(찾기 · 고치기 · 찾는 중…)
     if (busy && !result) body.innerHTML = '<div class="as-note">찾는 중…</div>';
   }
 
@@ -873,6 +971,15 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (r.actions?.length) meta.push(`랜덤 행동 ${esc(r.actions.join(', '))}`);
     if (r.refine && (r.refine.removed?.length || r.refine.added?.length)) {
       meta.push(`다듬기 ${[...(r.refine.removed || []).map(t => `−${esc(t)}`), ...(r.refine.added || []).map(t => `+${esc(t)}`)].join(' ')}`);
+    }
+    if (r.followup) {
+      const f = r.followup;
+      const change = [...(f.removed || []).map(t => `−${esc(t)}`), ...(f.added || []).map(t => `+${esc(t)}`)].join(' ');
+      meta.push(`고치기 ${change || '태그 그대로 · 문장만'}`);
+    }
+    if (r.direct) {
+      meta.push('파이프라인 미사용');
+      if (r.direct_info?.unknown?.length) meta.push(`사전에 없는 말 ${esc(r.direct_info.unknown.join(', '))}`);
     }
     const notes = [];
     if (r.suggested_names?.length) {
@@ -931,6 +1038,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     }
     body.innerHTML = html;
     wirePromptEditors();
+    paintFollow();
     fit();
   }
 
@@ -1159,6 +1267,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function reset() {
     recap = null;
     result = null;
+    followOn = false;                      // 새로 = 이어 고치기도 끈다(render 가 단추를 감춘다)
     historyAt = null;                      // 기록은 그대로 — 지금 보이는 기록만 없다
     paintHistory();
     choices.clear();

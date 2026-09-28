@@ -7,7 +7,7 @@ from pathlib import Path
 from .manifest import MANAGED_CREDENTIAL, MODELS
 from .profile import SLOTS, compile_graph, validate_request_slots
 from .runtime import INSTALLING, REGISTRY_LOCK, ManagedEngineError, get_runtime
-from .settings import load_settings, lora_catalog, quick_receipt, verified_hash
+from .settings import load_settings, lora_catalog, quick_receipt, unet_catalog, verified_hash
 
 
 def save_root_of(context):
@@ -48,11 +48,27 @@ def is_managed_credential(value):
     return value == MANAGED_CREDENTIAL
 
 
+def managed_models(context):
+    """관리형 엔진이 고를 수 있는 ANIMA 모델 이름 — 기본 모델이 맨 앞(설치 전에도 기본 모델 하나는 보인다)."""
+    names = [x["name"] for x in unet_catalog(load_settings(save_root_of(context)))["available"]]
+    default = MODELS[0]["filename"]
+    return names if default in names else [default] + names
+
+
+def resolve_model(context, requested):
+    """요청의 모델 -> 관리형 목록의 이름. 목록에 없으면(외부 ComfyUI 에서 남은 체크포인트 이름 · 빈 값) 기본 모델 —
+    Model 칸이 보여 주는 것(apply_managed_schema)과 같다. Model 칸을 거치지 않는 생성(작가 썸네일 등)도 이 길이다."""
+    requested = str(requested or "").strip()
+    return requested if requested and requested in managed_models(context) else MODELS[0]["filename"]
+
+
 def snapshot_request(context, params):
     params.update(sampling_mode="anima", comfyui_sampling_mode="anima", workflow_type="unet")
     params.update(validate_request_slots(params))
     params["resolution"] = f'{params["width"]} x {params["height"]}'
     params["_anima_lora_chain"] = copy.deepcopy(load_settings(save_root_of(context)).lora_chain)
+    # 모델도 큐에 넣는 순간의 것 — 그 뒤 파일이 사라지면 몰래 기본 모델로 바꾸지 않고 거절한다(LoRA 와 같은 규칙)
+    params["model"] = params["_anima_model"] = resolve_model(context, params.get("model"))
     params.pop("_anima_submission_attempted", None)
 
 
@@ -76,12 +92,17 @@ def prepare_managed_request(context, params):
         if item.get("sha256") and digest != item["sha256"]:
             raise ManagedEngineError("LORA_INVALID", "대기 중 LoRA 파일이 변경되었습니다.", item["name"])
         item["sha256"] = digest
-    compiled = compile_graph(params, chain, available_loras={k for k, v in catalog.items() if not v["conflict"]})
+    models = {x["name"] for x in unet_catalog(settings)["available"]}
+    model = params.get("_anima_model") or resolve_model(context, params.get("model"))
+    if model not in models:
+        raise ManagedEngineError("MODEL_NOT_FOUND", "ANIMA 모델 파일을 찾지 못했습니다.", model)
+    compiled = compile_graph(params, chain, available_loras={k for k, v in catalog.items() if not v["conflict"]},
+                             model=model, available_models=models)
     runtime = get_runtime(context)
     if runtime is None:
         raise ManagedEngineError("ENGINE_NOT_READY")
     url = runtime.ensure_running()
-    params.update(workflow=compiled.workflow, _comfyui_output_node_id=compiled.output_node_id,
+    params.update(workflow=compiled.workflow, _comfyui_output_node_id=compiled.output_node_id, model=model,
                   _comfyui_workflow_mode="managed", _anima_meta=compiled.meta, seed=compiled.seed,
                   width=compiled.meta["width"], height=compiled.meta["height"])
     params["resolution"] = f'{params["width"]} x {params["height"]}'
@@ -92,18 +113,22 @@ def prepare_managed_request(context, params):
     return url
 
 
-def fixed_api_options():
-    return {"options_model": [MODELS[0]["filename"]], "options_sampler": ["euler"], "options_scheduler": ["simple"]}
+def managed_api_options(context):
+    # 샘플러 · 스케줄러는 SPD 그래프 고정, 모델은 목록에서 고른다
+    return {"options_model": managed_models(context), "options_sampler": ["euler"], "options_scheduler": ["simple"]}
 
 
 def apply_managed_schema(context, payload):
     """Project fixed engine options without changing the external COMFYUI plane."""
     if payload.get("api_mode") != "COMFYUI" or not managed_anima(context):
         return
-    options = fixed_api_options()
+    options = managed_api_options(context)
     payload.update(options, steps_range=[1, 150])
-    for key in ("model", "sampler", "scheduler"):
+    for key in ("sampler", "scheduler"):
         payload[key] = options["options_" + key][0]
+    # 세션에 남은 모델이 목록에 있으면 그것, 아니면 기본 모델(resolve_model 과 같은 규칙) — remote_params 는 그대로 둔다
+    chosen = str(context.remote_params.get("model") or "").strip()
+    payload["model"] = chosen if chosen in options["options_model"] else options["options_model"][0]
     stored = context.remote_params
     for key in ("steps", "cfg_scale", "rescale_cfg"):
         if key not in stored or (key == "rescale_cfg" and stored[key] in (None, "")):

@@ -22,12 +22,14 @@ from . import manifest
 from .profile import ProfileError, number, validate_chain
 
 LOCK = RLock()
-DEFAULTS = {"version": 1, "engine_root": None, "model_dirs": [], "lora_dirs": [],
+DEFAULTS = {"version": 1, "engine_root": None, "model_dirs": [], "lora_dirs": [], "unet_dirs": [],
             "lora_chain": [], "idle_minutes": 30, "reserve_vram_gb": "auto"}
 THUMB_MAX_BYTES = 10 * 1024 * 1024
 _TRIGGER_CACHE = {}
 _CATALOG_CACHE = {}
 _THUMB_CACHE = {}
+_UNET_CACHE = {}
+_ANIMA_CHECK_CACHE = {}
 _COMMON_TAGS = {"1girl", "1boy", "solo", "2girls", "2boys", "multiple girls", "multiple boys",
                 "male focus", "female focus", "looking at viewer", "rating safe", "rating questionable",
                 "rating explicit", "masterpiece", "best quality", "high quality"}
@@ -97,12 +99,12 @@ def save_settings(save_root, updates):
         number(data["idle_minutes"], "idle_minutes", 0, 720, integer=True)
         if data["reserve_vram_gb"] != "auto":
             number(data["reserve_vram_gb"], "reserve_vram_gb", 0, 64)
-        for key in ("model_dirs", "lora_dirs"):
+        for key in ("model_dirs", "lora_dirs", "unet_dirs"):
             if not isinstance(data[key], list) or not all(isinstance(x, str) and Path(x).is_absolute() for x in data[key]):
                 raise ProfileError("PATH_INVALID", field=key)
         if data["engine_root"] is not None and not isinstance(data["engine_root"], str):
             raise ProfileError("PATH_INVALID", field="engine_root")
-        for key in ("model_dirs", "lora_dirs"):
+        for key in ("model_dirs", "lora_dirs", "unet_dirs"):
             data[key] = list(dict.fromkeys(data[key]))
         atomic_json(Path(save_root) / "anima_engine_user.json", data)
         return AnimaSettings(data)
@@ -222,6 +224,136 @@ def _scan_lora_catalog(settings):
                 found[key] = {"name": name, "size": path.stat().st_size, "source": source,
                               "conflict": False, "path": str(path)}
     return list(found.values())
+
+
+
+# ---- ANIMA 모델(UNet) — 관리형 엔진이 고를 수 있는 모델 ----
+# ComfyUI 는 모델 이름을 목록 문자열과 **정확히** 대조한다(execution.py value_not_in_list). 그 목록은
+# folder_paths.recursive_search 의 os.path.relpath 라 Windows 에서는 하위 폴더가 역슬래시다 — 같은 표기로 만든다.
+ANIMA_KEY_PREFIXES = ("model.diffusion_model.", "diffusion_model.", "net.", "")
+
+
+def _safetensors_header(path):
+    """Bounded header read (never tensor data). Raises ValueError on a malformed file."""
+    path = Path(path)
+    with path.open("rb") as handle:
+        size = struct.unpack("<Q", handle.read(8))[0]
+        if not 2 <= size <= min(16 * 1024 * 1024, path.stat().st_size - 8):
+            raise ValueError("header size")
+        header = json.loads(handle.read(size))
+    if not isinstance(header, dict):
+        raise ValueError("header")
+    return header
+
+
+def is_anima_unet(path):
+    """ANIMA DiT 인가 — Cosmos-Predict2 블록 + LLM 어댑터(ANIMA 에만 있다). SDXL · Flux · 순수 Cosmos 는 아니다."""
+    names = [key for key in _safetensors_header(path) if key != "__metadata__"]
+    for prefix in ANIMA_KEY_PREFIXES:
+        keys = {key[len(prefix):] for key in names if key.startswith(prefix)}
+        if ("blocks.0.adaln_modulation_cross_attn.1.weight" in keys
+                and any(key.startswith("llm_adapter.") for key in keys)
+                and any(key.startswith("x_embedder.") for key in keys)):
+            return True
+    return False
+
+
+def _anima_check(path):
+    key = (str(path), _file_stamp(path))
+    with LOCK:
+        if key in _ANIMA_CHECK_CACHE:
+            return _ANIMA_CHECK_CACHE[key]
+    try:
+        verdict = "ok" if is_anima_unet(path) else "not_anima"
+    except (OSError, ValueError, TypeError, AttributeError, struct.error):
+        verdict = "invalid"
+    with LOCK:
+        if len(_ANIMA_CHECK_CACHE) >= 512:
+            _ANIMA_CHECK_CACHE.clear()
+        _ANIMA_CHECK_CACHE[key] = verdict
+    return verdict
+
+
+def _receipt_unet(settings):
+    if not settings.engine_root:
+        return None
+    unet = ((read_json(Path(settings.engine_root) / "receipt.json").get("models") or {}).get("unet") or {}).get("path")
+    return Path(unet) if unet else None
+
+
+def _folder_identity(folder):
+    try:
+        return str(Path(folder).resolve()).casefold()
+    except OSError:
+        return str(folder).casefold()
+
+
+def unet_roots(settings, receipt_unet=None):
+    """ComfyUI 가 diffusion_models 를 찾는 순서(write_model_config 와 같다) — 앞 폴더의 같은 이름이 이긴다."""
+    roots = []
+    if settings.engine_root:
+        roots.append((Path(settings.engine_root) / "models" / "diffusion_models", "managed"))
+    if receipt_unet is not None:
+        roots.append((receipt_unet.parent, "reuse"))
+    roots.extend((Path(p), Path(p).name) for p in settings.unet_dirs)
+    unique, seen = [], set()
+    for folder, source in roots:
+        identity = _folder_identity(folder)
+        if identity not in seen:
+            seen.add(identity)
+            unique.append((folder, source))
+    return unique
+
+
+def unet_catalog(settings):
+    """{'available': [{name, size, source, path}], 'skipped': [{name, source, reason}]} — 기본 모델이 맨 앞.
+
+    reason: not_anima(ANIMA 가 아님) · invalid(safetensors 머리가 깨짐) · shadowed(앞 폴더에 같은 이름).
+    """
+    receipt_unet = _receipt_unet(settings)
+    roots = unet_roots(settings, receipt_unet)
+    key = tuple((str(root), _file_stamp(root)) for root, _ in roots) + (str(receipt_unet),)
+    with LOCK:
+        cached = _UNET_CACHE.get(key)
+        if cached and time.monotonic() - cached[0] < 2:
+            return copy.deepcopy(cached[1])
+    trusted = _folder_identity(receipt_unet) if receipt_unet is not None else None
+    result = _scan_unet_catalog(roots, trusted)
+    with LOCK:
+        if len(_UNET_CACHE) >= 64:
+            _UNET_CACHE.clear()
+        _UNET_CACHE[key] = (time.monotonic(), result)
+    return copy.deepcopy(result)
+
+
+def _scan_unet_catalog(roots, trusted):
+    available, skipped, names, files = [], [], set(), set()
+    for root, source in roots:
+        for path in sorted(walk_files(root), key=lambda p: str(p).casefold()):
+            if path.suffix.lower() != ".safetensors":
+                continue
+            identity = _folder_identity(path)
+            if identity in files:
+                continue
+            files.add(identity)
+            name = str(path.relative_to(root))
+            if name.casefold() in names:            # ComfyUI 는 앞 폴더의 같은 이름 파일을 연다
+                skipped.append({"name": name, "source": source, "reason": "shadowed"})
+                continue
+            names.add(name.casefold())
+            # 설치 영수증이 해시로 고정한 기본 모델은 머리를 다시 읽지 않는다
+            verdict = "ok" if identity == trusted else _anima_check(path)
+            if verdict != "ok":
+                skipped.append({"name": name, "source": source, "reason": verdict})
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            available.append({"name": name, "size": size, "source": source, "path": str(path)})
+    default = manifest.MODELS[0]["filename"].casefold()
+    available.sort(key=lambda x: (x["name"].casefold() != default, x["name"].casefold()))
+    return {"available": available, "skipped": skipped}
 
 
 def check_lora_header(path):
@@ -509,6 +641,9 @@ def write_model_config(settings, model_paths):
         lines.extend([f"naia_reuse_{i}:", "  base_path: " + json.dumps(str(folder)), f"  {model['category']}: ."])
     for i, folder in enumerate(settings.lora_dirs):
         lines.extend([f"naia_loras_{i}:", "  base_path: " + json.dumps(folder), "  loras: ."])
+    # ANIMA 모델 폴더 — 관리형 · 기본 모델 자리 뒤(ComfyUI 는 앞 폴더의 같은 이름을 연다, unet_roots 와 같은 순서)
+    for i, folder in enumerate(settings.unet_dirs):
+        lines.extend([f"naia_unets_{i}:", "  base_path: " + json.dumps(folder), "  diffusion_models: ."])
     path = root / "state/extra_model_paths.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".yaml.tmp")

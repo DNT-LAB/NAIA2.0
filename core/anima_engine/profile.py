@@ -28,6 +28,9 @@ class CompiledGraph:
     meta: dict[str, Any]
 
 
+# 모델은 고를 수 있다(09-28) — 노드 44 의 unet_name. 고르지 않으면 설치한 기본 모델.
+DEFAULT_UNET = GRAPH_TEMPLATE["44"]["inputs"]["unet_name"]
+
 SLOTS = {"input": ("11", "text", ""), "negative_prompt": ("12", "text", ""),
          "seed": ("48", "seed", -1), "steps": ("48", "steps", 27),
          "cfg_scale": ("48", "cfg", 4.8), "width": ("28", "width", 960),
@@ -120,7 +123,8 @@ def validate_chain(chain, available_loras):
 
 
 def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, Any]], *,
-                  available_loras: Collection[str], rng: random.Random | None = None) -> CompiledGraph:
+                  available_loras: Collection[str], rng: random.Random | None = None,
+                  model: str | None = None, available_models: Collection[str] | None = None) -> CompiledGraph:
     # The existing generation dispatcher calls ordinary text generation "generate".
     if params.get("type") not in (None, "", "generate", "txt2img"):
         raise ProfileError("MANAGED_UNSUPPORTED_REQUEST", field="type")
@@ -131,7 +135,11 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
         values["seed"] = (rng or random.SystemRandom()).randrange(0, 2**32)
     validate_params(values)
     validate_chain(lora_chain, available_loras)
+    unet = model or DEFAULT_UNET
+    if unet not in (available_models if available_models is not None else {DEFAULT_UNET}):
+        raise ProfileError("MODEL_NOT_FOUND", field=unet)
     graph = copy.deepcopy(GRAPH_TEMPLATE)
+    graph["44"]["inputs"]["unet_name"] = unet
     for key, (node, field, _) in SLOTS.items():
         graph[node]["inputs"][field] = values[key]
     prev, active = "44", []
@@ -144,9 +152,9 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
         prev = node
         active.append({"name": item["name"], "strength": item.get("strength", 1.0), "sha256": item.get("sha256")})
     graph["52"]["inputs"]["model"] = [prev, 0]
-    validate_compiled(graph, available_loras=available_loras)
+    validate_compiled(graph, available_loras=available_loras, available_models=available_models)
     return CompiledGraph(graph, OUTPUT_NODE_ID, values["seed"], {
-        "id": PROFILE_ID, "revision": PROFILE_REVISION, "runtime_id": RUNTIME_ID,
+        "id": PROFILE_ID, "revision": PROFILE_REVISION, "runtime_id": RUNTIME_ID, "model": unet,
         "sampler_actual": "euler", "sampler_note": "SPD forces Euler", "loras": active,
         **{key: values[key] for key in ("seed", "steps", "cfg_scale", "rescale_cfg", "width", "height")}})
 
@@ -160,7 +168,8 @@ def validate_request_slots(params):
     return values
 
 
-def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collection[str]) -> None:
+def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collection[str],
+                      available_models: Collection[str] | None = None) -> None:
     try:
         extra = set(workflow) - set(GRAPH_TEMPLATE)
         if len(extra) > 32 or extra != {str(100 + i) for i in range(len(extra))}:
@@ -168,6 +177,10 @@ def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collectio
         values = {key: workflow[node]["inputs"][field] for key, (node, field, _) in SLOTS.items()}
         validate_params(values)
         expected = copy.deepcopy(GRAPH_TEMPLATE)
+        unet = workflow["44"]["inputs"]["unet_name"]
+        if unet not in (available_models if available_models is not None else {DEFAULT_UNET}):
+            raise ValueError("model")
+        expected["44"]["inputs"]["unet_name"] = unet
         for key, (node, field, _) in SLOTS.items():
             expected[node]["inputs"][field] = values[key]
         prev = "44"

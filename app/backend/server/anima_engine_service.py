@@ -11,7 +11,8 @@ from core.anima_engine.install import AnimaInstallJob, app_version, validate_roo
 from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK,
                                        get_runtime, register_runtime, reserve_vram)
 from core.anima_engine.settings import (consent_agreed, license_bundle, license_text, load_settings, lora_catalog,
-                                        quick_receipt, record_consent, save_lora_chain, save_settings, write_model_config)
+                                        quick_receipt, record_consent, save_lora_chain, save_settings, unet_catalog,
+                                        write_model_config)
 from core.anima_engine.settings import (delete_lora_thumb, lora_folder, lora_thumb, lora_triggers,
                                         put_lora_thumb, read_lora_thumb)
 
@@ -64,12 +65,16 @@ class AnimaEngineService:
         ready = bool(receipt) and install["state"] != "preparing"
         with REGISTRY_LOCK:
             rt = REGISTRY.get(str(Path(settings.engine_root).resolve())) if settings.engine_root else None
+        # 모델 폴더 칸 밑 한 줄(찾은 모델 · 뺀 파일)용 — 설치가 끝났을 때만 훑는다(2초 캐시)
+        models = unet_catalog(settings) if ready else {"available": [], "skipped": []}
         return {"ok": True, "profile": {"id": manifest.PROFILE_ID, "revision": manifest.PROFILE_REVISION, "runtime_id": manifest.RUNTIME_ID},
                 "comfyui_engine": "managed" if integration.managed_selected(self.context) else "external", "ready": ready,
                 "install": install, "engine": rt.status() if rt else {"state": "stopped", "port": None, "pid": None, "started_at": None, "code": None, "message": ""},
                 "receipt": {k: receipt.get(k) for k in ("gpu", "system_stats", "created_at")} if receipt else None,
                 "consent": {"agreed": consent_agreed(self.save_root), "bundle_sha256": license_bundle()},
-                "settings": {k: settings.data[k] for k in ("engine_root", "model_dirs", "lora_dirs", "idle_minutes", "reserve_vram_gb")}}
+                "models": {"available": [x["name"] for x in models["available"]], "skipped": models["skipped"]},
+                "settings": {k: settings.data[k] for k in ("engine_root", "model_dirs", "lora_dirs", "unet_dirs", "idle_minutes",
+                                                           "reserve_vram_gb")}}
 
     def inspect(self, body):
         with self.lock:
@@ -135,13 +140,17 @@ class AnimaEngineService:
         with self.lock:
             if self.job and self.job.snapshot()["state"] == "preparing":
                 raise ManagedEngineError("JOB_RUNNING", "설치가 진행 중입니다.")
-            updates = {k: v for k, v in body.items() if k in ("engine_root", "model_dirs", "lora_dirs", "idle_minutes", "reserve_vram_gb")}
+            updates = {k: v for k, v in body.items()
+                       if k in ("engine_root", "model_dirs", "lora_dirs", "unet_dirs", "idle_minutes", "reserve_vram_gb")}
             current = load_settings(self.save_root)
-            if "lora_dirs" in updates and updates["lora_dirs"] != current.lora_dirs and current.engine_root:
+            # 폴더가 바뀌면 엔진을 다시 켜야 ComfyUI 가 읽는다 — 생성 중에는 막는다
+            folders = [k for k in ("lora_dirs", "unet_dirs") if k in updates and updates[k] != current.data[k]]
+            if folders and current.engine_root:
                 with REGISTRY_LOCK:
                     rt = REGISTRY.get(str(Path(current.engine_root).resolve()))
                 if rt and rt.queue_busy():
-                    raise ManagedEngineError("JOB_RUNNING", "생성이 끝난 뒤 LoRA 폴더를 변경해 주세요.")
+                    what = "LoRA" if "lora_dirs" in folders else "모델"
+                    raise ManagedEngineError("JOB_RUNNING", f"생성이 끝난 뒤 {what} 폴더를 변경해 주세요.")
             if "engine_root" in updates:
                 if not updates["engine_root"]:
                     raise ManagedEngineError("PATH_INVALID", "설치 경로를 확인해 주세요.")
@@ -150,7 +159,7 @@ class AnimaEngineService:
                         raise ManagedEngineError("PATH_INVALID", "설치 완료 후 엔진 루트를 변경할 수 없습니다.")
                     updates["engine_root"] = str(validate_root(updates["engine_root"], forbidden=self.forbidden()))
             settings = save_settings(self.save_root, updates)
-            if "lora_dirs" in updates:
+            if "lora_dirs" in updates or "unet_dirs" in updates:
                 receipt = quick_receipt(settings)
                 if receipt:
                     write_model_config(settings, {k: v["path"] for k, v in receipt["models"].items()})

@@ -2273,10 +2273,12 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
 // 백엔드는 /api/anima-engine/*(docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8). 엔진을 고르거나 설치가 끝나면
 // 기존 연결 확인(probe_api)을 다시 태운다 — 새 연결 경로를 만들지 않는다.
 let animaSetupPanel = null;
-import('./js/features/animaSetupPanel.mjs?v=20260927-noengine')
+import('./js/features/animaSetupPanel.mjs?v=20260928-models')
   .then(({createAnimaSetupPanel}) => {
     // 엔진을 골랐거나 설치가 끝났다 — 메인 모드 표시(ANIMA) · 연결 · 옵션을 새 엔진으로(onComfyEngineChanged)
-    animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine)});
+    animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine),
+      // ANIMA 모델 폴더가 바뀌었다 — Model 칸 목록을 새로 받는다(sync = 활성 모드 옵션 새로 고침 + 스키마 재전송)
+      onModelsChanged: () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('sync'); }});
     animaSetupPanel.init();
   })
   .catch(error => {
@@ -5439,16 +5441,18 @@ function setSelectToBypass(el) {
 
 function applyComfyUiFreeParamLock(mode = currentMode || modeSelect?.value || '') {
   const locked = isComfyUiFreeWorkflowActive(mode);
-  // 관리형 ANIMA 엔진은 모델 · 샘플러 · 스케줄러가 ANIMA 스펙 고정이다(서버가 고정값 하나씩만 준다) — 잠가서 보인다
+  // 관리형 ANIMA 엔진은 샘플러 · 스케줄러가 SPD 그래프 고정이다(서버가 하나씩만 준다) — 잠가서 보인다.
+  // 모델은 고를 수 있다(사용자 지정 09-28): ANIMA 탭의 모델 폴더에 든 ANIMA 모델 목록을 서버가 준다.
   const specFixed = isAnimaManagedMode();
   [paramEls.model, paramEls.sampler, paramEls.scheduler].forEach(el => {
     if (!el) return;
+    const fixed = specFixed && el !== paramEls.model;
     if (locked) setSelectToBypass(el);
-    el.disabled = locked || specFixed;
+    el.disabled = locked || fixed;
     el.classList.toggle('param-bypass-lock', locked);
     el.dataset.customSelectLabel = locked ? COMFYUI_FREE_BYPASS_TEXT : '';
     el.dataset.customSelectTitle = locked ? 'Controlled by the Bypass custom workflow'
-      : (specFixed ? '관리형 ANIMA 엔진 — ANIMA 스펙 고정' : '');
+      : (fixed ? '관리형 ANIMA 엔진 — ANIMA 스펙 고정' : '');
   });
 
   [paramEls.steps, paramEls.cfg_scale, paramEls.seed].forEach(el => {

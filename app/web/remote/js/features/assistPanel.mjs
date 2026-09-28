@@ -782,12 +782,17 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     const mine = ++askSeq;
     busy = true;
     paintBusy();
+    // 답을 기다리는 동안 결과 칸을 잠근다 — 그 사이 고친 글을 도착한 답이 덮었다(Codex 리뷰 09-28 F1). 답이 오면 다시 그린다
+    lockEditors(true);
     const payload = {
       text, rating: prev.rating || rating,
       followup: {
         main: mainPrompt(),
         characters: (prev.prompt?.characters || []).map(c => ({ ...c, prompt: oneLine(c.prompt) })),
         exclude: prev.pool?.exclude || '', persons: prev.pool?.persons || '',
+        // 메인 끝의 문장을 가를 힌트(F4) · 고른 캐릭터(메인에 적혀도 뺄 수 없다 — WebUI · 직접 모드, F3)
+        sentence: prev.followup?.sentence || prev.refine?.sentence || prev.direct_info?.sentence || '',
+        names: (prev.names || []).filter(n => n && n.tag && n.chosen !== false).map(n => String(n.tag)),
       },
     };
     const asked = { rating: payload.rating, personsMode, girls, boys, choices: [...choices], notNames: [...notNames],
@@ -799,6 +804,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (mine !== askSeq) return;
     busy = false;
     if (!data || !data.ok) {
+      lockEditors(false);
       paintBusy();
       toast((data && data.error) || '고치지 못했습니다', 'error');
       return;
@@ -1013,7 +1019,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   function render() {
     if (!body) return;
     const r = result;
-    if (!r) { body.innerHTML = ''; fit(); return; }
+    // 결과가 없어도 단추를 다시 칠한다 — [새로] 뒤에 '고치기' 가 남았다(Codex 리뷰 09-28 F7)
+    if (!r) { body.innerHTML = ''; paintFollow(); fit(); return; }
     let html;
     if (r.task === 'scene') {
       html = sceneHtml(r);
@@ -1062,6 +1069,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       });
       if (typeof bindTagAssist === 'function') bindTagAssist(box);
     });
+  }
+
+  /** 결과 칸(메인 · 캐릭터) 잠금 — 이어 고치기가 답을 기다리는 동안 */
+  function lockEditors(on) {
+    body?.querySelectorAll('[data-as-edit]').forEach(box => { box.readOnly = !!on; });
   }
 
   function autoSize(box) {

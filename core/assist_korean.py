@@ -1198,11 +1198,11 @@ def partition_of(girls: int, boys: int, solo: bool) -> str:
 def says_solo(text: str, toks: Iterable[tuple[str, str]], words: Iterable[str]) -> bool:
     """원문이 '혼자' · '홀로' 를 **낱말로** 적었나 — solo 는 이때만 싣는다(사용자 지정 09-28).
     Kiwi 는 홀로라이브 · 홀로그램을 홀로(MAG) + 라이브 · 그램 으로 쪼갠다 — 토막만 보면 홀로라이브가 '홀로' 가 된다.
-    낱말 = 원문에서 뒤에 한글이 안 붙었거나(홀로 서 있는) 바로 뒤 토막이 조사 · 어미 · 서술격 조사다(혼자서 · 혼자만의 ·
-    혼자라서)."""
+    낱말 = 원문에서 앞뒤에 한글이 안 붙었거나(홀로 서 있는) 바로 뒤 토막이 조사 · 어미 · 서술격 조사다(혼자서 · 혼자만의 ·
+    혼자라서 — Kiwi 가 혼자를 따로 낸 토막이라야). 앞도 본다: 약혼자 의 '혼자' 가 solo 가 됐다(Codex 리뷰 09-28 F6)."""
     words = [w for w in words if w]
     source = clean_text(text)
-    if any(re.search(re.escape(w) + r"(?![가-힣])", source) for w in words):
+    if any(re.search(r"(?<![가-힣])" + re.escape(w) + r"(?![가-힣])", source) for w in words):
         return True
     toks = list(toks)
     return any(form in words and i + 1 < len(toks) and toks[i + 1][1].startswith(("J", "E", "VCP"))

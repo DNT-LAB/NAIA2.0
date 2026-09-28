@@ -34,6 +34,8 @@ MAX_VIRTUAL_CHARACTERS = 6
 MAX_FOLLOWUP_MAIN = 4000      # 이어 고치기가 받는 메인 프롬프트 글자 수 상한
 # 직접 모드(_direct)가 모델 태그에서 가려내는 것 — 인원 태그(인원 칸이 정한다) · 품질 · 등급 태그(싣지 않는다)
 _PEOPLE_TAG = re.compile(r"\d+\+?(?:girl|boy|other)s?|multiple (?:girls|boys|others)|solo|no humans")
+# 괄호가 든 사전 이름 꼴(nahida (genshin impact)) — 이어 고치기가 뺄 수 있는 괄호 조각은 이것뿐(가중치 (x) · (x:1.2) 는 아니다)
+_QUALIFIED_TAG = re.compile(r"[^(){}\[\]:]+ \([^(){}\[\]:]+\)")
 _QUALITY_TAGS = frozenset({"masterpiece", "best quality", "high quality", "amazing quality", "very aesthetic",
                            "absurdres", "highres", "nsfw", "sfw", "safe", "explicit", "questionable", "sensitive",
                            "general", "rating:general", "rating:sensitive", "rating:questionable", "rating:explicit"})
@@ -386,8 +388,14 @@ def _parse_followup(raw: Any) -> dict[str, Any] | None:
             isinstance(c, dict) and isinstance(c.get("prompt", ""), str) and len(c.get("prompt") or "") <= 600
             for c in chars):
         raise AssistError("캐릭터 프롬프트가 잘못됐습니다.")
+    names = raw.get("names") or []
+    if not isinstance(names, list) or len(names) > MAX_NAME_CHOICES * 2 or not all(
+            isinstance(n, str) and len(n) <= 120 for n in names):
+        raise AssistError("이름 목록이 잘못됐습니다.")
+    # sentence = 받은 결과의 문장(메인 끝을 가를 힌트) · names = 고른 캐릭터 태그(메인에 적혀도 뺄 수 없다 — WebUI · 직접 모드)
     return {"main": main, "characters": [dict(c) for c in chars],
-            "exclude": str(raw.get("exclude") or "")[:1000], "persons": str(raw.get("persons") or "")[:200]}
+            "exclude": str(raw.get("exclude") or "")[:1000], "persons": str(raw.get("persons") or "")[:200],
+            "sentence": str(raw.get("sentence") or "")[:600], "names": [n.strip() for n in names if n.strip()]}
 
 
 def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -857,9 +865,11 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     - 빼기: 이전 태그 안에서만(문법) · 요청 낱말이 가리키는 태그만(사전 — 다듬기와 같은 _grounded_tags, 영문으로 적었으면
       그 이름). 시도에서 모델이 '비는 그치고 노을로' 에 우산 · 신호등까지 뺐다.
     - 더하기: 사전 이름 그대로 · 요청 낱말이 가리키는 것만 · 잡동사니 · 인원 아님 · 등급 게이트(G · S).
-    - 인원 태그 · 캐릭터 이름 · source#/target# · 가중치 문법은 건드리지 않는다. 더한 것은 메인에(캐릭터 칸은 빼기만).
+    - 인원 태그 · 캐릭터 이름 · source#/target# · 가중치 문법은 건드리지 않는다.
+    - 고칠 점이 캐릭터 이름(카나데)을 말하면 그 캐릭터 칸만 고친다 — 빼기도 더하기도. 아니면 빼기는 모든 칸, 더하기는 메인.
     - 이벤트 검색은 새 태그로 다시 판다 — 인원 · 등급 · 제외는 이전 풀 그대로."""
     from core import assist_followup as af
+    from core.assist_korean import clean_text, compact
     from core.assist_refine import mentions
     from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english
 
@@ -867,15 +877,22 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     wish = req["text"]
     layer = korean_layer(context)
     vocab = _tag_vocab(context, layer)
-    tags, sentence = af.split_main(fu["main"])
+    tags, sentence = af.split_main(fu["main"], fu["sentence"], is_tag=lambda part: bool(vocab.canonical(af.tag_key(part))))
     bags = [[t.strip() for t in re.split(r"[,\n]", str(c.get("prompt") or "")) if t.strip()] for c in fu["characters"]]
     people = {af.tag_key(t) for group in PERSON_TAGS.values() for t in group}
-    names = {af.tag_key(b[0]) for b in bags if b}
+    names = {af.tag_key(b[0]) for b in bags if b} | {af.tag_key(n) for n in fu["names"]}
+
+    def is_people(key: str) -> bool:                 # 3girls · 6+girls · no humans 도(Codex 8차 F3)
+        return key in people or bool(_PEOPLE_TAG.fullmatch(key))
 
     def editable(tag: str) -> bool:
+        """뺄 수 있는 조각 — 인원 · 캐릭터 이름(칸의 첫 태그 · 고른 캐릭터 — WebUI 는 메인에 적힌다) · source#/target# ·
+        가중치 문법의 조각은 아니다. 쉼표로 가른 '{long hair, rain}' 의 'rain}' 을 빼면 괄호가 깨졌다(Codex 8차 F2) —
+        괄호가 든 조각은 사전 이름 꼴(nahida (genshin impact))만 받는다."""
         key = af.tag_key(tag)
-        return bool(key) and key not in people and key not in names and "#" not in tag and "::" not in tag \
-            and not tag.startswith(("{", "[")) and not re.match(r"^\(.*:\s*[\d.]+\)$", tag)
+        if not key or is_people(key) or key in names or "#" in tag or "::" in tag or re.search(r"[{}\[\]]", tag):
+            return False
+        return not re.search(r"[()]", tag) or bool(_QUALIFIED_TAG.fullmatch(tag.strip()))
     removable = list(dict.fromkeys([t for t in tags if editable(t)] + [t for b in bags for t in b[1:] if editable(t)]))
     reply, info = _chat(context, af.FOLLOWUP_SYSTEM,
                         af.followup_message(tags, sentence, wish, [(b[0], b[1:]) for b in bags if b]),
@@ -901,6 +918,10 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     removed = [t for t in got.remove if pointed(t)]
     kept_back = [t for t in got.remove if t not in removed]
     gone = {af.tag_key(t) for t in removed}
+    # 고칠 점이 캐릭터 이름을 말하면 그 칸만(카나데만 머리를 짧게 — 두 칸 다 long hair 였는데 둘 다 뺐다, Codex 8차 F5)
+    said = compact(clean_text(wish))
+    target = {i for i, c in enumerate(fu["characters"])
+              if bags[i] and (key := compact(clean_text(str(c.get("ko") or "")))) and key in said}
     present = {af.tag_key(t) for t in tags + [x for b in bags for x in b]} - gone
     share = _rating_share(context, req["rating"])
     gate = RATING_GATE.get(req["rating"])
@@ -921,14 +942,21 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
             refused.append(name)
             continue
         added.append(name)
-    new_tags = [t for t in tags if af.tag_key(t) not in gone] + added
-    new_bags = [[b[0]] + [t for t in b[1:] if af.tag_key(t) not in gone] if b else [] for b in bags]
+    if target:
+        new_tags = list(tags)
+        new_bags = [([b[0]] + [t for t in b[1:] if af.tag_key(t) not in gone]
+                     + [a for a in added if af.tag_key(a) not in {af.tag_key(x) for x in b}]) if i in target else b
+                    for i, b in enumerate(bags)]
+    else:
+        new_tags = [t for t in tags if af.tag_key(t) not in gone] + added
+        new_bags = [[b[0]] + [t for t in b[1:] if af.tag_key(t) not in gone] if b else [] for b in bags]
     chars = [{**c, "prompt": ", ".join(b)} for c, b in zip(fu["characters"], new_bags)]
     out: dict[str, Any] = {
         "ok": True, "task": "scene", "rating": req["rating"], "model": info,
         "prompt": {"main": _with_sentence(", ".join(new_tags), got.sentence or sentence), "characters": chars},
         "followup": {"removed": removed, "added": added, "kept": kept_back, "refused": refused, "unknown": unknown,
-                     "sentence": got.sentence, "tags": [t for t in new_tags if af.tag_key(t) not in people]},
+                     "sentence": got.sentence, "tags": [t for t in new_tags if not is_people(af.tag_key(t))],
+                     "target": sorted(target)},
         "leftovers": [], "actions": [], "samples": [], "refine": None, "recover": None, "explain": None,
         "message": None, "pool": None,             # 풀이 없으면 None — 화면이 이전 결과의 핀을 이어 쓰지 않게
     }

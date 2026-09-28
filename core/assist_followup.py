@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from core.assist_korean import clean_text
@@ -28,8 +28,6 @@ Never add people counts (1girl, solo), quality or rating tags. Answer JSON only.
 MAX_ADD = 6
 MAX_REMOVE = 6
 MAX_SENTENCE = 260
-# 메인의 문장 = 대문자로 시작하고 낱말이 셋 이상인 조각부터 끝까지(태그는 소문자다 — 문장 안의 쉼표도 문장이다)
-_SENTENCE_START = re.compile(r"^[A-Z][^,]*\s\S+\s\S+")
 
 
 @dataclass
@@ -39,13 +37,27 @@ class Followup:
     sentence: str = ""
 
 
-def split_main(main: str) -> tuple[list[str], str]:
-    """메인 프롬프트 -> (태그들, 끝의 문장). 줄바꿈은 쉼표로 본다(결과 칸에서 고친 글)."""
-    parts = [p.strip() for p in re.split(r"[,\n]", str(main or ""))]
-    for i, part in enumerate(parts):
-        if _SENTENCE_START.match(part):
-            return [p for p in parts[:i] if p], ", ".join(p for p in parts[i:] if p)
-    return [p for p in parts if p], ""
+def split_main(main: str, sentence: str = "", is_tag: Callable[[str], bool] | None = None) -> tuple[list[str], str]:
+    """메인 프롬프트 -> (태그들, 끝의 문장). 줄바꿈은 쉼표로 본다(결과 칸에서 고친 글).
+    - sentence = 받은 결과의 문장(다듬기 · 고치기 · 직접) — 메인이 그것으로 끝나면 그대로 가른다(문장 안의 쉼표도 문장).
+    - 아니면(문장을 고쳤다) 대문자로 시작하고 두 낱말 이상 · 사전 태그가 아닌 조각부터 끝까지를 문장으로 본다 — 끝이 문장부호면
+      그 자리를, 없으면 네 낱말 이상인 자리를. 대문자 · 낱말 수만 보면 'Looking at viewer' 를 문장으로, 'Kanade smiles, …' 를
+      태그로 읽었다(Codex 리뷰 09-28 F4)."""
+    text = ", ".join(p.strip() for p in str(main or "").split("\n") if p.strip())
+    known = " ".join(str(sentence or "").split())
+    if known and text.endswith(known):
+        head = text[: -len(known)].rstrip().rstrip(",")
+        return [p.strip() for p in head.split(",") if p.strip()], known
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+
+    def starts(i: int, min_words: int) -> bool:
+        part = parts[i]
+        return bool(re.match(r"^[A-Z]", part)) and len(part.split()) >= min_words and not (is_tag and is_tag(part))
+    ends = bool(parts) and bool(re.search(r"[.!?]$", parts[-1]))
+    for i in range(len(parts)):
+        if starts(i, 2 if ends else 4):
+            return parts[:i], ", ".join(parts[i:])
+    return parts, ""
 
 
 def followup_message(tags: Iterable[str], sentence: str, wish: str,

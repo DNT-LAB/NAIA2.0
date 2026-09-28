@@ -174,6 +174,7 @@ class LlamaServerRuntime:
         self.lease_retry_seconds = 5.0         # 요청이 도는 중이라 못 내렸을 때 다시 볼 때까지
         self._unload_pending = False           # [VRAM 회수] 를 요청이 도는 중에 눌렀다 — 그 요청이 끝나면 내린다(unload)
         self._unload_timer: threading.Timer | None = None
+        self._unload_gen = 0                   # 내림 타이머 세대 — 이미 불리기 시작한 낡은 타이머가 새 유예를 무시하지 않게
         # 요청 하나가 모델을 여러 번 부른다(Assist 4~8번 — 사이에 한국어 층 · 이벤트 맵) — 마지막 부름 뒤 이만큼 조용하면 내린다
         self.unload_grace_seconds = 3.0
 
@@ -436,13 +437,18 @@ class LlamaServerRuntime:
         with self._proc_lock:
             if self._unload_timer is not None:
                 self._unload_timer.cancel()
-            timer = threading.Timer(self.unload_grace_seconds, self._unload_if_quiet)
+            self._unload_gen += 1
+            timer = threading.Timer(self.unload_grace_seconds, self._unload_if_quiet, args=(self._unload_gen,))
             timer.daemon = True
             self._unload_timer = timer
             timer.start()
 
-    def _unload_if_quiet(self) -> None:
+    def _unload_if_quiet(self, gen: int) -> None:
+        """cancel() 은 이미 불리기 시작한 타이머를 못 멈춘다 — 그 콜백이 락을 기다리는 사이 다음 부름이 끝나 새로 쟀으면
+        낡은 쪽은 아무것도 안 한다(Codex 10차 F1: 마지막 부름 뒤 3초가 지나기 전에 내렸다)."""
         with self._proc_lock:
+            if gen != self._unload_gen:
+                return
             self._unload_timer = None
         if self._unload_pending:
             self.unload()

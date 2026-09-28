@@ -1110,7 +1110,8 @@ class KoreanLayer:
         # 한 글자 성별 꼬리(~녀 · ~남)의 합성어 — 세 글자 이상만(테토녀 · 에겐녀 · 거유녀 · 초식남, 09-28 사용자 예시가 인원
         # 1girl 1boy 로 셌다). Kiwi 가 통째로 내기도(에겐녀) 쪼개기도(안경+녀 · 테+토+녀 · 거+유녀) 해서 토막 말고 원문 어절에서
         # 조사를 떼고 본다. 두 글자(남녀 · 자녀 · 강남)는 보지 않는다 · 이미 사람으로 센 토막이 든 어절(미소녀 의 소녀)은 건너뛴다
-        counted = seen | {compact(clean_text(form)) for form, _g in named}
+        names_c = {compact(clean_text(form)) for form, _g in named}
+        counted = seen | names_c
         words = re.findall(r"[가-힣0-9]+", analysis.source_text or "")
         for w_i, word in enumerate(words):
             base = next((word[:-len(p)] for p in self._PERSON_PARTICLES
@@ -1119,11 +1120,19 @@ class KoreanLayer:
                 continue
             if any(c and c in base for c in counted):
                 continue
-            gender = self._gender_suffixes[base[-1]]
-            # 바로 뒤 어절의 수(테토녀 둘이 · 안경녀 세 명) — 토막 길의 _count_near 와 같은 몫
+            # 바로 뒤가 고른 캐릭터 이름이면 그 이름을 꾸미는 말이다 — 이미 이름으로 셌다(테토녀 강지가 · Codex 10차 F3)
             nxt = words[w_i + 1] if w_i + 1 < len(words) else ""
             nxt = next((nxt[:-len(p)] for p in self._PERSON_PARTICLES if nxt.endswith(p) and len(nxt) > len(p)), nxt)
-            n = self._numerals.get(nxt) or (int(nxt) if nxt.isdigit() else 1)
+            if nxt and nxt in names_c:
+                continue
+            # 꼬리가 명사로 끝날 때만 사람이다 — 동사의 명사형(피어남 = 피어나/VV + ᆷ/EF · 문장부호가 붙으면 ETN)은 아니다
+            # (Codex 10차 F5). 테토녀 · 초식+남 · 안경+녀 는 NNG 로 끝난다. Kiwi 가 없으면(토막 없음) 그대로
+            wtoks = self.raw_tokens(base)
+            if wtoks and not wtoks[-1][1].startswith(("NN", "XSN")):
+                continue
+            gender = self._gender_suffixes[base[-1]]
+            # 앞뒤 어절의 수(두 안경녀가 · 두 명의 안경녀 · 테토녀 둘이 · 안경녀 세 명) — 토막 길의 _count_near 와 같은 몫
+            n = self._count_near_words(words, w_i) or 1
             if gender == "girl":
                 pc.girls += n
             else:
@@ -1175,6 +1184,29 @@ class KoreanLayer:
         rest = span[span.rfind(key) + len(key):]
         return not rest or rest in self._numerals or re.fullmatch(r"\d*명|\d+", rest) is not None \
             or (rest.endswith("명") and rest[:-1] in self._numerals)
+
+    _COUNT_WORD = re.compile(r"(\d+)(?:명|사람)?(?:의|이|가)?")
+
+    def _count_near_words(self, words: list[str], i: int) -> int | None:
+        """어절 i 의 앞(두 · 두 명의 · 2명의) 또는 뒤(둘이 · 세 명 · 3명) 수 — 꼬리 어절 세기용(Codex 10차 F4: 앞의 수를 못 봤다)."""
+        def number(word: str) -> int | None:
+            stem = next((word[:-len(p)] for p in self._PERSON_PARTICLES if word.endswith(p) and len(word) > len(p)), word)
+            for form in (word, stem):
+                if form in self._numerals:
+                    return self._numerals[form]
+            m = self._COUNT_WORD.fullmatch(word)
+            return int(m.group(1)) if m else None
+
+        if i >= 1:
+            prev = words[i - 1]
+            if prev in ("명의", "사람의") and i >= 2:
+                prev = words[i - 2]
+            n = number(prev)
+            if n:
+                return n
+        if i + 1 < len(words):
+            return number(words[i + 1])
+        return None
 
     def _count_near(self, toks: list[tuple[str, str]], i: int) -> int | None:
         """앞쪽(두 소녀·세 명의 소녀·2명의 소녀) 또는 뒤쪽(소녀 둘·소녀 두 명·소녀들) 수."""

@@ -284,23 +284,22 @@ def main(argv: list[str] | None = None) -> int:
             write_json(args.input.with_name(CACHE_NAME), raw_data)          # 큐레이션 전 — 다음엔 --from-cache
     curation = load_curation(args.curation)
     data = curate(raw_data, curation)
-    write_json(args.out, data)
     c = data["counts"]
+    # 자기 검증 — 진짜 원본(전체)이면 있어야 할 낱말. **쓰기 전에** 본다: 쓰고 나서 실패하면 --force 가 멀쩡한 사전을
+    # 이미 덮은 뒤였다(Codex 10차 F2)
+    miss = [w for w, needle in EXPECT.items()
+            if not any(needle in r["en"] for r in (data["entries"].get(w) or {}).get("senses", []))]
+    if not args.limit_bytes and (miss or c["words"] < args.min_words):
+        print(f"⚠ 검증 실패: 빠진 낱말 {miss} · 고른 낱말 {c['words']} — 입력이 맞는지 보십시오. 결과 파일은 쓰지 않았습니다"
+              f"(있던 것 그대로)")
+        return 4
+    write_json(args.out, data)
     if curation:
         print(f"큐레이션: {args.curation.name} — 뺀 낱말 {c.get('curated_dropped', 0):,} · 성적 뜻 고침 "
               f"{len(curation.get('sexual') or {}):,}")
     print(f"끝: {time.time() - t:.0f}초 · 한국어 표제어 {c.get('korean_entries', 0):,} · 실은 낱말 {c['words']:,}"
           f"(성적 뜻 있는 것 {c['sexual_words']:,}) -> {args.out}")
-    # 자기 검증 — 진짜 원본(전체)이면 있어야 할 낱말
-    miss = [w for w, needle in EXPECT.items()
-            if not any(needle in r["en"] for r in (data["entries"].get(w) or {}).get("senses", []))]
-    if args.limit_bytes:
-        print("시험 실행(--limit-bytes) — 자기 검증은 건너뜁니다")
-    elif miss or c["words"] < args.min_words:
-        print(f"⚠ 검증 실패: 빠진 낱말 {miss} · 고른 낱말 {c['words']} — 입력이 맞는지 보십시오")
-        return 4
-    else:
-        print("검증 통과: 모가지 · 씹 · 따먹다 있음")
+    print("시험 실행(--limit-bytes) — 자기 검증은 건너뜁니다" if args.limit_bytes else "검증 통과: 모가지 · 씹 · 따먹다 있음")
     print("다음: 결과를 Claude 에게 알려 주세요(파일 크기 · 고른 낱말 수) — 검토 후 커밋합니다")
     return 0
 

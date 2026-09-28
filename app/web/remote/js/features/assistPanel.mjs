@@ -373,10 +373,6 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       else if (event.target.closest('[data-as-llm-setup]')) window.openAiModelSetup?.();   // API 설정 › AI 모델
     });
     body.addEventListener('click', onBodyClick);
-    body.addEventListener('mouseover', event => {        // [VRAM 회수] 말풍선의 남은 시간을 올릴 때마다 새로
-      const btn = event.target.closest?.('[data-as-vram]');
-      if (btn) setTip(btn, vramTitle());
-    });
     document.addEventListener('pointerdown', event => {
       if (!open) return;
       const t = event.target;
@@ -771,6 +767,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
 
   /** [제출](Enter) — 늘 새로 찾기. 직전 검색 기억(previous)을 보내지 않는다(사용자 지정 09-28: 이어서 질문은 그 단추로만) */
   async function ask() {
+    if (busy) return;                        // [이어서 질문] 이 도는 중의 Enter 가 고칠 점만으로 새로 찾고 그 답을 버렸다(Codex 10차 F8)
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     closePicker();
@@ -1374,7 +1371,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   /** [VRAM 회수] 말풍선 — 누르지 않으면 언제 자동으로 내리나(엔진의 임대: Assist · 첫 준비는 기한이 있고, Auto Boost 는
-   *  켜져 있는 동안 무기한). 남은 시간은 받은 때부터 여기서 센다 — 올릴 때마다 다시 적는다(mouseover). */
+   *  켜져 있는 동안 무기한). **시각**으로 적는다 — 남은 시간(9분 57초)은 앱의 말풍선이 먼저 뜨는 탓에 첫 hover 에 낡은 값이
+   *  보였다(Codex 10차 F9). 시각은 낡지 않는다(임대가 늘면 요청 끝의 refreshLlm 이 새로 적는다). */
   function vramTitle() {
     if (!llm) return 'VRAM 회수 — 올라간 AI 모델을 지금 내립니다';
     if (llm.unload_pending) return '도는 요청이 끝나면 내립니다';
@@ -1383,12 +1381,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (leases.some(v => v == null)) {
       return 'Auto Boost 가 켜져 있어 자동으로 내리지 않습니다 — 누르면 지금 내립니다(다음 Boost 가 다시 올립니다)';
     }
-    const left = Math.max(0, ...leases.map(v => Number(v) || 0)) - (Date.now() - llmAt) / 1000;
     if (!leases.length) return '자동으로 내리지 않습니다 — 누르면 지금 내립니다';
-    if (left <= 1) return '곧 자동으로 내립니다';
-    const m = Math.floor(left / 60);
-    const s = Math.floor(left % 60);
-    return `누르지 않으면 ${m ? `${m}분 ` : ''}${s}초 뒤 자동으로 내립니다`;
+    const at = new Date(llmAt + Math.max(0, ...leases.map(v => Number(v) || 0)) * 1000);
+    const hh = String(at.getHours()).padStart(2, '0');
+    const mm = String(at.getMinutes()).padStart(2, '0');
+    return `누르지 않으면 ${hh}:${mm} 에 자동으로 내립니다`;
   }
 
   /** 말풍선 글 — 이 앱은 title 을 data-naia-title 로 걷어간다(app.js adoptTitle · 비동기). mouseover 중에 title 을 적으면

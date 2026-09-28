@@ -92,18 +92,22 @@ def hints(text: str, rating: str, *, hand: dict[str, str] | None = None, tokens:
     source = clean_text(text)
     # 손 풀이는 글자 그대로 — 끝이 '-' 면 용언 줄기라 바로 뒤가 어미 · 피동 접사일 때만('들어서 박-' 이 '들어서 박물관' ·
     # '들고 박-' 이 '들고 박스' 에 걸렸다, 09-28)
+    toks = list(tokens or [])
+    nouns = {form for form, tag in toks if tag.startswith(_NOUN_TAGS)}
+    verbs = {form for form, tag in toks if tag.startswith(_VERB_TAGS)}
     out: list[tuple[str, str]] = []
     for ko, en in (hand or {}).items():
         if not ko or not en:
             continue
         stem = ko[:-1] if ko.endswith("-") else ""
-        if (stem and _verb_in_text(stem, source)) or (not stem and ko in source):
-            out.append((stem or ko, str(en)))
+        # 용언 줄기는 Kiwi 가 그 줄기를 동사로 냈을 때만 — '들고 박자를' 의 박자(명사)에 '들고 박-' 이 걸렸다(Codex 10차 F6).
+        # 토막이 없으면(Kiwi 없음) 글자 규칙만
+        if stem and _verb_in_text(stem, source) and (not toks or stem.split()[-1] in verbs):
+            out.append((stem, str(en)))
+        elif not stem and ko in source:
+            out.append((ko, str(en)))
     taken = {ko for ko, _en in out}
     sexual_ok = rating in ("q", "e")
-    toks = list(tokens or [])
-    nouns = {form for form, tag in toks if tag.startswith(_NOUN_TAGS)}
-    verbs = {form for form, tag in toks if tag.startswith(_VERB_TAGS)}
     # Kiwi 가 모르는 두 음절 속어 명사는 명사 둘로 쪼갠다(눈뽕 -> 눈 + 뽕, 09-28) — 붙은 명사 토막 둘도 그 꼴로 본다.
     # '보지 않는' 은 보(동사) + 지(어미)라 아니다
     pairs = {a + b for (a, ta), (b, tb) in zip(toks, toks[1:])

@@ -803,6 +803,9 @@ def _direct_dictionary(context: Any, layer: Any, vocab: Any, ka: Any, rating: st
         index = _lemma_index(context, layer)
         raw = _ensure_kr_raw(context) or {}
         share = _rating_share(context, rating)
+        if rating in RATING_GATE and share is None:
+            # 이벤트 맵이 없어 등급을 못 잰다 — G · S 에 성인 태그(섹스 = sex)를 알려 줄 수 있어 줄을 뺀다(Codex 10차 F7)
+            return []
 
         def posts(tag: str) -> int:
             try:

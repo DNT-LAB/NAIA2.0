@@ -577,28 +577,37 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
             place(tag)
             log.append(f"extra:{tag}")
     exclude: list[str] = []
+    excluded_for: dict[int, set[str]] = {}       # 인물 번호 -> 그 인물 칸에서 뺄 것(0 = 장면 전체 = 모든 인물)
+
+    def add_exclude(tag: str, who: Any) -> None:
+        if tag not in exclude:
+            exclude.append(tag)
+        excluded_for.setdefault(int(who or 0), set()).add(tag)
+
     for item in route.get("exclude") or []:
         for tag in item_tags(item, "exclude"):
-            if tag not in exclude:
-                exclude.append(tag)
+            add_exclude(tag, item.get("who"))
     for item in route.get("include") or []:                         # 'no towel' -> 제외
         m = _NEGATION.match(str(item.get("en") or "").strip().lower())
         if m:
             for tag in resolve_english(m.group(1) or m.group(2), vocab):
-                if tag not in exclude:
-                    exclude.append(tag)
+                add_exclude(tag, item.get("who"))
     # 영문 제외(hat 빼고) — 모델이 제외 칸에 안 적었거나 ko 를 옮겨 적어 버려졌어도 뺀다(맵 이름이 있으면 그 이름으로)
     for part in english.exclude:
-        tag = exact_english(en_key(part), vocab, verb=False) or part
-        if tag not in exclude:
-            exclude.append(tag)
+        add_exclude(exact_english(en_key(part), vocab, verb=False) or part, 0)
     # 싣겠다고 적은 영문은 제외에서 푼다 — 모델이 제외 칸에 잘못 옮겨 적은 것(빼라는 말은 없었다)
     wanted = {en_key(p) for p in english.keep}
     exclude[:] = [t for t in exclude if en_key(t) not in wanted]
     for tier in (t1, t2, t3):
         tier[:] = [t for t in tier if t not in exclude]
-    for ch in characters:                                           # 인물 칸에도 — 뺀 것이 캐릭터 프롬프트로 새지 않게(R1)
-        ch.attrs[:] = [t for t in ch.attrs if t not in exclude]
+    # 인물 칸에도 — 뺀 것이 캐릭터 프롬프트로 새지 않게(Codex 재리뷰 R1). 단 그 인물을 가리킨 제외와 장면 전체의 제외만 —
+    # 한 인물의 제외가 다른 인물 칸까지 지웠다('카나데는 웃고 나히다는 웃지 않는' 의 카나데 smile, Codex 3차 N1)
+    live = set(exclude)
+    slot_of = {id(ch): who for who, ch in owners.items()}
+    for ch in characters:
+        who = slot_of.get(id(ch), 0)
+        drop = (excluded_for.get(0, set()) | (excluded_for.get(who, set()) if who else set())) & live
+        ch.attrs[:] = [t for t in ch.attrs if t not in drop]
 
     # 인물 사이 동작: 둘 이상 + Kiwi 가 방향을 잡았을 때. 동작은 사전 구 > 모델 동작.
     relations: list[tuple[str, str, str]] = []
@@ -608,13 +617,14 @@ def merge(route: dict[str, Any], ka: KoreanAnalysis, vocab: TagVocab, *, text: s
         dst = next((c for c in characters if c.ko == roles[1]), None)
         # 동사에서 나온 구만(공주 안기·볼 꼬집기·안기) — 명사 복합어(비치볼)는 동작이 아니다.
         # 자세·흔한 것(sleeping·smile)은 한 사람의 상태라 관계로 쓰지 않는다(안겨서 자는 -> sleeping 관계, 실측).
+        # 뺀 동작은 관계로도 싣지 않는다 — 층에서 지워도 관계가 다시 골라 source# · target# 으로 붙었다(Codex 3차 R1 잔존)
         def interaction(tags: Iterable[str]) -> str | None:
-            tags = [t for t in tags if t not in generic and t not in poses]
+            tags = [t for t in tags if t not in generic and t not in poses and t not in live]
             return next((t for t in tags if vocab.role(t) == "event_core"), None) or next(iter(tags), None)
 
         act = interaction(ka.verb_phrases)
         if act is None:
-            act = next((t for t in ka.verb_tags if t not in generic and t not in poses
+            act = next((t for t in ka.verb_tags if t not in generic and t not in poses and t not in live
                         and vocab.role(t) == "event_core"), None)
         if act is None:
             for item in route.get("actions") or []:

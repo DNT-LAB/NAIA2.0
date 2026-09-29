@@ -736,6 +736,27 @@ def swap_for_rating(merged: Merged, rating: str) -> None:
                                            for t in merged.exclude))
 
 
+# 단부루의 가족 태그는 **그림 속 인물들이 서로 그 사이**라는 뜻이다 — 누나 · 언니는 호칭(연상 여성)이지 관계가 아니다. 경로 모델이
+# 누나/언니를 older sister 로 옮겨 여성 한 명에 sisters 가 붙었다(09-29 E4B 창작 문장, 사용자 동의). 요청에 그 사이를 말하는
+# 낱말이 있거나 태그를 영문으로 적었을 때만 둔다
+FAMILY_TAGS = {"sisters": ("자매", "쌍둥이"), "brothers": ("형제", "쌍둥이"), "siblings": ("남매", "형제", "자매", "쌍둥이"),
+               "brother and sister": ("남매",), "twins": ("쌍둥이",)}
+
+
+def unstated_family(tag: str, text: str) -> bool:
+    """요청이 말하지 않은 가족 태그인가."""
+    words = FAMILY_TAGS.get(tag)
+    if words is None:
+        return False
+    said = compact(clean_text(text))
+    return not any(w in said for w in words) and tag not in str(text or "").lower()
+
+
+def drop_unstated_family(merged: Merged, text: str) -> None:
+    """모든 칸(층 · 인물 속성 · 관계)에서 요청이 말하지 않은 가족 태그를 뺀다."""
+    drop_tags(merged, [t for t in FAMILY_TAGS if unstated_family(t, text)])
+
+
 # ── 조립 ───────────────────────────────────────────────────────────────────
 
 PERSON_TAGS = {

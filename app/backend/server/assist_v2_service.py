@@ -854,7 +854,8 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
     from core.assist_english import people_count
     from core.assist_korean import partition_of
     from core.assist_refine import display_name
-    from core.assist_v2 import PERSON_TAGS, Character, _junk_tag, _with_sentence, exact_english, rating_name
+    from core.assist_v2 import (PERSON_TAGS, Character, _junk_tag, _with_sentence, exact_english, rating_name,
+                                unstated_family)
 
     layer = korean_layer(context)
     vocab = _tag_vocab(context, layer)
@@ -909,7 +910,7 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
                 model_people.append(tag)                  # 인원 태그(1girl · solo) — 아래에서 인원 칸이 정한다
                 continue
             name = exact_english(tag, vocab)
-            if _junk_tag(name or tag) or tag in _QUALITY_TAGS:
+            if _junk_tag(name or tag) or tag in _QUALITY_TAGS or unstated_family(name or tag, req["text"]):
                 dropped.append(tag)
                 continue
             if not name and tag not in {c.tag for c in chars}:
@@ -945,7 +946,8 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     from core import assist_followup as af
     from core.assist_korean import clean_text, compact
     from core.assist_refine import mentions
-    from core.assist_v2 import PERSON_TAGS, _junk_tag, _with_sentence, exact_english, rating_name, rating_sources
+    from core.assist_v2 import (PERSON_TAGS, _junk_tag, _with_sentence, exact_english, rating_name, rating_sources,
+                                unstated_family)
 
     fu = req["followup"]
     wish = req["text"]
@@ -1030,6 +1032,9 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
         name = rating_name(name, req["rating"])      # 고른 등급의 이름으로 먼저 — 있는지 · 더했는지도 그 이름으로(Codex 11차 R8)
         if af.tag_key(name) in present or name in added:
             continue
+        if unstated_family(name, wish):
+            refused.append(name)                      # 자매라고 안 했다(09-29)
+            continue
         s = share(name) if share and gate is not None else None
         # 더하기는 요청이 가리키거나 모델이 다시 쓴 제 문장에서 말한 것(자기 일관성 — '웃는 표정' 의 smile 은 사전 키워드가
         # '웃음' 이라 원형이 어긋난다). 빼기보다 느슨하다 — 넘치는 쪽은 빼기였다(시도 8회 중 4회)
@@ -1083,7 +1088,7 @@ def _fallback_route(ka: Any) -> dict[str, Any]:
 
 def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     from core.assist_english import en_key
-    from core.assist_v2 import GUIDE, drop_tags, make_recap, merge, off_rating, swap_for_rating
+    from core.assist_v2 import GUIDE, drop_tags, drop_unstated_family, make_recap, merge, off_rating, swap_for_rating
 
     started = time.perf_counter()
     try:
@@ -1149,6 +1154,7 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
                            if req["refine"] and merged.task == "scene" else (None, {}))
     _add_character_features(context, merged)
     swap_for_rating(merged, req["rating"])      # Q · E 의 tied up (nonsexual) -> restrained(사용자 제보 09-28)
+    drop_unstated_family(merged, req["text"])   # 누나 · 언니 -> sisters(요청이 자매라고 안 했다, 09-29)
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 인물 = 고른 캐릭터(후보 전체 — 화면이 목록을 그린다) + 받지 못한 선택(chosen=false — 화면이 그 선택을 푼다)
@@ -1793,7 +1799,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
     from core import assist_compose as ac
     from core.assist_english import en_key, english_only, english_parts
     from core.assist_korean import compact
-    from core.assist_v2 import PERSON_TAGS, off_rating, rating_name, rating_sources
+    from core.assist_v2 import PERSON_TAGS, off_rating, rating_name, rating_sources, unstated_family
 
     layer = korean_layer(context)
     t0 = time.perf_counter()
@@ -1909,7 +1915,7 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         keys = unwanted if lines is None else {en_key(p) for k in lines if k in english for p in english[k].exclude}
         return any(en_key(n) in keys for n in rating_sources(tag, req["rating"]))
     for d in subs:
-        d.tags = [t for t in d.tags if t not in dropped and not unwanted_tag(t)]
+        d.tags = [t for t in d.tags if t not in dropped and not unwanted_tag(t) and not unstated_family(t, req["text"])]
     # 관계 동작도 영문으로 뺀 것이면 뺀다 — 메인과 source# · target# 에 남았다(13차 R3). 메인 줄과 당사자 두 줄의 제외만 —
     # 제3자 줄(c3 미쿠 - princess carry 빼고)이 카나데 -> 나히다 관계까지 지웠다(14차 F1)
     if relation is not None and (relation.action in dropped

@@ -243,7 +243,25 @@ def person_words(rules: dict) -> frozenset[str]:
 # 뺀 것 · 부정된 것 — 명사 뒤 (조사 +) 없이 · 없는 · 빼고 · 말고 · 제외 · 금지 · 안/못 + 용언 · 용언 + 지 않/못/말. 되살리면
 # 반대 뜻이 붙었다(말풍선 없이 -> thought bubble · 속옷 없이 -> underwear · 팬티는 안 보이게 -> panty peek — 09-29 E4B 창작
 # 문장). 모자를 쓰지 않은 의 쓰다는 가벼운 용언이라 덩어리가 안 되고 모자만 남는다. 제외는 경로가 맡는다
-_NEGATED_AFTER = re.compile(r"(?:은|는|을|를|이|가|도|만|의)?\s*(?:빼|없|말고|제외|금지|(?:안|못)\s|\S*지\s*(?:않|못|말))")
+_NEGATED_HEADS = ("빼", "빼놓", "제외", "금지")
+
+
+def _negated_after(per: list[list[tuple[str, str, int, int]]], i: int, end: int) -> bool:
+    """명사(어절 i, end 에서 끝) 뒤가 부정 · 제외인가 — 형태소로 본다(조사 · 기호는 건넌다): 없이 · 없는 · 빼고 · 말고 · 제외 ·
+    금지 · 부사 안/못 · 용언 + 지 않/못/말. 글자로 보니 '말풍선 안 글자'(안 = 안쪽) · '책장 빼곡한' 의 빼 에 걸렸다(Codex 16차 F6)."""
+    toks = [(f, t) for f, t, s, _e in per[i] if s >= end]
+    toks += [(f, t) for j in (i + 1, i + 2) if j < len(per) for f, t, _s, _e in per[j]]
+    toks = [(f, t) for f, t in toks if not t.startswith(("J", "S"))]
+    if not toks:
+        return False
+    form, tag = toks[0]
+    if form.startswith("없") and tag.startswith(("VA", "VV", "MAG")):
+        return True
+    if (form in _NEGATED_HEADS and tag.startswith(("VV", "NNG"))) or (form == "말" and tag.startswith(("VV", "VX"))):
+        return True
+    if form in ("안", "못") and tag == "MAG":
+        return True
+    return tag.startswith(("VV", "VA")) and len(toks) >= 3 and toks[1][0] == "지" and toks[2][0] in ("않", "못하", "말")
 
 
 def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: set[str],
@@ -331,7 +349,12 @@ def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: 
             continue            # '-게' 로 끝난 채 멈췄다 = 꾸미는 서술어(뜬)는 이미 태그가 설명했다 — 동그랗게만 따로 찾으면
             #                     눈을 크게 뜬(unusually open eyes) 옆에 solid circle pupils 가 붙었다(라이브 09-26)
         lemmas = [k for j in range(lo, hi + 1) for k in (open_key(f, t) for f, t, _s, _e in per[j]) if k]
-        near = [(f, t) for j in range(max(0, lo - 1), hi + 1) for f, t, _s, _e in per[j]]
+        near = [(f, t) for j in range(lo, hi + 1) for f, t, _s, _e in per[j]]
+        # 바로 앞 어절은 부사 안/못 하나일 때만 이 서술의 부정이다 — '웃지않고 찡그리는' 의 앞 절 부정이 찡그리는 까지
+        # 버렸다(Codex 16차 F7)
+        before = [(f, t) for f, t, _s, _e in per[lo - 1]] if lo >= 1 and lo - 1 not in taken - set(range(lo, hi + 1)) else []
+        if len(before) == 1 and before[0][1] == "MAG" and before[0][0] in ("안", "못"):
+            near = before + near
         if any(t == "MAG" and f in ("안", "못") for f, t in near) or any(
                 f == "지" and t.startswith("EC") and k + 1 < len(near) and near[k + 1][0] in ("않", "못하", "말")
                 for k, (f, t) in enumerate(near)):
@@ -345,7 +368,7 @@ def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: 
                 continue        # 한 음절 명사만 — 뜻이 여럿이다(비 오는 날 -> 칼날 -> scabbard, 라이브 09-26). 고르기의
                 #                 요청 명사(uncovered_units)와 같은 규칙
             surface = text[s:e]
-            if _NEGATED_AFTER.match(text, e):
+            if _negated_after(per, i, e):
                 continue        # 말풍선 없이 · 속옷 없이 · 팬티는 안 보이게 — 뺀 것(09-29)
             units.append(Unit(surface, keys, "noun", s, e, person=_whole(surface) in people))
     units.sort(key=lambda u: u.start)

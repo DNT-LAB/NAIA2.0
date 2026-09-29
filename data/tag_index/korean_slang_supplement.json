@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "2026-09-29-v1",
+  "version": "2026-09-29-v2",
   "kind": "korean_slang_supplement",
   "semantic_certified": false,
   "source": {
     "curated_by": "hand",
-    "note": "NAIA 사용자가 쓰는 속어 중 태그 사전 키워드에 없던 것. E4B 창작 문장 78개 시험에서 Assist 되살리기가 모델의 영어 풀이로 잘못 읽었다(검스 -> weapon · 발코키 -> stockings). 이미 다른 태그의 키워드인 말(쩍벌 · 안싸)은 넣지 않았다 — 불러올 때도 겹치면 건너뛴다.",
+    "note": "NAIA 사용자가 쓰는 속어 중 태그 사전 키워드에 없던 것. E4B 창작 문장 78개 시험에서 Assist 되살리기가 모델의 영어 풀이로 잘못 읽었다(검스 -> weapon · 발코키 -> stockings). 이미 다른 태그의 키워드인 말(쩍벌 · 안싸)은 넣지 않았다 — 불러올 때도 겹치면 건너뛴다. 파김치(-> tired)는 뺐다 — 음식(파김치를 먹는)이기도 하다(Codex 16차 F9). '파김치가 되다' 의 비유는 모델이 문맥으로 푼다.",
     "kiwi_nouns": "사전 키워드로는 이미 있지만 Kiwi 가 쪼개는 속어(뒤치기 = 뒤치 + 기 · 정상위 = 정상 + 위 · 입싸 = 입 + 싸) — 한국어 층이 명사로 읽게만 한다(별칭은 더하지 않는다)"
   },
   "translations": {
@@ -111,17 +111,6 @@
           "basis": [
             "hand:community-slang-2026-09-29",
             "펠라치오 속어"
-          ]
-        }
-      ]
-    },
-    "tired": {
-      "aliases": [
-        {
-          "text": "파김치",
-          "basis": [
-            "hand:community-slang-2026-09-29",
-            "파김치가 되다 = 녹초"
           ]
         }
       ]

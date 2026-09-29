@@ -749,7 +749,8 @@ def unstated_family(tag: str, text: str) -> bool:
     if words is None:
         return False
     said = compact(clean_text(text))
-    return not any(w in said for w in words) and tag not in str(text or "").lower()
+    typed = re.search(rf"(?<![a-z]){re.escape(tag)}(?![a-z])", str(text or "").lower())    # LittleTwinStars 의 twins 는 아니다
+    return not any(w in said for w in words) and not typed
 
 
 def drop_unstated_family(merged: Merged, text: str) -> None:

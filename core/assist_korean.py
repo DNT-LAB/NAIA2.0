@@ -1090,10 +1090,11 @@ class KoreanLayer:
         last_group = -9
         # 묶음이 있으면 그 구성원 낱말은 따로 세지 않는다(커플 … 남친은 래쉬가드 여친은 원피스 — 2g2b 로 셌다, 09-29)
         members = {w for f, _t in toks if f in self._groups for w in self._GROUP_MEMBERS.get(f, ())}
-        seen |= members
         for i, (form, tag) in enumerate(toks):
             if tag not in NOUN_TAGS or form in seen or form in phrase_nouns or i in merged:
                 continue
+            if form in members and not any(f in self._OTHER_WORDS for f, _t in toks[max(0, i - 2):i]):
+                continue                               # 묶음의 구성원 — '또 다른 남자친구' 는 다른 사람이다(Codex 16차 F3)
             if any(compact(form) in name for name, _g in named):
                 continue                               # 고른 캐릭터 이름의 토막(하츠네 미쿠의 미쿠)
             nxt = toks[i + 1] if i + 1 < len(toks) else ("", "")
@@ -1119,7 +1120,7 @@ class KoreanLayer:
             gender = self._person_gender(form)         # 사람 · 친구(unknown) — 캐릭터 이름이기도 하면 사용자가 고른다(위)
             if gender is None:
                 continue                               # 자동으로 찾은 이름은 사람이 아니다(고르기 전)
-            if nxt[1] in NOUN_TAGS and self._person_gender(nxt[0]) is None and nxt[0] not in self._groups \
+            if nxt[1] in ("NNG", "NNP") and self._person_gender(nxt[0]) is None and nxt[0] not in self._groups \
                     and form + nxt[0] in (analysis.source_text or ""):
                 continue                               # 사람 낱말이 앞에 붙은 합성어(메이드카페 · 소녀상 — 09-29 E4B 시험)
             seen.add(form)
@@ -1177,8 +1178,8 @@ class KoreanLayer:
         for w_i, word in enumerate(words):
             base = next((word[:-len(p)] for p in self._PERSON_PARTICLES
                          if word.endswith(p) and len(word) - len(p) >= 2), word)
-            if base in whole or base in phrase_nouns or base in counted:
-                continue
+            if base in whole or base in phrase_nouns or base in counted or any(base in n for n in names_c):
+                continue                                  # 고른 이름 안의 사람 낱말(바니걸 아스나 — Codex 16차 F4)
             gender = ("girl" if base in self._female else "boy" if base in self._male
                       else "unknown" if base in self._neutral else None)
             if gender is None:
@@ -1260,18 +1261,20 @@ class KoreanLayer:
             m = self._COUNT_WORD.fullmatch(word)
             return int(m.group(1)) if m else None
 
+        if i + 1 < len(words):                  # 뒤의 수가 먼저 — 토막 길과 같은 차례(Codex 16차 F5: 남자 1명 바니걸 2명)
+            n = number(words[i + 1])
+            if n:
+                return n
         if i >= 1:
             prev = words[i - 1]
             if prev in ("명의", "사람의") and i >= 2:
                 prev = words[i - 2]
-            n = number(prev)
-            if n:
-                return n
-        if i + 1 < len(words):
-            return number(words[i + 1])
+            return number(prev)
         return None
 
     _AGE_UNITS = frozenset({"대", "살", "세"})
+    _COUNTERS = frozenset({"명", "분", "사람", "쌍"})
+    _OTHER_WORDS = frozenset({"다른", "다르", "또", "딴", "새"})
     # 묶음 -> 그 묶음을 이루는 사람 낱말(묶음과 함께 나오면 같은 사람들이다)
     _GROUP_MEMBERS = {"커플": ("남친", "여친", "남자친구", "여자친구"), "연인": ("남친", "여친", "남자친구", "여자친구"),
                       "부부": ("남편", "아내", "신랑", "신부", "새댁")}
@@ -1283,9 +1286,11 @@ class KoreanLayer:
         if i + 1 < len(toks):
             form, tag = toks[i + 1]
             after = toks[i + 2][0] if i + 2 < len(toks) else ""
-            if form in self._numerals and after not in self._AGE_UNITS:
+            # 뒤의 수는 둘 · 셋(수사) 또는 인원 단위(명 · 분 · 쌍)가 붙을 때만 — '두 여자 1미터 간격' 의 1 을 인원으로
+            # 읽었다(Codex 16차 F2). 나이(20대)는 아니다
+            if form in self._numerals and (tag == "NR" or after in self._COUNTERS) and after not in self._AGE_UNITS:
                 return self._numerals[form]
-            if tag == "SN" and form.isdigit() and after not in self._AGE_UNITS:
+            if tag == "SN" and form.isdigit() and after in self._COUNTERS:
                 return int(form)
         for back in range(1, 4):
             if i - back < 0:

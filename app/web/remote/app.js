@@ -10634,7 +10634,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260927-anima')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-shortcut')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,

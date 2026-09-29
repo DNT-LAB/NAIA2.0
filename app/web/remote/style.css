@@ -72,32 +72,39 @@
   --z-ui-lock: 2600;
   --z-feature-modal: 9000;
   --z-progress: 9900;
-  --z-setup-modal: 10000;
+  /* API 설정(셋업) 모달 - **항상 최상위**(사용자 지시 2026-09-29: 첫 설치 때 Search 창(10150~)이 이 모달을
+     덮었다). 떠 있는 창 더미와 그 딸린 층(보조 판 · 확대 · 자동완성 · 굴린 결과 툴팁 10240)보다 위다.
+     이보다 위는 **잠깐 뜨는 것**뿐이다 - 열린 셀렉트(목록은 body 에 붙어 이 모달 안의 셀렉트도 여기를 쓴다) ·
+     그보다 위인 끌기 유령 · 제목 툴팁 · 확인 대화상자 · 토스트. 새 층의 숫자를 이 위로 박지 마라(시험이 훑는다). */
+  --z-setup-modal: 10300;
   --z-floating-select: 10100;
   --z-floating-select-preview: 10110;
   /* title 흡수 툴팁은 모든 레이어 위에 떠야 한다 - 기능 모달(9000)/셀렉트(10100)
-     안에서 hover 했을 때 뒤로 숨던 문제(사용자 제보). 툴팁은 순간 표시라 최상단이 안전. */
-  --z-title-tooltip: 10200;
+     안에서 hover 했을 때 뒤로 숨던 문제(사용자 제보). 툴팁은 순간 표시라 최상단이 안전.
+     API 설정 모달(10300)과 그 안의 열린 셀렉트(10310)보다도 위다(09-29). */
+  --z-title-tooltip: 10320;
   /* 떠 있는 창(draggablePanel) - 사용자가 자리를 정해 두고 쓰는 층.
-     '최상위 정책'(사용자 지시 2026-09-14)이라 셋업 모달·셀렉트 위에 뜬다.
-     다만 제목 툴팁(10200)/확인 대화상자/토스트보다는 아래 - 창 안에서 hover 한
-     툴팁이 자기 창 뒤로 숨으면 안 되고, 확인을 물을 때는 확인이 앞이어야 한다.
-     여러 장이 겹치면 js 가 +1 씩 올려 앞뒤를 바꾼다(10200 을 넘지 않는다). */
+     '최상위 정책'(사용자 지시 2026-09-14)이라 기능 모달·진행 막대·셀렉트 위에 뜬다. **API 설정 모달만은
+     예외** - 그 모달이 늘 위다(사용자 지시 2026-09-29, 위 --z-setup-modal). 제목 툴팁/확인 대화상자/
+     토스트보다도 아래 - 창 안에서 hover 한 툴팁이 자기 창 뒤로 숨으면 안 되고, 확인을 물을 때는
+     확인이 앞이어야 한다. 여러 장이 겹치면 js 가 +1 씩 올려 앞뒤를 바꾼다(셋업 모달 10300 을 넘지 않는다). */
   --z-drag-panel: 10150;
-  /* 창 옆에 뜨는 확대 보기. 창 더미(10150~) 위여야 하고 제목 툴팁(10200) 아래여야 한다. */
+  /* 창 옆에 뜨는 확대 보기. 창 더미(10150~) 위여야 하고 API 설정 모달(10300) · 제목 툴팁 아래여야 한다. */
   --z-drag-panel-zoom: 10195;
   /* 창 옆 보조 판(믹스 큐). ⚠️ 확대 보기보다 **아래** - 격자 칸에 마우스를 올리면
      확대가 이 판 위로 그대로 덮여야 한다(사용자 지정 충돌 정책). */
   --z-drag-panel-side: 10193;
-  /* 창을 건너는 끌기의 유령. 확대 보기(10195)·열린 셀렉트(10196) 위, 제목 툴팁(10200)
-     아래. ⚠️ 받는 쪽 강조는 z 를 바꾸지 않는다(outline 만) - 창 순서가 흔들린다. */
-  --z-drag-ghost: 10199;
+  /* 창을 건너는 끌기의 유령. 확대 보기(10195)·열린 셀렉트(10310) 위, 제목 툴팁(10320)
+     아래 - 열린 셀렉트가 API 설정 모달 위로 오르며(09-29) 함께 올랐다. 끄는 동안만 산다.
+     ⚠️ 받는 쪽 강조는 z 를 바꾸지 않는다(outline 만) - 창 순서가 흔들린다. */
+  --z-drag-ghost: 10315;
   /* ⚠️ **열려 있는** 드롭다운은 떠 있는 창보다 위여야 한다. 리모컨(10150)에 올라간
      셀렉트의 메뉴가 기본값(10100)이면 창 뒤로 숨어 고를 수가 없다. 닫힌 메뉴는
-     그대로 두고 열린 것만 올린다. */
-  --z-floating-select-open: 10196;
+     그대로 두고 열린 것만 올린다. 목록은 body 에 붙으므로 API 설정 모달(10300) 안의
+     셀렉트를 위해 모달보다도 위다(09-29). */
+  --z-floating-select-open: 10310;
   /* ⚠️ 리모컨 판(10193)에 올라간 칸의 자동완성 팝업. 기본 팝업 층(2230)으로는
-     **판 뒤에 숨어 아예 안 보인다**. 열린 셀렉트(10196) 위, 유령(10199) 아래. */
+     **판 뒤에 숨어 아예 안 보인다**. 판 · 확대(10195) 위, API 설정 모달(10300) 아래. */
   --z-drag-panel-assist: 10197;
   --z-app-confirm: 11000;
   --z-toast: 11100;
@@ -19670,9 +19677,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
   text-align: center; padding: 10px;
 }
-/* 프리셋 hover 툴팁 — body 부착 position:fixed (목록 overflow 무시). Include/Exclude 라벨만 색 강조 */
+/* 프리셋 hover 툴팁 — body 부착 position:fixed (목록 overflow 무시). Include/Exclude 라벨만 색 강조.
+   층은 제목 툴팁과 같다 - 떠 있는 창(Filters) 위, 숫자를 박아 API 설정 모달 위로 새지 않게(09-29). */
 .tf-preset-tip {
-  position: fixed; z-index: 100000; pointer-events: none; display: none;
+  position: fixed; z-index: var(--z-title-tooltip); pointer-events: none; display: none;
   max-width: 360px; padding: 8px 11px; border-radius: 8px;
   background: var(--bg-deep); border: 1px solid var(--border-dim);
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
@@ -21576,7 +21584,8 @@ body.detached-module .mod-grid-3 {
 .grok-i2i-hint { color: var(--text-dim); font-weight: 400; font-size: 11px; margin-left: 6px; }
 /* Grok I2V 최소화 진행 pill (제거 가능) — 상단 우측, 클릭 시 모달 복원 */
 .grok-i2v-pill {
-  position: fixed; top: 10px; right: 16px; z-index: 12000;
+  /* API 설정 모달보다는 아래(항상 최상위 - 사용자 지시 2026-09-29). 눌러 되살리는 모달도 그 밑이다. */
+  position: fixed; top: 10px; right: 16px; z-index: calc(var(--z-setup-modal) - 1);
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 13px; border-radius: 999px;
   background: var(--bg-elevated); border: 1px solid rgba(96,205,178,0.7);

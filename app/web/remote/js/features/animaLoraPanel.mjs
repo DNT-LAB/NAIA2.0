@@ -1,12 +1,15 @@
 // ANIMA 전용 도구 > LoRA 창 — 관리형 엔진의 LoRA 컨테이너(사용자 지정 2026-09-27: 백엔드보다 먼저 화면).
 // "COMFYUI 전용 도구" 자리에 ANIMA 전용 도구[해상도 프리셋 · LoRA]를 두고 LoRA 는 따로 뜨는 창으로.
 // LoRA 컨테이너 규칙(사용자 지정): ① 폴더 열기로 LoRA 폴더에 접근 ② LoRA 마다 PNG 1장 칸 + 스키마 칸
-//   (스키마는 복잡한 걸 보이지 않고 트리거 워드가 있으면 알려 준다) ③ (TODO) 썸네일 채우기 — 이번엔 없다.
+//   (스키마는 복잡한 걸 보이지 않고 트리거 워드가 있으면 알려 준다) ③ 썸네일 채우기 = [히스토리](09-29 사용자 지정 -
+//   Artist Thumbnail 의 조합 저장처럼 생성 히스토리에서 고른다, 이 LoRA 를 켜고 만든 그림이 앞). PNG 칸 · 후보에 올리면
+//   크게 본다 - Artist Thumbnail(리모컨)의 확대 보기를 그대로 빌린다(zoom.show · zoom.hide, 창 옆 같은 자리 규칙).
 // 창은 Memo 처럼 Tag Search 의 뼈대(tagsearch-*)를 입는다 — 컴팩트 팝업 규약(Memo · Tagger).
 // 관리형 여부(COMFYUI 모드 + comfyui_engine 'managed' + 설치 준비됨)도 여기서 판단해 런처에 알린다(isManaged).
 // 계약 = docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §3.3 · §8.3 · §8.4:
 //   GET /loras -> {available: [{name, size, source, conflict, triggers, thumb}], chain, warnings}
 //   PUT /loras {chain: [{name, strength, enabled}]} · GET/PUT/DELETE /loras/thumb?name= · POST /loras/open-folder {name?}
+//   GET /loras/history?name= -> {candidates: [{history_id, thumb_url, zoom_url, used}]} · POST /loras/thumb/history {name, history_id}
 // 적힌 순서대로 LoraLoaderModelOnly 사슬이 된다 — 정렬하지 않는다. 끈 항목은 그래프에서만 빠지고 목록 · 순서는 남는다.
 // 서버는 생성을 큐에 넣는 순간의 체인을 요청에 박는다(여기서 바꿔도 이미 대기 중인 생성은 그대로).
 // 서버가 돌려준 체인이 정본이다 — 거절(422)되면 이유를 보이고 서버 것을 다시 읽는다(몰래 고치지 않는다).
@@ -26,6 +29,7 @@ const RECHECK_MS = 5000;             // params 에코마다 상태를 다시 묻
 const MAX_THUMB_BYTES = 10 * 1024 * 1024;
 const FLASH_MS = 1600;
 const REMOTE_FOLDER = '폴더 열기는 NAIA 를 켠 PC 에서만 할 수 있습니다.';
+const ZOOM_DELAY_MS = 140;           // 리모컨 확대 보기와 같다 - 훑고 지나갈 때 번쩍이지 않게
 const STYLE = `
 .anima-lora-popup { width: min(460px, calc(100vw - 16px)); height: min(560px, calc(100vh - 16px)); }
 .anima-lora-popup .alr-headbtn { height: 22px; padding: 0 8px; font-size: 10px; flex: none; }
@@ -115,10 +119,31 @@ const STYLE = `
 .anima-lora-popup .alr-error { font-size: 10px; color: #f07070; line-height: 1.5; }
 .anima-lora-popup .alr-link { background: none; border: 0; padding: 0; color: var(--accent-glow); cursor: pointer; font-size: inherit; }
 .anima-lora-popup .alr-link:hover { text-decoration: underline; }
+/* [히스토리] - 창 몸통을 덮는 판(머리줄은 남긴다). 창이 overflow:hidden 이라 모서리가 따라 깎인다. */
+.anima-lora-popup .alr-pick { position: absolute; left: 0; right: 0; bottom: 0; top: 33px; z-index: 2;
+  display: flex; flex-direction: column; background: rgba(15,15,23,0.99); }
+.anima-lora-popup .alr-pick[hidden] { display: none; }
+.anima-lora-popup .alr-pick-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 10px; min-width: 0;
+  font-size: 10.5px; color: var(--text-dim); border-bottom: 1px solid rgba(42,42,61,0.5); }
+.anima-lora-popup .alr-pick-head b { min-width: 0; font-family: var(--font-editor); font-size: 11.5px; font-weight: 600;
+  color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anima-lora-popup .alr-pick-head .tagsearch-x { margin-left: auto; }
+.anima-lora-popup .alr-pick-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 10px; }
+.anima-lora-popup .alr-pick-label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.4px; color: var(--text-dim);
+  margin: 0 0 6px; }
+.anima-lora-popup .alr-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px;
+  margin-bottom: 10px; }
+.anima-lora-popup .alr-pick-cell { aspect-ratio: 3 / 4; padding: 0; border: 1px solid var(--border-dim); border-radius: 6px;
+  overflow: hidden; background: rgba(0,0,0,0.28); cursor: pointer; }
+.anima-lora-popup .alr-pick-cell:hover:not(:disabled) { border-color: var(--accent); }
+.anima-lora-popup .alr-pick-cell:disabled { opacity: 0.5; cursor: default; }
+.anima-lora-popup .alr-pick-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.anima-lora-popup .alr-pick-note { padding: 18px 6px; text-align: center; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+.anima-lora-popup .alr-pick-error { font-size: 10px; color: #f07070; line-height: 1.5; margin-bottom: 6px; }
 `;
 
 export function createAnimaLoraPanel({ document, window: win = window, fetch: fetchFn = win.fetch.bind(win),
-  onOpenSetup = () => {}, onStateChange = () => {} }) {
+  onOpenSetup = () => {}, onStateChange = () => {}, zoom = {} }) {
   let mode = '';
   let managed = false;       // 관리형 + 준비됨 — 런처가 ANIMA 전용 도구를 보일지 여기로 묻는다
   let checkedAt = 0;
@@ -141,6 +166,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let windowRelease = false;   // 창(window)의 pointerup 도 듣는가 - 줄 · LoRA 창 밖에서 놓아도 끌기는 끝났다
   // 휠로 바꾸고 아직 저장하지 않은 강도 - LoRA 이름별. 행 번호로 쥐면 그사이 순서를 바꾸거나 뺀 뒤 다른 LoRA 에 들어갔다.
   const wheelEdits = new Map();
+  let picker = null;         // [히스토리] 판 - {name, rows: null(불러오는 중) | [...], error}
+  let pickerSeq = 0;         // 다시 열면 앞서 연 판의 늦은 목록을 버린다(닫았으면 picker 가 없다)
+  let zoomTarget = null;     // 크게 보려고 올린 칸
+  let zoomTimer = 0;
+  let zoomShown = false;     // 내가 띄운 확대 보기만 걷는다
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -467,13 +497,19 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         item.conflict ? '<span class="alr-badge">이름 겹침</span>'
           : at >= 0 ? `<span class="alr-inchain">체인 ${at + 1}번</span>`
             : `<button type="button" class="tagsearch-act" data-lora-addname="${esc(item.name)}"${busy || full ? ' disabled' : ''}>+ 체인</button>`,
+        item.conflict ? ''
+          : `<button type="button" class="alr-mini" data-lora-history="${esc(item.name)}" title="생성 히스토리에서 PNG 고르기"${
+            busy ? ' disabled' : ''}>히스토리</button>`,
         item.thumb && item.thumb.kind === 'naia'
           ? `<button type="button" class="alr-mini" data-lora-thumbdel="${esc(item.name)}"${busy ? ' disabled' : ''}>PNG 지우기</button>` : '',
         `<button type="button" class="alr-mini" data-lora-reveal="${esc(item.name)}" title="이 LoRA 가 든 폴더를 엽니다">폴더</button>`,
       ].join('');
+      // 그림이 있는 PNG 칸은 올리면 크게 본다 - 말풍선(title)은 그 위에 겹쳐(라이브 09-29) 안내를 크게 보기의 캡션으로 옮긴다
       return `<div class="alr-card${at >= 0 ? ' in-chain' : ''}">
-        <button type="button" class="alr-png${thumb ? ' has-img' : ''}" data-lora-png="${esc(item.name)}"
-                title="PNG 넣기 — 누르거나 끌어다 놓으세요"${busy ? ' disabled' : ''}>${png}</button>
+        <button type="button" class="alr-png${thumb ? ' has-img' : ''}" data-lora-png="${esc(item.name)}"${thumb
+          ? ` data-lora-zoom="${esc(thumbUrl(item))}" data-lora-zoom-title="${esc(shortName(item.name))}"
+                data-lora-zoom-note="눌러서 바꾸기" aria-label="PNG 바꾸기 — 누르거나 끌어다 놓으세요"`
+          : ' title="PNG 넣기 — 누르거나 끌어다 놓으세요"'}${busy ? ' disabled' : ''}>${png}</button>
         <div class="alr-card-body">
           <div class="alr-card-top"><span class="alr-card-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>
             <span class="alr-card-meta">${fmtSize(item.size)}</span></div>
@@ -499,6 +535,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         : `<div class="alr-empty">ANIMA 관리형 엔진이 준비되지 않았습니다.<br>
           <button type="button" class="alr-link" data-lora-act="setup">API 설정 › ANIMA</button> 에서 설치하고 고르세요.</div>`;
     }
+    if (zoomTarget && !popup.contains?.(zoomTarget)) hideZoom();   // 올려 둔 칸이 다시 그려져 사라졌다
     const foot = pick('.alr-foot');
     if (foot) {
       const notes = [];
@@ -508,6 +545,138 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       foot.innerHTML = notes.join('');
       foot.style.display = notes.length ? '' : 'none';
     }
+  }
+
+  // ---- [히스토리] 판 · 크게 보기 ----
+
+  function pickerHtml() {
+    const rows = picker.rows;
+    if (rows == null) return '<div class="alr-pick-note">불러오는 중…</div>';
+    const error = picker.error ? `<div class="alr-pick-error">${esc(picker.error)}</div>` : '';
+    if (!rows.length) return `${error}<div class="alr-pick-note">히스토리에 그림이 없습니다 — 생성하면 여기서 고를 수 있습니다.</div>`;
+    const cell = row => `<button type="button" class="alr-pick-cell" data-lora-pickhist="${esc(row.history_id)}"
+        data-lora-zoom="${esc(row.zoom_url || row.thumb_url)}"${busy ? ' disabled' : ''}><img src="${esc(row.thumb_url)}" alt=""
+        loading="lazy"></button>`;
+    const grid = list => `<div class="alr-pick-grid">${list.map(cell).join('')}</div>`;
+    const used = rows.filter(row => row.used);
+    const other = rows.filter(row => !row.used);
+    if (!used.length) return error + grid(other);
+    return `${error}<div class="alr-pick-label">이 LoRA 를 켜고 만든 그림</div>${grid(used)}${
+      other.length ? `<div class="alr-pick-label">다른 그림</div>${grid(other)}` : ''}`;
+  }
+
+  function paintPicker() {
+    const el = pick('.alr-pick');
+    if (!el) return;
+    if (!picker) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    const head = pick('.tagsearch-head');
+    if (head?.offsetHeight) el.style.top = `${head.offsetHeight}px`;
+    el.innerHTML = `<div class="alr-pick-head">PNG 고르기 · <b title="${esc(picker.name)}">${esc(shortName(picker.name))}</b>
+        <button type="button" class="tagsearch-x" data-lora-pickclose aria-label="닫기">&times;</button></div>
+      <div class="alr-pick-body">${pickerHtml()}</div>`;
+    el.hidden = false;
+    if (zoomTarget && !popup.contains?.(zoomTarget)) hideZoom();
+  }
+
+  async function openPicker(name) {
+    hideZoom();
+    const seq = ++pickerSeq;
+    picker = { name, rows: null, error: '' };
+    paintPicker();
+    try {
+      const data = await call('GET', `/loras/history?name=${encodeURIComponent(name)}`);
+      if (seq !== pickerSeq || !picker) return;
+      picker.rows = Array.isArray(data.candidates) ? data.candidates : [];
+    } catch (err) {
+      if (seq !== pickerSeq || !picker) return;
+      picker.rows = [];
+      picker.error = err.message;
+    }
+    paintPicker();
+  }
+
+  function closePicker() {
+    if (!picker) return;
+    picker = null;
+    hideZoom();
+    paintPicker();
+  }
+
+  // 고른 그림을 이 LoRA 의 PNG 로 - 서버가 히스토리 그림을 PNG(768 안쪽)로 줄여 PNG 넣기와 같은 자리에 쓴다.
+  // 실패하면 판에 이유를 두고 닫지 않는다(그사이 히스토리에서 밀려난 그림이면 다른 것을 고른다).
+  async function pickFromHistory(historyId) {
+    if (!picker || busy) return;
+    const { name } = picker;
+    const seq = pickerSeq;
+    busy = true;
+    error = '';
+    picker.error = '';
+    hideZoom();
+    render();
+    paintPicker();
+    try {
+      await call('POST', '/loras/thumb/history', { name, history_id: historyId });
+      busy = false;
+      if (seq === pickerSeq) closePicker();
+      flash('PNG 를 넣었습니다');
+    } catch (err) {
+      busy = false;
+      if (seq === pickerSeq && picker) {
+        picker.error = err.message;
+        paintPicker();
+      } else {
+        error = err.message;
+      }
+    }
+    await load();
+  }
+
+  function hideZoom() {
+    zoomTarget = null;
+    win.clearTimeout?.(zoomTimer);
+    if (zoomShown) {
+      zoomShown = false;
+      zoom.hide?.();
+    }
+  }
+
+  // PNG 칸 · 후보 칸에 올리면 창 옆에 크게(리모컨 확대 보기 그대로). 손가락은 hover 가 없다 - 누를 칸을 가린다.
+  function onZoomOver(event) {
+    if (event.pointerType === 'touch') return;
+    const target = event.target?.closest?.('[data-lora-zoom]') || null;
+    if (target === zoomTarget) return;
+    hideZoom();
+    if (!target) return;
+    zoomTarget = target;
+    zoomTimer = win.setTimeout?.(() => {
+      if (zoomTarget !== target || !popup?.contains?.(target)) return;
+      const src = target.getAttribute('data-lora-zoom');
+      let done = false;
+      const show = () => {
+        if (done || zoomTarget !== target || !popup?.contains?.(target)) return;
+        done = true;
+        zoomShown = true;
+        zoom.show?.(target, { src, title: target.getAttribute('data-lora-zoom-title') || '',
+          note: target.getAttribute('data-lora-zoom-note') || '' }, popup.getBoundingClientRect());
+      };
+      // 그림을 먼저 받는다 - 받기 전에 띄우면 확대 보기가 낮은 상자로 자리를 잡고, 그림이 오면 화면 아래로 삐져나갔다
+      // (라이브 09-29: 처음 올린 히스토리 칸의 아래 11px 이 잘렸다). 받아 둔 그림(캐시)은 곧바로.
+      if (typeof win.Image !== 'function') { show(); return; }
+      const probe = new win.Image();
+      probe.onload = show;
+      probe.onerror = show;
+      probe.src = src;
+      if (probe.complete) show();
+    }, ZOOM_DELAY_MS);
+  }
+
+  function onZoomOut(event) {
+    const next = event.relatedTarget;
+    if (!next || !popup?.contains?.(next)) hideZoom();
   }
 
   // ---- 창 ----
@@ -557,6 +726,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       </div>
       <div class="alr-lib"></div>
       <div class="alr-foot"></div>
+      <div class="alr-pick" role="dialog" aria-label="히스토리에서 PNG 고르기" hidden></div>
       <input type="file" accept="image/png" data-lora-file hidden>
     `;
     document.body.appendChild(popup);
@@ -564,8 +734,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     popup.addEventListener('dragover', onDragOver);
     popup.addEventListener('dragleave', onDragLeave);
     popup.addEventListener('drop', onDrop);
+    popup.addEventListener('pointerover', onZoomOver);
+    popup.addEventListener('pointerout', onZoomOut);
     popup.addEventListener('keydown', event => {
-      if (event.key === 'Escape') { event.preventDefault(); close(); }
+      // Esc 는 [히스토리] 판부터 닫는다 - 창까지 한 번에 닫히면 고르던 자리를 잃는다
+      if (event.key === 'Escape') { event.preventDefault(); if (picker) closePicker(); else close(); }
     });
   }
 
@@ -619,6 +792,8 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
 
   function close() {
     if (!isOpen()) return;
+    closePicker();
+    hideZoom();
     if (onResize) { win.removeEventListener('resize', onResize); onResize = null; }
     popup.style.display = 'none';
     onStateChange();
@@ -660,7 +835,12 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     }
     const reveal = event.target.closest('[data-lora-reveal]');
     if (reveal) { openFolder(reveal.getAttribute('data-lora-reveal')); return; }
+    if (event.target.closest('[data-lora-pickclose]')) { closePicker(); return; }
     if (busy) return;
+    const history = event.target.closest('[data-lora-history]');
+    if (history) { openPicker(history.getAttribute('data-lora-history')); return; }
+    const picked = event.target.closest('[data-lora-pickhist]');
+    if (picked) { pickFromHistory(picked.getAttribute('data-lora-pickhist')); return; }
     const png = event.target.closest('[data-lora-png]');
     if (png) {
       pngTarget = png.getAttribute('data-lora-png');

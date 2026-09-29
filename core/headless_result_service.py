@@ -379,6 +379,27 @@ class HeadlessResultStore:
         candidates.sort(key=lambda row: (row["exact_weights"], row["created_at"]), reverse=True)
         return candidates[:count]
 
+    def lora_candidates(self, name: Any, limit: Any = 36) -> list[dict]:
+        """LoRA 창 PNG 칸의 [히스토리] 후보 - 그 LoRA 를 켜고 만든 그림이 앞, 그다음 다른 그림(각각 새것부터).
+
+        켰는지는 생성이 큐에 들어갈 때 요청에 박힌 체인(`_anima_lora_chain`)으로 본다 - 지금 창의 체인이 아니다.
+        """
+        name = str(name or "").strip()
+        count = max(1, min(60, int(limit)))
+        with self._mutation_lock:
+            items = list(self._items)
+        rows = []
+        for item in items:
+            chain = (item.generation_params or {}).get("_anima_lora_chain")
+            used = bool(name) and isinstance(chain, list) and any(
+                isinstance(entry, dict) and entry.get("name") == name and entry.get("enabled", True) is not False
+                for entry in chain)
+            rows.append({"history_id": item.history_id, "thumb_url": f"/api/history/thumb/{item.history_id}",
+                         "zoom_url": f"/api/history/thumb/{item.history_id}?size=640", "used": used,
+                         "created_at": item.created_at.isoformat()})
+        rows.sort(key=lambda row: row["used"], reverse=True)   # 안정 정렬 - 각 무리 안은 새것부터 그대로
+        return rows[:count]
+
     def get_item(self, history_id: str) -> HeadlessHistoryItem | None:
         history_id = str(history_id or "")
         for item in self._items:

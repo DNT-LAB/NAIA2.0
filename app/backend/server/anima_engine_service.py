@@ -16,7 +16,7 @@ from core.anima_engine.settings import (consent_agreed, license_bundle, license_
                                         quick_receipt, read_json, record_consent, save_lora_chain, save_settings,
                                         unet_catalog)
 from core.anima_engine.settings import (delete_lora_thumb, lora_folder, lora_thumb, lora_triggers,
-                                        put_lora_thumb, read_lora_thumb)
+                                        png_from_image, put_lora_thumb, read_lora_thumb)
 
 _SERVICES = {}
 _LOCK = RLock()
@@ -262,6 +262,19 @@ class AnimaEngineService:
     def delete_thumb(self, name):
         delete_lora_thumb(load_settings(self.save_root), name)
         return {"ok": True}
+
+    def history_candidates(self, name):
+        # PNG 칸의 [히스토리] - 이 세션의 생성 히스토리(결과 저장소)에서 고른다. 저장소가 없는 판이면 빈 목록.
+        store = getattr(self.context, "result_store", None)
+        return {"ok": True, "candidates": store.lora_candidates(name) if store is not None else []}
+
+    def thumb_from_history(self, body):
+        # 고른 히스토리 그림을 PNG(768 안쪽)로 줄여 PNG 넣기와 같은 자리에 쓴다(put_lora_thumb 가 다시 검사한다)
+        store = getattr(self.context, "result_store", None)
+        item = store.get_item(str(body.get("history_id") or "")) if store is not None else None
+        if item is None or getattr(item, "image", None) is None:
+            raise ManagedEngineError("HISTORY_NOT_FOUND", "히스토리에서 그 그림이 사라졌습니다 - 다시 고르세요.")
+        return self.put_thumb(str(body.get("name") or ""), png_from_image(item.image))
 
     def open_lora_folder(self, body):
         folder = lora_folder(load_settings(self.save_root), body.get("name"))

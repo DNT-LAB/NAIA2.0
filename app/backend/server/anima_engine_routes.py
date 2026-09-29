@@ -47,7 +47,7 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
             remember(what, exc)
             code = exc.code
             status = 422 if code in ("PARAM_OUT_OF_RANGE", "PATH_INVALID", "PATH_NOT_WRITABLE", "LORA_NOT_FOUND", "LORA_INVALID", "LORA_NAME_CONFLICT", "LORA_THUMB_INVALID") else 409
-            if missing_404 and code == "LORA_NOT_FOUND":
+            if missing_404 and code in ("LORA_NOT_FOUND", "HISTORY_NOT_FOUND"):
                 status = 404
             if code.startswith("ENGINE_START"):
                 status = 500
@@ -125,6 +125,15 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
     @app.delete("/api/anima-engine/loras/thumb")
     async def delete_thumb(request: Request, name: str):
         return await call(request, lambda _: service_for(context).delete_thumb(name), missing_404=True)
+
+    @app.get("/api/anima-engine/loras/history")
+    async def lora_history(request: Request, name: str = ""):
+        # PNG 칸의 [히스토리] - 이 LoRA 를 켜고 만든 그림이 앞(읽기만 · 원격 기기도 - PNG 넣기와 같다)
+        return await call(request, lambda _: service_for(context).history_candidates(name))
+
+    @app.post("/api/anima-engine/loras/thumb/history")
+    async def put_thumb_from_history(request: Request):
+        return await call(request, service_for(context).thumb_from_history, body=True, missing_404=True)
 
     @app.post("/api/anima-engine/loras/open-folder")
     async def open_folder(request: Request):

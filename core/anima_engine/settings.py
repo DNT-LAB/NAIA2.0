@@ -479,6 +479,16 @@ def png_thumbnail(data):
         raise ProfileError("LORA_THUMB_INVALID") from None
 
 
+def png_from_image(image):
+    """생성 히스토리의 그림(PIL) -> LoRA 썸네일 PNG(768 안쪽). 큰 결과(업스케일)도 크기 상한(10MB)에 걸리지 않게 먼저 줄인다.
+    convert 가 사본을 만든다 - 히스토리의 그림은 건드리지 않는다."""
+    thumb = image.convert("RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB")
+    thumb.thumbnail((768, 768), Image.Resampling.LANCZOS)
+    output = io.BytesIO()
+    thumb.save(output, format="PNG")
+    return output.getvalue()
+
+
 def read_lora_thumb(settings, name):
     path, info = lora_thumb(settings, resolve_lora(settings, name))
     if path is None or path.stat().st_size > THUMB_MAX_BYTES:

@@ -2290,7 +2290,7 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-engsync')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
-import('./js/features/animaLoraPanel.mjs?v=20260929-wheelsync3')
+import('./js/features/animaLoraPanel.mjs?v=20260929-wheelsync4')
   .then(({createAnimaLoraPanel}) => {
     animaLoraPanel = createAnimaLoraPanel({
       document, window,

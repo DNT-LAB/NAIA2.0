@@ -136,6 +136,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let onResize = null;
   let dock = null;           // 프롬프트 밑 LoRA 줄 - 켜진 관리형 체인이 있을 때만 보인다
   let dragging = false;      // 강도 슬라이더를 끄는 중 - 그동안 줄을 다시 그리지 않는다(손잡이가 사라진다)
+  let dragPointer = null;    // 끌기를 시작한 포인터(pointerId) - 다른 포인터(펜 hover · 다른 손가락)는 이 끌기를 끝내지 않는다
   let wheelTimer = 0;
   let windowRelease = false;   // 창(window)의 pointerup 도 듣는가 - 줄 · LoRA 창 밖에서 놓아도 끌기는 끝났다
   // 휠로 바꾸고 아직 저장하지 않은 강도 - LoRA 이름별. 행 번호로 쥐면 그사이 순서를 바꾸거나 뺀 뒤 다른 LoRA 에 들어갔다.
@@ -576,19 +577,26 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     el.addEventListener('dblclick', onDblClick);
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('pointerdown', event => {
-      if (event.target?.closest?.('[data-lora-slider]')) dragging = true;
+      if (event.target?.closest?.('[data-lora-slider]')) { dragging = true; dragPointer = event.pointerId ?? null; }
     });
-    const release = () => { dragging = false; };
-    el.addEventListener('pointerup', release);
-    el.addEventListener('pointercancel', release);
+    el.addEventListener('pointerup', endDrag);
+    el.addEventListener('pointercancel', endDrag);
     if (!windowRelease) {
       windowRelease = true;
-      win.addEventListener?.('pointerup', release, true);
-      win.addEventListener?.('pointercancel', release, true);
-      // 놓은 것이 아예 안 왔다(브라우저 밖에서 놓았다 등) - 다음 움직임에 눌린 버튼이 없으면 끌기는 끝났다(Codex 확인 리뷰
-      // 09-29: 그대로면 휠 저장이 무기한 미뤄졌다). blur 로는 끊지 않는다 - 창을 잠깐 떠났다 와도 누른 채면 끌기는 이어진다.
-      win.addEventListener?.('pointermove', event => { if (dragging && event.buttons === 0) dragging = false; }, true);
+      win.addEventListener?.('pointerup', endDrag, true);
+      win.addEventListener?.('pointercancel', endDrag, true);
+      // 놓은 것이 아예 안 왔다(브라우저 밖에서 놓았다 등) - 끌던 포인터가 눌린 버튼 없이 움직이면 끌기는 끝났다(Codex 확인
+      // 리뷰 09-29: 그대로면 휠 저장이 무기한 미뤄졌다). blur 로는 끊지 않는다 - 창을 잠깐 떠났다 와도 누른 채면 이어진다.
+      win.addEventListener?.('pointermove', event => { if (dragging && event.buttons === 0) endDrag(event); }, true);
     }
+  }
+
+  // 끌기가 끝났다. 다른 포인터의 놓기 · 움직임이면 무시한다 - 마우스로 끄는 중에 펜이 지나가면(hover) 끝난 줄 알고 휠 값을
+  // 보내, 놓은 값이 저장 중이라 버려졌다(Codex 확인 리뷰 09-29). pointerId 가 없는 이벤트는 끝으로 본다.
+  function endDrag(event) {
+    if (event && dragPointer != null && event.pointerId != null && event.pointerId !== dragPointer) return;
+    dragging = false;
+    dragPointer = null;
   }
 
   function isOpen() {
@@ -697,7 +705,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     }
     const slider = event.target.closest('[data-lora-slider]');
     if (slider) {                  // 놓았다 - 한 번 저장한다
-      dragging = false;
+      endDrag();
       setStrength(Number(slider.getAttribute('data-lora-slider')), Number(slider.value));
       return;
     }
@@ -735,7 +743,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     const slider = event.target.closest('[data-lora-slider]');
     if (!slider || busy) return;
     event.preventDefault?.();
-    dragging = false;
+    endDrag();
     setStrength(Number(slider.getAttribute('data-lora-slider')), 1);
   }
 

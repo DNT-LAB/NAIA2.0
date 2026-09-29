@@ -11,7 +11,7 @@ from threading import RLock
 from core.anima_engine import diagnostics, integration, manifest
 from core.anima_engine.install import AnimaInstallJob, adopt_installed_engine, app_version, validate_root
 from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK, TRACE_CHARS,
-                                       get_runtime, register_runtime, reserve_vram)
+                                       get_runtime, read_log_since, register_runtime, reserve_vram)
 from core.anima_engine.settings import (consent_agreed, license_bundle, license_text, load_settings, lora_catalog,
                                         quick_receipt, read_json, record_consent, save_lora_chain, save_settings,
                                         unet_catalog)
@@ -162,6 +162,18 @@ class AnimaEngineService:
             raise ManagedEngineError("ENGINE_NOT_READY")
         rt.ensure_running()
         return {"ok": True, "engine": rt.status()}
+
+    def engine_log(self, since=None):
+        """엔진이 켜지는 동안 ComfyUI 가 적는 것 - 생성 화면의 임시 콘솔이 since 부터 이어 받는다(엔진 상태와 함께)."""
+        settings = load_settings(self.save_root)
+        with REGISTRY_LOCK:
+            rt = REGISTRY.get(str(Path(settings.engine_root).resolve())) if settings.engine_root else None
+        engine = rt.status() if rt else {"state": "stopped", "port": None, "pid": None, "started_at": None,
+                                         "code": None, "message": ""}
+        if not settings.engine_root:
+            return {"ok": True, "engine": engine, "text": "", "since": 0}
+        text, nxt = read_log_since(Path(settings.engine_root) / "state/engine.log", since)
+        return {"ok": True, "engine": engine, "text": text, "since": nxt}
 
     def stop_engine(self):
         if self._job().snapshot()["state"] == "preparing":

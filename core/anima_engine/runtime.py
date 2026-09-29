@@ -55,6 +55,38 @@ START_HARD_TIMEOUT = 600.0
 LOG_START_MARK = "===== NAIA: engine start "
 
 
+def read_log_since(path, since=None, limit=65536):
+    """engine.log 를 since(바이트)부터 - (글, 다음 since). 생성 화면의 '엔진 켜는 중' 콘솔이 이어 받는다.
+
+    since 가 없으면 이번 기동의 머리줄부터(끝 limit 바이트 안에서). 파일이 since 보다 짧아졌으면(10MB 에서 돌려 새
+    파일) 처음부터. 한 번에 limit 까지 - 너무 뒤처졌으면 끝 쪽만. 끝의 덜 적힌 줄은 다음에 준다(UTF-8 이 잘리지 않게).
+    """
+    path = Path(path)
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if since is None or not 0 <= since <= size or size - since > limit:
+                start = max(0, size - limit) if since is None or size - (since or 0) > limit else 0
+                handle.seek(start)
+                data = handle.read(limit)
+                mark = data.rfind(LOG_START_MARK.encode("utf-8")) if since is None else -1
+                if mark >= 0:
+                    data, start = data[mark:], start + mark
+                elif start > 0:                     # 창이 줄 한가운데서 시작한다 - 다음 줄부터
+                    cut = data.find(b"\n")
+                    data, start = (data[cut + 1:], start + cut + 1) if cut >= 0 else (b"", size)
+            else:
+                start = since
+                handle.seek(start)
+                data = handle.read(limit)
+    except OSError:
+        return "", since or 0
+    end = data.rfind(b"\n")
+    if end < 0:
+        return "", start
+    return data[:end + 1].decode("utf-8", "replace"), start + end + 1
+
+
 def start_timed_out(now, started, last_output, *, quiet=START_QUIET_TIMEOUT, hard=START_HARD_TIMEOUT):
     """기동을 그만 기다릴 때인가 - 마지막 출력(없으면 시작) 뒤 quiet 초가 조용했거나, 시작 뒤 hard 초가 지났다."""
     return now - max(started, last_output or started) >= quiet or now - started >= hard

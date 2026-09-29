@@ -69,7 +69,8 @@
         "core/anima_engine/settings.py", "core/anima_engine/install.py", "core/anima_engine/runtime.py",
         "core/anima_engine/integration.py", "core/anima_engine/diagnostics.py", "app/backend/server/anima_engine_service.py",
         "app/backend/server/anima_engine_routes.py",
-        "app/web/remote/js/features/animaSetupPanel.mjs", "app/web/remote/js/features/animaLoraPanel.mjs"
+        "app/web/remote/js/features/animaSetupPanel.mjs", "app/web/remote/js/features/animaLoraPanel.mjs",
+        "app/web/remote/js/features/animaEngineConsole.mjs"
       ],
       "routes": [
         {"method": "GET", "path": "/api/anima-engine/status", "smoke": "non_destructive"},
@@ -88,7 +89,8 @@
         {"method": "DELETE", "path": "/api/anima-engine/loras/thumb", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/anima-engine/loras/open-folder", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/anima-engine/settings", "smoke": "state_mutation"},
-        {"method": "GET", "path": "/api/anima-engine/diagnostics", "smoke": "non_destructive"}
+        {"method": "GET", "path": "/api/anima-engine/diagnostics", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/anima-engine/engine/log", "smoke": "non_destructive"}
       ]
     },
     {

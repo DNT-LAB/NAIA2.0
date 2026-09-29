@@ -137,6 +137,15 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
     async def settings(request: Request):
         return await call(request, service_for(context).update_settings, local=True, body=True, what="설정 바꾸기")
 
+    def since_of(raw):
+        return None if raw in (None, "") else max(0, int(raw))      # 숫자가 아니면 ValueError -> 422
+
+    @app.get("/api/anima-engine/engine/log")
+    async def engine_log(request: Request):
+        # 엔진이 켜지는 동안의 ComfyUI 출력 - 생성 화면의 임시 콘솔(읽기만 · 원격 기기도 - 상태 조회와 같다)
+        raw = request.query_params.get("since")
+        return await call(request, lambda _: service_for(context).engine_log(since_of(raw)))
+
     @app.get("/api/anima-engine/diagnostics")
     async def diagnostics(request: Request):
         # 실패 화면의 [자세히] · [에러 로그 복사] - nvidia-smi · 그래픽 카드 조회를 이 PC 에서 돌린다(검사와 같은 로컬 규칙)

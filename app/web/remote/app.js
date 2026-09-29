@@ -2303,6 +2303,16 @@ import('./js/features/animaLoraPanel.mjs?v=20260929-wheelsync4')
   .catch(error => {
     console.error('Failed to initialize ANIMA LoRA panel', error);
   });
+// 관리형 ANIMA — 엔진이 켜지는 동안 결과 칸 아래쪽에 ComfyUI 출력을 보이는 임시 콘솔(사용자 지정 09-29). 켜지면 스스로
+// 닫힌다. 여는 것은 생성 쪽 감시(watchAnimaEngineStart)가 '엔진 켜는 중' 을 알아챌 때.
+let animaEngineConsole = null;
+import('./js/features/animaEngineConsole.mjs?v=20260929-console')
+  .then(({createAnimaEngineConsole}) => {
+    animaEngineConsole = createAnimaEngineConsole({document, window});
+  })
+  .catch(error => {
+    console.error('Failed to initialize ANIMA engine console', error);
+  });
 // API 설정 > 05 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
 // 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 탭을 연다.
 let llmSetupPanel = null;
@@ -9064,6 +9074,7 @@ async function watchAnimaEngineStart(seq) {
     animaEngineStarting = true;
     holdProgress();
     showToast('ANIMA 엔진을 켜는 중입니다 — 켜지면 이어서 생성합니다', 'info');
+    animaEngineConsole?.show();   // ComfyUI 가 적는 것을 결과 칸 아래에 - 켜지면 스스로 닫힌다
   }
   animaEngineWatchTimer = setTimeout(() => watchAnimaEngineStart(seq), ANIMA_ENGINE_POLL_MS);
 }

@@ -4,6 +4,7 @@ import pandas as pd
 import weakref
 from collections import Counter
 from typing import Dict, Any
+from core.anima_artist_tags import add_anima_artist_at, artist_names
 from core.prompt_category_annotation import build_annotated_main_tags
 from core.prompt_context import PromptContext
 from core.safe_console import safe_print
@@ -908,6 +909,11 @@ class PromptProcessor:
             formatted_prompt = self._apply_prompt_squeeze(formatted_prompt)
 
         final_string = ', '.join(formatted_prompt)
+        # ANIMA 는 작가를 '@이름' 으로 알아본다 - @ 없이 들어온 작가 태그(손으로 친 프리픽스 · 와일드카드가 뱉은 이름 등)에
+        # 조용히 붙인다. 가중치로 감싼 것도(사용자 지정 09-29, core/anima_artist_tags.py). 생성 단계도 같은 함수로 한 번 더
+        # (api_service._call_comfyui_api - 손으로 친 프롬프트로 바로 Generate 하는 길).
+        if is_comfyui and is_anima_mode:
+            final_string = add_anima_artist_at(final_string, artist_names(self.app_context))
 
         return final_string
 

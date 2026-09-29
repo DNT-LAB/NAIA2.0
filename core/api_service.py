@@ -2155,6 +2155,11 @@ class APIService:
         try:
             # 1. ComfyUI 서버 URL 가져오기
             comfyui_url = params.get('credential')
+            # ANIMA 는 작가를 '@이름' 으로 알아본다 - @ 없이 들어온 작가 태그에 조용히 붙인다(사용자 지정 09-29). 와일드카드가
+            # 다 풀린 뒤의 마지막 자리 - 관리형 엔진 · 외부 ComfyUI(ANIMA 샘플링) 둘 다 여기를 지난다(core/anima_artist_tags.py).
+            from core.anima_artist_tags import add_anima_artist_at, artist_names, is_anima_request
+            if is_anima_request(params):
+                params['input'] = add_anima_artist_at(params.get('input'), artist_names(self.app_context))
             from core.anima_engine import integration
             if integration.is_managed_credential(comfyui_url):
                 comfyui_url = integration.prepare_managed_request(self.app_context, params)

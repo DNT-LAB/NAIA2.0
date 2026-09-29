@@ -1068,6 +1068,9 @@ class KoreanLayer:
         seen: set[str] = set()
         merged: set[int] = set()
         last_group = -9
+        # 묶음이 있으면 그 구성원 낱말은 따로 세지 않는다(커플 … 남친은 래쉬가드 여친은 원피스 — 2g2b 로 셌다, 09-29)
+        members = {w for f, _t in toks if f in self._groups for w in self._GROUP_MEMBERS.get(f, ())}
+        seen |= members
         for i, (form, tag) in enumerate(toks):
             if tag not in NOUN_TAGS or form in seen or form in phrase_nouns or i in merged:
                 continue
@@ -1081,6 +1084,13 @@ class KoreanLayer:
                     last_group = i
                     continue
                 gg, bb = self._groups[form]
+                n = self._count_near(toks, i, plural=False)
+                if n:                          # 세 자매 = 3 · 두 커플 = 둘씩(09-29 E4B 시험: 세 자매가 2girls)
+                    gg, bb = (gg * n, bb * n) if gg and bb else (n if gg else 0, n if bb else 0)
+                nxt_form, nxt_tag = nxt
+                if nxt_tag in NOUN_TAGS and self._person_gender(nxt_form) is not None:
+                    merged.add(i + 1)          # 묶음 바로 뒤의 사람 낱말은 그 사람들이다(쌍둥이 언니들 — 2 + 3 으로 셌다)
+                    seen.add(nxt_form)
                 pc.girls, pc.boys = pc.girls + gg, pc.boys + bb
                 seen.add(form)
                 last_group = i
@@ -1089,6 +1099,9 @@ class KoreanLayer:
             gender = self._person_gender(form)         # 사람 · 친구(unknown) — 캐릭터 이름이기도 하면 사용자가 고른다(위)
             if gender is None:
                 continue                               # 자동으로 찾은 이름은 사람이 아니다(고르기 전)
+            if nxt[1] in NOUN_TAGS and self._person_gender(nxt[0]) is None and nxt[0] not in self._groups \
+                    and form + nxt[0] in (analysis.source_text or ""):
+                continue                               # 사람 낱말이 앞에 붙은 합성어(메이드카페 · 소녀상 — 09-29 E4B 시험)
             seen.add(form)
             head = i
             nxt_form, nxt_tag = toks[i + 1] if i + 1 < len(toks) else ("", "")
@@ -1138,6 +1151,27 @@ class KoreanLayer:
                 pc.boys += n
             counted.add(base)
             pc.notes.append(f"{base}x{n}:{gender}(꼬리)")
+        # Kiwi 가 사람 낱말을 쪼개 토막 길이 못 센 것(여고+생 · 바니+걸 · 남사+친 — 09-29 E4B 시험) — 어절에서 조사를 떼고
+        # 규칙표 낱말 그대로일 때만. 통째 토막으로 나온 낱말은 토막 길이 이미 다뤘다(세었거나 일부러 뺐다 — 비유 · 구)
+        whole = {f for f, _t in toks}
+        for w_i, word in enumerate(words):
+            base = next((word[:-len(p)] for p in self._PERSON_PARTICLES
+                         if word.endswith(p) and len(word) - len(p) >= 2), word)
+            if base in whole or base in phrase_nouns or base in counted:
+                continue
+            gender = ("girl" if base in self._female else "boy" if base in self._male
+                      else "unknown" if base in self._neutral else None)
+            if gender is None:
+                continue
+            n = self._count_near_words(words, w_i) or 1
+            if gender == "girl":
+                pc.girls += n
+            elif gender == "boy":
+                pc.boys += n
+            else:
+                pc.unknown += n
+            counted.add(base)
+            pc.notes.append(f"{base}x{n}:{gender}(어절)")
         # 한 사람이라고 solo 가 아니다 — '혼자' · '홀로' 를 적었을 때만(사용자 지정 09-28: 다른 남녀를 엿듣는 여성이
         # 1girl, solo, hetero, sex 가 됐다). 이벤트 맵 풀은 그대로 둘 다 본다(persons_param)
         pc.partition = partition_of(pc.girls, pc.boys, pc.solo)
@@ -1199,7 +1233,8 @@ class KoreanLayer:
         """어절 i 의 앞(두 · 두 명의 · 2명의) 또는 뒤(둘이 · 세 명 · 3명) 수 — 꼬리 어절 세기용(Codex 10차 F4: 앞의 수를 못 봤다)."""
         def number(word: str) -> int | None:
             stem = next((word[:-len(p)] for p in self._PERSON_PARTICLES if word.endswith(p) and len(word) > len(p)), word)
-            for form in (word, stem):
+            together = word[:-2] if word.endswith("이서") else word      # 셋이서 · 둘이서
+            for form in (word, stem, together):
                 if form in self._numerals:
                     return self._numerals[form]
             m = self._COUNT_WORD.fullmatch(word)
@@ -1216,8 +1251,22 @@ class KoreanLayer:
             return number(words[i + 1])
         return None
 
-    def _count_near(self, toks: list[tuple[str, str]], i: int) -> int | None:
-        """앞쪽(두 소녀·세 명의 소녀·2명의 소녀) 또는 뒤쪽(소녀 둘·소녀 두 명·소녀들) 수."""
+    _AGE_UNITS = frozenset({"대", "살", "세"})
+    # 묶음 -> 그 묶음을 이루는 사람 낱말(묶음과 함께 나오면 같은 사람들이다)
+    _GROUP_MEMBERS = {"커플": ("남친", "여친", "남자친구", "여자친구"), "연인": ("남친", "여친", "남자친구", "여자친구"),
+                      "부부": ("남편", "아내", "신랑", "신부", "새댁")}
+
+    def _count_near(self, toks: list[tuple[str, str]], i: int, plural: bool = True) -> int | None:
+        """뒤쪽(소녀 둘 · 언니 2명) 수가 먼저, 다음 앞쪽(두 소녀 · 세 명의 소녀 · 2명의 소녀), 마지막 복수(소녀들, plural).
+        앞쪽을 먼저 보니 '남자 1명 언니 2명' 의 1명이 언니 몫이 됐다 · 나이(20대 여성 · 30살)는 수가 아니다 — 20명으로
+        셌다(09-29 E4B 시험)."""
+        if i + 1 < len(toks):
+            form, tag = toks[i + 1]
+            after = toks[i + 2][0] if i + 2 < len(toks) else ""
+            if form in self._numerals and after not in self._AGE_UNITS:
+                return self._numerals[form]
+            if tag == "SN" and form.isdigit() and after not in self._AGE_UNITS:
+                return int(form)
         for back in range(1, 4):
             if i - back < 0:
                 break
@@ -1226,14 +1275,10 @@ class KoreanLayer:
                 return self._numerals[form]
             if tag == "SN" and form.isdigit():
                 return int(form)
-            if form not in ("명", "의", "사람") and tag not in ("NNB", "JKG"):
-                break
-        if i + 1 < len(toks):
+            if form not in ("명", "분", "사람") and tag != "JKG":
+                break                                  # 수 단위(명)와 의만 건넌다 — 20대 의 대 · 30살 의 살은 아니다
+        if plural and i + 1 < len(toks):
             form, tag = toks[i + 1]
-            if form in self._numerals:
-                return self._numerals[form]
-            if tag == "SN" and form.isdigit():
-                return int(form)
             if form == "들" and tag.startswith("XSN"):
                 return 3
         return None

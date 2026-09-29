@@ -32,6 +32,11 @@ MAX_UNIT_WORDS = 5            # 서술 덩어리의 어절 수 상한
 # 인원이 이미 말하는 사람 낱말 — 되살리지 않는다(소녀 -> 1girl 로 끝). 역할 · 친족 · 직업 낱말(주인 · 엄마 · 여고생)은 되살린다
 BASIC_PEOPLE = frozenset({"소녀", "여자", "여성", "여자애", "미소녀", "소년", "남자", "남성", "남자애", "미소년", "사람",
                           "아이", "인물", "누군가", "친구"})
+# 호칭 · 친족 낱말 — 누구인지(관계)만 말하고 그림에 그릴 것이 없다. 인원 칸이 맡는다. 되살리면 사전 키워드로 엉뚱한 태그가
+# 붙었다(누나 -> siscon '누나 집착' · 언니 -> onee-loli · sisters · 누나/언니 -> brother and sister · 아가씨 -> ojou-sama pose —
+# 09-29 E4B 창작 문장 78개에서 30건 넘게)
+ADDRESS_PEOPLE = frozenset({"누나", "언니", "오빠", "형", "누님", "형님", "오라버니", "동생", "여동생", "남동생", "여친", "남친",
+                            "여자친구", "남자친구", "여사친", "남사친", "아가씨"})
 # 규칙표(people · groups)에 없는 친족 · 호칭 · 직업 — 평가 러너의 PERSON_EXTRA 그대로
 PERSON_EXTRA = frozenset({"누님", "형님", "오라버니", "남편", "아내", "부인", "신랑", "신부", "새댁", "이모", "삼촌", "동생",
                           "선배", "후배", "손님", "승객", "서퍼", "점원", "경찰", "의사", "간호사", "군인", "기사", "주인공"})
@@ -222,6 +227,12 @@ def person_words(rules: dict) -> frozenset[str]:
     return frozenset(words | set(rules.get("groups") or {}) | PERSON_EXTRA)
 
 
+# 뺀 것 · 부정된 것 — 명사 뒤 (조사 +) 없이 · 없는 · 빼고 · 말고 · 제외 · 금지 · 안/못 + 용언 · 용언 + 지 않/못/말. 되살리면
+# 반대 뜻이 붙었다(말풍선 없이 -> thought bubble · 속옷 없이 -> underwear · 팬티는 안 보이게 -> panty peek — 09-29 E4B 창작
+# 문장). 모자를 쓰지 않은 의 쓰다는 가벼운 용언이라 덩어리가 안 되고 모자만 남는다. 제외는 경로가 맡는다
+_NEGATED_AFTER = re.compile(r"(?:은|는|을|를|이|가|도|만|의)?\s*(?:빼|없|말고|제외|금지|(?:안|못)\s|\S*지\s*(?:않|못|말))")
+
+
 def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: set[str],
                skip: set[str], people: Iterable[str] = (), stop_verbs: Iterable[str] = (),
                max_units: int = MAX_UNITS) -> list[Unit]:
@@ -307,6 +318,11 @@ def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: 
             continue            # '-게' 로 끝난 채 멈췄다 = 꾸미는 서술어(뜬)는 이미 태그가 설명했다 — 동그랗게만 따로 찾으면
             #                     눈을 크게 뜬(unusually open eyes) 옆에 solid circle pupils 가 붙었다(라이브 09-26)
         lemmas = [k for j in range(lo, hi + 1) for k in (open_key(f, t) for f, t, _s, _e in per[j]) if k]
+        near = [(f, t) for j in range(max(0, lo - 1), hi + 1) for f, t, _s, _e in per[j]]
+        if any(t == "MAG" and f in ("안", "못") for f, t in near) or any(
+                f == "지" and t.startswith("EC") and k + 1 < len(near) and near[k + 1][0] in ("않", "못하", "말")
+                for k, (f, t) in enumerate(near)):
+            continue            # 안 보이게 · 보이지 않게 — 부정된 서술(09-29). 부사 안(MAG)만 — 방 안(NNG)은 아니다
         units.append(Unit(text[words[lo][0]:words[hi][1]].strip(), lemmas, "predicate", words[lo][0], words[hi][1]))
     for i, runs in nouns.items():
         if i in absorbed or i in taken:
@@ -316,6 +332,8 @@ def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: 
                 continue        # 한 음절 명사만 — 뜻이 여럿이다(비 오는 날 -> 칼날 -> scabbard, 라이브 09-26). 고르기의
                 #                 요청 명사(uncovered_units)와 같은 규칙
             surface = text[s:e]
+            if _NEGATED_AFTER.match(text, e):
+                continue        # 말풍선 없이 · 속옷 없이 · 팬티는 안 보이게 — 뺀 것(09-29)
             units.append(Unit(surface, keys, "noun", s, e, person=_whole(surface) in people))
     units.sort(key=lambda u: u.start)
     return units[:max_units]

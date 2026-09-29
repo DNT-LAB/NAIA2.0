@@ -1347,7 +1347,7 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
     typed = [t for t in (vocab.canonical(en_key(p)) for p in merged.english.keep + merged.english.exclude) if t]
     explained = _explained_lemmas(layer, ka, index, tags_now + typed, tools.info)
     names = {h.form for h in ka.names} | {c.ko for c in merged.characters}
-    skip = set(GENERIC_NOUNS) | set(ar.BASIC_PEOPLE) | set(rules.get("spatial_words") or ()) | names \
+    skip = set(GENERIC_NOUNS) | set(ar.BASIC_PEOPLE) | set(ar.ADDRESS_PEOPLE) | set(rules.get("spatial_words") or ()) | names \
         | {piece for n in names for piece in n.split()}
     text = clean_text(req["text"])
     units = ar.find_units(layer.spans(req["text"]), text, explained=explained, skip=skip,

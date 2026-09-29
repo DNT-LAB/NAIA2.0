@@ -2222,7 +2222,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
 //        마지막 하나가 빠지면 닫힌다. 표시/숨김 설정을 따로 두지 않는다(규칙이 둘이면
 //        어긋난다). 지금 온보딩하는 곳은 Artists 탭 하나뿐이다. ---
 let remoteController = null;
-const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260926-childalign')
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260930-zoomload')
   .then(({createRemoteController}) => {
     remoteController = createRemoteController({document, window, showToast, escHtml});
   })
@@ -2290,7 +2290,7 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-diag2')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
-import('./js/features/animaLoraPanel.mjs?v=20260929-lorahist3')
+import('./js/features/animaLoraPanel.mjs?v=20260930-zoomload')
   .then(({createAnimaLoraPanel}) => {
     animaLoraPanel = createAnimaLoraPanel({
       document, window,

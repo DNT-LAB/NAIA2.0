@@ -654,23 +654,10 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     zoomTarget = target;
     zoomTimer = win.setTimeout?.(() => {
       if (zoomTarget !== target || !popup?.contains?.(target)) return;
-      const src = target.getAttribute('data-lora-zoom');
-      let done = false;
-      const show = () => {
-        if (done || zoomTarget !== target || !popup?.contains?.(target)) return;
-        done = true;
-        zoomShown = true;
-        zoom.show?.(target, { src, title: target.getAttribute('data-lora-zoom-title') || '',
-          note: target.getAttribute('data-lora-zoom-note') || '' }, popup.getBoundingClientRect());
-      };
-      // 그림을 먼저 받는다 - 받기 전에 띄우면 확대 보기가 낮은 상자로 자리를 잡고, 그림이 오면 화면 아래로 삐져나갔다
-      // (라이브 09-29: 처음 올린 히스토리 칸의 아래 11px 이 잘렸다). 받아 둔 그림(캐시)은 곧바로.
-      if (typeof win.Image !== 'function') { show(); return; }
-      const probe = new win.Image();
-      probe.onload = show;
-      probe.onerror = show;
-      probe.src = src;
-      if (probe.complete) show();
+      zoomShown = true;
+      // 그림을 받은 뒤에 그리는 것은 확대 보기(리모컨 showZoom)가 한다 - 걷으면(zoom.hide) 받는 중인 것도 버린다
+      zoom.show?.(target, { src: target.getAttribute('data-lora-zoom'), title: target.getAttribute('data-lora-zoom-title') || '',
+        note: target.getAttribute('data-lora-zoom-note') || '' }, popup.getBoundingClientRect());
     }, ZOOM_DELAY_MS);
   }
 

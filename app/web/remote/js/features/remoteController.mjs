@@ -230,6 +230,8 @@ export function createRemoteController({
   // 지금 크게 보고 있는 칸이 **어느 판의 것인가**. 판마다 감시자가 붙는데
   // `hoverTarget` 은 하나를 나눠 쓰므로, 이것이 없으면 남의 판 감시자가 걷는다.
   let hoverHost = null;
+  // 받는 중인 확대 그림의 차례. 걷거나 다른 칸을 올리면 올라가 늦게 온 그림을 버린다(showZoom).
+  let zoomTicket = 0;
 
   function hoverBox() {
     if (hoverEl) return hoverEl;
@@ -243,6 +245,7 @@ export function createRemoteController({
   function hideZoom() {
     hoverTarget = null;
     hoverHost = null;
+    zoomTicket += 1;
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     if (hoverEl) hoverEl.hidden = true;
   }
@@ -275,17 +278,33 @@ export function createRemoteController({
   }
 
   function showZoom(target, info, anchorRect = null) {
-    const box = hoverBox();
-    box.innerHTML = `<img src="${escHtml(info.src)}" alt="">`
-      + `<div class="rctl-zoom-cap"><b>${escHtml(info.title || '')}</b>`
-      + (info.note ? `<span>${escHtml(info.note)}</span>` : '') + '</div>';
-    box.hidden = false;
-    const cardRect = target.getBoundingClientRect();
-    const boxRect = box.getBoundingClientRect();
-    // 세로는 올린 칸에 맞춘다. 가로 기준은 호출자가 정한다 - 격자 칸은 **창** 기준
-    // (믹스 판 위에 그대로 덮는다), 믹스 블럭은 **믹스 판** 기준(그 옆으로 비킨다).
-    placeBeside(box, anchorRect || panel.el.getBoundingClientRect(),
-                cardRect.top + cardRect.height / 2 - boxRect.height / 2);
+    // ⚠️ **그림을 받은 뒤에 그린다.** 받기 전에 그리면 그림 없는 낮은 상자로 자리를 잡고, 그림이 오면 상자가 자라
+    //    화면 아래로 삐져나갔다(처음 올린 칸 - 라이브 09-29 LoRA 창에서 아래 11px). 격자 · 조합 저장 후보 · 그룹 창 ·
+    //    LoRA 창이 모두 이 한 곳을 쓴다. 받아 둔 그림(캐시)은 곧바로. 그사이 걷거나 다른 칸을 올리면 버린다(zoomTicket).
+    const ticket = ++zoomTicket;
+    let drawn = false;
+    const draw = () => {
+      if (drawn || ticket !== zoomTicket) return;
+      drawn = true;
+      const box = hoverBox();
+      box.innerHTML = `<img src="${escHtml(info.src)}" alt="">`
+        + `<div class="rctl-zoom-cap"><b>${escHtml(info.title || '')}</b>`
+        + (info.note ? `<span>${escHtml(info.note)}</span>` : '') + '</div>';
+      box.hidden = false;
+      const cardRect = target.getBoundingClientRect();
+      const boxRect = box.getBoundingClientRect();
+      // 세로는 올린 칸에 맞춘다. 가로 기준은 호출자가 정한다 - 격자 칸은 **창** 기준
+      // (믹스 판 위에 그대로 덮는다), 믹스 블럭은 **믹스 판** 기준(그 옆으로 비킨다).
+      placeBeside(box, anchorRect || panel.el.getBoundingClientRect(),
+                  cardRect.top + cardRect.height / 2 - boxRect.height / 2);
+    };
+    const Picture = win?.Image;
+    if (!info.src || typeof Picture !== 'function') { draw(); return; }
+    const probe = new Picture();
+    probe.onload = draw;
+    probe.onerror = draw;          // 못 받은 그림도 상자는 띄운다(예전처럼) - 칸을 올렸는데 아무것도 안 뜨면 고장처럼 보인다
+    probe.src = info.src;
+    if (probe.complete) draw();
   }
 
   // ── 창 옆 보조 판(믹스 큐) ────────────────────────────────────────────

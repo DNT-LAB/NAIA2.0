@@ -137,6 +137,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let dock = null;           // 프롬프트 밑 LoRA 줄 - 켜진 관리형 체인이 있을 때만 보인다
   let dragging = false;      // 강도 슬라이더를 끄는 중 - 그동안 줄을 다시 그리지 않는다(손잡이가 사라진다)
   let wheelTimer = 0;
+  let windowRelease = false;   // 창(window)의 pointerup 도 듣는가 - 줄 · LoRA 창 밖에서 놓아도 끌기는 끝났다
   // 휠로 바꾸고 아직 저장하지 않은 강도 - LoRA 이름별. 행 번호로 쥐면 그사이 순서를 바꾸거나 뺀 뒤 다른 LoRA 에 들어갔다.
   const wheelEdits = new Map();
 
@@ -580,6 +581,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     const release = () => { dragging = false; };
     el.addEventListener('pointerup', release);
     el.addEventListener('pointercancel', release);
+    if (!windowRelease) {
+      windowRelease = true;
+      win.addEventListener?.('pointerup', release, true);
+      win.addEventListener?.('pointercancel', release, true);
+    }
   }
 
   function isOpen() {
@@ -698,14 +704,19 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
 
   function setStrength(index, value) {
     if (!chain[index]) return;
-    wheelEdits.delete(chain[index].name);      // 손으로 정한 값이 앞서 휠로 돌려 둔 값보다 나중이다
+    const dropped = wheelEdits.delete(chain[index].name);   // 손으로 정한 값이 앞서 휠로 돌려 둔 값보다 나중이다
     if (!Number.isFinite(value) || value < STRENGTH_MIN || value > STRENGTH_MAX) {
       error = `강도는 ${STRENGTH_MIN} ~ ${STRENGTH_MAX} 사이로 적어 주세요.`;
       render();                    // 틀린 값은 저장하지 않고 원래 값으로 되돌린다(조용히 자르지 않는다)
       return;
     }
     const next = Math.round(value * 100) / 100;
-    if (Number(chain[index].strength) === next) return;
+    if (Number(chain[index].strength) === next) {
+      // 저장된 값 그대로다(휠로 1.05 를 돌려 둔 뒤 더블클릭 1.00 등). 칸 · 슬라이더에는 버린 휠 값이 남아 있다 - 저장된
+      // 값으로 다시 그린다. 안 그러면 다음 휠이 남은 값에서 이어 1.10 을 저장했다(Codex 재리뷰 09-29).
+      if (dropped) render();
+      return;
+    }
     save(chain.map((item, i) => (i === index ? { ...item, strength: next } : item)));
   }
 
@@ -743,10 +754,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   }
 
   // 휠이 멈췄다 - 모아 둔 강도를 한 번에 저장한다(여러 LoRA 를 돌렸어도 하나도 버리지 않는다). 다른 저장이 도는
-  // 중이면 그게 끝난 뒤에 - 겹쳐 보내면 먼저 떠난 옛 목록이 뒤에 도착해 이긴다.
+  // 중이면 그게 끝난 뒤에 - 겹쳐 보내면 먼저 떠난 옛 목록이 뒤에 도착해 이긴다. 슬라이더를 끄는 중이어도 뒤로 -
+  // 그사이 저장이 돌면 놓을 때의 값(change)이 저장 중이라 버려졌다(Codex 재리뷰 09-29). 놓으면 그 저장에 실려 간다.
   function flushWheel() {
     if (!wheelEdits.size) return;
-    if (busy) { wheelTimer = win.setTimeout?.(flushWheel, WHEEL_SAVE_MS); return; }
+    if (busy || dragging) { wheelTimer = win.setTimeout?.(flushWheel, WHEEL_SAVE_MS); return; }
     if (chain.every(item => !wheelEdits.has(item.name) || Number(item.strength) === wheelEdits.get(item.name))) {
       wheelEdits.clear();
       return;

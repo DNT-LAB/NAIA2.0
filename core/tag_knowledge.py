@@ -214,6 +214,21 @@ def apply_korean_keyword_supplement(raw, path: str | Path, *,
     )
 
 
+def apply_korean_slang_supplement(raw, path: str | Path, *,
+                                  index: SupplementIndex | None = None) -> dict[str, Any]:
+    """손으로 고른 속어 키워드(검스 -> black pantyhose · 얼싸 -> facial)를 덧붙인다 — 자동으로 만든 두 보충(csv · 규칙표)은
+    산출물이라 손 항목을 섞지 않는다(다시 만들면 사라진다). 같은 안전 검사: 태그를 만들지 않고, 다른 태그의 키워드와 겹치면
+    건너뛴다(사용자 결정 2026-09-29 — Assist 되살리기가 속어를 영어로 잘못 풀었다: 검스 -> weapon · 발코키 -> stockings)."""
+    return _apply_korean_supplement(
+        raw,
+        path,
+        expected_kind="korean_slang_supplement",
+        source_name="hand_slang_supplement",
+        evidence_field="_korean_slang_sources",
+        index=index,
+    )
+
+
 def _merge_text_field(
     record: MutableMapping[str, Any],
     *,

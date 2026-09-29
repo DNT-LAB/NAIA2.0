@@ -11,6 +11,7 @@ from typing import Any, Callable
 from core.tag_knowledge import (
     apply_korean_alias_supplement,
     apply_korean_keyword_supplement,
+    apply_korean_slang_supplement,
     build_supplement_index,
     apply_translation_overrides,
     merge_parquet_tag_records,
@@ -33,6 +34,7 @@ class KrTagLoadResult:
     override_stats: Any | None = None
     supplement_stats: Any | None = None
     keyword_supplement_stats: Any | None = None
+    slang_supplement_stats: Any | None = None
     named_entity_stats: Any | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -97,6 +99,7 @@ def load_kr_tag_records(
     warn: Callable[[str], None] | None = None,
     include_korean_supplement: bool = True,
     include_korean_keyword_supplement: bool = True,
+    include_korean_slang_supplement: bool = True,
     include_named_entity_aliases: bool = True,
 ) -> KrTagLoadResult:
     """Load the merged KR tag corpus without depending on RemoteBridge."""
@@ -246,7 +249,8 @@ def load_kr_tag_records(
 
     # 두 보강이 한 색인을 쓴다(보강마다 19만 태그를 다시 정규화했다 - 첫 이름 칩 20초 제보, 09-26)
     supplement_index = (build_supplement_index(raw)
-                        if include_korean_supplement or include_korean_keyword_supplement else None)
+                        if include_korean_supplement or include_korean_keyword_supplement
+                        or include_korean_slang_supplement else None)
     supplement_stats = None
     if include_korean_supplement:
         supplement_stats = apply_korean_alias_supplement(
@@ -268,6 +272,15 @@ def load_kr_tag_records(
         for error in keyword_supplement_stats["errors"]:
             _warn(warnings, f"Korean keyword supplement warning - {error}", warn)
 
+    # 손으로 고른 속어(검스 · 얼싸 · 발코키 …) — 자동 보충 둘 뒤에(그것들과 겹치면 건너뛴다, 09-29)
+    slang_supplement_stats = None
+    if include_korean_slang_supplement:
+        slang_supplement_stats = apply_korean_slang_supplement(
+            raw, _first_existing(resolved_data_roots, Path("tag_index") / "korean_slang_supplement.json"),
+            index=supplement_index)
+        for error in slang_supplement_stats["errors"]:
+            _warn(warnings, f"Korean slang supplement warning - {error}", warn)
+
     from core.named_entity_aliases import apply_named_entity_aliases
 
     named_entity_stats = (apply_named_entity_aliases(
@@ -286,6 +299,7 @@ def load_kr_tag_records(
         override_stats=override_stats,
         supplement_stats=supplement_stats,
         keyword_supplement_stats=keyword_supplement_stats,
+        slang_supplement_stats=slang_supplement_stats,
         named_entity_stats=named_entity_stats,
         warnings=warnings,
     )
@@ -308,6 +322,7 @@ def format_kr_tag_load_summary(result: KrTagLoadResult) -> str:
         f"+ {getattr(overrides, 'applied', 0)} overrides "
         f"+ {(result.supplement_stats or {}).get('aliases', 0)} lexical aliases "
         f"+ {keyword_supplement.get('aliases', 0)} CSV keyword aliases "
+        f"+ {(result.slang_supplement_stats or {}).get('aliases', 0)} slang aliases "
         f"+ {(result.named_entity_stats or {}).get('aliases', 0)} entity names "
         f"+ {result.filter_count} filter + {result.dict_count} dict = {len(result.raw)} total"
     )

@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 RULES_PATH = Path(__file__).resolve().parents[1] / "data" / "assist" / "korean_rules.json"
+# 손으로 고른 속어 사전 보충(core/kr_tag_loader) — 그 낱말을 Kiwi 사용자 명사로도 넣는다(KoreanLayer._slang_nouns)
+SLANG_SUPPLEMENT = Path(__file__).resolve().parents[1] / "data" / "tag_index" / "korean_slang_supplement.json"
 NOUN_TAGS = frozenset({"NNG", "NNP", "NNB", "NR", "SL", "SN"})
 VERB_PREFIXES = ("VV", "VA")
 FUNCTIONAL_PREFIXES = ("VV", "VA", "VX", "EC", "EF", "ETM", "ETN", "JKS", "JKO", "JKB", "JKG", "JX", "JC", "XSV",
@@ -535,6 +537,18 @@ class KoreanLayer:
                 return False
         return True
 
+    def _slang_nouns(self) -> list[str]:
+        """손으로 고른 속어(data/tag_index/korean_slang_supplement.json — 별칭 + kiwi_nouns)를 Kiwi 사용자 명사로. Kiwi 가
+        대딸을 대 + 딸(daughter), 뒤태를 뒤 + 태, 입싸를 입 + 싸, 얼싸를 동사(얼싸안다의 얼싸)로 읽어 사전 키워드와 안 맞았다
+        (09-29 E4B 창작 문장 — mother and daughter 가 후보에 올랐다). 얼싸안고 는 그대로 얼싸안(동사)이다."""
+        try:
+            data = json.loads(SLANG_SUPPLEMENT.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        words = {str(a.get("text") or "") for v in (data.get("translations") or {}).values()
+                 for a in (v.get("aliases") or [])} | {str(w) for w in data.get("kiwi_nouns") or []}
+        return sorted(w for w in words if re.fullmatch(r"[가-힣]{2,}", w))
+
     def _build_kiwi(self) -> Any:
         import kiwipiepy
         from kiwipiepy import Kiwi
@@ -565,13 +579,16 @@ class KoreanLayer:
             self._save_names(signature, names)
         people = [w for w in (self._female | self._male | self._neutral | set(self._groups))
                   if re.fullmatch(r"[가-힣]{2,}", w)]
+        slang = self._slang_nouns()
         kiwi = Kiwi()
         for word in names:
             kiwi.add_user_word(word, "NNP", 0)
         for word in people:
             kiwi.add_user_word(word, "NNG", 0)
+        for word in slang:
+            kiwi.add_user_word(word, "NNG", 0)
         kiwi.tokenize("준비")     # 모델 구성을 여기서 한 번
-        self.user_words = len(names) + len(people)
+        self.user_words = len(names) + len(people) + len(slang)
         return kiwi
 
     def _cached_names(self, signature: str) -> list[str] | None:

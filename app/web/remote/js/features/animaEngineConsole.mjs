@@ -119,7 +119,9 @@ export function createAnimaEngineConsole({ document, window: win = window, fetch
   }
 
   function show() {
-    if (phase === 'starting') return;               // 이미 떠 있다 - 같은 기동을 두 번 받지 않는다
+    // 이미 떠 있다 - 같은 기동을 두 번 받지 않는다(줄 · 조회는 그대로). 다만 앞 요청이 끝나며 남긴 release 는 거둔다 -
+    // 켜기 전에 실패한 A 뒤에 큐의 B 가 곧바로 시작하면, A 의 release 가 B 가 켜는 엔진의 콘솔을 닫았다(Codex 09-30 F5).
+    if (phase === 'starting') { released = false; return; }
     if (!ensure()) return;
     stopTimers();
     seq += 1;

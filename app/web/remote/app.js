@@ -2311,7 +2311,7 @@ import('./js/features/animaLoraPanel.mjs?v=20260930-zoomload')
 // 관리형 ANIMA — 엔진이 켜지는 동안 결과 칸 아래쪽에 ComfyUI 출력을 보이는 임시 콘솔(사용자 지정 09-29). 켜지면 스스로
 // 닫힌다. 여는 것은 생성 쪽 감시(watchAnimaEngineStart)가 '엔진 켜는 중' 을 알아챌 때.
 let animaEngineConsole = null;
-import('./js/features/animaEngineConsole.mjs?v=20260930-reviewfix')
+import('./js/features/animaEngineConsole.mjs?v=20260930-reviewfix2')
   .then(({createAnimaEngineConsole}) => {
     animaEngineConsole = createAnimaEngineConsole({document, window});
   })

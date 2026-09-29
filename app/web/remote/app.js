@@ -2275,7 +2275,7 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
 // 백엔드는 /api/anima-engine/*(docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8). 엔진을 고르거나 설치가 끝나면
 // 기존 연결 확인(probe_api)을 다시 태운다 — 새 연결 경로를 만들지 않는다.
 let animaSetupPanel = null;
-import('./js/features/animaSetupPanel.mjs?v=20260929-engstart')
+import('./js/features/animaSetupPanel.mjs?v=20260929-engsync')
   .then(({createAnimaSetupPanel}) => {
     // 엔진을 골랐거나 설치가 끝났다 — 메인 모드 표시(ANIMA) · 연결 · 옵션을 새 엔진으로(onComfyEngineChanged)
     animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine),
@@ -2290,7 +2290,7 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-engstart')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
-import('./js/features/animaLoraPanel.mjs?v=20260929-loradock3')
+import('./js/features/animaLoraPanel.mjs?v=20260929-wheelsync')
   .then(({createAnimaLoraPanel}) => {
     animaLoraPanel = createAnimaLoraPanel({
       document, window,

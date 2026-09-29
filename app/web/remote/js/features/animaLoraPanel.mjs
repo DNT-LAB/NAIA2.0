@@ -137,11 +137,14 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let dock = null;           // 프롬프트 밑 LoRA 줄 - 켜진 관리형 체인이 있을 때만 보인다
   let dragging = false;      // 강도 슬라이더를 끄는 중 - 그동안 줄을 다시 그리지 않는다(손잡이가 사라진다)
   let wheelTimer = 0;
+  // 휠로 바꾸고 아직 저장하지 않은 강도 - LoRA 이름별. 행 번호로 쥐면 그사이 순서를 바꾸거나 뺀 뒤 다른 LoRA 에 들어갔다.
+  const wheelEdits = new Map();
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const shortName = name => String(name || '').replace(/\.safetensors$/i, '');
   const fmtStrength = value => (Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '1.00');
+  const shownStrength = item => (wheelEdits.has(item.name) ? wheelEdits.get(item.name) : item.strength);
   const fmtSize = bytes => (Number(bytes) >= 1048576 ? `${Math.round(Number(bytes) / 1048576)}MB` : `${Math.max(1, Math.round((Number(bytes) || 0) / 1024))}KB`);
   const pick = selector => (popup ? popup.querySelector(selector) : null);
   const thumbUrl = item => `${API}/loras/thumb?name=${encodeURIComponent(item.name)}&v=${encodeURIComponent(item.thumb.version ?? '')}`;
@@ -235,6 +238,13 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   }
 
   async function save(next) {
+    // 휠로 돌려 두고 아직 저장하지 않은 강도를 이번 저장에 이름으로 싣는다. 따로 늦게 보내면 옛 목록이 이겨, 그사이
+    // 끈 LoRA 를 다시 켜거나 순서를 바꾼 뒤 다른 LoRA 에 강도가 들어갔다(Codex 09-29).
+    win.clearTimeout?.(wheelTimer);
+    if (wheelEdits.size) {
+      next = next.map(item => (wheelEdits.has(item.name) ? { ...item, strength: wheelEdits.get(item.name) } : item));
+      wheelEdits.clear();
+    }
     busy = true;
     error = '';
     render(next);
@@ -388,7 +398,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         <input type="checkbox" data-lora-on="${i}"${item.enabled === false ? '' : ' checked'}${busy ? ' disabled' : ''}
                title="켜기 / 끄기">
         <span class="ald-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>
-        ${strengthHtml(i, item.strength)}</div>`).join('')}`;
+        ${strengthHtml(i, shownStrength(item))}</div>`).join('')}`;
     el.hidden = false;
     restoreFocus(el, focused);
     wrap?.classList.add('has-anima-lora-dock');
@@ -420,7 +430,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
           <button type="button" data-lora-down="${i}" title="적용 순서 아래로"${busy || i === view.length - 1 ? ' disabled' : ''}>↓</button>
           <button type="button" data-lora-rm="${i}" title="체인에서 빼기"${busy ? ' disabled' : ''}>✕</button>
         </span>
-        ${strengthHtml(i, item.strength)}</div>`;
+        ${strengthHtml(i, shownStrength(item))}</div>`;
     }).join('');
   }
 
@@ -688,6 +698,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
 
   function setStrength(index, value) {
     if (!chain[index]) return;
+    wheelEdits.delete(chain[index].name);      // 손으로 정한 값이 앞서 휠로 돌려 둔 값보다 나중이다
     if (!Number.isFinite(value) || value < STRENGTH_MIN || value > STRENGTH_MAX) {
       error = `강도는 ${STRENGTH_MIN} ~ ${STRENGTH_MAX} 사이로 적어 주세요.`;
       render();                    // 틀린 값은 저장하지 않고 원래 값으로 되돌린다(조용히 자르지 않는다)
@@ -721,12 +732,26 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     const item = chain[index];
     if (!item) return;
     event.preventDefault?.();      // 휠이 강도 위에 있으면 목록 · 입력칸을 굴리지 않는다
-    const shown = Number(control.parentElement?.querySelector?.('[data-lora-w]')?.value ?? item.strength);
+    const shown = wheelEdits.has(item.name) ? wheelEdits.get(item.name)
+      : Number(control.parentElement?.querySelector?.('[data-lora-w]')?.value ?? item.strength);
     const delta = (event.shiftKey ? 0.25 : STEP) * (event.deltaY < 0 ? 1 : -1);
     const value = Math.min(STRENGTH_MAX, Math.max(STRENGTH_MIN, Math.round(((Number.isFinite(shown) ? shown : 1) + delta) * 100) / 100));
     showStrength(control, value);
+    wheelEdits.set(item.name, value);
     win.clearTimeout?.(wheelTimer);
-    wheelTimer = win.setTimeout?.(() => setStrength(index, value), WHEEL_SAVE_MS);
+    wheelTimer = win.setTimeout?.(flushWheel, WHEEL_SAVE_MS);
+  }
+
+  // 휠이 멈췄다 - 모아 둔 강도를 한 번에 저장한다(여러 LoRA 를 돌렸어도 하나도 버리지 않는다). 다른 저장이 도는
+  // 중이면 그게 끝난 뒤에 - 겹쳐 보내면 먼저 떠난 옛 목록이 뒤에 도착해 이긴다.
+  function flushWheel() {
+    if (!wheelEdits.size) return;
+    if (busy) { wheelTimer = win.setTimeout?.(flushWheel, WHEEL_SAVE_MS); return; }
+    if (chain.every(item => !wheelEdits.has(item.name) || Number(item.strength) === wheelEdits.get(item.name))) {
+      wheelEdits.clear();
+      return;
+    }
+    save(chain.slice());
   }
 
   function onInput(event) {

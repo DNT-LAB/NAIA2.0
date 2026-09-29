@@ -156,6 +156,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   let pollTimer = 0;
   let drawn = '';            // 마지막으로 그린 입력 — 같으면 다시 그리지 않는다(입력 중인 칸을 지키려고)
   let lastState = '';
+  let lastEngine = '';
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -574,26 +575,37 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     }
   }
 
+  // 상태를 받았다 - 조회와 설치([설치] · [복구]) 응답이 둘 다 여기로 온다.
+  // 설치가 끝났다 — 엔진이 바뀌었을 수 있으니 기존 연결 확인 흐름(probe_api)을 다시 태운다(계약서 §9.5).
+  // 설치 작업 없이 바로 준비됨이 된 것(이미 끝난 설치를 가져다 썼다 - 09-29)도 같다. 첫 조회('')는 아니다.
+  // 준비된 채 엔진 선택만 바뀐 것도 알린다: 설치 응답보다 조회가 먼저 와 '외부' 를 알린 뒤 '관리형' 이 되면
+  // 준비됨 -> 준비됨이라 알림이 빠졌다(Codex 09-29).
+  function applyStatus(next) {
+    st = next;
+    const state = st ? install().state : '';
+    const engine = st ? String(st.comfyui_engine || '') : '';
+    if (lastState && state === 'ready' && (lastState !== 'ready' || engine !== lastEngine)) onEngineChanged(engine);
+    lastState = state;
+    lastEngine = engine;
+  }
+
   async function refresh() {
+    let next = null;
     try {
       const res = await fetchFn(`${API}/status`, { cache: 'no-store' });
       if (res.status === 404) {
         missing = true;
-        st = null;
       } else {
         missing = false;
-        st = await res.json();
+        next = await res.json();
       }
     } catch (error) {
       if (elStatus) elStatus.textContent = '상태를 읽지 못했습니다';
       schedule();
       return;
     }
+    applyStatus(next);
     const state = st ? install().state : '';
-    // 설치가 끝났다 — 엔진이 바뀌었을 수 있으니 기존 연결 확인 흐름(probe_api)을 다시 태운다(계약서 §9.5).
-    // 설치 작업 없이 바로 준비됨이 된 것(이미 끝난 설치를 가져다 썼다 - 09-29)도 같다. 첫 조회('')는 아니다.
-    if (lastState && lastState !== 'ready' && state === 'ready') onEngineChanged(st.comfyui_engine);
-    lastState = state;
     if (st && state !== 'preparing' && state !== 'ready' && visible()) {
       if (!lic) loadLicenses();
       if (!plan && !inspecting && !autoInspected && !remote) {
@@ -707,10 +719,10 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
         const body = { select_on_ready: true, force_verify: false, engine_root: currentRoot() };
         if (!consentStored()) body.consent = { bundle_sha256: lic ? lic.bundle_sha256 : '', agreed: agreed === true };
         const data = await call('POST', '/prepare', body);
-        if (data.status) st = data.status;
+        if (data.status) applyStatus(data.status);
       } else if (act === 'repair') {
         const data = await call('POST', '/prepare', { select_on_ready: false, force_verify: true });
-        if (data.status) st = data.status;
+        if (data.status) applyStatus(data.status);
       } else if (act === 'cancel') {
         await call('POST', '/cancel', {});
       } else if (act === 'start') {

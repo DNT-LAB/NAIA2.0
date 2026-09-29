@@ -371,6 +371,7 @@ def reserve_vram(context, settings):
       잰다(또 비우면 이중 계산).
     - 안 떠 있는데 GPU 모드로 받아 둔 모델이 있으면 나중에 올라올 자리를 남긴다. 단 GPU 메모리(설치 때 잰 값)에서
       ANIMA 가 설 자리(ANIMA_MIN_VRAM_GB)를 뺀 만큼까지만 - 넘으면 ANIMA 가 느린 분할 적재로 밀린다.
+      GPU 메모리를 모르면(첫 설치 - 영수증은 연기 시험 뒤에 생긴다) 상한을 걸 수 없으니 남기지 않는다(Codex 09-29).
     """
     if settings.reserve_vram_gb != "auto":
         return float(settings.reserve_vram_gb)
@@ -387,10 +388,10 @@ def reserve_vram(context, settings):
         model = model_by_id(config["model"])
         path = Path(config["model_path"]) if config.get("model_path") else model_path(save, model.id)
         if config.get("device") != "cpu" and path.is_file():
-            want = base + model.size / 1e9 * 1.1 + 0.5
             total = _gpu_total_gb(settings)
-            if total:
-                want = min(want, total - ANIMA_MIN_VRAM_GB)
+            if not total:
+                return base
+            want = min(base + model.size / 1e9 * 1.1 + 0.5, total - ANIMA_MIN_VRAM_GB)
             return round(max(base, want), 2)
     except (OSError, KeyError, ValueError, AttributeError):
         pass

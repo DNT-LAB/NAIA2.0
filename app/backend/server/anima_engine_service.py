@@ -52,13 +52,18 @@ class AnimaEngineService:
 
     def adopt_installed(self):
         """표준 자리에 이미 끝난 설치가 있으면 가져다 쓴다(adopt_installed_engine) - 기동 · 상태 조회가 부른다."""
-        adopted = adopt_installed_engine(self.save_root, forbidden_roots=self.forbidden())
-        if adopted:
-            # 설치 작업은 만들 때의 설정(engine_root 없음)을 쥐고 있다 - 새 자리로 다시 만든다. 설치 중이면 engine_root 가
-            # 이미 있어 여기로 오지 않는다.
-            self.job = None
-            print("ANIMA: adopted an installed engine", flush=True)
-        return adopted
+        if load_settings(self.save_root).engine_root:
+            return None      # 흔한 길 - 자물쇠 없이(복구하는 prepare 는 해시하는 동안 자물쇠를 오래 쥔다)
+        # prepare() 와 줄을 세운다: 가져다 쓰기로 정한 뒤 prepare 가 만든 설치 작업을 아래 self.job = None 이 지우면
+        # 설치는 돌지만 상태 · 취소 · 엔진 선택(_select)이 다른 작업을 본다(Codex 09-29).
+        with self.lock:
+            adopted = adopt_installed_engine(self.save_root, forbidden_roots=self.forbidden())
+            if adopted:
+                # 설치 작업은 만들 때의 설정(engine_root 없음)을 쥐고 있다 - 새 자리로 다시 만든다. 설치 중이면
+                # engine_root 가 이미 있어 여기로 오지 않는다.
+                self.job = None
+                print("ANIMA: adopted an installed engine", flush=True)
+            return adopted
 
     def _on_ready(self, runtime):
         register_runtime(runtime)
@@ -105,8 +110,11 @@ class AnimaEngineService:
             # Validate and persist root before start; all expensive checks run off the event loop.
             updates = {k: body[k] for k in ("engine_root", "model_dirs") if k in body}
             self.update_settings(updates)
+            force = body.get("force_verify", False) is True
             job = self._job()
-            job._force = body.get("force_verify", False) is True
+            if not force and quick_receipt(job.settings):
+                return self._use_installed(body)
+            job._force = force
             plan = job.inspect()
             for check in plan["checks"]:
                 if not check["ok"]:
@@ -115,15 +123,18 @@ class AnimaEngineService:
                 save_settings(self.save_root, {"engine_root": plan["engine_root"]})
                 self.job = None
                 job = self._job()
-            if not job._force and quick_receipt(job.settings):
-                # 고른 자리에 이미 끝난 설치가 있다('설치 (0KB)') - 받을 것도, 엔진을 켜서 다시 시험할 것도 없다.
-                # 가져다 쓴다(사용자 제보 09-29). 설치를 마친 것과 같게 엔진 선택도 따른다(select_on_ready).
-                if body.get("select_on_ready", True) is True:
-                    integration.token_manager_of(self.context).save_token("comfyui_engine", "managed")
-                return {"ok": True, "joined": False, "status": self.status()}
-            result = job.start(select_on_ready=body.get("select_on_ready", True) is True,
-                               force_verify=body.get("force_verify", False) is True)
+                if not force and quick_receipt(job.settings):
+                    return self._use_installed(body)
+            result = job.start(select_on_ready=body.get("select_on_ready", True) is True, force_verify=force)
             return {"ok": True, "joined": result["joined"], "status": self.status()}
+
+    def _use_installed(self, body):
+        """고른 자리에 이미 끝난 설치가 있다('설치 (0KB)') - 받을 것도, PC 검사(설치 공간 · GPU)도, 엔진을 켜서 다시
+        시험할 것도 없다. 가져다 쓴다(사용자 제보 09-29 · 공간 검사가 먼저 막았다 - Codex 09-29). 설치를 마친 것과 같게
+        엔진 선택도 따른다(select_on_ready)."""
+        if body.get("select_on_ready", True) is True:
+            integration.token_manager_of(self.context).save_token("comfyui_engine", "managed")
+        return {"ok": True, "joined": False, "status": self.status()}
 
     def cancel(self):
         self._job().cancel()

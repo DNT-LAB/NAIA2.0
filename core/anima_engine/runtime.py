@@ -31,12 +31,29 @@ class ManagedEngineError(RuntimeError):
 
 def clean_environment():
     env = dict(os.environ)
+    # PYTHONDONTWRITEBYTECODE · PYTHONPYCACHEPREFIX 는 Electron 셸이 NAIA 백엔드에 준다(앱 폴더에 .pyc 를 안 쓰게).
+    # ComfyUI 가 물려받으면 동봉된 __pycache__(.pyc 14,741개)를 못 찾고 켤 때마다 소스를 다시 번역한다(약 3초,
+    # 09-29 관측) - 엔진의 파이썬은 제 캐시를 쓴다.
     for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE", "PYTHONEXECUTABLE",
+                "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX",
                 "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "CONDA_SHLVL"):
         env.pop(key, None)
     env.update(PYTHONNOUSERSITE="1", PYTHONUTF8="1", PYTHONIOENCODING="utf-8",
                HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     return env
+
+
+# 엔진이 뜨기를 기다리는 한도(초). 출력 없이 START_QUIET_TIMEOUT 이 지나면 멈추고, 로그가 이어지는 동안은 기다리되
+# 전체로 START_HARD_TIMEOUT 을 넘지 않는다(09-29 관측: 180초 고정 한도에 끊긴 기동이 무엇을 하던 중인지 알 수 없었다).
+START_QUIET_TIMEOUT = 180.0
+START_HARD_TIMEOUT = 600.0
+# 기동마다 engine.log 에 적는 머리줄 - log_tail 은 마지막 머리줄부터만 돌려준다(오류 상세에 지난 실행의 로그가 섞였다).
+LOG_START_MARK = "===== NAIA: engine start "
+
+
+def start_timed_out(now, started, last_output, *, quiet=START_QUIET_TIMEOUT, hard=START_HARD_TIMEOUT):
+    """기동을 그만 기다릴 때인가 - 마지막 출력(없으면 시작) 뒤 quiet 초가 조용했거나, 시작 뒤 hard 초가 지났다."""
+    return now - max(started, last_output or started) >= quiet or now - started >= hard
 
 
 class AnimaEngineRuntime:
@@ -91,19 +108,36 @@ class AnimaEngineRuntime:
             path = self.engine_root / "state/engine.log"
             with path.open("rb") as handle:
                 handle.seek(max(0, path.stat().st_size - 16384))
-                return "\n".join(handle.read().decode("utf-8", "replace").splitlines()[-40:])
+                text = handle.read().decode("utf-8", "replace")
         except OSError:
             return ""
+        # 이번 기동의 머리줄부터 - 머리줄이 16KB 밖이면 창 전체가 이번 기동의 출력이다
+        mark = text.rfind(LOG_START_MARK)
+        return "\n".join((text[mark:] if mark >= 0 else text).splitlines()[-40:])
 
-    def _drain_log(self, proc):
+    def _mark_log_start(self):
+        path = self.engine_root / "state/engine.log"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("ab") as handle:
+                handle.write(f"\n{LOG_START_MARK}{datetime.now().astimezone().isoformat()} =====\n".encode("utf-8"))
+        except OSError:
+            pass
+
+    def _drain_log(self, proc, progress=None):
         path = self.engine_root / "state/engine.log"
         handle = None
+        # ⚠️ read(4096) 은 4KB 가 찰 때까지 안 돌아온다(파이프의 버퍼 리더) - 기동 출력은 3~4KB 라 한도가 다 되도록
+        #    파일에 한 줄도 안 적혔다(09-29 관측: 3,462바이트). read1 은 온 만큼 바로 준다.
+        read = getattr(proc.stdout, "read1", None) or proc.stdout.read
         try:
             handle = path.open("ab")
             while True:
-                block = proc.stdout.read(4096)
+                block = read(4096)
                 if not block:
                     break
+                if progress is not None:
+                    progress["last"] = self.clock()   # 기동 한도는 마지막 출력부터 잰다(start_timed_out)
                 if handle.tell() + len(block) > 10 * 1024 * 1024:
                     handle.close()
                     os.replace(path, path.with_name("engine.log.1"))
@@ -125,7 +159,7 @@ class AnimaEngineRuntime:
             except OSError:
                 pass
 
-    def ensure_running(self, timeout=180.0):
+    def ensure_running(self, timeout=START_QUIET_TIMEOUT, hard_timeout=START_HARD_TIMEOUT):
         with self._op:
             if self.status()["state"] == "running":
                 self.touch()
@@ -144,16 +178,21 @@ class AnimaEngineRuntime:
                 (self.engine_root / "state" / folder).mkdir(parents=True, exist_ok=True)
             self._cleanup_outputs()
             argv, cwd, env = self.command_builder(self.port)
+            self._mark_log_start()
             try:
                 self.proc = self.popen(argv, cwd=str(cwd), env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 self.job = _attach_kill_on_close_job(self.proc)
                 if os.name == "nt" and not self.job:
                     print("ANIMA: kill-on-close job attachment unavailable", flush=True)
-                Thread(target=self._drain_log, args=(self.proc,), daemon=True, name="anima-log").start()
-                deadline = self.clock() + timeout
-                while self.clock() < deadline and not self._stop.is_set():
+                progress = {"last": None}
+                drain = Thread(target=self._drain_log, args=(self.proc, progress), daemon=True, name="anima-log")
+                drain.start()
+                started = self.clock()
+                while not self._stop.is_set() and not start_timed_out(self.clock(), started, progress["last"],
+                                                                        quiet=timeout, hard=hard_timeout):
                     if self.proc.poll() is not None:
+                        drain.join(timeout=2)      # 끝난 프로세스의 마지막 출력까지 적은 뒤 읽는다
                         raise ManagedEngineError("ENGINE_START_FAILED", detail=self.log_tail())
                     try:
                         response = requests.get(self.url + "/system_stats", timeout=2)
@@ -298,10 +337,36 @@ def register_runtime(runtime):
         REGISTRY[str(runtime.engine_root.resolve())] = runtime
 
 
+# ANIMA 가 설 자리(GB) - 모델 셋(manifest) + 1MP 추론 여유. reserve_vram 이 이 자리까지 먹지 않게 한다.
+ANIMA_MIN_VRAM_GB = sum(model["size"] for model in manifest.MODELS) / 1e9 + 1.5
+
+
+def _gpu_total_gb(settings):
+    """설치 때 잰 GPU 메모리(GiB) - 영수증의 gpu.vram_mb. 모르면 None."""
+    try:
+        vram_mb = float(((quick_receipt(settings) or {}).get("gpu") or {}).get("vram_mb") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return vram_mb / 1024 if vram_mb > 0 else None
+
+
 def reserve_vram(context, settings):
+    """ComfyUI 가 **지금 쓰는 몫 밖으로** 더 비워 둘 VRAM(GB) - --reserve-vram. 엔진을 켤 때 한 번 정해진다.
+
+    ComfyUI 는 드라이버가 잰 빈 메모리에서 이만큼을 더 남기고 모델을 올린다(09-29 관측: 26B 를 받아 두기만 해도
+    16.81GB - 16GB GPU 전체보다 크다).
+    - Assist · Auto Boost 의 llama-server 가 **이미 떠 있으면** 기본값만: 그 몫은 드라이버가 이미 '사용 중' 으로
+      잰다(또 비우면 이중 계산).
+    - 안 떠 있는데 GPU 모드로 받아 둔 모델이 있으면 나중에 올라올 자리를 남긴다. 단 GPU 메모리(설치 때 잰 값)에서
+      ANIMA 가 설 자리(ANIMA_MIN_VRAM_GB)를 뺀 만큼까지만 - 넘으면 ANIMA 가 느린 분할 적재로 밀린다.
+    """
     if settings.reserve_vram_gb != "auto":
         return float(settings.reserve_vram_gb)
+    base = 1.0
     try:
+        llama = getattr(context, "boost_llama_runtime", None)
+        if llama is not None and getattr(llama, "is_running", lambda: False)():
+            return base
         from core.boost_v2 import load_boost_v2_settings
         from core.llama_models import model_by_id, model_path
         from .integration import save_root_of
@@ -310,10 +375,14 @@ def reserve_vram(context, settings):
         model = model_by_id(config["model"])
         path = Path(config["model_path"]) if config.get("model_path") else model_path(save, model.id)
         if config.get("device") != "cpu" and path.is_file():
-            return 1.0 + model.size / 1e9 * 1.1 + 0.5
+            want = base + model.size / 1e9 * 1.1 + 0.5
+            total = _gpu_total_gb(settings)
+            if total:
+                want = min(want, total - ANIMA_MIN_VRAM_GB)
+            return round(max(base, want), 2)
     except (OSError, KeyError, ValueError, AttributeError):
         pass
-    return 1.0
+    return base
 
 
 def get_runtime(context):

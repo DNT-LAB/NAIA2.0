@@ -443,7 +443,11 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       parts.push(`<div class="anima-detail">${esc(PHASE_LABEL[ins.phase] || '준비 중')}…${
         ins.current_item ? ` ${esc(ins.current_item)}` : ''}</div>`);
     }
-    if (ins.phase === 'start' || ins.phase === 'smoke') {
+    // 엔진 시작 단계는 ComfyUI 를 켤 뿐이다 - 모델은 시험 생성 때 올라간다(09-29 지적: 시작 단계에 '모델을 올리느라' 가
+    // 떠 있었다). 시작은 로그가 이어지는 동안 기다린다(runtime START_* - 출력 없이 3분이면 멈춘다).
+    if (ins.phase === 'start') {
+      parts.push('<div class="anima-note">ANIMA 엔진(ComfyUI)을 켜는 중입니다 — 처음 켤 때는 오래 걸릴 수 있습니다.</div>');
+    } else if (ins.phase === 'smoke') {
       parts.push('<div class="anima-note">처음에는 모델을 메모리에 올리느라 오래 걸릴 수 있습니다.</div>');
     }
     (ins.warnings || []).forEach(w => parts.push(`<div class="anima-note">⚠ ${esc(w.message || w)}</div>`));

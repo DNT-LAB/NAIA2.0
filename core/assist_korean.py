@@ -26,6 +26,7 @@ from typing import Any, Callable, Iterable
 RULES_PATH = Path(__file__).resolve().parents[1] / "data" / "assist" / "korean_rules.json"
 # 손으로 고른 속어 사전 보충(core/kr_tag_loader) — 그 낱말을 Kiwi 사용자 명사로도 넣는다(KoreanLayer._slang_nouns)
 SLANG_SUPPLEMENT = Path(__file__).resolve().parents[1] / "data" / "tag_index" / "korean_slang_supplement.json"
+SLANG_SCORE = -10
 NOUN_TAGS = frozenset({"NNG", "NNP", "NNB", "NR", "SL", "SN"})
 VERB_PREFIXES = ("VV", "VA")
 FUNCTIONAL_PREFIXES = ("VV", "VA", "VX", "EC", "EF", "ETM", "ETN", "JKS", "JKO", "JKB", "JKG", "JX", "JC", "XSV",
@@ -586,7 +587,9 @@ class KoreanLayer:
         for word in people:
             kiwi.add_user_word(word, "NNG", 0)
         for word in slang:
-            kiwi.add_user_word(word, "NNG", 0)
+            # 점수 -10 — 0 이면 더 긴 낱말까지 쪼갰다(입싸움 = 입싸 + 움 · 대딸기 = 대딸 + 기 · 검스트라이프 = 검스 + … ·
+            # 정상위치 = 정상위 + 치). -10 에서 속어 16개는 한 덩어리 · 긴 낱말 쪼갬 0, -15 는 속어 5개를 놓쳤다(09-29 실측)
+            kiwi.add_user_word(word, "NNG", SLANG_SCORE)
         kiwi.tokenize("준비")     # 모델 구성을 여기서 한 번
         self.user_words = len(names) + len(people) + len(slang)
         return kiwi

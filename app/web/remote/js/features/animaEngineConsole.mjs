@@ -50,6 +50,7 @@ export function createAnimaEngineConsole({ document, window: win = window, fetch
   let closeTimer = 0;
   let startedAt = 0;
   let seenStarting = false;
+  let released = false;      // 이 콘솔을 연 생성이 끝났다(release) - 엔진이 켜지기 시작한 걸 못 봤으면 다음 조회에서 닫는다
 
   function ensure() {
     if (el) return el;
@@ -125,6 +126,7 @@ export function createAnimaEngineConsole({ document, window: win = window, fetch
     lines = [];
     since = null;
     seenStarting = false;
+    released = false;
     phase = 'starting';
     startedAt = Date.now();
     logEl.textContent = '';
@@ -185,9 +187,17 @@ export function createAnimaEngineConsole({ document, window: win = window, fetch
       if (state === 'crashed') { fail(data.engine); return; }
       // 처음의 stopped 는 아직 켜기 전일 수 있다(생성 요청이 엔진을 켜기 직전) - 켜는 걸 본 뒤의 stopped 만 끝이다
       if (state === 'stopped' && seenStarting) { closeSoon('엔진이 꺼졌습니다'); return; }
+      // 생성이 끝났는데 엔진은 켜지기 시작하지도 않았다 - 켜기 전에 실패한 요청(LoRA 파일 없음 등)이다. 두면 '켜는 중' 으로
+      // 무기한 묻고 있었다(Codex 09-30). 끝난 '뒤의' 조회로 가른다 - 막 켜지기 시작한 엔진을 놓치지 않게.
+      if (state === 'stopped' && released) { hide(); return; }
     }
     pollTimer = win.setTimeout(() => poll(my), POLL_MS);
   }
 
-  return { show, hide, isShown: () => Boolean(el) && !el.hidden };
+  // 이 콘솔을 연 생성이 끝났다(성공 · 실패 · 취소) - app.js 가 생성 상태가 풀릴 때 부른다. 켜지는 중인 엔진은 끝까지 보인다.
+  function release() {
+    if (phase === 'starting') released = true;
+  }
+
+  return { show, hide, release, isShown: () => Boolean(el) && !el.hidden };
 }

@@ -473,6 +473,9 @@ export function createRemoteController({
       if (found.target === hoverTarget) return;
       hoverTarget = found.target;
       hoverHost = host;
+      // 앞 칸의 받는 중인 확대 그림은 버린다 - 이 칸에 썸네일이 없으면 새 showZoom 이 안 불려, 늦게 온 앞 칸 그림이
+      // 이 칸 위에서 떴다(Codex 09-30).
+      zoomTicket += 1;
       if (hoverTimer) clearTimeout(hoverTimer);
       // 격자를 훑고 지나갈 때마다 번쩍이지 않게 조금 기다린다.
       hoverTimer = setTimeout(() => {

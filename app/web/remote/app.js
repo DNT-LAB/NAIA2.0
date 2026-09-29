@@ -2222,7 +2222,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
 //        마지막 하나가 빠지면 닫힌다. 표시/숨김 설정을 따로 두지 않는다(규칙이 둘이면
 //        어긋난다). 지금 온보딩하는 곳은 Artists 탭 하나뿐이다. ---
 let remoteController = null;
-const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260930-zoomload')
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260930-reviewfix')
   .then(({createRemoteController}) => {
     remoteController = createRemoteController({document, window, showToast, escHtml});
   })
@@ -2311,7 +2311,7 @@ import('./js/features/animaLoraPanel.mjs?v=20260930-zoomload')
 // 관리형 ANIMA — 엔진이 켜지는 동안 결과 칸 아래쪽에 ComfyUI 출력을 보이는 임시 콘솔(사용자 지정 09-29). 켜지면 스스로
 // 닫힌다. 여는 것은 생성 쪽 감시(watchAnimaEngineStart)가 '엔진 켜는 중' 을 알아챌 때.
 let animaEngineConsole = null;
-import('./js/features/animaEngineConsole.mjs?v=20260929-console')
+import('./js/features/animaEngineConsole.mjs?v=20260930-reviewfix')
   .then(({createAnimaEngineConsole}) => {
     animaEngineConsole = createAnimaEngineConsole({document, window});
   })
@@ -8904,6 +8904,7 @@ function setGen(v) {
     stopGenTimer();
     finishProgress();
     updateGenerateButtonMode();
+    animaEngineConsole?.release?.();   // 켜기 전에 끝난 생성(실패 · 취소)이면 콘솔이 스스로 닫는다
   }
   if (resultEnhance) resultEnhance.update();
 }

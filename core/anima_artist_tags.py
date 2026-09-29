@@ -90,6 +90,27 @@ def artist_names(context=None) -> frozenset:
     return names
 
 
+def apply_to_request(params, context=None):
+    """생성 요청의 프롬프트(params['input'])에 '@' - **시도마다 그 시도의 모드로** 다시 만든다.
+
+    ⚠️ 외부 ComfyUI 는 두 번 실패하면 EPS <-> ANIMA 를 바꿔 같은 요청으로 다시 부른다(api_service 자동 스왑). 예전엔
+       붙인 '@' 가 요청에 그대로 남아 EPS 요청 · 그 결과의 히스토리까지 '@작가' 로 갔다(Codex 09-30). 그래서 붙이기 전
+       원문과 보낸 글을 요청에 적어 두고, 다음 시도가 그 보낸 글을 그대로 들고 오면 원문에서 다시 만든다. 보낸 글과
+       다르면(요청을 다른 프롬프트로 다시 쓴 경우) 들어온 글이 원문이다.
+    """
+    original = params.get("input")
+    if original is not None and original == params.get("_anima_at_sent"):
+        original = params.get("_anima_at_original", original)
+    sent = add_anima_artist_at(original, artist_names(context)) if is_anima_request(params) else original
+    params["input"] = sent
+    if sent != original:
+        params["_anima_at_original"], params["_anima_at_sent"] = original, sent
+    else:
+        params.pop("_anima_at_original", None)
+        params.pop("_anima_at_sent", None)
+    return params
+
+
 def is_anima_request(params) -> bool:
     """생성 요청이 ANIMA 로 가는가 - 관리형 엔진이거나, ComfyUI 의 ANIMA 샘플링(unet 그래프)."""
     from core.anima_engine import integration

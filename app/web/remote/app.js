@@ -2290,7 +2290,7 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-engstart')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
-import('./js/features/animaLoraPanel.mjs?v=20260927-lora2')
+import('./js/features/animaLoraPanel.mjs?v=20260929-loradock3')
   .then(({createAnimaLoraPanel}) => {
     animaLoraPanel = createAnimaLoraPanel({
       document, window,
@@ -12037,6 +12037,11 @@ function replayLauncherModuleStates() {
   const stream = moduleStateCache.get('event_stream');
   if (stream && moduleLauncherControl) {
     try { moduleLauncherControl.updateEventStreamState(stream); } catch (_) {}
+  }
+  // ANIMA 전용 도구의 LoRA 배지(L{n}) - 확장 목록을 다시 받으면([설정] 탭) 런처가 통째로 다시 그려져 배지가
+  // 비었다(사용자 제보 09-29). 체인은 LoRA 창이 쥐고 있다 - 서버를 다시 묻지 않고 그대로 칠한다.
+  if (animaLoraPanel) {
+    try { animaLoraPanel.paintBadge(); } catch (error) { console.warn('Failed to replay LoRA badge', error); }
   }
 }
 

@@ -18,6 +18,10 @@ const BADGE_ID = 'badgeAnimaLora';   // 런처의 LoRA 항목 배지(카테고�
 const MAX_CHAIN = 32;                // 계약서 §3.3 — 요청 크기 보호용 상한(임의의 4개 같은 상한은 두지 않는다)
 const STRENGTH_MIN = -2;
 const STRENGTH_MAX = 2;
+const SLIDER_MAX = 2;               // 슬라이더는 0 ~ 2(흔히 쓰는 쪽) - 음수는 칸에 적는다
+const STEP = 0.05;
+const WHEEL_SAVE_MS = 400;          // 휠은 멈춘 뒤 한 번 저장한다(돌리는 동안 매번 보내지 않는다)
+const DOCK_ID = 'animaLoraDock';    // 프롬프트 밑 LoRA 줄(Estimated Tokens 위)
 const RECHECK_MS = 5000;             // params 에코마다 상태를 다시 묻지 않는다
 const MAX_THUMB_BYTES = 10 * 1024 * 1024;
 const FLASH_MS = 1600;
@@ -28,22 +32,50 @@ const STYLE = `
 .anima-lora-popup .alr-sec { display: flex; align-items: center; gap: 6px; padding: 5px 10px 4px;
   font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.4px; color: var(--text-dim);
   border-bottom: 1px solid rgba(42,42,61,0.5); }
-.anima-lora-popup .alr-chain { flex: 0 1 auto; max-height: 132px; min-height: 0; overflow-y: auto;
+.anima-lora-popup .alr-chain { flex: 0 1 auto; max-height: 186px; min-height: 0; overflow-y: auto;
   border-bottom: 1px solid var(--border-dim); }
-.anima-lora-popup .alr-item { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+.anima-lora-popup .alr-item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; row-gap: 3px; padding: 5px 10px;
   border-bottom: 1px solid rgba(42,42,61,0.5); }
+/* 강도는 이름 밑 둘째 줄 - 순서 단추(↑↓)가 강도 칸 바로 옆에 있어 강도를 올리고 내리는 단추로 읽혔다
+   (사용자 지적 09-29 "가중치 조절이 비직관적"). */
+.anima-lora-popup .alr-item > .alr-strength { flex-basis: 100%; padding-left: 44px; }
 .anima-lora-popup .alr-item:last-child { border-bottom: 0; }
-.anima-lora-popup .alr-item.off .alr-name, .anima-lora-popup .alr-item.off .alr-w { opacity: 0.45; }
+.anima-lora-popup .alr-item.off .alr-name, .anima-lora-popup .alr-item.off .alr-strength { opacity: 0.45; }
 .anima-lora-popup .alr-item input[type=checkbox] { accent-color: var(--accent); cursor: pointer; margin: 0; flex: none; }
 .anima-lora-popup .alr-idx { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); width: 14px; text-align: right; flex: none; }
 .anima-lora-popup .alr-name { flex: 1; min-width: 0; font-family: var(--font-editor); font-size: 11.5px; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .anima-lora-popup .alr-badge { font-family: var(--font-mono); font-size: 9px; padding: 0 5px; border-radius: 3px; flex: none;
   background: rgba(240,64,64,0.16); color: #f07070; }
-.anima-lora-popup .alr-w { width: 52px; flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+/* 강도 - 슬라이더(0~2 · 0.05)로 끌고, 칸에는 정확한 값(-2~2, 음수 포함). 창과 프롬프트 밑 LoRA 줄이 같이 쓴다. */
+.alr-strength { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.alr-strength input[type=range] { flex: 1; min-width: 60px; height: 16px; margin: 0; accent-color: var(--accent);
+  cursor: pointer; background: transparent; }
+.alr-strength input[type=range]:disabled { cursor: default; opacity: 0.5; }
+.alr-strength .alr-w { width: 52px; flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
   text-align: right; background: rgba(0,0,0,0.28); border: 1px solid var(--border-dim); border-radius: 5px; padding: 2px 5px;
   height: 22px; outline: none; }
-.anima-lora-popup .alr-w:focus { border-color: var(--accent); color: var(--accent-glow); }
+.alr-strength .alr-w:focus { border-color: var(--accent); color: var(--accent-glow); }
+/* 프롬프트 밑 LoRA 줄(사용자 지정 09-29) - Estimated Tokens 바로 위. 켜고 끄기 · 강도만, 순서 · 넣기 · 빼기는 창([편집]).
+   부모(.prompt-token-footer)가 pointer-events:none 이라 여기서 다시 연다. 입력칸은 그 높이만큼 아래를 비운다. */
+.anima-lora-dock { align-self: stretch; pointer-events: auto; display: flex; flex-direction: column; gap: 3px;
+  padding: 0 0 5px; margin-bottom: 2px; border-bottom: 1px solid rgba(232,232,240,0.08); max-height: 104px; overflow-y: auto; }
+.anima-lora-dock[hidden] { display: none !important; }
+.anima-lora-dock .ald-head { display: flex; align-items: center; gap: 8px; font-size: 9.5px; letter-spacing: 0.4px;
+  color: var(--text-dim); }
+.anima-lora-dock .ald-head b { color: var(--accent-glow); font-weight: 600; }
+.anima-lora-dock .ald-edit { margin-left: auto; height: 18px; padding: 0 8px; font-family: var(--font-mono); font-size: 9.5px;
+  color: var(--text-muted); background: rgba(96,120,255,0.1); border: 1px solid rgba(130,150,255,0.3); border-radius: 5px;
+  cursor: pointer; }
+.anima-lora-dock .ald-edit:hover { color: var(--text-primary); background: rgba(96,120,255,0.2); }
+.anima-lora-dock .ald-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.anima-lora-dock .ald-row input[type=checkbox] { accent-color: var(--accent); cursor: pointer; margin: 0; flex: none; }
+.anima-lora-dock .ald-name { flex: 0 1 36%; min-width: 0; font-family: var(--font-editor); font-size: 11px;
+  color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anima-lora-dock .ald-row > .alr-strength { flex: 1; }
+.anima-lora-dock .ald-row.off .ald-name, .anima-lora-dock .ald-row.off .alr-strength { opacity: 0.45; }
+.prompt-highlight-wrap.has-anima-lora-dock .prompt-edit,
+.prompt-highlight-wrap.has-anima-lora-dock .prompt-highlight { padding-bottom: calc(66px + var(--anima-lora-dock-h, 0px)); }
 .anima-lora-popup .alr-btns { display: inline-flex; gap: 1px; flex: none; }
 .anima-lora-popup .alr-btns button { background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 10px;
   width: 20px; height: 22px; padding: 0; border-radius: 4px; line-height: 22px; }
@@ -102,6 +134,9 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let pngTarget = '';        // 파일 고르기 창을 연 카드의 LoRA 이름
   let popup = null;
   let onResize = null;
+  let dock = null;           // 프롬프트 밑 LoRA 줄 - 켜진 관리형 체인이 있을 때만 보인다
+  let dragging = false;      // 강도 슬라이더를 끄는 중 - 그동안 줄을 다시 그리지 않는다(손잡이가 사라진다)
+  let wheelTimer = 0;
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -162,7 +197,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       checkedAt = Date.now();
       checking = null;
       if (isManaged()) await load();
-      else paintBadge();
+      else paintOutside();
       if (before !== isManaged()) onStateChange();
     })();
     return checking;
@@ -176,7 +211,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       if (!isManaged()) close();
       onStateChange();
     }
-    paintBadge();
+    paintOutside();
   }
 
   function refresh() {
@@ -276,6 +311,90 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     badge.classList.toggle('hidden', !on);
   }
 
+  // 창 밖에 보이는 것 - 런처 배지와 프롬프트 밑 LoRA 줄
+  function paintOutside(view = chain) {
+    paintBadge();
+    paintDock(view);
+  }
+
+  // 강도 - 슬라이더(0~2)로 끌고 칸에는 정확한 값을 적는다(-2~2, 음수 포함). 놓을 때 한 번 저장한다.
+  // 더블클릭 = 1.00 · 휠 = ±0.05(Shift ±0.25). 음수면 슬라이더는 0 에 서 있다(칸이 정본).
+  function strengthHtml(i, strength) {
+    const value = Number.isFinite(Number(strength)) ? Number(strength) : 1;
+    const slider = Math.min(SLIDER_MAX, Math.max(0, value));
+    return `<span class="alr-strength" title="강도 · 더블클릭 = 1.00 · 휠 = ±0.05 · 음수는 칸에 적습니다">
+        <input type="range" data-lora-slider="${i}" min="0" max="${SLIDER_MAX}" step="${STEP}" value="${slider}"
+               aria-label="강도"${busy ? ' disabled' : ''}>
+        <input class="alr-w" data-lora-w="${i}" type="number" step="${STEP}" min="${STRENGTH_MIN}" max="${STRENGTH_MAX}"
+               value="${fmtStrength(strength)}" aria-label="강도"${busy ? ' disabled' : ''}></span>`;
+  }
+
+  // 다시 그린 뒤 초점을 같은 조작으로 돌려놓는다 - 칸만이 아니라 슬라이더도(키보드 ←→ 로 연달아 움직일 때 저장마다
+  // 줄이 새로 그려져 초점이 사라졌다, 라이브 09-29). ⚠️ 저장하는 동안(busy)은 조작이 잠겨 초점을 받지 못한다 - 그때는
+  // 자리를 기억해 두고 다음 그리기(저장이 끝난 뒤)에서 준다. 그사이 사람이 다른 곳을 눌렀으면 그쪽이 이긴다.
+  const pendingFocus = new WeakMap();
+
+  function focusKey(container) {
+    const active = document.activeElement;
+    if (active && container.contains?.(active)) {
+      for (const attr of ['data-lora-w', 'data-lora-slider']) {
+        const index = active.getAttribute?.(attr);
+        if (index != null) return [attr, index];
+      }
+      return null;
+    }
+    return !active || active === document.body ? pendingFocus.get(container) || null : null;
+  }
+
+  function restoreFocus(container, key) {
+    pendingFocus.delete(container);
+    const target = key ? container.querySelector?.(`[${key[0]}="${key[1]}"]`) : null;
+    if (!target) return;
+    if (target.disabled) pendingFocus.set(container, key);
+    else target.focus?.();
+  }
+
+  function ensureDock() {
+    if (dock) return dock;
+    const footer = document.getElementById('promptTokenFooter');
+    if (!footer || typeof footer.insertBefore !== 'function') return null;
+    dock = document.createElement('div');
+    dock.className = 'anima-lora-dock';
+    dock.id = DOCK_ID;
+    dock.hidden = true;
+    footer.insertBefore(dock, footer.firstChild);   // Estimated Tokens 줄 바로 위
+    listen(dock);
+    return dock;
+  }
+
+  // 프롬프트 밑 LoRA 줄(사용자 지정 09-29) - 관리형 ANIMA 이고 체인이 있을 때만. 켜기 · 강도만 여기서, 순서 · 넣기 ·
+  // 빼기는 창([편집]). 체인은 창과 하나다(같은 save) - 어느 쪽에서 바꿔도 둘 다 다시 그린다.
+  function paintDock(view = chain) {
+    const el = ensureDock();
+    if (!el) return;
+    const wrap = typeof el.closest === 'function' ? el.closest('.prompt-highlight-wrap') : null;
+    if (!isManaged() || !view.length) {
+      el.hidden = true;
+      el.innerHTML = '';
+      wrap?.classList.remove('has-anima-lora-dock');
+      return;
+    }
+    if (dragging) return;
+    const on = view.filter(item => item.enabled !== false).length;
+    const focused = focusKey(el);
+    el.innerHTML = `<div class="ald-head">LoRA <b>${on} / ${view.length}</b>
+        <button type="button" class="ald-edit" data-lora-act="open" title="LoRA 창 - 넣기 · 빼기 · 순서">편집</button></div>
+      ${view.map((item, i) => `<div class="ald-row${item.enabled === false ? ' off' : ''}">
+        <input type="checkbox" data-lora-on="${i}"${item.enabled === false ? '' : ' checked'}${busy ? ' disabled' : ''}
+               title="켜기 / 끄기">
+        <span class="ald-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>
+        ${strengthHtml(i, item.strength)}</div>`).join('')}`;
+    el.hidden = false;
+    restoreFocus(el, focused);
+    wrap?.classList.add('has-anima-lora-dock');
+    wrap?.style?.setProperty?.('--anima-lora-dock-h', `${Math.ceil(el.offsetHeight || 0) + 2}px`);
+  }
+
   function paintStatus(view = chain) {
     const status = pick('.tagsearch-status');
     if (!status) return;
@@ -296,13 +415,12 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
                title="켜기 / 끄기(끈 항목은 사슬에서 빠지고 자리는 남습니다)">
         <span class="alr-idx">${i + 1}</span>
         <span class="alr-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>${badge}
-        <input class="alr-w" data-lora-w="${i}" type="number" step="0.05" min="${STRENGTH_MIN}" max="${STRENGTH_MAX}"
-               value="${fmtStrength(item.strength)}" aria-label="강도"${busy ? ' disabled' : ''}>
         <span class="alr-btns">
-          <button type="button" data-lora-up="${i}" title="위로"${busy || i === 0 ? ' disabled' : ''}>▲</button>
-          <button type="button" data-lora-down="${i}" title="아래로"${busy || i === view.length - 1 ? ' disabled' : ''}>▼</button>
-          <button type="button" data-lora-rm="${i}" title="빼기"${busy ? ' disabled' : ''}>✕</button>
-        </span></div>`;
+          <button type="button" data-lora-up="${i}" title="적용 순서 위로"${busy || i === 0 ? ' disabled' : ''}>↑</button>
+          <button type="button" data-lora-down="${i}" title="적용 순서 아래로"${busy || i === view.length - 1 ? ' disabled' : ''}>↓</button>
+          <button type="button" data-lora-rm="${i}" title="체인에서 빼기"${busy ? ' disabled' : ''}>✕</button>
+        </span>
+        ${strengthHtml(i, item.strength)}</div>`;
     }).join('');
   }
 
@@ -354,16 +472,15 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   }
 
   function render(view = chain) {
-    paintBadge();
+    paintOutside(view);
     if (!popup) return;
     paintStatus(view);
     const chainEl = pick('.alr-chain');
     const libEl = pick('.alr-lib');
     if (chainEl) {
-      const active = document.activeElement;
-      const focusIndex = active && chainEl.contains(active) ? active.getAttribute('data-lora-w') : null;
-      chainEl.innerHTML = isManaged() ? chainHtml(view) : '';
-      if (focusIndex != null) chainEl.querySelector(`[data-lora-w="${focusIndex}"]`)?.focus();
+      const focused = focusKey(chainEl);
+      if (!dragging) chainEl.innerHTML = isManaged() ? chainHtml(view) : '';
+      restoreFocus(chainEl, focused);
     }
     if (libEl) {
       libEl.innerHTML = isManaged() ? libraryHtml()
@@ -431,15 +548,28 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       <input type="file" accept="image/png" data-lora-file hidden>
     `;
     document.body.appendChild(popup);
-    popup.addEventListener('click', onClick);
-    popup.addEventListener('change', onChange);
-    popup.addEventListener('input', onInput);
+    listen(popup);
     popup.addEventListener('dragover', onDragOver);
     popup.addEventListener('dragleave', onDragLeave);
     popup.addEventListener('drop', onDrop);
     popup.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); close(); }
     });
+  }
+
+  // 창과 LoRA 줄이 같은 조작을 듣는다(켜기 · 강도 · 편집)
+  function listen(el) {
+    el.addEventListener('click', onClick);
+    el.addEventListener('change', onChange);
+    el.addEventListener('input', onInput);
+    el.addEventListener('dblclick', onDblClick);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('pointerdown', event => {
+      if (event.target?.closest?.('[data-lora-slider]')) dragging = true;
+    });
+    const release = () => { dragging = false; };
+    el.addEventListener('pointerup', release);
+    el.addEventListener('pointercancel', release);
   }
 
   function isOpen() {
@@ -487,6 +617,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     if (act) {
       const which = act.getAttribute('data-lora-act');
       if (which === 'close') close();
+      else if (which === 'open') open();
       else if (which === 'setup') onOpenSetup();
       else if (which === 'folder') openFolder('');
       else if (which === 'reload' && !busy) { error = ''; refresh(); }
@@ -545,21 +676,66 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       save(chain.map((item, i) => (i === index ? { ...item, enabled: toggleBox.checked } : item)));
       return;
     }
-    const weight = event.target.closest('[data-lora-w]');
-    if (weight) {
-      const index = Number(weight.getAttribute('data-lora-w'));
-      const value = Number(weight.value);
-      if (!Number.isFinite(value) || value < STRENGTH_MIN || value > STRENGTH_MAX) {
-        error = `강도는 ${STRENGTH_MIN} ~ ${STRENGTH_MAX} 사이로 적어 주세요.`;
-        render();                  // 틀린 값은 저장하지 않고 원래 값으로 되돌린다(조용히 자르지 않는다)
-        return;
-      }
-      if (Number(chain[index] && chain[index].strength) === value) return;
-      save(chain.map((item, i) => (i === index ? { ...item, strength: value } : item)));
+    const slider = event.target.closest('[data-lora-slider]');
+    if (slider) {                  // 놓았다 - 한 번 저장한다
+      dragging = false;
+      setStrength(Number(slider.getAttribute('data-lora-slider')), Number(slider.value));
+      return;
     }
+    const weight = event.target.closest('[data-lora-w]');
+    if (weight) setStrength(Number(weight.getAttribute('data-lora-w')), Number(weight.value));
+  }
+
+  function setStrength(index, value) {
+    if (!chain[index]) return;
+    if (!Number.isFinite(value) || value < STRENGTH_MIN || value > STRENGTH_MAX) {
+      error = `강도는 ${STRENGTH_MIN} ~ ${STRENGTH_MAX} 사이로 적어 주세요.`;
+      render();                    // 틀린 값은 저장하지 않고 원래 값으로 되돌린다(조용히 자르지 않는다)
+      return;
+    }
+    const next = Math.round(value * 100) / 100;
+    if (Number(chain[index].strength) === next) return;
+    save(chain.map((item, i) => (i === index ? { ...item, strength: next } : item)));
+  }
+
+  // 슬라이더와 칸을 함께 맞춘다(저장 없이) - 끄는 동안 · 휠을 돌리는 동안
+  function showStrength(control, value) {
+    const box = control.parentElement?.querySelector?.('[data-lora-w]');
+    const bar = control.parentElement?.querySelector?.('[data-lora-slider]');
+    if (box) box.value = fmtStrength(value);
+    if (bar) bar.value = String(Math.min(SLIDER_MAX, Math.max(0, value)));
+  }
+
+  function onDblClick(event) {
+    const slider = event.target.closest('[data-lora-slider]');
+    if (!slider || busy) return;
+    event.preventDefault?.();
+    dragging = false;
+    setStrength(Number(slider.getAttribute('data-lora-slider')), 1);
+  }
+
+  function onWheel(event) {
+    const control = event.target.closest('[data-lora-slider], [data-lora-w]');
+    if (!control || busy || control.disabled) return;
+    const index = Number(control.getAttribute('data-lora-slider') ?? control.getAttribute('data-lora-w'));
+    const item = chain[index];
+    if (!item) return;
+    event.preventDefault?.();      // 휠이 강도 위에 있으면 목록 · 입력칸을 굴리지 않는다
+    const shown = Number(control.parentElement?.querySelector?.('[data-lora-w]')?.value ?? item.strength);
+    const delta = (event.shiftKey ? 0.25 : STEP) * (event.deltaY < 0 ? 1 : -1);
+    const value = Math.min(STRENGTH_MAX, Math.max(STRENGTH_MIN, Math.round(((Number.isFinite(shown) ? shown : 1) + delta) * 100) / 100));
+    showStrength(control, value);
+    win.clearTimeout?.(wheelTimer);
+    wheelTimer = win.setTimeout?.(() => setStrength(index, value), WHEEL_SAVE_MS);
   }
 
   function onInput(event) {
+    const slider = event.target.closest('[data-lora-slider]');
+    if (slider) {                  // 끄는 동안 칸만 따라 바꾼다 - 저장은 놓을 때(change)
+      dragging = true;
+      showStrength(slider, Number(slider.value));
+      return;
+    }
     const box = event.target.closest('[data-lora-filter]');
     if (!box) return;
     filter = box.value;

@@ -251,7 +251,8 @@ def _negated_after(per: list[list[tuple[str, str, int, int]]], i: int, end: int)
     금지 · 부사 안/못 · 용언 + 지 않/못/말. 글자로 보니 '말풍선 안 글자'(안 = 안쪽) · '책장 빼곡한' 의 빼 에 걸렸다(Codex 16차 F6)."""
     toks = [(f, t) for f, t, s, _e in per[i] if s >= end]
     toks += [(f, t) for j in (i + 1, i + 2) if j < len(per) for f, t, _s, _e in per[j]]
-    toks = [(f, t) for f, t in toks if not t.startswith(("J", "S"))]
+    cut = next((k for k, (_f, t) in enumerate(toks) if t.startswith("S")), len(toks))
+    toks = [(f, t) for f, t in toks[:cut] if not t.startswith("J")]   # 쉼표 · 기호에서 멈춘다 — '안경, 안 웃는'(17차 R5)
     if not toks:
         return False
     form, tag = toks[0]
@@ -261,7 +262,9 @@ def _negated_after(per: list[list[tuple[str, str, int, int]]], i: int, end: int)
         return True
     if form in ("안", "못") and tag == "MAG":
         return True
-    return tag.startswith(("VV", "VA")) and len(toks) >= 3 and toks[1][0] == "지" and toks[2][0] in ("않", "못하", "말")
+    # 용언 + 지 않 — 명사 + 하다(화장하지 않은 = 화장 + 하/XSV + 지 + 않)도(17차 R6)
+    return tag.startswith(("VV", "VA", "XSV", "XSA")) and len(toks) >= 3 and toks[1][0] == "지" \
+        and toks[2][0] in ("않", "못하", "말")
 
 
 def find_units(spans: list[tuple[str, str, int, int]], text: str, *, explained: set[str],

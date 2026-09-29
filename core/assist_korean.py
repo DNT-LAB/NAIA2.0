@@ -1093,8 +1093,13 @@ class KoreanLayer:
         for i, (form, tag) in enumerate(toks):
             if tag not in NOUN_TAGS or form in seen or form in phrase_nouns or i in merged:
                 continue
-            if form in members and not any(f in self._OTHER_WORDS for f, _t in toks[max(0, i - 2):i]):
-                continue                               # 묶음의 구성원 — '또 다른 남자친구' 는 다른 사람이다(Codex 16차 F3)
+            if form in members:
+                g = max((k for k in range(i) if toks[k][0] in self._groups), default=None)
+                joined = g is not None and any(t == "JC" for _f, t in toks[g + 1:i])
+                other = any(f in self._OTHER_WORDS for f, _t in toks[max(0, i - 2):i])
+                if not (joined or other):
+                    continue                           # 묶음의 구성원 — '또 다른 남자친구'(16차 F3) · '커플과 내 남친'(17차 R3)은
+                    #                                    다른 사람이다(접속 조사로 이어졌다)
             if any(compact(form) in name for name, _g in named):
                 continue                               # 고른 캐릭터 이름의 토막(하츠네 미쿠의 미쿠)
             nxt = toks[i + 1] if i + 1 < len(toks) else ("", "")
@@ -1175,11 +1180,12 @@ class KoreanLayer:
         # Kiwi 가 사람 낱말을 쪼개 토막 길이 못 센 것(여고+생 · 바니+걸 · 남사+친 — 09-29 E4B 시험) — 어절에서 조사를 떼고
         # 규칙표 낱말 그대로일 때만. 통째 토막으로 나온 낱말은 토막 길이 이미 다뤘다(세었거나 일부러 뺐다 — 비유 · 구)
         whole = {f for f, _t in toks}
+        name_at = self._name_positions(words, names_c)
         for w_i, word in enumerate(words):
             base = next((word[:-len(p)] for p in self._PERSON_PARTICLES
                          if word.endswith(p) and len(word) - len(p) >= 2), word)
-            if base in whole or base in phrase_nouns or base in counted or any(base in n for n in names_c):
-                continue                                  # 고른 이름 안의 사람 낱말(바니걸 아스나 — Codex 16차 F4)
+            if base in whole or base in phrase_nouns or base in counted or w_i in name_at:
+                continue      # 고른 이름이 차지한 어절(바니걸 아스나 — 16차 F4). 낱말이 아니라 자리로 — 이름 밖의 바니걸은 센다(17차 R4)
             gender = ("girl" if base in self._female else "boy" if base in self._male
                       else "unknown" if base in self._neutral else None)
             if gender is None:
@@ -1248,6 +1254,19 @@ class KoreanLayer:
                 return True
         return False
 
+    def _name_positions(self, words: list[str], names_c: set[str]) -> set[int]:
+        """고른 이름이 차지한 어절 번호(여러 어절 이름은 붙여서 · 끝 조사는 떼고)."""
+        out: set[int] = set()
+        for j in range(len(words)):
+            joined = ""
+            for k in range(j, min(len(words), j + 4)):
+                joined = compact(joined + words[k])
+                if joined in names_c or any(joined.endswith(p) and joined[:-len(p)] in names_c
+                                            for p in self._PERSON_PARTICLES):
+                    out.update(range(j, k + 1))
+                    break
+        return out
+
     _COUNT_WORD = re.compile(r"(\d+)(?:명|사람)?(?:의|이|가)?")
 
     def _count_near_words(self, words: list[str], i: int) -> int | None:
@@ -1262,9 +1281,16 @@ class KoreanLayer:
             return int(m.group(1)) if m else None
 
         if i + 1 < len(words):                  # 뒤의 수가 먼저 — 토막 길과 같은 차례(Codex 16차 F5: 남자 1명 바니걸 2명)
-            n = number(words[i + 1])
-            if n:
-                return n
+            nxt = words[i + 1]
+            follow = words[i + 2] if i + 2 < len(words) else ""
+            # 뒤의 수는 인원일 때만 — 숫자는 명 · 사람이 붙어야(1.5미터 의 1 을 인원으로 읽었다), 수사는 측정 단위가 뒤따르지
+            # 않아야(다섯 미터, Codex 17차 R1 · R2)
+            digit_ok = bool(re.fullmatch(r"\d+(?:명|사람)(?:의|이|가)?", nxt)) or (
+                nxt.isdigit() and follow.startswith(tuple(self._COUNTERS)))
+            if (digit_ok or not nxt[:1].isdigit()) and not self._is_measure(follow):
+                n = number(nxt)
+                if n:
+                    return n
         if i >= 1:
             prev = words[i - 1]
             if prev in ("명의", "사람의") and i >= 2:
@@ -1274,6 +1300,17 @@ class KoreanLayer:
 
     _AGE_UNITS = frozenset({"대", "살", "세"})
     _COUNTERS = frozenset({"명", "분", "사람", "쌍"})
+    # 사람 수가 아닌 것을 세는 단위 — '두 여자 다섯 미터 간격' 의 다섯은 인원이 아니다(Codex 17차 R2)
+    _MEASURE_UNITS = frozenset({"미터", "센티", "센티미터", "킬로", "cm", "m", "층", "번", "개", "마리", "시간", "초", "잔",
+                                "병", "장", "벌", "켤레", "그루", "송이", "권", "채"})
+
+    def _is_measure(self, word: str) -> bool:
+        """측정 단위 어절인가 — 앞 숫자와 끝 조사를 떼고 **그대로** 같을 때만(장 · 초 · 개로 시작하는 장면 · 초록 · 개이쁘게는
+        아니다)."""
+        core = re.sub(r"^[\d.]+", "", word)
+        core = next((core[:-len(p)] for p in ("으로", "로", "씩", "쯤", "정도", *self._PERSON_PARTICLES)
+                     if core.endswith(p) and len(core) > len(p)), core)
+        return core in self._MEASURE_UNITS
     _OTHER_WORDS = frozenset({"다른", "다르", "또", "딴", "새"})
     # 묶음 -> 그 묶음을 이루는 사람 낱말(묶음과 함께 나오면 같은 사람들이다)
     _GROUP_MEMBERS = {"커플": ("남친", "여친", "남자친구", "여자친구"), "연인": ("남친", "여친", "남자친구", "여자친구"),
@@ -1288,7 +1325,8 @@ class KoreanLayer:
             after = toks[i + 2][0] if i + 2 < len(toks) else ""
             # 뒤의 수는 둘 · 셋(수사) 또는 인원 단위(명 · 분 · 쌍)가 붙을 때만 — '두 여자 1미터 간격' 의 1 을 인원으로
             # 읽었다(Codex 16차 F2). 나이(20대)는 아니다
-            if form in self._numerals and (tag == "NR" or after in self._COUNTERS) and after not in self._AGE_UNITS:
+            if form in self._numerals and (tag == "NR" or after in self._COUNTERS) and after not in self._AGE_UNITS \
+                    and after not in self._MEASURE_UNITS:
                 return self._numerals[form]
             if tag == "SN" and form.isdigit() and after in self._COUNTERS:
                 return int(form)

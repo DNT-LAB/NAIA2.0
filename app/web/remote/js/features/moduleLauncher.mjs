@@ -189,20 +189,19 @@ const MODULE_REGISTRY = {
 };
 
 // 단축키(Ctrl+글자) -> 모듈(사용자 지정 2026-09-29). 위 표의 `shortcut` 이 단 하나의 원본이다 - 단추 말풍선의
-// 안내(' · Ctrl+W')도 거기서 나온다.
+// 안내(' · Ctrl+W')도 거기서 나온다. 모듈이 아닌 것(Ctrl+Q = Tag Filter)은 만드는 쪽이 `shortcuts` 로 넘긴다.
 const SHORTCUT_MODULES = new Map(Object.entries(MODULE_REGISTRY)
   .filter(([, config]) => config.shortcut)
   .map(([moduleId, config]) => [config.shortcut, moduleId]));
 
-/** 누른 키가 모듈 단축키면 그 모듈 id, 아니면 ''. 글자는 `key` 로 먼저 본다 - 물리 키(code)로만 보면 AZERTY 의
- *  Ctrl+Z(되돌리기)가 Ctrl+W 자리라 와일드카드가 열린다. 한글 자판은 key 가 'ㅈ' · 'ㅔ' 라 그때만 물리 키로
- *  본다(Ctrl+O 와 같은 사정). */
-function shortcutModule(event) {
+/** Ctrl(⌘)+글자면 그 글자(대문자), 아니면 ''. 글자는 `key` 로 먼저 본다 - 물리 키(code)로만 보면 AZERTY 의
+ *  Ctrl+Z(되돌리기)가 Ctrl+W 자리라 와일드카드가 열린다. 한글 자판은 key 가 'ㅈ' · 'ㅔ' · 'ㅂ' 라 그때만 물리
+ *  키로 본다(Ctrl+O 와 같은 사정). */
+function shortcutLetter(event) {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return '';
   const key = String(event.key || '');
-  const letter = /^[a-z]$/i.test(key) ? key.toUpperCase()
+  return /^[a-z]$/i.test(key) ? key.toUpperCase()
     : (/^Key([A-Z])$/.exec(String(event.code || ''))?.[1] || '');
-  return SHORTCUT_MODULES.get(letter) || '';
 }
 
 const CATEGORY_REGISTRY = [
@@ -276,6 +275,8 @@ export function createModuleLauncher({
   isAnimaManaged = () => false,
   openAnimaLora = null,
   isAnimaLoraOpen = () => false,
+  // 모듈이 아닌 단축키 {글자: 동작} - Ctrl+Q = Tag Filter(09-29). 표의 모듈 글자와 겹치면 모듈이 이긴다.
+  shortcuts = {},
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -807,18 +808,22 @@ export function createModuleLauncher({
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') closeMenus();
     });
-    // Ctrl+W 와일드카드 관리 · Ctrl+P 캐릭터 프롬프트(사용자 지정 2026-09-29) - 단추를 누른 것과 같다: 다시 누르면
+    // Ctrl+W 와일드카드 관리 · Ctrl+P 캐릭터 프롬프트 · Ctrl+Q Tag Filter(넘겨받은 동작)(사용자 지정 2026-09-29) -
+    // 단추를 누른 것과 같다: 다시 누르면
     // 닫히고(모듈 팝업 토글), 막힌 모듈이면 openModule 의 가드가 까닭을 토스트로 알린다(NAI 모드 전용 · NAID3 ·
     // 좁은 화면). 캡처로 받는다 - 전역 단축키(Ctrl+Enter)를 막으려고 전파를 멈추는 창 · 판에 같이 걸리지 않게
     // (Ctrl+E · Ctrl+O 와 같다). Ctrl+P 는 브라우저의 인쇄를 대신 가져온다.
     // ⚠️ 브라우저 탭의 Ctrl+W 는 브라우저 몫(탭 닫기)이라 페이지가 막을 수 없다 - 앱 창은 메뉴가 없어 여기로 온다.
     document.addEventListener('keydown', event => {
-      const moduleId = shortcutModule(event);
-      if (!moduleId) return;
+      const letter = shortcutLetter(event);
+      const moduleId = SHORTCUT_MODULES.get(letter) || '';
+      const action = moduleId || !letter ? null : shortcuts[letter];
+      if (!moduleId && typeof action !== 'function') return;
       event.preventDefault();
       if (event.repeat) return;           // 누르고 있으면 열고 닫기를 되풀이한다
       closeMenus();
-      openModule(moduleId);
+      if (moduleId) openModule(moduleId);
+      else action();
       updateState();
     }, true);
     observer = new MutationObserver(scheduleUpdateState);

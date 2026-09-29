@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260929-apitop">
+<link rel="stylesheet" href="style.css?v=20260929-keys">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -929,7 +929,25 @@
       <div class="result-main">
         <div class="viewer" id="resultViewer" tabindex="0">
           <img id="preview" alt="">
-          <span class="viewer-empty" id="emptyMsg"></span>
+          <!-- 이미지가 없을 때 이 자리에 단축키를 미리 보여 준다(사용자 지정 2026-09-29). 보이고 숨기는 것은 예전
+               그대로 #emptyMsg 의 display 를 만지는 쪽(app.js · resultHistory)이 한다 - 이미지가 뜨면 함께 사라진다.
+               줄을 더하면 그 키가 실제로 잡히는지 tests/headless/test_module_shortcuts.py 가 대조한다. -->
+          <div class="viewer-empty" id="emptyMsg">
+            <div class="viewer-keys" aria-label="단축키">
+              <div class="viewer-keys-title">Shortcuts</div>
+              <div class="viewer-keys-list">
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>Enter</kbd></span><span class="viewer-keys-label">Generate</span></div>
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Alt</kbd><kbd>Enter</kbd></span><span class="viewer-keys-label">Random</span></div>
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>Q</kbd></span><span class="viewer-keys-label">Tag Filter</span></div>
+                <!-- 브라우저 탭의 Ctrl+W 는 탭 닫기(페이지가 못 막는다) - 앱 창(desktop-shell)에서만 보인다 -->
+                <div class="viewer-keys-row" data-shell-only><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>W</kbd></span><span class="viewer-keys-label">와일드카드 관리</span></div>
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>P</kbd></span><span class="viewer-keys-label">캐릭터 프롬프트</span></div>
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>E</kbd></span><span class="viewer-keys-label">이벤트 맵</span></div>
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>O</kbd></span><span class="viewer-keys-label">Assist</span></div>
+                <div class="viewer-keys-row"><span class="viewer-keys-combo"><kbd>Ctrl</kbd><kbd>F</kbd></span><span class="viewer-keys-label">Fast Search</span></div>
+              </div>
+            </div>
+          </div>
           <!-- V5 인페인트 가상 캔버스의 **화면**. 결과 이미지와 같은 자리(plane)에 산다 -
                사용자가 만화를 고치듯 원본과 실물을 분리해 보는 곳이라, 아래에 작은
                복제본을 하나 더 띄우면 어느 쪽이 진짜인지 알 수 없다(사용자 지적).
@@ -1494,6 +1512,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260929-apitop"></script>
+<script src="app.js?v=20260929-keys"></script>
 </body>
 </html>

@@ -5203,6 +5203,37 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   text-align: center;
 }
 
+/* 이미지가 없을 때 결과 자리의 단축키 미리보기(사용자 지정 2026-09-29) - #emptyMsg 안에 산다. 이미지가 뜨면
+   #emptyMsg 의 display 를 끄는 쪽(app.js · resultHistory)이 함께 감춘다. 흐릿한 미리보기라 누름은 막지 않는다
+   (뷰어 초점 · 끌어 놓기). 키 칸은 오른쪽 · 이름 칸은 왼쪽으로 붙여 가운데 선에서 만난다. */
+.viewer-keys {
+  display: grid; justify-items: center; gap: 12px;
+  opacity: 0.82; pointer-events: none; user-select: none;
+}
+.viewer-keys-title {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim);
+}
+.viewer-keys-list {
+  display: grid; grid-template-columns: auto auto; align-items: center;
+  column-gap: 14px; row-gap: 7px;
+}
+.viewer-keys-row { display: contents; }
+.viewer-keys-combo { justify-self: end; display: inline-flex; gap: 4px; }
+.viewer-keys-label {
+  justify-self: start; font-size: 12px; line-height: 1.4; color: var(--text-muted);
+}
+.viewer-keys kbd {
+  min-width: 24px; padding: 0 6px; border-radius: 4px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 19px; text-align: center;
+  color: var(--text-muted); background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-dim); border-bottom-width: 2px;
+}
+/* 브라우저 탭에서 Ctrl+W 는 탭 닫기다(페이지가 못 막는다) - 그 줄은 앱 창에서만. */
+body:not(.desktop-shell) .viewer-keys-row[data-shell-only] { display: none; }
+/* 폰에는 키보드가 없다. */
+@media (max-width: 767px) { .viewer-keys { display: none; } }
+
 .event-preset-overlay[hidden] {
   display: none !important;
 }

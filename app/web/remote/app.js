@@ -10634,7 +10634,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-shortcut')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-tagq')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -10658,6 +10658,8 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
       isAnimaManaged: () => Boolean(animaLoraPanel?.isManaged()),
       openAnimaLora: () => animaLoraPanel?.toggle(),
       isAnimaLoraOpen: () => Boolean(animaLoraPanel?.isOpen()),
+      // 모듈이 아닌 단축키 - Ctrl+Q = Tag Filter(Quick 단추와 같은 입구 · 다시 누르면 닫힌다, 사용자 지정 2026-09-29).
+      shortcuts: {Q: () => toggleTagFilter()},
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();

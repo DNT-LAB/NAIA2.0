@@ -1418,7 +1418,14 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
                   else "keywords" if kw_names else "none")
         answers: list[Any] = []
         picks: list[str] = []
-        if listed and failed is None:
+        skipped = None
+        if listed and len(listed) < 2 and unit.kind == "predicate":
+            # 서술 덩어리에 후보가 하나뿐이면 싣지 않는다(묻지도 않는다) — 동사 하나가 엉뚱한 태그의 키워드에 걸린 것이 대부분이었다
+            # (받 -> catching · 박히 -> planted · 싸 -> slapping — 09-29 E4B 창작 문장 78개 채점: 틀림 13 · 맞음 8, 사용자 지시
+            # '후보 하나면 높은 확률로 오답'). 명사는 둔다 — 같은 채점에서 반반이었고 노천온천 -> onsen · 술집 -> bar · 거구 ->
+            # giant male 이 그 길이다
+            skipped = "single"
+        elif listed and failed is None:
             ask = cand.Ask(ko=unit.text, en=", ".join(words),
                            candidates=[(t, ac._short(str((tools.info(t) or {}).get("description") or ""))) for t in listed])
             orders = [ask] if len(listed) < 2 else [ask, cand.Ask(ko=ask.ko, en=ask.en,
@@ -1434,7 +1441,11 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
                     break
                 answers.append(cand.parse_choice(reply, names_in_order))
             if answers:
-                picks = cand.settle_order(answers[0], answers[1] if len(answers) > 1 else answers[0], listed) or []
+                # 정순 · 역순이 같을 때만 — 어긋나면 싣지 않는다(도구 순위로 고르던 것을 그만둔다: 09-29 채점에서 어긋난 67개가
+                # 틀림 38 · 애매 18 · 맞음 11). 본 경로의 고르기(settle_order)는 그대로
+                agreed = len(answers) < 2 or answers[0] == answers[1]
+                picks = (answers[0] or []) if agreed else []
+                skipped = None if agreed else "disagreed"
         for tag in picks:
             if tag not in present:
                 merged.tiers[1].append(tag)
@@ -1444,7 +1455,7 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
         merged.log.append(f"recover:{unit.text}->{','.join(picks) or '없음'}")
         out_units.append({"text": unit.text, "lemmas": unit.lemmas, "kind": unit.kind, "person": unit.person,
                           "source": source, "keywords": words, "candidates": listed, "answers": answers,
-                          "picks": picks})
+                          "picks": picks, "skipped": skipped})
     return {"units": out_units, "added": added, "calls": calls, "error": failed,
             "elapsed": round(time.perf_counter() - started, 3), "index_seconds": getattr(index, "seconds", None)}
 

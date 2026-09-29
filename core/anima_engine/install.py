@@ -12,6 +12,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from threading import Event, RLock, Thread
 
@@ -20,7 +21,7 @@ from . import manifest
 from .runtime import AnimaEngineRuntime, INSTALLING, REGISTRY, REGISTRY_LOCK, ManagedEngineError, register_runtime
 from .settings import LOCK as SETTINGS_LOCK
 from .settings import (AnimaSettings, atomic_json, load_settings, quick_receipt, read_json, save_settings,
-                       verified_hash, walk_files, write_model_config)
+                       verified_hash, walk_files, write_instance_model_config)
 
 
 @dataclass
@@ -136,8 +137,8 @@ def adopt_installed_engine(save_root, *, forbidden_roots=(), roots=None):
     '설치 (0KB)' 를 보이고, 누르면 받을 것도 없이 엔진을 켜서 연기 시험까지 다시 돈다(사용자 제보 2026-09-29).
     - 판정은 quick_receipt 그대로(파일 존재 · 크기 - 해시 없음, status 가 부른다). 설치 중인 자리는 건너뛴다.
     - 동의 기록은 만들지 않는다: 준비됨 판정에 동의는 들지 않고, 동의는 설치를 새로 시작할 때 묻는다.
-    - 엔진의 extra_model_paths.yaml 은 건드리지 않는다: 그 엔진을 같이 쓰는 다른 NAIA 의 폴더 설정이다
-      (이 user-data 가 LoRA · 모델 폴더를 바꿀 때 다시 쓴다).
+    - 엔진 폴더에는 아무것도 쓰지 않는다: LoRA · 모델 폴더는 user-data 마다 제 파일에 적어 엔진을 켤 때 넘긴다
+      (settings.write_instance_model_config).
     돌려주는 것: 적은 자리(Path) 또는 None.
     """
     if load_settings(save_root).engine_root:
@@ -444,7 +445,7 @@ class AnimaInstallJob:
                         raise ManagedEngineError("NODE_INSTALL_FAILED", detail=node["path"])
             self._phase("install_nodes", install_nodes)
             model_paths = {item["id"]: item["path"] for item in plan["artifacts"] if item["id"] in {m["id"] for m in manifest.MODELS}}
-            self._phase("write_config", lambda: write_model_config(self.settings, model_paths))
+            self._phase("write_config", lambda: write_instance_model_config(self.save_root, model_paths))
             # Stop the registered process before replacing files it may have open.
             with REGISTRY_LOCK:
                 previous = REGISTRY.get(str(root))
@@ -460,6 +461,8 @@ class AnimaInstallJob:
             self._phase("promote", promote)
             def start():
                 self._runtime = self.runtime_factory(root, manifest.RUNTIME_ID)
+                # 영수증은 아직 없다 - 계획의 모델 자리(다른 폴더에서 재사용한 모델 포함)로 켠다
+                self._runtime.model_config = partial(write_instance_model_config, self.save_root, model_paths)
                 self._runtime.ensure_running()
             self._phase("start", start)
             self._phase("preflight", self._runtime.preflight)

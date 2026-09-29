@@ -11,8 +11,7 @@ from core.anima_engine.install import AnimaInstallJob, adopt_installed_engine, a
 from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK,
                                        get_runtime, register_runtime, reserve_vram)
 from core.anima_engine.settings import (consent_agreed, license_bundle, license_text, load_settings, lora_catalog,
-                                        quick_receipt, record_consent, save_lora_chain, save_settings, unet_catalog,
-                                        write_model_config)
+                                        quick_receipt, record_consent, save_lora_chain, save_settings, unet_catalog)
 from core.anima_engine.settings import (delete_lora_thumb, lora_folder, lora_thumb, lora_triggers,
                                         put_lora_thumb, read_lora_thumb)
 
@@ -178,15 +177,12 @@ class AnimaEngineService:
                         raise ManagedEngineError("PATH_INVALID", "설치 완료 후 엔진 루트를 변경할 수 없습니다.")
                     updates["engine_root"] = str(validate_root(updates["engine_root"], forbidden=self.forbidden()))
             settings = save_settings(self.save_root, updates)
-            if "lora_dirs" in updates or "unet_dirs" in updates:
-                receipt = quick_receipt(settings)
-                if receipt:
-                    write_model_config(settings, {k: v["path"] for k, v in receipt["models"].items()})
-                    # New search paths are read by ComfyUI at startup.
-                    with REGISTRY_LOCK:
-                        rt = REGISTRY.get(str(Path(settings.engine_root).resolve()))
-                    if rt:
-                        rt.stop()
+            if folders and settings.engine_root:
+                # ComfyUI 는 폴더를 켤 때 읽는다 - 내려 두면 다음 생성이 새 폴더로 다시 켠다(모델 경로 파일은 켤 때 쓴다)
+                with REGISTRY_LOCK:
+                    rt = REGISTRY.get(str(Path(settings.engine_root).resolve()))
+                if rt:
+                    rt.stop()
             self.job = None
             return {"ok": True, "settings": copy.deepcopy(settings.data)}
 

@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from threading import Event, RLock, Thread
 
@@ -15,7 +16,7 @@ from PIL import Image
 from core.llama_runtime import _attach_kill_on_close_job, _close_job, _free_port
 from . import manifest
 from .profile import compile_graph
-from .settings import load_settings, quick_receipt, walk_files
+from .settings import load_settings, quick_receipt, walk_files, write_instance_model_config
 
 REGISTRY = {}
 REGISTRY_LOCK = RLock()
@@ -58,9 +59,12 @@ def start_timed_out(now, started, last_output, *, quiet=START_QUIET_TIMEOUT, har
 
 class AnimaEngineRuntime:
     def __init__(self, engine_root: Path, *, runtime_id: str, reserve_vram_gb: float, idle_minutes: int,
-                 command_builder=None, popen=subprocess.Popen, clock=time.monotonic):
+                 model_config=None, command_builder=None, popen=subprocess.Popen, clock=time.monotonic):
         self.engine_root, self.runtime_id = Path(engine_root).resolve(), runtime_id
         self.reserve_vram_gb, self.idle_minutes = reserve_vram_gb, idle_minutes
+        # 켜기 직전에 부른다: 켜는 NAIA(user-data)의 LoRA · 모델 폴더로 모델 경로 파일을 쓰고 그 경로를 돌려준다
+        # (settings.write_instance_model_config). 엔진 하나를 NAIA 여럿이 같이 쓴다 - 파일은 NAIA 마다.
+        self.model_config, self.model_config_path = model_config, None
         self.command_builder, self.popen, self.clock = command_builder or self._command, popen, clock
         self._op, self._lock = RLock(), RLock()
         self._stop = Event()
@@ -76,11 +80,14 @@ class AnimaEngineRuntime:
         return f"http://127.0.0.1:{self.port}"
 
     def _command(self, port):
+        if self.model_config_path is None:
+            # 엔진 폴더의 옛 파일(state/extra_model_paths.yaml)은 같은 엔진을 쓰는 다른 NAIA 의 폴더일 수 있다
+            raise ManagedEngineError("ENGINE_START_FAILED", detail="model paths not prepared")
         rt = self.engine_root / "runtime" / self.runtime_id / "ComfyUI_windows_portable"
         state = self.engine_root / "state"
         return ([str(rt / "python_embeded/python.exe"), "-s", str(rt / "ComfyUI/main.py"),
                  "--listen", "127.0.0.1", "--port", str(port), "--disable-auto-launch",
-                 "--extra-model-paths-config", str(state / "extra_model_paths.yaml"),
+                 "--extra-model-paths-config", str(self.model_config_path),
                  "--output-directory", str(state / "comfy_output"), "--temp-directory", str(state / "comfy_temp"),
                  "--user-directory", str(state / "comfy_user"), "--reserve-vram", str(self.reserve_vram_gb),
                  # 추가 패키지 없는 내장 가속(torch 2.7+). 같은 그래프 실측 11.57 -> 11.05초/장(09-27, 사용자 결정).
@@ -177,9 +184,14 @@ class AnimaEngineRuntime:
             for folder in ("comfy_output", "comfy_temp", "comfy_user"):
                 (self.engine_root / "state" / folder).mkdir(parents=True, exist_ok=True)
             self._cleanup_outputs()
-            argv, cwd, env = self.command_builder(self.port)
             self._mark_log_start()
             try:
+                if self.model_config is not None:
+                    try:
+                        self.model_config_path = self.model_config()
+                    except Exception as exc:
+                        raise ManagedEngineError("ENGINE_START_FAILED", detail=f"model paths: {exc}") from exc
+                argv, cwd, env = self.command_builder(self.port)
                 self.proc = self.popen(argv, cwd=str(cwd), env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 self.job = _attach_kill_on_close_job(self.proc)
@@ -387,7 +399,8 @@ def reserve_vram(context, settings):
 
 def get_runtime(context):
     from .integration import save_root_of
-    settings = load_settings(save_root_of(context))
+    save_root = save_root_of(context)
+    settings = load_settings(save_root)
     if not quick_receipt(settings):
         return None
     key = str(Path(settings.engine_root).resolve())
@@ -401,6 +414,8 @@ def get_runtime(context):
             REGISTRY[key] = runtime
         runtime.idle_minutes = settings.idle_minutes
         runtime.reserve_vram_gb = reserve_vram(context, settings)
+        # 켤 때 이 NAIA 의 폴더로(설치 작업이 등록한 런타임도 여기서 영수증 기준으로 바뀐다)
+        runtime.model_config = partial(write_instance_model_config, save_root)
         return runtime
 
 

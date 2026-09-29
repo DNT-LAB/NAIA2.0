@@ -584,7 +584,7 @@ def quick_receipt(settings):
     return receipt
 
 
-def write_model_config(settings, model_paths):
+def write_model_config(settings, model_paths, path):
     # JSON scalars are YAML-safe, including Windows paths, colons and Unicode.
     root = Path(settings.engine_root)
     lines = ["naia_managed:", "  base_path: " + json.dumps(str(root / "models")),
@@ -597,8 +597,36 @@ def write_model_config(settings, model_paths):
     # ANIMA 모델 폴더 — 관리형 · 기본 모델 자리 뒤(ComfyUI 는 앞 폴더의 같은 이름을 연다, unet_roots 와 같은 순서)
     for i, folder in enumerate(settings.unet_dirs):
         lines.extend([f"naia_unets_{i}:", "  base_path: " + json.dumps(folder), "  diffusion_models: ."])
-    path = root / "state/extra_model_paths.yaml"
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".yaml.tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-    _replace_file(tmp, path)
+    fd, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join(lines) + "\n")
+        _replace_file(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+    return path
+
+
+def model_config_path(save_root):
+    """ComfyUI 에 넘기는 모델 경로 파일 - user-data 마다 하나.
+
+    엔진 폴더에 하나(state/extra_model_paths.yaml)를 두었더니, 같은 엔진을 쓰는 다른 NAIA(격리 시험 · 새 포터블 -
+    설치를 가져다 쓴다)가 LoRA · 모델 폴더를 바꾸거나 설치를 돌릴 때 제 폴더로 통째 덮었다(09-29). 옛 파일은 그대로 둔다
+    (옛 판 NAIA 가 아직 쓴다).
+    """
+    return Path(save_root) / "anima_engine_model_paths.yaml"
+
+
+def write_instance_model_config(save_root, model_paths=None):
+    """이 user-data 의 설정(LoRA · 모델 폴더)으로 모델 경로 파일을 쓰고 그 경로를 돌려준다 - 엔진을 켤 때마다 부른다.
+
+    model_paths = 기본 모델 셋의 자리 {id: path}. 설치 중에는 계획의 것(영수증이 아직 없다 · 다른 폴더에서 재사용한 모델),
+    그 뒤로는 영수증의 것.
+    """
+    settings = load_settings(save_root)
+    if model_paths is None:
+        model_paths = {k: v["path"] for k, v in ((quick_receipt(settings) or {}).get("models") or {}).items()}
+    return write_model_config(settings, model_paths, model_config_path(save_root))

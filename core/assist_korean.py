@@ -1095,7 +1095,9 @@ class KoreanLayer:
                 continue
             if form in members:
                 g = max((k for k in range(i) if toks[k][0] in self._groups), default=None)
-                joined = g is not None and any(t == "JC" for _f, t in toks[g + 1:i])
+                # 접속 조사 바로 앞이 구성원 낱말이면 구성원끼리의 나열이다(커플의 남친과 여친 — 18차 F2)
+                joined = g is not None and any(t == "JC" and toks[k - 1][0] not in members
+                                               for k, (_f, t) in enumerate(toks[g + 1:i], start=g + 1))
                 other = any(f in self._OTHER_WORDS for f, _t in toks[max(0, i - 2):i])
                 if not (joined or other):
                     continue                           # 묶음의 구성원 — '또 다른 남자친구'(16차 F3) · '커플과 내 남친'(17차 R3)은
@@ -1261,8 +1263,8 @@ class KoreanLayer:
             joined = ""
             for k in range(j, min(len(words), j + 4)):
                 joined = compact(joined + words[k])
-                if joined in names_c or any(joined.endswith(p) and joined[:-len(p)] in names_c
-                                            for p in self._PERSON_PARTICLES):
+                # 이름 뒤 조사는 겹조사까지(에게서 · 와는 · 한테서 — 18차 F3): 이름으로 시작하고 꼬리가 네 글자 이하
+                if any(joined == n or (joined.startswith(n) and len(joined) - len(n) <= 4) for n in names_c):
                     out.update(range(j, k + 1))
                     break
         return out
@@ -1287,7 +1289,10 @@ class KoreanLayer:
             # 않아야(다섯 미터, Codex 17차 R1 · R2)
             digit_ok = bool(re.fullmatch(r"\d+(?:명|사람)(?:의|이|가)?", nxt)) or (
                 nxt.isdigit() and follow.startswith(tuple(self._COUNTERS)))
-            if (digit_ok or not nxt[:1].isdigit()) and not self._is_measure(follow):
+            # 명 · 사람이 붙은 수(2명이)와 조사가 붙은 수사(둘이)는 그대로 인원이다 — 뒤의 거리값(1미터)으로 버렸다(18차 F1).
+            # 측정 단위 검사는 조사 없는 수사(다섯 미터)에만
+            bare = nxt in self._numerals
+            if digit_ok or (not nxt[:1].isdigit() and not (bare and self._is_measure(follow))):
                 n = number(nxt)
                 if n:
                     return n

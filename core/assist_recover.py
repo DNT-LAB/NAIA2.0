@@ -86,7 +86,10 @@ class KoDictIndex:
         self.by_kw_token: dict[str, set[str]] = {}
         for tag, keywords, description in entries:
             kw = clean_keywords(keywords)
-            toks = frozenset(t for t in re.split(r"[,\s]+", kw) if t)
+            # 키워드 = 쉼표로 가른 구절 통째(공백 뺀 것). 공백으로도 쪼갰더니 '실종 포스터' 의 실종 · '더치 앵글' 의 앵글 · '성인
+            # 기구' 의 성인이 그 태그의 키워드 그대로가 돼 근거 검사(grounded)를 건너뛰었다 — 하의실종 -> missing poster · 앵글 ->
+            # dutch angle · 성인 -> cock ring(09-29 E4B 창작 문장 채점: 이 길로 들어온 것이 틀림 36 · 맞음 14)
+            toks = frozenset(_whole(p) for p in kw.split(",") if _whole(p))
             self.kw_tokens[tag] = toks
             for t in toks:
                 self.by_kw_token.setdefault(t, set()).add(tag)
@@ -175,20 +178,29 @@ class KoDictIndex:
 
 def _phrases(toks: list[tuple[str, str]]) -> tuple[frozenset[str], ...]:
     """키워드 토막 -> 쉼표(Kiwi SP)로 가른 구절마다의 원형 묶음(빈 구절은 뺀다). 접속 조사(와 · 과 — JC)에서도 가른다:
-    '주인과 하인' 은 한쪽(주인)만으로도 그 관계의 뜻이다 — 하인이 요청에 없다고 master and servant 를 버렸다(시험)."""
+    '주인과 하인' 은 한쪽(주인)만으로도 그 관계의 뜻이다 — 하인이 요청에 없다고 master and servant 를 버렸다(시험).
+    한 명사 + 조사 · 서술격 · 어미뿐인 구절은 뺀다 — 외래어 음역(오후로 = ofuro)을 Kiwi 가 오후 + 로 로 읽어 '오후' 가
+    ofuro 가 됐다(09-29). 그런 키워드는 구절 통째가 같을 때만 맞는다(kw_tokens)."""
     out: list[frozenset[str]] = []
     cur: set[str] = set()
+    shape: list[str] = []
+
+    def close() -> None:
+        nouns = [t for t in shape if t.startswith(("NN", "XR"))]
+        tail = [t for t in shape if t.startswith(("J", "VCP", "E"))]
+        if cur and not (len(nouns) == 1 and tail and len(nouns) + len(tail) == len(shape)):
+            out.append(frozenset(cur))
+
     for form, tag in toks:
         if tag in ("SP", "JC") or form == ",":
-            if cur:
-                out.append(frozenset(cur))
-            cur = set()
+            close()
+            cur, shape = set(), []
             continue
+        shape.append(tag)
         key = ko_key(form, tag)
         if key:
             cur.add(key)
-    if cur:
-        out.append(frozenset(cur))
+    close()
     return tuple(out)
 
 

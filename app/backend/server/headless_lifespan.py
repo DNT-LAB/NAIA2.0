@@ -30,6 +30,14 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
             recover_interrupted(save_root_of(context))
         except Exception as exc:
             print(f"Headless Remote: ANIMA recovery failed - {ascii(str(exc))}", flush=True)
+        # 이 user-data 에 ANIMA 설치 위치가 없는데 표준 자리에 이미 끝난 설치가 있으면 가져다 쓴다(사용자 제보 09-29:
+        # 격리 시험의 새 user-data 가 '설치 (0KB)' 를 보였다). 모드 선택 · 생성이 ANIMA 탭의 첫 상태 조회보다 먼저
+        # 올 수 있어 기동 때 한 번 한다(상태 조회도 한다 - 켜 둔 사이 다른 NAIA 가 설치한 경우).
+        try:
+            from app.backend.server.anima_engine_service import service_for as anima_service_for
+            anima_service_for(context).adopt_installed()
+        except Exception as exc:
+            print(f"Headless Remote: ANIMA adopt skipped - {ascii(str(exc))}", flush=True)
         # 사용자 확장 로드(user-data/extensions). 워밍업 프롬프트에도 확장 훅이
         # 적용되도록 warmup 태스크 생성 전에 동기 로드한다. 개별 확장 실패는
         # 내부에서 격리되며, 이 try는 로더 자체 결함이 부팅을 막는 것만 방지한다.

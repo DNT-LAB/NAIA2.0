@@ -18,7 +18,8 @@ from threading import Event, RLock, Thread
 from core.llama_model_download import LlamaModelDownloadService, sha256_of
 from . import manifest
 from .runtime import AnimaEngineRuntime, INSTALLING, REGISTRY, REGISTRY_LOCK, ManagedEngineError, register_runtime
-from .settings import (AnimaSettings, atomic_json, load_settings, quick_receipt, read_json,
+from .settings import LOCK as SETTINGS_LOCK
+from .settings import (AnimaSettings, atomic_json, load_settings, quick_receipt, read_json, save_settings,
                        verified_hash, walk_files, write_model_config)
 
 
@@ -117,6 +118,47 @@ def suggested_root(required, disk=disk_free):
         if drives:
             return max(drives, key=disk) / "NAIA_engines/anima"
     return local
+
+
+def standard_roots():
+    """설치가 제안하는 자리 전부(suggested_root 의 후보와 같다) - 로컬 앱 데이터 먼저, 그다음 고정 드라이브."""
+    roots = [Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "NAIA/engines/anima"]
+    if os.name == "nt":
+        roots += [Path(f"{letter}:/") / "NAIA_engines/anima" for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ"
+                  if ctypes.windll.kernel32.GetDriveTypeW(f"{letter}:\\") == 3]
+    return roots
+
+
+def adopt_installed_engine(save_root, *, forbidden_roots=(), roots=None):
+    """이 user-data 에 설치 위치가 아직 없는데 표준 자리에 **끝난 설치**(유효한 영수증)가 있으면 그 자리를 적는다.
+
+    같은 PC 의 다른 NAIA(새 user-data 의 포터블 · 격리 시험)가 이미 설치해 둔 엔진이다. 그대로 두면 설치 화면이
+    '설치 (0KB)' 를 보이고, 누르면 받을 것도 없이 엔진을 켜서 연기 시험까지 다시 돈다(사용자 제보 2026-09-29).
+    - 판정은 quick_receipt 그대로(파일 존재 · 크기 - 해시 없음, status 가 부른다). 설치 중인 자리는 건너뛴다.
+    - 동의 기록은 만들지 않는다: 준비됨 판정에 동의는 들지 않고, 동의는 설치를 새로 시작할 때 묻는다.
+    - 엔진의 extra_model_paths.yaml 은 건드리지 않는다: 그 엔진을 같이 쓰는 다른 NAIA 의 폴더 설정이다
+      (이 user-data 가 LoRA · 모델 폴더를 바꿀 때 다시 쓴다).
+    돌려주는 것: 적은 자리(Path) 또는 None.
+    """
+    if load_settings(save_root).engine_root:
+        return None
+    for root in (standard_roots() if roots is None else roots):
+        root = Path(root)
+        try:
+            if not (root / "receipt.json").is_file() or not quick_receipt(AnimaSettings({"engine_root": str(root)})):
+                continue
+            resolved = validate_root(root, forbidden=forbidden_roots, write_check=False)
+        except (OSError, ManagedEngineError):
+            continue
+        with REGISTRY_LOCK:
+            if str(resolved) in INSTALLING:
+                continue
+        with SETTINGS_LOCK:
+            if load_settings(save_root).engine_root:    # 그사이 설치 화면에서 사람이 정했다 - 그쪽이 이긴다
+                return None
+            save_settings(save_root, {"engine_root": str(resolved)})
+        return resolved
+    return None
 
 
 def run_7z(exe, archive, dest, cancel):

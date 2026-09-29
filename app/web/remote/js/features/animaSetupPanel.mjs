@@ -586,8 +586,9 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       return;
     }
     const state = st ? install().state : '';
-    // 설치가 끝났다 — 엔진이 바뀌었을 수 있으니 기존 연결 확인 흐름(probe_api)을 다시 태운다(계약서 §9.5)
-    if (lastState === 'preparing' && state === 'ready') onEngineChanged(st.comfyui_engine);
+    // 설치가 끝났다 — 엔진이 바뀌었을 수 있으니 기존 연결 확인 흐름(probe_api)을 다시 태운다(계약서 §9.5).
+    // 설치 작업 없이 바로 준비됨이 된 것(이미 끝난 설치를 가져다 썼다 - 09-29)도 같다. 첫 조회('')는 아니다.
+    if (lastState && lastState !== 'ready' && state === 'ready') onEngineChanged(st.comfyui_engine);
     lastState = state;
     if (st && state !== 'preparing' && state !== 'ready' && visible()) {
       if (!lic) loadLicenses();

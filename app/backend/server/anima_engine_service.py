@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import RLock
 
 from core.anima_engine import integration, manifest
-from core.anima_engine.install import AnimaInstallJob, app_version, validate_root
+from core.anima_engine.install import AnimaInstallJob, adopt_installed_engine, app_version, validate_root
 from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK,
                                        get_runtime, register_runtime, reserve_vram)
 from core.anima_engine.settings import (consent_agreed, license_bundle, license_text, load_settings, lora_catalog,
@@ -51,12 +51,23 @@ class AnimaEngineService:
                                            reserve_vram_gb=reserve_vram(self.context, settings)))
         return self.job
 
+    def adopt_installed(self):
+        """표준 자리에 이미 끝난 설치가 있으면 가져다 쓴다(adopt_installed_engine) - 기동 · 상태 조회가 부른다."""
+        adopted = adopt_installed_engine(self.save_root, forbidden_roots=self.forbidden())
+        if adopted:
+            # 설치 작업은 만들 때의 설정(engine_root 없음)을 쥐고 있다 - 새 자리로 다시 만든다. 설치 중이면 engine_root 가
+            # 이미 있어 여기로 오지 않는다.
+            self.job = None
+            print("ANIMA: adopted an installed engine", flush=True)
+        return adopted
+
     def _on_ready(self, runtime):
         register_runtime(runtime)
         if self.job and self.job._select:
             integration.token_manager_of(self.context).save_token("comfyui_engine", "managed")
 
     def status(self):
+        self.adopt_installed()
         settings = load_settings(self.save_root)
         install = self._job().snapshot()
         receipt = quick_receipt(settings)
@@ -105,6 +116,12 @@ class AnimaEngineService:
                 save_settings(self.save_root, {"engine_root": plan["engine_root"]})
                 self.job = None
                 job = self._job()
+            if not job._force and quick_receipt(job.settings):
+                # 고른 자리에 이미 끝난 설치가 있다('설치 (0KB)') - 받을 것도, 엔진을 켜서 다시 시험할 것도 없다.
+                # 가져다 쓴다(사용자 제보 09-29). 설치를 마친 것과 같게 엔진 선택도 따른다(select_on_ready).
+                if body.get("select_on_ready", True) is True:
+                    integration.token_manager_of(self.context).save_token("comfyui_engine", "managed")
+                return {"ok": True, "joined": False, "status": self.status()}
             result = job.start(select_on_ready=body.get("select_on_ready", True) is True,
                                force_verify=body.get("force_verify", False) is True)
             return {"ok": True, "joined": result["joined"], "status": self.status()}

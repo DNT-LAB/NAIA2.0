@@ -95,6 +95,54 @@ export function normalizeWebuiEscapedTagForLookup(text) {
   return String(text || '').replace(/\\([()])/g, '$1');
 }
 
+// 쉼표 조각 안의 **태그 자리** [start, end) - 앞뒤의 가중치 · 괄호 장식을 벗긴 곳.
+// 가중치 묶음 안의 쉼표가 조각을 `(a` · `here:1.15)` · `{a` · `smil}` 로 자르면, 예전 규칙(통째로 감싼 괄호 · 끝의
+// :가중치만)으로는 `here:1.15)` 가 그대로 질의가 되어 자동완성이 안 떴다(오래된 버그 - 제보 2026-09-29, NAI · WEBUI ·
+// ComfyUI 모두). 앞 = 공백 · NAI 가중치(1.2::) · 음수 강조의 - · ( { [ / 뒤 = 공백 · NAI 닫기(::) · ) } ] · :가중치.
+// 둥근 괄호는 **짝이 남을 때(또는 통째로 감쌀 때)만** 벗긴다 - `klee (genshin impact)` 의 괄호는 이름이다. 이스케이프
+// (`\(` · `\)`)는 셈하지 않는다(WEBUI · ComfyUI 의 이름). 괄호를 벗겨 글자가 안 남으면 두고(`:)` · `;)` 는 태그다),
+// 벗겨 빈 태그가 되는 가중치(`:3`)도 둔다.
+export function tokenCoreSpan(raw) {
+  const text = String(raw || '');
+  const worded = s => /[\p{L}\p{N}]/u.test(s);
+  const unclosed = s => {   // > 0 = 여는 괄호가 남는다, < 0 = 닫는 괄호가 남는다
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '\\') i += 1;
+      else if (s[i] === '(') depth += 1;
+      else if (s[i] === ')') depth -= 1;
+    }
+    return depth;
+  };
+  const wrapped = s => {    // 첫 ( 가 맨 끝의 ) 와 짝이다 - `(smile:1.2)`
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '\\') { i += 1; continue; }
+      if (s[i] === '(') depth += 1;
+      else if (s[i] === ')') depth -= 1;
+      if (depth <= 0 && i < s.length - 1) return false;
+    }
+    return depth === 0;
+  };
+  let start = 0;
+  let end = text.length;
+  while (start < end) {
+    const rest = text.slice(start, end);
+    const lead = /^(?:\s+|[+-]?(?:\d+(?:\.\d*)?|\.\d+)::|-(?=\())/.exec(rest);
+    if (lead) { start += lead[0].length; continue; }
+    if (/^[([{]/.test(rest) && worded(rest.slice(1))
+        && (rest[0] !== '(' || unclosed(rest) > 0 || wrapped(rest))) { start += 1; continue; }
+    const tail = /(?:\s+|::)$/.exec(rest);
+    if (tail) { end -= tail[0].length; continue; }
+    if (/[)\]}]$/.test(rest) && rest[rest.length - 2] !== '\\' && worded(rest.slice(0, -1))
+        && (!rest.endsWith(')') || unclosed(rest) < 0)) { end -= 1; continue; }
+    const weight = /:\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.exec(rest);
+    if (weight && weight.index > 0) { end -= weight[0].length; continue; }
+    break;
+  }
+  return { start, end };
+}
+
 export function createTagAssistController({
   document,
   window,
@@ -1462,14 +1510,15 @@ export function createTagAssistController({
     if (closeMark) rawEnd -= closeMark[0].length;
     const raw = text.substring(start, rawEnd);
     if (!raw || raw.startsWith('#')) return null;
-    let stripped = stripAutocompleteTokenDecorators(raw);
-    while (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/.test(stripped)) {
-      stripped = stripped.replace(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/, '');
-    }
-    stripped = stripped.replace(/\s*::$/, '');
-    stripped = stripped.trim();
+    // 태그 자리 - 가중치 묶음 안의 조각이어도(`(a, here:1.15)` · `{a, smil}` · `2::a, b ::`) 앞뒤 장식을 벗긴다
+    const span = tokenCoreSpan(raw);
+    const stripped = normalizeWebuiEscapedTagForLookup(raw.slice(span.start, span.end)).trim();
     if (!stripped) return null;
-    return { raw, stripped, start, end: rawEnd };
+    // 캐럿이 태그 밖의 장식 위다 - 가중치 숫자(`here:1.1|5`) · NAI 앞머리(`0.|7::`) · `::` 뒤. 후보 창은 이때 뜨지
+    // 않는다(옛 데스크톱 자동완성의 is_weight_value 와 같은 규칙). 태그 뒤의 공백 · 닫는 괄호만 지났으면 아직 그 태그다.
+    const caretOutsideTag = (pos >= start && pos < start + span.start)
+      || /[^\s)\]}]/.test(text.slice(start + span.end, pos));
+    return { raw, stripped, start, end: rawEnd, coreStart: span.start, coreEnd: span.end, caretOutsideTag };
   }
 
   function getImeState(textarea) {
@@ -1495,28 +1544,9 @@ export function createTagAssistController({
   }
 
   function stripAutocompleteTokenDecorators(raw) {
-    let stripped = raw.trim();
-    if (stripped.startsWith('-(')) {
-      stripped = stripped.substring(1);
-    }
-    while (stripped.startsWith('(') && stripped.endsWith(')') && hasWrappingParentheses(stripped)) {
-      stripped = stripped.substring(1, stripped.length - 1).trim();
-    }
-    stripped = stripped.replace(/:\d+(?:\.\d+)?$/, '').trim();
-    stripped = normalizeWebuiEscapedTagForLookup(stripped).trim();
-    return stripped;
-  }
-
-  function hasWrappingParentheses(text) {
-    let depth = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      if (char === '(') depth += 1;
-      else if (char === ')') depth -= 1;
-      if (depth === 0 && i < text.length - 1) return false;
-      if (depth < 0) return false;
-    }
-    return depth === 0;
+    const text = String(raw || '');
+    const span = tokenCoreSpan(text);
+    return normalizeWebuiEscapedTagForLookup(text.slice(span.start, span.end)).trim();
   }
 
   function getTagAtCursor(textarea) {
@@ -1935,7 +1965,9 @@ export function createTagAssistController({
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
-    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && !isPresetTrigger && info.stripped.length < 2)) {
+    const isTrigger = isChunkTrigger || isVibeClusterTrigger || isPresetTrigger;
+    // 가중치 숫자 · `::` 위의 캐럿은 태그를 치는 중이 아니다 - 후보 창만 닫고 태그 힌트는 그대로 둔다
+    if (!info || (info.caretOutsideTag && !isTrigger) || (!isTrigger && info.stripped.length < 2)) {
       hideAutocomplete();
       checkTagHint();
       return;
@@ -3045,13 +3077,17 @@ export function createTagAssistController({
     const _st = textarea.scrollTop, _sl = textarea.scrollLeft; // value 재대입 scrollTop=0 리셋 → 복원
     const raw = tokenInfo.raw;
     const stripped = tokenInfo.stripped;
-    const rawLower = raw.toLowerCase();
-    const strippedLower = stripped.toLowerCase();
-    const idx = rawLower.indexOf(strippedLower);
     let prefix = '', suffix = '';
-    if (idx >= 0) {
-      prefix = raw.substring(0, idx);
-      suffix = raw.substring(idx + stripped.length);
+    if (Number.isInteger(tokenInfo.coreStart) && Number.isInteger(tokenInfo.coreEnd)) {
+      // 잰 태그 자리 그대로(tokenCoreSpan) - 질의가 이스케이프(`\(`)를 풀어 글자가 달라도 앞뒤 장식이 산다
+      prefix = raw.substring(0, tokenInfo.coreStart);
+      suffix = raw.substring(tokenInfo.coreEnd);
+    } else {
+      const idx = raw.toLowerCase().indexOf(stripped.toLowerCase());
+      if (idx >= 0) {
+        prefix = raw.substring(0, idx);
+        suffix = raw.substring(idx + stripped.length);
+      }
     }
     const replacement = prefix + newTag + suffix;
     textarea.value = text.substring(0, tokenInfo.start) + replacement + text.substring(tokenInfo.end);

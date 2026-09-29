@@ -585,6 +585,9 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       windowRelease = true;
       win.addEventListener?.('pointerup', release, true);
       win.addEventListener?.('pointercancel', release, true);
+      // 놓은 것이 아예 안 왔다(브라우저 밖에서 놓았다 등) - 다음 움직임에 눌린 버튼이 없으면 끌기는 끝났다(Codex 확인 리뷰
+      // 09-29: 그대로면 휠 저장이 무기한 미뤄졌다). blur 로는 끊지 않는다 - 창을 잠깐 떠났다 와도 누른 채면 끌기는 이어진다.
+      win.addEventListener?.('pointermove', event => { if (dragging && event.buttons === 0) dragging = false; }, true);
     }
   }
 

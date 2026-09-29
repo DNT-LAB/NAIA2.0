@@ -2275,7 +2275,7 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
 // 백엔드는 /api/anima-engine/*(docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8). 엔진을 고르거나 설치가 끝나면
 // 기존 연결 확인(probe_api)을 다시 태운다 — 새 연결 경로를 만들지 않는다.
 let animaSetupPanel = null;
-import('./js/features/animaSetupPanel.mjs?v=20260929-engsync')
+import('./js/features/animaSetupPanel.mjs?v=20260929-diag2')
   .then(({createAnimaSetupPanel}) => {
     // 엔진을 골랐거나 설치가 끝났다 — 메인 모드 표시(ANIMA) · 연결 · 옵션을 새 엔진으로(onComfyEngineChanged)
     animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine),

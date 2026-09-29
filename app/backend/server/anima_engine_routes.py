@@ -16,7 +16,15 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
         if not _is_local_request(request) or not allowed:
             return JSONResponse({"ok": False, "code": "LOCAL_ONLY", "error": reason or "이 작업은 로컬 PC에서만 가능합니다."}, status_code=403)
 
-    async def call(request, action, *, local=False, body=False, png=False, missing_404=False):
+    def remember(what, exc):
+        # 설치 쪽 요청(검사 · 설치 · 엔진 켜기 …)의 실패 - 진단 정보(마지막 요청 오류)에 Traceback 까지. except 안에서.
+        if what:
+            try:
+                service_for(context).remember_error(what, exc)
+            except Exception:   # 기억하다 실패해도 응답은 그대로
+                pass
+
+    async def call(request, action, *, local=False, body=False, png=False, missing_404=False, what=None):
         if local:
             denied = guard(request)
             if denied is not None:
@@ -36,6 +44,7 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
                 data = bytes(data)
             return await run_in_thread(action, data)
         except (ProfileError, ManagedEngineError) as exc:
+            remember(what, exc)
             code = exc.code
             status = 422 if code in ("PARAM_OUT_OF_RANGE", "PATH_INVALID", "PATH_NOT_WRITABLE", "LORA_NOT_FOUND", "LORA_INVALID", "LORA_NAME_CONFLICT", "LORA_THUMB_INVALID") else 409
             if missing_404 and code == "LORA_NOT_FOUND":
@@ -43,10 +52,17 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
             if code.startswith("ENGINE_START"):
                 status = 500
             return JSONResponse({"ok": False, "code": code, "error": str(exc), "detail": getattr(exc, "detail", "")}, status_code=status)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
+            remember(what, exc)
             return JSONResponse({"ok": False, "code": "PARAM_OUT_OF_RANGE", "error": "요청 형식을 확인해 주세요."}, status_code=422)
         except OSError as exc:
+            remember(what, exc)
             return JSONResponse({"ok": False, "code": "PATH_NOT_WRITABLE", "error": "파일 또는 폴더에 접근하지 못했습니다.", "detail": str(exc)}, status_code=422)
+        except Exception as exc:
+            # 예기치 않은 오류 - 예전엔 FastAPI 의 500(글자 없음)이라 화면에 '요청 실패 (500)' 뿐이었다. 어디서 났는지는 진단 정보에.
+            remember(what, exc)
+            return JSONResponse({"ok": False, "code": "INTERNAL_ERROR", "detail": f"{type(exc).__name__}: {exc}",
+                                 "error": "예기치 않은 오류가 났습니다 - [자세히] 에서 확인해 주세요."}, status_code=500)
 
     @app.get("/api/anima-engine/status")
     async def status():
@@ -65,27 +81,27 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
 
     @app.post("/api/anima-engine/inspect")
     async def inspect(request: Request):
-        return await call(request, service_for(context).inspect, local=True, body=True)
+        return await call(request, service_for(context).inspect, local=True, body=True, what="PC 검사")
 
     @app.post("/api/anima-engine/prepare")
     async def prepare(request: Request):
-        return await call(request, service_for(context).prepare, local=True, body=True)
+        return await call(request, service_for(context).prepare, local=True, body=True, what="설치")
 
     @app.post("/api/anima-engine/cancel")
     async def cancel(request: Request):
-        return await call(request, lambda _: service_for(context).cancel(), local=True)
+        return await call(request, lambda _: service_for(context).cancel(), local=True, what="설치 취소")
 
     @app.post("/api/anima-engine/select")
     async def select(request: Request):
-        return await call(request, lambda data: service_for(context).select(data.get("engine")), body=True)
+        return await call(request, lambda data: service_for(context).select(data.get("engine")), body=True, what="엔진 선택")
 
     @app.post("/api/anima-engine/engine/start")
     async def start(request: Request):
-        return await call(request, lambda _: service_for(context).start_engine(), local=True)
+        return await call(request, lambda _: service_for(context).start_engine(), local=True, what="엔진 켜기")
 
     @app.post("/api/anima-engine/engine/stop")
     async def stop(request: Request):
-        return await call(request, lambda _: service_for(context).stop_engine(), local=True)
+        return await call(request, lambda _: service_for(context).stop_engine(), local=True, what="엔진 끄기")
 
     @app.get("/api/anima-engine/loras")
     async def loras():
@@ -119,4 +135,9 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
 
     @app.post("/api/anima-engine/settings")
     async def settings(request: Request):
-        return await call(request, service_for(context).update_settings, local=True, body=True)
+        return await call(request, service_for(context).update_settings, local=True, body=True, what="설정 바꾸기")
+
+    @app.get("/api/anima-engine/diagnostics")
+    async def diagnostics(request: Request):
+        # 실패 화면의 [자세히] · [에러 로그 복사] - nvidia-smi · 그래픽 카드 조회를 이 PC 에서 돌린다(검사와 같은 로컬 규칙)
+        return await call(request, lambda _: service_for(context).diagnostics(), local=True)

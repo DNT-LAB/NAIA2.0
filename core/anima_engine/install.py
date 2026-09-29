@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import time
+import traceback
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -18,7 +19,8 @@ from threading import Event, RLock, Thread
 
 from core.llama_model_download import LlamaModelDownloadService, sha256_of
 from . import manifest
-from .runtime import AnimaEngineRuntime, INSTALLING, REGISTRY, REGISTRY_LOCK, ManagedEngineError, register_runtime
+from .runtime import (AnimaEngineRuntime, INSTALLING, REGISTRY, REGISTRY_LOCK, TRACE_CHARS, ManagedEngineError,
+                      register_runtime)
 from .settings import LOCK as SETTINGS_LOCK
 from .settings import (AnimaSettings, atomic_json, load_settings, quick_receipt, read_json, save_settings,
                        verified_hash, walk_files, write_instance_model_config)
@@ -33,13 +35,15 @@ class GpuInfo:
     cuda_version: str = ""
 
 
-def gpu_probe():
+def gpu_probe(run=None):
+    """NVIDIA GPU(nvidia-smi) - 없으면 None. run = subprocess.run 대신(진단 정보가 원문을 적으려고 넘긴다)."""
+    run = run or subprocess.run
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        query = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version,compute_cap,memory.total",
-                                "--format=csv,noheader,nounits"], capture_output=True, text=True,
-                               timeout=10, creationflags=flags)
-        header = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=10, creationflags=flags)
+        query = run(["nvidia-smi", "--query-gpu=name,driver_version,compute_cap,memory.total",
+                     "--format=csv,noheader,nounits"], capture_output=True, text=True,
+                    timeout=10, creationflags=flags)
+        header = run(["nvidia-smi"], capture_output=True, text=True, timeout=10, creationflags=flags)
     except (OSError, subprocess.TimeoutExpired):
         return None
     cuda = re.search(r"CUDA Version:\s*(\d+\.\d+)", header.stdout)
@@ -203,6 +207,7 @@ class AnimaInstallJob:
         self._completed = []
         self._force = False
         self._select = False
+        self._trace = ""       # 실패한 곳(Traceback) - 기록(job.json)과 진단 정보에 싣는다
 
     def snapshot(self):
         with self._lock:
@@ -233,7 +238,8 @@ class AnimaInstallJob:
                 "version": 1, "profile_revision": manifest.PROFILE_REVISION, "runtime_id": manifest.RUNTIME_ID,
                 **{key: state[key] for key in ("job_id", "state", "phase", "started_at", "updated_at")},
                 "select_on_ready": self._select, "completed_phases": list(self._completed),
-                "error": {key: state.get(key) for key in ("code", "message", "retryable", "detail")}})
+                "error": {**{key: state.get(key) for key in ("code", "message", "retryable", "detail")},
+                          "trace": self._trace}})
 
     def _check_cancel(self):
         if self._cancel.is_set():
@@ -303,6 +309,7 @@ class AnimaInstallJob:
             self._cancel.clear()
             self._force, self._select = force_verify, select_on_ready
             self._completed = []
+            self._trace = ""
             self._state.update(state="preparing", phase="inspect", job_id=str(uuid.uuid4()), code=None,
                                message="PC 환경 확인 중", retryable=False, bytes_done=0, bytes_total=0,
                                started_at=datetime.now().astimezone().isoformat())
@@ -499,6 +506,7 @@ class AnimaInstallJob:
         except InterruptedError:
             self._publish(state="canceled", code="CANCELED", message="설치를 취소했습니다.", retryable=True)
         except Exception as exc:
+            self._trace = traceback.format_exc()[-TRACE_CHARS:]      # 어디서 났는지 - 코드 · 메시지만으론 모른다
             code = getattr(exc, "code", None) or {"extract": "EXTRACT_FAILED", "install_nodes": "NODE_INSTALL_FAILED",
                       "promote": "EXTRACT_FAILED", "write_config": "PATH_NOT_WRITABLE"}.get(self._state["phase"], "DOWNLOAD_FAILED")
             self._publish(state="blocked" if self._state["phase"] == "inspect" else "failed", code=code,

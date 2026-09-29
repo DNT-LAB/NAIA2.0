@@ -5,6 +5,7 @@ import io
 import os
 import subprocess
 import time
+import traceback
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -21,6 +22,8 @@ from .settings import load_settings, quick_receipt, walk_files, write_instance_m
 REGISTRY = {}
 REGISTRY_LOCK = RLock()
 INSTALLING = set()
+# 진단 정보에 싣는 Traceback 의 끝부분 길이(글자) - 어디서 났는지는 끝에 있다
+TRACE_CHARS = 8000
 
 
 class ManagedEngineError(RuntimeError):
@@ -74,6 +77,8 @@ class AnimaEngineRuntime:
         self._last_used, self._crash_retries = clock(), 0
         self.system_stats = {}
         self._monitor = None
+        # 마지막 시작 오류 {at, code, message, detail, trace} - 실패 화면의 [자세히] · [에러 로그 복사](diagnostics)
+        self.last_error = None
 
     @property
     def url(self):
@@ -228,6 +233,9 @@ class AnimaEngineRuntime:
             except Exception as exc:
                 code = "ENGINE_CRASHED" if crashed else getattr(exc, "code", "ENGINE_START_FAILED")
                 detail = getattr(exc, "detail", "") or self.log_tail() or str(exc)
+                self.last_error = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), "code": code,
+                                   "message": "엔진을 시작하지 못했습니다.", "detail": detail,
+                                   "trace": traceback.format_exc()[-TRACE_CHARS:]}
                 self._terminate()
                 self._set("crashed", code, "엔진을 시작하지 못했습니다.")
                 raise ManagedEngineError(code, "엔진을 시작하지 못했습니다.", detail) from exc

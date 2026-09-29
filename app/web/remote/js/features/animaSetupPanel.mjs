@@ -97,6 +97,11 @@ const STYLE = `
 #setupAnimaSection .anima-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px;
   color: var(--text-primary); word-break: break-all; }
 #setupAnimaSection .anima-path-row em { flex: none; font-style: normal; font-size: 10px; color: var(--text-dim); }
+#setupAnimaSection .anima-diag { display: flex; gap: 14px; align-items: center; }
+#setupAnimaSection .anima-diag .anima-link { margin-left: 0; }
+#setupAnimaSection .anima-diag-text { max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.45; color: var(--text-muted); user-select: text;
+  background: var(--bg-surface); border: 1px solid var(--border-dim); border-radius: 6px; padding: 8px; margin: 0; }
 `;
 
 // 설치 단계를 사람이 읽을 몇 칸으로 묶는다(계약서 §5.2 의 phase 10개 -> 6칸).
@@ -157,6 +162,12 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   let drawn = '';            // 마지막으로 그린 입력 — 같으면 다시 그리지 않는다(입력 중인 칸을 지키려고)
   let lastState = '';
   let lastEngine = '';
+  // 실패 화면의 [자세히] · [에러 로그 복사](사용자 지정 09-29 - Radeon 등 NVIDIA 가 아닌 PC 의 제보용)
+  let diag = null;           // 마지막으로 받은 진단 텍스트(GET /diagnostics)
+  let diagOpen = false;      // [자세히] 펼침
+  let diagLoading = false;
+  let diagPlaced = false;    // 한 화면에 한 번만 - 그리기마다 되돌린다
+  let lastError = null;      // 마지막 요청 오류 {code, message} - 알림은 사라지니 화면에도 남긴다(다음 요청 때 지운다)
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -272,6 +283,17 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     return `<div class="setup-result error">${esc(e.message)}${e.code ? `<span class="anima-code">${esc(e.code)}</span>` : ''}</div>`;
   }
 
+  // [자세히] · [에러 로그 복사] - 맨 위의 실패 옆에 한 번만. 원격 기기는 뺀다(진단은 이 PC 에서 nvidia-smi · 그래픽 카드
+  // 조회를 돌린다 - 서버도 로컬만 받는다). 진단 텍스트는 누를 때마다 새로 모은다.
+  function diagOnce() {
+    if (diagPlaced || remote) return '';
+    diagPlaced = true;
+    return `<div class="anima-diag">
+        <button type="button" class="anima-link" data-anima-diag="toggle">${diagOpen ? '접기' : '자세히'}</button>
+        <button type="button" class="anima-link" data-anima-diag="copy">에러 로그 복사</button>
+      </div>${diagOpen ? `<pre class="anima-diag-text">${esc(diagLoading && !diag ? '진단 정보를 모으는 중…' : diag || '')}</pre>` : ''}`;
+  }
+
   // 설치 위치가 거절됐다(PATH_*) — 오류는 입력칸 밑에 둔다(오른쪽 칸에 두면 고칠 자리와 떨어진다)
   const pathError = () => Boolean(planError) && /^PATH_/.test(planError.code || '');
 
@@ -281,7 +303,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     if (inspecting) return '<div class="anima-note">PC 검사 중…</div>';
     const again = `<div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="inspect">${
       plan || planError ? '다시 검사' : 'PC 검사'}</button></div>`;
-    if (planError && !pathError()) return errorHtml(planError) + again;
+    if (planError && !pathError()) return errorHtml(planError) + diagOnce() + again;
     if (planError) return `<div class="anima-note">설치 위치를 고치면 다시 검사합니다</div>${again}`;
     if (!plan) return `<div class="anima-note">RTX 20 시리즈 이상 NVIDIA GPU 가 필요합니다</div>${again}`;
     const gpu = plan.gpu || {};
@@ -291,7 +313,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       .map(c => `<li class="${c.ok ? '' : 'bad'}">${c.ok ? '✓' : '✕'} ${esc(c.message || c.code || c.id)}</li>`).join('');
     return `<div class="anima-kv"><span class="anima-label">GPU</span><span class="anima-val"${
         gpu.driver ? ` title="드라이버 ${esc(gpu.driver)}"` : ''}>${esc(gpuText)}</span></div>
-      ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}
+      ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}${(plan.checks || []).some(c => !c.ok) ? diagOnce() : ''}
       <div class="anima-kv"><span class="anima-label">용량</span><span class="anima-detail">필요 ${fmtBytes(plan.required_bytes)}
         · 남은 ${fmtBytes(plan.free_bytes)}</span></div>
       ${viewArtifacts()}
@@ -412,11 +434,14 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   function viewInstaller() {
     const ins = install();
     const parts = [];
-    if (ins.state === 'failed' || ins.state === 'blocked') {
+    const failed = ins.state === 'failed' || ins.state === 'blocked';
+    if (failed) {
       parts.push(errorHtml({ message: ins.message || '설치하지 못했습니다', code: ins.code }));
     } else if (ins.state === 'canceled') {
       parts.push('<div class="anima-note">설치를 취소했습니다. 다시 시작하면 받은 만큼 이어서 받습니다.</div>');
     }
+    if (lastError) parts.push(errorHtml(lastError));
+    if (failed || lastError) parts.push(diagOnce());
     if (remote) {
       parts.push(`<div class="anima-note">${REMOTE_NOTE}</div>`);
       return parts.join('');
@@ -476,7 +501,10 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
         : eng.state === 'stopped' || eng.state === 'crashed' || !eng.state
           ? '<button type="button" class="setup-btn-ghost" data-anima-act="start">켜기</button>' : '';
     parts.push(`<div class="anima-row"><span class="anima-label">엔진</span><span class="anima-val">${esc(engText)}</span>${engBtn}</div>`);
-    if (eng.state === 'crashed' && eng.message) parts.push(`<div class="setup-result error">${esc(eng.message)}</div>`);
+    const crashed = eng.state === 'crashed' && eng.message;
+    if (crashed) parts.push(errorHtml({ message: eng.message, code: eng.code }));
+    if (lastError) parts.push(errorHtml(lastError));
+    if (crashed || lastError) parts.push(diagOnce());
     const gpu = rc.gpu || {};
     const ss = rc.system_stats || {};
     const bits = [gpu.name, ss.comfyui_version && `ComfyUI ${ss.comfyui_version}`, ss.pytorch_version && `PyTorch ${ss.pytorch_version}`]
@@ -525,7 +553,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     if (elStatus) elStatus.textContent = headline();
     paintNav();
     const key = JSON.stringify([missing, remote, st, plan, planError, inspecting, lic && lic.bundle_sha256,
-      [...licOpen], Object.keys(licText), agreed, busy, artsOpen, licMore]);
+      [...licOpen], Object.keys(licText), agreed, busy, artsOpen, licMore, diag, diagOpen, diagLoading, lastError]);
     if (key === drawn && elBody.childElementCount) return;
     drawn = key;
     // 입력 중인 칸을 지킨다(폴링이 칸을 다시 그려도 글자 · 커서가 남게)
@@ -533,6 +561,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const focusKey = active && elBody.contains(active) ? active.getAttribute('data-anima-input') : null;
     const selection = focusKey && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
     let html;
+    diagPlaced = false;
     if (missing) html = '<div class="anima-note">이 버전에는 ANIMA 엔진이 아직 없습니다.</div>';
     else if (!st) html = '';
     else if (install().state === 'preparing') html = viewPreparing();
@@ -549,6 +578,51 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   }
 
   // ---- 서버 ----
+
+  // 진단 정보(GET /diagnostics) - nvidia-smi · Windows 그래픽 카드 조회를 도느라 1~2초 걸린다
+  async function loadDiag() {
+    diagLoading = true;
+    render();
+    try {
+      diag = String((await call('GET', '/diagnostics')).text || '');
+    } catch (error) {
+      diag = `진단 정보를 모으지 못했습니다: ${error.code ? `[${error.code}] ` : ''}${error.message}`;
+    } finally {
+      diagLoading = false;
+      render();
+    }
+    return diag;
+  }
+
+  // [에러 로그 복사] - 누른 때의 상태로 새로 모아 복사한다. ⚠️ 클립보드 쓰기는 **누른 순간** 시작한다(받아 올 글을
+  // 약속으로 넘긴다 - ClipboardItem). 받아 온 뒤(1~2초)에 쓰면 사용자 조작 밖이라 브라우저가 막았다(라이브 09-29).
+  // 그래도 막히면 [자세히] 를 펼쳐 글 전체를 선택해 둔다 - Ctrl+C 한 번이면 된다.
+  async function copyDiag() {
+    const fresh = loadDiag();
+    const clip = globalThis.navigator && globalThis.navigator.clipboard;
+    try {
+      if (typeof globalThis.ClipboardItem === 'function' && clip && typeof clip.write === 'function') {
+        await clip.write([new globalThis.ClipboardItem({
+          'text/plain': fresh.then(text => new Blob([text], { type: 'text/plain' })) })]);
+      } else {
+        await clip.writeText(await fresh);
+      }
+      showToast('에러 로그를 복사했습니다 — 제보에 붙여 넣어 주세요', 'success');
+    } catch (_) {
+      await fresh;
+      diagOpen = true;
+      render();
+      const pre = elBody && elBody.querySelector('.anima-diag-text');
+      const selection = globalThis.getSelection && globalThis.getSelection();
+      if (pre && selection && typeof document.createRange === 'function') {
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      showToast('자동 복사가 막혔습니다 — 펼친 글이 선택돼 있으니 Ctrl+C 를 눌러 주세요', 'error');
+    }
+  }
 
   async function loadLicenses() {
     try {
@@ -664,10 +738,12 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   async function run(button, task) {
     if (busy) return;
     busy = true;
+    lastError = null;
     if (button) button.disabled = true;
     try {
       await task();
     } catch (error) {
+      if (error.status !== 403) lastError = { code: error.code || '', message: error.message };
       showToast(error.status === 403 ? REMOTE_NOTE : `${error.code ? `[${error.code}] ` : ''}${error.message}`, 'error');
     } finally {
       busy = false;
@@ -677,6 +753,16 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   }
 
   async function onClick(event) {
+    const diagBtn = event.target.closest('[data-anima-diag]');
+    if (diagBtn) {
+      if (diagBtn.getAttribute('data-anima-diag') === 'copy') copyDiag();
+      else {
+        diagOpen = !diagOpen;
+        if (diagOpen) loadDiag();
+        else render();
+      }
+      return;
+    }
     const licBtn = event.target.closest('[data-anima-lic]');
     if (licBtn) {
       const id = licBtn.getAttribute('data-anima-lic');

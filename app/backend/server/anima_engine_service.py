@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import copy
 import os
+import traceback
+from datetime import datetime
 from pathlib import Path
 from threading import RLock
 
-from core.anima_engine import integration, manifest
+from core.anima_engine import diagnostics, integration, manifest
 from core.anima_engine.install import AnimaInstallJob, adopt_installed_engine, app_version, validate_root
-from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK,
+from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK, TRACE_CHARS,
                                        get_runtime, register_runtime, reserve_vram)
 from core.anima_engine.settings import (consent_agreed, license_bundle, license_text, load_settings, lora_catalog,
-                                        quick_receipt, record_consent, save_lora_chain, save_settings, unet_catalog)
+                                        quick_receipt, read_json, record_consent, save_lora_chain, save_settings,
+                                        unet_catalog)
 from core.anima_engine.settings import (delete_lora_thumb, lora_folder, lora_thumb, lora_triggers,
                                         put_lora_thumb, read_lora_thumb)
 
@@ -34,6 +37,8 @@ class AnimaEngineService:
         self.job_factory = job_factory
         self.job = None
         self.lock = RLock()
+        self.last_error = None     # 마지막 요청 오류(검사 · 설치 · 엔진 켜기 …) - 진단 정보에 싣는다
+        self.last_checks = None    # 마지막 PC 검사 결과(OS · GPU · 공간)
 
     def forbidden(self):
         paths = getattr(self.context, "runtime_paths", None)
@@ -97,7 +102,9 @@ class AnimaEngineService:
         with self.lock:
             if self._job().snapshot()["state"] == "preparing":
                 raise ManagedEngineError("JOB_RUNNING", "설치가 진행 중입니다.")
-            return {"ok": True, "plan": self._job().inspect(body.get("engine_root"), body.get("model_dirs"))}
+            plan = self._job().inspect(body.get("engine_root"), body.get("model_dirs"))
+            self.last_checks = plan["checks"]
+            return {"ok": True, "plan": plan}
 
     def prepare(self, body):
         with self.lock:
@@ -116,6 +123,7 @@ class AnimaEngineService:
                 return self._use_installed(body)
             job._force = force
             plan = job.inspect()
+            self.last_checks = plan["checks"]
             for check in plan["checks"]:
                 if not check["ok"]:
                     raise ManagedEngineError(check["code"], check["message"])
@@ -196,6 +204,29 @@ class AnimaEngineService:
                     rt.stop()
             self.job = None
             return {"ok": True, "settings": copy.deepcopy(settings.data)}
+
+    def remember_error(self, action, exc):
+        """요청이 실패했다 - 진단 정보의 '마지막 요청 오류' 로. 어디서 났는지(Traceback)까지 - except 안에서 부른다."""
+        self.last_error = {"action": action, "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                           "code": getattr(exc, "code", "") or type(exc).__name__,
+                           "message": getattr(exc, "message", "") or str(exc),
+                           "detail": str(getattr(exc, "detail", "") or ""),
+                           "trace": traceback.format_exc()[-TRACE_CHARS:]}
+
+    def diagnostics(self):
+        """실패 화면의 [자세히] · [에러 로그 복사] - 제보에 붙여 넣을 텍스트 하나(core/anima_engine/diagnostics.py)."""
+        status = self.status()
+        settings = load_settings(self.save_root)
+        journal = read_json(Path(settings.engine_root) / "state/job.json") if settings.engine_root else {}
+        job = self.job
+        with REGISTRY_LOCK:
+            rt = REGISTRY.get(str(Path(settings.engine_root).resolve())) if settings.engine_root else None
+        text = diagnostics.build_report(
+            settings=settings, install=status["install"], journal=journal,
+            job_trace=getattr(job, "_trace", "") or "", job_phases=list(getattr(job, "_completed", []) or []),
+            request_error=self.last_error, checks=self.last_checks, engine=status["engine"],
+            engine_error=getattr(rt, "last_error", None), comfyui_engine=status["comfyui_engine"])
+        return {"ok": True, "text": text}
 
     def loras(self):
         settings = load_settings(self.save_root)

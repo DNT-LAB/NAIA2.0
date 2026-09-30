@@ -112,11 +112,11 @@ def _search_wildcard(context, query: str, limit: int, _opts) -> tuple[list[dict]
 
 def _search_preset(context, query: str, limit: int, opts) -> tuple[list[dict], str]:
     from core.prompt_engineering_settings import (
-        list_preset_names, normalize_prompt_engineering_mode, read_preset_data,
+        list_preset_names, normalize_prompt_engineering_mode, prompt_engineering_mode_of, read_preset_data,
     )
 
     save_root = context.runtime_paths.save_dir
-    mode = normalize_prompt_engineering_mode(opts.get("mode") or context.get_api_mode())
+    mode = normalize_prompt_engineering_mode(opts.get("mode") or prompt_engineering_mode_of(context))
     needle = query.strip().casefold()
     items: list[dict[str, Any]] = []
     for name in list_preset_names(mode, save_root=save_root):

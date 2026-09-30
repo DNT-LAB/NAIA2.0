@@ -78,10 +78,10 @@ def register_nai_preview_routes(
 
     def _pe_prompts() -> tuple[str, str]:
         """지금 모드의 Prefix/Postfix. 표식 자리를 정하는 기준이다."""
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+        from core.prompt_engineering_settings import get_prompt_engineering_store, prompt_engineering_mode_of
 
         store = get_prompt_engineering_store(session_context)
-        settings = store.state(session_context.get_api_mode())["settings"]
+        settings = store.state(prompt_engineering_mode_of(session_context))["settings"]   # 지금 프리셋 색인
         return str(settings.get("pre_prompt") or ""), str(settings.get("post_prompt") or "")
 
     @app.post("/api/nai-preview/save")

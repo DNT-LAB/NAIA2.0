@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI")
+# ANIMA = 관리형 ANIMA 엔진을 고른 COMFYUI 의 프리셋 색인(아래 prompt_engineering_mode_of - 사용자 지정 09-30)
+PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI", "ANIMA")
 PRESET_RUNTIME_STATE_KEYS = frozenset({
     "random_resolution",
     "auto_fit_resolution",
@@ -39,6 +40,26 @@ def normalize_prompt_engineering_mode(mode: str | None, *, allow_empty: bool = F
     if value not in PROMPT_ENGINEERING_PRESET_MODES:
         raise ValueError("Invalid prompt engineering mode")
     return value
+
+
+def prompt_engineering_mode_of(app_context: Any) -> str:
+    """프리셋 색인(PE 모드). api_mode 그대로이되, 관리형 ANIMA 엔진을 고른 COMFYUI 는 "ANIMA".
+
+    사용자 지정 2026-09-30: ANIMA 모드가 외부 COMFYUI 의 프리셋(다른 모드에서 옮겨 온 것까지)을 그대로 보여 줬다 -
+    ANIMA 는 프리셋 · Prefix/Postfix · 마지막 프리셋 · 랜덤 풀을 따로 둔다(save/presets/ANIMA).
+    생성 백엔드(api_mode)는 그대로 COMFYUI 다 - 이것은 프리셋을 어디에 두고 어디서 읽느냐만 정한다.
+    """
+    getter = getattr(app_context, "get_api_mode", None)
+    mode = str((getter() if callable(getter) else "") or "NAI").strip().upper()
+    if mode == "COMFYUI":
+        try:
+            from core.anima_engine.integration import managed_selected
+
+            if managed_selected(app_context):
+                return "ANIMA"
+        except Exception:   # 엔진 모듈이 없는 축소 판 - 예전처럼 COMFYUI
+            pass
+    return mode
 
 
 def sanitize_preset_name(preset_name: str) -> str:
@@ -944,6 +965,19 @@ class PromptEngineeringHeadlessStore:
         self._dirty_modes.discard(mode_key)
         return True, current
 
+    def persist_all_dirty(self) -> tuple[bool, str]:
+        """지금 모드를 쓰고, 손댄 채 떠나온 다른 모드도 그 모드의 현재 프리셋에 쓴다.
+
+        모드마다 편집이 따로 살아 있다. 지금 모드만 쓰면 떠나온 모드의 편집은 그 모드로 돌아와 생성할
+        때까지 메모리에만 있고, 그 전에 끄면 사라진다 - COMFYUI <-> ANIMA 는 엔진만 바꿔도 모드가 바뀐다(09-30).
+        반환은 지금 모드의 결과(persist_active_settings 와 같다).
+        """
+        result = self.persist_active_settings()
+        current = self.mode()
+        for mode_key in sorted(self._dirty_modes - {current}):
+            self.persist_active_settings(mode_key)
+        return result
+
 
 def get_prompt_engineering_store(app_context) -> PromptEngineeringHeadlessStore:
     store = getattr(app_context, "prompt_engineering_headless_store", None)
@@ -952,8 +986,9 @@ def get_prompt_engineering_store(app_context) -> PromptEngineeringHeadlessStore:
     mode_getter = getattr(app_context, "get_api_mode", None)
     runtime_paths = getattr(app_context, "runtime_paths", None)
     save_root = getattr(runtime_paths, "save_dir", None)
+    # 모드 = 프리셋 색인(관리형 ANIMA 는 "ANIMA" - prompt_engineering_mode_of)
     store = PromptEngineeringHeadlessStore(
-        mode_getter if callable(mode_getter) else None,
+        (lambda: prompt_engineering_mode_of(app_context)) if callable(mode_getter) else None,
         save_root=save_root,
     )
     setattr(app_context, "prompt_engineering_headless_store", store)

@@ -81,10 +81,10 @@ def detect_subject(prompt: Any) -> str:
 
 
 def _pe_settings(context: Any) -> dict[str, Any]:
-    from core.prompt_engineering_settings import get_prompt_engineering_store
+    from core.prompt_engineering_settings import get_prompt_engineering_store, prompt_engineering_mode_of
 
     store = get_prompt_engineering_store(context)
-    state = store.state(context.get_api_mode())
+    state = store.state(prompt_engineering_mode_of(context))   # 지금 프리셋 색인(관리형 ANIMA 는 ANIMA)
     settings = state.get("settings") if isinstance(state, dict) else None
     return settings if isinstance(settings, dict) else {}
 

@@ -249,7 +249,7 @@ def _boost_v2_prefetch_token(context: WebSessionContext) -> tuple:
         import json
 
         from app.backend.server.boost_v2_service import boost_v2_settings
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+        from core.prompt_engineering_settings import get_prompt_engineering_store, prompt_engineering_mode_of
 
         store = get_prompt_engineering_store(context)
         options = context.get_options()
@@ -258,7 +258,7 @@ def _boost_v2_prefetch_token(context: WebSessionContext) -> tuple:
             # 프롬프트 가중치는 미리 만든 프롬프트에 구워진다 — 바꾸면 그 컷은 버린다.
             "weight": {key: remote_params.get(key) for key in PROMPT_WEIGHT_PARAM_KEYS},
             "v2": boost_v2_settings(context),
-            "preset": store.state(context.get_api_mode()).get("current_preset"),
+            "preset": store.state(prompt_engineering_mode_of(context)).get("current_preset"),
             "pe": store.collect_settings(),
             "opts": {key: options.get(key) for key in ("wildcard_standalone", "prompt_fixed")},
         }, sort_keys=True, default=str, ensure_ascii=False)
@@ -282,9 +282,9 @@ def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     # 접지가 아니라서 조건부가 지운 태그를 되살리지 않는다. '*randomized' 프리셋은 Random 때 프리셋을 다시 굴리는
     # 이벤트에 기대므로 미리 만들 수 없다.
     try:
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+        from core.prompt_engineering_settings import get_prompt_engineering_store, prompt_engineering_mode_of
 
-        state = get_prompt_engineering_store(context).state(context.get_api_mode())
+        state = get_prompt_engineering_store(context).state(prompt_engineering_mode_of(context))   # 지금 프리셋 색인
         if str(state.get("current_preset") or "") == "*randomized":
             return False
     except Exception:

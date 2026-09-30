@@ -17,7 +17,8 @@ from core.headless_generation_service import HeadlessGenerationService
 from core.web_session_context import WebSessionContext
 
 
-PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI")
+# 프리셋 색인은 core 한 곳에서 - ANIMA(관리형 엔진) 색인이 따로 섰다(09-30)
+from core.prompt_engineering_settings import PROMPT_ENGINEERING_PRESET_MODES, prompt_engineering_mode_of  # noqa: E402
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
 GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
@@ -472,7 +473,7 @@ def _normalize_preset_mode(
     if not value:
         if allow_empty:
             return ""
-        current_mode = str(context.get_api_mode() or "").strip().upper()
+        current_mode = str(prompt_engineering_mode_of(context) or "").strip().upper()
         return current_mode if current_mode in PROMPT_ENGINEERING_PRESET_MODES else "NAI"
     if value not in PROMPT_ENGINEERING_PRESET_MODES:
         raise ValueError("Invalid preset mode")
@@ -534,7 +535,7 @@ def _preset_file(context: WebSessionContext, preset_name: str, mode: str = "") -
     mode_candidates: list[str] = []
     if mode:
         mode_candidates.append(_normalize_preset_mode(context, mode))
-    current_mode = _normalize_preset_mode(context, context.get_api_mode(), allow_empty=True)
+    current_mode = _normalize_preset_mode(context, prompt_engineering_mode_of(context), allow_empty=True)
     if current_mode and current_mode not in mode_candidates:
         mode_candidates.append(current_mode)
     for fallback_mode in PROMPT_ENGINEERING_PRESET_MODES:

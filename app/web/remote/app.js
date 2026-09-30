@@ -9657,6 +9657,9 @@ function onModeResult(m) {
     // 서버는 COMFYUI 라고만 안다 — 관리형 엔진이면 화면 이름은 ANIMA(계약 FR-S1)
     const shownMode = m.mode === 'COMFYUI' && comfyEngine() === 'managed' ? 'ANIMA' : '';
     showToast(shownMode ? `${shownMode} mode active` : (m.message || `${m.mode} mode active`), 'success');
+    // 프리셋은 모드마다 따로다 - ANIMA 는 COMFYUI 와 색인이 갈려 엔진만 바꿔도 바뀐다(사용자 지정 09-30). 들고 있던
+    // PE 상태(Interactive 조립 · 슬래시 메뉴 · 프리셋 창이 읽는 것)를 새 모드의 것으로 다시 받는다.
+    if (moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState) requestModuleState('prompt_engineering');
   } else {
     syncMode(prevMode);
     showToast(m.message || 'Mode change failed', 'error', true);

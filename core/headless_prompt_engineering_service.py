@@ -29,6 +29,10 @@ ANIMA_RECOMMENDED_NEGATIVE = (
 )
 ANIMA_RECOMMENDED_STEPS = 27
 ANIMA_RECOMMENDED_CFG = 4.8
+# ANIMA 모드(관리형 엔진) 기본 프리셋(사용자 지정 2026-09-30) - 프리셋 색인이 ANIMA 로 따로 선 뒤 첫 진입에 프리셋이
+# 없으면 'default' 를 이것으로 만든다. Prefix · Postfix 만 다르고 나머지는 COMFYUI ANIMA 추천(@myowa)과 같다.
+ANIMA_MODE_DEFAULT_PRE_PROMPT = "newest, year2024, (best quality), highres, absurdres"
+ANIMA_MODE_DEFAULT_POST_PROMPT = "(sketch, thin jaggy lines:0.42)"
 
 
 class HeadlessPromptEngineeringService:
@@ -122,7 +126,7 @@ class HeadlessPromptEngineeringService:
 
         if key == 'auto_hide_add':
             store = get_prompt_engineering_store(context)
-            settings = store.state(context.get_api_mode())['settings']
+            settings = store.state(self._preset_mode())['settings']
             current = str(settings.get('auto_hide_prompt') or '')
             existing = {part.strip().lower() for part in current.replace(chr(10), ',').split(',')}
             if tag.lower() in existing:
@@ -208,6 +212,7 @@ class HeadlessPromptEngineeringService:
         context = self.context
         store = get_prompt_engineering_store(context)
         self.ensure_first_run_recommended_preset()
+        preset_mode = self._preset_mode()   # 프리셋 색인 - 관리형 ANIMA 는 "ANIMA"(api_mode 는 COMFYUI)
         settings = store.collect_settings()
         _runtime_paths = getattr(context, "runtime_paths", None)
         # 카테고리 필터 오버라이드도 전역 디스크 SSOT — 모드 캐시가 아니라 fresh 읽는다.
@@ -223,16 +228,16 @@ class HeadlessPromptEngineeringService:
             if name == "*randomized":
                 return {
                     "name": name,
-                    "api_mode": context.get_api_mode(),
+                    "api_mode": preset_mode,
                     "description": "Randomized preset pool",
                     "pre_prompt_preview": "",
                     "post_prompt_preview": "",
                     "thumbnail_url": "",
                 }
-            data = store.read_preset_data(name, mode or context.get_api_mode())
+            data = store.read_preset_data(name, mode or preset_mode)
             module_settings = data.get("module_settings") if isinstance(data, dict) else {}
             module_settings = module_settings if isinstance(module_settings, dict) else {}
-            api_mode = str(data.get("api_mode") or mode or context.get_api_mode())
+            api_mode = str(data.get("api_mode") or mode or preset_mode)
             # 프리셋이 어느 모델로 저장됐는지. Quick Preset 목록의 `[NAI4.5C]` 배지와
             # 그 위 필터 바(ALL/NAI5/NAI4.5/ETC)가 이 값을 쓴다. NAI 프리셋만 의미가
             # 있고(다른 모드는 모델 개념이 다르다), 모델을 안 적고 저장된 옛 프리셋은
@@ -267,7 +272,7 @@ class HeadlessPromptEngineeringService:
         webui_presets = store.list_preset_names("WEBUI")
         from core.prompt_engineering_settings import preset_thumbnail_url_map
 
-        current_mode_key = str(context.get_api_mode() or "").strip().upper()
+        current_mode_key = preset_mode
         current_thumbs = preset_thumbnail_url_map(context, list(preset_options), current_mode_key)
         webui_thumbs = preset_thumbnail_url_map(context, list(webui_presets), "WEBUI")
         payload = {
@@ -312,10 +317,10 @@ class HeadlessPromptEngineeringService:
 
         context = self.context
         store = get_prompt_engineering_store(context)
-        mode = context.get_api_mode()
+        mode = self._preset_mode()
         if mode == "COMFYUI" and not self._is_comfyui_anima_mode():
             return False, ""
-        if mode not in {"NAI", "WEBUI", "COMFYUI"}:
+        if mode not in {"NAI", "WEBUI", "COMFYUI", "ANIMA"}:
             return False, ""
         if store.load_last_used_preset(mode):
             return False, ""
@@ -326,7 +331,10 @@ class HeadlessPromptEngineeringService:
         ]
         if user_presets:
             return False, ""
-        ok, message = self.create_and_apply_recommended_preset(save_current=False)
+        if mode == "ANIMA":
+            ok, message = self._create_anima_mode_default(store)
+        else:
+            ok, message = self.create_and_apply_recommended_preset(save_current=False)
         if ok:
             print(f"Remote Web: first-run recommended preset applied: {message}", flush=True)
         return ok, message
@@ -350,7 +358,8 @@ class HeadlessPromptEngineeringService:
     def persist_active_settings(self) -> tuple[bool, str]:
         from core.prompt_engineering_settings import get_prompt_engineering_store
 
-        return get_prompt_engineering_store(self.context).persist_active_settings()
+        # 떠나온 모드의 편집까지 쓴다 - COMFYUI <-> ANIMA 는 엔진만 바꿔도 프리셋 색인이 바뀐다(09-30)
+        return get_prompt_engineering_store(self.context).persist_all_dirty()
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
         from core.prompt_engineering_settings import get_prompt_engineering_store
@@ -365,7 +374,7 @@ class HeadlessPromptEngineeringService:
             #    저장이 그것을 파일에 박는다(사용자 제보 2026-08-25).
             #    보고 친 프리셋과 지금 프리셋이 다르면 **버린다** - 사용자는 그 글을
             #    이 프리셋에 쓰려고 친 적이 없다.
-            current = str(store.state(context.get_api_mode()).get("current_preset") or "")
+            current = str(store.state(self._preset_mode()).get("current_preset") or "")
             if current and current != stamp:
                 print(
                     f"[info] dropped stale prompt-engineering edit ({key}):"
@@ -568,7 +577,7 @@ class HeadlessPromptEngineeringService:
 
         context = self.context
         store = get_prompt_engineering_store(context)
-        mode = context.get_api_mode()
+        mode = self._preset_mode()
         if str(flavor or "").strip() == "artist_bench":
             if mode != "NAI":
                 return False, "V5 영점 프리셋은 NAI 모드에서만 적용할 수 있습니다."
@@ -579,6 +588,11 @@ class HeadlessPromptEngineeringService:
             module_settings = store.collect_settings(mode)
             module_settings.update(self._artist_bench_recommended_module_settings())
             main_settings = self._artist_bench_recommended_main_settings()
+        elif mode == "ANIMA":
+            # 관리형 ANIMA 엔진 - 자기 색인에 ANIMA 모드 기본값으로(첫 진입의 'default' 와 같은 값)
+            preset_name = self._unique_preset_name(store, "recommend_anima", mode)
+            module_settings = self._anima_mode_default_module_settings()
+            main_settings = self._comfyui_anima_recommended_main_settings()
         elif mode == "COMFYUI":
             if not self._is_comfyui_anima_mode():
                 return False, "추천 설정 적용은 COMFYUI ANIMA 모드에서만 지원됩니다."
@@ -632,6 +646,33 @@ class HeadlessPromptEngineeringService:
         if str(flavor or "").strip() == "artist_bench":
             self._zero_session_resolution_flags()
         return True, preset_name
+
+    def _preset_mode(self) -> str:
+        """프리셋 색인(PE 모드) - api_mode 그대로이되 관리형 ANIMA 는 "ANIMA"(prompt_engineering_mode_of)."""
+        from core.prompt_engineering_settings import prompt_engineering_mode_of
+
+        return prompt_engineering_mode_of(self.context)
+
+    def _create_anima_mode_default(self, store: Any) -> tuple[bool, str]:
+        """ANIMA 색인이 비었다(첫 진입) - 'default' 를 ANIMA 모드 기본값으로 만들어 적용한다(사용자 지정 09-30).
+
+        이미 'default' 파일이 있으면 두지 않는다(사용자가 고친 것일 수 있다). 적용하면 마지막 프리셋이 'default' 로
+        남아 다음 진입부터는 여기 오지 않는다.
+        """
+        mode = "ANIMA"
+        if "default" in store.list_preset_names(mode):
+            return False, ""
+        main_settings = self._comfyui_anima_recommended_main_settings()
+        store.write_preset_data("default", mode, {
+            "api_mode": mode,
+            "module_settings": self._anima_mode_default_module_settings(),
+            "main_settings": main_settings,
+        })
+        store.refresh(mode)
+        if not store.set_preset("default", mode):
+            return False, "프리셋을 적용할 수 없습니다: default"
+        self._apply_main_settings(main_settings)
+        return True, "default"
 
     def _is_comfyui_anima_mode(self) -> bool:
         context = self.context
@@ -738,7 +779,7 @@ class HeadlessPromptEngineeringService:
         try:
             context = self.context
             store = get_prompt_engineering_store(context)
-            mode_key = context.get_api_mode()
+            mode_key = self._preset_mode()
             state = store.state(mode_key)
             name = str(state.get("current_preset") or "")
             # 고른 프리셋이 없거나 '랜덤' 자리면 반영할 대상이 없다.
@@ -792,7 +833,7 @@ class HeadlessPromptEngineeringService:
         try:
             context = self.context
             store = get_prompt_engineering_store(context)
-            mode_key = context.get_api_mode()
+            mode_key = self._preset_mode()
             state = store.state(mode_key)
             name = str(state.get("current_preset") or "")
             if name in {"", "(프리셋 없음)", "*randomized"}:
@@ -839,7 +880,7 @@ class HeadlessPromptEngineeringService:
 
             context = self.context
             store = get_prompt_engineering_store(context)
-            name = str(store.state(context.get_api_mode()).get("current_preset") or "")
+            name = str(store.state(self._preset_mode()).get("current_preset") or "")
         except Exception:   # noqa: BLE001 - 판정 실패가 편집을 막으면 안 된다
             return False
         if not name or name == stamp_text:
@@ -885,7 +926,7 @@ class HeadlessPromptEngineeringService:
         try:
             context = self.context
             store = get_prompt_engineering_store(context)
-            mode_key = context.get_api_mode()
+            mode_key = self._preset_mode()
             state = store.state(mode_key)
             name = str(state.get("current_preset") or "")
             if name in {"", "(프리셋 없음)", "*randomized"}:
@@ -924,7 +965,7 @@ class HeadlessPromptEngineeringService:
             # returning {} for COMFYUI/WEBUI-only names (no params/negative applied
             # at all). set_preset() above already reads module_settings with the
             # active mode, so this must match it.
-            preset_data = store.read_preset_data(preset_name, context.get_api_mode())
+            preset_data = store.read_preset_data(preset_name, self._preset_mode())
         except Exception:
             preset_data = None
         main_settings = preset_data.get("main_settings") if isinstance(preset_data, dict) else None
@@ -997,7 +1038,7 @@ class HeadlessPromptEngineeringService:
         if str(context.prompt_text or "").strip():
             return False
         store = get_prompt_engineering_store(context)
-        mode = context.get_api_mode()
+        mode = self._preset_mode()
         # Resolve to the *validated* current preset, not the raw last-used name:
         # store.state() already resolves a stale/nonexistent last-used preset down
         # to "default", so this also covers the "matched (last-used) preset" the
@@ -1065,6 +1106,14 @@ class HeadlessPromptEngineeringService:
                 cls._webui_recommended_module_settings()["preprocessing_options"]
             ),
         }
+
+    @staticmethod
+    def _anima_mode_default_module_settings() -> dict[str, Any]:
+        """ANIMA 모드 기본(사용자 지정 09-30) - Prefix · Postfix 만 ANIMA 모드 값, 나머지는 @myowa 추천 그대로."""
+        settings = HeadlessPromptEngineeringService._comfyui_anima_recommended_module_settings()
+        settings["pre_prompt"] = ANIMA_MODE_DEFAULT_PRE_PROMPT
+        settings["post_prompt"] = ANIMA_MODE_DEFAULT_POST_PROMPT
+        return settings
 
     @staticmethod
     def _comfyui_anima_recommended_main_settings() -> dict[str, Any]:

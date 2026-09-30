@@ -1384,21 +1384,20 @@ export function createCharacterQuickPanel({
         // (여기에는 비활성 무리가 보이지 않는다).
         + `<div class="cq-foot">`
         + `<button type="button" class="cq-add" data-cq-add="1">+ Add Character</button>`
+        // 캐릭터 모듈 창의 "Generate 때 와일드카드 재굴림" 과 **같은 값**(`reroll_on_generate`)이다 - 끄면 Random 이
+        // 굴린 값을 Generate 가 그대로 쓰고, 바꾸고 싶을 때 [Refresh] 를 누른다. 예전엔 아래 줄에 긴 글로 따로 있어
+        // 패널 밑으로 밀려 보였다(사용자 지정 2026-09-30: 디자인 개선) - [Add] 줄의 켜고 끄는 단추로 올린다.
+        + (current.virtual
+          ? ''
+          : `<label class="cq-reroll" title="켜면 Generate 때마다 캐릭터 와일드카드를 새로 굴립니다.`
+            + ` 끄면 Random · Refresh 가 굴린 값을 그대로 씁니다."><input type="checkbox" data-cq-reroll="1"`
+            + `${current.reroll_on_generate ? ' checked' : ''}><span>생성 때 재굴림</span></label>`)
         // ⚠️ 모바일에서는 **Manage 를 내보내지 않는다**(사용자 지정 2026-09-03).
         //    이 버튼이 여는 캐릭터 모듈 팝업은 좁은 화면에 맞춰져 있지 않아, 열면
         //    화면을 덮고 빠져나오기 어렵다. 여기서 안 그리는 것이 가장 확실하다.
         + (isNarrowViewport()
           ? ''
           : `<button type="button" class="cq-manage" data-cq-manage="1">Manage</button>`)
-        + `</div>`
-        // 캐릭터 모듈 창의 "Generate 버튼을 누를 때 캐릭터 와일드카드 재굴림" 과 **같은 값**
-        // (`reroll_on_generate`)이다 - 끄면 Random 이 굴린 값을 Generate 가 그대로 쓰고,
-        // 바꾸고 싶을 때 [Refresh] 를 누른다.
-        + (current.virtual
-          ? ''
-          : `<label class="cq-reroll"><input type="checkbox" data-cq-reroll="1"`
-            + `${current.reroll_on_generate ? ' checked' : ''}>`
-            + `<span>생성 버튼이 눌릴 때 와일드카드를 갱신합니다</span></label>`)
         + `</div>`
       : '';
     // 머리는 **버튼 하나가 아니라 줄**이다. 활성화 토글과 POS 를 나란히 두어야

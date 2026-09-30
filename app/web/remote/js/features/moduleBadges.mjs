@@ -382,7 +382,12 @@ export function createModuleBadges({
     const badge = document.getElementById('badgeChar');
     if (!badge || !btn) return;
 
-    const promptText = (m.processed_characters || []).filter(Boolean).join(' ');
+    // 굴려 둔 값이 없으면(재굴림 켬 · 슬롯을 고친 직후 · 재시작 직후) Generate 가 슬롯을 새로 굴려 보낸다 - 그때 0 을
+    // 내걸면 "캐릭터가 안 들어간다" 로 읽힌다(사용자 제보 2026-09-30: Activated 2 Characters 인데 Character 0).
+    // 켜진 슬롯의 글로 어림한다(와일드카드는 풀기 전 글자 그대로라 어림이다).
+    const rolled = (m.processed_characters || []).filter(Boolean);
+    const promptText = (rolled.length ? rolled : (m.characters || [])
+      .filter(item => item && item.enabled).map(item => String(item.prompt || '').trim()).filter(Boolean)).join(' ');
     const tokenCount = Number.isFinite(Number(m.character_token_count))
       ? Number(m.character_token_count)
       : estimateTokenCount(promptText, getMode());

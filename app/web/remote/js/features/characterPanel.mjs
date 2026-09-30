@@ -43,7 +43,8 @@ export function createCharacterPanel({
     {key: 'assets', label: '에셋'},
     {key: 'search', label: '검색'},
     {key: 'groups', label: '그룹'},
-    {key: 'tools', label: '도구'},
+    // 도구 탭은 없앴다 - 그 기능(재굴림 · Refresh Preview · Assets)은 머리 둘째 줄에 늘 보인다
+    // (renderHead, 사용자 지정 2026-09-30).
   ];
 
   let lastState = null;
@@ -1351,24 +1352,93 @@ export function createCharacterPanel({
       </div>
       <div class="cw-list cw-list-groups">${rows}</div>`;
   }
-  function renderTools(state) {
-    const preview = String(state.processed_preview_text || '');
+  // ── 머리 두 줄(사용자 지정 2026-09-30) ──────────────────────────────────────
+  //
+  // 제보: 슬롯을 켜고 생성했는데 이미지에 안 들어간다 - 모듈 활성화 · 켠 슬롯 · 굴려 둔 값이 한눈에 안 보였고,
+  // 'Generate 때 재굴림' · [Refresh Preview] 는 **도구 탭 안**에 숨어 있었다. 도구 탭을 걷고 그 기능을 전부
+  // 머리 둘째 줄로 올린다. [적용 상태] 에 마우스를 올리면 다음 생성에 **실제로 나가는** 캐릭터가 뜬다.
+
+  /**
+   * 다음 Generate 에 나가는 캐릭터. 규칙은 백엔드(api_service 의 5-1 · character_params_from_settings)와 같다:
+   *   모듈 꺼짐 -> 없음 · 켠 슬롯(활성이고 ✘ 아님) 없음 -> 없음 ·
+   *   재굴림 끔 + 굴려 둔 값 있음 -> 그 값 그대로 · 그 밖(굴려 둔 값 없음 · 재굴림 켬) -> Generate 가 새로 굴린다.
+   * 굴려 둔 값은 슬롯을 고치면 백엔드가 지운다 - Random · [Refresh Preview] 가 다시 굴린다.
+   */
+  function appliedState(state) {
+    const slots = (state.characters || []).filter(item => item.enabled);
+    const rolled = (state.processed_characters || []).map(value => String(value || ''));
+    const rolledUc = (state.processed_ucs || []).map(value => String(value || ''));
+    if (!state.activated) {
+      return {tone: 'off', line: '꺼짐 — 캐릭터 프롬프트가 생성에 들어가지 않습니다.', items: [],
+        note: slots.length ? `켜 둔 슬롯 ${slots.length}개는 [캐릭터 프롬프트 활성화] 를 켜야 나갑니다.` : ''};
+    }
+    if (!slots.length) {
+      return {tone: 'warn', line: '켠 슬롯이 없습니다 — 캐릭터 없이 생성합니다.', items: [], note: ''};
+    }
+    const fresh = !!state.reroll_on_generate || !rolled.length;
+    const items = fresh
+      ? slots.filter(item => String(item.prompt || '').trim())
+        .map(item => ({prompt: String(item.prompt || ''), uc: String(item.uc || '')}))
+      : rolled.map((prompt, i) => ({prompt, uc: rolledUc[i] || ''}));
+    if (!items.length) {
+      return {tone: 'warn', line: '켠 슬롯이 모두 비어 있습니다 — 캐릭터 없이 생성합니다.', items: [], note: ''};
+    }
+    if (state.reroll_on_generate) {
+      return {tone: 'on', line: `${items.length}명 · Generate 때마다 새로 굴립니다`, items,
+        note: '와일드카드는 생성할 때 풀립니다.'};
+    }
+    if (!rolled.length) {
+      return {tone: 'on', line: `${items.length}명 · 굴려 둔 값이 없어 Generate 가 새로 굴립니다`, items,
+        note: '와일드카드는 생성할 때 풀립니다. Random · [Refresh Preview] 로 미리 굴려 둘 수 있습니다.'};
+    }
+    return {tone: 'on', line: `${items.length}명 · 굴려 둔 값을 그대로 보냅니다`, items,
+      note: 'Random · [Refresh Preview] 가 다시 굴립니다. 슬롯을 고치면 굴려 둔 값은 지워집니다.'};
+  }
+
+  function renderApplied(state) {
+    const view = appliedState(state);
+    const rows = view.items.map((item, i) =>
+      `<div class="cw-applied-item"><span class="cw-applied-key">C${i + 1}</span><span>${escHtml(item.prompt)}</span></div>`
+      + (item.uc.trim()
+        ? `<div class="cw-applied-item is-uc"><span class="cw-applied-key">UC${i + 1}</span><span>${escHtml(item.uc)}</span></div>`
+        : '')).join('');
     return `
-      <div class="cw-tools">
-        <label class="cw-tool-row">
-          <input type="checkbox" ${state.reroll_on_generate ? 'checked' : ''} data-cw-reroll="1">
-          <span>Generate 버튼을 누를 때 캐릭터 와일드카드 재굴림</span>
-        </label>
-        <div class="cw-tool-row">
-          <button type="button" class="cw-chip" data-cw-refresh="1">Refresh Preview</button>
+      <div class="cw-applied is-${view.tone}" data-cw-applied="${view.tone}" tabindex="0"
+        aria-label="적용 상태: ${escAttr(view.line)}">
+        <span class="cw-applied-dot" aria-hidden="true"></span><span>적용 상태</span>
+        <div class="cw-applied-pop" role="tooltip">
+          <div class="cw-applied-title">다음 생성에 나가는 캐릭터</div>
+          <div class="cw-applied-line">${escHtml(view.line)}</div>
+          ${rows ? `<div class="cw-applied-list">${rows}</div>` : ''}
+          ${view.note ? `<div class="cw-applied-note">${escHtml(view.note)}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  /** 1줄 = 활성화 · 개수, 2줄 = 옛 도구 탭(재굴림 · Refresh Preview · Assets) + [적용 상태]. */
+  function renderHead(state, storedCount) {
+    return `
+      <div class="cw-head">
+        <div class="cw-head-row">
+          <label class="cw-tool-row" style="gap:6px">
+            <input type="checkbox" ${state.activated ? 'checked' : ''} data-cw-activated="1">
+            <span>캐릭터 프롬프트 활성화</span>
+          </label>
+          <span class="cw-sp"></span>
+          <span>${state.active_count || 0} active · ${storedCount} stored</span>
+        </div>
+        <div class="cw-head-row cw-head-tools">
+          <label class="cw-tool-row cw-reroll"
+            title="켜면 Generate 때마다 캐릭터 와일드카드를 새로 굴립니다. 끄면 Random · Refresh Preview 가 굴린 값을 그대로 씁니다.">
+            <input type="checkbox" ${state.reroll_on_generate ? 'checked' : ''} data-cw-reroll="1">
+            <span>Generate 때 와일드카드 재굴림</span>
+          </label>
+          <span class="cw-sp"></span>
+          <button type="button" class="cw-chip" data-cw-refresh="1"
+            title="캐릭터 와일드카드를 지금 다시 굴립니다 - 결과는 [적용 상태] 에 보입니다.">Refresh Preview</button>
           <button type="button" class="cw-chip" data-cw-assets="1">Assets ↗</button>
+          ${renderApplied(state)}
         </div>
-        <div class="cw-tool-note">
-          미리보기는 저장된 롤을 그대로 보여 줍니다 — 열어도 다시 굴리지 않습니다.
-        </div>
-        ${preview.trim()
-          ? `<pre class="mod-char-preview-text">${escHtml(preview)}</pre>`
-          : '<div class="cw-empty">아직 미리보기가 없습니다. [Refresh Preview] 를 누르세요.</div>'}
       </div>`;
   }
 
@@ -1380,7 +1450,6 @@ export function createCharacterPanel({
     if (tab === 'history') body = renderHistory(storedSlots, groups, false);
     else if (tab === 'favourites') body = renderHistory(storedSlots, groups, true);
     else if (tab === 'groups') body = renderGroups(storedSlots, groups);
-    else if (tab === 'tools') body = renderTools(state);
     else if (tab === 'assets') {
       // ⚠️ **편집·삭제·C1 적용은 여기 두지 않는다**(사용자 지정: "기존 기능 제거는
       //    아님"). 워크스페이스는 **소비**하는 자리다 - 고르고, 보고, 담는다.
@@ -1413,6 +1482,10 @@ export function createCharacterPanel({
     const next = parsed.querySelector('.cw-slots');
     if (!next) return;
     column.innerHTML = next.innerHTML;
+    // 머리도 새로 그린다 - 활성화 · ✘ · 재굴림은 이 길로 오는데 [적용 상태] 가 그 셋을 읽는다(옛 값에 멈추면
+    // 거짓말이 된다). 이벤트는 뿌리에 위임돼 있어 다시 걸 필요가 없다.
+    const head = moduleBody.querySelector('.cw-head');
+    if (head) head.outerHTML = renderHead(state, chars.length - activeSlots.length);
     const again = column.querySelector('.cw-slots-scroll');
     if (again && keep) again.scrollTop = keep;
     // 새로 만든 textarea 는 높이를 맞추고 자동완성을 다시 건다.
@@ -1459,14 +1532,7 @@ export function createCharacterPanel({
 
     moduleBody.innerHTML = `
       <div class="mod-character-shell">
-        <div class="cw-slots-head" style="border-bottom:1px solid var(--border-dim)">
-          <label class="cw-tool-row" style="gap:6px">
-            <input type="checkbox" ${nextState.activated ? 'checked' : ''} data-cw-activated="1">
-            <span>캐릭터 프롬프트 활성화</span>
-          </label>
-          <span class="cw-sp"></span>
-          <span>${nextState.active_count || 0} active · ${storedSlots.length} stored</span>
-        </div>
+        ${renderHead(nextState, storedSlots.length)}
         <div class="cw-body">
           ${renderSlots(activeSlots, chars.length, Number(nextState.max_slots) || 0)}
           ${renderWork(nextState, storedSlots, groups)}

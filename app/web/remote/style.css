@@ -14542,13 +14542,52 @@ body.detached-metadata .metadata-layout {
   border: 1px solid var(--border-dim); border-radius: 999px;
   font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted);
 }
-/* 도구 탭 */
-.cw-tools {
-  flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px;
-  display: flex; flex-direction: column; gap: 10px;
-}
+/* 머리 두 줄(사용자 지정 2026-09-30) - 1줄 활성화 · 개수, 2줄 옛 도구 탭(재굴림 · Refresh Preview · Assets)
+   + [적용 상태]. 제보 "슬롯을 켰는데 이미지에 안 들어간다" - 도구 탭에 숨어 있던 것을 늘 보이게 한다. */
 .cw-tool-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
-.cw-tool-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+.cw-head { flex: none; border-bottom: 1px solid var(--border-dim); background: rgba(20,24,42,0.5); }
+.cw-head-row {
+  min-height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--text-dim);
+}
+.cw-head-row .cw-sp { flex: 1; }
+.cw-head-tools { flex-wrap: wrap; padding: 3px 8px; border-top: 1px solid rgba(42,42,61,0.55); }
+.cw-head .cw-chip { height: 20px; padding: 0 8px; font-size: 9.5px; }
+.cw-reroll { min-width: 0; cursor: pointer; }
+.cw-reroll span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* [적용 상태] - 점 색이 곧 상태(초록 나감 · 노랑 캐릭터 없음 · 빨강 꺼짐). 마우스를 올리면(키보드는 초점) 다음
+   생성에 나가는 캐릭터가 뜬다. 판은 창 안에서 아래로 열린다 - 창 밖은 잘린다. */
+.cw-applied {
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-dim);
+  background: rgba(0,0,0,0.26); color: var(--text-dim); font-size: 9.5px; cursor: default;
+}
+.cw-applied:hover, .cw-applied:focus-visible { color: var(--text-primary); border-color: var(--border-glow); outline: none; }
+.cw-applied-dot { width: 7px; height: 7px; border-radius: 50%; background: #6b6b80; }
+.cw-applied.is-on .cw-applied-dot { background: #58c480; box-shadow: 0 0 6px rgba(88,196,128,0.55); }
+.cw-applied.is-warn .cw-applied-dot { background: #e6a84a; }
+.cw-applied.is-off .cw-applied-dot { background: #d46262; }
+/* 단추와 판 사이 틈을 잇는다 - 판으로 마우스를 옮기는 동안 닫히지 않게(긴 목록은 판 안에서 굴린다). */
+.cw-applied::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 8px; }
+.cw-applied-pop {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 5;
+  width: min(460px, 70vw); max-height: min(440px, 60vh); overflow-y: auto;
+  padding: 9px 11px; border-radius: 8px;
+  background: rgba(14,14,22,0.96); border: 1px solid rgba(124,106,239,0.45);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; line-height: 1.5;
+  color: var(--text-secondary); cursor: auto; user-select: text; white-space: normal;
+}
+.cw-applied:hover .cw-applied-pop, .cw-applied:focus-within .cw-applied-pop { display: block; }
+.cw-applied-title { font-weight: 700; color: rgb(190,180,255); margin-bottom: 3px; }
+.cw-applied-line { color: var(--text-primary); margin-bottom: 6px; }
+.cw-applied.is-off .cw-applied-line { color: #ffb0b0; }
+.cw-applied.is-warn .cw-applied-line { color: #e6c07a; }
+.cw-applied-list { display: flex; flex-direction: column; gap: 3px; }
+.cw-applied-item { display: flex; gap: 7px; word-break: break-word; }
+.cw-applied-item.is-uc { color: var(--text-dim); }
+.cw-applied-key { flex: none; min-width: 30px; color: var(--text-dim); font-weight: 700; }
+.cw-applied-note { margin-top: 7px; font-size: 9.5px; color: var(--text-dim); }
 
 .mod-character-shell {
   display: block;
@@ -24577,13 +24616,19 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-refresh-tip i { color: var(--text-dim); font-style: normal; }
 .cq-refresh-tip .cq-tip-key { color: var(--text-dim); }
 @media (prefers-reduced-motion: reduce) { .cq-refresh-tip { transition: none; } }
-/* 아래 줄 밑 '생성 버튼이 눌릴 때 와일드카드를 갱신합니다' - 캐릭터 모듈 창의 같은 체크(reroll_on_generate). */
+/* [Add] 줄의 '생성 때 재굴림' - 캐릭터 모듈 창의 같은 체크(reroll_on_generate). 예전엔 아래 줄에 긴 글로 따로 있어
+   패널 밑으로 밀려 보였다(사용자 지정 2026-09-30) - [Manage] 와 같은 결의 켜고 끄는 단추. 켜지면 보라. */
 .cq-reroll {
-  display: flex; align-items: center; gap: 6px; padding: 5px 4px 1px; cursor: pointer;
-  font-size: 10.5px; color: var(--text-dim); user-select: none;
+  flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; cursor: pointer;
+  border-radius: 5px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.04);
+  color: var(--text-dim); font-family: var(--font-mono); font-size: 10px; white-space: nowrap; user-select: none;
+  transition: border-color .14s, color .14s, background .14s;
 }
-.cq-reroll input { margin: 0; accent-color: rgb(124,106,239); cursor: pointer; }
-.cq-reroll:hover { color: var(--text-primary); }
+.cq-reroll input { width: 11px; height: 11px; margin: 0; accent-color: rgb(124,106,239); cursor: pointer; }
+.cq-reroll:hover { border-color: rgba(124,106,239,0.55); color: var(--text-primary); }
+.cq-reroll:has(input:checked) {
+  border-color: rgba(124,106,239,0.6); color: var(--text-primary); background: rgba(124,106,239,0.16);
+}
 /* Add 와 Manage 가 아래 줄을 나눠 쓴다. Add 가 주(主)라 더 넓게. */
 .cq-foot { display: flex; gap: 3px; }
 .cq-manage {

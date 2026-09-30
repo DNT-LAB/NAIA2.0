@@ -2109,7 +2109,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260903-main
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260927-anima')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260930-chartok')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -2450,7 +2450,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260924-histfresh')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-head2')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2468,7 +2468,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260924-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260924-cqrefresh')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260930-cqfoot')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,

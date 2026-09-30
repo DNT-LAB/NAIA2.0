@@ -2275,7 +2275,7 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
 // 백엔드는 /api/anima-engine/*(docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8). 엔진을 고르거나 설치가 끝나면
 // 기존 연결 확인(probe_api)을 다시 태운다 — 새 연결 경로를 만들지 않는다.
 let animaSetupPanel = null;
-import('./js/features/animaSetupPanel.mjs?v=20260929-diag2')
+import('./js/features/animaSetupPanel.mjs?v=20260930-vcredist')
   .then(({createAnimaSetupPanel}) => {
     // 엔진을 골랐거나 설치가 끝났다 — 메인 모드 표시(ANIMA) · 연결 · 옵션을 새 엔진으로(onComfyEngineChanged)
     animaSetupPanel = createAnimaSetupPanel({document, showToast, onEngineChanged: engine => onComfyEngineChanged(engine),
@@ -4537,6 +4537,14 @@ const wsMessageHandlers = {
     // ⚠️ 모델 미상은 바로 앞 `toast` 메시지가 이미 알렸다 - 여기서 또 띄우면 같은 말이
     //    두 번 쌓인다. 여기서는 **고칠 자리로 데려가는 일**만 한다.
     if (m && m.model_unknown) { guideModelReselect(); return; }
+    // ANIMA 엔진이 Visual C++ 재배포 패키지가 없어 켜지지 못했다(계약 §15.1) - 받는 단추가 있는 04 ANIMA 로 데려간다
+    // (엔진 오류 밑에 [설치 파일 받기]). 설치하기 전에는 몇 번을 다시 생성해도 같은 실패라 고칠 자리를 바로 연다.
+    if (m && /\bVCREDIST_MISSING\b/.test(String(m.message || ''))) {
+      showToast('Microsoft Visual C++ 재배포 패키지(x64)가 필요합니다 — API 설정 › 04 ANIMA 에서 받을 수 있습니다', 'error');
+      openApiPopup();
+      switchSetupTab('anima');
+      return;
+    }
     if (m && m.message) showToast(m.message, 'error', true);
   },
   prompt_generated: updatePromptOnly,

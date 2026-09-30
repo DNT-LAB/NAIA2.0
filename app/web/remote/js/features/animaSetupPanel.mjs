@@ -6,6 +6,8 @@
 // 설치 · 동의 · 엔진 제어는 NAIA 를 켠 PC 에서만(서버가 403) — 원격이면 안내만 하고 단추를 감춘다.
 // 동의(I Agree)는 화면에서 받고 서버가 묶음 해시로 다시 검사한다(버튼을 우회해도 막힌다).
 // 설치 화면은 짧게(사용자 지정 09-27 원격 시험): [설치] 맨 위 · 검사 · 받을 것은 오른쪽 칸 · 라이선스는 한 줄 동의 + [상세보기].
+// Visual C++ 재배포 패키지가 없으면(계약 §15.1 · VCREDIST_MISSING) 안내 + [설치 파일 받기] — NAIA 는 받거나 실행하지 않고
+// Microsoft 공식 주소를 이 PC 의 브라우저로 연다(사용자 결정 09-30).
 
 const POLL_BUSY_MS = 1000;
 const POLL_IDLE_MS = 4000;
@@ -134,6 +136,7 @@ const IDLE_OPTIONS = [
   { v: 0, t: '안 끔' }, { v: 10, t: '10분' }, { v: 30, t: '30분' }, { v: 60, t: '1시간' }, { v: 120, t: '2시간' },
 ];
 const REMOTE_NOTE = '설치와 엔진 제어는 NAIA 를 켠 PC 에서만 할 수 있습니다.';
+const VCREDIST = 'VCREDIST_MISSING';
 
 export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.bind(window), showToast = () => {},
   onEngineChanged = () => {}, onModelsChanged = () => {} }) {
@@ -167,6 +170,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
   let diagOpen = false;      // [자세히] 펼침
   let diagLoading = false;
   let diagPlaced = false;    // 한 화면에 한 번만 - 그리기마다 되돌린다
+  let vcPlaced = false;      // [설치 파일 받기] 도 한 화면에 한 번만(설치 실패 · 검사 줄이 함께 말할 때)
   let lastError = null;      // 마지막 요청 오류 {code, message} - 알림은 사라지니 화면에도 남긴다(다음 요청 때 지운다)
 
   const esc = value => String(value == null ? '' : value)
@@ -279,8 +283,19 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
 
   // ---- 설치 전(미설치 · 실패 · 취소 · 차단) ----
 
-  function errorHtml(e) {
-    return `<div class="setup-result error">${esc(e.message)}${e.code ? `<span class="anima-code">${esc(e.code)}</span>` : ''}</div>`;
+  // after = VC++ 를 설치한 뒤 누를 단추 이름(그 자리에 있는 단추) — 주면 VCREDIST_MISSING 밑에 [설치 파일 받기] 를 단다
+  function errorHtml(e, after) {
+    return `<div class="setup-result error">${esc(e.message)}${e.code ? `<span class="anima-code">${esc(e.code)}</span>` : ''}</div>${
+      after && e.code === VCREDIST ? vcredistHtml(after) : ''}`;
+  }
+
+  // [설치 파일 받기] — 서버가 Microsoft 공식 설치 파일 주소를 이 PC 의 기본 브라우저로 연다(POST /vcredist/open). 받기 ·
+  // 실행 · 권한 상승은 사람이 한다. 원격 기기는 뺀다(서버도 로컬만 받는다 — 오류 문구가 무엇이 필요한지는 이미 말한다).
+  function vcredistHtml(after) {
+    if (vcPlaced || remote) return '';
+    vcPlaced = true;
+    return `<div class="anima-row"><button type="button" class="setup-btn-ghost" data-anima-act="vcredist">설치 파일 받기</button>
+      <span class="anima-note">Microsoft 공식 · 설치한 뒤 [${esc(after)}]</span></div>`;
   }
 
   // [자세히] · [에러 로그 복사] - 맨 위의 실패 옆에 한 번만. 원격 기기는 뺀다(진단은 이 PC 에서 nvidia-smi · 그래픽 카드
@@ -313,7 +328,9 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
       .map(c => `<li class="${c.ok ? '' : 'bad'}">${c.ok ? '✓' : '✕'} ${esc(c.message || c.code || c.id)}</li>`).join('');
     return `<div class="anima-kv"><span class="anima-label">GPU</span><span class="anima-val"${
         gpu.driver ? ` title="드라이버 ${esc(gpu.driver)}"` : ''}>${esc(gpuText)}</span></div>
-      ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}${(plan.checks || []).some(c => !c.ok) ? diagOnce() : ''}
+      ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}${
+        (plan.checks || []).some(c => !c.ok && c.code === VCREDIST) ? vcredistHtml('다시 검사') : ''}${
+        (plan.checks || []).some(c => !c.ok) ? diagOnce() : ''}
       <div class="anima-kv"><span class="anima-label">용량</span><span class="anima-detail">필요 ${fmtBytes(plan.required_bytes)}
         · 남은 ${fmtBytes(plan.free_bytes)}</span></div>
       ${viewArtifacts()}
@@ -423,9 +440,14 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
             : !consentOk ? '라이선스에 동의해야 설치할 수 있습니다' : '';
     const ready = !why && Boolean(lic);
     const label = ins.state === 'failed' || ins.state === 'canceled' ? '다시 시작' : '설치';
+    // 실패 화면의 [다시 검증](계약 §15.3-3) — 받아 둔 파일을 모두 다시 확인하고 엔진을 새로 푼다. [다시 시작] 은 이어서
+    // 받고 틀린 노드만 고친다 — 그보다 깊은 손상이 이 단추 몫이다. 잠금은 [다시 시작] 과 같다(검사 · 동의).
+    const reverify = ins.state === 'failed'
+      ? `<button type="button" class="setup-btn-ghost" data-anima-act="reverify"${ready && !busy ? '' : ' disabled'}
+          title="받아 둔 파일을 모두 다시 확인하고 엔진을 새로 풉니다">다시 검증</button>` : '';
     return `<div class="setup-actions">
       <button type="button" class="setup-btn-primary" data-anima-act="prepare"${ready && !busy ? '' : ' disabled'}>${
-        label}${plan ? ` (${fmtBytes(plan.download_bytes)})` : ''}</button>
+        label}${plan ? ` (${fmtBytes(plan.download_bytes)})` : ''}</button>${reverify}
       ${why ? `<span class="anima-note">${esc(why)}</span>` : ''}</div>`;
   }
 
@@ -436,11 +458,11 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const parts = [];
     const failed = ins.state === 'failed' || ins.state === 'blocked';
     if (failed) {
-      parts.push(errorHtml({ message: ins.message || '설치하지 못했습니다', code: ins.code }));
+      parts.push(errorHtml({ message: ins.message || '설치하지 못했습니다', code: ins.code }, '다시 시작'));
     } else if (ins.state === 'canceled') {
       parts.push('<div class="anima-note">설치를 취소했습니다. 다시 시작하면 받은 만큼 이어서 받습니다.</div>');
     }
-    if (lastError) parts.push(errorHtml(lastError));
+    if (lastError) parts.push(errorHtml(lastError, '다시 검사'));
     if (failed || lastError) parts.push(diagOnce());
     if (remote) {
       parts.push(`<div class="anima-note">${REMOTE_NOTE}</div>`);
@@ -502,8 +524,8 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
           ? '<button type="button" class="setup-btn-ghost" data-anima-act="start">켜기</button>' : '';
     parts.push(`<div class="anima-row"><span class="anima-label">엔진</span><span class="anima-val">${esc(engText)}</span>${engBtn}</div>`);
     const crashed = eng.state === 'crashed' && eng.message;
-    if (crashed) parts.push(errorHtml({ message: eng.message, code: eng.code }));
-    if (lastError) parts.push(errorHtml(lastError));
+    if (crashed) parts.push(errorHtml({ message: eng.message, code: eng.code }, '켜기'));
+    if (lastError) parts.push(errorHtml(lastError, '켜기'));
     if (crashed || lastError) parts.push(diagOnce());
     const gpu = rc.gpu || {};
     const ss = rc.system_stats || {};
@@ -562,6 +584,7 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const selection = focusKey && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
     let html;
     diagPlaced = false;
+    vcPlaced = false;
     if (missing) html = '<div class="anima-note">이 버전에는 ANIMA 엔진이 아직 없습니다.</div>';
     else if (!st) html = '';
     else if (install().state === 'preparing') html = viewPreparing();
@@ -801,14 +824,17 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const act = actBtn.getAttribute('data-anima-act');
     if (act === 'inspect') { inspect(); return; }
     run(actBtn, async () => {
-      if (act === 'prepare') {
-        const body = { select_on_ready: true, force_verify: false, engine_root: currentRoot() };
+      if (act === 'prepare' || act === 'reverify') {
+        const body = { select_on_ready: true, force_verify: act === 'reverify', engine_root: currentRoot() };
         if (!consentStored()) body.consent = { bundle_sha256: lic ? lic.bundle_sha256 : '', agreed: agreed === true };
         const data = await call('POST', '/prepare', body);
         if (data.status) applyStatus(data.status);
       } else if (act === 'repair') {
         const data = await call('POST', '/prepare', { select_on_ready: false, force_verify: true });
         if (data.status) applyStatus(data.status);
+      } else if (act === 'vcredist') {
+        await call('POST', '/vcredist/open', {});
+        showToast('브라우저에서 Microsoft 설치 파일을 엽니다 — 설치한 뒤 다시 시도해 주세요', 'success');
       } else if (act === 'cancel') {
         await call('POST', '/cancel', {});
       } else if (act === 'start') {

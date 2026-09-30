@@ -747,8 +747,6 @@ class HeadlessGenerationService:
                 and not any(part.strip().startswith("-") for part in text.split(","))):
             return
         try:
-            import weakref
-
             from core.anima_engine.prompt_loras import split_lora_lines
             from core.prompt_context import PromptContext
             from core.wildcard_processor import WildcardProcessor, split_tags_smart
@@ -761,17 +759,10 @@ class HeadlessGenerationService:
                 )
                 self.context.current_prompt_context = prompt_context
 
-            wildcard_manager = getattr(self.context, "wildcard_manager", None)
-            if wildcard_manager is None:
-                from core.wildcard_manager import WildcardManager
+            # 없으면 세우고 청크(인스턴트 와일드카드)까지 싣는다 - 규칙은 한 곳(core/wildcard_runtime)
+            from core.wildcard_runtime import ensure_wildcard_manager
 
-                wildcard_manager = WildcardManager()
-                self.context.wildcard_manager = wildcard_manager
-            if getattr(wildcard_manager, "_app_context_ref", None) is None:
-                try:
-                    wildcard_manager._app_context_ref = weakref.ref(self.context)
-                except TypeError:
-                    pass
+            wildcard_manager = ensure_wildcard_manager(self.context)
 
             processor = WildcardProcessor(wildcard_manager)
 

@@ -776,6 +776,23 @@ def _get_prompt_context(app_context, *, reuse_current_context: bool = True) -> P
     return PromptContext(source_row=source_row, settings={})
 
 
+def _character_wildcard_processor(app_context) -> WildcardProcessor | None:
+    """캐릭터 글을 펼칠 처리기 - 새 굴림과 결과 창의 캐릭터 고정 재굴림이 함께 쓴다.
+
+    ⚠️ 관리자가 아직 없으면(기동 직후 워밍업 전) 와일드카드가 글자 그대로 나갔다(재현 2026-09-30: 재시작 직후
+       [Refresh Preview] 가 '1girl, __hair__'). 청크(인스턴트 와일드카드)도 그 창을 열어야 실렸다(사용자 제보:
+       Chunk 창을 한 번 열어야 캐릭터가 제대로 나갔다). 실제 실행 맥락(runtime_paths 가 있다 - 사용자 와일드카드
+       자리를 안다)이거나 관리자가 이미 있으면 core/wildcard_runtime 이 세우고 청크를 싣는다(관리자마다 한 번).
+    """
+    wildcard_manager = getattr(app_context, "wildcard_manager", None)
+    if app_context is not None and (wildcard_manager is not None
+                                    or getattr(app_context, "runtime_paths", None) is not None):
+        from core.wildcard_runtime import ensure_wildcard_manager
+
+        wildcard_manager = ensure_wildcard_manager(app_context)
+    return WildcardProcessor(wildcard_manager) if wildcard_manager is not None else None
+
+
 def _conditional_character_override(app_context, *, reuse_current_context: bool) -> dict | None:
     if not reuse_current_context:
         return None
@@ -1090,10 +1107,7 @@ def reroll_frozen_character_slot(
     if override_store is not None:
         override_store[slot_key] = working  # pin the fixed set for this re-expansion
 
-    processor = None
-    wildcard_manager = getattr(app_context, "wildcard_manager", None)
-    if wildcard_manager is not None:
-        processor = WildcardProcessor(wildcard_manager)
+    processor = _character_wildcard_processor(app_context)
     context = _get_prompt_context(app_context, reuse_current_context=False)
     prompt = _expand_character_text(frame.get("prompt", ""), processor, context, slot=slot_key)
     if not str(prompt).strip():
@@ -1525,10 +1539,7 @@ def character_params_from_settings(
             return result
 
     # (4) Fresh expansion (not stored here — see docstring).
-    processor = None
-    wildcard_manager = getattr(app_context, "wildcard_manager", None)
-    if wildcard_manager is not None:
-        processor = WildcardProcessor(wildcard_manager)
+    processor = _character_wildcard_processor(app_context)
     context = _get_prompt_context(app_context, reuse_current_context=reuse_current_context)
     roll_start = len(context.wildcard_rolls) if isinstance(getattr(context, "wildcard_rolls", None), list) else 0
     frozen = read_frozen_character_slots(app_context)

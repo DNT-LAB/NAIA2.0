@@ -428,10 +428,10 @@ class PromptProcessor:
             main_window = getattr(app_context, 'main_window', None)
             wildcard_manager = getattr(main_window, 'wildcard_manager', None) if main_window else None
         if wildcard_manager is None:
-            from core.wildcard_manager import WildcardManager
+            # 없으면 세우고 청크(인스턴트 와일드카드)까지 싣는다 - 규칙은 한 곳(core/wildcard_runtime)
+            from core.wildcard_runtime import ensure_wildcard_manager
 
-            wildcard_manager = WildcardManager()
-            setattr(app_context, 'wildcard_manager', wildcard_manager)
+            wildcard_manager = ensure_wildcard_manager(app_context)
         if getattr(wildcard_manager, '_app_context_ref', None) is None:
             try:
                 wildcard_manager._app_context_ref = weakref.ref(app_context)

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-import os
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Any
-import weakref
 
 import pandas as pd
 
@@ -798,23 +796,11 @@ class HeadlessRandomPromptService:
             self._runtime_registered = True
 
     def _ensure_wildcard_manager(self) -> None:
-        if getattr(self.context, "wildcard_manager", None) is not None:
-            return
-        from core.wildcard_manager import WildcardManager
+        # 기동 워밍업이 맨 먼저 부른다 - 관리자를 세우고 청크(인스턴트 와일드카드)도 함께 싣는다(사용자 제보
+        # 2026-09-30: Chunk 창을 한 번 열어야 캐릭터가 제대로 나갔다). 규칙은 한 곳(core/wildcard_runtime).
+        from core.wildcard_runtime import ensure_wildcard_manager
 
-        runtime_paths = getattr(self.context, "runtime_paths", None)
-        use_runtime_wildcards = bool(os.environ.get("NAIA_USER_DATA_DIR") or os.environ.get("NAIA_PORTABLE"))
-        wildcards_dir = (
-            getattr(runtime_paths, "wildcards_dir", None)
-            if runtime_paths is not None and use_runtime_wildcards
-            else None
-        )
-        manager = WildcardManager(wildcards_dir=wildcards_dir)
-        try:
-            manager._app_context_ref = weakref.ref(self.context)
-        except TypeError:
-            pass
-        self.context.wildcard_manager = manager
+        ensure_wildcard_manager(self.context)
 
     def _ensure_filter_data_manager(self) -> None:
         if getattr(self.context, "filter_data_manager", None) is not None:

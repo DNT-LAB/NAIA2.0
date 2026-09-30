@@ -2290,12 +2290,10 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-diag2')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
-// 카드 -> 적용 순서 끌어다 놓기(09-30)는 리모컨 · 그룹 창과 **같은** 끌기 중개자다 - 주소(쿼리까지)가 같아야 한 인스턴스다.
-Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorafolders'),
-  import('./js/features/dragBroker.mjs?v=20260919-strip')])
-  .then(([{createAnimaLoraPanel}, {dragBrokerFor}]) => {
+import('./js/features/animaLoraPanel.mjs?v=20260930-zoomload')
+  .then(({createAnimaLoraPanel}) => {
     animaLoraPanel = createAnimaLoraPanel({
-      document, window, broker: dragBrokerFor(document, window),
+      document, window,
       onOpenSetup: () => { openApiPopup(); switchSetupTab('anima'); },
       onStateChange: () => moduleLauncherControl?.updateState(),
       // PNG 칸 · [히스토리] 후보에 올리면 크게 - Artist Thumbnail(리모컨)의 확대 보기 그대로(창 옆, 같은 자리 규칙)

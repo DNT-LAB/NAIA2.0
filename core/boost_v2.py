@@ -61,7 +61,17 @@ BOOST_V2_DEFAULTS: dict[str, Any] = {
     # 켜기/끄기 토글은 기존 세션 토글(context.ollama_auto_boost — 이름만 옛것)을 그대로 쓴다. 백엔드는 하나뿐이다.
     "backend": "llamacpp",
     "sections": {key: True for key in SECTION_KEYS},
-    "preferences": {key: "" for key in SECTION_KEYS},
+    # 섹션별 User preferences 기본값 = 사용자 세션(7243)에 설정해 둔 값(사용자 지정 09-30, 적힌 그대로 - '...' 도).
+    # 저장본에 preferences 가 있으면 그것(빈 칸 포함)을 쓴다 — 기본값은 저장본이 없거나 그 칸이 없을 때만.
+    "preferences": {
+        "subject": "",
+        "composition": "",
+        "detail": "glistening wet skin, viscous texture of the ..., highly detailed ...,",
+        "lighting": ("dramatic high-contrast lighting, moody chiaroscuro, shimmering highlights on the wet skin, "
+                     "deep shadows, soft volumetric light,"),
+        "quality": ("hyper-detailed skin textures, micro-detail rendering of fluids and moisture, cinematic atmospheric "
+                    "depth, tactile surface fidelity, organic light refraction"),
+    },
     # 모델 — core/llama_models 목록의 id(e2b · e4b · 26b). Boost · Assist 가 같은 엔진 · 같은 모델을 쓴다.
     "model": "e2b",
     # 할당 장치 — 'auto'(처음 값: 외장 GPU 가 있으면 그것, 없으면 CPU — 내장 그래픽만 있는 PC 는 CPU 로 시작한다,
@@ -82,6 +92,7 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
     raw_sections = source.get("sections") if isinstance(source.get("sections"), dict) else {}
     sections = {key: bool(raw_sections.get(key, True)) for key in SECTION_KEYS}
     raw_prefs = source.get("preferences") if isinstance(source.get("preferences"), dict) else {}
+    defaults = BOOST_V2_DEFAULTS["preferences"]
     if "device" in source:
         device = _normalize_device(source.get("device"), allow_cpu=True)
     elif source.get("use_gpu") is False:
@@ -90,7 +101,8 @@ def normalize_boost_v2_settings(settings: dict[str, Any] | None) -> dict[str, An
         device = _normalize_device(source.get("gpu_device"))
     preferences = {}
     for key in SECTION_KEYS:
-        text = " ".join(str(raw_prefs.get(key) or "").split())
+        value = raw_prefs[key] if key in raw_prefs else defaults[key]
+        text = " ".join(str(value or "").split())
         preferences[key] = text[:PREFERENCE_MAX_CHARS]
     from core.llama_models import normalize_model_id
 

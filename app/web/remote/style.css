@@ -28661,6 +28661,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-move:hover, .em-move:focus-visible { opacity: 1; background: rgba(233, 110, 178, 0.95); }
 .em-move:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .em-move[hidden] { display: none; }
+/* A 를 숨기면(Settings > 화면 > Assist 단추 숨기기) 이동 단추가 **A 자리**로 올라온다 - 그대로 두면 E 아래 한 칸이
+   비어 보였다(사용자 지정 2026-09-30). 값은 위 #assistTab 의 top 과 같아야 한다.
+   ⚠️ `~` 는 **뒤의 형제**만 본다 - index.html 에서 #assistTab 이 이동 단추 둘보다 앞, 같은 부모 안에 있어야 한다. */
+#assistTab[hidden] ~ .em-move { top: calc(50% + 21px); }
 
 /* 고정 - 메인 프롬프트 칸 위에 눕는다. 자리·높이는 `positionPinned()` 가 재고, 여기서는
    **그 좁은 높이에서도 읽히게** 손본다: 몸통이 남는 높이를 다 먹고, 발줄은 한 줄로. */

@@ -4038,6 +4038,7 @@ const optBoxes = {
   // 서버가 보낸 값이 화면에 안 붙어 새로고침 때마다 꺼진 것처럼 보인다.
   stop_autogen_on_tag_exhaust: $('optStopAutogenOnExhaust'),
   hide_event_map_button: $('optHideEventMapTab'),
+  hide_assist_button: $('optHideAssistTab'),
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
@@ -9163,6 +9164,11 @@ function applyOptionState(key, value, options = {}) {
     // ⚠️ `.em-tab` 이 display:inline-flex 라 [hidden] 만으로는 안 사라진다 - style.css 에 짝 규칙이 있다.
     const emTab = document.getElementById('eventMapTab');
     if (emTab) emTab.hidden = next;
+  }
+  if (key === 'hide_assist_button') {
+    // A 탭도 같은 뜻 - 단추만 감추고 Ctrl+O 는 그대로 둔다(사용자 지시 2026-09-30). A 도 `.em-tab` 이라 같은 짝 규칙이 감춘다.
+    const asTab = document.getElementById('assistTab');
+    if (asTab) asTab.hidden = next;
   }
   return true;
 }

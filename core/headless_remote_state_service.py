@@ -23,6 +23,9 @@ REMOTE_OPTION_DEFAULTS = {
     # 이벤트 맵 진입 반구 단추(E)를 숨긴다. 숨겨도 **Ctrl+E 는 그대로 열린다**
     # (사용자 지시 2026-09-13 - 화면에서 치우고 싶을 뿐, 기능을 끄는 것이 아니다).
     "hide_event_map_button": False,
+    # Assist 진입 반구 단추(A, E 바로 아래)도 같은 뜻으로 숨긴다. 숨겨도 **Ctrl+O 는 그대로 열린다**
+    # (사용자 지시 2026-09-30).
+    "hide_assist_button": False,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",

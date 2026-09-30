@@ -1366,8 +1366,24 @@ export function createCharacterPanel({
    */
   function appliedState(state) {
     const slots = (state.characters || []).filter(item => item.enabled);
-    const rolled = (state.processed_characters || []).map(value => String(value || ''));
-    const rolledUc = (state.processed_ucs || []).map(value => String(value || ''));
+    // 백엔드가 굴리지 않고 계산한 '실제로 나가는 것'(character_settings.applied_character_view) - 조건부 override ·
+    // 📌 고정 슬롯까지 같은 우선순위로 들어 있다(Codex 09-30: 화면이 규칙을 따로 짜면 어긋났다). 없으면(옛 서버) 굴려 둔 값.
+    const view = state.applied && typeof state.applied === 'object' ? state.applied : null;
+    const rolled = (view && view.source === 'rolled' ? view.characters : state.processed_characters || [])
+      .map(value => String(value || ''));
+    const rolledUc = (view && view.source === 'rolled' ? view.uc : state.processed_ucs || [])
+      .map(value => String(value || ''));
+    // 조건부 규칙이 이번 회 캐릭터를 정했다 - Generate 는 슬롯 · 굴려 둔 값 대신 이것을 보낸다(백엔드의 첫 순위)
+    if (view && view.source === 'override') {
+      const chosen = (view.characters || []).map(value => String(value || ''));
+      if (!chosen.length) {
+        return {tone: 'warn', line: '조건부 규칙이 캐릭터를 모두 뺐습니다 — 캐릭터 없이 생성합니다.', items: [],
+          note: '다음 Random 이나 슬롯을 고치면 다시 정해집니다.'};
+      }
+      return {tone: 'on', line: `${chosen.length}명 · 조건부 규칙이 정한 캐릭터를 보냅니다`,
+        items: chosen.map((prompt, i) => ({prompt, uc: String((view.uc || [])[i] || '')})),
+        note: '다음 Random 이나 슬롯을 고치면 다시 정해집니다.'};
+    }
     if (!state.activated) {
       return {tone: 'off', line: '꺼짐 — 캐릭터 프롬프트가 생성에 들어가지 않습니다.', items: [],
         note: slots.length ? `켜 둔 슬롯 ${slots.length}개는 [캐릭터 프롬프트 활성화] 를 켜야 나갑니다.` : ''};
@@ -1376,9 +1392,19 @@ export function createCharacterPanel({
       return {tone: 'warn', line: '켠 슬롯이 없습니다 — 캐릭터 없이 생성합니다.', items: [], note: ''};
     }
     const fresh = !!state.reroll_on_generate || !rolled.length;
+    // ⚠️ Connect 자식은 제 글이 비어도 **나간다** - 앞 슬롯의 뽑힌 값을 물려받는다(백엔드 active_character_frames ·
+    //    Codex 09-30). 📌 고정 슬롯은 새로 굴릴 때도 그 값이 나간다.
+    const pinned = view && view.pinned && typeof view.pinned === 'object' ? view.pinned : {};
+    const sent = slots.filter(item => String(item.prompt || '').trim() || String(item.connect_to || '').trim());
+    const labelOf = new Map(sent.map((item, i) => [String(item.slot_uuid || ''), `C${i + 1}`]));
     const items = fresh
-      ? slots.filter(item => String(item.prompt || '').trim())
-        .map(item => ({prompt: String(item.prompt || ''), uc: String(item.uc || '')}))
+      ? sent.map(item => {
+        const pin = pinned[String(item.slot_uuid || '')];
+        if (pin) return {prompt: `📌 ${pin}`, uc: String(item.uc || '')};
+        const link = String(item.connect_to || '').trim();
+        const from = link ? `↳ ${labelOf.get(link) || '앞 슬롯'} 이어받음` : '';
+        return {prompt: [from, String(item.prompt || '').trim()].filter(Boolean).join(' + '), uc: String(item.uc || '')};
+      })
       : rolled.map((prompt, i) => ({prompt, uc: rolledUc[i] || ''}));
     if (!items.length) {
       return {tone: 'warn', line: '켠 슬롯이 모두 비어 있습니다 — 캐릭터 없이 생성합니다.', items: [], note: ''};
@@ -1469,6 +1495,14 @@ export function createCharacterPanel({
    * ⚠️ 슬롯 칸 안에도 스크롤이 있다(`.cw-slots-scroll`) - 그 자리를 되돌려 준다.
    *    이벤트는 뿌리에 위임돼 있어 다시 걸 필요가 없다.
    */
+  /** 머리만 새로 그린다 - 입력칸이 없어 편집 중에도 끊을 것이 없다(부분 렌더 · 포커스 중 렌더가 쓴다). */
+  function refreshHead(state) {
+    const head = moduleBody.querySelector('.cw-head');
+    if (!head) return;
+    const chars = state.characters || [];
+    head.outerHTML = renderHead(state, chars.filter(item => slotState(item) !== 'active').length);
+  }
+
   function renderSlotsOnly(state) {
     const column = moduleBody.querySelector('.cw-slots');
     if (!column) return;
@@ -1484,8 +1518,7 @@ export function createCharacterPanel({
     column.innerHTML = next.innerHTML;
     // 머리도 새로 그린다 - 활성화 · ✘ · 재굴림은 이 길로 오는데 [적용 상태] 가 그 셋을 읽는다(옛 값에 멈추면
     // 거짓말이 된다). 이벤트는 뿌리에 위임돼 있어 다시 걸 필요가 없다.
-    const head = moduleBody.querySelector('.cw-head');
-    if (head) head.outerHTML = renderHead(state, chars.length - activeSlots.length);
+    refreshHead(state);
     const again = column.querySelector('.cw-slots-scroll');
     if (again && keep) again.scrollTop = keep;
     // 새로 만든 textarea 는 높이를 맞추고 자동완성을 다시 건다.
@@ -1503,6 +1536,8 @@ export function createCharacterPanel({
     const focusedTextarea = focusedCharacterTextarea();
     if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
       lastState = nextState;
+      // 머리는 미루지 않는다 - 굴려 둔 값(processed_*)은 서명에 없어, 미루면 [적용 상태] 가 옛 값을 보였다(Codex 09-30)
+      refreshHead(nextState);
       queueDeferredFocusedRender(focusedTextarea, nextState);
       return;
     }

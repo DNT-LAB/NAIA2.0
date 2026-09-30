@@ -2109,7 +2109,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260903-main
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260930-chartok')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260930-chartok2')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -2450,7 +2450,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-head2')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-head3')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,

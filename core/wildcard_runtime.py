@@ -11,8 +11,13 @@
 from __future__ import annotations
 
 import os
+import threading
 import weakref
 from typing import Any
+
+# 세우기 · 청크 싣기를 한 줄로 세운다(Codex 09-30 HIGH) - 기동 워밍업과 [Refresh Preview] 가 겹치면 관리자가 둘 생겨
+# 한쪽은 청크 없이 돌려질 수 있었다. 만드는 일은 드물다(맥락마다 한 번) - 무거운 활성화가 이 안에서 돌아도 된다.
+_LOCK = threading.RLock()
 
 
 def runtime_wildcards_dir(context: Any):
@@ -25,19 +30,20 @@ def runtime_wildcards_dir(context: Any):
 
 def ensure_wildcard_manager(context: Any):
     """context.wildcard_manager 를 돌려준다 - 없으면 만들고, 청크를 아직 안 실었으면 싣는다(관리자마다 한 번)."""
-    manager = getattr(context, "wildcard_manager", None)
-    if manager is None:
-        from core.wildcard_manager import WildcardManager
+    with _LOCK:
+        manager = getattr(context, "wildcard_manager", None)
+        if manager is None:
+            from core.wildcard_manager import WildcardManager
 
-        manager = WildcardManager(wildcards_dir=runtime_wildcards_dir(context))
-        context.wildcard_manager = manager
-    if getattr(manager, "_app_context_ref", None) is None:
-        try:
-            manager._app_context_ref = weakref.ref(context)
-        except TypeError:
-            pass
-    sync_instant_wildcards(context, manager)
-    return manager
+            manager = WildcardManager(wildcards_dir=runtime_wildcards_dir(context))
+            context.wildcard_manager = manager
+        if getattr(manager, "_app_context_ref", None) is None:
+            try:
+                manager._app_context_ref = weakref.ref(context)
+            except TypeError:
+                pass
+        sync_instant_wildcards(context, manager)
+        return manager
 
 
 def sync_instant_wildcards(context: Any, manager: Any) -> bool:
@@ -49,18 +55,23 @@ def sync_instant_wildcards(context: Any, manager: Any) -> bool:
     if manager is None or getattr(manager, "_naia_instant_synced", False):
         return False
     load = getattr(context, "_instant_wildcard_store", None)
-    apply = getattr(context, "_apply_instant_wildcard_to_manager", None)
-    if not callable(load) or not callable(apply):
+    update = getattr(manager, "update_instant_wildcards", None)
+    if not callable(load) or not callable(update):
         return False
-    try:
-        store = load()
-        tree = store.get("instant_wildcard_tree") if isinstance(store, dict) else None
-        # store() 는 새로 읽을 때만 관리자에 싣고, 받아 둔 것이 있으면 싣지 않고 돌려준다(청크 창이 관리자보다 먼저
-        # 열렸으면 그때는 관리자가 없어 맥락에만 남아 있었다) - 관리자에 없을 때만 한 번 더 싣는다(같은 것을 두 번 안 싣게)
-        if getattr(manager, "instant_wildcard_tree", None) != (tree or {}):
-            apply(store)
-        manager._naia_instant_synced = True
-        return True
-    except Exception as exc:  # noqa: BLE001 - 청크를 못 실어도 생성은 계속한다
-        print(f"Wildcard: chunk (instant wildcard) sync failed - {ascii(str(exc))}", flush=True)
-        return False
+    with _LOCK:
+        if getattr(manager, "_naia_instant_synced", False):
+            return False
+        try:
+            store = load()
+            flat = store.get("instant_wildcard_dict") if isinstance(store, dict) else None
+            tree = store.get("instant_wildcard_tree") if isinstance(store, dict) else None
+            # 넘겨받은 관리자에 **직접** 싣는다 - 맥락의 관리자는 그사이 바뀔 수 있다(Codex 09-30 HIGH). store() 는 새로
+            # 읽을 때만 맥락의 관리자에 싣고, 받아 둔 것이 있으면(청크 창이 관리자보다 먼저 열렸다) 싣지 않고 돌려준다 -
+            # 이 관리자에 없을 때만 싣는다(같은 것을 두 번 안 싣게).
+            if getattr(manager, "instant_wildcard_tree", None) != (tree or {}):
+                update(flat or {}, tree or {})
+            manager._naia_instant_synced = True
+            return True
+        except Exception as exc:  # noqa: BLE001 - 청크를 못 실어도 생성은 계속한다
+            print(f"Wildcard: chunk (instant wildcard) sync failed - {ascii(str(exc))}", flush=True)
+            return False

@@ -377,17 +377,29 @@ export function createModuleBadges({
     }
   }
 
+  /** 켜진 슬롯의 글 - Connect 자식은 제 글이 비어도 앞 슬롯의 글을 물려받아 나간다(Codex 09-30). */
+  function enabledSlotTexts(characters) {
+    const slots = (characters || []).filter(item => item && item.enabled);
+    const own = new Map(slots.map(item => [String(item.slot_uuid || ''), String(item.prompt || '').trim()]));
+    return slots.map(item => {
+      const link = String(item.connect_to || '').trim();
+      return [link ? own.get(link) || '' : '', String(item.prompt || '').trim()].filter(Boolean).join(', ');
+    }).filter(Boolean);
+  }
+
   function updateCharacter(m) {
     const btn = document.querySelector('.module-btn[data-module="character"]');
     const badge = document.getElementById('badgeChar');
     if (!badge || !btn) return;
 
-    // 굴려 둔 값이 없으면(재굴림 켬 · 슬롯을 고친 직후 · 재시작 직후) Generate 가 슬롯을 새로 굴려 보낸다 - 그때 0 을
+    // 다음 Generate 에 나가는 글로 어림한다 - 백엔드가 계산한 것(applied: 조건부 override · 굴려 둔 값 + 📌 고정)이
+    // 있으면 그것, 굴려 둔 값이 없으면(재굴림 켬 · 슬롯을 고친 직후 · 재시작 직후) 켜진 슬롯의 글이다 - 그때 0 을
     // 내걸면 "캐릭터가 안 들어간다" 로 읽힌다(사용자 제보 2026-09-30: Activated 2 Characters 인데 Character 0).
-    // 켜진 슬롯의 글로 어림한다(와일드카드는 풀기 전 글자 그대로라 어림이다).
-    const rolled = (m.processed_characters || []).filter(Boolean);
-    const promptText = (rolled.length ? rolled : (m.characters || [])
-      .filter(item => item && item.enabled).map(item => String(item.prompt || '').trim()).filter(Boolean)).join(' ');
+    // ⚠️ 모듈이 꺼졌으면 비운다 - 토큰 칸은 개수가 0 이어도 글로 다시 어림한다(Codex 09-30: 꺼졌는데 Character 5).
+    const view = m.applied && typeof m.applied === 'object' ? m.applied : null;
+    const rolled = (view && (view.source === 'override' || view.source === 'rolled')
+      ? view.characters || [] : m.processed_characters || []).filter(Boolean);
+    const promptText = m.activated ? (rolled.length ? rolled : enabledSlotTexts(m.characters)).join(' ') : '';
     const tokenCount = Number.isFinite(Number(m.character_token_count))
       ? Number(m.character_token_count)
       : estimateTokenCount(promptText, getMode());

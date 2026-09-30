@@ -1867,6 +1867,34 @@ def _format_processed_preview(characters: list[str], ucs: list[str]) -> str:
     return "\n".join(display_text)
 
 
+def applied_character_view(app_context, normalized: dict, mode: str = "NAI") -> dict:
+    """[적용 상태](모듈 창 머리 · 토큰 칸) - 다음 Generate 에 **실제로 나가는** 캐릭터. 굴리지 않고 계산만 한다.
+
+    우선순위는 character_params_from_settings(= api_service 5-1)와 같다(Codex 09-30: 화면이 규칙을 따로 짜면 어긋난다):
+      조건부 override(Random 의 조건부 규칙이 정한 이번 회 캐릭터) > 모듈 꺼짐 · 켠 슬롯 없음(= 없음) >
+      재굴림 끔 + 굴려 둔 값(📌 고정 슬롯이 덮는다) > 새로 굴림(Generate 가 슬롯을 펼친다 - 📌 고정 슬롯은 그 값).
+    source = override | none | rolled | fresh. pinned = 📌 고정이 덮는 슬롯 uuid -> 그 값(새로 굴림에서 쓴다).
+    """
+    override = _conditional_character_override(app_context, reuse_current_context=True) if app_context is not None else None
+    if override is not None:
+        characters = [str(value) for value in override.get("characters") or []]
+        ucs = [str(value) for value in override.get("uc") or []]
+        return {"source": "override", "characters": characters,
+                "uc": [ucs[i] if i < len(ucs) else "" for i in range(len(characters))], "pinned": {}}
+    frames = active_character_frames(normalized)
+    if not frames:
+        return {"source": "none", "characters": [], "uc": [], "pinned": {}}
+    slot_ids = _active_frame_slot_ids(frames)
+    frozen = read_frozen_character_slots(app_context) if app_context is not None else {}
+    pinned = {slot: payload["prompt"] for slot, payload in frozen.items() if slot in slot_ids}
+    snapshot = None if normalized.get("reroll_on_generate") else read_character_roll_snapshot(app_context, mode)
+    if snapshot is not None:
+        result = _overlay_frozen_character_slots(app_context, _snapshot_result(snapshot, slot_ids), slot_ids)
+        return {"source": "rolled", "characters": [str(value) for value in result.get("characters") or []],
+                "uc": [str(value) for value in result.get("uc") or []], "pinned": pinned}
+    return {"source": "fresh", "characters": [], "uc": [], "pinned": pinned}
+
+
 def character_state_from_settings(
     settings: dict | None,
     app_context=None,
@@ -1958,6 +1986,8 @@ def character_state_from_settings(
         "processed_ucs": processed_ucs,
         "character_token_count": 0,
         "processed_preview_text": _format_processed_preview(processed_characters, processed_ucs),
+        # 다음 Generate 에 실제로 나가는 것(굴리지 않고 계산) - 모듈 창 [적용 상태] · 토큰 칸이 읽는다(2026-09-30).
+        "applied": applied_character_view(app_context, normalized, mode),
         # 슬롯별 결과와 뽑힌 와일드카드 - 퀵 패널 [Refresh] 툴팁이 읽는다(사용자 지정 2026-09-24).
         "processed_slots": (character_slot_rolls(app_context, mode)
                             if processed_characters else {}),

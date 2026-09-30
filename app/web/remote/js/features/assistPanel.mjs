@@ -45,12 +45,33 @@ const HISTORY_MAX = 30;
 const HL_KINDS = ['found', 'chosen', 'miss', 'off'];
 // [고급 설정] — User Preference(사용자 지정 2026-09-26): 다듬기가 고른 등급의 문장을 따라 프롬프트를 고친다(영어로).
 // E 는 사용자가 직접 적는다(비워 두면 쓰지 않는다). 앞으로 이 창에 입력 칸이 더 붙는다.
+// 기본 문장은 등급의 선만 말하고 분위기 · 신체 부위를 정하지 않는다(사용자 지정 09-30: 모델이 창의성을 잃지 않게). 옛 문장은
+// G 마다 'calm and peaceful' 을 싣고 peaceful 태그를 붙이며 '하늘을 나는' 의 flying 을 6/6 뺐다(still) · Q 는 breasts 를 ·
+// E 는 violent · dynamic 을 늘 붙였다. ⚠️다듬기는 선호 문장이 말한 태그를 사전 확인 없이 받는다 — 여기엔 태그 이름이 되는 낱말
+// (pose · action · peaceful · breasts · 'as' -> ass …)을 쓰지 않는다(시험이 태그 목록 전체로 훑는다)
 const DEFAULT_PREFERENCE = {
-  g: 'A wholesome image with a calm, peaceful, still atmosphere.',
-  s: 'A slightly risqué image that focuses on details of the body, outfit, and actions.',
-  q: 'An image that focuses on the body, such as the breasts and buttocks, with a somewhat sexual atmosphere and details.',
-  e: 'An image that focuses on the body, sexual activities, genitals and anatomy, fluids with violent and dynamic composition.',
+  g: 'Suitable for all ages. Keep the mood, movement and place the request describes, and add small details that fit that scene.',
+  s: 'Mildly suggestive at most. Keep the mood and movement the request describes, and add outfit and body language details that fit that scene.',
+  q: 'Suggestive with a sensual edge, within the limits of the request. Keep the mood and movement the request describes, and add outfit and body details that fit that scene.',
+  e: 'Explicit adult content when the request asks for it. Keep the mood, movement and composition the request describes, and add anatomical and situational details that fit that scene.',
 };
+// 예전 기본 문장 — 저장된 값이 이것 그대로면 손대지 않은 것이라 새 기본값으로 옮긴다(사용자가 고친 글 · 비운 칸은 그대로)
+const OLD_DEFAULT_PREFERENCE = {
+  g: ['A wholesome image with a calm, peaceful, still atmosphere.'],
+  s: ['A slightly risqué image that focuses on details of the body, outfit, and actions.'],
+  q: ['An image that focuses on the body, such as the breasts and buttocks, with a somewhat sexual atmosphere and details.'],
+  e: ['An image that focuses on the body, sexual activities, genitals and anatomy, fluids with violent and dynamic composition.'],
+};
+
+/** 저장된 선호 문장 -> 쓸 문장(등급마다). 저장이 없거나 옛 기본 문장 그대로면 지금 기본값 */
+function initialPreference(saved) {
+  const src = saved && typeof saved === 'object' ? saved : {};
+  return Object.fromEntries(Object.keys(DEFAULT_PREFERENCE).map(id => {
+    const v = src[id];
+    const stale = typeof v === 'string' && (OLD_DEFAULT_PREFERENCE[id] || []).includes(v.trim());
+    return [id, typeof v === 'string' && !stale ? v : DEFAULT_PREFERENCE[id]];
+  }));
+}
 const MAX_PREFERENCE = 400;
 const ADV_STYLE_ID = 'assist-adv-style';
 // 창 모듈이 제 CSS 를 싣는다(refinePanel 과 같은 방식). 주의: 이 템플릿 안에는 백틱을 쓰지 않는다
@@ -252,9 +273,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   let resultMode = 'search';              // 보이는 결과를 만든 길(search · direct · followup)
   let busyMode = 'search';                // 도는 요청(search · followup) — 단추 글
   let followBtn = null, directBox = null;
-  const savedPreference = prefs.preference && typeof prefs.preference === 'object' ? prefs.preference : {};
-  const preference = Object.fromEntries(RATINGS.map(r => [r.id,
-    typeof savedPreference[r.id] === 'string' ? savedPreference[r.id] : DEFAULT_PREFERENCE[r.id]]));
+  const preference = initialPreference(prefs.preference);     // 옛 기본 문장 그대로 저장된 것은 새 기본값으로(09-30)
   let girls = clampCount(prefs.girls, 1);
   let boys = clampCount(prefs.boys, 0);
 

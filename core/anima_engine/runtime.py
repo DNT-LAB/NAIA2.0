@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import subprocess
 import time
 import traceback
@@ -18,7 +19,7 @@ from PIL import Image
 from core.llama_runtime import _attach_kill_on_close_job, _close_job, _free_port
 from . import manifest
 from .profile import compile_graph
-from .settings import load_settings, quick_receipt, walk_files, write_instance_model_config
+from .settings import load_settings, quick_receipt, read_json, walk_files, write_instance_model_config
 
 REGISTRY = {}
 REGISTRY_LOCK = RLock()
@@ -54,6 +55,15 @@ START_QUIET_TIMEOUT = 180.0
 START_HARD_TIMEOUT = 600.0
 # 기동마다 engine.log 에 적는 머리줄 - log_tail 은 마지막 머리줄부터만 돌려준다(오류 상세에 지난 실행의 로그가 섞였다).
 LOG_START_MARK = "===== NAIA: engine start "
+
+
+def _torch_dll_load_failed(text):
+    # Pinned engine torch/__init__.py:_load_dll_libraries (241-279), read from the installed runtime.
+    # The DLL name and WinError description vary; only torch's own English fragments are stable.
+    return ("microsoft visual c++ redistributable is not installed, this may lead to the dll load failure."
+            in text.casefold() or re.search(
+                r'error loading "(?:[^"\r\n]*[\\/])?torch[\\/]lib[\\/][^"\\/\r\n]+\.dll" or one of its dependencies',
+                text, re.IGNORECASE) is not None)
 
 
 def read_log_since(path, since=None, limit=65536):
@@ -101,6 +111,8 @@ class AnimaEngineRuntime:
         # 켜기 직전에 부른다: 켜는 NAIA(user-data)의 LoRA · 모델 폴더로 모델 경로 파일을 쓰고 그 경로를 돌려준다
         # (settings.write_instance_model_config). 엔진 하나를 NAIA 여럿이 같이 쓴다 - 파일은 NAIA 마다.
         self.model_config, self.model_config_path = model_config, None
+        # 설치 작업의 첫 기동만 계획의 UUID를 쓴다. 그 뒤에는 기동마다 영수증과 현재 목록을 확인한다.
+        self.installation_gpu_uuid = None
         self.command_builder, self.popen, self.clock = command_builder or self._command, popen, clock
         self._op, self._lock = RLock(), RLock()
         self._stop = Event()
@@ -134,7 +146,33 @@ class AnimaEngineRuntime:
                  # 추가 패키지 없는 내장 가속(torch 2.7+). 같은 그래프 실측 11.57 -> 11.05초/장(09-27, 사용자 결정).
                  # 00132 기준선의 comfylaunch.bat 도 이 플래그로 돌았다. sage attention 은 넣지 않는다.
                  "--fast", "fp16_accumulation"],
-                rt, clean_environment())
+                rt, self._engine_environment())
+
+    def _engine_environment(self):
+        env = clean_environment()
+        if "CUDA_VISIBLE_DEVICES" in env:
+            return env
+        gpu_uuid = self.installation_gpu_uuid
+        source = "installation plan"
+        if gpu_uuid is None:
+            # install imports runtime; defer the reverse import until an actual start.
+            from .install import gpu_probe
+            gpu_record = read_json(self.engine_root / "receipt.json").get("gpu")
+            recorded_uuid = gpu_record.get("uuid", "") if isinstance(gpu_record, dict) else ""
+            gpu = gpu_probe(preferred_uuid=recorded_uuid)
+            gpu_uuid = gpu.uuid if gpu else ""
+            source = "receipt" if recorded_uuid and recorded_uuid == gpu_uuid else "re-probed GPU (receipt UUID missing or absent)"
+        if gpu_uuid:
+            env.update(CUDA_VISIBLE_DEVICES=gpu_uuid, CUDA_DEVICE_ORDER="PCI_BUS_ID")
+            note = f"NAIA: pinned CUDA_VISIBLE_DEVICES={ascii(gpu_uuid)} from {source}"
+        else:
+            note = "NAIA: GPU UUID unavailable; CUDA device selection unchanged"
+        try:
+            with (self.engine_root / "state/engine.log").open("ab") as handle:
+                handle.write((note + "\n").encode("ascii"))
+        except OSError:
+            pass
+        return env
 
     def _set(self, state, code=None, message=""):
         with self._lock:
@@ -187,13 +225,28 @@ class AnimaEngineRuntime:
         return "\n".join((text[mark:] if mark >= 0 else text).splitlines()[-40:])
 
     def _mark_log_start(self):
+        inherited_cuda = os.environ.get("CUDA_VISIBLE_DEVICES")
         path = self.engine_root / "state/engine.log"
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("ab") as handle:
                 handle.write(f"\n{LOG_START_MARK}{datetime.now().astimezone().isoformat()} =====\n".encode("utf-8"))
+                if inherited_cuda is not None:
+                    handle.write(f"NAIA: inherited CUDA_VISIBLE_DEVICES={ascii(inherited_cuda)}\n".encode("ascii"))
         except OSError:
             pass
+        return inherited_cuda
+
+    def _start_error(self):
+        detail = self.log_tail()
+        try:
+            text = (self.engine_root / "state/engine.log").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        # Inspect this start, not the previous run, even when the warning is before the last 40 lines.
+        if _torch_dll_load_failed(text.rsplit(LOG_START_MARK, 1)[-1]):
+            return ManagedEngineError("VCREDIST_MISSING", manifest.VCREDIST_MESSAGE, detail)
+        return ManagedEngineError("ENGINE_START_FAILED", detail=detail)
 
     def _drain_log(self, proc, progress=None):
         path = self.engine_root / "state/engine.log"
@@ -238,6 +291,8 @@ class AnimaEngineRuntime:
             crashed = self._state == "crashed"
             if crashed:
                 if self._crash_retries >= 1:
+                    if self._code == "VCREDIST_MISSING":
+                        raise ManagedEngineError("VCREDIST_MISSING", manifest.VCREDIST_MESSAGE, self.log_tail())
                     raise ManagedEngineError("ENGINE_CRASHED", detail=self.log_tail())
                 self._crash_retries += 1
             _close_job(self.job)
@@ -248,7 +303,7 @@ class AnimaEngineRuntime:
             for folder in ("comfy_output", "comfy_temp", "comfy_user"):
                 (self.engine_root / "state" / folder).mkdir(parents=True, exist_ok=True)
             self._cleanup_outputs()
-            self._mark_log_start()
+            inherited_cuda = self._mark_log_start()
             try:
                 if self.model_config is not None:
                     try:
@@ -269,7 +324,7 @@ class AnimaEngineRuntime:
                                                                         quiet=timeout, hard=hard_timeout):
                     if self.proc.poll() is not None:
                         drain.join(timeout=2)      # 끝난 프로세스의 마지막 출력까지 적은 뒤 읽는다
-                        raise ManagedEngineError("ENGINE_START_FAILED", detail=self.log_tail())
+                        raise self._start_error()
                     try:
                         response = requests.get(self.url + "/system_stats", timeout=2)
                         response.raise_for_status()
@@ -278,7 +333,11 @@ class AnimaEngineRuntime:
                         self._stop.wait(0.5)
                         continue
                     if not any(x.get("type") == "cuda" for x in stats.get("devices", [])):
-                        raise ManagedEngineError("GPU_NOT_USED", "엔진이 GPU를 쓰지 못하고 있습니다.")
+                        detail = self.log_tail()
+                        if inherited_cuda is not None:
+                            # The log tail may no longer include the start header or the inherited value.
+                            detail = f"CUDA_VISIBLE_DEVICES={ascii(inherited_cuda)} (inherited)\n" + detail
+                        raise ManagedEngineError("GPU_NOT_USED", "엔진이 GPU를 쓰지 못하고 있습니다.", detail)
                     self.system_stats = stats
                     self.started_at = datetime.now().astimezone().isoformat()
                     self._set("running")
@@ -290,14 +349,19 @@ class AnimaEngineRuntime:
                     return self.url
                 raise ManagedEngineError("CANCELED" if self._stop.is_set() else "ENGINE_START_TIMEOUT")
             except Exception as exc:
-                code = "ENGINE_CRASHED" if crashed else getattr(exc, "code", "ENGINE_START_FAILED")
+                code = getattr(exc, "code", "ENGINE_START_FAILED")
+                message = "엔진을 시작하지 못했습니다."
+                if code == "VCREDIST_MISSING":
+                    message = manifest.VCREDIST_MESSAGE
+                elif crashed:
+                    code = "ENGINE_CRASHED"
                 detail = getattr(exc, "detail", "") or self.log_tail() or str(exc)
                 self.last_error = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), "code": code,
-                                   "message": "엔진을 시작하지 못했습니다.", "detail": detail,
+                                   "message": message, "detail": detail,
                                    "trace": traceback.format_exc()[-TRACE_CHARS:]}
                 self._terminate()
-                self._set("crashed", code, "엔진을 시작하지 못했습니다.")
-                raise ManagedEngineError(code, "엔진을 시작하지 못했습니다.", detail) from exc
+                self._set("crashed", code, message)
+                raise ManagedEngineError(code, message, detail) from exc
 
     def _watch_idle(self):
         while not self._stop.wait(1):

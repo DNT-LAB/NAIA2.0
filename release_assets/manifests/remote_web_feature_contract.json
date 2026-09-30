@@ -82,6 +82,7 @@
         {"method": "POST", "path": "/api/anima-engine/select", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/anima-engine/engine/start", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/anima-engine/engine/stop", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/vcredist/open", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/anima-engine/loras", "smoke": "non_destructive"},
         {"method": "PUT", "path": "/api/anima-engine/loras", "smoke": "state_mutation"},
         {"method": "PUT", "path": "/api/anima-engine/loras/keyword", "smoke": "state_mutation"},

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import platform
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -101,9 +102,12 @@ class AnimaEngineService:
 
     def inspect(self, body):
         with self.lock:
-            if self._job().snapshot()["state"] == "preparing":
+            job = self._job()
+            if job.snapshot()["state"] == "preparing":
                 raise ManagedEngineError("JOB_RUNNING", "설치가 진행 중입니다.")
-            plan = self._job().inspect(body.get("engine_root"), body.get("model_dirs"))
+            # A normal retry must not inherit the preceding forced preparation.
+            job._force = False
+            plan = job.inspect(body.get("engine_root"), body.get("model_dirs"))
             self.last_checks = plan["checks"]
             return {"ok": True, "plan": plan}
 
@@ -166,6 +170,13 @@ class AnimaEngineService:
             raise ManagedEngineError("ENGINE_NOT_READY")
         rt.ensure_running()
         return {"ok": True, "engine": rt.status()}
+
+    def open_vcredist(self):
+        if platform.system() != "Windows":
+            raise ManagedEngineError("UNSUPPORTED_OS", "Windows에서만 설치 안내를 열 수 있습니다.")
+        # Hand the official URL to the browser. NAIA never downloads or runs the installer.
+        os.startfile(manifest.VCREDIST_URL)
+        return {"ok": True, "url": manifest.VCREDIST_URL}
 
     def engine_log(self, since=None):
         """엔진이 켜지는 동안 ComfyUI 가 적는 것 - 생성 화면의 임시 콘솔이 since 부터 이어 받는다(엔진 상태와 함께)."""

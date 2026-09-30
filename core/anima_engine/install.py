@@ -33,17 +33,22 @@ class GpuInfo:
     compute_cap: float | None
     vram_mb: int
     cuda_version: str = ""
+    uuid: str = ""
 
 
-def gpu_probe(run=None):
-    """NVIDIA GPU(nvidia-smi) - 없으면 None. run = subprocess.run 대신(진단 정보가 원문을 적으려고 넘긴다)."""
+def gpu_probe(run=None, *, preferred_uuid=""):
+    """NVIDIA GPU(nvidia-smi) - 없으면 None. run = subprocess.run 대신(진단 정보가 원문을 적으려고 넘긴다).
+
+    설치 검사는 가장 좋은 카드. 기동은 영수증의 UUID가 아직 있으면 그 카드, 없으면 가장 좋은 카드를 고른다.
+    """
     run = run or subprocess.run
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        query = run(["nvidia-smi", "--query-gpu=name,driver_version,compute_cap,memory.total",
+        query = run(["nvidia-smi", "--query-gpu=index,uuid,name,driver_version,compute_cap,memory.total",
                      "--format=csv,noheader,nounits"], capture_output=True, text=True,
-                    timeout=10, creationflags=flags)
-        header = run(["nvidia-smi"], capture_output=True, text=True, timeout=10, creationflags=flags)
+                    encoding="utf-8", errors="replace", timeout=10, creationflags=flags)
+        header = run(["nvidia-smi"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                     timeout=10, creationflags=flags)
     except (OSError, subprocess.TimeoutExpired):
         return None
     cuda = re.search(r"CUDA Version:\s*(\d+\.\d+)", header.stdout)
@@ -54,10 +59,14 @@ def gpu_probe(run=None):
     gpus = []
     for line in query.stdout.splitlines():
         try:
-            name, driver, cc, mem = [s.strip() for s in line.split(",")]
-            gpus.append(GpuInfo(name, driver, float(cc), int(float(mem)), cuda[1] if cuda else ""))
+            _index, gpu_uuid, name, driver, cc, mem = [s.strip() for s in line.split(",")]
+            gpus.append(GpuInfo(name, driver, float(cc), int(float(mem)), cuda[1] if cuda else "", gpu_uuid))
         except ValueError:
             continue
+    if preferred_uuid:
+        for gpu in gpus:
+            if gpu.uuid == preferred_uuid:
+                return gpu
     return max(gpus, key=lambda g: (g.compute_cap or 0, g.vram_mb), default=GpuInfo("NVIDIA", "", None, 0))
 
 
@@ -75,6 +84,15 @@ def validate_gpu(gpu):
     if cuda < (13, 0):
         raise ManagedEngineError("DRIVER_TOO_OLD", "CUDA 13.0 지원 그래픽 드라이버가 필요합니다.")
     return data
+
+
+def system_directory():
+    """The native system directory (System32 in the supported 64-bit Python)."""
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if not 0 < size < len(buffer):
+        raise OSError("GetSystemDirectoryW failed")
+    return Path(buffer.value)
 
 
 def validate_root(path, *, forbidden=(), write_check=True):
@@ -104,6 +122,16 @@ def validate_root(path, *, forbidden=(), write_check=True):
         except OSError as exc:
             raise ManagedEngineError("PATH_NOT_WRITABLE", "이 폴더에 쓸 수 없습니다.", str(exc)) from exc
     return resolved
+
+
+def runtime_needs_extract(engine_root, force_verify=False):
+    """Whether the pinned runtime needs extraction, independent of job state."""
+    active = Path(engine_root) / "runtime" / manifest.RUNTIME_ID
+    if force_verify or not active.exists():
+        return True
+    portable = active / "ComfyUI_windows_portable"
+    return (not (portable / "python_embeded/python.exe").is_file()
+            or not (portable / "ComfyUI/main.py").is_file())
 
 
 def disk_free(path):
@@ -190,10 +218,12 @@ def run_7z(exe, archive, dest, cancel):
 
 class AnimaInstallJob:
     def __init__(self, *, save_root: Path, settings: AnimaSettings, opener=None, run_7z=None, gpu_probe=None,
-                 disk_free=None, runtime_factory=None, on_ready=None, clock=time.time, forbidden_roots=()):
+                 disk_free=None, runtime_factory=None, on_ready=None, clock=time.time, forbidden_roots=(),
+                 system_directory=None):
         self.save_root, self.settings = Path(save_root), settings
         self.opener, self.run_7z = opener, run_7z or globals()["run_7z"]
         self.gpu_probe, self.disk_free = gpu_probe or globals()["gpu_probe"], disk_free or globals()["disk_free"]
+        self.system_directory = system_directory or globals()["system_directory"]
         self.runtime_factory = runtime_factory or (lambda root, runtime_id: AnimaEngineRuntime(
             root, runtime_id=runtime_id, reserve_vram_gb=1.0 if settings.reserve_vram_gb == "auto" else settings.reserve_vram_gb,
             idle_minutes=settings.idle_minutes))
@@ -251,10 +281,20 @@ class AnimaInstallJob:
         raw = engine_root or self.settings.engine_root or suggestion
         root = validate_root(raw, forbidden=self.forbidden_roots)
         checks, warnings = [], []
-        if platform.system() != "Windows" or platform.machine().lower() not in ("amd64", "x86_64") or platform.release() not in ("10", "11"):
+        is_windows = platform.system() == "Windows"
+        if not is_windows or platform.machine().lower() not in ("amd64", "x86_64") or platform.release() not in ("10", "11"):
             checks.append({"id": "os", "ok": False, "code": "UNSUPPORTED_OS", "message": "Windows 10/11 64비트가 필요합니다."})
         else:
             checks.append({"id": "os", "ok": True, "code": None, "message": ""})
+        if is_windows:
+            try:
+                directory = Path(self.system_directory())
+                present = all((directory / name).is_file() for name in
+                              ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"))
+            except OSError:
+                present = False
+            checks.append({"id": "vcredist", "ok": present, "code": None if present else "VCREDIST_MISSING",
+                           "message": "" if present else manifest.VCREDIST_MESSAGE})
         gpu = None
         try:
             gpu = validate_gpu(self.gpu_probe())
@@ -284,14 +324,26 @@ class AnimaInstallJob:
             plan.append(item)
         for node in manifest.SPECTRUM_FILES:
             plan.append(self._artifact_plan(node, root / "cache/spectrum" / node["path"], root))
-        download_bytes = sum(item["size"] for item in plan if item["action"] == "download")
-        installed = manifest.ARTIFACTS[0].get("installed_bytes") or 7_000_000_000
-        required = math.ceil((download_bytes + installed) * 1.1)
+        download_bytes = partial_bytes = remaining_bytes = 0
+        for item in plan:
+            if item["action"] != "download":
+                continue
+            target = Path(item["path"])
+            part = target.with_name(target.name + ".part")  # LlamaModelDownloadService.part_path
+            have = part.stat().st_size if part.is_file() else 0
+            download_bytes += item["size"]
+            partial_bytes += have
+            remaining_bytes += max(0, item["size"] - have)
+        installed = 0
+        if runtime_needs_extract(root, self._force):
+            installed = manifest.ARTIFACTS[0].get("installed_bytes") or 7_000_000_000
+        required = math.ceil((remaining_bytes + installed) * 1.1)
         free = self.disk_free(root)
         checks.append({"id": "disk", "ok": free >= required, "code": None if free >= required else "DISK_SPACE",
                        "message": "" if free >= required else "엔진 설치 공간이 부족합니다."})
         return {"engine_root": str(root), "suggested_root": str(suggestion), "gpu": gpu, "checks": checks,
-                "artifacts": plan, "download_bytes": download_bytes, "required_bytes": required, "free_bytes": free,
+                "artifacts": plan, "download_bytes": download_bytes, "partial_bytes": partial_bytes,
+                "required_bytes": required, "free_bytes": free,
                 "warnings": warnings}
 
     def _artifact_plan(self, artifact, target, root):
@@ -426,7 +478,7 @@ class AnimaInstallJob:
                     if item["action"] == "download":
                         self._fetch(items[item["id"]], item["path"])
             self._phase("download", download_phase)
-            fresh = not active.exists() or self._force
+            fresh = runtime_needs_extract(root, self._force)
             if fresh:
                 def extract():
                     self._remove_staging(staging)
@@ -442,14 +494,27 @@ class AnimaInstallJob:
                 self._phase("extract", extract)
             def install_nodes():
                 dest = (staging if fresh else active) / "ComfyUI_windows_portable/ComfyUI/custom_nodes/comfyui-spectrum-ksampler"
-                if fresh:
-                    dest.mkdir(parents=True, exist_ok=True)
                 for node in manifest.SPECTRUM_FILES:
                     target = dest / node["path"]
-                    if fresh:
-                        shutil.copyfile(root / "cache/spectrum" / node["path"], target)
-                    if not target.is_file() or sha256_of(target) != node["sha256"]:
+                    if not target.resolve().is_relative_to(root) or any(
+                            path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+                            for path in (target, *target.parents)):
+                        raise ManagedEngineError("PATH_INVALID", detail=node["path"])
+                    if not fresh and target.is_file() and sha256_of(target, cancel=self._cancel) == node["sha256"]:
+                        continue
+                    cached = root / "cache/spectrum" / node["path"]
+                    if not cached.is_file() or sha256_of(cached, cancel=self._cancel) != node["sha256"]:
                         raise ManagedEngineError("NODE_INSTALL_FAILED", detail=node["path"])
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    # Replace a verified copy instead of overwriting a possible hard link.
+                    temporary = target.with_name(target.name + ".tmp-" + uuid.uuid4().hex)
+                    try:
+                        shutil.copyfile(cached, temporary)
+                        if sha256_of(temporary, cancel=self._cancel) != node["sha256"]:
+                            raise ManagedEngineError("NODE_INSTALL_FAILED", detail=node["path"])
+                        temporary.replace(target)
+                    finally:
+                        temporary.unlink(missing_ok=True)
             self._phase("install_nodes", install_nodes)
             model_paths = {item["id"]: item["path"] for item in plan["artifacts"] if item["id"] in {m["id"] for m in manifest.MODELS}}
             self._phase("write_config", lambda: write_instance_model_config(self.save_root, model_paths))
@@ -470,7 +535,12 @@ class AnimaInstallJob:
                 self._runtime = self.runtime_factory(root, manifest.RUNTIME_ID)
                 # 영수증은 아직 없다 - 계획의 모델 자리(다른 폴더에서 재사용한 모델 포함)로 켠다
                 self._runtime.model_config = partial(write_instance_model_config, self.save_root, model_paths)
-                self._runtime.ensure_running()
+                self._runtime.installation_gpu_uuid = plan["gpu"].get("uuid", "")
+                try:
+                    self._runtime.ensure_running()
+                finally:
+                    # 이후 기동은 영수증과 현재 카드 목록을 다시 확인한다.
+                    self._runtime.installation_gpu_uuid = None
             self._phase("start", start)
             self._phase("preflight", self._runtime.preflight)
             smoke_result = {}

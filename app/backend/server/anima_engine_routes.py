@@ -107,6 +107,10 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
     async def stop(request: Request):
         return await call(request, lambda _: service_for(context).stop_engine(), local=True, what="엔진 끄기")
 
+    @app.post("/api/anima-engine/vcredist/open")
+    async def open_vcredist(request: Request):
+        return await call(request, lambda _: service_for(context).open_vcredist(), local=True, what="VC++ 설치 안내")
+
     @app.get("/api/anima-engine/loras")
     async def loras():
         return await run_in_thread(service_for(context).loras)

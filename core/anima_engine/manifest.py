@@ -6,6 +6,9 @@ PROFILE_REVISION = 1
 
 RUNTIME_ID = 'r1-comfyui-0.22.0-nvidia'
 
+VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+VCREDIST_MESSAGE = "Microsoft Visual C++ 재배포 패키지(x64)가 필요합니다."
+
 MANAGED_CREDENTIAL = 'managed://anima-spd-v1'
 
 OUTPUT_NODE_ID = '53'

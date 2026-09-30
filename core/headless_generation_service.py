@@ -749,6 +749,7 @@ class HeadlessGenerationService:
         try:
             import weakref
 
+            from core.anima_engine.prompt_loras import split_lora_lines
             from core.prompt_context import PromptContext
             from core.wildcard_processor import WildcardProcessor, split_tags_smart
 
@@ -776,7 +777,8 @@ class HeadlessGenerationService:
 
             negative = str(params.get("negative_prompt") or "")
             cleaned_tags: list[str] = []
-            for tag in split_tags_smart(text):
+            # lora:예약어 줄이 든 조각은 줄마다 - 여기서 개행을 먼저 지우면 뒤의 API 정리가 되살리지 못한다(Codex 09-30)
+            for tag in (piece for part in split_tags_smart(text) for piece in split_lora_lines(part)):
                 processed = tag.replace("\n", "").strip()
                 if not processed or processed.startswith("#"):
                     continue

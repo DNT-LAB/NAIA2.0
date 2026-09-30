@@ -13,6 +13,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from typing import Dict, Any, List, Optional
 from core.comfyui_service import ComfyUIService
+from core.anima_engine.prompt_loras import split_lora_lines
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
     apply_resolution_to_comfyui_workflow,
@@ -167,9 +168,6 @@ def _get_loaded_middle_module(app_context, class_name: str):
         if module.__class__.__name__ == class_name:
             return module
     return None
-
-# 한 줄이 LoRA 예약어(lora:KW:강도, 관리형 ANIMA)로 시작하는가 - 프롬프트 정리에서 그 조각을 줄마다 나눈다
-_LORA_LINE_RE = re.compile(r"(?im)^[ \t]*lora:")
 
 class APIService:
     def _nai_registry_knows(self, model_key: Any) -> bool:
@@ -498,7 +496,7 @@ class APIService:
             for tag in original_prompt.split(','):
                 # LoRA 예약어(lora:KW:강도)가 한 줄에 따로 있으면 그 조각은 줄마다 나눈다 - 개행을 지우기만 하면 앞뒤
                 # 태그에 붙어(1girllora:wc:0.8 · lora:wc:0.8smile) 못 읽거나 생성이 멈췄다(Codex 09-30). 다른 조각은 그대로.
-                for piece in (tag.split('\n') if _LORA_LINE_RE.search(tag) else (tag,)):
+                for piece in split_lora_lines(tag):
                     processed_tag = piece.replace('\n', '').strip()
                     if processed_tag and not processed_tag.startswith('#'):
                         cleaned_tags.append(processed_tag)

@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.llama_install_checks import artifact_ready
+
 
 @dataclass(frozen=True)
 class LlamaModel:
@@ -182,7 +184,8 @@ def catalog(save_root: str | Path, hardware: dict[str, Any] | None = None, gpu_i
             "vram_gb": model.vram_gb,
             "license": model.license,
             "source": model.url,
-            "installed": path.is_file(),
+            "installed": artifact_ready(path, model.size, model.sha256),
+            "repair_needed": path.is_file() and not artifact_ready(path, model.size, model.sha256),
             "partial_mb": round(part.stat().st_size / 1048576, 1) if part.is_file() else 0.0,
             "gpu": rec["models"][model.id]["gpu"],
             "cpu": rec["models"][model.id]["cpu"],

@@ -14,11 +14,14 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Any, Callable
+
+from core.llama_install_checks import vcredist_status
 
 ENGINE_VERSION = "b10830"
 ENGINE_ASSET = f"llama-{ENGINE_VERSION}-bin-win-vulkan-x64.zip"
@@ -62,26 +65,55 @@ def extract_engine_zip(zip_path: Path, into: Path, *, sha256: str = ENGINE_SHA25
 
 
 def check_engine_dir(directory: Path) -> None:
-    missing = [name for name in REQUIRED_FILES if not (directory / name).is_file()]
-    if not list(directory.glob("ggml-cpu-*.dll")):
+    missing = [name for name in REQUIRED_FILES
+               if not (directory / name).is_file() or not (directory / name).stat().st_size]
+    if not any(p.is_file() and p.stat().st_size for p in directory.glob("ggml-cpu-*.dll")):
         missing.append("ggml-cpu-*.dll")
     if missing:
         raise RuntimeError(f"llama.cpp engine is incomplete in {directory}: missing {', '.join(missing)}")
 
 
 def copy_engine_files(engine_dir: Path, target: Path) -> tuple[int, int]:
-    """엔진 파일을 target 으로(있던 것은 지운다). 반환: (파일 수, 바이트)."""
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True)
-    count = size = 0
-    for item in sorted(engine_dir.iterdir()):
-        if not item.is_file() or item.suffix.lower() in DROP_SUFFIXES:
-            continue
-        shutil.copy2(item, target / item.name)
-        count += 1
-        size += item.stat().st_size
+    """같은 볼륨의 임시 폴더에서 완성한 뒤 교체한다. 실패하면 기존 엔진을 보존한다."""
+    if target.is_symlink() or getattr(target, "is_junction", lambda: False)():
+        raise RuntimeError("엔진 폴더가 링크입니다 — 실제 폴더를 사용해 주세요.")
+    if target.exists() and not target.is_dir():
+        raise RuntimeError("엔진 경로가 폴더가 아닙니다.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    previous = target.with_name(target.name + ".previous-" + uuid.uuid4().hex)
+    with tempfile.TemporaryDirectory(prefix=".naia-llama-", dir=target.parent) as scratch:
+        staged = Path(scratch) / "staged"
+        staged.mkdir()
+        count = size = 0
+        for item in sorted(engine_dir.iterdir()):
+            if not item.is_file() or item.suffix.lower() in DROP_SUFFIXES:
+                continue
+            shutil.copy2(item, staged / item.name)
+            count += 1
+            size += item.stat().st_size
+        check_engine_dir(staged)
+        if target.exists():
+            target.rename(previous)
+        try:
+            staged.rename(target)
+        except Exception:
+            if previous.exists():
+                previous.rename(target)
+            raise
+    if previous.exists():
+        try:
+            shutil.rmtree(previous)
+        except OSError:
+            pass  # 잠긴 이전 엔진은 보존한다. 검증된 새 엔진에는 영향을 주지 않는다.
     return count, size
+
+
+def engine_files_ready(directory: Path) -> bool:
+    try:
+        check_engine_dir(directory)
+        return True
+    except (OSError, RuntimeError):
+        return False
 
 
 class LlamaEngineInstallService:
@@ -103,23 +135,29 @@ class LlamaEngineInstallService:
 
     @property
     def installed(self) -> bool:
-        return (self.target_dir / "llama-server.exe").is_file()
+        return engine_files_ready(self.target_dir)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             state = dict(self._state)
         state["installed"] = self.installed
+        state["repair_needed"] = self.target_dir.exists() and not state["installed"]
         return state
 
     def start(self) -> dict[str, Any]:
         with self._lock:
             if self._state.get("active"):
                 return dict(self._state)
+            prerequisite = vcredist_status()
+            if not prerequisite["ok"]:
+                return self._set(phase="error", done=False, error=prerequisite["message"],
+                                 message=prerequisite["message"], code=prerequisite["code"])
             if self.installed:
-                return self._set(phase="complete", percent=100, done=True, message="엔진이 이미 있습니다.")
+                return self._set(phase="complete", percent=100, done=True, error="", code=None,
+                                 message="엔진이 이미 있습니다.")
             self._cancel.clear()
             self._state.update({"active": True, "phase": "download", "percent": 0, "message": "연결 중...",
-                                "error": "", "done": False})
+                                "error": "", "code": None, "done": False})
             self._thread = Thread(target=self._run, daemon=True, name="llama-engine-install")
             self._thread.start()
             return dict(self._state)

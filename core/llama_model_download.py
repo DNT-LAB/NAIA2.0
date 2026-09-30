@@ -13,12 +13,14 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Any, Callable
 
 from core.llama_models import DEFAULT_MODEL_ID, LlamaModel, model_by_id, model_path
+from core.llama_install_checks import artifact_ready, verify_artifact
 
 _DEFAULT = model_by_id(DEFAULT_MODEL_ID)
 MODEL_URL = _DEFAULT.url
@@ -90,7 +92,7 @@ class LlamaModelDownloadService:
         with self._lock:
             state = dict(self._state)
         state["model"] = self.model_id
-        state["installed"] = self.target_path.is_file()
+        state["installed"] = artifact_ready(self.target_path, self.expected_size, self.sha256)
         state["partial_mb"] = round(self.part_path.stat().st_size / 1048576, 1) if self.part_path.is_file() else 0.0
         return state
 
@@ -98,11 +100,10 @@ class LlamaModelDownloadService:
         with self._lock:
             if self._state.get("active"):
                 return dict(self._state)
-            if self.target_path.is_file():
-                return self._set_state(phase="complete", percent=100, done=True, error="",
-                                       message="모델이 이미 설치되어 있습니다.")
             self._cancel.clear()
-            self._state.update({"active": True, "phase": "download", "percent": 0, "message": "연결 중...",
+            exists = self.target_path.is_file()
+            self._state.update({"active": True, "phase": "verify" if exists else "download", "percent": 0,
+                                "message": "기존 모델 검사 중(SHA-256)..." if exists else "연결 중...",
                                 "error": "", "done": False})
             self._thread = Thread(target=self._run, daemon=True, name=f"llama-model-download-{self.model_id}")
             self._thread.start()
@@ -124,13 +125,22 @@ class LlamaModelDownloadService:
     def _run(self) -> None:
         try:
             self.target_path.parent.mkdir(parents=True, exist_ok=True)
-            self._download()
-            self._set_state(phase="verify", message="검증 중(SHA-256)...")
-            actual = sha256_of(self.part_path, cancel=self._cancel)
-            if actual != self.sha256:
-                self.part_path.unlink(missing_ok=True)  # 틀린 파일은 이어받기 대상도 아니다
-                raise ValueError(f"SHA-256 불일치 — 받은 파일을 지웠습니다 ({actual[:12]}…)")
-            self.part_path.replace(self.target_path)
+            present = verify_artifact(self.target_path, self.expected_size, self.sha256,
+                                      force=True, cancel=self._cancel)
+            if not present:
+                if self._cancel.is_set():
+                    raise InterruptedError("다운로드가 취소되었습니다.")
+                if self.target_path.is_file():
+                    # ANIMA와 같이 관리 파일만 격리한다. 사용자 지정 모델 경로는 이 서비스의 대상이 아니다.
+                    self.target_path.replace(self.target_path.with_name(self.target_path.name + ".invalid-" + uuid.uuid4().hex))
+                self._set_state(phase="download", message="모델 다운로드 중...")
+                self._download()
+                self._set_state(phase="verify", message="검증 중(SHA-256)...")
+                actual = sha256_of(self.part_path, cancel=self._cancel)
+                if actual != self.sha256:
+                    self.part_path.unlink(missing_ok=True)  # 틀린 파일은 이어받기 대상도 아니다
+                    raise ValueError(f"SHA-256 불일치 — 받은 파일을 지웠습니다 ({actual[:12]}…)")
+                self.part_path.replace(self.target_path)
             self._set_state(active=False, phase="complete", percent=100, done=True, error="",
                             downloaded_mb=round(self.expected_size / 1048576, 1), message="설치 완료")
             if self.on_complete is not None:

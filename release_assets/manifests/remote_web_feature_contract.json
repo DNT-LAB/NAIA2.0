@@ -727,6 +727,7 @@
         "app/web/remote/js/features/llmSetupPanel.mjs",
         "core/boost_v2.py",
         "core/llama_engine_install.py",
+        "core/llama_install_checks.py",
         "core/llama_models.py",
         "core/llama_runtime.py",
         "core/llama_model_download.py"
@@ -737,6 +738,7 @@
         {"method": "POST", "path": "/api/boost-v2/model/download", "smoke": "external_live"},
         {"method": "POST", "path": "/api/boost-v2/model/download/cancel", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/boost-v2/engine/download", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/boost-v2/vcredist/open", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/boost-v2/unload", "smoke": "state_mutation"}
       ]
     },

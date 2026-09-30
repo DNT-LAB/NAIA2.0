@@ -1578,7 +1578,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
           <b>${esc(llmLabel(m))}</b>${statHtml(m)}${badges}<small>${esc(m.quant)} · ${esc(m.size_gb)}GB · ${state}</small></button>${act}</div>`;
     }).join('');
     const notes = [];
-    if (!llm.engine_ready) notes.push('llama.cpp 엔진이 없습니다 — AI 모델 설정에서 받아 주세요.');
+    if (llm.prerequisites?.ok === false) notes.push(`${llm.prerequisites.message} — AI 모델 설정에서 설치 안내를 확인해 주세요.`);
+    else if (!llm.engine_ready) notes.push('llama.cpp 엔진이 없거나 손상되었습니다 — AI 모델 설정에서 받아 주세요.');
     if (!own) notes.push(`모델 파일을 직접 지정해 쓰는 중입니다: ${llm.model_path}`);
     if (dl.error) notes.push(dl.error);
     return `<div class="as-llm-head"><b>AI 모델</b><span>${mode === 'gpu' ? 'GPU 모드' : 'CPU 모드'}</span></div>${rows}

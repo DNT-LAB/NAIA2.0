@@ -100,9 +100,10 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
   function headline() {
     const dl = st.download || {};
     const eng = st.engine_install || {};
+    if (st.prerequisites?.ok === false) return 'Visual C++ 설치 필요';
     if (!st.engine_ready) return eng.active ? `엔진 받는 중 ${eng.percent || 0}%` : '엔진 없음';
-    if (dl.active) return `받는 중 ${dl.percent || 0}%`;
     if (dl.phase === 'verify') return '검증 중…';
+    if (dl.active) return `받는 중 ${dl.percent || 0}%`;
     if (st.priming) return `준비 중 · ${st.model_label}`;
     if (st.model_ready) return `준비됨 · ${st.model_label}${st.running ? ' · 실행 중' : ''}`;
     return '모델 없음';
@@ -116,8 +117,10 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     const eng = st.engine_install || {};
     let text = '모델 없음';
     let state = 'warn';
-    if (!st.engine_ready) { text = eng.active ? `엔진 ${eng.percent || 0}%` : '엔진 없음'; state = 'err'; }
-    else if (dl.active || dl.phase === 'verify') text = `받는 중 ${dl.percent || 0}%`;
+    if (st.prerequisites?.ok === false) { text = 'Visual C++ 설치 필요'; state = 'err'; }
+    else if (!st.engine_ready) { text = eng.active ? `엔진 ${eng.percent || 0}%` : '엔진 없음'; state = 'err'; }
+    else if (dl.phase === 'verify') text = '검증 중';
+    else if (dl.active) text = `받는 중 ${dl.percent || 0}%`;
     else if (st.priming) text = '준비 중';
     else if (st.model_ready) { text = String(st.model_label || '').replace('Gemma 4 ', ''); state = 'ok'; }
     if (sub) sub.textContent = text;
@@ -147,12 +150,21 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
     const dl = st.download || {};
     const eng = st.engine_install || {};
     const parts = [`<div class="llm-hw">${hardwareLine(hw)}</div>`];
+    const prerequisites = st.prerequisites || {};
+    if (prerequisites.ok === false) {
+      parts.push(`<div class="setup-result error">${esc(prerequisites.message)}</div>
+        <div class="llm-row"><button type="button" class="setup-btn-primary" data-llm-act="vcredist">설치 파일 받기</button>
+        <button type="button" class="setup-btn-ghost" data-llm-act="recheck">다시 검사</button></div>
+        <div class="llm-note">Microsoft 공식 설치 파일을 받아 설치한 뒤 다시 검사해 주세요.</div>`);
+    }
 
-    if (!st.engine_ready) {
+    if (!(st.engine_installed ?? st.engine_ready)) {
       parts.push(st.engine_is_default
-        ? `<div class="llm-detail">llama.cpp 엔진이 없습니다(포터블엔 들어 있습니다 — 소스로 실행 중이면 받으세요).</div>
+        ? `<div class="llm-detail">${eng.repair_needed ? '엔진 파일 일부가 없거나 손상되었습니다 — 복구해 주세요.'
+          : 'llama.cpp 엔진이 없습니다(포터블엔 들어 있습니다 — 소스로 실행 중이면 받으세요).'}</div>
            <div class="llm-row">${eng.active ? progressHtml(eng)
-            : '<button type="button" class="setup-btn-primary" data-llm-act="engine">엔진 받기 (35MB)</button>'}</div>`
+             : `<button type="button" class="setup-btn-primary" data-llm-act="engine"${prerequisites.ok === false ? ' disabled' : ''}>${
+               eng.repair_needed ? '엔진 복구' : '엔진 받기'} (35MB)</button>`}</div>`
         : `<div class="llm-detail">지정한 엔진 파일이 없습니다: ${esc(st.engine_path)}</div>`);
       if (eng.error) parts.push(`<div class="setup-result error">${esc(eng.error)}</div>`);
     }
@@ -191,7 +203,7 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       const busyHere = (dl.active || dl.phase === 'verify') && dl.model === m.id;
       const state = m.installed ? '받음'
         : busyHere ? (dl.phase === 'verify' ? '검증 중' : `받는 중 ${Number(dl.percent) || 0}%`)
-          : m.partial_mb ? '받다 멈춤' : '안 받음';
+          : m.repair_needed ? '복구 필요' : m.partial_mb ? '받다 멈춤' : '안 받음';
       // 'E2B | Hit rate 52.2% | VRAM 1.5GB'(사용자 지정 09-28) — 카탈로그 값(core/llama_models 머리말: 평가 세트 · 개발 PC 실측)
       const stat = [Number(m.hit_rate) > 0 ? `Hit rate ${Number(m.hit_rate).toFixed(1)}%` : '',
         Number(m.vram_gb) > 0 ? `VRAM ${Number(m.vram_gb).toFixed(1)}GB` : ''].filter(Boolean).join(' | ');
@@ -214,11 +226,13 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
       } else if (view.installed && view.id !== current) {
         action = `<button type="button" class="setup-btn-primary" data-llm-act="use">이 모델 쓰기</button>`;
       } else if (!view.installed) {
-        action = `<button type="button" class="setup-btn-primary" data-llm-act="download"${downloadingOther ? ' disabled' : ''}>${
-          view.partial_mb ? `이어받기 (${Math.round(view.partial_mb)}MB 받음)` : `받기 (${esc(view.size_gb)}GB)`}</button>${
+        action = `<button type="button" class="setup-btn-primary" data-llm-act="download"${downloadingOther || prerequisites.ok === false ? ' disabled' : ''}>${
+          view.repair_needed ? '검사 및 복구' : view.partial_mb ? `이어받기 (${Math.round(view.partial_mb)}MB 받음)` : `받기 (${esc(view.size_gb)}GB)`}</button>${
           downloadingOther ? '<span class="llm-note">다른 모델을 받는 중입니다</span>' : ''}`;
       } else if (st.priming) {
         action = '<span class="llm-note">처음 쓰는 모델은 준비에 1분 가까이 걸릴 수 있습니다</span>';
+      } else {
+        action = `<button type="button" class="setup-btn-ghost" data-llm-act="download"${downloadingOther || prerequisites.ok === false ? ' disabled' : ''}>검사 및 복구</button>`;
       }
       if (action) parts.push(`<div class="llm-row">${action}</div>`);
       if (dl.error && dl.model === view.id) parts.push(`<div class="setup-result error">${esc(dl.error)}</div>`);
@@ -230,6 +244,9 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
         parts.push(`<div class="setup-result error">한국어 분석기(Kiwi) 설치 실패 — ${esc(kiwi.error)}</div>`);
       } else if (kiwi.installed === false && !view.installed && !downloadingThis) {
         parts.push(`<div class="llm-note">받으면 한국어 분석기(Kiwi, 약 ${esc(kiwi.approx_mb || 90)}MB)도 함께 설치합니다.</div>`);
+      }
+      if (kiwi.installed === false && !kiwi.active && view.installed) {
+        parts.push('<div class="llm-row"><button type="button" class="setup-btn-ghost" data-llm-act="kiwi">한국어 분석기 설치 / 복구</button></div>');
       }
     }
     parts.push(`<div class="llm-note">Hugging Face HauhauCS 저장소에서 한 번 받아 이 PC 에 둡니다.
@@ -311,6 +328,10 @@ export function createLlmSetupPanel({ document, fetch: fetchFn = window.fetch.bi
         await post('/api/boost-v2/model/download/cancel', {});
       } else if (act === 'engine') {
         await post('/api/boost-v2/engine/download', {});
+      } else if (act === 'vcredist') {
+        await post('/api/boost-v2/vcredist/open', {});
+      } else if (act === 'kiwi') {
+        await post('/api/assist/kiwi/install', {});
       }
     } catch (error) {
       showToast(error.status === 403 ? 'AI 모델은 NAIA 를 켠 PC 에서만 받을 수 있습니다' : error.message, 'error');

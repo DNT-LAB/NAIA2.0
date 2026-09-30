@@ -38,12 +38,15 @@ def boost_v2_settings(context: Any) -> dict[str, Any]:
 
 def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> Any:
     """세션 컨텍스트에 붙은 런타임 하나. 설정 경로가 바뀌면 다음 요청에서 새로 올린다."""
-    from core.llama_runtime import LlamaServerRuntime, resolve_paths
+    from core.llama_runtime import LlamaServerRuntime, resolve_paths, default_model_path
+    from core.llama_models import model_by_id
 
     s = settings if settings is not None else boost_v2_settings(context)
     save_root = _save_root(context)
     engine, model = resolve_paths(s, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
-    use_gpu, device = _allocation(engine, s)
+    installed, prerequisites, managed = _engine_state(context, engine)
+    use_gpu, device = _allocation(engine if installed and prerequisites["ok"] else None, s)
+    spec = model_by_id(s.get("model")) if model == default_model_path(save_root, s.get("model")) else None
     with _RUNTIME_LOCK:
         runtime = getattr(context, "boost_llama_runtime", None)
         if runtime is None:
@@ -51,11 +54,32 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
             # 매번 다시 올리면 호출마다 로드 ~2.6초가 붙는다(사용자 실측 "3초 느리다"). 끄기·백엔드 전환 때
             # Boost 의 임대를 놓는다 — 아무도 안 쥐면 그 자리에서 내리고, Assist 가 쥐고 있으면 그 임대가 끝날 때.
             runtime = LlamaServerRuntime(engine, model, idle_seconds=0, use_gpu=use_gpu, device=device,
+                                         managed_engine=managed, managed_model=spec,
                                          log_path=save_root / "logs" / "boost_llama_server.log")
             context.boost_llama_runtime = runtime
         else:
-            runtime.configure(engine, model, use_gpu=use_gpu, device=device)
+            runtime.configure(engine, model, use_gpu=use_gpu, device=device,
+                              managed_engine=managed, managed_model=spec)
         return runtime
+
+
+def _engine_state(context: Any, engine: Path) -> tuple[bool, dict[str, Any], bool]:
+    from core.llama_engine_install import engine_files_ready
+    from core.llama_install_checks import vcredist_status
+    from core.llama_runtime import default_engine_path
+
+    managed = engine == default_engine_path(getattr(context, "repo_root", "."))
+    installed = engine_files_ready(engine.parent) if managed else engine.is_file()
+    return installed, vcredist_status() if managed else {"ok": True}, managed
+
+
+def open_llama_vcredist() -> dict[str, Any]:
+    """ANIMA와 같이 사용자가 누르면 공식 설치 파일 주소만 연다. 다운로드·실행은 사용자 몫이다."""
+    import os
+    from core.llama_install_checks import VCREDIST_URL
+
+    os.startfile(VCREDIST_URL)
+    return {"ok": True, "url": VCREDIST_URL}
 
 
 def _allocation(engine: Any, settings: dict[str, Any]) -> tuple[bool, str | None]:
@@ -132,6 +156,13 @@ def active_model_download(context: Any) -> Any:
 
 def start_model_download(context: Any, model_id: Any = None) -> dict[str, Any]:
     """모델 받기. 다른 모델을 받는 중이면 거절한다(3~14GB 를 둘씩 받지 않는다)."""
+    from core.llama_runtime import resolve_paths
+
+    settings = boost_v2_settings(context)
+    engine, _ = resolve_paths(settings, repo_root=getattr(context, "repo_root", "."), save_root=_save_root(context))
+    _, prerequisites, _ = _engine_state(context, engine)
+    if not prerequisites["ok"]:
+        return {"ok": False, "error": prerequisites["message"], "code": prerequisites["code"]}
     svc = get_model_downloader(context, model_id)
     busy = active_model_download(context)
     if busy is not None and busy is not svc:
@@ -163,16 +194,20 @@ def cancel_model_download(context: Any) -> dict[str, Any]:
 def boost_v2_status(context: Any) -> dict[str, Any]:
     """설정 화면용 상태: 설정 · 엔진/모델 경로와 존재 여부 · 모델 목록(설치 · 권장) · 실행 여부 · 다운로드 진행."""
     from core.llama_models import catalog, model_by_id
-    from core.llama_runtime import default_engine_path, default_model_path, hardware_summary, resolve_paths
+    from core.llama_install_checks import artifact_ready
+    from core.llama_runtime import default_model_path, hardware_summary, resolve_paths
 
     settings = boost_v2_settings(context)
     save_root = _save_root(context)
     engine, model = resolve_paths(settings, repo_root=getattr(context, "repo_root", "."), save_root=save_root)
     runtime = getattr(context, "boost_llama_runtime", None)
     running = bool(runtime is not None and runtime.is_running())
-    hardware = hardware_summary(engine)
+    engine_installed, prerequisites, managed_engine = _engine_state(context, engine)
+    engine_ready = engine_installed and prerequisites["ok"]
+    probe_engine = engine if engine_ready else None
+    hardware = hardware_summary(probe_engine)
     entries = hardware["gpus"]
-    use_gpu, chosen = _allocation(engine, settings)
+    use_gpu, chosen = _allocation(probe_engine, settings)
     rt = runtime.status() if runtime is not None else {}
     fallback = rt.get("gpu_failed") if rt.get("use_gpu") and rt.get("device") == chosen else None
     selected = model_by_id(settings.get("model"))
@@ -181,7 +216,9 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "ok": True,
         "settings": settings,
         "engine_path": str(engine),
-        "engine_ready": engine.is_file(),
+        "engine_ready": engine_ready,
+        "engine_installed": engine_installed,
+        "prerequisites": prerequisites,
         # 이 PC 의 할당 가능한 자원 · 설정의 할당 장치 · 실제로 고른 장치 · GPU 실패로 CPU 로 내려왔는지.
         "hardware": hardware,
         "device_pref": settings.get("device", "auto"),
@@ -189,9 +226,9 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "gpu_device_entries": entries,
         "gpu_device_chosen": chosen,
         # GPU 모드에서 '자동' 을 골랐다면 쓰게 될 장치(선택 목록의 설명용 — 지금 선택과 무관).
-        "gpu_device_auto": _allocation(engine, {"device": "gpu"})[1],
+        "gpu_device_auto": _allocation(probe_engine, {"device": "gpu"})[1],
         "gpu_device_chosen_name": next((e["name"] for e in entries if e["id"] == chosen), ""),
-        "engine_is_default": engine == default_engine_path(getattr(context, "repo_root", ".")),
+        "engine_is_default": managed_engine,
         "engine_install": get_engine_installer(context).snapshot(),
         # 한국어 분석기(Kiwi) — 모델을 받으면 함께 설치한다(start_model_download). 화면은 설치 중 · 실패 · 받기 전 안내만
         "kiwi": kiwi_installer(context),
@@ -199,7 +236,8 @@ def boost_v2_status(context: Any) -> dict[str, Any]:
         "gpu_fallback": fallback,
         "swapping": bool(rt.get("stale")),
         "model_path": str(model),
-        "model_ready": model.is_file(),
+        "model_ready": (artifact_ready(model, selected.size, selected.sha256)
+                        if model == default_model_path(save_root, selected.id) else model.is_file()),
         "model_is_default": model == default_model_path(save_root, selected.id),
         # 고른 모델 · 목록(설치 여부 · 이 PC 에 맞는지). 경로를 직접 지정했으면 model_is_default=False — 그 파일이 쓰인다.
         "model_id": selected.id,

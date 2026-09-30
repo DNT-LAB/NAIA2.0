@@ -147,6 +147,8 @@ class LlamaServerRuntime:
         log_path: str | Path | None = None,
         use_gpu: bool = True,
         device: str | None = None,
+        managed_engine: bool = False,
+        managed_model: Any = None,
     ) -> None:
         # 요구 설정(use_gpu/device) — 실제로 GPU 를 쓰는지는 effective_gpu(실패하면 CPU 로 내려온다).
         self.use_gpu = bool(use_gpu)
@@ -155,6 +157,8 @@ class LlamaServerRuntime:
         self._running_key: tuple | None = None  # 지금 떠 있는 엔진이 어떤 설정으로 떴는가
         self.engine_path = Path(engine_path) if engine_path else None
         self.model_path = Path(model_path) if model_path else None
+        self.managed_engine = managed_engine
+        self.managed_model = managed_model
         self.threads = int(threads or min(8, os.cpu_count() or 4))
         self.ctx_size = int(ctx_size)
         self.idle_seconds = float(idle_seconds)
@@ -185,6 +189,7 @@ class LlamaServerRuntime:
     def configure(
         self, engine_path: str | Path | None, model_path: str | Path | None, *,
         use_gpu: bool | None = None, device: Any = _KEEP,
+        managed_engine: bool | None = None, managed_model: Any = _KEEP,
     ) -> None:
         """요구 설정을 바꾼다. 떠 있는 엔진이 새 설정과 다르면 **도는 요청이 없을 때만** 곧바로 내린다 —
         요청이 돌고 있으면 그 요청은 끝까지 가고, 끝난 뒤 백그라운드로 새 설정의 엔진을 띄운다(chat).
@@ -197,6 +202,10 @@ class LlamaServerRuntime:
             if (gpu, dev) != (self.use_gpu, self.device):
                 self.gpu_failed = None
             self.engine_path, self.model_path, self.use_gpu, self.device = engine, model, gpu, dev
+            if managed_engine is not None:
+                self.managed_engine = managed_engine
+            if managed_model is not self._KEEP:
+                self.managed_model = managed_model
         self._stop_if_stale()
 
     @property
@@ -244,13 +253,22 @@ class LlamaServerRuntime:
             return self._proc is not None and self._proc.poll() is None
 
     def status(self) -> dict[str, Any]:
+        from core.llama_engine_install import engine_files_ready
+        from core.llama_install_checks import artifact_ready, vcredist_status
+
         with self._proc_lock:
             running = self._proc is not None and self._proc.poll() is None
+            engine_exists = bool(self.engine_path and self.engine_path.is_file())
+            if self.managed_engine and engine_exists:
+                engine_exists = engine_files_ready(self.engine_path.parent) and vcredist_status()["ok"]
+            model_exists = bool(self.model_path and self.model_path.is_file())
+            if self.managed_model is not None and model_exists:
+                model_exists = artifact_ready(self.model_path, self.managed_model.size, self.managed_model.sha256)
             return {
                 "engine_path": str(self.engine_path or ""),
                 "model_path": str(self.model_path or ""),
-                "engine_exists": bool(self.engine_path and self.engine_path.is_file()),
-                "model_exists": bool(self.model_path and self.model_path.is_file()),
+                "engine_exists": engine_exists,
+                "model_exists": model_exists,
                 "running": running,
                 "pid": self._proc.pid if running and self._proc else None,
                 "port": self._port if running else None,
@@ -333,6 +351,17 @@ class LlamaServerRuntime:
             return self._launch(max(deadline, time.monotonic() + 30.0))
 
     def _launch(self, deadline: float) -> int:
+        # Hash once per unchanged managed model, outside the process lock so status polling stays responsive.
+        with self._proc_lock:
+            if (self._proc is not None and self._proc.poll() is None and self._port
+                    and self._running_key == self._desired_key()):
+                return self._port
+            checked_model, spec = self.model_path, self.managed_model
+        if spec is not None and checked_model is not None:
+            from core.llama_install_checks import verify_artifact
+
+            if not verify_artifact(checked_model, spec.size, spec.sha256):
+                raise LlamaRuntimeError("모델 파일이 없거나 손상되었습니다 — AI 모델 설정에서 검사 및 복구를 눌러 주세요.")
         with self._proc_lock:
             if (self._proc is not None and self._proc.poll() is None and self._port
                     and self._running_key == self._desired_key()):
@@ -342,6 +371,17 @@ class LlamaServerRuntime:
                 raise LlamaRuntimeError(f"llama-server 엔진이 없습니다: {self.engine_path or '(경로 미지정)'}")
             if not self.model_path or not self.model_path.is_file():
                 raise LlamaRuntimeError(f"모델 파일이 없습니다: {self.model_path or '(경로 미지정)'}")
+            if (checked_model, spec) != (self.model_path, self.managed_model):
+                raise LlamaRuntimeError("검사 중 모델 설정이 바뀌었습니다 — 다시 시도해 주세요.")
+            if self.managed_engine:
+                from core.llama_engine_install import engine_files_ready
+                from core.llama_install_checks import vcredist_status
+
+                prerequisite = vcredist_status()
+                if not prerequisite["ok"]:
+                    raise LlamaRuntimeError(prerequisite["message"])
+                if not engine_files_ready(self.engine_path.parent):
+                    raise LlamaRuntimeError("엔진 파일이 없거나 손상되었습니다 — AI 모델 설정에서 엔진 복구를 눌러 주세요.")
             port = _free_port()
             args = self.server_args(port)
             if self.log_path is not None:

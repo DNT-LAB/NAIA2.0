@@ -42,6 +42,7 @@ def register_boost_v2_routes(
         cancel_model_download,
         get_boost_runtime,
         get_engine_installer,
+        open_llama_vcredist,
         prime_runtime,
         release_boost_runtime,
         start_model_download,
@@ -118,3 +119,9 @@ def register_boost_v2_routes(
             return _loopback_only()
         result = await run_in_thread(stop_boost_runtime, context)
         return {"ok": True, **(result or {})}
+
+    @app.post("/api/boost-v2/vcredist/open")
+    async def boost_v2_vcredist_open(request: Request):
+        if not _is_local_request(request):
+            return _loopback_only()
+        return await run_in_thread(open_llama_vcredist)

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 REQUIREMENT = "kiwipiepy==0.23.2"
+MODEL_REQUIREMENT = "kiwipiepy_model>=0.23,<0.24"
 MODULES = ("kiwipiepy", "kiwipiepy_model")
 APPROX_MB = 90                    # kiwipiepy_model sdist 88.1MB + kiwipiepy 휠 + tqdm
 TIMEOUT_SECONDS = 30 * 60
@@ -34,10 +35,24 @@ _DOWNLOADING = re.compile(r"^\s*Downloading (\S+?)(?: \(([^)]+)\))?\s*$")
 _TAIL = 30
 
 
-def kiwi_installed() -> bool:
-    """두 모듈이 지금 환경에서 찾아지나. 설치 직후 같은 프로세스에서도 보이게 찾기 캐시를 비운다."""
+def kiwi_present() -> bool:
+    """패키지 흔적이 있으면 pip의 'already satisfied' 대신 복구 설치가 필요할 수 있다."""
     importlib.invalidate_caches()
-    return all(importlib.util.find_spec(name) is not None for name in MODULES)
+    try:
+        return any(importlib.util.find_spec(name) is not None for name in MODULES)
+    except (ImportError, ValueError):
+        return False
+
+
+def kiwi_installed() -> bool:
+    """모듈 탐색만 성공한 DLL 누락·손상 패키지를 설치 완료로 표시하지 않는다."""
+    importlib.invalidate_caches()
+    try:
+        module = importlib.import_module("kiwipiepy")
+        importlib.import_module("kiwipiepy_model")
+        return callable(getattr(module, "Kiwi", None))
+    except Exception:
+        return False
 
 
 def explain_failure(lines: list[str]) -> str:
@@ -77,6 +92,8 @@ class KiwiInstaller:
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._known = False                 # 한 번 설치를 확인하면 이 프로세스 동안은 다시 안 찾는다
+        self._prepare_failed = False
+        self._repair = False
         self._timed_out = False
         self._state: dict[str, Any] = {
             "active": False, "phase": "idle", "percent": 0, "message": "", "error": "", "done": False,
@@ -87,7 +104,14 @@ class KiwiInstaller:
         return [self.python, "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
                 "--progress-bar", "raw", REQUIREMENT]
 
+    def repair_command(self) -> list[str]:
+        # First resolve missing dependencies normally, then replace only Kiwi's two packages.
+        # --force-reinstall without --no-deps would also replace the running app's NumPy.
+        return [*self.command()[:-1], "--force-reinstall", "--no-deps", MODEL_REQUIREMENT, REQUIREMENT]
+
     def installed(self) -> bool:
+        if self._prepare_failed:
+            return False
         if not self._known:
             try:
                 self._known = bool(self._check())
@@ -109,6 +133,8 @@ class KiwiInstaller:
             if self.installed():
                 self._set(phase="complete", percent=100, done=True, error="", message="이미 설치되어 있습니다.")
                 return self.snapshot()
+            self._repair = self._prepare_failed or kiwi_present()
+            self._known = False
             self._timed_out = False
             self._state.update({"active": True, "phase": "start", "percent": 0, "message": "설치를 시작하는 중...",
                                 "error": "", "done": False, "log_tail": []})
@@ -135,6 +161,34 @@ class KiwiInstaller:
         except Exception:
             pass
 
+    def _run_pip(self, command: list[str], env: dict[str, str], tail: Any, log: Any, deadline: float) -> None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("설치 제한시간을 넘었습니다 — 다시 눌러 주세요.")
+        proc = self._popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                           encoding="utf-8", errors="replace", env=env,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        timer = threading.Timer(remaining, self._kill, args=(proc,))
+        timer.daemon = True
+        timer.start()
+        try:
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if not line:
+                    continue
+                if log is not None:
+                    log.write(line + "\n")
+                if not _PROGRESS.match(line):
+                    tail.append(line)
+                self._on_line(line)
+            code = proc.wait()
+        finally:
+            timer.cancel()
+        if self._timed_out:
+            raise TimeoutError(f"설치가 {int(self.timeout // 60)}분 안에 끝나지 않아 멈췄습니다 — 다시 눌러 주세요.")
+        if code != 0:
+            raise RuntimeError(explain_failure(list(tail)))
+
     def _run(self) -> None:
         tail: collections.deque[str] = collections.deque(maxlen=_TAIL)
         log = None
@@ -146,37 +200,24 @@ class KiwiInstaller:
                 except OSError:
                     log = None
             env = dict(os.environ, PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-            proc = self._popen(self.command(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                               encoding="utf-8", errors="replace", env=env,
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            timer = threading.Timer(self.timeout, self._kill, args=(proc,))   # 끝없이 매달리지 않게
-            timer.daemon = True
-            timer.start()
-            try:
-                for raw in proc.stdout:
-                    line = raw.rstrip()
-                    if not line:
-                        continue
-                    if log is not None:
-                        log.write(line + "\n")
-                    if not _PROGRESS.match(line):
-                        tail.append(line)
-                    self._on_line(line)
-                code = proc.wait()
-            finally:
-                timer.cancel()
-            if self._timed_out:
-                raise TimeoutError(f"설치가 {int(self.timeout // 60)}분 안에 끝나지 않아 멈췄습니다 — 다시 눌러 주세요.")
-            if code != 0:
-                raise RuntimeError(explain_failure(list(tail)))
+            deadline = time.monotonic() + self.timeout
+            self._run_pip(self.command(), env, tail, log, deadline)
+            if self._repair:
+                self._set(phase="repair", message="한국어 분석기 패키지를 복구하는 중...")
+                self._run_pip(self.repair_command(), env, tail, log, deadline)
+            self._known = False
+            self._prepare_failed = False
             if not self.installed():
                 raise RuntimeError("설치는 끝났지만 불러올 수 없습니다 — 앱을 다시 시작해 주세요.")
             if self._on_installed is not None:
                 self._set(phase="prepare", percent=100, message="한국어 분석기를 준비하는 중...")
                 try:
-                    self._on_installed()
+                    if self._on_installed() is False:
+                        raise RuntimeError("한국어 분석기를 불러올 수 없습니다 — 앱을 다시 시작한 뒤 다시 설치해 주세요.")
                 except Exception:
-                    pass                      # 준비는 첫 요청이 다시 한다
+                    self._prepare_failed = True
+                    self._known = False
+                    raise
             self._set(active=False, phase="complete", percent=100, done=True, error="", message="설치 완료",
                       log_tail=list(tail)[-5:])
         except FileNotFoundError:

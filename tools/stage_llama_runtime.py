@@ -49,6 +49,7 @@ from core.llama_engine_install import (  # noqa: E402
     ENGINE_URL,
     ENGINE_VERSION,
     REQUIRED_FILES,
+    check_engine_dir as _check_engine_dir,
 )
 
 ENGINE_TARGET = Path("resources") / "naia-backend" / "runtime" / "llama" / "engine"
@@ -97,14 +98,6 @@ def _extract_zip(zip_path: Path, into: Path) -> Path:
     if not servers:
         raise RuntimeError(f"llama-server.exe not found in {zip_path}")
     return servers[0].parent
-
-
-def _check_engine_dir(directory: Path) -> None:
-    missing = [name for name in REQUIRED_FILES if not (directory / name).is_file()]
-    if not list(directory.glob("ggml-cpu-*.dll")):
-        missing.append("ggml-cpu-*.dll")
-    if missing:
-        raise RuntimeError(f"llama.cpp engine is incomplete in {directory}: missing {', '.join(missing)}")
 
 
 def stage_llama_runtime(

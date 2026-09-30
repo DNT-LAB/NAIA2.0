@@ -67,7 +67,11 @@ def snapshot_request(context, params):
     params.update(sampling_mode="anima", comfyui_sampling_mode="anima", workflow_type="unet")
     params.update(validate_request_slots(params))
     params["resolution"] = f'{params["width"]} x {params["height"]}'
-    params["_anima_lora_chain"] = copy.deepcopy(load_settings(save_root_of(context)).lora_chain)
+    settings = load_settings(save_root_of(context))
+    params["_anima_lora_chain"] = copy.deepcopy(settings.lora_chain)
+    # 예약어 표도 큐에 넣는 순간의 것 - 기다리는 동안 예약어를 다른 LoRA 로 옮겨도 이 생성은 그대로다(Codex 09-30).
+    # 표 **전체**다: 입력창의 와일드카드는 실행 직전에 풀려(_expand_input_wildcards) 지금은 어떤 예약어가 나올지 모른다.
+    params["_anima_lora_keywords"] = lora_keyword_map(settings)
     # 모델도 큐에 넣는 순간의 것 — 그 뒤 파일이 사라지면 몰래 기본 모델로 바꾸지 않고 거절한다(LoRA 와 같은 규칙)
     params["model"] = params["_anima_model"] = resolve_model(context, params.get("model"))
     params.pop("_anima_submission_attempted", None)
@@ -83,7 +87,9 @@ def prepare_managed_request(context, params):
     chain = copy.deepcopy(params.get("_anima_lora_chain", settings.lora_chain))
     # 프롬프트의 lora:예약어:강도(09-30) - 와일드카드가 다 풀린 글에서. 원문(input)은 그대로 두고 엔진 글에서만 뺀다.
     try:
-        text, prompt_loras = extract_prompt_loras(params.get("input"), lora_keyword_map(settings))
+        queued = params.get("_anima_lora_keywords")
+        keywords = queued if isinstance(queued, dict) else lora_keyword_map(settings)
+        text, prompt_loras = extract_prompt_loras(params.get("input"), keywords)
     except PromptLoraError as exc:
         raise ManagedEngineError(exc.code, exc.message, exc.token) from None
     chain = merge_prompt_loras(chain, prompt_loras)
@@ -117,6 +123,9 @@ def prepare_managed_request(context, params):
     # Do not embed stale external UI graphs as if they represented the managed request.
     params.pop("_comfyui_workflow_ui", None)
     runtime.touch()
+    # 큐 시점 예약어 표는 여기까지만 쓴다(이 뒤로는 다시 내지 않는다) - 그대로 두면 PNG 메타(naia_generation_params) ·
+    # 히스토리에 LoRA 서재 전체가 남는다. 이 그림에 실제로 켠 것은 _anima_meta.loras 에 있다.
+    params.pop("_anima_lora_keywords", None)
     params["_anima_submission_attempted"] = True
     return url
 

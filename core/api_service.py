@@ -168,6 +168,9 @@ def _get_loaded_middle_module(app_context, class_name: str):
             return module
     return None
 
+# 한 줄이 LoRA 예약어(lora:KW:강도, 관리형 ANIMA)로 시작하는가 - 프롬프트 정리에서 그 조각을 줄마다 나눈다
+_LORA_LINE_RE = re.compile(r"(?im)^[ \t]*lora:")
+
 class APIService:
     def _nai_registry_knows(self, model_key: Any) -> bool:
         """레지스트리(빌트인 + 사용자 등록)가 이 키를 아는가. 조회 실패는 False."""
@@ -493,9 +496,12 @@ class APIService:
             original_prompt = parameters['input']
             cleaned_tags = []
             for tag in original_prompt.split(','):
-                processed_tag = tag.replace('\n', '').strip()
-                if processed_tag and not processed_tag.startswith('#'):
-                    cleaned_tags.append(processed_tag)
+                # LoRA 예약어(lora:KW:강도)가 한 줄에 따로 있으면 그 조각은 줄마다 나눈다 - 개행을 지우기만 하면 앞뒤
+                # 태그에 붙어(1girllora:wc:0.8 · lora:wc:0.8smile) 못 읽거나 생성이 멈췄다(Codex 09-30). 다른 조각은 그대로.
+                for piece in (tag.split('\n') if _LORA_LINE_RE.search(tag) else (tag,)):
+                    processed_tag = piece.replace('\n', '').strip()
+                    if processed_tag and not processed_tag.startswith('#'):
+                        cleaned_tags.append(processed_tag)
 
             cleaned_prompt = ', '.join(cleaned_tags)
             if original_prompt != cleaned_prompt:

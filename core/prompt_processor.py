@@ -337,6 +337,10 @@ def _get_random_prompt_weight_raw(app_context, settings: Dict[str, Any], *, allo
     return raw
 
 
+# LoRA 예약어 조각(lora:KW:강도, 관리형 ANIMA - core/anima_engine/prompt_loras.py)은 태그가 아니라 지시어다.
+_LORA_CONTROL_RE = re.compile(r"\s*lora:", re.IGNORECASE)
+
+
 def _wrap_unweighted_main_tag_runs(tags: list, first_non_hash: int, weighted_indices: set, weight: float) -> int:
     if not tags or first_non_hash >= len(tags):
         return 0
@@ -748,6 +752,12 @@ class PromptProcessor:
             weighted_indices = set(weighted_indices) | {
                 index for index, tag in enumerate(context.main_tags)
                 if isinstance(tag, str) and tag.startswith('#')
+            }
+            # LoRA 예약어 조각도 구간을 끊는다 - 묶음 `(... :1.2)` 에 끼면 강도가 둘이 되어(lora:wc:0.8:1.2) 생성이
+            # 멈추거나, 강도를 뺀 조각(lora:wc)은 묶음의 강도를 제 강도로 읽혔다(Codex 09-30).
+            weighted_indices |= {
+                index for index, tag in enumerate(context.main_tags)
+                if isinstance(tag, str) and _LORA_CONTROL_RE.match(tag)
             }
 
         # 4-0b. non-NAI 모드: main_tags 리터럴 괄호 이스케이프 (인덱스 기반)

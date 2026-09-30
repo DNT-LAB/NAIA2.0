@@ -619,14 +619,19 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     const libEl = pick('.alr-lib');
     if (!libEl) return;
     const active = document.activeElement;
-    const typing = focusKw || Boolean(active && active.getAttribute?.('data-lora-kwinput') != null && libEl.contains?.(active));
+    const inField = Boolean(active && active.getAttribute?.('data-lora-kwinput') != null && libEl.contains?.(active));
+    const typing = focusKw || inField;
+    // 치던 자리 - 가운데를 고치는 중에 다른 저장 · 목록 다시 읽기가 끝나도 캐럿이 끝으로 튀지 않게(Codex 09-30)
+    const sel = inField && Number.isInteger(active.selectionStart)
+      ? [active.selectionStart, active.selectionEnd, active.selectionDirection || 'none'] : null;
     libEl.innerHTML = libraryHtml();
     if (!typing || !kwEdit) return;
     const input = libEl.querySelector?.('[data-lora-kwinput]');
     if (!input || input.disabled) return;
     input.focus?.();
     const end = String(input.value || '').length;
-    input.setSelectionRange?.(end, end);
+    if (sel) input.setSelectionRange?.(Math.min(sel[0], end), Math.min(sel[1], end), sel[2]);
+    else input.setSelectionRange?.(end, end);
   }
 
   function startKwEdit(name) {

@@ -89,11 +89,21 @@ export function loraKeywordRows(query, keywords) {
       cat: '', loraName: row.name}));
 }
 
-// 고른 예약어로 갈아 끼울 글 - 조각에 강도를 이미 적어 두었으면(lora:wat|:0.7) 그 강도를 살리고, 없을 때만 :1.0
-export function loraKeywordInsertion(raw, coreEnd, keyword) {
+// lora:예약어[:강도] 조각의 자리 - 예약어는 첫 콜론 뒤, 강도는 둘째 콜론 뒤. 태그 자리(tokenCoreSpan)는 쓰지 않는다:
+// 숫자 예약어(lora:123)의 `:123` 을 가중치로 벗겨 lora: 갈래에 못 들어갔다(Codex 09-30). 조각 모양이 아니면 null.
+export function loraTokenParts(raw) {
   const text = String(raw || '');
-  const tail = text.slice(Number.isInteger(coreEnd) ? coreEnd : text.length);
-  return /^\s*:\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)/.test(tail) ? `lora:${keyword}` : `lora:${keyword}:1.0`;
+  const lead = text.length - text.trimStart().length;
+  const m = /^(lora:)([^:,\s]*)(\s*:[^,]*)?\s*$/i.exec(text.slice(lead));
+  if (!m) return null;
+  const kwStart = lead + m[1].length;
+  return {start: lead, kwStart, kwEnd: kwStart + m[2].length, keyword: m[2], hasWeight: m[3] !== undefined};
+}
+
+// 고른 예약어로 갈아 끼울 글(lora:부터 예약어 끝까지를 바꾼다) - 조각에 둘째 콜론(강도)이 이미 있으면 그대로 두고,
+// 없을 때만 :1.0 을 붙인다
+export function loraKeywordInsertion(parts, keyword) {
+  return parts && parts.hasWeight ? `lora:${keyword}` : `lora:${keyword}:1.0`;
 }
 
 export function firstDefaultAutocompleteIndexForRows(rows = []) {
@@ -2003,12 +2013,15 @@ export function createTagAssistController({
     const target = options.target || acTarget || promptEdit;
     const info = options.info || getActiveTokenInfo(target);
     const allowTriggers = target !== negEdit;
-    // lora:예약어 - 목록은 이미 손에 있다(서버에 묻지 않는다). 캐럿이 강도 숫자 위면 닫는다(예약어를 치는 중이 아니다).
-    const loraKeywords = info && allowTriggers && /^lora:/i.test(info.stripped) ? readLoraKeywords() : null;
+    // lora:예약어 - 목록은 이미 손에 있다(서버에 묻지 않는다). 캐럿이 예약어 자리를 벗어나면(강도 위) 닫는다.
+    const loraParts = info && allowTriggers && /^\s*lora:/i.test(info.raw) ? loraTokenParts(info.raw) : null;
+    const loraKeywords = loraParts ? readLoraKeywords() : null;
     if (loraKeywords) {
       window.clearTimeout(acTimer);
       clearAutocompleteTranslationTimer();
-      const rows = info.caretOutsideTag ? [] : loraKeywordRows(info.stripped.slice(5), loraKeywords);
+      const caret = Number.isInteger(target?.selectionStart) ? target.selectionStart - info.start : loraParts.kwEnd;
+      const onKeyword = caret >= loraParts.kwStart && caret <= loraParts.kwEnd;
+      const rows = onKeyword ? loraKeywordRows(loraParts.keyword, loraKeywords) : [];
       if (!rows.length) { hideAutocomplete(); return; }
       lastAcQuery = info.stripped;
       acResults = rows;
@@ -3020,7 +3033,8 @@ export function createTagAssistController({
     const info = getActiveTokenInfo(target);
     if (!info) return;
     if (r._wc_type === 'lora_keyword') {
-      swapToken(target, info, loraKeywordInsertion(info.raw, info.coreEnd, r.tag));
+      const parts = loraTokenParts(info.raw);
+      if (parts) swapToken(target, {...info, coreStart: parts.start, coreEnd: parts.kwEnd}, loraKeywordInsertion(parts, r.tag));
       hideAutocomplete();
       return;
     }

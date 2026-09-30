@@ -22,6 +22,8 @@ KEYWORD_PATTERN = r"[\w.\-]+"
 # 가 표기 검사에서 걸린다, Codex 09-30)
 _PIECE = re.compile(r"(?:\\.?|[^,\n\\])+")
 _OPENERS, _CLOSERS = "([{", ")]}"
+# 조각 앞의 여는 괄호 · 공백 - 여러 겹 · 사이에 공백이 있어도(`( (lora:..`) 한 번에 벗긴다(Codex 2차 확인 09-30)
+_LEAD = re.compile(r"[\s(\[{]*")
 # 한 줄이 lora: 로 시작하는가 - 프롬프트 정리(개행 지우기)에서 그 조각을 줄마다 나눈다(split_lora_lines)
 _LORA_LINE = re.compile(r"(?im)^[ \t]*lora:")
 _TOKEN = re.compile(r"(?i)lora:(?P<kw>" + KEYWORD_PATTERN + r")(?:\s*:\s*(?P<w>[+-]?(?:\d+(?:\.\d*)?|\.\d+)))?")
@@ -63,10 +65,11 @@ def _lora_pieces(text: str):
     for match in _PIECE.finditer(text):
         piece = match.group(0)
         body = piece.strip()
-        if body.lstrip(_OPENERS).lstrip()[:5].lower() != "lora:":
+        lead = _LEAD.match(body).end()
+        if body[lead:lead + 5].lower() != "lora:":
             continue
         start = match.start() + len(piece) - len(piece.lstrip())
-        yield start, body, body[0] in _OPENERS or _depth_at(text, start) > 0
+        yield start, body, lead > 0 or _depth_at(text, start) > 0
 
 
 def _depth_at(text: str, index: int) -> int:

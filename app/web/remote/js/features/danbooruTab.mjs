@@ -29,8 +29,12 @@ const DANBOORU_GENERAL_BREAKDOWN_GROUPS = [
 // 떠 있는 창의 처음 크기(CSS px). 예전 오버레이는 화면을 통째로 덮었다 - 창은 화면 안에 들어오게 잡는다.
 const WINDOW_SIZE = {width: 1180, height: 780};
 const WINDOW_MIN = {width: 560, height: 320};
-// 웹 칸이 덮였는지 hit test 할 점들(칸 폭 · 높이의 비율). 가장자리 가까이까지 본다 - 구석을 살짝 덮은 창도 잡는다.
+// 웹 칸 격자 hit test 의 점들(칸 폭 · 높이의 비율). 층 사각형으로 못 찾는 것(body 자식 밖으로 넘쳐 나온 고정 위치
+// 자손 등)을 받는 대비다. ⚠️ 이것만으로는 칸이 클 때 점 사이가 벌어져 작은 창을 놓친다 - regionCovered 의 1) 참고.
 const COVER_STEPS = [0.01, 0.25, 0.5, 0.75, 0.99];
+// 겹친 사각형의 모서리 점은 이만큼 안쪽에서 잰다. 끝 픽셀은 칸 밖으로 떨어지고, 둥근 모서리(8~12px)의 바깥 조각은
+// 밑이 보여 창을 놓친다(반지름 R 이면 0.3R 안쪽이면 된다 - 6px 는 20px 모서리까지).
+const COVER_INSET = 6;
 
 export function createDanbooruBrowserController({
   document,
@@ -335,10 +339,44 @@ export function createDanbooruBrowserController({
   // 우측 탭 모드는 재지 않는다 - 바닥층이라 늘 떠 있는 칩 하나에도 뷰가 통째로 사라진다.
   function regionCovered(rect) {
     if (!dragWin || !viewRegion || typeof document.elementFromPoint !== 'function') return false;
+    const coveredAt = (x, y) => {
+      const hit = document.elementFromPoint(x, y);
+      return !!(hit && hit !== viewRegion && !viewRegion.contains(hit));
+    };
+    // 겹친 사각형이 같은 층(화면을 다 덮는 층이 여럿)은 한 번만 잰다. 점마다 기억하면 겹치는 층이 없는 평소에도
+    // 점 25 개를 다 기억해야 해서 오히려 비쌌다(실측) - 겹친 층이 있을 때만 드는 사각형 단위로 기억한다.
+    const sampled = new Set();
+    const right = rect.x + rect.width;
+    const bottom = rect.y + rect.height;
+    // 1) 층마다 - 떠 있는 창 · 모달 · 드롭다운 · 확인창은 body 의 최상위 자식으로 붙는다. 층과 웹 칸이 겹치는
+    //    사각형 **안**(가운데 + 안쪽 네 모서리)을 잰다. 고정 격자만 쓰던 때는 칸이 크면 점 사이가 벌어져 그 사이에
+    //    올라온 작은 창을 놓쳤다(Codex 리뷰: 2098x718 칸의 왼쪽 x=100~400 에 300x250 창 -> 뷰가 그 창을 덮고 입력을
+    //    가로챘다). 겹치지 않는 층(닫힌 층은 크기 0)은 hit test 를 하지 않는다. 겹치기만 하고 우리 창 **밑**에 있는
+    //    층(앱 화면 등)은 hit test 가 우리 칸을 돌려주므로 덮개가 아니다 - 그래서 점은 반드시 겹친 사각형 안에서 찍는다.
+    const layers = document.body ? document.body.children : [];
+    for (const layer of layers) {
+      if (layer.contains(viewRegion)) continue;          // 우리 창(과 그 조상)
+      const box = layer.getBoundingClientRect();
+      const left = Math.max(rect.x, box.left);
+      const top = Math.max(rect.y, box.top);
+      const width = Math.min(right, box.right) - left;
+      const height = Math.min(bottom, box.bottom) - top;
+      if (!(width > 0 && height > 0)) continue;
+      const area = `${Math.round(left)},${Math.round(top)},${Math.round(width)},${Math.round(height)}`;
+      if (sampled.has(area)) continue;
+      sampled.add(area);
+      const ix = Math.min(COVER_INSET, width / 2);
+      const iy = Math.min(COVER_INSET, height / 2);
+      if (coveredAt(left + width / 2, top + height / 2)
+        || coveredAt(left + ix, top + iy) || coveredAt(left + width - ix, top + iy)
+        || coveredAt(left + ix, top + height - iy) || coveredAt(left + width - ix, top + height - iy)) {
+        return true;
+      }
+    }
+    // 2) 격자 - body 자식의 사각형 밖으로 넘쳐 나온 것(크기 0 인 상자의 고정 위치 자손 등)을 받는 대비.
     for (const fy of COVER_STEPS) {
       for (const fx of COVER_STEPS) {
-        const hit = document.elementFromPoint(rect.x + rect.width * fx, rect.y + rect.height * fy);
-        if (hit && hit !== viewRegion && !viewRegion.contains(hit)) return true;
+        if (coveredAt(rect.x + rect.width * fx, rect.y + rect.height * fy)) return true;
       }
     }
     return false;

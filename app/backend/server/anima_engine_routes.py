@@ -147,6 +147,25 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
             return JSONResponse({"ok": False, "code": "LOCAL_ONLY", "error": "폴더 열기는 로컬 PC에서만 가능합니다."}, status_code=403)
         return await call(request, service_for(context).open_lora_folder, body=True, missing_404=True)
 
+    @app.get("/api/anima-engine/models")
+    async def models():
+        # PARAMS Model 줄 [Manage] - 고를 수 있는 모델 · 모델 폴더(읽기만 · 원격 기기도)
+        return await run_in_thread(service_for(context).models)
+
+    @app.post("/api/anima-engine/models/refresh")
+    async def refresh_models(request: Request):
+        # [새로고침] - 원격 기기도(폴더를 다시 보고 켜진 엔진에게 목록을 다시 묻는다). 엔진을 내리는 것은 이 PC 에서만
+        host = request.client.host if request.client else ""
+        local = _is_local_request(request) and context.setup_gate(host)[0]
+        return await call(request, lambda data: service_for(context).refresh_models(data, may_restart=local), body=True)
+
+    @app.post("/api/anima-engine/models/open-folder")
+    async def open_model_folder(request: Request):
+        # LoRA 폴더 열기와 같은 규칙(이 PC 에서만 - 설치 · 터널 문은 안 본다)
+        if not _is_local_request(request):
+            return JSONResponse({"ok": False, "code": "LOCAL_ONLY", "error": "폴더 열기는 로컬 PC에서만 가능합니다."}, status_code=403)
+        return await call(request, service_for(context).open_model_folder, body=True)
+
     @app.post("/api/anima-engine/settings")
     async def settings(request: Request):
         return await call(request, service_for(context).update_settings, local=True, body=True, what="설정 바꾸기")

@@ -288,6 +288,18 @@ def unet_catalog(settings):
     return copy.deepcopy(result)
 
 
+def unet_folders(settings):
+    """PARAMS Model 줄 [Manage] 가 보여 주고 여는 모델 폴더 — ComfyUI 가 찾는 차례 그대로(unet_roots). 없는 폴더도 싣는다."""
+    return [{"path": str(folder), "source": source, "exists": Path(folder).is_dir()}
+            for folder, source in unet_roots(settings, _receipt_unet(settings))]
+
+
+def forget_unet_catalog():
+    """[새로고침] — 2초 캐시를 비워 다음 훑기가 폴더를 다시 본다(하위 폴더에 넣은 파일은 윗 폴더의 수정 시각을 안 바꾼다)."""
+    with LOCK:
+        _UNET_CACHE.clear()
+
+
 def _scan_unet_catalog(roots):
     available, skipped, names, files = [], [], set(), set()
     for root, source in roots:

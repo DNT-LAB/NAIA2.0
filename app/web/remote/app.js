@@ -2297,7 +2297,7 @@ Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorakw2'),
     animaLoraPanel = createAnimaLoraPanel({
       document, window, broker: dragBrokerFor(document, window),
       onOpenSetup: () => { openApiPopup(); switchSetupTab('anima'); },
-      onStateChange: () => moduleLauncherControl?.updateState(),
+      onStateChange: () => { moduleLauncherControl?.updateState(); syncAnimaModelManageButton(); },
       // PNG 칸 · [히스토리] 후보에 올리면 크게 - Artist Thumbnail(리모컨)의 확대 보기 그대로(창 옆, 같은 자리 규칙)
       zoom: {
         show: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
@@ -2309,6 +2309,20 @@ Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorakw2'),
   })
   .catch(error => {
     console.error('Failed to initialize ANIMA LoRA panel', error);
+  });
+// ANIMA 모드 PARAMS › Model 줄의 [Manage](사용자 지정 09-30) — 모델 폴더 열기 · 내장 ComfyUI 새로고침으로 모델 갱신.
+// 단추는 관리형 ANIMA 일 때만 보인다(syncAnimaModelManageButton — params 적용부 · LoRA 창의 상태 변화가 부른다).
+let animaModelManage = null;
+import('./js/features/animaModelManage.mjs?v=20260930-model1')
+  .then(({createAnimaModelManage}) => {
+    animaModelManage = createAnimaModelManage({document, window, showToast,
+      // 새로 찾음 · 사라짐의 기준 = 지금 Model 칸에 보이는 목록
+      getModelOptions: () => Array.from(paramEls.model?.options || []).map(option => option.value),
+      // 새로고침 뒤 Model 칸 목록을 새로 받는다(sync = 활성 모드 옵션 새로 고침 + 스키마 재전송) — ANIMA 설정의 모델 폴더와 같은 길
+      onModelsChanged: () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('sync'); }});
+  })
+  .catch(error => {
+    console.error('Failed to initialize ANIMA model manage', error);
   });
 // 관리형 ANIMA — 엔진이 켜지는 동안 결과 칸 아래쪽에 ComfyUI 출력을 보이는 임시 콘솔(사용자 지정 09-29). 켜지면 스스로
 // 닫힌다. 여는 것은 생성 쪽 감시(watchAnimaEngineStart)가 '엔진 켜는 중' 을 알아챌 때.
@@ -5623,6 +5637,7 @@ function updateParams(m) {
   $('webuiParams').style.display = mode === 'WEBUI' ? '' : 'none';
   $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
   if (animaLoraPanel) animaLoraPanel.setMode(mode);   // 관리형 ANIMA 인지 확인 — 런처가 ANIMA 전용 도구를 보일지 정한다
+  syncAnimaModelManageButton();                        // Model 줄 [Manage] — 관리형 ANIMA 일 때만
   if (
     (mode === 'WEBUI' || mode === 'COMFYUI')
     && ('resolution_preset_enabled' in m || 'resolution_preset' in m)
@@ -11601,6 +11616,21 @@ function openNaiModelManager() {
 
 function closeNaiModelManager() {
   if (naiModelManagerPanel) naiModelManagerPanel.close();
+}
+
+/** ANIMA Model 줄 [Manage] 를 관리형 ANIMA 일 때만 보인다 — 아니게 되면 열린 창도 닫는다 */
+function syncAnimaModelManageButton() {
+  const btn = document.getElementById('animaModelManageBtn');
+  if (!btn) return;
+  const on = !!animaLoraPanel?.isManaged?.();
+  btn.hidden = !on;
+  if (!on && animaModelManage?.isOpen()) animaModelManage.close();
+}
+
+function openAnimaModelManage(event) {
+  if (!animaModelManage || !animaLoraPanel?.isManaged?.()) return;
+  if (!animaModelManage.isOpen()) closeAuxiliaryPopups(null);
+  animaModelManage.open(event?.currentTarget || document.getElementById('animaModelManageBtn'));
 }
 
 // ---- 모델 변경 시 프리셋 보호 ----------------------------------------------

@@ -638,6 +638,9 @@
                 <button type="button" class="param-manage-btn mode-nai"
                         onclick="openNaiModelManager()">Add / Manage Models</button>
                 <select class="param-select" id="pModel" onchange="onModelSelectChange(this.value)"></select>
+                <!-- 관리형 ANIMA 전용(09-30) — 모델 폴더 열기 · 내장 ComfyUI 새로고침. 보이기 = app.js syncAnimaModelManageButton -->
+                <button type="button" class="param-manage-btn" id="animaModelManageBtn" hidden
+                        onclick="openAnimaModelManage(event)">Manage</button>
               </div>
             </div>
             <div class="param-row">
@@ -1521,6 +1524,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260930-boost2"></script>
+<script src="app.js?v=20260930-model1"></script>
 </body>
 </html>

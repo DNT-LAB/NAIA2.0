@@ -91,6 +91,9 @@
         {"method": "GET", "path": "/api/anima-engine/loras/history", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/anima-engine/loras/thumb/history", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/anima-engine/loras/open-folder", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/anima-engine/models", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/anima-engine/models/refresh", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/anima-engine/models/open-folder", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/anima-engine/settings", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/anima-engine/diagnostics", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/anima-engine/engine/log", "smoke": "non_destructive"}

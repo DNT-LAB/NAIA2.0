@@ -11,10 +11,10 @@ from threading import RLock
 from core.anima_engine import diagnostics, integration, manifest
 from core.anima_engine.install import AnimaInstallJob, adopt_installed_engine, app_version, validate_root
 from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK, TRACE_CHARS,
-                                       get_runtime, read_log_since, register_runtime, reserve_vram)
-from core.anima_engine.settings import (consent_agreed, license_bundle, license_text, load_settings, lora_catalog,
-                                        quick_receipt, read_json, record_consent, save_lora_chain, save_settings,
-                                        unet_catalog)
+                                       engine_unet_names, get_runtime, read_log_since, register_runtime, reserve_vram)
+from core.anima_engine.settings import (consent_agreed, forget_unet_catalog, license_bundle, license_text, load_settings,
+                                        lora_catalog, quick_receipt, read_json, record_consent, save_lora_chain,
+                                        save_settings, unet_catalog, unet_folders)
 from core.anima_engine.settings import (delete_lora_thumb, lora_folder, lora_thumb, lora_triggers,
                                         png_from_image, put_lora_thumb, read_lora_thumb, set_lora_keyword)
 from core.anima_engine.profile import ProfileError
@@ -295,6 +295,60 @@ class AnimaEngineService:
         folder = lora_folder(load_settings(self.save_root), body.get("name"))
         os.startfile(str(folder))
         return {"ok": True, "path": str(folder)}
+
+    # ---- PARAMS Model 줄 [Manage](사용자 지정 09-30) — 모델 폴더 열기 · 내장 ComfyUI 새로고침으로 모델 갱신 ----
+
+    def models(self):
+        """지금 고를 수 있는 모델 · 뺀 파일 · 모델 폴더(ComfyUI 가 찾는 차례). 훑기만 한다(엔진은 안 묻는다)."""
+        settings = load_settings(self.save_root)
+        catalog = unet_catalog(settings)
+        return {"ok": True, "models": [x["name"] for x in catalog["available"]], "skipped": catalog["skipped"],
+                "folders": unet_folders(settings)}
+
+    def refresh_models(self, body=None, *, may_restart=False):
+        """[새로고침] — 폴더를 다시 훑고, 엔진이 켜져 있으면 내장 ComfyUI 에게도 목록을 다시 읽힌다(engine_unet_names).
+        엔진을 켜지는 않는다 — 꺼져 있으면 다음 생성이 켤 때 새 목록을 읽는다. 그래도 엔진이 못 본 모델이 있으면(켠 뒤 폴더
+        설정이 바뀌었다 등) 이 PC 에서 · 쉬고 있을 때만 엔진을 내린다(may_restart) — 다음 생성이 새 목록으로 켠다.
+        새로 찾음 · 사라짐의 기준 = 화면의 Model 칸에 지금 보이는 목록(body.known). 없으면 훑기 전 캐시 — 하위 폴더를
+        만들면 윗 폴더 시각이 바뀌어 캐시가 이미 새 파일을 담으므로 기준으로는 화면 목록이 맞다."""
+        settings = load_settings(self.save_root)
+        known = (body or {}).get("known")
+        if isinstance(known, list):
+            before = {str(name) for name in known[:4096] if isinstance(name, str)}
+        else:
+            before = {x["name"] for x in unet_catalog(settings)["available"]}
+        forget_unet_catalog()
+        catalog = unet_catalog(settings)
+        names = [x["name"] for x in catalog["available"]]
+        engine = {"state": "stopped", "checked": False, "missing": [], "restarted": False}
+        with REGISTRY_LOCK:
+            rt = REGISTRY.get(str(Path(settings.engine_root).resolve())) if settings.engine_root else None
+        if rt is not None and rt.status()["state"] == "running":
+            engine["state"] = "running"
+            try:
+                listed = engine_unet_names(rt.url)
+                engine["checked"] = True
+                engine["missing"] = [name for name in names if name not in listed]
+            except Exception as exc:          # 묻지 못했다 - 목록은 그대로 돌려주고 까닭만 싣는다
+                engine["error"] = f"{type(exc).__name__}: {exc}"
+            if engine["missing"] and may_restart and not rt.queue_busy():
+                rt.stop()
+                engine["restarted"] = True
+        return {"ok": True, "models": names, "added": [name for name in names if name not in before],
+                "removed": sorted(before - set(names)), "skipped": catalog["skipped"],
+                "folders": unet_folders(settings), "engine": engine}
+
+    def open_model_folder(self, body):
+        """모델 폴더를 탐색기로 — 화면이 보낸 번호(models 의 folders 차례)만 받는다(경로를 받지 않는다)."""
+        folders = unet_folders(load_settings(self.save_root))
+        index = int(body.get("index", 0))
+        if not 0 <= index < len(folders):
+            raise ProfileError("PARAM_OUT_OF_RANGE", field="index")
+        folder = folders[index]
+        if not folder["exists"]:
+            raise ManagedEngineError("PATH_INVALID", "모델 폴더가 없습니다: " + folder["path"])
+        os.startfile(folder["path"])
+        return {"ok": True, "path": folder["path"]}
 
 
 def licenses_payload():

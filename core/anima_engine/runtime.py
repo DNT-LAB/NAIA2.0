@@ -349,6 +349,15 @@ def preflight(url, *, get=requests.get):
         raise ManagedEngineError("PREFLIGHT_SCHEMA_MISMATCH", detail="SpectrumSPDKSampler inputs")
 
 
+def engine_unet_names(url, *, get=requests.get):
+    """켜진 내장 ComfyUI 가 지금 보는 diffusion_models 이름들. 묻는 순간 ComfyUI 가 폴더를 다시 본다(folder_paths 는
+    폴더 · 하위 폴더의 수정 시각으로 목록 캐시를 버린다 - 0.22.0) — PARAMS Model 줄 [Manage] › [새로고침]."""
+    from core.headless_api_option_service import extract_combo_options
+    response = get(url + "/object_info/UNETLoader", timeout=10)
+    response.raise_for_status()
+    return set(extract_combo_options(response.json()["UNETLoader"]["input"]["required"]["unet_name"]))
+
+
 def smoke(url, *, service_factory=None, clock=time.monotonic):
     from core.comfyui_service import ComfyUIService
     service = (service_factory or ComfyUIService)(url)

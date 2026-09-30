@@ -378,6 +378,42 @@ def _wait_for_active_websocket(client: CdpClient, timeout: float) -> dict[str, A
     raise TimeoutError(f"active websocket did not become open; last state={last_state}")
 
 
+POOL_READY_MAX_WAIT_S = 120.0
+
+
+def _wait_for_pool_ready(client: CdpClient, timeout: float) -> dict[str, Any]:
+    """검색 풀을 적재하는 동안(poolLoad) 앱은 Random 을 **조용히 막는다**(토스트만 띄운다). 첫 기동 · 새로고침 직후
+    소켓이 열리는 순간부터 약 2초 걸린다(2026-10-01 실측: 새 user-data 첫 기동에서 7.1초에 걸려 8.9초에 풀림). 스모크는
+    소켓이 열리자마자 Random 을 **한 번** 보내고 600초를 기다려, 그 2초에 걸리면 게이트가 떨어졌다(09-30~10-01 게이트
+    4회 중 3회 - 같은 빌드를 풀이 풀린 뒤에 보내면 3/3 통과).
+    풀릴 때까지 기다렸다가 보낸다. 끝내 안 풀리면 ready=False 와 그 까닭을 남긴다 - 검사를 약하게 하지 않는다
+    (뒤의 Random 검사가 그대로 떨어진다).
+    """
+    started = time.monotonic()
+    deadline = started + max(1.0, min(float(timeout), POOL_READY_MAX_WAIT_S))
+    last: dict[str, Any] = {}
+    while True:
+        state = client.evaluate("""
+(() => {
+  /* __naia_cdp_pool_ready_probe */
+  try {
+    if (typeof poolLoad === "undefined") return {known: false, active: false, phase: null};
+    return {known: true, active: !!poolLoad.isActive(), phase: poolLoad.curPhase ? poolLoad.curPhase() : null};
+  } catch (error) {
+    return {known: false, active: false, phase: null, error: String(error)};
+  }
+})()
+""") or {}
+        last = state
+        waited_ms = round((time.monotonic() - started) * 1000)
+        if not state.get("active"):
+            return {"ready": True, "waitedMs": waited_ms, "poolLoadKnown": bool(state.get("known")), "reason": ""}
+        if time.monotonic() >= deadline:
+            return {"ready": False, "waitedMs": waited_ms, "poolLoadKnown": True, "phase": last.get("phase"),
+                    "reason": f"search pool still loading after {waited_ms} ms"}
+        time.sleep(0.25)
+
+
 def _wait_for_result_image_input_surface(client: CdpClient, timeout: float) -> dict[str, Any]:
     started = time.monotonic()
     deadline = time.monotonic() + timeout
@@ -1182,8 +1218,11 @@ def _collect_runtime_checks(
     run_check("storage", lambda: _verify_storage_persistence(client, timeout))
     run_check("shellStateAfterReload", lambda: _wait_for_shell_state(client, timeout))
     run_check("activeWebsocketBeforeActions", lambda: _wait_for_active_websocket(client, timeout))
+    # 검색 풀 잠금 중에는 Random 이 조용히 막힌다 - 풀린 뒤에 보낸다(_wait_for_pool_ready 참고).
+    run_check("poolReadyBeforeActions", lambda: _wait_for_pool_ready(client, timeout))
     run_check("actionDispatch", lambda: _measure_action_dispatch(client))
     run_check("installManager", lambda: _verify_install_manager_surface(client))
+    run_check("poolReadyBeforeRandom", lambda: _wait_for_pool_ready(client, timeout))
     run_check("randomPromptRoundTrip", lambda: _measure_random_prompt_roundtrip(client, timeout))
     run_check("websocketReconnect", lambda: _verify_websocket_reconnect(client, timeout))
     run_check("activeWebsocketAfterReconnect", lambda: _wait_for_active_websocket(client, timeout))

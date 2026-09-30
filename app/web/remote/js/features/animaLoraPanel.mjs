@@ -26,6 +26,7 @@
 const API = '/api/anima-engine';
 const STYLE_ID = 'animaLoraStyle';
 const BADGE_ID = 'badgeAnimaLora';   // 런처의 LoRA 항목 배지(카테고리 칩 "L{켜진 수}")
+const DOCK_FOLD_KEY = 'naia.animaLoraDock.folded';   // 프롬프트 밑 LoRA 줄을 접었는가(기기마다)
 const MAX_CHAIN = 32;                // 계약서 §3.3 — 요청 크기 보호용 상한(임의의 4개 같은 상한은 두지 않는다)
 const STRENGTH_MIN = -2;
 const STRENGTH_MAX = 2;
@@ -104,6 +105,10 @@ const STYLE = `
 .anima-lora-dock .ald-head { display: flex; align-items: center; gap: 8px; font-size: 9.5px; letter-spacing: 0.4px;
   color: var(--text-dim); }
 .anima-lora-dock .ald-head b { color: var(--accent-glow); font-weight: 600; }
+.anima-lora-dock .ald-fold { display: inline-flex; align-items: center; gap: 5px; padding: 0; background: none; border: 0;
+  font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer; }
+.anima-lora-dock .ald-fold:hover { color: var(--text-primary); }
+.anima-lora-dock .ald-caret { width: 8px; font-size: 9px; }
 .anima-lora-dock .ald-edit { margin-left: auto; height: 18px; padding: 0 8px; font-family: var(--font-mono); font-size: 9.5px;
   color: var(--text-muted); background: rgba(96,120,255,0.1); border: 1px solid rgba(130,150,255,0.3); border-radius: 5px;
   cursor: pointer; }
@@ -213,6 +218,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let popup = null;
   let onResize = null;
   let dock = null;           // 프롬프트 밑 LoRA 줄 - 켜진 관리형 체인이 있을 때만 보인다
+  let dockFolded = readDockFold();   // 그 줄을 머리(LoRA 켜짐 수 · [편집])만 남기고 접었는가
   let dragging = false;      // 강도 슬라이더를 끄는 중 - 그동안 줄을 다시 그리지 않는다(손잡이가 사라진다)
   let dragPointer = null;    // 끌기를 시작한 포인터(pointerId) - 다른 포인터(펜 hover · 다른 손가락)는 이 끌기를 끝내지 않는다
   let wheelTimer = 0;
@@ -472,8 +478,18 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     return dock;
   }
 
+  // 접기(사용자 지정 09-30) - 기기마다 기억한다(localStorage). 못 쓰는 브라우저면 이번 화면에서만 접힌다.
+  function readDockFold() {
+    try { return win.localStorage?.getItem(DOCK_FOLD_KEY) === '1'; } catch (_) { return false; }
+  }
+
+  function saveDockFold() {
+    try { win.localStorage?.setItem(DOCK_FOLD_KEY, dockFolded ? '1' : '0'); } catch (_) { /* 저장 못 해도 접힌다 */ }
+  }
+
   // 프롬프트 밑 LoRA 줄(사용자 지정 09-29) - 관리형 ANIMA 이고 체인이 있을 때만. 켜기 · 강도만 여기서, 순서 · 넣기 ·
   // 빼기는 창([편집]). 체인은 창과 하나다(같은 save) - 어느 쪽에서 바꿔도 둘 다 다시 그린다.
+  // 머리 줄(LoRA n / m)을 누르면 접고 편다(09-30) - 접으면 줄들을 빼고, 입력칸이 비워 둔 아래도 그만큼 준다.
   function paintDock(view = chain) {
     const el = ensureDock();
     if (!el) return;
@@ -487,9 +503,15 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     if (dragging) return;
     const on = view.filter(item => item.enabled !== false).length;
     const focused = focusKey(el);
-    el.innerHTML = `<div class="ald-head">LoRA <b>${on} / ${view.length}</b>
+    // 접힌 동안 무엇이 켜져 있는지는 머리 줄에 올리면 보인다
+    const onNames = view.filter(item => item.enabled !== false)
+      .map(item => `${baseName(item.name)} ${fmtStrength(shownStrength(item))}`).join(', ');
+    const foldTitle = dockFolded ? `펼치기${onNames ? ` — 켜짐: ${onNames}` : ''}` : '접기';
+    el.innerHTML = `<div class="ald-head"><button type="button" class="ald-fold" data-lora-act="fold"
+          aria-expanded="${dockFolded ? 'false' : 'true'}" title="${esc(foldTitle)}"><span class="ald-caret">${
+          dockFolded ? '▸' : '▾'}</span>LoRA <b>${on} / ${view.length}</b></button>
         <button type="button" class="ald-edit" data-lora-act="open" title="LoRA 창 - 넣기 · 빼기 · 순서">편집</button></div>
-      ${view.map((item, i) => `<div class="ald-row${item.enabled === false ? ' off' : ''}">
+      ${dockFolded ? '' : view.map((item, i) => `<div class="ald-row${item.enabled === false ? ' off' : ''}">
         <input type="checkbox" data-lora-on="${i}"${item.enabled === false ? '' : ' checked'}${busy ? ' disabled' : ''}
                title="켜기 / 끄기">
         <span class="ald-name" title="${esc(item.name)}">${esc(baseName(item.name))}</span>
@@ -1036,6 +1058,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       const which = act.getAttribute('data-lora-act');
       if (which === 'close') close();
       else if (which === 'open') open();
+      else if (which === 'fold') { dockFolded = !dockFolded; saveDockFold(); paintDock(); }
       else if (which === 'setup') onOpenSetup();
       else if (which === 'folder') openFolder('');
       else if (which === 'reload' && !busy) { error = ''; refresh(); }

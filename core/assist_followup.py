@@ -46,12 +46,16 @@ def split_main(main: str, sentence: str = "", is_tag: Callable[[str], bool] | No
     text = ", ".join(p.strip() for p in str(main or "").split("\n") if p.strip())
     known = " ".join(str(sentence or "").split())
     pieces = lambda s: [p.strip() for p in s.split(",") if p.strip()]   # noqa: E731
-    if known and known in text:
-        # 받은 문장이 그대로 있다 — 그 앞뒤가 태그다(문장 뒤에 덧붙인 TV, monochrome 을 문장으로 삼켜 태그 필터를 비켜 갔다 —
-        # Codex H1 ①)
-        at = text.rfind(known)
-        return pieces(text[:at]) + pieces(text[at + len(known):]), known
     parts = pieces(text)
+    known_parts = pieces(known)
+    if known_parts:
+        # 받은 문장이 쉼표 조각 **통째로** 그대로 있다 — 그 앞뒤가 태그다(문장 뒤에 덧붙인 TV, monochrome 을 문장으로 삼켜 태그
+        # 필터를 비켜 갔다 — Codex H1 ①). 조각 단위로만 본다: 부분 문자열로 보면 늘려 쓴 문장(A maid girl sleeps peacefully.)의
+        # 늘린 말이 태그로 떨어졌다(Codex H2 ②) — 그런 글은 아래 '고친 문장' 규칙으로
+        n = len(known_parts)
+        at = next((i for i in range(len(parts) - n, -1, -1) if parts[i:i + n] == known_parts), None)
+        if at is not None:
+            return parts[:at] + parts[at + n:], ", ".join(known_parts)
     ended = lambda i: bool(re.search(r"[.!?]$", parts[i]))        # noqa: E731
 
     def run_from(i: int) -> tuple[list[str], str]:

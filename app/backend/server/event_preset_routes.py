@@ -197,7 +197,11 @@ def _preset_source_to_generation_command(
     prompt_run_id_override: str = "",
 ) -> dict[str, Any]:
     source_row_data = result.get("sourceRow") if isinstance(result.get("sourceRow"), dict) else {}
-    if not source_row_data.get("general"):
+    # Assist [생성] 은 태그를 지우고 문장만 남긴 결과도 보낸다 — general 은 비고 문장(source_row['sentence'])만 있다(09-30,
+    # 등급 태그도 general 밖). 파이프라인을 거친 프롬프트가 있으면 그것을 쓴다(Codex H2)
+    sentence = source_row_data.get("sentence")
+    has_sentence = isinstance(sentence, str) and bool(sentence.strip())
+    if not source_row_data.get("general") and not (has_sentence and str(prompt_override or "").strip()):
         raise ValueError("Preset prompt source is empty.")
     request_id = str(result.get("requestId") or uuid.uuid4().hex)
     result["requestId"] = request_id

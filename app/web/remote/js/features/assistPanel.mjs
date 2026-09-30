@@ -173,6 +173,59 @@ function saveHistory(list) {
   }
 }
 
+/** 프롬프트 비교 열쇠 — 가중치(1.2::x:: · (x:1.2) · [x]) · 대소문자 · 밑줄 · 관계 접두(source# · target# · mutual#)를 뗀 것.
+ *  서버 assist_v2_service._prompt_key 와 같은 규칙(Suspicious 가 이미 실린 태그를 다시 보이지 않게 — Codex V7) */
+function promptKey(tag) {
+  let s = String(tag || '').trim();
+  for (let i = 0; i < 4; i += 1) {
+    const nai = s.match(/^-?\d+(?:\.\d+)?\s*::([\s\S]*?)(?:::)?$/);
+    const sd = s.match(/^\(([\s\S]*?)(?::\s*-?\d+(?:\.\d+)?)?\)$/);
+    if (nai) s = nai[1].trim();
+    else if (sd) s = sd[1].trim();
+    else if (s.length > 1 && s[0] === '[' && s[s.length - 1] === ']') s = s.slice(1, -1).trim();
+    else break;
+  }
+  return s.toLowerCase().replace(/_/g, ' ').split(/\s+/).filter(Boolean).join(' ').replace(/^(?:source|target|mutual)#/, '');
+}
+
+/** 메인 · 캐릭터 칸에 지금 실린 태그의 열쇠 */
+function presentKeys(prompt) {
+  const parts = [prompt?.main, ...((prompt?.characters) || []).map(c => c?.prompt)];
+  return new Set(parts.flatMap(part => String(part || '').split(',')).map(promptKey).filter(Boolean));
+}
+
+/** 보일 Suspicious — 지금 칸에 실린 것(이어서 질문이 되살렸거나 손으로 넣은 것)은 빼고, 태그마다 하나 */
+function visibleSuspicious(r) {
+  const shown = presentKeys(r?.prompt);
+  const seen = new Set();
+  return (r?.suspicious || []).filter(s => {
+    const key = promptKey(s?.tag);
+    if (!key || shown.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** 메인 글에 태그 하나를 끝의 자연어 문장 **앞**에. 알려진 문장(다듬기 · 이어서 질문 · 직접 모드)이 없거나 고쳐졌으면
+ *  문장처럼 보이는 첫 쉼표 조각(마침표로 끝남 · 대문자로 시작하는 세 낱말 이상 · 다섯 낱말 이상) 앞에. 문장뿐이면 맨 앞 */
+function insertBeforeSentence(text, tag, sentence) {
+  const body = String(text || '').replace(/[\s,]+$/, '');
+  const known = String(sentence || '').trim();
+  let at = known ? body.lastIndexOf(known) : -1;
+  if (at < 0) {
+    let pos = 0;
+    for (const seg of body.split(',')) {
+      const s = seg.trim();
+      const words = s.split(/\s+/).filter(Boolean).length;
+      if (s && (/[.!?]$/.test(s) || (/^[A-Z]/.test(s) && words >= 3) || words >= 5)) { at = pos + seg.indexOf(s); break; }
+      pos += seg.length + 1;
+    }
+  }
+  if (at < 0) return body ? `${body}, ${tag}` : tag;
+  const head = body.slice(0, at).replace(/[\s,]+$/, '');
+  return head ? `${head}, ${tag}, ${body.slice(at)}` : `${tag}, ${body.slice(at)}`;
+}
+
 function clampCount(value, fallback) {
   const n = Number(value);
   return Number.isInteger(n) && n >= 0 && n <= 9 ? n : fallback;
@@ -866,6 +919,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     // 새 결과 = 이전 결과(이름 · 인원 · 관계) + 고친 프롬프트 · 풀. 다듬기 · 되살리기 줄은 이전 검색의 것이라 지운다(서버가 null)
     result = { ...prev, ...data, names: prev.names, suggested_names: prev.suggested_names, persons: prev.persons,
       relations: prev.relations, direct: prev.direct };
+    result.suspicious = visibleSuspicious(result);   // 이어서 질문이 되살린 태그는 칩에서 뺀다(Codex V7)
     resultMode = 'followup';
     render();
     paintBusy();
@@ -1067,27 +1121,25 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
 
   /** Suspicious — 추천에 들어갔다가 빠진 태그(다듬기 · 뜻 검사 · 가족 게이트). 눌러서 메인에 다시 넣는다(사용자 지정 09-30) */
   function suspiciousHtml(r) {
-    const items = (r.suspicious || []).filter(s => s && s.tag);
+    const items = visibleSuspicious(r);
     if (!items.length) return '';
     return `<div class="as-sus"><span class="as-k" title="추천에 들어갔다가 빠진 태그 — 눌러서 메인에 다시 넣습니다">Suspicious</span>${
       items.map(s => `<button type="button" class="as-sus-chip" data-as-sus="${esc(s.tag)}"
         title="${esc(s.why || '')} — 눌러서 메인에 넣기">${esc(s.tag)}</button>`).join('')}</div>`;
   }
 
-  /** Suspicious 칩 — 메인 칸에 다시 넣는다. 메인 끝의 문장(다듬기)이 있으면 그 앞에. 넣은 칩은 결과 · 기록에서도 뺀다 */
+  /** Suspicious 칩 — 메인 칸에 다시 넣는다(끝의 문장 앞에). 이미 실렸으면(메인 · 캐릭터 칸) 넣지 않고 칩만 뺀다 */
   function restoreSuspicious(tag) {
     const box = body.querySelector('[data-as-edit="main"]');
     if (!result || !box || box.readOnly || !tag) return;
-    const have = oneLine(box.value).split(',').map(t => t.trim().toLowerCase());
-    if (!have.includes(tag.toLowerCase())) {
-      const text = box.value.replace(/[\s,]+$/, '');
-      const sentence = String(result.refine?.sentence || '').trim();
-      const at = sentence ? text.lastIndexOf(sentence) : -1;
-      box.value = at > 0 ? `${text.slice(0, at).replace(/[\s,]+$/, '')}, ${tag}, ${text.slice(at)}`
-        : (text ? `${text}, ${tag}` : tag);
+    if (!presentKeys(result.prompt).has(promptKey(tag))) {
+      const sentence = result.followup?.sentence || result.refine?.sentence || result.direct_info?.sentence || '';
+      box.value = insertBeforeSentence(box.value, tag, sentence);
       box.dispatchEvent(new Event('input', { bubbles: true }));   // 결과 · 기록 저장 · 단추 · 높이는 칸의 input 이 맡는다
     }
-    result.suspicious = (result.suspicious || []).filter(s => s.tag !== tag);
+    result.suspicious = (result.suspicious || []).filter(s => promptKey(s.tag) !== promptKey(tag));
+    clearTimeout(histTimer);                  // 넣지 않고 칩만 뺀 때도 기록에 — 새로고침하면 칩이 되살아났다(Codex V7)
+    histTimer = setTimeout(() => saveHistory(history), 400);
     const chip = [...body.querySelectorAll('[data-as-sus]')].find(b => b.dataset.asSus === tag);
     const row = chip?.closest('.as-sus');
     chip?.remove();

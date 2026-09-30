@@ -1213,15 +1213,28 @@ def _placed_tags(merged: Any) -> list[str]:
                               + [r[1] for r in merged.relations]))
 
 
+_RELATION_PREFIX = re.compile(r"^(?:source|target|mutual)#")
+
+
+def _prompt_key(tag: Any) -> str:
+    """최종 프롬프트 비교 열쇠 — en_key(가중치 1.2::x:: · (x:1.2) · [x] · 대소문자 · 밑줄) + 관계 접두(source# · target# ·
+    mutual#). 화면 assistPanel.mjs 의 promptKey 와 같은 규칙이다."""
+    from core.assist_english import en_key
+
+    return _RELATION_PREFIX.sub("", en_key(tag))
+
+
 def _still_missing(items: list[dict[str, str]], prompt: dict[str, Any]) -> list[dict[str, str]]:
-    """빠진 태그 중 최종 프롬프트(메인 · 캐릭터 칸)에 **없는** 것만 — 다른 길로 도로 실렸으면 의심할 것이 없다. 태그마다 하나."""
+    """빠진 태그 중 최종 프롬프트(메인 · 캐릭터 칸)에 **없는** 것만 — 다른 길로 도로 실렸으면 의심할 것이 없다. 태그마다 하나.
+    비교는 _prompt_key(적힌 1.2::belly:: 나 캐릭터 칸의 source#hugging 도 실린 것이다 — Codex V7)."""
     parts = [str(prompt.get("main") or "")] + [str((c or {}).get("prompt") or "") for c in prompt.get("characters") or []]
-    shown = {t.strip().lower() for part in parts for t in part.split(",")}
+    shown = {_prompt_key(t) for part in parts for t in part.split(",")}
     out: dict[str, dict[str, str]] = {}
     for item in items:
         tag = str(item.get("tag") or "").strip()
-        if tag and tag.lower() not in shown and tag not in out:
-            out[tag] = {"tag": tag, "why": str(item.get("why") or "")}
+        key = _prompt_key(tag)
+        if key and key not in shown and key not in out:
+            out[key] = {"tag": tag, "why": str(item.get("why") or "")}
     return list(out.values())
 
 

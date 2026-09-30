@@ -2073,7 +2073,10 @@ function adjustZoom(webContents, direction) {
   try {
     webContents.setZoomFactor(next);
   } catch (_error) {}
-  if (main) saveZoomFactor(next);
+  if (main) {
+    saveZoomFactor(next);
+    applyDanbooruViewBounds();
+  }
 }
 
 function resetZoom(webContents) {
@@ -2081,7 +2084,10 @@ function resetZoom(webContents) {
   try {
     webContents.setZoomFactor(1.0);
   } catch (_error) {}
-  if (isMainWebContents(webContents)) saveZoomFactor(1.0);
+  if (isMainWebContents(webContents)) {
+    saveZoomFactor(1.0);
+    applyDanbooruViewBounds();
+  }
 }
 
 ipcMain.on("naia:zoom-by", (event, direction) => {
@@ -2166,6 +2172,7 @@ function createMainWindow() {
   mainWindow.on("closed", () => {
     danbooruView = null;
     danbooruViewAttached = false;
+    danbooruCssRect = null;
     danbooruWarmupState = "idle";
     mainWindow = null;
   });
@@ -2273,6 +2280,9 @@ function appIconPath() {
 // they fall back to the JSON query/Load path in danbooruTab.mjs.
 let danbooruView = null;
 let danbooruViewAttached = false;
+// 렌더러가 마지막으로 알려 준 웹 칸 자리(**CSS px** + 가림 여부). 배율이 바뀌면 이것을 새 배율로 다시 넣는다 -
+// 렌더러의 다음 보고를 기다리지 않는다(떠 있는 창은 배율이 바뀌어도 CSS 자리가 그대로라 보고할 것이 없을 수 있다).
+let danbooruCssRect = null;
 const DANBOORU_HOSTS = new Set(["danbooru.donmai.us", "www.danbooru.donmai.us"]);
 const DANBOORU_POST_RE = /danbooru\.donmai\.us\/posts\/(\d+)/;
 const DANBOORU_HOME_URL = "https://danbooru.donmai.us/";
@@ -2348,13 +2358,65 @@ function resolveDanbooruUrl(text) {
   }
 }
 
-function roundRect(rect) {
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+// 렌더러는 웹 칸 자리를 getBoundingClientRect 로 재서 **CSS px** 로 보낸다. 그런데 WebContentsView.setBounds 는
+// 창 내용 영역의 **DIP** 를 받는다. 앱 화면 배율(Ctrl+휠 · Ctrl+± · Ctrl+0 · fit-width)이 1.0 이 아니면
+// 1 CSS px = 배율 DIP 라서, 그대로 넣으면 배율 1.2 에서는 뷰가 자리보다 작고 왼쪽 위로 쏠리고, 0.8 에서는 자리를
+// 넘쳐 오른쪽 태그 칸을 덮었다(사용자 제보 2026-09-30. 실측 - 배율 1.2: 자리 DIP 20,172 771x606 <- 뷰 17,144
+// 642x505 / 배율 0.8: 자리 13,115 893x670 <- 뷰 17,144 1116x837).
+// 모서리를 따로 반올림한다 - 폭 · 높이를 따로 반올림하면 오른쪽 · 아래 끝이 1px 씩 어긋난다.
+function danbooruViewBounds(rect, zoomFactor) {
+  const zoom = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1;
+  const x = finiteNumber(rect && rect.x);
+  const y = finiteNumber(rect && rect.y);
+  const width = Math.max(0, finiteNumber(rect && rect.width));
+  const height = Math.max(0, finiteNumber(rect && rect.height));
+  const left = Math.round(x * zoom);
+  const top = Math.round(y * zoom);
   return {
-    x: Math.round(Number(rect && rect.x) || 0),
-    y: Math.round(Number(rect && rect.y) || 0),
-    width: Math.max(0, Math.round(Number(rect && rect.width) || 0)),
-    height: Math.max(0, Math.round(Number(rect && rect.height) || 0)),
+    x: left,
+    y: top,
+    width: Math.max(0, Math.round((x + width) * zoom) - left),
+    height: Math.max(0, Math.round((y + height) * zoom) - top),
   };
+}
+
+function rememberDanbooruRect(rect) {
+  danbooruCssRect = {
+    x: finiteNumber(rect && rect.x),
+    y: finiteNumber(rect && rect.y),
+    width: Math.max(0, finiteNumber(rect && rect.width)),
+    height: Math.max(0, finiteNumber(rect && rect.height)),
+    // 떠 있는 창 위로 다른 창 · 모달이 올라와 웹 칸을 덮었다(렌더러가 hit test 로 잰다). 네이티브 뷰는
+    // 모든 HTML 위에 그려지므로 그동안은 숨겨야 덮은 쪽이 보이고 눌린다.
+    hidden: !!(rect && rect.hidden),
+  };
+}
+
+function mainZoomFactor() {
+  try {
+    const zoom = mainWindow.webContents.getZoomFactor();
+    if (Number.isFinite(zoom) && zoom > 0) {
+      return zoom;
+    }
+  } catch (_error) {}
+  return loadZoomFactor();
+}
+
+// 마지막 CSS 자리를 **지금 배율**로 바꿔 넣는다. 붙이기 · 자리 보고 · 배율 변경이 모두 여기로 온다.
+function applyDanbooruViewBounds() {
+  if (!danbooruView || !danbooruViewAttached || !danbooruCssRect || !mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+  danbooruView.setBounds(danbooruViewBounds(danbooruCssRect, mainZoomFactor()));
+  if (typeof danbooruView.setVisible === "function") {
+    danbooruView.setVisible(!danbooruCssRect.hidden);
+  }
+  return true;
 }
 
 function sendDanbooruNav() {
@@ -2546,7 +2608,8 @@ function attachDanbooruView(rect) {
     mainWindow.contentView.addChildView(view);
     danbooruViewAttached = true;
   }
-  view.setBounds(roundRect(rect));
+  rememberDanbooruRect(rect);
+  applyDanbooruViewBounds();
   if (!view.webContents.getURL()) {
     // Cold 로드: danbooru 직접 접속이 (한국에서) 막히므로 safebooru 로 먼저 붙어
     // Cloudflare 를 통과시키고, 정상 페이지 확인 후 maybeAdvanceDanbooruWarmup 이
@@ -2564,6 +2627,7 @@ function detachDanbooruView() {
     mainWindow.contentView.removeChildView(danbooruView);
   }
   danbooruViewAttached = false;
+  danbooruCssRect = null;
 }
 
 // The danbooru view drives the MAIN window overlay; only the trusted main-window
@@ -2588,7 +2652,8 @@ ipcMain.handle("naia:danbooru-detach", (event) => {
 });
 ipcMain.handle("naia:danbooru-set-bounds", (event, rect) => {
   if (isDanbooruSender(event) && danbooruView && danbooruViewAttached) {
-    danbooruView.setBounds(roundRect(rect));
+    rememberDanbooruRect(rect);
+    applyDanbooruViewBounds();
   }
   return true;
 });
@@ -2846,6 +2911,7 @@ ipcMain.handle("naia:fit-width", (_event, cssWidth) => {
     zoomed = true;
     cur = cssNow();
   }
+  if (zoomed) applyDanbooruViewBounds();
   return { ok: cur.css >= need, need, cssWidth: cur.css, zoom: cur.zoom, resized, zoomed,
            before: before.css };
 });
@@ -3361,6 +3427,7 @@ module.exports.__test = {
   appIconPath,
   compareVersions,
   currentAppVersion,
+  danbooruViewBounds,
   parseLatestRelease,
   parseChecksums,
   updatesRoot,

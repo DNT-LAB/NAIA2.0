@@ -28847,6 +28847,65 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 .dragpanel-grip:hover { opacity: 1; }
 
+/* ══ Danbooru Browser 떠 있는 창 (Electron 임베드 · danbooruTab.mjs · draggablePanel variant `dbw`) ══
+   예전에는 화면을 통째로 덮는 오버레이였다 - 이제 다른 떠 있는 창과 같은 draggablePanel 이다(끌기 · 크기 조절 ·
+   z 레지스트리 · 자리 기억). 층(z)은 draggablePanel 이 --z-drag-panel 에서 매긴다 - 여기서 숫자를 주지 않는다.
+   옷은 Memo · Tagger 컴팩트 틀(.imgtag-*): 머리줄 28px · 글자 9.5~11px · 단추 22px · 라운드 5~8px.
+   ⚠️ 가운데 검은 칸(.danbooru-view-region)은 비워 둔 자리다 - 그 위를 네이티브 뷰(WebContentsView)가 덮는다.
+      칸 안에 무엇을 넣어도 뷰 밑에 깔려 안 보인다. 칸의 자리(CSS px)는 메인이 앱 화면 배율을 곱해 DIP 로 넣는다. */
+.dragpanel.dbw {
+  border-color: rgba(130,150,255,0.30); border-radius: 8px;
+  /* 불투명 - Tagger 의 0.98 을 그대로 쓰면 오른쪽 태그 칸 밑으로 앱 글자가 비쳐 보였다(실측 스크린샷). */
+  background: rgb(15,15,23); box-shadow: 0 18px 42px rgba(0,0,0,0.42);
+}
+.dragpanel.dbw .dragpanel-head {
+  min-height: 28px; padding: 0 4px 0 10px;
+  border-bottom-color: var(--border-dim); background: rgba(22,24,38,0.9);
+}
+.dragpanel.dbw .dragpanel-title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.3px; }
+.dragpanel.dbw .dragpanel-slot { justify-content: flex-end; gap: 4px; }
+.dragpanel.dbw .dbw-mode {
+  height: 20px; padding: 0 8px; border: 1px solid rgba(139,118,255,0.4); border-radius: 5px;
+  background: rgba(139,118,255,0.12); color: var(--accent-glow);
+  font-size: 10px; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+.dragpanel.dbw .dbw-mode:hover { background: rgba(139,118,255,0.22); color: var(--accent-glow); }
+.dragpanel.dbw .dragpanel-body { padding: 0; gap: 0; overflow: hidden; }
+.dragpanel.dbw .danbooru-window-panel { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; }
+.dragpanel.dbw .danbooru-embed-body { min-width: 0; }
+.dragpanel.dbw .danbooru-embed-left { border-right-color: var(--border-dim); }
+.dragpanel.dbw .danbooru-embed-right { flex: 0 0 clamp(240px, 30%, 360px); }
+.dragpanel.dbw .danbooru-embed-toolbar { gap: 4px; padding: 5px 6px; border-bottom-color: var(--border-dim); }
+.dragpanel.dbw .danbooru-nav-btn {
+  height: 22px; min-width: 24px; padding: 0 7px; border-radius: 5px; font-size: 11px; line-height: 1;
+}
+.dragpanel.dbw .danbooru-address-input { height: 22px; padding: 0 8px; border-radius: 5px; font-size: 10.5px; }
+.dragpanel.dbw .danbooru-status { min-height: 0; padding: 6px 9px 4px; font-size: 9.5px; }
+.dragpanel.dbw .danbooru-results { min-height: 0; padding: 4px 8px 8px; }
+.dragpanel.dbw .danbooru-result-empty {
+  min-height: 120px; padding: 10px; border-radius: 6px; font-size: 10.5px; text-align: center;
+}
+.dragpanel.dbw .danbooru-result-card { gap: 8px; }
+.dragpanel.dbw .danbooru-result-head { gap: 6px; }
+.dragpanel.dbw .danbooru-result-kicker { font-size: 9.5px; letter-spacing: 1px; }
+.dragpanel.dbw .danbooru-result-link { font-size: 10.5px; }
+.dragpanel.dbw .danbooru-result-actions { gap: 4px; }
+.dragpanel.dbw .danbooru-copy-btn,
+.dragpanel.dbw .danbooru-gen-btn {
+  height: 22px; padding: 0 10px; border-radius: 5px; font-size: 10px; font-weight: 600;
+}
+.dragpanel.dbw .danbooru-prompt-box {
+  max-height: 96px; padding: 6px 8px; border-radius: 6px; font-size: 10.5px; line-height: 1.45;
+}
+.dragpanel.dbw .danbooru-tag-groups { gap: 6px; }
+.dragpanel.dbw .danbooru-tag-group { padding: 6px 7px; border-radius: 6px; }
+.dragpanel.dbw .danbooru-tag-group h3 { gap: 4px; margin-bottom: 5px; font-size: 9.5px; }
+.dragpanel.dbw .danbooru-group-copy { width: 18px; height: 18px; border-radius: 4px; font-size: 10px; }
+.dragpanel.dbw .danbooru-tags { gap: 4px; }
+.dragpanel.dbw .danbooru-tag { padding: 2px 6px; border-radius: 4px; font-size: 10.5px; }
+.dragpanel.dbw .danbooru-empty { font-size: 10px; }
+.dragpanel.dbw .danbooru-breakdown-head { margin: 8px 0 5px; font-size: 9.5px; letter-spacing: 1px; }
+
 /* ══ Remote 컨트롤러 — dragpanel 위에 입히는 옷 (js/features/remoteController.mjs) ══
    본문은 **탭에서 들어 올린 진짜 요소**들이다. 베낀 것이 아니므로 원래 클래스를 그대로
    달고 온다 - 여기서는 자리(줄/구획)만 잡고, 좁은 창에 맞게 몇 가지를 줄인다. */

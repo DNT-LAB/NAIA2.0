@@ -1,3 +1,7 @@
+// Electron 임베드(Danbooru Browser)는 다른 떠 있는 창과 같은 draggablePanel 에 산다(끌기 · 크기 조절 · z 레지스트리 ·
+// 자리 기억). ⚠️ 다른 창들과 **같은 주소**(쿼리까지)로 불러야 z 레지스트리를 나눠 쓴다 - 다르면 겹침 순서가 깨진다.
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
+
 // Tag-group layout ported from future01 tabs/web_view.py:28-47.
 // PRIMARY groups (general is NOT primary — it is broken down below).
 const DANBOORU_PRIMARY_GROUPS = [
@@ -22,6 +26,12 @@ const DANBOORU_GENERAL_BREAKDOWN_GROUPS = [
   ['other', 'OTHER GENERALS'],
 ];
 
+// 떠 있는 창의 처음 크기(CSS px). 예전 오버레이는 화면을 통째로 덮었다 - 창은 화면 안에 들어오게 잡는다.
+const WINDOW_SIZE = {width: 1180, height: 780};
+const WINDOW_MIN = {width: 560, height: 320};
+// 웹 칸이 덮였는지 hit test 할 점들(칸 폭 · 높이의 비율). 가장자리 가까이까지 본다 - 구석을 살짝 덮은 창도 잡는다.
+const COVER_STEPS = [0.01, 0.25, 0.5, 0.75, 0.99];
+
 export function createDanbooruBrowserController({
   document,
   window: win = window,
@@ -38,7 +48,8 @@ export function createDanbooruBrowserController({
   const naia = (win && win.naiaShell) || null;
   const embedMode = !!(naia && typeof naia.danbooruAttach === 'function');
   // Electron App은 native WebContentsView를 우측 탭 안에 호스팅할 수 있다(canTabMode).
-  // 사용자는 팝업 오버레이 / 우측 탭을 헤더 토글로 선택한다(기본=팝업, localStorage 저장).
+  // 사용자는 떠 있는 창 / 우측 탭을 머리줄 토글로 선택한다(기본=창, localStorage 저장 - 저장값 이름은
+  // 오버레이 시절의 'popup' 그대로 둔다. 바꾸면 사용자가 골라 둔 모드를 잃는다).
   // 일반 Web은 native surface가 없어 항상 기존 경량 lookup 팝업.
   const canTabMode = !!(embedMode && hostElement);
   const DISPLAY_MODE_KEY = 'naia.danbooru.displayMode';
@@ -50,8 +61,14 @@ export function createDanbooruBrowserController({
     } catch (_error) {}
   }
   function isTabMode() { return canTabMode && displayMode === 'tab'; }
+  // Electron 임베드인데 우측 탭이 아니면 **떠 있는 창**이다(예전의 전체 화면 '팝업' 오버레이 자리).
+  function isWindowMode() { return embedMode && !isTabMode(); }
 
   let panel = null;
+  // 떠 있는 창(draggablePanel). 창 모드에서만 있다 - panel(판)은 이 창의 본문에 들어간다.
+  let dragWin = null;
+  // 최소화 · 모드 전환이 창을 닫을 때는 '닫기' 뒷정리(onWindowClosed)를 건너뛴다.
+  let windowQuiet = false;
   let queryInput = null;
   let addressInput = null;
   let viewRegion = null;
@@ -68,6 +85,9 @@ export function createDanbooruBrowserController({
   let unsubscribeNav = null;
   let unsubscribeInsert = null;
   let boundsListener = null;
+  let regionObserver = null;   // 웹 칸 크기 변화(창 크기 조절 · 탭 폭 변화)
+  let coverObserver = null;    // 다른 창 · 모달이 웹 칸 위로 올라오는지(창 모드)
+  let lastSentKey = '';        // 같은 자리를 되풀이해 보내지 않는다
 
   // Minimize-to-island state (the panel can collapse to a floating pill near
   // the Auto Save control while preserving the embedded view's page state).
@@ -299,6 +319,8 @@ export function createDanbooruBrowserController({
   }
 
   // ---- Embedded native view (Electron only) --------------------------------
+  // 보내는 자리는 **CSS px**(getBoundingClientRect) 그대로다. 창의 DIP 로 바꾸는 것(× 앱 화면 배율)은 메인
+  // 프로세스가 한다 - 배율의 원본이 거기 있고, 배율이 바뀌면 거기서 바로 다시 넣는다(main.cjs danbooruViewBounds).
   function currentViewRect() {
     if (!viewRegion) return null;
     const r = viewRegion.getBoundingClientRect();
@@ -306,10 +328,44 @@ export function createDanbooruBrowserController({
     return {x: r.left, y: r.top, width: r.width, height: r.height};
   }
 
+  // 네이티브 뷰는 **모든 HTML 위에** 그려진다. 떠 있는 창 위로 다른 창 · API 설정 모달 · 확인 대화상자가 올라오면
+  // 그것들이 웹 칸 밑에 깔려 안 보이고 눌리지도 않는다. 그래서 웹 칸 안의 점들을 hit test 해서 맨 위가 우리 칸이
+  // 아니면 '덮였다' 고 보고하고 메인이 그동안 뷰를 숨긴다. 이 창을 누르면(앞으로 오면) 다시 보인다.
+  // pointer-events:none 인 툴팁 · 토스트 · 끌기 유령은 hit test 를 지나가므로 여기에 걸리지 않는다.
+  // 우측 탭 모드는 재지 않는다 - 바닥층이라 늘 떠 있는 칩 하나에도 뷰가 통째로 사라진다.
+  function regionCovered(rect) {
+    if (!dragWin || !viewRegion || typeof document.elementFromPoint !== 'function') return false;
+    for (const fy of COVER_STEPS) {
+      for (const fx of COVER_STEPS) {
+        const hit = document.elementFromPoint(rect.x + rect.width * fx, rect.y + rect.height * fy);
+        if (hit && hit !== viewRegion && !viewRegion.contains(hit)) return true;
+      }
+    }
+    return false;
+  }
+
+  function boundsPayload() {
+    const rect = currentViewRect();
+    // 칸이 사라졌으면(크기 0) 뷰도 비운다 - 예전엔 보고를 건너뛰어 뷰가 마지막 자리에 남았다.
+    if (!rect) return {x: 0, y: 0, width: 0, height: 0, hidden: true};
+    return {...rect, hidden: regionCovered(rect)};
+  }
+
+  function payloadKey(payload) {
+    // 배율(devicePixelRatio)도 열쇠에 넣는다 - 배율만 바뀌고 CSS 자리가 같아도 한 번은 다시 보낸다.
+    return [payload.x, payload.y, payload.width, payload.height]
+      .map(value => Math.round(value * 100) / 100).join(',')
+      + (payload.hidden ? ':hidden' : ':shown') + '@' + (win.devicePixelRatio || 1);
+  }
+
   function reportBounds() {
     if (!embedActive || !naia) return;
-    const rect = currentViewRect();
-    if (rect) naia.danbooruSetBounds(rect);
+    const payload = boundsPayload();
+    const key = payloadKey(payload);
+    if (key === lastSentKey) return;
+    lastSentKey = key;
+    const pending = naia.danbooruSetBounds(payload);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
   }
 
   function scheduleReportBounds() {
@@ -350,20 +406,43 @@ export function createDanbooruBrowserController({
     }
   }
 
+  // 창을 끄는 동안은 draggablePanel 이 자리를 옮긴 **그 프레임에** 바로 보낸다. rAF 를 한 번 더 거치면 뷰가
+  // 한 프레임씩 늦게 따라온다.
+  function onWindowMoved() { reportBounds(); }
+
   function attachEmbed() {
     if (!embedMode || embedActive) return;
     embedActive = true;
-    const rect = currentViewRect() || {x: 0, y: 0, width: 0, height: 0};
-    naia.danbooruAttach(rect);
+    const payload = boundsPayload();
+    lastSentKey = payloadKey(payload);
+    naia.danbooruAttach(payload);
     if (typeof naia.onDanbooruDidNavigate === 'function') {
       unsubscribeNav = naia.onDanbooruDidNavigate(onDidNavigate);
     }
     if (typeof naia.onDanbooruInsertHistory === 'function') {
       unsubscribeInsert = naia.onDanbooruInsertHistory(onInsertHistoryEvent);
     }
+    // 화면 배율(Ctrl+휠 · Ctrl+± · Ctrl+0)이 바뀌면 CSS 뷰포트가 바뀌어 resize 가 온다(Electron 실측) - 그때
+    // 다시 잰다. DIP 환산은 메인이 새 배율로 한다.
     boundsListener = () => scheduleReportBounds();
     win.addEventListener('resize', boundsListener, true);
     win.addEventListener('scroll', boundsListener, true);
+    if (dragWin) {
+      dragWin.el.addEventListener('dragpanel-move', onWindowMoved);
+      dragWin.el.addEventListener('dragpanel-resize', boundsListener);
+    }
+    // 창 크기 조절 · 우측 탭 폭 변화처럼 resize 없이 칸만 바뀌는 경우.
+    if (viewRegion && typeof win.ResizeObserver === 'function') {
+      regionObserver = new win.ResizeObserver(() => scheduleReportBounds());
+      regionObserver.observe(viewRegion);
+    }
+    // 다른 창이 앞으로 오거나 모달이 열리고 닫히는 것은 전부 DOM 변화다 - 한 프레임에 한 번만 다시 잰다.
+    if (dragWin && document.body && typeof win.MutationObserver === 'function') {
+      coverObserver = new win.MutationObserver(() => scheduleReportBounds());
+      coverObserver.observe(document.body, {
+        subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'],
+      });
+    }
     // Track late layout/reflow after the panel opens.
     win.requestAnimationFrame(() => win.requestAnimationFrame(reportBounds));
   }
@@ -371,6 +450,7 @@ export function createDanbooruBrowserController({
   function detachEmbed() {
     if (!embedMode || !embedActive) return;
     embedActive = false;
+    lastSentKey = '';
     if (boundsRaf) {
       win.cancelAnimationFrame(boundsRaf);
       boundsRaf = 0;
@@ -382,7 +462,17 @@ export function createDanbooruBrowserController({
     if (boundsListener) {
       win.removeEventListener('resize', boundsListener, true);
       win.removeEventListener('scroll', boundsListener, true);
+      if (dragWin) dragWin.el.removeEventListener('dragpanel-resize', boundsListener);
       boundsListener = null;
+    }
+    if (dragWin) dragWin.el.removeEventListener('dragpanel-move', onWindowMoved);
+    if (regionObserver) {
+      regionObserver.disconnect();
+      regionObserver = null;
+    }
+    if (coverObserver) {
+      coverObserver.disconnect();
+      coverObserver = null;
     }
     if (typeof unsubscribeNav === 'function') {
       unsubscribeNav();
@@ -538,13 +628,19 @@ export function createDanbooruBrowserController({
       return;
     }
     if (minimized) return;
-    if (!panel || !panel.classList.contains('open')) return;
+    if (!panelIsOpen()) return;
     minimized = true;
     // Detach the native view (removeChildView preserves its page state) so the
     // floating island and the main UI are unobstructed.
     if (embedMode) detachEmbed();
-    panel.classList.remove('open');
-    panel.hidden = true;
+    if (dragWin) {
+      // 창은 닫되 '닫기' 로 치지 않는다 - 자리 · 크기는 그대로 두었다가 섬에서 펼치면 같은 자리에 돌아온다.
+      windowQuiet = true;
+      try { dragWin.close(); } finally { windowQuiet = false; }
+    } else {
+      panel.classList.remove('open');
+      panel.hidden = true;
+    }
     showIsland();
   }
 
@@ -552,25 +648,62 @@ export function createDanbooruBrowserController({
     if (!minimized || !panel) return;
     minimized = false;
     hideIsland();
-    panel.hidden = false;
-    panel.classList.add('open');
+    if (dragWin) {
+      dragWin.open();
+    } else {
+      panel.hidden = false;
+      panel.classList.add('open');
+    }
     if (embedMode) attachEmbed();
   }
 
-  function embedDialogHtml() {
+  function panelIsOpen() {
+    if (!panel) return false;
+    if (dragWin) return dragWin.isOpen();
+    return !panel.hidden && panel.classList.contains('open');
+  }
+
+  // 머리줄 [×] 가 draggablePanel 을 닫으면 여기로 온다(Esc · 섬의 [×] 도 closePanel 을 거쳐 온다).
+  function onWindowClosed() {
+    if (windowQuiet) return;
+    detachEmbed();
+    minimized = false;
+    hideIsland();
+  }
+
+  function createWindow() {
+    const vw = win.innerWidth || WINDOW_SIZE.width;
+    const vh = win.innerHeight || WINDOW_SIZE.height;
+    const width = Math.max(WINDOW_MIN.width, Math.min(WINDOW_SIZE.width, vw - 48));
+    const height = Math.max(WINDOW_MIN.height, Math.min(WINDOW_SIZE.height, vh - 96));
+    const floating = createDraggablePanel({
+      document,
+      window: win,
+      title: 'Danbooru Browser',
+      variant: 'dbw',
+      storageKey: 'danbooru-browser',
+      width,
+      height,
+      minWidth: WINDOW_MIN.width,
+      minHeight: WINDOW_MIN.height,
+      maxWidth: 2400,
+      resizable: true,
+      // 접기 대신 예전 그대로 '최소화 -> 섬'. 둘 다 두면 [–] 가 두 개가 된다.
+      collapsible: false,
+      closable: true,
+      initial: {x: Math.max(8, Math.round((vw - width) / 2)), y: 48},
+      escHtml,
+      onClose: onWindowClosed,
+    });
+    floating.slot.innerHTML = `
+      ${canTabMode ? '<button type="button" class="dragpanel-btn dbw-mode" data-danbooru-toggle-mode title="우측 탭으로 옮기기">⤡ 탭으로</button>' : ''}
+      <button type="button" class="dragpanel-btn dbw-min" data-danbooru-minimize aria-label="최소화" title="최소화">&#8211;</button>`;
+    return floating;
+  }
+
+  // 왼쪽 = 주소 줄 + 웹 칸(네이티브 뷰가 덮는 빈 자리), 오른쪽 = 상태 + 태그. 창 · 우측 탭이 같이 쓴다.
+  function embedBodyHtml() {
     return `
-      <div class="danbooru-tool-dialog danbooru-embed">
-        <header class="danbooru-tool-header">
-          <div>
-            <div class="danbooru-tool-kicker">Danbooru</div>
-            <h2>Danbooru Browser</h2>
-          </div>
-          <div class="danbooru-header-actions">
-            ${canTabMode ? `<button type="button" class="danbooru-mode-btn" data-danbooru-toggle-mode title="팝업 오버레이 / 우측 탭 전환">${isTabMode() ? '⤢ 팝업으로' : '⤡ 탭으로'}</button>` : ''}
-            ${isTabMode() ? '' : `<button type="button" class="danbooru-min-btn" data-danbooru-minimize aria-label="최소화" title="최소화">–</button>
-            <button type="button" class="danbooru-close-btn" data-danbooru-close aria-label="Close">×</button>`}
-          </div>
-        </header>
         <div class="danbooru-embed-body">
           <div class="danbooru-embed-left">
             <div class="danbooru-embed-toolbar">
@@ -586,7 +719,23 @@ export function createDanbooruBrowserController({
             <div class="danbooru-status" data-danbooru-status></div>
             <div class="danbooru-results" data-danbooru-results></div>
           </div>
-        </div>
+        </div>`;
+  }
+
+  // 우측 탭 판 - 머리줄을 판이 직접 그린다. 떠 있는 창은 머리줄([⤡ 탭으로] [–] [×])을 draggablePanel 이 그린다.
+  function embedTabHtml() {
+    return `
+      <div class="danbooru-tool-dialog danbooru-embed">
+        <header class="danbooru-tool-header">
+          <div>
+            <div class="danbooru-tool-kicker">Danbooru</div>
+            <h2>Danbooru Browser</h2>
+          </div>
+          <div class="danbooru-header-actions">
+            <button type="button" class="danbooru-mode-btn" data-danbooru-toggle-mode title="떠 있는 창으로 꺼내기">⤢ 창으로</button>
+          </div>
+        </header>
+        ${embedBodyHtml()}
       </div>`;
   }
 
@@ -613,12 +762,20 @@ export function createDanbooruBrowserController({
   function ensurePanel() {
     if (panel) return panel;
     panel = document.createElement('section');
-    panel.className = 'danbooru-tool-panel';
-    if (embedMode) panel.classList.add('danbooru-tool-panel-embed');
-    if (isTabMode()) panel.classList.add('danbooru-tab-panel');
-    panel.innerHTML = embedMode ? embedDialogHtml() : lookupDialogHtml();
-    (isTabMode() ? hostElement : document.body).append(panel);
-    if (isTabMode()) panel.hidden = true;
+    if (isWindowMode()) {
+      // 떠 있는 창의 본문. `.danbooru-tool-panel`(전체 화면 오버레이 뼈대)은 달지 않는다.
+      panel.className = 'danbooru-window-panel';
+      panel.innerHTML = embedBodyHtml();
+      dragWin = createWindow();
+      dragWin.body.appendChild(panel);
+    } else {
+      panel.className = 'danbooru-tool-panel';
+      if (embedMode) panel.classList.add('danbooru-tool-panel-embed');
+      if (isTabMode()) panel.classList.add('danbooru-tab-panel');
+      panel.innerHTML = embedMode ? embedTabHtml() : lookupDialogHtml();
+      (isTabMode() ? hostElement : document.body).append(panel);
+      if (isTabMode()) panel.hidden = true;
+    }
     queryInput = panel.querySelector('[data-danbooru-query]');
     addressInput = panel.querySelector('[data-danbooru-address]');
     viewRegion = panel.querySelector('[data-danbooru-view-region]');
@@ -626,7 +783,8 @@ export function createDanbooruBrowserController({
     resultEl = panel.querySelector('[data-danbooru-results]');
     renderEmpty(embedMode ? '포스트를 열면 자동으로 태그를 읽습니다.' : undefined);
 
-    panel.addEventListener('click', event => {
+    // 창 모드는 머리줄 단추([⤡ 탭으로] [–])가 판 밖(draggablePanel 머리줄)에 있다 - 창 전체에서 받는다.
+    (dragWin ? dragWin.el : panel).addEventListener('click', event => {
       const target = event.target;
       if (!(target instanceof win.Element)) return;
       if (target.closest('[data-danbooru-close]')) {
@@ -690,11 +848,13 @@ export function createDanbooruBrowserController({
     if (isTabMode() && typeof onRequestTab === 'function') {
       const activeTab = onRequestTab('danbooru');
       setActive(activeTab === 'danbooru');
+    } else if (dragWin) {
+      dragWin.open();   // 이미 열려 있으면 앞으로만 부른다
     } else {
       panel.hidden = false;
       panel.classList.add('open');
     }
-    if (embedMode && panel.classList.contains('open')) {
+    if (embedMode && panelIsOpen()) {
       attachEmbed();
       setStatus('포스트를 열면 자동으로 태그를 읽습니다.', 'muted');
       if (query) navigateEmbed(query);
@@ -710,6 +870,12 @@ export function createDanbooruBrowserController({
     if (isTabMode()) {
       if (typeof onRequestTab === 'function') onRequestTab('result');
       else setActive(false);
+      return;
+    }
+    if (dragWin) {
+      // draggablePanel 을 닫으면 onWindowClosed 가 뷰를 떼고 섬을 치운다. 최소화 중(창은 이미 닫힘)이면 직접.
+      if (dragWin.isOpen()) dragWin.close();
+      else onWindowClosed();
       return;
     }
     detachEmbed();
@@ -745,7 +911,7 @@ export function createDanbooruBrowserController({
     if (next === displayMode) return;
     // 열려 있던 상태면 새 모드로 재오픈하기 위해 현재 패널을 완전히 헐고(native 뷰는
     // detach만 — 페이지/워밍업 상태 보존) 다른 부모/마크업으로 다시 만든다.
-    const wasOpen = !!(panel && !panel.hidden);
+    const wasOpen = panelIsOpen();
     // 재구성으로 패널 DOM 이 비워지지만 native 뷰는 같은 포스트를 유지한다. lastAutoPostId 를
     // 그대로 두면 재부착 후 같은 페이지의 재추출이 억제돼 태그 패널이 빈 채로 남는다(Codex MED).
     // 이전 포스트를 기억했다가 재부착 후 다시 읽는다.
@@ -753,7 +919,14 @@ export function createDanbooruBrowserController({
     detachEmbed();
     minimized = false;
     hideIsland();
-    if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+    if (dragWin) {
+      // 떠 있는 창을 통째로 거둔다(판은 그 안에 있다). 닫기 뒷정리는 위에서 이미 했다.
+      windowQuiet = true;
+      try { dragWin.destroy(); } finally { windowQuiet = false; }
+      dragWin = null;
+    } else if (panel && panel.parentNode) {
+      panel.parentNode.removeChild(panel);
+    }
     panel = null;
     queryInput = addressInput = viewRegion = statusEl = resultEl = null;
     lastAutoPostId = null;
@@ -761,7 +934,7 @@ export function createDanbooruBrowserController({
     try {
       if (win.localStorage) win.localStorage.setItem(DISPLAY_MODE_KEY, next);
     } catch (_error) {}
-    // 우측 탭 가용성(app.js)을 갱신 — 팝업 모드=탭 숨김, 탭 모드=탭 노출.
+    // 우측 탭 가용성(app.js)을 갱신 — 창 모드=탭 숨김, 탭 모드=탭 노출.
     if (typeof onDisplayModeChange === 'function') {
       try { onDisplayModeChange(next); } catch (_error) {}
     }

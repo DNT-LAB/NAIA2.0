@@ -23,7 +23,8 @@ from core.web_session_context import WebSessionContext
 
 IMAGE_VIEWER_EXTENSIONS = {".png", ".webp", ".jpg", ".jpeg"}
 SELECTED_HISTORY_MAX_ITEMS = 200
-PROMPT_SOURCE_KEYS = ("general", "character", "copyright", "artist", "meta", "prompt", "input", "tags")
+# sentence = Assist 결과의 끝 문장(source_row['sentence'], 09-30) — 태그를 지우고 문장만 넣은 행도 다시 생성할 수 있다(Codex H1 ③)
+PROMPT_SOURCE_KEYS = ("general", "character", "copyright", "artist", "meta", "prompt", "input", "tags", "sentence")
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
 

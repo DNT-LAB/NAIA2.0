@@ -800,7 +800,6 @@ class KoreanLayer:
         # 않는다. 맨 '기대기' 의 1순위는 게시물이 가장 많은 leaning on person 이라 혼자 기댄 소녀에게 사람이 붙었다(사용자
         # 제보 09-30 · 위에 올라타기엔 penis riding). 논항 구가 사전에 없거나 장소(에서)면 맨 동사를 그대로 묻는다 — 긴 구가
         # 먼저 돌므로 맨 동사 차례엔 이미 안다.
-        framed: set[str] = set()
         spans = _phrase_spans(toks, self._filler, self.rules["passive_suffixes"], self.rules["passive_exceptions"])
         # 제 꼴(수동 꼴) 그대로 사전에 있는 동사는 능동 꼴을 묻지 않는다 — 묶여 -> 묶이기(tied up) 인데 묶기(tying)가
         # 따라 들어왔다(사용자 요청 09-24). 실측: 두 꼴이 다 키워드인 쌍 15개 모두 제 꼴이 맞다(먹이기 feeding / 먹기 eating
@@ -808,6 +807,12 @@ class KoreanLayer:
         span_rows = [(span, kind, stem, self.vocab.scene_tags(span)) for span, kind, stem in spans]
         own_hit = {stem for _span, kind, stem, tags in span_rows
                    if kind in ("verb", "verb_object", "verb_arg") and tags}
+        # 태그를 얻은 논항 구(장소 · 출발점 조사는 빼고) — 그 동사의 **모든 자리**가 이런 구 안일 때만 맨 동사 구를 안 묻는다.
+        # '소녀는 책상에 엎드리고 소년은 엎드린다' 의 뒤 엎드리(on stomach)까지 막았다(Codex H1 ②). 구 목록은 같은 구를 한 번만
+        # 내므로 자리는 토막으로 본다(_framed_everywhere)
+        tagged_objects = [compact(span) for span, kind, stem, tags in span_rows
+                          if kind == "verb_object" and tags and tags[0] not in out.blocked and tags[0] not in out.covers
+                          and not (stem and stem in out.idiom_verbs) and span.split()[-2] not in PLACE_PARTICLES]
         for span, kind, stem, tags in span_rows:
             if stem and stem in out.idiom_verbs:
                 continue                    # 관용구가 가져간 동사(개같이 엎드리기 -> all fours, on stomach 아님)
@@ -815,7 +820,7 @@ class KoreanLayer:
                 continue
             if kind == "verb_arg":
                 continue                    # 논항이 있는 절의 맨 동사는 모호하므로 모델 근거로만 남긴다
-            if kind == "verb" and stem in framed:
+            if kind == "verb" and self._framed_everywhere(toks, stem, tagged_objects):
                 continue
             if kind == "active" and self._lexical_noun(span.split()[-1]):
                 continue                    # 능동 꼴이 따로 있는 명사다 — 눈물 고인 -> 고이 -> 고기 = meat(사용자 제보 09-24)
@@ -825,8 +830,6 @@ class KoreanLayer:
                 out.phrases[compact(span)] = tags[0]
                 if kind != "noun":
                     consumed.add(stem)
-                    if kind == "verb_object" and span.split()[-2] not in PLACE_PARTICLES:
-                        framed.add(stem)
                     if tags[0] not in out.verb_phrases:
                         out.verb_phrases.append(tags[0])
         out.phrase_stems = consumed
@@ -1264,6 +1267,26 @@ class KoreanLayer:
         pc.partition = partition_of(pc.girls, pc.boys, pc.solo)
         pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
         return pc
+
+    @staticmethod
+    def _framed_everywhere(toks: list[tuple[str, str]], stem: str, tagged_objects: list[str]) -> bool:
+        """동사 줄기가 나온 자리마다 바로 앞이 (명사 + 에 · 에게 …) 또는 명사이고 그 논항 구(명사 + 조사 + 줄기기)가 태그를 얻은
+        구(tagged_objects, compact)의 끝과 맞는가. 줄기가 토막에 그대로 없으면(파생 동사) 태그 얻은 구가 있는지만 본다(예전 규칙)."""
+        tail = stem + "기"
+        if not any(o.endswith(tail) for o in tagged_objects):
+            return False
+        uses = [k for k, (form, tag) in enumerate(toks) if form == stem and tag.startswith("VV")]
+        for k in uses:
+            prev_form, prev_tag = toks[k - 1] if k > 0 else ("", "")
+            if prev_tag == "JKB" and prev_form not in PLACE_PARTICLES and k > 1 and toks[k - 2][1] in NOUN_TAGS:
+                key = compact(toks[k - 2][0] + prev_form + tail)
+            elif prev_tag in NOUN_TAGS:
+                key = compact(prev_form + tail)
+            else:
+                return False                    # 논항 없이 따로 나온 자리(소년은 엎드린다) — 맨 동사를 묻는다
+            if not any(o.endswith(key) for o in tagged_objects):
+                return False                    # 그 자리의 논항 구는 사전에 없다(바닥에 엎드린다)
+        return True
 
     def _token_positions(self, analysis: KoreanAnalysis) -> list[tuple[int, int]] | None:
         """분석 토큰과 같은 토큰의 (시작, 끝) — 같은 글을 같은 길(spans)로 다시 나눈다. 토큰이 어긋나면 None(붙임 판정 안 함)."""

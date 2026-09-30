@@ -1170,8 +1170,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     const box = body.querySelector('[data-as-edit="main"]');
     if (!result || !box || box.readOnly || !tag) return;
     if (!presentKeys(result.prompt).has(promptKey(tag))) {
-      const sentence = result.followup?.sentence || result.refine?.sentence || result.direct_info?.sentence || '';
-      box.value = insertBeforeSentence(box.value, tag, sentence);
+      box.value = insertBeforeSentence(box.value, tag, resultSentence());   // [생성] 의 가르기와 같은 문장 힌트
       box.dispatchEvent(new Event('input', { bubbles: true }));   // 결과 · 기록 저장 · 단추 · 높이는 칸의 input 이 맡는다
     }
     result.suspicious = (result.suspicious || []).filter(s => promptKey(s.tag) !== promptKey(tag));

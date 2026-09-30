@@ -45,23 +45,40 @@ def split_main(main: str, sentence: str = "", is_tag: Callable[[str], bool] | No
       태그로 읽었다(Codex 리뷰 09-28 F4)."""
     text = ", ".join(p.strip() for p in str(main or "").split("\n") if p.strip())
     known = " ".join(str(sentence or "").split())
-    if known and text.endswith(known):
-        head = text[: -len(known)].rstrip().rstrip(",")
-        return [p.strip() for p in head.split(",") if p.strip()], known
-    parts = [p.strip() for p in text.split(",") if p.strip()]
+    pieces = lambda s: [p.strip() for p in s.split(",") if p.strip()]   # noqa: E731
+    if known and known in text:
+        # 받은 문장이 그대로 있다 — 그 앞뒤가 태그다(문장 뒤에 덧붙인 TV, monochrome 을 문장으로 삼켜 태그 필터를 비켜 갔다 —
+        # Codex H1 ①)
+        at = text.rfind(known)
+        return pieces(text[:at]) + pieces(text[at + len(known):]), known
+    parts = pieces(text)
+    ended = lambda i: bool(re.search(r"[.!?]$", parts[i]))        # noqa: E731
+
+    def run_from(i: int) -> tuple[list[str], str]:
+        """i 부터 첫 끝 문장부호까지가 문장 — 그 뒤 조각은 태그다(없으면 끝까지)."""
+        j = next((k for k in range(i, len(parts)) if ended(k)), len(parts) - 1)
+        return parts[:i] + parts[j + 1:], ", ".join(parts[i:j + 1])
     # 받은 문장의 뒤쪽만 고쳤으면(마침표를 지웠다) 그 문장의 첫 조각이 그대로 남아 있다 — 거기서 가른다(Codex 9차 F4)
     first = known.split(",")[0].strip() if known else ""
     if first and len(first.split()) >= 2 and first in parts:
-        i = len(parts) - 1 - parts[::-1].index(first)
-        return parts[:i], ", ".join(parts[i:])
+        return run_from(len(parts) - 1 - parts[::-1].index(first))
 
     def starts(i: int, min_words: int) -> bool:
         part = parts[i]
         return bool(re.match(r"^[A-Z]", part)) and len(part.split()) >= min_words and not (is_tag and is_tag(part))
-    ends = bool(parts) and bool(re.search(r"[.!?]$", parts[-1]))
+    ends = any(ended(i) for i in range(len(parts)))
     for i in range(len(parts)):
         if starts(i, 2 if ends else 4):
-            return parts[:i], ", ".join(parts[i:])
+            return run_from(i)
+    # 소문자로 고친 문장(a girl sleeps peacefully.) — 대문자 규칙에 안 걸려 태그로 실렸다(저빈도 필터가 지웠다, Codex H1 ①).
+    # 태그 사전이 있을 때만: 끝 문장부호가 있는 세 낱말 이상 조각에서 거슬러, 사전 태그가 아닌 두 낱말 이상 조각까지
+    if is_tag is not None:
+        for j in range(len(parts)):
+            if ended(j) and len(parts[j].split()) >= 3 and not is_tag(parts[j]):
+                i = j
+                while i > 0 and len(parts[i - 1].split()) >= 2 and not ended(i - 1) and not is_tag(parts[i - 1]):
+                    i -= 1
+                return parts[:i] + parts[j + 1:], ", ".join(parts[i:j + 1])
     return parts, ""
 
 

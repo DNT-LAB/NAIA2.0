@@ -464,9 +464,12 @@ class KoreanAnalysis:
             if not matches and form.lower() in self.spellings:
                 matches = True                     # TV ↔ 티비 ↔ 텔레비전 — 같은 낱말의 다른 표기(규칙표 latin_spellings)
             if not matches and tag.startswith(VERB_PREFIXES):
-                # ㄹ 탈락: 요청의 '쓰는 · 나는' 을 Kiwi 가 쓰다 · 나다 로 읽는다 — 모델의 '쓸기 · 날기'(쓸다 · 날다)가 버려졌다(09-30)
+                # ㄹ 탈락: 요청의 '쓰는 · 나는' 을 Kiwi 가 쓰다 · 나다 로 읽는다 — 모델의 '쓸기 · 날기'(쓸다 · 날다)가 버려졌다(09-30).
+                # 그 줄기 뒤 어미가 ㄹ 이 떨어지는 자리일 때만 — '편지를 쓰고' 는 쓸다 일 수 없다(쓸고, Codex V5)
                 bare = _without_rieul(form)
-                matches = bare != form and any(src == bare and src_tag.startswith(VERB_PREFIXES) for src, src_tag in request)
+                matches = bare != form and any(
+                    src == bare and src_tag.startswith(VERB_PREFIXES) and k + 1 < len(request)
+                    and _rieul_drops_before(request[k + 1][0]) for k, (src, src_tag) in enumerate(request))
             # 한 음절 동사 명사형은 Kiwi 가 NNG 로 분석할 수 있다(젖어 떨고 -> 모델 ko '떨기').
             # 실제 요청에 같은 동사 줄기가 있을 때만 어미 '-기'를 떼어 근거로 인정한다.
             if not matches and tag in ("NNG", "NNP") and form.endswith("기"):
@@ -477,6 +480,15 @@ class KoreanAnalysis:
             if tag.startswith(VERB_PREFIXES) or tag.startswith(("XSV", "XSA")):
                 matched_lexical_verb = True
         return True
+
+
+def _rieul_drops_before(ending: str) -> bool:
+    """ㄹ 받침 줄기가 이 어미 앞에서 ㄹ 을 잃는가 — ㄴ · ㅂ · ㅅ 으로 시작하는 어미(는 · 니 · 시 · 세)와 받침 어미(ᆫ · ᆯ · ᆸ).
+    고 · 지 · 게 · 어 앞에서는 남는다(쓸고 · 날지)."""
+    first = ending[:1]
+    if first in ("ᆫ", "ᆯ", "ᆸ"):
+        return True
+    return "가" <= first <= "힣" and (ord(first) - 0xAC00) // 588 in (2, 7, 9)      # 초성 ㄴ · ㅂ · ㅅ
 
 
 def _without_rieul(form: str) -> str:

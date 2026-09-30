@@ -318,22 +318,26 @@ class HeadlessPromptEngineeringService:
         context = self.context
         store = get_prompt_engineering_store(context)
         mode = self._preset_mode()
-        if mode == "COMFYUI" and not self._is_comfyui_anima_mode():
-            return False, ""
-        if mode not in {"NAI", "WEBUI", "COMFYUI", "ANIMA"}:
-            return False, ""
-        if store.load_last_used_preset(mode):
-            return False, ""
-        user_presets = [
-            name
-            for name in store.list_preset_names(mode)
-            if name not in {"", "default", "*randomized"}
-        ]
-        if user_presets:
-            return False, ""
         if mode == "ANIMA":
+            # ANIMA 색인에 프리셋 파일이 하나도 없으면 **무조건** default(ANIMA 기본값) - 사용자 지정 09-30. 마지막 프리셋
+            # 기록은 보지 않는다(지운 프리셋을 가리키는 기록이 남아 있으면 빈 색인이 빈 default 로 시작했다).
+            if store.list_preset_names(mode):
+                return False, ""
             ok, message = self._create_anima_mode_default(store)
         else:
+            if mode == "COMFYUI" and not self._is_comfyui_anima_mode():
+                return False, ""
+            if mode not in {"NAI", "WEBUI", "COMFYUI"}:
+                return False, ""
+            if store.load_last_used_preset(mode):
+                return False, ""
+            user_presets = [
+                name
+                for name in store.list_preset_names(mode)
+                if name not in {"", "default", "*randomized"}
+            ]
+            if user_presets:
+                return False, ""
             ok, message = self.create_and_apply_recommended_preset(save_current=False)
         if ok:
             print(f"Remote Web: first-run recommended preset applied: {message}", flush=True)

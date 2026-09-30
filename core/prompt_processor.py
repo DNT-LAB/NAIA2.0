@@ -337,6 +337,16 @@ def _get_random_prompt_weight_raw(app_context, settings: Dict[str, Any], *, allo
     return raw
 
 
+def _source_sentence(context: PromptContext) -> str:
+    """source_row['sentence'] — 태그 뒤의 자연어 문장(Assist 결과의 '태그들, 문장'). 없으면 ''."""
+    row = getattr(context, 'source_row', None)
+    try:
+        value = row.get('sentence') if row is not None else None
+    except Exception:
+        return ''
+    return ' '.join(value.split()) if isinstance(value, str) else ''
+
+
 # LoRA 예약어 조각(lora:KW:강도, 관리형 ANIMA - core/anima_engine/prompt_loras.py)은 태그가 아니라 지시어다.
 _LORA_CONTROL_RE = re.compile(r"\s*lora:", re.IGNORECASE)
 
@@ -884,6 +894,14 @@ class PromptProcessor:
                 safe_print(f"🎨 {label} 모드: main_tags 가중치 {prompt_weight} 적용 — {run_count}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
             else:
                 safe_print(f"🎨 {label} 모드: main_tags 가중치 입력 {raw_prompt_weight} → 래핑 생략")
+
+        # 자연어 문장(source_row['sentence'] — Assist 의 '태그들, 문장')은 태그가 아니다. 태그 필터(저빈도 · 자동 숨김 · 사물 …) ·
+        # 가중치 래핑을 거치지 않고 여기서 메인 끝에 둔다 — 문장 조각이 '사전에 없는 태그' 로 지워졌다(사용자 제보 09-30,
+        # Remove Low-freq Tags). 비-NAI 는 리터럴 괄호만 이스케이프한다(태그와 같다 — 괄호가 가중치 문법이다).
+        # Boost v2 는 그 뒤에 붙는다(inject_block = 메인 끝 · 접지는 위의 boost_v2_main_tags = 태그만).
+        sentence = _source_sentence(context)
+        if sentence:
+            context.main_tags.append(sentence if is_nai else _escape_parens_in_content(sentence))
 
         # --- 이하 기존 로직 ---
         all_tags = context.get_all_tags()

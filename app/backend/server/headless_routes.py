@@ -193,7 +193,8 @@ def register_headless_routes(
     register_boost_v2_routes(app, context, run_in_thread=run_in_thread)
     register_anima_engine_routes(app, context, run_in_thread=run_in_thread)
     register_assist_v2_routes(app, context, run_in_thread=run_in_thread,
-                              clients=clients, start_generation_runner=ensure_generation_runner)
+                              clients=clients, start_generation_runner=ensure_generation_runner,
+                              broadcast_json=broadcast_json)
     register_tagger_routes(app, context, run_in_thread=run_in_thread)
     register_params_workflow_routes(
         app,

@@ -844,9 +844,15 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   /** [제출 | 이어서 질문] — 이어서 질문은 받은 결과(장면)가 있을 때만 누를 수 있다. 도는 동안 둘 다 잠근다 */
+  /** AI 모델이 없다(상태를 받았고 model_ready=false) — [제출] · [이어서 질문] 을 막는다(사용자 지정 09-30: 모델 없이 찾는 길은
+   *  제대로 작동하지 않는다). 서버도 막는다 — 상태를 못 받았으면 서버에 맡긴다 */
+  function modelMissing() {
+    return !!status && status.model_ready === false;
+  }
+
   function paintFollow() {
     if (!followBtn) return;
-    followBtn.disabled = busy || !canFollow();
+    followBtn.disabled = busy || !canFollow() || modelMissing();
     followBtn.textContent = busy && busyMode === 'followup' ? '고치는 중…' : '이어서 질문';
     if (sendBtn) sendBtn.textContent = busy && busyMode === 'search' ? '찾는 중…' : '제출';
   }
@@ -856,6 +862,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (busy) return;                        // [이어서 질문] 이 도는 중의 Enter 가 고칠 점만으로 새로 찾고 그 답을 버렸다(Codex 10차 F8)
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
+    if (modelMissing()) { toast('AI 모델이 없어 찾지 않습니다 — API 설정 › AI ASSIST 에서 받아 주세요', 'error'); return; }
     closePicker();
     const mine = ++askSeq;
     busy = true;
@@ -898,7 +905,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   /** [이어 고치기] — 받은 결과(고친 메인 · 캐릭터 칸 그대로) + 고칠 점. 실패하면 받은 결과를 그대로 두고 알린다.
    *  인원 · 이름 · 등급은 그 결과의 것을 이어 쓴다(서버에 인원 · 등급 정보를 주지 않는다 — 풀만 그 값으로 다시 판다). */
   async function followup() {
-    if (busy || !canFollow()) return;
+    if (busy || !canFollow() || modelMissing()) return;
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     const prev = result;
@@ -1058,7 +1065,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     // 요청이 끝났다 — 엔진을 올렸거나(첫 요청) 임대가 늘었다: [현재 모델] · [VRAM 회수] 를 지금 상태로(열 때만 읽었더니
     // 검색이 모델을 올렸는데도 '올라간 AI 모델이 없습니다' 로 잠겨 있었다, 09-28)
     if (!busy && open) void refreshLlm();
-    if (sendBtn) sendBtn.disabled = busy;
+    if (sendBtn) sendBtn.disabled = busy || modelMissing();
     paintFollow();                          // 단추 글(제출 · 이어서 질문 · 찾는 중… · 고치는 중…) · 이어서 질문 잠금
     if (busy && !result) body.innerHTML = '<div class="as-note">찾는 중…</div>';
   }
@@ -1138,8 +1145,12 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       <div class="as-actions">
         <button type="button" class="as-act as-act-main" data-as-generate ${can}
                 title="메인 프롬프트·캐릭터 칸은 그대로 두고, 이 결과(가상 프롬프트)로 한 장 생성합니다">생성</button>
+        <button type="button" class="as-act" data-as-generate-boost ${can}
+                title="[생성] 과 같되 Auto Boost 와 같은 길로 부스트한 뒤 한 장 생성합니다(Boost 설정의 섹션 · User preferences)">부스트 생성</button>
         <button type="button" class="as-act" data-as-apply ${can}
                 title="메인 = Random 과 같은 파이프라인(PE 앞뒤·자동 숨김) · 캐릭터 칸 = 기존은 비활성으로 보내고 덧붙입니다">프롬프트에 넣기</button>
+        <button type="button" class="as-act" data-as-apply-boost ${can}
+                title="[프롬프트에 넣기] 와 같되 Auto Boost 와 같은 길로 부스트한 뒤 넣습니다">부스트 넣기</button>
         <button type="button" class="as-act" data-as-copy ${can} title="클립보드로 복사">복사</button>
         ${modelButtonHtml()}${vramButtonHtml()}
       </div></div>`;
@@ -1202,10 +1213,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         ${g.note ? `<div class="as-note">${esc(g.note)}</div>` : ''}</div>`;
     }
     const model = r.model || {};
-    if (model.error) {
-      const why = model.code === 'model_missing' || model.code === 'engine_missing'
-        ? `${model.error} — 한국어 층만으로 찾았습니다.` : `모델을 부르지 못해 한국어 층만으로 찾았습니다 (${model.error}).`;
-      html += `<div class="as-note as-note-warn">${esc(why)}</div>`;
+    if (model.error) {                                   // 모델 없이는 서버가 찾지 않는다(09-30) — 남은 것은 알림만
+      html += `<div class="as-note as-note-warn">${esc(`AI 모델을 부르지 못했습니다 (${model.error}).`)}</div>`;
     }
     if (r.task !== 'scene') html += modelLineHtml();      // 장면이면 결과 줄 오른쪽 끝에 있다
     body.innerHTML = html;
@@ -1227,7 +1236,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         else if (p.characters?.[Number(key.slice(1))]) p.characters[Number(key.slice(1))].prompt = box.value;
         autoSize(box);
         const empty = !oneLine(p.main);
-        body.querySelectorAll('[data-as-generate], [data-as-apply], [data-as-copy]').forEach(b => { b.disabled = empty; });
+        body.querySelectorAll('[data-as-generate], [data-as-generate-boost], [data-as-apply], [data-as-apply-boost], [data-as-copy]')
+          .forEach(b => { b.disabled = empty; });
         // 고친 글은 같은 result 를 쥔 기록에도 들어 있다 — 새로고침에도 남게 조금 뒤에 저장한다
         clearTimeout(histTimer);
         histTimer = setTimeout(() => saveHistory(history), 400);
@@ -1264,7 +1274,9 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (t.closest('[data-as-model]')) { toggleLlmMenu(); return; }
     if (t.closest('[data-as-vram]')) { void unloadVram(); return; }
     if (t.closest('[data-as-generate]')) { void generateVirtual(); return; }
+    if (t.closest('[data-as-generate-boost]')) { void generateVirtual(true); return; }
     if (t.closest('[data-as-apply]')) { void applyPrompt(); return; }
+    if (t.closest('[data-as-apply-boost]')) { void applyPrompt(true); return; }
     if (t.closest('[data-as-copy]')) { void copyPrompt(); return; }
     const sus = t.closest('[data-as-sus]');
     if (sus) { restoreSuspicious(sus.dataset.asSus); return; }
@@ -1289,23 +1301,31 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     return oneLine(result?.prompt?.main);
   }
 
+  /** 받은 결과의 끝 문장(다듬기 · 이어서 질문 · 직접 모드) — 서버가 메인을 태그와 문장으로 가르는 힌트. 문장은 태그 필터
+   *  (Remove Low-freq Tags 등) 밖에서 메인 끝에 붙는다(09-30: ANIMA 에서 [생성] 한 프롬프트에 문장이 없었다) */
+  function resultSentence(r = result) {
+    return r?.followup?.sentence || r?.refine?.sentence || r?.direct_info?.sentence || '';
+  }
+
   function lockActions(on) {
     body.querySelectorAll('.as-act').forEach(b => { b.disabled = !!on; });
   }
 
   /** [생성] — 이 결과를 **가상 프롬프트**로 한 장 뽑는다. 메인 칸·캐릭터 칸은 그대로다
    *  (사용자 지정 2026-09-24: "사용자의 캐릭터 프롬프트를 간섭하면 곤란"). 서버가 메인은 이벤트 맵 [생성] 과 같은
-   *  바이패스로, 캐릭터는 이 요청에만 싣는다. 결과는 평소 생성처럼 Result·히스토리로 온다. */
-  async function generateVirtual() {
+   *  바이패스로, 캐릭터는 이 요청에만 싣는다. 결과는 평소 생성처럼 Result·히스토리로 온다.
+   *  [부스트 생성](boost, 사용자 지정 09-30) = 파이프라인 뒤 Auto Boost 와 같은 길로 부스트 — 안 되면 생성하지 않는다. */
+  async function generateVirtual(boost = false) {
     const main = mainPrompt();
     if (!main) return;
     lockActions(true);
+    if (boost) toast('부스트하는 중…', 'info');
     try {
       const data = await postJson('/api/assist/generate', {
-        main, characters: characterPrompts(), rating: result.rating || rating,
+        main, sentence: resultSentence(), characters: characterPrompts(), rating: result.rating || rating, boost,
       });
       const n = (data.characters || []).length;
-      toast(`생성을 요청했습니다 — 메인·캐릭터 칸은 그대로${n ? ` (가상 캐릭터 ${n}명)` : ''}`, 'success');
+      toast(`${boost ? '부스트해서 ' : ''}생성을 요청했습니다 — 메인·캐릭터 칸은 그대로${n ? ` (가상 캐릭터 ${n}명)` : ''}`, 'success');
     } catch (error) {
       toast(`생성하지 못했습니다 — ${error.message}`, 'error');
     } finally {
@@ -1313,20 +1333,25 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     }
   }
 
-  /** [프롬프트에 넣기] — 사용자가 **원할 때만** 칸에 넣는다. 메인은 Random 파이프라인, 캐릭터 칸은 기존을 비활성으로. */
-  async function applyPrompt() {
+  /** [프롬프트에 넣기] — 사용자가 **원할 때만** 칸에 넣는다. 메인은 Random 파이프라인, 캐릭터 칸은 기존을 비활성으로.
+   *  [부스트 넣기](boost, 사용자 지정 09-30) = 부스트한 뒤 넣는다 — 부스트가 안 되면 부스트 없이 넣고 까닭을 알린다. */
+  async function applyPrompt(boost = false) {
     const main = mainPrompt();
     if (!main) return;
     lockActions(true);
+    if (boost) toast('부스트하는 중…', 'info');
     try {
       const chars = characterPrompts();
       if (chars.length) {
         const sent = typeof applyCharacters === 'function' ? applyCharacters(chars) : false;
         if (!sent) throw new Error('캐릭터 칸에 넣지 못했습니다');
       }
-      const tags = main.split(',').map(t => t.trim()).filter(Boolean);
-      await postJson('/api/event-map/apply', { tags, rating: result.rating || rating });
-      toast(`프롬프트에 넣었습니다${chars.length ? ` · 캐릭터 ${chars.length}명(기존 칸은 비활성으로)` : ''}`, 'success');
+      const data = await postJson('/api/assist/apply', {
+        main, sentence: resultSentence(), rating: result.rating || rating, boost,
+      });
+      const tail = chars.length ? ` · 캐릭터 ${chars.length}명(기존 칸은 비활성으로)` : '';
+      if (data.warning) toast(`${data.warning} — 부스트 없이 넣었습니다${tail}`, 'warning');
+      else toast(`${boost ? '부스트해서 ' : ''}프롬프트에 넣었습니다${tail}`, 'success');
     } catch (error) {
       toast(`넣지 못했습니다 — ${error.message}`, 'error');
     } finally {
@@ -1381,14 +1406,16 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (noModel) {
       // 받는 곳은 API 설정 › AI ASSIST 한 곳(09-26) — 모델을 받으면 한국어 분석기(Kiwi)도 함께 설치한다(사용자 지정 09-28).
       // 여기서 받는 동안에도 창이 열려 있으면 다 받은 걸 알아채게 묻는다.
-      parts.push(`<div class="as-banner-row${noKiwi ? '' : ' as-banner-dim'}"><span>${noKiwi
+      parts.push(`<div class="as-banner-row"><span>${noKiwi
         ? 'AI 모델과 한국어 분석기가 없습니다 — 모델을 받으면 함께 설치합니다.'
-        : 'AI 모델이 없어 한국어 층만으로 찾습니다.'}</span>
+        : 'AI 모델이 없어 찾을 수 없습니다 — 모델을 받아 주세요.'}</span>
         <button type="button" data-as-llm-setup title="API 설정 › AI ASSIST">AI 모델 받기</button></div>`);
       schedulePoll();
     }
     banner.innerHTML = parts.join('');
     banner.hidden = !parts.length;
+    if (sendBtn) sendBtn.disabled = busy || noModel;      // 모델을 받았으면(상태 다시 읽기) 곧바로 푼다
+    paintFollow();
     fit();
   }
 

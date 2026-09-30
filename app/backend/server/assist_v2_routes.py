@@ -23,16 +23,23 @@ def register_assist_v2_routes(
     run_in_thread: Callable[..., Awaitable[Any]],
     clients: set[Any] | None = None,
     start_generation_runner: Callable[..., Any] | None = None,
+    broadcast_json: Callable[..., Awaitable[None]] | None = None,
 ) -> None:
     from app.backend.server.assist_v2_service import (
         AssistError,
+        apply_source_row,
         assist_names,
         assist_status,
+        boost_result,
         generation_request,
         get_kiwi_installer,
         run_assist,
         warm_assist,
     )
+
+    async def _broadcast(message: dict[str, Any]) -> None:
+        if clients is not None and broadcast_json is not None:
+            await broadcast_json(clients, message)
 
     @app.post("/api/assist")
     async def assist_route(request: Request):
@@ -53,7 +60,9 @@ def register_assist_v2_routes(
     async def assist_generate_route(request: Request):
         """[생성] Assist 결과를 **가상 프롬프트**로 한 장 생성한다 — 메인 프롬프트·캐릭터 칸은 그대로다
         (사용자 지정 2026-09-24). 메인은 이벤트 맵 [생성] 과 같은 바이패스(파이프라인·PE 앞뒤), 캐릭터는
-        이 요청에만 싣는다(`generation_request`)."""
+        이 요청에만 싣는다(`generation_request`). 끝의 문장은 태그 필터를 거치지 않고 메인 끝에(source_row['sentence']).
+        boost = [부스트 생성](사용자 지정 09-30) — 파이프라인 뒤 Auto Boost 와 같은 길로 부스트하고, 안 되면 생성하지 않는다
+        (부스트를 청했는데 부스트 없는 한 장을 뽑으면 시간 · Anlas 만 쓴다)."""
         try:
             payload = await request.json()
         except Exception:
@@ -73,6 +82,10 @@ def register_assist_v2_routes(
             if not processed.success:
                 return JSONResponse({"ok": False, "error": processed.error or "프롬프트를 만들지 못했습니다."},
                                     status_code=400)
+            if payload.get("boost"):
+                why = await boost_result(context, processed, update_context=False)
+                if why:
+                    return JSONResponse({"ok": False, "code": "boost_failed", "error": why}, status_code=409)
             # ⚠️ 명령에는 등급을 **비워서** 넘긴다 - 명령을 만드는 쪽이 source_row 의 등급으로 Quick Filter
             #    (검색 등급)를 바꾼다(set_active_ratings). 한 장 뽑았다고 사용자의 검색 조건이 바뀌면 안 된다.
             #    생성 기록(메타데이터)에는 원래 등급을 다시 싣는다.
@@ -97,7 +110,56 @@ def register_assist_v2_routes(
                 and getattr(context, "headless_generation_execute_enabled", False):
             start_generation_runner(context, clients)
         return {"ok": True, "requestId": request_id, "prompt": processed.prompt,
-                "characters": list(overrides.get("characters") or [])}
+                "characters": list(overrides.get("characters") or []), "boosted": bool(payload.get("boost"))}
+
+    @app.post("/api/assist/apply")
+    async def assist_apply_route(request: Request):
+        """[프롬프트에 넣기] · [부스트 넣기] — Assist 결과를 Random 과 같은 파이프라인(PE 앞뒤 · 자동 숨김 · remove_*)에 태워
+        메인 프롬프트로 보낸다(prompt_generated 브로드캐스트 — 예전 /api/event-map/apply 와 같은 일, 출처는 'assist').
+        끝의 문장은 태그 필터를 거치지 않고 메인 끝에(source_row['sentence']). boost 면 Auto Boost 와 같은 길로 부스트한 뒤
+        넣는다(사용자 지정 09-30) — 부스트가 안 되면 부스트 없이 넣고 까닭을 돌려준다(칸은 파이프라인에서 이미 바뀌었다 —
+        서버 상태와 화면을 맞춘다)."""
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "JSON 요청이 아닙니다."}, status_code=400)
+        try:
+            source_row = apply_source_row(context, payload)
+        except AssistError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        from app.backend.server.generation_commands import _broadcast_wildcard_state, random_service
+
+        request_id = str(payload.get("requestId") or uuid.uuid4().hex)
+        try:
+            result = await run_in_thread(
+                random_service(context).generate_from_source_row,
+                source_row, random_request_id=request_id, source="assist", update_context=True)
+        except Exception as exc:                                  # pragma: no cover
+            print(f"Headless Remote: assist apply failed - {exc}", flush=True)
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        if not result.success:
+            return JSONResponse({"ok": False, "error": result.error or "프롬프트를 만들지 못했습니다."}, status_code=400)
+        warning = None
+        if payload.get("boost"):
+            warning = await boost_result(context, result, update_context=True)
+            if warning is None:
+                try:
+                    context.save_remote_ui_state()                # 파이프라인이 저장한 것은 부스트 전 글이다
+                except Exception:
+                    pass
+        await _broadcast(result.websocket_payload())
+        for message in result.extra_messages:
+            await _broadcast(message)
+        if clients is not None:
+            try:
+                await _broadcast_wildcard_state(context, clients)
+            except Exception:
+                pass
+        out = {"ok": True, "requestId": request_id, "prompt": result.prompt, "promptRunId": result.prompt_run_id,
+               "boosted": bool(payload.get("boost")) and warning is None}
+        if warning:
+            out["warning"] = warning
+        return out
 
     @app.post("/api/assist/names")
     async def assist_names_route(request: Request):

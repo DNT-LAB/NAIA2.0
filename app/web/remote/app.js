@@ -1188,7 +1188,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260930-pref1')
+import('./js/features/assistPanel.mjs?v=20260930-boost1')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
@@ -5229,6 +5229,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     || source === 'auto_generate'
     || source === 'result_reroll'
     || source === 'event_map'     // Ctrl+E 실제 조합 [적용] - Random 과 같은 파이프라인 산출물
+    || source === 'assist'        // Assist [프롬프트에 넣기] · [부스트 넣기](/api/assist/apply) - 같은 파이프라인 산출물
     || source === 'storyteller'   // RC-3: 스토리텔러 자동생성 프롬프트도 좌측 패널에 반영
     || source === 'automation'    // RC-3: 자동화 프롬프트도 좌측 패널에 반영
   );

@@ -416,11 +416,7 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
     """
     if not isinstance(payload, dict):
         raise AssistError("요청 형식이 잘못됐습니다.")
-    tags = [t.strip() for t in str(payload.get("main") or "").split(",") if t.strip()]
-    if not tags:
-        raise AssistError("생성할 프롬프트가 없습니다.")
-    if len(tags) > 200:
-        raise AssistError("프롬프트는 200태그까지입니다.")
+    tags, sentence = _generation_main(context, payload, "생성할 프롬프트가 없습니다.")
     rating = str(payload.get("rating") or "g").strip().lower()[:1]
     if rating not in ("g", "s", "q", "e"):
         rating = "g"
@@ -434,6 +430,8 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
     tags += [t for t in GENERATE_RATING_TAGS[rating] if t not in have]
     source_row = {"general": ", ".join(tags), "rating": rating,
                   "character": None, "copyright": None, "artist": None, "meta": None, "assist_combo": True}
+    if sentence:
+        source_row["sentence"] = sentence
     overrides: dict[str, Any] = {"auto_generate": False}
     if str(context.get_api_mode() or "").upper() == "NAI":
         overrides.update({
@@ -443,6 +441,75 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
             "_skip_character_reference_late_binding": True,   # 레퍼런스는 사용자 슬롯의 캐릭터 것이다
         })
     return source_row, overrides
+
+
+def _generation_main(context: Any, payload: dict[str, Any], empty: str) -> tuple[list[str], str]:
+    """[생성] · [프롬프트에 넣기] 의 메인 = 태그들, 끝의 자연어 문장(다듬기 · 이어서 질문 · 직접 모드가 쓴 것).
+
+    문장은 source_row['sentence'] 로 따로 싣는다 — 파이프라인 끝(core/prompt_processor 최종 포맷)에서 메인 끝에 붙어 태그
+    필터를 거치지 않는다. 사용자 제보 09-30: ANIMA 에서 [생성] 한 프롬프트에 문장이 없었다 — PE 의 Remove Low-freq Tags 가
+    문장 조각을 '사전에 없는 태그' 로 지웠다(등급 · 모드가 아니라 그 세션의 PE 설정 탓 — NAI 프리셋은 그 칸이 꺼져 있었다).
+    가르기는 이어서 질문과 같은 split_main — 화면이 보낸 받은 결과의 문장이 힌트다(고쳤으면 대문자 · 낱말 수로)."""
+    from core.assist_followup import split_main, tag_key
+
+    main = str(payload.get("main") or "")
+    pieces = [t.strip() for t in main.split(",") if t.strip()]
+    if not pieces:
+        raise AssistError(empty)
+    if len(pieces) > 200:
+        raise AssistError("프롬프트는 200태그까지입니다.")
+    manager = getattr(context, "filter_data_manager", None)       # 이미 올라온 것만(없으면 가르기는 대문자 · 낱말 수로)
+    known = getattr(manager, "_valid_tag_whitelist", None) or frozenset()
+    return split_main(main, str(payload.get("sentence") or "")[:600],
+                      is_tag=(lambda part: tag_key(part) in known) if known else None)
+
+
+def apply_source_row(context: Any, payload: Any) -> dict[str, Any]:
+    """[프롬프트에 넣기] · [부스트 넣기] — Random 과 같은 파이프라인에 태울 행. 예전 /api/event-map/apply 의 행과 같은 열이고
+    (등급 태그는 붙이지 않는다) 끝의 문장만 따로 싣는다(_generation_main)."""
+    if not isinstance(payload, dict):
+        raise AssistError("요청 형식이 잘못됐습니다.")
+    tags, sentence = _generation_main(context, payload, "넣을 프롬프트가 없습니다.")
+    rating = str(payload.get("rating") or "").strip().lower()[:1]
+    if rating not in ("g", "s", "q", "e"):
+        rating = "s"
+    row: dict[str, Any] = {"general": ", ".join(tags), "rating": rating,
+                           "character": None, "copyright": None, "artist": None, "meta": None, "assist_combo": True}
+    if sentence:
+        row["sentence"] = sentence
+    return row
+
+
+async def boost_result(context: Any, result: Any, *, update_context: bool) -> str | None:
+    """[부스트 생성] · [부스트 넣기](사용자 지정 09-30) — Auto Boost 와 같은 길(apply_boost_v2: 태그로 섹션을 받아 메인 끝에).
+    Auto Boost 토글과 무관하게 이번 한 번. 되면 None(result.prompt 가 부스트본), 안 되면 까닭."""
+    from app.backend.server.boost_v2_service import apply_boost_v2, boost_v2_settings, get_boost_runtime
+    from core.boost_v2 import enabled_sections
+
+    settings = boost_v2_settings(context)
+    if not enabled_sections(settings):
+        return "Boost 섹션이 모두 꺼져 있습니다 — Boost 설정에서 하나 이상 켜 주세요."
+    try:
+        get_boost_runtime(context, settings).hold("assist", ASSIST_LEASE_SECONDS)    # 부스트 뒤 엔진은 Assist 임대로 내린다
+    except Exception:
+        pass
+    if await apply_boost_v2(context, result, settings, update_context=update_context):
+        return None
+    meta = getattr(getattr(result, "context", None), "metadata", None)
+    info = meta.get("boost_v2") if isinstance(meta, dict) else None
+    error = str(info.get("error") or "") if isinstance(info, dict) and not info.get("ok") else ""
+    return f"부스트하지 못했습니다 — {error}" if error else "부스트하지 못했습니다 — 부스트할 태그가 없거나 AI 모델이 답하지 않았습니다."
+
+
+def _model_unavailable(info: dict[str, Any]) -> dict[str, Any]:
+    """AI 모델 없이는 찾지 않는다(사용자 지정 09-30: '모델 Load 가 안 된 상태 / 모델 없이 검색하는 기능을 차단 — 제대로 작동하지
+    않음'). 예전엔 모델이 없거나 부르지 못하면 한국어 층만으로 찾았다."""
+    code = str(info.get("code") or "model_failed")
+    if code in ("model_missing", "engine_missing"):
+        error = f"{info.get('error')} AI 모델 없이는 찾지 않습니다."
+    else:
+        error = f"AI 모델을 부르지 못해 찾지 않았습니다 — 잠시 뒤 다시 시도해 주세요. ({info.get('error') or '모델 호출 실패'})"
+    return {"ok": False, "code": code, "error": error, "model": info}
 
 
 def _literal(context: Any, text: str) -> tuple[str | None, dict[str, Any]]:
@@ -538,7 +605,7 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
 
 def _call_model(context: Any, text: str, previous: dict[str, Any] | None,
                 literal: str | None = None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """E2B 1회. (route | None, 기록). 엔진·모델이 없거나 실패하면 route=None — 한국어 층만으로 간다."""
+    """E2B 1회. (route | None, 기록). 엔진·모델이 없거나 실패하면 route=None — 부르는 쪽이 찾지 않는다(모델 필수, 09-30)."""
     from app.backend.server.boost_v2_service import get_boost_runtime
     from core.assist_v2 import SYSTEM_PROMPT, parse_route, user_message
 
@@ -895,13 +962,14 @@ def _direct(context: Any, req: dict[str, Any], started: float) -> dict[str, Any]
                         ad.direct_message(req["text"], req["rating"], names, ", ".join(people), situation,
                                           dictionary),
                         ad.direct_grammar(), max_tokens=320)
-    got = ad.parse_direct(reply) if reply is not None else None
+    if reply is None:
+        return _model_unavailable(info)
+    got = ad.parse_direct(reply)
     out: dict[str, Any] = {"ok": True, "task": "scene", "goal": "generate", "rating": req["rating"], "direct": True,
                            "names": _names_out(layer, chars, refused), "suggested_names": [], "relations": [],
                            "model": info, "leftovers": [], "actions": [], "samples": []}
     if got is None or not got.tags:
-        out["message"] = ("AI 모델이 답하지 않아 만들지 못했습니다." if reply is None
-                          else "AI 모델의 답을 읽지 못했습니다 — 다시 시도해 주세요.")
+        out["message"] = "AI 모델의 답을 읽지 못했습니다 — 다시 시도해 주세요."
         out["prompt"] = {"main": "", "characters": []}
     else:
         kept: list[str] = []
@@ -1083,12 +1151,6 @@ def _followup(context: Any, req: dict[str, Any], started: float) -> dict[str, An
     return out
 
 
-def _fallback_route(ka: Any) -> dict[str, Any]:
-    """모델 없이: 한국어 층이 찾은 것만으로 장면 검색."""
-    return {"task": "scene" if (ka.specific or ka.verb_tags) else "other", "goal": "find", "characters": [],
-            "actions": [], "include": [], "exclude": [], "name": "", "name_ko": ""}
-
-
 def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     from core.assist_english import en_key
     from core.assist_v2 import GUIDE, drop_tags, drop_unstated_family, make_recap, merge, off_rating, swap_for_rating
@@ -1118,12 +1180,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     korean_ms = round((time.perf_counter() - t) * 1000, 1)
     literal, literal_info = _literal(context, req["text"]) if req["literal"] else (None, {})
     route, model = _call_model(context, req["text"], req["previous"], literal=literal)
-    chooser, choose_state = None, None
-    vocab = _tag_vocab(context, layer)
     if route is None:
-        route = _fallback_route(ka)
-    else:
-        chooser, choose_state = _make_chooser(context, layer, ka, req, route, vocab)
+        return _model_unavailable(model)
+    vocab = _tag_vocab(context, layer)
+    chooser, choose_state = _make_chooser(context, layer, ka, req, route, vocab)
     rules = layer.rules
     merged = merge(route, ka, vocab, text=req["text"], generic=rules["generic_tags"],
                    simile_particles=rules["simile_particles"],
@@ -1847,7 +1907,7 @@ def _first_name(layer: Any, text: str) -> str:
 
 
 def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float) -> dict[str, Any]:
-    """여러 줄 요청 -> 메인·캐릭터 프롬프트 + 설명. 모델이 없으면 한국어 근거만으로(못 찾은 절은 설명에 남긴다).
+    """여러 줄 요청 -> 메인·캐릭터 프롬프트 + 설명. 절 추측을 모델이 못 하면(없음 · 실패) 찾지 않는다(모델 필수, 09-30).
     줄에 섞어 쓴 영문은 그 줄의 칸에 적힌 그대로 싣는다(core/assist_english, 09-26)."""
     from core import assist_compose as ac
     from core.assist_english import en_key, english_only, english_parts
@@ -1907,9 +1967,9 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
         text, info = _chat(context, ac.GUESS_SYSTEM, ac.guess_message([d.ko for d in details]),
                            ac.guess_grammar(len(details)), max_tokens=60 + 30 * len(details))
         model["guess"] = info
-        if text is None and info.get("error"):
-            model.update(error=info["error"], code=info.get("code"))
-        guesses = ac.parse_guesses(text, len(details)) if text is not None else [[] for _ in details]
+        if text is None:
+            return _model_unavailable(info)
+        guesses = ac.parse_guesses(text, len(details))
         for d, found in zip(details, guesses):
             for en in found or [""]:
                 subs.append(ac.Detail(owner=d.owner, ko=d.ko, en=en))

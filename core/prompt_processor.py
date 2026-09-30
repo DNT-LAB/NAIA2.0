@@ -347,6 +347,20 @@ def _source_sentence(context: PromptContext) -> str:
     return ' '.join(value.split()) if isinstance(value, str) else ''
 
 
+def _source_rating_tags(context: PromptContext) -> list[str]:
+    """source_row['rating_tags'] — Assist [생성] 이 붙이는 등급 태그(safe · rating:general …). 목록 또는 쉼표 글. 없으면 []."""
+    row = getattr(context, 'source_row', None)
+    try:
+        value = row.get('rating_tags') if row is not None else None
+    except Exception:
+        return []
+    if isinstance(value, str):
+        value = value.split(',')
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [t.strip() for t in value if isinstance(t, str) and t.strip()]
+
+
 # LoRA 예약어 조각(lora:KW:강도, 관리형 ANIMA - core/anima_engine/prompt_loras.py)은 태그가 아니라 지시어다.
 _LORA_CONTROL_RE = re.compile(r"\s*lora:", re.IGNORECASE)
 
@@ -899,6 +913,14 @@ class PromptProcessor:
         # 가중치 래핑을 거치지 않고 여기서 메인 끝에 둔다 — 문장 조각이 '사전에 없는 태그' 로 지워졌다(사용자 제보 09-30,
         # Remove Low-freq Tags). 비-NAI 는 리터럴 괄호만 이스케이프한다(태그와 같다 — 괄호가 가중치 문법이다).
         # Boost v2 는 그 뒤에 붙는다(inject_block = 메인 끝 · 접지는 위의 boost_v2_main_tags = 태그만).
+        # 등급 태그(source_row['rating_tags'] — Assist [생성])도 같은 까닭으로 필터 밖에서 문장 앞에 — Remove Low-freq Tags 가
+        # rating:sensitive 를 지웠다(사용자 결정 09-30). 앞뒤 칸에 이미 있으면(PE pre/post · 적힌 태그) 다시 붙이지 않는다
+        present = {t.strip().lower() for t in context.prefix_tags + context.main_tags + context.postfix_tags
+                   if isinstance(t, str)}
+        for tag in _source_rating_tags(context):
+            if tag.lower() not in present:
+                context.main_tags.append(tag if is_nai else _escape_parens_in_content(tag))
+                present.add(tag.lower())
         sentence = _source_sentence(context)
         if sentence:
             context.main_tags.append(sentence if is_nai else _escape_parens_in_content(sentence))

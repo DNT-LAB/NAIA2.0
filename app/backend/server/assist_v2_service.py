@@ -425,11 +425,15 @@ def generation_request(context: Any, payload: Any) -> tuple[dict[str, Any], dict
             isinstance(c, str) and len(c) <= 600 for c in raw_chars):
         raise AssistError("캐릭터 프롬프트가 잘못됐습니다.")
     characters = [c.strip() for c in raw_chars if c.strip()]
-    # 등급 태그를 뒤에(사용자 지정 09-26) — 이미 적힌 것은 다시 붙이지 않는다(영문으로 nsfw 를 적었을 때)
+    # 등급 태그를 뒤에(사용자 지정 09-26) — 이미 적힌 것은 다시 붙이지 않는다(영문으로 nsfw 를 적었을 때). 태그 칸(general)이
+    # 아니라 따로 싣는다 — PE 의 Remove Low-freq Tags 가 rating:sensitive 를 지웠다(사용자 결정 09-30: 문장처럼 필터 밖으로).
+    # 최종 포맷(core/prompt_processor)이 '태그들, 등급 태그, 문장' 으로 붙인다
     have = {t.lower() for t in tags}
-    tags += [t for t in GENERATE_RATING_TAGS[rating] if t not in have]
+    rating_tags = [t for t in GENERATE_RATING_TAGS[rating] if t not in have]
     source_row = {"general": ", ".join(tags), "rating": rating,
                   "character": None, "copyright": None, "artist": None, "meta": None, "assist_combo": True}
+    if rating_tags:
+        source_row["rating_tags"] = rating_tags
     if sentence:
         source_row["sentence"] = sentence
     overrides: dict[str, Any] = {"auto_generate": False}

@@ -80,6 +80,13 @@ const ADV_CSS = `
 }
 .as-line textarea.as-edit:hover { border-color: var(--border-dim); }
 .as-line textarea.as-edit:focus { outline: none; border-color: var(--text-dim); background: rgba(255,255,255,0.03); }
+.as-sus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; margin-top: 6px; }
+.as-sus .as-k { margin-right: 2px; color: #f0c674; }
+.as-sus-chip {
+  padding: 1px 7px; border: 1px dashed rgba(230,168,74,0.6); border-radius: 999px; background: rgba(230,168,74,0.08);
+  color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+}
+.as-sus-chip:hover { border-style: solid; color: var(--text-primary); background: rgba(230,168,74,0.18); }
 .as-hist { padding: 6px 10px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-muted); font-size: 10px; }
 .as-hist-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .as-hist-head b { color: var(--text-primary); font-size: 10.5px; }
@@ -1046,7 +1053,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       notes.push('<div class="as-note">인원을 확실히 못 셌습니다 — 위의 [여 · 남]으로 정해 주세요.</div>');
     }
     const can = p.main ? '' : 'disabled';
-    return `<div class="as-res">${lines.join('')}<div class="as-meta">${meta.join(' · ')}</div>${notes.join('')}
+    return `<div class="as-res">${lines.join('')}<div class="as-meta">${meta.join(' · ')}</div>${suspiciousHtml(r)}${notes.join('')}
       ${explainHtml(r.explain)}
       <div class="as-actions">
         <button type="button" class="as-act as-act-main" data-as-generate ${can}
@@ -1056,6 +1063,35 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         <button type="button" class="as-act" data-as-copy ${can} title="클립보드로 복사">복사</button>
         ${modelButtonHtml()}${vramButtonHtml()}
       </div></div>`;
+  }
+
+  /** Suspicious — 추천에 들어갔다가 빠진 태그(다듬기 · 뜻 검사 · 가족 게이트). 눌러서 메인에 다시 넣는다(사용자 지정 09-30) */
+  function suspiciousHtml(r) {
+    const items = (r.suspicious || []).filter(s => s && s.tag);
+    if (!items.length) return '';
+    return `<div class="as-sus"><span class="as-k" title="추천에 들어갔다가 빠진 태그 — 눌러서 메인에 다시 넣습니다">Suspicious</span>${
+      items.map(s => `<button type="button" class="as-sus-chip" data-as-sus="${esc(s.tag)}"
+        title="${esc(s.why || '')} — 눌러서 메인에 넣기">${esc(s.tag)}</button>`).join('')}</div>`;
+  }
+
+  /** Suspicious 칩 — 메인 칸에 다시 넣는다. 메인 끝의 문장(다듬기)이 있으면 그 앞에. 넣은 칩은 결과 · 기록에서도 뺀다 */
+  function restoreSuspicious(tag) {
+    const box = body.querySelector('[data-as-edit="main"]');
+    if (!result || !box || box.readOnly || !tag) return;
+    const have = oneLine(box.value).split(',').map(t => t.trim().toLowerCase());
+    if (!have.includes(tag.toLowerCase())) {
+      const text = box.value.replace(/[\s,]+$/, '');
+      const sentence = String(result.refine?.sentence || '').trim();
+      const at = sentence ? text.lastIndexOf(sentence) : -1;
+      box.value = at > 0 ? `${text.slice(0, at).replace(/[\s,]+$/, '')}, ${tag}, ${text.slice(at)}`
+        : (text ? `${text}, ${tag}` : tag);
+      box.dispatchEvent(new Event('input', { bubbles: true }));   // 결과 · 기록 저장 · 단추 · 높이는 칸의 input 이 맡는다
+    }
+    result.suspicious = (result.suspicious || []).filter(s => s.tag !== tag);
+    const chip = [...body.querySelectorAll('[data-as-sus]')].find(b => b.dataset.asSus === tag);
+    const row = chip?.closest('.as-sus');
+    chip?.remove();
+    if (row && !row.querySelector('[data-as-sus]')) row.remove();
   }
 
   function rowsHtml(items, caption) {
@@ -1152,6 +1188,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     if (t.closest('[data-as-generate]')) { void generateVirtual(); return; }
     if (t.closest('[data-as-apply]')) { void applyPrompt(); return; }
     if (t.closest('[data-as-copy]')) { void copyPrompt(); return; }
+    const sus = t.closest('[data-as-sus]');
+    if (sus) { restoreSuspicious(sus.dataset.asSus); return; }
     const example = t.closest('[data-as-example]');
     if (example) {
       input.value = example.dataset.asExample;

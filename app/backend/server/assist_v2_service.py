@@ -1135,7 +1135,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
         merged.task = "scene"                    # 영문 태그만 적은 요청(1girl, crying, prison cell) — 장면으로 싣는다(09-26)
         merged.log.append("task:scene(영문)")
     t_sense = time.perf_counter()
-    _sense_check(context, layer, ka, merged, vocab)
+    # 추천에 들어갔다가 빠진 태그 — 화면이 Suspicious 칩으로 보여 눌러서 다시 넣게 한다(사용자 지정 09-30: 다듬기가 '하늘을
+    # 나는' 의 flying 을 뺐다). 모델 항목이 병합에서 '요청에 없음' 으로 버려진 것은 넣지 않는다(대개 지시문 예시 흉내다)
+    suspicious = [{"tag": old, "why": f"뜻 검사: {word} -> {new}"}
+                  for word, old, new in _sense_check(context, layer, ka, merged, vocab)]
     sense_ms = round((time.perf_counter() - t_sense) * 1000, 1)
     # 미번역 낱말 되살리기(09-26 첫 마일스톤) — 뜻 검사 뒤 · 등급 게이트 앞. 모델이 없으면 건너뛴다(고를 수 없다 — 지어내지 않는다)
     recover: dict[str, Any] | None = None
@@ -1155,9 +1158,12 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka,
                                    keep=(recover or {}).get("added") or ())
                            if req["refine"] and merged.task == "scene" else (None, {}))
+    suspicious += [{"tag": t, "why": "다듬기가 뺐다"} for t in (refine or {}).get("removed") or ()]
     _add_character_features(context, merged)
     swap_for_rating(merged, req["rating"])      # Q · E 의 tied up (nonsexual) -> restrained(사용자 제보 09-28)
+    before = _placed_tags(merged)
     drop_unstated_family(merged, req["text"])   # 누나 · 언니 -> sisters(요청이 자매라고 안 했다, 09-29)
+    suspicious += [{"tag": t, "why": "요청이 가족 사이라고 하지 않았다"} for t in before if t not in _placed_tags(merged)]
     out: dict[str, Any] = {
         "ok": True, "task": merged.task, "goal": merged.goal, "rating": req["rating"],
         # 인물 = 고른 캐릭터(후보 전체 — 화면이 목록을 그린다) + 받지 못한 선택(chosen=false — 화면이 그 선택을 푼다)
@@ -1195,8 +1201,28 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
     if merged.task in ("scene", "tag"):
         partition = (out.get("persons") or {}).get("partition", "unknown")
         out["recap"] = make_recap(merged, partition=partition, rating=req["rating"])
+    if merged.task == "scene":
+        out["suspicious"] = _still_missing(suspicious, out.get("prompt") or {})
     _with_rating_note(out, req["rating"], dropped)
     return out
+
+
+def _placed_tags(merged: Any) -> list[str]:
+    """지금 실린 태그 전부(층 · 인물 속성 · 관계 동작) — 순서대로, 겹침 없이."""
+    return list(dict.fromkeys(merged.all_tags() + [a for c in merged.characters for a in c.attrs]
+                              + [r[1] for r in merged.relations]))
+
+
+def _still_missing(items: list[dict[str, str]], prompt: dict[str, Any]) -> list[dict[str, str]]:
+    """빠진 태그 중 최종 프롬프트(메인 · 캐릭터 칸)에 **없는** 것만 — 다른 길로 도로 실렸으면 의심할 것이 없다. 태그마다 하나."""
+    parts = [str(prompt.get("main") or "")] + [str((c or {}).get("prompt") or "") for c in prompt.get("characters") or []]
+    shown = {t.strip().lower() for part in parts for t in part.split(",")}
+    out: dict[str, dict[str, str]] = {}
+    for item in items:
+        tag = str(item.get("tag") or "").strip()
+        if tag and tag.lower() not in shown and tag not in out:
+            out[tag] = {"tag": tag, "why": str(item.get("why") or "")}
+    return list(out.values())
 
 
 def _add_character_features(context: Any, merged: Any) -> None:

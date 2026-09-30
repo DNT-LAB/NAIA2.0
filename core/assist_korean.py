@@ -33,6 +33,9 @@ FUNCTIONAL_PREFIXES = ("VV", "VA", "VX", "EC", "EF", "ETM", "ETN", "JKS", "JKO",
                        "XSA", "EP")
 ROLE_OF_PARTICLE = {"JKS": "S", "JKO": "O", "JKB": "D", "JKG": "G", "JX": "S", "JC": "C"}
 DATIVE_FORMS = frozenset({"에게", "한테", "께", "에게서", "한테서"})
+# 장소 · 출발점 조사 — 이 논항은 동사의 뜻을 바꾸지 않는다(길에서 뒤돌아보기 · 위에서 내려다보기). 논항 구가 사전에 있어도
+# 맨 동사 구를 그대로 묻는다(KoreanLayer.analyze 의 framed).
+PLACE_PARTICLES = frozenset({"에서", "에게서", "한테서"})
 # 이름 뒤에 붙어 나오는 조사(긴 것부터) — Kiwi 가 모르는 성 뒤에서 '카나데가' 처럼 묶어 낼 때 떼어 낸다
 GLUED_PARTICLES = (("에게서", "JKB"), ("한테서", "JKB"), ("에게", "JKB"), ("한테", "JKB"), ("께서", "JKS"),
                    ("이랑", "JC"), ("하고", "JC"), ("랑", "JC"), ("와", "JC"), ("과", "JC"), ("께", "JKB"),
@@ -793,6 +796,11 @@ class KoreanLayer:
                 out.viewer.append(tag)
                 out.notes.append(f"시청자:{tag}")
         consumed: set[str] = set()          # 사전 구가 가져간 동사 줄기 — 동사 사전으로 한 번 더 넣지 않는다
+        # 논항(에 · 에게 · 조사 없음)이 붙은 구(테이블에 기대기 -> leaning on table)가 가져간 동사 줄기 — 맨 동사 구는 묻지
+        # 않는다. 맨 '기대기' 의 1순위는 게시물이 가장 많은 leaning on person 이라 혼자 기댄 소녀에게 사람이 붙었다(사용자
+        # 제보 09-30 · 위에 올라타기엔 penis riding). 논항 구가 사전에 없거나 장소(에서)면 맨 동사를 그대로 묻는다 — 긴 구가
+        # 먼저 돌므로 맨 동사 차례엔 이미 안다.
+        framed: set[str] = set()
         spans = _phrase_spans(toks, self._filler, self.rules["passive_suffixes"], self.rules["passive_exceptions"])
         # 제 꼴(수동 꼴) 그대로 사전에 있는 동사는 능동 꼴을 묻지 않는다 — 묶여 -> 묶이기(tied up) 인데 묶기(tying)가
         # 따라 들어왔다(사용자 요청 09-24). 실측: 두 꼴이 다 키워드인 쌍 15개 모두 제 꼴이 맞다(먹이기 feeding / 먹기 eating
@@ -807,6 +815,8 @@ class KoreanLayer:
                 continue
             if kind == "verb_arg":
                 continue                    # 논항이 있는 절의 맨 동사는 모호하므로 모델 근거로만 남긴다
+            if kind == "verb" and stem in framed:
+                continue
             if kind == "active" and self._lexical_noun(span.split()[-1]):
                 continue                    # 능동 꼴이 따로 있는 명사다 — 눈물 고인 -> 고이 -> 고기 = meat(사용자 제보 09-24)
             if not tags or tags[0] in out.blocked or tags[0] in out.covers:
@@ -815,6 +825,8 @@ class KoreanLayer:
                 out.phrases[compact(span)] = tags[0]
                 if kind != "noun":
                     consumed.add(stem)
+                    if kind == "verb_object" and span.split()[-2] not in PLACE_PARTICLES:
+                        framed.add(stem)
                     if tags[0] not in out.verb_phrases:
                         out.verb_phrases.append(tags[0])
         out.phrase_stems = consumed

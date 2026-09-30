@@ -383,16 +383,20 @@ class HeadlessResultStore:
         """LoRA 창 PNG 칸의 [히스토리] 후보 - 그 LoRA 를 켜고 만든 그림이 앞, 그다음 다른 그림(각각 새것부터).
 
         켰는지는 생성이 큐에 들어갈 때 요청에 박힌 체인(`_anima_lora_chain`)으로 본다 - 지금 창의 체인이 아니다.
+        프롬프트의 lora:예약어(09-30)로 켠 것은 엔진이 실제로 쓴 목록(`_anima_meta.loras`)에 있다.
         """
         name = str(name or "").strip()
         with self._mutation_lock:
             items = list(self._items)
         rows = []
         for item in items:
-            chain = (item.generation_params or {}).get("_anima_lora_chain")
-            used = bool(name) and isinstance(chain, list) and any(
+            params = item.generation_params or {}
+            chain = params.get("_anima_lora_chain")
+            applied = (params.get("_anima_meta") or {}).get("loras") if isinstance(params.get("_anima_meta"), dict) else None
+            used = bool(name) and (isinstance(chain, list) and any(
                 isinstance(entry, dict) and entry.get("name") == name and entry.get("enabled", True) is not False
-                for entry in chain)
+                for entry in chain) or isinstance(applied, list) and any(
+                isinstance(entry, dict) and entry.get("name") == name for entry in applied))
             rows.append({"history_id": item.history_id, "thumb_url": f"/api/history/thumb/{item.history_id}",
                          "zoom_url": f"/api/history/thumb/{item.history_id}?size=640", "used": used,
                          "created_at": item.created_at.isoformat()})

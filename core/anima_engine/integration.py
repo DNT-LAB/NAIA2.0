@@ -7,7 +7,8 @@ from pathlib import Path
 from .manifest import MANAGED_CREDENTIAL, MODELS
 from .profile import SLOTS, compile_graph, validate_request_slots
 from .runtime import INSTALLING, REGISTRY_LOCK, ManagedEngineError, get_runtime
-from .settings import load_settings, lora_catalog, quick_receipt, unet_catalog, verified_hash
+from .prompt_loras import PromptLoraError, extract_prompt_loras, merge_prompt_loras
+from .settings import load_settings, lora_catalog, lora_keyword_map, quick_receipt, unet_catalog, verified_hash
 
 
 def save_root_of(context):
@@ -80,6 +81,12 @@ def prepare_managed_request(context, params):
     settings = load_settings(save_root_of(context))
     catalog = {x["name"]: x for x in lora_catalog(settings)}
     chain = copy.deepcopy(params.get("_anima_lora_chain", settings.lora_chain))
+    # 프롬프트의 lora:예약어:강도(09-30) - 와일드카드가 다 풀린 글에서. 원문(input)은 그대로 두고 엔진 글에서만 뺀다.
+    try:
+        text, prompt_loras = extract_prompt_loras(params.get("input"), lora_keyword_map(settings))
+    except PromptLoraError as exc:
+        raise ManagedEngineError(exc.code, exc.message, exc.token) from None
+    chain = merge_prompt_loras(chain, prompt_loras)
     for item in chain:
         if not item.get("enabled", True):
             continue
@@ -96,7 +103,8 @@ def prepare_managed_request(context, params):
     model = params.get("_anima_model") or resolve_model(context, params.get("model"))
     if model not in models:
         raise ManagedEngineError("MODEL_NOT_FOUND", "ANIMA 모델 파일을 찾지 못했습니다.", model)
-    compiled = compile_graph(params, chain, available_loras={k for k, v in catalog.items() if not v["conflict"]},
+    compiled = compile_graph({**params, "input": text}, chain,
+                             available_loras={k for k, v in catalog.items() if not v["conflict"]},
                              model=model, available_models=models)
     runtime = get_runtime(context)
     if runtime is None:

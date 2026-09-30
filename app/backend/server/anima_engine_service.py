@@ -16,7 +16,8 @@ from core.anima_engine.settings import (consent_agreed, license_bundle, license_
                                         quick_receipt, read_json, record_consent, save_lora_chain, save_settings,
                                         unet_catalog)
 from core.anima_engine.settings import (delete_lora_thumb, lora_folder, lora_thumb, lora_triggers,
-                                        png_from_image, put_lora_thumb, read_lora_thumb)
+                                        png_from_image, put_lora_thumb, read_lora_thumb, set_lora_keyword)
+from core.anima_engine.profile import ProfileError
 
 _SERVICES = {}
 _LOCK = RLock()
@@ -244,6 +245,7 @@ class AnimaEngineService:
         settings = load_settings(self.save_root)
         entries = lora_catalog(settings)
         available = [{**{k: v for k, v in x.items() if k != "path"},
+                      "keyword": (settings.lora_keywords or {}).get(x["name"], ""),
                       "triggers": lora_triggers(x["path"]) if not x["conflict"] else [],
                       "thumb": lora_thumb(settings, x)[1]} for x in entries]
         return {"ok": True, "available": available,
@@ -252,6 +254,19 @@ class AnimaEngineService:
     def put_loras(self, chain):
         chain, warnings = save_lora_chain(self.save_root, chain)
         return {"ok": True, "chain": chain, "warnings": warnings}
+
+    def put_keyword(self, body):
+        # LoRA 예약어(09-30) - 프롬프트에 lora:예약어:강도 로 적어 켠다. 빈 값이면 지운다.
+        name, keyword = str(body.get("name") or ""), str(body.get("keyword") or "").strip()
+        try:
+            keywords = set_lora_keyword(self.save_root, name, keyword)
+        except ProfileError as exc:
+            if exc.code == "LORA_KEYWORD_TAKEN":
+                raise ManagedEngineError(exc.code, f"'{keyword}' 은(는) 이미 다른 LoRA 의 예약어입니다: {exc.field}") from None
+            if exc.code == "LORA_KEYWORD_INVALID":
+                raise ManagedEngineError(exc.code, "예약어는 글자 · 숫자 · _ . - 로 48자까지 적어 주세요(공백 · 쉼표 · 콜론 · 괄호 없이).") from None
+            raise
+        return {"ok": True, "name": name, "keyword": keywords.get(name, "")}
 
     def read_thumb(self, name):
         return read_lora_thumb(load_settings(self.save_root), name)

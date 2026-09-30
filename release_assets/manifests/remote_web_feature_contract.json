@@ -84,6 +84,7 @@
         {"method": "POST", "path": "/api/anima-engine/engine/stop", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/anima-engine/loras", "smoke": "non_destructive"},
         {"method": "PUT", "path": "/api/anima-engine/loras", "smoke": "state_mutation"},
+        {"method": "PUT", "path": "/api/anima-engine/loras/keyword", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/anima-engine/loras/thumb", "smoke": "non_destructive"},
         {"method": "PUT", "path": "/api/anima-engine/loras/thumb", "smoke": "state_mutation"},
         {"method": "DELETE", "path": "/api/anima-engine/loras/thumb", "smoke": "state_mutation"},

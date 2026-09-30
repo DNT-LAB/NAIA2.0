@@ -10,6 +10,9 @@
 //   GET /loras -> {available: [{name, size, source, conflict, triggers, thumb}], chain, warnings}
 //   PUT /loras {chain: [{name, strength, enabled}]} · GET/PUT/DELETE /loras/thumb?name= · POST /loras/open-folder {name?}
 //   GET /loras/history?name= -> {candidates: [{history_id, thumb_url, zoom_url, used}]} · POST /loras/thumb/history {name, history_id}
+//   PUT /loras/keyword {name, keyword} -> {name, keyword} (빈 값 = 지우기 · 겹치면 409 · 모양이 틀리면 422)
+// 예약어(09-30 사용자 지정): 카드에서 정한다. 프롬프트에 `<` 없이 lora:예약어:강도 로 적으면 그 생성에서 켜지고(서버
+//   core/anima_engine/prompt_loras.py), 태그 도우미의 lora: 자동완성이 loraKeywords() 로 목록을 읽는다.
 // 적힌 순서대로 LoraLoaderModelOnly 사슬이 된다 — 정렬하지 않는다. 끈 항목은 그래프에서만 빠지고 목록 · 순서는 남는다.
 // 서버는 생성을 큐에 넣는 순간의 체인을 요청에 박는다(여기서 바꿔도 이미 대기 중인 생성은 그대로).
 // 서버가 돌려준 체인이 정본이다 — 거절(422)되면 이유를 보이고 서버 것을 다시 읽는다(몰래 고치지 않는다).
@@ -143,7 +146,14 @@ const STYLE = `
   border: 1px solid rgba(130,150,255,0.36); background: rgba(96,120,255,0.12); color: var(--text-primary); }
 .anima-lora-popup .alr-chip:hover { background: rgba(96,120,255,0.24); }
 .anima-lora-popup .alr-guess { font-size: 9px; color: #f5df8b; }
-.anima-lora-popup .alr-card-acts { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+.anima-lora-popup .alr-card-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: auto; }
+/* 예약어 - 정해 두면 lora:예약어 칩(누르면 고치기), 고치는 동안은 그 줄이 입력칸이 된다 */
+.anima-lora-popup .alr-kw-chip { font-family: var(--font-mono); font-size: 10px; }
+.anima-lora-popup .alr-kw-edit { gap: 4px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
+.anima-lora-popup .alr-kw-input { width: 150px; height: 22px; padding: 0 6px; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-primary); background: rgba(0,0,0,0.28); border: 1px solid var(--border-dim); border-radius: 5px; outline: none; }
+.anima-lora-popup .alr-kw-input:focus { border-color: var(--accent); }
+.anima-lora-popup .alr-kw-err { font-size: 10px; color: #f07070; line-height: 1.4; }
 .anima-lora-popup .alr-card-acts .tagsearch-act { height: 22px; padding: 0 8px; font-size: 10px; }
 .anima-lora-popup .alr-inchain { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent-glow); }
 .anima-lora-popup .alr-mini { background: none; border: 0; padding: 0; color: var(--text-dim); cursor: pointer; font-size: 10px; }
@@ -216,6 +226,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let zoomShown = false;     // 내가 띄운 확대 보기만 걷는다
   let category = ALL;        // 왼쪽 카테고리(하위 폴더) - 창을 닫았다 열어도 그대로, 새로 켜면 '전체'
   let chainZone = null;      // 적용 순서를 끌어다 놓는 자리로 올렸는가(dragBroker)
+  let kwEdit = null;         // 예약어를 고치는 카드 - {name, value, error, saving}
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -229,6 +240,9 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   const folderOf = name => { const s = String(name || ''); const at = s.lastIndexOf('/'); return at < 0 ? '' : s.slice(0, at); };
   const baseName = name => shortName(String(name || '').slice(String(name || '').lastIndexOf('/') + 1));
   const dirHtml = name => (folderOf(name) ? `<span class="alr-dir">${esc(folderOf(name))}/</span>` : '');
+  // 처음 정할 때 채워 두는 예약어 - 보이는 이름을 소문자로, 서버가 받는 글자(글자 · 숫자 · _ . -)만
+  const suggestKeyword = name => baseName(name).normalize('NFC').toLowerCase()
+    .replace(/[^\p{L}\p{N}_.\-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 48);
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -589,6 +603,75 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     (buttons.find(b => b.getAttribute('data-lora-cat') === focused) || el.querySelector?.('.alr-cat.on'))?.focus?.();
   }
 
+  // 예약어를 고치는 줄 - Enter = 저장 · Esc = 그만두기(창은 안 닫힌다) · 빈 값으로 저장하거나 [지우기] = 지우기
+  function kwEditHtml(item) {
+    const off = kwEdit.saving ? ' disabled' : '';
+    return `<div class="alr-card-acts alr-kw-edit">lora:<input class="alr-kw-input" data-lora-kwinput="${esc(item.name)}"
+        value="${esc(kwEdit.value)}" maxlength="48" spellcheck="false" autocomplete="off" aria-label="예약어"${off}>
+        <button type="button" class="tagsearch-act" data-lora-kwsave="${esc(item.name)}"${off}>저장</button>
+        ${item.keyword ? `<button type="button" class="alr-mini" data-lora-kwclear="${esc(item.name)}"${off}>지우기</button>` : ''}
+        <button type="button" class="alr-mini" data-lora-kwcancel${off}>취소</button></div>${
+      kwEdit.error ? `<div class="alr-kw-err">${esc(kwEdit.error)}</div>` : ''}`;
+  }
+
+  // 보기를 다시 그린다 - 예약어를 치던 중이면 새 입력칸으로 초점과 캐럿(끝)을 돌려준다
+  function paintLib(focusKw = false) {
+    const libEl = pick('.alr-lib');
+    if (!libEl) return;
+    const active = document.activeElement;
+    const typing = focusKw || Boolean(active && active.getAttribute?.('data-lora-kwinput') != null && libEl.contains?.(active));
+    libEl.innerHTML = libraryHtml();
+    if (!typing || !kwEdit) return;
+    const input = libEl.querySelector?.('[data-lora-kwinput]');
+    if (!input || input.disabled) return;
+    input.focus?.();
+    const end = String(input.value || '').length;
+    input.setSelectionRange?.(end, end);
+  }
+
+  function startKwEdit(name) {
+    const item = available.find(x => x.name === name);
+    if (!item || item.conflict) return;
+    kwEdit = { name, value: item.keyword || suggestKeyword(name), error: '', saving: false };
+    paintLib(true);
+    pick('[data-lora-kwinput]')?.select?.();
+  }
+
+  function cancelKwEdit() {
+    if (!kwEdit || kwEdit.saving) return;
+    kwEdit = null;
+    paintLib();
+  }
+
+  // 서버가 정본이다 - 겹침(409) · 모양(422)이면 그 줄에 이유를 두고 계속 고친다
+  async function saveKeyword(name, value) {
+    if (!kwEdit || kwEdit.name !== name || kwEdit.saving) return;
+    kwEdit.saving = true;
+    kwEdit.error = '';
+    paintLib();
+    try {
+      const data = await call('PUT', '/loras/keyword', { name, keyword: String(value || '').trim() });
+      const item = available.find(x => x.name === name);
+      if (item) item.keyword = data.keyword || '';
+      if (kwEdit && kwEdit.name === name) kwEdit = null;
+      flash(data.keyword ? `예약어: lora:${data.keyword}` : '예약어를 지웠습니다');
+      paintLib();
+    } catch (err) {
+      if (kwEdit && kwEdit.name === name) {
+        kwEdit.saving = false;
+        kwEdit.error = err.message;
+      }
+      paintLib(true);
+    }
+  }
+
+  // 태그 도우미의 lora: 자동완성이 읽는다 - 관리형이 아니면 null(그러면 `lora:` 는 그냥 글이다)
+  function loraKeywords() {
+    if (!isManaged()) return null;
+    return available.filter(item => item.keyword && !item.conflict)
+      .map(item => ({ keyword: item.keyword, name: item.name, label: baseName(item.name), folder: folderOf(item.name) }));
+  }
+
   function libraryHtml() {
     if (!available.length) {
       return `<div class="alr-empty">LoRA 파일이 없습니다.<br>
@@ -610,6 +693,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         item.conflict ? '<span class="alr-badge">이름 겹침</span>'
           : at >= 0 ? `<span class="alr-inchain">체인 ${at + 1}번</span>`
             : `<button type="button" class="tagsearch-act" data-lora-addname="${esc(item.name)}"${busy || full ? ' disabled' : ''}>+ 체인</button>`,
+        item.conflict ? '' : item.keyword
+          ? `<button type="button" class="alr-chip alr-kw-chip" data-lora-kwedit="${esc(item.name)}"
+              title="예약어 - 프롬프트에 lora:${esc(item.keyword)}:1.0 처럼 적으면 이 LoRA 가 켜집니다 · 눌러서 바꾸기">lora:${esc(item.keyword)}</button>`
+          : `<button type="button" class="alr-mini" data-lora-kwedit="${esc(item.name)}"
+              title="예약어를 정하면 프롬프트에 lora:예약어:1.0 처럼 적어 이 LoRA 를 켤 수 있습니다">+ 예약어</button>`,
         item.conflict ? ''
           : `<button type="button" class="alr-mini" data-lora-history="${esc(item.name)}" title="생성 히스토리에서 PNG 고르기"${
             busy ? ' disabled' : ''}>히스토리</button>`,
@@ -630,7 +718,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
           <div class="alr-card-top"><span class="alr-card-name" title="${esc(item.name)}">${esc(baseName(item.name))}</span>
             <span class="alr-card-meta">${fmtSize(item.size)}</span></div>
           ${dir}${triggerHtml(item)}
-          <div class="alr-card-acts">${acts}</div>
+          ${kwEdit && kwEdit.name === item.name ? kwEditHtml(item) : `<div class="alr-card-acts">${acts}</div>`}
         </div></div>`;
     }).join('');
   }
@@ -647,9 +735,9 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       if (!dragging) chainEl.innerHTML = isManaged() ? chainHtml(view) : '';
       restoreFocus(chainEl, focused);
     }
-    if (libEl) {
-      libEl.innerHTML = isManaged() ? libraryHtml()
-        : `<div class="alr-empty">ANIMA 관리형 엔진이 준비되지 않았습니다.<br>
+    if (libEl && isManaged()) paintLib();
+    else if (libEl) {
+      libEl.innerHTML = `<div class="alr-empty">ANIMA 관리형 엔진이 준비되지 않았습니다.<br>
           <button type="button" class="alr-link" data-lora-act="setup">API 설정 › ANIMA</button> 에서 설치하고 고르세요.</div>`;
     }
     if (zoomTarget && !popup.contains?.(zoomTarget)) hideZoom();   // 올려 둔 칸이 다시 그려져 사라졌다
@@ -849,6 +937,16 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     popup.addEventListener('pointerover', onZoomOver);
     popup.addEventListener('pointerout', onZoomOut);
     popup.addEventListener('keydown', event => {
+      // 예약어 칸 - Enter = 저장, Esc = 그 칸만 그만둔다(창은 그대로)
+      const kwInput = event.target?.closest?.('[data-lora-kwinput]');
+      if (kwInput && (event.key === 'Enter' || event.key === 'Escape')) {
+        event.preventDefault();
+        event.stopPropagation?.();
+        if (event.isComposing) return;           // 한글 조합 중의 Enter 는 글자를 마치는 것이다
+        if (event.key === 'Enter') saveKeyword(kwInput.getAttribute('data-lora-kwinput'), kwInput.value);
+        else cancelKwEdit();
+        return;
+      }
       // Esc 는 [히스토리] 판부터 닫는다 - 창까지 한 번에 닫히면 고르던 자리를 잃는다
       if (event.key === 'Escape') { event.preventDefault(); if (picker) closePicker(); else close(); }
     });
@@ -949,8 +1047,20 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     const reveal = event.target.closest('[data-lora-reveal]');
     if (reveal) { openFolder(reveal.getAttribute('data-lora-reveal')); return; }
     if (event.target.closest('[data-lora-pickclose]')) { closePicker(); return; }
+    const kwEditBtn = event.target.closest('[data-lora-kwedit]');
+    if (kwEditBtn) { startKwEdit(kwEditBtn.getAttribute('data-lora-kwedit')); return; }
+    const kwSave = event.target.closest('[data-lora-kwsave]');
+    if (kwSave) {
+      const name = kwSave.getAttribute('data-lora-kwsave');
+      saveKeyword(name, kwEdit && kwEdit.name === name ? kwEdit.value : '');
+      return;
+    }
+    const kwClear = event.target.closest('[data-lora-kwclear]');
+    if (kwClear) { saveKeyword(kwClear.getAttribute('data-lora-kwclear'), ''); return; }
+    if (event.target.closest('[data-lora-kwcancel]')) { cancelKwEdit(); return; }
     const cat = event.target.closest('[data-lora-cat]');
     if (cat) {
+      if (kwEdit && !kwEdit.saving) kwEdit = null;   // 다른 칸으로 가면 고치던 예약어는 그만둔다
       category = cat.getAttribute('data-lora-cat') || ALL;
       hideZoom();
       paintCats();
@@ -1086,6 +1196,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       showStrength(slider, Number(slider.value));
       return;
     }
+    const kwInput = event.target.closest('[data-lora-kwinput]');
+    if (kwInput) {
+      if (kwEdit && kwEdit.name === kwInput.getAttribute('data-lora-kwinput')) kwEdit.value = kwInput.value;
+      return;
+    }
     const box = event.target.closest('[data-lora-filter]');
     if (!box) return;
     filter = box.value;
@@ -1205,5 +1320,5 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     ensureStyle();
   }
 
-  return { init, setMode, refresh, isManaged, open, close, toggle, isOpen, paintBadge };
+  return { init, setMode, refresh, isManaged, open, close, toggle, isOpen, paintBadge, loraKeywords };
 }

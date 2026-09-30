@@ -54,7 +54,7 @@ export function autocompleteCandidateForRow(row) {
 }
 
 export function autocompleteInsertPolicyForRow(row) {
-  if (!row || row.disabled || row._wc_type === 'preset_status') return 'none';
+  if (!row || row.disabled || row._wc_type === 'preset_status' || row._wc_type === 'lora_status') return 'none';
   const candidate = autocompleteCandidateForRow(row);
   return String(candidate?.insertPolicy || row.insertPolicy || 'default').toLowerCase();
 }
@@ -64,6 +64,36 @@ export function canSelectAutocompleteRow(row, {manual = false} = {}) {
   if (policy === 'none') return false;
   if (manual) return policy === 'default' || policy === 'insert' || policy === 'manual';
   return policy === 'default' || policy === 'insert';
+}
+
+// LoRA 예약어(사용자 지정 2026-09-30) - 프롬프트에 `<` 없이 lora:예약어:강도 로 적어 관리형 ANIMA 에서 LoRA 를 켠다
+// (서버 core/anima_engine/prompt_loras.py 가 읽는다). 후보는 예약어를 정한 LoRA 만 - 정하는 곳은 LoRA 창의 카드.
+// 예약어가 같은 것 > 앞부분이 같은 것 > 들어 있는 것 > LoRA 이름에 든 것. 하나도 없으면 안내 한 줄(고를 수 없다).
+export function loraKeywordRows(query, keywords) {
+  const list = Array.isArray(keywords) ? keywords : [];
+  if (!list.length) {
+    return [{tag: '', _wc_type: 'lora_status', cat: '',
+      desc: '예약어를 정한 LoRA 가 없습니다 - LoRA 창의 카드에서 [+ 예약어]'}];
+  }
+  const q = String(query || '').trim().toLowerCase();
+  const rank = row => {
+    const kw = String(row.keyword || '').toLowerCase();
+    if (!q || kw === q) return 0;
+    if (kw.startsWith(q)) return 1;
+    if (kw.includes(q)) return 2;
+    return String(row.name || '').toLowerCase().includes(q) ? 3 : -1;
+  };
+  return list.map(row => ({row, r: rank(row)})).filter(x => x.r >= 0)
+    .sort((a, b) => a.r - b.r || String(a.row.keyword).localeCompare(String(b.row.keyword)))
+    .map(({row}) => ({tag: row.keyword, _wc_type: 'lora_keyword', group: row.folder || '', desc: row.label || row.name || '',
+      cat: '', loraName: row.name}));
+}
+
+// 고른 예약어로 갈아 끼울 글 - 조각에 강도를 이미 적어 두었으면(lora:wat|:0.7) 그 강도를 살리고, 없을 때만 :1.0
+export function loraKeywordInsertion(raw, coreEnd, keyword) {
+  const text = String(raw || '');
+  const tail = text.slice(Number.isInteger(coreEnd) ? coreEnd : text.length);
+  return /^\s*:\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)/.test(tail) ? `lora:${keyword}` : `lora:${keyword}:1.0`;
 }
 
 export function firstDefaultAutocompleteIndexForRows(rows = []) {
@@ -165,6 +195,8 @@ export function createTagAssistController({
   openTagSearch = null,
   getSlashCommands = null,       // app.js 가 주입하는 명령 레지스트리(호출 시점에 읽는다)
   getEventPresetPanel,
+  // LoRA 예약어 목록([{keyword, name, label, folder}]) - 관리형 ANIMA 가 아니면 null. app.js 가 LoRA 창에서 읽어 준다.
+  getLoraKeywords = null,
   // 태그 정보 툴팁(캐럿 위 태그 설명 + RELATED)을 억제할지 묻는 훅. Interactive 편집 팝업처럼
   // 화면을 이미 점유한 UI 위에 큰 툴팁이 겹치면 방해가 된다. 자동완성 드롭다운은 영향 없다.
   isTagInfoSuppressed = () => false,
@@ -1958,10 +1990,33 @@ export function createTagAssistController({
     renderAutocomplete();
   }
 
+  function readLoraKeywords() {
+    try {
+      const list = typeof getLoraKeywords === 'function' ? getLoraKeywords() : null;
+      return Array.isArray(list) ? list : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function scheduleAutocomplete(options = {}) {
     const target = options.target || acTarget || promptEdit;
     const info = options.info || getActiveTokenInfo(target);
     const allowTriggers = target !== negEdit;
+    // lora:예약어 - 목록은 이미 손에 있다(서버에 묻지 않는다). 캐럿이 강도 숫자 위면 닫는다(예약어를 치는 중이 아니다).
+    const loraKeywords = info && allowTriggers && /^lora:/i.test(info.stripped) ? readLoraKeywords() : null;
+    if (loraKeywords) {
+      window.clearTimeout(acTimer);
+      clearAutocompleteTranslationTimer();
+      const rows = info.caretOutsideTag ? [] : loraKeywordRows(info.stripped.slice(5), loraKeywords);
+      if (!rows.length) { hideAutocomplete(); return; }
+      lastAcQuery = info.stripped;
+      acResults = rows;
+      acSel = firstDefaultAutocompleteIndex(acResults);
+      acMode = true;
+      renderAutocomplete();
+      return;
+    }
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
@@ -2864,16 +2919,16 @@ export function createTagAssistController({
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
-      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : ''))));
+      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : (wcType === 'lora_keyword' ? 'lora:' : '')))));
       // 슬래시 선택지(slash_choice)는 접두가 없다 - 위 표에서 '' 로 떨어진다.
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const displayTag = wcType === 'preset_path'
         ? (r.tag || r.label || r.prompt || r.value || '')
-        : (wcType === 'preset_status' ? (r.desc || r.tag || '') : prefix + r.tag + suffix);
+        : (wcType === 'preset_status' || wcType === 'lora_status' ? (r.desc || r.tag || '') : prefix + r.tag + suffix);
       const metaText = wcType === 'chunk'
         ? (r.group || '')
-        : (wcType ? (r.desc || '') : fmtCount(r.count));
+        : (wcType === 'lora_status' ? '' : (wcType ? (r.desc || '') : fmtCount(r.count)));
       const inlinePreview = wcType === 'chunk_group' ? (r.preview || '') : '';
       const hoverTitle = wcType === 'preset_status' ? (r.tag || '') : displayTag;
       html += `<div class="tag-ac-item${itemClass}${sel}${r._rowClass || ''}" data-idx="${i}"${autocompleteInfoAttrs(r, hoverTitle)}>` +
@@ -2964,6 +3019,11 @@ export function createTagAssistController({
     if (r._wc_type === 'slash' || r._wc_type === 'slash_choice' || r._wc_type === 'slash_arg') { runSlashCommand(r); return; }
     const info = getActiveTokenInfo(target);
     if (!info) return;
+    if (r._wc_type === 'lora_keyword') {
+      swapToken(target, info, loraKeywordInsertion(info.raw, info.coreEnd, r.tag));
+      hideAutocomplete();
+      return;
+    }
     let newTag = r.tag;
     if (r._wc_type === 'wildcard_master') {
       // 종속 1단계: master 선택 → __$master: 삽입 후 2단계(slave) 자동완성 트리거

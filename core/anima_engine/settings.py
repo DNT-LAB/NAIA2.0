@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import struct
 import tempfile
 import time
@@ -23,7 +24,7 @@ from .profile import ProfileError, number, validate_chain
 
 LOCK = RLock()
 DEFAULTS = {"version": 1, "engine_root": None, "model_dirs": [], "lora_dirs": [], "unet_dirs": [],
-            "lora_chain": [], "idle_minutes": 30, "reserve_vram_gb": "auto"}
+            "lora_chain": [], "lora_keywords": {}, "idle_minutes": 30, "reserve_vram_gb": "auto"}
 THUMB_MAX_BYTES = 10 * 1024 * 1024
 _TRIGGER_CACHE = {}
 _CATALOG_CACHE = {}
@@ -103,6 +104,9 @@ def save_settings(save_root, updates):
                 raise ProfileError("PATH_INVALID", field=key)
         if data["engine_root"] is not None and not isinstance(data["engine_root"], str):
             raise ProfileError("PATH_INVALID", field="engine_root")
+        keywords = data["lora_keywords"]
+        if not isinstance(keywords, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in keywords.items()):
+            raise ProfileError("PARAM_OUT_OF_RANGE", field="lora_keywords")
         for key in ("model_dirs", "lora_dirs", "unet_dirs"):
             data[key] = list(dict.fromkeys(data[key]))
         atomic_json(Path(save_root) / "anima_engine_user.json", data)
@@ -545,6 +549,39 @@ def lora_folder(settings, name=None):
     # A folder opened before the first prepare is already an owned engine root.
     (root / "state").mkdir(exist_ok=True)
     return folder
+
+
+# ---- LoRA 예약어(09-30) - 프롬프트에 lora:예약어:강도 로 적어 켠다(core/anima_engine/prompt_loras.py) ----
+# 글자 · 숫자 · _ . - 만(한글 가능), 48자까지. 대소문자는 가리지 않는다 - 같은 예약어를 두 LoRA 가 쓸 수 없다.
+KEYWORD_RE = re.compile(r"[\w.\-]{1,48}")
+
+
+def set_lora_keyword(save_root, name, keyword):
+    """예약어를 정한다(빈 값이면 지운다). -> 저장된 {이름: 예약어}. 목록에서 사라진 LoRA 의 예약어는 다른 LoRA 가
+    가져갈 수 있다(파일을 옮기거나 지운 뒤 남은 것)."""
+    with LOCK:
+        settings = load_settings(save_root)
+        entry = resolve_lora(settings, name)
+        keyword = str(keyword or "").strip()
+        keywords = dict(settings.lora_keywords)
+        if not keyword:
+            keywords.pop(entry["name"], None)
+        else:
+            if not KEYWORD_RE.fullmatch(keyword):
+                raise ProfileError("LORA_KEYWORD_INVALID", field=keyword)
+            present = {x["name"] for x in lora_catalog(settings)}
+            for other, word in list(keywords.items()):
+                if other != entry["name"] and word.casefold() == keyword.casefold():
+                    if other in present:
+                        raise ProfileError("LORA_KEYWORD_TAKEN", field=other)
+                    keywords.pop(other)
+            keywords[entry["name"]] = keyword
+        return save_settings(save_root, {"lora_keywords": keywords}).lora_keywords
+
+
+def lora_keyword_map(settings):
+    """{예약어.casefold(): LoRA 이름} - 파일이 사라진 LoRA 도 싣는다(그러면 '파일을 찾지 못했습니다' 로 멈춘다)."""
+    return {word.casefold(): name for name, word in (settings.lora_keywords or {}).items()}
 
 
 def save_lora_chain(save_root, chain):

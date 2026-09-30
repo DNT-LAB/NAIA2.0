@@ -2291,7 +2291,7 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-diag2')
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
 // 카드 -> 적용 순서 끌어다 놓기(09-30)는 리모컨 · 그룹 창과 **같은** 끌기 중개자다 - 주소(쿼리까지)가 같아야 한 인스턴스다.
-Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorafolders2'),
+Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorakw'),
   import('./js/features/dragBroker.mjs?v=20260919-strip')])
   .then(([{createAnimaLoraPanel}, {dragBrokerFor}]) => {
     animaLoraPanel = createAnimaLoraPanel({
@@ -13922,7 +13922,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260929-weightac')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260930-lorakw')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -13946,6 +13946,8 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260929-weightac')
       openTagSearch: openTagSearchAll,
       getSlashCommands: slashCommandRegistry,
       getEventPresetPanel: () => eventPresetPanel,
+      // lora: 자동완성(09-30) - 예약어를 정한 LoRA. 관리형 ANIMA 가 아니면 null 이라 `lora:` 는 그냥 글이다.
+      getLoraKeywords: () => animaLoraPanel?.loraKeywords?.() ?? null,
       // Interactive 슬롯 편집 중에는 태그 정보 툴팁(설명 + RELATED)을 띄우지 않는다 —
       // 앵커 팝업(팔레트/썸네일) 위에 겹쳐 가린다. 자동완성 드롭다운은 그대로 동작한다.
       isTagInfoSuppressed: () => document.body.classList.contains('interactive-editing'),

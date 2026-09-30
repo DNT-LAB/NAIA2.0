@@ -46,7 +46,7 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
         except (ProfileError, ManagedEngineError) as exc:
             remember(what, exc)
             code = exc.code
-            status = 422 if code in ("PARAM_OUT_OF_RANGE", "PATH_INVALID", "PATH_NOT_WRITABLE", "LORA_NOT_FOUND", "LORA_INVALID", "LORA_NAME_CONFLICT", "LORA_THUMB_INVALID") else 409
+            status = 422 if code in ("PARAM_OUT_OF_RANGE", "PATH_INVALID", "PATH_NOT_WRITABLE", "LORA_NOT_FOUND", "LORA_INVALID", "LORA_NAME_CONFLICT", "LORA_THUMB_INVALID", "LORA_KEYWORD_INVALID") else 409
             if missing_404 and code in ("LORA_NOT_FOUND", "HISTORY_NOT_FOUND"):
                 status = 404
             if code.startswith("ENGINE_START"):
@@ -110,6 +110,11 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
     @app.put("/api/anima-engine/loras")
     async def put_loras(request: Request):
         return await call(request, lambda data: service_for(context).put_loras(data.get("chain")), body=True)
+
+    @app.put("/api/anima-engine/loras/keyword")
+    async def put_keyword(request: Request):
+        # LoRA 예약어 - 체인 저장처럼 원격 기기도(사용자 데이터 · 이 PC 의 파일은 안 건드린다). 겹침 = 409
+        return await call(request, service_for(context).put_keyword, body=True, missing_404=True)
 
     @app.get("/api/anima-engine/loras/thumb")
     async def get_thumb(request: Request, name: str):

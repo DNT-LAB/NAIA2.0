@@ -28,7 +28,7 @@ GENERATE_RATING_TAGS = {"g": ("safe", "rating:general"), "s": ("rating:sensitive
                         "q": ("nsfw", "rating:questionable"), "e": ("nsfw", "rating:explicit")}
 MAX_PREFERENCE = 400          # 고급 설정의 User Preference(등급마다 영어 한두 문장) 글자 수 상한
 MODEL_TIMEOUT = 60.0
-MODEL_MAX_TOKENS = 600        # 200 은 잘렸다(실측)
+MODEL_MAX_TOKENS = 800        # 200 은 잘렸다(실측). 포함 16칸에서 410 까지 봤다(09-30) — 칸이 다 차면 600 을 넘을 수 있다
 MAX_NAME_CHOICES = 8
 MAX_VIRTUAL_CHARACTERS = 6
 MAX_FOLLOWUP_MAIN = 4000      # 이어 고치기가 받는 메인 프롬프트 글자 수 상한

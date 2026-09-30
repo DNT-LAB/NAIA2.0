@@ -24,7 +24,9 @@ TASKS = ("scene", "tag", "character", "artist", "wildcard", "preset", "other")
 GOALS = ("find", "how", "generate")
 RATINGS = ("g", "s", "q", "e")
 MAX_TEXT = 800             # 여러 줄 구성 요청(main / c1 / c2 …)이 들어온다 — 300 이면 캐릭터 둘에서 끊겼다
-MAX_INCLUDE = 10
+# 모델이 돌려주는 포함 항목 칸. 10 이면 150자 넘는 요청은 늘 찼고, 모델은 글 순서로 적으니 뒤쪽(배경 · 날씨 · 구경꾼)이
+# 잘렸다. 16 = 09-30 실측(긴 요청 7개 × 3회: 적중 48 -> 56%, 짧은 요청은 칸을 채우지 않았다 · 출력 최대 410 토큰)
+MAX_INCLUDE = 16
 
 _ITEM = {"type": "object", "additionalProperties": False,
          "properties": {"en": {"type": "string", "maxLength": 60}, "ko": {"type": "string", "maxLength": 40},
@@ -71,7 +73,7 @@ source = number of the one who does it (이/가/은/는), target = the one it is
 In passive forms (안겨서, 꼬집히는) the doer is the other character.
 include: what must appear. en = Danbooru tag (lowercase, spaces), ko = Korean dictionary form (noun, or verb as ~기),
 who = the character number it belongs to (outfit, expression, pose), 0 = the whole scene (place, weather, time).
-List every concept of the request (up to 10).
+List every concept of the request (up to 16).
 exclude: things the user does not want (빼고, 빼줘, 없이, 말고), same form. Never put "no ..." in include.
 name / name_ko: for character/artist/wildcard/preset lookups, the name in English if sure, and as written.
 

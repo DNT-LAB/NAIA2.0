@@ -1088,10 +1088,23 @@ class KoreanLayer:
         seen: set[str] = set()
         merged: set[int] = set()
         last_group = -9
+        # Kiwi 는 같은 합성어를 문맥 따라 다르게 쪼갠다 — 120자 요청에서 마법소녀가 한 번은 마법+소녀, 한 번은 마법소녀(NNP)로
+        # 나와 두 사람(2girls)으로 셌다(09-30 실측). 띄어쓰기 없이 붙은 앞 명사 + 사람 낱말은 붙인 꼴 하나로 본다.
+        # 붙었는지는 글자 위치로(분석 토큰에는 위치가 없다). 띄어 쓴 수식(교실 소녀 · 엘프 소녀)은 그대로 둔다(Codex M1)
+        pos = self._token_positions(analysis)
         # 묶음이 있으면 그 구성원 낱말은 따로 세지 않는다(커플 … 남친은 래쉬가드 여친은 원피스 — 2g2b 로 셌다, 09-29)
         members = {w for f, _t in toks if f in self._groups for w in self._GROUP_MEMBERS.get(f, ())}
         for i, (form, tag) in enumerate(toks):
-            if tag not in NOUN_TAGS or form in seen or form in phrase_nouns or i in merged:
+            if tag not in NOUN_TAGS or form in phrase_nouns or i in merged:
+                continue
+            key, start = form, i
+            if pos is not None and i > 0 and toks[i - 1][1] in ("NNG", "NNP") and pos[i - 1][1] == pos[i][0] \
+                    and toks[i - 1][0] not in self._groups and self._person_gender(toks[i - 1][0]) is None \
+                    and self._person_gender(form) is not None:
+                key, start = toks[i - 1][0] + form, i - 1      # 마법+소녀 = 마법소녀(NNP 로 나온 것과 같은 열쇠)
+            # 머리 낱말(마법소녀의 소녀)이 이미 세어졌으면 같은 사람 — 쪼개져 나오면 원래 그렇게 셌다(소녀가 seen).
+            # 통째로 나온 쪽도 같게 한다. 소녀와 마법소녀를 둘로 가르는 일은 여기서 하지 않는다(언급 등록이 필요)
+            if key in seen or form in seen or (self._person_head(form) or "") in seen:
                 continue
             if form in members:
                 g = max((k for k in range(i) if toks[k][0] in self._groups), default=None)
@@ -1130,7 +1143,7 @@ class KoreanLayer:
             if nxt[1] in ("NNG", "NNP") and self._person_gender(nxt[0]) is None and nxt[0] not in self._groups \
                     and form + nxt[0] in (analysis.source_text or ""):
                 continue                               # 사람 낱말이 앞에 붙은 합성어(메이드카페 · 소녀상 — 09-29 E4B 시험)
-            seen.add(form)
+            seen.update(w for w in (key, form, self._person_head(form)) if w)
             head = i
             nxt_form, nxt_tag = toks[i + 1] if i + 1 < len(toks) else ("", "")
             other = self._person_gender(nxt_form) if nxt_tag in NOUN_TAGS and nxt_form not in phrase_nouns else None
@@ -1140,14 +1153,15 @@ class KoreanLayer:
                 head = i + 1
                 merged.add(head)
                 seen.add(nxt_form)
-            n = self._count_near(toks, head) or self._count_near(toks, i) or 1
+            n = self._count_near(toks, head) or self._count_near(toks, i) \
+                or (self._count_near(toks, start) if start != i else None) or 1
             if gender == "girl":
                 pc.girls += n
             elif gender == "boy":
                 pc.boys += n
             else:
                 pc.unknown += n
-            pc.notes.append(f"{form}{'+' + nxt_form if head != i else ''}x{n}:{gender}")
+            pc.notes.append(f"{key}{'+' + nxt_form if head != i else ''}x{n}:{gender}")
         # 한 글자 성별 꼬리(~녀 · ~남)의 합성어 — 세 글자 이상만(테토녀 · 에겐녀 · 거유녀 · 초식남, 09-28 사용자 예시가 인원
         # 1girl 1boy 로 셌다). Kiwi 가 통째로 내기도(에겐녀) 쪼개기도(안경+녀 · 테+토+녀 · 거+유녀) 해서 토막 말고 원문 어절에서
         # 조사를 떼고 본다. 두 글자(남녀 · 자녀 · 강남)는 보지 않는다 · 이미 사람으로 센 토막이 든 어절(미소녀 의 소녀)은 건너뛴다
@@ -1206,6 +1220,24 @@ class KoreanLayer:
         pc.partition = partition_of(pc.girls, pc.boys, pc.solo)
         pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
         return pc
+
+    def _token_positions(self, analysis: KoreanAnalysis) -> list[tuple[int, int]] | None:
+        """분석 토큰과 같은 토큰의 (시작, 끝) — 같은 글을 같은 길(spans)로 다시 나눈다. 토큰이 어긋나면 None(붙임 판정 안 함)."""
+        if not analysis.source_text:
+            return None
+        try:
+            spans = self.spans(analysis.source_text)
+        except Exception:
+            return None
+        if [(f, t) for f, t, _s, _e in spans] != [tuple(x) for x in analysis.tokens]:
+            return None
+        return [(s, e) for _f, _t, s, e in spans]
+
+    def _person_head(self, form: str) -> str | None:
+        """사람 낱말로 끝나는 합성어의 머리(마법소녀 -> 소녀) — 쪼개져 나왔을 때 seen 에 들어가는 것과 같게."""
+        heads = [w for w in (*self._female, *self._male, *self._neutral)
+                 if len(w) >= 2 and len(form) > len(w) and form.endswith(w)]
+        return max(heads, key=len) if heads else None
 
     # 사람 낱말 뒤에 붙어 나오는 조사 — Kiwi 가 '마법소녀와' 를 명사 하나로 낸다(09-26)
     _PERSON_PARTICLES = ("이랑", "하고", "에게", "한테", "와", "과", "랑", "의", "가", "이", "는", "은", "를", "을", "도",

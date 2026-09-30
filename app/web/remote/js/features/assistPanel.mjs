@@ -207,19 +207,26 @@ function visibleSuspicious(r) {
 }
 
 /** 메인 글에 태그 하나를 끝의 자연어 문장 **앞**에. 알려진 문장(다듬기 · 이어서 질문 · 직접 모드)이 없거나 고쳐졌으면
- *  문장처럼 보이는 첫 쉼표 조각(마침표로 끝남 · 대문자로 시작하는 세 낱말 이상 · 다섯 낱말 이상) 앞에. 문장뿐이면 맨 앞 */
+ *  문장처럼 보이는 첫 쉼표 조각(마침표로 끝남 · 대문자로 시작하는 세 낱말 이상 · 다섯 낱말 이상) 앞에. 문장뿐이면 맨 앞.
+ *  문장이 있었는데 짧게 고쳐 둘 다 못 찾으면(1girl, She flies) 앞쪽의 태그처럼 보이는 조각(소문자 · 대문자 약어 한 낱말 ·
+ *  세 낱말 이하 · 끝 부호 없음)이 이어지는 끝에 — 끝에 붙이면 문장 뒤가 된다(Codex V8) */
 function insertBeforeSentence(text, tag, sentence) {
   const body = String(text || '').replace(/[\s,]+$/, '');
   const known = String(sentence || '').trim();
   let at = known ? body.lastIndexOf(known) : -1;
+  const segs = [];
+  for (let pos = 0, i = 0, parts = body.split(','); i < parts.length; pos += parts[i].length + 1, i += 1) {
+    const s = parts[i].trim();
+    segs.push({ s, at: pos + parts[i].indexOf(s), words: s.split(/\s+/).filter(Boolean).length });
+  }
   if (at < 0) {
-    let pos = 0;
-    for (const seg of body.split(',')) {
-      const s = seg.trim();
-      const words = s.split(/\s+/).filter(Boolean).length;
-      if (s && (/[.!?]$/.test(s) || (/^[A-Z]/.test(s) && words >= 3) || words >= 5)) { at = pos + seg.indexOf(s); break; }
-      pos += seg.length + 1;
-    }
+    const first = segs.find(g => g.s && (/[.!?]$/.test(g.s) || (/^[A-Z]/.test(g.s) && g.words >= 3) || g.words >= 5));
+    if (first) at = first.at;
+  }
+  if (at < 0 && known) {
+    const tagLike = g => g.words <= 3 && !/[.!?]$/.test(g.s) && (!/[A-Z]/.test(g.s) || /^[A-Z0-9]+$/.test(g.s));
+    const cut = segs.findIndex(g => g.s && !tagLike(g));
+    if (cut >= 0) at = segs[cut].at;
   }
   if (at < 0) return body ? `${body}, ${tag}` : tag;
   const head = body.slice(0, at).replace(/[\s,]+$/, '');

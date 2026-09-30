@@ -405,6 +405,8 @@ class KoreanAnalysis:
     available: bool = True                                 # Kiwi 로 분석했나
     tokenizer: Callable[[str], list[tuple[str, str]]] | None = field(default=None, repr=False, compare=False)
     source_text: str = field(default="", repr=False, compare=False)
+    # 요청에 적힌 영문 약어 · 그 한글 표기 묶음(TV · 티비 · 텔레비전, 소문자) — 근거 검사가 같은 낱말로 본다(규칙표 latin_spellings)
+    spellings: set[str] = field(default_factory=set, repr=False, compare=False)
 
     def lemmas(self) -> set[str]:
         return {f for f, t in self.tokens if t in NOUN_TAGS or t.startswith(VERB_PREFIXES)} | set(self.stems)
@@ -459,6 +461,12 @@ class KoreanAnalysis:
             if not content(tag):
                 continue
             matches = (form, tag[:2]) in available or form in available_forms
+            if not matches and form.lower() in self.spellings:
+                matches = True                     # TV ↔ 티비 ↔ 텔레비전 — 같은 낱말의 다른 표기(규칙표 latin_spellings)
+            if not matches and tag.startswith(VERB_PREFIXES):
+                # ㄹ 탈락: 요청의 '쓰는 · 나는' 을 Kiwi 가 쓰다 · 나다 로 읽는다 — 모델의 '쓸기 · 날기'(쓸다 · 날다)가 버려졌다(09-30)
+                bare = _without_rieul(form)
+                matches = bare != form and any(src == bare and src_tag.startswith(VERB_PREFIXES) for src, src_tag in request)
             # 한 음절 동사 명사형은 Kiwi 가 NNG 로 분석할 수 있다(젖어 떨고 -> 모델 ko '떨기').
             # 실제 요청에 같은 동사 줄기가 있을 때만 어미 '-기'를 떼어 근거로 인정한다.
             if not matches and tag in ("NNG", "NNP") and form.endswith("기"):
@@ -469,6 +477,14 @@ class KoreanAnalysis:
             if tag.startswith(VERB_PREFIXES) or tag.startswith(("XSV", "XSA")):
                 matched_lexical_verb = True
         return True
+
+
+def _without_rieul(form: str) -> str:
+    """끝 글자의 받침 ㄹ 을 뺀 꼴(쓸 -> 쓰 · 날 -> 나 · 만들 -> 만드). 받침이 ㄹ 이 아니면 그대로."""
+    last = form[-1:]
+    if last and "가" <= last <= "힣" and (ord(last) - 0xAC00) % 28 == 8:
+        return form[:-1] + chr(ord(last) - 8)
+    return form
 
 
 @dataclass
@@ -722,6 +738,10 @@ class KoreanLayer:
         out = KoreanAnalysis(tokens=toks, stems=_stems(toks))
         out.tokenizer = self.tokenize
         out.source_text = clean_text(text)
+        for latin, hangul in (self.rules.get("latin_spellings") or {}).items():
+            group = {latin.lower(), *hangul}
+            if any(form.lower() in group for form, _tag in toks):
+                out.spellings |= group
         forms = [f for f, _t in toks]
         # 비유: 명사 + 같이/처럼/마냥
         for i, (form, tag) in enumerate(toks):

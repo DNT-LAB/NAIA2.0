@@ -124,6 +124,10 @@ _SYNONYMS = {"photo": "picture", "photos": "pictures",
              # 기호 태그는 이름이 기호다(? 8.6만 · ! 4.5만) — 모델은 영문 이름으로 적는다(사용자 제보 09-26)
              "question mark": "?", "question mark sign": "?", "exclamation mark": "!", "exclamation point": "!",
              "interrobang": "!?", "ellipsis": "..."}
+# 모델이 쓰는 짧은 꼴 -> 태그 이름. 짧은 꼴은 태그가 아니고 긴 꼴만 태그다(09-30 태그 목록으로 확인) — 'TV 보기' 가
+# watching tv 로 와서 watching television(1,108건)을 못 맞추고 조각 watching 만 남았다(6/6 실측)
+_SYNONYMS.update({"tv": "television", "sofa": "couch", "bike": "bicycle", "motorbike": "motorcycle",
+                  "fridge": "refrigerator", "mic": "microphone", "pc": "computer"})
 _EMOTICON_EN = re.compile(r"[^a-z]*|[^a-z]{1,2}\s?[a-z]?")
 _META_EN = re.compile(r"\((?:animated|medium|meme|artwork|style|cosplay|parody)\)$")
 # 뜻을 싣는 품사(Kiwi) — 명사 · 동사 · 형용사 · 보조 용언 · 관형사 · 부사 · 어근 · 외국어 · 숫자. 어미 · 조사 · 접사 · 부호는 뺀다

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "2026-09-29-v3",
+  "version": "2026-09-30-v4",
   "kind": "korean_slang_supplement",
   "semantic_certified": false,
   "source": {
@@ -133,6 +133,17 @@
           "basis": [
             "hand:community-slang-2026-09-29",
             "파김치가 되다 = 녹초"
+          ]
+        }
+      ]
+    },
+    "television": {
+      "aliases": [
+        {
+          "text": "티비",
+          "basis": [
+            "hand:colloquial-spelling-2026-09-30",
+            "TV 의 구어 표기 - 사전엔 티브이 · 텔레비전뿐"
           ]
         }
       ]

@@ -193,6 +193,8 @@ class ArtistThumbnailService:
         # 다 받아 크기가 바뀌면 그때 새로 읽게 하는 열쇠다(2026-09-03).
         self._data_cache_size: dict[str, int] = {}
         self._image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
+        # 사본 캐시(관심 · 그룹)의 **이름만** - 경로 -> ((파일 번호, mtime_ns, size), 이름들).
+        self._copy_names_memo: dict[str, tuple[tuple[int, int, int], frozenset]] = {}
         self._random_history: dict[tuple[str, str, str, int], list[str]] = {}
         self._lock = threading.RLock()
         self._download_thread: threading.Thread | None = None
@@ -1335,6 +1337,36 @@ class ArtistThumbnailService:
             ],
         }
 
+    def _copy_cache_names(self, path: Path, loader: Callable[[], dict]) -> frozenset:
+        """사본 캐시(관심 · 그룹)에 그림이 든 **이름들**. 파일이 그대로면 다시 읽지 않는다.
+
+        ⚠️ 관심 캐시는 그림을 통째로 담아 크다(사용자 포터블 18MB · 160명, 2026-09-30 실측) -
+           읽기만 40ms 라, 그림 규칙을 세울 때마다 읽으면 격자 한 쪽 · 검색 한 번마다 그만큼 든다.
+           쓰는 쪽은 늘 임시 파일로 갈아 끼운다(`replace`) - 그러면 **파일 번호**가 바뀐다.
+           시각만 보면 윈도의 시각 눈금(수 ms) 안에 같은 크기로 두 번 쓴 것을 못 가른다.
+        """
+        try:
+            stat = path.stat()
+        except OSError:
+            stat = None
+        if stat is None:
+            # 파일이 없으면 기억하지 않고 **읽개에게 그대로 묻는다**(없으면 빈 것을 즉시 낸다).
+            # ⚠️ 여기서 빈 것을 지어내면 읽개를 갈아 끼운 쪽(시험)의 답을 가로챈다.
+            try:
+                return frozenset((loader().get("items") or {}).keys())
+            except Exception:
+                return frozenset()
+        stamp = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+        hit = self._copy_names_memo.get(str(path))
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        try:
+            names = frozenset((loader().get("items") or {}).keys())
+        except Exception:
+            names = frozenset()     # 못 읽는 사본은 없는 것으로 본다(전부터 그랬다)
+        self._copy_names_memo[str(path)] = (stamp, names)
+        return names
+
     def _image_source_resolver(self, mode_key: str, filter_key: str, thumb_data: dict):
         """작가 이름 -> 썸네일 주소. 순서가 규약이다(아래 주석).
 
@@ -1343,11 +1375,11 @@ class ArtistThumbnailService:
            라우트가 "모르는 모드" 로 400 을 낸다.
         """
         virtual = self.is_virtual_mode(mode_key)
-        try:
-            favorite_thumb_items = self._load_thumbnail_cache().get("items", {})
-        except Exception:
-            favorite_thumb_items = {}
-        group_thumb_items = self._load_group_thumbnail_cache().get("items", {})
+        # 사본은 **있느냐만** 본다(그림은 제 라우트가 따로 낸다) - 그래서 이름만 쥔다.
+        favorite_thumb_items = self._copy_cache_names(self._favorite_thumbnail_cache_path(),
+                                                      self._load_thumbnail_cache)
+        group_thumb_items = self._copy_cache_names(self._group_thumbnail_cache_path(),
+                                                   self._load_group_thumbnail_cache)
 
         # ⚠️ **지금 모드의 것만 본다.** 백엔드가 다르면 그림의 결이 전혀 다르다.
         api_key = self._generated_api_key()
@@ -1406,6 +1438,22 @@ class ArtistThumbnailService:
             return self._generated_image_url(artist, selected[1], selected[2])
 
         return item_image_url
+
+    def image_presence(self, mode: str = "") -> Callable[[str], bool]:
+        """이름 -> **카드에 그림이 뜨는가**. 아티스트 검색의 [썸네일 있음] 이 쓴다.
+
+        ⚠️ 규칙을 따로 세우지 않는다 - 격자 · describe 와 같은 `_image_source_resolver` 다.
+           검색이 '있다' 고 한 작가가 격자에서 No Image 로 뜨면 그 토글은 거짓말이 된다.
+        ⚠️ 모드 팩을 못 읽으면(안 받았다 · 모르는 키) 팩 그림만 빠진다 - 관심 · 그룹 ·
+           생성 사본은 그대로 센다. 검색이 통째로 죽을 일은 아니다.
+        """
+        mode_key = str(mode or "").strip()
+        try:
+            thumb_data = self.load_data(mode_key) if mode_key else {}
+        except Exception:
+            thumb_data = {}
+        source = self._image_source_resolver(mode_key, "all", thumb_data)
+        return lambda artist: bool(source(artist))
 
     def capture_artist_images(self, mode: str, artists: list[str]) -> tuple[dict[str, bytes], list[str]]:
         """URL과 저장 그림은 같은 출처를 고른다. 가상 팩도 주인 팩으로 해석한다."""

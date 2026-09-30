@@ -25,7 +25,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import numpy as np
 
@@ -108,11 +108,21 @@ def normalize_stack(stack: Any) -> list[dict[str, Any]]:
 
 
 def search(pack, stack: Any, *, order: str = "wilson",
-           limit: int = 300, offset: int = 0) -> dict[str, Any]:
+           limit: int = 300, offset: int = 0,
+           only: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """depth 를 차례로 적용해 살아남은 작가를 돌려준다.
 
     돌려주는 `rows[].hits` 는 depth 순서와 같은 길이다 - 화면이 "1단계 305장 /
     2단계 41장" 을 그대로 읽는다.
+
+    `only` 는 **보여 줄 작가의 범위**다(사용자 지정 2026-09-30: [썸네일 있음 | 모두]).
+    이름 -> 참/거짓이고, 거짓인 작가는 depth 마다의 `passed` 에서부터 빠진다 - 칩의 수 ·
+    머리의 `N명` · 격자의 쪽수가 **한 범위**를 센다. 범위를 걸면 `total_all`(범위 밖까지
+    센 수)도 돌려준다 - 0 이 범위 탓인지 조건 탓인지 화면이 가려 말할 수 있게.
+
+    ⚠️ `only` 는 **첫 depth 를 지난 작가에게만** 묻는다. 팩의 작가는 47만 명이 넘어서
+       (2026-09-30 실측 477,430) 전부에 물으면 그것만으로 60~90ms 다. depth 는 AND 뿐이라
+       첫 depth 에서 떨어진 작가는 다시 살아나지 않는다 - 답은 같다.
     """
     steps = normalize_stack(stack)
     if not pack.available():
@@ -125,6 +135,7 @@ def search(pack, stack: Any, *, order: str = "wilson",
     # 0 번은 '작가 없음' 자리다 - 처음부터 죽여 둔다.
     alive = np.zeros(len(names), dtype=bool)
     alive[1:] = True
+    scope = None    # `only` 를 통과한 작가. 첫 depth 뒤에 한 번만 잰다.
 
     hits: list[np.ndarray] = []
     report: list[dict[str, Any]] = []
@@ -163,16 +174,24 @@ def search(pack, stack: Any, *, order: str = "wilson",
                 info = {"kind": "rating", "ratings": step["ratings"], "mode": "ratio",
                         "min_ratio": step["min_ratio"], "min_posts": step["min_posts"]}
         alive &= keep
+        if only is not None and scope is None:
+            scope = np.zeros(len(names), dtype=bool)
+            first = np.flatnonzero(alive)
+            scope[first] = np.fromiter((bool(only(names[i])) for i in first),
+                                       dtype=bool, count=first.size)
         hits.append(hit)
-        info["passed"] = int(alive.sum())
+        info["passed"] = int((alive if scope is None else alive & scope).sum())
         report.append(info)
-        if not info["passed"]:
+        # ⚠️ 범위 **밖**까지 아무도 없을 때만 멈춘다. 범위 안이 0 이어도 `total_all` 은
+        #    끝까지 세야 "썸네일이 있는 작가만 없다" 를 말할 수 있다.
+        if not alive.any():
             break
 
-    survivors = np.flatnonzero(alive)
+    survivors = np.flatnonzero(alive if scope is None else alive & scope)
+    extra = {} if scope is None else {"total_all": int(alive.sum())}
     if survivors.size == 0:
         return {"state": "ready", "steps": report, "rows": [], "total": 0,
-                "order": order, "limit": limit, "offset": offset}
+                "order": order, "limit": limit, "offset": offset, **extra}
 
     last = hits[len(report) - 1][survivors]
     total = total_posts[survivors]
@@ -201,7 +220,7 @@ def search(pack, stack: Any, *, order: str = "wilson",
         })
     return {"state": "ready", "steps": report, "rows": rows,
             "total": int(survivors.size), "order": order,
-            "limit": int(limit), "offset": start}
+            "limit": int(limit), "offset": start, **extra}
 
 
 def suggest(pack, prefix: str, *, axis: str | None = None, limit: int = 20) -> dict[str, Any]:

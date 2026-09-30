@@ -184,7 +184,7 @@ export function createArtistThumbController({
   let searchOn = false;
   // 검색이 켜져 있으면 격자의 **출처가 검색**이다(사용자 지정 2026-09-19).
   // ⚠️ 왼쪽에 따로 목록을 그리지 않는다 - 두 목록은 반드시 어긋나 보인다.
-  let searchQuery = null;        // {stack, order} | null
+  let searchQuery = null;        // {stack, order, thumbs} | null
   // 화면을 걸러 놓는 것들(조건 검색·이름 검색)은 **걸기 직전의 쪽**을 기억했다가
   // 다 풀면 그 자리로 돌려놓는다(사용자 지정 2026-09-19). 안 그러면 95,000명을
   // 훑던 자리를 잃어버려서, 잠깐 찾아보고 돌아오는 것이 사실상 불가능하다.
@@ -1053,6 +1053,8 @@ export function createArtistThumbController({
       // 둘로 갈라지면 언젠가 한쪽만 고치게 된다).
       const data = searchQuery ? await searchPageData(page) : await fetchListData(page, options);
       if (requestId !== listRequestId) return;
+      // ⚠️ 늦게 온 답은 위에서 버렸다 - 여기 닿은 셈만 판에 건넨다.
+      if (data.searchCounts) searchPanel?.syncCounts?.(data.searchCounts);
       currentPage = Number(data.page || 0);
       totalPages = Math.max(1, Number(data.total_pages || 1));
       randomViewActive = Boolean(data.random);
@@ -3378,7 +3380,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const mod = await import('./artistSearchPanel.mjs?v=20260920-keys');
+    const mod = await import('./artistSearchPanel.mjs?v=20260930-thumbs');
     searchPct = mod.pctText;
     searchPanel = mod.createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
@@ -3386,6 +3388,8 @@ export function createArtistThumbController({
       onQuery: query => { void applySearchQuery(query); },
       // [닫기] 는 토글을 끄는 것과 같다 - 보던 자리로 돌아간다.
       onClose: () => { void setSearchMode(false); },
+      // [썸네일 있음] 은 격자가 **지금 그리는 모드**의 그림으로 판정한다.
+      getThumbMode: () => currentMode(),
     });
     searchHostEl.appendChild(searchPanel.el);
     return searchPanel;
@@ -3463,8 +3467,12 @@ export function createArtistThumbController({
    */
   async function searchPageData(page) {
     const per = PAGE_SIZE;
+    const query = searchQuery;
     const found = await postJson('/api/artist-affinity/search', {
-      stack: searchQuery.stack, order: searchQuery.order,
+      stack: query.stack, order: query.order,
+      // [썸네일 있음 | 모두] - 판정은 서버가 **이 모드의 그림**으로 한다(카드와 같은 규칙).
+      //    화면에서 걸러 내면 쪽마다 구멍이 나고 쪽수 · 총수가 거짓이 된다.
+      thumbs: query.thumbs || 'all', thumb_mode: currentMode(),
       limit: per, offset: Math.max(0, Number(page) || 0) * per,
     });
     if (found?.state === 'unknown_tag') throw new Error(`색인에 없는 낱말입니다: ${found.tag}`);
@@ -3472,7 +3480,7 @@ export function createArtistThumbController({
     const rows = found.rows || [];
     // ⚠️ 등급 단계는 **마지막이 아닐 때만** 따로 보여 준다 - 마지막이면 위 배지가
     //    바로 그 수라 같은 숫자가 두 번 나온다(읽는 사람이 다른 것인 줄 안다).
-    const steps = searchQuery.stack || [];
+    const steps = query.stack || [];
     let rateAt = -1;
     steps.forEach((step, i) => { if (step.kind === 'rating') rateAt = i; });
     if (rateAt === steps.length - 1) rateAt = -1;
@@ -3487,6 +3495,8 @@ export function createArtistThumbController({
       total_pages: Math.max(1, Math.ceil(total / per)),
       filter_name: '검색 결과',
       random: false,
+      // 판의 칩 · `N명` 도 이 셈에 맞춘다(모드가 바뀌면 격자만 다시 받아 온다).
+      searchCounts: {query, steps: found.steps || [], total, total_all: found.total_all},
       items: rows.map(row => {
         const info = described[row.artist] || {};
         return {

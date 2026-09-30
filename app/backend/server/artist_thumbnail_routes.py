@@ -606,6 +606,18 @@ def _sync_group_thumbnails(context: WebSessionContext) -> None:
         pass
 
 
+def _search_thumb_scope(context: WebSessionContext, payload: dict) -> Callable[[str], bool] | None:
+    """검색의 [썸네일 있음 | 모두](사용자 지정 2026-09-30).
+
+    `thumbs: has` 면 **카드에 그림이 뜨는 작가만** 남기는 판정을, 아니면 None(= 모두,
+    예전 그대로)을 돌려준다. 모드는 화면이 지금 보는 썸네일 모드(`thumb_mode`)다 -
+    격자가 그 모드로 그림을 그리므로 판정도 같은 모드로 해야 둘이 맞는다.
+    """
+    if str(payload.get("thumbs") or "").strip().lower() != "has":
+        return None
+    return artist_thumbnail_service(context).image_presence(str(payload.get("thumb_mode") or ""))
+
+
 def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailService:
     service = getattr(context, "artist_thumbnail_service", None)
     if service is None:
@@ -886,11 +898,13 @@ def register_artist_thumbnail_routes(
         except (TypeError, ValueError):
             return JSONResponse({"error": "limit must be an integer"}, status_code=400)
         try:
+            only = await run_in_thread(_search_thumb_scope, session_context, payload)
             result = await run_in_thread(
                 artist_search, artist_affinity_pack(), payload.get("stack"),
                 order=str(payload.get("order") or "wilson"),
                 limit=limit,
-                offset=int(payload.get("offset") or 0))
+                offset=int(payload.get("offset") or 0),
+                only=only)
         except ArtistSearchError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return result

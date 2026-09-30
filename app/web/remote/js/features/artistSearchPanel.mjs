@@ -45,6 +45,17 @@ const ORDERS = [
   ['wilson', 'Wilson', '비중의 신뢰 하한 - 표본이 얇은 작가를 스스로 낮춥니다.'],
 ];
 
+/** 결과의 범위(사용자 지정 2026-09-30). 기본은 **썸네일 있음**이다.
+ *
+ *  '있음' 은 **격자 카드에 그림이 뜨는가** 그대로다 - 지금 고른 썸네일 모드의 팩 ·
+ *  관심 · 그룹 사본 · 생성한 썸네일. 판정은 서버가 격자와 같은 규칙으로 한다.
+ *  ⚠️ '없음' 은 두지 않는다(사용자 결정) - 그림이 없다는 것이 "안 받았다" 인지
+ *     "원래 없다" 인지 가를 길이 없다. */
+const THUMBS = [
+  ['has', '썸네일 있음', '지금 불러온 썸네일에 그림이 있는 작가만 보여 줍니다.'],
+  ['all', '모두', '그림이 없는 작가(No Image)도 모두 보여 줍니다.'],
+];
+
 /** 등급 묶음 둘(사용자 사양). 셋 이상을 열면 화면만 복잡해진다. */
 const RATING_SETS = [
   ['e', 'e'],
@@ -83,13 +94,15 @@ export function createArtistSearchPanel({
   showToast,
   getJson,
   postJson,
-  // 조건이 바뀔 때마다 `{stack, order}` 또는 `null`(비었음)을 준다.
+  // 조건이 바뀔 때마다 `{stack, order, thumbs}` 또는 `null`(비었음)을 준다.
   // ⚠️ 여기서 **목록을 그리지 않는다** - 격자가 그린다(사용자 지정 2026-09-19).
   onQuery = null,
   // [닫기] - 판을 접고 보던 자리로 돌려놓는다(조건은 안 지운다).
   onClose = null,
   // 결과가 바뀔 때마다 한 번. 바깥이 상태줄을 다시 쓴다.
   onUpdate = null,
+  // 지금 격자가 보는 썸네일 모드. [썸네일 있음] 의 판정이 그 모드의 그림으로 한다.
+  getThumbMode = () => '',
 }) {
   const el = doc.createElement('div');
   el.className = 'asx';
@@ -98,6 +111,9 @@ export function createArtistSearchPanel({
       <span class="asx-title">아티스트 검색</span>
       <span class="asx-count"></span>
       <span class="asx-spacer"></span>
+      <div class="asx-seg asx-thumbs" data-asx-seg="thumbs">
+        ${THUMBS.map(([v, label, tip]) => `<button type="button" data-asx-thumbs="${v}" title="${escHtml(tip)}">${escHtml(label)}</button>`).join('')}
+      </div>
       <button type="button" class="asx-btn" data-asx-act="close"
               title="검색을 닫고 보던 자리로 돌아갑니다">닫기</button>
       <button type="button" class="asx-btn" data-asx-act="reset" title="단계를 모두 지웁니다">지우기</button>
@@ -173,11 +189,14 @@ export function createArtistSearchPanel({
   let axisFloor = new Map();
   let stack = [];            // 서버가 받아 준 depth 만 쌓인다
   let order = 'wilson';
+  let thumbs = 'has';        // 사용자 지정: 기본값은 썸네일 있음
   let kind = 'copyright';
   let ratingsPick = 'e';
   let ratingMode = 'count';
   let steps = [];
   let total = 0;
+  // 범위 밖까지 센 수. 서버가 범위를 걸었을 때만 온다(모두면 null).
+  let totalAll = null;
   let busy = false;
   let seq = 0;               // 늦게 온 응답이 새 결과를 덮지 않게
   let suggSeq = 0;
@@ -218,6 +237,9 @@ export function createArtistSearchPanel({
 
   function paintCount() {
     headCountEl.textContent = stack.length ? `${fmt(total)}명` : '';
+    // 범위에 걸러진 수가 있으면 말풍선으로만 알린다 - 줄에 글자를 늘리지 않는다.
+    headCountEl.title = stack.length && totalAll !== null && totalAll > total
+      ? `썸네일 있는 작가 ${fmt(total)}명 · 모두 ${fmt(totalAll)}명` : '';
   }
 
   function paintForm() {
@@ -233,11 +255,12 @@ export function createArtistSearchPanel({
       ? `count ≥ ${floor}+` : 'count ≥';
     numWrap.count.title = floor > 1
       ? `${kindLabel(kind)} 축은 집계표라 ${floor}회 이상만 셉니다.` : '';
-    // 세그먼트 넷 - 각각 제 `data-asx-<이름>` 을 읽어 고른 것에 불을 켠다.
+    // 세그먼트 다섯 - 각각 제 `data-asx-<이름>` 을 읽어 고른 것에 불을 켠다.
     for (const [seg, attr, on] of [['kind', 'asxKind', kind],
                                    ['ratings', 'asxRatings', ratingsPick],
                                    ['mode', 'asxMode', ratingMode],
-                                   ['order', 'asxOrder', order]]) {
+                                   ['order', 'asxOrder', order],
+                                   ['thumbs', 'asxThumbs', thumbs]]) {
       el.querySelectorAll(`[data-asx-seg="${seg}"] button`).forEach(btn => {
         btn.classList.toggle('is-on', btn.dataset[attr] === on);
       });
@@ -277,12 +300,28 @@ export function createArtistSearchPanel({
     noteEl.className = `asx-note${kindName ? ` is-${kindName}` : ''}`;
   }
 
+  /** 결과에 딸린 한 줄. 판 자신의 셈과 격자가 받아 온 셈이 **같은 말**을 하게 한 곳에 둔다.
+   *  ⚠️ 범위 탓의 0 은 따로 말한다 - "문턱을 낮춰 보세요" 라고 하면 낮춰도 그대로다. */
+  function resultNote() {
+    const floored = steps.find(s => s.min_count_floor);
+    return !total ? (totalAll ? `썸네일이 있는 작가가 없습니다 - [모두] 에는 ${fmt(totalAll)}명입니다.`
+                              : '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.')
+      : floored ? `이 축은 ${floored.min_count_floor}회 이상만 셉니다 `
+                  + `(${floored.min_count_asked} -> ${floored.min_count}).`
+      : stack.length >= MAX_DEPTH ? `${MAX_DEPTH}단계까지입니다.` : '';
+  }
+
+  /** 지금 조건 - 격자가 받아 가는 모양 그대로. 범위(`thumbs`)도 조건이다. */
+  function currentQuery() {
+    return stack.length ? {stack: stack.map(step => ({...step})), order, thumbs} : null;
+  }
+
   // ── 서버 ──────────────────────────────────────────────────────────────
 
   /** `candidate` 를 끝에 붙여 본다. 서버가 받아 주면 그때 `stack` 이 된다. */
   async function run(nextStack, {commit = true, keepNums = false} = {}) {
     if (!nextStack.length) {
-      stack = []; steps = []; total = 0;
+      stack = []; steps = []; total = 0; totalAll = null;
       paintStack(); paintCount(); paintForm(); note('');
       onQuery?.(null);
       onUpdate?.();
@@ -295,8 +334,9 @@ export function createArtistSearchPanel({
     try {
       // ⚠️ 여기서는 **셈만 한다**(`limit: 1`). 목록은 격자가 제 쪽수만큼 따로
       //    받아 간다 - 같은 것을 두 번 그리면 둘이 어긋나 보인다.
+      // ⚠️ 범위와 모드를 **격자와 똑같이** 싣는다 - 안 그러면 칩의 수와 격자의 쪽수가 갈린다.
       data = await postJson('/api/artist-affinity/search',
-                            {stack: nextStack, order, limit: 1});
+                            {stack: nextStack, order, thumbs, thumb_mode: getThumbMode(), limit: 1});
     } catch (error) {
       if (mine !== seq) return false;
       busy = false; paintForm();
@@ -318,17 +358,14 @@ export function createArtistSearchPanel({
     if (commit) stack = nextStack;
     steps = data.steps || [];
     total = Number(data.total || 0);
+    totalAll = data.total_all === undefined ? null : Number(data.total_all);
     paintStack(); paintCount(); paintForm();
-    const floored = steps.find(s => s.min_count_floor);
-    note(!total ? '조건이 너무 좁습니다 - 문턱을 낮춰 보세요.'
-      : floored ? `이 축은 ${floored.min_count_floor}회 이상만 셉니다 `
-                  + `(${floored.min_count_asked} -> ${floored.min_count}).`
-      : stack.length >= MAX_DEPTH ? `${MAX_DEPTH}단계까지입니다.` : '');
+    note(resultNote());
     // ⚠️ 갱신 뒤에는 칸을 되돌리지 않는다 - 방금 사용자가 넣은 값이 곧 지금
     //    stack 의 값이라, 기본값으로 되돌리면 화면과 조건이 어긋나 보인다.
     if (!keepNums) resetNums();
     // 조건이 정해졌다 - 목록은 **격자가** 받아 간다(사용자 지정 2026-09-19).
-    onQuery?.({stack: stack.map(step => ({...step})), order});
+    onQuery?.(currentQuery());
     onUpdate?.();
     return true;
   }
@@ -493,6 +530,17 @@ export function createArtistSearchPanel({
       return;
     }
 
+    const thumbsBtn = event.target.closest('[data-asx-thumbs]');
+    if (thumbsBtn) {
+      const next = thumbsBtn.dataset.asxThumbs;
+      if (next === thumbs) return;
+      thumbs = next;
+      paintForm();
+      // 범위만 바뀌었다 - 같은 stack 을 다시 센다. 문턱 칸은 사용자가 쳐 둔 그대로 둔다.
+      if (stack.length) void run(stack, {keepNums: true});
+      return;
+    }
+
     const chip = event.target.closest('[data-asx-depth]');
     if (chip) {
       // 칩을 누르면 **거기까지만** 남는다. 마지막 칩이면 그 단계를 뺀다(뒤로 가기).
@@ -605,7 +653,26 @@ export function createArtistSearchPanel({
       ? [stack.map(stepLabel).join(' › '), `${fmt(total)}명`]
       : []),
     /** 지금 조건. 격자가 쪽을 넘길 때마다 쓴다. */
-    query: () => (stack.length ? {stack: stack.map(step => ({...step})), order} : null),
+    query: currentQuery,
+    /** 격자가 받아 온 셈으로 칩 · 머리의 수를 맞춘다.
+     *
+     *  ⚠️ [썸네일 있음] 의 수는 **썸네일 모드 · 백엔드**에 따라 달라진다. 그것들이 바뀌면
+     *     격자는 제 길로 다시 받아 오지만 판은 모른다 - 여기서 받지 않으면 칩과 `N명` 이
+     *     옛 모드의 수로 남는다. 조건이 **지금 판의 것과 같을 때만** 받는다.
+     *  ⚠️ 수가 그대로면 아무것도 안 건드린다 - 쪽을 넘길 때마다 판의 안내(예: 색인에 없는
+     *     낱말)를 지우면 안 된다. */
+    syncCounts: meta => {
+      if (busy || !meta || JSON.stringify(meta.query) !== JSON.stringify(currentQuery())) return;
+      const nextSteps = meta.steps || [];
+      const nextTotal = Number(meta.total || 0);
+      const nextAll = meta.total_all === undefined ? null : Number(meta.total_all);
+      if (nextTotal === total && nextAll === totalAll
+          && JSON.stringify(nextSteps) === JSON.stringify(steps)) return;
+      steps = nextSteps; total = nextTotal; totalAll = nextAll;
+      paintStack(); paintCount();
+      note(resultNote());
+      onUpdate?.();
+    },
     isReady: () => packState?.state === 'ready',
     focus: () => { if (isTagKind(kind) && kindUsable(kind)) inputEl.focus(); },
     reset: () => { void run([]); },

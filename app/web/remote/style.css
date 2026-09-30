@@ -29181,9 +29181,13 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .asx-note { flex: 0 0 auto; font-size: 9px; line-height: 1.5; color: var(--text-dim); }
 .asx-note.is-bad { color: #ff9c9c; }
 .asx-note:empty { display: none; }
+/* 결과의 범위 [썸네일 있음 | 모두] - 머리줄의 [닫기] 앞(사용자 지정 2026-09-30).
+   옷은 다른 세그먼트 그대로다(단추 키 22px = [닫기]와 같다). 좁아지면 빈칸이 먼저 준다. */
+.asx-thumbs { flex: 0 0 auto; }
 /* 팩이 없으면 입력은 잠기고 사유만 남는다 - 고장이 아니다. */
 .asx.is-missing .asx-form,
-.asx.is-missing .asx-orders { display: none !important; }
+.asx.is-missing .asx-orders,
+.asx.is-missing .asx-thumbs { display: none !important; }
 
 /* ══ 믹스 띠 (js/features/mixQueuePanel.mjs) ══════════════════════════════
    리모컨 창 **안쪽, 격자 바로 위**의 가로 썸네일 띠(사용자 지정 2026-09-19).

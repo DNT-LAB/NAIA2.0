@@ -1234,9 +1234,12 @@ class KoreanLayer:
         return [(s, e) for _f, _t, s, e in spans]
 
     def _person_head(self, form: str) -> str | None:
-        """사람 낱말로 끝나는 합성어의 머리(마법소녀 -> 소녀) — 쪼개져 나왔을 때 seen 에 들어가는 것과 같게."""
-        heads = [w for w in (*self._female, *self._male, *self._neutral)
-                 if len(w) >= 2 and len(form) > len(w) and form.endswith(w)]
+        """사람 낱말로 끝나는 합성어의 머리(마법소녀 -> 소녀) — 쪼개져 나왔을 때 seen 에 들어가는 것과 같게.
+        성별 있는 머리 · 두 글자 이상의 앞부분만 — Kiwi 가 명사 + 사람 낱말로 쪼개는 꼴(마법+소녀 · 고양이+소녀)이 같은
+        합성어의 다른 표기다. 그 밖은 다른 낱말 · 다른 사람이다: 성별 없는 머리(남자친구 ≠ 여자친구 의 친구) · 한 글자 접두
+        (할아버지 ≠ 아버지 · 미소녀 ≠ 소녀 · 남학생 ≠ 여학생) — 한 사람으로 합쳐졌다(Codex M2 F1 · 전수 대조)."""
+        heads = [w for w in (*self._female, *self._male)
+                 if len(w) >= 2 and len(form) - len(w) >= 2 and form.endswith(w)]
         return max(heads, key=len) if heads else None
 
     # 사람 낱말 뒤에 붙어 나오는 조사 — Kiwi 가 '마법소녀와' 를 명사 하나로 낸다(09-26)

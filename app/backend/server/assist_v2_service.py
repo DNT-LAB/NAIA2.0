@@ -310,15 +310,18 @@ class AssistError(ValueError):
 
 
 def _parse_payload(context: Any, payload: Any) -> dict[str, Any]:
-    from core.assist_v2 import MAX_TEXT, RATINGS
+    from core.assist_compose import length_problem
+    from core.assist_v2 import MAX_LINE_TEXT, MAX_TEXT, RATINGS
 
     if not isinstance(payload, dict):
         raise AssistError("요청 형식이 잘못됐습니다.")
     text = str(payload.get("text") or "").strip()
     if not text:
         raise AssistError("무엇을 찾을지 적어 주세요.")
-    if len(text) > MAX_TEXT:
-        raise AssistError(f"요청은 {MAX_TEXT}자까지입니다.")
+    # 한 줄 요청 300자 · 구성(c1 · c2 …)은 칸마다 300 / 전체 800 / 캐릭터 줄 6개 — 넘치면 까닭을 알린다(입력칸의 글은 그대로)
+    problem = length_problem(text, line_limit=MAX_LINE_TEXT, total_limit=MAX_TEXT)
+    if problem:
+        raise AssistError(problem)
     from core.assist_korean import symbols_as_words
 
     text = symbols_as_words(text)            # '? 마크를' -> '물음표를' — 한국어 층 · 모델 · 사전이 같은 낱말을 본다(09-26)
@@ -1849,6 +1852,9 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
             clause = ac.strip_subject(clause, names)
             if len(compact(clause)) >= 2:
                 details.append(ac.Detail(owner=seg.index, ko=clause, en=""))
+    # 절이 너무 많으면 뒤쪽은 모델에 묻지 않는다(묻는 시간이 절 수만큼 는다) — 말없이 버리지 않고 결과에 알린다(Codex M1).
+    # 거절하지 않는다: 칸마다 300자면 절 16개는 쉽게 넘고, 거절하면 앞쪽 결과까지 잃는다
+    unread = [d.ko for d in details[ac.MAX_CLAUSES:]]
     details = details[:ac.MAX_CLAUSES]
     # 줄마다 적은 영문 — 인원 태그는 인원으로, 빼라고 적은 것은 태그에서 빼고, 나머지는 그 줄의 칸에 적힌 그대로
     english = {seg.index: english_parts(seg.body) for seg in segs}
@@ -1968,5 +1974,10 @@ def _compose(context: Any, req: dict[str, Any], segs: list[Any], started: float)
                      "total_s": round(time.perf_counter() - started, 3)}
     if pool and not pool.get("pins"):             # 풀이 아예 없으면(이벤트 맵 없음) 게시물 수를 말할 수 없다
         out["message"] = "고른 등급·인원에서 이 조합의 실제 게시물이 20건이 안 됩니다 — 프롬프트는 그대로 쓸 수 있습니다."
+    if unread:
+        shown = ", ".join(unread[:3]) + (" …" if len(unread) > 3 else "")
+        out["message"] = " ".join(m for m in (out.get("message"), f"설명이 길어 뒤쪽 {len(unread)}개({shown})는 읽지 "
+                                              f"않았습니다 — 줄여서 다시 보내 주세요.") if m)
+        out["unread"] = unread
     _with_rating_note(out, req["rating"], dropped)
     return out

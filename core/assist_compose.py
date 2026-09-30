@@ -72,6 +72,37 @@ def parse_segments(text: Any) -> list[Segment]:
     return [Segment(0, "", " ".join(s for s in scene if s))] + chars[:MAX_CHARACTERS]
 
 
+def length_problem(text: Any, *, line_limit: int, total_limit: int) -> str | None:
+    """요청 길이 — 넘치면 사용자에게 보일 까닭(몇 자인지), 아니면 None. **자르지 않는다**(예전엔 7번째 캐릭터 줄이
+    말없이 사라졌다 — Codex 설계 논의 M1). 캐릭터 줄이 없으면 한 줄 요청(여러 줄이어도): 전체 line_limit 자.
+    구성 요청(c1 · c2 …)은 전체 total_limit 자 · 캐릭터 줄 MAX_CHARACTERS 개 · 장면 칸과 캐릭터 줄마다 line_limit 자."""
+    raw = str(text or "").strip()
+    scene: list[str] = []
+    chars: list[str] = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        m = _CHAR_LINE.match(line)
+        if m:
+            chars.append(clean_text(m.group(2)).strip())
+            continue
+        m = _MAIN_LINE.match(line)
+        scene.append(clean_text(m.group(1) if m else line).strip())
+    if not chars:
+        return f"요청은 {line_limit}자까지입니다(지금 {len(raw)}자)." if len(raw) > line_limit else None
+    if len(raw) > total_limit:
+        return f"여러 줄 요청은 모두 합쳐 {total_limit}자까지입니다(지금 {len(raw)}자)."
+    if len(chars) > MAX_CHARACTERS:
+        return f"캐릭터 줄은 {MAX_CHARACTERS}개까지입니다(지금 {len(chars)}개)."
+    main = " ".join(s for s in scene if s)
+    if len(main) > line_limit:
+        return f"장면 설명은 {line_limit}자까지입니다(지금 {len(main)}자)."
+    for k, body in enumerate(chars, start=1):
+        if len(body) > line_limit:
+            return f"c{k} 줄은 {line_limit}자까지입니다(지금 {len(body)}자)."
+    return None
+
+
 def strip_subject(clause: str, names: Iterable[str]) -> str:
     """'하츠네 미쿠가 혼자 …' -> '혼자 …' — 주어 이름은 캐릭터 칸이 말한다."""
     out = clean_text(clause)

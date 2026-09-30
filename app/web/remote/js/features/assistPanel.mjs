@@ -252,7 +252,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
         <span class="as-icon" aria-hidden="true">✦</span>
         <div class="as-edit">
           <div class="as-mirror" aria-hidden="true"></div>
-          <textarea class="as-input" rows="1" maxlength="800" spellcheck="false" autocomplete="off"
+          <textarea class="as-input" rows="1" spellcheck="false" autocomplete="off"
                     aria-label="Assist 요청"
                     placeholder="말로 적어 주세요 — 예: 카나데가 나히다를 공주안기 하고 뛰어다니는 장면"></textarea>
         </div>

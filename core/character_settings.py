@@ -1873,7 +1873,8 @@ def applied_character_view(app_context, normalized: dict, mode: str = "NAI") -> 
     우선순위는 character_params_from_settings(= api_service 5-1)와 같다(Codex 09-30: 화면이 규칙을 따로 짜면 어긋난다):
       조건부 override(Random 의 조건부 규칙이 정한 이번 회 캐릭터) > 모듈 꺼짐 · 켠 슬롯 없음(= 없음) >
       재굴림 끔 + 굴려 둔 값(📌 고정 슬롯이 덮는다) > 새로 굴림(Generate 가 슬롯을 펼친다 - 📌 고정 슬롯은 그 값).
-    source = override | none | rolled | fresh. pinned = 📌 고정이 덮는 슬롯 uuid -> 그 값(새로 굴림에서 쓴다).
+    source = override | none | rolled | fresh. pinned = 📌 고정이 덮는 슬롯 uuid -> {prompt, uc}(새로 굴림에서 쓴다 -
+    Generate 는 고정한 UC 도 그대로 쓴다, Codex 09-30 2차).
     """
     override = _conditional_character_override(app_context, reuse_current_context=True) if app_context is not None else None
     if override is not None:
@@ -1886,7 +1887,8 @@ def applied_character_view(app_context, normalized: dict, mode: str = "NAI") -> 
         return {"source": "none", "characters": [], "uc": [], "pinned": {}}
     slot_ids = _active_frame_slot_ids(frames)
     frozen = read_frozen_character_slots(app_context) if app_context is not None else {}
-    pinned = {slot: payload["prompt"] for slot, payload in frozen.items() if slot in slot_ids}
+    pinned = {slot: {"prompt": payload["prompt"], "uc": payload.get("uc", "")}
+              for slot, payload in frozen.items() if slot in slot_ids}
     snapshot = None if normalized.get("reroll_on_generate") else read_character_roll_snapshot(app_context, mode)
     if snapshot is not None:
         result = _overlay_frozen_character_slots(app_context, _snapshot_result(snapshot, slot_ids), slot_ids)

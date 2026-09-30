@@ -377,11 +377,18 @@ export function createModuleBadges({
     }
   }
 
-  /** 켜진 슬롯의 글 - Connect 자식은 제 글이 비어도 앞 슬롯의 글을 물려받아 나간다(Codex 09-30). */
-  function enabledSlotTexts(characters) {
+  /** 켜진 슬롯의 글 - Connect 자식은 제 글이 비어도 앞 슬롯의 글을 물려받아 나간다(Codex 09-30).
+   *  📌 고정 슬롯(pinned: uuid -> {prompt, uc})은 그 값이 나가고, 자식도 그 값을 물려받는다. */
+  function enabledSlotTexts(characters, pinned = null) {
     const slots = (characters || []).filter(item => item && item.enabled);
-    const own = new Map(slots.map(item => [String(item.slot_uuid || ''), String(item.prompt || '').trim()]));
+    const pinOf = item => {
+      const pin = pinned && pinned[String(item.slot_uuid || '')];
+      return pin ? String(typeof pin === 'object' ? pin.prompt || '' : pin).trim() : '';
+    };
+    const own = new Map(slots.map(item => [String(item.slot_uuid || ''),
+      pinOf(item) || String(item.prompt || '').trim()]));
     return slots.map(item => {
+      if (pinOf(item)) return pinOf(item);
       const link = String(item.connect_to || '').trim();
       return [link ? own.get(link) || '' : '', String(item.prompt || '').trim()].filter(Boolean).join(', ');
     }).filter(Boolean);
@@ -392,14 +399,24 @@ export function createModuleBadges({
     const badge = document.getElementById('badgeChar');
     if (!badge || !btn) return;
 
-    // 다음 Generate 에 나가는 글로 어림한다 - 백엔드가 계산한 것(applied: 조건부 override · 굴려 둔 값 + 📌 고정)이
-    // 있으면 그것, 굴려 둔 값이 없으면(재굴림 켬 · 슬롯을 고친 직후 · 재시작 직후) 켜진 슬롯의 글이다 - 그때 0 을
-    // 내걸면 "캐릭터가 안 들어간다" 로 읽힌다(사용자 제보 2026-09-30: Activated 2 Characters 인데 Character 0).
-    // ⚠️ 모듈이 꺼졌으면 비운다 - 토큰 칸은 개수가 0 이어도 글로 다시 어림한다(Codex 09-30: 꺼졌는데 Character 5).
+    // 다음 Generate 에 나가는 글로 어림한다 - 백엔드가 계산한 출처(applied.source)대로 가른다(Codex 09-30 2차: 길이로
+    // 가르면 조건부 규칙이 캐릭터를 모두 뺀 빈 목록이 슬롯 글로 되살아났다):
+    //   override · rolled -> 그 목록(비었으면 0) · none -> 0 · fresh -> 켜진 슬롯의 글(📌 고정은 그 값).
+    // 굴려 둔 값이 없을 때 0 을 내걸면 "캐릭터가 안 들어간다" 로 읽힌다(사용자 제보 2026-09-30: Activated 2 Characters
+    // 인데 Character 0). 옛 서버(applied 없음)는 굴려 둔 값 -> 없으면 슬롯 글.
+    // ⚠️ 모듈이 꺼졌으면 비운다(조건부 override 는 꺼져도 나간다 - 백엔드의 첫 순위) - 토큰 칸은 개수가 0 이어도
+    //    글로 다시 어림한다(Codex 09-30: 꺼졌는데 Character 5).
     const view = m.applied && typeof m.applied === 'object' ? m.applied : null;
-    const rolled = (view && (view.source === 'override' || view.source === 'rolled')
-      ? view.characters || [] : m.processed_characters || []).filter(Boolean);
-    const promptText = m.activated ? (rolled.length ? rolled : enabledSlotTexts(m.characters)).join(' ') : '';
+    const source = view ? String(view.source || '') : '';
+    let texts;
+    if (source === 'override' || source === 'rolled') texts = view.characters || [];
+    else if (source === 'none' || !m.activated) texts = [];
+    else if (source === 'fresh') texts = enabledSlotTexts(m.characters, view.pinned);
+    else {
+      const rolled = (m.processed_characters || []).filter(Boolean);
+      texts = rolled.length ? rolled : enabledSlotTexts(m.characters);
+    }
+    const promptText = texts.map(value => String(value || '').trim()).filter(Boolean).join(' ');
     const tokenCount = Number.isFinite(Number(m.character_token_count))
       ? Number(m.character_token_count)
       : estimateTokenCount(promptText, getMode());

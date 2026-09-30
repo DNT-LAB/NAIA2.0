@@ -51,6 +51,8 @@ export function createCharacterPanel({
   let lastRenderedStructureSignature = '';
   // 작업 영역(오른쪽 탭)의 서명. 이것이 그대로면 왼쪽만 다시 그린다.
   let lastRenderedWorkSignature = '';
+  // 굴린 값을 뺀 상태의 서명(contentSignature). 이것까지 그대로면 바뀐 것은 머리의 [적용 상태] 뿐이다.
+  let lastRenderedContentSignature = '';
   let deferredFocusedRenderState = null;
   let deferredFocusTarget = null;
   let tab = 'history';
@@ -464,6 +466,17 @@ export function createCharacterPanel({
         groupOf(item), item.custom_name || '',
       ].join(':')).join('|'),
     ].join('#');
+  }
+
+  // 굴린 값 - 머리의 [적용 상태] 만 읽는다(appliedState). Random · 📌 고정 뒤에 새로 청한 상태는 이것만 바뀐다.
+  const ROLL_KEYS = new Set(['processed_characters', 'processed_ucs', 'processed_preview_text', 'processed_slots',
+    'applied', 'character_token_count']);
+
+  /** 굴린 값을 뺀 상태 전부. 슬롯 글 · 기록처럼 서명에 없는 내용이 바뀌면 여기서 걸린다. */
+  function contentSignature(state) {
+    const rest = {};
+    for (const [key, value] of Object.entries(state || {})) if (!ROLL_KEYS.has(key)) rest[key] = value;
+    try { return JSON.stringify(rest); } catch (_) { return ''; }
   }
 
   function characterStructureSignature(state) {
@@ -1399,8 +1412,13 @@ export function createCharacterPanel({
     const labelOf = new Map(sent.map((item, i) => [String(item.slot_uuid || ''), `C${i + 1}`]));
     const items = fresh
       ? sent.map(item => {
+        // 📌 고정 = {prompt, uc} - Generate 는 고정한 UC 도 그대로 쓴다(Codex 09-30 2차). 옛 서버는 글만 보냈다.
         const pin = pinned[String(item.slot_uuid || '')];
-        if (pin) return {prompt: `📌 ${pin}`, uc: String(item.uc || '')};
+        if (pin) {
+          const pinPrompt = typeof pin === 'object' ? String(pin.prompt || '') : String(pin);
+          const pinUc = typeof pin === 'object' ? String(pin.uc || '') : String(item.uc || '');
+          return {prompt: `📌 ${pinPrompt}`, uc: pinUc};
+        }
         const link = String(item.connect_to || '').trim();
         const from = link ? `↳ ${labelOf.get(link) || '앞 슬롯'} 이어받음` : '';
         return {prompt: [from, String(item.prompt || '').trim()].filter(Boolean).join(' + '), uc: String(item.uc || '')};
@@ -1548,9 +1566,20 @@ export function createCharacterPanel({
     const workSig = workSignature(nextState);
     const shell = moduleBody.querySelector('.mod-character-shell');
     const slotColumn = moduleBody.querySelector('.cw-slots');
+    // 굴린 값만 바뀌었다(Random · 📌 고정 뒤에 새로 청한 상태 - Codex 09-30 2차) - 머리만 새로 그린다. 통째로
+    // 다시 그리면 오른쪽 탭의 목록 · 스크롤 · 입력칸이 Random 마다 새로 만들어진다.
+    const contentSig = contentSignature(nextState);
+    if (shell && lastRenderedStructureSignature === structureSignature && lastRenderedWorkSignature === workSig
+        && lastRenderedContentSignature === contentSig) {
+      lastState = nextState;
+      refreshHead(nextState);
+      return;
+    }
     if (shell && slotColumn && lastRenderedWorkSignature === workSig
         && lastRenderedStructureSignature !== structureSignature) {
       lastState = nextState;
+      // 오른쪽은 안 그린다 - 다음 같은 서명의 상태는 예전처럼 통째로 그려 따라잡는다(지름길을 막는다).
+      lastRenderedContentSignature = '';
       renderSlotsOnly(nextState);
       lastRenderedStructureSignature = structureSignature;
       return;
@@ -1581,6 +1610,7 @@ export function createCharacterPanel({
     bindEvents();
     lastRenderedStructureSignature = structureSignature;
     lastRenderedWorkSignature = workSig;
+    lastRenderedContentSignature = contentSig;
     if (dragUuid && !moduleBody.querySelector(`[data-cw-drag-uuid="${dragUuid.replace(/"/g, '')}"]`)) clearDrag();
 
   }

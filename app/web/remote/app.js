@@ -2109,7 +2109,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260903-main
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260930-chartok2')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260930-chartok3')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -2450,7 +2450,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-head3')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-head4')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -4317,6 +4317,8 @@ function afterWsJsonMessage(m) {
   if (m.type === 'prompt_generated' && 'remaining' in m) {
     if (searchPanelControl) searchPanelControl.updatePromptGeneratedCount(m);
   }
+  // Random 이 굴린 캐릭터 · 조건부 override 는 캐릭터 상태로 오지 않는다 - [적용 상태] · 토큰 칸을 위해 새로 청한다.
+  if (m.type === 'prompt_generated') scheduleCharacterStateRefresh();
 }
 
 function onWsMessageError(error) {
@@ -10821,6 +10823,21 @@ function isAnimaArtistMode() {
   return isComfyUiAnimaMode() || isWebUiAnimaModel();
 }
 
+// [적용 상태] · 토큰 칸은 캐릭터 상태의 applied(다음 Generate 에 나갈 것)를 읽는다. Random 이 굴린 값 · 조건부
+// override · 📌 고정은 캐릭터 상태를 따로 보내지 않는다 - 그때 새로 청한다(Codex 09-30 2차). 몰려 와도 한 번만.
+// ⚠️ 새 브로드캐스트를 더하지 않고 **청한다** - 서버가 보내는 메시지 순서(웹 스모크 계약)를 밀지 않는다.
+//    캐릭터는 NAI 전용이다.
+let characterStateRefreshTimer = null;
+let lastFrozenCharacterPins = null;
+function scheduleCharacterStateRefresh() {
+  if (!modeSelect || modeSelect.value !== 'NAI') return;
+  if (characterStateRefreshTimer) clearTimeout(characterStateRefreshTimer);
+  characterStateRefreshTimer = setTimeout(() => {
+    characterStateRefreshTimer = null;
+    requestModuleState('character');
+  }, 250);
+}
+
 function requestModuleState(moduleId) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   if (moduleId === 'search') {
@@ -11897,7 +11914,16 @@ function onModuleState(m) {
   }
   // Frozen wildcard bar must stay live even when the wildcard panel isn't the
   // open module — freeze/unfreeze/reroll all broadcast a fresh wildcard state.
-  if (m.module_id === 'wildcard') updateFrozenWildcardBar(m.frozen);
+  if (m.module_id === 'wildcard') {
+    updateFrozenWildcardBar(m.frozen);
+    // 📌 캐릭터 고정 · 해제 · 다시 굴림은 다음 Generate 의 캐릭터를 바꾼다 - 와일드카드 상태만 오므로 캐릭터 상태를
+    // 청한다(처음 한 번은 접속 때 이미 청했다).
+    const pins = JSON.stringify((m.frozen && m.frozen.characters) || []);
+    if (pins !== lastFrozenCharacterPins) {
+      if (lastFrozenCharacterPins !== null) scheduleCharacterStateRefresh();
+      lastFrozenCharacterPins = pins;
+    }
+  }
 
   // ⚠️ **이 게이트 앞이어야 한다.** 아래 `currentModuleId` 검사는 '지금 열려 있는
   //    모듈' 만 렌더하는데, V5 가상 캔버스는 모듈 팝업이 아니라 **Result 안에** 산다.

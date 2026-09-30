@@ -2291,7 +2291,7 @@ import('./js/features/animaSetupPanel.mjs?v=20260929-diag2')
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let animaLoraPanel = null;
 // 카드 -> 적용 순서 끌어다 놓기(09-30)는 리모컨 · 그룹 창과 **같은** 끌기 중개자다 - 주소(쿼리까지)가 같아야 한 인스턴스다.
-Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorafolders'),
+Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorafolders2'),
   import('./js/features/dragBroker.mjs?v=20260919-strip')])
   .then(([{createAnimaLoraPanel}, {dragBrokerFor}]) => {
     animaLoraPanel = createAnimaLoraPanel({

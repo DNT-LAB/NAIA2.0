@@ -73,6 +73,10 @@ const STYLE = `
 .anima-lora-popup .alr-item:last-child { border-bottom: 0; }
 .anima-lora-popup .alr-item.off .alr-name, .anima-lora-popup .alr-item.off .alr-strength { opacity: 0.45; }
 .anima-lora-popup .alr-item[data-lora-row] .alr-idx, .anima-lora-popup .alr-item[data-lora-row] .alr-name { cursor: grab; }
+/* 터치 - 끌기 전에 브라우저가 스크롤로 가져가면(pointercancel) 끌기가 취소된다. 손잡이(체인 번호 · 이름, 카드의 PNG 칸)만
+   막는다 - 목록은 그 밖을 쓸면 그대로 굴러간다(Codex 리뷰 F6). */
+.anima-lora-popup .alr-item[data-lora-row] .alr-idx, .anima-lora-popup .alr-item[data-lora-row] .alr-name,
+.anima-lora-popup .alr-card[data-lora-card] .alr-png { touch-action: none; }
 .anima-lora-popup .alr-dir { color: var(--text-dim); font-weight: 400; }
 .anima-lora-popup .alr-item input[type=checkbox] { accent-color: var(--accent); cursor: pointer; margin: 0; flex: none; }
 .anima-lora-popup .alr-idx { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); width: 14px; text-align: right; flex: none; }
@@ -573,9 +577,16 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       ...folders.map(f => row(f.path, f.label, f.count, f.depth, f.path))].join('');
   }
 
+  // 다시 그리면 초점을 가진 단추가 사라진다 - 키보드로 고르던 자리(같은 칸, 사라졌으면 고른 칸)로 돌려준다(Codex 리뷰 F8)
   function paintCats() {
     const el = pick('.alr-cats');
-    if (el) el.innerHTML = isManaged() ? catsHtml() : '';
+    if (!el) return;
+    const active = document.activeElement;
+    const focused = active && el.contains?.(active) ? active.getAttribute?.('data-lora-cat') : null;
+    el.innerHTML = isManaged() ? catsHtml() : '';
+    if (focused == null) return;
+    const buttons = [...(el.querySelectorAll?.('[data-lora-cat]') || [])];
+    (buttons.find(b => b.getAttribute('data-lora-cat') === focused) || el.querySelector?.('.alr-cat.on'))?.focus?.();
   }
 
   function libraryHtml() {
@@ -1111,8 +1122,11 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     return el?.querySelectorAll ? [...el.querySelectorAll('.alr-item')] : [];
   }
 
-  // 포인터 높이 -> 몇 번째 앞에 넣을지(줄의 가운데를 넘으면 그 뒤). 머리줄 위면 맨 앞.
+  // 포인터 높이 -> 몇 번째 앞에 넣을지(줄의 가운데를 넘으면 그 뒤). 머리줄 위면 맨 앞 - 체인 본문보다 위면 줄을 세지
+  // 않는다: 체인을 굴려 두면 가려진 위쪽 줄의 가운데도 머리줄보다 위라 세어져 중간에 들어갔다(Codex 리뷰 F7).
   function dropIndex(point) {
+    const top = pick('.alr-chain')?.getBoundingClientRect?.().top;
+    if (Number.isFinite(top) && point.y < top) return 0;
     const rows = chainRows();
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i].getBoundingClientRect();

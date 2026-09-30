@@ -197,15 +197,30 @@ def drop_color_tags(tags: list[str], colors: list[str]) -> list[str]:
     return [t for t in tags if _is_color_exception(t) or not any(c in t.lower() for c in lowered)]
 
 
+# 섹션 머리말 "(Subject & Action):" — 아는 머리말은 줄 어디에 있든, 모르는 머리말(모델이 지어낸 "(Mood):")은 줄 머리에서만.
+# 줄 머리의 "(soft light:1.2)," 같은 가중치 태그는 ")" 바로 뒤가 ":" 가 아니라 걸리지 않는다.
+_SECTION_LABEL_RE = re.compile(r"\((" + "|".join(re.escape(s[1]) for s in SECTIONS) + r")\)\s*:", re.IGNORECASE)
+_LEADING_LABEL_RE = re.compile(r"^\(([^()\n]{1,60})\)\s*:")
+
+
+def _unwrap_section_labels(line: str) -> str:
+    line = _SECTION_LABEL_RE.sub(lambda m: m.group(1) + ":", line)
+    return _LEADING_LABEL_RE.sub(lambda m: m.group(1).strip() + ":", line)
+
+
 def format_output(text: str, *, is_nai: bool) -> str:
     """모델 출력을 거의 그대로 쓴다 — 파싱·필터 없음(no-think 에서 템플릿을 온전히 지킨다, 사용자 결정).
 
-    하는 일은 둘뿐: ① 줄마다 앞의 ", " 를 떼고 ``",\\n\\n"`` 로 잇는다 — 섹션 하나가 한 문단이다(사용자 지정
+    하는 일은 셋뿐: ① 줄마다 앞의 ", " 를 떼고 ``",\\n\\n"`` 로 잇는다 — 섹션 하나가 한 문단이다(사용자 지정
     2026-09-23, 보기 좋게). 전송 직전 정리(api_service)가 개행을 지우므로 모델에는 ", " 목록으로 간다.
-    ② WEBUI/ComfyUI 는 ``()`` 가 가중치 문법이라 리터럴 괄호를 이스케이프 — 파이프라인 밖에서 끼우므로
-    ``_escape_main_tags_parens`` 를 거치지 않는다.
+    ② WEBUI/ComfyUI 는 ``()`` 가 가중치 문법이라 섹션 머리말의 괄호를 벗긴다 — ``(Detail & Object):`` ->
+    ``Detail & Object:``(사용자 지정 2026-09-30: NAI 는 그대로 읽지만 다른 모드에선 오작동할 수 있다). NAI 는 그대로.
+    ③ WEBUI/ComfyUI 는 남은 리터럴 괄호를 이스케이프 — 파이프라인 밖에서 끼우므로 ``_escape_main_tags_parens`` 를
+    거치지 않는다.
     """
     lines = [line.strip().lstrip(",").strip() for line in str(text or "").splitlines()]
+    if not is_nai:
+        lines = [_unwrap_section_labels(line) for line in lines]
     out = ",\n\n".join(line for line in lines if line)
     if out and not is_nai:
         from core.prompt_processor import _escape_parens_in_content

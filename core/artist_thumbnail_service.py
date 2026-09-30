@@ -83,13 +83,15 @@ class ArtistThumbnailService:
         # 새 팩(2026-09-27, 사용자 지시). 83-50 다음 구간(게시물 49~, 아직 채우는 중). 방안 A - 새 키 + **새 경로**.
         # 지문 = 업로드 원본 실측이고, HF 쪽 X-Linked-Size · X-Linked-ETag(= sha256)와 같음을 확인했다.
         # ⚠️ 나중에 채워 갈아끼울 때는 83 처럼 **경로를 그대로** 두고 키 · 라벨 · URL · 지문만 바꾼다.
+        # 09-30 내용 갱신(HF 에 같은 이름으로 올림 · 8,269명): 지문만 바꿨다 — 옛 판(1,042,944,875 · 6255A2FD…)을 받은
+        # 기기엔 (update). 형식은 83-50 과 같다(작가 -> [raw base64 JPEG 768x768] · 앞 팩과 겹침 0).
         # 이름이 `NAID5` 로 시작하고 `STYLISH` 가 아니라 Curated · ALL 모두에 자동으로 든다.
         "NAID5-49-WIP": {
             "label": "NAID5-49-WIP",
             "path": Path("data/artist_thumbnail_naid5_49_wip.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-49-WIP",
-            "expected_size": 1042944875,
-            "sha256": "6255A2FD4EE81F1AE4BEB5ADB7CED0AD7D8BD2649134DAB313549364A008EFC2",
+            "expected_size": 1388682556,
+            "sha256": "15A6242297DB835A738118FD9081F1BF65E6C9F32AA697B066B83BDDA0A3F9FB",
         },
         # 새 팩(2026-09-19). 새 키 + **새 경로** - 기존 것과 겹치지 않는다.
         # ⚠️ 이름에 `STYLISH` 가 들어가는 것이 곧 계약이다: Curated 는 이 조각을

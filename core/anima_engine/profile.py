@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
 import random
 import re
 from collections.abc import Collection, Mapping, Sequence
@@ -109,6 +110,21 @@ def validate_params(params):
         raise ProfileError("PARAM_OUT_OF_RANGE", field="area")
 
 
+# ComfyUI 는 lora_name 을 자기 목록 문자열과 **정확히** 대조한다(execution.py value_not_in_list). 그 목록은
+# folder_paths.recursive_search 의 os.path.relpath 라 Windows 에서는 하위 폴더가 역슬래시다 - 슬래시로 보내면
+# 하위 폴더 LoRA 만 거절됐다(09-30 LoRA 하위 폴더 지원). NAIA 안의 이름(목록 · 체인 · 썸네일 열쇠 · 히스토리)은
+# 슬래시 하나로 두고, 그래프에 적을 때만 바꾼다. 관리형 엔진은 NAIA 와 같은 PC 에서 돈다 = 같은 os.sep.
+ENGINE_SEP = os.sep
+
+
+def engine_lora_name(name: str) -> str:
+    return name.replace("/", ENGINE_SEP)
+
+
+def naia_lora_name(name: str) -> str:
+    return name.replace(ENGINE_SEP, "/") if isinstance(name, str) else name
+
+
 def validate_chain(chain, available_loras):
     if not isinstance(chain, (list, tuple)) or len(chain) > 32:
         raise ProfileError("PARAM_OUT_OF_RANGE", field="lora_chain")
@@ -148,7 +164,7 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
             continue
         node = str(100 + len(active))
         graph[node] = {"class_type": "LoraLoaderModelOnly", "inputs": {
-            "lora_name": item["name"], "strength_model": item.get("strength", 1.0), "model": [prev, 0]}}
+            "lora_name": engine_lora_name(item["name"]), "strength_model": item.get("strength", 1.0), "model": [prev, 0]}}
         prev = node
         active.append({"name": item["name"], "strength": item.get("strength", 1.0), "sha256": item.get("sha256")})
     graph["52"]["inputs"]["model"] = [prev, 0]
@@ -187,10 +203,10 @@ def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collectio
         for i in range(len(extra)):
             node = str(100 + i)
             inputs = workflow[node]["inputs"]
-            name, strength = inputs["lora_name"], inputs["strength_model"]
+            name, strength = naia_lora_name(inputs["lora_name"]), inputs["strength_model"]
             validate_chain([{"name": name, "strength": strength}], available_loras)
             expected[node] = {"class_type": "LoraLoaderModelOnly", "inputs": {
-                "lora_name": name, "strength_model": strength, "model": [prev, 0]}}
+                "lora_name": engine_lora_name(name), "strength_model": strength, "model": [prev, 0]}}
             prev = node
         expected["52"]["inputs"]["model"] = [prev, 0]
         if json.dumps(workflow, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True, allow_nan=False):

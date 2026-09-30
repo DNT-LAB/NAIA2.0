@@ -14,6 +14,11 @@
 // 서버는 생성을 큐에 넣는 순간의 체인을 요청에 박는다(여기서 바꿔도 이미 대기 중인 생성은 그대로).
 // 서버가 돌려준 체인이 정본이다 — 거절(422)되면 이유를 보이고 서버 것을 다시 읽는다(몰래 고치지 않는다).
 // style.css 는 건드리지 않는다(아래 STYLE — 새 클래스의 CSS 를 같은 파일에 둔다).
+// 하위 폴더(09-30 사용자 지정): 왼쪽 = 카테고리(하위 폴더, 기본 '전체') · 오른쪽 = 보기(적용 순서 + 카드). 이름은 LoRA 폴더
+//   기준 상대 경로(style/anime/a.safetensors, 슬래시) 그대로 - 카테고리는 그 앞부분이다(폴더를 고르면 그 아래 폴더까지).
+//   엔진(ComfyUI)은 Windows 에서 역슬래시 이름을 쓰는데, 바꾸는 것은 서버가 그래프에 적을 때 한 번뿐이다(profile.py).
+// 끌어다 놓기(09-30 사용자 지정: Artist Thumbnail 처럼) - 카드를 적용 순서에 놓으면 그 자리에 넣고, 체인 줄(번호 · 이름)을
+//   끌면 순서를 바꾼다. 끌기는 창을 건너는 유일한 길인 dragBroker(포인터 + 유령, HTML5 끌기 아님)를 app.js 가 넘긴다.
 
 const API = '/api/anima-engine';
 const STYLE_ID = 'animaLoraStyle';
@@ -30,9 +35,31 @@ const MAX_THUMB_BYTES = 10 * 1024 * 1024;
 const FLASH_MS = 1600;
 const REMOTE_FOLDER = '폴더 열기는 NAIA 를 켠 PC 에서만 할 수 있습니다.';
 const ZOOM_DELAY_MS = 140;           // 리모컨 확대 보기와 같다 - 훑고 지나갈 때 번쩍이지 않게
+const ALL = '';                      // 카테고리 '전체'(기본)
+const TOP = '.';                     // 하위 폴더 밖(LoRA 폴더 바로 아래) - 이름 조각에 '.' 은 없다(서버 resolve_lora 가 거절)
 const STYLE = `
-.anima-lora-popup { width: min(460px, calc(100vw - 16px)); height: min(560px, calc(100vh - 16px)); }
+.anima-lora-popup { width: min(700px, calc(100vw - 16px)); height: min(600px, calc(100vh - 16px)); }
 .anima-lora-popup .alr-headbtn { height: 22px; padding: 0 8px; font-size: 10px; flex: none; }
+/* 왼쪽 = 카테고리(하위 폴더) · 오른쪽 = 보기(적용 순서 + 찾기 + 카드). 폴더 칸은 깊이만큼 들여 쓴다. */
+.anima-lora-popup .alr-body { flex: 1; min-height: 0; display: flex; }
+.anima-lora-popup .alr-cats { flex: none; width: 148px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px;
+  padding: 6px 0; border-right: 1px solid var(--border-dim); }
+.anima-lora-popup .alr-cat { display: flex; align-items: center; gap: 6px; width: 100%; flex: none;
+  padding: 4px 8px 4px calc(10px + var(--depth, 0) * 12px); background: none; border: 0; color: var(--text-muted);
+  font-size: 11px; text-align: left; cursor: pointer; }
+.anima-lora-popup .alr-cat:hover { background: rgba(96,120,255,0.08); color: var(--text-primary); }
+.anima-lora-popup .alr-cat.on { background: rgba(96,120,255,0.18); color: var(--text-primary); }
+.anima-lora-popup .alr-cat:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.anima-lora-popup .alr-cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anima-lora-popup .alr-cat-n { flex: none; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); }
+.anima-lora-popup .alr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 적용 순서 = 끌어다 놓는 자리. 머리줄 위에 놓아도 맨 앞으로 들어간다. 넣을 자리는 줄 위/아래 선으로 보인다. */
+.anima-lora-popup .alr-chainbox { flex: none; display: flex; flex-direction: column; min-height: 0; }
+.anima-lora-popup .alr-chainbox.is-drop-hover { background: rgba(124,106,239,0.07);
+  box-shadow: inset 0 0 0 1px rgba(124,106,239,0.55); }
+.anima-lora-popup .alr-chainbox.is-drop-hover .alr-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.anima-lora-popup .alr-chainbox.is-drop-hover .alr-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.anima-lora-popup .alr-sec-hint { margin-left: auto; letter-spacing: 0; font-size: 9px; opacity: 0.85; }
 .anima-lora-popup .alr-sec { display: flex; align-items: center; gap: 6px; padding: 5px 10px 4px;
   font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.4px; color: var(--text-dim);
   border-bottom: 1px solid rgba(42,42,61,0.5); }
@@ -45,6 +72,8 @@ const STYLE = `
 .anima-lora-popup .alr-item > .alr-strength { flex-basis: 100%; padding-left: 44px; }
 .anima-lora-popup .alr-item:last-child { border-bottom: 0; }
 .anima-lora-popup .alr-item.off .alr-name, .anima-lora-popup .alr-item.off .alr-strength { opacity: 0.45; }
+.anima-lora-popup .alr-item[data-lora-row] .alr-idx, .anima-lora-popup .alr-item[data-lora-row] .alr-name { cursor: grab; }
+.anima-lora-popup .alr-dir { color: var(--text-dim); font-weight: 400; }
 .anima-lora-popup .alr-item input[type=checkbox] { accent-color: var(--accent); cursor: pointer; margin: 0; flex: none; }
 .anima-lora-popup .alr-idx { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); width: 14px; text-align: right; flex: none; }
 .anima-lora-popup .alr-name { flex: 1; min-width: 0; font-family: var(--font-editor); font-size: 11.5px; color: var(--text-primary);
@@ -91,6 +120,9 @@ const STYLE = `
 .anima-lora-popup .alr-lib { flex: 1; min-height: 0; overflow-y: auto; }
 .anima-lora-popup .alr-card { display: flex; gap: 10px; padding: 7px 10px; border-bottom: 1px solid rgba(42,42,61,0.5); }
 .anima-lora-popup .alr-card.in-chain { background: rgba(96,120,255,0.07); }
+.anima-lora-popup .alr-card[data-lora-card] { cursor: grab; }
+.anima-lora-popup .alr-card-dir { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .anima-lora-popup .alr-png { position: relative; flex: none; width: 54px; height: 72px; border-radius: 6px; overflow: hidden;
   border: 1px dashed var(--border-glow); background: rgba(0,0,0,0.28); cursor: pointer; padding: 0;
   display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; }
@@ -140,10 +172,17 @@ const STYLE = `
 .anima-lora-popup .alr-pick-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .anima-lora-popup .alr-pick-note { padding: 18px 6px; text-align: center; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
 .anima-lora-popup .alr-pick-error { font-size: 10px; color: #f07070; line-height: 1.5; margin-bottom: 6px; }
+/* 좁은 화면(폰) - 카테고리는 몸통 위의 한 줄(옆으로 넘긴다) */
+@media (max-width: 600px) {
+  .anima-lora-popup .alr-body { flex-direction: column; }
+  .anima-lora-popup .alr-cats { width: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    border-right: 0; border-bottom: 1px solid var(--border-dim); padding: 4px 6px; }
+  .anima-lora-popup .alr-cat { width: auto; padding: 3px 8px; white-space: nowrap; }
+}
 `;
 
 export function createAnimaLoraPanel({ document, window: win = window, fetch: fetchFn = win.fetch.bind(win),
-  onOpenSetup = () => {}, onStateChange = () => {}, zoom = {} }) {
+  onOpenSetup = () => {}, onStateChange = () => {}, zoom = {}, broker = null }) {
   let mode = '';
   let managed = false;       // 관리형 + 준비됨 — 런처가 ANIMA 전용 도구를 보일지 여기로 묻는다
   let checkedAt = 0;
@@ -171,6 +210,8 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let zoomTarget = null;     // 크게 보려고 올린 칸
   let zoomTimer = 0;
   let zoomShown = false;     // 내가 띄운 확대 보기만 걷는다
+  let category = ALL;        // 왼쪽 카테고리(하위 폴더) - 창을 닫았다 열어도 그대로, 새로 켜면 '전체'
+  let chainZone = null;      // 적용 순서를 끌어다 놓는 자리로 올렸는가(dragBroker)
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -180,6 +221,10 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   const fmtSize = bytes => (Number(bytes) >= 1048576 ? `${Math.round(Number(bytes) / 1048576)}MB` : `${Math.max(1, Math.round((Number(bytes) || 0) / 1024))}KB`);
   const pick = selector => (popup ? popup.querySelector(selector) : null);
   const thumbUrl = item => `${API}/loras/thumb?name=${encodeURIComponent(item.name)}&v=${encodeURIComponent(item.thumb.version ?? '')}`;
+  // 이름 = LoRA 폴더 기준 상대 경로(슬래시). 폴더 = 마지막 / 앞, 보이는 이름 = 그 뒤(확장자 뺌)
+  const folderOf = name => { const s = String(name || ''); const at = s.lastIndexOf('/'); return at < 0 ? '' : s.slice(0, at); };
+  const baseName = name => shortName(String(name || '').slice(String(name || '').lastIndexOf('/') + 1));
+  const dirHtml = name => (folderOf(name) ? `<span class="alr-dir">${esc(folderOf(name))}/</span>` : '');
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -429,7 +474,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       ${view.map((item, i) => `<div class="ald-row${item.enabled === false ? ' off' : ''}">
         <input type="checkbox" data-lora-on="${i}"${item.enabled === false ? '' : ' checked'}${busy ? ' disabled' : ''}
                title="켜기 / 끄기">
-        <span class="ald-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>
+        <span class="ald-name" title="${esc(item.name)}">${esc(baseName(item.name))}</span>
         ${strengthHtml(i, shownStrength(item))}</div>`).join('')}`;
     el.hidden = false;
     restoreFocus(el, focused);
@@ -447,16 +492,18 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
 
   function chainHtml(view) {
     const names = new Map(available.map(item => [item.name, item]));
-    if (!view.length) return '<div class="alr-empty">체인이 비어 있습니다 — 아래 목록에서 [+ 체인] 으로 넣으세요.</div>';
+    if (!view.length) {
+      return `<div class="alr-empty">체인이 비어 있습니다 — ${broker ? '아래 카드를 여기로 끌어다 놓거나 ' : '아래 목록에서 '}[+ 체인] 으로 넣으세요.</div>`;
+    }
     return view.map((item, i) => {
       const meta = names.get(item.name);
       const badge = !meta ? '<span class="alr-badge" title="폴더에 이 파일이 없습니다 — 생성이 거절됩니다">없음</span>'
         : meta.conflict ? '<span class="alr-badge" title="같은 이름의 파일이 여러 폴더에 있습니다">이름 겹침</span>' : '';
-      return `<div class="alr-item${item.enabled === false ? ' off' : ''}">
+      return `<div class="alr-item${item.enabled === false ? ' off' : ''}"${broker ? ` data-lora-row="${i}"` : ''}>
         <input type="checkbox" data-lora-on="${i}"${item.enabled === false ? '' : ' checked'}${busy ? ' disabled' : ''}
                title="켜기 / 끄기(끈 항목은 사슬에서 빠지고 자리는 남습니다)">
         <span class="alr-idx">${i + 1}</span>
-        <span class="alr-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>${badge}
+        <span class="alr-name" title="${esc(item.name)}">${dirHtml(item.name)}${esc(baseName(item.name))}</span>${badge}
         <span class="alr-btns">
           <button type="button" data-lora-up="${i}" title="적용 순서 위로"${busy || i === 0 ? ' disabled' : ''}>↑</button>
           <button type="button" data-lora-down="${i}" title="적용 순서 아래로"${busy || i === view.length - 1 ? ' disabled' : ''}>↓</button>
@@ -476,6 +523,61 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       guessed ? '<span class="alr-guess" title="학습 캡션에서 추정했습니다">추정</span>' : ''}</div>`;
   }
 
+  // ---- 카테고리(하위 폴더) ----
+
+  // 폴더마다 LoRA 수(그 아래 폴더까지 센다). 중간 폴더도 칸이 된다(a/b/x 면 a · a/b). 이름 순, 숫자는 크기대로.
+  function categories() {
+    const counts = new Map();
+    let top = 0;
+    for (const item of available) {
+      const folder = folderOf(item.name);
+      if (!folder) { top += 1; continue; }
+      const parts = folder.split('/');
+      for (let i = 1; i <= parts.length; i += 1) {
+        const path = parts.slice(0, i).join('/');
+        counts.set(path, (counts.get(path) || 0) + 1);
+      }
+    }
+    const byParts = (a, b) => {
+      const x = a.split('/');
+      const y = b.split('/');
+      for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+        const c = x[i].localeCompare(y[i], undefined, { sensitivity: 'base', numeric: true });
+        if (c) return c;
+      }
+      return x.length - y.length;
+    };
+    const folders = [...counts.keys()].sort(byParts)
+      .map(path => ({ path, depth: path.split('/').length - 1, label: path.split('/').pop(), count: counts.get(path) }));
+    return { top, folders };
+  }
+
+  function inCategory(item) {
+    if (category === ALL) return true;
+    const folder = folderOf(item.name);
+    if (category === TOP) return !folder;
+    return folder === category || folder.startsWith(`${category}/`);
+  }
+
+  // 고른 칸이 사라졌으면(폴더를 비웠다 · 다른 기기에서 옮겼다) '전체' 로 - 빈 목록 앞에 세워 두지 않는다.
+  // '최상위' 는 하위 폴더가 있을 때만 칸이 된다(없으면 '전체' 와 같다).
+  function catsHtml() {
+    const { top, folders } = categories();
+    const exists = category === TOP ? Boolean(top && folders.length) : folders.some(f => f.path === category);
+    if (category !== ALL && !exists) category = ALL;
+    const row = (key, label, count, depth, title) => `<button type="button" class="alr-cat${key === category ? ' on' : ''}"
+        data-lora-cat="${esc(key)}" style="--depth:${depth}" title="${esc(title)}"${key === category ? ' aria-current="true"' : ''}>
+        <span class="alr-cat-name">${esc(label)}</span><span class="alr-cat-n">${count}</span></button>`;
+    return [row(ALL, '전체', available.length, 0, '모든 LoRA'),
+      top && folders.length ? row(TOP, '최상위', top, 0, 'LoRA 폴더 바로 아래(하위 폴더 밖)') : '',
+      ...folders.map(f => row(f.path, f.label, f.count, f.depth, f.path))].join('');
+  }
+
+  function paintCats() {
+    const el = pick('.alr-cats');
+    if (el) el.innerHTML = isManaged() ? catsHtml() : '';
+  }
+
   function libraryHtml() {
     if (!available.length) {
       return `<div class="alr-empty">LoRA 파일이 없습니다.<br>
@@ -483,9 +585,9 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         <button type="button" class="alr-link" data-lora-act="setup">API 설정 › ANIMA</button> 에서 LoRA 폴더를 추가하세요.</div>`;
     }
     const needle = filter.trim().toLowerCase();
-    const shown = available.filter(item => !needle || item.name.toLowerCase().includes(needle)
-      || (item.triggers || []).some(t => String(t.word).toLowerCase().includes(needle)));
-    if (!shown.length) return '<div class="alr-empty">찾는 LoRA 가 없습니다.</div>';
+    const shown = available.filter(item => inCategory(item) && (!needle || item.name.toLowerCase().includes(needle)
+      || (item.triggers || []).some(t => String(t.word).toLowerCase().includes(needle))));
+    if (!shown.length) return `<div class="alr-empty">${needle ? '찾는 LoRA 가 없습니다.' : '이 폴더에 LoRA 가 없습니다.'}</div>`;
     const full = chain.length >= MAX_CHAIN;
     return shown.map(item => {
       const at = chain.findIndex(c => c.name === item.name);
@@ -505,15 +607,18 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         `<button type="button" class="alr-mini" data-lora-reveal="${esc(item.name)}" title="이 LoRA 가 든 폴더를 엽니다">폴더</button>`,
       ].join('');
       // 그림이 있는 PNG 칸은 올리면 크게 본다 - 말풍선(title)은 그 위에 겹쳐(라이브 09-29) 안내를 크게 보기의 캡션으로 옮긴다
-      return `<div class="alr-card${at >= 0 ? ' in-chain' : ''}">
+      // 폴더 표시 - 고른 칸과 다른 폴더(전체에서 본 하위 폴더 · 더 깊은 폴더)일 때만
+      const dir = folderOf(item.name) && folderOf(item.name) !== category
+        ? `<div class="alr-card-dir" title="폴더">${esc(folderOf(item.name))}</div>` : '';
+      return `<div class="alr-card${at >= 0 ? ' in-chain' : ''}"${broker && !item.conflict ? ` data-lora-card="${esc(item.name)}"` : ''}>
         <button type="button" class="alr-png${thumb ? ' has-img' : ''}" data-lora-png="${esc(item.name)}"${thumb
-          ? ` data-lora-zoom="${esc(thumbUrl(item))}" data-lora-zoom-title="${esc(shortName(item.name))}"
+          ? ` data-lora-zoom="${esc(thumbUrl(item))}" data-lora-zoom-title="${esc(baseName(item.name))}"
                 data-lora-zoom-note="눌러서 바꾸기" aria-label="PNG 바꾸기 — 누르거나 끌어다 놓으세요"`
           : ' title="PNG 넣기 — 누르거나 끌어다 놓으세요"'}${busy ? ' disabled' : ''}>${png}</button>
         <div class="alr-card-body">
-          <div class="alr-card-top"><span class="alr-card-name" title="${esc(item.name)}">${esc(shortName(item.name))}</span>
+          <div class="alr-card-top"><span class="alr-card-name" title="${esc(item.name)}">${esc(baseName(item.name))}</span>
             <span class="alr-card-meta">${fmtSize(item.size)}</span></div>
-          ${triggerHtml(item)}
+          ${dir}${triggerHtml(item)}
           <div class="alr-card-acts">${acts}</div>
         </div></div>`;
     }).join('');
@@ -523,6 +628,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     paintOutside(view);
     if (!popup) return;
     paintStatus(view);
+    paintCats();
     const chainEl = pick('.alr-chain');
     const libEl = pick('.alr-lib');
     if (chainEl) {
@@ -646,7 +752,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
 
   // PNG 칸 · 후보 칸에 올리면 창 옆에 크게(리모컨 확대 보기 그대로). 손가락은 hover 가 없다 - 누를 칸을 가린다.
   function onZoomOver(event) {
-    if (event.pointerType === 'touch') return;
+    if (event.pointerType === 'touch' || broker?.isDragging?.()) return;
     const target = event.target?.closest?.('[data-lora-zoom]') || null;
     if (target === zoomTarget) return;
     hideZoom();
@@ -672,8 +778,8 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   function position() {
     if (!popup) return;
     const margin = 10;
-    const pw = popup.offsetWidth || 460;
-    const ph = popup.offsetHeight || 420;
+    const pw = popup.offsetWidth || 700;
+    const ph = popup.offsetHeight || 600;
     const host = document.getElementById('resultViewer')
       || document.getElementById('rightTabResult')
       || document.querySelector('.right-tab-pane.active');
@@ -705,19 +811,27 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
         <button type="button" class="tagsearch-act alr-headbtn" data-lora-act="reload" title="LoRA 폴더를 다시 읽습니다">↻</button>
         <button type="button" class="tagsearch-x" data-lora-act="close" aria-label="닫기">&times;</button>
       </div>
-      <div class="alr-sec">적용 순서</div>
-      <div class="alr-chain"></div>
-      <div class="tagsearch-searchrow alr-searchrow">
-        <input class="tagsearch-input" type="search" data-lora-filter autocomplete="off" spellcheck="false"
-               placeholder="LoRA 찾기 (이름 · 트리거 워드)">
+      <div class="alr-body">
+        <nav class="alr-cats" aria-label="LoRA 폴더"></nav>
+        <div class="alr-main">
+          <div class="alr-chainbox">
+            <div class="alr-sec">적용 순서${broker ? '<span class="alr-sec-hint">카드를 끌어다 놓아 넣기 · 번호를 끌어 순서 바꾸기</span>' : ''}</div>
+            <div class="alr-chain"></div>
+          </div>
+          <div class="tagsearch-searchrow alr-searchrow">
+            <input class="tagsearch-input" type="search" data-lora-filter autocomplete="off" spellcheck="false"
+                   placeholder="LoRA 찾기 (이름 · 트리거 워드)">
+          </div>
+          <div class="alr-lib"></div>
+        </div>
       </div>
-      <div class="alr-lib"></div>
       <div class="alr-foot"></div>
       <div class="alr-pick" role="dialog" aria-label="히스토리에서 PNG 고르기" hidden></div>
       <input type="file" accept="image/png" data-lora-file hidden>
     `;
     document.body.appendChild(popup);
     listen(popup);
+    popup.addEventListener('pointerdown', onArm);
     popup.addEventListener('dragover', onDragOver);
     popup.addEventListener('dragleave', onDragLeave);
     popup.addEventListener('drop', onDrop);
@@ -727,6 +841,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       // Esc 는 [히스토리] 판부터 닫는다 - 창까지 한 번에 닫히면 고르던 자리를 잃는다
       if (event.key === 'Escape') { event.preventDefault(); if (picker) closePicker(); else close(); }
     });
+    wireDrop();
   }
 
   // 창과 LoRA 줄이 같은 조작을 듣는다(켜기 · 강도 · 편집)
@@ -823,6 +938,15 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     const reveal = event.target.closest('[data-lora-reveal]');
     if (reveal) { openFolder(reveal.getAttribute('data-lora-reveal')); return; }
     if (event.target.closest('[data-lora-pickclose]')) { closePicker(); return; }
+    const cat = event.target.closest('[data-lora-cat]');
+    if (cat) {
+      category = cat.getAttribute('data-lora-cat') || ALL;
+      hideZoom();
+      paintCats();
+      const libEl = pick('.alr-lib');
+      if (libEl && isManaged()) { libEl.innerHTML = libraryHtml(); libEl.scrollTop = 0; }
+      return;
+    }
     if (busy) return;
     const history = event.target.closest('[data-lora-history]');
     if (history) { openPicker(history.getAttribute('data-lora-history')); return; }
@@ -978,6 +1102,89 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
     if (busy) return;
     const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
     uploadThumb(slot.getAttribute('data-lora-png'), file);
+  }
+
+  // ---- 끌어다 놓기(dragBroker - Artist Thumbnail 의 격자 -> 믹스 큐 · 그룹 창과 같은 길) ----
+
+  function chainRows() {
+    const el = pick('.alr-chain');
+    return el?.querySelectorAll ? [...el.querySelectorAll('.alr-item')] : [];
+  }
+
+  // 포인터 높이 -> 몇 번째 앞에 넣을지(줄의 가운데를 넘으면 그 뒤). 머리줄 위면 맨 앞.
+  function dropIndex(point) {
+    const rows = chainRows();
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i].getBoundingClientRect();
+      if (point.y < r.top + r.height / 2) return i;
+    }
+    return rows.length;
+  }
+
+  function paintDropMark(index) {
+    const rows = chainRows();
+    rows.forEach((row, i) => {
+      row.classList.toggle('drop-before', i === index);
+      row.classList.toggle('drop-after', index === rows.length && i === rows.length - 1);
+    });
+  }
+
+  // 놓았다 - 이미 체인에 있으면 그 자리로 옮기고(카드에서 끌었든 체인 줄을 끌었든 같다), 없으면 그 자리에 넣는다
+  // (강도 1 · 켜짐 - [+ 체인] 과 같다). 저장은 늘 쓰던 save 하나 - 휠로 돌려 둔 강도도 이름으로 함께 실린다.
+  function dropOnChain(payload, at) {
+    if (busy || !isManaged()) return false;
+    const name = payload?.name;
+    const from = chain.findIndex(item => item.name === name);
+    const next = chain.slice();
+    if (from >= 0) {
+      const to = at > from ? at - 1 : at;
+      if (to === from) return true;           // 제자리
+      next.splice(to, 0, ...next.splice(from, 1));
+    } else {
+      const meta = available.find(item => item.name === name);
+      if (!meta || meta.conflict) return false;
+      if (chain.length >= MAX_CHAIN) {
+        error = `체인에는 ${MAX_CHAIN}개까지 넣을 수 있습니다.`;
+        render();
+        return false;
+      }
+      next.splice(Math.min(Math.max(0, at), next.length), 0, { name, strength: 1, enabled: true });
+    }
+    save(next);
+    return true;
+  }
+
+  // 적용 순서(머리줄 포함)를 받는 쪽으로 한 번 올린다. 줄은 다시 그려져도 상자는 그대로라 등록도 그대로다.
+  function wireDrop() {
+    if (!broker || chainZone) return;
+    const box = pick('.alr-chainbox');
+    if (!box) return;
+    chainZone = broker.registerZone(box, {
+      kind: 'anima-lora',
+      canAccept: payload => payload?.kind === 'anima-lora' && Boolean(payload.name) && isManaged() && !busy,
+      hover: (payload, point) => paintDropMark(dropIndex(point)),
+      accept: (payload, point) => dropOnChain(payload, dropIndex(point)),
+    });
+    broker.subscribe?.(state => { if (state === 'end') paintDropMark(-1); });
+  }
+
+  // 끌기의 시작점 - 카드는 어디서든(누르기만 하면 늘 하던 단추 · PNG 칸이다), 체인 줄은 번호 · 이름에서만(체크 · 강도 ·
+  // 순서 단추는 제 일을 한다). 문턱(4px)을 넘기 전에는 아무 일도 없다 - 누름은 그대로 클릭이다(중개자 규약).
+  function onArm(event) {
+    if (!broker || busy || !isManaged() || picker || event.button !== 0) return;
+    if (event.target?.closest?.('input, textarea, select')) return;
+    const card = event.target?.closest?.('[data-lora-card]');
+    let name = card ? card.getAttribute('data-lora-card') : '';
+    if (!card) {
+      const row = event.target?.closest?.('.alr-idx, .alr-name')?.closest?.('[data-lora-row]');
+      name = row ? chain[Number(row.getAttribute('data-lora-row'))]?.name || '' : '';
+    }
+    if (!name) return;
+    const meta = available.find(item => item.name === name);
+    broker.arm(event, {
+      kind: 'anima-lora', name, label: baseName(name),
+      image: meta?.thumb?.kind ? thumbUrl(meta) : '',
+    }, { onStart: () => hideZoom() });
   }
 
   function init() {

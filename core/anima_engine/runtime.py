@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import traceback
+from contextlib import contextmanager
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -103,6 +104,9 @@ class AnimaEngineRuntime:
         self.command_builder, self.popen, self.clock = command_builder or self._command, popen, clock
         self._op, self._lock = RLock(), RLock()
         self._stop = Event()
+        # 지금 이 엔진에 요청을 보내고 결과를 받는 중인 NAIA 생성 수(in_use) - 내리는 쪽(stop_if_unused)과 같은
+        # 자물쇠로 세어 '쓰는 중인데 내림' 이 없다(09-30 ANIMA 모드를 떠나면 자원 반환 - mode_release)
+        self._use_lock, self._users = RLock(), 0
         self.proc = self.job = None
         self.port = None
         self._state, self._code, self._message, self.started_at = "stopped", None, "", None
@@ -146,6 +150,29 @@ class AnimaEngineRuntime:
 
     def touch(self):
         self._last_used = self.clock()
+
+    @contextmanager
+    def in_use(self):
+        """NAIA 가 이 엔진에 요청을 보내고 결과를 받는 동안(api_service._call_comfyui_api) - stop_if_unused 가 내리지
+        않는다. 끝날 때도 touch 한다 - 쉰 시간은 마지막으로 쓴 뒤부터 잰다."""
+        with self._use_lock:
+            self._users += 1
+            self.touch()
+        try:
+            yield self
+        finally:
+            with self._use_lock:
+                self._users -= 1
+                self.touch()
+
+    def stop_if_unused(self, quiet=0.0):
+        """켜져 있고 · 보내고 받는 요청이 없고 · 마지막으로 쓴 뒤 quiet 초가 지났으면 내린다(내렸으면 True).
+        in_use 와 같은 자물쇠 안에서 판정하고 내린다 - 그 사이 들어온 요청은 내린 뒤에 들어가 엔진을 다시 켠다."""
+        with self._use_lock:
+            if self._users or self.status()["state"] != "running" or self.clock() - self._last_used < quiet:
+                return False
+            self.stop()
+            return True
 
     def log_tail(self):
         try:

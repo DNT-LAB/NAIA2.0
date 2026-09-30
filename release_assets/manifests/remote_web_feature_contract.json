@@ -67,10 +67,10 @@
       "source_files": [
         "core/anima_engine/__init__.py", "core/anima_engine/manifest.py", "core/anima_engine/profile.py",
         "core/anima_engine/settings.py", "core/anima_engine/install.py", "core/anima_engine/runtime.py",
-        "core/anima_engine/integration.py", "core/anima_engine/diagnostics.py", "app/backend/server/anima_engine_service.py",
-        "app/backend/server/anima_engine_routes.py",
+        "core/anima_engine/integration.py", "core/anima_engine/diagnostics.py", "core/anima_engine/mode_release.py",
+        "app/backend/server/anima_engine_service.py", "app/backend/server/anima_engine_routes.py",
         "app/web/remote/js/features/animaSetupPanel.mjs", "app/web/remote/js/features/animaLoraPanel.mjs",
-        "app/web/remote/js/features/animaEngineConsole.mjs"
+        "app/web/remote/js/features/animaEngineConsole.mjs", "app/web/remote/js/features/animaModelManage.mjs"
       ],
       "routes": [
         {"method": "GET", "path": "/api/anima-engine/status", "smoke": "non_destructive"},

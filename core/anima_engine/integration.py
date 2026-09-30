@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from pathlib import Path
 
 from .manifest import MANAGED_CREDENTIAL, MODELS
@@ -128,6 +129,23 @@ def prepare_managed_request(context, params):
     params.pop("_anima_lora_keywords", None)
     params["_anima_submission_attempted"] = True
     return url
+
+
+@contextmanager
+def engine_in_use(context, credential):
+    """관리형 엔진에 보내고 받는 동안 '쓰는 중'(runtime.in_use) - ANIMA 모드를 떠난 뒤의 자원 반환(mode_release)은 이
+    동안 엔진을 내리지 않는다. 관리형이 아니거나 엔진이 준비 전이면 아무것도 안 한다(그때는 prepare 가 거절한다)."""
+    runtime = None
+    if is_managed_credential(credential):
+        try:
+            runtime = get_runtime(context)
+        except Exception:        # 설정을 못 읽었다 - 뒤의 prepare_managed_request 가 같은 까닭으로 거절한다
+            runtime = None
+    if runtime is None:
+        yield
+        return
+    with runtime.in_use():
+        yield
 
 
 def managed_api_options(context):

@@ -21,7 +21,11 @@ class HeadlessApiControlService:
         return result
 
     def clear_api(self, mode: str) -> dict[str, Any]:
+        from core.anima_engine import mode_release
+        was_anima = mode_release.anima_active(self.context)
         result = self.context.api_config_service.clear(mode)
+        # COMFYUI 연결 해제는 엔진 선택(managed)도 지운다 - ANIMA 모드를 떠났으면 10초 뒤 엔진을 내린다(mode_release)
+        mode_release.note(self.context, was_anima)
         self.context.publish("api_status_changed", self.context.api_status_payload())
         return result
 

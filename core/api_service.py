@@ -2155,7 +2155,14 @@ class APIService:
             return None
 
     def _call_comfyui_api(self, params: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
-        """ComfyUI API를 호출합니다."""
+        """ComfyUI API를 호출합니다. 관리형 엔진(ANIMA)이면 보내고 받는 동안 '쓰는 중' 으로 센다 - ANIMA 모드를 떠난 뒤의
+        자원 반환(core/anima_engine/mode_release.py)이 그동안은 엔진을 내리지 않는다."""
+        from core.anima_engine import integration
+        with integration.engine_in_use(self.app_context, params.get('credential')):
+            return self._call_comfyui_api_once(params, progress_callback=progress_callback)
+
+    def _call_comfyui_api_once(self, params: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
+        """ComfyUI API를 한 번 호출합니다(_call_comfyui_api 가 부른다)."""
         try:
             # 1. ComfyUI 서버 URL 가져오기
             comfyui_url = params.get('credential')

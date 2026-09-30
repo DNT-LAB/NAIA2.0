@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from threading import RLock
 
-from core.anima_engine import diagnostics, integration, manifest
+from core.anima_engine import diagnostics, integration, manifest, mode_release
 from core.anima_engine.install import AnimaInstallJob, adopt_installed_engine, app_version, validate_root
 from core.anima_engine.runtime import (AnimaEngineRuntime, ManagedEngineError, REGISTRY, REGISTRY_LOCK, TRACE_CHARS,
                                        engine_unet_names, get_runtime, read_log_since, register_runtime, reserve_vram)
@@ -154,7 +154,10 @@ class AnimaEngineService:
             raise ManagedEngineError("PARAM_OUT_OF_RANGE", "엔진 선택을 확인해 주세요.")
         if engine == "managed" and not integration.managed_ready(self.context):
             raise ManagedEngineError("ENGINE_NOT_READY", "ANIMA 엔진 준비를 먼저 완료해 주세요.")
+        was_anima = mode_release.anima_active(self.context)
         integration.token_manager_of(self.context).save_token("comfyui_engine", engine)
+        # 메인 셀렉트의 COMFYUI 로 바꿔 ANIMA 모드를 떠났으면 10초 뒤 엔진을 내린다 · 돌아왔으면 취소(mode_release)
+        mode_release.note(self.context, was_anima)
         return {"ok": True, "comfyui_engine": engine}
 
     def start_engine(self):

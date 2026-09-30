@@ -4,12 +4,16 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from app.backend.server.install_manager_routes import _is_local_request
 from app.backend.server.anima_engine_service import service_for, licenses_payload
+from core.anima_engine import mode_release
 from core.anima_engine.profile import ProfileError
 from core.anima_engine.runtime import ManagedEngineError
 from core.anima_engine.settings import license_text, THUMB_MAX_BYTES
 
 
 def register_anima_engine_routes(app, context, *, run_in_thread):
+    # ANIMA 모드를 떠나면 10초 뒤 엔진을 내려 GPU · 메모리를 돌려준다 - 모드 전환을 듣는다(core/anima_engine/mode_release.py)
+    mode_release.watch(context)
+
     def guard(request):
         host = request.client.host if request.client else ""
         allowed, reason = context.setup_gate(host)

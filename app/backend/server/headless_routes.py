@@ -159,6 +159,30 @@ def _register_search_loading_bridge(context: WebSessionContext, clients: set[Web
     context.subscribe("search_pool_broadcast", _on_search_pool_broadcast)
 
 
+def _register_anima_release_bridge(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """ANIMA 모드를 떠나 엔진을 내렸다(core/anima_engine/mode_release.py) → 화면 토스트.
+
+    내리는 쪽은 뒤에서 도는 스레드라 lifespan 이 잡아 둔 메인 루프에 브로드캐스트를 예약한다."""
+    import asyncio
+    from core.anima_engine.mode_release import RELEASED_EVENT
+
+    def _on_released(payload: Any) -> None:
+        try:
+            data = payload if isinstance(payload, dict) else {}
+            message = str(data.get("message") or "").strip()
+            loop = getattr(context, "headless_main_loop", None)
+            if not message or loop is None:
+                return
+            toast = {"type": "toast", "message": message, "level": str(data.get("level") or "info")}
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(broadcast_json(clients, toast))
+            )
+        except Exception:
+            pass
+
+    context.subscribe(RELEASED_EVENT, _on_released)
+
+
 def register_headless_routes(
     app: FastAPI,
     context: WebSessionContext,
@@ -173,6 +197,7 @@ def register_headless_routes(
     _register_search_loading_bridge(context, clients)
     _register_extension_queue_bridge(context, clients)
     _register_extension_confirm_bridge(context, clients)
+    _register_anima_release_bridge(context, clients)
 
     register_state_routes(
         app,

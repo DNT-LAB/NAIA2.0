@@ -11,8 +11,10 @@
  *    · 10초 안전망 = 응답이 영영 안 올 때(연결 끊김) '번역 중' 표시만 푼다. 기다리거나 다시 보내지 않는다
  *    · 창을 닫으면 타이머를 모두 끄고 늦게 온 응답은 버린다
  *    [삽입] 만은 같은 글이라도 실패한 뒤면 다시 보낸다(사용자가 누른 것 — Translate 창의 [Translate] 와 같다).
+ *    · 받은 번역은 글별로 기억해 다시 쓴다 — 지웠다 같은 글을 다시 치면 보내지도 못하고 [삽입] 이 잠겼다(Codex S1 ①)
+ *    · 글을 바꾸면 걸어 둔 넣기를 거둔다 — 늦게 온 옛 응답이 바뀐 글(조합 중 '강아ㅈ' 까지)을 곧바로 보냈다(Codex S1 ②)
  */
-import { openSlashPopup } from './slashPopup.mjs?v=20261001-slashpop';
+import { openSlashPopup } from './slashPopup.mjs?v=20261001-slashpop2';
 
 const AUTO_MS = 600;
 const SAFETY_MS = 10000;
@@ -52,7 +54,9 @@ export function createQuickTranslate({ getWs, showToast } = {}) {
       pendingId: '',       // 답을 기다리는 요청
       doneText: '',        // 출력 칸의 번역이 어느 글의 것인가
       failed: false,       // 마지막 응답이 실패였다 — [삽입] 은 같은 글이라도 다시 보낸다
+      done: new Map(),     // 받은 번역(글 -> 번역) — 같은 글은 다시 보내지 않고 이것을 쓴다
       insertWhenDone: false,
+      waitText: '',        // 넣기를 걸어 둔 글
       timer: 0, safety: 0,
     };
     st.input.addEventListener('input', schedule);
@@ -71,20 +75,30 @@ export function createQuickTranslate({ getWs, showToast } = {}) {
     clearTimeout(st.timer);
     const text = st.input.value.trim();
     st.pop.setNote('');
+    if (st.insertWhenDone && text !== st.waitText) cancelWait();                    // 글을 바꿨다 — 새 글은 Enter 로 다시
     if (!text) { st.output.value = ''; st.doneText = ''; return; }
     if (!HANGUL.test(text)) { st.output.value = text; st.doneText = text; return; }   // 번역할 것이 없다 — 그대로
+    if (st.done.has(text)) { st.output.value = st.done.get(text); st.doneText = text; return; }   // 받은 번역을 다시 쓴다
     if (COMPOSING_TAIL.test(text)) return;                                           // 음절을 만드는 중
     st.timer = setTimeout(() => { if (st) request(st.input.value.trim(), false); }, AUTO_MS);
   }
 
+  /** 넣기를 거둔다 — [삽입] 잠금을 푼다 */
+  function cancelWait() {
+    st.insertWhenDone = false;
+    st.waitText = '';
+    st.pop.setBusy(false);
+  }
+
+  /** 번역을 청한다. 돌려주는 것 = 이 글의 요청이 지금 답을 기다리는가 */
   function request(text, force) {
-    if (!st || !text) return;
-    if (!force && text === st.sentText) return;        // 같은 글은 다시 보내지 않는다
+    if (!st || !text) return false;
+    if (!force && text === st.sentText) return !!st.pendingId;       // 같은 글은 다시 보내지 않는다
     const ws = typeof getWs === 'function' ? getWs() : null;
     if (!ws || ws.readyState !== 1) {
       st.pop.setNote('원격 연결이 열려 있지 않아 번역하지 못했습니다.', 'error');
-      if (st.insertWhenDone) { st.insertWhenDone = false; st.pop.setBusy(false); }
-      return;
+      if (st.insertWhenDone) cancelWait();
+      return false;
     }
     st.sentText = text;
     st.failed = false;
@@ -100,8 +114,9 @@ export function createQuickTranslate({ getWs, showToast } = {}) {
       st.failed = true;
       if (st.output.value === '…') st.output.value = '';
       st.pop.setNote('번역 응답이 없습니다 — 연결을 확인하고 [삽입] 으로 다시 시도해 주세요.', 'error');
-      if (st.insertWhenDone) { st.insertWhenDone = false; st.pop.setBusy(false); }
+      if (st.insertWhenDone) cancelWait();
     }, SAFETY_MS);
+    return true;
   }
 
   /** translation_result — 이 창이 보낸 것이면 받고 true(app.js 의 Translate 창 처리기 앞에서 부른다) */
@@ -119,12 +134,14 @@ export function createQuickTranslate({ getWs, showToast } = {}) {
       if (st.output.value === '…') st.output.value = '';
       const reason = typeof message?.error === 'string' && message.error ? message.error : '번역하지 못했습니다';
       st.pop.setNote(esc(reason), 'error');
-      if (st.insertWhenDone) { st.insertWhenDone = false; st.pop.setBusy(false); }
+      if (st.insertWhenDone) cancelWait();
       return true;
     }
+    if (answered) st.done.set(answered, translated);
     if (answered && answered !== current) {
-      // 그 사이 글이 바뀌었다 — 출력 칸에 옛 번역을 앉히지 않는다. 바뀐 글은 멈춤 타이머 · [삽입] 이 보낸다
-      if (st.insertWhenDone) request(current, true);
+      // 그 사이 글이 바뀌었다 — 옛 번역은 기억만 한다(그 글로 돌아오면 쓴다). 바뀐 글은 멈춤 타이머가 보낸다 — 여기서 보내면
+      // 멈춤 · 조합 중 자모 차단을 건너뛴다(Codex S1 ②). 걸어 둔 넣기는 글을 바꿀 때 이미 거뒀다
+      if (st.insertWhenDone) cancelWait();
       return true;
     }
     st.output.value = translated;
@@ -140,12 +157,14 @@ export function createQuickTranslate({ getWs, showToast } = {}) {
     const text = st.input.value.trim();
     if (!text) { st.input.focus(); return; }
     if (!HANGUL.test(text)) { finish(text); return; }
-    if (st.doneText === text && st.output.value && st.output.value !== '…') { finish(st.output.value); return; }
+    if (st.done.has(text)) { finish(st.done.get(text)); return; }
     st.insertWhenDone = true;
+    st.waitText = text;
     st.pop.setBusy(true, '번역 중…');
     st.pop.setNote('');
     if (st.pendingId && st.sentText === text) return;              // 이 글은 이미 답을 기다린다
-    request(text, st.failed || st.sentText !== text);
+    // 받은 번역도 기다리는 요청도 없다(처음 · 실패 뒤) — 사용자가 누른 것이니 보낸다. 못 보내면 잠금을 푼다
+    if (!request(text, true)) cancelWait();
   }
 
   function finish(text) {

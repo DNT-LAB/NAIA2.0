@@ -1188,7 +1188,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20261001-slashpop')
+import('./js/features/assistPanel.mjs?v=20261001-slashpop2')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
@@ -8412,7 +8412,7 @@ function insertTranslatorOutput() {
 // /translate 작은 창(사용자 지정 2026-10-01) - 메인 프롬프트의 캐럿 자리에 뜨고 번역을 그 자리에 넣는다. 번역은 이 창과 같은 길
 // (WS translate_text) · 같은 규칙(멈춤 뒤에만 · 같은 글 재발사 금지 · 10초 안전망) - 번역기 백오프를 모두가 함께 탄다.
 let quickTranslate = null;
-import('./js/features/quickTranslate.mjs?v=20261001-slashpop')
+import('./js/features/quickTranslate.mjs?v=20261001-slashpop2')
   .then(({createQuickTranslate}) => { quickTranslate = createQuickTranslate({getWs: () => ws, showToast}); })
   .catch(error => console.error('Failed to initialize quick translate', error));
 
@@ -14106,7 +14106,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261001-slashpop')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261001-slashpop2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -26,7 +26,7 @@
  * - 메인 프롬프트의 `/assist`(10-01) = 같은 상태(등급 · 인원 · User Preference · 이름 선택)를 쓰는 **작은 창**(openQuick).
  *   늘 NAIA 변환 파이프라인으로 찾고, 장면이면 메인 + 캐릭터 프롬프트를 한 줄로 엔트리를 연 캐럿에 넣는다.
  */
-import { openSlashPopup } from './slashPopup.mjs?v=20261001-slashpop';
+import { openSlashPopup } from './slashPopup.mjs?v=20261001-slashpop2';
 
 const RATINGS = [
   { id: 'g', label: 'G', title: 'General' },
@@ -1761,12 +1761,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       onClose: reason => {
         const was = quick;
         if (!was || was.pop !== pop) return;
+        clearTimeout(was.poll);
         quick = null;
         if (reason === 'esc' || reason === 'button') was.ctx.cancel?.();
       },
     });
     quick = {
-      pop, ctx, busy: false,
+      pop, ctx, busy: false, poll: 0, modelNote: false,
       input: pop.el.querySelector('[data-asq-input]'),
       persons: pop.el.querySelector('[data-asq-persons]'),
       ratingBar: pop.el.querySelector('[data-asq-rating]'),
@@ -1806,11 +1807,34 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     paintQuickModel();
   }
 
+  /** 모델이 없으면 알리고 [제출] 을 잠근 채 상태를 다시 읽는다. 생기면(다른 창에서 받았다) 알림 · [제출] 을 되살린다 — 한 번 잠그면
+   *  영영 안 풀렸다(Codex S1 ⑥). 큰 창의 상태 읽기(schedulePoll)는 큰 창이 열려 있을 때만 돈다 — 작은 창은 제 것을 돌린다 */
   function paintQuickModel() {
-    if (!quick || quick.busy || !modelMissing()) return;
-    quick.pop.setNote('AI 모델이 없어 찾을 수 없습니다.<button type="button" class="slash-pop-btn" data-asq-llm>AI 모델 받기</button>',
-      'error');
-    quick.pop.setOkEnabled(false);
+    if (!quick) return;
+    if (modelMissing()) {
+      quick.pop.setNote('AI 모델이 없어 찾을 수 없습니다.<button type="button" class="slash-pop-btn" data-asq-llm>AI 모델 받기</button>',
+        'error');
+      quick.modelNote = true;
+      if (!quick.busy) quick.pop.setOkEnabled(false);
+      scheduleQuickPoll();
+    } else if (quick.modelNote) {
+      quick.modelNote = false;
+      quick.pop.setNote('');
+      if (!quick.busy) quick.pop.setOkEnabled(true);
+    }
+  }
+
+  function scheduleQuickPoll() {
+    const q = quick;
+    if (!q || q.poll) return;
+    q.poll = setTimeout(async () => {
+      q.poll = 0;
+      if (quick !== q) return;
+      try { status = await getJson('/api/assist/status'); } catch { /* 다음에 다시 */ }
+      if (quick !== q) return;
+      paintBanner();
+      paintQuickModel();               // 아직 없으면 다시 건다
+    }, MODEL_POLL_MS);
   }
 
   /** [제출] · Enter — 큰 창의 [제출] 과 같은 요청(단 direct 는 싣지 않는다). 그 사이 창을 닫았으면 넣지 않는다 */
@@ -1874,7 +1898,8 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   /** 작은 창의 [설정] — 이 창을 [고급 설정] 이 펼쳐진 채로. 적던 글이 있으면 입력칸으로 옮긴다 */
   function showSettings(text = '') {
     show();
-    if (text && !busy) { input.value = text; onInput(); }
+    // 이 창이 찾는 중이어도 넘긴다 — 입력칸은 도는 동안에도 열려 있다(사용자가 치는 것과 같다). 막았더니 초안이 사라졌다(Codex S1 ⑤)
+    if (text) { input.value = text; onInput(); }
     if (advPanel?.hidden) {
       advPanel.hidden = false;
       advBtn.classList.add('is-on');

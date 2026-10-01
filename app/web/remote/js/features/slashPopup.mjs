@@ -4,6 +4,7 @@
  * 알림 줄 · [닫기 ESC | 확인 ENTER]. 한 번에 하나만 뜬다(새로 열면 앞의 것은 'replaced' 로 닫힌다).
  * - 바깥을 눌러도 닫지 않는다 — Assist 는 답을 기다리는 몇 초 동안 메인 칸을 만질 수 있어야 한다. 닫기는 Esc · [닫기] 뿐.
  * - Enter = 확인 · Shift+Enter = 줄바꿈. ⚠️ 한글 조합 중의 Enter 는 글자를 확정하는 키다 — 보내지 않는다(assistPanel 과 같다).
+ *   Enter 로 제출하는 것은 **글칸에서만** — 단추에 포커스가 있으면 그 단추가 눌린다([닫기] 에서 Enter 가 삽입하던 것, Codex S1 ④).
  * - Esc · Enter 는 여기서 전파를 끊는다 — 글로벌 단축키(Ctrl+Enter = Generate)가 버블 단계에 붙어 있다(슬래시 편집창 제보 09-13).
  * - CSS 는 이 모듈이 싣는다(style.css 의 z-index 숫자는 시험이 훑는다 — 셋업 모달 10300 아래, 슬래시 편집창과 같은 층).
  *   ⚠️ CSS 템플릿 안에는 백틱을 쓰지 않는다.
@@ -112,6 +113,8 @@ export function openSlashPopup({ document = globalThis.document, window = global
     }
     if (event.key !== 'Enter') return;
     event.stopPropagation();                          // Ctrl+Enter 가 Generate 까지 누르지 않게
+    const tag = String(event.target?.tagName || '').toUpperCase();
+    if (tag !== 'TEXTAREA' && tag !== 'INPUT') return;   // 단추 위의 Enter 는 그 단추(기본 동작)
     if (event.isComposing || event.keyCode === 229) return;
     if (event.shiftKey) return;                       // 줄바꿈
     event.preventDefault();

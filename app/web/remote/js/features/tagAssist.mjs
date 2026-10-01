@@ -184,26 +184,31 @@ export function tokenCoreSpan(raw) {
 }
 
 /** 슬래시 작은 창(/assist · /translate)이 돌려준 글을 캐럿 자리에 **앞뒤 태그와 쉼표로 이어** 넣을 글(사용자 지정 2026-10-01).
- *  before = 캐럿 앞 글, after = 캐럿 뒤 글. 앞이 `a,` 로 붙어 끝나면 한 칸 띄우고, 뒤에 태그가 이어지면 `, ` 를 붙인다.
- *  넣을 글 앞뒤의 쉼표 · 공백은 걷는다. 넣을 것이 없으면 '' */
+ *  before = 캐럿 앞 글, after = 캐럿 뒤 글. 앞이 비었거나 쉼표 · 줄바꿈으로 끝나면 그대로(`a,` 처럼 붙어 있으면 한 칸), 태그로
+ *  끝나면 `, ` 로 가른다(기다리는 동안 글이 통째 바뀌면 태그 끝에 떨어진다 — `sky` + `cat` 이 `skycat` 이 됐다, Codex S1 ③).
+ *  뒤에 태그가 이어지면 `, ` 를 붙인다. 넣을 글 앞뒤의 쉼표 · 공백은 걷는다. 넣을 것이 없으면 '' */
 export function slashJoinText(before, after, text) {
   const body = String(text || '').replace(/^[\s,]+|[\s,]+$/g, '');
   if (!body) return '';
-  const lead = /,$/.test(String(before || '')) ? ' ' : '';
+  const head = String(before || '');
+  const lead = !head.trim() || /[,\n][ \t]*$/.test(head) ? (/,$/.test(head) ? ' ' : '') : ', ';
   const rest = String(after || '');
   const tail = !rest.trim() || /^\s*[,\n]/.test(rest) ? '' : ', ';
   return `${lead}${body}${tail}`;
 }
 
-/** 작은 창이 답을 기다리는 동안 글이 바뀌었을 수 있다 — 넣을 자리를 다시 찾는다. 캐럿 앞 글이 그대로면 그 자리, 캐럿 뒤 글이
- *  그대로면 끝에서 같은 거리, 둘 다 바뀌었으면 null(부르는 쪽이 지금 캐럿을 쓴다) */
+/** 작은 창이 답을 기다리는 동안 글이 바뀌었을 수 있다 — 넣을 자리를 다시 찾는다. 글이 그대로거나 캐럿 앞 글이 그대로면 그 자리,
+ *  캐럿 뒤 글이 그대로면 끝에서 같은 거리, 아니면 null(부르는 쪽이 지금 캐럿을 쓴다). ⚠️ 빈 앞 · 빈 뒤는 근거가 아니다 — 빈 글은
+ *  어디에나 맞아서, 통째 바뀐 글에도 '그대로' 로 읽었다(Codex S1 ③) */
 export function slashReanchor(valueAtOpen, caret, value) {
   const was = String(valueAtOpen || '');
   const now = String(value || '');
   const at = Math.max(0, Math.min(Number(caret) || 0, was.length));
-  if (now.startsWith(was.slice(0, at))) return at;
+  if (now === was) return at;
+  const head = was.slice(0, at);
+  if (head && now.startsWith(head)) return at;
   const tail = was.slice(at);
-  if (now.endsWith(tail)) return now.length - tail.length;
+  if (tail && now.endsWith(tail)) return now.length - tail.length;
   return null;
 }
 

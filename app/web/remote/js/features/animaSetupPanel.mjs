@@ -38,6 +38,7 @@ const STYLE = `
 #setupAnimaSection ul.anima-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 #setupAnimaSection .anima-checks li { font-size: 11px; color: var(--text-muted); }
 #setupAnimaSection .anima-checks li.bad { color: #f07070; }
+#setupAnimaSection .anima-checks li.warn { color: #e2b368; }
 #setupAnimaSection .anima-dirs li { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10px;
   color: var(--text-muted); word-break: break-all; }
 #setupAnimaSection .anima-x { background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 4px; }
@@ -325,12 +326,12 @@ export function createAnimaSetupPanel({ document, fetch: fetchFn = window.fetch.
     const vram = Number(gpu.vram_mb) ? ` · ${Math.round(Number(gpu.vram_mb) / 1024)}GB` : '';
     const gpuText = gpu.name ? `${gpu.name}${vram}` : 'NVIDIA GPU 를 찾지 못했습니다';
     const checks = (plan.checks || []).filter(c => !c.ok || c.message)
-      .map(c => `<li class="${c.ok ? '' : 'bad'}">${c.ok ? '✓' : '✕'} ${esc(c.message || c.code || c.id)}</li>`).join('');
+      .map(c => `<li class="${c.warning ? 'warn' : c.ok ? '' : 'bad'}">${c.warning ? '⚠' : c.ok ? '✓' : '✕'} ${esc(c.message || c.code || c.id)}</li>`).join('');
     return `<div class="anima-kv"><span class="anima-label">GPU</span><span class="anima-val"${
         gpu.driver ? ` title="드라이버 ${esc(gpu.driver)}"` : ''}>${esc(gpuText)}</span></div>
       ${checks ? `<ul class="anima-list anima-checks">${checks}</ul>` : ''}${
         (plan.checks || []).some(c => !c.ok && c.code === VCREDIST) ? vcredistHtml('다시 검사') : ''}${
-        (plan.checks || []).some(c => !c.ok) ? diagOnce() : ''}
+        (plan.checks || []).some(c => !c.ok || c.warning) ? diagOnce() : ''}
       <div class="anima-kv"><span class="anima-label">용량</span><span class="anima-detail">필요 ${fmtBytes(plan.required_bytes)}
         · 남은 ${fmtBytes(plan.free_bytes)}</span></div>
       ${viewArtifacts()}

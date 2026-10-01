@@ -1,6 +1,7 @@
 """Single managed installation job; pinned downloads and restart-safe journal."""
 from __future__ import annotations
 
+import csv
 import ctypes
 import math
 import os
@@ -34,6 +35,83 @@ class GpuInfo:
     vram_mb: int
     cuda_version: str = ""
     uuid: str = ""
+    source: str = "nvidia-smi"
+
+
+def _load_nvml():
+    # Use the driver's DLL in System32, never one from the app/current directory.
+    if os.name != "nt":
+        raise OSError("NVML fallback is Windows-only")
+    return ctypes.CDLL(str(system_directory() / "nvml.dll"))
+
+
+def _nvml_gpus(load=None):
+    """Read driver-owned metadata without importing torch or creating a CUDA context."""
+    class Memory(ctypes.Structure):
+        _fields_ = [(key, ctypes.c_ulonglong) for key in ("total", "free", "used")]
+
+    try:
+        lib = (load or _load_nvml)()
+        signatures = {
+            "nvmlInit_v2": [], "nvmlShutdown": [],
+            "nvmlDeviceGetCount_v2": [ctypes.POINTER(ctypes.c_uint)],
+            "nvmlDeviceGetHandleByIndex_v2": [ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)],
+            "nvmlSystemGetDriverVersion": [ctypes.c_char_p, ctypes.c_uint],
+            "nvmlSystemGetCudaDriverVersion_v2": [ctypes.POINTER(ctypes.c_int)],
+            "nvmlDeviceGetName": [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint],
+            "nvmlDeviceGetUUID": [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint],
+            "nvmlDeviceGetCudaComputeCapability": [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
+                                                    ctypes.POINTER(ctypes.c_int)],
+            "nvmlDeviceGetMemoryInfo": [ctypes.c_void_p, ctypes.POINTER(Memory)],
+        }
+        for name, args in signatures.items():
+            func = getattr(lib, name)
+            func.argtypes, func.restype = args, ctypes.c_int
+        if lib.nvmlInit_v2() != 0:
+            return []
+    except (OSError, AttributeError):
+        return []
+    try:
+        def string_value(func, *args):
+            value = ctypes.create_string_buffer(256)
+            return value.value.decode("utf-8", "replace") if func(*args, value, len(value)) == 0 else ""
+
+        driver = string_value(lib.nvmlSystemGetDriverVersion)
+        version, count = ctypes.c_int(), ctypes.c_uint()
+        cuda = (f"{version.value // 1000}.{version.value % 1000 // 10}"
+                if lib.nvmlSystemGetCudaDriverVersion_v2(ctypes.byref(version)) == 0 and version.value > 0 else "")
+        if lib.nvmlDeviceGetCount_v2(ctypes.byref(count)) != 0:
+            return []
+        gpus = []
+        for index in range(count.value):
+            handle = ctypes.c_void_p()
+            if lib.nvmlDeviceGetHandleByIndex_v2(index, ctypes.byref(handle)) != 0:
+                continue
+            name = string_value(lib.nvmlDeviceGetName, handle)
+            gpu_uuid = string_value(lib.nvmlDeviceGetUUID, handle)
+            major, minor, memory = ctypes.c_int(), ctypes.c_int(), Memory()
+            cc = (float(f"{major.value}.{minor.value}") if lib.nvmlDeviceGetCudaComputeCapability(
+                  handle, ctypes.byref(major), ctypes.byref(minor)) == 0 else None)
+            vram = memory.total // (1024 ** 2) if lib.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)) == 0 else 0
+            gpus.append(GpuInfo(name or "NVIDIA", driver, cc, vram, cuda, gpu_uuid, "NVML"))
+        return gpus
+    except OSError:
+        return []
+    finally:
+        lib.nvmlShutdown()
+
+
+def _number(value):
+    try:
+        number = float(value)
+        return number if math.isfinite(number) and number > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _cuda_version(value):
+    value = str(value or "").strip()
+    return tuple(map(int, value.split("."))) if re.fullmatch(r"\d+\.\d+(?:\.\d+)*", value) else None
 
 
 def gpu_probe(run=None, *, preferred_uuid=""):
@@ -43,47 +121,69 @@ def gpu_probe(run=None, *, preferred_uuid=""):
     """
     run = run or subprocess.run
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    try:
-        query = run(["nvidia-smi", "--query-gpu=index,uuid,name,driver_version,compute_cap,memory.total",
-                     "--format=csv,noheader,nounits"], capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=10, creationflags=flags)
-        header = run(["nvidia-smi"], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                     timeout=10, creationflags=flags)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    cuda = re.search(r"CUDA Version:\s*(\d+\.\d+)", header.stdout)
-    if query.returncode or not query.stdout.strip():
-        if cuda:
-            return GpuInfo("NVIDIA", "", None, 0, cuda[1])
-        return None
-    gpus = []
-    for line in query.stdout.splitlines():
+    def output(args):
         try:
-            _index, gpu_uuid, name, driver, cc, mem = [s.strip() for s in line.split(",")]
-            gpus.append(GpuInfo(name, driver, float(cc), int(float(mem)), cuda[1] if cuda else "", gpu_uuid))
-        except ValueError:
+            result = run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=10, creationflags=flags)
+            return (result.stdout or "") if result.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
+    query = output(["nvidia-smi", "--query-gpu=index,uuid,name,driver_version,compute_cap,memory.total",
+                    "--format=csv,noheader,nounits"])
+    header = output(["nvidia-smi"])
+    cuda = re.search(r"CUDA Version\s*:\s*(\d+\.\d+)", header, re.IGNORECASE)
+    gpus = []
+    for row in csv.reader(query.splitlines(), skipinitialspace=True):
+        if len(row) != 6:
             continue
+        _index, gpu_uuid, name, driver, cc, mem = [s.strip() for s in row]
+        # Missing optional VRAM must not discard a supported card and its UUID.
+        gpus.append(GpuInfo(name, driver, _number(cc), int(_number(mem) or 0), cuda[1] if cuda else "", gpu_uuid))
+    if not gpus or any(g.compute_cap is None or not _cuda_version(g.cuda_version) or not g.uuid for g in gpus):
+        for fallback in _nvml_gpus():
+            original = next((g for g in gpus if g.uuid and g.uuid == fallback.uuid), None)
+            if original is None:
+                gpus.append(fallback)
+            else:
+                original.compute_cap = original.compute_cap or fallback.compute_cap
+                original.cuda_version = original.cuda_version or fallback.cuda_version
+                original.vram_mb = original.vram_mb or fallback.vram_mb
+                original.driver = original.driver or fallback.driver
+                original.source = "nvidia-smi + NVML"
     if preferred_uuid:
         for gpu in gpus:
             if gpu.uuid == preferred_uuid:
                 return gpu
-    return max(gpus, key=lambda g: (g.compute_cap or 0, g.vram_mb), default=GpuInfo("NVIDIA", "", None, 0))
+    return max(gpus, key=lambda g: (g.compute_cap or 0, bool(_cuda_version(g.cuda_version)), g.vram_mb),
+               default=GpuInfo("NVIDIA", "", None, 0, cuda[1] if cuda else "") if query or cuda else None)
 
 
 def validate_gpu(gpu):
     if gpu is None:
         raise ManagedEngineError("NO_NVIDIA_GPU", "NVIDIA 그래픽 카드와 드라이버를 찾지 못했습니다.")
     data = asdict(gpu) if isinstance(gpu, GpuInfo) else dict(gpu)
-    try:
-        cc = float(data["compute_cap"])
-        cuda = tuple(int(x) for x in data["cuda_version"].split("."))
-    except (ValueError, TypeError, KeyError):
-        raise ManagedEngineError("DRIVER_TOO_OLD", "그래픽 드라이버를 업데이트해 주세요.") from None
-    if not math.isfinite(cc) or cc < 7.5:
+    cc = _number(data.get("compute_cap"))
+    cuda = _cuda_version(data.get("cuda_version"))
+    if cc is None:
+        raise ManagedEngineError("GPU_PROBE_FAILED", "GPU 연산 능력을 확인하지 못했습니다. 자세히에서 GPU 조회 결과를 확인해 주세요.")
+    if cc < manifest.ARTIFACTS[0]["min_compute_cap"]:
         raise ManagedEngineError("GPU_UNSUPPORTED", "이 판은 RTX 20 시리즈 이상에서 동작합니다.")
-    if cuda < (13, 0):
-        raise ManagedEngineError("DRIVER_TOO_OLD", "CUDA 13.0 지원 그래픽 드라이버가 필요합니다.")
+    if cuda is None:
+        raise ManagedEngineError("GPU_PROBE_FAILED", "드라이버의 CUDA 지원 버전을 확인하지 못했습니다. 자세히에서 GPU 조회 결과를 확인해 주세요.")
+    required = manifest.ARTIFACTS[0]["min_driver_cuda"]
+    if cuda < _cuda_version(required):
+        raise ManagedEngineError("DRIVER_TOO_OLD", f"CUDA {required} 지원 그래픽 드라이버가 필요합니다.")
     return data
+
+
+def _windows_nvidia_gpu():
+    # Imported only on a failed probe; diagnostics also imports the strict validator.
+    from .diagnostics import windows_adapters
+    adapter = next((a for a in windows_adapters() if a["vendor"] == "NVIDIA"), None)
+    if adapter is None:
+        return None
+    return GpuInfo(adapter["name"], adapter["driver"], None, 0, source="Windows")
 
 
 def system_directory():
@@ -295,14 +395,26 @@ class AnimaInstallJob:
                 present = False
             checks.append({"id": "vcredist", "ok": present, "code": None if present else "VCREDIST_MISSING",
                            "message": "" if present else manifest.VCREDIST_MESSAGE})
+        probed_gpu = self.gpu_probe()
         gpu = None
         try:
-            gpu = validate_gpu(self.gpu_probe())
+            gpu = validate_gpu(probed_gpu)
             checks.append({"id": "gpu", "ok": True, "code": None, "message": ""})
             if gpu.get("vram_mb", 0) < 8192:
                 warnings.append("메모리가 부족할 수 있습니다.")
         except ManagedEngineError as exc:
-            checks.append({"id": "gpu", "ok": False, "code": exc.code, "message": exc.message})
+            # 2026-10-01 user policy: detected NVIDIA hardware may attempt install/start.
+            # Keep runtime CUDA health + smoke failures authoritative; never claim these passed.
+            detected = probed_gpu if probed_gpu is not None else _windows_nvidia_gpu()
+            if detected is None:
+                checks.append({"id": "gpu", "ok": False, "code": exc.code, "message": exc.message})
+            else:
+                gpu = asdict(detected) if isinstance(detected, GpuInfo) else dict(detected)
+                code = "GPU_PROBE_FAILED" if probed_gpu is None else exc.code
+                reason = "NVIDIA 카드의 CUDA 정보를 확인하지 못했습니다." if probed_gpu is None else exc.message
+                message = f"{reason} NVIDIA 카드가 확인되어 설치 및 실행을 시도할 수 있습니다. 실제 동작은 실행 시 확인합니다."
+                checks.append({"id": "gpu", "ok": True, "warning": True, "code": code, "message": message})
+                warnings.append(message)
         candidates = {}
         for directory in (model_dirs if model_dirs is not None else self.settings.model_dirs):
             for path in walk_files(directory, depth=4):

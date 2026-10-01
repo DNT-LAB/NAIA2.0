@@ -85,16 +85,17 @@ def gpu_verdict(gpu, adapters):
         return "OK", "NVIDIA GPU 와 드라이버가 ANIMA 엔진 요건(RTX 20 이상 · CUDA 13.0 드라이버)을 만족합니다."
     except ManagedEngineError as exc:
         code, message = exc.code, exc.message
+    attempt = " NVIDIA 카드가 확인되어 설치 및 실행을 시도할 수 있습니다. 실제 동작은 실행 시 확인합니다."
     if code == "NO_NVIDIA_GPU":
         nvidia = [a for a in adapters if a["vendor"] == "NVIDIA"]
         if nvidia:
             state = "드라이버가 설치되지 않았습니다" if any(_no_driver(a) for a in nvidia) else "NVIDIA 드라이버(nvidia-smi)를 쓸 수 없습니다"
-            return code, f"NVIDIA 그래픽 카드는 있지만 {state} - NVIDIA 드라이버를 (다시) 설치해 주세요."
+            return "GPU_PROBE_FAILED", f"NVIDIA 그래픽 카드는 있지만 {state}." + attempt
         others = [a["name"] + (f" (드라이버 없음 · {a['vendor']})" if _no_driver(a) else "")
                   for a in adapters if not (a["vendor"] == "Microsoft" and not _no_driver(a))]
         return code, (f"NVIDIA 그래픽 카드가 없습니다(이 PC: {', '.join(others) or '알 수 없음'}). ANIMA 엔진(ComfyUI CUDA 판)은 "
                       "NVIDIA 전용이라 AMD Radeon · Intel 그래픽에서는 동작하지 않습니다.")
-    return code, message
+    return code, message + (attempt if gpu is not None else "")
 
 
 def engine_log_tail(engine_root, lines=LOG_LINES):
@@ -171,6 +172,9 @@ def build_report(*, settings, install, journal=None, job_trace="", job_phases=()
     for a in adapters:
         bits = [a["name"], a["vendor"], f"드라이버 {a['driver']}" if a["driver"] else "드라이버 없음", a["status"]]
         add("  - " + " · ".join(bit for bit in bits if bit))
+    if gpu is not None:
+        add(f"선택 GPU: {gpu.name} · 드라이버 {gpu.driver or '?'} · Compute Capability {gpu.compute_cap or '?'}"
+            f" · CUDA {gpu.cuda_version or '?'} · 조회 {gpu.source}")
     code, reason = gpu_verdict(gpu, adapters)
     add(f"판정: {code} - {reason}")
 
@@ -209,7 +213,7 @@ def build_report(*, settings, install, journal=None, job_trace="", job_phases=()
         add("")
         add("[PC 검사] 마지막 결과")
         for check in checks:
-            mark = "✓" if check.get("ok") else "✕"
+            mark = "⚠" if check.get("warning") else "✓" if check.get("ok") else "✕"
             add(f"  {mark} {check.get('id')}" + (f" {check['code']}" if check.get("code") else "")
                 + (f" - {check['message']}" if check.get("message") else ""))
 

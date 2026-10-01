@@ -2,10 +2,11 @@
 // 2026-10-01: "API 모드에서도 Generate 를 통한 ComfyUI 백엔드 터미널 보여주는 기능". 인계 = docs/COMFYUI_API_TERMINAL_HANDOFF_2026_10_01.md).
 // 관리형 ANIMA 의 기동 콘솔(animaEngineConsole.mjs)과 따로 둔다 - 그쪽은 '엔진이 켜지는 동안', 이쪽은 '생성이 도는 동안' 이다.
 //
-// GET /api/comfyui/server-log 가 외부 서버의 /internal/logs/raw 를 이어 붙여 준다. 첫 조회 = 지금부터(앞 요청의 출력은 안 보인다).
+// GET /api/comfyui/server-log 가 외부 서버의 /internal/logs/raw 를 이어 붙여 준다. 첫 조회 = 지금부터.
+// 첫 조회가 오류 출력까지 기준선으로 삼은 빠른 실패는 마지막 응답의 최근 서버 출력을 별도 안내와 함께 보여 준다.
 // 서버 전체의 출력이라 머리에 'ComfyUI 서버 출력' 이라 적는다 - 이 요청만의 로그라고 단정하지 않는다.
 // - 성공으로 끝나면 마지막 출력을 한 번 더 받아 붙이고 '완료' 를 잠깐 보인 뒤 닫힌다. 실패면 열어 둔다([✕] - 생성은 그대로).
-// - 로그 API 가 없는 서버(404 · 권한 · 모양이 다름)는 한 줄로 알리고 더 묻지 않는다. 닿지 않으면 한 번 알리고 간격을 늘려 다시
+// - 로그 API 가 없는 서버(404 · 권한 · 모양이 다름)는 한 줄로 알리고 현재 생성의 조회를 끝낸다. 닿지 않으면 한 번 알리고 간격을 늘려 다시
 //   묻는다. 어느 쪽도 생성 실패로 바꾸지 않고 토스트를 띄우지 않는다.
 // - 진행 막대는 '\r' 로 같은 줄을 고쳐 쓴다 - 조각을 넘어 이어지므로 아직 안 닫힌 줄을 따로 들고 있다.
 // 경과 시간만 보인다(화면에 예상 속도 금지).
@@ -17,7 +18,7 @@ const CLOSE_MS = 1500;       // '완료' 를 보이고 닫기까지
 const FADE_MS = 300;
 const MAX_LINES = 400;
 const NOTE = '[NAIA] ';      // 서버 출력이 아니라 NAIA 가 붙인 줄
-const QUIET_MS = 10 * 60 * 1000;   // 로그 API 가 없다고 알린 뒤 이만큼은 Generate 마다 다시 열지 않는다
+const QUIET_MS = 10 * 60 * 1000;   // Generate 마다 같은 미지원 안내를 반복하지 않는 시간(지원 서버는 즉시 연다)
 const STYLE_ID = 'comfyServerConsoleStyle';
 // 결과 칸(#resultViewer, position: relative) 안 아래쪽 - 관리형 기동 콘솔과 같은 자리(두 모드는 함께 오지 않는다)
 const STYLE = `
@@ -60,7 +61,9 @@ export function createComfyServerConsole({ document, window: win = window, fetch
   let delay = POLL_MS;
   let streaming = true;      // false = 이 서버에는 더 묻지 않는다(로그 API 없음)
   let troubleShown = false;  // '읽지 못했다' 를 이미 알렸다 - 다시 읽힐 때까지 되풀이하지 않는다
-  let quietUntil = 0;        // 로그 API 가 없다고 이미 알렸다 - 그때까지는 열지 않는다(서버를 바꿨을 수 있어 영원히는 아니다)
+  let quietUntil = 0;        // 미지원 안내 반복만 숨긴다. 현재 서버의 지원 여부는 매 생성 첫 조회로 확인한다.
+  let inFlight = null;       // 종료할 때 첫 조회를 포함한 진행 중 조회를 먼저 회수한다
+  let hasServerText = false;
 
   function ensure() {
     if (el) return el;
@@ -133,6 +136,7 @@ export function createComfyServerConsole({ document, window: win = window, fetch
 
   // ComfyUI 의 write 조각을 이어 받는다 - '\n' 은 줄을 닫고, '\r' 뒤의 글자는 아직 안 닫힌 줄을 처음부터 고쳐 쓴다
   function appendStream(text) {
+    if (text) hasServerText = true;
     const follow = atEnd();
     const parts = String(text).replace(ANSI, '').split('\n');
     parts.forEach((part, index) => {
@@ -181,10 +185,15 @@ export function createComfyServerConsole({ document, window: win = window, fetch
     if (state === 'managed' || state === 'unconfigured') { hide(); return false; }
     if (state === 'unsupported') {
       streaming = false;
+      if (Date.now() < quietUntil) { hide(); return false; }
       quietUntil = Date.now() + QUIET_MS;
       notice(`이 서버는 터미널 로그를 제공하지 않습니다${data.reason ? ` (${data.reason})` : ''} - 생성 상태만 보입니다`);
       return false;
     }
+    // 매 Generate 의 첫 조회는 숨긴 상태에서도 한다. 미지원 캐시는 백엔드가 URL 별로 판단한다.
+    // 새 서버가 로그를 주면 앞 서버 때문에 닫혀 있던 콘솔을 즉시 다시 연다.
+    quietUntil = 0;
+    el.hidden = false;
     const first = since == null;
     if (typeof data.since === 'number') since = data.since;
     if (state === 'unreachable') {
@@ -199,21 +208,25 @@ export function createComfyServerConsole({ document, window: win = window, fetch
     return true;
   }
 
-  async function poll(my) {
-    const data = await read(since == null ? API : `${API}?since=${since}`);
-    if (my !== seq || phase !== 'running') return;
-    if (!isActive()) { hide(); return; }      // 모드 · 엔진이 바뀌었다
-    if (absorb(data) && phase === 'running') pollTimer = win.setTimeout(() => poll(my), delay);
+  function poll(my) {
+    const pending = read(since == null ? API : `${API}?since=${since}`).then(data => {
+      if (my !== seq || (phase !== 'running' && phase !== 'finishing')) return;
+      if (!isActive()) { hide(); return; }      // 모드 · 엔진이 바뀌었다
+      if (absorb(data) && phase === 'running') pollTimer = win.setTimeout(() => poll(my), delay);
+    });
+    inFlight = pending;
+    pending.finally(() => { if (inFlight === pending) inFlight = null; });
+    return pending;
   }
 
   // 생성이 시작됐다(외부 ComfyUI) - 앞 생성의 출력 · 실패 표시는 지우고 지금부터 받는다
   function start() {
-    if (Date.now() < quietUntil) { hide(); return; }   // 로그 API 가 없는 서버 - 방금 알렸다(앞 실패 표시도 걷는다)
     if (!ensure()) return;
     stopTimers();
     seq += 1;
     lines = [];
     current = '';
+    hasServerText = false;
     pendingCr = false;
     since = null;
     delay = POLL_MS;
@@ -223,7 +236,7 @@ export function createComfyServerConsole({ document, window: win = window, fetch
     startedAt = Date.now();
     logEl.textContent = '';
     el.classList.remove('is-closing');
-    el.hidden = false;
+    el.hidden = Date.now() < quietUntil;
     setState('생성 중');
     paintClock();
     clockTimer = win.setInterval(paintClock, 100);
@@ -234,6 +247,7 @@ export function createComfyServerConsole({ document, window: win = window, fetch
     seq += 1;
     stopTimers();
     phase = 'idle';
+    inFlight = null;
     if (el) {
       el.hidden = true;
       el.classList.remove('is-closing');
@@ -260,13 +274,23 @@ export function createComfyServerConsole({ document, window: win = window, fetch
     win.clearInterval(clockTimer);
     pollTimer = clockTimer = 0;
     paintClock();
+    // 첫 응답보다 먼저 끝난 생성도 커서를 받는다. 다음 생성/닫기가 시작됐으면 옛 응답은 버린다.
+    await inFlight;
+    if (my !== seq || phase !== 'finishing') return;
+    if (!isActive()) { hide(); return; }
     // 마지막 출력("Prompt executed in …")이 아직 안 붙었을 수 있다 - 간격과 관계없이 지금 서버를 한 번 더 읽는다
-    if (streaming && since != null) {
-      const data = await read(`${API}?since=${since}&fresh=1`);
+    if (streaming) {
+      const data = await read(`${API}?${since == null ? '' : `since=${since}&`}fresh=1`);
+      if (my !== seq || phase !== 'finishing') return;
+      if (!isActive()) { hide(); return; }
+      absorb(data);
       if (my !== seq || phase !== 'finishing') return;
       if (data && String(data.state || '') === 'ok') {
-        if (typeof data.since === 'number') since = data.since;
-        if (data.text) appendStream(data.text);
+        // 첫 스냅숏 자체에 실패 내용이 있었다면 delta 는 비어 있다. 서버 전체의 최근 출력임을 명시한다.
+        if (!hasServerText && data.tail) {
+          notice('새로 수신한 출력이 없어 최근 서버 출력을 표시합니다 (이전 생성의 출력이 포함될 수 있습니다)');
+          appendStream(data.tail);
+        }
       }
     }
     if (ok) {

@@ -119,7 +119,18 @@ class ExternalComfyLog:
         # 기준선(since 없음)과 마지막 조회(fresh)는 '지금' 의 서버를 읽어야 한다 - 간격 · 앞 조회와 관계없이 새로 묻는다
         self._refresh(url, wait=fresh or since is None)
         with self._state_lock:
-            return self._payload(since)
+            payload = self._payload(since)
+            if fresh and self._state == "ok":
+                # A fast failure can already be inside the first baseline. Only the final read
+                # carries this bounded, explicitly labelled fallback; normal polls remain deltas.
+                tail, remaining = [], MAX_TEXT
+                for _, text in reversed(self._snapshot or []):
+                    tail.append(text[-remaining:])
+                    remaining -= len(tail[-1])
+                    if not remaining:
+                        break
+                payload["tail"] = "".join(reversed(tail))
+            return payload
 
     def _switch(self, url: str) -> None:
         # 다른 서버 - 앞 서버의 조각은 버리고 순번은 이어 간다. 번호 하나를 비워 둔다: 앞 서버의 커서(이전 순번)를 든 화면은

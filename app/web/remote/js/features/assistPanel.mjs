@@ -51,16 +51,18 @@ const HL_KINDS = ['found', 'chosen', 'miss', 'off'];
 // 기본 문장은 등급의 선만 말하고 분위기 · 신체 부위를 정하지 않는다(사용자 지정 09-30: 모델이 창의성을 잃지 않게). 옛 문장은
 // G 마다 'calm and peaceful' 을 싣고 peaceful 태그를 붙이며 '하늘을 나는' 의 flying 을 6/6 뺐다(still) · Q 는 breasts 를 ·
 // E 는 violent · dynamic 을 늘 붙였다. ⚠️다듬기는 선호 문장이 말한 태그를 사전 확인 없이 받는다 — 여기엔 태그 이름이 되는 낱말
-// (pose · action · peaceful · breasts · 'as' -> ass …)을 쓰지 않는다(시험이 태그 목록 전체로 훑는다)
+// (pose · action · peaceful · breasts · 'as' -> ass …)을 쓰지 않는다(시험이 태그 목록 전체로 훑는다). 사전에 없는 구절도 태그로
+// 실린다 — G 의 'Suitable for all ages.' 가 'suitable for all ages' 태그가 됐다(연령 태그가 필요 없는 자리, 사용자 제보 10-01)
 const DEFAULT_PREFERENCE = {
-  g: 'Suitable for all ages. Keep the mood, movement and place the request describes, and add small details that fit that scene.',
+  g: 'Keep the mood, movement and place the request describes, and add small details that fit that scene.',
   s: 'Mildly suggestive at most. Keep the mood and movement the request describes, and add outfit and body language details that fit that scene.',
   q: 'Suggestive with a sensual edge, within the limits of the request. Keep the mood and movement the request describes, and add outfit and body details that fit that scene.',
   e: 'Explicit adult content when the request asks for it. Keep the mood, movement and composition the request describes, and add anatomical and situational details that fit that scene.',
 };
 // 예전 기본 문장 — 저장된 값이 이것 그대로면 손대지 않은 것이라 새 기본값으로 옮긴다(사용자가 고친 글 · 비운 칸은 그대로)
 const OLD_DEFAULT_PREFERENCE = {
-  g: ['A wholesome image with a calm, peaceful, still atmosphere.'],
+  g: ['A wholesome image with a calm, peaceful, still atmosphere.',
+    'Suitable for all ages. Keep the mood, movement and place the request describes, and add small details that fit that scene.'],
   s: ['A slightly risqué image that focuses on details of the body, outfit, and actions.'],
   q: ['An image that focuses on the body, such as the breasts and buttocks, with a somewhat sexual atmosphere and details.'],
   e: ['An image that focuses on the body, sexual activities, genitals and anatomy, fluids with violent and dynamic composition.'],
@@ -259,17 +261,21 @@ function insertBeforeSentence(text, tag, sentence) {
 
 /** /assist 작은 창이 캐럿에 넣을 글 — 메인 + 캐릭터 프롬프트를 한 줄로(사용자 지정 2026-10-01: 전부 캐럿 자리에). 캐릭터 칸에서만
  *  뜻이 있는 것 — 관계 접두(source# · target# · mutual#: 떼고 동작만) · 칸 머리의 girl · boy · other — 는 메인 글로 옮기지 않는다.
- *  이미 실린 태그(promptKey 가 같은 것)는 다시 넣지 않는다. 캐릭터 태그는 끝의 자연어 문장 **앞**에(insertBeforeSentence) */
+ *  인원수 태그(1girl · 2boys · 6+others · multiple girls · solo)는 조용히 뺀다 — 사용자의 프롬프트 중간에 끼워 넣는 글이라 인원은
+ *  사용자의 것이다(사용자 지정 10-01). 이미 실린 태그(promptKey 가 같은 것)는 다시 넣지 않는다. 캐릭터 태그는 끝의 자연어 문장
+ *  **앞**에(insertBeforeSentence) */
+const QUICK_PERSON_TAG = /^(?:[1-5]|6\+)(?:girl|boy|other)s?$|^multiple (?:girls|boys|others)$|^solo$/;
 function quickPromptText(prompt, sentence = '') {
   const flat = text => String(text || '').split(/\s*\n+\s*/).filter(Boolean).join(', ').trim();
-  const main = flat(prompt?.main);
+  const main = flat(prompt?.main).split(',').filter(part => !QUICK_PERSON_TAG.test(promptKey(part))).join(',')
+    .replace(/^[\s,]+/, '');
   const have = new Set(main.split(',').map(promptKey).filter(Boolean));
   const extra = [];
   for (const c of prompt?.characters || []) {
     for (const raw of flat(c?.prompt).split(',')) {
       const tag = raw.trim().replace(/^(?:source|target|mutual)#/i, '').trim();
       const key = promptKey(tag);
-      if (!key || have.has(key) || key === 'girl' || key === 'boy' || key === 'other') continue;
+      if (!key || have.has(key) || key === 'girl' || key === 'boy' || key === 'other' || QUICK_PERSON_TAG.test(key)) continue;
       have.add(key);
       extra.push(tag);
     }

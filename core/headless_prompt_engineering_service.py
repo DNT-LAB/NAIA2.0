@@ -596,7 +596,7 @@ class HeadlessPromptEngineeringService:
             # 관리형 ANIMA 엔진 - 자기 색인에 ANIMA 모드 기본값으로(첫 진입의 'default' 와 같은 값)
             preset_name = self._unique_preset_name(store, "recommend_anima", mode)
             module_settings = self._anima_mode_default_module_settings()
-            main_settings = self._comfyui_anima_recommended_main_settings()
+            main_settings = self._anima_mode_main_settings()
         elif mode == "COMFYUI":
             if not self._is_comfyui_anima_mode():
                 return False, "추천 설정 적용은 COMFYUI ANIMA 모드에서만 지원됩니다."
@@ -666,7 +666,7 @@ class HeadlessPromptEngineeringService:
         mode = "ANIMA"
         if "default" in store.list_preset_names(mode):
             return False, ""
-        main_settings = self._comfyui_anima_recommended_main_settings()
+        main_settings = self._anima_mode_main_settings()
         store.write_preset_data("default", mode, {
             "api_mode": mode,
             "module_settings": self._anima_mode_default_module_settings(),
@@ -1117,6 +1117,18 @@ class HeadlessPromptEngineeringService:
         settings = HeadlessPromptEngineeringService._comfyui_anima_recommended_module_settings()
         settings["pre_prompt"] = ANIMA_MODE_DEFAULT_PRE_PROMPT
         settings["post_prompt"] = ANIMA_MODE_DEFAULT_POST_PROMPT
+        return settings
+
+    @staticmethod
+    def _anima_mode_main_settings() -> dict[str, Any]:
+        """관리형 ANIMA 모드의 기본 · 추천(10-01) - 외부 ComfyUI ANIMA 추천과 같되 샘플러는 euler.
+
+        관리형 엔진의 SPD 가속은 Euler 전용이다(core/anima_engine/profile.py SPD_SAMPLER). 샘플러를 고르게 된 뒤로 er_sde 를
+        기본에 두면 고르지도 않은 사람의 SPD 가 꺼진다 - 그동안 관리형은 늘 Euler 로 돌았다(엔진 그래프가 euler 고정이었다).
+        사용자 결정(10-01): 기본은 Euler, 이미 er_sde 가 적힌 기존 프리셋은 그대로 둔다.
+        """
+        settings = HeadlessPromptEngineeringService._comfyui_anima_recommended_main_settings()
+        settings["sampler"] = "euler"
         return settings
 
     @staticmethod

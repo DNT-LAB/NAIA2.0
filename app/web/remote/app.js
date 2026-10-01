@@ -3893,6 +3893,11 @@ const COMFYUI_FREE_BYPASS_TEXT = 'Ignore and bypass';
 const COMFYUI_FREE_SEED_TEXT = 'Forced always random';
 const COMFYUI_FREE_LOCKED_PARAM_KEYS = new Set(['model', 'sampler', 'scheduler', 'steps', 'cfg_scale', 'seed', 'sampling_mode', 'rescale_cfg']);
 
+// 관리형 ANIMA 엔진의 SPD 가속은 Euler 전용이다 - 다른 샘플러면 그 생성은 SPD 없이 돈다(core/anima_engine/profile.py
+// spd_scale_for). 샘플러를 바꾸려 하면 툴팁보다 강하게 알린다(사용자 지정 2026-10-01) - onSamplerSelectChange.
+const ANIMA_SPD_SAMPLER = 'euler';
+const ANIMA_SPD_SAMPLER_TITLE = 'SPD 가속은 Euler 전용 — 다른 샘플러는 SPD 없이 생성';
+
 function buildWebGenerationOverrides(prompt, negativePrompt) {
   const overrides = _collectCurrentParams();
   overrides.input = prompt;
@@ -5484,21 +5489,31 @@ function setSelectToBypass(el) {
   el.value = COMFYUI_FREE_BYPASS_TEXT;
 }
 
+// 관리형 ANIMA 인데 샘플러가 Euler 가 아니다 = 그 생성은 SPD 가속 없이 돈다 - Sampler 칸 아래 한 줄로 늘 보인다.
+// 고르지 않았는데 꺼진 때(프리셋 · 메타데이터 적용 · 다른 기기)도 여기서 보인다 - 확인 창은 PARAMS 칸 · /sampler 에서만.
+function updateSamplerSpdNote() {
+  const note = $('pSamplerSpdNote');
+  if (!note) return;
+  const value = String(paramEls?.sampler?.value || '');
+  note.hidden = !(isAnimaManagedMode() && value && value !== ANIMA_SPD_SAMPLER);
+}
+
 function applyComfyUiFreeParamLock(mode = currentMode || modeSelect?.value || '') {
   const locked = isComfyUiFreeWorkflowActive(mode);
-  // 관리형 ANIMA 엔진은 샘플러 · 스케줄러가 SPD 그래프 고정이다(서버가 하나씩만 준다) — 잠가서 보인다.
-  // 모델은 고를 수 있다(사용자 지정 09-28): ANIMA 탭의 모델 폴더에 든 ANIMA 모델 목록을 서버가 준다.
-  const specFixed = isAnimaManagedMode();
+  // 관리형 ANIMA 엔진도 모델 · 샘플러 · 스케줄러를 고른다(모델 09-28 · 샘플러 · 스케줄러 10-01 핫픽스 "사용자가 자유롭게
+  // 선택"). 샘플러만 조건이 있다 - SPD 가속은 Euler 전용이라 Euler 밖으로 바꾸려 하면 확인 창으로 묻고
+  // (onSamplerSelectChange), 꺼진 동안은 칸 아래 한 줄이 남는다(updateSamplerSpdNote).
+  const managed = isAnimaManagedMode();
   [paramEls.model, paramEls.sampler, paramEls.scheduler].forEach(el => {
     if (!el) return;
-    const fixed = specFixed && el !== paramEls.model;
     if (locked) setSelectToBypass(el);
-    el.disabled = locked || fixed;
+    el.disabled = locked;
     el.classList.toggle('param-bypass-lock', locked);
     el.dataset.customSelectLabel = locked ? COMFYUI_FREE_BYPASS_TEXT : '';
     el.dataset.customSelectTitle = locked ? 'Controlled by the Bypass custom workflow'
-      : (fixed ? '관리형 ANIMA 엔진 — ANIMA 스펙 고정' : '');
+      : (managed && el === paramEls.sampler ? ANIMA_SPD_SAMPLER_TITLE : '');
   });
+  updateSamplerSpdNote();
 
   [paramEls.steps, paramEls.cfg_scale, paramEls.seed].forEach(el => {
     if (!el) return;
@@ -5620,7 +5635,10 @@ function updateParams(m) {
   // 백엔드가 들고 있는 모델. 모델 변경을 취소했을 때 콤보를 여기로 되돌린다.
   if (m.model !== undefined) lastBackendModel = String(m.model || '');
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
+  // 백엔드가 들고 있는 샘플러 - SPD 가 꺼지는 순간을 가려 묻고(onSamplerSelectChange), 취소하면 여기로 되돌린다.
+  if (m.sampler !== undefined) lastBackendSampler = String(m.sampler || '');
   populateSelect(paramEls.scheduler, m.options_scheduler, m.scheduler);
+  updateSamplerSpdNote();
   if (Array.isArray(m.options_resolution) && m.options_resolution.length) {
     baseResolutionOptions = m.options_resolution.slice();
   }
@@ -11661,6 +11679,56 @@ function openAnimaModelManage(event) {
   animaModelManage.open(event?.currentTarget || document.getElementById('animaModelManageBtn'));
 }
 
+// ---- 관리형 ANIMA 샘플러 - SPD 가속은 Euler 전용 ------------------------------
+//
+// 관리형 ANIMA 도 샘플러 · 스케줄러를 고른다(사용자 지정 2026-10-01 핫픽스). 단 엔진의 SPD 가속은 Euler 에서만 돈다 -
+// 다른 샘플러면 그 생성은 SPD 없이 돈다(core/anima_engine/profile.py spd_scale_for). 툴팁보다 강하게 알린다(사용자
+// 지시): SPD 가 켜진 채 Euler 밖으로 바꾸려 하면 확인 창으로 묻고, 취소하면 칸을 되돌린다. 꺼진 동안은 칸 아래 한 줄
+// (updateSamplerSpdNote). 스케줄러는 SPD 와 함께 쓰이므로 묻지 않는다.
+let lastBackendSampler = '';
+let samplerRevertInFlight = false;
+
+function revertSamplerSelect(value) {
+  const select = paramEls.sampler;
+  if (!select || !value) return;
+  // 모델 되돌리기와 같다 - change 를 다시 쏴야 커스텀 셀렉트의 접힌 라벨이 따라오고, 그 이벤트가 이 핸들러를 또 부른다.
+  samplerRevertInFlight = true;
+  try {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  } finally {
+    samplerRevertInFlight = false;
+  }
+  updateSamplerSpdNote();
+}
+
+/** PARAMS 의 Sampler 칸 · /sampler 가 부른다. 적용했으면 true, 취소했으면 false. */
+async function onSamplerSelectChange(value, {announce = ''} = {}) {
+  if (samplerRevertInFlight) return false;
+  const next = String(value || '');
+  const previous = lastBackendSampler;
+  const managed = isAnimaManagedMode();
+  if (managed && previous === ANIMA_SPD_SAMPLER && next && next !== ANIMA_SPD_SAMPLER) {
+    const ok = await showConfirmDialog(
+      `SPD 가속은 Euler 전용입니다. ${next} 로 바꾸면 SPD 없이 생성합니다.`,
+      {title: 'SPD 가속이 꺼집니다', okText: `${next} 로 바꾸기`, cancelText: 'Euler 유지'});
+    if (!ok) {
+      // 묻는 사이 서버 값이 바뀌었을 수 있다 - 지금 서버가 들고 있는 것으로 되돌린다
+      revertSamplerSelect(lastBackendSampler || previous);
+      return false;
+    }
+  }
+  lastBackendSampler = next;
+  setParam('sampler', next);
+  updateSamplerSpdNote();
+  if (managed && next === ANIMA_SPD_SAMPLER && previous && previous !== ANIMA_SPD_SAMPLER) {
+    showToast('Euler — SPD 가속이 다시 켜집니다', 'success');
+  } else if (announce) {
+    showToast(`${announce} ${next}`, 'success');
+  }
+  return true;
+}
+
 // ---- 모델 변경 시 프리셋 보호 ----------------------------------------------
 //
 // 파라미터를 바꾸면 선택된 프리셋에 **즉시 반영된다**(A안). 모델은 그 중에서도
@@ -13774,7 +13842,12 @@ function slashSelectCommand(name, key, title) {
     name, desc: `${title} 바꾸기 (지금 ${select?.value || '-'})`,
     choices: () => Array.from(select?.options || []).map(o => ({
       label: o.value, desc: o.textContent !== o.value ? o.textContent : '', current: o.value === select.value,
-      run: () => { select.value = o.value; setParam(key, o.value); showToast(`${title} ${o.value}`, 'success'); },
+      run: () => {
+        select.value = o.value;
+        // 샘플러는 PARAMS 칸과 같은 길 - 관리형 ANIMA 에서 SPD 가 꺼지면 묻는다(취소하면 칸이 되돌아간다)
+        if (key === 'sampler') { onSamplerSelectChange(o.value, {announce: title}); return; }
+        setParam(key, o.value); showToast(`${title} ${o.value}`, 'success');
+      },
     })),
   };
 }

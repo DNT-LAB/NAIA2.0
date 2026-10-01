@@ -37,6 +37,46 @@ SLOTS = {"input": ("11", "text", ""), "negative_prompt": ("12", "text", ""),
          "cfg_scale": ("48", "cfg", 4.8), "width": ("28", "width", 960),
          "height": ("28", "height", 1408), "rescale_cfg": ("52", "multiplier", 0.5)}
 
+# 샘플러 · 스케줄러는 고를 수 있다(사용자 지정 2026-10-01 핫픽스: "ANIMA 모드의 Params 에서 Sampler / Scheduler 는 사용자가
+# 자유롭게 선택"). 목록은 엔진 고정판 ComfyUI v0.22.0 의 comfy/samplers.py KSampler.SAMPLERS / SCHEDULERS 그대로다(설치본에서
+# AST 로 뽑음) - SpectrumSPDKSampler 의 sampler_name · scheduler 입력이 이 목록이다(노드 _KSAMPLER_INPUTS).
+SAMPLERS = (
+    "euler", "euler_cfg_pp", "euler_ancestral", "euler_ancestral_cfg_pp", "heun", "heunpp2", "exp_heun_2_x0",
+    "exp_heun_2_x0_sde", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral",
+    "dpmpp_2s_ancestral_cfg_pp", "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_cfg_pp", "dpmpp_2m_sde",
+    "dpmpp_2m_sde_gpu", "dpmpp_2m_sde_heun", "dpmpp_2m_sde_heun_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu",
+    "ddpm", "lcm", "ipndm", "ipndm_v", "deis", "res_multistep", "res_multistep_cfg_pp",
+    "res_multistep_ancestral", "res_multistep_ancestral_cfg_pp", "gradient_estimation",
+    "gradient_estimation_cfg_pp", "er_sde", "seeds_2", "seeds_3", "sa_solver", "sa_solver_pece", "ddim",
+    "uni_pc", "uni_pc_bh2",
+)
+SCHEDULERS = (
+    "simple", "sgm_uniform", "karras", "exponential", "ddim_uniform", "beta", "normal", "linear_quadratic",
+    "kl_optimal",
+)
+DEFAULT_SAMPLER = GRAPH_TEMPLATE["48"]["inputs"]["sampler_name"]      # euler
+DEFAULT_SCHEDULER = GRAPH_TEMPLATE["48"]["inputs"]["scheduler"]       # simple
+# SPD(저해상도로 앞 구간을 돌리다 σ=spd_sigma 에서 원해상도로 넘어가는 노드의 SPEED 경로)는 **Euler 전용**이다 - 노드는 SPD 중에
+# 다른 샘플러를 조용히 Euler 로 바꾼다(spectrum.py "ignoring requested sampler ... using Euler"). 그래서 Euler 밖의 샘플러면 그
+# 생성만 SPD 를 끈다: spd_scale 1.0 = 노드 설명의 "1.0 disables SPD (vanilla Spectrum)" - 고른 샘플러가 실제로 돌고 Spectrum
+# 가속은 남는다. 스케줄러는 SPD 와 함께 쓰인다(SPD 도 고른 스케줄러로 σ 표를 만든다).
+SPD_SAMPLER = "euler"
+SPD_SCALE = GRAPH_TEMPLATE["48"]["inputs"]["spd_scale"]               # 0.5
+SPD_OFF_SCALE = 1.0
+
+
+def resolve_sampling(params):
+    """요청의 샘플러 · 스케줄러 -> 엔진이 받는 값. 목록에 없으면(외부 ComfyUI · WebUI 에서 남은 이름 · 빈 값) 기본값 - PARAMS
+    칸이 보여 주는 것(integration.apply_managed_schema)과 같다(모델의 resolve_model 과 같은 규칙)."""
+    sampler = str(params.get("sampler") or "").strip()
+    scheduler = str(params.get("scheduler") or "").strip()
+    return (sampler if sampler in SAMPLERS else DEFAULT_SAMPLER,
+            scheduler if scheduler in SCHEDULERS else DEFAULT_SCHEDULER)
+
+
+def spd_scale_for(sampler):
+    return SPD_SCALE if sampler == SPD_SAMPLER else SPD_OFF_SCALE
+
 
 def integer_value(value, field):
     # Never pass a seed through float: even a Python int can lose uint64 bits.
@@ -158,6 +198,8 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
     graph["44"]["inputs"]["unet_name"] = unet
     for key, (node, field, _) in SLOTS.items():
         graph[node]["inputs"][field] = values[key]
+    sampler, scheduler = resolve_sampling(params)
+    graph["48"]["inputs"].update(sampler_name=sampler, scheduler=scheduler, spd_scale=spd_scale_for(sampler))
     prev, active = "44", []
     for item in lora_chain:
         if not item.get("enabled", True):
@@ -171,7 +213,9 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
     validate_compiled(graph, available_loras=available_loras, available_models=available_models)
     return CompiledGraph(graph, OUTPUT_NODE_ID, values["seed"], {
         "id": PROFILE_ID, "revision": PROFILE_REVISION, "runtime_id": RUNTIME_ID, "model": unet,
-        "sampler_actual": "euler", "sampler_note": "SPD forces Euler", "loras": active,
+        "sampler": sampler, "scheduler": scheduler, "spd": sampler == SPD_SAMPLER, "sampler_actual": sampler,
+        "sampler_note": "SPD on (Euler only)" if sampler == SPD_SAMPLER else "SPD off: non-Euler sampler (Spectrum only)",
+        "loras": active,
         **{key: values[key] for key in ("seed", "steps", "cfg_scale", "rescale_cfg", "width", "height")}})
 
 
@@ -199,6 +243,11 @@ def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collectio
         expected["44"]["inputs"]["unet_name"] = unet
         for key, (node, field, _) in SLOTS.items():
             expected[node]["inputs"][field] = values[key]
+        sampler, scheduler = workflow["48"]["inputs"]["sampler_name"], workflow["48"]["inputs"]["scheduler"]
+        if sampler not in SAMPLERS or scheduler not in SCHEDULERS:
+            raise ValueError("sampling")
+        # SPD 는 샘플러가 정한다 - Euler 에 SPD 끔 · 다른 샘플러에 SPD 켬은 고친 그래프다
+        expected["48"]["inputs"].update(sampler_name=sampler, scheduler=scheduler, spd_scale=spd_scale_for(sampler))
         prev = "44"
         for i in range(len(extra)):
             node = str(100 + i)

@@ -11690,6 +11690,17 @@ body.resizing-result-info {
 .param-sublabel {
   color: rgba(138,151,191,0.72);
 }
+/* 관리형 ANIMA - 샘플러가 Euler 가 아니면 그 생성은 SPD 가속 없이 돈다(10-01). 보이기 = app.js updateSamplerSpdNote.
+   Sampler 줄에 붙어 보이도록 격자 틈(1px)을 덮는다. */
+.param-spd-note {
+  margin-top: -1px;
+  padding: 0 12px 7px;
+  background: var(--bg-deep);
+  font-family: var(--font-mono); font-size: 10px;
+  color: #f0c674;
+  text-align: right;
+}
+.param-spd-note[hidden] { display: none; }
 .webui-hires-scroll {
   max-height: min(240px, 42dvh);
   min-height: 0;

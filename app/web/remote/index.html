@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260930-dbwin">
+<link rel="stylesheet" href="style.css?v=20261001-spd-note">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -645,8 +645,10 @@
             </div>
             <div class="param-row">
               <span class="param-label">Sampler</span>
-              <select class="param-select" id="pSampler" onchange="setParam('sampler',this.value)"></select>
+              <select class="param-select" id="pSampler" onchange="onSamplerSelectChange(this.value)"></select>
             </div>
+            <!-- 관리형 ANIMA 전용(10-01) — Euler 밖 샘플러면 그 생성은 SPD 가속 없이 돈다. 보이기 = app.js updateSamplerSpdNote -->
+            <div class="param-spd-note" id="pSamplerSpdNote" hidden>SPD 가속 꺼짐 · Euler 에서만 켜집니다</div>
             <div class="param-row">
               <span class="param-label">Scheduler</span>
               <select class="param-select" id="pScheduler" onchange="setParam('scheduler',this.value)"></select>
@@ -1524,6 +1526,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260930-dbwin2"></script>
+<script src="app.js?v=20261001-spd-note"></script>
 </body>
 </html>

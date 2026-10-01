@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .manifest import MANAGED_CREDENTIAL, MODELS
-from .profile import SLOTS, compile_graph, validate_request_slots
+from .profile import SAMPLERS, SCHEDULERS, SLOTS, compile_graph, resolve_sampling, validate_request_slots
 from .runtime import INSTALLING, REGISTRY_LOCK, ManagedEngineError, get_runtime
 from .prompt_loras import PromptLoraError, extract_prompt_loras, merge_prompt_loras
 from .settings import load_settings, lora_catalog, lora_keyword_map, quick_receipt, unet_catalog, verified_hash
@@ -75,6 +75,8 @@ def snapshot_request(context, params):
     params["_anima_lora_keywords"] = lora_keyword_map(settings)
     # 모델도 큐에 넣는 순간의 것 — 그 뒤 파일이 사라지면 몰래 기본 모델로 바꾸지 않고 거절한다(LoRA 와 같은 규칙)
     params["model"] = params["_anima_model"] = resolve_model(context, params.get("model"))
+    # 샘플러 · 스케줄러도 큐에 넣는 순간의 것(10-01) - 목록 밖 이름은 기본값으로(PARAMS 칸이 보여 준 그대로 기록에 남는다)
+    params["sampler"], params["scheduler"] = resolve_sampling(params)
     params.pop("_anima_submission_attempted", None)
 
 
@@ -149,8 +151,10 @@ def engine_in_use(context, credential):
 
 
 def managed_api_options(context):
-    # 샘플러 · 스케줄러는 SPD 그래프 고정, 모델은 목록에서 고른다
-    return {"options_model": managed_models(context), "options_sampler": ["euler"], "options_scheduler": ["simple"]}
+    # 모델은 목록에서 고른다. 샘플러 · 스케줄러도 고른다(10-01) - 엔진 고정판 ComfyUI 의 목록 그대로. Euler 밖 샘플러는 그
+    # 생성만 SPD 가 꺼진다(profile.spd_scale_for) - 화면이 고를 때 확인 창으로 알린다(app.js onSamplerSelectChange).
+    return {"options_model": managed_models(context), "options_sampler": list(SAMPLERS),
+            "options_scheduler": list(SCHEDULERS)}
 
 
 def apply_managed_schema(context, payload):
@@ -159,8 +163,8 @@ def apply_managed_schema(context, payload):
         return
     options = managed_api_options(context)
     payload.update(options, steps_range=[1, 150])
-    for key in ("sampler", "scheduler"):
-        payload[key] = options["options_" + key][0]
+    # 샘플러 · 스케줄러: 세션 값이 엔진 목록에 있으면 그것, 아니면 기본(생성과 같은 규칙 - resolve_sampling)
+    payload["sampler"], payload["scheduler"] = resolve_sampling(payload)
     # 세션에 남은 모델이 목록에 있으면 그것, 아니면 기본 모델(resolve_model 과 같은 규칙) — remote_params 는 그대로 둔다
     chosen = str(context.remote_params.get("model") or "").strip()
     payload["model"] = chosen if chosen in options["options_model"] else options["options_model"][0]

@@ -261,10 +261,10 @@ function insertBeforeSentence(text, tag, sentence) {
 
 /** /assist 작은 창이 캐럿에 넣을 글 — 메인 + 캐릭터 프롬프트를 한 줄로(사용자 지정 2026-10-01: 전부 캐럿 자리에). 캐릭터 칸에서만
  *  뜻이 있는 것 — 관계 접두(source# · target# · mutual#: 떼고 동작만) · 칸 머리의 girl · boy · other — 는 메인 글로 옮기지 않는다.
- *  인원수 태그(1girl · 2boys · 6+others · multiple girls · solo)는 조용히 뺀다 — 사용자의 프롬프트 중간에 끼워 넣는 글이라 인원은
- *  사용자의 것이다(사용자 지정 10-01). 이미 실린 태그(promptKey 가 같은 것)는 다시 넣지 않는다. 캐릭터 태그는 끝의 자연어 문장
- *  **앞**에(insertBeforeSentence) */
-const QUICK_PERSON_TAG = /^(?:[1-5]|6\+)(?:girl|boy|other)s?$|^multiple (?:girls|boys|others)$|^solo$/;
+ *  명시적인 인원수 태그(1girl · 2boys · 6+others …)는 조용히 뺀다 — 사용자 프롬프트는 구조적으로 맨 위에 1girl, 1boy 를 쓴다(사용자
+ *  지정 10-01). multiple girls · solo 는 인원수 태그가 아니라 둔다(사용자 지정). 이미 실린 태그(promptKey 가 같은 것)는 다시 넣지
+ *  않는다. 캐릭터 태그는 끝의 자연어 문장 **앞**에(insertBeforeSentence) */
+const QUICK_PERSON_TAG = /^(?:[1-5]|6\+)(?:girl|boy|other)s?$/;
 function quickPromptText(prompt, sentence = '') {
   const flat = text => String(text || '').split(/\s*\n+\s*/).filter(Boolean).join(', ').trim();
   const main = flat(prompt?.main).split(',').filter(part => !QUICK_PERSON_TAG.test(promptKey(part))).join(',')

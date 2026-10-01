@@ -378,7 +378,7 @@ def _record(context: Any, result: Any, payload: dict[str, Any]) -> None:
 
 
 async def apply_boost_v2(
-    context: Any, result: Any, settings: dict[str, Any], *, update_context: bool = True,
+    context: Any, result: Any, settings: dict[str, Any], *, update_context: bool = True, prune: bool = True,
 ) -> bool:
     """랜덤 결과 프롬프트의 main 끝에 Boost v2 섹션을 붙인다. 실패하면 원문 그대로(raise 없음).
 
@@ -386,6 +386,8 @@ async def apply_boost_v2(
     실제 전송, 네거티브 조건부 바인딩(final_prompt 비교)이 모두 같은 문자열을 보게 하려는 것.
     ``update_context=False`` 면 context.prompt_text 는 건드리지 않는다(Auto Gen 다음 컷 미리 만들기 —
     소비할 때 설치한다).
+    ``prune=False`` 면 응답이 쓴 입력 태그를 main 에서 걷어내지 않는다 — Assist [부스트 생성] · [부스트 넣기] 는 제안한
+    태그가 먼저, Boost 문단은 그 뒤다(사용자 지정 10-01: 걷어내기 때문에 Boost 문단만 남았다).
     """
     from core.boost_v2 import build_instruction, enabled_sections, format_output
 
@@ -409,8 +411,9 @@ async def apply_boost_v2(
             return False
         from core.boost_v2 import inject_block, prune_used_tags
 
-        # 응답이 이미 쓴 입력 태그는 main 에서 걷어내고(인원수 태그 제외), 안 쓴 태그만 앞에 남긴다.
-        pruned, removed = prune_used_tags(prompt, tags.split(", "), resp.get("text", ""))
+        # 응답이 이미 쓴 입력 태그는 main 에서 걷어내고(인원수 태그 제외), 안 쓴 태그만 앞에 남긴다(Auto Boost).
+        pruned, removed = (prune_used_tags(prompt, tags.split(", "), resp.get("text", "")) if prune
+                           else (prompt, []))
         new_prompt = inject_block(pruned, addition)
         if new_prompt == prompt:
             return False

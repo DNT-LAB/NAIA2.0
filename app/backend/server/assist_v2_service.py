@@ -486,7 +486,9 @@ def apply_source_row(context: Any, payload: Any) -> dict[str, Any]:
 
 async def boost_result(context: Any, result: Any, *, update_context: bool) -> str | None:
     """[부스트 생성] · [부스트 넣기](사용자 지정 09-30) — Auto Boost 와 같은 길(apply_boost_v2: 태그로 섹션을 받아 메인 끝에).
-    Auto Boost 토글과 무관하게 이번 한 번. 되면 None(result.prompt 가 부스트본), 안 되면 까닭."""
+    Auto Boost 토글과 무관하게 이번 한 번. 되면 None(result.prompt 가 부스트본), 안 되면 까닭.
+    단 Auto Boost 의 걷어내기(응답이 쓴 입력 태그를 메인에서 뺀다)는 하지 않는다 — 제안한 태그가 먼저, Boost 는 그
+    뒤(사용자 지정 10-01: 받은 태그가 다 빠지고 Boost 문단만 남았다)."""
     from app.backend.server.boost_v2_service import apply_boost_v2, boost_v2_settings, get_boost_runtime
     from core.boost_v2 import enabled_sections
 
@@ -497,7 +499,7 @@ async def boost_result(context: Any, result: Any, *, update_context: bool) -> st
         get_boost_runtime(context, settings).hold("assist", ASSIST_LEASE_SECONDS)    # 부스트 뒤 엔진은 Assist 임대로 내린다
     except Exception:
         pass
-    if await apply_boost_v2(context, result, settings, update_context=update_context):
+    if await apply_boost_v2(context, result, settings, update_context=update_context, prune=False):
         return None
     meta = getattr(getattr(result, "context", None), "metadata", None)
     info = meta.get("boost_v2") if isinstance(meta, dict) else None

@@ -183,6 +183,30 @@ export function tokenCoreSpan(raw) {
   return { start, end };
 }
 
+/** 슬래시 작은 창(/assist · /translate)이 돌려준 글을 캐럿 자리에 **앞뒤 태그와 쉼표로 이어** 넣을 글(사용자 지정 2026-10-01).
+ *  before = 캐럿 앞 글, after = 캐럿 뒤 글. 앞이 `a,` 로 붙어 끝나면 한 칸 띄우고, 뒤에 태그가 이어지면 `, ` 를 붙인다.
+ *  넣을 글 앞뒤의 쉼표 · 공백은 걷는다. 넣을 것이 없으면 '' */
+export function slashJoinText(before, after, text) {
+  const body = String(text || '').replace(/^[\s,]+|[\s,]+$/g, '');
+  if (!body) return '';
+  const lead = /,$/.test(String(before || '')) ? ' ' : '';
+  const rest = String(after || '');
+  const tail = !rest.trim() || /^\s*[,\n]/.test(rest) ? '' : ', ';
+  return `${lead}${body}${tail}`;
+}
+
+/** 작은 창이 답을 기다리는 동안 글이 바뀌었을 수 있다 — 넣을 자리를 다시 찾는다. 캐럿 앞 글이 그대로면 그 자리, 캐럿 뒤 글이
+ *  그대로면 끝에서 같은 거리, 둘 다 바뀌었으면 null(부르는 쪽이 지금 캐럿을 쓴다) */
+export function slashReanchor(valueAtOpen, caret, value) {
+  const was = String(valueAtOpen || '');
+  const now = String(value || '');
+  const at = Math.max(0, Math.min(Number(caret) || 0, was.length));
+  if (now.startsWith(was.slice(0, at))) return at;
+  const tail = was.slice(at);
+  if (now.endsWith(tail)) return now.length - tail.length;
+  return null;
+}
+
 export function createTagAssistController({
   document,
   window,
@@ -3456,8 +3480,11 @@ export function createTagAssistController({
       return;
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
       e.stopPropagation();   // Ctrl+Enter 가 명령 실행과 함께 Generate 를 누르던 것
+      // 한글 조합 중의 Enter 는 글자를 확정하는 키다 - 막지 않고(확정이 끊긴다) 명령은 확정 뒤의 Enter 로
+      // (`/assist 창가의 소녀` 를 치고 Enter 하면 조합 Enter 와 확정 뒤 Enter 가 둘 다 와 명령이 두 번 돌 수 있었다)
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
       const row = acResults[acSel] || acResults[0];
       if (row) runSlashCommand(row); else closeSlashEntry({restoreFocus: true});
     }
@@ -3567,6 +3594,27 @@ export function createTagAssistController({
     }
     const cmd = row._cmd;
     if (!cmd) { closeSlashEntry({restoreFocus: true}); return; }
+    if (typeof cmd.popup === 'function') {
+      // 작은 창(/assist · /translate, 사용자 지정 2026-10-01) - 엔트리 자리에 뜨고, 끝나면 **엔트리를 연 캐럿**에 글을 넣는다.
+      // 명령 뒤에 이어 친 글(`/assist 창가의 소녀`)은 창에 채워 바로 실행한다(`/preset recom` 의 첫 검색어와 같은 버릇).
+      const seed = slashArgText(open.input.value);
+      const {textarea, caret, valueAtOpen} = open;
+      const left = parseFloat(open.el.style.left) || 0;
+      const top = parseFloat(open.el.style.top) || 0;
+      closeSlashEntry({restoreFocus: false});
+      const backToCaret = () => {
+        textarea.focus({preventScroll: true});
+        const at = slashReanchor(valueAtOpen, caret, textarea.value);
+        if (at != null) textarea.setSelectionRange(at, at);
+      };
+      try {
+        cmd.popup({left, top, seed, insert: text => insertAtSlashCaret(textarea, caret, valueAtOpen, text), cancel: backToCaret});
+      } catch (error) {
+        showToast?.(`명령 실패 — ${error?.message || error}`, 'error');
+        backToCaret();
+      }
+      return;
+    }
     if (cmd.arg) {
       // 값을 이어 쳤으면(`step 23`) 바로 적용, 아니면 값 단계로 들어간다.
       const raw = slashArgText(open.input.value);
@@ -3635,6 +3683,20 @@ export function createTagAssistController({
       textarea.setRangeText(replacement, start, end, 'end');
       textarea.dispatchEvent(new Event('input', {bubbles: true}));
     }
+  }
+  /** 작은 창의 결과를 엔트리를 연 캐럿 자리에(앞뒤 태그와 쉼표로 잇는다). 그 사이 글이 바뀌었으면 자리를 다시 찾는다 */
+  function insertAtSlashCaret(textarea, caret, valueAtOpen, text) {
+    if (!textarea || !textarea.isConnected) return false;
+    const value = String(textarea.value || '');
+    let at = slashReanchor(valueAtOpen, caret, value);
+    if (at == null) at = Math.min(Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : value.length, value.length);
+    const joined = slashJoinText(value.slice(0, at), value.slice(at), text);
+    if (!joined) return false;
+    replaceRangeUndoable(textarea, at, at, joined);
+    const end = at + joined.length - (/, $/.test(joined) ? 2 : 0);
+    textarea.setSelectionRange(end, end);
+    if (textarea === promptEdit) onPromptEdit();
+    return true;
   }
   function applySlashInsert(textarea, caret, cmd) {
     if (cmd.name === 'seq' && /:begin\b/i.test(String(textarea.value || ''))) {

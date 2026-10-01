@@ -23,7 +23,10 @@
  *   가리킨 것만). 이벤트 검색은 새 태그로 다시 붙인다. [×] · [이어 고치기] 스위치 · [새로] 는 없앴다(쓸모없다 — 사용자).
  * - [ ] NAIA 추론 파이프라인 미사용(09-28): 켜면 AI 모델이 바로 태그 + 문장을 쓴다(서버 _direct — 한국어 층 · 이벤트 맵 ·
  *   되살리기 · 다듬기 없음). 이 기계에 남는다(prefs).
+ * - 메인 프롬프트의 `/assist`(10-01) = 같은 상태(등급 · 인원 · User Preference · 이름 선택)를 쓰는 **작은 창**(openQuick).
+ *   늘 NAIA 변환 파이프라인으로 찾고, 장면이면 메인 + 캐릭터 프롬프트를 한 줄로 엔트리를 연 캐럿에 넣는다.
  */
+import { openSlashPopup } from './slashPopup.mjs?v=20261001-slashpop';
 
 const RATINGS = [
   { id: 'g', label: 'G', title: 'General' },
@@ -254,6 +257,26 @@ function insertBeforeSentence(text, tag, sentence) {
   return head ? `${head}, ${tag}, ${body.slice(at)}` : `${tag}, ${body.slice(at)}`;
 }
 
+/** /assist 작은 창이 캐럿에 넣을 글 — 메인 + 캐릭터 프롬프트를 한 줄로(사용자 지정 2026-10-01: 전부 캐럿 자리에). 캐릭터 칸에서만
+ *  뜻이 있는 것 — 관계 접두(source# · target# · mutual#: 떼고 동작만) · 칸 머리의 girl · boy · other — 는 메인 글로 옮기지 않는다.
+ *  이미 실린 태그(promptKey 가 같은 것)는 다시 넣지 않는다. 캐릭터 태그는 끝의 자연어 문장 **앞**에(insertBeforeSentence) */
+function quickPromptText(prompt, sentence = '') {
+  const flat = text => String(text || '').split(/\s*\n+\s*/).filter(Boolean).join(', ').trim();
+  const main = flat(prompt?.main);
+  const have = new Set(main.split(',').map(promptKey).filter(Boolean));
+  const extra = [];
+  for (const c of prompt?.characters || []) {
+    for (const raw of flat(c?.prompt).split(',')) {
+      const tag = raw.trim().replace(/^(?:source|target|mutual)#/i, '').trim();
+      const key = promptKey(tag);
+      if (!key || have.has(key) || key === 'girl' || key === 'boy' || key === 'other') continue;
+      have.add(key);
+      extra.push(tag);
+    }
+  }
+  return extra.length ? insertBeforeSentence(main, extra.join(', '), sentence) : main;
+}
+
 function clampCount(value, fallback) {
   const n = Number(value);
   return Number.isInteger(n) && n >= 0 && n <= 9 ? n : fallback;
@@ -273,6 +296,7 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   let resultMode = 'search';              // 보이는 결과를 만든 길(search · direct · followup)
   let busyMode = 'search';                // 도는 요청(search · followup) — 단추 글
   let followBtn = null, directBox = null;
+  let quick = null;                       // /assist 작은 창(openQuick) — {pop, ctx, input, persons, ratingBar, busy}
   const preference = initialPreference(prefs.preference);     // 옛 기본 문장 그대로 저장된 것은 새 기본값으로(09-30)
   let girls = clampCount(prefs.girls, 1);
   let boys = clampCount(prefs.boys, 0);
@@ -484,11 +508,13 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   function paintRating() {
-    ratingBar?.querySelectorAll('[data-r]').forEach(pill => {
-      const on = pill.dataset.r === rating;
-      pill.classList.toggle('active', on);
-      pill.setAttribute('aria-pressed', String(on));
-    });
+    for (const bar of [ratingBar, quick?.ratingBar]) {
+      bar?.querySelectorAll('[data-r]').forEach(pill => {
+        const on = pill.dataset.r === rating;
+        pill.classList.toggle('active', on);
+        pill.setAttribute('aria-pressed', String(on));
+      });
+    }
     advPanel?.querySelectorAll('[data-as-adv-row]').forEach(row => {
       row.classList.toggle('is-on', row.dataset.asAdvRow === rating);      // 지금 쓰이는 등급의 문장
     });
@@ -506,13 +532,16 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   function paintPersons() {
-    if (!personsEl) return;
+    if (personsEl) personsEl.innerHTML = personsHtml(detectedPersons());
+    if (quick?.persons) quick.persons.innerHTML = personsHtml(null);     // 작은 창엔 센 결과가 없다 — 자동이면 '·'
+  }
+
+  function personsHtml(seen) {
     const auto = personsMode === 'auto';
-    const seen = detectedPersons();
     const g = auto ? (seen ? seen.girls : null) : girls;
     const b = auto ? (seen ? seen.boys : null) : boys;
     const shown = n => (n == null ? '·' : esc(n));
-    personsEl.innerHTML = `
+    return `
       <button type="button" class="as-seg${auto ? ' is-on' : ''}" data-as-persons-auto aria-pressed="${auto}"
               title="요청에서 인원을 셉니다">자동</button>
       <span class="as-step${auto ? ' is-dim' : ''}" title="여성 수">여
@@ -525,28 +554,33 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   }
 
   function onPersonsClick(event) {
-    if (event.target.closest('[data-as-persons-auto]')) {
-      if (personsMode === 'auto') return;
-      personsMode = 'auto';
-    } else {
-      const step = event.target.closest('[data-as-step]');
-      if (!step) return;
-      if (personsMode === 'auto') {
-        // 자동에서 처음 누르면 지금 보이는 수(센 것)에서 시작한다
-        const seen = detectedPersons();
-        if (seen) { girls = clampCount(seen.girls, girls); boys = clampCount(seen.boys, boys); }
-        personsMode = 'manual';
-      }
-      const next = clampCount((step.dataset.asStep === 'girls' ? girls : boys) + Number(step.dataset.d), null);
-      if (next == null) return;
-      const g = step.dataset.asStep === 'girls' ? next : girls;
-      const b = step.dataset.asStep === 'boys' ? next : boys;
-      if (g + b < 1 || g + b > 9) return;               // 서버 규칙과 같다(1~9명)
-      girls = g; boys = b;
-    }
+    if (!changePersons(event, detectedPersons())) return;
     persistPrefs();
     paintPersons();
     reask();
+  }
+
+  /** [자동 | 여 n 남 m] 한 번 누름 — 바뀌었으면 true. seen = 지금 보이는 센 수(작은 창은 null) */
+  function changePersons(event, seen) {
+    if (event.target.closest('[data-as-persons-auto]')) {
+      if (personsMode === 'auto') return false;
+      personsMode = 'auto';
+      return true;
+    }
+    const step = event.target.closest('[data-as-step]');
+    if (!step) return false;
+    if (personsMode === 'auto') {
+      // 자동에서 처음 누르면 지금 보이는 수(센 것)에서 시작한다
+      if (seen) { girls = clampCount(seen.girls, girls); boys = clampCount(seen.boys, boys); }
+      personsMode = 'manual';
+    }
+    const next = clampCount((step.dataset.asStep === 'girls' ? girls : boys) + Number(step.dataset.d), null);
+    if (next == null) return false;
+    const g = step.dataset.asStep === 'girls' ? next : girls;
+    const b = step.dataset.asStep === 'boys' ? next : boys;
+    if (g + b < 1 || g + b > 9) return false;           // 서버 규칙과 같다(1~9명)
+    girls = g; boys = b;
+    return true;
   }
 
   // ── 이름: 칠하기 · 칩 · 고르기 ───────────────────────────────────────────
@@ -963,17 +997,17 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
   // ── [기록] — 이번 세션의 결과(사용자 지정 2026-09-28). 새 결과를 앞에 쌓고, 누르면 그때의 요청 · 등급 · 인원 · 이름 선택 ·
   // 결과로 되돌아간다(붙인 이벤트 검색도 그 핀 · 인원 · 등급으로). [이어서 질문] 은 그 결과부터 고친다.
 
-  function remember(text, asked, data) {
+  function remember(text, asked, data, { current = true } = {}) {
     // 서버가 받지 않은 이름 선택은 뺀다(되돌아갈 때 '선택을 쓸 수 없어 되돌렸습니다' 가 또 뜨지 않게)
     const refused = new Set((data?.names || []).filter(n => n && n.ko && !n.chosen).map(n => String(n.ko)));   // absorbNames 와 같은 판정
     const entry = {
       id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), text,
       rating: asked.rating, personsMode: asked.personsMode, girls: asked.girls, boys: asked.boys,
-      choices: asked.choices.filter(([form]) => !refused.has(form)), notNames: asked.notNames, result,
+      choices: asked.choices.filter(([form]) => !refused.has(form)), notNames: asked.notNames, result: data,
       mode: asked.mode || 'search',
     };
     history = [entry, ...history].slice(0, HISTORY_MAX);
-    historyAt = entry.id;
+    if (current) historyAt = entry.id;
     saveHistory(history);
     paintHistory();
   }
@@ -1703,6 +1737,152 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     void refreshLlm();
   }
 
+  // ── /assist 작은 창(사용자 지정 2026-10-01) ─────────────────────────────────────
+  // [자동 | 여 | 남 | G S Q E ……… 설정] · [요청] · [닫기 ESC | 제출 ENTER]. 이 창과 **같은 상태**를 쓰는 작은 보기다(등급 · 인원 ·
+  // User Preference · 이름 선택). 제출은 늘 NAIA 변환 파이프라인 — [파이프라인 미사용] 을 따르지 않는다(사용자 지정). 장면이면
+  // 메인 + 캐릭터 프롬프트를 한 줄로(quickPromptText) 엔트리를 연 캐럿에 넣고 닫는다. 장면이 아닌 결과(태그 · 캐릭터 · 작가 찾기 …)는
+  // 넣을 것이 하나로 정해지지 않는다 — 이 창으로 넘겨 보인다. 결과는 이 창의 [기록] 에도 남는다.
+  // [설정] = 이 창을 [고급 설정] 이 펼쳐진 채로(사용자 지정) — 적던 글은 이 창 입력칸으로 옮긴다. 상태 변수 quick 은 위에.
+
+  function openQuick(ctx = {}) {
+    quick?.pop.close('replaced');
+    const pop = openSlashPopup({
+      className: 'as-quick', okLabel: '제출', left: ctx.left, top: ctx.top,
+      bodyHtml: `<div class="slash-pop-row">
+          <span class="as-persons" data-asq-persons role="group" aria-label="인원"></span>
+          <span class="fs-rating-bar as-rating" data-asq-rating role="group" aria-label="등급(추론 방향)">${RATINGS.map(r =>
+            `<button type="button" class="fs-rating-btn" data-r="${r.id}" title="${r.title}">${r.label}</button>`).join('')}</span>
+          <span class="slash-pop-gap"></span>
+          <button type="button" class="as-seg" data-asq-settings title="Assist 창을 [고급 설정] 이 펼쳐진 채로 엽니다">설정</button>
+        </div>
+        <textarea class="slash-pop-text" data-asq-input rows="2" spellcheck="false" autocomplete="off" aria-label="Assist 요청"
+          placeholder="말로 적어 주세요 — 예: 창가에 걸터앉아 밖을 내려다보는 소녀"></textarea>`,
+      onOk: () => { void quickAsk(); },
+      onClose: reason => {
+        const was = quick;
+        if (!was || was.pop !== pop) return;
+        quick = null;
+        if (reason === 'esc' || reason === 'button') was.ctx.cancel?.();
+      },
+    });
+    quick = {
+      pop, ctx, busy: false,
+      input: pop.el.querySelector('[data-asq-input]'),
+      persons: pop.el.querySelector('[data-asq-persons]'),
+      ratingBar: pop.el.querySelector('[data-asq-rating]'),
+    };
+    quick.persons.addEventListener('click', event => {
+      if (changePersons(event, null)) { persistPrefs(); paintPersons(); }
+    });
+    quick.ratingBar.addEventListener('click', event => {
+      const pill = event.target.closest('[data-r]');
+      if (!pill || pill.dataset.r === rating) return;
+      rating = pill.dataset.r;
+      persistPrefs();
+      paintRating();
+    });
+    pop.el.addEventListener('click', event => {
+      if (event.target.closest('[data-asq-llm]')) { window.openAiModelSetup?.(); return; }   // API 설정 › AI 모델
+      if (!event.target.closest('[data-asq-settings]')) return;
+      const text = quick?.input.value.trim() || '';
+      quick?.pop.close('settings');
+      showSettings(text);
+    });
+    paintRating();
+    paintPersons();
+    void quickWarm();
+    const seed = String(ctx.seed || '').trim();
+    if (seed) {
+      quick.input.value = seed;
+      void quickAsk();
+    }
+    quick?.input.focus();
+  }
+
+  /** 엔진 · 한국어 층을 뒤에서 올리고 상태를 받는다(큰 창을 열 때와 같다) — 모델이 없으면 작은 창에도 알린다 */
+  async function quickWarm() {
+    try { status = await postJson('/api/assist/warm', {}); } catch { return; }
+    paintBanner();
+    paintQuickModel();
+  }
+
+  function paintQuickModel() {
+    if (!quick || quick.busy || !modelMissing()) return;
+    quick.pop.setNote('AI 모델이 없어 찾을 수 없습니다.<button type="button" class="slash-pop-btn" data-asq-llm>AI 모델 받기</button>',
+      'error');
+    quick.pop.setOkEnabled(false);
+  }
+
+  /** [제출] · Enter — 큰 창의 [제출] 과 같은 요청(단 direct 는 싣지 않는다). 그 사이 창을 닫았으면 넣지 않는다 */
+  async function quickAsk() {
+    const q = quick;
+    if (!q || q.busy) return;
+    const text = q.input.value.trim();
+    if (!text) { q.input.focus(); return; }
+    if (modelMissing()) { paintQuickModel(); return; }
+    q.busy = true;
+    q.pop.setBusy(true, '찾는 중…');
+    q.pop.setNote('');
+    const payload = { text, rating, persons: personsPayload(), names: Object.fromEntries(choices), not_names: [...notNames] };
+    const asked = { rating, personsMode, girls, boys, choices: [...choices], notNames: [...notNames] };
+    const mode = typeof getApiMode === 'function' ? String(getApiMode() || '') : '';
+    if (mode) payload.api_mode = mode;
+    const wish = String(preference[rating] || '').trim();
+    if (wish) payload.preference = wish.slice(0, MAX_PREFERENCE);
+    let data;
+    try { data = await postJson('/api/assist', payload, { allowError: true }); } catch (error) { data = { ok: false, error: error.message }; }
+    if (quick !== q) return;
+    q.busy = false;
+    q.pop.setBusy(false);
+    if (!data || !data.ok) {
+      q.pop.setNote(esc((data && data.error) || '찾지 못했습니다'), 'error');
+      q.input.focus();
+      return;
+    }
+    if (data.task !== 'scene' || !oneLine(data.prompt?.main)) {
+      q.pop.close('handoff');
+      adoptQuick(text, asked, data);
+      show();
+      toast('찾기 결과라 넣을 것을 하나로 정할 수 없습니다 — Assist 창에서 보입니다', 'info');
+      return;
+    }
+    remember(text, asked, data, { current: false });
+    const n = (data.prompt.characters || []).length;
+    const ok = typeof q.ctx.insert === 'function' ? q.ctx.insert(quickPromptText(data.prompt, resultSentence(data))) : false;
+    q.pop.close('done');
+    toast(ok ? `Assist 결과를 넣었습니다${n ? ` (캐릭터 ${n}명 포함)` : ''}` : '프롬프트에 넣지 못했습니다', ok ? 'success' : 'error');
+  }
+
+  /** 작은 창의 결과를 이 창이 이어받는다(장면이 아닌 결과) — 기록에서 되돌아갈 때와 같은 일. 이 창에서 돌던 요청의 답은 버린다 */
+  function adoptQuick(text, asked, data) {
+    build();
+    if (busy) { askSeq += 1; busy = false; paintBusy(); }
+    closePicker();
+    input.value = text;
+    result = data;
+    resultMode = 'search';
+    names = new Map();
+    spans = [];
+    absorbNames(data.names, text);
+    remember(text, asked, data);
+    onInput();
+    paintPersons();
+    paintNames();
+    render();
+  }
+
+  /** 작은 창의 [설정] — 이 창을 [고급 설정] 이 펼쳐진 채로. 적던 글이 있으면 입력칸으로 옮긴다 */
+  function showSettings(text = '') {
+    show();
+    if (text && !busy) { input.value = text; onInput(); }
+    if (advPanel?.hidden) {
+      advPanel.hidden = false;
+      advBtn.classList.add('is-on');
+      advBtn.setAttribute('aria-expanded', 'true');
+      fit();
+    }
+  }
+
   // 결과 칸 왼쪽 가장자리의 A 탭(E 아래, 사용자 지정 2026-09-28) — 열려 있으면 눌린 모양
   function paintTab() {
     document.getElementById('assistTab')?.setAttribute('aria-pressed', String(open));
@@ -1745,5 +1925,5 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
     show();
   }, true);
 
-  return { show, close, toggle: () => (open ? close() : show()), isOpen: () => open };
+  return { show, close, toggle: () => (open ? close() : show()), isOpen: () => open, openQuick, showSettings };
 }

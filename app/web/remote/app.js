@@ -1188,7 +1188,7 @@ import('./js/features/eventMapPanel.mjs?v=20260919-empin2')
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
 // 잃지 않는다 — 메타데이터 적용의 'inactive' 와 같다. Assist 는 넣을 때마다 묻지 않는다).
-import('./js/features/assistPanel.mjs?v=20260930-install-repair')
+import('./js/features/assistPanel.mjs?v=20261001-slashpop')
   .then(({initAssist}) => {
     window.assistPanel = initAssist({
       showToast,
@@ -8368,6 +8368,8 @@ function scheduleTranslatorPopupTranslation() {
 }
 
 function onTranslationResult(message) {
+  // /translate 작은 창이 보낸 것(slash-tr-…)은 그 창이 받는다 - 이 창(Translate)의 출력칸에 앉지 않는다
+  if (quickTranslate?.onResult?.(message)) return;
   const requestId = String(message?.requestId || '');
   if (requestId && requestId !== translatorPopupRequestId) return;
   // ⚠️ **글자 기억은 남긴다.** 지우면 같은 글자가 다시 나간다(위 주석 참조).
@@ -8406,6 +8408,13 @@ function insertTranslatorOutput() {
   target.focus();
   onPromptAuthoredEdit();
 }
+
+// /translate 작은 창(사용자 지정 2026-10-01) - 메인 프롬프트의 캐럿 자리에 뜨고 번역을 그 자리에 넣는다. 번역은 이 창과 같은 길
+// (WS translate_text) · 같은 규칙(멈춤 뒤에만 · 같은 글 재발사 금지 · 10초 안전망) - 번역기 백오프를 모두가 함께 탄다.
+let quickTranslate = null;
+import('./js/features/quickTranslate.mjs?v=20261001-slashpop')
+  .then(({createQuickTranslate}) => { quickTranslate = createQuickTranslate({getWs: () => ws, showToast}); })
+  .catch(error => console.error('Failed to initialize quick translate', error));
 
 if (translatorInput) {
   translatorInput.addEventListener('input', scheduleTranslatorPopupTranslation);
@@ -14033,11 +14042,25 @@ function slashPresetChoices(activeGroup = '') {
   ];
 }
 
+/** 슬래시 작은 창(/assist · /translate) 열기 - 모듈을 아직 못 불러왔으면 알리고 캐럿으로 돌아간다 */
+function openSlashQuick(openFn, ctx, title) {
+  if (typeof openFn === 'function') return openFn(ctx);
+  showToast(`${title}을(를) 아직 불러오는 중입니다 - 잠시 뒤 다시 시도해 주세요`, 'error');
+  ctx?.cancel?.();
+  return null;
+}
+
 function slashCommandRegistry() {
   const withDesc = cmd => ({...cmd, desc: typeof cmd.desc === 'function' ? cmd.desc() : cmd.desc});
   // PE 상태는 모듈을 열어야 캐시에 든다 - `/preset`·`/pe` 가 빈 목록을 보이지 않게 엔트리를 여는 순간 청해 둔다.
   if (!Array.isArray(slashPeState().preset_options)) { try { requestModuleState('prompt_engineering'); } catch (_) {} }
   return [
+    // 작은 창(사용자 지정 2026-10-01) - 엔트리 자리에 뜨고, 끝나면 **엔트리를 연 캐럿**에 넣는다(tagAssist 의 popup 갈래).
+    // 명령 뒤에 이어 치면(`/assist 창가의 소녀` · `/translate 창가의 소녀`) 창에 채워 바로 실행한다.
+    {name: 'assist', desc: 'Assist - 말로 적으면 NAIA 변환 파이프라인으로 찾아 이 자리에 넣기',
+      popup: ctx => openSlashQuick(window.assistPanel?.openQuick, ctx, 'Assist')},
+    {name: 'translate', desc: '번역 (한 → 영) - 이 자리에 넣기',
+      popup: ctx => openSlashQuick(quickTranslate?.open, ctx, '번역기')},
     slashSelectCommand('sampler', 'sampler', '샘플러'),
     slashSelectCommand('scheduler', 'scheduler', '스케줄러'),
     {name: 'resolution', aliases: ['res'], desc: `해상도 (지금 ${qResolution?.value || '-'})`, choices: slashResolutionChoices},
@@ -14083,7 +14106,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260930-lorakw2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261001-slashpop')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

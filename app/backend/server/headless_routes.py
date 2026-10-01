@@ -35,6 +35,7 @@ from app.backend.server.character_instant_routes import register_character_insta
 from app.backend.server.nai_preview_routes import register_nai_preview_routes
 from app.backend.server.boost_v2_routes import register_boost_v2_routes
 from app.backend.server.anima_engine_routes import register_anima_engine_routes
+from app.backend.server.comfyui_server_log_routes import register_comfyui_server_log_routes
 from app.backend.server.assist_v2_routes import register_assist_v2_routes
 from app.backend.server.tagger_routes import register_tagger_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
@@ -217,6 +218,7 @@ def register_headless_routes(
     register_extension_install_routes(app, context, run_in_thread=run_in_thread)
     register_boost_v2_routes(app, context, run_in_thread=run_in_thread)
     register_anima_engine_routes(app, context, run_in_thread=run_in_thread)
+    register_comfyui_server_log_routes(app, context, run_in_thread=run_in_thread)
     register_assist_v2_routes(app, context, run_in_thread=run_in_thread,
                               clients=clients, start_generation_runner=ensure_generation_runner,
                               broadcast_json=broadcast_json)

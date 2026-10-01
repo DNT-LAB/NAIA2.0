@@ -2334,6 +2334,16 @@ import('./js/features/animaEngineConsole.mjs?v=20260930-reviewfix2')
   .catch(error => {
     console.error('Failed to initialize ANIMA engine console', error);
   });
+// 외부 ComfyUI(API 모드) — Generate 가 도는 동안 결과 칸 아래쪽에 ComfyUI 서버 출력(사용자 지정 10-01). 관리형 ANIMA 는 위의
+// 기동 콘솔(엔진이 켜지는 동안만)을 쓴다. 여닫는 것은 setGen — 성공이면 '완료' 뒤 스스로 닫히고, 실패면 출력을 남긴다.
+let comfyServerConsole = null;
+import('./js/features/comfyServerConsole.mjs?v=20261001-comfy-log')
+  .then(({createComfyServerConsole}) => {
+    comfyServerConsole = createComfyServerConsole({document, window, isActive: () => isExternalComfyMode()});
+  })
+  .catch(error => {
+    console.error('Failed to initialize ComfyUI server console', error);
+  });
 // API 설정 > 05 AI ASSIST 탭 — Assist · Boost 가 함께 쓰는 앱 llama-server 의 엔진 · 모델 · [CPU 모드 | GPU 모드](09-26).
 // 다른 곳의 [AI 모델] 단추(Assist 띠 · Boost 설정)는 window.openAiModelSetup() 으로 이 탭을 연다.
 let llmSetupPanel = null;
@@ -8939,6 +8949,7 @@ function setGen(v) {
     startGenTimer();
     startProgress();
     if (isAnimaManagedMode()) watchAnimaEngineStart(animaEngineWatchSeq);
+    else if (isExternalComfyMode()) comfyServerConsole?.start?.();   // 외부 ComfyUI - 생성이 도는 동안 서버 출력
   } else {
     if (genStartTime > 0 && !engineWait) {
       const dur = Date.now() - genStartTime;
@@ -8952,6 +8963,7 @@ function setGen(v) {
     finishProgress();
     updateGenerateButtonMode();
     animaEngineConsole?.release?.();   // 켜기 전에 끝난 생성(실패 · 취소)이면 콘솔이 스스로 닫는다
+    comfyServerConsole?.finish?.(lastGenerationOk);   // 성공이면 '완료' 뒤 닫히고, 실패면 출력을 남긴다
   }
   if (resultEnhance) resultEnhance.update();
 }
@@ -9377,6 +9389,11 @@ function isAnimaManagedMode() {
   return (currentMode || modeSelect?.value || '') === 'COMFYUI' && comfyEngine() === 'managed';
 }
 
+// 화면이 외부 ComfyUI(API 모드)인가 = COMFYUI 모드 + 외부 엔진 — Generate 동안 서버 출력 콘솔(comfyServerConsole)을 연다
+function isExternalComfyMode() {
+  return (currentMode || modeSelect?.value || '') === 'COMFYUI' && comfyEngine() !== 'managed';
+}
+
 // 셀렉트의 COMFYUI · ANIMA 두 칸. 아래 반복문은 value 로 찾아 COMFYUI 칸에만 연결을 매긴다 —
 // 그 결과는 **지금 엔진**의 것이라 엔진의 칸으로 옮기고, 다른 칸은 "엔진 바꾸기" 로 연다.
 function paintComfyEngineOptions(noApi = false) {
@@ -9406,6 +9423,7 @@ function paintComfyEngineOptions(noApi = false) {
   if (animaView !== lastAnimaView) {
     lastAnimaView = animaView;
     applyComfyUiFreeParamLock();
+    if (!isExternalComfyMode()) comfyServerConsole?.hide?.();   // 관리형으로 바뀌었다 — 외부 서버 출력은 닫는다
     if (moduleBadges) moduleBadges.updateModeState();
   }
   return !other.disabled;   // 엔진을 바꿔 들어갈 칸이 열려 있다 — 연결된 모드가 없어도 셀렉트를 열어 둔다
@@ -9515,6 +9533,8 @@ function syncMode(mode) {
   // 두 순서 어느 쪽이든 맞도록 여기서도 한 번 본다.
   refreshV5DependentChrome();
   applyComfyUiFreeParamLock(mode);
+  // 외부 ComfyUI 가 아니게 됐다 — 서버 출력 콘솔(실패로 남겨 둔 것 포함)을 닫는다
+  if (!isExternalComfyMode()) comfyServerConsole?.hide?.();
   // Upscale 은 NAI 전용이라 모드가 바뀌면 다시 판정해야 한다(Director 는 모드 무관이라
   // 지금까지 이 자리에서 갱신할 이유가 없었다).
   updateNaiDirectorButton();

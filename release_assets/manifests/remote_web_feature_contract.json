@@ -12,6 +12,7 @@
     "app/backend/server/character_asset_routes.py",
     "app/backend/server/character_instant_routes.py",
     "app/backend/server/character_viewer_routes.py",
+    "app/backend/server/comfyui_server_log_routes.py",
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_map_routes.py",
@@ -98,6 +99,18 @@
         {"method": "POST", "path": "/api/anima-engine/settings", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/anima-engine/diagnostics", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/anima-engine/engine/log", "smoke": "non_destructive"}
+      ]
+    },
+    {
+      "id": "comfyui_external_server_log",
+      "name": "External ComfyUI server output console during Generate (read-only /internal/logs/raw relay)",
+      "legacy_dependency": "none",
+      "source_files": [
+        "app/backend/server/comfyui_server_log_service.py", "app/backend/server/comfyui_server_log_routes.py",
+        "app/web/remote/js/features/comfyServerConsole.mjs"
+      ],
+      "routes": [
+        {"method": "GET", "path": "/api/comfyui/server-log", "smoke": "non_destructive"}
       ]
     },
     {

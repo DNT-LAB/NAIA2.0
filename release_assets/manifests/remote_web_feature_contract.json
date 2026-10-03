@@ -684,6 +684,7 @@
         "core/e621_tag_repository.py",
         "core/e621_research_metadata.py",
         "core/e621_research_index.py",
+        "core/e621_relation_repository.py",
         "app/web/remote/js/core/remoteWsClient.mjs",
         "app/web/remote/js/core/wsDispatcher.mjs",
         "app/backend/server/temporary_search_commands.py",
@@ -1015,7 +1016,7 @@
     {
       "feature": "websocket_shared_state",
       "description": "E621 research corpus, site-specific Korean descriptions and evidence-bound reading annotations bundled for clean-machine availability. The research index is lazy on first module use, with deterministic (match grade, -count, exact tag) ordering and 300-row pages deduplicated before slicing. Existing module-state fields remain compatible; additive match_grade, match_fields and match_compact_fields identify tag/Korean name, keywords, description and stored-body matches. Cross-site links do not rewrite prompts.",
-      "paths": ["data/e621_data", "data/e621_KR_tags.parquet", "data/e621_research_annotations.json"],
+      "paths": ["data/e621_data", "data/e621_KR_tags.parquet", "data/e621_research_annotations.json", "data/e621_relations.pack"],
       "provisioning": "bundled"
     },
     {

@@ -54,6 +54,7 @@
       "data/character_preview_thumbs.json",
       "data/e621_data",
       "data/e621_research_annotations.json",
+      "data/e621_relations.pack",
       "data/artist_tag_affinity.naiapack",
       "data/artist_tag_general.naiapack",
       "data/assist/**",

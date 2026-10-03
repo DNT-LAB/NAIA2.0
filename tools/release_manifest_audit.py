@@ -119,6 +119,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/character_analysis.json",
     "data/e621_data",
     "data/e621_research_annotations.json",
+    "data/e621_relations.pack",
     # Search date-cutoff slider bucket→date map (data/tag_bucket_dates.json). Small
     # static index loaded by core/tag_bucket_dates.load_bucket_dates; without it the
     # slider has no buckets and stays at the placeholder.
@@ -173,6 +174,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/character_analysis.json",
     "*/data/e621_data",
     "*/data/e621_research_annotations.json",
+    "*/data/e621_relations.pack",
     "*/data/tag_bucket_dates.json",
     "*/data/e621_boost_static.py",
     "*/data/danbooru_tag_counts_by_rating.json",

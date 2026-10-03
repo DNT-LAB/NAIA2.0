@@ -28115,7 +28115,32 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ic-layers-pill:hover { background: rgba(124,106,239,0.3); }
 /* [+ 이미지] 의 고르기 팝업 - 프롬프트 복원과 같은 모양, 목록의 오른쪽 끝에 맞춰 아래로 편다. */
-.ic-layer-pop { left: auto; right: 0; }
+.ic-layer-pop { left: auto; right: 0; width: 320px; }
+/* 넓은 놓기 자리(사용자 지정 2026-10-03: "공간을 넓혀서 드래그 드롭도"). 누르면 파일 열기,
+   끌어다 놓으면 바로 레이어로 오른다. 끄는 동안은 `.ic-layers.is-drop` 이 채워서 알린다. */
+.ic-layer-dropzone {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 104px; padding: 14px 10px; border-radius: 10px; cursor: pointer;
+  border: 1.5px dashed rgba(157,139,255,0.55); background: rgba(157,139,255,0.07);
+  color: var(--text-primary);
+}
+.ic-layer-dropzone:hover { background: rgba(157,139,255,0.15); border-color: rgba(185,174,255,0.9); }
+.ic-layer-dropzone svg { color: var(--accent-glow, #9d8bff); }
+.ic-layer-dropzone-main { font-size: 12px; font-weight: 700; }
+.ic-layer-dropzone-sub {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center;
+  font-size: 10.5px; color: var(--text-dim);
+}
+.ic-layer-dropzone kbd {
+  padding: 0 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 10px; line-height: 16px;
+  color: var(--text-primary); background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.16); border-bottom-width: 2px;
+}
+.ic-layers.is-drop .ic-layer-dropzone {
+  border-style: solid; border-color: #b9aeff; background: rgba(124,106,239,0.3);
+}
+/* 팝업이 열려 있으면 놓기 안내는 팝업 쪽 한 곳만 - 목록 아래의 것까지 켜면 둘이 겹친다. */
+.ic-layers:has(.ic-layer-pop).is-drop .ic-layers-drop { display: none; }
 /* 썸네일 격자 안의 안내 한 줄("히스토리가 비어 있습니다")은 한 칸이 아니라 줄 전체를 쓴다 -
    6칸 격자의 한 칸에 들어가 세 줄로 쪼개졌다(복원 팝업도 같은 목록을 쓴다). */
 .ic-restore-list > .ic-restore-hint { grid-column: 1 / -1; }

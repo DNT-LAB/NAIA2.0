@@ -7,6 +7,8 @@ export function createResultImageInput({
   navigatorRef = window.navigator,
   URLRef = window.URL,
   onInternalDrop = null,
+  // 붙여넣은 이미지를 먼저 받아 볼 곳(인페인트 캔버스). `true` 를 돌려주면 거기서 끝난다.
+  onPasteImageBlob = null,
 }) {
   const viewer = document.querySelector('.viewer');
   let localPreviewUrl = null;
@@ -215,6 +217,20 @@ export function createResultImageInput({
       showToast('Image file required', 'error');
       return;
     }
+    // 인페인트 캔버스가 열려 있으면 붙여넣은 이미지는 **새 레이어**다(사용자 지정 2026-10-03,
+    // 포토샵처럼). 붙여넣기로 들어오는 길이 둘(Ctrl+V 이벤트 · 우클릭 메뉴)이라 **여기 한 곳**에 건다.
+    // ⚠️ 붙여넣기에만 건다 - 끌어다 놓기 · 파일 열기는 예전처럼 이미지 동작 팝업으로 간다.
+    //    받는 쪽이 따로 정해진 붙여넣기(메타데이터 탭의 `onImageBlob`)도 건드리지 않는다.
+    if (options.source === 'paste' && typeof options.onImageBlob !== 'function'
+        && typeof onPasteImageBlob === 'function') {
+      let taken = false;
+      try {
+        taken = (await onPasteImageBlob(blob, label)) === true;
+      } catch (error) {
+        console.error('Paste interceptor failed', error);
+      }
+      if (taken) return;
+    }
     const onImageBlob = typeof options.onImageBlob === 'function'
       ? options.onImageBlob
       : handleImageBlob;
@@ -256,7 +272,7 @@ export function createResultImageInput({
         showToast('No image in clipboard', 'error');
         return;
       }
-      await importImageBlob(blob, options.label || 'Clipboard Image', options);
+      await importImageBlob(blob, options.label || 'Clipboard Image', {...options, source: 'paste'});
     } catch (error) {
       console.error('Clipboard image paste failed', error);
       showToast('Clipboard access denied', 'error');
@@ -270,11 +286,11 @@ export function createResultImageInput({
       const imageUrl = getImageUrlFromDataTransfer(event.clipboardData);
       if (!imageUrl) return;
       event.preventDefault();
-      handleImageUrl(imageUrl, labelFromImageUrl(imageUrl));
+      handleImageUrl(imageUrl, labelFromImageUrl(imageUrl), {source: 'paste'});
       return;
     }
     event.preventDefault();
-    importImageBlob(file, 'Clipboard Image');
+    importImageBlob(file, 'Clipboard Image', {source: 'paste'});
   }
 
   function ensureFileInput() {

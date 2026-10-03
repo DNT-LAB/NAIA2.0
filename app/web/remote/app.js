@@ -1557,7 +1557,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize image action popup module', error);
   });
-const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20260829-mark0')
+const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20261003-paste-layer')
   .then(({createResultImageInput}) => {
     resultImageInput = createResultImageInput({
       document,
@@ -1569,6 +1569,9 @@ const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20260
       },
       showToast,
       onInternalDrop: info => callResultImageAction('handleInternalImageDrop', info) || false,
+      // 인페인트 캔버스가 열려 있으면 붙여넣은 이미지는 새 레이어로 간다(사용자 지정 2026-10-03).
+      // 세션이 없으면 false 가 돌아와 예전처럼 이미지 동작 팝업이 뜬다.
+      onPasteImageBlob: (blob, label) => inpaintCanvasControl?.acceptPastedImage?.(blob, label) === true,
     });
     resultImageInput.bind();
   })
@@ -2959,7 +2962,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261003-layers3')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261003-layers4')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),

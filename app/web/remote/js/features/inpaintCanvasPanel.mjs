@@ -50,6 +50,7 @@ const ICON = {
   down: svg('<path d="m6 9 6 6 6-6"/>', 13),
   fold: svg('<path d="m9 6 6 6-6 6"/>', 13),
   plus: svg('<path d="M12 5v14M5 12h14"/>', 12),
+  upload: svg('<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>', 22),
   keys: svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>', 14),
 };
 
@@ -62,6 +63,7 @@ const CANVAS_KEYS = [
   [['가운데 끌기'], '확대 · Ctrl 을 쥐면 회전'],
   [['방향키'], '1px 이동 · Shift 16px'],
   [['Ctrl', 'Z'], '이동 · 회전 되돌리기'],
+  [['Ctrl', 'V'], '이미지를 새 레이어로 붙여넣기'],
   [['0'], '고른 레이어 초기화'],
 ];
 
@@ -744,7 +746,7 @@ export function createInpaintCanvasPanel({
       + `<button type="button" class="ic-lbtn ic-layers-add" data-ic-layers="add"`
       + `${(full || layerUploading) ? ' disabled' : ''} title="${full
         ? `레이어는 ${limit}장까지 올릴 수 있습니다`
-        : '이미지를 레이어로 올립니다 — 캔버스에 끌어다 놓아도 됩니다'}">`
+        : '이미지를 레이어로 올립니다 — 캔버스에 끌어다 놓기 · Ctrl+V 도 됩니다'}">`
       + `${ICON.plus}<span>${layerUploading ? '올리는 중…' : '이미지'}</span></button>`
       + `<button type="button" class="ic-lbtn" data-ic-layers="close" aria-expanded="true"`
       + ` title="레이어 목록 접기">${ICON.fold}</button></div>`
@@ -782,7 +784,10 @@ export function createInpaintCanvasPanel({
 
   /** 레이어로 올린다. 그림 바이트 · 히스토리 경로(JSON) 두 갈래. 상태는 서버가 방송한다. */
   async function uploadLayer(body, {json = false, label = ''} = {}) {
-    if (layerUploading) return;
+    if (layerUploading) {
+      showToast?.('앞선 이미지를 올리는 중입니다 - 끝나면 다시 해 주세요', 'info');
+      return;
+    }
     layerUploading = true;
     renderLayers(viewMode === 'edit');
     try {
@@ -831,7 +836,12 @@ export function createInpaintCanvasPanel({
     pop.innerHTML = `<div class="ic-restore-head">`
       + `<span>레이어로 올릴 이미지</span>`
       + `<button type="button" class="ic-restore-x" data-ic-layers="pop-close">&#10005;</button></div>`
-      + `<button type="button" class="ic-restore-file" data-ic-layers="pop-file">파일에서 열기…</button>`
+      // 넓은 놓기 자리(사용자 지정 2026-10-03). 누르면 파일 열기, 끌어다 놓으면 바로 올린다 -
+      // 놓기는 목록(`layersEl`)의 처리기가 받는다(팝업이 그 안에 있다).
+      + `<button type="button" class="ic-layer-dropzone" data-ic-layers="pop-file">`
+      + `${ICON.upload}<span class="ic-layer-dropzone-main">이미지를 여기로 끌어다 놓기</span>`
+      + `<span class="ic-layer-dropzone-sub">눌러서 파일 열기 · <kbd>Ctrl</kbd><kbd>V</kbd> 붙여넣기</span>`
+      + `</button>`
       + `<div class="ic-restore-hint">PNG 의 투명한 부분으로는 아래 레이어가 비칩니다</div>`
       + `<div class="ic-restore-list" data-ic-list="1">불러오는 중…</div>`;
     layersEl.appendChild(pop);
@@ -936,6 +946,7 @@ export function createInpaintCanvasPanel({
     event.stopPropagation();
     markDrop(false);
     viewer?.classList.remove('drag-over');      // 뷰어의 놓기 표시가 남지 않게
+    closeLayerPicker();                         // 고르기 팝업의 놓기 자리에 놓았을 수도 있다
     let internal = null;
     try { internal = JSON.parse(event.dataTransfer.getData('application/x-naia-source') || 'null'); }
     catch (_) { internal = null; }
@@ -1817,6 +1828,21 @@ export function createInpaintCanvasPanel({
     },
     handleModuleState(payload) {
       if (payload && payload.module_id === 'img2img') render(payload);
+    },
+    /** 붙여넣은 이미지를 **새 레이어**로 받는다(사용자 지정 2026-10-03, 포토샵처럼).
+     *
+     *  세션이 없거나 캔버스를 안 쓰면 false - 부른 쪽이 예전 길(이미지 동작 팝업)로 간다.
+     *  ⚠️ 결과 보기 중이었으면 **편집으로 돌아온다.** 올린 레이어가 안 보이면 붙여넣기가
+     *     조용히 사라진 것으로 읽힌다.
+     */
+    acceptPastedImage(blob, label = '') {
+      if (!state?.active || !state?.canvas_supported || !blob) return false;
+      if (viewMode !== 'edit') setViewMode('edit');
+      if (closeLayerPicker()) renderLayers(true);
+      // 클립보드 그림에는 이름이 없다(앱이 붙인 'Clipboard Image') - 목록에서 알아보게 적는다.
+      const generic = !label || label === 'Clipboard Image';
+      uploadLayer(blob, {label: generic ? '붙여넣기' : label});
+      return true;
     },
     /** 큰 Generate 버튼이 지나는 문. 도크 버튼과 **같은 함수**다 - 가드도 flush 도
      *  한 자리에 있어야 한 쪽만 빠뜨리는 일이 없다. */

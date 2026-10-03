@@ -7,9 +7,13 @@
  *   3. 벗어난 쪽마다 어떤 보정(프롬프트 · 네거티브 태그)이 있는지
  * 를 보여 준다. **판정하지 않는다** — 기준값은 표본의 가운데일 뿐이고, 고칠지는 사용자가 고른다.
  *
- * 보정은 **바로 반영하지 않는다**(사용자 지정 2026-10-03). 세기를 고르고 [시험 생성] 을 누르면 그 그림을
- * 같은 시드 · 같은 설정으로 보정만 얹어 한 장 다시 뽑는다 — 프롬프트 칸과 프리셋은 그대로다.
+ * 보정은 **바로 반영하지 않는다**(사용자 지정 2026-10-03). 해 볼 보정마다 세기를 고르고 맨 아래의 [시험 생성] 을 누르면
+ * 그 그림을 같은 시드 · 같은 설정으로, 고른 보정들만 얹어 한 장 다시 뽑는다 — 프롬프트 칸과 프리셋은 그대로다.
+ * 단추는 하나다: 카드마다 두면 같은 단추가 줄줄이 반복된다. 근거 · 주의도 카드에 적지 않고 제목의 툴팁에 둔다.
  * 결과가 오면 전후를 견줘 보여 주고, 마음에 들 때 [프롬프트에 반영] 으로 지금 프롬프트에 넣는다.
+ *
+ * 펼쳐도 **기본은 결과만** 보인다(사용자 지정 2026-10-03: 그림을 너무 많이 가린다). 보정은 판에 마우스를 가까이 대면 뜬다.
+ * 진행 중이거나 끝난 시험의 결과는 마우스가 없어도 보인다 — 그걸 보려고 시험한 것이다.
  *
  * 재는 일 · 추천 · 프롬프트 고치기 · 시험 생성 요청은 전부 서버가 한다(`/api/inspect/tone/*`). 여기는 그린다.
  *
@@ -21,8 +25,16 @@
 
 /** 축 막대가 담는 범위(거리 단위). ±1 이 표준 대역의 끝이다. */
 const BAR_RANGE = 2.5;
-/** RGB 한 채널이 이만큼(거리) 벗어나야 "치우쳤다" 고 말한다. */
-const RGB_SPEAK = 0.5;
+/** 마우스가 판을 벗어난 뒤 보정을 이만큼 더 띄워 둔다 — 스쳐 나갔다 들어올 때 깜빡이지 않게. */
+const LEAVE_DELAY_MS = 450;
+/**
+ * 색 치우침의 세기. 단위는 Lab 의 a* · b* 거리(밝은 영역의 값이 기준값에서 떨어진 정도)다.
+ * ⚠️ 대역 반폭으로 나눈 '거리' 로 재지 않는다 — 누런 기의 아래쪽 대역이 좁아서(0.0 ~ 2.0), 흰색이 깨끗한 보통 그림이
+ *    전부 "푸른 쪽" 으로 읽힌다(실측: 작가 없는 그림 다섯 중 셋).
+ */
+const CAST_LEVELS = [[3, ''], [7, '약함'], [14, '뚜렷'], [Infinity, '강함']];
+/** a* · b* 평면의 방향을 45도씩 나눈 이름. 0도 = +a(붉은), 90도 = +b(누런). */
+const CAST_NAMES = ['붉은', '주황', '누런', '연두', '초록', '청록', '푸른', '보라'];
 /** 시험 생성의 결과를 이만큼 기다린다. 넘으면 "오지 않았다" 고 말하고 놓아준다. */
 const TRIAL_TIMEOUT_MS = 240000;
 
@@ -59,22 +71,27 @@ const RGB_ROWS = [
 ];
 const CHANNELS = ['r', 'g', 'b'];
 
-/** 세 채널의 벗어난 방향을 한 낱말로. 높은 채널과 낮은 채널의 조합으로 정한다. */
-function rgbWord(distances) {
-  const up = CHANNELS.filter((_, i) => (distances[i] ?? 0) >= RGB_SPEAK);
-  const down = CHANNELS.filter((_, i) => (distances[i] ?? 0) <= -RGB_SPEAK);
-  const key = `${up.join('')}|${down.join('')}`;
-  const table = {
-    'r|': '붉은 쪽', 'r|g': '붉은 쪽', 'r|b': '주황 · 누런 쪽', 'r|gb': '붉은 쪽',
-    'g|': '초록 쪽', 'g|r': '초록 쪽', 'g|b': '연두 쪽', 'g|rb': '초록 쪽',
-    'b|': '푸른 쪽', 'b|r': '푸른 쪽', 'b|g': '보라 쪽', 'b|rg': '푸른 쪽',
-    'rg|': '누런 쪽', 'rg|b': '누런 쪽',
-    'gb|': '청록 쪽', 'gb|r': '청록 쪽',
-    'rb|': '자주 쪽', 'rb|g': '자주 쪽',
-    '|r': '청록 쪽', '|g': '자주 쪽', '|b': '누런 쪽',
-    '|rg': '푸른 쪽', '|gb': '붉은 쪽', '|rb': '초록 쪽',
+/**
+ * 색이 어느 쪽으로 치우쳤는가 — 밝은 영역(흰색이어야 할 곳)의 a* · b* 가 기준값에서 벗어난 방향과 크기.
+ * 그림 전체의 평균색으로 재지 않는다: 머리 · 옷 · 배경의 색이 그대로 실려서 보라를 붉다고, 파랑을 자주라고 읽는다(실측).
+ */
+function castSummary(axes) {
+  const a = axes.get('red');
+  const b = axes.get('yellow');
+  if (!a || !b || a.value == null || b.value == null) return null;
+  const da = a.value - a.zero;
+  const db = b.value - b.zero;
+  const size = Math.hypot(da, db);
+  const angle = (Math.atan2(db, da) * 180 / Math.PI + 360) % 360;
+  const level = CAST_LEVELS.find(([limit]) => size < limit)[1];
+  // 채도가 낮으면 색 이름보다 '무채색에 가깝다' 가 먼저다 — 가운데 영역으로 본다(흰 배경에 덜 끌린다).
+  const chroma = axes.get('center_chroma') || axes.get('chroma');
+  return {
+    name: size < CAST_LEVELS[0][0] ? '' : CAST_NAMES[Math.floor(((angle + 22.5) % 360) / 45)],
+    level,
+    size,
+    pale: chroma?.distance != null && chroma.distance <= -1,
   };
-  return table[key] || '';
 }
 
 function clamp(value, low, high) {
@@ -164,7 +181,7 @@ export function createToneInspectorPanel({
   const countEl = el.querySelector('[data-ti-count]');
   const refreshBtn = el.querySelector('[data-ti-refresh]');
 
-  const prefs = {open: false, toPreset: false, ...(loadPrefs() || {})};
+  const prefs = {open: false, toPreset: false, pinned: false, ...(loadPrefs() || {})};
   let enabled = false;
   let open = Boolean(prefs.open);
   let seq = 0;                 // 요청 번호 — 마지막 요청의 답만 그린다
@@ -178,9 +195,12 @@ export function createToneInspectorPanel({
   let trial = null;
   let trialTimer = 0;
   let busy = false;            // 시험 생성 요청 · 반영을 보내는 중
+  let near = false;            // 마우스(또는 초점)가 판 위에 있다 — 그동안 보정을 띄운다
+  let pinned = Boolean(prefs.pinned);   // 보정을 마우스 없이도 띄워 둔다
+  let leaveTimer = 0;
 
   function remember() {
-    savePrefs({open, toPreset: Boolean(prefs.toPreset)});
+    savePrefs({open, toPreset: Boolean(prefs.toPreset), pinned});
   }
 
   async function postJson(url, payload, {allowStatus = []} = {}) {
@@ -205,7 +225,8 @@ export function createToneInspectorPanel({
   }
 
   function choiceOf(id) {
-    if (!choices.has(id)) choices.set(id, {strength: 1, level: null});
+    // strength 가 null 이면 고르지 않은 것이다 - 시험 생성에 들어가지 않는다.
+    if (!choices.has(id)) choices.set(id, {strength: null, level: null});
     return choices.get(id);
   }
 
@@ -264,12 +285,24 @@ export function createToneInspectorPanel({
     } catch (_) { /* 다음 갱신 때 다시 받는다 */ }
   }
 
-  /** 보정을 얹어 같은 시드로 한 장 시험 생성한다. 프롬프트 칸은 건드리지 않는다. */
-  async function startTrial(id) {
+  /** 세기를 고른 보정들. 지금 그림에 해당하는 것만. */
+  function chosenItems() {
+    return (data?.advice?.suggestions || [])
+      .map(suggestion => ({suggestion, choice: choiceOf(suggestion.id)}))
+      .filter(({choice}) => choice.strength != null)
+      .map(({suggestion, choice}) => ({
+        suggestion_id: suggestion.id, level: choice.level, strength: choice.strength,
+        title: suggestion.title || suggestion.id,
+      }));
+  }
+
+  /** 고른 보정들을 얹어 같은 시드로 한 장 시험 생성한다. 프롬프트 칸은 건드리지 않는다. */
+  async function startTrial() {
     if (busy || (trial && trial.state === 'queued') || !shownId || !data) return;
-    const suggestion = (data.advice?.suggestions || []).find(item => item.id === id);
-    const choice = choiceOf(id);
-    const payload = {history_id: shownId, suggestion_id: id, level: choice.level, strength: choice.strength};
+    const chosen = chosenItems();
+    if (!chosen.length) return;
+    const items = chosen.map(({suggestion_id, level, strength}) => ({suggestion_id, level, strength}));
+    const payload = {history_id: shownId, items};
     busy = true;
     render();
     try {
@@ -282,7 +315,7 @@ export function createToneInspectorPanel({
       }
       if (!json.ok) throw new Error(json.error || '시험 생성을 시작하지 못했습니다');
       trial = {
-        id, title: suggestion?.title || id, level: choice.level, strength: choice.strength,
+        items, title: chosen.map(item => item.title).join(' + '),
         requestId: String(json.generation_request_id || ''), sourceId: shownId,
         before: primaryValues(data.inspection), state: 'queued', afterId: '', after: null,
       };
@@ -298,14 +331,13 @@ export function createToneInspectorPanel({
     render();
   }
 
-  /** 시험해 본 보정을 지금 프롬프트에 넣는다(같은 세기 · 같은 단계로). */
+  /** 시험해 본 보정들을 지금 프롬프트에 넣는다(같은 세기 · 같은 단계로). */
   async function applyTrial() {
     if (busy || !trial || trial.state !== 'done') return;
     busy = true;
     render();
-    const request = {suggestion_id: trial.id, level: trial.level, strength: trial.strength};
     try {
-      const {json: main} = await postJson('/api/inspect/tone/apply', {fields: currentFields(), ...request});
+      const {json: main} = await postJson('/api/inspect/tone/apply', {fields: currentFields(), items: trial.items});
       const mainChanges = Array.isArray(main.changes) ? main.changes : [];
       let presetChanges = [];
       if (prefs.toPreset) {
@@ -315,7 +347,7 @@ export function createToneInspectorPanel({
           // 한 번에 이어 붙여 보내면 같은 태그를 두 번 세게 된다.
           const {json: result} = await postJson('/api/inspect/tone/apply', {
             fields: {pre_prompt: String(preset.pre_prompt || ''), post_prompt: String(preset.post_prompt || '')},
-            ...request,
+            items: trial.items,
           });
           presetChanges = (Array.isArray(result.changes) ? result.changes : [])
             .filter(change => change.field === 'pre_prompt' || change.field === 'post_prompt');
@@ -366,13 +398,11 @@ export function createToneInspectorPanel({
     const rows = RGB_ROWS.map(row => {
       const items = row.ids.map(id => axes.get(id));
       if (items.some(item => !item)) return '';
-      const distances = items.map(item => item.distance);
       const mean = rgb[row.mean]?.mean;
       const swatch = mean
         ? `<span class="ti-swatch" style="background:rgb(${Math.round(mean.r)},${Math.round(mean.g)},${Math.round(mean.b)})"`
           + ` data-naia-title="${escHtml(`${row.label}의 평균색 · R ${Math.round(mean.r)} G ${Math.round(mean.g)} B ${Math.round(mean.b)}`)}"></span>`
         : '<span class="ti-swatch is-empty"></span>';
-      const word = rgbWord(distances);
       const cells = items.map((item, index) => {
         const name = CHANNELS[index].toUpperCase();
         return `<span class="ti-rgb-cell" data-naia-title="${escHtml(`${name} 가 기준보다 ${signedPercent(axisPercent(item, RGB_PERCENT_BASIS))} (0~255 눈금 기준)`)}">`
@@ -381,12 +411,20 @@ export function createToneInspectorPanel({
           + `<span class="ti-num">${escHtml(signedPercent(axisPercent(item, RGB_PERCENT_BASIS)))}</span></span>`;
       }).join('');
       return `<div class="ti-rgb-row">`
-        + `<div class="ti-rgb-head">${swatch}<span class="ti-rgb-label">${escHtml(row.label)}</span>`
-        + `<span class="ti-rgb-word${word ? '' : ' is-flat'}">${escHtml(word || '치우침 없음')}</span></div>`
+        + `<div class="ti-rgb-head">${swatch}<span class="ti-rgb-label">${escHtml(row.label)}</span></div>`
         + `<div class="ti-rgb-cells">${cells}</div></div>`;
     }).join('');
     if (!rows) return '';
-    return `<section class="ti-sec"><h4 class="ti-sec-title">RGB 치우침 <span class="ti-sec-note">기준값 대비</span></h4>${rows}</section>`;
+    // 한 낱말 요약 — 어느 색 쪽으로, 얼마나. RGB 줄은 그 아래의 세부다.
+    const cast = castSummary(axes);
+    const castText = !cast ? '' : [
+      cast.name ? `${cast.name} 쪽${cast.level ? ` · ${cast.level}` : ''}` : '치우침 없음',
+      cast.pale ? '무채색에 가까움' : '',
+    ].filter(Boolean).join(' · ');
+    const castHtml = cast
+      ? `<span class="ti-cast${cast.name || cast.pale ? '' : ' is-flat'}" data-naia-title="${escHtml('밝은 영역의 색이 기준에서 벗어난 방향 · 무채색 여부는 가운데 영역의 채도로 본다')}">${escHtml(castText)}</span>`
+      : '';
+    return `<section class="ti-sec"><h4 class="ti-sec-title">색 치우침 ${castHtml}</h4>${rows}</section>`;
   }
 
   /** 축에 마우스를 올리면 뜨는 안내 — 높을 때 · 낮을 때 무엇을 하면 되는가. */
@@ -437,7 +475,8 @@ export function createToneInspectorPanel({
     const choice = choiceOf(suggestion.id);
     const rule = ruleOf(suggestion);
     const level = (rule.levels || []).find(item => item.id === choice.level);
-    return scaledActions((level ? level.actions : rule.actions) || [], choice.strength);
+    // 아직 고르지 않은 보정은 기본 세기로 미리 보여 준다.
+    return scaledActions((level ? level.actions : rule.actions) || [], choice.strength ?? 1);
   }
 
   /** 태그까지 바꾸는 단계만 따로 고르게 한다(가중치만 다른 단계는 세기로 충분하다). */
@@ -451,42 +490,37 @@ export function createToneInspectorPanel({
     const axis = axes.get(suggestion.axis);
     const evidence = suggestion.evidence || {};
     const choice = choiceOf(suggestion.id);
-    const queued = trial && trial.state === 'queued';
-    const mine = queued && trial.id === suggestion.id;
+    const chosen = choice.strength != null;
     const chips = chosenActions(suggestion).map(action =>
       `<span class="ti-act is-${action.field === 'negative_prompt' ? 'neg' : 'pos'}">${escHtml(actionPhrase(action))}</span>`).join('');
-    const cautions = (suggestion.cautions || []).map(text => `<li>${escHtml(text)}</li>`).join('');
     const verify = (suggestion.verify || []).map(id => axes.get(id)?.label).filter(Boolean);
+    // 근거 · 주의는 카드에 적지 않는다(읽을 것이 너무 많았다) - 제목에 마우스를 올리면 뜬다.
+    const tip = [
+      `근거 : ${EVIDENCE_LABEL[evidence.level] || evidence.level || '–'}${evidence.note ? ` (${evidence.note})` : ''}`,
+      ...(suggestion.cautions || []).map(text => `※ ${text}`),
+      ...(verify.length ? [`※ 시험 결과에서 ${verify.join(' · ')}도 같이 본다`] : []),
+    ].join('\n');
     const strengths = STRENGTHS.map(step =>
       `<button type="button" class="ti-seg-btn${choice.strength === step.value ? ' is-on' : ''}" data-ti-strength="${step.value}"`
       + ` data-ti-for="${escHtml(suggestion.id)}" aria-pressed="${choice.strength === step.value}">${escHtml(step.label)}</button>`).join('');
     const levels = tagChangingLevels(suggestion).map(level =>
       `<button type="button" class="ti-seg-btn${choice.level === level.id ? ' is-on' : ''}" data-ti-level="${escHtml(level.id)}"`
       + ` data-ti-for="${escHtml(suggestion.id)}" aria-pressed="${choice.level === level.id}">${escHtml(level.label || level.id)}</button>`).join('');
-    const applied = suggestion.state === 'already_applied';
-    return `<div class="ti-sug${suggestion.prominent ? ' is-prominent' : ''}">`
-      + `<div class="ti-sug-head"><span class="ti-sug-title">${escHtml(suggestion.title || suggestion.id)}</span>`
-      + `<span class="ti-sug-axis">${escHtml(axis?.label || suggestion.axis)} ${escHtml(signedPercent(axisPercent(axis)))}</span>`
-      + `<span class="ti-ev is-${escHtml(evidence.level || '')}" data-naia-title="${escHtml(evidence.note || '')}">`
-      + `${escHtml(EVIDENCE_LABEL[evidence.level] || evidence.level || '')}</span></div>`
+    const present = suggestion.state === 'already_applied' || suggestion.state === 'partly_applied';
+    return `<div class="ti-sug${suggestion.prominent ? ' is-prominent' : ''}${chosen ? ' is-chosen' : ''}">`
+      + `<div class="ti-sug-head" data-naia-guide="${escHtml(tip)}"><span class="ti-sug-title">${escHtml(suggestion.title || suggestion.id)}</span>`
+      + `<span class="ti-sug-axis">${escHtml(axis?.label || suggestion.axis)} ${escHtml(signedPercent(axisPercent(axis)))}</span></div>`
       + (chips ? `<div class="ti-acts">${chips}</div>` : '')
-      + (cautions || verify.length
-        ? `<ul class="ti-cautions">${cautions}${verify.length ? `<li>시험 결과에서 ${escHtml(verify.join(' · '))}도 같이 본다</li>` : ''}</ul>` : '')
-      + `<div class="ti-sug-foot"><span class="ti-seg" role="group" aria-label="세기">${strengths}</span>`
-      + (levels ? `<span class="ti-seg" role="group">${levels}</span>` : '')
-      + `<button type="button" class="ti-btn is-primary ti-try" data-ti-trial="${escHtml(suggestion.id)}"${busy || queued ? ' disabled' : ''}`
-      + ` data-naia-title="이 그림을 같은 시드로, 이 보정만 얹어 한 장 다시 뽑는다 — 프롬프트 칸은 그대로다">`
-      + `${mine ? '생성 중…' : '시험 생성'}</button></div>`
-      + (applied ? '<div class="ti-state">지금 프롬프트에는 이미 들어 있습니다</div>' : '')
+      + `<div class="ti-sug-foot"><span class="ti-seg" role="group" aria-label="세기 — 고르면 시험 생성에 들어간다">${strengths}</span>`
+      + (levels ? `<span class="ti-seg" role="group">${levels}</span>` : '') + `</div>`
+      + (present ? '<div class="ti-state">이미 존재하는 프롬프트 (가중치 조절 권장)</div>' : '')
       + `</div>`;
   }
 
   /** 시험 생성의 상태와 결과. 결과가 왔으면 전후를 견주고 [프롬프트에 반영] 을 내놓는다. */
   function trialHtml(axes) {
     if (!trial) return '';
-    const strength = STRENGTHS.find(step => step.value === trial.strength)?.label || `${trial.strength}×`;
-    const head = `<div class="ti-trial-head"><span class="ti-trial-title">시험 · ${escHtml(trial.title)} <span class="ti-trial-opt">${escHtml(strength)}`
-      + `${trial.level ? ' · 센 단계' : ''}</span></span>`
+    const head = `<div class="ti-trial-head"><span class="ti-trial-title">시험 · ${escHtml(trial.title)}</span>`
       + `<button type="button" class="ti-trial-close" data-ti-trial-close aria-label="닫기" data-naia-title="이 시험을 접는다">✕</button></div>`;
     if (trial.state === 'queued') {
       return `<div class="ti-trial">${head}<div class="ti-trial-note">같은 시드로 생성하는 중… 결과가 화면에 오면 여기서 견줍니다.</div></div>`;
@@ -523,6 +557,17 @@ export function createToneInspectorPanel({
       + `</div></div>`;
   }
 
+  /** 보정 영역 맨 아래의 단추 하나 - 세기를 고른 보정들을 한 번에 얹어 시험 생성한다. */
+  function tryBarHtml(total) {
+    if (!total) return '';
+    const count = chosenItems().length;
+    const queued = trial && trial.state === 'queued';
+    const label = queued ? '생성 중…' : (count > 1 ? `시험 생성 (${count})` : '시험 생성');
+    return `<div class="ti-trybar"><span class="ti-trybar-note">${count ? '' : '해 볼 보정의 세기를 고르세요'}</span>`
+      + `<button type="button" class="ti-btn is-primary ti-try" data-ti-trial${busy || queued || !count ? ' disabled' : ''}`
+      + ` data-naia-title="이 그림을 같은 시드로, 고른 보정만 얹어 한 장 다시 뽑는다 — 프롬프트 칸은 그대로다">${label}</button></div>`;
+  }
+
   function adviceSection(axes) {
     const advice = data?.advice || {};
     const suggestions = Array.isArray(advice.suggestions) ? advice.suggestions : [];
@@ -543,14 +588,22 @@ export function createToneInspectorPanel({
         + (showRest ? rest.map(suggestion => suggestionHtml(suggestion, axes)).join('') : '')
       : '';
     const list = (mainHtml || (rest.length ? '<div class="ti-empty">크게 벗어난 축이 없습니다.</div>' : '')) + restHtml;
-    return `<section class="ti-sec"><h4 class="ti-sec-title">보정 <span class="ti-sec-note">같은 시드로 시험해 보고 반영</span></h4>`
-      + trialHtml(axes) + warningHtml
-      + (list || '<div class="ti-empty">이 그림에 권할 보정이 없습니다.</div>')
-      + `</section>`;
+    return {
+      count: main.length,
+      html: `<section class="ti-sec ti-advice"><h4 class="ti-sec-title">보정 <span class="ti-sec-note">같은 시드로 시험해 보고 반영</span>`
+        + `<button type="button" class="ti-pin${pinned ? ' is-on' : ''}" data-ti-pin aria-pressed="${pinned}"`
+        + ` data-naia-title="켜 두면 마우스를 떼도 보정이 접히지 않는다">고정</button></h4>`
+        + warningHtml
+        + (list || '<div class="ti-empty">이 그림에 권할 보정이 없습니다.</div>')
+        + tryBarHtml(suggestions.length)
+        + `</section>`,
+    };
   }
 
   function render() {
     box.classList.toggle('is-open', open);
+    box.classList.toggle('is-near', near);
+    box.classList.toggle('is-pinned', pinned);
     toggle.setAttribute('aria-expanded', String(open));
     caret.textContent = open ? '▾' : '▸';
     body.hidden = !open;
@@ -576,7 +629,14 @@ export function createToneInspectorPanel({
     indexRules();
     const keepScroll = body.scrollTop;
     body.classList.toggle('is-loading', status === 'loading');
-    body.innerHTML = rgbSection(axesNow) + axesSection(axesNow) + adviceSection(axesNow);
+    const advice = adviceSection(axesNow);
+    // 기본은 결과(색 치우침 · 기준값 대비)만. 보정은 마우스를 가까이 대면(또는 고정하면) 뜬다 - 감추는 것은 CSS 가 한다
+    // (`.ti-box:not(.is-near):not(.is-pinned) .ti-advice`). 다시 그리지 않고 클래스만 바꾸므로 깜빡이지 않는다.
+    // 시험의 진행 · 결과는 마우스가 없어도 보인다.
+    body.innerHTML = `<div class="ti-results">${rgbSection(axesNow)}${axesSection(axesNow)}</div>`
+      + trialHtml(axesNow)
+      + `<div class="ti-hint">${advice.count > 0 ? `보정 ${advice.count}개 · ` : ''}마우스를 올리면 보정이 열립니다</div>`
+      + advice.html;
     body.scrollTop = keepScroll;
   }
 
@@ -598,7 +658,10 @@ export function createToneInspectorPanel({
     }
     const strength = event.target.closest('[data-ti-strength]');
     if (strength) {
-      choiceOf(strength.dataset.tiFor).strength = Number(strength.dataset.tiStrength);
+      // 고른 세기를 다시 누르면 그 보정을 뺀다.
+      const choice = choiceOf(strength.dataset.tiFor);
+      const value = Number(strength.dataset.tiStrength);
+      choice.strength = choice.strength === value ? null : value;
       render();
       return;
     }
@@ -606,12 +669,14 @@ export function createToneInspectorPanel({
     if (level) {
       const choice = choiceOf(level.dataset.tiFor);
       choice.level = choice.level === level.dataset.tiLevel ? null : level.dataset.tiLevel;
+      // 단계를 고른 것은 그 보정을 하겠다는 뜻이다 - 세기를 안 골랐으면 기본으로 넣는다.
+      if (choice.level && choice.strength == null) choice.strength = 1;
       render();
       return;
     }
     const tryButton = event.target.closest('[data-ti-trial]');
     if (tryButton && !tryButton.disabled) {
-      startTrial(tryButton.dataset.tiTrial);
+      startTrial();
       return;
     }
     if (event.target.closest('[data-ti-trial-close]')) {
@@ -621,8 +686,30 @@ export function createToneInspectorPanel({
       return;
     }
     const applyButton = event.target.closest('[data-ti-apply-trial]');
-    if (applyButton && !applyButton.disabled) applyTrial();
+    if (applyButton && !applyButton.disabled) { applyTrial(); return; }
+    if (event.target.closest('[data-ti-pin]')) {
+      pinned = !pinned;
+      remember();
+      render();
+    }
   });
+  // 마우스가 판에 닿으면 보정을 띄우고, 떠나면 잠깐 뒤에 접는다. 클래스만 바꾼다 - 다시 그리지 않는다.
+  function setNear(next) {
+    clearTimeout(leaveTimer);
+    if (next) {
+      if (!near) { near = true; box.classList.add('is-near'); }
+      return;
+    }
+    leaveTimer = setTimeout(() => {
+      near = false;
+      box.classList.remove('is-near');
+    }, LEAVE_DELAY_MS);
+  }
+  box.addEventListener('mouseenter', () => setNear(true));
+  box.addEventListener('mouseleave', () => setNear(false));
+  // 키보드로 들어온 경우도 같다(초점이 판 안에 있는 동안).
+  box.addEventListener('focusin', () => setNear(true));
+  box.addEventListener('focusout', event => { if (!box.contains(event.relatedTarget)) setNear(false); });
   el.addEventListener('change', event => {
     const preset = event.target.closest('[data-ti-preset]');
     if (!preset) return;

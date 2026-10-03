@@ -282,3 +282,27 @@ def apply_suggestion(fields, suggestion_id, level=None, strength=1.0):
                         _set_weight(fields, destination, tag, 1)
     return {"fields": fields, "changes": [{"field": name, "before": before[name], "after": fields[name]}
                                           for name in FIELDS if before[name] != fields[name]]}
+
+
+def apply_suggestions(fields, items):
+    """여러 보정을 차례로 얹는다(순수 함수). items = [{"suggestion_id", "level", "strength"}] - 같은 보정은 한 번만."""
+    before = normalize_fields(fields)
+    keys = [name for name in FIELDS if name in fields]
+    if not isinstance(items, list) or not items or len(items) > len(RULES):
+        raise ValueError(f"items must list one to {len(RULES)} corrections")
+    current, seen = dict(before), set()
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("suggestion_id"), str):
+            raise ValueError("each item needs a suggestion_id")
+        suggestion_id, level, strength = item["suggestion_id"], item.get("level"), item.get("strength", 1.0)
+        if suggestion_id in seen:
+            raise ValueError("the same correction is listed twice")
+        seen.add(suggestion_id)
+        if level is not None and not isinstance(level, str):
+            raise ValueError("level must be null or a level id")
+        if isinstance(strength, bool) or not isinstance(strength, (int, float)):
+            raise ValueError("strength must be a number")
+        # 어느 칸에 붙일지는 처음 받은 칸의 구성으로 정한다(중간 결과의 빈 칸이 끼어들지 않게).
+        current = apply_suggestion({name: current[name] for name in keys}, suggestion_id, level, float(strength))["fields"]
+    return {"fields": current, "changes": [{"field": name, "before": before[name], "after": current[name]}
+                                           for name in FIELDS if before[name] != current[name]]}

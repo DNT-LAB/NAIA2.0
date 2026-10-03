@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from core import image_tone_inspector as tone
 from core.image_tone_reference import REFERENCE, axis_positions
-from core.image_tone_advisor import advise, apply_suggestion, guide, normalize_fields
+from core.image_tone_advisor import advise, apply_suggestions, guide, normalize_fields
 from core.web_session_context import WebSessionContext
 
 
@@ -69,8 +69,7 @@ class ToneInspectService:
         axes = axis_positions(result)
         return {"history_id": history_id, "axes": axes, **advise(axes, fields), "guide": guide()}
 
-    def prepare_trial(self, history_id: str, suggestion_id: str, level: str | None, strength: float,
-                      allow_paid: bool) -> dict[str, Any]:
+    def prepare_trial(self, history_id: str, items: list[dict[str, Any]], allow_paid: bool) -> dict[str, Any]:
         """같은 그림을 **같은 시드 · 같은 설정**으로, 보정만 얹어 다시 뽑을 요청을 만든다.
 
         사용자의 프롬프트 칸 · 프리셋은 건드리지 않는다 - 고치는 것은 그 그림이 실제로 생성된 프롬프트의 사본이다.
@@ -92,15 +91,15 @@ class ToneInspectService:
             seed = -1
         if seed < 0:
             raise ValueError("이 그림의 시드를 알 수 없어 시험 생성을 할 수 없습니다")
-        applied = apply_suggestion(
-            {"prompt": prompt, "negative_prompt": str(params.get("negative_prompt") or "")}, suggestion_id, level, strength)
+        applied = apply_suggestions(
+            {"prompt": prompt, "negative_prompt": str(params.get("negative_prompt") or "")}, items)
         if not applied["changes"]:
             raise ValueError("이 보정은 그 그림의 프롬프트에 이미 들어 있습니다")
         params.update({
             "input": applied["fields"]["prompt"], "_raw_input": applied["fields"]["prompt"],
             "negative_prompt": applied["fields"]["negative_prompt"],
             "seed": seed, "seed_fixed": True,
-            "_remote_queue_source": "Inspector Trial", "_remote_queue_label": f"Inspector · {suggestion_id}",
+            "_remote_queue_source": "Inspector Trial", "_remote_queue_label": "Inspector · " + ", ".join(str(item.get("suggestion_id")) for item in items),
         })
         cost = estimate_anlas_cost(self.context, params)
         if cost > 0 and not allow_paid:
@@ -203,12 +202,7 @@ def register_image_inspect_routes(
                 raise ValueError("Request body must be an object")
             fields = body.get("fields", {})
             normalize_fields(fields)
-            if not isinstance(body.get("suggestion_id"), str):
-                raise ValueError("suggestion_id must be a string")
-            level = body.get("level")
-            if level is not None and not isinstance(level, str):
-                raise ValueError("level must be null or a level id")
-            return apply_suggestion(fields, body["suggestion_id"], level, _strength(body))
+            return apply_suggestions(fields, _items(body))
         except (ValueError, TypeError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
@@ -219,20 +213,15 @@ def register_image_inspect_routes(
             body = await request.json()
             if not isinstance(body, dict):
                 raise ValueError("Request body must be an object")
-            history_id, suggestion_id = body.get("history_id"), body.get("suggestion_id")
+            history_id = body.get("history_id")
             if not isinstance(history_id, str) or not history_id.strip():
                 raise ValueError("history_id must be a nonempty string")
-            if not isinstance(suggestion_id, str):
-                raise ValueError("suggestion_id must be a string")
-            level = body.get("level")
-            if level is not None and not isinstance(level, str):
-                raise ValueError("level must be null or a level id")
-            strength = _strength(body)
+            items = _items(body)
         except (ValueError, TypeError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         try:
             prepared = await run_in_thread(tone_inspect_service(session_context).prepare_trial,
-                                           history_id, suggestion_id, level, strength, body.get("allow_paid") is True)
+                                           history_id, items, body.get("allow_paid") is True)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except (ValueError, TypeError) as exc:
@@ -254,8 +243,10 @@ def register_image_inspect_routes(
         return {**prepared, "generation_request_id": dispatch.request_id}
 
 
-def _strength(body: dict[str, Any]) -> float:
-    value = body.get("strength", 1.0)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("strength must be a number")
-    return float(value)
+def _items(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """보정 목록. `items` 가 있으면 그것을, 없으면 한 건짜리 옛 모양(suggestion_id · level · strength)을 받는다."""
+    if "items" in body:
+        return body["items"]
+    if not isinstance(body.get("suggestion_id"), str):
+        raise ValueError("suggestion_id must be a string")
+    return [{"suggestion_id": body["suggestion_id"], "level": body.get("level"), "strength": body.get("strength", 1.0)}]

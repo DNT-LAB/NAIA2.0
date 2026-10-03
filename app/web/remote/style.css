@@ -30550,3 +30550,23 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .ti-cmp.is-closer .ti-cmp-note { color: #b6dcc1; }
 .ti-cmp.is-farther .ti-cmp-note { color: #ecd9a6; }
 .ti-state { margin-top: 4px; }
+/* NAI Inspector - 기본은 결과만 보이고, 보정은 마우스를 가까이 대면(또는 고정하면) 뜬다(10-03).
+   감추기는 여기서 한다 - 판은 다시 그리지 않고 `.is-near` · `.is-pinned` 만 바꾼다. */
+.ti-box:not(.is-near):not(.is-pinned) .ti-advice { display: none; }
+.ti-box.is-near .ti-hint, .ti-box.is-pinned .ti-hint { display: none; }
+.ti-results { display: flex; flex-direction: column; gap: 9px; }
+.ti-hint { font-size: 9.5px; color: var(--text-dim); text-align: center; }
+.ti-cast { margin-left: auto; font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0; color: #ecd9a6; }
+.ti-cast.is-flat { font-weight: 400; color: var(--text-dim); }
+.ti-pin {
+  margin-left: auto; height: 17px; padding: 0 6px; border-radius: 4px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.14); background: transparent; color: var(--text-dim);
+  font-family: var(--font-display); font-size: 9.5px; font-weight: 400; letter-spacing: 0;
+}
+.ti-pin:hover { color: var(--text-secondary); border-color: rgba(124,106,239,0.5); }
+.ti-pin.is-on { background: rgba(124,106,239,0.28); border-color: rgba(124,106,239,0.55); color: var(--text-primary); }
+/* NAI Inspector - 시험 생성 단추는 보정 영역 맨 아래에 하나(10-03). 카드에서 세기를 고른 보정들이 들어간다. */
+.ti-trybar { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.ti-trybar-note { flex: 1; min-width: 0; font-size: 9.5px; color: var(--text-dim); }
+.ti-sug.is-chosen { border-color: rgba(124,106,239,0.6); background: rgba(124,106,239,0.08); opacity: 1; }
+.ti-sug-head[data-naia-guide] { cursor: help; }

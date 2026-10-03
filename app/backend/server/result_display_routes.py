@@ -1784,6 +1784,9 @@ def register_result_display_routes(
         """
         if not session_context.img2img_session.get("active"):
             return JSONResponse({"error": "열려 있는 인페인트 세션이 없습니다"}, status_code=409)
+        # 어느 세션에 올리는가. 화면이 보낸 창 번호가 없으면 **요청이 도착한 순간**의 세션이다 -
+        # 본문을 받고 그림을 푸는 사이에 세션이 바뀌면 넣지 않는다(Codex 리뷰 2026-10-03 HIGH).
+        window_id = (req.query_params.get("window") or "").strip() or session_context.img2img_session.get("window_id")
         content_type = (req.headers.get("content-type") or "").lower()
         body = await req.body()
         if not body:
@@ -1807,13 +1810,18 @@ def register_result_display_routes(
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
-        def _add():
-            # 캐시(디코드한 레이어 · 베이스)를 쥔 **같은 서비스**를 쓴다 - 새로 만들면
-            # 첫 합성이 모든 레이어를 다시 푼다.
-            return session_context._img2img_service().add_layer_from_bytes(image_bytes, name=label)
+        # 캐시(디코드한 레이어 · 베이스)를 쥔 **같은 서비스**를 쓴다 - 새로 만들면
+        # 첫 합성이 모든 레이어를 다시 푼다.
+        from core.headless_img2img_service import LayerSessionChanged
 
+        service = session_context._img2img_service()
         try:
-            state = await run_in_thread(_add)
+            # 느린 일(디코드 · 축소 · PNG · 썸네일)만 워커에서. 세션에 넣는 것은 **이벤트 루프**
+            # 에서 한다 - WS 명령과 같은 줄에 서야 동시 업로드 · 삭제와 엉키지 않는다.
+            prepared = await run_in_thread(lambda: service.prepare_layer(image_bytes, name=label))
+            state = service.insert_layer(prepared, window_id=window_id)
+        except LayerSessionChanged as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
         except RuntimeError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         if state:

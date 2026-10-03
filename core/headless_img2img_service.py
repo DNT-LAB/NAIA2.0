@@ -15,6 +15,10 @@ from core.headless_image_utils import image_to_png_bytes
 from core.resolution_utils import MAX_1MP_PIXELS, MAX_NAI_SOURCE_PIXELS, snap_resolution_to_multiple
 
 
+class LayerSessionChanged(RuntimeError):
+    """레이어를 올리는 사이에 인페인트 세션이 바뀌었다(라우트는 409 로 돌려준다)."""
+
+
 def _session_position_mode(characters: list[dict[str, Any]] | None) -> str:
     """인페인트 세션을 열 때의 POS 모드. **원본 그림을 따라간다.**
 
@@ -756,9 +760,7 @@ class HeadlessImg2ImgService:
             return None
         window = int(self.context.img2img_session.get("window_id", 0) or 0)
         key = (window, str(layer.get("id")), len(raw))
-        cache = getattr(self, "_layer_image_cache", None)
-        if not isinstance(cache, dict):
-            cache = self._layer_image_cache = {}
+        cache = self._layer_cache()
         hit = cache.get(key)
         if hit is not None:
             return hit
@@ -768,11 +770,28 @@ class HeadlessImg2ImgService:
         except Exception as exc:   # noqa: BLE001 - 레이어 하나 때문에 합성이 죽으면 안 된다
             print(f"[v5-canvas] layer unreadable: {ascii(exc)}", flush=True)
             return None
-        # 다른 창의 것은 버린다 - 세션을 오래 쓰면 지운 레이어가 쌓인다.
-        for stale in [k for k in cache if k[0] != window]:
-            cache.pop(stale, None)
+        self._prune_layer_cache()
         cache[key] = image
         return image
+
+    def _layer_cache(self) -> dict:
+        cache = getattr(self, "_layer_image_cache", None)
+        if not isinstance(cache, dict):
+            cache = self._layer_image_cache = {}
+        return cache
+
+    def _prune_layer_cache(self) -> None:
+        """지금 세션에 **없는** 레이어의 그림을 놓는다(다른 창 · 지운 레이어).
+
+        ⚠️ 창이 바뀔 때만 버리면, 한 세션에서 올리고 지우기를 되풀이할 때 지운 그림이
+           계속 쌓여 8장 상한이 메모리를 못 막는다(Codex 리뷰 2026-10-03).
+        """
+        state = self.context.img2img_session if isinstance(self.context.img2img_session, dict) else {}
+        window = int(state.get("window_id", 0) or 0)
+        alive = {str(layer.get("id")) for layer in state.get("layers") or []}
+        cache = self._layer_cache()
+        for key in [k for k in cache if k[0] != window or k[1] not in alive]:
+            cache.pop(key, None)
 
     def _layers_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """화면이 레이어 목록과 선택 테두리를 그리는 데 필요한 값(아래 -> 위)."""
@@ -843,10 +862,39 @@ class HeadlessImg2ImgService:
                 Image.Resampling.LANCZOS)
         return image
 
+    def prepare_layer(self, image_bytes: bytes, *, name: str = "") -> dict[str, Any]:
+        """올린 파일을 레이어 재료로 만든다 - **세션을 건드리지 않는다**(워커 스레드용).
+
+        ⚠️ 디코드·축소·PNG·썸네일은 느려서(큰 사진은 수백 ms) 워커에서 돌리지만, 세션에
+           넣는 일은 `insert_layer` 가 **이벤트 루프에서** 한다. 둘을 한 함수로 워커에서
+           돌렸더니 동시 업로드가 같은 `layer_counter` 를 읽어 같은 id 를 붙이거나, 삭제가
+           목록을 갈아 끼운 사이에 버려진 목록에 붙어 사라질 수 있었다(Codex 리뷰
+           2026-10-03 HIGH). WS 명령도 이벤트 루프에서 돌므로 거기서 넣으면 저절로 줄을 선다.
+        """
+        try:
+            image = self._normalize_layer_image(image_bytes)
+        except Exception as exc:
+            raise RuntimeError("이미지를 읽지 못했습니다") from exc
+        label = str(name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if "." in label:
+            label = label.rsplit(".", 1)[0]
+        return {
+            "image": image,
+            "label": label[:40],
+            "source_bytes": self._image_to_png_bytes(image),
+            "thumb": self._thumb_data_url(image, self.LAYER_THUMB_SIDE),
+        }
+
     def add_layer_from_bytes(self, image_bytes: bytes, *, name: str = "") -> dict[str, Any]:
-        """이미지를 **맨 위** 레이어로 올리고 그 레이어를 고른다.
+        """한 스레드에서 다 하는 길(시험 · 동기 호출용). 라우트는 둘로 나눠 쓴다."""
+        return self.insert_layer(self.prepare_layer(image_bytes, name=name))
+
+    def insert_layer(self, prepared: dict[str, Any], *, window_id: Any = None) -> dict[str, Any]:
+        """준비한 레이어를 **맨 위**에 넣고 그 레이어를 고른다.
 
         처음 자리는 캔버스 한가운데, 크기는 캔버스의 `LAYER_INITIAL_FIT` 안이다.
+        `window_id` 를 주면 **그 세션일 때만** 넣는다 - 업로드가 오는 사이에 세션을 닫고
+        다른 그림을 열면, 옛 세션의 이미지가 새 세션에 붙는다(Codex 리뷰 2026-10-03 HIGH).
         """
         from utils.v5_inpaint_canvas import clamp_scale, placed_size
 
@@ -854,15 +902,14 @@ class HeadlessImg2ImgService:
         state = context.img2img_session
         if not state.get("active"):
             raise RuntimeError("열려 있는 인페인트 세션이 없습니다")
+        if window_id not in (None, "") and str(window_id) != str(state.get("window_id")):
+            raise LayerSessionChanged("인페인트 세션이 바뀌었습니다 - 이미지를 다시 올려 주세요")
         if not state.get("canvas_supported"):
             raise RuntimeError("레이어는 V5 인페인트 캔버스에서만 쓸 수 있습니다")
         layers = state.setdefault("layers", [])
         if len(layers) >= self.LAYER_LIMIT:
             raise RuntimeError(f"레이어는 {self.LAYER_LIMIT}장까지 올릴 수 있습니다")
-        try:
-            image = self._normalize_layer_image(image_bytes)
-        except Exception as exc:
-            raise RuntimeError("이미지를 읽지 못했습니다") from exc
+        image = prepared["image"]
         canvas_w, canvas_h = self._canvas_size(state)
         fit = min(1.0,
                   canvas_w * self.LAYER_INITIAL_FIT / max(1, image.width),
@@ -871,13 +918,10 @@ class HeadlessImg2ImgService:
         placed_w, placed_h = placed_size(image, scale)
         counter = int(state.get("layer_counter", 0) or 0) + 1
         layer_id = f"L{counter}"
-        label = str(name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
-        if "." in label:
-            label = label.rsplit(".", 1)[0]
         layer = {
             "id": layer_id,
-            "name": (label or f"이미지 {counter}")[:40],
-            "source_bytes": self._image_to_png_bytes(image),
+            "name": (prepared.get("label") or f"이미지 {counter}")[:40],
+            "source_bytes": prepared["source_bytes"],
             "width": int(image.width),
             "height": int(image.height),
             "offset_x": int(round((canvas_w - placed_w) / 2)),
@@ -887,10 +931,13 @@ class HeadlessImg2ImgService:
             "placed_width": int(placed_w),
             "placed_height": int(placed_h),
             "visible": True,
-            "thumb": self._thumb_data_url(image, self.LAYER_THUMB_SIDE),
+            "thumb": prepared.get("thumb") or "",
         }
         state["layer_counter"] = counter
         layers.append(layer)
+        # 이미 푼 그림을 그대로 캐시에 넣는다 - 첫 합성이 PNG 를 다시 풀 이유가 없다.
+        cache_key = (int(state.get("window_id", 0) or 0), layer_id, len(layer["source_bytes"]))
+        self._layer_cache()[cache_key] = image
         state["layer_order"] = self._layer_order(state)      # 새 레이어는 맨 위(끝)에 붙는다
         state["active_layer"] = layer_id
         state["canvas_active"] = True
@@ -938,6 +985,7 @@ class HeadlessImg2ImgService:
             state["layer_order"] = [item for item in self._layer_order(state) if item != layer_id]
             if str(state.get("active_layer") or "base") == layer_id:
                 state["active_layer"] = "base"
+            self._prune_layer_cache()
             return self._recompose_canvas()
 
         # ── 여기부터 기하 ────────────────────────────────────────────────
@@ -1181,6 +1229,8 @@ class HeadlessImg2ImgService:
         context = self.context
         if key == "close":
             context.img2img_session = {}
+            # 닫은 세션의 레이어 그림을 붙잡고 있지 않는다.
+            self._prune_layer_cache()
             return self.module_state()
         if not context.img2img_session.get("active"):
             return context._toast("No active Img2Img session", level="error")

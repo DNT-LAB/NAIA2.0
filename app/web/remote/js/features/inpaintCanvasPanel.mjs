@@ -86,6 +86,9 @@ const NUDGE_PX_COARSE = 16;
 const WHEEL_SCALE_PCT = 2;
 const WHEEL_ROTATE_DEG = 1;
 const WHEEL_COARSE = 5;
+// 고른 레이어를 서버가 확인해 줄 때까지 옛 echo 로부터 지키는 시간. 그보다 늦으면
+// 서버의 값을 믿는다(고르기가 거절됐을 수도 있다).
+const PENDING_SELECT_MS = 3000;
 
 const ratio = (value) => (Number(value) || 0).toFixed(2);
 const clampPct = (v) => Math.max(SCALE_MIN_PCT, Math.min(SCALE_MAX_PCT, Math.round(Number(v) || 100)));
@@ -168,6 +171,8 @@ export function createInpaintCanvasPanel({
   let layersEl = null;
   let layerPop = null;        // [+ 이미지] 를 눌러 연 고르기 팝업
   let layerUploading = false;
+  // 고른 직후 서버가 아직 따라오지 않은 선택(`holdPendingSelection`).
+  let pendingSelect = null;
 
   const read = (key, fallback) => {
     try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
@@ -287,8 +292,28 @@ export function createInpaintCanvasPanel({
     // 미뤄 둔 변형은 원래 레이어 몫이다 - 먼저 흘려보낸다.
     flushTransforms();
     state.active_layer = id;
+    pendingSelect = {id, window: String(state.window_id || ''), at: Date.now()};
     send('layer_select', {id});
     refreshChrome();
+  }
+
+  /** 고른 직후 **늦게 도착한 옛 echo** 가 선택을 되돌리지 못하게 한다.
+   *
+   *  ⚠️ 서버는 명령을 차례로 처리하고 echo 도 그 차례로 온다. 고르기 **전에** 보낸 조작의
+   *     echo 는 옛 `active_layer` 를 싣고 온다 - 그대로 받으면 끌던 도중에 선택이 이전
+   *     레이어로 튀고, 되돌리기가 엉뚱한 레이어를 기록한다(Codex 리뷰 2026-10-03: L2 를
+   *     끄는 중 L1 echo -> Ctrl+Z 가 L1 을 되돌렸다). 서버가 따라오면(같은 id) 놓는다.
+   */
+  function holdPendingSelection(next) {
+    if (!pendingSelect) return;
+    const expired = Date.now() - pendingSelect.at > PENDING_SELECT_MS;
+    const sameWindow = String(next.window_id || '') === pendingSelect.window;
+    const stillThere = Array.isArray(next.layers) && next.layers.some(row => row.id === pendingSelect.id);
+    if (!sameWindow || !stillThere || expired || String(next.active_layer || 'base') === pendingSelect.id) {
+      pendingSelect = null;
+      return;
+    }
+    next.active_layer = pendingSelect.id;
   }
 
   function send(key, value) {
@@ -348,6 +373,7 @@ export function createInpaintCanvasPanel({
     // ⚠️ **그림이 바뀌면 되돌리기 기록도 버린다.** 세션은 살아 있는데 다른 그림을
     //    열면(`window_id` 가 바뀐다) 남의 그림에서 잰 자리가 이 그림에 적용된다.
     if (next && String(next.window_id || '') !== String(state?.window_id || '')) undoStack = [];
+    if (next) holdPendingSelection(next);
     if (next) state = next;
     if (!panel) return;
     // ⚠️ 조작 중에는 절대 다시 그리지 않는다(posStage 규칙 1). 서버 echo 가 와도
@@ -767,8 +793,10 @@ export function createInpaintCanvasPanel({
     layerUploading = true;
     renderLayers(viewMode === 'edit');
     try {
-      const query = label ? `?label=${encodeURIComponent(String(label).slice(0, 120))}` : '';
-      const response = await fetch(`/api/img2img/layer${query}`, {
+      // 올리는 동안 세션이 바뀌면 서버가 거절한다 - 어느 세션에 올리는지 함께 보낸다.
+      const params = new URLSearchParams({window: String(state?.window_id ?? '')});
+      if (label) params.set('label', String(label).slice(0, 120));
+      const response = await fetch(`/api/img2img/layer?${params}`, {
         method: 'POST',
         headers: {'Content-Type': json ? 'application/json' : (body?.type || 'application/octet-stream')},
         body: json ? JSON.stringify(body) : body,
@@ -1013,15 +1041,16 @@ export function createInpaintCanvasPanel({
   /** 고른 레이어의 지금 이동·회전. 되돌리기가 기억하는 것은 이것뿐이다(확대는 뺀다).
    *  **어느 레이어의 것인지**(`id`)도 함께 적는다 - 레이어를 바꿔 고른 뒤 되돌리면
    *  지금 고른 레이어가 아니라 그 값을 쟀던 레이어가 돌아와야 한다. */
-  function transformSnapshot() {
-    const t = tx();
+  function transformSnapshot(id = activeLayerId()) {
+    const t = tx(id);
     return {id: t.id, x: t.x, y: t.y, rotation: t.rotation};
   }
 
-  /** 바꾸기 **직전**에 부른다. 같은 값이면 안 쌓는다(방향키를 오래 눌러도 한 칸씩만). */
-  function pushUndo() {
-    if (!state?.active || undoApplying || undoGestureOpen) return;
-    const snap = transformSnapshot();
+  /** 바꾸기 **직전**에 부른다. 같은 값이면 안 쌓는다(방향키를 오래 눌러도 한 칸씩만).
+   *  끌기는 **누른 순간** 잰 스냅숏을 넘긴다 - 놓는 순간에 재면 그 사이 도착한 echo 가
+   *  고른 레이어를 바꿔 다른 레이어를 기록한다(Codex 리뷰 2026-10-03). */
+  function pushUndo(snap = transformSnapshot()) {
+    if (!state?.active || undoApplying || undoGestureOpen || !snap) return;
     const top = undoStack[undoStack.length - 1];
     if (top && top.id === snap.id && top.x === snap.x && top.y === snap.y
         && top.rotation === snap.rotation) return;
@@ -1030,9 +1059,9 @@ export function createInpaintCanvasPanel({
   }
 
   /** 드래그 한 번을 한 단계로 묶는다. 시작에서 한 번 쌓고, 끝날 때까지 잠근다. */
-  function beginUndoGesture() {
+  function beginUndoGesture(snap = transformSnapshot()) {
     if (undoGestureOpen) return;
-    pushUndo();
+    pushUndo(snap);
     undoGestureOpen = true;
   }
   function endUndoGesture() { undoGestureOpen = false; }
@@ -1080,11 +1109,10 @@ export function createInpaintCanvasPanel({
   }
 
   /** 고른 레이어에 확대/회전을 먹인다. 화면은 즉시, 서버는 묶어서. */
-  function applyTransform(key, value, at) {
+  function applyTransform(key, value, at, id = activeLayerId()) {
     if (!state) return;
-    const id = activeLayerId();
     // 회전만 되돌리기에 남긴다(확대는 대상이 아니다 - 위 UNDO 주석).
-    if (key !== 'scale') pushUndo();
+    if (key !== 'scale') pushUndo(transformSnapshot(id));
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
     patchLayer(id, key === 'scale' ? {scale: value / 100} : {rotation: value});
     const input = panel.querySelector(`[data-ic-tr="${key}"]`);
@@ -1366,6 +1394,7 @@ export function createInpaintCanvasPanel({
     const startY = event.clientY;
     // 끄는 것은 **누른 순간 고른 레이어**다. 끄는 사이에 echo 가 와도 대상이 바뀌지 않는다.
     const layer = tx();
+    const startSnap = transformSnapshot(layer.id);
     const startOffset = {x: layer.x, y: layer.y};
     const placedW = layer.placedW;
     const placedH = layer.placedH;
@@ -1392,7 +1421,7 @@ export function createInpaintCanvasPanel({
       pendingOffset = null;
       // 끄는 동안에는 `state` 가 안 바뀌므로, 여기서 쌓으면 **끌기 전 자리**가 담긴다.
       // 드래그 한 번 = 한 단계다(사용자가 되돌리고 싶은 단위가 그것이다).
-      pushUndo();
+      pushUndo(startSnap);
       setLayerOffset(layer.id, ox, oy);
       sendOffset(layer.id, ox, oy);
     });
@@ -1561,6 +1590,7 @@ export function createInpaintCanvasPanel({
     // 고른 레이어를 키우거나 돌린다(가운데 버튼은 레이어를 새로 고르지 않는다 - 휠과 같다).
     const layer = tx();
     const startScale = clampPct(layer.scale * 100);
+    const startSnap = transformSnapshot(layer.id);
     const startRotation = wrapDeg(layer.rotation);
     const ghost = host.querySelector('[data-ic-ghost]');
     // ⚠️ **`placed_*` 를 돌리면 안 된다.** 그건 이미 PIL 이 회전시킨 뒤의 축정렬
@@ -1590,12 +1620,12 @@ export function createInpaintCanvasPanel({
     posStage.beginFreeDrag(event, host, (ev) => {
       if (rotating) {
         if (startDist < ROTATE_DEAD_ZONE_PX) return;
-        const next = wrapDeg(startRotation - (angleOf(ev) - startAngle));   // 빼기 - 아래 angleOf 주석
+        const next = wrapDeg(startRotation - (angleOf(ev) - startAngle));   // 빼기 - 위 angleOf 주석
         sent = {key: 'rotation', value: next};
         // 끄는 **한 번**이 한 단계다. 여기서 열어 두면 아래 `applyTransform` 이
         // 프레임마다 불려도 기록은 하나뿐이다(Codex BLOCK 2).
-        beginUndoGesture();
-        applyTransform('rotation', next);
+        beginUndoGesture(startSnap);
+        applyTransform('rotation', next, null, layer.id);
         // 그림 자체는 서버가 다시 합성해야 돈다(놓을 때 한 번). 끄는 동안에는
         // 유령이 각도를 보여 준다 - 예전에는 슬라이더 숫자만 바뀌고 화면에는
         // 아무 반응이 없었다(사용자 지적 2026-08-27).
@@ -1612,7 +1642,7 @@ export function createInpaintCanvasPanel({
       } else {
         const next = clampPct(startScale + (startY - ev.clientY) / MIDDLE_SCALE_PX_PER_PCT);
         sent = {key: 'scale', value: next};
-        applyTransform('scale', next, at);
+        applyTransform('scale', next, at, layer.id);
       }
     }, () => {
       // 제스처가 끝났다 - 다음 조작은 새 단계로 쌓인다.

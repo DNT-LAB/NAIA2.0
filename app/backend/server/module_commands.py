@@ -59,6 +59,23 @@ async def _run_vibe_encode(
             await broadcast_json(clients, message)
 
 
+# V5 인페인트 캔버스의 **합성을 바꾸는** 파라미터. 이 응답은 모두에게 보낸다
+# (Codex 리뷰 2026-10-03 HIGH): 두 탭이 같은 세션을 보는데 A 가 레이어를 숨기거나
+# 베이스를 옮기면, B 화면은 옛 합성을 보이면서 B 의 [인페인트 생성] 은 서버의 새
+# 합성으로 나간다 - 화면과 다른 그림에 돈이 나간다. 레이어 추가(HTTP)는 이미 방송한다.
+_INPAINT_CANVAS_KEYS = frozenset({
+    "base_offset", "base_scale", "base_rotation", "base_reset",
+    "canvas_size", "mask_png", "clear_mask", "auto_mask",
+})
+
+
+def _is_inpaint_canvas_edit(command: dict[str, Any]) -> bool:
+    if str(command.get("module_id") or "") != "img2img":
+        return False
+    key = str(command.get("key") or "")
+    return key.startswith("layer_") or key in _INPAINT_CANVAS_KEYS
+
+
 def _truthy(value: Any) -> bool:
     """일반 dispatch(`_coerce_bool`)와 **같은 잣대**로 읽는다.
 
@@ -256,7 +273,11 @@ async def handle_module_command(
     #    ⚠️ 다른 모듈까지 넓히지 않는다 - 각자 에코를 받고 무엇을 하는지 안 봤다.
     #       캐릭터는 이미 에셋 REST 경로가 같은 페이로드를 방송하고 있어
     #       (`character_asset_routes`), 화면이 받을 준비가 되어 있는 것이 확인된다.
-    if str(command.get("module_id") or "") == "character":
+    if _is_inpaint_canvas_edit(command):
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        await broadcast_json(clients, module_state)
+    elif str(command.get("module_id") or "") == "character":
         from app.backend.server.websocket_broadcast import broadcast_json
 
         await broadcast_json(clients, module_state)

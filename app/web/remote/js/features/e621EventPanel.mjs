@@ -856,21 +856,8 @@ export function createE621EventPanel({
     });
   }
 
-  // app.js 의 옛 전역(e621Search 등)이 부르는 이름은 그대로 둔다 - 지금 화면은 위임 클릭만 쓴다.
-  return {
-    render,
-    search,
-    reset,
-    setViewMode: value => send('view_mode', value),
-    selectCategory: element => send('category', element.dataset.category || ''),
-    selectFolder: element => send('level2', element.dataset.folder || ''),
-    selectTag: element => send('selected_tag', element.dataset.tag || ''),
-    toggleStar,
-    hideSelected,
-    restoreHidden: element => send('restore', element.dataset.tag || ''),
-    onTestbenchInput: element => send('testbench', element.value),
-    generate,
-  };
+  // 밖에서 부르는 것은 상태를 넘기는 render 하나다. 조작은 전부 위의 위임 클릭이 받는다.
+  return {render};
 }
 
 const ICON_HIDE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'

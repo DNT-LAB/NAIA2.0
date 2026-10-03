@@ -2684,7 +2684,7 @@ const e621WindowReady = e621UsesWindow
       console.error('Failed to initialize E621 research window', error);
     })
   : Promise.resolve();
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621ux')
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621clean')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,
@@ -12870,52 +12870,9 @@ function instantWildcardDelete() {
 }
 
 // ---- E621 Event module ----
+// 패널은 클릭을 data-e621-act 위임으로 직접 받는다 - 여기에는 상태를 넘기는 길 하나만 둔다.
 function renderE621Event(m) {
   if (e621EventPanel) e621EventPanel.render(m);
-}
-
-function e621Search() {
-  if (e621EventPanel) e621EventPanel.search();
-}
-
-function e621Reset() {
-  if (e621EventPanel) e621EventPanel.reset();
-}
-
-function e621SetViewMode(value) {
-  if (e621EventPanel) e621EventPanel.setViewMode(value);
-}
-
-function e621SelectCategory(element) {
-  if (e621EventPanel) e621EventPanel.selectCategory(element);
-}
-
-function e621SelectFolder(element) {
-  if (e621EventPanel) e621EventPanel.selectFolder(element);
-}
-
-function e621SelectTag(element) {
-  if (e621EventPanel) e621EventPanel.selectTag(element);
-}
-
-function e621ToggleStar() {
-  if (e621EventPanel) e621EventPanel.toggleStar();
-}
-
-function e621HideSelected() {
-  if (e621EventPanel) e621EventPanel.hideSelected();
-}
-
-function e621RestoreHidden(element) {
-  if (e621EventPanel) e621EventPanel.restoreHidden(element);
-}
-
-function e621OnTestbenchInput(element) {
-  if (e621EventPanel) e621EventPanel.onTestbenchInput(element);
-}
-
-function e621Generate() {
-  if (e621EventPanel) e621EventPanel.generate();
 }
 
 // ---- Chunk Module (instant wildcard tree browser) ----

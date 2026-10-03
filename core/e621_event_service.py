@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.e621_tag_repository import E621TagRepository
+from core.e621_relation_repository import E621RelationRepository
 from core.e621_research_index import E621ResearchIndex, search_key
 from core.prompt_generation_service import PromptGenerationService
 from core.e621_prompt_composer import (WEIGHT_LIMITS, display_tag, validate_weight,
@@ -26,6 +27,8 @@ class E621EventService:
         self.data_path = self.root / "data" / "e621_data"
         data_dir = getattr(runtime_paths, "data_dir", None)
         self.repository = E621TagRepository(self.root, data_roots=[data_dir] if data_dir is not None else None)
+        # 관계 팩(별칭 · 포함 · 공동 출현). 만들 때는 안 읽는다 - 처음 태그를 고를 때 한 번 읽는다(약 0.4초).
+        self.relations = E621RelationRepository(self.root, data_roots=[data_dir] if data_dir is not None else None)
         self.save_dir = save_root / "e621_event"
         self.settings_path = save_root / "e621_module_v2_settings.json"
         self.starred_path = save_root / "e621_starred_v2.json"
@@ -63,6 +66,7 @@ class E621EventService:
         selected_payload = self._tag_payload(selected, selected_match) if selected else None
         if selected_payload is not None:
             selected_payload["research"] = self.research_metadata.for_tag(selected_payload["tag"])
+            selected_payload["relations"] = self._relations_payload(selected_payload["tag"])
         return {
             "type": "module_state",
             "module_id": "e621_event",
@@ -98,9 +102,82 @@ class E621EventService:
             "wiki": self._wiki_payload(selected),
             "testbench": self.testbench,
             "selected_tags": [dict(row) for row in self.selected_tags],
+            "selection_suggestions": self._suggestions_payload() if loaded else None,
             "use_main_pipeline": self.use_main_pipeline,
             "weight_limits": {mode: dict(limits) for mode, limits in WEIGHT_LIMITS.items()},
         }
+
+    # ── 관계 팩 → 화면 ────────────────────────────────────────────────────────
+    # 응답 계약 = docs/e621_relations_contract.ko.md. 여기서는 화면이 그릴 만큼만 줄인다.
+    # 어떤 관계도 프롬프트나 선택 목록을 스스로 바꾸지 않는다 - 사용자가 눌러야 더한다.
+    RELATION_LIST_LIMIT = 12
+
+    def _tag_brief(self, exact_tag: str, selected: set[str]) -> dict[str, Any]:
+        native = (self.research_metadata._native.get(exact_tag) if self.research_metadata else None) or {}
+        return {"tag": exact_tag, "display": display_tag(exact_tag), "kor": str(native.get("kor") or ""),
+                "count": int(native.get("count") or 0), "in_selection": exact_tag in selected}
+
+    def _relations_payload(self, exact_tag: str) -> dict[str, Any]:
+        try:
+            related = self.relations.related(exact_tag)
+        except ValueError:
+            return {"status": "invalid"}
+        groups = related.get("groups") or {}
+        selected = {row["exact_tag"] for row in self.selected_tags}
+
+        def other(row: dict[str, Any]) -> str:
+            # 계약상 incoming 이어도 source/target 은 원래 방향 그대로다 - 질의 태그가 아닌 쪽을 고른다.
+            source, target = row["source"]["exact_tag"], row["target"]["exact_tag"]
+            return target if source == exact_tag else source
+
+        def ranked(tags: list[str]) -> list[dict[str, Any]]:
+            # 하위(이 태그를 포함하는 태그)는 수천 개일 수 있다 - 게시물 수 순으로 앞만 싣고 전체 수는 따로 준다.
+            briefs = [self._tag_brief(tag, selected) for tag in dict.fromkeys(tags) if tag not in self.deleted_keys]
+            briefs.sort(key=lambda row: (-row["count"], row["tag"]))
+            return briefs[:self.RELATION_LIST_LIMIT]
+
+        implications = groups.get("implications") or []
+        broader = [other(row) for row in implications if row.get("direction") == "outgoing"]
+        narrower = [other(row) for row in implications if row.get("direction") == "incoming"]
+        cooccurrences = []
+        for row in groups.get("cooccurrences") or []:
+            target = row["target"]["exact_tag"]
+            if target in self.deleted_keys:
+                continue
+            cooccurrences.append({**self._tag_brief(target, selected), "pair_count": int(row.get("pair_count") or 0),
+                                  "lift": round(float(row.get("lift") or 0.0), 2)})
+        return {
+            "status": related.get("status"),
+            "snapshot": (related.get("observations") or {}).get("snapshot"),
+            "broader": ranked(broader), "broader_total": len(set(broader)),
+            "narrower": ranked(narrower), "narrower_total": len(set(narrower)),
+            "aliases": [{"from": row["source"]["exact_tag"], "to": row["target"]["exact_tag"]}
+                        for row in groups.get("aliases") or []],
+            "cooccurrences": cooccurrences,
+        }
+
+    def _suggestions_payload(self) -> dict[str, Any] | None:
+        anchors = [row["exact_tag"] for row in self.selected_tags]
+        if not anchors:
+            return None
+        try:
+            result = self.relations.suggest(anchors[:64], limit=24)
+        except ValueError:
+            return {"status": "invalid", "approximate": True, "candidates": []}
+        selected = set(anchors)
+        candidates = []
+        for row in result.get("candidates") or []:
+            if row["exact_tag"] in self.deleted_keys:
+                continue
+            evidence = row.get("pair_evidence") or []
+            candidates.append({**self._tag_brief(row["exact_tag"], selected),
+                               "matched_anchor_count": int(row.get("matched_anchor_count") or 0),
+                               "anchors": [item["source"]["exact_tag"] for item in evidence],
+                               "pair_count": max((int(item.get("pair_count") or 0) for item in evidence), default=0)})
+            if len(candidates) >= 16:
+                break
+        # 쌍 관측의 합이라 근사다(여러 태그 전체의 교집합 수가 아니다).
+        return {"status": result.get("status"), "approximate": True, "candidates": candidates}
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]]:
         self._ensure_loaded()

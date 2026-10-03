@@ -10,6 +10,7 @@ export function createE621EventPanel({
 }) {
   const moduleBody = host || document.getElementById('modulePopupBody');
   ensureStyle(document);
+  bindDelegates();
   let lastState = null;
   let lastRenderedStructureSignature = '';
   let deferredFocusedRenderState = null;
@@ -75,6 +76,156 @@ export function createE621EventPanel({
     }).join('');
   }
 
+  // ── 생성용 선택 태그(selected_tags) · 관계 · 추천 ──────────────────────────────
+  // 응답 계약 = docs/e621_stage2_response_contract.ko.md(선택 태그 절) · docs/e621_relations_contract.ko.md.
+  // 클릭은 data-e621-act 로 위임해 받는다(bindDelegates) - 공용 app.js 에 전역 함수를 늘리지 않는다.
+  function selectionSet() {
+    return new Set((lastState?.selected_tags || []).map(row => row.exact_tag));
+  }
+
+  function weightLimits() {
+    // 서버가 모드별 한도를 준다(지금은 세 모드 모두 0~2). 화면은 모드를 따로 들고 있지 않아 NAI 값을 쓴다.
+    const limits = lastState?.weight_limits || {};
+    return limits.NAI || {min: 0, max: 2, default: 1};
+  }
+
+  function formatWeight(value) {
+    return String(Math.round(Number(value) * 100) / 100);
+  }
+
+  // 관계 · 추천 칩: 이름을 누르면 그 태그로 간다, + 는 생성용 선택에 더한다(이미 있으면 ✓).
+  function renderRelationChip(item, extra = '') {
+    const title = [item.kor, item.count ? `${item.count.toLocaleString()} posts` : ''].filter(Boolean).join(' · ');
+    const add = item.in_selection
+      ? '<span class="e621-rel-added" title="이미 선택에 있습니다">✓</span>'
+      : `<button class="e621-rel-add" data-e621-act="add" data-tag="${attr(item.tag)}" title="선택에 추가">+</button>`;
+    return `<span class="e621-rel-chip${item.in_selection ? ' in-selection' : ''}">`
+      + `<button class="e621-rel-name" data-e621-act="open" data-tag="${attr(item.tag)}" title="${attr(title)}">${escHtml(item.display || item.tag)}${extra}</button>`
+      + `${add}</span>`;
+  }
+
+  function renderRelations(relations) {
+    if (!relations) return '';
+    const head = `<div class="mod-section-label">관계${relations.snapshot ? ` <small class="e621-rel-snapshot">e621 ${escHtml(relations.snapshot)}</small>` : ''}</div>`;
+    if (relations.status !== 'available') {
+      return `<section class="e621-research-section e621-relations">${head}<div class="mod-empty">관계 데이터가 없습니다.</div></section>`;
+    }
+    const row = (label, title, chips, more = '') => chips ? `<div class="e621-rel-row"><span class="e621-rel-label" title="${attr(title)}">${escHtml(label)}</span><span class="e621-rel-chips">${chips}${more}</span></div>` : '';
+    const broader = (relations.broader || []).map(item => renderRelationChip(item)).join('');
+    const narrower = (relations.narrower || []).map(item => renderRelationChip(item)).join('');
+    const narrowerMore = (relations.narrower_total || 0) > (relations.narrower || []).length
+      ? `<span class="e621-rel-more">외 ${(relations.narrower_total - relations.narrower.length).toLocaleString()}</span>` : '';
+    const aliases = (relations.aliases || []).map(item => `<span class="e621-rel-alias">${escHtml(item.from)} → ${escHtml(item.to)}</span>`).join('');
+    const together = (relations.cooccurrences || []).map(item => renderRelationChip(item, ` <small>${Number(item.pair_count || 0).toLocaleString()}</small>`)).join('');
+    const rows = row('상위', '이 태그가 붙으면 함께 붙는 상위 태그(e621 포함 관계)', broader)
+      + row('하위', '이 태그를 포함하는 하위 태그(e621 포함 관계)', narrower, narrowerMore)
+      + row('별칭', 'e621 별칭 - 입력 정규화 제안', aliases)
+      + row('함께', '같은 게시물에 자주 함께 붙은 태그와 그 게시물 수(관측일 뿐 의미 관계가 아님)', together);
+    return `<section class="e621-research-section e621-relations">${head}${rows || '<div class="mod-empty">기록된 관계가 없습니다.</div>'}</section>`;
+  }
+
+  function renderSelectionChip(row) {
+    const limits = weightLimits();
+    const weight = Number(row.weight);
+    const tone = weight > 1 ? ' up' : weight < 1 ? ' down' : '';
+    const title = [row.kor, '끌어서 순서를 바꿉니다'].filter(Boolean).join(' · ');
+    return `<span class="e621-sel-chip${tone}" draggable="true" data-sel-tag="${attr(row.exact_tag)}" title="${attr(title)}">`
+      + `<button class="e621-sel-name" data-e621-act="open" data-tag="${attr(row.exact_tag)}">${escHtml(row.display || row.exact_tag)}</button>`
+      + `<button class="e621-sel-step" data-e621-act="weight-down" data-tag="${attr(row.exact_tag)}" aria-label="가중치 내리기">−</button>`
+      + `<input class="e621-sel-weight" type="number" min="${limits.min}" max="${limits.max}" step="0.05" value="${formatWeight(weight)}" data-e621-weight="${attr(row.exact_tag)}" aria-label="가중치">`
+      + `<button class="e621-sel-step" data-e621-act="weight-up" data-tag="${attr(row.exact_tag)}" aria-label="가중치 올리기">+</button>`
+      + `<button class="e621-sel-x" data-e621-act="remove" data-tag="${attr(row.exact_tag)}" aria-label="선택에서 빼기">×</button>`
+      + '</span>';
+  }
+
+  function renderGenerationCard(state) {
+    const rows = state.selected_tags || [];
+    const chips = rows.length ? rows.map(renderSelectionChip).join('')
+      : '<span class="e621-sel-empty">태그를 고르고 [+ 선택] 을 누르세요</span>';
+    const suggestions = state.selection_suggestions?.candidates || [];
+    const suggest = suggestions.length
+      ? `<div class="e621-suggest"><span class="e621-rel-label" title="고른 태그들과 같은 게시물에 자주 함께 붙은 태그 - 쌍 관측의 합이라 근사입니다">함께 쓰임</span><span class="e621-rel-chips">${
+        suggestions.map(item => renderRelationChip(item, item.matched_anchor_count > 1 ? ` <small>×${item.matched_anchor_count}</small>` : '')).join('')}</span></div>`
+      : '';
+    return `
+          <section class="e621-detail-card e621-gen-card">
+            <div class="e621-gen-head">
+              <div class="mod-section-label">생성 테스트 · 선택 ${rows.length}</div>
+              <label class="mod-check-row e621-pipeline-toggle" title="메인 프롬프트의 접두 · 접미 · 와일드카드를 함께 씁니다">
+                <input type="checkbox" data-e621-pipeline ${state.use_main_pipeline === false ? '' : 'checked'}>
+                <span>메인 프롬프트 설정 사용</span>
+              </label>
+              <button class="mod-btn-sm" data-e621-act="clear" ${rows.length ? '' : 'disabled'}>비우기</button>
+            </div>
+            <div class="e621-selection">${chips}</div>
+            ${suggest}
+            <div class="e621-testbench-row">
+              <textarea class="mod-textarea" id="e621Testbench" rows="1" placeholder="{{selected_tags}} 자리에 선택 태그가 들어갑니다(없으면 맨 뒤)" oninput="e621OnTestbenchInput(this)">${escHtml(state.testbench || '')}</textarea>
+              <button class="mod-action-btn mod-start" onclick="e621Generate()">생성</button>
+            </div>
+          </section>`;
+  }
+
+  function bindDelegates() {
+    // 떼어 낸 창에서는 모듈 팝업 본문(다른 모듈도 그리는 곳)에 걸린다 - data-e621-* 표식이 있는 것만 받는다.
+    if (!moduleBody || typeof moduleBody.addEventListener !== 'function' || moduleBody.dataset?.e621Delegated) return;
+    if (moduleBody.dataset) moduleBody.dataset.e621Delegated = '1';
+    const send = (key, value) => setModuleParam('e621_event', key, value);
+    const clampWeight = value => {
+      const limits = weightLimits();
+      return Math.min(limits.max, Math.max(limits.min, Math.round(value * 100) / 100));
+    };
+    moduleBody.addEventListener('click', event => {
+      const target = event.target?.closest?.('[data-e621-act]');
+      if (!target || !moduleBody.contains(target)) return;
+      const tag = target.dataset.tag || '';
+      const act = target.dataset.e621Act;
+      const current = (lastState?.selected_tags || []).find(row => row.exact_tag === tag);
+      if (act === 'open') send('selected_tag', tag);
+      else if (act === 'add') send('selected_tags_add', {exact_tag: tag});
+      else if (act === 'remove') send('selected_tags_remove', {exact_tag: tag});
+      else if (act === 'toggle-selection') send(selectionSet().has(tag) ? 'selected_tags_remove' : 'selected_tags_add', {exact_tag: tag});
+      else if (act === 'clear') send('selected_tags_clear', null);
+      else if ((act === 'weight-up' || act === 'weight-down') && current) {
+        send('selected_tags_weight', {exact_tag: tag, weight: clampWeight(Number(current.weight) + (act === 'weight-up' ? 0.1 : -0.1))});
+      }
+    });
+    moduleBody.addEventListener('change', event => {
+      const input = event.target;
+      if (input?.dataset?.e621Weight !== undefined && input.dataset.e621Weight) {
+        const value = Number(input.value);
+        if (Number.isFinite(value)) send('selected_tags_weight', {exact_tag: input.dataset.e621Weight, weight: clampWeight(value)});
+      } else if (input?.matches?.('[data-e621-pipeline]')) {
+        send('use_main_pipeline', Boolean(input.checked));
+      }
+    });
+    // 선택 태그 순서 = 생성 순서. 칩을 끌어 다른 칩 위에 놓으면 그 자리로 옮긴다.
+    let dragging = '';
+    moduleBody.addEventListener('dragstart', event => {
+      const chip = event.target?.closest?.('[data-sel-tag]');
+      if (!chip) return;
+      dragging = chip.dataset.selTag;
+      event.dataTransfer?.setData?.('text/plain', dragging);
+      chip.classList.add('dragging');
+    });
+    moduleBody.addEventListener('dragover', event => {
+      if (dragging && event.target?.closest?.('[data-sel-tag]')) event.preventDefault();
+    });
+    moduleBody.addEventListener('drop', event => {
+      const chip = event.target?.closest?.('[data-sel-tag]');
+      if (!dragging || !chip) return;
+      event.preventDefault();
+      const order = (lastState?.selected_tags || []).map(row => row.exact_tag);
+      const index = order.indexOf(chip.dataset.selTag);
+      if (index >= 0 && chip.dataset.selTag !== dragging) send('selected_tags_move', {exact_tag: dragging, index});
+      dragging = '';
+    });
+    moduleBody.addEventListener('dragend', () => {
+      dragging = '';
+      moduleBody.querySelectorAll?.('.e621-sel-chip.dragging').forEach(el => el.classList.remove('dragging'));
+    });
+  }
+
   function renderTagButton(tag) {
     const selected = lastState && lastState.selected && lastState.selected.tag === tag.tag;
     const fields = matchFieldsOf(tag);
@@ -83,6 +234,7 @@ export function createE621EventPanel({
       'e621-tag-item',
       selected ? 'selected' : '',
       tag.starred ? 'starred' : '',
+      selectionSet().has(tag.tag) ? 'in-selection' : '',
       fields.length && fields.every(field => field === 'stored_body') ? 'wiki-match' : '',
     ].filter(Boolean).join(' ');
     const meta = `${tag.count_label || ''}${tag.starred ? ' ★' : ''}`;
@@ -143,6 +295,7 @@ export function createE621EventPanel({
     return `
       ${matchChips ? `<div class="e621-research-meta e621-selected-match"><span>검색 일치</span><span class="e621-match">${matchChips}</span></div>` : ''}
       ${korean}
+      ${renderRelations(state.selected.relations)}
       <section class="e621-research-section">
         <div class="mod-section-label">저장된 위키 본문</div>
         <pre class="e621-research-text">${escHtml(body || '저장된 본문이 없습니다.')}</pre>
@@ -277,14 +430,8 @@ export function createE621EventPanel({
             <input type="checkbox" ${state.disable_wiki_search ? 'checked' : ''} oninput="setModuleParam('e621_event','disable_wiki_search',String(this.checked))">
             <span>저장된 본문 검색 제외</span>
           </label>`;
-    const promptTestbench = state.prompt_testbench_visible === false ? '' : `
-          <section class="e621-detail-card e621-testbench-card">
-            <div class="mod-section-label">e621 프롬프트 테스트벤치</div>
-            <div class="e621-testbench-row">
-              <textarea class="mod-textarea mod-textarea-lg" id="e621Testbench" oninput="e621OnTestbenchInput(this)">${escHtml(state.testbench || '')}</textarea>
-              <button class="mod-action-btn mod-start" onclick="e621Generate()">생성</button>
-            </div>
-          </section>`;
+    const promptTestbench = state.prompt_testbench_visible === false ? '' : renderGenerationCard(state);
+    const inSelection = selected ? selectionSet().has(selected.tag) : false;
 
     moduleBody.innerHTML = `
       <div class="e621-panel">
@@ -333,6 +480,7 @@ ${wikiSearchControl}
                   <small>${escHtml(selectedMeta)}</small>
                 </div>
                 <div class="e621-selected-actions">
+                  <button class="mod-btn-sm e621-select-toggle${inSelection ? ' active' : ''}" data-e621-act="toggle-selection" data-tag="${attr(selected?.tag || '')}" ${selected ? '' : 'disabled'} title="생성 테스트의 선택 태그">${inSelection ? '✓ 선택됨' : '+ 선택'}</button>
                   <button class="mod-btn-sm" onclick="e621ToggleStar()" ${selected ? '' : 'disabled'}>${selected && selected.starred ? '즐겨찾기 해제' : '즐겨찾기'}</button>
                   <button class="mod-btn-sm danger" onclick="e621HideSelected()" ${selected ? '' : 'disabled'}>숨김</button>
                 </div>
@@ -453,10 +601,55 @@ const PANEL_CSS = `
 .e621-bottom.no-testbench{grid-template-columns:minmax(0,1fr)}
 .e621-bottom .e621-detail-card{display:flex;flex-direction:column;min-height:0}
 .e621-testbench-row{flex:1 1 auto;min-height:0;display:flex;gap:6px;align-items:stretch}
-.e621-testbench-row #e621Testbench{flex:1 1 auto;min-width:0;height:auto;min-height:44px;resize:none}
+.e621-testbench-row #e621Testbench{flex:1 1 auto;min-width:0;height:auto;min-height:28px;resize:none}
 .e621-testbench-row .mod-start{flex:0 0 auto;width:auto;height:auto;margin:0;padding:0 16px}
-.e621-hidden-card .e621-hidden-list{flex:1 1 auto;min-height:0;max-height:none}
-.module-popup-e621 .e621-panel{grid-template-rows:auto auto minmax(0,1fr) minmax(120px,0.24fr)}
+/* 아래 띠는 내용 높이(생성 테스트 카드)를 따른다 - 숨긴 태그 목록이 띠를 키우지 않게 상한을 둔다. */
+.e621-hidden-card .e621-hidden-list{flex:1 1 auto;min-height:0;max-height:116px}
+.module-popup-e621 .e621-panel{grid-template-rows:auto auto minmax(0,1fr) auto}
+
+/* 생성 테스트: 머리줄 · 선택 태그 칩(가중치) · 함께 쓰임 추천 · 템플릿 + [생성] */
+.e621-gen-card{gap:5px}
+.e621-gen-head{display:flex;align-items:center;gap:8px}
+.e621-gen-head .mod-section-label{flex:1 1 auto;padding:0}
+.e621-gen-head .e621-pipeline-toggle{min-height:22px;padding:0;font-size:10.5px}
+.e621-selection{display:flex;flex-wrap:wrap;gap:4px;max-height:58px;overflow:auto;padding:1px 0}
+.e621-sel-empty{padding:3px 0;color:var(--text-dim);font-size:10.5px}
+.e621-sel-chip{display:inline-flex;align-items:center;height:24px;border:1px solid var(--border-dim);border-radius:5px;
+  background:rgba(255,255,255,0.03);overflow:hidden;cursor:grab}
+.e621-sel-chip.up{border-color:rgba(232,180,106,0.55)}
+.e621-sel-chip.down{border-color:rgba(110,170,230,0.55)}
+.e621-sel-chip.dragging{opacity:0.45}
+.e621-sel-chip button{height:100%;padding:0 5px;border:none;background:transparent;color:var(--text-muted);font-size:11px;cursor:pointer}
+.e621-sel-chip button:hover{background:rgba(255,255,255,0.06);color:var(--text-primary)}
+.e621-sel-chip .e621-sel-name{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--text-primary);font-family:var(--font-mono);font-size:10.5px}
+.e621-sel-chip .e621-sel-weight{width:40px;height:100%;padding:0;border:none;border-left:1px solid var(--border-dim);
+  border-right:1px solid var(--border-dim);background:rgba(0,0,0,0.25);color:var(--text-primary);font-family:var(--font-mono);
+  font-size:10.5px;text-align:center;-moz-appearance:textfield;appearance:textfield}
+.e621-sel-chip .e621-sel-weight::-webkit-inner-spin-button,.e621-sel-chip .e621-sel-weight::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.e621-sel-chip.up .e621-sel-weight{color:#f0c987}
+.e621-sel-chip.down .e621-sel-weight{color:#9cc8f0}
+.e621-sel-chip .e621-sel-x{font-size:13px}
+.e621-sel-chip .e621-sel-x:hover{color:#ff8a8a}
+.e621-suggest{display:flex;align-items:flex-start;gap:6px;max-height:48px;overflow:auto}
+
+/* 관계(선택한 태그 칸) · 추천 칩: 이름 = 그 태그로 가기, + = 선택에 추가 */
+.e621-relations .mod-section-label .e621-rel-snapshot{display:inline;margin:0 0 0 4px;color:var(--text-dim);font-size:9px;font-weight:400}
+.e621-rel-row{display:flex;align-items:flex-start;gap:6px;margin-top:4px}
+.e621-rel-label{flex:0 0 auto;min-width:30px;padding-top:3px;color:var(--text-dim);font-size:10px;font-weight:700;cursor:help}
+.e621-rel-chips{display:flex;flex-wrap:wrap;gap:3px;min-width:0}
+.e621-rel-chip{display:inline-flex;align-items:center;height:20px;border:1px solid var(--border-dim);border-radius:4px;
+  background:rgba(255,255,255,0.02);overflow:hidden}
+.e621-rel-chip.in-selection{border-color:rgba(157,223,168,0.45)}
+.e621-rel-chip button{height:100%;padding:0 6px;border:none;background:transparent;color:var(--text-muted);
+  font-family:var(--font-mono);font-size:10px;cursor:pointer}
+.e621-rel-chip button:hover{background:rgba(255,255,255,0.06);color:var(--text-primary)}
+.e621-rel-chip .e621-rel-add{padding:0 5px;border-left:1px solid var(--border-dim);font-size:12px}
+.e621-research-details .e621-rel-chip small,.e621-rel-chip small{display:inline;margin:0;color:var(--text-dim);font-size:9px}
+.e621-rel-added{padding:0 5px;color:#9ddfa8;font-size:10px}
+.e621-rel-more,.e621-rel-alias{padding:3px 2px 0;color:var(--text-dim);font-size:10px}
+.e621-tag-item.in-selection{box-shadow:inset 3px 0 0 rgba(157,223,168,0.75)}
+.e621-selected-actions .e621-select-toggle.active{border-color:rgba(157,223,168,0.6);color:#9ddfa8}
 @media (max-width: 767px){
   .e621-panel .e621-layout.has-detail,.e621-bottom{grid-template-columns:minmax(0,1fr)}
   .e621-column.detail .e621-research-details{max-height:320px}

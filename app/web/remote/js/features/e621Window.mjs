@@ -101,7 +101,7 @@ const E6W_CSS = `
 /* 위에서부터: 검색줄 · 필터줄 · [카테고리 | 폴더 | 태그 | 선택한 태그] · 낮은 띠 [테스트벤치 | 숨긴 태그].
    선택한 태그 칸(번역 · 본문)이 창 높이를 다 쓴다(사용자 지정 2026-10-03). */
 .dragpanel.e6w .e621-panel{flex:1 1 auto;height:100%;min-height:0;display:grid;
-  grid-template-rows:auto auto minmax(0,1fr) minmax(96px,0.2fr);gap:6px}
+  grid-template-rows:auto auto minmax(0,1fr) auto;gap:6px}
 .dragpanel.e6w .e621-toolbar{gap:5px}
 .dragpanel.e6w .e621-toolbar .mod-input{height:24px;min-height:24px;padding:2px 8px;font-size:11px}
 .dragpanel.e6w .e621-toolbar .mod-btn-sm{height:24px;padding:0 10px;font-size:10.5px}
@@ -125,7 +125,7 @@ const E6W_CSS = `
 .dragpanel.e6w .e621-bottom{min-height:0;gap:6px}
 .dragpanel.e6w .e621-detail-card{display:flex;flex-direction:column;min-height:0;padding:6px 8px}
 .dragpanel.e6w .e621-selected-actions .mod-btn-sm{height:22px;padding:0 9px;font-size:10.5px}
-.dragpanel.e6w .e621-testbench-row #e621Testbench{flex:1 1 auto;min-height:40px;font-size:11px}
+.dragpanel.e6w .e621-testbench-row #e621Testbench{flex:1 1 auto;min-height:28px;font-size:11px}
 .dragpanel.e6w .e621-testbench-row .mod-start{height:auto;margin:0;padding:0 16px}
 .dragpanel.e6w .e621-hidden-list{flex:1;max-height:none}
 
@@ -138,6 +138,6 @@ const E6W_CSS = `
   .dragpanel.e6w .e621-scroll-list{flex:0 0 auto;max-height:220px}
   .dragpanel.e6w .e621-detail-card{min-height:auto}
   .dragpanel.e6w .e621-column.detail .e621-research-details{max-height:320px}
-  .dragpanel.e6w .e621-testbench-row #e621Testbench{min-height:70px}
+  .dragpanel.e6w .e621-testbench-row #e621Testbench{min-height:44px}
 }
 `;

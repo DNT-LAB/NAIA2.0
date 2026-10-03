@@ -2665,7 +2665,7 @@ const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs
   });
 const e621Host = document.createElement('div');
 const e621WindowReady = e621UsesWindow
-  ? import('./js/features/e621Window.mjs?v=20261003-e621detail')
+  ? import('./js/features/e621Window.mjs?v=20261003-e621sel')
     .then(({createE621Window}) => {
       e621Window = createE621Window({
         document,
@@ -2681,7 +2681,7 @@ const e621WindowReady = e621UsesWindow
       console.error('Failed to initialize E621 research window', error);
     })
   : Promise.resolve();
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621detail2')
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621sel')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,

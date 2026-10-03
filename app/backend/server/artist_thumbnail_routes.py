@@ -17,7 +17,7 @@ from core.artist_bench_views import ArtistBenchViewError, ArtistBenchViewStore
 from core.artist_groups import ArtistGroupError, ArtistGroupStore
 from core.artist_mixes import ArtistMixError, ArtistMixStore, MIX_SETTING_KEYS
 from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
-from core.artist_thumbnail_service import ArtistThumbnailService
+from core.artist_thumbnail_service import ArtistLoadCancelled, ArtistThumbnailService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.web_session_context import WebSessionContext
@@ -722,12 +722,26 @@ def register_artist_thumbnail_routes(
                 per_page,
                 random_sample,
             )
+        except ArtistLoadCancelled as exc:
+            # 화면이 팩 읽기를 그만두라고 했다(외부 브라우저의 [중단]) - 고장이 아니다
+            return JSONResponse({"error": str(exc), "cancelled": True}, status_code=409)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb list failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/load-status")
+    async def api_artist_thumb_load_status():
+        # 팩을 읽는 동안 화면이 '무엇을 기다리는지' 묻는다(외부 브라우저 - artist-viewer.html). 잠금을 잡지 않는
+        # 조회라 스레드로 넘기지 않는다. 팩 하나를 파싱하는 동안에는 이 답도 못 나간다 - 팩 사이 · 파일을 읽는 동안에 나간다.
+        return artist_thumbnail_service(session_context).load_status()
+
+    @app.post("/api/artist-thumb/load-cancel")
+    async def api_artist_thumb_load_cancel():
+        # 읽고 있는 팩을 그만두라고 적는다. 멈추는 자리는 읽는 쪽이 정한다(파일을 읽은 뒤 · 다음 팩으로 넘어가기 전).
+        return {"ok": True, "cancelling": artist_thumbnail_service(session_context).load_cancel()}
 
     @app.get("/api/artist-thumb/image")
     async def api_artist_thumb_image(mode: str = "", artist: str = ""):

@@ -27,6 +27,10 @@ from core.resolution_utils import (
 )
 
 
+class ArtistLoadCancelled(RuntimeError):
+    """화면이 팩 읽기를 그만두라고 했다(외부 브라우저의 [중단] - load_cancel)."""
+
+
 def _safe_log(message: str, fallback: str | None = None) -> None:
     try:
         print(message)
@@ -195,6 +199,14 @@ class ArtistThumbnailService:
         self._image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
         # 사본 캐시(관심 · 그룹)의 **이름만** - 경로 -> ((파일 번호, mtime_ns, size), 이름들).
         self._copy_names_memo: dict[str, tuple[tuple[int, int, int], frozenset]] = {}
+        # 작가 사전(artist_dictionary.py)의 표 - (파일 지문, 표). 파일이 그대로면 다시 읽지 않는다(_dictionary_weights).
+        self._dictionary_memo: tuple[tuple[int, int], dict[str, int]] | None = None
+        # 가상 모드의 작가 -> 주인 팩 표 - 모드 -> (구성원 지문, 표). 구성원이 그대로면 다시 만들지 않는다.
+        self._owner_map_memo: dict[str, tuple[tuple, dict[str, str]]] = {}
+        # 지금 읽고 있는 팩(load_status) · 가상 모드의 몇 번째인지 · 그만두라는 요청(load_cancel).
+        self._load_status: dict = {"active": False}
+        self._load_group: dict = {}
+        self._load_cancel = False
         self._random_history: dict[tuple[str, str, str, int], list[str]] = {}
         self._lock = threading.RLock()
         self._download_thread: threading.Thread | None = None
@@ -276,15 +288,61 @@ class ArtistThumbnailService:
         members = self.virtual_members(mode)
         # 구성원을 다 열어 둘 수 있어야 한 페이지가 팩을 왕복하지 않는다.
         self._data_cache_limit = max(1, len(members))
+        # ⚠️ 표는 구성원(팩 키 · 파일 크기)이 그대로이고 **다 메모리에 있으면** 다시 만들지 않는다 - 목록 한 쪽마다
+        #    4만 줄을 두 번 훑었다(2026-10-03). 하나라도 내려가 있으면 예전처럼 여기서 올린다(그림 요청이 팩을
+        #    하나씩 뒤늦게 읽게 두지 않는다). 받아 쓰는 쪽은 읽기만 한다.
+        stamp = tuple((key, self._file_state(self.ARTIST_THUMB_MODES[key])["size"]) for key in members)
+        hit = self._owner_map_memo.get(mode)
+        if hit is not None and hit[0] == stamp and all(key in self._data_cache for key in members):
+            return hit[1]
         owner: dict[str, str] = {}
-        for key in members:
-            try:
-                data = self.load_data(key)
-            except Exception:
-                continue
-            for artist in data.keys():
-                owner.setdefault(str(artist), key)
+        complete = True
+        try:
+            for index, key in enumerate(members):
+                # 팩 사이가 [중단] 을 볼 수 있는 틈이다 - 남은 팩을 읽지 않고 멈춘다(읽은 팩은 그대로 쥔다)
+                self._raise_if_load_cancelled()
+                self._load_group = {"group": mode, "index": index + 1, "total": len(members)}
+                try:
+                    data = self.load_data(key)
+                except ArtistLoadCancelled:
+                    raise
+                except Exception:
+                    complete = False
+                    continue
+                for artist in data.keys():
+                    owner.setdefault(str(artist), key)
+        finally:
+            self._load_group = {}
+            self._load_cancel = False
+        if complete:
+            self._owner_map_memo[mode] = (stamp, owner)
         return owner
+
+    def _raise_if_load_cancelled(self) -> None:
+        if self._load_cancel:
+            self._load_cancel = False
+            raise ArtistLoadCancelled("팩 불러오기를 중단했습니다.")
+
+    def load_status(self) -> dict:
+        """지금 읽고 있는 팩 · 메모리에 올라 있는 팩. 화면이 기다리는 동안 '무엇을 기다리는지' 묻는다.
+
+        ⚠️ 잠금을 잡지 않는다 - 팩을 읽는 쪽이 잠금을 쥔 채 몇 초를 쓴다. 잡으면 답이 읽기가 끝난 뒤에야 나간다.
+        """
+        status = dict(self._load_status)
+        if status.get("active"):
+            status["elapsed"] = round(max(0.0, time.time() - float(status.pop("started_at", 0) or 0)), 1)
+        else:
+            status = {"active": False}
+        status["loaded"] = list(self._data_cache.keys())
+        return status
+
+    def load_cancel(self) -> bool:
+        """읽고 있는 팩이 있으면 그만두라고 적어 둔다. 멈추는 것은 읽는 쪽이 틈에서 본다(_raise_if_load_cancelled) -
+        파일을 읽은 뒤 · 다음 팩으로 넘어가기 전. 파싱 중인 팩 하나는 끝까지 간다."""
+        if not (self._load_status.get("active") or self._load_group):
+            return False
+        self._load_cancel = True
+        return True
 
     def _mode_info(self, mode: str) -> dict:
         key = str(mode or "").strip()
@@ -335,23 +393,43 @@ class ArtistThumbnailService:
                 digest.update(chunk)
         return digest.hexdigest().upper()
 
-    def _artist_weights(self, mode: str = "") -> dict[str, int]:
-        weights: dict[str, int] = {}
+    def _dictionary_weights(self) -> dict[str, int]:
+        """`artist_dictionary.py` 의 표(작가 -> 게시물 수). **파일이 그대로면 다시 읽지 않는다.**
+
+        ⚠️ 받은 쪽은 고치지 않는다 - 고칠 쪽은 사본을 만든다(`_artist_weights`).
+        ⚠️ 예전에는 부를 때마다 읽었다. 포터블은 바이트코드를 쓰지 않아(PYTHONDONTWRITEBYTECODE) 그때마다 2MB 소스를
+           **컴파일**했고, 목록 한 쪽 · 검색 한 번 · 상태 조회마다 약 300ms 가 여기서 나갔다(2026-10-03 실측: 목록
+           340~410ms 중 300ms. 개발 트리는 .pyc 가 있어 27ms 라 안 보였다).
+        """
         dictionary_path = self.repo_root / "artist_dictionary.py"
-        if dictionary_path.exists():
-            try:
-                spec = importlib.util.spec_from_file_location("naia_artist_dictionary", dictionary_path)
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    artist_dict = getattr(module, "artist_dict", {})
-                    if isinstance(artist_dict, dict):
-                        weights.update({str(key): int(value or 0) for key, value in artist_dict.items()})
-            except Exception as exc:
-                _safe_log(
-                    f"🌐 Headless Artist Thumb: artist dictionary load failed — {exc}",
-                    f"[WARN] Headless Artist Thumb: artist dictionary load failed - {exc}",
-                )
+        try:
+            stat = dictionary_path.stat()
+        except OSError:
+            return {}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        memo = self._dictionary_memo
+        if memo is not None and memo[0] == stamp:
+            return memo[1]
+        table: dict[str, int] = {}
+        try:
+            spec = importlib.util.spec_from_file_location("naia_artist_dictionary", dictionary_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                artist_dict = getattr(module, "artist_dict", {})
+                if isinstance(artist_dict, dict):
+                    table = {str(key): int(value or 0) for key, value in artist_dict.items()}
+        except Exception as exc:
+            _safe_log(
+                f"🌐 Headless Artist Thumb: artist dictionary load failed — {exc}",
+                f"[WARN] Headless Artist Thumb: artist dictionary load failed - {exc}",
+            )
+            return {}          # 못 읽은 것은 기억하지 않는다 - 다음에 다시 읽는다
+        self._dictionary_memo = (stamp, table)
+        return table
+
+    def _artist_weights(self, mode: str = "") -> dict[str, int]:
+        weights: dict[str, int] = dict(self._dictionary_weights())
 
         mode_key = str(mode or "").strip()
         if mode_key:
@@ -1065,7 +1143,20 @@ class ArtistThumbnailService:
                 self._data_cache.pop(key, None)
                 self._data_cache_size.pop(key, None)
                 raise FileNotFoundError(f"Artist thumbnail data not found: {self._mode_path(key)}")
-            data = json.loads(self._mode_path(key).read_text(encoding="utf-8"))
+            # 화면이 '무엇을 기다리는지' 볼 수 있게 적어 둔다(load_status). 가상 모드면 몇 번째 팩인지도.
+            self._load_status = {"active": True, "mode": key, "label": str(info.get("label") or key),
+                                 "size_mb": file_state["size_mb"], "started_at": time.time(), **self._load_group}
+            try:
+                text = self._mode_path(key).read_text(encoding="utf-8")
+                # ⚠️ 파싱은 한 덩어리다(1.5GB · 약 2초 - 그동안 다른 요청은 못 돈다). 끼어들 틈은 파일을 읽는 동안뿐이라,
+                #    그 사이 [중단] 이 왔으면 파싱 전에 멈춘다.
+                self._raise_if_load_cancelled()
+                data = json.loads(text)
+                del text
+            finally:
+                self._load_status = {"active": False}
+                if not self._load_group:
+                    self._load_cancel = False
             if not isinstance(data, dict):
                 raise ValueError("Artist thumbnail data is invalid")
             # ⚠️ 예전에는 여기서 캐시를 **통째로 비웠다**. 가상 모드는 팩 여럿에
@@ -1503,7 +1594,9 @@ class ArtistThumbnailService:
             if image.mode not in ("RGB", "L"):
                 image = image.convert("RGB")
             output = io.BytesIO()
-            image.save(output, format="JPEG", quality=86, optimize=True)
+            # optimize 는 쓰지 않는다 - 허프만 표를 다시 짜느라 인코딩이 3.1ms -> 1.2ms 로 2.5배 느린데 파일은 2% 줄 뿐이다
+            # (2026-10-03 실측, 768px 팩 그림 60장: 6개 동시 230ms -> 115ms). 격자 한 쪽이 처음 뜨는 시간이 여기서 나온다.
+            image.save(output, format="JPEG", quality=86)
             return output.getvalue(), "image/jpeg"
         except Exception:
             return raw, self.media_type(raw)

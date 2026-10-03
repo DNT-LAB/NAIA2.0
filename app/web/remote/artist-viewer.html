@@ -10,6 +10,8 @@
   틀은 artist_thumb_tool 의 단독 뷰어(artist_viewer_*.html)에서 가져왔고, 데이터는 전부 NAIA 가 준다:
     목록 · 정렬 · 검색 = /api/artist-thumb/list (탭과 같은 요청) · 그림 = 항목의 image_url · 모드 · 목록 종류 = /api/artist-thumb/state
   뺀 것: 팩 파일 직접 열기 · 농농단 필터 · e 건수/비율 정렬. 생성 · 믹스 · 그룹 · 관심 편집도 없다 - 보고, 찾고, 복사만 한다.
+  팩 그림은 이 화면이 들지 않는다 - NAIA 백엔드가 메모리에 올린 것 하나를 Artist 탭과 함께 쓴다(같은 서비스 · 같은 캐시).
+  그래서 탭이 이미 보던 모드는 바로 열리고, 다른 모드를 고르면 NAIA 가 그 팩을 읽는 동안(팩 하나 약 3초) 진행 표시가 뜬다.
 -->
 <style>
   :root {
@@ -227,6 +229,34 @@
   }
   .grid-empty.bad { color: var(--bad); }
 
+  /* === 진행 표시 · 중단 === 격자와 쪽 넘김 줄 사이. 기다릴 때만 뜬다(격자의 아래쪽 보이는 높이만 줄어든다) */
+  .load {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 16px;
+    border-top: 1px solid var(--line); background: var(--panel-2);
+    color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .load[hidden] { display: none; }
+  .load-bar { flex: 0 0 120px; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; }
+  .load-bar i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--accent); transition: width .12s linear; }
+  .load-bar.indeterminate i { width: 40%; animation: load-slide 1.1s ease-in-out infinite; }
+  @keyframes load-slide { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
+  .load-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .load button {
+    background: var(--panel-3); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 3px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .load button:hover { border-color: var(--accent); }
+  .load button[hidden] { display: none; }
+  .grid-empty button {
+    margin-top: 12px;
+    background: var(--accent-soft); color: var(--text);
+    border: 1px solid #3d5278; border-radius: 6px;
+    padding: 7px 14px; font: inherit; cursor: pointer;
+  }
+  .grid-empty button:hover { background: #34466a; }
+
   /* === pagination footer === */
   .grid-footer {
     display: flex; align-items: center; justify-content: center;
@@ -308,6 +338,9 @@
     .grid { overflow: visible; grid-template-columns: repeat(2, 1fr); padding: 10px; gap: 10px; }
     .grid .card .caption { padding: 6px 10px; font-size: 11px; }
 
+    /* 좁은 화면은 main 이 스크롤한다 - 진행 표시는 화면 아래에 붙어 있어야 보인다 */
+    .load { position: sticky; bottom: 0; z-index: 15; padding: 6px 10px; }
+    .load-bar { flex-basis: 64px; }
     .grid-footer { padding: 8px 10px; gap: 8px; flex-wrap: wrap; }
     .grid-footer button { min-width: 64px; padding: 6px 10px; font-size: 12px; }
     .page-info { font-size: 12px; gap: 6px; }
@@ -322,6 +355,7 @@
   @media (prefers-reduced-motion: reduce) {
     .card, .card .pic img, footer .copied { transition: none; }
     .card:hover { transform: none; }
+    .load-bar.indeterminate i { animation: none; width: 100%; opacity: .5; }
   }
 </style>
 </head>
@@ -362,6 +396,11 @@
     <div class="grid" id="grid">
       <div class="grid-empty">불러오는 중…</div>
     </div>
+    <div class="load" id="load" hidden>
+      <div class="load-bar" id="load-bar"><i id="load-fill"></i></div>
+      <span class="load-text" id="load-text"></span>
+      <button id="load-stop" type="button" title="불러오기를 그만둡니다 (Esc)">중단</button>
+    </div>
     <div class="grid-footer">
       <button id="page-prev" type="button" disabled>‹ Prev</button>
       <div class="page-info">
@@ -387,6 +426,13 @@
 
 const PAGE_SIZE = 60;                       // /api/artist-thumb/list 는 12~96 을 받는다
 const SEARCH_DELAY_MS = 200;
+/* 주소에 모드가 없을 때 여는 팩(사용자 지정 2026-10-03). 팩 하나짜리다 - 여러 팩을 잇는 모드(NAID5 Curated 등)는
+   메모리를 몇 배로 쓰고 처음 읽는 데 오래 걸려, 고르지 않았는데 스스로 열지 않는다. */
+const DEFAULT_MODE = "NAID5-6333-165";
+const LIST_CACHE_MS = 30000;                // 받은 목록 쪽을 다시 쓰는 시간(관심 ★ 이 그만큼 늦을 수 있다)
+const LIST_CACHE_MAX = 12;
+const BUSY_SHOW_MS = 250;                   // 이보다 빨리 끝나면 진행 표시를 띄우지 않는다(깜빡임)
+const STATUS_POLL_MS = 700;                 // 기다리는 동안 '어느 팩을 읽는 중인지' 묻는 간격
 /* 작가 태그 서식 - NAIA 의 Artist 탭(artistThumbTab.mjs formatArtistToken)과 같은 규칙.
    NAI = artist:이름 · ANIMA = @이름(괄호 이스케이프) · 그 밖(SD 계열) = 이름(괄호 이스케이프). */
 const escapeParens = (name) => String(name).replace(/[()]/g, "\\$&");
@@ -398,11 +444,13 @@ const FORMATS = {
 
 /* === state === */
 const state = {
-  modes: [],            // /state 의 modes 중 볼 수 있는 것(exists)
+  modes: [],            // /state 의 modes 전부 - 받지 않은 팩은 칸에서 막는다(고를 수 없다)
   filters: [],          // /state 의 filters(구분선 포함)
+  loaded: new Set(),    // NAIA 가 지금 메모리에 올려 둔 팩(키) - 이 팩들은 바로 열린다
   mode: "",
   filter: "all",
   query: "",
+  shown: null,          // 지금 격자에 그려진 조건 {mode, filter, query} - 중단하면 여기로 돌아간다
   fmt: "nai",
   page: 0,              // 0 부터(API 와 같다)
   totalPages: 1,
@@ -431,16 +479,26 @@ const elStatus    = $("status");
 const elSelected  = $("selected");
 const elCopied    = $("copied");
 const elDictCnt   = $("dict-count");
+const elLoad      = $("load");
+const elLoadBar   = $("load-bar");
+const elLoadFill  = $("load-fill");
+const elLoadText  = $("load-text");
+const elLoadStop  = $("load-stop");
 $("page-size").textContent = PAGE_SIZE.toLocaleString();
 
 /* 게시물 수 - 줄이지 않는다(213 과 1,780 이 같아 보이면 고르는 근거가 흐려진다) */
 const countText = (value) => (Number(value) > 0 ? Number(value).toLocaleString() : "—");
+const sizeText = (mb) => (Number(mb) >= 1024 ? `${(Number(mb) / 1024).toFixed(1)}GB` : `${Math.round(Number(mb) || 0)}MB`);
 
 /* === NAIA 요청 === */
-async function api(path) {
-  const response = await fetch(path, { cache: "no-store" });
+async function api(path, signal) {
+  const response = await fetch(path, { cache: "no-store", signal });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.cancelled = Boolean(data.cancelled);          // 서버가 팩 읽기를 틈에서 멈췄다([중단])
+    throw error;
+  }
   return data;
 }
 
@@ -465,6 +523,54 @@ function syncUrl() {
   history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
 }
 
+/* === 모드(팩) ===
+   받은 팩만 고를 수 있다. 팩 그림은 NAIA 가 메모리에 올린 것을 Artist 탭과 함께 쓴다 - 올라 있는 팩은 바로 열리고,
+   아니면 NAIA 가 그 팩을 읽는 동안 기다린다. */
+const modeOf = (key) => state.modes.find((mode) => mode.key === key) || null;
+const usable = (mode) => Boolean(mode && mode.exists);
+const packKeys = (mode) => (!mode ? [] : mode.virtual ? (mode.members || []) : [mode.key]);   // 그 모드가 메모리에 올리는 팩들
+const packSizeMb = (mode) => packKeys(mode).reduce((sum, key) => sum + Number((modeOf(key) || {}).size_mb || 0), 0);
+const isLoaded = (mode) => { const keys = packKeys(mode); return keys.length > 0 && keys.every((key) => state.loaded.has(key)); };
+const packSummary = (mode) => (!mode ? "" : mode.virtual
+  ? `팩 ${packKeys(mode).length}개 ${sizeText(packSizeMb(mode))}` : sizeText(packSizeMb(mode)));
+
+function pickMode(wanted) {
+  if (usable(modeOf(wanted))) return wanted;                          // 탭이 보던 모드(주소로 온다)
+  if (usable(modeOf(DEFAULT_MODE))) return DEFAULT_MODE;
+  const single = state.modes.find((mode) => usable(mode) && !mode.virtual);
+  if (single) return single.key;
+  const any = state.modes.find(usable);
+  return any ? any.key : "";
+}
+
+function modeOptionLabel(mode) {
+  const label = mode.label || mode.key;
+  if (!usable(mode)) return `${label} — NAIA 에서 받아야 합니다`;
+  const parts = [label, packSummary(mode)];
+  if (isLoaded(mode)) parts.push("메모리에 있음");
+  return parts.join(" · ");
+}
+
+function paintModeOptions() {
+  elMode.textContent = "";
+  for (const mode of state.modes) {
+    const option = document.createElement("option");
+    option.value = mode.key;
+    option.textContent = modeOptionLabel(mode);
+    option.disabled = !usable(mode);                                  // 받지 않은 팩은 고를 수 없다
+    elMode.appendChild(option);
+  }
+  elMode.value = state.mode;
+}
+
+async function refreshLoaded() {
+  try {
+    const status = await api("/api/artist-thumb/load-status");
+    state.loaded = new Set(status.loaded || []);
+    paintModeOptions();
+  } catch (_) { /* 표시만 늦는다 */ }
+}
+
 /* === 처음: 주소의 조건 + NAIA 의 모드 · 목록 종류 === */
 async function init() {
   const params = new URLSearchParams(location.search);
@@ -475,12 +581,12 @@ async function init() {
   elSearch.value = state.query;
   try {
     const data = await api("/api/artist-thumb/state");
-    state.modes = (data.modes || []).filter((mode) => mode && mode.exists);
+    state.modes = (Array.isArray(data.modes) ? data.modes : []).filter(Boolean);
     state.filters = data.filters || [];
+    state.loaded = new Set(state.modes.filter((mode) => !mode.virtual && mode.loaded).map((mode) => mode.key));
     elDictCnt.textContent = Number(data.artist_count || 0).toLocaleString();
-    const wantMode = String(params.get("mode") || "");
     const wantFilter = String(params.get("filter") || "all");
-    state.mode = state.modes.some((mode) => mode.key === wantMode) ? wantMode : (state.modes[0] ? state.modes[0].key : "");
+    state.mode = pickMode(String(params.get("mode") || ""));
     state.filter = state.filters.some((f) => !f.separator && f.key === wantFilter) ? wantFilter : "all";
     fillSelects();
     state.ready = true;
@@ -491,7 +597,7 @@ async function init() {
     return;
   }
   if (!state.mode) {
-    showGridMessage(["썸네일 팩이 없습니다.", "NAIA 의 Artist 탭에서 팩을 받은 뒤 새로고침하세요."]);
+    showGridMessage(["받아 둔 썸네일 팩이 없습니다.", "NAIA 의 Artist 탭에서 팩을 받은 뒤 새로고침하세요."]);
     elGridSub.textContent = "썸네일 팩 없음";
     setStatus("썸네일 팩 없음");
     return;
@@ -500,15 +606,7 @@ async function init() {
 }
 
 function fillSelects() {
-  elMode.textContent = "";
-  for (const mode of state.modes) {
-    const option = document.createElement("option");
-    option.value = mode.key;
-    option.textContent = mode.label || mode.key;
-    elMode.appendChild(option);
-  }
-  elMode.value = state.mode;
-  elMode.disabled = state.modes.length < 2;
+  paintModeOptions();
   elFilter.textContent = "";
   for (const filter of state.filters) {
     const option = document.createElement("option");
@@ -526,11 +624,177 @@ function fillSelects() {
 }
 
 function modeLabel() {
-  const mode = state.modes.find((m) => m.key === state.mode);
+  const mode = modeOf(state.mode);
   return mode ? (mode.label || mode.key) : "";
 }
 function syncModeLabel() {
   elModeLabel.textContent = modeLabel() || "NAIA";
+}
+
+/* === 진행 표시 · 중단 ===
+   기다리는 것이 셋이다 - 팩을 메모리에 올리기(팩 하나 1.5GB 에 약 3초 · 여러 팩을 잇는 모드는 그 몇 배) · 목록 한 쪽 ·
+   그림 60장. 앞의 둘은 [중단] 할 수 있다. 팩 읽기는 NAIA 가 틈에서 멈춘다(파일을 읽은 뒤 · 다음 팩 앞) - 파싱에 들어간
+   팩 하나는 끝까지 간다. 흐른 시간만 보인다(남은 시간은 어림하지 않는다). */
+let busy = null;        // {controller, packLoad, startedAt, server, polling}
+let busyTimer = 0;
+
+function showLoad(text, ratio, stoppable) {
+  elLoad.hidden = false;
+  elLoadText.textContent = text;
+  elLoadBar.classList.toggle("indeterminate", ratio == null);
+  elLoadFill.style.width = ratio == null ? "" : `${Math.round(ratio * 100)}%`;
+  elLoadStop.hidden = !stoppable;
+}
+
+function beginBusy(controller, packLoad) {
+  endBusy();
+  busy = { controller, packLoad, startedAt: Date.now(), server: null, polling: false, polledAt: 0 };
+  busyTimer = setInterval(paintBusy, 100);
+  paintBusy();
+}
+
+function endBusy() {
+  clearInterval(busyTimer);
+  busyTimer = 0;
+  busy = null;
+  elLoad.hidden = true;
+}
+
+function paintBusy() {
+  if (!busy) return;
+  const elapsedMs = Date.now() - busy.startedAt;
+  // 팩을 읽는 줄 알았으면 처음부터, 아니어도 오래 걸리면(탭이 다른 팩을 써서 내려갔을 수 있다) NAIA 에 묻는다
+  if ((busy.packLoad || elapsedMs > 1000) && Date.now() - busy.polledAt >= STATUS_POLL_MS) pollLoadStatus();
+  if (!busy.packLoad && elapsedMs < BUSY_SHOW_MS) return;
+  const seconds = `${(elapsedMs / 1000).toFixed(1)}초`;
+  const server = busy.server && busy.server.active ? busy.server : null;
+  if (server) {
+    const step = server.total ? ` (${server.index}/${server.total})` : "";
+    showLoad(`팩을 메모리에 올리는 중 · ${server.label}${step} · ${sizeText(server.size_mb)} · ${seconds}`, null, true);
+  } else if (busy.packLoad) {
+    const mode = modeOf(state.mode);
+    showLoad(`팩을 메모리에 올리는 중 · ${modeLabel()} · ${packSummary(mode)} · ${seconds}`, null, true);
+  } else {
+    showLoad(`목록 받는 중 · ${seconds}`, null, true);
+  }
+}
+
+async function pollLoadStatus() {
+  const mine = busy;
+  if (!mine || mine.polling) return;
+  mine.polling = true;
+  mine.polledAt = Date.now();
+  try {
+    const status = await api("/api/artist-thumb/load-status");
+    if (busy === mine) { mine.server = status; paintBusy(); }
+  } catch (_) { /* 팩을 파싱하는 동안에는 답이 늦는다 - 다음에 다시 묻는다 */ }
+  mine.polling = false;
+}
+
+/* 기다리던 요청을 놓는다. 팩을 읽던 중이면 NAIA 에도 그만 읽으라고 알리고 그 답을 기다린다 -
+   안 기다리면 뒤따라 보내는 새 요청의 읽기가 이 '그만' 에 걸릴 수 있다. */
+async function dropBusy() {
+  if (!busy) return;
+  const wasLoading = busy.packLoad || Boolean(busy.server && busy.server.active);
+  busy.controller.abort();
+  endBusy();
+  if (wasLoading) {
+    try { await fetch("/api/artist-thumb/load-cancel", { method: "POST" }); } catch (_) { /* 못 알려도 화면은 넘어간다 */ }
+  }
+}
+
+/* [중단] · Esc - 지금 기다리는 것을 그만둔다. 깨어난 loadPage 가 화면을 되돌린다(onLoadStopped). */
+function stopLoading() {
+  if (!busy) return;
+  const wasLoading = busy.packLoad || Boolean(busy.server && busy.server.active);
+  busy.controller.abort();
+  if (wasLoading) fetch("/api/artist-thumb/load-cancel", { method: "POST" }).catch(() => {});
+}
+elLoadStop.addEventListener("click", stopLoading);
+
+function onLoadStopped() {
+  setStatus("불러오기를 중단했습니다");
+  if (state.shown) {
+    // 격자에 그려져 있던 조건으로 되돌린다 - 고른 칸 · 검색어가 보이는 것과 어긋나지 않게
+    state.mode = state.shown.mode;
+    state.filter = state.shown.filter;
+    state.query = state.shown.query;
+    elMode.value = state.mode;
+    elFilter.value = state.filter;
+    elSearch.value = state.query;
+    syncModeLabel();
+    return;
+  }
+  elGridSub.textContent = "중단됨";
+  showGridMessage(["불러오기를 중단했습니다.", "모드를 고르거나 다시 불러오세요."], false,
+    { label: "다시 불러오기", run: () => loadPage(0) });
+}
+
+/* === 받은 목록 쪽 · 다음 쪽 미리 받기 ===
+   한 쪽이 다 뜨면 다음 쪽의 목록과 그림을 미리 받아 둔다 - 쪽 넘김이 기다림 없이 뜬다. 다른 데로 가면 받던 것을 놓는다. */
+const listCache = new Map();           // 주소 -> {data, at}
+function cacheGet(url) {
+  const hit = listCache.get(url);
+  if (!hit) return null;
+  if (Date.now() - hit.at > LIST_CACHE_MS) { listCache.delete(url); return null; }
+  return hit.data;
+}
+function cachePut(url, data) {
+  listCache.delete(url);
+  listCache.set(url, { data, at: Date.now() });
+  while (listCache.size > LIST_CACHE_MAX) listCache.delete(listCache.keys().next().value);
+}
+
+let prefetch = { url: "", controller: null, images: [] };
+function cancelPrefetch() {
+  if (prefetch.controller) prefetch.controller.abort();
+  for (const img of prefetch.images) img.src = "";       // 받던 그림을 놓아 연결을 지금 쪽에 돌려준다
+  prefetch = { url: "", controller: null, images: [] };
+}
+async function prefetchNext(req) {
+  if (state.page >= state.totalPages - 1) return;
+  const url = listUrl(state.page + 1);
+  if (prefetch.url === url) return;
+  cancelPrefetch();
+  const controller = new AbortController();
+  const mine = prefetch = { url, controller, images: [] };
+  let data = cacheGet(url);
+  try {
+    if (!data) { data = await api(url, controller.signal); cachePut(url, data); }
+  } catch (_) { return; }
+  if (prefetch !== mine || req !== state.listReq) return;
+  for (const item of data.items || []) {
+    if (!item.image_url) continue;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = item.image_url;
+    mine.images.push(img);
+  }
+}
+
+/* 그림이 몇 장 왔는지 - 다 오면 다음 쪽을 미리 받는다 */
+function watchImages(req) {
+  const imgs = Array.from(elGrid.querySelectorAll(".card img"));
+  const total = imgs.length;
+  const startedAt = Date.now();
+  let done = 0;
+  const finish = () => {
+    if (req !== state.listReq) return;
+    if (!busy) elLoad.hidden = true;
+    prefetchNext(req);
+  };
+  if (!total) { finish(); return; }
+  const tick = () => {
+    if (req !== state.listReq) return;
+    done += 1;
+    if (done >= total) { finish(); return; }
+    if (!busy && Date.now() - startedAt >= BUSY_SHOW_MS) showLoad(`그림 ${done} / ${total}`, done / total, false);
+  };
+  for (const img of imgs) {
+    if (img.complete) { tick(); continue; }               // 이미 받아 둔 그림
+    img.addEventListener("load", tick, { once: true });
+    img.addEventListener("error", tick, { once: true });
+  }
 }
 
 /* === 목록 한 쪽 ===
@@ -539,21 +803,37 @@ function syncModeLabel() {
 async function loadPage(page, { select = null, scrollEnd = false } = {}) {
   if (!state.ready || !state.mode) return;
   const req = ++state.listReq;
-  setStatus("불러오는 중…");
-  let data;
-  try {
-    data = await api(listUrl(Math.max(0, page)));
-  } catch (error) {
-    if (req !== state.listReq) return;
-    showGridMessage(["목록을 불러오지 못했습니다.", `(${error.message})`], true);
-    setStatus("목록 실패", true);
-    return;
+  await dropBusy();                           // 앞 요청은 버린다(그 loadPage 는 req 가 달라 조용히 끝난다)
+  if (req !== state.listReq) return;
+  const url = listUrl(Math.max(0, page));
+  if (prefetch.url !== url) cancelPrefetch(); // 미리 받던 쪽으로 가는 것이면 그대로 둔다(그 그림을 이어 쓴다)
+  let data = cacheGet(url);
+  if (!data) {
+    const controller = new AbortController();
+    const mode = modeOf(state.mode);
+    const packLoad = Boolean(mode) && !isLoaded(mode);
+    beginBusy(controller, packLoad);
+    try {
+      data = await api(url, controller.signal);
+    } catch (error) {
+      if (req !== state.listReq) return;      // 다른 요청이 이어받았다
+      endBusy();
+      if (error.name === "AbortError" || error.cancelled) { onLoadStopped(); return; }
+      showGridMessage(["목록을 불러오지 못했습니다.", `(${error.message})`], true,
+        { label: "다시 불러오기", run: () => loadPage(page, { select, scrollEnd }) });
+      setStatus("목록 실패", true);
+      return;
+    }
+    if (req !== state.listReq) return;        // 그 사이 다른 조건으로 다시 물었다
+    endBusy();
+    cachePut(url, data);
+    if (packLoad) refreshLoaded();            // 방금 올린 팩을 모드 칸에 '메모리에 있음' 으로
   }
-  if (req !== state.listReq) return;        // 그 사이 다른 조건으로 다시 물었다
   state.page = Number(data.page || 0);
   state.totalPages = Math.max(1, Number(data.total_pages || 1));
   state.total = Number(data.total || 0);
   state.items = Array.isArray(data.items) ? data.items : [];
+  state.shown = { mode: state.mode, filter: state.filter, query: state.query };
   renderGrid();
   syncUrl();
   if (select != null && state.items.length) {
@@ -564,10 +844,11 @@ async function loadPage(page, { select = null, scrollEnd = false } = {}) {
     // renderGrid 가 방금 맨 위로 돌려놓았고 배치도 아직이다 - 한 프레임 뒤에 내린다
     requestAnimationFrame(() => { const host = scrollHost(); host.scrollTop = host.scrollHeight; });
   }
+  watchImages(req);
 }
 
-/* 격자 자리에 안내문 - 줄마다 글자로만 넣는다(서버가 준 오류 글도 여기로 온다) */
-function showGridMessage(lines, bad = false) {
+/* 격자 자리에 안내문 - 줄마다 글자로만 넣는다(서버가 준 오류 글도 여기로 온다). action = {label, run} 이면 단추 하나. */
+function showGridMessage(lines, bad = false, action = null) {
   state.items = [];
   const box = document.createElement("div");
   box.className = "grid-empty" + (bad ? " bad" : "");
@@ -576,6 +857,14 @@ function showGridMessage(lines, bad = false) {
     if (index) text.appendChild(document.createElement("br"));
     text.appendChild(document.createTextNode(line));
   });
+  if (action) {
+    text.appendChild(document.createElement("br"));
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.addEventListener("click", action.run);
+    text.appendChild(button);
+  }
   box.appendChild(text);
   elGrid.textContent = "";
   elGrid.appendChild(box);
@@ -745,6 +1034,7 @@ elFmt.addEventListener("click", (e) => {
 
 /* === 모드 · 목록 종류 · 검색 === */
 elMode.addEventListener("change", () => {
+  if (!usable(modeOf(elMode.value))) { elMode.value = state.mode; return; }   // 받지 않은 팩 - 칸에서도 막혀 있다
   state.mode = elMode.value;
   syncModeLabel();
   loadPage(0);
@@ -844,6 +1134,7 @@ document.addEventListener("keydown", (e) => {
   }
   const tagName = document.activeElement ? document.activeElement.tagName : "";
   if (tagName === "INPUT" || tagName === "SELECT" || tagName === "TEXTAREA") return;
+  if (e.key === "Escape" && busy) { e.preventDefault(); stopLoading(); return; }   // 기다리는 것을 그만둔다
   if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     const cols = gridColumns();

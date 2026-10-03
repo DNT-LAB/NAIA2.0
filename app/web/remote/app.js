@@ -2686,13 +2686,12 @@ const e621WindowReady = e621UsesWindow
       console.error('Failed to initialize E621 research window', error);
     })
   : Promise.resolve();
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621clean')
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621show')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,
       escHtml,
       setModuleParam,
-      bindTagAssist,
       showToast,
       moduleBody: e621UsesWindow ? e621Host : null,
     });
@@ -7141,11 +7140,6 @@ function collectModuleSnapshotState(moduleId) {
         stop_on_match: stopOnMatch ? !!stopOnMatch.checked : !!currentOptions.stop_on_match,
       };
     }
-  } else if (moduleId === 'e621_event') {
-    const search = document.getElementById('e621SearchInput');
-    const testbench = document.getElementById('e621Testbench');
-    if (search) state.search_text = search.value;
-    if (testbench) state.testbench = testbench.value;
   } else if (moduleId === 'img2img') {
     const mainPrompt = document.getElementById('img2imgMainPrompt');
     const negativePrompt = document.getElementById('img2imgNegativePrompt');

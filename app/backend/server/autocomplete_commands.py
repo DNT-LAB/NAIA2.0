@@ -578,7 +578,11 @@ def _has_hangul_text(text: str) -> bool:
     return bool(re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", str(text or "")))
 
 
-def _translate_autocomplete_query(context: WebSessionContext, query: str) -> str:
+def _translate_autocomplete_query(context: WebSessionContext, query: str, label: str = "autocomplete") -> str:
+    """한글 질의를 영어로(실패하면 ''). `label` 은 번역 기록에 남는 호출 자리 이름이다.
+
+    자동완성과 E621 연구모듈 검색이 같은 캐시 · 같은 백오프를 쓴다 - 무료 번역 엔드포인트는 IP 단위로 막는다.
+    """
     from core.tag_search_index import normalize_search_query
 
     normalized = normalize_search_query(query)
@@ -593,7 +597,7 @@ def _translate_autocomplete_query(context: WebSessionContext, query: str) -> str
         return str(cached)
     from core.translation_history import translation_context
 
-    with translation_context("autocomplete"):
+    with translation_context(label):
         translated = normalize_search_query(korean_to_english(normalized) or "")
     failed = not translated
     if not translated or _has_hangul_text(translated) or translated == normalized:

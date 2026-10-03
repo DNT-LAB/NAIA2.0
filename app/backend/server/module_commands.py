@@ -118,6 +118,54 @@ async def _run_extension_load(
     await broadcast_json(clients, context._module_state_payload("extensions", manager.panel_state()))
 
 
+# 끝나기 전에 쓰레기 수집되지 않게 붙잡아 둔다(asyncio 는 태스크를 약하게만 쥔다).
+_E621_TRANSLATION_TASKS: set[Any] = set()
+
+
+def translate_e621_search_query(context: WebSessionContext, query: str) -> str:
+    """한국어 검색어를 영어로. 네트워크를 타므로 스레드에서 부른다. 실패 · 쓸 수 없는 결과는 ''."""
+    from app.backend.server.autocomplete_commands import _translate_autocomplete_query
+
+    return _translate_autocomplete_query(context, query, label="e621_search")
+
+
+async def _run_e621_search_translation(
+    ws: WebSocket,
+    context: WebSessionContext,
+    client_host: str,
+    query: str,
+) -> None:
+    """E621 연구모듈: 한국어 검색어를 영어로 번역한 결과로 한 번 더 찾는다(사용자 지정 2026-10-03).
+
+    화면이 검색 뒤에 `search_translate` 로 따로 청한다(자동완성의 autocomplete_translate 와 같은 모양) - 검색 명령에
+    걸어 두면 한국어로 검색하는 모든 호출이 번역기를 부른다. 검색 응답은 이미 나갔고, 여기서는 번역이 끝나면
+    보탠 결과를 **한 번 더** 보낸다. 그사이 검색어가 바뀌었으면 서비스가 버린다(search_translation 이 비어서 온다).
+    """
+    import asyncio
+
+    try:
+        translated = await asyncio.to_thread(translate_e621_search_query, context, query)
+        if not translated:
+            return
+        state = context.set_module_param(
+            "e621_event", "search_translation", {"query": query, "translated": translated}, client_host=client_host)
+        if isinstance(state, dict) and state.get("search_translation"):
+            await _send_json(ws, state)
+    except Exception as exc:  # noqa: BLE001 - 덤으로 얹는 검색이다. 실패해도 원래 결과는 이미 화면에 있다
+        print(f"[warn] e621 search translation skipped: {type(exc).__name__}", flush=True)
+
+
+def _e621_translate_request(command: dict[str, Any]) -> str | None:
+    """`search_translate` 명령이면 번역할 검색어(한글이 없으면 ''), 다른 명령이면 None."""
+    if str(command.get("module_id") or "") != "e621_event" or str(command.get("key") or "") != "search_translate":
+        return None
+    from core.e621_research_index import HANGUL
+
+    # 서비스가 검색어를 다듬는 방식(strip · lower)과 같아야 search_translation 이 지금 검색어와 맞는다.
+    query = str(command.get("value") or "").strip().lower()
+    return query if HANGUL.search(query) else ""
+
+
 async def handle_module_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -216,6 +264,16 @@ async def handle_module_command(
             "message": "이 동작은 로컬(이 PC)에서만 가능합니다.",
             "runtime": "web",
         })
+        return True
+
+    e621_query = _e621_translate_request(command)
+    if e621_query is not None:
+        if e621_query:
+            import asyncio
+
+            task = asyncio.create_task(_run_e621_search_translation(ws, context, client_host, e621_query))
+            _E621_TRANSLATION_TASKS.add(task)
+            task.add_done_callback(_E621_TRANSLATION_TASKS.discard)
         return True
 
     module_state = context.set_module_param(

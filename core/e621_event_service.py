@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from pathlib import Path
 from typing import Any
 
 from core.e621_tag_repository import E621TagRepository
 from core.e621_relation_repository import E621RelationRepository
-from core.e621_research_index import E621ResearchIndex, search_key
+from core.e621_research_index import E621ResearchIndex, HANGUL, search_key
 from core.prompt_generation_service import PromptGenerationService
 from core.e621_prompt_composer import (WEIGHT_LIMITS, display_tag, validate_weight,
     prepare_template, restore_literals)
@@ -18,30 +17,10 @@ from core.e621_prompt_composer import (WEIGHT_LIMITS, display_tag, validate_weig
 
 DEFAULT_TESTBENCH = "{{selected_tags}}"
 
-# ── 관련 태그 자동 조립(사용자 지정 2026-10-03: "진짜 코어만 · 6개 이내", "종은 가급적 숨김") ──
-# 코어 = 고른 태그가 붙은 게시물의 AUTO_RELATED_MIN_SHARE 이상에 함께 붙는 태그(팩이 이미 우연의 2배 이상만 담는다).
-# 0.25 로 재 보면 feet 에 4_toes, kissing 에 male/male 과 male/female 이 함께 올라온다 - 서로 다른 변종이 섞인다.
-AUTO_RELATED_DEFAULT_LIMIT = 6
-AUTO_RELATED_MAX_LIMIT = 12
-AUTO_RELATED_MIN_SHARE = 0.4
-# 자동을 끄고 손으로 고를 때의 '함께' 추천은 더 넓게 보인다.
-SUGGEST_MIN_SHARE = 0.1
-SUGGEST_LIMIT = 16
-# 게시물이 너무 적은 태그는 관측이 흔들린다.
-RELATED_MIN_POSTS = 1000
-# 종(Species 분류 - anthro · feral · humanoid 같은 체형도 여기 든다)은 숨긴다. 고른 태그가 그 종에서만 주로
-# 나올 때(fox_tail → fox, beak → bird)만 가장 구체적인 종 하나를 담는다.
+# 선택한 태그의 '함께' 줄에서 종(Species 분류 - anthro · feral · humanoid 같은 체형도 여기 든다)은 숨긴다
+# (사용자 지정 2026-10-03: 주 대상이 인간이라 종은 가급적 숨김). 그 태그가 그 종에서만 주로 나올 때만 보인다
+# (fox_tail → fox, beak → bird).
 SPECIES_DEPENDENT_SHARE = 0.6
-AUTO_RELATED_EXCLUDED_MAX = 200
-
-# 미리보기에 그대로 보이는 조립 오류 - 화면 문구로 바꾼다([생성] 의 알림은 원문 그대로 둔다).
-PREVIEW_ERRORS = {
-    "Use {{selected_tags}} at most once": "{{selected_tags}} 는 한 번만 쓸 수 있습니다",
-    "{{selected_tags}} must be a standalone tag without a weight wrapper":
-        "{{selected_tags}} 는 가중치로 감싸지 말고 쉼표 사이에 따로 적어 주세요",
-    "Unbalanced or unsupported numeric weight in E621 template": "템플릿의 가중치(숫자::태그 ::) 짝이 맞지 않습니다",
-    "weight must be a finite number between 0 and 2": "가중치는 0 ~ 2 사이 숫자여야 합니다",
-}
 
 
 class E621EventService:
@@ -63,11 +42,9 @@ class E621EventService:
         self.selected_tags_path = save_root / "e621_selected_tags_v1.json"
         self.selected_tags: list[dict[str, Any]] = []
         self.use_main_pipeline = True
-        self.auto_related_enabled = True
-        self.auto_related_limit = AUTO_RELATED_DEFAULT_LIMIT
-        self.auto_related_excluded: list[str] = []
         self._species_tags: set[str] | None = None
-        self._related_cache: tuple[Any, list[dict[str, Any]]] | None = None
+        # (검색어, 영어로 번역한 검색어). 한국어 검색어를 번역한 결과로 한 번 더 찾는다 - set_param("search_translation").
+        self.search_translation: tuple[str, str] | None = None
         self.data: dict[str, Any] | None = None
         self.research_metadata: Any | None = None
         self.search_text = ""
@@ -90,7 +67,7 @@ class E621EventService:
         loaded = self._ensure_loaded()
         visible_tags = self._visible_tags() if loaded else []
         selected = self._find_tag(self.selected_tag) if loaded else None
-        matches = self._search_index.matches(self.search_text, self.disable_wiki_search) if loaded else None
+        matches = self._matches() if loaded else None
         selected_match = (matches.get(self.selected_tag) if matches is not None and
             any(row["tag"] == self.selected_tag for row in visible_tags) else None)
         tag_limit = 300
@@ -107,6 +84,7 @@ class E621EventService:
             "data_loaded": loaded,
             "data_path": str(self.data_path),
             "search_text": self.search_text,
+            "search_translation": self._search_translation_payload() if loaded else None,
             "view_mode": self.view_mode,
             "content_filter": self.content_filter,
             "research_summary": self.research_metadata.summary() if loaded else {},
@@ -134,17 +112,14 @@ class E621EventService:
             "wiki": self._wiki_payload(selected),
             "testbench": self.testbench,
             "selected_tags": [dict(row) for row in self.selected_tags],
-            "auto_related": self._auto_related_payload() if loaded else None,
-            # 자동이 켜져 있으면 화면은 추천 줄을 안 그린다 - 그때는 만들지 않는다.
-            "selection_suggestions": self._suggestions_payload() if loaded and not self.auto_related_enabled else None,
-            "selection_preview": self._preview_payload() if loaded else None,
             "use_main_pipeline": self.use_main_pipeline,
             "weight_limits": {mode: dict(limits) for mode, limits in WEIGHT_LIMITS.items()},
         }
 
     # ── 관계 팩 → 화면 ────────────────────────────────────────────────────────
     # 응답 계약 = docs/e621_relations_contract.ko.md. 여기서는 화면이 그릴 만큼만 줄인다.
-    # 관계가 프롬프트에 스스로 들어가는 길은 하나뿐이다: 자동 조립이 켜져 있고, 그 태그가 트레이에 칩으로 보일 때.
+    # 어떤 관계도 프롬프트를 스스로 바꾸지 않는다 - 연구모듈은 고른 태그 하나를 보여 줄 뿐이다
+    # (사용자 지정 2026-10-03: 프롬프트 조립은 지원하지 않는다).
     RELATION_LIST_LIMIT = 12
 
     def _tag_brief(self, exact_tag: str, selected: set[str]) -> dict[str, Any]:
@@ -181,17 +156,24 @@ class E621EventService:
         implications = groups.get("implications") or []
         broader = [other(row) for row in implications if row.get("direction") == "outgoing"]
         narrower = [other(row) for row in implications if row.get("direction") == "incoming"]
-        # '함께' = 팩에 든 순서 그대로(함께 붙은 수 × 특이도). 종은 의존할 때만 보인다(자동 조립과 같은 규칙).
+        # '함께' = 팩에 든 순서 그대로(함께 붙은 수 × 특이도). 종은 의존할 때만 보인다.
         species = self._species()
         anchor_is_species = exact_tag in species
         cooccurrences = []
+        shown_species = []
         for target, pair, share, lift, _count in self.relations.cooccurring(exact_tag):
             if target in self.deleted_keys:
                 continue
-            if target in species and (anchor_is_species or share < SPECIES_DEPENDENT_SHARE):
-                continue
+            if target in species:
+                if anchor_is_species or share < SPECIES_DEPENDENT_SHARE:
+                    continue
+                shown_species.append(target)
             cooccurrences.append({**self._tag_brief(target, selected), "pair_count": int(pair),
                                   "share": round(share, 3), "lift": round(lift, 2)})
+        if len(shown_species) > 1:
+            # 종은 가장 구체적인 것만: fox 가 보이면 그것이 뜻하는 canine · canid 는 같은 말의 되풀이다.
+            covered = set().union(*(self.relations.implied(tag) for tag in shown_species))
+            cooccurrences = [row for row in cooccurrences if row["tag"] not in covered]
         return {
             "status": related.get("status"),
             "snapshot": (related.get("observations") or {}).get("snapshot"),
@@ -202,124 +184,53 @@ class E621EventService:
             "cooccurrences": cooccurrences,
         }
 
-    def _related_rows(self) -> list[dict[str, Any]]:
-        """고른 태그들과 함께 붙는 태그 - 숨김 · 제외 · 문턱을 걸기 전의 전체. 고른 태그가 그대로면 다시 안 만든다."""
-        anchors = tuple(row["exact_tag"] for row in self.selected_tags)
-        if self._related_cache is not None and self._related_cache[0] == anchors:
-            return self._related_cache[1]
-        selected = set(anchors)
-        species = self._species()
-        # 고른 태그가 이미 뜻하는 상위 태그(soles → feet, kimono → clothing)는 붙이지 않는다 - 자리만 차지한다.
-        implied: set[str] = set()
-        for anchor in anchors:
-            implied |= self.relations.implied(anchor)
-        merged: dict[str, dict[str, Any]] = {}
-        for anchor in anchors[:64]:
-            anchor_is_species = anchor in species
-            for target, pair, share, lift, count in self.relations.cooccurring(anchor):
-                if target in selected or target in implied or count < RELATED_MIN_POSTS:
-                    continue
-                is_species = target in species
-                # 종을 직접 골랐으면 종을 더 붙이지 않는다(fox → red_fox 는 원하는 것이 아니다).
-                if is_species and (anchor_is_species or share < SPECIES_DEPENDENT_SHARE):
-                    continue
-                entry = merged.setdefault(target, {"tag": target, "species": is_species, "edges": []})
-                entry["edges"].append((anchor, share, share * math.log2(lift), int(pair)))
-        # 종은 가장 구체적인 것만: fox 가 있으면 그것이 뜻하는 canine · canid 는 뺀다.
-        covered: set[str] = set()
-        for entry in merged.values():
-            if entry["species"]:
-                covered |= self.relations.implied(entry["tag"])
-        rows = [entry for tag, entry in merged.items() if tag not in covered]
-        self._related_cache = (anchors, rows)
-        return rows
+    # ── 번역한 검색어 ─────────────────────────────────────────────────────────
+    # 한국어 이름 · 검색어가 달린 태그는 17만 개 중 6,700개쯤이다 - 한국어로 치면 못 찾는 일이 많다.
+    # 그래서 검색어를 영어로 번역해 한 번 더 찾고, 그 결과를 원래 결과 **뒤에** 보탠다(사용자 지정 2026-10-03).
+    # 번역은 네트워크라 이 서비스가 하지 않는다 - 화면이 search_translate 로 청하면 명령 처리부(module_commands)가
+    # 뒤에서 번역해 search_translation 으로 넣는다.
+    def _translated_query(self) -> str:
+        pending = self.search_translation
+        return pending[1] if pending and pending[0] == self.search_text else ""
 
-    def _related_candidates(self, *, min_share: float, limit: int, excluded: set[str]) -> list[dict[str, Any]]:
-        """코어 순: 여러 태그에 걸친 것 먼저, 그다음 '함께 붙는 비율 × 특이도'. 종은 하나만, 맨 뒤에."""
-        if limit <= 0 or not self.selected_tags:
-            return []
-        selected = {row["exact_tag"] for row in self.selected_tags}
-        ranked = []
-        for entry in self._related_rows():
-            tag = entry["tag"]
-            if tag in self.deleted_keys or tag in excluded:
-                continue
-            # 종은 이미 의존 문턱을 넘은 것만 남아 있다.
-            edges = entry["edges"] if entry["species"] else [edge for edge in entry["edges"] if edge[1] >= min_share]
-            if not edges:
-                continue
-            ranked.append({**self._tag_brief(tag, selected), "species": entry["species"],
-                           "anchors": [edge[0] for edge in edges],
-                           "matched_anchor_count": len(edges),
-                           "share": round(max(edge[1] for edge in edges), 3),
-                           "pair_count": max(edge[3] for edge in edges),
-                           "_score": sum(edge[2] for edge in edges)})
-        ranked.sort(key=lambda row: (-row["matched_anchor_count"], -row["_score"], row["tag"]))
-        species = [row for row in ranked if row["species"]][:1]
-        chosen = [row for row in ranked if not row["species"]][:max(0, limit - len(species))] + species
-        for row in chosen:
-            row.pop("_score")
-        return chosen
+    def _matches(self):
+        return self._search_index.matches(self.search_text, self.disable_wiki_search, self._translated_query())
 
-    def _auto_tags(self) -> list[dict[str, Any]]:
-        if not self.auto_related_enabled:
-            return []
-        return self._related_candidates(min_share=AUTO_RELATED_MIN_SHARE, limit=self.auto_related_limit,
-                                        excluded=set(self.auto_related_excluded))
-
-    def _auto_related_payload(self) -> dict[str, Any]:
-        return {"enabled": self.auto_related_enabled, "limit": self.auto_related_limit,
-                "limit_max": AUTO_RELATED_MAX_LIMIT, "min_share": AUTO_RELATED_MIN_SHARE,
-                # 고른 태그가 없으면 팩을 읽지 않는다 - 읽는 데 0.3초쯤 걸리고, 그때는 쓸 일도 없다.
-                "available": bool(self.relations.load()) if self.selected_tags else None,
-                "tags": self._auto_tags(), "excluded": list(self.auto_related_excluded)}
-
-    def _suggestions_payload(self) -> dict[str, Any] | None:
-        if not self.selected_tags:
+    def _search_translation_payload(self) -> dict[str, Any] | None:
+        translated = self._translated_query()
+        if not translated:
             return None
-        # 쌍 관측의 합이라 근사다(여러 태그 전체의 교집합 수가 아니다).
-        return {"status": "available" if self.relations.load() else "missing", "approximate": True,
-                "candidates": self._related_candidates(min_share=SUGGEST_MIN_SHARE, limit=SUGGEST_LIMIT, excluded=set())}
-
-    def _assembly_rows(self) -> tuple[list[dict[str, Any]], int]:
-        """[생성] 과 미리보기가 함께 쓰는 조립 순서: 고른 태그(사용자 순서) → 자동(코어 순, 가중치 1)."""
-        manual = [dict(row) for row in self.selected_tags]
-        auto = [{"exact_tag": row["tag"], "weight": 1.0} for row in self._auto_tags()]
-        return manual + auto, len(manual)
-
-    def _preview_payload(self) -> dict[str, Any]:
-        """[생성] 이 보낼 글을 조각으로. 와일드카드는 철자 그대로 두고 메인 파이프라인은 타지 않는다."""
-        # 상태 조회는 모드를 못 읽는 환경에서도 죽지 않아야 한다([생성] 은 모드가 꼭 있어야 한다 - 그쪽은 그대로).
-        get_api_mode = getattr(self.app_context, "get_api_mode", None)
-        api_mode = get_api_mode() if callable(get_api_mode) else "NAI"
-        rows, manual_count = self._assembly_rows()
-        try:
-            tags, protected = prepare_template(self.testbench, rows, api_mode, expand=None)
-        except ValueError as exc:
-            return {"api_mode": api_mode, "segments": [], "error": PREVIEW_ERRORS.get(str(exc), str(exc))}
-        order = {token: index for index, token in enumerate(protected)}
-        segments = []
-        for token in tags:
-            index = order.get(token)
-            if index is not None and index < len(rows):
-                # prepare_template 은 조립 태그를 맨 먼저, 넘긴 순서대로 보호한다.
-                segments.append({"text": protected[token], "source": "manual" if index < manual_count else "auto",
-                                 "exact_tag": rows[index]["exact_tag"]})
-            else:
-                segments.append({"text": protected.get(token, token), "source": "template"})
-        return {"api_mode": api_mode, "segments": segments, "error": None}
+        matches = self._matches() or {}
+        return {"query": self.search_text, "translated": translated,
+                "added": sum(1 for tag in matches if E621ResearchIndex.is_translated_match(matches[tag]))}
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]]:
         self._ensure_loaded()
         raw = str(value or "")
         if key == "search":
             self.search_text = raw.strip().lower()
+            self.search_translation = None
             self.current_category = None
             self.current_level2 = None
             self.selected_tag = None
             self.tag_offset = 0
+        elif key == "search_cancel":
+            # 검색만 푼다 - 고른 분류 · 폴더 · 보기 · 필터는 그대로 둔다(전부 되돌리는 것은 reset).
+            self.search_text = ""
+            self.search_translation = None
+            self.tag_offset = 0
+        elif key == "search_translation":
+            # 그사이 검색어가 바뀌었으면 버린다. 번역이 원문과 같거나 한글이 남아 있으면 쓸 값이 아니다.
+            payload = value if isinstance(value, dict) else {}
+            query = str(payload.get("query") or "").strip().lower()
+            translated = search_key(payload.get("translated"))
+            if (query and query == self.search_text and translated and translated != search_key(query)
+                    and not HANGUL.search(translated)):
+                self.search_translation = (query, translated)
+                self.tag_offset = 0
         elif key == "reset":
             self.search_text = ""
+            self.search_translation = None
             self.current_category = None
             self.current_level2 = None
             self.selected_tag = None
@@ -381,11 +292,6 @@ class E621EventService:
                 self._edit_selected_tags(key, value)
             except (ValueError, OSError) as exc:
                 return self._toast(str(exc), level="error")
-        elif key.startswith("auto_related_"):
-            try:
-                self._edit_auto_related(key, value)
-            except (ValueError, OSError) as exc:
-                return self._toast(str(exc), level="error")
         elif key == "use_main_pipeline":
             self.use_main_pipeline = self._coerce_bool(value)
             self._save_settings()
@@ -398,7 +304,7 @@ class E621EventService:
                 from core.headless_random_prompt_service import pipeline_swap_lock
                 with pipeline_swap_lock(self.app_context):
                     expand, template_context = self._template_expander() if self.use_main_pipeline else (None, None)
-                    tags, protected = prepare_template(template, self._assembly_rows()[0], self.app_context.get_api_mode(),
+                    tags, protected = prepare_template(template, self.selected_tags, self.app_context.get_api_mode(),
                         expand=expand)
                     if not tags:
                         return self._toast("E621 testbench is empty", level="error")
@@ -483,16 +389,6 @@ class E621EventService:
             self.disable_wiki_search = self._coerce_bool(settings.get("disable_wiki_search", False))
             self.use_main_pipeline = self._coerce_bool(settings.get("use_main_pipeline", True))
             self.testbench = str(settings.get("testbench", DEFAULT_TESTBENCH))
-            self.auto_related_enabled = self._coerce_bool(settings.get("auto_related_enabled", True))
-            try:
-                limit = int(settings.get("auto_related_limit", AUTO_RELATED_DEFAULT_LIMIT))
-            except (TypeError, ValueError):
-                limit = AUTO_RELATED_DEFAULT_LIMIT
-            self.auto_related_limit = min(AUTO_RELATED_MAX_LIMIT, max(0, limit))
-            excluded = settings.get("auto_related_excluded", [])
-            self.auto_related_excluded = list(dict.fromkeys(
-                tag for tag in (excluded if isinstance(excluded, list) else []) if isinstance(tag, str) and tag
-            ))[:AUTO_RELATED_EXCLUDED_MAX]
         try:
             saved = json.loads(self.selected_tags_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -521,41 +417,12 @@ class E621EventService:
                     "disable_wiki_search": self.disable_wiki_search,
                     "use_main_pipeline": self.use_main_pipeline,
                     "testbench": self.testbench,
-                    "auto_related_enabled": self.auto_related_enabled,
-                    "auto_related_limit": self.auto_related_limit,
-                    "auto_related_excluded": self.auto_related_excluded,
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             encoding="utf-8",
         )
-
-    def _edit_auto_related(self, key: str, value: Any) -> None:
-        if key == "auto_related_enabled":
-            self.auto_related_enabled = self._coerce_bool(value)
-        elif key == "auto_related_limit":
-            if isinstance(value, bool):
-                raise ValueError("auto_related_limit must be an integer")
-            try:
-                limit = int(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("auto_related_limit must be an integer") from exc
-            self.auto_related_limit = min(AUTO_RELATED_MAX_LIMIT, max(0, limit))
-        elif key in {"auto_related_exclude", "auto_related_include"}:
-            exact = value.get("exact_tag") if isinstance(value, dict) else value
-            if not isinstance(exact, str) or self._find_tag(exact) is None:
-                raise ValueError("Unknown exact_tag in E621 dictionary")
-            kept = [tag for tag in self.auto_related_excluded if tag != exact]
-            if key == "auto_related_exclude":
-                # 새로 뺀 것을 남기고 가장 오래된 것부터 밀어낸다.
-                kept = (kept + [exact])[-AUTO_RELATED_EXCLUDED_MAX:]
-            self.auto_related_excluded = kept
-        elif key == "auto_related_reset":
-            self.auto_related_excluded = []
-        else:
-            raise ValueError(f"Unknown E621 auto-related command: {key}")
-        self._save_settings()
 
     def _edit_selected_tags(self, key: str, value: Any) -> None:
         rows = [dict(row) for row in self.selected_tags]
@@ -596,7 +463,7 @@ class E621EventService:
 
     def _categories(self) -> list[dict[str, Any]]:
         index = self._search_index
-        matches = index.matches(self.search_text, self.disable_wiki_search)
+        matches = self._matches()
         categories = []
         for section, name, folder_count in sorted(index.categories):
             rows = index.category_rows[(section, name)]
@@ -620,7 +487,7 @@ class E621EventService:
         section, node = self._category_data(self.current_category)
         if not isinstance(node, dict):
             return []
-        matches = index.matches(self.search_text, self.disable_wiki_search)
+        matches = self._matches()
         folders = []
         for name in sorted(node):
             rows = index.filter_rows(index.folder_rows.get((section, self.current_category, name), []),
@@ -636,7 +503,7 @@ class E621EventService:
         return index.visible(category=self.current_category, folder=self.current_level2,
             content_filter=self.content_filter, hidden=self.deleted_keys,
             starred=self.starred_keys, starred_only=self.view_mode == "starred",
-            matches=index.matches(self.search_text, self.disable_wiki_search))
+            matches=self._matches())
 
     @staticmethod
     def _search_key(value: Any) -> str:
@@ -645,7 +512,7 @@ class E621EventService:
 
     def _filter_tags(self, tags: list[dict[str, Any]], *, include_search: bool = True) -> list[dict[str, Any]]:
         index = self._search_index
-        matches = index.matches(self.search_text, self.disable_wiki_search) if include_search else None
+        matches = self._matches() if include_search else None
         rows = index.filter_rows(tags, content_filter=self.content_filter, hidden=self.deleted_keys,
                                  starred=self.starred_keys, starred_only=self.view_mode == "starred", matches=matches)
         if matches is not None:

@@ -11,11 +11,88 @@ from typing import Any
 
 from core.site_tag_repository import collect_legacy_tags
 
-TAG_NAME, KOREAN_NAME, KOREAN_KEYWORDS, KOREAN_DESCRIPTION, STORED_BODY = 1, 2, 4, 8, 16
+TAG_NAME, KOREAN_NAME, KOREAN_KEYWORDS, KOREAN_DESCRIPTION, STORED_BODY, TRANSLATED_QUERY = 1, 2, 4, 8, 16, 32
 MATCH_FIELDS = ((TAG_NAME, "tag_name"), (KOREAN_NAME, "korean_name"),
                 (KOREAN_KEYWORDS, "korean_keywords"), (KOREAN_DESCRIPTION, "korean_description"),
-                (STORED_BODY, "stored_body"))
+                (STORED_BODY, "stored_body"), (TRANSLATED_QUERY, "translated_query"))
 HANGUL = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+# ── 색 변형 태그 ──────────────────────────────────────────────────────────────
+# '일반 미분류' 를 게시물 수 순으로 보면 상위 300개 중 286개가 pink_nipples · black_penis · white_shirt 같은
+# '색 + 부위 · 옷' 이었다(사용자 제보 2026-10-03 "노이즈 같아요"). 그 분류의 목록에서만 치운다 - 검색과 전체 목록에는 남는다.
+#
+# 색 낱말로 시작한다고 다 색 변형이 아니다(tan_line · golden_shower · black_eye_(injury) · orange_juice · white_house).
+# 그래서 **나머지가 같은 태그가 여러 색으로 있을 때만** 색 변형으로 본다:
+#   · 색 낱말(들) + 나머지: 그 나머지에 색이 COLOR_FAMILY_MIN 가지 이상(3~4가지면 orange_juice · green_room 이 걸린다).
+#   · 명암만 붙은 것(dark_skin · light_fur · pale_body): 그 나머지에 색이 TONE_FAMILY_MIN 가지 이상
+#     (light_beam · dark_room · light_truck · dark_magic 은 남는다).
+#   · 괄호로 시작하는 나머지(gold_(metal) · lavender_(flower))와 낱말 하나짜리(rainbow · bronze)는 건드리지 않는다.
+UNCLASSIFIED_GENERAL = "일반 미분류"
+COLOR_FAMILY_MIN = 5
+TONE_FAMILY_MIN = 12
+COLOR_WORDS = frozenset({
+    "black", "white", "grey", "gray", "red", "blue", "green", "yellow", "orange", "purple", "pink", "brown", "tan",
+    "teal", "cyan", "magenta", "gold", "golden", "silver", "blonde", "beige", "cream", "turquoise", "violet",
+    "lavender", "maroon", "crimson", "indigo", "aqua", "navy", "lime", "amber", "bronze", "copper", "rainbow",
+    "multicolored", "monotone", "colored", "ginger", "platinum", "auburn", "scarlet", "olive", "peach", "ivory"})
+# 색 앞에 붙는 꾸밈말(light_blue_eyes · glowing_red_eyes). 색 낱말이 뒤따를 때만 색의 일부로 본다.
+_COLOR_MODIFIERS = frozenset({"light", "dark", "pale", "bright", "pastel", "neon", "deep", "glowing"})
+# 색 없이 명암만으로도 색 변형이 되는 낱말.
+_TONE_WORDS = frozenset({"dark", "light", "pale"})
+_COLOR_PHRASES = frozenset({("two", "tone"), ("multi", "tone"), ("three", "tone")})
+_COLOR_HEADS = COLOR_WORDS | _COLOR_MODIFIERS | {"two", "multi", "three"}
+
+
+def _split_color(tag: str) -> tuple[str, str, bool] | None:
+    """(색 부분, 나머지, 명암만인가). 색으로 시작하지 않으면 None."""
+    tokens = tag.split("_")
+    index = 0
+    while index < len(tokens) and tokens[index] in _COLOR_MODIFIERS:
+        index += 1
+    start = index
+    while index < len(tokens):
+        if tokens[index] in COLOR_WORDS:
+            index += 1
+        elif tuple(tokens[index:index + 2]) in _COLOR_PHRASES:
+            index += 2
+        elif (tokens[index] == "and" and index > start and index + 1 < len(tokens)
+              and tokens[index + 1] in COLOR_WORDS):
+            index += 1
+        else:
+            break
+    if index > start:
+        return "_".join(tokens[:index]), "_".join(tokens[index:]), False
+    if tokens[0] in _TONE_WORDS and len(tokens) > 1:
+        return tokens[0], "_".join(tokens[1:]), True
+    return None
+
+
+def color_variant_tags(names) -> set[str]:
+    """색만 다른 변형 태그(white_fur · blue_eyes · dark_skin …). 규칙은 위 주석."""
+    families: dict[str, dict[str, list[str]]] = {}
+    tones: dict[str, list[str]] = {}
+    for tag in names:
+        if tag.split("_", 1)[0] not in _COLOR_HEADS:
+            continue  # 17만 개 중 색 · 명암 낱말로 시작하는 것만 자세히 본다
+        parts = _split_color(tag)
+        if parts is None:
+            continue
+        color, rest, tone_only = parts
+        if rest.startswith("(") or (not rest and "_" not in tag):
+            continue
+        if tone_only:
+            tones.setdefault(rest, []).append(tag)
+        else:
+            families.setdefault(rest, {}).setdefault(color, []).append(tag)
+    found: set[str] = set()
+    for rest, by_color in families.items():
+        if len(by_color) >= COLOR_FAMILY_MIN:
+            for tags in by_color.values():
+                found.update(tags)
+    for rest, tags in tones.items():
+        if len(families.get(rest, ())) >= TONE_FAMILY_MIN:
+            found.update(tags)
+    return found
 
 
 def search_key(value: Any) -> str:
@@ -28,6 +105,8 @@ class E621ResearchIndex:
         self.categories = []
         self.category_rows = {}
         self.folder_rows = {}
+        # 색 묶음은 사전 전체에서 센다(분류된 white_fur 도 'fur' 묶음의 한 색이다). 치우는 곳은 '일반 미분류' 뿐이다.
+        self.color_variants = color_variant_tags(metadata._native) if UNCLASSIFIED_GENERAL in (tree.get("General") or {}) else set()
         for section in ("General", "Species"):
             section_data = tree.get(section, {})
             if not isinstance(section_data, dict):
@@ -39,6 +118,8 @@ class E621ResearchIndex:
                     rows = []
                     for folder, child in node.items():
                         values = collect_legacy_tags(child)
+                        if section == "General" and name == UNCLASSIFIED_GENERAL and self.color_variants:
+                            values = [row for row in values if row["tag"] not in self.color_variants]
                         self.folder_rows[(section, name, folder)] = values
                         rows.extend(values)
                 else:
@@ -72,14 +153,28 @@ class E621ResearchIndex:
         self._query_key = None
         self._matches = None
 
-    def matches(self, query: str, disable_wiki: bool) -> dict[str, tuple[int, int, int]] | None:
-        """Return (field bits, compact-only bits, grade); cache one query only."""
-        key = (query, disable_wiki)
+    def matches(self, query: str, disable_wiki: bool, translated: str = "") -> dict[str, tuple[int, int, int]] | None:
+        """Return (field bits, compact-only bits, grade); cache one query only.
+
+        `translated` = the query translated to English. Its matches are only *added*: tags the
+        original query already found keep their entry, new ones get TRANSLATED_QUERY and rank
+        after every original match (grade + 2). A Korean query that finds nothing falls back to them.
+        """
+        key = (query, disable_wiki, translated)
         if key == self._query_key:
             return self._matches
         if not query:
             self._query_key, self._matches = key, None
             return None
+        matches = self._scan(query, disable_wiki)
+        if translated:
+            for tag, (bits, compact, grade) in self._scan(translated, disable_wiki).items():
+                if tag not in matches:
+                    matches[tag] = (bits | TRANSLATED_QUERY, compact, grade + 2)
+        self._query_key, self._matches = key, matches
+        return matches
+
+    def _scan(self, query: str, disable_wiki: bool) -> dict[str, tuple[int, int, int]]:
         needle = search_key(query)
         compact = needle.replace(" ", "") if HANGUL.search(needle) else None
         pattern = re.compile(re.escape(needle).replace(r"\ ", r"[\s_]+")) if " " in needle else None
@@ -106,7 +201,6 @@ class E621ResearchIndex:
                 if (pattern.search(body) if pattern else needle in body):
                     previous = matches.get(tag, (0, 0, 1))
                     matches[tag] = (previous[0] | STORED_BODY, previous[1], previous[2])
-        self._query_key, self._matches = key, matches
         return matches
 
     def filter_rows(self, rows, *, content_filter, hidden, starred, starred_only, matches):
@@ -147,6 +241,10 @@ class E621ResearchIndex:
                 return self.first_page
             return sorted(rows, key=self.sort_key)[offset:offset + limit]
         return rows[offset:offset + limit]
+
+    @staticmethod
+    def is_translated_match(match) -> bool:
+        return bool(match and match[0] & TRANSLATED_QUERY)
 
     @staticmethod
     def match_payload(match):

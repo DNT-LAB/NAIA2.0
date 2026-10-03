@@ -35,6 +35,35 @@ import {contentToPercent, createPosStage, gridSvg} from './posStage.mjs?v=202608
 // 빠져 있었다**(Large/Wallpaper 가 없어 인페인트 도중 유료 해상도로 갈 길이 없었다).
 const CANVAS_SIZES = ['832 x 1216', '1216 x 832', '1024 x 1024', '1152 x 896', '896 x 1152'];
 const GRID_KEY = 'naia.inpaintcanvas.grid.v1';
+// 레이어 목록을 펼쳐 둘지(사용자마다 기억한다).
+const LAYERS_OPEN_KEY = 'naia.inpaintcanvas.layers.v1';
+
+// 레이어 목록 · 단축키 단추에 쓰는 작은 아이콘(글자보다 덜 자리 먹고, 곁눈으로 갈린다).
+const svg = (body, size = 14) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none"`
+  + ` stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICON = {
+  layers: svg('<path d="M12 3 2.5 8 12 13l9.5-5z"/><path d="m2.5 12.5 9.5 5 9.5-5"/><path d="m2.5 16.5 9.5 5 9.5-5"/>', 13),
+  eye: svg('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', 13),
+  eyeOff: svg('<path d="M3 3l18 18"/><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>', 13),
+  trash: svg('<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>', 13),
+  up: svg('<path d="m6 15 6-6 6 6"/>', 13),
+  down: svg('<path d="m6 9 6 6 6-6"/>', 13),
+  fold: svg('<path d="m9 6 6 6-6 6"/>', 13),
+  plus: svg('<path d="M12 5v14M5 12h14"/>', 12),
+  keys: svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>', 14),
+};
+
+// 도크 머리의 단축키 툴팁. 예전에는 머리 줄에 글자로 늘어놓아 좁은 화면에서 잘렸다
+// ("…숫자 위치는 P…" - 사용자 제보 2026-10-03). 무엇을 누르면 되는지는 필요할 때만 본다.
+const CANVAS_KEYS = [
+  [['끌기'], '레이어 이동 · 누른 자리의 레이어가 골라집니다'],
+  [['휠'], '확대 / 축소 (커서 자리 기준)'],
+  [['Ctrl', '휠'], '회전'],
+  [['가운데 끌기'], '확대 · Ctrl 을 쥐면 회전'],
+  [['방향키'], '1px 이동 · Shift 16px'],
+  [['Ctrl', 'Z'], '이동 · 회전 되돌리기'],
+  [['0'], '고른 레이어 초기화'],
+];
 
 // 백엔드 `clamp_scale` 과 같은 한계. 어긋나면 화면이 보내 놓고 다른 값을 되받는다.
 const SCALE_MIN_PCT = 10;
@@ -134,6 +163,11 @@ export function createInpaintCanvasPanel({
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
   let rangeDragging = false;
   const transformTimers = {};
+  // 레이어 목록(뷰어 오른쪽에 떠 있다). 도크와 따로 그린다 - 도크는 아래 가운데에 있고
+  // 목록은 길어질 수 있어서 한 상자에 넣으면 캔버스를 그만큼 가린다.
+  let layersEl = null;
+  let layerPop = null;        // [+ 이미지] 를 눌러 연 고르기 팝업
+  let layerUploading = false;
 
   const read = (key, fallback) => {
     try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
@@ -143,25 +177,135 @@ export function createInpaintCanvasPanel({
   };
 
   let showGrid = read(GRID_KEY, '1') !== '0';
+  let showLayers = read(LAYERS_OPEN_KEY, '1') !== '0';
 
   const canvasSize = () => ({
     w: Number(state?.canvas_width) || 0,
     h: Number(state?.canvas_height) || 0,
   });
 
+  // ── 레이어(사용자 지정 2026-10-03) ─────────────────────────────────────
+  // 베이스는 서버의 `base_*` 키 그대로고(예전 계약), 덧붙인 이미지는 `layers` 에 함께
+  // 실려 온다(아래 -> 위, 베이스 포함). 이동·확대·회전·되돌리기는 **고른 레이어**
+  // (`active_layer`)에 먹는다 - 손으로 고르거나, 그림 위를 누르면 그 자리 레이어가 골라진다.
+
+  /** 아래 -> 위. 레이어를 모르는 옛 서버면 베이스 한 줄을 지어 내 예전처럼 돈다. */
+  function layerRows() {
+    const rows = Array.isArray(state?.layers) ? state.layers : [];
+    if (rows.length || !state) return rows;
+    return [{
+      id: 'base', kind: 'base', name: '원본', visible: true,
+      offset_x: state.base_offset_x, offset_y: state.base_offset_y,
+      width: state.base_width, height: state.base_height,
+      placed_width: state.placed_width, placed_height: state.placed_height,
+      scale: state.base_scale, rotation: state.base_rotation, thumb: '',
+    }];
+  }
+  const extraLayerCount = () => layerRows().filter(row => row.id !== 'base').length;
+  function activeLayerId() {
+    const id = String(state?.active_layer || 'base');
+    return layerRows().some(row => row.id === id) ? id : 'base';
+  }
+  const layerRow = (id) => layerRows().find(row => row.id === id) || null;
+
+  /** 레이어의 지금 기하(캔버스 픽셀). `placedW/H` 는 회전까지 먹인 뒤의 축정렬 상자다. */
+  function tx(id = activeLayerId()) {
+    const row = layerRow(id) || {};
+    const scale = Number(row.scale) || 1;
+    const w = Number(row.width) || 0;
+    const h = Number(row.height) || 0;
+    return {
+      id,
+      x: Math.round(Number(row.offset_x) || 0),
+      y: Math.round(Number(row.offset_y) || 0),
+      scale,
+      rotation: Number(row.rotation) || 0,
+      w,
+      h,
+      placedW: Number(row.placed_width) || Math.round(w * scale),
+      placedH: Number(row.placed_height) || Math.round(h * scale),
+    };
+  }
+
+  /** 서버 echo 전에 화면 값을 먼저 맞춘다(규칙 3). 베이스는 예전 `base_*` 키에도 적는다 -
+   *  두 곳이 갈리면 다음 조작이 어느 쪽에서 시작할지 알 수 없다. */
+  function patchLayer(id, patch) {
+    if (!state) return;
+    const row = (Array.isArray(state.layers) ? state.layers : []).find(item => item.id === id);
+    if (row) Object.assign(row, patch);
+    if (id !== 'base') return;
+    if ('offset_x' in patch) state.base_offset_x = patch.offset_x;
+    if ('offset_y' in patch) state.base_offset_y = patch.offset_y;
+    if ('scale' in patch) state.base_scale = patch.scale;
+    if ('rotation' in patch) state.base_rotation = patch.rotation;
+  }
+  const setLayerOffset = (id, x, y) => patchLayer(id, {offset_x: x, offset_y: y});
+
+  /** 레이어 이동 한 번. ⚠️ 베이스는 **예전 키**(`base_offset`)로 보낸다 - 그쪽 규칙
+   *  (캔버스 자동 켜기 · 앵커)은 실측으로 맞춰 둔 것이라 새 길로 우회하지 않는다. */
+  function sendOffset(id, x, y) {
+    if (id === 'base') send('base_offset', {x, y});
+    else send('layer_offset', {id, x, y});
+  }
+
+  /** 확대/회전은 마지막 값만, 레이어마다 따로 묶는다(다른 레이어의 값이 덮이지 않게). */
+  function sendLayerTransform(id, key, payload) {
+    if (id === 'base') sendTransform(key === 'scale' ? 'base_scale' : 'base_rotation', payload);
+    else sendTransform(`layer_${key}:${id}`, {...payload, id}, `layer_${key}`);
+  }
+
+  /** 그림 위의 한 점(캔버스 픽셀)에서 **맨 위에 보이는** 레이어. 없으면 ''.
+   *
+   *  축정렬 상자가 아니라 **돌린 사각형**으로 잰다 - 돌린 그림의 모서리 바깥 쐐기를
+   *  눌렀는데 그 레이어가 잡히면 아래 레이어를 영영 못 고른다.
+   *  ⚠️ PIL 은 양의 각도를 **반시계**로 돌린다(y 가 아래로 자라는 화면 좌표). 점을
+   *     거꾸로(시계 방향) 돌려 레이어 자신의 좌표로 되돌린 뒤 반폭과 비교한다.
+   */
+  function layerAt(point) {
+    if (!point) return '';
+    const rows = layerRows();
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const row = rows[i];
+      if (row.visible === false) continue;
+      const t = tx(row.id);
+      const halfW = (t.w * t.scale) / 2;
+      const halfH = (t.h * t.scale) / 2;
+      if (!(halfW > 0) || !(halfH > 0)) continue;
+      const dx = point.x - (t.x + t.placedW / 2);
+      const dy = point.y - (t.y + t.placedH / 2);
+      const rad = (t.rotation * Math.PI) / 180;
+      const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+      const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+      if (Math.abs(lx) <= halfW && Math.abs(ly) <= halfH) return row.id;
+    }
+    return '';
+  }
+
+  /** 레이어를 고른다. 화면은 즉시 바꾸고(도크 슬라이더 · 목록 · 테두리) 서버엔 알린다. */
+  function selectLayer(id) {
+    if (!state || !layerRow(id) || id === activeLayerId()) return;
+    // 미뤄 둔 변형은 원래 레이어 몫이다 - 먼저 흘려보낸다.
+    flushTransforms();
+    state.active_layer = id;
+    send('layer_select', {id});
+    refreshChrome();
+  }
+
   function send(key, value) {
     try { setModuleParam('img2img', key, value); }
     catch (error) { showToast?.(`캔버스 설정 실패: ${error.message}`, 'error'); }
   }
 
-  /** 변형은 마지막 값만 보낸다. 슬라이더 한 번에 수십 번 합성시키지 않는다. */
-  function sendTransform(key, value) {
+  /** 변형은 마지막 값만 보낸다. 슬라이더 한 번에 수십 번 합성시키지 않는다.
+   *  `key` 는 묶음 이름(타이머), `param` 은 실제로 보낼 파라미터다(레이어는 둘이 다르다). */
+  function sendTransform(key, value, param = key) {
     if (transformTimers[key]) clearTimeout(transformTimers[key].id);
     transformTimers[key] = {
       value,
+      param,
       id: setTimeout(() => {
         delete transformTimers[key];
-        send(key, value);
+        send(param, value);
       }, TRANSFORM_DEBOUNCE_MS),
     };
   }
@@ -181,7 +325,7 @@ export function createInpaintCanvasPanel({
       if (!pending) return;
       clearTimeout(pending.id);
       delete transformTimers[key];
-      send(key, pending.value);
+      send(pending.param || key, pending.value);
     });
   }
 
@@ -311,12 +455,41 @@ export function createInpaintCanvasPanel({
           : '다른 이미지에서 프롬프트를 가져옵니다'}">프롬프트 복원</button>`;
   }
 
+  /** 단축키 툴팁. 단추에 올리거나 초점을 주면 위로 카드가 뜬다(CSS `:hover` · `:focus-within`).
+   *
+   *  ⚠️ `title` 을 달지 않는다 - 앱의 전역 툴팁(`data-naia-title`)이 그것을 빨아들여
+   *     카드 위에 한 줄짜리 툴팁이 하나 더 뜬다.
+   */
+  function keysHtml() {
+    const rows = CANVAS_KEYS.map(([combo, label]) => `<div class="ic-keys-row">`
+      + `<span class="ic-keys-combo">${combo.map(key => `<kbd>${escHtml(key)}</kbd>`).join('')}</span>`
+      + `<span class="ic-keys-label">${escHtml(label)}</span></div>`).join('');
+    return `<span class="ic-keys">`
+      + `<button type="button" class="ic-btn ic-icon-btn ic-keys-btn" aria-label="캔버스 단축키">${ICON.keys}</button>`
+      + `<span class="ic-keys-card" role="tooltip">`
+      + `<span class="ic-keys-title">캔버스 조작</span>${rows}`
+      + `<span class="ic-keys-foot">캐릭터 숫자 위치는 POS 에서 고칩니다</span>`
+      + `</span></span>`;
+  }
+
+  /** 지금 이동·확대·회전이 먹는 레이어. 레이어가 둘 이상일 때만 띄운다 - 하나뿐이면
+   *  당연한 것을 굳이 적어 머리 줄만 붐빈다. 누르면 레이어 목록을 편다. */
+  function targetChipHtml() {
+    if (!extraLayerCount()) return '';
+    const row = layerRow(activeLayerId());
+    return `<button type="button" class="ic-target" data-ic="show-layers"`
+      + ` title="이동 · 확대 · 회전이 이 레이어에 먹습니다 - 눌러서 레이어 목록">`
+      + `${ICON.layers}<span>${escHtml(row?.name || '원본')}</span></button>`;
+  }
+
   function dockHtml() {
     const {w, h} = canvasSize();
     const editing = viewMode === 'edit';
     const off = editing ? '' : 'disabled';
-    const scalePct = clampPct((Number(state.base_scale) || 1) * 100);
-    const rotation = wrapDeg(state.base_rotation);
+    const active = tx();
+    const scalePct = clampPct(active.scale * 100);
+    const rotation = wrapDeg(active.rotation);
+    const onBase = active.id === 'base';
     return `
       <div class="ic-bar ic-bar-head ic-nowrap">
         <span class="ic-title">인페인트</span>
@@ -326,9 +499,8 @@ export function createInpaintCanvasPanel({
         </div>
         ${restoreButtonHtml()}
         <span class="ic-spacer"></span>
-        <span class="ic-hint">${editing
-          ? '끌기=이동 · 휠=크기 · Ctrl+휠=회전 · 방향키=1px(Shift 16) · 0=초기화 · 숫자 위치는 POS 에서'
-          : '생성 결과를 보는 중입니다.'}</span>
+        ${editing ? targetChipHtml() : ''}
+        ${editing ? keysHtml() : ''}
       </div>
       ${state.canvas_purpose === 'character_asset' ? `
       <div class="ic-bar ic-bar-asset ic-nowrap">
@@ -345,10 +517,12 @@ export function createInpaintCanvasPanel({
           <div class="ic-row">
             <span class="ic-label">캔버스</span>
             <select class="ic-select" data-ic="size" ${off} aria-label="캔버스 해상도">${sizeOptions(w, h)}</select>
-            <button type="button" class="ic-btn" data-ic="undo" ${(editing && undoStack.length) ? '' : 'disabled'}
+            <button type="button" class="ic-btn ic-icon-btn" data-ic="undo" ${(editing && undoStack.length) ? '' : 'disabled'}
               title="이동/회전을 한 단계 되돌립니다 (Ctrl+Z)">&#8630;</button>
             <button type="button" class="ic-btn" data-ic="reset" ${off}
-              title="원본 그대로로 되돌립니다 — 크기·위치·확대·회전">초기화</button>
+              title="${onBase
+                ? '원본 그대로로 되돌립니다 — 크기·위치·확대·회전'
+                : '고른 레이어를 처음 자리로 되돌립니다 — 위치·확대·회전'}">초기화</button>
             <button type="button" class="ic-btn${showGrid ? ' is-on' : ''}" data-ic="grid" ${off} title="격자">격자</button>
           </div>
           <div class="ic-row">
@@ -361,12 +535,12 @@ export function createInpaintCanvasPanel({
           </div>
           <div class="ic-row">
             <span class="ic-label">회전</span>
-            <button type="button" class="ic-btn ic-nudge" data-ic="rot-down" ${off} title="1° 반시계">−</button>
+            <button type="button" class="ic-btn ic-nudge" data-ic="rot-down" ${off} title="1° 시계 방향">−</button>
             <input type="range" class="ic-slider-wide" min="0" max="359" step="1" value="${rotation}"
                    data-ic-tr="rotation" ${off} aria-label="회전 각도">
             <strong class="ic-val" data-ic-val="rotation">${rotation}°</strong>
-            <button type="button" class="ic-btn ic-nudge" data-ic="rot-up" ${off} title="1° 시계">+</button>
-            <button type="button" class="ic-btn" data-ic="rot-quarter" ${off} title="90° 돌리기">⟳</button>
+            <button type="button" class="ic-btn ic-nudge" data-ic="rot-up" ${off} title="1° 반시계 방향">+</button>
+            <button type="button" class="ic-btn" data-ic="rot-quarter" ${off} title="90° 반시계로 돌리기">⟲</button>
           </div>
         </section>
         ${runColHtml(editing)}
@@ -432,6 +606,9 @@ export function createInpaintCanvasPanel({
     // 뷰어에 표식을 남겨 결과 이미지를 숨긴다 - 캔버스가 반투명하게 겹치면 옮긴
     // 자리가 원본과 겹쳐 보여 무엇이 진짜인지 알 수 없다.
     viewer?.classList.toggle('ic-editing', editing);
+    // 목록을 **먼저** 그린다 - 펼친 목록은 plane 에 오른쪽 여백을 만들고(CSS `:has`),
+    // 아래 `fitStage` 가 그 여백을 재서 스테이지를 앉힌다.
+    renderLayers(editing);
     if (!editing) { plane.innerHTML = ''; plane.hidden = true; stageEl = null; return; }
     plane.hidden = false;
 
@@ -448,6 +625,7 @@ export function createInpaintCanvasPanel({
           ? `<div class="ic-mask${flashMask ? ' is-flash' : ''}"
               style="--ic-mask-url:url('${escHtml(state.mask_preview)}')"></div>`
           : ''}
+        <div class="ic-sel" data-ic-sel="1" hidden></div>
         <div class="ic-ghost" data-ic-ghost="1" hidden></div>
         ${chars.map(c => {
           const p = contentToPercent(c.position.x, c.position.y, w, h);
@@ -463,7 +641,287 @@ export function createInpaintCanvasPanel({
     stageEl = plane.querySelector('[data-ic-stage]');
     // 번쩍임은 **한 번뿐**이다. 안 끄면 다음 렌더마다 다시 번쩍여 방해가 된다.
     flashMask = false;
+    placeSelection();
     fitStage();
+  }
+
+  /** 고른 레이어를 점선으로 두른다. 레이어가 둘 이상일 때만 - 하나뿐이면 고를 것이 없다.
+   *
+   *  ⚠️ 축정렬 상자(`placed_*`)가 아니라 **돌리기 전 사각형**을 놓고 돌린다(유령과 같은
+   *     이유 - `beginMiddleDrag` 주석). PIL 은 반시계로 돌리므로 CSS 는 음수 각도다.
+   */
+  function placeSelection() {
+    const sel = stageEl?.querySelector('[data-ic-sel]');
+    if (!sel) return;
+    const {w, h} = canvasSize();
+    const t = tx();
+    const preW = t.w * t.scale;
+    const preH = t.h * t.scale;
+    if (!extraLayerCount() || !(w > 0) || !(h > 0) || !(preW > 0) || !(preH > 0)) {
+      sel.hidden = true;
+      return;
+    }
+    sel.hidden = false;
+    sel.classList.toggle('is-hidden-layer', layerRow(t.id)?.visible === false);
+    sel.style.left = `${((t.x + t.placedW / 2) / w) * 100}%`;
+    sel.style.top = `${((t.y + t.placedH / 2) / h) * 100}%`;
+    sel.style.width = `${(preW / w) * 100}%`;
+    sel.style.height = `${(preH / h) * 100}%`;
+    sel.style.transform = `translate(-50%, -50%) rotate(${-t.rotation}deg)`;
+  }
+
+  /** 레이어를 바꿔 골랐을 때 **스테이지는 그대로 두고** 둘레만 다시 그린다.
+   *
+   *  ⚠️ 스테이지를 다시 만들면 안 된다 - 그림 위를 눌러 고르는 순간 곧바로 끌기가
+   *     시작되는데, 그 노드를 갈아 끼우면 끌기가 죽은 노드를 붙잡는다.
+   */
+  function refreshChrome() {
+    if (!state?.active || !panel || panel.hidden) return;
+    if (!rangeDragging && !typingInPanel()) {
+      closeRestorePicker();
+      panel.innerHTML = dockHtml();
+    }
+    renderLayers(viewMode === 'edit');
+    placeSelection();
+  }
+
+  // ── 레이어 목록 ─────────────────────────────────────────────────────────
+  function layerCardHtml(row, {active, top, bottom}) {
+    const base = row.id === 'base';
+    const hidden = row.visible === false;
+    const pct = Math.round((Number(row.scale) || 1) * 100);
+    const rot = Math.round(Number(row.rotation) || 0);
+    const meta = hidden ? '숨김' : `${pct}%${rot ? ` · ${rot}°` : ''}`;
+    const tool = (act, icon, title, disabled = false) => `<button type="button" class="ic-lbtn"`
+      + ` data-ic-layer-act="${act}"${disabled ? ' disabled' : ''} title="${escHtml(title)}">${icon}</button>`;
+    return `<li class="ic-layer${active ? ' is-active' : ''}${hidden ? ' is-hidden' : ''}"`
+      + ` data-ic-layer="${escHtml(row.id)}"${active ? ' aria-current="true"' : ''}>`
+      + `<span class="ic-layer-thumb">${row.thumb
+        ? `<img src="${escHtml(row.thumb)}" alt="" draggable="false">` : ''}</span>`
+      + `<span class="ic-layer-text">`
+      + `<span class="ic-layer-name">${escHtml(row.name || (base ? '원본' : '이미지'))}</span>`
+      + `<span class="ic-layer-meta">${escHtml(meta)}</span></span>`
+      + `<span class="ic-layer-tools">`
+      + tool('visible', hidden ? ICON.eyeOff : ICON.eye,
+        hidden ? '보이기' : '숨기기 — 숨긴 자리는 다시 그려집니다')
+      + tool('remove', ICON.trash, base ? '원본은 지울 수 없습니다 — 숨기기를 쓰세요' : '레이어 지우기', base)
+      + tool('up', ICON.up, '한 칸 위로', top)
+      + tool('down', ICON.down, '한 칸 아래로', bottom)
+      + `</span></li>`;
+  }
+
+  function layersHtml() {
+    const rows = layerRows().slice().reverse();           // 화면은 위가 먼저다
+    const count = rows.length;
+    if (!showLayers) {
+      return `<button type="button" class="ic-layers-pill" data-ic-layers="open" aria-expanded="false"`
+        + ` title="레이어 목록 펴기">${ICON.layers}<span>레이어</span><b>${count}</b></button>`;
+    }
+    const limit = Number(state?.layer_limit) || 8;
+    const full = extraLayerCount() >= limit;
+    const active = activeLayerId();
+    return `<div class="ic-layers-head">`
+      + `<span class="ic-layers-title">${ICON.layers}<span>레이어</span><b>${count}</b></span>`
+      + `<button type="button" class="ic-lbtn ic-layers-add" data-ic-layers="add"`
+      + `${(full || layerUploading) ? ' disabled' : ''} title="${full
+        ? `레이어는 ${limit}장까지 올릴 수 있습니다`
+        : '이미지를 레이어로 올립니다 — 캔버스에 끌어다 놓아도 됩니다'}">`
+      + `${ICON.plus}<span>${layerUploading ? '올리는 중…' : '이미지'}</span></button>`
+      + `<button type="button" class="ic-lbtn" data-ic-layers="close" aria-expanded="true"`
+      + ` title="레이어 목록 접기">${ICON.fold}</button></div>`
+      + `<ol class="ic-layer-list">${rows.map((row, i) => layerCardHtml(row, {
+        active: row.id === active, top: i === 0, bottom: i === count - 1,
+      })).join('')}</ol>`
+      + `<div class="ic-layers-drop">여기에 놓으면 레이어로 올라갑니다</div>`;
+  }
+
+  /** 목록은 **편집 중에만** 뜬다. 결과 보기에는 얹을 캔버스가 없다. */
+  function renderLayers(editing) {
+    if (!layersEl) return;
+    if (!editing) {
+      closeLayerPicker();
+      layersEl.hidden = true;
+      layersEl.innerHTML = '';
+      return;
+    }
+    // 고르기 팝업이 열려 있으면 다시 그리지 않는다 - 썸네일을 고르던 중에 사라진다.
+    if (layerPop) return;
+    layersEl.hidden = false;
+    layersEl.classList.toggle('is-folded', !showLayers);
+    layersEl.innerHTML = layersHtml();
+  }
+
+  function setLayersOpen(open) {
+    showLayers = !!open;
+    write(LAYERS_OPEN_KEY, showLayers ? '1' : '0');
+    closeLayerPicker();
+    renderLayers(viewMode === 'edit');
+    // 펼친 목록만큼 plane 오른쪽이 비켜선다 - plane 상자 크기는 그대로라
+    // ResizeObserver 가 안 불린다. 직접 다시 앉힌다.
+    fitStage();
+  }
+
+  /** 레이어로 올린다. 그림 바이트 · 히스토리 경로(JSON) 두 갈래. 상태는 서버가 방송한다. */
+  async function uploadLayer(body, {json = false, label = ''} = {}) {
+    if (layerUploading) return;
+    layerUploading = true;
+    renderLayers(viewMode === 'edit');
+    try {
+      const query = label ? `?label=${encodeURIComponent(String(label).slice(0, 120))}` : '';
+      const response = await fetch(`/api/img2img/layer${query}`, {
+        method: 'POST',
+        headers: {'Content-Type': json ? 'application/json' : (body?.type || 'application/octet-stream')},
+        body: json ? JSON.stringify(body) : body,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    } catch (error) {
+      showToast?.(`레이어를 올리지 못했습니다: ${error.message}`, 'error');
+    } finally {
+      layerUploading = false;
+      renderLayers(viewMode === 'edit');
+    }
+  }
+
+  function pickLayerFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (file) uploadLayer(file, {label: file.name || ''});
+    });
+    input.click();
+  }
+
+  /** [+ 이미지] - 파일 열기 + 최근 히스토리. 프롬프트 복원 팝업과 같은 모양이다. */
+  async function openLayerPicker(anchor) {
+    closeLayerPicker();
+    if (!layersEl) return;
+    const pop = document.createElement('div');
+    pop.className = 'ic-restore-pop ic-layer-pop';
+    const box = layersEl.getBoundingClientRect();
+    const at = anchor ? anchor.getBoundingClientRect() : box;
+    pop.style.top = `${Math.round(at.bottom - box.top + 6)}px`;
+    pop.innerHTML = `<div class="ic-restore-head">`
+      + `<span>레이어로 올릴 이미지</span>`
+      + `<button type="button" class="ic-restore-x" data-ic-layers="pop-close">&#10005;</button></div>`
+      + `<button type="button" class="ic-restore-file" data-ic-layers="pop-file">파일에서 열기…</button>`
+      + `<div class="ic-restore-hint">PNG 의 투명한 부분으로는 아래 레이어가 비칩니다</div>`
+      + `<div class="ic-restore-list" data-ic-list="1">불러오는 중…</div>`;
+    layersEl.appendChild(pop);
+    layerPop = pop;
+    try {
+      const response = await fetch('/api/history/list?page=0&per_page=24');
+      const data = await response.json();
+      const images = Array.isArray(data && data.images) ? data.images : [];
+      const list = pop.querySelector('[data-ic-list]');
+      if (!list) return;
+      list.innerHTML = images.length
+        ? images.map(item => `<button type="button" class="ic-restore-item"`
+            + ` data-ic-lpath="${escHtml(String(item.rel_path || ''))}"`
+            + ` title="${escHtml(String(item.filename || ''))}">`
+            + `<img src="${escHtml(String(item.thumb_url || ''))}" alt="" loading="lazy"></button>`).join('')
+        : `<div class="ic-restore-hint">히스토리가 비어 있습니다</div>`;
+    } catch (_error) {
+      const list = pop.querySelector('[data-ic-list]');
+      if (list) list.innerHTML = `<div class="ic-restore-hint">히스토리를 못 읽었습니다</div>`;
+    }
+  }
+
+  function closeLayerPicker() {
+    const had = !!layerPop;
+    if (layerPop && layerPop.parentElement) layerPop.parentElement.removeChild(layerPop);
+    layerPop = null;
+    return had;
+  }
+
+  function onLayersClick(event) {
+    const target = event.target;
+    const path = target.closest?.('[data-ic-lpath]')?.dataset.icLpath;
+    if (path !== undefined) {
+      closeLayerPicker();
+      uploadLayer({path, source: 'saved'}, {json: true});
+      return;
+    }
+    const button = target.closest?.('[data-ic-layers]');
+    const command = button?.dataset.icLayers;
+    if (command === 'open') return setLayersOpen(true);
+    if (command === 'close') return setLayersOpen(false);
+    if (command === 'pop-close') { closeLayerPicker(); renderLayers(viewMode === 'edit'); return; }
+    if (command === 'pop-file') { closeLayerPicker(); renderLayers(viewMode === 'edit'); pickLayerFile(); return; }
+    if (command === 'add') {
+      if (closeLayerPicker()) { renderLayers(viewMode === 'edit'); return; }
+      openLayerPicker(button);
+      return;
+    }
+    const card = target.closest?.('[data-ic-layer]');
+    if (!card) return;
+    const id = card.dataset.icLayer;
+    const act = target.closest?.('[data-ic-layer-act]')?.dataset.icLayerAct;
+    if (act === 'visible') {
+      send('layer_visible', {id, visible: layerRow(id)?.visible === false});
+      return;
+    }
+    if (act === 'remove') {
+      if (id === 'base') return;
+      // 지운 레이어를 가리키는 되돌리기는 갈 곳이 없다.
+      undoStack = undoStack.filter(snap => snap.id !== id);
+      send('layer_remove', {id});
+      return;
+    }
+    if (act === 'up' || act === 'down') {
+      send('layer_move', {id, dir: act});
+      return;
+    }
+    selectLayer(id);
+  }
+
+  // ── 끌어다 놓기: 캔버스(스테이지)나 목록에 놓으면 레이어로 ─────────────────
+  // ⚠️ 뷰어에도 놓기 처리가 있다(`resultImageInput` - 이미지 동작 팝업). 스테이지 **위**에
+  //    놓았을 때만 가로채고 전파를 끊는다. 스테이지 밖(뷰어 빈 곳)은 예전 팝업 그대로다.
+  function dropHasImage(dataTransfer) {
+    const types = Array.from(dataTransfer?.types || []);
+    return types.includes('Files') || types.includes('application/x-naia-source');
+  }
+  function dropTargetOk(event) {
+    if (viewMode !== 'edit' || !state?.active || !state?.canvas_supported) return false;
+    if (!dropHasImage(event.dataTransfer)) return false;
+    if (event.currentTarget === plane) return !!event.target?.closest?.('[data-ic-stage]');
+    return true;
+  }
+  function markDrop(on) {
+    stageEl?.classList.toggle('is-drop', !!on);
+    layersEl?.classList.toggle('is-drop', !!on);
+  }
+  function onLayerDragOver(event) {
+    if (!dropTargetOk(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    markDrop(true);
+  }
+  function onLayerDragLeave(event) {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    markDrop(false);
+  }
+  function onLayerDrop(event) {
+    if (!dropTargetOk(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    markDrop(false);
+    viewer?.classList.remove('drag-over');      // 뷰어의 놓기 표시가 남지 않게
+    let internal = null;
+    try { internal = JSON.parse(event.dataTransfer.getData('application/x-naia-source') || 'null'); }
+    catch (_) { internal = null; }
+    if (internal && typeof internal === 'object') {
+      uploadLayer({path: internal.path || '', source: internal.source || ''}, {json: true});
+      return;
+    }
+    const files = Array.from(event.dataTransfer?.files || []);
+    const file = files.find(item => item && String(item.type || '').startsWith('image/'));
+    if (!file) { showToast?.('이미지 파일만 레이어로 올릴 수 있습니다', 'error'); return; }
+    uploadLayer(file, {label: file.name || ''});
   }
 
   /** 스테이지를 남는 자리에 **비율 그대로** 앉힌다.
@@ -502,8 +960,9 @@ export function createInpaintCanvasPanel({
   /** 확대/회전을 정확히 얼마만큼 민다. 화면은 즉시, 서버는 묶어서. */
   function nudge(key, delta) {
     if (!state) return;
-    if (key === 'scale') applyTransform('scale', clampPct((Number(state.base_scale) || 1) * 100 + delta));
-    else applyTransform('rotation', wrapDeg((Number(state.base_rotation) || 0) + delta));
+    const t = tx();
+    if (key === 'scale') applyTransform('scale', clampPct(t.scale * 100 + delta));
+    else applyTransform('rotation', wrapDeg(t.rotation + delta));
   }
 
   /** 지금 인페인트 생성을 보낼 수 있는가. 안 되면 **이유를 말하고** false.
@@ -551,13 +1010,12 @@ export function createInpaintCanvasPanel({
     return true;
   }
 
-  /** 지금의 이동·회전. 되돌리기가 기억하는 것은 이 셋뿐이다. */
+  /** 고른 레이어의 지금 이동·회전. 되돌리기가 기억하는 것은 이것뿐이다(확대는 뺀다).
+   *  **어느 레이어의 것인지**(`id`)도 함께 적는다 - 레이어를 바꿔 고른 뒤 되돌리면
+   *  지금 고른 레이어가 아니라 그 값을 쟀던 레이어가 돌아와야 한다. */
   function transformSnapshot() {
-    return {
-      x: Math.round(Number(state?.base_offset_x) || 0),
-      y: Math.round(Number(state?.base_offset_y) || 0),
-      rotation: Number(state?.base_rotation) || 0,
-    };
+    const t = tx();
+    return {id: t.id, x: t.x, y: t.y, rotation: t.rotation};
   }
 
   /** 바꾸기 **직전**에 부른다. 같은 값이면 안 쌓는다(방향키를 오래 눌러도 한 칸씩만). */
@@ -565,7 +1023,8 @@ export function createInpaintCanvasPanel({
     if (!state?.active || undoApplying || undoGestureOpen) return;
     const snap = transformSnapshot();
     const top = undoStack[undoStack.length - 1];
-    if (top && top.x === snap.x && top.y === snap.y && top.rotation === snap.rotation) return;
+    if (top && top.id === snap.id && top.x === snap.x && top.y === snap.y
+        && top.rotation === snap.rotation) return;
     undoStack.push(snap);
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   }
@@ -586,6 +1045,9 @@ export function createInpaintCanvasPanel({
     //    도착하면 방금 되돌린 것을 다시 덮는다.
     flushTransforms();
     const snap = undoStack.pop();
+    const id = snap.id || 'base';
+    // 그 사이에 지운 레이어다 - 갈 곳이 없으니 버리고 다음 칸으로(조용하면 고장으로 읽힌다).
+    if (!layerRow(id)) { showToast?.('되돌릴 레이어가 이미 없습니다', 'info'); return; }
     undoApplying = true;
     try {
       // ⚠️ **회전을 먼저, 이동을 나중에.** 서버는 회전을 받으면 캔버스 한가운데를
@@ -597,27 +1059,34 @@ export function createInpaintCanvasPanel({
       //    "이미 같다" 고 판단해 **아무것도 안 보내는** 창이 있었다(BLOCK 4).
       //    같은 값을 다시 보내는 비용은 합성 한 번이고, 안 보내는 대가는 유료 생성이
       //    되돌리지 않은 자리로 나가는 것이다.
-      state.base_rotation = snap.rotation;
-      const input = panel?.querySelector('[data-ic-tr="rotation"]');
-      const label = panel?.querySelector('[data-ic-val="rotation"]');
-      if (input) input.value = String(snap.rotation);
-      if (label) label.textContent = `${snap.rotation}°`;
-      send('base_rotation', {value: snap.rotation});
-      state.base_offset_x = snap.x;
-      state.base_offset_y = snap.y;
-      send('base_offset', {x: snap.x, y: snap.y});
+      patchLayer(id, {rotation: snap.rotation});
+      if (id === activeLayerId()) {
+        const input = panel?.querySelector('[data-ic-tr="rotation"]');
+        const label = panel?.querySelector('[data-ic-val="rotation"]');
+        if (input) input.value = String(snap.rotation);
+        if (label) label.textContent = `${snap.rotation}°`;
+      }
+      setLayerOffset(id, snap.x, snap.y);
+      if (id === 'base') {
+        send('base_rotation', {value: snap.rotation});
+        send('base_offset', {x: snap.x, y: snap.y});
+      } else {
+        send('layer_rotation', {id, value: snap.rotation});
+        send('layer_offset', {id, x: snap.x, y: snap.y});
+      }
     } finally {
       undoApplying = false;
     }
   }
 
+  /** 고른 레이어에 확대/회전을 먹인다. 화면은 즉시, 서버는 묶어서. */
   function applyTransform(key, value, at) {
     if (!state) return;
+    const id = activeLayerId();
     // 회전만 되돌리기에 남긴다(확대는 대상이 아니다 - 위 UNDO 주석).
     if (key !== 'scale') pushUndo();
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
-    if (key === 'scale') state.base_scale = value / 100;
-    else state.base_rotation = value;
+    patchLayer(id, key === 'scale' ? {scale: value / 100} : {rotation: value});
     const input = panel.querySelector(`[data-ic-tr="${key}"]`);
     const label = panel.querySelector(`[data-ic-val="${key}"]`);
     if (input && input.value !== String(value)) input.value = String(value);
@@ -625,7 +1094,7 @@ export function createInpaintCanvasPanel({
     // 기준점을 안 주면 백엔드가 캔버스 한가운데를 잡는다(슬라이더·± 가 그 경우다).
     const payload = key === 'scale' ? {value: value / 100} : {value};
     if (at) payload.at = at;
-    sendTransform(key === 'scale' ? 'base_scale' : 'base_rotation', payload);
+    sendLayerTransform(id, key, payload);
   }
 
   /** 복원 1단계 - 출처 이미지를 고른다.
@@ -797,8 +1266,11 @@ export function createInpaintCanvasPanel({
       //    되돌리기가 이동·회전만 살려 내 **반쪽 상태**가 된다 - 커밋 메시지에
       //    "절대 안 만든다" 고 적어 놓고 정작 안 비우고 있었다(BLOCK 3).
       undoStack = [];
-      return send('base_reset', null);
+      // 고른 레이어만 되돌린다. 베이스는 예전 그대로 캔버스 크기까지 원본으로 간다.
+      const id = activeLayerId();
+      return id === 'base' ? send('base_reset', null) : send('layer_reset', {id});
     }
+    if (action === 'show-layers') return setLayersOpen(true);
     if (action === 'zoom-in') return nudge('scale', 1);
     if (action === 'zoom-out') return nudge('scale', -1);
     if (action === 'rot-up') return nudge('rotation', 1);
@@ -863,9 +1335,16 @@ export function createInpaintCanvasPanel({
 
   function onPlanePointerDown(event) {
     if (!stageEl) return;
+    // 레이어 목록의 고르기 팝업은 캔버스를 누르면 닫는다.
+    if (closeLayerPicker()) renderLayers(viewMode === 'edit');
     // 마커는 표시 전용이라 붙잡지 않는다 - 그 위에서 눌러도 베이스가 움직인다.
     if (event.button === 1) { event.preventDefault(); beginMiddleDrag(event); return; }
-    if (event.button === 0) beginBaseDrag(event);
+    if (event.button !== 0) return;
+    // 누른 자리에 보이는 맨 위 레이어를 고르고 **곧바로** 끈다(파워포인트처럼).
+    // 아무 레이어도 없는 빈 곳이면 고른 레이어를 그대로 끈다 - 예전의 "어디서나 끈다".
+    const hit = layerAt(canvasPointOf(event));
+    if (hit && hit !== activeLayerId()) selectLayer(hit);
+    beginBaseDrag(event);
   }
 
   /** 그림 위 **어디서나** 끌어서 옮긴다(사용자 지정 2026-08-26, 파워포인트처럼).
@@ -885,12 +1364,11 @@ export function createInpaintCanvasPanel({
     const perY = h / rect.height;
     const startX = event.clientX;
     const startY = event.clientY;
-    const startOffset = {
-      x: Number(state.base_offset_x) || 0,
-      y: Number(state.base_offset_y) || 0,
-    };
-    const placedW = Number(state.placed_width) || Number(state.base_width) || 0;
-    const placedH = Number(state.placed_height) || Number(state.base_height) || 0;
+    // 끄는 것은 **누른 순간 고른 레이어**다. 끄는 사이에 echo 가 와도 대상이 바뀌지 않는다.
+    const layer = tx();
+    const startOffset = {x: layer.x, y: layer.y};
+    const placedW = layer.placedW;
+    const placedH = layer.placedH;
     const ghost = host.querySelector('[data-ic-ghost]');
 
     posStage.beginFreeDrag(event, host, (ev) => {
@@ -915,8 +1393,8 @@ export function createInpaintCanvasPanel({
       // 끄는 동안에는 `state` 가 안 바뀌므로, 여기서 쌓으면 **끌기 전 자리**가 담긴다.
       // 드래그 한 번 = 한 단계다(사용자가 되돌리고 싶은 단위가 그것이다).
       pushUndo();
-      if (state) { state.base_offset_x = ox; state.base_offset_y = oy; }
-      send('base_offset', {x: ox, y: oy});
+      setLayerOffset(layer.id, ox, oy);
+      sendOffset(layer.id, ox, oy);
     });
   }
 
@@ -925,10 +1403,11 @@ export function createInpaintCanvasPanel({
       if (pendingOffset) {
         const {x: ox, y: oy} = pendingOffset;
         pendingOffset = null;
+        const id = activeLayerId();
         pushUndo();
         // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
-        if (state) { state.base_offset_x = ox; state.base_offset_y = oy; }
-        send('base_offset', {x: ox, y: oy});
+        setLayerOffset(id, ox, oy);
+        sendOffset(id, ox, oy);
       }
       return;
     }
@@ -979,7 +1458,7 @@ export function createInpaintCanvasPanel({
         return;
       }
       // 커서 아래를 붙잡고 키운다 - 안 붙잡으면 굴릴수록 그림이 도망간다.
-      const next = clampPct((Number(state.base_scale) || 1) * 100 + dir * WHEEL_SCALE_PCT * boost);
+      const next = clampPct(tx().scale * 100 + dir * WHEEL_SCALE_PCT * boost);
       applyTransform('scale', next, canvasPointOf(event));
     };
     plane?.addEventListener('wheel', onWheel, {passive: false});
@@ -1014,16 +1493,21 @@ export function createInpaintCanvasPanel({
       if (move) {
         event.preventDefault();
         pushUndo();
-        const ox = Math.round((Number(state.base_offset_x) || 0) + move[0]);
-        const oy = Math.round((Number(state.base_offset_y) || 0) + move[1]);
-        state.base_offset_x = ox;
-        state.base_offset_y = oy;
-        send('base_offset', {x: ox, y: oy});
+        const t = tx();
+        const ox = Math.round(t.x + move[0]);
+        const oy = Math.round(t.y + move[1]);
+        setLayerOffset(t.id, ox, oy);
+        sendOffset(t.id, ox, oy);
         return;
       }
       if (event.key === '0') {
         event.preventDefault();
-        send('base_reset', null);
+        // [초기화] 단추와 같은 일 - 고른 레이어만 되돌리고, 되돌리기 기록은 버린다.
+        flushTransforms();
+        undoStack = [];
+        const id = activeLayerId();
+        if (id === 'base') send('base_reset', null);
+        else send('layer_reset', {id});
       }
     };
     document.addEventListener('keydown', onKeyDown);
@@ -1074,8 +1558,10 @@ export function createInpaintCanvasPanel({
     const rect = host.getBoundingClientRect();
     if (!(rect.width > 0) || !(w > 0) || !(h > 0)) return;
     const rotating = event.ctrlKey;
-    const startScale = clampPct((Number(state.base_scale) || 1) * 100);
-    const startRotation = wrapDeg(state.base_rotation);
+    // 고른 레이어를 키우거나 돌린다(가운데 버튼은 레이어를 새로 고르지 않는다 - 휠과 같다).
+    const layer = tx();
+    const startScale = clampPct(layer.scale * 100);
+    const startRotation = wrapDeg(layer.rotation);
     const ghost = host.querySelector('[data-ic-ghost]');
     // ⚠️ **`placed_*` 를 돌리면 안 된다.** 그건 이미 PIL 이 회전시킨 뒤의 축정렬
     //    바운딩 박스라(`utils/v5_inpaint_canvas.transform_base` 의 `expand=True`),
@@ -1085,17 +1571,17 @@ export function createInpaintCanvasPanel({
     // ⚠️ 이 유령은 **각도와 대략의 자리**를 보여 주는 조작 피드백이다 - 서버 결과와
     //    픽셀이 같다고 약속하지 않는다. 회전은 캔버스 한가운데를 붙잡으므로 그림이
     //    많이 치우쳐 있으면 놓을 때 조금 어긋난다.
-    const scaleNow = Number(state.base_scale) || 1;
-    const preW = (Number(state.base_width) || 0) * scaleNow;
-    const preH = (Number(state.base_height) || 0) * scaleNow;
-    const cx = (Number(state.base_offset_x) || 0)
-      + (Number(state.placed_width) || preW) / 2;
-    const cy = (Number(state.base_offset_y) || 0)
-      + (Number(state.placed_height) || preH) / 2;
+    const preW = layer.w * layer.scale;
+    const preH = layer.h * layer.scale;
+    const cx = layer.x + (layer.placedW || preW) / 2;
+    const cy = layer.y + (layer.placedH || preH) / 2;
     const startY = event.clientY;
     const at = canvasPointOf(event);   // 누른 지점 = 크기의 기준점
     if (rotating) plane?.classList.add('is-rotate');
     const pivot = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+    // ⚠️ 화면 각도(atan2, y 아래)는 **시계**가 양수인데 서버(PIL)는 **반시계**가 양수다. 그래서 회전은
+    //    시작각에서 **뺀다** - 더하면 손을 반시계로 돌릴 때 그림은 시계로 돌았다(실측 2026-10-03:
+    //    손 -30° -> 회전 330°, 유령은 손을 따라가고 결과는 반대로 기울었다).
     const angleOf = (ev) => Math.atan2(ev.clientY - pivot.y, ev.clientX - pivot.x) * 180 / Math.PI;
     const startAngle = angleOf(event);
     const startDist = Math.hypot(event.clientX - pivot.x, event.clientY - pivot.y);
@@ -1104,7 +1590,7 @@ export function createInpaintCanvasPanel({
     posStage.beginFreeDrag(event, host, (ev) => {
       if (rotating) {
         if (startDist < ROTATE_DEAD_ZONE_PX) return;
-        const next = wrapDeg(startRotation + (angleOf(ev) - startAngle));
+        const next = wrapDeg(startRotation - (angleOf(ev) - startAngle));   // 빼기 - 아래 angleOf 주석
         sent = {key: 'rotation', value: next};
         // 끄는 **한 번**이 한 단계다. 여기서 열어 두면 아래 `applyTransform` 이
         // 프레임마다 불려도 기록은 하나뿐이다(Codex BLOCK 2).
@@ -1119,7 +1605,9 @@ export function createInpaintCanvasPanel({
           ghost.style.top = `${(cy / h) * 100}%`;
           ghost.style.width = `${(preW / w) * 100}%`;
           ghost.style.height = `${(preH / h) * 100}%`;
-          ghost.style.transform = `translate(-50%, -50%) rotate(${next}deg)`;
+          // ⚠️ 음수 각도다 - 서버(PIL)는 반시계로 돌리고 CSS 는 시계로 돈다. 예전에는 부호가
+          //    같아 유령이 실제 그림과 **반대로** 돌았다(2026-10-03 레이어 테두리를 맞추다 발견).
+          ghost.style.transform = `translate(-50%, -50%) rotate(${-next}deg)`;
         }
       } else {
         const next = clampPct(startScale + (startY - ev.clientY) / MIDDLE_SCALE_PX_PER_PCT);
@@ -1131,8 +1619,8 @@ export function createInpaintCanvasPanel({
       endUndoGesture();
       // 놓는 순간 마지막 값을 곧바로 보낸다 - 디바운스가 남아 있으면 거기서 또 간다.
       if (!sent) return;
-      if (sent.key === 'scale') sendTransform('base_scale', {value: sent.value / 100, at});
-      else sendTransform('base_rotation', {value: sent.value});
+      if (sent.key === 'scale') sendLayerTransform(layer.id, 'scale', {value: sent.value / 100, at});
+      else sendLayerTransform(layer.id, 'rotation', {value: sent.value});
       sent = null;
       if (rotating) plane?.classList.remove('is-rotate');
     });
@@ -1181,6 +1669,28 @@ export function createInpaintCanvasPanel({
     panel.addEventListener('input', onInput);
     panel.addEventListener('pointerdown', onPanelPointerDown);
     plane?.addEventListener('pointerdown', onPlanePointerDown);
+    // 레이어 목록은 뷰어 오른쪽에 따로 떠 있다(도크와 한 상자에 넣으면 캔버스를 더 가린다).
+    if (viewer) {
+      layersEl = document.createElement('div');
+      layersEl.className = 'ic-layers';
+      layersEl.hidden = true;
+      layersEl.setAttribute('aria-label', '레이어');
+      viewer.appendChild(layersEl);
+      layersEl.addEventListener('click', onLayersClick);
+      for (const target of [layersEl, plane].filter(Boolean)) {
+        target.addEventListener('dragenter', onLayerDragOver);
+        target.addEventListener('dragover', onLayerDragOver);
+        target.addEventListener('dragleave', onLayerDragLeave);
+        target.addEventListener('drop', onLayerDrop);
+      }
+      // 고르기 팝업은 바깥을 누르면 닫는다.
+      document.addEventListener('pointerdown', (event) => {
+        if (layerPop && !layersEl.contains(event.target)) {
+          closeLayerPicker();
+          renderLayers(viewMode === 'edit');
+        }
+      }, true);
+    }
     // 슬라이더는 패널 밖에서 손을 떼도 끝난다 - document 에서 받아야 놓치지 않는다.
     document.addEventListener('pointerup', () => { rangeDragging = false; });
     document.addEventListener('pointercancel', () => { rangeDragging = false; });

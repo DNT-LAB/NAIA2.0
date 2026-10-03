@@ -381,25 +381,25 @@ def png_bytes(image: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def build_payload(
-    base_image: Image.Image,
+def place_layer(
+    image: Image.Image,
     *,
     canvas_w: int,
     canvas_h: int,
-    offset_x: int,
-    offset_y: int,
+    offset_x: Any,
+    offset_y: Any,
     scale: Any = 1.0,
     rotation: Any = 0.0,
-    user_mask: Image.Image | None = None,
     anchor: tuple[float, float, float, float] | None = None,
-    encode_canvas: bool = True,
 ) -> dict[str, Any]:
-    """인페인트 요청에 실을 캔버스/마스크 한 벌.
+    """레이어 **하나**를 캔버스에 놓는다 - 가둔 오프셋 · 놓인 크기 · 캔버스에 걸리는 픽셀.
 
-    마스크는 **사용자가 칠한 것 + 베이스가 못 덮은 빈 곳**을 합친 것이다.
+    베이스든 덧붙인 이미지든 같은 함수를 지난다. 한 벌만 있어야 레이어마다 기하가
+    갈리지 않는다(확대·회전·가두기 규칙이 레이어마다 다르면 화면의 선택 테두리가
+    거짓말을 한다).
 
-    ⚠️ 확대/회전을 **먼저** 먹인다. 변형 뒤의 크기로 오프셋을 가두고 빈 곳을 재야
-       한다 - 원본 크기로 재면 회전해서 커진 만큼이 빈 곳으로 잘못 잡힌다.
+    ⚠️ 확대/회전을 **먼저** 먹인다. 변형 뒤의 크기로 오프셋을 가둬야 한다 - 원본
+       크기로 재면 회전해서 커진 만큼이 빈 곳으로 잘못 잡힌다.
 
     `anchor=(ax, ay, u, v)` 를 주면 `offset` 을 무시하고, **캔버스의 (ax, ay) 가 놓인
     그림의 비율 좌표 (u, v) 를 계속 가리키도록** 오프셋을 새로 잡는다. 확대/회전의
@@ -415,7 +415,7 @@ def build_payload(
     # 붙일 수 있다(`scaled_visible_part` / `rotated_visible_part` 주석 참조).
     angle = normalize_rotation(rotation)
     turning = bool(angle)
-    scaled_w, scaled_h = placed_size(base_image, scale)
+    scaled_w, scaled_h = placed_size(image, scale)
     if turning:
         # 회전 상자도 **픽셀을 돌리지 않고** 정확히 센다(`rotated_size` 주석 참조).
         placed_w, placed_h = rotated_size(scaled_w, scaled_h, angle)
@@ -436,32 +436,88 @@ def build_payload(
         #    같은 각도를 아핀으로 태우면 알파 경계에서 보간이 달라 어긋난다
         #    (실측: 90°/180° + 알파에서 42·60 픽셀이 1 씩 차이).
         #    transpose 는 리샘플이 아니라 4배에서도 수십 ms 다.
-        placed = transform_base(base_image, scale, angle)
+        placed = transform_base(image, scale, angle)
         visible, paste_x, paste_y = placed, offset_x, offset_y
     elif turning:
         # 확대는 아직 전체를 만든다 - 그 단계까지 창으로 좁히면 LANCZOS 의 필터
         # 위상이 달라져(측정: 채널당 1) 회전 결과가 예전과 어긋난다.
         # 회전 단계만 좁혀도 4배에서 1049ms -> 캔버스 크기로 떨어진다.
-        scaled = transform_base(base_image, scale, 0.0)
+        scaled = transform_base(image, scale, 0.0)
         visible, paste_x, paste_y = rotated_visible_part(
             scaled, angle, placed_w, placed_h, canvas_w, canvas_h, offset_x, offset_y
         )
     else:
         visible, paste_x, paste_y = scaled_visible_part(
-            base_image, placed_w, placed_h, canvas_w, canvas_h, offset_x, offset_y
+            image, placed_w, placed_h, canvas_w, canvas_h, offset_x, offset_y
         )
+    return {
+        "visible": visible,
+        "paste_x": int(paste_x),
+        "paste_y": int(paste_y),
+        "offset_x": int(offset_x),
+        "offset_y": int(offset_y),
+        "placed_width": int(placed_w),
+        "placed_height": int(placed_h),
+        "scale": clamp_scale(scale),
+        "rotation": normalize_rotation(rotation),
+    }
 
-    if visible is None:
-        # 화면 밖으로 완전히 나갔다 - `clamp_offset` 이 막지만, 막지 못한 판이
-        # 오더라도 캔버스는 비어 있을 뿐 예외가 나면 안 된다.
-        canvas = Image.new("RGB", (int(canvas_w), int(canvas_h)), CANVAS_BACKGROUND)
-        gap = Image.new("L", (int(canvas_w), int(canvas_h)), 255)
-    else:
-        canvas = compose_canvas(visible, canvas_w, canvas_h, paste_x, paste_y)
-        gap = uncovered_mask(
-            canvas_w, canvas_h, visible.width, visible.height, paste_x, paste_y,
-            coverage=coverage_mask(visible),
+
+# `compose_layers` 가 레이어마다 돌려주는 기하 키. 화면이 선택 테두리를 그리고
+# 서비스가 세션에 되적는 값이다(픽셀은 싣지 않는다).
+LAYER_GEOMETRY_KEYS = ("offset_x", "offset_y", "placed_width", "placed_height", "scale", "rotation")
+
+
+def compose_layers(
+    layers: list[dict[str, Any]],
+    *,
+    canvas_w: int,
+    canvas_h: int,
+    user_mask: Image.Image | None = None,
+    encode_canvas: bool = True,
+) -> dict[str, Any]:
+    """여러 레이어를 **아래에서 위로** 쌓은 캔버스와 마스크 한 벌.
+
+    `layers` 는 아래 -> 위 순서의 dict 목록이다:
+    `{"id", "image", "offset_x", "offset_y", "scale", "rotation", "visible", "anchor"}`.
+
+    마스크는 **사용자가 칠한 것 + 어떤 레이어도 못 덮은 빈 곳**을 합친 것이다.
+
+    ⚠️ 숨긴 레이어도 **기하는 잰다.** 숨겼다고 오프셋 가두기를 건너뛰면 다시 켰을 때
+       캔버스 밖에 있던 자리로 튀어나온다. 그리지만 않고, 덮은 곳으로도 안 센다 -
+       숨긴 자리는 빈 곳이 되어 다시 그려진다(사용자가 숨긴 뜻이 그것이다).
+    ⚠️ 덮인 곳은 **알파로** 판정한다(`coverage_mask`). 투명 PNG 를 올리면 투명한
+       자리는 아래 레이어가 비치고, 아래도 비어 있으면 빈 곳으로 열린다.
+    """
+    width, height = int(canvas_w), int(canvas_h)
+    canvas = Image.new("RGB", (width, height), CANVAS_BACKGROUND)
+    covered = Image.new("L", (width, height), 0)
+    geometry: dict[Any, dict[str, Any]] = {}
+    for index, layer in enumerate(layers):
+        key = layer.get("id", index)
+        placed = place_layer(
+            layer["image"],
+            canvas_w=width,
+            canvas_h=height,
+            offset_x=layer.get("offset_x", 0),
+            offset_y=layer.get("offset_y", 0),
+            scale=layer.get("scale", 1.0),
+            rotation=layer.get("rotation", 0.0),
+            anchor=layer.get("anchor"),
         )
+        geometry[key] = {name: placed[name] for name in LAYER_GEOMETRY_KEYS}
+        visible = placed["visible"]
+        # 화면 밖으로 완전히 나간 판(`clamp_offset` 이 막지만)도 예외 없이 지나간다.
+        if visible is None or not layer.get("visible", True):
+            continue
+        at = (placed["paste_x"], placed["paste_y"])
+        if visible.mode == "RGBA":
+            # 투명한 곳(회전 여백 · 투명 PNG)은 아래가 그대로 비친다.
+            canvas.paste(visible, at, visible)
+        else:
+            canvas.paste(visible if visible.mode == "RGB" else visible.convert("RGB"), at)
+        covered.paste(255, at, coverage_mask(visible))
+    gap = covered.point(lambda v: 0 if v >= 128 else 255, "L")
     if mask_is_empty(gap):
         gap = None
     # `mask_image` 는 **부풀리기 전**의 기하다 - `_auto_mask` 가 "빈 곳이 있나" 를
@@ -490,11 +546,39 @@ def build_payload(
         "mask_bytes": png_bytes(merged_small) if merged_small is not None else b"",
         "width": int(canvas.width),
         "height": int(canvas.height),
-        "offset_x": offset_x,
-        "offset_y": offset_y,
-        "placed_width": int(placed_w),
-        "placed_height": int(placed_h),
-        "scale": clamp_scale(scale),
-        "rotation": normalize_rotation(rotation),
         "has_mask": merged is not None and not mask_is_empty(merged),
+        "layers": geometry,
     }
+
+
+def build_payload(
+    base_image: Image.Image,
+    *,
+    canvas_w: int,
+    canvas_h: int,
+    offset_x: int,
+    offset_y: int,
+    scale: Any = 1.0,
+    rotation: Any = 0.0,
+    user_mask: Image.Image | None = None,
+    anchor: tuple[float, float, float, float] | None = None,
+    encode_canvas: bool = True,
+) -> dict[str, Any]:
+    """베이스 **한 장**만 있는 캔버스. 레이어가 없던 시절의 계약 그대로다.
+
+    `compose_layers` 에 레이어 하나로 넘기고, 그 레이어의 기하를 예전 키
+    (`offset_x` · `placed_width` …)로 펼쳐 돌려준다.
+    """
+    result = compose_layers(
+        [{
+            "id": "base", "image": base_image,
+            "offset_x": offset_x, "offset_y": offset_y,
+            "scale": scale, "rotation": rotation, "anchor": anchor,
+        }],
+        canvas_w=canvas_w,
+        canvas_h=canvas_h,
+        user_mask=user_mask,
+        encode_canvas=encode_canvas,
+    )
+    result.update(result["layers"]["base"])
+    return result

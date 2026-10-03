@@ -359,6 +359,9 @@ class HeadlessImg2ImgService:
             return True
         if state.get("has_mask") or state.get("user_mask_bytes"):
             return True
+        # 올려 둔 이미지와 숨긴 베이스도 작업이다 - 덮어쓰면 다시 올릴 길이 없다.
+        if state.get("layers") or state.get("base_visible", True) is False:
+            return True
         try:
             if abs(float(state.get("base_scale") or 1.0) - 1.0) > 1e-6:
                 return True
@@ -485,6 +488,16 @@ class HeadlessImg2ImgService:
             # 변형을 먹인 뒤의 크기(화면이 손잡이를 그리는 데 필요하다).
             "placed_width": int(image.width),
             "placed_height": int(image.height),
+            # ── 레이어(사용자 지정 2026-10-03) ──────────────────────────────
+            # 베이스 위아래에 이미지를 더 올린다. 베이스는 `base_*` 키를 그대로 쓰고
+            # (예전 계약), 덧붙인 것만 `layers` 에 산다. 쌓는 순서는 `layer_order`
+            # 하나가 정한다 - 베이스도 그 안에서 `"base"` 로 자리를 갖는다.
+            "layers": [],
+            "layer_order": ["base"],
+            # 이동·확대·회전이 먹는 레이어. 화면은 이것을 보고 선택 테두리를 그린다.
+            "active_layer": "base",
+            "base_visible": True,
+            "layer_counter": 0,
             # 사용자가 칠한 마스크(캔버스 좌표). 빈 곳 마스크와는 따로 보관해야
             # 오프셋을 다시 옮겼을 때 칠한 것을 잃지 않는다.
             "user_mask_bytes": b"",
@@ -657,7 +670,327 @@ class HeadlessImg2ImgService:
             "placed_height": int(state.get("placed_height") or 0),
             "base_scale": float(state.get("base_scale") or 1.0),
             "base_rotation": float(state.get("base_rotation") or 0.0),
+            # 레이어는 캔버스를 쓰는 세션에만 싣는다. 옛 img2img 팝업 길에는 뜻이 없고,
+            # 베이스 썸네일을 굽느라 그림을 한 번 더 열 이유도 없다.
+            **(self._layers_state(state) if state.get("canvas_supported") else {}),
         }
+
+    # ------------------------------------------------------------------
+    # 레이어(사용자 지정 2026-10-03)
+    # ------------------------------------------------------------------
+
+    # 덧붙일 수 있는 이미지 수. 레이어마다 원본 바이트와 디코드한 그림을 쥐고, 조작
+    # 한 번마다 전부 다시 합성한다 - 끝없이 열어 두면 메모리와 합성 시간이 함께 는다.
+    LAYER_LIMIT = 8
+    # 올린 이미지의 긴 변 상한. 확대는 4배까지라 이보다 큰 원본은 합성만 느리게 한다.
+    LAYER_MAX_SIDE = 2048
+    # 새 레이어가 처음 앉는 크기 - 캔버스의 이 비율 안에 들어오게 줄인다(키우지는 않는다).
+    # 캔버스를 꽉 채우면 베이스가 통째로 가려져 "그림이 사라졌다" 로 읽힌다.
+    LAYER_INITIAL_FIT = 0.6
+    LAYER_THUMB_SIDE = 112
+
+    @staticmethod
+    def _layer_order(state: dict[str, Any]) -> list[str]:
+        """아래 -> 위 순서. 베이스와 덧붙인 레이어가 **꼭 한 번씩** 든다.
+
+        ⚠️ 저장된 순서를 그대로 믿지 않는다. 지운 레이어가 남아 있거나 새 레이어가
+           빠져 있으면 합성이 그것을 건너뛰거나 두 번 그린다 - 여기서 늘 맞춰 준다.
+        """
+        ids = ["base"] + [str(layer.get("id")) for layer in (state.get("layers") or [])]
+        order: list[str] = []
+        for layer_id in state.get("layer_order") or []:
+            layer_id = str(layer_id)
+            if layer_id in ids and layer_id not in order:
+                order.append(layer_id)
+        if "base" not in order:
+            order.insert(0, "base")
+        order.extend(layer_id for layer_id in ids if layer_id not in order)
+        return order
+
+    @staticmethod
+    def _find_layer(state: dict[str, Any], layer_id: Any) -> dict[str, Any] | None:
+        wanted = str(layer_id or "")
+        for layer in state.get("layers") or []:
+            if str(layer.get("id")) == wanted:
+                return layer
+        return None
+
+    @staticmethod
+    def _thumb_data_url(image: Any, max_side: int = 112) -> str:
+        """레이어 목록에 띄울 작은 그림. 투명이 있으면 PNG(체크무늬가 비쳐야 한다)."""
+        thumb = image.copy()
+        thumb.thumbnail((max_side, max_side))
+        buf = io.BytesIO()
+        if thumb.mode == "RGBA":
+            thumb.save(buf, format="PNG", optimize=True)
+            kind = "png"
+        else:
+            thumb.convert("RGB").save(buf, format="JPEG", quality=82)
+            kind = "jpeg"
+        return f"data:image/{kind};base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    def _base_thumb(self) -> str:
+        state = self.context.img2img_session
+        source = state.get("source_bytes") or state.get("image_bytes") or b""
+        key = (int(state.get("window_id", 0) or 0), bool(state.get("resize_1mp", True)), len(source))
+        cached = getattr(self, "_base_thumb_cache", None)
+        if cached and cached[0] == key:
+            return cached[1]
+        try:
+            url = self._thumb_data_url(self._base_image(), self.LAYER_THUMB_SIDE)
+        except Exception:   # noqa: BLE001 - 썸네일 하나 때문에 상태가 죽으면 안 된다
+            url = ""
+        self._base_thumb_cache = (key, url)
+        return url
+
+    def _layer_image(self, layer: dict[str, Any]):
+        """덧붙인 레이어의 그림. 세션이 사는 동안 바뀌지 않으므로 디코드한 것을 쥔다.
+
+        ⚠️ 조작 한 번마다 레이어 수만큼 PNG 를 다시 푸는 것은 베이스에서 이미 한 번
+           치른 실수다(`_base_image` 주석). 창 번호 + id + 바이트 길이가 같으면 그대로 준다.
+        """
+        from PIL import Image
+
+        raw = layer.get("source_bytes") or b""
+        if not raw:
+            return None
+        window = int(self.context.img2img_session.get("window_id", 0) or 0)
+        key = (window, str(layer.get("id")), len(raw))
+        cache = getattr(self, "_layer_image_cache", None)
+        if not isinstance(cache, dict):
+            cache = self._layer_image_cache = {}
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        try:
+            image = Image.open(io.BytesIO(bytes(raw)))
+            image.load()
+        except Exception as exc:   # noqa: BLE001 - 레이어 하나 때문에 합성이 죽으면 안 된다
+            print(f"[v5-canvas] layer unreadable: {ascii(exc)}", flush=True)
+            return None
+        # 다른 창의 것은 버린다 - 세션을 오래 쓰면 지운 레이어가 쌓인다.
+        for stale in [k for k in cache if k[0] != window]:
+            cache.pop(stale, None)
+        cache[key] = image
+        return image
+
+    def _layers_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        """화면이 레이어 목록과 선택 테두리를 그리는 데 필요한 값(아래 -> 위)."""
+        by_id = {str(layer.get("id")): layer for layer in state.get("layers") or []}
+        rows: list[dict[str, Any]] = []
+        for layer_id in self._layer_order(state):
+            if layer_id == "base":
+                rows.append({
+                    "id": "base",
+                    "kind": "base",
+                    "name": "원본",
+                    "visible": state.get("base_visible", True) is not False,
+                    "width": int(state.get("base_width") or 0),
+                    "height": int(state.get("base_height") or 0),
+                    "offset_x": int(state.get("base_offset_x") or 0),
+                    "offset_y": int(state.get("base_offset_y") or 0),
+                    "placed_width": int(state.get("placed_width") or 0),
+                    "placed_height": int(state.get("placed_height") or 0),
+                    "scale": float(state.get("base_scale") or 1.0),
+                    "rotation": float(state.get("base_rotation") or 0.0),
+                    "thumb": self._base_thumb(),
+                })
+                continue
+            layer = by_id.get(layer_id)
+            if not layer:
+                continue
+            rows.append({
+                "id": layer_id,
+                "kind": "image",
+                "name": str(layer.get("name") or "이미지"),
+                "visible": layer.get("visible", True) is not False,
+                "width": int(layer.get("width") or 0),
+                "height": int(layer.get("height") or 0),
+                "offset_x": int(layer.get("offset_x") or 0),
+                "offset_y": int(layer.get("offset_y") or 0),
+                "placed_width": int(layer.get("placed_width") or 0),
+                "placed_height": int(layer.get("placed_height") or 0),
+                "scale": float(layer.get("scale") or 1.0),
+                "rotation": float(layer.get("rotation") or 0.0),
+                "thumb": str(layer.get("thumb") or ""),
+            })
+        active = str(state.get("active_layer") or "base")
+        if active != "base" and active not in by_id:
+            active = "base"
+        return {"layers": rows, "active_layer": active, "layer_limit": self.LAYER_LIMIT}
+
+    def _normalize_layer_image(self, image_bytes: bytes):
+        """올린 파일을 레이어 그림으로. 투명이 실제로 있을 때만 RGBA 로 둔다."""
+        from PIL import Image, ImageOps
+
+        image = Image.open(io.BytesIO(bytes(image_bytes)))
+        image.load()
+        try:
+            image = ImageOps.exif_transpose(image)
+        except Exception:   # noqa: BLE001 - EXIF 가 깨져 있어도 그림은 쓴다
+            pass
+        transparent = image.mode in ("RGBA", "LA", "PA") or (
+            image.mode == "P" and "transparency" in image.info)
+        image = image.convert("RGBA" if transparent else "RGB")
+        if image.mode == "RGBA" and image.getchannel("A").getextrema() == (255, 255):
+            # 알파가 있어도 전부 불투명이면 RGB 로 - 합성이 알파 붙여넣기를 안 탄다.
+            image = image.convert("RGB")
+        longest = max(image.width, image.height)
+        if longest > self.LAYER_MAX_SIDE:
+            ratio = self.LAYER_MAX_SIDE / float(longest)
+            image = image.resize(
+                (max(1, int(round(image.width * ratio))), max(1, int(round(image.height * ratio)))),
+                Image.Resampling.LANCZOS)
+        return image
+
+    def add_layer_from_bytes(self, image_bytes: bytes, *, name: str = "") -> dict[str, Any]:
+        """이미지를 **맨 위** 레이어로 올리고 그 레이어를 고른다.
+
+        처음 자리는 캔버스 한가운데, 크기는 캔버스의 `LAYER_INITIAL_FIT` 안이다.
+        """
+        from utils.v5_inpaint_canvas import clamp_scale, placed_size
+
+        context = self.context
+        state = context.img2img_session
+        if not state.get("active"):
+            raise RuntimeError("열려 있는 인페인트 세션이 없습니다")
+        if not state.get("canvas_supported"):
+            raise RuntimeError("레이어는 V5 인페인트 캔버스에서만 쓸 수 있습니다")
+        layers = state.setdefault("layers", [])
+        if len(layers) >= self.LAYER_LIMIT:
+            raise RuntimeError(f"레이어는 {self.LAYER_LIMIT}장까지 올릴 수 있습니다")
+        try:
+            image = self._normalize_layer_image(image_bytes)
+        except Exception as exc:
+            raise RuntimeError("이미지를 읽지 못했습니다") from exc
+        canvas_w, canvas_h = self._canvas_size(state)
+        fit = min(1.0,
+                  canvas_w * self.LAYER_INITIAL_FIT / max(1, image.width),
+                  canvas_h * self.LAYER_INITIAL_FIT / max(1, image.height))
+        scale = clamp_scale(fit)
+        placed_w, placed_h = placed_size(image, scale)
+        counter = int(state.get("layer_counter", 0) or 0) + 1
+        layer_id = f"L{counter}"
+        label = str(name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if "." in label:
+            label = label.rsplit(".", 1)[0]
+        layer = {
+            "id": layer_id,
+            "name": (label or f"이미지 {counter}")[:40],
+            "source_bytes": self._image_to_png_bytes(image),
+            "width": int(image.width),
+            "height": int(image.height),
+            "offset_x": int(round((canvas_w - placed_w) / 2)),
+            "offset_y": int(round((canvas_h - placed_h) / 2)),
+            "scale": scale,
+            "rotation": 0.0,
+            "placed_width": int(placed_w),
+            "placed_height": int(placed_h),
+            "visible": True,
+            "thumb": self._thumb_data_url(image, self.LAYER_THUMB_SIDE),
+        }
+        state["layer_counter"] = counter
+        layers.append(layer)
+        state["layer_order"] = self._layer_order(state)      # 새 레이어는 맨 위(끝)에 붙는다
+        state["active_layer"] = layer_id
+        state["canvas_active"] = True
+        print(f"[v5-canvas] layer added: {layer_id} {image.width}x{image.height} {image.mode}", flush=True)
+        return self._recompose_canvas()
+
+    def _layer_command(self, key: str, value: Any) -> dict[str, Any] | None:
+        """`layer_*` 파라미터. 베이스(`"base"`)는 예전 `base_*` 길로 보낸다.
+
+        ⚠️ 베이스를 따로 다시 짜지 않는다 - 확대/회전/초기화 규칙(앵커 · 캔버스 크기
+           되돌리기 · 되돌리기와의 순서)은 `base_*` 쪽이 이미 실측으로 맞춰 둔 것이다.
+        """
+        context = self.context
+        state = context.img2img_session
+        payload = value if isinstance(value, dict) else {"id": value}
+        layer_id = str(payload.get("id") or "base")
+        layer = None if layer_id == "base" else self._find_layer(state, layer_id)
+        if layer_id != "base" and layer is None:
+            return context._toast("그 레이어는 이미 없습니다", level="error")
+
+        if key == "layer_select":
+            state["active_layer"] = layer_id
+            return self.module_state()
+        if key == "layer_visible":
+            visible = context._coerce_bool(payload.get("visible", True))
+            if layer is None:
+                state["base_visible"] = visible
+            else:
+                layer["visible"] = visible
+            return self._recompose_canvas()
+        if key == "layer_move":
+            order = self._layer_order(state)
+            index = order.index(layer_id)
+            step = -1 if str(payload.get("dir") or "").lower() == "down" else 1
+            target = index + step
+            if 0 <= target < len(order):
+                order[index], order[target] = order[target], order[index]
+                state["layer_order"] = order
+                return self._recompose_canvas()
+            return self.module_state()
+        if key == "layer_remove":
+            if layer is None:
+                return context._toast("원본은 지울 수 없습니다 - 숨기려면 눈 단추를 누르세요", level="error")
+            state["layers"] = [item for item in state.get("layers") or [] if item is not layer]
+            state["layer_order"] = [item for item in self._layer_order(state) if item != layer_id]
+            if str(state.get("active_layer") or "base") == layer_id:
+                state["active_layer"] = "base"
+            return self._recompose_canvas()
+
+        # ── 여기부터 기하 ────────────────────────────────────────────────
+        if layer is None:
+            if key == "layer_offset":
+                return self._set_base_offset(payload)
+            if key == "layer_scale":
+                return self._set_base_transform(scale=payload.get("value"), at=payload.get("at"))
+            if key == "layer_rotation":
+                return self._set_base_transform(rotation=payload.get("value"), at=payload.get("at"))
+            if key == "layer_reset":
+                return self.set_param("base_reset", None)
+            return None
+        from utils.v5_inpaint_canvas import clamp_scale, normalize_rotation, placed_size
+
+        if key == "layer_offset":
+            position = self._normalized_position(payload)
+            if position is None:
+                return context._toast("레이어 위치를 읽지 못했습니다", level="error")
+            layer["offset_x"] = int(round(position["x"]))
+            layer["offset_y"] = int(round(position["y"]))
+            return self._recompose_canvas()
+        if key in {"layer_scale", "layer_rotation"}:
+            at = payload.get("at")
+            if not isinstance(at, dict):
+                # ⚠️ 기준점이 없으면(슬라이더 · ± · 가운데 버튼 회전) **레이어 한가운데**를
+                #    붙잡는다. 베이스처럼 캔버스 한가운데를 잡으면, 구석에 놓은 스티커를
+                #    돌리는 순간 캔버스 반대편으로 휙 날아간다(실측 2026-10-03: 30° 에
+                #    중심이 x 668 -> 761).
+                at = {
+                    "x": float(layer.get("offset_x") or 0) + float(layer.get("placed_width") or 0) / 2.0,
+                    "y": float(layer.get("offset_y") or 0) + float(layer.get("placed_height") or 0) / 2.0,
+                }
+            anchor = self._anchor_from_canvas_point(at, layer_id)
+            if key == "layer_scale":
+                layer["scale"] = clamp_scale(payload.get("value"))
+            else:
+                layer["rotation"] = normalize_rotation(payload.get("value"))
+            return self._recompose_canvas(anchor, anchor_layer=layer_id)
+        if key == "layer_reset":
+            image = self._layer_image(layer)
+            canvas_w, canvas_h = self._canvas_size(state)
+            if image is not None:
+                fit = min(1.0,
+                          canvas_w * self.LAYER_INITIAL_FIT / max(1, image.width),
+                          canvas_h * self.LAYER_INITIAL_FIT / max(1, image.height))
+                layer["scale"] = clamp_scale(fit)
+                placed_w, placed_h = placed_size(image, layer["scale"])
+                layer["offset_x"] = int(round((canvas_w - placed_w) / 2))
+                layer["offset_y"] = int(round((canvas_h - placed_h) / 2))
+            layer["rotation"] = 0.0
+            return self._recompose_canvas()
+        return None
 
     def generation_event_payload(self) -> dict[str, Any]:
         """Small cross-client lifecycle event; deliberately excludes image/mask bytes."""
@@ -899,6 +1232,8 @@ class HeadlessImg2ImgService:
                 return self._recompose_canvas()
         elif key == "auto_mask":
             return self._auto_mask()
+        elif key.startswith("layer_"):
+            return self._layer_command(key, value)
         elif key == "canvas_active":
             return self._set_canvas_active(context._coerce_bool(value))
         elif key == "canvas_size":
@@ -1103,21 +1438,27 @@ class HeadlessImg2ImgService:
         self._base_image_cache = (key, image)
         return image
 
-    def _anchor_from_canvas_point(self, point: Any) -> tuple[float, float, float, float] | None:
+    def _anchor_from_canvas_point(
+        self, point: Any, layer_id: str = "base"
+    ) -> tuple[float, float, float, float] | None:
         """캔버스의 한 점을 '지금 그림의 어느 자리인가' 로 바꿔 둔다.
 
         확대/회전을 하고 나서도 그 점이 같은 자리를 가리키게 하려면, 변형 **전에**
-        비율로 재 둬야 한다.
+        비율로 재 둬야 한다. `layer_id` 가 어느 레이어의 자리로 잴지 정한다.
 
         ⚠️ 점을 안 주면 **캔버스 한가운데**다. 예전에는 앵커가 아예 없어 놓인 상자의
            좌상단이 고정됐고, 그래서 키울수록 그림이 우하단으로 도망갔다(실측: 200%
            에서 그림 한가운데가 캔버스 우하단 모서리, 400% 에서는 화면 밖).
         """
         state = self.context.img2img_session
+        layer = None if layer_id == "base" else self._find_layer(state, layer_id)
+        if layer_id != "base" and layer is None:
+            return None
         canvas_w = int(state.get("canvas_width") or 0)
         canvas_h = int(state.get("canvas_height") or 0)
-        placed_w = int(state.get("placed_width") or 0)
-        placed_h = int(state.get("placed_height") or 0)
+        source = layer if layer is not None else state
+        placed_w = int(source.get("placed_width") or 0)
+        placed_h = int(source.get("placed_height") or 0)
         if canvas_w <= 0 or canvas_h <= 0 or placed_w <= 0 or placed_h <= 0:
             return None
         try:
@@ -1125,8 +1466,12 @@ class HeadlessImg2ImgService:
             anchor_y = float(point["y"])
         except (TypeError, ValueError, KeyError):
             anchor_x, anchor_y = canvas_w / 2.0, canvas_h / 2.0
-        off_x = float(state.get("base_offset_x") or 0)
-        off_y = float(state.get("base_offset_y") or 0)
+        if layer is not None:
+            off_x = float(layer.get("offset_x") or 0)
+            off_y = float(layer.get("offset_y") or 0)
+        else:
+            off_x = float(state.get("base_offset_x") or 0)
+            off_y = float(state.get("base_offset_y") or 0)
         return (
             anchor_x,
             anchor_y,
@@ -1134,11 +1479,66 @@ class HeadlessImg2ImgService:
             (anchor_y - off_y) / placed_h,
         )
 
+    def _compose_layers(
+        self,
+        base: Any,
+        canvas_w: int,
+        canvas_h: int,
+        *,
+        user_mask: Any = None,
+        anchor: tuple[float, float, float, float] | None = None,
+        anchor_layer: str = "base",
+        encode_canvas: bool = False,
+    ) -> dict[str, Any]:
+        """베이스와 덧붙인 레이어를 `layer_order` 대로 쌓는다. 기하는 `compose_layers` 가 SSOT.
+
+        ⚠️ `_recompose_canvas` 와 `_auto_mask` 가 **같은 함수**를 지난다. 자동 마스킹이
+           베이스만 보고 빈 곳을 재면, 올려 둔 이미지가 덮은 자리까지 칠해 그 이미지를
+           지워 버린다.
+        """
+        from utils.v5_inpaint_canvas import compose_layers
+
+        state = self.context.img2img_session
+        by_id = {str(layer.get("id")): layer for layer in state.get("layers") or []}
+        specs: list[dict[str, Any]] = []
+        for layer_id in self._layer_order(state):
+            if layer_id == "base":
+                specs.append({
+                    "id": "base",
+                    "image": base,
+                    "offset_x": int(state.get("base_offset_x") or 0),
+                    "offset_y": int(state.get("base_offset_y") or 0),
+                    "scale": state.get("base_scale", 1.0),
+                    "rotation": state.get("base_rotation", 0.0),
+                    "visible": state.get("base_visible", True) is not False,
+                    "anchor": anchor if anchor_layer == "base" else None,
+                })
+                continue
+            layer = by_id.get(layer_id)
+            image = self._layer_image(layer) if layer else None
+            if image is None:
+                continue
+            specs.append({
+                "id": layer_id,
+                "image": image,
+                "offset_x": int(layer.get("offset_x") or 0),
+                "offset_y": int(layer.get("offset_y") or 0),
+                "scale": layer.get("scale", 1.0),
+                "rotation": layer.get("rotation", 0.0),
+                "visible": layer.get("visible", True) is not False,
+                "anchor": anchor if anchor_layer == layer_id else None,
+            })
+        return compose_layers(
+            specs, canvas_w=canvas_w, canvas_h=canvas_h,
+            user_mask=user_mask, encode_canvas=encode_canvas,
+        )
+
     def _recompose_canvas(
         self,
         anchor: tuple[float, float, float, float] | None = None,
         *,
         encode_canvas: bool = False,
+        anchor_layer: str = "base",
     ) -> dict[str, Any]:
         """캔버스/오프셋/칠한 마스크로 전송용 이미지와 마스크를 다시 만든다.
 
@@ -1146,10 +1546,10 @@ class HeadlessImg2ImgService:
            캔버스 전체를 PNG 로 굽고 있었는데(실측 62ms), 그건 생성할 때나 필요한
            물건이다. 대신 `canvas_dirty` 를 세워 두고, `generation_commands` 가
            그때 한 번 굽는다.
+
+        `anchor` 는 `anchor_layer` 레이어에만 먹는다(확대/회전한 그 레이어).
         """
         from PIL import Image
-
-        from utils.v5_inpaint_canvas import build_payload, png_bytes
 
         state = self.context.img2img_session
         base = self._base_image()
@@ -1196,16 +1596,9 @@ class HeadlessImg2ImgService:
                 print(f"[v5-canvas] user mask unreadable: {exc}", flush=True)
                 user_mask = None
 
-        payload = build_payload(
-            base,
-            canvas_w=canvas_w,
-            canvas_h=canvas_h,
-            offset_x=int(state.get("base_offset_x") or 0),
-            offset_y=int(state.get("base_offset_y") or 0),
-            scale=state.get("base_scale", 1.0),
-            rotation=state.get("base_rotation", 0.0),
-            user_mask=user_mask,
-            anchor=anchor,
+        payload = self._compose_layers(
+            base, canvas_w, canvas_h,
+            user_mask=user_mask, anchor=anchor, anchor_layer=anchor_layer,
             encode_canvas=encode_canvas,
         )
         if encode_canvas:
@@ -1215,9 +1608,17 @@ class HeadlessImg2ImgService:
             # 전송본은 미뤄 둔다. 화면은 아래 미리보기만 있으면 된다.
             state["canvas_dirty"] = True
         state["width"], state["height"] = payload["width"], payload["height"]
-        state["base_offset_x"], state["base_offset_y"] = payload["offset_x"], payload["offset_y"]
-        state["placed_width"], state["placed_height"] = payload["placed_width"], payload["placed_height"]
-        state["base_scale"], state["base_rotation"] = payload["scale"], payload["rotation"]
+        # 가두고 앵커를 먹인 뒤의 기하를 각 레이어에 되적는다 - 화면은 이 값으로
+        # 선택 테두리를 그리고, 다음 조작은 이 값에서 시작한다.
+        geometry = payload["layers"]
+        base_geo = geometry["base"]
+        state["base_offset_x"], state["base_offset_y"] = base_geo["offset_x"], base_geo["offset_y"]
+        state["placed_width"], state["placed_height"] = base_geo["placed_width"], base_geo["placed_height"]
+        state["base_scale"], state["base_rotation"] = base_geo["scale"], base_geo["rotation"]
+        for layer in state.get("layers") or []:
+            geo = geometry.get(str(layer.get("id")))
+            if geo:
+                layer.update(geo)
         state["mask_bytes"] = payload["mask_bytes"]
         state["has_mask"] = bool(payload["has_mask"])
         if payload["has_mask"]:
@@ -1239,7 +1640,6 @@ class HeadlessImg2ImgService:
         from utils.v5_inpaint_canvas import (
             AUTO_MASK_RADIUS_PX,
             MASK_SCALE,
-            build_payload,
             dilate_mask,
             downscale_mask,
             mask_is_empty,
@@ -1251,20 +1651,11 @@ class HeadlessImg2ImgService:
         base = self._base_image()
         canvas_w = int(state.get("canvas_width") or base.width)
         canvas_h = int(state.get("canvas_height") or base.height)
-        # 지금 놓인 그대로의 빈 곳. 기하는 `build_payload` 가 SSOT 다 - 여기서 다시
-        # 계산하면 화면이 보는 것과 어긋날 자리가 생긴다.
-        probe = build_payload(
-            base,
-            canvas_w=canvas_w,
-            canvas_h=canvas_h,
-            offset_x=int(state.get("base_offset_x") or 0),
-            offset_y=int(state.get("base_offset_y") or 0),
-            scale=state.get("base_scale", 1.0),
-            rotation=state.get("base_rotation", 0.0),
-            user_mask=None,
-            # 빈 곳만 알면 된다 - 캔버스를 굽고 버릴 이유가 없다(62ms).
-            encode_canvas=False,
-        )
+        # 지금 놓인 그대로의 빈 곳. 기하는 `compose_layers` 가 SSOT 다 - 여기서 다시
+        # 계산하면 화면이 보는 것과 어긋날 자리가 생긴다. 올려 둔 레이어가 덮은 곳은
+        # 빈 곳이 아니다(베이스만 보면 그 레이어를 칠해 지운다).
+        # 빈 곳만 알면 된다 - 캔버스를 굽고 버릴 이유가 없다(62ms).
+        probe = self._compose_layers(base, canvas_w, canvas_h, user_mask=None, encode_canvas=False)
         gap = probe.get("mask_image")
         if gap is None or mask_is_empty(gap):
             return self.context._toast(

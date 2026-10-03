@@ -1770,6 +1770,56 @@ def register_result_display_routes(
             await broadcast_json(clients, state)
         return {"ok": True, "state": state}
 
+    @app.post("/api/img2img/layer")
+    async def api_img2img_add_layer(req: Request):
+        """열려 있는 V5 인페인트 캔버스에 이미지를 **레이어로** 올린다(사용자 지정 2026-10-03).
+
+        두 갈래를 받는다:
+          - JSON  `{path|source, label}` : 히스토리/결과 이미지(끌어다 놓기 · 고르기)
+          - 이미지 바이트                : 파일 열기 · 바탕화면에서 끌어다 놓기
+
+        ⚠️ WS 로 나르지 않는다. 그림은 수 MB 라 `set_module_param` 한 통에 싣기엔 크고,
+           캔버스 마스크(`mask_png`)처럼 작게 줄일 수도 없다. 상태는 여기서 방송한다 -
+           다른 탭과 분리창도 같은 레이어 목록을 본다.
+        """
+        if not session_context.img2img_session.get("active"):
+            return JSONResponse({"error": "열려 있는 인페인트 세션이 없습니다"}, status_code=409)
+        content_type = (req.headers.get("content-type") or "").lower()
+        body = await req.body()
+        if not body:
+            return JSONResponse({"error": "No data"}, status_code=400)
+        if len(body) > 64 * 1024 * 1024:
+            return JSONResponse({"error": "Image is too large"}, status_code=413)
+        try:
+            if "application/json" in content_type:
+                payload = json.loads(body.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    return JSONResponse({"error": "Invalid payload"}, status_code=400)
+
+                def _resolve():
+                    png, label, _params, _ctx = resolve_result_image_action_source(session_context, payload)
+                    return png, str(payload.get("label") or label or "")
+
+                image_bytes, label = await run_in_thread(_resolve)
+            else:
+                image_bytes = body
+                label = (req.query_params.get("label") or "")[:120]
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        def _add():
+            # 캐시(디코드한 레이어 · 베이스)를 쥔 **같은 서비스**를 쓴다 - 새로 만들면
+            # 첫 합성이 모든 레이어를 다시 푼다.
+            return session_context._img2img_service().add_layer_from_bytes(image_bytes, name=label)
+
+        try:
+            state = await run_in_thread(_add)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if state:
+            await broadcast_json(clients, state)
+        return {"ok": True, "state": state}
+
     @app.post("/api/image-action/{action}")
     async def api_image_action(action: str, req: Request):
         action = (action or "").strip().lower()

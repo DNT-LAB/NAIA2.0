@@ -104,7 +104,7 @@ export function createE621EventPanel({
   }
 
   function renderResearchDetails(state) {
-    if (!state.selected) return '<div class="mod-empty">태그를 선택하면 설명과 검토 상태를 확인할 수 있습니다.</div>';
+    if (!state.selected) return '<div class="mod-empty e621-detail-empty">태그를 고르면 여기에 번역과 설명이 보입니다.</div>';
     const research = state.selected.research || {};
     const status = research.review_label || state.selected.review_label || '미검토';
     const source = research.description_source ? `<small>${escHtml(research.description_source)}</small>` : '';
@@ -116,12 +116,13 @@ export function createE621EventPanel({
     const searchEvidence = (research.search_evidence || []).map(item => `
       <small>${escHtml(item.site || 'e621')}</small>
       <pre class="e621-research-text">${escHtml(item.quote || '')}</pre>`).join('');
+    // 번역이 맨 위다(사용자 지정 2026-10-03 - 아래 띠에 눌려 늘 스크롤해야 보였다). 검토 상태는 번역 밑의 작은 줄.
     const korean = state.disable_translation ? '' : `
-      <section class="e621-research-section">
-        <div class="mod-section-label">한국어 설명</div>
-        ${research.korean_label ? `<strong>${escHtml(research.korean_label)}</strong>` : ''}
-        <pre class="e621-research-text">${escHtml(research.korean_description || missingKorean)}</pre>
+      <section class="e621-research-section e621-korean-section">
+        ${research.korean_label ? `<strong class="e621-korean-label">${escHtml(research.korean_label)}</strong>` : ''}
+        <pre class="e621-research-text e621-korean-text">${escHtml(research.korean_description || missingKorean)}</pre>
         ${research.korean_keywords ? `<small>검색어: ${escHtml(research.korean_keywords)}</small>` : ''}
+        <div class="e621-research-meta e621-review-line"><span>${escHtml(status)}</span>${source}</div>
         ${research.search_review_status === 'reviewed_search_terms' ? '<small>한국어 검색어 · 직접 정의 대조 완료</small>' : ''}
         ${research.search_source_label ? `<small>${escHtml(research.search_source_label)}</small>` : ''}
         ${research.search_review_status === 'stale_evidence' ? '<small>한국어 검색어 · 근거 변경으로 적용 보류</small>' : ''}
@@ -140,7 +141,6 @@ export function createE621EventPanel({
       </div>`).join('');
     const matchChips = renderMatchChips(state.selected);
     return `
-      <div class="e621-research-meta"><span>${escHtml(status)}</span>${source}</div>
       ${matchChips ? `<div class="e621-research-meta e621-selected-match"><span>검색 일치</span><span class="e621-match">${matchChips}</span></div>` : ''}
       ${korean}
       <section class="e621-research-section">
@@ -278,9 +278,13 @@ export function createE621EventPanel({
             <span>저장된 본문 검색 제외</span>
           </label>`;
     const promptTestbench = state.prompt_testbench_visible === false ? '' : `
+          <section class="e621-detail-card e621-testbench-card">
             <div class="mod-section-label">e621 프롬프트 테스트벤치</div>
-            <textarea class="mod-textarea mod-textarea-lg" id="e621Testbench" oninput="e621OnTestbenchInput(this)">${escHtml(state.testbench || '')}</textarea>
-            <button class="mod-action-btn mod-start" onclick="e621Generate()">생성</button>`;
+            <div class="e621-testbench-row">
+              <textarea class="mod-textarea mod-textarea-lg" id="e621Testbench" oninput="e621OnTestbenchInput(this)">${escHtml(state.testbench || '')}</textarea>
+              <button class="mod-action-btn mod-start" onclick="e621Generate()">생성</button>
+            </div>
+          </section>`;
 
     moduleBody.innerHTML = `
       <div class="e621-panel">
@@ -301,7 +305,7 @@ ${wikiSearchControl}
           <div class="e621-research-summary">${escHtml(summaryText)}${summary.warning ? `<span>${escHtml(summary.warning)}</span>` : ''}</div>
         </div>
 
-        <div class="e621-layout">
+        <div class="e621-layout has-detail">
           <section class="e621-column categories">
             <div class="mod-section-label">General</div>
             <div class="e621-chip-grid">${general}</div>
@@ -319,27 +323,28 @@ ${wikiSearchControl}
             <div class="e621-scroll-list">${tags}</div>
             ${pagination}
           </section>
+
+          <section class="e621-column detail">
+            <div class="mod-section-label">선택한 태그</div>
+            <div class="e621-detail-card">
+              <div class="e621-selected-head">
+                <div>
+                  <strong>${escHtml(selectedName)}</strong>
+                  <small>${escHtml(selectedMeta)}</small>
+                </div>
+                <div class="e621-selected-actions">
+                  <button class="mod-btn-sm" onclick="e621ToggleStar()" ${selected ? '' : 'disabled'}>${selected && selected.starred ? '즐겨찾기 해제' : '즐겨찾기'}</button>
+                  <button class="mod-btn-sm danger" onclick="e621HideSelected()" ${selected ? '' : 'disabled'}>숨김</button>
+                </div>
+              </div>
+              <div class="e621-research-details">${renderResearchDetails(state)}</div>
+            </div>
+          </section>
         </div>
 
-        <div class="e621-detail-grid">
-          <section class="e621-detail-card">
-            <div class="e621-selected-head">
-              <div>
-                <div class="mod-section-label">선택된 태그</div>
-                <strong>${escHtml(selectedName)}</strong>
-                <small>${escHtml(selectedMeta)}</small>
-              </div>
-              <div class="e621-selected-actions">
-                <button class="mod-btn-sm" onclick="e621ToggleStar()" ${selected ? '' : 'disabled'}>${selected && selected.starred ? '즐겨찾기 해제' : '즐겨찾기'}</button>
-                <button class="mod-btn-sm danger" onclick="e621HideSelected()" ${selected ? '' : 'disabled'}>숨김</button>
-              </div>
-            </div>
-            <div class="e621-research-details">${renderResearchDetails(state)}</div>
-          </section>
-
-          <section class="e621-detail-card">
+        <div class="e621-bottom${promptTestbench ? '' : ' no-testbench'}">
 ${promptTestbench}
-
+          <section class="e621-detail-card e621-hidden-card">
             <div class="e621-hidden-head">
               <div class="mod-section-label">숨긴 태그</div>
               <small>${state.hidden_total || 0}</small>
@@ -425,11 +430,40 @@ ${promptTestbench}
   };
 }
 
-// 일치 이유 칩. 패널이 그리는 곳(떠 있는 창 · 떼어 낸 창의 모듈 팝업) 어디서나 같아야 해서 style.css 가 아니라
-// 패널과 함께 싣는다. 초록 = 이름 · 한국어에서 맞음, 보라 = 이름이 통째로 같음, 회색 = 본문에서만 맞음,
-// 점선 = 띄어쓰기를 빼고 맞음.
+// 패널 스타일은 style.css 가 아니라 패널과 함께 싣는다 - 패널이 그리는 곳(떠 있는 창 · 떼어 낸 창의 모듈 팝업)
+// 어디서나 같아야 한다.
 const STYLE_ID = 'e621-panel-style';
+// 배치(사용자 지정 2026-10-03): [카테고리 | 폴더 | 태그 | 선택한 태그] + 아래 낮은 띠 [테스트벤치 | 숨긴 태그].
+// 선택한 태그 칸이 창 높이를 다 쓴다 - 고른 태그 바로 옆에서 번역 · 본문 · (다음 단계의) 관계를 읽는다.
+// 떼어 낸 창의 옛 모듈 팝업(style.css 의 .module-popup-e621 규칙)에도 같은 골격이 서도록 여기서 덮는다.
+// ⚠️ 떠 있는 창(e621Window)의 규칙과 같은 속성을 다룰 때 그쪽이 한 단계 더 굵다 - 두 <style> 의 순서와 무관하게.
 const PANEL_CSS = `
+.e621-panel .e621-layout.has-detail{grid-template-columns:minmax(140px,0.75fr) minmax(110px,0.5fr) minmax(200px,1fr) minmax(250px,1.2fr)}
+.e621-column.detail{display:flex;flex-direction:column;min-width:0;min-height:0}
+.e621-column.detail .e621-detail-card{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.e621-column.detail .e621-research-details{flex:1 1 auto;min-height:0;overflow:auto;margin-top:6px}
+.e621-detail-empty{padding:18px 8px;text-align:center}
+.e621-research-section.e621-korean-section{margin-top:6px;padding-top:0;border-top:none}
+.e621-korean-label{display:block;color:var(--text-primary);font-size:13px;font-weight:700;line-height:1.35}
+.e621-research-text.e621-korean-text{color:var(--text-primary);font-size:11.5px}
+.e621-review-line{margin-top:4px;font-size:10px}
+/* 상세의 작은 줄(검색어 · 검토 상태 · 근거 출처). <small> 이 기본 글꼴을 물려받아 13.3px - 이름(13px)보다 컸다. */
+.e621-research-details small{display:block;margin-top:3px;color:var(--text-muted);font-size:10px;line-height:1.45}
+.e621-bottom{display:grid;grid-template-columns:minmax(0,1fr) minmax(170px,0.38fr);gap:8px;min-height:0}
+.e621-bottom.no-testbench{grid-template-columns:minmax(0,1fr)}
+.e621-bottom .e621-detail-card{display:flex;flex-direction:column;min-height:0}
+.e621-testbench-row{flex:1 1 auto;min-height:0;display:flex;gap:6px;align-items:stretch}
+.e621-testbench-row #e621Testbench{flex:1 1 auto;min-width:0;height:auto;min-height:44px;resize:none}
+.e621-testbench-row .mod-start{flex:0 0 auto;width:auto;height:auto;margin:0;padding:0 16px}
+.e621-hidden-card .e621-hidden-list{flex:1 1 auto;min-height:0;max-height:none}
+.module-popup-e621 .e621-panel{grid-template-rows:auto auto minmax(0,1fr) minmax(120px,0.24fr)}
+@media (max-width: 767px){
+  .e621-panel .e621-layout.has-detail,.e621-bottom{grid-template-columns:minmax(0,1fr)}
+  .e621-column.detail .e621-research-details{max-height:320px}
+}
+`;
+// 일치 이유 칩: 초록 = 이름 · 한국어에서 맞음, 보라 = 이름이 통째로 같음, 회색 = 본문에서만 맞음, 점선 = 띄어쓰기를 빼고 맞음.
+const MATCH_CSS = `
 .e621-tag-status > .e621-match,.e621-selected-match .e621-match{display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:3px}
 .e621-selected-match{margin-top:4px}
 .e621-selected-match .e621-match{justify-content:flex-start}
@@ -445,6 +479,6 @@ function ensureStyle(doc) {
   if (!doc || !doc.head || typeof doc.createElement !== 'function' || doc.getElementById(STYLE_ID)) return;
   const style = doc.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = PANEL_CSS;
+  style.textContent = PANEL_CSS + MATCH_CSS;
   doc.head.appendChild(style);
 }

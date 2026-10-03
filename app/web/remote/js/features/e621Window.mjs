@@ -98,9 +98,10 @@ const E6W_CSS = `
 .dragpanel.e6w .e621-host{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:6px 8px 8px;box-sizing:border-box}
 .dragpanel.e6w .e621-loading{padding:16px;text-align:center}
 
-/* 위에서부터: 검색줄 · 필터줄 · [카테고리 | 폴더 | 태그] · [선택 태그 | 테스트벤치 · 숨김] */
+/* 위에서부터: 검색줄 · 필터줄 · [카테고리 | 폴더 | 태그 | 선택한 태그] · 낮은 띠 [테스트벤치 | 숨긴 태그].
+   선택한 태그 칸(번역 · 본문)이 창 높이를 다 쓴다(사용자 지정 2026-10-03). */
 .dragpanel.e6w .e621-panel{flex:1 1 auto;height:100%;min-height:0;display:grid;
-  grid-template-rows:auto auto minmax(0,1fr) minmax(190px,0.44fr);gap:6px}
+  grid-template-rows:auto auto minmax(0,1fr) minmax(96px,0.2fr);gap:6px}
 .dragpanel.e6w .e621-toolbar{gap:5px}
 .dragpanel.e6w .e621-toolbar .mod-input{height:24px;min-height:24px;padding:2px 8px;font-size:11px}
 .dragpanel.e6w .e621-toolbar .mod-btn-sm{height:24px;padding:0 10px;font-size:10.5px}
@@ -110,8 +111,8 @@ const E6W_CSS = `
 .dragpanel.e6w .e621-description-filter{font-size:10.5px}
 .dragpanel.e6w .e621-research-summary{font-size:9.5px;line-height:1.4}
 
-.dragpanel.e6w .e621-layout{min-height:0;gap:6px;
-  grid-template-columns:minmax(170px,0.85fr) minmax(140px,0.6fr) minmax(240px,1.25fr)}
+.dragpanel.e6w .e621-layout.has-detail{min-height:0;gap:6px;
+  grid-template-columns:minmax(140px,0.75fr) minmax(110px,0.5fr) minmax(200px,1fr) minmax(250px,1.2fr)}
 .dragpanel.e6w .e621-column{display:flex;flex-direction:column;min-height:0}
 .dragpanel.e6w .e621-column.categories{display:grid;grid-template-rows:auto minmax(0,1fr) auto minmax(0,0.45fr)}
 .dragpanel.e6w .e621-chip-grid,.dragpanel.e6w .e621-scroll-list{overflow:auto}
@@ -121,21 +122,22 @@ const E6W_CSS = `
 .dragpanel.e6w .e621-pagination{padding-top:4px}
 .dragpanel.e6w .e621-pagination .mod-btn-sm{height:22px;padding:0 10px;font-size:10.5px}
 
-.dragpanel.e6w .e621-detail-grid{min-height:0;gap:6px}
+.dragpanel.e6w .e621-bottom{min-height:0;gap:6px}
 .dragpanel.e6w .e621-detail-card{display:flex;flex-direction:column;min-height:0;padding:6px 8px}
 .dragpanel.e6w .e621-selected-actions .mod-btn-sm{height:22px;padding:0 9px;font-size:10.5px}
-.dragpanel.e6w #e621Testbench{flex:0 0 92px;min-height:60px;font-size:11px}
-.dragpanel.e6w .e621-detail-card .mod-start{flex:0 0 auto;height:26px;margin:5px 0 6px}
+.dragpanel.e6w .e621-testbench-row #e621Testbench{flex:1 1 auto;min-height:40px;font-size:11px}
+.dragpanel.e6w .e621-testbench-row .mod-start{height:auto;margin:0;padding:0 16px}
 .dragpanel.e6w .e621-hidden-list{flex:1;max-height:none}
 
 /* 창이 좁으면(창 폭 기준) 한 줄로 쌓고 창 안을 굴린다. */
 @container e6w (max-width: 760px){
   .dragpanel.e6w .e621-panel{display:flex;flex-direction:column;overflow:auto}
-  .dragpanel.e6w .e621-layout,.dragpanel.e6w .e621-detail-grid{grid-template-columns:minmax(0,1fr)}
+  .dragpanel.e6w .e621-layout.has-detail,.dragpanel.e6w .e621-bottom{grid-template-columns:minmax(0,1fr)}
   .dragpanel.e6w .e621-column.categories{display:flex}
   .dragpanel.e6w .e621-chip-grid{max-height:150px}
   .dragpanel.e6w .e621-scroll-list{flex:0 0 auto;max-height:220px}
   .dragpanel.e6w .e621-detail-card{min-height:auto}
-  .dragpanel.e6w .e621-research-details{max-height:260px}
+  .dragpanel.e6w .e621-column.detail .e621-research-details{max-height:320px}
+  .dragpanel.e6w .e621-testbench-row #e621Testbench{min-height:70px}
 }
 `;

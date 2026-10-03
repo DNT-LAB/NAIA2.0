@@ -4,7 +4,9 @@ from __future__ import annotations
 import math
 
 AXIS_SPECS = (
-    ("lightness", "lightness.mean", "밝기", 1, ["장면을 탄다"], True),
+    # 밝기는 화면의 축에서 뺐다(사용자 결정 2026-10-03): 움직일 손잡이가 없고, 높은 쪽은 배경이 흰 그림일 뿐이다
+    # (기준 표본에서 밝기와 테두리 밝기의 상관 0.95). 값은 남긴다 - 시험 생성의 전후 비교가 쓴다.
+    ("lightness", "lightness.mean", "밝기", 1, ["장면을 탄다 — 사실상 배경의 밝기다"], False),
     ("chroma", "chroma.mean", "채도", 1, ["흰 배경이면 낮게 나온다"], True),
     ("yellow", "tint.highlights.b", "누런 기", 1, ["장면의 조명도 올린다"], True),
     ("line_contrast", "lines.depth", "선 대비", 1, ["맨 아래쪽은 선이 없는 그림이다"], True),
@@ -32,7 +34,7 @@ REFERENCE = {'schema': 'naia.tone-reference.v1',
            'review_raw55, review_raw56, review_raw57, review_raw58; <artist>/*.png excluding 0_first.png',
  'images': 4054,
  'rule': 'cut = round(n * 500 / 4002); zero = trimmed mean; band = trimmed min/max',
- 'built_at': '2026-10-03T13:17:24.693399+00:00',
+ 'built_at': '2026-10-03T14:33:51.368892+00:00',
  'axes': [{'id': 'lightness',
            'key': 'lightness.mean',
            'label': '밝기',
@@ -40,8 +42,8 @@ REFERENCE = {'schema': 'naia.tone-reference.v1',
            'low': 57.42,
            'high': 79.23,
            'digits': 1,
-           'cautions': ['장면을 탄다'],
-           'primary': True},
+           'cautions': ['장면을 탄다 — 사실상 배경의 밝기다'],
+           'primary': False},
           {'id': 'chroma',
            'key': 'chroma.mean',
            'label': '채도',

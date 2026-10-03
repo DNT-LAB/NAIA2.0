@@ -2561,7 +2561,7 @@ function setNaiInspectorEnabled(enabled) {
   syncToneInspectorVisibility();
 }
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 함께 바꾼다(위 퀵 캐릭터 패널의 주석과 같은 이유).
-const toneInspectorPanelReady = import('./js/features/toneInspectorPanel.mjs?v=20261003-compact2')
+const toneInspectorPanelReady = import('./js/features/toneInspectorPanel.mjs?v=20261003-nolight')
   .then(({createToneInspectorPanel}) => {
     toneInspectorPanel = createToneInspectorPanel({
       document, escHtml,

@@ -231,7 +231,8 @@ export function createToneInspectorPanel({
   }
 
   function primaryValues(inspection) {
-    return new Map((inspection?.axes || []).filter(axis => axis.primary).map(axis => [axis.id, axis]));
+    // 밝기는 화면의 축에서는 뺐지만(손잡이가 없다) 시험의 전후 비교에서는 본다 - 보정의 부작용으로 자주 움직인다.
+    return new Map((inspection?.axes || []).filter(axis => axis.primary || axis.id === 'lightness').map(axis => [axis.id, axis]));
   }
 
   /** 지금 그림을 잰다. `force` 가 아니면 이미 그려 둔 그림은 다시 재지 않는다. */

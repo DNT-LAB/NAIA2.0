@@ -236,12 +236,14 @@ async def handle_module_command(
     if isinstance(module_state, list):
         generated_prompt = ""
         generated_source = ""
+        e621_use_main_pipeline = True
         for item in module_state:
             if isinstance(item, dict):
                 await _send_json(ws, item)
                 if item.get("type") == "prompt_generated" and item.get("source") == "e621_event":
                     generated_prompt = str(item.get("prompt") or "")
                     generated_source = "E621"
+                    e621_use_main_pipeline = item.get("use_main_pipeline", True) is not False
         if generated_prompt:
             await enqueue_prompt_from_module(
                 ws,
@@ -249,6 +251,7 @@ async def handle_module_command(
                 clients,
                 prompt=generated_prompt,
                 source=generated_source,
+                e621_use_main_pipeline=e621_use_main_pipeline,
             )
         return True
 

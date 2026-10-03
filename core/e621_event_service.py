@@ -10,10 +10,11 @@ from typing import Any
 from core.e621_tag_repository import E621TagRepository
 from core.e621_research_index import E621ResearchIndex, search_key
 from core.prompt_generation_service import PromptGenerationService
-from core.wildcard_processor import split_tags_smart
+from core.e621_prompt_composer import (WEIGHT_LIMITS, display_tag, validate_weight,
+    prepare_template, restore_literals)
 
 
-DEFAULT_TESTBENCH = "1girl, 1boy, 2:: e621태그는_강조하여_입력하세요 ::, duo, male/female, nsfw, rating:explicit"
+DEFAULT_TESTBENCH = "{{selected_tags}}"
 
 
 class E621EventService:
@@ -29,6 +30,9 @@ class E621EventService:
         self.settings_path = save_root / "e621_module_v2_settings.json"
         self.starred_path = save_root / "e621_starred_v2.json"
         self.deleted_path = save_root / "e621_deleted_v2.json"
+        self.selected_tags_path = save_root / "e621_selected_tags_v1.json"
+        self.selected_tags: list[dict[str, Any]] = []
+        self.use_main_pipeline = True
         self.data: dict[str, Any] | None = None
         self.research_metadata: Any | None = None
         self.search_text = ""
@@ -93,6 +97,9 @@ class E621EventService:
             "selected": selected_payload,
             "wiki": self._wiki_payload(selected),
             "testbench": self.testbench,
+            "selected_tags": [dict(row) for row in self.selected_tags],
+            "use_main_pipeline": self.use_main_pipeline,
+            "weight_limits": {mode: dict(limits) for mode, limits in WEIGHT_LIMITS.items()},
         }
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]]:
@@ -162,15 +169,48 @@ class E621EventService:
             self.disable_wiki_search = self._coerce_bool(raw)
             self.tag_offset = 0
             self._save_settings()
+        elif key.startswith("selected_tags_"):
+            try:
+                self._edit_selected_tags(key, value)
+            except (ValueError, OSError) as exc:
+                return self._toast(str(exc), level="error")
+        elif key == "use_main_pipeline":
+            self.use_main_pipeline = self._coerce_bool(value)
+            self._save_settings()
         elif key == "testbench":
             self.testbench = raw
+            self._save_settings()
         elif key == "generate":
-            prompt = raw.strip() or self.testbench
-            tags = [tag.strip() for tag in split_tags_smart(prompt) if tag.strip()]
-            if not tags:
-                return self._toast("E621 testbench is empty", level="error")
-            self.testbench = ", ".join(tags)
-            generated = self._generate_prompt(tags)
+            template = raw if raw.strip() else self.testbench
+            try:
+                from core.headless_random_prompt_service import pipeline_swap_lock
+                with pipeline_swap_lock(self.app_context):
+                    expand, template_context = self._template_expander() if self.use_main_pipeline else (None, None)
+                    tags, protected = prepare_template(template, self.selected_tags, self.app_context.get_api_mode(),
+                        expand=expand)
+                    if not tags:
+                        return self._toast("E621 testbench is empty", level="error")
+                    generated = self._generate_prompt(tags) if self.use_main_pipeline else ", ".join(tags)
+                    generated = restore_literals(generated, protected)
+                    if not generated:
+                        raise ValueError("E621 generated prompt is empty")
+                    if template_context is not None and template_context.wildcard_history:
+                        # Template rolls are frozen when the E621 prompt is prepared.
+                        # Commit only after successful composition, under the same
+                        # pipeline lock. Preserve the live source and unrelated state.
+                        current = getattr(self.app_context, "current_prompt_context", None)
+                        if current is None:
+                            self.app_context.current_prompt_context = template_context
+                        else:
+                            current.sequential_counters.update(template_context.sequential_counters)
+                            current.wildcard_state.update(template_context.wildcard_state)
+                            for name, history in template_context.wildcard_history.items():
+                                current.wildcard_history.setdefault(name, []).extend(history)
+                            current.wildcard_rolls.extend(template_context.wildcard_rolls)
+            except ValueError as exc:
+                return self._toast(str(exc), level="error")
+            self.testbench = template
+            self._save_settings()
             self.app_context.prompt_text = generated
             save_remote_ui_state = getattr(self.app_context, "save_remote_ui_state", None)
             if callable(save_remote_ui_state):
@@ -179,6 +219,7 @@ class E621EventService:
                 {
                     "type": "prompt_generated",
                     "source": "e621_event",
+                    "use_main_pipeline": self.use_main_pipeline,
                     "prompt": generated,
                     "remaining": self.app_context.search_results.get_count()
                     if getattr(self.app_context, "search_results", None) is not None
@@ -228,6 +269,26 @@ class E621EventService:
         if isinstance(settings, dict):
             self.disable_translation = self._coerce_bool(settings.get("disable_translation", False))
             self.disable_wiki_search = self._coerce_bool(settings.get("disable_wiki_search", False))
+            self.use_main_pipeline = self._coerce_bool(settings.get("use_main_pipeline", True))
+            self.testbench = str(settings.get("testbench", DEFAULT_TESTBENCH))
+        try:
+            saved = json.loads(self.selected_tags_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = []
+        seen = set()
+        for row in saved if isinstance(saved, list) else []:
+            if not isinstance(row, dict) or row.get("site") != "e621":
+                continue
+            exact = row.get("exact_tag")
+            if not isinstance(exact, str) or not exact or exact in seen:
+                continue
+            try:
+                weight = validate_weight(row.get("weight", 1.0))
+            except ValueError:
+                continue
+            self.selected_tags.append({"site": "e621", "exact_tag": exact,
+                "display": display_tag(exact), "kor": str(row.get("kor") or ""), "weight": weight})
+            seen.add(exact)
 
     def _save_settings(self) -> None:
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -236,12 +297,51 @@ class E621EventService:
                 {
                     "disable_translation": self.disable_translation,
                     "disable_wiki_search": self.disable_wiki_search,
+                    "use_main_pipeline": self.use_main_pipeline,
+                    "testbench": self.testbench,
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             encoding="utf-8",
         )
+
+    def _edit_selected_tags(self, key: str, value: Any) -> None:
+        rows = [dict(row) for row in self.selected_tags]
+        payload = value if isinstance(value, dict) else {"exact_tag": value}
+        if payload.get("site", "e621") != "e621":
+            raise ValueError("site must be e621")
+        exact = payload.get("exact_tag")
+        index = next((i for i, row in enumerate(rows) if row["exact_tag"] == exact), None)
+        if key == "selected_tags_clear":
+            rows = []
+        elif key == "selected_tags_add":
+            if not isinstance(exact, str) or self._find_tag(exact) is None:
+                raise ValueError("Unknown exact_tag in E621 dictionary")
+            if index is None:
+                row = self._tag_payload(self._find_tag(exact))
+                rows.append({"site": "e621", "exact_tag": exact, "display": display_tag(exact),
+                    "kor": row["kor"], "weight": validate_weight(payload.get("weight", 1.0), self.app_context.get_api_mode())})
+        elif key == "selected_tags_remove":
+            if index is not None:
+                rows.pop(index)
+        elif key in {"selected_tags_weight", "selected_tags_move"}:
+            if index is None:
+                raise ValueError("exact_tag is not selected")
+            if key == "selected_tags_weight":
+                rows[index]["weight"] = validate_weight(payload.get("weight"), self.app_context.get_api_mode())
+            else:
+                target = payload.get("index")
+                if isinstance(target, bool) or not isinstance(target, int) or not 0 <= target < len(rows):
+                    raise ValueError("index must be a zero-based selected tag position")
+                rows.insert(target, rows.pop(index))
+        else:
+            raise ValueError(f"Unknown E621 selection command: {key}")
+        self.selected_tags_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.selected_tags_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.selected_tags_path)
+        self.selected_tags = rows
 
     def _categories(self) -> list[dict[str, Any]]:
         index = self._search_index
@@ -370,15 +470,51 @@ class E621EventService:
             "auto_generate": False,
             "prompt_fixed": False,
             "wildcard_standalone": False,
+            "random_prompt_weight": 1.0,
+            "e621_explicit_tags": True,
         }
-        try:
-            service = getattr(self.app_context, "prompt_generation_service", None)
-            if service is None:
-                service = PromptGenerationService(self.app_context)
-                self.app_context.prompt_generation_service = service
-            return service.generate_instant_source_silent(source, settings) or ", ".join(tags)
-        except Exception:
-            return ", ".join(tags)
+        from core.headless_random_prompt_service import pipeline_swap_lock
+
+        service = getattr(self.app_context, "prompt_generation_service", None)
+        if service is None:
+            service = PromptGenerationService(self.app_context)
+            self.app_context.prompt_generation_service = service
+        with pipeline_swap_lock(self.app_context):
+            result = service.generate_instant_source_result_silent(source, settings)
+        if result.error or not result.final_prompt:
+            raise ValueError(result.error or "E621 main prompt pipeline failed")
+        return result.final_prompt
+
+    def _template_expander(self):
+        """Use the existing wildcard/preset engines before wrapping explicit weights."""
+        import copy
+        import pandas as pd
+        from core.prompt_context import PromptContext
+        from core.wildcard_processor import WildcardProcessor, split_tags_smart
+        from core.wildcard_runtime import ensure_wildcard_manager
+
+        context = PromptContext(source_row=pd.Series(dtype=object), settings={"api_mode": self.app_context.get_api_mode()})
+        current = getattr(self.app_context, "current_prompt_context", None)
+        if current is not None:
+            context.sequential_counters = copy.deepcopy(current.sequential_counters)
+            context.wildcard_state = copy.deepcopy(current.wildcard_state)
+        processor = WildcardProcessor(ensure_wildcard_manager(self.app_context))
+
+        def expand(tag):
+            tags = processor.expand_tags([tag], context, location="main")
+            if any(str(item).lower().startswith("preset:") for item in tags):
+                service = getattr(self.app_context, "prompt_generation_service", None)
+                if service is None:
+                    service = PromptGenerationService(self.app_context)
+                    self.app_context.prompt_generation_service = service
+                tags = service.processor.expand_preset_tokens(tags, context)
+            tags.extend(context.global_append_tags)
+            context.global_append_tags.clear()
+            result = [piece.strip() for item in tags for piece in split_tags_smart(item) if piece.strip()]
+            if any("__" in piece for piece in result):
+                raise ValueError("An E621 template wildcard could not be resolved")
+            return result
+        return expand, context
 
     def _collect_tags(self, data: Any) -> list[dict[str, Any]]:
         tags: list[dict[str, Any]] = []

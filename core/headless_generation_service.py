@@ -564,6 +564,9 @@ class HeadlessGenerationService:
         # 구간과 겹치지 않게 잠근다 — 아래 추적 수집도 같다.
         from core.headless_random_prompt_service import pipeline_swap_lock
 
+        if params.get("_remote_queue_source") == "E621":
+            from core.e621_prompt_composer import clean_prompt
+            params["input"] = clean_prompt(params.get("input", ""))
         with pipeline_swap_lock(self.context):
             self._expand_input_wildcards(params)
         request.mark_processing()
@@ -726,6 +729,8 @@ class HeadlessGenerationService:
         이동, 와일드카드 라인의 global append 소비. 랜덤 경로 산출물처럼 토큰이 없는
         프롬프트는 빠르게 통과한다. ``params``는 execute_request의 로컬 복사본이므로
         요청 원본에는 토큰이 남아 반복 생성 시 매번 재전개(재롤)된다."""
+        if params.get("_remote_queue_source") == "E621" and params.get("_e621_use_main_pipeline") is False:
+            return
         text = params.get("input")
         if not isinstance(text, str) or not text.strip():
             return

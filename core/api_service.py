@@ -489,6 +489,11 @@ class APIService:
                 전달되면 NAI generate-image-stream(SSE)을 사용해 중간 이미지를 받습니다.
                 워커 스레드에서 호출되므로 스레드 안전하게 처리해야 함
         """
+        # E621 template lines are separators. Keep other ingress cleanup unchanged.
+        if parameters.get("_remote_queue_source") == "E621":
+            from core.e621_prompt_composer import clean_prompt
+            parameters["input"] = clean_prompt(parameters.get("input", ""))
+
         # 입력 프롬프트에서 주석 및 개행문자 처리
         if 'input' in parameters and isinstance(parameters['input'], str):
             original_prompt = parameters['input']

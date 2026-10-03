@@ -328,7 +328,10 @@ class PromptEngineeringHeadlessPostHook:
             return context
 
         options = self._current_options()
-        skip_preprocessing = bool(getattr(self.app_context, "skip_prompt_engineering_auto_hide", False))
+        # E621 directly authored selections/templates are authoritative, unlike
+        # sampled source tags. Still run this hook's prefix/suffix and wildcards.
+        skip_preprocessing = bool(getattr(self.app_context, "skip_prompt_engineering_auto_hide", False)
+                                  or context.settings.get("e621_explicit_tags", False))
         filter_manager = getattr(self.app_context, "filter_data_manager", None)
 
         prefix_tags = list(options.get("pre_prompt") or []) + list(context.prefix_tags)

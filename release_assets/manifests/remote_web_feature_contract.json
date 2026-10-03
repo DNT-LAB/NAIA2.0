@@ -680,6 +680,7 @@
         "core/event_corpus_index.py",
         "core/event_corpus_search_service.py",
         "core/e621_event_service.py",
+        "core/e621_prompt_composer.py",
         "core/e621_tag_repository.py",
         "core/e621_research_metadata.py",
         "core/e621_research_index.py",

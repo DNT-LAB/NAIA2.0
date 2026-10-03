@@ -745,6 +745,7 @@ async def enqueue_prompt_from_module(
     prompt: str,
     source: str,
     start_generation_runner: GenerationRunnerStarter,
+    e621_use_main_pipeline: bool | None = None,
 ) -> None:
     clean_prompt = str(prompt or "").strip()
     if not clean_prompt:
@@ -760,6 +761,8 @@ async def enqueue_prompt_from_module(
             "_remote_queue_label": source,
         },
     }
+    if source == "E621" and e621_use_main_pipeline is not None:
+        command["overrides"]["_e621_use_main_pipeline"] = bool(e621_use_main_pipeline)
     result = await enqueue_generation_request(context, command)
     await _send_json(ws, result.websocket_payload())
     if not result.ok:

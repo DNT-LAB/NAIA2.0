@@ -25,7 +25,7 @@ export function createE621Window({
 }) {
   ensureStyle(doc);
 
-  // 처음 크기 · 자리는 화면에 맞춘다(세 칸 + 상세 두 칸이라 넓게 시작한다). 좁은 화면이면 화면 안으로 줄인다.
+  // 처음 크기 · 자리는 화면에 맞춘다(네 칸이라 넓게 시작한다). 좁은 화면이면 화면 안으로 줄인다.
   const vw = win?.innerWidth || doc.documentElement.clientWidth || 1280;
   const vh = win?.innerHeight || doc.documentElement.clientHeight || 800;
   const width = Math.max(320, Math.min(1080, vw - 12));
@@ -89,55 +89,10 @@ function ensureStyle(doc) {
   doc.head.appendChild(style);
 }
 
-// 배치와 크기만 정한다. ⚠️ 색은 style.css 의 기존 `.e621-*` 규칙에 맡긴다(조건부 창 때 사용자 검토 - 색을 덮었다가
-// 되돌렸다). 모든 규칙은 `.dragpanel.e6w` 아래로 한정한다 - 떼어 낸 창의 옛 모듈 팝업 배치로 새지 않는다.
-// 창 폭에 따른 배치는 **컨테이너 질의**로 한다(화면 폭이 아니라 창 폭을 봐야 한다).
+// 창 본문의 크기만 정한다. 패널의 배치 · 모양 · 폭 반응은 전부 e621EventPanel 의 PANEL_CSS 가 싣는다
+// (.e6-root 가 컨테이너라 창 폭을 스스로 잰다) - 떼어 낸 브라우저 창의 모듈 팝업에서도 같은 화면이 나온다.
 const E6W_CSS = `
-.dragpanel.e6w .dragpanel-body{padding:0;gap:0;overflow:hidden;position:relative;background:var(--bg-surface);
-  container-type:inline-size;container-name:e6w}
-.dragpanel.e6w .e621-host{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:6px 8px 8px;box-sizing:border-box}
+.dragpanel.e6w .dragpanel-body{padding:0;gap:0;overflow:hidden;position:relative;background:var(--bg-surface)}
+.dragpanel.e6w .e621-host{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:8px;box-sizing:border-box}
 .dragpanel.e6w .e621-loading{padding:16px;text-align:center}
-
-/* 위에서부터: 검색줄 · 필터줄 · [카테고리 | 폴더 | 태그 | 선택한 태그] · 낮은 띠 [테스트벤치 | 숨긴 태그].
-   선택한 태그 칸(번역 · 본문)이 창 높이를 다 쓴다(사용자 지정 2026-10-03). */
-.dragpanel.e6w .e621-panel{flex:1 1 auto;height:100%;min-height:0;display:grid;
-  grid-template-rows:auto auto minmax(0,1fr) auto;gap:6px}
-.dragpanel.e6w .e621-toolbar{gap:5px}
-.dragpanel.e6w .e621-toolbar .mod-input{height:24px;min-height:24px;padding:2px 8px;font-size:11px}
-.dragpanel.e6w .e621-toolbar .mod-btn-sm{height:24px;padding:0 10px;font-size:10.5px}
-.dragpanel.e6w .e621-toolbar.compact{gap:4px 8px}
-.dragpanel.e6w .e621-toolbar.compact .mod-btn-sm{height:22px;padding:0 9px}
-.dragpanel.e6w .e621-toolbar.compact .mod-check-row{min-height:22px;padding:0;font-size:10.5px}
-.dragpanel.e6w .e621-description-filter{font-size:10.5px}
-.dragpanel.e6w .e621-research-summary{font-size:9.5px;line-height:1.4}
-
-.dragpanel.e6w .e621-layout.has-detail{min-height:0;gap:6px;
-  grid-template-columns:minmax(140px,0.75fr) minmax(110px,0.5fr) minmax(200px,1fr) minmax(250px,1.2fr)}
-.dragpanel.e6w .e621-column{display:flex;flex-direction:column;min-height:0}
-.dragpanel.e6w .e621-column.categories{display:grid;grid-template-rows:auto minmax(0,1fr) auto minmax(0,0.45fr)}
-.dragpanel.e6w .e621-chip-grid,.dragpanel.e6w .e621-scroll-list{overflow:auto}
-.dragpanel.e6w .e621-scroll-list{flex:1;max-height:none;padding:3px;gap:3px}
-.dragpanel.e6w .e621-chip-grid{gap:3px}
-.dragpanel.e6w .e621-chip,.dragpanel.e6w .e621-list-item,.dragpanel.e6w .e621-hidden-item{min-height:26px;padding:3px 7px;gap:6px}
-.dragpanel.e6w .e621-pagination{padding-top:4px}
-.dragpanel.e6w .e621-pagination .mod-btn-sm{height:22px;padding:0 10px;font-size:10.5px}
-
-.dragpanel.e6w .e621-bottom{min-height:0;gap:6px}
-.dragpanel.e6w .e621-detail-card{display:flex;flex-direction:column;min-height:0;padding:6px 8px}
-.dragpanel.e6w .e621-selected-actions .mod-btn-sm{height:22px;padding:0 9px;font-size:10.5px}
-.dragpanel.e6w .e621-testbench-row #e621Testbench{flex:1 1 auto;min-height:28px;font-size:11px}
-.dragpanel.e6w .e621-testbench-row .mod-start{height:auto;margin:0;padding:0 16px}
-.dragpanel.e6w .e621-hidden-list{flex:1;max-height:none}
-
-/* 창이 좁으면(창 폭 기준) 한 줄로 쌓고 창 안을 굴린다. */
-@container e6w (max-width: 760px){
-  .dragpanel.e6w .e621-panel{display:flex;flex-direction:column;overflow:auto}
-  .dragpanel.e6w .e621-layout.has-detail,.dragpanel.e6w .e621-bottom{grid-template-columns:minmax(0,1fr)}
-  .dragpanel.e6w .e621-column.categories{display:flex}
-  .dragpanel.e6w .e621-chip-grid{max-height:150px}
-  .dragpanel.e6w .e621-scroll-list{flex:0 0 auto;max-height:220px}
-  .dragpanel.e6w .e621-detail-card{min-height:auto}
-  .dragpanel.e6w .e621-column.detail .e621-research-details{max-height:320px}
-  .dragpanel.e6w .e621-testbench-row #e621Testbench{min-height:44px}
-}
 `;

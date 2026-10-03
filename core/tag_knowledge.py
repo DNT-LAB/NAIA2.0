@@ -377,17 +377,15 @@ def merge_e621_research_records(
     data_path: str | Path,
     src_key: int = 14,
 ) -> ParquetTagMergeStats:
-    """E621 연구모듈이 쓰는 전체 어휘(`data/e621_data`)를 색인에 채운다.
+    """Temporarily limit shared E621 vocabulary until the site-aware index lands.
 
-    ⚠️ `e621_KR_tags.parquet` 은 **한국어 번역이 붙은 것만** 담은 5,450개짜리
-       부분집합이다. 연구모듈이 실제로 보는 어휘는 20,987개라, 그 차이만큼
-       (8,864개) 자동완성·Tag Search 에서 아예 검색되지 않았다 - `mammal`
-       `anthro` 같은 e621 기본어까지 통째로 빠져 있었다(사용자 제보 2026-08-31:
-       "worm's 로 검색이 안 된다").
-
-    이미 있는 태그는 건드리지 않는다 - Danbooru 쪽 설명/빈도가 이깁니다.
-    위키 본문은 **싣지 않는다**(15MB짜리 파일이고, 색인에 넣으면 상주 메모리가
-    그만큼 늘어난다). 이름·빈도·한국어 이름만 가져온다.
+    In the reviewed expansion, all new unreviewed rows are in the two
+    unclassified folders. Curated folders plus the pre-expansion 'domestic'
+    exception equal all 20,980 original tags and 100 reviewed additions.
+    The research module still reads the full dictionary independently.
+    Keep existing shared records (including their frequency/description) and
+    omit wiki bodies. This rule is temporary, not a semantic approval heuristic
+    for future bulk imports; revalidate the bounded vocabulary before expansion.
     """
     stats = ParquetTagMergeStats()
     path = Path(data_path)
@@ -400,15 +398,17 @@ def merge_e621_research_records(
         stats.errors.append(f"{path}: {exc}")
         return stats
 
-    def walk(node: Any, group: str) -> None:
+    def walk(node: Any, group: str, unclassified: bool = False) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
-                walk(value, str(key))
+                walk(value, str(key), unclassified or key in {"일반 미분류", "종 미분류"})
             return
         if not isinstance(node, list):
             return
         for item in node:
             if not isinstance(item, dict) or "tag" not in item:
+                continue
+            if unclassified and item["tag"] != "domestic":
                 continue
             tag_raw = normalize_display_tag(item.get("tag"))
             tag_lower = normalize_tag_key(tag_raw)

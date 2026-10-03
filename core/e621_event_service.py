@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.e621_tag_repository import E621TagRepository
+from core.site_tag_repository import SiteTagKey
 from core.prompt_generation_service import PromptGenerationService
 from core.wildcard_processor import split_tags_smart
 
@@ -21,6 +23,8 @@ class E621EventService:
         runtime_paths = getattr(app_context, "runtime_paths", None)
         save_root = runtime_paths.save_dir if runtime_paths is not None else self.root / "save"
         self.data_path = self.root / "data" / "e621_data"
+        data_dir = getattr(runtime_paths, "data_dir", None)
+        self.repository = E621TagRepository(self.root, data_roots=[data_dir] if data_dir is not None else None)
         self.save_dir = save_root / "e621_event"
         self.settings_path = save_root / "e621_module_v2_settings.json"
         self.starred_path = save_root / "e621_starred_v2.json"
@@ -189,16 +193,11 @@ class E621EventService:
             if self.research_metadata is None:
                 self._load_research_metadata()
             return True
-        if not self.data_path.exists():
+        if not self.repository.load():
             return False
-        try:
-            payload = json.loads(self.data_path.read_text(encoding="utf-8"))
-        except Exception:
-            return False
-        if not isinstance(payload, dict):
-            return False
-        self.data = payload
-        self._load_research_metadata()
+        self.data = self.repository.dictionary.legacy_tree
+        self.data_path = self.repository.source_path
+        self.research_metadata = self.repository.translations.legacy_metadata
         return True
 
     def _load_research_metadata(self) -> None:
@@ -372,6 +371,8 @@ class E621EventService:
         for tag in self._visible_tags():
             if tag.get("tag") == tag_name:
                 return tag
+        if self.repository.loaded and self.data is self.repository.dictionary.legacy_tree:
+            return self.repository.get(SiteTagKey("e621", tag_name))
         for section in ("General", "Species"):
             for category_data in (self.data or {}).get(section, {}).values():
                 for tag in self._collect_tags(category_data):

@@ -67,6 +67,9 @@
     ]
   },
   "exclude": {
+    "authoring_catalogs": [
+      "data/e621_catalog/**"
+    ],
     "desktop_legacy": [
       "legacy_desktop/**",
       "NAIA_cold_v4.py",

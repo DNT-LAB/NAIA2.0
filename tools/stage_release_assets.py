@@ -98,6 +98,15 @@ def collect_release_files(
     manifest_path: str | Path = DEFAULT_MANIFEST,
 ) -> list[Path]:
     root = Path(source_root).resolve()
+    catalog = root / "data" / "e621_catalog"
+    if catalog.exists():
+        # Translation JSON is authoring-only; verify its Parquet export before
+        # staging writes. e621_data is the dictionary/taxonomy source itself.
+        try:
+            from tools.build_e621_catalog import verify_legacy
+        except ModuleNotFoundError:
+            from build_e621_catalog import verify_legacy
+        verify_legacy(catalog, root / "data")
     manifest = load_manifest(manifest_path)
     include_patterns = _flatten_patterns(manifest.get("include", {}))
     exclude_patterns = _flatten_patterns(manifest.get("exclude", {}))

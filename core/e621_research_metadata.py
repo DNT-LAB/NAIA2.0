@@ -22,7 +22,8 @@ def body_sha256(body: str) -> str:
 
 class E621ResearchMetadata:
     def __init__(self, repo_root: Path, native_rows: list[dict[str, Any]],
-                 data_roots: list[Path] | None = None):
+                 data_roots: list[Path] | None = None,
+                 translation_rows: list[dict[str, Any]] | None = None):
         self._native: dict[str, dict[str, Any]] = {}
         self._body_tags: set[str] = set()
         for row in native_rows:
@@ -32,7 +33,13 @@ class E621ResearchMetadata:
             self._native.setdefault(tag, row)
             if str(row.get("wiki_body") or row.get("wiki_preview") or "").strip():
                 self._body_tags.add(tag)
-        self._roots = list(dict.fromkeys([*(data_roots or []), Path(repo_root) / "data"]))
+        # App-owned E621 assets must receive bundle updates, not remain hidden
+        # behind an old runtime copy (runtime_install_manager documents this).
+        base = Path(repo_root).resolve()
+        self._roots = list(dict.fromkeys(
+            root if root.is_absolute() else base / root
+            for root in map(Path, [base / "data", *(data_roots or [])])
+        ))
         self._translations: dict[str, dict[str, Any]] = {}
         self._annotations: dict[str, dict[str, Any]] = {}
         self._search_annotations: dict[str, dict[str, Any]] = {}
@@ -41,7 +48,7 @@ class E621ResearchMetadata:
         self._stale_search: set[str] = set()
         self._warnings: list[str] = []
         self._metadata_available = False
-        self._load_translations()
+        self._load_translations(translation_rows)
         self._load_annotations()
         described = {tag for tag, value in self._translations.items() if value.get("desc")}
         described.update(self._annotations)
@@ -75,14 +82,15 @@ class E621ResearchMetadata:
     def _path(self, name: str) -> Path | None:
         return next((root / name for root in self._roots if (root / name).is_file()), None)
 
-    def _load_translations(self) -> None:
-        path = self._path("e621_KR_tags.parquet")
-        if path is None:
+    def _load_translations(self, rows: list[dict[str, Any]] | None = None) -> None:
+        path = self._path("e621_KR_tags.parquet") if rows is None else None
+        if rows is None and path is None:
             self._warnings.append("한국어 설명 사전이 없어 설명 보유 상태를 모두 확인할 수 없습니다.")
             return
         try:
-            import pyarrow.parquet as pq
-            rows = pq.read_table(path, columns=["tag", "desc", "keywords"]).to_pylist()
+            if rows is None:
+                import pyarrow.parquet as pq
+                rows = pq.read_table(path, columns=["tag", "desc", "keywords"]).to_pylist()
             for row in rows:
                 tag = str(row.get("tag") or "")
                 if tag in self._native:

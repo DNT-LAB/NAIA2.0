@@ -887,13 +887,18 @@
       "name": "Image tone inspector (lightness / chroma / tint / hue dependence / line profile)",
       "source_files": [
         "app/backend/server/image_inspect_routes.py",
-        "core/image_tone_inspector.py"
+        "core/image_tone_inspector.py",
+        "core/image_tone_reference.py",
+        "core/image_tone_advisor.py",
+        "app/web/remote/js/features/toneInspectorPanel.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
         {"method": "GET", "path": "/api/inspect/tone/history/{history_id}", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/inspect/tone/compare", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/inspect/tone/image", "smoke": "non_destructive"}
+        {"method": "POST", "path": "/api/inspect/tone/image", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/inspect/tone/advise", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/inspect/tone/apply", "smoke": "non_destructive"}
       ]
     },
     {

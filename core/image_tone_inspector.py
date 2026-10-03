@@ -50,6 +50,9 @@ HUE_STRIDE = 2
 LINE_SIGMA = 1.5            # 1~4px 굵기의 선에 맞춘 척도
 LINE_SAMPLES = 6000
 LINE_MIN_DEPTH = 8.0        # 선 한가운데가 양옆보다 이만큼(L*)은 어두워야 선으로 친다
+# Valid cross-section fraction, NOT ridge candidate density. Calibrated only on
+# the 10 SRS examples (3 present / 6 absent / 1 middle), not a lineart classifier.
+LINE_MIN_VALID_SHARE = 0.88
 _LINE_OFFSETS = np.arange(-8.0, 8.01, 0.5, dtype=np.float32)
 _LINE_CENTRE = len(_LINE_OFFSETS) // 2
 _LINE_REACH = 12            # 가운데에서 양쪽으로 6px
@@ -98,8 +101,13 @@ def load_rgb(source: Any, max_side: int = MAX_SIDE) -> tuple[np.ndarray, dict[st
         alpha = np.asarray(rgba.getchannel("A"))
         info["has_alpha"] = True
         info["transparent_share"] = round(float((alpha < 128).mean()), 4)
-        backdrop = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-        image = Image.alpha_composite(backdrop, rgba).convert("RGB")
+        if bool(np.all(alpha == 255)):
+            # Opaque RGBA is common in generated PNGs; compositing cannot change
+            # any pixel here. Keep partial transparency on the exact old path.
+            image = rgba.convert("RGB")
+        else:
+            backdrop = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+            image = Image.alpha_composite(backdrop, rgba).convert("RGB")
     else:
         image = image.convert("RGB")
     scale = 1.0
@@ -177,7 +185,7 @@ def line_profile(lightness: np.ndarray, sigma: float = LINE_SIGMA, samples: int 
     고정 sigma와 양옆 6px 탐색은 가는 선에 편향된다. samples=0의 0값은 측정 불가 표시다.
     """
     empty = {"samples": 0, "width": 0.0, "width_p25": 0.0, "width_p75": 0.0, "depth": 0.0, "floor": 0.0,
-             "flank": 0.0, "steepness": 0.0}
+             "flank": 0.0, "steepness": 0.0, "width_reliable": False}
     if min(lightness.shape) < 32:
         return empty
     lxx = ndi.gaussian_filter(lightness, sigma, order=(0, 2))
@@ -189,8 +197,14 @@ def line_profile(lightness: np.ndarray, sigma: float = LINE_SIGMA, samples: int 
     ys, xs = np.nonzero(ridge >= threshold)
     if len(ys) < 200:
         return empty
-    # 고정 씨앗 - 같은 그림은 같은 값을 낸다.
-    pick = np.random.default_rng(0).choice(len(ys), size=min(samples, len(ys)), replace=False)
+    # 좌표별 고정 우선순위 - 같은 그림은 같은 값을 낸다.
+    # Coordinate priorities do not change when another candidate appears/disappears.
+    priority = ys.astype(np.uint64) * np.uint64(0x9E3779B185EBCA87) ^ xs.astype(np.uint64)
+    priority = (priority ^ (priority >> 30)) * np.uint64(0xBF58476D1CE4E5B9)
+    priority = (priority ^ (priority >> 27)) * np.uint64(0x94D049BB133111EB)
+    priority ^= priority >> 31
+    count = min(samples, len(ys))
+    pick = np.argpartition(priority, count - 1)[:count]
     ys, xs = ys[pick], xs[pick]
     theta = 0.5 * np.arctan2(2 * lxy[ys, xs], lxx[ys, xs] - lyy[ys, xs])
     coords = np.stack([ys[:, None] + _LINE_OFFSETS[None, :] * np.sin(theta)[:, None],
@@ -213,6 +227,7 @@ def line_profile(lightness: np.ndarray, sigma: float = LINE_SIGMA, samples: int 
     p25, p50, p75 = np.percentile(width, [25, 50, 75])
     return {
         "samples": int(keep.sum()),
+        "width_reliable": bool(keep.mean() >= LINE_MIN_VALID_SHARE),
         "width": _round(p50), "width_p25": _round(p25), "width_p75": _round(p75),   # 반치폭(px)
         "depth": _round(np.median(depth), 1),        # 양옆 대비 얼마나 어두운가(L*)
         "floor": _round(np.median(floor), 1),        # 선 한가운데의 L* - 낮을수록 검은 선
@@ -344,6 +359,20 @@ def _extreme_rgb(rgb: np.ndarray, mask: np.ndarray) -> list[int]:
     return [int(round(v)) for v in rgb[mask].mean(0)]
 
 
+def _rgb_balance(rgb: np.ndarray, mask: np.ndarray | None = None) -> dict[str, Any]:
+    """평균색(0~255)과 세 채널의 치우침. 치우침 = 채널 평균 - 세 채널의 평균이라 합이 0 이다.
+
+    ⚠️ 치우침 0 이 '정상' 이 아니다 - 인물 그림은 살색 때문에 늘 R 쪽이다. 화면은 0점(표본의 가운데)과 견줘 보여 준다.
+    """
+    pixels = rgb.reshape(-1, 3) if mask is None else rgb[mask]
+    if pixels.size == 0:
+        return {"mean": {"r": 0.0, "g": 0.0, "b": 0.0}, "bias": {"r": 0.0, "g": 0.0, "b": 0.0}}
+    mean = pixels.mean(0, dtype=np.float64)
+    grey = float(mean.mean())
+    return {"mean": {k: _round(v, 1) for k, v in zip("rgb", mean)},
+            "bias": {k: _round(v - grey, 1) for k, v in zip("rgb", mean)}}
+
+
 def inspect_arrays(rgb: np.ndarray, spectrum: bool = False) -> dict[str, Any]:
     """RGB uint8 배열 하나를 잰다. `inspect_image` 가 이걸 부른다 - 시험은 배열을 직접 넣는다."""
     lightness, a, b = rgb_to_lab(rgb)
@@ -373,6 +402,12 @@ def inspect_arrays(rgb: np.ndarray, spectrum: bool = False) -> dict[str, Any]:
             # 가장 밝은 2% · 가장 어두운 2% 의 평균색 - '흰색이어야 할 곳' 과 '검정이어야 할 곳'.
             "white_point_rgb": _extreme_rgb(rgb, lightness >= p98),
             "black_point_rgb": _extreme_rgb(rgb, lightness <= p02),
+        },
+        # 그림 전체 · 밝은 영역(상위 10%) · 어두운 영역(하위 10%)의 평균색과 채널 치우침.
+        "rgb": {
+            "overall": _rgb_balance(rgb),
+            "highlights": _rgb_balance(rgb, highlights),
+            "shadows": _rgb_balance(rgb, shadows),
         },
         "hue": _hue_stats(rgb, chroma),
         "palette": _palette(rgb),

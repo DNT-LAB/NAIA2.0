@@ -1990,6 +1990,8 @@ let interactiveStateRestored = false;
 /** 빠른 캐릭터 패널을 보일지. NAI 모드이면서 Interactive 가 꺼져 있을 때만 쓴다.
  *  캐릭터 프롬프트는 NAID4+ 전용이라 WEBUI/ComfyUI 에서는 자리만 차지한다. */
 function syncCharacterQuickPanelVisibility(interactiveActive) {
+  // NAI Inspector 도 같은 때(모드 · 탭이 바뀔 때) 보이고 숨는다.
+  syncToneInspectorVisibility();
   if (!characterQuickPanel) return;
   const active = interactiveActive === undefined
     ? !!interactivePanel?.isActive?.()
@@ -2515,6 +2517,121 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   })
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
+  });
+// ── NAI Inspector(사용자 지정 2026-10-03) ─────────────────────────────────────
+// 프롬프트 도구 맨 아래의 체크박스로 켠다. 켜면 결과 화면의 시드 알약 옆에 접이식 판이 뜬다.
+// 켰는지 · 펼쳤는지는 이 브라우저에 기억한다(서버 상태가 아니다 - 화면마다 다를 수 있다).
+const TONE_INSPECTOR_KEY = 'naia_tone_inspector';
+let toneInspectorPanel = null;
+let toneInspectorState = (() => {
+  try { return JSON.parse(localStorage.getItem(TONE_INSPECTOR_KEY) || 'null') || {}; } catch (_) { return {}; }
+})();
+function saveToneInspectorState(patch) {
+  toneInspectorState = {...toneInspectorState, ...patch};
+  try { localStorage.setItem(TONE_INSPECTOR_KEY, JSON.stringify(toneInspectorState)); } catch (_) {}
+}
+/** 지금 화면에 있는 그림의 히스토리 id. 히스토리 항목이 아니면(저장 폴더에서 연 파일) ''. */
+function toneInspectorHistoryId() {
+  const path = String(resultHistory?.currentImagePath || '').replace(/\\/g, '/');
+  const prefix = '__history_item__/';
+  return path.startsWith(prefix) ? (path.slice(prefix.length).split('/')[0] || '') : '';
+}
+/** 런처가 다시 그려도 체크가 풀리지 않게, 상태를 들고 있다가 새로 그려진 칸에 씌운다. */
+function syncNaiInspectorToggle() {
+  document.querySelectorAll('[data-nai-inspector-enabled]').forEach(input => {
+    input.checked = !!toneInspectorState.enabled;
+  });
+  moduleLauncherControl?.updateState?.();
+}
+/** 프리셋의 postfix 를 아직 모르면 한 번 청한다('프리셋 postfix 에도 반영' 이 쓴다). */
+function requestToneInspectorPresetFields() {
+  if (typeof slashPeState().post_prompt !== 'string') requestModuleState('prompt_engineering');
+}
+function syncToneInspectorVisibility() {
+  if (!toneInspectorPanel) return;
+  const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
+  // 퀵 캐릭터 패널과 같은 규칙 - 결과 그림 위에 얹히는 부유창이라 Result 탭에서만 보인다.
+  const rightTab = document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
+  toneInspectorPanel.setEnabled(
+    !!toneInspectorState.enabled && mode === 'NAI' && !isDetachedShell && rightTab === 'result');
+}
+function setNaiInspectorEnabled(enabled) {
+  saveToneInspectorState({enabled: !!enabled});
+  syncNaiInspectorToggle();
+  syncToneInspectorVisibility();
+}
+// ⚠️ `?v=` 는 이 파일을 고칠 때마다 함께 바꾼다(위 퀵 캐릭터 패널의 주석과 같은 이유).
+const toneInspectorPanelReady = import('./js/features/toneInspectorPanel.mjs?v=20261003-ti3')
+  .then(({createToneInspectorPanel}) => {
+    toneInspectorPanel = createToneInspectorPanel({
+      document, escHtml,
+      getHistoryId: toneInspectorHistoryId,
+      // 다음 생성에 나갈 글 = 메인 칸과 네거티브 칸. 메인 칸에는 프리셋의 prefix · postfix 가 이미 펼쳐져 있다.
+      getFields: () => ({prompt: promptEdit.value, negative_prompt: negEdit.value}),
+      getPresetFields: () => {
+        const state = slashPeState();
+        return typeof state.post_prompt === 'string'
+          ? {pre_prompt: String(state.pre_prompt || ''), post_prompt: state.post_prompt} : null;
+      },
+      // 칸에 넣을 때는 **사용자가 친 것처럼** 넣는다 - 강조 · 토큰 수 · 서버 동기 · 프리셋 반영 규칙이
+      // 전부 input 처리기에 걸려 있어서, 값을 직접 보내면 그 규칙들을 비켜 간다.
+      applyFields: changes => {
+        for (const change of changes) {
+          const target = change.field === 'negative_prompt' ? negEdit : change.field === 'prompt' ? promptEdit : null;
+          if (!target) continue;
+          target.value = String(change.after ?? '');
+          target.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+      },
+      // 프리셋의 칸은 PE 칸을 고치는 유일한 길(`slashPeSetField`)로 넣는다 - 프리셋 도장이 거기서 찍힌다.
+      applyPresetFields: changes => {
+        for (const change of changes) slashPeSetField(change.field, String(change.after ?? ''));
+      },
+      requestPresetFields: requestToneInspectorPresetFields,
+      loadPrefs: () => ({open: !!toneInspectorState.open, toPreset: !!toneInspectorState.toPreset}),
+      savePrefs: prefs => saveToneInspectorState(prefs),
+      showToast,
+    });
+    const pill = document.getElementById('seedLockPill');
+    const host = pill?.parentElement || document.getElementById('resultViewer');
+    if (!host) return;
+    host.appendChild(toneInspectorPanel.element);
+    // 판은 시드 알약 **옆**에 선다. 알약은 켜면 시드 번호만큼 넓어지므로 폭을 재서 넘긴다
+    // (자리 전체를 재지 않는다 - 알약의 left 는 트랜지션 중일 수 있다). 판의 높이는 뷰어를 넘지 않게 줄인다.
+    const measure = () => {
+      host.style.setProperty('--ti-seed-w', `${pill ? Math.round(pill.offsetWidth) : 0}px`);
+      host.style.setProperty('--ti-max-h', `${Math.max(140, Math.round(host.clientHeight) - 96)}px`);
+    };
+    measure();
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(measure);
+      if (pill) observer.observe(pill);
+      observer.observe(host);
+    }
+    // 화면의 그림이 바뀌면 다시 잰다(펼쳐져 있을 때만). 새 생성 결과는 경로가 조금 늦게 채워져서 한 번 더 본다.
+    if (preview && typeof MutationObserver === 'function') {
+      let soon = 0;
+      let later = 0;
+      new MutationObserver(() => {
+        clearTimeout(soon);
+        clearTimeout(later);
+        soon = setTimeout(() => toneInspectorPanel?.onImageChanged(), 200);
+        later = setTimeout(() => toneInspectorPanel?.onImageChanged(), 1200);
+      }).observe(preview, {attributes: true, attributeFilter: ['src', 'data-path', 'data-source', 'class']});
+    }
+    // 프롬프트를 손으로 고치면 추천의 '반영되어 있음' 표시가 낡는다 - 잠깐 기다렸다 다시 받는다.
+    let fieldsTimer = 0;
+    const onFields = () => {
+      clearTimeout(fieldsTimer);
+      fieldsTimer = setTimeout(() => toneInspectorPanel?.onFieldsChanged(), 700);
+    };
+    promptEdit.addEventListener('input', onFields);
+    negEdit.addEventListener('input', onFields);
+    syncNaiInspectorToggle();
+    syncToneInspectorVisibility();
+  })
+  .catch(error => {
+    console.error('Failed to initialize tone inspector panel', error);
   });
 // 조건부 프롬프트 창(사용자 지정 2026-09-26: 새 플로팅 스타일 + 컴팩트). Search 창과 같은 방식으로
 // 두 모듈에 **같은 요소**를 넘긴다 - 창은 품고, 패널은 그 안에 그린다. 프리셋은 동반 창 요소.
@@ -10758,7 +10875,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-tagq')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261003-inspector2')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -10782,6 +10899,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
       isAnimaManaged: () => Boolean(animaLoraPanel?.isManaged()),
       openAnimaLora: () => animaLoraPanel?.toggle(),
       isAnimaLoraOpen: () => Boolean(animaLoraPanel?.isOpen()),
+      isNaiInspectorEnabled: () => !!toneInspectorState.enabled,
       // 모듈이 아닌 단축키 - Ctrl+Q = Tag Filter(Quick 단추와 같은 입구 · 다시 누르면 닫힌다, 사용자 지정 2026-09-29).
       shortcuts: {Q: () => toggleTagFilter()},
     });
@@ -10799,6 +10917,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
     moduleLauncherControl.updateState();
     ensureResolutionPresetOptions();
     syncNaiResolutionBandControls();   // 런처가 방금 그린 NAI 밴드 행도 채운다
+    syncNaiInspectorToggle();          // NAI Inspector 체크박스도
     updateWebUiHiresfixAssistControls();
     refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI');
   })

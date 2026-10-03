@@ -12,6 +12,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from core import image_tone_inspector as tone
+from core.image_tone_reference import REFERENCE, axis_positions
+from core.image_tone_advisor import advise, apply_suggestion, normalize_fields
 from core.web_session_context import WebSessionContext
 
 
@@ -45,6 +47,20 @@ class ToneInspectService:
             self._cache.popitem(last=False)
         return result
 
+    def history_with_axes(self, history_id: str, spectrum: bool = False) -> dict[str, Any]:
+        result = self.history(history_id, spectrum)
+        # Add only to this response; cached compare/image output stays compatible.
+        return {**result, "axes": axis_positions(result),
+                "reference": {key: REFERENCE[key] for key in ("schema", "sample", "images", "built_at")}}
+
+    def advice(self, history_id: str, fields: dict[str, str] | None) -> dict[str, Any]:
+        result = self.history(history_id)
+        if fields is None:
+            metadata = self.context.result_store.history_meta_payload(history_id)
+            fields = {"prompt": metadata.get("prompt", ""), "negative_prompt": metadata.get("negative", "")}
+        axes = axis_positions(result)
+        return {"history_id": history_id, "axes": axes, **advise(axes, fields)}
+
     def compare(self, before_id: str, after_id: str) -> dict[str, Any]:
         before, after = self.history(before_id), self.history(after_id)
         return {
@@ -71,9 +87,13 @@ def register_image_inspect_routes(
     run_in_thread: AsyncRunner,
 ) -> None:
     @app.get("/api/inspect/tone/history/{history_id}")
-    async def api_inspect_tone_history(history_id: str, spectrum: bool = False):
+    async def api_inspect_tone_history(history_id: str, spectrum: str = "false"):
+        value = spectrum.lower()
+        if value not in ("true", "t", "1", "yes", "y", "on", "false", "f", "0", "no", "n", "off"):
+            return JSONResponse({"error": "spectrum must be a boolean"}, status_code=400)
         try:
-            return await run_in_thread(tone_inspect_service(session_context).history, history_id, spectrum)
+            return await run_in_thread(tone_inspect_service(session_context).history_with_axes, history_id,
+                                       value in ("true", "t", "1", "yes", "y", "on"))
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:
@@ -101,3 +121,44 @@ def register_image_inspect_routes(
             return await run_in_thread(tone.inspect_image, body, tone.MAX_SIDE, spectrum)
         except Exception as exc:
             return JSONResponse({"error": f"Not a readable image: {exc}"}, status_code=400)
+
+
+    @app.post("/api/inspect/tone/advise")
+    async def api_inspect_tone_advise(request: Request):
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Request body must be an object")
+            history_id = body.get("history_id")
+            if not isinstance(history_id, str) or not history_id.strip():
+                raise ValueError("history_id must be a nonempty string")
+            fields = body.get("fields")
+            if "fields" in body:
+                normalize_fields(fields)
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        try:
+            return await run_in_thread(tone_inspect_service(session_context).advice, history_id, fields)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Tone advise failed: {exc}"}, status_code=500)
+
+    @app.post("/api/inspect/tone/apply")
+    async def api_inspect_tone_apply(request: Request):
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Request body must be an object")
+            fields = body.get("fields", {})
+            normalize_fields(fields)
+            if not isinstance(body.get("suggestion_id"), str):
+                raise ValueError("suggestion_id must be a string")
+            level = body.get("level")
+            if level is not None and not isinstance(level, str):
+                raise ValueError("level must be null or a level id")
+            return apply_suggestion(fields, body["suggestion_id"], level)
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)

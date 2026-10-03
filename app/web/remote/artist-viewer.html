@@ -1,0 +1,895 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Artist Thumbnail — NAIA</title>
+<!--
+  NAIA 의 Artist Thumbnail 을 NAIA 밖 브라우저에서 훑어보는 단독 화면(사용자 지정 2026-10-03).
+  Artist 탭 리모컨의 [외부 브라우저] 가 연다(artistThumbTab.mjs externalViewerUrl) - 그때 보던 모드 · 목록 · 검색어 · 작가 서식을 주소에 싣는다.
+  틀은 artist_thumb_tool 의 단독 뷰어(artist_viewer_*.html)에서 가져왔고, 데이터는 전부 NAIA 가 준다:
+    목록 · 정렬 · 검색 = /api/artist-thumb/list (탭과 같은 요청) · 그림 = 항목의 image_url · 모드 · 목록 종류 = /api/artist-thumb/state
+  뺀 것: 팩 파일 직접 열기 · 농농단 필터 · e 건수/비율 정렬. 생성 · 믹스 · 그룹 · 관심 편집도 없다 - 보고, 찾고, 복사만 한다.
+-->
+<style>
+  :root {
+    --bg: #0e1014;
+    --panel: #161a22;
+    --panel-2: #1d2330;
+    --panel-3: #242b3a;
+    --line: #262d3c;
+    --text: #e6e9ef;
+    --muted: #7b8597;
+    --accent: #6aa9ff;
+    --accent-soft: #2a3a5a;
+    --selected: #ff9d4a;
+    --selected-bg: #54193b;
+    --good: #7be0a8;
+    --bad: #f08a8a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: "Inter", "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+
+  /* === topbar === */
+  header {
+    height: 44px; flex: 0 0 44px;
+    display: flex; align-items: center;
+    padding: 0 14px; gap: 10px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header .title { font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
+  header .title .sub { color: var(--muted); font-weight: 400; }
+  header .hint { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .spacer { flex: 1; }
+  header .badge {
+    background: #0b1220; border: 1px solid var(--line);
+    color: var(--muted); padding: 4px 10px; border-radius: 999px;
+    font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  header .badge b { color: var(--text); font-weight: 600; }
+  kbd {
+    display: inline-block;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px;
+    padding: 1px 5px; font-size: 11px; font-family: inherit;
+    color: var(--text);
+  }
+  /* 태그 서식 - [태그 복사] 와 Enter 가 내는 모양(NAI artist: / ANIMA @ / 그 밖은 이름) */
+  .fmt { display: flex; flex: 0 0 auto; }
+  .fmt button {
+    background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--line); border-radius: 0;
+    padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
+    margin-left: -1px;
+  }
+  .fmt button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .fmt button:last-child { border-radius: 0 6px 6px 0; }
+  .fmt button:hover { color: var(--text); }
+  .fmt button.on { background: var(--accent-soft); color: var(--text); border-color: #3d5278; position: relative; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* === detail panel (left) === */
+  .detail {
+    width: clamp(440px, 34vw, 720px); flex: 0 0 auto;
+    display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 16px; gap: 12px;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .detail .pic {
+    position: relative;
+    flex: 1; min-height: 0;
+    aspect-ratio: 1;
+    max-width: 100%;
+    background: repeating-conic-gradient(#1a1f2a 0 25%, #161a22 0 50%) 50% / 16px 16px;
+    border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    align-self: center;
+  }
+  .detail .pic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .detail .pic .caption-bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(0deg, rgba(0,0,0,.92) 20%, rgba(0,0,0,0));
+    color: #fff; padding: 26px 14px 12px;
+    display: flex; align-items: baseline; gap: 10px;
+    font-size: 13px;
+    pointer-events: none;
+  }
+  .detail .pic .caption-bar .name {
+    flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 600;
+  }
+  .detail .pic .caption-bar .val { color: #cfd6e3; font-variant-numeric: tabular-nums; }
+  .detail .pic .loading { color: var(--muted); font-size: 12px; }
+  .detail .info { padding: 0 2px; display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
+  .detail .info .name { font-size: 18px; font-weight: 700; word-break: break-word; }
+  .detail .info .weight { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .detail .info .tag {
+    margin-top: 4px; color: var(--text); font-size: 12px;
+    font-family: "JetBrains Mono", "Consolas", monospace; word-break: break-all; user-select: all;
+  }
+  .detail .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 0 0 auto; }
+  .detail .actions button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px; font: inherit; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .detail .actions button:hover { background: var(--panel-3); border-color: var(--accent); }
+  .detail .actions button.primary { background: var(--accent-soft); border-color: #3d5278; }
+  .detail .actions button.primary:hover { background: #34466a; }
+  .detail .empty { margin: auto; color: var(--muted); text-align: center; line-height: 1.7; }
+
+  /* === grid panel (right) === */
+  .grid-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .grid-header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .grid-title { font-weight: 700; letter-spacing: 1.2px; font-size: 11px; color: var(--accent); text-transform: uppercase; white-space: nowrap; }
+  .grid-sub {
+    color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .pick-wrap { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .pick-wrap:first-of-type { margin-left: auto; }
+  .pick-wrap select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 8px; font: inherit; outline: none; cursor: pointer;
+    max-width: 220px;
+  }
+  .pick-wrap select:focus { border-color: var(--accent); }
+  .grid-header input[type=search] {
+    width: 280px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 10px; font: inherit; outline: none;
+  }
+  .grid-header input[type=search]:focus { border-color: var(--accent); }
+
+  .grid {
+    flex: 1; overflow-y: auto;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-auto-rows: max-content;
+    gap: 14px;
+    scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  }
+  .grid::-webkit-scrollbar { width: 10px; }
+  .grid::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+
+  .card {
+    position: relative;
+    aspect-ratio: 1 / 1.05;
+    background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+  .card .pic {
+    position: absolute; inset: 0;
+    background: repeating-conic-gradient(#1a1f2a 0 25%, #161a22 0 50%) 50% / 14px 14px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 11px;
+  }
+  .card .pic img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    opacity: 0; transition: opacity .25s ease;
+  }
+  .card .pic img.loaded { opacity: 1; }
+  .card .caption {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 19, 28, .88);
+    backdrop-filter: blur(6px);
+    padding: 8px 12px;
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 12px;
+  }
+  .card .caption .name { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .caption .val { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .card .fav { position: absolute; top: 8px; right: 10px; color: #ffd166; font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .card .badge-result {
+    position: absolute; top: 8px; left: 8px;
+    background: var(--selected-bg); color: #ffd1cf;
+    font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    padding: 3px 8px; border-radius: 4px;
+    display: none;
+  }
+  .card.selected { border-color: var(--selected); box-shadow: 0 0 0 2px rgba(255,157,74,.35); }
+  .card.selected .caption { background: rgba(84,25,59,.92); }
+  .card.selected .caption .val { color: #ffd1cf; }
+  .card.selected .badge-result { display: block; }
+
+  .grid-empty {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 240px;
+    color: var(--muted); text-align: center;
+    line-height: 1.7;
+  }
+  .grid-empty.bad { color: var(--bad); }
+
+  /* === pagination footer === */
+  .grid-footer {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; padding: 10px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .grid-footer button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 14px; font: inherit; cursor: pointer;
+    min-width: 80px;
+    transition: background .15s, border-color .15s;
+  }
+  .grid-footer button:hover:not(:disabled) { background: var(--panel-3); border-color: var(--accent); }
+  .grid-footer button:disabled { opacity: .4; cursor: not-allowed; }
+  .page-info { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .page-info input {
+    width: 64px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 8px; font: inherit;
+    text-align: center;
+    -moz-appearance: textfield;
+  }
+  .page-info input::-webkit-outer-spin-button,
+  .page-info input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .page-info input:focus { border-color: var(--accent); outline: none; }
+  .page-info b { color: var(--text); font-weight: 600; }
+  .page-info .sep { color: var(--muted); opacity: .5; }
+
+  /* === status footer === */
+  footer {
+    height: 26px; flex: 0 0 26px;
+    display: flex; align-items: center;
+    padding: 0 14px; gap: 16px;
+    background: var(--panel); border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  footer .status { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  footer .status.bad { color: var(--bad); }
+  footer .copied { color: var(--good); opacity: 0; transition: opacity .2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50vw; }
+  footer .copied.show { opacity: 1; }
+
+  /* ====== narrow viewport / mobile ====== */
+  @media (max-width: 860px) {
+    header { height: 40px; flex-basis: 40px; padding: 0 10px; gap: 6px; }
+    header .title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+    header .hint { display: none; }
+    header .badge { padding: 3px 7px; font-size: 10px; flex: 0 0 auto; }
+
+    /* 위에 상세(작은 띠), 아래에 격자 - main 이 스크롤한다 */
+    main { flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+    .detail {
+      width: 100%; flex: 0 0 auto;
+      border-right: none; border-bottom: 1px solid var(--line);
+      padding: 8px 12px; gap: 10px;
+      overflow: visible;
+      flex-direction: row; align-items: center;
+      position: sticky; top: 0; z-index: 20;
+    }
+    .detail .pic { display: none; }
+    .detail .info { flex: 1; min-width: 0; flex-direction: row; align-items: baseline; gap: 10px; padding: 0; }
+    .detail .info .name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+    .detail .info .weight { font-size: 11px; white-space: nowrap; flex: 0 0 auto; }
+    .detail .info .tag { display: none; }
+    .detail .actions { display: flex; flex-direction: row; gap: 6px; flex: 0 0 auto; }
+    .detail .actions button { padding: 6px 12px; font-size: 12px; min-width: 0; }
+    .detail .empty { display: none; }
+
+    .grid-panel { flex: 0 0 auto; min-height: 0; }
+    .grid-header { padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
+    .grid-title { display: none; }
+    .grid-sub { flex: 1 1 100%; font-size: 11px; }
+    .pick-wrap:first-of-type { margin-left: 0; }
+    .pick-wrap select { max-width: 42vw; }
+    .grid-header input[type=search] { flex: 1 1 100%; width: auto; }
+    .grid { overflow: visible; grid-template-columns: repeat(2, 1fr); padding: 10px; gap: 10px; }
+    .grid .card .caption { padding: 6px 10px; font-size: 11px; }
+
+    .grid-footer { padding: 8px 10px; gap: 8px; flex-wrap: wrap; }
+    .grid-footer button { min-width: 64px; padding: 6px 10px; font-size: 12px; }
+    .page-info { font-size: 12px; gap: 6px; }
+    .page-info input { width: 50px; padding: 3px 6px; }
+    footer { height: auto; min-height: 22px; flex-basis: auto; padding: 4px 10px; gap: 8px; font-size: 10px; }
+  }
+  @media (max-width: 540px) {
+    header .badge { display: none; }
+    .fmt button { padding: 4px 8px; font-size: 11px; }
+    .detail .actions button { padding: 5px 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card, .card .pic img, footer .copied { transition: none; }
+    .card:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">Artist Thumbnail <span class="sub" id="mode-label">NAIA</span></div>
+  <div class="hint"><kbd>←↑↓→</kbd> 이동 · <kbd>Enter</kbd> 태그 복사 · <kbd>Ctrl+C</kbd> 이름 복사 · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> 페이지</div>
+  <div class="spacer"></div>
+  <div class="fmt" id="fmt" role="group" aria-label="태그 서식" title="[태그 복사] 와 Enter 가 내는 서식 — NAI 는 artist:이름 · ANIMA 는 @이름 · 그 밖은 이름">
+    <button type="button" data-fmt="nai">artist:</button>
+    <button type="button" data-fmt="anima">@</button>
+    <button type="button" data-fmt="sd">이름</button>
+  </div>
+  <span class="badge">artists <b id="dict-count">0</b></span>
+</header>
+
+<main>
+  <aside class="detail" id="detail">
+    <div class="empty">
+      썸네일을 클릭하면<br>
+      여기에 선택한 작가가 표시됩니다.
+    </div>
+  </aside>
+
+  <section class="grid-panel">
+    <div class="grid-header">
+      <div class="grid-title">Artist Thumbnail</div>
+      <div class="grid-sub" id="grid-sub">불러오는 중…</div>
+      <label class="pick-wrap">모드
+        <select id="mode"></select>
+      </label>
+      <label class="pick-wrap">목록
+        <select id="filter"></select>
+      </label>
+      <input id="search" type="search" placeholder="Search artist  (Enter 첫번째 결과 선택)" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="grid" id="grid">
+      <div class="grid-empty">불러오는 중…</div>
+    </div>
+    <div class="grid-footer">
+      <button id="page-prev" type="button" disabled>‹ Prev</button>
+      <div class="page-info">
+        <input id="page-input" type="number" min="1" value="1" aria-label="페이지">
+        <span>/ <b id="page-total">1</b></span>
+        <span class="sep">·</span>
+        <span><b id="page-size">60</b> per page</span>
+      </div>
+      <button id="page-next" type="button" disabled>Next ›</button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="status" id="status">준비 중</div>
+  <div style="flex:1"></div>
+  <div id="selected" style="color:var(--text)"></div>
+  <div class="copied" id="copied">✓ 복사됨</div>
+</footer>
+
+<script>
+"use strict";
+
+const PAGE_SIZE = 60;                       // /api/artist-thumb/list 는 12~96 을 받는다
+const SEARCH_DELAY_MS = 200;
+/* 작가 태그 서식 - NAIA 의 Artist 탭(artistThumbTab.mjs formatArtistToken)과 같은 규칙.
+   NAI = artist:이름 · ANIMA = @이름(괄호 이스케이프) · 그 밖(SD 계열) = 이름(괄호 이스케이프). */
+const escapeParens = (name) => String(name).replace(/[()]/g, "\\$&");
+const FORMATS = {
+  nai:   { label: "artist: 복사", tag: (name) => `artist:${name}` },
+  anima: { label: "@ 복사",       tag: (name) => `@${escapeParens(name)}` },
+  sd:    { label: "태그 복사",     tag: (name) => escapeParens(name) },
+};
+
+/* === state === */
+const state = {
+  modes: [],            // /state 의 modes 중 볼 수 있는 것(exists)
+  filters: [],          // /state 의 filters(구분선 포함)
+  mode: "",
+  filter: "all",
+  query: "",
+  fmt: "nai",
+  page: 0,              // 0 부터(API 와 같다)
+  totalPages: 1,
+  total: 0,
+  items: [],            // 지금 쪽의 항목들
+  selected: null,       // 고른 항목 - 쪽을 넘겨도 상세는 남는다
+  listReq: 0,           // 늦게 온 옛 응답을 버린다
+  ready: false,
+};
+
+/* === DOM === */
+const $ = (id) => document.getElementById(id);
+const elDetail    = $("detail");
+const elGrid      = $("grid");
+const elGridSub   = $("grid-sub");
+const elSearch    = $("search");
+const elMode      = $("mode");
+const elFilter    = $("filter");
+const elFmt       = $("fmt");
+const elModeLabel = $("mode-label");
+const elPagePrev  = $("page-prev");
+const elPageNext  = $("page-next");
+const elPageInput = $("page-input");
+const elPageTotal = $("page-total");
+const elStatus    = $("status");
+const elSelected  = $("selected");
+const elCopied    = $("copied");
+const elDictCnt   = $("dict-count");
+$("page-size").textContent = PAGE_SIZE.toLocaleString();
+
+/* 게시물 수 - 줄이지 않는다(213 과 1,780 이 같아 보이면 고르는 근거가 흐려진다) */
+const countText = (value) => (Number(value) > 0 ? Number(value).toLocaleString() : "—");
+
+/* === NAIA 요청 === */
+async function api(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+function listUrl(page) {
+  const params = new URLSearchParams({
+    mode: state.mode,
+    filter: state.filter,
+    query: state.query,
+    page: String(page),
+    per_page: String(PAGE_SIZE),
+  });
+  return `/api/artist-thumb/list?${params.toString()}`;
+}
+
+/* 주소에 지금 보는 조건을 남긴다 - 새로고침 · 즐겨찾기가 같은 화면으로 돌아온다 */
+function syncUrl() {
+  const params = new URLSearchParams();
+  if (state.mode) params.set("mode", state.mode);
+  if (state.filter && state.filter !== "all") params.set("filter", state.filter);
+  if (state.query) params.set("q", state.query);
+  params.set("fmt", state.fmt);
+  history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+}
+
+/* === 처음: 주소의 조건 + NAIA 의 모드 · 목록 종류 === */
+async function init() {
+  const params = new URLSearchParams(location.search);
+  const fmt = String(params.get("fmt") || "").toLowerCase();
+  state.fmt = FORMATS[fmt] ? fmt : "nai";
+  syncFmtUI();
+  state.query = String(params.get("q") || "").trim();
+  elSearch.value = state.query;
+  try {
+    const data = await api("/api/artist-thumb/state");
+    state.modes = (data.modes || []).filter((mode) => mode && mode.exists);
+    state.filters = data.filters || [];
+    elDictCnt.textContent = Number(data.artist_count || 0).toLocaleString();
+    const wantMode = String(params.get("mode") || "");
+    const wantFilter = String(params.get("filter") || "all");
+    state.mode = state.modes.some((mode) => mode.key === wantMode) ? wantMode : (state.modes[0] ? state.modes[0].key : "");
+    state.filter = state.filters.some((f) => !f.separator && f.key === wantFilter) ? wantFilter : "all";
+    fillSelects();
+    state.ready = true;
+  } catch (error) {
+    showGridMessage(["NAIA 에 연결하지 못했습니다.", "NAIA 가 켜져 있는지 확인한 뒤 새로고침하세요.", `(${error.message})`], true);
+    setStatus("연결 실패", true);
+    elGridSub.textContent = "연결 실패";
+    return;
+  }
+  if (!state.mode) {
+    showGridMessage(["썸네일 팩이 없습니다.", "NAIA 의 Artist 탭에서 팩을 받은 뒤 새로고침하세요."]);
+    elGridSub.textContent = "썸네일 팩 없음";
+    setStatus("썸네일 팩 없음");
+    return;
+  }
+  loadPage(0);
+}
+
+function fillSelects() {
+  elMode.textContent = "";
+  for (const mode of state.modes) {
+    const option = document.createElement("option");
+    option.value = mode.key;
+    option.textContent = mode.label || mode.key;
+    elMode.appendChild(option);
+  }
+  elMode.value = state.mode;
+  elMode.disabled = state.modes.length < 2;
+  elFilter.textContent = "";
+  for (const filter of state.filters) {
+    const option = document.createElement("option");
+    if (filter.separator) {
+      option.disabled = true;
+      option.textContent = `──── ${filter.name || ""} ────`;
+    } else {
+      option.value = filter.key;
+      option.textContent = `${filter.name} · ${Number(filter.count || 0).toLocaleString()}`;
+    }
+    elFilter.appendChild(option);
+  }
+  elFilter.value = state.filter;
+  syncModeLabel();
+}
+
+function modeLabel() {
+  const mode = state.modes.find((m) => m.key === state.mode);
+  return mode ? (mode.label || mode.key) : "";
+}
+function syncModeLabel() {
+  elModeLabel.textContent = modeLabel() || "NAIA";
+}
+
+/* === 목록 한 쪽 ===
+   select: 받은 뒤 고를 칸 - "first" | (쪽 길이) => 칸 번호. 방향키가 쪽을 넘을 때 쓴다.
+   scrollEnd: 받은 뒤 맨 아래를 보인다 - 휠로 앞 쪽으로 넘어갔을 때 마지막 줄부터 이어 보게. */
+async function loadPage(page, { select = null, scrollEnd = false } = {}) {
+  if (!state.ready || !state.mode) return;
+  const req = ++state.listReq;
+  setStatus("불러오는 중…");
+  let data;
+  try {
+    data = await api(listUrl(Math.max(0, page)));
+  } catch (error) {
+    if (req !== state.listReq) return;
+    showGridMessage(["목록을 불러오지 못했습니다.", `(${error.message})`], true);
+    setStatus("목록 실패", true);
+    return;
+  }
+  if (req !== state.listReq) return;        // 그 사이 다른 조건으로 다시 물었다
+  state.page = Number(data.page || 0);
+  state.totalPages = Math.max(1, Number(data.total_pages || 1));
+  state.total = Number(data.total || 0);
+  state.items = Array.isArray(data.items) ? data.items : [];
+  renderGrid();
+  syncUrl();
+  if (select != null && state.items.length) {
+    const index = select === "first" ? 0
+      : Math.max(0, Math.min(state.items.length - 1, Number(select(state.items.length)) || 0));
+    selectItem(state.items[index], { scroll: true });
+  } else if (scrollEnd) {
+    // renderGrid 가 방금 맨 위로 돌려놓았고 배치도 아직이다 - 한 프레임 뒤에 내린다
+    requestAnimationFrame(() => { const host = scrollHost(); host.scrollTop = host.scrollHeight; });
+  }
+}
+
+/* 격자 자리에 안내문 - 줄마다 글자로만 넣는다(서버가 준 오류 글도 여기로 온다) */
+function showGridMessage(lines, bad = false) {
+  state.items = [];
+  const box = document.createElement("div");
+  box.className = "grid-empty" + (bad ? " bad" : "");
+  const text = document.createElement("div");
+  lines.forEach((line, index) => {
+    if (index) text.appendChild(document.createElement("br"));
+    text.appendChild(document.createTextNode(line));
+  });
+  box.appendChild(text);
+  elGrid.textContent = "";
+  elGrid.appendChild(box);
+  elPagePrev.disabled = true;
+  elPageNext.disabled = true;
+}
+
+function renderGrid() {
+  const pages = state.totalPages;
+  elPageTotal.textContent = pages.toLocaleString();
+  elPageInput.value = state.page + 1;
+  elPageInput.max = pages;
+  elPagePrev.disabled = state.page <= 0;
+  elPageNext.disabled = state.page >= pages - 1 || state.total === 0;
+
+  const filterName = (state.filters.find((f) => !f.separator && f.key === state.filter) || {}).name || "전체 목록";
+  if (state.total === 0) {
+    elGridSub.textContent = state.query ? "검색 결과 없음" : "결과 없음";
+    showGridMessage([state.query ? "검색 결과가 없습니다." : "이 목록에 작가가 없습니다."]);
+    setStatus(`${modeLabel()} — 0명`);
+    return;
+  }
+  elGridSub.textContent = state.query
+    ? `검색 결과 · ${state.total.toLocaleString()} artists · 페이지 ${state.page + 1} / ${pages}`
+    : `${filterName} · ${state.total.toLocaleString()} artists · 페이지 ${state.page + 1} / ${pages}`;
+  setStatus(`${modeLabel()} — ${state.total.toLocaleString()}명`);
+
+  const frag = document.createDocumentFragment();
+  for (const item of state.items) {
+    const card = document.createElement("div");
+    card.className = "card" + (state.selected && state.selected.artist === item.artist ? " selected" : "");
+    card.dataset.name = item.artist;
+    const pic = document.createElement("div");
+    pic.className = "pic";
+    if (item.image_url) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.decoding = "async";                 // 한 쪽 60장을 바로 받는다(지연 로딩은 배경 탭에서 그림이 안 뜬다)
+      img.addEventListener("load", () => img.classList.add("loaded"));
+      img.addEventListener("error", () => { img.remove(); pic.textContent = "No Image"; });
+      img.src = item.image_url;
+      pic.appendChild(img);
+    } else {
+      pic.textContent = "No Image";
+    }
+    const badge = document.createElement("div");
+    badge.className = "badge-result";
+    badge.textContent = "RESULT";
+    const caption = document.createElement("div");
+    caption.className = "caption";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = item.artist;
+    const val = document.createElement("span");
+    val.className = "val";
+    val.textContent = countText(item.weight);
+    caption.append(name, val);
+    card.append(pic, badge, caption);
+    if (item.favorite) {
+      const fav = document.createElement("div");
+      fav.className = "fav";
+      fav.textContent = "★";
+      fav.title = "관심 작가";
+      card.appendChild(fav);
+    }
+    card.addEventListener("click", () => selectItem(item));
+    frag.appendChild(card);
+  }
+  elGrid.textContent = "";
+  elGrid.appendChild(frag);
+  elGrid.scrollTop = 0;
+  const elMain = document.querySelector("main");
+  if (elMain) elMain.scrollTop = 0;
+}
+
+/* === selection / detail pane === */
+function cardOf(name) {
+  return Array.from(elGrid.querySelectorAll(".card")).find((c) => c.dataset.name === name) || null;
+}
+
+function selectItem(item, { scroll = false } = {}) {
+  if (!item) return;
+  state.selected = item;
+  Array.from(elGrid.querySelectorAll(".card")).forEach((c) => {
+    c.classList.toggle("selected", c.dataset.name === item.artist);
+  });
+  renderDetail();
+  if (scroll) cardOf(item.artist)?.scrollIntoView({ block: "nearest" });
+}
+
+function renderDetail() {
+  const item = state.selected;
+  if (!item) return;
+  const format = FORMATS[state.fmt];
+  elDetail.textContent = "";
+  const pic = document.createElement("div");
+  pic.className = "pic";
+  const missing = document.createElement("span");
+  missing.className = "loading";
+  missing.textContent = "썸네일 없음";
+  if (item.image_url) {
+    const img = document.createElement("img");
+    img.alt = "";
+    img.addEventListener("error", () => { img.remove(); pic.prepend(missing); });
+    img.src = item.image_url;
+    pic.appendChild(img);
+  } else {
+    pic.appendChild(missing);
+  }
+  const bar = document.createElement("div");
+  bar.className = "caption-bar";
+  const barName = document.createElement("span");
+  barName.className = "name";
+  barName.textContent = item.artist;
+  const barVal = document.createElement("span");
+  barVal.className = "val";
+  barVal.textContent = countText(item.weight);
+  bar.append(barName, barVal);
+  pic.appendChild(bar);
+
+  const info = document.createElement("div");
+  info.className = "info";
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = item.artist;
+  const weight = document.createElement("div");
+  weight.className = "weight";
+  weight.textContent = `게시물 ${countText(item.weight)}${item.favorite ? " · ★ 관심 작가" : ""}`;
+  const tag = document.createElement("div");
+  tag.className = "tag";
+  tag.textContent = format.tag(item.artist);
+  info.append(name, weight, tag);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const copyName = document.createElement("button");
+  copyName.type = "button";
+  copyName.className = "primary";
+  copyName.textContent = "이름 복사";
+  copyName.addEventListener("click", () => copyText(item.artist));
+  const copyTag = document.createElement("button");
+  copyTag.type = "button";
+  copyTag.textContent = format.label;
+  copyTag.addEventListener("click", () => copyText(format.tag(item.artist)));
+  actions.append(copyName, copyTag);
+
+  elDetail.append(pic, info, actions);
+  elSelected.textContent = item.artist;
+}
+
+/* === 서식 === */
+function syncFmtUI() {
+  Array.from(elFmt.querySelectorAll("button")).forEach((b) => {
+    const on = b.dataset.fmt === state.fmt;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+elFmt.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-fmt]");
+  if (!b || !FORMATS[b.dataset.fmt]) return;
+  state.fmt = b.dataset.fmt;
+  syncFmtUI();
+  renderDetail();
+  syncUrl();
+});
+
+/* === 모드 · 목록 종류 · 검색 === */
+elMode.addEventListener("change", () => {
+  state.mode = elMode.value;
+  syncModeLabel();
+  loadPage(0);
+});
+elFilter.addEventListener("change", () => {
+  state.filter = elFilter.value || "all";
+  loadPage(0);
+});
+
+let searchTimer = null;
+function applySearch(options) {
+  clearTimeout(searchTimer);
+  state.query = elSearch.value.trim();
+  loadPage(0, options);
+}
+elSearch.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applySearch, SEARCH_DELAY_MS);
+});
+elSearch.addEventListener("keydown", (e) => {
+  if (e.isComposing || e.keyCode === 229) return;      // 한글 조합 중의 Enter 는 글자를 확정할 뿐이다
+  if (e.key === "Enter") {
+    applySearch({ select: "first" });                   // 첫 결과를 고른다
+  } else if (e.key === "Escape") {
+    elSearch.value = "";
+    applySearch();
+  }
+});
+
+/* === pagination === */
+function goToPage(p, options) {                          // p 는 0 부터
+  if (Number.isNaN(p)) p = state.page;
+  p = Math.max(0, Math.min(state.totalPages - 1, p));
+  if (p === state.page) { elPageInput.value = state.page + 1; return false; }
+  loadPage(p, options);
+  return true;
+}
+elPagePrev.addEventListener("click", () => goToPage(state.page - 1));
+elPageNext.addEventListener("click", () => goToPage(state.page + 1));
+elPageInput.addEventListener("change", () => goToPage(parseInt(elPageInput.value, 10) - 1));
+elPageInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); elPageInput.blur(); }   // 칸을 떠나며 change 가 한 번 난다
+});
+
+/* === 격자 이동 (방향키) ===
+   쪽 안에서는 칸 번호로 옮기고, 쪽 끝을 넘으면 옆 쪽을 받아 이어지는 칸을 고른다. */
+function gridColumns() {
+  const t = getComputedStyle(elGrid).gridTemplateColumns;
+  const n = t ? t.split(" ").filter(Boolean).length : 1;
+  return Math.max(1, n);
+}
+
+function moveSelection(delta) {
+  if (!state.items.length) return;
+  const cur = state.selected ? state.items.findIndex((it) => it.artist === state.selected.artist) : -1;
+  if (cur < 0) { selectItem(state.items[0], { scroll: true }); return; }
+  const next = cur + delta;
+  if (next >= 0 && next < state.items.length) { selectItem(state.items[next], { scroll: true }); return; }
+  if (next < 0 && state.page > 0) {
+    loadPage(state.page - 1, { select: (length) => length + next });       // 앞 쪽의 끝에서 이어서
+  } else if (next >= state.items.length && state.page < state.totalPages - 1) {
+    const over = next - state.items.length;
+    loadPage(state.page + 1, { select: () => over });                       // 다음 쪽의 처음에서 이어서
+  }
+}
+
+/* === 끝에서 한 번 더 굴리면 쪽이 넘어간다 ===
+   경계에 닿는 순간 넘기면 관성 스크롤 한 번에 여러 쪽이 지나간다 - 닿은 시각을 적어 두고 그 뒤로도 굴릴 때만 넘긴다. */
+let edgeSince = 0;
+let edgeDir = 0;
+function scrollHost() {                                  // 넓은 화면은 .grid 가, 좁은 화면은 main 이 스크롤한다
+  if (elGrid.scrollHeight - elGrid.clientHeight > 2) return elGrid;
+  const m = document.querySelector("main");
+  if (m && m.scrollHeight - m.clientHeight > 2) return m;
+  return elGrid;
+}
+window.addEventListener("wheel", (e) => {
+  if (!state.items.length) return;
+  const dir = e.deltaY > 0 ? 1 : (e.deltaY < 0 ? -1 : 0);
+  if (!dir) return;
+  const host = scrollHost();
+  const atTop = host.scrollTop <= 0;
+  const atBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 2;
+  if (!(dir > 0 ? atBottom : atTop)) { edgeSince = 0; edgeDir = 0; return; }
+  const now = Date.now();
+  if (edgeDir !== dir) { edgeDir = dir; edgeSince = now; return; }
+  if (now - edgeSince < 260) return;                     // 한 박자 쉰다
+  edgeSince = 0; edgeDir = 0;
+  goToPage(state.page + dir, { scrollEnd: dir < 0 });    // 앞 쪽으로 넘어갔으면 마지막 줄부터
+}, { passive: true });
+
+/* === keyboard === */
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection().toString()) {
+    if (state.selected) { copyText(state.selected.artist); e.preventDefault(); }
+    return;
+  }
+  const tagName = document.activeElement ? document.activeElement.tagName : "";
+  if (tagName === "INPUT" || tagName === "SELECT" || tagName === "TEXTAREA") return;
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const cols = gridColumns();
+    moveSelection(e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" ? cols : -cols);
+    return;
+  }
+  if (e.key === "Enter" && state.selected && tagName !== "BUTTON") {   // 단추 위의 Enter 는 그 단추의 것이다
+    e.preventDefault();
+    copyText(FORMATS[state.fmt].tag(state.selected.artist));
+    return;
+  }
+  if (e.key === "PageDown") { e.preventDefault(); goToPage(state.page + 1); }
+  else if (e.key === "PageUp") { e.preventDefault(); goToPage(state.page - 1); }
+  else if (e.key === "Home" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); goToPage(0); }
+  else if (e.key === "End" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); goToPage(state.totalPages - 1); }
+});
+
+/* === utils === */
+let copiedTimer = null;
+function copyText(text) {
+  const done = () => showCopied(text);
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (_) { setStatus("복사하지 못했습니다", true); }
+    ta.remove();
+  };
+  // navigator.clipboard 는 localhost · https 에서만 산다 - 같은 망의 다른 기기(http)는 아래 길로 간다
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(fallback);
+  else fallback();
+}
+function showCopied(text) {
+  elCopied.textContent = `✓ 복사됨  ${text}`;
+  elCopied.classList.add("show");
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => elCopied.classList.remove("show"), 1400);
+}
+function setStatus(text, bad = false) {
+  elStatus.textContent = text;
+  elStatus.classList.toggle("bad", bad);
+}
+
+init();
+</script>
+</body>
+</html>

@@ -30,6 +30,9 @@ export function createArtistThumbController({
   // 리모컨을 켜면 오른쪽 화면을 Result 로 보낸다(사용자 지정) - 조각이 창으로 빠져
   // 나가 이 탭에는 자리 표시만 남기 때문이다.
   showResultTab = () => {},
+  // [외부 브라우저] 가 쓴다 - 주소를 시스템 브라우저로 연다(app.js openUrlInSystemBrowser: 데스크톱 셸은
+  // naia-open-browser:// 로 넘기고, 웹은 새 탭). 못 열면 false.
+  openExternalUrl = null,
   // ── 메인 프롬프트에서 **빌려 오는** 것 셋 ──
   //  색도 색인도 자동완성도 여기서 만들지 않는다. 흉내 내면 언젠가 두 화면이 갈린다.
   //  ⚠️ 안 받으면 `typeof ... === 'function'` 이 **조용히 false** 다 - 에러도 안 나고 색만 영영 안 붙는다.
@@ -3313,6 +3316,16 @@ export function createArtistThumbController({
     bench.addEventListener('click', () => { void applyArtistBenchPreset(); });
     remote.slot.appendChild(bench);
     peHeadButtons.set('__bench__', bench);
+    // [외부 브라우저] - V5 영점 오른쪽(사용자 지정 2026-10-03). 작가 썸네일을 NAIA 밖 브라우저에서 훑는 단독 화면을
+    // 연다(artist-viewer.html - 보기 · 검색 · 복사만). 지금 보던 모드 · 목록 · 검색어 · 작가 서식을 주소에 싣는다.
+    const external = document.createElement('button');
+    external.type = 'button';
+    external.className = 'rctl-pe-btn';
+    external.textContent = '외부 브라우저';
+    external.title = '작가 썸네일을 기본 브라우저에서 엽니다 (보기 · 검색 · 태그 복사)';
+    external.addEventListener('click', () => { openExternalViewer(); });
+    remote.slot.appendChild(external);
+    peHeadButtons.set('__external__', external);
   }
 
   /** V5 영점 프리셋 - 추천 설정과 **같은 길**이다(묻고 → 서버가 만들어 적용).
@@ -3332,6 +3345,23 @@ export function createArtistThumbController({
       {title: 'V5 영점 프리셋'}));
     if (!ok) return;
     setModuleParam('prompt_engineering', 'preset_apply_artist_bench', 'true');
+  }
+
+  /** [외부 브라우저] 의 주소 - 탭이 지금 보던 모드 · 목록 · 검색어와, 지금 생성 모드의 작가 서식을 싣는다.
+   *  서식은 formatArtistToken 과 같은 갈래다(NAI = artist: · ANIMA = @ · 그 밖 = 이름) - 받는 쪽이 그대로 복사한다. */
+  function externalViewerUrl() {
+    const params = new URLSearchParams();
+    if (currentMode()) params.set('mode', currentMode());
+    if (currentFilter() !== 'all') params.set('filter', currentFilter());
+    const query = String(searchEl?.value || '').trim();
+    if (query) params.set('q', query);
+    params.set('fmt', currentGenerationMode() === 'NAI' ? 'nai' : (usesAnimaArtistSyntax() ? 'anima' : 'sd'));
+    return `/artist-viewer.html?${params.toString()}`;
+  }
+
+  function openExternalViewer() {
+    const opened = typeof openExternalUrl === 'function' && openExternalUrl(externalViewerUrl());
+    if (!opened) showToast?.('브라우저를 열지 못했습니다 — 팝업 차단을 확인해 주세요.', 'error');
   }
 
   function unmountPeWindow() {

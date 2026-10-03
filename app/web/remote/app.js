@@ -819,7 +819,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260930-thumbs')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261003-extviewer')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -849,6 +849,8 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260930-thu
       getRemoteController: () => remoteController,
       // 리모컨을 켜면 Result 로 보낸다(사용자 지정).
       showResultTab: () => { try { switchRightTab('result'); } catch (_) {} },
+      // [외부 브라우저] — 작가 썸네일 단독 화면(artist-viewer.html)을 시스템 브라우저로 연다.
+      openExternalUrl: openUrlInSystemBrowser,
       // 믹스 판 아래 PE 빠른 수정. `/pe` 임시 편집창과 **같은 길**을 쓴다.
       getPeField: key => String(slashPeState()[key] || ''),
       setPeField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),

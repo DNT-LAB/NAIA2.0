@@ -354,10 +354,12 @@
         "core/artist_affinity.py",
         "core/artist_search.py",
         "app/web/remote/js/features/artistThumbTab.mjs",
-        "app/web/remote/js/features/artistSearchPanel.mjs"
+        "app/web/remote/js/features/artistSearchPanel.mjs",
+        "app/web/remote/artist-viewer.html"
       ],
       "legacy_dependency": "legacy_compat",
       "routes": [
+        {"method": "GET", "path": "/artist-viewer.html", "smoke": "static"},
         {"method": "GET", "path": "/api/artist-thumb/state", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/open-folder", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/artist-thumb/list", "smoke": "asset_runtime"},

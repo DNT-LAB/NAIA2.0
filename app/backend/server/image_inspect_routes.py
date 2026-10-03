@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from core import image_tone_inspector as tone
 from core.image_tone_reference import REFERENCE, axis_positions
-from core.image_tone_advisor import advise, apply_suggestion, normalize_fields
+from core.image_tone_advisor import advise, apply_suggestion, guide, normalize_fields
 from core.web_session_context import WebSessionContext
 
 
@@ -51,7 +51,15 @@ class ToneInspectService:
         result = self.history(history_id, spectrum)
         # Add only to this response; cached compare/image output stays compatible.
         return {**result, "axes": axis_positions(result),
-                "reference": {key: REFERENCE[key] for key in ("schema", "sample", "images", "built_at")}}
+                "reference": {key: REFERENCE[key] for key in ("schema", "sample", "images", "built_at")},
+                # 화면이 '이 그림이 내가 청한 시험 생성의 결과인가' 를 가린다.
+                "generation_request_id": self._generation_request_id(history_id)}
+
+    def _generation_request_id(self, history_id: str) -> str:
+        getter = getattr(self.context.result_store, "get_item", None)
+        item = getter(history_id) if callable(getter) else None
+        params = getattr(item, "generation_params", None)
+        return str(params.get("generation_request_id") or "") if isinstance(params, dict) else ""
 
     def advice(self, history_id: str, fields: dict[str, str] | None) -> dict[str, Any]:
         result = self.history(history_id)
@@ -59,7 +67,46 @@ class ToneInspectService:
             metadata = self.context.result_store.history_meta_payload(history_id)
             fields = {"prompt": metadata.get("prompt", ""), "negative_prompt": metadata.get("negative", "")}
         axes = axis_positions(result)
-        return {"history_id": history_id, "axes": axes, **advise(axes, fields)}
+        return {"history_id": history_id, "axes": axes, **advise(axes, fields), "guide": guide()}
+
+    def prepare_trial(self, history_id: str, suggestion_id: str, level: str | None, strength: float,
+                      allow_paid: bool) -> dict[str, Any]:
+        """같은 그림을 **같은 시드 · 같은 설정**으로, 보정만 얹어 다시 뽑을 요청을 만든다.
+
+        사용자의 프롬프트 칸 · 프리셋은 건드리지 않는다 - 고치는 것은 그 그림이 실제로 생성된 프롬프트의 사본이다.
+        """
+        from app.backend.server.result_display_routes import _history_item_replay_params
+        from core.nai_anlas_cost import estimate_anlas_cost
+
+        getter = getattr(self.context.result_store, "get_item", None)
+        item = getter(history_id) if callable(getter) else None
+        if item is None:
+            raise FileNotFoundError("History item not found")
+        params = _history_item_replay_params(item)
+        prompt = str(params.get("input") or params.get("_raw_input") or "")
+        if not prompt.strip():
+            raise ValueError("이 그림에는 생성 정보가 없어 시험 생성을 할 수 없습니다")
+        try:
+            seed = int(params.get("seed"))
+        except (TypeError, ValueError):
+            seed = -1
+        if seed < 0:
+            raise ValueError("이 그림의 시드를 알 수 없어 시험 생성을 할 수 없습니다")
+        applied = apply_suggestion(
+            {"prompt": prompt, "negative_prompt": str(params.get("negative_prompt") or "")}, suggestion_id, level, strength)
+        if not applied["changes"]:
+            raise ValueError("이 보정은 그 그림의 프롬프트에 이미 들어 있습니다")
+        params.update({
+            "input": applied["fields"]["prompt"], "_raw_input": applied["fields"]["prompt"],
+            "negative_prompt": applied["fields"]["negative_prompt"],
+            "seed": seed, "seed_fixed": True,
+            "_remote_queue_source": "Inspector Trial", "_remote_queue_label": f"Inspector · {suggestion_id}",
+        })
+        cost = estimate_anlas_cost(self.context, params)
+        if cost > 0 and not allow_paid:
+            return {"ok": False, "needs_confirmation": True, "anlas_cost": cost}
+        return {"ok": True, "params": params, "seed": seed, "anlas_cost": cost,
+                "fields": applied["fields"], "changes": applied["changes"]}
 
     def compare(self, before_id: str, after_id: str) -> dict[str, Any]:
         before, after = self.history(before_id), self.history(after_id)
@@ -85,6 +132,8 @@ def register_image_inspect_routes(
     session_context: WebSessionContext,
     *,
     run_in_thread: AsyncRunner,
+    clients: Any = None,
+    broadcast_json: Callable[..., Awaitable[Any]] | None = None,
 ) -> None:
     @app.get("/api/inspect/tone/history/{history_id}")
     async def api_inspect_tone_history(history_id: str, spectrum: str = "false"):
@@ -159,6 +208,54 @@ def register_image_inspect_routes(
             level = body.get("level")
             if level is not None and not isinstance(level, str):
                 raise ValueError("level must be null or a level id")
-            return apply_suggestion(fields, body["suggestion_id"], level)
+            return apply_suggestion(fields, body["suggestion_id"], level, _strength(body))
         except (ValueError, TypeError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/inspect/tone/trial")
+    async def api_inspect_tone_trial(request: Request):
+        """보정을 얹어 **같은 시드로 한 장** 시험 생성한다. 사용자의 프롬프트 · 프리셋은 그대로다."""
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Request body must be an object")
+            history_id, suggestion_id = body.get("history_id"), body.get("suggestion_id")
+            if not isinstance(history_id, str) or not history_id.strip():
+                raise ValueError("history_id must be a nonempty string")
+            if not isinstance(suggestion_id, str):
+                raise ValueError("suggestion_id must be a string")
+            level = body.get("level")
+            if level is not None and not isinstance(level, str):
+                raise ValueError("level must be null or a level id")
+            strength = _strength(body)
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        try:
+            prepared = await run_in_thread(tone_inspect_service(session_context).prepare_trial,
+                                           history_id, suggestion_id, level, strength, body.get("allow_paid") is True)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if not prepared["ok"]:
+            # 유료(Anlas)면 묻고 다시 보내게 한다 - 여기서 조용히 쓰지 않는다.
+            return JSONResponse(prepared, status_code=409)
+        from app.backend.server.generation_commands import generation_service
+
+        params = prepared.pop("params")
+        command = {"type": "generate", "prompt": params["input"], "negative_prompt": params["negative_prompt"],
+                   "overrides": params, "priority": 100}
+        dispatch = await run_in_thread(generation_service(session_context).enqueue_remote_request, command)
+        if not dispatch.ok:
+            return JSONResponse({"ok": False, "error": dispatch.blocked_reason}, status_code=400)
+        if broadcast_json is not None and clients is not None:
+            await broadcast_json(clients, dispatch.websocket_payload())
+            await broadcast_json(clients, session_context.queue_state_payload())
+        return {**prepared, "generation_request_id": dispatch.request_id}
+
+
+def _strength(body: dict[str, Any]) -> float:
+    value = body.get("strength", 1.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("strength must be a number")
+    return float(value)

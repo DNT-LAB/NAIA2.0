@@ -240,7 +240,13 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_style_thumbnail_routes(app, context, run_in_thread=run_in_thread)
-    register_image_inspect_routes(app, context, run_in_thread=run_in_thread)
+    register_image_inspect_routes(
+        app,
+        context,
+        run_in_thread=run_in_thread,
+        clients=clients,
+        broadcast_json=broadcast_json,
+    )
     register_font_routes(app, context, root_web_dir, run_in_thread=run_in_thread)
     register_nai_model_routes(
         app,

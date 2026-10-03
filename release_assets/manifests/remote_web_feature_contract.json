@@ -898,7 +898,8 @@
         {"method": "GET", "path": "/api/inspect/tone/compare", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/inspect/tone/image", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/inspect/tone/advise", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/inspect/tone/apply", "smoke": "non_destructive"}
+        {"method": "POST", "path": "/api/inspect/tone/apply", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/inspect/tone/trial", "smoke": "external_live"}
       ]
     },
     {

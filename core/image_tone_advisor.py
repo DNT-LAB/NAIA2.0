@@ -40,6 +40,32 @@ RULES = (
 )
 
 FIELDS = ("pre_prompt", "prompt", "post_prompt", "negative_prompt")
+# 세기(strength) - 규칙의 가중치에 곱한다. 화면이 약하게 / 기본 / 세게를 고르고, 같은 값으로 시험 생성과 반영을 한다.
+STRENGTH_MIN, STRENGTH_MAX = 0.25, 2.0
+
+
+def guide():
+    """축 · 쪽마다 어떤 보정이 있는지(그림과 무관한 안내). 화면의 축 툴팁이 쓴다."""
+    return [{key: deepcopy(rule[key]) for key in ("id", "axis", "side", "title", "actions", "levels", "cautions")}
+            for rule in RULES]
+
+
+def scaled_actions(actions, strength=1.0):
+    """세기를 곱한 actions. 가중치가 없는 추가(add)는 세기가 1 이 아니면 그 세기의 가중치 묶음으로 바뀐다."""
+    strength = float(strength)
+    if not math.isfinite(strength) or not STRENGTH_MIN <= strength <= STRENGTH_MAX:
+        raise ValueError(f"strength must be between {STRENGTH_MIN:g} and {STRENGTH_MAX:g}")
+    if strength == 1:
+        return deepcopy(list(actions))
+    scaled = []
+    for action in actions:
+        item = deepcopy(action)
+        if item["op"] == "set_weight":
+            item["weight"] = round(item["weight"] * strength, 2)
+        else:
+            item["op"], item["weight"] = "set_weight", round(strength, 2)
+        scaled.append(item)
+    return scaled
 _MARKER = re.compile(r"(?P<weight>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*::|(?P<close>::)|(?P<comma>,)")
 
 
@@ -219,7 +245,7 @@ def advise(positions, fields):
     return {"suggestions": suggestions, "warnings": _warnings(fields)}
 
 
-def apply_suggestion(fields, suggestion_id, level=None):
+def apply_suggestion(fields, suggestion_id, level=None, strength=1.0):
     target = "post_prompt" if isinstance(fields, dict) and "post_prompt" in fields else "prompt"
     before = normalize_fields(fields)
     fields = dict(before)
@@ -232,6 +258,7 @@ def apply_suggestion(fields, suggestion_id, level=None):
         if choice is None:
             raise ValueError("Unknown suggestion level")
         actions = choice["actions"]
+    actions = scaled_actions(actions, strength)
     # Repair negative weights even when they are unrelated to the chosen rule.
     parsed = _Prompt(fields, True)
     for group in reversed(parsed.groups):

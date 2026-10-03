@@ -2561,7 +2561,7 @@ function setNaiInspectorEnabled(enabled) {
   syncToneInspectorVisibility();
 }
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 함께 바꾼다(위 퀵 캐릭터 패널의 주석과 같은 이유).
-const toneInspectorPanelReady = import('./js/features/toneInspectorPanel.mjs?v=20261003-ti3')
+const toneInspectorPanelReady = import('./js/features/toneInspectorPanel.mjs?v=20261003-trial2')
   .then(({createToneInspectorPanel}) => {
     toneInspectorPanel = createToneInspectorPanel({
       document, escHtml,
@@ -2588,6 +2588,8 @@ const toneInspectorPanelReady = import('./js/features/toneInspectorPanel.mjs?v=2
         for (const change of changes) slashPeSetField(change.field, String(change.after ?? ''));
       },
       requestPresetFields: requestToneInspectorPresetFields,
+      // 시험 생성이 무료 구간 밖이면(Anlas) 묻는다.
+      confirmDialog: message => showConfirmDialog(message),
       loadPrefs: () => ({open: !!toneInspectorState.open, toPreset: !!toneInspectorState.toPreset}),
       savePrefs: prefs => saveToneInspectorState(prefs),
       showToast,

@@ -30509,3 +30509,44 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   background: transparent; color: var(--text-dim); font-family: var(--font-display); font-size: 10px;
 }
 .ti-more:hover { color: var(--text-secondary); background: rgba(255,255,255,0.06); }
+/* NAI Inspector - 보정 카드의 세기 고르기 · 시험 생성 · 시험 결과(10-03). */
+.ti-sug-foot { flex-wrap: wrap; }
+.ti-seg {
+  display: inline-flex; border-radius: 5px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.14);
+}
+.ti-seg-btn {
+  height: 20px; padding: 0 7px; border: 0; cursor: pointer;
+  background: rgba(255,255,255,0.04); color: var(--text-dim);
+  font-family: var(--font-display); font-size: 10px;
+}
+.ti-seg-btn + .ti-seg-btn { border-left: 1px solid rgba(255,255,255,0.1); }
+.ti-seg-btn:hover { color: var(--text-secondary); background: rgba(255,255,255,0.09); }
+.ti-seg-btn.is-on { background: rgba(124,106,239,0.28); color: var(--text-primary); }
+.ti-try { margin-left: auto; }
+.ti-trial {
+  margin-bottom: 6px; padding: 5px 6px 6px; border-radius: 6px;
+  border: 1px solid rgba(124,106,239,0.5); background: rgba(124,106,239,0.1);
+}
+.ti-trial.is-lost { border-color: rgba(224,176,96,0.5); background: rgba(90,80,30,0.25); }
+.ti-trial-head { display: flex; align-items: center; gap: 6px; }
+.ti-trial-title { flex: 1; min-width: 0; font-size: 10.5px; font-weight: 700; color: var(--text-primary); }
+.ti-trial-opt { font-weight: 400; color: var(--text-dim); }
+.ti-trial-close {
+  flex: none; width: 18px; height: 18px; border: 0; border-radius: 4px; cursor: pointer;
+  background: transparent; color: var(--text-dim); font-size: 10px; line-height: 1;
+}
+.ti-trial-close:hover { color: var(--text-primary); background: rgba(255,255,255,0.1); }
+.ti-trial-note { margin-top: 3px; font-size: 9.5px; line-height: 1.45; color: var(--text-dim); }
+.ti-trial-foot { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.ti-trial-foot .ti-preset { margin-top: 0; }
+.ti-cmp {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 6px; align-items: baseline;
+  margin-top: 3px; font-size: 10px;
+}
+.ti-cmp-label { color: var(--text-secondary); white-space: nowrap; }
+.ti-cmp-vals { font-family: var(--font-mono); color: var(--text-primary); white-space: nowrap; }
+.ti-cmp-note { font-size: 9.5px; color: var(--text-dim); white-space: nowrap; }
+.ti-cmp.is-closer .ti-cmp-note { color: #b6dcc1; }
+.ti-cmp.is-farther .ti-cmp-note { color: #ecd9a6; }
+.ti-state { margin-top: 4px; }

@@ -24,15 +24,20 @@ class E621ResearchMetadata:
     def __init__(self, repo_root: Path, native_rows: list[dict[str, Any]],
                  data_roots: list[Path] | None = None,
                  translation_rows: list[dict[str, Any]] | None = None):
-        self._native: dict[str, dict[str, Any]] = {}
-        self._body_tags: set[str] = set()
+        self._native = {}
+        self._body_tags = set()
+        self.search_field_tags = set()
         for row in native_rows:
-            tag = str(row.get("tag") or "")
+            tag = row.get("tag")
             if not tag:
                 continue
+            tag = str(tag)
             self._native.setdefault(tag, row)
-            if str(row.get("wiki_body") or row.get("wiki_preview") or "").strip():
+            body = row.get("wiki_body") or row.get("wiki_preview")
+            if body and str(body).strip():
                 self._body_tags.add(tag)
+            if row.get("kor"):
+                self.search_field_tags.add(tag)
         # App-owned E621 assets must receive bundle updates, not remain hidden
         # behind an old runtime copy (runtime_install_manager documents this).
         base = Path(repo_root).resolve()
@@ -53,8 +58,13 @@ class E621ResearchMetadata:
         described = {tag for tag, value in self._translations.items() if value.get("desc")}
         described.update(self._annotations)
         self._described = described
+        # Empty metadata cannot contain Korean. Avoid eight dictionary lookups
+        # and a regex for every unannotated row in the expanded vocabulary.
+        self.search_field_tags.update(self._translations)
+        self.search_field_tags.update(self._annotations)
+        self.search_field_tags.update(self._search_annotations)
         self._searchable = {
-            tag for tag in self._native
+            tag for tag in self.search_field_tags
             if re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", " ".join(str(value or "") for value in (
                 self._native[tag].get("kor"),
                 self._translations.get(tag, {}).get("desc"),
@@ -72,7 +82,7 @@ class E621ResearchMetadata:
             "with_korean_description": len(described),
             "with_korean_search": len(self._searchable),
             "reviewed_korean_search": len(self._search_annotations),
-            "without_description": len(self._native.keys() - self._body_tags - described),
+            "without_description": len(self._native) - len(self._body_tags | described),
             "reviewed_direct_definition": len(self._annotations),
             "with_cross_site_links": len(self._links),
             "metadata_available": self._metadata_available,
@@ -90,7 +100,7 @@ class E621ResearchMetadata:
         try:
             if rows is None:
                 import pyarrow.parquet as pq
-                rows = pq.read_table(path, columns=["tag", "desc", "keywords"]).to_pylist()
+                rows = pq.ParquetFile(path).read(columns=["tag", "desc", "keywords"]).to_pylist()
             for row in rows:
                 tag = str(row.get("tag") or "")
                 if tag in self._native:
@@ -217,6 +227,32 @@ class E621ResearchMetadata:
             "description_evidence": annotation.get("sources", []),
             "cross_site_links": self._links.get(exact_tag, []),
         }
+
+    def search_fields(self, exact_tag: str) -> tuple[str, str, str, str]:
+        """Raw legacy search fields, without allocating a display payload."""
+        native = self._native.get(exact_tag, {})
+        legacy = self._translations.get(exact_tag, {})
+        annotation = self._annotations.get(exact_tag, {})
+        search = self._search_annotations.get(exact_tag, {})
+        return (
+            str(native.get("kor") or ""),
+            str(annotation.get("label") or native.get("kor") or search.get("label") or ""),
+            str(annotation.get("description") or legacy.get("desc") or ""),
+            ", ".join(str(value) for value in (
+                annotation.get("keywords"), legacy.get("keywords"), search.get("label"),
+                *search.get("keywords", []),
+            ) if value),
+        )
+
+    def content_tags(self, content_filter: str) -> set[str] | None:
+        """Read-only membership sets used by research browsing/search."""
+        if content_filter == "with_body":
+            return self._body_tags
+        if content_filter == "with_korean":
+            return self._described
+        if content_filter == "with_korean_search":
+            return self._searchable
+        return None
 
     def summary(self) -> dict[str, Any]:
         return dict(self._summary)

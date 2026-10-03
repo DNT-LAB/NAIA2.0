@@ -15,6 +15,10 @@ from typing import Any
 
 from core.site_tag_repository import LegacyTagRepository, SiteTagKey, TagClassificationRepository
 
+# 표준 json 으로 읽는다. pandas 의 비공개 ujson_loads 는 80ms 빨랐지만 행마다 키 문자열을
+# 공유하지 않아 상주 메모리가 30MiB 더 남았다(10-03 실측: 63.5 -> 94.0MiB) - 모듈을 처음 열 때
+# 한 번 아끼는 시간과 바꿀 값이 아니다.
+
 
 class SiteTranslationRepository:
     def __init__(self, site: str, metadata: Any):
@@ -60,7 +64,7 @@ class E621TagRepository:
             if not source.exists():
                 continue
             try:
-                tree = json.loads(legacy.read_text(encoding="utf-8"))
+                tree = json.loads(legacy.read_bytes())
                 rows, manifest, source_format = None, None, "legacy_json"
                 if self.prefer_catalog:
                     from core.e621_catalog_format import load_catalog

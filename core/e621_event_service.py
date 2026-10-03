@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.e621_tag_repository import E621TagRepository
-from core.site_tag_repository import SiteTagKey
+from core.e621_research_index import E621ResearchIndex, search_key
 from core.prompt_generation_service import PromptGenerationService
 from core.wildcard_processor import split_tags_smart
 
@@ -44,14 +44,19 @@ class E621EventService:
         self.starred_keys: set[str] = set()
         self.deleted_keys: set[str] = set()
         self._settings_loaded = False
+        self._search_index: E621ResearchIndex | None = None
+        self._index_source = None
 
     def state(self) -> dict[str, Any]:
         loaded = self._ensure_loaded()
-        selected = self._find_tag(self.selected_tag) if loaded else None
         visible_tags = self._visible_tags() if loaded else []
+        selected = self._find_tag(self.selected_tag) if loaded else None
+        matches = self._search_index.matches(self.search_text, self.disable_wiki_search) if loaded else None
+        selected_match = (matches.get(self.selected_tag) if matches is not None and
+            any(row["tag"] == self.selected_tag for row in visible_tags) else None)
         tag_limit = 300
         self.tag_offset = min(self.tag_offset, max(0, (len(visible_tags) - 1) // tag_limit * tag_limit))
-        selected_payload = self._tag_payload(selected) if selected else None
+        selected_payload = self._tag_payload(selected, selected_match) if selected else None
         if selected_payload is not None:
             selected_payload["research"] = self.research_metadata.for_tag(selected_payload["tag"])
         return {
@@ -74,7 +79,8 @@ class E621EventService:
             "current_level2": self.current_level2,
             "categories": self._categories() if loaded else [],
             "folders": self._folders() if loaded else [],
-            "tags": [self._tag_payload(item) for item in visible_tags[self.tag_offset:self.tag_offset + tag_limit]],
+            "tags": [self._tag_payload(item, matches.get(item["tag"]) if matches is not None else None)
+                     for item in (self._search_index.page(visible_tags, self.tag_offset, tag_limit) if loaded else [])],
             "tag_total": len(visible_tags),
             "tag_limit": tag_limit,
             "tag_offset": self.tag_offset,
@@ -189,15 +195,17 @@ class E621EventService:
     def _ensure_loaded(self) -> bool:
         if not self._settings_loaded:
             self._load_settings()
-        if self.data is not None:
-            if self.research_metadata is None:
-                self._load_research_metadata()
-            return True
-        if not self.repository.load():
-            return False
-        self.data = self.repository.dictionary.legacy_tree
-        self.data_path = self.repository.source_path
-        self.research_metadata = self.repository.translations.legacy_metadata
+        if self.data is None:
+            if not self.repository.load():
+                return False
+            self.data = self.repository.dictionary.legacy_tree
+            self.data_path = self.repository.source_path
+            self.research_metadata = self.repository.translations.legacy_metadata
+        if self.research_metadata is None:
+            self._load_research_metadata()
+        if self._search_index is None or self._index_source is not self.data:
+            self._search_index = E621ResearchIndex(self.data, self.research_metadata)
+            self._index_source = self.data
         return True
 
     def _load_research_metadata(self) -> None:
@@ -236,126 +244,72 @@ class E621EventService:
         )
 
     def _categories(self) -> list[dict[str, Any]]:
+        index = self._search_index
+        matches = index.matches(self.search_text, self.disable_wiki_search)
         categories = []
-        data = self.data or {}
-        for section in ("General", "Species"):
-            section_data = data.get(section, {})
-            if not isinstance(section_data, dict):
-                continue
-            for name in sorted(section_data.keys()):
-                tags = self._collect_tags(section_data.get(name))
-                visible = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys and self._matches_content_filter(tag)]
-                categories.append({
-                    "name": name,
-                    "section": section,
-                    "folder_count": len(section_data.get(name, {})) if isinstance(section_data.get(name), dict) else 0,
-                    "tag_count": len(visible),
-                    "starred_count": sum(1 for tag in visible if tag.get("tag", "") in self.starred_keys),
-                    "matched": bool(self.search_text and self._filter_tags(visible, include_search=True)),
-                    "selected": name == self.current_category,
-                })
+        for section, name, folder_count in sorted(index.categories):
+            rows = index.category_rows[(section, name)]
+            visible = rows if self.content_filter == "all" and not self.deleted_keys else index.filter_rows(
+                rows, content_filter=self.content_filter, hidden=self.deleted_keys,
+                starred=self.starred_keys, starred_only=False, matches=None)
+            categories.append({
+                "name": name, "section": section, "folder_count": folder_count,
+                "tag_count": len(visible),
+                "starred_count": sum(row["tag"] in self.starred_keys for row in visible) if self.starred_keys else 0,
+                "matched": bool(self.search_text and any(row["tag"] in matches and
+                    (self.view_mode != "starred" or row["tag"] in self.starred_keys) for row in visible)),
+                "selected": name == self.current_category,
+            })
         return categories
 
     def _folders(self) -> list[dict[str, Any]]:
         if not self.current_category:
             return []
-        _, category_data = self._category_data(self.current_category)
-        if not isinstance(category_data, dict):
+        index = self._search_index
+        section, node = self._category_data(self.current_category)
+        if not isinstance(node, dict):
             return []
+        matches = index.matches(self.search_text, self.disable_wiki_search)
         folders = []
-        for name in sorted(category_data.keys()):
-            tags = self._filter_tags(self._collect_tags(category_data.get(name)))
-            if not tags:
-                continue
-            folders.append({
-                "name": name,
-                "display": name.replace("_", " "),
-                "tag_count": len(tags),
-                "selected": name == self.current_level2,
-            })
+        for name in sorted(node):
+            rows = index.filter_rows(index.folder_rows.get((section, self.current_category, name), []),
+                content_filter=self.content_filter, hidden=self.deleted_keys,
+                starred=self.starred_keys, starred_only=self.view_mode == "starred", matches=matches)
+            if rows:
+                folders.append({"name": name, "display": name.replace("_", " "),
+                                "tag_count": len(rows), "selected": name == self.current_level2})
         return folders
 
     def _visible_tags(self) -> list[dict[str, Any]]:
-        if self.current_category:
-            _, category_data = self._category_data(self.current_category)
-            if isinstance(category_data, dict) and self.current_level2:
-                tags = self._collect_tags(category_data.get(self.current_level2))
-            else:
-                tags = self._collect_tags(category_data)
-        else:
-            tags = []
-            data = self.data or {}
-            for section in ("General", "Species"):
-                for category_data in (data.get(section, {}) or {}).values():
-                    tags.extend(self._collect_tags(category_data))
-        tags = self._filter_tags(tags, include_search=True)
-        # A native tag can live in more than one folder. Keep its original key,
-        # but do not repeat it across result pages when searching all folders.
-        tags = list({str(item.get("tag")): item for item in reversed(tags)}.values())
-        needle = self._search_key(self.search_text) if self.search_text else ""
-        tags.sort(key=lambda item: (
-            0 if needle and self._search_key(item.get("tag")) == needle else 1,
-            -int(item.get("count") or 0), str(item.get("tag") or ""),
-        ))
-        return tags
+        index = self._search_index
+        return index.visible(category=self.current_category, folder=self.current_level2,
+            content_filter=self.content_filter, hidden=self.deleted_keys,
+            starred=self.starred_keys, starred_only=self.view_mode == "starred",
+            matches=index.matches(self.search_text, self.disable_wiki_search))
 
     @staticmethod
     def _search_key(value: Any) -> str:
-        """검색 비교용 정규화 — 밑줄을 공백으로 보고, 이어진 공백을 하나로 줄인다.
-
-        앱의 다른 태그 경로(`core.tag_axis_registry.normalize_tag`)가 쓰는 규칙과 같다.
-        여기만 날것으로 비교하고 있어서 이 모듈만 밑줄 태그를 못 찾았다.
-        """
-        return " ".join(str(value or "").replace("_", " ").lower().split())
+        """Keep the established underscore/space search projection."""
+        return search_key(value)
 
     def _filter_tags(self, tags: list[dict[str, Any]], *, include_search: bool = True) -> list[dict[str, Any]]:
-        result = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys and self._matches_content_filter(tag)]
-        if self.view_mode == "starred":
-            result = [tag for tag in result if tag.get("tag", "") in self.starred_keys]
-        if include_search and self.search_text:
-            # ⚠️ e621 태그 이름은 밑줄로 이어져 있다(`worm's-eye_view`). 사용자는 공백으로
-            #    친다. 예전에는 날것끼리 부분일치를 봐서 공백으로 치면 **이름으로는 하나도**
-            #    안 잡혔다 — 이름에 밑줄이 든 14,901개(71%)가 통째로 안 보였다.
-            #    `bird's-eye view` 가 되는 것처럼 보였던 건 우연히 **위키 본문**에 그 표현이
-            #    공백형으로 적혀 있어서다(실측: 그때 나온 3건은 전부 위키 매치였다).
-            #    밑줄과 공백을 같은 것으로 보고 맞춘다 — 어느 쪽으로 쳐도 잡힌다.
-            needle = self._search_key(self.search_text)
-            filtered = []
-            for tag in result:
-                name = self._search_key(tag.get("tag"))
-                wiki = "" if self.disable_wiki_search else self._search_key(
-                    tag.get("wiki_body") or tag.get("wiki_preview"))
-                research = self.research_metadata.for_tag(str(tag.get("tag") or "")) if self.research_metadata else {}
-                korean_fields = [self._search_key(value) for value in (
-                    tag.get("kor"), research.get("korean_label"), research.get("korean_description"), research.get("korean_keywords"),
-                )]
-                korean_match = any(needle in value for value in korean_fields if value)
-                # Korean compound words are commonly entered with or without
-                # spaces. Keep English tag/wikilookup boundaries unchanged.
-                if not korean_match and re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", needle):
-                    compact = needle.replace(" ", "")
-                    korean_match = any(compact in value.replace(" ", "") for value in korean_fields if value)
-                if needle in name or needle in wiki or korean_match:
-                    copied = dict(tag)
-                    copied["matched_in_wiki"] = needle not in name and not korean_match and needle in wiki
-                    copied["matched_in_korean"] = needle not in name and korean_match
-                    filtered.append(copied)
-            result = filtered
-        return result
+        index = self._search_index
+        matches = index.matches(self.search_text, self.disable_wiki_search) if include_search else None
+        rows = index.filter_rows(tags, content_filter=self.content_filter, hidden=self.deleted_keys,
+                                 starred=self.starred_keys, starred_only=self.view_mode == "starred", matches=matches)
+        if matches is not None:
+            return [dict(row, **index.match_payload(matches[row["tag"]])) for row in rows]
+        return rows
 
     def _matches_content_filter(self, tag: dict[str, Any]) -> bool:
         if self.content_filter == "all":
             return True
-        research = self.research_metadata.for_tag(str(tag.get("tag") or "")) if self.research_metadata else {}
-        body = bool(research.get("has_body"))
-        korean = bool(research.get("has_korean_description"))
-        if self.content_filter == "with_body":
-            return body
-        if self.content_filter == "with_korean":
-            return korean
-        if self.content_filter == "with_korean_search":
-            return bool(research.get("has_korean_search"))
-        return not body and not korean
+        metadata = self.research_metadata
+        name = str(tag.get("tag") or "")
+        allowed = metadata.content_tags(self.content_filter)
+        if allowed is not None:
+            return name in allowed
+        return name not in metadata._body_tags and name not in metadata._described
 
     def _category_data(self, category: str) -> tuple[str | None, Any]:
         data = self.data or {}
@@ -366,21 +320,9 @@ class E621EventService:
         return None, None
 
     def _find_tag(self, tag_name: str | None) -> dict[str, Any] | None:
-        if not tag_name:
-            return None
-        for tag in self._visible_tags():
-            if tag.get("tag") == tag_name:
-                return tag
-        if self.repository.loaded and self.data is self.repository.dictionary.legacy_tree:
-            return self.repository.get(SiteTagKey("e621", tag_name))
-        for section in ("General", "Species"):
-            for category_data in (self.data or {}).get(section, {}).values():
-                for tag in self._collect_tags(category_data):
-                    if tag.get("tag") == tag_name:
-                        return tag
-        return None
+        return self._search_index.by_tag.get(tag_name) if tag_name and self._search_index is not None else None
 
-    def _tag_payload(self, tag_data: dict[str, Any]) -> dict[str, Any]:
+    def _tag_payload(self, tag_data: dict[str, Any], match=None) -> dict[str, Any]:
         tag_name = str(tag_data.get("tag") or "")
         count = int(tag_data.get("count") or 0)
         research = self.research_metadata.for_tag(tag_name) if self.research_metadata else {}
@@ -392,8 +334,7 @@ class E621EventService:
             "count_label": self._format_count(count),
             "starred": tag_name in self.starred_keys,
             "hidden": tag_name in self.deleted_keys,
-            "matched_in_wiki": bool(tag_data.get("matched_in_wiki", False)),
-            "matched_in_korean": bool(tag_data.get("matched_in_korean", False)),
+            **E621ResearchIndex.match_payload(match),
             "has_body": bool(research.get("has_body")),
             "has_korean_description": bool(research.get("has_korean_description")),
             "has_korean_search": bool(research.get("has_korean_search")),

@@ -26,8 +26,11 @@ class E621EventService:
         self.starred_path = save_root / "e621_starred_v2.json"
         self.deleted_path = save_root / "e621_deleted_v2.json"
         self.data: dict[str, Any] | None = None
+        self.research_metadata: Any | None = None
         self.search_text = ""
         self.view_mode = "default"
+        self.content_filter = "all"
+        self.tag_offset = 0
         self.current_category: str | None = None
         self.current_level2: str | None = None
         self.selected_tag: str | None = None
@@ -43,6 +46,10 @@ class E621EventService:
         selected = self._find_tag(self.selected_tag) if loaded else None
         visible_tags = self._visible_tags() if loaded else []
         tag_limit = 300
+        self.tag_offset = min(self.tag_offset, max(0, (len(visible_tags) - 1) // tag_limit * tag_limit))
+        selected_payload = self._tag_payload(selected) if selected else None
+        if selected_payload is not None:
+            selected_payload["research"] = self.research_metadata.for_tag(selected_payload["tag"])
         return {
             "type": "module_state",
             "module_id": "e621_event",
@@ -52,6 +59,8 @@ class E621EventService:
             "data_path": str(self.data_path),
             "search_text": self.search_text,
             "view_mode": self.view_mode,
+            "content_filter": self.content_filter,
+            "research_summary": self.research_metadata.summary() if loaded else {},
             "disable_translation": self.disable_translation,
             "disable_wiki_search": self.disable_wiki_search,
             "prompt_testbench_visible": True,
@@ -61,13 +70,17 @@ class E621EventService:
             "current_level2": self.current_level2,
             "categories": self._categories() if loaded else [],
             "folders": self._folders() if loaded else [],
-            "tags": [self._tag_payload(item) for item in visible_tags[:tag_limit]],
+            "tags": [self._tag_payload(item) for item in visible_tags[self.tag_offset:self.tag_offset + tag_limit]],
             "tag_total": len(visible_tags),
             "tag_limit": tag_limit,
+            "tag_offset": self.tag_offset,
+            "tag_page_size": tag_limit,
+            "has_previous": self.tag_offset > 0,
+            "has_next": self.tag_offset + tag_limit < len(visible_tags),
             "starred_total": len(self.starred_keys),
             "hidden_total": len(self.deleted_keys),
             "hidden_items": sorted(self.deleted_keys)[:120],
-            "selected": self._tag_payload(selected) if selected else None,
+            "selected": selected_payload,
             "wiki": self._wiki_payload(selected),
             "testbench": self.testbench,
         }
@@ -80,21 +93,36 @@ class E621EventService:
             self.current_category = None
             self.current_level2 = None
             self.selected_tag = None
+            self.tag_offset = 0
         elif key == "reset":
             self.search_text = ""
             self.current_category = None
             self.current_level2 = None
             self.selected_tag = None
             self.view_mode = "default"
+            self.content_filter = "all"
+            self.tag_offset = 0
         elif key == "view_mode":
             self.view_mode = "starred" if raw == "starred" else "default"
+            self.tag_offset = 0
+        elif key == "content_filter":
+            self.content_filter = raw if raw in {"with_body", "with_korean", "with_korean_search", "without_description"} else "all"
+            self.selected_tag = None
+            self.tag_offset = 0
+        elif key == "tag_offset":
+            try:
+                self.tag_offset = max(0, int(raw)) // 300 * 300
+            except (TypeError, ValueError):
+                self.tag_offset = 0
         elif key == "category":
             self.current_category = raw or None
             self.current_level2 = None
             self.selected_tag = None
+            self.tag_offset = 0
         elif key == "level2":
             self.current_level2 = raw or None
             self.selected_tag = None
+            self.tag_offset = 0
         elif key == "selected_tag":
             self.selected_tag = raw or None
         elif key == "toggle_star":
@@ -122,6 +150,7 @@ class E621EventService:
             self._save_settings()
         elif key == "disable_wiki_search":
             self.disable_wiki_search = self._coerce_bool(raw)
+            self.tag_offset = 0
             self._save_settings()
         elif key == "testbench":
             self.testbench = raw
@@ -157,6 +186,8 @@ class E621EventService:
         if not self._settings_loaded:
             self._load_settings()
         if self.data is not None:
+            if self.research_metadata is None:
+                self._load_research_metadata()
             return True
         if not self.data_path.exists():
             return False
@@ -167,7 +198,17 @@ class E621EventService:
         if not isinstance(payload, dict):
             return False
         self.data = payload
+        self._load_research_metadata()
         return True
+
+    def _load_research_metadata(self) -> None:
+        from core.e621_research_metadata import E621ResearchMetadata
+
+        runtime_paths = getattr(self.app_context, "runtime_paths", None)
+        data_dir = getattr(runtime_paths, "data_dir", None)
+        self.research_metadata = E621ResearchMetadata(
+            self.root, self._collect_tags(self.data), data_roots=[data_dir] if data_dir is not None else None,
+        )
 
     def _load_settings(self) -> None:
         self._settings_loaded = True
@@ -204,7 +245,7 @@ class E621EventService:
                 continue
             for name in sorted(section_data.keys()):
                 tags = self._collect_tags(section_data.get(name))
-                visible = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys]
+                visible = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys and self._matches_content_filter(tag)]
                 categories.append({
                     "name": name,
                     "section": section,
@@ -249,7 +290,14 @@ class E621EventService:
                 for category_data in (data.get(section, {}) or {}).values():
                     tags.extend(self._collect_tags(category_data))
         tags = self._filter_tags(tags, include_search=True)
-        tags.sort(key=lambda item: int(item.get("count") or 0), reverse=True)
+        # A native tag can live in more than one folder. Keep its original key,
+        # but do not repeat it across result pages when searching all folders.
+        tags = list({str(item.get("tag")): item for item in reversed(tags)}.values())
+        needle = self._search_key(self.search_text) if self.search_text else ""
+        tags.sort(key=lambda item: (
+            0 if needle and self._search_key(item.get("tag")) == needle else 1,
+            -int(item.get("count") or 0), str(item.get("tag") or ""),
+        ))
         return tags
 
     @staticmethod
@@ -262,7 +310,7 @@ class E621EventService:
         return " ".join(str(value or "").replace("_", " ").lower().split())
 
     def _filter_tags(self, tags: list[dict[str, Any]], *, include_search: bool = True) -> list[dict[str, Any]]:
-        result = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys]
+        result = [tag for tag in tags if tag.get("tag", "") not in self.deleted_keys and self._matches_content_filter(tag)]
         if self.view_mode == "starred":
             result = [tag for tag in result if tag.get("tag", "") in self.starred_keys]
         if include_search and self.search_text:
@@ -278,12 +326,37 @@ class E621EventService:
                 name = self._search_key(tag.get("tag"))
                 wiki = "" if self.disable_wiki_search else self._search_key(
                     tag.get("wiki_body") or tag.get("wiki_preview"))
-                if needle in name or needle in wiki:
+                research = self.research_metadata.for_tag(str(tag.get("tag") or "")) if self.research_metadata else {}
+                korean_fields = [self._search_key(value) for value in (
+                    tag.get("kor"), research.get("korean_label"), research.get("korean_description"), research.get("korean_keywords"),
+                )]
+                korean_match = any(needle in value for value in korean_fields if value)
+                # Korean compound words are commonly entered with or without
+                # spaces. Keep English tag/wikilookup boundaries unchanged.
+                if not korean_match and re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", needle):
+                    compact = needle.replace(" ", "")
+                    korean_match = any(compact in value.replace(" ", "") for value in korean_fields if value)
+                if needle in name or needle in wiki or korean_match:
                     copied = dict(tag)
-                    copied["matched_in_wiki"] = needle not in name and needle in wiki
+                    copied["matched_in_wiki"] = needle not in name and not korean_match and needle in wiki
+                    copied["matched_in_korean"] = needle not in name and korean_match
                     filtered.append(copied)
             result = filtered
         return result
+
+    def _matches_content_filter(self, tag: dict[str, Any]) -> bool:
+        if self.content_filter == "all":
+            return True
+        research = self.research_metadata.for_tag(str(tag.get("tag") or "")) if self.research_metadata else {}
+        body = bool(research.get("has_body"))
+        korean = bool(research.get("has_korean_description"))
+        if self.content_filter == "with_body":
+            return body
+        if self.content_filter == "with_korean":
+            return korean
+        if self.content_filter == "with_korean_search":
+            return bool(research.get("has_korean_search"))
+        return not body and not korean
 
     def _category_data(self, category: str) -> tuple[str | None, Any]:
         data = self.data or {}
@@ -309,26 +382,35 @@ class E621EventService:
     def _tag_payload(self, tag_data: dict[str, Any]) -> dict[str, Any]:
         tag_name = str(tag_data.get("tag") or "")
         count = int(tag_data.get("count") or 0)
+        research = self.research_metadata.for_tag(tag_name) if self.research_metadata else {}
         return {
             "tag": tag_name,
             "display": tag_name.replace("_", " "),
-            "kor": tag_data.get("kor", ""),
+            "kor": tag_data.get("kor") or research.get("korean_label", ""),
             "count": count,
             "count_label": self._format_count(count),
             "starred": tag_name in self.starred_keys,
             "hidden": tag_name in self.deleted_keys,
             "matched_in_wiki": bool(tag_data.get("matched_in_wiki", False)),
+            "matched_in_korean": bool(tag_data.get("matched_in_korean", False)),
+            "has_body": bool(research.get("has_body")),
+            "has_korean_description": bool(research.get("has_korean_description")),
+            "has_korean_search": bool(research.get("has_korean_search")),
+            "review_status": research.get("review_status", "unreviewed"),
+            "review_label": research.get("review_label", "미검토"),
         }
 
     def _wiki_payload(self, tag_data: dict[str, Any] | None) -> dict[str, Any]:
         if not tag_data:
-            return {"tag": "", "text": "", "translated": False}
+            return {"tag": "", "text": "", "body": "", "translated": False}
         tag_name = str(tag_data.get("tag") or "")
-        body = str(tag_data.get("wiki_body") or tag_data.get("wiki_preview") or "위키 정보 없음")
+        body = str(tag_data.get("wiki_body") or tag_data.get("wiki_preview") or "")
         body = self._clean_wiki_text(body)
         return {
             "tag": tag_name,
-            "text": f"Tag: {tag_name.replace('_', ' ')}\nCount: {self._format_count(tag_data.get('count'))}\n\n{'=' * 50}\n\n{body}",
+            "text": f"Tag: {tag_name.replace('_', ' ')}\nCount: {self._format_count(tag_data.get('count'))}\n\n{'=' * 50}\n\n{body or '위키 정보 없음'}",
+            "body": body,
+            "source_label": "저장된 위키 본문",
             "translated": False,
         }
 

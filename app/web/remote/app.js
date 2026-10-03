@@ -2659,7 +2659,7 @@ const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs
   .catch(error => {
     console.error('Failed to initialize instant wildcard panel module', error);
   });
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-e621-focus1')
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261002-e621-taxonomy2')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,

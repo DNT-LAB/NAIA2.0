@@ -1008,8 +1008,8 @@
     },
     {
       "feature": "websocket_shared_state",
-      "description": "E621 Event module corpus bundled for clean-machine availability (module driven through WebSocket module commands).",
-      "paths": ["data/e621_data"],
+      "description": "E621 research corpus, site-specific Korean descriptions and evidence-bound reading annotations bundled for clean-machine availability. WebSocket module commands preserve exact tag keys, support Korean lookup, description coverage filters and paging; cross-site links do not rewrite prompts.",
+      "paths": ["data/e621_data", "data/e621_KR_tags.parquet", "data/e621_research_annotations.json"],
       "provisioning": "bundled"
     },
     {

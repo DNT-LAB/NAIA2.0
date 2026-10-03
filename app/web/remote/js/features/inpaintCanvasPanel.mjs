@@ -86,9 +86,6 @@ const NUDGE_PX_COARSE = 16;
 const WHEEL_SCALE_PCT = 2;
 const WHEEL_ROTATE_DEG = 1;
 const WHEEL_COARSE = 5;
-// 고른 레이어를 서버가 확인해 줄 때까지 옛 echo 로부터 지키는 시간. 그보다 늦으면
-// 서버의 값을 믿는다(고르기가 거절됐을 수도 있다).
-const PENDING_SELECT_MS = 3000;
 
 const ratio = (value) => (Number(value) || 0).toFixed(2);
 const clampPct = (v) => Math.max(SCALE_MIN_PCT, Math.min(SCALE_MAX_PCT, Math.round(Number(v) || 100)));
@@ -171,8 +168,11 @@ export function createInpaintCanvasPanel({
   let layersEl = null;
   let layerPop = null;        // [+ 이미지] 를 눌러 연 고르기 팝업
   let layerUploading = false;
-  // 고른 직후 서버가 아직 따라오지 않은 선택(`holdPendingSelection`).
-  let pendingSelect = null;
+  // 고른 레이어. **이 화면만의 값**이다(보기 모드 `viewMode` 와 같은 이유) - 서버에 두면
+  // 다른 탭이 고르는 순간 이 탭의 슬라이더 · 끌기 대상이 말없이 바뀐다(Codex 재리뷰
+  // 2026-10-03: 화면은 L1 인데 `layer_scale {id:'L2'}` 가 나갔다). 늦게 온 echo 가
+  // 선택을 되돌리는 경합도 같은 뿌리였다 - 서버 값을 안 읽으면 둘 다 없다.
+  let activeId = 'base';
 
   const read = (key, fallback) => {
     try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
@@ -207,9 +207,9 @@ export function createInpaintCanvasPanel({
     }];
   }
   const extraLayerCount = () => layerRows().filter(row => row.id !== 'base').length;
+  /** 고른 레이어. 지워졌으면 원본으로 돌아간다. */
   function activeLayerId() {
-    const id = String(state?.active_layer || 'base');
-    return layerRows().some(row => row.id === id) ? id : 'base';
+    return layerRows().some(row => row.id === activeId) ? activeId : 'base';
   }
   const layerRow = (id) => layerRows().find(row => row.id === id) || null;
 
@@ -286,34 +286,13 @@ export function createInpaintCanvasPanel({
     return '';
   }
 
-  /** 레이어를 고른다. 화면은 즉시 바꾸고(도크 슬라이더 · 목록 · 테두리) 서버엔 알린다. */
+  /** 레이어를 고른다 - 이 화면에서만(도크 슬라이더 · 목록 · 테두리). 서버로는 안 보낸다(`activeId`). */
   function selectLayer(id) {
     if (!state || !layerRow(id) || id === activeLayerId()) return;
     // 미뤄 둔 변형은 원래 레이어 몫이다 - 먼저 흘려보낸다.
     flushTransforms();
-    state.active_layer = id;
-    pendingSelect = {id, window: String(state.window_id || ''), at: Date.now()};
-    send('layer_select', {id});
+    activeId = id;
     refreshChrome();
-  }
-
-  /** 고른 직후 **늦게 도착한 옛 echo** 가 선택을 되돌리지 못하게 한다.
-   *
-   *  ⚠️ 서버는 명령을 차례로 처리하고 echo 도 그 차례로 온다. 고르기 **전에** 보낸 조작의
-   *     echo 는 옛 `active_layer` 를 싣고 온다 - 그대로 받으면 끌던 도중에 선택이 이전
-   *     레이어로 튀고, 되돌리기가 엉뚱한 레이어를 기록한다(Codex 리뷰 2026-10-03: L2 를
-   *     끄는 중 L1 echo -> Ctrl+Z 가 L1 을 되돌렸다). 서버가 따라오면(같은 id) 놓는다.
-   */
-  function holdPendingSelection(next) {
-    if (!pendingSelect) return;
-    const expired = Date.now() - pendingSelect.at > PENDING_SELECT_MS;
-    const sameWindow = String(next.window_id || '') === pendingSelect.window;
-    const stillThere = Array.isArray(next.layers) && next.layers.some(row => row.id === pendingSelect.id);
-    if (!sameWindow || !stillThere || expired || String(next.active_layer || 'base') === pendingSelect.id) {
-      pendingSelect = null;
-      return;
-    }
-    next.active_layer = pendingSelect.id;
   }
 
   function send(key, value) {
@@ -372,13 +351,23 @@ export function createInpaintCanvasPanel({
     }
     // ⚠️ **그림이 바뀌면 되돌리기 기록도 버린다.** 세션은 살아 있는데 다른 그림을
     //    열면(`window_id` 가 바뀐다) 남의 그림에서 잰 자리가 이 그림에 적용된다.
-    if (next && String(next.window_id || '') !== String(state?.window_id || '')) undoStack = [];
-    if (next) holdPendingSelection(next);
+    if (next && String(next.window_id || '') !== String(state?.window_id || '')) {
+      undoStack = [];
+      activeId = 'base';          // 다른 그림이다 - 옛 그림의 레이어를 고른 채 남기지 않는다
+    }
     if (next) state = next;
     if (!panel) return;
     // ⚠️ 조작 중에는 절대 다시 그리지 않는다(posStage 규칙 1). 서버 echo 가 와도
     //    마찬가지다 - 끌고 있던 노드가 교체되면 그 조작이 통째로 무시된다.
-    if (posStage?.isDragging() || rangeDragging || typingInPanel()) return;
+    if (posStage?.isDragging()) return;
+    if (rangeDragging || typingInPanel()) {
+      // 슬라이더를 끌거나 반복 칸에 쓰는 중이면 **도크만** 건너뛴다(끌던 input 이 교체되면
+      // 드래그가 끊긴다). 캔버스는 그린다 - 그 사이 다른 탭이 레이어를 숨기거나 옮기면
+      // 화면은 옛 그림인데 [인페인트 생성] 은 서버의 새 합성으로 나간다(Codex 재리뷰
+      // 2026-10-03). plane 은 도크와 다른 노드라 그려도 입력이 안 끊긴다.
+      if (state?.active && state.canvas_supported && !panel.hidden) renderPlane();
+      return;
+    }
     // 캔버스는 V5 인페인트 전용이다. 다른 계열에서 띄우면 팝업과 조작 수단이 둘로
     // 갈려 어느 쪽이 진짜인지 알 수 없게 된다.
     const show = !!(state?.active && state.canvas_supported);
@@ -803,6 +792,10 @@ export function createInpaintCanvasPanel({
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      // 방금 올린 레이어를 고른다 - **올린 이 탭만**. 서버가 넣은 id 를 돌려준다(다른 탭은 방송을
+      // 받아도 제 선택을 그대로 둔다). 방송이 먼저 와 있지 않아도 `activeId` 가 기다린다.
+      const added = data?.state?.active_layer;
+      if (added) { activeId = String(added); refreshChrome(); }
     } catch (error) {
       showToast?.(`레이어를 올리지 못했습니다: ${error.message}`, 'error');
     } finally {

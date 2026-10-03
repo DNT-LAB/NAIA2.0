@@ -282,6 +282,14 @@ export function createImg2ImgPanel({
         && (liveDraft.sourceWidth !== (Number(state.width) || 0)
           || liveDraft.sourceHeight !== (Number(state.height) || 0))) {
         closeMaskEditor();
+      } else {
+        // 크기는 그대로인데 합성이 바뀌었다(다른 탭이 레이어를 숨기거나 옮겼다). 바탕만
+        // 갈아 끼운다 - 칠한 자국은 캔버스 좌표라 그대로 맞다. 안 바꾸면 옛 그림의 얼굴을
+        // 칠하는데 마스크는 옮겨진 합성에 먹는다(Codex 재리뷰 2026-10-03).
+        const liveBase = document.getElementById('img2imgMaskDialogBase');
+        if (liveBase && state.preview && liveBase.getAttribute('src') !== state.preview) {
+          liveBase.setAttribute('src', state.preview);
+        }
       }
     }
     if (!isOpen()) {

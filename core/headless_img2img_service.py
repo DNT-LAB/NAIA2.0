@@ -438,7 +438,7 @@ class HeadlessImg2ImgService:
         session_characters = self._session_characters_from_sources(
             params, prompt_ctx, int(image.width), int(image.height)
         )
-        context.img2img_session = {
+        new_session = {
             "active": True,
             "window_id": context._img2img_window_counter,
             "mode": clean_mode,
@@ -538,6 +538,15 @@ class HeadlessImg2ImgService:
             "generation_terminal_request_ids": [],
             "generation_error": "",
         }
+        # ⚠️ **넣기 직전에 한 번 더 본다.** 위의 검사와 여기 사이에 그림을 풀고 줄이느라
+        #    수백 ms 가 걸리고(워커 스레드), 그동안 이벤트 루프에서 레이어 업로드 · 마스크가
+        #    들어올 수 있다 - 그대로 덮으면 방금 성공한 작업이 사라진다(Codex 재리뷰 2026-10-03).
+        current = context.img2img_session or {}
+        if current.get("active") and self._session_has_user_work(current):
+            raise ValueError(
+                "편집 중인 인페인트 세션이 있습니다. 먼저 [세션 닫기] 를 누른 뒤 다시 여세요."
+            )
+        context.img2img_session = new_session
         return self.module_state()
 
     @staticmethod

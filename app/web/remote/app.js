@@ -2696,7 +2696,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260830-clearneck')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261003-maskbg')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -2936,7 +2936,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261003-layers')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261003-layers2')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),

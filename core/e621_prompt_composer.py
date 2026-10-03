@@ -70,7 +70,9 @@ def prepare_template(template: str, selected_tags: list[dict], api_mode: str, *,
     nonce = uuid4().hex
 
     def protect(rendered):
-        token = f"e621literal{nonce}x{len(protected)}"
+        # ⚠️ 고정 폭 + 끝 표식. 예전 'x1' 은 'x10' · 'x11' 의 앞부분이라, 보호한 태그가 10개를 넘으면
+        #    restore_literals 의 count 가 겹쳐 세어 '중복' 으로 막았다(V5 표준 템플릿 17개에서 실측 2026-10-03).
+        token = f"e621literal{nonce}x{len(protected):05d}z"
         protected[token] = rendered
         return token
 

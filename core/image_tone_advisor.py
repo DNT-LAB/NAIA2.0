@@ -16,10 +16,16 @@ RULES = (
                  {"field": "prompt", "op": "set_weight", "tags": ["colorful"], "weight": .5}],
      "levels": [], "evidence": {"level": "single_seed", "note": "hamsterfragment 한 시드에서 밝기 27.9 → 40.1 · 채도 4.6 → 9.6"},
      "cautions": ["colorful 은 0.5 까지 — 1 이면 배경이 바뀐다"], "verify": []},
-    {"id": "line_faint", "axis": "line_contrast", "side": "low", "title": "선을 또렷하게",
+    # `ultra complexity` 는 **또렷함**의 손잡이다(사용자 지적 2026-10-03). 30장 검증에서 고주파 에너지는 10/10 올랐고
+    # 선 대비는 9/10 · 중앙 +3.7 로 약했다 - 처음에는 선 대비 축에만 붙여 놓아 또렷함 축이 '보정 없음' 으로 나왔다.
+    {"id": "sharpness_low", "axis": "sharpness", "side": "low", "title": "또렷하게",
      "actions": [{"field": "prompt", "op": "set_weight", "tags": ["ultra complexity"], "weight": .5}],
-     "levels": [], "evidence": {"level": "validated_30", "note": "5시드 x 2구도, 선 대비 9/10 상승(중앙 +3.7)"},
+     "levels": [], "evidence": {"level": "validated_30", "note": "5시드 x 2구도, 고주파 에너지 10/10 상승(중앙 +34) · 선 대비 9/10"},
      "cautions": ["그림이 다시 뽑힌다", "거칠기가 는다", "0.5 를 넘겨도 선은 더 안 선다"], "verify": []},
+    {"id": "sharpness_high", "axis": "sharpness", "side": "high", "title": "부드럽게",
+     "actions": [{"field": "prompt", "op": "set_weight", "tags": ["ultra complexity"], "weight": -.25}],
+     "levels": [], "evidence": {"level": "single_seed", "note": "evaiyu 한 시드의 사다리: 0.15 → -0.19 → -0.35 에서 고주파 59 → 44 → 25"},
+     "cautions": ["그림이 다시 뽑힌다", "-0.5 근처에서는 인물이 배경에 녹는다"], "verify": []},
     {"id": "line_absent", "axis": "line_contrast", "side": "low", "title": "선을 드러내기",
      "actions": [{"field": "prompt", "op": "set_weight", "tags": ["jaggy lines"], "weight": 2},
                  {"field": "negative_prompt", "op": "add", "tags": ["no lineart"]}],

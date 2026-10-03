@@ -479,6 +479,10 @@ let characterAssetControl = null;
 let conditionalPromptPanel = null;
 // 조건부 프롬프트는 모듈 팝업이 아니라 떠 있는 창이다(conditionalPromptWindow.mjs).
 let conditionalPromptWindow = null;
+// E621 연구모듈도 떠 있는 창이다(e621Window.mjs, 사용자 지정 2026-10-03). 별도 브라우저 창으로 떼어 낸
+// 모듈 화면(?detached=module)은 그 창 전체가 모듈 팝업이라 예전 배치를 그대로 쓴다.
+const e621UsesWindow = !isDetachedModule;
+let e621Window = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
 let latestWildcardFreezeState = {locations: [], legacy: [], characters: []};
@@ -2659,7 +2663,25 @@ const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs
   .catch(error => {
     console.error('Failed to initialize instant wildcard panel module', error);
   });
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261002-e621-taxonomy2')
+const e621Host = document.createElement('div');
+const e621WindowReady = e621UsesWindow
+  ? import('./js/features/e621Window.mjs?v=20261003-e621win')
+    .then(({createE621Window}) => {
+      e621Window = createE621Window({
+        document,
+        window,
+        host: e621Host,
+        escHtml,
+        onShow: () => requestModuleState('e621_event'),
+        onHide: () => flushPendingModuleEdit('e621_event'),
+        onVisibilityChange: () => updateModuleBtnState(),
+      });
+    })
+    .catch(error => {
+      console.error('Failed to initialize E621 research window', error);
+    })
+  : Promise.resolve();
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261003-e621win')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,
@@ -2667,6 +2689,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261002-
       setModuleParam,
       bindTagAssist,
       showToast,
+      moduleBody: e621UsesWindow ? e621Host : null,
     });
   })
   .catch(error => {
@@ -4306,6 +4329,7 @@ function onInitComplete() {
   // 떠 있는 창(조건부)은 currentModuleId 가 아니다 - 열려 있으면 따로 다시 받는다.
   // 없으면 연결 전·재연결 중에 연 창이 영영 빈 채로 남는다.
   if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) requestModuleState('conditional_prompt');
+  if (e621Window && e621Window.isOpen()) requestModuleState('e621_event');
   // 재시작/재연결 시 NAI 전용 도구(character/charref/vibe) 배지·Activated 요약 하이드레이션:
   // 모듈을 열지 않아도 복원된 활성 상태가 배지에 즉시 반영되도록 접속 직후 module_state 요청.
   for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
@@ -11385,6 +11409,23 @@ function openModule(moduleId, options = {}) {
     });
     return;
   }
+  // E621 연구모듈도 떠 있는 창이다(사용자 지정 2026-10-03). 떼어 낸 브라우저 창에서는 아래 모듈 팝업으로 연다.
+  if (moduleId === 'e621_event' && e621UsesWindow) {
+    Promise.all([e621WindowReady, e621EventPanelReady]).then(() => {
+      if (!e621Window) return;
+      const wasOpen = e621Window.isOpen();
+      // 떼어 낸 창을 다시 붙이면 그 창의 상태가 함께 온다 - 그대로 그리고 서버에 다시 묻지 않는다.
+      const initial = options.initialState && options.initialState.module_id === moduleId ? options.initialState : null;
+      if (initial) {
+        moduleStateCache.set(moduleId, initial);
+        renderModuleState(initial);
+        if (options.guardInitialState) guardTransferredModuleState(moduleId);
+      }
+      e621Window.show({toggle: !options.forceOpen && !initial, requestState: !initial && !options.skipStateRequest});
+      if (wasOpen && options.forceOpen && !initial && !options.skipStateRequest) requestModuleState(moduleId);
+    });
+    return;
+  }
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
@@ -11513,7 +11554,8 @@ function closeModule(options = {}) {
 
 /** 모듈 팝업이 아니라 떠 있는 창으로 사는 모듈이 지금 열려 있나(단추 눌림 표시용). */
 function isWindowModuleOpen(moduleId) {
-  return moduleId === 'conditional_prompt' && Boolean(conditionalPromptWindow && conditionalPromptWindow.isOpen());
+  return (moduleId === 'conditional_prompt' && Boolean(conditionalPromptWindow && conditionalPromptWindow.isOpen()))
+    || (moduleId === 'e621_event' && Boolean(e621Window && e621Window.isOpen()));
 }
 
 function closeOpenModulesForModeSwitch() {
@@ -12066,6 +12108,13 @@ function onModuleState(m) {
   // 창이 닫혀 있어도 흘려 넣는다: 다음에 열 때 이미 최신이다(img2img 와 같은 선례).
   if (m.module_id === 'instant_wildcard' && wildcardChunkPopup) {
     wildcardChunkPopup.onState(m);
+  }
+
+  // E621 연구모듈도 떠 있는 창이다(떼어 낸 브라우저 창에서는 예전 모듈 팝업이라 아래 관문을 탄다).
+  // 창이 닫혀 있어도 흘려 넣는다 - 다음에 열 때 이미 최신이다(조건부 창과 같은 원칙).
+  if (m.module_id === 'e621_event' && e621UsesWindow) {
+    renderE621Event(m);
+    return;
   }
 
   // 조건부 프롬프트도 모듈 팝업이 아니다(떠 있는 창). 아래 관문은 '지금 열린 모듈' 만 통과시키므로

@@ -4,8 +4,12 @@ export function createE621EventPanel({
   setModuleParam,
   bindTagAssist,
   showToast,
+  // 그릴 자리. 메인 화면은 떠 있는 창(e621Window)의 본문을 넘긴다. 없으면 예전처럼 모듈 팝업 본문
+  // (별도 브라우저 창으로 떼어 낸 모듈은 그 창 전체가 모듈 팝업이다).
+  moduleBody: host = null,
 }) {
-  const moduleBody = document.getElementById('modulePopupBody');
+  const moduleBody = host || document.getElementById('modulePopupBody');
+  ensureStyle(document);
   let lastState = null;
   let lastRenderedStructureSignature = '';
   let deferredFocusedRenderState = null;
@@ -40,21 +44,48 @@ export function createE621EventPanel({
     </button>`;
   }
 
+  // 검색이 어디서 맞았나(2단계 응답 계약 docs/e621_stage2_response_contract.ko.md). 짧은 칩으로 보인다 -
+  // 글자를 읽게 하지 않는다. 이름이 통째로 같으면(match_grade 0) '정확' 하나로 대신한다.
+  const MATCH_LABELS = {
+    tag_name: '이름',
+    korean_name: '한국어 이름',
+    korean_keywords: '검색어',
+    korean_description: '한국어 설명',
+    stored_body: '본문',
+  };
+
+  function matchFieldsOf(tag) {
+    if (Array.isArray(tag.match_fields)) return tag.match_fields;
+    // 옛 백엔드(필드 배열이 없다) - 예전 두 bool 로 대신한다.
+    return [tag.matched_in_korean ? 'korean_name' : '', tag.matched_in_wiki ? 'stored_body' : ''].filter(Boolean);
+  }
+
+  function renderMatchChips(tag) {
+    const fields = matchFieldsOf(tag);
+    if (!fields.length) return '';
+    const compact = new Set(Array.isArray(tag.match_compact_fields) ? tag.match_compact_fields : []);
+    return fields.map(field => {
+      const exact = field === 'tag_name' && tag.match_grade === 0;
+      const label = exact ? '정확' : (MATCH_LABELS[field] || field);
+      const classes = ['e621-match-chip', exact ? 'exact' : '', field === 'stored_body' ? 'body' : '',
+        compact.has(field) ? 'compact' : ''].filter(Boolean).join(' ');
+      const title = exact ? '태그 이름과 통째로 같습니다'
+        : compact.has(field) ? `${label} - 띄어쓰기를 빼고 맞았습니다` : `${label}에서 맞았습니다`;
+      return `<span class="${classes}" title="${attr(title)}">${escHtml(label)}</span>`;
+    }).join('');
+  }
+
   function renderTagButton(tag) {
     const selected = lastState && lastState.selected && lastState.selected.tag === tag.tag;
+    const fields = matchFieldsOf(tag);
     const classes = [
       'e621-list-item',
       'e621-tag-item',
       selected ? 'selected' : '',
       tag.starred ? 'starred' : '',
-      tag.matched_in_wiki ? 'wiki-match' : '',
+      fields.length && fields.every(field => field === 'stored_body') ? 'wiki-match' : '',
     ].filter(Boolean).join(' ');
-    const meta = [
-      tag.count_label,
-      tag.starred ? 'starred' : '',
-      tag.matched_in_wiki ? '본문 일치' : '',
-      tag.matched_in_korean ? '한국어 일치' : '',
-    ].filter(Boolean).join(' · ');
+    const meta = `${tag.count_label || ''}${tag.starred ? ' ★' : ''}`;
     const coverage = [
       tag.has_body ? '본문' : '',
       tag.has_korean_description ? '한국어 설명' : '',
@@ -62,9 +93,13 @@ export function createE621EventPanel({
     ].filter(Boolean).join(' · ') || (tag.review_status === 'metadata_unavailable' ? '설명 확인 불가' : '설명 없음');
     const koreanLabel = !lastState?.disable_translation && tag.kor
       ? `<span class="e621-tag-korean">${escHtml(tag.kor)}</span>` : '';
+    // 검색 중이면 둘째 줄은 '어디서 맞았나', 아니면 '무슨 설명이 있나'.
+    const second = fields.length
+      ? `<span class="e621-match">${renderMatchChips(tag)}</span>`
+      : `<span>${escHtml(coverage)}</span>`;
     return `<button class="${classes}" data-tag="${attr(tag.tag)}" onclick="e621SelectTag(this)">
       <span class="e621-tag-name"><span>${escHtml(tag.display)}</span>${koreanLabel}</span>
-      <small class="e621-tag-status"><span>${escHtml(meta)}</span><span>${escHtml(coverage)}</span></small>
+      <small class="e621-tag-status"><span>${escHtml(meta)}</span>${second}</small>
     </button>`;
   }
 
@@ -103,8 +138,10 @@ export function createE621EventPanel({
           <small>${escHtml(`${item.site || ''} · ${item.exact_tag || ''}`)}</small>
           <pre class="e621-research-text">${escHtml(item.quote || '')}</pre>`).join('')}</details>` : ''}
       </div>`).join('');
+    const matchChips = renderMatchChips(state.selected);
     return `
       <div class="e621-research-meta"><span>${escHtml(status)}</span>${source}</div>
+      ${matchChips ? `<div class="e621-research-meta e621-selected-match"><span>검색 일치</span><span class="e621-match">${matchChips}</span></div>` : ''}
       ${korean}
       <section class="e621-research-section">
         <div class="mod-section-label">저장된 위키 본문</div>
@@ -386,4 +423,28 @@ ${promptTestbench}
     onTestbenchInput,
     generate,
   };
+}
+
+// 일치 이유 칩. 패널이 그리는 곳(떠 있는 창 · 떼어 낸 창의 모듈 팝업) 어디서나 같아야 해서 style.css 가 아니라
+// 패널과 함께 싣는다. 초록 = 이름 · 한국어에서 맞음, 보라 = 이름이 통째로 같음, 회색 = 본문에서만 맞음,
+// 점선 = 띄어쓰기를 빼고 맞음.
+const STYLE_ID = 'e621-panel-style';
+const PANEL_CSS = `
+.e621-tag-status > .e621-match,.e621-selected-match .e621-match{display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:3px}
+.e621-selected-match{margin-top:4px}
+.e621-selected-match .e621-match{justify-content:flex-start}
+.e621-match-chip{display:inline-block;padding:0 5px;border:1px solid rgba(144,238,144,0.38);border-radius:3px;
+  background:rgba(144,238,144,0.07);color:#b9e3b9;font-family:var(--font-display);font-size:9px;font-weight:600;line-height:15px;white-space:nowrap}
+.e621-match-chip.exact{border-color:rgba(157,139,255,0.6);background:rgba(157,139,255,0.14);color:#d2c9ff}
+.e621-match-chip.body{border-color:rgba(170,170,170,0.32);background:transparent;color:#a8a8a8}
+.e621-match-chip.compact{border-style:dashed}
+`;
+
+function ensureStyle(doc) {
+  // 시험용 가짜 document(head · createElement 없음)에서도 패널은 살아야 한다.
+  if (!doc || !doc.head || typeof doc.createElement !== 'function' || doc.getElementById(STYLE_ID)) return;
+  const style = doc.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = PANEL_CSS;
+  doc.head.appendChild(style);
 }

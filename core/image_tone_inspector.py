@@ -125,8 +125,8 @@ def rgb_to_lab(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def _hsv_hue(rgb: np.ndarray) -> np.ndarray:
     values = rgb.astype(np.float32)
     r, g, b = values[..., 0], values[..., 1], values[..., 2]
-    high = values.max(-1)
-    span = np.maximum(high - values.min(-1), 1e-6)
+    high = np.maximum(np.maximum(r, g), b)
+    span = np.maximum(high - np.minimum(np.minimum(r, g), b), 1e-6)
     hue = np.where(high == r, ((g - b) / span) % 6.0, np.where(high == g, (b - r) / span + 2.0, (r - g) / span + 4.0))
     return (hue * 60.0) % 360.0
 
@@ -149,7 +149,7 @@ def _tint(a: np.ndarray, b: np.ndarray) -> dict[str, Any]:
 
 
 def _grain(lightness: np.ndarray, size: int = 5) -> float:
-    """평평한 면에 낀 잡티 = L* 의 국소 표준편차의 중앙값. 윤곽은 드물어서 중앙값은 면을 잰다."""
+    """L* 국소 표준편차의 중앙값. 잡티뿐 아니라 반복 무늬도 반응하며 평평한 면을 분할하지 않는다."""
     mean = ndi.uniform_filter(lightness, size)
     square = ndi.uniform_filter(lightness * lightness, size)
     return float(np.median(np.sqrt(np.maximum(square - mean * mean, 0.0))))
@@ -173,6 +173,8 @@ def line_profile(lightness: np.ndarray, sigma: float = LINE_SIGMA, samples: int 
     헤세 행렬의 큰 고윳값이 큰 자리 = 어두운 선의 한가운데, 그 고유벡터 = 선을 가로지르는 방향이다. 그 방향으로
     L* 을 0.5px 간격으로 떠서: 굵기 = 반치폭, 대비 = 양옆과 한가운데의 차, 옆면 폭 = 10~90% 구간의 길이.
     '무른 선' 은 가파르기(`steepness`)가 낮고 한가운데가 덜 어둡다(`floor` 가 높다).
+    단, steepness는 대비에도 비례한다. depth/flank와 함께 읽고 단독 흐림 판정으로 쓰지 않는다.
+    고정 sigma와 양옆 6px 탐색은 가는 선에 편향된다. samples=0의 0값은 측정 불가 표시다.
     """
     empty = {"samples": 0, "width": 0.0, "width_p25": 0.0, "width_p75": 0.0, "depth": 0.0, "floor": 0.0,
              "flank": 0.0, "steepness": 0.0}
@@ -244,8 +246,9 @@ def spectrum_profile(lightness: np.ndarray) -> dict[str, Any]:
     }
 
 
-def _lightness_stats(lightness: np.ndarray) -> dict[str, float]:
-    p01, p10, p50, p90, p99 = np.percentile(lightness, [1, 10, 50, 90, 99])
+def _lightness_stats(lightness: np.ndarray, percentiles=None) -> dict[str, float]:
+    p01, p10, p50, p90, p99 = (np.percentile(lightness, [1, 10, 50, 90, 99])
+                              if percentiles is None else percentiles)
     return {
         "mean": _round(lightness.mean()), "median": _round(p50), "std": _round(lightness.std()),
         "p01": _round(p01), "p10": _round(p10), "p90": _round(p90), "p99": _round(p99),
@@ -345,7 +348,8 @@ def inspect_arrays(rgb: np.ndarray, spectrum: bool = False) -> dict[str, Any]:
     """RGB uint8 배열 하나를 잰다. `inspect_image` 가 이걸 부른다 - 시험은 배열을 직접 넣는다."""
     lightness, a, b = rgb_to_lab(rgb)
     chroma = np.hypot(a, b)
-    p02, p10, p25, p75, p90, p98 = np.percentile(lightness, [2, 10, 25, 75, 90, 98])
+    p01, p02, p10, p25, p50, p75, p90, p98, p99 = np.percentile(
+        lightness, [1, 2, 10, 25, 50, 75, 90, 98, 99])
     highlights = lightness >= p90
     shadows = lightness <= p10
     midtones = (lightness >= p25) & (lightness <= p75)
@@ -359,7 +363,7 @@ def inspect_arrays(rgb: np.ndarray, spectrum: bool = False) -> dict[str, Any]:
                  - lightness[1:-1, :-2] - lightness[1:-1, 2:]) if min(height, width) >= 3 else np.zeros((1, 1))
 
     result = {
-        "lightness": _lightness_stats(lightness),
+        "lightness": _lightness_stats(lightness, (p01, p10, p50, p90, p99)),
         "chroma": _chroma_stats(chroma),
         "tint": {
             "overall": _tint(a, b),

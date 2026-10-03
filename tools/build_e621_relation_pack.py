@@ -56,14 +56,43 @@ def select_crosswalk(rows, ids):
     return sorted(kept, key=lambda row: (row["e621"], row["danbooru"], row["relation"]))
 
 
-def top_candidates(source, counts, marginals, total, *, k, min_support, min_lift):
-    """Stable exact top K after edge support/lift filters; IDs follow exact tag order."""
+RANK = "pair count * log2(lift) desc, pair count desc, exact tag asc"
+
+
+def implication_ancestors(relations):
+    """source id -> every tag it implies, transitively (kimono -> japanese_clothing -> ... -> clothing)."""
+    parents = {}
+    for kind, source, target, _ in relations:
+        if kind == "implication" and source != target:
+            parents.setdefault(source, set()).add(target)
+    closure = {}
+    for source in parents:
+        seen, stack = set(), list(parents[source])
+        while stack:
+            node = stack.pop()
+            if node not in seen and node != source:
+                seen.add(node)
+                stack.extend(parents.get(node, ()))
+        closure[source] = seen
+    return closure
+
+
+def top_candidates(source, counts, marginals, total, *, k, min_support, min_lift, excluded=None):
+    """Stable exact top K after edge support/lift filters; IDs follow exact tag order.
+
+    Rank = pair count * log2(lift): how often the pair occurs, weighted by how specific it is.
+    Lift alone ranked rare child tags first (feet -> 3_toes, white_fur -> one obscure species);
+    pair count alone ranks base-rate tags first. `excluded` drops tags the source already implies -
+    they co-occur by definition and would fill every slot (kimono -> four clothing ancestors).
+    """
     import numpy as np
     targets, support = counts.indices, counts.data
     lift = support.astype(np.float64) * total / (marginals[source] * marginals[targets])
     valid = (targets != source) & (support >= min_support) & (lift >= min_lift)
+    if excluded is not None and len(excluded):
+        valid &= ~np.isin(targets, excluded)
     targets, support, lift = targets[valid], support[valid], lift[valid]
-    order = np.lexsort((targets, -support, -lift))[:k]
+    order = np.lexsort((targets, -support, -(support * np.log2(lift))))[:k]
     return targets[order], support[order]
 
 
@@ -158,13 +187,18 @@ def build(args):
     marginals = np.asarray(matrix.sum(axis=1)).ravel().astype(np.float64)
     offsets = np.zeros(len(names) + 1, dtype="<u4")
     records = []
+    # Implied tags, as row numbers of this matrix (rows follow raw_ids, not product ids).
+    row_of = {int(product): row for row, product in enumerate(product_ids)}
+    implied_rows = {row_of[source]: np.array(sorted(row_of[t] for t in targets if t in row_of), dtype=np.int64)
+                    for source, targets in implication_ancestors(relations).items() if source in row_of}
     for lo in range(0, len(raw_ids), args.block_size):
         hi = min(lo + args.block_size, len(raw_ids))
         counts = matrix[lo:hi] @ transpose
         for source in range(lo, hi):
             row = counts.getrow(source - lo)
             targets, supports = top_candidates(source, row, marginals, len(ratings),
-                k=args.k, min_support=args.min_support, min_lift=args.min_lift)
+                k=args.k, min_support=args.min_support, min_lift=args.min_lift,
+                excluded=implied_rows.get(source))
             for target, support in zip(targets, supports):
                 a = matrix.indices[matrix.indptr[source]:matrix.indptr[source + 1]]
                 b = matrix.indices[matrix.indptr[target]:matrix.indptr[target + 1]]
@@ -182,7 +216,8 @@ def build(args):
         "vocabulary_sha256": sha256(args.vocabulary), "rating_values": ["s", "q", "e"],
         "denominators": dict(zip(("s", "q", "e"), map(int, denominator))),
         "total_posts": len(ratings), "k": args.k, "min_support": args.min_support,
-        "min_lift": args.min_lift, "rank": "lift desc, pair count desc, exact tag asc",
+        "min_lift": args.min_lift, "rank": RANK,
+        "cooccurrence_excludes": "tags the source implies, transitively",
         "eligible_marginal_tags": len(raw_ids), "tags_with_cooccurrences": int(np.count_nonzero(np.diff(offsets))),
         "cooccurrence_edges": len(edges), "relation_audit": relation_audit,
         "crosswalk_included": len(crosswalk), "crosswalk_excluded": len(crosswalk_rows) - len(crosswalk),
@@ -226,8 +261,8 @@ if __name__ == "__main__":
     parser.add_argument("--report", type=Path)
     parser.add_argument("--relations-snapshot", required=True)
     parser.add_argument("--expected-vocabulary", type=int, default=172608)
-    parser.add_argument("--k", type=int, default=8)
+    parser.add_argument("--k", type=int, default=16)
     parser.add_argument("--min-support", type=int, default=100)
-    parser.add_argument("--min-lift", type=float, default=1.2)
+    parser.add_argument("--min-lift", type=float, default=2.0)
     parser.add_argument("--block-size", type=int, default=128)
     build(parser.parse_args())

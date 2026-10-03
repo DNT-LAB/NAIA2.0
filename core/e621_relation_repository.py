@@ -1,7 +1,8 @@
-"""Lazy, app-owned E621 relation data; suggestions never rewrite prompts.
+"""Lazy, app-owned E621 relation data; this repository never rewrites prompts itself.
 
 The small bundle contains exact pair observations, not multi-tag intersections.
-This boundary has no service/UI integration and no dependency on the large index.
+This boundary has no UI and no dependency on the large index. E621EventService reads it
+for the relation rows and for the visible, user-toggled auto-related assembly.
 """
 from __future__ import annotations
 
@@ -20,6 +21,15 @@ PACK_NAME = "e621_relations.pack"
 RATINGS = ("s", "q", "e")
 MAX_PACK_BYTES = 10_000_000
 MAX_UNPACKED_BYTES = 48_000_000
+
+
+def _numpy():
+    """Optional accelerator for bundle validation; the app already ships numpy, a bare checkout may not."""
+    try:
+        import numpy
+    except Exception:
+        return None
+    return numpy
 
 
 def _uint32(blob: bytes) -> array:
@@ -120,23 +130,46 @@ class E621RelationRepository:
                 or any(a > b or b - a > meta["k"] for a, b in zip(offsets, offsets[1:]))):
             raise ValueError("invalid relation array shape or top K")
         denominators = [meta["denominators"][rating] for rating in RATINGS]
-        if any(count > denominators[index % 3] for index, count in enumerate(counts)):
-            raise ValueError("tag count exceeds E621 rating denominator")
-        for source in range(len(names)):
-            seen = set()
-            for record in range(offsets[source], offsets[source + 1]):
-                target, s, q, e = edges[record * 4:record * 4 + 4]
-                if target >= len(names) or target == source or target in seen:
-                    raise ValueError("invalid or duplicate cooccurrence target")
-                seen.add(target)
-                support = s + q + e
-                if (support < meta["min_support"] or any(
-                        value > min(counts[source * 3 + rating], counts[target * 3 + rating])
-                        for rating, value in enumerate((s, q, e)))):
-                    raise ValueError("invalid cooccurrence count")
-                denominator = sum(counts[source * 3:source * 3 + 3]) * sum(counts[target * 3:target * 3 + 3])
-                if not denominator or support * meta["total_posts"] / denominator < meta["min_lift"]:
-                    raise ValueError("cooccurrence does not meet lift floor")
+        np = _numpy()
+        if np is not None:
+            # Same checks as the loop below, on whole arrays: the per-edge loop cost ~0.5s of the
+            # first relation query (240k edges). Every product stays below 2**53, so the float
+            # lift equals the integer arithmetic of the loop.
+            count_rows = np.frombuffer(counts, dtype=np.uint32).reshape(-1, 3)
+            if (count_rows > np.array(denominators, dtype=np.uint64)).any():
+                raise ValueError("tag count exceeds E621 rating denominator")
+            edge_rows = np.frombuffer(edges, dtype=np.uint32).reshape(-1, 4)
+            source = np.repeat(np.arange(len(names), dtype=np.int64), np.diff(np.frombuffer(offsets, dtype=np.uint32).astype(np.int64)))
+            target = edge_rows[:, 0].astype(np.int64)
+            if (target >= len(names)).any() or (target == source).any() or len(
+                    np.unique(source * len(names) + target)) != len(target):
+                raise ValueError("invalid or duplicate cooccurrence target")
+            pairs = edge_rows[:, 1:]
+            support = pairs.sum(axis=1, dtype=np.int64)
+            if (support < meta["min_support"]).any() or (pairs > np.minimum(count_rows[source], count_rows[target])).any():
+                raise ValueError("invalid cooccurrence count")
+            totals = count_rows.sum(axis=1, dtype=np.int64)
+            denominator = (totals[source] * totals[target]).astype(np.float64)
+            if (denominator == 0).any() or (support * meta["total_posts"] / denominator < meta["min_lift"]).any():
+                raise ValueError("cooccurrence does not meet lift floor")
+        else:
+            if any(count > denominators[index % 3] for index, count in enumerate(counts)):
+                raise ValueError("tag count exceeds E621 rating denominator")
+            for source in range(len(names)):
+                seen = set()
+                for record in range(offsets[source], offsets[source + 1]):
+                    target, s, q, e = edges[record * 4:record * 4 + 4]
+                    if target >= len(names) or target == source or target in seen:
+                        raise ValueError("invalid or duplicate cooccurrence target")
+                    seen.add(target)
+                    support = s + q + e
+                    if (support < meta["min_support"] or any(
+                            value > min(counts[source * 3 + rating], counts[target * 3 + rating])
+                            for rating, value in enumerate((s, q, e)))):
+                        raise ValueError("invalid cooccurrence count")
+                    denominator = sum(counts[source * 3:source * 3 + 3]) * sum(counts[target * 3:target * 3 + 3])
+                    if not denominator or support * meta["total_posts"] / denominator < meta["min_lift"]:
+                        raise ValueError("cooccurrence does not meet lift floor")
         for kind, source, target, source_id in relations:
             if kind not in ("alias", "implication") or not (0 <= source < len(names) and 0 <= target < len(names)):
                 raise ValueError("invalid active relation")
@@ -175,6 +208,41 @@ class E621RelationRepository:
                 "count_exact": True, "semantic_approval": False,
             })
         return result
+
+    def cooccurring(self, exact_tag: str) -> list[tuple[str, int, float, float, int]]:
+        """Stored pair rows in pack rank order: (target, pair_count, share, lift, target_count).
+
+        `share` = pair_count / source_count: how much of this tag's posts also carry the target.
+        A lean read for ranking - `related()` builds a full evidence dict per row.
+        """
+        self.load()
+        tag_id = self._ids.get(exact_tag) if self.loaded and isinstance(exact_tag, str) else None
+        if tag_id is None:
+            return []
+        source_count = sum(self._counts[tag_id * 3:tag_id * 3 + 3])
+        rows = []
+        for record in range(self._offsets[tag_id], self._offsets[tag_id + 1]):
+            target, s, q, e = self._edges[record * 4:record * 4 + 4]
+            pair, target_count = s + q + e, sum(self._counts[target * 3:target * 3 + 3])
+            rows.append((self._names[target], pair, pair / source_count,
+                         pair * self._meta["total_posts"] / (source_count * target_count), target_count))
+        return rows
+
+    def implied(self, exact_tag: str) -> set[str]:
+        """Every tag this tag implies, transitively (active implications inside the product vocabulary)."""
+        self.load()
+        start = self._ids.get(exact_tag) if self.loaded and isinstance(exact_tag, str) else None
+        if start is None:
+            return set()
+        seen: set[int] = set()
+        stack = [start]
+        while stack:
+            node = stack.pop()
+            for kind, source, target, _ in self._relations.get(node, []):
+                if kind == "implication" and source == node and target != start and target not in seen:
+                    seen.add(target)
+                    stack.append(target)
+        return {self._names[index] for index in seen}
 
     def related(self, exact_tag: str) -> dict[str, Any]:
         if not isinstance(exact_tag, str) or not exact_tag:

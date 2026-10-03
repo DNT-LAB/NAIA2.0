@@ -162,6 +162,10 @@ export function createInpaintCanvasPanel({
   let flashModes = false;
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
   let rangeDragging = false;
+  // 그 슬라이더가 **누른 순간** 붙잡은 레이어. 끄는 사이 업로드가 끝나 새 레이어가 골라져도
+  // 끌던 값은 원래 레이어로 간다(Codex 3차 리뷰 2026-10-03: `base_scale 1.25` 로 시작한 끌기가
+  // `layer_scale {id:'L1'} 1.5` 로 이어졌다 - 도크는 그동안 원본을 보이고 있었다).
+  let rangeLayer = null;
   const transformTimers = {};
   // 레이어 목록(뷰어 오른쪽에 떠 있다). 도크와 따로 그린다 - 도크는 아래 가운데에 있고
   // 목록은 길어질 수 있어서 한 상자에 넣으면 캔버스를 그만큼 가린다.
@@ -1335,7 +1339,7 @@ export function createInpaintCanvasPanel({
     if (transform) {
       applyTransform(transform, transform === 'scale'
         ? clampPct(event.target.value)
-        : wrapDeg(event.target.value));
+        : wrapDeg(event.target.value), null, (rangeDragging && rangeLayer) || activeLayerId());
       return;
     }
     const key = event.target?.dataset?.icRange;
@@ -1351,7 +1355,10 @@ export function createInpaintCanvasPanel({
   }
 
   function onPanelPointerDown(event) {
-    if (event.target?.matches?.('input[type="range"]')) rangeDragging = true;
+    if (event.target?.matches?.('input[type="range"]')) {
+      rangeDragging = true;
+      rangeLayer = activeLayerId();
+    }
   }
 
   function onPlanePointerDown(event) {
@@ -1715,8 +1722,8 @@ export function createInpaintCanvasPanel({
       }, true);
     }
     // 슬라이더는 패널 밖에서 손을 떼도 끝난다 - document 에서 받아야 놓치지 않는다.
-    document.addEventListener('pointerup', () => { rangeDragging = false; });
-    document.addEventListener('pointercancel', () => { rangeDragging = false; });
+    document.addEventListener('pointerup', () => { rangeDragging = false; rangeLayer = null; });
+    document.addEventListener('pointercancel', () => { rangeDragging = false; rangeLayer = null; });
     posStage = createPosStage({
       // 스테이지는 매 렌더마다 새로 만들어진다 - 함수로 넘겨 늘 살아 있는 것을 잰다.
       stage: () => stageEl,
@@ -1766,6 +1773,7 @@ export function createInpaintCanvasPanel({
         try { document.activeElement.blur(); } catch (_) {}
       }
       rangeDragging = false;
+      rangeLayer = null;
       render();
     },
     /** 지금 무대가 놓인 자리와 캔버스 해상도. 캐릭터 POS 무대가 여기 겹쳐 선다.

@@ -694,6 +694,7 @@ function virtualModTextEdit(moduleId, field, value) {
 let inpaintSequenceControl = null;
 let v5SceneControl = null;
 let snapshotControl = null;
+let snapshotSaveControl = null;
 let danbooruFeedbackControl = null;
 let resolutionManagerPanel = null;
 let naiModelManagerPanel = null;
@@ -1602,7 +1603,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261004-snapshot5')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261004-snapsave1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -1635,6 +1636,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onDirector: context => openNaiDirector(context),
       onSetCharacterReference: context => callResultImageAction('requestContextImageAction', context, 'character_reference'),
       onSetVibeTransfer: context => callResultImageAction('requestContextImageAction', context, 'vibe'),
+      onSaveSnapshot: context => openSnapshotSaveWindow(context),
       onSaveCharacterAsset: context => {
         if (!characterAssetControl) {
           showToast('Character Asset tab is not ready', 'error');
@@ -3053,7 +3055,7 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .catch(error => {
     console.error('Failed to initialize V5 Scene panel', error);
   });
-const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261004-snapshot4')
+const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261004-snapsave1')
   .then(({createSnapshotPanel}) => {
     snapshotControl = createSnapshotPanel({
       document,
@@ -3071,6 +3073,27 @@ const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261004-snapsho
   })
   .catch(error => {
     console.error('Failed to initialize Snapshot panel', error);
+  });
+// 스냅샷 저장 창(결과 그림 우클릭 > [NAI] 스냅샷 저장). 저장은 Snapshot 창의 입구를 빌린다 -
+// 밀린 편집 flush 와 '같은 이름이 있다' 되묻기의 재전송이 거기 들어 있다.
+const snapshotSaveReady = snapshotReady
+  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261004-snapsave1'))
+  .then(({createSnapshotSaveWindow}) => {
+    snapshotSaveControl = createSnapshotSaveWindow({
+      document,
+      window,
+      escHtml,
+      showToast,
+      setModuleParam,
+      showPromptDialog,
+      showConfirmDialog,
+      saveSnapshot: (request, options) => snapshotControl?.save(request, options),
+    });
+    const cached = moduleStateCache.get('snapshot');
+    if (cached) snapshotSaveControl.render(cached);
+  })
+  .catch(error => {
+    console.error('Failed to initialize Snapshot save window', error);
   });
 const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs?v=20260829-mark0')
   .then(({createResolutionManagerPanel}) => {
@@ -8302,6 +8325,25 @@ function openSnapshotWindow() {
 }
 $('snapshotBtn')?.addEventListener('click', openSnapshotWindow);
 
+// 결과 그림 우클릭 > [NAI] 스냅샷 저장. 바로 담지 않고 저장 창을 거친다 - 카테고리 · 담을 항목을 거기서 정한다.
+function openSnapshotSaveWindow(context) {
+  // 클릭 시점의 그림을 안정 경로로 고정한다('현재 결과' 는 경로가 없어 히스토리 최신 항목으로 핀한다).
+  // 창을 열어 둔 채 새 결과가 와도 담기는 그림이 바뀌지 않는다.
+  const pinnedPath = String(context?.path || '')
+    || (resultHistory ? String(resultHistory.latestImagePath || '') : '');
+  if (!pinnedPath) {
+    showToast('저장할 이미지를 특정할 수 없습니다', 'error');
+    return;
+  }
+  snapshotSaveReady.then(() => {
+    if (!snapshotControl || !snapshotSaveControl) {
+      showToast('Snapshot 모듈을 불러오지 못했습니다.', 'error');
+      return;
+    }
+    snapshotSaveControl.open({image: pinnedPath, imageSrc: String(context?.imageSrc || '')});
+  });
+}
+
 function positionTranslatorPopup() {
   if (!translatorPopup || translatorPopup.hidden) return;
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -12058,6 +12100,9 @@ function onModuleState(m) {
   }
   else if (m.module_id === 'snapshot') {
     // Fn > Snapshot 은 제 창을 가진다(모듈 팝업 배선을 타지 않는다). 닫혀 있어도 상태는 받아 둔다.
+    // ⚠️ 저장 창이 **먼저** 받는다 - 거기서 만든 카테고리의 `created_folder` 를 가져가야
+    //    Snapshot 창의 선택이 엉뚱하게 옮겨 가지 않는다.
+    if (snapshotSaveControl) snapshotSaveControl.render(m);
     if (snapshotControl) snapshotControl.render(m);
   }
   else if (m.module_id === 'memo') {

@@ -22,8 +22,8 @@ const ACTION_DIRECTOR = 'nai_director_tool'; // NAI Director Tools (제거 가�
 const ACTION_SET_CHAR_REF = 'set_character_reference'; // 결과 이미지를 Character Reference 창에 할당
 const ACTION_SET_VIBE = 'set_vibe_transfer';           // 결과 이미지를 Vibe Transfer 창에 할당
 const ACTION_SAVE_CHAR_ASSET = 'save_character_asset'; // 결과 이미지를 캐릭터 에셋 라이브러리에 저장
-// 이 그림으로 스냅샷을 담는다. ⚠️ **아직 잇지 않았다**(사용자 지시 2026-10-04) - 저장은 브릿지 페이지를 거칠
-// 것이라, 그 페이지가 생기면 app.js 가 `onSaveSnapshot` 을 넘겨 준다. 넘겨 주기 전에는 항목이 꺼진 채로 보인다.
+// 이 그림으로 스냅샷을 담는다. 바로 담지 않고 **저장 창**(snapshotSaveWindow)을 거친다 - 카테고리와 담을
+// 항목을 거기서 정한다(사용자 지정 2026-10-04). app.js 가 `onSaveSnapshot` 으로 그 창을 연다.
 const ACTION_SAVE_SNAPSHOT = 'save_snapshot';
 
 const DEFAULT_CAPABILITIES = {

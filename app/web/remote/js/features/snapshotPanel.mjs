@@ -34,7 +34,7 @@ const PICKS_KEY = 'naia.snapshot.picks.v1';
 const DND_MIME = 'application/x-naia-snapshot';
 
 // 불러올 때 고르는 항목. 차례 = 화면 차례. 키는 백엔드의 `sections` 와 같다(SRS §10).
-const PICK_ITEMS = [
+export const SNAPSHOT_PICK_ITEMS = [
   ['prompt', '프롬프트', '메인 프롬프트를 이 스냅샷의 것으로 바꿉니다'],
   ['negative', '네거티브', '네거티브 프롬프트를 이 스냅샷의 것으로 바꿉니다'],
   ['params', '생성 설정', '모델 · 해상도 · 스텝 · CFG · 샘플러 · 시드 등'],
@@ -45,6 +45,7 @@ const PICK_ITEMS = [
   ['character_reference', 'Reference', 'Character Reference. 스냅샷에 없는 지금 항목은 지우지 않고 끕니다'],
   ['search', '데이터셋', 'Tag Filter 와 데이터셋 사본. 지금 불러온 데이터셋이 이것으로 바뀝니다'],
 ];
+const PICK_ITEMS = SNAPSHOT_PICK_ITEMS;
 // 옛 판 백엔드는 프리셋 넷을 `preset` 하나로 알려 준다 - 넷으로 펴서 읽는다.
 const PRESET_PARTS = ['prompt', 'negative', 'params', 'prompt_engineering'];
 
@@ -58,6 +59,18 @@ const BLOCKER_TEXT = {
   model: 'Snapshot 은 NAI V4.5 · V5 모델에서만 저장할 수 있습니다',
   no_image: '먼저 한 장을 생성하세요 — 스냅샷에는 그림이 꼭 들어갑니다',
 };
+
+/** 저장 이름을 백엔드와 **같은 규칙**으로 다듬는다. 저장 창(snapshotSaveWindow)도 이것을 쓴다.
+ *
+ * ⚠️ SSOT 는 `core/snapshot_store` 다. 여기서 흉내 내는 이유는 덮어쓰기 확인을
+ *    **보내기 전에** 하려는 것이다. 어긋나도 서버가 `overwrite_prompt` 로 되묻는다.
+ */
+export function sanitizeSnapshotName(value) {
+  return String(value ?? '')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim().replace(/[.\s]+$/g, '')
+    .trim();
+}
 
 export function createSnapshotPanel({
   document,
@@ -155,17 +168,7 @@ export function createSnapshotPanel({
   }
 
   // ── 도우미 ──────────────────────────────────────────────────────────────
-  /** 저장 이름을 백엔드와 **같은 규칙**으로 다듬는다.
-   *
-   * ⚠️ SSOT 는 `core/snapshot_store` 다. 여기서 흉내 내는 이유는 덮어쓰기 확인을
-   *    **보내기 전에** 하려는 것이다. 어긋나도 서버가 `overwrite_prompt` 로 되묻는다.
-   */
-  function sanitizeName(value) {
-    return String(value ?? '')
-      .replace(/[<>:"/\\|?*]/g, '')
-      .trim().replace(/[.\s]+$/g, '')
-      .trim();
-  }
+  const sanitizeName = sanitizeSnapshotName;
 
   const snapshots = () => (Array.isArray(lastState?.snapshots) ? lastState.snapshots : []);
   const folders = () => (Array.isArray(lastState?.folders) ? lastState.folders : []);
@@ -518,12 +521,12 @@ export function createSnapshotPanel({
   function consumeOneShots(state) {
     const prompt = state.overwrite_prompt;
     if (prompt && prompt.name) {
-      // 내가 보낸 저장이면 그때의 선택(데이터셋 포함 여부 · 카테고리)으로 다시 보낸다.
+      // 내가 보낸 저장이면 **그때의 요청 그대로**(그림 · 고른 항목 · 카테고리) 다시 보낸다.
       const retry = pendingSave || {name: String(prompt.name), include_search: includeSearch, folder: curSub || curTop};
       pendingSave = null;
       confirmBox(`"${String(prompt.name)}" 스냅샷을 덮어씁니다. 계속할까요?`,
                  {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'})
-        .then(ok => { if (ok) sendSave(retry.name, retry.include_search, true, retry.folder); });
+        .then(ok => { if (ok) sendSave(retry, true); });
     }
     const report = state.apply_report;
     const skipped = Array.isArray(report?.skipped) ? report.skipped : [];
@@ -739,18 +742,38 @@ export function createSnapshotPanel({
     showToast(folder ? `${folderLabel(folder)} (으)로 옮겼습니다.` : '분류를 풀었습니다.', 'info');
   }
 
-  function sendSave(name, withSearch, overwrite, folder) {
-    pendingSave = {name, include_search: !!withSearch, folder: folder || ''};
+  /** 저장을 보낸다. `request` = {name, include_search, folder, image?, sections?, relocate?}.
+   *
+   *  `image` · `sections` · `relocate` 는 저장 창(우클릭 > [NAI] 스냅샷 저장)이 싣는다: 우클릭한 그 그림,
+   *  고른 항목만, 덮어쓸 때도 고른 카테고리로. 이 창의 빠른 저장은 셋 다 없이 보낸다(전부 · 마지막 그림).
+   */
+  function sendSave(request, overwrite) {
+    const name = String(request.name || '');
+    const picked = Array.isArray(request.sections) ? request.sections.map(String) : null;
+    const withSearch = picked ? picked.includes('search') : !!request.include_search;
+    const folder = String(request.folder || '');
+    pendingSave = {...request, name, folder};
     pendingSelect = name;
     flush();
     // 데이터셋 사본은 풀 크기만큼 걸린다(수백 MB 면 수 초 이상). 답이 올 때까지 아무 표시가 없으면
     // 안 눌린 줄 알고 다시 누른다 - 누른 순간 알린다. 끝나면 서버의 저장 토스트가 온다.
     if (withSearch) showToast('데이터셋 사본을 담는 중입니다 — 크기에 따라 시간이 걸립니다', 'info');
     setModuleParam('snapshot', 'save', {
-      name, include_search: !!withSearch, overwrite: !!overwrite,
+      name, include_search: withSearch, overwrite: !!overwrite,
+      ...(request.image ? {image: String(request.image)} : {}),
+      ...(picked ? {sections: picked} : {}),
       // 지금 보고 있는 카테고리에 담는다. 덮어쓸 때는 보내지 않는다 - 원래 자리를 지킨다.
-      ...(overwrite ? {} : {folder: folder || ''}),
+      // 저장 창은 카테고리를 **직접 골랐으므로** 덮어쓸 때도 그 자리로 옮긴다(relocate).
+      ...((!overwrite || request.relocate) ? {folder} : {}),
+      ...((overwrite && request.relocate) ? {relocate: true} : {}),
     });
+  }
+
+  /** 저장 창이 빌려 쓰는 입구. 덮어쓰기 확인은 부른 쪽이 이미 했다. */
+  function saveFromOutside(request, {overwrite = false} = {}) {
+    // 같은 이름으로 다시 담으면 내용이 다른 스냅샷이다 - 옛 체크를 잊는다.
+    forgetPicks(String(request?.name || ''));
+    sendSave(request || {}, overwrite);
   }
 
   async function saveCurrent() {
@@ -770,7 +793,7 @@ export function createSnapshotPanel({
     }
     // 같은 이름으로 다시 담으면 내용이 다른 스냅샷이다 - 옛 체크를 잊는다(전부 켜진 채로 시작).
     forgetPicks(name);
-    sendSave(name, includeSearch, exists, curSub || curTop);
+    sendSave({name, include_search: includeSearch, folder: curSub || curTop}, exists);
     const now = popEl?.querySelector('#snapSaveName');
     if (now) now.value = '';
   }
@@ -922,5 +945,5 @@ export function createSnapshotPanel({
     saveCurrent();
   }
 
-  return {open, close, render, isOpen: () => popOpen};
+  return {open, close, render, isOpen: () => popOpen, save: saveFromOutside};
 }

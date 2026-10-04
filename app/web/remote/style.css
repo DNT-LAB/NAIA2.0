@@ -30414,3 +30414,48 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   background: rgba(176,156,255,0.34); border-color: rgba(176,156,255,0.72); color: #f1ecff;
 }
 .snapshot-open-btn:hover { background: rgba(176,156,255,0.48); border-color: #b9a8ff; }
+
+/* ── 스냅샷 저장 창 (결과 그림 우클릭 > [NAI] 스냅샷 저장 · snapshotSaveWindow.mjs) ──────────
+   떠 있는 창(draggablePanel variant `snapsave`). 왼쪽 두 칸 · 카드는 Snapshot 창과 **같은 옷**을 입는다 -
+   카드는 "목록에 이렇게 놓인다" 를 보여 주는 것이라 모양이 다르면 뜻이 없다. 층(z)은 뼈대가 매긴다. */
+.dragpanel.snapsave .dragpanel-body { padding: 8px; gap: 6px; overflow: hidden; font-family: var(--font-mono); }
+.snapsave-blocker { font-size: 10.5px; color: var(--hint-cross-search); }
+.snapsave-blocker[hidden] { display: none; }
+.snapsave-grid {
+  display: grid; grid-template-columns: 118px 118px minmax(0, 1fr); gap: 8px;
+  /* 높이를 못박는다 - 카테고리가 많아도 창이 자라지 않고 그 칸만 굴린다. */
+  height: 278px; min-height: 0;
+}
+.dragpanel.snapsave .ia-sc-item { display: flex; align-items: center; gap: 6px; }
+.snapsave-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.snapsave-top { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; }
+.snapsave-cardbox { flex: 0 0 138px; min-width: 0; }
+.dragpanel.snapsave .snap-card { cursor: default; }
+.dragpanel.snapsave .ia-sc-sthumb { position: relative; height: auto; aspect-ratio: 3 / 4; }
+.dragpanel.snapsave .ia-sc-sname.is-empty { color: #6f747e; }
+.dragpanel.snapsave .ia-sc-smeta { line-height: 1.45; }
+.snapsave-form { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.dragpanel.snapsave .snapsave-name { width: 100%; box-sizing: border-box; }
+.snapsave-sec { font-size: 10px; color: #8a8f9a; margin-top: 2px; }
+.snap-pick.is-dead { opacity: 0.45; cursor: default; }
+.snap-pick.is-dead:hover { border-color: rgba(255,255,255,0.14); }
+.snap-pick.is-dead input { cursor: default; }
+.snapsave-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding-top: 7px; border-top: 1px solid rgba(255,255,255,0.08);
+}
+.snapsave-where {
+  flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: #8a8f9a;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.snapsave-where.is-warn { color: var(--hint-cross-search); }
+/* `.ia-sc-btn` 의 `flex:1` 은 카드 안에서 폭을 나눠 갖기 위한 것이다 - 여기서는 줄을 다 먹는다. */
+.snapsave-foot .ia-sc-btn { flex: 0 0 auto; padding: 4px 18px; font-size: 11px; }
+.snapsave-foot .ia-sc-btn:disabled { opacity: 0.4; cursor: default; }
+/* 좁은 화면(폰): 카테고리 두 칸을 위에 나란히, 나머지를 아래로. */
+@media (max-width: 620px) {
+  .snapsave-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); height: auto; }
+  .snapsave-grid > .ia-sc-col1, .snapsave-grid > .ia-sc-col2 { max-height: 112px; }
+  .snapsave-main { grid-column: 1 / -1; }
+  .snapsave-cardbox { flex-basis: 104px; }
+}

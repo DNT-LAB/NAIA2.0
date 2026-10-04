@@ -10,7 +10,9 @@ from typing import Any, Callable
 from core.character_state_transfer import capture_character_state, replace_character_state
 from core.nai_model_contract import nai_model_badge
 from core.prompt_engineering_settings import get_prompt_engineering_store, is_snapshot_preset_name
-from core.snapshot_store import PRESET_SECTIONS, SNAPSHOT_SECTIONS, SnapshotStore, snapshot_defaults, snapshot_parts
+from core.snapshot_store import (
+    PRESET_SECTIONS, SNAPSHOT_SECTIONS, SnapshotStore, main_setting_section, snapshot_defaults, snapshot_parts,
+)
 from core.snapshot_reference_transfer import capture_reference_images
 
 
@@ -121,13 +123,13 @@ class HeadlessSnapshotService:
             history_id = normalized[len(HISTORY_ITEM_PREFIX):].split("/", 1)[0]
             item = self.context.result_store.get_item(history_id)
             if item is None or not item.webp_bytes:
-                raise FileNotFoundError("History image is gone")
+                raise FileNotFoundError("히스토리에서 사라진 그림입니다")
             return bytes(item.webp_bytes)
         save_dir = self.context._current_save_directory().resolve()
         target = (save_dir / normalized).resolve()
         target.relative_to(save_dir)                      # 밖이면 ValueError
         if not target.is_file() or target.suffix.lower() not in {".png", ".webp", ".jpg", ".jpeg"}:
-            raise FileNotFoundError("Saved image not found")
+            raise FileNotFoundError("저장 폴더에서 그림을 찾지 못했습니다")
         import io
 
         from PIL import Image
@@ -139,11 +141,67 @@ class HeadlessSnapshotService:
             picture.save(buffer, format="WEBP", quality=85, method=0)
         return buffer.getvalue()
 
+    def save_preview(self) -> dict[str, Any]:
+        """저장 창에 보일 **지금 담으면 무엇이 들어가나**. 읽기만 한다 - 아무것도 쓰지 않는다.
+
+        수치는 카드 아래 한 줄(`_summary`)과 같은 잣대로 센다: 캐릭터 = 실제로 나가는 슬롯,
+        Vibe · Reference = 켜 둔 것. 한 구역을 못 읽어도 나머지는 보낸다.
+        """
+        context = self.context
+        badge = nai_model_badge(context.remote_params.get("model"), context)
+        preview: dict[str, Any] = {f"model_{key}": badge[key] for key in ("key", "label", "family", "group", "variant")}
+
+        def characters() -> int:
+            from core.character_settings import load_character_settings
+
+            settings = load_character_settings(context.get_api_mode(), save_root=context._save_path())
+            return len(capture_character_state(settings)["frames"])
+
+        def enabled(getter) -> int:
+            return sum(bool(frame.get("is_enabled")) for frame in _frames(getter().capture_snapshot()))
+
+        def search() -> dict[str, Any]:
+            from core.temporary_search import is_temporary_search
+
+            if is_temporary_search(context):
+                return {"rows": 0, "blocker": "temporary"}
+            # 담을 때(`capture_search`)와 같은 작업 뷰를 고른다.
+            frame = getattr(context, "search_results_snapshot", None)
+            if frame is None or getattr(frame, "empty", True):
+                frame = getattr(context, "search_results_master_base_snapshot", None)
+            if frame is None or getattr(frame, "empty", True):
+                return {"rows": 0, "blocker": "empty"}
+            return {"rows": len(frame), "blocker": ""}
+
+        for key, read in (
+            ("character_count", characters),
+            ("conditional_enabled", lambda: bool(context._conditional_prompt_service().capture_snapshot()["enabled"])),
+            ("vibe_count", lambda: enabled(context._vibe_transfer_service)),
+            ("reference_count", lambda: enabled(context._character_reference_service)),
+            ("search", search),
+        ):
+            try:
+                preview[key] = read()
+            except Exception:
+                preview[key] = None
+        state = self.state()
+        state["save_preview"] = preview
+        return state
+
     def capture(self, name: str, include_search: bool = False, overwrite: bool = False,
-                folder: str = "", image_path: str = "") -> dict[str, Any]:
+                folder: str = "", image_path: str = "", sections: list[str] | None = None,
+                relocate: bool = False) -> dict[str, Any]:
         with self._lock:
             if self._support_blocker():
                 return self._response("Snapshot은 NAI V4.5 / V5에서 지원됩니다", level="error")
+            wanted: set[str] | None = None
+            if sections is not None:
+                # 저장 창에서 **고른 항목만** 담는다. 안 고른 항목은 파일에 아예 없다 - 불러올 때 목록에도
+                # 안 나온다. 데이터셋도 이 목록이 정한다(`include_search` 는 목록이 없을 때만 본다).
+                wanted = {key for key in SNAPSHOT_SECTIONS if key in sections}
+                if not wanted:
+                    return self._response("담을 항목을 하나 이상 고르세요", level="error")
+                include_search = "search" in wanted
             if image_path:
                 # 우클릭한 **그 그림**을 쓴다. 마지막 결과로 슬쩍 바꾸지 않는다 - 못 찾으면 담지 않는다.
                 try:
@@ -172,32 +230,42 @@ class HeadlessSnapshotService:
             }
             skipped = []
             try:
-                pe_store = get_prompt_engineering_store(context)
-                main = context._prompt_engineering_service()._capture_main_settings()
-                main = {key: value for key, value in main.items() if not key.startswith("web_session_")}
-                for key in snapshot_defaults()["extra_main_keys"]:
-                    if key in context.remote_params:
-                        main[key] = context.remote_params[key]
-                preset = {
-                    "source_preset": pe_store.state()["current_preset"],
-                    "module_settings": copy.deepcopy(pe_store.state()["settings"]),
-                    "main_settings": copy.deepcopy(main),
-                }
-                json.dumps(preset, allow_nan=False)
-                data["preset"] = preset
+                # 프리셋 넷(프롬프트 · 네거티브 · 생성 설정 · 프롬프트 엔지니어링)은 파일에서 한 구역이다.
+                # 고른 것만 그 안에 남긴다 - 읽는 쪽(`snapshot_parts`)은 **있는 키**로 항목을 가른다.
+                main_wanted = wanted is None or bool(wanted & set(PRESET_SECTIONS[:3]))
+                module_wanted = wanted is None or "prompt_engineering" in wanted
+                if main_wanted or module_wanted:
+                    pe_store = get_prompt_engineering_store(context)
+                    preset: dict[str, Any] = {"source_preset": pe_store.state()["current_preset"]}
+                    if module_wanted:
+                        preset["module_settings"] = copy.deepcopy(pe_store.state()["settings"])
+                    if main_wanted:
+                        main = context._prompt_engineering_service()._capture_main_settings()
+                        main = {key: value for key, value in main.items() if not key.startswith("web_session_")}
+                        for key in snapshot_defaults()["extra_main_keys"]:
+                            if key in context.remote_params:
+                                main[key] = context.remote_params[key]
+                        if wanted is not None:
+                            main = {key: value for key, value in main.items() if main_setting_section(key) in wanted}
+                        preset["main_settings"] = copy.deepcopy(main)
+                    json.dumps(preset, allow_nan=False)
+                    data["preset"] = preset
             except Exception as exc:
                 skipped.append(f"preset: {exc}")
-            try:
-                from core.character_settings import load_character_settings
+            if wanted is None or "characters" in wanted:
+                try:
+                    from core.character_settings import load_character_settings
 
-                settings = load_character_settings(context.get_api_mode(), save_root=context._save_path())
-                characters = capture_character_state(settings)
-                json.dumps(characters, allow_nan=False)
-                data["characters"] = characters
-            except Exception as exc:
-                skipped.append(f"characters: {exc}")
+                    settings = load_character_settings(context.get_api_mode(), save_root=context._save_path())
+                    characters = capture_character_state(settings)
+                    json.dumps(characters, allow_nan=False)
+                    data["characters"] = characters
+                except Exception as exc:
+                    skipped.append(f"characters: {exc}")
             reference_images = {}
             for key, getter in self._u2_services():
+                if wanted is not None and key not in wanted:
+                    continue
                 try:
                     section = getter().capture_snapshot()
                     json.dumps(section, allow_nan=False)
@@ -228,6 +296,13 @@ class HeadlessSnapshotService:
                 return state
             except (OSError, ValueError, TypeError) as exc:
                 return self._response(f"Snapshot 저장 실패: {exc}", level="error")
+            if overwrite and relocate:
+                # 덮어쓰기는 원래 자리를 지킨다(`store.write`). 저장 창에서는 사용자가 카테고리를 **직접 골랐으므로**
+                # 그 자리로 옮긴다. 저장이 끝난 뒤에만 한다 - 실패한 저장이 옛 스냅샷의 자리만 바꾸면 안 된다.
+                try:
+                    storage.move(name, folder)
+                except (OSError, ValueError) as exc:
+                    skipped.append(f"folder: {exc}")
             suffix = " / ".join(skipped)
             return self._response(f"Snapshot 저장: {name}" + (f" (건너뜀: {suffix})" if suffix else ""),
                                   level="warning" if skipped else "success")
@@ -449,10 +524,15 @@ class HeadlessSnapshotService:
         name = str(payload.get("name") or "")
         if key == "refresh":
             return self.state()
+        if key == "preview":
+            return self.save_preview()
         if key == "save":
+            if "sections" in payload and not isinstance(payload["sections"], list):
+                return self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error")
             return self.capture(name, self.context._coerce_bool(payload.get("include_search", False)),
                                 self.context._coerce_bool(payload.get("overwrite", False)), payload.get("folder", ""),
-                                str(payload.get("image") or ""))
+                                str(payload.get("image") or ""), payload.get("sections"),
+                                self.context._coerce_bool(payload.get("relocate", False)))
         if key == "apply":
             if "sections" in payload and not isinstance(payload["sections"], list):
                 return self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error")

@@ -169,7 +169,8 @@ def _e621_translate_request(command: dict[str, Any]) -> str | None:
 def _snapshot_moves_a_dataset(command: dict[str, Any]) -> bool:
     """이 명령이 스냅샷의 **데이터셋 사본**을 쓰거나 읽는가(= 오래 걸릴 수 있는가).
 
-    담기는 `include_search` 를 켰을 때, 되돌리기는 `search` 를 골랐을 때(또는 항목을 안 골라 전부일 때)다.
+    담기는 `include_search` 를 켰을 때(항목을 골라 담는 저장 창은 `sections` 에 `search` 가 있을 때),
+    되돌리기는 `search` 를 골랐을 때(또는 항목을 안 골라 전부일 때)다.
     그 밖의 스냅샷 명령은 작아서 예전처럼 제자리에서 돈다 - 스레드로 넘기면 다른 창의 명령과 섞일 틈만 는다.
     """
     if str(command.get("module_id") or "").strip() != "snapshot":
@@ -186,6 +187,10 @@ def _snapshot_moves_a_dataset(command: dict[str, Any]) -> bool:
         if not isinstance(value, dict):
             return False
     if key == "save":
+        sections = value.get("sections")
+        if isinstance(sections, list):
+            # 항목을 골라 담을 때는 그 목록이 정한다 - 서비스가 `include_search` 를 보지 않는다.
+            return "search" in sections
         flag = value.get("include_search")
         return flag is True or (isinstance(flag, str) and flag.strip().lower() == "true")
     if key == "apply":

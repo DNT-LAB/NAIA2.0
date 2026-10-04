@@ -547,7 +547,7 @@ class E621EventService:
     def _tag_payload(self, tag_data: dict[str, Any], match=None) -> dict[str, Any]:
         tag_name = str(tag_data.get("tag") or "")
         count = int(tag_data.get("count") or 0)
-        research = self.research_metadata.for_tag(tag_name) if self.research_metadata else {}
+        research = self.research_metadata.for_tag(tag_name, include_body=False) if self.research_metadata else {}
         return {
             "tag": tag_name,
             "display": tag_name.replace("_", " "),

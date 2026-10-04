@@ -226,6 +226,7 @@ def _inventory_assets(repo_root: Path, archive_root: Path | None) -> dict[str, A
     for relative, kind in [
         ("data/KR_tags.parquet", "autocomplete_parquet"),
         ("data/e621_KR_tags.parquet", "autocomplete_parquet"),
+        ("data/e621_KR_wiki_bodies.parquet", "reading_only_wiki_bodies"),
         ("data/danbooru_tag_counts_by_rating.json", "rating_count_json"),
         ("data/characteristic_list.txt", "filter_text"),
         ("data/clothes_list.txt", "filter_text"),

@@ -46,7 +46,6 @@ class ParquetTagMergeStats:
     description_replaced: int = 0
     keywords_filled: int = 0
     keywords_replaced: int = 0
-    body_translations_skipped: int = 0
     missing_sources: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -280,7 +279,6 @@ def merge_parquet_tag_records(
     parquet_sources: Iterable[tuple[str | Path, int]],
     *,
     source_allowlists: Mapping[int, Iterable[str]] | None = None,
-    body_translation_sources: Iterable[int] = (),
 ) -> ParquetTagMergeStats:
     """Merge KR parquet tag metadata into interactive tag records.
 
@@ -288,9 +286,6 @@ def merge_parquet_tag_records(
     Korean parquet metadata is allowed to fill empty fields and replace English
     descriptions/keywords, because those fields are user-facing in Web Remote.
 
-    `body_translation_sources` = 키워드 없는 행이 '위키 본문을 통째로 옮긴 번역' 인 표의 src 키(e621 = 2).
-    그런 행은 읽기용이라 공용 어휘에 싣지 않는다(사용자 지정 2026-10-04) - 실으면 메인 자동완성 · Assist 가 보는
-    설명 9,938개가 마크업 섞인 긴 위키 번역으로 바뀌고, 한국어 검색에 본문 속 낱말이 걸린다.
     """
 
     stats = ParquetTagMergeStats()
@@ -301,7 +296,6 @@ def merge_parquet_tag_records(
         stats.errors.append(f"pandas import failed: {exc}")
         return stats
 
-    body_translation_sources = set(body_translation_sources)
     for pq_path, src_key in parquet_sources:
         normalized_allowlist = None
         if source_allowlists is not None and src_key in source_allowlists:
@@ -312,14 +306,7 @@ def merge_parquet_tag_records(
             continue
         try:
             columns = ["tag", "count", "category", "desc", "keywords"]
-            if src_key in body_translation_sources:
-                # 번역 본문 행(키워드 없음)은 읽을 때부터 거른다 - 2만6천 개의 긴 글을 풀었다 버리면 기동 때 40MB 를 더 쓴다.
-                # 아래 줄 단위 검사는 그대로 둔다(공백뿐인 키워드 등).
-                skipped_at_read = pd.read_parquet(path, columns=["keywords"])["keywords"].fillna("").eq("").sum()
-                stats.body_translations_skipped += int(skipped_at_read)
-                df = pd.read_parquet(path, columns=columns, filters=[("keywords", "!=", "")])
-            else:
-                df = pd.read_parquet(path, columns=columns)
+            df = pd.read_parquet(path, columns=columns)
         except Exception as exc:
             stats.errors.append(f"{path}: {exc}")
             continue
@@ -332,10 +319,6 @@ def merge_parquet_tag_records(
                 continue
             keywords = str(row.get("keywords", "") or "")
             description = str(row.get("desc", "") or "")
-            if src_key in body_translation_sources and not keywords.strip():
-                stats.body_translations_skipped += 1
-                continue
-
             if tag_lower in raw:
                 existing = raw[tag_lower]
                 updated = False
@@ -393,17 +376,6 @@ def merge_parquet_tag_records(
             _refresh_lookup_fields(entry)
             raw[tag_lower] = entry
             stats.added += 1
-
-        if src_key in body_translation_sources:
-            # 걸러 낸 번역 본문 열을 풀 때 Arrow 가 잡은 메모리를 돌려준다. 안 하면 기동 뒤에도 30MB 쯤이 남는다
-            # (실측 2026-10-04: 읽은 직후 +59MB → 돌려준 뒤 +27MB, 한글화 전 +18MB).
-            del df
-            try:
-                import pyarrow
-
-                pyarrow.default_memory_pool().release_unused()
-            except Exception:
-                pass
 
     return stats
 

@@ -161,8 +161,6 @@ def load_kr_tag_records(
             (_first_existing(resolved_data_roots, "e621_KR_tags.parquet"), 2),
         ],
         source_allowlists=e621_allowlist,
-        # e621 표의 키워드 없는 행은 위키 본문 번역이다 - 연구모듈이 읽을거리로만 쓴다.
-        body_translation_sources={2},
     )
 
     # Preserve the original merge precedence: interactive and Parquet records

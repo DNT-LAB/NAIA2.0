@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -19,14 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.e621_catalog_format import _unique_object, load_catalog, rows_json, text_digest
+from core.e621_catalog_format import _unique_object, load_catalog, load_body_catalog, rows_json, text_digest
 from core.site_tag_repository import walk_legacy_tags
 from tools.build_e621_catalog import export_legacy, verify_legacy
 
-SCHEMA = "naia.e621-approved-changes.v1"
+SCHEMA = "naia.e621-approved-changes.v2"
 INPUTS = (
     "e621_data", "e621_catalog/translations.json", "e621_catalog/manifest.json",
     "e621_KR_tags.parquet", "e621_research_annotations.json",
+    "e621_catalog/wiki_bodies.json", "e621_KR_wiki_bodies.parquet",
 )
 
 
@@ -53,7 +55,7 @@ def at_path(tree, path):
     return tree
 
 
-def apply_records(tree, translations, annotations, changes, reviewer):
+def apply_records(tree, translations, annotations, changes, reviewer, bodies=None):
     """Mutate isolated structures only; site identity and memberships stay exact."""
     if not isinstance(changes, list) or not changes:
         raise ValueError("changes must be a nonempty list")
@@ -61,6 +63,7 @@ def apply_records(tree, translations, annotations, changes, reviewer):
     for path, row in walk_legacy_tags(tree):
         native.setdefault(row["tag"], []).append((path, row))
     translated = {row["tag"]: row for row in translations}
+    body_rows = {row["tag"]: row for row in (bodies or [])}
     seen = set()
     for change in changes:
         if not isinstance(change, dict) or set(change) - {"site", "exact_tag", "decision", "move", "korean", "native_body_sha256", "evidence"}:
@@ -91,9 +94,9 @@ def apply_records(tree, translations, annotations, changes, reviewer):
             if tag in translated and len(new) > 1:
                 translated[tag]["category"] = new[1]
         if korean:
-            if not isinstance(korean, dict) or set(korean) - {"label", "keywords", "description"}:
+            if not isinstance(korean, dict) or set(korean) - {"label", "keywords", "description", "body_translation", "translator"}:
                 raise ValueError("invalid Korean fields")
-            body = str(row.get("wiki_body") or "")
+            body = str(row.get("wiki_body") or row.get("wiki_preview") or "")
             if not body or digest(body.encode()) != change.get("native_body_sha256"):
                 raise ValueError("Korean review evidence body mismatch")
             evidence = change.get("evidence")
@@ -110,6 +113,26 @@ def apply_records(tree, translations, annotations, changes, reviewer):
                          if key == "keywords" else isinstance(value, str))
                 if not valid:
                     raise ValueError("invalid Korean field value")
+            if "description" in korean:
+                value = korean["description"]
+                if (len(value) > 200 or "\n" in value or "\r" in value or
+                    re.search(r"\[\[|thumb #|h[1-6]\.|\[/?b\]|\[/?section", value, re.I)):
+                    raise ValueError("description must be short, single-line and free of DText")
+            if "translator" in korean and "body_translation" not in korean:
+                raise ValueError("translator requires a body translation")
+            if "body_translation" in korean:
+                if bodies is None:
+                    raise ValueError("wiki body source is required")
+                value = korean["body_translation"]
+                if value:
+                    translator = korean.get("translator", reviewer)
+                    if not translator or translator != translator.strip():
+                        raise ValueError("invalid translator identifier")
+                    body_rows[tag] = {"tag": tag, "body_ko": value,
+                                      "native_body_sha256": change["native_body_sha256"],
+                                      "translator": translator}
+                else:
+                    body_rows.pop(tag, None)
             if "label" in korean:
                 for _, value in memberships:
                     value["kor"] = korean["label"]
@@ -130,7 +153,7 @@ def apply_records(tree, translations, annotations, changes, reviewer):
                 # A search-term supplement records a review of label/keywords. A description-only
                 # approval did not review those, so it must not take over that record's evidence
                 # and reviewer (2026-10-04: a body-translation batch re-attributed 123 of them).
-                if collection == "korean_search" and not {"label", "keywords"} & set(korean):
+                if not {"label", "keywords"} & set(korean):
                     continue
                 for annotation in annotations.get(collection, []):
                     if annotation.get("e621_tag") == tag:
@@ -138,9 +161,14 @@ def apply_records(tree, translations, annotations, changes, reviewer):
                                           e621_body_sha256=change["native_body_sha256"],
                                           native_body_matches_review_source=True)
                         for key, value in korean.items():
+                            if key in {"body_translation", "translator"}:
+                                continue
                             if key == "description" and collection == "korean_search":
                                 continue
                             annotation[key] = (", ".join(value) if key == "keywords" and collection == "descriptions" else value)
+
+    if bodies is not None:
+        bodies[:] = sorted(body_rows.values(), key=lambda row: row["tag"])
 
 
 def apply_ledger(data_dir: Path, ledger_path: Path, ledger_sha256: str) -> dict:
@@ -160,10 +188,11 @@ def apply_ledger(data_dir: Path, ledger_path: Path, ledger_sha256: str) -> dict:
     verify_legacy(data_dir / "e621_catalog", data_dir)
     tree = json.loads(originals["e621_data"], object_pairs_hook=_unique_object)
     translations, manifest = load_catalog(data_dir / "e621_catalog")
+    bodies = load_body_catalog(data_dir / "e621_catalog", manifest)
     annotations = json.loads(originals["e621_research_annotations.json"], object_pairs_hook=_unique_object)
     if annotations.get("schema") != "naia.e621-research-annotations.v1":
         raise ValueError("invalid annotation source")
-    apply_records(tree, translations, annotations, ledger.get("changes"), ledger["reviewer"])
+    apply_records(tree, translations, annotations, ledger.get("changes"), ledger["reviewer"], bodies)
     lock_path = data_dir / ".e621-approved-write.lock"
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     try:
@@ -175,18 +204,28 @@ def apply_ledger(data_dir: Path, ledger_path: Path, ledger_sha256: str) -> dict:
             translation_blob = rows_json(translations).encode()
             translation_blob = translation_blob.replace(b"\n", b"\r\n" if b"\r\n" in originals["e621_catalog/translations.json"] else b"\n")
             manifest["assets"]["translations.json"]["sha256_lf"] = text_digest(translation_blob)
-            manifest["counts"] = {"translations": len(translations)}
+            body_blob = rows_json(bodies).encode().replace(b"\n", b"\r\n" if b"\r\n" in originals["e621_catalog/wiki_bodies.json"] else b"\n")
+            manifest["assets"]["wiki_bodies.json"]["sha256_lf"] = text_digest(body_blob)
+            manifest["counts"] = {"translations": len(translations), "wiki_bodies": len(bodies)}
             manifest["last_approval"] = {"sha256": ledger_sha256, "reviewer": ledger["reviewer"]}
             (catalog / "translations.json").write_bytes(translation_blob)
+            (catalog / "wiki_bodies.json").write_bytes(body_blob)
             (catalog / "manifest.json").write_bytes(json_bytes(manifest, originals["e621_catalog/manifest.json"]))
             export_legacy(catalog, stage / "export")
             verify_legacy(catalog, stage / "export")
             outputs = {
-                "e621_data": json_bytes(tree, originals["e621_data"], indent=1),
+                "e621_data": (originals["e621_data"] if tree == json.loads(originals["e621_data"])
+                              else json_bytes(tree, originals["e621_data"], indent=1)),
                 "e621_catalog/translations.json": translation_blob,
                 "e621_catalog/manifest.json": (catalog / "manifest.json").read_bytes(),
-                "e621_KR_tags.parquet": (stage / "export/e621_KR_tags.parquet").read_bytes(),
-                "e621_research_annotations.json": json_bytes(annotations, originals["e621_research_annotations.json"]),
+                "e621_KR_tags.parquet": ((stage / "export/e621_KR_tags.parquet").read_bytes()
+                    if translation_blob != originals["e621_catalog/translations.json"] else originals["e621_KR_tags.parquet"]),
+                "e621_catalog/wiki_bodies.json": body_blob,
+                "e621_KR_wiki_bodies.parquet": ((stage / "export/e621_KR_wiki_bodies.parquet").read_bytes()
+                    if body_blob != originals["e621_catalog/wiki_bodies.json"] else originals["e621_KR_wiki_bodies.parquet"]),
+                "e621_research_annotations.json": (originals["e621_research_annotations.json"]
+                    if annotations == json.loads(originals["e621_research_annotations.json"])
+                    else json_bytes(annotations, originals["e621_research_annotations.json"])),
             }
             # Compare again under the cooperative lock before replacing files.
             if any((data_dir / name).read_bytes() != blob for name, blob in originals.items()):

@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.e621_catalog_format import CATALOG_SCHEMA, load_catalog, rows_json, text_digest
+from core.e621_catalog_format import CATALOG_SCHEMA, load_catalog, load_body_catalog, rows_json, text_digest
+from core.e621_wiki_bodies import body_table, export_bodies, PARQUET_NAME
 
 
 def translation_table(rows, manifest):
@@ -33,14 +34,24 @@ def import_legacy(data_dir: Path, output: Path, revision: str = "") -> dict:
         raise ValueError("catalog output must not already exist")
     table = pq.read_table(data_dir / "e621_KR_tags.parquet")
     blob = rows_json(table.to_pylist()).encode("utf-8")
+    # A projection does not contain translator provenance. Re-import it only
+    # with its existing editable source, and verify they agree before copying.
+    bodies = []
+    if (data_dir / PARQUET_NAME).is_file():
+        bodies = load_body_catalog(data_dir / "e621_catalog")
+        if not body_table(bodies).equals(pq.read_table(data_dir / PARQUET_NAME), check_metadata=True):
+            raise ValueError("wiki body projection differs from editable source")
+    body_blob = rows_json(bodies).encode("utf-8")
     manifest = {
         "schema": CATALOG_SCHEMA, "site": "e621", "source_revision": revision,
-        "assets": {"translations.json": {"sha256_lf": text_digest(blob)}},
-        "counts": {"translations": table.num_rows},
+        "assets": {"translations.json": {"sha256_lf": text_digest(blob)},
+                   "wiki_bodies.json": {"sha256_lf": text_digest(body_blob)}},
+        "counts": {"translations": table.num_rows, "wiki_bodies": len(bodies)},
         "translation_arrow_schema": base64.b64encode(table.schema.serialize().to_pybytes()).decode("ascii"),
     }
     output.mkdir(parents=True)
     (output / "translations.json").write_bytes(blob)
+    (output / "wiki_bodies.json").write_bytes(body_blob)
     (output / "manifest.json").write_bytes((json.dumps(manifest, ensure_ascii=True, indent=2) + "\n").encode())
     load_catalog(output)
     return manifest
@@ -55,6 +66,7 @@ def export_legacy(catalog: Path, output: Path) -> dict:
     table = translation_table(rows, manifest)
     output.mkdir(parents=True)
     pq.write_table(table, output / "e621_KR_tags.parquet")
+    export_bodies(load_body_catalog(catalog, manifest), output / PARQUET_NAME)
     return {"counts": manifest["counts"]}
 
 
@@ -65,6 +77,15 @@ def verify_legacy(catalog: Path, output: Path) -> dict:
     expected = translation_table(rows, manifest)
     if not expected.equals(pq.read_table(output / "e621_KR_tags.parquet"), check_metadata=True):
         raise ValueError("translation projection is stale or differs from source catalog")
+    body_expected = body_table(load_body_catalog(catalog, manifest))
+    body_path = output / PARQUET_NAME
+    # Old empty fixtures/bootstrap may omit an empty projection. Nonempty
+    # catalogs always require it, so staging cannot silently omit body data.
+    if body_path.is_file():
+        if not body_expected.equals(pq.read_table(body_path), check_metadata=True):
+            raise ValueError("wiki body projection is stale or differs from source catalog")
+    elif body_expected.num_rows:
+        raise ValueError("wiki body projection is missing")
     return {"ok": True, "counts": manifest["counts"]}
 
 

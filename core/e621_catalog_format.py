@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-CATALOG_SCHEMA = "naia.e621-translations.v2"
-ASSET_NAMES = ("translations.json",)
+CATALOG_SCHEMA = "naia.e621-translations.v3"
+ASSET_NAMES = ("translations.json", "wiki_bodies.json")
 
 
 def _unique_object(pairs):
@@ -48,6 +48,20 @@ def load_catalog(directory: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]
         raise ValueError("invalid translation records")
     if len({row["tag"] for row in rows}) != len(rows):
         raise ValueError("duplicate translation identity")
-    if {"translations": len(rows)} != manifest.get("counts"):
+    body_rows = load_body_catalog(directory, manifest)
+    if {"translations": len(rows), "wiki_bodies": len(body_rows)} != manifest.get("counts"):
         raise ValueError("translation counts do not match manifest")
     return rows, manifest
+
+
+def load_body_catalog(directory: Path, manifest: dict | None = None) -> list[dict]:
+    from core.e621_wiki_bodies import validate_body_rows
+    if manifest is None:
+        _, manifest = load_catalog(directory)
+    entry = manifest["assets"]["wiki_bodies.json"]
+    if not isinstance(entry, dict) or not isinstance(entry.get("sha256_lf"), str):
+        raise ValueError("invalid wiki body asset digest")
+    blob = (directory / "wiki_bodies.json").read_bytes()
+    if text_digest(blob) != entry.get("sha256_lf"):
+        raise ValueError("wiki body asset digest mismatch")
+    return validate_body_rows(json.loads(blob, object_pairs_hook=_unique_object))

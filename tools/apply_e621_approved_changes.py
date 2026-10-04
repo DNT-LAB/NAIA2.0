@@ -150,10 +150,16 @@ def apply_records(tree, translations, annotations, changes, reviewer, bodies=Non
             # Existing reviewed supplements must not shadow the approved edit.
             # Bind any edited supplement to the new review, never its old quote.
             for collection in ("descriptions", "korean_search"):
-                # A search-term supplement records a review of label/keywords. A description-only
-                # approval did not review those, so it must not take over that record's evidence
-                # and reviewer (2026-10-04: a body-translation batch re-attributed 123 of them).
-                if not {"label", "keywords"} & set(korean):
+                # A supplement is rebound only by an approval that reviewed what it records.
+                # · korean_search records a review of label/keywords. A description-only approval did not
+                #   review those, so it must not take over that record's evidence and reviewer
+                #   (2026-10-04: a body-translation batch re-attributed 123 of them).
+                # · descriptions records a reviewed description. A description approval MUST update it:
+                #   that supplement is read before the translation table at runtime, so leaving the old
+                #   text there would shadow the approved edit.
+                # · A body translation reviews neither - it rebinds nothing.
+                reviewed = {"label", "keywords"} if collection == "korean_search" else {"label", "keywords", "description"}
+                if not reviewed & set(korean):
                     continue
                 for annotation in annotations.get(collection, []):
                     if annotation.get("e621_tag") == tag:

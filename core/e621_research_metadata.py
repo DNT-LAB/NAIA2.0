@@ -47,6 +47,10 @@ class E621ResearchMetadata:
             for root in map(Path, [base / "data", *(data_roots or [])])
         ))
         self._translations: dict[str, dict[str, Any]] = {}
+        # 위키 본문을 통째로 옮긴 번역(2026-10-04 한글화, 26,464건)이 있는 태그. 본문 글은 data/e621_KR_wiki_bodies.parquet 에
+        # 따로 있고, 그 태그를 골랐을 때 읽는다(_body_reader). 사람이 쓴 짧은 '설명' 과 다르다:
+        # 읽기용이고 **검색에는 쓰지 않는다**(사용자 지정 2026-10-04) - 긴 번역문이 검색에 걸리면 결과가 흐려진다
+        # (실측: '꼬리' 63건 → 1,347건 · '캐릭터' 1,865건 → 10,389건). 공용 어휘(메인 자동완성 · Assist)에도 싣지 않는다.
         self._body_translations: AbstractSet[str] = set()
         self._body_reader = None
         self._stale_bodies: set[str] = set()

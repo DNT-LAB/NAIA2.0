@@ -41,22 +41,29 @@ def export_bodies(rows, path: Path):
 
 
 class WikiBodyReader:
-    """Startup reads tag/hash columns only. A selection decodes just its row group."""
+    """Startup reads tag/hash columns only. A selection opens the file and decodes just its row group.
+
+    The file is NOT kept open between reads. On Windows an open handle blocks replacing or deleting
+    the file (measured 2026-10-04: os.replace -> PermissionError 5), which is what a data update under
+    a running app does. Reopening costs about 1 ms per selection (0.2 ms with a held handle).
+    """
     def __init__(self, path: Path):
         import pyarrow as pa
         import pyarrow.parquet as pq
-        self.parquet = pq.ParquetFile(path)
-        if self.parquet.schema_arrow != pa.schema([(name, pa.string()) for name in PROJECTION_FIELDS]):
-            raise ValueError("invalid wiki body projection schema")
-        columns = self.parquet.read(columns=["tag", "native_body_sha256"], use_threads=False)
+        self.path = Path(path)
+        with pq.ParquetFile(self.path) as parquet:
+            if parquet.schema_arrow != pa.schema([(name, pa.string()) for name in PROJECTION_FIELDS]):
+                raise ValueError("invalid wiki body projection schema")
+            columns = parquet.read(columns=["tag", "native_body_sha256"], use_threads=False)
+            sizes = [parquet.metadata.row_group(group).num_rows for group in range(parquet.num_row_groups)]
         tags = columns.column("tag").to_pylist()
         self.hashes = columns.column("native_body_sha256").to_pylist()
         self.index = {}
         self.offsets = []
         total = 0
-        for group in range(self.parquet.num_row_groups):
+        for size in sizes:
             self.offsets.append(total)
-            total += self.parquet.metadata.row_group(group).num_rows
+            total += size
         previous = None
         digest_pattern = re.compile(r"[0-9a-f]{64}")
         for index, (tag, digest) in enumerate(zip(tags, self.hashes)):
@@ -74,11 +81,16 @@ class WikiBodyReader:
         entry = self.index.get(tag)
         if entry is None:
             return ""
+        import pyarrow.parquet as pq
         index, digest = entry, self.hashes[entry]
         group = bisect.bisect_right(self.offsets, index) - 1
-        table = self.parquet.read_row_group(group, columns=PROJECTION_FIELDS)
-        row = table.slice(index - self.offsets[group], 1).to_pylist()[0]
-        if row["tag"] != tag or row["native_body_sha256"] != digest:
+        with pq.ParquetFile(self.path) as parquet:
+            # The file may have been replaced since indexing - never trust the remembered layout.
+            if group >= parquet.num_row_groups:
+                raise ValueError("wiki body projection changed after indexing")
+            rows = parquet.read_row_group(group, columns=PROJECTION_FIELDS).slice(index - self.offsets[group], 1).to_pylist()
+        row = rows[0] if rows else {}
+        if row.get("tag") != tag or row.get("native_body_sha256") != digest:
             raise ValueError("wiki body projection changed after indexing")
         text = row["body_ko"]
         if not isinstance(text, str) or not text.strip():

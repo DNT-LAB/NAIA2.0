@@ -20,7 +20,20 @@ RULES = (
      "actions": [{"field": "negative_prompt", "op": "add", "tags": ["grey theme"]}],
      "levels": [], "evidence": {"level": "validated_pairs",
                                 "note": "어두운 작가 3 x 2시드, 채도 6/6 상승(중앙 +76%) · 구도 유지 0.90"},
-     "cautions": ["장면이 이미 가진 색이 짙어진다(파란 그림은 더 파랗게)", "밝기는 그대로이거나 조금 내려간다"], "verify": []},
+     "cautions": ["장면이 이미 가진 색이 짙어진다(파란 그림은 더 파랗게)", "밝기는 그대로이거나 조금 내려간다"], "verify": [],
+     "opposes": [{"field": "prompt", "tags": ["grey theme"], "message": "채도를 내리는 자리에 있다. 색을 더하려면 이것부터 뺀다"}]},
+    # 높을 때는 같은 태그를 **프롬프트**에 넣는다. 네거티브에서 색을 빼려던 것(colorful · pink theme)은 다른 원색으로 바뀌거나
+    # 더 짙어졌다(milo monzon: +13% · +5%). 프롬프트 쪽인데도 그림이 남는다 - 원색 배경이 회색 쪽으로 바뀌는 방식이다.
+    # 다이얼이 아니라 **스위치**처럼 듣는다 - 꺾이는 가중치가 작가마다 다르다: milo monzon 은 0.5 와 1 사이(40.9 → 34.2 → 15.7 → 15.3),
+    # sirhoopsalot 은 0.25 와 0.5 사이(28.0 → 25.3 → 6.6 → 5.8, 무채색 근처까지 넘친다). 1.5 는 1 보다 더 내리지 못한다.
+    # 기본을 1 로 둔 까닭: 채도가 높던 넉 장에서 1 은 둘을 기준 부근에 놓았고(15.7 · 14.5) 0.5 는 그 둘을 못 내렸다 - 넘치는 둘은 0.5 에서도 넘쳤다.
+    {"id": "chroma_high", "axis": "chroma", "side": "high", "title": "색을 덜기",
+     "actions": [{"field": "prompt", "op": "add", "tags": ["grey theme"]}],
+     "levels": [], "evidence": {"level": "validated_pairs", "note": "작가 3 x 2시드, 채도 6/6 하락(중앙 -64%) · 구도 유지 0.70 - milo monzon 은 기준 부근으로, sirhoopsalot 은 무채색 근처까지"},
+     "cautions": ["원색 배경이 회색 쪽으로 바뀐다", "켜지듯 듣는다 — 작가에 따라 약하게(0.5)로는 모자라거나 이미 무채색 가까이 넘친다",
+                  "밝기 · 또렷함이 오르는 편이다"],
+     "verify": ["lightness", "sharpness"],
+     "opposes": [{"field": "negative_prompt", "tags": ["grey theme"], "message": "채도를 올리는 자리에 있다. 색을 덜려면 이것부터 뺀다"}]},
     # 셋 가운데 무엇이 일하는지는 갈라 보지 않았다. 밝은 그림(밝기 69)에서는 안 움직였다 - 낮은 쪽에만 붙인다.
     {"id": "lightness_low", "axis": "lightness", "side": "low", "title": "밝게",
      "actions": [{"field": "negative_prompt", "op": "add", "tags": ["black theme", "dark", "muted color"]}],
@@ -34,7 +47,8 @@ RULES = (
     {"id": "sharpness_low", "axis": "sharpness", "side": "low", "title": "또렷하게",
      "actions": [{"field": "prompt", "op": "set_weight", "tags": ["ultra complexity"], "weight": .5}],
      "levels": [], "evidence": {"level": "validated_30", "note": "5시드 x 2구도, 고주파 에너지 10/10 상승(중앙 +34) · 선 대비 9/10"},
-     "cautions": ["그림이 다시 뽑힌다", "거칠기가 는다", "0.5 를 넘겨도 선은 더 안 선다"], "verify": []},
+     "cautions": ["그림이 다시 뽑힌다", "거칠기가 는다", "0.5 를 넘겨도 선은 더 안 선다"], "verify": [],
+     "opposes": [{"field": "negative_prompt", "tags": ["high contrast"], "message": "또렷함을 내리는 자리에 있다. 또렷하게 하려면 이것부터 뺀다"}]},
     # 높을 때는 네거티브의 `high contrast` - 그림을 유지한 채 무르게 한다. `ultra complexity` 를 음수로 내리던 것(한 시드의 근거)은
     # 그림이 다시 뽑혀서 바꿨다(2026-10-04).
     {"id": "sharpness_high", "axis": "sharpness", "side": "high", "title": "부드럽게",
@@ -66,7 +80,7 @@ STRENGTH_MIN, STRENGTH_MAX = 0.25, 2.0
 
 
 def guide():
-    """축 · 쪽마다 어떤 보정이 있는지(그림과 무관한 안내). 화면의 축 툴팁이 쓴다."""
+    """축 · 쪽마다 어떤 보정이 있는지(그림과 무관한 안내). 화면의 축 툴팁이 쓴다. 반대 칸 표(opposes)는 싣지 않는다."""
     return [{key: deepcopy(rule[key]) for key in ("id", "axis", "side", "title", "actions", "levels", "cautions")}
             for rule in RULES]
 
@@ -225,6 +239,20 @@ def _warnings(fields):
     return warnings
 
 
+def _opposing(opposes, fields):
+    """권하는 보정과 반대로 당기는 태그가 **반대 칸**에 이미 있는가. 같은 태그를 낮으면 네거티브에, 높으면 프롬프트에 넣는 규칙에서
+    시험 → 반영을 거듭하면 생긴다(넘쳐서 반대쪽 보정이 나왔는데 앞서 넣은 것이 남아 있다). 그 축이 벗어났을 때만 본다."""
+    found = []
+    for item in opposes:
+        parsed = _Prompt(fields, item["field"] == "negative_prompt")
+        for tag in item["tags"]:
+            for token in parsed.find(tag):
+                if token["weight"] > 0:
+                    found.append({"code": "opposing_tag", "field": token["field"], "weight": token["weight"], "tags": [tag],
+                                  "message": item["message"]})
+    return found
+
+
 def _action_status(actions, fields, target):
     pending, present, total, satisfied = [], 0, 0, 0
     for action in actions:
@@ -251,19 +279,20 @@ def advise(positions, fields):
     target = "post_prompt" if isinstance(fields, dict) and "post_prompt" in fields else "prompt"
     fields = normalize_fields(fields)
     indexed = {p["id"]: p for p in positions}
-    suggestions = []
+    suggestions, opposing = [], []
     for rule in RULES:
         position = indexed.get(rule["axis"])
         if not position or position.get("side") != rule["side"] or position.get("distance") is None:
             continue
         suggestion = deepcopy(rule)
+        opposing.extend(_opposing(suggestion.pop("opposes", ()), fields))
         suggestion["distance"] = position["distance"]
         suggestion["prominent"] = abs(position["distance"]) >= 1
         suggestion["actions"], suggestion["state"] = _action_status(rule["actions"], fields, target)
         for level in suggestion["levels"]:
             level["actions"], level["state"] = _action_status(level["actions"], fields, target)
         suggestions.append(suggestion)
-    return {"suggestions": suggestions, "warnings": _warnings(fields)}
+    return {"suggestions": suggestions, "warnings": _warnings(fields) + opposing}
 
 
 def apply_suggestion(fields, suggestion_id, level=None, strength=1.0):

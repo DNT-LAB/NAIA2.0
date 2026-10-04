@@ -30345,3 +30345,64 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 /* Active temporary search uses the same controls; only its shell changes. */
 .temporary-search-notice{flex:0 0 auto;padding:6px 10px;background:#241e30;border-bottom:1px solid #58456d;
   color:#c6b9dd;font-size:10.5px;line-height:1.6}
+
+/* ── Snapshot (Fn > Snapshot) ────────────────────────────────────────────────
+   Interactive 의 Scene 창과 같은 Finder 배치이고 그 옷(`.ia-sc-*`)을 그대로 입는다
+   (사용자 지정 2026-10-04). 여기에는 스냅샷에만 있는 것만 둔다 - 전부 `.snap-pop` 아래로
+   묶어 Scene 창의 모양을 건드리지 않는다. */
+.snap-pop .ia-sc-pop-head { flex-wrap: wrap; row-gap: 6px; }
+.snap-save { display: inline-flex; align-items: center; gap: 6px; }
+.snap-save.is-blocked .snap-save-name { opacity: 0.5; }
+.snap-pop .snap-save-name { width: 250px; }
+.snap-opt {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  font-size: 11px; color: #c6cad3; white-space: nowrap;
+}
+.snap-opt input { margin: 0; accent-color: #5a82dc; cursor: pointer; }
+.snap-pop .ia-sc-btn:disabled { opacity: 0.4; cursor: default; }
+.snap-blocker { font-size: 10.5px; color: var(--hint-cross-search); margin: -4px 0 8px; }
+.snap-pv-body .snap-blocker, .ia-sc-pv-body .snap-blocker { margin: 0; }
+/* 카테고리 줄 - 이름은 줄이고 개수는 오른쪽에 붙인다. */
+.snap-pop .ia-sc-item { display: flex; align-items: center; gap: 6px; }
+.snap-item-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snap-item-n { flex: none; font-size: 10px; color: #8a8f9a; }
+/* 카드 - 스냅샷의 그림은 대개 세로다. Scene 의 128px 가로 띠로는 머리만 남는다. */
+.snap-pop .ia-sc-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.snap-pop .ia-sc-sthumb { position: relative; height: auto; aspect-ratio: 3 / 4; }
+.snap-card.is-active { border-color: rgba(106,191,123,0.65); }
+/* 그림 위의 칩 - 모델(V4.5 · V5)은 카테고리가 아니라 여기 적는다(사용자 지정). */
+.snap-card-top { position: absolute; top: 5px; left: 5px; right: 5px; display: flex; gap: 4px; pointer-events: none; }
+.snap-top-chip {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px; line-height: 1.5;
+  background: rgba(12,12,20,0.8); border: 1px solid rgba(255,255,255,0.14); color: #e6e8ee;
+}
+.snap-top-chip.is-active { border-color: rgba(106,191,123,0.6); color: #b6dcc1; }
+.snap-active-tag {
+  padding: 1px 6px; border-radius: 3px; font-size: 9.5px;
+  border: 1px solid rgba(106,191,123,0.5); background: rgba(38,74,48,0.4); color: #b6dcc1;
+}
+/* 상세 - 프롬프트는 칩이 아니라 본문이다. 길면 그 줄 안에서 굴린다. */
+.snap-pv-sub { font-size: 10.5px; color: #8a8f9a; }
+.snap-pv-line { display: flex; gap: 6px; align-items: flex-start; }
+.snap-pv-line > code {
+  flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 10.5px; color: #cdd3e4;
+  background: transparent; border: 0; padding: 0; word-break: break-all; white-space: pre-wrap;
+  max-height: 7.4em; overflow-y: auto; overscroll-behavior: contain;
+}
+/* 불러올 항목 고르기 - 든 것만 나오고, 스냅샷마다 마지막 선택을 기억한다.
+   본문 밖에 둔다 - 불러오기 단추 바로 위에서 늘 보여야 한다. */
+.snap-pv-pickbox { flex: 0 0 auto; display: flex; flex-direction: column; gap: 5px; }
+.snap-picks { display: flex; flex-wrap: wrap; gap: 5px; }
+.snap-pick {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none;
+  padding: 3px 8px 3px 6px; border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03);
+  font-size: 10.5px; color: #8a8f9a;
+  transition: border-color .14s, background .14s, color .14s;
+}
+.snap-pick:hover { border-color: rgba(90,130,220,0.6); }
+.snap-pick:has(input:checked) {
+  border-color: rgba(90,130,220,0.6); background: rgba(90,130,220,0.2); color: #eef1f6;
+}
+.snap-pick input { margin: 0; accent-color: #5a82dc; cursor: pointer; }
+.snap-pick-n { color: #8a8f9a; font-size: 9.5px; }

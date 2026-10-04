@@ -481,11 +481,11 @@ def _normalize_preset_mode(
 
 
 def _thumbnail_target(context: WebSessionContext, preset_name: str) -> Path:
-    from core.prompt_engineering_settings import is_randomized_preset_name
+    from core.prompt_engineering_settings import is_synthetic_preset_name
 
     safe_name = Path(str(preset_name or "").strip()).name
     # 랜덤 칸(`*randomized` · `*randomized:이름`)에는 파일이 없다 - 그 이름으로 썸네일 파일을 만들지 않는다.
-    if not safe_name or is_randomized_preset_name(preset_name) or is_randomized_preset_name(safe_name):
+    if not safe_name or is_synthetic_preset_name(preset_name) or is_synthetic_preset_name(safe_name):
         raise ValueError("Preset name is required")
     target_dir = context._save_path("presets", "previews")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -687,12 +687,12 @@ def register_prompt_tools_routes(
         if not isinstance(payload, dict):
             payload = {}
         try:
-            from core.prompt_engineering_settings import is_randomized_preset_name
+            from core.prompt_engineering_settings import is_synthetic_preset_name
 
             raw_name = str(payload.get("name") or "").strip()
             name = Path(raw_name).name
             mode = _normalize_preset_mode(session_context, payload.get("mode") or "")
-            if not name or is_randomized_preset_name(raw_name) or is_randomized_preset_name(name):
+            if not name or is_synthetic_preset_name(raw_name) or is_synthetic_preset_name(name):
                 raise ValueError("Preset name is required")
             if not _preset_file(session_context, name, mode):
                 raise FileNotFoundError(f"Preset not found: {name}")

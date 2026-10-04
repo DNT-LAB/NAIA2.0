@@ -367,7 +367,9 @@ export function createPromptEngineeringPopupRenderers({
     const canSaveCurrent = !!m.preset_can_save_current;
     const canDeleteCurrent = !!m.preset_can_delete;
     const mode = String(m.api_mode || '');
-    const names = (m.preset_options || []).filter(name => !isRandomizedPreset(name));
+    // `*snapshot` 도 뺀다 - 파일 프리셋이 아니라 본문 조회 · 이름 바꾸기의 대상이 아니다.
+    const names = (m.preset_options || []).filter(name => !isRandomizedPreset(name))
+      .filter(name => String(name) !== '*snapshot');
     const listKey = JSON.stringify(names);
     // Server pushes must not replace a selection, text range, or pending response.
     if (presetBrowser?.mode === mode && presetBrowser.listKey === listKey

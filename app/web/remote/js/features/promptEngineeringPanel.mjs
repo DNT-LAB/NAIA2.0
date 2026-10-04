@@ -60,6 +60,8 @@ const PE_QUICK_PRESET_GUIDE = [
   '랜덤 칸(*randomized) — Random 을 누를 때마다 풀에서 프리셋 하나를 뽑아 그 Prefix·Postfix 를 씁니다. '
     + '[Add] › [랜덤 칸으로] 로 여러 개 만들 수 있고, 만든 칸은 그때의 모델·생성 설정·네거티브를 기억합니다 '
     + '(NAI4.5 용 · NAI5 용을 따로 두고, 고르면 그 설정으로 넘어갑니다). 풀은 [Manage] 에서 채웁니다.',
+  '*snapshot — Fn › Snapshot 에서 스냅샷을 불러온 뒤의 임시 프리셋입니다. 여기서 고친 것은 프리셋 파일이 아니라 '
+    + '그 임시 작업본에만 남습니다. 프리셋으로 남기려면 [Add] 로 새 프리셋을 만드세요.',
 ].join('\\n\\n');
 
 /** 갈래가 없는 랜덤 칸인가(기본 `*randomized`). 더한 칸은 모델을 기억해 배지와 갈래가 있다 - 프리셋처럼 걸린다. */
@@ -69,6 +71,10 @@ function isGrouplessRandomized(option) {
 
 /** 미리보기의 설명 줄. 랜덤 칸은 풀에 든 프리셋을 적는다 - 열어 보지 않고도 무슨 칸인지 알게. */
 function presetDescription(summary) {
+  // 스냅샷을 불러온 뒤의 임시 프리셋 - 어느 스냅샷에서 왔는지 적는다.
+  if (summary && summary.snapshot) {
+    return summary.snapshot_source ? `스냅샷 — ${summary.snapshot_source}` : '스냅샷';
+  }
   if (!summary || !summary.randomized) return summary ? summary.description : '';
   const pool = Array.isArray(summary.randomized_pool) ? summary.randomized_pool : [];
   return pool.length

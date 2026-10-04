@@ -9,7 +9,7 @@ from typing import Any
 
 from core.nai_model_contract import NAI_PRESET_FILTER_GROUPS, nai_model_badge
 
-HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
+HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "*snapshot", "(프리셋 없음)"}
 
 
 # 어느 프리셋을 보고 친 글인지 표식을 함께 받는 키들(위 `_text_and_preset_stamp`).
@@ -208,6 +208,7 @@ class HeadlessPromptEngineeringService:
             RANDOMIZED_PRESET,
             get_prompt_engineering_store,
             is_randomized_preset_name,
+            is_snapshot_preset_name,
             load_category_filter_overrides,
             randomized_slot_label,
         )
@@ -269,7 +270,7 @@ class HeadlessPromptEngineeringService:
                 main_settings = data.get("main_settings") if isinstance(data, dict) else {}
                 main_settings = main_settings if isinstance(main_settings, dict) else {}
                 badge = nai_model_badge(main_settings.get("model"), context)
-            return {
+            summary = {
                 "name": name,
                 "api_mode": api_mode,
                 "model_key": badge["key"],
@@ -290,6 +291,11 @@ class HeadlessPromptEngineeringService:
                 # 목록 단위 벌크 맵으로 조회(프리셋별 stat 프로브 방지).
                 "thumbnail_url": str((thumbnails or {}).get(name) or data.get("thumbnail_url") or ""),
             }
+            if is_snapshot_preset_name(name):
+                source = str(data.get("source") or "")
+                summary.update(snapshot=True, snapshot_source=source, description="Snapshot",
+                               thumbnail_url=store.snapshot_store(mode or preset_mode).image_url(source))
+            return summary
 
         webui_presets = store.list_preset_names("WEBUI")
         from core.prompt_engineering_settings import preset_thumbnail_url_map
@@ -336,16 +342,18 @@ class HeadlessPromptEngineeringService:
             "category_filters": category_filters,
             "debug_snapshot": self.debug_snapshot(),
             "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
-            "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
+            "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "*snapshot", "default"),
         }
         return context._module_state_payload("prompt_engineering", payload)
 
     def ensure_first_run_recommended_preset(self) -> tuple[bool, str]:
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+        from core.prompt_engineering_settings import get_prompt_engineering_store, is_snapshot_preset_name
 
         context = self.context
         store = get_prompt_engineering_store(context)
         mode = self._preset_mode()
+        if is_snapshot_preset_name(store.state(mode).get("current_preset")):
+            return False, ""
         if mode == "ANIMA":
             # ANIMA 색인에 프리셋 파일이 하나도 없으면 **무조건** default(ANIMA 기본값) - 사용자 지정 09-30. 마지막 프리셋
             # 기록은 보지 않는다(지운 프리셋을 가리키는 기록이 남아 있으면 빈 색인이 빈 default 로 시작했다).
@@ -425,6 +433,12 @@ class HeadlessPromptEngineeringService:
             # Persist only the departing module draft; generated Main is not a save.
             if text_value not in store.preset_options():
                 return context._toast(f"프리셋을 찾을 수 없습니다: {text_value}", level="error")
+            if text_value == "*snapshot":
+                working = store.read_preset_data(text_value)
+                saved_model = (working.get("main_settings") or {}).get("model")
+                if (context._snapshot_service()._support_blocker()
+                        or nai_model_badge(saved_model, context)["family"] not in {"v4.5", "v5"}):
+                    return context._toast("Snapshot은 NAI V4.5 / V5에서 지원됩니다", level="error")
             try:
                 store.persist_active_settings()
             except OSError as exc:
@@ -818,13 +832,14 @@ class HeadlessPromptEngineeringService:
         from core.prompt_engineering_settings import (
             PRESET_RUNTIME_STATE_KEYS,
             get_prompt_engineering_store,
+            is_snapshot_preset_name,
         )
 
         # 세션 전역으로 두는 값은 프리셋에 싣지 않는다. ⚠️ 목록이 **둘**이다 -
         # 저장 시 `normalize_preset_main_settings` 가 `PRESET_RUNTIME_STATE_KEYS`
         # (랜덤 해상도 등)를 어차피 벗겨 내므로, 그 키로 여기까지 오면 파일은 안
         # 바뀌는데 "반영했다" 고 답하고 쓸데없이 쓰기까지 한다.
-        if key in RUNTIME_REMOTE_PARAM_KEYS or key in PRESET_RUNTIME_STATE_KEYS:
+        if key in RUNTIME_REMOTE_PARAM_KEYS:
             return ""
         try:
             context = self.context
@@ -832,6 +847,10 @@ class HeadlessPromptEngineeringService:
             mode_key = self._preset_mode()
             state = store.state(mode_key)
             name = str(state.get("current_preset") or "")
+            if key in PRESET_RUNTIME_STATE_KEYS and not is_snapshot_preset_name(name):
+                return ""
+            if is_snapshot_preset_name(name) and key.startswith("web_session_"):
+                return ""
             # 고른 프리셋이 없거나 '랜덤' 자리면 반영할 대상이 없다.
             if name in {"", "(프리셋 없음)", "*randomized"}:
                 return ""
@@ -1031,7 +1050,15 @@ class HeadlessPromptEngineeringService:
         main_settings = preset_data.get("main_settings") if isinstance(preset_data, dict) else None
         if not isinstance(main_settings, dict) or not main_settings:
             return self.state()
-        self._apply_main_settings(main_settings)
+        from core.prompt_engineering_settings import is_snapshot_preset_name
+
+        snapshot = is_snapshot_preset_name(preset_name)
+        if snapshot:
+            self.apply_snapshot_main_settings(main_settings)
+            context.save_remote_ui_state()
+            context.publish("remote_params_changed", context.generation_param_schema_payload())
+        else:
+            self._apply_main_settings(main_settings)
         return [
             self.state(),
             context.generation_param_schema_payload(),
@@ -1040,10 +1067,42 @@ class HeadlessPromptEngineeringService:
                 "prompt": context.prompt_text,
                 "negative": context.negative_prompt_text,
                 "negative_prompt": context.negative_prompt_text,
+                **({"force": True} if snapshot else {}),
             },
         ]
 
-    def _apply_main_settings(self, main_settings: dict[str, Any]) -> None:
+    def apply_snapshot_main_settings(self, main_settings: dict[str, Any]) -> list[dict[str, str]]:
+        """Apply each Snapshot parameter independently, keeping session A4 keys."""
+        from core.snapshot_store import main_setting_section, snapshot_defaults
+        from core.headless_remote_state_service import (
+            REMOTE_BOOLEAN_PARAMS, REMOTE_INT_PARAMS, REMOTE_FLOAT_PARAMS,
+            REMOTE_OPTION_DEFAULTS, RUNTIME_REMOTE_PARAM_KEYS,
+        )
+
+        context = self.context
+        extra_keys = snapshot_defaults()["extra_main_keys"]
+        # 아직 세션에 등장하지 않은 선언된 키도 유효하다. 현재 값 유무로 복원을 막지 않는다.
+        known = (set(context.remote_params or {}) | REMOTE_BOOLEAN_PARAMS | REMOTE_INT_PARAMS
+                 | REMOTE_FLOAT_PARAMS | set(REMOTE_OPTION_DEFAULTS) | RUNTIME_REMOTE_PARAM_KEYS
+                 | {"prompt", "negative", "negative_prompt", *extra_keys})
+        skipped = []
+        for key, value in main_settings.items():
+            try:
+                if not isinstance(key, str) or key.startswith(("_", "web_session_")):
+                    raise ValueError("Internal/session parameter is not restorable")
+                if key not in known:
+                    raise ValueError("Unknown generation parameter")
+                if key == "model" and nai_model_badge(value, context)["family"] not in {"v4.5", "v5"}:
+                    raise ValueError("Unsupported Snapshot model")
+                if key in extra_keys:
+                    context.set_param(key, value)
+                else:
+                    self._apply_main_settings({key: value}, persist=False)
+            except Exception as exc:
+                skipped.append({"section": main_setting_section(key), "key": key, "reason": str(exc)})
+        return skipped
+
+    def _apply_main_settings(self, main_settings: dict[str, Any], *, persist: bool = True) -> None:
         from core.prompt_engineering_settings import normalize_preset_main_settings
 
         context = self.context
@@ -1077,7 +1136,7 @@ class HeadlessPromptEngineeringService:
                 context.set_param(str(key), target)
             else:
                 context.set_param(str(key), value)
-        if main_settings or prompt_dirty:
+        if persist and (main_settings or prompt_dirty):
             context.save_remote_ui_state()
             context.publish("remote_params_changed", context.generation_param_schema_payload())
 

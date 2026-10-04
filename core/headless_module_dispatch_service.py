@@ -44,6 +44,8 @@ class HeadlessModuleDispatchService:
             return context._storyteller_module_state()
         if clean_id == "v5_scene":
             return context._v5_scene_module_state()
+        if clean_id == "snapshot":
+            return context._snapshot_module_state()
         if clean_id == "memo":
             return context._memo_module_state()
         if clean_id == "wildcard":
@@ -109,6 +111,8 @@ class HeadlessModuleDispatchService:
             return context._set_storyteller_param(clean_key, value)
         if clean_id == "v5_scene":
             return context._set_v5_scene_param(clean_key, value)
+        if clean_id == "snapshot":
+            return context._set_snapshot_param(clean_key, value)
         if clean_id == "memo":
             return context._set_memo_param(clean_key, value)
         if clean_id == "wildcard":

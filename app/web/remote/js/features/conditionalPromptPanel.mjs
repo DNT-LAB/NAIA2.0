@@ -722,7 +722,7 @@ export function createConditionalPromptPanel({
     if (currentState?.can_manage_presets === false) return;
     presetDialogName = '';
     presetDialogMode = 'empty';
-    presetDialogSource = safeText(currentState?.active_preset).trim()
+    presetDialogSource = savablePresetName(currentState?.active_preset)
       || safeText(document.getElementById('condPresetSelect')?.value).trim()
       || safeText(currentState?.presets?.[0]?.name).trim();
     presetDialogOpen = true;
@@ -1312,6 +1312,13 @@ export function createConditionalPromptPanel({
     return ` <em class="cond-preset-origin" title="${escapeAttr(label)} 에서 저장된 프리셋입니다">${escHtml(label)}</em>`;
   }
 
+  /** 저장 칸 · 복제 원본에 쓸 수 있는 프리셋 이름. `*snapshot`(스냅샷을 불러온 뒤의 임시 이름표)은
+   *  파일 프리셋이 아니라서 비운다 - 미리 채우면 [저장] 한 번에 그 이름의 프리셋을 만들려 든다. */
+  function savablePresetName(value) {
+    const name = safeText(value).trim();
+    return name.startsWith('*') ? '' : name;
+  }
+
   function renderPresetPane(m) {
     if (presetHost) return renderPresetWindowPane(m);
     const presets = Array.isArray(m.presets) ? m.presets : [];
@@ -1341,7 +1348,7 @@ export function createConditionalPromptPanel({
         </div>
         <select class="mod-select" id="condPresetSelect">${options}</select>
         <div class="cond-preset-list">${presetItems || '<div class="cond-empty">저장된 프리셋 없음</div>'}</div>
-        <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(m.active_preset)}">
+        <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(savablePresetName(m.active_preset))}">
         <div class="cond-button-row">
           <button type="button" data-cond-action="new-preset">새 프리셋</button>
           <button type="button" data-cond-action="load-selected-preset">불러오기</button>
@@ -1374,7 +1381,7 @@ export function createConditionalPromptPanel({
       <section class="cond-pane cond-preset-pane">
         <div class="cond-preset-list">${rows || '<div class="cond-empty">저장된 프리셋 없음</div>'}</div>
         <div class="cond-preset-save-row">
-          <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(m.active_preset)}" autocomplete="off" spellcheck="false">
+          <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(savablePresetName(m.active_preset))}" autocomplete="off" spellcheck="false">
           <button type="button" data-cond-action="save-preset" title="지금 편집기의 규칙을 이 이름으로 저장합니다">저장</button>
         </div>
         <button type="button" class="cond-preset-new" data-cond-action="new-preset">+ 새 프리셋</button>

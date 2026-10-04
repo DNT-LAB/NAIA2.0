@@ -112,7 +112,25 @@ class HeadlessCharacterReferenceService:
             "fidelity": _as_float(frame.get("fidelity"), 0.8),
         }
 
-    def _persist(self) -> None:
+    def capture_snapshot(self) -> dict[str, Any]:
+        self._ensure_loaded()
+        frames = [self._persistable_frame(frame) for frame in self.context.character_reference_frames]
+        return {"frames": frames}
+
+    def restore_snapshot(self, section: Any, image_directory: Path) -> None:
+        from core.snapshot_reference_transfer import (
+            merge_reference_frames, restore_reference_images, validate_reference_section,
+        )
+
+        raw_frames = validate_reference_section(section, "character_reference")
+        self._ensure_loaded()
+        restore_reference_images(self.context, "character_reference", raw_frames, image_directory)
+        frames = [self._frame_from_persisted(raw) for raw in raw_frames]
+        # enable 액션의 상대 도구 끄기를 거치면 스냅샷에 기록된 두 도구의 상태가 바뀐다.
+        self.context.character_reference_frames = merge_reference_frames(self.context.character_reference_frames, frames)
+        self._persist(raise_errors=True)
+
+    def _persist(self, *, raise_errors: bool = False) -> None:
         context = self.context
         mode = self._settings_mode()
         try:
@@ -122,6 +140,9 @@ class HeadlessCharacterReferenceService:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
         except Exception as exc:
+            # 스냅샷은 구역별 실패를 보고해야 한다. 기존 편집 경로의 오류 처리는 유지한다.
+            if raise_errors:
+                raise
             print(f"[ERROR] Character Reference settings save failed: {exc}")
         # 레퍼런스 인셋 강제 종료(사용자 계약): CR이 하나라도 활성화되면 인셋 핀을
         # 해제한다 - 두 기법은 개념이 겹쳐 함께 켜면 안 된다. _persist는 모든 CR

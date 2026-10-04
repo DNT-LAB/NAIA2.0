@@ -693,6 +693,7 @@ function virtualModTextEdit(moduleId, field, value) {
 }
 let inpaintSequenceControl = null;
 let v5SceneControl = null;
+let snapshotControl = null;
 let danbooruFeedbackControl = null;
 let resolutionManagerPanel = null;
 let naiModelManagerPanel = null;
@@ -1219,7 +1220,7 @@ import('./js/features/assistPanel.mjs?v=20261001-agefix2')
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20261004-randomizers')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20261004-snapshot')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -2548,7 +2549,7 @@ const conditionalPromptWindowReady = import('./js/features/conditionalPromptWind
   .catch(error => {
     console.error('Failed to initialize conditional prompt window', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260926-simwin4')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20261004-snapshot')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -3051,6 +3052,25 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   })
   .catch(error => {
     console.error('Failed to initialize V5 Scene panel', error);
+  });
+const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261004-snapshot3')
+  .then(({createSnapshotPanel}) => {
+    snapshotControl = createSnapshotPanel({
+      document,
+      escHtml,
+      showToast,
+      setModuleParam,
+      // ⚠️ `window.prompt` 은 **Electron 에서 동작하지 않는다** - 앱 자체 대화상자를 쓴다.
+      showPromptDialog,
+      showConfirmDialog,
+      // 저장 · 불러오기 직전에 밀린 편집을 먼저 보낸다 - 프리셋 전환과 같은 길목이다.
+      flushEdits: () => flushPromptPresetSaveState(),
+    });
+    const cached = moduleStateCache.get('snapshot');
+    if (cached) snapshotControl.render(cached);
+  })
+  .catch(error => {
+    console.error('Failed to initialize Snapshot panel', error);
   });
 const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs?v=20260829-mark0')
   .then(({createResolutionManagerPanel}) => {
@@ -3636,7 +3656,7 @@ function refreshHiresPresetSwapOptions(m) {
   const validValues = new Set(['']);
   for (const raw of presets) {
     const name = String(raw || '');
-    if (!name || isRandomizedPresetName(name) || name === '(프리셋 없음)') continue;
+    if (!name || isRandomizedPresetName(name) || isSnapshotPresetName(name) || name === '(프리셋 없음)') continue;
     const s = summaryMap.get(name);
     if (s && String(s.api_mode || '').toUpperCase() !== 'WEBUI') continue;
     if (!s && Array.isArray(m?.preset_summaries)) continue;
@@ -8184,6 +8204,8 @@ const FN_QUICK_ITEMS = [
   //    빠른칸이 그냥 비므로, 옛 저장값 때문에 되살아나지 않는다.
   // {key: 'isequence', icon: '▷', label: 'I.Sequence', tab: 'isequence', run: () => openFnISequence()},
   {key: 'v5scene', icon: '🎬', label: 'V5 Scene', tab: 'v5scene', run: () => openFnV5Scene()},
+  // Snapshot 도 탭이 아니라 창이다(Scene 창과 같은 Finder 배치) - `tab` 을 비운다.
+  {key: 'snapshot', icon: '📸', label: 'Snapshot', tab: '', run: () => openFnSnapshot()},
   // Translate 는 탭이 아니라 팝업이다 - `tab` 이 비어 있으면 활성 표시를 하지 않는다.
   {key: 'translate', icon: 'あ', label: 'Translate', tab: '', run: () => openTranslatorPopup()},
 ];
@@ -8267,6 +8289,13 @@ function openFnV5Scene() {
   // 열 때마다 목록을 다시 받는다 - 다른 창에서 담은 씬이 있을 수 있고, 썸네일
   // 리비전도 그때 갱신된다.
   v5SceneReady.then(() => v5SceneControl?.onOpen());
+}
+
+function openFnSnapshot() {
+  closeFnMenu();
+  rememberFnQuick('snapshot');
+  // 탭을 바꾸지 않는다 - 화면을 덮는 창이 뜬다. 목록은 창이 열릴 때마다 다시 받는다.
+  snapshotReady.then(() => snapshotControl?.open());
 }
 
 function positionTranslatorPopup() {
@@ -10829,7 +10858,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261004-randomizers')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261004-snapshot')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -10845,7 +10874,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261004-randomizers')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261004-snapshot')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -11630,7 +11659,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260927-cpus
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261004-randomizers')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261004-snapshot')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
@@ -11836,7 +11865,8 @@ function currentPresetNameForModelGuard() {
   const name = select ? String(select.value || '') : '';
   // 실제 프리셋일 때만 묻는다 - 미선택은 고칠 대상이 없고, 랜덤 칸은 '복제' 할 것이 아니다
   // (더한 랜덤 칸은 묻지 않고 그 칸이 기억하는 모델을 바로 고친다 - 서버의 파라미터 반영이 맡는다).
-  if (!name || isRandomizedPresetName(name) || name === '(프리셋 없음)') return '';
+  // `*snapshot` 도 묻지 않는다 - 임시 작업본이라 '복제' 할 것이 아니고, 모델 변경은 그 작업본에 바로 실린다.
+  if (!name || isRandomizedPresetName(name) || isSnapshotPresetName(name) || name === '(프리셋 없음)') return '';
   return name;
 }
 
@@ -12021,6 +12051,10 @@ function onModuleState(m) {
   else if (m.module_id === 'v5_scene') {
     // Fn > V5 Scene 은 탭 페이지라 팝업 배선을 타지 않는다 - 여기서 직접 그린다.
     if (v5SceneControl) v5SceneControl.render(m);
+  }
+  else if (m.module_id === 'snapshot') {
+    // Fn > Snapshot 은 제 창을 가진다(모듈 팝업 배선을 타지 않는다). 닫혀 있어도 상태는 받아 둔다.
+    if (snapshotControl) snapshotControl.render(m);
   }
   else if (m.module_id === 'memo') {
     // 창이 닫혀 있어도 목록은 받아 둔다 - 다음에 열 때 곧바로 보인다.
@@ -12444,6 +12478,11 @@ function createRandomizedSlot() {
  *  진짜 프리셋과 겹치지 않는다. ⚠️ `=== '*randomized'` 로 묻지 않는다 - 그건 기본 칸 하나만 맞는다. */
 function isRandomizedPresetName(name) {
   return String(name || '').startsWith('*randomized');
+}
+
+/** 스냅샷을 불러온 뒤의 임시 프리셋(`*snapshot`)인가. 파일 프리셋이 아니라 작업본 하나다. */
+function isSnapshotPresetName(name) {
+  return String(name || '') === '*snapshot';
 }
 
 function applyRecommendedPromptPreset() {

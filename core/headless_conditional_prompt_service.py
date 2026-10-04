@@ -38,6 +38,65 @@ class HeadlessConditionalPromptService:
         # bundled_dir defaults to <project>/data/conditional_presets_bundled.
         return PresetStorage(save_dir=save_dir)
 
+    def capture_snapshot(self) -> dict[str, Any]:
+        from core.conditional_prompt_settings import get_conditional_prompt_store
+
+        settings = get_conditional_prompt_store(self.context).collect_settings()
+        return {key: settings[key] for key in (
+            "enabled", "editor_mode", "rules", "rules_v2", "engine_options_legacy",
+            "engine_options_v2", "active_preset_legacy", "active_preset_v2",
+        )}
+
+    def restore_snapshot(self, section: Any, name: str, *, save_user_presets: bool = True) -> None:
+        from core.conditional.dsl_parser import parse_rulebook
+        from core.conditional.preset_io import rulebook_to_dict
+        from core.conditional_prompt_settings import get_conditional_prompt_store
+
+        if (not isinstance(section, dict) or not isinstance(section.get("enabled"), bool)
+                or section.get("editor_mode") not in {"legacy", "v2"}
+                or not all(isinstance(section.get(key), str) for key in ("rules", "rules_v2"))
+                or not all(isinstance(section.get(key), dict) for key in ("engine_options_legacy", "engine_options_v2"))):
+            raise ValueError("Malformed snapshot conditional section")
+        store = get_conditional_prompt_store(self.context)
+        settings = store.collect_settings()
+        storage = self._storage()
+        infos = storage.list_all()
+        # 두 칸의 저장이 모두 끝나야 편집기를 교체한다. 실패한 사용자 규칙을 잃지 않는다.
+        for mode in ("legacy", "v2"):
+            settings["editor_mode"] = mode
+            preset = str(settings.get(self._preset_key(settings)) or "")
+            if (save_user_presets and preset and preset != "*snapshot"
+                    and not any(info.name == preset and info.is_bundled for info in infos)
+                    and storage.user_conflict(preset) is not None):
+                text = self._active_rules(settings)
+                book = parse_rulebook(text)
+                opts = self._active_engine_options(settings)
+                book.max_passes, book.stop_on_match = opts["max_passes"], opts["stop_on_match"]
+                try:
+                    _, previous = storage.load_with_meta(preset)
+                except (ValueError, TypeError):
+                    previous = {}
+                desired = rulebook_to_dict(book, name=preset, source_dsl=text, source_mode=mode)
+                # 파서는 같은 원문에도 새 rule id를 만든다. 시각/id를 빼야 불필요한 쓰기를 막는다.
+                def content(payload):
+                    result = {key: value for key, value in payload.items() if key != "created_at"}
+                    result["rules"] = [{key: value for key, value in rule.items() if key != "id"}
+                                       for rule in payload.get("rules", [])]
+                    return result
+                if content(previous) != content(desired):
+                    storage.save(preset, book, source_dsl=text, source_mode=mode)
+        for mode in ("legacy", "v2"):
+            settings["editor_mode"] = mode
+            reason = f"스냅샷 불러오기: {name}"
+            # 같은 본문/빈 칸도 이번 교체 직전 상태다. 일반 프리셋 로드의 생략 규칙과 분리한다.
+            self._stash_undo(settings, self._active_rules(settings), reason)
+            self._write_active_rules(settings, section[self._rules_key(settings)], reason=reason)
+        settings.update({key: section[key] for key in (
+            "enabled", "editor_mode", "engine_options_legacy", "engine_options_v2",
+        )})
+        settings.update(active_preset_legacy="*snapshot", active_preset_v2="*snapshot", active_preset="*snapshot")
+        store.apply_settings(settings)
+
     def _preset_infos(self) -> list[dict[str, Any]]:
         try:
             infos = []
@@ -307,7 +366,8 @@ class HeadlessConditionalPromptService:
         entry = (settings.get("rules_undo") or {}).get(cls._undo_slot(settings))
         if not isinstance(entry, dict):
             return None
-        return entry if str(entry.get("text") or "").strip() else None
+        return entry if (str(entry.get("text") or "").strip()
+                         or str(entry.get("reason") or "").startswith("스냅샷 불러오기: ")) else None
 
     @classmethod
     def _undo_summary(cls, settings: dict[str, Any]) -> dict[str, Any]:
@@ -444,6 +504,8 @@ class HeadlessConditionalPromptService:
         overwrite = _flag("overwrite")
         book_data = payload.get("book") if isinstance(payload.get("book"), dict) else None
 
+        if name == "*snapshot":
+            return self._state_with(messages=[self._toast_message("스냅샷 이름으로 조건부 프리셋을 저장할 수 없습니다.", "error")])
         if not name:
             return self._state_with(messages=[self._toast_message("조건부 프리셋 이름이 비어 있습니다.", "error")])
 
@@ -537,6 +599,9 @@ class HeadlessConditionalPromptService:
         if not name:
             return self._state_with(messages=[self._toast_message("로드할 프리셋 이름이 비어 있습니다.", "error")])
         try:
+            # 합성 이름을 정규화하면 실재하는 snapshot 프리셋을 잘못 읽게 된다.
+            if name == "*snapshot":
+                raise FileNotFoundError(name)
             book, meta = self._storage().load_with_meta(name)
         except FileNotFoundError:
             return self._state_with(messages=[
@@ -600,6 +665,8 @@ class HeadlessConditionalPromptService:
 
     def _handle_preset_delete(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
         name = text_value.strip()
+        if name == "*snapshot":
+            return self._state_with(messages=[self._toast_message("스냅샷 이름은 삭제할 조건부 프리셋이 아닙니다.", "error")])
         if name and self._storage().delete(name):
             # 지운 이름이 걸려 있던 **모든 모드**에서 뗀다. 한쪽만 떼면 다른 모드가
             # 없는 프리셋 이름을 계속 내걸고, 그걸 누르면 "찾을 수 없음" 이 뜬다.

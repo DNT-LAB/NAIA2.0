@@ -62,6 +62,7 @@ HEADLESS_SERVICE_SPECS = {
         "HeadlessCharacterAssetService",
     ),
     "v5_scene": HeadlessServiceSpec("core.headless_v5_scene_service", "HeadlessV5SceneService"),
+    "snapshot": HeadlessServiceSpec("core.headless_snapshot_service", "HeadlessSnapshotService"),
     "memo": HeadlessServiceSpec("core.headless_memo_service", "HeadlessMemoService"),
     "wildcard": HeadlessServiceSpec("core.headless_wildcard_service", "HeadlessWildcardService"),
     "instant_wildcard": HeadlessServiceSpec(

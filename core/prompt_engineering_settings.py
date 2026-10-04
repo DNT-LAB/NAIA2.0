@@ -82,6 +82,7 @@ def sanitize_preset_name(preset_name: str) -> str:
 # ⚠️ '랜덤 칸인가' 를 문자열 비교로 묻지 않는다(`== "*randomized"` 는 기본 칸만 맞는다) - 아래 판정을 쓴다.
 #    기본 칸만 가리킬 때에만 `RANDOMIZED_PRESET` 과 견준다(생성 설정을 기억하지 않는 것은 그 칸뿐이다).
 RANDOMIZED_PRESET = "*randomized"
+SNAPSHOT_PRESET = "*snapshot"
 RANDOMIZED_SLOT_PREFIX = "*randomized:"
 # randomized_pool.json 에서 더한 칸들이 사는 최상위 키(모드 이름과 겹치지 않는다).
 RANDOMIZED_SLOTS_KEY = "slots"
@@ -91,6 +92,14 @@ def is_randomized_preset_name(name: Any) -> bool:
     """기본 칸이든 더한 칸이든 - 랜덤 칸의 이름이면 참."""
     text = str(name or "")
     return text == RANDOMIZED_PRESET or bool(randomized_slot_label(text))
+
+
+def is_snapshot_preset_name(name: Any) -> bool:
+    return name == SNAPSHOT_PRESET
+
+
+def is_synthetic_preset_name(name: Any) -> bool:
+    return is_snapshot_preset_name(name) or is_randomized_preset_name(name)
 
 
 def randomized_slot_label(name: Any) -> str:
@@ -193,7 +202,7 @@ def preset_dir(mode: str | None = None, *, save_root: str | Path | None = None) 
 
 def is_user_preset_file(path: Path) -> bool:
     name = getattr(path, "stem", "")
-    return bool(name) and name != "*randomized" and not name.endswith(".hires")
+    return bool(name) and not is_synthetic_preset_name(name) and not name.endswith(".hires")
 
 
 def list_preset_names(mode: str | None = None, *, save_root: str | Path | None = None) -> list[str]:
@@ -422,7 +431,40 @@ def save_last_used_randomized(mode: str | None, name: str, *, save_root: str | P
     by_mode = by_mode if isinstance(by_mode, dict) else {}
     by_mode[mode_key] = str(name or "")
     data[LAST_USED_RANDOMIZED_KEY] = by_mode
+    if name and isinstance(data.get("snapshot"), dict):
+        data["snapshot"].pop(mode_key, None)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_last_used_snapshot(mode: str, *, save_root: str | Path | None = None) -> bool:
+    path = _existing_save_file(Path("presets") / "last_used_preset.json", save_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return isinstance(data, dict) and isinstance(data.get("snapshot"), dict) and bool(
+            data["snapshot"].get(normalize_prompt_engineering_mode(mode)))
+    except (OSError, ValueError):
+        return False
+
+
+def save_last_used_snapshot(mode: str, active: bool, *, save_root: str | Path | None = None) -> None:
+    mode_key = normalize_prompt_engineering_mode(mode)
+    path = last_used_preset_file(save_root=save_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError):
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    by_mode = data.get("snapshot")
+    by_mode = by_mode if isinstance(by_mode, dict) else {}
+    if active:
+        by_mode[mode_key] = True
+        if isinstance(data.get(LAST_USED_RANDOMIZED_KEY), dict):
+            data[LAST_USED_RANDOMIZED_KEY].pop(mode_key, None)
+    else:
+        by_mode.pop(mode_key, None)
+    data["snapshot"] = by_mode
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
 
 
 def randomized_pool_file(*, save_root: str | Path | None = None) -> Path:
@@ -518,6 +560,8 @@ def _restore_randomized_pool(pool: list, valid: set[str]) -> list[str]:
     seen = set()
     restored = []
     for raw_name in pool:
+        if is_snapshot_preset_name(raw_name):
+            continue
         name = sanitize_preset_name(str(raw_name or ""))
         if (
             name
@@ -664,7 +708,7 @@ def preset_preview_file(context: Any, preset_name: str, mode_key: str = "") -> P
     save/presets/favorites/도 함께 본다. prompt_tools_routes의 GET 라우트와
     상태 요약이 같은 해석을 쓰도록 core에 둔다.
     """
-    if is_randomized_preset_name(preset_name):
+    if is_synthetic_preset_name(preset_name):
         return None
     safe_name = Path(str(preset_name or "").strip()).name
     if not safe_name or safe_name == "*randomized":
@@ -774,7 +818,7 @@ def preset_thumbnail_url_map(context: Any, names: list[str], mode_key: str = "")
         return None
 
     for name in names:
-        if is_randomized_preset_name(name):
+        if is_synthetic_preset_name(name):
             continue
         safe_name = Path(str(name or "").strip()).name
         if not safe_name or safe_name == "*randomized":
@@ -841,6 +885,7 @@ class PromptEngineeringHeadlessStore:
         self._mode_getter = mode_getter or (lambda: "NAI")
         self._save_root = _coerce_save_root(save_root)
         self._states: dict[str, dict[str, Any]] = {}
+        self._snapshot_stores: dict[str, Any] = {}
         self._dirty_modes: set[str] = set()
 
     def mode(self, mode: str | None = None) -> str:
@@ -873,6 +918,13 @@ class PromptEngineeringHeadlessStore:
         if last_randomized == RANDOMIZED_PRESET or randomized_slot_label(last_randomized) in randomized_slots:
             current_preset = randomized_slot_name(randomized_slot_label(last_randomized))
             needs_roll = True
+        working = self.snapshot_store(mode).read_working(refresh=True)
+        if load_last_used_snapshot(mode, save_root=self._save_root) and working:
+            current_preset = SNAPSHOT_PRESET
+            base = default_prompt_engineering_settings(save_root=self._save_root)
+            base = merge_settings(base, self.load_mode_settings(mode))
+            settings = merge_settings(base, working["module_settings"])
+            needs_roll = False
         return {
             "settings": settings,
             "preset_list": preset_names,
@@ -892,15 +944,41 @@ class PromptEngineeringHeadlessStore:
     def read_preset_data(self, preset_name: str, mode: str | None = None) -> dict[str, Any]:
         # ⚠️ 랜덤 칸은 **파일로 가지 않는다.** 이름을 그대로 넘기면 `sanitize_preset_name` 이 `*` 를 지워
         #    `randomized.json` 이라는 **남의 프리셋**을 읽는다(그런 이름의 프리셋이 있으면 그 설정이 적용된다).
+        if is_snapshot_preset_name(preset_name):
+            return self.snapshot_store(mode).read_working()
         if is_randomized_preset_name(preset_name):
             return self._randomized_preset_data(str(preset_name), mode)
         return read_preset_data(preset_name, mode, save_root=self._save_root)
 
     def write_preset_data(self, preset_name: str, mode: str | None, data: dict[str, Any]) -> None:
+        if is_snapshot_preset_name(preset_name):
+            self.snapshot_store(mode).write_working(data)
+            return
         if is_randomized_preset_name(preset_name):
             self._write_randomized_preset_data(str(preset_name), mode, data)
             return
         write_preset_data(preset_name, mode, data, save_root=self._save_root)
+
+    def snapshot_store(self, mode: str | None = None):
+        from core.snapshot_store import SnapshotStore
+
+        # 같은 모드의 작업본 캐시를 목록/요약/이름 변경이 함께 사용한다.
+        mode_key = self.mode(mode)
+        if mode_key not in self._snapshot_stores:
+            self._snapshot_stores[mode_key] = SnapshotStore(self._save_root / "snapshots" / mode_key)
+        return self._snapshot_stores[mode_key]
+
+    def install_snapshot_working(
+        self, source: str, module_settings: dict[str, Any], main_settings: dict[str, Any],
+        mode: str | None = None,
+    ) -> None:
+        mode_key = self.mode(mode)
+        self.snapshot_store(mode_key).write_working({
+            "source": source, "api_mode": mode_key,
+            "module_settings": module_settings, "main_settings": main_settings,
+        })
+        if not self.set_preset(SNAPSHOT_PRESET, mode_key):
+            raise ValueError("Could not select snapshot working copy")
 
     def _randomized_preset_data(self, name: str, mode: str | None = None) -> dict[str, Any]:
         """랜덤 칸을 프리셋 모양으로 돌려준다 - **생성 설정만** 있다(Prefix · Postfix 는 뽑을 때 정해진다).
@@ -990,7 +1068,8 @@ class PromptEngineeringHeadlessStore:
         names = list(self.state(mode)["preset_list"])
         if "default" not in names:
             names.insert(0, "default")
-        return [*names, *self.randomized_names(mode)]
+        snapshot = [SNAPSHOT_PRESET] if self.snapshot_store(mode).read_working() else []
+        return [*names, *self.randomized_names(mode), *snapshot]
 
     # ---- 랜덤 칸 ----------------------------------------------------------------
 
@@ -1098,11 +1177,24 @@ class PromptEngineeringHeadlessStore:
         selected = set(self._randomized_pool_ref(state, self.active_randomized_name(mode)))
         return [
             name for name in state["preset_list"]
-            if name not in {"default", "*randomized"} and name not in selected
+            if name != "default" and not is_synthetic_preset_name(name) and name not in selected
         ]
 
     def set_preset(self, preset_name: str, mode: str | None = None) -> bool:
         state = self.state(mode)
+        if is_snapshot_preset_name(preset_name):
+            mode_key = self.mode(mode)
+            working = self.snapshot_store(mode_key).read_working()
+            if not working:
+                return False
+            base = default_prompt_engineering_settings(save_root=self._save_root)
+            base = merge_settings(base, self.load_mode_settings(mode_key))
+            save_last_used_snapshot(mode_key, True, save_root=self._save_root)
+            state["settings"] = merge_settings(base, working["module_settings"])
+            state["current_preset"] = SNAPSHOT_PRESET
+            state["randomized_needs_roll"] = False
+            self._dirty_modes.discard(mode_key)
+            return True
         if is_randomized_preset_name(preset_name):
             # 랜덤 칸은 살아 있는 Prefix · Postfix 를 건드리지 않는다 - 다음 Random 이 풀에서 뽑아 채운다.
             if not self.has_randomized(str(preset_name), mode):
@@ -1126,6 +1218,8 @@ class PromptEngineeringHeadlessStore:
         state["settings"] = merge_settings(base, preset_data.get("module_settings") or {})
         if is_randomized_preset_name(state.get("current_preset")):
             self._remember_randomized(mode_key, "")      # 랜덤 칸을 떠났다 - 다시 켜면 이 프리셋으로 연다
+        if is_snapshot_preset_name(state.get("current_preset")):
+            save_last_used_snapshot(mode_key, False, save_root=self._save_root)
         state["current_preset"] = name
         self.save_last_used_preset(self.mode(mode), name)
         self._dirty_modes.discard(self.mode(mode))
@@ -1168,9 +1262,11 @@ class PromptEngineeringHeadlessStore:
         if main_settings is not None:
             # Generation params travel with the preset (future01 parity); runtime
             # -state keys are stripped so they stay session-global.
-            data["main_settings"] = normalize_preset_main_settings(copy.deepcopy(main_settings))
+            data["main_settings"] = (copy.deepcopy(main_settings) if is_snapshot_preset_name(name)
+                                     else normalize_preset_main_settings(copy.deepcopy(main_settings)))
         self.write_preset_data(name, mode_key, data)
-        self.save_last_used_preset(mode_key, name)
+        if not is_snapshot_preset_name(name):
+            self.save_last_used_preset(mode_key, name)
         # ⚠️ **쓴 것만 clean 으로 친다.** `discard` 는 "살아 있는 설정을 파일에 다 썼다"
         #    는 뜻인데, `write_module_settings=False` 갈래는 그걸 **안 썼다.** 그런데도
         #    지우면 아직 저장 안 된 Prefix 편집이 미아가 되어, 다음 생성/종료의
@@ -1224,6 +1320,8 @@ class PromptEngineeringHeadlessStore:
 
         반환: (성공, 이름 또는 사유). 같은 이름이 있고 `overwrite` 가 아니면 사유는 "exists".
         """
+        if is_snapshot_preset_name(preset_name):
+            return False, "스냅샷 작업본은 내보낼 수 없습니다."
         mode_key = self.mode(mode)
         name = sanitize_preset_name(preset_name)
         if not name:
@@ -1243,6 +1341,8 @@ class PromptEngineeringHeadlessStore:
 
     def delete_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
+        if is_snapshot_preset_name(preset_name):
+            return False, "스냅샷 작업본은 삭제할 수 없습니다."
         # ⚠️ 이름을 다듬기 **전에** 가른다 - `sanitize_preset_name` 은 `*` · `:` 를 지워 랜덤 칸을 엉뚱한 프리셋 이름으로 만든다.
         if is_randomized_preset_name(preset_name):
             return self.delete_randomized_slot(str(preset_name), mode_key)
@@ -1263,6 +1363,8 @@ class PromptEngineeringHeadlessStore:
     # ⚠️ 아래 넷은 **지금 보는 랜덤 칸**(`active_randomized_name`)을 고친다. 그 칸을 고른 채로만 관리 화면이
     #    열리므로 화면이 본 칸과 같다 - 랜덤 칸을 고르지 않았으면 기본 칸이다(예전 그대로).
     def add_randomized_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
+        if is_snapshot_preset_name(preset_name):
+            return False, "스냅샷 작업본은 랜덤 풀에 추가할 수 없습니다."
         mode_key = self.mode(mode)
         state = self.state(mode_key)
         target = self.active_randomized_name(mode_key)
@@ -1275,6 +1377,8 @@ class PromptEngineeringHeadlessStore:
         return True, name
 
     def remove_randomized_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
+        if is_snapshot_preset_name(preset_name):
+            return False, "스냅샷 작업본은 랜덤 풀에 없습니다."
         mode_key = self.mode(mode)
         state = self.state(mode_key)
         target = self.active_randomized_name(mode_key)
@@ -1331,7 +1435,8 @@ class PromptEngineeringHeadlessStore:
             data["module_settings"] = settings
             data.setdefault("main_settings", {})
             self.write_preset_data(current, mode_key, data)
-            self.save_last_used_preset(mode_key, current)
+            if not is_snapshot_preset_name(current):
+                self.save_last_used_preset(mode_key, current)
         elif not randomized:
             self.save_mode_settings(mode_key, settings)
         # 랜덤 칸은 기본 칸이든 더한 칸이든 여기서 아무것도 쓰지 않는다.

@@ -198,6 +198,15 @@ class WebSessionContext:
     def _set_v5_scene_param(self, key, value):
         return self._v5_scene_service().set_param(key, value)
 
+    def _snapshot_service(self):
+        return self._lazy_service("snapshot")
+
+    def _snapshot_module_state(self):
+        return self._snapshot_service().state()
+
+    def _set_snapshot_param(self, key, value):
+        return self._snapshot_service().set_param(key, value)
+
     def _wildcard_service(self):
         return self._lazy_service("wildcard")
 

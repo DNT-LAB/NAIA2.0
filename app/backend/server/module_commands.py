@@ -166,6 +166,34 @@ def _e621_translate_request(command: dict[str, Any]) -> str | None:
     return query if HANGUL.search(query) else ""
 
 
+def _snapshot_moves_a_dataset(command: dict[str, Any]) -> bool:
+    """이 명령이 스냅샷의 **데이터셋 사본**을 쓰거나 읽는가(= 오래 걸릴 수 있는가).
+
+    담기는 `include_search` 를 켰을 때, 되돌리기는 `search` 를 골랐을 때(또는 항목을 안 골라 전부일 때)다.
+    그 밖의 스냅샷 명령은 작아서 예전처럼 제자리에서 돈다 - 스레드로 넘기면 다른 창의 명령과 섞일 틈만 는다.
+    """
+    if str(command.get("module_id") or "").strip() != "snapshot":
+        return False
+    key = str(command.get("key") or "").strip()
+    value = command.get("value")
+    if not isinstance(value, dict):
+        try:
+            import json
+
+            value = json.loads(str(value or "{}"))
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(value, dict):
+            return False
+    if key == "save":
+        flag = value.get("include_search")
+        return flag is True or (isinstance(flag, str) and flag.strip().lower() == "true")
+    if key == "apply":
+        sections = value.get("sections")
+        return sections is None or (isinstance(sections, list) and "search" in sections)
+    return False
+
+
 async def handle_module_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -276,12 +304,27 @@ async def handle_module_command(
             task.add_done_callback(_E621_TRANSLATION_TASKS.discard)
         return True
 
-    module_state = context.set_module_param(
-        str(command.get("module_id") or ""),
-        str(command.get("key") or ""),
-        command.get("value"),
-        client_host=client_host,
-    )
+    if _snapshot_moves_a_dataset(command):
+        # ⚠️ 데이터셋 사본을 쓰거나 읽는 스냅샷 명령은 **이벤트 루프 밖에서** 돌린다. 풀이 수백 MB 일 수
+        #    있어(실측: 사용자 custom_tags 가 150 ~ 330MB) 여기서 동기로 돌리면 그동안 모든 창의 소켓이
+        #    멈춘다. 커스텀 Parquet 불러오기가 같은 이유로 스레드에서 돈다(`search_commands`).
+        #    이 연결의 다음 명령은 이 await 가 끝난 뒤에 처리되므로 같은 창 안의 순서는 그대로다.
+        import asyncio
+
+        module_state = await asyncio.to_thread(
+            context.set_module_param,
+            str(command.get("module_id") or ""),
+            str(command.get("key") or ""),
+            command.get("value"),
+            client_host=client_host,
+        )
+    else:
+        module_state = context.set_module_param(
+            str(command.get("module_id") or ""),
+            str(command.get("key") or ""),
+            command.get("value"),
+            client_host=client_host,
+        )
     if module_state is None:
         await _send_json(ws, {
             "type": "toast",

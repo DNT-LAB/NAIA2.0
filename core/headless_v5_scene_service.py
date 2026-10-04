@@ -13,6 +13,7 @@ import json
 from typing import Any
 from urllib.parse import quote
 
+from core.character_state_transfer import capture_character_state, replace_character_state
 from core.v5_scene_store import (
     bare_from_text,
     create_event,
@@ -283,11 +284,7 @@ class HeadlessV5SceneService:
         ⚠️ Connect 는 uuid 를 번호로 바꿔 담는다 - 활성 무리 안의 1-based 자리다.
            비활성/Cold 슬롯은 씬에 담지 않으므로 번호 체계가 활성 목록과 일치한다.
         """
-        from core.character_settings import (
-            _frame_uuid,
-            active_character_frames,
-            load_character_settings,
-        )
+        from core.character_settings import load_character_settings
 
         context = self.context
         clean = sanitize_scene_name(name)
@@ -299,21 +296,7 @@ class HeadlessV5SceneService:
 
         mode = context.get_api_mode()
         settings = load_character_settings(mode, save_root=self._save_root())
-        frames = active_character_frames(settings)
-        order = {str(_frame_uuid(frame) or ""): index for index, frame in enumerate(frames)}
-
-        characters = []
-        for frame in frames:
-            link_uuid = str(frame.get("connect_to") or "")
-            link_index = order.get(link_uuid)
-            characters.append({
-                "prompt": str(frame.get("prompt") or ""),
-                "uc": str(frame.get("uc") or ""),
-                "custom_name": str(frame.get("custom_name") or ""),
-                "position": frame.get("position"),
-                # 저장은 1-based 번호. 못 찾으면 0(연결 없음).
-                "connect_to": (link_index + 1) if link_index is not None else 0,
-            })
+        characters = capture_character_state(settings)["frames"]
 
         params = dict(getattr(context, "remote_params", None) or {})
         scene = {
@@ -447,11 +430,7 @@ class HeadlessV5SceneService:
         ⚠️ 모드가 다르면 **적용하지 않는다.** NAI 씬의 캐릭터 캡션을 COMFYUI 에 얹으면
            뜻이 없고, 해상도만 맞아 보여 더 헷갈린다.
         """
-        from core.character_settings import (
-            _new_character_uuid,
-            clear_character_roll_snapshot,
-            has_connect_region,
-        )
+        from core.character_settings import has_connect_region
 
         context = self.context
         clean_event = sanitize_event_name(event)
@@ -475,12 +454,9 @@ class HeadlessV5SceneService:
         same_event = bool(clean_event) and (
             getattr(context, "_v5_scene_last_event", "") == clean_event)
         cast = self._live_cast(settings, mode) if same_event else {}
-        frames = settings.setdefault("character_frames", [])
-        uuids = [_new_character_uuid() for _ in scene["characters"]]
-        fresh = []
+        characters = []
         worn = 0
         for index, item in enumerate(scene["characters"]):
-            link = item.get("connect_to") or 0
             prompt = item["prompt"]
             # 살아있는 배역이 있고, 이 컷도 배역 자리를 열어 뒀을 때만 갈아 끼운다.
             # 자리가 없는 컷에 끼우면 그 컷의 연기를 통째로 덮어쓴다.
@@ -488,50 +464,8 @@ class HeadlessV5SceneService:
             if carried and has_connect_region(prompt):
                 prompt = self._wear_cast(prompt, carried)
                 worn += 1
-            fresh.append({
-                "uuid": uuids[index],
-                "prompt": prompt,
-                "uc": item["uc"],
-                "custom_name": item["custom_name"],
-                "position": item["position"],
-                "connect_to": uuids[link - 1] if 1 <= link <= len(uuids) else "",
-                "slot_state": "active",
-                "is_enabled": True,
-                "is_muted": False,
-                # 이 칸은 씬이 만든 것이다 - **다음 씬을 부를 때 버릴 대상**이 된다.
-                "from_scene": True,
-            })
-
-        def is_cold(frame: Any) -> bool:
-            return (isinstance(frame, dict)
-                    and str(frame.get("slot_state") or "").strip().lower() == "cold")
-
-        kept = []
-        dropped = 0
-        for frame in frames:
-            if is_cold(frame):
-                kept.append(frame)
-                continue
-            if not isinstance(frame, dict):
-                continue
-            # ⚠️ **이전 씬이 남긴 칸은 버린다.** 예전엔 전부 비활성으로 남겼는데(아무것도
-            #    잃지 않으려고), 씬을 잇달아 부르면 비활성 무리에 찌꺼기가 끝없이 쌓였다
-            #    (사용자 제보). 손으로 만든 칸은 그대로 남기고 씬이 만든 것만 고른다 -
-            #    그게 없으면 어느 것이 사용자 작업인지 구분할 방법이 없다.
-            if frame.get("from_scene"):
-                dropped += 1
-                continue
-            frame["slot_state"] = "inactive"
-            frame["is_enabled"] = False
-            # 비활성으로 밀린 슬롯의 링크는 정리한다 - 그대로 두면 정규화가
-            # "앞만 가리킨다" 규칙으로 지우거나, 새 활성 슬롯을 엉뚱하게 가리킨다.
-            frame["connect_to"] = ""
-            kept.append(frame)
-        frames[:] = fresh + kept
-        settings["is_active"] = bool(fresh)
-        settings["position_mode"] = scene["position_mode"]
-        character_service.save_settings(mode, settings)
-        clear_character_roll_snapshot(context, mode)
+            characters.append({**item, "prompt": prompt})
+        replace_character_state(context, mode, settings, characters, scene["position_mode"])
 
         # 2) 프롬프트 · 해상도
         # 담을 때 뺀 프롬프트 엔지니어링을 여기서 **지금 설정으로** 다시 입힌다.

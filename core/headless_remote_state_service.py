@@ -174,7 +174,7 @@ class HeadlessRemoteStateService:
             self.context.save_remote_ui_state()
             self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
 
-    def _disable_unsupported_reference_frames(self, key: str) -> list[str]:
+    def _disable_unsupported_reference_frames(self, key: str, *, modules: tuple[str, ...] | None = None) -> list[str]:
         """새 모델이 못 쓰는 Character Reference / Vibe Transfer 를 꺼 둔다.
 
         ⚠️ **여기가 목이다.** 모델을 바꾸는 길은 하나가 아니다 - UI 드롭다운뿐
@@ -206,10 +206,12 @@ class HeadlessRemoteStateService:
         if key != "model" or self.get_api_mode() != "NAI":
             return []
         disabled: list[str] = []
-        if not self.is_naid45_model():
+        # 선택 복원은 고르지 않은 도구를 건드리지 않는다. 기존 모델 변경은 둘 다 검사한다.
+        selected = ("character_reference", "vibe_transfer") if modules is None else modules
+        if "character_reference" in selected and not self.is_naid45_model():
             self._call_context("_disable_all_character_reference_frames")
             disabled.append("character_reference")
-        if not self.nai_model_supports_vibe():
+        if "vibe_transfer" in selected and not self.nai_model_supports_vibe():
             self._call_context("_disable_all_vibe_frames")
             disabled.append("vibe_transfer")
         return disabled

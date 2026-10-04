@@ -160,7 +160,7 @@ class HeadlessVibeTransferService:
             print(f"[ERROR] Vibe Transfer settings load failed: {exc}")
             return [], False
 
-    def _frame_from_persisted(self, raw: Any) -> dict[str, Any] | None:
+    def _frame_from_persisted(self, raw: Any, *, use_storage_metadata: bool = True) -> dict[str, Any] | None:
         if not isinstance(raw, dict):
             return None
         encodings = raw.get("vibe_encodings") if isinstance(raw.get("vibe_encodings"), dict) else {}
@@ -171,7 +171,7 @@ class HeadlessVibeTransferService:
         # 영속된 분) storage json에서 보강(SSOT=storage). 재시작 후에도 이미지 없는 번들 vibe는
         # IE 잠긴 채 유지된다.
         no_source = bool(raw.get("no_source"))
-        if not no_source and file_hash and source_model:
+        if use_storage_metadata and not no_source and file_hash and source_model:
             try:
                 _jp = self.context._existing_save_path("vibe_transfer", source_model, f"{file_hash}.json")
                 if _jp.exists():
@@ -229,7 +229,29 @@ class HeadlessVibeTransferService:
             "vibe_encodings": {str(k): str(v) for k, v in (frame.get("vibe_encodings") or {}).items() if v},
         }
 
-    def _persist(self) -> None:
+    def capture_snapshot(self) -> dict[str, Any]:
+        self._ensure_loaded()
+        frames = [self._persistable_frame(frame) for frame in self.context.vibe_transfer_frames]
+        for frame in frames:
+            frame["target_model"] = frame["target_model"] or self.context._current_model_key()
+        return {"normalize_strength": bool(self.context.vibe_transfer_normalize), "frames": frames}
+
+    def restore_snapshot(self, section: Any, image_directory: Path) -> None:
+        from core.snapshot_reference_transfer import (
+            merge_reference_frames, restore_reference_images, validate_reference_section,
+        )
+
+        raw_frames = validate_reference_section(section, "vibe_transfer")
+        self._ensure_loaded()
+        restore_reference_images(self.context, "vibe_transfer", raw_frames, image_directory)
+        # 스냅샷 값은 완전한 기록이므로 현재 Storage의 보강값으로 덮지 않는다.
+        frames = [self._frame_from_persisted(raw, use_storage_metadata=False) for raw in raw_frames]
+        # enable 액션의 상대 도구 끄기를 거치면 스냅샷에 기록된 두 도구의 상태가 바뀐다.
+        self.context.vibe_transfer_frames = merge_reference_frames(self.context.vibe_transfer_frames, frames)
+        self.context.vibe_transfer_normalize = section["normalize_strength"]
+        self._persist(raise_errors=True)
+
+    def _persist(self, *, raise_errors: bool = False) -> None:
         context = self.context
         mode = self._settings_mode()
         try:
@@ -239,6 +261,9 @@ class HeadlessVibeTransferService:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
         except Exception as exc:
+            # 스냅샷은 구역별 실패를 보고해야 한다. 기존 편집 경로의 오류 처리는 유지한다.
+            if raise_errors:
+                raise
             print(f"[ERROR] Vibe Transfer settings save failed: {exc}")
 
     @staticmethod

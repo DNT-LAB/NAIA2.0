@@ -96,7 +96,7 @@ export function createPromptEngineeringActions({
 
   async function deleteCurrentPreset() {
     const preset = document.getElementById('modPreset')?.value || '';
-    if (!preset || preset === 'default' || preset === '*randomized') {
+    if (!preset || preset === 'default' || preset === '*randomized' || preset === '*snapshot') {
       showToast('This preset cannot be deleted', 'error');
       return;
     }

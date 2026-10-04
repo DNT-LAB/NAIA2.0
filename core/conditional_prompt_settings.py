@@ -150,7 +150,8 @@ def normalize_rules_undo(raw: Any = None) -> dict[str, Any]:
         if not isinstance(entry, dict):
             continue
         text = entry.get("text")
-        if not isinstance(text, str) or not text.strip():
+        # 스냅샷은 빈 칸도 교체 전 상태로 보관한다. 기존 로드/타이핑의 생략 규칙은 유지한다.
+        if not isinstance(text, str) or (not text.strip() and not str(entry.get("reason") or "").startswith("스냅샷 불러오기: ")):
             continue
         out[slot] = {
             "text": text,

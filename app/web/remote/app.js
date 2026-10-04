@@ -1219,7 +1219,7 @@ import('./js/features/assistPanel.mjs?v=20261001-agefix2')
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260927-sameval')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20261004-randomizers')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -3636,7 +3636,7 @@ function refreshHiresPresetSwapOptions(m) {
   const validValues = new Set(['']);
   for (const raw of presets) {
     const name = String(raw || '');
-    if (!name || name === '*randomized' || name === '(프리셋 없음)') continue;
+    if (!name || isRandomizedPresetName(name) || name === '(프리셋 없음)') continue;
     const s = summaryMap.get(name);
     if (s && String(s.api_mode || '').toUpperCase() !== 'WEBUI') continue;
     if (!s && Array.isArray(m?.preset_summaries)) continue;
@@ -10829,7 +10829,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260926-noollama')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261004-randomizers')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -10845,7 +10845,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260926-noollama')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261004-randomizers')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -11630,7 +11630,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260927-cpus
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260926-noollama')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261004-randomizers')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
@@ -11834,8 +11834,9 @@ let pendingModelForNewPreset = '';
 function currentPresetNameForModelGuard() {
   const select = document.getElementById('modPreset');
   const name = select ? String(select.value || '') : '';
-  // 실제 프리셋일 때만 묻는다 - 랜덤 슬롯/미선택은 고칠 대상이 없다.
-  if (!name || name === '*randomized' || name === '(프리셋 없음)') return '';
+  // 실제 프리셋일 때만 묻는다 - 미선택은 고칠 대상이 없고, 랜덤 칸은 '복제' 할 것이 아니다
+  // (더한 랜덤 칸은 묻지 않고 그 칸이 기억하는 모델을 바로 고친다 - 서버의 파라미터 반영이 맡는다).
+  if (!name || isRandomizedPresetName(name) || name === '(프리셋 없음)') return '';
   return name;
 }
 
@@ -12433,6 +12434,16 @@ function saveCurrentPromptPreset() {
 
 function createPromptPreset() {
   if (promptEngineeringActions) promptEngineeringActions.createPreset();
+}
+
+function createRandomizedSlot() {
+  if (promptEngineeringActions) promptEngineeringActions.createRandomizedSlot();
+}
+
+/** 랜덤 칸의 이름인가(`*randomized` · `*randomized:이름`). `*` 로 시작하는 이름은 프리셋 파일이 될 수 없어
+ *  진짜 프리셋과 겹치지 않는다. ⚠️ `=== '*randomized'` 로 묻지 않는다 - 그건 기본 칸 하나만 맞는다. */
+function isRandomizedPresetName(name) {
+  return String(name || '').startsWith('*randomized');
 }
 
 function applyRecommendedPromptPreset() {
@@ -14034,8 +14045,10 @@ function slashPresetChoices(activeGroup = '') {
   const wanted = filters ? (activeGroup || slashPresetCurrentGroup(m)) : '';
   const rows = (m.preset_options || []).filter(name => {
     if (!wanted) return true;
-    if (String(name) === '*randomized' || String(name) === 'default') return true;   // 합성 이름 - 모델이 없다
+    if (String(name) === 'default') return true;                                      // 합성 이름 - 모델이 없다
     const s = summaries.get(String(name));
+    // 랜덤 칸: 기본 칸은 모델을 기억하지 않아 어느 갈래에서든 보이고, 더한 칸은 기억하는 모델의 갈래에 보인다.
+    if (isRandomizedPresetName(name) && !s?.model_label) return true;
     return String(s?.model_group || 'etc') === wanted;
   }).map(name => {
     const s = summaries.get(String(name));

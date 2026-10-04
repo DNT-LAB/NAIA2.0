@@ -71,6 +71,42 @@ def sanitize_preset_name(preset_name: str) -> str:
     return sanitized.strip()
 
 
+# ---- 랜덤 칸(랜더마이저) 이름 ------------------------------------------------
+#
+# 프리셋 목록 끝에 붙는 **합성 이름**이다 - 파일이 없다. `*` 는 프리셋 이름에 쓸 수 없는 글자라
+# (`sanitize_preset_name` 이 지운다) 진짜 프리셋과 겹치지 않는다.
+#   `*randomized`         기본 칸. 예전부터 있던 것 - 풀 하나, 생성 설정은 기억하지 않는다(고르면 그대로 둔다).
+#   `*randomized:<이름>`  사용자가 더한 칸(사용자 지정 2026-10-04: "10개든 20개든 NAI4.5 나 NAI5.0 에 맞게").
+#                         칸마다 풀 · Inject 가 따로이고, 프리셋처럼 **생성 설정(모델 · 파라미터 · 네거티브)을
+#                         기억한다** - 고르는 순간 그 설정으로 넘어가고, 모델 배지와 갈래 필터에도 실린다.
+# ⚠️ '랜덤 칸인가' 를 문자열 비교로 묻지 않는다(`== "*randomized"` 는 기본 칸만 맞는다) - 아래 판정을 쓴다.
+#    기본 칸만 가리킬 때에만 `RANDOMIZED_PRESET` 과 견준다(생성 설정을 기억하지 않는 것은 그 칸뿐이다).
+RANDOMIZED_PRESET = "*randomized"
+RANDOMIZED_SLOT_PREFIX = "*randomized:"
+# randomized_pool.json 에서 더한 칸들이 사는 최상위 키(모드 이름과 겹치지 않는다).
+RANDOMIZED_SLOTS_KEY = "slots"
+
+
+def is_randomized_preset_name(name: Any) -> bool:
+    """기본 칸이든 더한 칸이든 - 랜덤 칸의 이름이면 참."""
+    text = str(name or "")
+    return text == RANDOMIZED_PRESET or bool(randomized_slot_label(text))
+
+
+def randomized_slot_label(name: Any) -> str:
+    """더한 칸의 이름 부분(`*randomized:5.0` -> `5.0`). 기본 칸 · 랜덤 칸이 아닌 것은 빈 문자열."""
+    text = str(name or "")
+    if not text.startswith(RANDOMIZED_SLOT_PREFIX):
+        return ""
+    return sanitize_preset_name(text[len(RANDOMIZED_SLOT_PREFIX):])
+
+
+def randomized_slot_name(label: Any) -> str:
+    """이름 부분 -> 목록에 보이는 이름. 빈 이름은 기본 칸이다."""
+    clean = sanitize_preset_name(str(label or ""))
+    return f"{RANDOMIZED_SLOT_PREFIX}{clean}" if clean else RANDOMIZED_PRESET
+
+
 def _default_save_root() -> Path:
     user_data_dir = os.environ.get("NAIA_USER_DATA_DIR")
     if user_data_dir:
@@ -350,6 +386,45 @@ def save_last_used_preset(mode: str | None, preset_name: str, *, save_root: str 
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# last_used_preset.json 에서 '마지막에 보던 랜덤 칸' 이 사는 최상위 키(모드 이름과 겹치지 않는다).
+LAST_USED_RANDOMIZED_KEY = "randomized"
+
+
+def load_last_used_randomized(mode: str | None = None, *, save_root: str | Path | None = None) -> str:
+    """마지막에 보던 랜덤 칸(보고 있지 않았으면 빈 문자열).
+
+    마지막 **프리셋**(`load_last_used_preset`)과 따로 적는다 - 랜덤 칸은 Prefix 밖의 설정을 직전 프리셋에서 빌려
+    쓰므로, 다시 켤 때 둘 다 필요하다(프리셋 = 빌려 올 곳, 랜덤 칸 = 지금 서 있는 곳).
+    """
+    mode_key = normalize_prompt_engineering_mode(mode)
+    path = _existing_save_file(Path("presets") / "last_used_preset.json", save_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        return ""
+    by_mode = data.get(LAST_USED_RANDOMIZED_KEY) if isinstance(data, dict) else None
+    value = by_mode.get(mode_key) if isinstance(by_mode, dict) else ""
+    return str(value) if value else ""
+
+
+def save_last_used_randomized(mode: str | None, name: str, *, save_root: str | Path | None = None) -> None:
+    """마지막에 보던 랜덤 칸을 적는다(빈 문자열 = 랜덤 칸을 떠났다)."""
+    mode_key = normalize_prompt_engineering_mode(mode)
+    path = last_used_preset_file(save_root=save_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    by_mode = data.get(LAST_USED_RANDOMIZED_KEY)
+    by_mode = by_mode if isinstance(by_mode, dict) else {}
+    by_mode[mode_key] = str(name or "")
+    data[LAST_USED_RANDOMIZED_KEY] = by_mode
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def randomized_pool_file(*, save_root: str | Path | None = None) -> Path:
     return _coerce_save_root(save_root) / "presets" / "randomized_pool.json"
 
@@ -369,13 +444,61 @@ def _write_randomized_pool_data(data: dict[str, Any], save_root: str | Path | No
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _randomized_pool_entry(data: dict[str, Any], mode_key: str) -> tuple[list, str, str, bool]:
-    """Extract (pool, wildcard_front, wildcard_back, wildcard_enabled) for a mode.
+def _randomized_raw_entry(data: dict[str, Any], mode_key: str, slot: str = "") -> Any:
+    """그 칸이 파일에 적혀 있는 모양 그대로(`slot` = 더한 칸의 이름, 빈 문자열 = 기본 칸).
+
+    기본 칸은 예전 자리 `data[mode]` 에 그대로 있고, 더한 칸은 `data["slots"][mode][이름]` 에 산다.
+    ⚠️ 더한 칸을 `data[mode]` 안에 넣지 않는다 - 옛 판은 그 dict 를 네 키로 **다시 써서**
+       (`_randomized_entry_dict`) 모르는 키를 지운다. 최상위 키는 읽고-고치고-쓰는 동안 그대로 남으므로,
+       판을 내렸다 올려도 더한 칸이 살아 있다.
+    """
+    if not isinstance(data, dict):
+        return None
+    if not slot:
+        return data.get(mode_key)
+    slots = data.get(RANDOMIZED_SLOTS_KEY)
+    by_mode = slots.get(mode_key) if isinstance(slots, dict) else None
+    return by_mode.get(slot) if isinstance(by_mode, dict) else None
+
+
+def _store_randomized_entry(
+    data: dict[str, Any], mode_key: str, slot: str, entry: dict[str, Any], *, main_settings: Any = None,
+) -> None:
+    """칸 하나를 제자리에 적는다. 더한 칸은 생성 설정(`main_settings`)을 함께 쥔다 - 안 주면 있던 것을 지킨다
+    (풀이나 Inject 만 고치러 온 길이 생성 설정을 지우면 안 된다)."""
+    if not slot:
+        data[mode_key] = entry
+        return
+    slots = data.get(RANDOMIZED_SLOTS_KEY)
+    slots = slots if isinstance(slots, dict) else {}
+    by_mode = slots.get(mode_key)
+    by_mode = by_mode if isinstance(by_mode, dict) else {}
+    if main_settings is None:
+        previous = by_mode.get(slot)
+        main_settings = previous.get("main_settings") if isinstance(previous, dict) else {}
+    by_mode[slot] = {**entry, "main_settings": main_settings if isinstance(main_settings, dict) else {}}
+    slots[mode_key] = by_mode
+    data[RANDOMIZED_SLOTS_KEY] = slots
+
+
+def _randomized_slot_labels(data: dict[str, Any], mode_key: str) -> list[str]:
+    """이 모드에 더한 칸의 이름 - 파일에 적힌 차례(= 만든 차례)."""
+    slots = data.get(RANDOMIZED_SLOTS_KEY) if isinstance(data, dict) else None
+    by_mode = slots.get(mode_key) if isinstance(slots, dict) else None
+    if not isinstance(by_mode, dict):
+        return []
+    # 이름이 `sanitize_preset_name` 을 그대로 통과하는 것만 - 손으로 고친 파일의 이상한 키는 목록에 올리지 않는다.
+    return [label for label, entry in by_mode.items()
+            if isinstance(label, str) and label and label == sanitize_preset_name(label) and isinstance(entry, dict)]
+
+
+def _randomized_pool_entry(data: dict[str, Any], mode_key: str, slot: str = "") -> tuple[list, str, str, bool]:
+    """Extract (pool, wildcard_front, wildcard_back, wildcard_enabled) for a mode (and slot).
 
     Accepts the legacy list format (``data[mode] = [...]``) and the dict format
     (``{"pool": [...], "wildcard_front": str, "wildcard_back": str, "wildcard_enabled": bool}``).
     The earlier single-slot ``"wildcard"`` key is migrated into ``wildcard_back``."""
-    raw = data.get(mode_key) if isinstance(data, dict) else None
+    raw = _randomized_raw_entry(data, mode_key, slot)
     if isinstance(raw, dict):
         pool = raw.get("pool", [])
         front = raw.get("wildcard_front", "")
@@ -390,16 +513,8 @@ def _randomized_pool_entry(data: dict[str, Any], mode_key: str) -> tuple[list, s
     return pool, str(front or ""), str(back or ""), bool(enabled)
 
 
-def load_randomized_pool(
-    mode: str | None,
-    preset_names: list[str] | None = None,
-    *,
-    save_root: str | Path | None = None,
-) -> list[str]:
-    mode_key = normalize_prompt_engineering_mode(mode)
-    data = _read_randomized_pool_data(save_root)
-    pool, _front, _back, _enabled = _randomized_pool_entry(data, mode_key)
-    valid = set(preset_names or list_preset_names(mode_key, save_root=save_root))
+def _restore_randomized_pool(pool: list, valid: set[str]) -> list[str]:
+    """파일의 풀에서 지금도 있는 프리셋만, 차례대로 한 번씩."""
     seen = set()
     restored = []
     for raw_name in pool:
@@ -415,6 +530,20 @@ def load_randomized_pool(
     return restored
 
 
+def load_randomized_pool(
+    mode: str | None,
+    preset_names: list[str] | None = None,
+    *,
+    save_root: str | Path | None = None,
+    slot: str = "",
+) -> list[str]:
+    mode_key = normalize_prompt_engineering_mode(mode)
+    data = _read_randomized_pool_data(save_root)
+    pool, _front, _back, _enabled = _randomized_pool_entry(data, mode_key, slot)
+    valid = set(preset_names or list_preset_names(mode_key, save_root=save_root))
+    return _restore_randomized_pool(pool, valid)
+
+
 def _randomized_entry_dict(pool, front, back, enabled) -> dict[str, Any]:
     return {
         "pool": list(pool or []),
@@ -424,29 +553,87 @@ def _randomized_entry_dict(pool, front, back, enabled) -> dict[str, Any]:
     }
 
 
-def save_randomized_pool(mode: str | None, pool: list[str], *, save_root: str | Path | None = None) -> None:
+def save_randomized_pool(
+    mode: str | None, pool: list[str], *, save_root: str | Path | None = None, slot: str = ""
+) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
     data = _read_randomized_pool_data(save_root)
-    _pool, front, back, enabled = _randomized_pool_entry(data, mode_key)
-    data[mode_key] = _randomized_entry_dict(pool, front, back, enabled)
+    _pool, front, back, enabled = _randomized_pool_entry(data, mode_key, slot)
+    _store_randomized_entry(data, mode_key, slot, _randomized_entry_dict(pool, front, back, enabled))
     _write_randomized_pool_data(data, save_root)
 
 
-def load_randomized_wildcard(mode: str | None, *, save_root: str | Path | None = None) -> tuple[str, str, bool]:
+def load_randomized_wildcard(
+    mode: str | None, *, save_root: str | Path | None = None, slot: str = ""
+) -> tuple[str, str, bool]:
     mode_key = normalize_prompt_engineering_mode(mode)
     data = _read_randomized_pool_data(save_root)
-    _pool, front, back, enabled = _randomized_pool_entry(data, mode_key)
+    _pool, front, back, enabled = _randomized_pool_entry(data, mode_key, slot)
     return front, back, enabled
 
 
 def save_randomized_wildcard(
-    mode: str | None, front: str, back: str, enabled: bool, *, save_root: str | Path | None = None
+    mode: str | None, front: str, back: str, enabled: bool, *, save_root: str | Path | None = None,
+    slot: str = "",
 ) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
     data = _read_randomized_pool_data(save_root)
-    pool, _front, _back, _enabled = _randomized_pool_entry(data, mode_key)
-    data[mode_key] = _randomized_entry_dict(pool, front, back, enabled)
+    pool, _front, _back, _enabled = _randomized_pool_entry(data, mode_key, slot)
+    _store_randomized_entry(data, mode_key, slot, _randomized_entry_dict(pool, front, back, enabled))
     _write_randomized_pool_data(data, save_root)
+
+
+def load_randomized_slots(
+    mode: str | None,
+    preset_names: list[str] | None = None,
+    *,
+    save_root: str | Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """이 모드에 더한 랜덤 칸 전부 - `{이름: {pool, wildcard_*, main_settings}}`, 만든 차례. 파일은 한 번만 읽는다."""
+    mode_key = normalize_prompt_engineering_mode(mode)
+    data = _read_randomized_pool_data(save_root)
+    valid = set(preset_names or list_preset_names(mode_key, save_root=save_root))
+    slots: dict[str, dict[str, Any]] = {}
+    for label in _randomized_slot_labels(data, mode_key):
+        pool, front, back, enabled = _randomized_pool_entry(data, mode_key, label)
+        raw = _randomized_raw_entry(data, mode_key, label)
+        main = raw.get("main_settings") if isinstance(raw, dict) else None
+        slots[label] = {
+            **_randomized_entry_dict(_restore_randomized_pool(pool, valid), front, back, enabled),
+            "main_settings": dict(main) if isinstance(main, dict) else {},
+        }
+    return slots
+
+
+def save_randomized_slot(
+    mode: str | None, slot: str, entry: dict[str, Any], *, save_root: str | Path | None = None
+) -> None:
+    """더한 칸 하나를 통째로 적는다(만들 때 · 생성 설정을 고쳤을 때)."""
+    mode_key = normalize_prompt_engineering_mode(mode)
+    label = sanitize_preset_name(str(slot or ""))
+    if not label:
+        raise ValueError("Randomized slot name is required")
+    data = _read_randomized_pool_data(save_root)
+    main = entry.get("main_settings") if isinstance(entry, dict) else None
+    _store_randomized_entry(
+        data, mode_key, label,
+        _randomized_entry_dict(
+            entry.get("pool"), entry.get("wildcard_front"), entry.get("wildcard_back"), entry.get("wildcard_enabled")),
+        main_settings=normalize_preset_main_settings(copy.deepcopy(main)) if isinstance(main, dict) else {},
+    )
+    _write_randomized_pool_data(data, save_root)
+
+
+def delete_randomized_slot(mode: str | None, slot: str, *, save_root: str | Path | None = None) -> bool:
+    mode_key = normalize_prompt_engineering_mode(mode)
+    data = _read_randomized_pool_data(save_root)
+    slots = data.get(RANDOMIZED_SLOTS_KEY)
+    by_mode = slots.get(mode_key) if isinstance(slots, dict) else None
+    if not isinstance(by_mode, dict) or slot not in by_mode:
+        return False
+    del by_mode[slot]
+    _write_randomized_pool_data(data, save_root)
+    return True
 
 
 def read_preset_data(
@@ -477,6 +664,8 @@ def preset_preview_file(context: Any, preset_name: str, mode_key: str = "") -> P
     save/presets/favorites/도 함께 본다. prompt_tools_routes의 GET 라우트와
     상태 요약이 같은 해석을 쓰도록 core에 둔다.
     """
+    if is_randomized_preset_name(preset_name):
+        return None
     safe_name = Path(str(preset_name or "").strip()).name
     if not safe_name or safe_name == "*randomized":
         return None
@@ -585,6 +774,8 @@ def preset_thumbnail_url_map(context: Any, names: list[str], mode_key: str = "")
         return None
 
     for name in names:
+        if is_randomized_preset_name(name):
+            continue
         safe_name = Path(str(name or "").strip()).name
         if not safe_name or safe_name == "*randomized":
             continue
@@ -671,6 +862,17 @@ class PromptEngineeringHeadlessStore:
 
         randomized_pool = self.load_randomized_pool(mode, preset_names)
         wc_front, wc_back, wc_enabled = self.load_randomized_wildcard(mode)
+        randomized_slots = load_randomized_slots(mode, preset_names, save_root=self._save_root)
+        # 마지막에 **랜덤 칸**을 보고 있었으면 그 칸으로 연다.
+        # ⚠️ 안 그러면 다시 켰을 때 '직전 프리셋' 이 현재 프리셋으로 서는데 생성 설정은 랜덤 칸에서 쓰던 그대로라,
+        #    다음 저장 길목이 그 설정을 **직전 프리셋 파일에 써 넣는다**(실측 10-04: 4.5 프리셋의 모델이 5.0 이 됐다).
+        #    Prefix 밖의 설정(전처리 옵션 · Auto-Hide)은 위에서 읽은 직전 프리셋의 것 그대로다 - 랜덤 칸은 원래 그것을
+        #    빌려 쓴다. Prefix · Postfix 는 서비스가 첫 상태를 낼 때 한 번 굴려 채운다(`randomized_needs_roll`).
+        last_randomized = load_last_used_randomized(mode, save_root=self._save_root)
+        needs_roll = False
+        if last_randomized == RANDOMIZED_PRESET or randomized_slot_label(last_randomized) in randomized_slots:
+            current_preset = randomized_slot_name(randomized_slot_label(last_randomized))
+            needs_roll = True
         return {
             "settings": settings,
             "preset_list": preset_names,
@@ -679,16 +881,55 @@ class PromptEngineeringHeadlessStore:
             "randomized_wildcard_front": wc_front,
             "randomized_wildcard_back": wc_back,
             "randomized_wildcard_enabled": wc_enabled,
+            # 위 넷은 기본 칸(`*randomized`)의 것 - 예전 자리 그대로다. 더한 칸은 여기에 이름별로 산다.
+            "randomized_slots": randomized_slots,
+            "randomized_needs_roll": needs_roll,
         }
 
     def list_preset_names(self, mode: str | None = None) -> list[str]:
         return list_preset_names(mode, save_root=self._save_root)
 
     def read_preset_data(self, preset_name: str, mode: str | None = None) -> dict[str, Any]:
+        # ⚠️ 랜덤 칸은 **파일로 가지 않는다.** 이름을 그대로 넘기면 `sanitize_preset_name` 이 `*` 를 지워
+        #    `randomized.json` 이라는 **남의 프리셋**을 읽는다(그런 이름의 프리셋이 있으면 그 설정이 적용된다).
+        if is_randomized_preset_name(preset_name):
+            return self._randomized_preset_data(str(preset_name), mode)
         return read_preset_data(preset_name, mode, save_root=self._save_root)
 
     def write_preset_data(self, preset_name: str, mode: str | None, data: dict[str, Any]) -> None:
+        if is_randomized_preset_name(preset_name):
+            self._write_randomized_preset_data(str(preset_name), mode, data)
+            return
         write_preset_data(preset_name, mode, data, save_root=self._save_root)
+
+    def _randomized_preset_data(self, name: str, mode: str | None = None) -> dict[str, Any]:
+        """랜덤 칸을 프리셋 모양으로 돌려준다 - **생성 설정만** 있다(Prefix · Postfix 는 뽑을 때 정해진다).
+
+        기본 칸은 기억하는 것이 없어 빈 dict 다(예전 그대로: 고르면 생성 설정을 건드리지 않는다).
+        더한 칸은 빈 설정이어도 dict 를 준다 - 부르는 쪽이 `if not data` 로 '없는 프리셋' 을 가른다.
+        """
+        label = randomized_slot_label(name)
+        entry = (self.state(mode).get("randomized_slots") or {}).get(label) if label else None
+        if not isinstance(entry, dict):
+            return {}
+        return {
+            "api_mode": self.mode(mode),
+            "randomized": True,
+            "module_settings": {},
+            "main_settings": copy.deepcopy(entry.get("main_settings") or {}),
+        }
+
+    def _write_randomized_preset_data(self, name: str, mode: str | None, data: dict[str, Any]) -> None:
+        """더한 칸에 생성 설정을 적는다. module_settings 는 받지 않는다 - 그 칸의 Prefix · Postfix 는 뽑힌
+        프리셋의 것이라 저장할 것이 아니다. 기본 칸에는 아무것도 적지 않는다."""
+        mode_key = self.mode(mode)
+        label = randomized_slot_label(name)
+        entry = (self.state(mode_key).get("randomized_slots") or {}).get(label) if label else None
+        if not isinstance(entry, dict):
+            return
+        main = (data or {}).get("main_settings")
+        entry["main_settings"] = normalize_preset_main_settings(copy.deepcopy(main)) if isinstance(main, dict) else {}
+        save_randomized_slot(mode_key, label, entry, save_root=self._save_root)
 
     def load_mode_settings(self, mode: str | None = None) -> dict[str, Any]:
         return load_mode_settings(mode, save_root=self._save_root)
@@ -705,14 +946,16 @@ class PromptEngineeringHeadlessStore:
     def load_randomized_pool(self, mode: str | None, preset_names: list[str] | None = None) -> list[str]:
         return load_randomized_pool(mode, preset_names, save_root=self._save_root)
 
-    def save_randomized_pool(self, mode: str | None, pool: list[str]) -> None:
-        save_randomized_pool(mode, pool, save_root=self._save_root)
+    def save_randomized_pool(self, mode: str | None, pool: list[str], *, slot: str = "") -> None:
+        save_randomized_pool(mode, pool, save_root=self._save_root, slot=slot)
 
     def load_randomized_wildcard(self, mode: str | None = None) -> tuple[str, str, bool]:
         return load_randomized_wildcard(mode, save_root=self._save_root)
 
-    def save_randomized_wildcard(self, mode: str | None, front: str, back: str, enabled: bool) -> None:
-        save_randomized_wildcard(mode, front, back, enabled, save_root=self._save_root)
+    def save_randomized_wildcard(
+        self, mode: str | None, front: str, back: str, enabled: bool, *, slot: str = ""
+    ) -> None:
+        save_randomized_wildcard(mode, front, back, enabled, save_root=self._save_root, slot=slot)
 
     def save_e621_settings(self, settings: dict[str, Any]) -> None:
         save_e621_settings(settings, save_root=self._save_root)
@@ -747,11 +990,112 @@ class PromptEngineeringHeadlessStore:
         names = list(self.state(mode)["preset_list"])
         if "default" not in names:
             names.insert(0, "default")
-        return [*names, "*randomized"]
+        return [*names, *self.randomized_names(mode)]
+
+    # ---- 랜덤 칸 ----------------------------------------------------------------
+
+    def randomized_names(self, mode: str | None = None) -> list[str]:
+        """이 모드의 랜덤 칸 이름 - 기본 칸이 맨 앞, 더한 칸은 만든 차례."""
+        slots = self.state(mode).get("randomized_slots") or {}
+        return [RANDOMIZED_PRESET, *(randomized_slot_name(label) for label in slots)]
+
+    def has_randomized(self, name: str, mode: str | None = None) -> bool:
+        if str(name or "") == RANDOMIZED_PRESET:
+            return True
+        label = randomized_slot_label(name)
+        return bool(label) and label in (self.state(mode).get("randomized_slots") or {})
+
+    def active_randomized_name(self, mode: str | None = None) -> str:
+        """풀 · Inject 편집이 향하는 칸: 지금 프리셋이 랜덤 칸이면 그 칸, 아니면 기본 칸(예전 그대로)."""
+        current = str(self.state(mode).get("current_preset") or "")
+        if is_randomized_preset_name(current) and self.has_randomized(current, mode):
+            return current
+        return RANDOMIZED_PRESET
+
+    def randomized_view(self, name: str | None = None, mode: str | None = None) -> dict[str, Any]:
+        """그 칸의 풀 · Inject · 생성 설정(사본). 이름을 안 주면 편집이 향하는 칸."""
+        state = self.state(mode)
+        target = str(name) if name else self.active_randomized_name(mode)
+        label = randomized_slot_label(target)
+        if label:
+            entry = (state.get("randomized_slots") or {}).get(label) or {}
+            return {
+                "name": randomized_slot_name(label),
+                "pool": list(entry.get("pool") or []),
+                "wildcard_front": str(entry.get("wildcard_front") or ""),
+                "wildcard_back": str(entry.get("wildcard_back") or ""),
+                "wildcard_enabled": bool(entry.get("wildcard_enabled")),
+                "main_settings": copy.deepcopy(entry.get("main_settings") or {}),
+            }
+        return {
+            "name": RANDOMIZED_PRESET,
+            "pool": list(state["randomized_preset_list"]),
+            "wildcard_front": str(state.get("randomized_wildcard_front") or ""),
+            "wildcard_back": str(state.get("randomized_wildcard_back") or ""),
+            "wildcard_enabled": bool(state.get("randomized_wildcard_enabled")),
+            "main_settings": {},
+        }
+
+    def _randomized_pool_ref(self, state: dict[str, Any], name: str) -> list[str]:
+        """그 칸의 **살아 있는** 풀(같은 list). 기본 칸은 예전 자리를 그대로 쓴다."""
+        label = randomized_slot_label(name)
+        return state["randomized_slots"][label]["pool"] if label else state["randomized_preset_list"]
+
+    def create_randomized_slot(
+        self,
+        label: str,
+        mode: str | None = None,
+        *,
+        main_settings: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
+        """랜덤 칸을 하나 더한다. 지금의 생성 설정을 그 칸이 기억하고(프리셋 만들기와 같다) 그 칸으로 넘어간다 -
+        풀은 비어 있으니 곧바로 채우게."""
+        mode_key = self.mode(mode)
+        clean = sanitize_preset_name(str(label or ""))
+        if not clean:
+            return False, "랜덤 칸 이름이 비어 있습니다."
+        state = self.state(mode_key)
+        slots = state.setdefault("randomized_slots", {})
+        if clean in slots:
+            return False, f"이미 있는 랜덤 칸입니다: {clean}"
+        entry = {
+            **_randomized_entry_dict([], "", "", False),
+            "main_settings": (
+                normalize_preset_main_settings(copy.deepcopy(main_settings)) if main_settings is not None else {}
+            ),
+        }
+        save_randomized_slot(mode_key, clean, entry, save_root=self._save_root)
+        slots[clean] = entry
+        name = randomized_slot_name(clean)
+        state["current_preset"] = name
+        self._remember_randomized(mode_key, name)
+        self._dirty_modes.discard(mode_key)
+        return True, name
+
+    def _remember_randomized(self, mode_key: str, name: str) -> None:
+        """마지막에 보던 랜덤 칸을 적는다(빈 문자열 = 랜덤 칸을 떠났다). 다시 켤 때 `_load_state` 가 읽는다."""
+        save_last_used_randomized(mode_key, name, save_root=self._save_root)
+
+    def delete_randomized_slot(self, name: str, mode: str | None = None) -> tuple[bool, str]:
+        mode_key = self.mode(mode)
+        label = randomized_slot_label(name)
+        if not label:
+            return False, "랜덤 프리셋 모드는 삭제할 수 없습니다."
+        state = self.state(mode_key)
+        slots = state.get("randomized_slots") or {}
+        if label not in slots:
+            return False, f"랜덤 칸을 찾을 수 없습니다: {label}"
+        delete_randomized_slot(mode_key, label, save_root=self._save_root)
+        del slots[label]
+        if state.get("current_preset") == randomized_slot_name(label):
+            # 지운 칸을 보고 있었다 - 기본 칸으로 물러난다(생성 설정 · Prefix 는 그대로 둔다).
+            state["current_preset"] = RANDOMIZED_PRESET
+            self._remember_randomized(mode_key, RANDOMIZED_PRESET)
+        return True, randomized_slot_name(label)
 
     def randomized_available_presets(self, mode: str | None = None) -> list[str]:
         state = self.state(mode)
-        selected = set(state["randomized_preset_list"])
+        selected = set(self._randomized_pool_ref(state, self.active_randomized_name(mode)))
         return [
             name for name in state["preset_list"]
             if name not in {"default", "*randomized"} and name not in selected
@@ -759,11 +1103,15 @@ class PromptEngineeringHeadlessStore:
 
     def set_preset(self, preset_name: str, mode: str | None = None) -> bool:
         state = self.state(mode)
-        name = sanitize_preset_name(preset_name) if preset_name != "*randomized" else "*randomized"
-        if name == "*randomized":
-            state["current_preset"] = "*randomized"
+        if is_randomized_preset_name(preset_name):
+            # 랜덤 칸은 살아 있는 Prefix · Postfix 를 건드리지 않는다 - 다음 Random 이 풀에서 뽑아 채운다.
+            if not self.has_randomized(str(preset_name), mode):
+                return False
+            state["current_preset"] = randomized_slot_name(randomized_slot_label(preset_name))
+            self._remember_randomized(self.mode(mode), state["current_preset"])
             self._dirty_modes.discard(self.mode(mode))
             return True
+        name = sanitize_preset_name(preset_name)
         if name not in state["preset_list"]:
             return False
         mode_key = self.mode(mode)
@@ -776,6 +1124,8 @@ class PromptEngineeringHeadlessStore:
         base = default_prompt_engineering_settings(save_root=self._save_root)
         base = merge_settings(base, self.load_mode_settings(mode_key))
         state["settings"] = merge_settings(base, preset_data.get("module_settings") or {})
+        if is_randomized_preset_name(state.get("current_preset")):
+            self._remember_randomized(mode_key, "")      # 랜덤 칸을 떠났다 - 다시 켜면 이 프리셋으로 연다
         state["current_preset"] = name
         self.save_last_used_preset(self.mode(mode), name)
         self._dirty_modes.discard(self.mode(mode))
@@ -801,6 +1151,14 @@ class PromptEngineeringHeadlessStore:
         name = state["current_preset"]
         if name in {"", "(프리셋 없음)", "*randomized"}:
             return False, "저장할 현재 프리셋이 없습니다."
+        if is_randomized_preset_name(name):
+            # 더한 랜덤 칸 - **생성 설정만** 기억한다. 살아 있는 Prefix · Postfix 는 뽑힌 프리셋의 것이라 저장할
+            # 것이 아니고, 마지막 프리셋으로도 적지 않는다(랜덤 칸은 다음 실행에 이어지지 않는다 - 기본 칸과 같다).
+            if not self.has_randomized(name, mode_key):
+                return False, "저장할 현재 프리셋이 없습니다."
+            if main_settings is not None:
+                self.write_preset_data(name, mode_key, {"main_settings": main_settings})
+            return True, name
         data = self.read_preset_data(name, mode_key)
         data["api_mode"] = mode_key
         if write_module_settings:
@@ -885,6 +1243,9 @@ class PromptEngineeringHeadlessStore:
 
     def delete_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
+        # ⚠️ 이름을 다듬기 **전에** 가른다 - `sanitize_preset_name` 은 `*` · `:` 를 지워 랜덤 칸을 엉뚱한 프리셋 이름으로 만든다.
+        if is_randomized_preset_name(preset_name):
+            return self.delete_randomized_slot(str(preset_name), mode_key)
         name = sanitize_preset_name(preset_name)
         if not name:
             return False, "삭제할 프리셋 이름이 없습니다."
@@ -899,30 +1260,37 @@ class PromptEngineeringHeadlessStore:
         self.refresh(mode_key)
         return True, name
 
+    # ⚠️ 아래 넷은 **지금 보는 랜덤 칸**(`active_randomized_name`)을 고친다. 그 칸을 고른 채로만 관리 화면이
+    #    열리므로 화면이 본 칸과 같다 - 랜덤 칸을 고르지 않았으면 기본 칸이다(예전 그대로).
     def add_randomized_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         state = self.state(mode_key)
+        target = self.active_randomized_name(mode_key)
         name = sanitize_preset_name(preset_name)
         if name not in self.randomized_available_presets(mode_key):
             return False, "랜덤 풀에 추가할 수 없는 프리셋입니다."
-        state["randomized_preset_list"].append(name)
-        self.save_randomized_pool(mode_key, state["randomized_preset_list"])
+        pool = self._randomized_pool_ref(state, target)
+        pool.append(name)
+        self.save_randomized_pool(mode_key, pool, slot=randomized_slot_label(target))
         return True, name
 
     def remove_randomized_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         state = self.state(mode_key)
+        target = self.active_randomized_name(mode_key)
         name = sanitize_preset_name(preset_name)
-        if name not in state["randomized_preset_list"]:
+        pool = self._randomized_pool_ref(state, target)
+        if name not in pool:
             return False, "랜덤 풀에 없는 프리셋입니다."
-        state["randomized_preset_list"].remove(name)
-        self.save_randomized_pool(mode_key, state["randomized_preset_list"])
+        pool.remove(name)
+        self.save_randomized_pool(mode_key, pool, slot=randomized_slot_label(target))
         return True, name
 
     def clear_randomized_presets(self, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
-        self.state(mode_key)["randomized_preset_list"] = []
-        self.save_randomized_pool(mode_key, [])
+        target = self.active_randomized_name(mode_key)
+        self._randomized_pool_ref(self.state(mode_key), target).clear()
+        self.save_randomized_pool(mode_key, [], slot=randomized_slot_label(target))
         return True, ""
 
     def set_randomized_wildcard(
@@ -930,13 +1298,20 @@ class PromptEngineeringHeadlessStore:
     ) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         state = self.state(mode_key)
+        label = randomized_slot_label(self.active_randomized_name(mode_key))
         wc_front = str(front or "")
         wc_back = str(back or "")
         en = bool(enabled)
-        state["randomized_wildcard_front"] = wc_front
-        state["randomized_wildcard_back"] = wc_back
-        state["randomized_wildcard_enabled"] = en
-        self.save_randomized_wildcard(mode_key, wc_front, wc_back, en)
+        if label:
+            entry = state["randomized_slots"][label]
+            entry["wildcard_front"] = wc_front
+            entry["wildcard_back"] = wc_back
+            entry["wildcard_enabled"] = en
+        else:
+            state["randomized_wildcard_front"] = wc_front
+            state["randomized_wildcard_back"] = wc_back
+            state["randomized_wildcard_enabled"] = en
+        self.save_randomized_wildcard(mode_key, wc_front, wc_back, en, slot=label)
         return True, ""
 
     def persist_active_settings(self, mode: str | None = None, *, force: bool = False) -> tuple[bool, str]:
@@ -949,15 +1324,17 @@ class PromptEngineeringHeadlessStore:
             return False, current
 
         settings = copy.deepcopy(state["settings"])
-        if current and current not in {"(프리셋 없음)", "*randomized"}:
+        randomized = is_randomized_preset_name(current)
+        if current and current != "(프리셋 없음)" and not randomized:
             data = self.read_preset_data(current, mode_key)
             data["api_mode"] = mode_key
             data["module_settings"] = settings
             data.setdefault("main_settings", {})
             self.write_preset_data(current, mode_key, data)
             self.save_last_used_preset(mode_key, current)
-        elif current != "*randomized":
+        elif not randomized:
             self.save_mode_settings(mode_key, settings)
+        # 랜덤 칸은 기본 칸이든 더한 칸이든 여기서 아무것도 쓰지 않는다.
         # *randomized rolls a fresh preset (and an unexpanded Randomized Wildcard token)
         # into state["settings"] every generation; that transient roll must NEVER be
         # written to the durable mode baseline, or it bleeds into unrelated presets on

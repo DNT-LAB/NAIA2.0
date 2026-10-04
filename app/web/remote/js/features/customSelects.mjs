@@ -14,6 +14,8 @@ export function createCustomSelectController({
   let syncTimer = null;
   let observer = null;
   const requestFetch = fetchFn || window.fetch?.bind(window);
+  // 랜덤 칸(`*randomized` · `*randomized:이름`)은 파일이 없는 합성 이름이다 - 본문 조회도 썸네일도 없다.
+  const isRandomizedPreset = name => String(name || '').startsWith('*randomized');
 
   function selectClasses(select) {
     const classes = Array.from(select.classList)
@@ -469,7 +471,7 @@ export function createCustomSelectController({
     if (state.select?.dataset.presetDetail !== '1') return null;
     const name = String(option?.dataset?.previewName || '').trim();
     const mode = String(option?.dataset?.previewMode || '').trim().toUpperCase();
-    if (!name || name === '*randomized' || !mode) return null;
+    if (!name || isRandomizedPreset(name) || !mode) return null;
     return {name, mode};
   }
 
@@ -676,7 +678,7 @@ export function createCustomSelectController({
     const actions = document.createElement('div');
     actions.className = 'custom-select-preview-actions';
     const identity = previewPresetIdentity(option);
-    const canManage = !!identity.name && identity.name !== '*randomized';
+    const canManage = !!identity.name && !isRandomizedPreset(identity.name);
 
     const generate = document.createElement('button');
     generate.type = 'button';
@@ -770,7 +772,7 @@ export function createCustomSelectController({
 
   async function uploadPresetThumbnail(state, option, blob) {
     const identity = previewPresetIdentity(option);
-    if (!identity.name || identity.name === '*randomized') return;
+    if (!identity.name || isRandomizedPreset(identity.name)) return;
     try {
       setPreviewBusy(state, true);
       const params = new URLSearchParams({ name: identity.name, mode: identity.mode });
@@ -846,7 +848,7 @@ export function createCustomSelectController({
 
   async function requestTemporaryThumbnail(state, option) {
     const identity = previewPresetIdentity(option);
-    if (!identity.name || identity.name === '*randomized') return;
+    if (!identity.name || isRandomizedPreset(identity.name)) return;
     try {
       setPreviewBusy(state, true);
       const response = await window.fetch('/api/prompt-engineering/preset-thumbnail/generate', {

@@ -7,6 +7,7 @@ from core.artist_anchor import expand_tags as expand_anchor_tags
 from core.prompt_context import PromptContext
 from core.prompt_engineering_settings import (
     get_prompt_engineering_store,
+    is_randomized_preset_name,
     normalize_preset_main_settings,
 )
 from core.tag_filter_helpers import apply_tag_filters
@@ -615,9 +616,12 @@ class PromptEngineeringRandomizedSubscriber:
             return
         store = get_prompt_engineering_store(self.app_context)
         state = store.state()
-        if state.get("current_preset") != "*randomized":
+        # 기본 칸이든 더한 칸이든 - 지금 고른 **그 칸의** 풀과 Inject 로 굴린다.
+        current = str(state.get("current_preset") or "")
+        if not is_randomized_preset_name(current):
             return
-        pool = list(state.get("randomized_preset_list") or [])
+        view = store.randomized_view(current)
+        pool = list(view["pool"])
         if not pool:
             print("⚠️ 랜덤 프리셋 목록이 비어있습니다")
             return
@@ -626,9 +630,9 @@ class PromptEngineeringRandomizedSubscriber:
         module_settings = dict(preset_data.get("module_settings") or {})
         updates = {}
         base_pre = str(module_settings.get("pre_prompt", ""))
-        wc_front = str(state.get("randomized_wildcard_front") or "").strip()
-        wc_back = str(state.get("randomized_wildcard_back") or "").strip()
-        wc_on = bool(state.get("randomized_wildcard_enabled"))
+        wc_front = str(view["wildcard_front"] or "").strip()
+        wc_back = str(view["wildcard_back"] or "").strip()
+        wc_on = bool(view["wildcard_enabled"])
         if wc_on and (wc_front or wc_back):
             # Rebuild the leading prompt as: <front wildcard>, <rolled preset Prefix>, <back wildcard>.
             # 1.5 컨벤션: artist 류는 앞(front), character 류는 뒤(back). 토큰(__character__ 등)은

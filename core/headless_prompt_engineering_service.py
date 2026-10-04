@@ -205,14 +205,21 @@ class HeadlessPromptEngineeringService:
 
     def state(self) -> dict[str, Any]:
         from core.prompt_engineering_settings import (
+            RANDOMIZED_PRESET,
             get_prompt_engineering_store,
+            is_randomized_preset_name,
             load_category_filter_overrides,
+            randomized_slot_label,
         )
 
         context = self.context
         store = get_prompt_engineering_store(context)
         self.ensure_first_run_recommended_preset()
         preset_mode = self._preset_mode()   # 프리셋 색인 - 관리형 ANIMA 는 "ANIMA"(api_mode 는 COMFYUI)
+        if store.state().pop("randomized_needs_roll", False):
+            # 랜덤 칸으로 열렸다(다시 켰거나 목록을 다시 읽었다). 살아 있는 Prefix · Postfix 는 직전 프리셋의 것이라
+            # 그 칸의 풀에서 한 번 굴려 채운다 - 고를 때 굴리는 것과 같은 이유다.
+            self._roll_randomized_preset()
         settings = store.collect_settings()
         _runtime_paths = getattr(context, "runtime_paths", None)
         # 카테고리 필터 오버라이드도 전역 디스크 SSOT — 모드 캐시가 아니라 fresh 읽는다.
@@ -225,15 +232,30 @@ class HeadlessPromptEngineeringService:
             mode: str | None = None,
             thumbnails: dict[str, str] | None = None,
         ) -> dict[str, Any]:
-            if name == "*randomized":
-                return {
+            if is_randomized_preset_name(name):
+                # 랜덤 칸. 기본 칸은 모델을 기억하지 않아 배지가 없고(화면이 어느 갈래에서든 보여 준다),
+                # 더한 칸은 기억하는 모델로 배지와 갈래가 정해진다 - 프리셋과 같은 필터에 실린다.
+                view = store.randomized_view(name)
+                summary = {
                     "name": name,
                     "api_mode": preset_mode,
+                    "randomized": True,
+                    "randomized_pool": list(view["pool"]),
                     "description": "Randomized preset pool",
                     "pre_prompt_preview": "",
                     "post_prompt_preview": "",
                     "thumbnail_url": "",
                 }
+                if preset_mode.upper() == "NAI" and randomized_slot_label(name):
+                    badge = nai_model_badge((view.get("main_settings") or {}).get("model"), context)
+                    summary.update({
+                        "model_key": badge["key"],
+                        "model_label": badge["label"],
+                        "model_family": badge["family"],
+                        "model_group": badge["group"],
+                        "model_variant": badge.get("variant", ""),
+                    })
+                return summary
             data = store.read_preset_data(name, mode or preset_mode)
             module_settings = data.get("module_settings") if isinstance(data, dict) else {}
             module_settings = module_settings if isinstance(module_settings, dict) else {}
@@ -275,6 +297,9 @@ class HeadlessPromptEngineeringService:
         current_mode_key = preset_mode
         current_thumbs = preset_thumbnail_url_map(context, list(preset_options), current_mode_key)
         webui_thumbs = preset_thumbnail_url_map(context, list(webui_presets), "WEBUI")
+        # 랜덤 칸이 여럿이다(사용자 지정 2026-10-04). 풀 · Inject 는 **지금 보는 칸**의 것을 싣는다 - 랜덤 칸을
+        # 고른 채로만 관리 화면이 열리므로 화면이 본 칸과 같다(고르지 않았으면 기본 칸).
+        randomized = store.randomized_view()
         payload = {
             "api_mode": current_mode_key,
             "preset": state["current_preset"],
@@ -290,12 +315,15 @@ class HeadlessPromptEngineeringService:
             "webui_preset_summaries": [
                 preset_summary(name, "WEBUI", thumbnails=webui_thumbs) for name in webui_presets
             ],
-            "randomized_active": state["current_preset"] == "*randomized",
-            "randomized_preset_list": list(state["randomized_preset_list"]),
+            "randomized_active": is_randomized_preset_name(state["current_preset"]),
+            "randomized_name": randomized["name"],
+            "randomized_names": store.randomized_names(),
+            "randomized_can_delete": randomized["name"] != RANDOMIZED_PRESET,
+            "randomized_preset_list": list(randomized["pool"]),
             "randomized_available_presets": store.randomized_available_presets(),
-            "randomized_wildcard_front": str(state.get("randomized_wildcard_front") or ""),
-            "randomized_wildcard_back": str(state.get("randomized_wildcard_back") or ""),
-            "randomized_wildcard_enabled": bool(state.get("randomized_wildcard_enabled")),
+            "randomized_wildcard_front": randomized["wildcard_front"],
+            "randomized_wildcard_back": randomized["wildcard_back"],
+            "randomized_wildcard_enabled": randomized["wildcard_enabled"],
             "pre_prompt": settings.get("pre_prompt", ""),
             "post_prompt": settings.get("post_prompt", ""),
             "auto_hide": settings.get("auto_hide_prompt", ""),
@@ -366,7 +394,7 @@ class HeadlessPromptEngineeringService:
         return get_prompt_engineering_store(self.context).persist_all_dirty()
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+        from core.prompt_engineering_settings import get_prompt_engineering_store, is_randomized_preset_name
 
         context = self.context
         store = get_prompt_engineering_store(context)
@@ -406,6 +434,10 @@ class HeadlessPromptEngineeringService:
                 ]
             if not store.set_preset(text_value):
                 return context._toast(f"프리셋을 찾을 수 없습니다: {text_value}", level="error")
+            if is_randomized_preset_name(text_value):
+                # 랜덤 칸을 고른 순간 그 칸의 풀에서 **한 번 굴려 둔다.** 안 굴리면 다음 Random 까지 앞 프리셋의
+                # Prefix · Postfix 가 그대로 남는다 - NAI5 칸을 골랐는데 4.5 프리셋의 글이 보이고 쓰인다(실측 10-04).
+                self._roll_randomized_preset()
             return self._apply_preset_main_settings_response(store, text_value)
         elif key == "preset_save_current":
             ok, message = store.save_current_preset(main_settings=self._capture_main_settings())
@@ -465,6 +497,20 @@ class HeadlessPromptEngineeringService:
                 str(payload.get("back") or ""),
                 bool(payload.get("enabled")),
             )
+        elif key == "randomized_slot_create":
+            # 랜덤 칸을 하나 더한다(값 = 이름). 지금의 생성 설정을 그 칸이 기억하고 그 칸으로 넘어간다 -
+            # 프리셋 만들기(`preset_create`)와 같은 손놀림이다. 지우기는 `preset_delete` 가 그 이름으로 받는다.
+            # 떠나는 프리셋의 편집은 먼저 적어 둔다(프리셋을 바꿀 때와 같다).
+            try:
+                store.persist_active_settings()
+            except OSError as exc:
+                return [
+                    context._toast(f"현재 프리셋 저장 실패 — 랜덤 칸을 만들지 않았습니다: {exc}", level="error"),
+                    self.state(),
+                ]
+            ok, message = store.create_randomized_slot(text_value, main_settings=self._capture_main_settings())
+            if not ok:
+                return context._toast(message, level="error")
         elif key == "e621_settings":
             settings = json.loads(text_value or "{}")
             if not isinstance(settings, dict):
@@ -955,6 +1001,16 @@ class HeadlessPromptEngineeringService:
         except Exception as exc:  # noqa: BLE001 - 반영 실패가 프롬프트 편집을 막으면 안 된다
             print(f"[warn] preset prompt sync failed: {ascii(exc)}", flush=True)
             return ""
+
+    def _roll_randomized_preset(self) -> None:
+        """지금 고른 랜덤 칸의 풀에서 한 번 뽑아 Prefix · Postfix 에 놓는다 - Random 이 하는 것과 같은 굴림이다
+        (풀이 비었으면 아무 일도 없다). 굴림은 장식이라, 실패가 프리셋 전환을 막지 않는다."""
+        try:
+            from core.prompt_engineering_runtime import PromptEngineeringRandomizedSubscriber
+
+            PromptEngineeringRandomizedSubscriber(self.context).handle()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[warn] randomized preset roll failed: {ascii(exc)}", flush=True)
 
     def _apply_preset_main_settings_response(self, store: Any, preset_name: str):
         """On a preset swap, restore the preset's generation params + prompt and
@@ -1692,8 +1748,10 @@ class HeadlessPromptEngineeringService:
             return False, f"삭제 실패: {exc}"
 
     def hires_overlay_path(self, preset_name: str) -> Path | None:
+        from core.prompt_engineering_settings import is_randomized_preset_name
+
         name = str(preset_name or "").strip()
-        if name in HIRES_OVERLAY_DISALLOWED_NAMES:
+        if name in HIRES_OVERLAY_DISALLOWED_NAMES or is_randomized_preset_name(name):
             return None
         safe_name = Path(name).name
         if safe_name != name:

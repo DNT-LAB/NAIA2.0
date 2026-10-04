@@ -282,10 +282,12 @@ def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     # 접지가 아니라서 조건부가 지운 태그를 되살리지 않는다. '*randomized' 프리셋은 Random 때 프리셋을 다시 굴리는
     # 이벤트에 기대므로 미리 만들 수 없다.
     try:
-        from core.prompt_engineering_settings import get_prompt_engineering_store, prompt_engineering_mode_of
+        from core.prompt_engineering_settings import (
+            get_prompt_engineering_store, is_randomized_preset_name, prompt_engineering_mode_of,
+        )
 
         state = get_prompt_engineering_store(context).state(prompt_engineering_mode_of(context))   # 지금 프리셋 색인
-        if str(state.get("current_preset") or "") == "*randomized":
+        if is_randomized_preset_name(state.get("current_preset")):   # 기본 칸이든 더한 칸이든
             return False
     except Exception:
         return False

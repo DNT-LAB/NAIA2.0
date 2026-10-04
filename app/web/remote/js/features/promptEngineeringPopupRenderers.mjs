@@ -33,6 +33,11 @@ export function createPromptEngineeringPopupRenderers({
   let savedFlashUntil = 0;   // "저장됨" 피드백이 재렌더에도 잠깐 유지되도록 하는 만료 타임스탬프
   let presetBrowser = null;
   let presetDetailRequest = 0;
+  // 랜덤 칸(`*randomized` · `*randomized:이름`). 파일이 없는 합성 이름이라 프리셋 미리보기 목록에는 올리지 않는다.
+  const isRandomizedPreset = name => String(name || '').startsWith('*randomized');
+  // 랜덤 칸의 [Add Preset] 목록이 보여 주는 갈래. 칸을 옮기면 그 칸의 갈래로 다시 맞춘다.
+  let randomizedAddGroup = 'all';
+  let randomizedAddFor = null;
 
   function parseTagInput(value) {
     return String(value || '')
@@ -156,7 +161,7 @@ export function createPromptEngineeringPopupRenderers({
     + '매 생성 새로 추출됩니다. 둘을 섞어 써도 됩니다.\\n\\n'
     + '앞 = Prefix 앞(artist 류 권장), 뒤 = Prefix 뒤(character 류 권장). '
     + '(와일드카드는 구식 <...>가 아닌 __이름__ 형식)\\n\\n'
-    + '체크를 끄면 주입하지 않으며, *randomized 프리셋에서만 동작합니다.';
+    + '체크를 끄면 주입하지 않으며, 랜덤 칸에서만 동작합니다. 랜덤 칸마다 따로 둡니다.';
   let randomizedPreview = null;
   let randomizedPreviewHideTimer = null;
 
@@ -184,6 +189,22 @@ export function createPromptEngineeringPopupRenderers({
       `data-preview-description="${escHtml(compactPreviewText(summary.description, 300))}"`,
       `data-preview-thumbnail="${escHtml(summary.thumbnail_url || '')}"`,
     ].join(' ');
+  }
+
+  /** 프리셋의 모델 배지(`[NAI5.0F]`). Quick Preset 목록과 같은 옷(`.custom-select-model-tag`)을 입는다. */
+  function modelTagHtml(summary) {
+    if (!summary || !summary.model_label) return '';
+    return `<span class="custom-select-model-tag" data-family="${escHtml(summary.model_family || '')}"`
+      + ` data-variant="${escHtml(summary.model_variant || '')}">[${escHtml(summary.model_label)}]</span> `;
+  }
+
+  /** 커스텀 셀렉트가 배지와 갈래를 읽는 속성(Quick Preset 목록과 같은 이름). */
+  function modelOptionAttrs(summary) {
+    const group = ` data-model-group="${escHtml((summary && summary.model_group) || 'etc')}"`;
+    if (!summary || !summary.model_label) return group;
+    return `${group} data-model-label="${escHtml(summary.model_label)}"`
+      + ` data-model-family="${escHtml(summary.model_family || '')}"`
+      + ` data-model-variant="${escHtml(summary.model_variant || '')}"`;
   }
 
   function cancelRandomizedPreviewHide() {
@@ -312,8 +333,11 @@ export function createPromptEngineeringPopupRenderers({
     </label>
     <div class="mod-inline-row">
       <button class="mod-btn-secondary" onclick="createPromptPreset()">Save As</button>
+      <button class="mod-btn-secondary" onclick="createRandomizedSlot()">랜덤 칸으로</button>
       <button class="mod-btn-secondary" onclick="closePePresetAddPanel()">Close</button>
     </div>
+    <p class="pe-preset-hint">[랜덤 칸으로] = 이 이름의 랜덤 칸(<code>*randomized:이름</code>)을 만듭니다. Random 때마다 풀에서
+      프리셋을 뽑아 쓰는 칸이고, 지금의 모델 · 생성 설정 · 네거티브를 기억합니다. 풀은 만든 뒤 [Manage] 에서 채웁니다.</p>
   `;
     const input = document.getElementById('modPresetNewName');
     if (input) {
@@ -331,9 +355,9 @@ export function createPromptEngineeringPopupRenderers({
     const body = getBody(panels.presetManage);
     if (!body) return;
     const title = panels.presetManage?.querySelector('.module-popup-title');
-    if (title) title.textContent = m.preset === '*randomized' ? 'Manage Randomized' : 'Manage Preset';
+    if (title) title.textContent = isRandomizedPreset(m.preset) ? 'Manage Randomized' : 'Manage Preset';
 
-    if (m.preset === '*randomized') {
+    if (isRandomizedPreset(m.preset)) {
       presetDetailRequest += 1;
       presetBrowser = null;
       renderRandomizedManage(body, m);
@@ -343,7 +367,7 @@ export function createPromptEngineeringPopupRenderers({
     const canSaveCurrent = !!m.preset_can_save_current;
     const canDeleteCurrent = !!m.preset_can_delete;
     const mode = String(m.api_mode || '');
-    const names = (m.preset_options || []).filter(name => name !== '*randomized');
+    const names = (m.preset_options || []).filter(name => !isRandomizedPreset(name));
     const listKey = JSON.stringify(names);
     // Server pushes must not replace a selection, text range, or pending response.
     if (presetBrowser?.mode === mode && presetBrowser.listKey === listKey
@@ -473,10 +497,38 @@ export function createPromptEngineeringPopupRenderers({
     const wcLiveValue = focusedWcId ? activeEl.value : null;
     const wcCaret = focusedWcId ? activeEl.selectionStart : null;
     hideRandomizedPreview();
+    // 이 칸의 것. 더한 칸은 모델을 기억해 배지와 갈래가 있고, 기본 칸에는 없다.
+    const own = summaryMap.get(String(m.preset)) || {};
+    const ownGroup = own.model_label ? String(own.model_group || 'etc') : '';
+    const canSaveCurrent = !!m.preset_can_save_current;
+    const canDeleteCurrent = !!m.preset_can_delete;
+    const groupOf = preset => String((summaryMap.get(String(preset)) || {}).model_group || 'etc');
+    // 이 칸의 모델과 갈래가 다른 프리셋 - 뽑히면 지금 모델에 안 맞는 Prefix 가 나간다. 막지는 않고 알린다.
+    const offGroup = preset => {
+      const s = summaryMap.get(String(preset));
+      return !!(ownGroup && s && s.model_label && groupOf(preset) !== ownGroup);
+    };
+    const filterGroups = Array.isArray(m.preset_filter_groups) ? m.preset_filter_groups : [];
+    if (randomizedAddFor !== m.preset) {
+      randomizedAddFor = m.preset;
+      // 더할 목록은 **이 칸의 갈래**부터 보여 준다 - NAI5 칸을 채우는데 4.5 프리셋이 섞여 보일 이유가 없다.
+      randomizedAddGroup = ownGroup || 'all';
+    }
+    if (!filterGroups.some(g => g && g.key === randomizedAddGroup)) randomizedAddGroup = 'all';
+    const addOptionsHtml = () => {
+      const shown = available.filter(preset => randomizedAddGroup === 'all' || groupOf(preset) === randomizedAddGroup);
+      if (!shown.length) return '<option value="" disabled selected>이 갈래에 더할 프리셋이 없습니다</option>';
+      return shown
+        .map(preset => `<option value="${escHtml(preset)}" ${presetPreviewAttrs(preset, summaryMap)}${modelOptionAttrs(summaryMap.get(String(preset)))}>${escHtml(preset)}</option>`)
+        .join('');
+    };
+    const addFilterAttrs = filterGroups.length >= 2
+      ? ` data-option-filters="${escHtml(JSON.stringify(filterGroups))}" data-option-filter-active="${escHtml(randomizedAddGroup)}"`
+      : '';
     const poolHtml = pool.length
       ? pool.map(preset => `
-        <div class="pe-randomized-row">
-          <span class="pe-randomized-name">${escHtml(preset)}</span>
+        <div class="pe-randomized-row${offGroup(preset) ? ' is-off-group' : ''}"${offGroup(preset) ? ' title="이 랜덤 칸의 모델과 갈래가 다른 프리셋입니다"' : ''}>
+          <span class="pe-randomized-name">${modelTagHtml(summaryMap.get(String(preset)))}${escHtml(preset)}</span>
           <div class="pe-randomized-actions">
             <button class="mod-btn-secondary mod-btn-compact" data-randomized-switch="${escHtml(preset)}">Switch</button>
             <button class="mod-btn-secondary mod-btn-compact" data-randomized-show="${escHtml(preset)}">Show</button>
@@ -485,12 +537,17 @@ export function createPromptEngineeringPopupRenderers({
         </div>
       `).join('')
       : '<div class="pe-randomized-empty">No presets selected</div>';
-    const optionsHtml = available
-      .map(preset => `<option value="${escHtml(preset)}" ${presetPreviewAttrs(preset, summaryMap)}>${escHtml(preset)}</option>`)
-      .join('');
+    const optionsHtml = addOptionsHtml();
     body.innerHTML = `
     <div class="mod-section-label">Current Preset</div>
-    <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>
+    <div class="mod-info-chip">${modelTagHtml(own)}${escHtml(m.preset || '(none)')}</div>
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" ${canSaveCurrent ? '' : 'disabled'} onclick="saveCurrentPromptPreset()">Save Current</button>
+      <button class="mod-btn-danger" ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
+    </div>
+    <p class="pe-preset-hint">${canSaveCurrent
+      ? '이 랜덤 칸은 모델 · 생성 설정 · 네거티브를 기억합니다 — 고르면 그 설정으로 넘어가고, 바꾸면 바로 반영됩니다.'
+      : '기본 랜덤 칸은 생성 설정을 기억하지 않습니다(지금 설정을 그대로 씁니다). 모델별로 나눠 쓰려면 [Add] › [랜덤 칸으로] 로 칸을 더하세요.'}</p>
     <div class="mod-section-label">Randomized Pool</div>
     <div class="pe-randomized-list">${poolHtml}</div>
     <div class="pe-randomized-wc">
@@ -516,7 +573,7 @@ export function createPromptEngineeringPopupRenderers({
     <div>
       <div class="mod-section-label">Add Preset</div>
       <div class="mod-inline-row pe-randomized-add-row">
-        <select class="mod-select" id="modRandomizedPresetAddSelect" data-preview-kind="prompt-preset" data-preview-actions="none" ${available.length ? '' : 'disabled'}>${optionsHtml}</select>
+        <select class="mod-select" id="modRandomizedPresetAddSelect" data-preview-kind="prompt-preset" data-preview-actions="none"${addFilterAttrs} ${available.length ? '' : 'disabled'}>${optionsHtml}</select>
         <button class="mod-btn-secondary mod-btn-compact" id="modRandomizedPresetAddBtn" ${available.length ? '' : 'disabled'}>Add</button>
       </div>
     </div>
@@ -534,6 +591,11 @@ export function createPromptEngineeringPopupRenderers({
           event.preventDefault();
           addRandomizedPreset();
         }
+      });
+      // 목록 위 갈래 바(customSelects 가 쏜다). 무엇을 보일지는 여기서 정한다 - 옵션을 갈아 끼우면 메뉴가 따라 그려진다.
+      addSelect.addEventListener('naia:option-filter', event => {
+        randomizedAddGroup = String(event.detail?.key || 'all');
+        addSelect.innerHTML = addOptionsHtml();
       });
     }
     body.querySelectorAll('[data-randomized-remove]').forEach(button => {

@@ -13368,6 +13368,8 @@ body.detached-metadata .metadata-layout {
   min-width: 62px;
   padding-inline: 10px;
 }
+/* 이 랜덤 칸의 모델과 갈래가 다른 프리셋 - 흐리게 두어 '여기 안 맞는 것' 이 한눈에 보이게 한다(막지는 않는다). */
+.pe-randomized-row.is-off-group .pe-randomized-name { opacity: 0.5; }
 .pe-randomized-empty {
   min-height: 44px;
   display: flex;

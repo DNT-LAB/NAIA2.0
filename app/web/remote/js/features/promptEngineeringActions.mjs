@@ -47,6 +47,22 @@ export function createPromptEngineeringActions({
     closePresetAddPanel();
   }
 
+  /** 같은 이름 칸으로 **랜덤 칸**을 만든다(`*randomized:이름`, 사용자 지정 2026-10-04: 랜더마이저 여러 개).
+   *  프리셋 만들기와 같은 손놀림이다 - 지금의 모델 · 생성 설정 · 네거티브를 그 칸이 기억하고 그 칸으로 넘어간다.
+   *  ⚠️ 모델 변경을 '복제' 로 미뤄 둔 것(`onPresetCreated`)은 여기서 보내지 않는다 - 그것은 프리셋을 복제할 때의 약속이다. */
+  function createRandomizedSlot() {
+    const input = document.getElementById('modPresetNewName');
+    const name = input ? input.value.trim() : '';
+    if (!name) {
+      showToast('랜덤 칸 이름을 입력하세요', 'error');
+      return;
+    }
+    flushPresetSaveState();
+    setModuleParam('prompt_engineering', 'randomized_slot_create', name);
+    if (input) input.value = '';
+    closePresetAddPanel();
+  }
+
   async function applyRecommendedPreset() {
     const mode = getMode();
     const isAnima = typeof isComfyUiAnimaMode === 'function' && isComfyUiAnimaMode();
@@ -234,6 +250,7 @@ export function createPromptEngineeringActions({
     onPresetChange,
     saveCurrentPreset,
     createPreset,
+    createRandomizedSlot,
     applyRecommendedPreset,
     deleteCurrentPreset,
     addRandomizedPreset,

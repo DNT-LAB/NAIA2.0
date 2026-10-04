@@ -57,7 +57,24 @@ const PE_QUICK_PRESET_GUIDE = [
   'Quick Preset — 프롬프트 엔지니어링 설정과 생성 파라미터를 하나로 묶어 저장/불러옵니다. 드롭다운에서 고르면 즉시 적용됩니다.',
   '포함 항목: Prefix·Postfix·Auto-Hide 프롬프트, Preprocessing 옵션, 그리고 생성 파라미터(모델·스텝·CFG·샘플러·해상도 등)와 프롬프트/네거티브.',
   '[Add] 현재 설정을 새 프리셋으로 저장 · [Manage] 이름 변경·삭제·썸네일 관리. 프리셋은 API 모드(NAI/WEBUI/COMFYUI)별로 구분되어 저장됩니다.',
+  '랜덤 칸(*randomized) — Random 을 누를 때마다 풀에서 프리셋 하나를 뽑아 그 Prefix·Postfix 를 씁니다. '
+    + '[Add] › [랜덤 칸으로] 로 여러 개 만들 수 있고, 만든 칸은 그때의 모델·생성 설정·네거티브를 기억합니다 '
+    + '(NAI4.5 용 · NAI5 용을 따로 두고, 고르면 그 설정으로 넘어갑니다). 풀은 [Manage] 에서 채웁니다.',
 ].join('\\n\\n');
+
+/** 갈래가 없는 랜덤 칸인가(기본 `*randomized`). 더한 칸은 모델을 기억해 배지와 갈래가 있다 - 프리셋처럼 걸린다. */
+function isGrouplessRandomized(option) {
+  return !!option && option.dataset.randomized === '1' && !option.dataset.modelLabel;
+}
+
+/** 미리보기의 설명 줄. 랜덤 칸은 풀에 든 프리셋을 적는다 - 열어 보지 않고도 무슨 칸인지 알게. */
+function presetDescription(summary) {
+  if (!summary || !summary.randomized) return summary ? summary.description : '';
+  const pool = Array.isArray(summary.randomized_pool) ? summary.randomized_pool : [];
+  return pool.length
+    ? `랜덤 풀 ${pool.length}개 — ${pool.join(', ')}`
+    : '랜덤 풀이 비어 있습니다 — Manage 에서 프리셋을 넣으세요';
+}
 
 // 프리셋 검색창도 여기 넣는다. render() 는 이 목록 중 하나가 포커스를 쥐고 있으면
 // 통째로 다시 그리기를 건너뛴다 — 안 넣으면 한 글자 칠 때마다 오는 module_state
@@ -239,13 +256,15 @@ export function createPromptEngineeringPanel({
     if (!current) return;
     const source = presetAllOptions || Array.from(select.options);
     const option = source.find(opt => opt.value === current);
+    // 모델을 기억하지 않는 랜덤 칸에는 갈래가 없다 - 어느 갈래에서 골랐든 필터를 옮기지 않는다.
+    if (isGrouplessRandomized(option)) return;
     const own = String((option && option.dataset.modelGroup) || 'etc');
     // ⚠️ **프리셋 이름만 기억하면 안 된다.** 파라미터 자동 반영이 프리셋의 모델을
     // 바꾸면 같은 프리셋의 **갈래가 달라진다** - 이름만 보면 그 변화를 놓친다.
     // 실측(사용자 제보 2026-08-21): 4.5 프리셋을 고른 상태에서 모델을 5.0 으로
     // 바꿨다가 되돌리면, 중간에 v5 로 옮겨 간 필터가 그대로 남아 4.5 프리셋인데
     // 목록은 NAI5 를 보여 줬다.
-    const key = `${current} ${own}`;
+    const key = `${current}\0${own}`;
     if (key === lastAlignedPreset) return;
     lastAlignedPreset = key;
     const group = String(select.dataset.optionFilterActive || 'all');
@@ -265,7 +284,10 @@ export function createPromptEngineeringPanel({
     // 갈래 필터(ALL/NAI5/NAI4.5/ETC)는 검색과 **AND** 로 걸린다 — 좁혀 가는 도구
     // 둘이니 서로를 무르면 안 된다.
     const group = String(select.dataset.optionFilterActive || 'all');
+    // 갈래 없는 랜덤 칸(기본 `*randomized`)은 어느 갈래에서든 보인다 - 예전에는 ETC 로 떨어져, 필터가
+    // NAI5 · NAI4.5 일 때 목록에서 사라졌다. 더한 칸은 기억하는 모델의 갈래에만 보인다.
     const inGroup = opt => group === 'all'
+      || isGrouplessRandomized(opt)
       || String(opt.dataset.modelGroup || 'etc') === group;
     const hits = opt => {
       if (!terms.length) return false;
@@ -463,7 +485,7 @@ export function createPromptEngineeringPanel({
           // Postfix 도 실어 준다 — 검색이 postfix 까지 훑으므로, 무엇이 걸렸는지
           // 미리보기에서 확인할 수 있어야 한다(사용자 지적 2026-08-08).
           `data-preview-postfix="${escHtml(compactPreviewText(summary.post_prompt_preview, 1200))}"`,
-          `data-preview-description="${escHtml(compactPreviewText(summary.description, 300))}"`,
+          `data-preview-description="${escHtml(compactPreviewText(presetDescription(summary), 300))}"`,
           `data-preview-thumbnail="${escHtml(summary.thumbnail_url || '')}"`,
         ].join(' ') : '';
         // 모델 배지(`[NAI4.5C]`)와 갈래. customSelects 가 이 둘로 라벨을 색칠하고,
@@ -477,7 +499,9 @@ export function createPromptEngineeringPanel({
           `data-model-variant="${escHtml(summary.model_variant || '')}"`,
         ].join(' ') : '';
         const groupAttr = summary ? ` data-model-group="${escHtml(summary.model_group || 'etc')}"` : '';
-        return `<option value="${escHtml(preset)}"${preset === m.preset ? ' selected' : ''}${title ? ` title="${escHtml(title)}"` : ''}${groupAttr} ${previewAttrs} ${badgeAttrs}>${escHtml(preset)}</option>`;
+        // 랜덤 칸 표식. 갈래 필터가 '모델을 기억하지 않는 칸' 을 가려내는 데 쓴다(isGrouplessRandomized).
+        const randomizedAttr = summary && summary.randomized ? ' data-randomized="1"' : '';
+        return `<option value="${escHtml(preset)}"${preset === m.preset ? ' selected' : ''}${title ? ` title="${escHtml(title)}"` : ''}${groupAttr}${randomizedAttr} ${previewAttrs} ${badgeAttrs}>${escHtml(preset)}</option>`;
       })
       .join('');
 

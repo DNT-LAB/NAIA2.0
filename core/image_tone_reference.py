@@ -1,4 +1,8 @@
-"""Bundled tone reference and signed positions. Bands describe a sample, not quality."""
+"""Bundled tone reference and signed positions. Bands describe a sample, not quality.
+
+NAI Inspector(화면 · /api/inspect/tone/* 라우트)는 2026-10-04 에 회수했다 - 사람들에게 필요한 것은 '표준값에서 벗어난 정도' 가 아니라
+'원하는 방향으로 출력을 움직이는 법' 이라는 사용자 결정. 이 모듈은 런타임에서 부르지 않고, tools/ 와 연구 스크립트가 쓴다.
+"""
 from __future__ import annotations
 
 import math

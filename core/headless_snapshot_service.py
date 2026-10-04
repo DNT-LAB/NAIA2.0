@@ -108,12 +108,50 @@ class HeadlessSnapshotService:
         state["_headless_extra_messages"] = [self.context._toast(message, level=level)]
         return state
 
+    def _picked_image(self, image_path: str) -> bytes:
+        """지목한 그림을 스냅샷의 그림(WebP)으로. 결과 그림 우클릭 > [NAI] 스냅샷 저장이 쓴다.
+
+        경로는 결과 뷰어가 쓰는 것 그대로다: `__history_item__/<id>`(히스토리 항목 - 저장 전의 그림도 된다)
+        이거나 저장 폴더 기준의 상대 경로. 저장 폴더 **밖**을 가리키면 거부한다.
+        """
+        from core.headless_result_service import HISTORY_ITEM_PREFIX
+
+        normalized = str(image_path or "").replace("\\", "/").strip("/")
+        if normalized.startswith(HISTORY_ITEM_PREFIX):
+            history_id = normalized[len(HISTORY_ITEM_PREFIX):].split("/", 1)[0]
+            item = self.context.result_store.get_item(history_id)
+            if item is None or not item.webp_bytes:
+                raise FileNotFoundError("History image is gone")
+            return bytes(item.webp_bytes)
+        save_dir = self.context._current_save_directory().resolve()
+        target = (save_dir / normalized).resolve()
+        target.relative_to(save_dir)                      # 밖이면 ValueError
+        if not target.is_file() or target.suffix.lower() not in {".png", ".webp", ".jpg", ".jpeg"}:
+            raise FileNotFoundError("Saved image not found")
+        import io
+
+        from PIL import Image
+
+        # 히스토리의 그림과 같은 모양(WebP · 품질 85)으로 맞춘다 - 카드와 크게 보기가 한 형식만 다룬다.
+        with Image.open(target) as opened:
+            picture = opened.convert("RGBA" if opened.mode in ("RGBA", "LA", "P") else "RGB")
+            buffer = io.BytesIO()
+            picture.save(buffer, format="WEBP", quality=85, method=0)
+        return buffer.getvalue()
+
     def capture(self, name: str, include_search: bool = False, overwrite: bool = False,
-                folder: str = "") -> dict[str, Any]:
+                folder: str = "", image_path: str = "") -> dict[str, Any]:
         with self._lock:
             if self._support_blocker():
                 return self._response("Snapshot은 NAI V4.5 / V5에서 지원됩니다", level="error")
-            image = getattr(self.context.result_store, "latest_webp", None)
+            if image_path:
+                # 우클릭한 **그 그림**을 쓴다. 마지막 결과로 슬쩍 바꾸지 않는다 - 못 찾으면 담지 않는다.
+                try:
+                    image = self._picked_image(image_path)
+                except Exception as exc:
+                    return self._response(f"스냅샷에 넣을 그림을 찾지 못했습니다: {exc}", level="error")
+            else:
+                image = getattr(self.context.result_store, "latest_webp", None)
             if not image:
                 return self._response("먼저 한 장을 생성하세요", level="error")
             storage = self.store()
@@ -413,7 +451,8 @@ class HeadlessSnapshotService:
             return self.state()
         if key == "save":
             return self.capture(name, self.context._coerce_bool(payload.get("include_search", False)),
-                                self.context._coerce_bool(payload.get("overwrite", False)), payload.get("folder", ""))
+                                self.context._coerce_bool(payload.get("overwrite", False)), payload.get("folder", ""),
+                                str(payload.get("image") or ""))
         if key == "apply":
             if "sections" in payload and not isinstance(payload["sections"], list):
                 return self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error")

@@ -1602,7 +1602,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260823-ctxclose')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261004-snapshot5')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,

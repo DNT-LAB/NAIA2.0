@@ -22,6 +22,9 @@ const ACTION_DIRECTOR = 'nai_director_tool'; // NAI Director Tools (제거 가�
 const ACTION_SET_CHAR_REF = 'set_character_reference'; // 결과 이미지를 Character Reference 창에 할당
 const ACTION_SET_VIBE = 'set_vibe_transfer';           // 결과 이미지를 Vibe Transfer 창에 할당
 const ACTION_SAVE_CHAR_ASSET = 'save_character_asset'; // 결과 이미지를 캐릭터 에셋 라이브러리에 저장
+// 이 그림으로 스냅샷을 담는다. ⚠️ **아직 잇지 않았다**(사용자 지시 2026-10-04) - 저장은 브릿지 페이지를 거칠
+// 것이라, 그 페이지가 생기면 app.js 가 `onSaveSnapshot` 을 넘겨 준다. 넘겨 주기 전에는 항목이 꺼진 채로 보인다.
+const ACTION_SAVE_SNAPSHOT = 'save_snapshot';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -126,6 +129,7 @@ const MAIN_IMAGE_MENU = [
     ],
   },
   {type: 'separator'},
+  {label: '[NAI] 스냅샷 저장', action: ACTION_SAVE_SNAPSHOT},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
   {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I, grokGated: true},
@@ -184,6 +188,7 @@ const THUMBNAIL_MENU = [
     ],
   },
   {type: 'separator'},
+  {label: '[NAI] 스냅샷 저장', action: ACTION_SAVE_SNAPSHOT},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
   {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I, grokGated: true},
@@ -260,6 +265,7 @@ export function createResultContextMenu({
   onSetCharacterReference = null,
   onSetVibeTransfer = null,
   onSaveCharacterAsset = null,
+  onSaveSnapshot = null,
   onDelete = null,
   getWildcardFreezeState = () => ({}),
   setWildcardFreezeState = null,
@@ -444,6 +450,11 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_SAVE_CHAR_ASSET) {
       return typeof onSaveCharacterAsset === 'function' && Boolean(context?.hasImage);
+    }
+    if (item.action === ACTION_SAVE_SNAPSHOT) {
+      // 다른 모드에서도 보이되 켜지는 것은 NAI 에서만이다(이름의 [NAI]). 붙여 넣은 입력 그림은 결과가 아니라 뺀다.
+      return typeof onSaveSnapshot === 'function' && currentMode() === 'NAI' && Boolean(context?.hasImage)
+        && (context.source === 'saved' || context.source === 'current');
     }
     if (item.action === ACTION_DELETE_RESULT) {
       // capability 'delete'는 위에서 이미 검증됨 (백엔드 asset이 history item 존재 시 true).
@@ -714,6 +725,8 @@ export function createResultContextMenu({
           if (typeof onSetVibeTransfer === 'function') onSetVibeTransfer(context);
         } else if (action === ACTION_SAVE_CHAR_ASSET) {
           if (typeof onSaveCharacterAsset === 'function') onSaveCharacterAsset(context);
+        } else if (action === ACTION_SAVE_SNAPSHOT) {
+          if (typeof onSaveSnapshot === 'function') onSaveSnapshot(context);
         } else if (action === ACTION_DELETE_RESULT) {
           if (typeof onDelete === 'function') onDelete(context, deleteMode);
         }

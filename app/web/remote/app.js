@@ -103,6 +103,8 @@ function isNarrowViewport() {
 
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
+// 걸려 있는 디바운스가 **보낼 일**. `firePendingPromptSend` 가 기다리지 않고 같은 일을 시킬 때 쓴다.
+let promptSendFire = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
 let _localPromptDirty = false;
 // **네거티브 입력창에 사용자가 직접 친 것**이 아직 프리셋에 안 들어간 상태.
@@ -819,7 +821,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261003-extviewer')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261004-negative')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -864,11 +866,16 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261003-ext
         if (result.params) updateParams(result.params);
         if (result.applied?.includes('negative') && !virtualCharacterSession()) {
           negEdit.value = result.negative;
+          syncNegativeMirror();
           _negativeUserDirty = false;
           updateNegativeTokenEstimate();
         }
       },
       requestPeState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },
+      // 빠른 수정 창의 셋째 칸 = **이 네거티브 칸**(사용자 지정 2026-10-04). 읽기는 칸의 지금 글,
+      // 쓰기는 '칸에 직접 친 것' 과 같은 길(`applyNegativeAuthoredEdit`)이다.
+      getNegativeField: () => String(negEdit.value || ''),
+      setNegativeField: text => applyNegativeAuthoredEdit(text),
       // 믹스 모드의 칸들도 메인 프롬프트와 **같은** 강조·같은 자동완성을 쓴다(사용자 지정).
       attachPromptHighlight,
       bindTagAssist,
@@ -6648,6 +6655,7 @@ function _applyPromptSync(m) {
     _promptUserDirty = false;
   }
   if ('negative_prompt' in m && m.negative_prompt !== negEdit.value) negEdit.value = m.negative_prompt;
+  syncNegativeMirror();
   syncingPrompt = false;
   updateMetaChips(m);
   applyPromptTokenPayload(m);
@@ -6672,6 +6680,7 @@ function syncPrompts(m) {
         && negEdit.value !== m.negative_prompt) {
       syncingPrompt = true;
       negEdit.value = m.negative_prompt;
+      syncNegativeMirror();
       syncingPrompt = false;
     }
     updateMetaChips(m);
@@ -6771,7 +6780,9 @@ function onPromptEdit() {
     return;
   }
   if (promptSendTimer) clearTimeout(promptSendTimer);
-  promptSendTimer = setTimeout(() => {
+  // 보낼 일을 이름 붙여 쥐어 둔다 - 기다릴 이유가 없는 편집(칸을 벗어날 때 한 번 오는 저장)이
+  // `firePendingPromptSend` 로 **같은 일을 지금** 시킨다. 보내는 규칙을 두 벌로 만들지 않는다.
+  promptSendFire = () => {
     // 세션이 입력창을 가졌으면 **세션으로** 보낸다. 안 그러면 (a) 가상 문장이
     // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
     // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
@@ -6801,7 +6812,16 @@ function onPromptEdit() {
     }
     promptSendTimer = null;
     _localPromptDirty = false;
-  }, 500);
+  };
+  promptSendTimer = setTimeout(promptSendFire, 500);
+}
+
+/** 걸려 있는 프롬프트 · 네거티브 디바운스를 **지금** 보낸다(걸린 것이 없으면 아무 일도 없다). */
+function firePendingPromptSend() {
+  if (!promptSendTimer || typeof promptSendFire !== 'function') return;
+  clearTimeout(promptSendTimer);
+  promptSendTimer = null;
+  promptSendFire();
 }
 
 function applyPromptText(prompt) {
@@ -6847,6 +6867,7 @@ function applyPromptFields(prompt, negative, {authored = false} = {}) {
   syncingPrompt = true;
   promptEdit.value = String(prompt || '');
   negEdit.value = String(negative || '');
+  syncNegativeMirror();
   syncingPrompt = false;
   _localPromptDirty = false;
   // 서버 값이 네거티브를 덮었다 - 사용자가 치던 것은 더 이상 화면에 없으므로
@@ -7691,6 +7712,7 @@ function applyMetadataPrompt(payload) {
   }
   if (negEdit && payload.negative != null) {
     negEdit.value = payload.negative || '';
+    syncNegativeMirror();
     // 이미지에서 불러온 값이지 사용자가 친 것이 아니다 - 프리셋에 넣지 않는다.
     _negativeUserDirty = false;
   }
@@ -14247,10 +14269,33 @@ document.addEventListener('keydown', e => {
 });
 
 // ---- Init ----
-// ⚠️ **여기가 유일하게 `_negativeUserDirty` 를 세우는 자리다.** 네거티브 입력창에
-// 사람이 친 것만 프리셋에 반영한다 - `onPromptEdit` 자체는 메인 프롬프트 편집과
+// ⚠️ **`_negativeUserDirty` 를 세우는 자리는 이 리스너와 바로 아래 `applyNegativeAuthoredEdit` 둘뿐이다.**
+// 사람이 네거티브를 고친 것만 프리셋에 반영한다 - `onPromptEdit` 자체는 메인 프롬프트 편집과
 // Interactive 블록 변경에서도 불리므로 그 안에서 세우면 안 된다.
 negEdit.addEventListener('input', () => { _negativeUserDirty = true; onPromptEdit(); });
+
+/** 네거티브 칸을 **비추는 화면**(Artist Thumbnail 리모컨의 빠른 수정 창)이 고친 글을 칸에 넣는다.
+ *  사람이 그 칸에 직접 친 것과 **같은 일**이다 - 표식을 세우고 평소 처리를 한다(토큰 수 · 서버 동기 · 프리셋 반영).
+ *
+ *  ⚠️ input 이벤트를 쏘아 위 리스너를 태우지 않는다 - 자동완성(tagAssist)도 그 이벤트를 듣고 있어서,
+ *     손은 다른 창에 있는데 이 칸의 마지막 태그로 후보 창이 뜬다.
+ *  ⚠️ 디바운스를 기다리지 않는다. 그 창은 칸을 벗어날 때 **한 번** 저장하므로 묶을 타자가 없고, 0.5초를
+ *     기다리는 사이 바로 옆 단추([V5 영점] · 믹스 저장)가 눌리면 방금 고친 글이 엉뚱한 프리셋에 얹힌다. */
+function applyNegativeAuthoredEdit(text) {
+  negEdit.value = String(text ?? '');
+  _negativeUserDirty = true;
+  onPromptEdit();
+  firePendingPromptSend();
+}
+
+/** 네거티브 칸의 글이 바뀐 뒤에 부른다 - 그 칸을 비추는 화면이 따라오게 한다.
+ *  ⚠️ `negEdit.value = …` 로 **이벤트 없이** 바꾸는 자리는 전부 바로 뒤에 이것을 부른다(서버 동기 ·
+ *     프리셋 전환 · 믹스 · 메타데이터 적용). 빠뜨리면 그 화면이 옛 글을 보여 준다. */
+function syncNegativeMirror() {
+  try { artistThumbControl?.syncNegativeField?.(); } catch (_) {}
+}
+// 사람이 메인 칸에 직접 친 것도 같은 길로 알린다.
+negEdit.addEventListener('input', syncNegativeMirror);
 
 // ---- Tag Filter ----
 function toggleTagFilter() { if (quickFilter) quickFilter.toggle(); }

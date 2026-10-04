@@ -27,6 +27,10 @@ export function createArtistThumbController({
   beforeMixApply = () => ({}),
   onMixApplied = () => {},
   requestPeState = () => {},
+  // 빠른 수정 창의 셋째 칸 = **메인 네거티브 칸**(사용자 지정 2026-10-04). 읽기는 그 칸의 지금 글이고,
+  // 쓰기는 app.js 가 '그 칸에 직접 친 것' 과 같은 길로 보낸다(토큰 수 · 서버 동기 · 프리셋 반영이 거기 걸려 있다).
+  getNegativeField = null,
+  setNegativeField = null,
   // 리모컨을 켜면 오른쪽 화면을 Result 로 보낸다(사용자 지정) - 조각이 창으로 빠져
   // 나가 이 탭에는 자리 표시만 남기 때문이다.
   showResultTab = () => {},
@@ -162,7 +166,9 @@ export function createArtistThumbController({
   mixHostEl.className = 'rctl-mix-host';
   let peQuick = null;
   let peWindow = null;         // PE 빠른 수정이 사는 떠 있는 창
-  let peHeadButtons = null;    // 리모컨 머리줄의 [prefix] [postfix]
+  let peHeadButtons = null;    // 리모컨 머리줄의 [prefix] [postfix] [neg]
+  // 빠른 수정 창의 네거티브 칸 키. PE 모듈의 칸이 아니라 메인 네거티브 칸으로 간다(quickFieldGet/Set 이 가른다).
+  const NEGATIVE_FIELD = 'negative_prompt';
   let mixOn = false;
   // 앵커 그룹 `{아이디: 합친 글}`. 생성 요청에 실어 보내면 서버가 `<anchor:ID>` 자리에
   // 꽂는다(`core/artist_anchor.py`). 큐가 바뀔 때마다 갱신된다.
@@ -3207,6 +3213,33 @@ export function createArtistThumbController({
     return mixQueue;
   }
 
+  // ── 빠른 수정 창의 칸이 가는 길 ───────────────────────────────────────
+  //  prefix · postfix 는 PE 모듈의 칸이고 negative 는 **메인 네거티브 칸**이다(사용자 지정 2026-10-04).
+  //  창은 하나지만 주인이 둘이라 여기서 가른다 - 패널(peQuickEdit)은 키만 넘긴다.
+  function hasNegativeField() {
+    return typeof getNegativeField === 'function' && typeof setNegativeField === 'function';
+  }
+
+  function quickFieldGet(key) {
+    if (key !== NEGATIVE_FIELD) return getPeField(key);
+    try { return String(getNegativeField() ?? ''); } catch (_) { return ''; }
+  }
+
+  function quickFieldSet(key, text, seenPreset) {
+    if (key !== NEGATIVE_FIELD) { setPeField(key, text, seenPreset); return; }
+    // ⚠️ PE 칸은 서버가 도장(보고 친 프리셋)을 보고 낡은 편집을 버린다. 네거티브에는 그 검사가 없다 -
+    //    같은 규칙을 여기서 지킨다. 안 그러면 앞 프리셋의 네거티브를 보고 고친 글이 **지금 프리셋**에 저장된다.
+    //    도장이 비어 있으면(PE 상태가 오기 전에 친 글) 판단할 근거가 없으므로 그대로 쓴다.
+    const now = String(getPePreset?.() ?? '');
+    if (seenPreset && now && String(seenPreset) !== now) {
+      showToast?.('프리셋이 바뀌어 네거티브 수정을 반영하지 않았습니다.', 'info');
+      // 칸은 방금 버린 글을 '저장됨' 으로 알고 있다 - 저장 절차가 끝난 뒤 지금 값으로 되돌려 놓는다.
+      Promise.resolve().then(() => peQuick?.sync(NEGATIVE_FIELD));
+      return;
+    }
+    setNegativeField(text);
+  }
+
   /** PE 빠른 수정이 사는 **떠 있는 창**(사용자 지정 2026-09-19).
    *
    *  전에는 리모컨 옆 보조 판 아래에 얹혀 있었다. 그 자리를 비우면서 제 창을 갖고,
@@ -3220,15 +3253,16 @@ export function createArtistThumbController({
     const remote = getRemoteController?.();
     if (!remote) return null;
     if (!peQuick) {
-      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20260919-pewin');
+      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20261004-negative');
       peQuick = createPeQuickEdit({
         document, escHtml, showToast,
         // 강조도 자동완성도 **메인 프롬프트의 것을 그대로** 빌린다(사용자 지정).
         attachHighlight: (textarea, overlay) => (typeof attachPromptHighlight === 'function'
           ? attachPromptHighlight(textarea, overlay) : null),
         bindAssist: (textarea, options) => { bindTagAssist?.(textarea, options); },
-        getField: key => getPeField(key),
-        setField: (key, text, seenPreset) => setPeField(key, text, seenPreset),
+        withNegative: hasNegativeField(),
+        getField: key => quickFieldGet(key),
+        setField: (key, text, seenPreset) => quickFieldSet(key, text, seenPreset),
         getPreset: () => getPePreset(),
         requestState: () => requestPeState(),
       });
@@ -3280,7 +3314,7 @@ export function createArtistThumbController({
     paintPeButtons();
   }
 
-  /** 리모컨 머리줄에 [prefix] [postfix] 를 단다(사용자 지정). 창과 함께 사라진다. */
+  /** 리모컨 머리줄에 [prefix] [postfix] [neg] 를 단다(사용자 지정). 창과 함께 사라진다. */
   function mountPeHeadButtons() {
     const remote = getRemoteController?.();
     if (!remote?.slot || peHeadButtons) return;
@@ -3295,13 +3329,20 @@ export function createArtistThumbController({
     groups.addEventListener('click', event => { void openGroupsLauncher(event.currentTarget); });
     remote.slot.appendChild(groups);
     peHeadButtons.set('__groups__', groups);
-    for (const [key, label] of [['pre_prompt', 'prefix'], ['post_prompt', 'postfix']]) {
+    const tabs = [['pre_prompt', 'prefix'], ['post_prompt', 'postfix']];
+    // [neg] - 같은 창의 셋째 칸(사용자 지정 2026-10-04). PE 칸이 아니라 메인 네거티브 칸을 비춘다.
+    // ⚠️ 라벨을 줄여 쓴 이유는 폭이다 - `negative` 로 달면 기본 폭(490px)에서 단추 줄이 49px 넘쳐
+    //    접기 · 닫기 단추를 덮는다(실측). 창 안의 칸 이름은 그대로 `negative` 다.
+    if (hasNegativeField()) tabs.push([NEGATIVE_FIELD, 'neg']);
+    for (const [key, label] of tabs) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'rctl-pe-btn';
       btn.textContent = label;
       btn.setAttribute('aria-pressed', 'false');
-      btn.title = `${label} 를 고칩니다`;
+      btn.title = key === NEGATIVE_FIELD
+        ? 'Negative Prompt 를 고칩니다 (메인 화면의 네거티브 칸과 같은 값)'
+        : `${label} 를 고칩니다`;
       btn.addEventListener('click', () => { void togglePeField(key); });
       remote.slot.appendChild(btn);
       peHeadButtons.set(key, btn);
@@ -3701,5 +3742,8 @@ export function createArtistThumbController({
       //    **회복도 추적**해야 해서 올 때마다 다시 잰다(사용자 지정).
       mixQueue?.recheckAnchors();
     },
+    /** 메인 네거티브 칸의 글이 바뀌었다(서버 동기 · 프리셋 전환 · 믹스 · 메타데이터 적용 · 직접 친 것).
+     *  빠른 수정 창의 네거티브 칸이 따라간다 - 치는 중인 글은 패널이 지킨다. */
+    syncNegativeField: () => { peQuick?.sync(NEGATIVE_FIELD); },
   };
 }

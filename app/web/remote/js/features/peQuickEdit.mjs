@@ -23,14 +23,22 @@
  *  강조와 자동완성도 **만들지 않고 빌린다**(사용자 지정: "메인 프롬프트의 artist 강조를
  *  동일하게"). 색과 분류 색인은 메인 프롬프트를 칠하는 바로 그 모듈이 쥐고 있어,
  *  여기서 흉내 내면 언젠가 두 화면의 색이 갈린다.
+ *
+ *  셋째 칸 `negative` 는 **PE 칸이 아니다**(사용자 지정 2026-10-04: "Prefix / Postfix 외에
+ *  Negative Prompt 도"). 메인 화면의 네거티브 칸과 같은 값의 다른 창이라, 읽기도 쓰기도
+ *  그 칸을 거친다 - 같은 문(`getField`/`setField`)으로 오지만 길은 부르는 쪽이 가른다.
+ *  옷도 그 칸을 따른다: 색칠이 없다(그 칸에도 없다).
  */
 
 /** 글자가 겹쳐 보이려면 오버레이와 칸의 **글자 상자가 같아야** 한다 - 글꼴·크기·줄높이·
  *  안쪽 여백·테두리 두께·줄바꿈 규칙까지. 옷은 `.peq-hl` 이 `.peq-text` 를 그대로 베낀다
  *  (style.css). 하나라도 어긋나면 줄바꿈이 달라져 그 아래가 통째로 밀린다. */
-const FIELDS = [
+const ALL_FIELDS = [
   {key: 'pre_prompt', label: 'prefix', title: 'Prefix Prompt'},
   {key: 'post_prompt', label: 'postfix', title: 'Postfix Prompt'},
+  // 메인 네거티브 칸의 미러. `negative` 가 가르는 것 둘 - 색칠을 안 붙이고(그 칸에도 없다),
+  // 초점이 올 때 값을 다시 읽는다(아래 focusin - 원본이 입력 이벤트 없이도 바뀌기 때문이다).
+  {key: 'negative_prompt', label: 'negative', title: 'Negative Prompt', negative: true},
 ];
 
 export function createPeQuickEdit({
@@ -46,7 +54,12 @@ export function createPeQuickEdit({
   attachHighlight = null,
   // (textarea) => void   메인 프롬프트와 **같은** 자동완성
   bindAssist = null,
+  // 네거티브 칸을 둘 것인가. 그 칸으로 가는 길(`getField`/`setField` 의 'negative_prompt')을
+  // 건넬 수 있는 쪽만 켠다 - 길 없이 칸만 있으면 "비어 있음" 이라 말하고 쓴 글은 어디에도 안 간다.
+  withNegative = false,
 } = {}) {
+  const FIELDS = ALL_FIELDS.filter(f => !f.negative || withNegative);
+  const fieldOf = key => FIELDS.find(f => f.key === key) || null;
   const el = doc.createElement('div');
   el.className = 'peq';
   el.innerHTML = FIELDS.map(f => `
@@ -161,6 +174,20 @@ export function createPeQuickEdit({
     });
   }
 
+  // 네거티브 칸은 초점이 올 때 **한 번 더** 읽는다. 원본(메인 네거티브 칸)은 입력 이벤트 없이도
+  // 바뀐다 - 프리셋 전환 · 믹스 적용 · 다른 기기. 그때마다 `sync()` 가 불리게 되어 있지만, 한 자리라도
+  // 빠지면 옛 글 위에 친 것이 지금 네거티브를 덮는다. 치기 **직전**에 맞춰 두면 그 사고가 '화면이
+  // 잠깐 낡았다' 로 끝난다.
+  // ⚠️ PE 칸에는 걸지 않는다 - 그쪽 원본은 서버를 한 바퀴 돌아야 바뀌어서, 저장 직후 다시 누르면
+  //    아직 옛 글인 캐시로 되돌아간다.
+  el.addEventListener('focusin', event => {
+    const text = event.target.closest?.('.peq-text');
+    const row = text?.closest('.peq-row');
+    if (!row || !fieldOf(row.dataset.peqKey)?.negative) return;
+    if (text.value !== (text.dataset.peqSaved ?? '')) return;       // 안 저장된 편집은 지킨다
+    if (readField(row.dataset.peqKey) !== text.value) fill(row);
+  });
+
   // ⚠️ 글로벌 단축키는 document 의 **버블** 단계에 붙어 있다 - 전파를 끊지 않으면
   //    Ctrl+Enter 가 여기서도 Generate 를 누른다(슬래시 편집창에서 난 제보와 같은 자리).
   el.addEventListener('keydown', event => {
@@ -195,7 +222,8 @@ export function createPeQuickEdit({
       // 청크 다리는 메인 프롬프트의 것이다 - 여기서 열리면 리모컨 뒤로 숨는다.
       try { bindAssist(text, {disableChunkBridge: true}); } catch (_) { /* 없어도 산다 */ }
     }
-    if (typeof attachHighlight === 'function') {
+    // 네거티브 칸은 맨 글자로 둔다 - 메인 네거티브 칸에도 색칠이 없다(그 칸의 미러다).
+    if (typeof attachHighlight === 'function' && !f.negative) {
       Promise.resolve(attachHighlight(text, row.querySelector('.peq-hl')))
         .then(handle => {
           if (!handle) return;
@@ -236,8 +264,10 @@ export function createPeQuickEdit({
      *  ⚠️ 지키는 것은 '초점' 이 아니라 **안 저장된 편집**이다. 초점으로 재면 첫 상태가
      *     영영 안 들어온다 - 펼치는 순간 초점이 가고, 상태는 바로 그 펼침이 청해서
      *     **그 다음에** 오기 때문이다(실측: 상태 30키가 와 있는데 칸은 빈 채였다). */
-    sync() {
+    sync(onlyKey = null) {
       FIELDS.forEach(f => {
+        // 한 칸만 맞출 수도 있다 - 네거티브는 PE 상태와 **따로** 바뀐다(전부 다시 칠할 이유가 없다).
+        if (onlyKey && f.key !== onlyKey) return;
         const row = rowFor(f.key);
         const text = row.querySelector('.peq-text');
         const dirty = !text.hidden && text.value !== (text.dataset.peqSaved ?? '');

@@ -28937,6 +28937,10 @@ body.dragpanel-dragging iframe { pointer-events: none; }
    달고 온다 - 여기서는 자리(줄/구획)만 잡고, 좁은 창에 맞게 몇 가지를 줄인다. */
 .dragpanel.rctl { border-color: rgba(130, 150, 255, 0.42); }
 .dragpanel.rctl .dragpanel-head { background: rgba(130, 150, 255, 0.10); }
+/* 머리줄이 좁으면 **제목이 먼저 줄어든다** - 단추 줄(`.dragpanel-slot`)은 줄지 않고, 넘쳐서 접기 · 닫기
+   단추를 덮지도 않는다. 창의 최소 폭(400px)까지 이 순서로 버틴다. */
+.dragpanel.rctl .dragpanel-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dragpanel.rctl .dragpanel-slot { flex: 1 0 auto; gap: 3px; }
 .dragpanel.rctl .dragpanel-body {
   padding: 7px 8px 8px; gap: 6px; overflow: hidden;
   /* 격자 카드 높이가 이 폭을 따라간다(위 `30cqw`). */
@@ -29675,10 +29679,13 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   .rctl-side .rctl-fold-body { transition: none; }
 }
 
-/* 리모컨 머리줄의 [prefix] [postfix](사용자 지정 2026-09-19) - PE 창을 탭처럼 연다.
-   제목과 닫기 단추 사이의 빈 칸(`.dragpanel-slot`)에 산다. */
+/* 리모컨 머리줄의 [prefix] [postfix] [neg](사용자 지정 2026-09-19 · 10-04) - PE 창을 탭처럼 연다.
+   제목과 닫기 단추 사이의 빈 칸(`.dragpanel-slot`)에 산다.
+   ⚠️ 단추가 여섯이다(그룹 · prefix · postfix · neg · V5 영점 · 외부 브라우저). 기본 폭(490px)에서 그 빈 칸은
+      313px 이고 지금 여백(좌우 5px · 간격 3px)으로 303px 을 쓴다. 단추를 더하거나 라벨을 늘리면 넘친다 -
+      넘치면 제목이 먼저 줄어들지만(위 `.dragpanel.rctl .dragpanel-title`), 넣기 전에 재고 넣을 것. */
 .rctl-pe-btn {
-  flex: 0 0 auto; padding: 1px 7px; border-radius: 5px;
+  flex: 0 0 auto; padding: 1px 5px; border-radius: 5px;
   border: 1px solid var(--border-dim); background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted); font-family: var(--font-mono); font-size: 10px;
   line-height: 1.5; cursor: pointer;

@@ -11,21 +11,36 @@ RULES = (
      "actions": [{"field": "negative_prompt", "op": "add", "tags": ["sepia", "warm colored"]}],
      "levels": [], "evidence": {"level": "single_seed", "note": "evaiyu 한 시드에서 b* -7.2 · -6.4, 둘은 합산된다"},
      "cautions": [], "verify": []},
+    # 채도 · 밝기의 손잡이는 **네거티브**에 있다(사용자 발견 2026-10-04) - 프롬프트에 넣는 태그는 그림을 다시 뽑는다.
+    # 어두운 작가 셋 x 2시드(같은 시드의 짝 6쌍) + v1v404 의 2 x 2 에서 둘이 갈렸다: `grey theme` 은 채도만, 아래 묶음은 밝기를 올린다.
+    # `grey theme` 2.5 는 채도를 기준의 네 배 가까이 넘겨서 단계로 두지 않았다(세기는 화면의 약하게 0.5 · 세게 1.5).
+    # 옛 묶음(네거티브 monochrome · greyscale · muted color + 프롬프트 0.5::colorful)은 한 시드에서 한꺼번에 본 것이었고,
+    # colorful 은 여기에 더해도 거의 안 보탰다(채도 60.1 → 61.8).
     {"id": "chroma_low", "axis": "chroma", "side": "low", "title": "색을 더하기",
-     "actions": [{"field": "negative_prompt", "op": "add", "tags": ["monochrome", "greyscale", "muted color"]},
-                 {"field": "prompt", "op": "set_weight", "tags": ["colorful"], "weight": .5}],
-     "levels": [], "evidence": {"level": "single_seed", "note": "hamsterfragment 한 시드에서 밝기 27.9 → 40.1 · 채도 4.6 → 9.6"},
-     "cautions": ["colorful 은 0.5 까지 — 1 이면 배경이 바뀐다"], "verify": []},
-    # `ultra complexity` 는 **또렷함**의 손잡이다(사용자 지적 2026-10-03). 30장 검증에서 고주파 에너지는 10/10 올랐고
+     "actions": [{"field": "negative_prompt", "op": "add", "tags": ["grey theme"]}],
+     "levels": [], "evidence": {"level": "validated_pairs",
+                                "note": "어두운 작가 3 x 2시드, 채도 6/6 상승(중앙 +76%) · 구도 유지 0.90"},
+     "cautions": ["장면이 이미 가진 색이 짙어진다(파란 그림은 더 파랗게)", "밝기는 그대로이거나 조금 내려간다"], "verify": []},
+    # 셋 가운데 무엇이 일하는지는 갈라 보지 않았다. 밝은 그림(밝기 69)에서는 안 움직였다 - 낮은 쪽에만 붙인다.
+    {"id": "lightness_low", "axis": "lightness", "side": "low", "title": "밝게",
+     "actions": [{"field": "negative_prompt", "op": "add", "tags": ["black theme", "dark", "muted color"]}],
+     "levels": [], "evidence": {"level": "validated_pairs",
+                                "note": "어두운 작가 3 x 2시드, 밝기 6/6 상승(중앙 +13) · 구도 유지 0.76(최저 0.20)"},
+     "cautions": ["배경이 밝은 것으로 바뀐다 — 그림이 달라질 수 있다", "채도도 같이 오르는 편이다", "검은 옷의 색이 바뀔 수 있다",
+                  "이미 밝은 그림에서는 움직이지 않는다"],
+     "verify": ["chroma"]},
+    # `ultra complexity` 는 **또렷함**을 올리는 손잡이다(사용자 지적 2026-10-03). 30장 검증에서 고주파 에너지는 10/10 올랐고
     # 선 대비는 9/10 · 중앙 +3.7 로 약했다 - 처음에는 선 대비 축에만 붙여 놓아 또렷함 축이 '보정 없음' 으로 나왔다.
     {"id": "sharpness_low", "axis": "sharpness", "side": "low", "title": "또렷하게",
      "actions": [{"field": "prompt", "op": "set_weight", "tags": ["ultra complexity"], "weight": .5}],
      "levels": [], "evidence": {"level": "validated_30", "note": "5시드 x 2구도, 고주파 에너지 10/10 상승(중앙 +34) · 선 대비 9/10"},
      "cautions": ["그림이 다시 뽑힌다", "거칠기가 는다", "0.5 를 넘겨도 선은 더 안 선다"], "verify": []},
+    # 높을 때는 네거티브의 `high contrast` - 그림을 유지한 채 무르게 한다. `ultra complexity` 를 음수로 내리던 것(한 시드의 근거)은
+    # 그림이 다시 뽑혀서 바꿨다(2026-10-04).
     {"id": "sharpness_high", "axis": "sharpness", "side": "high", "title": "부드럽게",
-     "actions": [{"field": "prompt", "op": "set_weight", "tags": ["ultra complexity"], "weight": -.25}],
-     "levels": [], "evidence": {"level": "single_seed", "note": "evaiyu 한 시드의 사다리: 0.15 → -0.19 → -0.35 에서 고주파 59 → 44 → 25"},
-     "cautions": ["그림이 다시 뽑힌다", "-0.5 근처에서는 인물이 배경에 녹는다"], "verify": []},
+     "actions": [{"field": "negative_prompt", "op": "add", "tags": ["high contrast"]}],
+     "levels": [], "evidence": {"level": "validated_30", "note": "5시드 x 2구도(작가 없음), 또렷함 10/10 하락(중앙 -17%) · 구도 유지 0.93"},
+     "cautions": ["명암 대비 · 선 대비도 조금 내려간다"], "verify": ["line_contrast"]},
     {"id": "line_absent", "axis": "line_contrast", "side": "low", "title": "선을 드러내기",
      "actions": [{"field": "prompt", "op": "set_weight", "tags": ["jaggy lines"], "weight": 2},
                  {"field": "negative_prompt", "op": "add", "tags": ["no lineart"]}],

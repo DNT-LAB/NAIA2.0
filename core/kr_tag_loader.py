@@ -141,19 +141,39 @@ def load_kr_tag_records(
         _warn(warnings, f"tag data not found at {interactive_path}; using parquet/filter bootstrap only", warn)
     interactive_count = len(raw)
 
+    # Parse the native research dictionary once. Its exact shared-allowlist
+    # result bounds E621 Parquet rows, while the research repository continues
+    # to load the complete native vocabulary and translation table separately.
+    e621_data_path = _first_existing(resolved_data_roots, "e621_data")
+    e621_candidates: dict[str, dict[str, Any]] = {}
+    e621_research_stats = merge_e621_research_records(
+        e621_candidates,
+        e621_data_path,
+    )
+    e621_allowlist = None
+    if e621_data_path.is_file() and not e621_research_stats.errors and not e621_research_stats.missing_sources:
+        e621_allowlist = {2: e621_candidates.keys()}
+
     parquet_stats = merge_parquet_tag_records(
         raw,
         [
             (_first_existing(resolved_data_roots, "KR_tags.parquet"), 1),
             (_first_existing(resolved_data_roots, "e621_KR_tags.parquet"), 2),
         ],
+        source_allowlists=e621_allowlist,
+        # e621 표의 키워드 없는 행은 위키 본문 번역이다 - 연구모듈이 읽을거리로만 쓴다.
+        body_translation_sources={2},
     )
-    # 연구모듈이 보는 e621 전체 어휘. 번역 파켓(5,450)은 부분집합이라, 이것을
-    # 안 붙이면 8,864개가 자동완성/Tag Search 에서 아예 안 잡힌다.
-    e621_research_stats = merge_e621_research_records(
-        raw,
-        _first_existing(resolved_data_roots, "e621_data"),
-    )
+
+    # Preserve the original merge precedence: interactive and Parquet records
+    # remain authoritative for collisions; native research records only fill
+    # keys that are still absent.
+    e621_research_stats.added = 0
+    for tag_key, record in e621_candidates.items():
+        if tag_key in raw:
+            continue
+        raw[tag_key] = record
+        e621_research_stats.added += 1
     for error in e621_research_stats.errors:
         _warn(warnings, f"e621 research merge warning - {error}", warn)
 

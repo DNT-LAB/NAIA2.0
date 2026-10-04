@@ -14,6 +14,7 @@ from typing import Any
 
 
 ANNOTATION_SCHEMA = "naia.e621-research-annotations.v1"
+BODY_TRANSLATION_LABEL = "위키 번역 · 기계 번역(미검수)"
 
 
 def body_sha256(body: str) -> str:
@@ -46,6 +47,10 @@ class E621ResearchMetadata:
             for root in map(Path, [base / "data", *(data_roots or [])])
         ))
         self._translations: dict[str, dict[str, Any]] = {}
+        # 위키 본문을 통째로 옮긴 번역(2026-10-04 한글화, 26,464건). 사람이 쓴 짧은 '설명' 과 다르다:
+        # 읽기용이고 **검색에는 쓰지 않는다**(사용자 지정 2026-10-04) - 긴 번역문이 검색에 걸리면 결과가 흐려진다
+        # (실측: '꼬리' 63건 → 1,347건 · '캐릭터' 1,865건 → 10,389건).
+        self._body_translations: dict[str, str] = {}
         self._annotations: dict[str, dict[str, Any]] = {}
         self._search_annotations: dict[str, dict[str, Any]] = {}
         self._links: dict[str, list[dict[str, Any]]] = {}
@@ -57,6 +62,8 @@ class E621ResearchMetadata:
         self._load_annotations()
         described = {tag for tag, value in self._translations.items() if value.get("desc")}
         described.update(self._annotations)
+        # '한국어로 읽을 것이 있는가' 에는 번역 본문도 든다(설명 상태 필터 · 요약 수치).
+        described.update(self._body_translations)
         self._described = described
         # Empty metadata cannot contain Korean. Avoid eight dictionary lookups
         # and a regex for every unannotated row in the expanded vocabulary.
@@ -80,6 +87,7 @@ class E621ResearchMetadata:
             "total": len(self._native),
             "with_body": len(self._body_tags),
             "with_korean_description": len(described),
+            "with_korean_body_translation": len(self._body_translations),
             "with_korean_search": len(self._searchable),
             "reviewed_korean_search": len(self._search_annotations),
             "without_description": len(self._native) - len(self._body_tags | described),
@@ -99,15 +107,22 @@ class E621ResearchMetadata:
             return
         try:
             if rows is None:
+                import pyarrow
                 import pyarrow.parquet as pq
                 rows = pq.ParquetFile(path).read(columns=["tag", "desc", "keywords"]).to_pylist()
+                # 표를 풀 때 Arrow 가 잡은 메모리를 돌려준다(번역 본문 2만6천 건이 든 뒤로 수십 MB 다).
+                pyarrow.default_memory_pool().release_unused()
             for row in rows:
                 tag = str(row.get("tag") or "")
-                if tag in self._native:
-                    self._translations[tag] = {
-                        "desc": str(row.get("desc") or "").strip(),
-                        "keywords": str(row.get("keywords") or "").strip(),
-                    }
+                if tag not in self._native:
+                    continue
+                desc, keywords = str(row.get("desc") or "").strip(), str(row.get("keywords") or "").strip()
+                # 번역 본문인가: 키워드가 없고 그 태그에 위키 본문이 있다. 사람이 쓴 5,640행은 전부 키워드가 있고
+                # (가장 긴 설명 154자), 번역 26,464행은 전부 키워드가 없다 - 표에 종류를 적는 열은 없다.
+                if desc and not keywords and tag in self._body_tags:
+                    self._body_translations[tag] = desc
+                else:
+                    self._translations[tag] = {"desc": desc, "keywords": keywords}
             self._metadata_available = True
         except Exception:
             self._warnings.append("한국어 설명 사전을 읽지 못했습니다. 저장된 위키 본문은 계속 볼 수 있습니다.")
@@ -195,12 +210,15 @@ class E621ResearchMetadata:
         annotation = self._annotations.get(exact_tag, {})
         search = self._search_annotations.get(exact_tag, {})
         description = str(annotation.get("description") or legacy.get("desc") or "")
+        korean_body = self._body_translations.get(exact_tag, "")
         if annotation:
             status, label = "reviewed_direct_definition", "직접 정의 검토 완료"
         elif exact_tag in self._stale:
             status, label = "stale_evidence", "근거 변경 · 재검토 필요"
         elif description:
             status, label = "legacy_unverified", "기존 설명 · 검토 기록 미연결"
+        elif korean_body:
+            status, label = "machine_translated_body", BODY_TRANSLATION_LABEL
         elif not self._metadata_available:
             status, label = "metadata_unavailable", "한국어 설명 사전 확인 불가"
         else:
@@ -214,6 +232,10 @@ class E621ResearchMetadata:
             "has_korean_search": exact_tag in self._searchable,
             "korean_label": str(annotation.get("label") or native.get("kor") or search.get("label") or ""),
             "korean_description": description,
+            # 위키 본문 번역(있으면). 설명과 따로 준다 - 화면은 설명이 없을 때 이것을 읽을거리로 보인다.
+            "has_korean_body": bool(korean_body),
+            "korean_body": korean_body,
+            "korean_body_label": BODY_TRANSLATION_LABEL if korean_body else "",
             "korean_keywords": ", ".join(str(value) for value in (
                 annotation.get("keywords"), legacy.get("keywords"), search.get("label"),
                 *search.get("keywords", []),

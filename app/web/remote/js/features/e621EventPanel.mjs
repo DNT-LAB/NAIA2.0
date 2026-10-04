@@ -108,7 +108,9 @@ export function createE621EventPanel({
     if (ui.pop === 'settings') {
       const stats = Object.hasOwn(summary, 'total')
         ? `태그 ${fmt(summary.total)} · 위키 본문 ${fmt(summary.with_body)} · 한글 검색 ${fmt(summary.with_korean_search)}`
-          + ` · 한국어 설명 ${fmt(summary.with_korean_description)} · ${noDescription} ${fmt(summary.without_description)}` : '';
+          + ` · 한국어 설명 ${fmt((summary.with_korean_description || 0) - (summary.with_korean_body_translation || 0))}`
+          + (summary.with_korean_body_translation ? ` · 위키 번역 ${fmt(summary.with_korean_body_translation)}` : '')
+          + ` · ${noDescription} ${fmt(summary.without_description)}` : '';
       // 서버 키는 부정형(disable_*)이다 - 화면은 긍정형으로 보이고 값을 뒤집어 보낸다.
       const check = (key, label, title) => `<label class="e6-check" title="${esc(title)}">`
         + `<input type="checkbox" data-e621-setting="${key}"${state[key] ? '' : ' checked'}><span>${label}</span></label>`;
@@ -124,7 +126,7 @@ export function createE621EventPanel({
     const summary = state.research_summary || {};
     const filter = state.content_filter || 'all';
     const noDescription = summary.metadata_available === false ? '설명 미확인' : '설명 없음';
-    const options = [['all', '설명 상태'], ['with_body', '위키 본문 있음'], ['with_korean', '한국어 설명 있음'],
+    const options = [['all', '설명 상태'], ['with_body', '위키 본문 있음'], ['with_korean', '한국어 설명 · 번역 있음'],
       ['with_korean_search', '한글 검색어 있음'], ['without_description', noDescription]]
       .map(([value, label]) => `<option value="${value}"${filter === value ? ' selected' : ''}>${label}</option>`).join('');
     const hidden = Number(state.hidden_total) || 0;
@@ -180,6 +182,7 @@ export function createE621EventPanel({
     const fields = matchFieldsOf(tag);
     const coverage = [
       tag.has_body ? '위키 본문' : '',
+      tag.has_korean_body ? '위키 번역' : '',
       tag.has_korean_description ? '한국어 설명' : '',
       tag.has_korean_search && !tag.has_korean_description ? '한글 검색어' : '',
     ].filter(Boolean).join(' · ') || (tag.review_status === 'metadata_unavailable' ? '설명 확인 불가' : '설명 없음');
@@ -291,13 +294,23 @@ export function createE621EventPanel({
     const chips = matchChips(selected);
     const body = String(state.wiki?.body ?? '');
     const koreanText = state.disable_translation ? '' : String(research.korean_description || '');
-    // 설명 자리: 한국어 설명이 있으면 그것, 없으면 영어 위키 본문(6줄에서 접는다).
+    // 위키 본문을 통째로 옮긴 번역(기계 번역 · 미검수). 사람이 쓴 설명과 따로 온다 - 검색에는 안 쓰이고 읽기만 한다.
+    const koreanBody = state.disable_translation ? '' : String(research.korean_body || '');
+    const clampable = text => text.length > 300 || text.split('\n').length > 6;
+    // 설명 자리: 한국어 설명 → 없으면 위키 번역 → 그것도 없으면 영어 위키 본문. 긴 글은 6줄에서 접는다.
     let description = '';
     if (koreanText) {
       description = `<p class="e6-desc">${esc(koreanText)}</p>`;
+    } else if (koreanBody) {
+      const open = ui.expanded.has('kobody');
+      const long = clampable(koreanBody);
+      description = `<div class="e6-note" title="e621 위키 본문을 기계로 옮긴 글입니다. 사람이 검수하지 않았습니다 - 원문은 아래 '위키 원문'.">${
+        esc(research.korean_body_label || '위키 번역')}</div>`
+        + `<p class="e6-desc${long && !open ? ' clamp' : ''}">${esc(koreanBody)}</p>`
+        + (long ? `<button class="e6-link" data-e621-act="expand" data-key="kobody">${open ? '접기' : '더 보기'}</button>` : '');
     } else if (body) {
       const open = ui.expanded.has('wiki');
-      const long = body.length > 300 || body.split('\n').length > 6;
+      const long = clampable(body);
       description = (state.disable_translation ? '' : `<div class="e6-note">${
         research.review_status === 'metadata_unavailable' ? '한국어 설명 사전을 확인할 수 없습니다' : '한국어 설명 없음'} · 위키 원문</div>`)
         + `<p class="e6-desc en${long && !open ? ' clamp' : ''}">${esc(body)}</p>`
@@ -306,7 +319,7 @@ export function createE621EventPanel({
       description = `<div class="e6-note">${research.review_status === 'metadata_unavailable'
         ? '한국어 설명 사전을 확인할 수 없습니다' : '설명 없음'}</div>`;
     }
-    const wikiFold = koreanText && body
+    const wikiFold = (koreanText || koreanBody) && body
       ? `<details class="e6-fold" data-e621-fold="wiki"${ui.folds.has('wiki') ? ' open' : ''}><summary>위키 원문</summary>`
         + `<div class="e6-fold-body"><p class="e6-desc en">${esc(body)}</p></div></details>` : '';
     return `${head}<div class="e6-detail">`

@@ -74,7 +74,11 @@ class E621EventService:
         self.tag_offset = min(self.tag_offset, max(0, (len(visible_tags) - 1) // tag_limit * tag_limit))
         selected_payload = self._tag_payload(selected, selected_match) if selected else None
         if selected_payload is not None:
-            selected_payload["research"] = self.research_metadata.for_tag(selected_payload["tag"])
+            research = self.research_metadata.for_tag(selected_payload["tag"])
+            if research.get("korean_body"):
+                # 번역 본문도 영어 본문과 같은 방식으로 다듬어 보인다(thumb 번호 · [[링크]] · [b] 표식).
+                research["korean_body"] = self._clean_wiki_text(research["korean_body"])
+            selected_payload["research"] = research
             selected_payload["relations"] = self._relations_payload(selected_payload["tag"])
         return {
             "type": "module_state",
@@ -555,6 +559,7 @@ class E621EventService:
             **E621ResearchIndex.match_payload(match),
             "has_body": bool(research.get("has_body")),
             "has_korean_description": bool(research.get("has_korean_description")),
+            "has_korean_body": bool(research.get("has_korean_body")),
             "has_korean_search": bool(research.get("has_korean_search")),
             "review_status": research.get("review_status", "unreviewed"),
             "review_label": research.get("review_label", "미검토"),

@@ -127,6 +127,11 @@ def apply_records(tree, translations, annotations, changes, reviewer):
             # Existing reviewed supplements must not shadow the approved edit.
             # Bind any edited supplement to the new review, never its old quote.
             for collection in ("descriptions", "korean_search"):
+                # A search-term supplement records a review of label/keywords. A description-only
+                # approval did not review those, so it must not take over that record's evidence
+                # and reviewer (2026-10-04: a body-translation batch re-attributed 123 of them).
+                if collection == "korean_search" and not {"label", "keywords"} & set(korean):
+                    continue
                 for annotation in annotations.get(collection, []):
                     if annotation.get("e621_tag") == tag:
                         annotation.update(sources=evidence, reviewer=reviewer,

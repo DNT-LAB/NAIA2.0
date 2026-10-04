@@ -63,15 +63,6 @@ const MODULE_REGISTRY = {
     categoryBadgeLabel: '',
     categoryBadgeClass: 'event-stream',
   },
-  // NAI Inspector(사용자 지정 2026-10-03) — 모듈 팝업이 아니라 **켜고 끄는 줄**이다. 켜면 결과 화면의
-  // 시드 알약 옆에 접이식 판이 뜬다(js/features/toneInspectorPanel.mjs). 기준값이 NAI 그림에서 나와 NAI 에서만 보인다.
-  nai_inspector: {
-    label: 'NAI Inspector',
-    title: 'NAI Inspector — 결과 그림의 색 · 선이 기준값에서 얼마나 벗어났는지와 보정 태그를 결과 화면에 띄운다',
-    category: 'prompt_tools',
-    action: 'nai_inspector',
-    modes: ['NAI'],
-  },
   character: {
     label: 'Character',
     title: 'NAID4 Character',
@@ -223,8 +214,7 @@ const CATEGORY_REGISTRY = [
     //    ⚠️ 옛 `chunkPanel.mjs` 은 이제 **열리는 길이 없다**. 우클릭 › [Add to Chunk] 도
     //    새 창으로 가게 바꿔서(`onAddToChunkWindow`), 그 파일은 지금 사실상 죽은 코드다.
     //    지우는 것은 별도 작업으로 둔다(31KB · 배선이 여러 곳).
-    // `nai_inspector` 는 **맨 아래**(사용자 지정 2026-10-03).
-    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'nai_inspector'],
+    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser'],
     // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
     splitBadges: true,
   },
@@ -287,8 +277,6 @@ export function createModuleLauncher({
   isAnimaLoraOpen = () => false,
   // 모듈이 아닌 단축키 {글자: 동작} - Ctrl+Q = Tag Filter(09-29). 표의 모듈 글자와 겹치면 모듈이 이긴다.
   shortcuts = {},
-  // NAI Inspector 가 켜져 있나(10-03). 런처가 다시 그려도 체크가 풀리지 않게 상태를 물어 다시 씌운다.
-  isNaiInspectorEnabled = () => false,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -456,17 +444,6 @@ export function createModuleLauncher({
             <button type="button" class="module-hiresfix-assist-target" data-webui-hiresfix-assist-target="512" aria-pressed="false" onclick="setWebUiHiresfixAssistTarget(512)">512^2</button>
             <button type="button" class="module-hiresfix-assist-target" data-webui-hiresfix-assist-target="768" aria-pressed="false" onclick="setWebUiHiresfixAssistTarget(768)">768^2</button>
           </div>
-        </div>
-      `;
-    }
-    if (config.action === 'nai_inspector') {
-      const tooltip = tooltipAttr(config.title);
-      return `
-        <div class="module-hiresfix-assist-row module-nai-inspector-row" data-module="${moduleId}" data-module-tooltip="${tooltip}">
-          <label class="module-hiresfix-assist-toggle">
-            <input type="checkbox" data-nai-inspector-enabled onchange="setNaiInspectorEnabled(this.checked)">
-            <span>${config.label}</span>
-          </label>
         </div>
       `;
     }
@@ -696,11 +673,6 @@ export function createModuleLauncher({
       }
       button.disabled = blocked;
       button.classList.toggle('active', visible && moduleIsActive(moduleId));
-    });
-    root.querySelectorAll('[data-nai-inspector-enabled]').forEach(checkbox => {
-      const on = Boolean(isNaiInspectorEnabled());
-      if (checkbox.checked !== on) checkbox.checked = on;
-      checkbox.closest('.module-nai-inspector-row')?.classList.toggle('active', on);
     });
     root.querySelectorAll('[data-module-event-stream]').forEach(row => {
       row.classList.toggle('active', Boolean(eventStreamState.active));

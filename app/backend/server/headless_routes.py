@@ -43,7 +43,6 @@ from app.backend.server.prompt_engineering_filter_routes import register_pe_filt
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.result_display_routes import register_result_display_routes
 from app.backend.server.state_routes import register_state_routes
-from app.backend.server.image_inspect_routes import register_image_inspect_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
 from app.backend.server.web_shell_routes import register_web_shell_routes
 from app.backend.server.websocket_broadcast import broadcast_json
@@ -240,13 +239,6 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_style_thumbnail_routes(app, context, run_in_thread=run_in_thread)
-    register_image_inspect_routes(
-        app,
-        context,
-        run_in_thread=run_in_thread,
-        clients=clients,
-        broadcast_json=broadcast_json,
-    )
     register_font_routes(app, context, root_web_dir, run_in_thread=run_in_thread)
     register_nai_model_routes(
         app,

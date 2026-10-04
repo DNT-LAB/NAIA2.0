@@ -30406,3 +30406,11 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 }
 .snap-pick input { margin: 0; accent-color: #5a82dc; cursor: pointer; }
 .snap-pick-n { color: #8a8f9a; font-size: 9.5px; }
+/* 입구 단추 - Tools & Assistants 제목 옆(사용자 지정 2026-10-04: 연보라색 배경).
+   오른쪽 칩들(파란 기)과 같은 크기 · 같은 글꼴이되 색만 다르다 - 창을 여닫는 도구가 아니라 프로젝트 저장이다.
+   ⚠️ 제목 줄은 `text-transform: uppercase` 다 - 그대로 두면 이 단추만 SNAPSHOT 이 되어 옆 칩과 어긋난다. */
+.snapshot-open-btn {
+  margin-left: 4px; text-transform: none; letter-spacing: 0.2px;
+  background: rgba(176,156,255,0.34); border-color: rgba(176,156,255,0.72); color: #f1ecff;
+}
+.snapshot-open-btn:hover { background: rgba(176,156,255,0.48); border-color: #b9a8ff; }

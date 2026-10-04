@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261004-snapshot2">
+<link rel="stylesheet" href="style.css?v=20261004-snapshot4">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -552,7 +552,6 @@
         <button type="button" role="menuitem" onclick="openFnISequence()"><span>&#9655;</span><span>I.Sequence</span></button>
         -->
         <button type="button" role="menuitem" onclick="openFnV5Scene()"><span>&#127916;</span><span>V5 Scene</span></button>
-        <button type="button" role="menuitem" onclick="openFnSnapshot()"><span>&#128248;</span><span>Snapshot</span></button>
         <button type="button" role="menuitem" onclick="openTranslatorPopup()"><span>あ</span><span>Translate</span></button>
       </div>
       <div class="tab-content">
@@ -806,7 +805,15 @@
       <!-- Module bar -->
         <div class="assistants-section">
           <div class="assistants-label">
-            <span class="assistants-title">Tools &amp; Assistants <span class="assistants-info">i</span></span>
+            <!-- Snapshot 은 제목 옆에 따로 선다(사용자 지정 2026-10-04) - 오른쪽 도구 묶음(창을 여닫는 칩)과
+                 달리 "지금 설정을 통째로 담는" 프로젝트 저장이라 색도 다르다(연보라). 제목과 한 덩어리로 묶어야
+                 `.assistants-label` 의 space-between 이 이 단추를 가운데로 띄우지 않는다. -->
+            <span class="assistants-title">Tools &amp; Assistants <span class="assistants-info">i</span>
+              <button type="button" class="ia-mode-toggle snapshot-open-btn" id="snapshotBtn" aria-haspopup="dialog"
+                      data-naia-guide="Snapshot. 지금 설정을 그림 한 장과 함께 통째로 담아 두고, 항목을 골라 되돌립니다 — 프롬프트 · 네거티브 · 생성 설정 · 프롬프트 엔지니어링 · 캐릭터 · 조건부 · Vibe/Reference, 고르면 Tag Filter 와 데이터셋까지. NAI V4.5 · V5 에서 씁니다.">
+                <span>Snapshot</span>
+              </button>
+            </span>
             <!-- 오른쪽 도구 묶음. `.assistants-label` 이 space-between 이라 이 둘을 형제로
                  두면 사이가 벌어진다 — 한 번 더 감싸서 도구 단추끼리 붙인다. -->
             <div class="assistants-actions">
@@ -1527,6 +1534,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261004-snapshot3"></script>
+<script src="app.js?v=20261004-snapshot4"></script>
 </body>
 </html>

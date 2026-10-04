@@ -3053,7 +3053,7 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .catch(error => {
     console.error('Failed to initialize V5 Scene panel', error);
   });
-const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261004-snapshot3')
+const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261004-snapshot4')
   .then(({createSnapshotPanel}) => {
     snapshotControl = createSnapshotPanel({
       document,
@@ -8204,8 +8204,6 @@ const FN_QUICK_ITEMS = [
   //    빠른칸이 그냥 비므로, 옛 저장값 때문에 되살아나지 않는다.
   // {key: 'isequence', icon: '▷', label: 'I.Sequence', tab: 'isequence', run: () => openFnISequence()},
   {key: 'v5scene', icon: '🎬', label: 'V5 Scene', tab: 'v5scene', run: () => openFnV5Scene()},
-  // Snapshot 도 탭이 아니라 창이다(Scene 창과 같은 Finder 배치) - `tab` 을 비운다.
-  {key: 'snapshot', icon: '📸', label: 'Snapshot', tab: '', run: () => openFnSnapshot()},
   // Translate 는 탭이 아니라 팝업이다 - `tab` 이 비어 있으면 활성 표시를 하지 않는다.
   {key: 'translate', icon: 'あ', label: 'Translate', tab: '', run: () => openTranslatorPopup()},
 ];
@@ -8291,12 +8289,18 @@ function openFnV5Scene() {
   v5SceneReady.then(() => v5SceneControl?.onOpen());
 }
 
-function openFnSnapshot() {
-  closeFnMenu();
-  rememberFnQuick('snapshot');
-  // 탭을 바꾸지 않는다 - 화면을 덮는 창이 뜬다. 목록은 창이 열릴 때마다 다시 받는다.
-  snapshotReady.then(() => snapshotControl?.open());
+// Snapshot 의 입구는 Tools & Assistants 제목 옆의 단추다(사용자 지정 2026-10-04 - Fn 메뉴에서 옮겼다).
+// 화면을 덮는 창이 뜬다. 목록은 창이 열릴 때마다 다시 받는다.
+function openSnapshotWindow() {
+  snapshotReady.then(() => {
+    if (!snapshotControl) {
+      showToast('Snapshot 모듈을 불러오지 못했습니다.', 'error');
+      return;
+    }
+    snapshotControl.open();
+  });
 }
+$('snapshotBtn')?.addEventListener('click', openSnapshotWindow);
 
 function positionTranslatorPopup() {
   if (!translatorPopup || translatorPopup.hidden) return;

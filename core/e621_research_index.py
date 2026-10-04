@@ -138,6 +138,10 @@ class E621ResearchIndex:
         # The first response needs 300 ranks, not a full sorted copy of 172k
         # rows. Later pages use the identical total ordering over this snapshot.
         self.first_page = heapq.nsmallest(300, self.all_rows, key=self.sort_key)
+        # 정렬한 목록은 처음 필요할 때 한 번 만들어 둔다 - 이 색인은 스냅숏이라 줄이 바뀌지 않는다.
+        # (쪽을 이어 붙이는 화면은 뒤쪽을 자주 청한다. 예전에는 상태가 올 때마다 17만 줄을 다시 정렬했다.)
+        self._all_sorted = None
+        self._category_sorted = {}
         # The exact-key dictionary is also the name index. Query the retained
         # names directly instead of allocating 172k normalized name copies.
         # Keep references to bodies, not another normalized corpus in memory.
@@ -217,29 +221,40 @@ class E621ResearchIndex:
     def visible(self, *, category, folder, content_filter, hidden, starred, starred_only, matches):
         if category:
             section = next((section for section in ("General", "Species") if (section, category) in self.category_rows), None)
-            rows = (self.folder_rows.get((section, category, folder), []) if folder
-                    else self.category_rows.get((section, category), []))
-            # Dedup precedes pagination; preserve the first native membership.
-            rows = list({row["tag"]: row for row in reversed(rows)}.values())
+            key = (section, category, folder or None)
+            rows = self._category_sorted.get(key)
+            if rows is None:
+                rows = (self.folder_rows.get((section, category, folder), []) if folder
+                        else self.category_rows.get((section, category), []))
+                # Dedup precedes pagination; preserve the first native membership.
+                rows = sorted({row["tag"]: row for row in reversed(rows)}.values(), key=self.sort_key)
+                self._category_sorted[key] = rows
+        elif matches is None and content_filter == "all" and not hidden and not starred_only:
+            return self.all_rows
         else:
-            rows = self.all_rows
-        if matches is None and not category and content_filter == "all" and not hidden and not starred_only:
-            return rows
+            rows = self._sorted_all()
+        # 거르기는 순서를 지킨다(늘 새 목록을 돌려준다 - 위의 정렬해 둔 목록은 건드리지 않는다).
         rows = self.filter_rows(rows, content_filter=content_filter, hidden=hidden,
                                 starred=starred, starred_only=starred_only, matches=matches)
-        rows.sort(key=lambda row: ((matches[row["tag"]][2] if matches is not None else 1),
-                                  -int(row.get("count") or 0), row["tag"]))
+        if matches is not None:
+            # 이미 (게시물 수, 이름) 순이다 - 안정 정렬이라 일치 등급만으로 다시 세우면 된다.
+            rows.sort(key=lambda row: matches[row["tag"]][2])
         return rows
 
     @staticmethod
     def sort_key(row):
         return -int(row.get("count") or 0), row["tag"]
 
+    def _sorted_all(self):
+        if self._all_sorted is None:
+            self._all_sorted = sorted(self.all_rows, key=self.sort_key)
+        return self._all_sorted
+
     def page(self, rows, offset, limit=300):
         if rows is self.all_rows:
             if offset == 0 and limit == 300:
                 return self.first_page
-            return sorted(rows, key=self.sort_key)[offset:offset + limit]
+            return self._sorted_all()[offset:offset + limit]
         return rows[offset:offset + limit]
 
     @staticmethod

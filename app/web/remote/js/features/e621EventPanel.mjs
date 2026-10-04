@@ -10,6 +10,7 @@
 //      · 태그 목록 HTML 에는 '지금 고른 태그' 를 넣지 않는다 → 클래스만 옮긴다(syncMarks).
 //      · 치는 중인 검색어는 영역 HTML 에 넣지 않는다 → 쓴 뒤에 value 로 넣는다(syncInputs).
 //      · 영역을 다시 쓸 때는 data-scroll-key 가 같은 스크롤 · 포커스를 되돌린다(swap).
+//      · 태그 목록은 쪽(300줄)을 이어 붙인다 - 같은 목록이면 영역을 다시 쓰지 않고 쪽 단위로 맞춘다(paintTags).
 // ⚠️ 그리는 곳이 둘이다 - 떠 있는 창(e621Window 의 본문)과, 떼어 낸 브라우저 창의 모듈 팝업 본문.
 //    모양은 이 모듈이 싣는 PANEL_CSS 하나가 정한다(폭 반응은 .e6-root 의 컨테이너 질의).
 // 클릭은 data-e621-act 로 위임해 받는다 - 공용 app.js 에 전역 함수를 늘리지 않는다.
@@ -36,6 +37,12 @@ export function createE621EventPanel({
   let lastSearchText = null;
   // 화면 상태 - 이 탭의 것이다(서버에 두지 않는다: 다른 탭이 내 팝오버 · 펼침을 바꾸면 안 된다).
   const ui = {pop: '', searchDraft: null, expanded: new Set(), expandedFor: '', folds: new Set()};
+  // 태그 목록에 이어 붙여 둔 쪽들 - 이것도 이 탭의 것이다. 서버가 아는 것은 마지막으로 청한 쪽 하나뿐이다.
+  //   key = 어느 목록인가 · stamp = 그 목록의 줄 수와 줄 모양 · html = 쪽마다 써 넣은 줄 · pending = 청해 둔 쪽
+  const pages = {key: null, stamp: '', first: 0, last: -1, html: new Map(), pending: null};
+  const PAGE_LIMIT = 10;   // 화면에 두는 쪽 수(3,000줄). 넘으면 먼 쪽을 떼어 낸다 - 돌아가면 다시 받는다.
+  const EDGE_PX = 720;     // 끝에서 이만큼(서른 줄) 남으면 옆 쪽을 미리 청한다 - 응답(0.1초쯤)보다 먼저 끝에 닿지 않게
+  const RETRY_MS = 4000;   // 청한 쪽이 이 안에 안 오면 다시 청할 수 있다
 
   ensureStyle(document);
   bindDelegates();
@@ -197,23 +204,241 @@ export function createE621EventPanel({
       + '</div>';
   }
 
-  function tagsHtml(state) {
-    const tags = state.tags || [];
-    const offset = Number(state.tag_offset) || 0;
-    const pageSize = Number(state.tag_page_size || state.tag_limit) || 300;
+  // ── 태그 목록 = 이어 붙는 쪽 ───────────────────────────────────────────────
+  // 서버는 한 번에 한 쪽만 준다. 화면은 받은 쪽을 이어 붙인다 - 아래 끝에 닿으면 다음 쪽을, 위 끝에 닿으면 앞 쪽을
+  // 청한다(사용자 지정 2026-10-04: "스크롤이 하단에 닿으면 페이지가 자동으로 넘어가는 기능").
+  //   · 상태가 올 때마다 서버의 쪽(마지막으로 청한 쪽)이 다시 온다 → 가진 쪽이면 그 쪽만 견주고, 바로 옆 쪽이면
+  //     붙이고, 먼 쪽이면(다른 탭이 서버의 쪽을 옮겼다) 버린다.
+  //   · 같은 목록인데 줄이 밀렸으면(숨김 · 번역 결과가 뒤늦게 보태짐) 다른 쪽들은 이제 맞지 않는다 → 온 쪽만 남긴다.
+  //     그래서 목록을 바꾸는 명령 앞에서는 서버의 쪽을 '보고 있는 쪽' 에 먼저 맞춘다(alignServerPage).
+  const pageSizeOf = state => Number(state.tag_page_size || state.tag_limit) || 300;
+  const pageOf = state => Math.floor((Number(state.tag_offset) || 0) / pageSizeOf(state));
+  const hasPageAfter = (state, page) => (page + 1) * pageSizeOf(state) < (Number(state.tag_total) || 0);
+  // 같은 목록인지 = 무엇을 보고 있나(쪽은 뺀다). 번역이 뒤늦게 결과를 보태도 같은 검색이다.
+  const listKeyOf = state => ['tags', state.search_text, state.current_category, state.current_level2, state.view_mode,
+    state.content_filter, state.disable_wiki_search ? 1 : 0].join('|');
+  const listStampOf = state => `${Number(state.tag_total) || 0}|${state.disable_translation ? 1 : 0}`;
+  const EMPTY_TAGS = '<div class="e6-empty">태그 없음</div>';
+  const chunkHtml = (page, rows) => `<div class="e6-chunk" data-page="${page}">${rows}</div>`;
+  // 끝의 줄 = 스크롤로 못 닿았을 때 누르는 자리(평소에는 닿기 전에 옆 쪽이 붙는다).
+  const edgeHtml = (side, shown) => `<button class="e6-edge" data-e621-act="more" data-value="${side}"${shown ? '' : ' hidden'}>`
+    + `${side === 'prev' ? '앞 태그 더 보기' : '다음 태그 더 보기'}</button>`;
+
+  function rangeText(state, first, last) {
     const total = Number(state.tag_total) || 0;
-    const range = total ? `${fmt(offset + 1)}–${fmt(offset + tags.length)} / ${fmt(total)}` : '0';
-    const pager = total > pageSize ? `<div class="e6-pager">`
-      + `<button class="e6-btn" data-e621-act="page" data-value="${Math.max(0, offset - pageSize)}"${state.has_previous ? '' : ' disabled'} aria-label="이전 태그 페이지">이전</button>`
-      + `<span class="e6-dim">${Math.floor(offset / pageSize) + 1} / ${Math.ceil(total / pageSize)}</span>`
-      + `<button class="e6-btn" data-e621-act="page" data-value="${offset + pageSize}"${state.has_next ? '' : ' disabled'} aria-label="다음 태그 페이지">다음</button></div>` : '';
-    // 같은 목록인지 = 무엇을 보고 있나. 같으면 다시 써도 스크롤을 되돌리고, 다르면(다음 페이지 · 새 검색) 처음부터.
-    // 번역이 뒤늦게 결과를 보태도 같은 검색이다 - 보던 자리를 지킨다.
-    const key = ['tags', state.search_text, state.current_category, state.current_level2, state.view_mode,
-      state.content_filter, offset, state.disable_wiki_search ? 1 : 0].join('|');
-    const rows = tags.map(tag => tagRowHtml(tag, state)).join('');
-    return `<div class="e6-col-head">태그 <span class="e6-dim">${range}</span></div>`
-      + `<div class="e6-list e6-tags" tabindex="0" data-scroll-key="${esc(key)}">${rows || '<div class="e6-empty">태그 없음</div>'}</div>${pager}`;
+    const size = pageSizeOf(state);
+    return total ? `${fmt(first * size + 1)}–${fmt(Math.min(total, (last + 1) * size))} / ${fmt(total)}` : '0';
+  }
+
+  // 온 쪽의 줄. 같은 상태로 두 번 묻는다(영역 HTML · 쪽 맞추기) - 한 번만 만든다.
+  let pageRowsMemo = {state: null, html: ''};
+  function pageRowsHtml(state) {
+    if (pageRowsMemo.state !== state) pageRowsMemo = {state, html: (state.tags || []).map(tag => tagRowHtml(tag, state)).join('')};
+    return pageRowsMemo.html;
+  }
+
+  // 새 목록을 처음 쓸 때의 영역 HTML - 온 쪽 하나가 들어 있다. 그 뒤로는 쪽 단위로 고친다(paintTags).
+  function tagsHtml(state) {
+    const page = pageOf(state);
+    const rows = pageRowsHtml(state);
+    return `<div class="e6-col-head">태그 <span class="e6-dim" data-e621-range>${rangeText(state, page, page)}</span></div>`
+      + `<div class="e6-list e6-tags" tabindex="0" data-scroll-key="${esc(listKeyOf(state))}">${edgeHtml('prev', page > 0)}`
+      + `<div class="e6-chunks">${rows ? chunkHtml(page, rows) : EMPTY_TAGS}</div>${edgeHtml('next', hasPageAfter(state, page))}</div>`;
+  }
+
+  function startPages(state) {
+    const page = pageOf(state);
+    pages.key = listKeyOf(state);
+    pages.stamp = listStampOf(state);
+    pages.first = page;
+    pages.last = page;
+    pages.html = new Map([[page, pageRowsHtml(state)]]);
+    pages.pending = null;
+  }
+
+  function tagList() {
+    return canQuery() ? moduleBody.querySelector('.e6-tags') : null;
+  }
+
+  const chunkOf = (holder, page) => holder.querySelector(`.e6-chunk[data-page="${page}"]`);
+  const rowOffset = (list, row) => row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+
+  function rowByTag(list, tag) {
+    for (const row of list.querySelectorAll('.e6-tag')) {
+      if (row.dataset.tag === tag) return row;
+    }
+    return null;
+  }
+
+  // 목록에서 지금 맨 위에 보이는 줄 - 위쪽이 늘거나 줄어도 이 줄을 제자리에 두려고 잡아 둔다.
+  function topRow(list) {
+    if (typeof list.getBoundingClientRect !== 'function') return null;
+    const top = list.getBoundingClientRect().top;
+    for (const chunk of list.querySelectorAll('.e6-chunk')) {
+      if (chunk.getBoundingClientRect().bottom <= top) continue;
+      for (const row of chunk.children) {
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom > top) return {row, tag: row.dataset.tag, page: Number(chunk.dataset.page), offset: rect.top - top};
+      }
+    }
+    return null;
+  }
+
+  // 지금 주로 보고 있는 쪽(화면을 가장 많이 차지한 쪽)과, 그 쪽에서 맨 위에 보이는 줄 몇 개.
+  // ⚠️ 맨 윗줄 하나만 잡으면 안 된다 - 쪽의 경계에 걸쳐 있으면 줄이 한 칸 밀릴 때 옆 쪽으로 넘어가 버린다
+  //    (실측 2026-10-04: 숨긴 태그를 되돌리자 보던 자리가 540px 어긋났다).
+  function viewMark(list) {
+    if (typeof list.getBoundingClientRect !== 'function') return null;
+    const box = list.getBoundingClientRect();
+    let best = null;
+    for (const chunk of list.querySelectorAll('.e6-chunk')) {
+      const rect = chunk.getBoundingClientRect();
+      const seen = Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+      if (seen > 0 && (!best || seen > best.seen)) best = {chunk, seen, offset: rect.top - box.top};
+    }
+    if (!best) return null;
+    const rows = [];
+    for (const row of best.chunk.children) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom <= box.top) continue;
+      rows.push({tag: row.dataset.tag, offset: rect.top - box.top});
+      if (rows.length === 4) break;
+    }
+    return {page: Number(best.chunk.dataset.page), rows, chunkOffset: best.offset};
+  }
+
+  function syncTagEdges(list, state) {
+    for (const edge of list.querySelectorAll('.e6-edge')) {
+      edge.hidden = edge.dataset.value === 'prev' ? pages.first <= 0 : !hasPageAfter(state, pages.last);
+    }
+    const range = list.parentElement?.querySelector?.('[data-e621-range]');
+    if (range) range.textContent = rangeText(state, pages.first, pages.last);
+  }
+
+  // 옆 쪽을 붙인다. 쪽이 너무 많아지면 반대쪽 끝을 떼어 낸다(보고 있는 쪽이면 두고 다음에 뗀다).
+  // 위쪽이 늘거나 줄어도 보던 줄은 제자리다 - 브라우저의 자동 보정은 꺼 두었다(.e6-tags 의 overflow-anchor).
+  function addPage(list, holder, state, page, rows) {
+    const below = page > pages.last;
+    const mark = topRow(list);
+    holder.insertAdjacentHTML(below ? 'beforeend' : 'afterbegin', chunkHtml(page, rows));
+    pages.html.set(page, rows);
+    if (below) pages.last = page; else pages.first = page;
+    while (pages.last - pages.first + 1 > PAGE_LIMIT) {
+      const far = below ? pages.first : pages.last;
+      if (mark && mark.page === far) break;
+      chunkOf(holder, far)?.remove();
+      pages.html.delete(far);
+      if (below) pages.first += 1; else pages.last -= 1;
+    }
+    syncTagEdges(list, state);
+    if (mark && mark.row.isConnected) list.scrollTop += rowOffset(list, mark.row) - mark.offset;
+  }
+
+  // 줄이 밀렸거나 줄 모양이 바뀌었다 - 온 쪽만 남기고 다시 모은다. 보던 쪽이 그 쪽이면 보던 줄을 제자리에 둔다
+  // (그 줄이 사라졌으면 다음 줄로, 그것도 없으면 쪽의 자리로 맞춘다).
+  function restartPages(list, holder, state, page, rows) {
+    const mark = viewMark(list);
+    const samePage = Boolean(mark) && mark.page === page;
+    holder.innerHTML = rows ? chunkHtml(page, rows) : EMPTY_TAGS;
+    startPages(state);
+    syncTagEdges(list, state);
+    if (!samePage) {
+      list.scrollTop = 0;
+    } else {
+      let kept = null;
+      for (const item of mark.rows) {
+        const row = rowByTag(list, item.tag);
+        if (row) {
+          kept = rowOffset(list, row) - item.offset;
+          break;
+        }
+      }
+      const chunk = kept === null ? chunkOf(holder, page) : null;
+      if (chunk) kept = rowOffset(list, chunk) - mark.chunkOffset;
+      if (kept !== null) list.scrollTop += kept;
+    }
+    // 아래쪽 쪽들을 떼어 냈다 - 보던 자리가 끝에 가까우면 다음 쪽을 다시 청한다.
+    checkEdges(list);
+  }
+
+  // 같은 목록에 온 쪽을 맞춘다. 돌려주는 값 = 줄을 새로 썼나.
+  function mergePage(list, holder, state) {
+    const page = pageOf(state);
+    const rows = pageRowsHtml(state);
+    if (pages.stamp !== listStampOf(state)) {
+      restartPages(list, holder, state, page, rows);
+      return true;
+    }
+    if (pages.html.has(page)) {
+      if (pages.html.get(page) === rows) return false;
+      const chunk = chunkOf(holder, page);
+      if (chunk) chunk.innerHTML = rows;     // 줄 수가 같다 - 자리는 그대로다
+      pages.html.set(page, rows);
+      return true;
+    }
+    if (page === pages.last + 1 || page === pages.first - 1) {
+      addPage(list, holder, state, page, rows);
+      return true;
+    }
+    // 이 탭이 청하지 않은 먼 쪽이다(다른 탭이 서버의 쪽을 옮겼다) - 내 목록은 그대로 둔다.
+    return false;
+  }
+
+  // 태그 영역은 다른 영역처럼 통째로 견주지 않는다 - 같은 목록이면 쪽 단위로 맞춘다. 돌려주는 값 = 줄을 새로 썼나.
+  function paintTags(panel, state, html) {
+    const element = panel.querySelector('[data-e621-region="tags"]');
+    if (!element) return false;
+    if (pages.pending && pages.pending.page === pageOf(state)) pages.pending = null;
+    const list = typeof element.querySelector === 'function' ? element.querySelector('.e6-tags') : null;
+    const holder = list ? list.querySelector('.e6-chunks') : null;
+    if (!holder || pages.key !== listKeyOf(state)) {
+      // 다른 목록이다(또는 쪽을 찾을 수 없는 환경이다) - 영역을 통째로 쓰고 온 쪽부터 다시 모은다.
+      if (written.tags === html) return false;
+      swap(element, html);
+      written.tags = html;
+      startPages(state);
+      return true;
+    }
+    const wrote = mergePage(list, holder, state);
+    syncTagEdges(list, state);
+    return wrote;
+  }
+
+  // 고른 태그의 별 - 그 줄이 서버가 방금 준 쪽 밖에 있으면(이어 붙여 둔 다른 쪽) 그 줄만 고쳐 쓴다.
+  function syncStar(state) {
+    const selected = state.selected;
+    const list = selected ? tagList() : null;
+    const row = list ? rowByTag(list, selected.tag) : null;
+    if (!row || row.classList.contains('starred') === Boolean(selected.starred)) return false;
+    const page = Number(row.parentElement?.dataset?.page);
+    row.outerHTML = tagRowHtml(selected, state);
+    // 이 쪽의 기록은 이제 화면과 다르다 - 다음에 이 쪽이 오면 다시 쓴다.
+    if (pages.html.has(page)) pages.html.set(page, null);
+    return true;
+  }
+
+  function requestPage(page) {
+    if (!lastState || page < 0 || pages.key === null) return;
+    const now = Date.now();
+    if (pages.pending && now - pages.pending.at < RETRY_MS) return;   // 한 쪽씩 받는다
+    pages.pending = {page, at: now};
+    send('tag_offset', page * pageSizeOf(lastState));
+  }
+
+  // 끝에 닿았나. ⚠️ 높이가 0 이면(안 보이는 창) 아무것도 하지 않는다 - 늘 '끝' 으로 보여 목록 전체를 받아 버린다.
+  function checkEdges(list) {
+    if (!lastState || pages.key === null || !list.clientHeight) return;
+    const below = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (below < EDGE_PX && hasPageAfter(lastState, pages.last)) requestPage(pages.last + 1);
+    else if (list.scrollTop < EDGE_PX && pages.first > 0) requestPage(pages.first - 1);
+  }
+
+  // 목록을 바꾸는 명령(숨김 · 별 · 복원 · 표시 설정) 앞에서 서버의 쪽을 '보고 있는 쪽' 에 맞춘다 -
+  // 응답으로 목록을 다시 모을 때 그 쪽이 와야 보던 자리에 남는다.
+  function alignServerPage() {
+    const list = lastState ? tagList() : null;
+    const mark = list ? viewMark(list) : null;
+    if (mark && Number.isInteger(mark.page) && mark.page !== pageOf(lastState)) send('tag_offset', mark.page * pageSizeOf(lastState));
   }
 
   // 관계 칩: 누르면 그 태그로 간다.
@@ -423,6 +648,7 @@ export function createE621EventPanel({
       // 처음이거나, 떼어 낸 창에서 다른 모듈이 본문을 썼다 - 뼈대부터 쓴다.
       moduleBody.innerHTML = skeletonHtml(state, html);
       written = {...html};
+      startPages(state);
       syncInputs(state);
       syncMarks(state, true);
       return;
@@ -430,14 +656,18 @@ export function createE621EventPanel({
     panel.className = panelClasses(state);
     let tagsWritten = false;
     for (const name of REGIONS) {
+      if (name === 'tags') {
+        tagsWritten = paintTags(panel, state, html.tags);
+        continue;
+      }
       if (written[name] === html[name]) continue;
       const element = panel.querySelector(`[data-e621-region="${name}"]`);
       if (!element) continue;
       swap(element, html[name]);
       written[name] = html[name];
-      if (name === 'tags') tagsWritten = true;
     }
     syncInputs(state);
+    if (syncStar(state)) tagsWritten = true;
     syncMarks(state, tagsWritten);
   }
 
@@ -461,6 +691,7 @@ export function createE621EventPanel({
     if (!state.data_loaded) {
       moduleBody.innerHTML = notLoadedHtml(state);
       written = {};
+      pages.key = null;
       markedTag = null;
       return;
     }
@@ -498,8 +729,12 @@ export function createE621EventPanel({
 
   function withSelected(key) {
     const tag = selectedTagName();
-    if (tag) send(key, tag);
-    else if (showToast) showToast('태그를 먼저 고르세요', 'error');
+    if (!tag) {
+      if (showToast) showToast('태그를 먼저 고르세요', 'error');
+      return;
+    }
+    alignServerPage();
+    send(key, tag);
   }
 
   // 누른 줄을 서버 응답 전에 먼저 표시한다(상세는 응답이 와야 바뀐다).
@@ -531,12 +766,15 @@ export function createE621EventPanel({
         // 고른 분류 · 폴더를 다시 누르면 푼다.
         case 'category': send('category', lastState?.current_category === value ? '' : value); break;
         case 'folder': send('level2', lastState?.current_level2 === value ? '' : value); break;
-        case 'page': send('tag_offset', value); break;
+        case 'more': requestPage(value === 'prev' ? pages.first - 1 : pages.last + 1); break;
         case 'view': send('view_mode', value); break;
         case 'cancel-search': cancelSearch(); break;
         case 'star': withSelected('toggle_star'); break;
         case 'hide': withSelected('hide'); break;
-        case 'restore': send('restore', tag); break;
+        case 'restore':
+          alignServerPage();
+          send('restore', tag);
+          break;
         case 'pop':
           ui.pop = ui.pop === target.dataset.pop ? '' : target.dataset.pop;
           repaint();
@@ -553,7 +791,10 @@ export function createE621EventPanel({
 
     moduleBody.addEventListener('change', event => {
       const input = event.target;
-      if (input?.dataset?.e621Setting) send(input.dataset.e621Setting, String(!input.checked));
+      if (input?.dataset?.e621Setting) {
+        alignServerPage();
+        send(input.dataset.e621Setting, String(!input.checked));
+      }
       else if (input?.matches?.('[data-e621-filter]')) send('content_filter', input.value);
     });
 
@@ -600,6 +841,12 @@ export function createE621EventPanel({
       next.scrollIntoView({block: 'nearest'});
       send('selected_tag', next.dataset.tag);
     });
+
+    // 태그 목록의 끝에 닿으면 옆 쪽을 청한다. scroll 은 위로 올라오지 않아 capture 로 받는다.
+    moduleBody.addEventListener('scroll', event => {
+      const list = event.target;
+      if (list?.classList?.contains('e6-tags')) checkEdges(list);
+    }, true);
 
     // <details> 를 펼친 상태는 다시 그려도 남긴다. toggle 은 위로 올라오지 않아 capture 로 받는다.
     moduleBody.addEventListener('toggle', event => {
@@ -711,7 +958,12 @@ const PANEL_CSS = `
 .e6-tag-ko{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:4px}
 .e6-tag-ko-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .e6-tag.body-only .e6-tag-en{color:var(--text-dim)}
-.e6-pager{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:4px}
+/* 태그 목록은 쪽을 이어 붙인다. 위쪽이 늘 때 보던 줄은 패널이 직접 제자리에 둔다 - 브라우저의 자동 보정은 끈다(둘이 하면 두 번 민다). */
+.e6-tags{overflow-anchor:none}
+.e6-edge{display:block;width:100%;height:24px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--text-dim);
+  font-size:10px;cursor:pointer}
+.e6-edge:hover{background:var(--bg-hover);color:var(--text-primary)}
+.e6-edge[hidden]{display:none}
 
 /* 일치 이유 칩: 초록 = 이름 · 한국어에서 맞음, 보라 = 이름이 통째로 같음, 회색 = 본문에서만, 점선 = 띄어쓰기를 빼고 맞음 · 번역으로 찾음 */
 .e6-match{flex:0 0 auto;padding:0 4px;border:1px solid rgba(144,238,144,0.38);border-radius:3px;background:rgba(144,238,144,0.07);

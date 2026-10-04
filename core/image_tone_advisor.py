@@ -155,8 +155,15 @@ class _Prompt:
 
         cursor = 0
         for match in _MARKER.finditer(self.text):
-            token(cursor, match.start())
-            if match.group("weight") is not None:
+            # 태그 끝의 숫자는 가중치가 아니다: `1.15::artist:anam95 ::` 의 `95 ::` 를 새 가중치로 읽으면 뒤의 가중치가 전부 틀어지고
+            # 열린 묶음이 남아 반영할 때 닫는 표시를 덧붙이게 된다(Codex 발견 2026-10-04 - 기준 표본 4,054장 중 481장에 이런 작가가 있다).
+            # 가중치는 **토큰의 맨 앞**에만 온다 - 같은 토큰 안에서 글자 뒤에 나온 숫자는 태그의 일부이고 그 `::` 는 닫는 표시다.
+            numeric_tail = match.group("weight") is not None and bool(self.text[cursor:match.start()].strip())
+            token(cursor, match.end("weight") if numeric_tail else match.start())
+            if numeric_tail:
+                if stack:
+                    stack.pop()["end"] = match.end()
+            elif match.group("weight") is not None:
                 weight = float(match.group("weight"))
                 if not math.isfinite(weight):
                     raise ValueError("Nonfinite prompt weight")

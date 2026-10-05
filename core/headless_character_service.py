@@ -633,6 +633,9 @@ class HeadlessCharacterService:
         invalidate_snapshot = False
         refresh_snapshot = False
         refresh_slot = ""
+        # 이번 회에 조건부 규칙이 정해 둔 캐릭터(프롬프트 컨텍스트의 override)를 그대로 둘 것인가. 보관함의 글만
+        # 고친 명령은 다음 생성에 닿지 않으므로 둔다 - 기본은 예전처럼 버린다.
+        keep_round = False
         if key == "activated":
             settings["is_active"] = context._coerce_bool(value)
         elif key == "reroll_on_generate":
@@ -948,9 +951,11 @@ class HeadlessCharacterService:
                 return self._state_with_notice("이름 · 프롬프트 · 네거티브를 모두 비우면 저장할 수 없습니다.")
             frame.update(edited)
             frame["from_scene"] = False     # 사용자가 손댄 칸은 씬의 것이 아니다(`char_prompt_` 와 같다)
-            # 보관함의 글은 다음 생성에 안 나간다 - 굴려 둔 값을 버릴 까닭이 없다. 그 사이 슬롯으로 올라간
-            # 캐릭터였다면 슬롯 글 편집과 똑같이 버린다.
+            # 보관함의 글은 다음 생성에 안 나간다 - 굴려 둔 값도, 조건부 규칙이 이번 회에 정해 둔 캐릭터도 버릴
+            # 까닭이 없다(버리면 이름 하나 바꿨다고 다음 Generate 가 다른 캐릭터로 나간다 - Codex 리뷰 2026-10-05).
+            # 그 사이 슬롯으로 올라간 캐릭터였다면 슬롯 글 편집과 똑같이 둘 다 버린다.
             invalidate_snapshot = _state_of(frame) == "active"
+            keep_round = not invalidate_snapshot
         elif key.startswith("char_favorite_"):
             index = context._index_from_key(key, "char_favorite_")
             if index is not None:
@@ -1039,7 +1044,7 @@ class HeadlessCharacterService:
             return None
         prompt_context = getattr(context, "current_prompt_context", None)
         metadata = getattr(prompt_context, "metadata", None)
-        if isinstance(metadata, dict):
+        if isinstance(metadata, dict) and not keep_round:
             metadata.pop("conditional_character_overrides", None)
             metadata.pop("_conditional_character_slots", None)
             metadata.pop("conditional_character_skips", None)

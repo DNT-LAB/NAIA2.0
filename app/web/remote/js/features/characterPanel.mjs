@@ -538,34 +538,60 @@ export function createCharacterPanel({
     textarea.addEventListener('blur', flushDeferredFocusedRender);
   }
 
-  // ⚠️ **blur 안에서 다시 그리지 않는다**(2026-10-05 실측). blur 는 mousedown 과 mouseup **사이**에 난다 -
-  //    거기서 화면을 갈아 끼우면 눌린 단추가 사라지고, 크롬은 누른 요소가 떼기 전에 없어지면 click 을 아예
-  //    안 보낸다. 슬롯에 글을 친 직후의 **첫 클릭이 그렇게 먹혔다**(진짜 마우스로 재현: 줄을 눌러도 안 펼쳐짐).
-  //    Tab 으로 옆 칸에 갈 때도 받을 칸이 사라져 초점을 잃었다. 손을 뗀 **뒤**로 미룬다:
-  //      · 마우스로 눌러서 난 blur -> 뗄 때(mouseup · 끌기 끝), click 이 지나간 다음
-  //      · 그 밖(Tab 등)           -> 초점이 새 칸에 앉은 다음(0ms). 그 칸이 입력칸이면 거기에 다시 미뤄진다
-  //    미뤄 둔 상태는 구조(슬롯 · 보관함의 순서와 uuid)가 지금 화면과 같을 때만 생기므로, 그 사이의 클릭이
-  //    읽는 번호(`data-cw-*="${index}"`)는 `lastState` 와 어긋나지 않는다.
+  // ── 누르는 중에는 화면을 갈지 않는다 (2026-10-05) ─────────────────────────
+  //
+  // ⚠️ 화면을 갈아 끼우면 눌린 단추가 사라지고, 크롬은 누른 요소가 떼기 전에 없어지면 **click 을 아예 안 보낸다.**
+  //    두 길로 났다(둘 다 진짜 마우스로만 재현된다 - `el.click()` 으로는 안 보인다):
+  //      · 미뤄 둔 렌더를 그 칸의 **blur 안에서** 그렸다. blur 는 mousedown 과 mouseup 사이에 난다 - 슬롯에 글을
+  //        친 직후의 첫 클릭이 먹혔다. Tab 으로 옆 칸에 갈 때도 받을 칸이 사라져 초점을 잃었다.
+  //      · 누르는 **도중에 새 상태가 왔다**(자동 생성이 돌 때 · 다른 창이 고칠 때 - Codex 리뷰).
+  //    그래서 blur 는 그리지 않고 0ms 뒤로 넘긴다(초점이 새 칸에 앉은 다음 - 그 칸이 입력칸이면 거기에 다시
+  //    미뤄진다). 그리고 `render` 의 문이 누르는 동안 온 상태를 **쥐고 있다가**, 뗀 뒤 click 이 지나간 다음에 가장
+  //    새 것 하나만 그린다. 오래 누르고 있으면(끌기 · 긴 누름 · mouseup 을 삼키는 네이티브 메뉴) 기다리다 그린다 -
+  //    화면이 낡은 채로 멈추지 않게.
+  // ⚠️ 쥐는 것은 **번호가 안 밀리는 상태**뿐이다(`orderOf`). 화면의 단추는 번호(`data-cw-*="${index}"`)를 들고 있고
+  //    클릭 명령은 번호만 보낸다 - 순서가 바뀐 상태를 쥔 채 옛 화면을 남겨 두면 그 클릭(영구 삭제 ✕ 일 수도 있다)이
+  //    **다른 캐릭터**에 닿는다. 그런 상태는 예전처럼 바로 그린다(그 클릭은 먹힌다 - 틀린 곳에 닿는 것보다 낫다).
   let pointerHeld = false;
-  let flushOnRelease = false;
+  let heldState = null;
+  let heldValveTimer = 0;
+  const HELD_VALVE_MS = 1000;
+
+  /**
+   * 팝업 본문이 지금 캐릭터 창인가. 본문은 모듈들이 **함께 쓴다** - 스스로 다시 그리는 길(미뤄 둔 렌더 · 끝난
+   * 요청 · 타이머)은 이것을 보고 그린다. 미뤄 둔 렌더가 click **뒤에** 돌게 된 뒤로, 그 클릭이 다른 모듈을 열면
+   * 남의 화면에 캐릭터 창을 그렸다(Codex 리뷰 2026-10-05). 앱이 이 모듈을 열며 부르는 `render` 는 해당 없다.
+   */
+  const showsCharacter = () => !!moduleBody.querySelector('.mod-character-shell');
+
+  /** 캐릭터가 놓인 순서 = 번호가 가리키는 대상. */
+  const orderOf = state => (state?.characters || []).map(item => String(item.slot_uuid || '')).join('|');
 
   function runDeferredFocusedRender() {
     const pending = deferredFocusedRenderState;
     clearDeferredFocusedRender();
-    if (pending) render(pending);
+    if (pending && showsCharacter()) render(pending);
   }
 
+  /** 입력칸의 blur. 여기서는 그리지 않는다 - 넘긴 렌더가 돌 때 아직 누르는 중이면 `render` 의 문이 쥔다. */
   function flushDeferredFocusedRender() {
-    if (pointerHeld) { flushOnRelease = true; return; }
     setTimeout(runDeferredFocusedRender, 0);
+  }
+
+  /** 누르는 동안 쥐고 있던 상태를 그린다. */
+  function drawHeldState() {
+    clearTimeout(heldValveTimer);
+    heldValveTimer = 0;
+    const newest = heldState;
+    heldState = null;
+    // 초점 때문에 미뤄 둔 것이 있어도 그보다 새 상태다 - `draw` 가 그것을 걷고 이것을 그린다.
+    if (newest && showsCharacter()) draw(newest);
   }
 
   function releasePointer() {
     pointerHeld = false;
-    if (!flushOnRelease) return;
-    flushOnRelease = false;
     // click 은 mouseup 바로 뒤, 같은 작업 안에서 난다 - 타이머는 그 뒤에 돈다.
-    setTimeout(runDeferredFocusedRender, 0);
+    if (heldState) setTimeout(drawHeldState, 0);
   }
 
   // 문서에 **한 번만** 건다(패널 뿌리는 그릴 때마다 새로 만들어진다). 끌기를 시작하면 mouseup 이 오지 않으므로
@@ -1275,20 +1301,42 @@ export function createCharacterPanel({
       || draft.uc !== String(character.uc || '');
   }
 
-  function closeEdit() {
-    editingUuid = '';
-    editDraft = null;
-    editError = '';
+  /** 확인을 그만 기다린다(잠금을 푼다). */
+  function stopWaiting() {
     editPending = null;
     editBusy = false;
     clearTimeout(editConfirmTimer);
     editConfirmTimer = 0;
   }
 
-  /** 서버 상태의 그 캐릭터가 **보낸 글 그대로**인가 - 저장됐다는 유일한 증거다. */
-  function editConfirmedBy(state) {
-    const saved = editPending ? storedCharacter(editingUuid, state) : null;
-    return !!saved && ['custom_name', 'prompt', 'uc'].every(key => String(saved[key] || '') === editPending[key]);
+  function closeEdit() {
+    editingUuid = '';
+    editDraft = null;
+    editError = '';
+    stopWaiting();
+  }
+
+  /** 지금 칸에 있는 글을 **보낼 모양**으로. */
+  function draftValues() {
+    return {custom_name: editDraft.name.trim(), prompt: editDraft.prompt, uc: editDraft.uc};
+  }
+
+  const sameText = (a, b) => ['custom_name', 'prompt', 'uc'].every(key => String(a[key] || '') === String(b[key] || ''));
+
+  /**
+   * 들어온 상태가 보낸 저장을 확인해 주는가. 서버 상태의 그 캐릭터가 **보낸 글 그대로**인 것이 저장됐다는 유일한
+   * 증거다(이름만 같다 · 다른 캐릭터의 일로 온 상태는 아니다).
+   *
+   * ⚠️ 닫는 것은 **칸의 글이 아직 그 글일 때만**이다(Codex 리뷰 2026-10-05). 기다리는 동안 칸은 잠겨 있지만
+   *    프로그램이 넣는 글(청크 넣기 · 붙여넣기 메뉴의 `setRangeText` + input)은 그대로 들어온다. 확인을 못 받아
+   *    풀린 뒤 사람이 더 친 것도 같다. 그때 닫으면 그 글이 사라진다 - 저장은 됐으니 기다림만 끝내고 칸은 둔다.
+   */
+  function settleEditWith(state) {
+    if (!editingUuid || !editPending) return;
+    const saved = storedCharacter(editingUuid, state);
+    if (!saved || !sameText(saved, editPending)) return;
+    if (sameText(draftValues(), editPending)) closeEdit();
+    else stopWaiting();
   }
 
   function focusEditField(key, range = null) {
@@ -1344,7 +1392,7 @@ export function createCharacterPanel({
     const character = storedCharacter(uuid);
     const draft = editDraft;
     if (!character || !draft) { closeEdit(); scheduleRerender(); return false; }
-    const next = {custom_name: draft.name.trim(), prompt: draft.prompt, uc: draft.uc};
+    const next = draftValues();
     // ⚠️ 이름도 프롬프트도 없는 캐릭터는 목록에서 `(비어 있음)` 이고, 네거티브까지 비면 서버가 그 줄을
     //    '빈 히스토리' 로 걷어 간다 - [저장] 이 곧 삭제가 된다(서버도 그것은 거절한다).
     if (!next.custom_name && !next.prompt.trim()) {
@@ -1356,7 +1404,7 @@ export function createCharacterPanel({
       // 소켓이 끊겨 있다 - 여기서 칸을 닫으면 친 글이 사라진다.
       return failEdit('연결이 끊겨 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.', '');
     }
-    // ⚠️ 여기서 닫지 않는다 - 고친 글이 든 상태가 오면 `render` 가 닫는다(`editConfirmedBy`). 한참 안 오면
+    // ⚠️ 여기서 닫지 않는다 - 고친 글이 든 상태가 오면 그릴 때 닫는다(`settleEditWith`). 한참 안 오면
     //    칸을 다시 풀고 알린다. 늦게라도 오면 그때 닫힌다(보낸 값은 쥐고 있다).
     editError = '';
     editPending = next;
@@ -1367,7 +1415,10 @@ export function createCharacterPanel({
       editBusy = false;
       editError = '저장을 확인하지 못했습니다. 다시 눌러 주세요 - 계속 안 되면 앱을 다시 시작하세요.';
       // 그사이 다른 모듈을 열었으면 팝업 본문은 남의 것이다 - 그리지 않는다(돌아오면 이 상태로 그려진다).
-      if (moduleBody.querySelector('.mod-character-shell')) scheduleRerender();
+      if (!showsCharacter()) return;
+      // 누르는 중이면 `render` 의 문에 맡긴다(뗀 뒤에 그린다). 이미 더 새 상태를 쥐고 있으면 그것이 그려진다.
+      if (!pointerHeld) scheduleRerender();
+      else if (!heldState) render(lastState || {});
     }, EDIT_CONFIRM_MS);
     scheduleRerender();
     return true;
@@ -1756,7 +1807,27 @@ export function createCharacterPanel({
 
   // ── 렌더 ────────────────────────────────────────────────────────────────
 
+  /**
+   * 상태가 들어오는 문.
+   *
+   * ⚠️ **누르는 중에는 화면을 갈지 않는다** - 눌린 단추가 사라지면 그 클릭이 나지 않는다(위 `pointerHeld`).
+   *    쥐고 있다가 뗀 뒤에 그린다. 캐릭터 창이 화면에 없거나(이 모듈을 여는 첫 그리기) 번호가 밀리는 상태면
+   *    쥐지 않고 바로 그린다.
+   */
   function render(state) {
+    if (pointerHeld && showsCharacter() && orderOf(state) === orderOf(lastState)) {
+      heldState = state || {};
+      if (!heldValveTimer) heldValveTimer = setTimeout(drawHeldState, HELD_VALVE_MS);
+      return;
+    }
+    // 이것이 가장 새 상태다 - 쥐고 있던 것은 버린다(뒤늦게 그리면 화면이 옛 상태로 되돌아간다).
+    heldState = null;
+    clearTimeout(heldValveTimer);
+    heldValveTimer = 0;
+    draw(state);
+  }
+
+  function draw(state) {
     const nextState = state || {};
     // 편집하던 캐릭터가 보관함에서 빠졌다(다른 창에서 지웠다 · 슬롯으로 올렸다) - 칸을 닫는다. 서명을 내기
     // **전**에 한다(편집 중인 uuid 가 서명에 들어 있다).
@@ -1765,7 +1836,7 @@ export function createCharacterPanel({
       showToastSafe('편집하던 캐릭터가 보관함에서 빠져 편집을 닫았습니다.');
     }
     // 보낸 글이 서버 상태에 그대로 있다 - 저장됐다. 이제야 칸을 닫는다(모든 상태가 이 함수를 지나간다).
-    if (editingUuid && editConfirmedBy(nextState)) closeEdit();
+    settleEditWith(nextState);
     const structureSignature = characterStructureSignature(nextState);
     const focusedTextarea = focusedCharacterTextarea();
     if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
@@ -1866,9 +1937,6 @@ export function createCharacterPanel({
         //    초안은 여기서만 채운다(자동완성도 input 이벤트를 낸다) - 저장도 다시 그리기도 이것을 읽는다.
         const key = editField.dataset.cwEditField;
         if (editDraft && Object.prototype.hasOwnProperty.call(editDraft, key)) editDraft[key] = editField.value;
-        // 앞서 보낸 것의 확인은 더 기다리지 않는다 - 늦게 온 확인이 칸을 닫으면 지금 치는 글이 함께 사라진다.
-        // (기다리는 동안은 칸이 잠겨 있어 여기 오지 않는다 - 그때 지우면 잠금을 풀 타이머가 길을 잃는다.)
-        if (!editBusy) editPending = null;
         if (editField.tagName === 'TEXTAREA') autoGrow(editField);
         if (editError) {
           // 다시 치기 시작했다 - 안내를 걷는다. 다시 그리면 캐럿을 잃으므로 그 줄만 뗀다(서명은 맞춰 둔다).
@@ -2270,6 +2338,9 @@ export function createCharacterPanel({
 
   /** 검색어처럼 서버를 안 거치는 값은 그 자리에서 다시 그린다. */
   function rerender() {
+    // 누른 단추 · 끝난 요청이 부른다. 그사이 다른 모듈이 팝업을 차지했으면 그리지 않는다(`showsCharacter`) -
+    // 검색 탭의 목록 요청이 끝나며 남의 화면을 캐릭터 창으로 덮던 길이 이것이었다.
+    if (!showsCharacter()) return;
     lastRenderedStructureSignature = '';
     render(lastState || {});
   }

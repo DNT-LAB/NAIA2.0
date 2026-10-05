@@ -168,13 +168,41 @@ class E621ResearchIndex:
         if not query:
             self._query_key, self._matches = key, None
             return None
-        matches = self._scan(query, disable_wiki)
+        matches = self._scan_terms(query, disable_wiki)
         if translated:
-            for tag, (bits, compact, grade) in self._scan(translated, disable_wiki).items():
+            for tag, (bits, compact, grade) in self._scan_terms(translated, disable_wiki).items():
                 if tag not in matches:
                     matches[tag] = (bits | TRANSLATED_QUERY, compact, grade + 2)
         self._query_key, self._matches = key, matches
         return matches
+
+    @staticmethod
+    def terms(query: str) -> list[str]:
+        """쉼표로 나눈 검색어들. 빈 조각은 버리고 같은 조각은 한 번만 센다."""
+        return list(dict.fromkeys(term for term in (search_key(part) for part in str(query or "").split(",")) if term))
+
+    def _scan_terms(self, query: str, disable_wiki: bool) -> dict[str, tuple[int, int, int]]:
+        """다중 검색(사용자 지정 2026-10-05: Tag Filter 처럼): 쉼표로 나눈 검색어 가운데 **하나라도** 맞는 태그.
+
+        여러 검색어에 맞은 태그는 맞은 곳을 합치고 더 좋은 등급을 갖는다. 검색어가 하나면 예전과 같다.
+        """
+        terms = self.terms(query)
+        if not terms:
+            # 쉼표뿐인 검색어 - 쉼표 글자를 본문에서 찾으면 수천 건이 맞는다. 맞는 것이 없다고 답한다.
+            return {}
+        if len(terms) == 1:
+            return self._scan(terms[0], disable_wiki)
+        merged: dict[str, tuple[int, int, int]] = {}
+        for term in terms:
+            for tag, (bits, compact, grade) in self._scan(term, disable_wiki).items():
+                previous = merged.get(tag)
+                if previous is None:
+                    merged[tag] = (bits, compact, grade)
+                    continue
+                # '띄어쓰기를 빼고서만 맞은 곳' 은, 어느 검색어로도 곧바로 맞지 않은 곳만 남긴다.
+                direct = (previous[0] & ~previous[1]) | (bits & ~compact)
+                merged[tag] = (previous[0] | bits, (previous[1] | compact) & ~direct, min(previous[2], grade))
+        return merged
 
     def _scan(self, query: str, disable_wiki: bool) -> dict[str, tuple[int, int, int]]:
         needle = search_key(query)

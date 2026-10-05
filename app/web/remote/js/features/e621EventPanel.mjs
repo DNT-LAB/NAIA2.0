@@ -160,7 +160,8 @@ export function createE621EventPanel({
         + `<span class="e6-dim">번역</span> ${esc(translation.translated)}</span>` : '';
     // ⚠️ 검색어(value) · 검색 중 강조(is-active)는 여기 넣지 않는다 - syncInputs 가 쓴 뒤에 맞춘다.
     return `<div class="e6-search">`
-      + `<input class="mod-input" id="e621SearchInput" type="text" placeholder="태그 · 한국어 검색" autocomplete="off" spellcheck="false">`
+      + `<input class="mod-input" id="e621SearchInput" type="text" placeholder="태그 · 한국어 검색" autocomplete="off" spellcheck="false"`
+      + ` title="쉼표로 나누면 여러 검색어를 한꺼번에 찾습니다(예: small penis, cock)">`
       + `<button class="e6-search-x" data-e621-act="cancel-search" title="검색 취소" aria-label="검색 취소">×</button></div>`
       + translated
       + `<div class="e6-seg" role="group" aria-label="보기">`

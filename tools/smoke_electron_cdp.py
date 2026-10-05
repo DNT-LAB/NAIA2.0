@@ -379,19 +379,30 @@ def _wait_for_active_websocket(client: CdpClient, timeout: float) -> dict[str, A
 
 
 POOL_READY_MAX_WAIT_S = 120.0
+# 풀 잠금이 **잠잠한 채로** 이만큼 이어져야 준비된 것으로 본다. 새로고침 뒤 소켓이 열리고 나서 잠금이 걸리기까지
+# 틈이 있다 - 그 틈에 한 번 들여다보고 '안 걸려 있다' 로 넘어가면 바로 뒤에 잠금이 걸려 Random 이 막힌다
+# (2026-10-05 v2.0.49 게이트 1회차: 15ms 만에 통과 -> Random 미전송 -> 바로 뒤 검사는 2,031ms 를 기다렸다).
+POOL_READY_SETTLE_S = 3.0
+# 소스 모드에서 태그 묶음이 없을 때 Random 의 답을 기다리는 상한. 답이 오는 환경에서는 1초 안에 온다.
+SOURCE_RANDOM_WITHOUT_ARCHIVE_WAIT_S = 30.0
 
 
-def _wait_for_pool_ready(client: CdpClient, timeout: float) -> dict[str, Any]:
+def _wait_for_pool_ready(client: CdpClient, timeout: float, settle: float | None = None) -> dict[str, Any]:
     """검색 풀을 적재하는 동안(poolLoad) 앱은 Random 을 **조용히 막는다**(토스트만 띄운다). 첫 기동 · 새로고침 직후
     소켓이 열리는 순간부터 약 2초 걸린다(2026-10-01 실측: 새 user-data 첫 기동에서 7.1초에 걸려 8.9초에 풀림). 스모크는
     소켓이 열리자마자 Random 을 **한 번** 보내고 600초를 기다려, 그 2초에 걸리면 게이트가 떨어졌다(09-30~10-01 게이트
     4회 중 3회 - 같은 빌드를 풀이 풀린 뒤에 보내면 3/3 통과).
     풀릴 때까지 기다렸다가 보낸다. 끝내 안 풀리면 ready=False 와 그 까닭을 남긴다 - 검사를 약하게 하지 않는다
     (뒤의 Random 검사가 그대로 떨어진다).
+    '풀렸다' 는 한 번 들여다본 순간이 아니라 **잠잠한 채로 settle 초**다(POOL_READY_SETTLE_S 의 까닭 참고) -
+    잠금이 아직 걸리기 전에 들여다본 것을 '풀렸다' 로 읽지 않는다. 그사이 잠금이 걸리면 처음부터 다시 센다.
     """
+    settle_s = POOL_READY_SETTLE_S if settle is None else max(0.0, float(settle))
     started = time.monotonic()
     deadline = started + max(1.0, min(float(timeout), POOL_READY_MAX_WAIT_S))
     last: dict[str, Any] = {}
+    quiet_since: float | None = None
+    saw_load = False
     while True:
         state = client.evaluate("""
 (() => {
@@ -405,10 +416,19 @@ def _wait_for_pool_ready(client: CdpClient, timeout: float) -> dict[str, Any]:
 })()
 """) or {}
         last = state
-        waited_ms = round((time.monotonic() - started) * 1000)
-        if not state.get("active"):
-            return {"ready": True, "waitedMs": waited_ms, "poolLoadKnown": bool(state.get("known")), "reason": ""}
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        waited_ms = round((now - started) * 1000)
+        if state.get("active"):
+            saw_load = True
+            quiet_since = None
+        else:
+            if quiet_since is None:
+                quiet_since = now
+            # 풀 잠금을 모르는 화면(옛 판 · 다른 페이지)은 기다릴 것이 없다.
+            if not state.get("known") or now - quiet_since >= settle_s or now >= deadline:
+                return {"ready": True, "waitedMs": waited_ms, "poolLoadKnown": bool(state.get("known")),
+                        "sawLoad": saw_load, "reason": ""}
+        if now >= deadline:
             return {"ready": False, "waitedMs": waited_ms, "poolLoadKnown": True, "phase": last.get("phase"),
                     "reason": f"search pool still loading after {waited_ms} ms"}
         time.sleep(0.25)
@@ -1171,6 +1191,7 @@ def _collect_runtime_checks(
     timeout: float,
     skip_download: bool,
     skip_restart: bool,
+    mode: str = "packaged",
 ) -> dict[str, Any]:
     def run_check(name: str, callback):
         try:
@@ -1223,7 +1244,17 @@ def _collect_runtime_checks(
     run_check("actionDispatch", lambda: _measure_action_dispatch(client))
     run_check("installManager", lambda: _verify_install_manager_surface(client))
     run_check("poolReadyBeforeRandom", lambda: _wait_for_pool_ready(client, timeout))
-    run_check("randomPromptRoundTrip", lambda: _measure_random_prompt_roundtrip(client, timeout))
+    # 태그 묶음이 없으면 Random 의 답은 안 올 수 있다. 그때 답을 **끝까지**(게이트는 600초) 기다리면 창이 뜬 채
+    # 10분을 서 있고, CDP 소켓의 제한 시간과 같아 예외로 끝난다(2026-10-05: 태그 폴더가 없는 사본에서 빌드할 때마다).
+    # 소스 모드는 저장소의 태그 폴더를 빌려 쓰므로 있으면 1초 안에 답이 온다 - 없을 때만 짧게 기다리고, 못 받은 것은
+    # 받지 못했다고 그대로 남긴다(`_runtime_check_violations` 는 묶음이 준비됐을 때만 답을 요구한다).
+    # 포장본은 그대로 끝까지 기다린다 - 첫 실행의 내려받기가 그 안에 끝나는지가 그 검사다.
+    install_state = checks.get("installManager")
+    archive_ready = isinstance(install_state, dict) and bool(install_state.get("tagArchiveReady"))
+    roundtrip_timeout = timeout
+    if mode == "source" and not archive_ready:
+        roundtrip_timeout = min(float(timeout), SOURCE_RANDOM_WITHOUT_ARCHIVE_WAIT_S)
+    run_check("randomPromptRoundTrip", lambda: _measure_random_prompt_roundtrip(client, roundtrip_timeout))
     run_check("websocketReconnect", lambda: _verify_websocket_reconnect(client, timeout))
     run_check("activeWebsocketAfterReconnect", lambda: _wait_for_active_websocket(client, timeout))
     run_check("featureWorkflows", lambda: _verify_feature_workflows_surface(client, timeout))
@@ -1455,6 +1486,7 @@ def smoke_electron_cdp(
                     timeout=timeout,
                     skip_download=skip_download,
                     skip_restart=skip_restart,
+                    mode=mode,
                 )
                 # OS window visibility — a CDP page target is not proof of a visible window
                 # (the v2.0.19 hidden-window regression). Assert a real visible HWND.

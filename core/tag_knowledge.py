@@ -92,6 +92,32 @@ class SupplementIndex:
     owners: dict[str, set]
 
 
+# E621 에만 있는 태그의 레코드 = 번역 표(e621_KR_tags.parquet)가 만든 것(2) · 원본 사전(e621_data)이 채운 것(14).
+# 같은 태그가 Danbooru 사전에도 있으면 그 레코드는 Danbooru 것이다(0 · 1) - 여기에 들지 않는다.
+E621_ONLY_SOURCES = frozenset({2, 14})
+
+
+def is_e621_only(record) -> bool:
+    return record.get("_src") in E621_ONLY_SOURCES
+
+
+def add_e621_name_keyword(record, name) -> bool:
+    """번역 표가 먼저 만든 E621 레코드에는 검색어만 있고 이름이 없다 - 이름을 검색어 맨 앞에 넣는다.
+
+    원본 사전이 채운 레코드(14)는 이름이 곧 keywords_kr 이라 손댈 것이 없다. 이름이 이미 검색어에 있으면 그대로 둔다.
+    """
+    name = str(name or "").strip()
+    if not name or record.get("_src") != 2 or "," in name:
+        return False
+    previous = str(record.get("keywords_kr") or "")
+    have = {normalize_tag_key(part.replace("<", "").replace(">", "")).replace(" ", "") for part in previous.split(",")}
+    if normalize_tag_key(name).replace(" ", "") in have:
+        return False
+    record["keywords_kr"] = name + (", " + previous if previous.strip() else "")
+    _refresh_lookup_fields(record)
+    return True
+
+
 def build_supplement_index(raw) -> SupplementIndex:
     from collections import defaultdict
 
@@ -99,6 +125,11 @@ def build_supplement_index(raw) -> SupplementIndex:
     for key, record in raw.items():
         tag = normalize_tag_key(record.get("_tag") or key)
         records[tag].append(record)
+        # Danbooru 우선(사용자 지정 2026-10-05): E621 전용 태그의 말은 '이미 임자가 있는 말' 로 치지 않는다.
+        # 치면 E621 태그에 한국어 이름을 붙이는 순간 Danbooru 태그가 보충 검색어를 잃는다
+        # (실측: 이름 283개를 넣자 `1girl` 이 '여캐' 를, `pussy` 가 '여성기' 를, `hetero` 가 '남녀 커플' 을 잃었다).
+        if is_e621_only(record):
+            continue
         for field_name in ("keywords_kr", "keywords"):
             for part in str(record.get(field_name) or "").split(","):
                 keyword = normalize_tag_key(part.replace("<", "").replace(">", ""))
@@ -181,7 +212,8 @@ def _apply_korean_supplement(
         record.setdefault(evidence_field, {})[alias] = {
             "source": source_name, "version": payload.get("version"), "basis": basis}
         _refresh_lookup_fields(record)
-        owners[alias_key].add(tag)            # 이제 keywords_kr 에 있다 — 다시 만든 색인과 같게
+        if not is_e621_only(record):
+            owners[alias_key].add(tag)        # 이제 keywords_kr 에 있다 — 다시 만든 색인과 같게
         changed.add(tag)
         stats["aliases"] += 1
     stats["tags"] = len(changed)

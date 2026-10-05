@@ -524,6 +524,29 @@ def _deduped_entry(
     )
 
 
+def _other_site(entry) -> bool:
+    """Danbooru 우선(사용자 지정 2026-10-05): 점수가 같으면 E621 전용 태그는 Danbooru 태그 뒤에 선다.
+
+    둘의 게시물 수는 사이트가 달라 견줄 수 없다 - E621 의 `anthro`(373만)가 같은 말 '수인' 을 가진 Danbooru 의 `furry` 를 밀어낸다.
+    점수가 더 높으면(그 말이 E621 태그에만 정확히 맞으면) E621 태그가 그대로 앞에 온다.
+    """
+    return (getattr(entry, "cat", "") or "") == "e621"
+
+
+# E621 전용 태그가 **한국어 검색어로** 맞았을 때 깎는 점수. 검색어 일치의 한 단계 폭이다:
+#   정확 760 · 붙여 쓴 정확 600 · 앞부분 560 · 포함 500 → E621 의 정확 일치(760 - 250 = 510)는
+#   Danbooru 의 정확 · 붙여 쓴 정확 · 앞부분 일치 뒤, '그 말이 들어 있을 뿐' 인 일치(해양 포유류 ← 포유류) 앞에 선다.
+#   (실측 2026-10-05: 동점만 뒤로 보내면 '여우' 에 canid* · canine* 가 fox ears · fox girl 을 앞질렀다.)
+# 영문 태그 이름으로 맞은 것은 깎지 않는다 - `anthro` 를 치면 anthro 가 그대로 맨 앞이다.
+OTHER_SITE_KEYWORD_PENALTY = 250
+
+
+def _rank_score(query: str, result) -> float:
+    if _other_site(result.entry) and query not in result.tag:
+        return result.score - OTHER_SITE_KEYWORD_PENALTY
+    return result.score
+
+
 class TagSearchIndex:
     """Small shared lexical tag search index.
 
@@ -909,7 +932,7 @@ class TagSearchIndex:
         # 이름·한국어 키워드에 걸린 태그가 먼저, **설명에만** 걸린 태그는 그 뒤(각각 빈도순).
         # 빈도순이라 설명에 그 말이 스친 흔한 태그가 앞을 채웠다 - '꼬리' 에 holding('입·발·꼬리로
         # 잡는 경우는 제외'), '치마' 에 dress · nude(2026-09-27 실측, 대표 문장을 색인에 넣을 때 커졌다).
-        results.sort(key=lambda r: (not _name_or_keyword_hit(query, r), -freq_of(r), r.tag))
+        results.sort(key=lambda r: (not _name_or_keyword_hit(query, r), _other_site(r.entry), -freq_of(r), r.tag))
         return results[:limit] if limit else results
 
     def search_semantic(
@@ -1019,7 +1042,7 @@ class TagSearchIndex:
                 continue
             results.append(TagSearchResult(tag=tag, score=score, entry=entry))
 
-        results.sort(key=lambda r: (-r.score, -r.entry.freq, r.tag))
+        results.sort(key=lambda r: (-_rank_score(q, r), _other_site(r.entry), -r.entry.freq, r.tag))
         if limit is not None:
             return results[:limit]
         return results
@@ -1184,7 +1207,7 @@ class TagSearchIndex:
                 continue
             results.append(TagSearchResult(tag=tag, score=score, entry=entry))
 
-        results.sort(key=lambda r: (-r.score, -r.entry.freq, r.tag))
+        results.sort(key=lambda r: (-_rank_score(q, r), _other_site(r.entry), -r.entry.freq, r.tag))
         if limit is not None:
             return results[:limit]
         return results

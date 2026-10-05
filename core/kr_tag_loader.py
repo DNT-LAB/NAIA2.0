@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.tag_knowledge import (
+    add_e621_name_keyword,
     apply_korean_alias_supplement,
     apply_korean_keyword_supplement,
     apply_korean_slang_supplement,
@@ -169,6 +170,8 @@ def load_kr_tag_records(
     e621_research_stats.added = 0
     for tag_key, record in e621_candidates.items():
         if tag_key in raw:
+            # 번역 표가 먼저 만든 E621 레코드에는 이름이 없다 - 이름으로도 찾아지게 검색어에 넣는다.
+            add_e621_name_keyword(raw[tag_key], record.get("keywords_kr"))
             continue
         raw[tag_key] = record
         e621_research_stats.added += 1

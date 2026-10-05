@@ -5,6 +5,30 @@ from .prompt_context import PromptContext
 from .wildcard_manager import WildcardManager
 
 
+def _angle_ends_tag(text: str, index: int) -> bool:
+    """`<` 바로 뒤가 콤마나 끝인가 - 그러면 블록을 여는 것이 아니라 태그의 끝 글자다.
+
+    Danbooru 표정 태그(`:<` `>_<` `> <` `>o<` `;<`)가 전부 이 모양이다. 닫는 `>` 가 없어
+    그 뒤의 콤마를 전부 삼켰고, `:<` 가 맨 앞인 행은 통째로 태그 하나가 됐다. 그 덩어리가
+    Auto-Hide 의 포함 매치(`__background__`)에 걸리면 프롬프트 전체가 지워진다
+    (제보 2026-10-05 · 번들 코퍼스 754만 행 중 83,551행이 뭉쳤다)."""
+    rest = text[index + 1:].lstrip()
+    return not rest or rest[0] == ','
+
+
+def _angle_starts_emoticon(text: str, index: int) -> bool:
+    """`>` 가 `>_<` 꼴 표정 태그의 머리인가 - 그러면 블록을 닫지 않는다.
+
+    `<smile|>_<, closed eyes>` 처럼 블록 안에 표정 태그를 쓴 경우를 지킨다. 예전에는 `>` 가
+    닫고 `<` 가 다시 열어 우연히 맞았는데, 끝 글자 `<` 를 안 세게 되면서 `>` 도 같이 빼야 한다."""
+    for pos in (index + 1, index + 2):
+        if pos >= len(text) or text[pos] in ',>':
+            return False
+        if text[pos] == '<':
+            return _angle_ends_tag(text, pos)
+    return False
+
+
 def split_tags_smart(text: str) -> list[str]:
     """
     콤마로 태그를 분리하되, <...> 블록 내부의 콤마는 보존합니다.
@@ -13,16 +37,21 @@ def split_tags_smart(text: str) -> list[str]:
         "a, <angry,shy|b|c>, d" -> ["a", "<angry,shy|b|c>", "d"]
         "a, <lora:model:0.8>, b" -> ["a", "<lora:model:0.8>", "b"]
         "a, b, c" -> ["a", "b", "c"]
+        ":<, a, >_<, b" -> [":<", "a", ">_<", "b"]   (표정 태그의 꺾쇠는 블록이 아니다)
     """
     if not text:
         return []
+    if '<' not in text:
+        return [tag for tag in (piece.strip() for piece in text.split(',')) if tag]
     result, current, depth = [], [], 0
-    for char in text:
+    for index, char in enumerate(text):
         if char == '<':
-            depth += 1
+            if not _angle_ends_tag(text, index):
+                depth += 1
             current.append(char)
         elif char == '>':
-            depth = max(0, depth - 1)
+            if not _angle_starts_emoticon(text, index):
+                depth = max(0, depth - 1)
             current.append(char)
         elif char == ',' and depth == 0:
             tag = ''.join(current).strip()

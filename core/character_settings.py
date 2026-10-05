@@ -5,6 +5,8 @@ import math
 import os
 import random
 import re
+import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -116,28 +118,37 @@ def drop_empty_history(frames: list[dict]) -> list[dict]:
     return kept
 
 
-def trim_history(frames: list[dict]) -> list[dict]:
-    """히스토리를 500개로 끊는다. 활성 슬롯은 세지 않는다.
+def kept_by_user(frame: Any) -> bool:
+    """사용자가 **남기겠다고 표시한** 칸인가 - 즐겨찾기이거나 그룹에 들었다.
 
-    ⚠️ **즐겨찾기는 보호한다.** 상한은 '자동으로 쌓인 것' 을 끊으려는 장치인데,
-       별을 단 캐릭터는 사용자가 남기겠다고 표시한 것이다. 즐겨찾기만으로 상한을
-       넘으면 그때는 즐겨찾기 중 오래된 것부터 버린다 - 무한히 늘게 두지 않는다.
+    자동으로 걷는 길(히스토리 상한 · 씬 찌꺼기 걷기)은 이것을 건드리지 않는다. 손으로 모은 것을 조용히
+    지우는 일이 없어야 한다(2026-10-05 유실 사고).
     """
-    stored = [frame for frame in frames if str(frame.get("slot_state") or "") != "active"]
-    if len(stored) <= HISTORY_LIMIT:
+    if not isinstance(frame, dict):
+        return False
+    return bool(frame.get("favorite")) or bool(str(frame.get("group") or "").strip())
+
+
+def trim_history(frames: list[dict]) -> list[dict]:
+    """**그냥 히스토리**를 500개로 끊는다. 활성 슬롯 · 즐겨찾기 · 그룹은 세지도 자르지도 않는다.
+
+    상한은 '자동으로 쌓인 것' 을 끊으려는 장치다. 사용자가 남긴 것(`kept_by_user`)은 몇 개든 그대로 둔다 -
+    세지도 않는다. 세면 많이 모은 사람은 히스토리가 쌓일 자리가 없다.
+
+    ⚠️ 예전에는 보관함 전체를 세고 즐겨찾기만 앞세웠다. 그래서 그룹에 든 것이 그냥 히스토리보다 **먼저**
+       잘렸다 - 옛 Cold 슬롯은 내려온 시각이 0 이라 맨 앞이었다(실측: 보관 570개에서 Cold Storage 그룹
+       60개가 전부 잘리고 그냥 히스토리 450개는 다 남았다).
+    ⚠️ **버릴 것을 고른다.** 남길 것을 고르는 식으로 쓰면, 조건이 어긋나는 날 나머지가 전부 지워진다.
+    """
+    plain = [frame for frame in frames
+             if str(frame.get("slot_state") or "") != "active" and not kept_by_user(frame)]
+    if len(plain) <= HISTORY_LIMIT:
         return frames
-    # 남길 것을 고른다: 즐겨찾기 먼저, 그 다음 최근에 쓴 것.
-    ranked = sorted(
-        stored,
-        key=lambda frame: (bool(frame.get("favorite")), _as_used_at(frame.get("used_at"))),
-        reverse=True,
-    )
-    keep = {id(frame) for frame in ranked[:HISTORY_LIMIT]}
-    dropped = len(stored) - len(keep)
-    if dropped > 0:
-        print(f"[Character] history trimmed: dropped {dropped} slot(s)", flush=True)
-    return [frame for frame in frames
-            if str(frame.get("slot_state") or "") == "active" or id(frame) in keep]
+    # 최근에 쓴 것부터 세어 상한을 넘는 것 - 가장 오래된 것들이다.
+    ranked = sorted(plain, key=lambda frame: _as_used_at(frame.get("used_at")), reverse=True)
+    drop = {id(frame) for frame in ranked[HISTORY_LIMIT:]}
+    print(f"[Character] history trimmed: dropped {len(drop)} slot(s)", flush=True)
+    return [frame for frame in frames if id(frame) not in drop]
 
 
 def normalize_group_colors(stored: Any, groups: list[str]) -> dict[str, int]:
@@ -696,10 +707,192 @@ def normalize_character_settings(raw: dict | None) -> dict:
     return settings
 
 
+# ── 저장 방어선 (2026-10-05) ────────────────────────────────────────────────
+#
+# 슬롯의 내용은 `CharacterModule_{MODE}.json` **하나에만** 있다. 2026-10-05 에 [덮어씌우기] 가 보관함을
+# 통째로 지웠을 때 되돌릴 사본이 어디에도 없었다(제보: 손으로 모은 캐릭터 120개). 그래서 쓰는 길을
+# `write_character_settings_file` 하나로 모으고 세 가지를 지킨다.
+#
+#   1. **통째로 바꿔 끼운다.** 임시 파일에 다 쓴 뒤 `os.replace` - 쓰다 끊겨도 옛 파일이 남는다.
+#   2. **덮기 전에 사본을 남긴다.** `save/character_backup/` 에 종류마다 최근 10벌:
+#        session  NAIA 를 켠 뒤(날이 바뀐 뒤) 첫 저장 직전의 파일 - '켰을 때' 로 돌아갈 수 있다
+#        shrink   보관한 캐릭터가 한 번에 5개 이상 줄어드는 저장 직전의 파일 - 사고 직전 그대로다
+#        corrupt  읽을 수 없게 깨진 파일 - 덮기 전에 치워 둔다
+#      ⚠️ 종류를 나눠 돌린다. 한 줄로 세우면 자잘한 session 사본이 사고 직전의 shrink 사본을 밀어낸다.
+#   3. **읽지 못한 파일은 덮지 않는다.** 무엇이 들었는지 모르면 사본도 못 남긴다.
+#
+# 되살리기는 손으로 한다: NAIA 를 끄고, 사본을 `CharacterModule_{MODE}.json` 이름으로 `save/` 에 덮어 넣는다.
+CHARACTER_BACKUP_DIRNAME = "character_backup"
+CHARACTER_BACKUP_KEEP = 10
+CHARACTER_SHRINK_BACKUP_AT = 5
+
+_STORE_LOCK = threading.Lock()
+# 경로별 기억: 내가 마지막으로 쓴 파일의 (크기, mtime_ns) · 그 안의 보관 수 · session 사본을 남긴 날.
+# 파일이 그 모습 그대로면 다시 읽지 않는다 - 저장은 글자를 칠 때마다 온다.
+_STORE_STATE: dict[str, dict[str, Any]] = {}
+# Windows 에서는 백신 · 색인기가 파일을 잠깐 쥔다. 한 번 막혔다고 포기하지 않는다.
+_BUSY_RETRY_DELAYS = (0.0, 0.05, 0.1, 0.2)
+
+
+def forget_character_store_state() -> None:
+    """경로별 기억을 지운다 - NAIA 를 새로 켠 것과 같다(시험용)."""
+    with _STORE_LOCK:
+        _STORE_STATE.clear()
+
+
+def _read_settings_bytes(path: Path) -> bytes:
+    """잠깐 잠긴 파일은 몇 번 다시 읽는다. 끝내 못 읽으면 그 오류를 그대로 던진다."""
+    last: OSError | None = None
+    for delay in _BUSY_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            return path.read_bytes()
+        except PermissionError as exc:
+            last = exc
+    raise last
+
+
+def _settings_from_bytes(data: bytes, mode_key: str) -> dict | None:
+    """저장본 바이트 -> 그 모드의 설정. 깨졌으면(JSON 이 아니거나 dict 가 아니면) None."""
+    try:
+        # `utf-8-sig`: 메모장으로 고쳐 저장하면 BOM 이 붙는다. 그것을 깨진 파일로 보면 손으로 고친 목록이
+        # 빈 상태로 뜬다(예전에는 그렇게 뜬 뒤 다음 저장이 그 파일을 덮었다).
+        parsed = json.loads(data.decode("utf-8-sig"))
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    scoped = parsed.get(mode_key)
+    return scoped if isinstance(scoped, dict) else parsed
+
+
+def _stored_frame_count(settings: Any) -> int:
+    """보관함(활성이 아닌 칸)에 든 것의 수. 빈 자리표시자는 세지 않는다 - 정규화가 걷는 것이라, 그것이
+    사라졌다고 '줄었다' 고 보면 헛사본이 쌓인다."""
+    frames = settings.get("character_frames") if isinstance(settings, dict) else None
+    count = 0
+    for frame in frames if isinstance(frames, list) else []:
+        if not isinstance(frame, dict):
+            continue
+        if normalize_slot_state(frame.get("slot_state"), bool(frame.get("is_enabled", False))) == "active":
+            continue
+        if any(str(frame.get(key) or "").strip() for key in ("prompt", "uc", "custom_name")):
+            count += 1
+    return count
+
+
+def _backup_series(folder: Path, stem: str, kind: str) -> list[Path]:
+    """그 종류의 사본들, 오래된 것부터. 이름의 시각은 사람이 읽으라고 붙인 것이고 차례는 mtime 으로 센다."""
+    return sorted(folder.glob(f"{stem}.{kind}-*.json"), key=lambda path: (path.stat().st_mtime_ns, path.name))
+
+
+def _keep_backup_copy(target: Path, kind: str) -> None:
+    """`target` 을 지금 모습 그대로 사본 폴더에 남긴다. 그 종류의 가장 최근 사본과 같으면 또 남기지 않는다.
+
+    ⚠️ **읽지 못하면 던진다** - 호출자가 저장을 멈춘다. 사본 폴더에 **쓰지 못하면** 알리기만 한다. 사본을
+       못 남긴다고 저장까지 막으면, 폴더 하나가 잘못됐다는 이유로 캐릭터를 아예 못 고친다.
+    """
+    data = _read_settings_bytes(target)
+    folder = target.parent / CHARACTER_BACKUP_DIRNAME
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        series = _backup_series(folder, target.stem, kind)
+        try:
+            if series and series[-1].read_bytes() == data:
+                return
+        except OSError:
+            pass                                    # 최근 사본을 못 읽으면 다르다고 보고 남긴다
+        now = time.time()
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+        serial = int(now * 1000) % 1000
+        copy = folder / f"{target.stem}.{kind}-{stamp}-{serial:03d}.json"
+        while copy.exists():
+            serial += 1
+            copy = folder / f"{target.stem}.{kind}-{stamp}-{serial:03d}.json"
+        copy.write_bytes(data)
+    except OSError as exc:
+        print(f"[WARN] Character backup ({kind}) was not written: {exc}", flush=True)
+        return
+    try:
+        for old in _backup_series(folder, target.stem, kind)[:-CHARACTER_BACKUP_KEEP]:
+            old.unlink()
+    except OSError:
+        pass                                        # 못 지운 옛 사본은 다음에 지운다
+
+
+def _back_up_before_write(target: Path, mode_key: str, new_stored: int) -> None:
+    """덮어쓰기 직전 - 지금 디스크에 있는 파일을 남길지 정하고 남긴다."""
+    try:
+        stat = target.stat()
+    except FileNotFoundError:
+        return                                      # 처음 만드는 파일 - 지킬 것이 없다
+    state = _STORE_STATE.setdefault(str(target), {})
+    today = time.strftime("%Y%m%d")
+    if state.get("signature") == (stat.st_size, stat.st_mtime_ns):
+        previous_stored = int(state.get("stored") or 0)     # 내가 쓴 그대로다 - 다시 읽지 않는다
+    else:
+        # 내가 쓴 적이 없는 모습이다(이번 실행의 첫 저장 · 밖에서 바뀜 · 읽지 못했던 파일).
+        previous = _settings_from_bytes(_read_settings_bytes(target), mode_key)
+        if previous is None:
+            _keep_backup_copy(target, "corrupt")
+            state["session_day"] = today            # 깨진 파일의 사본이 이 실행의 '켰을 때' 다
+            return
+        previous_stored = _stored_frame_count(previous)
+    if state.get("session_day") != today:
+        _keep_backup_copy(target, "session")
+        state["session_day"] = today
+    if previous_stored - new_stored >= CHARACTER_SHRINK_BACKUP_AT:
+        _keep_backup_copy(target, "shrink")
+
+
+def _swap_in(target: Path, text: str) -> None:
+    """임시 파일에 다 쓴 뒤 바꿔 끼운다. 끝내 못 바꾸면 예전처럼 제자리에 쓴다(사본은 이미 남겼다)."""
+    # 임시 파일은 프로세스마다 이름이 다르다 - 같은 user-data 를 두 서버가 쓰면(소스 실행 둘) 한 이름에 섞어 쓴다.
+    temp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    try:
+        # ⚠️ 글자 모드로 쓴다 - `Path.write_text` 가 쓰던 바이트와 같아야 한다(Windows 에서는 CRLF).
+        with open(temp, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        last: OSError | None = None
+        for delay in _BUSY_RETRY_DELAYS:
+            if delay:
+                time.sleep(delay)
+            try:
+                os.replace(temp, target)
+                return
+            except PermissionError as exc:
+                last = exc
+        # 누가 파일을 연 채로 쥐고 있다(읽기만 해도 Windows 는 바꿔 끼우기를 막는다). 저장을 잃느니 제자리에 쓴다.
+        print(f"[WARN] Character settings swap is blocked ({last}); writing in place", flush=True)
+        target.write_text(text, encoding="utf-8")
+    finally:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+
+
+def write_character_settings_file(path: Path | str, mode_key: str, settings: dict) -> None:
+    """캐릭터 저장본을 쓰는 **하나뿐인 길**. 위의 '저장 방어선' 을 지킨다 - 다른 곳에서 `write_text` 로
+    직접 쓰면 사본도 없이 제자리에서 덮는다."""
+    target = Path(os.path.abspath(str(path)))
+    text = json.dumps({mode_key: settings}, ensure_ascii=False, indent=4)
+    stored = _stored_frame_count(settings)
+    with _STORE_LOCK:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _back_up_before_write(target, mode_key, stored)
+        _swap_in(target, text)
+        stat = target.stat()
+        _STORE_STATE.setdefault(str(target), {}).update(
+            signature=(stat.st_size, stat.st_mtime_ns), stored=stored)
+
+
 def _save_migrated_character_settings(path: Path, mode_key: str, settings: dict) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({mode_key: settings}, ensure_ascii=False, indent=4), encoding="utf-8")
+        write_character_settings_file(path, mode_key, settings)
     except Exception as exc:
         print(f"[WARN] Character settings migration save failed: {exc}")
 
@@ -736,8 +929,15 @@ def load_character_settings(
     target = Path(path) if path is not None else _existing_character_settings_path(mode_key, save_root=save_root)
     try:
         if target.exists():
-            data = json.loads(target.read_text(encoding="utf-8"))
-            raw_settings = data.get(mode_key) if isinstance(data, dict) and isinstance(data.get(mode_key), dict) else data
+            raw_settings = _settings_from_bytes(_read_settings_bytes(target), mode_key)
+            if raw_settings is None:
+                # ⚠️ 깨진 파일은 **치워 두고** 빈 상태로 뜬다. 예전에는 조용히 빈 상태로 떠서 다음 조작 하나가
+                #    그 위를 덮었다 - 쓰다 끊긴 파일에 남아 있던 절반도 그때 사라졌다.
+                with _STORE_LOCK:
+                    _keep_backup_copy(target, "corrupt")
+                print(f"[ERROR] Character settings file is broken: {target.name} "
+                      f"(a copy is kept in {CHARACTER_BACKUP_DIRNAME})", flush=True)
+                return default_character_settings()
             normalized, migrated = _normalize_character_settings_with_migration(raw_settings)
             if migrated:
                 _save_migrated_character_settings(target, mode_key, normalized)

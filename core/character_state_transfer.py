@@ -13,6 +13,7 @@ from core.character_settings import (
     _new_character_uuid,
     active_character_frames,
     clear_character_roll_snapshot,
+    kept_by_user,
 )
 
 
@@ -72,15 +73,17 @@ def replace_character_state(
     for frame in settings.get("character_frames") or []:
         if not isinstance(frame, dict):
             continue
-        # Cold 슬롯은 건드리지 않는다 - 사용자가 일부러 치워 둔 것이다(씬이 만든 것이었어도).
-        if str(frame.get("slot_state") or "").strip().lower() == "cold":
-            kept.append(frame)
+        # ⚠️ **버릴 것을 고른다**: 이전 씬 · 스냅샷이 남긴 칸 가운데 **사용자가 남기지 않은 것**만.
+        #    예전엔 전부 비활성으로 남겼는데(아무것도 잃지 않으려고), 잇달아 부르면 비활성 무리에 찌꺼기가
+        #    끝없이 쌓였다(사용자 제보). 손으로 만든 칸은 그대로 남기고 씬이 만든 것만 고른다 - 표식이
+        #    없으면 어느 것이 사용자 작업인지 구분할 방법이 없다.
+        # ⚠️ 즐겨찾기 · 그룹으로 보관한 칸은 씬이 만들었어도 **사용자의 것**이다. 이것을 안 보면 씬의
+        #    캐릭터를 ★ 해 두어도 다음 불러오기에서 사라진다(2026-10-05 재현). 예전에는 Cold 로 보낸 칸만
+        #    지켰는데 그 상태는 2026-09-02 에 폐기돼, 지키는 조건이 죽어 있었다.
+        if frame.get("from_scene") and not kept_by_user(frame):
             continue
-        # ⚠️ **이전 씬 · 스냅샷이 남긴 칸은 버린다.** 예전엔 전부 비활성으로 남겼는데(아무것도 잃지
-        #    않으려고), 잇달아 부르면 비활성 무리에 찌꺼기가 끝없이 쌓였다(사용자 제보). 손으로 만든
-        #    칸은 그대로 남기고 씬이 만든 것만 고른다 - 표식이 없으면 어느 것이 사용자 작업인지
-        #    구분할 방법이 없다.
-        if frame.get("from_scene"):
+        if str(frame.get("slot_state") or "").strip().lower() != "active":
+            kept.append(frame)          # 보관함은 손대지 않는다 - 씬이 내리는 것은 지금 슬롯뿐이다
             continue
         # 비활성으로 밀린 슬롯의 링크는 정리한다 - 그대로 두면 정규화가 "앞만 가리킨다" 규칙으로
         # 지우거나, 새 활성 슬롯을 엉뚱하게 가리킨다.

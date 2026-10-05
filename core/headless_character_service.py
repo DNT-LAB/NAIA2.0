@@ -281,7 +281,7 @@ class HeadlessCharacterService:
         self._slot_states()[mode_key] = self._state_map(normalized)
 
     def save_settings(self, mode: str, settings: dict[str, Any]) -> None:
-        from core.character_settings import normalize_character_settings
+        from core.character_settings import normalize_character_settings, write_character_settings_file
 
         mode_key = str(mode or "NAI").upper()
         normalized = normalize_character_settings(settings)
@@ -293,12 +293,10 @@ class HeadlessCharacterService:
             _seed_missing_positions(normalized)
         self._settle_history(mode_key, normalized)
         self.settings_by_mode()[mode_key] = normalized
+        # ⚠️ 파일은 **한 길로만** 쓴다 - 통째로 바꿔 끼우고, 덮기 전에 사본을 남긴다
+        #    (`write_character_settings_file`). 여기서 `write_text` 로 직접 쓰면 그 방어선을 건너뛴다.
         path = self.context._save_path(f"CharacterModule_{mode_key}.json")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({mode_key: normalized}, ensure_ascii=False, indent=4),
-            encoding="utf-8",
-        )
+        write_character_settings_file(path, mode_key, normalized)
 
     @staticmethod
     def _connected_children(frames: list[dict[str, Any]], source: dict[str, Any]) -> list[dict[str, Any]]:
@@ -397,14 +395,14 @@ class HeadlessCharacterService:
            프런트는 그 전에 이미 "Applied N character prompts" 를 띄운 뒤였다 —
            **성공 토스트와 실패 토스트가 나란히 뜨고 캐릭터는 안 들어갔다.**
 
-        `existing` 은 **기존 슬롯을 어떻게 할지**다(사용자에게 묻는다):
+        `existing` 은 **지금 슬롯(활성)을 어떻게 할지**다(사용자에게 묻는다):
 
-            "inactive"   기존을 비활성 무리로 보내고 새 것을 활성으로 덧붙인다.
-                         아무것도 잃지 않는다 - 되돌리려면 다시 켜면 된다.
-            "overwrite"  기존(비-cold)을 버리고 새 것으로 갈아치운다.
+            "inactive"   지금 슬롯을 히스토리로 내리고 새 것을 활성으로 덧붙인다.
+                         아무것도 잃지 않는다 - 되돌리려면 다시 올리면 된다.
+            "overwrite"  지금 슬롯을 버리고 새 것으로 갈아치운다.
 
-        어느 쪽이든 **cold 슬롯은 건드리지 않는다.** cold 는 사용자가 일부러 치워 둔
-        것이라 "기존 캐릭터" 로 취급하면 놀란다 - `_apply_asset_locked` 와 같은 규약이다.
+        어느 쪽이든 **보관함(히스토리 · 즐겨찾기 · 그룹)은 건드리지 않는다.** 사용자가 남겨 둔 것이라
+        "기존 캐릭터" 로 쓸어 담으면 안 된다 - 화면의 안내문도 그렇게 약속한다(`applyMetadataCharacters`).
 
         ## 좌표 정책 (의도적 선택, Codex 리뷰 2026-08-24)
 
@@ -444,35 +442,35 @@ class HeadlessCharacterService:
         if not fresh:
             raise ValueError("no character prompts to apply")
 
-        def is_cold(frame: Any) -> bool:
-            return (isinstance(frame, dict)
-                    and str(frame.get("slot_state") or "").strip().lower() == "cold")
-
-        cold = [f for f in frames if is_cold(f)]
-        if mode == "overwrite":
-            kept = cold
-        else:
-            kept = []
-            for frame in frames:
-                if is_cold(frame):
-                    kept.append(frame)
-                    continue
-                if not isinstance(frame, dict):
-                    continue
-                # 기본 상태의 **빈 C1** 까지 비활성으로 남기면 무리가 쓰레기로 찬다.
-                # ⚠️ 다만 "비었다" 의 기준을 프롬프트/UC 로만 잡으면 안 된다 -
-                #    사용자가 이름을 붙이거나 좌표만 잡아 둔 자리표시자 슬롯이
-                #    소리 없이 사라진다. 그건 도달 가능한 상태다:
-                #    슬롯을 우클릭하면 프롬프트가 없어도 이름을 붙일 수 있고
-                #    (`characterPanel.renameSlot`), 화면은 이름 없는 빈 슬롯만
-                #    `(empty)` 로 그린다(`inactiveLabel`). 좌표도 프롬프트와 무관하게
-                #    설정된다(`char_pos_N`).
-                #    "아무것도 잃지 않는다" 는 약속을 지키려면 넷 다 비어야 버린다.
-                if _slot_is_untouched(frame):
-                    continue
-                frame["slot_state"] = "inactive"
-                frame["is_enabled"] = False
-                kept.append(frame)
+        # ⚠️ **버릴 것을 고른다.** 덮어씌우기가 버리는 것은 **지금 슬롯(활성)** 뿐이고, 보관함은 어느 쪽이든
+        #    그대로 지나간다.
+        #    예전에는 남길 것을 `slot_state == "cold"` 로 골랐다. cold 는 2026-09-02 에 폐기돼 읽는 순간
+        #    inactive + 그룹 "Cold Storage" 로 눕는다 - 조건이 영영 참이 안 되어 히스토리 · 즐겨찾기 · 그룹이
+        #    통째로 지워졌다(2026-10-05 제보: 손으로 모은 캐릭터 120개. 그룹 이름은 `groups` 에 따로 있어
+        #    그것만 남았다). 남길 것을 고르는 조건은 죽는 날 나머지를 전부 지운다.
+        kept = []
+        for frame in frames:
+            if not isinstance(frame, dict):
+                continue
+            if _state_of(frame) != "active":
+                kept.append(frame)              # 보관함 - 어느 쪽이든 손대지 않는다
+                continue
+            if mode == "overwrite":
+                continue                        # 지금 슬롯을 버린다
+            # 기본 상태의 **빈 C1** 까지 비활성으로 남기면 무리가 쓰레기로 찬다.
+            # ⚠️ 다만 "비었다" 의 기준을 프롬프트/UC 로만 잡으면 안 된다 -
+            #    사용자가 이름을 붙이거나 좌표만 잡아 둔 자리표시자 슬롯이
+            #    소리 없이 사라진다. 그건 도달 가능한 상태다:
+            #    슬롯을 우클릭하면 프롬프트가 없어도 이름을 붙일 수 있고
+            #    (`characterPanel.renameSlot`), 화면은 이름 없는 빈 슬롯만
+            #    `(empty)` 로 그린다(`inactiveLabel`). 좌표도 프롬프트와 무관하게
+            #    설정된다(`char_pos_N`).
+            #    "아무것도 잃지 않는다" 는 약속을 지키려면 넷 다 비어야 버린다.
+            if _slot_is_untouched(frame):
+                continue
+            frame["slot_state"] = "inactive"
+            frame["is_enabled"] = False
+            kept.append(frame)
         frames[:] = fresh + kept
 
         settings["is_active"] = True
@@ -496,7 +494,8 @@ class HeadlessCharacterService:
         the settings cache directly.
 
         - "c1": Dev0714 assign_c1 parity — write frames[0], make it the only
-          active slot. Cold slots keep their state; custom names/uuids are
+          active slot. Stored frames (history/favorites/groups) are never touched -
+          with no active slot a new one is made. Custom names/uuids are
           preserved (only prompt/uc/state fields change).
         - "add_slot": append a fresh active frame.
         Either way the module itself is activated.
@@ -520,6 +519,11 @@ class HeadlessCharacterService:
                 "custom_name": "",
             })
         elif apply_mode == "c1":
+            # ⚠️ C1 은 **활성 슬롯의 첫 칸**이다. 정규화가 [활성][보관] 순으로 세우므로 활성이 하나도 없으면
+            #    frames[0] 은 보관함의 첫 줄이고, 거기에 쓰면 사용자가 보관한 캐릭터가 에셋으로 덮인다.
+            #    그때는 새 칸을 만든다.
+            if not frames or _state_of(frames[0]) != "active":
+                frames.insert(0, {"prompt": "", "uc": "", "custom_name": ""})
             frame = self.ensure_frame(frames, 0)
             frame["prompt"] = str(prompt or "")
             frame["uc"] = str(uc or "")
@@ -534,8 +538,8 @@ class HeadlessCharacterService:
             for other in frames[1:]:
                 if not isinstance(other, dict):
                     continue
-                if str(other.get("slot_state") or "").strip().lower() == "cold":
-                    continue
+                if _state_of(other) != "active":
+                    continue            # 보관함은 손대지 않는다 - 내리는 것은 지금 슬롯뿐이다
                 other["is_enabled"] = False
                 other["slot_state"] = "inactive"
         else:
@@ -858,6 +862,10 @@ class HeadlessCharacterService:
             if index is not None:
                 frame = self.ensure_frame(frames, index)
                 frame["favorite"] = context._coerce_bool(value)
+                if frame["favorite"]:
+                    # ⚠️ 사용자가 남기겠다고 표시한 칸은 **더 이상 씬의 것이 아니다**(프롬프트를 고친 칸과
+                    #    같다). 표식을 안 지우면 별을 뗀 뒤 다음 씬이 '이전 씬이 남긴 칸' 으로 보고 버린다.
+                    frame["from_scene"] = False
                 # ⚠️ 스냅샷을 무효화하지 **않는다** - 즐겨찾기는 프롬프트를 안 바꾼다.
                 #    무효화하면 별 하나 눌렀다고 굴린 캐릭터가 다시 굴러 버린다.
         elif key == "add_group":
@@ -900,6 +908,9 @@ class HeadlessCharacterService:
                     clone["uuid"] = _new_character_uuid()
                     clone["slot_state"] = "inactive"
                     clone["group"] = str(value or "").strip()
+                    # ⚠️ 씬 표식은 물려받지 않는다. 그룹에 넣은 것은 **사용자가 남긴 것**이다 - 표식이
+                    #    따라오면 다음 씬을 불러올 때 찌꺼기로 보고 지운다(2026-10-05 재현).
+                    clone["from_scene"] = False
                     # ⚠️ 링크는 지운다. 복제본은 **글의 사본**이지 관계의 사본이
                     #    아니다 - 물고 있는 채로 두면 순서에 따라 조용히 잘리거나
                     #    (`_prune_character_links`) 사슬 금지에 걸린다.
@@ -912,6 +923,8 @@ class HeadlessCharacterService:
             if index is not None:
                 frame = self.ensure_frame(frames, index)
                 frame["group"] = str(value or "").strip()
+                if frame["group"]:
+                    frame["from_scene"] = False     # 그룹에 넣은 칸은 사용자의 것이다(`char_favorite_` 와 같다)
                 # 그룹도 프롬프트와 무관하다 - 스냅샷을 건드리지 않는다.
         elif key.startswith("char_connect_"):
             # Connect - 앞선 활성 슬롯의 전개 결과를 물려받는다. 값은 원본 슬롯의

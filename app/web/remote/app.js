@@ -7970,7 +7970,7 @@ async function applyMetadataCharacters(payload, {withSettings = false} = {}) {
       title: '기존 캐릭터를 어떻게 할까요?',
       messageHtml: `${escHtml(`메타데이터의 캐릭터 ${validCharacters.length}명을 적용합니다.`)}`
         + `<br>${escHtml('지금 슬롯에 있는 캐릭터를 어떻게 할지 고르세요.')}`
-        + `<br>${escHtml('(따로 치워 둔 Cold 슬롯은 어느 쪽이든 그대로 둡니다)')}`,
+        + `<br>${escHtml('(히스토리 · 즐겨찾기 · 그룹에 보관한 캐릭터는 어느 쪽이든 그대로 둡니다)')}`,
       choices: [
         {key: 'inactive', label: '비활성으로 보내기'},
         {key: 'overwrite', label: '덮어씌우기'},

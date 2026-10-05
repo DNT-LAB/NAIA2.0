@@ -2681,7 +2681,7 @@ const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs
   });
 const e621Host = document.createElement('div');
 const e621WindowReady = e621UsesWindow
-  ? import('./js/features/e621Window.mjs?v=20261003-e621ux')
+  ? import('./js/features/e621Window.mjs?v=20261005-e621compact')
     .then(({createE621Window}) => {
       e621Window = createE621Window({
         document,
@@ -2691,21 +2691,27 @@ const e621WindowReady = e621UsesWindow
         onShow: () => requestModuleState('e621_event'),
         onHide: () => flushPendingModuleEdit('e621_event'),
         onVisibilityChange: () => updateModuleBtnState(),
+        // 머리줄의 [작게 보기] - 창은 폭을 바꾸고, 배치는 패널이 바꾼다.
+        onCompactChange: compact => { if (e621EventPanel) e621EventPanel.setCompact(compact); },
       });
     })
     .catch(error => {
       console.error('Failed to initialize E621 research window', error);
     })
   : Promise.resolve();
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261005-e621weight')
-  .then(({createE621EventPanel}) => {
+// 패널은 창이 만들어진 뒤에 만든다 - 작게 보기에서 설명이 나가는 옆 창(e621Window.detail)을 받아야 한다.
+const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mjs?v=20261005-e621compact'), e621WindowReady])
+  .then(([{createE621EventPanel}]) => {
     e621EventPanel = createE621EventPanel({
       document,
       escHtml,
       setModuleParam,
       showToast,
+      bindTagAssist,
       moduleBody: e621UsesWindow ? e621Host : null,
+      floatDetail: e621Window ? e621Window.detail : null,
     });
+    if (e621Window) e621EventPanel.setCompact(e621Window.isCompact());
   })
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);

@@ -4,6 +4,8 @@
 //   (개편안 docs/E621_MODULE_UX_PROPOSAL_2026_10_03.md. 프롬프트 조립 트레이는 뺐다 - 사용자 지정 2026-10-03
 //    "프롬프트 조립 기능을 지원하지 않습니다. 그냥 하나 누르면 그 하나에 대해서만 show 합니다.")
 //   테스트 생성은 고른 태그 **하나**로 조립한 프롬프트를 보이고 보낸다(사용자 지정 2026-10-05) - 태그를 여럿 고르지 않는다.
+//   작게 보기(같은 날): 분류 · 폴더를 숨기고 태그 목록 아래에 보낼 프롬프트를 붙인다. 선택한 태그의 설명은 이 패널 밖,
+//   창 옆에 뜨는 작은 창(floatDetail)에 그린다 - 태그를 누르면 뜨고, 다른 곳을 누르거나 생성하거나 × 를 누르면 닫힌다.
 //
 // ⚠️ 그리는 방식 - 영역(data-e621-region)마다 따로 쓴다. 영역의 HTML 이 지난번과 같으면 건드리지 않는다.
 //    예전에는 상태가 올 때마다 본문 전체를 innerHTML 로 갈아 끼워, 태그 하나만 눌러도 분류 · 폴더 · 태그 ·
@@ -21,9 +23,14 @@ export function createE621EventPanel({
   escHtml,
   setModuleParam,
   showToast,
+  // 메인 프롬프트와 같은 태그 자동완성(app.js 의 bindTagAssist). 보낼 프롬프트의 글상자에 묶는다.
+  bindTagAssist = null,
   // 그릴 자리. 메인 화면은 떠 있는 창(e621Window)의 본문을 넘긴다. 없으면 예전처럼 모듈 팝업 본문
   // (별도 브라우저 창으로 떼어 낸 모듈은 그 창 전체가 모듈 팝업이다).
   moduleBody: host = null,
+  // 작게 보기에서 선택한 태그의 설명이 나가는 옆 창 {host, open, close, isOpen}(e621Window 가 만든다).
+  // 없으면(떼어 낸 브라우저 창) 작게 보기도 없다.
+  floatDetail = null,
 }) {
   const moduleBody = host || document.getElementById('modulePopupBody');
   const REGIONS = ['toolbar', 'cats', 'folders', 'tags', 'detail', 'bench'];
@@ -40,8 +47,9 @@ export function createE621EventPanel({
   // 화면 상태 - 이 탭의 것이다(서버에 두지 않는다: 다른 탭이 내 팝오버 · 펼침을 바꾸면 안 된다).
   //   benchDraft = 보낼 프롬프트를 손으로 고친 글 {text, base}. base = 고치기 시작한 자동 조립 - 그것이 바뀌면 버린다.
   //   weightDraft = 끌고 있는(서버가 아직 받아 적지 않은) 가중치. 둘 다 null = 없음.
+  //   compact = 작게 보기 · popWanted = 방금 누른 태그(그 태그의 설명이 오면 옆 창을 연다)
   const ui = {pop: '', searchDraft: null, expanded: new Set(), expandedFor: '', folds: new Set(),
-    benchDraft: null, weightDraft: null, benchSentAt: 0};
+    benchDraft: null, weightDraft: null, benchSentAt: 0, compact: false, popWanted: ''};
   const BENCH_AGAIN_MS = 700;     // [생성] 을 연달아 누른 것은 한 번으로 친다
   // 태그 목록에 이어 붙여 둔 쪽들 - 이것도 이 탭의 것이다. 서버가 아는 것은 마지막으로 청한 쪽 하나뿐이다.
   //   key = 어느 목록인가 · stamp = 그 목록의 줄 수와 줄 모양 · html = 쪽마다 써 넣은 줄 · pending = 청해 둔 쪽
@@ -51,6 +59,7 @@ export function createE621EventPanel({
   const RETRY_MS = 4000;   // 청한 쪽이 이 안에 안 오면 다시 청할 수 있다
 
   ensureStyle(document);
+  if (floatDetail?.host?.classList) floatDetail.host.classList.add('e6-float');
   bindDelegates();
 
   function canQuery() {
@@ -519,7 +528,8 @@ export function createE621EventPanel({
 
   // 상세 칸: 읽는 순서 = 쓸모 순서. 머리(영문 · 한글 · 수 · ★ · 숨기기) → 설명 → 관계 → 근거.
   function detailHtml(state) {
-    const head = '<div class="e6-col-head">선택한 태그</div>';
+    // 작게 보기에서는 옆 창의 머리줄이 '선택한 태그' 다.
+    const head = ui.compact ? '' : '<div class="e6-col-head">선택한 태그</div>';
     const selected = state.selected;
     if (!selected) return `${head}<div class="e6-detail"><div class="e6-empty e6-detail-empty">태그를 고르면 설명과 관계가 보입니다</div></div>`;
     const research = selected.research || {};
@@ -625,6 +635,11 @@ export function createE621EventPanel({
     const bench = state.bench;
     const input = document.getElementById('e621BenchInput');
     if (!input) return;
+    // 메인 프롬프트와 같은 태그 자동완성. 글상자가 새로 생겼을 때 한 번만 묶는다(고른 것은 input 이벤트로 온다).
+    if (bindTagAssist && !input.e6Assist) {
+      input.e6Assist = true;
+      bindTagAssist(input);
+    }
     if (ui.benchDraft && ui.benchDraft.base !== bench.prompt) ui.benchDraft = null;
     if (ui.weightDraft !== null && ui.weightDraft === bench.weight) ui.weightDraft = null;
     const text = ui.benchDraft ? ui.benchDraft.text : bench.prompt;
@@ -671,6 +686,8 @@ export function createE621EventPanel({
     }
     ui.benchSentAt = now;
     send('generate', input.value);
+    // 생성하면 설명 창(누르면 뜨는 툴팁)은 닫는다.
+    if (ui.compact) floatDetail.close();
   }
 
   function regionsHtml(state) {
@@ -685,7 +702,7 @@ export function createE621EventPanel({
   }
 
   function panelClasses(state) {
-    return ['e6-panel', state.disable_translation ? 'no-ko' : ''].filter(Boolean).join(' ');
+    return ['e6-panel', state.disable_translation ? 'no-ko' : '', ui.compact ? 'compact' : ''].filter(Boolean).join(' ');
   }
 
   function skeletonHtml(state, html) {
@@ -758,17 +775,51 @@ export function createE621EventPanel({
     moduleBody.querySelectorAll('.e6-tag').forEach(row => row.classList.toggle('selected', row.dataset.tag === selected));
   }
 
+  // 작게 보기: 설명은 옆 창에 있다. 그 태그를 방금 눌렀으면(popWanted) 그 설명이 온 지금 창을 연다 -
+  // 누르자마자 열면 앞 태그의 설명이 잠깐 보인다. 고른 태그가 없어졌으면 닫는다.
+  function syncFloat(state) {
+    if (!ui.compact) return;
+    const tag = state.selected?.tag || '';
+    if (!tag) {
+      ui.popWanted = '';
+      floatDetail.close();
+    } else if (ui.popWanted === tag) {
+      ui.popWanted = '';
+      floatDetail.open();
+    }
+  }
+
+  // 작게 보기를 켜고 끈다(창 머리줄의 단추 → e621Window → 여기). 설명이 그려지는 자리가 바뀐다.
+  function setCompact(next) {
+    next = Boolean(next) && Boolean(floatDetail?.host);
+    if (ui.compact === next) return;
+    ui.compact = next;
+    ui.popWanted = '';
+    // 떠나는 자리의 설명은 지우고, 새 자리에 다시 쓰게 한다.
+    written.detail = undefined;
+    if (next) {
+      const inPanel = canQuery() ? moduleBody.querySelector('.e6-panel')?.querySelector('[data-e621-region="detail"]') : null;
+      if (inPanel) inPanel.innerHTML = '';
+    } else {
+      floatDetail.host.innerHTML = '';
+      floatDetail.close();
+    }
+    repaint();
+  }
+
   function paint(state) {
     const html = regionsHtml(state);
     const panel = moduleBody.querySelector('.e6-panel');
     if (!panel) {
       // 처음이거나, 떼어 낸 창에서 다른 모듈이 본문을 썼다 - 뼈대부터 쓴다.
-      moduleBody.innerHTML = skeletonHtml(state, html);
+      moduleBody.innerHTML = skeletonHtml(state, ui.compact ? {...html, detail: ''} : html);
       written = {...html};
+      if (ui.compact) swap(floatDetail.host, html.detail);
       startPages(state);
       syncInputs(state);
       syncBench(state);
       syncMarks(state, true);
+      syncFloat(state);
       return;
     }
     panel.className = panelClasses(state);
@@ -779,7 +830,8 @@ export function createE621EventPanel({
         continue;
       }
       if (written[name] === html[name]) continue;
-      const element = panel.querySelector(`[data-e621-region="${name}"]`);
+      // 설명이 그려지는 자리: 평소에는 네 번째 칸, 작게 보기에서는 옆에 뜨는 창.
+      const element = name === 'detail' && ui.compact ? floatDetail.host : panel.querySelector(`[data-e621-region="${name}"]`);
       if (!element) continue;
       swap(element, html[name]);
       written[name] = html[name];
@@ -788,6 +840,7 @@ export function createE621EventPanel({
     syncBench(state);
     if (syncStar(state)) tagsWritten = true;
     syncMarks(state, tagsWritten);
+    syncFloat(state);
   }
 
   // 화면 상태(팝오버 · 펼침)만 바뀌었을 때 - 서버를 거치지 않고 지금 상태로 다시 그린다.
@@ -811,6 +864,10 @@ export function createE621EventPanel({
     }
     if (!state.data_loaded) {
       moduleBody.innerHTML = notLoadedHtml(state);
+      if (ui.compact) {
+        floatDetail.host.innerHTML = '';
+        floatDetail.close();
+      }
       written = {};
       pages.key = null;
       markedTag = null;
@@ -870,18 +927,20 @@ export function createE621EventPanel({
     if (!moduleBody || typeof moduleBody.addEventListener !== 'function' || moduleBody.dataset?.e621Delegated) return;
     if (moduleBody.dataset) moduleBody.dataset.e621Delegated = '1';
 
-    moduleBody.addEventListener('click', event => {
+    const onClick = root => event => {
       // 팝오버 밖을 누르면 닫는다(이어서 누른 것의 동작은 그대로 한다).
       if (ui.pop && !event.target?.closest?.('.e6-pop,[data-e621-act="pop"]')) {
         ui.pop = '';
         repaint();
       }
       const target = event.target?.closest?.('[data-e621-act]');
-      if (!target || !moduleBody.contains(target) || target.disabled) return;
+      if (!target || !root.contains(target) || target.disabled) return;
       const {tag = '', value = ''} = target.dataset;
       switch (target.dataset.e621Act) {
         case 'open':
           markSelectedNow(tag);
+          // 작게 보기: 누른 태그의 설명이 오면 옆 창을 연다(이미 열려 있으면 내용만 바뀐다).
+          if (ui.compact) ui.popWanted = tag;
           send('selected_tag', tag);
           break;
         // 고른 분류 · 폴더를 다시 누르면 푼다.
@@ -910,7 +969,8 @@ export function createE621EventPanel({
         }
         default: break;
       }
-    });
+    };
+    moduleBody.addEventListener('click', onClick(moduleBody));
 
     moduleBody.addEventListener('change', event => {
       const input = event.target;
@@ -992,17 +1052,25 @@ export function createE621EventPanel({
     }, true);
 
     // <details> 를 펼친 상태는 다시 그려도 남긴다. toggle 은 위로 올라오지 않아 capture 로 받는다.
-    moduleBody.addEventListener('toggle', event => {
+    const onFold = event => {
       const name = event.target?.dataset?.e621Fold;
       if (!name) return;
       if (event.target.open) ui.folds.add(name); else ui.folds.delete(name);
       // 방금 바뀐 것은 화면에 이미 있다 - 다음 상태에서 같은 내용을 다시 쓰지 않게 기록만 맞춘다.
       if (lastState?.data_loaded && written.detail !== undefined) written.detail = detailHtml(lastState);
-    }, true);
+    };
+    moduleBody.addEventListener('toggle', onFold, true);
+
+    // 작게 보기에서 설명이 나가는 옆 창 - 그 안의 별 · 숨기기 · 관계 칩 · 접기도 같은 손이 받는다.
+    const floatHost = floatDetail?.host;
+    if (floatHost && typeof floatHost.addEventListener === 'function') {
+      floatHost.addEventListener('click', onClick(floatHost));
+      floatHost.addEventListener('toggle', onFold, true);
+    }
   }
 
-  // 밖에서 부르는 것은 상태를 넘기는 render 하나다. 조작은 전부 위의 위임 클릭이 받는다.
-  return {render};
+  // 밖에서 부르는 것: 상태를 넘기는 render 와, 창 머리줄의 [작게 보기] 가 부르는 setCompact. 조작은 전부 위의 위임 클릭이 받는다.
+  return {render, setCompact};
 }
 
 const ICON_HIDE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -1172,6 +1240,12 @@ const PANEL_CSS = `
 .e6-btn.e6-bench-go{margin-left:auto;padding:0 18px;border-color:var(--accent);background:rgba(124,106,239,0.24);color:var(--text-primary);font-weight:600}
 .e6-btn.e6-bench-go:hover:not(:disabled){background:rgba(124,106,239,0.42)}
 
+/* 작게 보기의 설명 창(패널 밖 - 창 옆에 뜬다). 패널의 글자 바탕을 그대로 입힌다. */
+.e6-float{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;color:var(--text-muted);font-family:var(--font-display);
+  font-size:11px;line-height:1.4}
+:where(.e6-float) button{font-family:inherit}
+.e6-float .e6-detail{border:0;border-radius:0;background:transparent}
+
 /* 그릇이 좁으면(창 폭 · 떼어 낸 창 폭 기준) 한 줄로 쌓고 패널 안을 굴린다. */
 @container e6 (max-width: 760px){
   .e6-panel{display:flex;flex-direction:column;overflow:auto}
@@ -1183,6 +1257,19 @@ const PANEL_CSS = `
   .e6-region-detail{flex:0 0 auto}
   .e6-detail-body{max-height:320px}
 }
+
+/* 작게 보기: 분류 · 폴더를 숨기고, 태그 목록이 남는 높이를 갖고, 그 아래에 보낼 프롬프트가 붙는다. 설명 칸은 비운다
+   (옆 창에 그린다). 좁은 그릇의 규칙(위)보다 구체적이라 창이 좁아도 이쪽이 이긴다. */
+.e6-panel.compact{display:grid;grid-template-rows:auto minmax(0,1fr);overflow:visible}
+.e6-panel.compact .e6-toolbar{flex-wrap:wrap}
+/* 검색칸의 바탕 폭을 줄여 둔다 - 안 그러면 제 내용 폭(250쯤)으로 줄을 잡아 숨김 · 설정 단추가 둘째 줄로 밀린다(실측). */
+.e6-panel.compact .e6-search{flex:1 1 120px}
+.e6-panel.compact .e6-toolbar .e6-filter{max-width:110px}
+.e6-panel.compact .e6-main{display:flex;flex-direction:column;flex:1 1 auto;gap:0;min-height:0}
+.e6-panel.compact .e6-col-cats,.e6-panel.compact .e6-col-folders,.e6-panel.compact .e6-region-detail{display:none}
+.e6-panel.compact .e6-col-tags{flex:1 1 auto;min-height:0}
+.e6-panel.compact .e6-col-tags .e6-list{flex:1 1 auto;max-height:none}
+.e6-panel.compact .e6-col-detail{flex:0 0 auto}
 `;
 
 function ensureStyle(doc) {

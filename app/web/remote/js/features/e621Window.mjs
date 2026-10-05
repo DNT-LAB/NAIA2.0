@@ -8,10 +8,16 @@
 //    이 창을 만들지 않고 예전 배치를 그대로 쓴다(app.js 의 e621UsesWindow).
 //
 // 내용은 e621EventPanel 이 그린다 - 이 모듈은 창만 만든다(본문 = `host`).
+//
+// 작게 보기(사용자 지정 2026-10-05): 머리줄의 단추로 켠다. 창이 좁아지고(분류 · 폴더가 숨고 태그 아래에 보낼 프롬프트가
+// 붙는다 - 그 배치는 패널이 한다), 선택한 태그의 설명은 이 창 옆에 뜨는 작은 창으로 나간다. 그 작은 창은 '누르면 뜨는
+// 툴팁' 이다: 다른 곳을 누르거나, 생성하거나, × 를 누를 때까지 떠 있다.
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
 const STYLE_ID = 'e6w-style';
+const COMPACT_KEY = 'naia.e621.compact';
+const COMPACT_WIDTH = 480;      // 툴바 한 줄(검색 · 보기 · 설명 상태 · 숨김 · 설정)이 접히지 않는 폭(실측: 471 부터)
 
 export function createE621Window({
   document: doc,
@@ -21,6 +27,9 @@ export function createE621Window({
   onShow = () => {},
   onHide = () => {},
   onVisibilityChange = () => {},
+  // 작게 보기를 켜거나 껐다 - 패널이 배치를 바꾼다.
+  onCompactChange = () => {},
+  storage = (typeof localStorage !== 'undefined' ? localStorage : null),
   escHtml,
 }) {
   ensureStyle(doc);
@@ -31,6 +40,15 @@ export function createE621Window({
   const width = Math.max(320, Math.min(1080, vw - 12));
   const height = Math.max(300, Math.min(740, vh - 70));
 
+  let compact = false;
+  try {
+    compact = storage?.getItem(COMPACT_KEY) === '1';
+  } catch (error) { /* 저장소를 못 읽으면 크게 시작한다 */ }
+  // 보기마다 쓰던 폭(이번 실행 동안). 없으면 그 보기의 기본 폭.
+  const widths = {full: null, compact: null};
+  // 창의 폭이 지금 어느 보기에 맞춰져 있는가. 처음 열 때 작게 보기가 켜져 있으면 그때 줄인다.
+  let sizedFor = 'full';
+
   const panel = createDraggablePanel({
     document: doc,
     window: win,
@@ -38,7 +56,7 @@ export function createE621Window({
     variant: 'e6w',
     storageKey: 'e621-research',
     width,
-    minWidth: Math.min(420, width),
+    minWidth: Math.min(340, width),
     maxWidth: 2000,
     height,
     minHeight: 300,
@@ -48,14 +66,87 @@ export function createE621Window({
     escHtml,
     onOpen: () => onVisibilityChange(),
     onClose: () => {
+      detail.close();
       onHide();
       onVisibilityChange();
     },
-    onCollapse: () => onVisibilityChange(),
+    onCollapse: () => {
+      detail.close();
+      onVisibilityChange();
+    },
   });
   panel.el.id = 'e621ResearchWindow';
   host.classList.add('e621-host');
   panel.body.appendChild(host);
+
+  // 머리줄의 [작게 보기] 단추. 접기 · 닫기 바로 왼쪽에 둔다.
+  const modeBtn = doc.createElement('button');
+  modeBtn.type = 'button';
+  modeBtn.className = 'e6w-mode';
+  modeBtn.textContent = '작게 보기';
+  panel.slot.appendChild(modeBtn);
+  modeBtn.addEventListener('click', () => setCompact(!compact));
+
+  // 선택한 태그의 설명이 나가는 작은 창(작게 보기에서만 쓴다). 이 창을 따라다니고, 끌어서 옮길 수 있다.
+  const detail = createDraggablePanel({
+    document: doc,
+    window: win,
+    title: '선택한 태그',
+    variant: 'e6w e6w-detail',
+    storageKey: 'e621-research-detail',
+    parentPanel: panel,
+    width: 340,
+    minWidth: 240,
+    maxWidth: 900,
+    height: Math.max(220, Math.min(440, vh - 120)),
+    minHeight: 140,
+    resizable: true,
+    collapsible: false,
+    escHtml,
+  });
+  detail.el.id = 'e621DetailWindow';
+  const detailHost = doc.createElement('div');
+  detailHost.className = 'e621-detail-host';
+  detail.body.appendChild(detailHost);
+
+  // 설명 창은 '누르면 뜨는 툴팁' 이다 - 다른 곳을 누르면 닫는다. 태그 목록 안(다른 태그를 누르거나 목록을 굴린다)은
+  // 닫지 않는다: 다른 태그를 누르면 그 태그의 설명으로 바뀔 뿐이다.
+  doc.addEventListener('pointerdown', event => {
+    if (!detail.isOpen()) return;
+    const target = event.target;
+    if (detail.el.contains(target) || target?.closest?.('.e6-tags')) return;
+    detail.close();
+  }, true);
+
+  function paintMode() {
+    modeBtn.classList.toggle('on', compact);
+    modeBtn.setAttribute('aria-pressed', String(compact));
+    modeBtn.title = compact ? '작게 보기를 끕니다 - 분류 · 폴더 · 설명 칸이 돌아옵니다'
+      : '작게 보기 - 태그 목록과 보낼 프롬프트만 남기고, 설명은 태그를 누르면 옆에 뜹니다';
+  }
+
+  // 창의 폭을 지금 보기에 맞춘다. 떠나는 보기의 폭은 적어 두었다가 돌아올 때 되살린다.
+  function fitWidth() {
+    const mode = compact ? 'compact' : 'full';
+    if (sizedFor === mode || !panel.isOpen()) return;
+    const rect = panel.el.getBoundingClientRect();
+    if (rect.width > 0) widths[sizedFor] = rect.width;
+    sizedFor = mode;
+    panel.sizeTo(widths[mode] ?? (compact ? COMPACT_WIDTH : width), panel.isCollapsed() ? NaN : rect.height);
+  }
+
+  function setCompact(next) {
+    next = Boolean(next);
+    if (compact === next) return;
+    compact = next;
+    try {
+      storage?.setItem(COMPACT_KEY, compact ? '1' : '0');
+    } catch (error) { /* 못 적으면 이번 실행에만 산다 */ }
+    if (!compact) detail.close();
+    paintMode();
+    fitWidth();
+    onCompactChange(compact);
+  }
 
   /** 창을 연다. 펼쳐져 있고 toggle 이면 닫는다(모듈 단추를 다시 누른 것). */
   function show({ toggle = false, requestState = true } = {}) {
@@ -68,9 +159,12 @@ export function createE621Window({
     if (!host.firstElementChild) host.innerHTML = '<div class="mod-empty e621-loading">E621 사전을 불러오는 중…</div>';
     panel.open();
     if (panel.isCollapsed()) panel.expand();
+    fitWidth();
     if (!wasOpen && requestState) onShow();
     onVisibilityChange();
   }
+
+  paintMode();
 
   return {
     el: panel.el,
@@ -78,6 +172,15 @@ export function createE621Window({
     close: () => panel.close(),
     isOpen: () => panel.isOpen(),
     isShown: () => panel.isOpen() && !panel.isCollapsed(),
+    isCompact: () => compact,
+    setCompact,
+    // 패널이 설명을 그리는 자리와, 그 창을 여닫는 손잡이.
+    detail: {
+      host: detailHost,
+      open: () => { if (compact && panel.isOpen() && !panel.isCollapsed()) detail.open(); },
+      close: () => detail.close(),
+      isOpen: () => detail.isOpen(),
+    },
   };
 }
 
@@ -95,4 +198,10 @@ const E6W_CSS = `
 .dragpanel.e6w .dragpanel-body{padding:0;gap:0;overflow:hidden;position:relative;background:var(--bg-surface)}
 .dragpanel.e6w .e621-host{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:8px;box-sizing:border-box}
 .dragpanel.e6w .e621-loading{padding:16px;text-align:center}
+.dragpanel.e6w .dragpanel-slot{justify-content:flex-end}
+.e6w-mode{flex:0 0 auto;height:22px;padding:0 8px;border:1px solid var(--border-dim);border-radius:4px;background:transparent;
+  color:var(--text-muted);font-family:var(--font-display);font-size:11px;white-space:nowrap;cursor:pointer}
+.e6w-mode:hover{background:var(--bg-hover);color:var(--text-primary)}
+.e6w-mode.on{border-color:var(--accent);background:rgba(124,106,239,0.24);color:var(--text-primary)}
+.dragpanel.e6w-detail .e621-detail-host{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 `;

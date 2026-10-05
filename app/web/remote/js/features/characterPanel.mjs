@@ -552,8 +552,14 @@ export function createCharacterPanel({
   // ⚠️ 쥐는 것은 **번호가 안 밀리는 상태**뿐이다(`orderOf`). 화면의 단추는 번호(`data-cw-*="${index}"`)를 들고 있고
   //    클릭 명령은 번호만 보낸다 - 순서가 바뀐 상태를 쥔 채 옛 화면을 남겨 두면 그 클릭(영구 삭제 ✕ 일 수도 있다)이
   //    **다른 캐릭터**에 닿는다. 그런 상태는 예전처럼 바로 그린다(그 클릭은 먹힌다 - 틀린 곳에 닿는 것보다 낫다).
+  // ⚠️ 문은 둘이다(Codex 2차 리뷰). **받은 상태**(`render`)는 언제나 가장 새 것이라 쥔 것을 갈아 치우지만,
+  //    **스스로 다시 그리기**(`redraw` - 누른 단추 · 끝난 요청 · 미뤄 둔 렌더 · 타이머)는 받은 상태가 아니다.
+  //    둘을 한 문에 넣었더니 옛 상태가 쥐고 있던 새 상태를 덮거나(blur 가 넘긴 렌더) 버렸다(탭 단추의 클릭).
+  //    `redraw` 는 **가장 새로 아는 상태**(쥔 것이 있으면 그것)를 그린다. 목록만 갈아 끼우는 길
+  //    (`scheduleRerender`)도 누르는 동안에는 미룬다(`heldPartial`).
   let pointerHeld = false;
   let heldState = null;
+  let heldPartial = false;
   let heldValveTimer = 0;
   const HELD_VALVE_MS = 1000;
 
@@ -567,10 +573,37 @@ export function createCharacterPanel({
   /** 캐릭터가 놓인 순서 = 번호가 가리키는 대상. */
   const orderOf = state => (state?.characters || []).map(item => String(item.slot_uuid || '')).join('|');
 
+  /**
+   * 가장 새로 아는 상태. 누르는 동안 쥐고 있는 것이 있으면 그것이다 - 화면(`lastState`)보다 새롭다.
+   * ⚠️ 번호는 `lastState` 와 같다(순서가 같은 상태만 쥔다). **내용을 보고 정하는 일**(빈 슬롯인가 · 편집 칸에
+   *    무슨 글을 넣나)은 이것으로 본다 - 낡은 화면의 내용으로 정하면 그사이 다른 창이 넣은 글을 지우거나 되돌린다.
+   */
+  const newestState = () => heldState || lastState;
+
+  /** 누르는 동안: 그릴 것을 쥐어 둔다. */
+  function hold(state) {
+    heldState = state;
+    armHeldValve();
+  }
+
+  function armHeldValve() {
+    if (!heldValveTimer) heldValveTimer = setTimeout(settleHeld, HELD_VALVE_MS);
+  }
+
+  /** 스스로 다시 그린다. 받은 상태가 아니다 - 가장 새로 아는 상태를 그린다(누르는 중이면 뗀 뒤에). */
+  function redraw() {
+    if (!showsCharacter()) return;
+    const newest = newestState() || {};
+    if (pointerHeld) { hold(newest); return; }
+    heldState = null;
+    draw(newest);
+  }
+
   function runDeferredFocusedRender() {
     const pending = deferredFocusedRenderState;
     clearDeferredFocusedRender();
-    if (pending && showsCharacter()) render(pending);
+    // 미뤄 둔 것은 `lastState` 그 자체다(미룰 때 적어 둔다). 그사이 더 새 상태를 쥐었으면 그것이 그려진다.
+    if (pending) redraw();
   }
 
   /** 입력칸의 blur. 여기서는 그리지 않는다 - 넘긴 렌더가 돌 때 아직 누르는 중이면 `render` 의 문이 쥔다. */
@@ -578,20 +611,24 @@ export function createCharacterPanel({
     setTimeout(runDeferredFocusedRender, 0);
   }
 
-  /** 누르는 동안 쥐고 있던 상태를 그린다. */
-  function drawHeldState() {
+  /** 누르는 동안 미뤄 둔 것을 한다(뗀 뒤 · 오래 눌렀을 때 - 그때는 아직 누르는 중이어도 한다). */
+  function settleHeld() {
     clearTimeout(heldValveTimer);
     heldValveTimer = 0;
     const newest = heldState;
+    const partial = heldPartial;
     heldState = null;
-    // 초점 때문에 미뤄 둔 것이 있어도 그보다 새 상태다 - `draw` 가 그것을 걷고 이것을 그린다.
-    if (newest && showsCharacter()) draw(newest);
+    heldPartial = false;
+    if (!showsCharacter()) return;
+    if (newest) draw(newest);
+    // 통째로 그렸어도 목록은 한 번 더 간다 - 그리기가 '바뀐 것이 없다' 며 오른쪽을 건너뛰었을 수 있다.
+    if (partial) refreshWork();
   }
 
   function releasePointer() {
     pointerHeld = false;
     // click 은 mouseup 바로 뒤, 같은 작업 안에서 난다 - 타이머는 그 뒤에 돈다.
-    if (heldState) setTimeout(drawHeldState, 0);
+    if (heldState || heldPartial) setTimeout(settleHeld, 0);
   }
 
   // 문서에 **한 번만** 건다(패널 뿌리는 그릴 때마다 새로 만들어진다). 끌기를 시작하면 mouseup 이 오지 않으므로
@@ -1351,7 +1388,9 @@ export function createCharacterPanel({
   }
 
   function startEdit(uuid) {
-    const character = storedCharacter(uuid);
+    // 칸에 넣을 글은 **가장 새 상태**에서 읽는다. 누르는 동안 다른 창이 이 캐릭터를 고쳤으면 화면의 글은 낡았다 -
+    // 그것으로 칸을 열면 [저장] 이 그 변경을 되돌린다(Codex 리뷰 2026-10-05).
+    const character = storedCharacter(uuid, newestState());
     if (!character) return false;
     if (editingUuid && editingUuid !== uuid && editIsDirty()) {
       // 치던 글을 말없이 버리지 않는다.
@@ -1414,11 +1453,9 @@ export function createCharacterPanel({
       if (editPending !== next || !editBusy) return;
       editBusy = false;
       editError = '저장을 확인하지 못했습니다. 다시 눌러 주세요 - 계속 안 되면 앱을 다시 시작하세요.';
-      // 그사이 다른 모듈을 열었으면 팝업 본문은 남의 것이다 - 그리지 않는다(돌아오면 이 상태로 그려진다).
-      if (!showsCharacter()) return;
-      // 누르는 중이면 `render` 의 문에 맡긴다(뗀 뒤에 그린다). 이미 더 새 상태를 쥐고 있으면 그것이 그려진다.
-      if (!pointerHeld) scheduleRerender();
-      else if (!heldState) render(lastState || {});
+      // 목록만 간다(다른 칸에서 치고 있을 수 있다). 누르는 중이면 뗀 뒤로, 다른 모듈이 팝업을 차지했으면
+      // 그리지 않는다 - 둘 다 `scheduleRerender` 가 본다(돌아오면 이 상태로 그려진다).
+      scheduleRerender();
     }, EDIT_CONFIRM_MS);
     scheduleRerender();
     return true;
@@ -1815,16 +1852,15 @@ export function createCharacterPanel({
    *    쥐지 않고 바로 그린다.
    */
   function render(state) {
-    if (pointerHeld && showsCharacter() && orderOf(state) === orderOf(lastState)) {
-      heldState = state || {};
-      if (!heldValveTimer) heldValveTimer = setTimeout(drawHeldState, HELD_VALVE_MS);
+    const next = state || {};
+    if (pointerHeld && showsCharacter() && orderOf(next) === orderOf(lastState)) {
+      hold(next);
       return;
     }
-    // 이것이 가장 새 상태다 - 쥐고 있던 것은 버린다(뒤늦게 그리면 화면이 옛 상태로 되돌아간다).
+    // 받은 상태는 언제나 가장 새 것이다 - 쥐고 있던 것은 버린다(뒤늦게 그리면 화면이 옛 상태로 되돌아간다).
+    // 미뤄 둔 목록 갈기는 건드리지 않는다 - 뗀 뒤에(`settleHeld`) 한다.
     heldState = null;
-    clearTimeout(heldValveTimer);
-    heldValveTimer = 0;
-    draw(state);
+    draw(next);
   }
 
   function draw(state) {
@@ -2096,8 +2132,14 @@ export function createCharacterPanel({
         const index = Number(down.dataset.cwDown);
         // 빈 슬롯은 히스토리로 안 보낸다 - 되살려도 할 일이 없는데 자리만 차지한다
         // (사용자 지정 2026-09-02). 백엔드도 저장할 때 같은 잣대로 걷는다.
-        const slot = (lastState?.characters || [])[index];
-        if (slot && isEmptySlot(slot)) { setModuleParam('character', `remove_character_${index}`, 'true'); return; }
+        // ⚠️ 비었는지는 **가장 새 상태**로 본다(누르는 동안 다른 창이 그 슬롯에 글을 넣었을 수 있다 - 화면은 낡았다).
+        //    그리고 지울 때는 '비었으면' 이라는 뜻과 그 칸의 uuid 를 함께 보낸다 - 명령이 가는 사이에 채워졌어도
+        //    서버가 지금의 내용으로 확인한다. 글이 든 슬롯을 지우는 것은 되돌릴 길이 없다(Codex 리뷰 2026-10-05).
+        const slot = (newestState()?.characters || [])[index];
+        if (slot && isEmptySlot(slot)) {
+          setModuleParam('character', `remove_character_${index}`, 'if_empty', {slotUuid: String(slot.slot_uuid || '')});
+          return;
+        }
         setSlotState(index, 'inactive');
         return;
       }
@@ -2338,15 +2380,27 @@ export function createCharacterPanel({
 
   /** 검색어처럼 서버를 안 거치는 값은 그 자리에서 다시 그린다. */
   function rerender() {
-    // 누른 단추 · 끝난 요청이 부른다. 그사이 다른 모듈이 팝업을 차지했으면 그리지 않는다(`showsCharacter`) -
+    // 누른 단추 · 끝난 요청이 부른다. 그사이 다른 모듈이 팝업을 차지했으면 그리지 않는다(`redraw` 가 본다) -
     // 검색 탭의 목록 요청이 끝나며 남의 화면을 캐릭터 창으로 덮던 길이 이것이었다.
-    if (!showsCharacter()) return;
     lastRenderedStructureSignature = '';
-    render(lastState || {});
+    redraw();
   }
 
   // ⚠️ 검색은 글자마다 다시 그리면 입력 칸이 갈리며 커서가 튄다. 목록만 갈아 끼운다.
   function scheduleRerender() {
+    // ⚠️ 누르는 중에는 목록도 갈지 않는다 - 눌린 줄이 사라져 그 클릭이 나지 않는다(검색 탭에서 더 불러오는 동안
+    //    이미 나온 줄을 누르면 그랬다 - Codex 2차 리뷰). 뗀 뒤에 한다. 누른 단추의 핸들러는 click 에서 돌므로
+    //    (이미 뗐다) 여기 걸리지 않는다 - 걸리는 것은 끝난 요청과 타이머다.
+    if (pointerHeld) {
+      heldPartial = true;
+      armHeldValve();
+      return;
+    }
+    refreshWork();
+  }
+
+  /** 작업 영역의 목록만 갈아 끼운다(문 없는 본문 - 부르는 쪽이 누르는 중인지 본다). */
+  function refreshWork() {
     const list = moduleBody.querySelector('.cw-list');
     // ⚠️ 그룹 탭도 여기로 온다. 펼친 그룹 안의 항목은 `.cw-grp-items` 안에 있고 그것은
     //    다시 `.cw-list` 안이라, 목록만 갈아 끼워도 전부 갱신된다. 전체를 다시 그리면

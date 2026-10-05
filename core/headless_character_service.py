@@ -745,6 +745,13 @@ class HeadlessCharacterService:
             #    **저장된 것은 언제나 지운다** - 슬롯 칸의 개수와 무관하다.
             _target = frames[index] if index is not None and 0 <= index < len(frames) else None
             _stored = isinstance(_target, dict) and _state_of(_target) != "active"
+            # ⚠️ 워크스페이스의 ✕ 는 **빈 슬롯이면** 지우고 아니면 히스토리로 보낸다 - 그 판단을 화면이 한다.
+            #    화면이 낡았으면(누르는 동안 · 명령이 오는 동안 다른 창이 그 슬롯에 글을 넣었다) 글이 든 슬롯이
+            #    영구 삭제된다(Codex 리뷰 2026-10-05). 화면은 '비었으면' 이라는 뜻을 함께 보내고(`if_empty`),
+            #    여기서 **지금의 내용**으로 확인한다 - 비어 있지 않으면 아무것도 안 하고 지금 상태를 돌려준다.
+            #    조건 없는 삭제(퀵 패널의 − · 히스토리의 ✕ · 옛 화면의 `true`)는 그대로다.
+            if str(value or "").strip().lower() == "if_empty" and not _slot_is_untouched(_target):
+                return self.state()
             if _target is not None and (len(frames) > 1 or _stored):
                 # 삭제로 활성이 0이 될 수 있다. 승격시키지 않는다 - 캐릭터 0은
                 # 유효한 상태이고(모듈을 끄거나 Cold 로 비우는 경로가 이미 그렇다)

@@ -76,6 +76,17 @@ export function createCharacterPanel({
 
   // '그룹에 전달' 을 누른 히스토리 항목(uuid). 그 항목 아래에 그룹 고르기 줄이 열린다.
   let groupPickerUuid = '';
+  // ── 보관함 카드의 [편집] (사용자 지정 2026-10-05) ──────────────────────────
+  //
+  // 펼친 카드에서 이름 · 프롬프트 · 네거티브를 고친다. 히스토리 · 즐겨찾기 · 그룹이 같은 카드를 그린다.
+  // ⚠️ **[저장] 을 눌러야** 서버로 간다. 칠 때마다 보내면, 2026-09-02 에 이 카드를 읽기 전용으로 둔 까닭
+  //    ("손이 미끄러져 고쳐지면 되돌릴 길이 없다")이 무너진다. 치는 글은 여기(`editDraft`)에만 둔다.
+  // ⚠️ **uuid 로 잡는다**(펼친 항목과 같다) - index 는 에코 한 번에 밀린다.
+  let editingUuid = '';
+  let editDraft = null;          // {name, prompt, uc}
+  let editError = '';
+  // 지금 화면에 그려져 있는 탭. 통째로 다시 그릴 때 **같은 탭이면** 목록 스크롤을 되돌려 준다.
+  let renderedTab = '';
   // 그룹 탭의 검색어. **그룹 안의 항목**을 찾는다(사용자 지정 2026-09-02) - 그룹
   // 이름을 찾는 것이 아니다. 이름은 눈에 다 보이지만 안에 무엇이 들었는지는 안 보인다.
   let groupQuery = '';
@@ -459,6 +470,8 @@ export function createCharacterPanel({
       JSON.stringify(state?.group_colors || {}),
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
+      // 치는 글(`editDraft`)은 싣지 않는다 - 실으면 한 글자마다 다시 그려 캐럿을 잃는다.
+      editingUuid, editError,
       [...openGroups].sort().join(','),
       chars.length,
       chars.map(item => [
@@ -519,10 +532,44 @@ export function createCharacterPanel({
     textarea.addEventListener('blur', flushDeferredFocusedRender);
   }
 
-  function flushDeferredFocusedRender() {
+  // ⚠️ **blur 안에서 다시 그리지 않는다**(2026-10-05 실측). blur 는 mousedown 과 mouseup **사이**에 난다 -
+  //    거기서 화면을 갈아 끼우면 눌린 단추가 사라지고, 크롬은 누른 요소가 떼기 전에 없어지면 click 을 아예
+  //    안 보낸다. 슬롯에 글을 친 직후의 **첫 클릭이 그렇게 먹혔다**(진짜 마우스로 재현: 줄을 눌러도 안 펼쳐짐).
+  //    Tab 으로 옆 칸에 갈 때도 받을 칸이 사라져 초점을 잃었다. 손을 뗀 **뒤**로 미룬다:
+  //      · 마우스로 눌러서 난 blur -> 뗄 때(mouseup · 끌기 끝), click 이 지나간 다음
+  //      · 그 밖(Tab 등)           -> 초점이 새 칸에 앉은 다음(0ms). 그 칸이 입력칸이면 거기에 다시 미뤄진다
+  //    미뤄 둔 상태는 구조(슬롯 · 보관함의 순서와 uuid)가 지금 화면과 같을 때만 생기므로, 그 사이의 클릭이
+  //    읽는 번호(`data-cw-*="${index}"`)는 `lastState` 와 어긋나지 않는다.
+  let pointerHeld = false;
+  let flushOnRelease = false;
+
+  function runDeferredFocusedRender() {
     const pending = deferredFocusedRenderState;
     clearDeferredFocusedRender();
     if (pending) render(pending);
+  }
+
+  function flushDeferredFocusedRender() {
+    if (pointerHeld) { flushOnRelease = true; return; }
+    setTimeout(runDeferredFocusedRender, 0);
+  }
+
+  function releasePointer() {
+    pointerHeld = false;
+    if (!flushOnRelease) return;
+    flushOnRelease = false;
+    // click 은 mouseup 바로 뒤, 같은 작업 안에서 난다 - 타이머는 그 뒤에 돈다.
+    setTimeout(runDeferredFocusedRender, 0);
+  }
+
+  // 문서에 **한 번만** 건다(패널 뿌리는 그릴 때마다 새로 만들어진다). 끌기를 시작하면 mouseup 이 오지 않으므로
+  // 끌기 끝(dragend · drop)에서도 푼다. 창이 초점을 잃으면 뗀 것으로 친다.
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('mousedown', () => { pointerHeld = true; }, true);
+    for (const type of ['mouseup', 'dragend', 'drop']) document.addEventListener(type, releasePointer, true);
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('blur', releasePointer);
   }
 
   /** Quick 과 같은 규약: 최소 줄수는 지키되 넘치면 한 줄씩 늘어난다. */
@@ -561,6 +608,8 @@ export function createCharacterPanel({
    * 히스토리 검색이 프롬프트 전문을 훑으므로 별칭 없이도 찾을 수 있다.
    * ⚠️ 함수는 남긴다 - `app.js` 의 전역 `renameCharacterSlot` 이 이것을 부르고,
    *    이미 붙어 있는 별칭은 목록에서 계속 이름으로 쓰인다(`slotLabel`).
+   * 2026-10-05: 이름은 다시 붙일 수 있다 - **보관함 카드의 [편집]** 에서(사용자 지정, `startEdit`).
+   *    슬롯 줄에는 여전히 이름 단추가 없다.
    */
   async function renameSlot(index) {
     const character = (lastState?.characters || [])[index];
@@ -1202,6 +1251,130 @@ export function createCharacterPanel({
       .join(' ').toLowerCase().includes(needle);
   }
 
+  // ── 보관함 카드 편집 (사용자 지정 2026-10-05) ─────────────────────────────
+
+  /** 그 상태의 보관함에 있는(활성이 아닌) 그 캐릭터. 슬롯에 올라가 있는 것은 슬롯에서 고친다. */
+  function storedCharacter(uuid, state = lastState) {
+    if (!uuid) return null;
+    return (state?.characters || []).find(
+      item => String(item.slot_uuid || '') === uuid && slotState(item) !== 'active') || null;
+  }
+
+  function editIsDirty() {
+    const character = storedCharacter(editingUuid);
+    const draft = editDraft;
+    if (!character || !draft) return false;
+    return draft.name.trim() !== String(character.custom_name || '').trim()
+      || draft.prompt !== String(character.prompt || '')
+      || draft.uc !== String(character.uc || '');
+  }
+
+  function closeEdit() {
+    editingUuid = '';
+    editDraft = null;
+    editError = '';
+  }
+
+  function focusEditField(key, range = null) {
+    const field = moduleBody.querySelector(`[data-cw-edit-field="${key}"]`);
+    if (!field || typeof field.focus !== 'function') return;
+    field.focus();
+    try {
+      // 끝에 캐럿을 둔다 - 이름을 이어 쓰거나 태그를 덧붙이는 일이 가장 흔하다.
+      const end = String(field.value || '').length;
+      field.setSelectionRange(range ? range.start : end, range ? range.end : end);
+    } catch (_) { /* 무시 */ }
+  }
+
+  function startEdit(uuid) {
+    const character = storedCharacter(uuid);
+    if (!character) return false;
+    if (editingUuid && editingUuid !== uuid && editIsDirty()) {
+      // 치던 글을 말없이 버리지 않는다.
+      showToastSafe('편집 중인 캐릭터가 있습니다 - 먼저 저장하거나 취소하세요.');
+      return false;
+    }
+    editingUuid = uuid;
+    editDraft = {
+      name: String(character.custom_name || ''),
+      prompt: String(character.prompt || ''),
+      uc: String(character.uc || ''),
+    };
+    editError = '';
+    // 그룹 고르기 줄이 열려 있었으면 닫는다 - 편집을 마치고 돌아왔을 때 누른 적 없는 줄이 떠 있으면 안 된다.
+    groupPickerUuid = '';
+    scheduleRerender();
+    focusEditField('name');
+    return true;
+  }
+
+  function cancelEdit() {
+    if (!editingUuid) return;
+    closeEdit();
+    scheduleRerender();
+  }
+
+  function failEdit(message, focusKey) {
+    editError = message;
+    scheduleRerender();
+    if (focusKey) focusEditField(focusKey);
+    return false;
+  }
+
+  /** [저장] - 원본이 바뀌는 **유일한 길**이다. */
+  function saveEdit() {
+    const uuid = editingUuid;
+    const character = storedCharacter(uuid);
+    const draft = editDraft;
+    if (!character || !draft) { closeEdit(); scheduleRerender(); return false; }
+    const next = {custom_name: draft.name.trim(), prompt: draft.prompt, uc: draft.uc};
+    // ⚠️ 이름도 프롬프트도 없는 캐릭터는 목록에서 `(비어 있음)` 이고, 네거티브까지 비면 서버가 그 줄을
+    //    '빈 히스토리' 로 걷어 간다 - [저장] 이 곧 삭제가 된다(서버도 그것은 거절한다).
+    if (!next.custom_name && !next.prompt.trim()) {
+      return failEdit('이름이나 프롬프트를 입력하세요.', 'name');
+    }
+    if (!editIsDirty()) { closeEdit(); scheduleRerender(); return true; }      // 바뀐 것이 없다
+    const sent = setModuleParam('character', 'char_update', JSON.stringify({uuid, ...next}));
+    if (sent === false) {
+      // 소켓이 끊겨 있다 - 여기서 칸을 닫으면 친 글이 사라진다.
+      return failEdit('연결이 끊겨 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.', '');
+    }
+    // 미뤄 둔 렌더는 버린다 - 그것은 저장 **전**의 상태라, 뒤늦게 그리면 고친 글이 옛 글로 깜빡인다.
+    clearDeferredFocusedRender();
+    // 에코가 오기 전에도 고친 글이 보이게 한다. 서버가 SSOT 다 - 에코가 곧 덮는다(받은 객체는 건드리지 않는다).
+    lastState = {...lastState, characters: (lastState.characters || []).map(item =>
+      (String(item.slot_uuid || '') === uuid ? {...item, ...next} : item))};
+    closeEdit();
+    scheduleRerender();
+    return true;
+  }
+
+  /**
+   * 편집 칸.
+   *
+   * ⚠️ **`data-cw-field` 를 달지 않는다.** 그 표가 붙은 칸은 칠 때마다 서버로 간다(슬롯 칸의 규약) -
+   *    여기 글은 [저장] 을 누를 때까지 `editDraft` 에만 있다. 칸은 **초안에서** 그린다 - 다시 그려도
+   *    (에코 · 다른 줄 펼치기 · 다른 모듈을 보고 돌아옴) 치던 글이 그대로 나온다.
+   */
+  function renderEditForm(uuid) {
+    const draft = editDraft || {name: '', prompt: '', uc: ''};
+    return `
+      <div class="cw-li-body is-editing" data-cw-editing="${escAttr(uuid)}">
+        <input class="cw-edit-name" type="text" maxlength="80" spellcheck="false" autocomplete="off"
+          data-cw-edit-field="name" value="${escAttr(draft.name)}"
+          placeholder="이름 (비우면 프롬프트로 보입니다)">
+        <textarea class="cw-input" data-cw-edit-field="prompt" data-cw-min="prompt"
+          rows="2" placeholder="캐릭터 프롬프트">${escHtml(draft.prompt)}</textarea>
+        <textarea class="cw-input is-uc" data-cw-edit-field="uc" data-cw-min="uc"
+          rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(draft.uc)}</textarea>
+        ${editError ? `<div class="cw-li-error">${escHtml(editError)}</div>` : ''}
+        <div class="cw-li-actions">
+          <button type="button" class="cw-li-act is-save" data-cw-edit-save="1">저장</button>
+          <button type="button" class="cw-li-act" data-cw-edit-cancel="1">취소</button>
+        </div>
+      </div>`;
+  }
+
   /** 히스토리 한 항목. 히스토리 탭과 그룹 탭(펼친 그룹 안)이 **같은 것**을 그린다. */
   /**
    * 히스토리 한 항목. 히스토리 탭과 그룹 탭(펼친 그룹 안)이 **같은 것**을 그린다.
@@ -1215,21 +1388,25 @@ export function createCharacterPanel({
    */
   function renderHistoryItem(character, index, groups, inGroup) {
     const uuid = String(character.slot_uuid || '');
-    const open = openHistory.has(uuid);
+    const editing = !!uuid && editingUuid === uuid;
+    const open = editing || openHistory.has(uuid);
     // **이번 세션에 내려온 것**은 옅은 녹색(사용자 지정 2026-09-24). `used_at` = 마지막으로 활성에서
     // 내려온 시각(서버가 모든 내려보내는 길에서 찍는다) · `session_started_at` = 이 서버가 켜진 시각.
     const fresh = slotState(character) !== 'active'
       && Number(character.used_at || 0) >= Number(lastState?.session_started_at || Infinity);
     return `
-    <div class="cw-li${open ? ' is-open' : ''}${groupOf(character) ? ' has-hue' : ''}${fresh ? ' is-fresh' : ''}"
+    <div class="cw-li${open ? ' is-open' : ''}${groupOf(character) ? ' has-hue' : ''}${fresh ? ' is-fresh' : ''}${
+      editing ? ' is-editing' : ''}"
       data-cw-li="${index}"${hueStyle(groupOf(character))}>
       <!-- ⚠️ 툴팁은 **프롬프트 전문**이다(사용자 지정 2026-09-02). 조작 설명을 띄우면
            정작 궁금한 것(잘린 뒷부분)을 볼 길이 없다. -->
-      <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}" draggable="true"
+      <!-- ⚠️ 편집 중에는 머리줄의 조작(↩ · ✕ · − · 끌기)을 **잠근다.** 그냥 히스토리의 ↩ 는 그 줄을 슬롯으로
+           옮기므로, 치던 글이 말없이 버려진다. 저장하거나 취소한 뒤에 한다. -->
+      <div class="cw-li-row" data-cw-toggle="${escAttr(uuid)}" draggable="${editing ? 'false' : 'true'}"
         data-cw-drag="${index}" data-cw-drag-uuid="${escAttr(uuid)}"
         title="${escAttr(character.prompt || '(비어 있음)')}">
         <!-- 왼쪽 끝 = 복원(사용자 지정 2026-09-02). 슬롯 맨 아래로 간다. -->
-        <button type="button" class="cw-li-btn" data-cw-load="${index}"
+        <button type="button" class="cw-li-btn" data-cw-load="${index}"${editing ? ' disabled' : ''}
           title="슬롯으로 복원">↩</button>
         <!-- ⚠️ 즐겨찾기는 이제 **표시**다(조작은 펼친 뒤에 있다) - 안 보이면
              위의 ★ 필터가 무엇을 거르는지 알 수 없다. -->
@@ -1242,13 +1419,13 @@ export function createCharacterPanel({
         <!-- 오른쪽 끝 = 삭제(사용자 지정). 여기가 **영영 지우는 유일한 길**이다 -
              슬롯의 ✕ 는 히스토리로 보낼 뿐이다. -->
         ${inGroup
-          ? `<button type="button" class="cw-li-btn" data-cw-ungroup="${index}"
+          ? `<button type="button" class="cw-li-btn" data-cw-ungroup="${index}"${editing ? ' disabled' : ''}
               data-cw-ungroup-key="${escAttr(inGroup)}"
               title="${inGroup === GRP_FAV ? '즐겨찾기에서 뺀다' : '이 그룹에서 뺀다 (캐릭터는 남는다)'}">−</button>`
-          : `<button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"
+          : `<button type="button" class="cw-li-btn is-danger" data-cw-remove="${index}"${editing ? ' disabled' : ''}
               title="영구 삭제">✕</button>`}
       </div>
-      ${open ? `
+      ${editing ? renderEditForm(uuid) : (open ? `
       <div class="cw-li-body">
         <div class="cw-li-field">${escHtml(character.prompt || '(비어 있음)')}</div>
         <div class="cw-li-field is-uc">${escHtml(character.uc || '(네거티브 없음)')}</div>
@@ -1260,13 +1437,17 @@ export function createCharacterPanel({
           <button type="button" class="cw-chip is-go" data-cw-new-group-for="${index}">+ 새 그룹</button>
         </div>` : ''}
         <div class="cw-li-actions">
+          <!-- 원본을 그 자리에서 고친다(사용자 지정 2026-10-05). ↩ 는 사본을 슬롯에 올리는 길이라
+               원본을 고칠 길이 없었다. uuid 로 연다 - index 는 에코 한 번에 밀린다. -->
+          <button type="button" class="cw-li-act" data-cw-edit-start="${escAttr(uuid)}"
+            title="이름 · 프롬프트 · 네거티브를 고칩니다 - [저장] 을 눌러야 바뀝니다">편집</button>
           <button type="button" class="cw-li-act${groupPickerUuid === uuid ? ' is-on' : ''}" data-cw-editgroup="${index}"
             data-cw-uuid="${escAttr(uuid)}">그룹에 전달</button>
           <button type="button" class="cw-li-act${character.favorite ? ' is-on' : ''}"
             data-cw-fav="${index}">${character.favorite ? '즐겨찾기 해제' : '즐겨찾기 등록'}</button>
           <button type="button" class="cw-li-act is-go" data-cw-gen="${index}">즉시 생성</button>
         </div>
-      </div>` : ''}
+      </div>` : '')}
     </div>`;
   }
 
@@ -1550,6 +1731,12 @@ export function createCharacterPanel({
 
   function render(state) {
     const nextState = state || {};
+    // 편집하던 캐릭터가 보관함에서 빠졌다(다른 창에서 지웠다 · 슬롯으로 올렸다) - 칸을 닫는다. 서명을 내기
+    // **전**에 한다(편집 중인 uuid 가 서명에 들어 있다).
+    if (editingUuid && Array.isArray(nextState.characters) && !storedCharacter(editingUuid, nextState)) {
+      closeEdit();
+      showToastSafe('편집하던 캐릭터가 보관함에서 빠져 편집을 닫았습니다.');
+    }
     const structureSignature = characterStructureSignature(nextState);
     const focusedTextarea = focusedCharacterTextarea();
     if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
@@ -1586,6 +1773,18 @@ export function createCharacterPanel({
     }
     lastState = nextState;
 
+    // ⚠️ 통째로 다시 쓰면 스크롤 두 곳(왼쪽 슬롯 칸 · 오른쪽 목록)이 **맨 위로 돌아간다**. 보관함의 조작
+    //    (★ · 그룹 · ✕ · ↩ · 편집 저장)은 전부 에코가 이 길로 와서, 목록을 내려가 무엇을 누르면 맨 위로 튀었다
+    //    (2026-10-05 실측: 1400 -> 0). 같은 탭이면 그 자리로 되돌린다 - 탭을 바꾼 것이면 새 목록이라 맨 위가 맞다.
+    const slotsBefore = moduleBody.querySelector('.cw-slots-scroll');
+    const keepSlots = slotsBefore ? slotsBefore.scrollTop : 0;
+    const listBefore = renderedTab === tab ? moduleBody.querySelector('.cw-list') : null;
+    const keepList = listBefore ? listBefore.scrollTop : 0;
+    // 편집 칸에서 치던 중이면(구조가 바뀐 에코) 초점 · 캐럿을 새 칸으로 옮긴다(친 글은 초안에서 다시 그려진다).
+    const typing = editingUuid ? document.activeElement : null;
+    const typingKey = typing && typing.dataset ? String(typing.dataset.cwEditField || '') : '';
+    const typingRange = typingKey ? {start: typing.selectionStart, end: typing.selectionEnd} : null;
+
     const chars = nextState.characters || [];
     const indexed = chars.map((character, index) => ({character, index}));
     // ⚠️ 배열은 백엔드가 [active][inactive][cold] 로 정렬해 보낸다. 여기서 순서를
@@ -1608,6 +1807,16 @@ export function createCharacterPanel({
       if (!element.classList.contains('is-uc')) bindTagAssist(element);
     });
     bindEvents();
+    if (keepSlots) {
+      const slotsAfter = moduleBody.querySelector('.cw-slots-scroll');
+      if (slotsAfter) slotsAfter.scrollTop = keepSlots;
+    }
+    if (keepList) {
+      const listAfter = moduleBody.querySelector('.cw-list');
+      if (listAfter) listAfter.scrollTop = keepList;
+    }
+    renderedTab = tab;
+    if (typingKey && editingUuid) focusEditField(typingKey, typingRange);
     lastRenderedStructureSignature = structureSignature;
     lastRenderedWorkSignature = workSig;
     lastRenderedContentSignature = contentSig;
@@ -1622,6 +1831,23 @@ export function createCharacterPanel({
     if (!root) return;
 
     root.addEventListener('input', event => {
+      const editField = event.target.closest('[data-cw-edit-field]');
+      if (editField) {
+        // ⚠️ 편집 칸의 글은 **보내지 않는다** - 초안(`editDraft`)에만 적는다. [저장] 을 눌러야 서버로 간다.
+        //    초안은 여기서만 채운다(자동완성도 input 이벤트를 낸다) - 저장도 다시 그리기도 이것을 읽는다.
+        const key = editField.dataset.cwEditField;
+        if (editDraft && Object.prototype.hasOwnProperty.call(editDraft, key)) editDraft[key] = editField.value;
+        if (editField.tagName === 'TEXTAREA') autoGrow(editField);
+        if (editError) {
+          // 다시 치기 시작했다 - 안내를 걷는다. 다시 그리면 캐럿을 잃으므로 그 줄만 뗀다(서명은 맞춰 둔다).
+          editError = '';
+          const note = moduleBody.querySelector('.cw-li-error');
+          if (note && typeof note.remove === 'function') note.remove();
+          lastRenderedWorkSignature = workSignature(lastState);
+          lastRenderedStructureSignature = characterStructureSignature(lastState);
+        }
+        return;
+      }
       const field = event.target.closest('[data-cw-field]');
       if (field) {
         autoGrow(field);
@@ -1646,8 +1872,22 @@ export function createCharacterPanel({
       if (reroll) setModuleParam('character', 'reroll_on_generate', String(reroll.checked));
     });
 
+    root.addEventListener('keydown', event => {
+      // 이름 칸에서 Enter = 저장. 한글 조합 중의 Enter 는 글자를 확정할 뿐이고, 조합키가 붙은 Enter 는
+      // 전역 단축키(생성 등)의 것이라 건드리지 않는다.
+      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (!(event.target.closest && event.target.closest('[data-cw-edit-field="name"]'))) return;
+      event.preventDefault();
+      saveEdit();
+    });
+
     root.addEventListener('click', event => {
       const hit = selector => event.target.closest(selector);
+      const editStart = hit('[data-cw-edit-start]');
+      if (editStart) { startEdit(editStart.dataset.cwEditStart || ''); return; }
+      if (hit('[data-cw-edit-save]')) { saveEdit(); return; }
+      if (hit('[data-cw-edit-cancel]')) { cancelEdit(); return; }
       const tabBtn = hit('[data-cw-tab]');
       if (tabBtn) { tab = tabBtn.dataset.cwTab; rerender(); return; }
       const add = hit('[data-cw-add]');
@@ -1834,6 +2074,8 @@ export function createCharacterPanel({
       const toggle = hit('[data-cw-toggle]');
       if (toggle) {
         const uuid = toggle.dataset.cwToggle;
+        // 편집 중인 카드의 펼침 상태는 건드리지 않는다 - 저장 · 취소하면 펼친 보기로 돌아와야 한다.
+        if (uuid && uuid === editingUuid) return;
         openOnly(openHistory.has(uuid) ? '' : uuid);
         // ⚠️ **부분 갱신**이다. 전체를 다시 그리면 검색 입력칸이 새로 만들어지고,
         //    무엇보다 `.cw-list` 가 스크롤 컨테이너라 자리가 맨 위로 튄다.
@@ -1985,6 +2227,8 @@ export function createCharacterPanel({
       // 히스토리 행은 그룹의 지름길로 남긴다(버튼도 함께 보인다).
       const item = event.target.closest('[data-cw-li]');
       if (!item) return;
+      // 편집 칸 안에서는 붙여넣기 같은 기본 메뉴가 떠야 한다(슬롯의 프롬프트 칸과 같다).
+      if (event.target.closest('[data-cw-editing]')) return;
       event.preventDefault();
       const character = (lastState?.characters || [])[Number(item.dataset.cwLi)];
       const uuid = String(character?.slot_uuid || '');
@@ -2063,6 +2307,12 @@ export function createCharacterPanel({
     //    내용이 줄어들면 브라우저가 알아서 clamp 하므로 그대로 되돌려 주면 된다.
     const keep = list.scrollTop;
     list.innerHTML = nextList.innerHTML;
+    // 편집 칸이 새로 생겼으면 높이를 맞추고 자동완성을 건다(통째로 그릴 때와 같은 일). 높이가 정해진 **뒤에**
+    // 스크롤을 되돌린다.
+    list.querySelectorAll('.cw-input').forEach(element => {
+      autoGrow(element);
+      if (!element.classList.contains('is-uc')) bindTagAssist(element);
+    });
     if (keep) list.scrollTop = keep;
     // ⚠️ 부분 갱신도 **서명을 갱신해야** 한다. 안 그러면 화면은 새것인데 기록은
     //    옛것이라, 다음 에코가 "작업 영역이 바뀌었다" 고 보고 전부 다시 그린다

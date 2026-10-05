@@ -598,6 +598,15 @@ class HeadlessCharacterService:
                     return self.state()     # 그 칸이 더는 없다 - 지금 상태를 돌려줘 화면이 다시 그리게 한다
             return self._set_param_locked(key, value)
 
+    def _state_with_notice(self, message: str) -> dict[str, Any]:
+        """아무것도 고치지 않고 지금 상태를 돌려주되, **명령을 보낸 창에만** 까닭을 알린다
+        (`module_commands` 가 `_headless_extra_messages` 를 떼어 그 소켓에만 보낸다 - 상태는 모두에게 간다)."""
+        from core.headless_payload_utils import toast
+
+        state = self.state()
+        state["_headless_extra_messages"] = [toast(message, level="error")]
+        return state
+
     def _key_for_slot(self, key: str, slot_uuid: str) -> str | None:
         """인덱스 주소의 번호를 그 uuid 가 **지금 있는 자리**로 고친다. 그 칸이 없으면 None."""
         from core.character_settings import _frame_uuid
@@ -909,6 +918,39 @@ class HeadlessCharacterService:
             if index is not None:
                 self.ensure_frame(frames, index)["custom_name"] = str(value or "")
                 invalidate_snapshot = True
+        elif key == "char_update":
+            # 보관함 카드의 [편집] - 히스토리 · 즐겨찾기 · 그룹의 캐릭터를 **그 자리에서** 고친다(사용자 지정
+            # 2026-10-05: 이름 붙이기 + 원본 편집). 값은 `{uuid, custom_name?, prompt?, uc?}` - 보낸 칸만 고친다.
+            #
+            # ⚠️ **uuid 로 찾는다.** 다른 명령처럼 번호로 받으면, 편집 칸을 열어 둔 사이 배열이 바뀌었을 때
+            #    (슬롯을 내렸다 · 다른 창 · 일괄 적용) [저장] 이 남의 캐릭터를 덮는다 - 프롬프트에는 되돌리기가 없다.
+            # ⚠️ 화면은 [저장] 을 눌렀을 때만 이것을 보낸다(칠 때마다 보내지 않는다). 2026-09-02 에 이 카드를
+            #    읽기 전용으로 둔 까닭 - 손이 미끄러져 고쳐지면 되돌릴 길이 없다 - 은 그대로다.
+            payload = value
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (TypeError, ValueError):
+                    payload = None
+            if not isinstance(payload, dict):
+                return None
+            frame = _find_by_uuid(frames, str(payload.get("uuid") or "").strip())
+            if frame is None:
+                # 편집하던 사이 다른 곳에서 지워졌다. 번호로 받았다면 여기서 빈 칸을 새로 만들었을 것이다.
+                return self._state_with_notice("편집하던 캐릭터가 목록에 없어 저장하지 못했습니다.")
+            edited = {field: str(payload.get(field) or "")
+                      for field in ("custom_name", "prompt", "uc") if field in payload}
+            if "custom_name" in edited:
+                edited["custom_name"] = edited["custom_name"].strip()
+            if _state_of(frame) != "active" and _slot_is_untouched({**frame, **edited}):
+                # ⚠️ 셋을 다 비운 보관함 칸은 정규화가 '빈 히스토리' 로 걷어 간다(`drop_empty_history`) -
+                #    그대로 받으면 [저장] 이 곧 **영구 삭제**다. 지우는 길은 ✕ 하나여야 한다.
+                return self._state_with_notice("이름 · 프롬프트 · 네거티브를 모두 비우면 저장할 수 없습니다.")
+            frame.update(edited)
+            frame["from_scene"] = False     # 사용자가 손댄 칸은 씬의 것이 아니다(`char_prompt_` 와 같다)
+            # 보관함의 글은 다음 생성에 안 나간다 - 굴려 둔 값을 버릴 까닭이 없다. 그 사이 슬롯으로 올라간
+            # 캐릭터였다면 슬롯 글 편집과 똑같이 버린다.
+            invalidate_snapshot = _state_of(frame) == "active"
         elif key.startswith("char_favorite_"):
             index = context._index_from_key(key, "char_favorite_")
             if index is not None:

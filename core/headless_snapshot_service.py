@@ -190,8 +190,9 @@ class HeadlessSnapshotService:
 
     def capture(self, name: str, include_search: bool = False, overwrite: bool = False,
                 folder: str = "", image_path: str = "", sections: list[str] | None = None,
-                relocate: bool = False) -> dict[str, Any]:
-        prepared = self._prepare_capture(name, include_search, overwrite, folder, image_path, sections, relocate)
+                relocate: bool = False, skip_empty: list[str] | None = None) -> dict[str, Any]:
+        prepared = self._prepare_capture(name, include_search, overwrite, folder, image_path, sections, relocate,
+                                         skip_empty)
         return prepared() if callable(prepared) else prepared
 
     def begin_save(self, payload: Any) -> dict[str, Any] | Callable[[], dict[str, Any]]:
@@ -223,13 +224,19 @@ class HeadlessSnapshotService:
         prepared = self._prepare_capture(
             str(payload.get("name") or ""), coerce(payload.get("include_search", False)),
             coerce(payload.get("overwrite", False)), payload.get("folder", ""), str(payload.get("image") or ""),
-            payload.get("sections"), coerce(payload.get("relocate", False)))
+            payload.get("sections"), coerce(payload.get("relocate", False)),
+            payload.get("skip_empty") if isinstance(payload.get("skip_empty"), list) else None)
         if callable(prepared):
             return lambda: stamp(prepared())
         return stamp(prepared)
 
     def _prepare_capture(self, name: str, include_search: bool, overwrite: bool, folder: str, image_path: str,
-                         sections: list[str] | None, relocate: bool) -> dict[str, Any] | Callable[[], dict[str, Any]]:
+                         sections: list[str] | None, relocate: bool,
+                         skip_empty: list[str] | None = None) -> dict[str, Any] | Callable[[], dict[str, Any]]:
+        # `skip_empty`: 켜 둔 것이 하나도 없으면 담지 않을 구역(Vibe · Reference 만 받는다). 저장 창은 그 판단을
+        # 미리보기 수치로 하지 않고 **여기에 맡긴다** - 미리보기는 낡을 수 있어, 방금 켠 Vibe 가 빠지곤 했다
+        # (Codex 2차 리뷰 2026-10-05). 담는 순간의 값으로 가린다.
+        droppable = {key for key in (skip_empty or []) if key in ("vibe_transfer", "character_reference")}
         with self._lock:
             if self._support_blocker():
                 return self._response("Snapshot은 NAI V4.5 / V5에서 지원됩니다", level="error")
@@ -308,6 +315,8 @@ class HeadlessSnapshotService:
                 try:
                     section = getter().capture_snapshot()
                     json.dumps(section, allow_nan=False)
+                    if key in droppable and not any(frame.get("is_enabled") for frame in _frames(section)):
+                        continue
                     if key != "conditional":
                         reference_images.update(capture_reference_images(context, key, section))
                     data[key] = section
@@ -360,29 +369,62 @@ class HeadlessSnapshotService:
             level="warning" if skipped or warnings else "success")
 
     def merge_apply(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
-        """둘로 나눠 부른 되돌리기(`part="session"` 뒤에 `part="dataset"`)의 응답을 하나로.
+        """둘로 나눠 부른 되돌리기(`part="session"` 뒤에 `part="dataset"`)를 **끝맺는다**. 이벤트 루프에서 부른다.
 
-        상태는 나중 것(가장 새 목록)을 쓰고, 보고는 둘을 잇는다. 끝 알림은 **합친 수로 한 번만** 낸다.
-        둘째가 시작도 못 했으면(그사이 모드가 바뀌었다 등) 첫째의 결과에 그 오류 알림을 덧붙인다.
+        반쪽들은 한 일만 돌려준다(`_apply_partial`). 화면 상태 저장 · 모듈 상태 모으기 · 알림은 여기서 **한 번** 한다 -
+        데이터셋 반쪽이 작업 스레드에서 그것까지 하면, 그사이 다른 창이 모드를 바꿨을 때 먼저 읽은 모드에 나중의
+        값이 섞여 저장된다(Codex 2차 리뷰 2026-10-05).
+        둘째가 시작도 못 했으면(그사이 모드가 바뀌었다 등) 첫째가 한 일로 끝맺고 그 오류 알림을 덧붙인다.
         """
         first_report = _dict(first.get("apply_report"))
         second_report = _dict(second.get("apply_report"))
-        first_extra = [m for m in first.get("_headless_extra_messages", []) if isinstance(m, dict)]
-        second_extra = [m for m in second.get("_headless_extra_messages", []) if isinstance(m, dict)]
-        merged = dict(second)
-        name = str(second_report.get("name") or first_report.get("name") or "")
+        name = str(first_report.get("name") or second_report.get("name") or "")
         restored = [*first_report.get("restored", []), *second_report.get("restored", [])]
         skipped = [*first_report.get("skipped", []), *second_report.get("skipped", [])]
-        warnings = [*first.get("apply_warnings", []), *second.get("apply_warnings", [])]
-        merged["apply_report"] = {"name": name, "restored": restored, "skipped": skipped}
-        if warnings:
-            merged["apply_warnings"] = warnings
-        if second_report:
-            quiet = [m for m in [*first_extra, *second_extra] if m.get("type") != "toast"]
-            merged["_headless_extra_messages"] = [*quiet, self._apply_toast(name, skipped, warnings)]
-        else:
-            merged["_headless_extra_messages"] = [*first_extra, *second_extra]
-        return merged
+        warnings = [*(first.get("apply_warnings") or []), *(second.get("apply_warnings") or [])]
+        state = self._finish_apply(name, restored, skipped, warnings)
+        if not second_report:
+            state["_headless_extra_messages"].extend(
+                message for message in second.get("_headless_extra_messages", []) if isinstance(message, dict))
+        return state
+
+    def _finish_apply(self, name: str, restored: list, skipped: list, warnings: list) -> dict[str, Any]:
+        """되돌리기의 끝맺음: 화면 상태 저장 · 바뀐 것 알리기 · 모듈 상태 모으기 · 알림. **이벤트 루프에서만** 부른다."""
+        context = self.context
+        with self._lock:
+            for section, action in (
+                ("remote_ui_state", context.save_remote_ui_state),
+                ("remote_params_changed", lambda: context.publish("remote_params_changed", context.generation_param_schema_payload())),
+            ):
+                try:
+                    action()
+                except Exception as exc:
+                    warnings.append({"key": section, "reason": str(exc)})
+            extra = []
+            for module in ("prompt_engineering", "character", "conditional_prompt", "vibe_transfer", "character_reference"):
+                try:
+                    extra.append(context.module_state_payload(module))
+                except Exception as exc:
+                    warnings.append({"key": f"state.{module}", "reason": str(exc)})
+            try:
+                extra.insert(1, context.generation_param_schema_payload())
+            except Exception as exc:
+                warnings.append({"key": "state.params", "reason": str(exc)})
+            extra.insert(2, {"type": "prompt_sync", "prompt": context.prompt_text,
+                             "negative": context.negative_prompt_text, "negative_prompt": context.negative_prompt_text,
+                             "force": True})
+            if "search" in restored:
+                try:
+                    extra.append(context.search_state_payload())
+                except Exception as exc:
+                    warnings.append({"key": "state.search", "reason": str(exc)})
+            extra.append(self._apply_toast(name, skipped, warnings))
+            state = self.state()
+            state["apply_report"] = {"name": name, "restored": restored, "skipped": skipped}
+            if warnings:
+                state["apply_warnings"] = warnings
+            state["_headless_extra_messages"] = extra
+            return state
 
     def apply(self, name: str, sections: list[str] | None = None, *, part: str = "") -> dict[str, Any]:
         """`part`: "" = 전부 · "session" = 데이터셋만 빼고 · "dataset" = 데이터셋만.
@@ -414,10 +456,9 @@ class HeadlessSnapshotService:
             if part:
                 selected = [key for key in selected if (key == "search") == (part == "dataset")]
                 if not selected:
-                    # 나눠 부른 반쪽에 할 일이 없다 - 알릴 것도 없다(다른 반쪽이 알린다).
-                    state = self.state()
-                    state["apply_report"] = {"name": name, "restored": [], "skipped": []}
-                    return state
+                    # 나눠 부른 반쪽에 할 일이 없다 - 한 일이 없다고만 돌려준다(끝맺음은 `merge_apply`).
+                    return {"apply_report": {"name": name, "restored": [], "skipped": []},
+                            "apply_warnings": [], "_apply_partial": True}
             if not selected:
                 return self._response("선택한 Snapshot 항목이 없습니다",
                                       apply_report={"name": name, "restored": [], "skipped": []})
@@ -534,39 +575,13 @@ class HeadlessSnapshotService:
                             warnings.append({"key": "search.persist_last_search", "reason": "Last-search persistence failed"})
                     except Exception as exc:
                         skipped.append({"section": "search", "reason": str(exc)})
-            for section, action in (
-                ("remote_ui_state", context.save_remote_ui_state),
-                ("remote_params_changed", lambda: context.publish("remote_params_changed", context.generation_param_schema_payload())),
-            ):
-                try:
-                    action()
-                except Exception as exc:
-                    warnings.append({"key": section, "reason": str(exc)})
-            extra = []
-            for module in ("prompt_engineering", "character", "conditional_prompt", "vibe_transfer", "character_reference"):
-                try:
-                    extra.append(context.module_state_payload(module))
-                except Exception as exc:
-                    warnings.append({"key": f"state.{module}", "reason": str(exc)})
-            try:
-                extra.insert(1, context.generation_param_schema_payload())
-            except Exception as exc:
-                warnings.append({"key": "state.params", "reason": str(exc)})
-            extra.insert(2, {"type": "prompt_sync", "prompt": context.prompt_text,
-                             "negative": context.negative_prompt_text, "negative_prompt": context.negative_prompt_text,
-                             "force": True})
-            if "search" in restored:
-                try:
-                    extra.append(context.search_state_payload())
-                except Exception as exc:
-                    warnings.append({"key": "state.search", "reason": str(exc)})
-            extra.append(self._apply_toast(name, skipped, warnings))
-            state = self.state()
-            state["apply_report"] = {"name": name, "restored": restored, "skipped": skipped}
-            if warnings:
-                state["apply_warnings"] = warnings
-            state["_headless_extra_messages"] = extra
-            return state
+            if part:
+                # ⚠️ 나눠 부른 반쪽은 **끝맺음을 하지 않는다.** 데이터셋 반쪽은 작업 스레드에서 돈다 - 여기서 화면
+                #    상태를 저장하거나 모듈 상태를 모으면 이벤트 루프의 모드 · 프리셋 변경과 섞인다. 한 일만 돌려주고,
+                #    끝맺음은 `merge_apply` 가 이벤트 루프에서 한 번 한다.
+                return {"apply_report": {"name": name, "restored": restored, "skipped": skipped},
+                        "apply_warnings": warnings, "_apply_partial": True}
+            return self._finish_apply(name, restored, skipped, warnings)
 
     def _u2_services(self):
         return (

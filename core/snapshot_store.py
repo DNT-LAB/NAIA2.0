@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -20,6 +21,12 @@ SNAPSHOT_SECTIONS = (
 )
 PRESET_SECTIONS = SNAPSHOT_SECTIONS[:4]
 _FORBIDDEN_NAME_CHARS = '<>:"/\\|?*'
+# 덮어쓰기가 비켜 둔 옛 폴더(`_old_*`) 안에 남기는 표식: "교체가 끝났다 - 버려도 된다".
+_SUPERSEDED = ".superseded"
+# 교체(옛 폴더 비키기 -> 새 폴더 놓기 -> 표식)와 `_recover_old` 를 한 번에 하나만. 저장의 쓰기는 작업 스레드에서
+# 돌 수 있고 목록 읽기는 이벤트 루프에서 온다 - 두 걸음 사이에 훑기가 끼면, 방금 비킨 폴더를 '되돌리지 못한
+# 원본' 으로 보고 제자리에 돌려놓아 새 폴더가 놓일 자리를 막는다.
+_SWAP_LOCK = threading.Lock()
 
 
 def sanitize_snapshot_name(name: Any) -> str:
@@ -185,8 +192,10 @@ class SnapshotStore:
         folder_revision = tuple((row["id"], row["name"], row["parent"]) for row in folders)
         ids = {row["id"] for row in folders}
         rows, next_cache = [], {}
+        stranded = False
         for entry in self.root.iterdir():
             if entry.name.startswith("_") or not entry.is_dir():
+                stranded = stranded or entry.name.startswith("_old_")
                 continue
             try:
                 path = self._file(entry.name, "snapshot.json", exact=True)
@@ -208,6 +217,9 @@ class SnapshotStore:
                     rows.append(copy.deepcopy(summary))
             except (OSError, ValueError) as exc:
                 print(f"[snapshot] skipped {ascii(entry.name)}: {ascii(exc)}")
+        if stranded and self._recover_old():
+            # 되돌리지 못하고 남아 있던 옛 스냅샷을 제자리에 돌려놨다 - 그것까지 넣어 다시 읽는다(한 번).
+            return self.list_summaries(summarize, folders=folders)
         # 병렬 state가 삭제된 카드의 캐시를 정리해도 이 호출의 로컬 결과는 보존한다.
         self._summary_cache = next_cache
         return sorted(rows, key=lambda row: str(row.get("saved_at") or ""), reverse=True)
@@ -215,6 +227,8 @@ class SnapshotStore:
     def write(self, name: str, data: dict[str, Any], image: bytes, *, overwrite: bool = False,
               reference_images: dict[str, bytes] | None = None,
               stage_search: Callable[[Path], dict[str, Any] | None] | None = None) -> str:
+        if self.root.is_dir():
+            self._recover_old()
         target = self.directory(name)
         if not image:
             raise ValueError("Snapshot image is required")
@@ -245,10 +259,16 @@ class SnapshotStore:
                     raise ValueError("Snapshot reference image escapes staging")
                 target_image.parent.mkdir(parents=True, exist_ok=True)
                 target_image.write_bytes(source_bytes)
+            if target.exists() and not overwrite:
+                raise FileExistsError(target.name)
+            self._swap_into_place(stage, target)
+            self._sweep_old()
+        return target.name
+
+    def _swap_into_place(self, stage: Path, target: Path) -> None:
+        with _SWAP_LOCK:
             backup = None
             if target.exists():
-                if not overwrite:
-                    raise FileExistsError(target.name)
                 # ⚠️ 옛 폴더를 **지우지 않고 비켜 둔다**. 먼저 지우면, 바로 다음의 교체가 실패했을 때
                 #    (윈도우에서는 폴더 안 파일을 누가 쥐고 있으면 rename 이 거부된다) 옛 스냅샷도 새 스냅샷도
                 #    남지 않는다(Codex 리뷰 2026-10-05 BLOCK). `_` 로 시작하는 이름은 목록에 나오지 않는다.
@@ -256,25 +276,62 @@ class SnapshotStore:
                 target.rename(backup)
             try:
                 stage.rename(target)
-            except BaseException:
+            except BaseException as swap_error:
                 if backup is not None:
-                    backup.rename(target)
+                    try:
+                        backup.rename(target)
+                    except OSError as restore_error:
+                        # 되돌리기까지 실패했다. 옛 스냅샷은 `_old_*` 에만 남아 있다 - **지우지 않는다.**
+                        # 다음에 목록을 읽거나 저장할 때 `_recover_old` 가 제자리로 돌려놓는다.
+                        raise OSError(f"교체 실패({swap_error}) - 옛 스냅샷은 {backup.name} 에 남겨 두었습니다") from restore_error
                 raise
             if backup is not None:
-                # 새 폴더가 자리 잡은 뒤에야 옛것을 버린다. 못 지워도(파일이 잡혀 있다) 저장은 끝난 것이다 -
-                # 남은 것은 다음 저장 때 다시 치운다.
+                # 새 폴더가 자리 잡았다 - 이제야 옛것은 버려도 된다. **버려도 되는 것에만 표식을 남긴다**:
+                # 표식 없는 `_old_*` 는 되돌리지 못한 원본일 수 있어 아무도 지우지 않는다(Codex 2차 리뷰 BLOCK -
+                # 표식 없이 이름만 보고 치우면, 되돌리기에 실패해 거기에만 남은 원본을 다음 저장이 지운다).
+                try:
+                    (backup / _SUPERSEDED).write_text(target.name, encoding="utf-8")
+                except OSError:
+                    pass
                 shutil.rmtree(backup, ignore_errors=True)
-            self._sweep_old()
-        return target.name
 
     def _sweep_old(self) -> None:
-        """덮어쓰기가 비켜 둔 옛 폴더(`_old_*`) 가운데 그때 못 지운 것을 치운다. 실패해도 조용히 둔다."""
+        """덮어쓰기가 비켜 둔 옛 폴더 가운데 **교체가 끝난 것**(표식이 있는 것)을 치운다. 실패해도 조용히 둔다."""
         try:
             for entry in self.root.iterdir():
-                if entry.name.startswith("_old_") and entry.is_dir() and not entry.is_symlink():
+                if (entry.name.startswith("_old_") and entry.is_dir() and not entry.is_symlink()
+                        and (entry / _SUPERSEDED).is_file()):
                     shutil.rmtree(entry, ignore_errors=True)
         except OSError:
             pass
+
+    def _recover_old(self) -> bool:
+        """되돌리지 못하고 남은 옛 스냅샷(`_old_*`, 표식 없음)을 제자리로 돌려놓는다. 하나라도 돌려놨으면 True.
+
+        제자리에 이미 다른 것이 있으면 건드리지 않는다 - 어느 쪽이 사용자의 것인지 여기서는 알 수 없다.
+        """
+        with _SWAP_LOCK:
+            return self._recover_old_locked()
+
+    def _recover_old_locked(self) -> bool:
+        recovered = False
+        try:
+            entries = [entry for entry in self.root.iterdir() if entry.name.startswith("_old_")]
+        except OSError:
+            return False
+        for entry in entries:
+            try:
+                if entry.is_symlink() or not entry.is_dir() or (entry / _SUPERSEDED).exists():
+                    continue
+                data = json.loads((entry / "snapshot.json").read_text(encoding="utf-8"))
+                name = sanitize_snapshot_name(data.get("name") if isinstance(data, dict) else None)
+                if not name or (self.root / name).exists():
+                    continue
+                entry.rename(self.root / name)
+                recovered = True
+            except (OSError, ValueError, TypeError):
+                continue
+        return recovered
 
     def delete(self, name: str) -> bool:
         target = self.directory(name)

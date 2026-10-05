@@ -22,13 +22,15 @@
  * ⚠️ 조작은 전부 `setModuleParam('snapshot', …)` 을 탄다 - 새 WS 메시지 타입을 만들지 않는다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
-import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapreview';
+import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapreview2';
 
 // 담을 항목의 마지막 선택. **꺼 둔 것만** 적는다 - 항목이 늘어도 새 항목은 켜진 채로 나온다.
 // 처음에는 데이터셋(크기만큼 용량을 쓴다)과 조건부 프롬프트가 꺼져 있다(사용자 지정 2026-10-05).
 // ⚠️ 기본값을 바꿀 때는 열쇠의 판 번호를 올린다 - 옛 기록이 남아 있으면 새 기본값이 영영 안 먹는다.
 const OFF_KEY = 'naia.snapshot.saveSections.v2';
 const DEFAULT_OFF = ['search', 'conditional'];
+// 켜 둔 것이 없으면 담지 않는 구역. 화면은 잠가 보여 주고, 마지막 판단은 서버가 담는 순간에 한다.
+const EMPTY_SKIPPED = ['vibe_transfer', 'character_reference'];
 // 마지막으로 담은 카테고리. 같은 자리에 잇달아 담는 일이 많다.
 const FOLDER_KEY = 'naia.snapshot.saveFolder.v1';
 
@@ -162,11 +164,23 @@ export function createSnapshotSaveWindow({
     return '';
   }
 
-  /** 담을 항목 = 꺼 두지 않은 것 가운데 지금 담을 것이 있는 것. */
+  /** 담을 항목 = 꺼 두지 않은 것 가운데 지금 담을 것이 있는 것. **화면에 보이는 대로**다(카드 · 잠금). */
   function pickedKeys() {
     return SNAPSHOT_PICK_ITEMS.map(([key]) => key)
       .filter(key => !off.has(key))
       .filter(key => !deadReason(key));
+  }
+
+  /** 서버에 보낼 항목 = **사용자의 선택 그대로**. Vibe · Reference 가 비었는지는 여기서 가리지 않는다.
+   *
+   *  ⚠️ 미리보기 수치는 낡을 수 있다 - 0 이던 Vibe 를 방금 켜고 곧바로 [저장] 을 누르면, 화면은 아직 0 으로
+   *     알고 있다. 여기서 빼면 켜 둔 Vibe 가 스냅샷에 안 들어간다(Codex 2차 리뷰 2026-10-05).
+   *     "없으면 담지 않는다" 는 서버가 **담는 순간**에 한다(`skip_empty`).
+   */
+  function sendKeys() {
+    return SNAPSHOT_PICK_ITEMS.map(([key]) => key)
+      .filter(key => !off.has(key))
+      .filter(key => !EMPTY_SKIPPED.includes(key) ? !deadReason(key) : true);
   }
 
   function countText(key) {
@@ -460,7 +474,8 @@ export function createSnapshotSaveWindow({
     awaiting = {id};
     busy = true;
     renderCard();
-    const sent = saveSnapshot({name, image: draft.image, sections, folder: sub || top, relocate: true, request_id: id},
+    const sent = saveSnapshot({name, image: draft.image, sections: sendKeys(), skip_empty: EMPTY_SKIPPED,
+                               folder: sub || top, relocate: true, request_id: id},
                               {overwrite: !!existing});
     if (sent === false) {
       // 연결이 끊겨 있다 - 답이 올 리 없다. 잠근 채로 두면 창을 닫았다 열어야 한다.

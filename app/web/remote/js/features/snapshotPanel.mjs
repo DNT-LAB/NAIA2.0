@@ -95,9 +95,11 @@ export function createSnapshotPanel({
   let curNone = false;
   let query = '';
   let previewName = '';        // 오른쪽 상세에 편 스냅샷
-  // 서버가 "같은 이름이 있다" 고 되물었을 때 다시 보낼 값. 이름 다듬기가 서버와 어긋나
-  // 화면의 확인을 그냥 지나친 경우의 뒷문이다.
-  let pendingSave = null;
+  // 서버가 "같은 이름이 있다" 고 되물었을 때 다시 보낼 요청들. **표식(request_id)마다 하나**다.
+  // ⚠️ 자리 하나에 마지막 요청만 두면 안 된다 - A 를 보내고 곧바로 B 를 보내면, 늦게 온 A 의 되묻기에
+  //    "A 를 덮어씁니다" 라고 묻고는 B 를 덮어쓰기로 보낸다(Codex 2차 리뷰 2026-10-05).
+  const pendingSaves = new Map();
+  let saveSeq = 0;
   let pendingSelect = '';      // 방금 담은 이름 - 목록에 나타나면 그 카드를 편다
   let dragName = '';
   let edgeTimer = 0;
@@ -495,15 +497,26 @@ export function createSnapshotPanel({
 
   /** 응답에 **한 번만** 실려 오는 값들. 다음 상태에는 없으므로 받은 자리에서 쓴다. */
   function consumeOneShots(state) {
+    // 끝난 저장은 잊는다(담겼든 실패했든 답이 왔다).
+    if (state.save_result?.request_id) pendingSaves.delete(String(state.save_result.request_id));
     const prompt = state.overwrite_prompt;
-    // 되묻기는 저장을 보낸 그 연결로만 온다. 보낸 요청을 모르면(그림 · 고른 항목이 없다) 다시 보낼 것이 없다.
-    if (prompt && prompt.name && pendingSave) {
-      // **그때의 요청 그대로**(그림 · 고른 항목 · 카테고리) 다시 보낸다.
-      const retry = pendingSave;
-      pendingSave = null;
+    // 되묻기는 **그 요청**에만 잇는다 - 표식으로 찾는다. 모르는 표식이면 다시 보낼 것이 없다.
+    const retry = prompt?.request_id ? pendingSaves.get(String(prompt.request_id)) : null;
+    if (prompt && prompt.name && retry) {
+      pendingSaves.delete(String(retry.request_id));
+      const abandon = () => { if (typeof onSaveAbandoned === 'function') onSaveAbandoned(retry); };
+      // **그때의 요청 그대로**(그림 · 고른 항목 · 카테고리 · 표식) 다시 보낸다.
       confirmBox(`"${String(prompt.name)}" 스냅샷을 덮어씁니다. 계속할까요?`,
                  {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'})
-        .then(ok => { if (ok) sendSave(retry, true); else if (typeof onSaveAbandoned === 'function') onSaveAbandoned(retry); });
+        .then(ok => {
+          if (!ok) { abandon(); return; }
+          if (sendSave(retry, true) === false) {
+            // 확인 창이 떠 있는 동안 연결이 끊겼다 - 답이 올 리 없다. 기다리는 쪽을 풀어 준다.
+            showToast('서버에 연결되어 있지 않아 저장을 보내지 못했습니다', 'error');
+            abandon();
+          }
+        })
+        .catch(abandon);
     }
     const report = state.apply_report;
     const skipped = Array.isArray(report?.skipped) ? report.skipped : [];
@@ -729,17 +742,21 @@ export function createSnapshotPanel({
     const picked = Array.isArray(request.sections) ? request.sections.map(String) : null;
     const withSearch = picked ? picked.includes('search') : !!request.include_search;
     const folder = String(request.folder || '');
-    pendingSave = {...request, name, folder};
+    saveSeq += 1;
+    const requestId = String(request.request_id || `sp-${Date.now().toString(36)}-${saveSeq}`);
+    pendingSaves.set(requestId, {...request, name, folder, request_id: requestId});
     pendingSelect = name;
     flush();
     // 데이터셋 사본은 풀 크기만큼 걸린다(수백 MB 면 수 초 이상). 답이 올 때까지 아무 표시가 없으면
     // 안 눌린 줄 알고 다시 누른다 - 누른 순간 알린다. 끝나면 서버의 저장 토스트가 온다.
     if (withSearch) showToast('데이터셋 사본을 담는 중입니다 — 크기에 따라 시간이 걸립니다', 'info');
-    return setModuleParam('snapshot', 'save', {
+    const sent = setModuleParam('snapshot', 'save', {
       name, include_search: withSearch, overwrite: !!overwrite,
       // 이 저장의 표식. 서버가 답에 그대로 실어 준다 - 저장 창이 **자기 저장의 답**을 가려낸다.
       // 되묻기 뒤의 재전송도 같은 표식으로 간다(같은 요청이다).
-      ...(request.request_id ? {request_id: String(request.request_id)} : {}),
+      request_id: requestId,
+      // 켜 둔 것이 없으면 담지 않을 구역 - 그 판단은 서버가 담는 순간에 한다(저장 창의 미리보기는 낡을 수 있다).
+      ...(Array.isArray(request.skip_empty) ? {skip_empty: request.skip_empty.map(String)} : {}),
       ...(request.image ? {image: String(request.image)} : {}),
       ...(picked ? {sections: picked} : {}),
       // 지금 보고 있는 카테고리에 담는다. 덮어쓸 때는 보내지 않는다 - 원래 자리를 지킨다.
@@ -747,6 +764,8 @@ export function createSnapshotPanel({
       ...((!overwrite || request.relocate) ? {folder} : {}),
       ...((overwrite && request.relocate) ? {relocate: true} : {}),
     });
+    if (sent === false) pendingSaves.delete(requestId);      // 나가지 못했다 - 되묻기가 올 일도 없다
+    return sent;
   }
 
   /** 저장 창이 빌려 쓰는 입구. 덮어쓰기 확인은 부른 쪽이 이미 했다. 보냈으면 true(연결이 끊겨 있으면 false). */

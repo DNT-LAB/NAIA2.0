@@ -175,13 +175,9 @@ export function createInpaintCanvasPanel({
   let flashModes = false;
   // 슬라이더를 끄는 동안에는 다시 그리지 않는다 - 끌던 input 이 교체되면 드래그가 끊긴다.
   let rangeDragging = false;
-  // 그 슬라이더가 **누른 순간** 붙잡은 레이어. 끄는 사이 업로드가 끝나 새 레이어가 골라져도
-  // 끌던 값은 원래 레이어로 간다(Codex 3차 리뷰 2026-10-03: `base_scale 1.25` 로 시작한 끌기가
-  // `layer_scale {id:'L1'} 1.5` 로 이어졌다 - 도크는 그동안 원본을 보이고 있었다).
-  let rangeLayer = null;
   // 슬라이더를 끌거나 반복 칸에 쓰는 동안 **건너뛴 도크 갱신이 있다**는 표시. 조작이 끝나면
-  // 그때 그린다 - 안 그리면 도크는 옛 레이어의 이름과 값을 보이는데 다음 조작은 새로 고른
-  // 레이어로 나간다(Codex 리뷰 2026-10-05: 표시 L1 · 150% -> 전송 `layer_scale {id:'L2'} 1.51`).
+  // 그때 그린다(`settleDock`). 그 사이의 조작은 `dockLayerId()` 가 지킨다 - 도크의 단추와
+  // 슬라이더는 **도크가 보여 주는 레이어**를 고친다.
   let dockStale = false;
   const transformTimers = {};
   // 레이어 목록(뷰어 오른쪽에 떠 있다). 도크와 따로 그린다 - 도크는 아래 가운데에 있고
@@ -420,8 +416,7 @@ export function createInpaintCanvasPanel({
     // 도크를 다시 그리면 팝업이 통째로 지워진다 - 손잡이만 남으면
     // 다음 클릭이 이미 사라진 노드를 지우려 든다.
     restorePop = null;
-    panel.innerHTML = dockHtml();
-    dockStale = false;
+    drawDock();
     flashModes = false;          // 한 번만 번쩍인다(그린 순간 표를 내린다)
     renderPlane();
   }
@@ -711,6 +706,30 @@ export function createInpaintCanvasPanel({
     sel.style.transform = `translate(-50%, -50%) rotate(${-t.rotation}deg)`;
   }
 
+  /** 도크를 그린다. **도크가 보여 주는 레이어**(`icDockLayer`)를 함께 적는다. */
+  function drawDock() {
+    panel.innerHTML = dockHtml();
+    panel.dataset.icDockLayer = activeLayerId();
+    dockStale = false;
+  }
+
+  /** 도크의 단추 · 슬라이더가 고칠 레이어 = **도크가 지금 보여 주는 레이어**.
+   *
+   *  ⚠️ `activeLayerId()` 가 아니다. 도크는 슬라이더를 끌거나 반복 칸에 쓰는 동안 다시 그려지지
+   *     않는데, 그 사이에 고른 레이어가 바뀔 수 있다(업로드가 끝나 새 레이어가 골라진다 · 다른
+   *     탭이 그 레이어를 지운다). 그때 `activeLayerId()` 를 읽으면 도크는 L1 · 150% 를 보이는데
+   *     [+] 는 L2 를 고친다(Codex 리뷰 2026-10-05, 세 번에 걸쳐 같은 뿌리). 조작이 끝난 뒤 다시
+   *     그리는 것(`settleDock`)만으로는 **그 첫 조작**을 못 막는다 - 보이는 것을 고치게 한다.
+   *  그 레이어가 그 사이 지워졌으면 null - 아무것도 고치지 않고 도크를 다시 그린다.
+   */
+  function dockLayerId() {
+    const id = panel?.dataset?.icDockLayer || '';
+    if (id && layerRow(id)) return id;
+    dockStale = true;
+    if (!rangeDragging && !typingInPanel() && !restorePop) refreshChrome();
+    return null;
+  }
+
   /** 레이어를 바꿔 골랐을 때 **스테이지는 그대로 두고** 둘레만 다시 그린다.
    *
    *  ⚠️ 스테이지를 다시 만들면 안 된다 - 그림 위를 눌러 고르는 순간 곧바로 끌기가
@@ -720,8 +739,7 @@ export function createInpaintCanvasPanel({
     if (!state?.active || !panel || panel.hidden) return;
     if (!rangeDragging && !typingInPanel()) {
       closeRestorePicker();
-      panel.innerHTML = dockHtml();
-      dockStale = false;
+      drawDock();
     } else {
       dockStale = true;          // 조작이 끝나면 `settleDock` 이 그린다
     }
@@ -738,6 +756,9 @@ export function createInpaintCanvasPanel({
    */
   function settleDock() {
     if (!dockStale || rangeDragging || typingInPanel()) return;
+    // 방금 연 [프롬프트 복원] 팝업은 도크 안에 산다 - 도크를 갈아 끼우면 같은 클릭에 닫힌다
+    // (Codex 재리뷰 2026-10-05: 반복 칸을 고친 직후 복원을 누르면 열리자마자 닫혔다). 닫힌 뒤에 그린다.
+    if (restorePop) return;
     if (!state?.active || !state.canvas_supported || !panel || panel.hidden) { dockStale = false; return; }
     refreshChrome();
   }
@@ -1168,11 +1189,11 @@ export function createInpaintCanvasPanel({
   }
 
   /** 확대/회전을 정확히 얼마만큼 민다. 화면은 즉시, 서버는 묶어서. */
-  function nudge(key, delta) {
-    if (!state) return;
-    const t = tx();
-    if (key === 'scale') applyTransform('scale', clampPct(t.scale * 100 + delta));
-    else applyTransform('rotation', wrapDeg(t.rotation + delta));
+  function nudge(key, delta, id = activeLayerId()) {
+    if (!state || !id) return;
+    const t = tx(id);
+    if (key === 'scale') applyTransform('scale', clampPct(t.scale * 100 + delta), null, id);
+    else applyTransform('rotation', wrapDeg(t.rotation + delta), null, id);
   }
 
   /** 지금 인페인트 생성을 보낼 수 있는가. 안 되면 **이유를 말하고** false.
@@ -1271,7 +1292,7 @@ export function createInpaintCanvasPanel({
       //    같은 값을 다시 보내는 비용은 합성 한 번이고, 안 보내는 대가는 유료 생성이
       //    되돌리지 않은 자리로 나가는 것이다.
       patchLayer(id, {rotation: snap.rotation});
-      if (id === activeLayerId()) {
+      if (id === (panel?.dataset?.icDockLayer || '')) {      // 도크가 보여 주는 레이어일 때만
         const input = panel?.querySelector('[data-ic-tr="rotation"]');
         const label = panel?.querySelector('[data-ic-val="rotation"]');
         if (input) input.value = String(snap.rotation);
@@ -1297,10 +1318,14 @@ export function createInpaintCanvasPanel({
     if (key !== 'scale') pushUndo(transformSnapshot(id));
     // 규칙 3 — 서버 echo 전에 화면 값을 먼저 맞춰 둔다.
     patchLayer(id, key === 'scale' ? {scale: value / 100} : {rotation: value});
-    const input = panel.querySelector(`[data-ic-tr="${key}"]`);
-    const label = panel.querySelector(`[data-ic-val="${key}"]`);
-    if (input && input.value !== String(value)) input.value = String(value);
-    if (label) label.textContent = key === 'scale' ? `${value}%` : `${value}°`;
+    // 도크의 숫자는 **도크가 보여 주는 레이어**의 것일 때만 고친다 - 캔버스에서 다른 레이어를
+    // 굴리는 동안(도크가 밀려 있을 때) 남의 값을 도크에 적으면 표시가 거짓말을 한다.
+    if (id === (panel.dataset.icDockLayer || '')) {
+      const input = panel.querySelector(`[data-ic-tr="${key}"]`);
+      const label = panel.querySelector(`[data-ic-val="${key}"]`);
+      if (input && input.value !== String(value)) input.value = String(value);
+      if (label) label.textContent = key === 'scale' ? `${value}%` : `${value}°`;
+    }
     // 기준점을 안 주면 백엔드가 캔버스 한가운데를 잡는다(슬라이더·± 가 그 경우다).
     const payload = key === 'scale' ? {value: value / 100} : {value};
     if (at) payload.at = at;
@@ -1470,14 +1495,18 @@ export function createInpaintCanvasPanel({
       return onSaveCharacterAssetFrame('generated');
     }
     if (action === 'undo') return undoTransform();
-    if (action === 'reset') return resetLayer(activeLayerId());
+    if (action === 'reset') {
+      const id = dockLayerId();
+      return id ? resetLayer(id) : undefined;
+    }
     if (action === 'show-layers') return setLayersOpen(true);
-    if (action === 'zoom-in') return nudge('scale', 1);
-    if (action === 'zoom-out') return nudge('scale', -1);
-    if (action === 'rot-up') return nudge('rotation', 1);
-    if (action === 'rot-down') return nudge('rotation', -1);
+    // 도크의 ± 는 **도크가 보여 주는 레이어**를 민다(`dockLayerId` 주석).
+    if (action === 'zoom-in') return nudge('scale', 1, dockLayerId());
+    if (action === 'zoom-out') return nudge('scale', -1, dockLayerId());
+    if (action === 'rot-up') return nudge('rotation', 1, dockLayerId());
+    if (action === 'rot-down') return nudge('rotation', -1, dockLayerId());
     // 90° 는 자주 쓰는 자리라 한 번에 간다 - 슬라이더로 정확히 90 을 맞추기는 번거롭다.
-    if (action === 'rot-quarter') return nudge('rotation', 90);
+    if (action === 'rot-quarter') return nudge('rotation', 90, dockLayerId());
     if (action === 'mask') return openMaskEditor();
     if (action === 'auto-mask') {
       // ⚠️ **여기도 flush 가 먼저다.** 빈 곳은 지금 배치에서 계산되는데, 미뤄 둔
@@ -1513,9 +1542,13 @@ export function createInpaintCanvasPanel({
   function onInput(event) {
     const transform = event.target?.dataset?.icTr;
     if (transform) {
+      // 슬라이더도 도크가 보여 주는 레이어를 고친다. 끄는 동안 도크는 다시 안 그려지므로
+      // 이 id 가 곧 **누른 순간의 레이어**다(끄는 사이 다른 레이어가 골라져도 안 바뀐다).
+      const id = dockLayerId();
+      if (!id) return;
       applyTransform(transform, transform === 'scale'
         ? clampPct(event.target.value)
-        : wrapDeg(event.target.value), null, (rangeDragging && rangeLayer) || activeLayerId());
+        : wrapDeg(event.target.value), null, id);
       return;
     }
     const key = event.target?.dataset?.icRange;
@@ -1531,10 +1564,7 @@ export function createInpaintCanvasPanel({
   }
 
   function onPanelPointerDown(event) {
-    if (event.target?.matches?.('input[type="range"]')) {
-      rangeDragging = true;
-      rangeLayer = activeLayerId();
-    }
+    if (event.target?.matches?.('input[type="range"]')) rangeDragging = true;
   }
 
   function onPlanePointerDown(event) {
@@ -1907,7 +1937,6 @@ export function createInpaintCanvasPanel({
     const endRangeDrag = () => {
       const wasDragging = rangeDragging;
       rangeDragging = false;
-      rangeLayer = null;
       // 끄는 동안 밀린 도크(다른 레이어가 골라졌을 수 있다)를 손을 뗀 지금 그린다.
       if (wasDragging) settleDock();
     };
@@ -1964,7 +1993,6 @@ export function createInpaintCanvasPanel({
         try { document.activeElement.blur(); } catch (_) {}
       }
       rangeDragging = false;
-      rangeLayer = null;
       render();
     },
     /** 지금 무대가 놓인 자리와 캔버스 해상도. 캐릭터 POS 무대가 여기 겹쳐 선다.

@@ -2974,7 +2974,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261005-layer-menu2')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261005-dock-target')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),

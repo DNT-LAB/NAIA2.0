@@ -245,12 +245,36 @@ class SnapshotStore:
                     raise ValueError("Snapshot reference image escapes staging")
                 target_image.parent.mkdir(parents=True, exist_ok=True)
                 target_image.write_bytes(source_bytes)
+            backup = None
             if target.exists():
                 if not overwrite:
                     raise FileExistsError(target.name)
-                self.delete(target.name)
-            stage.rename(target)
+                # ⚠️ 옛 폴더를 **지우지 않고 비켜 둔다**. 먼저 지우면, 바로 다음의 교체가 실패했을 때
+                #    (윈도우에서는 폴더 안 파일을 누가 쥐고 있으면 rename 이 거부된다) 옛 스냅샷도 새 스냅샷도
+                #    남지 않는다(Codex 리뷰 2026-10-05 BLOCK). `_` 로 시작하는 이름은 목록에 나오지 않는다.
+                backup = self.root / f"_old_{uuid4().hex}"
+                target.rename(backup)
+            try:
+                stage.rename(target)
+            except BaseException:
+                if backup is not None:
+                    backup.rename(target)
+                raise
+            if backup is not None:
+                # 새 폴더가 자리 잡은 뒤에야 옛것을 버린다. 못 지워도(파일이 잡혀 있다) 저장은 끝난 것이다 -
+                # 남은 것은 다음 저장 때 다시 치운다.
+                shutil.rmtree(backup, ignore_errors=True)
+            self._sweep_old()
         return target.name
+
+    def _sweep_old(self) -> None:
+        """덮어쓰기가 비켜 둔 옛 폴더(`_old_*`) 가운데 그때 못 지운 것을 치운다. 실패해도 조용히 둔다."""
+        try:
+            for entry in self.root.iterdir():
+                if entry.name.startswith("_old_") and entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            pass
 
     def delete(self, name: str) -> bool:
         target = self.directory(name)

@@ -80,6 +80,8 @@ export function createSnapshotPanel({
   // 한 소켓에서 순서대로 처리되므로, 이게 먼저 도착해야 스냅샷이 화면과 같은 것을 담고
   // 떠나는 프리셋이 마지막 편집까지 저장된다(프리셋 전환이 같은 일을 한다).
   flushEdits = null,
+  // 서버가 "같은 이름이 있다" 고 되물었는데 사용자가 취소했다 - 그 저장은 끝내 보내지지 않는다.
+  onSaveAbandoned = null,
 }) {
   let lastState = null;
   let popEl = null;
@@ -501,7 +503,7 @@ export function createSnapshotPanel({
       pendingSave = null;
       confirmBox(`"${String(prompt.name)}" 스냅샷을 덮어씁니다. 계속할까요?`,
                  {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'})
-        .then(ok => { if (ok) sendSave(retry, true); });
+        .then(ok => { if (ok) sendSave(retry, true); else if (typeof onSaveAbandoned === 'function') onSaveAbandoned(retry); });
     }
     const report = state.apply_report;
     const skipped = Array.isArray(report?.skipped) ? report.skipped : [];
@@ -733,8 +735,11 @@ export function createSnapshotPanel({
     // 데이터셋 사본은 풀 크기만큼 걸린다(수백 MB 면 수 초 이상). 답이 올 때까지 아무 표시가 없으면
     // 안 눌린 줄 알고 다시 누른다 - 누른 순간 알린다. 끝나면 서버의 저장 토스트가 온다.
     if (withSearch) showToast('데이터셋 사본을 담는 중입니다 — 크기에 따라 시간이 걸립니다', 'info');
-    setModuleParam('snapshot', 'save', {
+    return setModuleParam('snapshot', 'save', {
       name, include_search: withSearch, overwrite: !!overwrite,
+      // 이 저장의 표식. 서버가 답에 그대로 실어 준다 - 저장 창이 **자기 저장의 답**을 가려낸다.
+      // 되묻기 뒤의 재전송도 같은 표식으로 간다(같은 요청이다).
+      ...(request.request_id ? {request_id: String(request.request_id)} : {}),
       ...(request.image ? {image: String(request.image)} : {}),
       ...(picked ? {sections: picked} : {}),
       // 지금 보고 있는 카테고리에 담는다. 덮어쓸 때는 보내지 않는다 - 원래 자리를 지킨다.
@@ -744,11 +749,11 @@ export function createSnapshotPanel({
     });
   }
 
-  /** 저장 창이 빌려 쓰는 입구. 덮어쓰기 확인은 부른 쪽이 이미 했다. */
+  /** 저장 창이 빌려 쓰는 입구. 덮어쓰기 확인은 부른 쪽이 이미 했다. 보냈으면 true(연결이 끊겨 있으면 false). */
   function saveFromOutside(request, {overwrite = false} = {}) {
     // 같은 이름으로 다시 담으면 내용이 다른 스냅샷이다 - 옛 체크를 잊는다.
     forgetPicks(String(request?.name || ''));
-    sendSave(request || {}, overwrite);
+    return sendSave(request || {}, overwrite) !== false;
   }
 
   function applySnapshot(name) {

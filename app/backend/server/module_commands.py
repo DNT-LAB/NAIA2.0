@@ -201,6 +201,34 @@ def _snapshot_moves_a_dataset(command: dict[str, Any]) -> bool:
     return False
 
 
+async def _run_snapshot_dataset_command(context: WebSessionContext, command: dict[str, Any]) -> Any:
+    """데이터셋 사본을 쓰거나 읽는 스냅샷 명령. **긴 파일 일만** 이벤트 루프 밖으로 내보낸다.
+
+    ⚠️ 통째로 스레드에 넘기지 않는다(Codex 리뷰 2026-10-05 HIGH). 스냅샷의 잠금은 프리셋 · 모드 변경과 공유되지
+       않아서, 스레드가 세션을 읽거나 고치는 동안 다른 창의 명령이 이벤트 루프에서 끼어든다 - `*snapshot` 으로
+       넘어가던 중에 프리셋이 바뀌면 스냅샷의 값이 그 프리셋에 섞인다. 그래서:
+       · 담기 - 설정을 모으는 것까지 여기(이벤트 루프)서 하고, 파일 쓰기만 스레드로.
+       · 되돌리기 - 세션에 넣는 것(프리셋 · 캐릭터 · 조건부 · 참조)은 여기서, 데이터셋만 스레드로.
+         풀 교체는 제 잠금(`search_pool_state_guard`) 아래에서 한다 - 커스텀 Parquet 불러오기와 같은 길이다.
+    이 연결의 다음 명령은 이 await 가 끝난 뒤에 처리되므로 같은 창 안의 순서는 그대로다.
+    """
+    import asyncio
+
+    service = context._snapshot_service()
+    key = str(command.get("key") or "").strip()
+    payload = service._payload(command.get("value"))
+    if key == "save":
+        pending = service.begin_save(payload)
+        return await asyncio.to_thread(pending) if callable(pending) else pending
+    name = str(payload.get("name") or "")
+    sections = payload.get("sections")
+    first = service.apply(name, sections, part="session")
+    if not isinstance(first.get("apply_report"), dict):
+        return first                      # 시작도 못 했다(모드 · 모델 · 떠나는 프리셋 저장 실패) - 데이터셋도 안 건드린다
+    second = await asyncio.to_thread(lambda: service.apply(name, sections, part="dataset"))
+    return service.merge_apply(first, second)
+
+
 async def handle_module_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -316,15 +344,8 @@ async def handle_module_command(
         #    있어(실측: 사용자 custom_tags 가 150 ~ 330MB) 여기서 동기로 돌리면 그동안 모든 창의 소켓이
         #    멈춘다. 커스텀 Parquet 불러오기가 같은 이유로 스레드에서 돈다(`search_commands`).
         #    이 연결의 다음 명령은 이 await 가 끝난 뒤에 처리되므로 같은 창 안의 순서는 그대로다.
-        import asyncio
-
-        module_state = await asyncio.to_thread(
-            context.set_module_param,
-            str(command.get("module_id") or ""),
-            str(command.get("key") or ""),
-            command.get("value"),
-            client_host=client_host,
-        )
+        #    설정을 읽고 넣는 일은 여기(이벤트 루프)에 남긴다 - `_run_snapshot_dataset_command`.
+        module_state = await _run_snapshot_dataset_command(context, command)
     elif str(command.get("module_id") or "") == "character" and str(command.get("slot_uuid") or "").strip():
         # ⚠️ 캐릭터 명령은 배열 **인덱스**로 주소를 매긴다. 화면이 그 칸의 uuid 를 함께 보냈으면 서비스가
         #    그 칸이 지금 있는 자리로 고쳐 쓴다(밀린 글 편집이 낡은 번호로 남의 칸을 덮지 않게).

@@ -191,6 +191,45 @@ class HeadlessSnapshotService:
     def capture(self, name: str, include_search: bool = False, overwrite: bool = False,
                 folder: str = "", image_path: str = "", sections: list[str] | None = None,
                 relocate: bool = False) -> dict[str, Any]:
+        prepared = self._prepare_capture(name, include_search, overwrite, folder, image_path, sections, relocate)
+        return prepared() if callable(prepared) else prepared
+
+    def begin_save(self, payload: Any) -> dict[str, Any] | Callable[[], dict[str, Any]]:
+        """`save` 명령을 **모으기**까지 한다. 쓸 것이 있으면 쓰기를 맡은 함수를, 아니면 응답을 돌려준다.
+
+        ⚠️ 둘로 나눈 까닭(Codex 리뷰 2026-10-05): 데이터셋을 담는 저장은 파일 쓰기가 길어 작업 스레드에서
+           돈다. 그런데 **설정을 읽는 일까지** 스레드에서 하면, 그사이 이벤트 루프에서 다른 창의 프리셋 · 모드
+           변경이 끼어든다 - 반쯤 바뀐 설정이 담긴다. 읽기는 부른 자리(이벤트 루프)에서 끝내고, 돌려준
+           함수만 스레드로 넘긴다.
+
+        `request_id` 를 주면 응답에 그 저장의 결과를 표시한다(`save_result` 또는 `overwrite_prompt.request_id`) -
+        화면이 **자기가 보낸 저장의 답**을 다른 상태 응답(미리보기 등)과 구분한다.
+        """
+        payload = self._payload(payload)
+        request_id = str(payload.get("request_id") or "")
+
+        def stamp(state: dict[str, Any]) -> dict[str, Any]:
+            if request_id:
+                if isinstance(state.get("overwrite_prompt"), dict):
+                    state["overwrite_prompt"]["request_id"] = request_id
+                else:
+                    state["save_result"] = {"request_id": request_id, "ok": bool(state.get("saved_name")),
+                                            "name": str(state.get("saved_name") or "")}
+            return state
+
+        if "sections" in payload and not isinstance(payload["sections"], list):
+            return stamp(self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error"))
+        coerce = self.context._coerce_bool
+        prepared = self._prepare_capture(
+            str(payload.get("name") or ""), coerce(payload.get("include_search", False)),
+            coerce(payload.get("overwrite", False)), payload.get("folder", ""), str(payload.get("image") or ""),
+            payload.get("sections"), coerce(payload.get("relocate", False)))
+        if callable(prepared):
+            return lambda: stamp(prepared())
+        return stamp(prepared)
+
+    def _prepare_capture(self, name: str, include_search: bool, overwrite: bool, folder: str, image_path: str,
+                         sections: list[str] | None, relocate: bool) -> dict[str, Any] | Callable[[], dict[str, Any]]:
         with self._lock:
             if self._support_blocker():
                 return self._response("Snapshot은 NAI V4.5 / V5에서 지원됩니다", level="error")
@@ -287,27 +326,72 @@ class HeadlessSnapshotService:
                     skipped.append(f"search: {exc}")
                     return None
 
-            try:
-                storage.write(name, data, bytes(image), overwrite=overwrite, reference_images=reference_images,
-                              stage_search=stage_search if include_search else None)
-            except FileExistsError:
-                state = self.state()
-                state["overwrite_prompt"] = {"name": name}
-                return state
-            except (OSError, ValueError, TypeError) as exc:
-                return self._response(f"Snapshot 저장 실패: {exc}", level="error")
-            if overwrite and relocate:
-                # 덮어쓰기는 원래 자리를 지킨다(`store.write`). 저장 창에서는 사용자가 카테고리를 **직접 골랐으므로**
-                # 그 자리로 옮긴다. 저장이 끝난 뒤에만 한다 - 실패한 저장이 옛 스냅샷의 자리만 바꾸면 안 된다.
-                try:
-                    storage.move(name, folder)
-                except (OSError, ValueError) as exc:
-                    skipped.append(f"folder: {exc}")
-            suffix = " / ".join(skipped)
-            return self._response(f"Snapshot 저장: {name}" + (f" (건너뜀: {suffix})" if suffix else ""),
-                                  level="warning" if skipped else "success")
+            def commit() -> dict[str, Any]:
+                # 여기부터는 **파일 쓰기**다. 위에서 모은 것만 쓴다 - 세션을 다시 읽지 않는다(데이터셋 사본은 예외:
+                # 풀은 제 잠금 `search_pool_state_guard` 아래에서 복사한다).
+                with self._lock:
+                    try:
+                        storage.write(name, data, bytes(image), overwrite=overwrite, reference_images=reference_images,
+                                      stage_search=stage_search if include_search else None)
+                    except FileExistsError:
+                        state = self.state()
+                        state["overwrite_prompt"] = {"name": name}
+                        return state
+                    except (OSError, ValueError, TypeError) as exc:
+                        return self._response(f"Snapshot 저장 실패: {exc}", level="error")
+                    if overwrite and relocate:
+                        # 덮어쓰기는 원래 자리를 지킨다(`store.write`). 저장 창에서는 사용자가 카테고리를 **직접
+                        # 골랐으므로** 그 자리로 옮긴다. 저장이 끝난 뒤에만 한다 - 실패한 저장이 옛 스냅샷의 자리만
+                        # 바꾸면 안 된다.
+                        try:
+                            storage.move(name, folder)
+                        except (OSError, ValueError) as exc:
+                            skipped.append(f"folder: {exc}")
+                    suffix = " / ".join(skipped)
+                    return self._response(f"Snapshot 저장: {name}" + (f" (건너뜀: {suffix})" if suffix else ""),
+                                          level="warning" if skipped else "success", saved_name=name)
 
-    def apply(self, name: str, sections: list[str] | None = None) -> dict[str, Any]:
+            return commit
+
+    def _apply_toast(self, name: str, skipped: list, warnings: list) -> dict[str, Any]:
+        return self.context._toast(
+            f"Snapshot 불러오기: {name}" + (f" (건너뜀 {len(skipped)}개)" if skipped else "")
+            + (f" (알림 {len(warnings)}개)" if warnings else ""),
+            level="warning" if skipped or warnings else "success")
+
+    def merge_apply(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+        """둘로 나눠 부른 되돌리기(`part="session"` 뒤에 `part="dataset"`)의 응답을 하나로.
+
+        상태는 나중 것(가장 새 목록)을 쓰고, 보고는 둘을 잇는다. 끝 알림은 **합친 수로 한 번만** 낸다.
+        둘째가 시작도 못 했으면(그사이 모드가 바뀌었다 등) 첫째의 결과에 그 오류 알림을 덧붙인다.
+        """
+        first_report = _dict(first.get("apply_report"))
+        second_report = _dict(second.get("apply_report"))
+        first_extra = [m for m in first.get("_headless_extra_messages", []) if isinstance(m, dict)]
+        second_extra = [m for m in second.get("_headless_extra_messages", []) if isinstance(m, dict)]
+        merged = dict(second)
+        name = str(second_report.get("name") or first_report.get("name") or "")
+        restored = [*first_report.get("restored", []), *second_report.get("restored", [])]
+        skipped = [*first_report.get("skipped", []), *second_report.get("skipped", [])]
+        warnings = [*first.get("apply_warnings", []), *second.get("apply_warnings", [])]
+        merged["apply_report"] = {"name": name, "restored": restored, "skipped": skipped}
+        if warnings:
+            merged["apply_warnings"] = warnings
+        if second_report:
+            quiet = [m for m in [*first_extra, *second_extra] if m.get("type") != "toast"]
+            merged["_headless_extra_messages"] = [*quiet, self._apply_toast(name, skipped, warnings)]
+        else:
+            merged["_headless_extra_messages"] = [*first_extra, *second_extra]
+        return merged
+
+    def apply(self, name: str, sections: list[str] | None = None, *, part: str = "") -> dict[str, Any]:
+        """`part`: "" = 전부 · "session" = 데이터셋만 빼고 · "dataset" = 데이터셋만.
+
+        ⚠️ 데이터셋을 되돌리는 명령은 둘로 나눠 부른다(`module_commands`): 세션에 값을 넣는 일(프리셋 ·
+           캐릭터 · 조건부 · 참조)은 **이벤트 루프 위에서** 해야 다른 창의 프리셋 · 모드 변경과 차례가 지켜진다.
+           통째로 작업 스레드에 넘기면 `*snapshot` 으로 넘어가는 도중에 다른 창이 프리셋을 바꿀 수 있고,
+           그러면 스냅샷의 값이 그 프리셋에 섞여 저장된다(Codex 리뷰 2026-10-05). 긴 파일 읽기는 데이터셋뿐이다.
+        """
         with self._lock:
             context = self.context
             if self._support_blocker():
@@ -327,6 +411,13 @@ class HeadlessSnapshotService:
             if sections is not None and not isinstance(sections, list):
                 return self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error")
             selected = [key for key in SNAPSHOT_SECTIONS if key in (parts if sections is None else sections)]
+            if part:
+                selected = [key for key in selected if (key == "search") == (part == "dataset")]
+                if not selected:
+                    # 나눠 부른 반쪽에 할 일이 없다 - 알릴 것도 없다(다른 반쪽이 알린다).
+                    state = self.state()
+                    state["apply_report"] = {"name": name, "restored": [], "skipped": []}
+                    return state
             if not selected:
                 return self._response("선택한 Snapshot 항목이 없습니다",
                                       apply_report={"name": name, "restored": [], "skipped": []})
@@ -469,9 +560,7 @@ class HeadlessSnapshotService:
                     extra.append(context.search_state_payload())
                 except Exception as exc:
                     warnings.append({"key": "state.search", "reason": str(exc)})
-            extra.append(context._toast(f"Snapshot 불러오기: {name}" + (f" (건너뜀 {len(skipped)}개)" if skipped else "")
-                                        + (f" (알림 {len(warnings)}개)" if warnings else ""),
-                                        level="warning" if skipped or warnings else "success"))
+            extra.append(self._apply_toast(name, skipped, warnings))
             state = self.state()
             state["apply_report"] = {"name": name, "restored": restored, "skipped": skipped}
             if warnings:
@@ -527,12 +616,8 @@ class HeadlessSnapshotService:
         if key == "preview":
             return self.save_preview()
         if key == "save":
-            if "sections" in payload and not isinstance(payload["sections"], list):
-                return self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error")
-            return self.capture(name, self.context._coerce_bool(payload.get("include_search", False)),
-                                self.context._coerce_bool(payload.get("overwrite", False)), payload.get("folder", ""),
-                                str(payload.get("image") or ""), payload.get("sections"),
-                                self.context._coerce_bool(payload.get("relocate", False)))
+            pending = self.begin_save(payload)
+            return pending() if callable(pending) else pending
         if key == "apply":
             if "sections" in payload and not isinstance(payload["sections"], list):
                 return self._response("Snapshot 항목 목록이 올바르지 않습니다", level="error")

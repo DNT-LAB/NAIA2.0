@@ -3061,7 +3061,7 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .catch(error => {
     console.error('Failed to initialize V5 Scene panel', error);
   });
-const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapnosave')
+const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapreview')
   .then(({createSnapshotPanel}) => {
     snapshotControl = createSnapshotPanel({
       document,
@@ -3072,7 +3072,14 @@ const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapnos
       showPromptDialog,
       showConfirmDialog,
       // 저장 · 불러오기 직전에 밀린 편집을 먼저 보낸다 - 프리셋 전환과 같은 길목이다.
-      flushEdits: () => flushPromptPresetSaveState(),
+      // ⚠️ 프리셋 쪽(프롬프트 · Prefix · 생성 설정)만 밀면 모자라다. 캐릭터 퀵 패널 · 조건부 규칙도 0.5초 묵혀
+      //    보내는데(대기 자리 하나 - `pendingModuleEdit`), 그 안에 [저장] 을 누르면 옛 값이 담겼다
+      //    (Codex 리뷰 2026-10-05). 어느 모듈의 것이든 먼저 내보낸다.
+      flushEdits: () => {
+        flushPendingModuleEdit();
+        flushPromptPresetSaveState();
+      },
+      onSaveAbandoned: request => snapshotSaveControl?.saveAbandoned(request),
     });
     const cached = moduleStateCache.get('snapshot');
     if (cached) snapshotControl.render(cached);
@@ -3083,7 +3090,7 @@ const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapnos
 // 스냅샷 저장 창(결과 그림 우클릭 > [NAI] 스냅샷 저장). 저장은 Snapshot 창의 입구를 빌린다 -
 // 밀린 편집 flush 와 '같은 이름이 있다' 되묻기의 재전송이 거기 들어 있다.
 const snapshotSaveReady = snapshotReady
-  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261005-snapsave2'))
+  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261005-snapreview'))
   .then(({createSnapshotSaveWindow}) => {
     snapshotSaveControl = createSnapshotSaveWindow({
       document,

@@ -22,7 +22,7 @@
  * ⚠️ 조작은 전부 `setModuleParam('snapshot', …)` 을 탄다 - 새 WS 메시지 타입을 만들지 않는다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
-import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapnosave';
+import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapreview';
 
 // 담을 항목의 마지막 선택. **꺼 둔 것만** 적는다 - 항목이 늘어도 새 항목은 켜진 채로 나온다.
 // 처음에는 데이터셋(크기만큼 용량을 쓴다)과 조건부 프롬프트가 꺼져 있다(사용자 지정 2026-10-05).
@@ -72,7 +72,8 @@ export function createSnapshotSaveWindow({
   let sub = '';                // 그 아래 하위
   let off = readOff();
   let busy = false;
-  let awaiting = null;         // {name, before} - 보낸 저장이 목록에 나타나기를 기다린다
+  let awaiting = null;         // {id} - 보낸 저장의 표식. 서버의 답(`save_result`)이 이것을 달고 온다
+  let saveSeq = 0;
   let wantFolder = false;      // 방금 만든 카테고리를 기다리는 중
   let restoreFolder = '';      // 지난번에 담은 카테고리 - 목록을 받은 뒤에야 고를 수 있다
   let previewAt = 0;
@@ -378,12 +379,15 @@ export function createSnapshotSaveWindow({
       if (made.parent) { top = String(made.parent); sub = String(made.id); } else { top = String(made.id); sub = ''; }
     }
     if (restoreFolder && panel?.isOpen()) { selectFolder(restoreFolder); restoreFolder = ''; }
-    busy = false;
-    if (awaiting) {
-      const row = findByName(awaiting.name);
-      if (row && String(row.saved_at || '') !== awaiting.before) {
+    // ⚠️ **내가 보낸 저장의 답**만 저장의 답으로 읽는다(Codex 리뷰 2026-10-05). 예전에는 어느 상태 응답이든
+    //    잠금을 풀었고(미리보기 응답이 저장 중에 [저장] 을 되살렸다), 목록에 그 이름이 보이면 담긴 것으로 쳤다 -
+    //    서버가 "같은 이름이 있다" 고 되물은 응답에도 그 이름이 있어, 확인하기도 전에 창이 닫혔다.
+    const result = state.save_result;
+    if (awaiting && result && String(result.request_id || '') === awaiting.id) {
+      awaiting = null;
+      busy = false;
+      if (result.ok) {
         // 담겼다. 창을 걷는다 - 실패했으면(그림이 사라졌다 등) 열어 둔 채로 고쳐 다시 누를 수 있다.
-        awaiting = null;
         rememberFolder();
         const input = $('[data-ss="name"]');
         if (input) input.value = '';
@@ -391,6 +395,8 @@ export function createSnapshotSaveWindow({
         return;
       }
     }
+    // 되묻기(같은 이름이 있다)는 아직 답이 아니다 - 확인 창은 Snapshot 창 모듈이 띄우고, 승낙하면 같은 표식으로
+    // 다시 보낸다. 그동안 [저장] 은 잠근 채로 둔다. 취소하면 `saveAbandoned` 가 풀어 준다.
     renderAll();
   }
 
@@ -415,6 +421,14 @@ export function createSnapshotSaveWindow({
   }
 
   function close() { panel?.close(); }
+
+  /** 되묻기에서 사용자가 취소했다 - 그 저장은 끝났다(안 보내졌다). 다시 누를 수 있게 푼다. */
+  function saveAbandoned(request) {
+    if (!awaiting || String(request?.request_id || '') !== awaiting.id) return;
+    awaiting = null;
+    busy = false;
+    renderCard();
+  }
 
   // ── 조작 ─────────────────────────────────────────────────────────────────
   async function newFolder(parent) {
@@ -441,10 +455,20 @@ export function createSnapshotSaveWindow({
                                   {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'});
       if (!ok) return;
     }
-    awaiting = {name, before: existing ? String(existing.saved_at || '') : ''};
+    saveSeq += 1;
+    const id = `ss-${Date.now().toString(36)}-${saveSeq}`;
+    awaiting = {id};
     busy = true;
     renderCard();
-    saveSnapshot({name, image: draft.image, sections, folder: sub || top, relocate: true}, {overwrite: !!existing});
+    const sent = saveSnapshot({name, image: draft.image, sections, folder: sub || top, relocate: true, request_id: id},
+                              {overwrite: !!existing});
+    if (sent === false) {
+      // 연결이 끊겨 있다 - 답이 올 리 없다. 잠근 채로 두면 창을 닫았다 열어야 한다.
+      awaiting = null;
+      busy = false;
+      renderCard();
+      showToast('서버에 연결되어 있지 않아 저장을 보내지 못했습니다', 'error');
+    }
   }
 
   function onClick(event) {
@@ -477,5 +501,5 @@ export function createSnapshotSaveWindow({
     save();
   }
 
-  return {open, close, render, isOpen: () => !!panel && panel.isOpen()};
+  return {open, close, render, saveAbandoned, isOpen: () => !!panel && panel.isOpen()};
 }

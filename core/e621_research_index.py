@@ -149,11 +149,9 @@ class E621ResearchIndex:
         # done during a query so opening the module need not copy every wiki.
         self.bodies = {tag: str(self.by_tag[tag].get("wiki_body") or self.by_tag[tag].get("wiki_preview"))
                        for tag in metadata._body_tags if tag in self.by_tag}
-        self.korean = {}
-        for tag in metadata.search_field_tags:
-            if tag in self.by_tag:
-                normal = tuple(search_key(value) for value in metadata.search_fields(tag))
-                self.korean[tag] = (*normal, *(value.replace(" ", "") for value in normal))
+        # 한국어 검색 필드는 첫 검색 때 준비한다(_korean_fields). 모듈을 여는 데는 쓰이지 않는데, 이름을 붙인 태그가
+        # 6천 → 2만 1천 개로 늘면서 여기서만 첫 열기가 0.55 → 0.70초가 됐다(실측 2026-10-05).
+        self._korean = None
         self._query_key = None
         self._matches = None
 
@@ -184,7 +182,7 @@ class E621ResearchIndex:
         pattern = re.compile(re.escape(needle).replace(r"\ ", r"[\s_]+")) if " " in needle else None
         matches = {tag: (TAG_NAME, 0, 0 if needle and needle == search_key(tag) else 1)
                    for tag in self.by_tag if (pattern.search(tag.lower()) if pattern else needle in tag.lower())}
-        for tag, fields in self.korean.items():
+        for tag, fields in self._korean_fields().items():
             bits, compact_bits, direct_bits = 0, 0, 0
             for position, bit in ((0, KOREAN_NAME), (1, KOREAN_NAME), (2, KOREAN_DESCRIPTION), (3, KOREAN_KEYWORDS)):
                 if fields[position] and needle in fields[position]:
@@ -206,6 +204,16 @@ class E621ResearchIndex:
                     previous = matches.get(tag, (0, 0, 1))
                     matches[tag] = (previous[0] | STORED_BODY, previous[1], previous[2])
         return matches
+
+    def _korean_fields(self):
+        if self._korean is None:
+            prepared = {}
+            for tag in self.metadata.search_field_tags:
+                if tag in self.by_tag:
+                    normal = tuple(search_key(value) for value in self.metadata.search_fields(tag))
+                    prepared[tag] = (*normal, *(value.replace(" ", "") for value in normal))
+            self._korean = prepared
+        return self._korean
 
     def filter_rows(self, rows, *, content_filter, hidden, starred, starred_only, matches):
         allowed = self.metadata.content_tags(content_filter)

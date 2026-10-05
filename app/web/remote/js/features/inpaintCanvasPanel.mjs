@@ -73,6 +73,7 @@ const CANVAS_KEYS = [
   [['Ctrl', 'V'], '이미지를 새 레이어로 붙여넣기'],
   [['0'], '고른 레이어 초기화'],
   [['우클릭'], '반전 · 90° 회전 메뉴'],
+  [['Del'], '고른 레이어 지우기 (묻고 지웁니다)'],
 ];
 
 // 백엔드 `clamp_scale` 과 같은 한계. 어긋나면 화면이 보내 놓고 다른 값을 되받는다.
@@ -983,8 +984,33 @@ export function createInpaintCanvasPanel({
     send('layer_visible', {id, visible: layerRow(id)?.visible === false});
   }
 
-  function removeLayer(id) {
-    if (id === 'base') return;
+  /** 레이어를 지운다 - **늘 묻고 나서**(사용자 지정 2026-10-05: "인페인트 모드에서는 무조건 팝업으로
+   *  물어봅니다"). 목록의 휴지통 · 우클릭 메뉴 · Del 키가 모두 여기를 지난다.
+   *
+   *  ⚠️ '묻지 않기' 는 두지 않는다. 올린 그림은 지우면 되돌릴 길이 없다(되돌리기는 이동 · 회전뿐이다).
+   *  ⚠️ 묻는 사이 세션이 바뀌거나 그 레이어가 사라질 수 있다 - 답을 받은 뒤 다시 본다.
+   */
+  let removeAsking = false;
+  async function removeLayer(id) {
+    if (id === 'base' || removeAsking) return;
+    const row = layerRow(id);
+    if (!row || !state?.active) return;
+    const askedIn = String(state.window_id ?? '');
+    let confirmed = true;
+    if (typeof showConfirmDialog === 'function') {
+      removeAsking = true;
+      try {
+        confirmed = await showConfirmDialog(
+          `'${row.name || '이미지'}' 레이어를 지울까요?\n지운 레이어는 되돌릴 수 없습니다.`,
+          {title: '레이어 지우기', okText: '지우기', cancelText: '취소'});
+      } catch (_) {
+        confirmed = false;
+      } finally {
+        removeAsking = false;
+      }
+    }
+    if (!confirmed) return;
+    if (!state?.active || String(state.window_id ?? '') !== askedIn || !layerRow(id)) return;
     // 지운 레이어를 가리키는 되돌리기는 갈 곳이 없다.
     undoStack = undoStack.filter(snap => snap.id !== id);
     send('layer_remove', {id});
@@ -2055,6 +2081,28 @@ export function createInpaintCanvasPanel({
       // 클립보드 그림에는 이름이 없다(앱이 붙인 'Clipboard Image') - 목록에서 알아보게 적는다.
       const generic = !label || label === 'Clipboard Image';
       uploadLayer(blob, {label: generic ? '붙여넣기' : label});
+      return true;
+    },
+    /** 인페인트 세션이 열려 있는가(캔버스를 쓰는 세션). 히스토리 삭제가 이 동안에는 반드시 묻는다. */
+    isSessionActive() {
+      return !!(state?.active && state?.canvas_supported);
+    },
+    /** Del(· Backspace · Ctrl+D) 키. **편집 화면에서는 이 키가 레이어의 것**이다 - true 를 돌려주면
+     *  히스토리는 아무것도 지우지 않는다(사용자 제보 2026-10-05).
+     *
+     *  고른 레이어를 (묻고 나서) 지운다. 원본을 골랐으면 지우지 않고 말해 준다 - 조용하면
+     *  키가 죽은 것으로 읽히고, 그렇다고 히스토리로 넘기면 엉뚱한 것이 지워진다.
+     *  결과 보기 중에는 false - 그때 보이는 것은 결과 그림이라 예전처럼 히스토리의 키다.
+     */
+    handleDeleteKey() {
+      if (!state?.active || !state?.canvas_supported || viewMode !== 'edit') return false;
+      closeLayerMenu();
+      const id = activeLayerId();
+      if (id === 'base') {
+        showToast?.('원본은 지울 수 없습니다 - 지울 레이어를 먼저 고르세요', 'info');
+        return true;
+      }
+      removeLayer(id);
       return true;
     },
     /** 큰 Generate 버튼이 지나는 문. 도크 버튼과 **같은 함수**다 - 가드도 flush 도

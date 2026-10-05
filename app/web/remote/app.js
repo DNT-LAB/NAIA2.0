@@ -1246,7 +1246,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260830-railbar')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20261005-delkey-guard')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -1271,6 +1271,10 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260830-ra
       // 미저장 이미지는 지우면 휴지통에도 안 남는다 — 확인 창을 건너뛸지
       // 말지가 이 값에 걸린다. 상태가 아직 없으면 -1(모름)로 넘긴다.
       clearAllHistory: () => clearResultHistory(),
+      // 인페인트 편집 화면에서는 Del 이 레이어의 것이다(히스토리의 그림을 지우지 않는다). 세션 중의
+      // 히스토리 삭제는 '묻지 않기' 를 켜 놨어도 반드시 묻는다(사용자 지정 2026-10-05).
+      deleteKeyGuard: () => inpaintCanvasControl?.handleDeleteKey?.() === true,
+      mustConfirmDelete: () => inpaintCanvasControl?.isSessionActive?.() === true,
       getUnsavedCount: () => {
         const n = autoSavePanel?.getState()?.unsaved_history_count;
         return Number.isFinite(Number(n)) ? Number(n) : -1;
@@ -2980,7 +2984,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261005-dock-target2')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261005-delkey')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),

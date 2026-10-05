@@ -69,6 +69,12 @@ export function createResultHistoryController({
   // 히스토리 통째로 비우기. Auto Save 판이 갖고 있던 흐름을 그대로 부른다 —
   // 미저장 장수를 세어 경고하는 확인 창이 거기 붙어 있다.
   clearAllHistory = null,
+  // Del 키를 **다른 화면이 먼저 가져가는가.** 인페인트 편집 화면에서는 Del 이 레이어의 것이다 -
+  // true 를 돌려주면 히스토리는 아무것도 지우지 않는다(사용자 제보 2026-10-05: 캔버스를 고치다
+  // Del 을 누르자 히스토리에서 골라 둔 그림의 삭제 창이 떴다 - '묻지 않기' 를 켜 둔 사람은 말없이 지워진다).
+  deleteKeyGuard = null,
+  // 지금은 **반드시 물어보고** 지워야 하는가(인페인트 세션 중). '묻지 않기' 두 가지를 모두 이긴다.
+  mustConfirmDelete = null,
 }) {
   const getEl = id => document.getElementById(id);
   const viewerTab = getEl('viewerTab');
@@ -714,7 +720,18 @@ export function createResultHistoryController({
     //    섞이면 매번 다시 물었다 - 사용자가 원한 '딸깍 한 번' 이 그것 때문에 막혔다.
     //    이제 백엔드가 미저장분도 휴지통에 한 벌 남기므로(`_rescue_unsaved_to_trash`)
     //    "되돌릴 수 없다" 는 전제 자체가 없어졌다.
+    let shouldAsk = false;
     if (!viewerBindings.skipDeleteConfirm() && !skipDeleteConfirmThisRun) {
+      shouldAsk = true;
+    }
+    // ⚠️ 인페인트 세션 중에는 **무조건 묻는다**(사용자 지정 2026-10-05). 캔버스를 고치는 손이
+    //    Del 에 가 있어서, '묻지 않기' 를 켜 둔 채로는 히스토리의 그림이 말없이 지워진다.
+    //    위의 '묻지 않기' 둘을 모두 이긴다(미저장 여부로 가르지 않는다는 약속과는 별개다).
+    let forceConfirm = false;
+    try { forceConfirm = typeof mustConfirmDelete === 'function' && mustConfirmDelete() === true; }
+    catch (_) { forceConfirm = false; }
+    if (forceConfirm) shouldAsk = true;
+    if (shouldAsk) {
       // ⚠️ 문구가 사실과 어긋나면 안 된다. 미저장분도 이제 휴지통을 거치므로
       //    "지우면 되돌릴 수 없습니다" 는 **거짓말**이 됐다.
       const warn = recoverable ? ''
@@ -730,7 +747,8 @@ export function createResultHistoryController({
           title: '선택 항목 삭제',
           okText: `삭제 (${paths.length})`,
           cancelText: '취소',
-          checkbox: askOnce,
+          // 반드시 물어야 하는 자리에서는 '묻지 않기' 를 내밀지 않는다 - 켜도 안 먹는 약속이 된다.
+          checkbox: forceConfirm ? null : askOnce,
         })
         : window.confirm(message);
       if (!confirmed) return;
@@ -1924,6 +1942,16 @@ export function createResultHistoryController({
             && String(event.key).toLowerCase() === 'd'
             && commandKey && !event.altKey && !event.shiftKey
             && !viewerBindings.isCapturing());
+      // ⚠️ **다른 화면이 Del 을 가져가면 히스토리는 손대지 않는다**(`deleteKeyGuard` 주석).
+      //    선택이 있든 없든 먼저 묻는다 - 인페인트 편집 화면은 선택이 없어도 Del 로 레이어를 지운다.
+      if (deleteKey && typeof deleteKeyGuard === 'function') {
+        let claimed = false;
+        try { claimed = deleteKeyGuard(event) === true; } catch (_) { claimed = false; }
+        if (claimed) {
+          event.preventDefault();
+          return;
+        }
+      }
       if (deleteKey && selectedPaths.size) {
         event.preventDefault();
         deleteSelected();

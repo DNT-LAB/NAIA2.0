@@ -710,6 +710,10 @@ export function createInpaintCanvasPanel({
   function drawDock() {
     panel.innerHTML = dockHtml();
     panel.dataset.icDockLayer = activeLayerId();
+    // 어느 세션의 도크인가. 반복 칸에 쓰는 사이 다른 탭이 세션을 바꾸면 도크는 옛 그림의 것인데
+    // `base` 라는 같은 id 가 새 그림에도 있다(Codex 확인 리뷰 2026-10-05: 옛 150% 표시에서 새
+    // 세션에 `base_scale 1.51` 이 나갔다). 메뉴(`icMenuWindow`)와 같은 이유다.
+    panel.dataset.icDockWindow = String(state?.window_id ?? '');
     dockStale = false;
   }
 
@@ -724,7 +728,8 @@ export function createInpaintCanvasPanel({
    */
   function dockLayerId() {
     const id = panel?.dataset?.icDockLayer || '';
-    if (id && layerRow(id)) return id;
+    const sameSession = (panel?.dataset?.icDockWindow ?? '') === String(state?.window_id ?? '');
+    if (id && sameSession && layerRow(id)) return id;
     dockStale = true;
     if (!rangeDragging && !typingInPanel() && !restorePop) refreshChrome();
     return null;

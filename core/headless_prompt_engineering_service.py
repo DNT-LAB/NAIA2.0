@@ -1104,7 +1104,11 @@ class HeadlessPromptEngineeringService:
         # 아직 세션에 등장하지 않은 선언된 키도 유효하다. 현재 값 유무로 복원을 막지 않는다.
         known = (set(context.remote_params or {}) | REMOTE_BOOLEAN_PARAMS | REMOTE_INT_PARAMS
                  | REMOTE_FLOAT_PARAMS | set(REMOTE_OPTION_DEFAULTS) | RUNTIME_REMOTE_PARAM_KEYS
-                 | {"prompt", "negative", "negative_prompt", *extra_keys})
+                 | {"prompt", "negative", "negative_prompt", *extra_keys}
+                 # 해상도 프리셋의 **이름**. 켜짐 여부(`nai_resolution_preset_enabled`)만 선언돼 있어, 한 번도 고른 적
+                 # 없는 세션에서는 '모르는 파라미터' 로 건너뛰고 오류를 띄웠다(실측 2026-10-05 - 빈 사용자 폴더에서
+                 # 기본 스냅샷을 불러오면 매번 "되돌리지 못한 항목 1개"). 담을 때는 늘 함께 담긴다.
+                 | {"nai_resolution_preset"})
         skipped = []
         for key, value in main_settings.items():
             try:

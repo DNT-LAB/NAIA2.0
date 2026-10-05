@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import threading
+from pathlib import Path
 from typing import Any, Callable
 
 from core.character_state_transfer import capture_character_state, replace_character_state
@@ -31,6 +32,7 @@ class HeadlessSnapshotService:
         self._lock = threading.RLock()
         self._reset_search_filter: Callable[[], None] | None = None
         self._rebuild_search_filter: Callable[[], Any] | None = None
+        self._defaults_checked: set[str] = set()
 
     def register_search_runtime(self, *, reset_filter: Callable[[], None],
                                 rebuild_filter: Callable[[], Any]) -> None:
@@ -41,6 +43,21 @@ class HeadlessSnapshotService:
     def store(self) -> SnapshotStore:
         return get_prompt_engineering_store(self.context).snapshot_store(self.context.get_api_mode())
 
+    def _place_default_snapshots(self, storage: SnapshotStore) -> None:
+        """배포판에 실린 기본 스냅샷을 이 모드의 보관함에 놓는다 - 프로세스마다 모드당 한 번만 살핀다
+        (놓을지 말지는 보관함의 기록이 정한다: `core.snapshot_defaults`). 실패해도 화면은 그대로 뜬다."""
+        mode = str(self.context.get_api_mode() or "")
+        if mode in self._defaults_checked:
+            return
+        self._defaults_checked.add(mode)
+        try:
+            from core.snapshot_defaults import TEMPLATE_DIR, seed_default_snapshots
+
+            template = self.context.runtime_paths.resource_path(Path(*TEMPLATE_DIR) / mode)
+            seed_default_snapshots(storage, template)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[snapshot] default snapshots skipped: {ascii(exc)}", flush=True)
+
     def _support_blocker(self) -> str:
         if self.context.get_api_mode() != "NAI":
             return "mode"
@@ -50,6 +67,7 @@ class HeadlessSnapshotService:
     def state(self) -> dict[str, Any]:
         context = self.context
         storage = self.store()
+        self._place_default_snapshots(storage)
         blocker = self._support_blocker()
         has_image = bool(getattr(context.result_store, "latest_webp", None))
         pe_store = get_prompt_engineering_store(context)

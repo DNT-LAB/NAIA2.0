@@ -1,0 +1,106 @@
+{
+  "mode": "NAI",
+  "model": "NAID5F",
+  "app_version": "",
+  "preset": {
+    "source_preset": "artist_bench_recommend",
+    "module_settings": {
+      "pre_prompt": "-1::artist collaboration ::, 0.75::",
+      "post_prompt": "countershade ::, year 2024, masterpiece, very aesthetic, high-quality digital art, high complexity, -0.25::low complexity, detailed background ::, 0.15::ultra complexity ::, no text, depthness",
+      "auto_hide_prompt": "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, bad id, _logo, bad twitter id, comic, __background__, ~blurry background, ~sky background, character doll, stuffed animal, stuffed toy, speech bubble, cyclops, pov, 3d, glasses, mole, text focus, thought bubble, watermark, web address, body writing, fake screenshot, facing away, |_|, __piercing__, tattoo, _tattoo, _text, sound effects, greyscale, multiple views, __pubic hair__, peeing, rabbit, __censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, child on child, covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, multiple boys, __measuring__, multiple views, big belly, curvy, doll joints, dark-skinned male, looking at viewer, timestamp, battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, signature, alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, armpit hair, health bar, snapchat, facial mark, emoji, command spell, dark areolae, __piercing__, __bed__, __pillow__, __sheet__, body markings, obese, __long tongue__, toddlercon, __name__, handprint, __pasties__, mini person, __butt plug__, __eyepatch__, oppai loli, sex toy, loli, chibi, chibi inset, makeup, mascara, large breasts, runny makeup, third eye, anal hair, __halo__, __(style)__, __(cosplay)__, shikishi",
+      "preprocessing_options": {
+        "remove_author": true,
+        "remove_work_title": true,
+        "remove_character_name": true,
+        "remove_character_features": true,
+        "remove_clothes": false,
+        "remove_clothing_event": false,
+        "remove_color": true,
+        "remove_location_and_background_color": true,
+        "remove_expression": false,
+        "remove_pose_action": false,
+        "remove_meta_tags": true,
+        "remove_object_tags": false,
+        "remove_noise_tags": false,
+        "closed_eyes_sync": true,
+        "e621_auto_boost": false,
+        "danbooru_auto_weight": false,
+        "tag_implication_compression": false,
+        "category_annotation": true
+      },
+      "e621_settings": {
+        "weight": 1.05,
+        "hidden_tags": [],
+        "mode": "confused"
+      },
+      "danbooru_weight_settings": {
+        "magnitude": 3,
+        "rating_blend": 0.3,
+        "override_on": true,
+        "override_scale": 0.9,
+        "override_min": 0.55,
+        "override_max": 1.25,
+        "rating_override_on": true,
+        "rating_override": "s",
+        "invert_weight": false
+      },
+      "ollama_boost_settings": {
+        "nl_weight": 1.0,
+        "effort": "rich",
+        "include_prefix": false,
+        "include_postfix": false,
+        "include_e621": false,
+        "allow_scent_style": true,
+        "allow_material_style": true,
+        "allow_light_style": false,
+        "emphasize_framing": false
+      }
+    },
+    "main_settings": {
+      "prompt": "1girl, -1::artist collaboration ::, 0.75::, \n\n, \n#의상:\n, swimsuit, bare shoulders, bikini, open jacket, open clothes, collar, jacket, \n#표정:\n, open mouth, tareme, smile, \n#포즈/동작:\n, clothes down, upper body, navel, \n#추가:\n, solo, \n\n, countershade ::, year 2024, masterpiece, very aesthetic, high-quality digital art, high complexity, -0.25::low complexity, detailed background ::, 0.15::ultra complexity ::, no text, depthness",
+      "negative": "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy, no human, head out of frame, perspective, closed eyes, monochrome, comic",
+      "model": "NAID5F",
+      "sampler": "k_euler_ancestral",
+      "scheduler": "karras",
+      "resolution": "1088 x 960",
+      "steps": 23,
+      "cfg_scale": 6.7,
+      "cfg_rescale": 0.0,
+      "seed": 7583682359,
+      "seed_fixed": false,
+      "SMEA": false,
+      "DYN": false,
+      "VAR+": false,
+      "DECRISP": false,
+      "enable_hr": true,
+      "random_resolution": true,
+      "auto_fit_resolution": true,
+      "width": 1088,
+      "height": 960,
+      "prompt_fixed": false,
+      "wildcard_standalone": false,
+      "nai_resolution_preset_enabled": true,
+      "nai_resolution_preset": "normal",
+      "transparent_background": false
+    }
+  },
+  "characters": {
+    "is_active": true,
+    "position_mode": "auto",
+    "frames": [
+      {
+        "prompt": "girl, original, young female, adolescent, slender figure, animal ears, blue eyes, rabbit ears, rabbit girl, short hair, sidelocks, white hair, medium breasts",
+        "uc": "furry female, narrow waist, wide hips, chibi, belly, flat chest, loli",
+        "custom_name": "",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "connect_to": 0
+      }
+    ]
+  },
+  "schema": "naia.snapshot.v1",
+  "name": "아티스트 벤치전용",
+  "seed_folder": "샘플"
+}

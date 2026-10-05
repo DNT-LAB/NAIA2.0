@@ -22,7 +22,7 @@
  * ⚠️ 조작은 전부 `setModuleParam('snapshot', …)` 을 탄다 - 새 WS 메시지 타입을 만들지 않는다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
-import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapreview2';
+import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapreview3';
 
 // 담을 항목의 마지막 선택. **꺼 둔 것만** 적는다 - 항목이 늘어도 새 항목은 켜진 채로 나온다.
 // 처음에는 데이터셋(크기만큼 용량을 쓴다)과 조건부 프롬프트가 꺼져 있다(사용자 지정 2026-10-05).
@@ -366,7 +366,9 @@ export function createSnapshotSaveWindow({
     if (line) { line.hidden = !blocker; line.textContent = blocker; }
     const button = $('[data-ss-act="save"]');
     if (button) {
-      button.disabled = busy || !!blocker || !pickedKeys().length;
+      // ⚠️ 눌러도 되는지는 **보낼 항목**으로 본다. 보이는 항목(`pickedKeys`)으로 보면, Vibe 만 고르고 방금 켠
+      //    사람은 낡은 미리보기(0) 때문에 [저장] 이 잠겨 누르지도 못한다(Codex 3차 리뷰 2026-10-05).
+      button.disabled = busy || !!blocker || !sendKeys().length;
       button.textContent = busy ? '저장 중…' : '저장';
     }
   }
@@ -460,8 +462,8 @@ export function createSnapshotSaveWindow({
     if (name.startsWith('_')) { showToast('이름은 _ 로 시작할 수 없습니다', 'error'); input?.focus(); return; }
     const blocker = blockerText();
     if (blocker) { showToast(blocker, 'error'); return; }
-    const sections = pickedKeys();
-    if (!sections.length) { showToast('담을 항목을 하나 이상 체크하세요', 'error'); return; }
+    // 보낼 항목(사용자의 선택)으로 가린다 - 켜 둔 Vibe · Reference 가 정말 없는지는 서버가 담는 순간에 본다.
+    if (!sendKeys().length) { showToast('담을 항목을 하나 이상 체크하세요', 'error'); return; }
     // ⚠️ **다듬은 이름으로 견준다** - 목록의 이름은 이미 다듬어져 있다.
     const existing = findByName(name);
     if (existing) {

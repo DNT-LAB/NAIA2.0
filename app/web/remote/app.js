@@ -3061,7 +3061,7 @@ const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
   .catch(error => {
     console.error('Failed to initialize V5 Scene panel', error);
   });
-const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapreview2')
+const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapreview3')
   .then(({createSnapshotPanel}) => {
     snapshotControl = createSnapshotPanel({
       document,
@@ -3090,7 +3090,7 @@ const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snaprev
 // 스냅샷 저장 창(결과 그림 우클릭 > [NAI] 스냅샷 저장). 저장은 Snapshot 창의 입구를 빌린다 -
 // 밀린 편집 flush 와 '같은 이름이 있다' 되묻기의 재전송이 거기 들어 있다.
 const snapshotSaveReady = snapshotReady
-  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261005-snapreview2'))
+  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261005-snapreview3'))
   .then(({createSnapshotSaveWindow}) => {
     snapshotSaveControl = createSnapshotSaveWindow({
       document,

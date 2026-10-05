@@ -21,8 +21,11 @@ SNAPSHOT_SECTIONS = (
 )
 PRESET_SECTIONS = SNAPSHOT_SECTIONS[:4]
 _FORBIDDEN_NAME_CHARS = '<>:"/\\|?*'
-# 덮어쓰기가 비켜 둔 옛 폴더(`_old_*`) 안에 남기는 표식: "교체가 끝났다 - 버려도 된다".
-_SUPERSEDED = ".superseded"
+# 덮어쓰기가 비켜 둔 옛 폴더(`_old_<id>`) **옆에** 남기는 기록(`_old_<id>.done`): "교체가 끝났다 - 버려도 된다".
+# ⚠️ 폴더 안에 두지 않는다. 지우다 만 폴더에서는 표식이 먼저 사라질 수 있다 - `snapshot.json` 만 잡혀서 남으면
+#    그것이 '되돌리지 못한 원본' 으로 읽혀, 사용자가 새 스냅샷을 지운 뒤 그림 없는 옛것이 되살아난다
+#    (Codex 3차 리뷰 2026-10-05).
+_DONE_SUFFIX = ".done"
 # 교체(옛 폴더 비키기 -> 새 폴더 놓기 -> 표식)와 `_recover_old` 를 한 번에 하나만. 저장의 쓰기는 작업 스레드에서
 # 돌 수 있고 목록 읽기는 이벤트 루프에서 온다 - 두 걸음 사이에 훑기가 끼면, 방금 비킨 폴더를 '되돌리지 못한
 # 원본' 으로 보고 제자리에 돌려놓아 새 폴더가 놓일 자리를 막는다.
@@ -286,27 +289,38 @@ class SnapshotStore:
                         raise OSError(f"교체 실패({swap_error}) - 옛 스냅샷은 {backup.name} 에 남겨 두었습니다") from restore_error
                 raise
             if backup is not None:
-                # 새 폴더가 자리 잡았다 - 이제야 옛것은 버려도 된다. **버려도 되는 것에만 표식을 남긴다**:
-                # 표식 없는 `_old_*` 는 되돌리지 못한 원본일 수 있어 아무도 지우지 않는다(Codex 2차 리뷰 BLOCK -
-                # 표식 없이 이름만 보고 치우면, 되돌리기에 실패해 거기에만 남은 원본을 다음 저장이 지운다).
+                # 새 폴더가 자리 잡았다 - 이제야 옛것은 버려도 된다. **버려도 되는 것에만 기록을 남긴다**:
+                # 기록 없는 `_old_*` 는 되돌리지 못한 원본일 수 있어 아무도 지우지 않는다(Codex 2차 리뷰 BLOCK -
+                # 이름만 보고 치우면, 되돌리기에 실패해 거기에만 남은 원본을 다음 저장이 지운다).
                 try:
-                    (backup / _SUPERSEDED).write_text(target.name, encoding="utf-8")
+                    self._done_record(backup).write_text(target.name, encoding="utf-8")
                 except OSError:
-                    pass
+                    # 기록을 못 남겼다 - 지우지 않고 통째로 둔다. 지우다 말면 반쪽짜리가 원본 행세를 한다.
+                    return
                 shutil.rmtree(backup, ignore_errors=True)
+                if not backup.exists():
+                    self._done_record(backup).unlink(missing_ok=True)
+
+    def _done_record(self, backup: Path) -> Path:
+        return self.root / (backup.name + _DONE_SUFFIX)
 
     def _sweep_old(self) -> None:
-        """덮어쓰기가 비켜 둔 옛 폴더 가운데 **교체가 끝난 것**(표식이 있는 것)을 치운다. 실패해도 조용히 둔다."""
+        """덮어쓰기가 비켜 둔 옛 폴더 가운데 **교체가 끝난 것**(옆에 기록이 있는 것)을 치운다. 실패해도 조용히 둔다."""
         try:
-            for entry in self.root.iterdir():
-                if (entry.name.startswith("_old_") and entry.is_dir() and not entry.is_symlink()
-                        and (entry / _SUPERSEDED).is_file()):
-                    shutil.rmtree(entry, ignore_errors=True)
+            for record in self.root.iterdir():
+                if not (record.name.startswith("_old_") and record.name.endswith(_DONE_SUFFIX) and record.is_file()):
+                    continue
+                backup = self.root / record.name[:-len(_DONE_SUFFIX)]
+                if backup.is_dir() and not backup.is_symlink():
+                    shutil.rmtree(backup, ignore_errors=True)
+                # 기록은 폴더가 **다 사라진 뒤에만** 지운다 - 남은 조각이 원본으로 읽히면 안 된다.
+                if not backup.exists():
+                    record.unlink(missing_ok=True)
         except OSError:
             pass
 
     def _recover_old(self) -> bool:
-        """되돌리지 못하고 남은 옛 스냅샷(`_old_*`, 표식 없음)을 제자리로 돌려놓는다. 하나라도 돌려놨으면 True.
+        """되돌리지 못하고 남은 옛 스냅샷(`_old_*`, 옆에 기록 없음)을 제자리로 돌려놓는다. 하나라도 돌려놨으면 True.
 
         제자리에 이미 다른 것이 있으면 건드리지 않는다 - 어느 쪽이 사용자의 것인지 여기서는 알 수 없다.
         """
@@ -321,7 +335,7 @@ class SnapshotStore:
             return False
         for entry in entries:
             try:
-                if entry.is_symlink() or not entry.is_dir() or (entry / _SUPERSEDED).exists():
+                if entry.is_symlink() or not entry.is_dir() or self._done_record(entry).exists():
                     continue
                 data = json.loads((entry / "snapshot.json").read_text(encoding="utf-8"))
                 name = sanitize_snapshot_name(data.get("name") if isinstance(data, dict) else None)

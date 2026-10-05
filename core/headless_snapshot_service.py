@@ -309,6 +309,7 @@ class HeadlessSnapshotService:
                 except Exception as exc:
                     skipped.append(f"characters: {exc}")
             reference_images = {}
+            dropped: list[str] = []
             for key, getter in self._u2_services():
                 if wanted is not None and key not in wanted:
                     continue
@@ -316,12 +317,18 @@ class HeadlessSnapshotService:
                     section = getter().capture_snapshot()
                     json.dumps(section, allow_nan=False)
                     if key in droppable and not any(frame.get("is_enabled") for frame in _frames(section)):
+                        dropped.append(key)
                         continue
                     if key != "conditional":
                         reference_images.update(capture_reference_images(context, key, section))
                     data[key] = section
                 except Exception as exc:
                     skipped.append(f"{key}: {exc}")
+            if dropped and not include_search and not any(
+                    key in data for key in ("preset", "characters", "conditional", "vibe_transfer", "character_reference")):
+                # 고른 것이 전부 '켜 둔 것이 없어' 빠졌다. 저장 창은 이 판단을 여기에 맡긴다(미리보기는 낡을 수 있다) -
+                # 그림만 든 빈 스냅샷을 만들지 않고 까닭을 알린다.
+                return self._response("담을 것이 없습니다 — 고른 Vibe · Reference 에 켜 둔 것이 없습니다", level="error")
             from core.snapshot_recorded_settings import capture_recorded_settings
 
             data["recorded_only"] = capture_recorded_settings(context)

@@ -1137,9 +1137,9 @@ export function createCharacterPanel({
             title="히스토리로 보낸다 (거기서 다시 담을 수 있다)">✕</button>
         </div>
         <div class="cw-slot-body">
-          <textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-min="prompt"
+          <textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="prompt"
             rows="2" placeholder="캐릭터 프롬프트">${escHtml(character.prompt || '')}</textarea>
-          <textarea class="cw-input is-uc" data-cw-field="char_uc_${index}" data-cw-min="uc"
+          <textarea class="cw-input is-uc" data-cw-field="char_uc_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="uc"
             rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(character.uc || '')}</textarea>
         </div>
       </div>`;
@@ -1625,7 +1625,9 @@ export function createCharacterPanel({
       const field = event.target.closest('[data-cw-field]');
       if (field) {
         autoGrow(field);
-        setModuleParam('character', field.dataset.cwField, field.value);
+        // 그 칸을 그릴 때 적어 둔 uuid 를 함께 보낸다 - 번호가 낡았어도 서버가 그 칸을 찾아간다
+        // (.claude/CHARACTER_WORKSPACE_CLAUDE.md 4절).
+        setModuleParam('character', field.dataset.cwField, field.value, {slotUuid: field.dataset.cwUuid || ''});
         return;
       }
       const dexSearch = event.target.closest('[data-cw-dex-search]');

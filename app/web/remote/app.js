@@ -680,9 +680,9 @@ function virtualSetModuleParam(moduleId, key, value) {
 }
 
 /** 퀵 패널의 프롬프트/네거티브 편집을 인페인트 세션으로 돌린다. */
-function virtualModTextEdit(moduleId, field, value) {
+function virtualModTextEdit(moduleId, field, value, slotUuid) {
   const session = virtualCharacterSession();
-  if (moduleId !== 'character' || !session) return onModTextEdit(moduleId, field, value);
+  if (moduleId !== 'character' || !session) return onModTextEdit(moduleId, field, value, undefined, slotUuid);
   const map = {char_prompt_: 'char_prompt_', char_uc_: 'char_uc_'};
   for (const prefix of Object.keys(map)) {
     if (String(field).startsWith(prefix)) {
@@ -1440,7 +1440,8 @@ const imageTaggerPanelReady = import('./js/features/imageTaggerPanel.mjs?v=20260
         const current = String(list[index] && list[index].prompt || '');
         const merged = current.trim() ? `${current.replace(/,\s*$/, '')}, ${text}` : text;
         // 사용자가 그 칸에 직접 친 것과 **같은 경로**로 보낸다.
-        onModTextEdit('character', `char_prompt_${index}`, merged);
+        onModTextEdit('character', `char_prompt_${index}`, merged, undefined,
+          String(list[index] && list[index].slot_uuid || ''));
         return true;
       },
       // ⚠️ `characterPanel` 은 그 모듈을 **한 번도 열지 않으면 비어 있다** - 그래서
@@ -2479,7 +2480,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-head4')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261005-slotid1')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2497,7 +2498,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260930-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20260930-cqfoot')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261005-slotid1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -12597,7 +12598,7 @@ function flushPendingModuleEdit(moduleId = null) {
   }
   const pending = pendingModuleEdit;
   pendingModuleEdit = null;
-  setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true});
+  setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true, slotUuid: pending.slotUuid});
 }
 
 function discardPendingModuleEdit(moduleId = null) {
@@ -12624,7 +12625,11 @@ function setModuleParam(moduleId, key, value, options = {}) {
   // dirty 를 유지하고 사용자에게 실패를 알릴 수 있어야 한다(Codex 리뷰 반영).
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
-      ws.send(JSON.stringify({type: 'set_module_param', module_id: moduleId, key, value}));
+      const message = {type: 'set_module_param', module_id: moduleId, key, value};
+      // 캐릭터 칸은 번호(인덱스)로 주소를 매긴다. 그 칸의 uuid 를 함께 보내면 서버가 번호가 낡았어도 그 칸을
+      // 찾아가고, 칸이 사라졌으면 버린다. 옛 서버는 이 필드를 그냥 지나친다.
+      if (options.slotUuid) message.slot_uuid = String(options.slotUuid);
+      ws.send(JSON.stringify(message));
       return true;
     } catch (error) {
       return false;
@@ -12636,19 +12641,24 @@ function setModuleParam(moduleId, key, value, options = {}) {
 // `stamp` = 이 글을 칠 때 화면이 들고 있던 프리셋 이름(프롬프트 엔지니어링 전용).
 // 500ms 디바운스라 **프리셋을 바꾼 뒤에 도착할 수 있고**, 그러면 앞 프리셋의 글이
 // 새 프리셋에 얹힌다 — 백엔드가 표식을 보고 그런 글을 버린다(사용자 제보 2026-08-25).
-function onModTextEdit(moduleId, key, value, stamp) {
+// `slotUuid` = 이 글을 친 캐릭터 칸의 uuid(그 칸을 **그릴 때** 적어 둔 값). 묵히는 동안 배열이 바뀌어도
+// 서버가 그 칸을 찾아가게 한다 - 번호만 보내면 낡은 번호가 남의 칸(보관해 둔 캐릭터)을 덮는다.
+function onModTextEdit(moduleId, key, value, stamp, slotUuid) {
   // 대기 자리는 하나다. 조건부 창(떠 있는 창)과 모듈 팝업은 함께 열려 있을 수 있어서, 한쪽에서 치고
   // 0.5초 안에 다른 칸을 치면 앞 칸의 대기분이 **덮여 사라진다** - 다른 칸의 것은 먼저 보낸다.
   if (pendingModuleEdit && (pendingModuleEdit.moduleId !== moduleId || pendingModuleEdit.key !== key)) {
     flushPendingModuleEdit();
   }
   if (moduleSendTimer) clearTimeout(moduleSendTimer);
-  pendingModuleEdit = {moduleId, key, value: stampedEdit(value, stamp)};
+  pendingModuleEdit = {moduleId, key, value: stampedEdit(value, stamp), slotUuid: String(slotUuid || '')};
   moduleSendTimer = setTimeout(() => {
     const pending = pendingModuleEdit;
     pendingModuleEdit = null;
     moduleSendTimer = null;
-    if (pending) setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true});
+    if (pending) {
+      setModuleParam(pending.moduleId, pending.key, pending.value,
+        {skipPendingFlush: true, slotUuid: pending.slotUuid});
+    }
   }, 500);
 }
 

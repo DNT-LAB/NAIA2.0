@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from typing import Any
@@ -20,6 +21,10 @@ SESSION_STARTED_AT = time.time()
 #   · 슬롯 하나를 비활성으로 두고 조건부 규칙이 건너뛰는지 보는 경로
 #     (test_inactive_slot_falls_back_to_the_frame)
 # 여기서는 정렬 불변식만 세운다(core/character_settings.sort_character_frames).
+
+
+# 배열 **인덱스**로 주소를 매긴 명령(`char_prompt_3` · `remove_character_3` …).
+_INDEXED_KEY = re.compile(r"^(?P<head>.*_)(?P<index>\d+)$")
 
 
 def _slot_is_untouched(frame: Any) -> bool:
@@ -250,32 +255,42 @@ class HeadlessCharacterService:
         return {str(_frame_uuid(frame) or ""): _state_of(frame)
                 for frame in (frames or []) if isinstance(frame, dict) and _frame_uuid(frame)}
 
-    def _settle_history(self, mode_key: str, normalized: dict[str, Any]) -> None:
-        """저장 직전: 활성에서 내려온 슬롯에 시각을 찍고, 그때만 히스토리 중복을 걷는다.
+    def _stamp_demoted(self, mode_key: str, settings: dict[str, Any]) -> int:
+        """저장 직전, **정규화 앞**: 활성에서 내려온 슬롯에 시각을 찍는다. 내려온 수를 돌려준다.
 
         ⚠️ **시각은 여기서 찍는다.** 내려보내는 길이 여럿이다(슬롯 상태 · 일괄 적용 · 에셋 적용 ·
            옛 활성 체크) - 그중 한 곳만 `used_at` 을 찍고 있어서, 일괄 적용(Assist · 메타데이터)으로
            내려온 것은 최근 순에서도 밀리고 '이번 세션' 표시도 못 받았다.
+        ⚠️ **정규화보다 먼저**다. 정규화가 히스토리를 500개로 끊는데(`trim_history`), 시각 없이 들어가면
+           방금 내린 슬롯이 '가장 오래된 것' 으로 잘린다 - 히스토리가 꽉 찬 사람에게는 [비활성으로 보내기] 가
+           곧 삭제였다(Codex 리뷰 2026-10-05).
+        """
+        from core.character_settings import _as_used_at, _frame_uuid
+
+        before = self._slot_states().get(mode_key)
+        frames = settings.get("character_frames") if isinstance(settings, dict) else None
+        if not isinstance(before, dict) or not isinstance(frames, list):
+            return 0
+        now = time.time()
+        demoted = 0
+        for frame in frames:
+            if not isinstance(frame, dict):
+                continue
+            if before.get(str(_frame_uuid(frame) or "")) == "active" and _state_of(frame) != "active":
+                if _as_used_at(frame.get("used_at")) < now - 5:   # 그 길이 이미 찍었으면 둔다
+                    frame["used_at"] = now
+                demoted += 1
+        return demoted
+
+    def _settle_history(self, mode_key: str, normalized: dict[str, Any], demoted: int) -> None:
+        """저장 직전, 정규화 뒤: 내려온 것이 있을 때만 히스토리 중복을 걷고, 지금 슬롯 상태를 적어 둔다.
+
         ⚠️ **중복 정리는 내려온 게 있을 때만** 한다. 목록에서 줄이 빠지면 뒤 슬롯 번호가 당겨지는데,
            글자를 치는 중(밀린 편집이 옛 번호로 날아가는 중)에 그러면 엉뚱한 슬롯에 쓴다. 내려보내는
            일은 원래 번호를 다시 짜는 일이라 화면이 새 번호로 다시 그린다.
         """
-        from core.character_settings import _frame_uuid
-
-        before = self._slot_states().get(mode_key)
-        frames = normalized.get("character_frames") or []
-        demoted = 0
-        if isinstance(before, dict):
-            now = time.time()
-            for frame in frames:
-                if not isinstance(frame, dict):
-                    continue
-                if before.get(str(_frame_uuid(frame) or "")) == "active" and _state_of(frame) != "active":
-                    if float(frame.get("used_at") or 0) < now - 5:   # 그 길이 이미 찍었으면 둔다
-                        frame["used_at"] = now
-                    demoted += 1
         if demoted:
-            dropped = _drop_duplicate_history(frames)
+            dropped = _drop_duplicate_history(normalized.get("character_frames") or [])
             if dropped:
                 print(f"[Character] history duplicates removed: {dropped}", flush=True)
         self._slot_states()[mode_key] = self._state_map(normalized)
@@ -284,6 +299,7 @@ class HeadlessCharacterService:
         from core.character_settings import normalize_character_settings, write_character_settings_file
 
         mode_key = str(mode or "NAI").upper()
+        demoted = self._stamp_demoted(mode_key, settings)
         normalized = normalize_character_settings(settings)
         # POS 씨앗은 **여기서만** 뿌린다. 프레임을 바꾸는 길이 여럿이라
         # (set_param · 캐릭터 에셋 적용 · 앞으로 생길 것들) 호출부마다 걸면
@@ -291,7 +307,7 @@ class HeadlessCharacterService:
         # 정렬이 끝난 뒤여야 씨앗이 최종 순서를 보고 놓인다.
         if normalized.get("use_custom_positions"):
             _seed_missing_positions(normalized)
-        self._settle_history(mode_key, normalized)
+        self._settle_history(mode_key, normalized, demoted)
         self.settings_by_mode()[mode_key] = normalized
         # ⚠️ 파일은 **한 길로만** 쓴다 - 통째로 바꿔 끼우고, 덮기 전에 사본을 남긴다
         #    (`write_character_settings_file`). 여기서 `write_text` 로 직접 쓰면 그 방어선을 건너뛴다.
@@ -527,6 +543,9 @@ class HeadlessCharacterService:
             frame = self.ensure_frame(frames, 0)
             frame["prompt"] = str(prompt or "")
             frame["uc"] = str(uc or "")
+            # ⚠️ 씬이 만든 칸이었어도 이제 사용자가 넣은 글이다(`char_prompt_` 와 같다). 표식이 남으면
+            #    다음 씬이 '이전 씬이 남긴 칸' 으로 보고 히스토리로 내리지 않고 버린다(Codex 리뷰 2026-10-05).
+            frame["from_scene"] = False
             frame["is_enabled"] = True
             frame["slot_state"] = "active"
             # ⚠️ mute 도 함께 푼다. `is_enabled` 는 이제 **파생값**이라
@@ -557,9 +576,33 @@ class HeadlessCharacterService:
         clear_character_roll_snapshot(context, api_mode)
         return self.state()
 
-    def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
+    def set_param(self, key: str, value: Any, *, slot_uuid: str = "") -> dict[str, Any] | None:
+        """`slot_uuid` = 화면이 그 명령을 **어느 칸에 대고** 보냈는가(그 칸을 그릴 때의 uuid).
+
+        ⚠️ 명령은 배열 인덱스로 주소를 매기는데, 글 편집은 0.5초 묵혔다 온다. 그 사이에 배열이 바뀌면
+           (다른 창 · 씬 불러오기 · 일괄 적용) 낡은 번호에는 다른 칸이 있다 - 보관해 둔 캐릭터일 수도 있고,
+           프롬프트에는 되돌리기가 없다(Codex 리뷰 2026-10-05). uuid 가 오면 **그 칸이 지금 있는 자리**로
+           고쳐 쓰고, 칸이 사라졌으면 아무것도 고치지 않는다. uuid 를 안 보내는 옛 화면은 전처럼 번호로 간다.
+        """
         with self._commit_lock:
+            if slot_uuid:
+                key = self._key_for_slot(key, slot_uuid)
+                if key is None:
+                    return self.state()     # 그 칸이 더는 없다 - 지금 상태를 돌려줘 화면이 다시 그리게 한다
             return self._set_param_locked(key, value)
+
+    def _key_for_slot(self, key: str, slot_uuid: str) -> str | None:
+        """인덱스 주소의 번호를 그 uuid 가 **지금 있는 자리**로 고친다. 그 칸이 없으면 None."""
+        from core.character_settings import _frame_uuid
+
+        match = _INDEXED_KEY.match(str(key or ""))
+        if not match:
+            return key
+        frames = self.settings_cache().get("character_frames") or []
+        for index, frame in enumerate(frames):
+            if isinstance(frame, dict) and str(_frame_uuid(frame) or "") == slot_uuid:
+                return f"{match.group('head')}{index}"
+        return None
 
     def _set_param_locked(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
@@ -835,22 +878,24 @@ class HeadlessCharacterService:
                         else:
                             frame["origin_uuid"] = ""
                     if vanish:
-                        gone = {id(member) for member in targets}
-                        frames[:] = [f for f in frames if id(f) not in gone]
-                    else:
-                        if was_active and requested != "active":
-                            import time
+                        # ⚠️ 사라지는 것은 **사본 하나**다. 그것을 물고 있던 자식은 자기 글이 있는 다른 칸이라,
+                        #    함께 지우면 사용자가 쓴 것이 사라진다(Codex 리뷰 2026-10-05). 자식은 아래에서 여느
+                        #    내림과 똑같이 히스토리로 내린다 - 물 곳이 없어진 링크는 정규화가 지운다.
+                        frames[:] = [f for f in frames if f is not frame]
+                        targets = targets[1:]
+                    if was_active and requested != "active":
+                        import time
 
-                            stamp = time.time()
-                            for target in targets:
-                                target["used_at"] = stamp
+                        stamp = time.time()
                         for target in targets:
-                            if requested == "cold":
-                                target["return_slot_state"] = str(target.get("slot_state") or "inactive")
-                            target["slot_state"] = requested
-                            target["is_enabled"] = (
-                                requested == "active" and not bool(target.get("is_muted"))
-                            )
+                            target["used_at"] = stamp
+                    for target in targets:
+                        if requested == "cold":
+                            target["return_slot_state"] = str(target.get("slot_state") or "inactive")
+                        target["slot_state"] = requested
+                        target["is_enabled"] = (
+                            requested == "active" and not bool(target.get("is_muted"))
+                        )
                     invalidate_snapshot = True
         elif key.startswith("char_slot_name_"):
             index = context._index_from_key(key, "char_slot_name_")

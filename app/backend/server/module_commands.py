@@ -323,6 +323,15 @@ async def handle_module_command(
             command.get("value"),
             client_host=client_host,
         )
+    elif str(command.get("module_id") or "") == "character" and str(command.get("slot_uuid") or "").strip():
+        # ⚠️ 캐릭터 명령은 배열 **인덱스**로 주소를 매긴다. 화면이 그 칸의 uuid 를 함께 보냈으면 서비스가
+        #    그 칸이 지금 있는 자리로 고쳐 쓴다(밀린 글 편집이 낡은 번호로 남의 칸을 덮지 않게).
+        #    `set_module_param` 의 캐릭터 갈래는 `set_param` 으로 넘기기만 하므로 여기서 바로 부른다.
+        module_state = context._character_service().set_param(
+            str(command.get("key") or "").strip(),
+            command.get("value"),
+            slot_uuid=str(command.get("slot_uuid") or "").strip(),
+        )
     else:
         module_state = context.set_module_param(
             str(command.get("module_id") or ""),

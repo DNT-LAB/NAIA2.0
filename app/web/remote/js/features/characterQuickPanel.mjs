@@ -898,7 +898,7 @@ export function createCharacterQuickPanel({
     const field = (kind, cls, ph) =>
       `<div class="cq-input-wrap">`
       + `<div class="cq-hl" aria-hidden="true"></div>`
-      + `<textarea class="cq-input${cls}" data-cq-field="char_${kind}_${index}" data-cq-min="${kind === 'prompt' ? 'prompt' : 'uc'}"`
+      + `<textarea class="cq-input${cls}" data-cq-field="char_${kind}_${index}" data-cq-uuid="${escAttr(character.slot_uuid || '')}" data-cq-min="${kind === 'prompt' ? 'prompt' : 'uc'}"`
       + ` rows="${MIN_ROWS[kind === 'prompt' ? 'prompt' : 'uc']}" placeholder="${ph}"></textarea></div>`;
     const body = isOpen
       ? field('prompt', '', linked ? '추가할 캐릭터 프롬프트' : '캐릭터 프롬프트')
@@ -1151,7 +1151,9 @@ export function createCharacterQuickPanel({
     // 강조는 **글자를 칠 때마다** 다시 칠한다. 서명 기반 재렌더는 입력 내용을 일부러
     // 무시하므로(캐럿 튐) 여기서 하지 않으면 구간이 옛 모양에 굳는다.
     paintConnectHighlight(element);
-    onModTextEdit('character', element.dataset.cqField, element.value);
+    // 이 편집은 0.5초 묵혔다 간다. 그 칸을 그릴 때 적어 둔 uuid 를 함께 보내, 그 사이 배열이 바뀌어도
+    // 서버가 번호가 아니라 **그 칸**을 찾아가게 한다(가상 캐릭터는 uuid 가 없다 - 세션 쪽 길로 간다).
+    onModTextEdit('character', element.dataset.cqField, element.value, element.dataset.cqUuid || '');
   }
 
   function onClick(event) {

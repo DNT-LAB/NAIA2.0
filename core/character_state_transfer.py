@@ -53,44 +53,52 @@ def replace_character_state(
 
     `is_active` 를 안 주면 넣은 슬롯이 있을 때 켠다(씬의 규약). 스냅샷은 담을 때의 값을 준다.
     """
-    settings = copy.deepcopy(settings)
-    uuids = [_new_character_uuid() for _ in characters]
-    fresh = []
-    for index, item in enumerate(characters):
-        link = item.get("connect_to") or 0
-        fresh.append({
-            "uuid": uuids[index],
-            "prompt": item["prompt"],
-            "uc": item["uc"],
-            "custom_name": item["custom_name"],
-            "position": item["position"],
-            "connect_to": uuids[link - 1] if 1 <= link <= len(uuids) else "",
-            "slot_state": "active", "is_enabled": True, "is_muted": False,
-            # 이 칸은 씬 · 스냅샷이 만든 것이다 - **다음에 불러올 때 버릴 대상**이 된다.
-            "from_scene": True,
-        })
-    kept = []
-    for frame in settings.get("character_frames") or []:
-        if not isinstance(frame, dict):
-            continue
-        # ⚠️ **버릴 것을 고른다**: 이전 씬 · 스냅샷이 남긴 칸 가운데 **사용자가 남기지 않은 것**만.
-        #    예전엔 전부 비활성으로 남겼는데(아무것도 잃지 않으려고), 잇달아 부르면 비활성 무리에 찌꺼기가
-        #    끝없이 쌓였다(사용자 제보). 손으로 만든 칸은 그대로 남기고 씬이 만든 것만 고른다 - 표식이
-        #    없으면 어느 것이 사용자 작업인지 구분할 방법이 없다.
-        # ⚠️ 즐겨찾기 · 그룹으로 보관한 칸은 씬이 만들었어도 **사용자의 것**이다. 이것을 안 보면 씬의
-        #    캐릭터를 ★ 해 두어도 다음 불러오기에서 사라진다(2026-10-05 재현). 예전에는 Cold 로 보낸 칸만
-        #    지켰는데 그 상태는 2026-09-02 에 폐기돼, 지키는 조건이 죽어 있었다.
-        if frame.get("from_scene") and not kept_by_user(frame):
-            continue
-        if str(frame.get("slot_state") or "").strip().lower() != "active":
-            kept.append(frame)          # 보관함은 손대지 않는다 - 씬이 내리는 것은 지금 슬롯뿐이다
-            continue
-        # 비활성으로 밀린 슬롯의 링크는 정리한다 - 그대로 두면 정규화가 "앞만 가리킨다" 규칙으로
-        # 지우거나, 새 활성 슬롯을 엉뚱하게 가리킨다.
-        frame.update(slot_state="inactive", is_enabled=False, connect_to="")
-        kept.append(frame)
-    settings["character_frames"] = fresh + kept
-    settings["is_active"] = bool(fresh) if is_active is None else bool(is_active)
-    settings["position_mode"] = position_mode
-    context._character_service().save_settings(mode, settings)
+    service = context._character_service()
+    # ⚠️ **읽기부터 저장까지 한 잠금 안**이다. 스냅샷 불러오기는 작업 스레드에서 도는데(데이터셋을 옮긴다),
+    #    그동안 WS 명령은 이벤트 루프에서 같은 설정을 고친다. 잠금 밖에서 집어 든 설정으로 저장하면 그 사이에
+    #    보관한 것을 옛 사본으로 덮는다(Codex 리뷰 2026-10-05) - 그래서 넘겨받은 `settings` 가 아니라
+    #    잠금 안에서 **지금 설정**을 다시 읽는다. `set_param` 이 쥐는 것과 같은 잠금이다.
+    with service._commit_lock:
+        if str(mode or "").upper() == str(context.get_api_mode() or "").upper():
+            settings = service.settings_cache()
+        settings = copy.deepcopy(settings)
+        uuids = [_new_character_uuid() for _ in characters]
+        fresh = []
+        for index, item in enumerate(characters):
+            link = item.get("connect_to") or 0
+            fresh.append({
+                "uuid": uuids[index],
+                "prompt": item["prompt"],
+                "uc": item["uc"],
+                "custom_name": item["custom_name"],
+                "position": item["position"],
+                "connect_to": uuids[link - 1] if 1 <= link <= len(uuids) else "",
+                "slot_state": "active", "is_enabled": True, "is_muted": False,
+                # 이 칸은 씬 · 스냅샷이 만든 것이다 - **다음에 불러올 때 버릴 대상**이 된다.
+                "from_scene": True,
+            })
+        kept = []
+        for frame in settings.get("character_frames") or []:
+            if not isinstance(frame, dict):
+                continue
+            # ⚠️ **버릴 것을 고른다**: 이전 씬 · 스냅샷이 남긴 칸 가운데 **사용자가 남기지 않은 것**만.
+            #    예전엔 전부 비활성으로 남겼는데(아무것도 잃지 않으려고), 잇달아 부르면 비활성 무리에 찌꺼기가
+            #    끝없이 쌓였다(사용자 제보). 손으로 만든 칸은 그대로 남기고 씬이 만든 것만 고른다 - 표식이
+            #    없으면 어느 것이 사용자 작업인지 구분할 방법이 없다.
+            # ⚠️ 즐겨찾기 · 그룹으로 보관한 칸은 씬이 만들었어도 **사용자의 것**이다. 이것을 안 보면 씬의
+            #    캐릭터를 ★ 해 두어도 다음 불러오기에서 사라진다(2026-10-05 재현). 예전에는 Cold 로 보낸 칸만
+            #    지켰는데 그 상태는 2026-09-02 에 폐기돼, 지키는 조건이 죽어 있었다.
+            if frame.get("from_scene") and not kept_by_user(frame):
+                continue
+            if str(frame.get("slot_state") or "").strip().lower() != "active":
+                kept.append(frame)          # 보관함은 손대지 않는다 - 씬이 내리는 것은 지금 슬롯뿐이다
+                continue
+            # 비활성으로 밀린 슬롯의 링크는 정리한다 - 그대로 두면 정규화가 "앞만 가리킨다" 규칙으로
+            # 지우거나, 새 활성 슬롯을 엉뚱하게 가리킨다.
+            frame.update(slot_state="inactive", is_enabled=False, connect_to="")
+            kept.append(frame)
+        settings["character_frames"] = fresh + kept
+        settings["is_active"] = bool(fresh) if is_active is None else bool(is_active)
+        settings["position_mode"] = position_mode
+        service.save_settings(mode, settings)
     clear_character_roll_snapshot(context, mode)

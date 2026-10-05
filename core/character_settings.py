@@ -769,7 +769,11 @@ def _settings_from_bytes(data: bytes, mode_key: str) -> dict | None:
 
 def _stored_frame_count(settings: Any) -> int:
     """보관함(활성이 아닌 칸)에 든 것의 수. 빈 자리표시자는 세지 않는다 - 정규화가 걷는 것이라, 그것이
-    사라졌다고 '줄었다' 고 보면 헛사본이 쌓인다."""
+    사라졌다고 '줄었다' 고 보면 헛사본이 쌓인다.
+
+    ⚠️ '비었다' 의 잣대는 `drop_empty_history` 와 **같아야 한다** - 좌표만 잡아 둔 칸도 정규화가 남기는
+       사용자의 칸이다. 여기서 안 세면 그런 칸이 통째로 사라져도 shrink 사본이 안 남는다(Codex 리뷰 2026-10-05).
+    """
     frames = settings.get("character_frames") if isinstance(settings, dict) else None
     count = 0
     for frame in frames if isinstance(frames, list) else []:
@@ -777,7 +781,8 @@ def _stored_frame_count(settings: Any) -> int:
             continue
         if normalize_slot_state(frame.get("slot_state"), bool(frame.get("is_enabled", False))) == "active":
             continue
-        if any(str(frame.get(key) or "").strip() for key in ("prompt", "uc", "custom_name")):
+        if (any(str(frame.get(key) or "").strip() for key in ("prompt", "uc", "custom_name"))
+                or isinstance(frame.get("position"), dict)):
             count += 1
     return count
 
@@ -787,8 +792,9 @@ def _backup_series(folder: Path, stem: str, kind: str) -> list[Path]:
     return sorted(folder.glob(f"{stem}.{kind}-*.json"), key=lambda path: (path.stat().st_mtime_ns, path.name))
 
 
-def _keep_backup_copy(target: Path, kind: str) -> None:
+def _keep_backup_copy(target: Path, kind: str) -> bool:
     """`target` 을 지금 모습 그대로 사본 폴더에 남긴다. 그 종류의 가장 최근 사본과 같으면 또 남기지 않는다.
+    사본이 **있게 됐으면** 참(새로 썼거나 같은 것이 이미 있다), 못 썼으면 거짓.
 
     ⚠️ **읽지 못하면 던진다** - 호출자가 저장을 멈춘다. 사본 폴더에 **쓰지 못하면** 알리기만 한다. 사본을
        못 남긴다고 저장까지 막으면, 폴더 하나가 잘못됐다는 이유로 캐릭터를 아예 못 고친다.
@@ -800,7 +806,7 @@ def _keep_backup_copy(target: Path, kind: str) -> None:
         series = _backup_series(folder, target.stem, kind)
         try:
             if series and series[-1].read_bytes() == data:
-                return
+                return True
         except OSError:
             pass                                    # 최근 사본을 못 읽으면 다르다고 보고 남긴다
         now = time.time()
@@ -813,12 +819,13 @@ def _keep_backup_copy(target: Path, kind: str) -> None:
         copy.write_bytes(data)
     except OSError as exc:
         print(f"[WARN] Character backup ({kind}) was not written: {exc}", flush=True)
-        return
+        return False
     try:
         for old in _backup_series(folder, target.stem, kind)[:-CHARACTER_BACKUP_KEEP]:
             old.unlink()
     except OSError:
         pass                                        # 못 지운 옛 사본은 다음에 지운다
+    return True
 
 
 def _back_up_before_write(target: Path, mode_key: str, new_stored: int) -> None:
@@ -835,12 +842,13 @@ def _back_up_before_write(target: Path, mode_key: str, new_stored: int) -> None:
         # 내가 쓴 적이 없는 모습이다(이번 실행의 첫 저장 · 밖에서 바뀜 · 읽지 못했던 파일).
         previous = _settings_from_bytes(_read_settings_bytes(target), mode_key)
         if previous is None:
-            _keep_backup_copy(target, "corrupt")
-            state["session_day"] = today            # 깨진 파일의 사본이 이 실행의 '켰을 때' 다
+            if _keep_backup_copy(target, "corrupt"):
+                state["session_day"] = today        # 깨진 파일의 사본이 이 실행의 '켰을 때' 다
             return
         previous_stored = _stored_frame_count(previous)
-    if state.get("session_day") != today:
-        _keep_backup_copy(target, "session")
+    # ⚠️ **남겼을 때만** 오늘 남겼다고 적는다. 사본 폴더가 잠깐 막힌 것을 '남겼다' 고 적으면 풀린 뒤에도
+    #    그날은 다시 남기지 않는다(Codex 리뷰 2026-10-05).
+    if state.get("session_day") != today and _keep_backup_copy(target, "session"):
         state["session_day"] = today
     if previous_stored - new_stored >= CHARACTER_SHRINK_BACKUP_AT:
         _keep_backup_copy(target, "shrink")

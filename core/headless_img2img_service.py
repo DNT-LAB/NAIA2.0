@@ -1490,6 +1490,17 @@ class HeadlessImg2ImgService:
             session["base_scale"] = 1.0
             session["base_rotation"] = 0.0
             session["base_flip_x"] = session["base_flip_y"] = False
+        if session.get("canvas_active"):
+            # ⚠️ 캔버스 세션은 **합성으로 끝낸다.** 위에서 만든 미리보기는 베이스 한 장뿐이라,
+            #    그대로 돌려주면 화면에는 원본만 보이는데(숨긴 베이스가 다시 보이고 올린 레이어 ·
+            #    옮긴 자리가 사라진다) 생성은 남아 있던 `canvas_dirty` 로 다시 합성해 **다른 그림**을
+            #    보낸다(Codex 리뷰 2026-10-05: 1024x1024 처럼 크기가 그대로인 그림에서 드러났다).
+            #    미리보기 · 마스크 · 전송본을 같은 길(`_recompose_canvas`)로 맞춘다.
+            if size_changed:
+                # 칠한 마스크는 옛 캔버스의 것이다 - 남겨 두면 방금 버린 마스크가 합성에서 되살아난다.
+                session["user_mask_bytes"] = b""
+                session["user_mask_canvas"] = (int(image.width), int(image.height))
+            return self._recompose_canvas()
         return self.module_state()
 
     # ------------------------------------------------------------------

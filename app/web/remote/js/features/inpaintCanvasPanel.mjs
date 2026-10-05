@@ -179,6 +179,10 @@ export function createInpaintCanvasPanel({
   // 끌던 값은 원래 레이어로 간다(Codex 3차 리뷰 2026-10-03: `base_scale 1.25` 로 시작한 끌기가
   // `layer_scale {id:'L1'} 1.5` 로 이어졌다 - 도크는 그동안 원본을 보이고 있었다).
   let rangeLayer = null;
+  // 슬라이더를 끌거나 반복 칸에 쓰는 동안 **건너뛴 도크 갱신이 있다**는 표시. 조작이 끝나면
+  // 그때 그린다 - 안 그리면 도크는 옛 레이어의 이름과 값을 보이는데 다음 조작은 새로 고른
+  // 레이어로 나간다(Codex 리뷰 2026-10-05: 표시 L1 · 150% -> 전송 `layer_scale {id:'L2'} 1.51`).
+  let dockStale = false;
   const transformTimers = {};
   // 레이어 목록(뷰어 오른쪽에 떠 있다). 도크와 따로 그린다 - 도크는 아래 가운데에 있고
   // 목록은 길어질 수 있어서 한 상자에 넣으면 캔버스를 그만큼 가린다.
@@ -371,8 +375,11 @@ export function createInpaintCanvasPanel({
     if (next && String(next.window_id || '') !== String(state?.window_id || '')) {
       undoStack = [];
       activeId = 'base';          // 다른 그림이다 - 옛 그림의 레이어를 고른 채 남기지 않는다
+      closeLayerMenu();           // 옛 그림에서 연 메뉴가 새 그림을 고치지 않게
     }
     if (next) state = next;
+    // 메뉴가 가리키던 레이어가 사라졌으면(다른 탭이 지웠다) 닫는다.
+    if (layerMenu && !layerRow(layerMenu.dataset.icMenuLayer)) closeLayerMenu();
     if (!panel) return;
     // ⚠️ 조작 중에는 절대 다시 그리지 않는다(posStage 규칙 1). 서버 echo 가 와도
     //    마찬가지다 - 끌고 있던 노드가 교체되면 그 조작이 통째로 무시된다.
@@ -383,6 +390,7 @@ export function createInpaintCanvasPanel({
       // 화면은 옛 그림인데 [인페인트 생성] 은 서버의 새 합성으로 나간다(Codex 재리뷰
       // 2026-10-03). plane 은 도크와 다른 노드라 그려도 입력이 안 끊긴다.
       if (state?.active && state.canvas_supported && !panel.hidden) renderPlane();
+      dockStale = true;
       return;
     }
     // 캔버스는 V5 인페인트 전용이다. 다른 계열에서 띄우면 팝업과 조작 수단이 둘로
@@ -413,6 +421,7 @@ export function createInpaintCanvasPanel({
     // 다음 클릭이 이미 사라진 노드를 지우려 든다.
     restorePop = null;
     panel.innerHTML = dockHtml();
+    dockStale = false;
     flashModes = false;          // 한 번만 번쩍인다(그린 순간 표를 내린다)
     renderPlane();
   }
@@ -712,9 +721,25 @@ export function createInpaintCanvasPanel({
     if (!rangeDragging && !typingInPanel()) {
       closeRestorePicker();
       panel.innerHTML = dockHtml();
+      dockStale = false;
+    } else {
+      dockStale = true;          // 조작이 끝나면 `settleDock` 이 그린다
     }
     renderLayers(viewMode === 'edit');
     placeSelection();
+  }
+
+  /** 밀린 도크를 지금 그린다(조작이 끝난 뒤에만). 슬라이더를 놓을 때와 다음 클릭에 부른다.
+   *
+   *  ⚠️ 반복 칸에서 초점이 나가는 순간(`focusout`)에는 **그리지 않는다.** 칸에 쓰고 곧바로
+   *     [인페인트 생성] 을 누르면 초점 이동 -> 떼기 -> click 순서인데, 그 사이에 도크를 갈아
+   *     끼우면 누른 단추가 사라져 click 이 안 난다. 그래서 문서의 click(패널의 처리기가 먼저
+   *     돈 뒤)에 그린다.
+   */
+  function settleDock() {
+    if (!dockStale || rangeDragging || typingInPanel()) return;
+    if (!state?.active || !state.canvas_supported || !panel || panel.hidden) { dockStale = false; return; }
+    refreshChrome();
   }
 
   // ── 레이어 목록 ─────────────────────────────────────────────────────────
@@ -998,6 +1023,9 @@ export function createInpaintCanvasPanel({
     menu.className = 'ic-menu';
     menu.setAttribute('role', 'menu');
     menu.dataset.icMenuLayer = id;
+    // 어느 세션에서 열었는가. 떠 있는 사이 다른 탭이 세션을 닫고 새 그림을 열면 `base` 라는
+    // 같은 id 가 **다른 그림**을 가리킨다(Codex 리뷰 2026-10-05).
+    menu.dataset.icMenuWindow = String(state?.window_id ?? '');
     menu.innerHTML = html;
     document.body.appendChild(menu);
     // 화면 밖으로 나가지 않게 앉힌다(뷰어 아래쪽에서 누르면 메뉴가 잘린다).
@@ -1016,7 +1044,9 @@ export function createInpaintCanvasPanel({
     const act = event.target.closest?.('[data-ic-menu]')?.dataset.icMenu;
     if (!act) return;
     const id = layerMenu?.dataset.icMenuLayer || 'base';
+    const openedIn = layerMenu?.dataset.icMenuWindow ?? '';
     closeLayerMenu();
+    if (openedIn !== String(state?.window_id ?? '')) return;      // 다른 세션이 됐다
     // 메뉴가 떠 있는 사이에 세션이 닫혔거나 그 레이어가 지워졌으면 아무것도 안 한다.
     if (!state?.active || viewMode !== 'edit' || !layerRow(id)) return;
     if (act === 'flip-x') return flipLayer(id, 'x');
@@ -1874,8 +1904,17 @@ export function createInpaintCanvasPanel({
       window.addEventListener('wheel', closeLayerMenu, {passive: true, capture: true});
     }
     // 슬라이더는 패널 밖에서 손을 떼도 끝난다 - document 에서 받아야 놓치지 않는다.
-    document.addEventListener('pointerup', () => { rangeDragging = false; rangeLayer = null; });
-    document.addEventListener('pointercancel', () => { rangeDragging = false; rangeLayer = null; });
+    const endRangeDrag = () => {
+      const wasDragging = rangeDragging;
+      rangeDragging = false;
+      rangeLayer = null;
+      // 끄는 동안 밀린 도크(다른 레이어가 골라졌을 수 있다)를 손을 뗀 지금 그린다.
+      if (wasDragging) settleDock();
+    };
+    document.addEventListener('pointerup', endRangeDrag);
+    document.addEventListener('pointercancel', endRangeDrag);
+    // 반복 칸에서 나온 뒤의 첫 클릭에도 그린다(패널의 click 처리기가 먼저 돈 뒤다).
+    document.addEventListener('click', settleDock);
     posStage = createPosStage({
       // 스테이지는 매 렌더마다 새로 만들어진다 - 함수로 넘겨 늘 살아 있는 것을 잰다.
       stage: () => stageEl,

@@ -66,6 +66,8 @@ async def _run_vibe_encode(
 _INPAINT_CANVAS_KEYS = frozenset({
     "base_offset", "base_scale", "base_rotation", "base_reset",
     "canvas_size", "mask_png", "clear_mask", "auto_mask",
+    # 1MP 토글은 베이스를 다시 만들어 합성을 바꾼다(크기가 달라지면 캔버스 · 마스크까지).
+    "resize_1mp",
 })
 
 

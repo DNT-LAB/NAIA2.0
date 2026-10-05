@@ -21,7 +21,7 @@
  * ⚠️ 조작은 전부 `setModuleParam('snapshot', …)` 을 탄다 - 새 WS 메시지 타입을 만들지 않는다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
-import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261004-snapsave1';
+import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapnosave';
 
 // 담을 항목의 마지막 선택. **꺼 둔 것만** 적는다 - 항목이 늘어도 새 항목은 켜진 채로 나온다.
 // 처음에는 데이터셋만 꺼져 있다(크기만큼 용량을 쓴다).

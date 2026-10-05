@@ -5,7 +5,11 @@
  * Quick Preset 이 담던 것(프롬프트 엔지니어링 · 생성 설정 · 프롬프트 · 네거티브) +
  * 캐릭터(프롬프트 · 좌표) + 조건부 프롬프트 + Vibe Transfer · Character Reference +
  * 그림 한 장(필수) + 고르면 Tag Filter 와 데이터셋 사본.
- * 계약은 `docs/SNAPSHOT_SRS_2026_10_04.md` §5 · §6 · §10 · §11.
+ * 계약은 `docs/SNAPSHOT_SRS_2026_10_04.md` §5 · §6 · §10 · §11 · §12.
+ *
+ * ⚠️ **이 창은 담지 않는다**(사용자 지정 2026-10-05). 저장은 결과 그림 우클릭 > [NAI] 스냅샷 저장이 여는
+ *    저장 창(`snapshotSaveWindow.mjs`) 한 길뿐이다 - 여기는 찾고 · 정리하고 · 불러오는 자리다.
+ *    다만 저장을 **보내는 입구**(`save`)는 여기 있다: "같은 이름이 있다" 되묻기의 재전송을 이 창이 쥔다.
  *
  * 화면은 Interactive 의 Scene 창과 **같은 Finder 배치**다(사용자 지정 2026-10-04):
  *   [카테고리][하위 카테고리][카드][상세]
@@ -25,7 +29,6 @@
  *    넣으면 좌측 컨트롤이 위를 덮는다(Scene 창이 세 번 겪은 함정).
  */
 
-const INCLUDE_SEARCH_KEY = 'naia.snapshot.includeSearch.v1';
 // 스냅샷마다 **마지막으로 체크해 둔 항목**을 기억한다(사용자 지정 2026-10-04). 꺼 둔 것만 적는다 -
 // 나중에 항목이 늘어도 새 항목은 켜진 채로 나온다. 화면의 선택이라 서버가 아니라 여기 둔다.
 const PICKS_KEY = 'naia.snapshot.picks.v1';
@@ -52,12 +55,6 @@ const PRESET_PARTS = ['prompt', 'negative', 'params', 'prompt_engineering'];
 const SECTION_LABELS = {
   preset: '프리셋',
   ...Object.fromEntries(PICK_ITEMS.map(([key, label]) => [key, label])),
-};
-
-const BLOCKER_TEXT = {
-  mode: 'Snapshot 은 지금 NAI 모드에서만 저장할 수 있습니다',
-  model: 'Snapshot 은 NAI V4.5 · V5 모델에서만 저장할 수 있습니다',
-  no_image: '먼저 한 장을 생성하세요 — 스냅샷에는 그림이 꼭 들어갑니다',
 };
 
 /** 저장 이름을 백엔드와 **같은 규칙**으로 다듬는다. 저장 창(snapshotSaveWindow)도 이것을 쓴다.
@@ -100,22 +97,12 @@ export function createSnapshotPanel({
   // 화면의 확인을 그냥 지나친 경우의 뒷문이다.
   let pendingSave = null;
   let pendingSelect = '';      // 방금 담은 이름 - 목록에 나타나면 그 카드를 편다
-  let includeSearch = readIncludeSearch();
   let dragName = '';
   let edgeTimer = 0;
 
   const esc = value => escHtml(String(value ?? ''));
 
   // ── 기억(localStorage) ──────────────────────────────────────────────────
-  function readIncludeSearch() {
-    try { return globalThis.localStorage?.getItem(INCLUDE_SEARCH_KEY) === '1'; } catch (_) { return false; }
-  }
-
-  function rememberIncludeSearch(on) {
-    includeSearch = !!on;
-    try { globalThis.localStorage?.setItem(INCLUDE_SEARCH_KEY, includeSearch ? '1' : '0'); } catch (_) { /* 사생활 모드 */ }
-  }
-
   function readPicks() {
     try {
       const data = JSON.parse(globalThis.localStorage?.getItem(PICKS_KEY) || '{}');
@@ -286,7 +273,6 @@ export function createSnapshotPanel({
     popEl.addEventListener('click', onClick);
     popEl.addEventListener('input', onInput);
     popEl.addEventListener('change', onChange);
-    popEl.addEventListener('keydown', onPopKey);
     popEl.addEventListener('contextmenu', onContextMenu);
     popEl.addEventListener('dragstart', onDragStart);
     popEl.addEventListener('dragend', onDragEnd);
@@ -393,7 +379,7 @@ export function createSnapshotPanel({
    *  안 챙기면 다른 창의 저장이 상태를 밀어 보내는 순간 글이 사라진다. */
   function captureInputs(el) {
     const keep = {};
-    for (const key of ['snapSaveName', 'snapSearch']) {
+    for (const key of ['snapSearch']) {
       const input = el.querySelector(`#${key}`);
       if (!input) continue;
       keep[key] = {
@@ -408,7 +394,6 @@ export function createSnapshotPanel({
     for (const [key, saved] of Object.entries(keep)) {
       const input = el.querySelector(`#${key}`);
       if (!input) continue;
-      if (key === 'snapSaveName') input.value = saved.value;
       if (saved.focused) {
         input.focus();
         try { input.setSelectionRange(saved.start, saved.end); } catch (_) { /* 범위를 못 쓰는 입력 */ }
@@ -474,27 +459,16 @@ export function createSnapshotPanel({
            data-naia-title="카테고리만 지웁니다 — 안의 스냅샷은 남습니다">카테고리 삭제</button>`
       : '';
 
-    const blocker = String(lastState?.save_blocker || '');
-    const blockerText = BLOCKER_TEXT[blocker] || '';
-    const saveInto = target ? folderLabel(target) : '';
     const rows = visibleSnapshots();
     el.innerHTML = `<div class="ia-sc-pop-box">
       <div class="ia-sc-pop-head">
-        <span class="ia-sc-pop-title">Snapshot</span>
-        <span class="snap-save${blocker ? ' is-blocked' : ''}"${blockerText ? ` data-naia-title="${esc(blockerText)}"` : ''}>
-          <input type="text" class="ia-sc-search snap-save-name" id="snapSaveName" maxlength="80" autocomplete="off"
-                 placeholder="${esc(saveInto ? `이름 — ${saveInto} 에 담습니다` : '스냅샷 이름 (지금 설정 전부 + 마지막 그림)')}">
-          <label class="snap-opt" data-naia-title="지금의 Tag Filter 와 불러온 데이터셋의 사본을 함께 담습니다. 데이터셋 크기만큼 용량을 씁니다.">
-            <input type="checkbox" id="snapIncludeSearch"${includeSearch ? ' checked' : ''}>데이터셋</label>
-          <button type="button" class="ia-sc-btn is-main" data-snap-act="save"${blocker ? ' disabled' : ''}>저장</button>
-        </span>
+        <span class="ia-sc-pop-title">Snapshot <span class="snap-title-hint">- 저장은 히스토리 이미지 우클릭 - [NAI] 스냅샷 저장 버튼을 누르세요.</span></span>
         <input type="text" class="ia-sc-search" id="snapSearch" placeholder="이름·태그로 찾기" value="${esc(query)}" autocomplete="off">
         ${tools}
         <button type="button" class="ia-sc-btn" data-snap-act="open-folder"
           data-naia-title="Snapshot 폴더를 탐색기에서 엽니다">폴더</button>
         <button type="button" class="ia-sc-btn" data-snap-act="close">닫기</button>
       </div>
-      ${blockerText ? `<div class="snap-blocker">${esc(blockerText)}</div>` : ''}
       <div class="ia-sc-finder">
         <div class="ia-sc-col ia-sc-col1">${col1}</div>
         <div class="ia-sc-col ia-sc-col2">${col2}</div>
@@ -503,7 +477,7 @@ export function createSnapshotPanel({
             rows.length ? rows.map(cardHtml).join('')
               : `<div class="ia-sc-empty">${all.length
                   ? '조건에 맞는 스냅샷이 없습니다.'
-                  : '아직 스냅샷이 없습니다. 위에 이름을 적고 [저장]을 누르면 지금 설정이 통째로 담깁니다.'}</div>`}</div>
+                  : '아직 스냅샷이 없습니다. 히스토리 이미지를 우클릭해 [NAI] 스냅샷 저장을 누르면 지금 설정이 담깁니다.'}</div>`}</div>
         </div>
         <div class="ia-sc-col ia-sc-preview">${previewHtml()}</div>
       </div>
@@ -520,9 +494,10 @@ export function createSnapshotPanel({
   /** 응답에 **한 번만** 실려 오는 값들. 다음 상태에는 없으므로 받은 자리에서 쓴다. */
   function consumeOneShots(state) {
     const prompt = state.overwrite_prompt;
-    if (prompt && prompt.name) {
-      // 내가 보낸 저장이면 **그때의 요청 그대로**(그림 · 고른 항목 · 카테고리) 다시 보낸다.
-      const retry = pendingSave || {name: String(prompt.name), include_search: includeSearch, folder: curSub || curTop};
+    // 되묻기는 저장을 보낸 그 연결로만 온다. 보낸 요청을 모르면(그림 · 고른 항목이 없다) 다시 보낼 것이 없다.
+    if (prompt && prompt.name && pendingSave) {
+      // **그때의 요청 그대로**(그림 · 고른 항목 · 카테고리) 다시 보낸다.
+      const retry = pendingSave;
       pendingSave = null;
       confirmBox(`"${String(prompt.name)}" 스냅샷을 덮어씁니다. 계속할까요?`,
                  {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'})
@@ -745,7 +720,7 @@ export function createSnapshotPanel({
   /** 저장을 보낸다. `request` = {name, include_search, folder, image?, sections?, relocate?}.
    *
    *  `image` · `sections` · `relocate` 는 저장 창(우클릭 > [NAI] 스냅샷 저장)이 싣는다: 우클릭한 그 그림,
-   *  고른 항목만, 덮어쓸 때도 고른 카테고리로. 이 창의 빠른 저장은 셋 다 없이 보낸다(전부 · 마지막 그림).
+   *  고른 항목만, 덮어쓸 때도 고른 카테고리로. 저장을 보내는 곳은 이제 그 창뿐이다.
    */
   function sendSave(request, overwrite) {
     const name = String(request.name || '');
@@ -774,28 +749,6 @@ export function createSnapshotPanel({
     // 같은 이름으로 다시 담으면 내용이 다른 스냅샷이다 - 옛 체크를 잊는다.
     forgetPicks(String(request?.name || ''));
     sendSave(request || {}, overwrite);
-  }
-
-  async function saveCurrent() {
-    const input = popEl?.querySelector('#snapSaveName');
-    const name = sanitizeName(input?.value || '');
-    if (!name) { showToast('스냅샷 이름을 입력하세요', 'error'); input?.focus(); return; }
-    if (name.startsWith('_')) { showToast('이름은 _ 로 시작할 수 없습니다', 'error'); input?.focus(); return; }
-    const blocker = String(lastState?.save_blocker || '');
-    if (blocker) { showToast(BLOCKER_TEXT[blocker] || '지금은 저장할 수 없습니다', 'error'); return; }
-    // ⚠️ **다듬은 이름으로 견준다.** 목록의 이름은 이미 다듬어져 있다 - 날것으로 견주면
-    //    `A:B` 가 `AB` 와 안 맞아 확인 없이 덮어쓴다(V5 Scene 이 밟은 함정).
-    const exists = snapshots().some(item => String(item.name).toLowerCase() === name.toLowerCase());
-    if (exists) {
-      const ok = await confirmBox(`"${name}" 스냅샷을 덮어씁니다. 계속할까요?`,
-                                  {title: '덮어쓰기', okText: '덮어쓰기', cancelText: '취소'});
-      if (!ok) return;
-    }
-    // 같은 이름으로 다시 담으면 내용이 다른 스냅샷이다 - 옛 체크를 잊는다(전부 켜진 채로 시작).
-    forgetPicks(name);
-    sendSave({name, include_search: includeSearch, folder: curSub || curTop}, exists);
-    const now = popEl?.querySelector('#snapSaveName');
-    if (now) now.value = '';
   }
 
   function applySnapshot(name) {
@@ -877,7 +830,6 @@ export function createSnapshotPanel({
     const name = hit.dataset.snapName || '';
     if (hit.disabled) return;
     if (act === 'close') close();
-    else if (act === 'save') saveCurrent();
     else if (act === 'open-folder') setModuleParam('snapshot', 'open_folder', {});
     else if (act === 'preview') {
       // 같은 카드를 다시 누르면 접는다.
@@ -920,11 +872,10 @@ export function createSnapshotPanel({
     grid.innerHTML = rows.length ? rows.map(cardHtml).join('')
       : `<div class="ia-sc-empty">${snapshots().length
           ? '조건에 맞는 스냅샷이 없습니다.'
-          : '아직 스냅샷이 없습니다. 위에 이름을 적고 [저장]을 누르면 지금 설정이 통째로 담깁니다.'}</div>`;
+          : '아직 스냅샷이 없습니다. 히스토리 이미지를 우클릭해 [NAI] 스냅샷 저장을 누르면 지금 설정이 담깁니다.'}</div>`;
   }
 
   function onChange(event) {
-    if (event.target?.id === 'snapIncludeSearch') { rememberIncludeSearch(event.target.checked); return; }
     const pick = event.target?.closest?.('[data-snap-pick]');
     if (!pick) return;
     const box = pick.closest('[data-snap-picks]');
@@ -937,12 +888,6 @@ export function createSnapshotPanel({
     const button = popEl?.querySelector('[data-snap-act="apply"]');
     const wrongMode = !!(item?.mode && item.mode !== lastState?.current_mode);
     if (button) button.disabled = wrongMode || !box.querySelector('[data-snap-pick]:checked');
-  }
-
-  function onPopKey(event) {
-    if (event.key !== 'Enter' || event.isComposing || event.target?.id !== 'snapSaveName') return;
-    event.preventDefault();
-    saveCurrent();
   }
 
   return {open, close, render, isOpen: () => popOpen, save: saveFromOutside};

@@ -30418,14 +30418,8 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
    (사용자 지정 2026-10-04). 여기에는 스냅샷에만 있는 것만 둔다 - 전부 `.snap-pop` 아래로
    묶어 Scene 창의 모양을 건드리지 않는다. */
 .snap-pop .ia-sc-pop-head { flex-wrap: wrap; row-gap: 6px; }
-.snap-save { display: inline-flex; align-items: center; gap: 6px; }
-.snap-save.is-blocked .snap-save-name { opacity: 0.5; }
-.snap-pop .snap-save-name { width: 250px; }
-.snap-opt {
-  flex: none; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
-  font-size: 11px; color: #c6cad3; white-space: nowrap;
-}
-.snap-opt input { margin: 0; accent-color: #5a82dc; cursor: pointer; }
+/* 제목 옆 안내 - 이 창은 담지 않는다. 저장은 결과 그림 우클릭 > [NAI] 스냅샷 저장(사용자 지정 2026-10-05). */
+.snap-title-hint { font-size: 11px; color: #8a8f9a; }
 .snap-pop .ia-sc-btn:disabled { opacity: 0.4; cursor: default; }
 .snap-blocker { font-size: 10.5px; color: var(--hint-cross-search); margin: -4px 0 8px; }
 .snap-pv-body .snap-blocker, .ia-sc-pv-body .snap-blocker { margin: 0; }

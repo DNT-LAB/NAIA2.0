@@ -583,7 +583,7 @@ export function createE621EventPanel({
       + '<span class="e6-bench-count" data-e621-bench="count"></span></div>'
       + '<textarea class="mod-textarea e6-bench-input" id="e621BenchInput" rows="3" maxlength="4000" spellcheck="false" autocomplete="off"></textarea>'
       + '<div class="e6-bench-row">'
-      + '<label class="e6-bench-weight" title="고른 태그에 거는 가중치(0 ~ 2). 바꾸면 프롬프트를 새로 조립합니다 · 태그를 바꾸면 1 로 돌아갑니다">가중치'
+      + '<label class="e6-bench-weight" title="고른 태그에 거는 가중치(0 ~ 2). 바꾸면 프롬프트를 새로 조립합니다 · 태그를 바꿔도 그대로입니다">가중치'
       + '<input type="range" min="0" max="2" step="0.1" data-e621-bench="weight"><span data-e621-bench="weight-label"></span></label>'
       + '<label class="e6-check" title="켜면 1girl 대신 1boy 로 조립합니다">'
       + '<input type="checkbox" data-e621-bench="male"><span>남성모드(1boy)</span></label>'
@@ -806,7 +806,7 @@ export function createE621EventPanel({
     if (ui.expandedFor !== selected) {
       ui.expanded.clear();
       ui.expandedFor = selected;
-      // 가중치는 태그마다 1 에서 시작한다(서버도 그렇게 한다) - 앞 태그에서 끌던 값을 들고 오지 않는다.
+      // 가중치는 서버가 쥐고 있고 태그를 바꿔도 남는다. 여기서 버리는 것은 끌다 만(서버에 닿지 않은) 값뿐이다.
       ui.weightDraft = null;
     }
     if (!state.data_loaded) {

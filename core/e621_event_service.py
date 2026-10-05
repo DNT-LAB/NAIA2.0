@@ -82,7 +82,7 @@ class E621EventService:
         self.current_level2: str | None = None
         self.selected_tag: str | None = None
         self.testbench = DEFAULT_TESTBENCH
-        # 고른 태그에 거는 가중치. 태그를 바꾸면 1 로 돌아간다(저장하지 않는다).
+        # 고른 태그에 거는 가중치. 태그를 바꿔도 남는다(사용자 지정 2026-10-05) - 켜 있는 동안만이고 저장하지는 않는다.
         self.test_weight = 1.0
         self.disable_translation = False
         self.disable_wiki_search = False
@@ -344,8 +344,6 @@ class E621EventService:
             self.selected_tag = None
             self.tag_offset = 0
         elif key == "selected_tag":
-            if (raw or None) != self.selected_tag:
-                self.test_weight = 1.0
             self.selected_tag = raw or None
         elif key == "toggle_star":
             tag = raw.strip()

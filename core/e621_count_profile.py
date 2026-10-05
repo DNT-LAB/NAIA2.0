@@ -50,7 +50,9 @@ class E621CountProfile:
         self.last_error: str | None = None
         self.source_path: Path | None = None
         self.meta: dict[str, Any] = {}
-        self._rows: dict[str, tuple[int, int, int, int, int]] = {}
+        # 줄마다 파이썬 값으로 풀지 않는다 - 태그 → 줄 번호와 열 배열만 둔다(물을 때 그 줄만 읽는다).
+        self._index: dict[str, int] = {}
+        self._columns: list[Any] = []
         self._attempted = False
         self._lock = Lock()
 
@@ -71,22 +73,29 @@ class E621CountProfile:
                     meta = json.loads((table.schema.metadata or {}).get(METADATA_KEY) or b"{}")
                     if meta.get("schema") != SCHEMA:
                         raise ValueError("unexpected count profile schema")
-                    columns = [table.column(name).to_pylist() for name in ("tag", "total", *COUNT_TAGS)]
-                    self._rows = {tag: (int(total), int(solo), int(duo), int(trio), int(group))
-                                  for tag, total, solo, duo, trio, group in zip(*columns) if tag and int(total) > 0}
+                    self._columns = [table.column(name).to_numpy() for name in ("total", *COUNT_TAGS)]
+                    self._index = {tag: row for row, tag in enumerate(table.column("tag").to_pylist()) if tag}
                     self.meta = meta
                     self.loaded = True
                     return True
                 except Exception as exc:  # 읽을 수 없는 표는 '없음' 과 같다 - 인원 태그를 안 붙일 뿐이다
                     self.last_error = type(exc).__name__ + ": " + str(exc)
-                    self._rows = {}
+                    self._index, self._columns = {}, []
                     return False
             return False
+
+    def __len__(self) -> int:
+        self.load()
+        return len(self._index)
 
     def counts(self, exact_tag: str) -> tuple[int, int, int, int, int] | None:
         """(이 태그의 게시물 수, solo, duo, trio, group). 표에 없는 태그는 None('모름' 이지 '혼자' 가 아니다)."""
         self.load()
-        return self._rows.get(exact_tag)
+        row = self._index.get(exact_tag)
+        if row is None:
+            return None
+        counts = tuple(int(column[row]) for column in self._columns)
+        return counts if counts[0] > 0 else None
 
     def describe(self, exact_tag: str) -> dict[str, Any] | None:
         """화면용: 붙일 인원 태그와 비율. 표에 없으면 None."""

@@ -2700,7 +2700,7 @@ const e621WindowReady = e621UsesWindow
     })
   : Promise.resolve();
 // 패널은 창이 만들어진 뒤에 만든다 - 작게 보기에서 설명이 나가는 옆 창(e621Window.detail)을 받아야 한다.
-const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mjs?v=20261005-e621multi'), e621WindowReady])
+const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mjs?v=20261005-e621chips'), e621WindowReady])
   .then(([{createE621EventPanel}]) => {
     e621EventPanel = createE621EventPanel({
       document,

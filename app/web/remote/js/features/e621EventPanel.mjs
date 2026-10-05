@@ -12,6 +12,8 @@
 //    상세의 스크롤이 전부 0 으로 돌아갔다(사용자 제보 2026-10-03). 그래서:
 //      · 태그 목록 HTML 에는 '지금 고른 태그' 를 넣지 않는다 → 클래스만 옮긴다(syncMarks).
 //      · 치는 중인 검색어는 영역 HTML 에 넣지 않는다 → 쓴 뒤에 value 로 넣는다(syncInputs).
+//      · 올린 검색어(칩)와 번역 표시는 툴바가 아니라 그 아래의 terms 영역에 쓴다 → 검색이 바뀌어도 검색칸이 든 툴바는
+//        다시 쓰지 않는다(다음 검색어를 치는 중에 글상자가 갈리면 한글 조합이 끊긴다).
 //      · 영역을 다시 쓸 때는 data-scroll-key 가 같은 스크롤 · 포커스를 되돌린다(swap).
 //      · 태그 목록은 쪽(300줄)을 이어 붙인다 - 같은 목록이면 영역을 다시 쓰지 않고 쪽 단위로 맞춘다(paintTags).
 //      · 테스트 생성의 보낼 프롬프트 · 가중치도 영역 HTML 에 넣지 않는다 → 쓴 뒤에 맞춘다(syncBench).
@@ -33,7 +35,7 @@ export function createE621EventPanel({
   floatDetail = null,
 }) {
   const moduleBody = host || document.getElementById('modulePopupBody');
-  const REGIONS = ['toolbar', 'cats', 'folders', 'tags', 'detail', 'bench'];
+  const REGIONS = ['toolbar', 'terms', 'cats', 'folders', 'tags', 'detail', 'bench'];
   const send = (key, value) => setModuleParam('e621_event', key, value);
   const esc = value => escHtml(String(value ?? ''));
   const fmt = value => (Number(value) || 0).toLocaleString('en-US');
@@ -48,8 +50,9 @@ export function createE621EventPanel({
   //   benchDraft = 보낼 프롬프트를 손으로 고친 글 {text, base}. base = 고치기 시작한 자동 조립 - 그것이 바뀌면 버린다.
   //   weightDraft = 끌고 있는(서버가 아직 받아 적지 않은) 가중치. 둘 다 null = 없음.
   //   compact = 작게 보기 · popWanted = 방금 누른 태그(그 태그의 설명이 오면 옆 창을 연다)
+  //   termsDraft = 방금 올리거나 뺀 검색어 칩들(서버가 같은 검색어를 돌려줄 때까지 먼저 보인다 · null = 없음)
   const ui = {pop: '', searchDraft: null, expanded: new Set(), expandedFor: '', folds: new Set(),
-    benchDraft: null, weightDraft: null, benchSentAt: 0, compact: false, popWanted: ''};
+    benchDraft: null, weightDraft: null, benchSentAt: 0, compact: false, popWanted: '', termsDraft: null};
   const BENCH_AGAIN_MS = 700;     // [생성] 을 연달아 누른 것은 한 번으로 친다
   // 태그 목록에 이어 붙여 둔 쪽들 - 이것도 이 탭의 것이다. 서버가 아는 것은 마지막으로 청한 쪽 하나뿐이다.
   //   key = 어느 목록인가 · stamp = 그 목록의 줄 수와 줄 모양 · html = 쪽마다 써 넣은 줄 · pending = 청해 둔 쪽
@@ -153,17 +156,11 @@ export function createE621EventPanel({
       .map(([value, label]) => `<option value="${value}"${filter === value ? ' selected' : ''}>${label}</option>`).join('');
     const hidden = Number(state.hidden_total) || 0;
     const starred = state.view_mode === 'starred';
-    // 한국어 검색어를 영어로 번역해 한 번 더 찾았다 - 무엇으로 찾았는지 보인다.
-    const translation = state.search_translation;
-    const translated = translation?.translated
-      ? `<span class="e6-translated" title="${esc(`한국어 검색어를 영어로 번역해 한 번 더 찾았습니다 · 보탠 태그 ${fmt(translation.added)}개`)}">`
-        + `<span class="e6-dim">번역</span> ${esc(translation.translated)}</span>` : '';
-    // ⚠️ 검색어(value) · 검색 중 강조(is-active)는 여기 넣지 않는다 - syncInputs 가 쓴 뒤에 맞춘다.
+    // ⚠️ 검색어 · 검색 중 강조(is-active)는 여기 넣지 않는다 - 치는 글은 syncInputs 가, 올린 검색어(칩)는 terms 영역이 맡는다.
     return `<div class="e6-search">`
       + `<input class="mod-input" id="e621SearchInput" type="text" placeholder="태그 · 한국어 검색" autocomplete="off" spellcheck="false"`
-      + ` title="쉼표로 나누면 여러 검색어를 한꺼번에 찾습니다(예: small penis, cock)">`
-      + `<button class="e6-search-x" data-e621-act="cancel-search" title="검색 취소" aria-label="검색 취소">×</button></div>`
-      + translated
+      + ` title="Enter 나 쉼표로 검색어를 올립니다 - 여러 개를 올리면 그중 하나라도 맞는 태그가 나옵니다(예: small penis, cock)">`
+      + `<button class="e6-search-x" data-e621-act="cancel-search" title="검색 취소(검색어를 모두 뺍니다)" aria-label="검색 취소">×</button></div>`
       + `<div class="e6-seg" role="group" aria-label="보기">`
       + `<button class="${starred ? '' : 'on'}" data-e621-act="view" data-value="default">기본</button>`
       + `<button class="${starred ? 'on' : ''}" data-e621-act="view" data-value="starred" title="즐겨찾기한 태그만 봅니다">★ ${fmt(state.starred_total)}</button></div>`
@@ -174,13 +171,41 @@ export function createE621EventPanel({
       + popHtml(state);
   }
 
+  // ── 검색어 칩 ──────────────────────────────────────────────────────────────
+  // 검색어는 Tag Filter 처럼 칩으로 쌓인다(사용자 지정 2026-10-05). 서버가 쥔 것은 쉼표로 이은 글 하나(search_text)이고,
+  // 칩은 그것을 나눠 보일 뿐이다 - 칩 가운데 하나라도 맞는 태그가 나온다. 퍼펙트 매칭(*) 은 없다.
+  const termsOf = text => {
+    const seen = new Set();
+    return String(text || '').split(',').map(part => part.trim().replace(/\s+/g, ' ')).filter(term => {
+      const key = term.toLowerCase();
+      if (!term || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const shownTerms = state => ui.termsDraft ?? termsOf(state?.search_text);
+
+  function termsHtml(state) {
+    const chips = shownTerms(state).map(term => `<span class="e6-term">${esc(term)}`
+      + `<button class="e6-term-x" data-e621-act="term-remove" data-value="${esc(term)}" title="이 검색어 빼기" aria-label="${esc(term)} 빼기">×</button></span>`).join('');
+    // 한국어 검색어를 영어로 번역해 한 번 더 찾았다 - 무엇으로 찾았는지 보인다.
+    const translation = state.search_translation;
+    const translated = translation?.translated
+      ? `<span class="e6-translated" title="${esc(`한국어 검색어를 영어로 번역해 한 번 더 찾았습니다 · 보탠 태그 ${fmt(translation.added)}개`)}">`
+        + `<span class="e6-dim">번역</span> ${esc(translation.translated)}</span>` : '';
+    return chips + translated;
+  }
+
   function catsHtml(state) {
     const categories = state.categories || [];
     const group = (section, label) => {
       const rows = categories.filter(item => item.section === section).map(item => {
         const classes = ['e6-row', item.selected ? 'selected' : '', item.matched ? 'matched' : ''].filter(Boolean).join(' ');
+        // 검색에 맞은 태그가 있는 분류: 줄을 밝히고, 몇 개가 맞았는지 흰 글씨로 적는다(사용자 지정 2026-10-05).
+        const hits = item.matched && Number.isFinite(Number(item.match_count)) && Number(item.match_count) > 0
+          ? `<span class="e6-row-hit" title="검색에 맞은 태그 수">${fmt(item.match_count)}</span>` : '';
         return `<button class="${classes}" data-e621-act="category" data-value="${esc(item.name)}"${item.matched ? ' title="검색이 맞은 태그가 있습니다"' : ''}>`
-          + `<span class="e6-row-name">${esc(spaced(item.name))}</span>`
+          + `<span class="e6-row-name">${esc(spaced(item.name))}</span>` + hits
           + (item.starred_count ? `<span class="e6-star">★${fmt(item.starred_count)}</span>` : '')
           + `<span class="e6-row-num">${fmt(item.tag_count)}</span></button>`;
       }).join('');
@@ -192,7 +217,8 @@ export function createE621EventPanel({
   function foldersHtml(state) {
     const rows = (state.folders || []).map(folder =>
       `<button class="e6-row${folder.selected ? ' selected' : ''}" data-e621-act="folder" data-value="${esc(folder.name)}">`
-      + `<span class="e6-row-name">${esc(folder.display)}</span><span class="e6-row-num">${fmt(folder.tag_count)}</span></button>`).join('');
+      // 검색 중의 폴더 수는 '맞은 태그 수' 다 - 분류의 맞은 수와 같은 흰 글씨로.
+      + `<span class="e6-row-name">${esc(folder.display)}</span><span class="${state.search_text ? 'e6-row-hit' : 'e6-row-num'}">${fmt(folder.tag_count)}</span></button>`).join('');
     // 검색 중에는 맞는 태그가 있는 폴더만 나온다 - 비어 보이는 까닭을 적는다(검색을 잊으면 폴더가 사라진 것처럼 보인다).
     const empty = `<div class="e6-empty">${!state.current_category ? '분류를 고르면 보입니다'
       : state.search_text ? '검색에 맞는 폴더가 없습니다' : '폴더 없음'}</div>`;
@@ -694,6 +720,7 @@ export function createE621EventPanel({
   function regionsHtml(state) {
     return {
       toolbar: toolbarHtml(state),
+      terms: termsHtml(state),
       cats: catsHtml(state),
       folders: foldersHtml(state),
       tags: tagsHtml(state),
@@ -708,7 +735,8 @@ export function createE621EventPanel({
 
   function skeletonHtml(state, html) {
     return `<div class="e6-root"><div class="${panelClasses(state)}">`
-      + `<div class="e6-toolbar" data-e621-region="toolbar">${html.toolbar}</div>`
+      + `<div class="e6-top"><div class="e6-toolbar" data-e621-region="toolbar">${html.toolbar}</div>`
+      + `<div class="e6-terms" data-e621-region="terms">${html.terms}</div></div>`
       + '<div class="e6-main">'
       + `<section class="e6-col e6-col-cats" data-e621-region="cats">${html.cats}</section>`
       + `<section class="e6-col e6-col-folders" data-e621-region="folders">${html.folders}</section>`
@@ -755,9 +783,9 @@ export function createE621EventPanel({
   function syncInputs(state) {
     const search = document.getElementById('e621SearchInput');
     if (!search) return;
-    const want = ui.searchDraft ?? state.search_text ?? '';
-    // 치는 중이면 건드리지 않는다(치다 만 글이 다른 응답에 지워지면 안 된다).
-    if (search.value !== want && (document.activeElement !== search || ui.searchDraft === null)) search.value = want;
+    // 검색칸에는 치는 글만 있다(올린 검색어는 칩이다). 치는 중이면 건드리지 않는다 - 다른 응답에 지워지면 안 된다.
+    const want = ui.searchDraft ?? '';
+    if (search.value !== want && document.activeElement !== search) search.value = want;
     // 검색이 걸려 있는 동안 검색칸을 강조한다 - 잊으면 폴더가 사라진 것처럼 보인다(사용자 지정 2026-10-03).
     const box = typeof search.closest === 'function' ? search.closest('.e6-search') : null;
     if (box) {
@@ -854,8 +882,10 @@ export function createE621EventPanel({
     const previousSearch = lastSearchText;
     lastState = state;
     lastSearchText = state.search_text ?? '';
-    // 서버의 검색어가 바뀌었다(검색 · 취소가 반영됐다) - 치다 만 글은 버리고 서버 값을 따른다.
-    if (previousSearch !== lastSearchText) ui.searchDraft = null;
+    // 먼저 보여 둔 칩은 서버의 검색어가 바뀌었거나 같아졌으면 놓는다(그 뒤로는 서버의 것을 보인다).
+    // 치고 있는 다음 검색어(searchDraft)는 건드리지 않는다.
+    if (ui.termsDraft && (previousSearch !== lastSearchText
+      || termsOf(lastSearchText).join(',').toLowerCase() === ui.termsDraft.join(',').toLowerCase())) ui.termsDraft = null;
     const selected = state.selected?.tag || '';
     if (ui.expandedFor !== selected) {
       ui.expanded.clear();
@@ -886,20 +916,46 @@ export function createE621EventPanel({
   // ── 조작 ───────────────────────────────────────────────────────────────────
   const HANGUL = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
 
-  function search() {
-    const input = document.getElementById('e621SearchInput');
-    const query = input ? input.value : '';
+  // 칩들로 검색한다(하나라도 맞는 태그). 칩은 서버 응답을 기다리지 않고 먼저 보인다.
+  function applyTerms(terms) {
+    if (!terms.length) {
+      cancelSearch();
+      return;
+    }
+    const query = terms.join(', ');
+    ui.termsDraft = terms;
     send('search', query);
     // 한국어 검색어는 영어로 번역한 말로도 한 번 더 찾게 청한다(결과는 뒤에 보태져 한 번 더 온다).
     // 옛 백엔드(search_translation 필드가 없다)는 이 명령을 모른다 - 보내지 않는다.
     if (HANGUL.test(query) && lastState && Object.hasOwn(lastState, 'search_translation')) send('search_translate', query);
+    repaint();
   }
 
-  // 검색만 푼다 - 고른 분류 · 보기 · 필터는 그대로다.
+  // 검색칸의 글을 칩으로 올린다. keepTail = 쉼표를 쳐서 올리는 경우 - 마지막 쉼표 뒤는 치는 중인 글이라 칸에 남긴다.
+  function commitSearch({keepTail = false} = {}) {
+    const input = document.getElementById('e621SearchInput');
+    if (!input) return;
+    const parts = String(input.value || '').split(',');
+    const tail = keepTail ? parts.pop().replace(/^\s+/, '') : '';
+    const added = termsOf(parts.join(','));
+    input.value = tail;
+    ui.searchDraft = tail || null;
+    if (added.length) applyTerms(termsOf([...shownTerms(lastState), ...added].join(',')));
+  }
+
+  function removeTerm(term) {
+    applyTerms(shownTerms(lastState).filter(item => item.toLowerCase() !== String(term).toLowerCase()));
+  }
+
+  // 검색만 푼다(검색어를 모두 뺀다) - 고른 분류 · 보기 · 필터는 그대로다.
   function cancelSearch() {
     ui.searchDraft = null;
     const input = document.getElementById('e621SearchInput');
     if (input) input.value = '';
+    // 칩은 서버 응답을 기다리지 않고 바로 걷는다(서버가 검색을 푼 상태를 주면 그때 놓는다).
+    const hadTerms = shownTerms(lastState).length > 0;
+    ui.termsDraft = lastState?.search_text ? [] : null;
+    if (hadTerms) repaint();
     if (!lastState?.search_text) return;
     // 옛 백엔드(search_translation 필드가 없다)는 search_cancel 을 모른다 - 빈 검색으로 대신한다.
     if (Object.hasOwn(lastState, 'search_translation')) send('search_cancel', '1');
@@ -950,6 +1006,7 @@ export function createE621EventPanel({
         case 'more': requestPage(value === 'prev' ? pages.first - 1 : pages.last + 1); break;
         case 'view': send('view_mode', value); break;
         case 'cancel-search': cancelSearch(); break;
+        case 'term-remove': removeTerm(value); break;
         case 'star': withSelected('toggle_star'); break;
         case 'hide': withSelected('hide'); break;
         case 'restore':
@@ -989,8 +1046,11 @@ export function createE621EventPanel({
 
     moduleBody.addEventListener('input', event => {
       const input = event.target;
-      if (input?.id === 'e621SearchInput') ui.searchDraft = input.value;
-      else if (input?.id === 'e621BenchInput') draftBench(input.value);
+      if (input?.id === 'e621SearchInput') {
+        ui.searchDraft = input.value || null;
+        // 쉼표를 치면 그 앞까지를 칩으로 올려 바로 찾는다. 한글을 조합하는 중에는 건드리지 않는다.
+        if (!event.isComposing && String(input.value).includes(',')) commitSearch({keepTail: true});
+      } else if (input?.id === 'e621BenchInput') draftBench(input.value);
       else if (input?.dataset?.e621Bench === 'weight') {
         // 끄는 동안에는 숫자만 따라간다.
         ui.weightDraft = Number(input.value);
@@ -1003,13 +1063,17 @@ export function createE621EventPanel({
       const target = event.target;
       if (!target?.closest?.('.e6-panel')) return;
       if (target.id === 'e621SearchInput') {
-        if (event.key === 'Enter') {
+        if (event.key === 'Enter' && !event.isComposing) {
           event.preventDefault();
-          search();
+          commitSearch();
         } else if (event.key === 'Escape' && (lastState?.search_text || target.value)) {
           // 검색칸에서 Esc = 검색 취소.
           event.preventDefault();
           cancelSearch();
+        } else if (event.key === 'Backspace' && !target.value && shownTerms(lastState).length) {
+          // 빈 칸에서 지우기 = 마지막 칩을 뺀다.
+          event.preventDefault();
+          removeTerm(shownTerms(lastState).at(-1));
         }
         return;
       }
@@ -1113,6 +1177,16 @@ const PANEL_CSS = `
 .e6-check{flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;color:var(--text-muted);font-size:11px;white-space:nowrap;cursor:pointer}
 .e6-check input{margin:0;accent-color:var(--accent)}
 
+/* 툴바와 그 아래의 검색어 칩 */
+.e6-top{min-width:0;display:flex;flex-direction:column;gap:6px}
+.e6-terms{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0}
+.e6-terms:empty{display:none}
+.e6-term{display:inline-flex;align-items:center;gap:2px;max-width:100%;padding:1px 2px 1px 8px;border:1px solid rgba(127,209,143,0.45);
+  border-radius:4px;background:rgba(127,209,143,0.1);color:var(--text-primary);font-family:var(--font-mono);font-size:11px;line-height:18px;
+  overflow-wrap:anywhere}
+.e6-term-x{flex:0 0 auto;width:18px;height:18px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--text-dim);
+  font-size:13px;line-height:1;cursor:pointer}
+.e6-term-x:hover{background:rgba(255,138,138,0.22);color:#ffb3b3}
 /* 툴바 - 한 줄 */
 .e6-toolbar{position:relative;display:flex;align-items:center;gap:8px;min-width:0}
 .e6-search{position:relative;flex:1 1 auto;min-width:120px}
@@ -1155,9 +1229,14 @@ const PANEL_CSS = `
   border-radius:3px;background:transparent;color:var(--text-muted);font-size:11px;text-align:left;cursor:pointer}
 .e6-row:hover{background:var(--bg-hover)}
 .e6-row.selected{background:rgba(124,106,239,0.22);color:var(--text-primary);box-shadow:inset 2px 0 0 var(--accent-glow)}
-.e6-row.matched .e6-row-name{color:var(--text-primary)}
-.e6-row.matched .e6-row-name::after{content:'';display:inline-block;width:5px;height:5px;margin-left:6px;border-radius:50%;
-  background:#7fd18f;vertical-align:middle}
+/* 검색에 맞은 태그가 있는 분류: 줄을 밝히고 맞은 수를 흰 글씨로(고른 줄의 보라가 그 위에 온다). */
+.e6-row.matched{background:rgba(255,255,255,0.075)}
+.e6-row.matched:hover{background:rgba(255,255,255,0.12)}
+.e6-row.matched .e6-row-name{color:var(--text-primary);font-weight:600}
+.e6-row.matched.selected{background:rgba(124,106,239,0.3)}
+.e6-row-hit{flex:0 0 auto;margin-right:10px;color:#fff;font-family:var(--font-mono);font-size:11px;font-weight:600;
+  font-variant-numeric:tabular-nums}
+.e6-row.matched .e6-row-num{min-width:48px;text-align:right}
 .e6-row-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .e6-row-num,.e6-row .e6-star{flex:0 0 auto;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums}
 .e6-row-num{color:var(--text-dim)}

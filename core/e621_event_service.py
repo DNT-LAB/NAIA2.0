@@ -91,6 +91,8 @@ class E621EventService:
         self._settings_loaded = False
         self._search_index: E621ResearchIndex | None = None
         self._index_source = None
+        # (무엇으로 셌나, 분류 → 맞은 태그 수). 검색이 걸린 동안 태그를 누를 때마다 17만 줄을 다시 세지 않게 적어 둔다.
+        self._category_hits: tuple[Any, dict[tuple[str, str], int]] | None = None
 
     def state(self) -> dict[str, Any]:
         loaded = self._ensure_loaded()
@@ -555,21 +557,37 @@ class E621EventService:
 
     def _categories(self) -> list[dict[str, Any]]:
         index = self._search_index
-        matches = self._matches()
+        matches = self._matches() if self.search_text else None
+        # 검색 중에는 분류마다 맞은 태그 수를 센다(화면이 그 줄을 밝히고 수를 적는다 - 사용자 지정 2026-10-05).
+        # 같은 검색 · 같은 거름 조건이면 한 번만 센다.
+        hits_key = None if matches is None else (
+            index._query_key, self.content_filter, self.view_mode, frozenset(self.deleted_keys),
+            frozenset(self.starred_keys) if self.view_mode == "starred" else None)
+        cached = self._category_hits[1] if self._category_hits and self._category_hits[0] == hits_key else None
+        hits: dict[tuple[str, str], int] = {}
         categories = []
         for section, name, folder_count in sorted(index.categories):
             rows = index.category_rows[(section, name)]
             visible = rows if self.content_filter == "all" and not self.deleted_keys else index.filter_rows(
                 rows, content_filter=self.content_filter, hidden=self.deleted_keys,
                 starred=self.starred_keys, starred_only=False, matches=None)
+            if matches is None:
+                match_count = 0
+            elif cached is not None:
+                match_count = cached[(section, name)]
+            else:
+                # 한 태그가 그 분류의 여러 폴더에 들 수 있다 - 목록처럼 태그 하나로 센다.
+                match_count = len({row["tag"] for row in visible if row["tag"] in matches and
+                                   (self.view_mode != "starred" or row["tag"] in self.starred_keys)})
+            hits[(section, name)] = match_count
             categories.append({
                 "name": name, "section": section, "folder_count": folder_count,
                 "tag_count": len(visible),
                 "starred_count": sum(row["tag"] in self.starred_keys for row in visible) if self.starred_keys else 0,
-                "matched": bool(self.search_text and any(row["tag"] in matches and
-                    (self.view_mode != "starred" or row["tag"] in self.starred_keys) for row in visible)),
+                "matched": bool(match_count), "match_count": match_count,
                 "selected": name == self.current_category,
             })
+        self._category_hits = (hits_key, hits) if matches is not None else None
         return categories
 
     def _folders(self) -> list[dict[str, Any]]:

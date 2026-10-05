@@ -3083,7 +3083,7 @@ const snapshotReady = import('./js/features/snapshotPanel.mjs?v=20261005-snapnos
 // 스냅샷 저장 창(결과 그림 우클릭 > [NAI] 스냅샷 저장). 저장은 Snapshot 창의 입구를 빌린다 -
 // 밀린 편집 flush 와 '같은 이름이 있다' 되묻기의 재전송이 거기 들어 있다.
 const snapshotSaveReady = snapshotReady
-  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261005-snapnosave'))
+  .then(() => import('./js/features/snapshotSaveWindow.mjs?v=20261005-snapsave2'))
   .then(({createSnapshotSaveWindow}) => {
     snapshotSaveControl = createSnapshotSaveWindow({
       document,

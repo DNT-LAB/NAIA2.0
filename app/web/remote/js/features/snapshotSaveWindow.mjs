@@ -12,6 +12,7 @@
  * · 왼쪽은 Snapshot 창과 같은 두 칸이다 - 여기서 카테고리를 고르거나 만든다.
  * · 오른쪽 카드는 목록에 놓일 모양 그대로다(같은 옷 `.ia-sc-scard`). 이름 · 카테고리 · 체크를 바꾸면 따라 바뀐다.
  * · 체크를 끈 항목은 스냅샷에 **아예 담기지 않는다** - 불러올 때 목록에도 나오지 않는다.
+ *   처음에는 데이터셋 · 조건부가 꺼져 있고, Vibe · Reference 는 켜 둔 것이 없으면 꺼진 것으로 다룬다.
  *
  * 떠 있는 창(draggablePanel)인 이유: **[저장] 을 누르는 순간의 설정**이 담긴다. 창을 옆에 둔 채
  * 프롬프트 · 캐릭터를 더 고친 뒤 담을 수 있어야 한다. 그림만 우클릭한 그 장으로 고정된다.
@@ -24,8 +25,10 @@ import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {SNAPSHOT_PICK_ITEMS, sanitizeSnapshotName} from './snapshotPanel.mjs?v=20261005-snapnosave';
 
 // 담을 항목의 마지막 선택. **꺼 둔 것만** 적는다 - 항목이 늘어도 새 항목은 켜진 채로 나온다.
-// 처음에는 데이터셋만 꺼져 있다(크기만큼 용량을 쓴다).
-const OFF_KEY = 'naia.snapshot.saveSections.v1';
+// 처음에는 데이터셋(크기만큼 용량을 쓴다)과 조건부 프롬프트가 꺼져 있다(사용자 지정 2026-10-05).
+// ⚠️ 기본값을 바꿀 때는 열쇠의 판 번호를 올린다 - 옛 기록이 남아 있으면 새 기본값이 영영 안 먹는다.
+const OFF_KEY = 'naia.snapshot.saveSections.v2';
+const DEFAULT_OFF = ['search', 'conditional'];
 // 마지막으로 담은 카테고리. 같은 자리에 잇달아 담는 일이 많다.
 const FOLDER_KEY = 'naia.snapshot.saveFolder.v1';
 
@@ -81,10 +84,10 @@ export function createSnapshotSaveWindow({
   function readOff() {
     try {
       const raw = globalThis.localStorage?.getItem(OFF_KEY);
-      if (raw === null || raw === undefined) return new Set(['search']);
+      if (raw === null || raw === undefined) return new Set(DEFAULT_OFF);
       const data = JSON.parse(raw);
-      return new Set(Array.isArray(data) ? data.map(String) : ['search']);
-    } catch (_) { return new Set(['search']); }
+      return new Set(Array.isArray(data) ? data.map(String) : DEFAULT_OFF);
+    } catch (_) { return new Set(DEFAULT_OFF); }
   }
 
   function writeOff() {
@@ -141,11 +144,28 @@ export function createSnapshotSaveWindow({
     return String(preview.search.blocker || '');
   }
 
-  /** 담을 항목 = 꺼 두지 않은 것. 담을 데이터셋이 없으면 데이터셋은 뺀다. */
+  /** 지금은 담을 것이 없는 항목이면 그 까닭(툴팁 글), 담을 수 있으면 ''.
+   *
+   *  Vibe · Reference 는 **켜 둔 것이 없으면 꺼진 것으로 다룬다**(사용자 지정 2026-10-05) - 빈 구역을 담아 봐야
+   *  불러올 때 목록만 길어진다. 기억해 둔 선택은 건드리지 않는다: 나중에 Vibe 를 켜면 그 선택이 다시 나온다.
+   *  수치를 아직 못 받았으면(창을 막 열었다) 판단하지 않는다.
+   */
+  function deadReason(key) {
+    if (!preview) return '';
+    if (key === 'search') {
+      const blocked = searchBlocker();
+      return blocked ? (SEARCH_BLOCKER_TEXT[blocked] || '지금은 데이터셋을 담을 수 없습니다') : '';
+    }
+    if (key === 'vibe_transfer' && preview.vibe_count === 0) return '지금 켜 둔 Vibe Transfer 가 없습니다';
+    if (key === 'character_reference' && preview.reference_count === 0) return '지금 켜 둔 Character Reference 가 없습니다';
+    return '';
+  }
+
+  /** 담을 항목 = 꺼 두지 않은 것 가운데 지금 담을 것이 있는 것. */
   function pickedKeys() {
     return SNAPSHOT_PICK_ITEMS.map(([key]) => key)
       .filter(key => !off.has(key))
-      .filter(key => key !== 'search' || !searchBlocker());
+      .filter(key => !deadReason(key));
   }
 
   function countText(key) {
@@ -155,7 +175,7 @@ export function createSnapshotSaveWindow({
     if (key === 'vibe_transfer') return number(preview.vibe_count);
     if (key === 'character_reference') return number(preview.reference_count);
     if (key === 'conditional') return preview.conditional_enabled ? '켜짐' : (preview.conditional_enabled === false ? '꺼짐' : '');
-    if (key === 'search') return searchBlocker() ? '' : `${Number(preview.search?.rows || 0).toLocaleString()}행`;
+    if (key === 'search') return deadReason('search') ? '' : `${Number(preview.search?.rows || 0).toLocaleString()}행`;
     return '';
   }
 
@@ -275,7 +295,8 @@ export function createSnapshotSaveWindow({
     }
     const subs = folders().filter(folder => String(folder.parent || '') === top);
     col2.innerHTML = [
-      row(!sub, 'sub', '', '바로 여기에', all.filter(item => folderOf(item) === top).length),
+      // 하위를 안 고른 자리. 왼쪽 칸과 같은 말로 부른다(사용자 지정 2026-10-05: '분류 없음' 으로 통일).
+      row(!sub, 'sub', '', '분류 없음', all.filter(item => folderOf(item) === top).length),
       ...subs.map(folder => row(sub === String(folder.id), 'sub', folder.id, folder.name,
         all.filter(item => folderOf(item) === String(folder.id)).length)),
       `<button type="button" class="ia-sc-item is-add" data-ss-act="folder-new" data-fid="${esc(top)}"
@@ -286,10 +307,10 @@ export function createSnapshotSaveWindow({
   function renderPicks() {
     const box = $('[data-ss="picks"]');
     if (!box) return;
-    const blocked = searchBlocker();
     box.innerHTML = SNAPSHOT_PICK_ITEMS.map(([key, label]) => {
-      const dead = key === 'search' && !!blocked;
-      const tip = dead ? (SEARCH_BLOCKER_TEXT[blocked] || '지금은 데이터셋을 담을 수 없습니다') : SAVE_TIPS[key];
+      const reason = deadReason(key);
+      const dead = !!reason;
+      const tip = reason || SAVE_TIPS[key];
       const count = countText(key);
       return `<label class="snap-pick${dead ? ' is-dead' : ''}" data-naia-title="${esc(tip)}">
         <input type="checkbox" data-ss-pick="${esc(key)}"${(!off.has(key) && !dead) ? ' checked' : ''}${dead ? ' disabled' : ''}>${esc(label)}${

@@ -567,7 +567,7 @@ export function createE621EventPanel({
   }
 
   // ── 테스트 생성 ───────────────────────────────────────────────────────────
-  // 고른 태그 하나로 서버가 조립한 프롬프트(bench.prompt = 1girl → 인원 태그 → 고른 태그 → 관련 태그 6개 이내)를
+  // 고른 태그 하나로 서버가 조립한 프롬프트(bench.prompt = 1girl(남성모드면 1boy) → 인원 태그 → 고른 태그 → 관련 태그 6개 이내)를
   // 글상자에 넣는다. 사용자는 그 글을 직접 고치고, [생성] 은 글상자의 글을 그대로 보낸다 - '보이는 프롬프트' 와
   // '나가는 프롬프트' 가 같다. 틀은 보이지 않는다(사용자 지정 2026-10-05). 태그를 여럿 고르는 조립도 없다.
   // ⚠️ 이 영역의 HTML 은 뼈대뿐이다(태그를 바꿔도 같다). 글상자의 값 · 인원 분포 · 가중치를 여기 넣으면 그것이 바뀔 때마다
@@ -585,8 +585,8 @@ export function createE621EventPanel({
       + '<div class="e6-bench-row">'
       + '<label class="e6-bench-weight" title="고른 태그에 거는 가중치(0 ~ 2). 바꾸면 프롬프트를 새로 조립합니다 · 태그를 바꾸면 1 로 돌아갑니다">가중치'
       + '<input type="range" min="0" max="2" step="0.1" data-e621-bench="weight"><span data-e621-bench="weight-label"></span></label>'
-      + '<label class="e6-check" title="켜면 메인 화면의 선행 · 후행 프롬프트와 전처리가 함께 적용됩니다. 끄면 위 프롬프트 그대로 보냅니다(모델 · 해상도 · 네거티브는 늘 메인 설정)">'
-      + '<input type="checkbox" data-e621-bench="pipeline"><span>메인 설정</span></label>'
+      + '<label class="e6-check" title="켜면 1girl 대신 1boy 로 조립합니다">'
+      + '<input type="checkbox" data-e621-bench="male"><span>남성모드(1boy)</span></label>'
       + '<button class="e6-btn e6-bench-go" data-e621-act="bench-generate" data-e621-bench="go" title="Ctrl+Enter">생성</button>'
       + '</div></div>';
   }
@@ -637,8 +637,8 @@ export function createE621EventPanel({
     if (slider && Number(slider.value) !== weight) slider.value = String(weight);
     const label = benchNode('weight-label');
     if (label && label.textContent !== weightText(weight)) label.textContent = weightText(weight);
-    const pipeline = benchNode('pipeline');
-    if (pipeline) pipeline.checked = state.use_main_pipeline !== false;
+    const male = benchNode('male');
+    if (male) male.checked = Boolean(bench.male);
   }
 
   // 글상자를 손으로 고쳤다 - 그 글과, 고치기 시작한 자동 조립을 함께 적어 둔다.
@@ -923,7 +923,7 @@ export function createE621EventPanel({
         // 가중치 막대를 놓았다 - 서버에 보낸다(보낼 프롬프트가 따라온다).
         ui.weightDraft = Number(input.value);
         send('test_weight', ui.weightDraft);
-      } else if (input?.dataset?.e621Bench === 'pipeline') send('use_main_pipeline', input.checked);
+      } else if (input?.dataset?.e621Bench === 'male') send('male_mode', input.checked);   // 서버가 1boy 로 다시 조립해 준다
     });
 
     moduleBody.addEventListener('input', event => {

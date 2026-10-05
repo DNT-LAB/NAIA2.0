@@ -22,12 +22,13 @@ DEFAULT_TESTBENCH = "{{selected_tags}}"
 
 # ── 테스트 생성의 자동 조립 ──────────────────────────────────────────────────
 # 고른 태그 하나로 프롬프트를 조립한다: 주체 → 인원 태그 → 고른 태그 → 관련 태그.
-#   · 주체는 1girl. 인원 태그는 혼자서는 거의 안 나오는 태그에만 붙는다(사용자 지정 2026-10-05: "특이점이 없는
-#     경우에는 1girl 만 넣고 인원 태그를 사용하지 않습니다" - 기준은 core/e621_count_profile.py).
+#   · 주체는 1girl - 남성모드를 켜면 1boy(사용자 지정 2026-10-05). 인원 태그는 혼자서는 거의 안 나오는 태그에만
+#     붙는다(같은 날: "특이점이 없는 경우에는 1girl 만 넣고 인원 태그를 사용하지 않습니다" - 기준은 core/e621_count_profile.py).
 #   · 관련 태그 = 진짜 코어만, 6개 이내(사용자 지정 2026-10-03 · 다시 확인 2026-10-05). 코어 = 고른 태그가 붙은 게시물의
 #     40% 이상에 함께 붙는 태그(팩이 이미 우연의 2배 이상만 담는다). 0.25 로 재 보면 feet 에 4_toes, kissing 에
 #     male/male 과 male/female 이 함께 올라온다 - 서로 다른 변종이 섞인다. 게시물이 너무 적은 태그는 관측이 흔들린다.
 BENCH_SUBJECT = "1girl"
+BENCH_SUBJECT_MALE = "1boy"
 AUTO_RELATED_LIMIT = 6
 AUTO_RELATED_MIN_SHARE = 0.4
 RELATED_MIN_POSTS = 1000
@@ -62,7 +63,12 @@ class E621EventService:
         self.deleted_path = save_root / "e621_deleted_v2.json"
         self.selected_tags_path = save_root / "e621_selected_tags_v1.json"
         self.selected_tags: list[dict[str, Any]] = []
+        # 테스트 생성은 늘 메인 설정(선행 · 후행 프롬프트 · 전처리)을 탄다. 화면의 [메인 설정] 체크는 걷어 냈다
+        # (사용자 지정 2026-10-05) - 끄는 길은 명령으로만 남아 있고, 그 값은 저장하지도 되살리지도 않는다
+        # (예전 화면이 저장해 둔 '끔' 이 보이지 않는 채로 남아 있으면 안 된다).
         self.use_main_pipeline = True
+        # 남성모드: 조립의 주체를 1girl 대신 1boy 로(설정에 저장한다).
+        self.male_mode = False
         self._species_tags: set[str] | None = None
         # (검색어, 영어로 번역한 검색어). 한국어 검색어를 번역한 결과로 한 번 더 찾는다 - set_param("search_translation").
         self.search_translation: tuple[str, str] | None = None
@@ -180,12 +186,13 @@ class E621EventService:
         count_tag = info["tag"] if info else ""
         related = self._auto_related(exact_tag)
         api_mode = self.app_context.get_api_mode()
-        pieces = [(BENCH_SUBJECT, 1.0), *([(count_tag, 1.0)] if count_tag else []), (exact_tag, self.test_weight),
+        subject = BENCH_SUBJECT_MALE if self.male_mode else BENCH_SUBJECT
+        pieces = [(subject, 1.0), *([(count_tag, 1.0)] if count_tag else []), (exact_tag, self.test_weight),
                   *((tag, 1.0) for tag in related)]
         return {
             # 화면의 글상자에 들어가는 글이다. 사용자가 고치고, [생성] 은 그 글을 그대로 돌려보낸다.
             "prompt": ", ".join(editable_tag(tag, weight, api_mode) for tag, weight in pieces),
-            "weight": self.test_weight,
+            "weight": self.test_weight, "male": self.male_mode,
             # count_tag = 붙인 인원 태그('' = 붙이지 않았다) · count_shares = 근거(None = 표에 없는 태그) · related = 붙인 관련 태그.
             "count_tag": count_tag, "count_shares": info["shares"] if info else None, "related": related,
         }
@@ -374,6 +381,8 @@ class E621EventService:
                 return self._toast(str(exc), level="error")
         elif key == "use_main_pipeline":
             self.use_main_pipeline = self._coerce_bool(value)
+        elif key == "male_mode":
+            self.male_mode = self._coerce_bool(value)
             self._save_settings()
         elif key == "testbench":
             self.testbench = raw
@@ -472,7 +481,7 @@ class E621EventService:
         if isinstance(settings, dict):
             self.disable_translation = self._coerce_bool(settings.get("disable_translation", False))
             self.disable_wiki_search = self._coerce_bool(settings.get("disable_wiki_search", False))
-            self.use_main_pipeline = self._coerce_bool(settings.get("use_main_pipeline", True))
+            self.male_mode = self._coerce_bool(settings.get("male_mode", False))
             self.testbench = str(settings.get("testbench", DEFAULT_TESTBENCH))
         try:
             saved = json.loads(self.selected_tags_path.read_text(encoding="utf-8"))
@@ -500,7 +509,7 @@ class E621EventService:
                 {
                     "disable_translation": self.disable_translation,
                     "disable_wiki_search": self.disable_wiki_search,
-                    "use_main_pipeline": self.use_main_pipeline,
+                    "male_mode": self.male_mode,
                     "testbench": self.testbench,
                 },
                 ensure_ascii=False,

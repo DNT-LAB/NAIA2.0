@@ -194,7 +194,9 @@ export function createE621EventPanel({
       tag.has_korean_search && !tag.has_korean_description ? '한글 검색어' : '',
     ].filter(Boolean).join(' · ') || (tag.review_status === 'metadata_unavailable' ? '설명 확인 불가' : '설명 없음');
     const korean = state.disable_translation ? '' : String(tag.kor || '');
-    const title = [tag.display, korean, coverage].filter(Boolean).join('\n');
+    // 줄 툴팁 = 영문 + 한국어 이름. 이름이 없을 때만 무엇을 갖고 있는지(본문 · 번역 · 검색어)를 적는다 -
+    // 이름이 있으면 그 표시는 잡음이다(사용자 지정 2026-10-04 "헤더 번역 나오면 이 툴팁은 그 번역으로").
+    const title = [tag.display, korean || coverage].filter(Boolean).join('\n');
     const classes = ['e6-row', 'e6-tag', tag.starred ? 'starred' : '',
       fields.length && fields.every(field => field === 'stored_body' || field === 'translated_query') ? 'body-only' : ''].filter(Boolean).join(' ');
     return `<div class="${classes}" data-e621-act="open" data-tag="${esc(tag.tag)}" title="${esc(title)}">`

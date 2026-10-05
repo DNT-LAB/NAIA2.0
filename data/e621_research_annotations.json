@@ -5,9 +5,9 @@
   "descriptions": [
     {
       "e621_tag": "white_background",
-      "label": "흰 배경",
+      "label": "흰색 배경",
       "description": "흰색 배경이 있는 이미지나 장면. 흑백 표현 자체와는 구별한다.",
-      "keywords": "흰 배경, 흰색 배경, 하얀 배경",
+      "keywords": "하얀 배경",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -47,9 +47,9 @@
     },
     {
       "e621_tag": "green_eyes",
-      "label": "초록 눈",
+      "label": "녹안",
       "description": "초록색 눈을 가진 캐릭터를 나타낸다.",
-      "keywords": "초록 눈, 녹색 눈, 초록색 눈",
+      "keywords": "초록 눈, 초록색 눈",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -70,7 +70,7 @@
       "e621_tag": "brown_fur",
       "label": "갈색 털",
       "description": "몸 전체 또는 일부가 갈색 털로 덮인 캐릭터나 동물. 염색한 털도 포함하며 털 질감이 불분명하면 brown_body와 구별해 판단한다.",
-      "keywords": "갈색 털, 갈색 모피, 브라운 털",
+      "keywords": "brown fur",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -133,7 +133,7 @@
       "e621_tag": "food",
       "label": "음식",
       "description": "생물이 살아가기 위해 먹는 음식이나 식품을 나타낸다. 조리된 것과 조리하지 않은 것을 모두 포함한다.",
-      "keywords": "음식, 식품, 먹거리",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -152,9 +152,9 @@
     },
     {
       "e621_tag": "pose",
-      "label": "포즈 취하기",
+      "label": "포즈",
       "description": "캐릭터가 의도적으로 포즈를 취하는 장면. 단순히 어떤 자세에 있다는 이유만으로 적용하지 않는다.",
-      "keywords": "포즈, 포즈 취하기, 자세 취하기",
+      "keywords": "자세, 포즈 취하기, 뜻이 모호한 옛 태그",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -175,7 +175,7 @@
       "e621_tag": "tree",
       "label": "나무",
       "description": "여러 해 자라는 목본 식물인 나무가 등장하는 이미지나 장면.",
-      "keywords": "나무, 수목, 목본 식물",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -196,7 +196,7 @@
       "e621_tag": "weapon",
       "label": "무기",
       "description": "손상이나 위해를 가하기 위한 도구인 무기가 보이는 장면. 캐릭터가 들고 있지 않아도 포함한다.",
-      "keywords": "무기, 병기, 공격 도구",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -215,9 +215,9 @@
     },
     {
       "e621_tag": "membrane_(anatomy)",
-      "label": "생체막",
+      "label": "신체막",
       "description": "장벽 역할을 하는 얇은 조직층인 생체막을 나타낸다.",
-      "keywords": "생체막, 해부학적 막, 조직막",
+      "keywords": "생체막, 조직막",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -236,9 +236,9 @@
     },
     {
       "e621_tag": "one_eye_closed",
-      "label": "한쪽 눈 감음",
+      "label": "윙크",
       "description": "한쪽 눈만 감고 있는 캐릭터. 의도적인 윙크뿐 아니라 다른 이유로 한쪽 눈을 감은 경우도 포함한다.",
-      "keywords": "한쪽 눈 감음, 한 눈 감기, 한쪽 눈 감은 모습",
+      "keywords": "한쪽 눈 감기",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -257,9 +257,9 @@
     },
     {
       "e621_tag": "feathered_wings",
-      "label": "깃털 날개",
+      "label": "깃털날개",
       "description": "깃털이 달린 날개를 나타낸다.",
-      "keywords": "깃털 날개, 깃 달린 날개, 깃털이 있는 날개",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -280,7 +280,7 @@
       "e621_tag": "water",
       "label": "물",
       "description": "액체 상태의 물을 나타낸다. 수역이나 물로 이루어진 생물처럼 폭넓게 쓰이며 얼음·수증기와 구별한다.",
-      "keywords": "물, 액체 물, 수역",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -301,7 +301,7 @@
       "e621_tag": "necklace",
       "label": "목걸이",
       "description": "목 둘레에 늘어뜨려 착용하는 장신구. 단단한 고리형 목 장신구는 neck_rings와 구별한다.",
-      "keywords": "목걸이, 네크리스, 목 장신구",
+      "keywords": "네크리스",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -322,7 +322,7 @@
       "e621_tag": "swimwear",
       "label": "수영복",
       "description": "수영을 위해 만들어진 의복. 실제로 수영하는 장면이 아니어도 수영복을 입고 있으면 해당한다.",
-      "keywords": "수영복, 스윔웨어, 수영 의상",
+      "keywords": "스윔웨어",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -341,9 +341,9 @@
     },
     {
       "e621_tag": "sharp_teeth",
-      "label": "날카로운 이빨",
+      "label": "뾰족이빨",
       "description": "끝이 뾰족한 이빨이 한 줄 또는 두 줄로 보이는 장면.",
-      "keywords": "날카로운 이빨, 뾰족한 치아, 뾰족 이빨",
+      "keywords": "상어이빨, 톱니이빨",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -362,9 +362,9 @@
     },
     {
       "e621_tag": "inner_ear_fluff",
-      "label": "귀 안쪽 털",
+      "label": "귀털",
       "description": "귀 안쪽에서 자라난 털. 귀 끝에 난 귀털 뭉치인 ear_tuft와 구별한다.",
-      "keywords": "귀 안쪽 털, 귓속 털, 귀 내부 털",
+      "keywords": "귓속 털",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -385,7 +385,7 @@
       "e621_tag": "4_fingers",
       "label": "손가락 네 개",
       "description": "한 손에 손가락이 네 개 있는 캐릭터. 엄지가 있으면 총수에 포함하며, 엄지 없이 네 개인 경우도 포함한다.",
-      "keywords": "손가락 네 개, 네 손가락, 4개 손가락",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -404,9 +404,9 @@
     },
     {
       "e621_tag": "fluffy_tail",
-      "label": "복슬복슬한 꼬리",
+      "label": "복슬한 꼬리",
       "description": "부드러운 털이 풍성하게 난 꼬리를 나타낸다.",
-      "keywords": "복슬복슬한 꼬리, 풍성한 꼬리털, 복슬 꼬리",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -427,7 +427,7 @@
       "e621_tag": "shorts",
       "label": "반바지",
       "description": "다리 위쪽을 덮는 바지 형태의 하의. 길이가 다양하며 무릎에 닿거나 무릎을 덮는 종류도 포함한다.",
-      "keywords": "반바지, 쇼츠, 짧은 바지",
+      "keywords": "쇼츠",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -446,9 +446,9 @@
     },
     {
       "e621_tag": "ear_ring",
-      "label": "고리형 귀 피어싱",
+      "label": "귀고리",
       "description": "고리 모양의 귀 피어싱을 나타낸다.",
-      "keywords": "고리 귀 피어싱, 링 귀걸이, 고리형 귀걸이",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -467,9 +467,9 @@
     },
     {
       "e621_tag": "facial_tuft",
-      "label": "얼굴 털뭉치",
+      "label": "얼굴 털다발",
       "description": "얼굴 어느 부위에든 눈에 띄게 뭉쳐 난 털을 나타낸다.",
-      "keywords": "얼굴 털뭉치, 안면 털뭉치, 얼굴 털 술",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -488,9 +488,9 @@
     },
     {
       "e621_tag": "cheek_tuft",
-      "label": "볼 털뭉치",
+      "label": "뺨 털다발",
       "description": "볼에 뭉쳐 난 털이나 깃털을 나타낸다.",
-      "keywords": "볼 털뭉치, 뺨 털뭉치, 볼 깃털",
+      "keywords": "",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -509,9 +509,9 @@
     },
     {
       "e621_tag": "border",
-      "label": "장식 테두리",
+      "label": "테두리",
       "description": "이미지 가장자리에 있는 장식 테두리. 단순한 단색부터 복잡한 장식까지 포함하며 액자와 구별한다.",
-      "keywords": "테두리, 장식 테두리, 이미지 테두리",
+      "keywords": "보더",
       "review_status": "reviewed_direct_definition",
       "independent_review": true,
       "reviewer": "root",
@@ -3194,47 +3194,40 @@
       "e621_tag": "black_fur",
       "label": "검은 털",
       "keywords": [
-        "검은 털",
-        "검정 털",
+        "black fur",
         "검은색 털"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "6fe28b5ee6fc093354a744f83b63414ac88790b6d2cf5e4431266a576eefa99e",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3514.json",
-          "body_sha256": "9cc56c37ca0eaf5c3ea34b7e834c22665e6fa625170e576985e5dc5f96689833",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[fur]] that is the color [b]\"black\":[https://en.wikipedia.org/wiki/Black][/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=black_fur",
+          "body_sha256": "6fe28b5ee6fc093354a744f83b63414ac88790b6d2cf5e4431266a576eefa99e",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color black, or sections of the fur that is dyed black."
         }
       ]
     },
     {
       "e621_tag": "grey_fur",
       "label": "회색 털",
-      "keywords": [
-        "회색 털",
-        "잿빛 털",
-        "그레이 털"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "47a93374b9804e92e9d24d87d7d599d01084b48d6cf215a771f8b528e48718b1",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/4104.json",
-          "body_sha256": "079f6fc055f8ec5db7bd8ba4024fd0fe2afd89b3b2bfa0f858d137e2678d553c",
-          "retrieved_at": "2026-10-01T21:19:59.707754+00:00",
-          "quote": "[[fur]] that is the color  [b]\"grey\":https://en.wikipedia.org/wiki/Grey [/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=grey_fur",
+          "body_sha256": "47a93374b9804e92e9d24d87d7d599d01084b48d6cf215a771f8b528e48718b1",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color gray, or sections of the fur that is dyed gray."
         }
       ]
     },
@@ -3242,47 +3235,39 @@
       "e621_tag": "blue_fur",
       "label": "파란 털",
       "keywords": [
-        "파란 털",
-        "파란색 털",
-        "청색 털"
+        "파란색 털"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "056a7768aef985a11457609a051d973de8ff93ff04ebd5fb0714a3cf4431c9a8",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3512.json",
-          "body_sha256": "1e7d4e464fd28c60b34fd467974f119aabf523a05bc0aba274af54b7aab38199",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[fur]] that is the color  [b]\"blue\":https://en.wikipedia.org/wiki/Blue [/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=blue_fur",
+          "body_sha256": "056a7768aef985a11457609a051d973de8ff93ff04ebd5fb0714a3cf4431c9a8",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color \"blue\":https://en.wikipedia.org/wiki/Blue, or sections of the fur that is dyed blue."
         }
       ]
     },
     {
       "e621_tag": "orange_fur",
       "label": "주황색 털",
-      "keywords": [
-        "주황색 털",
-        "주황 털",
-        "오렌지색 털"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "96a21fe19e9c94e504acc46ea36863429ac3f3eea33f18651ab3435d684caf3f",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3518.json",
-          "body_sha256": "a1c0d6a2b46996cd897bbbfbbfd389c42b79dc0ef66a27e43c342a38be6894d3",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[fur]] that is the color [b]\"orange\":[https://en.wikipedia.org/wiki/Orange_(colour)][/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=orange_fur",
+          "body_sha256": "96a21fe19e9c94e504acc46ea36863429ac3f3eea33f18651ab3435d684caf3f",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color orange, or sections of the fur that is dyed orange."
         }
       ]
     },
@@ -3290,23 +3275,22 @@
       "e621_tag": "yellow_fur",
       "label": "노란 털",
       "keywords": [
-        "노란 털",
-        "노란색 털",
-        "황색 털"
+        "yellow fur",
+        "노란색 퍼",
+        "노란색 털"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "d3664f79fee1d3bad10cc34b17cb40054f41adc4737b665d8b86ed40e5d4b50c",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/5214.json",
-          "body_sha256": "2c7b0af0e032a60b1fc7a8528fb7f5df90a6349434f44d3f0b9a52ef29600a4a",
-          "retrieved_at": "2026-10-01T21:20:04.072334+00:00",
-          "quote": "[[fur]] that is the color  [b]\"yellow\":https://en.wikipedia.org/wiki/Yellow [/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=yellow_fur",
+          "body_sha256": "d3664f79fee1d3bad10cc34b17cb40054f41adc4737b665d8b86ed40e5d4b50c",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color yellow, or sections of the fur that is dyed yellow."
         }
       ]
     },
@@ -3336,383 +3320,343 @@
     {
       "e621_tag": "pink_fur",
       "label": "분홍색 털",
-      "keywords": [
-        "분홍색 털",
-        "핑크 털",
-        "분홍 털"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "dd57b71aa299458cac9b1bcc7923301c7bccf302e2532bc65c8bf1f41599421a",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3513.json",
-          "body_sha256": "352a8949dee1fb131ec23c595b7b86a5b052e9ff86582305cafbca7fde8a4400",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[fur]] that is the color  [b]\"pink\":https://en.wikipedia.org/wiki/Pink [/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pink_fur",
+          "body_sha256": "dd57b71aa299458cac9b1bcc7923301c7bccf302e2532bc65c8bf1f41599421a",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color pink, or sections of the fur that is dyed pink."
         }
       ]
     },
     {
       "e621_tag": "purple_fur",
       "label": "보라색 털",
-      "keywords": [
-        "보라색 털",
-        "보랏빛 털",
-        "보라 털"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "4cf7acb1e4515d264026e0e271e2accf4f59813bd38734eb571300e17650fa73",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3521.json",
-          "body_sha256": "a5ba9deb03383663aeba20410d5e63096dba1639430baedbd5a1fd429836036b",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[fur]] that is the color  [b]\"purple\":https://en.wikipedia.org/wiki/Purple [/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=purple_fur",
+          "body_sha256": "4cf7acb1e4515d264026e0e271e2accf4f59813bd38734eb571300e17650fa73",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color purple, or sections of the fur that is dyed purple."
         }
       ]
     },
     {
       "e621_tag": "green_fur",
-      "label": "초록색 털",
+      "label": "녹색털",
       "keywords": [
-        "초록색 털",
-        "녹색 털",
-        "초록 털"
+        "초록색 털"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "0279a5529807871685e2996de8a1749d29a2ecb24c31beb21e4070e988e7bbc4",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3516.json",
-          "body_sha256": "cc23e4398b5ffbde1714b26f114e74c8075e58b19d2dcced00d5ff7f648a7acf",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[fur]] that is the color  [b]\"green\":https://en.wikipedia.org/wiki/Green [/b]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=green_fur",
+          "body_sha256": "0279a5529807871685e2996de8a1749d29a2ecb24c31beb21e4070e988e7bbc4",
+          "quote": "A character or animal, that has its body covered in [[fur]] that is the color green, or sections of the fur that is dyed green."
         }
       ]
     },
     {
       "e621_tag": "black_hair",
-      "label": "검은 머리카락",
+      "label": "흑발",
       "keywords": [
         "검은 머리",
-        "검정 머리카락",
-        "흑발"
+        "검은색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "27bc8c07b2c453b725dcd75074e89d7f93e4cc2d5ad0f14b28b596ab478ed6c2",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1817.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=black_hair",
           "body_sha256": "27bc8c07b2c453b725dcd75074e89d7f93e4cc2d5ad0f14b28b596ab478ed6c2",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is black in color."
         }
       ]
     },
     {
       "e621_tag": "brown_hair",
-      "label": "갈색 머리카락",
+      "label": "갈색 머리",
       "keywords": [
-        "갈색 머리",
-        "갈색 머리카락",
-        "갈발"
+        "갈색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "17132419280103af1670ff18d60c9f189ad4e055df36185432f8bba3f6ff1edf",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1798.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=brown_hair",
           "body_sha256": "17132419280103af1670ff18d60c9f189ad4e055df36185432f8bba3f6ff1edf",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is brown in color."
         }
       ]
     },
     {
       "e621_tag": "white_hair",
-      "label": "흰 머리카락",
+      "label": "백발",
       "keywords": [
         "흰 머리",
-        "하얀 머리카락",
-        "백발"
+        "흰색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "28fcdb2d72453563f343f9958b1e51034e3ee70213d2108a86d846dee28f16c5",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1827.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=white_hair",
           "body_sha256": "28fcdb2d72453563f343f9958b1e51034e3ee70213d2108a86d846dee28f16c5",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is white in color."
         }
       ]
     },
     {
       "e621_tag": "blue_hair",
-      "label": "파란 머리카락",
+      "label": "파란 머리",
       "keywords": [
-        "파란 머리",
-        "파란색 머리카락",
-        "청발"
+        "청발",
+        "파란색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "c7ca9b5ed15ff9ffa58c8390360e09015c2cb86d271d6aac2063d231fa897c3e",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1813.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=blue_hair",
           "body_sha256": "c7ca9b5ed15ff9ffa58c8390360e09015c2cb86d271d6aac2063d231fa897c3e",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is blue in color."
         }
       ]
     },
     {
       "e621_tag": "red_hair",
-      "label": "빨간 머리카락",
+      "label": "적발",
       "keywords": [
         "빨간 머리",
-        "붉은 머리카락",
-        "적색 머리"
+        "빨간색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ed4dd1691b94b6b4f8c380448d69a07c3f7ae0ba7848eed26890d544f29dff1d",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1820.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=red_hair",
           "body_sha256": "ed4dd1691b94b6b4f8c380448d69a07c3f7ae0ba7848eed26890d544f29dff1d",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is red in color."
         }
       ]
     },
     {
       "e621_tag": "purple_hair",
-      "label": "보라색 머리카락",
+      "label": "자발",
       "keywords": [
         "보라색 머리",
-        "보랏빛 머리카락",
-        "보라 머리"
+        "보라색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "6ef9444820ee2905b56d836968bca15d2f9182ad209aae81aae278fee7ea5623",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1865.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=purple_hair",
           "body_sha256": "6ef9444820ee2905b56d836968bca15d2f9182ad209aae81aae278fee7ea5623",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is purple in color."
         }
       ]
     },
     {
       "e621_tag": "pink_hair",
-      "label": "분홍색 머리카락",
+      "label": "핑크 머리",
       "keywords": [
-        "분홍 머리",
-        "핑크 머리카락",
-        "분홍색 머리"
+        "분홍색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "c171ebb379a4f1d654619ebf6722976c19310887ebbca0cfd54730ec7c8a7905",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1849.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pink_hair",
           "body_sha256": "c171ebb379a4f1d654619ebf6722976c19310887ebbca0cfd54730ec7c8a7905",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is pink in color."
         }
       ]
     },
     {
       "e621_tag": "green_hair",
-      "label": "초록색 머리카락",
+      "label": "녹발",
       "keywords": [
         "초록 머리",
-        "녹색 머리카락",
-        "녹발"
+        "초록색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "cac1b1aa6de607eb813a97d74b076e0e011f7379d5b58568fe94a4fface6493f",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1931.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=green_hair",
           "body_sha256": "cac1b1aa6de607eb813a97d74b076e0e011f7379d5b58568fe94a4fface6493f",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is green in color."
         }
       ]
     },
     {
       "e621_tag": "grey_hair",
-      "label": "회색 머리카락",
+      "label": "은발",
       "keywords": [
         "회색 머리",
-        "잿빛 머리카락",
-        "회색 머리칼"
+        "회색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "16dc5942414f510cfdc6496360dd932248dd05cf3c6826d1fff7aeb5ff0222ab",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2047.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=grey_hair",
           "body_sha256": "16dc5942414f510cfdc6496360dd932248dd05cf3c6826d1fff7aeb5ff0222ab",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is grey in color."
         }
       ]
     },
     {
       "e621_tag": "orange_hair",
-      "label": "주황색 머리카락",
+      "label": "주황 머리",
       "keywords": [
-        "주황 머리",
-        "오렌지색 머리카락",
-        "주황색 머리"
+        "주황색 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "83db8a4f893f8ebb1489885e8487f83d85186caaa5e21f1cf4f95c9fdbec2ed3",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2055.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=orange_hair",
           "body_sha256": "83db8a4f893f8ebb1489885e8487f83d85186caaa5e21f1cf4f95c9fdbec2ed3",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Used when a character has [[hair]] (not fur) that is orange in color."
         }
       ]
     },
     {
       "e621_tag": "red_eyes",
-      "label": "빨간 눈",
+      "label": "붉은 눈",
       "keywords": [
-        "빨간 눈",
-        "붉은 눈",
-        "적안"
+        "적안",
+        "빨간색 눈",
+        "붉은눈",
+        "빨간눈",
+        "은발적안",
+        "흑발적안"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "f740afb2fef3e16c6525f741db2f6f8b78a2b301bbfbbbe5be9fc64d624f2a76",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1785.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=red_eyes",
           "body_sha256": "f740afb2fef3e16c6525f741db2f6f8b78a2b301bbfbbbe5be9fc64d624f2a76",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Any image or animation in which a character has red-colored eyes."
         }
       ]
     },
     {
       "e621_tag": "yellow_eyes",
-      "label": "노란 눈",
+      "label": "황안",
       "keywords": [
-        "노란 눈",
-        "노란색 홍채",
-        "황안"
+        "노란 눈"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9532a7bded353676119be944dba10e5fde5181b35a0813eddcce4bc2f4f50c54",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1810.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=yellow_eyes",
           "body_sha256": "9532a7bded353676119be944dba10e5fde5181b35a0813eddcce4bc2f4f50c54",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "a character has yellow-colored [[eyes]] (more specifically a yellow-colored [[iris]])"
+          "quote": "Any image or animation in which a character has yellow-colored [[eyes]] (more specifically a yellow-colored [[iris]])."
         }
       ]
     },
     {
       "e621_tag": "purple_eyes",
-      "label": "보라색 눈",
+      "label": "자안",
       "keywords": [
-        "보라색 눈",
-        "보랏빛 눈",
-        "자안"
+        "보라색 눈"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "fe43d0ffda43b1ffee0e58819a51e2ed093a6f904624a564423dfb1038b7aee7",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1411.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=purple_eyes",
           "body_sha256": "fe43d0ffda43b1ffee0e58819a51e2ed093a6f904624a564423dfb1038b7aee7",
-          "retrieved_at": "2026-10-01T21:19:52.027140+00:00",
           "quote": "Any image or animation in which a character has purple-, violet- or magenta-colored eyes."
         }
       ]
@@ -3720,23 +3664,18 @@
     {
       "e621_tag": "brown_eyes",
       "label": "갈색 눈",
-      "keywords": [
-        "갈색 눈",
-        "갈색 홍채",
-        "갈안"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9d28af63a822d40b9edfa6e3e4cbf17c4ba65028510b631bbffc6f9df5e0f4af",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1830.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=brown_eyes",
           "body_sha256": "9d28af63a822d40b9edfa6e3e4cbf17c4ba65028510b631bbffc6f9df5e0f4af",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "This tag refers to a character with eyes featuring a brown [[iris]] color."
         }
       ]
@@ -3744,47 +3683,37 @@
     {
       "e621_tag": "orange_eyes",
       "label": "주황색 눈",
-      "keywords": [
-        "주황색 눈",
-        "오렌지색 눈",
-        "주황 눈"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "40993dc9c8de8197fbac391d9774b45c157478b01d67c408055f4d4d18c8ea75",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2026.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=orange_eyes",
           "body_sha256": "40993dc9c8de8197fbac391d9774b45c157478b01d67c408055f4d4d18c8ea75",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Any image or animation in which a character has orange-colored eyes."
         }
       ]
     },
     {
       "e621_tag": "pink_eyes",
-      "label": "분홍색 눈",
-      "keywords": [
-        "분홍색 눈",
-        "핑크 눈",
-        "분홍 눈"
-      ],
+      "label": "분홍 눈",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "2f5c8d994eaad9b9e6b4634ba2dd1dd486fd490e7606c0fad4ea9ddec65bf858",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1979.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pink_eyes",
           "body_sha256": "2f5c8d994eaad9b9e6b4634ba2dd1dd486fd490e7606c0fad4ea9ddec65bf858",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Any image or animation in which a character's eyes are pink in color."
         }
       ]
@@ -3792,23 +3721,18 @@
     {
       "e621_tag": "grey_eyes",
       "label": "회색 눈",
-      "keywords": [
-        "회색 눈",
-        "잿빛 눈",
-        "회색 눈동자"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "135ec92a499d23bafc5adc87aa1b26b57fdc9f17d4188a38e583999b34ae5b10",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2065.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=grey_eyes",
           "body_sha256": "135ec92a499d23bafc5adc87aa1b26b57fdc9f17d4188a38e583999b34ae5b10",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Any image or animation in which a character has grey-colored eyes."
         }
       ]
@@ -3816,70 +3740,60 @@
     {
       "e621_tag": "hooves",
       "label": "발굽",
-      "keywords": [
-        "발굽",
-        "동물 발굽"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "641e88e7dd395e2d91b21cfc3efe3934d42ea8fe9595663c13fdf4d3d1e27e3f",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/894.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=hooves",
           "body_sha256": "641e88e7dd395e2d91b21cfc3efe3934d42ea8fe9595663c13fdf4d3d1e27e3f",
-          "retrieved_at": "2026-10-01T21:19:49.789921+00:00",
           "quote": "The horny part of the foot in some animals (e.g., horses)."
         }
       ]
     },
     {
       "e621_tag": "chest_tuft",
-      "label": "가슴 털뭉치",
+      "label": "가슴털",
       "keywords": [
-        "가슴 털뭉치",
-        "가슴 중앙 털",
-        "가슴 털 술"
+        "복슬복슬한 가슴"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "e0545ab483494c94584cb39a5afd9bc8884e0f87e6af0ca8b657e04097ab70c1",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/197.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=chest_tuft",
           "body_sha256": "e0545ab483494c94584cb39a5afd9bc8884e0f87e6af0ca8b657e04097ab70c1",
-          "retrieved_at": "2026-10-01T21:19:47.644461+00:00",
-          "quote": "A small tuft of fur located on the center of the chest of a character"
+          "quote": "A small tuft of fur located on the center of the chest of a character, most commonly used to accent [[breasts]] as well as to emphasize the fluffiness of the fur."
         }
       ]
     },
     {
       "e621_tag": "3_toes",
-      "label": "발가락 세 개",
+      "label": "세 발가락",
       "keywords": [
-        "발가락 세 개",
-        "세 발가락",
-        "3개 발가락"
+        "발가락 3개"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "de0a2446e68bc1f112b6ccd431e73bbecb5feb2ff9a001b6f49ed3b34d642959",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3043.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=3_toes",
           "body_sha256": "de0a2446e68bc1f112b6ccd431e73bbecb5feb2ff9a001b6f49ed3b34d642959",
-          "retrieved_at": "2026-10-01T21:19:56.550180+00:00",
           "quote": "A character with three toes."
         }
       ]
@@ -3888,22 +3802,20 @@
       "e621_tag": "tail_markings",
       "label": "꼬리 무늬",
       "keywords": [
-        "꼬리 무늬",
-        "꼬리 표식",
+        "꼬리 패턴",
         "꼬리 문양"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "578ccbf6090c6d8e25f37a3c7fd13bc9c16c3bc07dfe3589f3aa5ac57870b087",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/13189.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=tail_markings",
           "body_sha256": "578ccbf6090c6d8e25f37a3c7fd13bc9c16c3bc07dfe3589f3aa5ac57870b087",
-          "retrieved_at": "2026-10-01T21:20:32.254719+00:00",
           "quote": "Add this tag when a character has distinctive marks on their tail."
         }
       ]
@@ -3935,70 +3847,59 @@
     {
       "e621_tag": "pupils",
       "label": "동공",
-      "keywords": [
-        "동공",
-        "눈동공"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ff137b6ff35edca97c03177228c52b8a56a6a28c283187349021892d3e6a0130",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/22719.json",
-          "body_sha256": "7d24e23c916384b7e7d4241c7e7ba68702a8563dc095c005c0fc91c18a0c0807",
-          "retrieved_at": "2026-10-01T21:21:03.583816+00:00",
-          "quote": "A black hole located in the center of the eye that allows light to strike the retina."
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pupils",
+          "body_sha256": "ff137b6ff35edca97c03177228c52b8a56a6a28c283187349021892d3e6a0130",
+          "quote": "[i](Informal)[/i] In created work, the pupil of an eye may inherit accents of color."
         }
       ]
     },
     {
       "e621_tag": "biceps",
-      "label": "상완이두근",
+      "label": "이두근",
       "keywords": [
-        "상완이두근",
-        "이두근",
-        "위팔 두갈래근"
+        "biceps",
+        "알통"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "e5262a981c17ffbbe1f59473fbf1ca4fbb48dc7baa7d58103951c06e19b09b30",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/5210.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=biceps",
           "body_sha256": "e5262a981c17ffbbe1f59473fbf1ca4fbb48dc7baa7d58103951c06e19b09b30",
-          "retrieved_at": "2026-10-01T21:20:04.072334+00:00",
-          "quote": "a two-headed muscle that lies on the upper arm between the shoulder and the elbow"
+          "quote": "Pictures depicting the biceps, a two-headed muscle that lies on the upper arm between the shoulder and the elbow."
         }
       ]
     },
     {
       "e621_tag": "membranous_wings",
-      "label": "막질 날개",
-      "keywords": [
-        "막질 날개",
-        "피막 날개",
-        "비막 날개"
-      ],
+      "label": "막날개",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "0f201e1993a2990ce1d1290dd3fcc712168264a491f1bb9d70a417ec964cf145",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/6640.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=membranous_wings",
           "body_sha256": "0f201e1993a2990ce1d1290dd3fcc712168264a491f1bb9d70a417ec964cf145",
-          "retrieved_at": "2026-10-01T21:20:09.851156+00:00",
           "quote": "Wings that have a membrane in them."
         }
       ]
@@ -4006,23 +3907,18 @@
     {
       "e621_tag": "humanoid_hands",
       "label": "인간형 손",
-      "keywords": [
-        "인간형 손",
-        "사람 같은 손",
-        "사람형 손"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "800c6d3a7654a413a367684876efccb4955acfb78c19ed398f4d829e19454262",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/7553.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=humanoid_hands",
           "body_sha256": "800c6d3a7654a413a367684876efccb4955acfb78c19ed398f4d829e19454262",
-          "retrieved_at": "2026-10-01T21:20:13.240690+00:00",
           "quote": "A character with hands similar to that of a [[human]]."
         }
       ]
@@ -4030,235 +3926,198 @@
     {
       "e621_tag": "beak",
       "label": "부리",
-      "keywords": [
-        "부리",
-        "동물 부리"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "99c7162dbe267114f9ef869723ce55783d49257dbdcd89bbd22d50f4e7717272",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1974.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=beak",
           "body_sha256": "99c7162dbe267114f9ef869723ce55783d49257dbdcd89bbd22d50f4e7717272",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "The [b]beak[/b], [b]bill[/b], or [b]rostrum[/b] is an external anatomical structure"
+          "quote": "The [b]beak[/b], [b]bill[/b], or [b]rostrum[/b] is an external anatomical structure of [[bird|birds]] that is used for [[eating]], [[preening]], manipulating objects, killing prey, fighting, probing for food, courtship and feeding young."
         }
       ]
     },
     {
       "e621_tag": "spikes",
-      "label": "뾰족한 돌기",
-      "keywords": [
-        "뾰족한 돌기",
-        "스파이크",
-        "긴 뾰족 돌기"
-      ],
+      "label": "스파이크",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "804fdaf2ccabbdca9cd517c98398b7ae069f6445920324111639f67d1092d8cb",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1975.json",
-          "body_sha256": "8c38f0ac9ebb439c348208195ac05549f34abf61a2052a0b49ff2f092112dfdb",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A (sharp) pointed protrusion"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=spikes",
+          "body_sha256": "804fdaf2ccabbdca9cd517c98398b7ae069f6445920324111639f67d1092d8cb",
+          "quote": "A (sharp) pointed protrusion, either as part of a body commonly found on [[dragon|dragons]] and other [[reptile|reptiles]] or as a long sharp object without a handle."
         }
       ]
     },
     {
       "e621_tag": "faceless_character",
-      "label": "얼굴이 안 보이는 캐릭터",
-      "keywords": [
-        "얼굴이 안 보임",
-        "얼굴 비노출",
-        "얼굴이 보이지 않는 캐릭터"
-      ],
+      "label": "얼굴 가림",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "4d6ca81fd61b0421591a203432756433b80fb177476a99030ec542b11ce53948",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/29861.json",
-          "body_sha256": "4233ebf41071ab41881e82e50f97a2b3ff543adeff1919fb6fea3343115ee8c8",
-          "retrieved_at": "2026-10-01T21:21:28.593569+00:00",
-          "quote": "When one or more characters' face isn't shown"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=faceless_character",
+          "body_sha256": "4d6ca81fd61b0421591a203432756433b80fb177476a99030ec542b11ce53948",
+          "quote": "When one or more characters' face isn't shown (due to obstructing objects, [[hair]], position, etc.) or out of the picture."
         }
       ]
     },
     {
       "e621_tag": "spots",
-      "label": "점무늬",
+      "label": "점박이",
       "keywords": [
-        "점무늬",
-        "동그란 무늬",
-        "둥근 반점"
+        "반점"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "8002ec58e80c930af19ca0a3731859d1c275b66e8208e1f4ec21ef71da7f5359",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1888.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=spots",
           "body_sha256": "8002ec58e80c930af19ca0a3731859d1c275b66e8208e1f4ec21ef71da7f5359",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A spot is a dot or round pattern"
+          "quote": "A spot is a dot or round pattern that occurs in a variety of animal [[fur|furs]]."
         }
       ]
     },
     {
       "e621_tag": "soles",
-      "label": "발바닥",
-      "keywords": [
-        "발바닥",
-        "발 아랫면"
-      ],
+      "label": "발 밑면",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "2355826549aff35af5837182d4239b61b13c7fcac4da2abe8bc3331f7bbcb3c2",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2633.json",
-          "body_sha256": "d0be841da41698b8ae18c5e00541ecb3093504885d63d6c630fcb34f9cab401c",
-          "retrieved_at": "2026-10-01T21:19:55.303362+00:00",
-          "quote": "The undersurface of a [[plantigrade]] character's [[feet]], usually [[humanoid_feet|humanoid]]."
+          "url": "https://e621.net/wiki_pages/show_or_new?title=soles",
+          "body_sha256": "2355826549aff35af5837182d4239b61b13c7fcac4da2abe8bc3331f7bbcb3c2",
+          "quote": "The bottoms of a character's feet, usually [[humanoid_feet|humanoid]] and [[plantigrade]] ones."
         }
       ]
     },
     {
       "e621_tag": "facial_hair",
-      "label": "얼굴 수염",
+      "label": "수염",
       "keywords": [
-        "얼굴 수염",
-        "안면 수염",
-        "수염 전반"
+        "턱수염",
+        "콧수염"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "fd355bd8be350213166e4d8dcbe7efcd94fa4ec6e93c474f0361b4b3d28284c7",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/5463.json",
-          "body_sha256": "0128bc2a8b167d685e5068b1218f0505dfbfa4577a81a2769ca112991b30e947",
-          "retrieved_at": "2026-10-01T21:20:06.781710+00:00",
-          "quote": "describes the [[hair]] that grows on the lower part of the face"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=facial_hair",
+          "body_sha256": "fd355bd8be350213166e4d8dcbe7efcd94fa4ec6e93c474f0361b4b3d28284c7",
+          "quote": "[b]Facial hair[/b] is a word used to describe the [[hair]] that grows on the lower part of the face (\"cheeks\":https://en.m.wikipedia.org/wiki/Cheek, around the \"mouth\":https://en.m.wikipedia.org/wiki/Mouth, \"chin\":https://en.m.wikipedia.org/wiki/Chin etc…)"
         }
       ]
     },
     {
       "e621_tag": "pointy_ears",
-      "label": "뾰족한 귀",
+      "label": "뾰족귀",
       "keywords": [
-        "뾰족한 귀",
-        "끝이 뾰족한 귀"
+        "엘프귀"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "07603742a63dbba7266695ac3a783e396ae4be9a2ebc7ce675816e4ed27aa405",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/63957.json",
-          "body_sha256": "9b7be9f494e2ec9f5eb9f76e92cdd356ca23d4a5ffb650106a45e0392d6e2d8e",
-          "retrieved_at": "2026-10-01T21:23:26.792253+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pointy_ears",
+          "body_sha256": "07603742a63dbba7266695ac3a783e396ae4be9a2ebc7ce675816e4ed27aa405",
           "quote": "A character that has a pair of ears with a tapered external earlobe."
         }
       ]
     },
     {
       "e621_tag": "body_hair",
-      "label": "체모",
+      "label": "몸털",
       "keywords": [
-        "체모",
-        "몸털",
-        "몸의 털"
+        "체모"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "0096533fa3f50691b0697b1d132f6927259cde0c23d5ef8fb5161b5b6fdbee58",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/8371.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=body_hair",
           "body_sha256": "0096533fa3f50691b0697b1d132f6927259cde0c23d5ef8fb5161b5b6fdbee58",
-          "retrieved_at": "2026-10-01T21:20:15.420481+00:00",
           "quote": "[b]Body hair[/b] refers to hair growing all over a character's body."
         }
       ]
     },
     {
       "e621_tag": "dipstick_tail",
-      "label": "끝 색이 다른 꼬리",
-      "keywords": [
-        "끝 색이 다른 꼬리",
-        "꼬리 끝 배색",
-        "꼬리 끝 색차"
-      ],
+      "label": "끝색 꼬리",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "c2417398afdee543b2fb263f0d694e821d7877169bf2ff8e601f985e0d315ddd",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/9625.json",
-          "body_sha256": "1318e4b6315dcaabd1172eca14d5555b1847b745f535ddb5769f284417c4ff34",
-          "retrieved_at": "2026-10-01T21:20:19.886545+00:00",
-          "quote": "the tip of the tail of a creature is colored differently than the rest of the tail"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=dipstick_tail",
+          "body_sha256": "c2417398afdee543b2fb263f0d694e821d7877169bf2ff8e601f985e0d315ddd",
+          "quote": "A [b]dipstick tail[/b] is when the tip of the tail of a creature is colored differently than the rest of the tail, as if it was \"dipped\" in a bucket of paint."
         }
       ]
     },
     {
       "e621_tag": "facial_piercing",
       "label": "얼굴 피어싱",
-      "keywords": [
-        "얼굴 피어싱",
-        "안면 피어싱"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "1a0158c4c5643148bba59464ef50bb0552d0fbc0cd52069a9f975fdab5db41ef",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1763.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=facial_piercing",
           "body_sha256": "1a0158c4c5643148bba59464ef50bb0552d0fbc0cd52069a9f975fdab5db41ef",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "A [[piercing]] on some part of the forward face."
         }
       ]
@@ -4267,46 +4126,40 @@
       "e621_tag": "scar",
       "label": "흉터",
       "keywords": [
-        "흉터",
-        "상처 자국",
-        "반흔"
+        "상처"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "f49a26eb8c7dc0ce244c3bbd9e7ff078934a0ab6ed096c89994d514080b3d1ec",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1947.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=scar",
           "body_sha256": "f49a26eb8c7dc0ce244c3bbd9e7ff078934a0ab6ed096c89994d514080b3d1ec",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "Scars are areas of fibrous tissue (fibrosis) that replace normal skin after injury."
+          "quote": "[b]Scarred is aliased to this tag, do not confuse with [[scared]].[/b]"
         }
       ]
     },
     {
       "e621_tag": "pink_nose",
-      "label": "분홍 코",
+      "label": "분홍코",
       "keywords": [
-        "분홍 코",
-        "핑크 코",
-        "분홍색 코"
+        "색상: 분홍색."
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ee690cbda4d2e19784723c50169a692dab67ccfed365f85d39ea04d72bbc82ba",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/29.json",
-          "body_sha256": "71e698a1b907715bae5b29a58bac4824c4e5e1e228266c99dd605ba8572b3685",
-          "retrieved_at": "2026-10-01T21:19:47.644461+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pink_nose",
+          "body_sha256": "ee690cbda4d2e19784723c50169a692dab67ccfed365f85d39ea04d72bbc82ba",
           "quote": "A character with a [[nose]] that is pink in color."
         }
       ]
@@ -4314,22 +4167,18 @@
     {
       "e621_tag": "long_ears",
       "label": "긴 귀",
-      "keywords": [
-        "긴 귀",
-        "길쭉한 귀"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "e89ffe7194915f7c8f9bfe2c65a9387469e295d7a007cb260ecbe5e8cd363471",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2068.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=long_ears",
           "body_sha256": "e89ffe7194915f7c8f9bfe2c65a9387469e295d7a007cb260ecbe5e8cd363471",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "A character with ears that are noticeably long or tall."
         }
       ]
@@ -4337,22 +4186,18 @@
     {
       "e621_tag": "long_tail",
       "label": "긴 꼬리",
-      "keywords": [
-        "긴 꼬리",
-        "길쭉한 꼬리"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "f501d0e639221c6c39157b4b50110beb301ef6f4bb8d712b9fae0a655d238a20",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2171.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=long_tail",
           "body_sha256": "f501d0e639221c6c39157b4b50110beb301ef6f4bb8d712b9fae0a655d238a20",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
           "quote": "A character whose tail is as long as their upper body (shoulders to hips) or longer."
         }
       ]
@@ -4361,22 +4206,19 @@
       "e621_tag": "black_sclera",
       "label": "검은 공막",
       "keywords": [
-        "검은 공막",
-        "검은 흰자",
-        "검정 흰자위"
+        "흑안"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "d8e851fa64fade74b785b117172a7c35f1cfa7399d18fe0fb00b653ec9c2eda9",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3847.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=black_sclera",
           "body_sha256": "d8e851fa64fade74b785b117172a7c35f1cfa7399d18fe0fb00b653ec9c2eda9",
-          "retrieved_at": "2026-10-01T21:19:59.707754+00:00",
           "quote": "This tag is used in images in which the sclera is black in colour."
         }
       ]
@@ -4384,69 +4226,60 @@
     {
       "e621_tag": "lips",
       "label": "입술",
-      "keywords": [
-        "입술",
-        "입술 부위"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "91b99be5638b6b45ac4e11b617512cfb0bec9e2450c271a71f59bcc2218e29c4",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2144.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=lips",
           "body_sha256": "91b99be5638b6b45ac4e11b617512cfb0bec9e2450c271a71f59bcc2218e29c4",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
           "quote": "[b]Lips[/b] are a visible body part at the mouth of [[human|humans]] and many animals."
         }
       ]
     },
     {
       "e621_tag": "neck_tuft",
-      "label": "목 털뭉치",
-      "keywords": [
-        "목 털뭉치",
-        "목 주변 털 술"
-      ],
+      "label": "목털 뭉치",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "db80c73ef3f39ecd521ca8142df6cddce3253faaba8bde77ed6a257aa9d8d070",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/7118.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=neck_tuft",
           "body_sha256": "db80c73ef3f39ecd521ca8142df6cddce3253faaba8bde77ed6a257aa9d8d070",
-          "retrieved_at": "2026-10-01T21:20:12.023637+00:00",
           "quote": "A [[tuft]] of [[fur]] around a character's neck."
         }
       ]
     },
     {
       "e621_tag": "short_tail",
-      "label": "짧은 꼬리",
+      "label": "짧은꼬리",
       "keywords": [
-        "짧은 꼬리",
-        "짤막한 꼬리"
+        "뭉툭꼬리",
+        "짧은 꼬리"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "e7d360dd39aa1acec4a4bbb370e793b9b2eaa91891e970683723a1c8f0b808b0",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/9936.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=short_tail",
           "body_sha256": "e7d360dd39aa1acec4a4bbb370e793b9b2eaa91891e970683723a1c8f0b808b0",
-          "retrieved_at": "2026-10-01T21:20:21.211155+00:00",
-          "quote": "A character whose tail is less than half the length of their arm or diameter of their head"
+          "quote": "A character whose tail is less than half the length of their arm or diameter of their head (whichever appears proportionally bigger)."
         }
       ]
     },
@@ -4454,22 +4287,20 @@
       "e621_tag": "yellow_sclera",
       "label": "노란 공막",
       "keywords": [
-        "노란 공막",
-        "노란 흰자",
-        "노란색 흰자위"
+        "yellow sclera",
+        "황안"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ea8b52c4eb80acc6f8a0fa67302e51524d314b5f5315b4d6ab6e3da38246a741",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/5386.json",
-          "body_sha256": "2ed4c4f9833f6209b7a32d3fbe4bc0295b5ff11ebf0850a9606cfa0fcc77acf0",
-          "retrieved_at": "2026-10-01T21:20:04.072334+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=yellow_sclera",
+          "body_sha256": "ea8b52c4eb80acc6f8a0fa67302e51524d314b5f5315b4d6ab6e3da38246a741",
           "quote": "This tag is used in images in which the sclera is yellow in colour."
         }
       ]
@@ -4477,94 +4308,80 @@
     {
       "e621_tag": "beard",
       "label": "턱수염",
-      "keywords": [
-        "턱수염",
-        "볼과 턱의 수염"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "7ea44779002e07ff63e849d4ab07da71f56df5939f9fb75cae773d03f7001b1b",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/5382.json",
-          "body_sha256": "1fbd7f20c68bf1b2d796094c1f607a959b983679f72f9449f52d41cac291bc3c",
-          "retrieved_at": "2026-10-01T21:20:04.072334+00:00",
-          "quote": "[b]Beard[/b] is the word describing the [[hair]] that grows on the jaw and the cheeks"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=beard",
+          "body_sha256": "7ea44779002e07ff63e849d4ab07da71f56df5939f9fb75cae773d03f7001b1b",
+          "quote": "\"[b]Beard[/b]\" is a word for the [[hair]] that grows on the \"jaw\":https://en.m.wikipedia.org/wiki/Jaw, \"chin\":https://en.m.wikipedia.org/wiki/Chin, \"lip\":https://en.m.wikipedia.org/wiki/Lip [i](The upper and lower)[/i], \"cheeks\":https://en.m.wikipedia.org/wiki/Cheek and \"neck\":https://en.m.wikipedia.org/wiki/Neck of [[human|humans]]..."
         }
       ]
     },
     {
       "e621_tag": "floppy_ears",
-      "label": "처진 귀",
+      "label": "축 늘어진 귀",
       "keywords": [
-        "처진 귀",
-        "늘어진 귀",
-        "아래로 접힌 귀"
+        "floppy ears",
+        "접힌 귀"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "a1d7228fbe5d6e65a865e50dfc02e1ddeac67e426d706f1bc0b836c4f4ea0938",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/6963.json",
-          "body_sha256": "619027f3d737d1a70c2b0b4d8814c1ecf48b7b4d9f27030a4ef0af80a04f7878",
-          "retrieved_at": "2026-10-01T21:20:10.932437+00:00",
-          "quote": "Ears that droop down"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=floppy_ears",
+          "body_sha256": "a1d7228fbe5d6e65a865e50dfc02e1ddeac67e426d706f1bc0b836c4f4ea0938",
+          "quote": "[i]\"Ears that droop down\"[/i] — this can be subdivided into lop ears and button ears (but not all ears may cleanly fall into these categories)."
         }
       ]
     },
     {
       "e621_tag": "ring_piercing",
-      "label": "고리형 피어싱",
-      "keywords": [
-        "고리형 피어싱",
-        "링 피어싱",
-        "고리 피어싱"
-      ],
+      "label": "링 피어싱",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "48e933851f58916b474b4c80d07e66d4e92a6b4c40dff5e04f08aec089017692",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/44725.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=ring_piercing",
           "body_sha256": "48e933851f58916b474b4c80d07e66d4e92a6b4c40dff5e04f08aec089017692",
-          "retrieved_at": "2026-10-01T21:22:20.953674+00:00",
           "quote": "A [[piercing]] that takes the form of a [[ring]]."
         }
       ]
     },
     {
       "e621_tag": "thigh_highs",
-      "label": "허벅지 길이 다리 의복",
+      "label": "사이하이",
       "keywords": [
-        "사이하이",
-        "허벅지 길이 다리 의복",
-        "허벅지까지 오는 레그웨어"
+        "오버니"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "a9d285966fd50f84873c76759effa925d1ed8d7d1d1a7dac4bc69824225beed8",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2038.json",
-          "body_sha256": "080adde25e1563c452b000ab44bf7d3c3a9cb70d23b71b3582dc77b022517db1",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=thigh_highs",
+          "body_sha256": "a9d285966fd50f84873c76759effa925d1ed8d7d1d1a7dac4bc69824225beed8",
           "quote": "Refers to the length of a leg garment that covers the leg from the foot to the thigh."
         }
       ]
@@ -4573,71 +4390,63 @@
       "e621_tag": "makeup",
       "label": "화장",
       "keywords": [
-        "화장",
-        "메이크업",
-        "얼굴 화장"
+        "메이크업"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9c8850222efa30cb01c90245311bac5d36f3d03a26bd5a33d09295157d562b80",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2221.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=makeup",
           "body_sha256": "9c8850222efa30cb01c90245311bac5d36f3d03a26bd5a33d09295157d562b80",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
-          "quote": "[b]Makeup[/b] describes substances used to enhance one's appearance"
+          "quote": "[b]Makeup[/b] describes substances used to enhance one's appearance, usually applied to the face, and most often seen worn by [[female]] characters."
         }
       ]
     },
     {
       "e621_tag": "multicolored_hair",
-      "label": "여러 색 머리카락",
+      "label": "다색 머리",
       "keywords": [
-        "여러 색 머리",
-        "다색 머리카락",
-        "멀티컬러 헤어"
+        "멀티컬러 헤어",
+        "여러 색의 머리카락"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "d74ea752ad6f9d8360650701547ba7d3d62d70b7fc1dde58a66dca8022783c81",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/4934.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=multicolored_hair",
           "body_sha256": "d74ea752ad6f9d8360650701547ba7d3d62d70b7fc1dde58a66dca8022783c81",
-          "retrieved_at": "2026-10-01T21:20:03.040299+00:00",
           "quote": "Used when a character has more than one [[hair]] color."
         }
       ]
     },
     {
       "e621_tag": "dress",
-      "label": "드레스",
+      "label": "원피스",
       "keywords": [
-        "드레스",
-        "원피스",
-        "한 벌 드레스"
+        "드레스"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "89f0e899d64184ce57a0cdbb3b2526693e29c2d151dd8649c966b1047940049f",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1882.json",
-          "body_sha256": "24cba02c575d9c82a9ff331d0b4ae6dc9572093b757dbbd9df57155a4cfbb0fa",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A [b]dress[/b] is a one-piece garment that covers the body and extends down over the legs"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=dress",
+          "body_sha256": "89f0e899d64184ce57a0cdbb3b2526693e29c2d151dd8649c966b1047940049f",
+          "quote": "A [b]dress[/b] is a one-piece garment that covers the body and extends down over the legs, typically worn by women."
         }
       ]
     },
@@ -4645,213 +4454,174 @@
       "e621_tag": "armor",
       "label": "갑옷",
       "keywords": [
-        "갑옷",
-        "방어구",
         "아머"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "08076218830f2c0cb98356ffa70e161379b577098fc0e2a8957ebd49127699f0",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1874.json",
-          "body_sha256": "d86068712ba6b6bfe9415690f6a8ad8ede1613d6ccc41db13f4a90cfbd937875",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "[b]Armor[/b] is any type of protective covering"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=armor",
+          "body_sha256": "08076218830f2c0cb98356ffa70e161379b577098fc0e2a8957ebd49127699f0",
+          "quote": "[b]Armor[/b] is any type of protective covering that prevents damage or, at the very least, mitigate it."
         }
       ]
     },
     {
       "e621_tag": "armwear",
-      "label": "팔 의복",
-      "keywords": [
-        "팔 의복",
-        "암웨어",
-        "팔 착용 의복"
-      ],
+      "label": "팔 의류",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "da91aec6134a9e0d632ce8ae4cfbcacac4dc3052436a74e4f7bbac239c44fd01",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/14687.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=armwear",
           "body_sha256": "da91aec6134a9e0d632ce8ae4cfbcacac4dc3052436a74e4f7bbac239c44fd01",
-          "retrieved_at": "2026-10-01T21:20:36.654214+00:00",
-          "quote": "Articles of clothing designed to cover a considerable part of the arm"
+          "quote": "Articles of clothing designed to cover a considerable part of the arm (and sometimes the hands), but that don't cover any extension of the torso."
         }
       ]
     },
     {
       "e621_tag": "hair_accessory",
       "label": "머리 장식",
-      "keywords": [
-        "머리 장식",
-        "헤어 액세서리",
-        "머리 액세서리"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "c87d6d3735d17ea825fb2adfef32edfac98d43052e114fdd20db0f1b881761c2",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/25571.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=hair_accessory",
           "body_sha256": "c87d6d3735d17ea825fb2adfef32edfac98d43052e114fdd20db0f1b881761c2",
-          "retrieved_at": "2026-10-01T21:21:14.111307+00:00",
-          "quote": "A type of fashion [[accessory]] designed to be placed on top of a character's head, or in their [[hair]] / [[pseudo hair]]."
+          "quote": "[b]Hair accessory[/b] refers to one of two things:"
         }
       ]
     },
     {
       "e621_tag": "skirt",
-      "label": "치마",
+      "label": "스커트",
       "keywords": [
-        "치마",
-        "스커트"
+        "치마"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ff3731f4559ffdb504aaa776933165ab5597a42c1d74500669dbebfcf7eb7b7c",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1889.json",
-          "body_sha256": "b88606eb272226d155ba57debe4a4d85f8a025109c2cb659e93e43c3b8ab2c8a",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A [b]skirt[/b] is a tube- or cone-shaped piece of [[bottomwear]]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=skirt",
+          "body_sha256": "ff3731f4559ffdb504aaa776933165ab5597a42c1d74500669dbebfcf7eb7b7c",
+          "quote": "A [b]skirt[/b] is a tube- or cone-shaped piece of [[bottomwear]], typically worn by women, that hangs down from the waist and covers the legs (to varying lengths)."
         }
       ]
     },
     {
       "e621_tag": "tight_clothing",
       "label": "몸에 붙는 옷",
-      "keywords": [
-        "몸에 붙는 옷",
-        "밀착 의상",
-        "타이트한 옷"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "eaed4a6151c32c6639fad50813f8c7c0b977501656c7fa06b92c42beb354a4f3",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3650.json",
-          "body_sha256": "aa3d4b6ed20047aea516d344882320e982bf85b8234319c1df066eec30bf8ff8",
-          "retrieved_at": "2026-10-01T21:19:58.585357+00:00",
-          "quote": "[[Clothing]] that clings tightly to the wearer's body"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=tight_clothing",
+          "body_sha256": "eaed4a6151c32c6639fad50813f8c7c0b977501656c7fa06b92c42beb354a4f3",
+          "quote": "Clothing that clings tightly to the wearer's body, revealing the body's forms, curves, and muscle tone."
         }
       ]
     },
     {
       "e621_tag": "torn_clothing",
       "label": "찢어진 옷",
-      "keywords": [
-        "찢어진 옷",
-        "찢긴 의복",
-        "찢어진 의상"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9b016f1bef285cb494031df8355f83b09f413fdf3a450729e87ee95f24a46df9",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2071.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=torn_clothing",
           "body_sha256": "9b016f1bef285cb494031df8355f83b09f413fdf3a450729e87ee95f24a46df9",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Images or animations in which one or more character's clothing is torn."
         }
       ]
     },
     {
       "e621_tag": "fully_clothed",
-      "label": "상하의를 모두 입음",
-      "keywords": [
-        "상하의를 모두 입음",
-        "완전 착의",
-        "옷을 모두 입은 상태"
-      ],
+      "label": "옷을 다 입음",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ce62712aa09673e7551a17228b36259ca082dabc3b383dd37e6cc8a544249044",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/9943.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=fully_clothed",
           "body_sha256": "ce62712aa09673e7551a17228b36259ca082dabc3b383dd37e6cc8a544249044",
-          "retrieved_at": "2026-10-01T21:20:21.211155+00:00",
           "quote": "Tagged when a character is wearing a full set of clothing (both topwear and bottomwear)."
         }
       ]
     },
     {
       "e621_tag": "socks",
-      "label": "양말",
-      "keywords": [
-        "양말",
-        "삭스"
-      ],
+      "label": "삭스",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9204a6507ca695d5a77cbf7fa78d5742f21e57be15eaa80b40e238d8a4c3b3d9",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1915.json",
-          "body_sha256": "225bf1e1e425a9e63fab83215b169567184f9253523fa8f22b6fde41b94a8280",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "[b]Socks[/b] are articles of hosiery ([[clothing]]) that cover the wearer's [[feet]]/[[paws]]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=socks",
+          "body_sha256": "9204a6507ca695d5a77cbf7fa78d5742f21e57be15eaa80b40e238d8a4c3b3d9",
+          "quote": "[b]Socks[/b] are articles of clothing that cover the [[feet]] ([[footwear]]) and also, typically, some portion of the lower leg ([[legwear]])."
         }
       ]
     },
     {
       "e621_tag": "ponytail",
       "label": "포니테일",
-      "keywords": [
-        "포니테일",
-        "하나로 묶은 머리",
-        "한 갈래 묶음머리"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "17e1ea8227dbd73a15d901fdaafebd733d52302f6167948b62f7d60c7a051a11",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1926.json",
-          "body_sha256": "c7a27b3462b8e51237bc7232a791bada1e2566c94dd1029c755e293ecf75a163",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "gathered and secured at the back of the head"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=ponytail",
+          "body_sha256": "17e1ea8227dbd73a15d901fdaafebd733d52302f6167948b62f7d60c7a051a11",
+          "quote": "A [b]ponytail[/b] is a hairstyle in which most or all of the [[hair]] on the head is pulled away from the face, gathered and secured at the back of the head with a [[hair_tie|hair tie]], [[hairclip|hair clip]] or similar device, and allowed to hang freely from that point."
         }
       ]
     },
@@ -4859,92 +4629,78 @@
       "e621_tag": "bracelet",
       "label": "팔찌",
       "keywords": [
-        "팔찌",
-        "손목 장신구",
         "브레이슬릿"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "0ecc83c044e9569543f70ccce2e5c960480e193ade686acbee3200b97b6abf01",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1917.json",
-          "body_sha256": "bdd7251f6f478be7d0f37338dfc932950a473a3420975cb345cec9ba7331830a",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=bracelet",
+          "body_sha256": "0ecc83c044e9569543f70ccce2e5c960480e193ade686acbee3200b97b6abf01",
           "quote": "A bracelet is an article of [[jewelry]] which is worn around the wrist."
         }
       ]
     },
     {
       "e621_tag": "belt",
-      "label": "허리띠",
+      "label": "벨트",
       "keywords": [
-        "허리띠",
-        "벨트"
+        "허리띠"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "73aca8a82919bcf7bedd35598e5273c5b28e2f387ca5c2cb3de9bf16f95afebb",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1923.json",
-          "body_sha256": "b27dd4d2dfe87e69f4922bbc0da38ea16e9d4d9882af128c450e3846b47d814e",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "worn around the waist. A belt supports [[pants|trousers]] or other articles of [[clothing]]."
+          "url": "https://e621.net/wiki_pages/show_or_new?title=belt",
+          "body_sha256": "73aca8a82919bcf7bedd35598e5273c5b28e2f387ca5c2cb3de9bf16f95afebb",
+          "quote": "A belt is a flexible band or strap, typically made of leather or heavy cloth, and worn around the waist."
         }
       ]
     },
     {
       "e621_tag": "high_heels",
       "label": "하이힐",
-      "keywords": [
-        "하이힐",
-        "뒷굽 높은 신발",
-        "하이힐 구두"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9e3af87c3d3a2b8ab293ae222f2133af1168844316fd3a3ac9af3d3b13c5090b",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2118.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=high_heels",
           "body_sha256": "9e3af87c3d3a2b8ab293ae222f2133af1168844316fd3a3ac9af3d3b13c5090b",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
-          "quote": "raises the heel of the wearer's foot higher than the toes"
+          "quote": "High heels are a type of [[footwear]] that raises the heel of the wearer's foot higher than the toes."
         }
       ]
     },
     {
       "e621_tag": "jacket",
       "label": "재킷",
-      "keywords": [
-        "재킷",
-        "자켓"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "700a9f0addf5a5c0152af9792698169f500dd8dd5c0985d2760f18f6c21c9b6b",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/6495.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=jacket",
           "body_sha256": "700a9f0addf5a5c0152af9792698169f500dd8dd5c0985d2760f18f6c21c9b6b",
-          "retrieved_at": "2026-10-01T21:20:09.851156+00:00",
           "quote": "[b]Jackets[/b] are typically outerwear of the upper body, ending at hip or higher."
         }
       ]
@@ -4952,71 +4708,60 @@
     {
       "e621_tag": "nose_piercing",
       "label": "코 피어싱",
-      "keywords": [
-        "코 피어싱",
-        "콧구멍 피어싱"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "2ddcda8804a797056b746951ba6e307c2326676b5bfb9a04ccd90ab5fbc688d0",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1712.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=nose_piercing",
           "body_sha256": "2ddcda8804a797056b746951ba6e307c2326676b5bfb9a04ccd90ab5fbc688d0",
-          "retrieved_at": "2026-10-01T21:19:52.027140+00:00",
           "quote": "Piercings done somewhere on the [[nose]] or nostril."
         }
       ]
     },
     {
       "e621_tag": "uniform",
-      "label": "제복",
+      "label": "유니폼",
       "keywords": [
         "제복",
-        "유니폼",
-        "단체복"
+        "단복"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "4d737fe375e2556462acb2e7b0e1f52e55b423b1a594090fb0d8ee1383bd1379",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2033.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=uniform",
           "body_sha256": "4d737fe375e2556462acb2e7b0e1f52e55b423b1a594090fb0d8ee1383bd1379",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A uniform is a set of standard clothing worn by members of an organization"
+          "quote": "A uniform is a set of standard clothing worn by members of an organization while participating in that organization's activities."
         }
       ]
     },
     {
       "e621_tag": "hoodie",
-      "label": "후드 달린 상의",
-      "keywords": [
-        "후드 달린 상의",
-        "후디",
-        "후드 상의"
-      ],
+      "label": "후드티",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "8b3d4e8f49bd60dc0d4b9b08fb33b222f31a0ec2386714f1c60984cfd03184e1",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/8322.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=hoodie",
           "body_sha256": "8b3d4e8f49bd60dc0d4b9b08fb33b222f31a0ec2386714f1c60984cfd03184e1",
-          "retrieved_at": "2026-10-01T21:20:15.420481+00:00",
-          "quote": "wearing any form of hooded [[sweatshirt]], [[jacket]], or [[vest]]"
+          "quote": "This tag is used when a character is wearing any form of hooded [[sweatshirt]], [[jacket]], or [[vest]]."
         }
       ]
     },
@@ -5024,45 +4769,39 @@
       "e621_tag": "tank_top",
       "label": "탱크톱",
       "keywords": [
-        "탱크톱",
-        "탱크탑",
-        "민소매 탱크톱"
+        "민소매",
+        "나시"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "77da1491a0c6e7ed21a4c720417f73424a9a685153532650503773857dfa254b",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2212.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=tank_top",
           "body_sha256": "77da1491a0c6e7ed21a4c720417f73424a9a685153532650503773857dfa254b",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
-          "quote": "a shirt manufactured without sleeves, or one where the sleeves have been cut off."
+          "quote": "A [b]tank top[/b] (known as a [b]vest[/b] in UK or a [b]singlet[/b] in Australia/New Zealand) is a shirt manufactured without sleeves, or one where the sleeves have been cut off."
         }
       ]
     },
     {
       "e621_tag": "sky",
       "label": "하늘",
-      "keywords": [
-        "하늘",
-        "창공"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "1583bc29f341fe734a4f6cdeef8b15053a48a0a21da00f7396f9fe5b3c1f9614",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2073.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=sky",
           "body_sha256": "1583bc29f341fe734a4f6cdeef8b15053a48a0a21da00f7396f9fe5b3c1f9614",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
           "quote": "The sky is the part of the atmosphere or outer space visible from the surface of any astronomical object."
         }
       ]
@@ -5071,23 +4810,20 @@
       "e621_tag": "machine",
       "label": "기계",
       "keywords": [
-        "기계",
-        "기계장치",
-        "기계 장치"
+        "장치"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "badc56bd90076046934cfd0e46c72fce98ae4c111c2731a102846398b2af072b",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1948.json",
-          "body_sha256": "e9eb0fe1cc62860f4b60017c75f2e35928a211dc5cf1b7281f555890c5e8b9df",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A machine performs work via forces and movement."
+          "url": "https://e621.net/wiki_pages/show_or_new?title=machine",
+          "body_sha256": "badc56bd90076046934cfd0e46c72fce98ae4c111c2731a102846398b2af072b",
+          "quote": "A machine manages energy to accomplish a task, examples include, a mechanical system, a computing system, an electronic system, a molecular machine and a biological machine."
         }
       ]
     },
@@ -5095,94 +4831,80 @@
       "e621_tag": "container",
       "label": "용기",
       "keywords": [
-        "용기",
-        "담는 용기",
-        "수납 용기"
+        "통",
+        "컨테이너",
+        "그릇"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "7b13a112364329f5ec0471cfffae490ca84b25dec9d3954d13dd333f8d848651",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/11078.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=container",
           "body_sha256": "7b13a112364329f5ec0471cfffae490ca84b25dec9d3954d13dd333f8d848651",
-          "retrieved_at": "2026-10-01T21:20:24.329337+00:00",
-          "quote": "a partially or fully enclosed space that can be used to contain, store, and transport objects or materials"
+          "quote": "A container is a basic tool, consisting of any device creating a partially or fully enclosed space that can be used to contain, store, and transport objects or materials."
         }
       ]
     },
     {
       "e621_tag": "pillow",
       "label": "베개",
-      "keywords": [
-        "베개",
-        "머리 받침 베개",
-        "몸 받침 베개"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "8098ccc208b2f40587a1b389596ae6dceaee651c015898d4b32d090e6abb9d3d",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1877.json",
-          "body_sha256": "5f8d06690ea13c623f3543e0f2d00d739a9bc22d60913cfeb8067d5b4b95909a",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "A [b]pillow[/b] is a large [[cushion]] support for the [[head]], usually used while [[sleeping]] in a bed, or for the body as used on a [[couch]] or [[chair]]. They might get decorative [[tassels]] or a [[fringe_trim|fringe trim]]. \n\nh4.Tags about pillows\n\nh4. Types\n* [[big_pillow]] \n* [[perspective-incorrect_pillow]] \nh5. By destination\n* [[bondage_pillow]] \n* [[improvised_pillow]] \n* [[neck_pillow]]\n* [[sex_pillow]] \nh5. By shape\n* [[bolster_pillow]]\n* [[bow_pillow]] \n* [[frilly_pillow]] \n* [[heart pillow]]\n* [[holes_in_pillow]] \n* [[star_pillow]]\n* [[throw_pillow]] \nh5. By [[tag_group:colors|color]] \n* [[black_pillow]]\n* [[blue_pillow]] \n* [[brown_pillow]] \n* [[grey_pillow]] \n* [[green_pillow]] \n* [[orange_pillow]] \n* [[pink pillow]] \n* [[purple_pillow]] \n* [[red_pillow]]\n* [[tan_pillow]] \n* [[teal_pillow]], might get aliased to [[blue_pillow]] \n* [[white_pillow]] \n* [[yellow_pillow]] \n\n* [[dark_pillow]] \n* [[light_pillow]] \n\n* [[monotone_pillow]] \n* [[two_tone_pillow]] \n* [[multicolored_pillow]] \n** [[rainbow_pillow]] \n*** [[pride_color_pillow]] \n\n* [[pattern_pillow]]\n** [[floral_pillow]] \n** [[spotted_pillow]]\n** [[striped_pillow]] \n\nh5. By printed designs\n* [[print_pillow]] \n** [[?_block_pillow]] \n** [[dakimakura_pillow]]\n** [[text_on_pillow]] \n*** [[emoticon_on_pillow]] \n*** [[yes-no pillow]]\n**** [[yes pillow]]\n**** [[no pillow]] \n\nh4. Traits\n* [[bood_on_pillow]]\n* [[cum_on_pillow]] \n** [[cum_on_body_pillow]]\n* [[feces_on_pillow]] \n* [[pussy_juice_on_pillow]] \n* [[saliva_on_pillow]] \n* [[stained_pillow]] \n\n* [[airborne_pillow]] \n* [[torn_pillow]] \n* [[wet_pillow]] \n\nh4. Actions\n* [[drooling_on_pillow]]\n* [[farting_on_pillow]] \n* [[fluffing_pillow]] \n* [[holding_pillow]] \n** [[grabbing_pillow]]\n** [[gripping_pillow]] \n** [[holding_body_pillow]]\n* [[hugging_pillow]]\n* [[laying_on_pillow]], a character/devices put [u]someone or something else[/u]] in a horizontal [[resting]] position\n* [[lying_on_pillow]], someone/something is in or put [u]themselves[/u] in a horizontal resting position\n* [[offering_pillow]] \n* [[pillow_bite]] \n* [[pillow_fight]]\n* [[pillow_humping]] \n* [[punching_pillow]]\n* [[sitting_on_pillow]] \n* [[throwing_pillow]] \n\nh4. Positions\n* [[face_in_pillow]]\n* [[head_under_pillow]] \n* [[inside_pillow]] \n* [[on_pillow]] \n** [[head_on_pillow]] \n*** [[snout_on_pillow]] \n** [[hand_on_pillow]] \n** [[sitting_on_pillow]] \n\nNot to be confused with\n* resting on someone's body as if using a pillow\n** [[breast_pillow]]\n** [[butt_pillow]]\n** [[chest_pillow]] \n** [[ear_pillow]] \n** [[lap_pillow]]\n** [[penis_pillow]] \n** [[tail_pillow]] \n* [[love_pillow]], a form of amputation\n\nh4. See also\n\n* [[bed]]\n** [[bedding]]\n*** [[bed_covers]]\n*** [[bed_sheet]]\n*** [[blanket]]\n*** [[comforter]]\n** [b]pillow[/b]\n*** [[body_pillow]]\n**** [[body_pillow_design]]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=pillow",
+          "body_sha256": "8098ccc208b2f40587a1b389596ae6dceaee651c015898d4b32d090e6abb9d3d",
+          "quote": "A [b]pillow[/b] is a large [[cushion]] support for the [[head]], usually used while [[sleeping]] in a bed, or for the body as used on a [[couch]] or [[chair]]."
         }
       ]
     },
     {
       "e621_tag": "grey_background",
       "label": "회색 배경",
-      "keywords": [
-        "회색 배경",
-        "잿빛 배경",
-        "그레이 배경"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "6cdac1b43be7a589fd3405c41506d40faaa3c8a735865839dfa27bc145903da0",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/3216.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=grey_background",
           "body_sha256": "6cdac1b43be7a589fd3405c41506d40faaa3c8a735865839dfa27bc145903da0",
-          "retrieved_at": "2026-10-01T21:19:57.454243+00:00",
           "quote": "Images with a grey background."
         }
       ]
     },
     {
       "e621_tag": "grass",
-      "label": "풀",
+      "label": "풀밭",
       "keywords": [
-        "풀",
-        "풀밭의 풀",
-        "초본 풀"
+        "잔디"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "5c9c74e57c21bec308e80308bc4dff9bdac4c4fe8ea0477226f67d8c651d6807",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1911.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=grass",
           "body_sha256": "5c9c74e57c21bec308e80308bc4dff9bdac4c4fe8ea0477226f67d8c651d6807",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "Grasses, or more technically graminoids, are monocotyledonous, usually herbaceous plants with narrow leaves growing from the base."
         }
       ]
@@ -5191,21 +4913,19 @@
       "e621_tag": "on_bed",
       "label": "침대 위",
       "keywords": [
-        "침대 위",
         "침대 위에 있음"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "b04cbf6ac512c72b9db1fc73c6e6e87d80c55d65cbe348e2eb38e060189b7ba4",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/6839.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=on_bed",
           "body_sha256": "b04cbf6ac512c72b9db1fc73c6e6e87d80c55d65cbe348e2eb38e060189b7ba4",
-          "retrieved_at": "2026-10-01T21:20:10.932437+00:00",
           "quote": "One or more characters are on top of a bed."
         }
       ]
@@ -5213,23 +4933,18 @@
     {
       "e621_tag": "night",
       "label": "밤",
-      "keywords": [
-        "밤",
-        "야간",
-        "밤 시간"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "95a1bfc2997cec791610e78ce0d53c86953e171c335623b7c17cbed7ec84f176",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1913.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=night",
           "body_sha256": "95a1bfc2997cec791610e78ce0d53c86953e171c335623b7c17cbed7ec84f176",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "[b]Night[/b] or [b]nighttime[/b] is the period of time when the sun is below the horizon."
         }
       ]
@@ -5237,46 +4952,39 @@
     {
       "e621_tag": "flower",
       "label": "꽃",
-      "keywords": [
-        "꽃",
-        "꽃송이"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "ce614c5c36eafc4056cdc62cb6a946f6dc0a0499ac81a8f0e7292969eb9f193f",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/186.json",
-          "body_sha256": "dd5361b22f55d2cf8cf22e449e0dbcadc1e9316c0953f0321e17447f448a4c89",
-          "retrieved_at": "2026-10-01T21:19:47.644461+00:00",
-          "quote": "[b]Flowers[/b], also sometimes referred to as [b]blossoms[/b], are the reproductive part of flowering [[plant|plants]]. \n\nAll flowering plants are part of a group known as Angiosperm. A flower's appearance can change wildly from plant to plant, but generally they consist of a group of colorful, ruffly oval shaped petals radially mounted around the end of a stem.\n\nThis tag should be used whenever a picture features a flower,  for example, stuck behind one's ear, or on a flowering tree when in bloom. This also applies to characters who have visible flowers on them or are, themselves, a flower such as [[flowey_the_flower|Flowey]] from [i][[Undertale]][/i].\n\nNote, however, if the plant has not yet blossomed, use [[bud_(flower)]] instead.\n\nh4. Flower species\n\n[section=Flower species by family]\nThis list is organized by family, however, flowers (and other plants) should only be tagged by genus (and occasionally species, if identifiable).\n\n* [b]Amaryllidaceae[/b] (Amaryllis family)\n** [[allium_(flower)]]\n** [[amaryllis_(flower)]]\n** [[daffodil_(flower)]]\n** [[rain_lily]]\n** [[snowdrop_(flower)]]\n** [[spider_lily]]\n* [b]Apiaceae[/b] (Celery family)\n** [[hemlock_(flower)]]\n* [b]Apocynaceae[/b] (Dogbane family)\n** [[impala_lily]]\n** [[periwinkle_(flower)]]\n** [[plumeria]]\n* [b]Araceae[/b] (Arum family)\n** [[calla_lily]]\n* [b]Asparagaceae[/b] (Asparagus family)\n** [[bluebell_(flower)]]\n** [[hyacinth_(flower)]]\n** [[lily_of_the_valley]]\n* [b]Asphodelaceae[/b]\n** [[daylily_(flower)]]\n* [b]Asteraceae[/b] (Aster family)\n** [[aster_(flower)]]\n*** [[tatarian_aster_(flower)]]\n** [[black-eyed_susan]]\n** [[burdock_(flower)]]\n** [[cempasuchil_(flower)]]\n** [[chamomile]]\n** [[chrysanthemum]]\n** [[cornflower_(flower)]]\n** [[cosmos_(flower)]]\n** [[dahlia_(flower)]]\n** [[daisy_(flower)]]\n** [[dandelion]]\n** [[gerbera_(flower)]]\n** [[marigold_(flower)]]\n** [[sunflower]]\n** [[thistle_(plant)]]\n** [[tickseed]]\n** [[yarrow_(flower)]]\n** [[zinnia_(flower)]]\n* [b]Boraginaceae[/b] (Borage family)\n** [[borage]]\n** [[forget-me-not_(flower)]]\n* [b]Campanulaceae[/b] (Bellflower family)\n** [[bellflower]]\n* [b]Caryophyllaceae[/b] (Carnation family)\n** [[baby's_breath_(flower)]]\n** [[carnation]]\n* [b]Ericaceae[/b] (Heather family)\n** [[heather_(flower)]]\n* [b]Euphorbiaceae[/b] (Spurge family)\n** [[poinsettia]]\n* [b]Fabaceae[/b] (Legume family)\n** [[lotus_(flower)]]\n** [[lupine_(flower)]]\n** [[wisteria_(flower)]]\n* [b]Hydrangeaceae[/b] (Hydrangea family)\n** [[hydrangea]]\n* [b]Iridaceae[/b] (Iris family)\n** [[crocus_(flower)]]\n** [[gladiolus_(flower)]]\n** [[iris_(flower)]]\n* [b]Lamiaceae[/b] (Mint family)\n** [[lavender_(flower)]]\n** [[salvia_(flower)]]\n* [b]Liliaceae[/b] (Lily family)\n** [[lily_(flower)]]\n*** [[easter_lily]]\n*** [[stargazer_lily]]\n*** [[tiger_lily_(flower)]]\n*** [[triplet_lily]]\n** [[tulip_(flower)]]\n* [b]Linaceae[/b]\n** [[flax_(flower)]]\n* [b]Lythraceae[/b]\n** [[cuphea_(flower)]]\n* [b]Malvaceae[/b] (Mallow family)\n** [[hibiscus]]\n* [b]Melanthiaceae[/b] (Bunchflower family)\n** [[trillium_(flower)]]\n* [b]Oleaceae[/b] (Olive family)\n** [[jasmine_(flower)]]\n** [[lilac_(flower)]]\n* [b]Orchidaceae[/b] (Orchid family)\n** [[orchid_(flower)]]\n** [[vanilla_(flower)]]\n* [b]Papaveraceae[/b] (Poppy family)\n** [[poppy_(flower)]]\n* [b]Plantaginaceae[/b] (Plantain family)\n** [[foxglove_(flower)]]\n** [[snapdragon_(flower)]]\n* [b]Polemoniaceae[/b] (Phlox family)\n** [[phlox_(flower)]]\n* [b]Polygonaceae[/b] (Knotweed family)\n** [[buckwheat_(flower)]]\n* [b]Ranunculaceae[/b] (Buttercup family)\n** [[buttercup_(flower)]]\n** [[columbine_(flower)]]\n** [[delphinium_(flower)]]\n** [[wolfsbane_(flower)]]\n* [b]Rosaceae[/b] (Rose family)\n** [[cinquefoil_(flower)]]\n** [[flowering_quince]]\n*** [[japanese_quince]]\n** [[prunus_(flower)]]\n*** [[apricot_blossom]]\n*** [[cherry_blossom]]\n*** [[peach_blossom]]\n*** [[plum_blossom]]\n** [[rose_(flower)]]\n** [[strawberry_blossom]]\n* [b]Rubiaceae[/b] (Coffee family)\n** [[bluet_(flower)]]\n*** [[azure_bluet]]\n** [[gardenia_(flower)]]\n* [b]Rutaceae[/b] (Citrus family)\n** [[orange_blossom_(flower)]]\n** [[rue_(flower)]]\n** [[tangerine_blossom]]\n* [b]Scrophulariaceae[/b] (Figwort family)\n** [[mullein]]\n* [b]Solanaceae[/b] (Nightshade family)\n** [[eggplant_flower]]\n** [[mandragora_(plant)]]\n** [[nightshade_(flower)]]\n** [[petunia_(flower)]]\n* [b]Theaceae[/b] (Tea family)\n** [[camellia_(flower)]]\n* [b]Violaceae[/b] (Violet family)\n** [[violet_(flower)]]\n*** [[pansy_(flower)]]\n[/section]\n\n[section=Miscellaneous]\nThis section contains miscellaneous flowering plants not included in the family-sorted list above.\n\n* [[begonia_(flower)]]\n* [[bird_of_paradise_(flower)]]\n* [[dogwood_blossom]]\n* [[elderflower]]\n* [[lotus_(flower)]]\n* [[magnolia]]\n* [[matatabi_(flower)]]\n* [[morning_glory_(flower)]]\n* [[peony_(flower)]]\n* [[spicebush_(plant)]]\n* [[spiderwort]]\n* [[sundew_plant]]\n* [[trumpet_vine]]\n* [[water_lily]]\n[/section]\n\n[section=Fictional species]\n* [[black_lotus_(flower)]]\n* [[echo_flower]]\n* [[fire_flower]]\n* [[golden_flower]]\n* [[gracidea_flower]]\n* [[ice_flower]]\n* [[poison_joke]]\n* [[time_flower]]\n* [[wither_rose]]\n[/section]\n\nh4. See also:\n* [[bouquet]]\n* [[floral]]\n* [[flower_creature]]\n* [[flower_crown]]\n* [[flower_garland]]\n* [[garden]]\n* [[generic_flower]]\n\nH4. Not to be confused with:\n* [[Flour]] — The powder used in [[baking]].\n\nh4. External links:\n\n* \"Wikipedia — Flower\":[https://en.wikipedia.org/wiki/Flower]"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=flower",
+          "body_sha256": "ce614c5c36eafc4056cdc62cb6a946f6dc0a0499ac81a8f0e7292969eb9f193f",
+          "quote": "[b]Flowers[/b], also sometimes referred to as [b]blossoms[/b], are the reproductive part of flowering [[plant|plants]]."
         }
       ]
     },
     {
       "e621_tag": "beach",
-      "label": "모래·자갈 해변",
+      "label": "해변",
       "keywords": [
-        "해변",
-        "모래 해변",
-        "자갈 해변"
+        "바닷가"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "9f02d8e7489074f8a1148d7055324c343e5c160b72c2343396251a19c5cacc4f",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1879.json",
-          "body_sha256": "2d464d93d8b3ac9be369d486fc89834d240eb7924d88bf153cd811fb99d5071f",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=beach",
+          "body_sha256": "9f02d8e7489074f8a1148d7055324c343e5c160b72c2343396251a19c5cacc4f",
           "quote": "An area of sand or small stones near the sea or another body of water such as a lake."
         }
       ]
@@ -5285,23 +4993,20 @@
       "e621_tag": "day",
       "label": "낮",
       "keywords": [
-        "낮",
-        "주간",
-        "대낮"
+        "주간"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "79614a97904ab6dd976cf3698cdefd46029b7818edab724ab67740702fe1fbd1",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/8466.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=day",
           "body_sha256": "79614a97904ab6dd976cf3698cdefd46029b7818edab724ab67740702fe1fbd1",
-          "retrieved_at": "2026-10-01T21:20:16.769004+00:00",
-          "quote": "it is set during daylight hours"
+          "quote": "This tag is used when the post makes it clear that it is set during daylight hours (usually shown by the presence of the [[sun]], blue skies, or natural light)."
         }
       ]
     },
@@ -5309,47 +5014,38 @@
       "e621_tag": "forest",
       "label": "숲",
       "keywords": [
-        "숲",
-        "삼림",
-        "수림"
+        "삼림"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "3af76a11a4d73d67d0a96de872bb816e61108ea6408e50b6972fa63a1a3922fe",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1876.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=forest",
           "body_sha256": "3af76a11a4d73d67d0a96de872bb816e61108ea6408e50b6972fa63a1a3922fe",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "an area with a high density of [[tree]]s"
+          "quote": "A forest, also referred to as a [[wood]] or the woods, is an area with a high density of [[tree]]s."
         }
       ]
     },
     {
       "e621_tag": "public",
       "label": "공공장소",
-      "keywords": [
-        "공공장소",
-        "공개된 장소",
-        "사람들이 있는 공공 공간",
-        "사람들이 있는 장소"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "공개 장소 외 populated area 조건도 검색 가능하도록 검색어 추가. 성행위 의미를 전이하지 않음.",
       "e621_body_sha256": "d439affb538418ad2ae19441a00298a2e3b0db3af9106234d5c5bb01fd50b179",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2170.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=public",
           "body_sha256": "d439affb538418ad2ae19441a00298a2e3b0db3af9106234d5c5bb01fd50b179",
-          "retrieved_at": "2026-10-01T21:19:54.044924+00:00",
           "quote": "This is a general tag used for posts depicting a [b][i]public setting[/i][/b]; a location open to random people in general, or an otherwise populated area."
         }
       ]
@@ -5358,46 +5054,38 @@
       "e621_tag": "fire",
       "label": "불",
       "keywords": [
-        "불",
-        "화염",
-        "불꽃"
+        "화염"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "2ee80b636ba80df245394570d0cd5b3e61e35f0c7bfff5bfc9d27c879c624816",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1903.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=fire",
           "body_sha256": "2ee80b636ba80df245394570d0cd5b3e61e35f0c7bfff5bfc9d27c879c624816",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "[b]Fire[/b] is the rapid oxidation of a material in the chemical process of combustion"
+          "quote": "[b]Fire[/b] is the rapid oxidation of a material in the chemical process of combustion, releasing heat, light, and various reaction products such as carbon dioxide, carbon monoxide, and soot."
         }
       ]
     },
     {
       "e621_tag": "seaside",
-      "label": "바닷가",
-      "keywords": [
-        "바닷가",
-        "해안",
-        "바다와 육지가 만나는 곳"
-      ],
+      "label": "해안가",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "0a6ce2e648b9e5e142f48bee2ec632d78e4d81f44cd34325662ce5cf9c2b8ca0",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1875.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=seaside",
           "body_sha256": "0a6ce2e648b9e5e142f48bee2ec632d78e4d81f44cd34325662ce5cf9c2b8ca0",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "The area where land meets the sea or ocean."
         }
       ]
@@ -5405,47 +5093,38 @@
     {
       "e621_tag": "vehicle",
       "label": "탈것",
-      "keywords": [
-        "탈것",
-        "운송수단",
-        "이동수단"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "7efabc2b1179e86abae1299f75b6dc7d5ba6ceebb0c145d49bbcdc7e200faac0",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2749.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=vehicle",
           "body_sha256": "7efabc2b1179e86abae1299f75b6dc7d5ba6ceebb0c145d49bbcdc7e200faac0",
-          "retrieved_at": "2026-10-01T21:19:55.303362+00:00",
-          "quote": "designed to transport things (such as people and cargo)"
+          "quote": "[b]Vehicles[/b] are self-propelled [[machine]]s designed to transport things (such as people and cargo) through a variety of terrain depending on the type (land, water, air, space, etc.) and make use of a wide range of means of self-propulsion."
         }
       ]
     },
     {
       "e621_tag": "melee_weapon",
       "label": "근접 무기",
-      "keywords": [
-        "근접 무기",
-        "백병전 무기"
-      ],
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "e1bd79f238a6d2b784469cf0f60b23eb41b470a89b66dcf0c9c3de7517ec3ef3",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/7909.json",
-          "body_sha256": "2c56ebf590c5234788b7f6a672e6b70b5e58b591bb991afefabb93e9fa0c58fc",
-          "retrieved_at": "2026-10-01T21:20:14.304832+00:00",
-          "quote": "a weapon designed for close quarters combat"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=melee_weapon",
+          "body_sha256": "e1bd79f238a6d2b784469cf0f60b23eb41b470a89b66dcf0c9c3de7517ec3ef3",
+          "quote": "This tag is used when an image contains a weapon designed for close quarters combat."
         }
       ]
     },
@@ -5499,216 +5178,180 @@
     },
     {
       "e621_tag": "kneeling",
-      "label": "무릎 꿇기",
-      "keywords": [
-        "무릎 꿇기",
-        "무릎을 댄 자세",
-        "무릎 꿇은 자세"
-      ],
+      "label": "무릎꿇기",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "12dc3c3112ded307647d12a5e36b36577307429850f09cb83f1cc1989e373777",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1816.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=kneeling",
           "body_sha256": "12dc3c3112ded307647d12a5e36b36577307429850f09cb83f1cc1989e373777",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "When a character's knee(s) touch the ground or other surface beneath them"
+          "quote": "When a character's knee(s) touch the ground or other surface beneath them, usually balancing with their feet."
         }
       ]
     },
     {
       "e621_tag": "dripping",
-      "label": "액체가 떨어짐",
+      "label": "물방울",
       "keywords": [
-        "액체가 떨어짐",
-        "방울져 떨어짐",
-        "뚝뚝 떨어짐"
+        "dripping",
+        "떨어짐",
+        "흐름",
+        "뜻이 모호한 옛 태그"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "193524a44f575d305a5483ed100601be16f7365981a2e545f14790be668361b6",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1453.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=dripping",
           "body_sha256": "193524a44f575d305a5483ed100601be16f7365981a2e545f14790be668361b6",
-          "retrieved_at": "2026-10-01T21:19:52.027140+00:00",
           "quote": "Some kind of liquid (most commonly [[water]], [[blood]], [[cum]], [[precum]], or [[pussy juice]]) that seems to be dripping."
         }
       ]
     },
     {
       "e621_tag": "all_fours",
-      "label": "네발 자세",
+      "label": "네발기기",
       "keywords": [
-        "네발 자세",
-        "네 발로 엎드림",
-        "사지로 몸을 받침"
+        "개자세"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "5d791186dc6f5724183a342d4e3626ff26fbff927d31e18076b75989543e517a",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/596.json",
-          "body_sha256": "08fab32049e3857b6c13b1178d6502363b395f9964682ee7a136079bed350537",
-          "retrieved_at": "2026-10-01T21:19:48.579975+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=all_fours",
+          "body_sha256": "5d791186dc6f5724183a342d4e3626ff26fbff927d31e18076b75989543e517a",
           "quote": "A position in which both sets of limbs are resting against the ground."
         }
       ]
     },
     {
       "e621_tag": "grin",
-      "label": "이를 드러낸 웃음",
-      "keywords": [
-        "이를 드러낸 웃음",
-        "치아가 보이는 웃음",
-        "이를 보인 웃음"
-      ],
+      "label": "활짝 웃음",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "5094ae5972e2cf1040916fa9f87361afbfe5499a45ff67f81aefd551587c0736",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1868.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=grin",
           "body_sha256": "5094ae5972e2cf1040916fa9f87361afbfe5499a45ff67f81aefd551587c0736",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "a [[smile]] with the mouth slightly open to show teeth"
+          "quote": "Images or animations in which a character is grinning."
         }
       ]
     },
     {
       "e621_tag": "happy",
-      "label": "행복해 보임",
-      "keywords": [
-        "행복해 보임",
-        "기뻐 보임",
-        "행복한 표정"
-      ],
+      "label": "행복",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "954e6400843be1691ce41ae80feca1b558d68608d873d27b3a08f2e9c9db17e2",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2067.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=happy",
           "body_sha256": "954e6400843be1691ce41ae80feca1b558d68608d873d27b3a08f2e9c9db17e2",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "Use this tag for when a character looks happy."
+          "quote": "[b]Happiness[/b] is a mental state of well-being characterized by positive emotions ranging from contentment to intense joy."
         }
       ]
     },
     {
       "e621_tag": "bent_over",
-      "label": "허리를 깊이 숙임",
-      "keywords": [
-        "허리를 깊이 숙임",
-        "허리 굽힌 자세",
-        "상체를 직각으로 숙임"
-      ],
+      "label": "엉덩이 내밀기",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "c6eda77a4ee5bad8318ac8ac43721a1bc2fe59d1ee7a7a8d90a6eaf32e799e40",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1863.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=bent_over",
           "body_sha256": "c6eda77a4ee5bad8318ac8ac43721a1bc2fe59d1ee7a7a8d90a6eaf32e799e40",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
           "quote": "When a character is leaning over at a right angle, or more."
         }
       ]
     },
     {
       "e621_tag": "motion_lines",
-      "label": "움직임 선",
+      "label": "모션 라인",
       "keywords": [
-        "움직임 선",
-        "동작선",
-        "모션 라인"
+        "집중선"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "27ae2ab6c41a12ee7530dd11303622f283d7592951b06795c1b1508e1f8b7722",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/13677.json",
-          "body_sha256": "9209b862af490b048d730d978b0569622810640a86ca2867a511e74212a3241b",
-          "retrieved_at": "2026-10-01T21:20:33.386148+00:00",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=motion_lines",
+          "body_sha256": "27ae2ab6c41a12ee7530dd11303622f283d7592951b06795c1b1508e1f8b7722",
           "quote": "Lines in artwork drawn near or surrounding an object used to denote movement."
         }
       ]
     },
     {
       "e621_tag": "sweatdrop",
-      "label": "땀방울",
-      "keywords": [
-        "땀방울",
-        "상징적 땀방울",
-        "당황 땀방울"
-      ],
+      "label": "식은땀",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "36e01fcaadc526e2f82de67846a55edf95dfcf71190ea05384e960dddd4aa142",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/4128.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=sweatdrop",
           "body_sha256": "36e01fcaadc526e2f82de67846a55edf95dfcf71190ea05384e960dddd4aa142",
-          "retrieved_at": "2026-10-01T21:20:00.771866+00:00",
-          "quote": "Sweatdrop[/b] describes a character with 1-3 [[drop|drops]] or beads of sweat"
+          "quote": "[b]Sweatdrop[/b] describes a character with 1-3 [[drop|drops]] or beads of sweat, usually on their face, in more stylized cases, the drop can be a single large symbolic tear dropshape on, or beside, the character's head."
         }
       ]
     },
     {
       "e621_tag": "hand_on_hip",
-      "label": "자기 허리에 손",
-      "keywords": [
-        "자기 허리에 손",
-        "허리에 손 올림",
-        "한 손을 골반에 댐"
-      ],
+      "label": "허리에 손",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "b95f1492851c9decf18cb72ecb2fa50c133872115a9ed0b1ab61e8ce866c298d",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/4996.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=hand_on_hip",
           "body_sha256": "b95f1492851c9decf18cb72ecb2fa50c133872115a9ed0b1ab61e8ce866c298d",
-          "retrieved_at": "2026-10-01T21:20:03.040299+00:00",
           "quote": "When a character has one hand on their own hip."
         }
       ]
@@ -5717,142 +5360,127 @@
       "e621_tag": "hug",
       "label": "포옹",
       "keywords": [
-        "포옹",
-        "껴안기",
-        "팔로 감싸 안기"
+        "허그"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "def4c6c18562374a7843dd9c34fcac782aa902145b3eb29e34fcfb48c52b1815",
-      "native_body_matches_review_source": false,
+      "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1905.json",
-          "body_sha256": "bc6b16eca5f4ed5b4bc310564789d51148cd15afb0e501e9052a411a13ea3e62",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "wrapping or holding their arms around another, themselves, or an object"
+          "url": "https://e621.net/wiki_pages/show_or_new?title=hug",
+          "body_sha256": "def4c6c18562374a7843dd9c34fcac782aa902145b3eb29e34fcfb48c52b1815",
+          "quote": "[b]hug[/b] involves a character wrapping or holding their arms around another, themselves, or an object (typical a soft inanimate object)."
         }
       ]
     },
     {
       "e621_tag": "eye_contact",
-      "label": "서로 눈맞춤",
+      "label": "눈맞춤",
       "keywords": [
-        "서로 눈맞춤",
-        "눈 마주침",
-        "상호 시선"
+        "아이컨택"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "667d91b15ab829d7848754e29f664bfdb4f1ca49ffd2ae0673ecab1e60c55343",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/2635.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=eye_contact",
           "body_sha256": "667d91b15ab829d7848754e29f664bfdb4f1ca49ffd2ae0673ecab1e60c55343",
-          "retrieved_at": "2026-10-01T21:19:55.303362+00:00",
           "quote": "Used when at least two characters in an image are looking directly at each other."
         }
       ]
     },
     {
       "e621_tag": "hand_gesture",
-      "label": "손짓",
+      "label": "손 제스처",
       "keywords": [
         "손짓",
-        "손 제스처",
-        "손동작"
+        "핸드 사인",
+        "뜻이 모호한 옛 태그"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "45142f03f7776406621caadaabb6bef078fafc53f16fb52f90930d42cce3f811",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/52598.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=hand_gesture",
           "body_sha256": "45142f03f7776406621caadaabb6bef078fafc53f16fb52f90930d42cce3f811",
-          "retrieved_at": "2026-10-01T21:22:47.985494+00:00",
           "quote": "General tag for any kind of [[gesture]] made by one's [[hands|hand(s)]]."
         }
       ]
     },
     {
       "e621_tag": "looking_back_at_viewer",
-      "label": "돌아보며 시청자 응시",
+      "label": "뒤 돌아보기",
       "keywords": [
-        "돌아보며 시청자 응시",
-        "뒤돌아 감상자 보기",
-        "돌아보며 관객 보기"
+        "돌아보기",
+        "뒤 시선"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "75f01937ae85e56015165d6216d2d9eddded15b8e8576a3e23306aeed82309a6",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/30450.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=looking_back_at_viewer",
           "body_sha256": "75f01937ae85e56015165d6216d2d9eddded15b8e8576a3e23306aeed82309a6",
-          "retrieved_at": "2026-10-01T21:21:30.855161+00:00",
-          "quote": "simultaneously looking at the viewer and [[looking_back]] at the same time"
+          "quote": "Used for posts depicting a character who is simultaneously looking at the viewer and [[looking_back]] at the same time."
         }
       ]
     },
     {
       "e621_tag": "on_side",
-      "label": "옆으로 누움",
+      "label": "누운자세",
       "keywords": [
-        "옆으로 누움",
-        "옆으로 누운 자세",
-        "측와 자세"
+        "옆으로 눕기"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "862e6aeb318d5d90a6d668a95f9d71e6eca36e15d5f6b33baa2716de7001e49c",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/1914.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=on_side",
           "body_sha256": "862e6aeb318d5d90a6d668a95f9d71e6eca36e15d5f6b33baa2716de7001e49c",
-          "retrieved_at": "2026-10-01T21:19:53.031886+00:00",
-          "quote": "a character is resting on the narrow width of their body"
+          "quote": "Images or Animations in which a character is resting on the narrow width of their body, sometimes supported upright on their arm, or the surface underneath."
         }
       ]
     },
     {
       "e621_tag": "clenched_teeth",
-      "label": "이를 악묾",
+      "label": "이악물기",
       "keywords": [
-        "이를 악묾",
-        "악문 이",
-        "이를 꽉 다묾"
+        "이를 악물다"
       ],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
-      "reviewer": "root",
+      "reviewer": "gpt-6.1-sol",
       "review_note": "직접 정의 인용과 이름·검색어를 대조. 색/재질, 해부 부위, 동작/상태 및 인접 태그 경계를 유지한 검색 보충으로 승인.",
       "e621_body_sha256": "3bd8b7ed31c3c02c3ac1bb00b2007eb666b169f88740ae5b50c835981473622f",
       "native_body_matches_review_source": true,
       "sources": [
         {
           "site": "e621",
-          "url": "https://e926.net/wiki_pages/4409.json",
+          "url": "https://e621.net/wiki_pages/show_or_new?title=clenched_teeth",
           "body_sha256": "3bd8b7ed31c3c02c3ac1bb00b2007eb666b169f88740ae5b50c835981473622f",
-          "retrieved_at": "2026-10-01T21:20:00.771866+00:00",
           "quote": "When a character presses their own [[teeth]] together with force."
         }
       ]

@@ -1419,6 +1419,10 @@ export function createCharacterPanel({
         return false;
       }
     }
+    // 앞 카드의 저장 대기(보낸 값 · 잠금 · 타이머)는 이 카드의 것이 아니다. 남겨 두면 보낸 적도 없는 이 카드가
+    // [저장 중…] 으로 잠기고, 이 카드의 글이 마침 앞 카드가 보낸 글과 같으면 그 확인이 이 칸을 닫는다(Codex 5차 리뷰:
+    // 누르는 동안 앞 카드의 확인이 와 있으면 '바뀐 것 없음' 이라 여기까지 온다).
+    stopWaiting();
     editingUuid = uuid;
     editDraft = {
       name: String(character.custom_name || ''),

@@ -14572,6 +14572,8 @@ body.detached-metadata .metadata-layout {
 /* 저장 = 원본을 바꾸는 유일한 단추라 채워서 그린다. 편집 중에는 [즉시 생성] 이 없어 주 색이 겹치지 않는다. */
 .cw-li-act.is-save { background: var(--accent); border-color: transparent; color: #fff; }
 .cw-li-act.is-save:hover { border-color: transparent; color: #fff; filter: brightness(1.12); }
+/* 보내고 확인을 기다리는 동안([저장 중…]) - 눌리지 않는다. */
+.cw-li-act:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
 /* 편집 중에는 머리줄의 조작(↩ · ✕ · −)을 잠근다 - 치던 글이 말없이 버려지지 않게. */
 .cw-li-btn:disabled { opacity: 0.32; cursor: default; pointer-events: none; }
 .cw-li.is-editing .cw-li-row { cursor: default; }

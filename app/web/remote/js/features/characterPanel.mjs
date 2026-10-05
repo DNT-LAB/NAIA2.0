@@ -85,6 +85,12 @@ export function createCharacterPanel({
   let editingUuid = '';
   let editDraft = null;          // {name, prompt, uc}
   let editError = '';
+  // ⚠️ 칸은 **서버 상태가 고친 글을 보여 줄 때** 닫는다. 보내자마자 닫으면, 서버가 못 받았을 때(재시작 전의 옛
+  //    백엔드 · 보낸 직후 끊긴 연결) 저장이 안 됐는데 된 것처럼 보이고 친 글의 하나뿐인 사본이 사라진다.
+  let editPending = null;        // 마지막으로 보낸 값 {custom_name, prompt, uc} - 상태가 이것과 같아지면 저장된 것이다
+  let editBusy = false;          // 보내고 확인을 기다리는 중 - 그동안 칸과 단추를 잠근다
+  let editConfirmTimer = 0;
+  const EDIT_CONFIRM_MS = 4000;
   // 지금 화면에 그려져 있는 탭. 통째로 다시 그릴 때 **같은 탭이면** 목록 스크롤을 되돌려 준다.
   let renderedTab = '';
   // 그룹 탭의 검색어. **그룹 안의 항목**을 찾는다(사용자 지정 2026-09-02) - 그룹
@@ -471,7 +477,7 @@ export function createCharacterPanel({
       [...openHistory].sort().join(','),
       groupsOf(state).join(','), groupPickerUuid,
       // 치는 글(`editDraft`)은 싣지 않는다 - 실으면 한 글자마다 다시 그려 캐럿을 잃는다.
-      editingUuid, editError,
+      editingUuid, editError, editBusy ? 1 : 0,
       [...openGroups].sort().join(','),
       chars.length,
       chars.map(item => [
@@ -1273,6 +1279,16 @@ export function createCharacterPanel({
     editingUuid = '';
     editDraft = null;
     editError = '';
+    editPending = null;
+    editBusy = false;
+    clearTimeout(editConfirmTimer);
+    editConfirmTimer = 0;
+  }
+
+  /** 서버 상태의 그 캐릭터가 **보낸 글 그대로**인가 - 저장됐다는 유일한 증거다. */
+  function editConfirmedBy(state) {
+    const saved = editPending ? storedCharacter(editingUuid, state) : null;
+    return !!saved && ['custom_name', 'prompt', 'uc'].every(key => String(saved[key] || '') === editPending[key]);
   }
 
   function focusEditField(key, range = null) {
@@ -1323,6 +1339,7 @@ export function createCharacterPanel({
 
   /** [저장] - 원본이 바뀌는 **유일한 길**이다. */
   function saveEdit() {
+    if (editBusy) return false;                 // 이미 보냈다 - 확인을 기다리는 중이다
     const uuid = editingUuid;
     const character = storedCharacter(uuid);
     const draft = editDraft;
@@ -1339,12 +1356,19 @@ export function createCharacterPanel({
       // 소켓이 끊겨 있다 - 여기서 칸을 닫으면 친 글이 사라진다.
       return failEdit('연결이 끊겨 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.', '');
     }
-    // 미뤄 둔 렌더는 버린다 - 그것은 저장 **전**의 상태라, 뒤늦게 그리면 고친 글이 옛 글로 깜빡인다.
-    clearDeferredFocusedRender();
-    // 에코가 오기 전에도 고친 글이 보이게 한다. 서버가 SSOT 다 - 에코가 곧 덮는다(받은 객체는 건드리지 않는다).
-    lastState = {...lastState, characters: (lastState.characters || []).map(item =>
-      (String(item.slot_uuid || '') === uuid ? {...item, ...next} : item))};
-    closeEdit();
+    // ⚠️ 여기서 닫지 않는다 - 고친 글이 든 상태가 오면 `render` 가 닫는다(`editConfirmedBy`). 한참 안 오면
+    //    칸을 다시 풀고 알린다. 늦게라도 오면 그때 닫힌다(보낸 값은 쥐고 있다).
+    editError = '';
+    editPending = next;
+    editBusy = true;
+    clearTimeout(editConfirmTimer);
+    editConfirmTimer = setTimeout(() => {
+      if (editPending !== next || !editBusy) return;
+      editBusy = false;
+      editError = '저장을 확인하지 못했습니다. 다시 눌러 주세요 - 계속 안 되면 앱을 다시 시작하세요.';
+      // 그사이 다른 모듈을 열었으면 팝업 본문은 남의 것이다 - 그리지 않는다(돌아오면 이 상태로 그려진다).
+      if (moduleBody.querySelector('.mod-character-shell')) scheduleRerender();
+    }, EDIT_CONFIRM_MS);
     scheduleRerender();
     return true;
   }
@@ -1358,19 +1382,22 @@ export function createCharacterPanel({
    */
   function renderEditForm(uuid) {
     const draft = editDraft || {name: '', prompt: '', uc: ''};
+    // 보내고 확인을 기다리는 동안은 잠근다 - 그사이 더 친 글은 확인이 오면서 칸과 함께 사라진다.
+    const lock = editBusy ? ' readonly' : '';
+    const off = editBusy ? ' disabled' : '';
     return `
       <div class="cw-li-body is-editing" data-cw-editing="${escAttr(uuid)}">
-        <input class="cw-edit-name" type="text" maxlength="80" spellcheck="false" autocomplete="off"
+        <input class="cw-edit-name" type="text" maxlength="80" spellcheck="false" autocomplete="off"${lock}
           data-cw-edit-field="name" value="${escAttr(draft.name)}"
           placeholder="이름 (비우면 프롬프트로 보입니다)">
-        <textarea class="cw-input" data-cw-edit-field="prompt" data-cw-min="prompt"
+        <textarea class="cw-input" data-cw-edit-field="prompt" data-cw-min="prompt"${lock}
           rows="2" placeholder="캐릭터 프롬프트">${escHtml(draft.prompt)}</textarea>
-        <textarea class="cw-input is-uc" data-cw-edit-field="uc" data-cw-min="uc"
+        <textarea class="cw-input is-uc" data-cw-edit-field="uc" data-cw-min="uc"${lock}
           rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(draft.uc)}</textarea>
         ${editError ? `<div class="cw-li-error">${escHtml(editError)}</div>` : ''}
         <div class="cw-li-actions">
-          <button type="button" class="cw-li-act is-save" data-cw-edit-save="1">저장</button>
-          <button type="button" class="cw-li-act" data-cw-edit-cancel="1">취소</button>
+          <button type="button" class="cw-li-act is-save" data-cw-edit-save="1"${off}>${editBusy ? '저장 중…' : '저장'}</button>
+          <button type="button" class="cw-li-act" data-cw-edit-cancel="1"${off}>취소</button>
         </div>
       </div>`;
   }
@@ -1737,6 +1764,8 @@ export function createCharacterPanel({
       closeEdit();
       showToastSafe('편집하던 캐릭터가 보관함에서 빠져 편집을 닫았습니다.');
     }
+    // 보낸 글이 서버 상태에 그대로 있다 - 저장됐다. 이제야 칸을 닫는다(모든 상태가 이 함수를 지나간다).
+    if (editingUuid && editConfirmedBy(nextState)) closeEdit();
     const structureSignature = characterStructureSignature(nextState);
     const focusedTextarea = focusedCharacterTextarea();
     if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
@@ -1837,6 +1866,9 @@ export function createCharacterPanel({
         //    초안은 여기서만 채운다(자동완성도 input 이벤트를 낸다) - 저장도 다시 그리기도 이것을 읽는다.
         const key = editField.dataset.cwEditField;
         if (editDraft && Object.prototype.hasOwnProperty.call(editDraft, key)) editDraft[key] = editField.value;
+        // 앞서 보낸 것의 확인은 더 기다리지 않는다 - 늦게 온 확인이 칸을 닫으면 지금 치는 글이 함께 사라진다.
+        // (기다리는 동안은 칸이 잠겨 있어 여기 오지 않는다 - 그때 지우면 잠금을 풀 타이머가 길을 잃는다.)
+        if (!editBusy) editPending = null;
         if (editField.tagName === 'TEXTAREA') autoGrow(editField);
         if (editError) {
           // 다시 치기 시작했다 - 안내를 걷는다. 다시 그리면 캐럿을 잃으므로 그 줄만 뗀다(서명은 맞춰 둔다).

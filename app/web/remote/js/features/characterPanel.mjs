@@ -1329,8 +1329,13 @@ export function createCharacterPanel({
       item => String(item.slot_uuid || '') === uuid && slotState(item) !== 'active') || null;
   }
 
+  /**
+   * 칸의 글이 그 캐릭터의 지금 글과 다른가.
+   * ⚠️ **가장 새 상태**와 견준다(Codex 3차 리뷰). 화면의 상태로 보면, 누르는 동안 다른 창이 그 캐릭터를 고쳤을 때
+   *    '바뀐 것이 없다' 며 보내지 않고 칸을 닫는다 - 저장을 눌렀는데 칸의 글이 버려지고 남의 글이 남는다.
+   */
   function editIsDirty() {
-    const character = storedCharacter(editingUuid);
+    const character = storedCharacter(editingUuid, newestState());
     const draft = editDraft;
     if (!character || !draft) return false;
     return draft.name.trim() !== String(character.custom_name || '').trim()
@@ -1374,6 +1379,17 @@ export function createCharacterPanel({
     if (!saved || !sameText(saved, editPending)) return;
     if (sameText(draftValues(), editPending)) closeEdit();
     else stopWaiting();
+  }
+
+  /** 편집 칸에서 치던 중이면 그 자리(칸 · 캐럿). 칸을 갈아 끼우기 **전에** 적어 두고 뒤에 `restoreEditFocus` 로 되돌린다. */
+  function editFocus() {
+    const active = editingUuid ? document.activeElement : null;
+    const key = active && active.dataset ? String(active.dataset.cwEditField || '') : '';
+    return key ? {key, range: {start: active.selectionStart, end: active.selectionEnd}} : null;
+  }
+
+  function restoreEditFocus(saved) {
+    if (saved) focusEditField(saved.key, saved.range);
   }
 
   function focusEditField(key, range = null) {
@@ -1428,9 +1444,10 @@ export function createCharacterPanel({
   function saveEdit() {
     if (editBusy) return false;                 // 이미 보냈다 - 확인을 기다리는 중이다
     const uuid = editingUuid;
-    const character = storedCharacter(uuid);
     const draft = editDraft;
-    if (!character || !draft) { closeEdit(); scheduleRerender(); return false; }
+    // 가장 새 상태에 이 캐릭터가 보관함에 없으면(누르는 동안 다른 창이 슬롯으로 올렸다) 보내지 않는다. 그 상태가 곧
+    // 그려지며 칸이 닫히고 까닭이 뜬다(`draw`) - 여기서 닫으면 치던 글이 말없이 사라진다.
+    if (!draft || !storedCharacter(uuid, newestState())) return false;
     const next = draftValues();
     // ⚠️ 이름도 프롬프트도 없는 캐릭터는 목록에서 `(비어 있음)` 이고, 네거티브까지 비면 서버가 그 줄을
     //    '빈 히스토리' 로 걷어 간다 - [저장] 이 곧 삭제가 된다(서버도 그것은 거절한다).
@@ -1917,9 +1934,7 @@ export function createCharacterPanel({
     const listBefore = renderedTab === tab ? moduleBody.querySelector('.cw-list') : null;
     const keepList = listBefore ? listBefore.scrollTop : 0;
     // 편집 칸에서 치던 중이면(구조가 바뀐 에코) 초점 · 캐럿을 새 칸으로 옮긴다(친 글은 초안에서 다시 그려진다).
-    const typing = editingUuid ? document.activeElement : null;
-    const typingKey = typing && typing.dataset ? String(typing.dataset.cwEditField || '') : '';
-    const typingRange = typingKey ? {start: typing.selectionStart, end: typing.selectionEnd} : null;
+    const typing = editFocus();
 
     const chars = nextState.characters || [];
     const indexed = chars.map((character, index) => ({character, index}));
@@ -1952,7 +1967,7 @@ export function createCharacterPanel({
       if (listAfter) listAfter.scrollTop = keepList;
     }
     renderedTab = tab;
-    if (typingKey && editingUuid) focusEditField(typingKey, typingRange);
+    restoreEditFocus(typing);
     lastRenderedStructureSignature = structureSignature;
     lastRenderedWorkSignature = workSig;
     lastRenderedContentSignature = contentSig;
@@ -2463,6 +2478,9 @@ export function createCharacterPanel({
     //    항목 하나를 눌렀는데 맨 위로 튀었다(사용자 제보 2026-09-02).
     //    내용이 줄어들면 브라우저가 알아서 clamp 하므로 그대로 되돌려 주면 된다.
     const keep = list.scrollTop;
+    // ⚠️ 이 길은 편집 칸까지 새로 만든다 - 치던 칸의 초점 · 캐럿을 적어 두었다가 되돌린다(Codex 3차 리뷰: 다른 탭의
+    //    요청이 늦게 끝나며 지금 탭의 목록을 갈 때 · 누르는 동안 미뤄 둔 목록 갈기가 돌 때 입력이 끊겼다).
+    const typing = editFocus();
     list.innerHTML = nextList.innerHTML;
     // 편집 칸이 새로 생겼으면 높이를 맞추고 자동완성을 건다(통째로 그릴 때와 같은 일). 높이가 정해진 **뒤에**
     // 스크롤을 되돌린다.
@@ -2471,6 +2489,7 @@ export function createCharacterPanel({
       if (!element.classList.contains('is-uc')) bindTagAssist(element);
     });
     if (keep) list.scrollTop = keep;
+    restoreEditFocus(typing);
     // ⚠️ 부분 갱신도 **서명을 갱신해야** 한다. 안 그러면 화면은 새것인데 기록은
     //    옛것이라, 다음 에코가 "작업 영역이 바뀌었다" 고 보고 전부 다시 그린다
     //    (실측: 검색어를 한 글자 친 뒤 슬롯을 음소거하면 오른쪽이 통째로 새로 만들어졌다).

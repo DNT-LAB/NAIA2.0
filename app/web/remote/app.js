@@ -311,6 +311,9 @@ function initNaiaTitleTooltips() {
         // aria-label 은 그 title 에서 베껴 온 것일 때만 거둔다 - 원래 있던 것은 남긴다.
         if (element.getAttribute('aria-label') === adopted) element.removeAttribute('aria-label');
       }
+      // 그 설명이 지금 떠 있으면 같이 닫는다 - 안 그러면 지운 설명이 마우스를 뗄 때까지 남는다
+      // (E621 검색칸: 자동완성 목록이 뜨면 칸의 도움말을 뗀다 - 툴팁이 목록의 첫 줄들을 가렸다).
+      if (owner === element) hideTooltip();
       return;
     }
     element.dataset.naiaTitle = title;
@@ -2704,7 +2707,7 @@ const e621WindowReady = e621UsesWindow
     })
   : Promise.resolve();
 // 패널은 창이 만들어진 뒤에 만든다 - 작게 보기에서 설명이 나가는 옆 창(e621Window.detail)을 받아야 한다.
-const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mjs?v=20261005-e621fix'), e621WindowReady])
+const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mjs?v=20261005-e621suggest2'), e621WindowReady])
   .then(([{createE621EventPanel}]) => {
     e621EventPanel = createE621EventPanel({
       document,
@@ -2712,6 +2715,10 @@ const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mj
       setModuleParam,
       showToast,
       bindTagAssist,
+      // 검색칸의 자동완성은 E621 사전에서만 찾는다 - 답은 autocomplete_result(source: 'e621')로 온다.
+      requestSuggest: (query, requestId, limit) => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'autocomplete', query, source: 'e621', requestId, limit}));
+      },
       moduleBody: e621UsesWindow ? e621Host : null,
       floatDetail: e621Window ? e621Window.detail : null,
     });
@@ -4737,7 +4744,8 @@ const wsMessageHandlers = {
   // 사전 카드(tagAssist)와 Interactive 칩 툴팁이 같은 응답을 나눠 쓴다.
   // pending = 태그 사전을 아직 읽는 중이라는 답(첫 기동) - 카드는 tagAssist 가 다시 묻는다, 다른 소비자에겐 안 준다.
   tag_lookup_result: m => { onTagLookupResult(m); if (!m.pending) interactivePanel?.onTagInfo?.(m); },
-  autocomplete_result: onAutocompleteResult,
+  // source: 'e621' = E621 연구모듈의 검색칸이 청한 답 - 메인 자동완성 창과 섞지 않는다.
+  autocomplete_result: m => (m && m.source === 'e621' ? (e621EventPanel && e621EventPanel.onSuggest(m)) : onAutocompleteResult(m)),
   translation_result: onTranslationResult,
   tag_filter_result: onTagFilterResult,
   tag_filter_assigned: onTagFilterAssigned,
@@ -14260,7 +14268,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261005-e621ac')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261001-slashpop2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

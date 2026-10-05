@@ -153,10 +153,10 @@ class E621EventService:
         }
 
     def autocomplete(self, query: str, limit: int = 12) -> list[dict[str, Any]]:
-        """E621 사전에서만 찾는 자동완성(연구모듈의 보낼 프롬프트 - 사용자 지정 2026-10-05).
+        """E621 사전에서만 찾는 자동완성 - 연구모듈의 **검색칸**이 쓴다(사용자 지정 2026-10-05).
 
-        메인 자동완성(autocomplete_result)과 같은 줄 모양이다 - 화면의 tagAssist 가 그대로 그린다.
-        tag = 프롬프트에 들어갈 글 · group = 한국어 이름 · count = E621 게시물 수.
+        보낼 프롬프트의 자동완성은 공용 사전(메인 프롬프트와 같은 것)이다 - 거기에는 Danbooru 태그도 붙인다.
+        줄 모양은 공용 자동완성(autocomplete_result)과 같다: tag = 사람이 읽는 이름 · group = 한국어 이름 · count = E621 게시물 수.
         """
         if not self._ensure_loaded():
             return []

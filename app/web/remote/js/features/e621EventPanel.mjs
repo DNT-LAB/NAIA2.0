@@ -25,8 +25,11 @@ export function createE621EventPanel({
   escHtml,
   setModuleParam,
   showToast,
-  // 태그 자동완성(app.js 의 bindTagAssist - 메인 프롬프트와 같은 창). 보낼 프롬프트의 글상자에 묶되, E621 사전에서만 찾게 한다.
+  // 메인 프롬프트와 같은 태그 자동완성(app.js 의 bindTagAssist). 보낼 프롬프트의 글상자에 묶는다 - 공용 사전이다
+  // (거기에는 Danbooru 태그도 붙인다 - 사용자 지정 2026-10-05).
   bindTagAssist = null,
+  // 검색칸의 자동완성 후보를 청한다: (글, 요청 번호, 줄 수) → 답은 onSuggest 로 온다. E621 사전에서만 찾는다.
+  requestSuggest = null,
   // 그릴 자리. 메인 화면은 떠 있는 창(e621Window)의 본문을 넘긴다. 없으면 예전처럼 모듈 팝업 본문
   // (별도 브라우저 창으로 떼어 낸 모듈은 그 창 전체가 모듈 팝업이다).
   moduleBody: host = null,
@@ -158,11 +161,12 @@ export function createE621EventPanel({
     // ⚠️ 검색어 · 검색 중 강조(is-active)는 여기 넣지 않는다 - 치는 글은 syncInputs 가, 올린 검색어(칩)는 terms 영역이 맡는다.
     return `<div class="e6-search">`
       + `<input class="mod-input" id="e621SearchInput" type="text" placeholder="태그 · 한국어 검색" autocomplete="off" spellcheck="false"`
-      + ` title="Enter 나 쉼표로 검색어를 올립니다 - 여러 개를 올리면 모두 맞는 태그만 나옵니다(예: cum, face)">`
+      + ` title="${esc(SEARCH_HINT)}">`
       // [위키 본문도 검색] 은 설정이 아니라 검색 줄에 둔다(사용자 지정 2026-10-05). 서버 키는 부정형이라 값을 뒤집어 보낸다.
       + (state.wiki_search_control_visible === false ? '' : `<label class="e6-search-wiki" title="태그 이름 · 한국어뿐 아니라 저장된 위키 본문에서도 찾습니다">`
         + `<input type="checkbox" data-e621-setting="disable_wiki_search"><span class="long">위키 본문도 검색</span><span class="short">본문</span></label>`)
-      + `<button class="e6-search-x" data-e621-act="cancel-search" title="검색 취소(검색어를 모두 뺍니다)" aria-label="검색 취소">×</button></div>`
+      + `<button class="e6-search-x" data-e621-act="cancel-search" title="검색 취소(검색어를 모두 뺍니다)" aria-label="검색 취소">×</button>`
+      + `<div class="e6-suggest" data-e621-suggest hidden></div></div>`
       + `<div class="e6-seg" role="group" aria-label="보기">`
       + `<button class="${starred ? '' : 'on'}" data-e621-act="view" data-value="default">기본</button>`
       + `<button class="${starred ? 'on' : ''}" data-e621-act="view" data-value="starred" title="즐겨찾기한 태그만 봅니다">★ ${fmt(state.starred_total)}</button></div>`
@@ -196,6 +200,119 @@ export function createE621EventPanel({
       ? `<span class="e6-translated" title="${esc(`한국어 검색어를 영어로 번역해 한 번 더 찾았습니다 · 보탠 태그 ${fmt(translation.added)}개`)}">`
         + `<span class="e6-dim">번역</span> ${esc(translation.translated)}</span>` : '';
     return chips + translated;
+  }
+
+  // ── 검색칸의 자동완성 ──────────────────────────────────────────────────────
+  // E621 사전에서만 찾는 후보를 검색칸 아래에 길게 보인다(사용자 지정 2026-10-05: "기존보다 훨씬 긴 autocomplete 영역 -
+  // 어차피 e621 만 검색되니까"). 고르면 그 태그가 칩으로 올라간다. 메인 프롬프트의 자동완성 창과는 따로다.
+  //   ↑↓ = 줄 옮기기 · Enter = 고른 줄(없으면 친 글 그대로) · Tab = 고른 줄(없으면 첫 줄) · Esc = 목록 닫기
+  const SUGGEST_ROWS = 40;
+  const SUGGEST_MS = 120;
+  const SEARCH_HINT = 'Enter 나 쉼표로 검색어를 올립니다 - 여러 개를 올리면 모두 맞는 태그만 나옵니다(예: cum, face)';
+  const suggest = {query: '', seq: 0, rows: [], index: -1, timer: null};
+  const compactCount = value => {
+    const count = Number(value) || 0;
+    return count >= 1e6 ? `${(count / 1e6).toFixed(1)}M` : count >= 1e3 ? `${(count / 1e3).toFixed(1)}K` : String(count);
+  };
+
+  function suggestBox() {
+    return canQuery() ? moduleBody.querySelector('[data-e621-suggest]') : null;
+  }
+
+  // 검색칸의 툴팁(칸의 도움말 · 상자의 '검색 중')은 칸 바로 아래에 뜬다 - 자동완성 목록이 뜨는 자리다. 목록이 떠 있는 동안에는
+  // 떼어 두고(빈 title = 툴팁을 지운다), 닫히면 돌려놓는다. 값이 바뀔 때만 쓴다(쓸 때마다 앱이 title 을 거둬 간다).
+  function syncSearchTips(state = lastState) {
+    const input = document.getElementById('e621SearchInput');
+    if (!input) return;
+    const open = suggest.rows.length > 0;
+    const setTip = (node, text) => {
+      if (node.e6Tip === text) return;
+      node.e6Tip = text;
+      node.title = text;
+    };
+    setTip(input, open ? '' : SEARCH_HINT);
+    const box = typeof input.closest === 'function' ? input.closest('.e6-search') : null;
+    // 검색이 걸려 있는 동안에는 상자에 무엇을 찾는 중인지 적는다.
+    if (box) setTip(box, !open && state?.search_text ? `검색 중: ${state.search_text} - × 로 취소` : '');
+  }
+
+  function paintSuggest() {
+    const box = suggestBox();
+    if (!box) return;
+    syncSearchTips();
+    if (!suggest.rows.length) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = suggest.rows.map((row, index) => `<div class="e6-suggest-row${index === suggest.index ? ' on' : ''}" data-e621-act="suggest-pick"`
+      + ` data-value="${esc(row.tag)}"><span class="e6-tag-en">${esc(row.tag)}</span><span class="e6-suggest-ko">${esc(row.group || '')}</span>`
+      + `<span class="e6-tag-num">${esc(compactCount(row.count))}</span></div>`).join('');
+    box.hidden = false;
+    // 창 아래로 넘치지 않게 높이를 잡는다(창 본문이 넘친 것을 잘라 낸다).
+    const panel = typeof box.closest === 'function' ? box.closest('.e6-panel') : null;
+    if (panel && typeof box.getBoundingClientRect === 'function') {
+      const room = panel.getBoundingClientRect().bottom - box.getBoundingClientRect().top - 8;
+      box.style.maxHeight = `${Math.max(140, Math.min(640, Math.round(room)))}px`;
+    }
+    const active = suggest.index >= 0 && typeof box.querySelector === 'function' ? box.querySelector('.e6-suggest-row.on') : null;
+    if (active && typeof active.scrollIntoView === 'function') active.scrollIntoView({block: 'nearest'});
+  }
+
+  function closeSuggest() {
+    if (suggest.timer) clearTimeout(suggest.timer);
+    suggest.timer = null;
+    suggest.query = '';               // 오고 있는 답은 버린다(onSuggest 가 청한 글과 대조한다)
+    if (!suggest.rows.length && suggest.index === -1) return;
+    suggest.rows = [];
+    suggest.index = -1;
+    paintSuggest();
+  }
+
+  // 후보를 찾을 글 = 검색칸에서 치고 있는 조각(한글을 조합하는 중이라 아직 올리지 않은 쉼표가 있으면 그 뒤).
+  const suggestQueryOf = text => String(text || '').split(',').pop().trim();
+
+  // 검색칸의 글로 후보를 청한다(치다 멈추면).
+  function askSuggest(text) {
+    const query = suggestQueryOf(text);
+    if (!requestSuggest || !query) {
+      closeSuggest();
+      return;
+    }
+    if (suggest.timer) clearTimeout(suggest.timer);
+    suggest.timer = setTimeout(() => {
+      suggest.timer = null;
+      suggest.seq += 1;
+      suggest.query = query;
+      requestSuggest(query, `e6s-${suggest.seq}`, SUGGEST_ROWS);
+    }, SUGGEST_MS);
+  }
+
+  // 후보가 왔다. 늦게 온 옛 답 · 그사이 칸이 바뀐 답은 버린다.
+  function onSuggest(message) {
+    if (!message || String(message.requestId || '') !== `e6s-${suggest.seq}` || message.query !== suggest.query) return;
+    const input = document.getElementById('e621SearchInput');
+    if (!input || suggestQueryOf(input.value) !== suggest.query) return;
+    suggest.rows = (Array.isArray(message.results) ? message.results : []).slice(0, SUGGEST_ROWS);
+    suggest.index = -1;
+    paintSuggest();
+  }
+
+  function moveSuggest(step) {
+    const count = suggest.rows.length;
+    if (!count) return;
+    // -1(아무 줄도 아님) ↔ 0 ... 끝. 끝에서 더 내려가면 다시 '아무 줄도 아님'.
+    suggest.index = ((suggest.index + 1 + step + count + 1) % (count + 1)) - 1;
+    paintSuggest();
+  }
+
+  // 후보를 골랐다 - 그 태그를 칩으로 올린다.
+  function pickSuggest(tag) {
+    const input = document.getElementById('e621SearchInput');
+    if (input) input.value = '';
+    ui.searchDraft = null;
+    closeSuggest();
+    if (tag) applyTerms(termsOf([...shownTerms(lastState), tag].join(',')));
   }
 
   function catsHtml(state) {
@@ -664,11 +781,11 @@ export function createE621EventPanel({
     const bench = state.bench;
     const input = document.getElementById('e621BenchInput');
     if (!input) return;
-    // 태그 자동완성 - E621 사전에서만 찾는다(사용자 지정 2026-10-05: 공용 사전은 Danbooru 태그가 먼저 나온다).
+    // 메인 프롬프트와 같은 태그 자동완성(공용 사전 - 여기에는 Danbooru 태그도 붙인다. E621 전용 자동완성은 검색칸에 있다).
     // 글상자가 새로 생겼을 때 한 번만 묶는다(고른 것은 input 이벤트로 온다).
     if (bindTagAssist && !input.e6Assist) {
       input.e6Assist = true;
-      bindTagAssist(input, {e621Only: true});
+      bindTagAssist(input);
     }
     if (ui.benchDraft && ui.benchDraft.base !== bench.prompt) ui.benchDraft = null;
     if (ui.weightDraft !== null && ui.weightDraft === bench.weight) ui.weightDraft = null;
@@ -796,10 +913,15 @@ export function createE621EventPanel({
     if (box) {
       const active = Boolean(state.search_text);
       box.classList.toggle('is-active', active);
-      box.title = active ? `검색 중: ${state.search_text} - × 로 취소` : '';
+      syncSearchTips(state);
       // [위키 본문도 검색] 의 체크는 여기서 맞춘다(툴바 HTML 에 넣으면 누를 때마다 검색칸이 갈린다).
       const wiki = typeof box.querySelector === 'function' ? box.querySelector('[data-e621-setting="disable_wiki_search"]') : null;
       if (wiki) wiki.checked = !state.disable_wiki_search;
+    }
+    // 툴바가 다시 쓰였으면(필터 · 보기를 바꿨다) 자동완성 목록이 빈 새 자리로 바뀌어 있다 - 떠 있던 것을 다시 그린다.
+    if (suggest.rows.length) {
+      const list = suggestBox();
+      if (list && list.hidden) paintSuggest();
     }
   }
 
@@ -948,6 +1070,7 @@ export function createE621EventPanel({
     const added = termsOf(parts.join(','));
     input.value = tail;
     ui.searchDraft = tail || null;
+    if (!tail) closeSuggest();
     if (added.length) applyTerms(termsOf([...shownTerms(lastState), ...added].join(',')));
   }
 
@@ -958,6 +1081,7 @@ export function createE621EventPanel({
   // 검색만 푼다(검색어를 모두 뺀다) - 고른 분류 · 보기 · 필터는 그대로다.
   function cancelSearch() {
     ui.searchDraft = null;
+    closeSuggest();
     const input = document.getElementById('e621SearchInput');
     if (input) input.value = '';
     // 칩은 서버 응답을 기다리지 않고 바로 걷는다(서버가 검색을 푼 상태를 주면 그때 놓는다).
@@ -998,6 +1122,8 @@ export function createE621EventPanel({
         ui.pop = '';
         repaint();
       }
+      // 검색 줄 밖을 누르면 자동완성 목록을 닫는다.
+      if (suggest.rows.length && !event.target?.closest?.('.e6-search')) closeSuggest();
       const target = event.target?.closest?.('[data-e621-act]');
       if (!target || !root.contains(target) || target.disabled) return;
       const {tag = '', value = ''} = target.dataset;
@@ -1015,6 +1141,7 @@ export function createE621EventPanel({
         case 'view': send('view_mode', value); break;
         case 'cancel-search': cancelSearch(); break;
         case 'term-remove': removeTerm(value); break;
+        case 'suggest-pick': pickSuggest(value); break;
         case 'star': withSelected('toggle_star'); break;
         case 'hide': withSelected('hide'); break;
         case 'restore':
@@ -1058,6 +1185,8 @@ export function createE621EventPanel({
         ui.searchDraft = input.value || null;
         // 쉼표를 치면 그 앞까지를 칩으로 올려 바로 찾는다. 한글을 조합하는 중에는 건드리지 않는다.
         if (!event.isComposing && String(input.value).includes(',')) commitSearch({keepTail: true});
+        // 남아 있는 글로 E621 태그 후보를 청한다.
+        askSuggest(input.value);
       } else if (input?.id === 'e621BenchInput') draftBench(input.value);
       else if (input?.dataset?.e621Bench === 'weight') {
         // 끄는 동안에는 숫자만 따라간다.
@@ -1071,9 +1200,23 @@ export function createE621EventPanel({
       const target = event.target;
       if (!target?.closest?.('.e6-panel')) return;
       if (target.id === 'e621SearchInput') {
-        if (event.key === 'Enter' && !event.isComposing) {
+        const open = suggest.rows.length > 0;
+        if (open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
           event.preventDefault();
-          commitSearch();
+          moveSuggest(event.key === 'ArrowDown' ? 1 : -1);
+        } else if (open && event.key === 'Tab' && !event.shiftKey) {
+          // Tab = 고른 줄, 없으면 첫 줄.
+          event.preventDefault();
+          pickSuggest(suggest.rows[Math.max(0, suggest.index)].tag);
+        } else if (event.key === 'Enter' && !event.isComposing) {
+          event.preventDefault();
+          // 줄을 골라 두었으면 그 태그를, 아니면 친 글 그대로 올린다.
+          if (open && suggest.index >= 0) pickSuggest(suggest.rows[suggest.index].tag);
+          else commitSearch();
+        } else if (event.key === 'Escape' && open) {
+          // 목록이 떠 있으면 Esc 는 목록만 닫는다(검색은 그대로).
+          event.preventDefault();
+          closeSuggest();
         } else if (event.key === 'Escape' && (lastState?.search_text || target.value)) {
           // 검색칸에서 Esc = 검색 취소.
           event.preventDefault();
@@ -1118,6 +1261,15 @@ export function createE621EventPanel({
       send('selected_tag', next.dataset.tag);
     });
 
+    // 자동완성 줄을 눌러도 검색칸의 초점은 그대로 둔다(안 그러면 누르는 순간 초점이 나가 목록이 닫힌다).
+    moduleBody.addEventListener('mousedown', event => {
+      if (event.target?.closest?.('.e6-suggest')) event.preventDefault();
+    });
+    // 검색칸을 떠나면 목록을 닫는다. focusout 은 위로 올라온다.
+    moduleBody.addEventListener('focusout', event => {
+      if (event.target?.id === 'e621SearchInput') closeSuggest();
+    });
+
     // 태그 목록의 끝에 닿으면 옆 쪽을 청한다. scroll 은 위로 올라오지 않아 capture 로 받는다.
     moduleBody.addEventListener('scroll', event => {
       const list = event.target;
@@ -1142,8 +1294,9 @@ export function createE621EventPanel({
     }
   }
 
-  // 밖에서 부르는 것: 상태를 넘기는 render 와, 창 머리줄의 [작게 보기] 가 부르는 setCompact. 조작은 전부 위의 위임 클릭이 받는다.
-  return {render, setCompact};
+  // 밖에서 부르는 것: 상태를 넘기는 render, 창 머리줄의 [작게 보기] 가 부르는 setCompact, 검색칸 자동완성의 답을 받는 onSuggest.
+  // 조작은 전부 위의 위임 클릭이 받는다.
+  return {render, setCompact, onSuggest};
 }
 
 const ICON_HIDE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -1206,6 +1359,16 @@ const PANEL_CSS = `
 .e6-search-wiki:hover{background:var(--bg-hover);color:var(--text-primary)}
 .e6-search-wiki input{margin:0;accent-color:var(--accent)}
 .e6-search-wiki .short{display:none}
+/* 검색칸의 자동완성 - E621 사전만 찾으니 길게 보인다(높이는 창에 맞춰 스크립트가 잡는다). */
+.e6-suggest{position:absolute;top:calc(100% + 4px);left:0;z-index:2;width:max(100%,320px);max-width:calc(100cqw - 2px);max-height:640px;
+  overflow:auto;padding:2px;box-sizing:border-box;border:1px solid var(--border-dim);border-radius:6px;background:var(--bg-surface);
+  box-shadow:0 10px 28px rgba(0,0,0,0.55)}
+.e6-suggest[hidden]{display:none}
+.e6-suggest-row{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 56px;align-items:center;gap:8px;height:24px;padding:0 8px;
+  border-radius:3px;color:var(--text-muted);font-size:11px;cursor:pointer}
+.e6-suggest-row:hover{background:var(--bg-hover)}
+.e6-suggest-row.on{background:rgba(124,106,239,0.26);color:var(--text-primary)}
+.e6-suggest-ko{min-width:0;overflow:hidden;color:var(--text-primary);text-overflow:ellipsis;white-space:nowrap}
 .e6-search-x{position:absolute;top:2px;right:2px;width:22px;height:22px;border:0;border-radius:3px;background:transparent;
   color:var(--text-dim);font-size:14px;line-height:1;cursor:pointer}
 .e6-search-x:hover{background:var(--bg-hover);color:var(--text-primary)}

@@ -952,10 +952,16 @@ async def handle_autocomplete_command(
 
     query = str(command.get("query") or "")
     if command_type == "autocomplete" and str(command.get("source") or "") == "e621":
-        # E621 연구모듈의 글상자 - E621 사전에서만 찾는다(사용자 지정 2026-10-05). 공용 태그 색인을 쓰지 않으므로
-        # 그 색인이 아직 만들어지는 중이어도 기다리지 않는다. 답의 모양은 공용 자동완성과 같다.
-        results = await run_in_thread(context._e621_event_service().autocomplete, query, 12)
-        await _send_json(ws, {"type": "autocomplete_result", "query": query, "results": results})
+        # E621 연구모듈의 검색칸 - E621 사전에서만 찾는다(사용자 지정 2026-10-05). 공용 태그 색인을 쓰지 않으므로
+        # 그 색인이 아직 만들어지는 중이어도 기다리지 않는다. 한 사전만 찾으니 후보를 넉넉히 준다(화면이 긴 목록으로 보인다).
+        # 답에 source 를 실어, 화면이 메인 자동완성의 답과 섞지 않게 한다.
+        try:
+            limit = max(1, min(int(command.get("limit") or 12), 60))
+        except (TypeError, ValueError):
+            limit = 12
+        results = await run_in_thread(context._e621_event_service().autocomplete, query, limit)
+        await _send_json(ws, {"type": "autocomplete_result", "query": query, "results": results, "source": "e621",
+                              "requestId": str(command.get("requestId") or "")})
         return True
     pending = _pending_reply(context, command_type, command, query)
     if pending is not None:

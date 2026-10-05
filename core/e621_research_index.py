@@ -233,23 +233,27 @@ class E621ResearchIndex:
         return merged
 
     def suggest(self, query: str, limit: int = 12, hidden=frozenset()) -> list[dict]:
-        """자동완성 후보: 이름이 그 글로 시작하는 태그 → 이름에 그 글이 든 태그 → 한국어 이름 · 검색어가 맞는 태그.
-        갈래마다 게시물 많은 순. E621 사전에서만 찾는다."""
+        """자동완성 후보: 이름이 그 글로 시작하는 태그 → 이름에 그 글이 든 태그 → 낱말이 순서와 상관없이 모두 든 태그
+        → 한국어 이름 · 검색어가 맞는 태그. 갈래마다 게시물 많은 순. E621 사전에서만 찾는다."""
         needle = search_key(query)
         if not needle or limit <= 0:
             return []
         if self._name_keys is None:
             self._name_keys = [(search_key(row["tag"]), row) for row in sorted(self.by_tag.values(), key=self.sort_key)]
-        starts, inside = [], []
+        words = needle.split() if " " in needle else None
+        starts, inside, loose = [], [], []
         for name, row in self._name_keys:
             if name.startswith(needle):
                 if row["tag"] not in hidden:
                     starts.append(row)
                     if len(starts) >= limit:
                         break
-            elif len(inside) < limit and needle in name and row["tag"] not in hidden:
-                inside.append(row)
-        found = (starts + inside)[:limit]
+            elif needle in name:
+                if len(inside) < limit and row["tag"] not in hidden:
+                    inside.append(row)
+            elif words and len(loose) < limit and all(word in name for word in words) and row["tag"] not in hidden:
+                loose.append(row)       # 'penis small' → small penis
+        found = (starts + inside + loose)[:limit]
         if len(found) < limit and HANGUL.search(needle):
             compact = needle.replace(" ", "")
             seen = {row["tag"] for row in found}

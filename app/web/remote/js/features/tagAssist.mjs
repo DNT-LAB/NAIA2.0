@@ -1944,7 +1944,7 @@ export function createTagAssistController({
     acPendingTimer = window.setTimeout(() => {
       acPendingTimer = null;
       if (lastAcQuery !== query) return;        // 그 사이 다른 것을 쳤거나 닫았다 - 새 질의가 알아서 묻는다
-      sendWs({type: 'autocomplete', query, ...autocompleteSource(acTarget)});
+      sendWs({type: 'autocomplete', query});
     }, AC_PENDING_RETRY_MS);
   }
 
@@ -1960,16 +1960,8 @@ export function createTagAssistController({
     }, AC_PENDING_RETRY_MS);
   }
 
-  // 이 글상자의 자동완성이 찾는 사전. E621 연구모듈의 글상자는 E621 사전에서만 찾는다(bindTagAssist 의 e621Only) -
-  // 서버가 같은 모양(autocomplete_result)으로 답하므로 그리는 쪽은 그대로다.
-  function autocompleteSource(target) {
-    return target && target._e621OnlyAutocomplete ? {source: 'e621'} : {};
-  }
-
-  function scheduleAutocompleteTranslation(query, allowTriggers, target = null) {
+  function scheduleAutocompleteTranslation(query, allowTriggers) {
     clearAutocompleteTranslationTimer();
-    // E621 사전은 한국어 이름 · 검색어로 곧바로 찾는다 - 번역해 공용 사전에서 한 번 더 찾으면 다른 사전의 태그가 섞인다.
-    if (target && target._e621OnlyAutocomplete) return;
     if (!query || !hangulRe.test(query) || isAutocompleteControlQuery(query, allowTriggers)) return;
     if (lastTranslationRequestQuery === query) return;
     acTranslationTimer = window.setTimeout(() => {
@@ -2086,7 +2078,7 @@ export function createTagAssistController({
     if (query === lastAcQuery && !options.force) return;
     if (query !== lastAcQuery) visibleTranslatedAutocompleteQuery = '';
     lastAcQuery = query;
-    scheduleAutocompleteTranslation(query, allowTriggers, target);
+    scheduleAutocompleteTranslation(query, allowTriggers);
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
     acTimer = window.setTimeout(() => {
@@ -2107,7 +2099,7 @@ export function createTagAssistController({
       } else if (allowTriggers && s.toLowerCase().startsWith('preset:')) {
         requestPresetAutocomplete(s);
       } else {
-        sendWs({type: 'autocomplete', query: s, ...autocompleteSource(target)});
+        sendWs({type: 'autocomplete', query: s});
       }
     }, 150);
   }
@@ -3729,8 +3721,6 @@ export function createTagAssistController({
   function bindTagAssist(textarea, options = {}) {
     if (!textarea) return;
     textarea._excludeE621Autocomplete = !!options.excludeE621;
-    // E621 사전에서만 찾는 자동완성(E621 연구모듈의 보낼 프롬프트 - 사용자 지정 2026-10-05).
-    textarea._e621OnlyAutocomplete = !!options.e621Only;
     // 자동완성·태그 정보를 떠 있는 팝업 대신 이 요소 안에 그린다(syncTooltipHost).
     textarea._tagAssistInlineHost = options.inlineHost || null;
     // 카테고리 통째로 빼기. Interactive 의 글로벌 태그 칸이 캐릭터·아티스트를

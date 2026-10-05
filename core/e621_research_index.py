@@ -154,6 +154,8 @@ class E621ResearchIndex:
         self._korean = None
         self._query_key = None
         self._matches = None
+        # 자동완성용: (사람이 치는 모양의 이름, 줄)을 게시물 많은 순으로. 처음 물을 때 만든다.
+        self._name_keys = None
 
     def matches(self, query: str, disable_wiki: bool, translated: str = "") -> dict[str, tuple[int, int, int]] | None:
         """Return (field bits, compact-only bits, grade); cache one query only.
@@ -161,6 +163,10 @@ class E621ResearchIndex:
         `translated` = the query translated to English. Its matches are only *added*: tags the
         original query already found keep their entry, new ones get TRANSLATED_QUERY and rank
         after every original match (grade + 2). A Korean query that finds nothing falls back to them.
+
+        다중 검색(쉼표로 나눈 검색어 - 화면의 칩)은 **교집합**이다: 모든 검색어에 맞는 태그만 나온다
+        (사용자 지정 2026-10-05: "합집합이 아니라 교집합"). 번역은 검색어마다의 다른 표기로 친다 - 검색어 하나는
+        원래 말이나 번역한 말 가운데 어느 쪽으로 맞아도 된다.
         """
         key = (query, disable_wiki, translated)
         if key == self._query_key:
@@ -168,9 +174,18 @@ class E621ResearchIndex:
         if not query:
             self._query_key, self._matches = key, None
             return None
-        matches = self._scan_terms(query, disable_wiki)
+        terms = self.terms(query)
+        matches = self._intersect([self._scan(term, disable_wiki) for term in terms])
         if translated:
-            for tag, (bits, compact, grade) in self._scan_terms(translated, disable_wiki).items():
+            other = self.terms(translated)
+            if len(other) == len(terms):
+                # 조각 수가 같다 = 조각마다 번역이 짝지어졌다. 조각 i 는 원래 말 또는 번역한 말로 맞으면 된다.
+                widened = self._intersect([self._either(self._scan(term, disable_wiki), self._scan(alias, disable_wiki))
+                                           for term, alias in zip(terms, other)])
+            else:
+                # 번역이 쉼표를 지키지 않았다 - 번역한 말들끼리만 따로 모두 맞는 태그를 보탠다.
+                widened = self._intersect([self._scan(alias, disable_wiki) for alias in other])
+            for tag, (bits, compact, grade) in widened.items():
                 if tag not in matches:
                     matches[tag] = (bits | TRANSLATED_QUERY, compact, grade + 2)
         self._query_key, self._matches = key, matches
@@ -181,28 +196,68 @@ class E621ResearchIndex:
         """쉼표로 나눈 검색어들. 빈 조각은 버리고 같은 조각은 한 번만 센다."""
         return list(dict.fromkeys(term for term in (search_key(part) for part in str(query or "").split(",")) if term))
 
-    def _scan_terms(self, query: str, disable_wiki: bool) -> dict[str, tuple[int, int, int]]:
-        """다중 검색(사용자 지정 2026-10-05: Tag Filter 처럼): 쉼표로 나눈 검색어 가운데 **하나라도** 맞는 태그.
+    @staticmethod
+    def _merge(first: tuple[int, int, int], second: tuple[int, int, int], grade: int) -> tuple[int, int, int]:
+        # '띄어쓰기를 빼고서만 맞은 곳' 은, 어느 쪽으로도 곧바로 맞지 않은 곳만 남긴다.
+        direct = (first[0] & ~first[1]) | (second[0] & ~second[1])
+        return first[0] | second[0], (first[1] | second[1]) & ~direct, grade
 
-        여러 검색어에 맞은 태그는 맞은 곳을 합치고 더 좋은 등급을 갖는다. 검색어가 하나면 예전과 같다.
-        """
-        terms = self.terms(query)
-        if not terms:
+    @classmethod
+    def _either(cls, first: dict, second: dict) -> dict[str, tuple[int, int, int]]:
+        """한 검색어의 두 표기(원래 말 · 번역한 말) - 어느 쪽으로든 맞는 태그. 더 좋은 등급을 갖는다."""
+        merged = dict(first)
+        for tag, entry in second.items():
+            previous = merged.get(tag)
+            merged[tag] = entry if previous is None else cls._merge(previous, entry, min(previous[2], entry[2]))
+        return merged
+
+    @classmethod
+    def _intersect(cls, scans: list[dict]) -> dict[str, tuple[int, int, int]]:
+        """모든 검색어에 맞는 태그. 맞은 곳은 합치고, 등급은 가장 약하게 맞은 검색어의 것이다
+        (이름이 통째로 같다는 표시는 검색어가 하나일 때만 남는다 - 둘 이상이면 어느 것도 이름 전체일 수 없다)."""
+        if not scans:
             # 쉼표뿐인 검색어 - 쉼표 글자를 본문에서 찾으면 수천 건이 맞는다. 맞는 것이 없다고 답한다.
             return {}
-        if len(terms) == 1:
-            return self._scan(terms[0], disable_wiki)
+        if len(scans) == 1:
+            return dict(scans[0])
+        smallest = min(scans, key=len)
         merged: dict[str, tuple[int, int, int]] = {}
-        for term in terms:
-            for tag, (bits, compact, grade) in self._scan(term, disable_wiki).items():
-                previous = merged.get(tag)
-                if previous is None:
-                    merged[tag] = (bits, compact, grade)
-                    continue
-                # '띄어쓰기를 빼고서만 맞은 곳' 은, 어느 검색어로도 곧바로 맞지 않은 곳만 남긴다.
-                direct = (previous[0] & ~previous[1]) | (bits & ~compact)
-                merged[tag] = (previous[0] | bits, (previous[1] | compact) & ~direct, min(previous[2], grade))
+        for tag in smallest:
+            entries = [scan.get(tag) for scan in scans]
+            if any(entry is None for entry in entries):
+                continue
+            total = entries[0]
+            for entry in entries[1:]:
+                total = cls._merge(total, entry, max(total[2], entry[2]))
+            merged[tag] = total
         return merged
+
+    def suggest(self, query: str, limit: int = 12, hidden=frozenset()) -> list[dict]:
+        """자동완성 후보: 이름이 그 글로 시작하는 태그 → 이름에 그 글이 든 태그 → 한국어 이름 · 검색어가 맞는 태그.
+        갈래마다 게시물 많은 순. E621 사전에서만 찾는다."""
+        needle = search_key(query)
+        if not needle or limit <= 0:
+            return []
+        if self._name_keys is None:
+            self._name_keys = [(search_key(row["tag"]), row) for row in sorted(self.by_tag.values(), key=self.sort_key)]
+        starts, inside = [], []
+        for name, row in self._name_keys:
+            if name.startswith(needle):
+                if row["tag"] not in hidden:
+                    starts.append(row)
+                    if len(starts) >= limit:
+                        break
+            elif len(inside) < limit and needle in name and row["tag"] not in hidden:
+                inside.append(row)
+        found = (starts + inside)[:limit]
+        if len(found) < limit and HANGUL.search(needle):
+            compact = needle.replace(" ", "")
+            seen = {row["tag"] for row in found}
+            korean = [self.by_tag[tag] for tag, fields in self._korean_fields().items()
+                      if tag not in seen and tag not in hidden
+                      and any(fields[at] and needle in fields[at] or fields[at + 4] and compact in fields[at + 4] for at in (0, 1, 3))]
+            found += sorted(korean, key=self.sort_key)[:limit - len(found)]
+        return found
 
     def _scan(self, query: str, disable_wiki: bool) -> dict[str, tuple[int, int, int]]:
         needle = search_key(query)

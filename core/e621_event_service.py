@@ -152,6 +152,20 @@ class E621EventService:
             "weight_limits": {mode: dict(limits) for mode, limits in WEIGHT_LIMITS.items()},
         }
 
+    def autocomplete(self, query: str, limit: int = 12) -> list[dict[str, Any]]:
+        """E621 사전에서만 찾는 자동완성(연구모듈의 보낼 프롬프트 - 사용자 지정 2026-10-05).
+
+        메인 자동완성(autocomplete_result)과 같은 줄 모양이다 - 화면의 tagAssist 가 그대로 그린다.
+        tag = 프롬프트에 들어갈 글 · group = 한국어 이름 · count = E621 게시물 수.
+        """
+        if not self._ensure_loaded():
+            return []
+        native = self.research_metadata._native if self.research_metadata else {}
+        return [{"tag": display_tag(row["tag"]), "count": int(row.get("count") or 0), "desc": "",
+                 "group": "" if self.disable_translation else str((native.get(row["tag"]) or {}).get("kor") or ""),
+                 "cat": "e621", "axis": ""}
+                for row in self._search_index.suggest(query, limit, self.deleted_keys)]
+
     # ── 테스트 생성 ───────────────────────────────────────────────────────────
     # 고른 태그 **하나**로 프롬프트를 조립해 보이고, 그 글을 메인 생성으로 보낸다. 태그를 여럿 골라 모으는 조립은 없다
     # (사용자 지정 2026-10-03). 화면에는 조립된 프롬프트만 보인다 - 사용자는 그 글을 직접 고친다(사용자 지정 2026-10-05:

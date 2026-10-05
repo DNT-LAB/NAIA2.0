@@ -25,7 +25,7 @@ export function createE621EventPanel({
   escHtml,
   setModuleParam,
   showToast,
-  // 메인 프롬프트와 같은 태그 자동완성(app.js 의 bindTagAssist). 보낼 프롬프트의 글상자에 묶는다.
+  // 태그 자동완성(app.js 의 bindTagAssist - 메인 프롬프트와 같은 창). 보낼 프롬프트의 글상자에 묶되, E621 사전에서만 찾게 한다.
   bindTagAssist = null,
   // 그릴 자리. 메인 화면은 떠 있는 창(e621Window)의 본문을 넘긴다. 없으면 예전처럼 모듈 팝업 본문
   // (별도 브라우저 창으로 떼어 낸 모듈은 그 창 전체가 모듈 팝업이다).
@@ -141,7 +141,6 @@ export function createE621EventPanel({
         + `<input type="checkbox" data-e621-setting="${key}"${state[key] ? '' : ' checked'}><span>${label}</span></label>`;
       return `<div class="e6-pop" data-e621-pop="settings">${
         state.translation_control_visible === false ? '' : check('disable_translation', '한국어 표시', '태그 줄과 상세에 한국어 이름 · 설명을 보입니다')}${
-        state.wiki_search_control_visible === false ? '' : check('disable_wiki_search', '위키 본문도 검색', '태그 이름 · 한국어뿐 아니라 저장된 위키 본문에서도 찾습니다')}${
         stats ? `<div class="e6-pop-stats">${esc(stats)}</div>` : ''}</div>`;
     }
     return '';
@@ -159,7 +158,10 @@ export function createE621EventPanel({
     // ⚠️ 검색어 · 검색 중 강조(is-active)는 여기 넣지 않는다 - 치는 글은 syncInputs 가, 올린 검색어(칩)는 terms 영역이 맡는다.
     return `<div class="e6-search">`
       + `<input class="mod-input" id="e621SearchInput" type="text" placeholder="태그 · 한국어 검색" autocomplete="off" spellcheck="false"`
-      + ` title="Enter 나 쉼표로 검색어를 올립니다 - 여러 개를 올리면 그중 하나라도 맞는 태그가 나옵니다(예: small penis, cock)">`
+      + ` title="Enter 나 쉼표로 검색어를 올립니다 - 여러 개를 올리면 모두 맞는 태그만 나옵니다(예: cum, face)">`
+      // [위키 본문도 검색] 은 설정이 아니라 검색 줄에 둔다(사용자 지정 2026-10-05). 서버 키는 부정형이라 값을 뒤집어 보낸다.
+      + (state.wiki_search_control_visible === false ? '' : `<label class="e6-search-wiki" title="태그 이름 · 한국어뿐 아니라 저장된 위키 본문에서도 찾습니다">`
+        + `<input type="checkbox" data-e621-setting="disable_wiki_search"><span class="long">위키 본문도 검색</span><span class="short">본문</span></label>`)
       + `<button class="e6-search-x" data-e621-act="cancel-search" title="검색 취소(검색어를 모두 뺍니다)" aria-label="검색 취소">×</button></div>`
       + `<div class="e6-seg" role="group" aria-label="보기">`
       + `<button class="${starred ? '' : 'on'}" data-e621-act="view" data-value="default">기본</button>`
@@ -173,7 +175,7 @@ export function createE621EventPanel({
 
   // ── 검색어 칩 ──────────────────────────────────────────────────────────────
   // 검색어는 Tag Filter 처럼 칩으로 쌓인다(사용자 지정 2026-10-05). 서버가 쥔 것은 쉼표로 이은 글 하나(search_text)이고,
-  // 칩은 그것을 나눠 보일 뿐이다 - 칩 가운데 하나라도 맞는 태그가 나온다. 퍼펙트 매칭(*) 은 없다.
+  // 칩은 그것을 나눠 보일 뿐이다 - 칩 **모두에** 맞는 태그만 나온다(교집합). 퍼펙트 매칭(*) 은 없다.
   const termsOf = text => {
     const seen = new Set();
     return String(text || '').split(',').map(part => part.trim().replace(/\s+/g, ' ')).filter(term => {
@@ -662,10 +664,11 @@ export function createE621EventPanel({
     const bench = state.bench;
     const input = document.getElementById('e621BenchInput');
     if (!input) return;
-    // 메인 프롬프트와 같은 태그 자동완성. 글상자가 새로 생겼을 때 한 번만 묶는다(고른 것은 input 이벤트로 온다).
+    // 태그 자동완성 - E621 사전에서만 찾는다(사용자 지정 2026-10-05: 공용 사전은 Danbooru 태그가 먼저 나온다).
+    // 글상자가 새로 생겼을 때 한 번만 묶는다(고른 것은 input 이벤트로 온다).
     if (bindTagAssist && !input.e6Assist) {
       input.e6Assist = true;
-      bindTagAssist(input);
+      bindTagAssist(input, {e621Only: true});
     }
     if (ui.benchDraft && ui.benchDraft.base !== bench.prompt) ui.benchDraft = null;
     if (ui.weightDraft !== null && ui.weightDraft === bench.weight) ui.weightDraft = null;
@@ -730,7 +733,9 @@ export function createE621EventPanel({
   }
 
   function panelClasses(state) {
-    return ['e6-panel', state.disable_translation ? 'no-ko' : '', ui.compact ? 'compact' : ''].filter(Boolean).join(' ');
+    // searching = 검색이 걸려 있다 - 태그 줄에 '맞은 곳' 표식이 붙어 좁아지므로 분류 · 폴더 칸을 좁혀 태그 칸을 넓힌다.
+    return ['e6-panel', state.disable_translation ? 'no-ko' : '', ui.compact ? 'compact' : '',
+      state.search_text ? 'searching' : ''].filter(Boolean).join(' ');
   }
 
   function skeletonHtml(state, html) {
@@ -792,6 +797,9 @@ export function createE621EventPanel({
       const active = Boolean(state.search_text);
       box.classList.toggle('is-active', active);
       box.title = active ? `검색 중: ${state.search_text} - × 로 취소` : '';
+      // [위키 본문도 검색] 의 체크는 여기서 맞춘다(툴바 HTML 에 넣으면 누를 때마다 검색칸이 갈린다).
+      const wiki = typeof box.querySelector === 'function' ? box.querySelector('[data-e621-setting="disable_wiki_search"]') : null;
+      if (wiki) wiki.checked = !state.disable_wiki_search;
     }
   }
 
@@ -916,7 +924,7 @@ export function createE621EventPanel({
   // ── 조작 ───────────────────────────────────────────────────────────────────
   const HANGUL = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
 
-  // 칩들로 검색한다(하나라도 맞는 태그). 칩은 서버 응답을 기다리지 않고 먼저 보인다.
+  // 칩들로 검색한다(모두 맞는 태그). 칩은 서버 응답을 기다리지 않고 먼저 보인다.
   function applyTerms(terms) {
     if (!terms.length) {
       cancelSearch();
@@ -1191,6 +1199,13 @@ const PANEL_CSS = `
 .e6-toolbar{position:relative;display:flex;align-items:center;gap:8px;min-width:0}
 .e6-search{position:relative;flex:1 1 auto;min-width:120px}
 .e6-search .mod-input{height:26px;padding:0 26px 0 10px;font-size:11px}
+/* [위키 본문도 검색] - 검색 줄의 오른쪽 끝(× 왼쪽)에 얹는다. 그만큼 글 칠 자리를 비운다. */
+.e6-search:has(.e6-search-wiki) .mod-input{padding-right:142px}
+.e6-search-wiki{position:absolute;top:2px;right:28px;height:22px;display:inline-flex;align-items:center;gap:4px;padding:0 6px;border-radius:3px;
+  color:var(--text-muted);font-size:10px;white-space:nowrap;cursor:pointer;user-select:none}
+.e6-search-wiki:hover{background:var(--bg-hover);color:var(--text-primary)}
+.e6-search-wiki input{margin:0;accent-color:var(--accent)}
+.e6-search-wiki .short{display:none}
 .e6-search-x{position:absolute;top:2px;right:2px;width:22px;height:22px;border:0;border-radius:3px;background:transparent;
   color:var(--text-dim);font-size:14px;line-height:1;cursor:pointer}
 .e6-search-x:hover{background:var(--bg-hover);color:var(--text-primary)}
@@ -1326,6 +1341,10 @@ const PANEL_CSS = `
 :where(.e6-float) button{font-family:inherit}
 .e6-float .e6-detail{border:0;border-radius:0;background:transparent}
 
+/* 검색이 걸려 있는 동안: 태그 줄에 '맞은 곳' 표식이 붙는다 - 분류 · 폴더 칸을 좁혀 태그 칸을 넓힌다(사용자 지정 2026-10-05). */
+.e6-panel.searching .e6-main{grid-template-columns:184px 132px minmax(260px,1.7fr) minmax(240px,1fr)}
+.e6-panel.searching .e6-row.e6-tag{grid-template-columns:minmax(0,1fr) 56px minmax(0,1.2fr)}
+
 /* 그릇이 좁으면(창 폭 · 떼어 낸 창 폭 기준) 한 줄로 쌓고 패널 안을 굴린다. */
 @container e6 (max-width: 760px){
   .e6-panel{display:flex;flex-direction:column;overflow:auto}
@@ -1344,6 +1363,9 @@ const PANEL_CSS = `
 .e6-panel.compact .e6-toolbar{flex-wrap:wrap}
 /* 검색칸의 바탕 폭을 줄여 둔다 - 안 그러면 제 내용 폭(250쯤)으로 줄을 잡아 숨김 · 설정 단추가 둘째 줄로 밀린다(실측). */
 .e6-panel.compact .e6-search{flex:1 1 120px}
+.e6-panel.compact .e6-search:has(.e6-search-wiki) .mod-input{padding-right:78px}
+.e6-panel.compact .e6-search-wiki .long{display:none}
+.e6-panel.compact .e6-search-wiki .short{display:inline}
 .e6-panel.compact .e6-toolbar .e6-filter{max-width:110px}
 .e6-panel.compact .e6-main{display:flex;flex-direction:column;flex:1 1 auto;gap:0;min-height:0}
 .e6-panel.compact .e6-col-cats,.e6-panel.compact .e6-col-folders,.e6-panel.compact .e6-region-detail{display:none}

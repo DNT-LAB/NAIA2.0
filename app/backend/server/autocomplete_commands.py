@@ -951,6 +951,12 @@ async def handle_autocomplete_command(
         return False
 
     query = str(command.get("query") or "")
+    if command_type == "autocomplete" and str(command.get("source") or "") == "e621":
+        # E621 연구모듈의 글상자 - E621 사전에서만 찾는다(사용자 지정 2026-10-05). 공용 태그 색인을 쓰지 않으므로
+        # 그 색인이 아직 만들어지는 중이어도 기다리지 않는다. 답의 모양은 공용 자동완성과 같다.
+        results = await run_in_thread(context._e621_event_service().autocomplete, query, 12)
+        await _send_json(ws, {"type": "autocomplete_result", "query": query, "results": results})
+        return True
     pending = _pending_reply(context, command_type, command, query)
     if pending is not None:
         await _send_json(ws, pending)

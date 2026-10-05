@@ -1408,10 +1408,16 @@ export function createCharacterPanel({
     // 그것으로 칸을 열면 [저장] 이 그 변경을 되돌린다(Codex 리뷰 2026-10-05).
     const character = storedCharacter(uuid, newestState());
     if (!character) return false;
-    if (editingUuid && editingUuid !== uuid && editIsDirty()) {
-      // 치던 글을 말없이 버리지 않는다.
-      showToastSafe('편집 중인 캐릭터가 있습니다 - 먼저 저장하거나 취소하세요.');
-      return false;
+    if (editingUuid && editingUuid !== uuid) {
+      // 지금 고치던 캐릭터가 가장 새 상태에는 보관함에 없다(누르는 동안 다른 창이 슬롯으로 올렸다). 그 상태가 곧
+      // 그려지며 칸이 까닭과 함께 닫힌다 - 여기서 다른 편집으로 넘어가면 치던 글이 말없이 사라진다(Codex 4차 리뷰:
+      // '바뀐 것이 있나' 를 가장 새 상태로 보게 하면서, 견줄 대상이 없는 이 경우가 '바뀐 것 없음' 이 됐다).
+      if (!storedCharacter(editingUuid, newestState())) return false;
+      if (editIsDirty()) {
+        // 치던 글을 말없이 버리지 않는다.
+        showToastSafe('편집 중인 캐릭터가 있습니다 - 먼저 저장하거나 취소하세요.');
+        return false;
+      }
     }
     editingUuid = uuid;
     editDraft = {

@@ -3,30 +3,36 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
 
-from core.e621_count_profile import E621CountProfile
+from core.e621_count_profile import COUNT_TAGS, E621CountProfile
 from core.e621_tag_repository import E621TagRepository
 from core.e621_relation_repository import E621RelationRepository
 from core.e621_research_index import E621ResearchIndex, HANGUL, search_key
 from core.prompt_generation_service import PromptGenerationService
-from core.e621_prompt_composer import (WEIGHT_LIMITS, display_tag, validate_weight,
+from core.e621_prompt_composer import (WEIGHT_LIMITS, display_tag, editable_tag, validate_weight,
     prepare_template, restore_literals)
 
 
-# 테스트 생성의 틀. {태그} = 고른 태그 하나 · {인원} = 그 태그에 맞는 인원 태그(특이점이 없으면 빈다).
-# 사용자 지정 2026-10-05: "특이점이 없는 경우에는 1girl 만 넣고 인원 태그를 사용하지 않습니다".
-TAG_SLOT, COUNT_SLOT = "{태그}", "{인원}"
-DEFAULT_TESTBENCH = "1girl, {인원}, {태그}"
-# 조립기(e621_prompt_composer)의 자리 표기이자 예전 기본 틀 - 설정 파일에 이 값이 그대로 남아 있다.
-COMPOSER_SLOT = "{{selected_tags}}"
-TESTBENCH_LIMIT = 4000
+# 예전 화면의 틀. 지금 화면은 틀을 보이지 않는다 - 상태 · 설정의 자리만 남아 있다.
+DEFAULT_TESTBENCH = "{{selected_tags}}"
+
+# ── 테스트 생성의 자동 조립 ──────────────────────────────────────────────────
+# 고른 태그 하나로 프롬프트를 조립한다: 주체 → 인원 태그 → 고른 태그 → 관련 태그.
+#   · 주체는 1girl. 인원 태그는 혼자서는 거의 안 나오는 태그에만 붙는다(사용자 지정 2026-10-05: "특이점이 없는
+#     경우에는 1girl 만 넣고 인원 태그를 사용하지 않습니다" - 기준은 core/e621_count_profile.py).
+#   · 관련 태그 = 진짜 코어만, 6개 이내(사용자 지정 2026-10-03 · 다시 확인 2026-10-05). 코어 = 고른 태그가 붙은 게시물의
+#     40% 이상에 함께 붙는 태그(팩이 이미 우연의 2배 이상만 담는다). 0.25 로 재 보면 feet 에 4_toes, kissing 에
+#     male/male 과 male/female 이 함께 올라온다 - 서로 다른 변종이 섞인다. 게시물이 너무 적은 태그는 관측이 흔들린다.
+BENCH_SUBJECT = "1girl"
+AUTO_RELATED_LIMIT = 6
+AUTO_RELATED_MIN_SHARE = 0.4
+RELATED_MIN_POSTS = 1000
+BENCH_PROMPT_LIMIT = 4000
 BENCH_ERRORS = {
-    "Use {{selected_tags}} at most once": "{태그} 는 한 번만 쓸 수 있습니다",
-    "{{selected_tags}} must be a standalone tag without a weight wrapper":
-        "{태그} 는 가중치로 감쌀 수 없습니다 - 가중치는 아래 칸에서 정합니다",
     "Unbalanced or unsupported numeric weight in E621 template": "가중치 표기(숫자::태그 ::)가 닫히지 않았습니다",
 }
 
@@ -139,48 +145,54 @@ class E621EventService:
         }
 
     # ── 테스트 생성 ───────────────────────────────────────────────────────────
-    # 고른 태그 **하나**를 틀에 끼워 메인 생성으로 보낸다. 여러 태그를 모으는 조립은 없다(사용자 지정 2026-10-03).
-    # 틀은 사용자가 고치는 글이고, 화면은 그 틀이 무엇으로 조립되는지를 그대로 보인다(사용자 지정 2026-10-05:
-    # "어떤 프롬프트가 자동으로 조립되는지 보여줘야 합니다 · 프롬프트는 사용자가 수정 가능하게").
-    # ⚠️ 미리보기와 실제 생성은 같은 길(_bench_template → prepare_template)로 조립한다 - 화면이 따로 조립하지 않는다.
-    def _bench_rows(self) -> list[dict[str, Any]]:
-        tag = self.selected_tag
-        return [{"exact_tag": tag, "weight": self.test_weight}] if tag and self._find_tag(tag) is not None else []
-
-    def _bench_template(self, template: str, rows: list[dict[str, Any]]) -> str:
-        """화면의 틀 → 조립기의 틀. {인원} 자리는 인원 태그로 바꾼다 - 없으면 빈 조각이 되고 조립기가 버린다."""
-        info = self.count_profile.describe(rows[0]["exact_tag"]) if rows else None
-        return template.replace(COUNT_SLOT, info["tag"] if info else "").replace(TAG_SLOT, COMPOSER_SLOT)
-
-    @staticmethod
-    def _bench_error(error: Exception) -> str:
-        return BENCH_ERRORS.get(str(error), str(error))
+    # 고른 태그 **하나**로 프롬프트를 조립해 보이고, 그 글을 메인 생성으로 보낸다. 태그를 여럿 골라 모으는 조립은 없다
+    # (사용자 지정 2026-10-03). 화면에는 조립된 프롬프트만 보인다 - 사용자는 그 글을 직접 고친다(사용자 지정 2026-10-05:
+    # "어떤 프롬프트가 자동으로 조립되는지 보여줘야 합니다 · 프롬프트는 사용자가 수정 가능하게" · 틀은 보이지 않는다).
+    def _auto_related(self, anchor: str) -> list[str]:
+        """고른 태그에 자동으로 붙이는 관련 태그(코어 순 · 6개 이내). 종은 그 종에서만 주로 나올 때 하나만, 맨 뒤에."""
+        implied = self.relations.implied(anchor)
+        species = self._species()
+        anchor_is_species = anchor in species
+        rows = []
+        for target, _pair, share, lift, count in self.relations.cooccurring(anchor):
+            # 고른 태그가 이미 뜻하는 상위 태그(soles → feet)는 자리만 차지한다. 인원 태그는 제 자리가 따로 있다.
+            if target in implied or target in COUNT_TAGS or count < RELATED_MIN_POSTS or target in self.deleted_keys:
+                continue
+            is_species = target in species
+            # 종을 직접 골랐으면 종을 더 붙이지 않는다(fox → red_fox 는 원하는 것이 아니다).
+            if is_species and (anchor_is_species or share < SPECIES_DEPENDENT_SHARE):
+                continue
+            if not is_species and share < AUTO_RELATED_MIN_SHARE:
+                continue
+            rows.append((target, is_species, share * math.log2(lift)))
+        # 종은 가장 구체적인 것만: fox 가 있으면 그것이 뜻하는 canine · canid 는 뺀다.
+        covered: set[str] = set()
+        for target, is_species, _score in rows:
+            if is_species:
+                covered |= self.relations.implied(target)
+        rows = sorted((row for row in rows if row[0] not in covered), key=lambda row: (-row[2], row[0]))
+        kind = [row[0] for row in rows if row[1]][:1]
+        return [row[0] for row in rows if not row[1]][:AUTO_RELATED_LIMIT - len(kind)] + kind
 
     def _bench_payload(self, exact_tag: str) -> dict[str, Any]:
-        rows = self._bench_rows()
+        """조립 순서: 주체 → 인원 태그(있을 때만) → 고른 태그(가중치) → 관련 태그."""
         info = self.count_profile.describe(exact_tag)
-        payload: dict[str, Any] = {
-            "template": self.testbench, "default_template": DEFAULT_TESTBENCH, "weight": self.test_weight,
-            # count_tag = 이 태그에 붙이는 인원 태그('' = 붙이지 않는다) · count_shares = 근거(없으면 표에 없는 태그).
-            "count_tag": info["tag"] if info else "", "count_shares": info["shares"] if info else None,
-            "parts": [], "error": "",
+        count_tag = info["tag"] if info else ""
+        related = self._auto_related(exact_tag)
+        api_mode = self.app_context.get_api_mode()
+        pieces = [(BENCH_SUBJECT, 1.0), *([(count_tag, 1.0)] if count_tag else []), (exact_tag, self.test_weight),
+                  *((tag, 1.0) for tag in related)]
+        return {
+            # 화면의 글상자에 들어가는 글이다. 사용자가 고치고, [생성] 은 그 글을 그대로 돌려보낸다.
+            "prompt": ", ".join(editable_tag(tag, weight, api_mode) for tag, weight in pieces),
+            "weight": self.test_weight,
+            # count_tag = 붙인 인원 태그('' = 붙이지 않았다) · count_shares = 근거(None = 표에 없는 태그) · related = 붙인 관련 태그.
+            "count_tag": count_tag, "count_shares": info["shares"] if info else None, "related": related,
         }
-        try:
-            tags, protected = prepare_template(self._bench_template(self.testbench, rows), rows,
-                                               self.app_context.get_api_mode())
-        except ValueError as exc:
-            payload["error"] = self._bench_error(exc)
-            return payload
-        # 조립기는 고른 태그를 가장 먼저 보호한다 - 그 표식으로 '어느 조각이 고른 태그인가' 를 가린다.
-        chosen = next(iter(protected), None) if rows else None
-        count_text = payload["count_tag"] if COUNT_SLOT in self.testbench else ""
-        for token in tags:
-            text = protected.get(token, token)
-            kind = "tag" if token == chosen else "count" if count_text and text == count_text else ""
-            if kind == "count":
-                count_text = ""
-            payload["parts"].append({"text": text, "kind": kind})
-        return payload
+
+    def _bench_prompt(self) -> str:
+        tag = self.selected_tag
+        return self._bench_payload(tag)["prompt"] if tag and self._find_tag(tag) is not None else ""
 
     # ── 관계 팩 → 화면 ────────────────────────────────────────────────────────
     # 응답 계약 = docs/e621_relations_contract.ko.md. 여기서는 화면이 그릴 만큼만 줄인다.
@@ -364,7 +376,7 @@ class E621EventService:
             self.use_main_pipeline = self._coerce_bool(value)
             self._save_settings()
         elif key == "testbench":
-            self.testbench = raw[:TESTBENCH_LIMIT]
+            self.testbench = raw
             self._save_settings()
         elif key == "test_weight":
             try:
@@ -372,18 +384,18 @@ class E621EventService:
             except ValueError as exc:
                 return self._toast(str(exc), level="error")
         elif key == "generate":
-            template = (raw if raw.strip() else self.testbench)[:TESTBENCH_LIMIT]
-            # 고른 태그 하나만 넣는다. 예전의 여러 태그 모음(selected_tags)은 화면에서 걷어 냈다 - 남아 있는
-            # 저장분이 보이지 않는 채로 프롬프트에 섞이면 안 된다.
-            rows = self._bench_rows()
+            # 화면의 글상자에 있는 글을 그대로 보낸다(사용자가 고쳤을 수 있다). 비어 있으면 지금 고른 태그의 자동 조립.
+            # 고른 태그는 그 글 안에 이미 있다 - 조립기에 따로 얹지 않는다. 화면에서 걷어 낸 예전의 여러 태그 모음
+            # (selected_tags)의 저장분도 얹지 않는다 - 보이지 않는 채로 프롬프트에 섞이면 안 된다.
+            # (태그 이름이 와일드카드 · 가중치 표기와 겹치는 것은 사전 17만 개 중 15개다 - $ · <:3 · ::3 따위.)
+            template = (raw if raw.strip() else self._bench_prompt())[:BENCH_PROMPT_LIMIT]
             try:
                 from core.headless_random_prompt_service import pipeline_swap_lock
                 with pipeline_swap_lock(self.app_context):
                     expand, template_context = self._template_expander() if self.use_main_pipeline else (None, None)
-                    tags, protected = prepare_template(self._bench_template(template, rows), rows,
-                        self.app_context.get_api_mode(), expand=expand)
+                    tags, protected = prepare_template(template, [], self.app_context.get_api_mode(), expand=expand)
                     if not tags:
-                        return self._toast("테스트 생성의 틀이 비어 있습니다", level="error")
+                        return self._toast("보낼 프롬프트가 비어 있습니다", level="error")
                     generated = self._generate_prompt(tags) if self.use_main_pipeline else ", ".join(tags)
                     generated = restore_literals(generated, protected)
                     if not generated:
@@ -402,9 +414,7 @@ class E621EventService:
                                 current.wildcard_history.setdefault(name, []).extend(history)
                             current.wildcard_rolls.extend(template_context.wildcard_rolls)
             except ValueError as exc:
-                return self._toast(self._bench_error(exc), level="error")
-            self.testbench = template
-            self._save_settings()
+                return self._toast(BENCH_ERRORS.get(str(exc), str(exc)), level="error")
             # ⚠️ 메인 프롬프트(app_context.prompt_text)는 건드리지 않는다. 예전에는 여기서 만든 프롬프트로 덮어썼는데,
             #    화면은 이 출처의 프롬프트를 메인 칸에 받지 않아서 서버와 화면이 갈라졌다 - 새로고침하면 쓰던 메인
             #    프롬프트가 테스트 프롬프트로 바뀌어 있었다(실측 2026-10-05). 생성에는 아래 메시지의 prompt 가 그대로 간다.
@@ -463,10 +473,7 @@ class E621EventService:
             self.disable_translation = self._coerce_bool(settings.get("disable_translation", False))
             self.disable_wiki_search = self._coerce_bool(settings.get("disable_wiki_search", False))
             self.use_main_pipeline = self._coerce_bool(settings.get("use_main_pipeline", True))
-            # 예전 기본 틀('{{selected_tags}}' 하나)은 새 기본 틀로 올린다. 사용자가 고쳐 둔 틀은 자리 표기만 옮긴다.
-            saved = str(settings.get("testbench", DEFAULT_TESTBENCH))
-            self.testbench = (DEFAULT_TESTBENCH if saved.strip() in ("", COMPOSER_SLOT)
-                              else saved.replace(COMPOSER_SLOT, TAG_SLOT))[:TESTBENCH_LIMIT]
+            self.testbench = str(settings.get("testbench", DEFAULT_TESTBENCH))
         try:
             saved = json.loads(self.selected_tags_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):

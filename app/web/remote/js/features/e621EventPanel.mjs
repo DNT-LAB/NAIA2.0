@@ -3,7 +3,7 @@
 // 배치: 툴바 한 줄 / [분류 | 폴더 | 태그 | 선택한 태그 + 그 아래 테스트 생성]
 //   (개편안 docs/E621_MODULE_UX_PROPOSAL_2026_10_03.md. 프롬프트 조립 트레이는 뺐다 - 사용자 지정 2026-10-03
 //    "프롬프트 조립 기능을 지원하지 않습니다. 그냥 하나 누르면 그 하나에 대해서만 show 합니다.")
-//   테스트 생성은 고른 태그 **하나**를 틀에 끼워 보낸다(사용자 지정 2026-10-05) - 여러 태그를 모으지 않는다.
+//   테스트 생성은 고른 태그 **하나**로 조립한 프롬프트를 보이고 보낸다(사용자 지정 2026-10-05) - 태그를 여럿 고르지 않는다.
 //
 // ⚠️ 그리는 방식 - 영역(data-e621-region)마다 따로 쓴다. 영역의 HTML 이 지난번과 같으면 건드리지 않는다.
 //    예전에는 상태가 올 때마다 본문 전체를 innerHTML 로 갈아 끼워, 태그 하나만 눌러도 분류 · 폴더 · 태그 ·
@@ -12,7 +12,7 @@
 //      · 치는 중인 검색어는 영역 HTML 에 넣지 않는다 → 쓴 뒤에 value 로 넣는다(syncInputs).
 //      · 영역을 다시 쓸 때는 data-scroll-key 가 같은 스크롤 · 포커스를 되돌린다(swap).
 //      · 태그 목록은 쪽(300줄)을 이어 붙인다 - 같은 목록이면 영역을 다시 쓰지 않고 쪽 단위로 맞춘다(paintTags).
-//      · 테스트 생성의 틀 · 보낼 프롬프트 · 가중치도 영역 HTML 에 넣지 않는다 → 쓴 뒤에 맞춘다(syncBench).
+//      · 테스트 생성의 보낼 프롬프트 · 가중치도 영역 HTML 에 넣지 않는다 → 쓴 뒤에 맞춘다(syncBench).
 // ⚠️ 그리는 곳이 둘이다 - 떠 있는 창(e621Window 의 본문)과, 떼어 낸 브라우저 창의 모듈 팝업 본문.
 //    모양은 이 모듈이 싣는 PANEL_CSS 하나가 정한다(폭 반응은 .e6-root 의 컨테이너 질의).
 // 클릭은 data-e621-act 로 위임해 받는다 - 공용 app.js 에 전역 함수를 늘리지 않는다.
@@ -38,12 +38,11 @@ export function createE621EventPanel({
   let markedTag = null;
   let lastSearchText = null;
   // 화면 상태 - 이 탭의 것이다(서버에 두지 않는다: 다른 탭이 내 팝오버 · 펼침을 바꾸면 안 된다).
-  //   benchDraft = 틀을 고쳤는데 서버가 아직 받아 적지 않은 글 · weightDraft = 같은 뜻의 가중치(null = 없음)
+  //   benchDraft = 보낼 프롬프트를 손으로 고친 글 {text, base}. base = 고치기 시작한 자동 조립 - 그것이 바뀌면 버린다.
+  //   weightDraft = 끌고 있는(서버가 아직 받아 적지 않은) 가중치. 둘 다 null = 없음.
   const ui = {pop: '', searchDraft: null, expanded: new Set(), expandedFor: '', folds: new Set(),
     benchDraft: null, weightDraft: null, benchSentAt: 0};
-  const BENCH_SEND_MS = 350;      // 틀을 치다 멈춘 뒤 이만큼 지나면 서버에 보낸다(보낼 프롬프트가 따라온다)
   const BENCH_AGAIN_MS = 700;     // [생성] 을 연달아 누른 것은 한 번으로 친다
-  let benchTimer = null;
   // 태그 목록에 이어 붙여 둔 쪽들 - 이것도 이 탭의 것이다. 서버가 아는 것은 마지막으로 청한 쪽 하나뿐이다.
   //   key = 어느 목록인가 · stamp = 그 목록의 줄 수와 줄 모양 · html = 쪽마다 써 넣은 줄 · pending = 청해 둔 쪽
   const pages = {key: null, stamp: '', first: 0, last: -1, html: new Map(), pending: null};
@@ -568,49 +567,43 @@ export function createE621EventPanel({
   }
 
   // ── 테스트 생성 ───────────────────────────────────────────────────────────
-  // 고른 태그 하나를 틀에 끼워 메인 생성으로 보낸다. 조립은 서버가 한다 - 화면은 서버가 준 조각(bench.parts)을
-  // 그대로 보인다. 그래서 '보이는 프롬프트' 와 '나가는 프롬프트' 가 갈라지지 않는다.
-  // ⚠️ 이 영역의 HTML 은 뼈대뿐이다(태그를 바꿔도 같다). 틀(글상자의 값) · 보낼 프롬프트 · 가중치를 여기 넣으면
-  //    글자를 칠 때마다 글상자를 갈아 끼우게 된다(한글 조합이 끊긴다) - 그것들은 syncBench 가 맞춘다.
+  // 고른 태그 하나로 서버가 조립한 프롬프트(bench.prompt = 1girl → 인원 태그 → 고른 태그 → 관련 태그 6개 이내)를
+  // 글상자에 넣는다. 사용자는 그 글을 직접 고치고, [생성] 은 글상자의 글을 그대로 보낸다 - '보이는 프롬프트' 와
+  // '나가는 프롬프트' 가 같다. 틀은 보이지 않는다(사용자 지정 2026-10-05). 태그를 여럿 고르는 조립도 없다.
+  // ⚠️ 이 영역의 HTML 은 뼈대뿐이다(태그를 바꿔도 같다). 글상자의 값 · 인원 분포 · 가중치를 여기 넣으면 그것이 바뀔 때마다
+  //    글상자를 갈아 끼우게 된다(치던 글과 한글 조합이 끊긴다) - 그것들은 syncBench 가 맞춘다.
+  const hasBench = state => Boolean(state?.selected) && typeof state.bench?.prompt === 'string';
+
   function benchHtml(state) {
-    // bench 가 없으면 옛 백엔드다(재시작 전) - 그리지 않는다.
-    if (!state.selected || !state.bench) return '';
+    // bench.prompt 가 없으면 옛 백엔드다(재시작 전) - 그리지 않는다.
+    if (!hasBench(state)) return '';
     return '<div class="e6-bench">'
-      + '<div class="e6-bench-head"><span class="e6-sec-head">테스트 생성</span>'
-      + '<button class="e6-link" data-e621-act="bench-reset" data-e621-bench="reset" title="틀을 기본값으로 되돌립니다" hidden>기본값</button></div>'
-      + '<textarea class="mod-textarea e6-bench-input" id="e621BenchInput" rows="2" maxlength="4000" spellcheck="false" autocomplete="off"'
-      + ' title="{태그} = 고른 태그 · {인원} = 그 태그에 맞는 인원 태그(없으면 빈다)&#10;줄바꿈은 쉼표와 같고, # 으로 시작하는 줄은 뺍니다 · Ctrl+Enter = 생성"></textarea>'
-      + '<div class="e6-bench-line"><span>보낼 프롬프트</span><span class="e6-bench-count" data-e621-bench="count"></span></div>'
-      + '<div class="e6-bench-preview" data-e621-bench="preview"></div>'
+      + '<div class="e6-bench-line"><span title="고른 태그로 자동 조립한 프롬프트입니다(인원 태그 · 관련 태그 6개 이내). 아래 칸에서 바로 고칠 수 있고, 태그를 바꾸면 새로 조립합니다">보낼 프롬프트</span>'
+      + '<button class="e6-link" data-e621-act="bench-reset" data-e621-bench="reset" title="고친 글을 버리고 자동으로 조립한 프롬프트로 되돌립니다" hidden>되돌리기</button>'
+      + '<span class="e6-bench-count" data-e621-bench="count"></span></div>'
+      + '<textarea class="mod-textarea e6-bench-input" id="e621BenchInput" rows="3" maxlength="4000" spellcheck="false" autocomplete="off"></textarea>'
       + '<div class="e6-bench-row">'
-      + '<label class="e6-bench-weight" title="고른 태그에 거는 가중치(0 ~ 2). 태그를 바꾸면 1 로 돌아갑니다">가중치'
+      + '<label class="e6-bench-weight" title="고른 태그에 거는 가중치(0 ~ 2). 바꾸면 프롬프트를 새로 조립합니다 · 태그를 바꾸면 1 로 돌아갑니다">가중치'
       + '<input type="range" min="0" max="2" step="0.1" data-e621-bench="weight"><span data-e621-bench="weight-label"></span></label>'
       + '<label class="e6-check" title="켜면 메인 화면의 선행 · 후행 프롬프트와 전처리가 함께 적용됩니다. 끄면 위 프롬프트 그대로 보냅니다(모델 · 해상도 · 네거티브는 늘 메인 설정)">'
       + '<input type="checkbox" data-e621-bench="pipeline"><span>메인 설정</span></label>'
-      + '<button class="e6-btn e6-bench-go" data-e621-act="bench-generate" data-e621-bench="go">생성</button>'
+      + '<button class="e6-btn e6-bench-go" data-e621-act="bench-generate" data-e621-bench="go" title="Ctrl+Enter">생성</button>'
       + '</div></div>';
   }
 
   const percent = value => `${Math.round((Number(value) || 0) * 100)}%`;
   const weightText = value => (Number.isInteger(Math.round(value * 100) / 10) ? value.toFixed(1) : value.toFixed(2));
 
-  // 인원 분포 한 줄 - 고른 인원 태그가 있으면 그것을 강조한다.
+  // 인원 분포 한 줄 - 넣은 인원 태그가 있으면 그것을 강조한다.
   function benchCountHtml(bench) {
     const shares = bench.count_shares;
     if (!shares) return '<span title="게시물이 적어 인원 분포를 세지 않은 태그입니다 - 인원 태그를 넣지 않습니다">인원 분포 없음</span>';
     const keys = bench.count_tag === 'trio' ? ['solo', 'duo', 'trio', 'group'] : ['solo', 'duo', 'group'];
     const cells = keys.map(key => (key === bench.count_tag ? `<b>${key} ${percent(shares[key])}</b>` : `${key} ${percent(shares[key])}`));
     const title = '이 태그가 붙은 e621 게시물에 함께 붙은 인원 태그의 비율입니다. '
-      + (bench.count_tag ? `혼자 나오는 일이 드문 태그라 틀의 {인원} 자리에 ${bench.count_tag} 를 넣었습니다`
-        : '혼자 나오는 일이 드문 태그에만 {인원} 자리에 인원 태그를 넣습니다 - 이 태그에는 넣지 않았습니다');
+      + (bench.count_tag ? `혼자 나오는 일이 드문 태그라 ${bench.count_tag} 를 넣었습니다`
+        : '혼자 나오는 일이 드문 태그에만 인원 태그를 넣습니다 - 이 태그에는 넣지 않았습니다');
     return `<span title="${esc(title)}">${cells.join(' · ')}</span>`;
-  }
-
-  function benchPreviewHtml(bench) {
-    if (bench.error) return `<span class="e6-bench-error">${esc(bench.error)}</span>`;
-    const titles = {tag: '고른 태그', count: '자동으로 넣은 인원 태그'};
-    return (bench.parts || []).map(part => `<span class="e6-bench-part${part.kind ? ` ${esc(part.kind)}` : ''}"${
-      titles[part.kind] ? ` title="${titles[part.kind]}"` : ''}>${esc(part.text)}</span>`).join('<span class="e6-bench-sep">, </span>');
   }
 
   // 노드에 마지막으로 써 넣은 HTML 을 적어 둔다 - 같으면 다시 쓰지 않는다(영역이 다시 쓰이면 노드도 새것이다).
@@ -624,22 +617,21 @@ export function createE621EventPanel({
     return canQuery() ? moduleBody.querySelector(`[data-e621-bench="${name}"]`) : null;
   }
 
-  // 테스트 생성의 값들을 상태에 맞춘다. ⚠️ 치는 중인 틀 · 끄는 중인 가중치는 건드리지 않는다.
+  // 테스트 생성의 값들을 상태에 맞춘다.
+  // ⚠️ 손으로 고친 글은 자동 조립이 그대로인 동안 건드리지 않는다(다른 응답이 와도 남는다). 자동 조립이 바뀌면
+  //    (다른 태그를 골랐다 · 가중치를 바꿨다) 그 글은 지난 프롬프트의 것이다 - 버리고 새 조립을 넣는다.
   function syncBench(state) {
+    if (!hasBench(state) || !canQuery()) return;
     const bench = state.bench;
-    if (!bench || !state.selected || !canQuery()) return;
     const input = document.getElementById('e621BenchInput');
     if (!input) return;
-    // 서버가 내 글을 받아 적었다 - 초안을 놓는다.
-    if (ui.benchDraft !== null && ui.benchDraft === bench.template) ui.benchDraft = null;
+    if (ui.benchDraft && ui.benchDraft.base !== bench.prompt) ui.benchDraft = null;
     if (ui.weightDraft !== null && ui.weightDraft === bench.weight) ui.weightDraft = null;
-    const template = ui.benchDraft ?? bench.template ?? '';
-    if (input.value !== template && document.activeElement !== input) input.value = template;
-    if (input.placeholder !== bench.default_template) input.placeholder = bench.default_template || '';
+    const text = ui.benchDraft ? ui.benchDraft.text : bench.prompt;
+    if (input.value !== text) input.value = text;
     const reset = benchNode('reset');
-    if (reset) reset.hidden = template === bench.default_template;
+    if (reset) reset.hidden = text === bench.prompt;
     writeNode(benchNode('count'), benchCountHtml(bench));
-    writeNode(benchNode('preview'), benchPreviewHtml(bench));
     const weight = ui.weightDraft ?? (Number(bench.weight) || 0);
     const slider = benchNode('weight');
     if (slider && Number(slider.value) !== weight) slider.value = String(weight);
@@ -647,43 +639,37 @@ export function createE621EventPanel({
     if (label && label.textContent !== weightText(weight)) label.textContent = weightText(weight);
     const pipeline = benchNode('pipeline');
     if (pipeline) pipeline.checked = state.use_main_pipeline !== false;
-    const go = benchNode('go');
-    if (go) go.disabled = Boolean(bench.error);
   }
 
-  // 틀을 서버에 보낸다(치다 멈췄을 때 · 생성 직전). 보낸 뒤에도 초안은 서버가 같은 글을 돌려줄 때까지 쥐고 있다.
-  function flushBench() {
-    if (benchTimer) clearTimeout(benchTimer);
-    benchTimer = null;
-    if (ui.benchDraft !== null) send('testbench', ui.benchDraft);
-  }
-
+  // 글상자를 손으로 고쳤다 - 그 글과, 고치기 시작한 자동 조립을 함께 적어 둔다.
   function draftBench(text) {
-    ui.benchDraft = text;
-    if (benchTimer) clearTimeout(benchTimer);
-    benchTimer = setTimeout(flushBench, BENCH_SEND_MS);
+    if (!hasBench(lastState)) return;
+    const base = lastState.bench.prompt;
+    ui.benchDraft = text === base ? null : {text, base};
     const reset = benchNode('reset');
-    if (reset && lastState?.bench) reset.hidden = text === lastState.bench.default_template;
+    if (reset) reset.hidden = text === base;
   }
 
   function resetBench() {
-    const fallback = lastState?.bench?.default_template;
     const input = document.getElementById('e621BenchInput');
-    if (typeof fallback !== 'string' || !input) return;
-    input.value = fallback;
-    ui.benchDraft = fallback;
-    flushBench();
+    if (!input || !hasBench(lastState)) return;
+    ui.benchDraft = null;
+    input.value = lastState.bench.prompt;
     const reset = benchNode('reset');
     if (reset) reset.hidden = true;
   }
 
+  // 글상자에 보이는 글을 그대로 보낸다.
   function generateBench() {
     const input = document.getElementById('e621BenchInput');
     const now = Date.now();
-    if (!input || !lastState?.bench || lastState.bench.error || now - ui.benchSentAt < BENCH_AGAIN_MS) return;
+    if (!input || !hasBench(lastState) || now - ui.benchSentAt < BENCH_AGAIN_MS) return;
+    if (!input.value.trim()) {
+      // 빈 글을 보내면 서버는 자동 조립으로 대신한다 - 비운 사람이 바란 것이 아니다.
+      if (showToast) showToast('보낼 프롬프트가 비어 있습니다', 'error');
+      return;
+    }
     ui.benchSentAt = now;
-    // 치다 만 틀을 먼저 보낸다 - 서버가 적어 둔 옛 틀로 생성되면 안 된다.
-    flushBench();
     send('generate', input.value);
   }
 
@@ -1173,22 +1159,12 @@ const PANEL_CSS = `
 .e6-region-bench{flex:0 0 auto}
 .e6-bench{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:8px 12px 10px;border:1px solid var(--border-dim);border-radius:5px;
   background:var(--bg-deep)}
-.e6-bench-head{display:flex;align-items:baseline;gap:8px}
-.e6-bench-head .e6-sec-head{margin:0}
-.e6-bench-head .e6-link{margin-left:auto}
-.e6-bench-head .e6-link[hidden]{display:none}
-.e6-bench .e6-bench-input{box-sizing:border-box;min-height:44px;max-height:132px;padding:6px 8px;border-radius:4px;font-family:var(--font-mono);
-  font-weight:400;line-height:1.5;word-break:normal;overflow-wrap:anywhere}
-.e6-bench-line{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 8px;color:var(--text-dim);font-size:10px}
-.e6-bench-count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;cursor:help}
+.e6-bench-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;color:var(--text-dim);font-size:10px}
+.e6-bench-line .e6-link[hidden]{display:none}
+.e6-bench-count{margin-left:auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;cursor:help}
 .e6-bench-count b{color:#9cc4f5;font-weight:600}
-.e6-bench-preview{min-height:18px;max-height:88px;overflow:auto;padding:4px 8px;border:1px dashed var(--border-dim);border-radius:4px;
-  color:var(--text-primary);font-family:var(--font-mono);font-size:11px;line-height:1.7;overflow-wrap:anywhere}
-.e6-bench-part.tag,.e6-bench-part.count{padding:1px 4px;border-radius:3px}
-.e6-bench-part.tag{background:rgba(124,106,239,0.3)}
-.e6-bench-part.count{background:rgba(106,170,239,0.22);color:#b9d6f7}
-.e6-bench-sep{color:var(--text-dim)}
-.e6-bench-error{color:#ff9a9a;font-family:var(--font-display)}
+.e6-bench .e6-bench-input{box-sizing:border-box;min-height:62px;max-height:160px;padding:6px 8px;border-radius:4px;font-family:var(--font-mono);
+  font-weight:400;line-height:1.5;word-break:normal;overflow-wrap:anywhere}
 .e6-bench-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;min-width:0}
 .e6-bench-weight{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-size:11px;white-space:nowrap}
 .e6-bench-weight input{width:88px;margin:0;accent-color:var(--accent)}

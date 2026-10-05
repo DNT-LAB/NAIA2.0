@@ -50,6 +50,17 @@ def serialize_tag(exact_tag: str, weight, api_mode: str) -> str:
     return f"{number}::{tag} ::" if api_mode == "NAI" else f"({tag}:{number})"
 
 
+def editable_tag(exact_tag: str, weight, api_mode: str) -> str:
+    """화면에 보이고 사용자가 고치는 글의 한 조각. 가중치는 그 모드의 표기로 적되 괄호는 이스케이프하지 않는다 -
+    보낼 때 prepare_template 가 이 글을 다시 읽어 serialize_tag 와 같은 글로 만든다(이스케이프는 거기서 한 번만)."""
+    weight = validate_weight(weight, api_mode)
+    tag = display_tag(exact_tag)
+    if weight == 1.0:
+        return tag
+    number = format(Decimal(str(weight)).normalize(), "f")
+    return f"{number}::{tag} ::" if api_mode == "NAI" else f"({tag}:{number})"
+
+
 def clean_prompt(text: str) -> str:
     """Full-line comments and physical line breaks are template separators."""
     lines = [line.strip() for line in str(text).splitlines()

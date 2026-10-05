@@ -102,18 +102,27 @@ def is_e621_only(record) -> bool:
 
 
 def add_e621_name_keyword(record, name) -> bool:
-    """번역 표가 먼저 만든 E621 레코드에는 검색어만 있고 이름이 없다 - 이름을 검색어 맨 앞에 넣는다.
+    """E621 이름을 검색어 맨 앞에 넣는다 - 이름으로 찾아지게. 넣는 곳은 둘이다.
 
+    · 번역 표가 먼저 만든 E621 레코드(2): 검색어만 있고 이름이 없다.
+    · Danbooru 사전에 태그는 있는데 **한국어가 하나도 없는** 레코드: E621 이름으로 채운다. Danbooru 가 한국어를 갖고 있으면
+      손대지 않는다(Danbooru 우선). 넣은 이름은 `_e621_name` 에 적어 둔다 - 보충 검색어의 임자로 치지 않는다.
+      (실측 2026-10-05: 이름 원장이 옛 검색어를 비우자 panty gag · snowstorm 등 28개가 한국어를 전부 잃었다.)
     원본 사전이 채운 레코드(14)는 이름이 곧 keywords_kr 이라 손댈 것이 없다. 이름이 이미 검색어에 있으면 그대로 둔다.
     """
     name = str(name or "").strip()
-    if not name or record.get("_src") != 2 or "," in name:
+    if not name or "," in name or record.get("_src") == 14:
         return False
     previous = str(record.get("keywords_kr") or "")
+    borrowed = record.get("_src") != 2
+    if borrowed and has_hangul(previous):
+        return False
     have = {normalize_tag_key(part.replace("<", "").replace(">", "")).replace(" ", "") for part in previous.split(",")}
     if normalize_tag_key(name).replace(" ", "") in have:
         return False
     record["keywords_kr"] = name + (", " + previous if previous.strip() else "")
+    if borrowed:
+        record["_e621_name"] = name
     _refresh_lookup_fields(record)
     return True
 
@@ -130,10 +139,11 @@ def build_supplement_index(raw) -> SupplementIndex:
         # (실측: 이름 283개를 넣자 `1girl` 이 '여캐' 를, `pussy` 가 '여성기' 를, `hetero` 가 '남녀 커플' 을 잃었다).
         if is_e621_only(record):
             continue
+        borrowed = normalize_tag_key(record.get("_e621_name") or "")      # E621 에서 빌려 온 이름 - 이것도 임자가 아니다
         for field_name in ("keywords_kr", "keywords"):
             for part in str(record.get(field_name) or "").split(","):
                 keyword = normalize_tag_key(part.replace("<", "").replace(">", ""))
-                if has_hangul(keyword):
+                if has_hangul(keyword) and keyword != borrowed:
                     owners[keyword.replace(" ", "")].add(tag)
     return SupplementIndex(records, owners)
 

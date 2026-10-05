@@ -383,7 +383,7 @@
     },
     {
       "e621_tag": "4_fingers",
-      "label": "손가락 네 개",
+      "label": "손가락 4개",
       "description": "한 손에 손가락이 네 개 있는 캐릭터. 엄지가 있으면 총수에 포함하며, 엄지 없이 네 개인 경우도 포함한다.",
       "keywords": "",
       "review_status": "reviewed_direct_definition",
@@ -3779,7 +3779,7 @@
     },
     {
       "e621_tag": "3_toes",
-      "label": "세 발가락",
+      "label": "발가락 3개",
       "keywords": [
         "발가락 3개"
       ],
@@ -5445,10 +5445,8 @@
     },
     {
       "e621_tag": "on_side",
-      "label": "누운자세",
-      "keywords": [
-        "옆으로 눕기"
-      ],
+      "label": "옆으로 눕기",
+      "keywords": [],
       "review_status": "reviewed_search_terms",
       "independent_review": true,
       "reviewer": "gpt-6.1-sol",

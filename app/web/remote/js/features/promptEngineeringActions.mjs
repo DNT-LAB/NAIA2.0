@@ -54,7 +54,7 @@ export function createPromptEngineeringActions({
     const input = document.getElementById('modPresetNewName');
     const name = input ? input.value.trim() : '';
     if (!name) {
-      showToast('랜덤 칸 이름을 입력하세요', 'error');
+      showToast('랜덤 프리셋 이름을 입력하세요', 'error');
       return;
     }
     flushPresetSaveState();

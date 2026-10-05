@@ -623,9 +623,13 @@ class PromptEngineeringRandomizedSubscriber:
         view = store.randomized_view(current)
         pool = list(view["pool"])
         if not pool:
+            state["randomized_picked"] = {"slot": current, "preset": ""}
             print("⚠️ 랜덤 프리셋 목록이 비어있습니다")
             return
         selected = random.choice(pool)
+        # 무엇을 뽑았는지 적어 둔다 - 화면의 Prefix · Postfix 는 이 프리셋의 글이고(읽기 전용), 이름이 없으면
+        # 사용자는 그 글이 어디서 왔는지 알 길이 없다(사용자 지적 2026-10-05). 세션 상태일 뿐 저장하지 않는다.
+        state["randomized_picked"] = {"slot": current, "preset": selected}
         preset_data = store.read_preset_data(selected, store.mode())
         module_settings = dict(preset_data.get("module_settings") or {})
         updates = {}

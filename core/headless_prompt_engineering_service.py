@@ -14,6 +14,8 @@ HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "*snapshot", "(프리셋 �
 
 # 어느 프리셋을 보고 친 글인지 표식을 함께 받는 키들(위 `_text_and_preset_stamp`).
 _STAMPED_TEXT_KEYS = frozenset({"pre_prompt", "post_prompt", "auto_hide"})
+# 랜덤 프리셋(`*randomized` · `*randomized:이름`)을 고른 동안 받지 않는 글 - 굴림이 채우는 칸이다.
+_RANDOMIZED_READONLY_KEYS = frozenset({"pre_prompt", "post_prompt"})
 
 
 # ANIMA 기본 추천(사용자 지정 2026-09-27) — COMFYUI(외부 ComfyUI · 관리형 ANIMA 엔진 공통)와 WEBUI 가 같이 쓴다.
@@ -325,6 +327,8 @@ class HeadlessPromptEngineeringService:
             "randomized_name": randomized["name"],
             "randomized_names": store.randomized_names(),
             "randomized_can_delete": randomized["name"] != RANDOMIZED_PRESET,
+            # 이번에 뽑힌 프리셋 - 지금 고른 랜덤 프리셋에서 굴린 것일 때만(다른 칸에서 굴린 이름을 싣지 않는다).
+            "randomized_picked": self._randomized_picked(state),
             "randomized_preset_list": list(randomized["pool"]),
             "randomized_available_presets": store.randomized_available_presets(),
             "randomized_wildcard_front": randomized["wildcard_front"],
@@ -422,6 +426,14 @@ class HeadlessPromptEngineeringService:
                     flush=True,
                 )
                 return self.state()
+        if key in _RANDOMIZED_READONLY_KEYS and is_randomized_preset_name(
+            store.state(self._preset_mode()).get("current_preset")
+        ):
+            # 랜덤 프리셋의 Prefix · Postfix 는 **뽑힌 프리셋의 글**이다 - 읽기 전용(사용자 지정 2026-10-05).
+            # 고친 글은 어디에도 저장되지 않고 다음 Random 의 굴림이 덮으므로, 받으면 '고쳐졌다' 고 보일 뿐이다.
+            # 입구가 여럿이라(PE 창 · 빠른 수정 창 · /prefix · Artist Thumbnail · 에이전트) 여기 한 곳에서 막는다.
+            print(f"[info] dropped prompt-engineering edit ({key}): randomized preset is read-only", flush=True)
+            return self.state()
         if key == "pre_prompt":
             store.apply_settings({"pre_prompt": text_value})
         elif key == "post_prompt":
@@ -1020,6 +1032,14 @@ class HeadlessPromptEngineeringService:
         except Exception as exc:  # noqa: BLE001 - 반영 실패가 프롬프트 편집을 막으면 안 된다
             print(f"[warn] preset prompt sync failed: {ascii(exc)}", flush=True)
             return ""
+
+    @staticmethod
+    def _randomized_picked(state: dict[str, Any]) -> str:
+        """지금 고른 랜덤 프리셋이 이번에 뽑은 프리셋의 이름. 굴린 적이 없거나 풀이 비었으면 빈 글."""
+        picked = state.get("randomized_picked")
+        if not isinstance(picked, dict) or picked.get("slot") != state.get("current_preset"):
+            return ""
+        return str(picked.get("preset") or "")
 
     def _roll_randomized_preset(self) -> None:
         """지금 고른 랜덤 칸의 풀에서 한 번 뽑아 Prefix · Postfix 에 놓는다 - Random 이 하는 것과 같은 굴림이다

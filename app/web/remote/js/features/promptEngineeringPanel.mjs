@@ -57,8 +57,8 @@ const PE_QUICK_PRESET_GUIDE = [
   'Quick Preset — 프롬프트 엔지니어링 설정과 생성 파라미터를 하나로 묶어 저장/불러옵니다. 드롭다운에서 고르면 즉시 적용됩니다.',
   '포함 항목: Prefix·Postfix·Auto-Hide 프롬프트, Preprocessing 옵션, 그리고 생성 파라미터(모델·스텝·CFG·샘플러·해상도 등)와 프롬프트/네거티브.',
   '[Add] 현재 설정을 새 프리셋으로 저장 · [Manage] 이름 변경·삭제·썸네일 관리. 프리셋은 API 모드(NAI/WEBUI/COMFYUI)별로 구분되어 저장됩니다.',
-  '랜덤 칸(*randomized) — Random 을 누를 때마다 풀에서 프리셋 하나를 뽑아 그 Prefix·Postfix 를 씁니다. '
-    + '[Add] › [랜덤 칸으로] 로 여러 개 만들 수 있고, 만든 칸은 그때의 모델·생성 설정·네거티브를 기억합니다 '
+  '랜덤 프리셋(*randomized) — Random 을 누를 때마다 풀에서 프리셋 하나를 뽑아 그 Prefix·Postfix 를 씁니다(뽑힌 글은 읽기 전용입니다 — 고치려면 풀의 프리셋을 고치세요). '
+    + '[Add] › [랜덤 프리셋으로 적용] 으로 여러 개 만들 수 있고, 만든 랜덤 프리셋은 그때의 모델·생성 설정·네거티브를 기억합니다 '
     + '(NAI4.5 용 · NAI5 용을 따로 두고, 고르면 그 설정으로 넘어갑니다). 풀은 [Manage] 에서 채웁니다.',
   '*snapshot — Fn › Snapshot 에서 스냅샷을 불러온 뒤의 임시 프리셋입니다. 여기서 고친 것은 프리셋 파일이 아니라 '
     + '그 임시 작업본에만 남습니다. 프리셋으로 남기려면 [Add] 로 새 프리셋을 만드세요.',
@@ -393,7 +393,8 @@ export function createPromptEngineeringPanel({
 
   function captureFocus() {
     const active = document.activeElement;
-    if (!active || !PE_EDITABLE_IDS.includes(active.id)) return null;
+    // 읽기 전용 칸(랜덤 프리셋의 Prefix · Postfix)에는 지킬 편집이 없다 - 초점이 있어도 새 굴림을 그대로 그린다.
+    if (!active || !PE_EDITABLE_IDS.includes(active.id) || active.readOnly) return null;
     return {
       id: active.id,
       value: active.value,
@@ -570,16 +571,34 @@ export function createPromptEngineeringPanel({
     </div>
   `;
 
+    // 랜덤 프리셋을 고른 동안 Prefix · Postfix 는 **이번에 뽑힌 프리셋의 글**이다(사용자 지정 2026-10-05: 읽기 전용).
+    // 고쳐도 저장되지 않고 다음 Random 이 덮는다 - 고칠 수 있게 두면 랜덤 프리셋의 자기 글처럼 읽힌다. 서버도 받지 않는다.
+    const rolled = !!m.randomized_active;
+    const rolledPool = Array.isArray(m.randomized_preset_list) ? m.randomized_preset_list : [];
+    const pickedName = rolled ? String(m.randomized_picked || '') : '';
+    const pickedSummary = pickedName ? summaryMap.get(pickedName) : null;
+    const pickedBadge = pickedSummary && pickedSummary.model_label
+      ? `<span class="custom-select-model-tag" data-family="${escHtml(pickedSummary.model_family || '')}" data-variant="${escHtml(pickedSummary.model_variant || '')}">[${escHtml(pickedSummary.model_label)}]</span> `
+      : '';
+    const rolledHtml = !rolled ? '' : (
+      !rolledPool.length
+        ? '<div class="pe-rolled-line is-empty">풀이 비어 있습니다 — [Manage] 에서 프리셋을 넣으세요</div>'
+        : `<div class="pe-rolled-line"><span class="pe-rolled-label">이번에 뽑힌 프리셋</span><span class="pe-rolled-name">${pickedBadge}${escHtml(pickedName || '—')}</span><span class="pe-rolled-count">풀 ${rolledPool.length}개 중</span></div>`
+    );
+    const rolledNote = rolled ? '<span class="pe-rolled-note">뽑힌 프리셋의 것 · 읽기 전용</span>' : '';
+    const rolledAttrs = rolled ? ' readonly aria-readonly="true" title="랜덤 프리셋에서는 고칠 수 없습니다 — 풀의 프리셋을 고치세요"' : '';
+
     moduleBody.innerHTML = `
     ${presetControlHtml}
+    ${rolledHtml}
     <div class="pe-prompt-stack">
       <div class="pe-prompt-field">
-        <div class="mod-section-label has-actions"><span>Prefix Prompt</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea>
+        <div class="mod-section-label has-actions"><span>Prefix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
+        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea>
       </div>
       <div class="pe-prompt-field">
-        <div class="mod-section-label has-actions"><span>Postfix Prompt</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_POSTFIX_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" data-preset="${escHtml(m.preset || '')}" placeholder="postfix tags..." oninput="onModTextEdit('prompt_engineering','post_prompt',this.value,this.dataset.preset)">${escHtml(m.post_prompt)}</textarea>
+        <div class="mod-section-label has-actions"><span>Postfix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_POSTFIX_GUIDE)}">ⓘ 가이드</button></span></div>
+        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" data-preset="${escHtml(m.preset || '')}" placeholder="postfix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','post_prompt',this.value,this.dataset.preset)">${escHtml(m.post_prompt)}</textarea>
       </div>
       <div class="pe-prompt-field">
         <div class="mod-section-label has-actions"><span>Auto-Hide (Filter)</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_AUTOHIDE_GUIDE)}">ⓘ 가이드</button></span></div>

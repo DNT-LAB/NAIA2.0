@@ -10910,7 +10910,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261004-snapshot')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261005-rolled')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -10926,7 +10926,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261004-snapshot')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261005-rolled')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -11711,7 +11711,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260927-cpus
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261004-snapshot')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261005-rolled')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },

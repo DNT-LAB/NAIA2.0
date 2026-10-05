@@ -161,7 +161,7 @@ export function createPromptEngineeringPopupRenderers({
     + '매 생성 새로 추출됩니다. 둘을 섞어 써도 됩니다.\\n\\n'
     + '앞 = Prefix 앞(artist 류 권장), 뒤 = Prefix 뒤(character 류 권장). '
     + '(와일드카드는 구식 <...>가 아닌 __이름__ 형식)\\n\\n'
-    + '체크를 끄면 주입하지 않으며, 랜덤 칸에서만 동작합니다. 랜덤 칸마다 따로 둡니다.';
+    + '체크를 끄면 주입하지 않으며, 랜덤 프리셋에서만 동작합니다. 랜덤 프리셋마다 따로 둡니다.';
   let randomizedPreview = null;
   let randomizedPreviewHideTimer = null;
 
@@ -333,11 +333,11 @@ export function createPromptEngineeringPopupRenderers({
     </label>
     <div class="mod-inline-row">
       <button class="mod-btn-secondary" onclick="createPromptPreset()">Save As</button>
-      <button class="mod-btn-secondary" onclick="createRandomizedSlot()">랜덤 칸으로</button>
+      <button class="mod-btn-secondary" onclick="createRandomizedSlot()">랜덤 프리셋으로 적용</button>
       <button class="mod-btn-secondary" onclick="closePePresetAddPanel()">Close</button>
     </div>
-    <p class="pe-preset-hint">[랜덤 칸으로] = 이 이름의 랜덤 칸(<code>*randomized:이름</code>)을 만듭니다. Random 때마다 풀에서
-      프리셋을 뽑아 쓰는 칸이고, 지금의 모델 · 생성 설정 · 네거티브를 기억합니다. 풀은 만든 뒤 [Manage] 에서 채웁니다.</p>
+    <p class="pe-preset-hint">[랜덤 프리셋으로 적용] = 이 이름의 랜덤 프리셋(<code>*randomized:이름</code>)을 만듭니다. Random 때마다 풀에서
+      프리셋을 뽑아 쓰고, 지금의 모델 · 생성 설정 · 네거티브를 기억합니다. 풀은 만든 뒤 [Manage] 에서 채웁니다.</p>
   `;
     const input = document.getElementById('modPresetNewName');
     if (input) {
@@ -529,7 +529,7 @@ export function createPromptEngineeringPopupRenderers({
       : '';
     const poolHtml = pool.length
       ? pool.map(preset => `
-        <div class="pe-randomized-row${offGroup(preset) ? ' is-off-group' : ''}"${offGroup(preset) ? ' title="이 랜덤 칸의 모델과 갈래가 다른 프리셋입니다"' : ''}>
+        <div class="pe-randomized-row${offGroup(preset) ? ' is-off-group' : ''}"${offGroup(preset) ? ' title="이 랜덤 프리셋의 모델과 갈래가 다른 프리셋입니다"' : ''}>
           <span class="pe-randomized-name">${modelTagHtml(summaryMap.get(String(preset)))}${escHtml(preset)}</span>
           <div class="pe-randomized-actions">
             <button class="mod-btn-secondary mod-btn-compact" data-randomized-switch="${escHtml(preset)}">Switch</button>
@@ -548,8 +548,8 @@ export function createPromptEngineeringPopupRenderers({
       <button class="mod-btn-danger" ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
     </div>
     <p class="pe-preset-hint">${canSaveCurrent
-      ? '이 랜덤 칸은 모델 · 생성 설정 · 네거티브를 기억합니다 — 고르면 그 설정으로 넘어가고, 바꾸면 바로 반영됩니다.'
-      : '기본 랜덤 칸은 생성 설정을 기억하지 않습니다(지금 설정을 그대로 씁니다). 모델별로 나눠 쓰려면 [Add] › [랜덤 칸으로] 로 칸을 더하세요.'}</p>
+      ? '이 랜덤 프리셋은 모델 · 생성 설정 · 네거티브를 기억합니다 — 고르면 그 설정으로 넘어가고, 바꾸면 바로 반영됩니다.'
+      : '기본 랜덤 프리셋은 생성 설정을 기억하지 않습니다(지금 설정을 그대로 씁니다). 모델별로 나눠 쓰려면 [Add] › [랜덤 프리셋으로 적용] 으로 더하세요.'}</p>
     <div class="mod-section-label">Randomized Pool</div>
     <div class="pe-randomized-list">${poolHtml}</div>
     <div class="pe-randomized-wc">

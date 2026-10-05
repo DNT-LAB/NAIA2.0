@@ -13370,6 +13370,18 @@ body.detached-metadata .metadata-layout {
 }
 /* 이 랜덤 칸의 모델과 갈래가 다른 프리셋 - 흐리게 두어 '여기 안 맞는 것' 이 한눈에 보이게 한다(막지는 않는다). */
 .pe-randomized-row.is-off-group .pe-randomized-name { opacity: 0.5; }
+/* 랜덤 프리셋을 고른 동안의 PE 창: 무엇이 뽑혔는지 한 줄 + Prefix · Postfix 는 읽기 전용(뽑힌 프리셋의 글이다). */
+.pe-rolled-line {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(124, 138, 255, 0.08); font-size: 11.5px;
+}
+.pe-rolled-line.is-empty { color: var(--text-dim); }
+.pe-rolled-label { flex: 0 0 auto; color: var(--text-dim); }
+.pe-rolled-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); }
+.pe-rolled-count { flex: 0 0 auto; color: var(--text-dim); font-size: 10.5px; }
+.pe-rolled-note { margin-left: 8px; color: var(--text-dim); font-size: 10.5px; font-weight: normal; letter-spacing: 0; text-transform: none; }
+.pe-textarea[readonly] { border-style: dashed; background: transparent; color: var(--text-dim); cursor: default; }
 .pe-randomized-empty {
   min-height: 44px;
   display: flex;

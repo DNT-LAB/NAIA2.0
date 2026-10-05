@@ -229,6 +229,36 @@ async def _run_snapshot_dataset_command(context: WebSessionContext, command: dic
     return service.merge_apply(first, second)
 
 
+async def _show_applied_snapshot_image(context: WebSessionContext, clients: set[WebSocket], module_state: Any) -> None:
+    """스냅샷을 불러왔으면 그 그림을 결과 히스토리에 올리고 모두에게 알린다(사용자 지정 2026-10-05).
+
+    되돌린 항목이 하나라도 있을 때만이다 - 모드가 달라 막혔거나 고른 항목이 없으면 아무것도 올리지 않는다.
+    불러오기 본체(`HeadlessSnapshotService.apply`)는 건드리지 않는다: 그림은 설정이 다 들어간 **뒤에**, 명령이
+    지나는 이 한 곳에서 올린다(Snapshot 창이든 에이전트든 같은 길). 알림은 가져온 그림과 같은 셋이다
+    (`/api/image/insert-history`) - 새 메시지 종류를 만들지 않는다. 그림이 실패해도 불러오기는 이미 끝났다.
+    """
+    report = module_state.get("apply_report") if isinstance(module_state, dict) else None
+    if not isinstance(report, dict) or not report.get("restored"):
+        return
+    import asyncio
+
+    from app.backend.server.result_display_routes import insert_snapshot_image_to_history
+    from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
+
+    try:
+        # 그림을 풀고 다시 싸는 일(WebP -> PNG -> WebP)이라 이벤트 루프 밖에서 한다. 목록은 저장소의 잠금이 지킨다.
+        stored = await asyncio.to_thread(insert_snapshot_image_to_history, context, str(report.get("name") or ""))
+    except Exception as exc:  # noqa: BLE001 - 그림은 덤이다
+        print(f"[warn] snapshot image was not added to history: {ascii(exc)}", flush=True)
+        return
+    if stored is None:
+        return
+    await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
+    await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+    for evicted in stored.evicted_payloads:
+        await broadcast_json(clients, evicted)
+
+
 async def handle_module_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -424,6 +454,8 @@ async def handle_module_command(
         await broadcast_json(clients, module_state)
     else:
         await _send_json(ws, module_state)
+    if str(command.get("module_id") or "").strip() == "snapshot" and str(command.get("key") or "").strip() == "apply":
+        await _show_applied_snapshot_image(context, clients, module_state)
     if str(command.get("module_id") or "") == "automation":
         # A timer automation must finish on wall-clock time even when no
         # generation is running; spawn the independent expiry watcher.

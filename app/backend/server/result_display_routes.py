@@ -575,7 +575,9 @@ def resolve_result_image_action_source(
     raise FileNotFoundError("Result image is unavailable")
 
 
-def insert_external_image_to_history(context: WebSessionContext, image_bytes: bytes, label: str = "Imported Image"):
+def insert_external_image_to_history(context: WebSessionContext, image_bytes: bytes, label: str = "Imported Image",
+                                     *, source: str = "Imported Image", auto_save: bool = True,
+                                     extra_params: dict[str, Any] | None = None):
     """Insert an arbitrary external image into the result history WITHOUT a prompt.
 
     Lets a pasted / dropped / detected image enter the standard result pipeline
@@ -603,19 +605,45 @@ def insert_external_image_to_history(context: WebSessionContext, image_bytes: by
     safe_label = str(label or "Imported Image")[:120]
     result = {"status": "success", "image": image, "raw_bytes": png_bytes}
     params = {
+        **(extra_params or {}),
         "api_mode": str(context.get_api_mode() or "").upper(),
         "imported_external": True,
-        "_remote_queue_source": "Imported Image",
+        "_remote_queue_source": str(source or "Imported Image"),
         "_remote_queue_label": safe_label,
     }
     request = GenerationRequest(params=params, source_row=None)
     stored = context.result_store.add_api_result(result, request)
-    if context._coerce_bool(context.auto_save_state.get("auto_save", True)):
+    if auto_save and context._coerce_bool(context.auto_save_state.get("auto_save", True)):
         try:
             context.save_history_item(stored.item)
         except Exception:
             pass
     return stored, "이미지를 히스토리에 추가했습니다."
+
+
+def insert_snapshot_image_to_history(context: WebSessionContext, name: str):
+    """불러온 스냅샷의 그림을 결과 히스토리 맨 앞에 올린다(사용자 지정 2026-10-05). 올렸으면 저장 결과, 아니면 None.
+
+    스냅샷은 그림 한 장과 함께 담긴다. 설정만 되돌리면 그 설정이 어떤 그림을 내던 것인지 화면에 없다 - 불러올 때
+    그 그림도 히스토리에 올려, 결과 그림처럼 보고 우클릭(Img2Img · Vibe · 스냅샷 저장)할 수 있게 한다.
+    프롬프트 없는 '가져온 그림' 으로 넣는다(`insert_external_image_to_history`): 담긴 그림은 히스토리의 WebP 사본이라
+    생성 정보가 박혀 있지 않고, 스냅샷의 설정이 그 그림을 만든 설정이라는 보장도 없다 - 설정은 스냅샷이 되돌린다.
+    자동 저장은 하지 않는다 - 불러올 때마다 출력 폴더에 사본이 쌓인다(그림은 이미 스냅샷이 쥐고 있다).
+    같은 스냅샷을 연달아 불러오면 한 번만 올린다(맨 앞이 이미 그 그림이면 건너뛴다).
+    """
+    service = context._snapshot_service()
+    payload = service.image_payload(name)
+    if payload is None:
+        return None
+    image_bytes, _media_type = payload
+    data = service.store().read(name) or {}
+    marker = {"snapshot_source": str(data.get("name") or name), "snapshot_saved_at": str(data.get("saved_at") or "")}
+    latest = context.result_store.latest_item
+    if latest is not None and all(latest.generation_params.get(key) == value for key, value in marker.items()):
+        return None
+    stored, _message = insert_external_image_to_history(
+        context, image_bytes, marker["snapshot_source"], source="Snapshot", auto_save=False, extra_params=marker)
+    return stored
 
 
 def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_type: str = "") -> dict[str, Any]:

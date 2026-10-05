@@ -2974,7 +2974,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261003-layers4')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261005-layer-menu')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -3015,6 +3015,11 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202610
       // 빠져 있었다 - 인페인트 도중 유료 해상도로 갈 길이 아예 없었다.
       getResolutionBands: () => naiResolutionBands,
       getFreePixels: () => naiFreeLimits.pixels,
+      // 우클릭 메뉴의 [이미지 붙여넣기] - 클립보드를 읽어 붙여넣기 훅(위 onPasteImageBlob)으로 보낸다.
+      onRequestPaste: () => {
+        if (resultImageInput) resultImageInput.pasteFromClipboard();
+        else showToast('Image input is not ready', 'error');
+      },
       // Result 패널은 사용자가 손잡이로 높이를 정한다. 캔버스가 열려 있는 동안만
       // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
     });

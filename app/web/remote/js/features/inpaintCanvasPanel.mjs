@@ -52,6 +52,13 @@ const ICON = {
   plus: svg('<path d="M12 5v14M5 12h14"/>', 12),
   upload: svg('<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>', 22),
   keys: svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>', 14),
+  // 우클릭 메뉴
+  flipX: svg('<path d="M12 3v18"/><path d="M8 7.5 3.5 12 8 16.5z"/><path d="m16 7.5 4.5 4.5-4.5 4.5z"/>'),
+  flipY: svg('<path d="M3 12h18"/><path d="M7.5 8 12 3.5 16.5 8z"/><path d="m7.5 16 4.5 4.5 4.5-4.5z"/>'),
+  rotCw: svg('<path d="M20 12a8 8 0 1 1-2.7-6"/><path d="M20 4v5h-5"/>'),
+  rotCcw: svg('<path d="M4 12a8 8 0 1 0 2.7-6"/><path d="M4 4v5h5"/>'),
+  reset: svg('<path d="M4 12a8 8 0 1 0 2.7-6"/><path d="M4 4v5h5"/><circle cx="12" cy="12" r="1.6"/>'),
+  paste: svg('<rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 12h6M9 16h4"/>'),
 };
 
 // 도크 머리의 단축키 툴팁. 예전에는 머리 줄에 글자로 늘어놓아 좁은 화면에서 잘렸다
@@ -65,6 +72,7 @@ const CANVAS_KEYS = [
   [['Ctrl', 'Z'], '이동 · 회전 되돌리기'],
   [['Ctrl', 'V'], '이미지를 새 레이어로 붙여넣기'],
   [['0'], '고른 레이어 초기화'],
+  [['우클릭'], '반전 · 90° 회전 메뉴'],
 ];
 
 // 백엔드 `clamp_scale` 과 같은 한계. 어긋나면 화면이 보내 놓고 다른 값을 되받는다.
@@ -115,6 +123,9 @@ export function createInpaintCanvasPanel({
   onVisibility = () => {},
   getResolutionBands = () => [],
   getFreePixels = () => 1048576,
+  // 우클릭 메뉴의 [이미지 붙여넣기]. 클립보드를 읽는 길은 앱이 쥐고 있다(`resultImageInput`) -
+  // 읽어 온 그림은 붙여넣기 훅을 거쳐 `acceptPastedImage` 로 돌아온다. 없으면 그 줄을 안 띄운다.
+  onRequestPaste = null,
 }) {
   let state = null;
   let restorePop = null;   // 프롬프트 복원 - 출처 고르는 팝업
@@ -712,7 +723,8 @@ export function createInpaintCanvasPanel({
     const hidden = row.visible === false;
     const pct = Math.round((Number(row.scale) || 1) * 100);
     const rot = Math.round(Number(row.rotation) || 0);
-    const meta = hidden ? '숨김' : `${pct}%${rot ? ` · ${rot}°` : ''}`;
+    const meta = hidden ? '숨김'
+      : `${pct}%${rot ? ` · ${rot}°` : ''}${row.flip_x ? ' · ↔' : ''}${row.flip_y ? ' · ↕' : ''}`;
     const tool = (act, icon, title, disabled = false) => `<button type="button" class="ic-lbtn"`
       + ` data-ic-layer-act="${act}"${disabled ? ' disabled' : ''} title="${escHtml(title)}">${icon}</button>`;
     return `<li class="ic-layer${active ? ' is-active' : ''}${hidden ? ' is-hidden' : ''}"`
@@ -761,6 +773,7 @@ export function createInpaintCanvasPanel({
     if (!layersEl) return;
     if (!editing) {
       closeLayerPicker();
+      closeLayerMenu();
       layersEl.hidden = true;
       layersEl.innerHTML = '';
       return;
@@ -894,22 +907,153 @@ export function createInpaintCanvasPanel({
     if (!card) return;
     const id = card.dataset.icLayer;
     const act = target.closest?.('[data-ic-layer-act]')?.dataset.icLayerAct;
-    if (act === 'visible') {
-      send('layer_visible', {id, visible: layerRow(id)?.visible === false});
-      return;
-    }
-    if (act === 'remove') {
-      if (id === 'base') return;
-      // 지운 레이어를 가리키는 되돌리기는 갈 곳이 없다.
-      undoStack = undoStack.filter(snap => snap.id !== id);
-      send('layer_remove', {id});
-      return;
-    }
+    if (act === 'visible') return toggleLayerVisible(id);
+    if (act === 'remove') return removeLayer(id);
     if (act === 'up' || act === 'down') {
       send('layer_move', {id, dir: act});
       return;
     }
     selectLayer(id);
+  }
+
+  // ── 레이어 동작: 도크 · 목록 · 단축키 · 우클릭 메뉴가 **같은 함수**를 부른다 ──────────
+  // 입구마다 따로 짜면 한쪽이 빠뜨린다(초기화의 되돌리기 비우기가 실제로 0 키에서만 빠져 있었다).
+
+  /** 레이어를 처음 자리로. 베이스는 예전 그대로 캔버스 크기까지 원본으로 간다. */
+  function resetLayer(id) {
+    flushTransforms();
+    // ⚠️ 초기화는 **확대(베이스는 캔버스 크기까지)** 되돌린다. 기록을 남겨 두면 그 뒤의
+    //    되돌리기가 이동·회전만 살려 내 **반쪽 상태**가 된다(BLOCK 3).
+    undoStack = [];
+    return id === 'base' ? send('base_reset', null) : send('layer_reset', {id});
+  }
+
+  function toggleLayerVisible(id) {
+    send('layer_visible', {id, visible: layerRow(id)?.visible === false});
+  }
+
+  function removeLayer(id) {
+    if (id === 'base') return;
+    // 지운 레이어를 가리키는 되돌리기는 갈 곳이 없다.
+    undoStack = undoStack.filter(snap => snap.id !== id);
+    send('layer_remove', {id});
+  }
+
+  /** 좌우(`x`) · 상하(`y`) 반전. 화면에 보이는 그대로 뒤집힌다(회전 부호는 서버가 함께 바꾼다).
+   *
+   *  ⚠️ 미뤄 둔 확대/회전을 **먼저** 보낸다. 서버는 반전하면서 회전의 부호를 뒤집는데,
+   *     그 뒤에 늦게 도착한 옛 회전값이 방금 뒤집은 값을 덮으면 그림이 엉뚱한 쪽으로 기운다.
+   */
+  function flipLayer(id, axis) {
+    flushTransforms();
+    send('layer_flip', {id, axis});
+  }
+
+  // ── 우클릭 메뉴(사용자 지정 2026-10-05) ─────────────────────────────────
+  // ⚠️ 결과 이미지의 우클릭 메뉴는 **문서 전체**에 걸려 있고(`resultContextMenu` - 누른 곳이
+  //    `.viewer` 안이면 뜬다), 캔버스 · 레이어 목록 · 도크가 전부 그 뷰어 안에 산다. 여기서
+  //    전파를 끊지 않으면 편집 중인 캔버스 위에 "이미지 저장 · 큐에 추가 · 이미지 삭제" 가
+  //    뜬다(사용자 제보 2026-10-05). 그 자리에는 레이어 메뉴를 띄운다.
+  let layerMenu = null;
+
+  function closeLayerMenu() {
+    if (!layerMenu) return false;
+    layerMenu.remove();
+    layerMenu = null;
+    return true;
+  }
+
+  function layerMenuHtml(id) {
+    const row = layerRow(id);
+    if (!row) return '';
+    const base = id === 'base';
+    const hidden = row.visible === false;
+    const item = (act, icon, label, {hint = '', danger = false, disabled = false, on = false} = {}) =>
+      `<button type="button" role="menuitem" class="ic-menu-item${danger ? ' is-danger' : ''}${on ? ' is-on' : ''}"`
+      + ` data-ic-menu="${act}"${disabled ? ' disabled' : ''}>`
+      + `<span class="ic-menu-icon">${icon}</span><span class="ic-menu-label">${escHtml(label)}</span>`
+      + `${hint ? `<span class="ic-menu-hint">${escHtml(hint)}</span>` : ''}</button>`;
+    const sep = '<div class="ic-menu-sep" role="separator"></div>';
+    return `<div class="ic-menu-head">${ICON.layers}<span>${escHtml(row.name || (base ? '원본' : '이미지'))}</span></div>`
+      // 뒤집혀 있으면 켜진 표시를 한다 - 다시 누르면 풀린다는 것이 보인다.
+      + item('flip-x', ICON.flipX, '좌우 반전', {on: !!row.flip_x})
+      + item('flip-y', ICON.flipY, '상하 반전', {on: !!row.flip_y})
+      + sep
+      + item('rot-cw', ICON.rotCw, '시계 방향 90°')
+      + item('rot-ccw', ICON.rotCcw, '반시계 방향 90°')
+      + sep
+      + item('visible', hidden ? ICON.eye : ICON.eyeOff, hidden ? '보이기' : '숨기기')
+      + item('reset', ICON.reset, '초기화', {hint: '0'})
+      + (typeof onRequestPaste === 'function'
+        ? sep + item('paste', ICON.paste, '이미지 붙여넣기', {hint: 'Ctrl+V'}) : '')
+      + sep
+      + item('remove', ICON.trash, base ? '원본은 지울 수 없습니다' : '레이어 지우기', {danger: true, disabled: base});
+  }
+
+  function openLayerMenu(id, x, y) {
+    closeLayerMenu();
+    const html = layerMenuHtml(id);
+    if (!html) return;
+    const menu = document.createElement('div');
+    menu.className = 'ic-menu';
+    menu.setAttribute('role', 'menu');
+    menu.dataset.icMenuLayer = id;
+    menu.innerHTML = html;
+    document.body.appendChild(menu);
+    // 화면 밖으로 나가지 않게 앉힌다(뷰어 아래쪽에서 누르면 메뉴가 잘린다).
+    const rect = menu.getBoundingClientRect();
+    const maxX = (document.documentElement.clientWidth || window.innerWidth) - rect.width - 6;
+    const maxY = (document.documentElement.clientHeight || window.innerHeight) - rect.height - 6;
+    menu.style.left = `${Math.round(Math.max(6, Math.min(x, maxX)))}px`;
+    menu.style.top = `${Math.round(Math.max(6, Math.min(y, maxY)))}px`;
+    menu.addEventListener('click', onLayerMenuClick);
+    // 메뉴 위에서 또 우클릭해도 결과 이미지 메뉴가 뜨지 않게.
+    menu.addEventListener('contextmenu', (event) => { event.preventDefault(); event.stopPropagation(); });
+    layerMenu = menu;
+  }
+
+  function onLayerMenuClick(event) {
+    const act = event.target.closest?.('[data-ic-menu]')?.dataset.icMenu;
+    if (!act) return;
+    const id = layerMenu?.dataset.icMenuLayer || 'base';
+    closeLayerMenu();
+    // 메뉴가 떠 있는 사이에 세션이 닫혔거나 그 레이어가 지워졌으면 아무것도 안 한다.
+    if (!state?.active || viewMode !== 'edit' || !layerRow(id)) return;
+    if (act === 'flip-x') return flipLayer(id, 'x');
+    if (act === 'flip-y') return flipLayer(id, 'y');
+    // 서버(PIL)는 반시계가 양수다 - 시계 방향은 빼기.
+    if (act === 'rot-cw') return applyTransform('rotation', wrapDeg(tx(id).rotation - 90), null, id);
+    if (act === 'rot-ccw') return applyTransform('rotation', wrapDeg(tx(id).rotation + 90), null, id);
+    if (act === 'visible') return toggleLayerVisible(id);
+    if (act === 'reset') return resetLayer(id);
+    if (act === 'paste') return onRequestPaste?.();
+    if (act === 'remove') return removeLayer(id);
+  }
+
+  /** 캔버스 위 우클릭 - 누른 자리의 레이어를 고르고 그 레이어의 메뉴를 띄운다. */
+  function onStageContextMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();           // 결과 이미지 메뉴로 올라가지 않게
+    if (viewMode !== 'edit' || !state?.active || posStage?.isDragging()) return;
+    const hit = layerAt(canvasPointOf(event));
+    if (hit && hit !== activeLayerId()) selectLayer(hit);
+    openLayerMenu(activeLayerId(), event.clientX, event.clientY);
+  }
+
+  /** 레이어 목록 위 우클릭 - 카드면 그 레이어의 메뉴, 아니면 막기만 한다. */
+  function onLayersContextMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.target.closest?.('[data-ic-layer]')?.dataset.icLayer;
+    if (!id || !state?.active || !layerRow(id)) return;
+    selectLayer(id);
+    openLayerMenu(id, event.clientX, event.clientY);
+  }
+
+  /** 도크 위 우클릭 - 결과 이미지 메뉴만 막는다(글자 칸의 기본 메뉴는 둔다). */
+  function onDockContextMenu(event) {
+    event.stopPropagation();
+    if (!event.target?.matches?.('input, textarea')) event.preventDefault();
   }
 
   // ── 끌어다 놓기: 캔버스(스테이지)나 목록에 놓으면 레이어로 ─────────────────
@@ -1296,16 +1440,7 @@ export function createInpaintCanvasPanel({
       return onSaveCharacterAssetFrame('generated');
     }
     if (action === 'undo') return undoTransform();
-    if (action === 'reset') {
-      flushTransforms();
-      // ⚠️ 초기화는 **확대와 캔버스 크기까지** 되돌린다. 기록을 남겨 두면 그 뒤의
-      //    되돌리기가 이동·회전만 살려 내 **반쪽 상태**가 된다 - 커밋 메시지에
-      //    "절대 안 만든다" 고 적어 놓고 정작 안 비우고 있었다(BLOCK 3).
-      undoStack = [];
-      // 고른 레이어만 되돌린다. 베이스는 예전 그대로 캔버스 크기까지 원본으로 간다.
-      const id = activeLayerId();
-      return id === 'base' ? send('base_reset', null) : send('layer_reset', {id});
-    }
+    if (action === 'reset') return resetLayer(activeLayerId());
     if (action === 'show-layers') return setLayersOpen(true);
     if (action === 'zoom-in') return nudge('scale', 1);
     if (action === 'zoom-out') return nudge('scale', -1);
@@ -1542,12 +1677,7 @@ export function createInpaintCanvasPanel({
       }
       if (event.key === '0') {
         event.preventDefault();
-        // [초기화] 단추와 같은 일 - 고른 레이어만 되돌리고, 되돌리기 기록은 버린다.
-        flushTransforms();
-        undoStack = [];
-        const id = activeLayerId();
-        if (id === 'base') send('base_reset', null);
-        else send('layer_reset', {id});
+        resetLayer(activeLayerId());      // [초기화] 단추 · 우클릭 메뉴와 같은 함수
       }
     };
     document.addEventListener('keydown', onKeyDown);
@@ -1709,7 +1839,9 @@ export function createInpaintCanvasPanel({
     panel.addEventListener('change', onChange);
     panel.addEventListener('input', onInput);
     panel.addEventListener('pointerdown', onPanelPointerDown);
+    panel.addEventListener('contextmenu', onDockContextMenu);
     plane?.addEventListener('pointerdown', onPlanePointerDown);
+    plane?.addEventListener('contextmenu', onStageContextMenu);
     // 레이어 목록은 뷰어 오른쪽에 따로 떠 있다(도크와 한 상자에 넣으면 캔버스를 더 가린다).
     if (viewer) {
       layersEl = document.createElement('div');
@@ -1718,19 +1850,28 @@ export function createInpaintCanvasPanel({
       layersEl.setAttribute('aria-label', '레이어');
       viewer.appendChild(layersEl);
       layersEl.addEventListener('click', onLayersClick);
+      layersEl.addEventListener('contextmenu', onLayersContextMenu);
       for (const target of [layersEl, plane].filter(Boolean)) {
         target.addEventListener('dragenter', onLayerDragOver);
         target.addEventListener('dragover', onLayerDragOver);
         target.addEventListener('dragleave', onLayerDragLeave);
         target.addEventListener('drop', onLayerDrop);
       }
-      // 고르기 팝업은 바깥을 누르면 닫는다.
+      // 고르기 팝업 · 우클릭 메뉴는 바깥을 누르면 닫는다.
       document.addEventListener('pointerdown', (event) => {
+        if (layerMenu && !layerMenu.contains(event.target)) closeLayerMenu();
         if (layerPop && !layersEl.contains(event.target)) {
           closeLayerPicker();
           renderLayers(viewMode === 'edit');
         }
       }, true);
+      // Esc · 창 크기 · 스크롤 · 초점 잃음에도 메뉴를 닫는다(떠 있는 자리가 뜻을 잃는다).
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && closeLayerMenu()) event.stopPropagation();
+      }, true);
+      window.addEventListener('resize', closeLayerMenu);
+      window.addEventListener('blur', closeLayerMenu);
+      window.addEventListener('wheel', closeLayerMenu, {passive: true, capture: true});
     }
     // 슬라이더는 패널 밖에서 손을 떼도 끝난다 - document 에서 받아야 놓치지 않는다.
     document.addEventListener('pointerup', () => { rangeDragging = false; rangeLayer = null; });

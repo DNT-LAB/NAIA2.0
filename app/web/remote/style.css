@@ -27848,6 +27848,44 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 /* 팝업이 열려 있으면 놓기 안내는 팝업 쪽 한 곳만 - 목록 아래의 것까지 켜면 둘이 겹친다. */
 .ic-layers:has(.ic-layer-pop).is-drop .ic-layers-drop { display: none; }
+
+/* ── 레이어 우클릭 메뉴(사용자 지정 2026-10-05) ───────────────────────────
+   캔버스 · 레이어 카드 위에서 결과 이미지 메뉴 대신 뜬다. body 에 붙어 화면 좌표로 선다.
+   쌓임 높이는 결과 이미지 메뉴와 같은 변수를 쓴다 - 숫자를 따로 박지 않는다. */
+.ic-menu {
+  position: fixed; z-index: var(--z-result-context-menu);
+  min-width: 196px; max-width: min(280px, calc(100vw - 16px));
+  display: grid; gap: 2px; padding: 6px;
+  border: 1px solid rgba(157,139,255,0.3); border-radius: 9px;
+  background: rgba(18,18,27,0.98);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.55);
+  user-select: none;
+}
+.ic-menu-head {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px 6px;
+  border-bottom: 1px solid var(--border-dim); margin-bottom: 2px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.04em; color: var(--text-dim);
+}
+.ic-menu-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ic-menu-head svg { flex: none; }
+.ic-menu-item {
+  width: 100%; min-height: 28px; display: flex; align-items: center; gap: 9px;
+  padding: 0 9px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--text-primary); font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.ic-menu-item:hover:not(:disabled) { background: rgba(157,139,255,0.2); }
+.ic-menu-item:disabled { opacity: 0.4; cursor: default; }
+.ic-menu-icon { flex: none; display: inline-flex; color: var(--text-dim); }
+.ic-menu-item:hover:not(:disabled) .ic-menu-icon { color: var(--text-primary); }
+.ic-menu-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+.ic-menu-hint { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+/* 뒤집혀 있는 쪽은 켜진 표시 - 다시 누르면 풀린다는 것이 보인다. */
+.ic-menu-item.is-on { background: rgba(124,106,239,0.24); }
+.ic-menu-item.is-on .ic-menu-icon { color: var(--accent-glow, #9d8bff); }
+.ic-menu-item.is-danger:not(:disabled) { color: #ff7b7b; }
+.ic-menu-item.is-danger:not(:disabled) .ic-menu-icon { color: #ff7b7b; }
+.ic-menu-sep { height: 1px; margin: 3px 4px; background: var(--border-dim); }
 /* 썸네일 격자 안의 안내 한 줄("히스토리가 비어 있습니다")은 한 칸이 아니라 줄 전체를 쓴다 -
    6칸 격자의 한 칸에 들어가 세 줄로 쪼개졌다(복원 팝업도 같은 목록을 쓴다). */
 .ic-restore-list > .ic-restore-hint { grid-column: 1 / -1; }

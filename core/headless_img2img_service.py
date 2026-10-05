@@ -366,6 +366,8 @@ class HeadlessImg2ImgService:
         # 올려 둔 이미지와 숨긴 베이스도 작업이다 - 덮어쓰면 다시 올릴 길이 없다.
         if state.get("layers") or state.get("base_visible", True) is False:
             return True
+        if state.get("base_flip_x") or state.get("base_flip_y"):
+            return True
         try:
             if abs(float(state.get("base_scale") or 1.0) - 1.0) > 1e-6:
                 return True
@@ -501,6 +503,9 @@ class HeadlessImg2ImgService:
             # 이동·확대·회전이 먹는 레이어. 화면은 이것을 보고 선택 테두리를 그린다.
             "active_layer": "base",
             "base_visible": True,
+            # 좌우 · 상하 반전(사용자 지정 2026-10-05). 합성은 반전 -> 확대 -> 회전 순서다.
+            "base_flip_x": False,
+            "base_flip_y": False,
             "layer_counter": 0,
             # 사용자가 칠한 마스크(캔버스 좌표). 빈 곳 마스크와는 따로 보관해야
             # 오프셋을 다시 옮겼을 때 칠한 것을 잃지 않는다.
@@ -821,6 +826,8 @@ class HeadlessImg2ImgService:
                     "placed_height": int(state.get("placed_height") or 0),
                     "scale": float(state.get("base_scale") or 1.0),
                     "rotation": float(state.get("base_rotation") or 0.0),
+                    "flip_x": bool(state.get("base_flip_x")),
+                    "flip_y": bool(state.get("base_flip_y")),
                     "thumb": self._base_thumb(),
                 })
                 continue
@@ -840,6 +847,8 @@ class HeadlessImg2ImgService:
                 "placed_height": int(layer.get("placed_height") or 0),
                 "scale": float(layer.get("scale") or 1.0),
                 "rotation": float(layer.get("rotation") or 0.0),
+                "flip_x": bool(layer.get("flip_x")),
+                "flip_y": bool(layer.get("flip_y")),
                 "thumb": str(layer.get("thumb") or ""),
             })
         active = str(state.get("active_layer") or "base")
@@ -937,6 +946,8 @@ class HeadlessImg2ImgService:
             "offset_y": int(round((canvas_h - placed_h) / 2)),
             "scale": scale,
             "rotation": 0.0,
+            "flip_x": False,
+            "flip_y": False,
             "placed_width": int(placed_w),
             "placed_height": int(placed_h),
             "visible": True,
@@ -997,6 +1008,9 @@ class HeadlessImg2ImgService:
             self._prune_layer_cache()
             return self._recompose_canvas()
 
+        if key == "layer_flip":
+            return self._flip_layer(layer, str(payload.get("axis") or "x").strip().lower())
+
         # ── 여기부터 기하 ────────────────────────────────────────────────
         if layer is None:
             if key == "layer_offset":
@@ -1046,8 +1060,50 @@ class HeadlessImg2ImgService:
                 layer["offset_x"] = int(round((canvas_w - placed_w) / 2))
                 layer["offset_y"] = int(round((canvas_h - placed_h) / 2))
             layer["rotation"] = 0.0
+            layer["flip_x"] = layer["flip_y"] = False
             return self._recompose_canvas()
         return None
+
+    @staticmethod
+    def _oriented(image: Any, flip_x: Any, flip_y: Any):
+        """반전을 먹인 그림. 안 뒤집었으면 **같은 객체**를 그대로 준다(예전과 바이트까지 같다)."""
+        if not flip_x and not flip_y:
+            return image
+        from PIL import Image
+
+        if flip_x:
+            image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if flip_y:
+            image = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        return image
+
+    def _flip_layer(self, layer: dict[str, Any] | None, axis: str) -> dict[str, Any]:
+        """좌우(`x`) · 상하(`y`) 반전 - **화면에 보이는 그대로** 거울처럼 뒤집는다.
+
+        합성 순서는 반전 -> 확대 -> 회전이다. 돌려 둔 레이어를 그 자리에서 뒤집으려면 원본만
+        뒤집어서는 안 된다: 거울(H)과 회전(R)은 `H·R(θ) = R(-θ)·H` 로 엇갈리므로 **회전의
+        부호도 함께 바꾼다.** 안 바꾸면 왼쪽으로 30° 기운 스티커가 뒤집힌 뒤에도 왼쪽으로
+        기울어 있다 - 거울상은 오른쪽으로 기운다.
+
+        자리는 그대로다. 따로 붙잡을 필요가 없다 - θ 와 -θ 의 회전 상자는 크기가 같아
+        (모서리 집합이 서로 거울상이다) 같은 오프셋이 곧 같은 한가운데다. 베이스도 같은 규칙이다.
+        """
+        from utils.v5_inpaint_canvas import normalize_rotation
+
+        context = self.context
+        state = context.img2img_session
+        if axis not in {"x", "y"}:
+            return context._toast("반전 방향을 읽지 못했습니다", level="error")
+        flag = f"flip_{axis}"
+        if layer is None:
+            state[f"base_{flag}"] = not bool(state.get(f"base_{flag}"))
+            state["base_rotation"] = normalize_rotation(-float(state.get("base_rotation") or 0.0))
+        else:
+            layer[flag] = not bool(layer.get(flag))
+            layer["rotation"] = normalize_rotation(-float(layer.get("rotation") or 0.0))
+        if not state.get("canvas_active"):
+            return self.module_state()
+        return self._recompose_canvas()
 
     def generation_event_payload(self) -> dict[str, Any]:
         """Small cross-client lifecycle event; deliberately excludes image/mask bytes."""
@@ -1313,6 +1369,7 @@ class HeadlessImg2ImgService:
             state = context.img2img_session
             state["base_scale"], state["base_rotation"] = 1.0, 0.0
             state["base_offset_x"] = state["base_offset_y"] = 0
+            state["base_flip_x"] = state["base_flip_y"] = False
             # 캔버스 크기도 원본으로 되돌린다. 이게 곧 "원본 그대로" 상태다 -
             # 화면의 `가상 캔버스` 토글이 하던 일을 초기화가 대신한다(사용자 지적
             # 2026-08-26: "역할이 모호합니다"). 실제로 토글은 켜나 끄나 결과가 같았다:
@@ -1432,6 +1489,7 @@ class HeadlessImg2ImgService:
             session["base_offset_y"] = 0
             session["base_scale"] = 1.0
             session["base_rotation"] = 0.0
+            session["base_flip_x"] = session["base_flip_y"] = False
         return self.module_state()
 
     # ------------------------------------------------------------------
@@ -1564,7 +1622,7 @@ class HeadlessImg2ImgService:
             if layer_id == "base":
                 specs.append({
                     "id": "base",
-                    "image": base,
+                    "image": self._oriented(base, state.get("base_flip_x"), state.get("base_flip_y")),
                     "offset_x": int(state.get("base_offset_x") or 0),
                     "offset_y": int(state.get("base_offset_y") or 0),
                     "scale": state.get("base_scale", 1.0),
@@ -1579,7 +1637,7 @@ class HeadlessImg2ImgService:
                 continue
             specs.append({
                 "id": layer_id,
-                "image": image,
+                "image": self._oriented(image, layer.get("flip_x"), layer.get("flip_y")),
                 "offset_x": int(layer.get("offset_x") or 0),
                 "offset_y": int(layer.get("offset_y") or 0),
                 "scale": layer.get("scale", 1.0),

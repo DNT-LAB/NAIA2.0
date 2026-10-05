@@ -1338,6 +1338,10 @@ export function createCharacterPanel({
     const character = storedCharacter(editingUuid, newestState());
     const draft = editDraft;
     if (!character || !draft) return false;
+    // ⚠️ **보냈지만 확인되지 않은 글**(`editPending`)이 있으면 그것과도 견준다(Codex 6차 리뷰). 서버가 한참 바빠 확인이
+    //    늦는 사이 글을 원래대로 되돌려 다시 저장하면, 상태와 같다고 보내지 않았다 - 뒤늦게 처리된 앞 저장이 최종 값이
+    //    된다. 칸의 글이 보낸 글과 다르면 바뀐 것이다(다시 보내면 서버가 차례로 처리해 마지막 것이 남는다).
+    if (editPending && !sameText(draftValues(), editPending)) return true;
     return draft.name.trim() !== String(character.custom_name || '').trim()
       || draft.prompt !== String(character.prompt || '')
       || draft.uc !== String(character.uc || '');

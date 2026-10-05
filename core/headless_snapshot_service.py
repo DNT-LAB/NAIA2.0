@@ -393,7 +393,7 @@ class HeadlessSnapshotService:
                     try:
                         section = parts["characters"]
                         frames = self._validate_characters(section)
-                        replace_character_state(context, context.get_api_mode(), context._character_service().settings_cache(),
+                        replace_character_state(context, context.get_api_mode(),
                                                 frames, section["position_mode"], is_active=section["is_active"])
                         context._v5_scene_last_event = ""
                         restored.append("characters")

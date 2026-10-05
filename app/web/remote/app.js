@@ -2498,7 +2498,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261005-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261005-slotid1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261005-slotid2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -12646,7 +12646,10 @@ function setModuleParam(moduleId, key, value, options = {}) {
 function onModTextEdit(moduleId, key, value, stamp, slotUuid) {
   // 대기 자리는 하나다. 조건부 창(떠 있는 창)과 모듈 팝업은 함께 열려 있을 수 있어서, 한쪽에서 치고
   // 0.5초 안에 다른 칸을 치면 앞 칸의 대기분이 **덮여 사라진다** - 다른 칸의 것은 먼저 보낸다.
-  if (pendingModuleEdit && (pendingModuleEdit.moduleId !== moduleId || pendingModuleEdit.key !== key)) {
+  // ⚠️ **칸(uuid)** 까지 견준다. 번호만 보면, 그 자리에 다른 캐릭터가 온 뒤의 편집이 앞 캐릭터의 대기분을
+  //    지운다 - 키는 둘 다 `char_prompt_0` 이다(Codex 리뷰 2026-10-05).
+  if (pendingModuleEdit && (pendingModuleEdit.moduleId !== moduleId || pendingModuleEdit.key !== key
+      || pendingModuleEdit.slotUuid !== String(slotUuid || ''))) {
     flushPendingModuleEdit();
   }
   if (moduleSendTimer) clearTimeout(moduleSendTimer);
@@ -12663,20 +12666,11 @@ function onModTextEdit(moduleId, key, value, stamp, slotUuid) {
 }
 
 function flushCharacterEdits() {
-  if (currentModuleId !== 'character') return;
-  if (moduleSendTimer) {
-    clearTimeout(moduleSendTimer);
-    moduleSendTimer = null;
-  }
-  pendingModuleEdit = null;
-  const chars = document.querySelectorAll('[data-char-index]');
-  chars.forEach((block) => {
-    const idx = block.dataset.charIndex;
-    const prompt = block.querySelector('.mod-char-prompt');
-    const uc = block.querySelector('.mod-char-uc');
-    if (prompt) setModuleParam('character', `char_prompt_${idx}`, prompt.value);
-    if (uc) setModuleParam('character', `char_uc_${idx}`, uc.value);
-  });
+  // ⚠️ 대기 중인 글 편집을 **보내고** 비운다. 예전에는 대기분을 먼저 지운 뒤 옛 모듈 창의 칸
+  //    (`[data-char-index]`)에서 다시 모아 보냈는데, 그 칸은 워크스페이스로 바뀌며 없어졌다 - 퀵 패널에 치고
+  //    0.5초 안에 모듈 창의 [+ Add] · [Refresh Preview] · 분리를 누르면 친 글이 그대로 버려졌다
+  //    (Codex 리뷰 2026-10-05). 모듈 창의 칸은 칠 때마다 바로 보내므로 따로 모을 것이 없다.
+  flushPendingModuleEdit('character');
 }
 
 function addCharacterSlot() {

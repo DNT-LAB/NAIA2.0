@@ -991,9 +991,15 @@ export function createCharacterQuickPanel({
     // ⚠️ **참/거짓이 아니라 대상 uuid 를 넣는다.** 불리언으로 넣으면 C3 의 연결을
     //    C1 에서 C2 로 바꿔도 서명이 그대로라 다시 그리지 않는다 - 칩은 계속 `C1` 이라
     //    말하고 원본 배지도 옛 슬롯에 붙어 있다(Codex 리뷰 2026-08-24 #6).
+    // ⚠️ **누가 그 자리에 있는가**(uuid)도 넣는다. 빠른 길은 칸을 다시 안 그리고 값만 바꾸는데, 칸에는 그릴
+    //    때의 uuid(`data-cq-uuid`)가 적혀 있고 글 편집은 그것을 함께 보낸다. 같은 자리에 다른 캐릭터가 왔는데
+    //    (일괄 적용 · 씬) 안 그리면 칸은 옛 uuid 를 쥔 채 새 글을 보여 주고, 거기에 친 것을 서버가 **옛
+    //    캐릭터(보관함)** 에 가져다 쓴다(Codex 리뷰 2026-10-05). uuid 는 입력 내용이 아니라 신원이다 -
+    //    글자를 친다고 바뀌지 않으니 아래 '라벨을 넣지 마라' 와 어긋나지 않는다.
     const slots = activeSlots(state)
       .map(({index, character}) =>
-        [index, openSlots.has(index) ? 1 : 0, character && character.muted ? 1 : 0,
+        [index, String((character && character.slot_uuid) || ''),
+         openSlots.has(index) ? 1 : 0, character && character.muted ? 1 : 0,
          String((character && character.connect_to) || '')].join('~'))
       .join('|');
     // `activated` 도 넣는다 - 모듈 팝업에서 끄면 이쪽 체크도 따라와야 한다.

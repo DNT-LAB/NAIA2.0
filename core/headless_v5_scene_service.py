@@ -466,7 +466,7 @@ class HeadlessV5SceneService:
                 prompt = self._wear_cast(prompt, carried)
                 worn += 1
             characters.append({**item, "prompt": prompt})
-        replace_character_state(context, mode, settings, characters, scene["position_mode"])
+        replace_character_state(context, mode, characters, scene["position_mode"])
 
         # 2) 프롬프트 · 해상도
         # 담을 때 뺀 프롬프트 엔지니어링을 여기서 **지금 설정으로** 다시 입힌다.

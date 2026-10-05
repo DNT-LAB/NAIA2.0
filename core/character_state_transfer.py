@@ -46,22 +46,21 @@ def capture_character_state(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def replace_character_state(
-    context: Any, mode: str, settings: dict[str, Any], characters: list[dict[str, Any]],
+    context: Any, mode: str, characters: list[dict[str, Any]],
     position_mode: str, *, is_active: bool | None = None,
 ) -> None:
-    """활성 슬롯을 `characters` 로 **통째 교체**한다. 새 uuid 를 만들고 번호 링크를 그 uuid 로 되살린다.
+    """`mode` 의 활성 슬롯을 `characters` 로 **통째 교체**한다. 새 uuid 를 만들고 번호 링크를 그 uuid 로 되살린다.
 
     `is_active` 를 안 주면 넣은 슬롯이 있을 때 켠다(씬의 규약). 스냅샷은 담을 때의 값을 준다.
+
+    ⚠️ **설정을 넘겨받지 않는다.** 스냅샷 불러오기는 작업 스레드에서 도는데(데이터셋을 옮긴다), 그동안 WS 명령은
+       이벤트 루프에서 같은 설정을 고친다. 부르는 쪽이 미리 집어 든 설정으로 저장하면 그 사이에 보관한 것을 옛
+       사본으로 덮는다(Codex 리뷰 2026-10-05). 읽기부터 저장까지 `set_param` 과 **같은 잠금** 안에서 하고,
+       그 안에서 `mode` 의 지금 설정을 읽는다 - '지금 API 모드' 가 아니다(그 사이에 모드를 바꿀 수 있다).
     """
     service = context._character_service()
-    # ⚠️ **읽기부터 저장까지 한 잠금 안**이다. 스냅샷 불러오기는 작업 스레드에서 도는데(데이터셋을 옮긴다),
-    #    그동안 WS 명령은 이벤트 루프에서 같은 설정을 고친다. 잠금 밖에서 집어 든 설정으로 저장하면 그 사이에
-    #    보관한 것을 옛 사본으로 덮는다(Codex 리뷰 2026-10-05) - 그래서 넘겨받은 `settings` 가 아니라
-    #    잠금 안에서 **지금 설정**을 다시 읽는다. `set_param` 이 쥐는 것과 같은 잠금이다.
     with service._commit_lock:
-        if str(mode or "").upper() == str(context.get_api_mode() or "").upper():
-            settings = service.settings_cache()
-        settings = copy.deepcopy(settings)
+        settings = copy.deepcopy(service.settings_for(mode))
         uuids = [_new_character_uuid() for _ in characters]
         fresh = []
         for index, item in enumerate(characters):

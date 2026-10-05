@@ -226,19 +226,26 @@ class HeadlessCharacterService:
         return cache
 
     def settings_cache(self) -> dict[str, Any]:
+        return self.settings_for(self.context.get_api_mode())
+
+    def settings_for(self, mode: str) -> dict[str, Any]:
+        """**그 모드**의 지금 설정 - 지금 API 모드가 무엇이든. 캐시에 없으면 그 모드의 파일에서 읽는다.
+
+        ⚠️ 한 모드의 설정을 고쳐 쓰는 일(씬 · 스냅샷 불러오기)은 이것으로 읽는다. `settings_cache` 는 '지금 모드'
+           를 읽으므로, 일이 도는 사이에 사용자가 모드를 바꾸면 남의 모드 설정을 집는다(Codex 리뷰 2026-10-05).
+        """
         from core.character_settings import load_character_settings
 
-        mode = self.context.get_api_mode()
+        mode_key = str(mode or "NAI").upper()
         cache = self.settings_by_mode()
-        if mode not in cache:
-            cache[mode] = load_character_settings(
-                mode,
-                path=self.context._existing_save_path(f"CharacterModule_{str(mode or 'NAI').upper()}.json"),
+        if mode_key not in cache:
+            cache[mode_key] = load_character_settings(
+                mode_key,
+                path=self.context._existing_save_path(f"CharacterModule_{mode_key}.json"),
             )
         # 고치기 **전** 의 슬롯 상태를 한 번 적어 둔다 - 저장 때 "활성에서 내려온 것" 을 가르는 기준.
-        states = self._slot_states()
-        states.setdefault(str(mode or "NAI").upper(), self._state_map(cache[mode]))
-        return cache[mode]
+        self._slot_states().setdefault(mode_key, self._state_map(cache[mode_key]))
+        return cache[mode_key]
 
     def _slot_states(self) -> dict[str, dict[str, str]]:
         states = getattr(self.context, "_character_slot_states", None)

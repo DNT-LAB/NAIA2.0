@@ -37,6 +37,7 @@
       "data/event_map_subcategories.json",
       "data/e621_KR_tags.parquet",
       "data/e621_KR_wiki_bodies.parquet",
+      "data/e621_count_profile.parquet",
       "data/interactive_tags.json",
       "data/interactive_axis_tags.json",
       "data/interactive_preset_facts.json",

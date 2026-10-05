@@ -2697,7 +2697,7 @@ const e621WindowReady = e621UsesWindow
       console.error('Failed to initialize E621 research window', error);
     })
   : Promise.resolve();
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261005-e621tip')
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20261005-e621bench')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,

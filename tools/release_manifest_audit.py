@@ -113,6 +113,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/KR_tags.parquet",
     "data/e621_KR_tags.parquet",
     "data/e621_KR_wiki_bodies.parquet",
+    "data/e621_count_profile.parquet",
     # 이벤트 맵 소분류 표(876KB). 색인(.naiamap)은 런타임 다운로드지만 이 표는 번들이다.
     "data/event_map_subcategories.json",
     "data/tag_index/*",
@@ -170,6 +171,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/KR_tags.parquet",
     "*/data/e621_KR_tags.parquet",
     "*/data/e621_KR_wiki_bodies.parquet",
+    "*/data/e621_count_profile.parquet",
     "*/data/event_map_subcategories.json",
     "*/data/tag_index/*",
     "*/data/copyright_groups.json",

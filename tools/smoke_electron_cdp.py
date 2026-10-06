@@ -26,6 +26,14 @@ DEFAULT_ELECTRON_ROOT = ROOT / "app" / "electron"
 DEFAULT_PACKAGE_ROOT = DEFAULT_ELECTRON_ROOT / "dist" / "win-unpacked"
 DEFAULT_DEBUG_PORT = 9336
 DEFAULT_BACKEND_PORT = 7243
+# 포장본 스모크는 빈 임시 user-data 로 뜬다. 앱은 그것을 첫 실행으로 보고 태그 묶음(1.4GB)을 허깅페이스에서 받는다 -
+# 게이트는 포장본 스모크를 **두 번** 돌리므로(작업 공간 러너 + 증거 보고서) 빌드 한 번에 두 번 받았다(v2.0.50 게이트
+# 실측: 197초 + 182초 = 12분 중 6분 남짓, 2.8GB). 그래서 띄우기 전에 저장소의 태그 폴더를 임시 user-data 에 넣어 둔다.
+# 앱은 "이미 설치됨" 으로 보고 바로 뜬다. 첫 실행의 내려받기를 **실제로** 보고 싶을 때만 NAIA_SMOKE_TAG_DOWNLOAD=1.
+DEFAULT_TAG_SEED_DIR = ROOT / "data" / "tags"
+TAG_SEED_DIR_ENV = "NAIA_SMOKE_TAG_SEED_DIR"
+TAG_DOWNLOAD_ENV = "NAIA_SMOKE_TAG_DOWNLOAD"
+TAG_SEED_GLOB = "tags_*.parquet"
 SMOKE_IMAGE_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/"
@@ -103,6 +111,33 @@ def _find_source_electron(electron_root: Path) -> str | None:
 
 def _packaged_exe(package_root: Path, exe_name: str) -> Path:
     return package_root / exe_name
+
+
+def _seed_tag_data(user_data: str | Path, seed_dir: str | Path | None = None) -> dict[str, Any]:
+    """로컬 태그 폴더를 `<user-data>/data/tags` 로 복사한다. 무엇을 했는지 그대로 돌려준다(증거에 남는다).
+
+    하드링크 · 정션이 아니라 **복사**다 - 앱이 그 파일을 고쳐 쓰는 일이 생겨도 저장소의 원본(다시 받으려면 1.4GB)은
+    안 다친다. 넣을 것이 없거나 복사가 도중에 깨지면 그대로 둔다 - 앱이 모자라다고 보고 예전처럼 내려받는다.
+    """
+    source = Path(seed_dir or os.environ.get(TAG_SEED_DIR_ENV) or DEFAULT_TAG_SEED_DIR)
+    report: dict[str, Any] = {"seeded": False, "source": str(source), "files": 0, "seconds": 0.0, "reason": ""}
+    files = sorted(path for path in source.glob(TAG_SEED_GLOB) if path.is_file()) if source.is_dir() else []
+    if not files:
+        report["reason"] = "no local tag files; the app downloads the archive"
+        return report
+    target = Path(user_data) / "data" / "tags"
+    started = time.monotonic()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for path in files:
+            shutil.copyfile(path, target / path.name)
+            report["files"] += 1
+    except OSError as exc:
+        report["reason"] = f"{type(exc).__name__}: {exc}"
+    else:
+        report["seeded"] = True
+    report["seconds"] = round(time.monotonic() - started, 3)
+    return report
 
 
 def build_launch_config(
@@ -1431,6 +1466,7 @@ def smoke_electron_cdp(
     skip_download: bool = False,
     skip_restart: bool = False,
     dry_run: bool = False,
+    download_tags: bool = False,
 ) -> dict[str, Any]:
     temp_user_data: tempfile.TemporaryDirectory[str] | None = None
     if user_data is None:
@@ -1455,6 +1491,15 @@ def smoke_electron_cdp(
                 "launch": config,
                 "violations": [] if dry_run and config.get("ok") else [{"path": "electron", "reason": config.get("reason", "")}] if not config.get("ok") else [],
             }
+
+        # 내가 만든 빈 임시 user-data 일 때만 넣는다(남이 준 user-data 는 건드리지 않는다). 소스 모드는 설치 관문이
+        # 없어 내려받지 않는다 - 저장소의 태그 폴더를 그대로 읽는다.
+        tag_seed: dict[str, Any] = {"seeded": False, "source": "", "files": 0, "seconds": 0.0, "reason": "not applicable"}
+        if mode == "packaged" and temp_user_data is not None:
+            if download_tags or os.environ.get(TAG_DOWNLOAD_ENV) == "1":
+                tag_seed["reason"] = "real first-run download requested"
+            else:
+                tag_seed = _seed_tag_data(user_data)
 
         timings: dict[str, float] = {}
         started = time.monotonic()
@@ -1505,6 +1550,7 @@ def smoke_electron_cdp(
                         "title": target.get("title"),
                     },
                     "timings": timings,
+                    "tagSeed": tag_seed,
                     "state": state,
                     "checks": checks,
                     "violations": violations,
@@ -1523,6 +1569,7 @@ def smoke_electron_cdp(
                         "title": target.get("title"),
                     },
                     "timings": timings,
+                    "tagSeed": tag_seed,
                     "state": state,
                     "checks": {},
                     "violations": [{"path": "electron_cdp_runtime", "reason": f"{type(exc).__name__}: {exc}"}],
@@ -1549,6 +1596,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--user-data", default=None)
     parser.add_argument("--skip-download", action="store_true", help="Do not trigger a synthetic browser download.")
     parser.add_argument("--skip-restart", action="store_true", help="Do not restart the backend through the shell API.")
+    parser.add_argument(
+        "--download-tags",
+        action="store_true",
+        help="Packaged mode: let the app download the tag archive instead of seeding the temp user-data from data/tags.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -1565,6 +1617,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_download=args.skip_download,
         skip_restart=args.skip_restart,
         dry_run=args.dry_run,
+        download_tags=args.download_tags,
     )
     json.dump(payload, sys.stdout, ensure_ascii=True, indent=2)
     sys.stdout.write("\n")

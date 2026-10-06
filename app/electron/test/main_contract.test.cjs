@@ -22,6 +22,22 @@ function writeFile(target, content = "") {
   fs.writeFileSync(target, content, "utf8");
 }
 
+// main.cjs 는 OS 마다 Python 실행 파일 위치가 다르다.
+//   Windows       : <venv>/Scripts/python.exe, <bundled python>/python.exe
+//   macOS / Linux : <venv>/bin/python,         <bundled python>/bin/python
+// 테스트의 가짜 Python 도 같은 규칙으로 만들어야 어느 OS 에서 돌려도 통과한다.
+function venvPythonPath(venvRoot, platform = process.platform) {
+  return platform === "win32"
+    ? path.join(venvRoot, "Scripts", "python.exe")
+    : path.join(venvRoot, "bin", "python");
+}
+
+function bundledPythonPath(pythonRoot, platform = process.platform) {
+  return platform === "win32"
+    ? path.join(pythonRoot, "python.exe")
+    : path.join(pythonRoot, "bin", "python");
+}
+
 function loadMain({
   env = {},
   appData,
@@ -31,6 +47,8 @@ function loadMain({
   spawnImpl,
   cliSwitches = [],
   argv = [],
+  // 기본은 테스트를 돌리는 OS. 다른 OS 의 경로 규칙을 검증할 때만 덮어쓴다.
+  platform = process.platform,
 } = {}) {
   const source = fs.readFileSync(MAIN_PATH, "utf8");
   const opened = [];
@@ -101,7 +119,7 @@ function loadMain({
   };
   const processStub = {
     env: { ...process.env, ...env },
-    platform: process.platform,
+    platform,
     resourcesPath: resourcesPath || process.resourcesPath,
     argv: ["node", MAIN_PATH, ...argv],
   };
@@ -135,17 +153,20 @@ function loadMain({
   return { api: sandbox.module.exports.__test, app, menuCalls, opened };
 }
 
-test("source backend launch config uses repo venv, no-browser, and app data user root", async () => {
+// 소스 모드 venv 경로는 OS 별 규칙이 갈리는 핵심 지점이라, 실행 OS 와 무관하게 두 규칙을 모두 검증한다.
+for (const platform of ["win32", "linux"]) {
+test(`source backend launch config uses repo venv, no-browser, and app data user root (${platform})`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "naia-electron-source-"));
   try {
     const appData = path.join(root, "AppData");
-    const venvPython = path.join(root, "venv", "Scripts", "python.exe");
+    const venvPython = venvPythonPath(path.join(root, "venv"), platform);
     const entry = path.join(root, "NAIA_web_headless.py");
     writeFile(venvPython, "python");
     writeFile(entry, "print('ok')\n");
 
     const { api } = loadMain({
       appData,
+      platform,
       env: {
         NAIA_REPO_ROOT: root,
         NAIA_BACKEND_PORT: "7421",
@@ -176,6 +197,7 @@ test("source backend launch config uses repo venv, no-browser, and app data user
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+}
 
 test("grok proxy port is dynamic: explicit env wins and reaches the Python backend", async () => {
   // Multi-instance contract: an explicit NAIA_GROK_PROXY_PORT is honored and is
@@ -183,7 +205,7 @@ test("grok proxy port is dynamic: explicit env wins and reaches the Python backe
   // the same progrok instance the shell spawned (each NAIA instance = own port).
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "naia-electron-grok-"));
   try {
-    const venvPython = path.join(root, "venv", "Scripts", "python.exe");
+    const venvPython = venvPythonPath(path.join(root, "venv"));
     const entry = path.join(root, "NAIA_web_headless.py");
     writeFile(venvPython, "python");
     writeFile(entry, "print('ok')\n");
@@ -274,8 +296,8 @@ test("packaged backend launch config uses resources backend, managed runtime env
     const resources = path.join(packageRoot, "resources");
     const backendRoot = path.join(resources, "naia-backend");
     const entry = path.join(backendRoot, "NAIA_web_headless.py");
-    const basePython = path.join(resources, "python", "python.exe");
-    const envPython = path.join(packageRoot, "user-data", "runtime-env", "Scripts", "python.exe");
+    const basePython = bundledPythonPath(path.join(resources, "python"));
+    const envPython = venvPythonPath(path.join(packageRoot, "user-data", "runtime-env"));
     writeFile(entry, "print('ok')\n");
     writeFile(basePython, "python");
     writeFile(envPython, "python");
@@ -314,9 +336,9 @@ test("packaged runtime env bootstrap creates env and installs requirements befor
     const resources = path.join(packageRoot, "resources");
     const backendRoot = path.join(resources, "naia-backend");
     const entry = path.join(backendRoot, "NAIA_web_headless.py");
-    const basePython = path.join(resources, "python", "python.exe");
+    const basePython = bundledPythonPath(path.join(resources, "python"));
     const userDataRoot = path.join(packageRoot, "user-data");
-    const envPython = path.join(userDataRoot, "runtime-env", "Scripts", "python.exe");
+    const envPython = venvPythonPath(path.join(userDataRoot, "runtime-env"));
     const generatedBytecode = path.join(resources, "python", "Lib", "__pycache__", "venv.cpython-310.pyc");
     writeFile(entry, "print('ok')\n");
     writeFile(path.join(backendRoot, "requirements-headless.txt"), "fastapi\n");

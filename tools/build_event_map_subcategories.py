@@ -3,7 +3,11 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.event_map_semantic_groups import resolve, APPROVED_AUDIT_OVERRIDES, APPROVED_AUDIT_FALLBACKS
 
 
 # Display-only consolidation. The reviewed mapping keeps every original label.
@@ -22,7 +26,7 @@ MERGE_RULES = {
   ("착의·노출 상태", "상태|착의|탈의|노출|착용|구속|열림|벗|입기"),
   ("무늬·재질", "무늬|패턴|프린트|재질|소재|질감|색|문양"),
   ("디테일·스타일", "디테일|디자인|실루엣|특징|스타일|용도|구조|형태|크기|패션")],
- "body": [("머리카락", "헤어|머리카락|앞머리|머리 모양"), ("눈·얼굴", "눈|얼굴|입|치아|이빨|코|표정|수염|혀"),
+ "body": [("체액·분비", "^체액·분비$"), ("머리카락", "헤어|머리카락|앞머리|머리 모양"), ("눈·얼굴", "눈|얼굴|입|치아|이빨|코|표정|수염|혀"),
   ("피부·표식", "피부|문신|흉터|표식|상처|체모|점|화장"), ("종족·특징", "종족|수인|동물|인외|뿔|꼬리|날개|기계|로봇|메카|귀"),
   ("체형·부위", "체형|체격|가슴|엉덩|골반|배|허리|다리|발|손|팔|부위|해부|성기|신체|근육"),
   ("자세·상태", "자세|상태|동작|변화|건강|반응|노출"), ("인물 설정", "직업|역할|나이|연령|인물|캐릭터|성별|속성")],
@@ -65,29 +69,56 @@ MERGE_RULES = {
 def merged_subcategory(group: str, sub: str) -> str:
     if sub.startswith("__"):
         return sub
+    # Whole source labels must not accidentally match a shorter word inside:
+    # 장식품 contains 식품, and 사물 contains 물.
+    if group == "object" and sub == "장식품":
+        return "가구·생활용품"
+    if group == "scene" and sub == "사물":
+        return "기타 소분류"
     for label, pattern in MERGE_RULES.get(group, []):
         if re.search(pattern, sub, re.IGNORECASE):
             return label
     return "작품·시리즈" if group == "franchise" else "기타 소분류"
 
 
-def build(source: Path, target: Path) -> None:
+def build(source: Path, target: Path, report: Path | None = None) -> None:
     raw = source.read_bytes()
     document = json.loads(raw)
     tags = {}
+    changes = {}
     for tag, row in document["tags"].items():
-        if not row["category"]:
+        override = resolve(tag, row)
+        if not row["category"] and override is None:
             continue
         state = row["subcategory_status"]
         sub = "__pending__" if state == "pending_review" else (row["subcategory"] or "__unclassified__")
-        tags[tag] = [row["group"], merged_subcategory(row["group"], sub)]
+        before = [row["group"], merged_subcategory(row["group"], sub)]
+        if override is None:
+            tags[tag] = before
+        else:
+            group, sub, rule = override
+            tags[tag] = [group, merged_subcategory(group, sub)]
+            if tags[tag] != before or not row["category"]:
+                changes[tag] = {"before": before if row["category"] else None,
+                                "after": tags[tag], "rule": rule}
+    # Reviewed KR fallback entries may not exist in the older mapping export.
+    # Keep exact spellings (including escaped aliases); never merge/delete tags.
+    for tag in APPROVED_AUDIT_FALLBACKS:
+        if tag not in document["tags"]:
+            group, sub = APPROVED_AUDIT_OVERRIDES[tag]
+            tags[tag] = [group, merged_subcategory(group, sub)]
+            changes[tag] = {"before": None, "after": tags[tag],
+                            "rule": "approved-audit-20261006-fallback"}
     result = {"schema": "naia-event-map-subcategories-v1",
               "source_sha256": hashlib.sha256(raw).hexdigest(),
-              "display_grouping": "compact-v1",
+              "display_grouping": "compact-v2-semantic",
               "grouping_rules_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              "semantic_rules_sha256": hashlib.sha256(Path(__file__).with_name("event_map_semantic_groups.py").read_bytes()).hexdigest(),
               "tags": tags,
               "candidate_exclusions": document.get("reviewed_candidate_exclusions", {})}
     target.write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+    if report is not None:
+        report.write_text(json.dumps(changes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Exported {len(tags)} tags: {target} ({target.stat().st_size} bytes)")
 
 
@@ -95,5 +126,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("target", type=Path)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    build(args.source, args.target)
+    build(args.source, args.target, args.report)

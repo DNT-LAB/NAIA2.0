@@ -4479,7 +4479,8 @@ function applyDispatchedResolutionDisplay(m) {
 function onGenerationDispatched(m) {
   // 실제 디스패치된 시드를 Params 패널 시드 박스에 반영한다 — Seed Fix OFF면 서버가
   // 요청마다 시드를 재추첨하므로(534fa55) 박스의 직전 값과 어긋난다. 구체 시드(>=0)일
-  // 때만 갱신한다(WEBUI/COMFYUI의 -1은 백엔드 랜덤 위임이라 실행 시드를 아직 모름).
+  // 때만 갱신한다(WEBUI/COMFYUI의 -1은 백엔드 랜덤 위임이라 실행 시드를 아직 모름 -
+  // WEBUI 는 결과가 나올 때 `updateMeta` 가 `executed_seed_sync` 로 채운다).
   // 사용자가 시드 박스를 편집 중이거나 COMFYUI Free 잠금 표시 중에는 건드리지 않는다.
   if (!m || m.ok !== true) return;
   // 방금 **실제로 나간** 해상도를 콤보에 비춰 준다. Rnd Res 는 매 생성마다 새로 뽑는데
@@ -4489,7 +4490,14 @@ function onGenerationDispatched(m) {
   // ⚠️ 시드 판정(`seed >= 0`)보다 **앞**이다. WEBUI/COMFYUI 는 백엔드가 시드를 굴려
   //    `-1` 로 오지만 해상도는 알고 있다 - 뒤에 두면 그 두 모드에서 영영 안 비친다.
   applyDispatchedResolutionDisplay(m);
-  const seed = Number(m.params?.seed);
+  applyExecutedSeed(m, Number(m.params?.seed));
+}
+
+/** 실제로 쓰인 시드를 시드 박스 · 좌하단 알약 · 고정 값에 반영한다.
+ *  NAI 는 디스패치 때 시드를 알아 `onGenerationDispatched` 가 부르고,
+ *  WEBUI 는 결과가 나와서야 알아(디스패치 땐 -1) `updateMeta` 가 `executed_seed_sync` 로 부른다.
+ *  `m.params` 에는 seed / width / height / interactive_mode_request 만 있으면 된다. */
+function applyExecutedSeed(m, seed) {
   if (!Number.isFinite(seed) || seed < 0) return;
   // 2^53 을 넘는 시드는 JSON 에서 이미 끝자리가 바뀌어 왔다 — 되돌려 쓰면 사용자가 친 시드를 망친다.
   // 이 경우 시드 박스(사용자가 친 그대로)를 믿고 아무것도 덮지 않는다.
@@ -4920,6 +4928,11 @@ function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
   latestImageMeta = m && typeof m === 'object' ? m : null;
   updateMetaChips(m);
+  // WEBUI 는 Seed Fix OFF 일 때 시드를 WebUI 가 굴려서, 실제 시드를 결과가 나와서야 안다.
+  // 서버가 그런 새 결과에만 `executed_seed_sync` 를 실어 준다(headless_result_service).
+  if (m?.executed_seed_sync) {
+    applyExecutedSeed({params: m.executed_seed_sync}, Number(m.executed_seed_sync.seed));
+  }
   if (artistThumbControl && typeof artistThumbControl.handleResultMeta === 'function') {
     artistThumbControl.handleResultMeta(m);
   }
@@ -5924,7 +5937,11 @@ function updateParams(m) {
       }
     }
     if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
-    updateWebUiHiresfixAssistControls();
+    // 저장된 Assist 상태를 바로 반영한다. 모듈 상태 응답을 기다리는 동안 하드코딩 기본값(켜짐)으로
+    // "HR WxH" 가 잠깐 보이지 않게 한다.
+    updateWebUiHiresfixAssistControls('webui_hiresfix_assist' in m
+      ? {enabled: Boolean(m.webui_hiresfix_assist), target: m.webui_hiresfix_assist_target ?? webUiHiresfixAssistState.target}
+      : null);
     updateWebUiHrScaleHint();
   }
 

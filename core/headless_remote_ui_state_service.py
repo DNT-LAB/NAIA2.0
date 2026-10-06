@@ -214,6 +214,7 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
     planes[mode] = active
     context.remote_param_planes = planes
     _heal_nai_model_key(context, planes)
+    _restore_webui_hiresfix_assist_state(context, planes)
     context.auto_save_state.update(state["auto_save_state"])
     context.save_directory_state.update(state["save_directory_state"])
     if "auto_save" not in context.auto_save_state:
@@ -226,6 +227,29 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
         )
     context.remote_options["auto_save"] = bool(context.auto_save_state["auto_save"])
     return state
+
+
+def _restore_webui_hiresfix_assist_state(context: Any, planes: dict[str, Any]) -> None:
+    """저장된 WEBUI 판의 Hiresfix Assist 값으로 모듈 상태를 되살린다.
+
+    ⚠️ Assist 모듈 상태는 `remote_params` 가 아니라 `context.webui_hiresfix_assist_state` 에 산다.
+       이걸 채우지 않으면 재시작 직후 빈 상태의 기본값(**켜짐**)으로 보고되고, 화면은 그걸 받아
+       hires-fix 를 켜고 Res Preset 을 끈 뒤 **저장까지** 한다 - 끄고 쓰던 사용자가 재시작할 때마다
+       해상도가 "HR 1280x896" 같은 Assist 크기로 바뀌어 있던 원인이다.
+    저장된 값이 없으면(처음 쓰는 사용자) 손대지 않는다 - 기본값은 그대로 켜짐이다.
+    """
+    from core.headless_webui_hiresfix_assist_service import HeadlessWebuiHiresfixAssistService
+
+    webui_params = planes.get("WEBUI")
+    if not isinstance(webui_params, dict):
+        return
+    saved = {
+        key: webui_params[key]
+        for key in ("webui_hiresfix_assist", "webui_hiresfix_assist_target")
+        if key in webui_params
+    }
+    if saved:
+        context.webui_hiresfix_assist_state = HeadlessWebuiHiresfixAssistService.normalized_state(saved)
 
 
 def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:

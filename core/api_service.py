@@ -1798,19 +1798,24 @@ class APIService:
                     extract_webui_infotext,
                     extract_webui_seed,
                 )
+                # Seed Fix OFF 면 seed=-1(WebUI 가 굴림)로 나가므로 실제 시드는 응답 info 로만 안다.
+                # 여기서 꺼내 결과에 실어야 저장 메타·메타데이터 보기·시드 고정이 -1 대신 실제 값을 본다.
+                actual_seed = extract_webui_seed(info_text)
                 if extract_webui_infotext(info_text):
                     print(f"📋 WEBUI 생성 정보(forge): {str(info_text)[:100]}...")
                 else:
-                    actual_seed = extract_webui_seed(info_text)
                     info_text = build_webui_infotext_from_payload(payload, actual_seed)
                     print(f"📋 WEBUI info 비어있음 → payload에서 메타데이터 재구성 ({len(info_text)}자)")
 
-                return {
+                webui_result = {
                     'status': 'success',
                     'image': image,
                     'raw_bytes': image_data,
                     'generation_info': info_text
                 }
+                if actual_seed is not None:
+                    webui_result['actual_seed'] = actual_seed
+                return webui_result
             else:
                 raise Exception("응답에서 이미지를 찾을 수 없습니다.")
 

@@ -137,6 +137,26 @@ class HeadlessResultStore:
         except Exception as exc:                     # 썸네일 실패가 생성을 막지 않는다
             print(f"[interactive-assets] thumb attach skipped: {exc}")
 
+    @staticmethod
+    def _resolve_executed_seed(api_result: dict[str, Any], params: dict[str, Any]) -> int | None:
+        """요청 시드가 -1(백엔드에 맡김)이었고 백엔드가 실제 시드를 알려 줬으면 params 에 적고 그 값을 돌려준다.
+
+        WEBUI 는 Seed Fix OFF 일 때 seed=-1 로 나가 실제 시드를 응답 info 로만 알려 준다
+        (api_service 가 `actual_seed` 로 꺼내 둔다). 요청 시드를 그대로 저장하면 메타데이터 보기 ·
+        히스토리 · 시드 고정 · Enhance 가 전부 -1 을 본다. NAI 는 처음부터 구체 시드라 해당 없다.
+        """
+        actual = api_result.get("actual_seed")
+        if isinstance(actual, bool) or not isinstance(actual, int) or actual < 0:
+            return None
+        try:
+            requested = int(params.get("seed", -1))
+        except (TypeError, ValueError):
+            requested = -1
+        if requested >= 0:
+            return None
+        params["seed"] = actual
+        return actual
+
     def add_api_result(self, api_result: dict[str, Any], request) -> HeadlessStoredResult:
         image = self._coerce_image(api_result)
         raw_bytes = self._coerce_raw_bytes(api_result, image)
@@ -156,6 +176,7 @@ class HeadlessResultStore:
         self._attach_interactive_snapshot_thumb(request, raw_bytes or webp_bytes)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
+        executed_seed = self._resolve_executed_seed(api_result, params)
         # Storyteller Use Vibe: 스트림 발급 vibe는 휘발성 — 히스토리 메타/리플레이에
         # 남기지 않는다(마커로 그 1장만 정밀 제거, 일반 vibe refs는 리플레이 의미 보존).
         strip_event_stream_vibe_params(params)
@@ -313,6 +334,21 @@ class HeadlessResultStore:
             metadata_payload = self.latest_metadata_payload or {}
             # Build removal payloads AFTER eviction so their `total` reflects the capped count.
             evicted_payloads = [self.viewer_removed_payload(ev) for ev in evicted]
+        if executed_seed is not None:
+            # 화면이 시드 박스·좌하단 알약·고정 값을 이 시드로 맞추라는 신호. **새 결과 방송분에만** 싣는다 -
+            # 재접속·히스토리 열람 때 다시 만드는 메타(`_build_image_meta`)에 있으면 그때마다 시드 박스를 덮는다.
+            # ⚠️ 새 WS 메시지 타입이 아니라 image_meta 의 필드다(웹 스모크 계약이 타입 순서를 센다).
+            image_meta = {
+                **image_meta,
+                "executed_seed_sync": {
+                    "seed": executed_seed,
+                    # 그림 크기가 아니라 **요청 해상도**다(디스패치 경로와 같은 값). hires-fix 를 켜면
+                    # 그림은 이미 확대된 크기라, 그걸 고정하면 다음 장이 또 확대된다.
+                    "width": params.get("width"),
+                    "height": params.get("height"),
+                    "interactive_mode_request": bool(params.get("interactive_mode_request")),
+                },
+            }
         return HeadlessStoredResult(
             item=item,
             image_meta=image_meta,

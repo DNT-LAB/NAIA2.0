@@ -65,6 +65,61 @@ class HeadlessSaveService:
     def __init__(self, context: Any):
         self.context = context
 
+    def enforce_history_limit(self) -> tuple[list[Any], str]:
+        """Apply the live/restored policy at insertion, under the store's RLock.
+
+        Never drop unsaved bytes if saving fails. Stop mode retains completed
+        results (including manual/in-flight results beyond the limit); the
+        generation runner stops loops before announcing completion.
+        """
+        context = self.context
+        state = context.auto_save_state
+        if not context._coerce_bool(state.get("history_limit_enabled", False)):
+            return [], ""
+        limit = context._coerce_int(state.get("max_history_length"), default=2000,
+                                    minimum=100, maximum=10000)
+        action = context._coerce_int(state.get("memory_action"), default=1, minimum=1, maximum=3)
+        store = context.result_store
+        with store._mutation_lock:
+            if action == 3:
+                reason = (f"히스토리가 설정한 {limit}장에 도달하여 자동 생성을 중단했습니다."
+                          if store.history_total() >= limit else "")
+                return [], reason
+            evicted = []
+            while store.history_total() > limit:
+                oldest = store._items[-1]
+                if action == 1:
+                    try:
+                        context.save_history_item(oldest)
+                    except Exception as exc:
+                        return evicted, f"히스토리 자동 저장 실패: {exc}. 이미지를 유지하고 자동 생성을 중단했습니다."
+                # Only release the in-memory entry. Saved files stay on disk.
+                store.remove_item(oldest)
+                evicted.append(oldest)
+            return evicted, ""
+
+    def history_limit_notice(self) -> str:
+        """히스토리 큐 제한이 켜져 있을 때 **자동 생성 중에 무슨 일이 일어나는지** 한 줄. 꺼져 있으면 빈 글.
+
+        Auto Gen 을 켜는 순간에 보여 준다(사용자 지정 2026-10-06). 제한은 설정 창 안에 있고 한 번 켜 두면
+        잊기 쉬운데, 그 결과(멈춤 · 삭제)는 한참 뒤 자리를 비운 사이에 온다.
+        """
+        context = self.context
+        state = context.auto_save_state
+        if not context._coerce_bool(state.get("history_limit_enabled", False)):
+            return ""
+        limit = context._coerce_int(state.get("max_history_length"), default=2000, minimum=100, maximum=10000)
+        action = context._coerce_int(state.get("memory_action"), default=1, minimum=1, maximum=3)
+        total = context.result_store.history_total()
+        head = f"히스토리 큐 제한이 켜져 있습니다({limit}장 · 지금 {total}장)"
+        if action == 3:
+            if total >= limit:
+                return f"{head} — 이미 한도에 닿아 다음 한 장 뒤에 자동 생성이 멈춥니다."
+            return f"{head} — {limit}장에 도달하면 자동 생성이 멈춥니다."
+        if action == 2:
+            return f"{head} — {limit}장을 넘으면 오래된 그림부터 저장 없이 지웁니다."
+        return f"{head} — {limit}장을 넘으면 오래된 그림부터 저장한 뒤 히스토리에서 내립니다."
+
     def auto_save_state_payload(self) -> dict[str, Any]:
         context = self.context
         state = dict(AUTO_SAVE_DEFAULTS)

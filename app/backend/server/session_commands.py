@@ -254,8 +254,16 @@ async def handle_session_command(
         return True
     if command_type == "set_option":
         option_key = str(command.get("key") or "")
+        auto_gen_was_on = context._coerce_bool(context.get_options().get("auto_generate", False))
         context.set_option(option_key, command.get("value"))
         await broadcast_json(clients, {"type": "options", **context.get_options()})
+        # Auto Gen 을 **켜는 순간**(꺼져 있다가 켤 때만) 히스토리 큐 제한이 켜져 있으면 무슨 일이 일어나는지
+        # 적색 토스트로 알린다(사용자 지정 2026-10-06). 켠 창에만 보낸다 - 다른 창은 스위치를 만지지 않았다.
+        if (option_key == "auto_generate" and context._coerce_bool(command.get("value"))
+                and not auto_gen_was_on):
+            notice = context._save_service().history_limit_notice()
+            if notice:
+                await ws.send_text(json.dumps(context._toast(notice, level="error"), ensure_ascii=False))
         # 지속 자동화: Auto Gen을 켜면(+persist) 자동화를 자동 시작(Auto Gen이 트리거).
         if option_key == "auto_generate" and context._coerce_bool(command.get("value")):
             await _maybe_autostart_automation(context, clients, broadcast_json=broadcast_json)

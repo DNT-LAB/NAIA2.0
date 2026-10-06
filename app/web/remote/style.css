@@ -19251,8 +19251,15 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
     width: 136px;
     border-left: 1px solid var(--border-dim);
   }
-  .viewer-panel-grid { grid-template-columns: 1fr; }
-  .viewer-panel .viewer-thumb { aspect-ratio: auto; }
+  /* ⚠️ 격자는 **레일이 다 펼쳐졌을 때의 폭**으로 선다(136px - 왼쪽 테두리 1px). 레일은 접힌 34px 에서
+     0.3초에 걸쳐 넓어지는데(`transition: width`), 격자가 그 폭을 따라가면 첫 장면들에서 썸네일이 18px 짜리로
+     깔려 100장 가까이가 한 화면에 들어온다 - 자리를 잡아 둬도 그 순간 전부 불러온다(실측 2026-10-06: 141장 중
+     109장 -> 31장). 넘치는 것은 레일(overflow: hidden)이 가린다. */
+  .viewer-panel-grid { grid-template-columns: 1fr; min-width: 135px; }
+  /* 레일의 썸네일은 그림의 제 비율로 선다. `auto` 로 두면 아직 안 불러온 썸네일의 높이가 0 이라 수백 장이
+     전부 '화면 안' 으로 읽혀 한꺼번에 불러온다 - 비율을 변수로 받아 **자리를 미리** 잡는다(resultHistory 의
+     reserveThumbBox 가 그림마다 준다 · 모르면 3 / 4). */
+  .viewer-panel .viewer-thumb { aspect-ratio: var(--thumb-ratio, 3 / 4); }
   .viewer-pop-btn { display: flex; align-items: center; justify-content: center; }
   .viewer-panel.collapsed {
     width: 34px;

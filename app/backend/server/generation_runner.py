@@ -583,6 +583,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 and img2img_service.record_generation_completed(request_params, request.request_id)
             )
             auto_save_result = await _auto_save_generated_history_item(context, stored.item)
+            history_limit_stopped = await _stop_generation_for_history_limit(context, clients, stored)
 
             context.is_generating = False
             # ⚠️ 완료 알림은 **모든 클라이언트에게** 간다. 지금까지 알맹이가 없어서, 탭 두
@@ -604,6 +605,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 "message": "completed",
                 "v5_scene_run": str((request_params or {}).get("v5_scene_run") or ""),
                 "quota_exhausted": bool(context._auto_gen_quota_stop),
+                "history_limit_stopped": history_limit_stopped,
             })
             # ComfyUI 서버가 생성 이미지에 메타데이터를 남기지 않아(예: --disable-metadata)
             # NAIA가 자체 메타데이터를 삽입한 경우, 세션당 한 번만 경고 토스트로 알린다.
@@ -718,17 +720,20 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # Sequence Use Vibe: 라운드 첫 이미지(캡처 stamp)가 완료되면 그 결과를 인코딩(2 Anlas)
             # 해 이후 프레임에 적용할 임시 vibe 로 보관한다. 다음 프레임 dequeue 전(같은 루프 반복
             # 안에서 await)이라 두 번째 컷부터 곧바로 주입된다. 비NAI/이미 인코딩됨/실패는 no-op.
-            await _capture_sequence_vibe(context, clients, request, stored)
+            if not history_limit_stopped:
+                await _capture_sequence_vibe(context, clients, request, stored)
             # I.Sequence 캔버스 연쇄 — 다음 컷을 지금 넣는다. `_advance_sequence_run`
             # 보다 **먼저**여야 한다: 그쪽은 큐가 비어 있어야 다음 그룹으로 넘어가므로,
             # 뒤에 두면 라운드가 안 끝났는데 새 그룹이 시작될 수 있다.
-            await _chain_inpaint_sequence_frame(context, clients, request, stored)
+            if not history_limit_stopped:
+                await _chain_inpaint_sequence_frame(context, clients, request, stored)
             # Guard the auto-continue (prompt gen / PE persist / enqueue) so a raised
             # exception after a story page was counted still cleans up the cycle
             # (_broadcast_generation_error fails the stamped story) instead of leaving the
             # freeze + Auto Gen armed.
             try:
-                await _maybe_continue_auto_generation(context, clients, request)
+                if not history_limit_stopped:
+                    await _maybe_continue_auto_generation(context, clients, request)
             except Exception as exc:
                 await _broadcast_generation_error(context, clients, request, str(exc), exc)
             await broadcast_json(clients, context.queue_state_payload())
@@ -1843,6 +1848,17 @@ async def _auto_save_generated_history_item(context: WebSessionContext, item):
         return await asyncio.to_thread(context.save_history_item, item)
     except Exception as exc:
         return {"error": str(exc)}
+
+
+async def _stop_generation_for_history_limit(context, clients, stored) -> bool:
+    reason = getattr(stored, "history_limit_stop_reason", "")
+    if not reason:
+        return False
+    messages = await stop_all_generation_loops(context, clients)
+    messages.append(context._toast(reason, level="warning"))
+    for message in messages:
+        await broadcast_json(clients, message)
+    return True
 
 
 _COMFYUI_MODE_LABELS = {"eps": "EPS", "v_prediction": "V-Pred", "anima": "ANIMA"}

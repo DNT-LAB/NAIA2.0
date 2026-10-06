@@ -71,6 +71,7 @@ class HeadlessStoredResult:
     # {from, to, from_workflow_type, to_workflow_type}. The caller commits the swap
     # to the UI flags + remote_params and shows a yellow warning toast.
     comfyui_mode_swap: Optional[dict[str, Any]] = None
+    history_limit_stop_reason: str = ""
 
 
 class HeadlessResultStore:
@@ -81,8 +82,10 @@ class HeadlessResultStore:
     # 없으면 훅은 조용히 아무것도 하지 않는다.
     _context = None
 
-    def __init__(self, max_items: int = 200):
-        self.max_items = max(1, int(max_items))
+    def __init__(self, max_items: int | None = None):
+        # Production retention is owned by Auto Save settings. An explicit cap
+        # remains available for standalone stores; None means no hidden cap.
+        self.max_items = max(1, int(max_items)) if max_items is not None else None
         self._items: list[HeadlessHistoryItem] = []
         # _items 와 latest_* 는 항상 같은 것을 가리켜야 한다. 생성 워커(add_api_result),
         # 외부 이미지 삽입, 삭제, 히스토리 초기화가 서로 다른 스레드에서 들어오므로
@@ -299,8 +302,13 @@ class HeadlessResultStore:
         with self._mutation_lock:
             item.epoch = self._epoch
             self._items.insert(0, item)
-            evicted = self._items[self.max_items:]
-            del self._items[self.max_items:]
+            evicted = []
+            history_limit_stop_reason = ""
+            if self.max_items is not None:
+                evicted = self._items[self.max_items:]
+                del self._items[self.max_items:]
+            elif self._context is not None:
+                evicted, history_limit_stop_reason = self._context._save_service().enforce_history_limit()
             image_meta = self._set_latest_item(item) or {}
             metadata_payload = self.latest_metadata_payload or {}
             # Build removal payloads AFTER eviction so their `total` reflects the capped count.
@@ -311,6 +319,7 @@ class HeadlessResultStore:
             metadata_payload=metadata_payload,
             evicted_payloads=evicted_payloads,
             comfyui_metadata_injected=comfyui_metadata_injected,
+            history_limit_stop_reason=history_limit_stop_reason,
         )
 
     @staticmethod
@@ -513,9 +522,15 @@ class HeadlessResultStore:
 
     def history_summary(self, item: HeadlessHistoryItem, index: int = 0) -> dict[str, Any]:
         mtime = item.created_at.timestamp()
+        # 그림의 크기. 화면이 썸네일 칸의 **자리를 미리** 잡는 데 쓴다 - 자리가 없으면 아직 안 불러온 썸네일은
+        # 높이가 0 이라 수백 장이 전부 '화면 안' 으로 읽히고, 접어 둔 히스토리를 펼치는 순간 한꺼번에 불러온다
+        # (히스토리가 200장에서 잘리지 않게 되면서 1천 장 단위가 됐다 - 사용자 지적 2026-10-06).
+        width, height = (getattr(item.image, "size", None) or (0, 0))[:2]
         return {
             "rel_path": item.rel_path,
             "history_id": item.history_id,
+            "width": int(width or 0),
+            "height": int(height or 0),
             "filename": item.filename,
             "file_path": item.filepath,
             "source": "file" if item.filepath else "memory",

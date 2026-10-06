@@ -856,12 +856,29 @@ export function createResultHistoryController({
     return fetch(legacyViewerListUrl(page, perPage));
   }
 
-  function appendThumb(relPath) {
+  /** 썸네일 칸의 **자리를 미리 잡는다**(가로세로 비율을 CSS 변수 `--thumb-ratio` 로).
+   *
+   *  데스크톱 레일의 썸네일은 그림의 제 비율로 선다(`aspect-ratio: auto` 였다) - 그래서 아직 안 불러온 `loading=lazy`
+   *  썸네일은 **높이가 0** 이었다. 접어 둔 동안 쌓인 수백 장이 6px 간격으로 포개져 전부 '화면 안' 으로 읽혔고,
+   *  펼치는 순간 한꺼번에 불러왔다(200장 상한일 때는 느려도 끝났다 - 무제한이 되면 1천 장 단위다: 사용자 지적
+   *  2026-10-06). 자리가 있으면 보이는 것과 그 언저리만 불러오고 나머지는 스크롤할 때 온다.
+   *   · 서버가 크기를 주면(width · height) 그 비율로 잡는다 - 불러온 뒤에도 자리가 그대로라 목록이 안 튄다.
+   *   · 안 주면(옛 백엔드) CSS 의 기본 3 / 4 로 서고, 불러온 순간 그림의 제 비율로 고친다. */
+  function reserveThumbBox(img, entry) {
+    const setRatio = (w, h) => {
+      if (w > 0 && h > 0) img.style.setProperty('--thumb-ratio', `${w} / ${h}`);
+    };
+    setRatio(Number(entry?.width) || 0, Number(entry?.height) || 0);
+    img.addEventListener('load', () => setRatio(img.naturalWidth, img.naturalHeight), {once: true});
+  }
+
+  function appendThumb(relPath, entry = null) {
     if (!viewerGrid) return;
     const img = document.createElement('img');
     img.className = 'viewer-thumb';
     img.loading = 'lazy';
     img.dataset.path = relPath;
+    reserveThumbBox(img, entry);
     img.src = historyAssetUrl(relPath, 'thumb');
     // 평클릭 한 번으로 **선택까지** 된다(사용자 요청 2026-08-30: "클릭 후 DELETE").
     // 예전에는 레일에서 평클릭이 선택을 **비우기만** 해서, 눌러 놓고 Del 을 눌러도
@@ -873,12 +890,13 @@ export function createResultHistoryController({
     viewerGrid.appendChild(img);
   }
 
-  function prependThumb(relPath) {
+  function prependThumb(relPath, entry = null) {
     if (!viewerGrid) return;
     const img = document.createElement('img');
     img.className = 'viewer-thumb';
     img.loading = 'lazy';
     img.dataset.path = relPath;
+    reserveThumbBox(img, entry);
     img.src = historyAssetUrl(relPath, 'thumb');
     configureThumb(img, relPath, viewerGrid, () => thumbClick(relPath), {selectOnOpen: true});
     viewerGrid.prepend(img);
@@ -900,7 +918,7 @@ export function createResultHistoryController({
       if (viewerTab) viewerTab.classList.toggle('visible', viewerTotal > 0);
       for (const entry of data.images) {
         if (hasThumb(entry.rel_path)) continue;
-        appendThumb(entry.rel_path);
+        appendThumb(entry.rel_path, entry);
       }
       viewerPage = page + 1;
     } catch (error) {
@@ -1192,7 +1210,7 @@ export function createResultHistoryController({
     }
 
     const didPrepend = !alreadyInGrid && !!viewerGrid;
-    if (didPrepend) prependThumb(message.rel_path);
+    if (didPrepend) prependThumb(message.rel_path, message);
 
     if (viewerNavIdx < 0 || !currentViewerPath || currentViewerPath === message.rel_path) {
       loadResultInfo(message.rel_path);

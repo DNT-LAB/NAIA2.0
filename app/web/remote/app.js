@@ -1249,7 +1249,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20261005-delkey-guard')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20261006-histlazy')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -4650,6 +4650,11 @@ const wsMessageHandlers = {
     // 서버가 "모든 계정의 무료 사용량이 0%" 라고 알려 준다. 프런트가 돌리는 루프는
     // 서버의 Auto Gen 스위치를 안 보므로, 이 신호가 없으면 계속 유료로 낸다(Codex BLOCK).
     lastGenerationQuotaStop = !!m.quota_exhausted;
+    lastGenerationHistoryStop = !!m.history_limit_stopped;
+    if (lastGenerationHistoryStop) {
+      cancelInteractiveAutoGen();
+      v5SceneControl?.stopRun?.();
+    }
     setGen(m.is_generating);
   },
   generation_error: m => {
@@ -9082,12 +9087,12 @@ function setGen(v) {
   // ⚠️ **큐가 빌 때만** 잇는다 - 사람이 쌓아 둔 장이 남았는데 한 장 끝날 때마다 잇면
   //    그 사이로 시키지 않은 장이 끼어든다(서버 Auto Gen 과 같은 규칙: 큐 먼저).
   //    마지막 장이 끝날 때 queuePending 이 0 이 되어 그때 한 번 잇는다.
-  if (wasGenerating && !next && queuePending === 0 && interactivePanel?.notifyGenerationDone) {
+  if (wasGenerating && !next && !lastGenerationHistoryStop && queuePending === 0 && interactivePanel?.notifyGenerationDone) {
     setTimeout(() => {
       const fired = interactivePanel.notifyGenerationDone();
       if (!fired) scheduleInteractiveAutoGen();
     }, 0);
-  } else if (wasGenerating && !next && queuePending === 0) {
+  } else if (wasGenerating && !next && !lastGenerationHistoryStop && queuePending === 0) {
     setTimeout(scheduleInteractiveAutoGen, 0);
   }
   // V5 Scene 연속 생성: 한 장이 **성공으로** 끝나면 다음 컷을 불러오고 또 낸다.
@@ -12776,6 +12781,7 @@ let lastGenerationOk = false;
 // 직전 완료 알림이 달고 온 V5 연속 생성 런 표(없으면 빈 문자열).
 let lastGenerationRunTag = '';
 let lastGenerationQuotaStop = false;
+let lastGenerationHistoryStop = false;
 // Automation 미지원 안내는 한 번만 띄운다.
 let interactiveAutomationWarned = false;
 

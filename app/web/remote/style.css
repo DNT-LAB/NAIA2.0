@@ -28791,16 +28791,19 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid rgba(130,150,255,0.30); border-radius: 8px;
   box-shadow: 0 18px 42px rgba(0,0,0,0.5);
 }
-/* 머리줄 = 예전의 검색 줄(.em-bar)과 같은 높이 · 바탕. 제목 글자는 감춘다 - [E] 와 검색 칸이 이름이다. */
+/* 맨 위 = 얇은 핸들 줄(사용자 지정 2026-10-06). 통째로 끌기 손잡이다 - 검색 줄(.em-bar)은 그 아래 한 칸.
+   공용 창의 제목줄(굵은 12px · 위아래 6px)을 그대로 쓰면 머리가 두 겹으로 무겁다 - 20px 로 눌러 이름은 작게. */
 .em-window > .dragpanel-head {
-  min-height: 32px; padding: 0 4px 0 8px; gap: 6px;
-  border-bottom: 1px solid var(--border-dim); background: rgba(22,24,38,0.92);
+  min-height: 20px; padding: 0 2px 0 8px; gap: 6px;
+  border-bottom: 1px solid var(--border-dim); background: rgba(30,32,50,0.92);
 }
-.em-window > .dragpanel-head .dragpanel-title { display: none; }
-.em-window .em-headbar { gap: 6px; }
+.em-window > .dragpanel-head .dragpanel-title {
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-dim);
+}
+.em-window > .dragpanel-head .dragpanel-grab { height: 9px; opacity: 0.6; }
+.em-window > .dragpanel-head .dragpanel-btn { font-size: 13px; padding: 1px 6px; }
 .em-window > .dragpanel-body { position: relative; display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
 .em-window .em-body { min-height: 0; }
-.em-window .em-busy { top: 0; }
 /* 발줄 오른쪽 끝 = 크기 손잡이(16px)의 자리. 비워 두지 않으면 [랜덤 버튼 연결] 글자가 손잡이 밑에 깔린다. */
 .em-window .em-foot { padding-right: 20px; }
 .em-window .em-random-link { margin-left: auto; }

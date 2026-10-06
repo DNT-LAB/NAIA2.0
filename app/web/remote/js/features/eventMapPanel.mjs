@@ -196,7 +196,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     busyCount = Math.max(0, busyCount + (on ? 1 : -1));
     if (subEl) subEl.inert = busyCount > 0;
     if (!busyEl) return;
-    busyEl.style.top = '0px';       // 머리줄은 몸통 밖(창의 머리줄)에 있다
+    // 덮개는 몸통 안에서 검색 줄 **아래**를 덮는다 - 찾는 동안에도 검색 칸은 칠 수 있다. 핸들 줄은 몸통 밖이다.
+    const bar = panel?.body.querySelector('.em-bar');
+    if (bar) busyEl.style.top = `${bar.offsetHeight}px`;
     busyEl.classList.toggle('open', busyCount > 0);
   }
 
@@ -1164,16 +1166,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     });
     overlay = panel.el;
     overlay.setAttribute('aria-label', '이벤트 맵');
-    // 머리줄 = 예전의 검색 줄 그대로([E] [태그 찾기…] [상태] [×]). 공용 창의 제목줄 아래에 검색 줄을 한 줄 더
-    // 두면 머리가 두 겹이 된다(사용자 지적 2026-10-06). 제목 글자는 CSS 가 감춘다 - E 와 검색 칸이 이름이다.
-    // 입력 칸 · 단추는 끌기 손잡이가 아니다(draggablePanel 의 NO_DRAG) - 그 밖의 머리줄을 잡고 끈다.
-    panel.slot.classList.add('em-headbar');
-    panel.slot.innerHTML = `
+    // 맨 위 = **얇은 핸들 줄**(창의 머리줄: 점 여섯 · 작은 이름 · ×), 그 아래가 검색 줄이다(사용자 지정
+    // 2026-10-06: "위에 핸들 영역을 하나 더 붙이고, 태그 찾기를 한 칸 내립시다"). 검색 줄을 머리줄에 합쳐 두면
+    // 잡을 자리가 검색 칸과 상태 글 사이의 틈뿐이라 창을 끌기 어렵다. 핸들 줄은 통째로 손잡이다 -
+    // 두껍게 두지 않는다(공용 창의 기본 제목줄을 그대로 쓰면 머리가 두 겹으로 무거워진다: CSS 의 `.em-window`).
+    panel.body.innerHTML = `
+      <div class="em-bar">
         <span class="em-icon" aria-hidden="true">E</span>
         <input class="em-input" type="search" autocomplete="off" spellcheck="false"
                aria-label="태그 찾기" placeholder="태그 찾기…">
-        <span class="em-status" role="status" aria-live="polite"></span>`;
-    panel.body.innerHTML = `
+        <span class="em-status" role="status" aria-live="polite"></span>
+      </div>
       <div class="em-trail"></div>
       <div class="em-filters"></div>
       <div class="em-library-bar"><button type="button" data-library-mode="save" aria-expanded="false">이 조합 저장하기</button><button type="button" data-library-mode="load" aria-expanded="false">조합 불러오기</button></div>

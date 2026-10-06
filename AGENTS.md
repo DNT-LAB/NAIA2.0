@@ -27,9 +27,23 @@
   - Query `http://127.0.0.1:<port>/json/list` to find the page target and connect to `webSocketDebuggerUrl`.
   - Use DevTools methods such as `Runtime.evaluate`, `Page.reload`, and `Page.captureScreenshot` to open popups, simulate hover/focus/click states, inspect computed styles, and save screenshots.
   - Prefer temporary profiles and close the launched browser process after validation.
-- If the remote server is not running, start it from the repository root with:
+- If the remote server is not running, start it from the repository root with the launcher for the current OS.
+  Windows, macOS, and Linux are all supported clone-user platforms; the launchers create `venv/` with Python 3.10 - 3.12 and install `requirements-headless.txt`.
 
 ```bat
+:: Windows
 call venv\Scripts\activate.bat
 python NAIA_web_headless.py
+:: or: run_NAIA_web.bat
 ```
+
+```bash
+# macOS / Linux
+source venv/bin/activate
+python NAIA_web_headless.py
+# or: ./run_NAIA_web.command (macOS), ./run_NAIA_web.sh (Linux)
+```
+
+- The opt-in Electron shell launchers are `run_NAIA_electron.bat` / `run_NAIA_electron.command` / `run_NAIA_electron.sh`.
+  On headless Linux, run them under `xvfb-run` and pass `--no-sandbox` when running as root.
+- When adding or changing a launcher, keep all six `run_NAIA_*` launchers (`.bat`/`.command`/`.sh`) behaviorally aligned.

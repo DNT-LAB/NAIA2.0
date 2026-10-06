@@ -10,7 +10,7 @@ REM ============================================================
 REM --- Source update check ------------------------------------------------
 REM Channel: the clone's upstream branch (origin/future02 today).
 REM WARNING: if future02 is ever force-merged into main, revise every update
-REM touchpoint together: this block in all four run_NAIA_* launchers, the
+REM touchpoint together: this block in all six run_NAIA_* launchers (.bat/.command/.sh), the
 REM source-mode update banner (app/electron/main/main.cjs +
 REM updateBannerControls.mjs), and existing clones' upstream branches.
 where git > nul 2>&1

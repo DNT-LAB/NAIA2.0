@@ -42,7 +42,7 @@ const APP_ICON = path.join(__dirname, "..", "assets", "naia.ico");
 // stays release-feed driven even in source mode — it does NOT see commit-level
 // drift; updateState.sourceMode only switches the banner to git-pull guidance
 // for release-tag notifications. If future02 is ever force-merged into/renamed
-// to main, revise every update touchpoint together: all four run_NAIA_*
+// to main, revise every update touchpoint together: all six run_NAIA_*
 // launchers, the source-mode banner guidance (updateBannerControls.mjs), and
 // existing clones' upstream branches.
 const UPDATE_REPO = "DNT-LAB/NAIA2.0";

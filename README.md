@@ -17,20 +17,24 @@ pip install -r requirements-headless.txt
 python NAIA_web_headless.py
 ```
 
-Windows는 `run_NAIA_web.bat`, macOS는 `run_NAIA_web.command` 로도 실행할 수 있습니다.
+Windows는 `run_NAIA_web.bat`, macOS는 `run_NAIA_web.command`, Linux는 `./run_NAIA_web.sh` 로도 실행할 수 있습니다.
+Linux 런처는 `python3.12` → `python3.11` → `python3.10` 순으로 호환 버전을 자동으로 찾습니다.
+(Ubuntu/Debian은 venv 모듈이 별도 패키지이므로 `sudo apt install python3.12-venv` 가 필요할 수 있습니다)
 실행 후 표시되는 로컬 주소를 브라우저에서 열면 됩니다.
 
 ### B. 소스에서 Electron 데스크톱 셸 실행 (clone 사용자 + Node.js)
 
 A와 같은 Python 백엔드를 Electron 데스크톱 창에서 실행합니다 (Danbooru 임베드 뷰 등
 셸 전용 기능 포함). Python **3.10 ~ 3.12** (3.13 이상 미지원) + **Node.js 18 이상**이 필요합니다.
-런처가 `py` 런처로 설치된 3.12 를 자동으로 찾으므로, PATH 기본 Python 이 3.13+ 여도 됩니다.
+런처가 설치된 3.12 를 자동으로 찾으므로(Windows는 `py` 런처, macOS/Linux는 `python3.12`), PATH 기본 Python 이 3.13+ 여도 됩니다.
 
 ```bash
 # Windows
 run_NAIA_electron.bat
 # macOS
 ./run_NAIA_electron.command
+# Linux (X11/Wayland 데스크톱 세션 필요)
+./run_NAIA_electron.sh
 ```
 
 런처가 venv 생성 → `pip install -r requirements-headless.txt` → `app/electron`에서
@@ -38,8 +42,10 @@ run_NAIA_electron.bat
 수동으로 하려면: 위 A의 venv 셋업 후 `cd app/electron && npm ci && npm start`.
 
 - 첫 실행 시 태그 검색 데이터(약 1.4GB) 설치 화면이 표시됩니다 (Portable 빌드와 동일한 흐름).
-- user-data는 기본적으로 A(브라우저 모드)와 **공유**됩니다 (Windows: `%APPDATA%\NAIA`).
+- user-data는 기본적으로 A(브라우저 모드)와 **공유**됩니다 (Windows: `%APPDATA%\NAIA`, Linux: `~/.config/NAIA`).
   A에서 쓰던 설정·토큰·저장물을 그대로 이어서 사용합니다.
+- Linux에서 root 로 실행하는 등 Chromium 샌드박스를 쓸 수 없는 환경이면 `./run_NAIA_electron.sh --no-sandbox` 처럼
+  인자를 덧붙여 실행합니다 (런처 인자는 그대로 Electron 에 전달됩니다).
 
 ### C. Portable 앱 (Release 사용자)
 

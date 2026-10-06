@@ -1,8 +1,9 @@
 # Launcher scripts need deterministic line endings on every checkout:
 # - cmd batch label scanning (goto/call) misbehaves on LF-only files -> force CRLF
-# - bash chokes on CRLF shebang/lines -> force LF for macOS .command launchers
+# - bash chokes on CRLF shebang/lines -> force LF for macOS .command / Linux .sh launchers
 *.bat text eol=crlf
 *.command text eol=lf
+*.sh text eol=lf
 # ANIMA license texts are verified by byte SHA-256 (core/anima_engine/manifest.py) - no EOL conversion,
 # or autocrlf turns GPL/MIT (CRLF upstream) into LF on commit and the LF ones into CRLF on checkout.
 core/anima_engine/licenses/** -text

@@ -1,7 +1,7 @@
-#!/bin/bash
-# NAIA 2.0 Web Mode Mac Launcher
-# 더블클릭으로 실행 가능한 Mac용 런처 스크립트 (웹 UI 모드)
-# Windows의 run_NAIA_web.bat 과 동일한 사용자 경험 제공
+#!/usr/bin/env bash
+# NAIA 2.0 Web Mode Linux Launcher
+# 터미널에서 ./run_NAIA_web.sh 로 실행하는 Linux용 런처 스크립트 (웹 UI 모드)
+# Windows의 run_NAIA_web.bat / macOS의 run_NAIA_web.command 와 동일한 사용자 경험 제공
 
 # ANSI 색상 코드 정의
 RED='\033[0;31m'
@@ -12,8 +12,12 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# 화면 지우기
-clear
+# 터미널에서 직접 실행할 때만 입력을 기다린다 (파이프/CI 실행 시 멈추지 않도록).
+pause_if_interactive() {
+    if [ -t 0 ]; then
+        read -r -p "$1"
+    fi
+}
 
 find_compatible_python() {
     for candidate in python3.12 python3.11 python3.10 python3; do
@@ -32,45 +36,40 @@ find_compatible_python() {
     return 1
 }
 
+# 화면 지우기 (터미널일 때만)
+[ -t 1 ] && clear
+
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${PURPLE}║                        🌐 NAIA 2.0 Web Launcher                               ║${NC}"
 echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # 현재 스크립트 위치로 이동
-SCRIPT_DIR="$(dirname "$0")"
-cd "$SCRIPT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR" || exit 1
 
 echo -e "${CYAN}📁 프로젝트 디렉토리: ${NC}$(pwd)"
 echo ""
 
-# 권한이 없으면 자동으로 설정
-if [ ! -x "$0" ]; then
-    echo -e "${YELLOW}🔧 첫 실행입니다. 실행 권한을 설정합니다...${NC}"
-    chmod +x "$0"
-    echo -e "${GREEN}✅ 권한 설정 완료! 다시 더블클릭해주세요.${NC}"
-    echo ""
-    read -p "엔터를 눌러 종료하고 다시 실행해주세요..."
-    exit 0
-fi
-
-# macOS 버전 확인
-echo -e "${BLUE}🍎 시스템 정보:${NC}"
-echo -e "   - macOS: $(sw_vers -productVersion)"
+# Linux 배포판 정보 확인
+DISTRO_NAME="$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
+echo -e "${BLUE}🐧 시스템 정보:${NC}"
+echo -e "   - 배포판: ${DISTRO_NAME:-알 수 없음}"
+echo -e "   - 커널: $(uname -r)"
 echo -e "   - 아키텍처: $(uname -m)"
 echo ""
 
 # --- 소스 업데이트 체크 ----------------------------------------------------
 # 채널: clone 의 upstream 브랜치 (현재 origin/future02).
 # WARNING: future02 가 main 브랜치로 force merge 되는 경우, 업데이트 기준점을
-# 전부 함께 수정해야 한다: run_NAIA_* 런처 6종(.bat/.command/.sh)의 이 블록, 데스크톱 셸 업데이트
-# 배너, 기존 clone 들의 upstream 브랜치.
+# 전부 함께 수정해야 한다: run_NAIA_* 런처 6종(.bat/.command/.sh)의 이 블록,
+# 데스크톱 셸 업데이트 배너, 기존 clone 들의 upstream 브랜치.
 if command -v git > /dev/null 2>&1 && [ -d ".git" ] && git rev-parse --abbrev-ref --symbolic-full-name '@{u}' > /dev/null 2>&1; then
     if git fetch --quiet 2>/dev/null; then
         BEHIND="$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
-        if [ "${BEHIND:-0}" -gt 0 ] 2>/dev/null; then
+        if [ "${BEHIND:-0}" -gt 0 ] 2>/dev/null && [ -t 0 ]; then
             echo -e "${YELLOW}⬆️  업데이트 가능: 원격 브랜치에 새 커밋 ${BEHIND}개${NC}"
-            read -p "지금 git pull 로 업데이트할까요? (y/N): " DO_UPDATE
+            read -r -p "지금 git pull 로 업데이트할까요? (y/N): " DO_UPDATE
             if [[ "$DO_UPDATE" =~ ^[Yy]$ ]]; then
                 # pull 이 이 스크립트 자신을 덮어쓰므로, 성공 시 같은 컴파운드
                 # 블록 안에서 exec 로 새 스크립트를 즉시 재실행한다.
@@ -98,64 +97,53 @@ if [ -z "$PYTHON_CMD" ]; then
     else
         echo -e "${RED}❌ Python 3.10 ~ 3.12 가 설치되지 않았습니다 (3.13 이상은 아직 미지원).${NC}"
     fi
-    echo -e "${YELLOW}📖 Python 설치 가이드:${NC}"
-    echo "   1. 브라우저에서 Python 3.12 다운로드 페이지가 열립니다"
-    echo "   2. macOS 설치 파일(.pkg)을 다운로드합니다"
-    echo "   3. 다운로드된 .pkg 파일 실행"
-    echo "   4. 설치 완료 후 이 스크립트를 다시 실행"
+    echo -e "${YELLOW}📖 Python 설치 가이드 (배포판 패키지 관리자 사용):${NC}"
+    echo "   - Ubuntu/Debian : sudo apt install python3.12 python3.12-venv"
+    echo "                     (기본 저장소에 없으면 deadsnakes PPA 또는 pyenv 사용)"
+    echo "   - Fedora        : sudo dnf install python3.12"
+    echo "   - Arch          : pyenv 또는 AUR 의 python312 사용"
+    echo "   설치 후 이 스크립트를 다시 실행해주세요."
     echo ""
-    echo -e "${CYAN}🔗 Python 다운로드 페이지를 열고 있습니다...${NC}"
-    open "https://www.python.org/downloads/release/python-31210/"
-    echo ""
-    read -p "Python 3.12 설치 후 엔터를 눌러주세요..."
+    pause_if_interactive "엔터를 눌러 종료..."
     exit 1
 fi
 
 PYTHON_VERSION=$("$PYTHON_CMD" --version)
 echo -e "${GREEN}✅ $PYTHON_VERSION 사용${NC}"
 echo -e "   실행 파일: $(command -v "$PYTHON_CMD")"
-
-# pip 확인
-if ! command -v pip3 &> /dev/null; then
-    echo -e "${YELLOW}⚠️  pip3가 설치되지 않았습니다. pip를 설치합니다...${NC}"
-    "$PYTHON_CMD" -m ensurepip --upgrade
-fi
-
 echo ""
 
 # 가상환경 확인 및 생성
 echo -e "${BLUE}📦 가상환경 설정 중...${NC}"
 
+# 기존 venv 가 지원 범위(3.10 ~ 3.12) 밖의 Python 으로 생성되어 있으면 재생성
 if [ -x "venv/bin/python" ]; then
-    VENV_VERSION=$(venv/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)
-    if [ -n "$VENV_VERSION" ]; then
-        VENV_MAJOR="${VENV_VERSION%%.*}"
-        VENV_MINOR="${VENV_VERSION##*.}"
-        if [ "$VENV_MAJOR" -ne 3 ] || [ "$VENV_MINOR" -lt 10 ] || [ "$VENV_MINOR" -gt 12 ]; then
-            echo -e "${YELLOW}⚠️  기존 가상환경이 지원 범위 밖의 Python ${VENV_VERSION}로 생성되어 다시 만들어야 합니다.${NC}"
-            read -p "기존 venv 폴더를 삭제하고 ${PYTHON_VERSION} 기준으로 다시 생성할까요? (y/N): " RECREATE_VENV
-            if [[ "$RECREATE_VENV" =~ ^[Yy]$ ]]; then
-                rm -rf venv
-                echo -e "${GREEN}✅ 기존 가상환경을 삭제했습니다.${NC}"
-            else
-                echo -e "${RED}❌ Python 3.10 ~ 3.12 로 생성된 가상환경이 필요합니다.${NC}"
-                echo "   venv 폴더를 삭제한 뒤 다시 실행해주세요."
-                read -p "엔터를 눌러 종료..."
-                exit 1
-            fi
+    if ! venv/bin/python -c 'import sys; raise SystemExit(0 if (3,10) <= sys.version_info[:2] <= (3,12) else 1)' 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  기존 가상환경이 지원 범위 밖의 Python 으로 생성되어 다시 만들어야 합니다.${NC}"
+        RECREATE_VENV=""
+        [ -t 0 ] && read -r -p "기존 venv 폴더를 삭제하고 ${PYTHON_VERSION} 기준으로 다시 생성할까요? (y/N): " RECREATE_VENV
+        if [[ "$RECREATE_VENV" =~ ^[Yy]$ ]]; then
+            rm -rf venv
+            echo -e "${GREEN}✅ 기존 가상환경을 삭제했습니다.${NC}"
+        else
+            echo -e "${RED}❌ Python 3.10 ~ 3.12 로 생성된 가상환경이 필요합니다.${NC}"
+            echo "   venv 폴더를 삭제한 뒤 다시 실행해주세요."
+            pause_if_interactive "엔터를 눌러 종료..."
+            exit 1
         fi
     fi
 fi
 
 if [ ! -d "venv" ]; then
     echo -e "${YELLOW}   가상환경이 없습니다. 새로 생성합니다...${NC}"
-    "$PYTHON_CMD" -m venv venv
-
-    if [ $? -eq 0 ]; then
+    if "$PYTHON_CMD" -m venv venv; then
         echo -e "${GREEN}✅ 가상환경 생성 완료${NC}"
     else
+        rm -rf venv
         echo -e "${RED}❌ 가상환경 생성 실패${NC}"
-        read -p "엔터를 눌러 종료..."
+        echo -e "${YELLOW}💡 Ubuntu/Debian 은 venv 모듈이 별도 패키지입니다:${NC}"
+        echo "   sudo apt install ${PYTHON_CMD}-venv"
+        pause_if_interactive "엔터를 눌러 종료..."
         exit 1
     fi
 else
@@ -164,14 +152,13 @@ fi
 
 # 가상환경 활성화
 echo -e "${BLUE}🔄 가상환경 활성화 중...${NC}"
-source venv/bin/activate
-
-if [ $? -eq 0 ]; then
+# shellcheck disable=SC1091
+if source venv/bin/activate; then
     echo -e "${GREEN}✅ 가상환경 활성화 완료${NC}"
-    echo -e "   Python 경로: $(which python)"
+    echo -e "   Python 경로: $(command -v python)"
 else
     echo -e "${RED}❌ 가상환경 활성화 실패${NC}"
-    read -p "엔터를 눌러 종료..."
+    pause_if_interactive "엔터를 눌러 종료..."
     exit 1
 fi
 
@@ -181,7 +168,7 @@ echo ""
 if [ ! -f "requirements-headless.txt" ]; then
     echo -e "${RED}❌ requirements-headless.txt 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
-    read -p "엔터를 눌러 종료..."
+    pause_if_interactive "엔터를 눌러 종료..."
     exit 1
 fi
 
@@ -190,13 +177,9 @@ echo -e "${BLUE}📚 필요한 라이브러리를 확인하고 설치합니다..
 echo -e "${YELLOW}   (처음 실행 시 시간이 소요될 수 있습니다)${NC}"
 echo ""
 
-# pip 업그레이드
-pip install --upgrade pip --quiet
+python -m pip install --upgrade pip --quiet
 
-# requirements 설치
-pip install -r requirements-headless.txt
-
-if [ $? -eq 0 ]; then
+if python -m pip install -r requirements-headless.txt; then
     echo ""
     echo -e "${GREEN}✅ 모든 라이브러리 설치 완료${NC}"
 else
@@ -204,9 +187,9 @@ else
     echo -e "${RED}❌ 라이브러리 설치 중 오류 발생${NC}"
     echo -e "${YELLOW}💡 해결 방법:${NC}"
     echo "   1. 인터넷 연결을 확인해주세요"
-    echo "   2. 터미널에서 'pip install -r requirements-headless.txt' 명령을 직접 실행해보세요"
+    echo "   2. 터미널에서 'venv/bin/python -m pip install -r requirements-headless.txt' 를 직접 실행해보세요"
     echo ""
-    read -p "엔터를 눌러 종료..."
+    pause_if_interactive "엔터를 눌러 종료..."
     exit 1
 fi
 
@@ -216,7 +199,7 @@ echo ""
 if [ ! -f "NAIA_web_headless.py" ]; then
     echo -e "${RED}❌ NAIA_web_headless.py 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
-    read -p "엔터를 눌러 종료..."
+    pause_if_interactive "엔터를 눌러 종료..."
     exit 1
 fi
 
@@ -230,28 +213,17 @@ echo -e "${CYAN}💡 백엔드 준비가 끝나면 웹 UI를 자동으로 엽니
 echo -e "${CYAN}💡 터미널 창을 닫지 마세요. 백엔드가 함께 종료됩니다.${NC}"
 echo ""
 
-# Python 스크립트 실행
-python NAIA_web_headless.py --auto-port
-
-# 실행 결과 확인
+python NAIA_web_headless.py --auto-port "$@"
 EXIT_CODE=$?
 
 echo ""
-echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-
 if [ $EXIT_CODE -eq 0 ]; then
-    echo -e "${PURPLE}║                     🏁 NAIA 2.0 Web 이 정상 종료되었습니다                       ║${NC}"
+    echo -e "${PURPLE}🏁 NAIA 2.0 Web 이 정상 종료되었습니다${NC}"
 else
-    echo -e "${PURPLE}║                  ⚠️  NAIA 2.0 Web 이 오류와 함께 종료되었습니다                  ║${NC}"
-    echo -e "${PURPLE}║                         종료 코드: $EXIT_CODE                                    ║${NC}"
+    echo -e "${PURPLE}⚠️  NAIA 2.0 Web 이 오류와 함께 종료되었습니다 (종료 코드: $EXIT_CODE)${NC}"
 fi
-
-echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# 가상환경 비활성화
 deactivate
 
-# 사용자 입력 대기
-echo -e "${YELLOW}터미널을 닫으려면 엔터를 눌러주세요...${NC}"
-read
+exit $EXIT_CODE

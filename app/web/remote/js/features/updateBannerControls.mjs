@@ -16,7 +16,7 @@
 // "no newer release tag", and the copy below says exactly that.
 // WARNING(update channel): source clones follow their upstream branch
 // (origin/future02 today). If future02 is ever force-merged into main, revise
-// every update touchpoint together: the four run_NAIA_* launchers, this
+// every update touchpoint together: the six run_NAIA_* launchers, this
 // source-mode guidance, main.cjs WARNING(update channel), and existing clones'
 // upstream branches.
 

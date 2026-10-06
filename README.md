@@ -344,6 +344,19 @@ class MyHook:
 
 ---
 
+## CI (자동 검사)
+
+`future02` / `main` push 와 모든 PR 에서 GitHub Actions(`.github/workflows/ci.yml`)가 자동으로 돌아갑니다.
+
+| 잡 | OS | 확인 내용 |
+|---|---|---|
+| Launchers | Linux | `run_NAIA_*` 런처 6종의 bash 문법 · shellcheck · 줄바꿈(CRLF/LF) · 실행 권한 |
+| Electron contract | Windows · macOS · Linux | `app/electron` 문법 검사 + main 프로세스 계약 테스트 |
+| Python gates & tests | Windows · Linux | 레이아웃/런타임 경계 게이트 + `tools/test_*.py` |
+| Headless web smoke | Linux | `./run_NAIA_web.sh` 로 실제 서버를 띄워 `/api/status` · Remote Web 응답 확인 |
+
+CI 가 빨간불이면 Actions 탭에서 실패한 step 의 명령을 로컬에서 그대로 실행해 재현할 수 있습니다.
+
 ## 더 읽어보기
 
 - 레이아웃·런타임 경계 정책: [`PROJECT_LAYOUT_POLICY.md`](PROJECT_LAYOUT_POLICY.md)

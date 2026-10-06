@@ -1,0 +1,190 @@
+# NAIA 2.0 CI
+#
+# 목적: Windows / macOS / Linux 어느 OS 에서든 "clone 해서 실행" 경로가 깨지지 않았는지
+#       push / PR 마다 자동으로 확인한다. (배포(CD)는 이 워크플로의 범위가 아니다.)
+#
+# 잡 구성 — 빠른 것부터, 서로 독립적으로 병렬 실행된다.
+#   1. launchers        : run_NAIA_* 런처 6종의 문법 / 줄바꿈(CRLF·LF) 검사
+#   2. electron-contract: Electron 셸 계약 테스트 (3 OS). Electron 바이너리 설치 없이 돈다.
+#   3. python           : 레이아웃·런타임 경계 게이트 + tools/test_*.py (Windows / Linux)
+#   4. web-smoke        : 실제 run_NAIA_web.sh 로 서버를 띄우고 HTTP 응답 확인 (Linux)
+#
+# 로컬에서 같은 검사를 돌리는 방법은 각 step 의 run 명령을 그대로 복사하면 된다.
+
+name: CI
+
+on:
+  push:
+    branches: [future02, main]
+  pull_request:
+  workflow_dispatch:
+
+# 같은 브랜치에 연속 push 하면 이전 실행은 취소하고 최신 커밋만 검사한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  launchers:
+    name: Launchers (syntax / line endings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash syntax check (.sh / .command)
+        run: |
+          for f in run_NAIA_*.sh run_NAIA_*.command; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+
+      - name: shellcheck (errors only)
+        run: shellcheck --severity=error run_NAIA_*.sh run_NAIA_*.command
+
+      - name: line endings match .gitattributes
+        # .bat 는 CRLF 가 아니면 cmd 의 goto/call 라벨 탐색이 깨지고,
+        # .sh / .command 는 CRLF 가 섞이면 bash 가 실행하지 못한다.
+        run: |
+          status=0
+          for f in run_NAIA_*.bat; do
+            if ! file "$f" | grep -q CRLF; then echo "::error file=$f::.bat launcher must use CRLF"; status=1; fi
+          done
+          for f in run_NAIA_*.sh run_NAIA_*.command; do
+            if grep -q $'\r' "$f"; then echo "::error file=$f::shell launcher must use LF"; status=1; fi
+          done
+          exit $status
+
+      - name: shell launchers are executable in git
+        run: |
+          status=0
+          for f in run_NAIA_*.sh run_NAIA_*.command; do
+            mode=$(git ls-files -s "$f" | cut -d' ' -f1)
+            if [ "$mode" != "100755" ]; then echo "::error file=$f::expected mode 100755, got $mode"; status=1; fi
+          done
+          exit $status
+
+  electron-contract:
+    name: Electron contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # main_contract.test.cjs 는 "electron" 모듈을 가짜로 주입하고 나머지는 Node 내장 모듈만 쓴다.
+      # 그래서 npm ci (Electron 바이너리 다운로드) 없이 바로 돌린다.
+      - name: syntax check (main / preload)
+        working-directory: app/electron
+        run: npm run check
+
+      - name: main process contract tests
+        working-directory: app/electron
+        run: npm run test:main-contract
+
+      - name: back-navigation guard test
+        run: node tools/test_prevent_back_navigation.mjs
+
+  python:
+    name: Python gates & tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-headless.txt
+
+      - name: install headless requirements
+        run: python -m pip install -r requirements-headless.txt
+
+      # PROJECT_LAYOUT_POLICY.md 의 Validation Gates 중, 원격 checkout 에서 의미 있는 것만 돌린다.
+      # 아래 4개는 로컬 전용 폴더(refactor_plans/, tests/)를 전제로 하므로 CI 에서 제외한다.
+      #   check_project_layout_policy, check_refactor_plan_execution_contract,
+      #   check_project_layout_round_completion, check_runtime_write_policy
+      - name: layout / runtime boundary gates
+        run: |
+          for gate in \
+            check_runtime_distribution_tracks \
+            check_source_layout_contract \
+            check_headless_core_boundary \
+            check_runtime_asset_classification \
+            check_remote_web_feature_contract \
+            check_release_source_payload \
+            check_project_cleanup_candidates
+          do
+            echo "::group::$gate"
+            python "tools/$gate.py"
+            echo "::endgroup::"
+          done
+
+      - name: focused regression tests (tools/test_*.py)
+        run: |
+          for t in tools/test_*.py; do
+            echo "::group::$t"
+            python "$t"
+            echo "::endgroup::"
+          done
+
+  web-smoke:
+    name: Headless web smoke (run_NAIA_web.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # 런처가 python3.12 를 직접 찾아 venv 를 만든다. setup-python 은 설치 + pip 캐시만 담당.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-headless.txt
+
+      - name: start server through the Linux launcher
+        run: |
+          ./run_NAIA_web.sh < /dev/null > web.log 2>&1 &
+          echo "launcher started"
+
+      - name: wait for /api/status
+        run: |
+          for i in $(seq 1 100); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:7243/api/status || true)
+            if [ "$code" = "200" ]; then echo "backend ready after $((i * 3))s"; exit 0; fi
+            sleep 3
+          done
+          echo "::error::backend did not answer /api/status within 300s"
+          exit 1
+
+      - name: Remote Web UI is served
+        run: |
+          curl -fsS http://127.0.0.1:7243/api/status
+          echo
+          curl -fsS http://127.0.0.1:7243/ | grep -q "<title>NAIA Remote</title>"
+          echo "Remote Web index OK"
+
+      - name: launcher log
+        if: always()
+        run: cat web.log || true

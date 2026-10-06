@@ -47,3 +47,9 @@ python NAIA_web_headless.py
 - The opt-in Electron shell launchers are `run_NAIA_electron.bat` / `run_NAIA_electron.command` / `run_NAIA_electron.sh`.
   On headless Linux, run them under `xvfb-run` and pass `--no-sandbox` when running as root.
 - When adding or changing a launcher, keep all six `run_NAIA_*` launchers (`.bat`/`.command`/`.sh`) behaviorally aligned.
+
+## CI
+
+- `.github/workflows/ci.yml` runs on pushes to `future02`/`main` and on every PR: launcher syntax/line-ending checks, Electron main contract tests (Windows/macOS/Linux), remote-checkout-safe layout gates plus `tools/test_*.py` (Windows/Linux), and a Linux headless web smoke through `run_NAIA_web.sh`.
+- Keep CI green. When adding a tracked test or a gate that works in a fresh remote checkout, add it to the workflow too.
+- Gates that depend on local-only roots (`refactor_plans/`, `tests/`) are intentionally excluded from CI; run them locally.

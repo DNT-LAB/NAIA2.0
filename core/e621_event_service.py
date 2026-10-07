@@ -31,6 +31,15 @@ BENCH_SUBJECT = "1girl"
 BENCH_SUBJECT_MALE = "1boy"
 # 자동 조립의 끝에 늘 붙는 것(사용자 지정 2026-10-07: "e621 특성이므로"). 고른 태그 · 관련 태그와 겹치면 다시 붙이지 않는다.
 BENCH_TAIL = ("full_body", "nsfw")
+# [퍼리 싫어](사용자 지정 2026-10-07): 생성할 때 네거티브에 2 를, 조립된 프롬프트의 맨 뒤에 -1 을 붙인다.
+NO_FURRY_TAGS = "furry, furry female"
+
+
+def no_furry_pieces(api_mode: str) -> tuple[str, str]:
+    """(프롬프트 맨 뒤에 붙일 글, 네거티브에 붙일 글). 가중치는 그 모드의 표기로."""
+    if api_mode == "NAI":
+        return f"-1::{NO_FURRY_TAGS} ::", f"2::{NO_FURRY_TAGS} ::"
+    return f"({NO_FURRY_TAGS}:-1)", f"({NO_FURRY_TAGS}:2)"
 AUTO_RELATED_LIMIT = 6
 AUTO_RELATED_MIN_SHARE = 0.4
 RELATED_MIN_POSTS = 1000
@@ -71,6 +80,8 @@ class E621EventService:
         self.use_main_pipeline = True
         # 남성모드: 조립의 주체를 1girl 대신 1boy 로(설정에 저장한다).
         self.male_mode = False
+        # 퍼리 싫어: 생성할 때 furry 를 네거티브(2)와 프롬프트 끝(-1)에 붙인다(설정에 저장한다).
+        self.no_furry = False
         self._species_tags: set[str] | None = None
         # (검색어, 영어로 번역한 검색어). 한국어 검색어를 번역한 결과로 한 번 더 찾는다 - set_param("search_translation").
         self.search_translation: tuple[str, str] | None = None
@@ -212,7 +223,7 @@ class E621EventService:
         return {
             # 화면의 글상자에 들어가는 글이다. 사용자가 고치고, [생성] 은 그 글을 그대로 돌려보낸다.
             "prompt": ", ".join(editable_tag(tag, weight, api_mode) for tag, weight in pieces),
-            "weight": self.test_weight, "male": self.male_mode,
+            "weight": self.test_weight, "male": self.male_mode, "no_furry": self.no_furry,
             # count_tag = 붙인 인원 태그('' = 붙이지 않았다) · count_shares = 근거(None = 표에 없는 태그) · related = 붙인 관련 태그.
             "count_tag": count_tag, "count_shares": info["shares"] if info else None, "related": related,
         }
@@ -402,6 +413,9 @@ class E621EventService:
         elif key == "male_mode":
             self.male_mode = self._coerce_bool(value)
             self._save_settings()
+        elif key == "no_furry":
+            self.no_furry = self._coerce_bool(value)
+            self._save_settings()
         elif key == "testbench":
             self.testbench = raw
             self._save_settings()
@@ -427,6 +441,10 @@ class E621EventService:
                     generated = restore_literals(generated, protected)
                     if not generated:
                         raise ValueError("E621 generated prompt is empty")
+                    # [퍼리 싫어]: 다 만들어진 프롬프트의 맨 뒤에 붙인다(고친 글 · 메인 설정의 접미 뒤). 네거티브 쪽은 아래 메시지로 간다.
+                    furry_prompt, furry_negative = no_furry_pieces(self.app_context.get_api_mode()) if self.no_furry else ("", "")
+                    if furry_prompt:
+                        generated = f"{generated}, {furry_prompt}"
                     if template_context is not None and template_context.wildcard_history:
                         # Template rolls are frozen when the E621 prompt is prepared.
                         # Commit only after successful composition, under the same
@@ -451,6 +469,8 @@ class E621EventService:
                     "source": "e621_event",
                     "use_main_pipeline": self.use_main_pipeline,
                     "prompt": generated,
+                    # 이 생성에만 네거티브 뒤에 덧붙일 글('' = 없음). 메인 네거티브는 건드리지 않는다.
+                    "negative_append": furry_negative,
                     "remaining": self.app_context.search_results.get_count()
                     if getattr(self.app_context, "search_results", None) is not None
                     else 0,
@@ -500,6 +520,7 @@ class E621EventService:
             self.disable_translation = self._coerce_bool(settings.get("disable_translation", False))
             self.disable_wiki_search = self._coerce_bool(settings.get("disable_wiki_search", False))
             self.male_mode = self._coerce_bool(settings.get("male_mode", False))
+            self.no_furry = self._coerce_bool(settings.get("no_furry", False))
             self.testbench = str(settings.get("testbench", DEFAULT_TESTBENCH))
         try:
             saved = json.loads(self.selected_tags_path.read_text(encoding="utf-8"))
@@ -528,6 +549,7 @@ class E621EventService:
                     "disable_translation": self.disable_translation,
                     "disable_wiki_search": self.disable_wiki_search,
                     "male_mode": self.male_mode,
+                    "no_furry": self.no_furry,
                     "testbench": self.testbench,
                 },
                 ensure_ascii=False,

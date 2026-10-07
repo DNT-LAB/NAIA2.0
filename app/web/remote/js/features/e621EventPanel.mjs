@@ -743,6 +743,9 @@ export function createE621EventPanel({
       + '<input type="range" min="0" max="2" step="0.1" data-e621-bench="weight"><span data-e621-bench="weight-label"></span></label>'
       + '<label class="e6-check" title="켜면 1girl 대신 1boy 로 조립합니다">'
       + '<input type="checkbox" data-e621-bench="male"><span>남성모드(1boy)</span></label>'
+      + '<label class="e6-check" title="켜면 생성할 때 네거티브에 2::furry, furry female :: 를, 프롬프트의 맨 뒤에 -1::furry, furry female :: 를 붙입니다'
+      + '(글상자에는 보이지 않습니다)">'
+      + '<input type="checkbox" data-e621-bench="nofurry"><span>퍼리 싫어</span></label>'
       + '<button class="e6-btn e6-bench-go" data-e621-act="bench-generate" data-e621-bench="go" title="Ctrl+Enter">생성</button>'
       + '</div></div>';
   }
@@ -801,6 +804,8 @@ export function createE621EventPanel({
     if (label && label.textContent !== weightText(weight)) label.textContent = weightText(weight);
     const male = benchNode('male');
     if (male) male.checked = Boolean(bench.male);
+    const noFurry = benchNode('nofurry');
+    if (noFurry) noFurry.checked = Boolean(bench.no_furry);
   }
 
   // 글상자를 손으로 고쳤다 - 그 글과, 고치기 시작한 자동 조립을 함께 적어 둔다.
@@ -1177,6 +1182,7 @@ export function createE621EventPanel({
         ui.weightDraft = Number(input.value);
         send('test_weight', ui.weightDraft);
       } else if (input?.dataset?.e621Bench === 'male') send('male_mode', input.checked);   // 서버가 1boy 로 다시 조립해 준다
+      else if (input?.dataset?.e621Bench === 'nofurry') send('no_furry', input.checked);   // 생성할 때 서버가 붙인다
     });
 
     moduleBody.addEventListener('input', event => {

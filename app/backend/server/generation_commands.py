@@ -746,14 +746,20 @@ async def enqueue_prompt_from_module(
     source: str,
     start_generation_runner: GenerationRunnerStarter,
     e621_use_main_pipeline: bool | None = None,
+    negative_append: str = "",
 ) -> None:
     clean_prompt = str(prompt or "").strip()
     if not clean_prompt:
         return
+    # negative_append = 이 생성에만 네거티브 뒤에 덧붙일 글(E621 테스트 생성의 [퍼리 싫어]). 메인 네거티브는 그대로 둔다.
+    negative = str(context.negative_prompt_text or "")
+    extra = str(negative_append or "").strip()
+    if extra:
+        negative = f"{negative.rstrip().rstrip(',')}, {extra}" if negative.strip() else extra
     command = {
         "type": "generate",
         "prompt": clean_prompt,
-        "negative_prompt": context.negative_prompt_text,
+        "negative_prompt": negative if extra else context.negative_prompt_text,
         "overrides": {
             "input": clean_prompt,
             "_raw_input": clean_prompt,

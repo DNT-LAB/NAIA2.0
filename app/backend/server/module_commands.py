@@ -405,6 +405,7 @@ async def handle_module_command(
         generated_prompt = ""
         generated_source = ""
         e621_use_main_pipeline = True
+        negative_append = ""
         for item in module_state:
             if isinstance(item, dict):
                 await _send_json(ws, item)
@@ -412,6 +413,7 @@ async def handle_module_command(
                     generated_prompt = str(item.get("prompt") or "")
                     generated_source = "E621"
                     e621_use_main_pipeline = item.get("use_main_pipeline", True) is not False
+                    negative_append = str(item.get("negative_append") or "")
         if generated_prompt:
             await enqueue_prompt_from_module(
                 ws,
@@ -420,6 +422,7 @@ async def handle_module_command(
                 prompt=generated_prompt,
                 source=generated_source,
                 e621_use_main_pipeline=e621_use_main_pipeline,
+                **({"negative_append": negative_append} if negative_append else {}),
             )
         return True
 

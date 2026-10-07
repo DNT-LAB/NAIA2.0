@@ -300,6 +300,58 @@ class E621EventService:
             "cooccurrences": cooccurrences,
         }
 
+    # ── 공용 태그 카드 ────────────────────────────────────────────────────────
+    # 메인 프롬프트 · 자동완성의 태그 카드(툴팁)가 E621 에만 있는 태그에 쓰는 요약이다(사용자 지정 2026-10-07:
+    # "번역과 관계 데이터를 함께 나열 · danbooru 사양 참조"). 그 전에는 이름 · 수 · 분류 한 줄뿐이라, 같은 태그를
+    # 연구모듈에서 볼 때와 내용이 달랐다. **이 화면이 보이는 것과 같은 자료**를 준다: 한국어 이름 · 설명(사람이 쓴 설명,
+    # 없으면 위키 번역의 첫 문단) · 상위 · 하위 · 함께. 숨긴 태그 · 종 규칙도 이 화면과 같다(_relations_payload).
+    # ⚠️ 위키 번역은 **읽을 때만** 꺼낸다 - 공용 사전의 레코드(검색 색인)에는 싣지 않는다(위 _body_translations 의 까닭).
+    CARD_DESCRIPTION_LIMIT = 160
+
+    def tag_card(self, tag: str) -> dict[str, Any] | None:
+        """`tag` = 정확한 E621 이름이거나 공용 사전의 표기(밑줄 대신 공백). 모르는 태그 · 자료가 없으면 None."""
+        if not self._ensure_loaded():
+            return None
+        name = str(tag or "").strip()
+        exact = next((candidate for candidate in (name, name.replace(" ", "_"))
+                      if candidate and self._find_tag(candidate) is not None), None)
+        if exact is None:
+            return None
+        research = self.research_metadata.for_tag(exact) if self.research_metadata else {}
+        description = (str(research.get("korean_description") or "").strip()
+                       or self._card_description(research.get("korean_body"), self.CARD_DESCRIPTION_LIMIT))
+        relations = self._relations_payload(exact)
+
+        def briefs(rows) -> list[dict[str, Any]]:
+            return [{"tag": row["display"], "kor": row["kor"], "count": row["count"]} for row in rows or []]
+
+        return {
+            "tag": display_tag(exact),
+            "kor": str(research.get("korean_label") or (self._find_tag(exact) or {}).get("kor") or ""),
+            "description": description,
+            "broader": briefs(relations.get("broader")),
+            "narrower": briefs(relations.get("narrower")),
+            "together": briefs(relations.get("cooccurrences")),
+        }
+
+    @classmethod
+    def _card_description(cls, body: Any, limit: int) -> str:
+        """위키 번역의 첫 문단을 카드 한 칸에 들어갈 길이로. 제목(h3.) · 목록(*) · 빈 줄에서 끊는다."""
+        lines: list[str] = []
+        for line in cls._clean_wiki_text(str(body or "")).splitlines():
+            text = line.strip()
+            if not text or re.match(r"h\d\.", text) or text.startswith("*"):
+                if lines:
+                    break
+                continue
+            lines.append(text)
+        text = " ".join(lines)
+        if len(text) <= limit:
+            return text
+        # 문장이 끝나는 자리에서 자른다. 그런 자리가 너무 앞이면(한 문장이 길다) 글자 수로 자르고 말줄임표를 붙인다.
+        cut = max(text.rfind(mark, 0, limit) for mark in (". ", "다. ", "요. "))
+        return text[:cut + 1].rstrip() if cut >= limit // 3 else text[:limit].rstrip() + "…"
+
     # ── 번역한 검색어 ─────────────────────────────────────────────────────────
     # 한국어 이름 · 검색어가 달린 태그는 17만 개 중 6,700개쯤이다 - 한국어로 치면 못 찾는 일이 많다.
     # 그래서 검색어를 영어로 번역해 한 번 더 찾고, 그 결과를 원래 결과 **뒤에** 보탠다(사용자 지정 2026-10-03).

@@ -304,6 +304,51 @@ def _recommendable(context, raw_tags):
     return ok
 
 
+# E621 카드의 한 줄에 싣는 칩 수(상위 · 하위 · 메인 칸이 아닌 곳의 '함께'). 메인 칸의 '함께' 는 연구모듈이 주는 만큼
+# (관계 팩에 든 만큼) 싣는다 - 추천 줄이 앞의 넷만 보이고 나머지는 [함께 N] 단추 뒤에 둔다.
+E621_CARD_CHIPS = 8
+
+
+def _apply_e621_card(context: WebSessionContext, info: dict[str, Any], result: dict[str, Any], *,
+                     recommend: bool) -> dict[str, dict[str, Any]]:
+    """E621 에만 있는 태그의 카드를 E621 자료로 채운다 - **Danbooru 카드와 같은 칸**을 쓴다(사용자 지정 2026-10-07).
+
+    공용 사전의 E621 레코드에는 설명도 관계도 없어(관계 팩 · 동반 표는 Danbooru 것이다) 카드가 이름 · 수 · 분류 한 줄이었다.
+    · 설명 = `한국어 이름 — 설명`                         · implies = 상위 태그
+    · 메인 칸(recommend): 종류 = 하위 · 함께 = 함께 붙는 태그   · 그 밖의 칸: related = 함께 붙는 태그
+    권할 값 거르개(_recommendable)는 태우지 않는다 - 그 기준(공용 사전의 게시물 수 300 등)은 Danbooru 사전의 것이고,
+    연구모듈이 이미 숨긴 태그 · 종 규칙으로 걸렀다. 돌려주는 것 = 칩 이름 -> {tag, kor, count}(칩의 호버 정보에 쓴다).
+    ⚠️ 연구모듈 자료는 처음 한 번 읽는 데 1초쯤 든다(사전 37MB + 관계 팩). 그래서 E621 전용 태그를 볼 때만 부른다.
+    """
+    try:
+        card = context._e621_event_service().tag_card(str(info.get("_tag") or ""))
+    except Exception as exc:  # noqa: BLE001 - 카드의 덧붙임이다. 못 읽으면 예전처럼 한 줄만 보인다
+        print(f"[tag-lookup] e621 card skipped: {ascii(str(exc))}", flush=True)
+        card = None
+    if not card:
+        return {}
+    text = " — ".join(part for part in (card.get("kor"), card.get("description")) if part)
+    if text:
+        result["desc"] = text
+    broader, narrower, together = (card.get(key) or [] for key in ("broader", "narrower", "together"))
+
+    def names(rows, limit=E621_CARD_CHIPS):
+        return [row["tag"] for row in rows][:limit]
+
+    if broader:
+        result["implications"] = names(broader)
+    if narrower:
+        result["specific"] = names(narrower)
+    if together:
+        result["related"] = names(together)
+    if recommend:
+        groups = [{"type": kind, "items": [{"tag": name, "op": "add"} for name in chips]}
+                  for kind, chips in (("variations", names(narrower)), ("companions", names(together, None))) if chips]
+        if groups:
+            result["recommend"] = {"groups": groups}
+    return {row["tag"]: row for row in (*broader, *narrower, *together)}
+
+
 def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = False,
                     prompt_tags: list[str] | None = None) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
@@ -412,16 +457,26 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
             if fill:
                 result["recommend"]["fill"] = fill
             recommended = [item["tag"] for group in groups for item in group["items"]]
+    # E621 에만 있는 태그는 위의 줄들이 전부 빈다(사전 관계 · 동반 표 · 관계 팩이 Danbooru 것이다) - E621 자료로 채운다.
+    from core.tag_knowledge import is_e621_only
+
+    e621_chips: dict[str, dict[str, Any]] = {}
+    if is_e621_only(info):
+        e621_chips = _apply_e621_card(context, info, result, recommend=recommend)
     extra_info = {}
     for extra_tag in (list(result.get("implications", [])) + list(result.get("related", []))
-                      + list(result.get("companions", [])) + recommended):
+                      + list(result.get("companions", [])) + recommended + list(e621_chips)):
         extra = raw_tags.get(str(extra_tag).strip().lower())
-        if not extra:
+        # E621 칩은 공용 사전에 없을 수 있다(미분류 태그) - 그때는 연구모듈이 준 한국어 이름 · 수로 호버 정보를 만든다.
+        chip = e621_chips.get(str(extra_tag))
+        if not extra and not chip:
             continue
+        extra = extra or {"_cat": "e621", "group": "E621"}
         extra_info[str(extra_tag)] = {
             "tag": extra.get("_tag", str(extra_tag)),
-            "count": extra.get("freq", 0),
-            "desc": korean_description(pack, str(extra_tag)) or extra.get("description", ""),
+            "count": extra.get("freq", 0) or (chip or {}).get("count", 0),
+            "desc": (korean_description(pack, str(extra_tag)) or extra.get("description", "")
+                     or (chip or {}).get("kor", "")),
             "group": extra.get("group", ""),
             "subgroup": extra.get("subgroup", ""),
             "cat": extra.get("_cat", ""),

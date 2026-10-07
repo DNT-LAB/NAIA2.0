@@ -736,6 +736,8 @@ export function createE621EventPanel({
     return '<div class="e6-bench">'
       + '<div class="e6-bench-line"><span title="고른 태그로 자동 조립한 프롬프트입니다(인원 태그 · 관련 태그 6개 이내). 아래 칸에서 바로 고칠 수 있고, 태그를 바꾸면 새로 조립합니다">보낼 프롬프트</span>'
       + '<button class="e6-link" data-e621-act="bench-reset" data-e621-bench="reset" title="고친 글을 버리고 자동으로 조립한 프롬프트로 되돌립니다" hidden>되돌리기</button>'
+      // 고른 태그의 즐겨찾기(설명 칸의 ★ 과 같은 동작 - 작게 보기에서는 설명 칸이 옆 창에 있어 여기서 누른다). 글은 syncBench 가 맞춘다.
+      + '<button class="e6-link e6-bench-star" data-e621-act="star" data-e621-bench="star"></button>'
       + '<span class="e6-bench-count" data-e621-bench="count"></span></div>'
       + '<textarea class="mod-textarea e6-bench-input" id="e621BenchInput" rows="3" maxlength="4000" spellcheck="false" autocomplete="off"></textarea>'
       + '<div class="e6-bench-row">'
@@ -796,6 +798,13 @@ export function createE621EventPanel({
     if (input.value !== text) input.value = text;
     const reset = benchNode('reset');
     if (reset) reset.hidden = text === bench.prompt;
+    const star = benchNode('star');
+    if (star) {
+      const starred = Boolean(state.selected?.starred);
+      const label = starred ? '즐겨찾기에서 제거' : '즐겨찾기에 추가';
+      if (star.textContent !== label) star.textContent = label;
+      if (star.classList) star.classList.toggle('on', starred);
+    }
     writeNode(benchNode('count'), benchCountHtml(bench));
     const weight = ui.weightDraft ?? (Number(bench.weight) || 0);
     const slider = benchNode('weight');
@@ -1431,6 +1440,10 @@ const PANEL_CSS = `
 .e6-tag-en{min-width:0;overflow:hidden;font-family:var(--font-mono);text-overflow:ellipsis;white-space:nowrap}
 .e6-tag-num{color:var(--text-dim);font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .e6-tag-num .e6-star{margin-right:3px}
+/* 즐겨찾기한 태그의 줄: 배경을 조금 밝게, 이름은 연노랑(사용자 지정 2026-10-07). 고른 줄의 보라 배경은 그대로 이긴다. */
+.e6-tag.starred:not(.selected){background:rgba(255,255,255,0.055)}
+.e6-tag.starred:not(.selected):hover{background:rgba(255,255,255,0.1)}
+.e6-tag.starred .e6-tag-en{color:#f3e6a3}
 .e6-tag-ko{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:4px}
 .e6-tag-ko-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .e6-tag.body-only .e6-tag-en{color:var(--text-dim)}
@@ -1493,6 +1506,7 @@ const PANEL_CSS = `
   background:var(--bg-deep)}
 .e6-bench-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;color:var(--text-dim);font-size:10px}
 .e6-bench-line .e6-link[hidden]{display:none}
+.e6-bench-star.on{color:#e8c76a}
 .e6-bench-count{margin-left:auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;cursor:help}
 .e6-bench-count b{color:#9cc4f5;font-weight:600}
 .e6-bench .e6-bench-input{box-sizing:border-box;min-height:62px;max-height:160px;padding:6px 8px;border-radius:4px;font-family:var(--font-mono);

@@ -2,6 +2,9 @@ import requests
 from core.generation_access_policy import generation_operation
 import zipfile
 import io, time, re, json
+import socket
+import threading
+from contextlib import contextmanager
 import base64
 import copy
 import math
@@ -158,6 +161,102 @@ def _resolve_nai_model_key_loosely(model_value: Any) -> str:
         return text                       # 이미 아는 키다
     recovered = nai_key_from_exact_name(text)
     return recovered or text
+
+
+# NAI 요청 한 번의 **총** 대기 상한(초). 넘으면 Connection Lost 로 판정한다(사용자 지정 2026-10-07).
+# ⚠️ `requests` 의 timeout 은 '한 번 읽을 때' 의 상한이지 총 시간이 아니다. 조금씩이라도 바이트가
+#    오면(스트리밍 SSE) 영영 안 끝나고, 응답 전체를 기다리는 경로도 읽기마다 상한이 다시 시작된다.
+#    그래서 아래 `_nai_deadline_guard` 가 벽시계로 재고, 시간이 다 되면 연결을 끊어 막힌 읽기를 깨운다.
+NAI_REQUEST_DEADLINE_S = 135.0
+NAI_CONNECT_TIMEOUT_S = 30.0
+
+
+class NaiConnectionLost(Exception):
+    """NAI 요청이 총 대기 상한(NAI_REQUEST_DEADLINE_S) 안에 끝나지 않았다.
+
+    재시도하지 않는다 - 서버는 이미 생성(과금)했을 수 있어 다시 보내면 Anlas 를 두 번 물 수 있고,
+    재시도마다 상한만큼 더 기다리게 된다(3회면 6분 남짓).
+    """
+
+    def __init__(self, seconds: float = NAI_REQUEST_DEADLINE_S):
+        super().__init__(
+            f"NAI 연결 끊김(Connection Lost): {int(seconds)}초 동안 응답을 받지 못했습니다. "
+            "NovelAI 서버 상태나 네트워크를 확인한 뒤 다시 생성해 주세요."
+        )
+
+
+class _NaiDeadlineGuard:
+    """NAI 요청 하나의 벽시계 상한. 시간이 다 되면 응답 연결을 끊어 막혀 있는 읽기를 깨운다.
+
+    쓰는 법:
+        guard = _NaiDeadlineGuard()
+        response = session.post(..., timeout=guard.request_timeout(), stream=True)
+        with guard.watch(response):
+            ... response 를 읽는다 ...
+    `watch` 블록 안에서 읽기 오류가 나면 시간 초과 때문인지 보고 NaiConnectionLost 로 바꿔 던진다.
+    """
+
+    def __init__(self, deadline_s: float | None = None):
+        self.deadline_s = float(deadline_s if deadline_s is not None else NAI_REQUEST_DEADLINE_S)
+        self._deadline = time.monotonic() + self.deadline_s
+        self._expired = threading.Event()
+
+    def remaining(self) -> float:
+        return self._deadline - time.monotonic()
+
+    def request_timeout(self) -> tuple[float, float]:
+        """`requests` 의 (연결, 읽기) 상한. 응답 머리를 기다리는 동안은 이 읽기 상한이 지킨다."""
+        remaining = max(0.1, self.remaining())
+        return (min(NAI_CONNECT_TIMEOUT_S, remaining), remaining)
+
+    def _expire(self, response) -> None:
+        self._expired.set()
+        _force_close_response(response)
+
+    @contextmanager
+    def watch(self, response):
+        remaining = self.remaining()
+        if remaining <= 0:
+            self._expire(response)
+            raise NaiConnectionLost(self.deadline_s)
+        timer = threading.Timer(remaining, self._expire, args=(response,))
+        timer.daemon = True
+        timer.start()
+        try:
+            yield
+        except Exception as exc:
+            if self._expired.is_set() or isinstance(exc, requests.exceptions.Timeout):
+                raise NaiConnectionLost(self.deadline_s) from exc
+            raise
+        finally:
+            timer.cancel()
+        if self._expired.is_set():
+            # 끊긴 연결에서 읽기가 조용히 끝난 경우(예외 없이 iter 가 멈춤)도 같은 판정이다
+            raise NaiConnectionLost(self.deadline_s)
+
+
+def _force_close_response(response) -> None:
+    """다른 스레드에서 막혀 있는 소켓 읽기를 깨운다.
+
+    소켓을 `close()` 만 하면 이미 recv 에서 기다리는 스레드가 깨지 않을 수 있다(Linux).
+    `shutdown()` 을 먼저 불러 읽기를 끝낸 뒤 응답을 닫는다.
+    """
+    try:
+        raw = getattr(response, "raw", None)
+        sock = None
+        connection = getattr(raw, "_connection", None) or getattr(raw, "connection", None)
+        sock = getattr(connection, "sock", None)
+        if sock is None:
+            fp = getattr(raw, "_fp", None)
+            sock = getattr(getattr(getattr(fp, "fp", None), "raw", None), "_sock", None)
+        if sock is not None:
+            sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        response.close()
+    except Exception:
+        pass
 
 
 def _get_loaded_middle_module(app_context, class_name: str):
@@ -676,6 +775,9 @@ class APIService:
                 if result and result.get('status') == 'error':
                     error_msg = result.get('message', 'Unknown error')
                     print(f"[WARNING] API 오류 응답 (시도 {attempt}/{max_retries}): {error_msg}")
+                    # 다시 보내면 안 되는 실패(NAI Connection Lost - 이미 과금됐을 수 있다)는 그대로 돌려준다
+                    if result.get('no_retry'):
+                        return {'status': 'error', 'message': error_msg}
 
                     # HTTP 520 등 서버 오류는 재시도 가능
                     if 'HTTP 520' in error_msg or 'HTTP 502' in error_msg or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg:
@@ -1641,13 +1743,21 @@ class APIService:
                 return {'status': 'success', 'image': image, 'raw_bytes': image_bytes}
 
             # HTTP 세션을 사용하여 연결 정리
+            # 총 대기 상한(NAI_REQUEST_DEADLINE_S)을 벽시계로 잰다 - 본문까지 다 받아야 끝이다.
+            guard = _NaiDeadlineGuard()
             with requests.Session() as session:
-                response = session.post(
-                    self.NAI_V3_API_URL,
-                    headers=headers,
-                    timeout=180,
-                    **self._nai_request_body_kwargs(payload, nai_multipart)
-                )
+                try:
+                    response = session.post(
+                        self.NAI_V3_API_URL,
+                        headers=headers,
+                        timeout=guard.request_timeout(),
+                        stream=True,
+                        **self._nai_request_body_kwargs(payload, nai_multipart)
+                    )
+                except requests.exceptions.Timeout as exc:
+                    raise NaiConnectionLost(guard.deadline_s) from exc
+                with guard.watch(response):
+                    _ = response.content   # 본문 전체를 상한 안에서 받아 둔다(아래 처리는 이 사본을 쓴다)
                 # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
@@ -1666,6 +1776,10 @@ class APIService:
             else:
                 raise Exception("응답에서 이미지를 처리할 수 없습니다.")
 
+        except NaiConnectionLost as e:
+            # 재시도하지 않는다(NaiConnectionLost 설명 참고) - call_generation_api 가 no_retry 를 보고 바로 돌려준다
+            print(f"❌ {e}")
+            return {'status': 'error', 'message': str(e), 'no_retry': True}
         except requests.exceptions.HTTPError as e:
             error_message = f"API 오류 (HTTP {e.response.status_code}): {e.response.text}"
             print(f"❌ {error_message}")
@@ -2081,68 +2195,78 @@ class APIService:
         except Exception:
             steps = 0
 
+        # 총 대기 상한(NAI_REQUEST_DEADLINE_S)을 벽시계로 잰다. 프레임이 조금씩 계속 와도 상한이 되면 끊는다
+        # (예전 (30, 300) 은 '한 번 읽기' 상한이라, 바이트가 이어지면 끝없이 기다렸다).
+        guard = _NaiDeadlineGuard()
         with requests.Session() as session:
-            response = session.post(
-                stream_url,
-                headers=stream_headers,
-                stream=True,
-                timeout=(30, 300),
-                **self._nai_request_body_kwargs(payload, multipart),
-            )
             try:
-                # 오류 응답은 본문을 읽어 예외로 처리 (재시도/에러 표시 일관성)
-                if response.status_code not in (200, 201):
-                    response.raise_for_status()
+                response = session.post(
+                    stream_url,
+                    headers=stream_headers,
+                    stream=True,
+                    timeout=guard.request_timeout(),
+                    **self._nai_request_body_kwargs(payload, multipart),
+                )
+            except requests.exceptions.Timeout as exc:
+                raise NaiConnectionLost(guard.deadline_s) from exc
+            try:
+                with guard.watch(response):
+                    # 오류 응답은 본문을 읽어 예외로 처리 (재시도/에러 표시 일관성)
+                    if response.status_code not in (200, 201):
+                        response.raise_for_status()
 
-                for line in response.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    # SSE 데이터 라인만 처리 (event:/id: 라인은 무시)
-                    if not line.startswith("data:"):
-                        continue
-                    data_str = line[len("data:"):].lstrip()
-                    if not data_str:
-                        continue
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-
-                    event_type = event.get("event_type")
-                    img_b64 = event.get("image")
-                    if not img_b64:
-                        continue
-                    try:
-                        img_bytes = base64.b64decode(img_b64)
-                    except Exception:
-                        continue
-
-                    if event_type == "final":
-                        final_bytes = img_bytes
-                        # 최종 프레임도 즉시 프리뷰에 반영 (완료 처리 전 잔상 방지)
-                        if preview_callback is not None:
-                            try:
-                                preview_callback(img_bytes, steps, steps)
-                            except Exception:
-                                pass
-                    else:
-                        # intermediate 프레임
-                        step_ix = event.get("step_ix", -1)
+                    for line in response.iter_lines(decode_unicode=True):
+                        if not line:
+                            continue
+                        # SSE 데이터 라인만 처리 (event:/id: 라인은 무시)
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:"):].lstrip()
+                        if not data_str:
+                            continue
                         try:
-                            cur = int(step_ix) + 1 if (step_ix is not None and int(step_ix) >= 0) else 0
+                            event = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        event_type = event.get("event_type")
+                        img_b64 = event.get("image")
+                        if not img_b64:
+                            continue
+                        try:
+                            img_bytes = base64.b64decode(img_b64)
                         except Exception:
-                            cur = 0
-                        if progress_callback is not None and steps > 0:
-                            percent = int(min(max(cur / steps, 0.0), 1.0) * 100)
-                            progress_callback(
-                                f"NAI 스트리밍 : {percent}% ({cur}/{steps})",
-                                cur, steps, percent,
-                            )
-                        if preview_callback is not None:
+                            continue
+
+                        if event_type == "final":
+                            final_bytes = img_bytes
+                            # 최종 프레임도 즉시 프리뷰에 반영 (완료 처리 전 잔상 방지)
+                            if preview_callback is not None:
+                                try:
+                                    preview_callback(img_bytes, steps, steps)
+                                except Exception:
+                                    pass
+                            # 최종 그림을 받았으면 스트림이 닫히기를 기다리지 않는다 - 서버가 늦게 닫으면
+                            # 총 대기 상한에 걸려 이미 받은 그림을 버리게 된다.
+                            break
+                        else:
+                            # intermediate 프레임
+                            step_ix = event.get("step_ix", -1)
                             try:
-                                preview_callback(img_bytes, cur, steps)
-                            except Exception as e:
-                                print(f"⚠️ 스트리밍 프리뷰 콜백 실패: {e}")
+                                cur = int(step_ix) + 1 if (step_ix is not None and int(step_ix) >= 0) else 0
+                            except Exception:
+                                cur = 0
+                            if progress_callback is not None and steps > 0:
+                                percent = int(min(max(cur / steps, 0.0), 1.0) * 100)
+                                progress_callback(
+                                    f"NAI 스트리밍 : {percent}% ({cur}/{steps})",
+                                    cur, steps, percent,
+                                )
+                            if preview_callback is not None:
+                                try:
+                                    preview_callback(img_bytes, cur, steps)
+                                except Exception as e:
+                                    print(f"⚠️ 스트리밍 프리뷰 콜백 실패: {e}")
             finally:
                 response.close()
                 if hasattr(session, 'adapters'):

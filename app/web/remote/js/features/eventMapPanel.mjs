@@ -517,7 +517,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         <div class="em-tip-stats">${row.dataset.emLift ? `lift ${esc(row.dataset.emLift)} · ` : ''}${info?.count ? `Danbooru ${fmt(info.count)}` : ''}</div>
         <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : "클릭 꽂기 · 우클릭 제외"}</div></div>
       </div>${thumb}</div>`;
-    tip.style.zIndex = String(Number(overlay.style.zIndex) + 1);
+    // 툴팁은 곁에 뜨는 창들(소분류 · 옆 패널 · 인원 팝업, 모두 overlay+1)보다 **한 칸 위**다. 같은 칸이면
+    // body 에 나중에 붙은 쪽이 이겨, 창을 다시 열면 소분류 창이 툴팁을 덮었다(사용자 제보 2026-10-07).
+    tip.style.zIndex = String(Number(overlay.style.zIndex) + 2);
     tip.classList.add('open');
     // **항상 같은 자리**: 행 가운데의 살짝 오른쪽, 행 바로 아래(사용자 지정 2026-09-12 밤 - 창 크기에
     // 따라 좌우로 튀던 것). 아래가 모자라면 위로만 올린다. 좌우는 화면 밖으로 나가지 않게만 민다.
@@ -1463,9 +1465,10 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     fitWindow();
     panel.refit();
     const z = Number(overlay.style.zIndex) + 1;
-    for (const el of [subEl, sideEl, personPopup, tipEl, document.querySelector('.em-saved-panel')]) {
+    for (const el of [subEl, sideEl, personPopup, document.querySelector('.em-saved-panel')]) {
       if (el) el.style.zIndex = String(z);
     }
+    if (tipEl) tipEl.style.zIndex = String(z + 1);   // 툴팁은 위 창들보다 한 칸 위(행 툴팁을 열 때와 같은 값)
     positionSubcategories();
     positionSide();
     library?.position();

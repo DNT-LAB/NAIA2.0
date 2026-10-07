@@ -29,6 +29,8 @@ DEFAULT_TESTBENCH = "{{selected_tags}}"
 #     male/male 과 male/female 이 함께 올라온다 - 서로 다른 변종이 섞인다. 게시물이 너무 적은 태그는 관측이 흔들린다.
 BENCH_SUBJECT = "1girl"
 BENCH_SUBJECT_MALE = "1boy"
+# 자동 조립의 끝에 늘 붙는 것(사용자 지정 2026-10-07: "e621 특성이므로"). 고른 태그 · 관련 태그와 겹치면 다시 붙이지 않는다.
+BENCH_TAIL = ("full_body", "nsfw")
 AUTO_RELATED_LIMIT = 6
 AUTO_RELATED_MIN_SHARE = 0.4
 RELATED_MIN_POSTS = 1000
@@ -197,7 +199,7 @@ class E621EventService:
         return [row[0] for row in rows if not row[1]][:AUTO_RELATED_LIMIT - len(kind)] + kind
 
     def _bench_payload(self, exact_tag: str) -> dict[str, Any]:
-        """조립 순서: 주체 → 인원 태그(있을 때만) → 고른 태그(가중치) → 관련 태그."""
+        """조립 순서: 주체 → 인원 태그(있을 때만) → 고른 태그(가중치) → 관련 태그 → 늘 붙는 끝(full body, nsfw)."""
         info = self.count_profile.describe(exact_tag)
         count_tag = info["tag"] if info else ""
         related = self._auto_related(exact_tag)
@@ -205,6 +207,8 @@ class E621EventService:
         subject = BENCH_SUBJECT_MALE if self.male_mode else BENCH_SUBJECT
         pieces = [(subject, 1.0), *([(count_tag, 1.0)] if count_tag else []), (exact_tag, self.test_weight),
                   *((tag, 1.0) for tag in related)]
+        used = {exact_tag, *related}
+        pieces += [(tag, 1.0) for tag in BENCH_TAIL if tag not in used]
         return {
             # 화면의 글상자에 들어가는 글이다. 사용자가 고치고, [생성] 은 그 글을 그대로 돌려보낸다.
             "prompt": ", ".join(editable_tag(tag, weight, api_mode) for tag, weight in pieces),

@@ -1733,7 +1733,7 @@ class HeadlessPromptEngineeringService:
             "cfg_scale": 5.8,
             "cfg_rescale": 0.28,
             "negative": (
-                "text, logo, signature, watermark, too many watermarks, chili inset, "
+                "text, logo, signature, watermark, too many watermarks, chibi inset, "
                 "0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, "
                 "chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, "
                 "missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, "

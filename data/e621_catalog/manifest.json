@@ -4,7 +4,7 @@
   "source_revision": "df7cf53b",
   "assets": {
     "translations.json": {
-      "sha256_lf": "d1270d646f9446f8758f67b3aa8af1bbefabf8718fc453f5771e783f5b9312f4"
+      "sha256_lf": "3cb921e13b36fe302e9b08d83f6cef96890cb9d60b03a2153a61c000012105d7"
     },
     "wiki_bodies.json": {
       "sha256_lf": "6e9ebfdd1d8e397f463cee7dd9c0e272ef0f81dc728255e5cd55b96a02207045"
@@ -18,5 +18,13 @@
   "last_approval": {
     "sha256": "25d468a830b2b081b52b7093bac9c065cfeda0e24a7775c9dceda3115239e548",
     "reviewer": "gpt-6.1-sol"
+  },
+  "last_taxonomy_migration": {
+    "ledger_sha256": "8abb4804ebb2bbbc5ee380b84564c21d5542913fa9fa8eb660552c79cc270bd3",
+    "dictionary_sha256": "c2eceee6c39631574e08bd66e735d2fd5ab7d10c872918b55187767c6e37297a",
+    "scope": 5128,
+    "record_content_unchanged": true,
+    "user_approved": true,
+    "legacy_categories_removed": 15
   }
 }

@@ -1470,6 +1470,15 @@
               </button>
               <p class="settings-toggle-desc">E 바로 아래에 붙는 반구 단추(<b>A</b>)를 감춥니다. 숨겨도 <b>Ctrl+O</b> 로는 그대로 열립니다.</p>
             </div>
+            <div class="settings-toggle-row">
+              <button type="button" class="opt-toggle settings-toggle" id="optShowComfyServerConsole"
+                      data-option="show_comfyui_server_console" data-checked="false" aria-pressed="false"
+                      onclick="toggleOptionButton('show_comfyui_server_console')">
+                <span class="opt-box" aria-hidden="true"></span>
+                <span class="opt-label">ComfyUI 서버 출력 보기</span>
+              </button>
+              <p class="settings-toggle-desc">외부 ComfyUI(API 모드)로 생성하는 동안 결과 이미지 아래쪽에 ComfyUI 서버의 터미널 출력을 띄웁니다. 성공하면 잠시 뒤 닫히고, 실패하면 원인을 볼 수 있게 열어 둡니다. <span class="settings-toggle-note">결과 이미지 일부를 가리므로 기본은 꺼져 있습니다.</span></p>
+            </div>
           </div>
           <div class="settings-empty">
             <p>그 외 전역 설정이 이곳으로 모일 예정입니다 (API 연결 · Web Session · 가시성).</p>

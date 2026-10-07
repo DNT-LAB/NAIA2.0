@@ -1,6 +1,8 @@
 // 외부 ComfyUI(API 모드) - Generate 가 도는 동안 결과 칸 아래쪽에 ComfyUI 서버 출력을 보이는 읽기 전용 콘솔(사용자 지정
 // 2026-10-01: "API 모드에서도 Generate 를 통한 ComfyUI 백엔드 터미널 보여주는 기능". 인계 = docs/COMFYUI_API_TERMINAL_HANDOFF_2026_10_01.md).
 // 관리형 ANIMA 의 기동 콘솔(animaEngineConsole.mjs)과 따로 둔다 - 그쪽은 '엔진이 켜지는 동안', 이쪽은 '생성이 도는 동안' 이다.
+// Settings ▸ 화면 의 [ComfyUI 서버 출력 보기](옵션 show_comfyui_server_console, **기본 꺼짐**)를 켠 경우에만 app.js setGen 이 연다
+// (결과 이미지를 가려서 - 사용자 지시 2026-10-07). 꺼져 있으면 서버 로그도 조회하지 않는다.
 //
 // GET /api/comfyui/server-log 가 외부 서버의 /internal/logs/raw 를 이어 붙여 준다. 첫 조회 = 지금부터.
 // 첫 조회가 오류 출력까지 기준선으로 삼은 빠른 실패는 마지막 응답의 최근 서버 출력을 별도 안내와 함께 보여 준다.

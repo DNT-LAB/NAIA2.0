@@ -4177,6 +4177,7 @@ const optBoxes = {
   stop_autogen_on_tag_exhaust: $('optStopAutogenOnExhaust'),
   hide_event_map_button: $('optHideEventMapTab'),
   hide_assist_button: $('optHideAssistTab'),
+  show_comfyui_server_console: $('optShowComfyServerConsole'),
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
@@ -9131,7 +9132,8 @@ function setGen(v) {
     startGenTimer();
     startProgress();
     if (isAnimaManagedMode()) watchAnimaEngineStart(animaEngineWatchSeq);
-    else if (isExternalComfyMode()) comfyServerConsole?.start?.();   // 외부 ComfyUI - 생성이 도는 동안 서버 출력
+    // 외부 ComfyUI - 생성이 도는 동안 서버 출력. Settings 에서 켠 사람만(기본 꺼짐, 사용자 지시 10-07).
+    else if (isExternalComfyMode() && getOptionChecked('show_comfyui_server_console')) comfyServerConsole?.start?.();
   } else {
     if (genStartTime > 0 && !engineWait) {
       const dur = Date.now() - genStartTime;
@@ -9409,6 +9411,10 @@ function applyOptionState(key, value, options = {}) {
     // A 탭도 같은 뜻 - 단추만 감추고 Ctrl+O 는 그대로 둔다(사용자 지시 2026-09-30). A 도 `.em-tab` 이라 같은 짝 규칙이 감춘다.
     const asTab = document.getElementById('assistTab');
     if (asTab) asTab.hidden = next;
+  }
+  if (key === 'show_comfyui_server_console' && !next) {
+    // 끄면 지금 떠 있는 것(실패로 남겨 둔 것 포함)도 닫는다 - 다음 Generate 부터가 아니라 바로.
+    comfyServerConsole?.hide?.();
   }
   return true;
 }

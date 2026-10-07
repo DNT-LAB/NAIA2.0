@@ -26,6 +26,9 @@ REMOTE_OPTION_DEFAULTS = {
     # Assist 진입 반구 단추(A, E 바로 아래)도 같은 뜻으로 숨긴다. 숨겨도 **Ctrl+O 는 그대로 열린다**
     # (사용자 지시 2026-09-30).
     "hide_assist_button": False,
+    # 외부 ComfyUI(API 모드)에서 Generate 동안 결과 칸 아래에 ComfyUI 서버 출력을 띄운다(10-01 추가 기능).
+    # 결과 이미지를 가려서 **기본 꺼짐** - 필요한 사람만 Settings 에서 켠다(사용자 지시 2026-10-07).
+    "show_comfyui_server_console": False,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",

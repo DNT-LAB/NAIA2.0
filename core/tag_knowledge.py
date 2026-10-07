@@ -438,20 +438,20 @@ def merge_e621_research_records(
     for future bulk imports; revalidate the bounded vocabulary before expansion.
     """
     stats = ParquetTagMergeStats()
-    path = Path(data_path)
-    if not path.exists():
-        stats.missing_sources.append(str(path))
+    data_file = Path(data_path)
+    if not data_file.exists():
+        stats.missing_sources.append(str(data_file))
         return stats
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(data_file.read_text(encoding="utf-8"))
     except Exception as exc:
-        stats.errors.append(f"{path}: {exc}")
+        stats.errors.append(f"{data_file}: {exc}")
         return stats
 
-    def walk(node: Any, group: str, unclassified: bool = False) -> None:
+    def walk(node: Any, path: tuple[str, ...] = (), unclassified: bool = False) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
-                walk(value, str(key), unclassified or key in {"일반 미분류", "종 미분류"})
+                walk(value, path + (str(key),), unclassified or key in {"일반 미분류", "종 미분류"})
             return
         if not isinstance(node, list):
             return
@@ -475,17 +475,40 @@ def merge_e621_research_records(
                 "_cat": "e621",
                 "freq": freq,
                 "description": "",
-                "group": group,
+                "group": e621_group_label(path),
                 "subgroup": "",
                 "keywords_kr": korean,
-                "_translation_source": str(path),
+                "_translation_source": str(data_file),
             }
             _refresh_lookup_fields(entry)
             raw[tag_lower] = entry
             stats.added += 1
 
-    walk(payload, "e621")
+    walk(payload)
     return stats
+
+
+def e621_group_label(path: tuple[str, ...]) -> str:
+    """공용 사전(자동완성 · 태그 정보)에 보이는 E621 태그의 분류 글자: 'E621: 구조·체형'(사용자 지정 2026-10-07).
+
+    사전의 자리는 구역 > 분류 > 폴더 > (잎 묶음 '_Tags' …)다. 폴더 이름을 쓰되, 분류마다 되풀이되어 무엇인지 알려 주지
+    못하는 폴더('전체' · '기타·복합' · 'NSFW' - 공용 E621 태그의 64%가 이 둘에 있다)는 분류 이름을 쓴다.
+    예전에는 잎 묶음의 이름('_Tags' · 'Other')이나 번역 표의 대분류가 그대로 보였다.
+    """
+    folder = path[2] if len(path) > 2 else ""
+    name = folder if folder and folder not in _E621_GENERIC_FOLDERS else (path[1] if len(path) > 1 else "")
+    return f"E621: {name}" if name else "E621"
+
+
+_E621_GENERIC_FOLDERS = frozenset({"전체", "기타·복합", "NSFW"})
+
+
+def apply_e621_group(record: MutableMapping[str, Any], label: str) -> bool:
+    """번역 표가 먼저 만든 E621 레코드(2)의 분류 글자를 사전의 폴더 이름으로 바꾼다. Danbooru 레코드는 손대지 않는다."""
+    if record.get("_src") != 2 or not label or record.get("group") == label:
+        return False
+    record["group"] = label
+    return True
 
 def merge_rating_count_records(
     raw: MutableMapping[str, MutableMapping[str, Any]],

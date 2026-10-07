@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from core.tag_knowledge import (
     add_e621_name_keyword,
+    apply_e621_group,
     apply_korean_alias_supplement,
     apply_korean_keyword_supplement,
     apply_korean_slang_supplement,
@@ -172,6 +173,8 @@ def load_kr_tag_records(
         if tag_key in raw:
             # 번역 표가 먼저 만든 E621 레코드에는 이름이 없다 - 이름으로도 찾아지게 검색어에 넣는다.
             add_e621_name_keyword(raw[tag_key], record.get("keywords_kr"))
+            # 분류 글자도 사전의 폴더 이름으로('E621: 구조·체형') - 번역 표에는 대분류만 있다.
+            apply_e621_group(raw[tag_key], record.get("group"))
             continue
         raw[tag_key] = record
         e621_research_stats.added += 1

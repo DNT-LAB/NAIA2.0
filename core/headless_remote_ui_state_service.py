@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,7 @@ from core.headless_remote_state_service import (
     HeadlessRemoteStateService,
     SUPPORTED_API_MODES,
 )
+from core.safe_json_file import read_json_safely, write_json_safely
 
 
 REMOTE_WEB_STATE_KEY = "remote_web"
@@ -31,19 +31,15 @@ def _read_app_settings(context: Any) -> dict[str, Any]:
     if not path.exists():
         legacy = Path(context.repo_root) / "app_settings.json"
         path = legacy if legacy.exists() else path
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    # 전원이 끊겨 깨진 파일이면 .bak(한 단계 전 정상본)에서 되살린다 - 말없이 {} 로 보고 기본값으로
+    # 돌아가면 다음 저장이 그 기본값으로 덮어 설정을 영영 잃는다(core/safe_json_file.py).
+    data = read_json_safely(path)
+    return data if isinstance(data, dict) else {}
 
 
 def _write_app_settings(context: Any, data: dict[str, Any]) -> None:
-    path = _settings_path(context)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp_path.replace(path)
+    # Auto Gen 중 몇 초마다 쓰이는 파일이다 - fsync + 정상본 .bak 을 남기는 쓰기를 쓴다.
+    write_json_safely(_settings_path(context), data)
 
 
 def _json_safe(value: Any) -> Any:

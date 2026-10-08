@@ -698,9 +698,15 @@ def register_prompt_tools_routes(
             def field(section, key):
                 value = section.get(key) if isinstance(section, dict) else None
                 return value if isinstance(value, str) else None
+            # 네거티브는 저장하는 쪽이 전부 `negative` 키로 쓴다(_capture_main_settings 등). 예전 파일에
+            # `negative_prompt` 만 있을 수 있어 그쪽도 본다. `negative_prompt` 만 보던 탓에 저장된 네거티브가
+            # 미리보기에서 "저장된 값 없음" 으로 보였다(사용자 제보 2026-10-08).
+            negative = field(main, "negative")
+            if negative is None:
+                negative = field(main, "negative_prompt")
             return {"name": name, "mode": mode_key, "source": source, "fields": {
                 "prefix": field(module, "pre_prompt"), "postfix": field(module, "post_prompt"),
-                "main": field(main, "prompt"), "negative": field(main, "negative_prompt"),
+                "main": field(main, "prompt"), "negative": negative,
                 "auto_hide": field(module, "auto_hide_prompt"),
             }}
 

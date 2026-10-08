@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+from core.safe_json_file import backup_path, read_json_safely, write_json_safely
+
 
 # ANIMA = 관리형 ANIMA 엔진을 고른 COMFYUI 의 프리셋 색인(아래 prompt_engineering_mode_of - 사용자 지정 09-30)
 PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI", "ANIMA")
@@ -369,12 +371,7 @@ def last_used_preset_file(*, save_root: str | Path | None = None) -> Path:
 def load_last_used_preset(mode: str | None = None, *, save_root: str | Path | None = None) -> str | None:
     mode_key = normalize_prompt_engineering_mode(mode)
     path = _existing_save_file(Path("presets") / "last_used_preset.json", save_root)
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    data = read_json_safely(path)
     if not isinstance(data, dict):
         return None
     value = data.get(mode_key)
@@ -385,14 +382,11 @@ def save_last_used_preset(mode: str | None, preset_name: str, *, save_root: str 
     mode_key = normalize_prompt_engineering_mode(mode)
     path = last_used_preset_file(save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        data = {}
+    data = read_json_safely(path)
     if not isinstance(data, dict):
         data = {}
     data[mode_key] = str(preset_name or "")
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_safely(path, data)
 
 
 # last_used_preset.json 에서 '마지막에 보던 랜덤 칸' 이 사는 최상위 키(모드 이름과 겹치지 않는다).
@@ -407,10 +401,7 @@ def load_last_used_randomized(mode: str | None = None, *, save_root: str | Path 
     """
     mode_key = normalize_prompt_engineering_mode(mode)
     path = _existing_save_file(Path("presets") / "last_used_preset.json", save_root)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        return ""
+    data = read_json_safely(path)
     by_mode = data.get(LAST_USED_RANDOMIZED_KEY) if isinstance(data, dict) else None
     value = by_mode.get(mode_key) if isinstance(by_mode, dict) else ""
     return str(value) if value else ""
@@ -421,10 +412,7 @@ def save_last_used_randomized(mode: str | None, name: str, *, save_root: str | P
     mode_key = normalize_prompt_engineering_mode(mode)
     path = last_used_preset_file(save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        data = {}
+    data = read_json_safely(path)
     if not isinstance(data, dict):
         data = {}
     by_mode = data.get(LAST_USED_RANDOMIZED_KEY)
@@ -433,27 +421,21 @@ def save_last_used_randomized(mode: str | None, name: str, *, save_root: str | P
     data[LAST_USED_RANDOMIZED_KEY] = by_mode
     if name and isinstance(data.get("snapshot"), dict):
         data["snapshot"].pop(mode_key, None)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_safely(path, data)
 
 
 def load_last_used_snapshot(mode: str, *, save_root: str | Path | None = None) -> bool:
     path = _existing_save_file(Path("presets") / "last_used_preset.json", save_root)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return isinstance(data, dict) and isinstance(data.get("snapshot"), dict) and bool(
-            data["snapshot"].get(normalize_prompt_engineering_mode(mode)))
-    except (OSError, ValueError):
-        return False
+    data = read_json_safely(path)
+    return isinstance(data, dict) and isinstance(data.get("snapshot"), dict) and bool(
+        data["snapshot"].get(normalize_prompt_engineering_mode(mode)))
 
 
 def save_last_used_snapshot(mode: str, active: bool, *, save_root: str | Path | None = None) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
     path = last_used_preset_file(save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, ValueError):
-        data = {}
+    data = read_json_safely(path)
     data = data if isinstance(data, dict) else {}
     by_mode = data.get("snapshot")
     by_mode = by_mode if isinstance(by_mode, dict) else {}
@@ -464,7 +446,7 @@ def save_last_used_snapshot(mode: str, active: bool, *, save_root: str | Path | 
     else:
         by_mode.pop(mode_key, None)
     data["snapshot"] = by_mode
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+    write_json_safely(path, data)
 
 
 def randomized_pool_file(*, save_root: str | Path | None = None) -> Path:
@@ -693,11 +675,9 @@ def read_preset_data(
     path = _existing_save_file(Path("presets") / mode_key / f"{name}.json", save_root)
     if not path.exists():
         return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    # 지금 쓰는 프리셋은 파라미터를 바꿀 때마다 다시 쓰인다 - 전원이 끊겨 깨졌으면 .bak 에서 되살린다
+    data = read_json_safely(path)
+    return data if isinstance(data, dict) else {}
 
 
 def preset_preview_file(context: Any, preset_name: str, mode_key: str = "") -> Path | None:
@@ -853,7 +833,7 @@ def write_preset_data(
     if isinstance(payload.get("main_settings"), dict):
         payload["main_settings"] = normalize_preset_main_settings(payload["main_settings"])
     path = preset_dir(mode, save_root=save_root) / f"{name}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_safely(path, payload)
 
 
 def merge_settings(base: dict[str, Any], updates: dict[str, Any] | None) -> dict[str, Any]:
@@ -1357,6 +1337,8 @@ class PromptEngineeringHeadlessStore:
         if not path.exists():
             return False, f"프리셋을 찾을 수 없습니다: {name}"
         path.unlink()
+        # 지운 프리셋의 정상본 사본도 치운다 - 같은 이름으로 새로 만들면 남의 옛 내용이 되살아날 수 있다
+        backup_path(path).unlink(missing_ok=True)
         self.refresh(mode_key)
         return True, name
 

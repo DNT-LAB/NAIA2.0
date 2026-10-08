@@ -453,15 +453,22 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function currentPrompt() { return pins.join(', '); }
   /** [넣기] = 랜덤 대치(사용자 지정 2026-09-13): 고른 핀을 Random 과 같은 파이프라인에 태워 메인 프롬프트를
    *  **갈아끼운다**(/api/event-map/apply). 전에는 커서 자리에 끼워 넣었다. 등급은 지금 고른 등급이 하나면 그것, 아니면 s. */
-  async function applyPins(btn) {
+  /** [넣기] = 고른 핀으로 메인 프롬프트를 대치한다. [생성] = 같은 대치 뒤 Generate(사용자 지정 2026-10-08 -
+   *  [랜덤+생성] · 실제 조합의 [적용+생성] 과 같은 길, applyThenGenerate). */
+  async function applyPins(btn, andGenerate = false) {
     if (!pins.length) return;
     const rating = ratings.size === 1 ? [...ratings][0] : 's';
     if (btn) btn.disabled = true;
     try {
-      await postJson('/api/event-map/apply', { tags: pins.slice(), rating });
-      toast(`메인 프롬프트를 대치했습니다 — ${pins.join(', ').slice(0, 40)}`, 'success');
+      if (andGenerate) {
+        await applyThenGenerate(pins.slice(), rating);
+        toast(`메인 프롬프트를 대치하고 생성을 눌렀습니다 — ${pins.join(', ').slice(0, 40)}`, 'success');
+      } else {
+        await postJson('/api/event-map/apply', { tags: pins.slice(), rating });
+        toast(`메인 프롬프트를 대치했습니다 — ${pins.join(', ').slice(0, 40)}`, 'success');
+      }
     } catch (error) {
-      toast(`대치 실패 — ${error.message}`, 'error');
+      toast(`${andGenerate ? '생성' : '대치'} 실패 — ${error.message}`, 'error');
     } finally { if (btn) btn.disabled = !pins.length; }
   }
   // ── 행 툴팁 ──────────────────────────────────────────────────────────────
@@ -756,7 +763,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (!footEl) return;
     const on = pins.length > 0;
     // 넣기/복사/실제 조합 셋 다 조건 줄 오른쪽에 산다(사용자 지정 2026-09-12 밤 - 발줄에선 못 찾았다)
-    overlay.querySelectorAll('[data-em-insert], [data-em-copy]').forEach(b => { b.disabled = !on; });
+    overlay.querySelectorAll('[data-em-insert], [data-em-insert-generate], [data-em-copy]').forEach(b => { b.disabled = !on; });
     const sb = overlay.querySelector('[data-em-samples]');
     if (sb) { sb.disabled = !on; sb.classList.toggle('is-on', !!samples); }
     const rs = overlay.querySelector('[data-em-reset]');
@@ -775,7 +782,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       <button type="button" class="em-reset em-pe" data-em-pe-settings
               title="Prompt Engineering — prefix · postfix · autohide · 옵션 (메인 프롬프트의 /pe 와 같은 목록)">PE설정</button>
       <span class="em-actions em-actions-right"><button type="button" data-em-insert disabled
-              title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-copy disabled
+              title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-insert-generate disabled
+              title="지금 고른 태그로 메인 프롬프트를 대치한 뒤 바로 Generate">생성</button><button type="button" data-em-copy disabled
               title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
               title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button></span>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
@@ -1163,7 +1171,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       document, window, id: 'eventMapWindow', title: '이벤트 맵',
       variant: 'em-overlay em-window', storageKey: 'event-map',
       width: EM_BASE_WIDTH, height: EM_BASE_HEIGHT, minWidth: EM_BASE_WIDTH, minHeight: EM_MIN_HEIGHT, maxWidth: 1000,
-      initial: {x: 16, y: 64}, resizable: true, collapsible: false,
+      initial: {x: 16, y: 64}, resizable: true,
+      // 접기(머리줄 더블클릭 · [–])는 다른 떠 있는 창과 같다. 다만 접혀도 **검색 줄과 랜덤 발줄은 남긴다**
+      // (사용자 지정 2026-10-08) - 접은 채로 태그를 찾고 [랜덤] [랜덤+생성] 을 누를 수 있다. 무엇을 남기는지는
+      // style.css 의 `.em-window.is-collapsed` 짝 규칙이 정한다.
+      onCollapse: syncCollapsed,
       onClose: close, onMove: () => { closePersonPopup(); hideTip(); fitHeight(); },
     });
     overlay = panel.el;
@@ -1224,7 +1236,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     footEl.querySelector('[data-em-random-link]').addEventListener('change', event => {
       void syncRandomLink(event.target.checked);
     });
-    input.addEventListener('input', () => { active = -1; scheduleSuggest(); });
+    input.addEventListener('input', () => {
+      // 접은 채로 검색 칸에 치면 펼친다 - 후보 목록은 몸통에 뜬다
+      if (panel.isCollapsed()) panel.expand();
+      active = -1; scheduleSuggest();
+    });
     input.addEventListener('keydown', onKeyDown);
 
     trailEl.addEventListener('click', event => {
@@ -1248,6 +1264,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (t.closest('[data-em-pe-settings]')) { openPeSettings(); return; }
       if (t.closest('[data-em-reset]')) { resetSelection(); return; }
       if (t.closest('[data-em-insert]')) { void applyPins(t.closest('[data-em-insert]')); return; }
+      if (t.closest('[data-em-insert-generate]')) { void applyPins(t.closest('[data-em-insert-generate]'), true); return; }
       if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
       if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return; }
       if (t.closest('[data-em-person]')) {
@@ -1445,7 +1462,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const rect = overlay.getBoundingClientRect();
     const need = Math.min(panelMinimumWidth(), window.innerWidth - 16);
     if (rect.width < need - 0.5) overlay.style.width = `${need}px`;
-    if (manualSize || !bodyEl) return;
+    // 접혀 있으면 높이를 내용에 맞추지 않는다 - 맞추면 접은 창이 곧바로 다시 커진다(공용 창이 높이를 비워 접는다)
+    if (manualSize || !bodyEl || panel?.isCollapsed()) return;
     const last = bodyEl.lastElementChild;
     const bodyRect = bodyEl.getBoundingClientRect();
     const content = last ? Math.ceil(last.getBoundingClientRect().bottom - bodyRect.top + bodyEl.scrollTop + 8) : 0;
@@ -1478,6 +1496,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     build();
     open = true;
     panel.open();
+    syncCollapsed();                // 접힌 채로 기억된 창이면 보조 창 숨김 표시도 다시 건다
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'true');
     position();
     focusInput();                   // 열자마자 - 바로 칠 수 있게(사용자 지정 2026-09-12 밤)
@@ -1495,6 +1514,14 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     input.focus({ preventScroll: true });
     requestAnimationFrame(() => { if (open && document.activeElement !== input) input.focus({ preventScroll: true }); });
   }
+  /** 접힘 상태를 뿌리에 표시한다. 보조 창(소분류 · 실제 조합 · 인원 팝업 · 저장 패널 · 툴팁)은 창 밖 body 에
+   *  따로 떠 있어 본 창과 함께 접히지 않는다 - 이 표시 하나로 CSS 가 숨긴다. 각자의 hidden 은 건드리지 않으므로
+   *  펼치면 접기 전 그대로 다시 보인다(접은 동안 다시 그려져도 마찬가지다). */
+  function syncCollapsed(collapsed = panel?.isCollapsed()) {
+    document.documentElement.classList.toggle('em-window-collapsed', !!collapsed && open);
+    if (collapsed) { closePersonPopup(); hideTip(); }
+    else if (open) queueMicrotask(fitHeight);
+  }
   function close() {
     if (!open) return;
     hideTip();
@@ -1507,6 +1534,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (subEl) subEl.hidden = true;
     if (sideEl) { sideEl.hidden = true; sideEl.innerHTML = ''; }
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'false');
+    document.documentElement.classList.remove('em-window-collapsed');
     clearTimeout(timer);
     stopDlPoll();                   // 화면 폴링만 멈춘다 - 내려받기는 서버에서 계속 돈다
     seq += 1; suggestSeq += 1;

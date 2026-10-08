@@ -28814,6 +28814,17 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 발줄 오른쪽 끝 = 크기 손잡이(16px)의 자리. 비워 두지 않으면 [랜덤 버튼 연결] 글자가 손잡이 밑에 깔린다. */
 .em-window .em-foot { padding-right: 20px; }
 .em-window .em-random-link { margin-left: auto; }
+/* 접힌 이벤트 맵(사용자 지정 2026-10-08): 핸들 줄 · 검색 줄(.em-bar) · 랜덤 발줄(.em-foot)만 남긴다.
+   공용 규칙(.dragpanel.is-collapsed .dragpanel-body = none)보다 구체적이어야 이긴다. */
+.dragpanel.em-window.is-collapsed > .dragpanel-body { display: flex !important; }
+.dragpanel.em-window.is-collapsed > .dragpanel-body > :not(.em-bar):not(.em-foot) { display: none !important; }
+.dragpanel.em-window.is-collapsed .em-foot { padding-right: 8px; }   /* 접으면 크기 손잡이가 없다 */
+/* 창 밖에 따로 뜨는 보조 창은 접힌 동안 숨긴다(eventMapPanel syncCollapsed 가 뿌리에 표시를 단다). */
+.em-window-collapsed .em-subpanel,
+.em-window-collapsed .em-side,
+.em-window-collapsed .em-person-popup,
+.em-window-collapsed .em-saved-panel,
+.em-window-collapsed .em-tip { display: none !important; }
 @media (max-width: 640px) {
   .em-obs { display: none; }
   .em-person-list { grid-template-columns: 1fr; }

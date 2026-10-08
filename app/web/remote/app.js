@@ -1350,7 +1350,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260825-notip1')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20261009-v5medium')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -5705,6 +5705,9 @@ function applyComfyUiFreeParamLock(mode = currentMode || modeSelect?.value || ''
     rescaleInput.title = locked ? 'Controlled by the Bypass custom workflow' : '';
   }
 
+  // 위에서 Sampler · Scheduler · Steps 의 `disabled` 를 통째로 다시 썼다 - NAI Medium 의 잠금이
+  // 걸려 있었다면 여기서 풀렸으므로 다시 건다(이 함수는 NAI 모드에서도 불린다: syncMode).
+  applyNaiFixedParamLock();
   if (typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
 }
 
@@ -5958,6 +5961,15 @@ function updateParams(m) {
   updateModuleHeaderAction(currentModuleId);
   syncingParams = false;
   if (resultEnhance) resultEnhance.update();
+  // 모델이 고정하는 칸(Medium)을 잠근다. 서버 값은 따로 적어 둔다 - 잠금이 풀릴 때 되돌릴 값이다.
+  // ⚠️ 아래 유료 경고보다 **앞**이어야 한다 - 경고가 Steps 칸을 읽는데, 저장된 40 이 남아 있으면
+  //    14스텝으로 나갈 모델에 유료 경고가 뜬다.
+  if (mode === 'NAI') {
+    NAI_FIXED_FIELD_KEYS.forEach(key => {
+      if (m[key] !== undefined) naiServerParamValues[key] = m[key];
+    });
+  }
+  refreshNaiModelLimits();
   // 모드 전환·프리셋 적용·재접속으로 값이 통째로 바뀌었다 - 유료 경고를 다시 본다.
   updateAnlasPaidIndicator();
   // 투명 BG: 서버가 들고 있는 값이 진실이다. 모델도 여기서 바뀌므로 보임을 함께 갱신한다.
@@ -7891,6 +7903,8 @@ function naiModelKeyFromMetadataText(raw) {
   const lowered = text.toLowerCase();
   // 해시가 가장 정확하다 - V4 는 Full/Curated 의 라벨이 같아 해시로만 갈린다.
   const hashes = [
+    // V5 Full Medium 은 표시 라벨이 Full 과 같다 - 해시로만 갈린다(t2i·i2i / 인페인트 모델).
+    ['70ab5786', 'NAID5FM'], ['93f4bd30', 'NAID5FM'], ['657484a5', 'NAID5F'],
     ['0adf9ab7', 'NAID5F'], ['4bde2a90', 'NAID4.5F'], ['c02d4f98', 'NAID4.5C'],
     ['7abffa2a', 'NAID4.0C'], ['37442fca', 'NAID4.0F'],
   ];
@@ -7899,10 +7913,12 @@ function naiModelKeyFromMetadataText(raw) {
   // 와이어 이름 -> 라벨 -> 계열. 각 단계에서 **긴 것부터** 봐야
   // 'nai-diffusion-4-full' 이 '...-4-5-full' 을, 'v4' 가 'v4.5' 를 안 삼킨다.
   const table = [
+    ['nai-diffusion-5-full-medium', 'NAID5FM'],     // Full 보다 **앞** - 긴 것부터
     ['nai-diffusion-5-curated', 'NAID5C'], ['nai-diffusion-5-full', 'NAID5F'],
     ['nai-diffusion-4-5-curated', 'NAID4.5C'], ['nai-diffusion-4-5-full', 'NAID4.5F'],
     ['nai-diffusion-4-curated', 'NAID4.0C'], ['nai-diffusion-4-full', 'NAID4.0F'],
     ['nai-diffusion-3', 'NAID3'],
+    ['novelai diffusion v5 full medium', 'NAID5FM'],
     ['novelai diffusion v5 curated', 'NAID5C'], ['novelai diffusion v5 full', 'NAID5F'],
     ['novelai diffusion v4.5 curated', 'NAID4.5C'], ['novelai diffusion v4.5 full', 'NAID4.5F'],
     ['novelai diffusion v4 curated', 'NAID4.0C'], ['novelai diffusion v4 full', 'NAID4.0F'],
@@ -8226,6 +8242,9 @@ function toggleDrawer() {
 }
 
 function switchTab(name) {
+  // 네거티브를 안 받는 모델(Medium)에서는 그 탭으로 가지 않는다. 단추는 꺼져 있지만
+  // 탭을 여는 길이 단추만은 아니라서 목에서 한 번 더 막는다.
+  if (name === 'negative' && naiModelIgnoresNegative()) return;
   activePromptTab = name || 'prompt';
   if (activePromptTab !== 'preset') clearPresetAutoGenTimer();
   if (promptDrawerControl) promptDrawerControl.switchTab(name);
@@ -11196,6 +11215,86 @@ function naiModelIsV5() {
   return String(naiModelMetaByKey.get(model)?.payload_profile || '') === 'v5';
 }
 
+// ── 모델이 받지 않는 것을 화면에서 잠근다(V5 Full Medium · 사용자 지정 2026-10-09) ──
+// Medium 은 steps · sampler · cfg_rescale 을 서버가 고정하고(14 / Euler A / 0), scheduler 와
+// 네거티브는 보내도 그림이 같다(라이브 실측, 같은 시드 픽셀 대조). 바꿔도 소용없는 칸을 열어
+// 두면 "안 먹는다" 가 되므로 고정값을 보여 주며 잠그고, Negative 탭 단추를 끈다.
+//
+// 무엇을 잠글지는 **백엔드 모델 계약이 정한다**(`fixed_params` · `capabilities.negative_prompt`).
+// 여기서 모델 이름을 뒤지지 않는다 - 그러면 표가 둘이 된다.
+// ⚠️ 서버에 저장된 값은 그대로다(steps 28 등). 칸에는 고정값만 **비춘다** - 다른 모델로
+//    돌아가면 서버 값으로 되돌린다. 실제로 나갈 값은 백엔드가 나가는 자리에서 맞춘다.
+const NAI_FIXED_PARAM_TITLE = '이 모델은 이 값을 서버에서 고정합니다';
+const NAI_FIXED_FIELD_KEYS = ['steps', 'cfg_rescale', 'sampler', 'scheduler'];
+const NAI_FIXED_SELECT_KEYS = new Set(['sampler', 'scheduler']);
+// 서버가 마지막으로 보낸 값. 잠금이 풀릴 때 칸을 여기로 되돌린다(`updateParams` 가 채운다).
+const naiServerParamValues = {};
+
+function naiSelectedModelMeta() {
+  if ((currentMode || modeSelect.value) !== 'NAI') return null;
+  const sel = document.getElementById('pModel');
+  const model = sel ? String(sel.value || '').trim().toUpperCase() : '';
+  return model ? (naiModelMetaByKey.get(model) || null) : null;
+}
+
+function naiModelFixedParams() {
+  const fixed = naiSelectedModelMeta()?.fixed_params;
+  return fixed && typeof fixed === 'object' && Object.keys(fixed).length ? fixed : null;
+}
+
+// ⚠️ 플래그가 없으면(커스텀 · 미확정 모델) **끄지 않는다** - 모르는 것을 막지 않는다.
+function naiModelIgnoresNegative() {
+  return naiSelectedModelMeta()?.capabilities?.negative_prompt === false;
+}
+
+function applyNaiFixedParamLock() {
+  const fixed = naiModelFixedParams();
+  const inNai = (currentMode || modeSelect.value) === 'NAI';
+  let selectsTouched = false;
+  NAI_FIXED_FIELD_KEYS.forEach(key => {
+    const el = paramEls[key];
+    if (!el) return;
+    const lock = !!fixed && key in fixed;
+    // ⚠️ 표식을 단 것만 푼다. 같은 칸을 ComfyUI Bypass 잠금도 쓴다(`applyComfyUiFreeParamLock`) -
+    //    표식 없이 `disabled = false` 를 하면 남의 잠금을 연다.
+    const wasLocked = el.dataset.naiFixedLock === '1';
+    if (lock) {
+      el.value = String(fixed[key]);
+      el.disabled = true;
+      el.title = NAI_FIXED_PARAM_TITLE;
+      el.dataset.naiFixedLock = '1';
+    } else if (wasLocked) {
+      delete el.dataset.naiFixedLock;
+      el.disabled = false;
+      el.title = '';
+      // 모드가 바뀌어 풀린 것이면 되돌리지 않는다 - 그 값은 NAI 것이고, 새 모드의 값은 에코가 싣는다.
+      if (inNai && key in naiServerParamValues) el.value = String(naiServerParamValues[key]);
+    } else {
+      return;
+    }
+    if (NAI_FIXED_SELECT_KEYS.has(key)) {
+      el.dataset.customSelectTitle = lock ? NAI_FIXED_PARAM_TITLE : '';
+      selectsTouched = true;
+    }
+  });
+  if (selectsTouched && typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
+}
+
+function refreshNaiNegativeTab() {
+  const button = document.querySelector('.tab-btn[data-tab="negative"]');
+  if (!button) return;
+  const off = naiModelIgnoresNegative();
+  button.disabled = off;
+  button.title = off ? '이 모델은 네거티브 프롬프트를 받지 않습니다' : '';
+  // 그 탭을 보고 있었으면 프롬프트로 돌려보낸다 - 꺼진 단추의 탭에 남으면 나갈 길이 없어 보인다.
+  if (off && activePromptTab === 'negative') switchTab('prompt');
+}
+
+function refreshNaiModelLimits() {
+  applyNaiFixedParamLock();
+  refreshNaiNegativeTab();
+}
+
 // V5 여부에 따라 달라지는 화면을 **함께** 갱신한다. 토큰 줄이 빠지면 모델을 바꿔도
 // 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
 // ALT + P 로 요청(기본 활성). ⚠️ 입력 칸 안에서도 동작해야 한다 - 프롬프트를 고치다
@@ -11507,6 +11606,8 @@ async function maybeRunV45PreviewAfterRandom() {
 
 function refreshV5DependentChrome() {
   refreshTransparentBgPill();
+  // 모델 · 모드가 바뀌는 자리마다 여기를 지난다 - Medium 의 칸 잠금 · Negative 탭도 함께 맞춘다.
+  refreshNaiModelLimits();
   // 프리뷰는 V5 에서만 뜻이 있다 - 4.5 에서 4.5 를 미리 볼 이유가 없다.
   const previewSplit = document.getElementById('preview45Split');
   const previewOn = naiModelIsV5();

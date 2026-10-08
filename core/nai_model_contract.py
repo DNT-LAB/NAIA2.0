@@ -40,6 +40,18 @@ class NaiModelSpec:
     selectable: bool = True
     api_parameter_overrides: Mapping[str, Any] = field(default_factory=dict)
     api_parameter_removals: tuple[str, ...] = ()
+    # **서버가 고정하는** 생성 파라미터(NAIA 의 파라미터 키 -> 값). 비어 있으면 고정 없음.
+    #
+    # V5 Full Medium 이 그렇다(라이브 실측 2026-10-09, 같은 시드 픽셀 대조):
+    # steps · sampler · cfg_rescale 은 무엇을 보내도 서버가 14 / k_euler_ancestral / 0 으로
+    # **고쳐서** 메타데이터에 적고, scheduler 는 보낸 이름을 적기만 하고 그림은 같다.
+    # 그림을 바꾸는 것은 CFG scale · 시드 · 해상도뿐이었다.
+    # 화면은 이 칸들을 잠그고, 생성 · 비용 판정은 저장된 값 대신 이 값을 쓴다
+    # (`apply_nai_fixed_params`) - 저장된 사용자 값은 건드리지 않는다.
+    fixed_params: Mapping[str, Any] = field(default_factory=dict)
+    # 네거티브 프롬프트를 그림에 반영하는가. Medium 은 안 한다 - 메인 · 캐릭터 네거티브를
+    # 비우거나 필드를 통째로 빼도 같은 시드에서 픽셀이 같았다(실측 2026-10-09).
+    supports_negative_prompt: bool = True
 
     @property
     def uses_v4_payload(self) -> bool:
@@ -111,12 +123,14 @@ class NaiModelSpec:
             "selectable": self.selectable,
             "api_parameter_overrides": copy.deepcopy(dict(self.api_parameter_overrides)),
             "api_parameter_removals": list(self.api_parameter_removals),
+            "fixed_params": copy.deepcopy(dict(self.fixed_params)),
             "capabilities": {
                 "v4_payload": self.uses_v4_payload,
                 "vibe": self.supports_vibe,
                 "character_reference": self.supports_character_reference,
                 "legacy_smea": self.uses_legacy_smea,
                 "inpainting": bool(self.inpainting_api_model),
+                "negative_prompt": self.supports_negative_prompt,
             },
         }
 
@@ -131,6 +145,8 @@ def _builtin(
     family: str,
     selectable: bool = True,
     inpainting_is_substitute: bool = False,
+    fixed_params: Mapping[str, Any] | None = None,
+    supports_negative_prompt: bool = True,
 ) -> NaiModelSpec:
     return NaiModelSpec(
         key=key,
@@ -142,6 +158,8 @@ def _builtin(
         family=family,
         source="builtin",
         selectable=selectable,
+        fixed_params=dict(fixed_params or {}),
+        supports_negative_prompt=supports_negative_prompt,
     )
 
 
@@ -157,6 +175,30 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
         "v5",
         inpainting_api_model="nai-diffusion-5-full-inpainting",
         family="v5",
+    ),
+    # V5 Full Medium (2026-10 · 사용자 제보: 웹이 `nai-diffusion-5-full-medium` 을 보낸다).
+    # 흔히 말하는 turbo 계열이다 - 14스텝 고정, 네거티브를 안 받고, 대신 빠르고 싸다.
+    # Full 에만 있다(Curated Medium 은 없다 - 사용자 확인).
+    #
+    # 라이브 실측 2026-10-09(계정 토큰 · 같은 시드 · 픽셀 대조):
+    #   - t2i · i2i(`action: img2img`) · 스트리밍(`generate-image-stream`) 모두 200.
+    #   - 인페인트는 **전용 모델이 따로 있다**: `nai-diffusion-5-full-medium-inpainting`.
+    #     제 이름에 `action: infill` 을 보내면 400("doesn't support action infill").
+    #   - 고정값 · 네거티브 무시는 `NaiModelSpec.fixed_params` 주석 참조.
+    "NAID5FM": _builtin(
+        "NAID5FM",
+        "NovelAI Diffusion V5 Full Medium",
+        "nai-diffusion-5-full-medium",
+        "v5",
+        inpainting_api_model="nai-diffusion-5-full-medium-inpainting",
+        family="v5",
+        fixed_params={
+            "steps": 14,
+            "sampler": "k_euler_ancestral",
+            "scheduler": "karras",
+            "cfg_rescale": 0.0,
+        },
+        supports_negative_prompt=False,
     ),
     "NAID5C": _builtin(
         "NAID5C",
@@ -311,6 +353,7 @@ NAI_VALID_SAMPLERS: frozenset[str] = frozenset(NAI_SAMPLER_OPTIONS) | {"ddim_v3"
 # `NAID4.5` 처럼 접미사가 없는 키가 있어 규칙이 한 줄로 안 떨어진다.
 NAI_MODEL_SHORT_LABELS: dict[str, str] = {
     "NAID5F": "NAI5.0F",
+    "NAID5FM": "NAI5.0FM",
     "NAID5C": "NAI5.0C",
     "NAID4.5F": "NAI4.5F",
     "NAID4.5C": "NAI4.5C",
@@ -410,11 +453,54 @@ def resolve_nai_model_for_context(context: Any, model_key: Any) -> NaiModelSpec:
     return resolve_nai_model_spec(model_key)
 
 
+def nai_fixed_params_for(context: Any, model_key: Any) -> dict[str, Any]:
+    """이 모델이 서버에서 고정하는 생성 파라미터. 없거나 모델을 모르면 `{}`.
+
+    ⚠️ **모르면 빈 값이다.** 여기는 '덧씌울 것이 있는가' 만 답한다 - 모르는 키를 막는
+       일은 생성 직전의 엄격한 판정(`resolve_nai_model_for_context`)이 한다. 여기서
+       예외를 내면 비용 표시 · 파라미터 조립이 모델 키 하나 때문에 통째로 죽는다.
+    ⚠️ 폴백 스펙을 믿지 않는다. 레지스트리가 없는 자리의 `resolve_nai_model_spec` 은
+       모르는 키를 기본 모델로 돌려주므로, **키가 같을 때만** 그 스펙의 고정값을 쓴다.
+    """
+    key = normalize_nai_model_key(model_key)
+    if not key:
+        return {}
+    try:
+        spec = resolve_nai_model_for_context(context, key)
+    except Exception:   # noqa: BLE001 - 모르는 키 · 조회 실패는 '고정 없음' 이다
+        return {}
+    if normalize_nai_model_key(getattr(spec, "key", "")) != key:
+        return {}
+    return copy.deepcopy(dict(getattr(spec, "fixed_params", None) or {}))
+
+
+def apply_nai_fixed_params(context: Any, params: dict[str, Any] | None,
+                           model_key: Any = None) -> dict[str, Any]:
+    """고른 모델의 고정값을 `params` 에 **덧씌운다**(제자리). 덧씌운 키 -> 값을 돌려준다.
+
+    모델은 `model_key` -> `params["model"]` 순으로 본다.
+
+    ⚠️ 저장소(`remote_params` · 프리셋)에 쓰는 자리에서 부르지 마라. 이것은 **이번에
+       나갈 값**을 맞추는 것이다 - 저장된 사용자 값(예: steps 28)은 그대로 둬야 다른
+       모델로 돌아갔을 때 되살아난다.
+    """
+    if not isinstance(params, dict):
+        return {}
+    fixed = nai_fixed_params_for(context, model_key if model_key is not None else params.get("model"))
+    if fixed:
+        params.update(fixed)
+    return fixed
+
+
 # NAI 가 PNG `Source`/`Comment.model_hash` 에 남기는 모델 해시 -> 키.
 # ⚠️ V4 는 Full/Curated 의 **표시 라벨이 같다**(`NovelAI Diffusion V4`) - 해시가
 # 유일한 구분자다. 실측으로 확인된 것만 넣는다.
 NAI_SOURCE_HASHES: dict[str, str] = {
     "0ADF9AB7": "NAID5F",      # 실측 2026-08-22 (사용자 V5 Full 생성물)
+    "657484A5": "NAID5F",      # 실측 2026-10-09 (`nai-diffusion-5-full-inpainting` 생성물)
+    # ⚠️ Medium 은 `model_name` 이 Full 과 **같다**(`NovelAI Diffusion V5`) - 해시가 유일한 구분자다.
+    "70AB5786": "NAID5FM",     # 실측 2026-10-09 (t2i · i2i)
+    "93F4BD30": "NAID5FM",     # 실측 2026-10-09 (`...-medium-inpainting`)
     "4BDE2A90": "NAID4.5F",
     "C02D4F98": "NAID4.5C",
     "7ABFFA2A": "NAID4.0C",

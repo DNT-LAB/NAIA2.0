@@ -128,6 +128,8 @@ export function createMetadataViewer({
     const text = `${source} ${raw}`.toLowerCase();
     // ⚠️ V4 는 Full/Curated 의 **표시 라벨이 같아** 해시로만 갈린다. 해시를 먼저 본다.
     const hashes = [
+      // V5 Full Medium 은 표시 라벨이 Full 과 같다('NovelAI Diffusion V5') - 해시로만 갈린다.
+      ['70ab5786', 'NAID5FM'], ['93f4bd30', 'NAID5FM'],
       ['4bde2a90', 'NAID4.5F'], ['c02d4f98', 'NAID4.5C'],
       ['7abffa2a', 'NAID4.0C'], ['37442fca', 'NAID4.0F'],
     ];
@@ -139,6 +141,7 @@ export function createMetadataViewer({
     // V5 가 이 목록에서 빠져 있어 메타데이터를 읽으면 라벨이 그대로 모델 키로
     // 흘러갔다(사용자 제보 2026-08-22).
     const map = [
+      ['nai-diffusion-5-full-medium', 'NAID5FM'],     // Full 보다 **앞** - 긴 것부터
       ['nai-diffusion-5-full', 'NAID5F'],
       ['nai-diffusion-5-curated', 'NAID5C'],
       ['nai-diffusion-4-5-full', 'NAID4.5F'],

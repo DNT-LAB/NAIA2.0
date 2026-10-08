@@ -140,6 +140,14 @@ def cost_params_for_context(context: Any) -> dict[str, Any]:
        `is_free_generation` 하나에 맡긴다(그쪽 주석에 실측표가 있다).
     """
     params = dict(getattr(context, "remote_params", {}) or {})
+    # 모델이 고정하는 값(Medium: 14스텝)이 있으면 그것이 실제로 나간다 - 저장된 steps 40 으로
+    # 값을 매기면 있지도 않은 금액이 뜬다. 사본에만 덧씌운다.
+    try:
+        from core.nai_model_contract import apply_nai_fixed_params
+
+        apply_nai_fixed_params(context, params)
+    except Exception:   # noqa: BLE001 - 판정 실패가 표시를 막으면 안 된다
+        pass
     session = getattr(context, "img2img_session", None)
     if not isinstance(session, dict) or not session.get("active"):
         return params

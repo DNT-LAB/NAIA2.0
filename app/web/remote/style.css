@@ -8566,6 +8566,19 @@ body.resizing-result-info {
   border-bottom-color: var(--accent);
   background: rgba(124,106,239,0.08);
 }
+/* 지금 모델이 받지 않는 탭(V5 Full Medium 의 Negative) - 꺼진 채로 자리는 지킨다 */
+.tab-btn:disabled,
+.tab-btn:disabled:hover {
+  color: var(--text-dim);
+  background: transparent;
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+/* 모델이 서버에서 고정하는 값(V5 Full Medium 의 Steps · CFG Rescale) - 잠긴 셀렉트와 같은 흐림 */
+.param-input[data-nai-fixed-lock] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .tab-icon {
   font-size: 11px;
   line-height: 1;

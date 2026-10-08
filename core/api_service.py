@@ -46,6 +46,7 @@ from core.nai_model_contract import (
     BUILTIN_NAI_MODEL_SPECS,
     DEFAULT_NAI_MODEL_SPEC,
     NaiModelSpec,
+    apply_nai_fixed_params,
     nai_img2img_fallback_key,
     nai_key_from_exact_name,
     nai_key_from_metadata,
@@ -954,6 +955,10 @@ class APIService:
         """
         try:
             # 🆕 멀티 계정 지원: 라운드 로빈 토큰 선택
+            # 모델이 고정하는 값(Medium: 14스텝 등)을 **아래 유료 판정보다 먼저** 맞춘다 -
+            # 저장된 steps 40 이 실려 오면 실제로는 14스텝으로 나갈 요청을 유료로 보고
+            # 계정을 고른다. 여기서는 키를 아는 경우만 맞고, 정식 판정은 모델을 확정한 뒤 한 번 더 한다.
+            apply_nai_fixed_params(self.app_context, params)
             # ⚠️ 이번 생성이 Anlas 를 물면 동적 할당의 잣대를 Anlas 로 바꾼다 -
             #    V5 무료 사용량 % 는 유료 모드에서 안 움직여 균등화가 멎는다.
             #    판정은 `nai_free_usage` 한 곳이 한다(화면·집계와 같은 자).
@@ -993,6 +998,13 @@ class APIService:
                 model_spec = resolve_nai_model_for_context(self.app_context, model_key)
             selected_model_spec = model_spec
             model_name = model_spec.api_model
+            # 서버가 고정하는 생성값을 **나가는 자리에서** 맞춘다(Medium: steps 14 ·
+            # k_euler_ancestral · karras · cfg_rescale 0). 다른 값을 보내도 서버가 고쳐
+            # 쓰지만(실측 2026-10-09), 맞춰 보내야 진행률 · 히스토리 · 무료 집계가 실제와 같다.
+            # ⚠️ **여기가 목이다** - 화면을 거치지 않는 요청(자동 생성 · 프리셋 미리보기 ·
+            #    메타데이터 리플레이)도 전부 이 자리를 지난다.
+            if selected_model_spec.fixed_params:
+                params.update(copy.deepcopy(dict(selected_model_spec.fixed_params)))
 
             # ✅ Img2Img 분기 처리
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None

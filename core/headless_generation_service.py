@@ -29,7 +29,7 @@ from core.generation_request import (
     NAIVibeTransferData,
 )
 from core.headless_result_service import HeadlessStoredResult
-from core.nai_model_contract import resolve_nai_model_for_context
+from core.nai_model_contract import apply_nai_fixed_params, resolve_nai_model_for_context
 from core.resolution_utils import snap_resolution_to_multiple
 from core.web_session_context import WebSessionContext
 
@@ -924,6 +924,11 @@ class HeadlessGenerationService:
         if not managed:
             self._normalize_resolution(params)
             self._normalize_numbers(params, api_mode)
+        # 모델이 고정하는 값(Medium: 14스텝 · Euler A · karras · rescale 0)으로 맞춘다 - 큐 요약 ·
+        # 유료 판정이 저장된 값(예: steps 40)이 아니라 **실제로 나갈 값**을 보게 한다.
+        # 요청 사본에만 쓴다(`remote_params` 는 그대로) - 다른 모델로 돌아가면 사용자 값이 되살아난다.
+        if api_mode == "NAI":
+            apply_nai_fixed_params(self.context, params)
         self._normalize_comfyui_workflow_type(params, api_mode)
         apply_image_modules = getattr(self.context, "apply_headless_image_module_params", None)
         if callable(apply_image_modules):

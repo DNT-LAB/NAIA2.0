@@ -20213,6 +20213,9 @@ select.setup-input { cursor: pointer; }
 /* Full / Curated 구분(사용자 지정 2026-08-21). **색상(갈래)은 건드리지 않고 밝기만**
    올린다 - 세대별 색 구분이 F/C 구분에 먹히면 안 된다. F 는 위 색 그대로. */
 .custom-select-model-tag[data-variant="curated"] { filter: brightness(1.28) saturate(0.82); }
+/* Medium(V5 Full Medium · 사용자 결정 2026-10-09). 띠에 칸을 늘리지 않고 같은 NAI5 칸에서 가른다 -
+   Curated 가 밝은 쪽이니 Medium 은 **어두운 쪽**으로. 색상은 그대로 둔다(세대 구분을 먹지 않게). */
+.custom-select-model-tag[data-variant="medium"] { filter: brightness(0.72) saturate(0.8); }
 /* 모델을 안 적고 저장된 옛 프리셋(라벨은 키 그대로) — 눈에 안 띄게 둔다. */
 .custom-select-model-tag:not([data-family="v5"]):not([data-family="v4.5"]):not([data-family="v4.0"]):not([data-family="v3"]) {
   color: var(--text-dim);

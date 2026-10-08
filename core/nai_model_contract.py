@@ -362,7 +362,9 @@ NAI_VALID_SAMPLERS: frozenset[str] = frozenset(NAI_SAMPLER_OPTIONS) | {"ddim_v3"
 # `NAID4.5` 처럼 접미사가 없는 키가 있어 규칙이 한 줄로 안 떨어진다.
 NAI_MODEL_SHORT_LABELS: dict[str, str] = {
     "NAID5F": "NAI5.0F",
-    "NAID5FM": "NAI5.0FM",
+    # 배지는 좁은 목록의 이름 앞에 붙는다 - `NAI5.0FM` 은 가장 길어서 M 하나로 줄였다
+    # (사용자 결정 2026-10-09). Full 과는 밝기(variant)로도 갈린다.
+    "NAID5FM": "NAI5.0M",
     "NAID5C": "NAI5.0C",
     "NAID4.5F": "NAI4.5F",
     "NAID4.5C": "NAI4.5C",
@@ -419,13 +421,17 @@ def nai_model_badge(model_key: Any, context: Any = None) -> dict[str, str]:
 
 
 def nai_model_variant(spec: Any) -> str:
-    """Full / Curated 판정. 화면이 같은 세대 안에서 둘을 색으로 가른다.
+    """Full / Curated / Medium 판정. 화면이 같은 세대 안에서 셋을 밝기로 가른다.
 
     ⚠️ **키나 짧은 라벨의 끝 글자로 자르지 않는다.** `NAID4.5` 처럼 접미사가 없는
     키가 있고, 사용자 등록 모델은 이름을 마음대로 짓는다. 실제 구분은 API 모델
     이름에 있다(`nai-diffusion-5-full` / `nai-diffusion-5-curated`).
     """
     api_model = str(getattr(spec, "api_model", "") or "").lower()
+    # ⚠️ Medium 을 **먼저** 본다 - 이름이 `...-5-full-medium` 이라 뒤에 두면 Full 로 떨어져
+    #    프리셋 목록에서 Full 프리셋과 배지 색이 같아진다(같은 NAI5 칸에 섞여 있다).
+    if "medium" in api_model:
+        return "medium"
     if "curated" in api_model:
         return "curated"
     if "full" in api_model:

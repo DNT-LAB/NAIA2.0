@@ -5760,6 +5760,7 @@ function updateParams(m) {
   //   - 사용자 등록 모델: 등록할 때 준 이름
   //   - V5: `NAID5F (Opus Limit)` — Anlas 가 아니라 **별도 사용량 풀**을 쓴다는
   //     것을 고르는 자리에서 바로 알려 준다(사용자 지정 2026-08-19).
+  //     계약이 표시 이름을 주면 키 대신 그것을 쓴다(`NAID5FM` -> `NAID5F-medium`).
   const modelLabels = mode === 'NAI'
     ? new Map(
       Array.from(naiModelMetaByKey.entries())
@@ -5768,7 +5769,7 @@ function updateParams(m) {
           key,
           item?.source === 'user'
             ? String(item?.label || key)
-            : `${key} (Opus Limit)`,
+            : `${String(item?.option_label || key)} (Opus Limit)`,
         ])
     )
     : null;

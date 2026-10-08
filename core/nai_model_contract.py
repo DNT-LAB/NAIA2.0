@@ -52,6 +52,10 @@ class NaiModelSpec:
     # 네거티브 프롬프트를 그림에 반영하는가. Medium 은 안 한다 - 메인 · 캐릭터 네거티브를
     # 비우거나 필드를 통째로 빼도 같은 시드에서 픽셀이 같았다(실측 2026-10-09).
     supports_negative_prompt: bool = True
+    # 모델 고르는 칸에 키 대신 보일 이름. 비면 키를 그대로 쓴다.
+    # 키는 대문자 · 짧은 식별자라(`NAID5FM`) 사람이 읽기엔 뜻이 안 보일 때가 있다 - 그때만 준다.
+    # ⚠️ 표시 전용이다. 저장 · 전송 · 메타데이터 되찾기는 전부 키로 한다.
+    option_label: str = ""
 
     @property
     def uses_v4_payload(self) -> bool:
@@ -124,6 +128,7 @@ class NaiModelSpec:
             "api_parameter_overrides": copy.deepcopy(dict(self.api_parameter_overrides)),
             "api_parameter_removals": list(self.api_parameter_removals),
             "fixed_params": copy.deepcopy(dict(self.fixed_params)),
+            "option_label": self.option_label,
             "capabilities": {
                 "v4_payload": self.uses_v4_payload,
                 "vibe": self.supports_vibe,
@@ -147,6 +152,7 @@ def _builtin(
     inpainting_is_substitute: bool = False,
     fixed_params: Mapping[str, Any] | None = None,
     supports_negative_prompt: bool = True,
+    option_label: str = "",
 ) -> NaiModelSpec:
     return NaiModelSpec(
         key=key,
@@ -160,6 +166,7 @@ def _builtin(
         selectable=selectable,
         fixed_params=dict(fixed_params or {}),
         supports_negative_prompt=supports_negative_prompt,
+        option_label=option_label,
     )
 
 
@@ -199,6 +206,8 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
             "cfg_rescale": 0.0,
         },
         supports_negative_prompt=False,
+        # 사용자 지정 2026-10-09: 고르는 칸에는 `NAID5F-medium (Opus Limit)` 로 보인다.
+        option_label="NAID5F-medium",
     ),
     "NAID5C": _builtin(
         "NAID5C",

@@ -9,6 +9,11 @@
 - 머리가 안 오거나 · 본문이 멎거나 · SSE 프레임이 조금씩 계속 와도 **상한에서** Connection Lost 로 끝난다.
 - Connection Lost 는 **재시도하지 않는다**(이미 과금됐을 수 있다) - 서버가 받은 요청은 1건이어야 한다.
 
+사용자 제보(2026-10-09): 그래도 Generate 가 299초 동안 안 풀렸다. 상한이 **시도마다** 새로 시작됐기 때문이다 -
+Cloudflare 는 상한보다 먼저(실측 약 125초) HTTP 524 로 끊고, 그 실패는 3회까지 다시 보냈다.
+- 524 는 Connection Lost 다 - 다시 보내지 않는다(서버가 받은 요청 1건).
+- 다른 실패의 재시도는 **처음 시도부터 잰 상한 안에서만** 한다 - 생성 한 번이 상한을 넘겨 기다리지 않는다.
+
 `python tools/test_nai_request_deadline.py`
 """
 
@@ -34,6 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 DEADLINE_S = 2.0
 HANG_S = 20          # 가짜 서버가 멎어 있는 시간 - 상한보다 충분히 길다
+LATE_S = 1.5         # 상한 **직전에** 오류로 끝나는 응답(Cloudflare 524 가 이렇게 온다)
 
 
 def _png_bytes() -> bytes:
@@ -53,8 +59,22 @@ def _start_fake_nai(state: dict) -> ThreadingHTTPServer:
             self.rfile.read(int(self.headers.get("Content-Length", 0)))
             state["hits"] += 1
             mode = state["mode"]
-            if mode == "no_headers":
+            if mode == "no_headers" or (mode == "500_then_hang" and state["hits"] > 1):
                 time.sleep(HANG_S)
+                return
+            if mode in {"late_524", "late_500", "fast_500", "500_then_hang"}:
+                if mode.startswith("late_"):
+                    time.sleep(LATE_S)
+                body = b"<html>origin timed out</html>"
+                self.close_connection = True
+                self.send_response(524 if mode == "late_524" else 500)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except OSError:
+                    pass
                 return
             if self.path.endswith("-stream"):
                 self._stream(mode)
@@ -138,15 +158,25 @@ def main() -> int:
                 "width": 832, "height": 1216, "steps": 28, "cfg_scale": 5,
                 "sampler": "k_euler_ancestral", "seed": 1, "action": "generate",
             }
+            # (가짜 서버 모드, 스트리밍, 기대 상태, 걸린 시간 하한, 상한, 서버가 받을 요청 수 상한)
+            at_deadline = (DEADLINE_S - 0.2, DEADLINE_S + 3.0, 1)
             cases = [
-                ("ok", False, "success"),
-                ("ok", True, "success"),
-                ("no_headers", False, "error"),
-                ("stall", False, "error"),
-                ("stall", True, "error"),
-                ("trickle", True, "error"),
+                ("ok", False, "success", None),
+                ("ok", True, "success", None),
+                ("no_headers", False, "error", at_deadline),
+                ("stall", False, "error", at_deadline),
+                ("stall", True, "error", at_deadline),
+                ("trickle", True, "error", at_deadline),
+                # 상한 직전의 524 - 다시 보내지 않고 거기서 끝난다(예전: 3회 x 1.5초)
+                ("late_524", False, "error", (LATE_S - 0.2, DEADLINE_S, 1)),
+                ("late_524", True, "error", (LATE_S - 0.2, DEADLINE_S, 1)),
+                # 상한 직전의 500 - 쉬고 나면 남은 시간이 없다. 다시 보내지 않고 상한에서 끝난다
+                ("late_500", False, "error", (DEADLINE_S - 0.2, DEADLINE_S + 0.7, 1)),
+                # 금방 500, 다시 보낸 요청이 멎는다 - 재시도도 **첫 시도부터 잰** 상한에서 끊긴다
+                # (시도마다 새로 재면 1.2초 + 2초 = 3.2초가 걸린다)
+                ("500_then_hang", False, "error", (DEADLINE_S - 0.2, DEADLINE_S + 0.7, 2)),
             ]
-            for mode, stream, expected in cases:
+            for mode, stream, expected, bounds in cases:
                 state.update(mode=mode, hits=0)
                 started = time.monotonic()
                 result = service.call_generation_api(
@@ -154,12 +184,25 @@ def main() -> int:
                 elapsed = time.monotonic() - started
                 label = f"{mode}{'_stream' if stream else ''}"
                 assert result.get("status") == expected, (label, result)
-                if expected == "error":
+                if bounds is not None:
+                    low, high, max_hits = bounds
                     assert "Connection Lost" in str(result.get("message")), (label, result)
-                    # 상한에서 끝난다(넉넉히 +3초) - 예전에는 읽기마다 상한이 다시 시작되고 3회 재시도했다
-                    assert DEADLINE_S - 0.2 <= elapsed <= DEADLINE_S + 3.0, (label, elapsed)
-                    assert state["hits"] == 1, (label, "retried", state["hits"])
+                    # 상한에서 끝난다 - 예전에는 읽기마다 · 시도마다 상한이 다시 시작되고 3회 재시도했다
+                    assert low <= elapsed <= high, (label, elapsed)
+                    assert 1 <= state["hits"] <= max_hits, (label, "retried", state["hits"])
                 evidence[label] = f"{result.get('status')} in {elapsed:.1f}s, requests={state['hits']}"
+
+            # 금방 끝나는 실패의 재시도는 그대로다 - 상한 안이면 3회까지 다시 보낸다
+            # (재시도 사이 1초씩 쉬므로 2초 상한으로는 세 번이 안 들어간다 - 이 경우만 상한을 넉넉히)
+            api_service.NAI_REQUEST_DEADLINE_S = 30.0
+            state.update(mode="fast_500", hits=0)
+            started = time.monotonic()
+            result = service.call_generation_api(dict(params))
+            elapsed = time.monotonic() - started
+            assert result.get("status") == "error", result
+            assert state["hits"] == 3, ("fast_500", state["hits"])
+            assert "HTTP 500" in str(result.get("message")), result
+            evidence["fast_500"] = f"error in {elapsed:.1f}s, requests={state['hits']}"
         finally:
             server.shutdown()
 

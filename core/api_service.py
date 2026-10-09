@@ -164,12 +164,19 @@ def _resolve_nai_model_key_loosely(model_value: Any) -> str:
     return recovered or text
 
 
-# NAI 요청 한 번의 **총** 대기 상한(초). 넘으면 Connection Lost 로 판정한다(사용자 지정 2026-10-07).
+# NAI 생성 한 번의 **총** 대기 상한(초). 넘으면 Connection Lost 로 판정한다(사용자 지정 2026-10-07).
+# ⚠️ **시도마다가 아니라 생성 한 번에** 건다(사용자 제보 2026-10-09: 299초 동안 Generate 가 안 풀렸다).
+#    `call_generation_api` 가 가드를 하나 만들어 재시도까지 같은 시계로 잰다. 시도마다 새로 재면
+#    상한 직전에 끝난 실패(아래 524)가 다시 보내질 때마다 상한만큼 더 기다린다.
 # ⚠️ `requests` 의 timeout 은 '한 번 읽을 때' 의 상한이지 총 시간이 아니다. 조금씩이라도 바이트가
 #    오면(스트리밍 SSE) 영영 안 끝나고, 응답 전체를 기다리는 경로도 읽기마다 상한이 다시 시작된다.
 #    그래서 아래 `_nai_deadline_guard` 가 벽시계로 재고, 시간이 다 되면 연결을 끊어 막힌 읽기를 깨운다.
 NAI_REQUEST_DEADLINE_S = 135.0
 NAI_CONNECT_TIMEOUT_S = 30.0
+# Cloudflare 가 '원본 서버가 제때 답하지 않았다' 며 끊는 코드. NAI 는 우리 상한보다 **먼저**(실측 약 125초)
+# 이걸로 끊는다 - 그래서 135초 읽기 상한은 실제로는 거의 안 걸리고, 이 응답이 '시간 초과' 의 실제 모습이다.
+# Connection Lost 와 같은 실패로 다룬다: 서버는 이미 생성(과금)했을 수 있으니 다시 보내지 않는다.
+NAI_ORIGIN_TIMEOUT_STATUS = 524
 
 
 class NaiConnectionLost(Exception):
@@ -179,9 +186,13 @@ class NaiConnectionLost(Exception):
     재시도마다 상한만큼 더 기다리게 된다(3회면 6분 남짓).
     """
 
-    def __init__(self, seconds: float = NAI_REQUEST_DEADLINE_S):
+    def __init__(self, seconds: float = NAI_REQUEST_DEADLINE_S, origin_timeout_status: int | None = None):
+        if origin_timeout_status:
+            reason = f"NovelAI 서버가 제때 응답하지 않았습니다(HTTP {int(origin_timeout_status)})."
+        else:
+            reason = f"{int(seconds)}초 동안 응답을 받지 못했습니다."
         super().__init__(
-            f"NAI 연결 끊김(Connection Lost): {int(seconds)}초 동안 응답을 받지 못했습니다. "
+            f"NAI 연결 끊김(Connection Lost): {reason} "
             "NovelAI 서버 상태나 네트워크를 확인한 뒤 다시 생성해 주세요."
         )
 
@@ -731,6 +742,14 @@ class APIService:
 
         max_retries = 3  # 5회에서 3회로 줄임
         last_exception = None
+        # NAI: 총 대기 상한은 **첫 시도부터** 잰다 - 재시도는 남은 시간 안에서만 한다(NAI_REQUEST_DEADLINE_S 설명 참고)
+        nai_guard = _NaiDeadlineGuard() if api_mode == "NAI" else None
+
+        def _retry_wait(seconds: float) -> None:
+            if nai_guard is not None:
+                seconds = min(seconds, max(0.0, nai_guard.remaining()))
+            if seconds > 0:
+                time.sleep(seconds)
 
         # ComfyUI 자동 모드 스왑 자격: basic(내장) eps/anima 워크플로우만(스펙: EPS↔ANIMA).
         # custom/bypass/free 워크플로우·artist thumbnail·사전 빌드 workflow dict·v_prediction은 제외.
@@ -764,7 +783,15 @@ class APIService:
                     )
             try:
                 if api_mode == "NAI":
-                    result = self._call_nai_api(parameters, progress_callback=progress_callback, preview_callback=preview_callback)
+                    if attempt > 1 and nai_guard.remaining() <= 0:
+                        # 앞 시도들이 상한을 다 썼다 - 더 보내지 않는다
+                        lost = NaiConnectionLost(nai_guard.deadline_s)
+                        print(f"❌ {lost}")
+                        return {'status': 'error', 'message': str(lost)}
+                    result = self._call_nai_api(
+                        parameters, progress_callback=progress_callback, preview_callback=preview_callback,
+                        deadline_guard=nai_guard,
+                    )
                 elif api_mode == "WEBUI":
                     result = self._call_webui_api(parameters)
                 elif api_mode == "COMFYUI":  # 🆕 새로 추가
@@ -784,13 +811,13 @@ class APIService:
                     if 'HTTP 520' in error_msg or 'HTTP 502' in error_msg or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg:
                         if attempt < max_retries:
                             print(f"[WAIT] 서버 오류 감지. {2 * attempt}초 후 재시도합니다...")
-                            time.sleep(2 * attempt)  # 점진적으로 대기 시간 증가
+                            _retry_wait(2 * attempt)  # 점진적으로 대기 시간 증가
                             continue
 
                     # 재시도할 수 없는 오류는 즉시 반환
                     last_exception = error_msg
                     if attempt < max_retries:
-                        time.sleep(1)  # 1초 대기 후 재시도
+                        _retry_wait(1)  # 1초 대기 후 재시도
                         continue
                     else:
                         # 마지막 시도에서도 실패하면 에러 반환
@@ -811,7 +838,7 @@ class APIService:
                 print(f"[WARNING] API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
                 last_exception = e
                 if attempt < max_retries:
-                    time.sleep(1)  # 1초 대기 후 재시도 (필요에 따라 시간 조정 가능)
+                    _retry_wait(1)  # 1초 대기 후 재시도 (필요에 따라 시간 조정 가능)
                 else:
                     # 마지막 시도에서도 실패하면 에러 반환
                     return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {e}"}
@@ -947,7 +974,8 @@ class APIService:
         return {"files": files}
 
     @generation_operation
-    def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
+    def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None,
+                      deadline_guard: "_NaiDeadlineGuard | None" = None) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다.
 
         preview_callback이 전달되고 기본 txt2img(generate) 액션이면
@@ -1743,6 +1771,7 @@ class APIService:
                     progress_callback=progress_callback,
                     preview_callback=preview_callback,
                     multipart=nai_multipart,
+                    deadline_guard=deadline_guard,
                 )
                 self._cleanup_http_threads()
                 if not image_bytes:
@@ -1756,7 +1785,8 @@ class APIService:
 
             # HTTP 세션을 사용하여 연결 정리
             # 총 대기 상한(NAI_REQUEST_DEADLINE_S)을 벽시계로 잰다 - 본문까지 다 받아야 끝이다.
-            guard = _NaiDeadlineGuard()
+            # 가드는 call_generation_api 가 준 것을 쓴다(재시도까지 같은 시계).
+            guard = deadline_guard or _NaiDeadlineGuard()
             with requests.Session() as session:
                 try:
                     response = session.post(
@@ -1793,6 +1823,11 @@ class APIService:
             print(f"❌ {e}")
             return {'status': 'error', 'message': str(e), 'no_retry': True}
         except requests.exceptions.HTTPError as e:
+            if e.response.status_code == NAI_ORIGIN_TIMEOUT_STATUS:
+                # 서버가 제때 답하지 못했다 = Connection Lost. 다시 보내지 않는다(NAI_ORIGIN_TIMEOUT_STATUS 설명 참고)
+                lost = NaiConnectionLost(origin_timeout_status=e.response.status_code)
+                print(f"❌ {lost}")
+                return {'status': 'error', 'message': str(lost), 'no_retry': True}
             error_message = f"API 오류 (HTTP {e.response.status_code}): {e.response.text}"
             print(f"❌ {error_message}")
             return {'status': 'error', 'message': error_message}
@@ -2185,7 +2220,8 @@ class APIService:
 
     def _stream_nai_request(self, payload: Dict[str, Any], headers: Dict[str, str], steps: int,
                             progress_callback=None, preview_callback=None,
-                            multipart: bool = False) -> bytes | None:
+                            multipart: bool = False,
+                            deadline_guard: "_NaiDeadlineGuard | None" = None) -> bytes | None:
         """
         NovelAI generate-image-stream(SSE) 엔드포인트를 호출합니다.
 
@@ -2209,7 +2245,7 @@ class APIService:
 
         # 총 대기 상한(NAI_REQUEST_DEADLINE_S)을 벽시계로 잰다. 프레임이 조금씩 계속 와도 상한이 되면 끊는다
         # (예전 (30, 300) 은 '한 번 읽기' 상한이라, 바이트가 이어지면 끝없이 기다렸다).
-        guard = _NaiDeadlineGuard()
+        guard = deadline_guard or _NaiDeadlineGuard()
         with requests.Session() as session:
             try:
                 response = session.post(

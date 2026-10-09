@@ -97,6 +97,16 @@ const NUDGE_PX_COARSE = 16;
 const WHEEL_SCALE_PCT = 2;
 const WHEEL_ROTATE_DEG = 1;
 const WHEEL_COARSE = 5;
+// 펼친 캐릭터 패널과 스테이지 사이 틈. 결과 이미지를 밀 때의 틈(characterQuickPanel)과 같다.
+const CHARACTER_PANEL_GAP = 8;
+
+/** 스테이지 왼끝을 `want` 까지 밀 것인가. 미는 양(px) 또는 null(가운데 그대로).
+ *  `slack` 은 스테이지를 앉히고 남은 가로 여백 - 가운데 자리는 그 절반이다.
+ *  다 못 비키면 안 비키고(겹친다), 가운데가 이미 패널을 벗어나 있으면 건드리지 않는다. */
+export function stagePushOffset(want, slack) {
+  if (!(slack > 0) || want > slack) return null;
+  return want > slack / 2 ? Math.round(want) : null;
+}
 
 const ratio = (value) => (Number(value) || 0).toFixed(2);
 const clampPct = (v) => Math.max(SCALE_MIN_PCT, Math.min(SCALE_MAX_PCT, Math.round(Number(v) || 100)));
@@ -1202,8 +1212,36 @@ export function createInpaintCanvasPanel({
     const availH = plane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
     if (!(availW > 0) || !(availH > 0)) return;
     const scale = Math.min(availW / w, availH / h);
-    stageEl.style.width = `${Math.round(w * scale)}px`;
+    const stageW = Math.round(w * scale);
+    stageEl.style.width = `${stageW}px`;
     stageEl.style.height = `${Math.round(h * scale)}px`;
+    const push = characterPanelPush(parseFloat(style.paddingLeft), availW - stageW);
+    stageEl.style.marginLeft = push === null ? '' : `${push}px`;
+    stageEl.style.marginRight = push === null ? '' : 'auto';
+  }
+
+  /** 펼친 캐릭터 패널을 피해 스테이지를 얼마나 밀지(plane 안쪽 왼끝 기준 px). 안 밀면 null.
+   *
+   *  레이어 목록이 오른쪽을 비우면서 스테이지가 왼쪽으로 쏠려, 왼쪽 위에 얹힌 캐릭터
+   *  패널 밑으로 들어갔다(사용자 제보 2026-10-09). 규칙은 결과 이미지와 같다(사용자 결정):
+   *    - **크기는 안 건드린다.** 남는 여백 안에서 옆으로만 옮긴다.
+   *    - **다 못 비키면 아예 안 비킨다** - 가운데 그대로 두고 겹친다.
+   *    - **밀기만 한다** - 가운데보다 왼쪽으로는 안 간다.
+   *  자리가 생기면(Ctrl+휠로 UI 를 줄이거나 창을 넓히면) 저절로 비켜서야 하므로, 판정은
+   *  스테이지를 앉힐 때마다 다시 한다 - 한 번 정해 두고 쓰지 않는다.
+   *
+   *  ⚠️ 패널이 펼쳐져 있는지는 `#resultViewer.is-cq-shift` 가 말한다
+   *     (characterQuickPanel.syncViewerShift 가 `보임 && 펼침` 으로 건다). 폭은 상자
+   *     (`.cq-box`)가 아니라 **틀**(`.cq-float`)로 잰다 - 상자는 펼쳐지는 동안 폭이 자라는
+   *     중이라, 그때 재면 덜 민 자리에 선다.
+   */
+  function characterPanelPush(padLeft, slack) {
+    if (!viewer?.classList.contains('is-cq-shift')) return null;
+    const float = document.querySelector('.cq-float.open');
+    const box = float?.getBoundingClientRect();
+    if (!box || !box.width) return null;
+    const want = box.right + CHARACTER_PANEL_GAP - (plane.getBoundingClientRect().left + padLeft);
+    return stagePushOffset(want, slack);
   }
 
   // ── 조작 ────────────────────────────────────────────────────────────────
@@ -1925,6 +1963,17 @@ export function createInpaintCanvasPanel({
         fitStage();
       });
       new ResizeObserver(refit).observe(plane);
+    }
+    // 캐릭터 패널을 펴고 접을 때도 다시 앉힌다 - plane 상자는 그대로라 위 관찰자는 안 불린다.
+    if (viewer && typeof MutationObserver === 'function') {
+      let lastShift = viewer.classList.contains('is-cq-shift');
+      const onViewerClass = deferred(() => {
+        const shift = viewer.classList.contains('is-cq-shift');
+        if (shift === lastShift) return;
+        lastShift = shift;
+        fitStage();
+      });
+      new MutationObserver(onViewerClass).observe(viewer, {attributes: true, attributeFilter: ['class']});
     }
     panel.addEventListener('click', onClick);
     panel.addEventListener('change', onChange);

@@ -980,11 +980,12 @@ class ImageMetadataExtractor:
                             parsed['Comment'] = json.loads(parsed['Comment'])
                         except:
                             pass  # Comment가 JSON이 아니면 그대로 유지
-                    return parsed
+                    return ImageMetadataExtractor._lift_stealth_nai_comment(parsed)
                 except json.JSONDecodeError:
                     # 실패하면 백슬래시 제거 후 재시도 (구형 호환성)
                     try:
-                        return json.loads(data.replace("\\", ""))
+                        return ImageMetadataExtractor._lift_stealth_nai_comment(
+                            json.loads(data.replace("\\", "")))
                     except:
                         pass
         except Exception as e:
@@ -992,7 +993,33 @@ class ImageMetadataExtractor:
 
         # NAI 형식으로 파싱 시도
         return ImageMetadataExtractor._parse_nai_format(data)
-    
+
+    @staticmethod
+    def _lift_stealth_nai_comment(parsed: Any) -> Any:
+        """스텔스 PNG 의 NAI 메타를 tEXt `Comment` 길과 **같은 모양**으로 편다.
+
+        스텔스 페이로드는 `{Software, Source, Description, Comment: {...}}` 봉투다. 예전에는
+        봉투를 그대로 돌려줘서 `prompt` · `uc` · `v4_prompt` · `characters` 가 전부
+        `Comment` 안에만 있었다. tEXt 청크가 살아 있는 그림은 3번 길이 먼저 펴 주므로
+        티가 안 났고, **청크가 벗겨지고 알파만 남은 그림**(커뮤니티 재업로드 등)에서만
+        백엔드 소비자가 빈 값을 읽었다 - 인페인트 창의 메인 · 가상 캐릭터 프롬프트가
+        통째로 비었다(사용자 제보 2026-10-09). 화면 쪽 뷰어는 `Comment` 안을 직접 읽어서
+        멀쩡해 보였다.
+
+        ⚠️ 펴는 일은 `_normalize_nai_comment_data` 하나가 한다 - 여기서 따로 짜면 두 길이
+           갈린다. 봉투 없이 Comment 본문만 든 페이로드(`v4_prompt` 가 맨 위)도 같이 편다.
+        """
+        if not isinstance(parsed, dict):
+            return parsed
+        comment = parsed.get('Comment')
+        if not isinstance(comment, dict):
+            if not isinstance(parsed.get('v4_prompt'), dict):
+                return parsed
+            comment = parsed
+        lifted = dict(parsed)
+        lifted.update(ImageMetadataExtractor._normalize_nai_comment_data(comment))
+        return lifted
+
     @staticmethod
     def detect_software(metadata: Dict[str, Any]) -> str:
         """메타데이터에서 소프트웨어 타입 감지"""
@@ -1135,7 +1162,7 @@ def character_prompts_from_embedded(embedded: Optional[Dict[str, Any]]) -> list:
                         position = None
             slots.append({'prompt': prompt, 'uc': uc, 'active': True, 'position': position})
     else:
-        # v4 원본이 없는 그림(스텔스 PNG · 외부 도구)은 압축된 목록밖에 없다. 이때는
+        # v4 원본이 없는 그림(정규식으로 긁은 옛 형식 · 외부 도구)은 압축된 목록밖에 없다. 이때는
         # 좌표를 아예 쓰지 않는다 - 자리가 맞는지 보증할 방법이 없기 때문이다.
         texts = embedded.get('characters') or []
         ucs = embedded.get('characters_uc') or []

@@ -29933,6 +29933,10 @@ body.inpaint-prompt-owned .pe-mini { display: none; }
   padding: 5px 7px; border: 0; border-radius: 0; font-size: 11px; line-height: 1.5;
 }
 .dragpanel.pefloat .peq-text { min-height: 30px; }
+/* ⚠️ 크기 손잡이는 글칸 **위**에 있어야 잡힌다. 이 창은 몸통 여백이 0 이라 글칸(`z-index: 1`)이 오른쪽 아래
+   모서리까지 덮는다 - 손잡이가 비쳐 보이기만 하고 누르면 글칸이 받았다(사용자 제보 2026-10-10: "드래그로 확대가
+   안 된다"). 리모컨의 창은 몸통 여백(6px) 덕에 모서리가 드러나 있어 같은 일이 없다. */
+.dragpanel.pefloat .dragpanel-grip { z-index: 2; }
 /* 머리줄 색으로 두 창을 가른다(사용자 지정 2026-10-10): prefix = 보라 · postfix = **더 연한** 보라.
    꼬리표의 켜짐 색도 같은 짝이다 - 어느 꼬리표가 어느 창인지 색으로 이어진다. */
 .dragpanel.pefloat .dragpanel-head { background: rgba(124, 106, 239, 0.30); }

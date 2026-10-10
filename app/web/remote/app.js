@@ -11210,6 +11210,11 @@ function scheduleInitialStateRefresh(delayMs = 5000) {
     // 재연결 시 좌측 패널을 현재 적용 프롬프트로 강제 재동기(FIX-B/RC-2) — session 메시지가 누락/레이스
     // 돼도 복구 보장. 백엔드가 prompt_sync{force:true} 로 응답한다.
     ws.send(JSON.stringify({type: 'get_prompt'}));
+    // 끊겼다 다시 붙었다 - 들고 있던 프리셋 이름은 끊긴 동안 낡았을 수 있다(다른 창이 바꿨다 · 재조회가 끊긴 채
+    // 소진됐다). 이름을 다시 받을 때까지 표식을 비운다. 처음 붙을 때는 들고 있는 것이 없어 아무 일도 없다.
+    if (_presetStampStale || moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState) {
+      refreshPresetStamp();
+    }
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'storyteller'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
@@ -14398,13 +14403,16 @@ function slashPeSetField(key, value, seenPreset = null) {
   // 도장은 **보고 친 프리셋**이다. 상주 패널처럼 전환을 걸쳐 열려 있을 수 있는 쪽은
   // 채울 때 기억해 둔 이름을 넘긴다 - 저장 순간의 이름을 찍으면 도장이 무의미해진다.
   const stamp = seenPreset == null ? (slashPeState().preset || '') : String(seenPreset || '');
-  setModuleParam('prompt_engineering', key, stampedEdit(text, stamp));
+  const sent = setModuleParam('prompt_engineering', key, stampedEdit(text, stamp));
   // PE 모듈이 열려 있으면 그 칸도 맞춘다(반대 방향은 모듈 상태가 돌아올 때 온다).
   const el = document.getElementById(PE_FIELD_ELEMENTS[key] || '');
   // ⚠️ 앞 프리셋을 보고 친 글(도장이 지금 프리셋과 다르다)은 서버가 버린다. 그 글을 모듈 창의 칸에 써 두면
   //    버려진 글이 지금 프리셋의 것처럼 보이고, 그 칸을 비추는 다른 창들도 따라간다.
   if (el && (!stamp || stamp === (slashPeState().preset || ''))) el.value = text;
-  peFieldHub?.noteLocalWrite(key, text, {seenPreset: stamp, origin: 'quick'});
+  // ⚠️ **보낸 글만** 비추기 상태에 적는다. 연결이 끊겨 못 보낸 글을 적으면 서버에는 없는 글이 저장된 것처럼
+  //    다른 창 · 다시 연 창에 보인다(Codex 리뷰 2026-10-10). 못 보냈으면 `false` 를 돌려준다.
+  if (sent) peFieldHub?.noteLocalWrite(key, text, {seenPreset: stamp, origin: 'quick'});
+  return sent;
 }
 /** 작은 임시 편집창으로 PE 칸 하나를 고친다. */
 function slashPeEditor(key, _elementId, title) {
@@ -14643,7 +14651,11 @@ import('./js/features/mainPeQuick.mjs?v=20261010-review2')
       loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign')
         .then(module => module.createDraggablePanel),
       getField: key => peFieldText(key),
-      setField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),
+      // 못 보냈으면 **던진다** - 판(peQuickEdit)이 '저장 실패' 를 알리고 그 줄을 안 보낸 글로 남겨 둔다
+      // (다음에 칸을 벗어날 때 다시 보낸다). 조용히 넘어가면 저장된 줄로 보이다가 서버 값으로 되돌아간다.
+      setField: (key, text, seenPreset) => {
+        if (!slashPeSetField(key, text, seenPreset)) throw new Error('WS 연결이 끊겨 있습니다');
+      },
       getPreset: () => String(slashPeState().preset || ''),
       requestState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },
       attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay),

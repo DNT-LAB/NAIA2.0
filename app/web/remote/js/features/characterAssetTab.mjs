@@ -7,7 +7,7 @@ import {
   appendBenchCandidateBatch,
   benchModeBadge,
   findBenchRequestCandidate,
-} from './benchCandidates.mjs?v=20260717-benchcand4';
+} from './benchCandidates.mjs?v=20261009-benchv5';
 import {createCharacterCreationBench} from './characterCreationBench.mjs?v=20260718-fix1';
 
 // 캐릭터 생성 벤치도 같은 계약을 쓰므로 재수출한다(기존 import 경로 호환).
@@ -676,7 +676,10 @@ export function createCharacterAssetTabController({
   let benchLayer = null;
   let benchOpen = false;
   let benchChar = null;          // {id, name, prompt, uc, revision}
-  let benchMode = 'char_reference'; // 'inpaint' | 'char_reference' - 기본은 CR(사용자 지시 2026-07-17)
+  // 생성 모드. V4.5 모드 = 'inpaint'(1/2 Inpaint) | 'char_reference', V5 모드 = 'inpaint_v5'(인페인트만).
+  // 기본은 V5(사용자 지정 2026-10-09 "이제 기본이 V5"). 그 전의 기본은 CR 이었다(2026-07-17).
+  let benchMode = 'inpaint_v5';
+  let benchV45Mode = 'char_reference';   // V4.5 모드로 돌아갈 때 되살릴, 거기서 마지막으로 고른 방식
   let benchReferenceType = 'character'; // 기본 CR 스펙 = Character (사용자 지시 2026-07-17)
   let benchReferenceStrength = 0.8; // 기본 S 0.8 (사용자 지시 2026-07-17)
   let benchReferenceFidelity = 0.9; // 기본 F 0.9
@@ -694,6 +697,7 @@ export function createCharacterAssetTabController({
   const benchFields = {
     inpaint: {main: '', negative: ''},
     char_reference: {main: '', negative: ''},
+    inpaint_v5: {main: '', negative: ''},
   };
   let benchCount = 1;
   let benchDefaultsLoaded = false;
@@ -786,9 +790,11 @@ export function createCharacterAssetTabController({
       const action = button.dataset.action;
       if (action === 'bench-close') closeBench();
       else if (action === 'bench-mode') {
-        const nextMode = button.dataset.mode === 'char_reference' ? 'char_reference' : 'inpaint';
+        const nextMode = ['inpaint', 'char_reference', 'inpaint_v5'].includes(button.dataset.mode)
+          ? button.dataset.mode : 'inpaint';
         if (nextMode !== benchMode) {
           benchMode = nextMode;
+          if (nextMode !== 'inpaint_v5') benchV45Mode = nextMode;
           renderBench();
         }
       }
@@ -884,7 +890,7 @@ export function createCharacterAssetTabController({
       // 덮어쓰면 CUSTOM 시드까지 오염된다 - 완료 시점의 벤치 캐릭터로 검증.
       if (!benchChar || benchChar.id !== characterId) return false;
       if (!benchDefaultsLoaded) {
-        for (const mode of ['inpaint', 'char_reference']) {
+        for (const mode of ['inpaint', 'char_reference', 'inpaint_v5']) {
           const block = defaults?.[mode];
           if (block && typeof block === 'object') {
             benchFields[mode].main = String(block.main_prompt || '');
@@ -1200,7 +1206,29 @@ export function createCharacterAssetTabController({
         </div>
       `;
     }
+    // V5 모드 결과: 1024x1024 캔버스의 오른쪽 절반(저장되는 자리)만 보인다. 자르는 자리는 CSS(`.char-bench-crop.v5`).
+    if (candidate?.mode === 'inpaint_v5') {
+      return `
+        <div class="char-bench-crop v5">
+          <img src="${API.historyImage(candidate.historyId)}" alt="">
+        </div>
+      `;
+    }
     return benchCropImg(candidate.historyId);
+  }
+
+  /** 모드가 모델 계열을 정한다(서버 `_bench_model_for_mode`). 고른 프로파일의 모델이 다른 계열이면 무엇으로
+   *  나가는지 말해 준다 - 말없이 바꾸면 사용자는 고른 모델로 나갔다고 믿는다. */
+  function benchModelNotice() {
+    const profile = selectedBenchProfile();
+    if (!profile || typeof profile.v5 !== 'boolean') return '';
+    if (benchMode === 'inpaint_v5' && !profile.v5) {
+      return '<div class="mod-notice">선택한 프로파일의 모델이 V5 가 아닙니다 - V5 모드에서는 NAID5F 로 나갑니다</div>';
+    }
+    if (benchMode !== 'inpaint_v5' && profile.v5) {
+      return '<div class="mod-notice">선택한 프로파일의 모델이 V5 입니다 - V4.5 모드에서는 NAID4.5F 로 나갑니다</div>';
+    }
+    return '';
   }
 
   function selectedBenchProfile() {
@@ -1233,6 +1261,7 @@ export function createCharacterAssetTabController({
       postfix: String(seed.postfix || ''),
       negative_prompt: String(seed.negative_prompt || ''),
       cr_capable: typeof seed.cr_capable === 'boolean' ? seed.cr_capable : null,
+      v5: typeof seed.v5 === 'boolean' ? seed.v5 : null,
       model: String(params.model || ''),
       cfg_scale: params.cfg_scale ?? '',
       cfg_rescale: params.cfg_rescale ?? '',
@@ -1444,12 +1473,23 @@ export function createCharacterAssetTabController({
               <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-uc">${escHtml(benchChar.uc)}</textarea>
               <div class="mod-section-label">Generation Mode</div>
               <div class="char-bench-mode-toggle">
-                <button class="char-bench-mode-btn ${benchMode === 'inpaint' ? 'active' : ''}"
-                  data-action="bench-mode" data-mode="inpaint">1/2 Inpaint</button>
-                <button class="char-bench-mode-btn ${benchMode === 'char_reference' ? 'active' : ''}"
-                  data-action="bench-mode" data-mode="char_reference">Char Reference</button>
+                <button class="char-bench-mode-btn ${benchMode !== 'inpaint_v5' ? 'active' : ''}"
+                  data-action="bench-mode" data-mode="${benchV45Mode}"
+                  title="NAI 4.5 사양: 1/2 Inpaint(1152x896 · 좁은 마스크) 또는 Char Reference">V4.5</button>
+                <button class="char-bench-mode-btn ${benchMode === 'inpaint_v5' ? 'active' : ''}"
+                  data-action="bench-mode" data-mode="inpaint_v5"
+                  title="NAI V5 사양: split screen 인페인트 · 1024x1024 캔버스 · 그릴 곳 51%">V5</button>
               </div>
-              ${benchMode === 'char_reference' && selectedBenchProfile()?.cr_capable === false
+              ${benchMode !== 'inpaint_v5' ? `
+                <div class="char-bench-mode-toggle char-bench-mode-sub">
+                  <button class="char-bench-mode-btn ${benchMode === 'inpaint' ? 'active' : ''}"
+                    data-action="bench-mode" data-mode="inpaint">1/2 Inpaint</button>
+                  <button class="char-bench-mode-btn ${benchMode === 'char_reference' ? 'active' : ''}"
+                    data-action="bench-mode" data-mode="char_reference">Char Reference</button>
+                </div>
+              ` : ''}
+              ${benchModelNotice()}
+              ${benchMode === 'char_reference' && selectedBenchProfile()?.cr_capable === false && !selectedBenchProfile()?.v5
                 ? '<div class="mod-notice">선택한 프로파일이 NAI 4.5가 아닌 모델을 강제합니다 - Char Reference 생성이 거부됩니다</div>'
                 : ''}
               ${benchMode === 'char_reference' ? `
@@ -1478,6 +1518,8 @@ export function createCharacterAssetTabController({
               <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-negative">${escHtml(benchFields[benchMode].negative)}</textarea>
               <div class="char-asset-count">${benchMode === 'char_reference'
                 ? 'Char Reference: 원본(A) late-binding / 768x1344 / {1girl|1boy} + PREFIX + MAIN + solo·자세 스캐폴드 + POSTFIX'
+                : benchMode === 'inpaint_v5'
+                ? 'V5 인페인트 고정: strength 1.0 / noise 0.0 / 1024x1024 캔버스 · 왼쪽 칸에 원본 · 그릴 곳 51% / {1girl|1boy} + PREFIX + MAIN(split screen) + solo·자세 스캐폴드 + POSTFIX / 저장 = 오른쪽 절반 그대로(512x1024)'
                 : '인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896) / {1girl|1boy} + MAIN + PREFIX + solo·자세 스캐폴드 + POSTFIX'}</div>
             </div>
             <div class="char-bench-form-footer">

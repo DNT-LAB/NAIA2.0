@@ -12,7 +12,7 @@ import {
   applyRandomCharacterSlot,
   benchModeBadge,
   findBenchRequestCandidate,
-} from './benchCandidates.mjs?v=20260717-benchcand4';
+} from './benchCandidates.mjs?v=20261009-benchv5';
 import {createMaskEngine} from './maskCanvas.mjs?v=20260717-mask1';
 
 const GENERATE_MAX = 8;

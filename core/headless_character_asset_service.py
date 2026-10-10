@@ -73,7 +73,22 @@ BENCH_DEFAULT_MAIN_PROMPT = "2koma, borderless panels"
 BENCH_LEGACY_DEFAULT_MAIN_PROMPT = "2koma, borderless panel"
 BENCH_DEFAULT_EXTRA_NEGATIVE = "border, border, nsfw"
 BENCH_LEGACY_DEFAULT_EXTRA_NEGATIVE = "border"
-BENCH_MODES = ("inpaint", "char_reference")
+BENCH_MODES = ("inpaint", "char_reference", "inpaint_v5")
+# V5 모드(사용자 지정 2026-10-09). 레퍼런스 인셋과 같은 틀이다: 왼쪽 칸에 원본, 오른쪽이 그릴 곳.
+#   - 캔버스 1024x1024(무료 대역의 끝) · 경계선은 **그릴 곳 51%** 가 남는 자리(= 인셋 한계의 가장 넓은 칸).
+#   - 기본 입력은 `split screen`(V5 가 칸 나눔을 알아보는 태그 - 인셋 핀과 같다). 인페인트만 된다.
+#   - 저장은 **캔버스의 오른쪽 절반**(512x1024)을 그 크기 그대로 잘라 넣는다(키우지 않는다 - 리샘플로 키우면
+#     흐려질 뿐이다). 경계선(496)부터가 아니라 512 부터인 까닭: 모델이 경계선 오른쪽에 검은 칸 테두리를 이어
+#     그린다(라이브 실측 2026-10-09 · NAID5F: x 488 ~ 505 가 검정) - 거기서 자르면 저장본에 검은 띠가 들어간다.
+BENCH_V5_MODE = "inpaint_v5"
+BENCH_V5_CANVAS = (1024, 1024)
+# 테두리가 더 두껍게 그려진 판은 검은 세로줄이 끝나는 데까지 더 민다(`utils.trim_panel_border_left`).
+BENCH_V5_SAVE_LEFT = 512
+BENCH_V5_DEFAULT_MAIN_PROMPT = "split screen"
+BENCH_V5_DEFAULT_EXTRA_NEGATIVE = "border, nsfw"
+# 모드가 요구하는 계열과 고른 프로파일의 모델이 다를 때 대신 보내는 모델.
+BENCH_V5_FALLBACK_MODEL = "NAID5F"
+BENCH_V45_FALLBACK_MODEL = "NAID4.5F"
 BENCH_REFERENCE_TYPES = {"character&style", "character"}
 # 생성 벤치 랜덤 슬롯 풀(data/random_*.txt). 각 줄 = 콤마로 구분된 태그 한 세트.
 RANDOM_CHARACTER_POOLS = {
@@ -87,6 +102,7 @@ BENCH_PROMPT_SOURCES = {"primary", "current", "preset"}
 BENCH_MODE_DEFAULTS = {
     "inpaint": {"main_prompt": BENCH_DEFAULT_MAIN_PROMPT, "extra_negative": BENCH_DEFAULT_EXTRA_NEGATIVE},
     "char_reference": {"main_prompt": "", "extra_negative": ""},
+    BENCH_V5_MODE: {"main_prompt": BENCH_V5_DEFAULT_MAIN_PROMPT, "extra_negative": BENCH_V5_DEFAULT_EXTRA_NEGATIVE},
 }
 
 _REFERENCE_PIVOT_CURRENT = (
@@ -209,7 +225,7 @@ class HeadlessCharacterAssetService:
         self._prompt_meta_cache: dict[tuple[str, int], dict[str, Any]] = {}
         # (primary path, mtime_ns) -> (canvas_png, small_mask_png). Canvases are
         # ~1MB each; keep only a handful.
-        self._bench_canvas_cache: dict[tuple[str, int], tuple[bytes, bytes]] = {}
+        self._bench_canvas_cache: dict[tuple[str, int, str], tuple[bytes, bytes]] = {}
         # (primary path, mtime_ns) -> normalized CR image_data (base64, ~1-2MB).
         self._bench_reference_cache: dict[tuple[str, int], str] = {}
         # (primary path, mtime_ns) -> Metadata Viewer-compatible prompt profile.
@@ -2007,6 +2023,12 @@ class HeadlessCharacterAssetService:
                     presets.append(profile)
         except Exception as exc:
             print(f"[CharacterAsset] prompt preset list unavailable: {exc}")
+        # 지금 이 프로파일로 나가면 V5 계열인가(모델을 안 적은 프로파일은 세션 모델을 따른다). 화면이
+        # "이 모드에서는 다른 모델로 나갑니다" 를 말할 근거다 - 캐시에 넣지 않고 내보낼 때마다 판정한다.
+        primary, current = dict(primary), dict(current)
+        presets = [dict(profile) for profile in presets]
+        for profile in (primary, current, *presets):
+            profile["v5"] = self._is_v5_model_key(self._effective_model_key(profile))
         return {"primary": primary, "current": current, "presets": presets}
 
     # CUSTOM 편집 허용 파라미터(사용자 지시 2026-07-17): CFG Scale/CFG Rescale/
@@ -2334,6 +2356,50 @@ class HeadlessCharacterAssetService:
             model,
         ).supports_character_reference
 
+    def _is_v5_model_key(self, model_key: Any) -> bool:
+        """V5 계열 모델인가. 모르는 키는 False(= 예전 사양으로 본다)."""
+        key = str(model_key or "").strip()
+        if not key:
+            return False
+        try:
+            spec = resolve_nai_model_for_context(self.context, key)
+        except Exception:      # noqa: BLE001 - 모르는 키 하나 때문에 벤치가 죽으면 안 된다
+            return False
+        return str(getattr(spec, "payload_profile", "") or "") == "v5"
+
+    def _bench_model_for_mode(self, profile: dict[str, Any], generation_mode: str) -> str:
+        """이 모드로 나갈 모델. 모드가 계열을 정한다(사용자 지정 2026-10-09 - V4.5 모드 / V5 모드).
+
+        고른 프로파일(또는 세션)의 모델이 그 계열이면 그대로 쓰고, 다른 계열이면 그 계열의 기본 모델로 바꾼다.
+        V5 모드의 캔버스 · `split screen` 은 V5 모델에 맞춘 것이고, V4.5 모드의 좁은 마스크 · `2koma` 는 4.5 에
+        맞춘 것이라 섞어 보내면 어느 쪽도 제대로 안 나온다. 빈 문자열 = 바꾸지 않는다(세션 모델 그대로).
+        """
+        key = self._effective_model_key(profile)
+        is_v5 = self._is_v5_model_key(key)
+        if generation_mode == BENCH_V5_MODE:
+            return key if is_v5 else BENCH_V5_FALLBACK_MODEL
+        return BENCH_V45_FALLBACK_MODEL if is_v5 else ""
+
+    @staticmethod
+    def _bench_v5_save_box(source: Any) -> tuple[int, int, int, int]:
+        """V5 결과에서 저장할 자리 `(left, top, right, bottom)`. 보통은 캔버스의 오른쪽 절반이다.
+
+        그 왼쪽 끝이 아직 칸 테두리(위에서 아래까지 내내 검은 세로줄)면 테두리가 끝나는 데까지 민다.
+        """
+        from utils.reference_inpaint_preprocess import trim_panel_border_left
+
+        width, height = source.size
+        return trim_panel_border_left(source, BENCH_V5_SAVE_LEFT), 0, width, height
+
+    @staticmethod
+    def _bench_v5_layout() -> tuple[Any, int]:
+        """V5 모드의 캔버스 규칙과 경계선. 굽는 자리 · 잘라 저장하는 자리가 같은 값을 쓴다."""
+        from utils.reference_inpaint_preprocess import ReferenceInsetPreprocessSpec, reference_inset_box_limits
+
+        spec = ReferenceInsetPreprocessSpec(canvas_width=BENCH_V5_CANVAS[0], canvas_height=BENCH_V5_CANVAS[1])
+        # 인셋 한계에서 가장 넓은 칸 = 그릴 곳이 51% 남는 자리.
+        return spec, int(reference_inset_box_limits(spec)["max_divider"])
+
     def _effective_model_key(self, profile: dict[str, Any]) -> str:
         """모델의 최종 권위 = 프로파일이 덮어쓴 값 우선, 없으면 라이브 세션 값.
 
@@ -2468,17 +2534,25 @@ class HeadlessCharacterAssetService:
             "normalize_reference_strength_multiple": True,
         }
 
-    def _bench_canvas(self, character_id: str) -> tuple[bytes, bytes]:
+    def _bench_canvas(self, character_id: str, generation_mode: str = "inpaint") -> tuple[bytes, bytes]:
         """Build (or reuse) the variation inpaint canvas + NAI small mask for a
         character's primary image. Narrow 512x896 edit rect - keeps NAI from
-        painting a second character into the free area (Dev0714 spec)."""
+        painting a second character into the free area (Dev0714 spec).
+
+        V5 모드(`inpaint_v5`)는 레퍼런스 인셋의 칸 방식으로 굽는다: 1024x1024 · 왼쪽 칸에 원본을 높이에 맞춰
+        가운데 놓고(칸보다 넓은 좌우는 잘린다) · 경계선 오른쪽 전부가 그릴 곳이다.
+        """
         from PIL import Image
 
-        from utils.reference_inpaint_preprocess import prepare_variation_inpaint_canvas
+        from utils.reference_inpaint_preprocess import (
+            default_reference_inset_box,
+            prepare_reference_inpaint_canvas,
+            prepare_variation_inpaint_canvas,
+        )
 
         primary = self.resolve_image_path(character_id)
         try:
-            cache_key = (str(primary), primary.stat().st_mtime_ns)
+            cache_key = (str(primary), primary.stat().st_mtime_ns, generation_mode)
         except OSError as exc:
             raise FileNotFoundError(f"primary image unavailable: {exc}")
         cached = self._bench_canvas_cache.get(cache_key)
@@ -2486,7 +2560,13 @@ class HeadlessCharacterAssetService:
             return cached
         with Image.open(primary) as opened:
             opened.load()
-            result = prepare_variation_inpaint_canvas(opened)
+            if generation_mode == BENCH_V5_MODE:
+                spec, divider = self._bench_v5_layout()
+                fitted = default_reference_inset_box(opened.size, spec)        # 높이에 꽉 채운 크기
+                box = {"x": (divider - fitted["width"]) // 2, "y": fitted["y"], "height": fitted["height"]}
+                result = prepare_reference_inpaint_canvas(opened, spec, box=box, divider=divider)
+            else:
+                result = prepare_variation_inpaint_canvas(opened)
         canvas_buffer = io.BytesIO()
         result.canvas_image.save(canvas_buffer, format="PNG")
         mask_buffer = io.BytesIO()
@@ -2570,7 +2650,9 @@ class HeadlessCharacterAssetService:
         if generation_mode == "char_reference":
             # 게이트 권위 = effective model. 프로파일이 model을 덮으면(PRIMARY/PRESET)
             # 라이브 모델 판정은 무의미하다. 생성 경로와 같은 모델 계약을 사용한다.
-            cr_capable = self._profile_cr_capability(profile, self.context)
+            swapped_model = self._bench_model_for_mode(profile, generation_mode)
+            # V5 모델이 잡혀 있으면 V4.5 모드는 4.5 로 바꿔 보낸다 - 그때는 아래 '4.5 가 아니면 거절' 을 건너뛴다.
+            cr_capable = True if swapped_model else self._profile_cr_capability(profile, self.context)
             if cr_capable is False:
                 forced_model = str((profile.get("params") or {}).get("model") or "")
                 raise ValueError(
@@ -2584,7 +2666,7 @@ class HeadlessCharacterAssetService:
             # TOCTOU 차단(Codex BLOCK): 게이트를 통과한 모델을 요청에 고정한다.
             # 안 그러면 enqueue까지의 모델 전환(4.5->4.0)으로 api_service가 director
             # reference를 조용히 버린 채 과금 생성이 진행된다.
-            frozen_model = self._effective_model_key(profile)
+            frozen_model = swapped_model or self._effective_model_key(profile)
             count_tag = self._count_tag_for(character_prompt)
             reference_type = str(payload.get("reference_type") or "character&style")
             # 기본 S 0.8 / F 0.9 (사용자 지시 2026-07-17)
@@ -2612,6 +2694,31 @@ class HeadlessCharacterAssetService:
             }
 
         count_tag = self._count_tag_for(character_prompt)
+        bench_model = self._bench_model_for_mode(profile, generation_mode)
+        if generation_mode == BENCH_V5_MODE:
+            # V5: 사용자 PREFIX 바로 뒤에 `split screen`(인셋 핀과 같은 자리). MAIN 의 기본값이 그 태그다.
+            composed = ", ".join(
+                part
+                for part in (count_tag, prefix, main_prompt or BENCH_V5_DEFAULT_MAIN_PROMPT, BENCH_SILENT_SCAFFOLD, postfix)
+                if part
+            )
+            canvas_png, mask_png = self._bench_canvas(character_id, BENCH_V5_MODE)
+            v5_spec, _divider = self._bench_v5_layout()
+            return {
+                **common,
+                "model": bench_model,
+                "type": "inpaint",
+                "image_bytes": canvas_png,
+                "mask_bytes": mask_png,
+                "input": composed,
+                "_raw_input": composed,
+                "strength": 1.0,
+                "noise": 0.0,
+                "width": v5_spec.canvas_width,
+                "height": v5_spec.canvas_height,
+                "reference_inset_tag_required": True,
+                "_skip_character_reference_late_binding": True,
+            }
         composed = ", ".join(
             part
             for part in (count_tag, main_prompt or BENCH_DEFAULT_MAIN_PROMPT, prefix, BENCH_SILENT_SCAFFOLD, postfix)
@@ -2621,6 +2728,7 @@ class HeadlessCharacterAssetService:
         spec = VariationInpaintSpec()
         return {
             **common,
+            **({"model": bench_model} if bench_model else {}),
             "type": "inpaint",
             "image_bytes": canvas_png,
             "mask_bytes": mask_png,
@@ -2668,6 +2776,7 @@ class HeadlessCharacterAssetService:
         if str(params.get("character_asset_bench_character") or "") != character_id:
             raise ValueError("bench result belongs to a different character")
         if str(params.get("character_asset_bench_mode") or "inpaint") != "inpaint":
+            # V5 모드 결과(`inpaint_v5`)도 여기서 걸린다 - 그쪽은 그릴 곳을 그대로 저장하므로 Enhance 가 없다.
             raise ValueError("Enhance is for 1/2 Inpaint results only")
 
         spec = VariationInpaintSpec()
@@ -2759,6 +2868,19 @@ class HeadlessCharacterAssetService:
                 self._ensure_current(character_id)
                 path = asset_storage.save_character_variation(
                     character_id, raw_bytes=bytes(raw), root=self.write_root()
+                )
+            elif bench_mode == BENCH_V5_MODE:
+                # V5 모드: 1024x1024 캔버스의 오른쪽 절반(그릴 곳에서 칸 테두리를 뺀 자리)을 **그 크기 그대로** 저장한다.
+                v5_spec, _divider = self._bench_v5_layout()
+                with Image.open(io.BytesIO(bytes(raw))) as source:
+                    source.load()
+                    if source.size != (v5_spec.canvas_width, v5_spec.canvas_height):
+                        raise ValueError("history item is not a V5 variation bench canvas result")
+                    crop = source.crop(self._bench_v5_save_box(source))
+                    png = reencode_with_nai_meta(crop, source, params)
+                self._ensure_current(character_id)
+                path = asset_storage.save_character_variation(
+                    character_id, raw_bytes=png, root=self.write_root()
                 )
             else:
                 spec = VariationInpaintSpec()

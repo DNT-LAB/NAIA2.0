@@ -22805,6 +22805,11 @@ body.detached-module .mod-grid-3 {
 .char-bench-crop img {
   position: absolute; top: 0; left: -112.5%; height: 100%; width: auto; max-width: none;
 }
+/* V5 모드 결과: 1024x1024 캔버스의 오른쪽 절반(512px · 높이 전체) = 저장되는 자리만 보인다.
+   그림은 높이에 맞춰 놓이므로 너비 = 높이, 왼쪽으로 512/512 = 100% 만큼 민다.
+   ⚠️ 512 는 서버의 `BENCH_V5_SAVE_LEFT` 다 - 시험이 이 숫자와 대조한다. */
+.char-bench-fit .char-bench-crop.v5 { height: min(100cqh, calc(100cqw * 1024 / 512)); aspect-ratio: 512 / 1024; }
+.char-bench-crop.v5 img { left: -100.00%; }
 .char-bench-crop.empty { display: flex; align-items: center; justify-content: center; }
 .char-bench-save-row { display: flex; gap: 10px; flex: 0 0 auto; justify-content: center; padding-top: 6px; }
 .char-bench-save-btn { min-width: 200px; font-weight: 700; }
@@ -22824,6 +22829,7 @@ body.detached-module .mod-grid-3 {
   color: var(--text-muted); font-size: 11px;
 }
 .char-bench-thumb .char-bench-crop { aspect-ratio: 4 / 7; width: 100%; height: auto; }
+.char-bench-thumb .char-bench-crop.v5 { aspect-ratio: 512 / 1024; }
 .char-bench-thumb.pending, .char-bench-thumb.error {
   display: flex; align-items: center; justify-content: center; min-height: 170px; cursor: default;
 }
@@ -22842,6 +22848,9 @@ body.detached-module .mod-grid-3 {
 }
 .char-bench-mode-badge.mode-char_reference, .char-asset-var-origin.mode-char_reference { color: #8fd4ff; }
 .char-bench-mode-badge.mode-enhance, .char-asset-var-origin.mode-enhance { color: #a9f0b4; }
+.char-bench-mode-badge.mode-inpaint_v5, .char-asset-var-origin.mode-inpaint_v5 { color: #cfc4ff; }
+/* Generation Mode 둘째 줄(V4.5 모드 안의 1/2 Inpaint | Char Reference). */
+.char-bench-mode-sub { margin-top: 6px; }
 .char-asset-var-origin { top: auto; bottom: 3px; left: 3px; }
 .char-bench-enhance-btn { background: rgba(46, 160, 67, 0.22); }
 @media (max-width: 900px) {

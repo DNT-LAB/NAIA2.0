@@ -42,6 +42,7 @@ export function benchModeBadge(mode, hasReference = false) {
   const base = mode === 'char_reference' ? 'CR'
     : mode === 'enhance' ? 'ENH'
     : mode === 'inpaint' ? 'INP'
+    : mode === 'inpaint_v5' ? 'V5'
     : mode === 'scaffold' ? 'STD'
     : '';
   if (!base) return '';

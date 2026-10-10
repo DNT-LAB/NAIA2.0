@@ -7,6 +7,7 @@ core.headless_character_asset_service; modeled on character_viewer_routes.
 from __future__ import annotations
 
 import io
+import json
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -297,6 +298,197 @@ def register_character_asset_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Reference inset canvas failed: {exc}"}, status_code=500)
         return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/box")
+    async def api_character_asset_inset_box(req: Request):
+        # 핀과 캔버스는 그대로 두고 인셋의 배치만 바꾼다: `divider` = 경계선(왼쪽에 붙은 칸의 너비),
+        # `x · y · height` = 칸 안의 그림 자리와 크기. `{reset: true}` = 기본 배치.
+        payload = await _read_json(req)
+        box = None if payload.get("reset") else {
+            key: payload.get(key) for key in ("x", "y", "height", "divider")
+        }
+        try:
+            state = await run_in_thread(_asset_service(session_context).set_reference_inset_box, box)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset box failed: {exc}"}, status_code=500)
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/upscale")
+    async def api_character_asset_inset_upscale():
+        # 레퍼런스 **원본**을 NAI 업스케일에 한 번 보내 쥐어 두고, 그 뒤로는 거기서 줄여 칸에 놓는다
+        # (키워 놓아도 흐려지지 않는다 · 배치를 바꿔도 다시 부르지 않는다).
+        # Result 의 Upscale 단추와 같은 길 · 같은 계정 규칙이다. ⚠️ Anlas 가 든다.
+        notes: list[str] = []
+
+        def upscaler(png: bytes):
+            from PIL import Image
+
+            from app.backend.server.result_commands import _upscale_token
+
+            if session_context.get_api_mode() != "NAI":
+                raise ValueError("NAI 모드에서만 업스케일할 수 있습니다.")
+            api = getattr(session_context, "api_service", None)
+            if api is None:
+                from core.api_service import APIService
+
+                api = APIService(session_context)
+                session_context.api_service = api
+            result = api.upscale_NAI(None, raw_bytes=png, token=_upscale_token(session_context))
+            if not isinstance(result, dict) or result.get("status") != "success" or not result.get("raw_bytes"):
+                raise RuntimeError(str((result or {}).get("message") or "NAI upscale failed"))
+            notes.append(str(result.get("message") or ""))
+            image = Image.open(io.BytesIO(result["raw_bytes"]))
+            image.load()
+            return image
+
+        try:
+            state = await run_in_thread(_asset_service(session_context).upscale_reference_inset, upscaler)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset upscale failed: {exc}"}, status_code=500)
+        # 쥐고 있던 원본을 다시 쓴 경우에는 NAI 를 부르지 않았다 - 그 사실을 말한다.
+        message = notes[-1] if notes else "업스케일해 둔 원본을 다시 씁니다 (새로 부르지 않았습니다)"
+        return {"ok": True, "message": message, **state}
+
+    @app.post("/api/character-asset/inset/source")
+    async def api_character_asset_inset_source(req: Request):
+        # 인셋 칸의 그림을 붙여넣은 그림으로 덮어쓴다(본문 = 그림 바이트). JSON `{reset: true}` = 에셋의 그림으로.
+        service = _asset_service(session_context)
+        content_type = str(req.headers.get("content-type") or "").lower()
+        try:
+            # 본문은 **어느 꼴이든** 한계까지만 받는다(그림이든 JSON 이든 - Content-Type 은 보내는 쪽이 정한다).
+            limit = int(service.REFERENCE_INSET_SOURCE_MAX_BYTES)
+            try:
+                declared = int(req.headers.get("content-length") or 0)
+            except ValueError:
+                declared = 0
+            if declared > limit:
+                return JSONResponse({"error": "그림이 너무 큽니다(32MB 까지)."}, status_code=413)
+            # 길이를 안 밝힌 본문(chunked)도 있다 - 받으면서 세고, 넘는 순간 그만 받는다. `req.body()` · `req.json()` 은
+            # 전부 메모리에 받은 뒤에야 돌려준다(Codex 리뷰 2026-10-10).
+            chunks: list[bytes] = []
+            received = 0
+            async for chunk in req.stream():
+                received += len(chunk)
+                if received > limit:
+                    return JSONResponse({"error": "그림이 너무 큽니다(32MB 까지)."}, status_code=413)
+                chunks.append(chunk)
+            body = b"".join(chunks)
+            if content_type.startswith("application/json"):
+                try:
+                    payload = json.loads(body.decode("utf-8")) if body else {}
+                except ValueError:      # 깨진 JSON · 깨진 UTF-8(UnicodeDecodeError 도 ValueError 다)
+                    payload = {}
+                if not isinstance(payload, dict) or not payload.get("reset"):
+                    return JSONResponse({"error": "그림은 본문 바이트로 보냅니다."}, status_code=400)
+                state = await run_in_thread(service.set_reference_inset_source, None)
+            else:
+                # `?toggle=` = 화면이 [붙여넣기] 를 누른 순간에 알던 켜고 끄기 차례(그 뒤에 껐으면 켜지 않는다).
+                state = await run_in_thread(
+                    service.set_reference_inset_source, body, req.query_params.get("toggle")
+                )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset source failed: {exc}"}, status_code=500)
+        return await _inset_reply(state)
+
+    @app.get("/api/character-asset/inset/source")
+    async def api_character_asset_inset_source_image(v: str = ""):
+        # 칸에 놓인 그림(붙여넣은 그림이면 그것, 아니면 에셋의 그림). 인셋 창이 이것을 놓아 보여 준다.
+        try:
+            data, media = await run_in_thread(_asset_service(session_context).reference_inset_source_image)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        if not data:
+            return JSONResponse({"error": "no pinned reference inset"}, status_code=404)
+        return Response(content=data, media_type=media, headers=PRIVATE_CACHE_HEADERS)
+
+    @app.post("/api/character-asset/inset/crop")
+    async def api_character_asset_inset_crop(req: Request):
+        # 생성 결과에서 인셋 칸을 잘라 낼 것인가(`{enabled}`) - 이 세션의 설정.
+        payload = await _read_json(req)
+        state = _asset_service(session_context).set_reference_inset_crop_result(payload.get("enabled"))
+        return {"ok": True, "crop_result": bool(payload.get("enabled")) and state.get("crop_result", False), **state}
+
+    async def _inset_reply(state: dict):
+        # 인셋을 켜면서 Character Reference 를 껐으면 그 모듈의 화면도 맞춘다([C1+레퍼런스 인셋] 과 같은 길).
+        if state.get("references_disabled"):
+            try:
+                await broadcast_json(clients, session_context.module_state_payload("character_reference"))
+            except Exception as exc:      # noqa: BLE001 - 방송 실패가 답을 막지 않는다
+                print(f"[CharacterAsset] module state broadcast failed: {exc}")
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/enabled")
+    async def api_character_asset_inset_enabled(req: Request):
+        # 인셋을 켜고 끈다(`{enabled}`). 꺼도 그림 · 배치 · 해상도는 남는다.
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).set_reference_inset_enabled, payload.get("enabled")
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return await _inset_reply(state)
+
+    @app.get("/api/character-asset/inset/storage")
+    async def api_character_asset_inset_storage_list():
+        return await run_in_thread(_asset_service(session_context).reference_inset_storage_list)
+
+    @app.post("/api/character-asset/inset/storage")
+    async def api_character_asset_inset_storage_save():
+        # 지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만).
+        try:
+            state = await run_in_thread(_asset_service(session_context).save_reference_inset_to_storage)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/storage/apply")
+    async def api_character_asset_inset_storage_apply(req: Request):
+        # Storage 의 그림을 칸의 그림으로 쓴다(`{id}`) - 인셋을 켜고 배치는 기본으로.
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).apply_reference_inset_storage, payload.get("id"), payload.get("toggle")
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return await _inset_reply(state)
+
+    @app.delete("/api/character-asset/inset/storage/{item_id}")
+    async def api_character_asset_inset_storage_delete(item_id: str):
+        try:
+            result = await run_in_thread(_asset_service(session_context).delete_reference_inset_storage, item_id)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return {"ok": True, **result}
+
+    @app.get("/api/character-asset/inset/storage/{item_id}/image")
+    async def api_character_asset_inset_storage_image(item_id: str, thumb: str = ""):
+        try:
+            data, media = await run_in_thread(
+                _asset_service(session_context).reference_inset_storage_image, item_id, bool(thumb)
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return Response(content=data, media_type=media, headers=PRIVATE_CACHE_HEADERS)
 
     @app.post("/api/character-asset/inset/unpin")
     async def api_character_asset_inset_unpin():

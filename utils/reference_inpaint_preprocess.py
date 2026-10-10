@@ -40,6 +40,7 @@ Important interpretation:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Iterable, Sequence
@@ -102,13 +103,23 @@ class ReferenceGenerationSpec:
 #
 # ⚠️ 여기가 유일한 목록이다. 화면은 `reference_inset_state()` 가 실어 보내는 이 값을
 #    그려야 한다 - 프런트에 표를 복사하면 한쪽만 고쳐져 서로 다른 말을 하게 된다.
-REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = (
-    # ⚠️ 1088x960 은 뺐다(사용자 지정 2026-08-25) - 인셋이 캔버스의 절반을 넘게
-    #    차지해 생성 영역이 너무 좁았다. 1344x768 은 **남긴다**(사용자 재확인:
-    #    "누군가는 쓰겠죠").
-    (1152, 896),
-    (1216, 832),
-    (1344, 768),
+#
+# 비율(종류)별로 고른다(사용자 지정 2026-10-10: "종류별로 지원 - 1024x1024 · 1280x1280 · 1472x1472 …").
+# 비율마다 세 급이다: **1MP(무료 대역) · Large · Wallpaper**. 값은 NAIA 의 NAI 해상도 밴드 표
+# (`core/resolution_utils.NAI_RESOLUTION_PRESETS` 의 normal · large · wallpaper)에서 같은 비율의 줄을 가져왔다 -
+# 가로로 쓸 수 있는 것만(세로 캔버스는 왼쪽에 칸을 둘 자리가 안 난다). 16:9 의 Large 만 그 표에 없어
+# 같은 넓이대의 64 배수(1664x960)로 채웠다.
+# ⚠️ 1MP 를 넘는 캔버스는 **Anlas 가 든다.** 그래서 금액 표시(`core/nai_anlas_cost.cost_params_for_context`)가
+#    인셋 캔버스를 본다 - 이 목록을 늘릴 때 그 길이 살아 있는지 함께 볼 것.
+# ⚠️ 1088x960 은 뺐다(사용자 지정 2026-08-25) - 세로에 가까워 인셋이 캔버스의 절반을 넘게 차지했다.
+REFERENCE_INSET_CANVAS_KINDS: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
+    ("1:1", ((1024, 1024), (1280, 1280), (1472, 1472))),
+    ("9:7", ((1152, 896), (1408, 1088), (1664, 1280))),
+    ("3:2", ((1216, 832), (1536, 1024), (1728, 1216))),
+    ("16:9", ((1344, 768), (1664, 960), (1920, 1088))),
+)
+REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = tuple(
+    size for _label, sizes in REFERENCE_INSET_CANVAS_KINDS for size in sizes
 )
 DEFAULT_REFERENCE_INSET_CANVAS: tuple[int, int] = (1152, 896)
 
@@ -270,9 +281,15 @@ def build_reference_inpaint_prompt(
 def prepare_reference_inpaint_canvas(
     source_image: Image.Image,
     spec: ReferenceInsetPreprocessSpec | None = None,
+    box: dict | None = None,
+    divider: object = None,
 ) -> ReferenceInsetPreprocessResult:
     """
     Create the left-anchored reference canvas and matching full/small masks.
+
+    ``box``(칸 안의 그림 자리 · 높이) 나 ``divider``(경계선 = 칸의 너비)를 주면 **칸** 방식으로 굽는다
+    (사용자 지정 2026-10-09): 왼쪽 가장자리부터 경계선까지가 칸이고, 그림은 칸 안에서만 보이며, 칸은
+    흰 바탕까지 통째로 보존한다. 둘 다 안 주면 예전 그림 그대로다(높이에 꽉 채우고 그림의 끝이 경계).
 
     Output semantics:
     - canvas_image:
@@ -286,18 +303,33 @@ def prepare_reference_inpaint_canvas(
     spec = spec or ReferenceInsetPreprocessSpec()
     reference = source_image.convert("RGB")
 
-    placement = _resolve_reference_placement(reference.size, spec)
-    resized = reference.resize((placement.width, placement.height), Image.Resampling.LANCZOS)
+    panelled = box is not None or divider is not None
+    if not panelled:
+        placement = _resolve_reference_placement(reference.size, spec)
+    else:
+        divider_px = normalize_reference_inset_divider(divider, reference.size, spec)
+        placed = normalize_reference_inset_box(box, reference.size, spec, divider=divider_px)
+        placement = _panel_placement(placed, divider_px, spec)
 
     canvas = Image.new("RGB", (spec.canvas_width, spec.canvas_height), spec.background_rgb)
-    canvas.paste(resized, (placement.x, placement.y))
+    if panelled:
+        # 그림은 칸 안에서만 보인다 - **보이는 부분만** 줄여(늘려) 놓는다. 통째로 줄인 뒤 자르면 안 된다.
+        visible = _resize_visible_part(reference, placement)
+        if visible is not None:
+            canvas.paste(visible[0], visible[1])
+    else:
+        resized = reference.resize((placement.width, placement.height), Image.Resampling.LANCZOS)
+        canvas.paste(resized, (placement.x, placement.y))
 
     if spec.reference_border_px > 0:
         _draw_reference_border(canvas, placement, spec)
 
-    _draw_seam_edge_line(canvas, placement, spec)
-
-    full_mask = _build_reference_inpaint_mask(placement, spec)
+    if not panelled:
+        _draw_seam_edge_line(canvas, placement, spec)
+        full_mask = _build_reference_inpaint_mask(placement, spec)
+    else:
+        _draw_inner_edge_lines(canvas, placement, spec)
+        full_mask = _build_boxed_inpaint_mask(placement, spec)
     small_mask = _downscale_binary_mask(full_mask, spec.mask_downscale)
 
     recommended = spec.recommended_inpaint_settings()
@@ -491,6 +523,296 @@ def _downscale_binary_mask(full_mask: Image.Image, factor: int) -> Image.Image:
     arr = np.array(small)
     arr = np.where(arr > 127, 255, 0).astype(np.uint8)
     return Image.fromarray(arr, mode="L")
+
+
+# ---------------------------------------------------------------------------
+# 인셋 칸의 너비와 그 안의 그림을 사용자가 정한다(사용자 지정 2026-10-09)
+# ---------------------------------------------------------------------------
+# 예전: 그림을 캔버스 높이에 꽉 채워 왼쪽에 붙였고, 그림의 오른쪽 끝이 곧 경계였다(한 가지뿐).
+# 이제: **칸**(왼쪽 가장자리 ~ 경계선 · 캔버스 높이 전체)과 **그 안의 그림**을 따로 다룬다.
+#   - 경계선을 좌우로 끌어 칸의 너비를 정한다. 칸은 늘 왼쪽에 붙어 있다.
+#   - 칸 안의 그림은 끌어서 옮기고, 휠 · 손잡이로 키우고 줄인다(비율 고정). 경계선 밖으로 나간 부분은 잘린다.
+#   - 칸 안은 그림이 안 덮은 흰 바탕까지 통째로 보존한다. 경계선 안쪽에 예전과 같은 칸 선 · 이음매를 둔다.
+#
+# 경위(같은 날 세 번 바뀌었다 - 되돌리기 전에 읽을 것): 자유롭게 옮기는 박스 → "좌측은 무조건 왼쪽에 고정 ·
+# 사이즈만 · 이동 불가"(그림을 키우면 머리 쪽만 보였다) → "기존 사양처럼 경계선이 필요하고 내부 드래그 가능해야".
+# 그래서 **칸은 왼쪽 고정, 옮기는 것은 칸 안의 그림**이다.
+#
+# ⚠️ 한계 값의 SSOT 는 여기다. 화면은 `reference_inset_state()` 가 실어 보내는 `limits` 로 같은 계산을 한다 -
+#    프런트에 숫자를 복사하면 한쪽만 고쳐져 서로 다른 말을 한다.
+REFERENCE_INSET_BOX_GRID_PX = 8
+REFERENCE_INSET_BOX_MIN_HEIGHT_PX = 192
+# 그림의 이만큼은 언제나 칸 안에 남는다(밖으로 끌어내 잃어버리지 않게).
+REFERENCE_INSET_BOX_MIN_VISIBLE_PX = 64
+# 경계선이 갈 수 있는 범위 = **그릴 곳이 캔버스의 51% ~ 60%**(사용자 지정 2026-10-09). 칸이 절반을 넘으면
+# 생성 영역이 좁아 결과가 나빠지고(1088x960 을 목록에서 뺀 것과 같은 까닭), 너무 좁으면 인셋이 힘을 못 쓴다.
+# ⚠️ **기본 경계에도 건다.** 처음에는 예전과 같은 그림을 지키려고 손대지 않은 기본 경계를 범위 밖에 뒀는데
+#    (1216x832 = 61% · 1344x768 = 67%), 해상도를 바꾸면 조건이 무시되는 것으로 보였다(사용자 제보 2026-10-09).
+#    그래서 예전과 바이트까지 같은 그림이 나가는 것은 예전 배치가 범위 안인 캔버스(1152x896 = 55%)뿐이다.
+REFERENCE_INSET_OPEN_PERCENT_MIN = 51
+REFERENCE_INSET_OPEN_PERCENT_MAX = 60
+# ⚠️ **캔버스 크기와 무관하게 같은 범위다.** 고해상도(1MP 초과)에서만 65% 까지 푼 적이 있는데 사용자가 같은 날 되돌렸다
+#    (2026-10-10: "고해상도라고 봐주는건 없었네요") - 캔버스가 커도 칸이 좁아지면 결과가 나빠진다. 다시 풀지 말 것.
+
+
+def _round_half_up(value: float) -> int:
+    """화면(JS `Math.round`)과 같은 반올림. 파이썬 `round` 는 .5 를 짝수로 보내 1px 씩 어긋난다."""
+    return int(math.floor(value + 0.5))
+
+
+def _finite(value: object, fallback: float) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+    return number if math.isfinite(number) else fallback
+
+
+def reference_inset_box_limits(spec: ReferenceInsetPreprocessSpec | None = None) -> dict[str, float]:
+    spec = spec or ReferenceInsetPreprocessSpec()
+    grid = REFERENCE_INSET_BOX_GRID_PX
+    return {
+        "grid": grid,
+        "min_height": REFERENCE_INSET_BOX_MIN_HEIGHT_PX,
+        # 캔버스보다 크게도 놓는다(얼굴만 크게 걸치기) - 두 배까지.
+        "max_height": spec.canvas_height * 2,
+        "min_visible": REFERENCE_INSET_BOX_MIN_VISIBLE_PX,
+        # 정수로만 센다(0.4 * 1152 같은 소수 곱은 460.79999… 가 되어 격자 한 칸이 갈린다).
+        # 가장 좁은 칸 = 그릴 곳 60% 를 넘지 않게 올림, 가장 넓은 칸 = 그릴 곳 51% 밑으로 안 가게 내림.
+        "min_divider": -(-spec.canvas_width * (100 - REFERENCE_INSET_OPEN_PERCENT_MAX) // (100 * grid)) * grid,
+        "max_divider": spec.canvas_width * (100 - REFERENCE_INSET_OPEN_PERCENT_MIN) // (100 * grid) * grid,
+    }
+
+
+def classic_reference_inset_layout(
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec | None = None,
+) -> tuple[dict[str, int], int]:
+    """예전 배치 그대로: 그림을 캔버스 높이에 꽉 채워 왼쪽에 붙이고, 그림의 오른쪽 끝이 경계다. `(box, divider)`."""
+    placement = _resolve_reference_placement(source_size, spec or ReferenceInsetPreprocessSpec())
+    box = {"x": placement.x, "y": placement.y, "width": placement.width, "height": placement.height}
+    return box, placement.visible_right
+
+
+def default_reference_inset_divider(
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec | None = None,
+) -> int:
+    """기본 경계 = 예전 배치의 경계(그림의 오른쪽 끝)를 **범위 안으로 넣은 것**.
+
+    범위 안이면 예전 값 그대로다(격자에 안 맞춘다 - 그래야 예전과 같은 그림이 나간다).
+    """
+    spec = spec or ReferenceInsetPreprocessSpec()
+    _box, classic = classic_reference_inset_layout(source_size, spec)
+    limits = reference_inset_box_limits(spec)
+    return max(int(limits["min_divider"]), min(int(limits["max_divider"]), classic))
+
+
+def default_reference_inset_box(
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec | None = None,
+) -> dict[str, int]:
+    """기본 그림 자리. [기본값] 이 돌아가는 곳이다.
+
+    예전 배치의 경계가 범위 안이면 예전 자리 그대로(높이에 꽉 채워 왼쪽). 범위에 맞추느라 칸이 넓어지거나
+    좁아졌으면 같은 크기의 그림을 **칸의 가운데**에 놓는다 - 왼쪽에 붙여 두면 넓어진 칸의 오른쪽이 휑하게 비고,
+    좁아진 칸에서는 한쪽만 잘린다.
+    """
+    spec = spec or ReferenceInsetPreprocessSpec()
+    box, classic = classic_reference_inset_layout(source_size, spec)
+    divider = default_reference_inset_divider(source_size, spec)
+    if divider != classic:
+        box = {**box, "x": (divider - box["width"]) // 2}
+    return box
+
+
+# 생성 결과에서 인셋 칸을 잘라 낼 때: 경계선에서 이만큼은 모델이 칸 테두리를 이어 그리는 자리라 함께 버린다
+# (라이브 실측 2026-10-09 · NAID5F: 경계선 오른쪽 10px 이 검정). 더 두껍게 그려졌으면 검은 세로줄이 끝나는
+# 데까지 더 민다.
+REFERENCE_INSET_RESULT_CROP_MARGIN_PX = 16
+REFERENCE_INSET_BORDER_SCAN_PX = 32
+REFERENCE_INSET_BORDER_DARK_MEAN = 40.0
+
+
+def trim_panel_border_left(image: Image.Image, start: int) -> int:
+    """`start` 부터 오른쪽으로 '위아래로 내내 검은 세로줄'(칸 테두리)이 이어지는 동안 민 자리를 돌려준다."""
+    width, _height = image.size
+    left = max(0, min(width - 1, int(start)))
+    luminance = np.asarray(image.convert("L"), dtype=np.float32)
+    for x in range(left, min(width - 1, left + REFERENCE_INSET_BORDER_SCAN_PX)):
+        if float(luminance[:, x].mean()) >= REFERENCE_INSET_BORDER_DARK_MEAN:
+            break
+        left = x + 1
+    return left
+
+
+def reference_inset_result_crop_box(image: Image.Image, divider: int) -> tuple[int, int, int, int]:
+    """생성 결과에서 **그린 부분만** 남기는 자리 `(left, top, right, bottom)` - 인셋 칸과 칸 테두리를 뺀다."""
+    width, height = image.size
+    left = trim_panel_border_left(image, int(divider) + REFERENCE_INSET_RESULT_CROP_MARGIN_PX)
+    return left, 0, width, height
+
+
+def normalize_reference_inset_divider(
+    value: object,
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec | None = None,
+) -> int:
+    """경계선(칸의 너비)을 격자와 한계에 맞춘다. 못 읽으면 기본 경계다.
+
+    기본 경계와 **같은 값**이면 그대로 둔다 - 그래야 손대지 않은 인셋이 예전과 같은 그림으로 나간다.
+    """
+    spec = spec or ReferenceInsetPreprocessSpec()
+    base = default_reference_inset_divider(source_size, spec)
+    wanted = _finite(value, float(base))
+    if wanted == base:
+        return base
+    limits = reference_inset_box_limits(spec)
+    grid = int(limits["grid"])
+    return max(int(limits["min_divider"]), min(int(limits["max_divider"]), _round_half_up(wanted / grid) * grid))
+
+
+def normalize_reference_inset_box(
+    box: object,
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec | None = None,
+    divider: int | None = None,
+) -> dict[str, int]:
+    """칸 안의 그림 자리 · 높이를 한계에 맞춘다. 너비는 받지 않는다 - 원본 비율에서 나온다.
+
+    높이는 격자에, 자리는 1px 에 맞춘다(끄는 대로 따라온다). 그림의 `min_visible` 만큼은 늘 칸 안에 남긴다.
+    못 읽는 값은 기본 배치의 값으로 채운다. 기본 배치를 넣으면 그대로 나온다(멱등).
+    """
+    spec = spec or ReferenceInsetPreprocessSpec()
+    src_w, src_h = max(1, int(source_size[0])), max(1, int(source_size[1]))
+    base = default_reference_inset_box((src_w, src_h), spec)
+    if divider is None:
+        divider = default_reference_inset_divider((src_w, src_h), spec)
+    limits = reference_inset_box_limits(spec)
+    grid = int(limits["grid"])
+    data = box if isinstance(box, dict) else {}
+    wanted = _round_half_up(_finite(data.get("height"), float(base["height"])) / grid) * grid
+    height = max(int(limits["min_height"]), min(int(limits["max_height"]), wanted))
+    scale = height / src_h
+    width = max(1, int(round(src_w * scale)))
+    keep = int(limits["min_visible"])
+    x = max(keep - width, min(int(divider) - keep, _round_half_up(_finite(data.get("x"), float(base["x"])))))
+    y = max(keep - height, min(spec.canvas_height - keep, _round_half_up(_finite(data.get("y"), float(base["y"])))))
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+def reference_inset_open_ratio(divider: int, spec: ReferenceInsetPreprocessSpec | None = None) -> float:
+    """캔버스에서 칸이 **안 덮은** 넓이의 비율(0 ~ 1) - 모델이 그릴 수 있는 곳. 칸은 높이 전체라 너비만 본다."""
+    spec = spec or ReferenceInsetPreprocessSpec()
+    return 1.0 - max(0, min(spec.canvas_width, int(divider))) / float(spec.canvas_width)
+
+
+def _panel_placement(box: dict[str, int], divider: int, spec: ReferenceInsetPreprocessSpec) -> PlacementBox:
+    """그림은 `box` 에 놓이지만, 보존하는 것은 **칸 전체**(왼쪽 가장자리 ~ 경계선 · 높이 전체)다."""
+    return PlacementBox(
+        x=int(box["x"]),
+        y=int(box["y"]),
+        width=int(box["width"]),
+        height=int(box["height"]),
+        visible_left=0,
+        visible_top=0,
+        visible_right=max(1, min(spec.canvas_width, int(divider))),
+        visible_bottom=spec.canvas_height,
+    )
+
+
+def _resize_visible_part(reference: Image.Image, placement: PlacementBox) -> tuple[Image.Image, tuple[int, int]] | None:
+    """칸 안에 보이는 부분만 원본에서 바로 그 크기로 만든다 -> ``(그림, 놓을 자리)``. 보이는 것이 없으면 None.
+
+    ⚠️ 그림을 놓일 크기로 **통째로** 만든 뒤 칸으로 자르면 안 된다. 놓일 크기는 원본의 비율이 정하는데, 가로로 긴
+       그림(예: 4096x16 - 붙여넣기의 한계는 통과한다)은 높이를 맞추는 순간 237568x928 = 2억 2천만 픽셀이 된다
+       (Codex 리뷰 2026-10-10). 여기서는 만드는 그림이 칸보다 커질 수 없다.
+    결과는 통째로 만들어 자른 것과 같은 그림이다 - `resize(box=)` 는 그 영역을 같은 배율로 줄이고, 경계의 필터는
+    영역 밖의 진짜 이웃 픽셀을 읽는다.
+    """
+    left = max(placement.visible_left, placement.x)
+    top = max(placement.visible_top, placement.y)
+    right = min(placement.visible_right, placement.x + placement.width)
+    bottom = min(placement.visible_bottom, placement.y + placement.height)
+    if right <= left or bottom <= top:
+        return None
+    scale_x = reference.width / float(placement.width)
+    scale_y = reference.height / float(placement.height)
+    source_box = (
+        (left - placement.x) * scale_x, (top - placement.y) * scale_y,
+        (right - placement.x) * scale_x, (bottom - placement.y) * scale_y,
+    )
+    part = reference.resize((right - left, bottom - top), Image.Resampling.LANCZOS, box=source_box)
+    return part, (left, top)
+
+
+def _inner_edges(placement: PlacementBox, spec: ReferenceInsetPreprocessSpec) -> tuple[str, ...]:
+    """캔버스 가장자리에 닿지 않은 변 - 그림과 생성 영역이 맞닿는 곳이다. 칸 선과 이음매는 여기에만 둔다."""
+    edges = []
+    if placement.visible_left > 0:
+        edges.append("left")
+    if placement.visible_top > 0:
+        edges.append("top")
+    if placement.visible_right < spec.canvas_width:
+        edges.append("right")
+    if placement.visible_bottom < spec.canvas_height:
+        edges.append("bottom")
+    return tuple(edges)
+
+
+def _edge_band(placement: PlacementBox, edge: str, near: int, far: int) -> tuple[int, int, int, int] | None:
+    """그 변에서 안쪽으로 ``[near, far)`` 만큼 떨어진 띠 ``(left, top, right, bottom)``. 보이는 부분으로 자른다."""
+    left, top = placement.visible_left, placement.visible_top
+    right, bottom = placement.visible_right, placement.visible_bottom
+    if edge == "right":
+        band = (max(left, right - far), top, right - near, bottom)
+    elif edge == "left":
+        band = (left + near, top, min(right, left + far), bottom)
+    elif edge == "bottom":
+        band = (left, max(top, bottom - far), right, bottom - near)
+    else:
+        band = (left, top + near, right, min(bottom, top + far))
+    if band[2] <= band[0] or band[3] <= band[1]:
+        return None
+    return band
+
+
+def _seam_line_distances(spec: ReferenceInsetPreprocessSpec) -> tuple[int, int, int]:
+    """(이음매 띠 폭, 칸 선이 시작하는 거리, 끝나는 거리) - 예전 오른쪽 변의 규칙을 거리로 적은 것."""
+    seam = max(0, spec.seam_overlap_px)
+    line = max(0, spec.seam_edge_line_px)
+    masked = max(0, min(spec.seam_edge_line_masked_px, seam, line))
+    return seam, seam - masked, seam - masked + line
+
+
+def _draw_inner_edge_lines(
+    canvas: Image.Image,
+    placement: PlacementBox,
+    spec: ReferenceInsetPreprocessSpec,
+) -> None:
+    _seam, near, far = _seam_line_distances(spec)
+    if far <= near:
+        return
+    draw = ImageDraw.Draw(canvas)
+    for edge in _inner_edges(placement, spec):
+        band = _edge_band(placement, edge, near, far)
+        if band is not None:
+            draw.rectangle((band[0], band[1], band[2] - 1, band[3] - 1), fill=spec.seam_edge_line_rgb)
+
+
+def _build_boxed_inpaint_mask(placement: PlacementBox, spec: ReferenceInsetPreprocessSpec) -> Image.Image:
+    """인셋의 보이는 부분은 보존, 나머지는 편집. 안쪽 변마다 이음매 띠를 다시 연다(예전 오른쪽 변과 같은 규칙)."""
+    mask = np.full((spec.canvas_height, spec.canvas_width), 255, dtype=np.uint8)
+    if placement.visible_right <= placement.visible_left or placement.visible_bottom <= placement.visible_top:
+        return Image.fromarray(mask, mode="L")
+    mask[placement.visible_top:placement.visible_bottom, placement.visible_left:placement.visible_right] = 0
+    seam, _near, _far = _seam_line_distances(spec)
+    if seam > 0:
+        for edge in _inner_edges(placement, spec):
+            band = _edge_band(placement, edge, 0, seam)
+            if band is not None:
+                mask[band[1]:band[3], band[0]:band[2]] = 255
+    return Image.fromarray(mask, mode="L")
 
 
 # ---------------------------------------------------------------------------

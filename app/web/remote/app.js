@@ -974,22 +974,125 @@ const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=202608
   });
 
 // ---------------------------------------------------------------------------
-// 레퍼런스 인셋 핀 배지 - Result 뷰어 좌상단 고정(캐릭터 에셋 [C1+레퍼런스 인셋]).
-// 핀이 살아 있는 동안 plain 생성이 전부 인셋 인페인트로 나가므로, 항상 보이는 배지 +
-// X 즉시 해제를 제공한다(사용자 계약).
+// 레퍼런스 인셋 - Result 뷰어 왼쪽 위의 **띠**(켜져 있는 동안) + 인셋 창(Fn > 레퍼런스 인셋).
+// 켜져 있는 동안 plain 생성이 전부 인셋 인페인트로 나가므로, 항상 보이는 띠 + x 로 바로 끄기를 준다(사용자 계약).
 //
-// 해상도는 **눌러서 고른다**(사용자 지정 2026-08-25, V5). 예전에는 `1152x896 고정`
-// 이라고만 적혀 있었다. 고를 수 있는 목록은 백엔드가 `sizes` 로 실어 보낸다 - 여기에
-// 표를 복사하면 한쪽만 고쳐져 서로 다른 말을 한다(SSOT = reference_inpaint_preprocess).
+// 끄는 것과 꽂아 둔 것은 따로다(사용자 결정 2026-10-10): x 로 꺼도 그림 · 배치 · 해상도는 서버에 남고,
+// Fn > 레퍼런스 인셋의 스위치로 다시 켠다. 그래서 상태를 둘로 쥔다.
+//   referenceInsetFull  = 서버가 준 상태 그대로(꺼져 있거나 꽂아 둔 것이 없는 상태 포함) - 창이 이것을 본다
+//   referenceInsetState = **켜져 있을 때만** - 띠가 이것을 그린다
+//
+// 해상도는 **눌러서 고른다**(사용자 지정 2026-08-25, V5). 고를 수 있는 목록은 백엔드가 `sizes` 로 실어
+// 보낸다 - 여기에 표를 복사하면 한쪽만 고쳐져 서로 다른 말을 한다(SSOT = reference_inpaint_preprocess).
 let referenceInsetState = null;
+let referenceInsetFull = null;
 let referenceInsetMenuEl = null;
 let referenceInsetMenuDismiss = null;
 let referenceInsetPanelObserver = null;
 let referenceInsetObservedPanel = null;
+let referenceInsetWindow = null;
+// 접힌 캐릭터 퀵 슬롯(`.cq-box`)의 너비 = 퀵 패널의 이 비율. ⚠️ style.css 의 `.cq-box { width: 58% }` 와 짝이다
+// (띠가 그 크기를 따라간다 - 사용자 지정 2026-10-10). 한쪽만 고치면 시험이 잡는다.
+const CQ_COLLAPSED_RATIO = 0.58;
 
+// 마지막으로 받아들인 상태의 차례(서버가 상태마다 `sync_session` · `sync_seq` 를 싣는다).
+let referenceInsetSync = {session: '', seq: -1};
+let referenceInsetRefreshTimers = [];
+
+/** 서버의 인셋 상태를 다시 받는다. `followUp` 이면 몇 번 더 묻는다 - 답을 못 받은 요청은 서버가 **나중에** 끝낼 수 있다
+ *  (창의 `followUp` 과 같은 까닭). 받은 상태는 차례 번호로 가려진다 - 옛것이면 버려진다. */
+function refreshReferenceInsetState({followUp = false} = {}) {
+  const ask = () => fetch('/api/character-asset/inset/state')
+    .then(response => (response.ok ? response.json() : null))
+    .then(state => { if (state) setReferenceInsetBadge(state); })
+    .catch(() => {});
+  ask();
+  if (!followUp) return;
+  referenceInsetRefreshTimers.forEach(timer => clearTimeout(timer));
+  referenceInsetRefreshTimers = [2000, 5000, 15000].map(delay => setTimeout(ask, delay));
+}
+
+/** 서버가 준 인셋 상태를 받아들인다 - 띠 · 창 · 해상도 메뉴가 **전부 이 한 곳**을 지난다.
+ *  ⚠️ 답이 오는 길이 여럿이라(창의 요청 줄 · 띠의 x · 해상도 메뉴 · 에셋 탭) 순서가 뒤바뀔 수 있다. 늦게 온 옛 답을
+ *     그대로 그리면, 방금 x 로 끈 띠가 그 전에 떠난 답 때문에 도로 켜진 것처럼 보인다(서버는 꺼져 있다 - Codex 리뷰
+ *     2026-10-10). 같은 실행(`sync_session`) 안에서 번호가 더 작은 답은 버린다. */
 function setReferenceInsetBadge(state) {
-  referenceInsetState = state && state.active ? state : null;
+  let next = state && typeof state === 'object' ? state : null;
+  if (next && Number.isFinite(next.sync_seq)) {
+    const session = String(next.sync_session || '');
+    if (session === referenceInsetSync.session && next.sync_seq < referenceInsetSync.seq) return;
+    referenceInsetSync = {session, seq: next.sync_seq};
+  }
+  // ⚠️ 인셋의 차례는 같아도 **금액표는 더 옛것일 수 있다**(인셋은 그대로인데 그 사이에 스텝 · 모델이 바뀌었다).
+  //    늦게 온 답을 통째로 받으면 창과 띠 메뉴의 'Anlas 소모' 표시가 옛 기준으로 되돌아간다(Codex 리뷰 7차) -
+  //    쥐고 있는 금액표가 더 새것이면 그것을 지키고, 이 답의 금액은 쓰지 않는다.
+  const heldCost = referenceInsetFull?.nai_cost_rev;
+  const nextCost = next?.nai_cost_rev;
+  if (next && heldCost && nextCost && String(heldCost.session || '') === String(nextCost.session || '')
+      && nextCost.rev < heldCost.rev) {
+    const {nai_anlas_cost: _oldCost, nai_anlas_cost_if_paid: _oldPaid, ...rest} = next;
+    next = {...rest, canvas_costs: referenceInsetFull.canvas_costs, nai_cost_rev: heldCost};
+  }
+  referenceInsetFull = next;
+  referenceInsetState = referenceInsetFull && referenceInsetFull.active ? referenceInsetFull : null;
+  // Generate 옆의 금액도 이 답으로 맞춘다. 인셋이 켜져 있으면 일반 생성이 **인셋 캔버스**로 나가고, 그 캔버스는 1MP 를
+  // 넘을 수 있다(고해상도 - 사용자 지정 2026-10-10). 금액은 평소 파라미터 메시지로만 오므로, 인셋을 켜고 끄거나
+  // 캔버스를 바꾼 직후에는 여기서 안 받으면 옛 금액(또는 "무료")이 남는다.
+  // ⚠️ 금액은 파라미터 메시지로도 온다 - 순서가 뒤바뀔 수 있다. `applyNaiCost` 가 서버의 차례 번호로 옛 금액을 버린다.
+  if (next) applyNaiCost(next);
+  // 유료 판정은 인셋 캔버스를 본다 - 금액을 안 받았어도(옛 백엔드) 켜고 끌 때마다 칩을 다시 맞춘다.
+  updateAnlasPaidIndicator();
   renderReferenceInsetBadge();
+  // 창이 떠 있으면 같은 상태를 본다. 꺼져도 창은 닫히지 않는다 - 거기서 다시 켠다.
+  referenceInsetWindow?.sync(referenceInsetFull);
+}
+
+/** 레퍼런스 인셋 창(사용자 지정 2026-10-09 · 10-10 개편). Fn > 레퍼런스 인셋 · 띠의 이름을 누르면 뜬다.
+ *  **꽂아 둔 것이 없어도 열린다** - 거기서 그림을 붙여넣거나 Storage 에서 꺼낸다. 처음 열 때만 읽어 온다. */
+async function openReferenceInsetWindow() {
+  closeReferenceInsetMenu();
+  // 상태를 아직 못 받았으면(접속 직후 · 받다가 실패) 지금 받는다.
+  if (!referenceInsetFull) {
+    try {
+      const response = await fetch('/api/character-asset/inset/state');
+      if (response.ok) setReferenceInsetBadge(await response.json());
+    } catch (_error) { /* 아래에서 말한다 */ }
+  }
+  if (!referenceInsetFull) {
+    showToast('레퍼런스 인셋의 상태를 받지 못했습니다', 'error');
+    return;
+  }
+  // 재시작 전의 옛 백엔드는 `configured` 를 모르거나(그림 없이 여는 길 · Storage 가 없다) 배치(`box` · `divider`)를
+  // 안 실어 보낸다 - 창을 띄우면 누르는 것마다 실패하니 띄우지 않고 까닭을 말한다.
+  const usable = 'configured' in referenceInsetFull && (!referenceInsetFull.configured
+    || (referenceInsetFull.box && referenceInsetFull.limits && referenceInsetFull.divider > 0));
+  if (!usable) {
+    showToast('레퍼런스 인셋 창을 쓰려면 앱을 다시 시작해 주세요', 'warning');
+    return;
+  }
+  if (!referenceInsetWindow) {
+    try {
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261010-inset17');
+      referenceInsetWindow = createReferenceInsetWindow({
+        document, window, fetch: window.fetch.bind(window), escHtml, showToast,
+        onState: state => setReferenceInsetBadge(state),
+        // [붙여넣기] - 클립보드를 읽어 **이 창으로만** 넘긴다. 받는 쪽을 지목한 붙여넣기라 앱의 평소 붙여넣기
+        // (이미지 동작 팝업 · 인페인트 레이어)로 가지 않는다. ⚠️ Ctrl+V 는 이리로 오지 않는다(회수 - 사용자 결정).
+        requestPaste: () => {
+          if (!resultImageInput) { showToast('Image input is not ready', 'error'); return; }
+          resultImageInput.pasteFromClipboard({
+            label: 'Reference Inset',
+            onImageBlob: blob => { referenceInsetWindow?.acceptPastedImage?.(blob); },
+          });
+        },
+      });
+    } catch (error) {
+      console.error('Failed to load the reference inset window', error);
+      showToast('인셋 창을 열지 못했습니다', 'error');
+      return;
+    }
+  }
+  referenceInsetWindow.open(referenceInsetFull);
 }
 
 function syncReferenceInsetWithCharRef(m) {
@@ -1002,8 +1105,9 @@ function syncReferenceInsetWithCharRef(m) {
     .then(response => (response.ok ? response.json() : null))
     .then(state => {
       if (state && state.active) return;
-      setReferenceInsetBadge(null);
-      showToast('Character Reference 활성화로 레퍼런스 인셋이 해제되었습니다', 'warning');
+      // 꺼졌을 뿐이다 - 꽂아 둔 그림 · 배치는 남아 있다(창이 그 상태를 본다).
+      setReferenceInsetBadge(state);
+      showToast('Character Reference 를 켜서 레퍼런스 인셋이 꺼졌습니다 (그림과 배치는 남아 있습니다)', 'warning');
     })
     .catch(() => {});
 }
@@ -1017,40 +1121,56 @@ function renderReferenceInsetBadge() {
     badge?.remove();
     return;
   }
-  const characterId = String(referenceInsetState.character_id || '');
-  const variation = String(referenceInsetState.variation || '');
-  const thumb = `/api/character-asset/thumb?id=${encodeURIComponent(characterId)}`
-    + (variation ? `&variation=${encodeURIComponent(variation)}` : '') + '&size=grid';
   if (!badge) {
     badge = document.createElement('div');
     badge.id = 'referenceInsetBadge';
     badge.className = 'reference-inset-badge';
     viewer.appendChild(badge);
   }
+  // 띠 한 줄이다(사용자 지정 2026-10-10): 접힌 캐릭터 퀵 슬롯과 같은 크기 · 그림 미리보기 없음 · 해상도를 보여 준다.
+  // 이름은 '인셋' 두 글자다 - '레퍼런스 인셋' 은 해상도가 아홉 글자(1472x1472)가 되면 197px 띠에서 잘렸다(실측).
+  // 예전의 썸네일 달린 96px 배지는 결과 그림을 가렸다. 그림은 이름을 눌러 창에서 본다.
   const width = Number(referenceInsetState.width) || 0;
   const height = Number(referenceInsetState.height) || 0;
   const sizeText = width && height ? `${width}x${height}` : '크기 미상';
+  // 이 캔버스가 Anlas 를 무는가(1MP 초과 등) - 해상도 글자의 색으로 알린다. 금액은 메뉴와 Generate 옆에 있다.
+  const paid = (Number(referenceInsetState.canvas_costs?.[sizeText]) || 0) > 0;
   badge.innerHTML = `
-    <img src="${thumb}" alt="레퍼런스 인셋 핀">
-    <button type="button" class="reference-inset-badge-x" aria-label="레퍼런스 인셋 해제">x</button>
-    <button type="button" class="reference-inset-badge-label" aria-haspopup="listbox"
-            aria-expanded="false" data-naia-title="눌러서 인셋 해상도를 고릅니다">레퍼런스 인셋<br>${
-      escHtml(sizeText)} <span aria-hidden="true">&#9662;</span></button>`;
+    <button type="button" class="reference-inset-badge-open"
+            data-naia-title="레퍼런스 인셋이 켜져 있습니다 - 눌러서 창을 엽니다 (그림 · 배치 · 켜고 끄기)"
+            ><span class="reference-inset-badge-mark" aria-hidden="true"></span><span
+            class="reference-inset-badge-name">인셋</span></button>
+    <button type="button" class="reference-inset-badge-label${paid ? ' is-paid' : ''}" aria-haspopup="listbox"
+            aria-expanded="false" data-naia-title="눌러서 인셋 해상도를 고릅니다${
+              paid ? ' (이 해상도는 Anlas 를 소모합니다)' : ''}">${
+      escHtml(sizeText)} <span aria-hidden="true">&#9662;</span></button>
+    <button type="button" class="reference-inset-badge-x" aria-label="레퍼런스 인셋 끄기"
+            data-naia-title="레퍼런스 인셋을 끕니다 - 그림과 배치는 남아 있습니다 (Fn > 레퍼런스 인셋에서 다시 켭니다)"
+            >&times;</button>`;
   badge.querySelector('.reference-inset-badge-label').onclick = event => {
     event.stopPropagation();
     toggleReferenceInsetMenu(event.currentTarget);
   };
+  badge.querySelector('.reference-inset-badge-open').onclick = () => openReferenceInsetWindow();
   watchQuickPanelForInsetBadge();
   positionReferenceInsetBadge();
   badge.querySelector('.reference-inset-badge-x').onclick = async () => {
     closeReferenceInsetMenu();
+    // 끄기만 한다. 끈 뒤의 상태(꽂아 둔 것은 남아 있다)를 다시 받아 창과 맞춘다.
+    let state = null;
     try {
       await fetch('/api/character-asset/inset/unpin', {method: 'POST'});
+      const response = await fetch('/api/character-asset/inset/state');
+      state = response.ok ? await response.json() : null;
     } catch (error) {
-      console.error('reference inset unpin failed', error);
+      console.error('reference inset off failed', error);
     }
-    setReferenceInsetBadge(null);
-    showToast('레퍼런스 인셋 핀 해제됨 - 일반 생성으로 복귀합니다', 'success');
+    if (!state || state.active) {
+      showToast('레퍼런스 인셋을 끄지 못했습니다', 'error');
+      return;
+    }
+    setReferenceInsetBadge(state);
+    showToast('레퍼런스 인셋을 껐습니다 - 일반 생성으로 나갑니다 (Fn > 레퍼런스 인셋에서 다시 켭니다)', 'success');
   };
 }
 
@@ -1074,10 +1194,13 @@ function positionReferenceInsetBadge() {
   if (!viewer || !panelBox || panelBox.height <= 0) {
     badge.style.top = '';
     badge.style.left = '';
+    badge.style.width = '';
     return;
   }
+  // 접힌 퀵 슬롯과 같은 너비로(사용자 지정 2026-10-10). 패널이 없을 때의 너비는 CSS 가 같은 식으로 정한다.
+  badge.style.width = `${Math.round(panelBox.width * CQ_COLLAPSED_RATIO)}px`;
   const viewerBox = viewer.getBoundingClientRect();
-  const gap = 10;
+  const gap = 6;
   let top = panelBox.bottom - viewerBox.top + gap;
   // 패널이 아주 길면 배지가 뷰어 밖으로 나간다 - 바닥 안쪽으로 물린다.
   const room = viewerBox.height - badge.offsetHeight - gap;
@@ -1125,15 +1248,23 @@ function toggleReferenceInsetMenu(button) {
   referenceInsetMenuEl = document.createElement('div');
   referenceInsetMenuEl.className = 'cq-connect-menu reference-inset-menu';
   referenceInsetMenuEl.setAttribute('role', 'listbox');
+  // 비율(종류)별로 묶어 보인다(사용자 지정 2026-10-10). 묶음 · 금액은 서버가 실어 보낸다 - 옛 백엔드면 한 묶음이다.
+  const groups = Array.isArray(referenceInsetState.size_groups) && referenceInsetState.size_groups.length
+    ? referenceInsetState.size_groups : [{label: '', sizes}];
+  const costs = referenceInsetState.canvas_costs || {};
   referenceInsetMenuEl.innerHTML = '<div class="cq-connect-menu-head">인셋 해상도</div>'
-    + sizes.map(pair => {
-      const w = Number(pair[0]) || 0;
-      const h = Number(pair[1]) || 0;
-      const on = `${w}x${h}` === current;
-      return `<button type="button" class="cq-connect-item${on ? ' is-on' : ''}" role="option"
-              aria-selected="${on ? 'true' : 'false'}" data-inset-w="${w}" data-inset-h="${h}"
-              ><b>${w} x ${h}</b></button>`;
-    }).join('');
+    + groups.map(group => (group.label
+      ? `<div class="reference-inset-menu-kind">${escHtml(group.label)}</div>` : '')
+      + (Array.isArray(group.sizes) ? group.sizes : []).map(pair => {
+        const w = Number(pair[0]) || 0;
+        const h = Number(pair[1]) || 0;
+        const on = `${w}x${h}` === current;
+        const price = Number(costs[`${w}x${h}`]) || 0;
+        return `<button type="button" class="cq-connect-item${on ? ' is-on' : ''}" role="option"
+                aria-selected="${on ? 'true' : 'false'}" data-inset-w="${w}" data-inset-h="${h}"
+                ><b>${w} x ${h}</b>${price > 0
+                  ? '<span class="reference-inset-menu-cost">Anlas 소모</span>' : ''}</button>`;
+      }).join('')).join('');
   document.body.appendChild(referenceInsetMenuEl);
   button.setAttribute('aria-expanded', 'true');
 
@@ -1160,7 +1291,9 @@ function toggleReferenceInsetMenu(button) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({width: w, height: h}),
       });
-      const data = await response.json().catch(() => null);
+      let bodyLost = false;
+      const data = await response.json().catch(() => { bodyLost = true; return null; });
+      if (response.ok && bodyLost) throw new Error('response body lost');      // 아래: 결과를 모른다
       if (!response.ok || !data || data.error) {
         showToast(`인셋 해상도를 바꾸지 못했습니다: ${data?.error || response.status}`, 'error');
         return;
@@ -1168,7 +1301,10 @@ function toggleReferenceInsetMenu(button) {
       setReferenceInsetBadge(data);
       showToast(`인셋 해상도 ${w} x ${h}`, 'success');
     } catch (error) {
-      showToast('인셋 해상도를 바꾸지 못했습니다', 'error');
+      // 답을 못 받았다(끊김 · 본문 유실) - 서버는 **바꿨을 수 있다**. '못 바꿨다' 고 단정하고 옛 해상도 · 옛 금액을
+      // 두면, 유료 캔버스로 바뀌었는데 화면은 무료로 남는다(Codex 리뷰 5차). 서버 상태를 다시 받아 맞춘다.
+      showToast('인셋 해상도의 답을 받지 못했습니다 - 서버 상태로 다시 맞춥니다', 'warning');
+      refreshReferenceInsetState({followUp: true});
     }
   });
 
@@ -1626,6 +1762,8 @@ const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20261
       onInternalDrop: info => callResultImageAction('handleInternalImageDrop', info) || false,
       // 인페인트 캔버스가 열려 있으면 붙여넣은 이미지는 새 레이어로 간다(사용자 지정 2026-10-03).
       // 세션이 없으면 false 가 돌아와 예전처럼 이미지 동작 팝업이 뜬다.
+      // ⚠️ 레퍼런스 인셋 창은 여기에 물리지 않는다 - 창이 떠 있는 동안 Ctrl+V 를 가로채던 것은 회수했다
+      //    (사용자 결정 2026-10-10). 그 창은 자기 [붙여넣기] 단추로만 받는다.
       onPasteImageBlob: (blob, label) => inpaintCanvasControl?.acceptPastedImage?.(blob, label) === true,
     });
     resultImageInput.bind();
@@ -1877,7 +2015,8 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
           onPromptEdit();
         }
       },
-      onActiveChange: applyInteractiveModeGate,
+      // Interactive 를 켜고 끄면 Generate 가 나가는 길이 바뀐다(인셋이 주입되는가) - 금액 칩도 다시 맞춘다.
+      onActiveChange: isActive => { applyInteractiveModeGate(isActive); updateAnlasPaidIndicator(); },
       // 캐릭터 스택(Assets 바)이 현재 슬롯 목록을 따라간다.
       onRosterChange: rosterRows => {
         if (interactiveAssetsPanel) interactiveAssetsPanel.setRoster(rosterRows);
@@ -5804,8 +5943,16 @@ function updateParams(m) {
       !!m.nai_resolution_preset_enabled,
       String(m.nai_resolution_preset || 'normal'));
   }
-  if ('nai_anlas_cost' in m) naiAnlasCost = Number(m.nai_anlas_cost) || 0;
-  if ('nai_anlas_cost_if_paid' in m) naiAnlasCostIfPaid = Number(m.nai_anlas_cost_if_paid) || 0;
+  // 금액은 레퍼런스 인셋의 상태(HTTP)로도 온다 - 서버의 차례 번호로 옛 금액을 버린다(`applyNaiCost`).
+  applyNaiCost(m);
+  // 모델 · 스텝이 바뀌면 인셋 창과 띠 메뉴의 **크기별 금액**(`canvas_costs`)도 옛것이 된다 - 인셋이 꽂혀 있고 그 상태가
+  // 이 메시지보다 앞선 차례의 것이면 다시 받는다(받은 상태는 같은 차례라 한 번으로 끝난다).
+  const costRev = m.nai_cost_rev;
+  const insetRev = referenceInsetFull?.nai_cost_rev;
+  if (referenceInsetFull?.configured && costRev && insetRev
+      && String(costRev.session || '') === String(insetRev.session || '') && costRev.rev > insetRev.rev) {
+    refreshReferenceInsetState();
+  }
   if (m.nai_free_limits) {
     const steps = Number(m.nai_free_limits.steps);
     const pixels = Number(m.nai_free_limits.pixels);
@@ -8377,6 +8524,8 @@ const FN_QUICK_ITEMS = [
   {key: 'v5scene', icon: '🎬', label: 'V5 Scene', tab: 'v5scene', run: () => openFnV5Scene()},
   // Translate 는 탭이 아니라 팝업이다 - `tab` 이 비어 있으면 활성 표시를 하지 않는다.
   {key: 'translate', icon: 'あ', label: 'Translate', tab: '', run: () => openTranslatorPopup()},
+  // 레퍼런스 인셋도 탭이 아니라 떠 있는 창이다(사용자 지정 2026-10-10).
+  {key: 'refinset', icon: '◧', label: '레퍼런스 인셋', tab: '', run: () => openFnReferenceInset()},
 ];
 let fnQuickKey = (() => {
   try { return String(localStorage.getItem(FN_QUICK_STORE) || ''); } catch (_) { return ''; }
@@ -8458,6 +8607,13 @@ function openFnV5Scene() {
   // 열 때마다 목록을 다시 받는다 - 다른 창에서 담은 씬이 있을 수 있고, 썸네일
   // 리비전도 그때 갱신된다.
   v5SceneReady.then(() => v5SceneControl?.onOpen());
+}
+
+/** Fn > 레퍼런스 인셋. 꽂아 둔 것이 없어도 창이 열린다 - 거기서 그림을 넣고 켠다. */
+function openFnReferenceInset() {
+  closeFnMenu();
+  rememberFnQuick('refinset');
+  openReferenceInsetWindow();
 }
 
 // Snapshot 의 입구는 Tools & Assistants 제목 옆의 단추다(사용자 지정 2026-10-04 - Fn 메뉴에서 옮겼다).
@@ -10645,6 +10801,36 @@ let naiFreeLimits = {steps: 28, pixels: 1024 * 1024};
 let naiAnlasCost = 0;
 // 무료 풀이 마른 뒤의 가격(무료 대역이어도 값이 있다).
 let naiAnlasCostIfPaid = 0;
+// 마지막으로 받아들인 금액의 차례(서버가 금액마다 `nai_cost_rev` = `{session, rev}` 를 붙인다 - 금액이 달라질 때마다 +1).
+let naiCostRev = {session: '', rev: -1};
+// 레퍼런스 인셋으로 나가는 요청의 금액(서버의 `nai_inset_cost` - 인셋이 꺼져 있으면 null). 위의 `naiAnlasCost` 는 인셋
+// **없이** 나가는 요청의 금액이다. 어느 쪽을 보일지는 `naiEffectiveAnlasCost` 가 실제로 나갈 길로 고른다.
+let naiInsetCost = null;
+let naiInsetCostIfPaid = null;
+
+/** 서버가 준 금액(`nai_anlas_cost` · `nai_anlas_cost_if_paid`)을 받아들인다. 받았으면 true.
+ *
+ *  ⚠️ 금액이 오는 길이 여럿이다 - 파라미터 메시지(WS)와 레퍼런스 인셋의 상태(HTTP). 길이 다르면 순서가 뒤바뀐다:
+ *     스텝이나 해상도를 바꿔 새 금액을 받은 뒤에 그 전에 계산된 답이 늦게 오면 옛 금액이 덮는다(유료인데 칩이
+ *     사라졌다 - Codex 리뷰 2026-10-10). 같은 실행(`session`) 안에서 **차례가 더 낮은 금액은 버린다.**
+ *     차례가 없는 메시지(옛 백엔드 · 인페인트 세션의 상태)는 예전처럼 받는다. */
+function applyNaiCost(m) {
+  if (!m || !('nai_anlas_cost' in m)) return false;
+  const stamp = m.nai_cost_rev;
+  if (stamp && Number.isFinite(stamp.rev)) {
+    const session = String(stamp.session || '');
+    if (session === naiCostRev.session && stamp.rev < naiCostRev.rev) return false;
+    naiCostRev = {session, rev: stamp.rev};
+  }
+  naiAnlasCost = Number(m.nai_anlas_cost) || 0;
+  if ('nai_anlas_cost_if_paid' in m) naiAnlasCostIfPaid = Number(m.nai_anlas_cost_if_paid) || 0;
+  if ('nai_inset_cost' in m) {
+    const known = m.nai_inset_cost !== null && m.nai_inset_cost !== undefined;
+    naiInsetCost = known ? Number(m.nai_inset_cost) || 0 : null;
+    naiInsetCostIfPaid = known ? Number(m.nai_inset_cost_if_paid) || 0 : null;
+  }
+  return true;
+}
 // **이번 생성이 쓸 계정들의 무료 풀이 말랐는가.** 백엔드의 `generation_quota_exhausted`
 // 판정을 그대로 받는다 - 화면에서 `percent <= 0` 으로 흉내 내면 지목 계정·미확인
 // 캐시에서 판정이 갈라져, 돈 가드와 경고가 서로 다른 말을 한다.
@@ -10652,6 +10838,12 @@ let naiQuotaExhausted = false;
 
 /** 지금 화면에 띄울 금액. 무료 풀이 말랐으면 무료 대역도 값이 있다. */
 function naiEffectiveAnlasCost() {
+  // ⚠️ 금액은 두 벌이다 - **실제로 나갈 길**의 것을 쓴다. 레퍼런스 인셋으로 나가는 생성이면 인셋 캔버스의 금액,
+  //    아니면(프리셋 · 시퀀스 탭 · Interactive · 인페인트 세션 · 인셋 꺼짐) 인셋 없이 나가는 요청의 금액이다.
+  //    한 벌로 쓰면 어느 한쪽이 틀린다: 무료 인셋을 켠 채 유료 해상도로 프리셋 생성을 하면 0 이 떴다(Codex 리뷰 8차).
+  if (generationGoesThroughInset() && naiInsetCost !== null) {
+    return naiQuotaExhausted ? naiInsetCostIfPaid : naiInsetCost;
+  }
   return naiQuotaExhausted ? naiAnlasCostIfPaid : naiAnlasCost;
 }
 
@@ -10681,9 +10873,15 @@ function naiGenerationCostsAnlas() {
   //    이걸 안 보면 도크에서 Wallpaper 를 골라 놓고도 Params 탭이 무료 대역이라
   //    금액 칩이 안 뜬다 - 실제로는 Anlas 가 나간다(실측 2026-08-28).
   const session = moduleStateCache.get('img2img');
+  // ⚠️ **레퍼런스 인셋이 켜져 있으면** 일반 생성은 Params 탭 해상도도 Rnd Res 의 추첨도 아닌 **인셋 캔버스**로 나간다.
+  //    그 캔버스는 1MP 를 넘을 수 있다(고해상도 캔버스 - 사용자 지정 2026-10-10). 여기서 안 보면 백엔드가 금액을
+  //    실어 보내도 칩이 안 뜬다(라이브 실측: 금액 42 인데 '무료' 판정). 반대로 Params 가 큰 해상도여도 인셋 캔버스가
+  //    1MP 이하면 무료다. (인페인트 세션이 열려 있으면 인셋은 주입되지 않는다 - 세션 캔버스가 먼저다.)
+  const inset = (generationGoesThroughInset() && referenceInsetState.width && referenceInsetState.height)
+    ? [`${referenceInsetState.width} x ${referenceInsetState.height}`] : null;
   const candidates = (session?.active && session.width && session.height)
     ? [`${session.width} x ${session.height}`]
-    : (randomOn && paramEls.resolution
+    : inset || (randomOn && paramEls.resolution
       ? Array.from(paramEls.resolution.options || []).map(o => o.value)
       : [paramEls.resolution?.value || qResolution?.value || '']);
   return candidates.some(text => {
@@ -10702,6 +10900,28 @@ function naiGenerationCostsAnlas() {
  *  ⚠️ 칩은 라벨 **뒤**에 온다. 인페인트 잠금이 라벨을 "맨 뒤 텍스트 노드" 로 찾는데
  *     (`applyInpaintSessionLock`), 칩은 element 라 그 탐색에 안 걸린다.
  */
+/** Generate 의 금액 칩에 적을 글. 보통은 추정 금액(`27 Anlas`)이다.
+ *  ⚠️ **레퍼런스 인셋으로 나가는 생성은 숫자 없이 'Anlas 소모' 라고만 적는다**(사용자 지정 2026-10-10: "Anlas 소모량은
+ *     불명확하니 모두 'Anlas 소모' 로 대체"). 추정식은 일반 생성을 웹에서 잰 것이라, 인셋 인페인트의 실제 청구와 다를 수
+ *     있다. 인페인트 세션이 열려 있으면 인셋은 주입되지 않는다 - 그때는 예전처럼 숫자다. */
+function genCostChipText(cost) {
+  return generationGoesThroughInset() ? 'Anlas 소모' : `${cost.toLocaleString()} Anlas`;
+}
+
+/** 지금 [Generate] 를 누르면 **레퍼런스 인셋으로 나가는가.** 서버가 인셋을 주입하는 조건과 맞춘다
+ *  (`HeadlessImageModuleParamService._apply_reference_inset_pin`): 인셋이 켜져 있고 · 인페인트 세션이 없고 ·
+ *  **일반 생성**일 때다. 프리셋 · 시퀀스 · I.Sequence 탭의 Generate 는 자기 요청(특수 요청)을 보내 인셋이 주입되지
+ *  않는다 - 거기서 'Anlas 소모' 라고 적거나 인셋 캔버스로 유료를 판정하면 틀린다(Codex 리뷰 7차).
+ *  ⚠️ 탭 목록은 `canQueueGenerate` 의 것과 같다 - Generate 가 자기 흐름을 타는 탭들이다. */
+function generationGoesThroughInset() {
+  if (!referenceInsetState) return false;
+  if (moduleStateCache.get('img2img')?.active) return false;
+  // Interactive 가 켜져 있으면 일반 탭의 Generate 도 `interactive_mode_request` 를 달고 나간다 - 특수 요청이라 인셋이
+  // 주입되지 않는다(Codex 리뷰 8차: 화면만 인셋으로 나간다고 보고 '무료' 로 판정했다).
+  if (interactivePanel?.isActive?.()) return false;
+  return !['preset', 'sequence', 'isequence'].includes(activePromptTab);
+}
+
 function genButtonHtml(label) {
   const cost = naiEffectiveAnlasCost();
   const show = naiGenerationCostsAnlas() && cost > 0;
@@ -10711,7 +10931,7 @@ function genButtonHtml(label) {
   const waiting = queuePending > 0 ? ` +${queuePending}` : '';
   const times = queuePending > 0 ? ` ×${queuePending}` : '';   // 도는 장은 이미 나갔다 - 남은 것만
   const chip = show
-    ? `<span class="gen-cost-chip">${escHtml(cost.toLocaleString())} Anlas${escHtml(times)}</span>`
+    ? `<span class="gen-cost-chip">${escHtml(genCostChipText(cost))}${escHtml(times)}</span>`
     : '';
   return `<span class="shortcut-hint">CTRL + ENTER</span>${escHtml(label)}${escHtml(waiting)}${chip}`;
 }
@@ -10742,7 +10962,7 @@ function syncGenCostChip() {
     chip.className = 'gen-cost-chip';
     btnGen.appendChild(chip);
   }
-  chip.textContent = `${cost.toLocaleString()} Anlas`;
+  chip.textContent = genCostChipText(cost);
 }
 
 function updateAnlasPaidIndicator() {
@@ -12471,8 +12691,9 @@ function onModuleState(m) {
     //    페이로드로만 갱신되는데 캔버스 해상도는 이 메시지로 바뀐다 - 여기서 값을
     //    받아 다시 그리지 않으면, 유료권(Large/Wallpaper)으로 바꿔 놓고도 화면이
     //    옛 금액을 말하거나 아예 "무료" 로 보인다(실측 2026-08-28).
-    if ('nai_anlas_cost' in m) naiAnlasCost = Number(m.nai_anlas_cost) || 0;
-    if ('nai_anlas_cost_if_paid' in m) naiAnlasCostIfPaid = Number(m.nai_anlas_cost_if_paid) || 0;
+    //    금액은 다른 길로도 온다(파라미터 메시지 · 레퍼런스 인셋의 상태) - 같은 문(`applyNaiCost`)으로 받아 서버의
+    //    차례 번호로 옛 금액을 버린다. 여기서만 바로 적으면 늦게 온 옛 답이 방금 받은 금액을 덮는다.
+    applyNaiCost(m);
     updateAnlasPaidIndicator();
     // 가상 캐릭터 프롬프트: 세션이 살아 있으면 퀵 패널이 **세션 캐릭터**를 그린다.
     // 세션이 끝나면 원래 캐릭터 모듈 상태로 돌아간다.

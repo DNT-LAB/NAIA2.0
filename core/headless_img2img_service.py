@@ -569,16 +569,14 @@ class HeadlessImg2ImgService:
         보고 **캔버스 해상도 + 유료 표식**을 세워 준다.
         """
         try:
-            if str(self.context.get_api_mode() or "").upper() != "NAI":
-                return {"nai_anlas_cost": 0, "nai_anlas_cost_if_paid": 0}
-            from core.nai_anlas_cost import cost_params_for_context, estimate_anlas_cost
+            from core.nai_anlas_cost import cost_snapshot_for_context
 
-            params = cost_params_for_context(self.context)
-            return {
-                "nai_anlas_cost": estimate_anlas_cost(self.context, params),
-                "nai_anlas_cost_if_paid": estimate_anlas_cost(
-                    self.context, params, ignore_free=True),
-            }
+            # 금액과 **그 차례**(`nai_cost_rev`)를 함께 싣는다. 금액은 파라미터 메시지 · 레퍼런스 인셋의 상태로도 화면에
+            # 가고, 화면은 차례가 낮은 금액을 버린다 - 이 길만 번호가 없으면 늦게 온 옛 답이 방금 실은 금액을 덮는다
+            # (Codex 리뷰 2026-10-10). NAI 가 아니면 0 이다.
+            snapshot = cost_snapshot_for_context(self.context)
+            snapshot.pop("params", None)
+            return snapshot
         except Exception as exc:   # noqa: BLE001 - 금액 표시가 세션을 죽이면 안 된다
             print(f"[warn] inpaint anlas estimate failed: {ascii(exc)}", flush=True)
             return {}
@@ -587,7 +585,10 @@ class HeadlessImg2ImgService:
         context = self.context
         state = context.img2img_session if isinstance(context.img2img_session, dict) else {}
         if not state.get("active"):
-            payload = context._module_state_payload("img2img", {"active": False})
+            # ⚠️ 세션이 끝난 상태도 금액을 싣는다. 끝나면 Generate 는 다시 일반 생성으로 나가는데(레퍼런스 인셋이 켜져
+            #    있으면 그 캔버스로), 여기서 안 실으면 세션 때의 금액이 화면에 남는다 - 유료 인셋을 켠 채 무료 세션을
+            #    열었다 닫으면 0 이 남았다(Codex 리뷰 2026-10-10).
+            payload = context._module_state_payload("img2img", {"active": False, **self._anlas_cost_fields()})
             if extra:
                 payload.update(extra)
             return payload

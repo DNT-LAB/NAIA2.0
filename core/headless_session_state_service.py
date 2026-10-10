@@ -7,7 +7,7 @@ from typing import Any
 import re
 
 from core.headless_remote_state_service import HeadlessRemoteStateService
-from core.nai_anlas_cost import cost_params_for_context, estimate_anlas_cost
+from core.nai_anlas_cost import cost_snapshot_for_context
 from core.nai_free_usage import FREE_PIXELS_MAX, FREE_STEPS_MAX
 from core.resolution_utils import (
     NAI_RESOLUTION_PRESET_DISPLAY,
@@ -202,6 +202,9 @@ class HeadlessSessionStateService:
         resolution = str(context.remote_params.get("resolution") or "832 x 1216")
         if resolution not in resolution_options:
             resolution_options.append(resolution)
+        # 금액과 그 차례를 한 번에 받는다(NAI 가 아니면 0). 금액은 레퍼런스 인셋의 상태(HTTP)로도 화면에 간다 -
+        # 화면은 `nai_cost_rev` 가 낮은 쪽을 버린다(`nai_anlas_cost.cost_snapshot_for_context` 의 주석).
+        cost_snapshot = cost_snapshot_for_context(context)
         payload = {
             "type": "params",
             "api_mode": mode,
@@ -234,15 +237,17 @@ class HeadlessSessionStateService:
             # 것이라 공식 계약이 아니다 - 표시용이고 집계엔 안 쓴다. 무료 판정은
             # `is_free_generation` 을 그대로 재사용하므로 상단 알약의 유료 점멸과
             # 항상 같은 말을 한다. NAI 가 아니면 뜻이 없으니 0.
-            "nai_anlas_cost": (
-                estimate_anlas_cost(context, cost_params_for_context(context))
-                if mode == "NAI" else 0),
+            "nai_anlas_cost": cost_snapshot["nai_anlas_cost"],
             # 무료 풀이 마른 뒤의 가격. 화면은 사용량 소진 신호(`nai_usage_update`
             # 의 `quota_exhausted`)를 보고 둘 중 하나를 고른다 - 계산식을 프론트에
             # 복제하지 않으려고 **둘 다 내려 준다**.
-            "nai_anlas_cost_if_paid": (
-                estimate_anlas_cost(context, cost_params_for_context(context), ignore_free=True)
-                if mode == "NAI" else 0),
+            "nai_anlas_cost_if_paid": cost_snapshot["nai_anlas_cost_if_paid"],
+            # 레퍼런스 인셋으로 나가는 요청의 금액(인셋이 꺼져 있으면 None). 위 둘은 인셋 **없이** 나가는 요청의 것 -
+            # 화면이 실제로 나갈 길(탭 · Interactive · 인셋)에 맞는 쪽을 쓴다.
+            "nai_inset_cost": cost_snapshot["nai_inset_cost"],
+            "nai_inset_cost_if_paid": cost_snapshot["nai_inset_cost_if_paid"],
+            # 위 두 금액의 차례 - 금액이 달라질 때마다 오른다.
+            "nai_cost_rev": cost_snapshot["nai_cost_rev"],
             "nai_flags_enabled": {
                 "SMEA": mode == "NAI",
                 "DYN": mode == "NAI",

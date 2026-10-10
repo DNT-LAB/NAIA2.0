@@ -56,6 +56,9 @@ REFERENCE_INSET_LIVE_REFETCH_KEYS = (
     "noise",
     "add_original_image",
     "reference_inset_tag_required",
+    # 결과에서 인셋 칸을 잘라 내는 설정 - 중간에 켜고 끈 것이 다음 장부터 반영돼야 한다.
+    "_reference_inset_crop_left",
+    "_reference_inset_crop_canvas",
     "_reference_inset_pin",
 )
 

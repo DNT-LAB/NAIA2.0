@@ -45,6 +45,8 @@ NAI 웹 UI 의 `calculateCost` 를 옮긴 뒤, **NAI 웹에서 직접 측정해 
 from __future__ import annotations
 
 import math
+import threading
+import uuid
 from typing import Any
 
 from core.nai_free_usage import is_free_generation
@@ -127,8 +129,99 @@ def estimate_anlas_cost(context: Any, params: dict[str, Any] | None,
         _AREA_COEFF * resolution + _AREA_STEP_COEFF * resolution * steps
     ) * factor
     return max(math.ceil(per_sample), _MIN_PER_SAMPLE)
-def cost_params_for_context(context: Any) -> dict[str, Any]:
+
+
+def _reference_inset_canvas(context: Any) -> tuple[int, int] | None:
+    """레퍼런스 인셋이 켜져 있으면 그 캔버스 - 일반 생성이 그 크기의 인페인트로 나간다. 아니면 None."""
+    try:
+        getter = getattr(context, "_character_asset_service", None)
+        service = getter() if callable(getter) else None
+        canvas = service.reference_inset_active_canvas() if service is not None else None
+    except Exception:   # noqa: BLE001 - 판정 실패가 표시를 막으면 안 된다
+        return None
+    if (isinstance(canvas, tuple) and len(canvas) == 2
+            and all(isinstance(side, int) and side > 0 for side in canvas)):
+        return canvas
+    return None
+
+
+# 금액의 차례를 매기는 자리. 번호는 이 실행(프로세스) 안에서만 뜻이 있다 - 다시 켜면 표식(`session`)이 바뀐다.
+_COST_REV_LOCK = threading.Lock()
+_COST_REV_SESSION = uuid.uuid4().hex[:12]
+
+
+def cost_snapshot_for_context(context: Any) -> dict[str, Any]:
+    """지금 [Generate] 를 누르면 나갈 금액과 **그 금액의 차례**.
+
+    돌려주는 것: `nai_anlas_cost` · `nai_anlas_cost_if_paid`(NAI 가 아니면 0) · `nai_inset_cost` ·
+    `nai_inset_cost_if_paid` · `nai_cost_rev` = `{session, rev}` · `params`(계산에 쓴 파라미터 - 화면에 보내지 않는다).
+
+    ⚠️ **금액은 두 벌이다.** `nai_anlas_cost` 는 레퍼런스 인셋 **없이** 나가는 요청의 금액이고(Params 탭 해상도 또는
+       인페인트 세션의 캔버스 - 인셋이 생기기 전과 같은 뜻), `nai_inset_cost` 는 인셋으로 나가는 요청의 금액이다
+       (인셋이 꺼져 있거나 인페인트 세션이 열려 있으면 None). 서버는 화면이 어느 탭에 있는지 · Interactive 가 켜져
+       있는지 모른다 - 프리셋 · 시퀀스 탭과 Interactive 의 생성은 인셋이 주입되지 않는다. 한 벌만 보내면 어느 한쪽이
+       틀린다(Codex 리뷰 8차: 무료 인셋을 켠 채 유료 해상도로 프리셋 생성 - 금액 0). 화면이 실제로 나갈 길을 고른다.
+
+    화면은 금액을 여러 길로 받는다 - 파라미터 메시지(WS)와 레퍼런스 인셋의 상태(HTTP). 길이 다르면 순서가 뒤바뀐다:
+    스텝이나 해상도를 바꿔 새 금액을 받은 뒤에 **그 전에 계산된** 답이 늦게 오면 옛 금액이 새 금액을 덮는다(유료인데
+    금액 칩이 사라졌다 - Codex 리뷰 2026-10-10). 그래서 금액을 계산할 때마다 여기서 번호를 붙인다: 금액이나 그 근거
+    (모드 · 모델 · 스텝 · 샘플링 옵션 · **실제로 나갈 해상도**)가 앞의 계산과 달라지면 +1. 화면은 번호가 낮은 금액을 버린다.
+
+    ⚠️ 읽기 · 계산 · 번호 붙이기를 **한 잠금 안에서** 한다. 밖에서 계산하고 들어와 번호만 받으면, 먼저 읽은(낡은)
+       계산이 나중에 들어와 더 높은 번호를 받는다.
+    ⚠️ 이 잠금을 쥔 채 `cost_params_for_context` 가 캐릭터 에셋 서비스의 `_retain_lock` 을 잡는다(순서: 이 잠금 ->
+       `_retain_lock`). 그 잠금을 쥔 채 이 함수를 부르지 말 것.
+    """
+    with _COST_REV_LOCK:
+        params = cost_params_for_context(context, with_inset=False)
+        try:
+            mode = str(context.get_api_mode() or "").upper()
+        except Exception:   # noqa: BLE001
+            mode = ""
+        if mode == "NAI":
+            price = int(estimate_anlas_cost(context, params))
+            price_if_paid = int(estimate_anlas_cost(context, params, ignore_free=True))
+        else:
+            price = price_if_paid = 0
+        # 인셋으로 나가는 요청의 금액(인셋이 켜져 있고 인페인트 세션이 없을 때만 그런 요청이 있다).
+        inset_price = inset_price_if_paid = None
+        session = getattr(context, "img2img_session", None)
+        canvas = None if isinstance(session, dict) and session.get("active") else _reference_inset_canvas(context)
+        if canvas:
+            through = {**params, "width": canvas[0], "height": canvas[1], "resolution": f"{canvas[0]} x {canvas[1]}"}
+            if mode == "NAI":
+                inset_price = int(estimate_anlas_cost(context, through))
+                inset_price_if_paid = int(estimate_anlas_cost(context, through, ignore_free=True))
+            else:
+                inset_price = inset_price_if_paid = 0
+        basis = "|".join(str(part) for part in (
+            mode, price, price_if_paid, inset_price, inset_price_if_paid, canvas,
+            _pixels(params), params.get("width"), params.get("height"),
+            params.get("model"), params.get("steps"), params.get("SMEA"), params.get("DYN"),
+            params.get("use_custom_api_params"),
+        ))
+        state = getattr(context, "_nai_cost_rev_state", None)
+        if not isinstance(state, dict) or state.get("basis") != basis:
+            state = {"basis": basis, "rev": int(state.get("rev", 0)) + 1 if isinstance(state, dict) else 1}
+            try:
+                setattr(context, "_nai_cost_rev_state", state)
+            except Exception:   # noqa: BLE001 - 못 적으면 매번 같은 번호가 나갈 뿐이다(화면은 같은 번호를 받는다)
+                pass
+        return {
+            "nai_anlas_cost": price,
+            "nai_anlas_cost_if_paid": price_if_paid,
+            "nai_inset_cost": inset_price,
+            "nai_inset_cost_if_paid": inset_price_if_paid,
+            "nai_cost_rev": {"session": _COST_REV_SESSION, "rev": int(state["rev"])},
+            "params": params,
+        }
+
+
+def cost_params_for_context(context: Any, *, with_inset: bool = True) -> dict[str, Any]:
     """지금 [Generate] 를 누르면 **실제로 나갈** 파라미터.
+
+    ``with_inset=False`` 면 레퍼런스 인셋을 안 본다 - 인셋이 주입되지 않는 요청(프리셋 · 시퀀스 · Interactive)의
+    금액을 매길 때 쓴다(`cost_snapshot_for_context` 가 두 벌을 다 계산한다).
 
     ⚠️ 인페인트/img2img 세션이 열려 있으면 나가는 것은 Params 탭의 해상도가 아니라
        **캔버스**다. 도크에서 Wallpaper 로 옮겨 놓고도 화면이 옛 해상도의 금액을
@@ -150,6 +243,13 @@ def cost_params_for_context(context: Any) -> dict[str, Any]:
         pass
     session = getattr(context, "img2img_session", None)
     if not isinstance(session, dict) or not session.get("active"):
+        # ⚠️ 레퍼런스 인셋이 켜져 있으면 일반 생성은 Params 탭의 해상도가 아니라 **인셋 캔버스**로 나간다. 그 캔버스는
+        #    1MP 를 넘을 수 있다(고해상도 캔버스 - 사용자 지정 2026-10-10). 여기서 안 보면 금액이 0 으로 보이면서
+        #    Anlas 가 나간다. (인페인트 세션이 열려 있으면 인셋은 주입되지 않는다 - 아래 세션 캔버스가 맞다.)
+        canvas = _reference_inset_canvas(context) if with_inset else None
+        if canvas:
+            params["width"], params["height"] = canvas
+            params["resolution"] = f"{canvas[0]} x {canvas[1]}"
         return params
     width = int(session.get("width") or 0)
     height = int(session.get("height") or 0)

@@ -438,6 +438,8 @@
         "utils/character_asset_storage.py",
         "utils/inpaint_mask.py",
         "app/web/remote/js/features/characterAssetTab.mjs",
+        "app/web/remote/js/features/referenceInsetWindow.mjs",
+        "core/reference_inset_storage.py",
         "app/web/remote/js/features/benchCandidates.mjs",
         "app/web/remote/js/features/characterCreationBench.mjs",
         "app/web/remote/js/features/maskCanvas.mjs"
@@ -553,6 +555,61 @@
           "method": "POST",
           "path": "/api/character-asset/inset/canvas",
           "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/box",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/upscale",
+          "smoke": "external_live"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/source",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/inset/source",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/crop",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/enabled",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/inset/storage",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/storage",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/storage/apply",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/character-asset/inset/storage/{item_id}",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/inset/storage/{item_id}/image",
+          "smoke": "asset_runtime"
         },
         {
           "method": "GET",

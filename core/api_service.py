@@ -638,7 +638,9 @@ class APIService:
                 elif "resolution:" in v and v.startswith("resolution:"):
                     try:
                         fix_res_value = [int(l) for l in v[11:].split('x')]  # "resolution:" 부분 제거
-                        if len(fix_res_value) == 2:
+                        # ⚠️ 레퍼런스 인셋은 **캔버스**가 치수다. 여기서 덮으면 그림과 마스크는 1216x832 인데
+                        #    요청은 832x1216 으로 나간다(Codex 리뷰 2026-10-09). 태그만 걷는다.
+                        if len(fix_res_value) == 2 and not parameters.get('_reference_inset_pin'):
                             parameters['width'] = fix_res_value[0]
                             parameters['height'] = fix_res_value[1]
                     except:
@@ -822,6 +824,10 @@ class APIService:
                     else:
                         # 마지막 시도에서도 실패하면 에러 반환
                         return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {error_msg}"}
+
+                # 레퍼런스 인셋: 결과에서 인셋 칸을 잘라 내고 그린 부분만 남긴다(사용자 지정 2026-10-09).
+                if result and result.get('status') == 'success' and parameters.get('_reference_inset_crop_left'):
+                    result = self._crop_reference_inset_result(result, parameters)
 
                 # Check if cropped_image_request is enabled
                 if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
@@ -2688,6 +2694,56 @@ class APIService:
             import traceback
             traceback.print_exc()
             # Return original result on error
+            return result
+
+    def _crop_reference_inset_result(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """레퍼런스 인셋으로 만든 결과에서 **인셋 칸(과 칸 테두리)을 잘라 내고** 그린 부분만 남긴다.
+
+        NAI 메타데이터(tEXt)는 잘라 낸 그림에 다시 싣는다 - PNG Info · Enhance · 히스토리가 그대로 알아본다
+        (알파 채널의 스텔스 사본은 자르면서 사라진다). 요청 파라미터는 건드리지 않는다: 이것은 여전히 인셋
+        생성이고, 이어가기는 핀에서 캔버스를 다시 읽는다. 실패하면 원본 결과를 그대로 돌려준다.
+
+        ⚠️ **그 캔버스를 실제로 보낸 요청에서만** 자른다(`_reference_inset_crop_canvas` = 보낸 캔버스의 지문).
+           Result 의 Enhance · Upscale 은 원본 결과의 생성 정보를 통째로 복사해 새 요청을 만든다 - 표식만 보고
+           자르면 다듬어진 그림의 왼쪽을 한 번 더 잘라 낸다(사용자 제보 2026-10-09). 파생 요청은 그림을 바꿔
+           싣거나 아예 안 싣기 때문에 지문이 안 맞는다. 표식은 쓰고 나면 요청에서 걷는다.
+        """
+        divider = int(parameters.pop('_reference_inset_crop_left', 0) or 0)
+        expected = str(parameters.pop('_reference_inset_crop_canvas', '') or '')
+        try:
+            import hashlib
+
+            from utils.reference_inpaint_preprocess import reference_inset_result_crop_box
+
+            generated = result.get('image')
+            if generated is None:
+                return result
+            sent = parameters.get('image_bytes')
+            if (not expected or not isinstance(sent, (bytes, bytearray))
+                    or hashlib.sha1(bytes(sent)).hexdigest()[:16] != expected):
+                return result                      # 인셋 캔버스를 보낸 요청이 아니다(Enhance 등) - 자르지 않는다
+            box = reference_inset_result_crop_box(generated, divider)
+            if divider <= 0 or box[2] - box[0] < 64:
+                return result                      # 남길 것이 없다 - 자르지 않는다
+            cropped = generated.crop(box)
+            if cropped.mode not in ('RGB', 'RGBA'):
+                cropped = cropped.convert('RGB')
+            pnginfo = self._build_nai_pnginfo_for_cropped_image(generated, parameters)
+            buffer = io.BytesIO()
+            if pnginfo is not None:
+                cropped.save(buffer, format='PNG', pnginfo=pnginfo)
+            else:
+                cropped.save(buffer, format='PNG')
+            cropped_bytes = buffer.getvalue()
+            final_image = Image.open(io.BytesIO(cropped_bytes))
+            final_image.load()
+            result['image'] = final_image
+            result['image_bytes'] = cropped_bytes
+            result['raw_bytes'] = cropped_bytes
+            print(f"[inset] result cropped to the drawn area: {final_image.size[0]}x{final_image.size[1]}", flush=True)
+            return result
+        except Exception as exc:   # noqa: BLE001 - 자르기 실패가 만든 그림을 버리게 하면 안 된다
+            print(f"[inset] result crop failed: {exc}", flush=True)
             return result
 
     # Enhance-ready crop 상수:

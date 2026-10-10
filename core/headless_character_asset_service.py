@@ -15,6 +15,7 @@ display name only.
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import math
@@ -27,6 +28,36 @@ from typing import Any, Optional
 
 from core.nai_model_contract import resolve_nai_model_for_context
 from utils import character_asset_storage as asset_storage
+
+# 지금 이 스레드가 하고 있는 '인셋을 바꾸는 일' - 겹쳐 부른 깊이와, 일이 시작될 때의 켜고 끄기 차례.
+_INSET_OP = threading.local()
+
+
+def _inset_serialized(method):
+    """레퍼런스 인셋을 **바꾸는** 일은 한 번에 하나만 한다(`_reference_inset_op_lock` · 재진입 가능).
+
+    배치 · 해상도 · 그림을 바꾸는 길은 전부 "지금 핀을 읽고 -> 잠금 밖에서 다시 굽고 -> 새 핀으로 갈아 끼운다" 인데,
+    굽는 동안 다른 요청이 핀을 바꾸면 **늦게 끝난 쪽이 그것을 되돌린다** - 배치를 끌어 놓자마자 그림을 붙여넣으면
+    붙여넣은 그림이 옛 그림으로 돌아갔다(Codex 리뷰 2026-10-10). 그래서 읽기부터 갈아 끼우기까지를 한 줄로 세운다.
+    ⚠️ 생성 요청이 읽는 길(`reference_inset_generation_params` · `reference_inset_state`)은 이 잠금을 잡지 않는다 -
+       굽는 동안에도 지금 핀으로 바로 나간다. 여기서 `_retain_lock` 을 쥔 채 이 잠금을 잡지 말 것(순서: 이 잠금 -> `_retain_lock`).
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        depth = getattr(_INSET_OP, "depth", 0)
+        if depth == 0:
+            # 이 일이 **시작될 때**(줄을 서기 전)의 켜고 끄기 차례를 붙잡는다. 일이 끝날 때 차례가 달라져 있으면
+            # 그 사이에 사용자가 켜거나 끈 것이다 - 이 일이 인셋을 켜지 않는다(`set_reference_inset_pin` 의 끝).
+            with self._retain_lock:
+                _INSET_OP.toggle_epoch = self._reference_inset_toggle_epoch
+        _INSET_OP.depth = depth + 1
+        try:
+            with self._reference_inset_op_lock:
+                return method(self, *args, **kwargs)
+        finally:
+            _INSET_OP.depth = depth
+
+    return wrapper
 
 CHARACTER_ASSET_DIR_NAME = "character_asset"
 ASSET_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -197,6 +228,24 @@ class HeadlessCharacterAssetService:
         # 인셋 인페인트가 되도록 고정한다. 해제는 사용자만(Result 탭 X 버튼).
         # {character_id, variation, canvas_png, mask_png, width, height}
         self._reference_inset_pin: Optional[dict[str, Any]] = None
+        # 업스케일해 둔 레퍼런스 원본 `{(character_id, variation): png}`. 배치를 바꿀 때마다 여기서 다시 굽는다.
+        self._reference_inset_upscaled_sources: dict[tuple[str, str, str], bytes] = {}
+        # 생성 결과에서 인셋 칸을 잘라 낼 것인가(사용자 지정 2026-10-09). 핀이 아니라 이 세션의 설정이다 -
+        # 그림을 바꿔 꽂아도 유지된다. 앱을 다시 켜면 꺼진 채로 시작한다.
+        self._reference_inset_crop_result = False
+        # 인셋이 **켜져 있는가**. 꽂아 둔 것(`_reference_inset_pin` - 그림 · 배치 · 해상도)과 따로다:
+        # 꺼도 꽂아 둔 것은 남고, 다시 켜면 그대로 이어진다(사용자 결정 2026-10-10). 앱을 켜면 꺼진 채다.
+        self._reference_inset_enabled = False
+        # 인셋을 바꾸는 일을 한 줄로 세우는 잠금(`_inset_serialized`) · 지금 NAI 업스케일에 가 있는 그림들.
+        self._reference_inset_op_lock = threading.RLock()
+        # 켜고 끌 때마다 올라가는 차례. 먼저 시작된 일(붙여넣기 · Storage 꺼내기)이 굽는 사이에 사용자가 끄면,
+        # 그 일이 끝나면서 인셋을 도로 켜면 안 된다 - 끈 뒤의 일반 생성이 인셋으로 나간다(Codex 리뷰 2026-10-10).
+        self._reference_inset_toggle_epoch = 0
+        # 상태가 바뀔 때마다 올라가는 번호(`sync_seq`) + 이 실행의 표식(`sync_session`). 화면이 여러 길(창의 요청
+        # 줄 · 띠의 x · 해상도 메뉴)로 답을 받으므로, 늦게 온 옛 답이 새 상태를 덮지 않게 번호로 가린다.
+        self._reference_inset_sync_session = uuid.uuid4().hex[:12]
+        self._reference_inset_sync_seq = 0
+        self._reference_inset_upscaling: set[tuple[str, str, str]] = set()
         # data/random_*.txt lines. 수 MB라 1회만 읽는다.
         self._random_pools: dict[str, list[str]] = {}
 
@@ -286,41 +335,100 @@ class HeadlessCharacterAssetService:
             return self._pinned_candidates.pop(str(pin_id or "").strip(), None) is not None
 
     # ------------------------------------------------- reference inset pin
+    @_inset_serialized
     def set_reference_inset_pin(
         self,
         character_id: str,
         variation: str = "",
         width: Any = 0,
         height: Any = 0,
+        box: Any = None,
+        use_upscaled: bool = False,
+        source_override: Optional[bytes] = None,
+        stored_id: str = "",
+        enable: Optional[bool] = None,
     ) -> dict[str, Any]:
         """선택 이미지를 레퍼런스 인셋 소스로 고정한다(Dev0714 Comic Panel 계보).
 
         prepare_reference_inpaint_canvas가 고른 캔버스 왼쪽에 이미지를 붙이고
         보존 마스크(+우측 seam 스트립)를 만든다. 핀이 살아 있는 동안 plain NAI
         생성은 전부 이 캔버스 위 인셋 인페인트로 나간다(주입은
-        headless_image_module_param_service). 이번 버전은 마스크 크롭 저장 미지원 -
-        결과는 캔버스 전체가 히스토리에 남는다.
+        headless_image_module_param_service). 결과는 캔버스 전체가 히스토리에 남는다
+        (`set_reference_inset_crop_result` 를 켜면 그린 부분만 남는다).
 
         캔버스는 `REFERENCE_INSET_CANVAS_SIZES` 중에서 고른다(사용자 지정 2026-08-25).
         안 주면 기본 1152x896. 목록에 없는 값은 조용히 기본값으로 떨어뜨린다 -
         아무 숫자나 통과시키면 돈이 나가는 요청이 엉뚱한 크기로 나간다.
+
+        ``box`` 는 인셋의 배치(`{x, y, height, divider}`)다(사용자 지정 2026-10-09 - 화면의 작은 창에서 정한다):
+        `divider` = 경계선(왼쪽에 붙은 칸의 너비), `x · y · height` = 칸 안의 그림 자리와 크기.
+        안 주면 기본 배치다. **새로 꽂는 핀은 늘 기본 배치 · 에셋의 그림 · 업스케일 전으로 시작한다.**
+
+        ``use_upscaled`` · ``source_override`` 는 지금 핀의 것을 이어 갈 때만 준다(배치 · 해상도를 바꾸는 길):
+        업스케일해 둔 원본으로 굽는가 / 붙여넣은 그림으로 칸을 덮었는가(`stored_id` = 그 그림이 Storage 의 어느 것인가).
+
+        ``character_id`` 가 비어 있으면 **에셋 없는 인셋**이다 - 붙여넣은 그림(`source_override`)만으로 선다
+        (사용자 결정 2026-10-10: Fn 에서 바로 연다). ``enable`` 은 켜짐을 함께 정한다(None = 지금 그대로).
         """
+        import hashlib
+
         from PIL import Image
 
         from utils.reference_inpaint_preprocess import (
             ReferenceInsetPreprocessSpec,
+            classic_reference_inset_layout,
+            default_reference_inset_box,
+            default_reference_inset_divider,
+            normalize_reference_inset_box,
+            normalize_reference_inset_divider,
             prepare_reference_inpaint_canvas,
+            reference_inset_open_ratio,
             resolve_reference_inset_canvas,
         )
 
-        character_id = self._validate_id(character_id)
-        variation = self._validate_hash(variation) if str(variation or "").strip() else ""
+        override = bytes(source_override) if source_override else None
+        if str(character_id or "").strip() or not override:
+            character_id = self._validate_id(character_id)
+            variation = self._validate_hash(variation) if str(variation or "").strip() else ""
+            path = self.resolve_image_path(character_id, variation)
+        else:
+            character_id, variation, path = "", "", None      # 에셋 없는 인셋 - 붙여넣은 그림뿐이다
         canvas_w, canvas_h = resolve_reference_inset_canvas(width, height)
         spec = ReferenceInsetPreprocessSpec(canvas_width=canvas_w, canvas_height=canvas_h)
-        path = self.resolve_image_path(character_id, variation)
-        with Image.open(path) as opened:
+        source_id = hashlib.sha1(override).hexdigest()[:16] if override else ""
+        with self._retain_lock:
+            upscaled_png = (
+                self._reference_inset_upscaled_sources.get((character_id, variation, source_id)) if use_upscaled else None
+            )
+        with (Image.open(io.BytesIO(override)) if override else Image.open(path)) as opened:
             opened.load()
-            result = prepare_reference_inpaint_canvas(opened, spec)
+            source_size = (int(opened.width), int(opened.height))
+            classic_box, classic_divider = classic_reference_inset_layout(source_size, spec)
+            default_box = default_reference_inset_box(source_size, spec)
+            default_divider = default_reference_inset_divider(source_size, spec)
+            if box is None:
+                placed, divider = default_box, default_divider
+            else:
+                divider = normalize_reference_inset_divider(box.get("divider"), source_size, spec)
+                placed = normalize_reference_inset_box(box, source_size, spec, divider=divider)
+            custom = placed != default_box or divider != default_divider
+            # 예전 배치와 **똑같을 때만** 예전 길로 굽는다(같은 그림 · 같은 마스크). 기본 배치라도 범위(그릴 곳
+            # 51 ~ 60%)에 맞추느라 경계가 옮겨졌으면 칸 방식으로 굽는다.
+            panelled = placed != classic_box or divider != classic_divider
+            open_ratio = reference_inset_open_ratio(divider, spec)
+
+            def bake(image: Any) -> Any:
+                return prepare_reference_inpaint_canvas(
+                    image, spec, box=placed if panelled else None, divider=divider if panelled else None
+                )
+
+            # 업스케일해 둔 원본이 있으면 그것을 줄여 놓는다(비율이 같아 자리 · 크기 계산은 똑같이 나온다).
+            if upscaled_png:
+                with Image.open(io.BytesIO(upscaled_png)) as big:
+                    big.load()
+                    result = bake(big)
+            else:
+                result = bake(opened)
         canvas_buffer = io.BytesIO()
         result.canvas_image.save(canvas_buffer, format="PNG")
         mask_buffer = io.BytesIO()
@@ -329,14 +437,155 @@ class HeadlessCharacterAssetService:
             "character_id": character_id,
             "variation": variation,
             "canvas_png": canvas_buffer.getvalue(),
+            # 이 캔버스의 지문 - '결과에서 칸 빼기' 가 **이 캔버스를 보낸 요청**에서만 자르게 하는 열쇠.
+            "canvas_id": hashlib.sha1(canvas_buffer.getvalue()).hexdigest()[:16],
+            # 업스케일해 둔 원본으로 구웠는가.
+            "upscaled": bool(upscaled_png),
+            # 붙여넣은 그림으로 칸을 덮었으면 그 그림(PNG)과 그 지문. 없으면 에셋의 그림이다.
+            "source_override": override,
+            "source_id": source_id,
+            # 이 그림이 Storage 의 어느 것인가(꺼냈거나 방금 저장했으면). 없으면 빈 문자열.
+            "stored_id": str(stored_id or ""),
             "mask_png": mask_buffer.getvalue(),
             "width": int(result.canvas_image.width),
             "height": int(result.canvas_image.height),
+            "box": dict(placed),
+            "divider": int(divider),
+            "default_divider": int(default_divider),
+            "custom": custom,
+            "source": source_size,
+            "open_ratio": open_ratio,
         }
         with self._retain_lock:
             self._reference_inset_pin = pin
+            # 켜짐은 이 일이 시작된 뒤로 사용자가 켜고 끄지 않았을 때만 정한다 - 그 사이의 손이 이긴다.
+            started_at = getattr(_INSET_OP, "toggle_epoch", self._reference_inset_toggle_epoch)
+            if enable is not None and started_at == self._reference_inset_toggle_epoch:
+                self._reference_inset_enabled = bool(enable)
+            self._reference_inset_sync_seq += 1
         return self.reference_inset_state()
 
+    @staticmethod
+    def _inset_carry(pin: dict[str, Any]) -> dict[str, Any]:
+        """배치 · 해상도를 바꿀 때 지금 핀에서 이어 갈 것(업스케일 · 붙여넣은 그림 · Storage 의 어느 것인가)."""
+        return {
+            "use_upscaled": bool(pin.get("upscaled")),
+            "source_override": pin.get("source_override"),
+            "stored_id": str(pin.get("stored_id") or ""),
+        }
+
+    # ------------------------------------------------- 켜짐 / 꺼짐
+    def set_reference_inset_enabled(self, enabled: Any) -> dict[str, Any]:
+        """인셋을 켜고 끈다. 꺼도 꽂아 둔 것(그림 · 배치 · 해상도)은 남는다.
+
+        켤 때는 Character Reference 를 끈다 - 둘은 함께 못 쓴다([C1+레퍼런스 인셋] 과 같은 계약). 안 끄면
+        다음 생성이 CR 을 보고 인셋을 도로 끈다. 돌려주는 상태의 `references_disabled` 가 그 사실을 알린다.
+        """
+        coerce = getattr(self.context, "_coerce_bool", None)
+        wanted = bool(coerce(enabled)) if callable(coerce) else bool(enabled)
+        with self._retain_lock:
+            if wanted and not self._reference_inset_pin:
+                raise ValueError("레퍼런스로 쓸 그림이 없습니다 - 그림을 먼저 넣어 주세요.")
+            if self._reference_inset_enabled != wanted:
+                # ⚠️ 차례는 **실제로 바뀌었을 때만** 올린다(아래 `clear_reference_inset_pin` 의 주석).
+                self._reference_inset_enabled = wanted
+                self._reference_inset_toggle_epoch += 1
+                self._reference_inset_sync_seq += 1
+        state = self.reference_inset_state()
+        if wanted:
+            state["references_disabled"] = self._release_character_references_for_inset()
+        return state
+
+    @staticmethod
+    def _started_at_toggle_epoch(toggle_epoch: Any) -> None:
+        """이 일이 **사용자가 누른 순간**에 시작됐다고 적는다(화면이 그때 알던 켜고 끄기 차례).
+
+        서버에 닿은 순간으로 재면 그 앞의 시간을 놓친다: 그림이 올라가는 동안, 창의 요청 줄에서 기다리는 동안 사용자가
+        끄면 서버는 '끈 뒤에 시작된 붙여넣기' 로 보고 인셋을 도로 켠다(Codex 리뷰 3차). 화면이 안 실어 보내면(옛 화면 ·
+        다른 길) 줄을 서기 전에 붙잡은 값을 그대로 쓴다. `_inset_serialized` 로 감싼 일 안에서만 부른다.
+        """
+        try:
+            _INSET_OP.toggle_epoch = int(toggle_epoch)
+        except (TypeError, ValueError):
+            pass
+
+    def _release_character_references_for_inset(self) -> bool:
+        try:
+            return bool(self._disable_all_character_reference_frames())
+        except Exception as exc:      # noqa: BLE001 - 못 꺼도 인셋은 켜졌다. 생성 단계가 한 번 더 본다
+            print(f"[CharacterAsset] character reference disable failed: {exc}")
+            return False
+
+    # ------------------------------------------------- Storage(명시적으로 저장한 그림)
+    def _inset_storage(self):
+        from core.reference_inset_storage import STORAGE_DIR_NAME, ReferenceInsetStorage
+
+        return ReferenceInsetStorage(Path(self.context._save_path(STORAGE_DIR_NAME)))
+
+    def reference_inset_storage_list(self) -> dict[str, Any]:
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            current = str(pin.get("stored_id") or "") if pin else ""
+        return {"items": self._inset_storage().list(), "current": current}
+
+    def save_reference_inset_to_storage(self) -> dict[str, Any]:
+        """지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만 - 자동으로 넣지 않는다).
+
+        업스케일해 뒀으면 **올려 둔 판**을 넣는다 - 다음에 꺼낼 때 Anlas 를 다시 쓰지 않는다(사용자 결정).
+        에셋으로 꽂은 그림도 넣을 수 있다. 배치는 넣지 않는다.
+        """
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin:
+                raise ValueError("저장할 그림이 없습니다.")
+            key = (str(pin["character_id"]), str(pin["variation"]), str(pin.get("source_id") or ""))
+            upscaled = self._reference_inset_upscaled_sources.get(key) if pin.get("upscaled") else None
+            override = pin.get("source_override")
+        if upscaled:
+            data = bytes(upscaled)
+        elif override:
+            data = bytes(override)
+        else:
+            data = self._normalize_inset_source(self.resolve_image_path(key[0], key[1]).read_bytes())
+        item = self._inset_storage().save(data)
+        with self._retain_lock:
+            if self._reference_inset_pin is pin:
+                pin["stored_id"] = item["id"]
+            self._reference_inset_sync_seq += 1
+        return {"item": item, **self.reference_inset_state()}
+
+    @_inset_serialized
+    def apply_reference_inset_storage(self, item_id: Any, toggle_epoch: Any = None) -> dict[str, Any]:
+        """Storage 의 그림을 칸의 그림으로 쓴다. 인셋을 켜고, 배치는 기본으로 놓는다(배치는 기억하지 않는다).
+        ``toggle_epoch`` = 화면이 누른 순간에 알던 켜고 끄기 차례 - 그 뒤에 사용자가 껐으면 켜지 않는다."""
+        self._started_at_toggle_epoch(toggle_epoch)
+        storage = self._inset_storage()
+        data = storage.read(item_id)
+        stored = storage.image_id(data)
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            character_id = str(pin["character_id"]) if pin else ""
+            variation = str(pin["variation"]) if pin else ""
+            width, height = (pin["width"], pin["height"]) if pin else (0, 0)
+        state = self.set_reference_inset_pin(
+            character_id, variation, width, height, source_override=data, stored_id=stored, enable=True
+        )
+        if state["active"]:
+            state["references_disabled"] = self._release_character_references_for_inset()
+        return state
+
+    def delete_reference_inset_storage(self, item_id: Any) -> dict[str, Any]:
+        """Storage 에서 그림 한 장을 지운다. 지금 칸에 놓여 있는 그림은 그대로다(보관본만 없어진다)."""
+        removed = self._inset_storage().delete(item_id)
+        with self._retain_lock:
+            self._reference_inset_sync_seq += 1      # 지금 칸의 그림이 '저장됨' 에서 풀렸을 수 있다
+        return {"removed": removed, **self.reference_inset_storage_list()}
+
+    def reference_inset_storage_image(self, item_id: Any, thumb: bool = False) -> tuple[bytes, str]:
+        storage = self._inset_storage()
+        return (storage.thumb(item_id), "image/jpeg") if thumb else (storage.read(item_id), "image/png")
+
+    @_inset_serialized
     def set_reference_inset_canvas(self, width: Any, height: Any) -> dict[str, Any]:
         """핀은 그대로 두고 **캔버스 크기만** 바꾼다.
 
@@ -345,27 +594,297 @@ class HeadlessCharacterAssetService:
         """
         with self._retain_lock:
             pin = self._reference_inset_pin
-            character_id = str(pin["character_id"]) if pin else ""
-            variation = str(pin["variation"]) if pin else ""
-        if not character_id:
-            raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
-        return self.set_reference_inset_pin(character_id, variation, width, height)
+            if not pin:
+                raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
+            character_id, variation = str(pin["character_id"]), str(pin["variation"])
+            # 사용자가 정한 배치(경계선 · 그림 자리 · 크기)는 들고 간다 - 새 캔버스의 한계에 다시 맞춘다.
+            # 손대지 않은 기본 배치면 새 캔버스의 기본 배치로 간다(그쪽도 그릴 곳 51 ~ 60% 안이다).
+            box = {**pin["box"], "divider": pin["divider"]} if pin.get("custom") else None
+            carry = self._inset_carry(pin)
+        return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
 
-    def clear_reference_inset_pin(self) -> bool:
-        with self._retain_lock:
-            had = self._reference_inset_pin is not None
-            self._reference_inset_pin = None
-        return had
+    # 업스케일해 둔 원본을 몇 장까지 쥘까. 한 장이 수 MB 라 많이 쥐지 않는다(오래된 것부터 버린다).
+    REFERENCE_INSET_UPSCALED_SOURCE_LIMIT = 2
+    # 붙여넣는 그림의 한계: 풀기 전에 크기로 거르고, 큰 것은 줄여 쥔다(캔버스는 1MP 다 - 더 큰 것은 쓸 데가 없다).
+    REFERENCE_INSET_SOURCE_MAX_BYTES = 32 * 1024 * 1024
+    REFERENCE_INSET_SOURCE_MAX_PIXELS = 40_000_000
+    REFERENCE_INSET_SOURCE_STORE_SIDE = 4096
 
-    def reference_inset_state(self) -> dict[str, Any]:
-        from utils.reference_inpaint_preprocess import REFERENCE_INSET_CANVAS_SIZES
+    def upscale_reference_inset(self, upscaler: Any) -> dict[str, Any]:
+        """레퍼런스 **원본**을 업스케일러에 한 번 보내 쥐어 두고, 그 뒤로는 거기서 줄여 칸에 놓는다.
+
+        `upscaler(image_bytes) -> PIL.Image` 는 부르는 쪽이 준다(라우트가 NAI 업스케일을 건다 · 시험은 가짜).
+
+        ⚠️ 구운 **캔버스**를 올렸다가 되줄이는 것은 소용없다 - 실측(2026-10-09): NAI 업스케일은 정확히 2배를
+           돌려주고, 그것을 원래 크기로 줄이면 업스케일 전과 같은 그림이다(평균 차 0.11/255). 흐림은 원본보다
+           **키워 놓을 때** 생기므로, 원본을 올려 두어 놓을 때 늘 줄이게 만든다.
+        그래서 배치 · 해상도를 바꿔도 다시 부르지 않는다(같은 그림이면 핀을 다시 꽂아도 쥔 것을 쓴다).
+        붙여넣은 그림으로 칸을 덮었으면 그 그림을 올린다.
+        """
+        from PIL import Image
 
         with self._retain_lock:
             pin = self._reference_inset_pin
             if not pin:
-                return {"active": False}
+                raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
+            already = bool(pin.get("upscaled"))
+            key = (str(pin["character_id"]), str(pin["variation"]), str(pin.get("source_id") or ""))
+            override = pin.get("source_override")
+            cached = key in self._reference_inset_upscaled_sources
+            # 같은 그림이 이미 NAI 에 가 있으면(다른 창 · 연타) 또 보내지 않는다 - 두 번 보내면 Anlas 가 두 번 나간다.
+            flying = not already and not cached and key in self._reference_inset_upscaling
+            if not already and not cached and not flying:
+                self._reference_inset_upscaling.add(key)
+        if already:
+            # 이미 그 원본으로 굽고 있다 - 다시 부르지 않는다.
+            # ⚠️ 잠금을 쥔 채 `reference_inset_state()` 를 부르면 안 된다 - 같은 잠금을 다시 잡아 멈춘다(재진입 불가).
+            return self.reference_inset_state()
+        if flying:
+            raise ValueError("이 그림은 지금 업스케일하는 중입니다 - 끝난 뒤에 다시 눌러 주세요.")
+        if not cached:
+            try:
+                source_bytes = bytes(override) if override else self.resolve_image_path(key[0], key[1]).read_bytes()
+                with Image.open(io.BytesIO(source_bytes)) as opened:
+                    source_w, source_h = opened.size
+                upscaled = upscaler(source_bytes)                # 네트워크를 탄다 - 잠금 밖에서
+                up_w, up_h = upscaled.size
+                # 받은 것이 정말 이 그림을 키운 것인가. 비율이 다르면 그림이 찌그러져 놓인다 - 쓰지 않는다.
+                if up_w <= source_w or up_h <= source_h or abs(up_w / up_h - source_w / source_h) > 0.01:
+                    raise RuntimeError(f"업스케일 결과의 크기가 이상합니다: {source_w}x{source_h} -> {up_w}x{up_h}")
+                buffer = io.BytesIO()
+                upscaled.convert("RGB").save(buffer, format="PNG")
+                with self._retain_lock:
+                    sources = self._reference_inset_upscaled_sources
+                    sources[key] = buffer.getvalue()
+                    while len(sources) > self.REFERENCE_INSET_UPSCALED_SOURCE_LIMIT:
+                        sources.pop(next(iter(sources)))
+            finally:
+                with self._retain_lock:
+                    self._reference_inset_upscaling.discard(key)      # 실패해도 다음에 다시 누를 수 있게
+        # '아직 같은 그림인가' 를 보는 것부터 갈아 끼우기까지 한 줄로 - 그 사이에 그림이 바뀌면 옛 그림으로 되돌린다.
+        with self._reference_inset_op_lock:
+            with self._retain_lock:
+                current = self._reference_inset_pin
+                same = bool(current) and (
+                    str(current["character_id"]), str(current["variation"]), str(current.get("source_id") or "")
+                ) == key
+                if same:
+                    width, height = current["width"], current["height"]
+                    # 기다리는 동안 배치를 바꿨으면 **지금의** 배치로 굽는다.
+                    box = {**current["box"], "divider": current["divider"]} if current.get("custom") else None
+            if not same:
+                # 올려 둔 원본은 쥐고 있다 - 그 그림을 다시 꽂고 누르면 새로 부르지 않고 바로 된다.
+                raise ValueError("업스케일하는 동안 인셋이 바뀌었습니다 - 그 그림을 다시 꽂고 눌러 주세요.")
+            return self.set_reference_inset_pin(
+                key[0], key[1], width, height, box=box, use_upscaled=True, source_override=override
+            )
+
+    def reference_inset_canvas_png(self) -> bytes:
+        """지금 나가는 캔버스. 핀이 없으면 빈 bytes."""
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            return bytes(pin["canvas_png"]) if pin else b""
+
+    @_inset_serialized
+    def set_reference_inset_box(self, box: Any) -> dict[str, Any]:
+        """핀과 캔버스는 그대로 두고 인셋의 **배치만** 바꾼다(`{x, y, height, divider}`). ``None`` 이면 기본
+        배치로 돌아간다. 그림과 마스크가 통째로 달라지므로 같은 원본으로 다시 만든다. 한계를 넘는 값은
+        거절하지 않고 한계에 맞춘다(경계선은 그릴 곳이 남는 데까지만 간다).
+        """
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin:
+                raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
+            character_id, variation = str(pin["character_id"]), str(pin["variation"])
+            width, height = pin["width"], pin["height"]
+            carry = self._inset_carry(pin)
+        if box is not None and not isinstance(box, dict):
+            raise ValueError("인셋 배치는 x · y · height · divider 로 보냅니다.")
+        return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
+
+    @_inset_serialized
+    def set_reference_inset_source(self, image_bytes: Optional[bytes], toggle_epoch: Any = None) -> dict[str, Any]:
+        """인셋 칸의 그림을 **붙여넣은 그림으로 덮어쓴다**(사용자 지정 2026-10-09 - 캡쳐 · 복사해 붙여넣기).
+
+        ``None`` 이면 에셋의 그림으로 돌아간다. 그림의 비율이 달라지므로 배치는 기본으로 돌아가고, 업스케일도
+        새 그림에는 아직 안 한 상태다. 핀(캐릭터 · 프롬프트)과 캔버스는 그대로다. 꽂아 둔 것이 없으면 그림만으로
+        인셋을 새로 만든다. 붙여넣은 그림은 Storage 에 [저장] 하기 전에는 앱을 끄면 사라진다.
+        ``toggle_epoch`` = 화면이 누른 순간에 알던 켜고 끄기 차례 - 그 뒤에 사용자가 껐으면 그림만 바꾸고 켜지 않는다.
+        """
+        self._started_at_toggle_epoch(toggle_epoch)
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            character_id = str(pin["character_id"]) if pin else ""
+            variation = str(pin["variation"]) if pin else ""
+            width, height = (pin["width"], pin["height"]) if pin else (0, 0)
+        if image_bytes is None:
+            if not character_id:
+                raise ValueError("돌아갈 에셋의 그림이 없습니다.")
+            return self.set_reference_inset_pin(character_id, variation, width, height)
+        # 꽂아 둔 것이 없어도 된다 - 붙여넣은 그림만으로 인셋을 만든다(Fn 에서 바로 여는 길). 그림을 넣으면 켠다.
+        state = self.set_reference_inset_pin(
+            character_id, variation, width, height,
+            source_override=self._normalize_inset_source(image_bytes), enable=True,
+        )
+        if state["active"]:
+            state["references_disabled"] = self._release_character_references_for_inset()
+        return state
+
+    def _normalize_inset_source(self, image_bytes: Any) -> bytes:
+        """붙여넣은 그림을 쥘 수 있는 꼴(RGB PNG · 긴 변 4096 이하)로 만든다. 투명한 곳은 흰 바탕에 얹는다."""
+        from PIL import Image
+
+        raw = bytes(image_bytes or b"")
+        if not raw:
+            raise ValueError("붙여넣을 그림이 비어 있습니다.")
+        if len(raw) > self.REFERENCE_INSET_SOURCE_MAX_BYTES:
+            raise ValueError("그림이 너무 큽니다(32MB 까지).")
+        try:
+            with Image.open(io.BytesIO(raw)) as opened:
+                width, height = opened.size
+                # 풀기 **전에** 치수로 거른다 - 작은 파일이 수억 픽셀로 풀릴 수 있다.
+                if width < 16 or height < 16:
+                    raise ValueError("그림이 너무 작습니다.")
+                if width * height > self.REFERENCE_INSET_SOURCE_MAX_PIXELS:
+                    raise ValueError("그림이 너무 큽니다(4천만 픽셀까지).")
+                opened.load()
+                if opened.mode in ("RGBA", "LA") or "transparency" in opened.info:
+                    rgba = opened.convert("RGBA")
+                    image = Image.new("RGB", rgba.size, (255, 255, 255))
+                    image.paste(rgba, mask=rgba.getchannel("A"))
+                else:
+                    image = opened.convert("RGB")
+        except ValueError:
+            raise
+        except Exception as exc:      # noqa: BLE001 - 그림이 아닌 것을 붙였다
+            raise ValueError(f"그림을 읽지 못했습니다: {exc}") from exc
+        longest = max(image.size)
+        if longest > self.REFERENCE_INSET_SOURCE_STORE_SIDE:
+            scale = self.REFERENCE_INSET_SOURCE_STORE_SIDE / longest
+            image = image.resize(
+                (max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS
+            )
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def reference_inset_source_image(self) -> tuple[bytes, str]:
+        """칸에 놓인 그림 `(bytes, media_type)` - 붙여넣은 그림이면 그것, 아니면 에셋의 그림. 핀이 없으면 빈 bytes."""
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin:
+                return b"", "image/png"
+            override = pin.get("source_override")
+            character_id, variation = str(pin["character_id"]), str(pin["variation"])
+        if override:
+            return bytes(override), "image/png"
+        path = self.resolve_image_path(character_id, variation)
+        media = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}.get(
+            path.suffix.lower(), "image/png"
+        )
+        return path.read_bytes(), media
+
+    def set_reference_inset_crop_result(self, enabled: Any) -> dict[str, Any]:
+        """생성 결과에서 인셋 칸을 잘라 내고 **그린 부분만** 남길 것인가. 핀이 없어도 정해 둘 수 있다."""
+        coerce = getattr(self.context, "_coerce_bool", None)
+        with self._retain_lock:
+            self._reference_inset_crop_result = bool(coerce(enabled)) if callable(coerce) else bool(enabled)
+            self._reference_inset_sync_seq += 1
+        return self.reference_inset_state()
+
+    def clear_reference_inset_pin(self) -> bool:
+        """인셋을 **끈다**(배지의 x · Character Reference 를 켰을 때 · 생성에 CR 이 실렸을 때). 켜져 있었으면 True.
+
+        ⚠️ 이름은 옛것이지만 이제 꽂아 둔 것을 지우지 않는다 - 그림 · 배치 · 해상도는 남고 다시 켜면 이어진다
+           (사용자 결정 2026-10-10). 예전에는 여기서 전부 사라져, 한 번 끄면 처음부터 다시 꽂아야 했다.
+        """
+        with self._retain_lock:
+            had = bool(self._reference_inset_enabled and self._reference_inset_pin)
+            if self._reference_inset_enabled:
+                # ⚠️ 켜고 끄기 차례는 **켜져 있던 것을 끌 때만** 올린다. 이 함수는 Character Reference 가 실린 생성마다
+                #    불린다 - 이미 꺼져 있는데도 올리면, 화면이 아는 차례가 낡아 다음 붙여넣기가 '그 사이에 사용자가
+                #    껐다' 로 읽혀 인셋을 못 켠다(Codex 리뷰 4차).
+                self._reference_inset_enabled = False
+                self._reference_inset_toggle_epoch += 1
+                self._reference_inset_sync_seq += 1
+        return had
+
+    def reference_inset_active_canvas(self) -> Optional[tuple[int, int]]:
+        """인셋이 켜져 있으면 그 캔버스 `(w, h)` - 일반 NAI 생성이 이 크기로 나간다. 꺼져 있으면 None.
+        금액 계산(`core/nai_anlas_cost.cost_params_for_context`)이 본다."""
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin or not self._reference_inset_enabled:
+                return None
+            return int(pin["width"]), int(pin["height"])
+
+    def reference_inset_state(self) -> dict[str, Any]:
+        """화면에 보낼 인셋 상태. 금액(`_reference_inset_cost_fields`)은 잠금 밖에서 붙인다."""
+        state = self._reference_inset_state_core()
+        state.update(self._reference_inset_cost_fields())
+        return state
+
+    def _reference_inset_cost_fields(self) -> dict[str, Any]:
+        """Anlas 추정치: 캔버스 크기별(`canvas_costs` - 무료면 0)과 지금 Generate 를 누르면 나갈 금액.
+
+        1MP 를 넘는 캔버스는 Anlas 가 든다(사용자 지정 2026-10-10 - 고해상도 캔버스). 금액은 지금 모델 · 스텝으로
+        계산한다. `nai_anlas_cost` · `nai_anlas_cost_if_paid` 는 Generate 옆의 금액과 **같은 계산**이다 - 화면이
+        인셋을 켜고 끄거나 캔버스를 바꾼 직후 그 금액을 이 답으로 맞춘다(파라미터 메시지를 기다리지 않는다).
+        ⚠️ `_retain_lock` 을 쥔 채 부르지 말 것 - 금액 계산이 `reference_inset_active_canvas` 로 되돌아온다.
+        """
+        try:
+            from core.nai_anlas_cost import cost_snapshot_for_context, estimate_anlas_cost
+            from utils.reference_inpaint_preprocess import REFERENCE_INSET_CANVAS_SIZES
+
+            context = self.context
+            # 지금 나갈 금액 + 그 금액의 차례(`nai_cost_rev`) - 파라미터 메시지와 **같은 계산 · 같은 번호 줄**이다.
+            # 화면은 길과 무관하게 번호가 낮은 금액을 버린다.
+            snapshot = cost_snapshot_for_context(context)
+            base = snapshot.pop("params")
+            if str(context.get_api_mode() or "").upper() != "NAI":
+                return {"canvas_costs": {}, **snapshot}
+            costs = {}
+            for width, height in REFERENCE_INSET_CANVAS_SIZES:
+                sized = {**base, "width": width, "height": height, "resolution": f"{width} x {height}"}
+                costs[f"{width}x{height}"] = int(estimate_anlas_cost(context, sized))
+            return {"canvas_costs": costs, **snapshot}
+        except Exception as exc:      # noqa: BLE001 - 금액 표시가 인셋을 막으면 안 된다
+            print(f"[CharacterAsset] reference inset cost estimate failed: {ascii(exc)}")
+            return {}
+
+    def _reference_inset_state_core(self) -> dict[str, Any]:
+        from utils.reference_inpaint_preprocess import (
+            REFERENCE_INSET_CANVAS_KINDS,
+            REFERENCE_INSET_CANVAS_SIZES,
+            ReferenceInsetPreprocessSpec,
+            reference_inset_box_limits,
+        )
+
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            # 이 상태의 차례 - 화면은 같은 `sync_session` 안에서 번호가 더 작은 답을 버린다.
+            sync = {"sync_session": self._reference_inset_sync_session, "sync_seq": self._reference_inset_sync_seq,
+                    # 켜고 끌 때마다 올라가는 차례. 화면은 붙여넣기 · Storage 꺼내기를 보낼 때 **누른 순간의** 이 값을
+                    # 함께 보낸다 - 그 사이에 끈 것을 서버가 알아보게(`_started_at_toggle_epoch`).
+                    "toggle_epoch": self._reference_inset_toggle_epoch}
+            if not pin:
+                # 꽂아 둔 것이 없다. 창은 이 상태로도 열린다('그림을 넣어 주세요').
+                return {"active": False, "configured": False,
+                        "crop_result": bool(self._reference_inset_crop_result), **sync}
+            stored_id = str(pin.get("stored_id") or "")
             return {
-                "active": True,
+                **sync,
+                # 켜져 있는가(= 다음 생성이 인셋으로 나가는가) / 꽂아 둔 것이 있는가. 꺼도 꽂아 둔 것은 남는다.
+                "active": bool(self._reference_inset_enabled),
+                "configured": True,
+                # 에셋 없이 붙여넣은 그림만으로 선 인셋인가 · 지금 그림이 Storage 에 있는가.
+                "standalone": not pin["character_id"],
+                "saved": bool(stored_id) and self._inset_storage().has(stored_id),
+                # 칸의 그림을 붙여넣은 그림으로 덮었는가 · 그 그림이 바뀔 때마다 바뀌는 값(그림 주소의 캐시 열쇠).
+                "overridden": bool(pin.get("source_override")),
+                "source_revision": str(pin.get("source_id") or "asset"),
+                # 생성 결과에서 인셋 칸을 잘라 내는가(이 세션의 설정).
+                "crop_result": bool(self._reference_inset_crop_result),
                 "character_id": pin["character_id"],
                 "variation": pin["variation"],
                 "width": pin["width"],
@@ -373,6 +892,26 @@ class HeadlessCharacterAssetService:
                 # 고를 수 있는 목록을 함께 싣는다 - 화면이 표를 따로 들면 한쪽만
                 # 고쳐져 서로 다른 말을 한다(SSOT 는 reference_inpaint_preprocess).
                 "sizes": [list(size) for size in REFERENCE_INSET_CANVAS_SIZES],
+                # 같은 목록을 비율(종류)별로 묶은 것 - 화면이 비율을 먼저 고르고 그 안에서 크기를 고른다.
+                # 묶음 안의 차례 = 급(1MP · Large · Wallpaper).
+                "size_groups": [
+                    {"label": label, "sizes": [list(size) for size in sizes]}
+                    for label, sizes in REFERENCE_INSET_CANVAS_KINDS
+                ],
+                # 칸 안의 그림(`box`)과 경계선(`divider` = 왼쪽에 붙은 칸의 너비) - 캔버스 px. 화면이 같은
+                # 계산을 하도록 한계 값과 기본 경계도 싣는다.
+                "box": dict(pin["box"]),
+                "divider": pin["divider"],
+                "default_divider": pin["default_divider"],
+                # 업스케일해 둔 원본으로 굽고 있는가. 배치 · 해상도를 바꿔도 유지된다(다시 부르지 않는다).
+                "upscaled": bool(pin["upscaled"]),
+                "custom": bool(pin["custom"]),
+                "source_width": pin["source"][0],
+                "source_height": pin["source"][1],
+                "open_ratio": round(float(pin["open_ratio"]), 4),
+                "limits": reference_inset_box_limits(
+                    ReferenceInsetPreprocessSpec(canvas_width=pin["width"], canvas_height=pin["height"])
+                ),
             }
 
     def reference_inset_generation_params(self) -> dict[str, Any]:
@@ -387,9 +926,9 @@ class HeadlessCharacterAssetService:
 
         with self._retain_lock:
             pin = self._reference_inset_pin
-            if not pin:
-                return {}
-            return {
+            if not pin or not self._reference_inset_enabled:
+                return {}                       # 꺼져 있으면 꽂아 둔 것이 있어도 일반 생성이다
+            params = {
                 "type": "inpaint",
                 "image_bytes": pin["canvas_png"],
                 "mask_bytes": pin["mask_png"],
@@ -401,6 +940,13 @@ class HeadlessCharacterAssetService:
                 "reference_inset_tag_required": True,
                 REFERENCE_INSET_PIN_MARKER: True,
             }
+            if self._reference_inset_crop_result:
+                # 결과에서 인셋 칸을 잘라 낸다 - api_service 가 생성 직후 이 경계선의 오른쪽만 남긴다.
+                # ⚠️ 캔버스의 지문을 함께 싣는다. Enhance · Upscale 은 이 결과의 생성 정보를 통째로 복사해 새 요청을
+                #    만들기 때문에, 자리만 실으면 다듬어진 그림을 한 번 더 잘라 낸다(사용자 제보 2026-10-09).
+                params["_reference_inset_crop_left"] = int(pin["divider"])
+                params["_reference_inset_crop_canvas"] = str(pin["canvas_id"])
+            return params
 
     def pinned_candidate(self, pin_id: str) -> Optional[dict[str, Any]]:
         with self._retain_lock:
@@ -984,7 +1530,7 @@ class HeadlessCharacterAssetService:
         if with_inset:
             # C1 + 레퍼런스 인셋: 선택 이미지를 인셋 핀으로 고정한다. 실패 시
             # C1 적용 자체는 이미 끝난 상태 - 명시 에러로 알린다(조용한 절반 성공 금지).
-            reference_inset = self.set_reference_inset_pin(character_id, variation)
+            reference_inset = self.set_reference_inset_pin(character_id, variation, enable=True)
         return {
             "ok": True,
             "state": state,

@@ -22574,38 +22574,51 @@ body.detached-module .mod-grid-3 {
 .char-bench-float-btn.tone-inpaint.active {
   background: #f0d882; color: #33280a; border-color: transparent;
 }
-/* 레퍼런스 인셋 핀 배지 - Result 뷰어 좌상단 고정, X로 즉시 해제 */
+/* 레퍼런스 인셋 띠 - Result 뷰어 왼쪽 위, 켜져 있는 동안. **접힌 캐릭터 퀵 슬롯(`.cq-box`)과 같은 크기**의
+   한 줄이다(사용자 지정 2026-10-10 - 썸네일 달린 96px 배지가 결과 그림을 가렸다). 그림 미리보기는 없고
+   해상도를 보여 준다. 이름 = 창 열기 · 해상도 = 고르기 · x = 끄기(그림과 배치는 남는다).
+   ⚠️ 너비 = 퀵 패널의 58%(`.cq-box { width: 58% }` 와 짝). 퀵 패널이 떠 있으면 app.js 가 실측해 맞춘다
+      (`CQ_COLLAPSED_RATIO`) - 아래 값은 패널이 없을 때의 것이다. */
 .reference-inset-badge {
-  position: absolute; top: 10px; left: 10px; z-index: var(--z-viewer-overlay);
-  width: 96px; border: 2px solid rgba(139, 118, 255, 0.85); border-radius: 9px;
-  background: rgba(12, 12, 20, 0.94); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  position: absolute; top: 10px; left: 12px; z-index: var(--z-viewer-overlay);
+  display: flex; align-items: stretch; box-sizing: border-box;
+  width: calc(min(340px, 100% - 24px) * 0.58); overflow: hidden;
+  border: 1px solid rgba(139, 118, 255, 0.5); border-radius: 8px;
+  background: rgba(20, 20, 28, 0.62); opacity: 0.7;
+  transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease;
 }
-.reference-inset-badge img {
-  display: block; width: 100%; height: auto; border-radius: 7px 7px 0 0;
-  user-select: none; -webkit-user-drag: none;
+.reference-inset-badge:hover, .reference-inset-badge:focus-within {
+  opacity: 1; background: rgba(18, 18, 26, 0.86); border-color: rgba(139, 118, 255, 0.85);
 }
-/* 라벨이 곧 해상도 고르기 버튼이다(사용자 지정) - 누를 수 있다는 것이 보여야 해서
-   테두리 대신 밑줄 한 줄과 hover 배경만 준다. 배지가 96px 로 좁아 테두리를 두르면
-   글자가 두 줄로 깨진다. */
-.reference-inset-badge-label {
-  display: block; width: 100%; padding: 4px 6px 5px; text-align: center;
-  border: 0; border-top: 1px solid rgba(139, 118, 255, 0.28);
-  border-radius: 0 0 7px 7px; background: transparent; cursor: pointer;
-  color: #cfc4ff; font: 700 10px var(--font-mono); line-height: 1.4;
-  letter-spacing: 0.02em; transition: background .14s, color .14s;
+.reference-inset-badge button {
+  border: 0; background: transparent; cursor: pointer; color: var(--text-secondary);
+  /* 줄 높이 14px = 접힌 퀵 슬롯과 같은 23px 띠(실측). */
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2px; line-height: 14px;
+  transition: background 0.14s ease, color 0.14s ease;
 }
-.reference-inset-badge-label:hover { background: rgba(139, 118, 255, 0.18); color: #ffffff; }
-.reference-inset-badge-label:focus-visible { outline: 1px solid #b2a0ff; outline-offset: -1px; }
-/* 고르기 메뉴는 body 직계 + fixed 다 - 배지가 뷰어 안이라 그 안에 그리면 잘린다. */
+.reference-inset-badge button:hover { background: rgba(139, 118, 255, 0.2); color: #ffffff; }
+.reference-inset-badge button:focus-visible { outline: 1px solid #b2a0ff; outline-offset: -2px; }
+.reference-inset-badge-open {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px;
+  padding: 4px 4px 4px 7px; text-align: left;
+}
+/* 왼쪽 칸이 찬 네모 = 인셋(Fn 메뉴의 ◧ 와 같은 뜻). 켜져 있다는 표시를 겸한다. */
+.reference-inset-badge-mark {
+  flex: none; width: 10px; height: 10px; box-sizing: border-box; border-radius: 2px;
+  border: 1px solid #b2a0ff; background: linear-gradient(90deg, #b2a0ff 0 45%, transparent 45%);
+}
+.reference-inset-badge-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* ⚠️ 아래 둘은 클래스를 겹쳐 쓴다 - 위의 `.reference-inset-badge button`(테두리 0 · 글자색)이 특이도로 이긴다. */
+.reference-inset-badge .reference-inset-badge-label {
+  flex: none; padding: 4px 5px; white-space: nowrap; color: #cfc4ff;
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+}
+/* 고르기 메뉴는 body 직계 + fixed 다 - 띠가 뷰어 안이라 그 안에 그리면 잘린다. */
 .reference-inset-menu { min-width: 132px; }
-.reference-inset-badge-x {
-  position: absolute; top: -7px; right: -7px; width: 20px; height: 20px;
-  border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.5); cursor: pointer;
-  background: #b2a0ff; color: #1d1440; font: 700 11px/1 var(--font-mono);
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+.reference-inset-badge .reference-inset-badge-x {
+  flex: none; width: 18px; padding: 4px 0; text-align: center; font-size: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
 }
-.reference-inset-badge-x:hover { background: #d0c4ff; }
 
 /* 생성 벤치 프롬프트 입력 - 추가 Negative 제거분만큼 여유 높이(사용자 지시) */
 .char-bench-create-ta { min-height: 200px; }
@@ -30643,4 +30656,150 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   .snapsave-grid > .ia-sc-col1, .snapsave-grid > .ia-sc-col2 { max-height: 112px; }
   .snapsave-main { grid-column: 1 / -1; }
   .snapsave-cardbox { flex-basis: 104px; }
+}
+
+/* ── 레퍼런스 인셋 창: 인셋 칸의 너비(경계선)와 칸 안의 그림을 정한다(사용자 지정 2026-10-09) ──
+   흰 바탕 = 나가는 캔버스. 칸은 늘 왼쪽에 붙어 있고, 그림은 칸이 자른다(칸 기준 % 로 놓는다).
+   칸 선은 화면에서 얇게만 긋는다(나가는 그림의 선은 서버가 긋는다). */
+.dragpanel.riw .dragpanel-body { padding: 10px; gap: 8px; overflow: hidden; }
+.riw-stage {
+  position: relative; width: 100%; background: #ffffff; overflow: hidden;
+  outline: 1px solid rgba(255, 255, 255, 0.16); touch-action: none; user-select: none;
+}
+.riw-panel { position: absolute; left: 0; top: 0; height: 100%; overflow: hidden; cursor: grab; }
+.riw-stage.is-dragging .riw-panel { cursor: grabbing; }
+.riw-pic {
+  position: absolute; max-width: none; pointer-events: none;
+  user-select: none; -webkit-user-drag: none;
+}
+.riw-frame {
+  position: absolute; box-sizing: border-box; pointer-events: none;
+  outline: 1px dashed rgba(139, 118, 255, 0.95); outline-offset: -1px;
+}
+.riw-frame[hidden] { display: none !important; }
+/* 그림의 크기 손잡이 - 보이는 부분의 오른쪽 아래 **안쪽**에 둔다(걸치면 칸 · 캔버스에 잘려서 못 잡는다). */
+.riw-handle {
+  position: absolute; right: 9px; bottom: 2px; width: 14px; height: 14px; box-sizing: border-box;
+  background: #ffffff; border: 2px solid #8b76ff; border-radius: 2px;
+  cursor: nwse-resize; pointer-events: auto;
+}
+/* 경계선 - 선은 2px 이지만 잡는 폭은 14px. 가운데의 알약이 '여기를 끈다' 를 말한다. */
+.riw-divider {
+  position: absolute; top: 0; height: 100%; width: 14px; margin-left: -8px; cursor: ew-resize;
+}
+.riw-divider::before {
+  content: ''; position: absolute; left: 6px; top: 0; width: 2px; height: 100%; background: #111111;
+}
+.riw-divider::after {
+  content: ''; position: absolute; left: 2px; top: 50%; width: 10px; height: 36px; margin-top: -18px;
+  box-sizing: border-box; border-radius: 5px; background: #8b76ff; border: 2px solid #ffffff;
+}
+/* 잠김(업스케일을 기다리는 중): 끌 것을 감춘다. */
+.riw-stage.is-locked .riw-panel { cursor: default; }
+.riw-stage.is-locked .riw-divider, .riw-stage.is-locked .riw-frame { display: none; }
+.riw-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* ⚠️ `[hidden]` 은 `display:flex` 에 진다 - 감추는 것마다 짝 규칙을 둔다. */
+.riw-row[hidden], .riw-main[hidden], .riw-store[hidden], .riw-empty[hidden], .riw-stage[hidden] {
+  display: none !important;
+}
+/* 상태 글은 남는 폭만 쓰고 넘치면 줄인다 - 길어지면('꺼져 있음 · …') 단추 줄이 두 줄이 됐다(실측). */
+.riw-note {
+  flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: var(--text-muted); font: 500 11px var(--font-mono);
+}
+.riw-check {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap;
+  color: var(--text-muted); font: 500 11px var(--font-mono);
+}
+.riw-check:hover { color: var(--text-primary); }
+.riw-sizes { display: inline-flex; gap: 6px; }
+.riw-chip {
+  padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-glow);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font: 700 11px var(--font-mono); letter-spacing: 0.02em;
+}
+.riw-chip:hover:not(:disabled) { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+.riw-chip.is-on { border-color: rgba(139, 118, 255, 0.85); color: #ffffff; background: rgba(139, 118, 255, 0.22); }
+.riw-chip:disabled { opacity: 0.45; cursor: default; }
+.riw-read { margin-left: auto; white-space: nowrap; color: var(--text-muted); font: 500 11px var(--font-mono); }
+
+/* ── 레퍼런스 인셋 창 개편(사용자 지정 2026-10-10): 켜고 끄기 · 빈 상태 · 이름 붙은 줄 · Storage ── */
+.riw-main, .riw-store { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dragpanel.riw .dragpanel-slot { justify-content: flex-end; padding-right: 4px; }
+/* 머리줄의 켜고 끄기. 켜져 있으면 보라, 꺼져 있으면 회색 - 글자가 상태를 말한다. */
+.riw-switch {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none;
+  padding: 2px 8px 2px 6px; border-radius: 999px; border: 1px solid var(--border-glow);
+  color: var(--text-muted); font: 700 11px var(--font-mono);
+}
+.riw-switch input { width: 12px; height: 12px; margin: 0; cursor: pointer; accent-color: rgb(139, 118, 255); }
+.riw-switch.is-on { border-color: rgba(139, 118, 255, 0.85); color: #ffffff; background: rgba(139, 118, 255, 0.22); }
+.riw-switch:has(input:disabled) { opacity: 0.45; cursor: default; }
+.riw-switch input:disabled { cursor: default; }
+/* 꺼져 있는 동안: 캔버스를 흐리게 - 이 배치는 지금 나가지 않는다. 그래도 끌어서 고칠 수 있다. */
+.riw-stage.is-off { opacity: 0.55; }
+/* 줄 이름. 같은 폭으로 세워야 세 줄의 단추가 한 줄에 선다. */
+.riw-label {
+  flex: none; width: 52px; color: var(--text-dim); white-space: nowrap;
+  font: 600 10.5px var(--font-mono); letter-spacing: 0.02em;
+}
+.riw-row-center { justify-content: center; }
+/* 꽂아 둔 것이 없을 때. 캔버스가 놓일 자리와 비슷한 높이로 두어 그림을 넣어도 창이 덜 튄다. */
+.riw-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  min-height: 220px; border: 1px dashed var(--border-glow); border-radius: 8px;
+}
+.riw-empty-text { color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.riw-empty-hint { color: var(--text-dim); font: 500 10.5px var(--font-mono); }
+/* Storage - 저장해 둔 그림의 격자. 높이를 묶어 두지 않으면 그림 수만큼 창이 자란다. */
+.riw-store-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px;
+  max-height: 392px; min-height: 300px; overflow-y: auto; align-content: start; padding: 2px;
+}
+.riw-store-empty {
+  grid-column: 1 / -1; padding: 44px 12px; text-align: center;
+  color: var(--text-muted); font-size: 12px; line-height: 1.6;
+}
+.riw-store-item { position: relative; }
+.riw-store-pick {
+  display: flex; flex-direction: column; width: 100%; padding: 0; cursor: pointer; overflow: hidden;
+  border-radius: 6px; border: 1px solid var(--border-glow); background: #ffffff;
+}
+.riw-store-pick:hover { border-color: rgba(139, 118, 255, 0.85); }
+.riw-store-item.is-current .riw-store-pick { border-color: #8b76ff; box-shadow: 0 0 0 1px #8b76ff; }
+.riw-store-pick img {
+  display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: #ffffff;
+  user-select: none; -webkit-user-drag: none;
+}
+.riw-store-size {
+  padding: 2px 0 3px; text-align: center; background: rgba(12, 12, 20, 0.94);
+  color: var(--text-muted); font: 500 9.5px var(--font-mono);
+}
+.riw-store-x {
+  position: absolute; top: 3px; right: 3px; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; border: 1px solid rgba(0, 0, 0, 0.5); cursor: pointer;
+  background: rgba(12, 12, 20, 0.82); color: #e6e6ee; font: 700 11px/1 var(--font-mono);
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.riw-store-item:hover .riw-store-x, .riw-store-x:focus-visible, .riw-store-x.is-armed { opacity: 1; }
+.riw-store-x.is-armed { background: #c8324a; color: #ffffff; border-color: transparent; font-size: 10px; }
+
+/* ── 레퍼런스 인셋 캔버스를 비율(종류)별로 · 고해상도(사용자 지정 2026-10-10) ──
+   1MP 를 넘는 크기는 Anlas 가 든다 - 금액은 호박색으로(Generate 옆의 금액 칩과 같은 뜻). */
+.riw-chip-cost { color: #f0c060; font-weight: 500; }
+.riw-chip.is-on .riw-chip-cost { color: #ffe1a0; }
+.riw-cost { margin-left: auto; white-space: nowrap; color: #f0c060; font: 600 11px var(--font-mono); }
+.reference-inset-badge .reference-inset-badge-label.is-paid { color: #f0c060; }
+/* 띠의 해상도 메뉴: 비율 이름 줄 + 두 칸(크기 · 금액). 열두 줄이라 줄을 낮게 잡는다. */
+.reference-inset-menu { max-height: calc(100vh - 16px); overflow-y: auto; }
+.reference-inset-menu-kind {
+  padding: 5px 9px 1px; color: var(--text-dim); font: 600 9.5px var(--font-mono); letter-spacing: 0.04em;
+}
+/* ⚠️ `.cq-connect-item` 은 세로로 쌓는 줄이고(`flex-direction: column`) 그 안의 `span` 을 흐린 작은 글씨로 만든다 -
+   가로 두 칸으로 되돌리고, 금액은 클래스를 겹쳐 그 규칙을 이긴다. */
+.reference-inset-menu .cq-connect-item {
+  flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 9px;
+}
+.reference-inset-menu .reference-inset-menu-cost {
+  flex: none; overflow: visible; color: #f0c060; font: 600 10.5px var(--font-mono);
 }

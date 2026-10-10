@@ -2053,6 +2053,27 @@ function isMainWebContents(webContents) {
   );
 }
 
+function zoomState(factor) {
+  return { factor, min: ZOOM_MIN, max: ZOOM_MAX, step: ZOOM_STEP, default: ZOOM_DEFAULT };
+}
+
+// 설정 화면(Settings > UI 확대 · 축소)의 슬라이더가 따라오게 알린다 - Ctrl+휠 · Ctrl+± · Ctrl+0 ·
+// fit-width · 슬라이더 어느 길로 바뀌든 여기 한 곳을 거친다.
+function notifyMainZoom(factor) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send("naia:zoom-changed", zoomState(factor));
+  } catch (_error) {}
+}
+
+function currentMainZoom() {
+  let factor = loadZoomFactor();
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) factor = clampZoom(mainWindow.webContents.getZoomFactor());
+  } catch (_error) {}
+  return factor;
+}
+
 function applyMainWindowZoom() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
@@ -2076,6 +2097,7 @@ function adjustZoom(webContents, direction) {
   if (main) {
     saveZoomFactor(next);
     applyDanbooruViewBounds();
+    notifyMainZoom(next);
   }
 }
 
@@ -2087,6 +2109,7 @@ function resetZoom(webContents) {
   if (isMainWebContents(webContents)) {
     saveZoomFactor(1.0);
     applyDanbooruViewBounds();
+    notifyMainZoom(1.0);
   }
 }
 
@@ -2097,6 +2120,27 @@ ipcMain.on("naia:zoom-by", (event, direction) => {
 });
 
 ipcMain.on("naia:zoom-reset", (event) => resetZoom(event.sender));
+
+// 설정 화면의 슬라이더. 배율의 주인은 메인 창 하나다 - 어느 창에서 청하든 메인 창의 것을 읽고 쓴다.
+// 쓰기는 단계(ZOOM_STEP)에 맞추고 범위 안으로 들인 뒤, 단축키와 **같은 저장 · 같은 뒤처리**를 한다.
+ipcMain.handle("naia:zoom-get", () => zoomState(currentMainZoom()));
+
+ipcMain.handle("naia:zoom-set", (_event, value) => {
+  const requested = Number(value);
+  if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(requested)) {
+    return { ok: false, ...zoomState(currentMainZoom()) };
+  }
+  const next = clampZoom(Math.round(requested / ZOOM_STEP) * ZOOM_STEP);
+  try {
+    mainWindow.webContents.setZoomFactor(next);
+  } catch (_error) {
+    return { ok: false, ...zoomState(currentMainZoom()) };
+  }
+  saveZoomFactor(next);
+  applyDanbooruViewBounds();
+  notifyMainZoom(next);
+  return { ok: true, ...zoomState(next) };
+});
 
 // Automation 완료 등 백그라운드 작업이 끝나면 작업표시줄 버튼을 깜빡여(Windows 노란불)
 // 사용자 주의를 끈다. 창이 이미 포커스면 불필요하므로 비활성(다른 창/최소화)일 때만 깜빡인다.
@@ -2911,7 +2955,10 @@ ipcMain.handle("naia:fit-width", (_event, cssWidth) => {
     zoomed = true;
     cur = cssNow();
   }
-  if (zoomed) applyDanbooruViewBounds();
+  if (zoomed) {
+    applyDanbooruViewBounds();
+    notifyMainZoom(cur.zoom);
+  }
   return { ok: cur.css >= need, need, cssWidth: cur.css, zoom: cur.zoom, resized, zoomed,
            before: before.css };
 });

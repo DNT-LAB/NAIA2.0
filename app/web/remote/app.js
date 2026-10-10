@@ -2652,6 +2652,14 @@ const fontSettingsPanelReady = import('./js/features/fontSettingsPanel.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize font settings panel module', error);
   });
+
+// Settings > Global > UI 확대 · 축소. 배율의 주인은 앱 껍데기다(Ctrl+± · Ctrl+휠과 같은 값) -
+// 이 화면은 그 값을 비추고, 고르면 껍데기에 청한다. 브라우저 탭 · 옛 껍데기에서는 슬라이더가 꺼진다.
+import('./js/features/uiZoomSetting.mjs?v=20261010-uizoom')
+  .then(({createUiZoomSetting}) => {
+    createUiZoomSetting({document, root: $('uiZoomSetting'), shell: window.naiaShell || null, showToast});
+  })
+  .catch(error => console.error('Failed to initialize UI zoom setting', error));
 const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260704-wc-folder2')
   .then(({createWildcardManagerPanel}) => {
     wildcardManagerPanel = createWildcardManagerPanel({

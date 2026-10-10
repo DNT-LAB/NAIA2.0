@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261010-pegrip">
+<link rel="stylesheet" href="style.css?v=20261010-uizoom">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -1441,6 +1441,13 @@
             </div>
           </div>
           <div class="settings-group">
+            <h3 class="settings-group-title">UI 확대 · 축소</h3>
+            <div class="settings-toggle-row">
+              <div class="font-settings ui-zoom-setting" id="uiZoomSetting"></div>
+              <p class="settings-toggle-desc">앱 화면 전체의 크기를 <b>다섯 단계</b>로 바꿉니다. <kbd>Ctrl</kbd> + <kbd>+</kbd> · <kbd>Ctrl</kbd> + <kbd>-</kbd> 또는 <kbd>Ctrl</kbd> + 마우스 휠로도 바꿀 수 있습니다. <kbd>Ctrl</kbd> + <kbd>0</kbd> 은 100% 로 되돌립니다. 고른 배율은 다음 실행에도 유지됩니다.</p>
+            </div>
+          </div>
+          <div class="settings-group">
             <h3 class="settings-group-title">저장</h3>
             <div class="settings-toggle-row">
               <button type="button" class="mod-btn-secondary settings-action-btn"
@@ -1536,6 +1543,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261010-escsave"></script>
+<script src="app.js?v=20261010-uizoom"></script>
 </body>
 </html>

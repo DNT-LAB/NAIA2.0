@@ -12,6 +12,18 @@ contextBridge.exposeInMainWorld("naiaShell", {
   openLogs: () => ipcRenderer.invoke("naia:open-logs"),
   // 창 폭을 맞춘다 — 1) 창 넓히기 2) 모자라면 줌 단계 축소. Interactive 태그 사전용.
   fitWidth: (cssWidth) => ipcRenderer.invoke("naia:fit-width", cssWidth),
+  // 앱 화면 배율(Ctrl+휠 · Ctrl+± · Ctrl+0 과 같은 값). 설정 화면의 슬라이더가 읽고 쓴다.
+  // 돌려주는 모양: { factor, min, max, step, default } (+ setZoom 은 ok).
+  getZoom: () => ipcRenderer.invoke("naia:zoom-get"),
+  setZoom: (factor) => ipcRenderer.invoke("naia:zoom-set", factor),
+  onZoomChanged: (callback) => {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("naia:zoom-changed", listener);
+    return () => ipcRenderer.removeListener("naia:zoom-changed", listener);
+  },
   // options = { title, defaultPath } — 안 주면 예전 그대로(데이터 이전 화면)
   pickDirectory: (options) => ipcRenderer.invoke("naia:pick-directory", options),
   pickSaveDirectory: () => ipcRenderer.invoke("naia:pick-save-directory"),

@@ -21934,6 +21934,27 @@ body.detached-module .mod-grid-3 {
 .font-scale-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
 .font-scale-row input[type="range"]:disabled { opacity: 0.4; }
 .font-scale-value { min-width: 38px; text-align: right; font-family: var(--font-mono); }
+/* Settings > UI 확대 · 축소 (js/features/uiZoomSetting.mjs). 폰트의 '크기 보정' 줄과 같은 틀에 눈금을 단다.
+   눈금은 손잡이가 실제로 서는 자리에 맞춘다 - 손잡이 폭의 절반(8px)만큼 양쪽을 들인다. */
+.ui-zoom-row { align-items: flex-start; }
+.ui-zoom-row > label, .ui-zoom-row > .font-scale-value { line-height: 20px; }
+.ui-zoom-track { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* ⚠️ `flex: 0 0 auto` 가 있어야 한다 - 위 `.font-scale-row input[type="range"]` 의 `flex: 1` 이 여기에도 걸리는데,
+   이 칸은 세로로 쌓는 상자라 그 값이 **높이**를 늘린다(슬라이더가 굵은 막대가 됐다 - 실측). */
+.ui-zoom-track input[type="range"] { flex: 0 0 auto; width: 100%; margin: 2px 0; }
+.ui-zoom-ticks { display: flex; justify-content: space-between; padding: 0 8px; }
+.ui-zoom-ticks span {
+  width: 0; display: flex; justify-content: center;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
+}
+.ui-zoom-ticks span.is-on { color: var(--accent-light); }
+.ui-zoom-row .mod-btn-secondary { flex: 0 0 auto; padding: 3px 10px; font-size: 11px; }
+.ui-zoom-note { font-size: 11px; color: var(--accent-secondary); }
+.ui-zoom-note[hidden] { display: none; }
+.settings-toggle-desc kbd {
+  padding: 0 5px; border: 1px solid var(--border-glow); border-radius: 4px;
+  background: var(--bg-deep); font-family: var(--font-mono); font-size: 10px; color: var(--text-primary);
+}
 /* 미리보기는 --font-editor 를 상속받아 선택 결과를 그대로 보여준다. */
 .font-preview {
   padding: 10px 12px; border-radius: 8px;

@@ -859,7 +859,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261004-neg
       // [외부 브라우저] — 작가 썸네일 단독 화면(artist-viewer.html)을 시스템 브라우저로 연다.
       openExternalUrl: openUrlInSystemBrowser,
       // 믹스 판 아래 PE 빠른 수정. `/pe` 임시 편집창과 **같은 길**을 쓴다.
-      getPeField: key => String(slashPeState()[key] || ''),
+      getPeField: key => peFieldText(key),
       setPeField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),
       getPePreset: () => String(slashPeState().preset || ''),
       beforeMixApply: () => {
@@ -12806,6 +12806,11 @@ function setModuleParam(moduleId, key, value, options = {}) {
 // `slotUuid` = 이 글을 친 캐릭터 칸의 uuid(그 칸을 **그릴 때** 적어 둔 값). 묵히는 동안 배열이 바뀌어도
 // 서버가 그 칸을 찾아가게 한다 - 번호만 보내면 낡은 번호가 남의 칸(보관해 둔 캐릭터)을 덮는다.
 function onModTextEdit(moduleId, key, value, stamp, slotUuid) {
+  // 모듈 창의 PE 글칸에 글자가 쳐졌다 - 같은 값을 비추는 창들(리모컨 · 메인의 작은 창)이 **묶어 보내기 전의**
+  // 그 글을 곧바로 따라온다. 안 알리면 0.5초 + 왕복 동안 옛 글을 보여 주고, 그 위에 친 것이 이 수정을 덮는다.
+  if (moduleId === 'prompt_engineering' && Object.hasOwn(PE_FIELD_ELEMENTS, key)) {
+    peFieldHub?.noteLiveInput(key, {origin: 'module'});
+  }
   // 대기 자리는 하나다. 조건부 창(떠 있는 창)과 모듈 팝업은 함께 열려 있을 수 있어서, 한쪽에서 치고
   // 0.5초 안에 다른 칸을 치면 앞 칸의 대기분이 **덮여 사라진다** - 다른 칸의 것은 먼저 보낸다.
   // ⚠️ **칸(uuid)** 까지 견준다. 번호만 보면, 그 자리에 다른 캐릭터가 온 뒤의 편집이 앞 캐릭터의 대기분을
@@ -14228,6 +14233,37 @@ function slashPeOptionChoice(key, title) {
  *  ⚠️ `stampedEdit` 는 낡은 편집 방지 도장이다 - 편집을 시작한 뒤 프리셋이 바뀌면 서버가
  *     그 값을 버릴 수 있게 한다. 이 규칙이 두 곳에 있으면 한쪽이 엉뚱한 프리셋에 쓴다. */
 const PE_FIELD_ELEMENTS = {pre_prompt: 'modPrePrompt', post_prompt: 'modPostPrompt', auto_hide: 'modAutoHide'};
+// PE 글칸을 고치는 화면이 넷이다(모듈 창 · `/pe` · 리모컨의 창 · 메인의 작은 창). **잠그지 않고 같은 글을 비춘다**
+// (사용자 결정 2026-10-10): 어느 화면에서 고치든 열려 있는 다른 화면이 서버를 한 바퀴 돌기 전에 그 글을 본다.
+// 읽기는 `peFieldText` 한 곳으로 - 모듈 창의 칸이 떠 있으면 그 칸이 가장 새 글이다(js/features/peFieldHub.mjs).
+let peFieldHub = null;
+import('./js/features/peFieldHub.mjs?v=20261010-pehub')
+  .then(({createPeFieldHub}) => {
+    peFieldHub = createPeFieldHub({
+      getState: () => slashPeState(),
+      // ⚠️ 모듈 창을 닫아도 그 칸의 DOM 은 남는다(`closeModule` 은 `currentModuleId` 만 비운다) - 그래서 그것을 본다.
+      getLiveBox: key => {
+        if (currentModuleId === 'prompt_engineering') {
+          const el = document.getElementById(PE_FIELD_ELEMENTS[key]);
+          if (el?.isConnected) return {value: el.value, preset: el.dataset.preset || ''};
+        }
+        return null;
+      },
+      commitState: next => {
+        moduleStateCache.set('prompt_engineering', next);
+        lastPromptEngineeringState = next;
+      },
+      cloneState: cloneModuleState,
+    });
+    peFieldHub.subscribe(() => {
+      try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
+      try { mainPeQuick?.sync(); } catch (_) {}
+    });
+  })
+  .catch(error => console.error('Failed to initialize PE field hub', error));
+function peFieldText(key) {
+  return peFieldHub ? peFieldHub.read(key) : String(slashPeState()[key] || '');
+}
 function slashPeSetField(key, value, seenPreset = null) {
   const text = String(value ?? '');
   // 도장은 **보고 친 프리셋**이다. 상주 패널처럼 전환을 걸쳐 열려 있을 수 있는 쪽은
@@ -14236,13 +14272,16 @@ function slashPeSetField(key, value, seenPreset = null) {
   setModuleParam('prompt_engineering', key, stampedEdit(text, stamp));
   // PE 모듈이 열려 있으면 그 칸도 맞춘다(반대 방향은 모듈 상태가 돌아올 때 온다).
   const el = document.getElementById(PE_FIELD_ELEMENTS[key] || '');
-  if (el) el.value = text;
+  // ⚠️ 앞 프리셋을 보고 친 글(도장이 지금 프리셋과 다르다)은 서버가 버린다. 그 글을 모듈 창의 칸에 써 두면
+  //    버려진 글이 지금 프리셋의 것처럼 보이고, 그 칸을 비추는 다른 창들도 따라간다.
+  if (el && (!stamp || stamp === (slashPeState().preset || ''))) el.value = text;
+  peFieldHub?.noteLocalWrite(key, text, {seenPreset: stamp, origin: 'quick'});
 }
 /** 작은 임시 편집창으로 PE 칸 하나를 고친다. */
 function slashPeEditor(key, _elementId, title) {
   return () => ({editor: {
     title,
-    get: () => String(slashPeState()[key] || ''),
+    get: () => peFieldText(key),
     set: value => slashPeSetField(key, value),
   }});
 }
@@ -14474,7 +14513,7 @@ import('./js/features/mainPeQuick.mjs?v=20261010-pemini2')
         .then(module => module.createPeQuickEdit),
       loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign')
         .then(module => module.createDraggablePanel),
-      getField: key => String(slashPeState()[key] || ''),
+      getField: key => peFieldText(key),
       setField: (key, text, seenPreset) => slashPeSetField(key, text, seenPreset),
       getPreset: () => String(slashPeState().preset || ''),
       requestState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },

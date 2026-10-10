@@ -29885,6 +29885,56 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .peq-box.nai-preview .peq-text { caret-color: transparent; }
 .peq-box.is-editing .peq-text { caret-color: var(--text-primary); }
 
+/* ══ 메인 칸의 [prefix] [postfix] 꼬리표 (js/features/mainPeQuick.mjs) ══════════
+   **매우 작게**(사용자 지정 2026-10-10). 글자를 가리지 않는 띠에만 선다:
+   위 = 입력칸의 위 여백 14px · 아래 = 토큰 줄 바로 위의 빈 띠 14px(입력칸 아래 여백 48 / 66px 에서
+   토큰 줄 34 / 52px 을 뺀 나머지). ⚠️ 그 넷 중 하나를 바꾸면 여기 `bottom` 도 같이 바꿀 것. */
+.pe-mini {
+  position: absolute; left: 12px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 14px; padding: 0 6px; margin: 0;
+  border: 1px solid rgba(232,232,240,0.14); background: rgba(255,255,255,0.045);
+  color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; line-height: 1;
+  letter-spacing: .04em; cursor: pointer; user-select: none;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.pe-mini--top { top: 0; border-top: 0; border-radius: 0 0 5px 5px; }
+.pe-mini--bottom { bottom: 34px; border-bottom: 0; border-radius: 5px 5px 0 0; }
+.prompt-highlight-wrap.has-activated-summary .pe-mini--bottom { bottom: 52px; }
+.pe-mini-caret { font-size: 8px; }
+.pe-mini:hover { color: var(--text-primary); border-color: var(--accent); background: rgba(124,106,239,0.16); }
+.pe-mini.is-on { color: #0d1020; background: var(--accent); border-color: var(--accent); }
+/* 입력창의 주인이 바뀌면(Interactive · 인페인트 세션) 조용히 물러난다 - 그동안 Prefix · Postfix 는 안 쓰인다.
+   좁은 화면에는 끌어 둘 자리가 없다. */
+body.interactive-mode .pe-mini,
+body.inpaint-prompt-owned .pe-mini { display: none; }
+@media (max-width: 767px) { .pe-mini { display: none; } }
+/* 꼬리표가 여는 **작은 창**(prefix 하나 · postfix 하나 - 사용자 지정 2026-10-10). 리모컨의 PE 창(`.pewin`)과
+   같은 판을 쓰되 겉을 줄인다: 머리줄 18px 한 줄에 칸 이름 · 글자 수 · 닫기. 판의 줄 머리(칸 이름 단추)는
+   숨긴다 - 그 일은 창의 머리줄이 한다. 판은 두 줄을 늘 함께 만들므로 창마다 **제 줄만** 보인다.
+   ⚠️ `.peq-text` 와 `.peq-hl` 은 글자 상자가 한 픽셀도 다르면 안 된다 - 아래에서 둘을 **함께** 고친다. */
+.dragpanel.pefloat { border-radius: 8px; border-color: rgba(130, 150, 255, 0.5); }
+.dragpanel.pefloat .dragpanel-head { height: 18px; padding: 0 2px 0 6px; gap: 5px; }
+.dragpanel.pefloat .dragpanel-grab { height: 9px; }
+.dragpanel.pefloat .dragpanel-title {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: .04em;
+  color: var(--accent-light);
+}
+.dragpanel.pefloat .dragpanel-slot { justify-content: flex-end; }
+.pefloat-count { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); white-space: nowrap; }
+.dragpanel.pefloat .dragpanel-btn { font-size: 12px; line-height: 16px; padding: 0 4px; border-radius: 4px; }
+.dragpanel.pefloat .dragpanel-body { padding: 0; }
+.dragpanel.pefloat .peq-head { display: none; }
+.dragpanel.pefloat[data-pe-field="pre_prompt"] .peq-row:not([data-peq-key="pre_prompt"]),
+.dragpanel.pefloat[data-pe-field="post_prompt"] .peq-row:not([data-peq-key="post_prompt"]) { display: none; }
+.dragpanel.pefloat .peq-box { margin: 0; }
+.dragpanel.pefloat .peq-text,
+.dragpanel.pefloat .peq-hl {
+  padding: 5px 7px; border: 0; border-radius: 0; font-size: 11px; line-height: 1.5;
+}
+.dragpanel.pefloat .peq-text { min-height: 30px; }
+
+
 /* ══ 창을 건너는 끌기 (js/features/dragBroker.mjs) ══════════════════════════ */
 /* ⚠️ 유령은 pointer-events:none 이라야 elementFromPoint 가 **밑의** 받는 쪽을 돌려준다. */
 .drag-ghost {

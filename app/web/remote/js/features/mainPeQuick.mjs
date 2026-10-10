@@ -129,10 +129,21 @@ export function createMainPeQuick({
     if (slot.opening) return slot.opening;
     slot.opening = (async () => {
       const [createPeQuickEdit, createDraggablePanel] = await Promise.all([loadPeQuickEdit(), loadDraggablePanel()]);
+      // 방금의 저장이 실패했는가(연결이 끊겼다 - `setField` 가 던진다). 판은 실패를 알리고 그 줄을 안 보낸 글로
+      // 남기지만, **접힌 줄은 다시 열 때 서버 값으로 채워진다** - 아래 Esc 처리가 이것을 본다.
+      let saveFailed = false;
+      const guardedSetField = (key, text, seenPreset) => {
+        try {
+          setField(key, text, seenPreset);
+        } catch (error) {
+          saveFailed = true;
+          throw error;
+        }
+      };
       const quick = createPeQuickEdit({
         document: doc, escHtml, showToast,
         attachHighlight, bindAssist,
-        getField, setField, getPreset, requestState,
+        getField, setField: guardedSetField, getPreset, requestState,
       });
       const width = Math.max(240, Math.round(host.getBoundingClientRect().width) - INSET * 2);
       const panel = createDraggablePanel({
@@ -166,6 +177,17 @@ export function createMainPeQuick({
         // 저장과 Random 은 같은 소켓으로 차례대로 나간다. (Ctrl+Enter 는 판이 '저장' 으로 쓴다 - 그대로 둔다.)
         // 조합 중의 keydown 은 입력기의 것이다 - 문서의 단축키도 **같은 규칙**으로 그 keydown 을 지나친다(app.js).
         if (event.key === 'Enter' && event.altKey && !event.ctrlKey && !event.isComposing && event.keyCode !== 229) quick.flush();
+        // Esc = 저장하고 닫기(사용자 지시). **저장이 안 되면 닫지 않는다.** 먼저 보내 보고, 실패했으면 이 Esc 를 판에
+        // 넘기지 않는다 - 줄이 접히지 않고 창도 열린 채라 안 보낸 글이 그대로 남는다(실패는 판이 알렸다).
+        // 넘기면 판이 줄을 접고, 접힌 줄은 다시 열 때 서버 값으로 채워져 그 글이 사라진다(Codex 리뷰 2026-10-10).
+        if (event.key === 'Escape' && !event.isComposing && event.keyCode !== 229) {
+          saveFailed = false;      // **이번** Esc 의 저장만 본다 - 앞선 실패가 남아 있으면 영영 못 닫는다
+          quick.flush();
+          if (saveFailed) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }
       }, true);
       // 판이 Esc 로 줄을 접었으면 창도 닫는다 - 줄 머리가 없는 창에 빈 상자만 남지 않게(머리말).
       quick.el.addEventListener('keydown', event => {

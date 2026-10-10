@@ -145,6 +145,19 @@ export function createMainPeQuick({
         attachHighlight, bindAssist,
         getField, setField: guardedSetField, getPreset, requestState,
       });
+      // Esc = 저장하고 닫기(사용자 지시). **저장이 안 되면 닫지 않는다.** 먼저 보내 보고, 실패했으면 그 Esc 를 판에
+      // 넘기지 않는다 - 줄이 접히지 않고 창도 열린 채라 안 보낸 글이 그대로 남는다(실패는 판이 알렸다).
+      // 넘기면 판이 줄을 접고, 접힌 줄은 다시 열 때 서버 값으로 채워져 그 글이 사라진다(Codex 리뷰 2026-10-10).
+      const saveBeforeFold = event => {
+        // 자동완성 후보 창이 먹은 Esc(`defaultPrevented`)는 그 창의 것이다 - 판도 같은 규칙으로 지나친다.
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        saveFailed = false;      // **이번** Esc 의 저장만 본다 - 앞선 실패가 남아 있으면 영영 못 닫는다
+        quick.flush();
+        if (saveFailed) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      };
       const width = Math.max(240, Math.round(host.getBoundingClientRect().width) - INSET * 2);
       const panel = createDraggablePanel({
         document: doc, window: win,
@@ -177,16 +190,14 @@ export function createMainPeQuick({
         // 저장과 Random 은 같은 소켓으로 차례대로 나간다. (Ctrl+Enter 는 판이 '저장' 으로 쓴다 - 그대로 둔다.)
         // 조합 중의 keydown 은 입력기의 것이다 - 문서의 단축키도 **같은 규칙**으로 그 keydown 을 지나친다(app.js).
         if (event.key === 'Enter' && event.altKey && !event.ctrlKey && !event.isComposing && event.keyCode !== 229) quick.flush();
-        // Esc = 저장하고 닫기(사용자 지시). **저장이 안 되면 닫지 않는다.** 먼저 보내 보고, 실패했으면 이 Esc 를 판에
-        // 넘기지 않는다 - 줄이 접히지 않고 창도 열린 채라 안 보낸 글이 그대로 남는다(실패는 판이 알렸다).
-        // 넘기면 판이 줄을 접고, 접힌 줄은 다시 열 때 서버 값으로 채워져 그 글이 사라진다(Codex 리뷰 2026-10-10).
-        if (event.key === 'Escape' && !event.isComposing && event.keyCode !== 229) {
-          saveFailed = false;      // **이번** Esc 의 저장만 본다 - 앞선 실패가 남아 있으면 영영 못 닫는다
-          quick.flush();
-          if (saveFailed) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
+        // Esc 의 '저장해 보기'(`saveBeforeFold`)는 **그 칸의 맨 뒤**에 한 번짜리로 건다.
+        // ⚠️ 여기(판보다 앞 · 칸보다도 앞)에서 바로 하면 자동완성 후보 창의 Esc 를 가로챈다 - 후보만 물리려던
+        //    Esc 에 글이 저장되고, 저장에 실패하면 후보 창이 닫히지도 않는다(Codex 리뷰 2026-10-10).
+        //    후보 창(tagAssist)은 칸에 직접 손을 걸어 둔다. 이벤트가 그 칸에 닿기 **전에** 건 손은 그 칸의 손들
+        //    맨 뒤에 붙으므로, 후보 창이 언제 걸렸든 그보다 뒤 · 판의 손(버블)보다 앞에서 돈다.
+        if (event.key === 'Escape' && !event.isComposing && event.keyCode !== 229
+            && event.target && event.target !== quick.el && typeof event.target.addEventListener === 'function') {
+          event.target.addEventListener('keydown', saveBeforeFold, {once: true});
         }
       }, true);
       // 판이 Esc 로 줄을 접었으면 창도 닫는다 - 줄 머리가 없는 창에 빈 상자만 남지 않게(머리말).

@@ -14639,7 +14639,7 @@ updatePromptTokenEstimate();
 // 프롬프트 엔지니어링 모듈을 열지 않고 그 두 칸을 **작은 떠 있는 창 둘**로 고친다 - 결과 그림을 보면서.
 // 판은 리모컨의 PE 빠른 수정과 같은 것이고, 읽기 · 쓰기 · 프리셋 도장도 `/pe` 와 한 길을 쓴다.
 let mainPeQuick = null;
-import('./js/features/mainPeQuick.mjs?v=20261010-review7')
+import('./js/features/mainPeQuick.mjs?v=20261010-review8')
   .then(({createMainPeQuick}) => {
     mainPeQuick = createMainPeQuick({
       document, window, escHtml, showToast,

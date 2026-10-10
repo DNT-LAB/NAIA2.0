@@ -122,6 +122,16 @@ let _negativeUserDirty = false;
 // 다른 탭이 프리셋을 바꾼 뒤에 닿은 네거티브 편집을 서버가 버릴 수 있게 함께 보낸다. 표식이 없던 때에는 그 글이
 // **새 프리셋**에 써졌다(Codex 리뷰 2026-10-10 - Random 앞에 네거티브를 먼저 보내면서 그 길이 하나 더 늘었다).
 let _negativeDirtyPreset = '';
+// 들고 있는 프리셋 이름을 **믿을 수 없는 동안** 참이다 - 새 PE 상태가 올 때까지 표식을 비운다(서버는 표식이 없으면
+// 판정하지 않는다).
+// ⚠️ 프리셋을 바꾼 결과(PE 상태)는 **바꾼 창에만** 온다. 다른 창은 옛 이름을 쥔 채라, 서버가 "그 편집은 앞 프리셋의
+//    것" 이라며 칸을 고쳐 준 뒤에도 옛 이름표를 계속 달았다 - 고쳐진 칸을 다시 고쳐도 **매번 버려졌다**
+//    (Codex 리뷰 2026-10-10). 모드를 바꾼 직후도 같다(새 모드의 PE 상태가 오기 전).
+let _presetStampStale = false;
+function refreshPresetStamp() {
+  _presetStampStale = true;
+  try { requestModuleState('prompt_engineering'); } catch (_) {}
+}
 function markNegativeEdited() {
   // 처음 세울 때만 잡는다 - 계속 치는 동안 다시 잡으면 스왑 뒤의 이름으로 바뀌어 표식의 뜻이 사라진다.
   if (!_negativeUserDirty) {
@@ -138,6 +148,7 @@ function markNegativeEdited() {
  *  백엔드가 **스왑 뒤 늦게 도착한 글**을 버릴 수 있다(Prefix/Postfix 와 같은 방식).
  *  패널이 안 열려 있어도 모듈 상태 캐시에 남아 있으므로 여기서 읽는다. */
 function _currentPresetStamp() {
+  if (_presetStampStale) return '';
   const st = moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState;
   return st && typeof st.preset === 'string' ? st.preset : '';
 }
@@ -6861,6 +6872,10 @@ function syncPrompts(m) {
   if (forceSync && m.stale_correction && promptEdit.value !== _lastSentPromptValue) {
     forceSync = false;
   }
+  // 이 창이 쥔 프리셋 이름이 낡았다는 뜻이기도 하다 - 새 이름을 받아 온다(`refreshPresetStamp`).
+  // ⚠️ 네거티브는 보낸 뒤에 더 친 글이 있어도 **덮는다**(메인 칸과 다르다). 그 칸의 글은 통째로 앞 프리셋의
+  //    네거티브라, 남겨 두면 다음 송신이 그것을 지금 프리셋에 써 넣는다 - 표식으로 막으려던 바로 그 일이다.
+  if (m.stale_correction) refreshPresetStamp();
 
   if (!forceSync && _isPromptEditingActive() && (promptChanged || negativeChanged)) {
     // 편집 중: 서버 값 버림. blur해도 자동 flush 안 함 (사용자 편집 보호).
@@ -9985,7 +10000,8 @@ function onModeResult(m) {
     showToast(shownMode ? `${shownMode} mode active` : (m.message || `${m.mode} mode active`), 'success');
     // 프리셋은 모드마다 따로다 - ANIMA 는 COMFYUI 와 색인이 갈려 엔진만 바꿔도 바뀐다(사용자 지정 09-30). 들고 있던
     // PE 상태(Interactive 조립 · 슬래시 메뉴 · 프리셋 창이 읽는 것)를 새 모드의 것으로 다시 받는다.
-    if (moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState) requestModuleState('prompt_engineering');
+    // 답이 올 때까지는 들고 있는 프리셋 이름이 **앞 모드의 것**이다 - 그동안의 편집에 그 이름표를 달지 않는다.
+    if (moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState) refreshPresetStamp();
   } else {
     syncMode(prevMode);
     showToast(m.message || 'Mode change failed', 'error', true);
@@ -12306,6 +12322,12 @@ function guideModelReselect() {
 function onModuleState(m) {
   if (seamObserver) seamObserver.watch('module_state', m && m.module_id);
   if (isModuleStateGuarded(m.module_id)) return;
+  if (m.module_id === 'prompt_engineering') {
+    _presetStampStale = false;      // 새 프리셋 이름이 왔다
+    // 보냈지만 아직 답이 안 온 **더 새** PE 글이 있으면 그것을 지킨다 - 앞서 보낸 글의 답이 먼저 와서
+    // 방금 보낸 글을 되돌리지 않게(`peFieldHub.reconcileIncoming`).
+    m = peFieldHub?.reconcileIncoming(m) || m;
+  }
   if (m.module_id) moduleStateCache.set(m.module_id, m);
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
@@ -14329,7 +14351,7 @@ const PE_FIELD_ELEMENTS = {pre_prompt: 'modPrePrompt', post_prompt: 'modPostProm
 // (사용자 결정 2026-10-10): 어느 화면에서 고치든 열려 있는 다른 화면이 서버를 한 바퀴 돌기 전에 그 글을 본다.
 // 읽기는 `peFieldText` 한 곳으로 - 모듈 창의 칸이 떠 있으면 그 칸이 가장 새 글이다(js/features/peFieldHub.mjs).
 let peFieldHub = null;
-import('./js/features/peFieldHub.mjs?v=20261010-pehub')
+import('./js/features/peFieldHub.mjs?v=20261010-review3')
   .then(({createPeFieldHub}) => {
     peFieldHub = createPeFieldHub({
       getState: () => slashPeState(),

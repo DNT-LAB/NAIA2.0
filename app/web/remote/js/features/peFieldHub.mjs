@@ -3,8 +3,52 @@ export function createPeFieldHub({
   getLiveBox = () => null,
   commitState = () => {},
   cloneState = state => ({...state}),
+  now = () => Date.now(),
 } = {}) {
   const subscribers = new Set();
+  // 보냈지만 서버의 답을 아직 못 받은 글 - 칸마다 보낸 차례대로.
+  // ⚠️ 답은 보낸 차례대로 온다. X 를 보내고 그 답이 오기 전에 Y 를 보내면 **X 의 답이 먼저** 와서 상태를 X 로
+  //    되돌린다(Y 의 답이 올 때까지) - 그 사이 비추는 창에서 X 를 바탕으로 친 글이 Y 를 덮는다(Codex 리뷰 2026-10-10).
+  const unacked = new Map();      // key → {preset, sent: [{text, at}]}
+  const UNACKED_TTL = 5000;       // 답이 끝내 안 오는 글(끊긴 소켓)을 영영 믿지 않는다
+
+  function noteUnacked(key, text, preset) {
+    const at = now();
+    let entry = unacked.get(key);
+    if (!entry || entry.preset !== preset) {
+      entry = {preset, sent: []};
+      unacked.set(key, entry);
+    }
+    entry.sent = entry.sent.filter(item => at - item.at < UNACKED_TTL);
+    entry.sent.push({text, at});
+  }
+
+  /** 서버가 보낸 PE 상태를 받아들이기 전에 부른다. 돌려준 것을 상태로 쓴다.
+   *  받은 글이 **보낸 글 중 하나**면 거기까지는 답을 받은 것이다 - 그 뒤에 보낸 글이 남아 있으면 가장 새것을 지킨다.
+   *  보낸 적 없는 글이면(다른 창이 고쳤다 · 서버가 다듬었다 · 프리셋이 바뀌었다) 서버가 진실이다 - 기억을 버린다. */
+  function reconcileIncoming(incoming) {
+    if (!incoming || unacked.size === 0) return incoming;
+    const at = now();
+    const preset = String(incoming.preset ?? '');
+    let next = incoming;
+    for (const [key, entry] of [...unacked]) {
+      entry.sent = entry.sent.filter(item => at - item.at < UNACKED_TTL);
+      const got = String(incoming[key] ?? '');
+      const index = entry.preset === preset ? entry.sent.findIndex(item => item.text === got) : -1;
+      if (index < 0) {
+        unacked.delete(key);
+        continue;
+      }
+      entry.sent.splice(0, index + 1);
+      if (entry.sent.length === 0) {
+        unacked.delete(key);
+        continue;
+      }
+      if (next === incoming) next = cloneState(incoming);
+      next[key] = entry.sent[entry.sent.length - 1].text;
+    }
+    return next;
+  }
 
   function notify(key, origin) {
     for (const fn of [...subscribers]) {
@@ -33,6 +77,7 @@ export function createPeFieldHub({
     const next = cloneState(state || {});
     next[key] = String(text ?? '');
     commitState(next);
+    noteUnacked(key, next[key], String(state?.preset ?? ''));
     notify(key, origin);
     return true;
   }
@@ -46,5 +91,5 @@ export function createPeFieldHub({
     return () => subscribers.delete(fn);
   }
 
-  return {read, noteLocalWrite, noteLiveInput, subscribe};
+  return {read, noteLocalWrite, noteLiveInput, reconcileIncoming, subscribe};
 }

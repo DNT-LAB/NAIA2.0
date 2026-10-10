@@ -293,7 +293,16 @@ async def handle_session_command(
         )
         if not stale_prompt:
             context.prompt_text = str(command.get("prompt") or "")
-        context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
+        # 네거티브도 같다. `negative_preset` = 그 네거티브를 **치기 시작했을 때** 화면이 믿던 프리셋.
+        # 다른 탭이 프리셋을 바꾼 뒤에 닿은 편집을 받으면 그 글이 **새 프리셋**에 써진다 - 통째로 버리고
+        # 화면이 스스로 고치게 지금 값을 돌려준다(Codex 리뷰 2026-10-10). 표식이 없으면(옛 화면 · 사람이 친 게
+        # 아닌 에코) 판정하지 않는다 - 예전 그대로.
+        stale_negative = context.stale_prompt_edit(
+            str(command.get("origin") or ""),
+            str(command.get("negative_preset") or ""),
+        )
+        if not stale_negative:
+            context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
         context.save_remote_ui_state()
         # 네거티브는 **선택된 프리셋에도** 즉시 반영한다. 안 하면 편집분이 세션에만
         # 남아 프리셋을 옮기는 순간 사라진다(사용자 지적 2026-08-21).
@@ -302,7 +311,7 @@ async def handle_session_command(
         # 되돌려 보내는 에코 경로가 여럿이라(프리셋 적용·메타데이터 적용·재동기),
         # 아무 `set_prompt` 에서나 반영하면 파이프라인이 만든 네거티브가 프리셋에
         # 굳는다.
-        if str(command.get("origin") or "") == "edit":
+        if not stale_negative and str(command.get("origin") or "") == "edit":
             context.sync_negative_into_current_preset()
         # 메인 프롬프트도 같다. 표식이 **따로**인 이유: `origin` 은 "네거티브 칸을
         # 직접 쳤다" 는 뜻이라 여기에 새 의미를 얹으면 두 칸이 서로의 값을 프리셋에
@@ -320,7 +329,7 @@ async def handle_session_command(
             # 덮어써서 맞춘다(`get_prompt` 가 재접속 때 쓰는 것과 같은 처리).
             # `stale_correction` 은 화면이 **보낸 뒤 더 친 글**을 지키게 하는 표식이다 -
             # 그것까지 지우면 방금 친 글자가 소리없이 사라진다(Codex 리뷰 2026-08-27).
-            **({"force": True, "stale_correction": True} if stale_prompt else {}),
+            **({"force": True, "stale_correction": True} if (stale_prompt or stale_negative) else {}),
         }, ensure_ascii=False))
         return True
     if command_type == "get_prompt":

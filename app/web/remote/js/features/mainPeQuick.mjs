@@ -164,7 +164,8 @@ export function createMainPeQuick({
       quick.el.addEventListener('keydown', event => {
         // Alt+Enter(Random)는 문서의 단축키다 - 여기서 치던 글을 **먼저** 보내야 그 Random 이 새 글을 쓴다.
         // 저장과 Random 은 같은 소켓으로 차례대로 나간다. (Ctrl+Enter 는 판이 '저장' 으로 쓴다 - 그대로 둔다.)
-        if (event.key === 'Enter' && event.altKey && !event.ctrlKey && !event.isComposing) quick.flush();
+        // 조합 중의 keydown 은 입력기의 것이다 - 문서의 단축키도 **같은 규칙**으로 그 keydown 을 지나친다(app.js).
+        if (event.key === 'Enter' && event.altKey && !event.ctrlKey && !event.isComposing && event.keyCode !== 229) quick.flush();
       }, true);
       // 판이 Esc 로 줄을 접었으면 창도 닫는다 - 줄 머리가 없는 창에 빈 상자만 남지 않게(머리말).
       quick.el.addEventListener('keydown', event => {

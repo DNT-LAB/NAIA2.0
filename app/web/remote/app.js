@@ -118,6 +118,22 @@ let _localPromptDirty = false;
 // `_localPromptDirty` 를 지우는 자리가 여럿인데, 거기서 같이 지우면 500ms 안에
 // Generate/Random 을 누른 사용자의 네거티브 편집이 조용히 사라진다.
 let _negativeUserDirty = false;
+// 그 네거티브를 **치기 시작했을 때** 화면이 믿던 프리셋. 메인 프롬프트의 `_promptDirtyPreset` 과 같은 일을 한다 -
+// 다른 탭이 프리셋을 바꾼 뒤에 닿은 네거티브 편집을 서버가 버릴 수 있게 함께 보낸다. 표식이 없던 때에는 그 글이
+// **새 프리셋**에 써졌다(Codex 리뷰 2026-10-10 - Random 앞에 네거티브를 먼저 보내면서 그 길이 하나 더 늘었다).
+let _negativeDirtyPreset = '';
+function markNegativeEdited() {
+  // 처음 세울 때만 잡는다 - 계속 치는 동안 다시 잡으면 스왑 뒤의 이름으로 바뀌어 표식의 뜻이 사라진다.
+  if (!_negativeUserDirty) {
+    _negativeDirtyPreset = _currentPresetStamp();
+    // 페이지를 연 뒤 PE 상태를 **한 번도** 받지 않았으면 프리셋 이름을 모른다(부팅 때 받는 모듈이 아니다 - 실측).
+    // 표식이 비면 서버는 판정하지 않는다(예전 동작). 다음 편집부터는 알 수 있게 지금 청해 둔다.
+    if (!moduleStateCache.get('prompt_engineering') && !lastPromptEngineeringState) {
+      try { requestModuleState('prompt_engineering'); } catch (_) {}
+    }
+  }
+  _negativeUserDirty = true;
+}
 /** 지금 화면이 믿고 있는 프리셋 이름. 사용자가 친 프롬프트에 함께 실어 보내면
  *  백엔드가 **스왑 뒤 늦게 도착한 글**을 버릴 수 있다(Prefix/Postfix 와 같은 방식).
  *  패널이 안 열려 있어도 모듈 상태 캐시에 남아 있으므로 여기서 읽는다. */
@@ -1950,7 +1966,7 @@ function applyVirtualMainPrompt() {
             type: 'set_prompt',
             prompt: pending,
             negative_prompt: negEdit.value,
-            ...(_negativeUserDirty ? {origin: 'edit'} : {}),
+            ...(_negativeUserDirty ? {origin: 'edit', negative_preset: _negativeDirtyPreset} : {}),
             ...(_promptUserDirty ? {prompt_origin: 'edit', prompt_preset: _promptDirtyPreset} : {}),
           }));
           _lastSentPromptValue = pending;
@@ -6794,7 +6810,11 @@ function _applyPromptSync(m) {
     // 내린다. 안 내리면 남이 만든 프롬프트가 다음 flush 때 프리셋에 굳는다.
     _promptUserDirty = false;
   }
-  if ('negative_prompt' in m && m.negative_prompt !== negEdit.value) negEdit.value = m.negative_prompt;
+  const negativeReplaced = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
+  // 서버 값이 네거티브를 덮는다 - 사용자가 치던 글은 화면에서 사라진다. 표식을 내린다(메인 프롬프트와 같은 규칙).
+  // 안 내리면 걸려 있던 송신이 이 **서버 값**을 사용자 편집인 척 프리셋에 써 넣는다.
+  if (negativeReplaced) _negativeUserDirty = false;
+  if (negativeReplaced) negEdit.value = m.negative_prompt;
   syncNegativeMirror();
   syncingPrompt = false;
   updateMetaChips(m);
@@ -6941,7 +6961,7 @@ function onPromptEdit() {
         // 네거티브를 선택된 프리셋에 반영한다. 이 함수는 메인 프롬프트 편집과
         // Interactive 블록 변경에서도 불리므로, 무조건 달면 화면에 떠 있던 남의
         // 네거티브가 프리셋에 굳는다(Codex 리뷰 2026-08-21).
-        ...(_negativeUserDirty ? {origin: 'edit'} : {}),
+        ...(_negativeUserDirty ? {origin: 'edit', negative_preset: _negativeDirtyPreset} : {}),
         // 메인 프롬프트의 표식은 **따로** 단다. `origin` 은 네거티브 전용이라
         // 겸용하면 한쪽 칸의 값이 다른 칸의 이름으로 프리셋에 들어간다.
         ...(_promptUserDirty ? {prompt_origin: 'edit', prompt_preset: _promptDirtyPreset} : {}),
@@ -8967,6 +8987,7 @@ function requestRandomPrompt({force = false, bootstrap = false, pressed = false}
       prompt: heldPrompt,
       negative_prompt: negEdit.value,
       origin: 'edit',
+      negative_preset: _negativeDirtyPreset,
     }));
     _lastSentPromptValue = heldPrompt;
     _negativeUserDirty = false;
@@ -12701,7 +12722,7 @@ function flushMainPromptAndParams() {
       type: 'set_prompt',
       prompt: sentPrompt,
       negative_prompt: negEdit.value,
-      ...(negativeWasEdited ? {origin: 'edit'} : {}),
+      ...(negativeWasEdited ? {origin: 'edit', negative_preset: _negativeDirtyPreset} : {}),
       // ⚠️ 이 길목(프리셋 전환 · 저장 · 만들기 - 모두 **지금 프리셋을 떠나거나 저장하는** 자리)에서는 칸에 보이는
       //    마지막 메인 프롬프트를 **누가 썼든** 지금 프리셋에 남긴다. 사람이 친 글만 남기던 때는 Random 결과가
       //    빠져, 돌아오면 Random 이전 값이 실렸다(사용자 제보 2026-09-25: "마지막 메인 프롬프트 값을 기억해야").
@@ -12808,6 +12829,23 @@ function stampedEdit(value, stamp) {
   return preset ? {text: String(value ?? ''), preset} : value;
 }
 
+/** 쥐고 있던 모듈 글 편집 하나를 보낸다(0.5초 뒤 · 앞당겨 보낼 때 - 두 자리가 같은 일을 한다).
+ *
+ *  ⚠️ PE 글칸이면 **보낸 글을 '같은 글 비추기' 의 상태에도 적는다.** 보내는 순간 대기 자리는 비고, 초점도 이미
+ *     다른 데 있으면 그 칸은 더 이상 "안 보낸 글" 이 아니다 - 서버의 답이 오기 전까지 비추는 창들(메인의 작은 창 ·
+ *     리모컨)이 **옛 상태**를 읽고, 그 위에 친 글이 방금 보낸 수정을 덮는다(Codex 리뷰 2026-10-10).
+ *     앞 프리셋을 보고 친 글(도장이 지금 프리셋과 다르다)은 `noteLocalWrite` 가 적지 않는다 - 서버도 버린다. */
+function sendPendingModuleEdit(pending) {
+  const sent = setModuleParam(pending.moduleId, pending.key, pending.value,
+    {skipPendingFlush: true, slotUuid: pending.slotUuid});
+  if (sent && pending.moduleId === 'prompt_engineering' && Object.hasOwn(PE_FIELD_ELEMENTS, pending.key)) {
+    const stamped = pending.value !== null && typeof pending.value === 'object';
+    peFieldHub?.noteLocalWrite(pending.key, stamped ? pending.value.text : pending.value,
+      {seenPreset: stamped ? pending.value.preset : null, origin: 'module'});
+  }
+  return sent;
+}
+
 function flushPendingModuleEdit(moduleId = null) {
   if (!pendingModuleEdit) return;
   if (moduleId && pendingModuleEdit.moduleId !== moduleId) return;
@@ -12817,7 +12855,7 @@ function flushPendingModuleEdit(moduleId = null) {
   }
   const pending = pendingModuleEdit;
   pendingModuleEdit = null;
-  setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true, slotUuid: pending.slotUuid});
+  sendPendingModuleEdit(pending);
 }
 
 function discardPendingModuleEdit(moduleId = null) {
@@ -12882,10 +12920,7 @@ function onModTextEdit(moduleId, key, value, stamp, slotUuid) {
     const pending = pendingModuleEdit;
     pendingModuleEdit = null;
     moduleSendTimer = null;
-    if (pending) {
-      setModuleParam(pending.moduleId, pending.key, pending.value,
-        {skipPendingFlush: true, slotUuid: pending.slotUuid});
-    }
+    if (pending) sendPendingModuleEdit(pending);
   }, 500);
 }
 
@@ -14565,7 +14600,7 @@ updatePromptTokenEstimate();
 // 프롬프트 엔지니어링 모듈을 열지 않고 그 두 칸을 **작은 떠 있는 창 둘**로 고친다 - 결과 그림을 보면서.
 // 판은 리모컨의 PE 빠른 수정과 같은 것이고, 읽기 · 쓰기 · 프리셋 도장도 `/pe` 와 한 길을 쓴다.
 let mainPeQuick = null;
-import('./js/features/mainPeQuick.mjs?v=20261010-escsave')
+import('./js/features/mainPeQuick.mjs?v=20261010-review2')
   .then(({createMainPeQuick}) => {
     mainPeQuick = createMainPeQuick({
       document, window, escHtml, showToast,
@@ -14661,15 +14696,19 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     // Ctrl+Enter 와 같은 까닭 - 누르고 있으면 keydown 이 반복되고, 반복 한 번이 Random(+ 생성) 한 번이다.
     if (e.repeat) return;
+    // 글자를 조합하는 중(한글 · 일본어 입력기)의 keydown 은 **입력기의 것**이다. 작은 PE 창은 그때 치던 글을 보내지
+    // 않으므로(`mainPeQuick` - 같은 규칙), 여기서만 Random 을 보내면 방금 친 글이 빠진 채 Random(+ 생성)이 나간다
+    // (Codex 리뷰 2026-10-10). 조합이 끝난 뒤의 keydown 이 단축키다.
+    if (e.isComposing || e.keyCode === 229) return;
     send('random');
   }
 });
 
 // ---- Init ----
-// ⚠️ **`_negativeUserDirty` 를 세우는 자리는 이 리스너와 바로 아래 `applyNegativeAuthoredEdit` 둘뿐이다.**
+// ⚠️ **`_negativeUserDirty` 를 세우는 자리(`markNegativeEdited`)는 이 리스너와 바로 아래 `applyNegativeAuthoredEdit` 둘뿐이다.**
 // 사람이 네거티브를 고친 것만 프리셋에 반영한다 - `onPromptEdit` 자체는 메인 프롬프트 편집과
 // Interactive 블록 변경에서도 불리므로 그 안에서 세우면 안 된다.
-negEdit.addEventListener('input', () => { _negativeUserDirty = true; onPromptEdit(); });
+negEdit.addEventListener('input', () => { markNegativeEdited(); onPromptEdit(); });
 
 /** 네거티브 칸을 **비추는 화면**(Artist Thumbnail 리모컨의 빠른 수정 창)이 고친 글을 칸에 넣는다.
  *  사람이 그 칸에 직접 친 것과 **같은 일**이다 - 표식을 세우고 평소 처리를 한다(토큰 수 · 서버 동기 · 프리셋 반영).
@@ -14680,7 +14719,7 @@ negEdit.addEventListener('input', () => { _negativeUserDirty = true; onPromptEdi
  *     기다리는 사이 바로 옆 단추([V5 영점] · 믹스 저장)가 눌리면 방금 고친 글이 엉뚱한 프리셋에 얹힌다. */
 function applyNegativeAuthoredEdit(text) {
   negEdit.value = String(text ?? '');
-  _negativeUserDirty = true;
+  markNegativeEdited();
   onPromptEdit();
   firePendingPromptSend();
 }

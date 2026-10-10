@@ -389,7 +389,7 @@ async def _handle_random_command(
     # 보여 준다 — 사용자에겐 아직 못 본 새 랜덤이고, 기다림이 거의 0이다. 없으면 기존 경로.
     from app.backend.server.generation_runner import take_prefetched_cut_for_manual_random
 
-    prefetched = await take_prefetched_cut_for_manual_random(context, active_ratings, request_id)
+    prefetched = await take_prefetched_cut_for_manual_random(context, active_ratings, request_id, overrides)
     # 수동 random은 풀을 advance하므로 Auto Gen 프리페치 예약행을 무효화(폐기).
     invalidate_auto_gen_prefetch(context)
     # 영속된 활성 태그필터가 아직 in-memory 로 재조립되지 않았으면(재시작/가져오기 직후) 백엔드가

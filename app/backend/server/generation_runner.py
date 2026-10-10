@@ -395,7 +395,11 @@ async def _prefetch_v2_cut(context: WebSessionContext, source_row, overrides, ra
     return result
 
 
-def _install_prefetched_cut(context: WebSessionContext, result, holder) -> None:
+_HOLDER_OVERRIDES = object()  # 네거티브를 홀더의 overrides 로 푼다(Auto Gen 이 이어 가는 길의 기본).
+
+
+def _install_prefetched_cut(context: WebSessionContext, result, holder, *,
+                            negative_overrides=_HOLDER_OVERRIDES) -> None:
     """미리 만든 컷을 지금 컷으로 세운다 — 동기 random 이 하던 세션 반영과 같다."""
     service = random_service(context)
     ctx = getattr(result, "context", None)
@@ -404,14 +408,19 @@ def _install_prefetched_cut(context: WebSessionContext, result, holder) -> None:
     context.current_prompt_context = ctx
     context.prompt_text = str(getattr(result, "prompt", "") or "")
     # 네거티브는 소비 시점의 살아 있는 설정으로 푼다(미리 만든 뒤 바꿨을 수 있다).
-    context.negative_prompt_text = service._resolve_negative_prompt(service._random_settings(holder.get("overrides")))
+    # ⚠️ 홀더의 overrides 에는 **앞 생성 요청의 네거티브**가 실려 있다. 사람이 누른 Random 은 그것 대신
+    #    **그 명령의 overrides** 로 푼다 - 미리 만든 컷이 없을 때의 Random 과 같은 규칙이고, 보통은 네거티브가
+    #    실려 있지 않아 지금 세션의 네거티브가 그대로 남는다. 홀더 것으로 풀면 Random 직전에 고친 네거티브가
+    #    앞 요청의 것으로 되돌아가고, 뒤따르는 생성이 그것으로 나갔다(Codex 리뷰 2026-10-10).
+    negative_source = holder.get("overrides") if negative_overrides is _HOLDER_OVERRIDES else negative_overrides
+    context.negative_prompt_text = service._resolve_negative_prompt(service._random_settings(negative_source))
     context.save_remote_ui_state()
     publish = getattr(context, "publish", None)
     if ctx is not None and callable(publish):
         publish("prompt_generated", ctx)
 
 
-async def _consume_v2_cut(context: WebSessionContext, holder):
+async def _consume_v2_cut(context: WebSessionContext, holder, *, negative_overrides=_HOLDER_OVERRIDES):
     """홀더(이미 비워 둠)의 v2 컷을 끝까지 기다렸다가 유효하면 설치해 돌려준다. 무효·실패면 None(동기 폴백)."""
     task = holder.get("task")
     ratings = context.get_active_ratings()
@@ -426,13 +435,14 @@ async def _consume_v2_cut(context: WebSessionContext, holder):
     if not getattr(result, "success", False):
         return None
     try:
-        _install_prefetched_cut(context, result, holder)
+        _install_prefetched_cut(context, result, holder, negative_overrides=negative_overrides)
     except Exception:
         return None
     return result
 
 
-async def take_prefetched_cut_for_manual_random(context: WebSessionContext, active_ratings, request_id: str):
+async def take_prefetched_cut_for_manual_random(context: WebSessionContext, active_ratings, request_id: str,
+                                                overrides=None):
     """Auto Gen 도중 수동 Random: 미리 만든 v2 컷이 있으면 그것을 꺼내 준다(대기 ~0, 부스트 이미 끝남).
     등급이 다르면 쓰지 않는다. 없거나 무효면 None — 호출부가 새로 뽑는다."""
     holder = getattr(context, "_auto_gen_prefetch", None)
@@ -441,7 +451,8 @@ async def take_prefetched_cut_for_manual_random(context: WebSessionContext, acti
     if sorted(active_ratings or []) != holder.get("ratings"):
         return None
     context._auto_gen_prefetch = None
-    result = await _consume_v2_cut(context, holder)
+    # 네거티브는 **이 Random 명령의 overrides** 로 푼다(`_install_prefetched_cut` 주석).
+    result = await _consume_v2_cut(context, holder, negative_overrides=overrides)
     if result is not None:
         result.random_request_id = request_id
         result.source = "random"

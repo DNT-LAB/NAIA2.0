@@ -128,9 +128,18 @@ let _negativeDirtyPreset = '';
 //    것" 이라며 칸을 고쳐 준 뒤에도 옛 이름표를 계속 달았다 - 고쳐진 칸을 다시 고쳐도 **매번 버려졌다**
 //    (Codex 리뷰 2026-10-10). 모드를 바꾼 직후도 같다(새 모드의 PE 상태가 오기 전).
 let _presetStampStale = false;
+let _presetStampRetry = null;
 function refreshPresetStamp() {
   _presetStampStale = true;
   try { requestModuleState('prompt_engineering'); } catch (_) {}
+  // 그 답은 **삼켜질 수 있다** - 떼었던 창을 다시 붙인 직후의 가드(0.9초)가 PE 상태를 버린다. 그 뒤에도 이름을
+  // 못 믿는 채면 한 번 더 청한다. 가드의 타이머에 얹지 않는다 - 다른 모듈을 다시 붙이면 그 타이머가 갈린다
+  // (Codex 리뷰 2026-10-10).
+  if (_presetStampRetry) clearTimeout(_presetStampRetry);
+  _presetStampRetry = setTimeout(() => {
+    _presetStampRetry = null;
+    if (_presetStampStale) { try { requestModuleState('prompt_engineering'); } catch (_) {} }
+  }, 1500);
 }
 function markNegativeEdited() {
   // 처음 세울 때만 잡는다 - 계속 치는 동안 다시 잡으면 스왑 뒤의 이름으로 바뀌어 표식의 뜻이 사라진다.
@@ -7467,12 +7476,7 @@ function guardTransferredModuleState(moduleId, delayMs = 900) {
   transferredModuleStateGuard.moduleId = moduleId;
   transferredModuleStateGuard.until = Date.now() + delayMs;
   transferredModuleStateGuard.timer = setTimeout(() => {
-    // ⚠️ 창이 닫혔어도 **프리셋 이름을 못 믿는 동안**이면 PE 상태는 다시 청한다. 이 가드가 그 답을 삼키면
-    //    (다시 붙인 직후 모드를 바꿨다) 이름표가 계속 비어, 낡은 화면의 편집을 서버가 가려내지 못한다
-    //    (Codex 리뷰 2026-10-10).
-    if (currentModuleId === moduleId || (moduleId === 'prompt_engineering' && _presetStampStale)) {
-      requestModuleState(moduleId);
-    }
+    if (currentModuleId === moduleId) requestModuleState(moduleId);
     if (transferredModuleStateGuard.moduleId === moduleId) {
       transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
     }
@@ -14356,7 +14360,7 @@ const PE_FIELD_ELEMENTS = {pre_prompt: 'modPrePrompt', post_prompt: 'modPostProm
 // (사용자 결정 2026-10-10): 어느 화면에서 고치든 열려 있는 다른 화면이 서버를 한 바퀴 돌기 전에 그 글을 본다.
 // 읽기는 `peFieldText` 한 곳으로 - 모듈 창의 칸이 떠 있으면 그 칸이 가장 새 글이다(js/features/peFieldHub.mjs).
 let peFieldHub = null;
-import('./js/features/peFieldHub.mjs?v=20261010-review4')
+import('./js/features/peFieldHub.mjs?v=20261010-review5')
   .then(({createPeFieldHub}) => {
     peFieldHub = createPeFieldHub({
       getState: () => slashPeState(),

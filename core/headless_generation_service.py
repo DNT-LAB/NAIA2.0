@@ -860,7 +860,8 @@ class HeadlessGenerationService:
             for key, value in schema.items()
             if key not in SCHEMA_ONLY_KEYS and not key.startswith("options_")
         }
-        params.update(self.context.get_options())
+        # 저장 옵션만 싣는다 - 세션 옵션은 요청(-> 그림의 생성 정보)에 실을 것이 아니다.
+        params.update(self.context.persistent_options())
         params.update(self.context.remote_params)
 
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}

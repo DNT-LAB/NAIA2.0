@@ -317,7 +317,8 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "prompt": str(context.prompt_text or ""),
         "negative_prompt": str(context.negative_prompt_text or ""),
         "remote_options": {
-            **context.get_options(),
+            # ⚠️ `get_options()` 가 아니다 - 그것은 세션 옵션(저장 금지)까지 싣는다.
+            **context.persistent_options(),
             **({"stop_autogen_on_tag_exhaust": context._temporary_search.normal_stop_on_exhaust}
                if getattr(context, "_temporary_search", None) and context._temporary_search.active else {}),
         },

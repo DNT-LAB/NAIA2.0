@@ -10979,6 +10979,20 @@ body.resizing-result-info {
   display: flex;
   gap: 6px;
 }
+/* 옵션 줄 오른쪽 끝의 톱니 = 확장 기능(js/features/optionExtras.mjs · 사용자 지시 2026-10-10).
+   세 단추처럼 늘어나지 않는다 - 좁은 정사각 단추 하나. 팝업 안의 옵션이 켜져 있으면 물든다(닫혀 있으면 안 보이므로). */
+.opt-extras-btn {
+  flex: 0 0 34px; display: flex; align-items: center; justify-content: center; padding: 0;
+  background: var(--bg-elevated); border: 1px solid var(--border-dim); border-radius: 8px;
+  color: var(--text-dim); font-size: 14px; line-height: 1; cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.opt-extras-btn:hover, .opt-extras-btn[aria-expanded="true"] { color: var(--text-primary); border-color: var(--accent); }
+.opt-extras-btn.has-on { color: #e6a84a; border-color: rgba(230, 168, 74, 0.55); }
+/* 팝업은 Interactive 의 ALT 팝업(.ia-alt-popup) 옷을 그대로 입는다. 거기는 두 열 · 400px 이지만 여기는 한 열. */
+.ia-alt-popup.opt-extras-popup { width: 300px; }
+.ia-alt-popup.opt-extras-popup .ia-alt-list { display: flex; flex-direction: column; gap: 2px; }
+.ia-alt-popup.opt-extras-popup .ia-alt-label { font-size: 11.5px; }
 .opt-toggle {
   display: flex; align-items: center; gap: 6px;
   padding: 7px 10px;

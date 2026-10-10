@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261010-uizoom">
+<link rel="stylesheet" href="style.css?v=20261010-optextras">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -881,6 +881,10 @@
         <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">WC Solo</span>
       </button>
+      <!-- 확장 기능(사용자 지시 2026-10-10). 누르면 Interactive 의 ALT 팝업과 같은 체크 목록이 위로 뜬다
+           (js/features/optionExtras.mjs). 팝업 안의 것이 하나라도 켜져 있으면 단추가 물든다. -->
+      <button type="button" class="opt-extras-btn" id="optExtrasBtn" aria-haspopup="true" aria-expanded="false"
+              aria-label="확장 기능" data-naia-guide="확장 기능 — 자주 쓰지 않는 생성 옵션을 모아 둔 목록입니다.">&#9881;</button>
     </div>
     <div class="quick-params">
       <select class="param-select quick-select" id="qResolution" onchange="setParam('resolution',this.value)"></select>
@@ -1543,6 +1547,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261010-uizoom"></script>
+<script src="app.js?v=20261010-optextras"></script>
 </body>
 </html>

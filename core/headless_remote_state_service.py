@@ -30,6 +30,18 @@ REMOTE_OPTION_DEFAULTS = {
     # 결과 이미지를 가려서 **기본 꺼짐** - 필요한 사람만 Settings 에서 켠다(사용자 지시 2026-10-07).
     "show_comfyui_server_console": False,
 }
+# **세션 옵션** - 프로그램이 도는 동안만 산다. 다시 켜면 전부 기본값(꺼짐)이다.
+# ⚠️ **어디에도 저장하지 않는다**(사용자 지정 2026-10-10: "기억은 휘발성으로 어디에도 저장되지 않아야").
+#    그래서 `remote_options`(저장되는 옵션)에 넣지 않고 `context.session_options` 에 따로 둔다:
+#      · 저장(`headless_remote_ui_state_service`)은 `persistent_options()` 만 쓴다.
+#      · 불러오기는 `REMOTE_OPTION_DEFAULTS` 의 키만 읽는다 - 파일에 이 키가 적혀 있어도 켜지지 않는다.
+#      · 생성 요청의 파라미터(-> 그림의 생성 정보)에도 싣지 않는다(`headless_generation_service._normalized_params`).
+#    화면으로 가는 길은 저장 옵션과 **같다**(`get_options()` 에 합쳐 `options` 메시지로) - 통로를 따로 두지 않는다.
+SESSION_OPTION_DEFAULTS = {
+    # Auto Gen 이 꺼져 있을 때, 사람이 누른 Random 이 프롬프트를 굴린 뒤 **한 장** 생성까지 한다
+    # (하단 옵션 줄의 톱니 > 확장 기능). Auto Gen 이 켜져 있으면 원래 그렇게 돈다 - 이 옵션은 영향이 없다.
+    "generate_on_random": False,
+}
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",
     "random_resolution",
@@ -143,7 +155,19 @@ class HeadlessRemoteStateService:
         self.context.prompt_text = str(plane.get("prompt") or "")
         self.context.negative_prompt_text = str(plane.get("negative_prompt") or "")
 
+    def _session_options(self) -> dict[str, bool]:
+        options = getattr(self.context, "session_options", None)
+        if not isinstance(options, dict):
+            options = dict(SESSION_OPTION_DEFAULTS)
+            self.context.session_options = options
+        return options
+
     def set_option(self, key: str, value: Any) -> None:
+        if key in SESSION_OPTION_DEFAULTS:
+            # 세션 옵션 - 메모리에만 둔다. **저장을 부르지 않는다.**
+            self._session_options()[key] = self.coerce_bool(value)
+            self.context.publish("remote_options_changed", self.get_options())
+            return
         if key not in REMOTE_OPTION_DEFAULTS:
             return
         self.context.remote_options[key] = self.coerce_bool(value)
@@ -152,13 +176,21 @@ class HeadlessRemoteStateService:
         self.context.save_remote_ui_state()
         self.context.publish("remote_options_changed", self.get_options())
 
-    def get_options(self) -> dict[str, bool]:
+    def persistent_options(self) -> dict[str, bool]:
+        """저장되는 옵션만. 파일에 쓰거나 생성 요청에 싣는 자리는 이것을 쓴다(세션 옵션이 새지 않게)."""
         options = dict(REMOTE_OPTION_DEFAULTS)
         options.update({
             key: bool(value)
             for key, value in self.context.remote_options.items()
             if key in options
         })
+        return options
+
+    def get_options(self) -> dict[str, bool]:
+        """화면에 보내는 옵션 전부 = 저장 옵션 + 세션 옵션. ⚠️ 저장 · 생성 요청에는 `persistent_options()`."""
+        options = self.persistent_options()
+        session = self._session_options()
+        options.update({key: bool(session.get(key, default)) for key, default in SESSION_OPTION_DEFAULTS.items()})
         return options
 
     def set_param(self, key: str, value: Any, *, notify: bool = True) -> None:

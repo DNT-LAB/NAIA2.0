@@ -17,7 +17,9 @@ from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_autocomplete_state import AutocompleteRuntimeState
 from core.headless_event_bus import WebSessionEventBus
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 이벤트 버스 계측
-from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
+from core.headless_remote_state_service import (
+    REMOTE_OPTION_DEFAULTS, SESSION_OPTION_DEFAULTS, SUPPORTED_API_MODES,
+)
 from core.headless_result_service import HeadlessResultStore
 from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.headless_token_store import InMemoryTokenManager, TokenStore
@@ -55,6 +57,8 @@ class WebSessionContext:
     # 기록하지 않는다. 사용자가 직접 켜야만 ON이며 앱 내장 엔진 · 모델이 준비됐을 때만 enable 가능.
     ollama_auto_boost: bool = False
     remote_options: dict[str, bool] = field(default_factory=lambda: dict(REMOTE_OPTION_DEFAULTS))
+    # 세션 옵션 - 프로그램이 도는 동안만 산다. 저장하지 않는다(headless_remote_state_service.SESSION_OPTION_DEFAULTS).
+    session_options: dict[str, bool] = field(default_factory=lambda: dict(SESSION_OPTION_DEFAULTS))
     remote_params: dict[str, Any] = field(default_factory=dict)
     remote_param_planes: dict[str, dict[str, Any]] = field(default_factory=dict)
     remote_option_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -459,6 +463,9 @@ class WebSessionContext:
 
     def get_options(self) -> dict[str, bool]:
         return self._remote_state_service().get_options()
+
+    def persistent_options(self) -> dict[str, bool]:
+        return self._remote_state_service().persistent_options()
 
     def set_param(self, key: str, value: Any) -> None:
         self._remote_state_service().set_param(key, value)

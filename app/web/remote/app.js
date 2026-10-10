@@ -4187,6 +4187,22 @@ const optBoxes = {
   hide_assist_button: $('optHideAssistTab'),
   show_comfyui_server_console: $('optShowComfyServerConsole'),
 };
+// 하단 옵션 줄의 톱니 > 확장 기능. 체크 줄을 **옵션 통로에 그대로 물린다**(`optBoxes` 에 등록) - 켜고 끄기 ·
+// 서버 동기 · 다른 창과의 맞춤이 세 단추와 같은 길로 간다. 줄은 팝업이 만들어 돌려준다.
+let optionExtras = null;
+import('./js/features/optionExtras.mjs?v=20261010-optextras')
+  .then(({createOptionExtras}) => {
+    optionExtras = createOptionExtras({
+      document, window,
+      button: $('optExtrasBtn'),
+      registerOption: (key, control) => { optBoxes[key] = control; },
+      toggleOption: key => toggleOptionButton(key),
+      isChecked: key => getOptionChecked(key),
+    });
+    // 팝업의 줄이 붙기 전에 서버 값이 먼저 왔을 수 있다 - 한 번 다시 청한다.
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'sync'}));
+  })
+  .catch(error => console.error('Failed to initialize option extras', error));
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
 let translatorPopupRequestText = '';
@@ -8901,7 +8917,7 @@ function runStorytellerCycle(request) {
   setModuleParam('storyteller', 'run_cycle', JSON.stringify(payload));
 }
 
-function requestRandomPrompt({force = false, bootstrap = false} = {}) {
+function requestRandomPrompt({force = false, bootstrap = false, pressed = false} = {}) {
   flushPromptEngineeringEdits();
   if (window.eventMap?.isRandomLinkPending?.()) return false;
   if (window.eventMap?.isRandomLinked?.() && awaitingMyRandom) return false;
@@ -8956,6 +8972,9 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
     random_request_id: pendingRandomRequestId,
     ratings: getActiveRatings(),
     overrides: _collectCurrentParams(),
+    // 사람이 Prompt 탭의 Random(단추 · Alt+Enter)을 눌렀다는 표. 서버가 이 표가 있을 때만
+    // '랜덤을 누를 때 생성합니다'(세션 옵션)를 건다 - 연동 · 첫 실행의 Random 에는 붙지 않는다.
+    ...(pressed ? {pressed: true} : {}),
   }));
   return true;
 }
@@ -9100,7 +9119,7 @@ function send(cmd, options = {}) {
       inpaintSequenceControl.randomGenerate();
       return;
     }
-    requestRandomPrompt();
+    requestRandomPrompt({pressed: true});
     return;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -9440,6 +9459,8 @@ function applyOptionState(key, value, options = {}) {
     const asTab = document.getElementById('assistTab');
     if (asTab) asTab.hidden = next;
   }
+  // 팝업 안의 옵션은 닫혀 있으면 안 보인다 - 켜져 있다는 것을 톱니 단추가 알린다.
+  if (optionExtras?.owns(key)) optionExtras.paint();
   if (key === 'show_comfyui_server_console' && !next) {
     // 끄면 지금 떠 있는 것(실패로 남겨 둔 것 포함)도 닫는다 - 다음 Generate 부터가 아니라 바로.
     comfyServerConsole?.hide?.();

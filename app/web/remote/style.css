@@ -29933,6 +29933,14 @@ body.inpaint-prompt-owned .pe-mini { display: none; }
   padding: 5px 7px; border: 0; border-radius: 0; font-size: 11px; line-height: 1.5;
 }
 .dragpanel.pefloat .peq-text { min-height: 30px; }
+/* 머리줄 색으로 두 창을 가른다(사용자 지정 2026-10-10): prefix = 보라 · postfix = **더 연한** 보라.
+   꼬리표의 켜짐 색도 같은 짝이다 - 어느 꼬리표가 어느 창인지 색으로 이어진다. */
+.dragpanel.pefloat .dragpanel-head { background: rgba(124, 106, 239, 0.30); }
+.dragpanel.pefloat[data-pe-field="post_prompt"] { border-color: rgba(201, 192, 255, 0.5); }
+.dragpanel.pefloat[data-pe-field="post_prompt"] .dragpanel-head { background: rgba(201, 192, 255, 0.16); }
+.dragpanel.pefloat[data-pe-field="post_prompt"] .dragpanel-title { color: #ddd6ff; }
+.pe-mini--bottom:hover { border-color: #c9c0ff; background: rgba(201, 192, 255, 0.14); }
+.pe-mini--bottom.is-on { background: #c9c0ff; border-color: #c9c0ff; }
 
 
 /* ══ 창을 건너는 끌기 (js/features/dragBroker.mjs) ══════════════════════════ */

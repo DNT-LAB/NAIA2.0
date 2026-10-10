@@ -2121,13 +2121,17 @@ ipcMain.on("naia:zoom-by", (event, direction) => {
 
 ipcMain.on("naia:zoom-reset", (event) => resetZoom(event.sender));
 
-// 설정 화면의 슬라이더. 배율의 주인은 메인 창 하나다 - 어느 창에서 청하든 메인 창의 것을 읽고 쓴다.
+// 설정 화면의 슬라이더. 배율의 주인은 메인 창 하나다 - 읽기는 어느 창에나 메인 창의 것을 알려 준다.
 // 쓰기는 단계(ZOOM_STEP)에 맞추고 범위 안으로 들인 뒤, 단축키와 **같은 저장 · 같은 뒤처리**를 한다.
+// ⚠️ **쓰기는 메인 창이 청할 때만 받는다.** 이 preload 는 안에서 여는 팝업 창에도 실린다 - 그 창이 띄운
+//    바깥 웹 페이지가 `naiaShell.setZoom()` 으로 메인 창의 배율과 저장 파일을 바꿀 수 있었다(Codex 리뷰 2026-10-10).
+//    설정 화면은 메인 창에만 있다. (팝업 창 자신의 Ctrl+휠 배율은 예전 그대로 그 창의 것이다.)
 ipcMain.handle("naia:zoom-get", () => zoomState(currentMainZoom()));
 
-ipcMain.handle("naia:zoom-set", (_event, value) => {
+ipcMain.handle("naia:zoom-set", (event, value) => {
   const requested = Number(value);
-  if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(requested)) {
+  if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(requested)
+      || !isMainWebContents(event && event.sender)) {
     return { ok: false, ...zoomState(currentMainZoom()) };
   }
   const next = clampZoom(Math.round(requested / ZOOM_STEP) * ZOOM_STEP);

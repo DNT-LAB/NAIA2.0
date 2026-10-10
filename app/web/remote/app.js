@@ -4195,15 +4195,21 @@ import('./js/features/optionExtras.mjs?v=20261010-optextras')
     optionExtras = createOptionExtras({
       document, window,
       button: $('optExtrasBtn'),
-      registerOption: (key, control) => { optBoxes[key] = control; },
+      // 줄이 붙기 전에 서버 값이 먼저 와 있을 수 있다 - 기억해 둔 값으로 맞춘다.
+      // ⚠️ 서버에 `sync` 를 다시 청하지 않는다. 그 답에는 옵션 말고도 모드 · 파라미터 전체가 실려 와서,
+      //    그사이 사용자가 고친 Steps · Seed 나 방금 감지한 해상도를 덮는다(Codex 리뷰 2026-10-10).
+      registerOption: (key, control) => {
+        optBoxes[key] = control;
+        if (key in lastOptionValues) applyOptionState(key, lastOptionValues[key]);
+      },
       toggleOption: key => toggleOptionButton(key),
       isChecked: key => getOptionChecked(key),
     });
-    // 팝업의 줄이 붙기 전에 서버 값이 먼저 왔을 수 있다 - 한 번 다시 청한다.
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'sync'}));
   })
   .catch(error => console.error('Failed to initialize option extras', error));
 const pendingOptionValues = Object.create(null);
+// 서버가 마지막으로 알려 준 옵션 값. control 이 **나중에** 붙는 옵션(확장 기능 팝업의 줄)이 이것으로 제 모습을 맞춘다.
+const lastOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
 let translatorPopupRequestText = '';
 let translatorPopupTimer = null;
@@ -8950,6 +8956,21 @@ function requestRandomPrompt({force = false, bootstrap = false, pressed = false}
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
   }
+  // ⚠️ 걸려 있던 **네거티브 편집은 버리지 않고 먼저 보낸다.** 메인 프롬프트의 대기분은 Random 이 칸을 덮으니
+  //    버려도 되지만, 네거티브는 Random 뒤의 생성(Auto Gen · '랜덤을 누를 때 생성')이 **서버가 가진 값**으로
+  //    나간다 - 고치고 0.5초 안에 Random 을 누르면 옛 네거티브로 생성됐다(Codex 리뷰 2026-10-10 · 유료면 그대로 소모).
+  //    같은 소켓이라 이 글이 Random 보다 먼저 닿는다. 메인 프롬프트에는 편집 표식을 달지 않는다(프리셋에 굳지 않게).
+  if (_negativeUserDirty && !inpaintOwnsPromptBox()) {
+    const heldPrompt = promptTextForSave();
+    ws.send(JSON.stringify({
+      type: 'set_prompt',
+      prompt: heldPrompt,
+      negative_prompt: negEdit.value,
+      origin: 'edit',
+    }));
+    _lastSentPromptValue = heldPrompt;
+    _negativeUserDirty = false;
+  }
   _localPromptDirty = false;
   btnRnd.disabled = true;
   awaitingMyRandom = true;
@@ -9119,6 +9140,10 @@ function send(cmd, options = {}) {
       inpaintSequenceControl.randomGenerate();
       return;
     }
+    // 앞서 누른 Random 의 답을 기다리는 중이면 또 보내지 않는다. 단추는 그동안 꺼져 있지만 단축키는 이 함수를
+    // 직접 부른다 - 누를 때마다 새 Random 이 나가고, Random 뒤에 생성이 붙는 설정(Auto Gen · '랜덤을 누를 때
+    // 생성')이면 그 수만큼 생성이 쌓였다(Codex 리뷰 2026-10-10).
+    if (awaitingMyRandom) return;
     requestRandomPrompt({pressed: true});
     return;
   }
@@ -9492,6 +9517,9 @@ function refreshAllOptionVisuals() {
 
 function syncOptions(m) {
   const sessionEcho = !!m._session_echo;
+  for (const [key, value] of Object.entries(m || {})) {
+    if (typeof value === 'boolean') lastOptionValues[key] = value;
+  }
   syncingOptions = true;
   try {
     for (const key of Object.keys(optBoxes)) {
@@ -14271,10 +14299,16 @@ import('./js/features/peFieldHub.mjs?v=20261010-pehub')
     peFieldHub = createPeFieldHub({
       getState: () => slashPeState(),
       // ⚠️ 모듈 창을 닫아도 그 칸의 DOM 은 남는다(`closeModule` 은 `currentModuleId` 만 비운다) - 그래서 그것을 본다.
+      // ⚠️ 그 칸을 믿는 것은 **거기에 아직 안 보낸 글이 있을 때만**이다: 초점이 그 칸에 있거나(치는 중 - 그동안은
+      //    모듈이 그 칸을 다시 그리지도 않는다), 묶어 보내려고 쥐고 있는 편집이 그 칸의 것일 때.
+      //    그 밖에는 서버 상태가 진실이다. 조건 없이 믿으면, 서버가 새 글을 알려 온 순간 **아직 다시 그려지지 않은**
+      //    칸의 옛 글을 읽어 다른 창들이 한 박자 늦는다(다른 탭이 같은 프리셋을 고쳤을 때 - Codex 리뷰 2026-10-10).
       getLiveBox: key => {
         if (currentModuleId === 'prompt_engineering') {
           const el = document.getElementById(PE_FIELD_ELEMENTS[key]);
-          if (el?.isConnected) return {value: el.value, preset: el.dataset.preset || ''};
+          const unsent = el === document.activeElement
+            || (pendingModuleEdit?.moduleId === 'prompt_engineering' && pendingModuleEdit.key === key);
+          if (el?.isConnected && unsent) return {value: el.value, preset: el.dataset.preset || ''};
         }
         return null;
       },
@@ -14625,6 +14659,8 @@ document.addEventListener('keydown', e => {
     generateAction();
   } else if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.shiftKey) {
     e.preventDefault();
+    // Ctrl+Enter 와 같은 까닭 - 누르고 있으면 keydown 이 반복되고, 반복 한 번이 Random(+ 생성) 한 번이다.
+    if (e.repeat) return;
     send('random');
   }
 });

@@ -826,7 +826,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261004-negative')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261010-escsave')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -14502,14 +14502,14 @@ updatePromptTokenEstimate();
 // 프롬프트 엔지니어링 모듈을 열지 않고 그 두 칸을 **작은 떠 있는 창 둘**로 고친다 - 결과 그림을 보면서.
 // 판은 리모컨의 PE 빠른 수정과 같은 것이고, 읽기 · 쓰기 · 프리셋 도장도 `/pe` 와 한 길을 쓴다.
 let mainPeQuick = null;
-import('./js/features/mainPeQuick.mjs?v=20261010-pemini2')
+import('./js/features/mainPeQuick.mjs?v=20261010-escsave')
   .then(({createMainPeQuick}) => {
     mainPeQuick = createMainPeQuick({
       document, window, escHtml, showToast,
       storage: localStorage,
       host: promptEdit.closest('.prompt-highlight-wrap'),
       // ⚠️ 리모컨(artistThumbTab)이 부르는 주소와 **같은 주소**로 부른다 - 같은 모듈 한 벌을 나눠 쓴다.
-      loadPeQuickEdit: () => import('./js/features/peQuickEdit.mjs?v=20261004-negative')
+      loadPeQuickEdit: () => import('./js/features/peQuickEdit.mjs?v=20261010-escsave')
         .then(module => module.createPeQuickEdit),
       loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign')
         .then(module => module.createDraggablePanel),

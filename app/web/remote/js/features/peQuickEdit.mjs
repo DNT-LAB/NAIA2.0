@@ -198,12 +198,14 @@ export function createPeQuickEdit({
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Escape') {
       // ⚠️ 자동완성 팝업이 먼저 먹은 Esc 다(tagAssist 가 칸에 직접 걸어 둔 손이
-      //    버블보다 앞선다). 그것까지 되돌리면 후보를 물리려다 **글이 통째로**
-      //    옛것으로 돌아가고 칸이 접힌다. 팝업이 막아 둔 키는 팝업의 것이다.
+      //    버블보다 앞선다). 그것까지 받으면 후보를 물리려다 칸이 접힌다.
+      //    팝업이 막아 둔 키는 팝업의 것이다.
       if (event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
-      text.value = text.dataset.peqSaved ?? '';   // 되돌리고 접는다
+      // **저장하고 접는다**(사용자 지시 2026-10-10). 예전에는 친 글을 되돌리고 접었다 - 닫으려고 누른 Esc 에
+      // 그사이 친 글이 통째로 사라졌다(사용자가 직접 겪었다). 접기가 곧 저장이다(`setOpen` 이 `commit` 을 부른다) -
+      // 칸을 벗어날 때 · 머리줄을 눌러 접을 때와 같은 한 길이다. 되돌리고 싶으면 Ctrl+Z 가 있다.
       setOpen(text.closest('.peq-row'), false);
       return;
     }

@@ -3253,7 +3253,7 @@ export function createArtistThumbController({
     const remote = getRemoteController?.();
     if (!remote) return null;
     if (!peQuick) {
-      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20261004-negative');
+      const {createPeQuickEdit} = await import('./peQuickEdit.mjs?v=20261010-escsave');
       peQuick = createPeQuickEdit({
         document, escHtml, showToast,
         // 강조도 자동완성도 **메인 프롬프트의 것을 그대로** 빌린다(사용자 지정).

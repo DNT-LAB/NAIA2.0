@@ -7467,7 +7467,12 @@ function guardTransferredModuleState(moduleId, delayMs = 900) {
   transferredModuleStateGuard.moduleId = moduleId;
   transferredModuleStateGuard.until = Date.now() + delayMs;
   transferredModuleStateGuard.timer = setTimeout(() => {
-    if (currentModuleId === moduleId) requestModuleState(moduleId);
+    // ⚠️ 창이 닫혔어도 **프리셋 이름을 못 믿는 동안**이면 PE 상태는 다시 청한다. 이 가드가 그 답을 삼키면
+    //    (다시 붙인 직후 모드를 바꿨다) 이름표가 계속 비어, 낡은 화면의 편집을 서버가 가려내지 못한다
+    //    (Codex 리뷰 2026-10-10).
+    if (currentModuleId === moduleId || (moduleId === 'prompt_engineering' && _presetStampStale)) {
+      requestModuleState(moduleId);
+    }
     if (transferredModuleStateGuard.moduleId === moduleId) {
       transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
     }
@@ -14351,7 +14356,7 @@ const PE_FIELD_ELEMENTS = {pre_prompt: 'modPrePrompt', post_prompt: 'modPostProm
 // (사용자 결정 2026-10-10): 어느 화면에서 고치든 열려 있는 다른 화면이 서버를 한 바퀴 돌기 전에 그 글을 본다.
 // 읽기는 `peFieldText` 한 곳으로 - 모듈 창의 칸이 떠 있으면 그 칸이 가장 새 글이다(js/features/peFieldHub.mjs).
 let peFieldHub = null;
-import('./js/features/peFieldHub.mjs?v=20261010-review3')
+import('./js/features/peFieldHub.mjs?v=20261010-review4')
   .then(({createPeFieldHub}) => {
     peFieldHub = createPeFieldHub({
       getState: () => slashPeState(),

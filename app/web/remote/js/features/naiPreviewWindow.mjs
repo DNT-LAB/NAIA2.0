@@ -1,35 +1,19 @@
 /**
- * V4.5 프리뷰 창 — 뽑은 구도를 띄우고, 마음에 들면 진짜로 생성한다.
+ * 캐릭터 '즉시 생성' 결과 창 — 방금 뽑은 한 장을 결과 스테이지 옆에 띄운다.
  *
- * 사용자 지정 2026-09-01:
- *   "Action은 [ Save | Generate | Close ] 입니다. Generate 버튼이 크고, 나머지 버튼은
- *    좌우 구석에 작게 박힙니다."
+ * 그 그림은 **평소 생성**이다(Results · 히스토리에 남는다). 이 창은 보여 주기만 한다 - 다시 뽑는 것은
+ * 캐릭터 슬롯의 [▶] 가 한다(사용자 지정 2026-09-02: "상하 Close 버튼만 있으면 충분").
  *
- * ⚠️ 이 그림은 **저장되지 않는다**(사용자 지정). 서버가 결과 저장소에서 빼고 디스크에도
- *    안 쓴다 - [Save] 를 눌렀을 때만 쓴다. 그래서 창을 닫으면 그림은 사라진다.
- *
- * ⚠️ [Generate] 는 **4.5 재생성**이다(사용자 지정 2026-09-01) - 프롬프트를 고쳐 가며
- *    다시 보는 것이 이 창의 쓰임새다. V5 로 진짜 생성하는 버튼이 **아니다**.
- *    그래서 눌러도 창을 닫지 않는다 - 새 그림이 같은 자리에 갈린다.
+ * ⚠️ 원래는 V4.5 프리뷰(V5 할당량을 안 쓰고 구도만 미리 보던 기능)의 창이었고 즉시 생성이 빌려 썼다.
+ *    V4.5 프리뷰는 v5-medium 출시로 회수했다(사용자 지시 2026-10-11) - [Save] · [Generate] 와 그 잠금이
+ *    함께 빠졌다. 서버 메시지 이름(`nai_preview_result`)과 요소 id(`preview45…`)는 그대로다.
  */
 export function createNaiPreviewWindow({
   document: doc,
   window: win,
-  showToast,
-  onGenerate,
 }) {
   let root = null;
   let objectUrl = '';
-  // 지금 띄운 것. [Generate] 가 **무엇을 다시 뽑을지**를 이것으로 가른다.
-  let showing = null;
-
-  // ⚠️ 이 버튼의 이름은 **한 곳에서만** 정한다. 마크업과 `setBusy` 두 군데에 적혀
-  //    있었는데, 그러면 생성이 한 번 돌고 난 뒤 이름이 옛것으로 되돌아간다
-  //    ([[feedback_two_entry_points]]).
-  // ⚠️ 모델을 이름에 적는 이유: 아래 큰 [Generate] 와 **다른 것**이다. 저건 V5 진짜
-  //    생성이고 이건 4.5 재생성이라, 이름이 같으면 돈이 나가는 줄 알고 안 누르거나
-  //    반대로 눌러 버린다(사용자 지정 2026-09-03).
-  const GENERATE_LABEL = 'Generate (V4.5F)';
 
   function build() {
     root = doc.createElement('div');
@@ -37,7 +21,7 @@ export function createNaiPreviewWindow({
     root.id = 'preview45Window';
     root.innerHTML = `
       <div class="pvw-head">
-        <span class="pvw-title" id="preview45WindowTitle">V4.5 PREVIEW</span>
+        <span class="pvw-title" id="preview45WindowTitle"></span>
         <span class="pvw-meta" id="preview45WindowMeta"></span>
         <!-- 창을 닫는 길은 **위아래 둘**이다(사용자 지정 2026-09-02). 위는 관례대로 [X]. -->
         <button type="button" class="pvw-x" data-pvw="close"
@@ -45,18 +29,11 @@ export function createNaiPreviewWindow({
       </div>
       <div class="pvw-stage"><img class="pvw-img" id="preview45Image" alt=""></div>
       <div class="pvw-actions">
-        <button type="button" class="pvw-side" data-pvw="save">Save</button>
-        <button type="button" class="pvw-main" data-pvw="generate">${GENERATE_LABEL}</button>
         <button type="button" class="pvw-side pvw-close" data-pvw="close">Close</button>
       </div>`;
     doc.body.appendChild(root);
     root.addEventListener('click', event => {
-      const btn = event.target.closest('[data-pvw]');
-      if (!btn) return;
-      if (btn.dataset.pvw === 'close') { close(); return; }
-      if (btn.dataset.pvw === 'save') { void save(btn); return; }
-      // ⚠️ 닫지 않는다 - 같은 자리에서 새 프리뷰로 갈린다(재테스트 루프).
-      if (btn.dataset.pvw === 'generate') onGenerate?.(showing);
+      if (event.target.closest('[data-pvw="close"]')) close();
     });
     doc.addEventListener('keydown', event => {
       if (event.key === 'Escape' && isOpen()) close();
@@ -100,43 +77,16 @@ export function createNaiPreviewWindow({
     root.style.top = `${clamp(wantTop, rect.height, win.innerHeight)}px`;
   }
 
-  async function save(btn) {
-    btn.disabled = true;
-    try {
-      const res = await fetch('/api/nai-preview/save', {method: 'POST'});
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(data.error || '프리뷰를 저장하지 못했습니다.', 'error'); return; }
-      showToast('프리뷰를 저장했습니다.', 'success');
-    } catch (error) {
-      showToast('프리뷰 저장 실패: ' + error.message, 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
   function close() {
     if (!root) return;
     root.classList.remove('open');
-    // ⚠️ blob URL 을 안 놓으면 프리뷰를 뽑을 때마다 메모리가 는다.
+    // ⚠️ blob URL 을 안 놓으면 그림을 띄울 때마다 메모리가 는다.
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
   }
 
   /** 서버가 보낸 `nai_preview_result` 를 받아 띄운다. */
   function show(message) {
     if (!root) build();
-    showing = message || null;
-    // ⚠️ 캐릭터 테스트 생성 결과는 **이미 저장됐다**(Results 에 있다) - [Save] 는
-    //    뜻이 없어 감춘다. 프리뷰의 그림만 저장 안 된 것이다.
-    const character = String(message?.kind || '') === 'character';
-    // ⚠️ [Generate] 도 감춘다(사용자 지정 2026-09-02: "Generate 버튼이 거기에
-    //    달려있을 필요는 없어 보이고, 상하 Close 버튼만 있으면 충분"). 이 창은
-    //    이미 나간 결과를 보여 줄 뿐이고, 다시 뽑는 것은 슬롯의 [▶] 가 한다.
-    //    V4.5 프리뷰에는 그대로 남는다 - 거기서는 다시 뽑는 것이 창의 쓰임새다.
-    const saveBtn = root.querySelector('[data-pvw="save"]');
-    if (saveBtn) saveBtn.hidden = character;
-    const genBtn = root.querySelector('[data-pvw="generate"]');
-    if (genBtn) genBtn.hidden = character;
-    root.classList.toggle('is-character', character);
     const bytes = atob(String(message.image || ''));
     const buffer = new Uint8Array(bytes.length);
     for (let i = 0; i < bytes.length; i += 1) buffer[i] = bytes.charCodeAt(i);
@@ -159,20 +109,12 @@ export function createNaiPreviewWindow({
         + ` · ${message.model}` + (cast ? ` · ${cast} char` : '');
       meta.title = (message.characters || []).join(' | ');
     }
-    // 프리뷰와 캐릭터 즉시 생성이 **같은 창**을 쓴다 - 무엇을 보고 있는지 말해 준다.
+    // 머리글 = 무엇을 뽑았는가(캐릭터 이름 · 프롬프트 앞머리).
     const title = doc.getElementById('preview45WindowTitle');
-    if (title) title.textContent = String(message.title || '').trim() || 'V4.5 PREVIEW';
+    if (title) title.textContent = String(message.title || '').trim() || 'CHARACTER';
     root.classList.add('open');
     place();
   }
 
-  /** 재생성이 도는 동안 [Generate] 를 잠근다 - 연타하면 요청이 쌓인다. */
-  function setBusy(busy) {
-    const btn = root && root.querySelector('[data-pvw="generate"]');
-    if (!btn) return;
-    btn.disabled = !!busy;
-    btn.textContent = busy ? '생성 중…' : GENERATE_LABEL;
-  }
-
-  return {show, close, isOpen, setBusy};
+  return {show, close, isOpen};
 }

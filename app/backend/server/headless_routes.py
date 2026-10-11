@@ -33,7 +33,6 @@ from app.backend.server.install_manager_routes import register_install_manager_r
 from app.backend.server.module_storage_routes import register_module_storage_routes
 from app.backend.server.nai_model_routes import register_nai_model_routes
 from app.backend.server.character_instant_routes import register_character_instant_routes
-from app.backend.server.nai_preview_routes import register_nai_preview_routes
 from app.backend.server.boost_v2_routes import register_boost_v2_routes
 from app.backend.server.anima_engine_routes import register_anima_engine_routes
 from app.backend.server.comfyui_server_log_routes import register_comfyui_server_log_routes
@@ -246,14 +245,6 @@ def register_headless_routes(
         context,
         run_in_thread=run_in_thread,
         clients=clients,
-        broadcast_json=broadcast_json,
-    )
-    register_nai_preview_routes(
-        app,
-        context,
-        run_in_thread=run_in_thread,
-        clients=clients,
-        start_generation_runner=ensure_generation_runner,
         broadcast_json=broadcast_json,
     )
     register_character_instant_routes(

@@ -575,19 +575,6 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 except Exception:
                     pass
                 continue
-            # ── V4.5 프리뷰 ─────────────────────────────────────────
-            # 사용자 지정: "저장이 되지 않는 이미지". 디스크에도 안 쓰고 히스토리에도
-            # 안 남긴다 - 여기서 갈라져 나가므로 아래 auto_save / broadcast_image /
-            # viewer_new_image_payload 를 **하나도** 타지 않는다.
-            # ⚠️ 캐릭터 '즉시 생성' 은 **여기로 오지 않는다**(사용자 제보 2026-09-02:
-            #    "사용자는 Results에 결과가 남는 것을 원할 것 입니다"). 평소 길로 흘러
-            #    디스크·히스토리·Result 탭을 모두 탄다 - 그래야 메타데이터로 PE 설정이
-            #    실제로 실렸는지도 확인할 수 있다.
-            _params = getattr(request, "params", {}) or {}
-            if _params.get("nai_preview_request"):
-                context.is_generating = False
-                await _finish_nai_preview(context, clients, request, stored)
-                continue
 
             img2img_completed = bool(
                 img2img_service
@@ -1778,9 +1765,9 @@ async def _wait_for_automation_delay(
 
 
 async def _broadcast_character_instant_preview(clients, stored, params) -> None:
-    """캐릭터 즉시 생성 결과를 프리뷰 창에도 띄운다.
+    """캐릭터 즉시 생성 결과를 결과 창에도 띄운다(메시지 이름은 옛 V4.5 프리뷰 시절 그대로다).
 
-    ⚠️ 결과 저장소에서 **빼지 않는다**(프리뷰와 다른 점). 이 그림은 평소 생성이라
+    ⚠️ 결과 저장소에서 **빼지 않는다.** 이 그림은 평소 생성이라
        히스토리에 남아야 한다 - 여기서 빼면 사용자가 Results 에서 못 찾는다.
     """
     import base64
@@ -1804,54 +1791,6 @@ async def _broadcast_character_instant_preview(clients, stored, params) -> None:
     })
 
 
-async def _finish_nai_preview(context: WebSessionContext, clients, request, stored) -> None:
-    """프리뷰 한 장을 프리뷰 창으로 보내고 **흔적을 지운다**.
-
-    ⚠️ `execute_request` 는 이미 결과 저장소에 넣어 두었다. 안 빼면 새로고침했을 때
-       히스토리에 나타난다 - 사용자는 저장한 적이 없는 그림을 보게 된다.
-    ⚠️ 그래도 **바이트는 들고 있는다**([Save] 를 누르면 그때 되살린다). 화면이 base64 를
-       되보내게 하면 큰 본문이 왕복하고, 그 사이 사용자가 다른 프리뷰를 뽑으면 어느
-       것을 저장하는지 헷갈린다.
-    """
-    import base64
-
-    params = getattr(request, "params", {}) or {}
-    item = stored.item
-    # 실행본 기록은 결과 항목이 들고 있다(위 주석 참조).
-    executed = getattr(item, "generation_params", None) or {}
-    # [Save] 가 쓸 한 칸. 다음 프리뷰가 덮는다 - 마지막 것만 저장할 수 있다.
-    context.nai_preview_last_item = item
-    try:
-        context.result_store.remove_item(item)
-    except Exception as exc:
-        print(f"[NaiPreview] result store cleanup failed: {exc}", flush=True)
-
-    await broadcast_json(clients, {
-        "type": "status",
-        "is_generating": False,
-        "message": "completed",
-    })
-    await broadcast_json(clients, {
-        "type": "nai_preview_result",
-        "requestId": str(params.get("nai_preview_request_id") or ""),
-        # 창의 머리글. 프리뷰와 즉시 생성이 **같은 창**을 쓰므로 무엇을 보고 있는지
-        # 말해 줘야 한다(기본값은 프리뷰 - 옛 경로가 이 키를 안 싣는다).
-        "title": str(params.get("nai_preview_title") or ""),
-        # ⚠️ **정말로 실려 나간** 캐릭터다. `api_service` 가 페이로드를 만들 때 적는
-        #    `_executed_characters` 라, 요청에 적은 것이 아니라 `char_captions` 에
-        #    들어간 것 - '전달됐는가' 를 여기서 확인할 수 있다.
-        #
-        # ⚠️ **요청이 아니라 결과 항목에서 읽는다.** 생성 서비스가
-        #    `params = dict(request.params)` 로 사본을 뜨고 실행하므로, api_service 가
-        #    적은 값은 요청 쪽으로 **안 돌아온다**(라이브 실측: 캐릭터가 실제로는
-        #    실려 나갔는데 여기서는 빈 배열이었다).
-        "characters": [str(c) for c in (executed.get("_executed_characters") or [])],
-        "width": int(params.get("width") or 0),
-        "height": int(params.get("height") or 0),
-        "steps": int(params.get("steps") or 0),
-        "model": str(params.get("model") or ""),
-        "image": base64.b64encode(item.webp_bytes).decode("ascii"),
-    })
 async def _auto_save_generated_history_item(context: WebSessionContext, item):
     if not context._coerce_bool(context.auto_save_state.get("auto_save", True)):
         return None

@@ -30,12 +30,9 @@ AUTO_GENERATE_SUPPRESSED_FLAGS = {
     # 연쇄는 반드시 빠져야 한다. 안 빼면 생산자가 둘이 되어 사용자가 시키지 않은 그림이
     # 나간다(Codex 리뷰 BLOCK, 실증됨).
     "v5_scene_request",
-    # NAI V4.5 Preview. 이 마커 하나로 Vibe 주입 · 레퍼런스 인셋 핀 · 스트림 Vibe 가
-    # 전부 빠진다 - **Vibe 는 인코딩만으로 2 Anlas 라** 무료 판정으로는 안 잡힌다.
-    # Auto Gen 연쇄에서 빠지는 것도 필수다(프리뷰가 진짜 생성을 몰면 안 된다).
-    "nai_preview_request",
-    # 캐릭터 '즉시 생성'. 히스토리의 캐릭터 하나를 시험 삼아 뽑는 한 장이라 같은
-    # 이유로 전부 빠져야 한다 - 특히 Vibe(인코딩만으로 2 Anlas)와 Auto Gen 연쇄.
+    # 캐릭터 '즉시 생성'. 히스토리의 캐릭터 하나를 시험 삼아 뽑는 한 장이다. 이 마커 하나로 Vibe 주입 ·
+    # 레퍼런스 인셋 핀 · 스트림 Vibe 가 전부 빠진다 - **Vibe 는 인코딩만으로 2 Anlas 라** 무료 판정으로는
+    # 안 잡힌다. Auto Gen 연쇄에서 빠지는 것도 필수다(시험 한 장이 진짜 생성을 몰면 안 된다).
     "character_instant_request",
 }
 

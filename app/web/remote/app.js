@@ -4913,12 +4913,6 @@ const wsMessageHandlers = {
     const msg = String(m.message || '');
     if (!m.is_generating && generating && (msg === 'queued' || msg === 'blocked')) return;
     if (!m.is_generating) lastGenerationOk = (msg === 'completed');
-    // 프리뷰가 실패로 끝나면 `nai_preview_result` 가 영영 안 온다 - 여기서 푼다.
-    // 단, 시작을 본 뒤의 종료만 종료다(큐 직후의 false 는 시작이 아니다).
-    if (preview45Busy) {
-      if (m.is_generating) preview45Started = true;
-      else if (preview45Started) setPreview45Busy(false);
-    }
     // V5 Scene 연속 생성의 런 표. 완료가 **누구 것인지** 가르는 유일한 단서다 -
     // 이 알림은 모든 탭에 가므로, 표가 없으면 남의 완료로 자기 컷을 넘긴다.
     lastGenerationRunTag = String(m.v5_scene_run || '');
@@ -5687,9 +5681,6 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   // 명시적인 prompt 생성 이벤트는 서버의 generation state가 authoritative하다.
   if (acceptsGeneratedPrompt) {
     if (isMyRandom) unlockRandomButton();   // 내가 요청한 random 응답일 때만 버튼 unlock(브로드캐스트로 온 남/재연결분은 패널만 갱신)
-    // 랜덤 연동 프리뷰(기본 비활성). ⚠️ **내가 누른 랜덤일 때만** 건다 - 다른 탭이
-    //    돌린 랜덤의 브로드캐스트에도 걸면 안 시킨 프리뷰가 나간다(무료지만 큐를 먹는다).
-    if (isMyRandom) void maybeRunV45PreviewAfterRandom();
     if (promptSendTimer) {
       clearTimeout(promptSendTimer);
       promptSendTimer = null;
@@ -9691,8 +9682,7 @@ function stopRndTimer() {
 }
 
 /** Random 버튼의 **기본 글자**. 이벤트 맵에 연결돼 있으면 EV Random 이다.
- *  ⚠️ 버튼 글자를 쓰는 자리가 셋이다(여기 · 스트림 배지 · V4.5 프리뷰 표기). 리터럴 'Random' 을
- *     쓰면 연결 표시가 지워진다 - 생성 중 프리뷰 표기가 EV Random 을 덮던 사용자 제보(2026-09-13). */
+ *  ⚠️ 버튼 글자를 쓰는 자리가 둘이다(여기 · 스트림 배지). 리터럴 'Random' 을 쓰면 연결 표시가 지워진다. */
 function randomButtonLabel() {
   return window.eventMap?.isRandomLinked?.() ? 'EV Random' : 'Random';
 }
@@ -11695,328 +11685,31 @@ function refreshNaiModelLimits() {
   refreshNaiNegativeTab();
 }
 
-// V5 여부에 따라 달라지는 화면을 **함께** 갱신한다. 토큰 줄이 빠지면 모델을 바꿔도
-// 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
-// ALT + P 로 요청(기본 활성). ⚠️ 입력 칸 안에서도 동작해야 한다 - 프롬프트를 고치다
-//    바로 눌러 보는 것이 이 기능의 쓰임새다. 그래서 target 을 가리지 않는다.
-document.addEventListener('keydown', event => {
-  if (!event.altKey || event.ctrlKey || event.metaKey) return;
-  if (String(event.key || '').toLowerCase() !== 'p') return;
-  if (!naiModelIsV5()) return;
-  // ⚠️ 꺼져 있으면 단축키도 안 먹는다 - 버튼은 회색인데 키만 도는 상태를 만들지 않는다.
-  if (v45PreviewState() === 'off') return;
-  if (!v45PreviewSetting('alt_p_hotkey', true)) return;
-  event.preventDefault();
-  void runV45Preview();
-});
-
-// 프리뷰 창(지연 로드). ⚠️ 이 그림은 **저장되지 않는다** - 서버가 결과 저장소에서
-//    빼고 디스크에도 안 쓴다. [Save] 를 눌렀을 때만 쓴다.
+// 캐릭터 '즉시 생성' 결과 창(지연 로드). 그 그림은 평소 생성이라 Results 에도 남는다 - 이 창은 방금 나온 한 장을
+// 띄울 뿐이다. (원래 V4.5 프리뷰의 창이었다 - 그 기능은 회수했다. 사용자 지시 2026-10-11)
 let naiPreviewWindow = null;
-const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20260903-genlabel')
+const naiPreviewWindowReady = import('./js/features/naiPreviewWindow.mjs?v=20261011-nopv45')
   .then(({createNaiPreviewWindow}) => {
-    naiPreviewWindow = createNaiPreviewWindow({
-      document,
-      window,
-      showToast,
-      // ⚠️ [Generate] 는 **4.5 재생성**이다(사용자 지정) - 프롬프트를 고쳐 가며 다시
-      //    보는 루프가 이 창의 쓰임새다. V5 진짜 생성이 아니다.
-      // ⚠️ 캐릭터 테스트 생성 결과가 떠 있으면 **그 캐릭터로** 다시 뽑는다. 여기서
-      //    V4.5 프리뷰를 돌리면 사용자가 보던 것과 다른 그림이 같은 자리에 갈린다.
-      onGenerate: showing => {
-        if (String(showing?.kind || '') === 'character' && showing.uuid) {
-          void characterPanel?.instantGenerate?.(showing.uuid);
-          return;
-        }
-        void runV45Preview();
-      },
-    });
+    naiPreviewWindow = createNaiPreviewWindow({document, window});
   })
   .catch(error => {
-    console.error('Failed to initialize NAI preview window', error);
+    console.error('Failed to initialize the character result window', error);
   });
 
 async function onNaiPreviewResult(message) {
-  // ⚠️ 캐릭터 테스트 생성은 **프리뷰 잠금을 안 쓴다** - 그 잠금은 툴바의 V4.5
-  //    버튼용이다. 여기서 풀면 마침 돌고 있던 프리뷰의 잠금이 남의 결과에 풀린다.
-  if (String(message.kind || '') !== 'character') setPreview45Busy(false);
   // 캐릭터 테스트 생성은 자기 잠금을 쓴다(연타 방지) - 결과가 닿았으니 푼다.
-  else characterPanel?.instantDone?.();
+  characterPanel?.instantDone?.();
   await naiPreviewWindowReady;
-  if (!naiPreviewWindow) { showToast('프리뷰 창을 불러오지 못했습니다.', 'error'); return; }
+  if (!naiPreviewWindow) { showToast('결과 창을 불러오지 못했습니다.', 'error'); return; }
   naiPreviewWindow.show(message);
 }
 
-// ── V4.5 프리뷰 ────────────────────────────────────────────────────────
-//
-// V5 할당량을 안 쓰고 구도만 먼저 본다. 실제로 나가는 것은 4.5 · Small · 10스텝이라
-// Anlas 도 V5 사용량도 안 깎인다(라이브 실증: 6,458 -> 6,458).
-//
-// ⚠️ 보내는 것은 **표식 사이**의 general 태그뿐이다. 표식이 없으면 보내지 않는다 -
-//    메인 전체를 보내면 Prefix 의 아티스트·품질 태그가 실려 구도가 흐려진다.
-const PREVIEW45_START = '#프리뷰 프롬프트 시작:';
-const PREVIEW45_END = '#:프리뷰 프롬프트 종료';
-let preview45Busy = false;
-let preview45ReleaseTimer = 0;
-// ⚠️ 큐에 넣은 직후에도 `is_generating:false` 상태가 한 번 온다(라이브 실측: 3초에
-//    풀렸다). 그래서 **시작을 본 뒤**의 종료만 종료로 친다.
-let preview45Started = false;
-
-/**
- * 프리뷰 잠금 - 툴바 버튼과 창의 [Generate] 를 함께 잠근다.
- *
- * ⚠️ **생성이 끝날 때까지** 잠근다. 처음엔 kickoff POST 의 finally 에서 풀었는데,
- *    그 응답은 '큐에 넣었다' 는 뜻이라 200ms 만에 풀렸다 - 30초 생성 내내 버튼이
- *    열려 있어 연타하면 그만큼 큐에 쌓였다(라이브 실측).
- * ⚠️ 결과 알림이 유실되면 영영 잠긴다 - 안전 타이머로 반드시 되돌린다.
- */
-function setPreview45Busy(busy) {
-  preview45Busy = !!busy;
-  if (busy) preview45Started = false;
-  // 글자 버튼(생성)만 잠근다. ⚠️ **톱니는 안 잠근다** - 도는 동안에도 설정을 열어
-  //    다음 판의 값을 고칠 수 있어야 한다.
-  const btn = document.getElementById('preview45RunBtn');
-  if (btn) btn.disabled = !!busy;
-  naiPreviewSettingsPanel?.setBusy(!!busy);
-  naiPreviewWindow?.setBusy(!!busy);
-  if (preview45ReleaseTimer) { clearTimeout(preview45ReleaseTimer); preview45ReleaseTimer = 0; }
-  if (busy) preview45ReleaseTimer = setTimeout(() => setPreview45Busy(false), 180000);
-}
-
-// 표식 사이만 읽는다. ⚠️ **자리를 정하는 규칙은 백엔드가 갖는다** - 여기서는 읽기만
-//    한다. 규칙이 두 곳에 있으면 한쪽만 고치게 된다.
-function extractPreviewSegment(text) {
-  const tags = String(text || '').split(',').map(t => t.trim()).filter(Boolean);
-  const start = tags.indexOf(PREVIEW45_START);
-  if (start < 0) return '';
-  const end = tags.indexOf(PREVIEW45_END, start + 1);
-  if (end < 0) return '';
-  return tags.slice(start + 1, end).join(', ');
-}
-
-/**
- * @param {object} [opts]
- * @param {boolean} [opts.segmentConfirmed] 서버가 방금 구간을 확인해 줬다.
- *        ⚠️ 표식은 서버가 넣고 `prompt_sync` 로 되돌려 준다 - 그 왕복이 끝나기 전에는
- *           화면 글에 표식이 없어서 아래 관문이 튕긴다(랜덤 연동이 여기서 막혔다).
- *           보내는 글은 어차피 **서버가** 자기 상태에서 뽑으므로 화면은 늦어도 된다.
- */
-async function runV45Preview(opts) {
-  if (preview45Busy) return;
-  if (!(opts && opts.segmentConfirmed)
-      && !extractPreviewSegment(promptEdit ? promptEdit.value : '')) {
-    // ⚠️ **실패다 - 붉게 띄운다**(사용자 지정 2026-09-03). 눌렀는데 아무 그림도 안 나오는
-    //    상황이라, 안내(파랑)로 흘리면 눌린 줄 알고 기다리게 된다.
-    showToast('프리뷰 표식이 없어 생성하지 못했습니다. 톱니 > [재삽입] 을 누르세요.', 'error');
-    return;
-  }
-  setPreview45Busy(true);
-  try {
-    const res = await fetch('/api/nai-preview/generate', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({requestId: String(Date.now())}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      showToast(data.error || data.message || '프리뷰를 시작하지 못했습니다.', 'error');
-      setPreview45Busy(false);   // 시작조차 못 했다 - 기다릴 결과가 없다.
-      return;
-    }
-    showToast('V4.5 프리뷰 생성 중… ' + data.width + 'x' + data.height + ', ' + data.steps + ' steps', 'info');
-  } catch (error) {
-    showToast('프리뷰 요청 실패: ' + error.message, 'error');
-    setPreview45Busy(false);
-  }
-  // ⚠️ finally 에서 풀지 않는다 - 여기까지는 '큐에 넣었다' 일 뿐이다.
-  //    잠금은 nai_preview_result / 생성 종료 신호가 푼다.
-}
-
-/**
- * 표식을 넣거나 걷는다.
- *
- * @param {object} [opts]
- * @param {boolean} [opts.silent]     토스트를 띄우지 않는다(랜덤 연동용).
- * @param {boolean} [opts.useServerPrompt]  화면 글 대신 서버의 글을 쓴다.
- *        ⚠️ 랜덤은 **서버가** 뽑은 것이라 서버 쪽이 최신이다 - 화면 글을 보내면
- *           방금 굴린 프롬프트 대신 직전 것에 표식을 박는다.
- * @returns {Promise<boolean>} 표식이 실제로 자리 잡았는지.
- */
-async function applyV45PreviewMarkers(action, opts) {
-  const {silent = false, useServerPrompt = false, keepOpen = false} = opts || {};
-  // 활성화 토글이 부른 것이면 창을 열어 둔다 - 켜자마자 닫히면 이어서 값을 못 고친다.
-  if (!keepOpen) closeV45PreviewMenu();
-  try {
-    const res = await fetch('/api/nai-preview/markers', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      // ⚠️ 화면의 현재 글을 함께 보낸다 - 서버의 프롬프트는 500ms 디바운스라
-      //    방금 친 태그가 아직 안 갔을 수 있다(Codex CONCERN 1).
-      body: JSON.stringify({
-        action,
-        prompt: (useServerPrompt || !promptEdit) ? undefined : promptEdit.value,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (!silent) showToast(data.error || '표식을 바꾸지 못했습니다.', 'error');
-      return false;
-    }
-    if (!silent) {
-      if (action === 'remove') showToast('프리뷰 표식을 걷었습니다.', 'success');
-      else showToast(data.segment ? ('프리뷰 구간: ' + data.segment) : '프리뷰 표식을 넣었습니다.', 'success');
-    }
-    return action === 'remove' ? true : !!data.segment;
-  } catch (error) {
-    if (!silent) showToast('표식 요청 실패: ' + error.message, 'error');
-    return false;
-  }
-}
-
-// 설정 패널(지연 로드). ⚠️ 값의 SSOT 는 백엔드다 - 여기서는 열고 닫기만 한다.
-let naiPreviewSettingsPanel = null;
-// ⚠️ **모듈을 고치면 이 `?v=` 를 반드시 올린다.** 브라우저는 URL 로 ES 모듈을 캐시해서,
-//    안 올리면 새로고침해도 옛 모듈이 그대로 돈다 - 실제로 활성화 토글이 안 뜨는 것으로
-//    한 번 나타났다(2026-09-03 실측).
-const naiPreviewSettingsReady = import('./js/features/naiPreviewSettingsPanel.mjs?v=20260903-pv45markers')
-  .then(({createNaiPreviewSettingsPanel}) => {
-    naiPreviewSettingsPanel = createNaiPreviewSettingsPanel({
-      document,
-      window,
-      showToast,
-      escHtml,
-      onMarkers: (action, opts) => { void applyV45PreviewMarkers(action, opts); },
-      // 팝업 머리줄의 [생성]. 값을 고쳐 가며 다시 뽑는 용도라 창을 닫지 않는다
-      //  - 툴바의 글자 버튼과 **같은 일**을 한다(잠금도 함께 걸린다).
-      onGenerate: () => { void runV45Preview(); },
-      // 켜짐/랜덤 연동이 바뀌면 툴바 버튼 색과 Random 라벨이 따라 바뀐다.
-      onSettingsChange: () => { refreshV45PreviewState(); },
-    });
-    // 잠금은 이미 켜져 있을 수 있다(팝업은 지연 로드다) - 지금 상태를 한 번 물려준다.
-    naiPreviewSettingsPanel.setBusy(preview45Busy);
-    // ⚠️ 설정을 **미리 받아 둔다.** 안 그러면 팝업을 한 번도 안 연 세션에서는
-    //    `current()` 가 null 이라 랜덤 연동·ALT+P 가 기본값으로 떨어진다 - 서버에는
-    //    on_random:true 인데 화면은 false 로 알고 아무 일도 안 했다(라이브 실측).
-    return naiPreviewSettingsPanel.refresh().catch(error => {
-      console.error('Failed to prime NAI preview settings', error);
-    });
-  })
-  .catch(error => {
-    console.error('Failed to initialize NAI preview settings panel', error);
-  });
-
-function closeV45PreviewMenu() {
-  naiPreviewSettingsPanel?.close();
-}
-
-/**
- * 툴바 버튼의 **세 가지 상태**(사용자 지정 2026-09-03).
- *
- *   꺼짐   회색   · 누르면 설정이 열린다(팝업의 활성화 줄이 점멸해 다음 할 일을 가리킨다)
- *   켜짐   연두   · 누르면 생성
- *   랜덤   분홍   · 켜짐 + 랜덤 연동. Random 버튼도 `Random (프리뷰)` 로 바뀐다
- *
- * ⚠️ 랜덤은 **켜짐의 하위 상태**다. 꺼져 있는데 랜덤 연동만 켜 두면 아무 일도
- *    안 일어나므로 분홍으로 칠하면 거짓말이 된다.
- */
-function v45PreviewState() {
-  if (!v45PreviewSetting('enabled', false)) return 'off';
-  return v45PreviewSetting('on_random', false) ? 'random' : 'on';
-}
-
-function refreshV45PreviewState() {
-  const state = v45PreviewState();
-  const btn = document.getElementById('preview45RunBtn');
-  if (btn) {
-    btn.classList.toggle('is-off', state === 'off');
-    btn.classList.toggle('is-on', state === 'on');
-    btn.classList.toggle('is-random', state === 'random');
-    btn.title = state === 'off'
-      ? 'V4.5 프리뷰가 꺼져 있습니다 - 눌러서 설정을 엽니다'
-      : (state === 'random' ? 'Random 을 누를 때 함께 나갑니다' : '4.5 프리뷰를 생성합니다');
-  }
-  // Random 라벨. ⚠️ 라벨은 단축키 힌트 <span> 뒤의 **맨 뒤 텍스트 노드**다
-  //    (Generate 의 인페인트 표기와 같은 방식 - 노드를 지우면 힌트까지 날아간다).
-  // ⚠️ 프리뷰 묶음이 안 보이는 모드(V5 아님)에서는 표기하지 않는다 - 그때는 랜덤이
-  //    프리뷰를 부르지 않는다.
-  const rnd = document.getElementById('btnRnd');
-  if (rnd) {
-    const linked = state === 'random' && naiModelIsV5();
-    const label = Array.from(rnd.childNodes).reverse().find(n => n.nodeType === 3);
-    if (label) label.textContent = linked ? `${randomButtonLabel()} (프리뷰)` : randomButtonLabel();
-    rnd.classList.toggle('is-preview-linked', linked);
-  }
-}
-
-/**
- * 툴바 글자 버튼. **꺼져 있으면 생성하지 않고 설정을 연다**(사용자 지정 2026-09-03).
- *
- * 꺼진 채로 눌렀을 때 토스트만 띄우면 어디서 켜는지를 다시 찾아야 한다 - 켜는 자리를
- * 바로 열어 주고, 그 줄이 점멸해 무엇을 누를지 가리킨다.
- */
-async function onV45PreviewButton() {
-  // 설정이 아직 안 왔으면 기다린다 - 안 기다리면 첫 클릭이 늘 '꺼짐' 으로 읽힌다.
-  await naiPreviewSettingsReady;
-  if (v45PreviewState() === 'off') { await toggleV45PreviewMenu(); return; }
-  void runV45Preview();
-}
-
-async function toggleV45PreviewMenu() {
-  await naiPreviewSettingsReady;
-  if (!naiPreviewSettingsPanel) { showToast('프리뷰 설정을 불러오지 못했습니다.', 'error'); return; }
-  naiPreviewSettingsPanel.toggle();
-}
-
-// ⚠️ 설정을 **묻기만** 한다. 패널을 한 번도 안 열었으면 값이 없으므로, 그때는
-//    기본값(SPEC 그대로)으로 답한다 - 서버에 매번 물으면 랜덤 연타가 왕복을 만든다.
-function v45PreviewSetting(key, fallback) {
-  const current = naiPreviewSettingsPanel?.current();
-  if (!current || !(key in current)) return fallback;
-  return current[key];
-}
-
-/**
- * 랜덤이 돈 뒤의 뒤처리. **두 가지가 층이 다르다.**
- *
- *   켜짐(`enabled`)       -> 표식을 **다시 넣는다**
- *   랜덤 연동(`on_random`) -> 거기에 더해 프리뷰까지 **생성한다**
- *
- * ⚠️ 표식은 켜져 있기만 하면 언제나 다시 넣는다(사용자 제보 2026-09-03). 랜덤은 메인
- *    프롬프트를 통째로 갈아 끼워 지난 판의 표식을 지워 버린다 - 예전에는 랜덤 연동을
- *    켰을 때만 다시 넣어서, 연동을 끄고 쓰는 사람은 랜덤을 누를 때마다 [4.5 프리뷰]가
- *    **붉게 실패**했다. 켜 뒀는데 매번 톱니를 열어 [재삽입]을 눌러야 했던 셈이다.
- * ⚠️ 표식만 지키는 판에서는 **아무 토스트도 띄우지 않는다.** 랜덤을 돌릴 때마다
- *    안내가 뜨면 화면을 덮는다 - 잡지 못했다면 다음 [4.5 프리뷰] 가 그 자리에서
- *    붉게 알려 준다.
- */
-async function maybeRunV45PreviewAfterRandom() {
-  if (!naiModelIsV5()) return;
-  // 설정이 아직 안 왔으면 기다린다 - 안 기다리면 첫 랜덤이 기본값으로 떨어진다.
-  await naiPreviewSettingsReady;
-  // ⚠️ 꺼져 있으면 아무것도 안 한다 - `on_random` 만 보면 꺼 둔 사람에게도 표식이 박힌다.
-  const state = v45PreviewState();
-  if (state === 'off') return;
-  // 조용히 넣는다 - 랜덤을 돌릴 때마다 구간 토스트가 뜨면 화면을 덮는다.
-  const ok = await applyV45PreviewMarkers('insert', {silent: true, useServerPrompt: true});
-  // 생성까지 가는 것은 **랜덤 연동을 켰을 때만**이다.
-  if (state !== 'random') return;
-  if (!ok) { showToast('프리뷰 구간을 잡지 못했습니다.', 'info'); return; }
-  await runV45Preview({segmentConfirmed: true});
-}
-
+// V5 여부에 따라 달라지는 화면을 **함께** 갱신한다. 토큰 줄이 빠지면 모델을 바꿔도
+// 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
 function refreshV5DependentChrome() {
   refreshTransparentBgPill();
   // 모델 · 모드가 바뀌는 자리마다 여기를 지난다 - Medium 의 칸 잠금 · Negative 탭도 함께 맞춘다.
   refreshNaiModelLimits();
-  // 프리뷰는 V5 에서만 뜻이 있다 - 4.5 에서 4.5 를 미리 볼 이유가 없다.
-  const previewSplit = document.getElementById('preview45Split');
-  const previewOn = naiModelIsV5();
-  if (previewSplit) previewSplit.hidden = !previewOn;
-  document.getElementById('promptTokenFooter')
-    ?.classList.toggle('has-preview45', previewOn);
-  // 모드가 바뀌면 Random 라벨도 다시 계산한다 - V5 를 벗어나면 `(프리뷰)` 를 떼야 한다.
-  refreshV45PreviewState();
-  if (!previewOn) closeV45PreviewMenu();
   if (tokenDisplayControl) tokenDisplayControl.updatePromptTokenEstimate();
 }
 

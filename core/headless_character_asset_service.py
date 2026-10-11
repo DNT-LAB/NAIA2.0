@@ -1699,7 +1699,8 @@ class HeadlessCharacterAssetService:
 
     def save_migrated(self, character_id: str, results: Any = None) -> dict[str, Any]:
         """구 사양 캐릭터의 **사본**을 신 사양으로 만든다. 원본은 건드리지 않는다.
-        옮기는 것 = 대표 그림(배경 제거) + 이름 · 설명 + 캐릭터 프롬프트. 바리에이션은 옮기지 않는다."""
+        옮기는 것 = 대표 그림(배경 제거) + 이름(없으면 원본 id 앞 8자) · 설명 + 캐릭터 프롬프트.
+        바리에이션은 옮기지 않는다."""
         self._bootstrap()
         with self._lock:
             character_id = self._validate_id(character_id)
@@ -1721,6 +1722,10 @@ class HeadlessCharacterAssetService:
             for key in ("display_name", "description", "character_prompt", "character_uc"):
                 if key in old:
                     sidecar[key] = old[key]
+            if not str(sidecar.get("display_name") or "").strip():
+                # 이름이 없던 캐릭터는 구 사양 카드에 id 앞 8자로 보였다. 사본의 id 는 다르므로(그림이 다르다)
+                # 그대로 두면 어느 캐릭터의 사본인지 알 수 없다 - 원본의 그 8자를 이름으로 준다(사용자 지시 2026-10-11).
+                sidecar["display_name"] = character_id[:8]
             sidecar["builder_v5"] = builder_v5.migrated_metadata(character_id, builder_v5.prompt_gender(prompt))
             if not asset_storage.write_character_meta(saved_id, sidecar, self.write_root()):
                 raise OSError("could not save migration metadata")

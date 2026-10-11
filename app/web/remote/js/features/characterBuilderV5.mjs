@@ -54,6 +54,8 @@ export function createCharacterBuilderV5({
   isNai = () => true,
   // 화면이 바뀌어 덮개를 올리거나 내려야 할 때 부른다(바깥이 body 표식과 탭을 맞춘다).
   onViewChange = () => {},
+  // [C1 + 레퍼런스 인셋 적용] 이 돌려받은 인셋 상태를 넘긴다(Result 탭의 핀 배지가 같은 상태를 본다).
+  onReferenceInsetPin = () => {},
 }) {
   if (!leftMount || !rightMount) return null;
 
@@ -85,6 +87,9 @@ export function createCharacterBuilderV5({
   let storeSeq = 0;
   let selectedId = '';           // 선택 화면에서 고른 캐릭터
   let selectedVar = '';          // 그 캐릭터의 고른 그림('' = 대표)
+  // 바리에이션마다의 캐릭터 프롬프트(해시 -> {prompt, uc, recovered}). 대표의 것은 `detail` 에 있다.
+  // 그림마다 자기 프롬프트를 갖는다 - 대표의 것을 바리에이션에 보여 주면 적용되는 글과 보이는 글이 달라진다.
+  const imagePrompts = new Map();
   let detail = null;             // 고른 캐릭터의 상세(그림들 · 이름 · 설명 · 구성)
   let detailSeq = 0;
   let deleteArmed = '';          // 지우기는 두 번 누른다 - 한 번 눌린 단추의 표식
@@ -500,6 +505,28 @@ export function createCharacterBuilderV5({
     return rows || origin ? `<div class="cb5-comp">${origin}${rows}</div>` : '';
   }
 
+  /** 고른 그림의 캐릭터 프롬프트. 아직 못 받았으면 null. */
+  function promptOf(hash) {
+    if (!detail) return null;
+    if (!hash) {
+      return {prompt: String(detail.character_prompt || ''), uc: String(detail.character_uc || ''),
+        recovered: !!detail.recovered};
+    }
+    return imagePrompts.get(hash) || null;
+  }
+
+  /** 캐릭터 프롬프트 칸(구 사양 상세와 같은 꼴 - 읽기만 한다). 슬롯 · 레퍼런스 인셋에 실리는 글이 이것이다. */
+  function promptHtml(hash) {
+    const info = promptOf(hash);
+    const label = `<div class="mod-section-label">Character Prompt ${hash ? '(바리에이션)' : '(대표)'}</div>`;
+    if (!info) return `<div class="char-asset-prompt-block">${label}<pre class="char-asset-pre">불러오는 중...</pre></div>`;
+    const uc = info.uc
+      ? `<div class="mod-section-label">Character UC</div>`
+        + `<pre class="char-asset-pre char-asset-pre-uc">${escHtml(info.uc)}</pre>` : '';
+    return `<div class="char-asset-prompt-block">${label}<pre class="char-asset-pre">${
+      escHtml(info.prompt || '(이 그림에서는 캐릭터 프롬프트를 읽지 못했습니다)')}</pre>${uc}</div>`;
+  }
+
   function detailHtml() {
     if (!selectedId) return '<div class="mod-empty char-asset-detail-empty">캐릭터를 선택하세요.</div>';
     if (!detail || detail.id !== selectedId) return '<div class="mod-empty char-asset-detail-empty">불러오는 중...</div>';
@@ -516,6 +543,8 @@ export function createCharacterBuilderV5({
     const armed = deleteArmed === `var:${selectedVar}`;
     const charArmed = deleteArmed === `char:${detail.id}`;
     // 이름 · 설명은 그림마다 자유롭게 적는다(사용자 결정). 대표의 것은 곧 캐릭터의 것이다.
+    // 프롬프트를 읽지 못한 그림은 슬롯에 실을 글이 없다(서버도 거절한다) - 눌러서 실패하게 두지 않는다.
+    const applyOff = promptOf(selectedVar)?.recovered ? '' : ' disabled';
     const nameValue = entry ? (entry.name || '') : (detail.display_name || '');
     const descValue = entry ? (entry.description || '') : (detail.description || '');
     return `<div class="char-asset-detail-head">`
@@ -537,8 +566,13 @@ export function createCharacterBuilderV5({
       + `<textarea class="cb5-annot-desc" data-cb-field="description" maxlength="4000" rows="3"`
       + ` placeholder="${entry ? '이 그림의 설명' : '캐릭터 설명'} (자유롭게 적어 둡니다)">${escHtml(descValue)}</textarea></div>`
       + compositionHtml(compositionOf(selectedVar))
+      + promptHtml(selectedVar)
       + `<div class="char-asset-apply-actions">`
-      + `<button type="button" class="mod-btn-sm mod-btn-encode" data-cb-act="apply-c1">C1 적용 (단독)</button></div>`;
+      + `<button type="button" class="mod-btn-sm mod-btn-encode" data-cb-act="apply-c1"${applyOff}`
+      + ` data-naia-title="C1 에 넣습니다. 쓰던 캐릭터 프롬프트는 한 칸씩 밀려 꺼집니다">C1 적용 (단독)</button>`
+      + `<button type="button" class="mod-btn-sm mod-btn-encode" data-cb-act="apply-c1-inset"${applyOff}`
+      + ` data-naia-title="C1 에 넣고 이 그림을 레퍼런스 인셋으로 고정합니다 - 켜져 있던 Character Reference 는 꺼집니다">`
+      + `C1 + 레퍼런스 인셋 적용</button></div>`;
   }
 
   function galleryHtml() {
@@ -923,13 +957,33 @@ export function createCharacterBuilderV5({
       const data = await getJson(`/api/character-asset/detail?id=${encodeURIComponent(id)}`);
       if (seq !== detailSeq || id !== selectedId) return;     // 그사이 다른 캐릭터를 골랐다
       detail = data;
+      imagePrompts.clear();
       if (selectedVar && !variationEntry(selectedVar)) selectedVar = '';
+      if (selectedVar) void loadImagePrompt(selectedVar);
     } catch (error) {
       if (seq !== detailSeq) return;
       detail = null;
       showToast(`불러오지 못했습니다: ${error.message}`, 'error');
     }
     if (view === 'gallery') renderDetail();
+  }
+
+  /** 고른 바리에이션의 캐릭터 프롬프트를 받는다(상세 라우트가 `variation` 으로 그 그림의 것을 준다). */
+  async function loadImagePrompt(hash) {
+    const id = selectedId;
+    if (!id || !hash || imagePrompts.has(hash)) return;
+    try {
+      const data = await getJson(`/api/character-asset/detail?id=${encodeURIComponent(id)}`
+        + `&variation=${encodeURIComponent(hash)}`);
+      if (id !== selectedId || !detail || detail.id !== id) return;
+      imagePrompts.set(hash, {
+        prompt: String(data.character_prompt || ''), uc: String(data.character_uc || ''), recovered: !!data.recovered,
+      });
+    } catch (error) {
+      if (id !== selectedId) return;
+      imagePrompts.set(hash, {prompt: '', uc: '', recovered: false});
+    }
+    if (view === 'gallery' && selectedVar === hash) renderDetail();
   }
 
   function selectCharacter(id) {
@@ -969,15 +1023,22 @@ export function createCharacterBuilderV5({
     }
   }
 
-  async function applyC1() {
+  async function applyC1(withInset = false) {
     if (!detail) return;
     if (!isNai()) {
       showToast('캐릭터 슬롯 적용은 NAI 모드 전용입니다', 'error');
       return;
     }
     try {
-      await postJson('/api/character-asset/apply', {id: detail.id, variation: selectedVar, mode: 'c1'});
-      showToast('C1 에 적용했습니다', 'success');
+      const result = await postJson('/api/character-asset/apply', {
+        id: detail.id, variation: selectedVar, mode: 'c1', with_inset: withInset,
+      });
+      if (withInset) {
+        showToast('C1 에 적용하고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다', 'success');
+        if (result?.reference_inset) onReferenceInsetPin(result.reference_inset);
+      } else {
+        showToast('C1 에 적용했습니다', 'success');
+      }
     } catch (error) {
       showToast(`적용 실패: ${error.message}`, 'error');
     }
@@ -1114,6 +1175,7 @@ export function createCharacterBuilderV5({
     if (variation) {
       selectedVar = variation.dataset.cbVar;
       deleteArmed = '';
+      if (selectedVar) void loadImagePrompt(selectedVar);
       // 고른 그림이 바뀌면 이름 · 설명 칸도 그 그림의 것으로 바뀌어야 한다 - 치던 칸에서 초점을 뗀 뒤 그린다.
       if (document.activeElement?.dataset?.cbField) document.activeElement.blur();
       renderDetail();
@@ -1131,6 +1193,7 @@ export function createCharacterBuilderV5({
       else if (name === 'var-delete') deleteVariation();
       else if (name === 'char-delete') deleteCharacter();
       else if (name === 'apply-c1') void applyC1();
+      else if (name === 'apply-c1-inset') void applyC1(true);
       return;
     }
     const row = event.target.closest('[data-cb-block]');

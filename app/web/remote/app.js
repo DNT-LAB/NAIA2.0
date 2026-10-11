@@ -952,9 +952,9 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
 // 신 사양 탭이 **보이는 동안만** 왼쪽 메인 프롬프트 자리를 블록 줄이 덮는다(사용자 지정 2026-10-11).
 // Result 로 가면(= Assets 탭을 떠나면) 덮개가 저절로 걷힌다 - 이 모드는 Result 를 띄우지 않으므로
 // 다른 기능과 같은 자리를 다투지 않는다. 메인 프롬프트 글에는 쓰지 않아 되돌릴 것도 없다.
-const ASSET_SPEC_TAB_KEY = 'naia.assets.specTab';
-let assetSpecTab = 'legacy';
-try { if (localStorage.getItem(ASSET_SPEC_TAB_KEY) === 'v5') assetSpecTab = 'v5'; } catch (_) { /* 사생활 모드 */ }
+// 처음 보여 주는 것은 **늘 신 사양**이다(사용자 지시 2026-10-11). 고른 탭은 이 창이 떠 있는 동안만 기억한다 -
+// 브라우저에 저장해 두면 구 사양을 한 번 눌러 본 사람은 그 뒤로 계속 구 사양으로 열린다.
+let assetSpecTab = 'v5';
 
 function syncAssetsV5Mode(activeRightTab) {
   const rightTab = activeRightTab
@@ -984,12 +984,11 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   const button = event.target.closest('[data-asset-spec]');
   if (!button) return;
   assetSpecTab = button.dataset.assetSpec === 'v5' ? 'v5' : 'legacy';
-  try { localStorage.setItem(ASSET_SPEC_TAB_KEY, assetSpecTab); } catch (_) { /* 사생활 모드 */ }
   syncAssetsV5Mode();
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5c')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5d')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1002,6 +1001,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
       rightMount: document.getElementById('charBuilderV5Root'),
       isNai: () => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() === 'NAI',
       onViewChange: () => syncAssetsV5Mode(),
+      onReferenceInsetPin: state => setReferenceInsetBadge(state),
     });
     syncAssetsV5Mode();
   })
@@ -1009,7 +1009,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
     console.error('Failed to initialize Character Builder V5 module', error);
   });
 
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5c')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5d')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -1138,10 +1138,12 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261010-inset17');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261011-inset18');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),
+        // [Assets] - Assets 탭을 연다. 에셋의 그림은 거기서 [C1 + 레퍼런스 인셋 적용] 으로 꽂는다.
+        openAssets: () => switchRightTab('charAssets'),
         // [붙여넣기] - 클립보드를 읽어 **이 창으로만** 넘긴다. 받는 쪽을 지목한 붙여넣기라 앱의 평소 붙여넣기
         // (이미지 동작 팝업 · 인페인트 레이어)로 가지 않는다. ⚠️ Ctrl+V 는 이리로 오지 않는다(회수 - 사용자 결정).
         requestPaste: () => {

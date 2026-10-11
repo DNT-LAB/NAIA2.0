@@ -1797,7 +1797,8 @@ export function createCharacterAssetTabController({
         ${promptContent}
       </div>
       <div class="char-asset-apply-actions">
-        <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1" ${applyDisabled} ${applyTitle}>C1 적용 (단독)</button>
+        <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1" ${applyDisabled} ${applyTitle}
+          data-naia-title="C1 에 넣습니다. 쓰던 캐릭터 프롬프트는 한 칸씩 밀려 꺼집니다">C1 적용 (단독)</button>
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-cr" ${applyDisabled} ${applyTitle}
           title="C1 슬롯 적용 + 이 이미지를 Character Reference로 등록 (해상도는 자동 정규화)">C1 + CR 적용</button>
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-inset" ${applyDisabled} ${applyTitle}

@@ -516,10 +516,11 @@ class HeadlessCharacterService:
         save_settings, snapshot invalidation) instead of letting callers poke
         the settings cache directly.
 
-        - "c1": Dev0714 assign_c1 parity — write frames[0], make it the only
-          active slot. Stored frames (history/favorites/groups) are never touched -
-          with no active slot a new one is made. Custom names/uuids are
-          preserved (only prompt/uc/state fields change).
+        - "c1": **끼워 넣는다**(사용자 지시 2026-10-11). 에셋이 새 C1 이 되고, 있던 슬롯은 한 칸씩 밀려
+          **꺼진다**(mute - 슬롯에 그대로 남아 다시 켜면 된다). 예전(Dev0714 assign_c1)에는 C1 의 글을
+          덮어쓰고 나머지를 히스토리로 내려서, 쓰던 C1 프롬프트가 사라졌다.
+          밀 것이 없으면 그 칸에 쓴다: C1 이 비어 있거나, 이미 같은 글이다(같은 에셋을 다시 누른 것).
+          Stored frames (history/favorites/groups) are never touched.
         - "add_slot": append a fresh active frame.
         Either way the module itself is activated.
         """
@@ -545,11 +546,25 @@ class HeadlessCharacterService:
             # ⚠️ C1 은 **활성 슬롯의 첫 칸**이다. 정규화가 [활성][보관] 순으로 세우므로 활성이 하나도 없으면
             #    frames[0] 은 보관함의 첫 줄이고, 거기에 쓰면 사용자가 보관한 캐릭터가 에셋으로 덮인다.
             #    그때는 새 칸을 만든다.
-            if not frames or _state_of(frames[0]) != "active":
+            new_prompt, new_uc = str(prompt or ""), str(uc or "")
+            first = frames[0] if frames and isinstance(frames[0], dict) and _state_of(frames[0]) == "active" else None
+            # 밀 것이 없는 C1 = 빈 칸이거나, 이미 이 에셋의 글이다. 이때도 밀면 같은 에셋을 누를 때마다
+            # 꺼진 사본이 한 칸씩 쌓인다.
+            reuse = first is not None and (
+                (not str(first.get("prompt") or "").strip() and not str(first.get("uc") or "").strip())
+                or (str(first.get("prompt") or "") == new_prompt and str(first.get("uc") or "") == new_uc)
+            )
+            if not reuse:
+                if _active_slot_count(frames) >= MAX_CHARACTER_SLOTS:
+                    # 슬롯이 가득이면 맨 끝 칸이 히스토리로 내려간다(지워지지 않는다). 적용을 거절하면
+                    # 사용자는 슬롯을 하나 비우고 다시 눌러야 한다 - 같은 일을 손으로 시키는 것이다.
+                    last = [item for item in frames if isinstance(item, dict) and _state_of(item) == "active"][-1]
+                    last["is_enabled"] = False
+                    last["slot_state"] = "inactive"
                 frames.insert(0, {"prompt": "", "uc": "", "custom_name": ""})
             frame = self.ensure_frame(frames, 0)
-            frame["prompt"] = str(prompt or "")
-            frame["uc"] = str(uc or "")
+            frame["prompt"] = new_prompt
+            frame["uc"] = new_uc
             # ⚠️ 씬이 만든 칸이었어도 이제 사용자가 넣은 글이다(`char_prompt_` 와 같다). 표식이 남으면
             #    다음 씬이 '이전 씬이 남긴 칸' 으로 보고 히스토리로 내리지 않고 버린다(Codex 리뷰 2026-10-05).
             frame["from_scene"] = False
@@ -565,9 +580,10 @@ class HeadlessCharacterService:
                 if not isinstance(other, dict):
                     continue
                 if _state_of(other) != "active":
-                    continue            # 보관함은 손대지 않는다 - 내리는 것은 지금 슬롯뿐이다
+                    continue            # 보관함은 손대지 않는다 - 끄는 것은 지금 슬롯뿐이다
+                # **제자리에서 끈다**(화면의 ✔/✘ 와 같은 것 - `char_muted_`). 슬롯에 남으므로 번호만 하나씩 밀린다.
+                other["is_muted"] = True
                 other["is_enabled"] = False
-                other["slot_state"] = "inactive"
         else:
             raise ValueError(f"unknown apply mode: {apply_mode}")
         settings["is_active"] = True

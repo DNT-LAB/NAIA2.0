@@ -15,7 +15,7 @@
  *      └──────────────────────────────────────┘
  *
  *  상태는 셋이다(서버의 `configured` · `active`):
- *    - 꽂아 둔 것이 없다 → '레퍼런스로 쓸 그림을 넣어 주세요' + [붙여넣기] [Storage]
+ *    - 꽂아 둔 것이 없다 → '레퍼런스로 쓸 그림을 넣어 주세요' + [붙여넣기] [Storage] [Assets]
  *    - 꽂아 뒀고 켜져 있다 → 다음 생성이 인셋으로 나간다
  *    - 꽂아 뒀는데 꺼져 있다 → 일반 생성. **그림 · 배치 · 해상도는 그대로** 남아 있고 스위치로 다시 켠다
  *      (예전에는 끄면 전부 사라져 처음부터 다시 꽂아야 했다).
@@ -32,7 +32,9 @@
  *    세 급. 비율을 바꾸면 같은 급의 크기로 간다. 1MP 를 넘는 크기는 **Anlas 를 소모한다** - 칩에 'Anlas 소모' 라고만
  *    적는다(소모량을 숫자로 적지 않는다 - 사용자 지정 2026-10-10: 실제 소모량이 불명확하다). 드는가 아닌가는 서버의
  *    `canvas_costs`(0 이면 무료)로 가린다. 목록 · 묶음은 전부 서버가 실어 보낸다.
- *  에셋의 그림은 Assets 탭의 [C1+레퍼런스 인셋] 으로 꽂는다 - 이 창에는 에셋을 고르는 단추가 없다(사용자 결정).
+ *  에셋의 그림은 Assets 탭의 [C1+레퍼런스 인셋] 으로 꽂는다 - 이 창 안에서 에셋을 고르지는 않는다(사용자 결정).
+ *  [Assets] = 그 Assets 탭을 연다(사용자 지시 2026-10-11). 꽂는 일은 여전히 거기서 한다 - 캐릭터 프롬프트(C1)와
+ *  그림이 함께 실려야 하기 때문이다.
  *
  *  경위(10-09 하루에 세 번 바뀌었다 - 되돌리기 전에 읽을 것): 자유롭게 옮기는 박스 → "좌측은 무조건 왼쪽에 고정 ·
  *  사이즈만 · 이동 불가"(그림을 키우면 머리 쪽만 보였다) → "기존 사양처럼 경계선이 필요하고 내부 드래그 가능해야".
@@ -127,6 +129,8 @@ export function createReferenceInsetWindow({
   onState = () => {},
   // [붙여넣기] 단추: 클립보드의 그림을 읽어 `acceptPastedImage(blob)` 로 넘겨 준다(읽는 일은 앱이 한다).
   requestPaste = null,
+  // [Assets] 단추: Assets 탭을 연다(탭을 바꾸는 일은 앱이 한다).
+  openAssets = null,
 } = {}) {
   let panel = null;
   // 서버의 인셋 상태. 꽂아 둔 것이 없으면 `{configured: false}` - 그때도 창은 열려 있다.
@@ -205,6 +209,8 @@ export function createReferenceInsetWindow({
                     data-naia-title="클립보드의 그림(캡쳐 · 복사한 것)을 레퍼런스로 씁니다">붙여넣기</button>
             <button type="button" class="riw-chip" data-riw-storage
                     data-naia-title="저장해 둔 그림에서 고릅니다">Storage</button>
+            <button type="button" class="riw-chip" data-riw-assets
+                    data-naia-title="Assets 탭을 엽니다 - 캐릭터를 고르고 [C1 + 레퍼런스 인셋 적용] 을 누릅니다">Assets</button>
           </div>
           <div class="riw-empty-hint">에셋의 그림은 Assets 탭의 [C1+레퍼런스 인셋] 으로 꽂습니다</div>
         </div>
@@ -265,6 +271,7 @@ export function createReferenceInsetWindow({
       upscale: find('[data-riw-upscale]'),
       pastes: [...panel.body.querySelectorAll('[data-riw-paste]')],
       storages: [...panel.body.querySelectorAll('[data-riw-storage]')],
+      assets: [...panel.body.querySelectorAll('[data-riw-assets]')],
       save: find('[data-riw-save]'),
       crop: find('[data-riw-crop]'),
       note: find('[data-riw-note]'),
@@ -292,6 +299,10 @@ export function createReferenceInsetWindow({
       else showToast('이 화면에서는 붙여넣기를 쓸 수 없습니다', 'error');
     }));
     el.storages.forEach(button => button.addEventListener('click', () => { if (!locked()) showStorage(); }));
+    el.assets.forEach(button => button.addEventListener('click', () => {
+      if (typeof openAssets === 'function') openAssets();
+      else showToast('이 화면에서는 Assets 탭을 열 수 없습니다', 'error');
+    }));
     el.back.addEventListener('click', () => showMain());
     el.storeGrid.addEventListener('click', onStoreClick);
     el.save.addEventListener('click', saveToStorage);

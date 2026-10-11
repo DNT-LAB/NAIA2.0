@@ -1,3 +1,6 @@
+// 캐릭터 글의 `#주석` 은 나가지 않는다 - 토큰을 어림할 때도 걷는다(캐릭터 패널들과 한 벌을 나눠 쓴다).
+import {stripCommentText} from './promptCommentLayer.mjs?v=20261011-cmt5';
+
 export function createModuleBadges({
   document,
   getMode,
@@ -416,7 +419,9 @@ export function createModuleBadges({
       const rolled = (m.processed_characters || []).filter(Boolean);
       texts = rolled.length ? rolled : enabledSlotTexts(m.characters);
     }
-    const promptText = texts.map(value => String(value || '').trim()).filter(Boolean).join(' ');
+    // ⚠️ 슬롯마다 주석을 **걷은 뒤에** 잇는다. 그대로 이으면 앞 슬롯의 `#memo` 가 뒤 슬롯의 글까지 한 토막으로 삼켜
+    //    어림이 0 이 된다(실제로는 뒤 슬롯이 나간다 - Codex 리뷰 2026-10-11).
+    const promptText = texts.map(value => stripCommentText(String(value || '')).trim()).filter(Boolean).join(' ');
     const tokenCount = Number.isFinite(Number(m.character_token_count))
       ? Number(m.character_token_count)
       : estimateTokenCount(promptText, getMode());

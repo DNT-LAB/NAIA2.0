@@ -398,7 +398,7 @@ class HeadlessConditionalRuleEngine:
         # 같은 함수를 호출해 동치를 구조적으로 보장한다. 와일드카드가 빈 옵션을 고르면(`<keep|>`
         # 빈 가지 등) 정상 경로처럼 빈 결과를 그대로 써(원문 토큰 미잔존) 리터럴 누출 + 후속
         # store의 시퀀스 카운터 재전진을 막는다. 매니저 없음/예외 → 원문 보존(전개 미실행=불변).
-        from core.character_settings import _expand_character_text
+        from core.character_settings import character_text_is_blank, expand_whole_character_text
         processor = None
         _manager = getattr(self.app_context, "wildcard_manager", None)
         if _manager is not None:
@@ -415,7 +415,8 @@ class HeadlessConditionalRuleEngine:
             if processor is None:
                 return raw
             try:
-                value = _expand_character_text(raw, processor, context)
+                # 슬롯 전개와 같은 순서로(Connect 마커가 두 쌍이어도 같은 토막이 나오게 - Codex 2026-10-11 3차).
+                value = expand_whole_character_text(raw, processor, context)
             except Exception:
                 return raw  # 전개 실패 → 콘텐츠 손실 방지(원문 보존, 카운터는 이미 진행분만)
             slot[field] = value  # write-back(빈 결과 포함): 반복 store 시 같은 토큰 재확장 방지
@@ -428,7 +429,8 @@ class HeadlessConditionalRuleEngine:
             # 비활성/빈 프롬프트 슬롯까지 확장하면 __*wc__(순차)·$m:s(옵저버)가 메인 프롬프트와
             # 공유하는 카운터를 헛소비해 시퀀스가 어긋난다(Codex 리뷰 지적). 정상 캐릭터 경로
             # (active_character_frames → _expand_character_text)의 필터-후-확장 순서와 일치.
-            if not slot.get("active") or not str(slot.get("prompt") or "").strip():
+            # ⚠️ `character_settings._conditional_slot_mask` 와 **같은 필터**다(주석뿐인 프롬프트 = 빈 프롬프트).
+            if not slot.get("active") or character_text_is_blank(slot.get("prompt")):
                 continue
             prompt = _expand_slot_field(slot, "prompt")
             if not prompt:

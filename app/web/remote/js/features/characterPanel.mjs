@@ -24,6 +24,9 @@
  *    줄 높이는 그대로였다. 이제 **그룹**으로 접는다 - 옛 `cold` 슬롯은 그룹 "Cold Storage" 로
  *    읽힌다(저장은 안 바꾼다).
  */
+// `#주석` 을 연노랑으로 물들이는 층(사용자 지정 2026-10-11) - 퀵 패널과 한 벌을 나눠 쓴다.
+import {commentTextIsBlank, paintCommentLayer} from './promptCommentLayer.mjs?v=20261011-cmt5';
+
 export function createCharacterPanel({
   document,
   escHtml,
@@ -648,6 +651,8 @@ export function createCharacterPanel({
     const min = Math.round(rows * line) + 12;    // + 세로 패딩
     element.style.height = 'auto';
     element.style.height = Math.max(min, element.scrollHeight) + 'px';
+    // `#주석` 층은 높이를 맞추는 때마다 다시 칠한다 - 칸을 새로 그린 뒤와 글자를 칠 때가 전부 여기로 온다.
+    paintCommentLayer(element, escHtml);
   }
 
   // ── 조작 ────────────────────────────────────────────────────────────────
@@ -1255,10 +1260,12 @@ export function createCharacterPanel({
             title="히스토리로 보낸다 (거기서 다시 담을 수 있다)">✕</button>
         </div>
         <div class="cw-slot-body">
-          <textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="prompt"
-            rows="2" placeholder="캐릭터 프롬프트">${escHtml(character.prompt || '')}</textarea>
-          <textarea class="cw-input is-uc" data-cw-field="char_uc_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="uc"
-            rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(character.uc || '')}</textarea>
+          <!-- 칸을 감싼 상자 안에, 칸 **뒤**에 주석 층을 둔다(promptCommentLayer.mjs · style.css 가 형제 선택자로 칸의 상태를 읽는다 - 템플릿 안 주석에 백틱 금지).
+               칠하기는 autoGrow 와 같은 자리에서 한다. -->
+          <div class="pc-cmt-wrap"><textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="prompt"
+            rows="2" placeholder="캐릭터 프롬프트">${escHtml(character.prompt || '')}</textarea><div class="pc-cmt" aria-hidden="true"></div></div>
+          <div class="pc-cmt-wrap"><textarea class="cw-input is-uc" data-cw-field="char_uc_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="uc"
+            rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(character.uc || '')}</textarea><div class="pc-cmt" aria-hidden="true"></div></div>
         </div>
       </div>`;
   }
@@ -1509,10 +1516,10 @@ export function createCharacterPanel({
         <input class="cw-edit-name" type="text" maxlength="80" spellcheck="false" autocomplete="off"${lock}
           data-cw-edit-field="name" value="${escAttr(draft.name)}"
           placeholder="이름 (비우면 프롬프트로 보입니다)">
-        <textarea class="cw-input" data-cw-edit-field="prompt" data-cw-min="prompt"${lock}
-          rows="2" placeholder="캐릭터 프롬프트">${escHtml(draft.prompt)}</textarea>
-        <textarea class="cw-input is-uc" data-cw-edit-field="uc" data-cw-min="uc"${lock}
-          rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(draft.uc)}</textarea>
+        <div class="pc-cmt-wrap"><textarea class="cw-input" data-cw-edit-field="prompt" data-cw-min="prompt"${lock}
+          rows="2" placeholder="캐릭터 프롬프트">${escHtml(draft.prompt)}</textarea><div class="pc-cmt" aria-hidden="true"></div></div>
+        <div class="pc-cmt-wrap"><textarea class="cw-input is-uc" data-cw-edit-field="uc" data-cw-min="uc"${lock}
+          rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(draft.uc)}</textarea><div class="pc-cmt" aria-hidden="true"></div></div>
         ${editError ? `<div class="cw-li-error">${escHtml(editError)}</div>` : ''}
         <div class="cw-li-actions">
           <button type="button" class="cw-li-act is-save" data-cw-edit-save="1"${off}>${editBusy ? '저장 중…' : '저장'}</button>
@@ -1735,7 +1742,9 @@ export function createCharacterPanel({
     // ⚠️ Connect 자식은 제 글이 비어도 **나간다** - 앞 슬롯의 뽑힌 값을 물려받는다(백엔드 active_character_frames ·
     //    Codex 09-30). 📌 고정 슬롯은 새로 굴릴 때도 그 값이 나간다.
     const pinned = view && view.pinned && typeof view.pinned === 'object' ? view.pinned : {};
-    const sent = slots.filter(item => String(item.prompt || '').trim() || String(item.connect_to || '').trim());
+    // ⚠️ 주석뿐인 프롬프트는 빈 프롬프트다 - 백엔드(`character_text_is_blank`)가 그 슬롯을 내지 않는다. 여기서 세면
+    //    나가지 않는 슬롯을 '1명' 이라고 안내한다(Codex 리뷰 2026-10-11).
+    const sent = slots.filter(item => !commentTextIsBlank(item.prompt) || String(item.connect_to || '').trim());
     const labelOf = new Map(sent.map((item, i) => [String(item.slot_uuid || ''), `C${i + 1}`]));
     const items = fresh
       ? sent.map(item => {

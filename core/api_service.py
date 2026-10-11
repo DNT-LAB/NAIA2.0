@@ -41,6 +41,7 @@ from core.character_settings import (
     read_character_roll_snapshot,
     read_reroll_on_generate,
     store_character_roll_snapshot,
+    strip_character_comment_tags,
 )
 from core.nai_model_contract import (
     BUILTIN_NAI_MODEL_SPECS,
@@ -1454,6 +1455,13 @@ class APIService:
                                         },
                                         _char_mode,
                                     )
+
+                # `#주석` 은 캐릭터 프롬프트 · 네거티브에서도 걷는다(사용자 지정 2026-10-11 - 메인 프롬프트와 같은 규칙).
+                # 슬롯 전개가 이미 걷지만 그 길을 안 타는 소스(인페인트 세션 · Interactive · 즉시 생성 · 저장된 요청)가
+                # 있어, 조립하는 이 목에서 한 번 더 건다. 주석이 없으면 아무것도 바꾸지 않는다.
+                if characters:
+                    characters, ucs, character_positions, character_ids = strip_character_comment_tags(
+                        characters, ucs, character_positions, character_ids)
 
                 # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
                 if characters:

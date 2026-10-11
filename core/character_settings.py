@@ -582,7 +582,7 @@ def _conditional_slot_mask(app_context) -> list[bool] | None:
     # `_store_character_overrides` 와 **같은 필터**여야 한다 - 그쪽은 active 이고
     # 프롬프트가 빈칸이 아닌 슬롯만 내보낸다. 어긋나면 좌표가 한 칸씩 밀린다.
     return [
-        bool(slot.get("active")) and bool(str(slot.get("prompt") or "").strip())
+        bool(slot.get("active")) and not character_text_is_blank(slot.get("prompt"))
         for slot in slots
         if isinstance(slot, dict)
     ]
@@ -970,7 +970,8 @@ def active_character_frames(settings: dict | None) -> list[dict]:
         frame
         for frame in normalized.get("character_frames", [])
         if frame.get("is_enabled")
-        and (str(frame.get("prompt") or "").strip() or str(frame.get("connect_to") or "").strip())
+        # 주석뿐인 프롬프트는 빈 프롬프트다(`character_text_is_blank`) - 나갈 것이 없는 슬롯을 세면 좌표가 어긋난다.
+        and (not character_text_is_blank(frame.get("prompt")) or str(frame.get("connect_to") or "").strip())
     ]
 
 
@@ -1317,14 +1318,14 @@ def reroll_frozen_character_slot(
 
     processor = _character_wildcard_processor(app_context)
     context = _get_prompt_context(app_context, reuse_current_context=False)
-    prompt = _expand_character_text(frame.get("prompt", ""), processor, context, slot=slot_key)
+    prompt = expand_whole_character_text(frame.get("prompt", ""), processor, context, slot=slot_key)
     if not str(prompt).strip():
         # restore the prior override map so a failed reroll doesn't strip the pin
         if override_store is not None and isinstance(store.get(slot_key), dict):
             prior = {c.get("name"): c.get("value") for c in store[slot_key].get("components") or [] if isinstance(c, dict)}
             override_store[slot_key] = {k: v for k, v in prior.items() if k}
         return False
-    uc = _expand_character_text(frame.get("uc", ""), processor, context, slot=slot_key)
+    uc = expand_whole_character_text(frame.get("uc", ""), processor, context, slot=slot_key)
     # New components = fixed (pinned) + freshly re-rolled, straight from the rolls.
     new_map = _character_rolls_map(context, slot_key)
     prior_label = store[slot_key].get("slot_label") if isinstance(store.get(slot_key), dict) else None
@@ -1641,6 +1642,31 @@ def _expand_connect_field(
     return (final, share)
 
 
+def expand_whole_character_text(
+    text: str,
+    processor: WildcardProcessor | None,
+    context: PromptContext,
+    slot=None,
+    slot_label=None,
+) -> str:
+    """원문 한 칸을 **슬롯 전개와 같은 순서**로 전개한다(물려받는 것 없이).
+
+    슬롯 밖에서 원문을 통째로 전개하는 자리(캐릭터 Freeze 재굴림 · 조건부 override 생산자)가 쓴다.
+    `_expand_character_text` 를 원문에 바로 부르면 Connect 마커를 **한 번만** 걷어, 마커가 두 쌍인 글에서 슬롯 전개와
+    다른 토막이 나온다 - `girl, &connect: #memo &connect: hat &end` 가 슬롯에서는 `girl, hat` 인데 거기서는 뒤의
+    `hat` 까지 주석 토막(`#memo &connect: hat`)에 딸려 사라졌다(Codex 리뷰 2026-10-11 3차).
+
+    ⚠️ **주석이 없는 글은 예전 그대로** 한 번에 전개한다. 슬롯 순서는 첫 마커에서 구간을 나눠 따로 전개하므로,
+       마커를 품은 블록(`<red &connect: hair|blue hair &end>`)이 경계에서 잘려 미전개 문자열로 남는다 - 이 자리들이
+       주석과 무관하게 해 오던 전개가 바뀐다(Codex 4차 리뷰: 바로 앞 수정이 만든 회귀). 주석을 가리는 데 필요한
+       때에만 슬롯 순서를 탄다.
+    """
+    source = str(text or "")
+    if "#" not in source or not any(piece.startswith("#") for piece in _comment_pieces(source)):
+        return _expand_character_text(text, processor, context, slot=slot, slot_label=slot_label)
+    return _expand_connect_field(text, "", processor, context, slot, slot_label)[0]
+
+
 def _join_character_text(base: str, own: str) -> str:
     """물려받은 텍스트 뒤에 이 슬롯이 직접 쓴 것을 잇는다. 한쪽이 비면 다른 쪽 그대로."""
     left = str(base or "").strip().strip(",").strip()
@@ -1650,6 +1676,86 @@ def _join_character_text(base: str, own: str) -> str:
     if not right:
         return left
     return f"{left}, {right}"
+
+
+def strip_comment_tags(text: Any) -> str:
+    """`#` 로 시작하는 토막(주석)을 걷는다. 주석이 없으면 **원문 그대로** 돌려준다.
+
+    메인 프롬프트의 규칙과 같다(`api_service.call_generation_api`): 쉼표로 가른 토막의 앞뒤 공백 · 개행을 떼고
+    `#` 로 시작하면 주석이다. 주석이 없는 글은 다시 조립하지 않는다 - 조립하면 공백 · 개행이 바뀌어 모든 생성의
+    기록이 달라진다.
+    """
+    source = str(text or "")
+    if "#" not in source:
+        return source
+    pieces = _comment_pieces(source)
+    if not any(piece.startswith("#") for piece in pieces):
+        return source
+    return ", ".join(piece for piece in pieces if piece and not piece.startswith("#"))
+
+
+def _comment_pieces(text: str) -> list[str]:
+    """주석을 가릴 때의 토막 - **슬롯 전개가 실제로 가르는 그대로** 가른다.
+
+    슬롯 전개의 순서(`_expand_connect_field` -> `_expand_character_text`)를 한 줄도 다르지 않게 밟는다:
+      1. 첫 Connect 마커 한 쌍으로 세 구간을 나눈다 - 구간은 **따로** 전개된다(꺾쇠 깊이가 넘어가지 않는다).
+      2. 구간 안에 마커가 또 있으면 `strip_connect_markers` 가 그 앞뒤를 `, ` 로 **이어 붙인다** - 두 번째 마커는
+         쉼표와 같고, 꺾쇠 깊이는 그 너머로 이어진다(`<a &connect: #memo, b>` 는 블록 하나다).
+      3. 그 글을 `split_tags_smart` 로 가른다.
+    따로 짠 판정은 이 순서와 갈렸다(Codex 리뷰 2026-10-11 두 번: 마커를 경계로 안 봤고, 그다음엔 2 를 구간 나누기로
+    잘못 옮겼다). 화면(`promptCommentLayer.mjs` 의 `promptPieces`)도 같은 순서다.
+    """
+    source = str(text or "")
+    parts = _split_connect_region(source) if has_connect_region(source) else (source,)
+    return [piece.strip() for part in parts for piece in split_tags_smart(strip_connect_markers(part))]
+
+
+def character_text_is_blank(text: Any) -> bool:
+    """나갈 태그가 하나도 없는 글인가 - 비었거나 주석뿐이다.
+
+    '빈 프롬프트의 슬롯은 나가지 않는다' 를 가르는 자리들이 함께 쓴다(`active_character_frames` · 조건부의 슬롯
+    마스크 · 조건부 override 생산자). 주석뿐인 슬롯을 활성으로 세면 전개 결과는 한 명이 적은데 좌표는 그대로라,
+    CUSTOM 좌표가 통째로 버려진다(Codex 리뷰 2026-10-11). 주석이 없는 글의 판정은 예전 그대로다.
+    """
+    source = str(text or "")
+    if not source.strip():
+        return True
+    if "#" not in source:
+        return False
+    return not any(piece and not piece.startswith("#") for piece in _comment_pieces(source))
+
+
+def strip_character_comment_tags(
+    characters: list, ucs: list, positions: list, ids: list,
+) -> tuple[list, list, list, list]:
+    """char_captions 를 조립하기 직전의 네 목록에서 주석을 걷는다. 주석뿐이던 캐릭터는 뺀다.
+
+    슬롯 전개(`_expand_character_text`)를 거치지 않는 소스(인페인트 세션 · Interactive · 즉시 생성 · 저장된 요청)를
+    위한 목이다. 슬롯 전개가 주석뿐인 슬롯을 내지 않는 것과 같은 결과가 되게, 걷고 나서 빈 캐릭터는 같은 번호의
+    네거티브 · 좌표 · id 와 함께 뺀다(원래 비어 있던 것은 건드리지 않는다). 주석이 하나도 없으면 받은 목록 그대로다.
+    """
+    if not any("#" in str(text or "") for text in list(characters) + list(ucs)):
+        return characters, ucs, positions, ids
+    count = len(characters)
+    cleaned = [strip_comment_tags(text) for text in characters]
+    keep = [index for index, text in enumerate(cleaned)
+            if text.strip() or not str(characters[index] or "").strip()]
+    if len(keep) == count:
+        # 아무도 빠지지 않았다 - 좌표 · id 는 받은 그대로 둔다(길이가 모자라도 뒤에서 예전 규칙으로 채운다).
+        return cleaned, [strip_comment_tags(text) for text in ucs], positions, ids
+    # ⚠️ 누가 빠지면 좌표 · id 를 **원래 번호로** 채운 뒤 같이 거른다. 모자란 채로 두면 남은 캐릭터에 빠진
+    #    캐릭터의 것이 붙고, 개수가 우연히 맞아 use_coords 까지 켜진다(Codex 리뷰 2026-10-11).
+    #    모자란 좌표는 None(= 좌표 없음)이다. 모자란 id 는 **원래 번호**(index + 1)로 채운다 - 조립하는 쪽이
+    #    거르기 전에 채웠을 값이다. 거른 뒤에 채우게 두면 앞의 id 와 겹친다(`["1","2"]` 에서 첫째가 빠지면
+    #    `["2","2"]` - Codex 2차 리뷰). id 를 아예 안 받았으면 빈 목록 그대로 둔다(뒤에서 새 번호로 매긴다).
+    padded_positions = list(positions) + [None] * (count - len(positions))
+    padded_ids = list(ids) + [str(index + 1) for index in range(len(ids), count)]
+    return (
+        [cleaned[index] for index in keep],
+        [strip_comment_tags(ucs[index]) if index < len(ucs) else "" for index in keep],
+        [padded_positions[index] for index in keep] if positions else [],
+        [padded_ids[index] for index in keep] if ids else [],
+    )
 
 
 def _expand_character_text(
@@ -1666,14 +1772,20 @@ def _expand_character_text(
     #    (Codex 리뷰 2026-08-24 #4, 실측: `&connect: girl &end, extra` 가 그대로 나왔다).
     #    이 함수가 캐릭터 텍스트 전개의 SSOT 라 여기 한 곳이면 모든 표면이 옳아진다.
     pieces = [piece.strip() for piece in split_tags_smart(strip_connect_markers(text))]
-    pieces = [piece for piece in pieces if piece]
+    # `#` 로 시작하는 토막은 주석이다(사용자 지정 2026-10-11 - 메인 프롬프트와 같은 규칙). 전개 **전에** 걷는다 -
+    # 주석 안의 와일드카드는 굴리지 않는다(`#__hair__` 로 한 줄을 꺼 둘 수 있다).
+    pieces = [piece for piece in pieces if piece and not piece.startswith("#")]
     if not pieces:
         return ""
     if processor is None:
         return ", ".join(pieces)
     # location='character'(+slot)으로 캐릭터 블록 와일드카드 롤을 위치 인식 기록한다(Wildcard
     # Watch 블록별 뷰). slot은 안정 uuid, slot_label은 표시용 1-based 번호다.
-    return ", ".join(processor.expand_tags(pieces, context, location='character', slot=slot, slot_label=slot_label))
+    expanded = ", ".join(
+        processor.expand_tags(pieces, context, location='character', slot=slot, slot_label=slot_label))
+    # 와일드카드가 낸 글에 주석이 들어 있을 수 있다(`<girl,#note|...>` · 와일드카드 파일의 줄). 여기서 안 걸으면
+    # 스냅샷 · 아래로 물려주는 몫에는 남고 NAI 로는 안 나가, 화면의 굴림 결과와 실제가 갈린다(Codex 리뷰 2026-10-11).
+    return strip_comment_tags(expanded)
 
 
 def character_params_from_settings(

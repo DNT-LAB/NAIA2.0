@@ -371,6 +371,7 @@ class HeadlessV5SceneService:
             active_character_frames,
             has_connect_region,
             read_character_shares,
+            strip_comment_tags,
         )
 
         shares = read_character_shares(self.context, mode)
@@ -402,7 +403,9 @@ class HeadlessV5SceneService:
                 memo = remembered.get(key)
                 if isinstance(memo, dict) and memo.get("source") == own:
                     rolled = str(memo.get("value") or "").strip()
-            value = rolled or own
+            # 굴린 값이 없으면 원문으로 잇는데, 원문의 `#주석` 은 배역이 아니다. 주석뿐인 공유 구간을 그대로 이으면
+            # 다음 컷의 배역 자리가 주석으로 덮이고, 전개에서 걷혀 배역이 사라진다(Codex 리뷰 2026-10-11).
+            value = rolled or strip_comment_tags(own).strip()
             if value:
                 cast[index] = value
             # 아직 안 풀린 원문에서 값을 얻었을 때만 기억한다. 원문이 이미 구체적이면

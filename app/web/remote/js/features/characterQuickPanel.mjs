@@ -37,6 +37,9 @@ function isNarrowViewport() {
     && window.matchMedia('(max-width: 767px)').matches;
 }
 
+// `#주석` 을 연노랑으로 물들이는 층(사용자 지정 2026-10-11) - 워크스페이스와 한 벌을 나눠 쓴다.
+import {paintCommentLayer} from './promptCommentLayer.mjs?v=20261011-cmt5';
+
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
   openCharacterModule = () => {},
@@ -677,6 +680,8 @@ export function createCharacterQuickPanel({
   function paintConnectHighlight(element) {
     const wrap = element && element.parentElement;
     if (!wrap || !wrap.classList.contains('cq-input-wrap')) return;
+    // `#주석` 층도 같은 때에 다시 칠한다 - 글자를 칠 때 · 서버 값이 올 때 · 스크롤할 때가 전부 이 함수로 온다.
+    paintCommentLayer(element, escHtml);
     const mirror = wrap.querySelector('.cq-hl');
     if (!mirror) return;
     const html = connectHighlightHtml(element.value, fieldIsLinked(element));
@@ -899,7 +904,9 @@ export function createCharacterQuickPanel({
       `<div class="cq-input-wrap">`
       + `<div class="cq-hl" aria-hidden="true"></div>`
       + `<textarea class="cq-input${cls}" data-cq-field="char_${kind}_${index}" data-cq-uuid="${escAttr(character.slot_uuid || '')}" data-cq-min="${kind === 'prompt' ? 'prompt' : 'uc'}"`
-      + ` rows="${MIN_ROWS[kind === 'prompt' ? 'prompt' : 'uc']}" placeholder="${ph}"></textarea></div>`;
+      + ` rows="${MIN_ROWS[kind === 'prompt' ? 'prompt' : 'uc']}" placeholder="${ph}"></textarea>`
+      // `#주석` 층은 칸 **뒤**의 형제다 - style.css 가 칸의 상태(`.is-neg` · 초점)를 `~` 로 읽어 색을 고른다.
+      + `<div class="pc-cmt" aria-hidden="true"></div></div>`;
     const body = isOpen
       ? field('prompt', '', linked ? '추가할 캐릭터 프롬프트' : '캐릭터 프롬프트')
         + field('uc', ' is-neg', linked ? '추가할 캐릭터 네거티브' : '캐릭터 네거티브')

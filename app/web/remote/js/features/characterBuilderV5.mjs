@@ -84,6 +84,12 @@ function isProsePart(text) {
   return s.length >= 18 && s.split(/\s+/).length >= 3;
 }
 const GENDERS = [['girl', 'Female'], ['boy', 'Male'], ['other', 'Other']];
+// 프롬프트의 인물 태그 -> 성별 단추. 글을 블록으로 가를 때 이것은 부품이 아니라 단추로 간다.
+const PERSON_TAGS = new Map([
+  ['girl', 'girl'], ['1girl', 'girl'], ['female', 'girl'],
+  ['boy', 'boy'], ['1boy', 'boy'], ['male', 'boy'],
+  ['other', 'other'], ['1other', 'other'],
+]);
 const RESOLUTION_LABEL = {standard: '표준', high: '고해상도', ultra: '초고해상도'};
 const DRAFT_KEY = 'naia.assetsV5.draft';
 // 시험 그림을 처음 놓는 배율의 상한(높이를 채우느라 좌우를 자르는 정도) · 휠로 키울 수 있는 끝.
@@ -108,6 +114,8 @@ export function createCharacterBuilderV5({
   onViewChange = () => {},
   // [C1 + 레퍼런스 인셋 적용] 이 돌려받은 인셋 상태를 넘긴다(Result 탭의 핀 배지가 같은 상태를 본다).
   onReferenceInsetPin = () => {},
+  // 앱의 태그 자동완성을 입력 칸에 붙인다(메인 프롬프트 · 캐릭터 프롬프트와 같은 것).
+  bindTagAssist = () => {},
 }) {
   if (!leftMount || !rightMount) return null;
 
@@ -384,7 +392,56 @@ export function createCharacterBuilderV5({
         ? `<button type="button" class="cb5-btn" data-cb-act="clear"${totalParts() ? '' : ' disabled'}>Clear</button>`
         : '')
       + `</div><div class="cb5-rows">${rows}</div>`;
-    autosizeSlotInput(leftMount.querySelector('[data-cb-slot-input]'));
+    const slotInput = leftMount.querySelector('[data-cb-slot-input]');
+    autosizeSlotInput(slotInput);
+    // 고른 것은 자동완성이 칸의 글을 바꾸고 input 을 쏜다 - 친 것과 같은 길(`onLeftInput`)로 들어온다.
+    if (slotInput) bindTagAssist(slotInput);
+  }
+
+  // ------------------------------------------------------------------ 자동 분류
+
+  /** 카탈로그에서 그 태그의 블록을 찾는다(가중치 · 강조 괄호는 떼고, 대소문자는 가리지 않는다). 없으면 ''. */
+  function blockOfPart(raw) {
+    const bare = barePart(raw);
+    return (tagInfo.get(bare) || tagInfo.get(bare.toLowerCase()))?.block || '';
+  }
+
+  /** 프롬프트 글을 블록으로 가른다(사용자 지시 2026-10-11 - 부품은 색인돼 있으니 자동으로 가를 수 있다).
+   *  카탈로그에 있는 태그는 제 블록으로, 없는 것(미색인 · 자연어 · 묶음)은 '기타' 로. 인물 태그는 성별로 돌려준다. */
+  function classifyParts(text) {
+    const parts = {};
+    for (const key of BLOCK_ORDER) parts[key] = [];
+    let gender = '';
+    for (const entry of splitParts(text)) {
+      const person = PERSON_TAGS.get(barePart(entry).toLowerCase());
+      if (person) {
+        gender = gender || person;
+        continue;
+      }
+      const key = blockOfPart(entry) || ETC_BLOCK;
+      if (!parts[key].includes(entry)) parts[key].push(entry);
+    }
+    return {parts, gender};
+  }
+
+  /** '기타' 에 쓴 것 가운데 카탈로그의 부품은 제 블록으로 옮긴다 - 프롬프트를 통째로 붙여넣으면 알아서 갈린다.
+   *  다른 블록에 직접 쓴 것은 건드리지 않는다(사람이 그 자리에 적은 것이다). 옮긴 개수를 돌려준다. */
+  function sortEtcBlock() {
+    const {parts, gender} = classifyParts(draft.parts[ETC_BLOCK].join(', '));
+    let moved = 0;
+    for (const key of BLOCK_ORDER) {
+      if (key === ETC_BLOCK) continue;
+      for (const entry of parts[key]) {
+        moved += 1;
+        if (!draft.parts[key].some(item => barePart(item) === barePart(entry))) draft.parts[key].push(entry);
+      }
+    }
+    const personDropped = parts[ETC_BLOCK].length + moved < draft.parts[ETC_BLOCK].length;
+    if (gender && personDropped) draft.gender = gender;
+    if (!moved && !personDropped) return 0;
+    draft.parts[ETC_BLOCK] = parts[ETC_BLOCK];
+    saveDraft();
+    return moved || 1;
   }
 
   /** 열린 줄의 입력 칸에 초점을 준다(줄을 눌러 열었을 때). 글 끝에 커서를 둔다. */
@@ -477,7 +534,7 @@ export function createCharacterBuilderV5({
     const block = blockDef.get(activeBlock);
     const part = block?.parts.find(item => item.key === activePart.get(activeBlock)) || block?.parts[0];
     host.querySelector('[data-cb-role="main-title"]').textContent = q
-      ? '검색 결과' : `${block?.label || ''} · ${part ? partLabel(part) : ''}`;
+      ? '검색 결과' : [block?.label || '', part ? partLabel(part) : ''].filter(Boolean).join(' · ');
     scroller.innerHTML = q ? searchHtml(q) : blockHtml();
     scroller.scrollTop = top;
     host.querySelector('[data-cb-role="parts"]').innerHTML = partsHtml(!!q);
@@ -927,6 +984,8 @@ export function createCharacterBuilderV5({
       if (focus) focusSlotInput();
       return;
     }
+    // '기타' 를 떠날 때 거기 쓴 부품을 제 블록으로 옮긴다. 치는 동안에는 옮기지 않는다 - 친 글이 눈앞에서 사라진다.
+    if (activeBlock === ETC_BLOCK) announceSorted(sortEtcBlock());
     activeBlock = key;
     // 블록을 고르면 검색을 걷는다 - 검색 결과가 그리드를 덮고 있으면 눌러도 아무 일이 없어 보인다.
     if (query) {
@@ -939,6 +998,10 @@ export function createCharacterBuilderV5({
     const scroller = rightMount.querySelector('.cb5-main-scroll');
     if (scroller) scroller.scrollTop = 0;
     if (focus) focusSlotInput();
+  }
+
+  function announceSorted(moved) {
+    if (moved) showToast('기타에 쓴 것 가운데 색인된 부품을 제 블록으로 옮겼습니다', 'info');
   }
 
   /** 못 쓰는 글자가 든 부품(없으면 ''). 서버가 400 으로 돌려보내기 전에 먼저 말한다. */
@@ -1004,6 +1067,14 @@ export function createCharacterBuilderV5({
       band: sameTarget ? work.band : {...(builder.band || {start: 0.3, end: 1})},
     };
     applyBuilder(builder);
+    if (!totalParts()) {
+      // 구 사양에서 옮겨 온 캐릭터에는 부품 구성이 없다. 그 그림의 캐릭터 프롬프트를 블록으로 갈라 싣는다 -
+      // 줄이 전부 빈 채로 열리면 바꿀 것(의상 등)을 처음부터 다시 적어야 한다.
+      const text = promptOf(selectedVar)?.prompt || detail.character_prompt || '';
+      const sorted = classifyParts(text);
+      draft.parts = sorted.parts;
+      if (sorted.gender) draft.gender = sorted.gender;
+    }
     setView('variation');
   }
 
@@ -1039,6 +1110,11 @@ export function createCharacterBuilderV5({
     if (!totalParts()) {
       showToast('부품을 하나 이상 골라 주세요', 'error');
       return true;
+    }
+    // '기타' 를 열어 둔 채 Generate 를 누르면 아직 안 갈린 채다 - 나가기 전에 가른다(프롬프트의 블록 차례가 달라진다).
+    if (sortEtcBlock()) {
+      renderLeft();
+      renderMain();
     }
     const bad = invalidPart();
     if (bad) {
@@ -1525,8 +1601,18 @@ export function createCharacterBuilderV5({
   function onLeftKeydown(event) {
     // 줄바꿈은 받지 않는다(쉼표가 구분자다) - Enter 는 입력을 마치고 칩으로 접는다.
     if (event.key !== 'Enter' || event.isComposing || !event.target.closest('[data-cb-slot-input]')) return;
+    // 자동완성이 Enter 로 후보를 받았으면(그쪽이 먼저 듣고 기본 동작을 막는다) 여기서는 손대지 않는다.
+    if (event.defaultPrevented) return;
     event.preventDefault();
     event.target.blur();
+    if (activeBlock === ETC_BLOCK) {
+      const moved = sortEtcBlock();
+      if (moved) {
+        announceSorted(moved);
+        renderLeft();
+        renderMain();
+      }
+    }
   }
 
   function onChange(event) {

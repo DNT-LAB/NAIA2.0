@@ -995,7 +995,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5i')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5j')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1009,6 +1009,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
       isNai: () => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() === 'NAI',
       onViewChange: () => syncAssetsV5Mode(),
       onReferenceInsetPin: state => setReferenceInsetBadge(state),
+      bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
     });
     syncAssetsV5Mode();
   })

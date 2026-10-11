@@ -435,6 +435,7 @@
         "app/backend/server/character_asset_routes.py",
         "core/headless_character_asset_service.py",
         "core/character_builder_v5.py",
+        "core/nai_background_removal.py",
         "utils/character_asset_storage.py",
         "utils/inpaint_mask.py",
         "app/web/remote/js/features/characterAssetTab.mjs",
@@ -471,6 +472,11 @@
           "method": "POST",
           "path": "/api/character-asset/v5/annotate",
           "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/v5/migrate",
+          "smoke": "external_live"
         },
         {
           "method": "GET",

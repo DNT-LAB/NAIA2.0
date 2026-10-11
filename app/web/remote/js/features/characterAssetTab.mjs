@@ -31,6 +31,7 @@ const API = {
   remove: '/api/character-asset/delete',
   removeVariation: '/api/character-asset/delete-variation',
   promote: '/api/character-asset/promote',
+  migrate: '/api/character-asset/v5/migrate',
   generate: '/api/character-asset/generate',
   historyThumb: id => `/api/history/thumb/${encodeURIComponent(id)}`,
   // 벤치 후보는 리스가 붙잡고 있으므로 히스토리 퇴출 후에도 이 경로로 살아있다.
@@ -50,6 +51,7 @@ export function createCharacterAssetTabController({
   escHtml,
   showToast,
   showPromptDialog = null,
+  showAppDialog = null,
   bindTagAssist = () => {},
   getGenerationMode,
   getCharacterState = null,
@@ -69,6 +71,9 @@ export function createCharacterAssetTabController({
   let deleteArmed = '';           // 'char:<id>' | 'variation:<hash>' (2-step confirm)
   let deleteArmTimer = null;
   let busy = false;
+  // 신 사양으로 옮기기: 이미 옮긴 구 사양 캐릭터(목록이 알려 준다) · 지금 옮기는 중인 캐릭터.
+  let migratedIds = new Set();
+  let migrating = '';
   let promptEditOpen = false;
   let promptDraft = '';
   // [불러오기시 의상 제거] - 켠 채로 두는 사람이 많을 설정이라 브라우저에 기억한다.
@@ -165,8 +170,9 @@ export function createCharacterAssetTabController({
     try {
       const state = await api(API.list);
       // 신 사양(V5)으로 지은 캐릭터는 [신 사양] 탭의 보관함이 맡는다 - 탭 둘이 같은 것을 두 번 보여 주지 않는다.
-      characters = (Array.isArray(state?.characters) ? state.characters : [])
-        .filter(item => item?.spec !== 'v5');
+      const everyone = Array.isArray(state?.characters) ? state.characters : [];
+      migratedIds = new Set(everyone.map(item => String(item?.migrated_from || '')).filter(Boolean));
+      characters = everyone.filter(item => item?.spec !== 'v5');
       loadedOnce = true;
       if (selectedId && !characters.some(entry => entry.id === selectedId)) {
         selectedId = '';
@@ -466,6 +472,43 @@ export function createCharacterAssetTabController({
       showToast(`슬롯 적용 실패: ${error.message}`, 'error');
     } finally {
       busy = false;
+      render();
+    }
+  }
+
+  /** 대표 그림의 배경을 지운 **사본**을 신 사양에 만든다(원본은 그대로). 배경 제거는 Anlas 가 든다 - 먼저 묻는다.
+   *  금액은 적지 않는다('Anlas 소모' 로만 - 사용자 지시). */
+  async function migrateSelected() {
+    const id = selectedId;
+    if (!id || migrating || typeof showAppDialog !== 'function') return;
+    const again = migratedIds.has(id);
+    const lines = [
+      ...(again ? ['이미 신 사양으로 옮긴 캐릭터입니다. 사본을 하나 더 만듭니다.'] : []),
+      '대표 그림의 배경을 지운 사본을 신 사양에 만듭니다.',
+      '원본은 구 사양에 그대로 남습니다.',
+      'Anlas 소모',
+    ];
+    const agreed = await showAppDialog('', {
+      title: '신 사양으로 이전', messageHtml: lines.map(line => escHtml(line)).join('<br>'),
+      okText: '이전', cancelText: '취소',
+    });
+    if (!agreed) return;
+    migrating = id;
+    render();
+    try {
+      await postJson(API.migrate, {id, again});
+      migratedIds.add(id);
+      showToast('신 사양에 사본을 만들었습니다 - [신 사양 · V5] 탭에서 볼 수 있습니다', 'success');
+    } catch (error) {
+      if (error.message === 'already_migrated') {
+        // 다른 창에서 이미 옮겼다. 돈이 드는 일이라 다시 묻게 한다(단추가 '이전됨' 으로 바뀐다).
+        migratedIds.add(id);
+        showToast('이미 신 사양으로 옮긴 캐릭터입니다 - 한 번 더 누르면 사본을 하나 더 만듭니다', 'info');
+      } else {
+        showToast(`신 사양으로 이전 실패: ${error.message}`, 'error');
+      }
+    } finally {
+      migrating = '';
       render();
     }
   }
@@ -1733,6 +1776,10 @@ export function createCharacterAssetTabController({
         </div>
         <div class="char-asset-detail-head-actions">
           <button class="mod-btn-sm" data-action="rename">이름변경</button>
+          <button class="mod-btn-sm char-asset-migrate-btn" data-action="migrate-v5" ${migrating ? 'disabled' : ''}
+            data-naia-title="대표 그림의 배경을 지운 사본을 신 사양에 만듭니다. 원본은 그대로 남습니다. Anlas 소모">${
+              migrating === selectedId ? '이전하는 중...'
+                : (migratedIds.has(selectedId) ? '신 사양으로 이전됨' : '신 사양으로 이전')}</button>
           <button class="mod-btn-sm mod-btn-danger" data-action="delete-character" ${busy ? 'disabled' : ''}>
             ${charDeleteArmed ? '한 번 더 클릭하면 삭제' : '캐릭터 삭제'}
           </button>
@@ -1804,6 +1851,7 @@ export function createCharacterAssetTabController({
       else if (action === 'apply-c1-inset') applySlot('c1', false, true);
       else if (action === 'apply-add') applySlot('add_slot');
       else if (action === 'rename') renameSelected();
+      else if (action === 'migrate-v5') migrateSelected();
       else if (action === 'prompt-edit') beginPromptEdit();
       else if (action === 'prompt-edit-save') savePromptEdit();
       else if (action === 'prompt-edit-cancel') cancelPromptEdit();

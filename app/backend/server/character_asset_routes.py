@@ -242,6 +242,52 @@ def register_character_asset_routes(
         return {"ok": bool(accepted), "request_id": str(payload.get("request_id") or ""),
                 "accepted": accepted, "rejected": rejected}
 
+    @app.post("/api/character-asset/v5/migrate")
+    async def api_character_asset_v5_migrate(req: Request):
+        """구 사양 캐릭터의 대표 그림을 배경만 지워 신 사양 **사본**으로 만든다. 원본은 그대로 남는다.
+        배경 제거는 Anlas 가 든다 - 화면이 먼저 묻는다. 이미 옮긴 캐릭터는 `again` 없이는 409."""
+        from core.generation_access_policy import GenerationBlocked, access_policy
+        from core.nai_background_removal import BackgroundRemovalError, remove_background
+
+        payload = await _read_json(req)
+        service = _asset_service(session_context)
+        character_id = str(payload.get("id") or "")
+        try:
+            source = await run_in_thread(service.migration_source, character_id)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        if source["copies"] and payload.get("again") is not True:
+            return JSONResponse({"error": "already_migrated", "copies": source["copies"]}, status_code=409)
+        if not service.begin_migration(source["id"]):
+            return JSONResponse({"error": "이 캐릭터를 옮기는 중입니다"}, status_code=409)
+
+        def remove() -> list[bytes]:
+            token = str(session_context.secure_token_manager.get_token("nai_token") or "").strip()
+            with access_policy(session_context).operation():
+                return remove_background(token, source["data"])
+
+        try:
+            results = None if source["transparent"] else await run_in_thread(remove)
+            result = await run_in_thread(service.save_migrated, source["id"], results)
+        except (BackgroundRemovalError, GenerationBlocked) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character Asset migration failed: {exc}"}, status_code=500)
+        finally:
+            service.end_migration(source["id"])
+            if not source["transparent"]:
+                # 요청이 나갔으면 실패했어도 잔액이 변했을 수 있다. 생성 직후와 같은 갱신이다(캐시를 버린다).
+                from app.backend.server.anlas_poller import schedule_subscription_refresh
+
+                schedule_subscription_refresh(session_context, clients, force=True)
+        return {"ok": True, "charged": results is not None, **result}
+
     @app.post("/api/character-asset/v5/annotate")
     async def api_character_asset_v5_annotate(req: Request):
         payload = await _read_json(req)

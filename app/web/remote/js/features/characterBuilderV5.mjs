@@ -494,7 +494,10 @@ export function createCharacterBuilderV5({
       return `<div class="cb5-comp-row"><b>${escHtml(blockDef.get(key)?.label || key)}</b>`
         + `<span>${escHtml(tags.join(', '))}</span></div>`;
     }).join('');
-    return rows ? `<div class="cb5-comp">${rows}</div>` : '';
+    // 구 사양에서 배경만 지워 옮긴 사본에는 부품 구성이 없다 - 빈 자리로 두지 않고 어디서 왔는지 적는다.
+    const origin = builder.migrated
+      ? '<div class="cb5-comp-origin">구 사양에서 이전 · 배경 제거</div>' : '';
+    return rows || origin ? `<div class="cb5-comp">${origin}${rows}</div>` : '';
   }
 
   function detailHtml() {
@@ -552,7 +555,8 @@ export function createCharacterBuilderV5({
       + `<button type="button" class="mod-btn-sm" data-cb-act="refresh" aria-label="새로 읽기">↻</button>`
       + `<span class="char-asset-count">${store.length} characters</span></div>`
       + `<div class="char-asset-grid">${cards
-        || '<div class="mod-empty">신 사양으로 만든 캐릭터가 없습니다. [+ 캐릭터 생성] 으로 시작합니다.</div>'}</div>`
+        || '<div class="mod-empty">신 사양으로 만든 캐릭터가 없습니다. [+ 캐릭터 생성] 으로 시작합니다.<br>'
+          + '구 사양 캐릭터는 [구 사양 · V4.5] 탭의 [신 사양으로 이전] 으로 가져옵니다.</div>'}</div>`
       + `</section><section class="char-asset-detail" data-cb-role="detail">${detailHtml()}</section>`
       + `</div></div>`;
   }

@@ -989,7 +989,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5b')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5c')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1009,7 +1009,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
     console.error('Failed to initialize Character Builder V5 module', error);
   });
 
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5a')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5c')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -1017,6 +1017,7 @@ const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=202610
       escHtml,
       showToast,
       showPromptDialog,
+      showAppDialog,
       bindTagAssist,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
       // onModuleState가 모든 module_state를 일반 캐시하므로(접속 직후 일괄 요청 포함)

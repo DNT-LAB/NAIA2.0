@@ -1141,6 +1141,7 @@ class HeadlessCharacterAssetService:
                         "mtime": record.mtime,
                         "revision": revision,
                         "spec": "v5" if "builder_v5" in sidecar else "legacy",
+                        **self._migrated_from_field(sidecar),
                     })
             entries.sort(key=lambda entry: entry["mtime"], reverse=True)
             return {
@@ -1651,6 +1652,81 @@ class HeadlessCharacterAssetService:
                 payload, candidate, self.parts_catalog(), data, character_id, source
             )
 
+    # ------------------------------------------------ 구 사양 -> 신 사양 (배경 제거 사본)
+    @staticmethod
+    def _migrated_from_field(sidecar: dict[str, Any]) -> dict[str, str]:
+        builder = sidecar.get("builder_v5") if isinstance(sidecar, dict) else None
+        origin = builder.get("migrated") if isinstance(builder, dict) else None
+        source = str(origin.get("from") or "") if isinstance(origin, dict) else ""
+        return {"migrated_from": source} if source else {}
+
+    def _migrated_copies(self, character_id: str) -> list[str]:
+        copies = []
+        for root in self._list_roots():
+            for record in asset_storage.list_characters(root):
+                sidecar = asset_storage.read_character_meta(record.character_id, root)
+                if self._migrated_from_field(sidecar).get("migrated_from") == character_id:
+                    copies.append(record.character_id)
+        return copies
+
+    def migration_source(self, character_id: str) -> dict[str, Any]:
+        """옮길 구 사양 캐릭터의 대표 그림. 신 사양 캐릭터는 옮길 것이 없다(거절).
+        `transparent` 면 배경 제거를 부르지 않는다 - 그대로 옮기면 된다(Anlas 가 들지 않는다)."""
+        self._bootstrap()
+        with self._lock:
+            character_id = self._validate_id(character_id)
+            root = self._owner_root(character_id)
+            if root is None:
+                raise FileNotFoundError(f"character {character_id} not found")
+            if "builder_v5" in asset_storage.read_character_meta(character_id, root):
+                raise ValueError("이미 신 사양 캐릭터입니다")
+            data = asset_storage.get_character_primary_path(character_id, root).read_bytes()
+            return {"id": character_id, "data": data, "transparent": builder_v5.transparency(data)["ok"],
+                    "copies": self._migrated_copies(character_id)}
+
+    def begin_migration(self, character_id: str) -> bool:
+        """같은 캐릭터를 두 번 누르면 돈이 두 번 나간다 - 하나만 들여보낸다."""
+        with self._lock:
+            running = self.__dict__.setdefault("_migrating", set())
+            if character_id in running:
+                return False
+            running.add(character_id)
+            return True
+
+    def end_migration(self, character_id: str) -> None:
+        with self._lock:
+            self.__dict__.setdefault("_migrating", set()).discard(character_id)
+
+    def save_migrated(self, character_id: str, results: Any = None) -> dict[str, Any]:
+        """구 사양 캐릭터의 **사본**을 신 사양으로 만든다. 원본은 건드리지 않는다.
+        옮기는 것 = 대표 그림(배경 제거) + 이름 · 설명 + 캐릭터 프롬프트. 바리에이션은 옮기지 않는다."""
+        self._bootstrap()
+        with self._lock:
+            character_id = self._validate_id(character_id)
+            root = self._owner_root(character_id)
+            if root is None:
+                raise FileNotFoundError(f"character {character_id} not found")
+            old = asset_storage.read_character_meta(character_id, root)
+            if "builder_v5" in old:
+                raise ValueError("이미 신 사양 캐릭터입니다")
+            primary = asset_storage.get_character_primary_path(character_id, root)
+            data = builder_v5.migration_image(primary.read_bytes(), results, origin=character_id)
+            prompt, _uc = self._prompt_for(character_id, primary, old)
+            saved_id, saved_path = asset_storage.save_new_character(raw_bytes=data, root=self.write_root())
+            if saved_id == character_id:
+                # id 는 그림 바이트의 해시다. 같은 id 면 '새 캐릭터' 가 원본 자신이다 - 여기서 멈추지 않으면
+                # 아래에서 원본의 기록에 신 사양 표식이 써져 원본이 구 사양 목록에서 사라진다.
+                raise ValueError("옮긴 그림이 원본과 같습니다")
+            sidecar = asset_storage.read_character_meta(saved_id, self.write_root())
+            for key in ("display_name", "description", "character_prompt", "character_uc"):
+                if key in old:
+                    sidecar[key] = old[key]
+            sidecar["builder_v5"] = builder_v5.migrated_metadata(character_id, builder_v5.prompt_gender(prompt))
+            if not asset_storage.write_character_meta(saved_id, sidecar, self.write_root()):
+                raise OSError("could not save migration metadata")
+            return {"character_id": saved_id, "source_id": character_id, "spec": "v5",
+                    **builder_v5.image_dimensions(saved_path)}
+
     def annotate(self, payload: dict) -> dict:
         values = builder_v5.annotations(payload)
         self._bootstrap()
@@ -1683,6 +1759,9 @@ class HeadlessCharacterAssetService:
             if "builder_v5" not in sidecar:
                 raise ValueError("character has no builder_v5 metadata")
             root = self._ensure_current(character_id)
+            origin = sidecar["builder_v5"].get("migrated") if isinstance(sidecar["builder_v5"], dict) else None
+            if origin is not None:
+                builder["migrated"] = origin
             sidecar["builder_v5"] = builder
             if not asset_storage.write_character_meta(character_id, sidecar, root):
                 raise OSError("could not save builder metadata")

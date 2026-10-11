@@ -214,6 +214,81 @@ def builder_metadata(payload: Any, catalog: PartsCatalog) -> dict[str, Any]:
     return {**builder, "model": MODEL, "scale": SCALE, "saved_at": datetime.now(timezone.utc).isoformat()}
 
 
+# ---------------------------------------------------------------- 구 사양에서 옮기기
+MIGRATION_METHOD = "bg-removal"
+MIGRATION_ORIGIN_KEY = "NAIA-Migrated-From"
+_GENDER_TAGS = {"girl": "girl", "1girl": "girl", "boy": "boy", "1boy": "boy", "other": "other", "1other": "other"}
+
+
+def prompt_gender(prompt: Any) -> str:
+    """캐릭터 프롬프트의 첫 인물 태그. 못 찾으면 girl(화면의 기본값과 같다)."""
+    for tag in str(prompt or "").split(","):
+        gender = _GENDER_TAGS.get(tag.strip().lower())
+        if gender:
+            return gender
+    return "girl"
+
+
+def migrated_metadata(source_id: str, gender: str) -> dict[str, Any]:
+    """구 사양 캐릭터를 **배경만 지워** 옮긴 사본의 기록. 부품 구성이 없다(`parts` 가 비어 있다) -
+    옮기기는 단순 복제다(사용자 결정 2026-10-11). `migrated` 가 있으면 조립해 만든 캐릭터가 아니다."""
+    return {"version": 1, "gender": gender if gender in GENDERS else "girl", "parts": {}, "resolution": None,
+            "seed": None, "pose_slot": "", "model": MODEL, "scale": SCALE,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "migrated": {"from": source_id, "method": MIGRATION_METHOD}}
+
+
+def migration_image(source: bytes, results: Any = None, *, origin: str = "") -> bytes:
+    """옮길 그림 한 장. `results` = Remove BG 의 셋(Masked · Generated · Blend) - **Blend** 를 쓴다
+    (안쪽은 원본 · 가장자리의 흰 테만 정리된 것 - `core/nai_background_removal.py` 의 실측).
+    `results` 가 없으면 원본이 이미 투명한 것이다(그대로 옮긴다).
+
+    - 투명하지 않으면 거절한다. 신 사양의 잣대(`transparency`)와 같은 함수다.
+    - 가로 · 세로를 64 의 배수로 **투명하게 넓힌다**(가운데 · 바닥 맞춤). 바리에이션의 원본은 64 의 배수여야 한다.
+    - 원본 PNG 의 글 조각(NAI 생성 정보)을 그대로 옮긴다 - 캐릭터 프롬프트를 계속 읽을 수 있어야 한다.
+    - `origin`(원본 캐릭터의 id)을 글 조각 하나로 적는다. 캐릭터의 id 는 그림 바이트의 해시라, 이미 투명한
+      원본을 그대로 옮기면 **같은 id** 가 나와 사본이 생기지 않는다(시험이 잡았다) - 이 한 줄이 바이트를 가른다.
+    """
+    from PIL import Image
+    from PIL.PngImagePlugin import PngInfo
+
+    try:
+        with Image.open(io.BytesIO(bytes(source or b""))) as original:
+            original.load()
+            size = original.size
+            texts = {key: value for key, value in (getattr(original, "text", None) or {}).items()
+                     if isinstance(key, str) and isinstance(value, str) and value}
+            picked = original.convert("RGBA") if results is None else None
+        if picked is None:
+            if not isinstance(results, (list, tuple)) or len(results) < 3:
+                raise ValueError("background removal returned too few images")
+            with Image.open(io.BytesIO(bytes(results[2]))) as blend:
+                blend.load()
+                picked = blend.convert("RGBA")
+    except ValueError:
+        raise
+    except Exception as exc:      # noqa: BLE001 - 그림이 아니다
+        raise ValueError(f"image could not be read: {exc}") from exc
+    if picked.size != size:
+        raise ValueError("background removal changed the image size")
+    width, height = (math.ceil(value / 64) * 64 for value in size)
+    if (width, height) != size:
+        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        canvas.paste(picked, ((width - size[0]) // 2, height - size[1]))
+        picked = canvas
+    if origin:
+        texts[MIGRATION_ORIGIN_KEY] = origin
+    info = PngInfo()
+    for key, value in texts.items():
+        info.add_text(key, value)
+    output = io.BytesIO()
+    picked.save(output, format="PNG", pnginfo=info if texts else None)
+    data = output.getvalue()
+    if not transparency(data)["ok"]:
+        raise ValueError("배경이 지워지지 않았습니다 - 투명한 자리가 거의 없습니다")
+    return data
+
+
 def annotations(payload: dict) -> dict[str, str]:
     result = {}
     for key, limit in (("name", 80), ("description", 4000)):

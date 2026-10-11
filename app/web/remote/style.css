@@ -30760,6 +30760,8 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-cand.is-saved { outline: 1px solid #46cf88; outline-offset: -3px; }
 /* ── 신 사양의 화면 셋(2026-10-11): 선택(기본 · 구 사양 화면의 꼴을 그대로 쓴다) · 제작 · 바리에이션 ── */
 .cb5-gal { flex: 1 1 auto; min-height: 0; }
+/* 빈 보관함의 안내문은 카드 그리드의 **한 칸**에 들어가 좁은 기둥으로 접혔다(구 사양 · 신 사양 둘 다) - 줄 전체를 쓴다. */
+.char-asset-grid > .mod-empty { grid-column: 1 / -1; }
 .cb5-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
 .cb5-bar-title { font: 600 13px var(--font-display); color: var(--text-primary); }
 /* 선택 화면의 그림은 투명 배경이다 - 바둑판을 깔아 투명한 곳이 보이게 한다. */
@@ -30777,6 +30779,7 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-annot-name:focus, .cb5-annot-desc:focus { border-color: var(--accent); outline: none; }
 .cb5-comp { display: flex; flex-direction: column; gap: 3px; font: 400 11px var(--font-mono); color: var(--text-dim); }
 .cb5-comp-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+.cb5-comp-origin { color: var(--text-muted); }
 .cb5-comp-row b { font-weight: 600; color: var(--text-muted); }
 .cb5-comp-row span { color: var(--text-primary); word-break: break-word; }
 /* 바리에이션: 결과 칸이 A(원본) | B(결과) 둘로 갈린다 - 예전 벤치의 나란히 보기를 잇는다. */

@@ -7,3 +7,6 @@
 # ANIMA license texts are verified by byte SHA-256 (core/anima_engine/manifest.py) - no EOL conversion,
 # or autocrlf turns GPL/MIT (CRLF upstream) into LF on commit and the LF ones into CRLF on checkout.
 core/anima_engine/licenses/** -text
+# 부품 카탈로그는 빌더가 바이트로 대조한다(tools/build_character_parts.py --check). 체크아웃 때 줄바꿈이 CRLF 로
+# 바뀌면 내용이 같아도 늘 STALE 이 된다 - 변환하지 않는다.
+data/character_parts.json -text

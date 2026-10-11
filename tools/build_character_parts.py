@@ -371,13 +371,19 @@ def main(argv=None):
         catalog, rows = build(args.root)
         outputs = serialized(catalog, rows)
         if args.check:
+            # 판정표(docs/)는 .gitignore 라 다른 체크아웃에는 없다. 없으면 건너뛴다 - 카탈로그는 반드시 대조한다.
+            skipped = [name for name in outputs if name == TSV_PATH and not (args.root / name).is_file()]
             stale = [name for name, text in outputs.items()
-                     if not (args.root / name).is_file()
-                     or (args.root / name).read_bytes() != text.encode("utf-8")]
+                     if name not in skipped
+                     and (not (args.root / name).is_file()
+                          or (args.root / name).read_bytes() != text.encode("utf-8"))]
             if stale:
                 print("STALE: " + ", ".join(stale))
                 return 1
-            print("OK: catalog and verdicts match inputs")
+            if skipped:
+                print("OK: catalog matches inputs (not in this checkout, skipped: " + ", ".join(skipped) + ")")
+            else:
+                print("OK: catalog and verdicts match inputs")
         else:
             for name, text in outputs.items():
                 path = args.root / name

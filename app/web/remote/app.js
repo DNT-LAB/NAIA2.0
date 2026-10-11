@@ -9251,7 +9251,8 @@ function requestRandomPrompt({force = false, bootstrap = false, pressed = false}
     ratings: getActiveRatings(),
     overrides: _collectCurrentParams(),
     // 사람이 Prompt 탭의 Random(단추 · Alt+Enter)을 눌렀다는 표. 서버가 이 표가 있을 때만
-    // '랜덤을 누를 때 생성합니다'(세션 옵션)를 건다 - 연동 · 첫 실행의 Random 에는 붙지 않는다.
+    // '랜덤을 누를 때 생성합니다'(세션 옵션)를 건다 - 첫 실행의 Random 에는 붙지 않는다(이벤트 맵 연동 중의
+    // Random 단추에는 붙는다 - 사용자 지시 2026-10-11).
     ...(pressed ? {pressed: true} : {}),
   }));
   return true;

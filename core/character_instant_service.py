@@ -106,8 +106,7 @@ def build_instant_prompt(context: Any, frame: dict[str, Any]) -> str:
     return ", ".join(part for part in parts if part)
 
 
-def build_instant_overrides(request_id: str, frame: dict[str, Any],
-                           uuid: str = "") -> dict[str, Any]:
+def build_instant_overrides(request_id: str, frame: dict[str, Any]) -> dict[str, Any]:
     """생성 요청에 얹을 것. **파라미터는 안 건드린다** - 사용자 현재 값 그대로 나간다.
 
     ⚠️ `uc` 는 `characters` 와 **길이가 같아야** 한다. 어긋나면
@@ -133,8 +132,6 @@ def build_instant_overrides(request_id: str, frame: dict[str, Any],
         #    Auto Gen 연쇄와 Vibe 주입에서 빠지기 위한 것뿐이다.
         INSTANT_REQUEST_FLAG: True,
         "character_instant_request_id": str(request_id or ""),
-        # 프리뷰 창이 [Generate] 로 **같은 캐릭터**를 다시 뽑을 수 있게.
-        "character_instant_uuid": str(uuid or ""),
         "nai_preview_title": str(
             frame.get("custom_name") or strip_connect_markers(
                 str(frame.get("prompt") or "")))[:60],

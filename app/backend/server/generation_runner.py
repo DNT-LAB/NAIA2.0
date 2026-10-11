@@ -1777,10 +1777,9 @@ async def _broadcast_character_instant_preview(clients, stored, params) -> None:
     await broadcast_json(clients, {
         "type": "nai_preview_result",
         "requestId": str(params.get("character_instant_request_id") or ""),
-        # 창이 갈래를 안다 - [Save] 는 감추고(이미 저장됐다) [Generate] 는 이 캐릭터로
-        # 다시 뽑는다.
+        # 지금 화면은 이 값을 안 읽는다(이 창에 오는 것은 즉시 생성의 결과뿐이다). **지우지 않는다** - 이미 열려
+        # 있는 옛 화면이 이 값으로 캐릭터 잠금을 푼다.
         "kind": "character",
-        "uuid": str(params.get("character_instant_uuid") or ""),
         "title": str(params.get("nai_preview_title") or ""),
         "width": int(params.get("width") or 0),
         "height": int(params.get("height") or 0),

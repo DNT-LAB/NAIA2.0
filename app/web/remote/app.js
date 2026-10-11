@@ -9323,7 +9323,9 @@ function send(cmd, options = {}) {
   }
   if (cmd === 'random') {
     if (window.eventMap?.isRandomLinked?.() || window.eventMap?.isRandomLinkPending?.()) {
-      requestRandomPrompt();
+      // 이벤트 맵이 Random 을 쥐고 있을 때도 **사람이 누른 Random** 이다 - '랜덤을 누를 때 생성합니다' 가 여기에도
+      // 걸린다(사용자 지시 2026-10-11). 답을 기다리는 중의 재입력은 `requestRandomPrompt` 가 스스로 버린다.
+      requestRandomPrompt({pressed: true});
       return;
     }
     // Pool still loading (chunk load / parquet load-merge-upload) → block Random

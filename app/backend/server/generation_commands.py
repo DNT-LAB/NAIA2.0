@@ -919,7 +919,8 @@ def _should_generate_once_after_random(
 
     Auto Gen 이 꺼져 있을 때만 뜻이 있다(켜져 있으면 `_should_auto_generate_after_random` 이 연속 생성을 건다).
     **사람이 Prompt 탭에서 누른 Random**(단추 · Alt+Enter)에만 건다 - 화면이 `pressed` 를 실어 보낸다.
-    앱을 켤 때 도는 첫 Random(bootstrap_random) · 이벤트 맵 연동 · 프리셋 / Sequence 탭의 Random 은 그 표가 없다.
+    앱을 켤 때 도는 첫 Random(bootstrap_random) · 프리셋 / Sequence 탭의 Random 은 그 표가 없다.
+    이벤트 맵이 Random 을 쥐고 있을 때(연동)의 Random 단추도 표를 싣는다(사용자 지시 2026-10-11).
     """
     if command.get("pressed") is not True:
         return False
@@ -950,13 +951,15 @@ async def _maybe_enqueue_random_auto_generation(
     from core.event_map.random_link import result_is_current
     if not result_is_current(context, result):
         return None
+    continuous = _should_auto_generate_after_random(context, command, overrides)
     if getattr(result, "event_map_revision", None) is not None:
         # Live OFF must beat stale request options after sampling/boost awaits.
+        # ⚠️ 연속 생성만 끈다. 예전에는 여기서 돌려보내, 이벤트 맵이 Random 을 쥐고 있으면 '랜덤을 누를 때 생성합니다'
+        #    가 걸리지 않았다(사용자 지시 2026-10-11: "이벤트맵이 랜덤을 점유중일 때 옵션을 여기에도 전파합니다").
         if not context._coerce_bool(context.get_options().get("auto_generate", False)):
-            return None
-    continuous = _should_auto_generate_after_random(context, command, overrides)
-    # 한 장만: Auto Gen 은 꺼져 있고, 수동 Random 명령이다(`allow_once`). 이벤트 맵 연동 결과는 여기까지 오지
-    # 않는다 - 바로 위에서 Auto Gen 이 꺼져 있으면 돌려보낸다(일반 생성에만 건다는 사양이 그 줄로 지켜진다).
+            continuous = False
+    # 한 장만: Auto Gen 은 꺼져 있고, 수동 Random 명령이다(`allow_once`). 일반 Random 이든 이벤트 맵 연동 Random 이든
+    # 같다 - 사람이 눌렀다는 표(`pressed`)와 세션 옵션이 정한다.
     once = (not continuous and allow_once
             and _should_generate_once_after_random(context, command, overrides))
     if not continuous and not once:

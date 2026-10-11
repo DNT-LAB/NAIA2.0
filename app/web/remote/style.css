@@ -30609,6 +30609,17 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .cb5-btn.is-primary { background: rgba(124,106,239,0.22); border-color: var(--accent); color: var(--text-primary); }
 .cb5-rows { display: flex; flex-direction: column; gap: 5px; }
+/* 네거티브 줄: 살짝 붉다(사용자 지시 2026-10-11). Interactive 의 네거티브 칸(.ia-neg)과 같은 색 계열이다. */
+.cb5-block.is-negative { border-color: rgba(229,115,107,0.32); background: rgba(229,115,107,0.06); }
+.cb5-block.is-negative:hover { border-color: rgba(229,115,107,0.55); background: rgba(229,115,107,0.09); }
+.cb5-block.is-negative.is-open {
+  border-color: rgba(229,115,107,0.8);
+  background: linear-gradient(180deg, rgba(229,115,107,0.13), rgba(229,115,107,0.04));
+}
+.cb5-block.is-negative .ia-block-name { color: #ffb9ae; }
+.cb5-block.is-negative.is-open .ia-block-icon { background: rgba(229,115,107,0.24); color: #ffb9ae; }
+.cb5-block.is-negative .ia-slot-input { border-color: rgba(229,115,107,0.75); }
+.cb5-block.is-negative .ia-chip { background: rgba(229,115,107,0.12); color: #ffcfc7; }
 /* Interactive 의 칸은 본문이 '살펴보기'(cursor: help)다. 여기는 살펴볼 옆판이 없다 - 단추만 누른다. */
 .cb5-cell { cursor: default; }
 .cb5-swatch { display: block; width: 100%; height: 100%; }

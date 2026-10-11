@@ -24,7 +24,11 @@ BLOCKS = ("hair", "face", "body", "species", "outfit", "accessory", "item")
 # 부품 카탈로그에 없는 것을 담는 블록(사용자 결정 2026-10-11): 미색인 태그 · 자연어 · 가중치를 건 묶음.
 # 카탈로그 블록에도 직접 쓴 것을 넣을 수 있다 - '기타' 는 어느 블록에도 안 맞는 것의 자리다. 프롬프트의 맨 뒤에 붙는다.
 ETC_BLOCK = "etc"
-PART_BLOCKS = BLOCKS + (ETC_BLOCK,)
+# 네거티브(사용자 지시 2026-10-11 · NAI 전용 사양). v5-medium 은 네거티브 프롬프트를 받지 않는다 - 대신 여기 적은 것을
+# **음수 가중치 한 묶음**(`-1::a, b, c ::`)으로 캐릭터 프롬프트의 맨 뒤에 싣는다. 사람이 '기타' 에 손으로 쓰던 것이다.
+NEGATIVE_BLOCK = "negative"
+NEGATIVE_WEIGHT = "-1"
+PART_BLOCKS = BLOCKS + (ETC_BLOCK, NEGATIVE_BLOCK)
 FREE_TEXT_MAX = 300
 # 직접 쓴 것에 못 쓰는 글자. 전부 NAIA 가 **프롬프트 문법으로 읽는** 것이다 - 고정 사양(메인 프롬프트 · 모델 · 크기)이
 # 캐릭터 칸의 글 때문에 바뀌면 안 된다.
@@ -90,6 +94,7 @@ def specification() -> dict[str, Any]:
         "model": MODEL, "model_label": resolve_nai_model_spec(MODEL).label, "scale": SCALE,
         "resolutions": resolutions, "genders": list(GENDERS), "pose_slot_default": POSE_DEFAULT,
         "prompt_template": PROMPT_TEMPLATE, "blocks": list(BLOCKS), "free_block": ETC_BLOCK,
+        "negative_block": NEGATIVE_BLOCK,
         "free_text_max": FREE_TEXT_MAX,
         "max_count": MAX_COUNT, "api_mode": "NAI",
     }
@@ -153,6 +158,16 @@ def validate_builder(payload: Any, catalog: PartsCatalog, *, saved: bool = False
         if not isinstance(parts[block], list):
             raise ValueError(f"parts.{block} must be a list")
         normalized[block] = []
+        if block == NEGATIVE_BLOCK:
+            # 통째로 `-1:: ... ::` 한 묶음이 된다. 그 안에 가중치(`::`)를 또 쓰면 묶음이 거기서 닫혀 뒤의 태그가
+            # 전부 양수로 뒤집힌다 - 받지 않는다. 같은 태그가 위의 블록에 있어도 그대로 둔다(빼려고 적은 것이다).
+            for entry in parts[block]:
+                tag = free_text(entry)
+                if "::" in tag:
+                    raise ValueError("negative parts must not contain weights")
+                if tag not in normalized[block]:
+                    normalized[block].append(tag)
+            continue
         for entry in parts[block]:
             if isinstance(entry, str):
                 tag, hold = entry, False
@@ -213,9 +228,14 @@ def generation_count(payload: dict) -> int:
 def _caption_tags(builder: dict[str, Any], catalog: PartsCatalog) -> list[str]:
     _data, _revision, records = catalog.read()
     tags = []
-    for entries in builder["parts"].values():
+    for block, entries in builder["parts"].items():
+        if block == NEGATIVE_BLOCK:
+            continue
         for entry in entries:
             tags.append(records[entry["tag"]]["hold"] if isinstance(entry, dict) else entry)
+    negative = builder["parts"].get(NEGATIVE_BLOCK) or []
+    if negative:
+        tags.append(f"{NEGATIVE_WEIGHT}::{', '.join(negative)} ::")
     return tags
 
 

@@ -181,7 +181,8 @@ export function createReferenceInsetWindow({
     if (panel) return panel;
     panel = createDraggablePanel({
       document: doc, window: win, title: '레퍼런스 인셋', variant: 'riw', storageKey: 'reference-inset',
-      width: 520, minWidth: 520, maxWidth: 520, collapsible: false, escHtml,
+      // 접을 수 있다(2026-10-11) - 머리줄(이름 · 켜고 끄기)만 남겨 결과를 가리지 않게 둘 수 있다.
+      width: 520, minWidth: 520, maxWidth: 520, collapsible: true, escHtml,
       // 닫을 때 끌어 놓고 아직 안 보낸 배치가 있으면 보낸다 - 휠을 굴리자마자 닫아도 화면에서 본 대로 나간다.
       onClose: () => { drag = null; win?.clearTimeout(wheelTimer); wheelAnchor = null; commit(); },
     });
@@ -841,9 +842,15 @@ export function createReferenceInsetWindow({
     view = 'main';
     disarmDelete();
     panel.open();
+    panel.expand?.();          // 연다는 것은 보겠다는 것이다 - 접혀 있었으면 편다
     panel.raise?.();
     render();
   }
 
-  return {open, sync, isOpen: () => !!panel?.isOpen(), acceptPastedImage};
+  /** 창을 닫는다(떠 있을 때만). 에셋에서 [C1 + 레퍼런스 인셋 적용] 을 누르면 창은 닫힌 채로 Result 로 넘어간다. */
+  function close() {
+    if (panel?.isOpen()) panel.close();
+  }
+
+  return {open, close, sync, isOpen: () => !!panel?.isOpen(), acceptPastedImage};
 }

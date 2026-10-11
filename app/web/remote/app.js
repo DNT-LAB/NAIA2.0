@@ -995,7 +995,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5k')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5l')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1008,7 +1008,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
       rightMount: document.getElementById('charBuilderV5Root'),
       isNai: () => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() === 'NAI',
       onViewChange: () => syncAssetsV5Mode(),
-      onReferenceInsetPin: state => setReferenceInsetBadge(state),
+      onReferenceInsetPin: state => afterReferenceInsetApplied(state),
       bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
     });
     syncAssetsV5Mode();
@@ -1039,7 +1039,7 @@ const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=202610
       // CR capability(is_naid45)는 모듈 팝업을 연 적 없어도 캐시에서 읽는다.
       // 게이트에서 버려지는 건 renderModuleState뿐이고 캐시 적재는 그 앞에서 일어난다.
       getCharacterReferenceState: () => moduleStateCache.get('character_reference') || null,
-      onReferenceInsetPin: state => setReferenceInsetBadge(state),
+      onReferenceInsetPin: state => afterReferenceInsetApplied(state),
     });
     // 리로드 복원: 백엔드 인셋 핀은 리로드와 무관하게 살아 있다(생성이 계속
     // 인셋으로 나감) - 배지가 없으면 사용자가 이유 모를 1152x896 생성을 본다.
@@ -1128,6 +1128,15 @@ function setReferenceInsetBadge(state) {
 
 /** 레퍼런스 인셋 창(사용자 지정 2026-10-09 · 10-10 개편). Fn > 레퍼런스 인셋 · 띠의 이름을 누르면 뜬다.
  *  **꽂아 둔 것이 없어도 열린다** - 거기서 그림을 붙여넣거나 Storage 에서 꺼낸다. 처음 열 때만 읽어 온다. */
+/** 에셋에서 [C1 + 레퍼런스 인셋 적용] 이 끝났을 때(사용자 지시 2026-10-11): 배지를 맞추고 **Result 탭으로 넘어간다**.
+ *  인셋 창은 **닫힌 채**다 - 떠 있었으면 닫는다(결과를 가린다). 켜져 있다는 것은 Result 의 띠가 보여 주고, 거기서 다시 연다.
+ *  제작 화면의 시험 그림 · 신 사양 / 구 사양의 캐릭터 목록 어디서 눌러도 여기로 온다. */
+function afterReferenceInsetApplied(state) {
+  setReferenceInsetBadge(state);
+  referenceInsetWindow?.close?.();
+  switchRightTab('result');
+}
+
 async function openReferenceInsetWindow() {
   closeReferenceInsetMenu();
   // 상태를 아직 못 받았으면(접속 직후 · 받다가 실패) 지금 받는다.
@@ -1151,7 +1160,7 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261011-inset19');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261011-inset21');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),

@@ -248,8 +248,9 @@ class HeadlessCharacterAssetService:
         # 업스케일해 둔 레퍼런스 원본 `{(character_id, variation): png}`. 배치를 바꿀 때마다 여기서 다시 굽는다.
         self._reference_inset_upscaled_sources: dict[tuple[str, str, str], bytes] = {}
         # 생성 결과에서 인셋 칸을 잘라 낼 것인가(사용자 지정 2026-10-09). 핀이 아니라 이 세션의 설정이다 -
-        # 그림을 바꿔 꽂아도 유지된다. 앱을 다시 켜면 꺼진 채로 시작한다.
-        self._reference_inset_crop_result = False
+        # 그림을 바꿔 꽂아도 유지된다. **기본은 켜짐**이다(사용자 지시 2026-10-11 - 예전에는 꺼진 채로 시작했다).
+        # 앱을 다시 켜면 켜진 채로 시작한다.
+        self._reference_inset_crop_result = True
         # 칸의 바탕색("white" | "black" - 사용자 결정 2026-10-11). 핀이 아니라 이 세션의 설정이다(그림을 바꿔 꽂아도
         # 유지된다). 투명한 그림의 뒤와 그림이 덮지 않은 칸이 이 색으로 나간다. 앱을 다시 켜면 흰색이다.
         self._reference_inset_background = "white"

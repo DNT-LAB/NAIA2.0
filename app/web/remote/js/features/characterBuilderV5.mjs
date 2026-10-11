@@ -36,10 +36,13 @@ import {TAG_DESC} from './interactiveAxes.mjs?v=20260913-gap3385';
 // 앞의 일곱은 부품 카탈로그의 블록이고, 'etc'(기타)는 카탈로그가 없는 블록이다 - 직접 쓴 것만 담는다.
 // 어느 블록에든 직접 쓸 수 있다(사용자 결정 2026-10-11 - Interactive 의 캐릭터 슬롯과 같은 사양).
 const ETC_BLOCK = 'etc';
-const BLOCK_ORDER = ['hair', 'face', 'body', 'species', 'outfit', 'accessory', 'item', ETC_BLOCK];
+// 네거티브(사용자 지시 2026-10-11 · NAI 전용): 여기 적은 것은 생성할 때 `-1::a, b ::` 한 묶음으로 맨 뒤에 실린다
+// (묶는 일은 서버가 한다 - `core/character_builder_v5._caption_tags`). 화면은 태그만 받는다.
+const NEGATIVE_BLOCK = 'negative';
+const BLOCK_ORDER = ['hair', 'face', 'body', 'species', 'outfit', 'accessory', 'item', ETC_BLOCK, NEGATIVE_BLOCK];
 const BLOCK_ICONS = {
   hair: '\u{1F487}', face: '\u{1F441}', body: '\u{1F9CD}', species: '\u{1F9EC}',
-  outfit: '\u{1F457}', accessory: '\u{1F452}', item: '\u{1F392}', etc: '\u270F\uFE0F',
+  outfit: '\u{1F457}', accessory: '\u{1F452}', item: '\u{1F392}', etc: '\u270F\uFE0F', negative: '\u2296',
 };
 // 서버(`core/character_builder_v5.free_text`)와 같은 잣대. NAIA 가 프롬프트 문법으로 읽는 글자는 못 쓴다 -
 // 눌러서 400 을 받게 두지 않고 여기서 먼저 말한다.
@@ -244,7 +247,10 @@ export function createCharacterBuilderV5({
       if (!activePart.has(block.key)) activePart.set(block.key, firstGridPart(block)?.key || '');
     }
     // '기타' 는 카탈로그에 없다 - 그리드가 없는 블록으로 끼워 둔다.
-    if (blockDef.size) blockDef.set(ETC_BLOCK, {key: ETC_BLOCK, label: '기타', parts: []});
+    if (blockDef.size) {
+      blockDef.set(ETC_BLOCK, {key: ETC_BLOCK, label: '기타', parts: []});
+      blockDef.set(NEGATIVE_BLOCK, {key: NEGATIVE_BLOCK, label: '네거티브', parts: []});
+    }
   }
 
   /** 블록을 처음 열 때 펼칠 부품. 그림이 있는 축을 먼저 본다 - 색 · 길이는 늘 위에 함께 보이니까. */
@@ -292,6 +298,8 @@ export function createCharacterBuilderV5({
   }
 
   const totalParts = () => BLOCK_ORDER.reduce((n, key) => n + draft.parts[key].length, 0);
+  // 그릴 것(네거티브를 뺀 것). 뺄 것만 적어서는 그릴 수 없다.
+  const positiveParts = () => totalParts() - draft.parts[NEGATIVE_BLOCK].length;
 
   // ------------------------------------------------------------------ 그리기 - 칸
 
@@ -460,12 +468,15 @@ export function createCharacterBuilderV5({
       // 닫힌 줄은 글자 칩. 썸네일은 그리드에만 둔다 - 왼쪽에 썸네일을 놓으면 몇 개만 골라도 줄이 화면 밖으로 늘어진다.
       const body = open
         ? `<textarea class="ia-slot-input" data-cb-slot-input="${escHtml(key)}" rows="1" spellcheck="false"`
-          + ` placeholder="${key === ETC_BLOCK ? '태그 · 자연어를 직접 씁니다 (쉼표로 여러 개)'
-            : '태그 입력 (쉼표로 여러 개) · 오른쪽에서 골라도 됩니다'}">${escHtml(picks.join(', '))}</textarea>`
+          + ` placeholder="${key === NEGATIVE_BLOCK
+            ? '여기에 적은 프롬프트는 자동으로 -1:: 프롬프트1, 프롬프트2, ... :: 로 처리됩니다'
+            : key === ETC_BLOCK ? '태그 · 자연어를 직접 씁니다 (쉼표로 여러 개)'
+              : '태그 입력 (쉼표로 여러 개) · 오른쪽에서 골라도 됩니다'}">${escHtml(picks.join(', '))}</textarea>`
         : `<div class="ia-block-chips">${picks.length
           ? picks.map((tag, index) => chipHtml(key, tag, index)).join('')
           : '<span class="ia-chip-empty">비어 있음</span>'}</div>`;
-      return `<div class="ia-block cb5-block${open ? ' is-open is-editing' : ''}${picks.length ? '' : ' is-empty'}"`
+      return `<div class="ia-block cb5-block${key === NEGATIVE_BLOCK ? ' is-negative' : ''}`
+        + `${open ? ' is-open is-editing' : ''}${picks.length ? '' : ' is-empty'}"`
         + ` data-cb-block="${escHtml(key)}">`
         + `<div class="ia-block-label"><span class="ia-block-title">`
         + `<span class="ia-block-icon">${BLOCK_ICONS[key] || ''}</span>`
@@ -591,6 +602,10 @@ export function createCharacterBuilderV5({
   function blockHtml() {
     const block = blockDef.get(activeBlock);
     if (!block) return '';
+    if (activeBlock === NEGATIVE_BLOCK) {
+      return '<div class="cb5-empty">네거티브에는 고를 부품이 없습니다.<br>'
+        + '왼쪽 칸에 빼고 싶은 것을 적습니다 - 생성할 때 -1:: ... :: 한 묶음으로 실립니다 (NAI 전용).</div>';
+    }
     if (activeBlock === ETC_BLOCK) {
       return '<div class="cb5-empty">기타에는 고를 부품이 없습니다.<br>'
         + '왼쪽 칸에 직접 씁니다 - 색인되지 않은 태그 · 자연어 · 가중치(1.2::tag ::)를 그대로 받습니다.</div>';
@@ -1123,6 +1138,11 @@ export function createCharacterBuilderV5({
     return '';
   }
 
+  /** 네거티브에 가중치(`::`)를 쓴 항목(없으면 ''). 통째로 `-1:: ... ::` 로 묶이므로 안에 또 쓰면 묶음이 깨진다. */
+  function weightedNegative() {
+    return draft.parts[NEGATIVE_BLOCK].find(item => item.includes('::')) || '';
+  }
+
   async function confirmDialog(title, message, okText) {
     if (typeof showAppDialog !== 'function') return false;
     return showAppDialog('', {
@@ -1216,8 +1236,13 @@ export function createCharacterBuilderV5({
       showToast('캐릭터 제작은 NAI 모드 전용입니다', 'error');
       return true;
     }
-    if (!totalParts()) {
+    if (!positiveParts()) {
       showToast('부품을 하나 이상 골라 주세요', 'error');
+      return true;
+    }
+    const weighted = weightedNegative();
+    if (weighted) {
+      showToast(`네거티브에는 가중치(::)를 쓰지 않습니다 - 통째로 -1:: 로 묶입니다: ${weighted.slice(0, 40)}`, 'error');
       return true;
     }
     // '기타' 를 열어 둔 채 Generate 를 누르면 아직 안 갈린 채다 - 나가기 전에 가른다(프롬프트의 블록 차례가 달라진다).

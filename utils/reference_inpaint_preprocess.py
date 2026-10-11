@@ -126,6 +126,25 @@ REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = tuple(
 DEFAULT_REFERENCE_INSET_CANVAS: tuple[int, int] = (1216, 832)
 
 
+def rgb_without_hidden_color(image: Image.Image) -> Image.Image:
+    """알파를 떼어 RGB 로 만들되, **완전히 투명한 자리는 검정으로** 둔다.
+
+    `convert("RGB")` 는 알파만 버리고 그 밑의 색을 그대로 드러낸다. NAI 가 그린 투명 배경 그림은 그 자리가 검정이라
+    여태 문제가 없었는데, **NAI 업스케일은 투명한 자리의 색을 노이즈로 채워 돌려준다**(실측 2026-10-11:
+    원본은 전부 검정 · 업스케일본은 30% 가 검정이 아니고 표준편차 85 ~ 102). 그것을 그대로 떼면 인셋 칸의 배경이
+    노이즈로 덮인다(사용자 제보). 알파가 0 인 자리만 검정으로 되돌린다 - 숨은 색이 원래 검정인 그림은
+    `convert("RGB")` 와 **바이트까지 같은** 결과가 나온다(예전 그림이 달라지지 않는다).
+    NAI 의 일반 그림(숨은 생성 정보가 알파 254 / 255 에 실린 것)은 알파 0 이 없어 그대로다.
+    """
+    if image.mode not in ("RGBA", "LA") and "transparency" not in image.info:
+        return image.convert("RGB")
+    rgba = image.convert("RGBA")
+    rgb = rgba.convert("RGB")
+    clear = rgba.getchannel("A").point(lambda value: 255 if value == 0 else 0)
+    rgb.paste((0, 0, 0), mask=clear)
+    return rgb
+
+
 def resolve_reference_inset_canvas(width: object, height: object) -> tuple[int, int]:
     """고를 수 있는 캔버스인지 확인해 돌려준다. 목록에 없으면 기본값.
 
@@ -303,7 +322,7 @@ def prepare_reference_inpaint_canvas(
       Binary 1/8 mask for NovelAI native infill.
     """
     spec = spec or ReferenceInsetPreprocessSpec()
-    reference = source_image.convert("RGB")
+    reference = rgb_without_hidden_color(source_image)
 
     panelled = box is not None or divider is not None
     if not panelled:
@@ -926,7 +945,7 @@ def prepare_variation_inpaint_canvas(
     features and keeps NovelAI from inventing a second figure.
     """
     spec = spec or VariationInpaintSpec()
-    reference = source_image.convert("RGB")
+    reference = rgb_without_hidden_color(source_image)
 
     placement = _resolve_variation_reference_placement(reference.size, spec)
     resized = reference.resize((placement.width, placement.height), Image.Resampling.LANCZOS)

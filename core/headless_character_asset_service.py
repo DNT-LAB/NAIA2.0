@@ -683,7 +683,11 @@ class HeadlessCharacterAssetService:
                 if up_w <= source_w or up_h <= source_h or abs(up_w / up_h - source_w / source_h) > 0.01:
                     raise RuntimeError(f"업스케일 결과의 크기가 이상합니다: {source_w}x{source_h} -> {up_w}x{up_h}")
                 buffer = io.BytesIO()
-                upscaled.convert("RGB").save(buffer, format="PNG")
+                # ⚠️ `convert("RGB")` 로 떼면 안 된다. NAI 업스케일은 투명한 자리의 색을 노이즈로 채워 돌려준다 -
+                #    알파를 그냥 버리면 그 노이즈가 인셋 칸의 배경이 된다(사용자 제보 2026-10-11).
+                from utils.reference_inpaint_preprocess import rgb_without_hidden_color
+
+                rgb_without_hidden_color(upscaled).save(buffer, format="PNG")
                 with self._retain_lock:
                     sources = self._reference_inset_upscaled_sources
                     sources[key] = buffer.getvalue()

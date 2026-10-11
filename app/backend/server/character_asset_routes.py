@@ -214,6 +214,44 @@ def register_character_asset_routes(
         return {"ok": bool(accepted), "request_id": str(payload.get("request_id") or ""),
                 "accepted": accepted, "rejected": rejected}
 
+    @app.post("/api/character-asset/v5/variation/generate")
+    async def api_character_asset_v5_variation_generate(req: Request):
+        payload = await _read_json(req)
+        service = _asset_service(session_context)
+        try:
+            overrides_batch = [
+                await run_in_thread(service.build_v5_variation_overrides, payload, candidate)
+                for candidate in range(generation_count(payload))
+            ]
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        accepted, rejected = [], []
+        generation = _generation_service(session_context)
+        for candidate, overrides in enumerate(overrides_batch):
+            dispatch = await run_in_thread(
+                generation.enqueue_remote_request, {"type": "generate", "api_mode": "NAI", "overrides": overrides}
+            )
+            if dispatch.ok:
+                accepted.append(candidate)
+            else:
+                rejected.append({"candidate": candidate, **dispatch.websocket_payload()})
+        if accepted and session_context.headless_generation_execute_enabled:
+            start_generation_runner(session_context, clients)
+        return {"ok": bool(accepted), "request_id": str(payload.get("request_id") or ""),
+                "accepted": accepted, "rejected": rejected}
+
+    @app.post("/api/character-asset/v5/annotate")
+    async def api_character_asset_v5_annotate(req: Request):
+        payload = await _read_json(req)
+        try:
+            return await run_in_thread(_asset_service(session_context).annotate, payload)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
     @app.get("/api/character-asset/list")
     async def api_character_asset_list():
         try:

@@ -463,6 +463,16 @@
           "smoke": "external_live"
         },
         {
+          "method": "POST",
+          "path": "/api/character-asset/v5/variation/generate",
+          "smoke": "external_live"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/v5/annotate",
+          "smoke": "state_mutation"
+        },
+        {
           "method": "GET",
           "path": "/api/character-asset/v5/candidate-check",
           "smoke": "asset_runtime"

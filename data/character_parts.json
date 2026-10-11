@@ -7,8 +7,8 @@
   "counts": {
     "blocks": 7,
     "parts": 73,
-    "tags": 6448,
-    "adult_tags": 132,
+    "tags": 6460,
+    "adult_tags": 134,
     "review": 290
   },
   "blocks": [
@@ -36218,6 +36218,92 @@
               "thumb": "obj_etc/large teddy bear",
               "hold": null,
               "review": "not_carriable"
+            },
+            {
+              "tag": "flower",
+              "hold": "holding flower",
+              "freq": 357121,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/flower"
+            },
+            {
+              "tag": "bouquet",
+              "hold": "holding bouquet",
+              "freq": 15270,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/bouquet"
+            },
+            {
+              "tag": "leaf",
+              "hold": "holding leaf",
+              "freq": 55872,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/leaf"
+            },
+            {
+              "tag": "branch",
+              "hold": "holding branch",
+              "freq": 14510,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/branch"
+            },
+            {
+              "tag": "spring onion",
+              "hold": "holding spring onion",
+              "freq": 2425,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/spring onion"
+            },
+            {
+              "tag": "clover",
+              "hold": "holding clover",
+              "freq": 3122,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/clover"
+            },
+            {
+              "tag": "mistletoe",
+              "hold": "holding mistletoe",
+              "freq": 411,
+              "from_axis": "ani_plant",
+              "thumb": "ani_plant/mistletoe"
+            },
+            {
+              "tag": "flag",
+              "hold": "holding flag",
+              "freq": 9939,
+              "from_axis": "fx_symbol",
+              "thumb": "fx_symbol/flag"
+            },
+            {
+              "tag": "picture frame",
+              "hold": "holding picture frame",
+              "freq": 5516,
+              "from_axis": "meta_frame",
+              "thumb": "meta_frame/picture frame"
+            },
+            {
+              "tag": "party popper",
+              "hold": "holding party popper",
+              "freq": 1051,
+              "from_axis": "event",
+              "thumb": "event/party popper"
+            },
+            {
+              "tag": "sex toy",
+              "hold": "holding sex toy",
+              "freq": 28308,
+              "from_axis": "nsfw_toy",
+              "thumb": "nsfw_toy/sex toy",
+              "adult": true
+            },
+            {
+              "tag": "condom",
+              "hold": "holding condom",
+              "freq": 21767,
+              "from_axis": "nsfw_toy",
+              "thumb": "nsfw_toy/condom",
+              "adult": true
             }
           ]
         },
@@ -62045,6 +62131,54 @@
     "tenga": [
       "item",
       "obj_restraint"
+    ],
+    "flower": [
+      "item",
+      "obj_etc"
+    ],
+    "bouquet": [
+      "item",
+      "obj_etc"
+    ],
+    "leaf": [
+      "item",
+      "obj_etc"
+    ],
+    "branch": [
+      "item",
+      "obj_etc"
+    ],
+    "spring onion": [
+      "item",
+      "obj_etc"
+    ],
+    "clover": [
+      "item",
+      "obj_etc"
+    ],
+    "mistletoe": [
+      "item",
+      "obj_etc"
+    ],
+    "flag": [
+      "item",
+      "obj_etc"
+    ],
+    "picture frame": [
+      "item",
+      "obj_etc"
+    ],
+    "party popper": [
+      "item",
+      "obj_etc"
+    ],
+    "sex toy": [
+      "item",
+      "obj_etc"
+    ],
+    "condom": [
+      "item",
+      "obj_etc"
     ]
   }
 }

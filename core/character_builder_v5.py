@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
+import math
 import re
 import threading
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -209,3 +212,98 @@ def build_overrides(payload: dict, candidate: int, catalog: PartsCatalog) -> dic
 def builder_metadata(payload: Any, catalog: PartsCatalog) -> dict[str, Any]:
     builder = validate_builder(payload, catalog, saved=True)
     return {**builder, "model": MODEL, "scale": SCALE, "saved_at": datetime.now(timezone.utc).isoformat()}
+
+
+def annotations(payload: dict) -> dict[str, str]:
+    result = {}
+    for key, limit in (("name", 80), ("description", 4000)):
+        if key not in payload:
+            continue
+        value = payload[key]
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be a string")
+        if key == "name" and any(c in value for c in "\r\n\v\f\x85\u2028\u2029"):
+            raise ValueError("name must not contain line breaks")
+        value = value.strip()
+        if len(value) > limit:
+            raise ValueError(f"{key} must contain at most {limit} characters")
+        result[key] = value
+    return result
+
+
+def apply_annotations(meta: dict, values: dict, variation: str = "") -> None:
+    for key, value in values.items():
+        field = "display_name" if key == "name" else "description"
+        container = meta
+        if variation:
+            field = "variation_names" if key == "name" else "variation_descriptions"
+            container = dict(meta.get(field) or {})
+            meta[field] = container
+            field = variation
+        if value:
+            container[field] = value
+        else:
+            container.pop(field, None)
+
+
+def image_dimensions(path: Path) -> dict:
+    from PIL import Image
+
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+    except (OSError, ValueError):
+        width, height = 0, 0
+    context = SimpleNamespace(_current_model_key=lambda: MODEL)
+    params = {"model": MODEL, "width": width, "height": height, "type": "inpaint", "cfg_scale": SCALE}
+    apply_nai_fixed_params(context, params)
+    return {"width": width, "height": height, "paid": estimate_anlas_cost(context, params) > 0}
+
+
+def band_rows(band: Any, height: int) -> tuple[dict, int, int]:
+    if not isinstance(band, dict):
+        raise ValueError("band must be an object")
+    start, end = band.get("start"), band.get("end")
+    if any(type(v) not in (int, float) or not 0 <= v <= 1 for v in (start, end)):
+        raise ValueError("band start and end must be finite numbers within 0..1")
+    if Decimal(str(end)) - Decimal(str(start)) < Decimal("0.05"):
+        raise ValueError("band must be within 0..1 and at least 0.05 high")
+    first = max(0, math.floor(start * height / 8) * 8)
+    last = min(height, math.ceil(end * height / 8) * 8)
+    if last - first < 64:
+        raise ValueError("band must be at least 64 pixels high after alignment")
+    return {"start": start, "end": end}, first, last
+
+
+def variation_image(data: bytes, band: Any) -> tuple[dict, int, int, bytes]:
+    from PIL import Image
+    from utils.reference_inpaint_preprocess import _downscale_binary_mask
+
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != "PNG":
+                raise ValueError("source must be a PNG image")
+            width, height = image.size
+    except OSError as exc:
+        raise ValueError("source must be a PNG image") from exc
+    # 생성 경로는 너비 · 높이를 64 의 배수로 맞춘다. 64 의 배수가 아닌 그림을 보내면 요청의 크기와 그림이 어긋난다
+    # (72x136 이 64x128 로 나갔다 - 하청 실측). 신 사양의 해상도 셋은 전부 64 의 배수라 여기서 거절해도 잃는 것이 없다.
+    if width % 64 or height % 64:
+        raise ValueError("source dimensions must be multiples of 64")
+    normalized, first, last = band_rows(band, height)
+    mask = Image.new("L", (width, height), 0)
+    mask.paste(255, (0, first, width, last))
+    output = io.BytesIO()
+    _downscale_binary_mask(mask, 8).save(output, format="PNG")
+    return normalized, width, height, output.getvalue()
+
+
+def build_variation_overrides(payload: dict, candidate: int, catalog: PartsCatalog,
+                              data: bytes, character_id: str, source: str) -> dict:
+    # Resolution presets validate the builder only; the image owns the actual dimensions.
+    overrides = build_overrides({**payload, "resolution": payload.get("resolution", "standard")}, candidate, catalog)
+    _band, width, height, mask = variation_image(data, payload.get("band"))
+    overrides.update(type="inpaint", image_bytes=data, mask_bytes=mask, strength=1.0, noise=0.0,
+                     width=width, height=height, character_asset_flow="builder_v5_variation",
+                     character_asset_id=character_id, character_asset_source=source)
+    return overrides

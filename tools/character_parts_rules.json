@@ -31237,5 +31237,67 @@
       "class": "not_object",
       "where": ""
     }
-  }
+  },
+  "extra_items": [
+    {
+      "tag": "flower",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "bouquet",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "leaf",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "branch",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "spring onion",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "clover",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "mistletoe",
+      "source_axis": "ani_plant",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "flag",
+      "source_axis": "fx_symbol",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "picture frame",
+      "source_axis": "meta_frame",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "party popper",
+      "source_axis": "event",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "sex toy",
+      "source_axis": "nsfw_toy",
+      "part": "obj_etc"
+    },
+    {
+      "tag": "condom",
+      "source_axis": "nsfw_toy",
+      "part": "obj_etc"
+    }
+  ]
 }

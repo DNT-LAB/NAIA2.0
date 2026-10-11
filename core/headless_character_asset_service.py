@@ -1207,6 +1207,7 @@ class HeadlessCharacterAssetService:
                     "hash": path.stem,
                     "mtime": stat.st_mtime,
                     "revision": stat.st_mtime_ns,
+                    **builder_v5.image_dimensions(path),
                 })
             sidecar = asset_storage.read_character_meta(character_id, root)
             origins = sidecar.get("variation_origins") if isinstance(sidecar.get("variation_origins"), dict) else {}
@@ -1214,6 +1215,11 @@ class HeadlessCharacterAssetService:
                 # 벤치 저장 시 기록된 생성 방식(inpaint|char_reference|enhance).
                 # 기록 이전 저장분/승격 잔여 키는 빈 값으로 노출된다.
                 entry["origin"] = str(origins.get(entry["hash"]) or "")
+                entry["name"] = str((sidecar.get("variation_names") or {}).get(entry["hash"]) or "")
+                entry["description"] = str((sidecar.get("variation_descriptions") or {}).get(entry["hash"]) or "")
+                saved_builder = (sidecar.get("variation_builders") or {}).get(entry["hash"])
+                if saved_builder is not None:
+                    entry["builder"] = saved_builder
             variation = str(variation or "").strip()
             if variation:
                 variation = self._validate_hash(variation)
@@ -1230,6 +1236,8 @@ class HeadlessCharacterAssetService:
             return {
                 "id": character_id,
                 "display_name": str(sidecar.get("display_name") or ""),
+                "description": str(sidecar.get("description") or ""),
+                **builder_v5.image_dimensions(primary),
                 "variation": variation,
                 "character_prompt": prompt,
                 "character_uc": character_uc,
@@ -1255,15 +1263,18 @@ class HeadlessCharacterAssetService:
 
     # -------------------------------------------------------------- mutations
     def save_bytes(self, data: bytes, target: dict[str, Any]) -> dict[str, Any]:
+        kind = str((target or {}).get("kind") or "new").strip().lower()
+        names = builder_v5.annotations(target) if kind == "new" or "builder" in (target or {}) else {}
         builder = None
         if isinstance(target, dict) and "builder" in target:
-            if str(target.get("kind") or "new").strip().lower() != "new":
-                raise ValueError("builder is only supported for new characters")
+            if kind not in ("new", "variation"):
+                raise ValueError("builder requires a new or variation target")
             builder = builder_v5.builder_metadata(target["builder"], self.parts_catalog())
         self._bootstrap()
         self._validate_image_bytes(data)
         routed_legacy = False
-        if builder is not None and not builder_v5.transparency(data)["ok"]:
+        transparent = builder_v5.transparency(data)["ok"] if builder is not None else None
+        if kind == "new" and builder is not None and not transparent:
             # 신 사양은 투명 배경이 전제다. 투명하지 않은 그림은 막지 않고 **구 사양으로 보낸다**
             # (사용자 결정 2026-10-11). 여기가 가르는 목이다 - 부품 구성을 떼면 그 캐릭터는 구 사양이 된다.
             builder = None
@@ -1272,6 +1283,14 @@ class HeadlessCharacterAssetService:
             kind = str((target or {}).get("kind") or "new").strip().lower()
             if kind == "variation":
                 character_id = self._validate_id(str((target or {}).get("character_id") or ""))
+                if builder is not None:
+                    source = self._v5_variation_source(character_id, target.get("source", ""))
+                    band, _width, _height, _mask = builder_v5.variation_image(
+                        self.resolve_image_path(character_id, source).read_bytes(), target.get("band")
+                    )
+                    builder.update(band=band, source=source)
+                    # A repeated image replaces all of its annotations, including omitted values.
+                    names = {"name": "", "description": "", **names}
                 self._ensure_current(character_id)
                 saved_path = asset_storage.save_character_variation(
                     character_id, raw_bytes=bytes(data), root=self.write_root()
@@ -1284,10 +1303,16 @@ class HeadlessCharacterAssetService:
             else:
                 raise ValueError(f"unknown save target kind: {kind}")
             meta = self._extract_prompt_meta(saved_id, saved_path)
-            if builder is not None:
+            if builder is not None or names:
                 root = self.write_root()
                 sidecar = asset_storage.read_character_meta(saved_id, root)
-                sidecar["builder_v5"] = builder
+                variation = saved_path.stem if kind == "variation" else ""
+                if builder is not None:
+                    if variation:
+                        sidecar.setdefault("variation_builders", {})[variation] = builder
+                    else:
+                        sidecar["builder_v5"] = builder
+                builder_v5.apply_annotations(sidecar, names, variation)
                 if not asset_storage.write_character_meta(saved_id, sidecar, root):
                     raise OSError("could not save builder metadata")
             return {
@@ -1297,6 +1322,8 @@ class HeadlessCharacterAssetService:
                 # 어느 사양으로 저장됐는가. 신 사양으로 보냈는데 구 사양이 됐으면 화면이 그렇게 알린다.
                 "spec": "v5" if builder is not None else "legacy",
                 **({"routed_legacy": True} if routed_legacy else {}),
+                **({"variation": saved_path.stem, "transparent": transparent}
+                   if kind == "variation" and builder is not None else {}),
             }
 
     def rename(self, character_id: str, display_name: str) -> dict[str, Any]:
@@ -1377,7 +1404,8 @@ class HeadlessCharacterAssetService:
         """Drop per-variation sidecar entries for a hash that no longer exists."""
         meta = asset_storage.read_character_meta(character_id, root)
         changed = False
-        for key in ("variation_prompts", "variation_origins"):
+        for key in ("variation_prompts", "variation_origins", "variation_names",
+                    "variation_descriptions", "variation_builders"):
             block = meta.get(key)
             if isinstance(block, dict) and variation_hash in block:
                 block = dict(block)
@@ -1405,6 +1433,9 @@ class HeadlessCharacterAssetService:
         self._bootstrap()
         with self._lock:
             character_id = self._validate_id(character_id)
+            owner = self._owner_root(character_id)
+            if owner is not None and "builder_v5" in asset_storage.read_character_meta(character_id, owner):
+                raise ValueError("promote is not supported for builder_v5 characters yet")
             variation_hash = self._validate_hash(variation_hash)
             root = self._ensure_current(character_id)
             for path in asset_storage.list_character_variations(character_id, root):
@@ -1594,6 +1625,51 @@ class HeadlessCharacterAssetService:
         if str(self.context.get_api_mode() or "").upper() != "NAI":
             raise ValueError("Character Asset generation requires NAI mode")
         return builder_v5.build_overrides(payload, candidate, self.parts_catalog())
+
+    def _v5_variation_source(self, character_id: str, source: Any) -> str:
+        self._bootstrap()
+        character_id = self._validate_id(character_id)
+        if not isinstance(source, str):
+            raise ValueError("source must be a variation hash or empty string")
+        source = self._validate_hash(source) if source else ""
+        root = self._owner_root(character_id)
+        if root is None:
+            raise FileNotFoundError(f"character {character_id} not found")
+        if "builder_v5" not in asset_storage.read_character_meta(character_id, root):
+            raise ValueError("character has no builder_v5 metadata")
+        self.resolve_image_path(character_id, source)
+        return source
+
+    def build_v5_variation_overrides(self, payload: dict, candidate: int) -> dict:
+        if str(self.context.get_api_mode() or "").upper() != "NAI":
+            raise ValueError("Character Asset generation requires NAI mode")
+        with self._lock:
+            character_id = self._validate_id(str(payload.get("id") or ""))
+            source = self._v5_variation_source(character_id, payload.get("source", ""))
+            data = self.resolve_image_path(character_id, source).read_bytes()
+            return builder_v5.build_variation_overrides(
+                payload, candidate, self.parts_catalog(), data, character_id, source
+            )
+
+    def annotate(self, payload: dict) -> dict:
+        values = builder_v5.annotations(payload)
+        self._bootstrap()
+        with self._lock:
+            character_id = self._validate_id(str(payload.get("id") or ""))
+            variation = payload.get("variation", "")
+            if not isinstance(variation, str):
+                raise ValueError("variation must be a hash or empty string")
+            variation = self._validate_hash(variation) if variation else ""
+            self.resolve_image_path(character_id, variation)
+            root = self._ensure_current(character_id)
+            meta = asset_storage.read_character_meta(character_id, root)
+            builder_v5.apply_annotations(meta, values, variation)
+            if not asset_storage.write_character_meta(character_id, meta, root):
+                raise OSError("could not save annotations")
+            name = (meta.get("variation_names") or {}).get(variation, "") if variation else meta.get("display_name", "")
+            description = ((meta.get("variation_descriptions") or {}).get(variation, "")
+                           if variation else meta.get("description", ""))
+            return {"ok": True, "id": character_id, "variation": variation, "name": name, "description": description}
 
     def update_builder(self, character_id: str, payload: Any) -> dict[str, Any]:
         builder = builder_v5.builder_metadata(payload, self.parts_catalog())

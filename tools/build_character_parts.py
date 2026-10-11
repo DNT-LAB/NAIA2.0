@@ -338,6 +338,28 @@ def build(root):
             part["tags"].append(entry)
             index[tag] = [block, axis]
         parts[axis] = part
+    for extra in rules.get("extra_items", []):
+        tag, axis, target = extra["tag"], extra["source_axis"], extra["part"]
+        if axis not in source["axes"] or not any(e["tag"] == tag for e in source["axes"][axis]):
+            raise ValueError("Unknown extra item source: " + axis + "/" + ascii(tag))
+        if tag in index:
+            raise ValueError("Extra item already published: " + ascii(tag))
+        if target not in parts or targets.get(target) != "item":
+            raise ValueError("Extra item target must be an existing item part: " + target)
+        holding = "holding " + tag
+        if holding not in hold_source:
+            raise ValueError("Extra item has no holding source: " + ascii(tag))
+        freq = dictionary.get(tag, {}).get("freq", "")
+        entry = {"tag": tag, "hold": holding, "freq": freq, "from_axis": axis}
+        thumb = axis + "/" + tag
+        if thumb in thumbs:
+            entry["thumb"] = thumb
+        if axis.startswith("nsfw_") or tag in adult:
+            entry["adult"] = True
+        parts[target]["tags"].append(entry)
+        index[tag] = ["item", target]
+        rows.append({"tag": tag, "source_axis": axis, "verdict": "keep", "reason": "",
+                     "block": "item", "part": target, "freq": freq})
     for block in rules["blocks"]:
         blocks.append({"key": block["key"], "label": block["label"],
                        "parts": [parts[axis] for axis in block["axes"] if parts[axis]["tags"]]})

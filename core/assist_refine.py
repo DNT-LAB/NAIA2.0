@@ -56,7 +56,8 @@ def display_name(tag: str) -> str:
 
 
 def refine_message(text: str, tags: list[str], literal: str | None = None, preference: str = "",
-                   names: Iterable[tuple[str, str, str | None]] = ()) -> str:
+                   names: Iterable[tuple[str, str, str | None]] = (),
+                   evidence: Iterable[tuple[str, str, str]] = ()) -> str:
     """preference = 고급 설정의 User Preference(고른 등급의 것, 사용자 지정 09-26) — 있으면 맨 끝 줄에.
     names = 고른 캐릭터(원문의 이름, 태그, 성별) — 모델이 모르는 이름을 지어냈다(라크리모사 -> Lacy lingerie ·
     A Lace Merrier, 사용자 제보 09-26). 문장이 그 캐릭터를 영어 이름으로 부르게 한 줄로 준다."""
@@ -68,6 +69,9 @@ def refine_message(text: str, tags: list[str], literal: str | None = None, prefe
     if literal:
         lines.append(f"Literal English: {literal}")
     lines.append(f"Tags: {', '.join(tags)}")
+    grounding = [f"{ko} -> {tag}: {description[:180]}" for ko, tag, description in evidence if tag in tags]
+    if grounding:
+        lines.append("Selected tag meanings (reference data): " + json.dumps(grounding[:12], ensure_ascii=False))
     if preference:
         lines.append(f"User preference: {preference}")
     return "\n".join(lines)

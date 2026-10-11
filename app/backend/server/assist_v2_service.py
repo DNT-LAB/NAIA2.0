@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import re
 import threading
 import time
@@ -554,7 +555,8 @@ def _grounded_tags(context: Any, layer: Any, text: str) -> set[str]:
 
 
 def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: Any, literal: str | None,
-            layer: Any, ka: Any, keep: Iterable[str] = ()) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+            layer: Any, ka: Any, keep: Iterable[str] = (),
+            evidence: Iterable[dict[str, Any]] = ()) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """다듬기 도구(core/assist_refine) — 원문 + 지금 태그를 E2B 에 한 번(문법 잠금 · 권장 샘플링). 모델의 답은 제안이다.
     한국어 사전으로 확인한다(진짜 E2B 가 브이 문장에서 맞는 v 를 빼고 finger heart 를 더했다, 09-25):
     - 빼기: 지금 태그 안에서만, 사전이 요청과 이어 주는 태그 · 한국어 층 규칙 태그는 빼지 않는다.
@@ -571,7 +573,9 @@ def _refine(context: Any, req: dict[str, Any], merged: Any, vocab: Any, share: A
     preference = req.get("preference") or ""
     # 고른 캐릭터는 이름을 알려 준다 — 모르면 문장이 이름을 지어낸다(라크리모사 -> Lacy lingerie, 09-26)
     names = [(c.ko, c.tag, c.gender) for c in merged.characters]
-    reply, info = _chat(context, ar.REFINE_SYSTEM, ar.refine_message(req["text"], tags, literal, preference, names),
+    meanings = [(h["query"], h["tag"], h["description"]) for h in evidence]
+    reply, info = _chat(context, ar.REFINE_SYSTEM,
+                        ar.refine_message(req["text"], tags, literal, preference, names, evidence=meanings),
                         ar.refine_grammar(), max_tokens=160)
     got = ar.parse_refine(reply) if reply is not None else None
     if got is None:
@@ -720,6 +724,59 @@ def _lemma_index(context: Any, layer: Any) -> Any:
     return index
 
 
+def _rag_retriever(context: Any, state: dict[str, Any]) -> Any:
+    """Local opt-in only. Missing/incompatible assets leave the existing lexical path available."""
+    root = os.environ.get("NAIA_ASSIST_RAG_DIR", "").strip()
+    state.update(enabled=False, queries=[], selected=[])
+    if not root:
+        return None
+    try:
+        from app.backend.server.boost_v2_service import get_boost_runtime, _save_root
+        from core.assist_rag import RetrievalPack, MIN_SCORE
+        load_started = time.perf_counter()
+        with _LOCK:
+            if not hasattr(context, "assist_rag_lock"):
+                context.assist_rag_lock = threading.Lock()
+        # Asset verification must not hold the shared Assist initialization lock.
+        with context.assist_rag_lock:
+            previous_error = getattr(context, "assist_rag_load_error", None)
+            if previous_error:
+                state["error"] = previous_error
+                return None
+            pack = getattr(context, "assist_rag_pack", None)
+            if pack is None:
+                try:
+                    pack = RetrievalPack(Path(root), get_boost_runtime(context).engine_path,
+                                         log_path=_save_root(context) / "logs/assist_embedding.log")
+                except Exception as exc:
+                    context.assist_rag_load_error = f"{type(exc).__name__}: {exc}"
+                    raise
+                context.assist_rag_pack = pack
+        state.update(enabled=True, dimensions=768, records=pack.signature["records"], min_score=MIN_SCORE,
+                     load_ms=round((time.perf_counter() - load_started) * 1000, 1))
+    except Exception as exc:
+        state["error"] = f"{type(exc).__name__}: {exc}"
+        return None
+    cache: dict[str, list[dict[str, Any]]] = {}
+
+    def retrieve(query: str) -> list[dict[str, Any]]:
+        if query in cache:
+            return cache[query]
+        if state.get("error"):
+            return []
+        started = time.perf_counter()
+        try:
+            hits = pack.search(query)
+            cache[query] = hits
+            state["queries"].append({"text": query, "ms": round((time.perf_counter() - started) * 1000, 1),
+                                     "top": [{"tag": h["tag"], "score": h["score"]} for h in hits[:6]]})
+            return hits
+        except Exception as exc:
+            state["error"] = f"{type(exc).__name__}: {exc}"
+            return []
+    return retrieve
+
+
 def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route: dict[str, Any],
                   vocab: Any) -> tuple[Any, dict[str, Any]]:
     """정확히 안 풀린 모델 항목 + 모델이 안 낸 요청 명사 -> 한국어 사전 후보(+영문 묶음·순위) -> E2B 가 고른다.
@@ -731,12 +788,16 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
 
     rules = layer.rules
     state: dict[str, Any] = {"sent": [], "kept": [], "model": {}, "prep_ms": 0.0}
+    rag: dict[str, Any] = {}
+    state["rag"] = rag
+    retrieve = _rag_retriever(context, rag)
 
     def chooser(asks: list[Any]) -> list[str]:
         try:
             return _choose(asks)
         except Exception as exc:                      # 후보 찾기가 깨져도 Assist 는 산다 — 모두 예전 결과로
             state["error"] = f"{type(exc).__name__}: {exc}"
+            rag["selected"] = []
             for ask in asks:
                 ask.keep, ask.picks = [], None
             return []
@@ -769,7 +830,7 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
                                tokenize=layer.tokenize, lookup=layer.vocab.lookup, keyword_tags=tools.keyword_tags,
                                rank=lambda ko, en: [(c.tag, c.en_strong, c.ko_strong) for c in finder.rank(ko, en)],
                                canonical=canonical, usable=finder.usable, keep=keep, stop=stop,
-                               layer_lemmas=layer_lemmas,
+                               layer_lemmas=layer_lemmas, retrieve=retrieve,
                                literal=lambda t, word: ac.compact(word) in ac.own_names(
                                    tools.info(t) or {}, tools.name_claims, tools.label_uses),
                                describe=lambda t: ac._short((tools.info(t) or {}).get("description") or ""))
@@ -798,9 +859,16 @@ def _make_chooser(context: Any, layer: Any, ka: Any, req: dict[str, Any], route:
             if not answers:
                 break
             ask.picks = cand.settle_order(answers[0], answers[1] if len(answers) > 1 else answers[0], names)
+            # Preserve lexical selection; retrieval-only choices need order-consistent answers.
+            agreed = not failed and bool(answers[0]) and (len(names) == 1 or len(answers) == 2 and answers[0] == answers[1])
+            if not agreed and ask.picks:
+                ask.picks = [t for t in ask.picks if t not in ask.semantic_only]
+            rag["selected"] += [dict(ask.retrieved[t], agreed=agreed, semantic_only=t in ask.semantic_only)
+                                for t in (ask.picks or []) if t in ask.retrieved]
             done += ask.picks or []
             state["sent"].append({"ko": ask.ko, "en": ask.en, "source": ask.source, "keep": list(ask.keep),
-                                  "candidates": names, "picks": ask.picks, "answers": answers})
+                                  "candidates": names, "picks": ask.picks, "answers": answers,
+                                  "retrieved": list(ask.retrieved.values()), "semantic_only": sorted(ask.semantic_only)})
             if failed:
                 break
         return [t for a in sent if a.source == "extra" for t in (a.picks or [])]
@@ -1221,8 +1289,10 @@ def run_assist(context: Any, payload: Any) -> dict[str, Any]:
              + [r[1] for r in merged.relations] if en_key(t) not in typed]
     dropped = off_rating(gated, share, RATING_GATE[req["rating"]]) if share else {}
     drop_tags(merged, dropped)
+    rag_selected = choose_state["rag"]["selected"] + (recover or {}).get("rag", {}).get("selected", [])
     refine, refine_info = (_refine(context, req, merged, vocab, share, literal, layer, ka,
-                                   keep=(recover or {}).get("added") or ())
+                                   keep=(recover or {}).get("added") or (),
+                                   evidence=rag_selected)
                            if req["refine"] and merged.task == "scene" else (None, {}))
     suspicious += [{"tag": t, "why": "다듬기가 뺐다"} for t in (refine or {}).get("removed") or ()]
     _add_character_features(context, merged)
@@ -1460,6 +1530,8 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
     # 영문으로 적은 것(적힌 그대로 실린다, core/assist_english)도 이미 있는 것 — 그 뜻을 다시 찾거나 겹쳐 싣지 않는다
     typed = [t for t in (vocab.canonical(en_key(p)) for p in merged.english.keep + merged.english.exclude) if t]
     explained = _explained_lemmas(layer, ka, index, tags_now + typed, tools.info)
+    # Only the existing dictionary explains a span. An agreed semantic choice is still
+    # fallible; marking its query as explained can split idioms into literal predicates.
     names = {h.form for h in ka.names} | {c.ko for c in merged.characters}
     skip = set(GENERIC_NOUNS) | set(ar.BASIC_PEOPLE) | set(ar.ADDRESS_PEOPLE) | set(rules.get("spatial_words") or ()) | names \
         | {piece for n in names for piece in n.split()}
@@ -1484,6 +1556,8 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
     pins = [t for t in merged.ordered(vocab.count) if vocab.canonical(t) and vocab.role(t) != "population"][:2]
     request = set(index.query(text))
     plans = []
+    rag: dict[str, Any] = {}
+    retrieve = _rag_retriever(context, rag)
     for unit in units:
         matched = index.match(unit.text, keywords_only=unit.person)     # 사람 낱말은 키워드에서만(설명문 -> slave)
         # 원형 하나만 맞은 태그는 뺀다 — 비틀 -> nipple tweak(유두비틀기) · 건너편 -> misty lake(설명의 호수 건너편), 09-28
@@ -1491,11 +1565,21 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
         dict_names = _recover_rank(context, [n for n in matched if ok(n)], pins, req["rating"], vocab.count,
                                    scores=matched, limit=ar.MAX_CANDIDATES)
         need_kw = not dict_names or index.completeness(unit.text, matched, keywords_only=unit.person) < 1.0
-        plans.append((unit, dict_names, need_kw))
+        semantic: dict[str, dict[str, Any]] = {}
+        relations = {cand._KO_RELATION[f] for f, pos in (layer.tokenize(unit.text) if retrieve else ())
+                     if pos.startswith("NN") and f in cand._KO_RELATION}
+        # Person-role nouns retain the existing exact-keyword requirement.
+        for hit in retrieve(unit.text) if retrieve and need_kw and not unit.person else ():
+            tag = vocab.canonical(hit["tag"])
+            if tag and ok(tag) and not cand.relation_conflicts(tag, relations):
+                semantic.setdefault(tag, dict(hit, tag=tag, query=unit.text))
+        # Similarity is not proof that the missing concept has been recovered.
+        # Keep the independent keyword lane even when retrieval produced candidates.
+        plans.append((unit, dict_names, need_kw, semantic))
     calls = 0
     failed = None                                     # 모델 호출이 실패하면 그 뒤는 부르지 않는다(죽은 엔진은 매번 제한 시간)
     keywords: dict[str, list[str]] = {}
-    kw_units = [u.text for u, _d, need in plans if need]
+    kw_units = [u.text for u, _d, need, _semantic in plans if need]
     if kw_units:                                      # 뜻 키워드 두 번(합집합) — 실행마다 흔들려서
         message = ar.kw_message(text, tags_now, kw_units)
         for _ in range(2):
@@ -1511,7 +1595,7 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
     done = list(tags_now)
     added: list[str] = []
     out_units: list[dict[str, Any]] = []
-    for unit, dict_names, need_kw in plans:
+    for unit, dict_names, need_kw, semantic in plans:
         words = keywords.get(unit.text, [])
         kw_names: list[str] = []
         if need_kw and words:
@@ -1521,9 +1605,12 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
                     pool |= windex.get(form, set())
             kw_names = _recover_rank(context, [n for n in pool if ok(n)], pins, req["rating"], vocab.count,
                                      limit=ar.MAX_CANDIDATES)
-        listed = list(dict.fromkeys(dict_names + kw_names))[:ar.MAX_CANDIDATES]
+        semantic_names = list(semantic)
+        listed = list(dict.fromkeys(dict_names + kw_names + semantic_names[:3]))[:ar.MAX_CANDIDATES]
         source = ("both" if dict_names and kw_names else "dictionary" if dict_names
                   else "keywords" if kw_names else "none")
+        if any(t in semantic and t not in dict_names + kw_names for t in listed):
+            source = "rag" if source == "none" else "rag+" + source
         answers: list[Any] = []
         picks: list[str] = []
         skipped = None
@@ -1535,7 +1622,8 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
             skipped = "single"
         elif listed and failed is None:
             ask = cand.Ask(ko=unit.text, en=", ".join(words),
-                           candidates=[(t, ac._short(str((tools.info(t) or {}).get("description") or ""))) for t in listed])
+                           candidates=[(t, ac._short(str((tools.info(t) or {}).get("description")
+                                                        or semantic.get(t, {}).get("description") or ""))) for t in listed])
             orders = [ask] if len(listed) < 2 else [ask, cand.Ask(ko=ask.ko, en=ask.en,
                                                                   candidates=list(reversed(ask.candidates)))]
             for order in orders:
@@ -1560,12 +1648,16 @@ def _recover(context: Any, req: dict[str, Any], layer: Any, ka: Any, merged: Any
                 present.add(tag)
                 added.append(tag)
                 done.append(tag)
+                if tag in semantic:
+                    rag["selected"].append(dict(semantic[tag], agreed=True, semantic_only=tag not in dict_names + kw_names))
         merged.log.append(f"recover:{unit.text}->{','.join(picks) or '없음'}")
         out_units.append({"text": unit.text, "lemmas": unit.lemmas, "kind": unit.kind, "person": unit.person,
                           "source": source, "keywords": words, "candidates": listed, "answers": answers,
-                          "picks": picks, "skipped": skipped})
+                          "picks": picks, "skipped": skipped,
+                          "retrieved": [semantic[t] for t in listed if t in semantic],
+                          "semantic_only": [t for t in listed if t in semantic and t not in dict_names + kw_names]})
     return {"units": out_units, "added": added, "calls": calls, "error": failed,
-            "elapsed": round(time.perf_counter() - started, 3), "index_seconds": getattr(index, "seconds", None)}
+            "elapsed": round(time.perf_counter() - started, 3), "index_seconds": getattr(index, "seconds", None), "rag": rag}
 
 
 def _persons_total(layer: Any, ka: Any, merged: Any, req: dict[str, Any]) -> int:

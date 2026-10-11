@@ -36,6 +36,11 @@ import {TAG_DESC} from './interactiveAxes.mjs?v=20260913-gap3385';
 // 앞의 일곱은 부품 카탈로그의 블록이고, 'etc'(기타)는 카탈로그가 없는 블록이다 - 직접 쓴 것만 담는다.
 // 어느 블록에든 직접 쓸 수 있다(사용자 결정 2026-10-11 - Interactive 의 캐릭터 슬롯과 같은 사양).
 const ETC_BLOCK = 'etc';
+// 상세 화면에서 숨겨 둔 것(사용자 지시 2026-10-11 - 자리가 모자라 그림이 잘려 보였다). 지운 것이 아니다:
+// 설명은 여태 쓰이지 않은 칸이라 당분간 숨기고 나중에 따로 펼치는 자리로 뺀다. 부품 구성 줄은 Character Prompt 가
+// 같은 것을 말하므로 숨긴다(저장된 값 · 저장 길은 그대로다).
+const SHOW_DETAIL_DESCRIPTION = false;
+const SHOW_DETAIL_COMPOSITION = false;
 // 네거티브(사용자 지시 2026-10-11 · NAI 전용): 여기 적은 것은 생성할 때 `-1::a, b ::` 한 묶음으로 맨 뒤에 실린다
 // (묶는 일은 서버가 한다 - `core/character_builder_v5._caption_tags`). 화면은 태그만 받는다.
 const NEGATIVE_BLOCK = 'negative';
@@ -984,9 +989,12 @@ export function createCharacterBuilderV5({
       + `<div class="cb5-annot">`
       + `<input type="text" class="cb5-annot-name" data-cb-field="name" maxlength="80" autocomplete="off"`
       + ` value="${escHtml(nameValue)}" placeholder="${entry ? '이 그림의 이름' : '캐릭터 이름'}">`
-      + `<textarea class="cb5-annot-desc" data-cb-field="description" maxlength="4000" rows="3"`
-      + ` placeholder="${entry ? '이 그림의 설명' : '캐릭터 설명'} (자유롭게 적어 둡니다)">${escHtml(descValue)}</textarea></div>`
-      + compositionHtml(compositionOf(selectedVar))
+      + (SHOW_DETAIL_DESCRIPTION
+        ? `<textarea class="cb5-annot-desc" data-cb-field="description" maxlength="4000" rows="3"`
+          + ` placeholder="${entry ? '이 그림의 설명' : '캐릭터 설명'} (자유롭게 적어 둡니다)">${escHtml(descValue)}</textarea>`
+        : '')
+      + `</div>`
+      + (SHOW_DETAIL_COMPOSITION ? compositionHtml(compositionOf(selectedVar)) : '')
       + promptHtml(selectedVar)
       + `<div class="char-asset-apply-actions">`
       + `<button type="button" class="mod-btn-sm mod-btn-encode" data-cb-act="apply-c1"${applyOff}`

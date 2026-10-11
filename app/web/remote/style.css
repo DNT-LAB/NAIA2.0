@@ -28640,17 +28640,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 발줄 오른쪽 끝 = 크기 손잡이(16px)의 자리. 비워 두지 않으면 [랜덤 버튼 연결] 글자가 손잡이 밑에 깔린다. */
 .em-window .em-foot { padding-right: 20px; }
 .em-window .em-random-link { margin-left: auto; }
-/* 접힌 이벤트 맵(사용자 지정 2026-10-08): 핸들 줄 · 검색 줄(.em-bar) · 랜덤 발줄(.em-foot)만 남긴다.
+/* 접힌 이벤트 맵: 핸들 줄 · 검색 줄(.em-bar) · 부스러기 줄(.em-trail) · 조건 줄(.em-filters) · 랜덤 발줄(.em-foot)을
+   남긴다. 숨는 것은 저장 줄과 후보 목록뿐이다 - 접은 채로 고른 태그를 보고, 빼고, 인원 · 등급을 바꾸고, 넣기 · 생성까지
+   한다(사용자 지정 2026-10-08: 검색 · 랜덤 줄 -> 2026-10-11: 부스러기 · 조건 줄까지).
    공용 규칙(.dragpanel.is-collapsed .dragpanel-body = none)보다 구체적이어야 이긴다. */
 .dragpanel.em-window.is-collapsed > .dragpanel-body { display: flex !important; }
-.dragpanel.em-window.is-collapsed > .dragpanel-body > :not(.em-bar):not(.em-foot) { display: none !important; }
+.dragpanel.em-window.is-collapsed > .dragpanel-body > :not(.em-bar):not(.em-trail):not(.em-filters):not(.em-foot) { display: none !important; }
 .dragpanel.em-window.is-collapsed .em-foot { padding-right: 8px; }   /* 접으면 크기 손잡이가 없다 */
-/* 창 밖에 따로 뜨는 보조 창은 접힌 동안 숨긴다(eventMapPanel syncCollapsed 가 뿌리에 표시를 단다). */
+/* 창 밖에 따로 뜨는 보조 창 중 **접힌 창에 여는 단추가 없는 것**만 숨긴다(eventMapPanel syncCollapsed 가 뿌리에 표시를
+   단다): 소분류(후보 목록에서 연다) · 저장 패널(저장 줄에서 연다). 인원 팝업 · 실제 조합 · 툴팁은 조건 줄 · 부스러기
+   줄에서 열리므로 접혀도 뜬다 - 숨기면 눌러도 아무 일이 없는 단추가 된다. */
 .em-window-collapsed .em-subpanel,
-.em-window-collapsed .em-side,
-.em-window-collapsed .em-person-popup,
-.em-window-collapsed .em-saved-panel,
-.em-window-collapsed .em-tip { display: none !important; }
+.em-window-collapsed .em-saved-panel { display: none !important; }
 @media (max-width: 640px) {
   .em-obs { display: none; }
   .em-person-list { grid-template-columns: 1fr; }
@@ -30791,6 +30792,14 @@ body.assets-v5-mode .cb5-col { padding-top: 32px; }
   background-color: var(--bg-deep);
   background-image: conic-gradient(rgba(255,255,255,0.05) 25%, transparent 0 50%, rgba(255,255,255,0.05) 0 75%, transparent 0);
   background-size: 16px 16px;
+}
+/* 상세의 그림은 칸이 줄어도 **통째로** 보인다(사용자 제보 2026-10-11 - 발이 잘려 보였다). 아래 칸들이 자리를 먹으면
+   칸(.char-asset-preview)은 flex 로 줄어드는데 그림의 높이는 46vh 그대로라 넘친 만큼이 잘렸다. 그림을 칸에 맞춘다. */
+.cb5-preview { position: relative; flex: 0 1 46vh; min-height: 260px; }
+/* 줄어드는 것은 그림 칸 하나다. 바리에이션 줄(가로로 구르는 칸이라 같이 눌린다)은 제 높이를 지킨다 - 썸네일 아래가 잘렸다. */
+.cb5-preview ~ .char-asset-var-strip { flex-shrink: 0; }
+.cb5-preview img {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain;
 }
 .cb5-annot { display: flex; flex-direction: column; gap: 5px; }
 .cb5-annot-name, .cb5-annot-desc {

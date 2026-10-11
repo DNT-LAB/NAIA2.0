@@ -166,6 +166,8 @@ class Ask:
     candidates: list[tuple[str, str]] = field(default_factory=list)  # (태그, 한국어 뜻)
     source: str = "item"                     # item(모델 항목) | extra(모델이 안 낸 요청 명사)
     picks: list[str] | None = None           # 모델이 고른 것([] = 없음) · None = 고르기 없음(예전 결과로)
+    retrieved: dict[str, dict[str, Any]] = field(default_factory=dict)  # 후보 근거; 선택 전에는 승인 아님
+    semantic_only: set[str] = field(default_factory=set)  # 사전 근거 없이 추가된 후보
 
     def chosen(self) -> list[str]:
         """실을 태그 — 고르기가 없으면 예전 결과, 있으면 확인된 묶음 + 고른 것."""
@@ -409,6 +411,7 @@ def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: Key
                canonical: Callable[[str], str | None], usable: Callable[[str], bool],
                describe: Callable[[str], str], keep: Callable[[str], bool], stop: set[str],
                layer_lemmas: Iterable[str] = (),
+               retrieve: Callable[[str], list[dict[str, Any]]] | None = None,
                literal: Callable[[str, str], bool] = lambda _t, _w: True) -> list[Ask]:
     """모델에게 보낼 것 — 모델 항목(asks)마다 한국어가 확인한 영문 묶음을 keep 에 담고, **아직 설명 안 된 한국어 원형**이
     남으면 그 원형의 후보를 채운다. 모델이 안 낸 요청 명사도 한국어 후보가 있으면 붙인다.
@@ -459,7 +462,20 @@ def build_asks(asks: list[Ask], *, ka: Any, route_kos: Iterable[str], index: Key
         pair = " and " in f" {ask.en} "
         names = [t for t in order_candidates(scored, ask.en)
                  if t not in ask.keep and ok(t) and (pair or " and " not in t) and not relation_conflicts(t, relations)]
-        ask.candidates = [(t, describe(t)) for t in names[:MAX_CANDIDATES]]
+        semantic = []
+        for hit in retrieve(ask.ko) if retrieve else ():
+            tag = canonical(hit["tag"])
+            if tag and tag not in ask.keep and ok(tag) and (pair or " and " not in tag) \
+                    and not relation_conflicts(tag, relations) and tag not in semantic \
+                    and (ask.source != "extra" or literal(tag, ask.ko.replace(" ", ""))):
+                semantic.append(tag)
+                ask.retrieved[tag] = dict(hit, tag=tag, query=ask.ko)
+        # Retrieval fills vacant slots; it must not evict an existing lexical candidate.
+        combined = list(dict.fromkeys(names + semantic[:3]))[:MAX_CANDIDATES]
+        ask.semantic_only = set(combined) - set(names)
+        ask.retrieved = {t: h for t, h in ask.retrieved.items() if t in combined}
+        ask.candidates = [(t, describe(t) or str(ask.retrieved.get(t, {}).get("description") or "")[:240])
+                          for t in combined]
 
     out: list[Ask] = []
     item_lemmas: set[str] = set()

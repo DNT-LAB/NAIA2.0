@@ -983,7 +983,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     // 레일이 아직 바깥에 떠 있으면 먼저 안으로 들인다(열리는 순서와 무관하게 같은 배치).
     if (subEl && !subEl.hidden && !subEl.classList.contains('is-inline')) positionSubcategories();
     const r = overlay.getBoundingClientRect();
-    const railRight = subEl && !subEl.hidden && !subEl.classList.contains('is-inline')
+    // ⚠️ 접힌 동안 소분류 레일은 CSS 로 숨는다(`hidden` 은 그대로) - 그때 레일의 상자는 0 이라, 그 오른쪽에 붙이면
+    //    실제 조합 창이 화면 왼쪽 끝으로 튄다. 접혀 있으면 레일이 없는 것으로 본다.
+    const railRight = subEl && !subEl.hidden && !subEl.classList.contains('is-inline') && !panel?.isCollapsed()
       ? subEl.getBoundingClientRect().right : r.right;
     const width = Math.round(Math.min(360, Math.max(240, window.innerWidth - railRight - 24)));
     // Use the left side if there is no room beside the subcategory rail.
@@ -1172,9 +1174,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       variant: 'em-overlay em-window', storageKey: 'event-map',
       width: EM_BASE_WIDTH, height: EM_BASE_HEIGHT, minWidth: EM_BASE_WIDTH, minHeight: EM_MIN_HEIGHT, maxWidth: 1000,
       initial: {x: 16, y: 64}, resizable: true,
-      // 접기(머리줄 더블클릭 · [–])는 다른 떠 있는 창과 같다. 다만 접혀도 **검색 줄과 랜덤 발줄은 남긴다**
-      // (사용자 지정 2026-10-08) - 접은 채로 태그를 찾고 [랜덤] [랜덤+생성] 을 누를 수 있다. 무엇을 남기는지는
-      // style.css 의 `.em-window.is-collapsed` 짝 규칙이 정한다.
+      // 접기(머리줄 더블클릭 · [–])는 다른 떠 있는 창과 같다. 다만 접혀도 **검색 줄 · 부스러기 줄 · 조건 줄 · 랜덤
+      // 발줄은 남긴다**(사용자 지정 2026-10-08 · 10-11) - 접은 채로 고른 태그를 보고 넣기 · 생성 · [랜덤] 을 누를 수
+      // 있다. 무엇을 남기는지는 style.css 의 `.em-window.is-collapsed` 짝 규칙이 정한다.
       onCollapse: syncCollapsed,
       onClose: close, onMove: () => { closePersonPopup(); hideTip(); fitHeight(); },
     });
@@ -1514,12 +1516,13 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     input.focus({ preventScroll: true });
     requestAnimationFrame(() => { if (open && document.activeElement !== input) input.focus({ preventScroll: true }); });
   }
-  /** 접힘 상태를 뿌리에 표시한다. 보조 창(소분류 · 실제 조합 · 인원 팝업 · 저장 패널 · 툴팁)은 창 밖 body 에
-   *  따로 떠 있어 본 창과 함께 접히지 않는다 - 이 표시 하나로 CSS 가 숨긴다. 각자의 hidden 은 건드리지 않으므로
-   *  펼치면 접기 전 그대로 다시 보인다(접은 동안 다시 그려져도 마찬가지다). */
+  /** 접힘 상태를 뿌리에 표시한다. 보조 창은 창 밖 body 에 따로 떠 있어 본 창과 함께 접히지 않는다 - 이 표시로 CSS 가
+   *  **접힌 창에 여는 단추가 없는 것**(소분류 · 저장 패널)을 숨긴다. 각자의 hidden 은 건드리지 않으므로 펼치면 접기 전
+   *  그대로 다시 보인다(접은 동안 다시 그려져도 마찬가지다). 인원 팝업 · 실제 조합 · 툴팁은 접힌 창에 남는 줄에서
+   *  열리므로 숨기지 않는다 - 다만 창의 모양이 바뀌는 순간에는 떠 있던 팝업 · 툴팁을 닫고, 실제 조합은 새 자리에 다시 앉힌다. */
   function syncCollapsed(collapsed = panel?.isCollapsed()) {
     document.documentElement.classList.toggle('em-window-collapsed', !!collapsed && open);
-    if (collapsed) { closePersonPopup(); hideTip(); }
+    if (collapsed) { closePersonPopup(); hideTip(); if (open) queueMicrotask(positionSide); }
     else if (open) queueMicrotask(fitHeight);
   }
   function close() {

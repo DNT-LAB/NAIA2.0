@@ -30632,7 +30632,29 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-note { padding: 8px 2px; font: 400 10.5px var(--font-mono); color: var(--text-dim); }
 
 #rightTabCharAssets > .char-asset-root { flex: 1 1 auto; min-height: 0; height: auto; }
-.cb5-spec-tabs { display: flex; gap: 6px; justify-content: flex-end; padding: 8px 10px 0; flex: 0 0 auto; }
+/* 사양 단추는 왼쪽(사용자 지시 2026-10-11). */
+.cb5-spec-tabs { display: flex; gap: 6px; justify-content: flex-start; padding: 8px 10px 0; flex: 0 0 auto; }
+/* 구 사양 화면: **위 줄(도구 줄 · 캐릭터 머리줄)과 아래 줄(적용 단추)은 고정**이고 가운데만 구른다(사용자 지시 2026-10-11).
+   전에는 화면 전체가 한 덩어리로 굴러, 그림이 길면 적용 단추가 창 아래로 잘려 나갔다.
+   두 칸(목록 · 상세)이 각자 구르고, 고정 줄은 그 칸 안에서 sticky 다. 좁은 화면(767px 이하 - 칸이 세로로 쌓인다)은 예전대로 둔다. */
+@media (min-width: 768px) {
+  #rightTabCharAssets > .char-asset-root { overflow: hidden; display: flex; flex-direction: column; }
+  #rightTabCharAssets .char-asset-shell { flex: 1 1 auto; min-height: 0; }
+  #rightTabCharAssets .char-asset-columns { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  #rightTabCharAssets .char-asset-gallery,
+  #rightTabCharAssets .char-asset-detail { min-height: 0; overflow-y: auto; padding-right: 2px; }
+  #rightTabCharAssets .char-asset-toolbar,
+  #rightTabCharAssets .char-asset-detail-head {
+    position: sticky; top: 0; z-index: 2; background: var(--bg-surface); padding-bottom: 6px; margin-bottom: 0;
+    /* 고정 줄 가장자리로 뒤의 카드 테두리가 비치지 않게 같은 색으로 한 겹 덮는다. */
+    box-shadow: 0 -8px 0 0 var(--bg-surface);
+  }
+  #rightTabCharAssets .char-asset-toolbar { margin-bottom: 2px; }
+  #rightTabCharAssets .char-asset-apply-actions {
+    position: sticky; bottom: 0; z-index: 2; background: var(--bg-surface); padding-top: 6px; margin-top: auto;
+    box-shadow: 0 8px 0 0 var(--bg-surface);
+  }
+}
 .cb5-spec-tab {
   padding: 5px 12px; border-radius: 7px; border: 1px solid var(--border-dim); background: none;
   color: var(--text-dim); font: 500 11px var(--font-mono); cursor: pointer;
@@ -30644,7 +30666,10 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
   padding: 10px; overflow: hidden;
 }
 .cb5-win { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; }
-.cb5-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.cb5-main {
+  flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px;
+  container: cb5main / inline-size;
+}
 .cb5-search {
   flex: 0 0 auto; height: 30px; padding: 0 10px; border-radius: 7px;
   border: 1px solid var(--border-dim); background: var(--bg-deep);
@@ -30674,6 +30699,17 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-part-sel {
   flex: 0 0 auto; padding: 0 5px; border-radius: 4px; font-size: 9.5px;
   color: var(--accent-glow); background: rgba(124,106,239,0.16);
+}
+/* 그리드가 **한 줄에 세 칸**을 못 채울 만큼 좁으면 소분류를 위로 올린다(사용자 지시 2026-10-11 - 예전의 위쪽 탭 꼴).
+   세 칸 = 104 x 3 + 틈 6 x 2 = 324px, 여기에 세로 목록 136 + 틈 8 + 스크롤 여유를 더한 것이 문턱이다.
+   확대 배율이 걸린 창에서 그리드가 두 칸으로 쪼그라들던 것이 이 경우다. */
+@container cb5main (max-width: 484px) {
+  .cb5-browse { flex-direction: column; }
+  .cb5-parts {
+    order: -1; flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; gap: 5px; overflow: visible;
+  }
+  .cb5-part { padding: 4px 9px; border-radius: 999px; }
+  .cb5-part-name { flex: 0 0 auto; overflow: visible; }
 }
 /* 그리드는 바깥(.cb5-main-scroll)이 굴린다 - Interactive 팝업용 높이 제한을 푼다. */
 .cb5-grid.ia-cell-grid { max-height: none; overflow: visible; flex: 0 0 auto; }

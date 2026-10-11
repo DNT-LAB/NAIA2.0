@@ -33,7 +33,56 @@
 // ⚠️ 아래 import 의 `?v=` 는 interactivePanel.mjs 와 **같은 글자**여야 한다 - 다르면 2MB 모듈을 두 번 받는다.
 import {TAG_DESC} from './interactiveAxes.mjs?v=20260913-gap3385';
 
-const BLOCK_ORDER = ['hair', 'face', 'body', 'species', 'outfit', 'accessory', 'item'];
+// 앞의 일곱은 부품 카탈로그의 블록이고, 'etc'(기타)는 카탈로그가 없는 블록이다 - 직접 쓴 것만 담는다.
+// 어느 블록에든 직접 쓸 수 있다(사용자 결정 2026-10-11 - Interactive 의 캐릭터 슬롯과 같은 사양).
+const ETC_BLOCK = 'etc';
+const BLOCK_ORDER = ['hair', 'face', 'body', 'species', 'outfit', 'accessory', 'item', ETC_BLOCK];
+const BLOCK_ICONS = {
+  hair: '\u{1F487}', face: '\u{1F441}', body: '\u{1F9CD}', species: '\u{1F9EC}',
+  outfit: '\u{1F457}', accessory: '\u{1F452}', item: '\u{1F392}', etc: '\u270F\uFE0F',
+};
+// 서버(`core/character_builder_v5.free_text`)와 같은 잣대. NAIA 가 프롬프트 문법으로 읽는 글자는 못 쓴다 -
+// 눌러서 400 을 받게 두지 않고 여기서 먼저 말한다.
+const FREE_TEXT_FORBIDDEN = /[\u0000-\u001f\u007f<>|#$`\\"\u201c\u201d\uff02]|__/;
+const FREE_TEXT_MAX = 300;
+const WEIGHT_RE = /^\s*(-?\d+(?:\.\d+)?)\s*::\s*([\s\S]*?)\s*::\s*$/;
+const WEIGHT_OPEN_RE = /^\s*-?\d+(?:\.\d+)?\s*::/;
+
+/** `1.3::dark persona ::` -> {weight: '1.3', text: 'dark persona'} (Interactive 의 칩과 같은 규칙). */
+function weightedPart(raw) {
+  const m = WEIGHT_RE.exec(String(raw));
+  return m ? {weight: m[1], text: m[2]} : {weight: null, text: String(raw)};
+}
+
+/** 카탈로그와 견줄 맨 태그: 가중치 · 강조 괄호를 뗀 것. */
+function barePart(raw) {
+  return weightedPart(raw).text.trim().replace(/^[{\[]+/, '').replace(/[}\]]+$/, '').trim();
+}
+
+/** 입력 칸의 글 -> 부품 목록. 쉼표 · 줄바꿈으로 자르되 가중치 묶음(`1.2::a, b ::`)은 하나로 둔다. */
+function splitParts(text) {
+  const out = [];
+  let group = null;
+  for (const raw of String(text || '').split(/[,\n]/)) {
+    const piece = raw.replace(/\s+/g, ' ').trim();
+    if (group) {
+      if (piece) group.push(piece);
+      if (piece.endsWith('::')) { out.push(group.join(', ')); group = null; }
+      continue;
+    }
+    if (!piece) continue;
+    if (WEIGHT_OPEN_RE.test(piece) && !piece.endsWith('::')) { group = [piece]; continue; }
+    out.push(piece);
+  }
+  if (group) out.push(group.join(', '));        // 닫지 않은 묶음 - 쓴 대로 둔다
+  return out.filter((item, index) => out.indexOf(item) === index);
+}
+
+/** 문장 꼴인가(칩을 기울여 구분한다 - Interactive 와 같은 잣대). */
+function isProsePart(text) {
+  const s = String(text || '').trim();
+  return s.length >= 18 && s.split(/\s+/).length >= 3;
+}
 const GENDERS = [['girl', 'Female'], ['boy', 'Male'], ['other', 'Other']];
 const RESOLUTION_LABEL = {standard: '표준', high: '고해상도', ultra: '초고해상도'};
 const DRAFT_KEY = 'naia.assetsV5.draft';
@@ -176,6 +225,8 @@ export function createCharacterBuilderV5({
       }
       if (!activePart.has(block.key)) activePart.set(block.key, firstGridPart(block)?.key || '');
     }
+    // '기타' 는 카탈로그에 없다 - 그리드가 없는 블록으로 끼워 둔다.
+    if (blockDef.size) blockDef.set(ETC_BLOCK, {key: ETC_BLOCK, label: '기타', parts: []});
   }
 
   /** 블록을 처음 열 때 펼칠 부품. 그림이 있는 축을 먼저 본다 - 색 · 길이는 늘 위에 함께 보이니까. */
@@ -202,16 +253,15 @@ export function createCharacterBuilderV5({
     applyBuilder(raw);
   }
 
-  /** 저장된 구성(초안 · 보관함)을 지금 카탈로그에 맞춰 받아들인다. 카탈로그에서 사라진 태그는 버린다. */
+  /** 저장된 구성(초안 · 보관함)을 받아들인다. 카탈로그에 없는 것도 그대로 둔다 - 직접 쓴 것일 수 있다. */
   function applyBuilder(raw) {
     const next = emptyDraft();
     if (GENDERS.some(([key]) => key === raw.gender)) next.gender = raw.gender;
     if ((spec?.resolutions || []).some(item => item.key === raw.resolution)) next.resolution = raw.resolution;
     for (const key of BLOCK_ORDER) {
       for (const item of (raw.parts && raw.parts[key]) || []) {
-        const tag = typeof item === 'string' ? item : String(item?.tag || '');
-        const info = tagInfo.get(tag);
-        if (info && info.block === key && !next.parts[key].includes(tag)) next.parts[key].push(tag);
+        const tag = (typeof item === 'string' ? item : String(item?.tag || '')).replace(/\s+/g, ' ').trim();
+        if (tag && !next.parts[key].includes(tag)) next.parts[key].push(tag);
       }
     }
     draft = next;
@@ -265,6 +315,26 @@ export function createCharacterBuilderV5({
 
   // ------------------------------------------------------------------ 그리기 - 왼쪽
 
+  /** 고른 부품 하나 = 글자 칩(Interactive 의 칩과 같은 마크업). 가중치는 배지로 떼고, 문장은 기울인다. */
+  function chipHtml(blockKey, raw, index) {
+    const {weight, text} = weightedPart(raw);
+    const bare = barePart(raw);
+    const prose = isProsePart(text);
+    const negative = weight != null && Number(weight) < 0;
+    const cls = `ia-chip${prose ? ' is-prose' : ''}${negative ? ' is-negw' : ''}`;
+    return `<span class="${cls}" title="${escHtml(tagInfo.has(bare) ? tagTip(bare) : text)}">`
+      + (weight ? `<b class="ia-chip-w">${escHtml(weight)}\u00d7</b>` : '')
+      + `<span class="ia-chip-t">${escHtml(text)}</span>`
+      + `<button type="button" class="ia-chip-x" data-cb-chip-del="${index}" data-cb-chip-block="${escHtml(blockKey)}"`
+      + ` tabindex="-1" aria-label="${escHtml(text)} 빼기" title="빼기">&times;</button></span>`;
+  }
+
+  function autosizeSlotInput(input) {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(160, Math.max(58, input.scrollHeight + 2))}px`;
+  }
+
   function renderLeft() {
     if (!catalog) {
       leftMount.innerHTML = `<div class="cb5-empty">${escHtml(loadError
@@ -278,13 +348,25 @@ export function createCharacterBuilderV5({
       const block = blockDef.get(key);
       if (!block) return '';
       const picks = draft.parts[key];
-      const cells = picks.length
-        ? picks.map(tag => cellHtml(tag, {act: 'off'})).join('')
-        : '<span class="cb5-row-empty">비어 있음</span>';
-      return `<div class="cb5-row${key === activeBlock ? ' is-on' : ''}" data-cb-block="${key}">`
-        + `<div class="cb5-row-label"><b>${escHtml(block.label)}</b>`
-        + `${picks.length ? `<span class="cb5-row-n">${picks.length}</span>` : ''}</div>`
-        + `<div class="cb5-row-cells">${cells}</div></div>`;
+      const open = key === activeBlock;
+      // 열린 줄은 입력 칸이다(Interactive 의 슬롯과 같다) - 아는 사람은 그냥 치고, 오른쪽 그리드에서 눌러도 여기에 들어온다.
+      // 닫힌 줄은 글자 칩. 썸네일은 그리드에만 둔다 - 왼쪽에 썸네일을 놓으면 몇 개만 골라도 줄이 화면 밖으로 늘어진다.
+      const body = open
+        ? `<textarea class="ia-slot-input" data-cb-slot-input="${escHtml(key)}" rows="1" spellcheck="false"`
+          + ` placeholder="${key === ETC_BLOCK ? '태그 · 자연어를 직접 씁니다 (쉼표로 여러 개)'
+            : '태그 입력 (쉼표로 여러 개) · 오른쪽에서 골라도 됩니다'}">${escHtml(picks.join(', '))}</textarea>`
+        : `<div class="ia-block-chips">${picks.length
+          ? picks.map((tag, index) => chipHtml(key, tag, index)).join('')
+          : '<span class="ia-chip-empty">비어 있음</span>'}</div>`;
+      return `<div class="ia-block cb5-block${open ? ' is-open is-editing' : ''}${picks.length ? '' : ' is-empty'}"`
+        + ` data-cb-block="${escHtml(key)}">`
+        + `<div class="ia-block-label"><span class="ia-block-title">`
+        + `<span class="ia-block-icon">${BLOCK_ICONS[key] || ''}</span>`
+        + `<span class="ia-block-name">${escHtml(block.label)}</span></span>`
+        + `<span class="ia-block-axis">${escHtml(key)}</span></div>`
+        + body
+        + `<div class="ia-block-meta"><span class="ia-block-count" data-cb-count="${escHtml(key)}">`
+        + `${picks.length || ''}</span></div></div>`;
     }).join('');
     leftMount.innerHTML = `<div class="cb5-head">`
       + `<span class="cb5-title">${view === 'variation'
@@ -295,6 +377,15 @@ export function createCharacterBuilderV5({
         ? `<button type="button" class="cb5-btn" data-cb-act="clear"${totalParts() ? '' : ' disabled'}>Clear</button>`
         : '')
       + `</div><div class="cb5-rows">${rows}</div>`;
+    autosizeSlotInput(leftMount.querySelector('[data-cb-slot-input]'));
+  }
+
+  /** 열린 줄의 입력 칸에 초점을 준다(줄을 눌러 열었을 때). 글 끝에 커서를 둔다. */
+  function focusSlotInput() {
+    const input = leftMount.querySelector('[data-cb-slot-input]');
+    if (!input) return;
+    input.focus({preventScroll: true});
+    input.setSelectionRange(input.value.length, input.value.length);
   }
 
   // ------------------------------------------------------------------ 그리기 - 오른쪽
@@ -305,8 +396,9 @@ export function createCharacterBuilderV5({
     return !!desc && String(desc).toLowerCase().includes(q);
   }
 
+  /** 그 블록에 든 것의 **맨 태그** 모음. 가중치를 건 것(`1.2::twintails ::`)도 그 부품을 고른 것으로 친다. */
   function chosenSet(blockKey) {
-    return new Set(draft.parts[blockKey] || []);
+    return new Set((draft.parts[blockKey] || []).map(barePart));
   }
 
   function partLabel(part) {
@@ -343,6 +435,10 @@ export function createCharacterBuilderV5({
   function blockHtml() {
     const block = blockDef.get(activeBlock);
     if (!block) return '';
+    if (activeBlock === ETC_BLOCK) {
+      return '<div class="cb5-empty">기타에는 고를 부품이 없습니다.<br>'
+        + '왼쪽 칸에 직접 씁니다 - 색인되지 않은 태그 · 자연어 · 가중치(1.2::tag ::)를 그대로 받습니다.</div>';
+    }
     const chosen = chosenSet(activeBlock);
     const part = block.parts.find(item => item.key === activePart.get(activeBlock)) || block.parts[0];
     const cells = (part?.tags || []).map(entry =>
@@ -687,11 +783,11 @@ export function createCharacterBuilderV5({
     const info = tagInfo.get(tag);
     if (!info) return;
     let list = draft.parts[info.block];
-    if (list.includes(tag)) {
-      list = list.filter(item => item !== tag);
+    if (list.some(item => barePart(item) === tag)) {
+      list = list.filter(item => barePart(item) !== tag);     // 가중치를 건 것도 같은 부품이다
     } else {
-      // 색 · 단계는 하나만 고른다 - 같은 부품의 먼저 고른 것을 밀어낸다.
-      if (info.part.kind !== 'thumb') list = list.filter(item => tagInfo.get(item)?.part !== info.part);
+      // 색 · 단계는 하나만 고른다 - 같은 부품의 먼저 고른 것을 밀어낸다(직접 쓴 것은 건드리지 않는다).
+      if (info.part.kind !== 'thumb') list = list.filter(item => tagInfo.get(barePart(item))?.part !== info.part);
       list = [...list, tag];
     }
     draft.parts[info.block] = list;
@@ -700,8 +796,12 @@ export function createCharacterBuilderV5({
     renderMain();
   }
 
-  function setActiveBlock(key) {
-    if (!blockDef.has(key) || key === activeBlock) return;
+  function setActiveBlock(key, {focus = false} = {}) {
+    if (!blockDef.has(key)) return;
+    if (key === activeBlock) {
+      if (focus) focusSlotInput();
+      return;
+    }
     activeBlock = key;
     // 블록을 고르면 검색을 걷는다 - 검색 결과가 그리드를 덮고 있으면 눌러도 아무 일이 없어 보인다.
     if (query) {
@@ -713,6 +813,17 @@ export function createCharacterBuilderV5({
     renderMain();
     const scroller = rightMount.querySelector('.cb5-main-scroll');
     if (scroller) scroller.scrollTop = 0;
+    if (focus) focusSlotInput();
+  }
+
+  /** 못 쓰는 글자가 든 부품(없으면 ''). 서버가 400 으로 돌려보내기 전에 먼저 말한다. */
+  function invalidPart() {
+    for (const key of BLOCK_ORDER) {
+      for (const item of draft.parts[key]) {
+        if (FREE_TEXT_FORBIDDEN.test(item) || item.length > FREE_TEXT_MAX) return item;
+      }
+    }
+    return '';
   }
 
   async function confirmDialog(title, message, okText) {
@@ -802,6 +913,13 @@ export function createCharacterBuilderV5({
     }
     if (!totalParts()) {
       showToast('부품을 하나 이상 골라 주세요', 'error');
+      return true;
+    }
+    const bad = invalidPart();
+    if (bad) {
+      showToast(bad.length > FREE_TEXT_MAX
+        ? `너무 긴 항목이 있습니다 (${FREE_TEXT_MAX}자까지): ${bad.slice(0, 30)}...`
+        : `쓸 수 없는 글자가 있습니다: ${bad.slice(0, 40)}  ( < > | # $ \` \\ " __ 는 못 씁니다 )`, 'error');
       return true;
     }
     const forView = view;
@@ -1218,8 +1336,47 @@ export function createCharacterBuilderV5({
       else if (name === 'apply-c1-inset') void applyC1(true);
       return;
     }
+    const chipDel = event.target.closest('[data-cb-chip-del]');
+    if (chipDel) {
+      const key = chipDel.dataset.cbChipBlock;
+      const index = Number(chipDel.dataset.cbChipDel);
+      if (draft.parts[key]) {
+        draft.parts[key] = draft.parts[key].filter((_item, at) => at !== index);
+        saveDraft();
+        renderLeft();
+        renderMain();
+      }
+      return;
+    }
+    if (event.target.closest('[data-cb-slot-input]')) return;      // 입력 칸 안의 클릭은 그대로 둔다
     const row = event.target.closest('[data-cb-block]');
-    if (row) setActiveBlock(row.dataset.cbBlock);
+    if (row) setActiveBlock(row.dataset.cbBlock, {focus: true});
+  }
+
+  /** 열린 줄의 입력 칸: 친 글이 곧 그 블록의 부품 목록이다. 치는 동안 왼쪽은 다시 그리지 않는다(커서가 날아간다). */
+  let slotRenderTimer = null;
+  function onLeftInput(event) {
+    const input = event.target.closest('[data-cb-slot-input]');
+    if (!input) return;
+    const key = input.dataset.cbSlotInput;
+    if (!draft.parts[key]) return;
+    draft.parts[key] = splitParts(input.value);
+    saveDraft();
+    autosizeSlotInput(input);
+    const count = leftMount.querySelector(`[data-cb-count="${key}"]`);
+    if (count) count.textContent = draft.parts[key].length || '';
+    const clear = leftMount.querySelector('[data-cb-act="clear"]');
+    if (clear) clear.disabled = !totalParts();
+    // 그리드의 '선택됨' 표시가 친 글을 따라온다.
+    clearTimeout(slotRenderTimer);
+    slotRenderTimer = setTimeout(renderMain, 200);
+  }
+
+  function onLeftKeydown(event) {
+    // 줄바꿈은 받지 않는다(쉼표가 구분자다) - Enter 는 입력을 마치고 칩으로 접는다.
+    if (event.key !== 'Enter' || event.isComposing || !event.target.closest('[data-cb-slot-input]')) return;
+    event.preventDefault();
+    event.target.blur();
   }
 
   function onChange(event) {
@@ -1260,6 +1417,8 @@ export function createCharacterBuilderV5({
   }
 
   leftMount.addEventListener('click', onClick);
+  leftMount.addEventListener('input', onLeftInput);
+  leftMount.addEventListener('keydown', onLeftKeydown);
   rightMount.addEventListener('click', onClick);
   rightMount.addEventListener('change', onChange);
   rightMount.addEventListener('input', onInput);

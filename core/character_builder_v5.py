@@ -21,6 +21,18 @@ SCALE = 5.0
 RESOLUTIONS = {"standard": (832, 1216), "high": (1024, 1536), "ultra": (1152, 1728)}
 GENDERS = {"girl": "1girl", "boy": "1boy", "other": "1other"}
 BLOCKS = ("hair", "face", "body", "species", "outfit", "accessory", "item")
+# 부품 카탈로그에 없는 것을 담는 블록(사용자 결정 2026-10-11): 미색인 태그 · 자연어 · 가중치를 건 묶음.
+# 카탈로그 블록에도 직접 쓴 것을 넣을 수 있다 - '기타' 는 어느 블록에도 안 맞는 것의 자리다. 프롬프트의 맨 뒤에 붙는다.
+ETC_BLOCK = "etc"
+PART_BLOCKS = BLOCKS + (ETC_BLOCK,)
+FREE_TEXT_MAX = 300
+# 직접 쓴 것에 못 쓰는 글자. 전부 NAIA 가 **프롬프트 문법으로 읽는** 것이다 - 고정 사양(메인 프롬프트 · 모델 · 크기)이
+# 캐릭터 칸의 글 때문에 바뀌면 안 된다.
+#   < > |   와일드카드 고르기        __      와일드카드 이름        $       변수
+#   #       캐릭터 프롬프트의 주석(그 줄이 통째로 사라진다)
+#   " “ ” ＂ 대사 - 캐릭터 칸의 따옴표 글은 **메인 프롬프트로 옮겨진다**(`text: ...`)
+#   \ `     이스케이프 · 템플릿
+_FREE_TEXT_FORBIDDEN = re.compile('[\\x00-\\x1f\\x7f<>|#$`\\\\"\u201c\u201d\uff02]')
 POSE_DEFAULT = "standing, full body"
 MAX_COUNT = 4
 # 신 사양의 그림은 **투명 배경**이다 - 구 사양(흰 배경)과 신 사양을 가르는 선(사용자 결정 2026-10-11).
@@ -77,7 +89,9 @@ def specification() -> dict[str, Any]:
     return {
         "model": MODEL, "model_label": resolve_nai_model_spec(MODEL).label, "scale": SCALE,
         "resolutions": resolutions, "genders": list(GENDERS), "pose_slot_default": POSE_DEFAULT,
-        "prompt_template": PROMPT_TEMPLATE, "blocks": list(BLOCKS), "max_count": MAX_COUNT, "api_mode": "NAI",
+        "prompt_template": PROMPT_TEMPLATE, "blocks": list(BLOCKS), "free_block": ETC_BLOCK,
+        "free_text_max": FREE_TEXT_MAX,
+        "max_count": MAX_COUNT, "api_mode": "NAI",
     }
 
 
@@ -93,6 +107,20 @@ def normalize_pose(value: Any = "") -> str:
     if len(pose) > 200:
         raise ValueError("pose_slot must contain at most 200 characters")
     return pose
+
+
+def free_text(value: Any) -> str:
+    """직접 쓴 부품 한 개(태그 · 자연어 · `1.2::a, b ::` 같은 묶음). 쓴 그대로 캐릭터 프롬프트에 실린다."""
+    if not isinstance(value, str):
+        raise ValueError("part must be a tag string or object")
+    if _FREE_TEXT_FORBIDDEN.search(value) or "__" in value:
+        raise ValueError("part contains unsupported characters")
+    text = re.sub(" +", " ", value.strip())
+    if not text:
+        raise ValueError("part must not be empty")
+    if len(text) > FREE_TEXT_MAX:
+        raise ValueError(f"part must contain at most {FREE_TEXT_MAX} characters")
+    return text
 
 
 def validate_builder(payload: Any, catalog: PartsCatalog, *, saved: bool = False) -> dict[str, Any]:
@@ -113,13 +141,13 @@ def validate_builder(payload: Any, catalog: PartsCatalog, *, saved: bool = False
     parts = payload.get("parts")
     if not isinstance(parts, dict):
         raise ValueError("parts must be an object")
-    unknown = set(parts) - set(BLOCKS)
+    unknown = set(parts) - set(PART_BLOCKS)
     if unknown:
         raise ValueError(f"unknown block: {next(iter(unknown))}")
     data, _revision, records = catalog.read()
     normalized = {}
     seen = set()
-    for block in BLOCKS:
+    for block in PART_BLOCKS:
         if block not in parts:
             continue
         if not isinstance(parts[block], list):
@@ -134,12 +162,17 @@ def validate_builder(payload: Any, catalog: PartsCatalog, *, saved: bool = False
                     raise ValueError("hold must be a boolean")
             else:
                 raise ValueError("part must be a tag string or object")
-            if not isinstance(tag, str) or tag not in data["index"]:
-                raise ValueError(f"unknown catalog tag: {tag}")
-            if data["index"][tag][0] != block:
-                raise ValueError(f"tag belongs to a different block: {tag}")
-            if hold and not records[tag].get("hold"):
-                raise ValueError(f"tag does not support hold: {tag}")
+            # 이 블록의 카탈로그 부품이면 그 부품이고, 아니면 **직접 쓴 것**이다(사용자 결정 2026-10-11 -
+            # 미색인 태그 · 자연어를 붙일 수 없었다). 다른 블록의 부품 이름을 여기 적은 것도 직접 쓴 것으로 받는다 -
+            # 사람이 그 자리에 적었으면 그 자리에 실린다.
+            in_catalog = isinstance(tag, str) and tag in data["index"] and data["index"][tag][0] == block
+            if in_catalog:
+                if hold and not records[tag].get("hold"):
+                    raise ValueError(f"tag does not support hold: {tag}")
+            else:
+                if hold:
+                    raise ValueError(f"tag does not support hold: {tag}")
+                tag = free_text(tag)
             if tag in seen:
                 continue
             seen.add(tag)

@@ -955,12 +955,15 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
 // 처음 보여 주는 것은 **늘 신 사양**이다(사용자 지시 2026-10-11). 고른 탭은 이 창이 떠 있는 동안만 기억한다 -
 // 브라우저에 저장해 두면 구 사양을 한 번 눌러 본 사람은 그 뒤로 계속 구 사양으로 열린다.
 let assetSpecTab = 'v5';
+// 신 사양 모듈을 **못** 불러왔는가. 아직 불러오는 중인 것과는 다르다 - 불러오는 중에는 구 사양 화면으로 떨어지지 않는다
+// (기본 탭이 신 사양이라, 떨어지면 앱을 켤 때마다 구 사양 화면이 몇 초 보였다가 바뀐다).
+let characterBuilderV5Failed = false;
 
 function syncAssetsV5Mode(activeRightTab) {
   const rightTab = activeRightTab
     || document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
   // 모듈을 못 불러왔으면 신 사양 탭은 고를 수 없는 것으로 친다 - 빈 화면을 덮개로 올리지 않는다.
-  const showV5 = assetSpecTab === 'v5' && !!characterBuilderV5Control;
+  const showV5 = assetSpecTab === 'v5' && !characterBuilderV5Failed;
   const shown = showV5 && !isDetachedShell && rightTab === 'charAssets';
   document.querySelectorAll('#charAssetSpecTabs [data-asset-spec]').forEach(button => {
     const hit = button.dataset.assetSpec === (showV5 ? 'v5' : 'legacy');
@@ -971,6 +974,10 @@ function syncAssetsV5Mode(activeRightTab) {
   const v5Root = document.getElementById('charBuilderV5Root');
   if (legacyRoot) legacyRoot.hidden = showV5;
   if (v5Root) v5Root.hidden = !showV5;
+  // 아직 불러오는 중이면 자리만 잡아 둔다(모듈이 뜨면 이 자리를 자기 화면으로 갈아 끼운다).
+  if (v5Root && showV5 && !characterBuilderV5Control && !v5Root.childElementCount) {
+    v5Root.innerHTML = '<div class="mod-empty">불러오는 중...</div>';
+  }
   characterBuilderV5Control?.setActive(shown);
   // 덮개는 **제작 · 바리에이션 화면에서만** 올라온다. 신 사양 탭의 기본 화면(캐릭터 선택)에서는 메인 프롬프트가
   // 그대로 보이고 Generate 도 평소대로다(사용자 정정 2026-10-11). 화면이 바뀌면 모듈이 `onViewChange` 로 다시 부른다.
@@ -1007,9 +1014,14 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
   })
   .catch(error => {
     console.error('Failed to initialize Character Builder V5 module', error);
+    characterBuilderV5Failed = true;
+    const v5Root = document.getElementById('charBuilderV5Root');
+    if (v5Root) v5Root.innerHTML = '';
+    syncAssetsV5Mode();
+    if (assetSpecTab === 'v5') characterAssetControl?.load?.();      // 구 사양 화면으로 떨어진다 - 목록을 채운다
   });
 
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5e')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5f')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,

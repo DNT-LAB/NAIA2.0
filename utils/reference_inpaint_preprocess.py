@@ -121,7 +121,9 @@ REFERENCE_INSET_CANVAS_KINDS: tuple[tuple[str, tuple[tuple[int, int], ...]], ...
 REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = tuple(
     size for _label, sizes in REFERENCE_INSET_CANVAS_KINDS for size in sizes
 )
-DEFAULT_REFERENCE_INSET_CANVAS: tuple[int, int] = (1152, 896)
+# 기본 캔버스 = 3:2 의 1MP(사용자 지시 2026-10-11 "편의를 위해 기본값은 3:2로"). 예전에는 9:7 의 1152x896 이었다.
+# 세로 캐릭터(768x1344)를 놓으면 칸이 488px · 그릴 곳이 60% 다 - 9:7(55%)보다 그릴 자리가 넓다.
+DEFAULT_REFERENCE_INSET_CANVAS: tuple[int, int] = (1216, 832)
 
 
 def resolve_reference_inset_canvas(width: object, height: object) -> tuple[int, int]:
@@ -624,6 +626,33 @@ def default_reference_inset_box(
     if divider != classic:
         box = {**box, "x": (divider - box["width"]) // 2}
     return box
+
+
+# 에셋의 **캐릭터**를 꽂을 때의 기본 자리(사용자 지시 2026-10-11): 칸의 가운데에 놓고 **살짝만** 키운다.
+# 캔버스 높이의 106% - 사용자가 손으로 맞춰 보여 준 배치(1216x832 에 높이 약 880)에서 잰 값이다.
+# 더 키우면 꽉 차게 그려진 전신 그림(구 사양의 768x1344)은 발끝이 잘린다.
+REFERENCE_INSET_CHARACTER_ZOOM_PERCENT = 106
+
+
+def character_reference_inset_box(
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec | None = None,
+) -> dict[str, int]:
+    """에셋의 캐릭터 그림의 기본 자리: 칸(경계선 왼쪽)의 가운데 · 캔버스 높이의 가운데 · 살짝 키운 크기.
+
+    경계선은 `default_reference_inset_divider` 그대로다(그릴 곳 51 ~ 60%). 붙여넣은 그림 · Storage 의 그림은
+    이 자리를 쓰지 않는다 - 캐릭터가 아닐 수 있고, 키우면 가장자리가 잘린다.
+    """
+    spec = spec or ReferenceInsetPreprocessSpec()
+    src_w, src_h = max(1, int(source_size[0])), max(1, int(source_size[1]))
+    divider = default_reference_inset_divider((src_w, src_h), spec)
+    grid = int(reference_inset_box_limits(spec)["grid"])
+    height = _round_half_up(spec.canvas_height * REFERENCE_INSET_CHARACTER_ZOOM_PERCENT / (100 * grid)) * grid
+    width = max(1, int(round(src_w * height / src_h)))
+    return normalize_reference_inset_box(
+        {"x": (divider - width) // 2, "y": (spec.canvas_height - height) // 2, "height": height},
+        (src_w, src_h), spec, divider=divider,
+    )
 
 
 # 생성 결과에서 인셋 칸을 잘라 낼 때: 경계선에서 이만큼은 모델이 칸 테두리를 이어 그리는 자리라 함께 버린다

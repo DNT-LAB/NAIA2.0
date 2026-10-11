@@ -448,7 +448,7 @@ export function createCharacterAssetTabController({
         strip_outfit: stripOutfit,
       });
       if (withInset) {
-        showToast('C1 슬롯 적용 + 레퍼런스 인셋 고정됨 - 해제 전까지 1152x896 인셋으로 생성됩니다', 'success');
+        showToast('C1 슬롯 적용 + 레퍼런스 인셋 고정됨 - 해제 전까지 인셋으로 생성됩니다', 'success');
         // Result 탭 좌상단 핀 배지 갱신(앱 셸 소유)
         if (result.reference_inset) onReferenceInsetPin(result.reference_inset);
       } else if (withReference) {
@@ -1802,7 +1802,7 @@ export function createCharacterAssetTabController({
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-cr" ${applyDisabled} ${applyTitle}
           title="C1 슬롯 적용 + 이 이미지를 Character Reference로 등록 (해상도는 자동 정규화)">C1 + CR 적용</button>
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-inset" ${applyDisabled} ${applyTitle}
-          title="C1 슬롯 적용 + 이 이미지를 레퍼런스 인셋(1152x896)으로 고정 - 기존 CR은 전부 비활성화">C1 + 레퍼런스 인셋 적용</button>
+          title="C1 슬롯 적용 + 이 이미지를 레퍼런스 인셋으로 고정 - 기존 CR은 전부 비활성화">C1 + 레퍼런스 인셋 적용</button>
         <button class="mod-btn-sm" data-action="apply-add" ${applyDisabled} ${applyTitle}>새 슬롯으로 추가</button>
       </div>
     `;

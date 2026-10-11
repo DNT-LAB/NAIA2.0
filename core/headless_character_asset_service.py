@@ -374,12 +374,15 @@ class HeadlessCharacterAssetService:
         (`set_reference_inset_crop_result` 를 켜면 그린 부분만 남는다).
 
         캔버스는 `REFERENCE_INSET_CANVAS_SIZES` 중에서 고른다(사용자 지정 2026-08-25).
-        안 주면 기본 1152x896. 목록에 없는 값은 조용히 기본값으로 떨어뜨린다 -
+        안 주면 기본(3:2 의 1216x832 - 2026-10-11). 목록에 없는 값은 조용히 기본값으로 떨어뜨린다 -
         아무 숫자나 통과시키면 돈이 나가는 요청이 엉뚱한 크기로 나간다.
 
         ``box`` 는 인셋의 배치(`{x, y, height, divider}`)다(사용자 지정 2026-10-09 - 화면의 작은 창에서 정한다):
         `divider` = 경계선(왼쪽에 붙은 칸의 너비), `x · y · height` = 칸 안의 그림 자리와 크기.
         안 주면 기본 배치다. **새로 꽂는 핀은 늘 기본 배치 · 에셋의 그림 · 업스케일 전으로 시작한다.**
+        기본 배치는 그림이 무엇이냐에 따라 다르다: **에셋의 캐릭터**는 칸 가운데에 살짝 키워 놓고
+        (`character_reference_inset_box` - 사용자 지시 2026-10-11), 붙여넣은 그림 · Storage 의 그림은 예전 그대로다.
+        [기본값] 도 같은 자리로 돌아간다.
 
         ``use_upscaled`` · ``source_override`` 는 지금 핀의 것을 이어 갈 때만 준다(배치 · 해상도를 바꾸는 길):
         업스케일해 둔 원본으로 굽는가 / 붙여넣은 그림으로 칸을 덮었는가(`stored_id` = 그 그림이 Storage 의 어느 것인가).
@@ -393,6 +396,7 @@ class HeadlessCharacterAssetService:
 
         from utils.reference_inpaint_preprocess import (
             ReferenceInsetPreprocessSpec,
+            character_reference_inset_box,
             classic_reference_inset_layout,
             default_reference_inset_box,
             default_reference_inset_divider,
@@ -421,7 +425,11 @@ class HeadlessCharacterAssetService:
             opened.load()
             source_size = (int(opened.width), int(opened.height))
             classic_box, classic_divider = classic_reference_inset_layout(source_size, spec)
-            default_box = default_reference_inset_box(source_size, spec)
+            # 칸에 든 것이 에셋의 캐릭터면(붙여넣은 그림으로 덮지 않았으면) 가운데 · 살짝 키운 자리가 기본이다.
+            default_box = (
+                character_reference_inset_box(source_size, spec) if character_id and not override
+                else default_reference_inset_box(source_size, spec)
+            )
             default_divider = default_reference_inset_divider(source_size, spec)
             if box is None:
                 placed, divider = default_box, default_divider

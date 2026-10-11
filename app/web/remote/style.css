@@ -30704,9 +30704,10 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
   color: var(--accent-glow); background: rgba(124,106,239,0.16);
 }
 /* 그리드가 **한 줄에 세 칸**을 못 채울 만큼 좁으면 소분류를 위로 올린다(사용자 지시 2026-10-11 - 예전의 위쪽 탭 꼴).
-   세 칸 = 104 x 3 + 틈 6 x 2 = 324px, 여기에 세로 목록 136 + 틈 8 + 스크롤 여유를 더한 것이 문턱이다.
-   확대 배율이 걸린 창에서 그리드가 두 칸으로 쪼그라들던 것이 이 경우다. */
-@container cb5main (max-width: 484px) {
+   세 칸 = 136 x 3 + 틈 6 x 2 = 420px, 여기에 세로 목록 136 + 틈 8 + 스크롤 여유를 더한 것이 문턱이다.
+   확대 배율이 걸린 창에서 그리드가 두 칸으로 쪼그라들던 것이 이 경우다.
+   ⚠️ 칸의 최소 폭(아래 `.cb5-grid`)을 바꾸면 이 문턱도 같이 바꾼다 - 안 그러면 '세 칸 보장' 이 깨진다. */
+@container cb5main (max-width: 574px) {
   .cb5-browse { flex-direction: column; }
   .cb5-parts {
     order: -1; flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; gap: 5px; overflow: visible;
@@ -30716,6 +30717,10 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 }
 /* 그리드는 바깥(.cb5-main-scroll)이 굴린다 - Interactive 팝업용 높이 제한을 푼다. */
 .cb5-grid.ia-cell-grid { max-height: none; overflow: visible; flex: 0 0 auto; }
+/* 부품 썸네일은 Interactive 팝업의 것(최소 104px)보다 **크게** 놓는다(사용자 지시 2026-10-11: "썸네일이 보이지가
+   않는 수준 - 약 1.4 ~ 1.5배"). 여기서는 그림을 보고 고르는 것이 일의 전부다. 최소 136px 이면 확대 배율 150% 인
+   창(그리드 폭 약 430px)에서 한 줄 넷(104px)이던 것이 셋(약 140px)이 된다. 폭이 남으면 칸이 더 커진다. */
+.cb5-win:not(.is-ab) .cb5-grid.ia-cell-grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); }
 .cb5-hit-head { font: 600 11px var(--font-display); color: var(--text-dim); margin-top: 4px; }
 /* 시험 생성 칸 - 결과 그림이 주인이다. 폭은 창을 따라가고, 그림은 남는 높이를 다 쓴다. */
 .cb5-side {

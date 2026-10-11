@@ -475,6 +475,11 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/v5/candidate/apply",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/v5/migrate",
           "smoke": "external_live"
         },

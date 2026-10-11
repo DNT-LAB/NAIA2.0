@@ -30609,21 +30609,6 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .cb5-btn.is-primary { background: rgba(124,106,239,0.22); border-color: var(--accent); color: var(--text-primary); }
 .cb5-rows { display: flex; flex-direction: column; gap: 5px; }
-.cb5-row {
-  display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px;
-  padding: 7px 9px; min-height: 46px; cursor: pointer;
-  background: var(--bg-card); border: 1px solid var(--border-dim); border-radius: 8px;
-}
-.cb5-row:hover { border-color: var(--border-glow); }
-.cb5-row.is-on { border-color: var(--accent); background: var(--bg-elevated); }
-.cb5-row-label b { display: block; font: 600 12.5px var(--font-display); color: var(--text-primary); }
-.cb5-row-n {
-  display: inline-block; margin-top: 3px; padding: 1px 6px; border-radius: 4px;
-  font: 500 9px var(--font-mono); color: var(--accent-glow); background: rgba(124,106,239,0.16);
-}
-.cb5-row-cells { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
-.cb5-row-cells .cb5-cell { width: 76px; }
-.cb5-row-empty { align-self: center; font: italic 400 11px var(--font-mono); color: var(--text-dim); }
 /* Interactive 의 칸은 본문이 '살펴보기'(cursor: help)다. 여기는 살펴볼 옆판이 없다 - 단추만 누른다. */
 .cb5-cell { cursor: default; }
 .cb5-swatch { display: block; width: 100%; height: 100%; }
@@ -30669,6 +30654,13 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
   padding: 10px; overflow: hidden;
 }
 .cb5-win { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; }
+/* 왼쪽 기둥: [← 목록] 줄 + 그리드. 시험 그림 칸(.cb5-side)은 그 옆에서 맨 위부터 선다. */
+.cb5-col { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+/* 제작 · 바리에이션 화면에서는 사양 탭 줄을 띄워 놓고(그 줄의 오른쪽은 비어 있다) 시험 그림 칸이 그 자리까지 올라간다
+   (사용자 지시 2026-10-11 - "프리뷰 영역은 공간이 부족하므로 상단 영역을 침범"). 왼쪽 기둥은 탭 줄만큼 내려 선다. */
+body.assets-v5-mode #rightTabCharAssets { position: relative; }
+body.assets-v5-mode #charAssetSpecTabs { position: absolute; top: 0; left: 0; z-index: 3; }
+body.assets-v5-mode .cb5-col { padding-top: 32px; }
 .cb5-main {
   flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px;
   container: cb5main / inline-size;
@@ -30731,6 +30723,13 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-side-label { font: 600 12px var(--font-display); color: var(--text-muted); }
 .cb5-size, .cb5-seed { font: 400 10.5px var(--font-mono); color: var(--text-dim); }
 .cb5-seed { flex: 1 1 auto; }
+/* 크기 줄: 크기 · Anlas 표시는 왼쪽, 시드 고정은 오른쪽 끝. */
+.cb5-side-sub { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cb5-side-sub .cb5-check { margin-left: auto; }
+.cb5-side-sub .cb5-seed { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 아래 줄은 단추 둘뿐이다 - 오른쪽에 붙인다. 접히지 않게 줄바꿈을 막고, 모자라면 글을 줄인다. */
+.cb5-win:not(.is-ab) .cb5-side-bottom { justify-content: flex-end; flex-wrap: nowrap; }
+.cb5-win:not(.is-ab) .cb5-side-bottom .cb5-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cb5-paid { color: #e0a84a; }
 .cb5-check { display: flex; align-items: center; gap: 6px; font: 400 11px var(--font-mono); color: var(--text-muted); cursor: pointer; }
 /* 결과는 투명 배경이다 - 바둑판을 깔아 투명한 곳이 보이게 한다. */
@@ -30743,6 +30742,10 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 }
 .cb5-stage { position: relative; }
 .cb5-stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* 들여다보는 칸(제작 화면): 휠로 키우고 끌어서 옮긴다. 배율과 자리는 JS 가 transform 으로 준다. */
+.cb5-stage[data-cb-zoom] { touch-action: none; }
+.cb5-stage[data-cb-zoom] img { cursor: grab; transform-origin: center; user-select: none; -webkit-user-drag: none; }
+.cb5-stage[data-cb-zoom].is-dragging img { cursor: grabbing; }
 /* 신 사양은 투명 배경이 전제다 - 투명하지 않은 결과에는 그림 위에 경고를 얹는다(저장도 막힌다). */
 .cb5-stage-warn {
   position: absolute; left: 8px; right: 8px; top: 8px; padding: 7px 10px; border-radius: 7px;
@@ -30753,8 +30756,11 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-cand.is-opaque { border-color: #ff8a8a; opacity: 0.6; }
 .cb5-stage-empty { padding: 10px; text-align: center; font: 400 10.5px var(--font-mono); color: var(--text-dim); }
 .cb5-stage-empty.is-error { color: #ff8a8a; }
-.cb5-strip { flex: 0 0 auto; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+/* 후보 줄은 **한 줄**로 굴린다. 여덟 칸 폭은 예전 그대로이고, 기다리는 것이 겹쳐 여덟을 넘으면 옆으로 넘어간다 -
+   줄이 둘로 접히면 그만큼 그림 칸이 줄어든다. */
+.cb5-strip { flex: 0 0 auto; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .cb5-cand {
+  flex: 0 0 calc((100% - 28px) / 8);
   aspect-ratio: 832 / 1216; padding: 0; overflow: hidden; cursor: pointer;
   border: 1px solid var(--border-dim); border-radius: 5px; background: var(--bg-card);
   color: var(--text-dim); font: 500 11px var(--font-mono);

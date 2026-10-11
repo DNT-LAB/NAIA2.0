@@ -86,6 +86,9 @@ function isProsePart(text) {
 const GENDERS = [['girl', 'Female'], ['boy', 'Male'], ['other', 'Other']];
 const RESOLUTION_LABEL = {standard: '표준', high: '고해상도', ultra: '초고해상도'};
 const DRAFT_KEY = 'naia.assetsV5.draft';
+// 시험 그림을 처음 놓는 배율의 상한(높이를 채우느라 좌우를 자르는 정도) · 휠로 키울 수 있는 끝.
+const STAGE_BASE_MAX = 1.12;
+const STAGE_ZOOM_MAX = 8;
 const CANDIDATE_MAX = 8;       // 시험 생성 후보를 이만큼만 쥔다(가장 오래된 것부터 버린다)
 const SEARCH_MAX = 150;        // 검색 결과 칸 수. 넘으면 넘었다고 말한다
 const SEARCH_DELAY = 150;
@@ -129,6 +132,10 @@ export function createCharacterBuilderV5({
   let seedLock = false;
   let lockedSeed = null;
   let saving = false;
+  let applying = false;          // [C1 + 레퍼런스 인셋 적용] 이 가 있는 동안
+  // 시험 그림을 들여다보는 배율과 자리. `zoom` 이 null 이면 기본 배율(아래 `stageFit`)로 놓는다.
+  // 보고 있는 그림이 바뀌면 처음으로 돌아간다 - 앞 그림에서 얼굴을 확대해 뒀다고 새 그림이 얼굴부터 보이면 안 된다.
+  const stageView = {key: '', zoom: null, x: 0, y: 0};
 
   let view = 'gallery';          // 'gallery'(기본) | 'create' | 'variation'
   let builtView = '';            // 오른쪽 창의 뼈대를 세운 화면(바뀔 때만 다시 세운다)
@@ -505,7 +512,7 @@ export function createCharacterBuilderV5({
     if (candidate?.status === 'done') {
       // 비투명 경고: 새 캐릭터는 구 사양으로 저장되고, 바리에이션은 경고만 한다(둘 다 저장은 된다 - 사용자 결정).
       const note = view === 'variation' ? '' : '<small>저장하면 V4.5 구 사양으로 저장됩니다</small>';
-      return `<img src="${escHtml(candidateImage(candidate))}" alt="">`
+      return `<img data-cb-stage-img draggable="false" src="${escHtml(candidateImage(candidate))}" alt="">`
         + (candidate.opaque
           ? `<span class="cb5-stage-warn">투명 배경이 아닙니다 · 다시 생성해 주세요${note}</span>` : '');
     }
@@ -544,14 +551,23 @@ export function createCharacterBuilderV5({
     // 투명한지 아직 모르는 동안(확인 중)에만 잠깐 막는다 - 어느 사양으로 저장되는지 말할 수 있어야 한다.
     const canSave = current?.status === 'done' && current.opaque !== null && !current.saved && !saving;
     const saveLabel = current?.saved ? '저장됨' : (current?.opaque ? '구 사양으로 저장' : '에셋으로 저장');
+    // 그림 칸에는 title 을 달지 않는다 - 앱 툴팁으로 떠서, 들여다보는 내내 후보 줄을 가린다(라이브에서 봄).
+    // 시드 고정은 크기 줄에 둔다. 아래 줄에 단추가 둘이라, 거기에 같이 두면 좁은 창에서 줄이 둘로 접혀 그림 칸이 깎인다.
     return `<div class="cb5-side-top"><span class="cb5-side-label">시험 생성</span>`
-      + `<div class="cb5-seg" role="group" aria-label="해상도">${resolutions}</div>${size}${paid}</div>`
-      + `<div class="cb5-stage">${stageHtml(current, 'Generate 를 누르면 여기에 그립니다')}</div>`
-      + `<div class="cb5-strip">${stripHtml()}</div>`
-      + `<div class="cb5-side-bottom">`
+      + `<div class="cb5-seg" role="group" aria-label="해상도">${resolutions}</div></div>`
+      + `<div class="cb5-side-sub">${size}${paid}`
       + `<label class="cb5-check"><input type="checkbox" data-cb-role="seedlock"`
       + `${seedLock ? ' checked' : ''}${seedKnown || seedLock ? '' : ' disabled'}> 시드 고정</label>`
-      + `<span class="cb5-seed">${escHtml(seedText)}</span>`
+      + `<span class="cb5-seed">${escHtml(seedText)}</span></div>`
+      + `<div class="cb5-stage" data-cb-zoom="1" aria-label="시험 그림 - 휠로 확대 · 축소, 끌어서 옮기기, 두 번 눌러 처음 크기로">`
+      + `${stageHtml(current, 'Generate 를 누르면 여기에 그립니다')}</div>`
+      + `<div class="cb5-strip">${stripHtml()}</div>`
+      + `<div class="cb5-side-bottom">`
+      // 저장하기 전에 바로 써 본다: 이 그림을 만든 글을 C1 에, 그림을 레퍼런스 인셋에(사용자 지시 2026-10-11).
+      + `<button type="button" class="cb5-btn" data-cb-act="cand-apply"`
+      + `${current?.status === 'done' && current.historyId && !applying ? '' : ' disabled'}`
+      + ` title="이 그림을 만든 프롬프트를 C1 에 넣고(쓰던 슬롯은 한 칸씩 밀려 꺼집니다) 그림을 레퍼런스 인셋으로 고정합니다">`
+      + `C1 + 레퍼런스 인셋 적용</button>`
       + `<button type="button" class="cb5-btn is-primary" data-cb-act="save"${canSave ? '' : ' disabled'}>`
       + `${saveLabel}</button></div>`;
   }
@@ -590,6 +606,112 @@ export function createCharacterBuilderV5({
     if (!host) return;
     if (view === 'variation' && work) host.innerHTML = abHtml();
     else if (view === 'create') host.innerHTML = sideHtml();
+    syncStage();
+    // 후보 줄은 한 줄로 굴린다. 고른 것이 줄 밖에 있으면 보이는 데로 민다(새 그림은 맨 앞에 온다).
+    const strip = host.querySelector('.cb5-strip');
+    const on = strip?.querySelector('.cb5-cand.is-on');
+    if (strip && on) {
+      if (on.offsetLeft < strip.scrollLeft) strip.scrollLeft = on.offsetLeft;
+      else if (on.offsetLeft + on.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+        strip.scrollLeft = on.offsetLeft + on.offsetWidth - strip.clientWidth;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ 시험 그림 들여다보기(휠 · 끌기)
+
+  /** 그림 칸과 그림의 치수. `base` = 처음 놓는 배율: 위아래가 남는 그림(폭에 맞춰진 것)은 높이를 채울 때까지 키운다 -
+   *  좌우가 살짝 잘리고 인물이 크게 보인다(사용자 지시: "실제로 자르는 게 아니라 확대"). `STAGE_BASE_MAX` 를 넘기지는 않는다. */
+  function stageFit(stage, img) {
+    const W = stage.clientWidth;
+    const H = stage.clientHeight;
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    if (!W || !H || !iw || !ih) return null;
+    const fit = Math.min(W / iw, H / ih);
+    const dw = iw * fit;
+    const dh = ih * fit;
+    return {W, H, dw, dh, base: Math.min(STAGE_BASE_MAX, Math.max(1, H / dh))};
+  }
+
+  function placeStage(img, fit) {
+    if (stageView.zoom == null) stageView.zoom = fit.base;
+    const z = stageView.zoom;
+    // 그림이 칸보다 큰 만큼만 옮길 수 있다 - 칸 밖으로 끌려 나가 빈 바닥만 보이는 일이 없다.
+    const maxX = Math.max(0, (fit.dw * z - fit.W) / 2);
+    const maxY = Math.max(0, (fit.dh * z - fit.H) / 2);
+    stageView.x = Math.max(-maxX, Math.min(maxX, stageView.x));
+    stageView.y = Math.max(-maxY, Math.min(maxY, stageView.y));
+    img.style.transform = `translate(${stageView.x}px, ${stageView.y}px) scale(${z})`;
+  }
+
+  function zoomStage() {
+    const stage = rightMount.querySelector('.cb5-stage[data-cb-zoom]');
+    const img = stage?.querySelector('[data-cb-stage-img]');
+    return stage && img ? {stage, img} : null;
+  }
+
+  /** 다시 그린 뒤 그림을 제자리에 놓는다. 그림이 바뀌었으면 처음 배율로. */
+  function syncStage() {
+    const found = zoomStage();
+    if (!found) return;
+    const key = picked()?.requestId || '';
+    if (stageView.key !== key) Object.assign(stageView, {key, zoom: null, x: 0, y: 0});
+    const place = () => {
+      const fit = stageFit(found.stage, found.img);
+      if (fit) placeStage(found.img, fit);
+    };
+    if (found.img.complete && found.img.naturalWidth) place();
+    else found.img.addEventListener('load', place, {once: true});
+  }
+
+  function onWheel(event) {
+    if (!event.target.closest('.cb5-stage[data-cb-zoom]')) return;
+    const found = zoomStage();
+    const fit = found && stageFit(found.stage, found.img);
+    if (!fit) return;
+    event.preventDefault();
+    const rect = found.stage.getBoundingClientRect();
+    // 커서 아래의 점이 그 자리에 남게 키운다(칸의 가운데가 기준).
+    const cx = event.clientX - rect.left - rect.width / 2;
+    const cy = event.clientY - rect.top - rect.height / 2;
+    const before = stageView.zoom ?? fit.base;
+    const after = Math.max(1, Math.min(STAGE_ZOOM_MAX, before * Math.exp(-event.deltaY * 0.0015)));
+    stageView.x = cx - (cx - stageView.x) * (after / before);
+    stageView.y = cy - (cy - stageView.y) * (after / before);
+    stageView.zoom = after;
+    placeStage(found.img, fit);
+  }
+
+  function beginStageDrag(event, stage) {
+    const found = zoomStage();
+    const fit = found && stageFit(found.stage, found.img);
+    if (!fit) return;
+    event.preventDefault();
+    const start = {x: event.clientX, y: event.clientY, ox: stageView.x, oy: stageView.y};
+    const move = e => {
+      stageView.x = start.ox + (e.clientX - start.x);
+      stageView.y = start.oy + (e.clientY - start.y);
+      placeStage(found.img, fit);
+    };
+    const stop = e => {
+      stage.classList.remove('is-dragging');
+      stage.removeEventListener('pointermove', move);
+      stage.removeEventListener('pointerup', stop);
+      stage.removeEventListener('pointercancel', stop);
+      try { stage.releasePointerCapture(e.pointerId); } catch (_) { /* 이미 놓였다 */ }
+    };
+    try { stage.setPointerCapture(event.pointerId); } catch (_) { /* 잡지 못해도 끌 수는 있다 */ }
+    stage.classList.add('is-dragging');
+    stage.addEventListener('pointermove', move);
+    stage.addEventListener('pointerup', stop);
+    stage.addEventListener('pointercancel', stop);
+  }
+
+  function onDblClick(event) {
+    if (!event.target.closest('.cb5-stage[data-cb-zoom]') || !zoomStage()) return;
+    Object.assign(stageView, {zoom: null, x: 0, y: 0});
+    syncStage();
   }
 
   // ------------------------------------------------------------------ 그리기 - 선택 화면(기본)
@@ -727,15 +849,18 @@ export function createCharacterBuilderV5({
 
   function builderShellHtml() {
     const title = view === 'variation' ? `${escHtml(work?.name || '')} · 바리에이션 만들기` : '새 캐릭터';
-    return `<div class="cb5-bar"><button type="button" class="cb5-btn" data-cb-act="back">← 목록</button>`
+    // 시험 그림 칸(.cb5-side)은 **맨 위부터** 선다(사용자 지시 2026-10-11 - 그림 볼 자리가 모자랐다). 그래서 [← 목록] 줄을
+    // 왼쪽 기둥(.cb5-col) 안으로 넣었다. 사양 탭 줄의 오른쪽 빈 자리까지 올라가는 것은 CSS 가 한다(`body.assets-v5-mode`).
+    return `<div class="cb5-win${view === 'variation' ? ' is-ab' : ''}">`
+      + `<div class="cb5-col">`
+      + `<div class="cb5-bar"><button type="button" class="cb5-btn" data-cb-act="back">← 목록</button>`
       + `<span class="cb5-bar-title">${title}</span></div>`
-      + `<div class="cb5-win${view === 'variation' ? ' is-ab' : ''}">`
       + `<section class="cb5-main" data-cb-role="main">`
       + `<input type="text" class="cb5-search" data-cb-role="search" autocomplete="off" spellcheck="false"`
       + ` placeholder="부품 검색 · twintails, 땋은 머리">`
       + `<div class="cb5-main-title" data-cb-role="main-title"></div>`
       + `<div class="cb5-browse"><div class="cb5-main-scroll"></div>`
-      + `<nav class="cb5-parts" data-cb-role="parts" aria-label="소분류"></nav></div></section>`
+      + `<nav class="cb5-parts" data-cb-role="parts" aria-label="소분류"></nav></div></section></div>`
       + `<aside class="cb5-side" data-cb-role="side"></aside></div>`;
   }
 
@@ -985,9 +1110,9 @@ export function createCharacterBuilderV5({
     const seed = Number(meta.seed);
     candidate.seed = Number.isFinite(seed) && seed > 0 ? seed : null;
     candidate.builder.seed = candidate.seed;
-    // 보고 있던 것이 완성본이 아니면(기다리는 중 · 실패 · 없음) 새 그림으로 옮긴다.
-    const current = pickedCandidate[candidate.view];
-    if (!current || current.status !== 'done') pickedCandidate[candidate.view] = candidate;
+    // 새 그림이 오면 **그 그림으로 넘긴다**(사용자 지시 2026-10-11). 예전에는 보던 그림을 그대로 두어서, 새 그림은
+    // 후보 줄 맨 앞에 조용히 끼고 보던 것만 옆으로 밀려났다 - 방금 만든 것을 보려면 매번 눌러야 했다.
+    pickedCandidate[candidate.view] = candidate;
     if (candidate.view === view) renderSide();
     void checkTransparency(candidate);
   }
@@ -1184,6 +1309,30 @@ export function createCharacterBuilderV5({
     }
   }
 
+  /** 저장하기 전의 시험 그림을 바로 써 본다 - 그 그림을 만든 글을 C1 에, 그림을 레퍼런스 인셋에. */
+  async function applyCandidate() {
+    const candidate = picked();
+    if (!candidate || candidate.status !== 'done' || !candidate.historyId || applying) return;
+    if (!isNai()) {
+      showToast('캐릭터 슬롯 적용은 NAI 모드 전용입니다', 'error');
+      return;
+    }
+    applying = true;
+    renderSide();
+    try {
+      const result = await postJson('/api/character-asset/v5/candidate/apply', {
+        history_id: candidate.historyId, builder: candidate.builder, with_inset: true,
+      });
+      showToast('C1 에 적용하고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다', 'success');
+      if (result?.reference_inset) onReferenceInsetPin(result.reference_inset);
+    } catch (error) {
+      showToast(`적용 실패: ${error.message}`, 'error');
+    } finally {
+      applying = false;
+      renderSide();
+    }
+  }
+
   /** 지우기는 두 번 눌러야 한다(구 사양 화면과 같은 방식) - 한 번 누르면 단추 글이 바뀐다. */
   async function armedDelete(key, run) {
     if (deleteArmed !== key) {
@@ -1326,6 +1475,7 @@ export function createCharacterBuilderV5({
       const name = act.dataset.cbAct;
       if (name === 'clear') void clearDraft();
       else if (name === 'save') void saveSelected();
+      else if (name === 'cand-apply') void applyCandidate();
       else if (name === 'new') openCreate();
       else if (name === 'refresh') void loadStore();
       else if (name === 'back') backToGallery();
@@ -1413,7 +1563,12 @@ export function createCharacterBuilderV5({
 
   function onPointerDown(event) {
     const line = event.target.closest('[data-cb-edge]');
-    if (line) beginBandDrag(event, line.dataset.cbEdge);
+    if (line) {
+      beginBandDrag(event, line.dataset.cbEdge);
+      return;
+    }
+    const stage = event.target.closest('.cb5-stage[data-cb-zoom]');
+    if (stage && event.button === 0) beginStageDrag(event, stage);
   }
 
   leftMount.addEventListener('click', onClick);
@@ -1423,6 +1578,8 @@ export function createCharacterBuilderV5({
   rightMount.addEventListener('change', onChange);
   rightMount.addEventListener('input', onInput);
   rightMount.addEventListener('pointerdown', onPointerDown);
+  rightMount.addEventListener('wheel', onWheel, {passive: false});
+  rightMount.addEventListener('dblclick', onDblClick);
 
   return {
     /** 신 사양 탭이 보이는가. 보일 때마다 캐릭터 목록을 새로 읽는다. 덮개는 `wantsCover()` 가 따로 말한다. */

@@ -174,6 +174,33 @@ def register_character_asset_routes(
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+    @app.post("/api/character-asset/v5/candidate/apply")
+    async def api_character_asset_v5_candidate_apply(req: Request):
+        """제작 화면의 시험 그림을 저장하기 전에 써 본다: 그 구성의 글을 C1 에 · 그림을 레퍼런스 인셋에."""
+        payload = await _read_json(req)
+        service = _asset_service(session_context)
+        item = service.candidate_item(str(payload.get("history_id") or ""))
+        if item is None:
+            return JSONResponse({"error": "candidate is no longer available"}, status_code=404)
+        try:
+            result = await run_in_thread(
+                service.apply_v5_candidate, _history_item_png_bytes(item), payload.get("builder"),
+                payload.get("with_inset") is not False,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character Asset candidate apply failed: {exc}"}, status_code=500)
+        result.pop("state", None)
+        # 에셋의 적용 라우트와 같다: 슬롯 · CR 패널이 바로 따라오게 상태를 뿌린다.
+        try:
+            await broadcast_json(clients, session_context.module_state_payload("character"))
+            if result.get("references_disabled"):
+                await broadcast_json(clients, session_context.module_state_payload("character_reference"))
+        except Exception as exc:
+            print(f"[CharacterAsset] module state broadcast failed: {exc}")
+        return result
+
     @app.post("/api/character-asset/v5/update-builder")
     async def api_character_asset_v5_update_builder(req: Request):
         payload = await _read_json(req)

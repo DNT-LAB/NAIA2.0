@@ -364,6 +364,7 @@ class HeadlessCharacterAssetService:
         source_override: Optional[bytes] = None,
         stored_id: str = "",
         enable: Optional[bool] = None,
+        character_layout: bool = False,
     ) -> dict[str, Any]:
         """선택 이미지를 레퍼런스 인셋 소스로 고정한다(Dev0714 Comic Panel 계보).
 
@@ -382,7 +383,8 @@ class HeadlessCharacterAssetService:
         안 주면 기본 배치다. **새로 꽂는 핀은 늘 기본 배치 · 에셋의 그림 · 업스케일 전으로 시작한다.**
         기본 배치는 그림이 무엇이냐에 따라 다르다: **에셋의 캐릭터**는 칸 가운데에 살짝 키워 놓고
         (`character_reference_inset_box` - 사용자 지시 2026-10-11), 붙여넣은 그림 · Storage 의 그림은 예전 그대로다.
-        [기본값] 도 같은 자리로 돌아간다.
+        [기본값] 도 같은 자리로 돌아간다. ``character_layout`` = 에셋이 아닌 그림(신 사양 제작 화면의 시험 그림)도
+        캐릭터로 보고 그 자리에 놓는다.
 
         ``use_upscaled`` · ``source_override`` 는 지금 핀의 것을 이어 갈 때만 준다(배치 · 해상도를 바꾸는 길):
         업스케일해 둔 원본으로 굽는가 / 붙여넣은 그림으로 칸을 덮었는가(`stored_id` = 그 그림이 Storage 의 어느 것인가).
@@ -426,8 +428,9 @@ class HeadlessCharacterAssetService:
             source_size = (int(opened.width), int(opened.height))
             classic_box, classic_divider = classic_reference_inset_layout(source_size, spec)
             # 칸에 든 것이 에셋의 캐릭터면(붙여넣은 그림으로 덮지 않았으면) 가운데 · 살짝 키운 자리가 기본이다.
+            as_character = bool(character_layout) or bool(character_id and not override)
             default_box = (
-                character_reference_inset_box(source_size, spec) if character_id and not override
+                character_reference_inset_box(source_size, spec) if as_character
                 else default_reference_inset_box(source_size, spec)
             )
             default_divider = default_reference_inset_divider(source_size, spec)
@@ -471,6 +474,8 @@ class HeadlessCharacterAssetService:
             "source_id": source_id,
             # 이 그림이 Storage 의 어느 것인가(꺼냈거나 방금 저장했으면). 없으면 빈 문자열.
             "stored_id": str(stored_id or ""),
+            # 에셋이 아닌 그림을 캐릭터 자리(가운데 · 살짝 키움)에 놓았는가 - 배치 · 해상도를 바꿀 때 이어 간다.
+            "character_layout": bool(character_layout),
             "mask_png": mask_buffer.getvalue(),
             "width": int(result.canvas_image.width),
             "height": int(result.canvas_image.height),
@@ -497,6 +502,7 @@ class HeadlessCharacterAssetService:
             "use_upscaled": bool(pin.get("upscaled")),
             "source_override": pin.get("source_override"),
             "stored_id": str(pin.get("stored_id") or ""),
+            "character_layout": bool(pin.get("character_layout")),
         }
 
     # ------------------------------------------------- 켜짐 / 꺼짐
@@ -1739,6 +1745,33 @@ class HeadlessCharacterAssetService:
                 raise OSError("could not save migration metadata")
             return {"character_id": saved_id, "source_id": character_id, "spec": "v5",
                     **builder_v5.image_dimensions(saved_path)}
+
+    def apply_v5_candidate(self, png: bytes, builder: Any, with_inset: bool = True) -> dict[str, Any]:
+        """신 사양 제작 화면의 **시험 그림**(아직 저장하지 않은 것)을 바로 써 본다(사용자 지시 2026-10-11).
+
+        그 그림을 만든 구성의 글을 C1 에 넣고(에셋의 C1 적용과 같은 길 - 있던 슬롯은 한 칸씩 밀려 꺼진다),
+        ``with_inset`` 이면 그 그림을 레퍼런스 인셋으로 꽂는다. 에셋이 아니라 그림만으로 서는 인셋이지만
+        캐릭터이므로 에셋의 캐릭터와 같은 자리(가운데 · 살짝 키움)에 놓는다.
+        """
+        context = self.context
+        if str(context.get_api_mode() or "").upper() != "NAI":
+            raise ValueError("character slot apply requires NAI mode")
+        prompt = builder_v5.character_prompt(builder, self.parts_catalog())
+        state = context._character_service().apply_asset(prompt, "", "c1")
+        references_disabled = False
+        try:
+            references_disabled = self._disable_all_character_reference_frames()
+        except Exception as exc:
+            print(f"[CharacterAsset] character reference disable failed: {exc}")
+        reference_inset = None
+        if with_inset:
+            reference_inset = self.set_reference_inset_pin(
+                "", source_override=self._normalize_inset_source(png), enable=True, character_layout=True,
+            )
+        return {
+            "ok": True, "state": state, "character_prompt": prompt,
+            "references_disabled": references_disabled, "reference_inset": reference_inset,
+        }
 
     def annotate(self, payload: dict) -> dict:
         values = builder_v5.annotations(payload)

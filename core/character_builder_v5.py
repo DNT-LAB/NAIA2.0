@@ -210,17 +210,29 @@ def generation_count(payload: dict) -> int:
     return 1 if type(payload.get("seed")) is int else count
 
 
+def _caption_tags(builder: dict[str, Any], catalog: PartsCatalog) -> list[str]:
+    _data, _revision, records = catalog.read()
+    tags = []
+    for entries in builder["parts"].values():
+        for entry in entries:
+            tags.append(records[entry["tag"]]["hold"] if isinstance(entry, dict) else entry)
+    return tags
+
+
+def character_prompt(payload: Any, catalog: PartsCatalog) -> str:
+    """이 구성이 캐릭터 칸에 싣는 글(인물 태그 + 부품). 생성 요청의 `characters[0]` 과 **같은 글**이다 -
+    시험 그림을 슬롯에 꽂을 때(`apply_v5_candidate`) 그 그림을 만든 글이 그대로 실려야 한다."""
+    builder = validate_builder(payload, catalog)
+    return ", ".join([builder["gender"], *_caption_tags(builder, catalog)])
+
+
 def build_overrides(payload: dict, candidate: int, catalog: PartsCatalog) -> dict[str, Any]:
     request_id = payload.get("request_id")
     if not isinstance(request_id, str) or not request_id.strip():
         raise ValueError("request_id is required")
     generation_count(payload)
     builder = validate_builder(payload, catalog)
-    _data, _revision, records = catalog.read()
-    tags = []
-    for entries in builder["parts"].values():
-        for entry in entries:
-            tags.append(records[entry["tag"]]["hold"] if isinstance(entry, dict) else entry)
+    tags = _caption_tags(builder, catalog)
     character = ", ".join([builder["gender"], *tags])
     prompt = PROMPT_TEMPLATE.format(count=GENDERS[builder["gender"]], pose=builder["pose_slot"])
     width, height = RESOLUTIONS[builder["resolution"]]

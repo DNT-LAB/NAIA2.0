@@ -30639,6 +30639,9 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
    두 칸(목록 · 상세)이 각자 구르고, 고정 줄은 그 칸 안에서 sticky 다. 좁은 화면(767px 이하 - 칸이 세로로 쌓인다)은 예전대로 둔다. */
 @media (min-width: 768px) {
   #rightTabCharAssets > .char-asset-root { overflow: hidden; display: flex; flex-direction: column; }
+  /* ⚠️ 위에서 display 를 주면 `hidden` 속성이 진다 - 신 사양 탭에서 구 사양 화면이 위에 같이 떠 버렸다(바로 잡음).
+     display 를 주는 규칙에는 [hidden] 을 되돌리는 줄을 짝으로 둔다. */
+  #rightTabCharAssets > .char-asset-root[hidden] { display: none; }
   #rightTabCharAssets .char-asset-shell { flex: 1 1 auto; min-height: 0; }
   #rightTabCharAssets .char-asset-columns { flex: 1 1 auto; min-height: 0; align-items: stretch; }
   #rightTabCharAssets .char-asset-gallery,

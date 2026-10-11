@@ -961,7 +961,7 @@ function syncAssetsV5Mode(activeRightTab) {
     || document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
   // 모듈을 못 불러왔으면 신 사양 탭은 고를 수 없는 것으로 친다 - 빈 화면을 덮개로 올리지 않는다.
   const showV5 = assetSpecTab === 'v5' && !!characterBuilderV5Control;
-  const on = showV5 && !isDetachedShell && rightTab === 'charAssets';
+  const shown = showV5 && !isDetachedShell && rightTab === 'charAssets';
   document.querySelectorAll('#charAssetSpecTabs [data-asset-spec]').forEach(button => {
     const hit = button.dataset.assetSpec === (showV5 ? 'v5' : 'legacy');
     button.classList.toggle('is-on', hit);
@@ -971,10 +971,13 @@ function syncAssetsV5Mode(activeRightTab) {
   const v5Root = document.getElementById('charBuilderV5Root');
   if (legacyRoot) legacyRoot.hidden = showV5;
   if (v5Root) v5Root.hidden = !showV5;
-  document.body.classList.toggle('assets-v5-mode', on);
+  characterBuilderV5Control?.setActive(shown);
+  // 덮개는 **제작 · 바리에이션 화면에서만** 올라온다. 신 사양 탭의 기본 화면(캐릭터 선택)에서는 메인 프롬프트가
+  // 그대로 보이고 Generate 도 평소대로다(사용자 정정 2026-10-11). 화면이 바뀌면 모듈이 `onViewChange` 로 다시 부른다.
+  const cover = shown && !!characterBuilderV5Control?.wantsCover?.();
+  document.body.classList.toggle('assets-v5-mode', cover);
   // 블록 줄은 Prompt 탭 안에 있다. 다른 탭(Params 등)을 보고 있었으면 덮개가 안 보인다.
-  if (on && activePromptTab !== 'prompt') switchTab('prompt');
-  characterBuilderV5Control?.setActive(on);
+  if (cover && activePromptTab !== 'prompt') switchTab('prompt');
 }
 
 document.getElementById('charAssetSpecTabs')?.addEventListener('click', event => {
@@ -986,7 +989,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5a')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5b')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -998,6 +1001,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
       leftMount: document.getElementById('cbBlocks'),
       rightMount: document.getElementById('charBuilderV5Root'),
       isNai: () => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() === 'NAI',
+      onViewChange: () => syncAssetsV5Mode(),
     });
     syncAssetsV5Mode();
   })

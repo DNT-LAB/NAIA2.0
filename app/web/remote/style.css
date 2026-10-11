@@ -30758,6 +30758,53 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-cand.is-on { border: 2px solid var(--accent); }
 .cb5-cand.is-error { color: #ff8a8a; }
 .cb5-cand.is-saved { outline: 1px solid #46cf88; outline-offset: -3px; }
+/* ── 신 사양의 화면 셋(2026-10-11): 선택(기본 · 구 사양 화면의 꼴을 그대로 쓴다) · 제작 · 바리에이션 ── */
+.cb5-gal { flex: 1 1 auto; min-height: 0; }
+.cb5-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.cb5-bar-title { font: 600 13px var(--font-display); color: var(--text-primary); }
+/* 선택 화면의 그림은 투명 배경이다 - 바둑판을 깔아 투명한 곳이 보이게 한다. */
+.cb5-preview {
+  background-color: var(--bg-deep);
+  background-image: conic-gradient(rgba(255,255,255,0.05) 25%, transparent 0 50%, rgba(255,255,255,0.05) 0 75%, transparent 0);
+  background-size: 16px 16px;
+}
+.cb5-annot { display: flex; flex-direction: column; gap: 5px; }
+.cb5-annot-name, .cb5-annot-desc {
+  width: 100%; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border-dim);
+  background: var(--bg-deep); color: var(--text-primary); font: 400 12px var(--font-mono);
+}
+.cb5-annot-desc { resize: vertical; min-height: 54px; line-height: 1.5; }
+.cb5-annot-name:focus, .cb5-annot-desc:focus { border-color: var(--accent); outline: none; }
+.cb5-comp { display: flex; flex-direction: column; gap: 3px; font: 400 11px var(--font-mono); color: var(--text-dim); }
+.cb5-comp-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+.cb5-comp-row b { font-weight: 600; color: var(--text-muted); }
+.cb5-comp-row span { color: var(--text-primary); word-break: break-word; }
+/* 바리에이션: 결과 칸이 A(원본) | B(결과) 둘로 갈린다 - 예전 벤치의 나란히 보기를 잇는다. */
+.cb5-win.is-ab .cb5-side { flex: 0 0 clamp(420px, 60%, 900px); flex-direction: row; gap: 10px; }
+.cb5-ab-pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+/* 띠의 % 는 그림의 행이다. 그림과 같은 비율의 상자를 칸에 꽉 차게 놓고(컨테이너 단위) 선 · 띠를 그 위에 얹는다. */
+.cb5-band-stage { container-type: size; }
+.cb5-band-box {
+  position: relative; flex: 0 0 auto; touch-action: none; user-select: none;
+  width: min(100cqw, calc(100cqh * var(--cb5-w) / var(--cb5-h)));
+  aspect-ratio: var(--cb5-w) / var(--cb5-h);
+}
+.cb5-band-box img { width: 100%; height: 100%; display: block; object-fit: fill; pointer-events: none; }
+.cb5-band {
+  position: absolute; left: 0; right: 0; pointer-events: none;
+  background: rgba(124,106,239,0.30);
+}
+.cb5-band-line {
+  position: absolute; left: 0; right: 0; height: 20px; margin-top: -10px; cursor: ns-resize;
+  display: flex; align-items: center;
+}
+.cb5-band-line::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 9px; border-top: 2px solid var(--accent-glow);
+}
+.cb5-band-line span {
+  position: relative; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+  background: var(--accent); color: #fff; font: 600 10.5px var(--font-display);
+}
 .cb5-store { flex: 0 0 auto; }
 .cb5-store-head { font: 600 12px var(--font-display); color: var(--text-muted); margin-bottom: 6px; }
 .cb5-store-list { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; min-height: 30px; }

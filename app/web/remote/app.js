@@ -995,7 +995,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5j')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5k')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1151,7 +1151,7 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261011-inset18');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261011-inset19');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),
@@ -14611,7 +14611,10 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261001-slashpop2'
       getLoraKeywords: () => animaLoraPanel?.loraKeywords?.() ?? null,
       // Interactive 슬롯 편집 중에는 태그 정보 툴팁(설명 + RELATED)을 띄우지 않는다 —
       // 앵커 팝업(팔레트/썸네일) 위에 겹쳐 가린다. 자동완성 드롭다운은 그대로 동작한다.
-      isTagInfoSuppressed: () => document.body.classList.contains('interactive-editing'),
+      // Assets 신 사양의 제작 화면도 같다(사용자 지시 2026-10-11): 정보 판이 그리드를 통째로 가린다 -
+      // 거기서는 이벤트 맵의 작은 툴팁 카드가 부품을 설명한다(characterBuilderV5.mjs).
+      isTagInfoSuppressed: () => document.body.classList.contains('interactive-editing')
+        || document.body.classList.contains('assets-v5-mode'),
     });
     tagAssist.bindDefaultTextareas();
     // 자동완성 팝업은 body 직속이라 리모컨이 '바깥' 으로 친다 - 후보를 누르는

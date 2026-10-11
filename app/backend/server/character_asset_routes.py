@@ -608,6 +608,20 @@ def register_character_asset_routes(
                 print(f"[CharacterAsset] module state broadcast failed: {exc}")
         return {"ok": True, **state}
 
+    @app.post("/api/character-asset/inset/background")
+    async def api_character_asset_inset_background(req: Request):
+        # 칸의 바탕색(white | black). 투명한 그림의 뒤와 그림이 덮지 않은 칸이 이 색으로 나간다.
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).set_reference_inset_background, payload.get("color")
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset background failed: {exc}"}, status_code=500)
+        return {"ok": True, **state}
+
     @app.post("/api/character-asset/inset/enabled")
     async def api_character_asset_inset_enabled(req: Request):
         # 인셋을 켜고 끈다(`{enabled}`). 꺼도 그림 · 배치 · 해상도는 남는다.

@@ -145,6 +145,27 @@ def rgb_without_hidden_color(image: Image.Image) -> Image.Image:
     return rgb
 
 
+# 인셋 칸의 바탕색(사용자 결정 2026-10-11). 투명한 그림의 뒤와, 그림이 덮지 않은 칸이 이 색이다.
+# 기본은 흰색 - 붙여넣은 그림도 흰 바탕이고 캔버스도 희다. 검정은 화면의 토글로 고른다
+# (예전에는 투명한 자리가 늘 검정으로 나갔다 - 알파를 그냥 떼어서 그 밑의 검정이 드러났을 뿐이다).
+REFERENCE_INSET_PANEL_COLORS: dict[str, tuple[int, int, int]] = {"white": (255, 255, 255), "black": (0, 0, 0)}
+DEFAULT_REFERENCE_INSET_PANEL_COLOR = "white"
+
+
+def flatten_on(image: Image.Image, rgb: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
+    """알파가 있는 그림을 그 색 바탕에 **얹어** RGB 로 만든다(없으면 그냥 RGB).
+
+    떼기(`convert("RGB")`)가 아니라 얹기다: 완전히 투명한 자리는 바탕색이 되고(그 밑의 숨은 색은 안 드러난다 -
+    NAI 업스케일본은 거기가 노이즈다), 반투명한 가장자리는 바탕색과 섞인다.
+    """
+    if image.mode not in ("RGBA", "LA") and "transparency" not in image.info:
+        return image.convert("RGB")
+    rgba = image.convert("RGBA")
+    flat = Image.new("RGB", rgba.size, tuple(int(v) for v in rgb))
+    flat.paste(rgba, mask=rgba.getchannel("A"))
+    return flat
+
+
 def resolve_reference_inset_canvas(width: object, height: object) -> tuple[int, int]:
     """고를 수 있는 캔버스인지 확인해 돌려준다. 목록에 없으면 기본값.
 
@@ -165,6 +186,8 @@ class ReferenceInsetPreprocessSpec:
     canvas_width: int = 1152
     canvas_height: int = 896
     background_rgb: tuple[int, int, int] = (255, 255, 255)
+    # 칸의 바탕색: 투명한 그림의 뒤 · 그림이 덮지 않은 칸(`REFERENCE_INSET_PANEL_COLORS`).
+    panel_rgb: tuple[int, int, int] = (255, 255, 255)
 
     # Empirical bleed that produced a stable inpaint region in practice.
     left_bleed_px: int = 16
@@ -322,7 +345,8 @@ def prepare_reference_inpaint_canvas(
       Binary 1/8 mask for NovelAI native infill.
     """
     spec = spec or ReferenceInsetPreprocessSpec()
-    reference = rgb_without_hidden_color(source_image)
+    # 투명한 그림은 칸의 바탕색에 얹는다(줄이기 **전에** - 숨은 색이 가장자리로 번지지 않게).
+    reference = flatten_on(source_image, spec.panel_rgb)
 
     panelled = box is not None or divider is not None
     if not panelled:
@@ -333,6 +357,10 @@ def prepare_reference_inpaint_canvas(
         placement = _panel_placement(placed, divider_px, spec)
 
     canvas = Image.new("RGB", (spec.canvas_width, spec.canvas_height), spec.background_rgb)
+    if panelled and tuple(spec.panel_rgb) != tuple(spec.background_rgb):
+        # 칸 전체가 그 바탕색이다 - 그림이 덮지 않은 자리도. 안 칠하면 검은 그림 상자가 흰 칸 위에 떠 있게 된다.
+        canvas.paste(tuple(int(v) for v in spec.panel_rgb), (
+            placement.visible_left, placement.visible_top, placement.visible_right, placement.visible_bottom))
     if panelled:
         # 그림은 칸 안에서만 보인다 - **보이는 부분만** 줄여(늘려) 놓는다. 통째로 줄인 뒤 자르면 안 된다.
         visible = _resize_visible_part(reference, placement)

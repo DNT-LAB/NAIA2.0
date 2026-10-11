@@ -95,7 +95,10 @@ const DRAFT_KEY = 'naia.assetsV5.draft';
 // 시험 그림을 처음 놓는 배율의 상한(높이를 채우느라 좌우를 자르는 정도) · 휠로 키울 수 있는 끝.
 const STAGE_BASE_MAX = 1.12;
 const STAGE_ZOOM_MAX = 8;
-const CANDIDATE_MAX = 8;       // 시험 생성 후보를 이만큼만 쥔다(가장 오래된 것부터 버린다)
+// 시험 그림을 이만큼 쥔다(넘으면 가장 오래된 것부터 버린다). 서버가 쥐어 주는 수(`CANDIDATE_RETENTION_LIMIT` = 24)와
+// 같다 - 예전의 8 은 후보 줄 한 줄에 맞춘 값이라, 아홉 번째를 만들면 첫 그림이 사라져 다시는 고를 수 없었다
+// (사용자 제보 2026-10-11). 줄은 옆으로 굴린다.
+const CANDIDATE_MAX = 24;
 const SEARCH_MAX = 150;        // 검색 결과 칸 수. 넘으면 넘었다고 말한다
 const SEARCH_DELAY = 150;
 const BAND_MIN = 0.05;         // 다시 그릴 띠의 최소 높이(그림 높이의 5% - 서버의 문턱과 같다)
@@ -320,7 +323,8 @@ export function createCharacterBuilderV5({
     const sensitive = !!(info.part.adult || info.entry.adult);
     const cls = `ia-cell cb5-cell${chosen ? ' on' : ''}${sensitive ? ' is-sensitive' : ''}`;
     const label = act === 'on' ? `${tag} 넣기` : `${tag} 빼기`;
-    return `<div class="${cls}" data-tag="${escHtml(tag)}" title="${escHtml(tagTip(tag))}">`
+    return `<div class="${cls}" data-tag="${escHtml(tag)}" data-cb-tip="${escHtml(tag)}"`
+      + ` data-cb-tip-hint="${act === 'on' ? '+ 를 눌러 넣기' : '− 를 눌러 빼기'}" aria-label="${escHtml(tagTip(tag))}">`
       + `<span class="ia-cell-img">${cellMedia(info)}`
       + `${sensitive ? '<span class="ia-cell-veil">보기</span>' : ''}</span>`
       + `<span class="ia-cell-cap"><span class="ia-cell-name">${escHtml(tag)}</span>`
@@ -337,7 +341,7 @@ export function createCharacterBuilderV5({
     const prose = isProsePart(text);
     const negative = weight != null && Number(weight) < 0;
     const cls = `ia-chip${prose ? ' is-prose' : ''}${negative ? ' is-negw' : ''}`;
-    return `<span class="${cls}" title="${escHtml(tagInfo.has(bare) ? tagTip(bare) : text)}">`
+    return `<span class="${cls}" data-cb-tip="${escHtml(bare)}" data-cb-tip-hint="× 로 빼기 · 줄을 누르면 고쳐 쓰기">`
       + (weight ? `<b class="ia-chip-w">${escHtml(weight)}\u00d7</b>` : '')
       + `<span class="ia-chip-t">${escHtml(text)}</span>`
       + `<button type="button" class="ia-chip-x" data-cb-chip-del="${index}" data-cb-chip-block="${escHtml(blockKey)}"`
@@ -350,7 +354,95 @@ export function createCharacterBuilderV5({
     input.style.height = `${Math.min(160, Math.max(58, input.scrollHeight + 2))}px`;
   }
 
+  // ------------------------------------------------------------------ 부품 툴팁(이벤트 맵의 카드)
+  //
+  // 이 화면에서는 자동완성의 태그 정보 판(IMPLIES · RELATED · RATING)을 띄우지 않는다 - 판이 커서 그리드를 통째로
+  // 가린다(사용자 지시 2026-10-11). 대신 이벤트 맵의 툴팁과 같은 작은 카드(.em-tip)를 칸 · 칩에 댄다:
+  // 이름 · 분류 · 설명 · Danbooru 게시물 수 · 썸네일. 포함 / 제외 줄은 비워 둔다(이 화면에는 그런 수가 없다).
+  let tipEl = null;
+  let tipOwner = null;
+  const tipLooked = new Map();     // 태그 -> {desc, count} | null(조회해 봤는데 없다)
+  const tipAsked = new Set();
+
+  function ensureTip() {
+    if (tipEl && document.body.contains(tipEl)) return tipEl;
+    tipEl = document.createElement('div');
+    tipEl.className = 'em-tip';
+    document.body.appendChild(tipEl);          // body 직계 - 화면 안에 두면 overflow 에 잘린다
+    return tipEl;
+  }
+
+  async function askTip(tag) {
+    if (tipLooked.has(tag) || tipAsked.has(tag)) return;
+    tipAsked.add(tag);
+    try {
+      const response = await fetchFn(`/api/tag/lookup?tag=${encodeURIComponent(tag)}`);
+      const data = response.ok ? await response.json() : null;
+      tipLooked.set(tag, data && data.tag ? {desc: String(data.desc || ''), count: Number(data.count) || 0} : null);
+    } catch (_) {
+      tipLooked.set(tag, null);
+    }
+    if (tipOwner && tipOwner.dataset.cbTip === tag) paintTip(tipOwner);
+  }
+
+  function paintTip(owner) {
+    const tip = ensureTip();
+    const tag = owner.dataset.cbTip || '';
+    const info = tagInfo.get(tag) || tagInfo.get(tag.toLowerCase());
+    const looked = tipLooked.get(tag);
+    const source = info ? `${blockDef.get(info.block)?.label || ''} · ${partLabel(info.part)}` : '직접 쓴 것';
+    const desc = (info && (TAG_DESC || {})[info.entry.tag]) || looked?.desc || '';
+    const sensitive = !!(info && (info.part.adult || info.entry.adult));
+    const thumb = info?.entry.thumb && !sensitive
+      ? `<img class="em-tip-thumb" alt="" src="${escHtml(thumbUrl(info.entry.thumb))}">` : '';
+    const waiting = !desc && looked === undefined && !isProsePart(tag);
+    tip.innerHTML = `<div class="em-tip-row"><div class="em-tip-main">`
+      + `<div class="em-tip-head"><span class="em-tip-tag">${escHtml(tag)}</span>`
+      + `<span class="em-tip-src">${escHtml(source)}</span></div>`
+      + (desc ? `<div class="em-tip-desc">${escHtml(desc)}</div>`
+        : (waiting ? '<div class="em-tip-desc em-tip-wait">…</div>' : ''))
+      + `<div class="em-tip-stats">${looked?.count ? `Danbooru ${looked.count.toLocaleString('en-US')}` : ''}</div>`
+      + `<div class="em-tip-foot"><div class="em-tip-hint">${escHtml(owner.dataset.cbTipHint || '')}</div></div>`
+      + `</div>${thumb}</div>`;
+    tip.classList.add('open');
+    // 이벤트 맵과 같은 자리: 대상 가운데의 살짝 오른쪽 · 바로 아래. 아래가 모자라면 위로.
+    const a = owner.getBoundingClientRect();
+    const b = tip.getBoundingClientRect();
+    const view = document.defaultView || globalThis;
+    let left = a.left + a.width * 0.5 + 16;
+    left = Math.max(8, Math.min(left, view.innerWidth - b.width - 8));
+    let top = a.bottom + 6;
+    if (top + b.height > view.innerHeight - 8) top = a.top - b.height - 6;
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(Math.max(8, top))}px`;
+  }
+
+  function showTip(owner) {
+    if (!owner || owner === tipOwner) return;
+    tipOwner = owner;
+    const tag = owner.dataset.cbTip || '';
+    if (tag && !isProsePart(tag)) void askTip(tag);     // 문장은 조회할 태그가 아니다
+    paintTip(owner);
+  }
+
+  function hideTip() {
+    tipOwner = null;
+    if (tipEl) tipEl.classList.remove('open');
+  }
+
+  function onTipOver(event) {
+    const owner = event.target.closest ? event.target.closest('[data-cb-tip]') : null;
+    if (owner) showTip(owner);
+  }
+
+  function onTipOut(event) {
+    const owner = event.target.closest ? event.target.closest('[data-cb-tip]') : null;
+    if (!owner || owner.contains(event.relatedTarget)) return;
+    if (owner === tipOwner) hideTip();
+  }
+
   function renderLeft() {
+    hideTip();           // 다시 그리면 툴팁의 주인이 사라진다
     if (!catalog) {
       leftMount.innerHTML = `<div class="cb5-empty">${escHtml(loadError
         ? `부품 목록을 불러오지 못했습니다: ${loadError}` : '부품 목록을 불러오는 중...')}</div>`;
@@ -528,6 +620,7 @@ export function createCharacterBuilderV5({
   function renderMain() {
     const host = rightMount.querySelector('[data-cb-role="main"]');
     if (!host) return;
+    hideTip();
     const scroller = host.querySelector('.cb5-main-scroll');
     const top = scroller ? scroller.scrollTop : 0;
     const q = query.trim().toLowerCase();
@@ -668,10 +761,11 @@ export function createCharacterBuilderV5({
     const strip = host.querySelector('.cb5-strip');
     const on = strip?.querySelector('.cb5-cand.is-on');
     if (strip && on) {
-      if (on.offsetLeft < strip.scrollLeft) strip.scrollLeft = on.offsetLeft;
-      else if (on.offsetLeft + on.offsetWidth > strip.scrollLeft + strip.clientWidth) {
-        strip.scrollLeft = on.offsetLeft + on.offsetWidth - strip.clientWidth;
-      }
+      // ⚠️ `offsetLeft` 는 줄이 아니라 위치 잡힌 조상이 기준이다 - 줄 안에서의 자리는 두 사각형의 차로 잰다.
+      const stripBox = strip.getBoundingClientRect();
+      const onBox = on.getBoundingClientRect();
+      if (onBox.left < stripBox.left) strip.scrollLeft += onBox.left - stripBox.left;
+      else if (onBox.right > stripBox.right) strip.scrollLeft += onBox.right - stripBox.right;
     }
   }
 
@@ -720,9 +814,24 @@ export function createCharacterBuilderV5({
     };
     if (found.img.complete && found.img.naturalWidth) place();
     else found.img.addEventListener('load', place, {once: true});
+    // 서버가 쥐는 시험 그림에도 끝이 있다(다른 화면의 후보와 한 줄을 쓴다). 사라진 것을 고르면 깨진 그림 대신 말로 알린다.
+    found.img.addEventListener('error', () => {
+      const candidate = picked();
+      if (!candidate || candidate.status !== 'done' || (candidate.requestId || '') !== key) return;
+      candidate.status = 'error';
+      candidate.message = '이 시험 그림은 더 이상 남아 있지 않습니다 - 다시 생성해 주세요';
+      renderSide();
+    }, {once: true});
   }
 
   function onWheel(event) {
+    // 후보 줄: 세로 휠로 옆으로 굴린다(줄이 한 줄이라 세로로 굴릴 것이 없다).
+    const strip = event.target.closest('.cb5-strip');
+    if (strip && strip.scrollWidth > strip.clientWidth && !event.deltaX) {
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY;
+      return;
+    }
     if (!event.target.closest('.cb5-stage[data-cb-zoom]')) return;
     const found = zoomStage();
     const fit = found && stageFit(found.stage, found.img);
@@ -1658,6 +1767,11 @@ export function createCharacterBuilderV5({
   }
 
   leftMount.addEventListener('click', onClick);
+  for (const mount of [leftMount, rightMount]) {
+    mount.addEventListener('pointerover', onTipOver);
+    mount.addEventListener('pointerout', onTipOut);
+    mount.addEventListener('pointerdown', hideTip);
+  }
   leftMount.addEventListener('input', onLeftInput);
   leftMount.addEventListener('keydown', onLeftKeydown);
   rightMount.addEventListener('click', onClick);

@@ -224,6 +224,8 @@ export function createReferenceInsetWindow({
                   data-naia-title="저장해 둔 그림에서 고릅니다">Storage</button>
           <button type="button" class="riw-chip" data-riw-upscale
                   data-naia-title="레퍼런스 원본을 NAI 업스케일에 한 번 보내 두고, 그 뒤로는 거기서 줄여 칸에 놓습니다 - 그림을 키워도 흐려지지 않습니다 (Anlas 가 듭니다 · 그림 하나에 한 번)">업스케일</button>
+          <button type="button" class="riw-chip" data-riw-bg
+                  data-naia-title="칸의 바탕색을 흰색 · 검정으로 바꿉니다 - 투명한 그림의 뒤와 그림이 덮지 않은 자리가 이 색으로 나갑니다"></button>
           <span class="riw-note" data-riw-note></span>
         </div>
         <div class="riw-row" data-riw-row>
@@ -269,6 +271,7 @@ export function createReferenceInsetWindow({
       reset: find('[data-riw-reset]'),
       read: find('[data-riw-read]'),
       upscale: find('[data-riw-upscale]'),
+      bg: find('[data-riw-bg]'),
       pastes: [...panel.body.querySelectorAll('[data-riw-paste]')],
       storages: [...panel.body.querySelectorAll('[data-riw-storage]')],
       assets: [...panel.body.querySelectorAll('[data-riw-assets]')],
@@ -314,6 +317,11 @@ export function createReferenceInsetWindow({
         if (data.references_disabled) showToast('레퍼런스 인셋을 켰습니다 - Character Reference 는 껐습니다', 'success');
         else showToast(wanted ? '레퍼런스 인셋을 켰습니다' : '레퍼런스 인셋을 껐습니다 - 그림과 배치는 남아 있습니다', 'success');
       });
+    });
+    // 칸의 바탕색: 흰색 <-> 검정(사용자 결정 2026-10-11). 이 세션의 설정이라 그림을 바꿔 꽂아도 남는다.
+    el.bg.addEventListener('click', () => {
+      if (locked()) return;
+      send({color: state?.background === 'black' ? 'white' : 'black'}, KEEP_DRAFT, '/api/character-asset/inset/background');
     });
     el.crop.addEventListener('change', () => {
       send({enabled: el.crop.checked}, KEEP_DRAFT, '/api/character-asset/inset/crop');
@@ -397,6 +405,11 @@ export function createReferenceInsetWindow({
     el.cost.textContent = price > 0 ? (on ? 'Anlas 소모' : '켜면 Anlas 소모') : '';
     el.reset.disabled = lock || (!draft && !state.custom);
     el.upscale.disabled = lock || !!state.upscaled;          // 그림 하나에 한 번이면 된다
+    // 미리보기의 칸도 **나가는 캔버스와 같은 바탕**을 깐다. 예전에는 미리보기는 희고 나가는 것은 검었다.
+    const dark = state.background === 'black';
+    el.bg.textContent = dark ? '바탕 검정' : '바탕 흰색';
+    el.bg.disabled = lock;
+    el.panel.style.background = dark ? '#000000' : '#ffffff';
     el.upscale.textContent = busy ? '업스케일 중…' : state.upscaled ? '업스케일됨' : '업스케일';
     el.pastes.forEach(button => { button.disabled = lock; });
     el.storages.forEach(button => { button.disabled = lock; });

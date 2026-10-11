@@ -630,6 +630,11 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/inset/background",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/inset/enabled",
           "smoke": "state_mutation"
         },

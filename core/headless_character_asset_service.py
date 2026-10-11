@@ -250,6 +250,9 @@ class HeadlessCharacterAssetService:
         # 생성 결과에서 인셋 칸을 잘라 낼 것인가(사용자 지정 2026-10-09). 핀이 아니라 이 세션의 설정이다 -
         # 그림을 바꿔 꽂아도 유지된다. 앱을 다시 켜면 꺼진 채로 시작한다.
         self._reference_inset_crop_result = False
+        # 칸의 바탕색("white" | "black" - 사용자 결정 2026-10-11). 핀이 아니라 이 세션의 설정이다(그림을 바꿔 꽂아도
+        # 유지된다). 투명한 그림의 뒤와 그림이 덮지 않은 칸이 이 색으로 나간다. 앱을 다시 켜면 흰색이다.
+        self._reference_inset_background = "white"
         # 인셋이 **켜져 있는가**. 꽂아 둔 것(`_reference_inset_pin` - 그림 · 배치 · 해상도)과 따로다:
         # 꺼도 꽂아 둔 것은 남고, 다시 켜면 그대로 이어진다(사용자 결정 2026-10-10). 앱을 켜면 꺼진 채다.
         self._reference_inset_enabled = False
@@ -417,7 +420,12 @@ class HeadlessCharacterAssetService:
         else:
             character_id, variation, path = "", "", None      # 에셋 없는 인셋 - 붙여넣은 그림뿐이다
         canvas_w, canvas_h = resolve_reference_inset_canvas(width, height)
-        spec = ReferenceInsetPreprocessSpec(canvas_width=canvas_w, canvas_height=canvas_h)
+        from utils.reference_inpaint_preprocess import REFERENCE_INSET_PANEL_COLORS
+
+        background = self._reference_inset_background
+        spec = ReferenceInsetPreprocessSpec(
+            canvas_width=canvas_w, canvas_height=canvas_h, panel_rgb=REFERENCE_INSET_PANEL_COLORS[background],
+        )
         source_id = hashlib.sha1(override).hexdigest()[:16] if override else ""
         with self._retain_lock:
             upscaled_png = (
@@ -476,6 +484,8 @@ class HeadlessCharacterAssetService:
             "stored_id": str(stored_id or ""),
             # 에셋이 아닌 그림을 캐릭터 자리(가운데 · 살짝 키움)에 놓았는가 - 배치 · 해상도를 바꿀 때 이어 간다.
             "character_layout": bool(character_layout),
+            # 이 캔버스를 구운 바탕색.
+            "background": background,
             "mask_png": mask_buffer.getvalue(),
             "width": int(result.canvas_image.width),
             "height": int(result.canvas_image.height),
@@ -634,6 +644,26 @@ class HeadlessCharacterAssetService:
             carry = self._inset_carry(pin)
         return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
 
+    @_inset_serialized
+    def set_reference_inset_background(self, color: Any) -> dict[str, Any]:
+        """칸의 바탕색을 바꾼다(흰색 <-> 검정). 꽂아 둔 것이 있으면 그 바탕으로 다시 굽는다 - 그림 · 배치는 그대로."""
+        from utils.reference_inpaint_preprocess import REFERENCE_INSET_PANEL_COLORS
+
+        name = str(color or "").strip().lower()
+        if name not in REFERENCE_INSET_PANEL_COLORS:
+            raise ValueError("바탕색은 white 또는 black 입니다.")
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            self._reference_inset_background = name
+            if pin:
+                character_id, variation = str(pin["character_id"]), str(pin["variation"])
+                width, height = pin["width"], pin["height"]
+                box = {**pin["box"], "divider": pin["divider"]} if pin.get("custom") else None
+                carry = self._inset_carry(pin)
+        if not pin:
+            return self.reference_inset_state()
+        return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
+
     # 업스케일해 둔 원본을 몇 장까지 쥘까. 한 장이 수 MB 라 많이 쥐지 않는다(오래된 것부터 버린다).
     REFERENCE_INSET_UPSCALED_SOURCE_LIMIT = 2
     # 붙여넣는 그림의 한계: 풀기 전에 크기로 거르고, 큰 것은 줄여 쥔다(캔버스는 1MP 다 - 더 큰 것은 쓸 데가 없다).
@@ -685,9 +715,9 @@ class HeadlessCharacterAssetService:
                 buffer = io.BytesIO()
                 # ⚠️ `convert("RGB")` 로 떼면 안 된다. NAI 업스케일은 투명한 자리의 색을 노이즈로 채워 돌려준다 -
                 #    알파를 그냥 버리면 그 노이즈가 인셋 칸의 배경이 된다(사용자 제보 2026-10-11).
-                from utils.reference_inpaint_preprocess import rgb_without_hidden_color
-
-                rgb_without_hidden_color(upscaled).save(buffer, format="PNG")
+                #    알파를 **쥔 채** 둔다: 바탕색(흰색 · 검정)은 구울 때 얹는다(`flatten_on`).
+                keeps_alpha = upscaled.mode in ("RGBA", "LA") or "transparency" in upscaled.info
+                (upscaled.convert("RGBA") if keeps_alpha else upscaled.convert("RGB")).save(buffer, format="PNG")
                 with self._retain_lock:
                     sources = self._reference_inset_upscaled_sources
                     sources[key] = buffer.getvalue()
@@ -766,7 +796,8 @@ class HeadlessCharacterAssetService:
         return state
 
     def _normalize_inset_source(self, image_bytes: Any) -> bytes:
-        """붙여넣은 그림을 쥘 수 있는 꼴(RGB PNG · 긴 변 4096 이하)로 만든다. 투명한 곳은 흰 바탕에 얹는다."""
+        """붙여넣은 그림을 쥘 수 있는 꼴(PNG · 긴 변 4096 이하)로 만든다. **투명한 곳은 투명한 채로** 둔다 -
+        바탕색(흰색 · 검정)은 구울 때 얹는다. 여기서 흰 바탕에 얹어 버리면 바탕색을 바꿔도 따라오지 않는다."""
         from PIL import Image
 
         raw = bytes(image_bytes or b"")
@@ -784,9 +815,7 @@ class HeadlessCharacterAssetService:
                     raise ValueError("그림이 너무 큽니다(4천만 픽셀까지).")
                 opened.load()
                 if opened.mode in ("RGBA", "LA") or "transparency" in opened.info:
-                    rgba = opened.convert("RGBA")
-                    image = Image.new("RGB", rgba.size, (255, 255, 255))
-                    image.paste(rgba, mask=rgba.getchannel("A"))
+                    image = opened.convert("RGBA")
                 else:
                     image = opened.convert("RGB")
         except ValueError:
@@ -904,7 +933,7 @@ class HeadlessCharacterAssetService:
                     "toggle_epoch": self._reference_inset_toggle_epoch}
             if not pin:
                 # 꽂아 둔 것이 없다. 창은 이 상태로도 열린다('그림을 넣어 주세요').
-                return {"active": False, "configured": False,
+                return {"active": False, "configured": False, "background": self._reference_inset_background,
                         "crop_result": bool(self._reference_inset_crop_result), **sync}
             stored_id = str(pin.get("stored_id") or "")
             return {
@@ -920,6 +949,8 @@ class HeadlessCharacterAssetService:
                 "source_revision": str(pin.get("source_id") or "asset"),
                 # 생성 결과에서 인셋 칸을 잘라 내는가(이 세션의 설정).
                 "crop_result": bool(self._reference_inset_crop_result),
+                # 칸의 바탕색("white" | "black" - 이 세션의 설정). 화면의 미리보기도 이 색을 깐다.
+                "background": self._reference_inset_background,
                 "character_id": pin["character_id"],
                 "variation": pin["variation"],
                 "width": pin["width"],

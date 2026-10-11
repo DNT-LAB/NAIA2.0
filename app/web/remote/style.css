@@ -30857,3 +30857,178 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .reference-inset-menu .reference-inset-menu-cost {
   flex: none; overflow: visible; color: #f0c060; font: 600 10.5px var(--font-mono);
 }
+
+/* ── Assets 신 사양(V5) 캐릭터 제작 (2026-10-11) ────────────────────────────────
+   왼쪽 = 메인 프롬프트 자리를 덮는 블록 줄(#cbBlocks) · 오른쪽 = Assets 창의 [신 사양] 탭(#charBuilderV5Root).
+   썸네일 칩은 Interactive 의 `.ia-cell` 을 그대로 쓴다 - 여기는 배치와, 그 칩이 이 화면에서 달라지는 곳만 적는다.
+   덮개는 값(프롬프트 글)을 건드리지 않고 가리기만 한다 - 클래스를 떼면 원래 화면이 그대로 돌아온다. */
+body.assets-v5-mode #tabPrompt > .prompt-highlight-wrap,
+body.assets-v5-mode #tabPrompt > .section-label,
+body.assets-v5-mode #tabPrompt > #promptInpaintBadge,
+body.assets-v5-mode #iaBlocks { display: none !important; }
+/* Prompt ~ Fn 탭 줄도 걷는다(사용자 지시 2026-10-11). 이 모드에는 고칠 프롬프트 · 파라미터 · 네거티브가 없다 -
+   사양은 고정이고(v5-medium 은 네거티브도 받지 않는다) 덮개는 Prompt 탭 위에만 올라온다. */
+body.assets-v5-mode .prompt-inner > .tab-bar { display: none; }
+/* 이 모드에서 쓰지 않는 조작도 걷는다(사용자 지시 2026-10-11): Tools & Assistants · 모듈 줄 · 옵션 줄 · 해상도 줄 · Random.
+   남는 것은 Generate 하나다 - 이 모드에서는 그것이 시험 생성이다. */
+body.assets-v5-mode .assistants-section,
+body.assets-v5-mode #moduleLauncher,
+body.assets-v5-mode .bottom-controls > .options-row,
+body.assets-v5-mode .bottom-controls > .quick-params,
+body.assets-v5-mode #btnRnd { display: none !important; }
+body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
+
+.cb5-blocks {
+  display: flex; flex-direction: column; gap: 6px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 2px;
+}
+.cb5-blocks[hidden], .cb5-root[hidden] { display: none; }
+.cb5-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cb5-title { flex: 1 1 auto; font: 600 13px var(--font-display); color: var(--text-primary); }
+.cb5-seg { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 7px; overflow: hidden; }
+.cb5-seg-btn {
+  padding: 4px 10px; background: none; border: 0; border-right: 1px solid var(--border-dim);
+  color: var(--text-dim); font: 500 11px var(--font-mono); cursor: pointer;
+}
+.cb5-seg-btn:last-child { border-right: 0; }
+.cb5-seg-btn:hover { color: var(--text-primary); }
+.cb5-seg-btn.is-on { background: rgba(124,106,239,0.22); color: var(--text-primary); }
+.cb5-btn {
+  padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border-dim);
+  background: var(--bg-card); color: var(--text-muted); font: 500 11px var(--font-mono); cursor: pointer;
+}
+.cb5-btn:hover:not(:disabled) { border-color: var(--border-glow); color: var(--text-primary); }
+.cb5-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.cb5-btn.is-primary { background: rgba(124,106,239,0.22); border-color: var(--accent); color: var(--text-primary); }
+.cb5-rows { display: flex; flex-direction: column; gap: 5px; }
+.cb5-row {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px;
+  padding: 7px 9px; min-height: 46px; cursor: pointer;
+  background: var(--bg-card); border: 1px solid var(--border-dim); border-radius: 8px;
+}
+.cb5-row:hover { border-color: var(--border-glow); }
+.cb5-row.is-on { border-color: var(--accent); background: var(--bg-elevated); }
+.cb5-row-label b { display: block; font: 600 12.5px var(--font-display); color: var(--text-primary); }
+.cb5-row-n {
+  display: inline-block; margin-top: 3px; padding: 1px 6px; border-radius: 4px;
+  font: 500 9px var(--font-mono); color: var(--accent-glow); background: rgba(124,106,239,0.16);
+}
+.cb5-row-cells { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
+.cb5-row-cells .cb5-cell { width: 76px; }
+.cb5-row-empty { align-self: center; font: italic 400 11px var(--font-mono); color: var(--text-dim); }
+/* Interactive 의 칸은 본문이 '살펴보기'(cursor: help)다. 여기는 살펴볼 옆판이 없다 - 단추만 누른다. */
+.cb5-cell { cursor: default; }
+.cb5-swatch { display: block; width: 100%; height: 100%; }
+.cb5-step { font: 500 10px var(--font-mono); color: var(--text-dim); }
+.cb5-empty { padding: 18px; text-align: center; font: 400 11.5px var(--font-mono); color: var(--text-dim); }
+.cb5-note { padding: 8px 2px; font: 400 10.5px var(--font-mono); color: var(--text-dim); }
+
+#rightTabCharAssets > .char-asset-root { flex: 1 1 auto; min-height: 0; height: auto; }
+.cb5-spec-tabs { display: flex; gap: 6px; justify-content: flex-end; padding: 8px 10px 0; flex: 0 0 auto; }
+.cb5-spec-tab {
+  padding: 5px 12px; border-radius: 7px; border: 1px solid var(--border-dim); background: none;
+  color: var(--text-dim); font: 500 11px var(--font-mono); cursor: pointer;
+}
+.cb5-spec-tab:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.cb5-spec-tab.is-on { background: rgba(124,106,239,0.22); border-color: var(--accent); color: var(--text-primary); }
+.cb5-root {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px;
+  padding: 10px; overflow: hidden;
+}
+.cb5-win { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; }
+.cb5-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.cb5-search {
+  flex: 0 0 auto; height: 30px; padding: 0 10px; border-radius: 7px;
+  border: 1px solid var(--border-dim); background: var(--bg-deep);
+  color: var(--text-primary); font: 400 12px var(--font-mono);
+}
+.cb5-search:focus { border-color: var(--accent); outline: none; }
+.cb5-main-title { flex: 0 0 auto; font: 600 12px var(--font-display); color: var(--text-muted); }
+/* 그리드(왼쪽)와 소분류 목록(오른쪽 세로 줄). 소분류는 접지 않고 전부 보인다. */
+.cb5-browse { flex: 1 1 auto; min-height: 0; display: flex; gap: 8px; }
+.cb5-main-scroll {
+  flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; padding-right: 2px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cb5-parts {
+  flex: 0 0 136px; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cb5-part {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding: 6px 8px; text-align: left;
+  border: 1px solid var(--border-dim); border-radius: 7px; background: var(--bg-card);
+  color: var(--text-muted); font: 500 11px var(--font-mono); cursor: pointer;
+}
+.cb5-part:hover { border-color: var(--border-glow); color: var(--text-primary); }
+.cb5-part.is-open { border-color: var(--accent); color: var(--text-primary); background: rgba(124,106,239,0.18); }
+.cb5-part-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb5-part-n { flex: 0 0 auto; font-size: 9.5px; color: var(--text-dim); }
+.cb5-part-sel {
+  flex: 0 0 auto; padding: 0 5px; border-radius: 4px; font-size: 9.5px;
+  color: var(--accent-glow); background: rgba(124,106,239,0.16);
+}
+/* 그리드는 바깥(.cb5-main-scroll)이 굴린다 - Interactive 팝업용 높이 제한을 푼다. */
+.cb5-grid.ia-cell-grid { max-height: none; overflow: visible; flex: 0 0 auto; }
+.cb5-hit-head { font: 600 11px var(--font-display); color: var(--text-dim); margin-top: 4px; }
+/* 시험 생성 칸 - 결과 그림이 주인이다. 폭은 창을 따라가고, 그림은 남는 높이를 다 쓴다. */
+.cb5-side {
+  flex: 0 0 clamp(300px, 40%, 470px); min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cb5-side-top, .cb5-side-bottom { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cb5-side-label { font: 600 12px var(--font-display); color: var(--text-muted); }
+.cb5-size, .cb5-seed { font: 400 10.5px var(--font-mono); color: var(--text-dim); }
+.cb5-seed { flex: 1 1 auto; }
+.cb5-paid { color: #e0a84a; }
+.cb5-check { display: flex; align-items: center; gap: 6px; font: 400 11px var(--font-mono); color: var(--text-muted); cursor: pointer; }
+/* 결과는 투명 배경이다 - 바둑판을 깔아 투명한 곳이 보이게 한다. */
+.cb5-stage {
+  flex: 1 1 auto; min-height: 200px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--border-glow); border-radius: 8px; background-color: var(--bg-deep);
+  background-image: conic-gradient(rgba(255,255,255,0.05) 25%, transparent 0 50%, rgba(255,255,255,0.05) 0 75%, transparent 0);
+  background-size: 16px 16px;
+}
+.cb5-stage { position: relative; }
+.cb5-stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* 신 사양은 투명 배경이 전제다 - 투명하지 않은 결과에는 그림 위에 경고를 얹는다(저장도 막힌다). */
+.cb5-stage-warn {
+  position: absolute; left: 8px; right: 8px; top: 8px; padding: 7px 10px; border-radius: 7px;
+  background: rgba(150, 30, 30, 0.92); border: 1px solid #ff8a8a; color: #fff;
+  font: 600 11.5px var(--font-display); text-align: center;
+}
+.cb5-stage-warn small { display: block; margin-top: 2px; font: 400 10.5px var(--font-mono); opacity: 0.9; }
+.cb5-cand.is-opaque { border-color: #ff8a8a; opacity: 0.6; }
+.cb5-stage-empty { padding: 10px; text-align: center; font: 400 10.5px var(--font-mono); color: var(--text-dim); }
+.cb5-stage-empty.is-error { color: #ff8a8a; }
+.cb5-strip { flex: 0 0 auto; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.cb5-cand {
+  aspect-ratio: 832 / 1216; padding: 0; overflow: hidden; cursor: pointer;
+  border: 1px solid var(--border-dim); border-radius: 5px; background: var(--bg-card);
+  color: var(--text-dim); font: 500 11px var(--font-mono);
+}
+.cb5-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cb5-cand.is-on { border: 2px solid var(--accent); }
+.cb5-cand.is-error { color: #ff8a8a; }
+.cb5-cand.is-saved { outline: 1px solid #46cf88; outline-offset: -3px; }
+.cb5-store { flex: 0 0 auto; }
+.cb5-store-head { font: 600 12px var(--font-display); color: var(--text-muted); margin-bottom: 6px; }
+.cb5-store-list { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; min-height: 30px; }
+.cb5-card {
+  position: relative; flex: 0 0 78px; overflow: hidden;
+  border: 1px solid var(--border-dim); border-radius: 7px; background: var(--bg-card);
+}
+.cb5-card.is-on { border-color: var(--accent); }
+.cb5-card-open { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; color: var(--text-muted); }
+.cb5-card-open img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; }
+.cb5-card-open span {
+  display: block; padding: 3px 4px 4px; text-align: left;
+  font: 400 10px var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 조작은 마우스를 대면 뜬다(판에는 결과만 먼저). */
+.cb5-card-acts { position: absolute; top: 3px; right: 3px; display: none; gap: 3px; }
+.cb5-card:hover .cb5-card-acts, .cb5-card:focus-within .cb5-card-acts { display: flex; }
+.cb5-card-acts button {
+  padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-glow);
+  background: rgba(10,10,15,0.85); color: var(--text-primary); font: 600 9.5px var(--font-mono); cursor: pointer;
+}

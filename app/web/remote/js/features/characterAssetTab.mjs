@@ -164,7 +164,9 @@ export function createCharacterAssetTabController({
     render();
     try {
       const state = await api(API.list);
-      characters = Array.isArray(state?.characters) ? state.characters : [];
+      // 신 사양(V5)으로 지은 캐릭터는 [신 사양] 탭의 보관함이 맡는다 - 탭 둘이 같은 것을 두 번 보여 주지 않는다.
+      characters = (Array.isArray(state?.characters) ? state.characters : [])
+        .filter(item => item?.spec !== 'v5');
       loadedOnce = true;
       if (selectedId && !characters.some(entry => entry.id === selectedId)) {
         selectedId = '';

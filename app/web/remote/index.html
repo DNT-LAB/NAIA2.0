@@ -620,6 +620,9 @@
           <!-- Interactive Mode: 프롬프트를 의미 슬롯으로 분해한 블록 리스트.
                Interactive 토글이 켜졌을 때만 표시된다(모듈이 hidden 을 제어). -->
           <div class="ia-blocks" id="iaBlocks" hidden></div>
+          <!-- Assets 신 사양(V5) 캐릭터 제작: 일곱 블록 줄. Assets 창의 [신 사양] 탭이 떠 있는 동안만
+               프롬프트 자리를 덮는다(모듈이 hidden 을 제어). 메인 프롬프트 글에는 쓰지 않는다. -->
+          <div class="cb5-blocks" id="cbBlocks" hidden></div>
           <!-- Tag search bar (reserved for future: event/outfit/preset) -->
           <div class="tag-search-bar" id="tagSearchBar" style="display:none">
             <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
@@ -1409,7 +1412,12 @@
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabCharAssets" data-right-pane="charAssets" hidden role="tabpanel">
+    <div class="cb5-spec-tabs" id="charAssetSpecTabs" role="tablist" aria-label="Assets 사양">
+      <button type="button" class="cb5-spec-tab is-on" data-asset-spec="legacy" role="tab" aria-selected="true">구 사양 · V4.5</button>
+      <button type="button" class="cb5-spec-tab" data-asset-spec="v5" role="tab" aria-selected="false">신 사양 · V5</button>
+    </div>
     <div class="char-asset-root" id="charAssetRoot"></div>
+    <div class="cb5-root" id="charBuilderV5Root" hidden></div>
   </div>
 
   <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" hidden role="tabpanel">

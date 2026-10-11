@@ -435,6 +435,7 @@
       "source_files": [
         "app/backend/server/character_asset_routes.py",
         "core/headless_character_asset_service.py",
+        "core/character_builder_v5.py",
         "utils/character_asset_storage.py",
         "utils/inpaint_mask.py",
         "app/web/remote/js/features/characterAssetTab.mjs",
@@ -442,10 +443,36 @@
         "core/reference_inset_storage.py",
         "app/web/remote/js/features/benchCandidates.mjs",
         "app/web/remote/js/features/characterCreationBench.mjs",
+        "app/web/remote/js/features/characterBuilderV5.mjs",
         "app/web/remote/js/features/maskCanvas.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
+        {
+          "method": "GET",
+          "path": "/api/character-parts",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/v5/spec",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/v5/generate",
+          "smoke": "external_live"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/v5/candidate-check",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/v5/update-builder",
+          "smoke": "asset_runtime"
+        },
         {
           "method": "GET",
           "path": "/api/character-asset/list",

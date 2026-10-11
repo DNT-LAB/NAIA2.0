@@ -729,6 +729,8 @@ class HeadlessGenerationService:
         이동, 와일드카드 라인의 global append 소비. 랜덤 경로 산출물처럼 토큰이 없는
         프롬프트는 빠르게 통과한다. ``params``는 execute_request의 로컬 복사본이므로
         요청 원본에는 토큰이 남아 반복 생성 시 매번 재전개(재롤)된다."""
+        if params.get("_literal_input") is True:
+            return
         if params.get("_remote_queue_source") == "E621" and params.get("_e621_use_main_pipeline") is False:
             return
         text = params.get("input")

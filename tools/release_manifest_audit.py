@@ -165,6 +165,9 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/interactive_clothing_harmony.json",
     "data/interactive_tag_harmony.json",
     "data/interactive_preset_facts.json",
+    # Assets 신 사양(V5) 캐릭터 제작의 부품 카탈로그(tools/build_character_parts.py 가 굽는다).
+    # 없으면 신 사양 화면이 "부품 목록을 불러오지 못했습니다" 로 멈춘다(`GET /api/character-parts` 404).
+    "data/character_parts.json",
     # NOTE: Sequence dataset (data/sequence_preset/events_v1.parquet) is NOT shipped —
     # it is downloaded on demand from HuggingFace (core/sequence_download_service.py),
     # mirroring Event Preset. So it is intentionally absent from this allowlist.
@@ -196,6 +199,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/interactive_clothing_harmony.json",
     "*/data/interactive_tag_harmony.json",
     "*/data/interactive_preset_facts.json",
+    "*/data/character_parts.json",
     # 캐릭터 생성 벤치 랜덤 슬롯 풀(2.0.33) - 없으면 클린 설치에서 랜덤생성이
     # 404로 죽는다. SOURCE_BOOTSTRAP_PATHS/release_include_exclude_draft/
     # runtime_asset_classification과 함께 4곳 등록 세트.

@@ -19,6 +19,7 @@ from app.backend.server.result_display_routes import (
 )
 from app.backend.server.websocket_broadcast import broadcast_json
 from core.headless_character_asset_service import MAX_GENERATION_COUNT, PNG_SIGNATURE
+from core.character_builder_v5 import generation_count, specification, transparency
 from core.headless_generation_service import HeadlessGenerationService
 from core.web_session_context import WebSessionContext
 
@@ -146,6 +147,73 @@ def register_character_asset_routes(
     clients: set[Any],
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
+    @app.get("/api/character-parts")
+    async def api_character_parts(req: Request):
+        try:
+            data, revision, _records = await run_in_thread(_asset_service(session_context).parts_catalog().read)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        headers = {"X-Parts-Revision": revision, "ETag": f'"{revision}"', "Cache-Control": "private, no-cache"}
+        matches = [value.strip().removeprefix("W/") for value in req.headers.get("if-none-match", "").split(",")]
+        if headers["ETag"] in matches or "*" in matches:
+            return Response(status_code=304, headers=headers)
+        return JSONResponse(data, headers=headers)
+
+    @app.get("/api/character-asset/v5/spec")
+    async def api_character_asset_v5_spec():
+        return await run_in_thread(specification)
+
+    @app.get("/api/character-asset/v5/candidate-check")
+    async def api_character_asset_v5_candidate_check(history_id: str = ""):
+        # 신 사양의 결과가 투명 배경인지. 화면은 이것으로 경고를 띄우고, 저장은 같은 판정으로 거절한다.
+        item = _asset_service(session_context).candidate_item(history_id)
+        if item is None:
+            return JSONResponse({"error": "candidate is no longer available"}, status_code=404)
+        try:
+            return await run_in_thread(transparency, _history_item_png_bytes(item))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/character-asset/v5/update-builder")
+    async def api_character_asset_v5_update_builder(req: Request):
+        payload = await _read_json(req)
+        try:
+            return await run_in_thread(
+                _asset_service(session_context).update_builder, str(payload.get("id") or ""), payload.get("builder")
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.post("/api/character-asset/v5/generate")
+    async def api_character_asset_v5_generate(req: Request):
+        payload = await _read_json(req)
+        service = _asset_service(session_context)
+        try:
+            overrides_batch = [
+                await run_in_thread(service.build_v5_overrides, payload, candidate)
+                for candidate in range(generation_count(payload))
+            ]
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        accepted, rejected = [], []
+        generation = _generation_service(session_context)
+        for candidate, overrides in enumerate(overrides_batch):
+            dispatch = await run_in_thread(
+                generation.enqueue_remote_request, {"type": "generate", "api_mode": "NAI", "overrides": overrides}
+            )
+            if dispatch.ok:
+                accepted.append(candidate)
+            else:
+                rejected.append({"candidate": candidate, **dispatch.websocket_payload()})
+        if accepted and session_context.headless_generation_execute_enabled:
+            start_generation_runner(session_context, clients)
+        return {"ok": bool(accepted), "request_id": str(payload.get("request_id") or ""),
+                "accepted": accepted, "rejected": rejected}
+
     @app.get("/api/character-asset/list")
     async def api_character_asset_list():
         try:

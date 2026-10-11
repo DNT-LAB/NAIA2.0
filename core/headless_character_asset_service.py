@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.nai_model_contract import resolve_nai_model_for_context
+from core import character_builder_v5 as builder_v5
 from utils import character_asset_storage as asset_storage
 
 # 지금 이 스레드가 하고 있는 '인셋을 바꾸는 일' - 겹쳐 부른 깊이와, 일이 시작될 때의 켜고 끄기 차례.
@@ -1139,6 +1140,7 @@ class HeadlessCharacterAssetService:
                         "variation_count": record.variation_count,
                         "mtime": record.mtime,
                         "revision": revision,
+                        "spec": "v5" if "builder_v5" in sidecar else "legacy",
                     })
             entries.sort(key=lambda entry: entry["mtime"], reverse=True)
             return {
@@ -1234,6 +1236,7 @@ class HeadlessCharacterAssetService:
                 "recovered": bool(prompt),
                 "variations": variations,
                 "revision": primary.stat().st_mtime_ns,
+                **({"builder_v5": sidecar["builder_v5"]} if "builder_v5" in sidecar else {}),
             }
 
     def resolve_image_path(self, character_id: str, variation: str = "") -> Path:
@@ -1252,8 +1255,19 @@ class HeadlessCharacterAssetService:
 
     # -------------------------------------------------------------- mutations
     def save_bytes(self, data: bytes, target: dict[str, Any]) -> dict[str, Any]:
+        builder = None
+        if isinstance(target, dict) and "builder" in target:
+            if str(target.get("kind") or "new").strip().lower() != "new":
+                raise ValueError("builder is only supported for new characters")
+            builder = builder_v5.builder_metadata(target["builder"], self.parts_catalog())
         self._bootstrap()
         self._validate_image_bytes(data)
+        routed_legacy = False
+        if builder is not None and not builder_v5.transparency(data)["ok"]:
+            # 신 사양은 투명 배경이 전제다. 투명하지 않은 그림은 막지 않고 **구 사양으로 보낸다**
+            # (사용자 결정 2026-10-11). 여기가 가르는 목이다 - 부품 구성을 떼면 그 캐릭터는 구 사양이 된다.
+            builder = None
+            routed_legacy = True
         with self._lock:
             kind = str((target or {}).get("kind") or "new").strip().lower()
             if kind == "variation":
@@ -1270,10 +1284,19 @@ class HeadlessCharacterAssetService:
             else:
                 raise ValueError(f"unknown save target kind: {kind}")
             meta = self._extract_prompt_meta(saved_id, saved_path)
+            if builder is not None:
+                root = self.write_root()
+                sidecar = asset_storage.read_character_meta(saved_id, root)
+                sidecar["builder_v5"] = builder
+                if not asset_storage.write_character_meta(saved_id, sidecar, root):
+                    raise OSError("could not save builder metadata")
             return {
                 "character_id": saved_id,
                 "kind": kind,
                 "character_prompt_recovered": bool(str(meta.get("character_prompt") or "").strip()),
+                # 어느 사양으로 저장됐는가. 신 사양으로 보냈는데 구 사양이 됐으면 화면이 그렇게 알린다.
+                "spec": "v5" if builder is not None else "legacy",
+                **({"routed_legacy": True} if routed_legacy else {}),
             }
 
     def rename(self, character_id: str, display_name: str) -> dict[str, Any]:
@@ -1558,6 +1581,37 @@ class HeadlessCharacterAssetService:
         }
 
     # ------------------------------------------------ reference generation
+    def parts_catalog(self) -> builder_v5.PartsCatalog:
+        with self._lock:
+            catalog = getattr(self, "_builder_parts_catalog", None)
+            if catalog is None:
+                root = Path(getattr(self.context, "repo_root", None) or Path(__file__).resolve().parents[1])
+                catalog = builder_v5.PartsCatalog(root / "data" / "character_parts.json")
+                self._builder_parts_catalog = catalog
+            return catalog
+
+    def build_v5_overrides(self, payload: dict[str, Any], candidate: int) -> dict[str, Any]:
+        if str(self.context.get_api_mode() or "").upper() != "NAI":
+            raise ValueError("Character Asset generation requires NAI mode")
+        return builder_v5.build_overrides(payload, candidate, self.parts_catalog())
+
+    def update_builder(self, character_id: str, payload: Any) -> dict[str, Any]:
+        builder = builder_v5.builder_metadata(payload, self.parts_catalog())
+        self._bootstrap()
+        with self._lock:
+            character_id = self._validate_id(character_id)
+            root = self._owner_root(character_id)
+            if root is None:
+                raise FileNotFoundError(f"character {character_id} not found")
+            sidecar = asset_storage.read_character_meta(character_id, root)
+            if "builder_v5" not in sidecar:
+                raise ValueError("character has no builder_v5 metadata")
+            root = self._ensure_current(character_id)
+            sidecar["builder_v5"] = builder
+            if not asset_storage.write_character_meta(character_id, sidecar, root):
+                raise OSError("could not save builder metadata")
+            return {"ok": True, "id": character_id, "builder_v5": builder}
+
     def build_generation_overrides(self, payload: dict[str, Any], candidate: int) -> dict[str, Any]:
         """Creation bench: a brand-new character on the fixed full-body scaffold.
 

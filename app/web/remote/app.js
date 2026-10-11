@@ -517,6 +517,7 @@ let automationPanel = null;
 let characterPanel = null;
 let characterQuickPanel = null;
 let characterAssetControl = null;
+let characterBuilderV5Control = null;
 let conditionalPromptPanel = null;
 // 조건부 프롬프트는 모듈 팝업이 아니라 떠 있는 창이다(conditionalPromptWindow.mjs).
 let conditionalPromptWindow = null;
@@ -810,6 +811,7 @@ function applyRightTabAvailability(tabAvailability) {
     danbooruTabControl?.setActive?.(activeTab === 'danbooru');
     // Assets 탭이 숨겨지며 Result로 복귀한 경우 컨트롤 활성 상태도 동기화.
     characterAssetControl?.setActive?.(activeTab === 'charAssets');
+    syncAssetsV5Mode(activeTab);
     return;
   }
   pendingRightTabAvailability = {...(pendingRightTabAvailability || {}), ...tabAvailability};
@@ -944,7 +946,66 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261009-benchv5')
+// ---------------------------------------------------------------------------
+// Assets 신 사양(V5) - 캐릭터 제작. Assets 탭 위의 [구 사양 · V4.5] [신 사양 · V5] 가 가른다.
+//
+// 신 사양 탭이 **보이는 동안만** 왼쪽 메인 프롬프트 자리를 블록 줄이 덮는다(사용자 지정 2026-10-11).
+// Result 로 가면(= Assets 탭을 떠나면) 덮개가 저절로 걷힌다 - 이 모드는 Result 를 띄우지 않으므로
+// 다른 기능과 같은 자리를 다투지 않는다. 메인 프롬프트 글에는 쓰지 않아 되돌릴 것도 없다.
+const ASSET_SPEC_TAB_KEY = 'naia.assets.specTab';
+let assetSpecTab = 'legacy';
+try { if (localStorage.getItem(ASSET_SPEC_TAB_KEY) === 'v5') assetSpecTab = 'v5'; } catch (_) { /* 사생활 모드 */ }
+
+function syncAssetsV5Mode(activeRightTab) {
+  const rightTab = activeRightTab
+    || document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
+  // 모듈을 못 불러왔으면 신 사양 탭은 고를 수 없는 것으로 친다 - 빈 화면을 덮개로 올리지 않는다.
+  const showV5 = assetSpecTab === 'v5' && !!characterBuilderV5Control;
+  const on = showV5 && !isDetachedShell && rightTab === 'charAssets';
+  document.querySelectorAll('#charAssetSpecTabs [data-asset-spec]').forEach(button => {
+    const hit = button.dataset.assetSpec === (showV5 ? 'v5' : 'legacy');
+    button.classList.toggle('is-on', hit);
+    button.setAttribute('aria-selected', String(hit));
+  });
+  const legacyRoot = document.getElementById('charAssetRoot');
+  const v5Root = document.getElementById('charBuilderV5Root');
+  if (legacyRoot) legacyRoot.hidden = showV5;
+  if (v5Root) v5Root.hidden = !showV5;
+  document.body.classList.toggle('assets-v5-mode', on);
+  // 블록 줄은 Prompt 탭 안에 있다. 다른 탭(Params 등)을 보고 있었으면 덮개가 안 보인다.
+  if (on && activePromptTab !== 'prompt') switchTab('prompt');
+  characterBuilderV5Control?.setActive(on);
+}
+
+document.getElementById('charAssetSpecTabs')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-asset-spec]');
+  if (!button) return;
+  assetSpecTab = button.dataset.assetSpec === 'v5' ? 'v5' : 'legacy';
+  try { localStorage.setItem(ASSET_SPEC_TAB_KEY, assetSpecTab); } catch (_) { /* 사생활 모드 */ }
+  syncAssetsV5Mode();
+  if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
+});
+
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261011-cb5a')
+  .then(({createCharacterBuilderV5}) => {
+    characterBuilderV5Control = createCharacterBuilderV5({
+      document,
+      fetchFn: window.fetch.bind(window),
+      escHtml,
+      showToast,
+      showAppDialog,
+      showPromptDialog,
+      leftMount: document.getElementById('cbBlocks'),
+      rightMount: document.getElementById('charBuilderV5Root'),
+      isNai: () => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() === 'NAI',
+    });
+    syncAssetsV5Mode();
+  })
+  .catch(error => {
+    console.error('Failed to initialize Character Builder V5 module', error);
+  });
+
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261011-cb5a')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -4921,6 +4982,7 @@ const wsMessageHandlers = {
   },
   character_asset_generation_error: m => {
     if (characterAssetControl) characterAssetControl.handleGenerationError(m);
+    characterBuilderV5Control?.handleGenerationError?.(m);
   },
   comfyui_workflow_state: onComfyUiWorkflowState,
   mode_result: onModeResult,
@@ -5148,6 +5210,7 @@ function updateMeta(m) {
   if (characterAssetControl && typeof characterAssetControl.handleResultMeta === 'function') {
     characterAssetControl.handleResultMeta(m);
   }
+  characterBuilderV5Control?.handleResultMeta?.(m);
   if (resultEnhance) {
     resultEnhanceAssetRequestId += 1;
     resultEnhance.setCurrentMeta({
@@ -7341,6 +7404,8 @@ function switchRightTab(tabName, options = {}) {
   }
   // 캐릭터 퀵 패널은 Result 위에만 얹힌다 - 탭이 바뀌면 즉시 물러나야 한다.
   syncCharacterQuickPanelVisibility();
+  // Assets 신 사양(V5)의 덮개도 탭을 따라 오르내린다 - Assets 를 떠나면 걷힌다.
+  syncAssetsV5Mode(activeTab);
   return activeTab;
 }
 
@@ -9264,6 +9329,10 @@ function generateAction() {
   const now = performance.now();
   if (now - lastHumanGenerateAt < 300) return;
   lastHumanGenerateAt = now;
+  // Assets 신 사양(V5) 창이 떠 있으면 Generate 는 그 창의 시험 생성이다(사용자 승인 2026-10-11).
+  // **사람이 누른 길에만** 건다 - 자동 반복이 부르는 `send('generate')` 까지 가로채면
+  // 시험 생성이 줄줄이 나간다. 덮개가 내려가 있으면 false 라 아래로 그대로 흐른다.
+  if (characterBuilderV5Control?.generate?.()) return;
   if (virtualCharacterSession()) {
     // ⚠️ 도크의 [인페인트 생성] 과 **같은 함수**를 부른다. 예전에는 여기서 가드만
     //    빌려 쓰고 생성은 직접 불렀는데, 그러다 `flushTransforms()` 를 빠뜨려

@@ -1812,6 +1812,11 @@ export function createCharacterAssetTabController({
    *  ⚠️ `mod-btn-sm` 을 그대로 입는다 - 옆의 버튼들과 크기가 어긋나면 혼자 튄다.
    *     자리는 Character UC 라벨 줄의 **오른쪽 끝**이다. */
   function stripOutfitToggle() {
+    // 신 사양 화면도 같은 설정을 쓴다. 거기서 바꿨으면 여기서도 바뀌어 있어야 한다 - 그릴 때 다시 읽는다.
+    try {
+      const stored = globalThis.localStorage?.getItem(STRIP_OUTFIT_KEY);
+      if (stored === '1' || stored === '0') stripOutfit = stored === '1';
+    } catch (_) { /* 사생활 모드 */ }
     return `<label class="mod-btn-sm char-asset-strip"`
       + ` data-naia-title="인물 태그 + 캐릭터 특징 + 악세서리/모자만 남기고 의상 태그를 뺍니다. UC 는 그대로 둡니다.">`
       + `<input type="checkbox" data-action="toggle-strip"${stripOutfit ? ' checked' : ''}>`

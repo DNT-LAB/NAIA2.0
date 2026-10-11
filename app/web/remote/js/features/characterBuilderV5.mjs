@@ -90,6 +90,21 @@ export function createCharacterBuilderV5({
   // 바리에이션마다의 캐릭터 프롬프트(해시 -> {prompt, uc, recovered}). 대표의 것은 `detail` 에 있다.
   // 그림마다 자기 프롬프트를 갖는다 - 대표의 것을 바리에이션에 보여 주면 적용되는 글과 보이는 글이 달라진다.
   const imagePrompts = new Map();
+  // [불러오기시 의상 제거] - 구 사양 화면과 **같은 설정**이다(같은 저장 키). 한쪽에서 켜면 다른 쪽에서도 켜져 있다.
+  const STRIP_OUTFIT_KEY = 'naia.characterAsset.stripOutfit';
+  let stripOutfitMemo = false;       // 브라우저 저장소를 못 쓸 때(사생활 모드)의 기억
+  function stripOutfit() {
+    try {
+      const stored = globalThis.localStorage?.getItem(STRIP_OUTFIT_KEY);
+      if (stored === '1' || stored === '0') stripOutfitMemo = stored === '1';
+    } catch (_) { /* 사생활 모드 */ }
+    return stripOutfitMemo;
+  }
+  function setStripOutfit(next) {
+    stripOutfitMemo = !!next;
+    try { globalThis.localStorage?.setItem(STRIP_OUTFIT_KEY, stripOutfitMemo ? '1' : '0'); }
+    catch (_) { /* 사생활 모드 */ }
+  }
   let detail = null;             // 고른 캐릭터의 상세(그림들 · 이름 · 설명 · 구성)
   let detailSeq = 0;
   let deleteArmed = '';          // 지우기는 두 번 누른다 - 한 번 눌린 단추의 표식
@@ -518,7 +533,14 @@ export function createCharacterBuilderV5({
   /** 캐릭터 프롬프트 칸(구 사양 상세와 같은 꼴 - 읽기만 한다). 슬롯 · 레퍼런스 인셋에 실리는 글이 이것이다. */
   function promptHtml(hash) {
     const info = promptOf(hash);
-    const label = `<div class="mod-section-label">Character Prompt ${hash ? '(바리에이션)' : '(대표)'}</div>`;
+    // [불러오기시 의상 제거] 는 구 사양 화면의 것과 같은 꼴 · 같은 문구다(`mod-btn-sm` 을 그대로 입는다).
+    // 구 사양에서는 UC 라벨 줄에 있지만, 여기서는 UC 가 없는 그림이 많아 늘 있는 프롬프트 라벨 줄에 둔다.
+    const strip = `<label class="mod-btn-sm char-asset-strip"`
+      + ` data-naia-title="인물 태그 + 캐릭터 특징 + 악세서리/모자만 남기고 의상 태그를 뺍니다. UC 는 그대로 둡니다.">`
+      + `<input type="checkbox" data-cb-role="strip-outfit"${stripOutfit() ? ' checked' : ''}>`
+      + `<span>불러오기시 의상 제거</span></label>`;
+    const label = `<div class="char-asset-uc-label-row"><div class="mod-section-label">Character Prompt ${
+      hash ? '(바리에이션)' : '(대표)'}</div>${strip}</div>`;
     if (!info) return `<div class="char-asset-prompt-block">${label}<pre class="char-asset-pre">불러오는 중...</pre></div>`;
     const uc = info.uc
       ? `<div class="mod-section-label">Character UC</div>`
@@ -1031,7 +1053,7 @@ export function createCharacterBuilderV5({
     }
     try {
       const result = await postJson('/api/character-asset/apply', {
-        id: detail.id, variation: selectedVar, mode: 'c1', with_inset: withInset,
+        id: detail.id, variation: selectedVar, mode: 'c1', with_inset: withInset, strip_outfit: stripOutfit(),
       });
       if (withInset) {
         showToast('C1 에 적용하고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다', 'success');
@@ -1204,6 +1226,11 @@ export function createCharacterBuilderV5({
     const field = event.target.closest('[data-cb-field]');
     if (field) {
       void annotate(field.dataset.cbField, field.value);
+      return;
+    }
+    const strip = event.target.closest('[data-cb-role="strip-outfit"]');
+    if (strip) {
+      setStripOutfit(strip.checked);
       return;
     }
     const box = event.target.closest('[data-cb-role="seedlock"]');

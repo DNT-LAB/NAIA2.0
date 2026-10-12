@@ -1687,6 +1687,8 @@ export function createCharacterAssetTabController({
       <div class="char-asset-toolbar">
         <button class="mod-btn-sm char-asset-create-btn" data-action="open-create">+ 캐릭터 생성</button>
         <button class="mod-btn-sm" data-action="refresh">↻</button>
+        <button type="button" class="char-asset-folder-link" data-action="open-folder"
+                data-naia-title="에셋이 저장된 폴더를 엽니다">폴더 열기</button>
         <span class="char-asset-count">${characters.length} characters</span>
       </div>
       <div class="char-asset-grid">
@@ -1848,6 +1850,10 @@ export function createCharacterAssetTabController({
       if (action === 'select') select(button.dataset.id || '');
       else if (action === 'select-variation') selectVariationInPlace(button.dataset.hash || '');
       else if (action === 'refresh') refreshAll();
+      else if (action === 'open-folder') {
+        Promise.resolve(postJson('/api/character-asset/open-folder', {target: 'assets'}))
+          .catch(error => showToast(`폴더를 열지 못했습니다: ${error.message}`, 'error'));
+      }
       else if (action === 'open-create') openCreationBench();
       else if (action === 'staged-new') saveStaged({kind: 'new'});
       else if (action === 'staged-variation') saveStaged({kind: 'variation', character_id: selectedId});

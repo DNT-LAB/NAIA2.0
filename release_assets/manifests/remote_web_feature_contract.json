@@ -637,6 +637,26 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/inset/storage/add",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/storage/category",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/storage/move",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/open-folder",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/inset/layer",
           "smoke": "state_mutation"
         },

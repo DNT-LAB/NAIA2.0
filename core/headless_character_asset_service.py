@@ -735,7 +735,44 @@ class HeadlessCharacterAssetService:
         with self._retain_lock:
             pin = self._reference_inset_pin
             current = str(pin.get("stored_id") or "") if pin else ""
-        return {"items": self._inset_storage().list(), "current": current}
+        storage = self._inset_storage()
+        return {"items": storage.list(), "categories": storage.categories(), "current": current}
+
+    def add_reference_inset_storage_image(self, image_bytes: Any, category: Any = "") -> dict[str, Any]:
+        """그림 한 장을 Storage 에 **바로** 넣는다(끌어다 놓기 · 파일 · 붙여넣기 - 사용자 지시 2026-10-12).
+        칸의 그림은 건드리지 않는다. ``category`` = 넣을 카테고리(빈 값 = 미분류)."""
+        item = self._inset_storage().save(self._normalize_inset_source(image_bytes), str(category or ""))
+        with self._retain_lock:
+            self._reference_inset_sync_seq += 1      # 방금 넣은 것이 지금 칸의 그림일 수 있다('저장됨')
+        return {"item": item, **self.reference_inset_storage_list()}
+
+    def edit_reference_inset_storage_category(self, action: Any, category_id: Any = "", name: Any = "") -> dict[str, Any]:
+        """카테고리를 만든다 · 이름을 바꾼다 · 지운다(`action` = "add" | "rename" | "delete"). 지워도 그림은 미분류로 남는다."""
+        storage = self._inset_storage()
+        what = str(action or "").strip().lower()
+        result: dict[str, Any] = {}
+        if what == "add":
+            result["category"] = storage.add_category(name)
+        elif what == "rename":
+            result["category"] = storage.rename_category(category_id, name)
+        elif what == "delete":
+            result["removed"] = storage.delete_category(category_id)
+        else:
+            raise ValueError("카테고리는 add · rename · delete 로 고칩니다.")
+        return {**result, **self.reference_inset_storage_list()}
+
+    def move_reference_inset_storage_item(self, item_id: Any, category_id: Any) -> dict[str, Any]:
+        self._inset_storage().set_category(item_id, category_id)
+        return self.reference_inset_storage_list()
+
+    def asset_folder(self, target: Any) -> Path:
+        """탐색기로 열 폴더 - "storage"(레퍼런스 인셋 Storage) | "assets"(캐릭터 에셋). 없으면 만든다."""
+        if str(target or "").strip().lower() == "storage":
+            folder = self._inset_storage().root
+        else:
+            folder = self.write_root()
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
 
     def save_reference_inset_to_storage(self) -> dict[str, Any]:
         """지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만 - 자동으로 넣지 않는다).

@@ -131,6 +131,8 @@ export function createReferenceInsetWindow({
   requestPaste = null,
   // [Assets] 단추: Assets 탭을 연다(탭을 바꾸는 일은 앱이 한다).
   openAssets = null,
+  // Storage 에 그림을 끌어다 놓는 자리를 건다 `(target, onImageBlob)` - 메타데이터 뷰어와 같은 길이다(파일 · 웹의 그림).
+  bindImageDrop = null,
 } = {}) {
   let panel = null;
   // 서버의 인셋 상태. 꽂아 둔 것이 없으면 `{configured: false}` - 그때도 창은 열려 있다.
@@ -166,6 +168,14 @@ export function createReferenceInsetWindow({
   let pickFor = 'base';     // Storage · Assets 에서 고른 그림을 어디에 쓸까
   let assets = null;        // Assets 목록(레이어로 고를 때) - 열 때마다 다시 받는다
   let assetsSeq = 0;
+  // ── Storage 의 카테고리(사용자 지시 2026-10-12: 사용자가 만들고 관리한다) ──
+  let storeCat = 'all';     // 보고 있는 칸 - 'all'(전체) | ''(미분류) | 카테고리 id
+  let catEdit = null;       // 이름을 적는 중 {mode: 'add' | 'rename', id}
+  let addChain = Promise.resolve();   // 넣는 그림은 한 장씩 차례로 보낸다(여러 장을 끌어다 놓는다)
+  let addCount = 0;         // 이번 묶음에서 넣은 장수 - 줄이 비면 한 번만 알린다
+  let addPending = 0;
+  const STORE = '/api/character-asset/inset/storage';
+  const categories = () => (Array.isArray(stored?.categories) ? stored.categories : []);
   const LAYER_ADD = '/api/character-asset/inset/layer';
   const LAYER_UPDATE = '/api/character-asset/inset/layer/update';
   const layerSrc = id => `/api/character-asset/inset/layer/${encodeURIComponent(id)}/image`;
@@ -291,10 +301,20 @@ export function createReferenceInsetWindow({
       <div class="riw-store" data-riw-store hidden>
         <div class="riw-row">
           <button type="button" class="riw-chip" data-riw-back>&#8592; 돌아가기</button>
-          <span class="riw-label" data-riw-store-count></span>
-          <span class="riw-read" data-riw-store-hint>누르면 칸에 놓습니다 · 배치는 기본으로 놓입니다</span>
+          <span class="riw-label riw-store-count" data-riw-store-count></span>
+          <span class="riw-store-tools" data-riw-store-tools>
+            <button type="button" class="riw-chip" data-riw-store-paste
+                    data-naia-title="클립보드의 그림(캡쳐 · 복사한 것)을 Storage 에 넣습니다 - 보고 있는 카테고리로 들어갑니다">붙여넣기</button>
+            <button type="button" class="riw-chip" data-riw-store-file
+                    data-naia-title="그림 파일을 골라 Storage 에 넣습니다 (여러 장을 한꺼번에 고를 수 있습니다)">파일 열기</button>
+            <button type="button" class="riw-link" data-riw-store-folder
+                    data-naia-title="Storage 의 그림이 저장된 폴더를 엽니다">폴더 열기</button>
+            <input type="file" accept="image/*" multiple data-riw-store-input hidden>
+          </span>
         </div>
+        <div class="riw-row riw-cats" data-riw-cats></div>
         <div class="riw-store-grid" data-riw-store-grid></div>
+        <div class="riw-store-hint" data-riw-store-hint></div>
       </div>`;
     const find = selector => panel.body.querySelector(selector);
     el = {
@@ -326,6 +346,9 @@ export function createReferenceInsetWindow({
       storeGrid: find('[data-riw-store-grid]'),
       storeCount: find('[data-riw-store-count]'),
       storeHint: find('[data-riw-store-hint]'),
+      storeTools: find('[data-riw-store-tools]'),
+      storeInput: find('[data-riw-store-input]'),
+      cats: find('[data-riw-cats]'),
       back: find('[data-riw-back]'),
       stageBox: find('[data-riw-stagebox]'),
       layerBox: find('[data-riw-layerbox]'),
@@ -378,6 +401,38 @@ export function createReferenceInsetWindow({
     }));
     el.back.addEventListener('click', () => showMain());
     el.storeGrid.addEventListener('click', onStoreClick);
+    el.storeGrid.addEventListener('change', onStoreMove);
+    el.cats.addEventListener('click', onCatClick);
+    el.cats.addEventListener('keydown', onCatKey);
+    el.cats.addEventListener('focusout', event => {
+      // 이름 칸에서 손을 떼면 그만둔다(Enter 로만 정한다).
+      if (catEdit && event.target.matches?.('[data-riw-cat-input]')) { catEdit = null; render(); }
+    });
+    find('[data-riw-store-paste]').addEventListener('click', () => {
+      pasteFor = 'storage';
+      if (typeof requestPaste === 'function') requestPaste();
+      else showToast('이 화면에서는 붙여넣기를 쓸 수 없습니다', 'error');
+    });
+    find('[data-riw-store-file]').addEventListener('click', () => el.storeInput.click());
+    el.storeInput.addEventListener('change', () => {
+      const files = [...(el.storeInput.files || [])];
+      el.storeInput.value = '';
+      files.forEach(file => addToStorage(file));
+    });
+    find('[data-riw-store-folder]').addEventListener('click', async () => {
+      try {
+        const response = await fetchImpl('/api/character-asset/open-folder', {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({target: 'storage'}),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch (error) {
+        showToast(`폴더를 열지 못했습니다: ${error.message}`, 'error');
+      }
+    });
+    // 웹의 그림 · 파일을 끌어다 놓으면 Storage 에 들어간다(메타데이터 뷰어와 같은 길). Storage 화면일 때만 받는다.
+    if (typeof bindImageDrop === 'function') {
+      bindImageDrop(el.store, blob => { if (view === 'storage') addToStorage(blob); });
+    }
     el.save.addEventListener('click', saveToStorage);
     el.enabled.addEventListener('change', () => {
       const wanted = el.enabled.checked;
@@ -932,6 +987,10 @@ export function createReferenceInsetWindow({
       showToast('클립보드에 그림이 없습니다', 'error');
       return false;
     }
+    if (target === 'storage') {                // Storage 화면의 [붙여넣기] - 칸의 그림은 그대로 두고 보관함에만 넣는다
+      addToStorage(blob);
+      return true;
+    }
     if (locked()) return true;                 // 업스케일을 기다리는 중 - 아무것도 안 한다
     if (target === 'layer' && configured()) {  // [+ 이미지] 의 붙여넣기 - 칸의 그림은 그대로 두고 한 장 더 놓는다
       addLayer(blob);
@@ -988,6 +1047,8 @@ export function createReferenceInsetWindow({
     const items = assets?.items || [];
     el.storeCount.textContent = assets ? `Assets · ${items.length}개` : 'Assets';
     el.storeHint.textContent = '누르면 칸에 한 장 더 놓습니다';
+    el.storeTools.hidden = true;               // 넣기 · 카테고리는 Storage 의 것이다
+    el.cats.hidden = true;
     if (!assets) {
       el.storeGrid.innerHTML = '<div class="riw-store-empty">불러오는 중…</div>';
       return;
@@ -1012,6 +1073,7 @@ export function createReferenceInsetWindow({
 
   async function showStorage() {
     view = 'storage';
+    catEdit = null;
     disarmDelete();
     render();
     await loadStorage();
@@ -1040,34 +1102,175 @@ export function createReferenceInsetWindow({
   }
 
   function renderStorage() {
-    const items = stored?.items || [];
-    el.storeCount.textContent = stored ? `Storage · ${items.length}장` : 'Storage';
-    el.storeHint.textContent = pickFor === 'layer' ? '누르면 칸에 한 장 더 놓습니다'
-      : '누르면 칸에 놓습니다 · 배치는 기본으로 놓입니다';
+    const all = stored?.items || [];
+    const cats = categories();
+    // 보던 카테고리가 없어졌으면(지웠다 · 다른 창이 지웠다) 전체로 돌아간다.
+    if (storeCat !== 'all' && storeCat !== '' && !cats.some(cat => cat.id === storeCat)) storeCat = 'all';
+    const items = storeCat === 'all' ? all : all.filter(item => String(item.category || '') === storeCat);
+    el.storeCount.textContent = stored ? `Storage · ${all.length}장` : 'Storage';
+    el.storeTools.hidden = false;
+    el.cats.hidden = !stored;
+    el.storeHint.textContent = `${pickFor === 'layer' ? '누르면 칸에 한 장 더 놓습니다'
+      : '누르면 칸에 놓습니다(배치는 기본으로)'} · 웹의 그림이나 파일을 여기로 끌어다 놓으면 보고 있는 카테고리에 들어갑니다`;
     if (!stored) {
       el.storeGrid.innerHTML = '<div class="riw-store-empty">불러오는 중…</div>';
       return;
     }
+    renderCategories(all, cats);
     if (!items.length) {
-      el.storeGrid.innerHTML = `<div class="riw-store-empty">${stored.failed ? 'Storage 를 읽지 못했습니다'
-        : '저장해 둔 그림이 없습니다 - 칸에 그림을 넣고 [저장] 을 누르면 여기에 남습니다'}</div>`;
+      const empty = `<div class="riw-store-empty">${stored.failed ? 'Storage 를 읽지 못했습니다'
+        : all.length ? '이 카테고리에 그림이 없습니다 - 여기로 끌어다 놓으면 이 카테고리에 들어갑니다'
+          : '넣어 둔 그림이 없습니다 - 웹의 그림이나 파일을 여기로 끌어다 놓거나 [붙여넣기] 로 넣습니다'}</div>`;
+      if (el.storeGrid.innerHTML !== empty) el.storeGrid.innerHTML = empty;
       return;
     }
     // 지금 칸에 놓인 그림 = 인셋 상태의 `saved` 가 가리키는 한 장(목록의 `current`).
     const current = state?.saved ? String(stored.current || '') : '';
-    el.storeGrid.innerHTML = items.map(item => {
+    const grid = items.map(item => {
       const id = escHtml(item.id);
       const armed = armedDelete === item.id;
+      const at = String(item.category || '');
+      // 카테고리를 만들어 둔 뒤에야 옮길 데가 있다. 마우스를 대면 치수 자리에 고르는 칸이 뜬다.
+      // `data-native-select` = 앱의 커스텀 셀렉트로 바꾸지 않는다(바꾸면 목록의 DOM 이 달라져 매번 다시 그려진다).
+      const move = !cats.length ? '' : `<select class="riw-store-move" data-native-select data-riw-move="${id}"
+                data-naia-title="이 그림을 다른 카테고리로 옮깁니다">
+          <option value=""${at ? '' : ' selected'}>미분류</option>${cats.map(cat =>
+            `<option value="${escHtml(cat.id)}"${cat.id === at ? ' selected' : ''}>${escHtml(cat.name)}</option>`).join('')}
+        </select>`;
       return `<div class="riw-store-item${item.id === current ? ' is-current' : ''}" data-riw-item="${id}">
         <button type="button" class="riw-store-pick" data-riw-pick="${id}"
-                data-naia-title="이 그림을 인셋 칸에 놓고 인셋을 켭니다">
+                data-naia-title="${pickFor === 'layer' ? '이 그림을 칸에 한 장 더 놓습니다' : '이 그림을 인셋 칸에 놓고 인셋을 켭니다'}">
           <img src="/api/character-asset/inset/storage/${id}/image?thumb=1" alt="저장해 둔 레퍼런스" loading="lazy" draggable="false">
           <span class="riw-store-size">${Number(item.width) || 0}x${Number(item.height) || 0}</span>
-        </button>
+        </button>${move}
         <button type="button" class="riw-store-x${armed ? ' is-armed' : ''}" data-riw-del="${id}"
                 data-naia-title="Storage 에서 지웁니다 (한 번 더 눌러야 지워집니다)">${armed ? '지우기' : '&times;'}</button>
       </div>`;
     }).join('');
+    // 같으면 다시 쓰지 않는다 - 고르는 칸이 펴져 있는 동안 상태가 한 번 더 와도 닫히지 않는다.
+    if (el.storeGrid.innerHTML !== grid) el.storeGrid.innerHTML = grid;
+  }
+
+  /** 카테고리 줄: 전체 · 미분류는 늘 있고, 그 뒤가 사용자가 만든 것이다. 보고 있는 칩에만 이름 바꾸기 · 지우기가 붙는다. */
+  function renderCategories(all, cats) {
+    const unsorted = all.filter(item => !item.category).length;
+    const chip = (key, name, count) => `<button type="button" class="riw-chip${storeCat === key ? ' is-on' : ''}"
+      data-riw-cat="${escHtml(key)}" aria-pressed="${storeCat === key ? 'true' : 'false'}">${escHtml(name)}<b>${count}</b></button>`;
+    const input = value => `<input type="text" class="riw-cat-input" data-riw-cat-input maxlength="24" autocomplete="off"
+      value="${escHtml(value)}" placeholder="이름 · Enter" aria-label="카테고리 이름">`;
+    const parts = [chip('all', '전체', all.length), chip('', '미분류', unsorted)];
+    cats.forEach(cat => {
+      if (catEdit?.mode === 'rename' && catEdit.id === cat.id) { parts.push(input(cat.name)); return; }
+      const on = storeCat === cat.id;
+      const armed = armedDelete === `cat:${cat.id}`;
+      parts.push(`<span class="riw-cat${on ? ' is-on' : ''}">${chip(cat.id, cat.name, Number(cat.count) || 0)}${!on ? '' : `
+        <button type="button" class="riw-lay-tool" data-riw-cat-act="rename" data-naia-title="카테고리의 이름을 바꿉니다">이름</button>
+        <button type="button" class="riw-lay-tool${armed ? ' is-armed' : ''}" data-riw-cat-act="delete"
+                data-naia-title="카테고리를 지웁니다 - 그림은 지워지지 않고 미분류로 갑니다 (한 번 더 눌러야 지워집니다)">${
+                  armed ? '지우기' : '&times;'}</button>`}</span>`);
+    });
+    parts.push(catEdit?.mode === 'add' ? input('')
+      : `<button type="button" class="riw-chip" data-riw-cat-act="add" data-naia-title="카테고리를 만듭니다">+</button>`);
+    const html = parts.join('');
+    if (el.cats.innerHTML === html) return;
+    el.cats.innerHTML = html;
+    const field = el.cats.querySelector('[data-riw-cat-input]');
+    if (field) { field.focus(); field.select(); }
+  }
+
+  /** Storage 만 바꾸는 요청(카테고리 · 옮기기 · 넣기). 인셋의 요청 줄을 서지 않는다 - 칸의 그림과 무관하다. */
+  async function storeCall(path, options, failText) {
+    const seq = ++storedSeq;
+    let data = null;
+    let failed = '';
+    try {
+      const response = await fetchImpl(path, options);
+      data = await response.json().catch(() => null);
+      if (!response.ok || !data || data.error) failed = data?.error || `HTTP ${response.status}`;
+    } catch (_error) { failed = '서버에 닿지 못했습니다'; }
+    if (failed) {
+      showToast(`${failText}: ${failed}`, 'error');
+      return null;
+    }
+    // 더 새로운 요청이 가 있으면 그 답이 목록을 맞춘다.
+    if (seq === storedSeq && Array.isArray(data.items)) {
+      stored = {items: data.items, categories: data.categories || [], current: data.current || ''};
+    }
+    if (view === 'storage') render();
+    return data;
+  }
+
+  const jsonPost = body => ({method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+
+  function onCatClick(event) {
+    const act = event.target.closest('[data-riw-cat-act]')?.dataset.riwCatAct;
+    if (act === 'add') { disarmDelete(); catEdit = {mode: 'add', id: ''}; render(); return; }
+    if (act === 'rename') { disarmDelete(); catEdit = {mode: 'rename', id: storeCat}; render(); return; }
+    if (act === 'delete') {
+      const id = storeCat;
+      if (armedDelete !== `cat:${id}`) {
+        disarmDelete();
+        armedDelete = `cat:${id}`;
+        armedTimer = win?.setTimeout(() => { armedDelete = ''; if (view === 'storage') render(); }, 3000) || 0;
+        render();
+        return;
+      }
+      disarmDelete();
+      storeCall(`${STORE}/category`, jsonPost({action: 'delete', id}), '카테고리를 지우지 못했습니다').then(data => {
+        if (data) showToast('카테고리를 지웠습니다 - 그림은 미분류로 갔습니다', 'success');
+      });
+      return;
+    }
+    const pick = event.target.closest('[data-riw-cat]');
+    if (!pick) return;
+    disarmDelete();
+    catEdit = null;
+    storeCat = pick.dataset.riwCat;
+    render();
+  }
+
+  function onCatKey(event) {
+    const field = event.target.closest?.('[data-riw-cat-input]');
+    if (!field || !catEdit) return;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); catEdit = null; render(); return; }
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    const name = field.value.trim();
+    const edit = catEdit;
+    catEdit = null;
+    if (!name) { render(); return; }
+    storeCall(`${STORE}/category`, jsonPost({action: edit.mode, id: edit.id, name}),
+      edit.mode === 'add' ? '카테고리를 만들지 못했습니다' : '이름을 바꾸지 못했습니다').then(data => {
+      if (data && edit.mode === 'add' && data.category?.id) { storeCat = data.category.id; render(); }
+    });
+    render();
+  }
+
+  function onStoreMove(event) {
+    const pick = event.target.closest('[data-riw-move]');
+    if (!pick) return;
+    storeCall(`${STORE}/move`, jsonPost({id: pick.dataset.riwMove, category: pick.value}), '그림을 옮기지 못했습니다');
+  }
+
+  /** 그림 한 장을 Storage 에 바로 넣는다(끌어다 놓기 · 파일 · 붙여넣기). 보고 있는 카테고리로 들어간다. 한 장씩 차례로 보낸다. */
+  function addToStorage(blob) {
+    if (!blob || (blob.type && !String(blob.type).startsWith('image/'))) {
+      showToast('그림이 아닙니다', 'error');
+      return;
+    }
+    const category = storeCat === 'all' ? '' : storeCat;       // 넣는 순간에 보던 칸
+    addPending += 1;
+    addChain = addChain.then(async () => {
+      const data = await storeCall(`${STORE}/add?category=${encodeURIComponent(category)}`,
+        {method: 'POST', headers: {'Content-Type': blob.type || 'image/png'}, body: blob}, 'Storage 에 넣지 못했습니다');
+      if (data) addCount += 1;
+    }).catch(() => null).then(() => {
+      addPending -= 1;
+      if (addPending > 0) return;
+      if (addCount) showToast(addCount > 1 ? `그림 ${addCount}장을 Storage 에 넣었습니다` : 'Storage 에 넣었습니다', 'success');
+      addCount = 0;
+      refresh();                               // 방금 넣은 것이 지금 칸의 그림이면 '저장됨' 이 된다
+    });
   }
 
   async function onStoreClick(event) {
@@ -1123,7 +1326,7 @@ export function createReferenceInsetWindow({
       if (seq === storedSeq) loadStorage();
       return;
     }
-    if (seq === storedSeq) stored = {items: data.items, current: data.current || ''};
+    if (seq === storedSeq) stored = {items: data.items, categories: data.categories || [], current: data.current || ''};
     // 지운 것이 지금 칸의 그림이었으면 '저장됨' 이 풀린다 - 인셋 상태를 다시 받는다(칸의 그림은 그대로다).
     await refresh();
     if (view === 'storage') render();

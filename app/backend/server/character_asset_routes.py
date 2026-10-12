@@ -711,6 +711,83 @@ def register_character_asset_routes(
             return JSONResponse({"error": str(exc)}, status_code=404)
         return {"ok": True, **state}
 
+    @app.post("/api/character-asset/inset/storage/add")
+    async def api_character_asset_inset_storage_add(req: Request, category: str = ""):
+        # 그림을 Storage 에 바로 넣는다(본문 = 그림 바이트 · `?category=` = 넣을 카테고리). 칸의 그림은 그대로다.
+        service = _asset_service(session_context)
+        try:
+            limit = int(service.REFERENCE_INSET_SOURCE_MAX_BYTES)
+            chunks: list[bytes] = []
+            received = 0
+            async for chunk in req.stream():
+                received += len(chunk)
+                if received > limit:
+                    return JSONResponse({"error": "그림이 너무 큽니다(32MB 까지)."}, status_code=413)
+                chunks.append(chunk)
+            result = await run_in_thread(service.add_reference_inset_storage_image, b"".join(chunks), category)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Storage add failed: {exc}"}, status_code=500)
+        return {"ok": True, **result}
+
+    @app.post("/api/character-asset/inset/storage/category")
+    async def api_character_asset_inset_storage_category(req: Request):
+        # 카테고리를 만든다 · 이름을 바꾼다 · 지운다: `{action: "add" | "rename" | "delete", id, name}`.
+        payload = await _read_json(req)
+        try:
+            result = await run_in_thread(
+                _asset_service(session_context).edit_reference_inset_storage_category,
+                payload.get("action"), payload.get("id"), payload.get("name"),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return {"ok": True, **result}
+
+    @app.post("/api/character-asset/inset/storage/move")
+    async def api_character_asset_inset_storage_move(req: Request):
+        # 그림 한 장을 카테고리로 옮긴다: `{id, category}`(빈 값 = 미분류).
+        payload = await _read_json(req)
+        try:
+            result = await run_in_thread(
+                _asset_service(session_context).move_reference_inset_storage_item,
+                payload.get("id"), payload.get("category"),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return {"ok": True, **result}
+
+    @app.post("/api/character-asset/open-folder")
+    async def api_character_asset_open_folder(req: Request):
+        # 탐색기로 폴더를 연다: `{target: "storage" | "assets"}`. 결과 폴더 열기(`/api/history/open-folder`)와 같은 길이다.
+        payload = await _read_json(req)
+
+        def _open_folder():
+            import os
+            import subprocess
+            import sys
+
+            folder = _asset_service(session_context).asset_folder(payload.get("target"))
+            if sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(folder)])
+            elif os.name == "nt":
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+            return str(folder)
+
+        try:
+            opened = await run_in_thread(_open_folder)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return {"ok": True, "path": opened}
+
     @app.post("/api/character-asset/inset/storage/apply")
     async def api_character_asset_inset_storage_apply(req: Request):
         # Storage 의 그림을 칸의 그림으로 쓴다(`{id}`) - 인셋을 켜고 배치는 기본으로.

@@ -1016,6 +1016,8 @@ export function createCharacterBuilderV5({
       + `<div class="char-asset-toolbar">`
       + `<button type="button" class="mod-btn-sm char-asset-create-btn" data-cb-act="new">+ 캐릭터 생성</button>`
       + `<button type="button" class="mod-btn-sm" data-cb-act="refresh" aria-label="새로 읽기">↻</button>`
+      + `<button type="button" class="char-asset-folder-link" data-cb-act="open-folder"`
+      + ` data-naia-title="에셋이 저장된 폴더를 엽니다">폴더 열기</button>`
       + `<span class="char-asset-count">${store.length} characters</span></div>`
       + `<div class="char-asset-grid">${cards
         || '<div class="mod-empty">신 사양으로 만든 캐릭터가 없습니다. [+ 캐릭터 생성] 으로 시작합니다.<br>'
@@ -1696,6 +1698,10 @@ export function createCharacterBuilderV5({
       else if (name === 'cand-apply') void applyCandidate();
       else if (name === 'new') openCreate();
       else if (name === 'refresh') void loadStore();
+      else if (name === 'open-folder') {
+        postJson('/api/character-asset/open-folder', {target: 'assets'})
+          .catch(error => showToast(`폴더를 열지 못했습니다: ${error.message}`, 'error'));
+      }
       else if (name === 'back') backToGallery();
       else if (name === 'var-new') openVariation();
       else if (name === 'var-delete') deleteVariation();

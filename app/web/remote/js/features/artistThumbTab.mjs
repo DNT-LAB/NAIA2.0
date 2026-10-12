@@ -3451,7 +3451,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const mod = await import('./artistSearchPanel.mjs?v=20261012-floor');
+    const mod = await import('./artistSearchPanel.mjs?v=20261012-tagfirst');
     searchPct = mod.pctText;
     searchPanel = mod.createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,

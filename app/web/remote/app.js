@@ -864,7 +864,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261012-floor')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261012-tagfirst')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,

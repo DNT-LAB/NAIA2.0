@@ -37,6 +37,12 @@ const KINDS = [
 ];
 
 const TAG_KINDS = KINDS.filter(([, , hint]) => hint).map(([value]) => value);
+
+/** 판이 처음 열릴 때 골라져 있는 갈래(사용자 지정 2026-10-12: 작품 -> 태그).
+ *  ⚠️ 태그 축은 **옆 파일**(집계표)이라 혼자 빠져 있을 수 있다. 그때는 전에 처음 열리던
+ *     작품으로 물러난다 - 잠긴 갈래를 골라 둔 채 열리면 [추가] 가 죽은 판이 뜬다. */
+const DEFAULT_KIND = 'general';
+const FALLBACK_KINDS = ['copyright', ...KINDS.map(([value]) => value)];
 const isTagKind = value => TAG_KINDS.includes(value);
 
 const ORDERS = [
@@ -194,7 +200,8 @@ export function createArtistSearchPanel({
   let stack = [];            // 서버가 받아 준 depth 만 쌓인다
   let order = 'wilson';
   let thumbs = 'has';        // 사용자 지정: 기본값은 썸네일 있음
-  let kind = 'copyright';
+  // 처음 열리는 갈래는 **태그**다(사용자 지정 2026-10-12 - 전에는 작품이었다).
+  let kind = DEFAULT_KIND;
   let ratingsPick = 'e';
   let ratingMode = 'count';
   let steps = [];
@@ -639,7 +646,7 @@ export function createArtistSearchPanel({
     axisFloor = new Map(Object.entries(packState.axes || {})
       .map(([name, info]) => [name, Number(info?.min_count) || 1]));
     if (!kindUsable(kind)) {
-      kind = KINDS.map(([v]) => v).find(kindUsable) || 'rating';
+      kind = FALLBACK_KINDS.find(kindUsable) || 'rating';
     }
     paintForm();
     resetNums();

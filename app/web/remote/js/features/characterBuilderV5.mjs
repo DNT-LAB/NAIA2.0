@@ -159,7 +159,7 @@ export function createCharacterBuilderV5({
   let view = 'gallery';          // 'gallery'(기본) | 'create' | 'variation'
   let builtView = '';            // 오른쪽 창의 뼈대를 세운 화면(바뀔 때만 다시 세운다)
   // [확대](사용자 지시 2026-10-12): 부품 그리드를 접고 그림 칸(제작 = 시험 그림 · 바리에이션 = A | B)이 오른쪽을 다 쓴다.
-  // 화면을 새로 열 때마다 꺼진 채로 시작한다. 왼쪽에서 다른 블록을 고르면 저절로 풀린다(부품을 고르려는 것이다).
+  // 화면을 새로 열 때마다 꺼진 채로 시작하고, 켠 뒤에는 [축소] 를 누를 때까지 간다(저절로 풀리지 않는다).
   let wide = false;
   let store = [];                // 신 사양 캐릭터(spec === 'v5')
   let storeSeq = 0;
@@ -1144,11 +1144,8 @@ export function createCharacterBuilderV5({
     // '기타' 를 떠날 때 거기 쓴 부품을 제 블록으로 옮긴다. 치는 동안에는 옮기지 않는다 - 친 글이 눈앞에서 사라진다.
     if (activeBlock === ETC_BLOCK) announceSorted(sortEtcBlock());
     activeBlock = key;
-    // 다른 블록을 골랐다 = 부품을 고르려는 것이다. 그림을 넓혀 두었으면 부품 그리드를 다시 보인다.
-    if (wide) {
-      wide = false;
-      applyWide();
-    }
+    // ⚠️ 여기서 [확대] 를 풀지 않는다. '다른 블록을 골랐으니 부품을 고르려는 것' 으로 보고 풀었더니, 넓혀 놓고 줄을
+    //    눌러 글을 고칠 때마다 부품 그리드가 도로 열렸다(사용자 제보 2026-10-12). 넓힌 것은 [축소] 를 누를 때까지 간다.
     // 블록을 고르면 검색을 걷는다 - 검색 결과가 그리드를 덮고 있으면 눌러도 아무 일이 없어 보인다.
     if (query) {
       query = '';

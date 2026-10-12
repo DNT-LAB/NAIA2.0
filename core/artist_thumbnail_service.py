@@ -84,28 +84,43 @@ class ArtistThumbnailService:
             "expected_size": 2192792940,
             "sha256": "C2741D70E463B03841B0F27A59D69CD422D98B34F52E5A8F5713A10DFE227C3A",
         },
-        # 새 팩(2026-09-27, 사용자 지시). 83-50 다음 구간(게시물 49~, 아직 채우는 중). 방안 A - 새 키 + **새 경로**.
-        # 지문 = 업로드 원본 실측이고, HF 쪽 X-Linked-Size · X-Linked-ETag(= sha256)와 같음을 확인했다.
-        # ⚠️ 나중에 채워 갈아끼울 때는 83 처럼 **경로를 그대로** 두고 키 · 라벨 · URL · 지문만 바꾼다.
-        # 09-30 내용 갱신(HF 에 같은 이름으로 올림 · 8,269명): 지문만 바꿨다 — 옛 판(1,042,944,875 · 6255A2FD…)을 받은
-        # 기기엔 (update). 형식은 83-50 과 같다(작가 -> [raw base64 JPEG 768x768] · 앞 팩과 겹침 0).
-        # 이름이 `NAID5` 로 시작하고 `STYLISH` 가 아니라 Curated · ALL 모두에 자동으로 든다.
-        "NAID5-49-WIP": {
-            "label": "NAID5-49-WIP",
-            "path": Path("data/artist_thumbnail_naid5_49_wip.json"),
-            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-49-WIP",
-            "expected_size": 1388682556,
-            "sha256": "15A6242297DB835A738118FD9081F1BF65E6C9F32AA697B066B83BDDA0A3F9FB",
+        # ── 2026-10-12 (사용자 지시): 83-50 아래 구간이 셋으로 정리됐다 ─────────────────────────────
+        #   지문은 셋 다 업로드 원본 실측이고 HF 의 X-Linked-Size · X-Linked-ETag(= sha256)와 같다.
+        #
+        # Curated 가 이 구간에서 읽는 팩. 새 팩이라 방안 A - 새 키 + **새 경로**. 33,001 ~ 55,000 번째 줄의
+        # 작가 가운데 손으로 고른 6,145명이다. ⚠️ **ALL 에는 안 든다**: 전원이 이미 다른 팩에 있다 -
+        # 앞의 세 팩에 2,060명, `NAID5-49-20` 에 4,085명(그림까지 같다, 실측). 넣으면 1GB 를 더 읽고
+        # 한 명도 안 늘어난다. 거르는 조각은 `Curated`(ALL 의 `exclude_contains`).
+        "NAID5-33000-55000-Curated": {
+            "label": "NAID5-33000-55000-Curated",
+            "path": Path("data/artist_thumbnail_naid5_33000_55000_curated.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-33000-55000-Curated",
+            "expected_size": 1030625005,
+            "sha256": "724EE2B0C906159C22BA28566F0D0AA2AEE350E81896294AC0DED22C23144FAC",
         },
-        # 새 팩(2026-09-19). 새 키 + **새 경로** - 기존 것과 겹치지 않는다.
+        # 옛 `NAID5-49-WIP` 의 확정판(게시물 49 이하 통과자 전원 13,167명). 83 때와 같은 방안 B -
+        # 키 · 라벨 · URL · 지문은 새것, **디스크 경로는 옛 이름 그대로**(`..._49_wip.json`). 그래야 WIP 를
+        # 받아 둔 기기에 `(download)` 가 아니라 `(update)` 가 선다(옛 판 1,388,682,556 · 15A62422… · 8,269명 -
+        # 전원이 새 판 안에 있다). 키가 바뀌어 `NAID5-49-WIP` 로 부르던 주소는 '모르는 모드' 가 된다.
+        # ⚠️ **Curated 에는 안 든다**(사용자 지정): ALL 을 고르거나 이 팩을 직접 고를 때만 읽는다.
+        #    거르는 조각은 `49-20`(Curated 의 `exclude_contains`).
+        "NAID5-49-20": {
+            "label": "NAID5-49-20",
+            "path": Path("data/artist_thumbnail_naid5_49_wip.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-49-20",
+            "expected_size": 2217731005,
+            "sha256": "B21A5C0ECB47E52C7050736954B766DCA2C05DC9659C0A10AEA62EA15DE2B570",
+        },
+        # 옛 `NAID5-STYLISH-WIP` 의 확정판(탈락 갈래 전원 8,028명). 위와 같은 방안 B - **경로는 옛 이름
+        # 그대로**(`..._stylish_wip.json`), 옛 판(850,611,426 · 1486E2F0… · 5,149명)을 받은 기기엔 `(update)`.
         # ⚠️ 이름에 `STYLISH` 가 들어가는 것이 곧 계약이다: Curated 는 이 조각을
         #    `exclude_contains` 로 걸러 내고 ALL 만 포함한다.
-        "NAID5-STYLISH-WIP": {
-            "label": "NAID5-STYLISH-WIP",
+        "NAID5-STYLISH-8000": {
+            "label": "NAID5-STYLISH-8000",
             "path": Path("data/artist_thumbnail_naid5_stylish_wip.json"),
-            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-STYLISH-WIP",
-            "expected_size": 850611426,
-            "sha256": "1486E2F0F17A2DB3499F680D4F479040850E587F4166959B1E7E302C409149A5",
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID5_artist_thumbnail/NAID5-STYLISH-8000",
+            "expected_size": 1335470826,
+            "sha256": "2AC41FDC117E51EAC2A853167A67647112953FE8886F6B6BFACFC01D4A02A6DB",
         },
         "NAID4.5F-31000": {
             "label": "NAID4.5F-31000",
@@ -151,18 +166,23 @@ class ArtistThumbnailService:
     # `pin_top`/`accent` 는 **드롭다운에서의 자리와 색**이다(사용자 지정 2026-09-19:
     # "NAID5 Curated 버튼 위치를 가장 위로 올리고, 연노랑색으로 혼자 강조").
     # ⚠️ 권하는 것이 하나라서 강조가 뜻을 갖는다 - 둘에 칠하면 둘 다 안 보인다.
+    #
+    # 구성(사용자 지정 2026-10-12) - 표의 차례 그대로 잇는다:
+    #   Curated = 6333-165 · 164-84 · 83-50 · 33000-55000-Curated            (37,770명)
+    #   ALL     = 6333-165 · 164-84 · 83-50 · 49-20 · STYLISH-8000           (54,880명)
+    # `NAID5-49-20` · `NAID5-STYLISH-8000` 은 ALL 을 고르거나 그 팩을 직접 고를 때만 읽는다.
     ARTIST_THUMB_VIRTUAL_MODES = {
         "NAID5-CURATED": {
             "label": "NAID5 Curated",
             "prefix": "NAID5",
-            "exclude_contains": ("20000-Q", "STYLISH"),
+            "exclude_contains": ("20000-Q", "STYLISH", "49-20"),
             "pin_top": True,
             "accent": True,
         },
         "NAID5-ALL": {
             "label": "NAID5 ALL",
             "prefix": "NAID5",
-            "exclude_contains": ("20000-Q",),
+            "exclude_contains": ("20000-Q", "Curated"),
         },
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -191,7 +211,7 @@ class ArtistThumbnailService:
         self._data_cache: dict[str, dict] = {}
         # ⚠️ 팩 하나가 1.3GB(파싱 4.2초)다. 가상 모드는 그 여럿에 걸쳐 있어서 한 칸만
         #    쥐면 한 페이지를 그리는 동안 팩을 왕복한다 - 활성 가상 모드의 구성원
-        #    수만큼 열어 둔다(Curated 4 · ALL 5, 2026-09-27 NAID5-49-WIP 부터). 평소에는 예전처럼 하나다.
+        #    수만큼 열어 둔다(Curated 4 · ALL 5). 평소에는 예전처럼 하나다.
         self._data_cache_limit = 1
         # 캐시한 팩의 **바이트 크기**. 갱신 중에도 옛 팩을 계속 보여 주되,
         # 다 받아 크기가 바뀌면 그때 새로 읽게 하는 열쇠다(2026-09-03).

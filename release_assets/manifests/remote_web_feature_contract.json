@@ -637,6 +637,21 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/inset/layer",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/layer/update",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/inset/layer/{layer_id}/image",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/inset/enabled",
           "smoke": "state_mutation"
         },

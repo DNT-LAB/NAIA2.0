@@ -41,7 +41,7 @@ Important interpretation:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Iterable, Sequence
 
@@ -327,6 +327,8 @@ def prepare_reference_inpaint_canvas(
     spec: ReferenceInsetPreprocessSpec | None = None,
     box: dict | None = None,
     divider: object = None,
+    layers: Sequence[tuple[Image.Image, dict]] | None = None,
+    layers_below: int = 0,
 ) -> ReferenceInsetPreprocessResult:
     """
     Create the left-anchored reference canvas and matching full/small masks.
@@ -345,8 +347,15 @@ def prepare_reference_inpaint_canvas(
       Binary 1/8 mask for NovelAI native infill.
     """
     spec = spec or ReferenceInsetPreprocessSpec()
+    # ``layers`` = 칸 안에 덧놓는 그림들 ``(그림, 자리)`` - 아래 -> 위 차례(사용자 지시 2026-10-12: 배경 위에 캐릭터).
+    # 앞의 ``layers_below`` 장은 칸의 그림 **아래**에, 나머지는 위에 놓인다. 모두 칸 안에서만 보이고, 보존하는 것은
+    # 여전히 칸 전체다(마스크는 그대로). 레이어가 없으면 예전 그림과 바이트까지 같다.
+    stacked = list(layers or ())
+    if stacked and (box is None or divider is None):
+        raise ValueError("layers need a panelled layout (box and divider)")
     # 투명한 그림은 칸의 바탕색에 얹는다(줄이기 **전에** - 숨은 색이 가장자리로 번지지 않게).
-    reference = flatten_on(source_image, spec.panel_rgb)
+    # 레이어가 있으면 얹지 않는다 - 투명한 자리로 아래 레이어가 비쳐야 한다(줄일 때 PIL 이 알파를 먼저 곱한다).
+    reference = source_image if stacked else flatten_on(source_image, spec.panel_rgb)
 
     panelled = box is not None or divider is not None
     if not panelled:
@@ -361,7 +370,15 @@ def prepare_reference_inpaint_canvas(
         # 칸 전체가 그 바탕색이다 - 그림이 덮지 않은 자리도. 안 칠하면 검은 그림 상자가 흰 칸 위에 떠 있게 된다.
         canvas.paste(tuple(int(v) for v in spec.panel_rgb), (
             placement.visible_left, placement.visible_top, placement.visible_right, placement.visible_bottom))
-    if panelled:
+    if stacked:
+        below = max(0, min(len(stacked), int(layers_below)))
+        for image, layer_box in stacked[:below]:
+            _paste_panel_layer(canvas, image, layer_box, placement)
+        _paste_panel_layer(canvas, reference, {
+            "x": placement.x, "y": placement.y, "width": placement.width, "height": placement.height}, placement)
+        for image, layer_box in stacked[below:]:
+            _paste_panel_layer(canvas, image, layer_box, placement)
+    elif panelled:
         # 그림은 칸 안에서만 보인다 - **보이는 부분만** 줄여(늘려) 놓는다. 통째로 줄인 뒤 자르면 안 된다.
         visible = _resize_visible_part(reference, placement)
         if visible is not None:
@@ -623,6 +640,8 @@ def reference_inset_box_limits(spec: ReferenceInsetPreprocessSpec | None = None)
     return {
         "grid": grid,
         "min_height": REFERENCE_INSET_BOX_MIN_HEIGHT_PX,
+        # 덧놓는 그림(레이어)의 가장 작은 높이 - 소품은 칸의 그림보다 작게 놓는다.
+        "layer_min_height": REFERENCE_INSET_LAYER_MIN_HEIGHT_PX,
         # 캔버스보다 크게도 놓는다(얼굴만 크게 걸치기) - 두 배까지.
         "max_height": spec.canvas_height * 2,
         "min_visible": REFERENCE_INSET_BOX_MIN_VISIBLE_PX,
@@ -781,6 +800,55 @@ def reference_inset_open_ratio(divider: int, spec: ReferenceInsetPreprocessSpec 
     """캔버스에서 칸이 **안 덮은** 넓이의 비율(0 ~ 1) - 모델이 그릴 수 있는 곳. 칸은 높이 전체라 너비만 본다."""
     spec = spec or ReferenceInsetPreprocessSpec()
     return 1.0 - max(0, min(spec.canvas_width, int(divider))) / float(spec.canvas_width)
+
+
+def _paste_panel_layer(canvas: Image.Image, image: Image.Image, box: dict, panel: PlacementBox) -> None:
+    """칸 안에 그림 한 장을 놓는다 - 칸이 자르고, 투명한 자리로는 아래가 비친다."""
+    picture = image if image.mode in ("RGB", "RGBA") else image.convert("RGBA")
+    visible = _resize_visible_part(picture, replace(
+        panel, x=int(box["x"]), y=int(box["y"]), width=max(1, int(box["width"])), height=max(1, int(box["height"]))))
+    if visible is None:
+        return
+    part, at = visible
+    if part.mode == "RGBA":
+        canvas.paste(part, at, part)
+    else:
+        canvas.paste(part, at)
+
+
+# 덧놓는 그림(레이어): 소품처럼 작은 것도 놓으므로 칸의 그림보다 더 줄일 수 있다. 장수는 인페인트의 레이어와 같다.
+REFERENCE_INSET_LAYER_MIN_HEIGHT_PX = 64
+REFERENCE_INSET_LAYER_LIMIT = 8
+
+
+def default_reference_inset_layer_box(
+    source_size: tuple[int, int], spec: ReferenceInsetPreprocessSpec, divider: int
+) -> dict[str, int]:
+    """새로 놓는 레이어의 자리: 칸 안에 통째로 들어가게 맞추고 한가운데에 둔다."""
+    src_w, src_h = max(1, int(source_size[0])), max(1, int(source_size[1]))
+    grid = REFERENCE_INSET_BOX_GRID_PX
+    fit = min(int(divider) / src_w, spec.canvas_height / src_h)
+    height = max(REFERENCE_INSET_LAYER_MIN_HEIGHT_PX, int(src_h * fit) // grid * grid)
+    width = max(1, int(round(src_w * (height / src_h))))
+    return {"x": (int(divider) - width) // 2, "y": (spec.canvas_height - height) // 2, "width": width, "height": height}
+
+
+def normalize_reference_inset_layer_box(
+    box: object, source_size: tuple[int, int], spec: ReferenceInsetPreprocessSpec, divider: int
+) -> dict[str, int]:
+    """레이어의 자리 · 높이를 한계에 맞춘다(칸의 그림과 같은 규칙 - 너비는 비율에서, `min_visible` 은 칸 안에 남긴다)."""
+    src_w, src_h = max(1, int(source_size[0])), max(1, int(source_size[1]))
+    base = default_reference_inset_layer_box((src_w, src_h), spec, divider)
+    limits = reference_inset_box_limits(spec)
+    grid = int(limits["grid"])
+    data = box if isinstance(box, dict) else {}
+    wanted = _round_half_up(_finite(data.get("height"), float(base["height"])) / grid) * grid
+    height = max(int(limits["layer_min_height"]), min(int(limits["max_height"]), wanted))
+    width = max(1, int(round(src_w * (height / src_h))))
+    keep = int(limits["min_visible"])
+    x = max(keep - width, min(int(divider) - keep, _round_half_up(_finite(data.get("x"), float(base["x"])))))
+    y = max(keep - height, min(spec.canvas_height - keep, _round_half_up(_finite(data.get("y"), float(base["y"])))))
+    return {"x": x, "y": y, "width": width, "height": height}
 
 
 def _panel_placement(box: dict[str, int], divider: int, spec: ReferenceInsetPreprocessSpec) -> PlacementBox:

@@ -30485,6 +30485,34 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .riw-chip.is-on { border-color: rgba(139, 118, 255, 0.85); color: #ffffff; background: rgba(139, 118, 255, 0.22); }
 .riw-chip:disabled { opacity: 0.45; cursor: default; }
 .riw-read { margin-left: auto; white-space: nowrap; color: var(--text-muted); font: 500 11px var(--font-mono); }
+/* 레이어 줄(사용자 지시 2026-10-12): 칸 안에 쌓인 그림들 - 위에 놓인 것부터. 고른 칩에만 조작 단추가 붙는다. */
+/* 칸 안의 그림들은 쌓는 차례를 z-index 로 받는다 - 칸이 제 쌓임 맥락을 갖지 않으면 그 숫자가 칸 밖으로 새어
+   경계선 · 테두리 · 손잡이를 덮는다(실측: 레이어를 놓자 경계선의 알약과 점선 테두리가 사라졌다). */
+.riw-panel { isolation: isolate; }
+.riw-lay-list { display: inline-flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.riw-lay {
+  display: inline-flex; align-items: center; border-radius: 6px;
+  border: 1px solid var(--border-glow); background: transparent;
+}
+.riw-lay.is-on { border-color: rgba(139, 118, 255, 0.85); background: rgba(139, 118, 255, 0.22); }
+.riw-lay-pick {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border: 0; background: none;
+  color: var(--text-dim); font: 500 11px var(--font-mono); cursor: pointer; white-space: nowrap;
+}
+.riw-lay-pick:hover:not(:disabled), .riw-lay.is-on .riw-lay-pick { color: #ffffff; }
+.riw-lay-pick img {
+  width: 20px; height: 26px; object-fit: cover; border-radius: 3px; background: #ffffff;
+  user-select: none; -webkit-user-drag: none;
+}
+.riw-lay.is-hidden .riw-lay-pick img { opacity: 0.3; }
+.riw-lay-tools { display: inline-flex; align-items: center; gap: 1px; padding-right: 3px; }
+.riw-lay-tool {
+  min-width: 20px; height: 20px; padding: 0 5px; border: 0; border-radius: 4px; background: none;
+  color: #d8d2ff; font: 600 10.5px/1 var(--font-mono); cursor: pointer; white-space: nowrap;
+}
+.riw-lay-tool:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.riw-lay-tool:disabled { opacity: 0.35; cursor: default; }
+.riw-lay-tool.is-armed { background: #c8324a; color: #ffffff; }
 
 /* ── 레퍼런스 인셋 창 개편(사용자 지정 2026-10-10): 켜고 끄기 · 빈 상태 · 이름 붙은 줄 · Storage ── */
 .riw-main, .riw-store { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

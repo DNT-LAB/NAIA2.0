@@ -1160,7 +1160,7 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261011-inset21');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261012-inset22');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),

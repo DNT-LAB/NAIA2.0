@@ -592,6 +592,68 @@ def register_character_asset_routes(
             return JSONResponse({"error": "no pinned reference inset"}, status_code=404)
         return Response(content=data, media_type=media, headers=PRIVATE_CACHE_HEADERS)
 
+    @app.post("/api/character-asset/inset/layer")
+    async def api_character_asset_inset_layer_add(req: Request):
+        # 칸 안에 그림 한 장을 덧놓는다. 본문 = 그림 바이트(붙여넣기 · 파일), 또는 JSON `{stored_id}`(Storage 의 그림) ·
+        # `{character_id, variation}`(에셋의 그림).
+        service = _asset_service(session_context)
+        content_type = str(req.headers.get("content-type") or "").lower()
+        try:
+            limit = int(service.REFERENCE_INSET_SOURCE_MAX_BYTES)
+            chunks: list[bytes] = []
+            received = 0
+            async for chunk in req.stream():
+                received += len(chunk)
+                if received > limit:
+                    return JSONResponse({"error": "그림이 너무 큽니다(32MB 까지)."}, status_code=413)
+                chunks.append(chunk)
+            body = b"".join(chunks)
+            if content_type.startswith("application/json"):
+                try:
+                    payload = json.loads(body.decode("utf-8")) if body else {}
+                except ValueError:
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                state = await run_in_thread(
+                    service.add_reference_inset_layer, None, payload.get("stored_id"),
+                    payload.get("character_id"), payload.get("variation") or "",
+                )
+            else:
+                state = await run_in_thread(service.add_reference_inset_layer, body)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset layer failed: {exc}"}, status_code=500)
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/layer/update")
+    async def api_character_asset_inset_layer_update(req: Request):
+        # 레이어 하나를 고친다: `{id, box: {x, y, height}}` · `{id, visible}` · `{id, move: "up" | "down"}` · `{id, remove}`.
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).update_reference_inset_layer,
+                payload.get("id"), payload.get("box"), payload.get("visible"), payload.get("move"), payload.get("remove"),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset layer failed: {exc}"}, status_code=500)
+        return {"ok": True, **state}
+
+    @app.get("/api/character-asset/inset/layer/{layer_id}/image")
+    async def api_character_asset_inset_layer_image(layer_id: str):
+        try:
+            data = await run_in_thread(_asset_service(session_context).reference_inset_layer_image, layer_id)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return Response(content=data, media_type="image/png", headers=PRIVATE_CACHE_HEADERS)
+
     @app.post("/api/character-asset/inset/crop")
     async def api_character_asset_inset_crop(req: Request):
         # 생성 결과에서 인셋 칸을 잘라 낼 것인가(`{enabled}`) - 이 세션의 설정.

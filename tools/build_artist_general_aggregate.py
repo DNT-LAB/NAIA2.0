@@ -6,15 +6,29 @@
 
 무엇을 담나
     general 태그마다 **(작가, 그 태그를 그린 횟수)** 쌍을, 횟수가 `--min-count`
-    (기본 10) 이상인 것만. 역색인(postings)은 담지 않는다.
+    (기본 5) 이상인 것만. 역색인(postings)은 담지 않는다.
 
 왜 집계인가 (사용자 결정 2026-09-19, 방안 B)
     깊이 검색이 general 축에 묻는 것은 `count(작가, 태그) >= 문턱` 하나뿐이다.
-    그 답만 담으면 **약 12MB** 로 끝난다 - postings 를 통째로 담으면 528MB
+    그 답만 담으면 **약 20MB** 로 끝난다 - postings 를 통째로 담으면 528MB
     (압축 후에도 +256MB)라 배포판이 배로 커진다.
 
     대가는 하나다: **문턱 아래는 못 센다.** `--min-count` 밑으로는 자료가 없다.
     읽는 쪽이 그 문턱을 `meta.min_count` 로 알고 화면에 알린다.
+
+문턱 10 -> 5 (사용자 지정 2026-10-12) - 코퍼스 175 실측
+    화면의 기본값이 count 5 · post 10 으로 내려갔다(썸네일 색인이 게시물 20장대 작가까지
+    내려가서). 이 표가 10 에 머물면 태그 축만 조용히 10 으로 눌린다 - **기본값을 되돌리지 마라.**
+
+        문턱 10 · 전 작가            17,708 태그 ·  4,908,649 쌍 · 10.4MB   (전)
+        문턱  5 · 전 작가            28,500 태그 · 10,935,725 쌍 · 20.3MB   (지금)
+        문턱  5 는 색인 작가만       27,668 태그 ·  9,319,186 쌍 · 18.1MB
+        문턱  3 · 전 작가            42,007 태그 · 19,858,276 쌍 · 33.3MB
+
+    ⚠️ **썸네일 색인에 든 작가로 좁혀 굽지 않는다.** 아끼는 것이 2.2MB 뿐이다 - 색인된
+       5만 5천 명(작가의 11%)이 쌍의 81% 를 쥐고 있다. 그 값에 이 표가 썸네일 팩 하나의
+       명부에 묶이고, [모두] 와 다른 팩(ANIMA · Noob) · 사용자가 만든 썸네일에서는 작가마다
+       바닥이 달라진다(누구는 5부터, 누구는 10부터) - 화면이 그것을 말할 길이 없다.
 
 ⚠️ 이 파일에 박혀 있는 규칙 넷
   * **작가 코드는 친화도 팩에서 그대로 가져온다.** 다시 만들지 않는다 - parquet 에서
@@ -65,7 +79,10 @@ REQUIRED_SECTIONS = (
     "id_index", "ids_general", "cnt_index", "counts_general",
 )
 # 검산 표본. 흔한 것과 드문 것을 섞는다 - 흔한 것만 보면 꼬리에서 나는 오류를 놓친다.
-VERIFY_TAGS = ("1girl", "small breasts", "twintails", "ovipositor", "maid")
+# ⚠️ 드문 쪽은 **표에 실제로 남는 것**이어야 한다. 전에 넣어 둔 `ovipositor` 는 문턱을 넘는
+#    작가가 한 명도 없어 "양쪽 다 없다 - 일치" 로 늘 통과했다(아무것도 안 쟀다). 지금 둘은
+#    코퍼스 175 · 문턱 5 에서 작가 24명 / **딱 5회인 1명**이다 - 문턱이 한 칸 어긋나면 갈린다.
+VERIFY_TAGS = ("1girl", "small breasts", "twintails", "maid", "licking finger", "braiding hair")
 
 
 def jzlib(obj) -> bytes:
@@ -371,8 +388,8 @@ def main() -> int:
                         help="parquet 폴더. 주면 전수 주사로 교차검증한다(권장)")
     parser.add_argument("--out", type=Path,
                         default=REPO / "data" / "artist_tag_general.naiapack")
-    parser.add_argument("--min-count", type=int, default=10,
-                        help="이 횟수 미만인 (작가,태그) 쌍은 담지 않는다 (기본 10)")
+    parser.add_argument("--min-count", type=int, default=5,
+                        help="이 횟수 미만인 (작가,태그) 쌍은 담지 않는다 (기본 5)")
     parser.add_argument("--force", action="store_true", help="기존 산출물을 덮어쓴다")
     args = parser.parse_args()
 

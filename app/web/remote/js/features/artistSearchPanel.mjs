@@ -67,14 +67,18 @@ const MAX_DEPTH = 3;
 
 /** 작가의 총 게시물 문턱. **기본값이자 하한**이다(사용자 지정 2026-09-19).
  *
- *  ⚠️ 처음 사양은 첫 단계 200 · 그 뒤 100 이었는데 너무 높았다 - 지금은 단계를
- *     가리지 않고 30 이고, 그보다 낮게는 **못 내린다**. 30장도 안 그린 작가는
- *     비중이 널뛰어서(1/3 이 33%다) 줄 세울 수가 없다.
+ *  ⚠️ 200 · 100 -> 30 -> **10**(사용자 지정 2026-10-12). 썸네일 색인이 게시물 20장대
+ *     작가까지 내려갔는데(NAID5 54,880명) 30 으로는 그중 92.4% 만 닿았다 - 10 이면
+ *     99.5% 다. 그보다 낮게는 **못 내린다**. 표본이 얇은 작가가 위를 덮는 것은 Wilson
+ *     이 막는다(10/10 의 하한 72% 는 30/30 의 89% 아래에 선다).
  */
-const POST_FLOOR = 30;
+const POST_FLOOR = 10;
 
+/** 태그를 그린 횟수의 기본값(사용자 지정 2026-10-12: 10 -> 5). 게시물 20장대 작가는 한
+ *  태그를 10번 그리기 어렵다. 태그(general) 축의 집계표도 5회부터 담아 다시 구웠다 -
+ *  그 축의 바닥(`/state` 의 `min_count`)이 이 값보다 높으면 `resetNums()` 가 바닥을 쓴다. */
 function tagDefaults() {
-  return {minCount: 10, minPosts: POST_FLOOR};
+  return {minCount: 5, minPosts: POST_FLOOR};
 }
 
 const fmt = n => Number(n || 0).toLocaleString('en-US');
@@ -287,7 +291,8 @@ export function createArtistSearchPanel({
   function resetNums() {
     const defaults = tagDefaults();
     const floor = isTagKind(kind) ? floorOf(kind) : 1;
-    // ⚠️ 입력칸의 바닥을 안 잡아 주면 사용자가 5를 넣고 **조용히 10의 답**을 본다.
+    // ⚠️ 입력칸의 바닥을 안 잡아 주면 사용자가 바닥보다 낮은 값을 넣고 **조용히 바닥의 답**을
+    //    본다(집계표는 그 아래를 못 센다 - 지금 태그 축의 바닥은 5 다).
     numEls.count.min = String(floor);
     numEls.count.value = String(Math.max(defaults.minCount, floor));
     numEls.ratio.value = '45';
@@ -372,7 +377,7 @@ export function createArtistSearchPanel({
 
   /** 지금 칸의 값. ⚠️ `min` 속성은 **타자를 막지 않는다** - 여기서 한 번 더 건다.
    *
-   *  ⚠️ 누른 값은 **칸에 돌려쓴다**. 안 그러면 칸에는 1 이 남고 답은 30 의 답이라
+   *  ⚠️ 누른 값은 **칸에 돌려쓴다**. 안 그러면 칸에는 1 이 남고 답은 하한의 답이라
    *     화면과 조건이 어긋나 보인다(실측: 1을 치고 갱신하니 9,464명 그대로였다).
    */
   function currentThresholds() {

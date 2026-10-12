@@ -1723,9 +1723,16 @@ export function createCharacterBuilderV5({
       return;
     }
     if (event.target.closest('[data-cb-slot-input]')) return;      // 입력 칸 안의 클릭은 그대로 둔다
+    // 입력 칸에서 **누르기 시작한** 클릭도 그대로 둔다. 글을 끌어서 고르다가 칸 밖(같은 줄의 이름 · 여백)에서 손을 떼면
+    // 브라우저는 그 클릭을 줄에 준다(누른 곳과 뗀 곳의 공통 조상) - 그것을 '줄을 눌렀다' 로 읽어 커서를 글 끝으로
+    // 보내면 방금 고른 글이 풀린다(사용자 제보 2026-10-12).
+    if (pressedInSlot) return;
     const row = event.target.closest('[data-cb-block]');
     if (row) setActiveBlock(row.dataset.cbBlock, {focus: true});
   }
+
+  // 지금의 누르기가 입력 칸 안에서 시작됐는가(`onClick` 이 본다 - 끌어서 고른 글을 지키려고).
+  let pressedInSlot = false;
 
   /** 열린 줄의 입력 칸: 친 글이 곧 그 블록의 부품 목록이다. 치는 동안 왼쪽은 다시 그리지 않는다(커서가 날아간다). */
   let slotRenderTimer = null;
@@ -1810,6 +1817,9 @@ export function createCharacterBuilderV5({
     mount.addEventListener('pointerover', onTipOver);
     mount.addEventListener('pointerout', onTipOut);
     mount.addEventListener('pointerdown', hideTip);
+    mount.addEventListener('pointerdown', event => {
+      pressedInSlot = !!event.target.closest?.('[data-cb-slot-input]');
+    });
   }
   leftMount.addEventListener('input', onLeftInput);
   leftMount.addEventListener('keydown', onLeftKeydown);

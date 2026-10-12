@@ -48,6 +48,10 @@ def apply_named_entity_aliases(raw, path: Path):
                 info['_named_entity_category'] = item['category']
                 info['_named_entity_aliases'] = list(item['aliases'])
                 info['_named_entity_source'] = data.get('source', {}).get('file', '')
+                # Explicitly typed new corpus entries have no legacy dictionary
+                # row. Existing classifications remain authoritative.
+                if item.get('set_category_if_missing') is True and not info.get('_cat'):
+                    info['_cat'] = item['category']
                 existing = str(info.get('keywords_kr') or '')
                 terms = {normalize_tag_key(a) for a in existing.split(',')}
                 added = [a for a in item['aliases'] if normalize_tag_key(a) not in terms]

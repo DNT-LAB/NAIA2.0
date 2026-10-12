@@ -127,6 +127,10 @@ def main():
     args = parser.parse_args()
     if (args.output.exists() or args.report.exists()) and not args.replace_generated:
         parser.error('Refusing to overwrite existing output')
+    # This builder regenerates everything from one CSV. An asset that also holds
+    # entities merged from other sources would silently lose them.
+    if args.output.exists() and json.loads(args.output.read_text(encoding='utf-8')).get('additional_sources'):
+        parser.error('Refusing to overwrite: output holds entities merged from additional sources')
     entities, stats = extract(args.source)
     raw = load_kr_tag_records(ROOT, include_named_entity_aliases=False).raw
     active = defaultdict(set)

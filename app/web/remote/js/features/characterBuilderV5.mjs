@@ -158,6 +158,9 @@ export function createCharacterBuilderV5({
 
   let view = 'gallery';          // 'gallery'(기본) | 'create' | 'variation'
   let builtView = '';            // 오른쪽 창의 뼈대를 세운 화면(바뀔 때만 다시 세운다)
+  // [확대](사용자 지시 2026-10-12): 부품 그리드를 접고 그림 칸(제작 = 시험 그림 · 바리에이션 = A | B)이 오른쪽을 다 쓴다.
+  // 화면을 새로 열 때마다 꺼진 채로 시작한다. 왼쪽에서 다른 블록을 고르면 저절로 풀린다(부품을 고르려는 것이다).
+  let wide = false;
   let store = [];                // 신 사양 캐릭터(spec === 'v5')
   let storeSeq = 0;
   let selectedId = '';           // 선택 화면에서 고른 캐릭터
@@ -492,6 +495,7 @@ export function createCharacterBuilderV5({
         + `${picks.length || ''}</span></div></div>`;
     }).join('');
     leftMount.innerHTML = `<div class="cb5-head">`
+      + `<button type="button" class="cb5-btn" data-cb-act="back">← 목록</button>`
       + `<span class="cb5-title">${view === 'variation'
         ? `${escHtml(work?.name || '')} · 바리에이션` : '캐릭터 제작 · V5'}</span>`
       + `<div class="cb5-seg" role="group" aria-label="인물">${genders}</div>`
@@ -723,8 +727,8 @@ export function createCharacterBuilderV5({
     const saveLabel = current?.saved ? '저장됨' : (current?.opaque ? '구 사양으로 저장' : '에셋으로 저장');
     // 그림 칸에는 title 을 달지 않는다 - 앱 툴팁으로 떠서, 들여다보는 내내 후보 줄을 가린다(라이브에서 봄).
     // 시드 고정은 크기 줄에 둔다. 아래 줄에 단추가 둘이라, 거기에 같이 두면 좁은 창에서 줄이 둘로 접혀 그림 칸이 깎인다.
-    return `<div class="cb5-side-top"><span class="cb5-side-label">시험 생성</span>`
-      + `<div class="cb5-seg" role="group" aria-label="해상도">${resolutions}</div></div>`
+    return `<div class="cb5-side-top">`
+      + `<div class="cb5-seg" role="group" aria-label="해상도">${resolutions}</div>${wideButtonHtml()}</div>`
       + `<div class="cb5-side-sub">${size}${paid}`
       + `<label class="cb5-check"><input type="checkbox" data-cb-role="seedlock"`
       + `${seedLock ? ' checked' : ''}${seedKnown || seedLock ? '' : ' disabled'}> 시드 고정</label>`
@@ -763,12 +767,24 @@ export function createCharacterBuilderV5({
       + `</div></div>`
       + `<div class="cb5-side-bottom"><span class="cb5-size">${work.width} x ${work.height}</span>${paid}</div>`
       + `</div><div class="cb5-ab-pane">`
-      + `<div class="cb5-side-top"><span class="cb5-side-label">결과 B</span></div>`
+      + `<div class="cb5-side-top"><span class="cb5-side-label">결과 B</span>${wideButtonHtml()}</div>`
       + `<div class="cb5-stage">${stageHtml(current, 'Generate 를 누르면 띠 안을 다시 그립니다')}</div>`
       + `<div class="cb5-strip">${stripHtml()}</div>`
       + `<div class="cb5-side-bottom"><span class="cb5-seed"></span>`
       + `<button type="button" class="cb5-btn is-primary" data-cb-act="save"${canSave ? '' : ' disabled'}>`
       + `${current?.saved ? '저장됨' : '바리에이션으로 저장'}</button></div></div>`;
+  }
+
+  /** [확대] / [축소] - 부품 그리드를 접고 그림 칸을 넓힌다(다시 누르면 돌아온다). */
+  function wideButtonHtml() {
+    return `<button type="button" class="cb5-btn cb5-wide-btn${wide ? ' is-on' : ''}" data-cb-act="wide"`
+      + ` aria-pressed="${wide ? 'true' : 'false'}" title="${wide
+        ? '부품 그리드를 다시 보입니다' : '부품 그리드를 접고 그림을 크게 봅니다'}">${wide ? '축소' : '확대'}</button>`;
+  }
+
+  function applyWide() {
+    rightMount.querySelector('.cb5-win')?.classList.toggle('is-wide', wide);
+    renderSide();             // 단추의 글 + 그림을 새 칸 크기에 다시 맞춘다
   }
 
   function renderSide() {
@@ -1039,20 +1055,18 @@ export function createCharacterBuilderV5({
   // ------------------------------------------------------------------ 그리기 - 오른쪽 창
 
   function builderShellHtml() {
-    const title = view === 'variation' ? `${escHtml(work?.name || '')} · 바리에이션 만들기` : '새 캐릭터';
-    // 시험 그림 칸(.cb5-side)은 **맨 위부터** 선다(사용자 지시 2026-10-11 - 그림 볼 자리가 모자랐다). 그래서 [← 목록] 줄을
-    // 왼쪽 기둥(.cb5-col) 안으로 넣었다. 사양 탭 줄의 오른쪽 빈 자리까지 올라가는 것은 CSS 가 한다(`body.assets-v5-mode`).
-    return `<div class="cb5-win${view === 'variation' ? ' is-ab' : ''}">`
+    // 배치(사용자 지시 2026-10-12): 부품 줄(왼쪽 덮개) | **그림 칸(가운데)** | 부품 그리드(오른쪽). 그림은 고치는 곳 바로
+    // 옆에 서고, 부품 그리드와는 따로다(그리드의 머리줄 · 카테고리가 그림 위를 지나가지 않는다). 그림 칸은 맨 위부터 선다 -
+    // [← 목록] 은 왼쪽 머리줄에 있고, 벤치에서는 사양 탭 줄이 없다(CSS `body.assets-v5-mode`).
+    return `<div class="cb5-win${view === 'variation' ? ' is-ab' : ''}${wide ? ' is-wide' : ''}">`
+      + `<aside class="cb5-side" data-cb-role="side"></aside>`
       + `<div class="cb5-col">`
-      + `<div class="cb5-bar"><button type="button" class="cb5-btn" data-cb-act="back">← 목록</button>`
-      + `<span class="cb5-bar-title">${title}</span></div>`
       + `<section class="cb5-main" data-cb-role="main">`
       + `<input type="text" class="cb5-search" data-cb-role="search" autocomplete="off" spellcheck="false"`
       + ` placeholder="부품 검색 · twintails, 땋은 머리">`
       + `<div class="cb5-main-title" data-cb-role="main-title"></div>`
       + `<div class="cb5-browse"><div class="cb5-main-scroll"></div>`
-      + `<nav class="cb5-parts" data-cb-role="parts" aria-label="소분류"></nav></div></section></div>`
-      + `<aside class="cb5-side" data-cb-role="side"></aside></div>`;
+      + `<nav class="cb5-parts" data-cb-role="parts" aria-label="소분류"></nav></div></section></div></div>`;
   }
 
   function renderRight() {
@@ -1071,6 +1085,7 @@ export function createCharacterBuilderV5({
     const key = `${view}:${work?.id || ''}:${work?.source || ''}`;
     if (builtView !== key) {
       builtView = key;
+      wide = false;                       // 화면을 새로 열면 부품 그리드가 보이는 채로 시작한다
       rightMount.innerHTML = builderShellHtml();
       rightMount.querySelector('[data-cb-role="search"]').value = query;
     }
@@ -1121,6 +1136,11 @@ export function createCharacterBuilderV5({
     // '기타' 를 떠날 때 거기 쓴 부품을 제 블록으로 옮긴다. 치는 동안에는 옮기지 않는다 - 친 글이 눈앞에서 사라진다.
     if (activeBlock === ETC_BLOCK) announceSorted(sortEtcBlock());
     activeBlock = key;
+    // 다른 블록을 골랐다 = 부품을 고르려는 것이다. 그림을 넓혀 두었으면 부품 그리드를 다시 보인다.
+    if (wide) {
+      wide = false;
+      applyWide();
+    }
     // 블록을 고르면 검색을 걷는다 - 검색 결과가 그리드를 덮고 있으면 눌러도 아무 일이 없어 보인다.
     if (query) {
       query = '';
@@ -1703,6 +1723,10 @@ export function createCharacterBuilderV5({
           .catch(error => showToast(`폴더를 열지 못했습니다: ${error.message}`, 'error'));
       }
       else if (name === 'back') backToGallery();
+      else if (name === 'wide') {
+        wide = !wide;
+        applyWide();
+      }
       else if (name === 'var-new') openVariation();
       else if (name === 'var-delete') deleteVariation();
       else if (name === 'char-delete') deleteCharacter();

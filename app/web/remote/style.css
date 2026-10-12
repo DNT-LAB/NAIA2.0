@@ -30680,11 +30680,23 @@ body.assets-v5-mode #btnGen { flex: 1 1 100%; grid-column: 1 / -1; }
 .cb5-win { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; }
 /* 왼쪽 기둥: [← 목록] 줄 + 그리드. 시험 그림 칸(.cb5-side)은 그 옆에서 맨 위부터 선다. */
 .cb5-col { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-/* 제작 · 바리에이션 화면에서는 사양 탭 줄을 띄워 놓고(그 줄의 오른쪽은 비어 있다) 시험 그림 칸이 그 자리까지 올라간다
-   (사용자 지시 2026-10-11 - "프리뷰 영역은 공간이 부족하므로 상단 영역을 침범"). 왼쪽 기둥은 탭 줄만큼 내려 선다. */
-body.assets-v5-mode #rightTabCharAssets { position: relative; }
-body.assets-v5-mode #charAssetSpecTabs { position: absolute; top: 0; left: 0; z-index: 3; }
-body.assets-v5-mode .cb5-col { padding-top: 32px; }
+/* 제작 · 바리에이션 화면(벤치)에서는 사양 탭 줄을 없앤다(사용자 지시 2026-10-12 - 만드는 중에 사양을 바꿀 일이 없다).
+   그림 칸도 부품 기둥도 맨 위부터 선다. 목록 화면에서는 탭이 그대로 보인다. */
+body.assets-v5-mode #charAssetSpecTabs { display: none; }
+/* 벤치의 배치(사용자 지시 2026-10-12): 부품 줄 | **그림 칸(가운데)** | 부품 그리드(오른쪽).
+   부품 그리드는 한 줄 셋을 지킬 만큼만 쓰고(넓은 창에서도 560px 까지), 남는 폭은 그림이 갖는다.
+   [확대] = 부품 그리드를 접고 그림 칸이 오른쪽을 다 쓴다. */
+.cb5-win:not(.is-ab) .cb5-col { flex: 0 0 clamp(424px, 58%, 560px); }
+.cb5-win:not(.is-ab) .cb5-side { flex: 1 1 0; min-width: 0; }
+.cb5-win.is-wide .cb5-col { display: none; }
+/* ❗ 바리에이션의 폭 규칙(.cb5-win.is-ab .cb5-side)이 파일의 뒤에 있어 같은 무게로는 진다 - 클래스를 하나 더 건다. */
+.cb5-win.is-wide .cb5-side, .cb5-win.is-ab.is-wide .cb5-side { flex: 1 1 auto; }
+.cb5-wide-btn { margin-left: auto; }
+.cb5-wide-btn.is-on { background: rgba(124,106,239,0.22); border-color: var(--accent); color: var(--text-primary); }
+/* 왼쪽 머리줄에 [← 목록] 이 들어왔다 - 이름이 길면(바리에이션) 줄을 바꾸지 않고 줄인다. */
+.cb5-head { flex-wrap: nowrap; }
+.cb5-head .cb5-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb5-head .cb5-btn, .cb5-head .cb5-seg { flex: none; }
 .cb5-main {
   flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px;
   container: cb5main / inline-size;

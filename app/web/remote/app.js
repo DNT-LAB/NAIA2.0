@@ -995,7 +995,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261012-cb5n')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261012-cb5o')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1022,7 +1022,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
     if (assetSpecTab === 'v5') characterAssetControl?.load?.();      // 구 사양 화면으로 떨어진다 - 목록을 채운다
   });
 
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261012-cb5g')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261012-cb5h')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -1160,16 +1160,12 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261012-store2');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261012-inset24');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),
         // [Assets] - Assets 탭을 연다. 에셋의 그림은 거기서 [C1 + 레퍼런스 인셋 적용] 으로 꽂는다.
         openAssets: () => switchRightTab('charAssets'),
-        // Storage 화면에 그림을 끌어다 놓는 자리 - 메타데이터 뷰어와 같은 길(파일 · 웹의 그림)을 쓴다. 여러 장도 받는다.
-        bindImageDrop: (target, onImageBlob) => resultImageInput?.bindDropTarget?.(target, {
-          onImageBlob, multiple: true, activeClass: 'is-drop',
-        }),
         // [붙여넣기] - 클립보드를 읽어 **이 창으로만** 넘긴다. 받는 쪽을 지목한 붙여넣기라 앱의 평소 붙여넣기
         // (이미지 동작 팝업 · 인페인트 레이어)로 가지 않는다. ⚠️ Ctrl+V 는 이리로 오지 않는다(회수 - 사용자 결정).
         requestPaste: () => {
@@ -1842,7 +1838,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize image action popup module', error);
   });
-const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20261012-multi')
+const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20261003-paste-layer')
   .then(({createResultImageInput}) => {
     resultImageInput = createResultImageInput({
       document,

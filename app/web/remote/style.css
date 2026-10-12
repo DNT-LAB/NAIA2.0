@@ -30485,48 +30485,6 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .riw-chip.is-on { border-color: rgba(139, 118, 255, 0.85); color: #ffffff; background: rgba(139, 118, 255, 0.22); }
 .riw-chip:disabled { opacity: 0.45; cursor: default; }
 .riw-read { margin-left: auto; white-space: nowrap; color: var(--text-muted); font: 500 11px var(--font-mono); }
-/* 레이어 판(사용자 지시 2026-10-12): 칸 안에 쌓인 그림들 - 위에 놓인 것부터. 고른 것에만 조작 단추가 붙는다.
-   캔버스의 **흰 빈 곳(그릴 곳)** 위에 얹는다 - 창 아래에 줄로 두니 자리가 모자랐다. 너비의 한계는 화면이 경계선에 맞춰 준다. */
-.riw-stagebox { position: relative; }
-.riw-stagebox[hidden], .riw-layerbox-add[hidden] { display: none !important; }
-.riw-layerbox {
-  position: absolute; top: 8px; right: 8px; width: 224px; max-height: calc(100% - 16px); box-sizing: border-box;
-  display: flex; flex-direction: column; gap: 6px; padding: 7px;
-  border-radius: 8px; border: 1px solid var(--border-glow); background: rgba(16, 16, 26, 0.94);
-}
-.riw-layerbox-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.riw-layerbox-title { color: var(--text-dim); font: 600 11px var(--font-mono); white-space: nowrap; }
-.riw-layerbox-title b { color: var(--text-primary); font-weight: 600; }
-.riw-layerbox-add { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-/* 칸 안의 그림들은 쌓는 차례를 z-index 로 받는다 - 칸이 제 쌓임 맥락을 갖지 않으면 그 숫자가 칸 밖으로 새어
-   경계선 · 테두리 · 손잡이를 덮는다(실측: 레이어를 놓자 경계선의 알약과 점선 테두리가 사라졌다). */
-.riw-panel { isolation: isolate; }
-.riw-lay-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
-.riw-lay {
-  display: flex; align-items: center; flex: none; min-width: 0; border-radius: 6px;
-  border: 1px solid var(--border-glow); background: transparent;
-}
-.riw-lay.is-on { border-color: rgba(139, 118, 255, 0.85); background: rgba(139, 118, 255, 0.22); }
-.riw-lay-pick {
-  display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; padding: 2px 6px 2px 2px;
-  border: 0; background: none; text-align: left;
-  color: var(--text-dim); font: 500 11px var(--font-mono); cursor: pointer; white-space: nowrap;
-}
-.riw-lay-pick span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.riw-lay-pick:hover:not(:disabled), .riw-lay.is-on .riw-lay-pick { color: #ffffff; }
-.riw-lay-pick img {
-  flex: none; width: 20px; height: 26px; object-fit: cover; border-radius: 3px; background: #ffffff;
-  user-select: none; -webkit-user-drag: none;
-}
-.riw-lay.is-hidden .riw-lay-pick img { opacity: 0.3; }
-.riw-lay-tools { display: inline-flex; align-items: center; flex: none; gap: 1px; padding-right: 3px; }
-.riw-lay-tool {
-  min-width: 20px; height: 20px; padding: 0 5px; border: 0; border-radius: 4px; background: none;
-  color: #d8d2ff; font: 600 10.5px/1 var(--font-mono); cursor: pointer; white-space: nowrap;
-}
-.riw-lay-tool:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
-.riw-lay-tool:disabled { opacity: 0.35; cursor: default; }
-.riw-lay-tool.is-armed { background: #c8324a; color: #ffffff; }
 
 /* ── 레퍼런스 인셋 창 개편(사용자 지정 2026-10-10): 켜고 끄기 · 빈 상태 · 이름 붙은 줄 · Storage ── */
 .riw-main, .riw-store { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -30566,51 +30524,12 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   color: var(--text-muted); font-size: 12px; line-height: 1.6;
 }
 .riw-store-item { position: relative; }
-/* Storage 의 카테고리 · 넣기 · 폴더 열기(사용자 지시 2026-10-12). */
-.riw-store-count { width: auto; }
-.riw-store-tools { display: flex; flex: 1 1 0; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; }
-.riw-store-tools[hidden], .riw-cats[hidden] { display: none !important; }
+/* [폴더 열기](사용자 지시 2026-10-12) - Storage 화면 머리줄과 Assets 탭 목록 윗줄의 남는 자리에 링크로 둔다. */
 .riw-link {
   padding: 0 2px; border: 0; background: none; cursor: pointer; white-space: nowrap;
   color: #a99cff; font: 500 11px var(--font-mono); text-decoration: underline; text-underline-offset: 2px;
 }
 .riw-link:hover { color: #ffffff; }
-.riw-cats { gap: 5px; }
-.riw-cats .riw-chip b { margin-left: 5px; font-weight: 500; opacity: 0.65; }
-.riw-cat { display: inline-flex; align-items: center; gap: 1px; }
-.riw-cat-input {
-  width: 110px; padding: 3px 7px; border-radius: 6px; border: 1px solid rgba(139, 118, 255, 0.85);
-  background: var(--bg-deep); color: var(--text-primary); font: 500 11px var(--font-mono); outline: none;
-}
-.riw-store-hint { color: var(--text-muted); font: 500 10.5px var(--font-mono); line-height: 1.5; }
-/* 끌어다 놓는 중: 받는 자리를 알린다(메타데이터 뷰어와 같은 길로 받는다). */
-.riw-store.is-drop .riw-store-grid { outline: 2px dashed rgba(139, 118, 255, 0.95); outline-offset: -2px; background: rgba(139, 118, 255, 0.08); }
-/* 그림을 옮기는 칸: 마우스를 대면 치수 자리에 뜬다. */
-.riw-store-move {
-  position: absolute; left: 1px; right: 1px; bottom: 1px; width: calc(100% - 2px); height: 18px; padding: 0 2px;
-  border: 0; border-radius: 0 0 5px 5px; background: #0c0c14; color: #e6e6ee;
-  font: 500 9.5px var(--font-mono); cursor: pointer; opacity: 0; transition: opacity 0.12s ease;
-}
-.riw-store-item:hover .riw-store-move, .riw-store-move:focus { opacity: 1; }
-/* 이름으로 찾기 · 그림의 이름(한도가 없다 - 사용자 지시 2026-10-12). */
-.riw-store-search {
-  flex: 1 1 70px; width: 96px; min-width: 70px; padding: 3px 7px; border-radius: 6px;
-  border: 1px solid var(--border-glow); background: var(--bg-deep); color: var(--text-primary);
-  font: 500 11px var(--font-mono); outline: none;
-}
-.riw-store-search:focus { border-color: rgba(139, 118, 255, 0.85); }
-.riw-store-edit {
-  position: absolute; top: 3px; left: 3px; height: 18px; padding: 0 5px; border-radius: 9px; cursor: pointer;
-  border: 1px solid rgba(0, 0, 0, 0.5); background: rgba(12, 12, 20, 0.82); color: #e6e6ee;
-  font: 600 9.5px/1 var(--font-mono); opacity: 0; transition: opacity 0.12s ease;
-}
-.riw-store-item:hover .riw-store-edit, .riw-store-edit:focus-visible { opacity: 1; }
-.riw-store-name {
-  position: absolute; left: 1px; right: 1px; bottom: 1px; width: calc(100% - 2px); height: 20px; box-sizing: border-box;
-  padding: 0 4px; border: 1px solid rgba(139, 118, 255, 0.95); border-radius: 0 0 5px 5px; z-index: 1;
-  background: #0c0c14; color: #ffffff; font: 500 10px var(--font-mono); outline: none;
-}
-/* Assets 탭의 [폴더 열기] - 목록 위 줄의 남는 자리(개수 앞). */
 .char-asset-folder-link {
   margin-left: auto; padding: 0 2px; border: 0; background: none; cursor: pointer; white-space: nowrap;
   color: var(--text-muted); font-size: 11px; text-decoration: underline; text-underline-offset: 2px;
@@ -30628,8 +30547,7 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   user-select: none; -webkit-user-drag: none;
 }
 .riw-store-size {
-  padding: 2px 4px 3px; text-align: center; background: rgba(12, 12, 20, 0.94);
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  padding: 2px 0 3px; text-align: center; background: rgba(12, 12, 20, 0.94);
   color: var(--text-muted); font: 500 9.5px var(--font-mono);
 }
 .riw-store-x {

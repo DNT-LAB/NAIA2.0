@@ -267,12 +267,6 @@ class HeadlessCharacterAssetService:
         self._reference_inset_sync_session = uuid.uuid4().hex[:12]
         self._reference_inset_sync_seq = 0
         self._reference_inset_upscaling: set[tuple[str, str, str]] = set()
-        # 칸 안에 덧놓은 그림들(레이어 - 사용자 지시 2026-10-12: 배경 위에 캐릭터를 놓는다). `{id: {name, png, image,
-        # size, box, visible}}` 와 쌓는 차례(아래 -> 위 · "base" = 칸의 그림). 핀이 아니라 이 세션의 것이다 -
-        # 칸의 그림을 바꿔 꽂아도 남는다(배경은 두고 캐릭터만 바꾼다). 앱을 끄면 사라진다.
-        self._reference_inset_layers: dict[str, dict[str, Any]] = {}
-        self._reference_inset_layer_order: list[str] = ["base"]
-        self._reference_inset_layer_counter = 0
         # data/random_*.txt lines. 수 MB라 1회만 읽는다.
         self._random_pools: dict[str, list[str]] = {}
 
@@ -414,7 +408,6 @@ class HeadlessCharacterAssetService:
             default_reference_inset_divider,
             normalize_reference_inset_box,
             normalize_reference_inset_divider,
-            normalize_reference_inset_layer_box,
             prepare_reference_inpaint_canvas,
             reference_inset_open_ratio,
             resolve_reference_inset_canvas,
@@ -460,32 +453,10 @@ class HeadlessCharacterAssetService:
             # 51 ~ 60%)에 맞추느라 경계가 옮겨졌으면 칸 방식으로 굽는다.
             panelled = placed != classic_box or divider != classic_divider
             open_ratio = reference_inset_open_ratio(divider, spec)
-            # 칸의 그림에 투명한 곳이 있는가 - 새 레이어를 그 아래에 넣을지 위에 얹을지를 이것으로 정한다.
-            source_alpha = bool(
-                opened.mode in ("RGBA", "LA") and opened.getchannel("A").getextrema()[0] < 250
-            )
-            # 덧놓은 그림들. 자리는 지금 캔버스 · 경계선의 한계에 다시 맞춘다(경계선이 좁아지면 칸 안으로 따라온다).
-            with self._retain_lock:
-                order = [key for key in self._reference_inset_layer_order
-                         if key == "base" or key in self._reference_inset_layers]
-                if "base" not in order:
-                    order.append("base")
-                extras = {key: self._reference_inset_layers[key] for key in order if key != "base"}
-            layer_boxes = {
-                key: normalize_reference_inset_layer_box(layer.get("box"), layer["size"], spec, divider)
-                for key, layer in extras.items()
-            }
-            base_at = order.index("base")
-            below = [(extras[key]["image"], layer_boxes[key]) for key in order[:base_at] if extras[key]["visible"]]
-            above = [(extras[key]["image"], layer_boxes[key]) for key in order[base_at + 1:] if extras[key]["visible"]]
-            stacked = below + above
-            # 레이어가 있으면 늘 칸 방식으로 굽는다(예전 길에는 칸이 없다).
-            panelled = panelled or bool(stacked)
 
             def bake(image: Any) -> Any:
                 return prepare_reference_inpaint_canvas(
-                    image, spec, box=placed if panelled else None, divider=divider if panelled else None,
-                    layers=stacked or None, layers_below=len(below),
+                    image, spec, box=placed if panelled else None, divider=divider if panelled else None
                 )
 
             # 업스케일해 둔 원본이 있으면 그것을 줄여 놓는다(비율이 같아 자리 · 크기 계산은 똑같이 나온다).
@@ -524,21 +495,9 @@ class HeadlessCharacterAssetService:
             "default_divider": int(default_divider),
             "custom": custom,
             "source": source_size,
-            "source_alpha": source_alpha,
             "open_ratio": open_ratio,
-            # 이 캔버스에 구워진 레이어들(화면이 그리는 것) - 쌓는 차례(아래 -> 위)와 맞춘 자리.
-            "layer_order": list(order),
-            "layers": [
-                {"id": key, "name": str(extras[key]["name"]), "box": dict(layer_boxes[key]),
-                 "visible": bool(extras[key]["visible"]),
-                 "source_width": int(extras[key]["size"][0]), "source_height": int(extras[key]["size"][1])}
-                for key in order if key != "base"
-            ],
         }
         with self._retain_lock:
-            for key, placed_box in layer_boxes.items():
-                if key in self._reference_inset_layers:
-                    self._reference_inset_layers[key]["box"] = dict(placed_box)
             self._reference_inset_pin = pin
             # 켜짐은 이 일이 시작된 뒤로 사용자가 켜고 끄지 않았을 때만 정한다 - 그 사이의 손이 이긴다.
             started_at = getattr(_INSET_OP, "toggle_epoch", self._reference_inset_toggle_epoch)
@@ -556,132 +515,6 @@ class HeadlessCharacterAssetService:
             "stored_id": str(pin.get("stored_id") or ""),
             "character_layout": bool(pin.get("character_layout")),
         }
-
-    # ------------------------------------------------- 레이어(칸 안에 덧놓는 그림)
-    # 쥐는 크기의 한계 - 캔버스는 1728x1216 까지고 칸은 그 절반이 안 된다. 굽을 때마다 읽으므로 풀어 둔 채로 쥔다.
-    REFERENCE_INSET_LAYER_MAX_SIDE = 2048
-
-    def _rebake_reference_inset(self) -> dict[str, Any]:
-        """지금 핀을 같은 그림 · 같은 배치로 다시 굽는다(레이어 · 바탕이 바뀌었을 때)."""
-        with self._retain_lock:
-            pin = self._reference_inset_pin
-            if not pin:
-                return self.reference_inset_state()
-            character_id, variation = str(pin["character_id"]), str(pin["variation"])
-            width, height = pin["width"], pin["height"]
-            # 레이어가 있으면 칸 방식이라 지금 배치를 그대로 넘긴다(기본 배치로 되돌리지 않는다).
-            box = {**pin["box"], "divider": pin["divider"]} if pin.get("custom") or pin.get("layers") else None
-            carry = self._inset_carry(pin)
-        return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
-
-    @_inset_serialized
-    def add_reference_inset_layer(
-        self, image_bytes: Optional[bytes] = None, stored_id: Any = None,
-        character_id: Any = None, variation: Any = "",
-    ) -> dict[str, Any]:
-        """칸 안에 그림 한 장을 덧놓는다 - 붙여넣은 / 올린 그림(`image_bytes`), Storage 의 그림(`stored_id`),
-        에셋의 그림(`character_id` · `variation`) 중 하나.
-
-        칸의 그림에 투명한 곳이 있으면 **그 아래**에 넣고(배경이 캐릭터 뒤에 깔린다), 없으면 맨 위에 얹는다.
-        자리는 칸 안에 통째로 들어가게 맞춘 한가운데다. 칸의 그림이 먼저 있어야 한다.
-        """
-        from PIL import Image
-
-        from utils.reference_inpaint_preprocess import REFERENCE_INSET_LAYER_LIMIT
-
-        with self._retain_lock:
-            pin = self._reference_inset_pin
-            count = len(self._reference_inset_layers)
-        if not pin:
-            raise ValueError("칸의 그림을 먼저 넣어 주세요.")
-        if count >= REFERENCE_INSET_LAYER_LIMIT:
-            raise ValueError(f"레이어는 {REFERENCE_INSET_LAYER_LIMIT}장까지 놓을 수 있습니다.")
-        if image_bytes:
-            raw = bytes(image_bytes)
-        elif str(stored_id or "").strip():
-            raw = self._inset_storage().read(stored_id)
-        elif str(character_id or "").strip():
-            asset_id = self._validate_id(character_id)
-            asset_variation = self._validate_hash(variation) if str(variation or "").strip() else ""
-            raw = self.resolve_image_path(asset_id, asset_variation).read_bytes()
-        else:
-            raise ValueError("놓을 그림이 없습니다.")
-        png = self._normalize_inset_source(raw)
-        image = Image.open(io.BytesIO(png))
-        image.load()
-        longest = max(image.size)
-        if longest > self.REFERENCE_INSET_LAYER_MAX_SIDE:
-            scale = self.REFERENCE_INSET_LAYER_MAX_SIDE / longest
-            image = image.resize(
-                (max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS
-            )
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            png = buffer.getvalue()
-        layer_id = uuid.uuid4().hex[:12]
-        with self._retain_lock:
-            self._reference_inset_layer_counter += 1
-            self._reference_inset_layers[layer_id] = {
-                "name": f"이미지 {self._reference_inset_layer_counter}", "png": png, "image": image,
-                "size": (int(image.width), int(image.height)), "box": None, "visible": True,
-            }
-            order = [key for key in self._reference_inset_layer_order if key != layer_id]
-            if "base" not in order:
-                order.append("base")
-            if pin.get("source_alpha"):
-                order.insert(order.index("base"), layer_id)       # 칸의 그림 바로 아래
-            else:
-                order.append(layer_id)                            # 맨 위
-            self._reference_inset_layer_order = order
-        state = self._rebake_reference_inset()
-        return {"layer_id": layer_id, **state}
-
-    @_inset_serialized
-    def update_reference_inset_layer(
-        self, layer_id: Any, box: Any = None, visible: Any = None, move: Any = None, remove: Any = False,
-    ) -> dict[str, Any]:
-        """레이어 하나를 고친다: 자리(`box` = `{x, y, height}`) · 보이기(`visible`) · 차례(`move` = "up" | "down" -
-        "base" 도 된다) · 지우기(`remove`). 한 번에 하나만 한다."""
-        key = str(layer_id or "").strip()
-        coerce = getattr(self.context, "_coerce_bool", None)
-        truthy = (lambda value: bool(coerce(value))) if callable(coerce) else bool
-        with self._retain_lock:
-            if not self._reference_inset_pin:
-                raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
-            order = [item for item in self._reference_inset_layer_order
-                     if item == "base" or item in self._reference_inset_layers]
-            if "base" not in order:
-                order.append("base")
-            if key not in order:
-                raise FileNotFoundError("그 레이어가 없습니다.")
-            step = {"up": 1, "down": -1}.get(str(move or "").strip().lower())
-            if step:
-                at = order.index(key)
-                to = at + step
-                if 0 <= to < len(order):
-                    order[at], order[to] = order[to], order[at]
-            elif key == "base":
-                raise ValueError("칸의 그림은 차례만 바꿀 수 있습니다.")
-            elif truthy(remove):
-                self._reference_inset_layers.pop(key, None)
-                order.remove(key)
-            elif visible is not None:
-                self._reference_inset_layers[key]["visible"] = truthy(visible)
-            elif isinstance(box, dict):
-                self._reference_inset_layers[key]["box"] = {
-                    name: box.get(name) for name in ("x", "y", "height")
-                }
-            else:
-                raise ValueError("바꿀 것이 없습니다.")
-            self._reference_inset_layer_order = order
-        return self._rebake_reference_inset()
-
-    def reference_inset_layer_image(self, layer_id: Any) -> bytes:
-        with self._retain_lock:
-            layer = self._reference_inset_layers.get(str(layer_id or "").strip())
-            if not layer:
-                raise FileNotFoundError("그 레이어가 없습니다.")
-            return bytes(layer["png"])
 
     # ------------------------------------------------- 켜짐 / 꺼짐
     def set_reference_inset_enabled(self, enabled: Any) -> dict[str, Any]:
@@ -735,50 +568,7 @@ class HeadlessCharacterAssetService:
         with self._retain_lock:
             pin = self._reference_inset_pin
             current = str(pin.get("stored_id") or "") if pin else ""
-        storage = self._inset_storage()
-        return {"items": storage.list(), "categories": storage.categories(), "current": current}
-
-    def add_reference_inset_storage_image(self, image_bytes: Any, category: Any = "", name: Any = "") -> dict[str, Any]:
-        """그림 한 장을 Storage 에 **바로** 넣는다(끌어다 놓기 · 파일 · 붙여넣기 - 사용자 지시 2026-10-12).
-        칸의 그림은 건드리지 않는다. ``category`` = 넣을 카테고리(빈 값 = 미분류) · ``name`` = 그림의 이름
-        (파일 이름 · 웹 주소의 끝 - 화면이 이름으로 찾는다)."""
-        item = self._inset_storage().save(self._normalize_inset_source(image_bytes), str(category or ""), name)
-        with self._retain_lock:
-            self._reference_inset_sync_seq += 1      # 방금 넣은 것이 지금 칸의 그림일 수 있다('저장됨')
-        return {"item": item, **self.reference_inset_storage_list()}
-
-    def edit_reference_inset_storage_category(self, action: Any, category_id: Any = "", name: Any = "") -> dict[str, Any]:
-        """카테고리를 만든다 · 이름을 바꾼다 · 지운다(`action` = "add" | "rename" | "delete"). 지워도 그림은 미분류로 남는다."""
-        storage = self._inset_storage()
-        what = str(action or "").strip().lower()
-        result: dict[str, Any] = {}
-        if what == "add":
-            result["category"] = storage.add_category(name)
-        elif what == "rename":
-            result["category"] = storage.rename_category(category_id, name)
-        elif what == "delete":
-            result["removed"] = storage.delete_category(category_id)
-        else:
-            raise ValueError("카테고리는 add · rename · delete 로 고칩니다.")
-        return {**result, **self.reference_inset_storage_list()}
-
-    def move_reference_inset_storage_item(self, item_id: Any, category_id: Any) -> dict[str, Any]:
-        self._inset_storage().set_category(item_id, category_id)
-        return self.reference_inset_storage_list()
-
-    def rename_reference_inset_storage_item(self, item_id: Any, name: Any) -> dict[str, Any]:
-        """Storage 의 그림 한 장에 이름을 붙인다(빈 값이면 이름을 지운다)."""
-        self._inset_storage().rename(item_id, name)
-        return self.reference_inset_storage_list()
-
-    def asset_folder(self, target: Any) -> Path:
-        """탐색기로 열 폴더 - "storage"(레퍼런스 인셋 Storage) | "assets"(캐릭터 에셋). 없으면 만든다."""
-        if str(target or "").strip().lower() == "storage":
-            folder = self._inset_storage().root
-        else:
-            folder = self.write_root()
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder
+        return {"items": self._inset_storage().list(), "current": current}
 
     def save_reference_inset_to_storage(self) -> dict[str, Any]:
         """지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만 - 자동으로 넣지 않는다).
@@ -832,6 +622,16 @@ class HeadlessCharacterAssetService:
         with self._retain_lock:
             self._reference_inset_sync_seq += 1      # 지금 칸의 그림이 '저장됨' 에서 풀렸을 수 있다
         return {"removed": removed, **self.reference_inset_storage_list()}
+
+    def asset_folder(self, target: Any) -> Path:
+        """탐색기로 열 폴더 - "storage"(레퍼런스 인셋 Storage) | "assets"(캐릭터 에셋). 없으면 만든다.
+        화면이 경로를 주지 않는다 - 둘 중 하나를 이름으로 고를 뿐이다(사용자 지시 2026-10-12: [폴더 열기])."""
+        if str(target or "").strip().lower() == "storage":
+            folder = self._inset_storage().root
+        else:
+            folder = self.write_root()
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
 
     def reference_inset_storage_image(self, item_id: Any, thumb: bool = False) -> tuple[bytes, str]:
         storage = self._inset_storage()
@@ -1131,7 +931,6 @@ class HeadlessCharacterAssetService:
         from utils.reference_inpaint_preprocess import (
             REFERENCE_INSET_CANVAS_KINDS,
             REFERENCE_INSET_CANVAS_SIZES,
-            REFERENCE_INSET_LAYER_LIMIT,
             ReferenceInsetPreprocessSpec,
             reference_inset_box_limits,
         )
@@ -1186,10 +985,6 @@ class HeadlessCharacterAssetService:
                 "custom": bool(pin["custom"]),
                 "source_width": pin["source"][0],
                 "source_height": pin["source"][1],
-                # 칸 안에 덧놓은 그림들과 쌓는 차례(아래 -> 위 · "base" = 칸의 그림).
-                "layers": [dict(layer, box=dict(layer["box"])) for layer in pin.get("layers") or []],
-                "layer_order": list(pin.get("layer_order") or ["base"]),
-                "layer_limit": REFERENCE_INSET_LAYER_LIMIT,
                 "open_ratio": round(float(pin["open_ratio"]), 4),
                 "limits": reference_inset_box_limits(
                     ReferenceInsetPreprocessSpec(canvas_width=pin["width"], canvas_height=pin["height"])

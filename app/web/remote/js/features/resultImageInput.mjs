@@ -384,15 +384,6 @@ export function createResultImageInput({
           console.error('Internal drop handler failed', error);
         }
       }
-      if (options.multiple) {
-        // 여러 장을 한꺼번에 받는 자리(Storage - 2026-10-12). 그 밖의 자리는 예전처럼 첫 장만 받는다.
-        const dropped = Array.from(event.dataTransfer?.files || [])
-          .filter(item => item && item.type && item.type.startsWith('image/'));
-        if (dropped.length > 1) {
-          dropped.forEach(item => importImageBlob(item, item.name || 'Dropped Image', options));
-          return;
-        }
-      }
       const file = getImageFileFromDataTransfer(event.dataTransfer);
       if (file) {
         importImageBlob(file, file.name || 'Dropped Image', options);

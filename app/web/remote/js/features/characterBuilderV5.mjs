@@ -495,7 +495,6 @@ export function createCharacterBuilderV5({
         + `${picks.length || ''}</span></div></div>`;
     }).join('');
     leftMount.innerHTML = `<div class="cb5-head">`
-      + `<button type="button" class="cb5-btn" data-cb-act="back">← 목록</button>`
       + `<span class="cb5-title">${view === 'variation'
         ? `${escHtml(work?.name || '')} · 바리에이션` : '캐릭터 제작 · V5'}</span>`
       + `<div class="cb5-seg" role="group" aria-label="인물">${genders}</div>`
@@ -727,7 +726,9 @@ export function createCharacterBuilderV5({
     const saveLabel = current?.saved ? '저장됨' : (current?.opaque ? '구 사양으로 저장' : '에셋으로 저장');
     // 그림 칸에는 title 을 달지 않는다 - 앱 툴팁으로 떠서, 들여다보는 내내 후보 줄을 가린다(라이브에서 봄).
     // 시드 고정은 크기 줄에 둔다. 아래 줄에 단추가 둘이라, 거기에 같이 두면 좁은 창에서 줄이 둘로 접혀 그림 칸이 깎인다.
-    return `<div class="cb5-side-top">`
+    // [← 목록] 은 **오른쪽 영역의 왼쪽 위**에 둔다 - 예전 자리다. 왼쪽 머리줄로 옮겼더니 사라진 것으로 보였다
+    // (사용자 제보 2026-10-12). 그림 칸이 가운데로 왔으므로 그 자리는 그림 칸의 머리줄이다.
+    return `<div class="cb5-side-top">${backButtonHtml()}`
       + `<div class="cb5-seg" role="group" aria-label="해상도">${resolutions}</div>${wideButtonHtml()}</div>`
       + `<div class="cb5-side-sub">${size}${paid}`
       + `<label class="cb5-check"><input type="checkbox" data-cb-role="seedlock"`
@@ -754,11 +755,11 @@ export function createCharacterBuilderV5({
     const paid = work.paid ? '<span class="cb5-paid">Anlas 소모</span>' : '';
     const canSave = current?.status === 'done' && current.opaque !== null && !current.saved && !saving;
     return `<div class="cb5-ab-pane">`
-      + `<div class="cb5-side-top"><span class="cb5-side-label">원본 A</span>`
-      + `<span class="cb5-size" data-cb-role="band-text">다시 그릴 곳 ${start}% ~ ${end}%</span></div>`
+      + `<div class="cb5-side-top">${backButtonHtml()}<span class="cb5-side-label">원본 A</span></div>`
       // 띠의 % 는 **그림의 행**이어야 한다. 그림 칸은 그림과 비율이 다를 수 있으므로(남는 곳이 생긴다),
       // 그림과 같은 비율의 상자를 칸 안에 꽉 차게 놓고 선 · 띠를 그 상자 기준으로 얹는다.
       + `<div class="cb5-stage cb5-band-stage">`
+      + `<span class="cb5-band-read" data-cb-role="band-text">다시 그릴 곳 ${start}% ~ ${end}%</span>`
       + `<div class="cb5-band-box" data-cb-role="band-stage" style="--cb5-w:${work.width};--cb5-h:${work.height}">`
       + `<img src="${escHtml(assetImage(work.id, work.source, work.revision))}" alt="" draggable="false">`
       + `<div class="cb5-band" data-cb-role="band" style="top:${start}%;height:${end - start}%"></div>`
@@ -773,6 +774,10 @@ export function createCharacterBuilderV5({
       + `<div class="cb5-side-bottom"><span class="cb5-seed"></span>`
       + `<button type="button" class="cb5-btn is-primary" data-cb-act="save"${canSave ? '' : ' disabled'}>`
       + `${current?.saved ? '저장됨' : '바리에이션으로 저장'}</button></div></div>`;
+  }
+
+  function backButtonHtml() {
+    return `<button type="button" class="cb5-btn" data-cb-act="back" title="캐릭터 목록으로 돌아갑니다">← 목록</button>`;
   }
 
   /** [확대] / [축소] - 부품 그리드를 접고 그림 칸을 넓힌다(다시 누르면 돌아온다). */
@@ -802,6 +807,9 @@ export function createCharacterBuilderV5({
       const onBox = on.getBoundingClientRect();
       if (onBox.left < stripBox.left) strip.scrollLeft += onBox.left - stripBox.left;
       else if (onBox.right > stripBox.right) strip.scrollLeft += onBox.right - stripBox.right;
+      // [확대] 한 제작 화면에서는 후보가 세로 목록이다 - 같은 일을 위아래로 한다.
+      if (onBox.top < stripBox.top) strip.scrollTop += onBox.top - stripBox.top;
+      else if (onBox.bottom > stripBox.bottom) strip.scrollTop += onBox.bottom - stripBox.bottom;
     }
   }
 

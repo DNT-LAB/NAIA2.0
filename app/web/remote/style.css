@@ -30692,6 +30692,20 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
 /* ❗ 바리에이션의 폭 규칙(.cb5-win.is-ab .cb5-side)이 파일의 뒤에 있어 같은 무게로는 진다 - 클래스를 하나 더 건다. */
 .cb5-win.is-wide .cb5-side, .cb5-win.is-ab.is-wide .cb5-side { flex: 1 1 auto; }
 .cb5-wide-btn { margin-left: auto; }
+/* 제작 화면을 [확대] 한 동안에는 후보를 그림 **옆의 세로 목록**으로 놓는다(사용자 지시 2026-10-12). 넓어진 칸에서 아래의
+   한 줄(칸 폭의 1/8 = 썸네일이 90px 넘게 커진다)이 그림의 높이를 깎았다 - 넓은 칸에서 남는 것은 폭이지 높이가 아니다. */
+.cb5-win.is-wide:not(.is-ab) .cb5-side {
+  display: grid; grid-template-columns: minmax(0, 1fr) 104px; grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 6px 8px;
+}
+.cb5-win.is-wide:not(.is-ab) .cb5-side > .cb5-side-top { grid-column: 1 / -1; grid-row: 1; }
+.cb5-win.is-wide:not(.is-ab) .cb5-side > .cb5-side-sub { grid-column: 1 / -1; grid-row: 2; }
+.cb5-win.is-wide:not(.is-ab) .cb5-side > .cb5-stage { grid-column: 1; grid-row: 3; min-height: 0; }
+.cb5-win.is-wide:not(.is-ab) .cb5-side > .cb5-strip {
+  grid-column: 2; grid-row: 3; min-height: 0; flex-direction: column; overflow-x: hidden; overflow-y: auto;
+}
+.cb5-win.is-wide:not(.is-ab) .cb5-side > .cb5-side-bottom { grid-column: 1 / -1; grid-row: 4; }
+.cb5-win.is-wide:not(.is-ab) .cb5-cand { flex: 0 0 auto; width: 100%; }
 .cb5-wide-btn.is-on { background: rgba(124,106,239,0.22); border-color: var(--accent); color: var(--text-primary); }
 /* 왼쪽 머리줄에 [← 목록] 이 들어왔다 - 이름이 길면(바리에이션) 줄을 바꾸지 않고 줄인다. */
 .cb5-head { flex-wrap: nowrap; }
@@ -30842,6 +30856,12 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
 .cb5-ab-pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 /* 띠의 % 는 그림의 행이다. 그림과 같은 비율의 상자를 칸에 꽉 차게 놓고(컨테이너 단위) 선 · 띠를 그 위에 얹는다. */
 .cb5-band-stage { container-type: size; }
+/* 띠의 범위('다시 그릴 곳 20% ~ 100%')는 그림 칸의 오른쪽 위에 표식으로 얹는다 - 머리줄에 [← 목록] 이 들어와 자리가 없다.
+   시작 · 종료 이름표는 왼쪽에 붙으므로 겹치지 않는다. */
+.cb5-band-read {
+  position: absolute; top: 6px; right: 8px; z-index: 2; padding: 2px 8px; border-radius: 9px; pointer-events: none;
+  background: rgba(12, 12, 20, 0.8); color: var(--text-primary); font: 400 10.5px var(--font-mono); white-space: nowrap;
+}
 .cb5-band-box {
   position: relative; flex: 0 0 auto; touch-action: none; user-select: none;
   width: min(100cqw, calc(100cqh * var(--cb5-w) / var(--cb5-h)));

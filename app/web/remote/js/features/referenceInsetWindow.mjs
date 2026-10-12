@@ -212,6 +212,7 @@ export function createReferenceInsetWindow({
       </label>`;
     panel.body.innerHTML = `
       <div class="riw-main" data-riw-main>
+        <div class="riw-stagebox" data-riw-stagebox>
         <div class="riw-stage" data-riw-stage>
           <div class="riw-panel" data-riw-panel data-naia-title="끌어서 칸 안의 그림을 옮깁니다 · 휠로 크기를 바꿉니다">
             <img class="riw-pic" alt="레퍼런스 인셋 그림" draggable="false">
@@ -220,6 +221,27 @@ export function createReferenceInsetWindow({
             <span class="riw-handle" data-riw-handle data-naia-title="끌어서 그림의 크기를 바꿉니다"></span>
           </div>
           <div class="riw-divider" data-riw-divider data-naia-title="좌우로 끌어 인셋 칸의 너비를 정합니다"></div>
+        </div>
+        <!-- 레이어 판: 캔버스의 흰 빈 곳(그릴 곳 - 늘 절반 넘게 비어 있다)에 얹는다(사용자 지시 2026-10-12 - 창 아래에
+             줄로 두니 자리가 모자랐다). 캔버스의 형제라 '꺼짐' 의 흐림을 타지 않고, 휠도 캔버스로 가지 않는다. -->
+        <div class="riw-layerbox" data-riw-layerbox>
+          <div class="riw-layerbox-head">
+            <span class="riw-layerbox-title">레이어 <b data-riw-lay-count></b></span>
+            <button type="button" class="riw-chip" data-riw-lay-add></button>
+          </div>
+          <div class="riw-layerbox-add" data-riw-addrow hidden>
+            <button type="button" class="riw-chip" data-riw-lay-paste
+                    data-naia-title="클립보드의 그림(캡쳐 · 복사한 것)을 칸에 한 장 더 놓습니다">붙여넣기</button>
+            <button type="button" class="riw-chip" data-riw-lay-file
+                    data-naia-title="그림 파일을 골라 칸에 한 장 더 놓습니다">파일 열기</button>
+            <button type="button" class="riw-chip" data-riw-lay-storage
+                    data-naia-title="저장해 둔 그림에서 골라 칸에 한 장 더 놓습니다">Storage</button>
+            <button type="button" class="riw-chip" data-riw-lay-assets
+                    data-naia-title="Assets 의 그림에서 골라 칸에 한 장 더 놓습니다">Assets</button>
+            <input type="file" accept="image/*" data-riw-lay-input hidden>
+          </div>
+          <div class="riw-lay-list" data-riw-lays></div>
+        </div>
         </div>
         <div class="riw-empty" data-riw-empty hidden>
           <div class="riw-empty-text">레퍼런스로 쓸 그림을 넣어 주세요</div>
@@ -232,23 +254,6 @@ export function createReferenceInsetWindow({
                     data-naia-title="Assets 탭을 엽니다 - 캐릭터를 고르고 [C1 + 레퍼런스 인셋 적용] 을 누릅니다">Assets</button>
           </div>
           <div class="riw-empty-hint">에셋의 그림은 Assets 탭의 [C1+레퍼런스 인셋] 으로 꽂습니다</div>
-        </div>
-        <div class="riw-row" data-riw-row>
-          <span class="riw-label">레이어</span>
-          <span class="riw-lay-list" data-riw-lays></span>
-          <button type="button" class="riw-chip" data-riw-lay-add></button>
-        </div>
-        <div class="riw-row" data-riw-addrow hidden>
-          <span class="riw-label"></span>
-          <button type="button" class="riw-chip" data-riw-lay-paste
-                  data-naia-title="클립보드의 그림(캡쳐 · 복사한 것)을 칸에 한 장 더 놓습니다">붙여넣기</button>
-          <button type="button" class="riw-chip" data-riw-lay-file
-                  data-naia-title="그림 파일을 골라 칸에 한 장 더 놓습니다">파일 열기</button>
-          <button type="button" class="riw-chip" data-riw-lay-storage
-                  data-naia-title="저장해 둔 그림에서 골라 칸에 한 장 더 놓습니다">Storage</button>
-          <button type="button" class="riw-chip" data-riw-lay-assets
-                  data-naia-title="Assets 의 그림에서 골라 칸에 한 장 더 놓습니다">Assets</button>
-          <input type="file" accept="image/*" data-riw-lay-input hidden>
         </div>
         <div class="riw-row" data-riw-row>
           <span class="riw-label">칸의 그림</span>
@@ -322,6 +327,9 @@ export function createReferenceInsetWindow({
       storeCount: find('[data-riw-store-count]'),
       storeHint: find('[data-riw-store-hint]'),
       back: find('[data-riw-back]'),
+      stageBox: find('[data-riw-stagebox]'),
+      layerBox: find('[data-riw-layerbox]'),
+      layCount: find('[data-riw-lay-count]'),
       lays: find('[data-riw-lays]'),
       layAdd: find('[data-riw-lay-add]'),
       addRow: find('[data-riw-addrow]'),
@@ -410,6 +418,7 @@ export function createReferenceInsetWindow({
     if (view === 'storage') { renderStorage(); return; }
     if (view === 'assets') { renderAssets(); return; }
     el.stage.hidden = !ready;
+    el.stageBox.hidden = !ready;
     el.empty.hidden = ready;
     el.rows.forEach(row => { row.hidden = !ready; });
     el.addRow.hidden = !ready || !addOpen;
@@ -436,6 +445,8 @@ export function createReferenceInsetWindow({
     el.pic.style.width = pct(box.width, divider);
     el.pic.style.height = pct(box.height, canvasH);
     el.divider.style.left = pct(divider, canvasW);
+    // 레이어 판은 그릴 곳 안에만 선다 - 경계선이 어디로 가든 칸(과 경계선의 알약)을 덮지 않는다.
+    el.layerBox.style.maxWidth = `calc(${(1 - divider / canvasW) * 100}% - 20px)`;
     // 덧놓은 그림들 - 칸 안에 같은 식으로 놓고, 쌓는 차례대로 겹친다. 고른 것의 줄(칩)도 여기서 그린다.
     const active = activeLayer ? layerById(activeLayer) : null;
     renderLayers(divider, canvasH, src, pct);
@@ -487,6 +498,7 @@ export function createReferenceInsetWindow({
     const full = layers().length >= (Number(state.layer_limit) || 8);
     el.layAdd.disabled = lock || full;
     el.layAdd.textContent = addOpen ? '닫기' : '+ 이미지';
+    el.layAdd.classList.toggle('is-on', addOpen);
     el.layAdd.dataset.naiaTitle = full ? `레이어는 ${Number(state.layer_limit) || 8}장까지 놓을 수 있습니다`
       : '칸 안에 그림을 한 장 더 놓습니다 (배경 · 소품) - 칸의 그림과 겹쳐 쌓입니다';
     el.addRow.querySelectorAll('button').forEach(button => { button.disabled = lock || full; });
@@ -554,6 +566,7 @@ export function createReferenceInsetWindow({
           <span>${escHtml(base ? '칸의 그림' : layer.name)}</span></button>${tools}</span>`;
     }).join('');
     if (el.lays.innerHTML !== chips) el.lays.innerHTML = chips;
+    el.layCount.textContent = String(order.length);
   }
 
   /** 끌어 놓고 · 굴려 놓고 아직 안 보낸 것(칸의 그림 · 레이어)을 지금 보낸다 - 다른 일을 하기 전에 부른다. */

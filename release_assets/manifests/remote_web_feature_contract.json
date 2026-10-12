@@ -652,6 +652,11 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/inset/storage/rename",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/open-folder",
           "smoke": "state_mutation"
         },

@@ -712,8 +712,9 @@ def register_character_asset_routes(
         return {"ok": True, **state}
 
     @app.post("/api/character-asset/inset/storage/add")
-    async def api_character_asset_inset_storage_add(req: Request, category: str = ""):
-        # 그림을 Storage 에 바로 넣는다(본문 = 그림 바이트 · `?category=` = 넣을 카테고리). 칸의 그림은 그대로다.
+    async def api_character_asset_inset_storage_add(req: Request, category: str = "", name: str = ""):
+        # 그림을 Storage 에 바로 넣는다(본문 = 그림 바이트 · `?category=` = 넣을 카테고리 · `?name=` = 그림의 이름).
+        # 칸의 그림은 그대로다.
         service = _asset_service(session_context)
         try:
             limit = int(service.REFERENCE_INSET_SOURCE_MAX_BYTES)
@@ -724,7 +725,7 @@ def register_character_asset_routes(
                 if received > limit:
                     return JSONResponse({"error": "그림이 너무 큽니다(32MB 까지)."}, status_code=413)
                 chunks.append(chunk)
-            result = await run_in_thread(service.add_reference_inset_storage_image, b"".join(chunks), category)
+            result = await run_in_thread(service.add_reference_inset_storage_image, b"".join(chunks), category, name)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except FileNotFoundError as exc:
@@ -756,6 +757,21 @@ def register_character_asset_routes(
             result = await run_in_thread(
                 _asset_service(session_context).move_reference_inset_storage_item,
                 payload.get("id"), payload.get("category"),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return {"ok": True, **result}
+
+    @app.post("/api/character-asset/inset/storage/rename")
+    async def api_character_asset_inset_storage_rename(req: Request):
+        # 그림 한 장에 이름을 붙인다: `{id, name}`(빈 값 = 이름을 지운다).
+        payload = await _read_json(req)
+        try:
+            result = await run_in_thread(
+                _asset_service(session_context).rename_reference_inset_storage_item,
+                payload.get("id"), payload.get("name"),
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)

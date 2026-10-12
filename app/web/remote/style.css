@@ -30568,7 +30568,7 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .riw-store-item { position: relative; }
 /* Storage 의 카테고리 · 넣기 · 폴더 열기(사용자 지시 2026-10-12). */
 .riw-store-count { width: auto; }
-.riw-store-tools { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.riw-store-tools { display: flex; flex: 1 1 0; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; }
 .riw-store-tools[hidden], .riw-cats[hidden] { display: none !important; }
 .riw-link {
   padding: 0 2px; border: 0; background: none; cursor: pointer; white-space: nowrap;
@@ -30592,6 +30592,24 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   font: 500 9.5px var(--font-mono); cursor: pointer; opacity: 0; transition: opacity 0.12s ease;
 }
 .riw-store-item:hover .riw-store-move, .riw-store-move:focus { opacity: 1; }
+/* 이름으로 찾기 · 그림의 이름(한도가 없다 - 사용자 지시 2026-10-12). */
+.riw-store-search {
+  flex: 1 1 70px; width: 96px; min-width: 70px; padding: 3px 7px; border-radius: 6px;
+  border: 1px solid var(--border-glow); background: var(--bg-deep); color: var(--text-primary);
+  font: 500 11px var(--font-mono); outline: none;
+}
+.riw-store-search:focus { border-color: rgba(139, 118, 255, 0.85); }
+.riw-store-edit {
+  position: absolute; top: 3px; left: 3px; height: 18px; padding: 0 5px; border-radius: 9px; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.5); background: rgba(12, 12, 20, 0.82); color: #e6e6ee;
+  font: 600 9.5px/1 var(--font-mono); opacity: 0; transition: opacity 0.12s ease;
+}
+.riw-store-item:hover .riw-store-edit, .riw-store-edit:focus-visible { opacity: 1; }
+.riw-store-name {
+  position: absolute; left: 1px; right: 1px; bottom: 1px; width: calc(100% - 2px); height: 20px; box-sizing: border-box;
+  padding: 0 4px; border: 1px solid rgba(139, 118, 255, 0.95); border-radius: 0 0 5px 5px; z-index: 1;
+  background: #0c0c14; color: #ffffff; font: 500 10px var(--font-mono); outline: none;
+}
 /* Assets 탭의 [폴더 열기] - 목록 위 줄의 남는 자리(개수 앞). */
 .char-asset-folder-link {
   margin-left: auto; padding: 0 2px; border: 0; background: none; cursor: pointer; white-space: nowrap;
@@ -30610,7 +30628,8 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   user-select: none; -webkit-user-drag: none;
 }
 .riw-store-size {
-  padding: 2px 0 3px; text-align: center; background: rgba(12, 12, 20, 0.94);
+  padding: 2px 4px 3px; text-align: center; background: rgba(12, 12, 20, 0.94);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   color: var(--text-muted); font: 500 9.5px var(--font-mono);
 }
 .riw-store-x {

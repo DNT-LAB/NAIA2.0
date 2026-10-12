@@ -738,10 +738,11 @@ class HeadlessCharacterAssetService:
         storage = self._inset_storage()
         return {"items": storage.list(), "categories": storage.categories(), "current": current}
 
-    def add_reference_inset_storage_image(self, image_bytes: Any, category: Any = "") -> dict[str, Any]:
+    def add_reference_inset_storage_image(self, image_bytes: Any, category: Any = "", name: Any = "") -> dict[str, Any]:
         """그림 한 장을 Storage 에 **바로** 넣는다(끌어다 놓기 · 파일 · 붙여넣기 - 사용자 지시 2026-10-12).
-        칸의 그림은 건드리지 않는다. ``category`` = 넣을 카테고리(빈 값 = 미분류)."""
-        item = self._inset_storage().save(self._normalize_inset_source(image_bytes), str(category or ""))
+        칸의 그림은 건드리지 않는다. ``category`` = 넣을 카테고리(빈 값 = 미분류) · ``name`` = 그림의 이름
+        (파일 이름 · 웹 주소의 끝 - 화면이 이름으로 찾는다)."""
+        item = self._inset_storage().save(self._normalize_inset_source(image_bytes), str(category or ""), name)
         with self._retain_lock:
             self._reference_inset_sync_seq += 1      # 방금 넣은 것이 지금 칸의 그림일 수 있다('저장됨')
         return {"item": item, **self.reference_inset_storage_list()}
@@ -763,6 +764,11 @@ class HeadlessCharacterAssetService:
 
     def move_reference_inset_storage_item(self, item_id: Any, category_id: Any) -> dict[str, Any]:
         self._inset_storage().set_category(item_id, category_id)
+        return self.reference_inset_storage_list()
+
+    def rename_reference_inset_storage_item(self, item_id: Any, name: Any) -> dict[str, Any]:
+        """Storage 의 그림 한 장에 이름을 붙인다(빈 값이면 이름을 지운다)."""
+        self._inset_storage().rename(item_id, name)
         return self.reference_inset_storage_list()
 
     def asset_folder(self, target: Any) -> Path:

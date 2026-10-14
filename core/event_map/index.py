@@ -477,8 +477,15 @@ class EventMapIndex:
             live &= np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))
         return np.flatnonzero(live).astype(np.int64)
 
+    @staticmethod
+    def _unblocked(rids: np.ndarray, block) -> np.ndarray:
+        """영구 제외(`core.event_map.permanent.PermanentBlock`)에 걸린 태그가 달린 게시물을 뺀다."""
+        if block is None or rids.size == 0:
+            return rids
+        return rids[~block.posts[rids]]
+
     def browse(self, *, ratings=None, persons=None, allowed=None, limit=40, min_posts=5,
-               include_color=False, scan_cap=SCAN_CAP, prior=RANK_PRIOR, offset=0) -> dict:
+               include_color=False, scan_cap=SCAN_CAP, prior=RANK_PRIOR, offset=0, block=None) -> dict:
         """핀 **없이** 고른 분면(인원·등급)에서 특징적인 태그를 낸다 - 첫 화면(대분류 → 태그)용.
 
         기준선은 코퍼스 전체다: 그 분면에서의 비율 ÷ 전체에서의 비율. `allowed` (태그 불리언
@@ -487,7 +494,7 @@ class EventMapIndex:
         """
         started = time.perf_counter()
         parts = self._partition_filter(ratings, persons)
-        rids = self._live_posts(parts)
+        rids = self._unblocked(self._live_posts(parts), block)
         out = {"schema": SCHEMA, "ratings": sorted(ratings or []), "persons": sorted(persons or []),
                "observed_posts": int(rids.size), "candidates": [], "corpus_posts": self.total_posts,
                "count_meaning": "고른 분면의 게시물 수", "note": NOTE}
@@ -505,6 +512,8 @@ class EventMapIndex:
         keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0)
         if not include_color:
             keep &= ~self.color_arr
+        if block is not None:
+            keep &= ~block.tags
         out["_pool"] = keep.copy()      # 갈래 필터 전의 풀(카테고리 탭의 개수용). 서비스가 지운다.
         if allowed is not None:
             keep &= allowed
@@ -520,7 +529,7 @@ class EventMapIndex:
         return out
 
     def browse_groups(self, *, groups, ratings=None, persons=None, limit=5, min_posts=5,
-                      scan_cap=SCAN_CAP, prior=RANK_PRIOR) -> dict:
+                      scan_cap=SCAN_CAP, prior=RANK_PRIOR, block=None) -> dict:
         """browse 와 같은 줄 세우기를 **여러 태그 묶음에 한 번의 집계로** 낸다(3단 지도의 그룹 화면용).
 
         그룹 하나를 고르면 그 안의 절이 15개 안팎이다. 절마다 browse 를 부르면 같은 게시물을 15번
@@ -529,7 +538,7 @@ class EventMapIndex:
         """
         started = time.perf_counter()
         parts = self._partition_filter(ratings, persons)
-        rids = self._live_posts(parts)
+        rids = self._unblocked(self._live_posts(parts), block)
         out = {"schema": SCHEMA, "ratings": sorted(ratings or []), "persons": sorted(persons or []),
                "observed_posts": int(rids.size), "corpus_posts": self.total_posts,
                "count_meaning": "고른 분면의 게시물 수", "note": NOTE,
@@ -546,6 +555,8 @@ class EventMapIndex:
         out["min_posts"] = int(min_posts)
         counts = self._count_tags(scanned)
         keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0) & ~self.color_arr
+        if block is not None:
+            keep &= ~block.tags
         out["_pool"] = keep.copy()
         for slot, mask in zip(out["groups"], groups):
             k = keep & mask
@@ -598,7 +609,7 @@ class EventMapIndex:
     def explore(self, pins, *, exclude=None, ratings=None, persons=None, limit=24,
                 min_posts=5, include_color=False, roles=None, allowed=None,
                 scan_cap=SCAN_CAP, prior=RANK_PRIOR, sort="lift", offset=0, relax=0,
-                candidate_excluded=None) -> dict:
+                candidate_excluded=None, block=None) -> dict:
         """핀 전체를 동시에 만족하는(그리고 제외 태그가 없는) 게시물에서 다음 후보를 센다.
         `relax=1` 이면 핀 n개 중 n-1개만 있는 게시물까지 센다([-1 허용]) - `strict_posts` 에 정확 일치 수를 같이 준다."""
         started = time.perf_counter()
@@ -629,11 +640,11 @@ class EventMapIndex:
             return out
 
         parts = self._partition_filter(ratings, persons)
-        rids = self._without(self._matching_posts(wanted, parts), excluded)
+        rids = self._unblocked(self._without(self._matching_posts(wanted, parts), excluded), block)
         out["strict_posts"] = int(rids.size)
         out["relaxed"] = False
         if relax and len(wanted) >= 2:
-            rids = self._without(self._matching_posts_relaxed(wanted, parts), excluded)
+            rids = self._unblocked(self._without(self._matching_posts_relaxed(wanted, parts), excluded), block)
             out["relaxed"] = True
             out["count_meaning"] = "핀 %d개 중 %d개 이상이 같은 게시물에 함께 달린 수" % (len(wanted), len(wanted) - 1)
         out["observed_posts"] = int(rids.size)
@@ -682,6 +693,8 @@ class EventMapIndex:
             keep &= by_role
         if candidate_excluded is not None:
             keep &= ~candidate_excluded
+        if block is not None:
+            keep &= ~block.tags
         out["_pool"] = keep.copy()      # 갈래 필터 전의 풀(카테고리 탭의 개수용). 서비스가 지운다.
         if allowed is not None:
             keep &= allowed
@@ -746,7 +759,7 @@ class EventMapIndex:
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
 
     def sample(self, pins, *, exclude=None, ratings=None, persons=None, n=5,
-               include_color=False, seed=None) -> dict:
+               include_color=False, seed=None, block=None) -> dict:
         """핀 전부를 포함하는 **실제 게시물**을 무작위로 골라 그 게시물의 태그 전체를 준다.
 
         Dev0714 Interactive 창 Quick Search 의 랜덤 프롬프트와 같은 동작이다. 돌려주는
@@ -785,7 +798,7 @@ class EventMapIndex:
             return out
         parts = self._partition_filter(ratings, persons)
         pool = self._matching_posts(wanted, parts) if wanted else self._live_posts(parts)
-        rids = self._without(pool, excluded)
+        rids = self._unblocked(self._without(pool, excluded), block)
         out["observed_posts"] = int(rids.size)
         if rids.size == 0:
             out["status"] = "no_match"

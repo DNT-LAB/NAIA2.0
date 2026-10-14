@@ -45,6 +45,7 @@ import numpy as np
 from core.event_map import categories as C
 from core.event_map.index import (SORT_MODES,
     MAX_EXCLUDE, MAX_PINS, MAX_SAMPLES, SCAN_CAP, EventMapIndex)
+from core.event_map.permanent import PermanentBlock, build_block
 from core.event_map.tree import BoundTree, EventMapTree, TreeError
 
 # 대분류 재료. `data/KR_tags.parquet` 의 category 를 접기 표로 접는다(사용자 결정 2026-09-12).
@@ -137,6 +138,10 @@ class EventMapService:
         self._tried: list[str] = []
         # suggest 용. 어휘가 10만이라 키 입력마다 전체를 훑지 않는다.
         self._sorted_names: list[str] = []
+        # 영구 제외(Search 의 붉은 줄). 글은 세션이 쥐고 있다 - ensure_event_map_service 가 읽는 함수를 단다.
+        self.permanent_source: Callable[[], str] | None = None
+        self._block_key: tuple | None = None
+        self._block: PermanentBlock | None = None
 
     # -- 개방 ----------------------------------------------------------------
     def _candidates(self) -> list[Path]:
@@ -304,6 +309,7 @@ class EventMapService:
             self._candidate_excluded = None
             self._sub_arr, self._sub_names = None, []
             self._bound = None   # 다른 색인이면 태그 id 가 다르다
+            self._block_key, self._block = None, None
         if idx is not None:
             try:
                 idx.close()
@@ -480,9 +486,12 @@ class EventMapService:
         picked.sort(key=lambda row: (1, translation_rank[row[1]]) if row[1] in translation_rank
                     else (0, -row[0], row[1]))
         items = []
+        block = self.permanent_block(idx)
         for observed, name, tid in picked[:limit]:
             blocked = None
-            if idx.color[tid]:
+            if block is not None and block.tags[tid]:
+                blocked = "영구 제외"
+            elif idx.color[tid]:
                 blocked = "색상"
             elif not idx.eligible[tid]:
                 blocked = "후보 아님"
@@ -493,6 +502,33 @@ class EventMapService:
                           "blocked": blocked})
         return {"ok": True, "status": "matched" if items else "no_match",
                 "query": raw, "items": items, "translated": translated}
+
+    # -- 영구 제외 -----------------------------------------------------------------------
+    def permanent_text(self) -> str:
+        try:
+            return str((self.permanent_source() if self.permanent_source else "") or "")
+        except Exception:
+            return ""
+
+    def permanent_block(self, idx: EventMapIndex | None = None) -> PermanentBlock | None:
+        """지금 영구 제외 글로 막을 태그 · 게시물. 글이 바뀔 때만 다시 만든다(색인을 한 번 훑는다)."""
+        idx = idx or self.index()
+        text = self.permanent_text()
+        key = (text, id(idx))
+        if key != self._block_key:
+            self._block = build_block(idx, text) if text.strip() else None
+            self._block_key = key
+        return self._block
+
+    def permanent_state(self) -> dict[str, Any]:
+        """영구 제외 글 + 색인에서 걸리는 태그(화면이 '걸린 태그 n개' 를 보여 준다). 색인이 없어도 글은 준다."""
+        text = self.permanent_text()
+        try:
+            block = self.permanent_block()
+        except MapQueryError:
+            block = None
+        names = list(block.names) if block else []
+        return {"ok": True, "text": text, "tag_count": len(names), "tags": names[:40]}
 
     # -- 3단 지도(갈래 › 그룹 › 절 › 태그) -------------------------------------------------
     def tree(self) -> EventMapTree:
@@ -561,7 +597,8 @@ class EventMapService:
         if d3:
             off = self._page_offset(offset, idx.n_tags)
             result = idx.browse(ratings=want_r, persons=want_p, allowed=bound.mask(slots),
-                                limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=off)
+                                limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=off,
+                                block=self.permanent_block(idx))
             pool = result.pop("_pool", None)
             self._attach_page(result, off)
             siblings = tree.select(d2=d2)
@@ -581,7 +618,7 @@ class EventMapService:
                      for row in next(x for x in tree.d1 if x["id"] == d1)["d2"]]
             mode = "branch"
         result = idx.browse_groups(groups=[bound.mask(u["slots"]) for u in units],
-                                   ratings=want_r, persons=want_p, limit=per_n)
+                                   ratings=want_r, persons=want_p, limit=per_n, block=self.permanent_block(idx))
         result.pop("_pool", None)
         sections = []
         for u, g in zip(units, result.pop("groups")):
@@ -672,7 +709,7 @@ class EventMapService:
                 roles=want_roles or None, allowed=allowed,
                 limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES),
                 include_color=False, sort=sort_mode, offset=offset, relax=1 if relax_one else 0,
-                candidate_excluded=self._candidate_excluded)
+                candidate_excluded=self._candidate_excluded, block=self.permanent_block(idx))
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         if bound is not None:
@@ -702,7 +739,8 @@ class EventMapService:
                                 state="ready")
         mask = self._subcategory_mask([gid], subcategory)
         result = idx.browse(ratings=want_r, persons=want_p, allowed=mask,
-                            limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=offset)
+                            limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=offset,
+                            block=self.permanent_block(idx))
         self._attach_subcategories(result, [gid], subcategory)
         self._attach_page(result, offset)
         self._attach_groups(result.get("candidates") or [], result)
@@ -770,10 +808,11 @@ class EventMapService:
             ]
 
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
-               persons: Any = None, n: Any = 5, seed: Any = None) -> dict[str, Any]:
+               persons: Any = None, n: Any = 5, seed: Any = None, permanent: bool = False) -> dict[str, Any]:
         """핀을 포함하는 **실제 게시물**의 태그 조합. Dev0714 Quick Search 의 랜덤과 같다.
 
         핀이 없으면 분면(인원·등급) 전체에서 뽑는다([랜덤 프롬프트 할당] - 사용자 지정 2026-09-12 밤).
+        `permanent` = 영구 제외를 건다(이벤트 맵 화면 · 랜덤 버튼 연결). Assist 는 걸지 않는다.
         """
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
@@ -788,7 +827,7 @@ class EventMapService:
             result = idx.sample(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
                 n=self._count(n, 5, MAX_SAMPLES), include_color=False,
-                seed=seed_value)
+                seed=seed_value, block=self.permanent_block(idx) if permanent else None)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         result["ok"] = True

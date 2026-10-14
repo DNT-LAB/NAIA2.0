@@ -1449,7 +1449,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261014-tree7')
+import('./js/features/eventMapPanel.mjs?v=20261014-perm1')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1461,6 +1461,13 @@ import('./js/features/eventMapPanel.mjs?v=20261014-tree7')
       // [PE설정] = 메인 프롬프트의 `/pe` **그 목록**을 연다. 베껴 그리지 않는다 -
       // ON/OFF 상태가 두 곳이 되면 반드시 어긋난다.
       openPeSlash: () => tagAssist?.openSlashCommandByName?.('pe', promptEdit) || false,
+      // 영구 제외는 Search 의 붉은 줄과 같은 글이다. 이벤트 맵이 저장하면 Search 칸도 같은 글로 바꿔 둔다 -
+      // 안 그러면 Search 가 다음 저장 때 옛 글을 다시 써 넣는다(칸의 값을 통째로 보낸다). input 이벤트는
+      // 칸 높이 · [영구 제외 · n] 단추만 고친다(저장하지 않는다).
+      onPermanentExcludeChange: text => {
+        const field = document.getElementById('searchExcludePermanent');
+        if (field && field.value !== text) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); }
+      },
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));

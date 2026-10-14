@@ -235,7 +235,8 @@ def register_event_map_routes(
                 # Validate the same query used by Random. Empty matches are valid;
                 # generation must fail closed rather than broaden the conditions.
                 await run_in_thread(ensure_event_map_service(session_context).sample,
-                                    **{k: state[k] for k in ("pins", "exclude", "ratings", "persons")}, n=1)
+                                    **{k: state[k] for k in ("pins", "exclude", "ratings", "persons")}, n=1,
+                                    permanent=True)
             except MapQueryError as exc:
                 if link_state(session_context)["revision"] == revision:
                     session_context.event_map_random_link = {"enabled": False, "revision": revision}
@@ -331,10 +332,32 @@ def register_event_map_routes(
         try:
             payload = await run_in_thread(
                 _call, service.sample, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, n=n, seed=seed)
+                persons=persons, n=n, seed=seed, permanent=True)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/permanent-exclude")
+    async def api_event_map_permanent_exclude():
+        """영구 제외 글(Search 의 붉은 줄과 같은 것) + 지금 색인에서 걸리는 태그."""
+        service = ensure_event_map_service(session_context)
+        payload = await run_in_thread(service.permanent_state)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.post("/api/event-map/permanent-exclude")
+    async def api_event_map_permanent_exclude_save(request: Request):
+        """영구 제외 글을 바꾼다 - Search 필터 상태의 **그 칸만** 저장한다(검색어 · 제외어는 건드리지 않는다)."""
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = None
+        text = payload.get("text") if isinstance(payload, dict) else None
+        if not isinstance(text, str) or len(text) > 8192:
+            return JSONResponse({"ok": False, "message": "Invalid text"}, status_code=400)
+        await run_in_thread(session_context.save_search_filter_state, exclude_permanent=text)
+        service = ensure_event_map_service(session_context)
+        state = await run_in_thread(service.permanent_state)
+        return JSONResponse(state, headers=_no_store())
 
     @app.get("/api/event-map/describe")
     async def api_event_map_describe(tag: str = ""):

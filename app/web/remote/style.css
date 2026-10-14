@@ -28674,6 +28674,15 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-foot .emt-acts { margin-left: auto; }
 .em-window.em-tree .em-foot > .em-actions:first-child { margin-left: 0; }   /* 랜덤 단추는 왼쪽(목업) */
 .emt-menu-btn { margin-left: auto; padding: 0 9px; font-size: 13px; line-height: 1; }
+/* 영구 제외(사용자 지시 2026-10-14): [⋯] 왼쪽 단추 · 누르면 태그 찾기 바로 아래 입력 줄. 걸린 게 있으면 붉게. */
+.emt-perm-btn { margin-left: auto; padding: 0 8px; white-space: nowrap; }
+.emt-perm-btn + .emt-menu-btn { margin-left: 0; }
+.emt-perm-btn.is-on { border-color: rgba(229,115,115,0.6); color: #ff9a9a; }
+.emt-perm { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--border-dim); background: rgba(44,22,28,0.92); }
+.emt-perm[hidden] { display: none; }
+.emt-perm-icon { background: rgba(229,115,115,0.35); color: #ffd0d0; }
+.emt-perm-status { color: #e57373; cursor: help; }
 .emt-menu {
   position: fixed; z-index: calc(var(--z-floating-module-aux) + 1); display: flex; flex-direction: column; min-width: 190px;
   padding: 4px; border: 1px solid rgba(130,150,255,0.30); border-radius: 6px; background: rgba(18,18,28,0.99);

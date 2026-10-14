@@ -14,6 +14,10 @@ def ensure_event_map_service(context):
         if service is None:
             service = EventMapService(default_roots(context))
             context.event_map_service = service
+        if service.permanent_source is None:
+            # 영구 제외 = Search 의 붉은 줄(search_filter_state.exclude_permanent) - 같은 글을 읽는다.
+            service.permanent_source = lambda: str(context.normalize_search_filter_state(
+                getattr(context, "search_filter_state", None)).get("exclude_permanent") or "")
         return service
 
 

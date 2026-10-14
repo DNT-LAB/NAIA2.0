@@ -174,7 +174,7 @@ class HeadlessRandomPromptService:
                                                  event_map_revision=revision)
             try:
                 body = ensure_event_map_service(self.context).sample(
-                    **{k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}, n=1)
+                    **{k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}, n=1, permanent=True)
                 samples = body.get("samples") or []
                 if not samples:
                     raise MapQueryError("no_match", "EV Random: 이 조건에 맞는 게시물이 없습니다.")

@@ -98,7 +98,7 @@ const SORT_MODES = [
 ];
 
 export function initEventMap({ insertTag, showToast, getPromptText, generateNow, onRandomLinkChange,
-                               openPeSlash = null } = {}) {
+                               openPeSlash = null, onPermanentExcludeChange = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
   let linkUncertain = false;
   let linkQueue = Promise.resolve(), linkKey = '';
@@ -191,6 +191,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let treeAuto = false;           // 절을 사람이 고르지 않았다(그룹만 눌렀다) - 비면 다음 절로 옮겨도 된다
   let treeFilter = '';            // 핀이 있을 때: 갈래 탭(비면 전체). 그 안의 그룹 · 절은 treeSel 을 같이 쓴다
   let ttabsEl = null, actsEl = null, menuEl = null;
+  // 영구 제외(Search 의 붉은 줄과 **같은 글**). 서버가 이 글로 게시물을 거른다 - 화면은 고치고 보여 줄 뿐이다.
+  let permText = '', permInfo = null, permOpen = false, permSaving = 0;
+  let permEl = null, permInput = null, permStatus = null;
   const isTree = () => viewMode === 'tree';
 
   const esc = value => String(value == null ? '' : value)
@@ -285,6 +288,50 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (mine === seq && browse?.status !== 'error' && subcategory && widenEmptySelection(
       { ...browse, status: 'matched', group_counts: null })) { void loadBrowse(true); return; }
     render();
+  }
+
+  // ── 영구 제외 ─────────────────────────────────────────────────────────────
+  const permTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean).length;
+  async function loadPermanent() {
+    try { permInfo = await getJson('/api/event-map/permanent-exclude', {}); permText = String(permInfo.text || ''); }
+    catch { permInfo = null; }
+    paintPermanent();
+  }
+  function paintPermanent() {
+    const btn = filtersEl?.querySelector('[data-emt-perm]');
+    const n = permTerms(permText);
+    if (btn) {
+      btn.textContent = `영구 제외${n ? ` · ${n}` : ''}`;
+      btn.classList.toggle('is-on', n > 0 || permOpen);
+      btn.setAttribute('aria-expanded', String(permOpen));
+    }
+    if (!permStatus) return;
+    const tags = permInfo?.tags || [];
+    permStatus.textContent = permSaving ? '저장 중…' : (permInfo ? `걸린 태그 ${fmt(permInfo.tag_count || 0)}` : '');
+    permStatus.title = tags.length ? `${tags.join(', ')}${permInfo.tag_count > tags.length ? ' …' : ''}` : '';
+  }
+  function openPermanent(on) {
+    if (!permEl) return;
+    permOpen = !!on && isTree();
+    permEl.hidden = !permOpen;
+    if (permOpen) { permInput.value = permText; permInput.focus({ preventScroll: true }); }
+    paintPermanent();
+    fitHeight();
+  }
+  /** 입력 줄의 글을 저장한다. 바뀐 것이 없으면 묻지 않는다. 저장되면 Search 창의 붉은 줄도 같은 글로(같은 화면 안). */
+  async function savePermanent() {
+    const text = String(permInput?.value || '').split(/\r?\n/).join(', ').trim();
+    if (text === permText.trim()) return;
+    permSaving++; paintPermanent();
+    try {
+      permInfo = await postJson('/api/event-map/permanent-exclude', { text });
+      permText = String(permInfo.text || '');
+      if (typeof onPermanentExcludeChange === 'function') onPermanentExcludeChange(permText);
+      toast(permText ? `영구 제외를 저장했습니다 — 걸린 태그 ${fmt(permInfo.tag_count || 0)}개` : '영구 제외를 비웠습니다', 'success');
+      if (open && mapState?.state === 'ready') void explore();   // 걸러지는 게시물이 바뀌었다 - 지금 화면을 다시 묻는다
+    } catch (error) {
+      toast(`영구 제외 저장 실패 — ${error.message}`, 'error');
+    } finally { permSaving--; paintPermanent(); }
   }
 
   // ── 3단 지도 ──────────────────────────────────────────────────────────────
@@ -950,10 +997,13 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
    *  넣기 · 생성 · 복사 · 실제 조합은 발줄로(목업 승인 2026-10-14). */
   function paintTreeFilters() {
     filtersEl.innerHTML = `${filterHeadHtml()}
+      <button type="button" class="em-reset emt-perm-btn" data-emt-perm aria-expanded="false"
+              title="영구 제외 - 이 태그가 달린 게시물은 이벤트 맵이 세지 않는다(Search 의 영구 제외와 같은 목록)">영구 제외</button>
       <button type="button" class="em-reset emt-menu-btn" data-emt-menu aria-haspopup="menu" aria-expanded="false"
               title="초기화 · PE설정 · 조합 저장/불러오기">⋯</button>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
     paintPersonButton();
+    paintPermanent();
     paintActions();
   }
   function paintFilters() {
@@ -1540,6 +1590,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     viewMode = mode;
     rememberView();
     closeTreeMenu(); closePersonPopup(); hideTip();
+    if (permOpen) { void savePermanent(); openPermanent(false); }
     if (library?.isOpen()) library.close();
     samples = null; widenNote = ''; result = null; browse = null; treeData = null;
     treeFilter = isTree() && pins.length ? treeSel.d1 : '';
@@ -1575,6 +1626,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
                aria-label="태그 찾기" placeholder="태그 찾기…">
         <span class="em-status" role="status" aria-live="polite"></span>
       </div>
+      <div class="emt-perm" hidden>
+        <span class="em-icon emt-perm-icon" aria-hidden="true">−</span>
+        <input class="em-input emt-perm-input" type="text" autocomplete="off" spellcheck="false"
+               aria-label="영구 제외 태그" placeholder="영구 제외 태그 · 쉼표로 구분 (*태그 = 그 태그만)">
+        <span class="em-status emt-perm-status" role="status"></span>
+      </div>
       <div class="em-trail"></div>
       <div class="em-filters"></div>
       <div class="em-cats emt-tabs" role="tablist" aria-label="갈래" hidden></div>
@@ -1604,6 +1661,16 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     footEl = overlay.querySelector('.em-foot');
     ttabsEl = overlay.querySelector('.emt-tabs');
     actsEl = overlay.querySelector('.emt-acts');
+    permEl = overlay.querySelector('.emt-perm');
+    permInput = overlay.querySelector('.emt-perm-input');
+    permStatus = overlay.querySelector('.emt-perm-status');
+    // Enter = 저장하고 닫기 · Esc = 되돌리고 닫기(창의 Esc 처리기가 먼저 받는다 - 거기서 이 줄을 닫는다) · 칸을 떠나면 저장.
+    permInput.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      void savePermanent().then(() => { openPermanent(false); focusInput(); });
+    });
+    permInput.addEventListener('blur', () => { if (permOpen) void savePermanent(); });
     paintViewToggle();
     panel.slot.addEventListener('click', event => {
       const v = event.target.closest('[data-em-view]');
@@ -1676,6 +1743,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
+      if (t.closest('[data-emt-perm]')) { if (permOpen) { void savePermanent(); openPermanent(false); } else openPermanent(true); return; }
       const menuBtn = t.closest('[data-emt-menu]');
       if (menuBtn) { if (menuEl && !menuEl.hidden) closeTreeMenu(); else openTreeMenu(menuBtn); return; }
       if (t.closest('[data-em-pe-settings]')) { openPeSettings(); return; }
@@ -1936,6 +2004,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     setStatus('여는 중…', 'busy');
     dlFailed = false; dlError = '';      // 다시 열면 다시 시도한다
     treeMap = null; treeData = null;     // 3단 지도의 골격도 열 때마다 새로(색인이 바뀌면 절의 태그 수가 바뀐다)
+    void loadPermanent();                // Search 에서 바꿨을 수 있다
     await loadState();
     if (mapState?.state !== 'ready') { await autoDownload(); startDlPoll(); }
     render();
@@ -2006,6 +2075,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       event.preventDefault(); event.stopPropagation();
       if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
       if (menuEl && !menuEl.hidden) { closeTreeMenu(); return; }
+      if (permOpen) { permInput.value = permText; openPermanent(false); focusInput(); return; }
       if (library?.isOpen()) {
         library.close();
         overlay.querySelector('.em-library-bar button')?.focus();
